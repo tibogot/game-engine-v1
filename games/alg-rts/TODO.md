@@ -519,6 +519,30 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          bare grounds (Ground104 "crumbly"…), nothing for stubble or crops.
    - [ ] you, look at play zoom and close: the soil colour, the tints, the
          furrow scale (TILE_M), the stubble's bands, the barley's green.
+- [ ] **THE GROUND PASS — CoH-detailed terrain (2026-10-02, you: "any RTS I
+      see has very detailed textures")**. Research (agent): CoH = a few base
+      tiles + hundreds of low-opacity splats + texture SPLINES for roads; SupCom
+      861 decals from 21; BAR / SupCom a macro colour layer over tiling detail;
+      grass mostly painted texture. Built so far (NOT baked into the map yet —
+      the GROUND LAB, ground-lab.html, holds it; ◀ Before / After ▶, key B):
+      · tools/fetchGroundSets.mjs: 12 more Poly Haven CC0 sets (4 AERIAL,
+        20-25 m a photo) + sets.json for the lab (27 sets).
+      · MACRO PHOTO (splatOverlayTsl, engine, opt-in): an aerial photo's
+        luminance ratio at tens of metres a tile, two rotated scales, read
+        with texel LOADS (no sampler: the shader is at its limit), baked in
+        the ground cache = free per frame. Proposal: dirt_aerial_02, 0.7, 45 m.
+      · RELIEF: normal 2.5 on valley soil / scree / track (was 1).
+      · WHEEL RUTS, PROCEDURAL: groundCache RUT STRIPS (warp < 0) chained
+        down every piste (119); the shader draws two grooves (sometimes a
+        second vehicle's pair) that wander, narrow, fade and come back, along
+        the road's arc length (continuous strip to strip), in smoothed pale
+        packed dust with soft walls + berms. Only the ruts draw. An image
+        version (tread texture) was tried and dropped: straight, read as
+        rails. Lab sliders: rut width, wander, opacity, relief. ?ruts=0 = off.
+        (The thin straight black lines over the piste are the TELEGRAPH WIRES.)
+      Next: you judge in the lab → bake (map + algSplats); worn ground round
+      the post / villages; more splats; grass as texture. Only dirt_aerial_02
+      is committed; the other lab sets: node tools/fetchGroundSets.mjs.
 - [x] **AN ENEMY THAT FIGHTS (2026-10-02, algAI; you: "the enemies don't
       even try to fire at me")**. Bands held fire walking, occupying, mining,
       running home, and broke off after 12-22 s. Now:

@@ -1,0 +1,302 @@
+{
+ "note": "Ground sets for the Ground Lab (tools/fetchGroundSets.mjs). size: metres one photo spans (Poly Haven).",
+ "sets": [
+  {
+   "slug": "aerial_ground_rock",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 20,
+   "aerial": true
+  },
+  {
+   "slug": "coast_sand_05",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 25,
+   "aerial": true
+  },
+  {
+   "slug": "dirt_aerial_02",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 20,
+   "aerial": true
+  },
+  {
+   "slug": "dirt_aerial_03",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 25,
+   "aerial": true
+  },
+  {
+   "slug": "rocky_terrain_02",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 90,
+   "aerial": true
+  },
+  {
+   "slug": "brown_mud_dry",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.3,
+   "aerial": false
+  },
+  {
+   "slug": "cliff_side",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.83,
+   "aerial": false
+  },
+  {
+   "slug": "coast_sand_01",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 15,
+   "aerial": false
+  },
+  {
+   "slug": "dry_decay_leaves",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  },
+  {
+   "slug": "dry_ground_01",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 4,
+   "aerial": false
+  },
+  {
+   "slug": "dry_ground_rocks",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 4,
+   "aerial": false
+  },
+  {
+   "slug": "dry_mud_field_001",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 3,
+   "aerial": false
+  },
+  {
+   "slug": "dry_river_pebbles",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  },
+  {
+   "slug": "forrest_ground_01",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  },
+  {
+   "slug": "grass_ground",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2.51,
+   "aerial": false
+  },
+  {
+   "slug": "gravelly_sand",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2.48,
+   "aerial": false
+  },
+  {
+   "slug": "mud_cracked_dry_03",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.5,
+   "aerial": false
+  },
+  {
+   "slug": "red_dirt_mud_01",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.5,
+   "aerial": false
+  },
+  {
+   "slug": "red_laterite_soil_stones",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  },
+  {
+   "slug": "red_mud_stones",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.5,
+   "aerial": false
+  },
+  {
+   "slug": "rock_boulder_cracked",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.39,
+   "aerial": false
+  },
+  {
+   "slug": "rock_boulder_dry",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 1.8,
+   "aerial": false
+  },
+  {
+   "slug": "rocks_ground_02",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  },
+  {
+   "slug": "rocks_ground_05",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 3,
+   "aerial": false
+  },
+  {
+   "slug": "rocky_trail",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  },
+  {
+   "slug": "sandy_gravel_02",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2.53,
+   "aerial": false
+  },
+  {
+   "slug": "terrain_red_01",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2,
+   "aerial": false
+  }
+ ]
+}

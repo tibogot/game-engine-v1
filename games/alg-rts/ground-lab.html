@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      GROUND LAB (groundLab.js): the Algeria game booted lean — no AI, no win
+      rules, no fog of war, no flocks — with a panel that stages a fight. Any
+      of the game's URL options still work (?blood=0, ?acc=0, ?sky=atmosphere…);
+      the lab's defaults are only filled in where the URL says nothing.
+    -->
+    <base href="/v3/" />
+    <title>Ground Lab — Sand &amp; Blood</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #16110c; }
+      #game { position: fixed; inset: 0; }
+      #perf-stats { top: auto !important; bottom: 8px !important; left: auto !important; right: calc(var(--alg-dev-w, 0px) + 8px) !important; }
+      #boot { position: fixed; inset: 0; z-index: 2147483000; display: grid; place-items: center;
+        background: #16110c; color: #e8dcc4; font: 13px "Segoe UI", system-ui, sans-serif; letter-spacing: .12em;
+        text-transform: uppercase; transition: opacity .4s ease; }
+      #boot.hidden { opacity: 0; pointer-events: none; }
+      #boot pre { max-width: 680px; white-space: pre-wrap; color: #ff9a8c; text-transform: none; letter-spacing: 0; }
+      #hud { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="boot"><div><div id="msg">Ground Lab · loading</div><pre id="err"></pre></div></div>
+    <div id="hud"></div>
+
+    <script type="module">
+      // The lab's defaults, written into the URL so the game reads them (and
+      // you can see and override them): the AI, the win rules, the fog of
+      // war, the flocks and birds off.
+      const q = new URLSearchParams(location.search);
+      for (const [k, v] of Object.entries({ ai: "0", battle: "0", brief: "0", fow: "0", herds: "0", hens: "0", birds: "0" })) if (!q.has(k)) q.set(k, v);
+      history.replaceState(null, "", `${location.pathname}?${q}`);
+
+      const boot = document.getElementById("boot");
+      const msg = document.getElementById("msg");
+      try {
+        const { startAlgGame } = await import("./algGame.js");
+        const app = await startAlgGame({ container: document.getElementById("game"), onStatus: (s) => { msg.textContent = `Ground Lab · ${s}`; } });
+        window.__ALG = app;
+        const { createGroundLab } = await import("./groundLab.js");
+        app.groundLab = await createGroundLab(app);
+        window.__GLAB = app.groundLab;
+        boot.classList.add("hidden");
+        setTimeout(() => boot.remove(), 500);
+      } catch (e) {
+        console.error("[ground lab] failed to start", e);
+        msg.textContent = "Ground Lab · failed to start";
+        document.getElementById("err").textContent = e?.stack || e?.message || String(e);
+      }
+    </script>
+  </body>
+</html>

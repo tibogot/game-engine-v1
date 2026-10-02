@@ -641,9 +641,43 @@ export function createGroundCache({
       const tile = max(s2.w, 0.05);
       // The material turns with the splat, and every splat starts somewhere
       // else in it (its centre is the offset), so two never repeat.
-      const u = vW.x.mul(c).add(vW.y.mul(s)).div(tile).add(s0.x.mul(0.137));
-      const v = vW.y.mul(c).sub(vW.x.mul(s)).div(tile).add(s0.y.mul(0.211));
+      // RUT STRIP mode (warp < 0; 2026-10-02, alg-rts's pistes — CoH lays
+      // roads as splines): a chain of strips down a road draws PROCEDURAL
+      // wheel ruts — two (sometimes four: another vehicle's) packed grooves
+      // that wander, narrow and widen, fade out and come back along the road.
+      // Only the ruts draw (alpha), the road's own paint stays between them.
+      //   s3.x rut width (m) · s3.y arc length at the strip's centre (m: the
+      //   noise runs continuously from strip to strip) · −s3.z wander (m).
+      // The material is sampled in WORLD axes (strips overlap seamlessly).
+      const strip = s3.z.lessThan(0);
+      const along = vW.y.mul(c).sub(vW.x.mul(s)).div(tile);
+      const u = select(strip, vW.x.div(tile), vW.x.mul(c).add(vW.y.mul(s)).div(tile).add(s0.x.mul(0.137)));
+      const v = select(strip, vW.y.div(tile), along.add(s0.y.mul(0.211)));
       const muv = vec2(u, v).toVar();
+      const arc = s3.y.add(vLocal.y.mul(s0.w));
+      const acrossM = vLocal.x.mul(s0.z);
+      const nz1 = (f, k) => mx_noise_float(vec3(arc.mul(f), float(k), float(k * 1.7)));
+      const wanderM = s3.z.negate();
+      const off1 = nz1(0.013, 1.3).mul(wanderM).add(nz1(0.045, 2.1).mul(wanderM.mul(0.55))).add(nz1(0.16, 8.2).mul(wanderM.mul(0.12)));
+      const off2 = off1.add(0.4).add(nz1(0.034, 7.0).mul(wanderM.mul(0.7)));
+      const gauge = float(0.8).add(nz1(0.05, 3.3).mul(0.06));
+      const pres1 = smoothstep(-0.5, -0.15, nz1(0.012, 4.4));
+      const pres2 = smoothstep(0.05, 0.35, nz1(0.015, 9.1)).mul(0.65);
+      const hwL = s3.x.mul(nz1(0.17, 5.5).mul(0.35).add(0.85)), hwR = s3.x.mul(nz1(0.17, 6.6).mul(0.35).add(0.85));
+      // One groove's profile at distance d (m) from its axis: a flat-ish floor
+      // easing up to the verge (no kink: a kink lights as a hard line, a rail)
+      // and a low berm of pushed-out soil beside it.
+      const groove = (d, hw) => {
+        const dd = d.div(hw);
+        return vec2(float(1).sub(smoothstep(0.25, 1.25, dd)), smoothstep(0.9, 1.4, dd).mul(float(1).sub(smoothstep(1.4, 2.3, dd))));
+      };
+      const rutsAt = (x) => {
+        const g = groove(abs(x.sub(off1).add(gauge)), hwL).max(groove(abs(x.sub(off1).sub(gauge)), hwR)).mul(pres1);
+        const g2 = groove(abs(x.sub(off2).add(gauge)), hwR).max(groove(abs(x.sub(off2).sub(gauge)), hwL)).mul(pres2);
+        return g.max(g2);                                   // x = depth 0..1, y = berm 0..1
+      };
+      const rg = rutsAt(acrossM).toVar();
+      const rSlope = rutsAt(acrossM.add(0.04)).sub(rutsAt(acrossM.sub(0.04))).toVar();   // d(berm − depth)/dx · 0.08
       const alb = albedoNode.sample(muv).depth(layer).toVar();
       // The outline: two octaves of noise, the coarse one in the splat's OWN
       // frame (so every splat, big or small, gets a lobed shape of its own)
@@ -657,6 +691,11 @@ export function createGroundCache({
       const holes = mx_noise_float(vec3(vW.x.mul(0.35), vW.y.mul(0.35), seed.mul(2).add(9.1)));
       const interior = smoothstep(-0.55, 0.15, holes.add(body.mul(0.9)));
       let a = smoothstep(0, max(s3.x, 0.02), body.mul(1.2).add(alb.a.sub(0.5).mul(s3.y))).mul(interior).mul(s1.w);
+      // A rut strip: the grooves and their berms only, broken by the world
+      // noise (a rut is never one clean line), soft ends to overlap the next.
+      const ends = smoothstep(0, 0.3, float(1).sub(abs(vLocal.y))).mul(float(1).sub(smoothstep(0.85, 1, abs(vLocal.x))));
+      const rutA = smoothstep(0, 0.35, rg.x.add(rg.y.mul(0.5))).mul(fine.mul(0.7).add(0.8).clamp(0, 1));
+      a = select(strip, rutA.mul(ends).mul(s1.w), a);
       // No splat inside painted GRASS (FAR GRASS): a patch of mud baked over a
       // meadow read as a tan hole in it. Everywhere, not only far, or splats
       // would vanish at the far-grass rings — a pop of their own.
@@ -667,16 +706,23 @@ export function createGroundCache({
       if (which === "colour") {
         const tone = groundToneAt(vW.x, vW.y);
         const ratio = mix(vec3(1), tone.div(max(s4.xyz, vec3(1e-3))), s4.w);
-        return vec4(sqrt(max(alb.rgb.mul(s2.xyz).mul(ratio), vec3(0))), a);
+        // A rut's floor is fine packed dust (the material smoothed to its
+        // mean); its berm loose, a little darker.
+        const rutCol = mix(alb.rgb, s4.xyz, rg.x.mul(0.85)).mul(rg.x.mul(0.2).add(1).sub(rg.y.mul(0.15)));
+        return vec4(sqrt(max(select(strip, rutCol, alb.rgb).mul(s2.xyz).mul(ratio), vec3(0))), a);
       }
       const sf = surfaceNode.sample(muv).depth(layer);
       const G = normalize(terrainNormals.surfaceAt(vec2(vW.x.add(HALF).div(W), vW.y.add(HALF).div(W))).xyz).toVar();
-      const nx = sf.r.mul(2).sub(1).mul(s3.w), ny = sf.g.mul(2).sub(1).mul(s3.w);
+      // A rut: the material's relief smoothed on the packed floor, plus the
+      // groove's own walls (~5 cm deep) across the strip.
+      const smooth = select(strip, float(1).sub(rg.x.mul(0.7)), float(1));
+      const wall = select(strip, rSlope.x.sub(rSlope.y.mul(0.3)).mul(0.625), float(0));
+      const nx = sf.r.mul(2).sub(1).mul(s3.w).mul(smooth).add(wall.mul(s3.w)), ny = sf.g.mul(2).sub(1).mul(s3.w).mul(smooth);
       const nz = sqrt(max(float(0), float(1).sub(nx.mul(nx)).sub(ny.mul(ny))));
       const Tn = normalize(vec3(c, 0, s).sub(G.mul(dot(vec3(c, 0, s), G))));
       const Bn = cross(Tn, G);
       const n = normalize(Tn.mul(nx).add(Bn.mul(ny)).add(G.mul(nz)));
-      return vec4(encodeDetail(n, G), sf.b, a);
+      return vec4(encodeDetail(n, G), select(strip, sf.b.mul(float(1).sub(rg.x.mul(0.6))), sf.b), a);
     })();
     return m;
   }
@@ -687,6 +733,8 @@ export function createGroundCache({
    *     push=0.6, warp=0.25, normal=1 }
    * w and l are the FULL width and length in metres; mat is a material index
    * into the library handed to setSplatMaterials. Drawn in list order.
+   * A RUT STRIP has warp < 0 (−warp = wander, m), soft = rut width (m) and
+   * arc = the road's length at its centre (m); see the splat fragment.
    */
   function setSplats(list) {
     if (!splatGeo || list.length > splatBuf.count) {
@@ -708,7 +756,7 @@ export function createGroundCache({
         p.x, p.z, p.w * 0.5, p.l * 0.5,
         c, s, p.mat | 0, p.opacity ?? 1,
         t[0], t[1], t[2], p.tile ?? 3,
-        p.soft ?? 0.35, p.push ?? 0.6, p.warp ?? 0.25, p.normal ?? 1,
+        p.soft ?? 0.35, (p.warp ?? 0.25) < 0 ? (p.arc ?? 0) : (p.push ?? 0.6), p.warp ?? 0.25, p.normal ?? 1,
         mean[0], mean[1], mean[2], p.match ?? 0.8,
       ], i * SPLAT_STRIDE);
       const r = Math.hypot(p.w, p.l) * 0.5;

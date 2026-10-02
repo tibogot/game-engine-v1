@@ -32,7 +32,7 @@ import {
   Fn, If, float, int, struct, vec2, vec3, vec4,
   texture, mix, max, min, clamp, pow, sqrt, uniform, step, normalize,
   positionWorld, smoothstep, abs, length, mx_noise_float, floor, fract, hash, uint,
-  select, cameraPosition, dFdx, dFdy, cos, sin,
+  select, cameraPosition, dFdx, dFdy, cos, sin, textureLoad, ivec2,
 } from "three/tsl";
 import { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 import { cliffRockTint, createCliffRockUniforms } from "./cliffRockTsl.js";
@@ -266,6 +266,27 @@ export function createSplatOverlay(
   const uMacroStrength  = uniform(0.0);  // brightness swing, 0..0.5
   const uMacroWarmth    = uniform(0.0);  // warm/cool tint amount, 0..1
   const uMacroScale     = uniform(80.0); // metres per noise cell
+  // A MACRO PHOTO (2026-10-02, alg-rts's ground pass; every AAA RTS lays a
+  // big unique colour variation over its tiling ground — BAR's map diffuse,
+  // SupCom's upper stratum): an aerial photo's LUMINANCE RATIO (pixel / its
+  // mean, 0..2 in a byte) at tens of metres a tile, two scales rotated apart
+  // so its own repeat does not show, multiplying the paint. Read with texel
+  // LOADS and filtered here — no sampler (this shader is at the 16-sampler
+  // limit). Off (strength 0) costs a branch; setMacroImage(ratio bytes) fills it.
+  const MACRO_N = 512;
+  const macroTex = new THREE.DataTexture(new Uint8Array(MACRO_N * MACRO_N).fill(128), MACRO_N, MACRO_N, THREE.RedFormat, THREE.UnsignedByteType);
+  macroTex.minFilter = macroTex.magFilter = THREE.NearestFilter;
+  macroTex.needsUpdate = true;
+  const uMacroTexStrength = uniform(0.0);   // 0..1: how much of the photo's light/dark
+  const uMacroTexScale    = uniform(60.0);  // metres a photo tile spans
+  const macroLum = (q) => {
+    // q: tile coords (any real) → the ratio, bilinear from four loads.
+    const t = fract(q).mul(MACRO_N).sub(0.5);
+    const i0 = floor(t), fr = t.sub(i0);
+    const wrap = (v) => v.sub(floor(v.div(MACRO_N)).mul(MACRO_N));
+    const ld = (dx, dy) => textureLoad(macroTex, ivec2(int(wrap(i0.x.add(dx))), int(wrap(i0.y.add(dy))))).r;
+    return mix(mix(ld(0, 0), ld(1, 0), fr.x), mix(ld(0, 1), ld(1, 1), fr.x), fr.y).mul(2.0);
+  };
   // Near/far (SPLAT_FEATURES.farBlend): far tile = near tile × ratio, faded in
   // between the two camera distances.
   const uFarRatio       = uniform(5.0);
@@ -955,6 +976,17 @@ export function createSplatOverlay(
           });
         }
 
+        if (F.macroVariation) {
+          If(uMacroTexStrength.greaterThan(0.0), () => {
+            const sc = max(uMacroTexScale, float(1));
+            const q1 = P.xz.div(sc);
+            // the second scale turned ~52° and 1.73x: the two repeats never line up
+            const q2 = vec2(P.x.mul(0.616).sub(P.z.mul(0.788)), P.x.mul(0.788).add(P.z.mul(0.616))).div(sc.mul(1.73)).add(vec2(0.37, 0.61));
+            const r = mix(macroLum(q1), macroLum(q2), 0.42);
+            colV.assign(colV.mul(mix(float(1), clamp(r, 0.35, 2.0), uMacroTexStrength)));
+          });
+        }
+
         // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
         if (F.solo) {
           If(uSoloLayer.greaterThanEqual(float(0)), () => {
@@ -1054,6 +1086,11 @@ export function createSplatOverlay(
     uMacroStrength,
     uMacroWarmth,
     uMacroScale,
+    uMacroTexStrength,
+    uMacroTexScale,
+    /** The macro photo: `bytes` = MACRO_N² luminance ratios (pixel / mean, 0..2 → 0..255). */
+    setMacroImage(bytes) { macroTex.image.data.set(bytes.subarray(0, MACRO_N * MACRO_N)); macroTex.needsUpdate = true; },
+    macroImageSize: MACRO_N,
     // Near/far (SPLAT_FEATURES.farBlend); live, no recompile.
     uFarRatio,
     uFarStart,

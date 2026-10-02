@@ -22,6 +22,7 @@
 // Materials: Poly Haven (CC0), tools/fetchSplatMaterials.mjs.
 import { loadSplatMaterials, splatMaterialFromSlug } from "../../v3/terrain/splatMaterials.js";
 import { LAYOUT, PLAY } from "./layout.js";
+import { TRACK_LINES } from "./algTracks.js";
 
 /** The library, and the tint that sits each photo in the Aurès palette. */
 const MATS = {
@@ -43,6 +44,9 @@ const MATS = {
   ruts:      { slug: "muddy_tracks",                 tint: [0.95, 0.86, 0.74] },
   dust:      { slug: "dry_ground_01",                tint: [1.04, 0.97, 0.88] },
 };
+/** The pistes' wheel ruts (procedural, groundCache rut strips; live: restyleStrips):
+ *  rut width m, wander m, opacity, relief, and the dust photo's tile m (MATS.dust). */
+const STRIP = { rut: 0.3, wander: 1.0, opacity: 0.85, normal: 1.0, tile: 3, tint: [1.08, 1.0, 0.9] };
 const MAT_KEYS = Object.keys(MATS);
 const M = Object.fromEntries(MAT_KEYS.map((k, i) => [k, i]));
 
@@ -234,10 +238,44 @@ export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
   const camp = LAYOUT.sites.find((s) => s.kind === "aln");
   if (camp) out.push({ x: camp.x + 4, z: camp.z - 3, w: 5, l: 6, yaw: 0.7, mat: M.burnt, opacity: 0.85, tint: MATS.burnt.tint, tile: 3, soft: 0.3, push: 0.8, warp: 0.4, normal: 1, match: 0.1, _layer: 100 });
 
+  // ── WHEEL RUTS DOWN THE PISTES (2026-10-02, the ground pass; CoH lays
+  // roads as splines): a chain of RUT STRIPS down every piste (groundCache:
+  // warp < 0), each a segment of the track (resampled every 4 m: one strip per
+  // 2 points), long enough to overlap the next. The ruts are procedural — they
+  // wander, narrow, fade and come back — in packed dust; `arc` (the length
+  // down the road, each piste its own 10 km apart) keeps the noise continuous
+  // from strip to strip. Drawn LAST, over everything else. ──
+  const strips = [];
+  TRACK_LINES.forEach((t, ti) => {
+    if (t.kind !== "piste") return;
+    const L = t.line;
+    let arc = ti * 10000;
+    for (let i = 0; i + 2 < L.length; i += 2) {
+      const a = L[i], b = L[i + 2];
+      const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1;
+      strips.push({
+        x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, w: 6.4, l: d * 1.45, yaw: Math.atan2(-dx / d, dz / d),
+        mat: M.dust, opacity: STRIP.opacity, tint: STRIP.tint, tile: STRIP.tile,
+        soft: STRIP.rut, arc: arc + d / 2, warp: -STRIP.wander, normal: STRIP.normal, match: 0.6, _layer: 200,
+      });
+      arc += d;
+    }
+  });
+  byMat.rutStrips = strips.length;
+
   // Draw order: broad and faint first, fine and strong on top.
   out.sort((a, b) => (a._layer - b._layer) || (b.w * b.l - a.w * a.l));
-  gc.setSplats(out);
+  let stripsOn = new URLSearchParams(location.search).get("ruts") !== "0";
+  const push = () => gc.setSplats(stripsOn ? [...out, ...strips] : out);
+  push();
   const ms = Math.round(performance.now() - t0);
-  console.log(`[alg splats] ${out.length} splats in ${ms} ms`, byMat);
-  return { count: out.length, byMat, ms, splats: out };
+  console.log(`[alg splats] ${out.length + strips.length} splats in ${ms} ms`, byMat);
+  return {
+    count: out.length + strips.length, byMat, ms, splats: out, strips,
+    /** The piste strips on / off (the Ground Lab's before / after); `?ruts=0` boots off. */
+    setStrips(on) { stripsOn = !!on; push(); gc.markAllStale?.(); },
+    /** Re-lay the ruts with new looks ({ rut, wander, opacity, normal, tile }), live. */
+    restyleStrips(p) { Object.assign(STRIP, p); for (const s of strips) { s.soft = STRIP.rut; s.warp = -Math.max(STRIP.wander, 0.01); s.tile = STRIP.tile; s.opacity = STRIP.opacity; s.normal = STRIP.normal; } push(); gc.markAllStale?.(); },
+    get stripStyle() { return { ...STRIP }; },
+  };
 }
