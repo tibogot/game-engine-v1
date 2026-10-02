@@ -143,8 +143,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // farGrass: a top-down grass photo baked where grass is painted, past the
     // blades (groundCache.js FAR GRASS). ?fargrass=0 = without.
     // detail: the paint layer's fine grain added back at draw time (groundCache
-    // DETAIL; the cache alone kept 72-87% of it). ?detail=0 = without.
-    groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 1) },
+    // DETAIL; the cache alone kept 72-87% of it). OFF (you, 2026-10-02: "a
+    // repeating pattern, unnatural"): it reads the photo at its PLAIN repeat
+    // over a cache baked hex-tiled, so the two never line up and the ratio
+    // printed a regular diagonal hatch over all the ground (A/B at the oasis
+    // village: on = the hatch, off = gone). ?detail=1 = with, to compare.
+    groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0) },
   });
   app.setFrameThrottle?.(1000);
   // The stats-gl overlay: ON (you, 2026-10-01: "keep the performance stats

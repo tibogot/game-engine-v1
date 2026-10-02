@@ -473,6 +473,29 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         BARLEY: plants on the rows with gaps, soil showing.
       MEASURED (lab, a field filling much of a close view, on/off x3): all
       the fields together +0.09 ms.
+   - [x] **THE GROUND'S REPEATING PATTERN (2026-10-02, you: crops of a
+         fine diagonal repeat by the oasis village)**. Two things:
+         · Paint layer 3 "Oasis grove" was forrest_ground_01 (a ~2 m forest
+           floor close-up, twigs, stretched to 7 m and repeated): now Poly
+           Haven rocky_terrain_02 (a 90 m AERIAL photo), 64 m tile, tint
+           #ffe0b4 (tools/algOasisGround.mjs patches the .v3proj; backup in
+           the session scratchpad).
+         · THE PATTERN ITSELF was the ground cache's DETAIL pass (algGame
+           detail 1): it re-reads the paint photo at its plain repeat over a
+           cache baked HEX-tiled, so they never line up — a regular diagonal
+           hatch over all the ground. A/B there: on = the hatch, off = gone.
+           Now detail 0 (?detail=1 to compare). A detail pass that follows
+           the hex bake would get the grain back without the hatch: later,
+           if the ground ever reads soft.
+         - [ ] **NOT FIXED FOR YOU** (you, same day: "it makes no difference
+               for me, I still see that pattern where my other textures
+               don't"). Parked for later. Next suspects, in order: the
+               hex bake's own cell grid on this layer (A/B ?gchex=0 at the
+               spot), the paint splat blend between Oasis grove and Valley
+               soil (heightBlend 0.55 can print the photos' own grain as a
+               pattern), the ground splats laid there (algSplats), the
+               far-grass bake (?fargrass=0). Ask for the exact spot and the
+               zoom; A/B each from YOUR view.
    - [x] **PHOTOGRAPHED, round 2 (same day)** — you: "still not convinced,
          not realistic next to the image textures — find a texture". The
          procedural soil is gone: Poly Haven CC0 photo sets
