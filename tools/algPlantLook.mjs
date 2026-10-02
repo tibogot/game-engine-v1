@@ -15,7 +15,7 @@ import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { FOLIAGE_PRESETS } from "../v3/app/state/foliageScatterState.js";
 
 const FILE = "public/levels/alg-aures.v3proj";
-const PRESETS = ["pricklyPear", "thistle", "asphodel", "alfa", "oleander", "tamarisk"];
+const PRESETS = ["pricklyPear", "thistle", "asphodel", "alfa", "oleander", "tamarisk", "typha"];
 const KEEP = new Set(["name", "preset", "castShadow", "heightMin", "heightMax", "onLayer", "nearRiver"]);
 
 const p = await readProject(FILE);

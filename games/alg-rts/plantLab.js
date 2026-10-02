@@ -25,7 +25,7 @@ import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 const SPECIES = [
   ["pricklyPear", "Prickly pear"], ["thistle", "Thistle"], ["asphodel", "Asphodel"], ["alfa", "Alfa grass"],
   ["agave", "Agave"], ["agaveMast", "Agave in flower"], ["broom", "Broom (genêt)"], ["oleander", "Oleander"],
-  ["tamarisk", "Tamarisk (tree)"], ["tamariskShrub", "Tamarisk shrub"], ["typha", "Reed-mace"],
+  ["tamarisk", "Big tree (old)"], ["betoum", "Betoum (Atlas pistachio)"], ["tamariskTree", "Tamarisk"], ["typha", "Reed-mace"],
   ["juniperScrub", "Juniper scrub"], ["doumPalm", "Doum palm"],
 ];
 const STEP = 6;   // m between beds
@@ -102,12 +102,18 @@ export async function startPlantLab(container) {
   // judged by one plant is judged by its seed.
   const pf = new PlacedFoliage({ scene, lodDistances: [60, 140], shadowLods: 3 });
   pf.setSunDir(SUN.dir);
-  const x0 = -((SPECIES.length - 1) * STEP) / 2;
-  const beds = SPECIES.filter(([k]) => FOLIAGE_PRESETS[k]).map(([key, name], i) => {
-    const x = x0 + i * STEP;
+  // A bed is as wide as its plant (a 11 m betoum gets room, a thistle 6 m).
+  const list = SPECIES.filter(([k]) => FOLIAGE_PRESETS[k]);
+  const widths = list.map(([k]) => Math.max(STEP, (FOLIAGE_PRESETS[k].size ?? 1) * 1.6));
+  const total = widths.reduce((s, w) => s + w, 0);
+  let cursor = -total / 2;
+  const beds = list.map(([key, name], i) => {
+    const x = cursor + widths[i] / 2;
+    cursor += widths[i];
+    const k = widths[i] / STEP;                       // spread the three apart too
     pf.setType(key, structuredClone(FOLIAGE_PRESETS[key]));
     for (const [dx, dz, s, seed] of [[0, 0, 1, 0.13], [-1.4, 1.6, 0.8, 0.47], [1.5, 1.3, 0.65, 0.81]]) {
-      pf.add(key, x + dx, -0.05, dz, { rotY: seed * 9, scale: s, seed });
+      pf.add(key, x + dx * k, -0.05, dz * k, { rotY: seed * 9, scale: s, seed });
       // As in the game (algLandmarks): a mast grows out of an agave.
       if (key === "agaveMast" && pf.types.has("agave")) pf.add("agave", x + dx - 0.2, -0.08, dz, { rotY: seed * 5, scale: 0.9 * s + 0.2, seed: (seed + 0.3) % 1 });
     }
@@ -118,7 +124,7 @@ export async function startPlantLab(container) {
   {
     const m = new THREE.MeshStandardNodeMaterial({ color: 0x8a7a5a, roughness: 0.9 });
     const man = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 1.3, 4, 10), m);
-    man.position.set(x0 - STEP, 0.87, 0);
+    man.position.set(-total / 2 - STEP, 0.87, 0);
     man.castShadow = true;
     scene.add(man);
   }

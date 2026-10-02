@@ -56,11 +56,13 @@ export const FOLIAGE_PRESETS = {
     spread: 0.6, arch: 0.6, droop: 0.35, stemWidth: 1, bareStalk: 0,
     colorBase: "#34602c", colorTip: "#6f9a3c", colorHead: "#6f9a3c", size: 1.8, translucency: 0.7,
   },
+  // (2026-10-02, alg-rts's wadis: 18 strap leaves taller than the stalks,
+  // grey-olive, dark chocolate heads — was 9 lime leaves and orange heads.)
   typha: {
     kind: "typha",
-    fronds: 9, frondLength: 1.2, leaflets: 5, leafletWidth: 1.0, leafletAngle: 60,
-    spread: 0.2, arch: 0.45, droop: 0.15, stemWidth: 1, bareStalk: 0,
-    colorBase: "#4f8a33", colorTip: "#93c25a", colorHead: "#7e3f1f", size: 2.0, translucency: 0.8,
+    fronds: 18, frondLength: 1.2, leaflets: 5, leafletWidth: 1.0, leafletAngle: 60,
+    spread: 0.22, arch: 0.4, droop: 0.15, stemWidth: 1, bareStalk: 0,
+    colorBase: "#36462a", colorTip: "#727d4f", colorHead: "#3a2416", size: 2.0, translucency: 0.45,
   },
   plumeReed: {
     kind: "plume",
@@ -379,9 +381,10 @@ export const FOLIAGE_PRESETS = {
     spread: 0.6, arch: 0.6, droop: 0.2, stemWidth: 1, bareStalk: 0,
     colorBase: "#223a1b", colorTip: "#4d6a33", colorHead: "#d9758f", size: 2.8, translucency: 0.4,
   },
-  // TAMARISK (Tamarix) — the feathery grey-green small tree of wadi banks
-  // and salty hollows. The cauliflower builder, loose and pale. (Kept as the
-  // FULL tree, you 2026-10-02; the weeping one is tamariskShrub below.)
+  // THE OLD BIG TREE (key "tamarisk" — what alg-aures.v3proj's "Tamarisk"
+  // slot paints, kept until the betoum below replaces it there; it is NOT a
+  // tamarisk: the dipterocarp's crown, pale). The real tamarisk is
+  // tamariskTree; the big tree is becoming the betoum (2026-10-02).
   tamarisk: {
     kind: "dipterocarp",
     fronds: 4, frondLength: 1.0, leaflets: 110, leafletWidth: 0.9, leafletAngle: 34,
@@ -389,14 +392,24 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.0,
     colorBase: "#3b4735", colorTip: "#8b957a", colorHead: "#5e5244", size: 5, translucency: 0.45,
   },
-  // TAMARISK SHRUB (weeping) — its own builder (foliageGeometry
-  // buildTamarisk, 2026-10-02): leaning reddish trunks, weeping wands of
-  // feathery scale-leaves (the plume strand texture). colorBase/Tip = the bark.
-  tamariskShrub: {
-    kind: "tamarisk",
-    fronds: 4, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
+  // TAMARISK (Tamarix) — THE tamarisk (2026-10-02): foliageGeometry
+  // buildTamariskTree — a grown leaning skeleton, weeping feathery wands,
+  // some in pink flower. colorBase/Tip = the bark.
+  tamariskTree: {
+    kind: "tamariskTree",
+    fronds: 3, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
-    colorBase: "#4a382c", colorTip: "#5e4a3a", colorHead: "#6d8466", size: 5, translucency: 0.45,
+    colorBase: "#3e2c22", colorTip: "#5a4232", colorHead: "#6f8768", size: 5, translucency: 0.5,
+  },
+  // BETOUM — the Atlas pistachio (Pistacia atlantica), the big round shade
+  // tree of the Algerian steppe (betoumGeometry.js, 2026-10-02): a short
+  // gnarled trunk, a broad dome of dense dark clumps. colorBase/Tip = the
+  // leaves (dark → lit), colorHead = the grey bark.
+  betoum: {
+    kind: "betoum",
+    fronds: 2, frondLength: 1.0, leaflets: 320, leafletWidth: 1, leafletAngle: 30,
+    spread: 0.62, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#26341f", colorTip: "#5c7040", colorHead: "#544c44", size: 11, translucency: 0.3,
   },
   // PRICKLY PEAR (Opuntia ficus-indica) — the hedge round every village and
   // garden in the Maghreb: tiers of flat grey-green pads (buildOpuntia).

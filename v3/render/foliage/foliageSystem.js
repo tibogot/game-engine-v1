@@ -99,6 +99,14 @@ const CARD_TEXTURES = {
     masks: LEAF_SPRAY_MASKS,
     drawMasks: (c, masks) => drawLeafSprayCard(c, masks, { sprays: 4, scale: 0.52 }),
   },
+  // The betoum's leaf CLUSTERS (tools/makeBetoumLeaves.py, 2026-10-02): four
+  // twigs of compound leaves built from CC0 leaf photos, a 2x2 atlas — rgb a
+  // per-leaf shade, alpha the leaves. An IMAGE: the banyan card stands in
+  // until it loads.
+  betoumLeaf: {
+    w: 1024, h: 1024, draw: drawBanyanLeafTexture, shade: true,
+    image: "/textures/leaves/betoum_clusters.png",
+  },
 };
 
 /** Mask images, loaded once per set and shared by every card that uses them. */
@@ -124,6 +132,21 @@ export function makeCardTexture(key, anisotropy = 0) {
   spec.draw(canvas);
   const opts = { threshold: 0.4, anisotropy, shade: spec.shade === true };
   const tex = coverageMippedTexture(canvas, opts);
+  if (spec.image) {
+    // An image card: drawn into the same canvas once loaded, then the same
+    // coverage mips, into the SAME texture (no material rebuild).
+    const img = new Image();
+    img.onload = () => {
+      const g = canvas.getContext("2d");
+      g.clearRect(0, 0, canvas.width, canvas.height);
+      g.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const next = coverageMippedTexture(canvas, opts);
+      tex.image = next.image;
+      tex.mipmaps = next.mipmaps;
+      tex.needsUpdate = true;
+    };
+    img.src = spec.image;
+  }
   if (spec.masks) {
     // Redraw from the masks once they are in, into the SAME texture — every
     // material built on it picks the new pixels up with no rebuild.
@@ -506,6 +529,9 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
   // The canopy trees' cards (part 5.35) too, behind FOLIAGE_DOME_CARDS; they
   // keep their own lift (the part's fraction, 0.35).
   const isTreeCard = vPart.greaterThan(5.3).and(vPart.lessThan(5.4)).and(FOLIAGE_DOME_CARDS.greaterThan(0.5));
+  // A thin tepal (part 2.1) faces the viewer too, lifted well up: a petal
+  // seen from behind is lit through, never a sky-blue mirror.
+  const isTepalN = vPart.greaterThan(2.05).and(vPart.lessThan(2.15));
   const isDome = vPart.greaterThan(2.35).and(vPart.lessThan(2.45)).or(vPart.greaterThan(5.2).and(vPart.lessThan(5.3))).or(isTreeCard);
   const domeView = cameraViewMatrix.mul(vec4(liftToUp(nW, select(isTreeCard, float(0.35), float(0.25))), 0)).xyz.normalize();
   // The pad: 20% of the way to up — its own baked occlusion now darkens the
@@ -514,9 +540,13 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
   // wind so the side you see is the back face — `faceDirection` would turn
   // every normal inward (black pads, first try).
   const padView = cameraViewMatrix.mul(vec4(liftToUp(nW, 0.2), 0)).xyz.normalize();
-  mat.normalNode = select(isDome, domeView, select(vPart.greaterThan(4.5), nFrondFacing,
+  // (A flower turned away from the sun took only the blue sky: lifted most of
+  // the way to up, every tepal takes the sun, as a cup of thin white petals does.)
+  const tepalView = cameraViewMatrix.mul(vec4(liftToUp(nW, 0.85), 0)).xyz.normalize();
+  const tepalFacing = select(tepalView.z.lessThan(0), tepalView.negate(), tepalView);
+  mat.normalNode = select(isTepalN, tepalFacing, select(isDome, domeView, select(vPart.greaterThan(4.5), nFrondFacing,
     select(isSoft, nLeafFacing,
-      select(vPart.greaterThan(2.5), culmView, select(vPart.greaterThan(1.5), padView, trueView)))));
+      select(vPart.greaterThan(2.5), culmView, select(vPart.greaterThan(1.5), padView, trueView))))));
 
   // SELF-SHADOW ACNE (2026-10-02, alg-rts's prickly pear: every pad hatched
   // in fine stripes): the RTS fitted sun shadow runs with almost no bias to
@@ -636,7 +666,20 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
       .toVar();
     agave.assign(mix(agave, vec3(0.09, 0.06, 0.035), smoothstep(0.9, 0.98, vAlong)));
     const isAgave = vPart.greaterThan(2.2).and(vPart.lessThan(2.3));
-    const head = select(isPad, pad, select(isAgave, agave, headPlain));
+    // A STRIPED TEPAL (part 2.1, the asphodel's flower): white, a fine
+    // reddish-brown MIDRIB down its middle (uv.x 0.5), fading out at the tip;
+    // averaged away where it would shimmer.
+    const tx = uv().x.sub(0.5).mul(2);
+    const midrib = exp(tx.mul(tx).mul(-55)).mul(float(1).sub(smoothstep(0.7, 1, uv().y))).mul(0.85);
+    const ribFine = smoothstep(0.3, 0.8, fwidth(uv().x));
+    const tepal = mix(headPlain, vec3(0.2, 0.06, 0.035), mix(midrib, float(0.12), ribFine));
+    const isTepal = vPart.greaterThan(2.05).and(vPart.lessThan(2.15));
+    // A tamarisk WAND (part 2.4): each a slightly different grey-green, and
+    // one in ten in flower — the dusty pink plume of late summer.
+    const isWand = vPart.greaterThan(2.35).and(vPart.lessThan(2.45));
+    const wandTone = headPlain.mul(mix(vec3(0.9, 0.96, 1.04), vec3(1.08, 1.04, 0.88), fract(vRand.mul(3.7))));
+    const wand = select(vRand.greaterThan(0.93), mix(wandTone, vec3(0.5, 0.3, 0.32), 0.5), wandTone);
+    const head = select(isPad, pad, select(isAgave, agave, select(isTepal, tepal, select(isWand, wand, headPlain))));
     // A bamboo culm (part 3). `vAlong` is the SIGNED distance to the nearest
     // node in half-internodes (bambooGeometry.js): 0 on the node, ±1 in the
     // middle of an internode, negative below the node. A node is drawn from
@@ -689,7 +732,22 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     const bootFine = smoothstep(0.25, 0.6, fwidth(bootA));
     const bootMean = mix(rust, pale, float(0.5)).mul(0.72);
     const boots = mix(bootCol, bootMean, bootFine);
-    const culm = select(vAlong.greaterThan(1.5), boots, culmRinged);
+    // BARK (part 3.4, betoumGeometry): furrowed grey-brown bark from uv —
+    // u round the branch in whole tile wraps, v metres along it. Long ridges
+    // (noise stretched along the wood), dark cracks between them, a little
+    // lichen-pale on the ridges, darker low on the trunk; averaged away
+    // where it would shimmer.
+    const bu = uv().x, bv = uv().y;
+    const ridge = mx_noise_float(vec3(bu.mul(5.0), bv.mul(0.9), vPlant.mul(7)));
+    const crackN = float(1).sub(smoothstep(0.0, 0.22, abs(ridge)));
+    const fineB = mx_noise_float(vec3(bu.mul(23), bv.mul(6), 3.1)).mul(0.5).add(0.5);
+    const barkFine = smoothstep(0.15, 0.6, fwidth(bu.mul(5)));
+    const barkBase = row(vType, 3).xyz.mul(float(0.85).add(fineB.mul(0.3)));
+    const barkLit = mix(barkBase, barkBase.mul(vec3(1.2, 1.18, 1.1)), smoothstep(0.3, 0.7, ridge.mul(0.5).add(0.5)).mul(0.5));
+    const barkCol = mix(barkLit.mul(mix(float(1), float(0.45), crackN)), barkBase.mul(0.82), barkFine)
+      .mul(mix(float(0.72), float(1), smoothstep(0.0, 0.25, vHeight)));
+    const isBark = vPart.greaterThan(3.35).and(vPart.lessThan(3.45));
+    const culm = select(isBark, barkCol, select(vAlong.greaterThan(1.5), boots, culmRinged));
     const col = select(isLeafPart, leaf,
       select(vPart.lessThan(1.5), stem,
         select(vPart.lessThan(2.5), head, culm)));
@@ -733,7 +791,8 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     const V = normalize(cameraPosition.sub(vWorld));
     const behind = pow(saturate(dot(V, u.uSunDir.negate())), 3).mul(sunVis);
     // Leaves let light through; a stem or a solid head does not.
-    const thin = select(isLeafPart.and(vRand.lessThan(1.5)), row(vType, 0).w, float(0));
+    const thin = select(isLeafPart.and(vRand.lessThan(1.5)), row(vType, 0).w,
+      select(vPart.greaterThan(2.05).and(vPart.lessThan(2.15)), float(0.8), float(0)));   // tepals let light through
     return col.mul(behind.mul(thin).mul(u.uTransMul).mul(0.9).add(u.uGlowLight));
   })();
 

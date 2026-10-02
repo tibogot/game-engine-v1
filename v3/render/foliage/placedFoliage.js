@@ -36,7 +36,9 @@ const ROWS = 4;
  * (2026-10-01: alg-rts reached 8 with the agave; its flower mast is a 9th).
  * 48 vec4 uniforms: nothing next to the 4096 a uniform buffer holds.
  */
-const MAX_TYPES = 16;   // 12 → 16 (2026-10-02: the Plant Lab's beds, two tamarisks)
+const MAX_TYPES = 16;
+/** Metres a plant's bounds grow for the view test: shadows cast into view from just outside it. */
+const CULL_MARGIN = 14;   // 12 → 16 (2026-10-02: the Plant Lab's beds, two tamarisks)
 
 export class PlacedFoliage {
   /**
@@ -109,6 +111,11 @@ export class PlacedFoliage {
     this._plainMat = null;
     this._cardMats = {};
     this._camPos = new THREE.Vector3(Infinity, 0, 0);
+    this._camDir = new THREE.Vector3();
+    this._camDirNow = new THREE.Vector3();
+    this._projView = new THREE.Matrix4();
+    this._frustum = new THREE.Frustum();
+    this._sphere = new THREE.Sphere();
     this._dirty = true;
   }
 
@@ -232,17 +239,34 @@ export class PlacedFoliage {
     // Every frame, before the early-out: billboard cards face this camera in
     // the shadow pass too (foliageSystem `viewPos`).
     this._src.viewPos.value.copy(cp);
-    // Re-bin only once the camera has moved a couple of metres.
-    if (!this._dirty && this._camPos.distanceToSquared(cp) < 4) return;
+    // Re-bin only once the camera has moved a couple of metres or turned.
+    camera.getWorldDirection(this._camDirNow);
+    if (!this._dirty && this._camPos.distanceToSquared(cp) < 4 && this._camDir.dot(this._camDirNow) > 0.9995) return;
     this._camPos.copy(cp);
+    this._camDir.copy(this._camDirNow);
+    // VIEW CULLING (2026-10-03 audit: every one of alg-rts's 1,467 hedge
+    // plants was drawn — and cast — every frame, wherever the camera looked:
+    // ~0.8-1.0 ms). A plant is kept if its sphere, grown by CULL_MARGIN for
+    // the shadows it throws into view from just outside, touches the frustum.
+    camera.updateMatrixWorld();
+    this._projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this._frustum.setFromProjectionMatrix(this._projView);
     const [d1, d2] = this.lodDistances;
     const byIndex = [];
     for (const t of this.types.values()) byIndex[t.index] = t;
     let changed = this._dirty;
+    const sph = this._sphere;
     for (const p of this.plants) {
-      const dist = Math.hypot(p.x - cp.x, p.y - cp.y, p.z - cp.z);
-      const m = byIndex[p.typeIndex].lodMul;
-      const lod = dist < d1 * m ? 0 : dist < d2 * m ? 1 : 2;
+      const t = byIndex[p.typeIndex];
+      const r = (t.type.size ?? 1) * p.scale;
+      sph.center.set(p.x, p.y + r * 0.5, p.z);
+      sph.radius = r + CULL_MARGIN;
+      let lod = -1;
+      if (this._frustum.intersectsSphere(sph)) {
+        const dist = Math.hypot(p.x - cp.x, p.y - cp.y, p.z - cp.z);
+        const m = t.lodMul;
+        lod = dist < d1 * m ? 0 : dist < d2 * m ? 1 : 2;
+      }
       if (lod !== p.lod) { p.lod = lod; changed = true; }
     }
     if (!changed) return;

@@ -44,6 +44,7 @@ import { buildTravellersPalm } from "./travellersPalmGeometry.js";
 import { buildBanyan } from "./banyanGeometry.js";
 import { buildDipterocarp } from "./dipterocarpGeometry.js";
 import { buildAtlasCedar } from "./cedarGeometry.js";
+import { buildBetoum } from "./betoumGeometry.js";
 import { buildPandanus } from "./pandanusGeometry.js";
 
 export const FOLIAGE_LODS = 3;
@@ -96,6 +97,8 @@ const LEAF_ROUNDING = {
   // (each head shades as a ball); round only a little toward the crown's
   // middle, high up, so the heads still read as one umbrella.
   dipterocarp: [0.85, 0.3],
+  // The grown tamarisk: one rounded crown, from its middle.
+  tamariskTree: [0.68, 0.8],
   // The cedar's cards carry their own PLATE's normal (a shelf shades as a
   // slab); round only a touch, high up, so the tiers still read as one tree.
   atlasCedar: [0.8, 0.2],
@@ -112,8 +115,9 @@ const LEAF_ROUNDING = {
   opuntia:   [0.45, 0.45],
   // The oleander shades as one dome, from its middle.
   oleander:  [0.5, 0.8],
-  // The weeping tamarisk too, from the middle of its crown.
-  tamarisk:  [0.6, 0.85],
+  // The betoum's cards carry their own CLUMP's normal (betoumGeometry.js):
+  // round only a little more, from the crown's middle, so the whole dome reads.
+  betoum:    [0.62, 0.08],
   agaveMast: [0.6, 0.15],
 };
 
@@ -161,10 +165,12 @@ const SELF_OCCLUSION = {
   agaveMast: [0.6, 0.5],
   broom: [0.8, 0.4],
   oleander: [0.9, 0.35],
-  tamarisk: [0.8, 0.4],
+  betoum: [0.85, 0.4],
+  typha: [0.6, 0.5],
   // The canopy tree (alg-rts tamarisk, nam-rts dipterocarps): the crown's
   // heart and underside darker (the Plant Lab's before / after, 2026-10-02).
   dipterocarp: [0.75, 0.42],
+  tamariskTree: [0.85, 0.35],
 };
 const AO_DIRS = (() => {
   // 14 directions over the upper hemisphere and a little below the horizon
@@ -278,7 +284,7 @@ function archCurve(rows, len, tilt, arch) {
  */
 export function cardTextureOf(kind) {
   switch (kind) {
-    case "pampas": case "susuki": case "tamarisk": return "plume";
+    case "pampas": case "susuki": case "tamariskTree": return "plume";
     case "bamboo": return "spray";
     case "palm": case "areca": return "frond";
     case "fanPalm": return "fan";
@@ -289,6 +295,7 @@ export function cardTextureOf(kind) {
     // Sprays of real leaves with sky between them (leafSprayCard.js) — the
     // banyan card's solid blob made both crowns read as green sheets.
     case "banyan": case "dipterocarp": return "leafSpray";
+    case "betoum": return "betoumLeaf";
     // Rosettes of short needles in flat mats (cedarNeedleTexture.js).
     case "atlasCedar": return "needle";
     case "taro": return "taro";
@@ -336,6 +343,10 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   if (type.kind === "travellersPalm") return buildTravellersPalm(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "banyan") return buildBanyan(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "dipterocarp") return buildDipterocarp(type, { near, far, rand, push, vcount, I, finish });
+  // The new tamarisk TREE (2026-10-02): its own grown skeleton + weeping
+  // sprays (buildTamariskTree); the old "tamarisk" (dipterocarp) is untouched.
+  if (type.kind === "betoum") return buildBetoum(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "tamariskTree") return buildTamariskTree(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "atlasCedar") return buildAtlasCedar(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "pandanus") return buildPandanus(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "opuntia") return buildOpuntia(type, { near, far, rand, push, vcount, I, finish });
@@ -345,7 +356,6 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   if (type.kind === "asphodel") return buildAsphodel(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "broom") return buildBroom(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "oleander") return buildOleander(type, { near, far, rand, push, vcount, I, finish });
-  if (type.kind === "tamarisk") return buildTamarisk(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";
@@ -634,12 +644,14 @@ function buildStalked(type, ctx, head) {
   const { near, far, rand, push, vcount, I, finish } = ctx;
   const height = type.frondLength ?? 1.0;
 
-  // The clump of leaves it grows out of.
+  // The clump of leaves it grows out of. A cattail's strap leaves stand
+  // TALLER than its flower stalks (2026-10-02: they stopped short of them,
+  // so the heads stood on bare sticks over a tuft).
   addBladeFan(ctx, {
     count: Math.max(2, Math.round((type.fronds ?? 7) * (far ? 0.5 : near ? 1 : 0.75))),
     rows: near ? 5 : far ? 2 : 3,
-    len: height * (plume ? 0.8 : 0.95),
-    width: (plume ? 0.03 : 0.022) * (type.leafletWidth ?? 1),
+    len: height * (plume ? 0.8 : 1.1),
+    width: (plume ? 0.03 : 0.026) * (type.leafletWidth ?? 1),
     spread: type.spread ?? 0.3,
     arch: type.arch ?? 0.8,
   });
@@ -662,7 +674,8 @@ function buildStalked(type, ctx, head) {
   for (let k = 0; k < stems; k++) {
     const a = k * 2.39996 + rand() * 0.7;
     const sr = rand();
-    const len = height * (0.85 + sr * 0.3);
+    // Cattail heads at many heights; the plumes keep their even crown.
+    const len = height * (plume ? 0.85 + sr * 0.3 : 0.7 + sr * 0.45);
     const dir = [Math.cos(a), 0, Math.sin(a)];
     const side = [-Math.sin(a), 0, Math.cos(a)];
     // Nearly upright, leaning a little and bending under the head's weight.
@@ -1226,9 +1239,152 @@ function thistleHead(ctx, top, hr, bud) {
  *   fronds  leaves · leaflets  branches
  */
 function buildAsphodel(type, ctx) {
+  // Near and mid: the real plant (2026-10-02, you: "very cheap, very low
+  // poly, not convincing at all"). Far: the light version below.
+  if (!ctx.far) return buildAsphodelFine(type, ctx);
+  return buildAsphodelFar(type, ctx);
+}
+
+/**
+ * ASPHODEL up close (Asphodelus ramosus), from the plant:
+ *   · a rosette of long, narrow, KEELED leaves (a V down the middle — the
+ *     fold catches the light), arching out and flopping toward the ground;
+ *   · one stalk, gently curved, branching from about half way into a
+ *     loose candelabra — every stem a smooth curved tube, olive (part 1.25);
+ *   · up each branch, as a raceme opens from the bottom: round green seed
+ *     pods (FRUIT, unripe), then open flowers — six separate pointed white
+ *     tepals in a shallow cup, each with the reddish-brown MIDRIB stripe the
+ *     plant is known by (part 2.1, foliageSystem) and orange stamens in the
+ *     middle (FRUIT, half ripe = orange) — then closed teardrop buds at the tip.
+ *   fronds  leaves · leaflets  branches
+ */
+function buildAsphodelFine(type, ctx) {
+  const { near, rand, push, vcount, I } = ctx;
+  const sides = near ? 6 : 4;
+  /** A smooth curved tube along a quadratic curve a → c (control b), part 1.25. */
+  const curveTube = (a, b, c, r0, r1, segs) => {
+    const P = (t) => [0, 1, 2].map((i) => (1 - t) * (1 - t) * a[i] + 2 * (1 - t) * t * b[i] + t * t * c[i]);
+    const base = vcount();
+    for (let q = 0; q <= segs; q++) {
+      const t = q / segs, p = P(t), p2 = P(Math.min(1, t + 0.02)), p1 = P(Math.max(0, t - 0.02));
+      const d = norm([p2[0] - p1[0], p2[1] - p1[1], p2[2] - p1[2]]);
+      const u = norm(cross(d, Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), v = norm(cross(d, u));
+      const r = r0 + (r1 - r0) * t;
+      for (let s = 0; s < sides; s++) {
+        const ph = (s / sides) * Math.PI * 2, n = norm(add(add([0, 0, 0], u, Math.cos(ph)), v, Math.sin(ph)));
+        push(add(p, n, r), n, s / sides, t, [1.25, Math.min(1, p[1]), 0.3, 0]);
+      }
+    }
+    for (let q = 0; q < segs; q++) for (let s = 0; s < sides; s++) {
+      const i0 = base + q * sides + s, i1 = base + q * sides + ((s + 1) % sides);
+      I.push(i0, i0 + sides, i1, i1, i0 + sides, i1 + sides);
+    }
+    return P;
+  };
+
+  // ── The rosette: keeled strap leaves ──
+  const nLeaves = Math.max(10, Math.round((type.fronds ?? 14) * (near ? 1.7 : 1.2)));
+  const rows = near ? 7 : 4;
+  for (let l = 0; l < nLeaves; l++) {
+    const az = l * 2.39996 + rand() * 0.5, br = rand();
+    const out = [Math.cos(az), 0, Math.sin(az)], side = [-Math.sin(az), 0, Math.cos(az)];
+    const len = 0.5 * (0.7 + br * 0.5);
+    const line = archCurve(rows, len, 0.35 + br * 0.45, 1.1 + br * 0.6);
+    const W = 0.03 * (0.85 + rand() * 0.3);
+    const base = vcount();
+    for (let j = 0; j <= rows; j++) {
+      const L = line[j];
+      const p = [out[0] * L.r, L.y, out[2] * L.r];
+      const fwd = norm([Math.sin(L.th) * out[0], Math.cos(L.th), Math.sin(L.th) * out[2]]);
+      const up = norm(cross(side, fwd));
+      const w = W * Math.pow(Math.max(0, 1 - L.v), 0.6) * (0.6 + 0.4 * Math.min(1, L.v * 5));
+      const keel = w * 0.45;
+      // Edge, keel (the fold sits low), edge.
+      push(add(p, side, -w), norm(add(up, side, -0.55)), 0, L.v, [0, L.v, br, L.v]);
+      push(add(p, up, -keel), up, 0.5, L.v, [0, L.v, br, L.v]);
+      push(add(p, side, w), norm(add(up, side, 0.55)), 1, L.v, [0, L.v, br, L.v]);
+    }
+    for (let j = 0; j < rows; j++) {
+      const a = base + j * 3, b = a + 3;
+      I.push(a, b, a + 1, a + 1, b, b + 1, a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+    }
+  }
+
+  // ── The stalk and its branches: smooth curves ──
+  const H = 0.75 + rand() * 0.2;
+  const lean = [(rand() - 0.5) * 0.08, 0, (rand() - 0.5) * 0.08];
+  const top = [lean[0], H, lean[2]];
+  const P0 = curveTube([0, 0, 0], [lean[0] * 0.2, H * 0.5, lean[2] * 0.2], top, 0.009, 0.0035, near ? 8 : 5);
+  const racemes = [];   // { P: t → point, t0, t1 }
+  racemes.push({ P: P0, t0: 0.62, t1: 1 });
+  const nb = Math.max(3, Math.round((type.leaflets ?? 3) * 1.6) + (near ? 1 : 0));
+  for (let k = 0; k < nb; k++) {
+    const f = 0.42 + (k / nb) * 0.28 + rand() * 0.05;
+    const at = P0(f), az = k * 2.39996 + rand() * 0.5;
+    const out = [Math.cos(az), 0, Math.sin(az)];
+    const reach = 0.11 + rand() * 0.06, rise = 0.22 + rand() * 0.12;
+    const ctrl = add(at, [out[0] * reach, rise * 0.25, out[2] * reach]);
+    const tip = add(ctrl, [out[0] * reach * 0.25, rise, out[2] * reach * 0.25]);
+    const P = curveTube(at, ctrl, tip, 0.004, 0.0018, near ? 6 : 4);
+    racemes.push({ P, t0: 0.35, t1: 1 });
+  }
+
+  // ── Along each raceme: pods, flowers, buds ──
+  const per = near ? 12 : 7;
+  for (const { P, t0, t1 } of racemes) {
+    for (let k = 0; k < per; k++) {
+      const s = k / (per - 1);
+      const t = t0 + (t1 - t0) * s;
+      const c = P(t), c2 = P(Math.min(1, t + 0.02));
+      const d = norm([c2[0] - c[0], c2[1] - c[1], c2[2] - c[2]]);
+      const az = k * 2.39996 + rand();
+      const outv = norm(add([Math.cos(az), 0, Math.sin(az)], d, -[Math.cos(az), 0, Math.sin(az)].reduce((m, x, i) => m + x * d[i], 0)));
+      const pedicel = add(c, outv, 0.012);
+      if (s < 0.3) {
+        // A seed pod: round, green.
+        blob(ctx, pedicel, 0.009, 0.01, 0, near ? 6 : 5, near ? 4 : 3, 0, 0, 3.2);
+      } else if (s > 0.8) {
+        // A bud: a closed teardrop, pointing up the branch.
+        blob(ctx, add(pedicel, d, 0.006), 0.0055, 0.013, 2, near ? 6 : 4, near ? 4 : 3, 0.35, 0.55, 0.5);
+      } else {
+        asphodelFlower(ctx, pedicel, norm(add(outv, [0, 1, 0], 0.5)), 0.03 * (0.85 + rand() * 0.3), rand() * 6.28, near);
+      }
+    }
+  }
+  return ctx.finish();
+}
+
+/**
+ * One asphodel flower facing `face`: six separate pointed tepals in a shallow
+ * cup (part 2.1: white with a reddish-brown midrib down uv.x 0.5) and a
+ * little knot of orange stamens (FRUIT, half ripe).
+ */
+function asphodelFlower(ctx, c, face, r, spin, near) {
+  const { push, vcount, I } = ctx;
+  const u = norm(cross(face, Math.abs(face[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), v = norm(cross(face, u));
+  for (let k = 0; k < 6; k++) {
+    const a = spin + (k / 6) * Math.PI * 2;
+    const out = norm(add(add([0, 0, 0], u, Math.cos(a)), v, Math.sin(a)));
+    const side = norm(cross(face, out));
+    // The tepal rises a little out of the cup: out along `out`, up along `face`.
+    const dir = norm(add(out, face, 0.35));
+    const n = norm(cross(dir, side));
+    const w = r * 0.32;
+    const base = vcount();
+    const pts = near ? [[0, 0.12], [0.45, 1], [0.8, 0.75], [1, 0]] : [[0, 0.12], [0.5, 1], [1, 0]];
+    for (const [t, wf] of pts) {
+      const p = add(add(c, dir, r * t), face, r * 0.12 * t * t);
+      for (const s of [-1, 1]) push(add(p, side, s * w * wf), n, s * 0.5 + 0.5, t, [2.1, 1, 0.5, 0.55 + t * 0.45]);
+    }
+    for (let q = 0; q < pts.length - 1; q++) { const i0 = base + q * 2; I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3); }
+  }
+  // Stamens: a small orange knot in the heart.
+  blob(ctx, add(c, face, r * 0.12), r * 0.16, r * 0.12, 0, near ? 5 : 4, 2, 0.5, 0.5, 3.2);
+}
+
+/** The asphodel far away: a tuft, a stalk, a few white stars. */
+function buildAsphodelFar(type, ctx) {
   const { near, far, rand } = ctx;
-  // A dense tuft of long strap leaves, arching out (2026-10-02: 14 thin
-  // blades read as a lonely stick in the dirt).
   addBladeFan(ctx, {
     count: Math.max(6, Math.round((type.fronds ?? 14) * 1.7 * (far ? 0.45 : near ? 1 : 0.7))),
     // Soft, long, flopping out toward the ground (stiff ones read as a yucca).
@@ -1628,21 +1784,25 @@ function buildOleander(type, ctx) {
 }
 
 /**
- * TAMARISK (Tamarix) — its own builder (2026-10-02; it was the dipterocarp,
- * a round broadleaf crown that read as an oak). The real small tree of the
- * wadi banks: a few LEANING trunks of dark reddish bark, forking low into
- * limbs that splay out, and from them hundreds of thin WANDS that arch over
- * and droop, clothed in feathery grey-green scale-leaves — an airy,
- * see-through, weeping crown.
- *   trunks, limbs  part 1.25 (woody: colorBase → colorTip, the bark)
- *   wands          crossed cards in the PLUME strand texture (part 2,
- *                  colorHead), hanging along each wand's droop
- * Unit frame (height ~1).
+ * TAMARISK TREE, GROWN (2026-10-02, you: "build the best convincing tree and
+ * foliage"; the dipterocarp-based one read as a spoke umbrella of stamped
+ * cards). A real Tamarix of the wadi banks:
+ *   · 2-3 LEANING trunks of dark reddish bark from one foot, each forking
+ *     again and again at uneven heights — a recursive skeleton, every limb
+ *     curving a little, thinner and shorter each generation (no two trees
+ *     alike: the seed grows it);
+ *   · on the last two generations, hundreds of thin WANDS of feathery
+ *     scale-leaves (the plume strand texture, crossed cards, part 2.4: the
+ *     dome normal, no flip) that rise, arch over and WEEP — the outline
+ *     ragged, see-through at the edges, drooping tips;
+ *   · late summer: some wands carry the pink flower plumes (the shader tints
+ *     part 2.4 with rand > 0.9).
+ * Unit frame (height ~1). Woody parts 1.25 (colorBase → colorTip = bark).
  *   fronds  trunks
  */
-function buildTamarisk(type, ctx) {
+function buildTamariskTree(type, ctx) {
   const { near, far, rand, push, vcount, I } = ctx;
-  const sides = far ? 3 : near ? 6 : 4;
+  const sides = far ? 3 : near ? 5 : 4;
   const tube = (a, b, r0, r1) => {
     const d = norm([b[0] - a[0], b[1] - a[1], b[2] - a[2]]);
     const u = norm(cross(d, Math.abs(d[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0])), v = norm(cross(d, u));
@@ -1658,8 +1818,8 @@ function buildTamarisk(type, ctx) {
       I.push(base + s, base + sides + s, base + s1, base + s1, base + sides + s, base + sides + s1);
     }
   };
-  /** A WAND: two crossed strand cards from `a`, heading `dir`, arching down. */
-  const segsW = near ? 4 : far ? 2 : 3;
+  const segsW = near ? 3 : 2;
+  /** A weeping wand: two crossed strand cards from `a`, heading `dir`. */
   const wand = (a, dir, L, halfW, wr) => {
     for (const cardAngle of [0, Math.PI / 2]) {
       const ca = Math.cos(cardAngle), sa = Math.sin(cardAngle);
@@ -1670,10 +1830,8 @@ function buildTamarisk(type, ctx) {
       const base = vcount();
       for (let q = 0; q <= segsW; q++) {
         const v = q / segsW;
-        // Weeping: the further out, the more it hangs.
-        const c = add(add(a, dir, L * v), [0, -1, 0], L * 0.7 * v * v);
-        const w = halfW * (0.55 + 0.45 * Math.sin(Math.PI * Math.min(1, v * 1.15)));
-        // Part 2.4: a DOME card (foliageSystem: dome normal, no flip to the viewer).
+        const c = add(add(a, dir, L * v), [0, -1, 0], L * 0.55 * v * v);
+        const w = halfW * (0.5 + 0.5 * Math.sin(Math.PI * Math.min(1, v * 1.1)));
         for (const s of [-1, 1]) push(add(c, wide, s * w), n, s * 0.5 + 0.5, v, [2.4, Math.min(1, c[1]), wr, v]);
       }
       for (let q = 0; q < segsW; q++) {
@@ -1683,38 +1841,49 @@ function buildTamarisk(type, ctx) {
     }
   };
 
-  const trunks = Math.max(2, Math.round(type.fronds ?? 4) - (far ? 1 : 0));
-  // A FULL crown: a soft grey-green cloud with wispy, weeping edges (11 a
-  // limb left the limbs bare).
-  const wandsPerLimb = far ? 8 : near ? 26 : 15;
-  const wandW = far ? 0.13 : near ? 0.085 : 0.1;
-  for (let t = 0; t < trunks; t++) {
-    const az = t * 2.39996 + rand() * 0.6, out = [Math.cos(az), 0, Math.sin(az)];
-    const lean = 0.18 + rand() * 0.32;
-    const tH = 0.36 + rand() * 0.14;
-    const root = [out[0] * 0.03, 0, out[2] * 0.03];
-    const fork = add(root, [out[0] * Math.sin(lean), Math.cos(lean), out[2] * Math.sin(lean)], tH);
-    tube(root, fork, 0.022, 0.014);
-    // Limbs: two or three, splaying up and out from the fork.
-    const limbs = 2 + (rand() < 0.5 ? 1 : 0);
-    for (let l = 0; l < limbs; l++) {
-      const laz = az + (l - (limbs - 1) / 2) * 0.9 + (rand() - 0.5) * 0.4;
-      const lout = [Math.cos(laz), 0, Math.sin(laz)];
-      const lLen = 0.38 + rand() * 0.15;
-      const lTip = add(fork, norm([lout[0] * 0.75, 1, lout[2] * 0.75]), lLen);
-      tube(fork, lTip, 0.012, 0.005);
-      // Wands from the limb's upper two-thirds and its tip, arching out
-      // in every direction (most of them away from the tree's middle).
-      for (let w = 0; w < wandsPerLimb; w++) {
-        const f = 0.25 + (w / wandsPerLimb) * 0.75;
-        const at = add(fork, [lTip[0] - fork[0], lTip[1] - fork[1], lTip[2] - fork[2]], f);
-        const waz = laz + (rand() - 0.5) * 3.4;
-        const up = 0.45 + rand() * 0.7;
-        const dir = norm([Math.cos(waz), up, Math.sin(waz)]);
-        const L = 0.26 + rand() * 0.2;
-        wand(at, dir, L, wandW * (0.8 + rand() * 0.4), rand());
+  const maxDepth = far ? 2 : near ? 4 : 3;
+  // A FULL crown (4 a twig left the limbs bare): the wands are the tree.
+  const wandsPerTwig = far ? 5 : near ? 7 : 7;
+  const wandW = far ? 0.1 : near ? 0.07 : 0.08;
+  /** Grow a limb from `p` along `dir`: `len`, radius r, generation g. */
+  const grow = (p, dir, len, r, g) => {
+    // The limb itself, in two bent pieces.
+    const bendAx = norm(cross(dir, [rand() - 0.5, 0.2, rand() - 0.5]));
+    const mid = add(add(p, dir, len * 0.5), bendAx, len * 0.08 * (rand() - 0.5) * 2);
+    const dir2 = norm(add(dir, [0, 0.12, 0], 1));
+    const end = add(mid, norm(add(dir2, bendAx, 0.15 * (rand() - 0.5))), len * 0.5);
+    if (!far || g < 2) { tube(p, mid, r, r * 0.85); tube(mid, end, r * 0.85, r * 0.7); }
+    // Wands on the last two generations, along the limb and at its end.
+    if (g >= maxDepth - 1) {
+      const n = g === maxDepth ? wandsPerTwig + 1 : wandsPerTwig - 1;
+      for (let w = 0; w < n; w++) {
+        const f = 0.35 + (w / Math.max(1, n - 1)) * 0.65;
+        const at = f < 0.5 ? add(p, [mid[0] - p[0], mid[1] - p[1], mid[2] - p[2]], f * 2) : add(mid, [end[0] - mid[0], end[1] - mid[1], end[2] - mid[2]], (f - 0.5) * 2);
+        const az = rand() * Math.PI * 2;
+        const wd = norm(add(add(dir, [Math.cos(az), 0, Math.sin(az)], 0.9), [0, 1, 0], 0.35 + rand() * 0.5));
+        wand(at, wd, 0.16 + rand() * 0.12, wandW * (0.8 + rand() * 0.4), rand());
       }
     }
+    if (g >= maxDepth) return;
+    // Children: 2-3, splaying from the limb's upper half at uneven heights.
+    const kids = 2 + (rand() < 0.45 ? 1 : 0);
+    for (let k = 0; k < kids; k++) {
+      const f = k === 0 ? 1 : 0.45 + rand() * 0.45;
+      const at = f >= 1 ? end : add(mid, [end[0] - mid[0], end[1] - mid[1], end[2] - mid[2]], (f - 0.45) / 0.55);
+      const side = norm(cross(dir, [Math.cos(k * 2.4 + rand()), 0.3, Math.sin(k * 2.4 + rand())]));
+      const spreadA = (0.35 + rand() * 0.4) * (k === 0 ? 0.6 : 1);
+      // Up and out — the outer generations lean out further and droop.
+      const cd = norm(add(add(dir, side, Math.tan(spreadA)), [0, 1, 0], g < 2 ? 0.15 : -0.05));
+      grow(at, cd, len * (0.62 + rand() * 0.14), r * 0.62, g + 1);
+    }
+  };
+
+  const trunks = Math.max(2, Math.min(3, Math.round(type.fronds ?? 3)));
+  for (let t = 0; t < trunks; t++) {
+    const az = t * 2.39996 + rand() * 0.8;
+    const lean = 0.2 + rand() * 0.3;
+    const dir = norm([Math.cos(az) * Math.sin(lean), Math.cos(lean), Math.sin(az) * Math.sin(lean)]);
+    grow([Math.cos(az) * 0.02, 0, Math.sin(az) * 0.02], dir, 0.36 + rand() * 0.08, 0.026 - t * 0.003, 0);
   }
   return ctx.finish();
 }

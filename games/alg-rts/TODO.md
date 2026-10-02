@@ -570,6 +570,19 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       Cards with alpha instead of blades = NO: alpha test loses early-z and
       overdraws (our cedar lesson); solid strips facing the camera are right.
       Also: wind streaks (12 compute ribbons), grass-only wind particles.
+      PLANT AUDIT ROUND 1 (2026-10-03, gpuBench interleaved, scale 2):
+      · painted Foliage ≈ 0 ms, Tall plants ≈ 0, RevoGrass 0-0.4 ms,
+        vegetation shadows 0.1-0.75 ms (noisy).
+      · PLACED plants were the cost: 0.8-1.0 ms — all 1,467 hedge prickly
+        pears + 72 brooms + the rest drawn AND cast every frame, map-wide
+        (PlacedFoliage had no culling). FIXED: view-frustum culling per plant
+        (sphere + 14 m shadow margin, re-binned on 2 m / a turn). Now:
+        close 16 plants ≈ 0 ms, default 74 plants 0.26 ms, max zoom 288
+        plants 0.5-0.7 (≈ 0.2-0.3 of it their shadows).
+      · open: heavy NEAR levels (betoum 15.9k, tamarisk 15.1k, broom 6.8k,
+        oleander 6.4k, prickly pear 5.7k, asphodel 5.5k) — only drawn within
+        ~60-70 m, measured cheap today; revisit if a map packs them.
+      · open: small plants casting (alfa/thistle/asphodel) → baked ground patch?
       PLANT AUDIT — when every Plant Lab bed is done (you, 2026-10-02: "see
       if we can optimize, merge, or anything so it's as optimized as
       possible"): triangles per LOD × how often each plant is drawn; types
@@ -607,7 +620,22 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       (flash, explosion, flame, tracer, sprites) write their own mask.
       [ ] the firefly pixels' SOURCE is still unknown (they're harmless now:
           clipped on screen, clamped in the bloom).
-      Next plants: reed-mace, juniper, doum palm (last); tamarisk TREE look
+      PLANT PASS 3 (2026-10-02): reed-mace (18 strap leaves taller than the
+      stalks, chocolate heads); asphodel rebuilt from the plant (keeled leaves,
+      curved stems, six-tepal flowers with the brown midrib); TAMARISK = the
+      grown weeping tree (buildTamariskTree; old weeping shrub removed);
+      BETOUM (Atlas pistachio, betoumGeometry.js) — NEW big tree, a grown
+      skeleton meshed as one continuous parallel-transport tube per branch,
+      children buried in their parent with a collar, root flare, shader bark
+      (part 3.4), leaf CLUSTER cards from tools/makeBetoumLeaves.py (CC0 leaf
+      photos → public/textures/leaves/betoum_clusters.png), crown-proxy
+      normals. 15.8k / 3.3k / 0.5k tris.
+      KEEP (you): the OLD big tree ("tamarisk" key, the map's slot) stays as
+      it is — the betoum is an extra tree, not a replacement. Juniper scrub
+      and doum palm: keep as they are unless a NEW, better model is built
+      beside them (never edit them in place).
+      Next plants: juniper / doum palm (new models beside them), where the
+      betoum and tamarisk go on the map; tamarisk TREE look
       (own builder, feathery needle cards, clump colour); agave mast still
       "cheap" (you: which part?); where the tamarisk shrub goes; then the
       PLANT AUDIT above.
