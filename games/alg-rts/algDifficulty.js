@@ -9,17 +9,17 @@
 const LEVELS = {
   easy: {
     label: "Easy", alnStart: 320, alnBase: 25, moudjahid: 35, headStart: 4,
-    firstBandAt: 40, bandEvery: [70, 115], maxLive: 16, frStart: 500,
+    firstBandAt: 40, bandEvery: [70, 115], maxLive: 16, frStart: 750,
     blurb: "Small bands, slow to come.",
   },
   normal: {
     label: "Normal", alnStart: 480, alnBase: 45, moudjahid: 30, headStart: 8,
-    firstBandAt: 18, bandEvery: [50, 85], maxLive: 26, frStart: 400,
+    firstBandAt: 18, bandEvery: [50, 85], maxLive: 26, frStart: 600,
     blurb: "A katiba that fights for every village.",
   },
   hard: {
     label: "Hard", alnStart: 700, alnBase: 70, moudjahid: 25, headStart: 12,
-    firstBandAt: 10, bandEvery: [35, 60], maxLive: 36, frStart: 330,
+    firstBandAt: 10, bandEvery: [35, 60], maxLive: 36, frStart: 500,
     blurb: "The whole wilaya against one post.",
   },
 };

@@ -1265,18 +1265,35 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
    * is both simpler and kinder than raycasting: a 1.9 m man at RTS zoom is a
    * miserable click target.
    */
-  function pickCrowdUnit(clientX, clientY, camera, rect, maxPx = 22) {
+  /**
+   * The soldier under the cursor, picked in 2D. Against his whole BODY — the
+   * screen segment from his feet to his head — not one point: it was the
+   * point 1 m up within 22 px, and zoomed in (a man 60-100 px tall) a click on
+   * his chest or head missed (you, 2026-10-02: "clicking on one unit sometimes
+   * doesn't work"). The reach grows with his size on screen (min `maxPx`).
+   * Nearest wins; the player's own men win a tie within a few px.
+   */
+  function pickCrowdUnit(clientX, clientY, camera, rect, maxPx = 18) {
     let best = null;
-    let bestD = maxPx;
+    let bestD = Infinity;
     for (const unit of crowdUnits) {
       if (!unit.alive) continue;
-      const p = unit.position;
-      _proj.set(p.x, p.y + 1, p.z).project(camera);
+      const p = unit.position, h = unit.type?.targetHeight ?? 2.3;
+      _proj.set(p.x, p.y, p.z).project(camera);
       if (_proj.z > 1) continue; // behind the camera
-      const sx = rect.left + (_proj.x * 0.5 + 0.5) * rect.width;
-      const sy = rect.top + (-_proj.y * 0.5 + 0.5) * rect.height;
-      const d = Math.hypot(sx - clientX, sy - clientY);
-      if (d < bestD) { bestD = d; best = unit; }
+      const fx = rect.left + (_proj.x * 0.5 + 0.5) * rect.width;
+      const fy = rect.top + (-_proj.y * 0.5 + 0.5) * rect.height;
+      _proj.set(p.x, p.y + h, p.z).project(camera);
+      const hx = rect.left + (_proj.x * 0.5 + 0.5) * rect.width;
+      const hy = rect.top + (-_proj.y * 0.5 + 0.5) * rect.height;
+      // Distance to the feet→head segment.
+      const vx = hx - fx, vy = hy - fy, L2 = vx * vx + vy * vy || 1;
+      const t = Math.max(0, Math.min(1, ((clientX - fx) * vx + (clientY - fy) * vy) / L2));
+      const d = Math.hypot(clientX - (fx + vx * t), clientY - (fy + vy * t));
+      const reach = Math.max(maxPx, Math.min(40, Math.sqrt(L2) * 0.35));
+      if (d > reach) continue;
+      const score = d - (unit.team === "player" ? 4 : 0);
+      if (score < bestD) { bestD = score; best = unit; }
     }
     return best;
   }
@@ -1619,6 +1636,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           // (beauty + each shadow cascade) — hide the field when the type has
           // no live units (builders at boot, or a type wiped out).
           part.im.visible = inst.n > 0;
+          // The pick bounds go stale as the vehicles move: three computes an
+          // InstancedMesh's bounding sphere ONCE (the first raycast) and tests
+          // every ray against it first — a vehicle that had driven out of the
+          // group's old sphere could no longer be clicked (you, 2026-10-02).
+          // Dropped here, rebuilt lazily by the next raycast only (a click).
+          part.im.boundingSphere = null;
           part.im.instanceMatrix.needsUpdate = true;
           part.im.instanceColor.needsUpdate = true;
           part.xray.count = inst.n;

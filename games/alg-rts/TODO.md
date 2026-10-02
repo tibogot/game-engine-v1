@@ -519,6 +519,24 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          bare grounds (Ground104 "crumbly"…), nothing for stubble or crops.
    - [ ] you, look at play zoom and close: the soil colour, the tints, the
          furrow scale (TILE_M), the stubble's bands, the barley's green.
+- [x] **AN ENEMY THAT FIGHTS (2026-10-02, algAI; you: "the enemies don't
+      even try to fire at me")**. Bands held fire walking, occupying, mining,
+      running home, and broke off after 12-22 s. Now:
+      · FIRED ON (hit, suppressed or shot at), any band fires back — on its
+        way, in a village, laying a mine, cutting wire, in ambush.
+      · Strikes 18-30 s and go on (+8 s at a time, up to 50) while not losing.
+      · Running home, pressed by men within 35 m: one REARGUARD (6-10 s).
+      · DEFENCE: French within 90 m of a village it holds → a band out
+        within 450 m is diverted (else the next one within 8 s); it fights
+        from the houses and moves on only 25 s after the French go.
+      · ASSAULTS: from 5:30, every 220-320 s, 8-11 men (two FMs while the
+        caches allow) against a French-held village (fewest guards), else an
+        outpost, else troops, else the post's outskirts: staged in cover,
+        then in, firing, with an alert. Breaks at 55% lost; a village taken
+        gets a cell.
+      Tested: a village band fired on at 45 m → 8/8 firing; an assault went
+      in firing; French near Ksar el Hamra → a 7-man band diverted to defend.
+   - [ ] you, play it: too hard now? (assault pace, size, strike length.)
 - [x] **CHEAP BLOOM (2026-10-02)**: on by default in alg. Stock selective
       bloom MEASURED 6.6-8.9 ms (scale 2): most of it was the 4th MSAA
       attachment (emissive) written per sample, the blur ~1 ms. Now THRESHOLD
@@ -527,7 +545,32 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       of the frame (new postFxPipeline bloom `resolution`, default 0.5 = stock,
       nam unchanged). MEASURED interleaved (scale 2, play zoom): 0.42-0.47 ms.
       ?bloom=0 = off.
-   - [ ] you, look in a fight: the strength (1.4), the threshold (1.6).
+   - [x] ROUND 2 (same day; you: "everything white blooms — the flags, the
+         sheep, the hens"): threshold mode was wrong (in this sun a white
+         sheep is as bright as a flash). Back to SELECTIVE, with a 1-byte
+         glow MASK attachment (postFxPipeline bloom `mask`: R8, the bloom =
+         scene colour × mask) instead of the RGBA16F colour. Seen: the
+         fireball glows; the flag, the white post, the sand do not.
+         MEASURED (scale 2, interleaved x6): 1.6-1.8 ms (≈0.5 at the normal
+         scale) vs 6.6-8.9 stock.
+   - [ ] you, look in a fight: the strength (1.2).
+- [x] **CLICKING A UNIT SOMETIMES MISSED (2026-10-02, you; vehicles most)**:
+      · VEHICLES: three computes an InstancedMesh's bounding sphere ONCE (the
+        first raycast) and tests every ray against it first — a vehicle that
+        had driven out of its type's old sphere could not be clicked. Now
+        dropped every frame, rebuilt only by a click (unitRenderer). Plus a
+        screen-space backup: a click within a vehicle's outline picks it
+        (selection.js).
+      · SOLDIERS: picked against one point 1 m up within 22 px — zoomed in, a
+        click on the chest or head missed. Now the feet→head segment, the
+        reach growing with his size on screen; box-select tests his middle.
+      Tested with real clicks after the jeep drove 80 m: jeep 9/9, two
+      appelés 18/18 (3 zooms × feet, chest, head).
+- [x] **3x FRENCH INCOME (2026-10-02, you: "it takes long to build")**:
+      Algiers 40 → 120/min, villages 25/40/50 → 40/60/80, start 400 → 600
+      (Easy 750, Hard 500). An appelé every 30 s with nothing held. Later
+      (proposed): a second resource (fuel / ammunition from villages and
+      convoys) for vehicles, tiers, grenades — CoH-style.
    - [ ] Next post-FX from the list: a colour-grade LUT + vignette (near
          free), then GTAO (measure, keep only under ~1.5 ms).
 - [ ] **SOLDIERS' VOICES + RADIO CALLS, French and Arabic** (you,

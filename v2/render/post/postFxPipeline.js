@@ -3,11 +3,13 @@ import {
   diffuseColor,
   directionToColor,
   emissive,
+  max,
   mrt,
   normalView,
   output,
   pass,
   renderOutput,
+  saturate,
   texture,
   uniform,
   vec4,
@@ -157,6 +159,8 @@ export class PostFxPipeline {
       // 0.5). 0.25 starts at a quarter (1/16 the pixels) — a game's cheap
       // bloom (alg-rts, 2026-10-02: stock bloom MEASURED 6.6-8.9 ms at scale 2).
       resolution: 0.5,
+      // Selective mode's attachment as a 1-byte glow MASK (see _applySceneMRT).
+      mask: false,
     };
 
     /** FXAA enable flag — node is built lazily inside `_refreshOutputNode`. */
@@ -463,7 +467,11 @@ export class PostFxPipeline {
     if (this._renderPipeline) this._refreshOutputNode();
   }
 
-  setBloomParams({ strength, threshold, radius, smoothWidth, resolution } = {}) {
+  setBloomParams({ strength, threshold, radius, smoothWidth, resolution, mask } = {}) {
+    if (mask != null && !!mask !== !!this._bloomParams.mask) {
+      this._bloomParams.mask = !!mask;
+      if (this._scenePass) { this._applySceneMRT(); this._rebuildBloomPasses(); this._refreshOutputNode?.(); }
+    }
     if (resolution != null && resolution !== this._bloomParams.resolution) {
       this._bloomParams.resolution = resolution;
       for (const p of [this._bloomPass, this._cloudBloomPass]) this._scaleBloom(p);
@@ -830,12 +838,25 @@ export class PostFxPipeline {
     // The emissive member carries the fragment's OWN coverage in .a, and the
     // attachment is told to blend like the material does. Both halves are
     // needed, and only together — see `_emissiveBlend` at the top of the file.
-    if (this._sceneExtra.has("emissive")) targets.emissive = vec4(emissive, output.a);
+    // MASK mode (`bloomMask`, alg-rts 2026-10-02): the attachment is a ONE-BYTE
+    // glow mask (how much of this pixel glows, 0..1), not an HDR colour — the
+    // full RGBA16F attachment, written per MSAA sample, was most of selective
+    // bloom's cost. The bloom then reads the scene colour times the mask.
+    if (this._sceneExtra.has("emissive")) {
+      targets.emissive = this._bloomParams.mask
+        ? vec4(saturate(max(max(emissive.r, emissive.g), emissive.b).mul(0.6)), 0, 0, output.a)
+        : vec4(emissive, output.a);
+    }
     const sceneMRT = mrt(targets);
     if (targets.emissive) sceneMRT.setBlendMode("emissive", _emissiveBlend);
     sp.setMRT(sceneMRT);
     if (targets.diffuseColor) sp.getTexture("diffuseColor").type = THREE.UnsignedByteType;
     if (targets.normal) sp.getTexture("normal").type = THREE.UnsignedByteType;
+    if (targets.emissive && this._bloomParams.mask) {
+      const t = sp.getTexture("emissive");
+      t.type = THREE.UnsignedByteType;
+      t.format = THREE.RedFormat;
+    }
   }
 
   /**
@@ -853,7 +874,9 @@ export class PostFxPipeline {
     // add the attachment (see _wrapSceneTextureRequests), so it waits for
     // setBloomEnabled(true), which rebuilds these passes.
     const solidsInput = this._emissiveWanted()
-      ? this._scenePass.getTextureNode("emissive")
+      ? (bp.mask
+        ? vec4(this._scenePassColor.rgb.mul(this._scenePass.getTextureNode("emissive").r), 1)
+        : this._scenePass.getTextureNode("emissive"))
       : this._scenePassColor;
     this._bloomPass = bloom(solidsInput, bp.strength, bp.radius, bp.threshold);
     this._cloudBloomPass = this._bloomSelective

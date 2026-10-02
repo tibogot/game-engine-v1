@@ -184,8 +184,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // (postFxPipeline `resolution`; stock: a half). MEASURED interleaved at
   // scale 2: 0.42-0.47 ms; seen: fireball, muzzle flashes, the tank's flash,
   // sparks glow; walls and sand do not. ?bloom=0 = off.
-  app.postFx?.setBloomSelective(false);
-  app.postFx?.setBloom({ enabled: params.get("bloom") !== "0", strength: 1.4, threshold: 1.6, radius: 0.6, smoothWidth: 0.8, resolution: 0.125 });
+  //
+  // ROUND 2, same day (you: "the bloom makes everything white bloom — the flags,
+  // the sheep, the hens"): threshold mode was wrong — in this sun a white sheep
+  // is as bright as a muzzle flash. Back to SELECTIVE (only what a material
+  // marks as emissive glows), but its attachment is a 1-byte MASK (pipeline
+  // `mask`), not the RGBA16F colour that cost the 5 ms: the bloom reads the
+  // scene colour times the mask.
+  app.postFx?.setBloomSelective(true);
+  app.postFx?.setBloom({ enabled: params.get("bloom") !== "0", strength: 1.2, threshold: 0, radius: 0.6, smoothWidth: 0.01, resolution: 0.125, mask: true });
   // CRISP, NOT SOFT (you, 2026-10-01: "CoH looks really good resolution").
   // FXAA ran ON TOP of the 4x MSAA and blurred every pixel of the frame:
   // MEASURED same frame, the fine detail (Laplacian) went ×2.7 with it off —

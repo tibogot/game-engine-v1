@@ -14,6 +14,7 @@
 // (mesh.userData.unit); box-select projects each unit to screen space.
 import * as THREE from "three";
 
+const _pc = new THREE.Vector3(), _pe = new THREE.Vector3();   // screen picks (vehicles)
 const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
@@ -64,6 +65,25 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     // Nothing with a mesh — try the crowd (soldiers), which is picked in 2D.
     const soldier = pickCrowdUnit?.(clientX, clientY, camera, rect);
     if (soldier?.alive) return soldier;
+    // A VEHICLE the ray missed (between a jeep's wheels, a helicopter's thin
+    // tail, far out where it is a few pixels): within its outline on screen —
+    // its radius projected round its middle (2026-10-02, you: "clicking
+    // vehicles sometimes doesn't work").
+    {
+      let best = null, bd = Infinity;
+      for (const u of units.list) {
+        if (!u.alive || u.isStructure || u.type?.foot) continue;
+        const r = u.radius ?? u.type?.radius ?? 3;
+        _pc.set(u.position.x, u.position.y + Math.min(2, r * 0.5), u.position.z).project(camera);
+        if (_pc.z > 1) continue;
+        const sx = rect.left + (_pc.x * 0.5 + 0.5) * rect.width, sy = rect.top + (-_pc.y * 0.5 + 0.5) * rect.height;
+        _pe.set(u.position.x + r, u.position.y + Math.min(2, r * 0.5), u.position.z).project(camera);
+        const rpx = Math.max(10, Math.hypot((_pe.x - _pc.x) * 0.5 * rect.width, (_pe.y - _pc.y) * 0.5 * rect.height));
+        const d = Math.hypot(sx - clientX, sy - clientY);
+        if (d < rpx * 1.1 && d - (u.team === "player" ? 4 : 0) < bd) { bd = d - (u.team === "player" ? 4 : 0); best = u; }
+      }
+      if (best) return best;
+    }
     // Nothing under the cursor — try our own buildings (the base is commandable).
     // Structures are instanced per kind now, so a hit names its structure by
     // instanceId, exactly like the units.
@@ -135,7 +155,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       // check a drag also grabbed every casualty in the rectangle.
       for (const u of units.list) {
         if (!u.alive || u.team !== "player") continue;
-        const p = u.position.clone().project(camera);
+        // His middle, not his feet (a box drawn round a man's body missed him).
+        const p = u.position.clone().setY(u.position.y + (u.type?.foot ? 1 : 0)).project(camera);
         if (p.z > 1) continue; // behind the camera
         const sx = rect.left + (p.x * 0.5 + 0.5) * rect.width;
         const sy = rect.top + (-p.y * 0.5 + 0.5) * rect.height;

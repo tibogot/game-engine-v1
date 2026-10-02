@@ -62,7 +62,7 @@ const P = {
   roadBonus: 0.8,             // a spot lining that track, 15-45 m off it
   trigger: 32,                // French this close to the band: open fire
   waitMax: 60,                // seconds in ambush before going in or re-planning
-  strikeTime: [12, 22],
+  strikeTime: [18, 30],
   breakLoss: 0.4,             // share of the band lost: break off
   armourNear: 55,             // French armour this close: break off
   postKeepOff: 60,            // French within this of the post count as "at home"
@@ -105,6 +105,21 @@ const P = {
   cacheFirst: 120,            // s before the FLN first checks for a lost cache
   cacheEvery: 45,             // s between its checks
   cacheMin: 2,                // it keeps at least this many (or as many as it started with)
+  // ── 2026-10-02: an enemy that fights back ──
+  fireBackAt: 0.1,            // suppression that counts as "under fire" (rifles add 0.12 a round)
+  strikeMax: 50,              // s a strike may run while the band is not losing
+  strikeExtend: 8,            // s added each time it is still winning
+  rearguard: [6, 10],         // s a band running home turns and fights, once
+  rearguardNear: 35,          // m: French this close to a band running home
+  defendRadius: 90,           // m: French this near a held village = it is threatened
+  defendDivert: 450,          // m: a band out this near may be sent to defend
+  defendSoon: 8,              // s: otherwise the next band within this
+  defendQuiet: 25,            // s with no French near before a defending band moves on
+  assaultFirst: 330,          // s to the first assault
+  assaultEvery: [220, 320],   // s between assaults
+  assaultSize: [8, 11],       // men (two FMs while the caches allow)
+  assaultBreak: 0.55,         // share lost: the assault breaks
+  assaultMax: 150,            // s an assault lasts at most
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -476,8 +491,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   const holdFire = (b, on) => { for (const u of b.members) u.holdFire = on; };
 
-  function newBand() {
-    const size = Math.round(rand(...P.bandSize));
+  function newBand({ size: want = null, mission = null } = {}) {
+    const size = want ?? Math.round(rand(...P.bandSize));
     const room = P.maxLive - liveFighters();
     const n = Math.min(size, room);
     if (n < 3) return;
@@ -493,8 +508,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         units.spawn("moudjahid", front.x + Math.cos(a) * 3, front.z + Math.sin(a) * 3, { team: "enemy" });
       }
       pool -= k;
-      bands.push({ state: "gather", size: k, members: [], t: 0, start: 0, from: front });
-      return;
+      bands.push({ state: "gather", size: k, members: [], t: 0, start: 0, from: front, mission });
+      return true;
     }
     // Only the men the katiba can PAY for (algEconomy.js: the cave's queue
     // charges the ALN purse): a band of however many that is, or none.
@@ -509,8 +524,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     // THE FM GUNNER: one in the band while the ARMS CACHES allow it (two
     // MG teams per standing cache) — the French take the caches, the MGs stop.
     let mg = 0;
-    if (mgRoom() > 0 && cave.structure.enqueue("fmTeam")) mg = 1;
-    bands.push({ state: "gather", size: paid + mg, members: [], t: 0, start: 0 });
+    // An assault takes two FMs when the caches allow (a base of fire).
+    for (let k = mission === "assault" ? 2 : 1; k > 0; k--) if (mgRoom() > 0 && cave.structure.enqueue("fmTeam")) mg++;
+    bands.push({ state: "gather", size: paid + mg, members: [], t: 0, start: 0, mission });
+    return true;
   }
   /** MG teams the caches still allow (out on the map + on the cave's queue counted). */
   function mgRoom() {
@@ -544,8 +561,9 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       }
       case "approach": {
         if (!m.length) return setState(b, "done");
-        // Found on the way in — fired on: it opens up (a mine band, too).
-        if (b.mission !== "village" && m.some((u) => (u.suppression ?? 0) > 0.3)) { strike(b); break; }
+        // Found on the way in — fired on: it opens up (any band, 2026-10-02:
+        // a village band walking on under fire read as "they never shoot").
+        if (underFire(b, m)) { if (b.mission === "assault") goIn(b); else strike(b); break; }
         // Round the guns: at the via point (most of the band), on to the spot.
         if (b.via) {
           const past = m.filter((u) => dist(u.position, b.via) < 15 || !u.isMoving);
@@ -569,7 +587,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             if (!u.retried) { u.retried = true; u.orderTo(b.spot.x, b.spot.z); }
             else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); sendHome(u); }
           }
-          setState(b, b.mission === "village" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
+          if (b.mission === "assault") { goIn(b); break; }
+          setState(b, b.mission === "village" || b.mission === "defend" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
           break;
         }
         // Everyone stopped short (no route for anyone): wire in the way? Cut
@@ -590,7 +609,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const near = m.filter((u) => dist(u.position, b.spot) < 15);
         const c = centre(near.length ? near : m);
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.trigger);
-        if (close || m.some((u) => (u.suppression ?? 0) > 0.3)) { strike(b); break; }
+        if (close || underFire(b, m)) { strike(b); break; }
         // Waiting: cut scrub stood up in front of them — an AMBUSH SCREEN
         // (algBuild.js, paid from the ALN purse): they are hidden behind it
         // until they fire (algCover concealment).
@@ -607,7 +626,20 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         // they stay. The French coming: open up, then go as ever.
         if (!m.length) return setState(b, "done");
         const c = centre(m);
-        if (french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
+        // DEFENDING a village it holds: it stays and fights from the houses
+        // (no melting away), and moves on only once the French have gone.
+        if (b.mission === "defend") {
+          const near = french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger + 25);
+          holdFire(b, !near && !underFire(b, m));
+          if (near) {
+            b.quiet = 0;
+            b.tact = (b.tact ?? 0) - dt;
+            if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
+          } else if ((b.quiet = (b.quiet ?? 0) + dt) > P.defendQuiet || b.village?.owner !== "enemy") { defending.delete(b.village); b.mission = null; plan(b); }
+          if (1 - m.length / Math.max(1, b.start) >= P.breakLoss + 0.15) withdraw(b);
+          break;
+        }
+        if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
         // TURNED: leave a cell to hold it, the rest go on (a band that sat in
         // a won village forever was a band the war no longer had). Already
         // held (a second band arrived): on to something else. Too small to
@@ -626,7 +658,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (!m.length) return setState(b, "done");
         const c = centre(m);
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger + 10);
-        holdFire(b, !close);
+        const shot = underFire(b, m);
+        holdFire(b, !close && !shot);
         if (close) {
           b.tact = (b.tact ?? 0) - dt;
           if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
@@ -637,6 +670,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       case "cut": {
         // Stuck at wire: the men cut it (algWire.js), then on to the spot.
         if (!m.length) return setState(b, "done");
+        if (underFire(b, m)) { strike(b); break; }
         if (!b.wire?.parent || b.t > 25) { setState(b, "approach"); sendBand(b, b.spot); }
         break;
       }
@@ -645,7 +679,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         // turning up first: fight, then go as ever (no mine).
         if (!m.length) return setState(b, "done");
         const c = centre(m);
-        if (french().some((u) => !u.isAir && dist(u.position, c) < P.trigger)) { strike(b); break; }
+        if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.trigger)) { strike(b); break; }
         if (b.t > P.mineWork) { app.algMines?.lay(b.minePt.x, b.minePt.z); withdraw(b); }
         break;
       }
@@ -655,13 +689,53 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const armour = french().some((u) => !u.type?.foot && !u.isAir && dist(u.position, c) < P.armourNear);
         if (!m.length) return setState(b, "done");
         const pinned = m.filter((u) => u.pinned).length / m.length;
+        // Still winning (few lost, French still there): fight on, up to strikeMax.
+        if (b.t > b.strikeFor && !b.rearguardOnly && lost < P.breakLoss * 0.6 && b.t < P.strikeMax
+          && french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger + 20)) b.strikeFor += P.strikeExtend;
         if (b.t > b.strikeFor || lost >= P.breakLoss || armour || pinned >= P.pinnedBreak) { withdraw(b); break; }
         b.tact = (b.tact ?? 0) - dt;
         if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
         break;
       }
+      case "assault": {
+        // In among them, firing: until the band breaks, the target falls
+        // (a structure destroyed, a village turned: a cell is left in it), or
+        // time runs out. Men who reach the target with nobody to shoot push on
+        // to the nearest French in reach.
+        if (!m.length) return setState(b, "done");
+        const lost = 1 - m.length / Math.max(1, b.start);
+        const pinned = m.filter((u) => u.pinned).length / m.length;
+        const tg = b.assault;
+        b.tact = (b.tact ?? 0) - dt;
+        if (b.tact <= 0) {
+          b.tact = P.tactEvery;
+          tactics(b, m, dt);
+          for (const u of m) {
+            if (u.isMoving || u.target?.alive || u.attackTarget?.alive || u.pinned) continue;
+            let best = null, bd = 80;
+            for (const f of french()) { if (f.isAir) continue; const d = dist(f.position, u.position); if (d < bd) { bd = d; best = f; } }
+            if (best) u.orderTo(best.position.x, best.position.z);
+          }
+        }
+        if (tg.village?.owner === "enemy") { leaveCell(b, tg.village); withdraw(b); break; }
+        if (tg.structure && !tg.structure.alive) { withdraw(b); break; }
+        if (lost >= P.assaultBreak || pinned >= 0.6 || b.t > P.assaultMax) withdraw(b);
+        break;
+      }
       case "withdraw": {
         if (!m.length) return setState(b, "done");
+        // PRESSED on the way home: they turn and fight once (a rearguard),
+        // then run on. Not when armour is on them (they just run).
+        {
+          const c = centre(m);
+          const pressed = underFire(b, m) && french().some((u) => !u.isAir && u.type?.foot && dist(u.position, c) < P.rearguardNear);
+          if (pressed && !b.rearguarded) {
+            b.rearguarded = true; b.rearguardOnly = true;
+            for (const u of m) u.haltMovement?.();
+            strike(b, rand(...P.rearguard));
+            break;
+          }
+        }
         // Into the mouth: gone to ground. They count toward the next band.
         for (const u of m) if (atHome(u)) goToGround(u);
         if (!alive(b).length) setState(b, "done");
@@ -987,6 +1061,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   function plan(b) {
     const m = alive(b);
     const c = centre(m);
+    // A village of ours with French at the door: go and hold it (defend).
+    if (b.mission === "defend" || (!b.mission && defendNeed())) {
+      const v = b.mission === "defend" ? b.village : defendNeed();
+      if (v && v.owner === "enemy" && planVillage(b, v)) { b.mission = "defend"; b.village = v; defending.add(v); return; }
+      b.mission = null;
+    }
+    // An ASSAULT: a big band against what the French hold.
+    if (b.mission === "assault") {
+      if (planAssault(b)) return;
+      b.mission = null;
+    }
     // A village the French just took from us comes first: go and take it back.
     if (!b.mission || b.mission === "retake") {
       const lost = lostVillages.find((l) => l.v.owner !== "enemy");
@@ -1030,10 +1115,110 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     setState(b, "approach");
   }
 
-  function strike(b) {
+  function strike(b, secs = null) {
     holdFire(b, false);
-    b.strikeFor = rand(...P.strikeTime);
+    b.strikeFor = secs ?? rand(...P.strikeTime);
     setState(b, "strike");
+  }
+
+  // ── 2026-10-02: AN ENEMY THAT FIGHTS (you: "the enemies don't even try to
+  // fire at me"). Bands held their fire walking, occupying, laying mines and
+  // running home, and broke off after 12-22 s. Now: FIRED ON, they fire back
+  // whatever they were doing; a strike goes on while they are not losing; a
+  // band running home turns and fights a rearguard once when pressed; the
+  // villages they hold are DEFENDED (the next band, or one on its way, goes
+  // there); and every few minutes they ASSAULT what the French hold. ──
+
+  /** Hit since the last look, or under fire (suppression), or shot at just now. */
+  function underFire(b, m) {
+    let hp = 0;
+    for (const u of m) hp += u.hp ?? 0;
+    const hit = b.lastHp != null && hp < b.lastHp - 0.5;
+    b.lastHp = hp;
+    return hit || m.some((u) => (u.suppression ?? 0) > P.fireBackAt || (u.firedOnBy?.alive && u.firedOnBy.team === "player" && dist(u.firedOnBy.position, u.position) < 60 && (u.suppression ?? 0) > 0.02));
+  }
+
+  /** A held village with French at its door and nobody yet sent (or null). */
+  const defending = new Set();
+  function defendNeed() {
+    for (const v of app.algEconomy?.points ?? []) {
+      if (v.owner !== "enemy") { defending.delete(v); continue; }
+      if (defending.has(v) && bands.some((b) => b.mission === "defend" && b.village === v && alive(b).length)) continue;
+      defending.delete(v);
+      if (french().some((u) => !u.isAir && dist(u.position, v.position) < P.defendRadius)) return v;
+    }
+    return null;
+  }
+  /** Divert a band already out (not fighting, not retaking) to a threatened village. */
+  function sendDefence() {
+    const v = defendNeed();
+    if (!v) return;
+    let best = null, bd = P.defendDivert;
+    for (const b of bands) {
+      if (b.state !== "approach" && b.state !== "ambush") continue;
+      if (b.mission === "assault" || b.mission === "defend" || b.retake) continue;
+      const d = dist(centre(alive(b)), v.position);
+      if (d < bd && alive(b).length >= 3) { bd = d; best = b; }
+    }
+    if (best && planVillage(best, v)) { best.mission = "defend"; best.village = v; defending.add(v); }
+    else nextBand = Math.min(nextBand, P.defendSoon);
+  }
+
+  /**
+   * An ASSAULT's target: a village the French hold (fewest guards, nearest
+   * the cave), else one of their outposts (a nest, a mirador, a mortar pit,
+   * sandbags… nearest the cave), else their troops in the field, else the
+   * post's outskirts. Stage 50-70 m short (ambushSpot, cover), then go in.
+   */
+  function planAssault(b) {
+    const c = centre(alive(b));
+    let tgt = null;
+    const fr = french().filter((u) => !u.isAir);
+    const guards = (p) => fr.filter((u) => dist(u.position, p) < 60).length;
+    let best = -Infinity;
+    for (const v of app.algEconomy?.points ?? []) {
+      if (v.owner !== "player") continue;
+      const s = 3 - guards(v.position) * 0.5 - dist(c, v.position) / 400;
+      if (s > best) { best = s; tgt = { at: v.position, name: v.name, village: v }; }
+    }
+    if (!tgt) {
+      const outposts = (app.algStructures?.list ?? []).filter((s) => s.alive && s.team === "player" && s.typeKey !== "post" && s.typeKey !== "motorPool" && s.typeKey !== "helipad");
+      outposts.sort((a, b2) => dist(a.position, c) - dist(b2.position, c));
+      if (outposts[0]) tgt = { at: outposts[0].position, name: outposts[0].name ?? "an outpost", structure: outposts[0] };
+    }
+    if (!tgt) { const t2 = pickTarget(c); if (t2) tgt = { at: t2.at, name: "French troops" }; }
+    if (!tgt) {
+      const a = Math.atan2(c.z - post.z, c.x - post.x);
+      tgt = { at: { x: post.x + Math.cos(a) * 70, z: post.z + Math.sin(a) * 70 }, name: "the post" };
+    }
+    const spot = ambushSpot(c, tgt.at) ?? { x: tgt.at.x + (c.x - tgt.at.x) * 0.25, z: tgt.at.z + (c.z - tgt.at.z) * 0.25 };
+    b.assault = tgt; b.target = { lead: null, at: tgt.at, size: 0 }; b.spot = spot;
+    holdFire(b, true);
+    sendBand(b, spot);
+    setState(b, "approach");
+    return true;
+  }
+
+  /** In they go: everyone at the target, firing. */
+  function goIn(b) {
+    const m = alive(b), tg = b.assault;
+    holdFire(b, false);
+    m.forEach((u, i) => {
+      const a = (i / Math.max(1, m.length)) * Math.PI * 2, r = 4 + (i % 3) * 3;
+      u.orderTo(tg.at.x + Math.cos(a) * r, tg.at.z + Math.sin(a) * r);
+    });
+    app.algBattle?.say?.(`<b>FLN attack</b> on ${tg.name}!`, tg.at.x, tg.at.z, "bad", "hq_contact");
+    setState(b, "assault");
+  }
+
+  let nextAssault = P.assaultFirst, defT = 0;
+  function stepAssaults(dt) {
+    nextAssault -= dt;
+    if (nextAssault > 0) return;
+    if (bands.some((b) => b.mission === "assault" && alive(b).length)) { nextAssault = 30; return; }
+    if (P.maxLive - liveFighters() < P.assaultSize[0]) { nextAssault = 30; return; }   // room for a real one, or wait
+    if (newBand({ size: Math.round(rand(...P.assaultSize)), mission: "assault" })) nextAssault = rand(...P.assaultEvery);
+    else nextAssault = 40;
   }
 
   function withdraw(b) {
@@ -1060,6 +1245,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       watchLookouts();
       stepConvoy(dt);
       stepCaches(dt);
+      // Twice a second: villages to defend, assaults to launch.
+      defT -= dt;
+      if (defT <= 0) { defT = 0.5; sendDefence(); }
+      stepAssaults(dt);
       nextBand -= dt;
       if (nextBand <= 0) {
         nextBand = rand(...P.bandEvery) * (pool > 6 ? 0.7 : 1);
@@ -1069,6 +1258,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     },
     /** Dev: a band now. */
     bandNow() { newBand(); },
+    /** Dev: an assault band now. */
+    assaultNow() { return newBand({ size: Math.round(rand(...P.assaultSize)), mission: "assault" }); },
     /** The next band in `s` seconds (algDifficulty.js, at the start). */
     restartClock(s) { nextBand = s; },
     /** Dev: where a man at (x, z) goes to ground (the nearest refuge or the cave). */
@@ -1098,7 +1289,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${b.mission === "village" && b.village ? ` (${b.village.name})` : b.mission === "mine" ? " (mine)" : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend") && b.village ? ` (${b.mission === "defend" ? "defend " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }

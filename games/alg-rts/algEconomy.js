@@ -24,9 +24,13 @@ export const COSTS = {
 };
 
 const P = {
-  start: { player: 400, enemy: 240 },
-  base: { player: 40, enemy: 15 },        // per minute
-  village: { hamlet: 25, dechra: 40, ksar: 50 },    // per minute to its holder (a ksar: a market town)
+  // ~3x the French income (you, 2026-10-02: "it takes long to be able to
+  // build things"): 40/min was one appelé every 90 s with nothing held. Now
+  // one every 30 s from Algiers alone; villages still clearly pay (CoH:
+  // manpower always flows, territory pays for the expensive things).
+  start: { player: 600, enemy: 240 },
+  base: { player: 120, enemy: 15 },       // per minute (the ALN's: algDifficulty)
+  village: { hamlet: 40, dechra: 60, ksar: 80 },    // per minute to its holder (a ksar: a market town)
   cache: 15,                              // per minute per standing arms cache (ALN)
   radius: 40,
   // Influence per second per man (up to 3). 0.02 turned a neutral village in
