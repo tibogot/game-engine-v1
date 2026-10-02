@@ -443,13 +443,51 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
             the fire's colour and life, the skirt, the column's drift.
    - [ ] Step 3: fire extras — embers, a black (soot) smoke column from
          wrecks (SMOKE_TINTS.soot), a ground glow.
-- [ ] **PLOUGHED FIELDS LOOK FLAT** (you, 2026-10-02: "too flat, not
-      realistic enough; CoH looks way better — without hurting perf"):
-      algFields.js plots (one transparent ground layer, renderOrder 40) —
-      give them real furrow relief (a normal map / parallax-free height
-      shading along the rows), clods and stubble texture, soil colour
-      variation and a worn edge instead of the flat stripes; the same for
-      every field kind on the map. Judge against CoH; measure.
+   - [ ] **MORE VFX vs CoH** (proposed 2026-10-02, you asked; PAUSED for a
+         play + UI, then back here). Rough order of what reads most:
+         1. Bullet strikes on sand: small directional spurts (lit puffs
+            thrown away from the shooter), not round puffs.
+         2. Shells on BUILDINGS: plaster/stone dust bursting off the wall,
+            chunks falling, a dust curtain sliding down the face.
+         3. Tank gun: a forward muzzle-blast cone + side puffs from the
+            brake; the AMX-13 rocking back already.
+         4. Smoke screens: the mortar's / a grenade's white smoke that
+            BLOCKS sight (nam has the LOS rule: shared smoke columns).
+         5. Craters: a burnt ring and scattered debris stones round them.
+         6. Ricochets: a tracer bouncing off stone or a hull into the sky.
+         7. Alouette downwash: a dust ring on landing / low hover.
+         8. Vehicle exhaust puffs on pulling away (lit grey).
+         9. Dust devils on the plain (ambience; the wind).
+        10. Heat haze over fires (a screen distortion: costs a copy —
+            measure first, maybe only near the camera).
+- [x] **PLOUGHED FIELDS LOOK FLAT** (you, 2026-10-02: "too flat, not
+      realistic enough; CoH looks way better — without hurting perf"). Done
+      the same day, still ONE draw (algFields buildSurface):
+      · RELIEF: the furrows bend the normal (narrow crests, wide grooves:
+        h = c^2.5 and its exact slope; uneven ridge heights), on the
+        TERRAIN'S normal (4 heightmap taps a vertex — it was lit as if flat
+        whatever the slope), plus clod tilt from two noise octaves.
+      · SOIL: darker, moist grooves, dry pale crests, crumbs, wet/dry patches.
+      · HEADLAND: a 2-3 m trampled band round the edge where the rows stop.
+      · STUBBLE: broken straw along the rows, dry soil between, stalks.
+        BARLEY: plants on the rows with gaps, soil showing.
+      MEASURED (lab, a field filling much of a close view, on/off x3): all
+      the fields together +0.09 ms.
+   - [x] **PHOTOGRAPHED, round 2 (same day)** — you: "still not convinced,
+         not realistic next to the image textures — find a texture". The
+         procedural soil is gone: Poly Haven CC0 photo sets
+         (tools/fetchFieldMaterials.mjs → public/textures/fields/, one 2x2
+         atlas: colour + normal/height, 3.2 MB): farm_furrows (ploughed;
+         the photo is a PATCH — cropped to its even middle and groove to
+         groove, tiled mirrored both ways: no seam), raked_dirt (stubble,
+         tinted straw, in windrows), sparse_grass (barley, in rows),
+         farm_soil (headland, soil between rows). 4 taps a pixel, the mip
+         chosen in the shader and the cell inset (no atlas bleeding), the
+         photo's normals on the terrain's. Same cost as before (on/off x3:
+         within noise). ambientCG checked too (its API works, CC0): good
+         bare grounds (Ground104 "crumbly"…), nothing for stubble or crops.
+   - [ ] you, look at play zoom and close: the soil colour, the tints, the
+         furrow scale (TILE_M), the stubble's bands, the barley's green.
 - [x] **THE BATTLE LAB (2026-10-02, battle-lab.html + battleLab.js)** (you:
       "everything related to the fight in a lab"). The REAL game booted lean
       (URL defaults ai=0 battle=0 fow=0 herds/hens/birds=0, any game option

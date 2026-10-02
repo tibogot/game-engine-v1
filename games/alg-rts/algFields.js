@@ -25,8 +25,8 @@
 // along the contour. Their scrub and grass are cleared (it is worked land).
 // ?fields=0 = without.
 import * as THREE from "three";
-import { Fn, attribute, positionLocal, uv, sin, cos, abs, float, vec3, mix, smoothstep, min, fract, max } from "three/tsl";
-import { drapedPosition } from "../shared-rts/terrainDrape.js";
+import { Fn, attribute, positionLocal, uv, sin, cos, float, vec2, vec3, mix, smoothstep, min, max, fract, floor, step, normalize, varying, texture, dFdx, dFdy, log2, exp2, transformNormalToView } from "three/tsl";
+import { drapeY, drapedPosition } from "../shared-rts/terrainDrape.js";
 import { buildFieldWallSegment } from "../../v3/render/objects/rtsAlgVillage.js";
 import { TRACK_LINES } from "./algTracks.js";
 import { LAYOUT, PLAY } from "./layout.js";
@@ -265,7 +265,30 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
   };
 }
 
-/** One instanced, draped quad per field; the furrows in the fragment shader. */
+/**
+ * One instanced, draped quad per field — PHOTOGRAPHED soil (you, 2026-10-02:
+ * the procedural soil "looks not realistic compared to the image textures we
+ * use in the game"). ONE draw for every field on the map.
+ *
+ * The four Poly Haven (CC0) sets of tools/fetchFieldMaterials.mjs, in one 2x2
+ * atlas pair (colour; normal + height): ploughed furrows, raked stubble,
+ * sparse grass (the crop), farm soil. A field reads its own cell and the soil
+ * cell — 4 taps — tinted to this valley's earth:
+ *   PLOUGHED  the furrow photo, scaled up so a furrow is ~1.3 m (real ones
+ *             are under a pixel at play zoom); tiled MIRRORED across the rows
+ *             (the photo is a patch, cropped to its clean middle).
+ *   STUBBLE   raked earth with straw on it, warmed toward straw.
+ *   BARLEY    the grass photo in rows over the soil photo, gaps where it failed.
+ *   HEADLAND  2-3 m of plain soil round every field, where the plough turned.
+ * Each photo's normal map lights it with our sun, laid on the TERRAIN'S
+ * normal (4 heightmap taps a vertex). The mip level is chosen here and capped,
+ * and the cell is inset by half a texel of it, so the atlas cells never bleed
+ * into each other.
+ */
+const FIELD_ATLAS = { c: "/textures/fields/fields_c.webp", n: "/textures/fields/fields_n.webp", cell: 1024, maxLod: 5 };
+/** Metres a tile covers, per atlas cell (plough, stubble, crop, soil). */
+const TILE_M = [6.5, 4, 3, 3];
+
 function buildSurface(app, plots) {
   const N = Math.max(1, plots.length);
   const src = new THREE.PlaneGeometry(1, 1, 16, 16).rotateX(-Math.PI / 2);
@@ -283,52 +306,110 @@ function buildSurface(app, plots) {
   geo.setAttribute("aField2", new THREE.InstancedBufferAttribute(a1, 4));
   geo.instanceCount = plots.length;
 
-  // LIT and opaque-ish, its own soil: a 2× multiply over the ground photo
-  // kept the photo's pebbles and a ploughed field read as darker stony
-  // ground (seen 2026-10-01). Worked soil REPLACES the ground; the sun and the
-  // shadows light it like the terrain (receiveShadow).
+  const load = (url, srgb) => {
+    const t = new THREE.TextureLoader().load(url);
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.anisotropy = 8;
+    return t;
+  };
+  const texC = load(FIELD_ATLAS.c, true), texN = load(FIELD_ATLAS.n, false);
+
+  // LIT and opaque-ish, its own soil: worked soil REPLACES the ground; the sun
+  // and the shadows light it like the terrain (receiveShadow).
   const mat = new THREE.MeshStandardNodeMaterial({
     transparent: true, depthTest: true, depthWrite: false, roughness: 1, metalness: 0,
     polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
   });
   mat.forceSinglePass = true;
+  const HT = app.heightTexNode;
+  const vN = varying(vec3(0, 1, 0), "vFieldGroundN");
   mat.positionNode = Fn(() => {
     const f = attribute("aField", "vec4"), f2 = attribute("aField2", "vec4");
     const s = sin(f.z), c = cos(f.z);
     const lx = positionLocal.x.mul(f.w), lz = positionLocal.z.mul(f2.x);
-    return drapedPosition(app.heightTexNode, lx.mul(c).add(lz.mul(s)).add(f.x), lz.mul(c).sub(lx.mul(s)).add(f.y), 0.1);
+    const wx = lx.mul(c).add(lz.mul(s)).add(f.x), wz = lz.mul(c).sub(lx.mul(s)).add(f.y);
+    // The terrain's normal under the vertex (central differences, 1 m).
+    const hx = drapeY(HT, wx.sub(1), wz).sub(drapeY(HT, wx.add(1), wz));
+    const hz = drapeY(HT, wx, wz.sub(1)).sub(drapeY(HT, wx, wz.add(1)));
+    vN.assign(normalize(vec3(hx, float(2), hz)));
+    return drapedPosition(HT, wx, wz, 0.1);
   })();
-  const lin = (hex) => { const c = new THREE.Color(hex); return vec3(c.r, c.g, c.b); };
-  const SOIL = lin(0x5a4532), STRAW = lin(0xa48d5f), BARLEY = lin(0x6b7848);
+
+  // ── The field's terms (fragment), shared by the colour and the normal ────
+  const f = attribute("aField", "vec4"), f2 = attribute("aField2", "vec4");
+  const mx = uv().x.mul(f.w), mz = uv().y.mul(f2.x);          // metres across the plot
+  const kind = f2.y, seed = f2.z;
+  const isPlough = float(1).sub(smoothstep(0.5, 0.6, kind)), isGreen = smoothstep(1.5, 1.6, kind);
+  const isStub = float(1).sub(isPlough).sub(isGreen);
+  const edgeM = min(min(mx, f.w.sub(mx)), min(mz, f2.x.sub(mz)));
+  const rag = sin(mx.mul(1.3).add(mz.mul(0.9)).add(seed.mul(31))).mul(0.35);
+  const rows = smoothstep(1.8, 3.2, edgeM.add(rag.mul(1.5)));   // 0 on the headland, 1 in the field
+
+  // Tile coordinates (continuous; a per-field offset so no two fields match).
+  const tileM = mix(mix(float(TILE_M[0]), float(TILE_M[1]), isStub), float(TILE_M[2]), isGreen);
+  const off = vec2(seed.mul(7.13), seed.mul(3.71));
+  const tMain = vec2(mx, mz).div(tileM).add(off);
+  const tSoil = vec2(mx, mz).div(TILE_M[3]).add(off.yx);
+  // Ploughed: tiled MIRRORED both ways (the photo is cropped groove to
+  // groove down the rows, so a seam there is a groove meeting itself).
+  const tri = (x) => float(1).sub(fract(x.mul(0.5)).mul(2).sub(1).abs());
+  const signOf = (x) => float(1).sub(step(0.5, fract(x.mul(0.5))).mul(2));          // d(tri)/dx's sign: + then −
+  const mirrorSign = vec2(signOf(tMain.x), signOf(tMain.y));
+  const lMain = mix(fract(tMain), vec2(tri(tMain.x), tri(tMain.y)), isPlough);
+  const lSoil = fract(tSoil);
+  const cellMain = kind.round();
+  // The mip level from the continuous coordinates (one cell = cell px), capped.
+  const lodOf = (t) => {
+    const dx = dFdx(t).mul(FIELD_ATLAS.cell), dy = dFdy(t).mul(FIELD_ATLAS.cell);
+    return log2(max(max(dx.dot(dx), dy.dot(dy)).sqrt(), 1)).clamp(0, FIELD_ATLAS.maxLod);
+  };
+  const lodMain = lodOf(tMain), lodSoil = lodOf(tSoil);
+  // A cell's uv in the atlas (row 0 at the top of the image: v from 0.5 up).
+  const atlasUV = (cell, l, lod) => {
+    const inset = exp2(lod).mul(0.5 / FIELD_ATLAS.cell);
+    const q = l.clamp(inset, float(1).sub(inset));
+    const col = cell.mod(2), row = floor(cell.div(2));
+    return vec2(col.add(q.x).div(2), float(1).sub(row).add(q.y).div(2));
+  };
+  const uvMain = atlasUV(cellMain, lMain, lodMain), uvSoil = atlasUV(float(3), lSoil, lodSoil);
+  const cMain = texture(texC, uvMain).level(lodMain).xyz, cSoil = texture(texC, uvSoil).level(lodSoil).xyz;
+  const nMain = texture(texN, uvMain).level(lodMain).xyz, nSoil = texture(texN, uvSoil).level(lodSoil).xyz;
+
+  // ROWS read from the RTS camera, on the photos (CoH does the same): the
+  // crop in rows (1.1 m, wavy) with gaps, soil between; the stubble in straw
+  // bands (windrows, 1.4 m) with soil showing between. Ploughed: its own.
+  const wav = sin(mx.mul(0.21).add(seed.mul(40))).mul(0.3);
+  const crest = cos(fract(mz.add(wav).div(mix(float(1.1), float(1.4), isStub))).mul(Math.PI * 2)).mul(0.5).add(0.5);
+  const gaps = smoothstep(-0.3, 0.3, sin(mx.mul(0.37).add(seed.mul(11))).add(sin(mx.mul(0.91).add(mz.mul(0.23)).add(seed.mul(5))).mul(0.6)));
+  const cropMask = float(1).sub(isGreen).sub(isStub)
+    .add(smoothstep(0.25, 0.65, crest).mul(gaps.mul(0.6).add(0.4)).mul(isGreen))
+    .add(smoothstep(0.15, 0.7, crest).mul(0.65).add(0.35).mul(isStub));
+  // How much of the field's own photo shows (the rest: plain soil).
+  const own = rows.mul(cropMask);
+  // Big soft patches (moister, drier): a field is not a flat print.
+  const patch = sin(mx.mul(0.13).add(seed.mul(17))).mul(sin(mz.mul(0.17).add(seed.mul(9)))).mul(0.5).add(0.5);
+
+  // ── Colour: the photos, tinted to this valley's earth (linear) ───────────
+  const TINT_PLOUGH = vec3(1.18, 1.02, 0.86), TINT_STUB = vec3(1.55, 1.32, 0.82), TINT_GREEN = vec3(0.8, 1.08, 0.55), TINT_SOIL = vec3(1.0, 0.92, 0.84);
   mat.colorNode = Fn(() => {
-    const f = attribute("aField", "vec4"), f2 = attribute("aField2", "vec4");
-    const p = uv();
-    // Metres across the plot (rows run along its long side, local x).
-    const mx = p.x.mul(f.w), mz = p.y.mul(f2.x);
-    const kind = f2.y, seed = f2.z;
-    // Rows EXAGGERATED for the RTS camera (CoH does the same): real furrows
-    // 0.7 m apart are under a pixel at play zoom and averaged into a flat
-    // tint (seen 2026-10-01). Furrows 1.5 m, stubble / barley rows 1.1 m,
-    // a little wavy.
-    const wav = sin(mx.mul(0.21).add(seed.mul(40))).mul(0.3);
-    const rowP = fract(mz.add(wav).div(1.5)), rowS = fract(mz.add(wav).div(1.1));
-    const furrow = smoothstep(0.0, 0.55, abs(rowP.sub(0.5)).mul(2));                 // 0 in the groove, 1 on the ridge
-    const row = smoothstep(0.25, 0.65, abs(rowS.sub(0.5)).mul(2));
-    // Big soft patches (moister, richer) so a field is not a flat print.
-    const patch = sin(mx.mul(0.13).add(seed.mul(17))).mul(sin(mz.mul(0.17).add(seed.mul(9)))).mul(0.5).add(0.5);
-    const plough = SOIL.mul(mix(float(0.62), float(1.22), furrow)).mul(mix(float(0.9), float(1.08), patch));
-    const stubble = STRAW.mul(mix(float(0.78), float(1.08), row)).mul(mix(float(0.92), float(1.05), patch));
-    const green = BARLEY.mul(mix(float(0.72), float(1.12), row)).mul(mix(float(0.9), float(1.08), patch));
-    return mix(mix(plough, stubble, smoothstep(0.5, 0.6, kind)), green, smoothstep(1.5, 1.6, kind));
+    const tint = TINT_PLOUGH.mul(isPlough).add(TINT_STUB.mul(isStub)).add(TINT_GREEN.mul(isGreen));
+    // The soil between rows a little darker (shaded by the crop / damp).
+    const soil = cSoil.mul(TINT_SOIL).mul(mix(float(1), float(0.78), rows.mul(float(1).sub(isPlough))));
+    const col = mix(soil, cMain.mul(tint), own);
+    return col.mul(mix(float(0.9), float(1.07), patch));
+  })();
+
+  // ── Normal: the photo's, on the terrain's (the plot's axes as tangents) ──
+  mat.normalNode = Fn(() => {
+    const decode = (n) => vec2(n.x.mul(2).sub(1), n.y.mul(2).sub(1));
+    const nm = decode(nMain).mul(mix(vec2(1, 1), mirrorSign, isPlough));
+    const nt = mix(decode(nSoil), nm, own).mul(1.4);                    // a little stronger: the RTS camera is far
+    const s = sin(f.z), c = cos(f.z);
+    const ax = vec3(c, 0, s.negate()), az = vec3(s, 0, c);               // the plot's x (u) and z (v) in the world
+    return transformNormalToView(normalize(vN.add(ax.mul(nt.x)).add(az.mul(nt.y))));
   })();
   // Feathered, uneven edges (a worked field has no ruled border).
-  mat.opacityNode = Fn(() => {
-    const f = attribute("aField", "vec4"), f2 = attribute("aField2", "vec4");
-    const p = uv(), mx = p.x.mul(f.w), mz = p.y.mul(f2.x), seed = f2.z;
-    const edgeM = min(min(mx, f.w.sub(mx)), min(mz, f2.x.sub(mz)));
-    const ragged = sin(mx.mul(1.3).add(mz.mul(0.9)).add(seed.mul(31))).mul(0.35);
-    return smoothstep(0.2, 1.5, edgeM.add(ragged)).mul(0.94);
-  })();
+  mat.opacityNode = smoothstep(0.2, 1.5, edgeM.add(rag)).mul(0.97);
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = "FieldSurfaces";
