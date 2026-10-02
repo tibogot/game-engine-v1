@@ -27,6 +27,8 @@ import * as THREE from "three";
 import { attribute, cos, float, int, floor, sin, time, uniform, uniformArray, vec4 } from "three/tsl";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { createFoliageMaterial, makeCardTexture } from "./foliageSystem.js";
+// The canopy-tree no-flip switch (a lab's before / after), public through here.
+export { FOLIAGE_DOME_CARDS } from "./foliageSystem.js";
 
 const ROWS = 4;
 /**
@@ -34,7 +36,7 @@ const ROWS = 4;
  * (2026-10-01: alg-rts reached 8 with the agave; its flower mast is a 9th).
  * 48 vec4 uniforms: nothing next to the 4096 a uniform buffer holds.
  */
-const MAX_TYPES = 12;
+const MAX_TYPES = 16;   // 12 → 16 (2026-10-02: the Plant Lab's beds, two tamarisks)
 
 export class PlacedFoliage {
   /**
@@ -62,6 +64,9 @@ export class PlacedFoliage {
       uGlowLight: uniform(0.05),
       uTransMul: uniform(1),
       uSunDir: uniform(new THREE.Vector3(0.5, 0.8, 0.3).normalize()),
+      // The wind (setWind): where it blows TO on the ground, and how hard.
+      uWindDir: uniform(new THREE.Vector2(0.94, 0.34)),
+      uWindStrength: uniform(0.16),
     };
     const uTypes = uniformArray(this._rows, "vec4");
     this._src = {
@@ -69,10 +74,23 @@ export class PlacedFoliage {
         const p = attribute("iPos", "vec4");
         const r = attribute("iRot", "vec4");
         const seed = r.z;
-        // Sway: two slow frequencies on the plant's own phase, a few degrees.
+        // WIND (2026-10-02, you: "it doesn't look like wind on grass at all").
+        // It was two slow sines on each plant's own phase: every plant wobbled
+        // in its own little circle. Now ONE wind: every plant bows DOWNWIND,
+        // by a gust that rolls across the ground as a wave (neighbours bow
+        // together, the wave travels on), never against it; a small
+        // cross-wind wander on top. Scaled by the type's sway (big trees less).
+        const wd = this.u.uWindDir, ws = this.u.uWindStrength;
+        const along = p.x.mul(wd.x).add(p.y.mul(wd.y));
+        const across = p.y.mul(wd.x).sub(p.x.mul(wd.y));
+        const ph = along.mul(0.11).add(sin(across.mul(0.07)).mul(1.3)).sub(time.mul(1.1));
+        const wave = sin(ph).mul(0.5).add(0.5);
+        const gust = wave.mul(wave).mul(0.75).add(sin(ph.mul(2.3).add(seed.mul(5))).mul(0.08)).add(0.22);
+        const mag = gust.mul(ws).mul(r.w);
+        const wander = sin(time.mul(0.83).add(seed.mul(9.1))).mul(0.12).mul(mag);
         const d = vec4(
-          sin(time.mul(0.61).add(seed.mul(7.3))).mul(r.w.mul(0.035)),
-          cos(time.mul(0.47).add(seed.mul(3.1))).mul(r.w.mul(0.03)),
+          wd.x.mul(mag).sub(wd.y.mul(wander)),
+          wd.y.mul(mag).add(wd.x.mul(wander)),
           1, 0,
         );
         // No resting lean: a planted tree stands straight (the field adds a
@@ -148,6 +166,13 @@ export class PlacedFoliage {
   }
 
   get count() { return this.plants.length; }
+
+  /** The wind: `dirX, dirZ` where it blows to (normalised here), `strength` the bow in radians at a full gust (~0.16). */
+  setWind(dirX, dirZ, strength) {
+    const l = Math.hypot(dirX, dirZ) || 1;
+    this.u.uWindDir.value.set(dirX / l, dirZ / l);
+    if (strength != null) this.u.uWindStrength.value = strength;
+  }
 
   /** Toward the sun, for the see-through light. */
   setSunDir(v) { if (v) this.u.uSunDir.value.copy(v).normalize(); }

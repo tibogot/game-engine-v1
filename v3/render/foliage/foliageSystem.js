@@ -18,7 +18,7 @@ import * as THREE from "three";
 import {
   Discard, Fn, abs, attribute, cameraPosition, cameraViewMatrix, cos, cross, dot, exp, faceDirection, float,
   floor, fract, fwidth, hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
-  select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2,
+  select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2, mx_noise_float,
 } from "three/tsl";
 import { drawPlumeTexture, PLUME_TEX_W, PLUME_TEX_H } from "./plumeTexture.js";
 import { drawBambooSprayTexture, SPRAY_TEX_W, SPRAY_TEX_H } from "./bambooSprayTexture.js";
@@ -56,6 +56,15 @@ const RULE_ROW = 2;
  * measurements and what the flatter crowns cost.
  */
 const FOLIAGE_TOPDOWN_LIFT = foliageTopdownLift;
+/**
+ * 1 = the canopy-tree leaf cards (dipterocarp builder, part 5.35: alg-rts's
+ * tamarisk tree, nam-rts's dipterocarps) keep their baked dome normal with no
+ * flip to the viewer — the light stops following the camera. 0 = the old
+ * flip. A switch for the Plant Lab's before / after (2026-10-02).
+ */
+export const FOLIAGE_DOME_CARDS = uniform(1);
+/** The foliage's shadow lookup offset, metres: x along the normal, y toward the sun (see createFoliageMaterial). */
+export const FOLIAGE_SHADOW_OFFSET = uniform(new THREE.Vector2(0.2, 3));
 
 /**
  * THE CARD TEXTURES — one canvas-drawn alpha per `cardTextureOf` key. Geometry
@@ -184,10 +193,11 @@ export async function bakeFoliageThumbnail(type, { renderer, size = 128, runRend
       const scar = ad < 0.09 ? (1 - ad / 0.09) * 0.34 : 0;
       const bloom = along > 0.03 && along < 0.36 ? 0.26 : 0;
       c.copy(head).multiplyScalar((0.82 + t * 0.36) * (1 - scar + bloom));
-    } else if (part > 1.5) c.copy(head).multiplyScalar(0.85 + along * 0.3);
+    } else if (part > 1.5) c.copy(head).multiplyScalar(0.85 + Math.min(along, 1) * 0.3);   // a cactus pad's `along` is 2 + age
     else if (part > 0.5) c.copy(stalk);
     // Part 0 is a leaf, parts 4 and 5 are leaf CARDS (alpha-tested spray or
     // frond): same colour. A dead frond (rand ≥ 2) is brown.
+    else if (aPlant.getZ(i) >= 2.9) c.copy(base);      // fruit, buds, capsules
     else if (aPlant.getZ(i) >= 1.5) c.setRGB(0.62, 0.42, 0.17);
     else c.copy(base).lerp(tip, Math.min(1, t * 0.65 + along * 0.35));
     colors[i * 3] = c.r; colors[i * 3 + 1] = c.g; colors[i * 3 + 2] = c.b;
@@ -274,6 +284,8 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
   const vPlant = varying(float(0), "v_fo_plant");
   const vWorld = varying(vec3(0), "v_fo_world");
   const vNormal = varying(vec3(0, 1, 0), "v_fo_normal");
+  const vAO = varying(float(1), "v_fo_ao");
+  const vMacro = varying(float(0), "v_fo_macro");
 
   const row = src.rowOf;
 
@@ -323,11 +335,21 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     // camera — `along` carries the card's half-size instead of a flutter
     // weight, and `uv` says which corner. See billboardOffset.
     const isBB = part.greaterThan(5.99);
-    const flutter = sin(time.mul(5.2).add(a.z.mul(29)).add(hash(plant).mul(13)))
-      .mul(u.uFlutter).mul(0.06).mul(along).mul(select(isLeaf.and(isBB.not()), float(1), float(0)));
+    // FLUTTER (2026-10-02, you: "the alfa's movement with the wind looks very
+    // off, going up and down"): it was 6 cm × size STRAIGHT UP for every leaf
+    // — a tuft of long blades bobbed and boiled; along the leaf's normal was
+    // still mostly up on an arching blade. Now a small SIDEWAYS swish: round
+    // the plant's axis (the horizontal at right angles to the leaf's way out
+    // of the crown), a third of the old size, each leaf at its own rate. The
+    // plant's BOW to the wind (below) is what reads as wind; this is detail.
+    const flutterRate = float(3.1).add(fract(a.z.mul(7.13)).mul(2.2));
+    const flutter = sin(time.mul(flutterRate).add(a.z.mul(29)).add(hash(plant).mul(13)))
+      .mul(u.uFlutter).mul(0.02).mul(along).mul(select(isLeaf.and(isBB.not()).and(a.z.lessThan(2.9)), float(1), float(0)));   // fruit (rand ≥ 3) carries ripeness in `along`: still
+    const radial = vec2(positionLocal.x, positionLocal.z);
+    const swish = vec3(radial.y.negate(), 0, radial.x).div(max(length(radial), 0.02));
 
-    const local = yawRot(positionLocal.mul(size), cy, sy).add(vec3(0, flutter.mul(size), 0));
     const nLocal = yawRot(normalLocal, cy, sy);
+    const local = yawRot(positionLocal.mul(size).add(swish.mul(flutter.mul(size))), cy, sy);
     // Stiff at the base, loose at the top: the angle grows with a vertex's
     // HEIGHT on the plant.
     //
@@ -351,6 +373,13 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     vRand.assign(a.z);
     vPlant.assign(hash(plant.add(3197)));
     vNormal.assign(nrm);
+    // The plant's own AMBIENT OCCLUSION rides in the normal's length
+    // (foliageGeometry bakeSelfOcclusion; 1 = open, for every kind without it).
+    vAO.assign(length(normalLocal).clamp(0, 1));
+    // MACRO VARIATION: a dry ↔ lush field across the world (~40 m and ~12 m
+    // blobs), read once per plant at its root — from an RTS camera this is
+    // the variation the eye reads; leaf-by-leaf jitter disappears.
+    vMacro.assign(mx_noise_float(vec3(p.x.mul(0.025), p.y.mul(0.025), 7.3)).add(mx_noise_float(vec3(p.x.mul(0.08), p.y.mul(0.08), 2.1)).mul(0.4)));
     // Sits on the ground, lifted by the grass it grows in.
     const base = vec3(pos.x.add(p.x), pos.y.add(p.w).add(d.w.mul(0.5)), pos.z.add(p.y));
     // BILLBOARD: spread the corner out from the centre in the plane facing the
@@ -449,7 +478,12 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
   // lifts the shaded side off the floor.
   // Part 4 (a leaf card) is a leaf in every way but its alpha.
   const isLeafPart = vPart.lessThan(0.5).or(vPart.greaterThan(3.5));
-  const isSoft = isLeafPart.or(vPart.greaterThan(1.5).and(vPart.lessThan(2.5)));
+  // A prickly-pear pad: part 2 with `along` 2 + age (foliageGeometry buildOpuntia).
+  const padMask = vPart.greaterThan(1.5).and(vPart.lessThan(2.5)).and(vAlong.greaterThan(1.5));
+  // A cactus pad (part 2, `along` ≥ 2) and an agave leaf (part 2.25) are
+  // solid bodies with real form: they shade like a pad (below), not as a
+  // soft canopy that flattens them.
+  const isSoft = isLeafPart.or(vPart.greaterThan(1.5).and(vPart.lessThan(2.5)).and(vAlong.lessThan(1.5)).and(vPart.lessThan(2.2).or(vPart.greaterThan(2.3))));
   const nCulm = liftToUp(nW, 0.45);
   const trueView = cameraViewMatrix.mul(vec4(nW, 0)).xyz.normalize().mul(faceDirection);
   const culmView = cameraViewMatrix.mul(vec4(nCulm, 0)).xyz.normalize().mul(faceDirection);
@@ -462,9 +496,39 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
   const nFrond = liftToUp(nW, fract(vPart));
   const nFrondView = cameraViewMatrix.mul(vec4(nFrond, 0)).xyz.normalize();
   const nFrondFacing = select(nFrondView.z.lessThan(0), nFrondView.negate(), nFrondView);
-  mat.normalNode = select(vPart.greaterThan(4.5), nFrondFacing,
+  // DOME FOLIAGE (2026-10-02, you: "orbiting around it feels it's not using
+  // rounded normals"): the tamarisk shrub's strand cards (part 2.4) and the
+  // oleander's leaf cards (part 5.25) carry a baked DOME normal
+  // (foliageGeometry LEAF_ROUNDING) — the crown's sun side lit, its far side
+  // falling off. The "turn toward the viewer" flip above relit whatever side
+  // you orbited to (the light followed the camera); these skip it, and are
+  // lifted only a quarter of the way to up so the dome survives.
+  // The canopy trees' cards (part 5.35) too, behind FOLIAGE_DOME_CARDS; they
+  // keep their own lift (the part's fraction, 0.35).
+  const isTreeCard = vPart.greaterThan(5.3).and(vPart.lessThan(5.4)).and(FOLIAGE_DOME_CARDS.greaterThan(0.5));
+  const isDome = vPart.greaterThan(2.35).and(vPart.lessThan(2.45)).or(vPart.greaterThan(5.2).and(vPart.lessThan(5.3))).or(isTreeCard);
+  const domeView = cameraViewMatrix.mul(vec4(liftToUp(nW, select(isTreeCard, float(0.35), float(0.25))), 0)).xyz.normalize();
+  // The pad: 20% of the way to up — its own baked occlusion now darkens the
+  // heart of the plant, so the normal can keep its form (45% read flat). A
+  // pad is a CLOSED body whose normals already point out, and its triangles
+  // wind so the side you see is the back face — `faceDirection` would turn
+  // every normal inward (black pads, first try).
+  const padView = cameraViewMatrix.mul(vec4(liftToUp(nW, 0.2), 0)).xyz.normalize();
+  mat.normalNode = select(isDome, domeView, select(vPart.greaterThan(4.5), nFrondFacing,
     select(isSoft, nLeafFacing,
-      select(vPart.greaterThan(2.5), culmView, trueView)));
+      select(vPart.greaterThan(2.5), culmView, select(vPart.greaterThan(1.5), padView, trueView)))));
+
+  // SELF-SHADOW ACNE (2026-10-02, alg-rts's prickly pear: every pad hatched
+  // in fine stripes): the RTS fitted sun shadow runs with almost no bias to
+  // keep the level look, and a plant's smooth, sun-grazing surfaces shadow
+  // themselves. Its texel is ~17 cm (2048 over a 340 m frustum), as wide as
+  // half a pad, so a plant's self-shadow there is only fine hatching. The
+  // shadow is looked up OUT of the surface (along its true normal, on the
+  // side being drawn) and 3 m toward the sun — measured: 0.8 and 1.8 m still
+  // hatched the lower pads, 3 m is clean. A plant skips its OWN shadow; a
+  // wall, a building or a tree taller than the offset still shades it, and
+  // the plant still casts on the ground. Its form comes from its normals.
+  mat.receivedShadowPositionNode = vWorld.add(nW.mul(faceDirection).mul(FOLIAGE_SHADOW_OFFSET.x)).add(u.uSunDir.mul(FOLIAGE_SHADOW_OFFSET.y));
 
   const baseColor = Fn(() => {
     const r0 = row(vType, 0);
@@ -486,19 +550,93 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     leaf.mulAssign(float(0.94).add(min(vRand, float(1)).mul(0.12)));
     // A DEAD leaf — a palm's hanging skirt — is flagged by rand ≥ 2 (the
     // only spare channel): brown, and opaque to the backlight below.
+    // MARBLED LEAF (part 0.25: the milk thistle's rosette): the white the
+    // plant is named for — a pale midrib, side veins running out to the teeth,
+    // and milky patches along them. uv.x 0 → 1 across (0.5 the rib), uv.y the
+    // length. Fades to its average where it would shimmer.
+    {
+      const mx = c.x.sub(0.5).mul(2), my = c.y;
+      const rib = exp(mx.mul(mx).mul(-70));
+      const side = smoothstep(0.82, 0.97, sin(my.mul(11).sub(mx.abs().mul(2.6)).mul(3.14159))).mul(smoothstep(0.92, 0.6, mx.abs()));
+      const patch = smoothstep(0.25, 0.75, sin(mx.mul(7.3).add(vRand.mul(13))).mul(sin(my.mul(9.1).add(vRand.mul(5)))).mul(0.5).add(0.5)).mul(0.55);
+      const white = rib.max(side).max(patch.mul(rib.max(side).mul(2).min(1))).max(patch.mul(0.35));
+      const fine = smoothstep(0.15, 0.5, fwidth(my.mul(11)));
+      const marble = mix(white, float(0.28), fine);
+      leaf.assign(select(vPart.greaterThan(0.2).and(vPart.lessThan(0.5)), mix(leaf, vec3(0.42, 0.46, 0.36), marble.mul(0.85)), leaf));
+    }
     const dead = vRand.greaterThan(1.5);
     leaf.assign(select(dead, vec3(0.62, 0.42, 0.17).mul(float(0.85).add(vHeight.mul(0.3))), leaf));
+    // A DRY leaf (rand 1..1.5 — the alfa's straw blades, foliageGeometry
+    // addBladeFan `dry`): grey straw, paler toward the tip (linear colours).
+    const dryLeaf = vRand.greaterThanEqual(0.999).and(vRand.lessThan(1.5));
+    leaf.assign(select(dryLeaf, mix(leaf, vec3(0.25, 0.22, 0.15).mul(float(0.8).add(vHeight.mul(0.4))), 0.85), leaf));
     // FRUIT (rand ≥ 3, the prickly pear's figs — foliageGeometry buildOpuntia):
     // the type's colorBase, which a plant drawn in its head colour leaves free.
     // Brightest at the top, where the sun hits (vHeight 0.9 there).
-    leaf.assign(select(vRand.greaterThan(2.9), r0.xyz.mul(float(0.8).add(vHeight.mul(0.25))), leaf));
+    // RIPENESS rides in `along` (0 green → 0.5 orange → 1 the type's colour):
+    // a hedge in late summer carries every stage at once.
+    const ripe = vAlong.clamp(0, 1);
+    const fruitCol = mix(mix(vec3(0.1, 0.16, 0.035), vec3(0.5, 0.15, 0.02), smoothstep(0, 0.5, ripe)), r0.xyz, smoothstep(0.5, 1, ripe));   // linear
+    leaf.assign(select(vRand.greaterThan(2.9), fruitCol.mul(float(0.8).add(vHeight.mul(0.25))), leaf));
     // The stalk: only a little paler and yellower than the blade, and as
     // dark as the blade toward the crown.
-    const stem = mix(r1.xyz, vec3(0.72, 0.8, 0.4), float(0.5))
+    const stemGreen = mix(r1.xyz, vec3(0.72, 0.8, 0.4), float(0.5))
       .mul(mix(float(0.5), float(1), smoothstep(0.0, 0.12, vHeight)));
+    // A WOODY STALK (part 1.25: the agave's flower spear): colorBase at the
+    // foot → colorTip at the top, with faint lengthwise striations.
+    const stemWood = mix(r0.xyz, r1.xyz, smoothstep(0.1, 0.9, vHeight))
+      .mul(float(1).add(sin(uv().x.mul(PI2).mul(5)).mul(0.05)));
+    const stem = select(vPart.greaterThan(1.2).and(vPart.lessThan(1.3)), stemWood, stemGreen);
     // The head (a cattail's sausage, a reed's plume): its own colour, a
     // little darker where it meets the stem and paler at the tip.
-    const head = row(vType, 3).xyz.mul(mix(float(0.82), float(1.12), vAlong));
+    const headPlain = row(vType, 3).xyz.mul(mix(float(0.82), float(1.12), vAlong.min(1)));
+    // A PRICKLY-PEAR PAD (foliageGeometry buildOpuntia: `along` 2 + age,
+    // uv = the pad's own −1..1 frame, rand per pad): the old pads low down
+    // darker and greyer, the young ones on top fresher; a paler rim; the
+    // AREOLES — the little tufts of glochids in a diamond lattice that make a
+    // pad read as cactus, not a green paddle — fading out where they would
+    // shimmer; now and then a dried, yellowed pad.
+    const padAge = vAlong.sub(2).clamp(0, 1);
+    const padUv = uv().mul(2).sub(1);
+    const padBase = row(vType, 3).xyz.mul(float(0.82).add(vRand.mul(0.32)));
+    const padTone = mix(padBase.mul(vec3(0.78, 0.8, 0.76)), padBase.mul(vec3(1.08, 1.1, 0.96)), padAge);
+    const rim = smoothstep(0.72, 1.0, dot(padUv, padUv));
+    const padRim = mix(padTone, padTone.mul(vec3(1.18, 1.14, 0.82)), rim.mul(0.7));
+    const q = vec2(padUv.x.mul(3.2), padUv.y.mul(4.2));
+    const qRow = floor(q.y);
+    const qc = vec2(fract(q.x.add(qRow.mul(0.5))), fract(q.y)).sub(0.5);
+    // (Colours here are LINEAR: a pale tan dot is ~0.25, not 0.6.)
+    const areole = float(1).sub(smoothstep(0.05, 0.1, length(qc)));
+    const areoleFine = smoothstep(0.2, 0.45, fwidth(q.x));
+    const padDots = mix(padRim, vec3(0.2, 0.17, 0.09), areole.mul(float(1).sub(areoleFine)).mul(0.7));
+    // Mottling: the faint lighter and darker patches of a living pad.
+    const mott = sin(padUv.x.mul(5.1).add(vRand.mul(17))).mul(sin(padUv.y.mul(4.3).add(vRand.mul(9)))).mul(0.07);
+    // Summer stress: a purple-red flush at the rim of some pads.
+    const stressed = smoothstep(0.55, 0.8, fract(vRand.mul(7.31)));
+    const padLive = mix(padDots.mul(float(1).add(mott)), padDots.mul(vec3(1.25, 0.82, 0.95)), rim.mul(stressed).mul(0.55));
+    const dried = vRand.greaterThan(0.93).and(padAge.lessThan(0.4));
+    // THE TRUNK: an old plant's foot pads turn woody — corky grey-brown,
+    // rough, ringed. Half the bottom tier (the shader can't know the plant's
+    // age; the bottom pads of a 3-tier plant are its oldest).
+    const woody = padAge.lessThan(0.05).and(vRand.lessThan(0.5));
+    const cork = vec3(0.17, 0.12, 0.07).mul(float(0.85).add(sin(padUv.y.mul(22).add(padUv.x.mul(3))).mul(0.12)).add(mott));
+    const pad = select(woody, cork, select(dried, mix(padLive, vec3(0.26, 0.19, 0.07), 0.7), padLive));
+    const isPad = vAlong.greaterThan(1.5);
+    // AN AGAVE LEAF (part 2.25): darker toward its spiny margins, a little
+    // olive at the root, paler toward the tip, and the ghost of the next
+    // leaf's outline printed across it (the "imprint" bands every agave has).
+    const agEdge = abs(uv().x.sub(0.5)).mul(2);
+    const imprint = smoothstep(0.88, 1, sin(vAlong.mul(9).add(vRand.mul(6)).add(agEdge.mul(2.5)))).mul(0.12);
+    const agave = row(vType, 3).xyz
+      .mul(mix(vec3(0.9, 0.95, 0.8), vec3(1.08, 1.06, 1.04), smoothstep(0, 0.7, vAlong)))
+      .mul(mix(float(1), float(0.62), smoothstep(0.55, 1, agEdge)))
+      .mul(float(1).add(imprint))
+      .mul(float(0.9).add(vRand.mul(0.2)))
+      // The terminal spine: the last few centimetres go dark brown.
+      .toVar();
+    agave.assign(mix(agave, vec3(0.09, 0.06, 0.035), smoothstep(0.9, 0.98, vAlong)));
+    const isAgave = vPart.greaterThan(2.2).and(vPart.lessThan(2.3));
+    const head = select(isPad, pad, select(isAgave, agave, headPlain));
     // A bamboo culm (part 3). `vAlong` is the SIGNED distance to the nearest
     // node in half-internodes (bambooGeometry.js): 0 on the node, ±1 in the
     // middle of an internode, negative below the node. A node is drawn from
@@ -556,19 +694,38 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
       select(vPart.lessThan(1.5), stem,
         select(vPart.lessThan(2.5), head, culm)));
     const j = vPlant.sub(0.5).mul(2).mul(src.colorVar);
-    return col.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
+    // The macro field (vMacro): dry plants yellower and paler, lush ones a
+    // deeper green. Greens only — flowers, fruit and buds keep their colour.
+    const isGreen = isLeafPart.and(vRand.lessThan(1.5)).or(padMask).or(vPart.greaterThan(0.5).and(vPart.lessThan(1.5)));
+    const dry = smoothstep(-0.45, 0.6, vMacro);
+    const macroTint = mix(vec3(0.86, 0.98, 0.9), vec3(1.16, 1.04, 0.74), dry);
+    const colM = select(isGreen, col.mul(macroTint), col);
+    return colM.mul(vec3(float(1).add(j.mul(0.6)), float(1).add(j), float(1).sub(j.mul(0.5))));
   });
   // A card texture's RGB is a per-leaf SHADE (the banyan's clusters); every
   // other card texture is white there, so this multiply leaves it untouched.
   const cardPart = vPart.greaterThan(1.5).and(vPart.lessThan(2.5)).or(vPart.greaterThan(3.5));
-  const col = headTex
+  const col = (headTex
     ? baseColor().mul(select(cardPart, texture(headTex, uv()).rgb, vec3(1)))
-    : baseColor();
+    : baseColor()).mul(vAO).mul(mix(vec3(1.15, 1.0, 0.78), vec3(1), vAO));   // the dark heart takes the GROUND's warm bounce, not the sky's blue
   // Mountain shade (terrainSunShadow.js): shade the colour on the detail
   // levels that skip shadows, and take the sun out of the see-through light
   // everywhere — emissive never passes through any shadow.
   const sunVis = terrainSunVisibilityHere();
-  mat.colorNode = terrainShade(col, sunVis);
+  // WAXY PADS (cactus): a lower roughness for a soft sheen, and the bluish
+  // bloom of the wax where the pad turns away at its rim (a Fresnel term on
+  // the colour). Everything else stays matte.
+  const padFres = pow(float(1).sub(abs(dot(normalize(cameraPosition.sub(vWorld)), nW))), 3);
+  const waxy = padMask.and(vAlong.greaterThan(2.05).or(vRand.greaterThanEqual(0.5)))   // not the woody trunk
+    .or(vPart.greaterThan(2.2).and(vPart.lessThan(2.3)));                               // the agave's leaves
+  const colWax = select(waxy, col.mul(mix(vec3(1), vec3(1.05, 1.15, 1.26), padFres.mul(0.4))), col);
+  // The plant's own occlusion also dims the SKY's light on it (diffuse and
+  // reflection): darkening only the colour left the sky's blue reflection
+  // standing in the dark heart of every rosette.
+  mat.aoNode = vAO;
+  // Glossy marbled leaves (the milk thistle) too.
+  mat.roughnessNode = select(waxy, float(0.55), select(vPart.greaterThan(0.2).and(vPart.lessThan(0.5)), float(0.74), float(0.92)));
+  mat.colorNode = terrainShade(colWax, sunVis);
   mat.terrainSunShadowNode = sunVis;   // shared with the sun's shadow term: one read
 
   // Sunlight through the blades when the sun is behind them.

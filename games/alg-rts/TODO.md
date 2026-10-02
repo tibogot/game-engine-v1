@@ -540,6 +540,65 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         version (tread texture) was tried and dropped: straight, read as
         rails. Lab sliders: rut width, wander, opacity, relief. ?ruts=0 = off.
         (The thin straight black lines over the piste are the TELEGRAPH WIRES.)
+      PLANT PASS (2026-10-02, PLANT LAB: games/alg-rts/plant-lab.html — a bed
+      of each of 12 species beside the post, close + play views):
+      · STRIPES on the prickly pear = foliage self-shadow at the fitted
+        shadow's ~17 cm texel. foliageSystem: receivedShadowPositionNode
+        looks the shadow up 3 m toward the sun (0.8 / 1.8 m still hatched):
+        a plant skips its OWN shadow, walls / trees / units still shade it.
+      · PRICKLY PEAR: pads drawn by the shader (areole lattice, pale rim, old
+        pads darker and bigger at the foot, the odd dried one, true rounded
+        light); fewer, smaller fruit at mixed RIPENESS (green → orange →
+        magenta). Was: flat green paddles, big orange eggs everywhere.
+      · THISTLE: rosette of long toothed folded leaves, 2-4 branching stalks
+        with clasping leaves, green spiny bract globes + a purple floret
+        brush, some still buds. Was: a white cup + pink ball on a stick.
+      · ASPHODEL: dense strap-leaf tuft, candelabra stalk, white six-petal
+        stars, green capsules below, brown buds above. Was: white blobs.
+      · Mid/far detail kept at the old triangle budget (thistle 421/141,
+        asphodel 484/140 vs 456/168, 470/178). Map colours: node
+        tools/algPlantLook.mjs (copies FOLIAGE_PRESETS looks into the map).
+      GRASS DENSITY (revo-realms re-read 2026-10-02; the map runs revo
+      "openWorld" ultra: 590k blades / 140 m tile = 30 per m², fade 44→68 m,
+      faceCamera 1). His: 1.28M / 130 m = 76 per m², and the look comes from
+      (1) far blades 1→4× WIDER (6% of the blades keep 25% coverage),
+      (2) 8-blade TUFTS + a dome normal per tuft (ours: jittered grid, normal
+      tilted toward up = flat), (3) the terrain under the grass shaded with
+      the blade lighting at full weight (gaps read as grass), (4) a 5-colour
+      palette per clump, (5) 3 LODs (11/7/3 tris; ours 7 everywhere), (6) a
+      per-clump compute cache (ours ~7 texture reads per blade per frame).
+      Cards with alpha instead of blades = NO: alpha test loses early-z and
+      overdraws (our cedar lesson); solid strips facing the camera are right.
+      Also: wind streaks (12 compute ribbons), grass-only wind particles.
+      PLANT AUDIT — when every Plant Lab bed is done (you, 2026-10-02: "see
+      if we can optimize, merge, or anything so it's as optimized as
+      possible"): triangles per LOD × how often each plant is drawn; types
+      sharing a material merged into fewer draws; self-shadow for the small
+      plants (real vs a baked ground patch); LOD switch distances; the
+      alpha-cut cards' cost (tamarisk, oleander, palms); one in-game GPU
+      A/B before and after (ask for focus).
+      PLANT PASS 2 (2026-10-02, the LIGHT Plant Lab — plant-lab.html: no map,
+      the game's sun / shadow / exposure, loads in ~2.5 s):
+      · shared shader: baked per-vertex SELF-OCCLUSION (in the normal's
+        length, aoNode too), dry↔lush MACRO tint per plant, waxy sheen;
+        DOME cards (parts 2.4 / 5.25 / 5.35 behind FOLIAGE_DOME_CARDS) keep
+        their rounded normal — the "turn to the viewer" flip made the light
+        follow the camera (kept for nam-rts's dipterocarps too, you chose).
+      · WIND: placed plants bow DOWNWIND with gusts rolling across the
+        ground (was a per-plant wobble); leaf flutter a sideways swish.
+      · done: prickly pear (round pads, bloom, cork trunk), alfa (60 wiry
+        blades, 30% straw), thistle (marbled leaves), asphodel, agave
+        (blue-grey, spine tips), agave mast v2 (candelabrum; the big
+        "cushion" tufts were tried and rejected), broom (forking round
+        rods), oleander (own builder: vase of stems, whorls of 3, blossom
+        clusters), tamariskShrub (NEW weeping one — not in the game yet;
+        the old fuller "tamarisk" tree kept).
+      · costs: alfa A/B in game = noise (≤0.2 ms); oleander mid 1.7k tris
+        (was 0.9k) — measure in game when focused.
+      Next plants: reed-mace, juniper, doum palm (last); tamarisk TREE look
+      (own builder, feathery needle cards, clump colour); agave mast still
+      "cheap" (you: which part?); where the tamarisk shrub goes; then the
+      PLANT AUDIT above.
       Next: you judge in the lab → bake (map + algSplats); worn ground round
       the post / villages; more splats; grass as texture. Only dirt_aerial_02
       is committed; the other lab sets: node tools/fetchGroundSets.mjs.

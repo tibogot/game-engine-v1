@@ -370,24 +370,33 @@ export const FOLIAGE_PRESETS = {
   },
   // OLEANDER (Nerium oleander) — THE line of a dry North-African valley:
   // a dense clump of canes along every wadi, narrow dark leathery leaves,
-  // pink flowers at the tips all summer. The cane-clump builder with narrow
-  // leaves and flower clusters (foliageGeometry.js buildLeafy, `flowers`).
+  // pink flowers at the tips all summer. Its own builder (foliageGeometry
+  // buildOleander, 2026-10-02): a vase of stems, leaves in whorls of three,
+  // a blossom cluster at every tip.
   oleander: {
-    // First pass (5 big flowers a cane, 64 thin leaves at 3 m) read as pink
-    // flowers on sticks: a real oleander is a dense dark bush, pink dots on it.
-    kind: "bush", flowers: 3,
+    kind: "oleander", flowers: 3,
     fronds: 120, frondLength: 1.2, leaflets: 6, leafletWidth: 0.8, leafletAngle: 60,
     spread: 0.6, arch: 0.6, droop: 0.2, stemWidth: 1, bareStalk: 0,
-    colorBase: "#223a1b", colorTip: "#4d6a33", colorHead: "#d9758f", size: 3.6, translucency: 0.4,
+    colorBase: "#223a1b", colorTip: "#4d6a33", colorHead: "#d9758f", size: 2.8, translucency: 0.4,
   },
   // TAMARISK (Tamarix) — the feathery grey-green small tree of wadi banks
-  // and salty hollows. The cauliflower builder, loose and pale.
+  // and salty hollows. The cauliflower builder, loose and pale. (Kept as the
+  // FULL tree, you 2026-10-02; the weeping one is tamariskShrub below.)
   tamarisk: {
     kind: "dipterocarp",
     fronds: 4, frondLength: 1.0, leaflets: 110, leafletWidth: 0.9, leafletAngle: 34,
     spread: 0.7, arch: 0.9, droop: 0.35, stemWidth: 1.2, bareStalk: 0.12,
     plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.0,
     colorBase: "#3b4735", colorTip: "#8b957a", colorHead: "#5e5244", size: 5, translucency: 0.45,
+  },
+  // TAMARISK SHRUB (weeping) — its own builder (foliageGeometry
+  // buildTamarisk, 2026-10-02): leaning reddish trunks, weeping wands of
+  // feathery scale-leaves (the plume strand texture). colorBase/Tip = the bark.
+  tamariskShrub: {
+    kind: "tamarisk",
+    fronds: 4, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
+    spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
+    colorBase: "#4a382c", colorTip: "#5e4a3a", colorHead: "#6d8466", size: 5, translucency: 0.45,
   },
   // PRICKLY PEAR (Opuntia ficus-indica) — the hedge round every village and
   // garden in the Maghreb: tiers of flat grey-green pads (buildOpuntia).
@@ -398,7 +407,8 @@ export const FOLIAGE_PRESETS = {
     // fruit: per top pad (late-summer figues de barbarie, foliageGeometry
     // buildOpuntia); colorBase IS the fruit colour (the pads are colorHead).
     fruit: 2,
-    colorBase: "#b04a2c", colorTip: "#7d8e58", colorHead: "#6c8050", size: 2.2, translucency: 0.15,
+    // (colorBase = the RIPEST fruit; less ripe ones run green → orange to it.)
+    colorBase: "#8c1d3c", colorTip: "#7d8e58", colorHead: "#5d7a4f", size: 2.2, translucency: 0.15,
   },
   // AGAVE (Agave americana) — the big blue-grey rosette along every farm
   // track and hedge of the Maghreb (foliageGeometry buildAgave). Placed by the
@@ -407,7 +417,9 @@ export const FOLIAGE_PRESETS = {
     kind: "agave",
     fronds: 26, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
-    colorBase: "#5d7468", colorTip: "#86a094", colorHead: "#7f9a90", size: 2.0, translucency: 0.1,
+    // (2026-10-02: #7f9a90 read near-WHITE in the sun. The blue-grey comes
+    // from the wax bloom the shader adds, not the base colour.)
+    colorBase: "#5d7468", colorTip: "#86a094", colorHead: "#4d6a63", size: 2.0, translucency: 0.1,
   },
   // Its flower mast: once in an agave's life, a 6 m candelabrum (late
   // summer: the flowers drying to ochre).
@@ -415,7 +427,9 @@ export const FOLIAGE_PRESETS = {
     kind: "agaveMast",
     fronds: 1, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
-    colorBase: "#6b5a3e", colorTip: "#8a7550", colorHead: "#b8963e", size: 6.0, translucency: 0.05,
+    // Stalk: olive-green at the foot, browning up top (foliageGeometry
+    // buildAgaveMastV2, part 1.25); the flowers' yellow.
+    colorBase: "#4a5230", colorTip: "#6b5a3a", colorHead: "#d4a022", size: 6.0, translucency: 0.05,
   },
   // THISTLE (Silybum / Onopordum) — purple heads over a flat rosette of
   // spiny silvery leaves, on the rough ground by the tracks and villages.
@@ -423,15 +437,19 @@ export const FOLIAGE_PRESETS = {
     kind: "thistle",
     fronds: 9, frondLength: 1.0, leaflets: 3, leafletWidth: 1, leafletAngle: 0,
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
-    colorBase: "#66745f", colorTip: "#a5ae98", colorHead: "#8f4c93", size: 1.5, translucency: 0.3,
+    // Dark glossy green (the shader adds the white marbling); the tip kept
+    // dark too — a leaf's colour runs most of the way to colorTip.
+    colorBase: "#2f4a2a", colorTip: "#4f6e3c", colorHead: "#9446a6", size: 1.4, translucency: 0.3,
   },
   // ASPHODEL (Asphodelus ramosus) — the over-grazed hillside's flower: a
-  // tuft of narrow leaves, a branched stalk of pale buds (late summer: drying).
+  // tuft of strap leaves, a candelabra stalk of white star flowers, green
+  // capsules below them and brown buds above.
   asphodel: {
     kind: "asphodel",
     fronds: 14, frondLength: 1.0, leaflets: 3, leafletWidth: 1, leafletAngle: 0,
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
-    colorBase: "#56653f", colorTip: "#9b9563", colorHead: "#ddd1b4", size: 1.35, translucency: 0.35,
+    // Grey-green leaves (the tip kept muted: a leaf runs most of the way to it).
+    colorBase: "#3c4a2e", colorTip: "#66704a", colorHead: "#f1e7dd", size: 1.25, translucency: 0.35,
   },
   // BROOM (genêt) — the round bush of thin grey-green rods on the slopes,
   // yellow flowers along its upper half. Placed in clumps (algLandmarks.js).
@@ -457,11 +475,14 @@ export const FOLIAGE_PRESETS = {
   },
   // ALFA (esparto) — the tussock grass of the high plains and dry slopes:
   // wiry, rolled, grey-green going straw, in dense round tufts.
+  // (2026-10-02: 60 thin blades, not 26 broad ones — a dense tussock; a
+  // third of them dry straw.)
   alfa: {
     kind: "blades",
-    fronds: 26, frondLength: 1.0, leaflets: 6, leafletWidth: 0.7, leafletAngle: 50,
-    spread: 0.45, arch: 0.85, droop: 0.35, stemWidth: 0.8, bareStalk: 0,
-    colorBase: "#6b6a44", colorTip: "#c6b784", colorHead: "#d9c894", size: 1.0, translucency: 0.9,
+    fronds: 60, frondLength: 1.0, leaflets: 6, leafletWidth: 0.42, leafletAngle: 50,
+    spread: 0.4, arch: 0.8, droop: 0.35, stemWidth: 0.8, bareStalk: 0, dry: 0.3,
+    // (A blade's colour runs most of the way to colorTip — keep the tip muted.)
+    colorBase: "#465238", colorTip: "#86825a", colorHead: "#d9c894", size: 1.0, translucency: 0.9,
   },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {
