@@ -285,7 +285,15 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
            LEFT is known, WHERE only once seen (click goes to a found one);
            an alert when one comes into sight. Minimap: the shroud at half
            strength (the land readable), villages always shown.
-   - [ ] The FLN building new caches in villages it holds (algBuild piece).
+   - [x] **NEW ARMS CACHES (2026-10-02, algAI stepCaches)**: while the FLN has
+         fewer caches than it started with (min 2), every 45 s (first at
+         2:00) a village it HOLDS with a cell hides a new one among the
+         houses (the most concealed spot that takes it; algBuild armsCache,
+         120 ALN supplies, 40 s, the cell builds it). Hidden from the French
+         until SEEN (site and cache; late-built enemy structures need real
+         sight, not "explored" — algStructures builtLate). Tested (x5): a
+         cache destroyed → a new one at Ksar el Hamra, built, unseen, 4 again.
+         Holding villages back is how the caches stop coming back.
    - [x] **THE MULE TRAIN (2026-10-01, algAI convoy)**: every 200-280 s
          (first at 2:30) 3 porters enter at the play box's edge on the FLN's
          side (a point with a ROUTE to the cache: the corner was a cliff) and
@@ -511,6 +519,58 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          bare grounds (Ground104 "crumbly"…), nothing for stubble or crops.
    - [ ] you, look at play zoom and close: the soil colour, the tints, the
          furrow scale (TILE_M), the stubble's bands, the barley's green.
+- [ ] **SOLDIERS' VOICES + RADIO CALLS, French and Arabic** (you,
+      2026-10-02, first minutes of a match: "the soldiers' communication is
+      missing, the enemies' too; radio calls in French and Arabic"). Today:
+      a radio squelch on orders, no voices. Plan: ~150-250 short lines
+      generated ONCE with neural TTS (ElevenLabs: acted, shouted, FR + AR;
+      or Azure neural: fr-FR + ar-DZ, Algerian Arabic voices), a few
+      voices per side, baked to small files (~2 MB); the RADIO sound made
+      live in Web Audio (band-pass + crackle) over the same lines.
+      · French barks: acknowledge, move, attack, under fire, pinned,
+        grenade, man down, retreat, sapper at work, vehicle crews.
+      · Radio (HQ, CoH-style): village taken / lost, reinforcements, cache
+        found, "contact" with a direction.
+      · ALN barks in Algerian Arabic (Darija), Chaoui/French words mixed as
+        in the Aurès — heard when near them (positional), your eyes on them.
+        Lines to be checked by a native speaker.
+      DECIDE: which TTS (an account / key is needed). → ElevenLabs (you).
+   - [x] BUILT (2026-10-02), waiting for the key to generate:
+         · tools/algVoiceLines.mjs: the script — 11 French bark lines (39
+           texts), 15 HQ radio lines (24), 7 ALN lines in Darija (18, the
+           English beside each; to check by a native speaker).
+         · tools/genVoices.mjs: ElevenLabs multilingual v2, 3 French
+           voices, 1 HQ, 3 ALN (premade ids, `--list` to swap), shouted
+           settings; resumable; writes public/sounds/alg/voices/ +
+           manifest. ~6k characters (the free tier covers it).
+         · games/alg-rts/algVoices.js: barks from the man who speaks
+           (panned, by distance; ALN only when seen and near), one voice per
+           man, one speaker per side at a time, a cooldown per line; triggers
+           on order, selection, contact, suppressed / pinned, grenade, man
+           down, sapper at work. HQ through a live radio filter after the
+           squelch, on algBattle's alerts and the tier unlock. Inert until
+           the files exist. ?voices=0 = off.
+   - [ ] **PARKED (2026-10-02)**: on the FREE plan the API refuses the
+         native French / Algerian library voices ("paid plan", some "Creator
+         tier"); the free default voices (multilingual v2, then the
+         expressive v3 with [shouting] tags) were tested and judged "not
+         convincing at all — flat, wrong intonation" (you). The system stays
+         in, silent (no manifest = inert). Ways back: a Creator plan (native
+         voices: Théo / Hugo / Christophe, Algerian Amin / Ben Chamsou /
+         Ilyass — ids in tools/genVoices.mjs), or RECORD the lines (you /
+         friends; any mp3 named as the manifest expects). French script
+         fixed once ("On est bloqués !"); you check the rest.
+- [ ] **LATER — MEN OF WAR CAMERA + FOG OF WAR WITHOUT THE SHROUD** (you,
+      2026-10-02: "with these fogs do I still need fog of war? Men of War
+      lets you pivot the camera"). Atmospheric fog is the LOOK; fog of war
+      is the RULE (what your men can see) — the ALN's ambushes, hidden
+      caches and refuges need the rule. Keep it, drop the dark overlay:
+      enemies unseen by your men are simply not drawn (the renderer already
+      does this), terrain fully lit, the weather fog for depth. Then a
+      freer camera (pivot down toward the horizon, as MoW): the shroud is
+      what looks wrong at low angles. Costs to plan: far views draw more
+      (vegetation LOD, far terrain, the frame budget), picking at grazing
+      angles, a "last seen" ghost marker for enemies that drop out of sight.
 - [x] **HUD round 1 (2026-10-02, you: "the bottom UI could be better")**:
       · the selection + command card FOLD AWAY when nothing is selected
         (hudBar setCollapsed): only the supply strip stays.
@@ -1542,7 +1602,12 @@ lift off the pad; the ALN comes out of the cave mouth.
          ghost walk into the tunnel, as `emerge` backwards).
    - [ ] With no French out in the open they harass the post (ambush spots
          60 m+ from it): mines on the track and hamlets (SAS) instead.
-   - [ ] Routes: bands go straight at their spot; hug the gullies and scrub
+   - [x] **COVER ROUTES (2026-10-02, algAI coverRoute)**: A* on a 12 m grid
+         round both ends, priced by MG reach, sight of known French, crests,
+         against concealment and LOW ground; waypoints every ~48 m walked in
+         turn. 1-6 ms a plan. Measured vs the straight line: 10-15% more
+         concealment, 0.3-0.7 m lower than the ground round, 5-15% longer.
+   - (was) Routes: bands go straight at their spot; hug the gullies and scrub
          (a path cost for exposure) — the approach IS the ambush.
 4g. [x] COMBAT (2026-09-27, algCombat.js). nam's fighting machinery moved to
        games/shared-rts (nam keeps re-export shims): combat.js (acquire,
@@ -2527,7 +2592,8 @@ Asset follow-ups:
       6 appelés sent, the band struck when they arrived, withdrew with all
       5 and went to ground; the dechra stays theirs until the French work
       it back through 0.
-- [ ] The ALN leaving a few men as a village cell (moussebilines), and
+- [~] The ALN leaving a few men as a village cell (moussebilines) — DONE
+      already (algAI leaveCell: 2-3 men + a sangar); still to do: 
       the French answer: cordon-and-search (a mission, not just walking in).
 - [ ] Balance: all numbers are first guesses.
 

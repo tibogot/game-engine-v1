@@ -47,6 +47,7 @@ export function createAlgTiers(app, { economy }) {
       if (!t || blockedBy(t) || !economy.french.spend(t.cost)) return false;
       tier = t.n;
       app.algBattle?.say?.(`<b>${t.name}</b> unlocked: ${t.note}.`);
+      app.algVoices?.radio("hq_tier");
       return true;
     },
   };

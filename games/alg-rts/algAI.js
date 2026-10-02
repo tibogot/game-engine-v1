@@ -96,6 +96,15 @@ const P = {
   convoyEscort: 3,            // porters with the donkeys
   convoyPace: 0.45,           // their walk (donkey pace)
   convoyLoad: 150,            // supplies the load is worth
+  // ── 2026-10-02: the approach routes (coverRoute) and new caches ──
+  routeCell: 12,              // m: the route grid
+  routePad: 70,               // m round both ends the route may swing through
+  routeMax: 56,               // cells a side at most (a long way: coarser cells)
+  routeSight: 110,            // m: French this near a cell see it (less through scrub)
+  routeEvery: 4,              // cells between waypoints
+  cacheFirst: 120,            // s before the FLN first checks for a lost cache
+  cacheEvery: 45,             // s between its checks
+  cacheMin: 2,                // it keeps at least this many (or as many as it started with)
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -285,8 +294,174 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
    * crosses one (detour): first to the via point, then on (stepBand).
    */
   function sendBand(b, to) {
-    b.via = detour(centre(alive(b)), to, frenchMGs());
+    const from = centre(alive(b));
+    b.route = coverRoute(from, to);
+    if (b.route == null) { const v = detour(from, to, frenchMGs()); b.route = v ? [v] : []; }
+    b.via = b.route[0] ?? null;
     moveBand(b, b.via ?? to);
+  }
+
+  /**
+   * THE APPROACH IS THE AMBUSH (2026-10-02, the TODO's "hug the gullies and
+   * scrub"): the band's way to `to` is a ROUTE found on a coarse grid
+   * (P.routeCell m) round both ends, each cell priced by what a man crossing
+   * it risks — inside an MG's reach; in sight of French the FLN knows of (the
+   * nearer and the more open, the worse); on a crest against the sky — and
+   * what helps him: scrub and tall plants (the cover map's concealment), LOW
+   * ground (a gully, a wadi: lower than the ground round it). A*, then
+   * thinned to a few waypoints the band walks one by one (stepBand). Null: no
+   * route (the caller falls back to the MG detour). [] : straight is fine.
+   */
+  function coverRoute(from, to) {
+    const C = P.routeCell, pad = P.routePad;
+    const spanX = Math.abs(to.x - from.x) + 2 * pad, spanZ = Math.abs(to.z - from.z) + 2 * pad;
+    const cs = Math.max(C, spanX / (P.routeMax - 1), spanZ / (P.routeMax - 1));
+    const nx = Math.ceil(spanX / cs) + 1, nz = Math.ceil(spanZ / cs) + 1;
+    const x0 = Math.min(from.x, to.x) - pad, z0 = Math.min(from.z, to.z) - pad;
+    const wx = (i) => x0 + i * cs, wz = (j) => z0 + j * cs;
+    const mgs = frenchMGs(), seen = knownFrench().map((f) => f.position);
+    const H = (x, z) => app.getWorldHeight(x, z);
+    const N = nx * nz;
+    const price = new Float32Array(N).fill(-1);
+    const priceAt = (i, j) => {
+      const k = j * nx + i;
+      if (price[k] >= 0) return price[k];
+      const x = wx(i), z = wz(j);
+      if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) return (price[k] = 1e9);
+      const conceal = Math.min(1, cover(x, z));
+      // Low ground: below the mean of a ring round it (a gully < 0 < a crest).
+      const h = H(x, z), r = cs * 1.4;
+      const rel = h - (H(x + r, z) + H(x - r, z) + H(x, z + r) + H(x, z - r)) / 4;
+      let sight = 0;
+      for (const f of seen) {
+        const d = Math.hypot(f.x - x, f.z - z);
+        if (d < P.routeSight) sight += 1 - d / P.routeSight;
+      }
+      const c = 1
+        + mgExposure(x, z, mgs, 6) * 6
+        + sight * 3 * (1 - conceal * 0.7) * (rel > 0.5 ? 1.5 : 1)
+        - conceal * 0.45
+        + Math.max(-0.4, Math.min(0.8, rel * 0.25));
+      return (price[k] = Math.max(0.35, c));
+    };
+    const cellOf = (p) => [
+      Math.max(0, Math.min(nx - 1, Math.round((p.x - x0) / cs))),
+      Math.max(0, Math.min(nz - 1, Math.round((p.z - z0) / cs))),
+    ];
+    // An end on a blocked cell (a house, the cave's rock): the nearest open one.
+    const openNear = ([i, j]) => {
+      if (priceAt(i, j) < 1e9) return [i, j];
+      for (let r = 1; r < 6; r++) for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) {
+        const a = i + di, c = j + dj;
+        if (a >= 0 && c >= 0 && a < nx && c < nz && priceAt(a, c) < 1e9) return [a, c];
+      }
+      return [i, j];
+    };
+    const [si, sj] = openNear(cellOf(from)), [ti, tj] = openNear(cellOf(to));
+    const g = new Float32Array(N).fill(Infinity), prev = new Int32Array(N).fill(-1), done = new Uint8Array(N);
+    const goal = tj * nx + ti;
+    const hcost = (k) => Math.hypot((k % nx) - ti, Math.floor(k / nx) - tj) * 0.35;
+    const open = [[0, sj * nx + si]];
+    g[sj * nx + si] = 0;
+    let found = false;
+    while (open.length) {
+      // A plain open list (grids are at most routeMax²: fast enough).
+      let bi = 0;
+      for (let q = 1; q < open.length; q++) if (open[q][0] < open[bi][0]) bi = q;
+      const k = open[bi][1];
+      open[bi] = open[open.length - 1]; open.pop();
+      if (done[k]) continue;
+      done[k] = 1;
+      if (k === goal) { found = true; break; }
+      const i = k % nx, j = (k - i) / nx;
+      for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+        if (!di && !dj) continue;
+        const a = i + di, c = j + dj;
+        if (a < 0 || c < 0 || a >= nx || c >= nz) continue;
+        const n = c * nx + a;
+        if (done[n]) continue;
+        const p = priceAt(a, c);
+        if (p >= 1e9) continue;
+        const ng = g[k] + p * (di && dj ? 1.414 : 1);
+        if (ng < g[n]) { g[n] = ng; prev[n] = k; open.push([ng + hcost(n), n]); }
+      }
+    }
+    if (!found) return null;
+    const path = [];
+    for (let k = goal; k >= 0; k = prev[k]) path.push(k);
+    path.reverse();
+    const pts = [];
+    for (let q = P.routeEvery; q < path.length - 1; q += P.routeEvery) pts.push({ x: wx(path[q] % nx), z: wz(Math.floor(path[q] / nx)) });
+    // Nearly straight anyway: not worth the stops.
+    const L = dist(from, to) || 1;
+    let off = 0;
+    for (const p of pts) off = Math.max(off, Math.abs(((to.x - from.x) * (from.z - p.z) - (from.x - p.x) * (to.z - from.z)) / L));
+    lastRoute = { from, to, pts, off: Math.round(off), cells: N };
+    return off < cs * 1.2 ? [] : pts;
+  }
+  let lastRoute = null;   // dev: the last route found
+
+  /**
+   * NEW ARMS CACHES (2026-10-02, the TODO's "the FLN building new caches in
+   * villages it holds"). Each standing cache arms two FM teams (mgRoom), so
+   * destroying them was a one-way win. Now: while it has fewer caches than it
+   * started with, every P.cacheEvery s the FLN looks for a village it HOLDS
+   * with a cell in it (garrisonOf), and the cell hides a new one among the
+   * houses — the most concealed spot round the village that will take it
+   * (algBuild survey) — paid from the ALN purse, raised by the cell's men in
+   * P.cacheTime s. Hidden from the French (fog) until seen, site and cache
+   * alike; found, it is the same objective as the first ones. So holding
+   * villages back from the FLN is how the caches stop coming back.
+   */
+  let cacheT = P.cacheFirst, cacheSite = null, cacheWhy = null, cacheStart = -1;
+  const liveCaches = () => (app.algStructures?.list ?? []).filter((s) => s.typeKey === "armsCache" && s.alive).length;
+  function stepCaches(dt, force = false) {
+    if (cacheStart < 0) cacheStart = Math.max(P.cacheMin, liveCaches());
+    // A site under way: hidden while the French cannot see it.
+    if (cacheSite) {
+      const fog = app.fogOfWar;
+      if (!cacheSite.done && cacheSite.alive) {
+        const seen = !fog?.enabled || fog.canSeeEntity?.(cacheSite);
+        if (seen) cacheSite.wasSeen = true;
+        cacheSite.mesh.visible = seen || !!cacheSite.wasSeen;
+        return;
+      }
+      cacheSite = null;
+    }
+    cacheT -= dt;
+    if (cacheT > 0 && !force) return;
+    cacheT = P.cacheEvery;
+    if (liveCaches() >= cacheStart) { cacheWhy = "enough caches"; return; }
+    const build = app.algBuild, aln = app.algEconomy?.aln;
+    if (!build || !aln) { cacheWhy = "no build"; return; }
+    if (!aln.canAfford(build.costOf("armsCache"))) { cacheWhy = "ALN cannot afford it"; return; }
+    const held = (app.algEconomy?.points ?? []).filter((v) => v.owner === "enemy" && garrisonOf(v));
+    if (!held.length) { cacheWhy = "no village held with a cell"; return; }
+    // The held village furthest from the post (deepest in FLN country).
+    held.sort((a, b) => dist(b.position, post) - dist(a.position, post));
+    for (const v of held) {
+      const g = garrisonOf(v), men = alive(g);
+      const spots = [];
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2 + rand(-0.12, 0.12), r = rand(14, 34);
+        const x = v.position.x + Math.cos(a) * r, z = v.position.z + Math.sin(a) * r;
+        spots.push({ x, z, s: cover(x, z) + rand(0, 0.15) + dist({ x, z }, post) * 0.0005 });
+      }
+      spots.sort((p, q) => q.s - p.s);
+      for (const p of spots) {
+        const yaw = rand(0, Math.PI * 2);
+        if (!build.survey("armsCache", p.x, p.z, yaw).ok) continue;
+        build.place("armsCache", p.x, p.z, yaw, men).then((site) => {
+          if (!site) return;
+          cacheSite = site;
+          site.mesh.visible = false;
+          // Under fog from the first frame (stepCaches shows it once seen).
+        });
+        cacheWhy = `hiding one at ${v.name}`;
+        return;
+      }
+    }
+    cacheWhy = "no spot round the held villages";
   }
 
   /** Orders the band to `to`, spread out a little (a loose file, not a knot). */
@@ -374,7 +549,11 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         // Round the guns: at the via point (most of the band), on to the spot.
         if (b.via) {
           const past = m.filter((u) => dist(u.position, b.via) < 15 || !u.isMoving);
-          if (past.length >= Math.ceil(m.length * 0.6)) { b.via = null; moveBand(b, b.spot); }
+          if (past.length >= Math.ceil(m.length * 0.6)) {
+            b.route?.shift();
+            b.via = b.route?.[0] ?? null;
+            moveBand(b, b.via ?? b.spot);
+          }
           break;
         }
         // Arrived when most of the band is there — not the average: one man
@@ -880,6 +1059,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       watchVillages();
       watchLookouts();
       stepConvoy(dt);
+      stepCaches(dt);
       nextBand -= dt;
       if (nextBand <= 0) {
         nextBand = rand(...P.bandEvery) * (pool > 6 ? 0.7 : 1);
@@ -908,9 +1088,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     ambushSpotFor: (from, tgt) => ambushSpot(from, tgt),
     /** Dev: the via point a band at `from` would take round the French MGs to `to` (null: straight). */
     routeFor: (from, to) => detour(from, to, frenchMGs()),
+    /** Dev: the cover route a band at `from` would walk to `to` ([] straight, null none) and the last one found. */
+    coverRouteFor: (from, to) => coverRoute(from, to),
+    get lastRoute() { return lastRoute; },
+    /** Dev: the cache being hidden now (null: none) and why the last try did not start one. */
+    get cacheSite() { return cacheSite; },
+    get cacheWhy() { return cacheWhy; },
+    /** Dev: try to hide a new cache now (ignores the clock). */
+    cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state}${b.via ? " (round the guns)" : ""}${b.mission === "village" && b.village ? ` (${b.village.name})` : b.mission === "mine" ? " (mine)" : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${b.mission === "village" && b.village ? ` (${b.village.name})` : b.mission === "mine" ? " (mine)" : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }

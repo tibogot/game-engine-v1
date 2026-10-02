@@ -158,7 +158,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     muzzleOf,
     wreck,
     /** A building a sapper finished (algBuild.js): it fights, is seen, is picked. */
-    addBuilt: (key, mesh) => add(key, mesh),
+    addBuilt: (key, mesh) => { const s = add(key, mesh); if (s) s.builtLate = true; return s; },
     /** For the shared selection: every building (the dead can't be picked). */
     renderer: {
       roots,
@@ -180,7 +180,11 @@ export function createAlgStructures({ app, showroom, producers, units }) {
         // The ALN's buildings: hidden under the fog until first seen (then
         // they stay, as a last-known position does).
         if (s.team === "enemy") {
-          const seen = !fow?.enabled || fow.isExplored(s.position.x, s.position.z);
+          // One raised mid-game (a new arms cache, algAI.js) where the French
+          // had already been: only once they actually SEE it — "explored"
+          // would show it the moment it is finished.
+          if (s.builtLate && !s.sighted && fow?.enabled && fow.canSeeEntity?.(s)) s.sighted = true;
+          const seen = !fow?.enabled || (s.builtLate ? !!s.sighted : fow.isExplored(s.position.x, s.position.z));
           r.mesh.visible = seen;
           if (!seen) continue;
         }

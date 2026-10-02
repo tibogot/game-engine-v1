@@ -55,8 +55,10 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (best?.kind === "aln") return "leaving their camp";
     return best ? `near ${best.name}` : "in the djebel";
   };
-  function say(text, x, z, kind) {
+  /** An alert; `radio`: the HQ line said with it (algVoices.js, tools/algVoiceLines.mjs). */
+  function say(text, x, z, kind, radio = null) {
     hud.alert(text, { x, z, kind, time: clock });
+    if (radio) app.algVoices?.radio(radio);
     if (x != null) minimap?.ping?.(x, z);
   }
   // Throttle: one alert per `key` per place (a 90 m cell) per `every` seconds.
@@ -79,9 +81,9 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     for (const v of economy.points) {
       const L = villageLast.get(v), { x, z } = v.position;
       if (v.owner !== L.owner) {
-        if (v.owner === "player") say(`<b>${v.name}</b> is yours. It pays you, and counts for you.`, x, z, "good");
-        else if (v.owner === "enemy") say(`<b>${v.name}</b> now backs the FLN. Win it back: stand men in it.`, x, z, "bad");
-        else if (L.owner === "player") say(`<b>${v.name}</b> slipped away: the FLN turned it.`, x, z, "bad");
+        if (v.owner === "player") say(`<b>${v.name}</b> is yours. It pays you, and counts for you.`, x, z, "good", "hq_villageTaken");
+        else if (v.owner === "enemy") say(`<b>${v.name}</b> now backs the FLN. Win it back: stand men in it.`, x, z, "bad", "hq_villageLost");
+        else if (L.owner === "player") say(`<b>${v.name}</b> slipped away: the FLN turned it.`, x, z, "bad", "hq_villageLost");
         else if (L.owner === "enemy") say(`<b>${v.name}</b> no longer backs the FLN.`, x, z, "good");
         L.owner = v.owner;
       }
@@ -90,7 +92,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       if (falling && v.value > -economy.params.hold && clock - L.turnAt > P.turnEvery) {
         const r = economy.params.radius;
         const aln = units.list.some((u) => u.alive && u.team === "enemy" && u.type?.foot && Math.hypot(u.position.x - x, u.position.z - z) < r);
-        if (aln) { L.turnAt = clock; say(`The FLN is working <b>${v.name}</b>. Send men before it turns.`, x, z, "bad"); }
+        if (aln) { L.turnAt = clock; say(`The FLN is working <b>${v.name}</b>. Send men before it turns.`, x, z, "bad", "hq_villageThreat"); }
       }
       L.value = v.value;
     }
@@ -105,8 +107,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       if (u.team === "player") {
         if (u.hp < was - 1e-6 || (was > 0 && !u.alive)) {
           if (!u.alive) stats.lostFr++;
-          if (!throttled("contact", x, z, P.contactEvery)) { say(`<b>Contact</b> ${placeName(x, z)}!`, x, z, "bad"); told.add("contactSeen"); }
-          else if (!u.alive && !u.type?.foot && !throttled(`lost:${u.typeKey}`, x, z, 10)) say(`${u.type?.name ?? "A vehicle"} destroyed ${placeName(x, z)}.`, x, z, "bad");
+          if (!throttled("contact", x, z, P.contactEvery)) { say(`<b>Contact</b> ${placeName(x, z)}!`, x, z, "bad", "hq_contact"); told.add("contactSeen"); }
+          else if (!u.alive && !u.type?.foot && !throttled(`lost:${u.typeKey}`, x, z, 10)) say(`${u.type?.name ?? "A vehicle"} destroyed ${placeName(x, z)}.`, x, z, "bad", "hq_vehicleLost");
         }
       } else if (u.team === "enemy") {
         if (was > 0 && !u.alive) stats.lostAln++;
@@ -116,12 +118,12 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           for (const o of units.list) {
             if (o.alive && o.team === "enemy" && Math.hypot(o.position.x - x, o.position.z - z) < 35) { n++; reported.add(o); }
           }
-          if (!throttled("sight", x, z, P.sightEvery)) { say(`FLN ${n > 1 ? `band (${n})` : "fighter"} seen ${placeName(x, z)}.`, x, z, ""); told.add("bandSeen"); }
+          if (!throttled("sight", x, z, P.sightEvery)) { say(`FLN ${n > 1 ? `band (${n})` : "fighter"} seen ${placeName(x, z)}.`, x, z, "", "hq_enemySeen"); told.add("bandSeen"); }
         }
         // The first FLN machine gun seen: say so — it is what pins a section.
         if (u.alive && u.typeKey === "fmTeam" && !told.has("mgSeen") && seenByPlayer(x, z) && (!cave || Math.hypot(x - cave.position.x, z - cave.position.z) > 80)) {
           told.add("mgSeen");
-          say(`<b>FLN machine gun</b> ${placeName(x, z)}! It pins men in the open.`, x, z, "bad");
+          say(`<b>FLN machine gun</b> ${placeName(x, z)}! It pins men in the open.`, x, z, "bad", "hq_enemyMG");
         }
       }
     }
@@ -137,7 +139,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       const m = c.men.find((u) => u.alive && seenByPlayer(u.position.x, u.position.z));
       if (m) {
         lastConvoySeen = c; c.seen = true;
-        say(`<b>FLN mule train</b> ${placeName(m.position.x, m.position.z)}! Arms for a cache — intercept it.`, m.position.x, m.position.z, "bad");
+        say(`<b>FLN mule train</b> ${placeName(m.position.x, m.position.z)}! Arms for a cache — intercept it.`, m.position.x, m.position.z, "bad", "hq_muleTrain");
         advise("convoy", "A mule train brings the FLN supplies and arms a cache with one more machine gun. Kill its escort and the load is lost.");
       }
     }
@@ -154,14 +156,14 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     const now = new Set(mines.list);
     for (const m of now) {
       const was = knownMines.get(m);
-      if (was === false && m.spotted) say(`A <b>mine</b> spotted on the track ${placeName(m.x, m.z)}. Men on foot clear it.`, m.x, m.z, "");
+      if (was === false && m.spotted) say(`A <b>mine</b> spotted on the track ${placeName(m.x, m.z)}. Men on foot clear it.`, m.x, m.z, "", "hq_mine");
       knownMines.set(m, m.spotted);
     }
     for (const [m] of knownMines) {
       if (now.has(m)) continue;
       knownMines.delete(m);
       if (m.clearT >= (mines.params?.clearTime ?? 1e9)) say(`Mine cleared ${placeName(m.x, m.z)}.`, m.x, m.z, "good");
-      else say(`A <b>mine</b> went up ${placeName(m.x, m.z)}!`, m.x, m.z, "bad");
+      else say(`A <b>mine</b> went up ${placeName(m.x, m.z)}!`, m.x, m.z, "bad", "hq_mine");
     }
   }
 
@@ -177,16 +179,16 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       const was = aliveB.get(s);
       aliveB.set(s, s.alive);
       const { x, z } = s.position;
-      if (was && !s.alive) say(`${s.name ?? "A building"} destroyed.`, x, z, s.team === "player" ? "bad" : "good");
+      if (was && !s.alive) say(`${s.name ?? "A building"} destroyed.`, x, z, s.team === "player" ? "bad" : "good", s.team === "player" ? "hq_buildingLost" : null);
       // A hidden cache comes into sight.
       if (FOUND[s.typeKey] && s.alive && !foundCaches.has(s) && fog()?.enabled && fog().isVisible(x, z)) {   // seen, not the dev switch turning the fog off
         foundCaches.add(s);
-        if (clock > 2) say(FOUND[s.typeKey], x, z, "good");
+        if (clock > 2) say(FOUND[s.typeKey], x, z, "good", s.typeKey === "armsCache" ? "hq_cacheFound" : null);
       }
       const hp = hpOf.get(s);
       hpOf.set(s, s.hp);
       if (hp != null && s.alive && s.hp < hp - 1e-6) {
-        if (s === post && !throttled("post", x, z, 30)) say("<b>The post is under attack!</b>", x, z, "bad");
+        if (s === post && !throttled("post", x, z, 30)) say("<b>The post is under attack!</b>", x, z, "bad", "hq_postAttack");
         else if (s === cave && !throttled("cave", x, z, 45)) say("The cave is under fire. Destroy it to win.", x, z, "good");
       }
     }
@@ -208,7 +210,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   function finish(end) {
     over = end;
     const win = end.winner === "player";
-    say(win ? "<b>Victory.</b>" : "<b>Defeat.</b>", null, null, win ? "good" : "bad");
+    say(win ? "<b>Victory.</b>" : "<b>Defeat.</b>", null, null, win ? "good" : "bad", win ? "hq_victory" : "hq_defeat");
     hud.end(`
       <div class="kicker">Aurès · ${fmt(clock)}</div>
       <h2 class="${win ? "win" : "lose"}">${win ? "Victory" : "Defeat"}</h2>
@@ -320,7 +322,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   return {
     params: P, score, stats,
     /** An alert from another system (algTiers.js). */
-    say: (text, x = null, z = null, kind = "good") => say(text, x, z, kind),
+    say: (text, x = null, z = null, kind = "good", radio = null) => say(text, x, z, kind, radio),
     get over() { return over; },
     get clock() { return clock; },
     /** Start without the briefing (?brief=0): the remembered difficulty. */

@@ -31,6 +31,7 @@ import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
 import { createAlgSplats } from "./algSplats.js";
 import { createAlgSounds } from "./algSounds.js";
+import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
@@ -308,6 +309,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // land (wind, cicadas, dogs, flocks, the call to prayer). ?sound=0 = without.
   if (params.get("sound") !== "0") {
     try { app.algSounds = createAlgSounds({ app, rtsCamera, units: app.algUnits?.units ?? null }); } catch (e) { console.warn("[alg sound] failed:", e); }
+    // VOICES (algVoices.js): barks in French and Algerian Arabic, the HQ on
+    // the radio. Silent until tools/genVoices.mjs has made the files.
+    if (app.algSounds && app.algUnits && params.get("voices") !== "0") {
+      try {
+        app.algVoices = createAlgVoices({ app, audio: app.algSounds.audio, units: app.algUnits.units, fogOfWar: app.fogOfWar ?? null });
+        app.addPreRenderHook((dt) => app.algVoices.step(dt));
+      } catch (e) { console.warn("[alg voices] failed:", e); }
+    }
   }
   // AMBIENCE (algAmbience.js): dust behind the vehicles, smoke from the
   // bread ovens. ?ambience=0 = without.

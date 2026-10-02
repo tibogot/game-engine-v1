@@ -333,6 +333,8 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
 
   return {
     ready, ctx, play, addLoopProvider, choose, audition, settings,
+    /** The sfx / ambience / ui buses, for a game's own nodes (alg-rts voices). */
+    buses,
     update: updateLoops,
     get slots() { return slots; },
     get manifest() { return manifest; },

@@ -406,10 +406,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
     }),
     // The radio answers an order (algSounds.js).
-    onOrder: (kind, list) => app.algSounds?.order(kind, list),
+    onOrder: (kind, list) => { app.algSounds?.order(kind, list); app.algVoices?.order(kind, list); },
     onChange: (sel) => {
       // Nothing selected: the card folds away (hudBar.js).
       hud.setCollapsed(!sel.length);
+      app.algVoices?.select(sel);
       unitBar.render(sel);
       commandCard.render(sel);
       controlGroups?.render();
