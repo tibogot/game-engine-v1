@@ -511,6 +511,25 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          bare grounds (Ground104 "crumbly"…), nothing for stubble or crops.
    - [ ] you, look at play zoom and close: the soil colour, the tints, the
          furrow scale (TILE_M), the stubble's bands, the barley's green.
+- [x] **HUD round 1 (2026-10-02, you: "the bottom UI could be better")**:
+      · the selection + command card FOLD AWAY when nothing is selected
+        (hudBar setCollapsed): only the supply strip stays.
+      · ARMY TABS (ui/armyTabs.js), the CoH squad tabs, down the right edge:
+        each vehicle a tab; men of one type standing together (15 m links)
+        one tab, split when they split. Portrait, count, health together,
+        state (PIN / SUP / FEU / » / ABRI), a red pulsing edge under fire,
+        brass when selected. Click: select (shift: add); double-click: the
+        camera there. Regrouped 4×/s, DOM only on change. Seen: Appelés ×12,
+        Sapeur, Willys; a click selected the 12 and opened the card.
+   - [ ] Next from the proposal: an ICON command grid with hotkeys (QWER /
+         ASDF), the richer selection card (a pip per man, state, cover),
+         resources top right, build-queue badges over buildings, tooltips.
+   - [ ] **PORTRAITS — keep for later** (you, 2026-10-02): an atlas of 32
+         painted portraits (public/textures/alg-atlas.png, 1536×1024, 3 MB:
+         rows 1-2 French, 3-4 ALN) for the tabs and the selection card
+         instead of the 3D thumbnails. You'll redo it to match the troops
+         (red berets, green berets…). Then: crop the cells, ~160×200 each
+         into one WebP (~150 KB), a face per type (and per man, varied).
 - [x] **THE BATTLE LAB (2026-10-02, battle-lab.html + battleLab.js)** (you:
       "everything related to the fight in a lab"). The REAL game booted lean
       (URL defaults ai=0 battle=0 fow=0 herds/hens/birds=0, any game option

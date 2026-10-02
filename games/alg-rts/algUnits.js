@@ -37,6 +37,7 @@ import { createHudBar } from "./ui/hudBar.js";
 import { createUnitBar } from "./ui/unitBar.js";
 import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
+import { createArmyTabs } from "./ui/armyTabs.js";
 
 /**
  * WHAT EACH BUILDING PRODUCES, seconds per unit (no costs yet: this game's
@@ -393,6 +394,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // The radio answers an order (algSounds.js).
     onOrder: (kind, list) => app.algSounds?.order(kind, list),
     onChange: (sel) => {
+      // Nothing selected: the card folds away (hudBar.js).
+      hud.setCollapsed(!sel.length);
       unitBar.render(sel);
       commandCard.render(sel);
       controlGroups?.render();
@@ -401,6 +404,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   });
   app.selection = selection;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
+  hud.setCollapsed(true);   // nothing selected at the start
+  // THE ARMY TABS (ui/armyTabs.js): every group you have, down the right edge.
+  const armyTabs = createArmyTabs({ units, selection, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
   const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
   const resourceHud = createResourceHud({ mount: hud.strip });
@@ -507,6 +513,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     selectionFrames.commit();
     commandCard.tick();
     unitBar.tick();
+    armyTabs.tick(frameDt);
     minimap.draw();
   });
 

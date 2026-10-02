@@ -56,7 +56,12 @@ const CSS = `
   right: var(--alg-dev-w, 340px); height: ${HUD_H}px;
   display: grid; grid-template-columns: 330px 316px;
   border-right: 0; border-radius: var(--hud-radius) 0 0 0;
+  transition: height 0.18s ease;
 }
+/* NOTHING SELECTED: the card folds away, only the supply strip stays (you,
+   2026-10-02: two empty boxes covered the battlefield most of the time). */
+#alg-hud .block-right.collapsed { height: 0; border-top-color: transparent; box-shadow: none; }
+#alg-hud .block-right.collapsed .slot { visibility: hidden; }
 #alg-hud .strip {
   position: absolute; left: -1px; bottom: 100%; height: ${HUD_STRIP_H}px;
   display: flex; align-items: center; padding: 0 12px;
@@ -101,8 +106,18 @@ export function createHudBar() {
     </div>`;
   document.body.appendChild(root);
 
+  const right = root.querySelector(".block-right");
+  let collapsed = false;
   return {
     root,
+    /** Fold the selection + command card away (nothing selected) or open it. */
+    setCollapsed(on) {
+      if (on === collapsed) return;
+      collapsed = on;
+      right.classList.toggle("collapsed", on);
+      // The army tabs (armyTabs.js) end above whatever the right block is.
+      document.documentElement.style.setProperty("--alg-hud-right-h", on ? "0px" : `${HUD_H}px`);
+    },
     strip: root.querySelector(".strip"),
     left: root.querySelector(".block-left"),
     centre: root.querySelector(".slot-centre"),
