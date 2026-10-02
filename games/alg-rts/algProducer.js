@@ -30,7 +30,9 @@ const OPEN_AHEAD = 0.8;               // start opening at 80% of a unit's build
  *   spools up for `hold` s, it rises over `rise` s, then flies to the rally.
  *   No `outside` then: nothing walks out.
  */
-export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null, team = "player" }) {
+export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null, team = "player", countOf = null, onSpawned = null }) {
+  // `countOf(key)`: men per purchase (a SQUAD, algSquads.js; default 1), each
+  // spawned with his slot as his look role; `onSpawned(u, key, slot)` after.
   const leaves = mesh.children.filter((c) => c.userData.gateLeaf);
   const yaw = mesh.rotation.y, c = Math.cos(yaw), s = Math.sin(yaw);
   /** Building-local (scaled metres) → world. */
@@ -79,7 +81,12 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
       if (structure.progress >= 1) {
         structure.progress = 0;
         structure.queue.shift();
-        const u = units.spawn(key, inside.x, inside.z, { snap: false, team });
+        const count = countOf?.(key) ?? 1;
+        for (let k = 0; k < count; k++) {
+        // A squad comes out in file: each man a little further back inside.
+        const back = k * 1.1;
+        const u = units.spawn(key, inside.x - (outside.x - inside.x) * back * 0.12, inside.z - (outside.z - inside.z) * back * 0.12, { snap: false, team, lookRole: count > 1 ? k : null });
+        if (u) onSpawned?.(u, key, k);
         // The pad launches AIRCRAFT; the paras it trains (off a helicopter)
         // walk off it to the rally like any soldier out of a gate.
         if (u && launch && u.isAir) {
@@ -89,7 +96,12 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
           u.launch(launch.rise, { hold: launch.hold, fromY: mesh.position.y + launch.deckY });
           u.ghost = true;
           lifting.push({ u, at: t + launch.hold + launch.rise * 0.35 });
-        } else u?.emerge(outside.x, outside.z, structure.rally.x, structure.rally.z);
+        } else {
+          // A squad gathers round the rally, not on one point.
+          const a = k * 2.39996, r = k === 0 ? 0 : 2.8;
+          u?.emerge(outside.x, outside.z, structure.rally.x + Math.cos(a) * r, structure.rally.z + Math.sin(a) * r);
+        }
+        }
         openUntil = t + HOLD_OPEN;
       }
     } else structure.progress = 0;

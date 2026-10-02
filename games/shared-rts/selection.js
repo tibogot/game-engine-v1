@@ -20,7 +20,10 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null }) {
+  // `squadOf(unit) → unit[] | null` (opt-in, alg-rts's squads): a click or a
+  // box on one man selects his whole squad, and a move order forms each squad
+  // round its own spot instead of a grid of loose men.
   // onOrder(kind, units): "attack" | "harvest" | "move" — the radio answers (namSounds.js).
   // Rigid unit types render as shared InstancedMeshes, so a hit identifies its
   // unit by instanceId, not by the mesh — unitRenderer owns that resolution.
@@ -35,7 +38,12 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
 
   const rtsActive = () => !app.rtsCamera || app.rtsCamera.getMode() === "rts";
 
-  const notify = () => onChange([...selected]);
+  /** With squads: every selected man's squad mates join him. */
+  const expandSquads = () => {
+    if (!squadOf) return;
+    for (const u of [...selected]) for (const m of squadOf(u) ?? []) if (m.alive && !selected.has(m)) setSelected(m, true);
+  };
+  const notify = () => { expandSquads(); onChange([...selected]); };
   const setSelected = (unit, on) => {
     if (on) selected.add(unit); else selected.delete(unit);
     unit.setSelected(on);
@@ -174,7 +182,11 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         if (!down.shift) clear();
         for (const u of onScreenOfType(unit.typeKey)) setSelected(u, true);
       } else if (unit) {
-        if (down.shift) setSelected(unit, !selected.has(unit));
+        if (down.shift) {
+          // Shift-click toggles the man's whole squad (or the man alone).
+          const on = !selected.has(unit);
+          for (const m of (squadOf?.(unit) ?? [unit])) setSelected(m, on);
+        }
         else { clear(); setSelected(unit, true); }
       } else if (!down.shift) {
         clear();
@@ -326,11 +338,40 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const spacing = Math.max(6, maxR * 2.6);
     const cols = Math.ceil(Math.sqrt(arr.length));
 
-    const slots = arr.map((_, i) => {
+    let slots = arr.map((_, i) => {
       const gx = (i % cols) - (cols - 1) / 2;
       const gz = Math.floor(i / cols) - (cols - 1) / 2;
       return { x: hit.point.x + gx * spacing, z: hit.point.z + gz * spacing };
     });
+    // SQUADS (opt-in): each squad (or lone unit) gets a spot on a coarse grid,
+    // its men a loose cluster round it — a squad stays a squad on arrival.
+    if (squadOf) {
+      const groups = [];
+      const seen = new Set();
+      for (const u of arr) {
+        if (seen.has(u)) continue;
+        const mates = (squadOf(u) ?? [u]).filter((m) => arr.includes(m));
+        if (!mates.includes(u)) mates.push(u);
+        for (const m of mates) seen.add(m);
+        groups.push(mates);
+      }
+      const gCols = Math.ceil(Math.sqrt(groups.length));
+      const gSpace = Math.max(16, maxR * 4);
+      const order = [];
+      slots = [];
+      groups.forEach((g, gi) => {
+        const cx = hit.point.x + ((gi % gCols) - (gCols - 1) / 2) * gSpace;
+        const cz = hit.point.z + (Math.floor(gi / gCols) - (Math.ceil(groups.length / gCols) - 1) / 2) * gSpace;
+        g.forEach((m, k) => {
+          // A loose ring round the spot (the first man at its middle).
+          const ring = k === 0 ? 0 : 2.6 + (k > 6 ? 2.6 : 0), a = k * 2.39996;
+          slots.push({ x: cx + Math.cos(a) * ring, z: cz + Math.sin(a) * ring });
+          order.push(m);
+        });
+      });
+      arr.length = 0;
+      arr.push(...order);
+    }
 
     // ONE path search per cluster of units, not one per unit: every ground
     // unit within 15 m of a unit that already searched takes a copy of that
@@ -352,6 +393,11 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       return c.path?.length ? [...c.path.slice(0, -1), { x: slot.x, z: slot.z }] : null;
     };
 
+    // Squads: each man to his own squad's spot (in the order built above).
+    if (squadOf) {
+      arr.forEach((u, i) => u.moveOrder(slots[i].x, slots[i].z, pathFor(u, slots[i])));
+      return;
+    }
     const pool = [...arr];
     for (const slot of slots) {
       let best = 0, bestD = Infinity;

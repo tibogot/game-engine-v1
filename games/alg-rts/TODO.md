@@ -162,6 +162,28 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
    - [ ] **you**: press Check GPU health once right after a fresh EC reset,
          so "best seen" is a healthy reference.
 
+## SQUADS + RETREAT + REINFORCE (2026-10-03, you: "let's go")
+- [x] algSquads.js — a LAYER over the men (every man stays a unit in
+      units.list). French infantry is bought, selected and ordered by SQUAD:
+      Groupe 6 appelés (300), Génie 2 sapeurs (150), Stick 5 paras (450),
+      Légion 5 (650). Slot = look role (0 leader, 1 radio, 2 FM gunner;
+      units.spawn `lookRole`). Start army: 2 groupes + 1 génie team.
+      · shared selection `squadOf` (opt-in, nam unchanged): a man selects his
+        squad, shift toggles it, a move forms each squad round its own spot.
+      · RETRAITE (T): hold fire, can't be pinned, 140% speed, 60% damage, to
+        the muster; a new order calls it off. In the post's zone (48 m) the
+        wounded HEAL (3 hp/s, out of fire).
+      · RENFORCER (Y): at the post, one man per click (30/45/60/80), out of
+        the gate in the dead man's slot (his kit), to his squad.
+      · army tabs: one stable tab per squad, n/size, RETR state.
+      Tested in game: select-one → 6; losses → slots freed; retreat → home,
+      healing; 2 reinforcements → slots 2 and 4 refilled with roles 2 and 4.
+- [ ] you, play it: squad sizes and prices, the retreat's speed, the reinforce cost.
+- [ ] next on this: veterancy per squad; the FLN's bands shown as squads to
+      the player (their tabs when seen); retreat/reinforce icons (game-icons
+      unreachable from here — text labels for now); the selection card
+      showing the squad's name and its n/size pips.
+
 ## PARKED / NEXT (2026-09-30)
 
 - [~] **THE COH GROUND** (2026-10-01; you: "that same CoH terrain texture,

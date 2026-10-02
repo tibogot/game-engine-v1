@@ -1180,7 +1180,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // role's weapon (or one from the look's mix), kit, rolled extras.
       const n = (spawned[t.typeKey] = (spawned[t.typeKey] ?? -1) + 1);
       const view = crd.views.get(t.typeKey);
-      const load = view.look ? loadout(view.look, n % 12, () => Math.random()) : null;
+      // A game with squads names the man's role itself (`unit.lookRole`, his
+      // slot in his squad: 0 the leader…), so a reinforcement wears the kit of
+      // the man he replaces; otherwise spawn order, as before.
+      const role = Number.isInteger(unit.lookRole) ? unit.lookRole : n % 12;
+      const load = view.look ? loadout(view.look, role, () => Math.random()) : null;
       views.set(unit, {
         crowd: crd, view, xform, bob: 0,
         // the clip it's on, the one it's fading from, and how far the fade is

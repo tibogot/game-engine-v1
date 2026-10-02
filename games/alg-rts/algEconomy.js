@@ -19,7 +19,9 @@
 import * as THREE from "three";
 
 export const COSTS = {
-  appele: 60, sapeur: 80, para: 110, legion: 150, willys: 90, gmc: 110, halftrack: 160, ebr: 220, amx13: 260, alouette: 320,
+  // French infantry: per SQUAD (algSquads.js: 6 appelés, 2 sapeurs, 5 paras,
+  // 5 légionnaires), a little under the old per-man price × the squad.
+  appele: 300, sapeur: 150, para: 450, legion: 650, willys: 90, gmc: 110, halftrack: 160, ebr: 220, amx13: 260, alouette: 320,
   moudjahid: 40, fmTeam: 70,
 };
 

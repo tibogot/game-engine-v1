@@ -18,7 +18,7 @@ export const ALG_UNIT_TYPES = {
     typeKey: "appele",
     grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Appelés",
-    buildLabel: "Appelé",   // the command card trains ONE man a click
+    buildLabel: "Groupe (6)",   // a SQUAD a click (algSquads.js)
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -55,7 +55,7 @@ export const ALG_UNIT_TYPES = {
   sapeur: {
     typeKey: "sapeur",
     name: "Sapeurs du Génie",
-    buildLabel: "Sapeur",
+    buildLabel: "Génie (2)",
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -93,7 +93,7 @@ export const ALG_UNIT_TYPES = {
     typeKey: "para",
     grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Paras coloniaux",
-    buildLabel: "Para",
+    buildLabel: "Stick para (5)",
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -126,7 +126,7 @@ export const ALG_UNIT_TYPES = {
     typeKey: "legion",
     grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Légionnaires",
-    buildLabel: "Légionnaire",
+    buildLabel: "Légion (5)",
     weapon: "rifle",
     isAir: false,
     foot: true,

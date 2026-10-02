@@ -13,6 +13,7 @@ import { createSimClock } from "../shared-rts/simClock.js";
 import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { createAlgSquads, SQUADS } from "./algSquads.js";
 import { createAlgProducer } from "./algProducer.js";
 import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
@@ -46,9 +47,10 @@ import { installPortraits } from "./ui/portraits.js";
  * economy comes with its rules). The command card lists them in this order.
  */
 const PRODUCTION = {
-  post: { appele: 6, sapeur: 8, legion: 14 },
+  // Infantry per SQUAD (algSquads.js), vehicles one each.
+  post: { appele: 14, sapeur: 10, legion: 24 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
-  helipad: { para: 10, alouette: 30 },   // paras: the heliborne reserve
+  helipad: { para: 18, alouette: 30 },   // paras: the heliborne reserve
   caveEntrance: { moudjahid: 4, fmTeam: 7 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
 };
 
@@ -161,18 +163,20 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const units = createUnits({ app, navGrid, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS, spawn: {}, origin: muster });
   app.units = units;
 
-  // A section of appelés formed up in front of the post's gate (3 x 4).
+  // TWO GROUPES of appelés formed up in front of the post's gate (2 x 6, each
+  // a squad — algSquads.js — its leader, radioman and FM gunner first)…
   const fx = -Math.sin(muster.yaw), fz = -Math.cos(muster.yaw);   // out of the gate
   const rx = Math.cos(muster.yaw), rz = -Math.sin(muster.yaw);
+  const startMen = { appele: [], sapeur: [] };
   for (let i = 0; i < 12; i++) {
-    const col = (i % 4) - 1.5, row = Math.floor(i / 4);
+    const col = (i % 6 % 3) - 1 + (i < 6 ? -2.2 : 2.2), row = Math.floor((i % 6) / 3);
     const p = navGrid.nearestOpenWorld(muster.x + fx * row * 3.2 + rx * col * 3.2, muster.z + fz * row * 3.2 + rz * col * 3.2, true) ?? { x: muster.x, z: muster.z };
-    units.spawn("appele", p.x, p.z);
+    startMen.appele.push(units.spawn("appele", p.x, p.z, { lookRole: i % 6 }));
   }
-  // …and a sapeur beside them (the lean start: he digs the post's defences).
-  {
-    const p = navGrid.nearestOpenWorld(muster.x + rx * 9, muster.z + rz * 9, true) ?? { x: muster.x, z: muster.z };
-    units.spawn("sapeur", p.x, p.z);
+  // …and a sapeur team beside them (the lean start: they dig the post's defences).
+  for (let i = 0; i < 2; i++) {
+    const p = navGrid.nearestOpenWorld(muster.x + rx * (12 + i * 2.5), muster.z + rz * (12 + i * 2.5), true) ?? { x: muster.x, z: muster.z };
+    startMen.sapeur.push(units.spawn("sapeur", p.x, p.z, { lookRole: i }));
   }
 
   // FOG OF WAR (the shared vision grid, as nam): what the French see — every
@@ -230,6 +234,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       builds: PRODUCTION.post,
       // In the courtyard behind the gate; out through the arch; the muster.
       inside: [0, g.z + 4.5 * S], outside: [0, g.z - 3.2 * S], rally: muster,
+      // A whole SQUAD per click (algSquads.js).
+      countOf: (key) => SQUADS[key]?.size ?? 1,
+      onSpawned: (u, key, slot) => app.algSquads?.bought(u, key, slot),
     }));
   }
   if (showroom?.motorPool) {
@@ -259,6 +266,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       // Paras trained here walk off the pad's edge, toward the holding point.
       inside: [0, 0], outside: padEdge(m, px, pz), rally,
       launch: { hold: 2.2, rise: 2.4, deckY: m.geometry.userData.deckY ?? 0 },
+      countOf: (key) => SQUADS[key]?.size ?? 1,
+      onSpawned: (u, key, slot) => app.algSquads?.bought(u, key, slot),
     }));
     // The Alouette parked on the pad at the start (a unit now, hovering) moves
     // to that holding point, off the pad.
@@ -304,6 +313,18 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const tiers = createAlgTiers(app, { economy });
   app.algTiers = tiers;
   for (const p of producers) p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
+  // THE SQUADS (algSquads.js): the start army into squads; retreat to the
+  // post's zone, heal and reinforce there.
+  const postProd = producers.find((p) => p.structure.typeKey === "post") ?? null;
+  const squads = createAlgSquads({
+    app, units,
+    base: postProd?.centre ?? muster, muster,
+    pay: (n) => economy.french.spend(n),
+    post: postProd ?? { inside: muster, outside: muster },
+  });
+  app.algSquads = squads;
+  squads.adopt(startMen.appele.filter(Boolean), "appele");
+  squads.adopt(startMen.sapeur.filter(Boolean), "sapeur");
   // A faint ring round each village in its holder's colour (the shared ring
   // field: a thin band on a big circle).
   const villageRings = createSelectionRingField({ app, max: 8, inner: 0.975, segments: 96, opacity: 0.55 });
@@ -371,6 +392,20 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
         sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
           && { key: "cutWire", label: "Couper", hint: "Cut the nearest barbed wire (40 m): ~8 s for one sapper, less for more.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
+        // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
+        // calls a man in for a squad short of men, at the post.
+        squads.squadsIn(sel).length > 0 && {
+          key: "retreat", label: squads.squadsIn(sel).every((s) => s.retreating) ? "En retraite" : "Retraite",
+          hint: "Run back to the post: hold fire, can't be pinned, faster, take less fire. The wounded heal at the post.", ready: true,
+        },
+        (() => {
+          const sq = squads.squadsIn(sel), cost = sq.reduce((n, s) => n + squads.reinforceCost(s), 0);
+          if (!sq.length) return null;
+          const short = sq.some((s) => s.count + squads.pendingFor(s) < s.size);
+          return { key: "reinforce", label: "Renforcer", cost: cost || undefined,
+            hint: !short ? "Squad at full strength." : cost ? "One man per short squad, out of the post's gate." : "Bring the squad back to the post to reinforce it (Retraite).",
+            ready: cost > 0 && economy.french.canAfford(cost) };
+        })(),
       ].filter(Boolean)
       // A sappers' site (algBuild.js): cancel it, the price back.
       : sel.length === 1 && sel[0].site && sel[0].alive
@@ -381,6 +416,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "cutWire") app.algWire?.orderCut(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
+      if (key === "retreat") { for (const s of squads.squadsIn(sel)) squads.retreat(s); app.algSounds?.order?.("move", sel); commandCard.render(sel); }
+      if (key === "reinforce") { for (const s of squads.squadsIn(sel)) squads.reinforce(s); commandCard.render(sel); }
     },
     // The cover and concealment chips, read at the first man (algCover.js).
     stanceFor: (sel) => {
@@ -401,12 +438,18 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     buildingRenderer: { get roots() { return build?.renderer.roots ?? []; }, buildingFromHit: (h) => build?.renderer.buildingFromHit(h) ?? null },
     // An order outside the playable box: the nearest point 8 m inside it
     // (the box's edge is blocked on the nav grid; room for the formation).
+    // SQUADS: a man selects his squad; a move forms each squad (algSquads.js).
+    squadOf: (u) => squads.squadOf(u),
     clampOrder: (x, z) => ({
       x: Math.min(PLAY.x1 - 8, Math.max(PLAY.x0 + 8, x)),
       z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
     }),
     // The radio answers an order (algSounds.js).
-    onOrder: (kind, list) => { app.algSounds?.order(kind, list); app.algVoices?.order(kind, list); },
+    onOrder: (kind, list) => {
+      // A new order calls a retreating squad off its retreat (CoH).
+      for (const s of squads.squadsIn(list)) if (s.retreating) squads.endRetreat(s);
+      app.algSounds?.order(kind, list); app.algVoices?.order(kind, list);
+    },
     onChange: (sel) => {
       // Nothing selected: the card folds away (hudBar.js).
       hud.setCollapsed(!sel.length);
@@ -423,7 +466,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE ARMY TABS (ui/armyTabs.js): every group you have, down the right edge.
   // What each building is training, over its roof (ui/queueBadges.js).
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
-  const armyTabs = createArmyTabs({ units, selection, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
+  const armyTabs = createArmyTabs({ units, selection, squads, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
   const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
   // Top right now (resourceHud.js); the bottom strip is gone with it.
@@ -501,7 +544,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.addPreRenderHook((frameDt) => {
     let dt = frameDt * app.timeScale;
     if (app.timeStep) { dt = app.timeStep; app.timeStep = 0; }
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); grenades.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); squads.step(d); grenades.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
     searchlights.frame();
     combat.frame(dt);
     grenades.frame();

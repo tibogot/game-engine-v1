@@ -720,12 +720,15 @@ export function createUnits({
      * it EXACTLY — e.g. at a hangar door inside the building's own footprint, from
      * where it then drives out via emerge().
      */
-    spawn(typeKey, x, z, { team = "player", snap = true } = {}) {
+    spawn(typeKey, x, z, { team = "player", snap = true, lookRole = null } = {}) {
       const type = UNIT_TYPES[typeKey];
       if (!type) return null;
       let px = x, pz = z;
       if (snap && !type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z, !!type.foot));
       const u = makeUnit(app, type, navGrid, px, pz, near, team);
+      // A game with squads: the man's role in his section's look (before the
+      // renderer builds him: unitRenderer reads it in onSpawn).
+      if (lookRole != null) u.lookRole = lookRole;
       units.push(u);
       onSpawn(u);
       return u;

@@ -48,6 +48,8 @@ const CSS = `
 #alg-tabs .st.supp { color: #ffd59a; background: #5a3d12; }
 #alg-tabs .st.fight { color: #f1e6c4; }
 #alg-tabs .st.cover { color: #b8d08a; }
+#alg-tabs .st.retreat { color: #fff; background: #7a5a18; }
+#alg-tabs .n.short { color: #ffcf8a; }
 #alg-tabs .hp { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 4px; background: #23261d; border: 1px solid #3a4031; }
 #alg-tabs .hp i { display: block; height: 100%; background: var(--hud-olive); }
 #alg-tabs .hp i.low { background: var(--hud-red); }
@@ -56,6 +58,7 @@ const CSS = `
 
 /** What a group is doing, most urgent first: [class, label, words]. */
 function stateOf(g) {
+  if (g.squad?.retreating) return ["retreat", "RETR", "retreating"];
   if (g.some((u) => u.pinned)) return ["pinned", "PIN", "pinned down"];
   if (g.some((u) => u.suppressed)) return ["supp", "SUP", "suppressed"];
   if (g.some((u) => u.target?.alive || u.attackTarget?.alive)) return ["fight", "FEU", "firing"];
@@ -64,7 +67,7 @@ function stateOf(g) {
   return ["idle", "", "holding"];
 }
 
-export function createArmyTabs({ units, selection, thumbnails, focus = () => {}, team = "player", mount = document.body }) {
+export function createArmyTabs({ units, selection, thumbnails, focus = () => {}, team = "player", mount = document.body, squads = null }) {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -77,12 +80,24 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
   let views = [];       // per tab: { el, bar, st, hpLast, stLast, fireLast, selLast }
   let wait = 0;
 
-  /** Vehicles alone; men of one type linked within LINK m. */
+  /**
+   * SQUADS first (algSquads.js, 2026-10-03): one stable tab per squad, its
+   * men alive and the dead slots counted (`g.squad`). Then vehicles alone;
+   * men in no squad, of one type, linked within LINK m.
+   */
   function regroup() {
     const out = [];
     const byType = new Map();
+    for (const s of squads?.list ?? []) {
+      if (s.team !== team) continue;
+      const g = s.members;
+      if (!g.length) continue;
+      g.squad = s;
+      out.push(g);
+    }
     for (const u of units.list) {
       if (!u.alive || u.team !== team || u.isStructure || u.site) continue;
+      if (squads?.of(u)) continue;
       if (!u.type?.foot) { out.push([u]); continue; }
       (byType.get(u.typeKey) ?? byType.set(u.typeKey, []).get(u.typeKey)).push(u);
     }
@@ -101,10 +116,11 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         out.push(g);
       }
     }
-    // A stable order: infantry first, then vehicles; by type; by the oldest member.
-    const rank = (g) => (g[0].type?.foot ? 0 : 1);
-    const first = (g) => Math.min(...g.map((u) => units.list.indexOf(u)));
-    out.sort((a, b) => rank(a) - rank(b) || a[0].typeKey.localeCompare(b[0].typeKey) || first(a) - first(b));
+    // A stable order: squads (by when they were raised), other infantry,
+    // then vehicles; by type; by the oldest member.
+    const rank = (g) => (g.squad ? 0 : g[0].type?.foot ? 1 : 2);
+    const first = (g) => (g.squad ? g.squad.id : Math.min(...g.map((u) => units.list.indexOf(u))));
+    out.sort((a, b) => rank(a) - rank(b) || (a.squad && b.squad ? a.squad.id - b.squad.id : 0) || a[0].typeKey.localeCompare(b[0].typeKey) || first(a) - first(b));
     return out;
   }
 
@@ -117,7 +133,9 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       el.className = "tab";
       const url = thumbnails?.get(thumbKeyOf(u));
       if (url) el.style.backgroundImage = `url(${url})`;
-      el.innerHTML = `<span class="st"></span>${g.length > 1 ? `<span class="n">${g.length}</span>` : ""}<div class="hp"><i></i></div>`;
+      // A squad: men alive / its full strength (CoH's pips as a number).
+      const n = g.squad ? `${g.length}/${g.squad.size}` : g.length > 1 ? `${g.length}` : "";
+      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<div class="hp"><i></i></div>`;
       el.addEventListener("click", (e) => {
         const live = g.filter((m) => m.alive);
         if (!live.length) return;
@@ -149,7 +167,9 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       }
       const f = max > 0 ? hp / max : 0, pct = Math.round(f * 100);
       if (pct !== v.hpLast) { v.hpLast = pct; v.bar.style.width = `${pct}%`; v.bar.classList.toggle("low", f < 0.3); }
-      const [cls, label, words] = stateOf(v.g.filter((u) => u.alive));
+      const live = v.g.filter((u) => u.alive);
+      live.squad = v.g.squad;
+      const [cls, label, words] = stateOf(live);
       if (cls !== v.stLast) {
         v.stLast = cls;
         v.st.className = `st ${cls}`;
@@ -159,8 +179,9 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       if (fire !== v.fireLast) { v.fireLast = fire; v.el.classList.toggle("fire", fire); }
       const isSel = v.g.some((u) => sel.has(u));
       if (isSel !== v.selLast) { v.selLast = isSel; v.el.classList.toggle("sel", isSel); }
-      const name = v.g[0].type?.name ?? v.g[0].typeKey;
-      v.el.title = `${name}${v.g.length > 1 ? ` ×${v.g.length}` : ""} — ${words}, ${pct}% health\nClick: select · Shift: add · Double-click: go there`;
+      const name = v.g.squad?.name ?? v.g[0].type?.name ?? v.g[0].typeKey;
+      const count = v.g.squad ? ` (${live.length}/${v.g.squad.size} men)` : v.g.length > 1 ? ` ×${v.g.length}` : "";
+      v.el.title = `${name}${count} — ${words}, ${pct}% health\nClick: select · Shift: add · Double-click: go there${v.g.squad ? " · T: retreat · Y: reinforce (at the post)" : ""}`;
     }
   }
 
