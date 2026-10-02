@@ -4,6 +4,7 @@ import {
   directionToColor,
   emissive,
   max,
+  min,
   mrt,
   normalView,
   output,
@@ -12,6 +13,7 @@ import {
   saturate,
   texture,
   uniform,
+  vec3,
   vec4,
 } from "three/tsl";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
@@ -842,9 +844,16 @@ export class PostFxPipeline {
     // glow mask (how much of this pixel glows, 0..1), not an HDR colour — the
     // full RGBA16F attachment, written per MSAA sample, was most of selective
     // bloom's cost. The bloom then reads the scene colour times the mask.
+    // Only LIGHT glows in mask mode (2026-10-02, you: "small flashing blue,
+    // orange, purple lights"): every plant carries a weak emissive (sunlight
+    // through its leaves, a small glow — up to ~0.5), and at m × 0.6 those
+    // pixels leaked into the mask; the bloom's eighth-res blur then caught a
+    // swaying leaf one frame and missed it the next — a flashing coloured
+    // dot. The mask now starts at 0.5 and is full at 1.2: flashes, fire,
+    // sparks and tracers (HDR, well above 1) glow; foliage never does.
     if (this._sceneExtra.has("emissive")) {
       targets.emissive = this._bloomParams.mask
-        ? vec4(saturate(max(max(emissive.r, emissive.g), emissive.b).mul(0.6)), 0, 0, output.a)
+        ? vec4(saturate(max(max(emissive.r, emissive.g), emissive.b).sub(0.5).div(0.7)), 0, 0, output.a)
         : vec4(emissive, output.a);
     }
     const sceneMRT = mrt(targets);
@@ -873,9 +882,13 @@ export class PostFxPipeline {
     // Selective bloom that is OFF reads nothing: asking for "emissive" would
     // add the attachment (see _wrapSceneTextureRequests), so it waits for
     // setBloomEnabled(true), which rebuilds these passes.
+    // FIREFLY CLAMP (mask mode, 2026-10-02): a lone shading blow-up in the
+    // scene colour (seen: single pixels at 60-16000× white for a frame) times
+    // even a sliver of mask spread across an eighth-res blur as a flashing
+    // coloured blob. The bloom never takes more than 8× white from a pixel.
     const solidsInput = this._emissiveWanted()
       ? (bp.mask
-        ? vec4(this._scenePassColor.rgb.mul(this._scenePass.getTextureNode("emissive").r), 1)
+        ? vec4(min(this._scenePassColor.rgb, vec3(8)).mul(this._scenePass.getTextureNode("emissive").r), 1)
         : this._scenePass.getTextureNode("emissive"))
       : this._scenePassColor;
     this._bloomPass = bloom(solidsInput, bp.strength, bp.radius, bp.threshold);

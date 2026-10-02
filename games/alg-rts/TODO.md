@@ -595,6 +595,18 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         the old fuller "tamarisk" tree kept).
       · costs: alfa A/B in game = noise (≤0.2 ms); oleander mid 1.7k tris
         (was 0.9k) — measure in game when focused.
+      [x] BUG (2026-10-02, you): small FLASHING blue / orange / purple
+      lights — the BLOOM (gone with bloom off). Read off the GPU: the scene
+      colour holds lone FIREFLY pixels (60-16 000× white, a frame each, at
+      steady screen spots — even with every scene object hidden, so not a
+      plant / unit / building); × any sliver of glow mask, the 1/8-res blur
+      spread them into flashing coloured blobs. FIX (postFxPipeline mask
+      mode): the bloom takes at most 8× white from a pixel (firefly clamp),
+      and the mask ignores weak emissive (saturate((m − 0.5)/0.7), plants'
+      leaf light no longer glows). You: no flashes with bloom on. FX glows
+      (flash, explosion, flame, tracer, sprites) write their own mask.
+      [ ] the firefly pixels' SOURCE is still unknown (they're harmless now:
+          clipped on screen, clamped in the bloom).
       Next plants: reed-mace, juniper, doum palm (last); tamarisk TREE look
       (own builder, feathery needle cards, clump colour); agave mast still
       "cheap" (you: which part?); where the tamarisk shrub goes; then the
