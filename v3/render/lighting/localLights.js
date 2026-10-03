@@ -14,8 +14,9 @@
 // Every light lives in a pool made at boot (nothing is allocated mid-game). Each frame the live
 // lights are ranked — brightness x range^2 / distance^2 to the camera, x importance — and written
 // into the pool in that order: TiledLighting keeps at most 8 lights per tile, in list order, so a
-// crowded spot drops the faintest, not whichever was added last. Unused pool lights are hidden
-// (point lights are not in any shader key under TiledLighting, so hiding one rebuilds nothing).
+// crowded spot drops the faintest, not whichever was added last. Pool lights are NEVER hidden or
+// shown (a light first turning visible rebuilt every shader: see the pool below) — a spare one
+// sits at intensity 0, parked far below the world.
 //
 // Water (Ocean Pro, lakes, rivers) builds its own lighting and is not lit by these.
 
@@ -147,10 +148,19 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
   group.name = "LocalLights";
   scene.add(group);
   const pool = [];
+  /*
+   * THE POOL NEVER CHANGES WHAT THE RENDERER SEES. A pool light turning visible for the first
+   * time rebuilt every shader in the world (MEASURED in alg-rts, 2026-10-04: 53 render
+   * pipelines, a 0.9-1.2 s frame on every blast that used a slot no flash had used before) —
+   * even with point lights out of the lights node's key. So every pool light is visible from
+   * boot and stays visible; a spare one has intensity 0 and is parked far below the world, where
+   * it falls in no tile. The tiles get only the active lights (drive()).
+   */
+  const PARK = -1e6;
   for (let i = 0; i < max; i++) {
-    const l = new THREE.PointLight(0xffffff, 0, 10, 2);
-    l.visible = false;
+    const l = new THREE.PointLight(0xffffff, 0, 0.01, 2);
     l.castShadow = false;
+    l.position.set(0, PARK, 0);
     group.add(l);
     pool.push(l);
   }
@@ -198,7 +208,7 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
     const n = Math.min(ranked.length, max);
     for (let i = 0; i < max; i++) {
       const l = pool[i];
-      if (i >= n) { if (l.visible) l.visible = false; continue; }
+      if (i >= n) { if (l.intensity !== 0) { l.intensity = 0; l.distance = 0.01; l.position.y = PARK; } continue; }
       const r = ranked[i];
       let k = 1;
       if (r.flicker > 0) k = 1 - r.flicker * (0.5 - 0.5 * Math.sin(time * 13 + r.phase) * Math.sin(time * 7.3 + r.phase * 1.7));
@@ -206,7 +216,6 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
       l.color.copy(r.color);
       l.intensity = r.intensity * k;
       l.distance = r.range;
-      if (!l.visible) l.visible = true;
     }
     // bin them into the screen tiles for this view, once (the tile pass reads world matrices)
     if (tiled) {

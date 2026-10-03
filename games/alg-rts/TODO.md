@@ -3348,7 +3348,13 @@ Asset follow-ups:
       (`app.localLights`, no fixed cost; ?locallights=0). The weather no longer resets the
       clock at boot. By day nothing changes (frame luma 0.2409 vs 0.2397 look on/off).
       — you, look: 19.3 h and 23 h, Realistic vs Cinematic.
-- [ ] **NIGHT, NEXT** (proposed 2026-10-04): (1) combat lights — explosions (algCombat
+- [x] **COMBAT LIGHTS AT NIGHT (2026-10-04, algLights.js)**: muzzle flashes (20 cd, 6 m, 60 ms),
+      tank gun, grenades, shell hits, blasts (scale with size: a big blast lights ~35 m) and
+      fires (one flickering light per blaze, as long as it burns), all x `app.sky.night` (nothing
+      by day), on the game clock (slow-mo, pause). Cost below noise in a 48-man night fight.
+      ?combatlights=0 = without. — you, look: battle-lab.html?tod=23 (are the rifle pools too
+      strong? the blast too wide?).
+- [ ] **NIGHT, NEXT** (proposed 2026-10-04): ~~(1) combat lights~~ DONE above — explosions (algCombat
       fx.explosion), fires (combat.js:158, algStructures.js:152, algDamage.js:113), muzzle flashes
       (projectiles.js fx.muzzle), shell/rocket flare; (2) fixed lights faded by `app.sky.night` —
       base (searchlight lamp, mirador, gate, vehicle park, helipad), ksar (souk lanterns: need a

@@ -12,6 +12,7 @@ import { createCraterSystem } from "../shared-rts/craterSystem.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
 import { createCombat } from "../shared-rts/combat.js";
 import { createBloodField } from "../shared-rts/bloodField.js";
+import { createAlgLights } from "./algLights.js";
 
 /**
  * @param {object} app
@@ -76,6 +77,9 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); app.algDamage?.blast(x, z, opts?.size ?? 10); } };
   const grenade = fx.grenade;
   fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); app.algDamage?.blast(x, z, 6); };
+  // AT NIGHT the shots, blasts and fires light what is round them (algLights.js: the engine's
+  // local lights, nothing by day). ?combatlights=0 = without.
+  if (new URLSearchParams(location.search).get("combatlights") !== "0") app.algLights = createAlgLights({ app, fx, fire });
 
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combat = null;
