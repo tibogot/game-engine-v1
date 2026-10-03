@@ -262,6 +262,19 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       track, mud splats, grass) and a re-baked far village (same as
       ?gpuonly=0 — dark only from the fog of war); console clean.
       In one boot the perf line read 505 MB vs 1,470 MB with ?gpuonly=0.
+- [x] **PRODUCTION BUILD MEASURED** (vite build + vite preview, port 4173):
+      boot **31.9 s** (page + modules ~0.5 s before the engine starts vs
+      ~1.3 s on the dev server), frame at the start view 8.8 ms (CPU 9.0,
+      CPU-bound — same as dev), **live heap 388 MB** (the dev server's module
+      text and source maps gone). Console clean.
+- [x] **FIRST LAUNCH RELOADED ITSELF**: on a clean install the engine started
+      at its default terrain size, the level was another size → saved + page
+      reload, a whole boot thrown away: **39 s → 31.6 s** (cold HTTP cache).
+      alg.html writes the level's terrain config before the engine loads (a
+      level of another size still takes the reload path). Every new player
+      saw this; Electron's first run would have too.
+- [x] gpuBench / the GPU button worked only in dev (window.__V3_DEBUG):
+      falls back to the game's app.renderer.
 - [ ] One flaky suite: npm test read 197/198 once, 198/198 twice after
       (which one not caught).
 - [ ] Heap left (475 MB): ~150 MB is the DEV SERVER's module text and

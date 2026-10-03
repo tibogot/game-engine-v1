@@ -23,6 +23,8 @@
 import { Fn, Loop, float, instanceIndex, instancedArray } from "three/tsl";
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+// The dev global first; a production build has no __V3_DEBUG — the game's app.
+const renderer = () => window.__V3_DEBUG?.renderer ?? window.__ALG?.renderer;
 
 function loopOf(R) {
   const a = R._animation;
@@ -31,7 +33,7 @@ function loopOf(R) {
 
 /** Time N frames through the app's own loop. Returns ms per frame. */
 export async function timeFrames(n = 24, { perFrame = null } = {}) {
-  const R = window.__V3_DEBUG.renderer;
+  const R = renderer();
   const loop = loopOf(R);
   const dev = R.backend.device;
   await dev.queue.onSubmittedWorkDone();
@@ -47,7 +49,7 @@ export async function timeFrames(n = 24, { perFrame = null } = {}) {
 
 /** Pause the app's rAF loop while benching (the loop would add frames). */
 function pauseLoop() {
-  const R = window.__V3_DEBUG.renderer;
+  const R = renderer();
   const a = R._animation;
   const saved = a._animationLoop;
   a.stop?.();
@@ -84,12 +86,12 @@ export const TOGGLES = {
   // cloud-shadow quarter, cirrus, env). The sun is fixed in this game, so a
   // skipped update leaves the frame's light unchanged.
   skyUpdate: () => {
-    const sp = window.__V3_DEBUG.worldEnv?.skyPro; if (!sp) return () => {};
+    const sp = window.__V3_DEBUG?.worldEnv?.skyPro; if (!sp) return () => {};
     const u = sp.update; sp.update = () => {}; return () => { sp.update = u; };
   },
   // The air haze (march + temporal + full-res apply + copy back).
   haze: () => {
-    const sp = window.__V3_DEBUG.worldEnv?.skyPro; if (!sp) return () => {};
+    const sp = window.__V3_DEBUG?.worldEnv?.skyPro; if (!sp) return () => {};
     const h = sp.params.haze; sp.params.haze = 0; return () => { sp.params.haze = h; };
   },
 };
@@ -105,7 +107,7 @@ export async function setView({ x, z, zoom, yaw } = {}) {
   if (yaw != null) cam.setYaw(yaw);
   if (zoom != null) cam.setZoom(zoom);
   // Let the eased zoom land and the ground cache fill around it.
-  const R = window.__V3_DEBUG.renderer, loop = loopOf(R);
+  const R = renderer(), loop = loopOf(R);
   // In small batches with a yield between: right after a render-scale change
   // the resized targets are not on the GPU yet, and a synchronous burst binds
   // them half-made ("reading 'mipLevelCount'").
@@ -243,7 +245,7 @@ function healthKernel() {
 }
 
 export async function gpuHealth({ rounds = 5 } = {}) {
-  const R = window.__V3_DEBUG.renderer, dev = R.backend.device;
+  const R = renderer(), dev = R.backend.device;
   const { k, flop } = healthKernel();
   await R.computeAsync(k);   // compile
   // The slope between 8 and 40 dispatches: the ~3 ms onSubmittedWorkDone floor
@@ -274,7 +276,7 @@ export async function gpuHealth({ rounds = 5 } = {}) {
 // ── This view ────────────────────────────────────────────────────────────────
 /** Frame cost at the current view: pipelined frame ms, CPU ms, draws, the limit. */
 export async function measureView({ rounds = 4, n = 24 } = {}) {
-  const R = window.__V3_DEBUG.renderer, dev = R.backend.device, loop = loopOf(R);
+  const R = renderer(), dev = R.backend.device, loop = loopOf(R);
   const resume = pauseLoop();
   try {
     await timeFrames(8);

@@ -162,6 +162,18 @@
 
       try {
         // Relative to THIS file (Vite resolves imports from the file, not <base>).
+        // FIRST LAUNCH: the engine reads its terrain size from this page's
+        // saved config when it loads; with none it starts at its default,
+        // finds the level is another size and RELOADS the page — a whole
+        // boot thrown away (measured on a clean install: 39 s vs 31 s). The
+        // level's size (alg-aures.v3proj), written before the engine loads.
+        // A level of another size still takes the reload path (levelLoader).
+        try {
+          const key = `v3.terrainConfig:${location.pathname.replace(/index\.html$/, "")}`;
+          if (!localStorage.getItem(key)) {
+            localStorage.setItem(key, JSON.stringify({ worldSize: 1024, heightmapSize: 1024, splatSize: 2048, maxHeight: 250 }));
+          }
+        } catch { /* private mode: the reload path */ }
         const { startAlgGame } = await import("./algGame.js");
         window.__ALG = await startAlgGame({
           container: document.getElementById("game"),
