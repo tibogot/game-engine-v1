@@ -288,14 +288,20 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   });
   window.__rts = app; // handy for console debugging
 
-  // Behind the loading screen the scene only needs to keep compiling what the
-  // boot adds to it, not to render at 60 Hz: ~12 s of main thread went on
-  // frames nobody saw. ONE a second until "ready" (reset just before it).
-  // Even at four a second the trace put ~2.8 s of per-frame render work
-  // (bindings, cache keys, draws — not material building) into the boot, and
-  // nothing in the boot waits on an engine frame (checked), so a slower loop
-  // cannot hold a stage up. The loading bar animates on its own rAF.
-  app.setFrameThrottle?.(1000);
+  // NO ENGINE FRAMES behind the loading screen until the warm-up ("Preparing
+  // effects" puts the throttle back to 0 and renders every drawable once).
+  // It was 60 Hz (~12 s of main thread on frames nobody saw), then one a
+  // second "so compiles happen as things appear". Measured 2026-10-03 once
+  // pipelines compiled in parallel: each of those frames built every visible
+  // shader with the boot's settings OF THAT MOMENT, and later stages changed
+  // them (render context, environment, batch layout) — the plant materials
+  // were built 5-6 times each. None: shader building 6.8 → 4.6 s of main
+  // thread, ready ~31 → ~26 s (6 runs each, heat-noisy), and the first
+  // seconds of play smooth every time — at 1 Hz, 3 of 5 runs crawled at ~5
+  // fps or froze 2.5 s just after the loading screen. Nothing in the boot
+  // waits on an engine frame (checked); the loading bar has its own rAF.
+  // ?bootframes=1 = the one-a-second loop, to compare.
+  app.setFrameThrottle?.(new URLSearchParams(location.search).get("bootframes") === "1" ? 1000 : 1e9);
   // PIPELINES IN PARALLEL for the whole boot (v3/render/parallelPipelines.js,
   // ported from alg-rts 2026-10-03: there 41 → 32 s): the game scene's
   // pipelines compile side by side; its draws behind the loading screen wait
@@ -1836,8 +1842,8 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   window.__NAM = app;
 
   // The world is built (river, canopy, props): the egrets may look for their
-  // banks now. The loop has been running at 1 Hz under the loading screen,
-  // and a scan then found banks under a canopy that was not painted yet.
+  // banks now. A scan while the boot was still building (the loop once ran at
+  // 1 Hz under the loading screen) found banks under a canopy not painted yet.
   birds.worldReady();
   app.setFrameThrottle?.(0);     // the loading screen is going: full rate
   // Build every pipeline the game will need NOW, under the loading screen,

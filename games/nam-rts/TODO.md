@@ -58,6 +58,12 @@ After alg's audit (games/alg-rts/TODO.md "PERF + LOAD AUDIT 2"):
 - [x] Stats-gl overlay came BACK on any resize (the engine's layout rewrote
       its whole style) — keeps its hidden state now.
 - Boot after all this: dev ~24-28 s (heat-noisy; was 32.5), PRODUCTION 16.0 s.
+- [x] NO ENGINE FRAMES during the boot (was 1 a second; ?bootframes=1 = old):
+      shader building 6.8 → 4.6 s, ready ~31 → ~26 s (6 runs each, noisy),
+      first seconds of play smooth every run (1 Hz: 3 of 5 runs crawled or
+      froze 2.5 s after the loading screen). alg measured the OPPOSITE and
+      keeps its 1 Hz loop. 2026-10-03: nam WILL BE REDONE — no more nam-only
+      perf work; the items below are for reference.
 - [ ] Left: unit visuals ~7 s and rice terraces ~5 s are mostly the frame
       AFTER them building what they added (renderWithClouds in the trace) —
       fewer builds now; re-trace to see what is left. "Preparing effects"

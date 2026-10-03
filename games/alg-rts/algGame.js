@@ -168,7 +168,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // village: on = the hatch, off = gone). ?detail=1 = with, to compare.
     groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0) },
   });
-  app.setFrameThrottle?.(1000);
+  // ONE engine frame a second behind the loading screen. nam-rts boots faster
+  // with NONE (namGame.js); here that was measured the other way, 2026-10-03:
+  // ready 29.0 / 30.3 s without frames vs 24.7 / 24.7 with, main thread 16-19
+  // vs 13-15 s — this boot gains from the frames it gets. ?bootframes=0 =
+  // none, to compare.
+  app.setFrameThrottle?.(params.get("bootframes") === "0" ? 1e9 : 1000);
   // PIPELINES IN PARALLEL for the whole boot (v3/render/parallelPipelines.js):
   // the game scene's pipelines compile side by side on the browser's threads
   // instead of one after another (the boot ended waiting on that queue,
