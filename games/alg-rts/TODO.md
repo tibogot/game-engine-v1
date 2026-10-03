@@ -409,7 +409,24 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
          What is left (~50 per-object uploads) is real per-object data. The
          Tidewater-style one-buffer rewrite of three would now win at most
          ~0.5 ms: parked.
-      3. MULTI-TYPE INDIRECT BATCH for props (Tidewater ReefBatch / the
+      3. **DONE FOR THE PLANT FIELDS 2026-10-03** (where the draws are: in
+         alg the tall plants + foliage were 99 of 194 draws, props ~20).
+         ScatterField._syncBatches (opt batchPlantDraws, both games;
+         ?plantbatch=0 = off): the per-(type × detail) meshes stay as
+         RECORDS, records that draw alike share ONE mesh with merged
+         geometry issuing a drawIndexedIndirect per visible record
+         (setIndirect with an offsets array; firstIndex/baseVertex written
+         into each record's entry, counts still from the compute). alg:
+         render objects 194 → 112 a frame, GPU draws the same 194; CPU per
+         frame (same page, switched live, x3 alternating) default 3.5 →
+         2.8 ms, max zoom 3.9 → 3.0; frame time unchanged (GPU-bound there).
+         Pixels: same frozen frame both ways, 4 pixels differ by > 8 (max 13)
+         = the renderer's own noise. nam: little (302 objects for 331 draws)
+         — its plant types each have their OWN card material (6 a field) and
+         only the near level receives shadows. NEXT for nam: the card
+         textures as one texture array → one material a field (the alg
+         stones pattern); then props the same way if a view shows them.
+      (was:) MULTI-TYPE INDIRECT BATCH for props (Tidewater ReefBatch / the
          custom path three r184 already allows: one merged geometry,
          geometry.setIndirect with many offsets, compute cull writes the
          counts) → ~80 prop renderObjects a pass become 1. One material:

@@ -109,6 +109,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Plant-field draws that cannot hold a plant are skipped on the CPU (main.js
     // plantCpuCull, ScatterField.setCpuDensity). ?plantcull=0 = draw them all.
     plantCpuCull: params.get("plantcull") !== "0",
+    // The plant fields' draws batched: a few objects issuing many indirect
+    // draws each (engine ScatterField._syncBatches). ?plantbatch=0 = one each.
+    batchPlantDraws: params.get("plantbatch") !== "0",
     // ?msaa=0: no 4x MSAA (to measure its cost; the look keeps it).
     antialias: params.get("msaa") !== "0",
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural

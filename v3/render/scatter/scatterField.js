@@ -66,6 +66,9 @@ const THIN_BAND = 0.1;
 const thinThreshold = (k) => k.mul(1 + THIN_BAND);
 
 export class ScatterField {
+  /** Batch the per-draw meshes (see _syncBatches). Set before fields are made: main.js opts.batchPlantDraws. */
+  static batchDraws = false;
+
   /**
    * @param {object} o
    *   scene, renderer
@@ -438,6 +441,9 @@ export class ScatterField {
 
     this.meshes = [];
     this.shadowMeshes = [];
+    this._batched = ScatterField.batchDraws;
+    this._batches = [];
+    this._batchSig = null;
     this.triangles = new Array(meshCount).fill(0);
     this._shadowCams = new Set();
     this._usedTypes = new Array(typeCount).fill(true);
@@ -481,7 +487,9 @@ export class ScatterField {
       mesh.name = `${this.name}:type${Math.floor(sub / this.variants)}${this.variants > 1 ? `:v${sub % this.variants}` : ""}:lod${k % this.lods}` +
         (this.parts > 1 ? `:part${part}` : "");
       this.meshes.push(mesh);
-      this.group.add(mesh);
+      // Batched: the mesh is a RECORD (material, flags, visibility, geometry)
+      // and the batches draw it — see _syncBatches.
+      if (!this._batched) this.group.add(mesh);
     }
     for (let m = 0; m < this.shadowMeshCount; m++) {
       const part = m % this.parts;
@@ -494,8 +502,142 @@ export class ScatterField {
       mesh.visible = false;         // until its type casts (setShadowCasters)
       mesh.name = `${this.name}:type${Math.floor(m / this.parts / this.variants)}:shadow` + (this.parts > 1 ? `:part${part}` : "");
       this.shadowMeshes.push(mesh);
-      this.group.add(mesh);
+      if (!this._batched) this.group.add(mesh);
     }
+  }
+
+  /**
+   * ONE DRAW OBJECT FOR MANY PLANT DRAWS (2026-10-03).
+   *
+   * Every (type × variant × detail level) is its own indirect draw, and three
+   * pays its full per-object path for each — bindings, pipeline, draw params,
+   * ~25 µs of CPU. MEASURED alg-rts post: the tall plants and the foliage were
+   * 99 of the frame's 194 draws (main + depth pre-pass + shadow).
+   *
+   * Batched (ScatterField.batchDraws, set by the app before the fields exist):
+   * the per-draw meshes stay as RECORDS — everything that sets their material,
+   * shadow flags or visibility still does — but leave the scene. Records that
+   * draw alike (same material, shadow flags, layers, render order, depth-copy
+   * material, vertex layout) share ONE mesh: their geometries merged into one
+   * buffer, and the mesh issues one drawIndexedIndirect per VISIBLE record
+   * (BufferGeometry.setIndirect with an array of offsets — three reads it at
+   * every draw). Each record's indirect entry gets its firstIndex and
+   * baseVertex in the merged buffer; the compute still writes the counts.
+   * Same plants, same shaders, a handful of objects instead of dozens.
+   */
+  _syncBatches() {
+    const recs = [];
+    for (let m = 0; m < this.meshCount; m++) recs.push({ mesh: this.meshes[m], slot: m });
+    for (let s = 0; s < this.shadowMeshCount; s++) recs.push({ mesh: this.shadowMeshes[s], slot: this.meshCount + s });
+    // Rebuild when anything that decides the grouping (or the geometry) moved.
+    const sig = this._batchSig ??= [];
+    let changed = sig.length !== recs.length * 7;
+    let i = 0;
+    for (const { mesh } of recs) {
+      const depth = mesh.children.find((c) => c.userData.depthPrepass);
+      const vals = [mesh.material, mesh.geometry, mesh.receiveShadow, mesh.castShadow, mesh.layers.mask, mesh.renderOrder, depth?.material ?? null];
+      for (const v of vals) { if (sig[i] !== v) { sig[i] = v; changed = true; } i++; }
+    }
+    if (changed) this._buildBatches(recs);
+    // Per frame: each batch draws its visible records.
+    for (const b of this._batches) {
+      const off = b.offsets;
+      off.length = 0;
+      for (const r of b.recs) if (r.mesh.visible) off.push(r.slot * 20);
+      b.mesh.visible = off.length > 0;
+    }
+  }
+
+  _buildBatches(recs) {
+    for (const b of this._batches) {
+      this.group.remove(b.mesh);
+      if (b.merged) b.mesh.geometry.dispose();
+    }
+    this._batches = [];
+    const layoutOf = (g) => {
+      if (!g.index || g.morphAttributes && Object.keys(g.morphAttributes).length) return null;
+      const parts = [];
+      for (const [n, a] of Object.entries(g.attributes)) {
+        if (a.isInterleavedBufferAttribute || a.isInstancedBufferAttribute) return null;
+        parts.push(`${n}:${a.itemSize}:${a.array.constructor.name}:${a.normalized}`);
+      }
+      return parts.sort().join(",");
+    };
+    const groups = new Map();
+    for (const r of recs) {
+      const g = r.mesh.geometry;
+      if (!g?.index) continue;   // not built yet
+      const depth = r.mesh.children.find((c) => c.userData.depthPrepass);
+      const layout = layoutOf(g);
+      // A geometry that cannot be merged draws alone (its own buffers).
+      const key = layout === null ? `solo:${r.slot}` :
+        `${r.mesh.material.id}|${r.mesh.receiveShadow}|${r.mesh.castShadow}|${r.mesh.layers.mask}|${r.mesh.renderOrder}|${depth?.material.id ?? "-"}|${layout}`;
+      let grp = groups.get(key);
+      if (!grp) groups.set(key, (grp = { recs: [], depth, solo: layout === null }));
+      grp.recs.push(r);
+    }
+    const ind = this._indirect;
+    for (const grp of groups.values()) {
+      const first = grp.recs[0].mesh;
+      let geometry;
+      if (grp.solo) {
+        geometry = first.geometry;
+      } else {
+        // Merge: vertices and indices end to end; each record keeps its own
+        // indices (baseVertex shifts them), so nothing is renumbered.
+        let vTotal = 0, iTotal = 0;
+        for (const r of grp.recs) { vTotal += r.mesh.geometry.attributes.position.count; iTotal += r.mesh.geometry.index.count; }
+        geometry = new THREE.BufferGeometry();
+        for (const [n, a] of Object.entries(first.geometry.attributes)) {
+          const arr = new a.array.constructor(vTotal * a.itemSize);
+          let o = 0;
+          for (const r of grp.recs) {
+            const b = r.mesh.geometry.attributes[n];
+            arr.set(b.array.subarray(0, b.count * b.itemSize), o);
+            o += b.count * b.itemSize;
+          }
+          geometry.setAttribute(n, new THREE.BufferAttribute(arr, a.itemSize, a.normalized));
+        }
+        const idx = new Uint32Array(iTotal);
+        let io = 0, vo = 0;
+        for (const r of grp.recs) {
+          const g = r.mesh.geometry;
+          idx.set(g.index.array.subarray(0, g.index.count), io);
+          ind.array[r.slot * 5 + 2] = io;   // firstIndex
+          ind.array[r.slot * 5 + 3] = vo;   // baseVertex
+          ind.addUpdateRange(r.slot * 5 + 2, 2);
+          io += g.index.count;
+          vo += g.attributes.position.count;
+        }
+        geometry.setIndex(new THREE.BufferAttribute(idx, 1));
+      }
+      const offsets = [];
+      geometry.setIndirect(ind, offsets);
+      const mesh = new THREE.Mesh(geometry, first.material);
+      mesh.name = `${this.name}:batch${this._batches.length}`;
+      mesh.count = 1;
+      mesh.frustumCulled = false;
+      mesh.castShadow = first.castShadow;
+      mesh.receiveShadow = first.receiveShadow;
+      mesh.layers.mask = first.layers.mask;
+      mesh.renderOrder = first.renderOrder;
+      mesh.position.copy(first.position);
+      if (grp.depth) {
+        const d = new THREE.Mesh(geometry, grp.depth.material);
+        d.name = mesh.name + ":depth";
+        d.userData.depthPrepass = true;
+        d.count = 1;
+        d.frustumCulled = false;
+        d.castShadow = d.receiveShadow = false;
+        d.renderOrder = grp.depth.renderOrder;
+        mesh.add(d);
+      }
+      this.group.add(mesh);
+      this._batches.push({ mesh, recs: grp.recs, offsets, merged: !grp.solo });
+    }
+    // Only the firstIndex / baseVertex ranges go up: a whole upload would
+    // overwrite the instance counts the compute writes on the GPU.
+    if (ind.updateRanges.length) ind.needsUpdate = true;
   }
 
   /** Shadow mesh index of (type, part). */
@@ -925,7 +1067,12 @@ export class ScatterField {
     await this.renderer.computeAsync(this.computeInit);
     await this.renderer.computeAsync([this.computeReset, this.computeUpdate]);
     this._initDone = true;
-    for (const m of this.meshes) await this.renderer.compileAsync(m, camera);
+    if (this._batched) {
+      this._syncBatches();
+      for (const b of this._batches) await this.renderer.compileAsync(b.mesh, camera);
+    } else {
+      for (const m of this.meshes) await this.renderer.compileAsync(m, camera);
+    }
   }
 
   get ready() { return this._initDone; }
@@ -959,6 +1106,10 @@ export class ScatterField {
     u.uFx.value = e[0];
     u.uFy.value = e[5];
     if (this._cpuPages) this._cpuCull(anchorPos);
+    if (this._batched) {
+      this._syncBatches();
+      for (const b of this._batches) b.mesh.position.set(anchorPos.x, 0, anchorPos.z);
+    }
     this.renderer.compute([this.computeReset, this.computeUpdate]);
   }
 }

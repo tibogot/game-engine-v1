@@ -197,6 +197,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // Plant-field draws that cannot hold a plant skipped on the CPU (engine
     // plantCpuCull, ported from alg-rts). ?plantcull=0 = draw them all.
     plantCpuCull: new URLSearchParams(location.search).get("plantcull") !== "0",
+    // The plant fields' draws batched (engine ScatterField._syncBatches).
+    // ?plantbatch=0 = one object per draw.
+    batchPlantDraws: new URLSearchParams(location.search).get("plantbatch") !== "0",
     // The EDITOR's default paint palette (7 PBR sets, 28 images) was decoded
     // on every boot and then overwritten slot by slot by the level's own
     // paintLayers — nam-valley fills all seven. The engine says a game must

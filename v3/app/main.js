@@ -8,6 +8,7 @@ import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.j
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
 import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
+import { ScatterField } from "../render/scatter/scatterField.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
 import {
@@ -659,6 +660,10 @@ export async function startV3App(opts = {}) {
   // Skip the plant fields' draws that provably hold no plant (ScatterField
   // setCpuDensity): a game opts in; default off = every draw as before.
   const plantCpuCull = opts.plantCpuCull === true;
+  // ONE draw object for many plant draws (ScatterField._syncBatches): the
+  // fields' per-type × detail meshes merged into a few that issue many
+  // indirect draws each. A game opts in; default off = a mesh per draw.
+  ScatterField.batchDraws = opts.batchPlantDraws === true;
   // Plant detail levels that RECEIVE shadows (ScatterField.setReceiveShadows):
   // 1 = the near level (editor, walking cameras); an RTS camera sees all three
   // at once and asks for them all (alg-rts, 2026-10-01).
