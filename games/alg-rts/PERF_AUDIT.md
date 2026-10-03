@@ -35,9 +35,9 @@ release (Steam later, likely wrapped in Electron, but SOLID first). Two halves:
   visible, NOT minimised. A minimised or covered window stops drawing.
   Already launched with `--disable-backgrounding-occluded-windows`,
   `--disable-renderer-backgrounding` and `--disable-background-timer-throttling`.
-  Offered: add `--disable-features=CalculateNativeWinOcclusion` to the
-  chrome-devtools entry in `~/.claude.json` (needs the user's OK + an MCP
-  restart).
+  `--disable-features=CalculateNativeWinOcclusion` was added 2026-10-03 (the
+  user's OK; `~/.claude.json`, chrome-devtools entry): Windows no longer calls
+  a covered window occluded. Only minimising still stops it.
 - The laptop (MSI Thin 15) **throttles at ~87 °C after ~2 min**. Run A/B pairs
   back to back, take breaks, and don't trust one long run.
 - Check the **console, warnings too**, after every boot. A known warning:
