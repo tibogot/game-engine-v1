@@ -17,8 +17,13 @@
 //       fog     the shroud: 4 times a second (when fog of war is on)
 //       units   villages, built defences, units, combat pulses: 12 a second
 //       camera  the view's outline: when the camera moves
-//   • Units by kind: infantry dots, vehicles squares, aircraft arrows; the
-//     selection white, on top. A red pulse where a unit fires or is hit — a
+//   • TERRITORY (2026-10-03, CoH's sectors): each capture point owns the
+//     ground nearest it, tinted in its holder's colour with the sector
+//     borders; redrawn only when a point changes hands. The SUPPLY LINES
+//     (algEconomy.js) run from the post to every linked point; a point held
+//     but cut off is amber.
+//   • Units by kind: a FRENCH SQUAD is ONE marker (CoH), the ALN's men dots,
+//     vehicles squares, aircraft arrows; the selection white, on top. A red pulse where a unit fires or is hit — a
 //     fight starting off screen shows here.
 //   • Left click / drag: the camera goes there. RIGHT click: the selection
 //     moves there (selection.orderMove — the same order as on the ground).
@@ -282,7 +287,7 @@ function bakeBase(app, frame, px, world) {
 
 export function createMinimap({
   app, units, selection = null, structures = null, fogOfWar = null, requisition = null,
-  mount = document.body, intel = null, upYaw = 0, area = null,
+  mount = document.body, intel = null, upYaw = 0, area = null, squadOf = null,
 }) {
   const world = app.worldSize ?? 1000;
   const box = area ?? { x0: -world / 2, x1: world / 2, z0: -world / 2, z1: world / 2 };
@@ -312,7 +317,7 @@ export function createMinimap({
     root.appendChild(c);
     return { c, ctx: c.getContext("2d") };
   };
-  const base = layer("base"), fog = layer("fog"), dyn = layer("units"), cam = layer("camera");
+  const base = layer("base"), terr = layer("territory"), fog = layer("fog"), dyn = layer("units"), cam = layer("camera");
   base.ctx.drawImage(bakeBase(app, frame, px, world), 0, 0);
 
   // The clip and the frame: the play area's outline, in % of the box.
@@ -417,6 +422,51 @@ export function createMinimap({
     c.strokeStyle = "rgba(255,255,255,0.92)"; c.lineWidth = 1.2 * s; c.stroke();
   }
 
+  // ── Territory: the sectors, redrawn when a point changes hands ───────────
+  // Each sample of the map belongs to its NEAREST point (a Voronoi of the
+  // points, CoH's sectors drawn from them); tinted by its holder, with a
+  // border where two sectors meet. A cell grid of TERR_CELL device px.
+  const TERR_CELL = Math.max(2, Math.round(2 * dpr));
+  let terrKey = "";
+  function drawTerritory() {
+    const pts = requisition?.points ?? [];
+    const key = pts.map((p) => `${p.owner}${p.linked ? 1 : 0}`).join("|");
+    if (key === terrKey) return;
+    terrKey = key;
+    const c = terr.ctx;
+    c.clearRect(0, 0, px, px);
+    if (!pts.length) return;
+    const n = Math.ceil(px / TERR_CELL);
+    const own = new Int16Array(n * n);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const w = frame.toWorld((i + 0.5) * TERR_CELL, (j + 0.5) * TERR_CELL);
+      let best = 0, bd = Infinity;
+      for (let k = 0; k < pts.length; k++) {
+        const d = (pts[k].position.x - w.x) ** 2 + (pts[k].position.z - w.z) ** 2;
+        if (d < bd) { bd = d; best = k; }
+      }
+      own[j * n + i] = best;
+    }
+    const tint = (p) => (p.owner === "player" ? (p.linked === false ? "rgba(224,160,64,0.16)" : "rgba(90,174,255,0.17)")
+      : p.owner === "enemy" ? "rgba(255,95,78,0.17)" : null);
+    for (let k = 0; k < pts.length; k++) {
+      const f = tint(pts[k]);
+      if (!f) continue;
+      c.fillStyle = f;
+      c.beginPath();
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (own[j * n + i] === k) c.rect(i * TERR_CELL, j * TERR_CELL, TERR_CELL, TERR_CELL);
+      c.fill();
+    }
+    // The borders: a cell whose right or lower neighbour is another sector.
+    c.fillStyle = "rgba(236,228,204,0.4)";
+    c.beginPath();
+    for (let j = 0; j < n - 1; j++) for (let i = 0; i < n - 1; i++) {
+      const o = own[j * n + i];
+      if (own[j * n + i + 1] !== o || own[(j + 1) * n + i] !== o) c.rect(i * TERR_CELL + TERR_CELL * 0.25, j * TERR_CELL + TERR_CELL * 0.25, TERR_CELL * 0.5 + 0.5, TERR_CELL * 0.5 + 0.5);
+    }
+    c.fill();
+  }
+
   // ── Fog ──────────────────────────────────────────────────────────────────
   let fogT = 0, fogShown = false;
   function drawFog(now) {
@@ -481,6 +531,7 @@ export function createMinimap({
     _labels.length = 0;
   }
   const _foot = { enemy: [], player: [], sel: [] }, _veh = { enemy: [], player: [], sel: [] }, _air = { enemy: [], player: [], sel: [] };
+  const _squad = { enemy: [], player: [], sel: [] }, _sq = new Map();
   function drawUnits(now) {
     const c = dyn.ctx;
     c.clearRect(0, 0, px, px);
@@ -490,13 +541,28 @@ export function createMinimap({
     // a marker and the name — what the whole war is about, readable at a
     // glance (the old 4 px diamond read as a speck).
     const R = requisition?.params?.radius ?? 40;
+    // THE SUPPLY LINES: post → each linked point (algEconomy.js linkFrom).
+    // Dashed blue on a dark rim: they must not read as one more track.
+    c.beginPath();
+    for (const p of requisition?.points ?? []) {
+      if (!p.linkFrom) continue;
+      const a = frame.toMini(p.linkFrom.x, p.linkFrom.z), b = frame.toMini(p.position.x, p.position.z);
+      c.moveTo(a.x, a.y); c.lineTo(b.x, b.y);
+    }
+    c.lineCap = "round";
+    c.lineWidth = 3.4 * s; c.strokeStyle = "rgba(6,14,28,0.75)"; c.stroke();
+    c.setLineDash([5 * s, 3.5 * s]);
+    c.lineWidth = 1.7 * s; c.strokeStyle = "#7cc4ff"; c.stroke();
+    c.setLineDash([]);
+    c.lineCap = "butt";
     for (const p of requisition?.points ?? []) {
       // Always shown: the French know their own valley's villages (who
       // holds one is known from the economy, as in CoH).
-      const m = frame.toMini(p.position.x, p.position.z), rr = R * frame.k;
-      const col = p.owner === "player" ? COL.player : p.owner === "enemy" ? COL.enemy : "#e8dcbc";
+      const m = frame.toMini(p.position.x, p.position.z), rr = (p.radius ?? R) * frame.k;
+      // Held but cut off from the post (algEconomy.js supply lines): amber.
+      const col = p.owner === "player" ? (p.linked === false ? "#e0a040" : COL.player) : p.owner === "enemy" ? COL.enemy : "#e8dcbc";
       c.beginPath(); c.arc(m.x, m.y, rr, 0, Math.PI * 2);
-      c.fillStyle = p.owner === "player" ? "rgba(90,174,255,0.2)" : p.owner === "enemy" ? "rgba(255,95,78,0.22)" : "rgba(232,220,188,0.12)";
+      c.fillStyle = p.owner === "player" ? "rgba(90,174,255,0.14)" : p.owner === "enemy" ? "rgba(255,95,78,0.16)" : "rgba(232,220,188,0.1)";
       c.fill();
       c.strokeStyle = "rgba(10,12,8,0.6)"; c.lineWidth = 2.4 * s; c.stroke();
       c.strokeStyle = col; c.lineWidth = 1 * s; c.globalAlpha = 0.75; c.stroke(); c.globalAlpha = 1;
@@ -504,6 +570,18 @@ export function createMinimap({
       if (Math.abs(v) > 0.01 && Math.abs(v) < 0.999) {
         c.strokeStyle = v > 0 ? COL.player : COL.enemy; c.lineWidth = 2.6 * s;
         c.beginPath(); c.arc(m.x, m.y, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(v)); c.stroke();
+      }
+      // A SUPPLY POINT (fuel / munitions): a round token with its letter, no name.
+      if (p.kind === "supply") {
+        const r = 3.6 * s;
+        c.fillStyle = col; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.2 * s;
+        c.beginPath(); c.arc(m.x, m.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
+        c.fillStyle = "rgba(10,12,8,0.9)"; c.font = `700 ${Math.round(5 * s)}px sans-serif`; c.textAlign = "center"; c.textBaseline = "middle";
+        c.fillText(p.res === "fuel" ? "C" : "M", m.x, m.y + 0.3 * s);
+        // The resource's colour round it: fuel amber, munitions rust.
+        c.strokeStyle = p.res === "fuel" ? "#e2b25a" : "#d48a6a"; c.lineWidth = 1 * s;
+        c.beginPath(); c.arc(m.x, m.y, r + 1.4 * s, 0, Math.PI * 2); c.stroke();
+        continue;
       }
       // The marker: a flag-diamond, bigger than any unit.
       const r = 4.6 * s;
@@ -561,15 +639,28 @@ export function createMinimap({
     }
 
     // Units, bucketed by kind and colour, then one path per bucket.
-    for (const b of [_foot, _veh, _air]) for (const k in b) b[k].length = 0;
+    for (const b of [_foot, _veh, _air, _squad]) for (const k in b) b[k].length = 0;
+    _sq.clear();
     for (const u of units.list) {
       if (!u.alive) continue;
       if (u.team !== "player" && fogOfWar?.enabled && !fogOfWar.isVisible(u.position.x, u.position.z)) continue;
+      // A French squad: one marker at its men's centre (gathered below).
+      const sq = u.team === "player" && u.type?.foot ? squadOf?.(u) : null;
+      if (sq) {
+        const g = _sq.get(sq) ?? { x: 0, z: 0, n: 0, sel: false };
+        g.x += u.position.x; g.z += u.position.z; g.n++; g.sel ||= !!u.selected;
+        _sq.set(sq, g);
+        continue;
+      }
       const m = frame.toMini(u.position.x, u.position.z);
       const key = u.selected ? "sel" : u.team === "player" ? "player" : "enemy";
       if (u.isAir) _air[key].push(m.x, m.y, frame.upYaw - (u.heading ?? 0));
       else if (u.type?.foot) _foot[key].push(m.x, m.y);
       else _veh[key].push(m.x, m.y);
+    }
+    for (const g of _sq.values()) {
+      const m = frame.toMini(g.x / g.n, g.z / g.n);
+      _squad[g.sel ? "sel" : "player"].push(m.x, m.y);
     }
     // Outline FIRST, fill over it: a packed squad reads as one coloured mass
     // with a dark rim, not as a black knot of outlines.
@@ -584,6 +675,17 @@ export function createMinimap({
         const r = 1.9 * s;     // (1.55: a speck at play)
         for (let i = 0; i < f.length; i += 2) { c.moveTo(f[i] + r, f[i + 1]); c.arc(f[i], f[i + 1], r, 0, Math.PI * 2); }
         c.fillStyle = fill; c.stroke(); c.fill();
+      }
+      // squads: a bigger round badge with a dark centre (one per squad, CoH)
+      const q = _squad[key];
+      if (q.length) {
+        c.beginPath();
+        const r = 3.6 * s;
+        for (let i = 0; i < q.length; i += 2) { c.moveTo(q[i] + r, q[i + 1]); c.arc(q[i], q[i + 1], r, 0, Math.PI * 2); }
+        c.fillStyle = fill; c.stroke(); c.fill();
+        c.beginPath();
+        for (let i = 0; i < q.length; i += 2) { c.moveTo(q[i] + r * 0.38, q[i + 1]); c.arc(q[i], q[i + 1], r * 0.38, 0, Math.PI * 2); }
+        c.fillStyle = "rgba(8,12,20,0.8)"; c.fill();
       }
       // vehicles: squares
       const v = _veh[key];
@@ -640,7 +742,7 @@ export function createMinimap({
   function draw() {
     const now = performance.now();
     if (!hasIntel()) {
-      if (!locked) { locked = true; root.classList.add("locked"); fog.ctx.clearRect(0, 0, px, px); cam.ctx.clearRect(0, 0, px, px); lastCam = null; fogShown = false; }
+      if (!locked) { locked = true; root.classList.add("locked"); terr.ctx.clearRect(0, 0, px, px); terrKey = ""; fog.ctx.clearRect(0, 0, px, px); cam.ctx.clearRect(0, 0, px, px); lastCam = null; fogShown = false; }
       drawLocked(now);
       return;
     }
@@ -648,6 +750,7 @@ export function createMinimap({
     drawFog(now);
     if (now - unitsT >= 1000 / UNITS_HZ) {
       unitsT = now;
+      drawTerritory();
       watchCombat(now);
       drawUnits(now);
     }

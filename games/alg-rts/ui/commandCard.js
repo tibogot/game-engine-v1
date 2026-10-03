@@ -15,6 +15,19 @@
 // (unitBar.js). Per frame: only classes, a CSS variable and text on change.
 import { HOTKEY, hasIcon, iconStyle } from "./icons.js";
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
+import { costOf, hasCost } from "../algEconomy.js";
+
+// A price on a button: the effectifs, then the fuel / munitions under it.
+function costTag(c) {
+  const k = costOf(c);
+  const parts = [k.mp ? `<b>${k.mp}</b>` : "", k.fuel ? `<b class="fu">${k.fuel}</b>` : "", k.mun ? `<b class="mu">${k.mun}</b>` : ""].filter(Boolean);
+  return parts.length ? `<span class="co">${parts.join("")}</span>` : "";
+}
+// The same, spelled out for a tooltip.
+function costText(c) {
+  const k = costOf(c);
+  return [k.mp && `${k.mp} effectifs`, k.fuel && `${k.fuel} carburant`, k.mun && `${k.mun} munitions`].filter(Boolean).join(" · ");
+}
 
 const CSS = `
 #rts-cmd-card { height: 100%; display: flex; flex-direction: column; gap: 6px; font-family: var(--hud-sans); color: var(--hud-text); }
@@ -31,7 +44,10 @@ const CSS = `
 #rts-cmd-card .cc-b .pic { position: absolute; inset: 0 0 13px 0; background: center 22%/cover no-repeat; }
 #rts-cmd-card .cc-b .lb { position: relative; padding: 0 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 #rts-cmd-card .cc-b .hk { position: absolute; left: 3px; top: 2px; font: 700 9px var(--hud-mono); color: var(--hud-dim); }
-#rts-cmd-card .cc-b .co { position: absolute; right: 3px; top: 2px; font: 700 10px var(--hud-mono); color: var(--hud-brass); text-shadow: 0 1px 2px #000; }
+#rts-cmd-card .cc-b .co { position: absolute; right: 3px; top: 2px; font: 700 10px var(--hud-mono); color: var(--hud-brass); text-shadow: 0 1px 2px #000; display: flex; flex-direction: column; align-items: flex-end; line-height: 1.05; }
+#rts-cmd-card .cc-b .co b { font-weight: 700; }
+#rts-cmd-card .cc-b .co .fu { color: #e2b25a; }
+#rts-cmd-card .cc-b .co .mu { color: #d48a6a; }
 #rts-cmd-card .cc-b.verb { background: linear-gradient(#3a3520, #2a2717); border-color: rgba(201,165,74,0.5); }
 #rts-cmd-card .cc-b.verb:hover { background: linear-gradient(#463f25, #332f1c); border-color: var(--hud-brass); }
 #rts-cmd-card .cc-b.tier { border-color: var(--hud-brass); box-shadow: inset 0 0 0 1px rgba(201,165,74,0.35); }
@@ -50,6 +66,10 @@ const CSS = `
 #rts-cmd-card .cc-q { display: flex; gap: 4px; align-items: center; min-height: 34px; }
 #rts-cmd-card .cc-q .q { position: relative; width: 34px; height: 34px; flex: none; background: #1b1e17 center 22%/cover no-repeat; border: 1px solid #454c3a; border-radius: var(--hud-radius); }
 #rts-cmd-card .cc-q .q.first { width: 40px; height: 40px; border-color: var(--hud-brass); }
+#rts-cmd-card .cc-q .q { cursor: pointer; }
+#rts-cmd-card .cc-q .q:hover { border-color: var(--hud-red); }
+#rts-cmd-card .cc-q .q:hover::after { content: "✕"; position: absolute; inset: 0; display: grid; place-items: center;
+  font: 700 16px var(--hud-sans); color: #ffb0a2; background: rgba(40, 10, 6, 0.55); }
 #rts-cmd-card .cc-q .q .bar { position: absolute; left: 2px; right: 2px; bottom: 2px; height: 3px; background: #23261d; }
 #rts-cmd-card .cc-q .q .bar i { display: block; height: 100%; width: 0; background: var(--hud-brass); }
 #rts-cmd-card .cc-q .idle { font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--hud-dim); }
@@ -78,7 +98,8 @@ export function createCommandCard({
   onFocus = () => {},
   onBuild = () => {},          // (structure, key) — enqueue production on that structure
   productionFor = () => [],    // (structure) → [{ key, label, cost, locked, tier, tip }]
-  canAfford = () => true,      // (cost) → affordable right now?
+  canAfford = () => true,      // (cost) → affordable right now? (cost: a number = effectifs, or { mp, fuel, mun })
+  shortOf = () => "",          // (cost) → what is missing ("45 Carburant"), for the tooltip
   structureBuilds = [],        // [{ key, label, tip }] — what a builder can raise
   buildingCosts = {},          // { key: supplies }
   onBuildStructure = () => {},
@@ -109,11 +130,11 @@ export function createCommandCard({
     el.className = `cc-b${verb ? " verb" : ""}${tier ? " tier" : ""}${locked ? " locked" : ""}`;
     const hk = HOTKEY[key];
     el.innerHTML = `${pic ? `<span class="pic" style="background-image:url(${pic})"></span>` : icon && hasIcon(icon) ? `<span class="ic" style="${iconStyle(icon)}"></span>` : ""}`
-      + `${hk ? `<span class="hk">${hk}</span>` : ""}${cost ? `<span class="co">${cost}</span>` : ""}<span class="lb">${esc(label)}</span>`;
+      + `${hk ? `<span class="hk">${hk}</span>` : ""}${costTag(cost)}<span class="lb">${esc(label)}</span>`;
     const b = { el, kind, key, cost, label, info, locked, run };
     el.addEventListener("click", () => {
       if (b.locked || el.classList.contains("cool")) return;
-      if (b.cost > 0 && !canAfford(b.cost)) return;
+      if (hasCost(b.cost) && !canAfford(b.cost)) return;
       run();
     });
     el.addEventListener("mouseenter", () => showTip(b));
@@ -123,9 +144,9 @@ export function createCommandCard({
   }
   function showTip(b) {
     const hk = HOTKEY[b.key];
-    tip.innerHTML = `<div class="t"><b>${esc(b.label)}</b>${b.cost ? `<span>${b.cost} ravit.</span>` : ""}</div>`
+    tip.innerHTML = `<div class="t"><b>${esc(b.label)}</b>${hasCost(b.cost) ? `<span>${costText(b.cost)}</span>` : ""}</div>`
       + (b.info ? `<div class="d">${esc(b.info)}</div>` : "")
-      + (b.locked ? `<div class="l">Locked — ${esc(b.locked)}</div>` : b.cost && !canAfford(b.cost) ? `<div class="l">Not enough supplies</div>` : "")
+      + (b.locked ? `<div class="l">Locked — ${esc(b.locked)}</div>` : hasCost(b.cost) && !canAfford(b.cost) ? `<div class="l">Missing ${esc(shortOf(b.cost) || "resources")}</div>` : "")
       + (hk ? `<div class="k">Key <kbd>${hk}</kbd></div>` : "");
     tip.style.display = "block";
     const r = b.el.getBoundingClientRect(), panel = root.getBoundingClientRect();
@@ -239,7 +260,7 @@ export function createCommandCard({
           cdMax.delete(b.key);
         }
       }
-      if (b.cost > 0 && !b.locked) b.el.classList.toggle("poor", !canAfford(b.cost));
+      if (hasCost(b.cost) && !b.locked) b.el.classList.toggle("poor", !canAfford(b.cost));
     }
     if (baseRef) {
       const qEl = root.querySelector("#cc-q");
@@ -248,7 +269,7 @@ export function createCommandCard({
       if (qEl && sig !== queueSig) {
         queueSig = sig;
         qEl.innerHTML = queue.length
-          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="${esc(k)}">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
+          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" data-qi="${i}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="Click: cancel (full refund)">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
             + (queue.length > 7 ? `<span class="idle">+${queue.length - 7}</span>` : "")
           : `<span class="idle">${baseRef.constructing ? "Under construction" : "Nothing in training"}</span>`;
       }
@@ -256,6 +277,15 @@ export function createCommandCard({
       if (bar) bar.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;
     }
   }
+
+  // CANCEL a queued unit: a click on its portrait in the queue (refunded).
+  root.addEventListener("click", (e) => {
+    const q = e.target.closest?.("[data-qi]");
+    if (!q || !baseRef?.cancel) return;
+    baseRef.cancel(+q.dataset.qi);
+    queueSig = "";
+    refresh();
+  });
 
   // Hotkeys (printed key, AZERTY-safe): only orders on the card now.
   window.addEventListener("keydown", (e) => {

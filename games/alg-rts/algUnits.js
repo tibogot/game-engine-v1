@@ -14,6 +14,8 @@ import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { createAlgSquads, SQUADS } from "./algSquads.js";
+import { createAlgLastSeen } from "./algLastSeen.js";
+import { createAlgPathDots } from "./algPathDots.js";
 import { createAlgProducer } from "./algProducer.js";
 import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
@@ -28,7 +30,7 @@ import { createAlgSight } from "./algSight.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
-import { COSTS, createAlgEconomy } from "./algEconomy.js";
+import { COSTS, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
@@ -307,12 +309,17 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // houses are not built round the site's point — a ring there sat off to
     // one side, you, 2026-09-29), and a ksar from its souk (layout.js sitePoint).
     sites: LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => ({ ...s, ...villageCentre(s, showroom) })),
+    // The supply lines run from the post (a held point pays only if linked to it).
+    post: producers.find((p) => p.structure.typeKey === "post")?.centre ?? muster,
   });
   app.algEconomy = economy;
   // THE FRENCH TIERS (algTiers.js): unlocked from the post's card.
   const tiers = createAlgTiers(app, { economy });
   app.algTiers = tiers;
-  for (const p of producers) p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
+  for (const p of producers) {
+    p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
+    p.structure.refund = (key) => economy.purses[p.structure.team].earn(COSTS[key] ?? 0);
+  }
   // THE SQUADS (algSquads.js): the start army into squads; retreat to the
   // post's zone, heal and reinforce there.
   const postProd = producers.find((p) => p.structure.typeKey === "post") ?? null;
@@ -327,7 +334,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   squads.adopt(startMen.sapeur.filter(Boolean), "sapeur");
   // A faint ring round each village in its holder's colour (the shared ring
   // field: a thin band on a big circle).
-  const villageRings = createSelectionRingField({ app, max: 8, inner: 0.975, segments: 96, opacity: 0.55 });
+  const villageRings = createSelectionRingField({ app, max: 16, inner: 0.975, segments: 96, opacity: 0.55 });
 
   // ── The HUD (this game's files, ./ui/) ─────────────────────────────────
   const hud = createHudBar();
@@ -377,6 +384,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       return list;
     },
     canAfford: (cost) => economy.french.canAfford(cost),
+    shortOf: (cost) => economy.french.short(cost),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
@@ -468,7 +476,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
   const armyTabs = createArmyTabs({ units, selection, squads, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: economy, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY });
+  const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.squadOf(u) });
   // Top right now (resourceHud.js); the bottom strip is gone with it.
   const resourceHud = createResourceHud({ mount: document.body, troops: () => units.list.reduce((n, u) => n + (u.alive && u.team === "player" && !u.isStructure ? 1 : 0), 0) });
   hud.strip.style.display = "none";
@@ -517,7 +525,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   });
   app.algCombat = combat;
   app.algAccuracy = ACCURACY;   // dev: the table, live
-  grenades = createAlgGrenades({ app, units, projectiles: combat.projectiles, selection });
+  grenades = createAlgGrenades({ app, units, projectiles: combat.projectiles, selection, purse: economy.french });
   app.algGrenades = grenades;
 
   // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
@@ -533,7 +541,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // them), the French patrols and convoys along the tracks (algPatrols.js).
   const mines = createAlgMines(app, { units, combat: combat.combat });
   app.algMines = mines;
-  patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(`+${n} · convoi ${v.name}`) });
+  patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(`+${n.fuel} C +${n.mun} M · convoi ${v.name}`) });
   app.algPatrols = patrols;
 
   const sim = createSimClock({ hz: 60 });
@@ -541,10 +549,17 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // The game never sets them (scale 1, no step); the camera keeps real time.
   app.timeScale ??= 1;
   app.timeStep ??= 0;
+  // LAST SEEN (algLastSeen.js): where an enemy was when he dropped out of sight.
+  const ghostRings = createSelectionRingField({ app, max: 32, inner: 0.86, segments: 40, opacity: 0.5 });
+  const lastSeen = createAlgLastSeen({ app, units, fogOfWar, rings: ghostRings });
+  // THE PATH DOTS (algPathDots.js): the selected squads' routes on the ground.
+  const pathDots = createAlgPathDots({ app, selection, squads });
+  app.algPathDots = pathDots;
+  app.algLastSeen = lastSeen;
   app.addPreRenderHook((frameDt) => {
     let dt = frameDt * app.timeScale;
     if (app.timeStep) { dt = app.timeStep; app.timeStep = 0; }
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); squads.step(d); grenades.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
     searchlights.frame();
     combat.frame(dt);
     grenades.frame();
@@ -563,12 +578,17 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // is standing in one — always-on, they cluttered the map (you, 2026-09-29).
     villageRings.begin();
     const giving = selection.selected?.some((e) => e.team === "player" && !e.isStructure);
-    const R = economy.params.radius;
-    for (const v of economy.points) {
+    for (const v of economy.allPoints) {
+      const R = v.radius;
       const busy = giving || units.list.some((u) => u.alive && !u.isAir && Math.abs(u.position.x - v.position.x) < R && Math.abs(u.position.z - v.position.z) < R && Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < R);
-      if (busy) villageRings.add(v.position.x, v.position.z, R, v.owner === "player" ? 0x58a8ff : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
+      // Held but cut off from the post (no supply line): amber, it pays nothing.
+      if (busy) villageRings.add(v.position.x, v.position.z, R, v.owner === "player" ? (v.linked ? 0x58a8ff : 0xe0a040) : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
     }
     villageRings.commit();
+    ghostRings.begin();
+    lastSeen.frame(app.camera);
+    ghostRings.commit();
+    pathDots.frame();
     resourceHud.update(economy);
     healthBars.commit();
     selectionRings.commit();

@@ -179,6 +179,67 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       Tested in game: select-one → 6; losses → slots freed; retreat → home,
       healing; 2 reinforcements → slots 2 and 4 refilled with roles 2 and 4.
 - [ ] you, play it: squad sizes and prices, the retreat's speed, the reinforce cost.
+- [x] LAST SEEN markers (algLastSeen.js, 2026-10-03): an FLN man seen then
+      lost → a faint red ring + "? ×n, N s" where he was LAST SEEN (men lost
+      within 12 m merged). Goes when one is seen again near it, when you look
+      back at the spot after it was out of sight, or after 35 s. Dead men: none.
+      Tested with scripted men (merge, re-seen, look-again).
+- [ ] you, play it: the markers' size and how long they last (35 s).
+
+## FROM YOUR PLAY (2026-10-03)
+- [x] CANCEL a queued unit: click its portrait in the building's queue (a ✕
+      on hover), full refund (algProducer `cancel`, the economy's `refund`).
+- [x] Fields drawn OVER a sapper's site: worked soil (FieldSurfaces, draped
+      +0.1 m) hid the 6%-high foundation. The field shader now has HOLES
+      (up to 24 footprints, soft 0.5 m): a site clears the field under it
+      (algFields `cutHole`, called by algBuild; wire excepted).
+- [ ] **MINIMAP JUMPS: the ground texture takes time to update** (you): the
+      ground cache re-bakes its rings round the new focus, and until it has
+      the terrain shows unbaked / wrong. Ideas: a coarse ring covering the
+      WHOLE play box, baked once and never dropped (a jump always lands on
+      something right); bake the new focus centre-out first; or hold the old
+      tiles until the new ones are in.
+- [x] **THREE RESOURCES** (you: "the full three-resource economy", CoH):
+      algEconomy.js — Effectifs (from Algiers, 280/min less UPKEEP past 14
+      men and 5 per vehicle, floor 100), Carburant and Munitions from the
+      land. 6 SUPPLY POINTS on the pistes (Puits d'Ain Tighanimine M,
+      Carrefour C, Gué de l'oued C, Col du ravin M, Source d'Aïn Kerma M,
+      Débouché du ravin C; 12/min each, 22 m ring, capture 1.6x faster than
+      a village) + the villages pay all three. A point pays only while
+      LINKED to the post: a chain of held points ≤ 180 m apart (the ksar
+      needs the col, the far mechta the ford, the dechra Aïn Kerma); cut
+      off = amber, pays nothing. Costs: infantry effectifs; vehicles, the
+      Alouette and the tiers + fuel; the Légion + munitions; a GRENADE 15
+      munitions. The ALN keeps one purse. Strip top right: three stocks +
+      incomes; buttons show each resource; tooltip says what is missing;
+      a convoy brings 20/10/15.
+- [ ] you, play it: the prices and incomes (algEconomy P + COSTS, tiers in
+      algTiers) — first numbers, not tuned in a full game yet.
+- [ ] The ALN AI does not go for the supply points on purpose (its bands
+      take them only passing through): raid cut-off points, cut the lines.
+- [x] **PATH DOTS** (you, CoH screenshot): algPathDots.js — white dots
+      every 2.4 m along each selected squad's A* route (units.route, new
+      read-only getter in shared units.js), one trail per squad, eaten as
+      it walks. One draw (the ring field, filled discs).
+- [ ] PATHS, the rest: a cursor that says "can't go there", rock where
+      it's too steep.
+- [x] **MINIMAP BIGGER + CoH** (you): 236 → 320 px; TERRITORY sectors (each
+      point owns the ground nearest it, tinted by holder, borders; redrawn
+      only when a point changes hands); the SUPPLY LINES dashed from the
+      post; supply points as C / M tokens; ONE marker per French squad.
+- [ ] you, look: the minimap (sector tint strength, the line, the badges).
+- [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
+      do?" — later): measure the boot's stages first (alg.html already
+      logs them for its progress bar), then the usual suspects: the animal
+      morphs (~4.5 s), shader compiles / warm-up, the ground cache bake,
+      plants and props built on the main thread, textures not compressed.
+      nam went 46 → 24 s the same way.
+- [ ] **ANIMALS DIE** (you, 2026-10-03: "they have death animations, we
+      have blood and splashes"): the herds' animals take hits — stray
+      bullets, grenades, shells, napalm, fire — play their death clip, bleed
+      (the shared bloodField pools + spray, as the men), the body stays;
+      the rest bolt. Nobody aims at them. Later: a village whose flock you
+      killed turns against you. (Was parked below under BLOOD.)
 - [ ] next on this: veterancy per squad; the FLN's bands shown as squads to
       the player (their tabs when seen); retreat/reinforce icons (game-icons
       unreachable from here — text labels for now); the selection card
@@ -1431,7 +1492,7 @@ skinned to it) → judged in `games/shared-rts/soldier-lab.html`. In alg-rts
       the spread are GPU-side). ?blood=0 boots without. The flipbook dropped
       (your call).
 - [ ] blood: a gore switch in an options menu (the game has none yet)
-- [ ] **ANIMALS DIE in the fighting** (you, later): shells, grenades, napalm
+- [ ] (moved up to FROM YOUR PLAY 2026-10-03) **ANIMALS DIE in the fighting** (you, later): shells, grenades, napalm
       and fire kill the herds' animals near them (their death clips; the body
       stays, like the soldiers'); the rest bolt (they do). Nobody aims at them.
       Later: a village whose flock you killed turns against you.

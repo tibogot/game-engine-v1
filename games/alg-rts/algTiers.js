@@ -1,7 +1,8 @@
 // THE FRENCH TIERS (you, 2026-10-01: "motor pool → helipad → armour"): a
 // match with a shape, Company of Heroes style — infantry and light vehicles
 // first, the heliborne reserve once the valley is contested, armour last.
-// A tier is UNLOCKED from the post's card: it costs supplies and needs
+// A tier is UNLOCKED from the post's card: it costs effectifs + FUEL
+// (algEconomy.js — the land you hold pays for the next tier) and needs
 // villages held (the war is for the villages; the means follow them).
 // Locked units show on their building's card, greyed, saying what unlocks
 // them. Once unlocked a tier stays (losing a village later doesn't take the
@@ -13,11 +14,11 @@ export const TIERS = [
   },
   {
     n: 2, name: "Moyens héliportés", note: "the helipad opens: paras, the Alouette; the half-track",
-    units: ["para", "alouette", "halftrack"], cost: 150, villages: 1,
+    units: ["para", "alouette", "halftrack"], cost: { mp: 150, fuel: 40 }, villages: 1,
   },
   {
     n: 3, name: "Blindés", note: "armour: the EBR, the AMX-13; the Légion",
-    units: ["ebr", "amx13", "legion"], cost: 250, villages: 2,
+    units: ["ebr", "amx13", "legion"], cost: { mp: 200, fuel: 90 }, villages: 2,
   },
 ];
 const tierOfUnit = Object.fromEntries(TIERS.flatMap((t) => t.units.map((u) => [u, t.n])));
@@ -31,7 +32,8 @@ export function createAlgTiers(app, { economy }) {
   function blockedBy(t = next()) {
     if (!t) return "all unlocked";
     if (economy.held < t.villages) return `hold ${t.villages} village${t.villages > 1 ? "s" : ""} (you hold ${economy.held})`;
-    if (!economy.french.canAfford(t.cost)) return `${t.cost} supplies`;
+    // Ends "supplies": the card shows it as merely too poor, not locked.
+    if (!economy.french.canAfford(t.cost)) return `${economy.french.short?.(t.cost) || "more"} supplies`;
     return null;
   }
   return {

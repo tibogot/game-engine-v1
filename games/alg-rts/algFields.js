@@ -25,13 +25,16 @@
 // along the contour. Their scrub and grass are cleared (it is worked land).
 // ?fields=0 = without.
 import * as THREE from "three";
-import { Fn, attribute, positionLocal, uv, sin, cos, float, vec2, vec3, mix, smoothstep, min, max, fract, floor, step, normalize, varying, texture, dFdx, dFdy, log2, exp2, transformNormalToView } from "three/tsl";
+import { Fn, attribute, positionLocal, uv, sin, cos, float, vec2, vec3, vec4, mix, smoothstep, min, max, abs, fract, floor, step, normalize, varying, texture, dFdx, dFdy, log2, exp2, transformNormalToView, uniform, uniformArray, Loop, int } from "three/tsl";
 import { drapeY, drapedPosition } from "../shared-rts/terrainDrape.js";
 import { buildFieldWallSegment } from "../../v3/render/objects/rtsAlgVillage.js";
 import { TRACK_LINES } from "./algTracks.js";
 import { LAYOUT, PLAY } from "./layout.js";
 import { kitView } from "./showroom.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
+
+/** Buildings that can clear the fields under them (the field shader's hole list). */
+const MAX_HOLES = 24;
 
 const P = {
   perVillage: { hamlet: 10, dechra: 12, ksar: 15 },
@@ -259,6 +262,8 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
   return {
     params: P, plots, walls, surface, hedge,
     concealAt,
+    /** A building put down here clears the field under it (algBuild.js). */
+    cutHole: (x, z, hx, hz, yaw) => surface?.userData?.cutHole?.(x, z, hx, hz, yaw) ?? false,
     /** Hard cover along the walls, for the cover bake (algCover.js). */
     *coverCircles() { for (const c of cover) yield { x: c.x, z: c.z, radius: 1.1, size: 0.8, hard: true }; },
     stats: { plots: plots.length, wallSegments: cover.length, hedgePlants: hedge.length, stonesCleared },
@@ -323,6 +328,14 @@ function buildSurface(app, plots) {
   mat.forceSinglePass = true;
   const HT = app.heightTexNode;
   const vN = varying(vec3(0, 1, 0), "vFieldGroundN");
+  const vW = varying(vec2(0, 0), "vFieldWorld");
+  // HOLES (2026-10-03, you: "the field stays on top of the construction"):
+  // a building put down on a field clears it under its footprint (+0.6 m),
+  // as CoH does. Up to MAX_HOLES rectangles: (x, z, cos, sin) + (hx, hz).
+  const holeA = Array.from({ length: MAX_HOLES }, () => new THREE.Vector4(0, 0, 1, 0));
+  const holeB = Array.from({ length: MAX_HOLES }, () => new THREE.Vector4(0, 0, 0, 0));
+  const uHoleA = uniformArray(holeA, "vec4"), uHoleB = uniformArray(holeB, "vec4");
+  const uHoles = uniform(0);
   mat.positionNode = Fn(() => {
     const f = attribute("aField", "vec4"), f2 = attribute("aField2", "vec4");
     const s = sin(f.z), c = cos(f.z);
@@ -332,6 +345,7 @@ function buildSurface(app, plots) {
     const hx = drapeY(HT, wx.sub(1), wz).sub(drapeY(HT, wx.add(1), wz));
     const hz = drapeY(HT, wx, wz.sub(1)).sub(drapeY(HT, wx, wz.add(1)));
     vN.assign(normalize(vec3(hx, float(2), hz)));
+    vW.assign(vec2(wx, wz));
     return drapedPosition(HT, wx, wz, 0.1);
   })();
 
@@ -409,7 +423,18 @@ function buildSurface(app, plots) {
     return transformNormalToView(normalize(vN.add(ax.mul(nt.x)).add(az.mul(nt.y))));
   })();
   // Feathered, uneven edges (a worked field has no ruled border).
-  mat.opacityNode = smoothstep(0.2, 1.5, edgeM.add(rag)).mul(0.97);
+  mat.opacityNode = Fn(() => {
+    const keep = float(1).toVar();
+    Loop({ start: int(0), end: int(uHoles) }, ({ i }) => {
+      const A = uHoleA.element(i), B = uHoleB.element(i);
+      const d = vW.sub(A.xy);
+      const lx = abs(d.x.mul(A.z).sub(d.y.mul(A.w))), lz = abs(d.x.mul(A.w).add(d.y.mul(A.z)));
+      // Soft by 0.5 m outside the footprint.
+      const out = max(lx.sub(B.x), lz.sub(B.y));
+      keep.mulAssign(smoothstep(0, 0.5, out));
+    });
+    return smoothstep(0.2, 1.5, edgeM.add(rag)).mul(0.97).mul(keep);
+  })();
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = "FieldSurfaces";
@@ -418,5 +443,14 @@ function buildSurface(app, plots) {
   mesh.castShadow = false;
   mesh.receiveShadow = true;    // lit like the ground round it
   app.scene.add(mesh);
+  /** Clear the fields under a footprint (centre, half sizes, yaw); false when full. */
+  mesh.userData.cutHole = (x, z, hx, hz, yaw = 0) => {
+    const n = uHoles.value;
+    if (n >= MAX_HOLES) return false;
+    holeA[n].set(x, z, Math.cos(yaw), Math.sin(yaw));
+    holeB[n].set(hx + 0.6, hz + 0.6, 0, 0);
+    uHoles.value = n + 1;
+    return true;
+  };
   return mesh;
 }

@@ -19,7 +19,8 @@ const P = {
   reach: 9,             // "there" for the leader
   spacingFoot: 5, spacingVehicle: 14,
   reorderMove: 6,       // re-path a man only when his goal moved this far
-  convoyPay: 30, convoyEvery: 120, convoyR: 70,   // the piste stops at the village edge
+  // A delivery (algEconomy.js resources): what a truck brings a village it holds.
+  convoyPay: { mp: 20, fuel: 10, mun: 15 }, convoyEvery: 120, convoyR: 70,   // the piste stops at the village edge
 };
 
 /** Cumulative arc length along a line of {x, z}. */

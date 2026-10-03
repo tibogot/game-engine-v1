@@ -1,54 +1,125 @@
 // THE ECONOMY — this war's, not nam's. What both sides fight over is the
-// POPULATION: the mechtas and the dechra.
+// POPULATION (the mechtas, the dechra, the ksar) and the ROADS between them.
 //
-//   INFLUENCE  each village has a value, −1 (the ALN's) … +1 (the French's).
+// THREE RESOURCES for the French (2026-10-03, you: "the full three-resource
+// economy", Company of Heroes):
+//   EFFECTIFS  (mp)   manpower: flows from Algiers all the time, less an
+//                     UPKEEP per man and vehicle in the field. Buys and
+//                     reinforces infantry, part of everything.
+//   CARBURANT  (fuel) from the land: villages, fuel points. Vehicles, the
+//                     Alouette, the tiers.
+//   MUNITIONS  (mun)  from the land: villages, munition points. Grenades,
+//                     the Légion, (later) abilities and upgrades.
+// A point PAYS only while LINKED to the post — a chain of points the French
+// hold, each within LINK m of the next (CoH's supply lines): lose the one in
+// between and the far ones stop paying.
+//
+//   INFLUENCE  each point has a value, −1 (the ALN's) … +1 (the French's).
 //              Men ON FOOT within 40 m push it their way (not vehicles) — the more
-//              men, the faster (up to three count); both sides there, the
-//              stronger pushes. Nobody there, it drifts back toward neutral
-//              (a village left alone for two minutes is nobody's). Past
-//              ±0.6 the village is HELD, and stays held until the value
-//              crosses back through 0.
-//   INCOME     the French: Algiers' budget (a base) + each village they hold.
-//              The ALN: a small base + each village it holds + each arms
-//              cache still standing (burn the caches and the katiba starves).
+//              men, the faster (up to three count). Nobody there, it drifts
+//              back toward neutral. Past ±0.6 the point is HELD, and stays held
+//              until the value crosses back through 0.
+//   POINTS     `points`  the VILLAGES (the war's score, the AI, the objectives);
+//              `supply`  the FUEL / MUNITION points along the pistes;
+//              `allPoints` both (the map's markers and rings).
+//   THE ALN    keeps ONE purse (its supplies): a small base + its villages +
+//              each arms cache still standing.
 //   COSTS      charged when a unit is QUEUED (algProducer.js), refused if the
-//              purse can't pay.
-//
-// Villages are shaped as the minimap's points ({position, owner, progress}),
-// so the tactical map shows them in their holder's colour for free.
+//              purse can't pay. A number = effectifs alone.
 import * as THREE from "three";
 
+/** What each unit costs: French { mp, fuel, mun } (per SQUAD for infantry), the ALN's a number. */
 export const COSTS = {
-  // French infantry: per SQUAD (algSquads.js: 6 appelés, 2 sapeurs, 5 paras,
-  // 5 légionnaires), a little under the old per-man price × the squad.
-  appele: 300, sapeur: 150, para: 450, legion: 650, willys: 90, gmc: 110, halftrack: 160, ebr: 220, amx13: 260, alouette: 320,
+  appele: { mp: 270 }, sapeur: { mp: 170 },
+  para: { mp: 320, fuel: 25 }, legion: { mp: 380, mun: 45 },
+  willys: { mp: 110, fuel: 20 }, gmc: { mp: 140, fuel: 30 }, halftrack: { mp: 190, fuel: 50 },
+  ebr: { mp: 240, fuel: 75 }, amx13: { mp: 290, fuel: 105 }, alouette: { mp: 280, fuel: 120 },
   moudjahid: 40, fmTeam: 70,
 };
 
+/** The three, in display order. */
+export const RES = [
+  { key: "mp", name: "Effectifs", short: "", cls: "mp" },
+  { key: "fuel", name: "Carburant", short: "C", cls: "fuel" },
+  { key: "mun", name: "Munitions", short: "M", cls: "mun" },
+];
+
+/** A cost as { mp, fuel, mun } (a number = effectifs). */
+export function costOf(c) {
+  if (c == null) return { mp: 0, fuel: 0, mun: 0 };
+  if (typeof c === "number") return { mp: c, fuel: 0, mun: 0 };
+  return { mp: c.mp ?? 0, fuel: c.fuel ?? 0, mun: c.mun ?? 0 };
+}
+export const hasCost = (c) => { const k = costOf(c); return k.mp > 0 || k.fuel > 0 || k.mun > 0; };
+
+/** The supply points (fuel / munitions), on the pistes between the post and the villages. */
+const SUPPLY = [
+  { name: "Puits d'Ain Tighanimine", x: 134, z: 157, res: "mun" },   // the oasis' dry north shore (132,128 is the pond)
+  { name: "Carrefour de la piste", x: 2, z: 177, res: "fuel" },
+  { name: "Gué de l'oued", x: 193, z: 20, res: "fuel" },          // beside the ford (181,32 is half in the oued)
+  { name: "Col du ravin", x: 19, z: -14, res: "mun" },
+  { name: "Source d'Aïn Kerma", x: -110, z: 150, res: "mun" },         // the step from the crossroads to the dechra
+  { name: "Débouché du ravin", x: -78, z: -82, res: "fuel" },
+];
+
 const P = {
-  // ~3x the French income (you, 2026-10-02: "it takes long to be able to
-  // build things"): 40/min was one appelé every 90 s with nothing held. Now
-  // one every 30 s from Algiers alone; villages still clearly pay (CoH:
-  // manpower always flows, territory pays for the expensive things).
-  start: { player: 600, enemy: 240 },
-  base: { player: 120, enemy: 15 },       // per minute (the ALN's: algDifficulty)
-  village: { hamlet: 40, dechra: 60, ksar: 80 },    // per minute to its holder (a ksar: a market town)
+  start: { player: { mp: 600, fuel: 40, mun: 50 }, enemy: 240 },
+  // Per minute. The French: Algiers' effectifs, a trickle of the rest.
+  base: { player: { mp: 280, fuel: 4, mun: 6 }, enemy: 15 },
+  // UPKEEP (effectifs a minute): every man past the first UPKEEP_FREE, every vehicle.
+  upkeepMan: 1.5, upkeepVehicle: 5, upkeepFree: 14, mpFloor: 100,
+  // A village to its holder (the ALN: one number, as before).
+  village: {
+    hamlet: { mp: 20, fuel: 6, mun: 8 }, dechra: { mp: 25, fuel: 8, mun: 10 }, ksar: { mp: 30, fuel: 10, mun: 12 },
+  },
+  villageAln: { hamlet: 40, dechra: 60, ksar: 80 },
+  supplyPoint: 12,                        // its resource a minute
+  // m between two held points of a supply line. 180: the ksar needs the col,
+  // the far mechta the ford, the dechra Aïn Kerma (240 linked nearly all
+  // straight to the post).
+  link: 180,
   cache: 15,                              // per minute per standing arms cache (ALN)
   radius: 40,
-  // Influence per second per man (up to 3). 0.02 turned a neutral village in
-  // 10 s — the "the FLN is working it" alert came too late to answer
-  // (2026-10-01). Now ~20 s from neutral with 3+, ~53 s to win one back.
+  supplyRadius: 22,                       // a supply point's capture ring
+  // Influence per second per man (up to 3): ~20 s from neutral with 3+.
   push: 0.01,
   drift: 0.005,                           // back toward 0 per second, nobody there
   hold: 0.6,
 };
 
+/** The ALN's one-number purse. */
 function purse(start) {
   const p = {
     stock: start,
-    earn(n) { p.stock += n; },
-    spend(n) { if (p.stock < n) return false; p.stock -= n; return true; },
-    canAfford(n) { return p.stock >= n; },
+    earn(n) { p.stock += typeof n === "number" ? n : (n?.mp ?? 0); },
+    spend(n) { const c = costOf(n).mp; if (p.stock < c) return false; p.stock -= c; return true; },
+    canAfford(n) { return p.stock >= costOf(n).mp; },
+  };
+  return p;
+}
+/**
+ * The French purse: three stocks. `stock` is the effectifs (the old calls:
+ * a number spent, earned or checked is effectifs).
+ */
+function purse3(start) {
+  const p = {
+    mp: start.mp, fuel: start.fuel, mun: start.mun,
+    get stock() { return p.mp; },
+    set stock(v) { p.mp = v; },
+    earn(n) { const c = costOf(n); p.mp += c.mp; p.fuel += c.fuel; p.mun += c.mun; },
+    canAfford(n) { const c = costOf(n); return p.mp >= c.mp && p.fuel >= c.fuel && p.mun >= c.mun; },
+    spend(n) {
+      if (!p.canAfford(n)) return false;
+      const c = costOf(n);
+      p.mp -= c.mp; p.fuel -= c.fuel; p.mun -= c.mun;
+      return true;
+    },
+    /** What is short for `n` (for a tooltip): "45 Carburant", or "". */
+    short(n) {
+      const c = costOf(n), out = [];
+      for (const r of RES) if (p[r.key] < c[r.key]) out.push(`${Math.ceil(c[r.key] - p[r.key])} ${r.name}`);
+      return out.join(", ");
+    },
   };
   return p;
 }
@@ -57,35 +128,78 @@ function purse(start) {
  * @param {object} o
  * @param {object[]} o.sites   layout sites (kind "hamlet" / "dechra", x, z, name)
  * @param {object} o.structures algStructures (the arms caches)
+ * @param {{x:number,z:number}} [o.post]  the French post (the supply lines' root)
  */
-export function createAlgEconomy({ app, units, sites, structures }) {
-  const purses = { player: purse(P.start.player), enemy: purse(P.start.enemy) };
+export function createAlgEconomy({ app, units, sites, structures, post = null }) {
+  const purses = { player: purse3(P.start.player), enemy: purse(P.start.enemy) };
+  const at = (x, z) => new THREE.Vector3(x, app.getWorldHeight?.(x, z) ?? 0, z);
   const points = sites.map((s) => ({
-    name: s.name, kind: s.kind,
-    position: new THREE.Vector3(s.x, app.getWorldHeight?.(s.x, s.z) ?? 0, s.z),
-    value: 0, owner: null, progress: 0,
+    name: s.name, kind: s.kind, position: at(s.x, s.z),
+    value: 0, owner: null, progress: 0, linked: false, linkFrom: null, radius: P.radius,
   }));
+  const supply = SUPPLY.map((s) => ({
+    name: `${s.name} · ${s.res === "fuel" ? "carburant" : "munitions"}`, kind: "supply", res: s.res,
+    position: at(s.x, s.z), value: 0, owner: null, progress: 0, linked: false, linkFrom: null, radius: P.supplyRadius,
+  }));
+  const allPoints = [...points, ...supply];
   let tick = 0;
 
-  function incomePerMinute(team) {
-    let n = P.base[team];
-    for (const v of points) if (v.owner === team) n += P.village[v.kind] ?? P.village.hamlet;
-    if (team === "enemy") n += P.cache * structures.list.filter((s) => s.typeKey === "armsCache" && s.alive).length;
-    return n;
+  /** Which French points are linked to the post (a chain of held points, each within LINK m). */
+  function relink() {
+    for (const v of allPoints) { v.linked = false; v.linkFrom = null; }
+    if (!post) { for (const v of allPoints) v.linked = v.owner === "player"; return; }
+    // Breadth first from the post: each point hangs off the NEAREST linked one
+    // reached first (the minimap draws these as the supply lines).
+    const front = [{ position: { x: post.x, z: post.z } }];
+    for (let i = 0; i < front.length; i++) {
+      const a = front[i];
+      for (const v of allPoints) {
+        if (v.linked || v.owner !== "player") continue;
+        if (Math.hypot(v.position.x - a.position.x, v.position.z - a.position.z) <= P.link) { v.linked = true; v.linkFrom = a.position; front.push(v); }
+      }
+    }
+  }
+
+  /** The upkeep: effectifs a minute for the French army in the field. */
+  function upkeep() {
+    let men = 0, veh = 0;
+    for (const u of units.list) {
+      if (!u.alive || u.team !== "player" || u.isStructure) continue;
+      if (u.type?.foot) men++; else veh++;
+    }
+    return Math.max(0, men - P.upkeepFree) * P.upkeepMan + veh * P.upkeepVehicle;
+  }
+
+  /** Income a minute: the French { mp, fuel, mun }, the ALN a number. */
+  function incomeOf(team) {
+    if (team === "enemy") {
+      let n = P.base.enemy;
+      for (const v of points) if (v.owner === "enemy") n += P.villageAln[v.kind] ?? P.villageAln.hamlet;
+      n += P.cache * structures.list.filter((s) => s.typeKey === "armsCache" && s.alive).length;
+      return n;
+    }
+    const inc = { ...P.base.player };
+    for (const v of points) {
+      if (v.owner !== "player" || !v.linked) continue;
+      const g = P.village[v.kind] ?? P.village.hamlet;
+      inc.mp += g.mp; inc.fuel += g.fuel; inc.mun += g.mun;
+    }
+    for (const v of supply) if (v.owner === "player" && v.linked) inc[v.res] += P.supplyPoint;
+    inc.mp = Math.max(P.mpFloor, inc.mp - upkeep());
+    return inc;
   }
 
   function stepInfluence(dt) {
-    for (const v of points) {
+    for (const v of allPoints) {
       let fr = 0, al = 0;
       for (const u of units.list) {
-        // MEN ON FOOT only (as the proposal, and CoH's capture): a tank parked
-        // in a mechta wins nobody over.
+        // MEN ON FOOT only (CoH's capture): a tank parked in a mechta wins nobody over.
         if (!u.alive || u.isAir || u.ghost || !u.type?.foot) continue;
-        if (Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) > P.radius) continue;
+        if (Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) > v.radius) continue;
         if (u.team === "player") fr++; else if (u.team === "enemy") al++;
       }
       const net = Math.max(-3, Math.min(3, fr - al));
-      if (fr || al) v.value += net * P.push * dt;
+      if (fr || al) v.value += net * P.push * dt * (v.kind === "supply" ? 1.6 : 1);
       else v.value -= Math.sign(v.value) * Math.min(Math.abs(v.value), P.drift * dt);
       v.value = Math.max(-1, Math.min(1, v.value));
       if (v.value >= P.hold) v.owner = "player";
@@ -102,16 +216,27 @@ export function createAlgEconomy({ app, units, sites, structures }) {
     purses,
     french: purses.player,
     aln: purses.enemy,
-    /** The minimap reads these as its points. */
+    /** The VILLAGES (the war's score). */
     points,
+    /** The fuel and munition points. */
+    supply,
+    /** Villages and supply points (the map's markers, rings, minimap). */
+    allPoints,
     get held() { return points.filter((v) => v.owner === "player").length; },
     get heldByEnemy() { return points.filter((v) => v.owner === "enemy").length; },
-    incomePerMinute,
-    /** Fixed clock: influence every half second, income every second. */
+    /** French points held but cut off from the post (they pay nothing). */
+    get cutOff() { return allPoints.filter((v) => v.owner === "player" && !v.linked).length; },
+    incomeOf,
+    upkeep,
+    /** The old call: effectifs a minute (French) / supplies (ALN). */
+    incomePerMinute: (team) => (team === "enemy" ? incomeOf("enemy") : incomeOf("player").mp),
+    /** Fixed clock: influence, links and income every step. */
     step(dt) {
       tick += dt;
       stepInfluence(dt);
-      for (const team of ["player", "enemy"]) purses[team].earn((incomePerMinute(team) / 60) * dt);
+      relink();
+      purses.player.earn(Object.fromEntries(Object.entries(incomeOf("player")).map(([k, v]) => [k, (v / 60) * dt])));
+      purses.enemy.earn((incomeOf("enemy") / 60) * dt);
     },
   };
 }

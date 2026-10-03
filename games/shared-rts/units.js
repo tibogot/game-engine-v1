@@ -330,6 +330,9 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       if (arrived) target.copy(pos);
     },
 
+    /** The route still ahead ([{x,z}], read-only; null when arrived) — the path dots. */
+    get route() { return arrived || type.isAir ? null : waypoints; },
+
     /** Debug snapshot — used by the dev panel to see why a unit is stuck. */
     debugState() {
       return {

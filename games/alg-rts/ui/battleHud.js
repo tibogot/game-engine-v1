@@ -96,6 +96,12 @@ const CSS = `
 .alg-vmark.player .flag { background: #5aaeff; } .alg-vmark.enemy .flag { background: #ff5f4e; }
 .alg-vmark .cap { width: 64px; height: 5px; background: rgba(20,22,16,0.85); border: 1px solid rgba(0,0,0,0.7); position: relative; }
 .alg-vmark .cap i { position: absolute; top: 0; bottom: 0; }
+/* A SUPPLY POINT (algEconomy.js): a round token with its letter, smaller. */
+.alg-vmark.supply .flag { transform: none; border-radius: 50%; width: 15px; height: 15px; font: 800 9px/15px var(--hud-sans, sans-serif); text-align: center; color: rgba(10,12,8,0.9); }
+.alg-vmark.supply .name { font-size: 10px; opacity: 0.85; }
+.alg-vmark.supply .cap { width: 40px; height: 4px; }
+/* Held, but cut off from the post: pays nothing. */
+.alg-vmark.player.cut .flag { background: #e0a040; }
 .alg-vmark .cap::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(239,232,210,0.6); }
 
 .alg-modal-back {
@@ -248,7 +254,8 @@ export function createBattleHud({ camera, canvas, onJump }) {
         const node = document.createElement("div");
         node.className = "alg-vmark";
         node.innerHTML = `<div class="flag"></div><div class="name"></div><div class="cap"><i></i></div>`;
-        node.querySelector(".name").textContent = p.name;
+        node.querySelector(".name").textContent = p.kind === "supply" ? p.name.split(" · ")[0] : p.name;
+        if (p.kind === "supply") node.querySelector(".flag").textContent = p.res === "fuel" ? "C" : "M";
         for (const el of node.querySelectorAll(".flag, .name")) {
           el.addEventListener("pointerenter", () => { hovered = p; });
           el.addEventListener("pointerleave", () => { if (hovered === p) hovered = null; });
@@ -267,10 +274,10 @@ export function createBattleHud({ camera, canvas, onJump }) {
       const sx = r.left + (pv.x * 0.5 + 0.5) * r.width, sy = r.top + (-pv.y * 0.5 + 0.5) * r.height;
       m.node.style.transform = `translate(${sx.toFixed(0)}px, ${sy.toFixed(0)}px) translate(-50%, -100%)`;
       const v = p.progress ?? 0;
-      const key = `${p.owner}|${v.toFixed(2)}`;
+      const key = `${p.owner}|${v.toFixed(2)}|${p.linked}`;
       if (key === m.last) continue;
       m.last = key;
-      m.node.className = `alg-vmark ${p.owner ?? ""}`;
+      m.node.className = `alg-vmark ${p.owner ?? ""}${p.kind === "supply" ? " supply" : ""}${p.owner === "player" && p.linked === false ? " cut" : ""}`;
       // The bar fills from the centre: right (blue) toward the French, left (red) toward the FLN.
       Object.assign(m.cap.style, v >= 0
         ? { left: "50%", right: "", width: `${v * 50}%`, background: "#5aaeff" }

@@ -63,6 +63,16 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
       structure.queue.push(key);
       return true;
     },
+    /** Set by the economy: (key) → give its price back. */
+    refund: null,
+    /** CANCEL the queue's `i`th unit (the one in training too): full refund. */
+    cancel(i) {
+      if (i < 0 || i >= structure.queue.length) return false;
+      const [key] = structure.queue.splice(i, 1);
+      if (i === 0) structure.progress = 0;
+      structure.refund?.(key);
+      return true;
+    },
   };
 
   let t = 0, openUntil = -1;

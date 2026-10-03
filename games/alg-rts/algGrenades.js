@@ -26,6 +26,7 @@ export const GRENADE = {
   blast: 5,         // metres of the blast (splash)
   damage: 70,       // at the centre (a moudjahid has 60)
   cooldown: 30,     // s per man
+  cost: { mun: 15 }, // the French pay MUNITIONS per throw (algEconomy.js), charged as it starts
   clipStart: 0.6,   // s into grenade_throw where the throw starts
   release: 1.25,    // s after that the grenade leaves the hand
   done: 2.0,        // s after that he is back to his rifle
@@ -38,8 +39,9 @@ export const GRENADE = {
  * @param {object} o.projectiles  (spawnArc, drawWarnings)
  * @param {object} o.selection    the shared selection (selected)
  * @param {() => void} [o.onChange]  the command card to refresh (a throw started / a cooldown ended)
+ * @param {object} [o.purse]       the French purse (a throw costs munitions); none = free
  */
-export function createAlgGrenades({ app, units, projectiles, selection, onChange = () => {} }) {
+export function createAlgGrenades({ app, units, projectiles, selection, onChange = () => {}, purse = null }) {
   const P = GRENADE;
   const dom = app.renderer.domElement;
   const rings = createSelectionRingField({ app, max: 24, inner: 0.9, opacity: 0.8 });
@@ -56,13 +58,13 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
     if (!men.length) return null;
     const cds = men.map((u) => (u.throwing ? P.cooldown : Math.max(0, u.grenadeCd ?? 0)));
     const cd = Math.min(...cds);
-    return { key: "grenade", label: "Grenade", hint: `A man throws a grenade (${P.range} m, blast ${P.blast} m): damage, and men near it go down. G.`, ready: cd <= 0, cooldown: Math.ceil(cd) };
+    return { key: "grenade", label: "Grenade", cost: purse ? P.cost : undefined, hint: `A man throws a grenade (${P.range} m, blast ${P.blast} m): damage, and men near it go down. G.`, ready: cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd) };
   }
 
   // ── Aiming ───────────────────────────────────────────────────────────────
   function begin(sel = selection.selected) {
     const men = (sel ?? []).filter((u) => ready(u) && u.team === "player");
-    if (!men.length) return false;
+    if (!men.length || (purse && !purse.canAfford(P.cost))) return false;
     targeting = { sel: men, at: null };
     dom.style.cursor = "crosshair";
     return true;
@@ -127,6 +129,8 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
         // Walking into reach; the player moving him elsewhere cancels.
         if (job.walking && !u.isMoving) { end(job, i); continue; }
         if (dist(u, job) > P.range * 0.95) continue;
+        // The French pay as the throw starts (the munitions ran out meanwhile: no throw).
+        if (purse && u.team === "player" && !purse.spend(P.cost)) { end(job, i); continue; }
         u.stop();
         u.faceToward(job.x, job.z);
         u.throwing = { start: P.clipStart };

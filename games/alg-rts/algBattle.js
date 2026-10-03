@@ -273,13 +273,13 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (started && clock > startAt + 3) advise("start", "Drag a box round your men, then <b>right-click</b> near a village to send them there. Click an objective to look at it.");
     const footIn = units.list.some((u) => u.alive && u.team === "player" && u.type?.foot && economy.points.some((v) => Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < economy.params.radius));
     if (footIn) advise("inRing", "Keep them in the ring: the bar under the village's name fills toward you. Only men on foot count; more men, faster (up to 3).");
-    if (economy.held > 0) advise("firstVillage", "A village of yours pays supplies and counts as a point. The FLN will try to turn it back — <b>leave a few men</b> in it.");
+    if (economy.held > 0) advise("firstVillage", "A village of yours pays effectifs, fuel and munitions (while linked to the post) and counts as a point. The FLN will try to turn it back — <b>leave a few men</b> in it.");
     if (stats.lostFr > 0 || told.has("contactSeen")) advise("contact", "Under fire: hold <b>V</b> to see cover (green) and concealment (cyan). Men behind walls and rocks live; men in the open don't.");
     if (economy.heldByEnemy > economy.held) advise("bleeding", "The FLN holds more villages than you: <b>your score is falling</b>. Take one back.");
-    if (economy.french.stock >= 260 && clock > 60) advise("build", "Supplies to spend: click the post to train a <b>Sapeur</b> — he builds MG nests, wire and miradors to hold what you take.");
+    if (economy.french.stock >= 260 && clock > 60) advise("build", "Effectifs to spend: click the post to train a <b>Sapeur</b> — he builds MG nests, wire and miradors to hold what you take.");
     // The next French tier can be bought (algTiers.js).
     const tn = app.algTiers?.next();
-    if (tn && !app.algTiers.blockedBy(tn)) advise(`tier${tn.n}`, `<b>${tn.name}</b> can be unlocked: click the post, then <b>▲ ${tn.name}</b> (${tn.cost} supplies) — ${tn.note}.`);
+    if (tn && !app.algTiers.blockedBy(tn)) advise(`tier${tn.n}`, `<b>${tn.name}</b> can be unlocked: click the post, then <b>▲ ${tn.name}</b> (${tn.cost.mp} effectifs, ${tn.cost.fuel} carburant) — ${tn.note}.`);
     if (told.has("mgSeen")) advise("mg", "An FLN <b>machine gun</b> pins your men in the open: get them behind walls and rocks (V), then flank it. Its guns come from the <b>arms caches</b> — destroy them and no more come.");
     if (told.has("bandSeen")) advise("band", "An FLN band won't fight fair: it waits in the scrub and strikes men who come close. Scout with the jeep, bring the MG, keep men together.");
     if ((tipGap -= dt) > 0 || !tips.length) return;
@@ -290,15 +290,21 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
 
   // The village tooltip (hover its marker).
   hud.setTooltip((v) => {
-    const r = economy.params.radius;
+    const r = v.radius ?? economy.params.radius;
     let fr = 0, al = 0;
     for (const u of units.list) {
       if (!u.alive || !u.type?.foot || Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) > r) continue;
       if (u.team === "player") fr++; else if (u.team === "enemy") al++;
     }
-    const pay = economy.params.village[v.kind] ?? economy.params.village.hamlet;
+    const E = economy.params;
+    const g = E.village[v.kind] ?? E.village.hamlet;
+    const pay = v.kind === "supply"
+      ? `<b>+${E.supplyPoint} ${v.res === "fuel" ? "carburant" : "munitions"}/min</b>`
+      : `<b>+${g.mp} effectifs, +${g.fuel} carburant, +${g.mun} munitions/min</b> and counts as a victory point`;
+    const line = v.owner === "player" && !v.linked
+      ? `<br><span style="color:#e0a040">CUT OFF from the post: it pays nothing. Hold a chain of points (≤ ${E.link} m apart) back to the post.</span>` : "";
     const lean = v.value > 0.02 ? `${Math.round(v.value * 100)}% toward France` : v.value < -0.02 ? `${Math.round(-v.value * 100)}% toward the FLN` : "undecided";
-    return `<b>${v.name}</b> <span class="dim">· ${v.kind}</span><br>Backs: <b>${v.owner === "player" ? "France" : v.owner === "enemy" ? "the FLN" : "nobody"}</b> (${lean}; held at 60%)<br>Pays its holder <b>+${pay}/min</b> and counts as a victory point<br>In its ring now: France ${fr} · FLN ${al}<br><span class="dim">Stand men on foot in the ring to win it over (more men, faster, up to 3).</span>`;
+    return `<b>${v.name}</b> <span class="dim">· ${v.kind === "supply" ? "supply point" : v.kind}</span><br>Backs: <b>${v.owner === "player" ? "France" : v.owner === "enemy" ? "the FLN" : "nobody"}</b> (${lean}; held at 60%)<br>Pays the French ${pay} while linked to the post${line}<br>In its ring now: France ${fr} · FLN ${al}<br><span class="dim">Stand men on foot in the ring to win it over (more men, faster, up to 3).</span>`;
   });
 
   // ── The clock ─────────────────────────────────────────────────────────────
@@ -312,7 +318,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     watchConvoy();
     if (!over) stepScore(dt);
     hud.setScore({ fr: score.player, aln: score.enemy, max: P.start, heldFr: economy.held, heldAln: economy.heldByEnemy });
-    hud.markers(economy.points);
+    hud.markers(economy.allPoints);
     objectives(dt);
     advice(dt);
     hud.tick();
@@ -335,7 +341,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
         <div class="kicker">Aurès, 1956 · Poste de Tighanimine</div>
         <h2>Hold the valley</h2>
         <ul>
-          <li>The <b>${n} villages</b> are what this war is about. Each one pays supplies to whoever it backs, and each is a <b>victory point</b> (the markers over them; ◆ on the minimap).</li>
+          <li>The <b>${n} villages</b> are what this war is about. Each one pays whoever it backs, and each is a <b>victory point</b> (the markers over them; ◆ on the minimap).</li>
+          <li><b>Effectifs</b> (men) come from Algiers all the time. <b>Carburant</b> and <b>munitions</b> come from the land: the villages and the <b>supply points</b> on the pistes (● C / M) — vehicles and tiers need fuel, grenades and the Légion munitions. A point pays only while <b>linked to the post</b> by a chain of points you hold; cut off, it turns amber and pays nothing.</li>
           <li><b>Win a village</b> by standing men on foot in it. The bar under its name moves toward whoever has more men there.</li>
           <li>You both start at <b>500</b>. Whoever holds <b>fewer</b> villages bleeds points every second; at 0 they lose. <b>Destroy the FLN's cave</b> (north-west) to win outright. <b>Lose the post</b> and it is over.</li>
           <li>The <b>FLN</b> won't fight you in the open. It works the villages quietly, ambushes men who wander, mines the pistes, and slips back to its cave. Garrison, patrol, build.</li>

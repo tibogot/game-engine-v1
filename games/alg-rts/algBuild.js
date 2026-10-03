@@ -203,6 +203,9 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       const [wx, wz] = toWorld(x, z, yaw, f.cx + lx, f.cz + lz);
       app.clearVegetation?.(wx, wz, 2.4, { grass: 2, edge: 0.5 });
     }
+    // A field under it is cleared (algFields cutHole): worked soil drawn over
+    // the ground hid the foundation (2026-10-03). Wire lies in the crop.
+    if (!B.noFoot) app.algFields?.cutHole?.(cx, cz, f.hx, f.hz, yaw);
     // A pad: the ground levelled to the site's mean (the showroom's rule).
     let y = sv.y;
     if (B.pad) await app.flattenRect?.(cx, cz, f.hx + 1.5, f.hz + 1.5, sv.y, { rim: 4, rotY: yaw });

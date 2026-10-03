@@ -23,8 +23,9 @@
 
 export const HUD_H = 172;          // the blocks' height, px (strip excluded)
 // The minimap's block: bigger than the bar (you, 2026-10-01: "reads small"),
-// standing up out of it in its own corner, as CoH's does.
-export const MINI = 236;
+// standing up out of it in its own corner, as CoH's does. 320 (you,
+// 2026-10-03: "bigger and better like Company of Heroes").
+export const MINI = 320;
 export const HUD_STRIP_H = 24;
 
 const CSS = `
