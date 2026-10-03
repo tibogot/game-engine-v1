@@ -937,6 +937,8 @@ export async function createWorldEnvironment({
   scene.fogNode = fog(_blendedFogColor, _combinedFactor);
 
   function syncFog() {
+    // (it writes the authored colours: Sky Pro's lit fog must be re-applied after it)
+    _fogLitKey = "";
     uHFogEnabled.value = F.height.enabled ? 1 : 0;
     uHFogMode.value = F.height.mode === "monsoon" ? 2 : F.height.mode === "valley" ? 1 : 0;
     uMonDensity.value = F.height.monDensity ?? 0.02;
@@ -1009,19 +1011,28 @@ export async function createWorldEnvironment({
    * Runs after driveFogSun; leaving the mode restores the colours (restoreLightFromSkyPro).
    */
   const _fogLit = new THREE.Color();
-  let _fogLitByProSky = false;
+  const _fogK = [1, 1, 1];
+  let _fogLitByProSky = false, _fogLitKey = "";
   function driveSkyProFog() {
     const E = skyPro.light().groundE;
-    const k = [0, 1, 2].map((i) => E[i] / SKYPRO_NOON_GROUND_E[i]);
+    for (let i = 0; i < 3; i++) _fogK[i] = E[i] / SKYPRO_NOON_GROUND_E[i];
+    const F = toolState.fog;
+    // only when the light or a colour moved (the colours are hex strings: no parsing every frame).
+    // driveFogSun rewrites the distance pair each frame it runs, so those are redone regardless.
+    const key = `${_fogK[0].toFixed(5)},${_fogK[1].toFixed(5)},${_fogK[2].toFixed(5)},${F.height.color},${F.height.monSunTint}`;
     const lit = (u, hex) => {
       _fogLit.set(hex);
-      u.value.setRGB(_fogLit.r * k[0], _fogLit.g * k[1], _fogLit.b * k[2]);
+      u.value.setRGB(_fogLit.r * _fogK[0], _fogLit.g * _fogK[1], _fogLit.b * _fogK[2]);
     };
-    const F = toolState.fog;
-    lit(uDFogColor, F.distance.color);
-    lit(uDFogSunTint, F.distance.sunTint);
-    lit(uHFogColor, F.height.color);
-    lit(uMonSunTint, F.height.monSunTint ?? "#ffcf9a");
+    if (toolState.fog.distance.enabled || key !== _fogLitKey) {
+      lit(uDFogColor, F.distance.color);
+      lit(uDFogSunTint, F.distance.sunTint);
+    }
+    if (key !== _fogLitKey) {
+      lit(uHFogColor, F.height.color);
+      lit(uMonSunTint, F.height.monSunTint ?? "#ffcf9a");
+      _fogLitKey = key;
+    }
     _fogLitByProSky = true;
   }
 
@@ -1185,12 +1196,15 @@ export async function createWorldEnvironment({
   const SKYPRO_GRADE_LUM = { loLum: 0.004, hiLum: 0.06 };
   const SKYPRO_ROD_TINT = [0.62, 0.86, 1.3];
   const _gradeTint = [1, 1, 1];
-  let _skyProGradeOn = false;
+  let _skyProGradeOn = false, _gradeLastA = -1, _gradeLastB = -1;
   function driveSkyProGrade(L) {
     const P = skyPro.params;
     const amount = P.nightLook ? Math.max(0, P.nightGrade) * L.night : 0;
-    // the rod blue, scaled about the grey of the same luminance (0.81): 0 = desaturate only
     const b = Math.max(0, P.nightBlue);
+    // only when it moves (dusk, a slider): a still night writes nothing
+    if (_skyProGradeOn && amount === _gradeLastA && b === _gradeLastB) return;
+    _gradeLastA = amount; _gradeLastB = b;
+    // the rod blue, scaled about the grey of the same luminance (0.81): 0 = desaturate only
     for (let i = 0; i < 3; i++) _gradeTint[i] = 0.81 + (SKYPRO_ROD_TINT[i] - 0.81) * b;
     if (!_skyProGradeOn) {
       _skyProGradeOn = true;
@@ -1217,9 +1231,9 @@ export async function createWorldEnvironment({
   function restoreLightFromSkyPro() {
     cloudShadowsLite.setMap(null);
     // the fog colours back to as authored (driveSkyProFog lit them)
-    if (_fogLitByProSky) { _fogLitByProSky = false; syncFog(); }
+    if (_fogLitByProSky) { _fogLitByProSky = false; _fogLitKey = ""; syncFog(); }
     // the night grade off (it stays in the chain, at an exact identity)
-    if (_skyProGradeOn) postFxPipeline?.setPurkinje({ amount: 0 });
+    if (_skyProGradeOn) { postFxPipeline?.setPurkinje({ amount: 0 }); _gradeLastA = -1; }
     const saved = toolState.skyProSky.savedLight;
     if (!saved) return;
     Object.assign(toolState.light, saved);

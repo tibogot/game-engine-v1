@@ -68,12 +68,17 @@ export function createAlgLights({ app, fx, fire = null }) {
 
   // ---- fires: one flickering light per blaze, as long as it burns
   const fireLights = new Map(); // fire -> handle
+  let stamp = 0;
   function syncFires(n) {
     const list = fire?.fires;
     if (!list) return;
+    // by day with no fire light up: nothing to do
+    if (n < 0.02 && fireLights.size === 0) return;
     const now = fire.now;
-    const live = new Set(list);
-    for (const [f, h] of fireLights) if (!live.has(f)) { h.remove(); fireLights.delete(f); }
+    // the fires still burning, stamped (no Set built every frame)
+    stamp++;
+    for (const f of list) f._algLightStamp = stamp;
+    for (const [f, h] of fireLights) if (f._algLightStamp !== stamp) { h.remove(); fireLights.delete(f); }
     for (const f of list) {
       // dying down over its last 3 s
       const left = Math.max(0, Math.min(1, (f.end - now) / 3));

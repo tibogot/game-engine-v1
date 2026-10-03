@@ -428,7 +428,7 @@ export async function startV3App(opts = {}) {
   );
   camera.position.set(0, 300, 600);
   // the local lights' pool (null unless they are on: see _localLightsOn); its tiles follow this camera
-  const localLights = _localLightsOn ? createLocalLights({ scene, camera, renderer }) : null;
+  const localLights = _localLightsOn ? createLocalLights({ scene, camera, renderer, ...(opts.localLightsMax ? { max: opts.localLightsMax } : {}) }) : null;
 
   let worldEnv = null;
 

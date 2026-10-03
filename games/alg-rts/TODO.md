@@ -3368,8 +3368,10 @@ Asset follow-ups:
       unchanged). — you, look: ?tod=23 at the post, the ksar, the ALN camp (the fire is at the
       camp's centre, partly behind the hut), a sapper's searchlight.
 - [ ] **NIGHT, NEXT** (proposed 2026-10-04): ~~(1) combat lights~~ ~~(2) fixed lights~~ ~~(3) searchlight~~
-      DONE above; LEFT: souk lanterns (need a lantern mesh), illumination flares (gameplay, you
-      decide) — explosions (algCombat
+      DONE above; souk lanterns DONE (2026-10-04: the arcades HAD lanterns — rtsAlgVillage.js
+      arcadeRange — now recorded in userData.lanterns: 6, a light each + a warm glass that
+      blooms at night, one instanced draw); LEFT: illumination flares (gameplay, you decide) —
+      explosions (algCombat
       fx.explosion), fires (combat.js:158, algStructures.js:152, algDamage.js:113), muzzle flashes
       (projectiles.js fx.muzzle), shell/rocket flare; (2) fixed lights faded by `app.sky.night` —
       base (searchlight lamp, mirador, gate, vehicle park, helipad), ksar (souk lanterns: need a

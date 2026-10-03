@@ -921,7 +921,7 @@ function ksarHouse(parts, R, { x, z, yaw, w, d, h, y, low, frontGround, mat, ton
  * goes back to z = +depth. `fy` is the floor (the square's), `low` the lowest
  * ground under it.
  */
-function arcadeRange(parts, R, { x, z, yaw, len, fy, low, mat = MAT.plaster, tone = 0.6, depth = 5.4 }) {
+function arcadeRange(parts, R, { x, z, yaw, len, fy, low, mat = MAT.plaster, tone = 0.6, depth = 5.4, lanterns = null }) {
   const put = placer(parts, x, fy, z, yaw);
   const HA = 3.8, HT = 7.0, GAL = 3.0, T = 0.6;
   const drop = fy - low + 0.3;
@@ -977,6 +977,11 @@ function arcadeRange(parts, R, { x, z, yaw, len, fy, low, mat = MAT.plaster, ton
     const lx = -len / 2 + pier / 2 + b * (pier + ow);
     put(buildBox(0.05, 0.05, 0.5), [lx, HA - 0.25, -0.28], MAT.steel, 0.2);
     put(buildBox(0.26, 0.4, 0.26), [lx, HA - 0.52, -0.5], MAT.white, 0.8);
+    // where it hangs (the placer's transform; finish() scales it with the rest): a game lights it
+    if (lanterns) {
+      const c = Math.cos(yaw), s = Math.sin(yaw), lz = -0.5;
+      lanterns.push({ x: x + lx * c + lz * s, y: fy + HA - 0.52, z: z - lx * s + lz * c, yaw });
+    }
   }
 }
 
@@ -1006,9 +1011,10 @@ export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
   const SQ = { x0: -11, x1: 11, z0: -39.2, z1: -27 };
   let fy = -Infinity, flow = Infinity;
   for (let x = -16; x <= 16; x += 2) for (let z = -39; z <= -21.5; z += 2) { const g = groundAt(x, z); fy = Math.max(fy, g); flow = Math.min(flow, g); }
-  arcadeRange(parts, R, { x: 0, z: SQ.z1, yaw: 0, len: 31, fy, low: flow, tone: 0.62 });
+  const lanterns = [];   // the arcades' lanterns (userData.lanterns)
+  arcadeRange(parts, R, { x: 0, z: SQ.z1, yaw: 0, len: 31, fy, low: flow, tone: 0.62, lanterns });
   for (const sx of [-1, 1]) {
-    arcadeRange(parts, R, { x: sx * 11, z: -33.2, yaw: -sx * Math.PI / 2, len: 11.6, fy, low: flow, mat: sx < 0 ? MAT.plasterPale : MAT.plaster, tone: 0.5 + R() * 0.2, depth: 4.6 });
+    arcadeRange(parts, R, { x: sx * 11, z: -33.2, yaw: -sx * Math.PI / 2, len: 11.6, fy, low: flow, mat: sx < 0 ? MAT.plasterPale : MAT.plaster, tone: 0.5 + R() * 0.2, depth: 4.6, lanterns });
   }
   // The square: a terrace of beaten earth on a stone retaining wall.
   const sw = SQ.x1 - SQ.x0, sd = SQ.z1 - SQ.z0, scz = (SQ.z0 + SQ.z1) / 2;
@@ -1222,6 +1228,9 @@ export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
   const geo = finish(parts, { hx: E, hz: (E - zMin) / 2, cz: (E + zMin) / 2, height: 26, ao: { cell: 0.3 } });
   geo.userData.houses = houses.map((h) => ({ x: h.x * KIT, z: h.z * KIT, mosque: !!h.mosque }));
   geo.userData.trees = scaled(trees);
+  // The souk's lanterns on their brackets ({ x, y, z } of the lantern's centre, yaw of its arcade:
+  // it hangs on the arcade's -Z side): a game lights them at night (alg-rts algNightLamps.js).
+  geo.userData.lanterns = lanterns.map((l) => ({ x: l.x * KIT, y: l.y * KIT, z: l.z * KIT, yaw: l.yaw }));
   // The town is one mass (alleys too narrow to hold a line in), blocked as
   // 6 m strips across its outline; the souk's square and steps are open
   // ground: men gather there.

@@ -46,11 +46,13 @@ import TiledLightsNode from "three/addons/tsl/lighting/TiledLightsNode.js";
 const _plainLights = new WeakMap();
 
 class MasterTiledLightsNode extends TiledLightsNode {
-  constructor() {
-    super();
+  /** @param {number} maxLights  the pool's size: the light texture (uploaded every frame) and the tile loop's bound */
+  constructor(maxLights) {
+    super(maxLights);
     // (2) never per render: createLocalLights' update() drives it once a frame (drive()). Most lit
     // materials use a follower, so the master is often in no shader graph at all.
     this.updateBeforeType = THREE.NodeUpdateType.NONE;
+    this._keep = [];
   }
   create(width, height) {
     super.create(width, height);
@@ -65,11 +67,14 @@ class MasterTiledLightsNode extends TiledLightsNode {
     TiledLightsNode.prototype.updateBefore.call(this, { renderer, camera });
   }
   // the renderer hands the scene's lights over every render; the tiles keep the pool's order
+  // (no allocation: this runs on every render pass)
   setLights(lights) {
-    const keep = this.tiledLights.slice();
+    const keep = this._keep, t = this.tiledLights;
+    keep.length = 0;
+    for (let i = 0; i < t.length; i++) keep.push(t[i]);
     super.setLights(lights);
-    this.tiledLights.length = 0;
-    for (const l of keep) this.tiledLights.push(l);
+    t.length = 0;
+    for (let i = 0; i < keep.length; i++) t.push(keep[i]);
     return this;
   }
 }
@@ -104,10 +109,10 @@ class LocalTiledLighting extends THREE.Lighting {
     this._mainScene = null;
     this._master = null;
   }
-  /** The scene whose local lights are drawn. */
-  setMain(scene) {
+  /** The scene whose local lights are drawn, and the pool's size. */
+  setMain(scene, maxLights) {
     this._mainScene = scene;
-    this._master = new MasterTiledLightsNode();
+    this._master = new MasterTiledLightsNode(maxLights);
     this._master.updateProgram(this._renderer); // (4)
   }
   createNode(lights = []) {
@@ -138,14 +143,19 @@ export function installTiledLighting(renderer) {
  * @param {THREE.Scene} o.scene
  * @param {THREE.Camera} [o.camera]  the main camera (the tiles are binned for it)
  * @param {THREE.WebGPURenderer} [o.renderer]  with installTiledLighting done
- * @param {number} [o.max=256]  pool size (lights drawn at once)
+ * @param {number} [o.max=128]  pool size (lights drawn at once). Every pool light is handed to
+ *   the renderer on every render pass, so the pool is kept to what a busy night needs (alg-rts:
+ *   ~50 at most); a game with more passes its own.
  */
-export function createLocalLights({ scene, camera, renderer, max = 256 }) {
+export function createLocalLights({ scene, camera, renderer, max = 128 }) {
   const tiled = renderer?.lighting instanceof LocalTiledLighting ? renderer.lighting : null;
-  tiled?.setMain(scene);
+  tiled?.setMain(scene, max);
   void camera;
   const group = new THREE.Group();
   group.name = "LocalLights";
+  // Matrices by hand, for the active lights only: three would recompose all `max` every frame,
+  // and the tile pass reads them BEFORE the render's own matrix update.
+  group.matrixAutoUpdate = false;
   scene.add(group);
   const pool = [];
   /*
@@ -160,10 +170,13 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
   for (let i = 0; i < max; i++) {
     const l = new THREE.PointLight(0xffffff, 0, 0.01, 2);
     l.castShadow = false;
+    l.matrixAutoUpdate = false;
     l.position.set(0, PARK, 0);
     group.add(l);
+    l.updateMatrix(); l.updateMatrixWorld();
     pool.push(l);
   }
+  let lastDrawn = -1;
 
   /** @type {Set<object>} */
   const live = new Set();
@@ -181,10 +194,15 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
     live.add(rec);
     return {
       rec,
+      // (called every frame by flickering, fading and moving lights: no allocation)
       set(p) {
         if (p.position) rec.position.copy(p.position);
         if (p.color !== undefined) rec.color.set(p.color);
-        for (const k of ["intensity", "range", "flicker", "ttl", "importance"]) if (p[k] !== undefined) rec[k] = p[k];
+        if (p.intensity !== undefined) rec.intensity = p.intensity;
+        if (p.range !== undefined) rec.range = p.range;
+        if (p.flicker !== undefined) rec.flicker = p.flicker;
+        if (p.ttl !== undefined) rec.ttl = p.ttl;
+        if (p.importance !== undefined) rec.importance = p.importance;
         return this;
       },
       remove() { live.delete(rec); },
@@ -206,25 +224,31 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
     }
     ranked.sort((a, b) => b.score - a.score);
     const n = Math.min(ranked.length, max);
-    for (let i = 0; i < max; i++) {
+    // the slots used last frame and not now are parked (only those: the rest are parked already)
+    for (let i = n; i < Math.max(lastDrawn, 0); i++) {
       const l = pool[i];
-      if (i >= n) { if (l.intensity !== 0) { l.intensity = 0; l.distance = 0.01; l.position.y = PARK; } continue; }
-      const r = ranked[i];
+      l.intensity = 0; l.distance = 0.01; l.position.set(0, PARK, 0);
+      l.updateMatrix(); l.updateMatrixWorld();
+    }
+    for (let i = 0; i < n; i++) {
+      const l = pool[i], r = ranked[i];
       let k = 1;
       if (r.flicker > 0) k = 1 - r.flicker * (0.5 - 0.5 * Math.sin(time * 13 + r.phase) * Math.sin(time * 7.3 + r.phase * 1.7));
       l.position.copy(r.position);
       l.color.copy(r.color);
       l.intensity = r.intensity * k;
       l.distance = r.range;
+      l.updateMatrix(); l.updateMatrixWorld();
     }
-    // bin them into the screen tiles for this view, once (the tile pass reads world matrices)
-    if (tiled) {
-      group.updateMatrixWorld(true);
+    // bin them into the screen tiles for this view, once a frame — and not at all while none is lit
+    // (by day): one empty pass clears the tiles, then the pass and its upload stop
+    if (tiled && (n > 0 || lastDrawn !== 0)) {
       camera.updateMatrixWorld();
       active.length = 0;
       for (let i = 0; i < n; i++) active.push(pool[i]);
       tiled._master.drive(renderer, camera, active);
     }
+    lastDrawn = n;
   }
   const active = [];
 
@@ -235,5 +259,5 @@ export function createLocalLights({ scene, camera, renderer, max = 256 }) {
     for (const l of pool) l.dispose?.();
   }
 
-  return { add, update, clear, dispose, group, get count() { return live.size; }, get drawn() { return Math.min(ranked.length, max); } };
+  return { add, update, clear, dispose, group, max, get count() { return live.size; }, get drawn() { return Math.min(ranked.length, max); } };
 }

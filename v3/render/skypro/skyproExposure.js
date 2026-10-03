@@ -76,8 +76,9 @@ export function createSkyProExposure({ renderer }) {
     // exposure froze); after a second it is dropped and its late result, if any, ignored.
     const now = performance.now();
     if (pending && now - pendingSince > 1000) { pending = false; state.dropped++; }
-    // one readback in flight at a time; a new image every other frame is plenty
-    if (pending || (frame++ & 1)) return;
+    // one readback in flight at a time; a new image every 4th frame (67 ms) — the adaptation's
+    // time constants are 0.6-0.9 s, so a fresher meter changes nothing on screen
+    if (pending || (frame++ & 3)) return;
     const prev = renderer.getRenderTarget();
     pass(down1, rt.texture, w, h, quarter);
     pass(down2, quarter.texture, qw, qh, sixteenth);
