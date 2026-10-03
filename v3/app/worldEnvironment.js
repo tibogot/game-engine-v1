@@ -48,7 +48,7 @@ import { createCloudSkyLight } from "../render/sky/cloudSkyLight.js";
 import { createSkyWorldLight, WORLD_LIGHT_REFERENCE } from "../render/sky/skyWorldLight.js";
 import { SKY_LENS_FLARE_LOOK } from "../render/sky/skyLensFlareLook.js";
 import { createModularRoadClouds } from "../render/clouds/volumetricCloudDeck.js";
-import { createSkyProSky, skyProKeyDir, skyProSunFromTime } from "../render/skypro/skyproSky.js";
+import { createSkyProSky, skyProKeyDir, skyProSunFromTime, SKYPRO_NOON_GROUND_E } from "../render/skypro/skyproSky.js";
 import { createOceanPro } from "../render/oceanpro/oceanproOcean.js";
 import { createPaintedClouds } from "../render/clouds/paintedCloudDeck.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
@@ -997,6 +997,34 @@ export async function createWorldEnvironment({
     }
   }
 
+  /*
+   * THE FOG UNDER SKY PRO'S LIGHT. The fog colours are a radiance added wherever the fog is
+   * thick, authored against daylight — and they were added at the same radiance at midnight.
+   * Under Sky Pro's night (Tidewater units, ~0.01) a monsoon layer based at sea level painted
+   * the whole seabed ~0.6, and the sea refracting it read 15-20x brighter than Tidewater's
+   * (measured 2026-10-03 at the bay shot: 0.11 against 0.0056 at -2 deg; fog off = 0.0058).
+   * So in this mode every fog colour is lit: x the light on level ground now / at noon, per
+   * channel — noon is exactly as authored, the night is moonlit and blue. Tidewater has no such
+   * fog, and its horizon readback is 0 at night, so `matchSky` cannot take the horizon here.
+   * Runs after driveFogSun; leaving the mode restores the colours (restoreLightFromSkyPro).
+   */
+  const _fogLit = new THREE.Color();
+  let _fogLitByProSky = false;
+  function driveSkyProFog() {
+    const E = skyPro.light().groundE;
+    const k = [0, 1, 2].map((i) => E[i] / SKYPRO_NOON_GROUND_E[i]);
+    const lit = (u, hex) => {
+      _fogLit.set(hex);
+      u.value.setRGB(_fogLit.r * k[0], _fogLit.g * k[1], _fogLit.b * k[2]);
+    };
+    const F = toolState.fog;
+    lit(uDFogColor, F.distance.color);
+    lit(uDFogSunTint, F.distance.sunTint);
+    lit(uHFogColor, F.height.color);
+    lit(uMonSunTint, F.height.monSunTint ?? "#ffcf9a");
+    _fogLitByProSky = true;
+  }
+
   function syncInteriorUniforms() {
     interiorNodes.syncFromRegistry(interiorRegistry, toolState.interior);
   }
@@ -1123,7 +1151,13 @@ export async function createWorldEnvironment({
     const m = Math.max(r, g, b, 1e-6);
     _skyProColor.setRGB(r / m, g / m, b / m, THREE.LinearSRGBColorSpace);
     const key = _skyProColor.getHexString() + "," + m.toFixed(3) + "," + skyPro.params.exposure;
-    if (key === _skyProLightKey) return;
+    // Eye adaptation (Tidewater's auto exposure): a per-frame factor on the
+    // mode's base exposure, written to the renderer only — Li.exposure stays the saved base.
+    const exposureK = skyPro.exposureFactor(dtSec);
+    if (key === _skyProLightKey) {
+      renderer.toneMappingExposure = Li.exposure * exposureK;
+      return;
+    }
     _skyProLightKey = key;
     snapshotLightForSkyPro();
     // Encoded as the sRGB hex the engine consumes (sun.color.set decodes it back to linear).
@@ -1134,6 +1168,7 @@ export async function createWorldEnvironment({
     Li.moonIntensity = 0.12;
     Li.exposure = skyPro.params.exposure;
     updateSunSky();
+    renderer.toneMappingExposure = Li.exposure * exposureK;   // (updateSunSky wrote the bare base)
   }
 
   /**
@@ -1152,6 +1187,8 @@ export async function createWorldEnvironment({
 
   function restoreLightFromSkyPro() {
     cloudShadowsLite.setMap(null);
+    // the fog colours back to as authored (driveSkyProFog lit them)
+    if (_fogLitByProSky) { _fogLitByProSky = false; syncFog(); }
     const saved = toolState.skyProSky.savedLight;
     if (!saved) return;
     Object.assign(toolState.light, saved);
@@ -2461,6 +2498,7 @@ export async function createWorldEnvironment({
       if (toolState.skyMode === "skypro") {
         // Its own bakes, clouds and environment; nothing for the dome IBL rig to do.
         driveSkyProSky(procDt);
+        if (skyPro && _skyProReady) driveSkyProFog();
         procSnap = null;
       } else if (toolState.skyMode === "atmosphere") {
         driveAtmosphereSky(procDt);
@@ -2596,6 +2634,8 @@ export async function createWorldEnvironment({
         // the marine haze layer sits on the sea (and the far sea is measured to it)
         seaLevel: toolState.worldOcean.enabled ? toolState.worldOcean.seaLevel : 0,
       });
+      // Tidewater meters the frame after its haze, before exposure: this one
+      skyPro.meter(rt);
     },
   };
 

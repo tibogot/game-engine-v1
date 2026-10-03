@@ -85,6 +85,12 @@ m.spawn = null;
 // ---- Sky Pro and Ocean Pro, the swell as Tidewater's
 const env = m.environment;
 env.look.skyMode = "skypro";
+// No editor fog: Tidewater has none (its air is Sky Pro's haze). nam-valley's monsoon layer, based at
+// sea level, sat on the seabed and the water refracted it — the "sea too bright at night" of 2026-10-03.
+if (env.look.fog) {
+  env.look.fog.height.enabled = false;
+  env.look.fog.distance.enabled = false;
+}
 env.worldOcean.enabled = true;
 env.worldOcean.seaLevel = SEA;
 env.worldOcean.mode = "pro";

@@ -821,6 +821,10 @@ function _buildSkyProControls(parent, ts, app) {
     label: "Exposure", min: 0.1, max: 2, step: 0.01,
     hint: "Tidewater's is 0.55 for its units. This sky sets the world's lights while it is shown and gives them back when you leave it.",
   });
+  _toggle(li, S, "autoExposure", {
+    label: "Auto exposure",
+    hint: "Tidewater's eye adaptation on top of the exposure: it meters the frame and partly corrects it (x0.6 to x6, at most x2 at night). Off = the bare exposure.",
+  });
   _color(li, S, "groundAlbedo", { label: "Ground (sky light)" });
 
   const hz = _section(wrap, "Haze & shafts", true);

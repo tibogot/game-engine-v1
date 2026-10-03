@@ -34,6 +34,7 @@ import { createSkyProClouds } from "./skyproClouds.js";
 import { createCirrus, clOver } from "./skyproCirrus.js";
 import { createSkyEnvironment } from "./skyproEnv.js";
 import { createAirHaze } from "./skyproHaze.js";
+import { createSkyProExposure } from "./skyproExposure.js";
 
 /** The settings the mode saves with a project (toolState.skyProSky). */
 export const SKYPRO_DEFAULTS = {
@@ -50,6 +51,8 @@ export const SKYPRO_DEFAULTS = {
   horizonMask: false,
   /** Tidewater's exposure for its units (the engine's exposure follows it while this sky is shown) */
   exposure: 0.55,
+  /** Tidewater's eye adaptation on top of `exposure` (skyproExposure.js): x0.6..x6, at most x2 at night */
+  autoExposure: true,
   /** the lower hemisphere of the sky light (a flat ground of this albedo) */
   groundAlbedo: "#54493a",
   /** air haze density (Tidewater AirHaze: marine + aerosol layers); 0 = no haze pass at all */
@@ -69,6 +72,13 @@ export const SKYPRO_DEFAULTS = {
 };
 
 const SKY_RADIUS = 4000;
+
+/**
+ * light().groundE at noon (Tidewater's sun path, 12 h; measured 2026-10-03): the reference the
+ * engine's fog colours are authored against. Sky Pro's atmosphere has no live parameters, so it is
+ * a constant.
+ */
+export const SKYPRO_NOON_GROUND_E = [3.22, 3.08, 2.97];
 
 /**
  * Tidewater sky/Sky.js sunDirectionFromTime: the sun's direction at `hours` (latitude 24°, declination
@@ -174,7 +184,11 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   const sunColor = [0, 0, 0], T = [0, 0, 0];
   const moonColor = new THREE.Vector3();
   let time = 0;
-  const out = { sunColor: [0, 0, 0], skyIrradiance: [0, 0, 0], horizon: [0, 0, 0], keyIsMoon: false, moonColor, keyDir: lightDir };
+  const out = {
+    sunColor: [0, 0, 0], skyIrradiance: [0, 0, 0], horizon: [0, 0, 0], keyIsMoon: false, moonColor, keyDir: lightDir, night: 0,
+    /** the light on a level surface, as radiance off a white Lambert floor: key N.L / PI + sky (Tidewater units) */
+    groundE: [0, 0, 0],
+  };
 
   /**
    * @param {number} dt
@@ -232,6 +246,20 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     out.skyIrradiance = skyIrr;
     out.horizon = atmosphere.horizon || [0, 0, 0];
     out.keyIsMoon = keyIsMoon;
+    out.night = night;
+    const up = Math.max(lightDir.y, 0) / Math.PI;
+    out.groundE[0] = keyLight.x * up + skyIrr[0];
+    out.groundE[1] = keyLight.y * up + skyIrr[1];
+    out.groundE[2] = keyLight.z * up + skyIrr[2];
+  }
+
+  // ---- eye adaptation (Tidewater's auto exposure)
+  const ae = createSkyProExposure({ renderer });
+  mesh.userData.exposure = ae.state;   // (debug: the dome is reachable from the scene)
+  mesh.userData.light = out;
+  /** The factor on P.exposure for this frame (call once per frame, after update). */
+  function exposureFactor(dt) {
+    return ae.update(dt, { night: out.night, enabled: !!P.autoExposure });
   }
 
   // ---- the air haze and sun shafts, on the engine's linear HDR frame
@@ -287,10 +315,14 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     mesh.geometry.dispose();
     material.dispose();
     env.target?.dispose?.();
+    ae.dispose();
   }
 
   return {
     mesh, params: P, ready, update, dispose, postProcess, haze,
+    /** meter the linear HDR frame (after postProcess) for the auto exposure */
+    meter: (rt) => { if (P.autoExposure) ae.meter(rt); },
+    exposureFactor, exposureState: ae.state,
     light: () => out,
     cloudShadow: {
       texture: clouds.textures.shadowMap,
