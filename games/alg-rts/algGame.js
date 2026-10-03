@@ -37,6 +37,7 @@ import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWa
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import { createPerfHud } from "./ui/perfHud.js";
 import { openParallelPipelines } from "../../v3/render/parallelPipelines.js";
+import { releaseGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -433,6 +434,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     console.log(`[pipelines] ${p.created} built in parallel during the boot, ${p.skipped} draws waited; the last ones took ${Math.round(performance.now() - t0)} ms`);
   }
   await app.groundCache?.bakeAll(app.camera);
+  // Drop the CPU copies of buffers only the GPU writes (v3/render/gpuOnlyArrays.js):
+  // grass, plant fields, crowd skinning — ~260 MB of zeros held for nothing
+  // (heap snapshot, 2026-10-03). Again every 5 s: a crowd gets its buffers
+  // with its first soldier. ?gpuonly=0 keeps them.
+  if (params.get("gpuonly") !== "0") {
+    const mb = releaseGpuOnly(app.renderer) / 1048576;
+    console.log(`[memory] ${mb.toFixed(0)} MB of GPU-only arrays released from the JS heap`);
+    setInterval(() => releaseGpuOnly(app.renderer), 5000);
+  }
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;

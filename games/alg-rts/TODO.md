@@ -238,8 +238,24 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       52 programs change text every load: three names unnamed buffers
       `NodeBuffer_<global id>` (WGSLNodeBuilder) — name them to make the text
       stable before any cache can help.
-- [ ] JS HEAP ~0.9-1.1 GB in play (perf line): find what holds it (a release
-      on Steam wants far less).
+- [x] **JS HEAP** (perf line read 0.9-1.6 GB): NO LEAK (floor flat over a
+      minute; the 1.6 GB was boot garbage before a major GC). After a forced
+      full GC: **830 MB live → 566 MB**. 666 MB were typed arrays; ~260 MB of
+      them CPU copies of buffers ONLY THE GPU WRITES (crowd skinning output +
+      sources, hybrid grass, plant scatter field, revo grass). Now
+      v3/render/gpuOnlyArrays.js: systems markGpuOnly() those arrays, the
+      game calls releaseGpuOnly() after the boot and every 5 s (a crowd gets
+      its buffers with its first man): the ArrayBuffer is DETACHED
+      (transfer(0)) — three's storage binding keeps its own reference, so
+      swapping the array freed nothing. A released array asked to upload
+      logs an error. ?gpuonly=0 keeps them. Checked: grass, palms, reeds,
+      soldiers running, ALN spawned later and fighting; console clean.
+- [ ] Heap left (566 MB): ~150 MB is the DEV SERVER's module text and
+      source maps (gone in a production build); texture arrays kept on the
+      CPU after upload (2 DataArrayTextures 58 MB, DataTextures ~25 MB);
+      the splat map's working copies (~50 MB, the game samples it on the CPU);
+      the ground cache's bake index (~34 MB). GPU side: three 16 MB heightmap
+      readback staging buffers created at boot (check they are destroyed).
 - [ ] Remaining per-frame uploads (1.66 MB): our own buffer()/uniformArray
       nodes (oven smoke 60 KB, x-ray 48, birds 48, sprite/bars ~100) use the
       per-object group → one upload per draw per pass; a shared uniform group

@@ -19,6 +19,7 @@
 // The two slices are what buys us the idle⇄run CROSSFADE: the compute shader
 // skins the vertex against BOTH poses and mixes the results by the blend weight.
 import * as THREE from "three";
+import { markGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import {
   Fn, add, attributeArray, cos, cross, dot, float, floor, instanceIndex, max, min, mix, select, sin, sqrt, storage, transformNormal,
   transformNormalToView, uint, uniform, uniformArray, vec2, vec3, vec4, vertexIndex,
@@ -212,6 +213,8 @@ export function createCrowdField({
     const boneTable = new THREE.StorageBufferAttribute(b.slices * b.boneCount, 16);
     boneTable.array.set(b.table);
     boneTable.needsUpdate = true;
+    markGpuOnly(boneTable);   // the CPU keeps its own b.table
+
     return { ...b, bones: storage(boneTable, "mat4", boneTable.count).toReadOnly() };
   })();
   const { table, boneCount, info, bones } = baked;
@@ -267,6 +270,9 @@ export function createCrowdField({
 
   // Output: skinned position + normal, per soldier per vertex.
   const out = attributeArray(max * vertexCount * 2, "vec4");
+  // Only the GPU writes the output and only the kernel reads the sources: a
+  // game's releaseGpuOnly drops their CPU copies (~12 MB a crowd for `out`).
+  markGpuOnly(out.value, sourceVerts.value, skinIndices.value);
 
   // ── The compute kernel ─────────────────────────────────────────────────────
   const kernel = Fn(() => {

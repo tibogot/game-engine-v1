@@ -62,6 +62,7 @@ import { createBladeGeometry } from "../../core/foliage/grassGemini.js";
 import { wrapTileOffsetXZ } from "../../core/revoGrass/revoGrassTile.js";
 import { computeFrustumVisibility } from "../../core/revoGrass/revoGrassSsboUtils.js";
 import { grassTintBlend, grassFieldAlbedo } from "./grassFieldColor.js";
+import { markGpuOnly } from "../../../v3/render/gpuOnlyArrays.js";
 
 /**
  * Map the Gemini LOD sliders (lodMidDistance/lodFarDistance/lodMaxDistance/
@@ -508,6 +509,8 @@ export class HybridGrassSystem {
     // Compute atomically appends visible blade ids; the GPU decides its own
     // instance count — culled blades cost ZERO vertex work.
     const compactBuf = instancedArray(this.count, "uint");
+    // Written and read on the GPU only (computeInit fills them): no CPU copy kept.
+    markGpuOnly(bufPos.value, bufA.value, bufB.value, bufC.value, compactBuf.value);
     const indirectData = new Uint32Array(5);
     indirectData[0] = geom.index.count;
     this._indirectAttr = new THREE.IndirectStorageBufferAttribute(

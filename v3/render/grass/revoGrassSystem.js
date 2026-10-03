@@ -74,6 +74,7 @@ import {
 import { createClipmapGroundY } from "../../../v2/core/terrain/clipmapGroundY.js";
 import { worldSizeForPixels } from "../scatter/gpuCull.js";
 import { revoGrassConfig } from "../../app/state/revoGrassState.js";
+import { markGpuOnly } from "../gpuOnlyArrays.js";
 
 /**
  * Revo Realms' packed RGBA noise atlas (MIT — alezen9/revo-realms). Each
@@ -258,6 +259,8 @@ export class RevoGrassSystem {
     const buf1 = instancedArray(cfg.count, "vec4");
     const buf2 = instancedArray(cfg.count, "vec4");
     const compactBuf = instancedArray(cfg.count, "uint");
+    // GPU-only (computeInit fills them): a game may drop the CPU copies (gpuOnlyArrays).
+    markGpuOnly(buf1.value, buf2.value, compactBuf.value);
 
     // GPU-written indirect args: [indexCount, instanceCount, firstIndex,
     // baseVertex, firstInstance]. The compute decides the instance count.

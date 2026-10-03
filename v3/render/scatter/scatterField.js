@@ -52,6 +52,7 @@ import { createClipmapGroundY } from "../../../v2/core/terrain/clipmapGroundY.js
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
 import { scatterFrustumVisible } from "./gpuCull.js";
 import { LAYERS } from "../layers.js";
+import { markGpuOnly } from "../gpuOnlyArrays.js";
 
 /** Hash seed of the setThin keep test — shared by the compute and thinScale. */
 const THIN_SEED = 6151;
@@ -206,6 +207,8 @@ export class ScatterField {
     // One compact list: a slice of `count` per draw, then one per type's shadow list.
     const compactBuf = instancedArray(count * slices, "uint");
     this.nodes = { bufPos, bufDir, compactBuf };
+    // GPU-only (computeInit fills them): a game may drop the CPU copies (gpuOnlyArrays).
+    markGpuOnly(bufPos.value, bufDir.value, compactBuf.value);
 
     // One indirect buffer: 5 args per mesh; firstInstance = its slice.
     const entries = meshCount + shadowCount;
