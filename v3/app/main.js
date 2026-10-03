@@ -364,6 +364,35 @@ export async function startV3App(opts = {}) {
 
   await renderer.init();
   initGlbLoaderRenderer(renderer);
+  // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
+  // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer
+  // and re-sends the whole buffer on every draw of every pass, changed or not
+  // (measured 2026-10-03, alg-rts: ~1.3 MB a frame — static stones and walls
+  // included). Above that size it uses an instanced vertex buffer, uploaded
+  // only when instanceMatrix.needsUpdate. A limit of 0 sends every instanced
+  // mesh that way. Only InstanceNode and RangeNode read this limit. Cost: one
+  // more vertex buffer per instanced draw (WebGPU allows 8).
+  if (opts.instanceAttributes && renderer.backend?.capabilities?.getUniformBufferLimit) {
+    renderer.backend.capabilities.getUniformBufferLimit = () => 0;
+    // And a changed buffer uploads only the instances DRAWN (mesh.count), not
+    // its whole capacity — the soldiers' kit pieces have room for 640 and sent
+    // all 40 KB each frame for a dozen men. A caller's own update ranges win.
+    // (Patched once per page; every app in it shares three's classes.)
+    const IN = THREE.InstanceNode?.prototype;
+    if (IN && !IN._v3DrawnRange) {
+      const update = IN.update;
+      IN.update = function (frame) {
+        const buf = this.buffer, im = this.instanceMatrix;
+        const changed = buf !== null && this.isStorageMatrix !== true && im.version !== buf.version;
+        update.call(this, frame);
+        if (changed && buf.updateRanges.length === 0) {
+          const n = Math.min(im.count, Math.max(1, this.instancedMesh?.count ?? im.count));
+          if (n < im.count) buf.addUpdateRange(0, n * 16);
+        }
+      };
+      IN._v3DrawnRange = true;
+    }
+  }
 
   // ── Scene ──────────────────────────────────────────────────────────────────
   const scene = new THREE.Scene();
@@ -4621,6 +4650,7 @@ export async function startV3App(opts = {}) {
   let _statsOn = true;
   let _statsWrapped = null;
   let _tsDrain = 0;
+  const _fs = { last: performance.now(), n: 0, cpu: 0, cpuMax: 0, iv: 0, ivMax: 0, draws: 0 };
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     if (_frameThrottleMs > 0) {
@@ -5001,6 +5031,15 @@ export async function startV3App(opts = {}) {
           vp.appendChild(msg);
         }
       }
+    }
+
+    // Our own frame counters (app.takeFrameStats): the loop's CPU ms and the
+    // frame interval, summed until a reader takes them. Two clock reads.
+    {
+      const cpu = performance.now() - now, iv = now - _fs.last;
+      _fs.last = now;
+      if (iv < 1000) { _fs.n++; _fs.cpu += cpu; _fs.iv += iv; if (cpu > _fs.cpuMax) _fs.cpuMax = cpu; if (iv > _fs.ivMax) _fs.ivMax = iv; }
+      _fs.draws = renderer.info.render.drawCalls ?? 0;
     }
 
     // The overlay hidden (app.setStatsOverlay(false)): skip ALL of it — the
@@ -12774,6 +12813,18 @@ export async function startV3App(opts = {}) {
       stats.dom.style.display = _statsOn ? "" : "none";
     },
     get statsOverlay() { return _statsOn; },
+    /**
+     * The frames since the last call: { frames, frameMs, frameMaxMs (the rAF
+     * interval — vsync-quantised), cpuMs, cpuMaxMs (the loop's own work),
+     * draws (the last frame) }, then resets. Costs nothing between reads — a
+     * game's own stats panel reads it a few times a second.
+     */
+    takeFrameStats() {
+      const n = Math.max(1, _fs.n);
+      const out = { frames: _fs.n, frameMs: _fs.iv / n, frameMaxMs: _fs.ivMax, cpuMs: _fs.cpu / n, cpuMaxMs: _fs.cpuMax, draws: _fs.draws };
+      _fs.n = 0; _fs.cpu = 0; _fs.cpuMax = 0; _fs.iv = 0; _fs.ivMax = 0;
+      return out;
+    },
     /**
      * THE WORLD'S WIND for every plant field — grass, tall plants, ground
      * foliage, flowers all read the shared grass wind. For a game with its

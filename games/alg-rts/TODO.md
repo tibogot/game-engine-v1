@@ -191,9 +191,40 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
 - [—] F4 herds off screen at a lower rate: NOT done — it changes their
       steps (slope checks, trails, sidesteps) for ~0.3 ms; animals must not
       break each other.
-- [ ] **you**: the stats overlay is ON by default (?stats=0) and costs
-      0.4-0.8 ms a frame (incl. the per-frame timestamp resolves) — off for
-      a release build (dev panel toggle keeps it)?
+- [x] Stats overlay OFF by default (you: "off the stats panel"; it cost
+      0.4-0.8 ms a frame). ?stats=1 / Dev → Performance brings it back.
+- [x] **OUR PERF LINE** (you: "our own perf stats ui"): ui/perfHud.js, top
+      left — frame ms + worst, CPU ms + worst, draws, JS heap, twice a second
+      off the engine's counters (app.takeFrameStats: two clock reads a frame);
+      a GPU button runs gpuBench.measureView (the honest frame cost + what
+      limits it). ?perf=0 hides; Dev → Performance → "Perf line".
+- [x] **F1 INSTANCE MATRICES** (engine opt `instanceAttributes`, alg + nam
+      on; ?instubo=1 = old): three kept ≤1024-instance matrices in a uniform
+      buffer re-sent on EVERY draw of every pass; now the instanced vertex
+      buffer (uploaded only on needsUpdate) + only the DRAWN instances upload
+      (kit pieces: 640 slots, 40 KB, for a dozen men). Uploads 2,853 → 1,658
+      KB a frame. **alg at the post: 8.0 / 8.9 / 12.2 → 6.4 / 8.0 / 11.2 ms**
+      (close / default / max, interleaved loads, stats off both sides); nam
+      within noise (8.9 vs 8.7, CPU 8.2 vs 9.1). Checked: men, kit, jeep,
+      stones, walls in place and moving; both consoles clean.
+- [—] **TRIED, NO GAIN: parallel pipeline compiles in the warm-up**
+      (createRenderPipelineAsync for every new pipeline, draws skipped, all
+      awaited at once — 16 pipelines 1.0 s one by one vs 0.21 s together in
+      isolation). In the game: 134 pipelines in the window, warm-up stage
+      11.0 vs 10.4 s without. That stage is main-thread bound (node builds
+      ~1.4 s, texture uploads ~1.2 s on first draw). Reverted.
+- [ ] Persistent shader cache: Chrome writes DawnWebGPUCache (62 MB) but a
+      compute pipeline from a previous load compiled at full cost (46-93 ms)
+      in a probe — unproven either way (the probe's device limits differ).
+      52 programs change text every load: three names unnamed buffers
+      `NodeBuffer_<global id>` (WGSLNodeBuilder) — name them to make the text
+      stable before any cache can help.
+- [ ] JS HEAP ~0.9-1.1 GB in play (perf line): find what holds it (a release
+      on Steam wants far less).
+- [ ] Remaining per-frame uploads (1.66 MB): our own buffer()/uniformArray
+      nodes (oven smoke 60 KB, x-ray 48, birds 48, sprite/bars ~100) use the
+      per-object group → one upload per draw per pass; a shared uniform group
+      bumped on change uploads once (three: sharedUniformGroup + needsUpdate).
 
 ## PERF + QUALITY AUDIT (2026-10-01, you: "measure first, popping, culling, shadows, errors")
 

@@ -185,6 +185,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // createWorldEnvironment builds the sun).
   const app = await startV3App({
     container,
+    // Instance matrices uploaded only when they change, not on every draw
+    // (main.js; alg-rts audit 2026-10-03). ?instubo=1 = three's per-draw copy.
+    instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
     // The EDITOR's default paint palette (7 PBR sets, 28 images) was decoded
     // on every boot and then overwritten slot by slot by the level's own
     // paintLayers — nam-valley fills all seven. The engine says a game must

@@ -35,6 +35,7 @@ import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
+import { createPerfHud } from "./ui/perfHud.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -97,6 +98,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   const app = await startV3App({
     container,
     preloadPaintTextures: false,
+    // Instance matrices uploaded only when they change, not on every draw
+    // (main.js; audit 2026-10-03). ?instubo=1 = three's per-draw uniform copy.
+    instanceAttributes: params.get("instubo") !== "1",
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural
     // sky unless it asks, and setWorldLight below only drives this one.
     // ?sky=pro: Sky Pro, with its clouds' shadows on the land (the sun's
@@ -155,6 +159,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The stats-gl overlay: OFF (you, 2026-10-03: "off the stats panel"; it
   // cost 0.4-0.8 ms a frame, measured). ?stats=1 or Dev → Performance.
   app.setStatsOverlay?.(params.get("stats") === "1");
+  // Our own perf line in its place (ui/perfHud.js): frame / CPU / draws twice
+  // a second off the engine's counters, the honest GPU number on click. ?perf=0 hides.
+  app.perfHud = createPerfHud(app, { visible: params.get("perf") !== "0" });
   // Cloud shadows start OFF (you, 2026-09-30: sweeping shadows get in the way
   // while debugging). The shadow map stays attached — Dev → Sky → Cloud
   // shadows turns them on, or ?cloudshadows=1 at boot.

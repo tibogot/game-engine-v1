@@ -309,7 +309,8 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     const rows = r.rows.map((x) => `${x.name.padEnd(14)} ${x.ms >= 0 ? " " : ""}${x.ms.toFixed(2)} ms`).join("\n");
     return `Frame ${r.frame} ms · noise ±${r.noise} ms\n${rows}\n(cost = frame − frame without it; under the noise = nothing)`;
   }));
-  perf.toggle("Stats overlay", { get: () => app.statsOverlay, set: (v) => app.setStatsOverlay?.(v) });
+  perf.toggle("Perf line", { get: () => app.perfHud?.visible ?? false, set: (v) => app.perfHud?.setVisible(v) });
+  perf.toggle("Stats overlay (stats-gl, costs 0.4-0.8 ms)", { get: () => app.statsOverlay, set: (v) => app.setStatsOverlay?.(v) });
   perf.slider("Render scale", { min: 0.5, max: 1, step: 0.05, get: () => app.renderScale ?? 1, set: (v) => app.setRenderScale?.(v, { persist: false }) });
   perf.hint("<b>GPU health</b>: a fixed kernel's TFLOPS against the best this browser has measured. Throttled (the latch) read 1.8-2.9 on 2026-10-01; healthy should be roughly double — run it once right after a fresh EC reset to set the best. " +
     "Judge cost in <b>ms</b>, never FPS (vsync holds 60). The stats bar is a rough glance: its GPU ms and the pass timer misattribute on this machine. A cost under the <b>noise</b> is not a cost. Console: <code>(await import('/games/alg-rts/gpuBench.js'))</code> for zoom sweeps and panning.");
