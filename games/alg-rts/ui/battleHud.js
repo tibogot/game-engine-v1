@@ -13,6 +13,7 @@
 // Plain DOM in the HUD's own look (hudBar.js tokens); per frame it writes only
 // what changed. The top of the screen otherwise stays empty (hudBar.js).
 import { MINI } from "./hudBar.js";
+import { rectOf } from "../../shared-rts/canvasRect.js";
 
 const CSS = `
 #alg-score {
@@ -247,7 +248,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
   const marks = new Map();   // point → { node, cap, last }
   let pv = null;             // a scratch vector (the first point's type)
   function markers(points) {
-    const r = canvas.getBoundingClientRect();
+    const r = rectOf(canvas);   // cached: a read per frame forced a layout (shared-rts/canvasRect.js)
     for (const p of points) {
       let m = marks.get(p);
       if (!m) {

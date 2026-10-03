@@ -10,6 +10,8 @@
 // DOM, not the world: a dozen squads at most, crisp at any zoom, and each
 // badge only touches the DOM when what it shows has changed.
 
+import { rectOf } from "../../shared-rts/canvasRect.js";
+
 const ICONS = {
   // A rifle, slung diagonally.
   appele: `<path d="M4.5 19.5 L18.5 5.5" stroke-width="2.4"/><path d="M3 18 L6 21" stroke-width="3.2"/><path d="M18.5 5.5 L21 3" stroke-width="1.2"/><path d="M11 13 L9.5 11.5" stroke-width="1.6"/>`,
@@ -72,7 +74,7 @@ export function createSquadBadges({ app, squads }) {
 
   /** Each frame (render side). */
   function frame(camera) {
-    const r = canvas.getBoundingClientRect();
+    const r = rectOf(canvas);   // cached: a read per frame forced a layout (shared-rts/canvasRect.js)
     const live = new Set();
     for (const s of squads.list) {
       if (s.team !== "player") continue;

@@ -341,6 +341,16 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       TRIED, NEUTRAL: the parallel-pipeline window opened by the engine from
       its first frame (instead of after startV3App) — the stage did not move
       (its idle gap was not the early compiles). Reverted.
+- [x] **BIG FIGHT PROFILED** (83 men + 3 vehicles engaged, Mechta Ouled
+      Ali): the units hook ~2.0 ms a frame; in it the squad badges' per-frame
+      getBoundingClientRect (a forced layout: 144 ms of a 5 s trace). Now
+      shared-rts/canvasRect.js `rectOf(el)` — cached, dropped on resize /
+      scroll, re-read at most once a second — in the squad badges, the battle
+      HUD markers, the unit hover test and the camera's edge scroll (all read
+      the canvas rect every frame). Hook 638 → 530 ms (−0.35 ms a frame in that
+      fight). Badges checked on their squads. The sim step (~0.7 ms at 83 men)
+      is spread thin (separation 0.14, influence 0.07, avoidance 0.05 …):
+      nothing worth cutting yet.
 - [ ] Remaining duplicate builds (~230): mostly DIFFERENT materials with the
       same structure (stone sets, walls, outcrops, vehicle parts — three must
       build per material: the build binds its textures) and the placed

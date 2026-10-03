@@ -28,6 +28,7 @@ import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { rtsObjectMaterial, rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { rectOf } from "./canvasRect.js";
 
 
 // Mesh → owning unit, for selection raycasts. A WeakMap (not mesh.userData)
@@ -1381,7 +1382,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       for (const view of g.views.values()) { view.living.length = 0; view.dead.length = 0; }
     }
     if (camera) _frustum.setFromProjectionMatrix(_viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse));
-    const rect = pointer && camera ? dom.getBoundingClientRect() : null;
+    const rect = pointer && camera ? rectOf(dom) : null;   // cached (canvasRect.js)
     // px a metre at unit distance: a vehicle's pick circle grows with its size on screen
     const pxPerM = rect ? rect.height / (2 * Math.tan(THREE.MathUtils.degToRad((camera.fov ?? 50) / 2))) : 0;
     let nextHovered = null, hoverD = Infinity;

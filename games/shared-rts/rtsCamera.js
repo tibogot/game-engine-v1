@@ -17,6 +17,7 @@
 //   • We grab the wheel event at the window-capture phase and stop it, so the
 //     engine's editor-camera zoom never sees it while we're in RTS mode.
 import * as THREE from "three";
+import { rectOf } from "./canvasRect.js";
 
 const DEG = Math.PI / 180;
 
@@ -135,7 +136,7 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     if (!params.edgeScroll || !overCanvas) return { mf: 0, mr: 0 };
     const el = dom();
     if (!el) return { mf: 0, mr: 0 };
-    const r = el.getBoundingClientRect();
+    const r = rectOf(el);   // cached: read every frame over the canvas (canvasRect.js)
     const band = Math.max(1, params.edgeBand);
     const ramp = (d) => THREE.MathUtils.clamp(1 - d / band, 0, 1);
     const mr = ramp(ptrX - r.left) * -1 + ramp(r.right - ptrX);
