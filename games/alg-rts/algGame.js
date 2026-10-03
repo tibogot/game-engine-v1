@@ -103,6 +103,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Instance matrices uploaded only when they change, not on every draw
     // (main.js; audit 2026-10-03). ?instubo=1 = three's per-draw uniform copy.
     instanceAttributes: params.get("instubo") !== "1",
+    // Instanced meshes on one material share ONE node build (engine
+    // render/sharedInstanceBuilds.js). ?instshare=0 = one build each.
+    shareInstanceBuilds: params.get("instshare") !== "0",
     // Plant-field draws that cannot hold a plant are skipped on the CPU (main.js
     // plantCpuCull, ScatterField.setCpuDensity). ?plantcull=0 = draw them all.
     plantCpuCull: params.get("plantcull") !== "0",

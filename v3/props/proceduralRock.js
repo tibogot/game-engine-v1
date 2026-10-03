@@ -446,3 +446,78 @@ export function getRockGeometry(params) {
   }
   return geo;
 }
+
+/**
+ * Generate many rocks in PARALLEL worker threads into getRockGeometry's memo,
+ * so the synchronous calls that follow are hits. A level restores its rock
+ * kit shape by shape on the main thread — nam-valley's 20 took 3.4 s of boot
+ * (~170 ms each: a dense sphere cut by every chip plane, then simplified).
+ * The worker runs this same module, so the result is the same geometry; a
+ * worker that fails leaves its shape to be generated here, as before.
+ *
+ * Call it as EARLY as the shapes are known and await it again where they are
+ * needed: a shape already on its way is waited for, not started twice.
+ * @param {object[]} paramsList generator params, as getRockGeometry gets them
+ */
+const _inFlight = new Map();   // key → promise of that shape's worker job
+export async function prewarmRockGeometries(paramsList) {
+  const todo = [];
+  const waits = new Set();
+  for (const params of paramsList) {
+    const key = JSON.stringify(params);
+    if (_geometryCache.has(key)) continue;
+    if (_inFlight.has(key)) { waits.add(_inFlight.get(key)); continue; }
+    if (todo.some((j) => j.key === key)) continue;
+    todo.push({ key, params });
+  }
+  if (todo.length < 2 || typeof Worker === "undefined") { await Promise.all(waits); return; }
+  for (const job of todo) {
+    job.done = new Promise((resolve) => { job.resolve = resolve; });
+    _inFlight.set(job.key, job.done);
+    waits.add(job.done);
+  }
+  const finish = (job) => { _inFlight.delete(job.key); job.resolve(); };
+  const keep = (job, msg) => {
+    if (_geometryCache.has(job.key)) return;   // made here meanwhile: keep the one in use
+    const geo = new THREE.BufferGeometry();
+    for (const [name, a] of Object.entries(msg.attributes)) {
+      geo.setAttribute(name, new THREE.BufferAttribute(a.array, a.itemSize, a.normalized));
+    }
+    geo.setIndex(new THREE.BufferAttribute(msg.index, 1));
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    geo.userData.rock = msg.rock;
+    // Same rule as getRockGeometry: only a simplified result sticks.
+    if (msg.rock.simplified || msg.rock.denseTriangles <= (job.params.targetTriangles ?? 0)) {
+      _geometryCache.set(job.key, geo);
+    }
+  };
+  const cores = navigator.hardwareConcurrency || 4;
+  const n = Math.max(1, Math.min(todo.length, cores - 1, 6));
+  let next = 0;
+  const run = async () => {
+    let worker;
+    try {
+      worker = new Worker(new URL("./rockGeometryWorker.js", import.meta.url), { type: "module" });
+    } catch { return; }
+    try {
+      while (next < todo.length) {
+        const job = todo[next++];
+        const msg = await new Promise((resolve) => {
+          worker.onmessage = (e) => resolve(e.data);
+          worker.onerror = (e) => { e.preventDefault?.(); resolve({ error: e.message || "worker error" }); };
+          worker.postMessage({ id: job.key, params: job.params });
+        });
+        if (msg.error) console.warn("[V3] rock worker:", msg.error);
+        else keep(job, msg);
+        finish(job);
+      }
+    } finally {
+      worker.terminate();
+    }
+  };
+  await Promise.all(Array.from({ length: n }, run));
+  // A worker that could not start leaves its jobs undone: not waited on.
+  for (const job of todo) if (_inFlight.get(job.key) === job.done) finish(job);
+  await Promise.all(waits);
+}

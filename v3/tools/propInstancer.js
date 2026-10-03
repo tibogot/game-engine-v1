@@ -540,7 +540,7 @@ export class PropInstancer {
     if (type._autoLod2) apply(tr.lod2);
     this._disposeShadowMeshes(tr);
     this._lodDirty = true;
-    for (const m of seen) m?.dispose?.();
+    for (const m of seen) if (!m?.userData?.sharedKit) m?.dispose?.();   // a shared kit material is still in use elsewhere
   }
 
   /** Swap material on every LOD InstancedMesh for this type. */
@@ -560,7 +560,7 @@ export class PropInstancer {
     // disposed one behind.
     this._disposeShadowMeshes(tr);
     this._lodDirty = true;
-    for (const m of seen) m.dispose?.();
+    for (const m of seen) if (!m.userData?.sharedKit) m.dispose?.();   // a shared kit material is still in use elsewhere
   }
 
   onTypeRemoved(typeIdx) {

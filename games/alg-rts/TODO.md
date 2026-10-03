@@ -361,7 +361,13 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       same; crops differ 1.5-4 levels of 255 (plants and haze move). The
       array's CPU pixels are released (markGpuOnly). clearWhere moves the
       ground index with the matrix.
-- [ ] Remaining duplicate builds (~230): mostly DIFFERENT materials with the
+- [x] SHARED NODE BUILDS (engine render/sharedInstanceBuilds.js, 2026-10-03,
+      found in nam's boot): instanced meshes on ONE material now share one
+      build (three keyed each on its uuid). alg: builds 389 → 289,
+      main-thread build time 7.0 → 4.2 s; frame A/B within noise (default
+      9.1 vs 9.3, max 11.9 vs 12.2 ms); matrices proven by GPU readback.
+      ?instshare=0 = one build each. (nam: 728 → 405.)
+- [ ] Remaining duplicate builds (~115 now): mostly DIFFERENT materials with the
       same structure (stone sets, walls, outcrops, vehicle parts — three must
       build per material: the build binds its textures) and the placed
       foliage's per-object buffers. Cutting them = content work: e.g. the

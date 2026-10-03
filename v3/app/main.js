@@ -7,6 +7,7 @@ import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZ
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
+import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
 import {
@@ -134,7 +135,7 @@ import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
-import { getRockGeometry, createRockKitGeometry, rockKitParams, ROCK_CLASSES, ROCK_KIT, ROCK_CLIFF_PRESETS } from "../props/proceduralRock.js";
+import { getRockGeometry, createRockKitGeometry, prewarmRockGeometries, rockKitParams, ROCK_CLASSES, ROCK_KIT, ROCK_CLIFF_PRESETS } from "../props/proceduralRock.js";
 // Cliffs are the rock generator with a flat top (the strata kit is gone).
 const CLIFF_PRESETS = [...ROCK_CLIFF_PRESETS];
 import { simplifierReady } from "../render/instancing/autoLod.js";
@@ -348,6 +349,9 @@ export async function startV3App(opts = {}) {
   function layoutStatsOverlay() {
     const r = viewport.getBoundingClientRect();
     const panelCount = stats.dom.children.length;
+    // Rewritten on every resize: keep its shown/hidden state (setStatsOverlay
+    // hides it — the rewrite brought the hidden overlay back in nam-rts).
+    const display = stats.dom.style.display;
     stats.dom.style.cssText = `
       position: fixed;
       z-index: 10000;
@@ -359,6 +363,7 @@ export async function startV3App(opts = {}) {
       height: 48px;
       width: ${Math.max(80, panelCount * 40)}px;
     `;
+    stats.dom.style.display = display;
   }
 
   document.body.appendChild(stats.dom);
@@ -394,6 +399,10 @@ export async function startV3App(opts = {}) {
       };
       IN._v3DrawnRange = true;
     }
+    // With the matrices out of the shader source, instanced meshes on one
+    // material can share ONE node build (three builds each — its uuid is in the
+    // key): render/sharedInstanceBuilds.js. opts.shareInstanceBuilds.
+    if (opts.shareInstanceBuilds) installSharedInstanceBuilds(renderer);
   }
 
   // ── Scene ──────────────────────────────────────────────────────────────────
@@ -7341,12 +7350,13 @@ export async function startV3App(opts = {}) {
     // `slot.kit` (rock/cliff kits) and bare `slot.solid` (imported cliff GLBs)
     // both run a shading layer below, and both multiply over the base colour.
     const layered = Boolean(slot.kit) || Boolean(slot.solid);
-    const newMat = propMaterialFor(propMat, { triplanar: !!slot.triplanar, plain: layered });
     // Procedural rocks/cliffs keep their baked shading through a material
     // change or a project load. Solid ROCKS never took the cliff grass blend:
     // before this, a reload gave boulders grass tops they did not have when added.
-    if (slot.kit) _finishKitMaterial(newMat, slot.kit, propMat.id === "__none__");
-    else if (slot.solid) applyCliffTerrainBlend(newMat, cliffBlendDeps);
+    const newMat = slot.kit
+      ? kitMaterialFor(slot.kit, propMat, slot.triplanar)
+      : propMaterialFor(propMat, { triplanar: !!slot.triplanar, plain: layered });
+    if (!slot.kit && slot.solid) applyCliffTerrainBlend(newMat, cliffBlendDeps);
     for (const e of type.entries) e.material = newMat;
     propInstancer.setTypeMaterial(slot.typeIdx, newMat);
     return true;
@@ -8118,8 +8128,7 @@ export async function startV3App(opts = {}) {
     const geometry = getRockGeometry(preset.params);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = propMaterialFor(defaultPropMat, { triplanar: true, plain: true });
-    _finishKitMaterial(material, "cliff", defaultPropMat?.id === "__none__");
+    const material = kitMaterialFor("cliff", defaultPropMat, true);
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
     propStore.types[typeIdx].solid = true;
@@ -8162,6 +8171,25 @@ export async function startV3App(opts = {}) {
     return mat;
   }
 
+  // ONE material per (kit, library material, triplanar), shared by every kit
+  // shape: nothing in it is per shape (the shading reads the geometry's
+  // rockShade attribute, the uniforms are global), and with instanced meshes
+  // sharing node builds (render/sharedInstanceBuilds.js) the 60 rock shapes
+  // then build one shader per pass instead of 60 (nam-rts boot, 2026-10-03).
+  // Marked `sharedKit`: the prop instancer never disposes it on a swap.
+  const _kitMaterials = new Map();
+  function kitMaterialFor(kind, propMat, triplanar) {
+    const id = propMat?.id ?? "__none__";
+    const key = `${kind}|${id}|${!!triplanar}`;
+    let mat = _kitMaterials.get(key);
+    if (!mat) {
+      mat = _finishKitMaterial(propMaterialFor(propMat, { triplanar: !!triplanar, plain: true }), kind, id === "__none__");
+      mat.userData.sharedKit = true;
+      _kitMaterials.set(key, mat);
+    }
+    return mat;
+  }
+
   // Procedural rock kit (props/proceduralRock.js) — chipped boulders down to
   // pebbles. Meant for thousands of instances, so each size class carries its
   // own LOD distance scale, last shadow cascade and collision (boulders solid,
@@ -8178,8 +8206,7 @@ export async function startV3App(opts = {}) {
     const geometry = createRockKitGeometry(rockName);
     const defaultPropMat =
       propTextureLibrary.getById("__none__") ?? propTextureLibrary.getByIndex(0);
-    const material = propMaterialFor(defaultPropMat, { triplanar: false, plain: true });
-    _finishKitMaterial(material, "rock", defaultPropMat?.id === "__none__");
+    const material = kitMaterialFor("rock", defaultPropMat, false);
     const typeIdx = propStore.registerPrimitive(rockName, geometry, material);
     if (typeIdx < 0) return;
     const cls = ROCK_CLASSES[kit.cls];
@@ -8668,6 +8695,27 @@ export async function startV3App(opts = {}) {
   }
 
   /** Re-register prop types from saved slot metadata before instance import. */
+  /**
+   * Generate a level's procedural rock + cliff shapes in worker threads
+   * (proceduralRock.js prewarmRockGeometries): nam-valley's 20 were 3.4 s of
+   * main thread, one after another. Never throws — a shape not made here is
+   * generated by addRock / addCliff as before.
+   */
+  async function _prewarmLevelRocks(slots) {
+    try {
+      const rockParams = [];
+      for (const meta of slots ?? []) {
+        if (!meta.builtin || meta.live) continue;
+        const cliff = CLIFF_PRESETS.find((c) => c.name === meta.name);
+        const params = cliff ? cliff.params : rockKitParams(meta.name);
+        if (params) rockParams.push(params);
+      }
+      if (rockParams.length) await prewarmRockGeometries(rockParams);
+    } catch (err) {
+      console.warn("[V3] rock prewarm failed (generated in turn instead):", err);
+    }
+  }
+
   async function restorePropSlots(savedSlots, savedTypes) {
     _clearAllPropTypes();
 
@@ -8685,6 +8733,11 @@ export async function startV3App(opts = {}) {
 
     const cliffNames = new Set(CLIFF_PRESETS.map((c) => c.name));
     const kitNames   = new Set(GREYBOX_KIT.map((p) => p.name));
+
+    // The level's rock and cliff shapes come from parallel worker threads
+    // (started when the project began to load); addRock / addCliff below then
+    // find them made. Waited for here — any not yet done.
+    await _prewarmLevelRocks(slots);
 
     for (const meta of slots) {
       try {
@@ -8883,6 +8936,9 @@ export async function startV3App(opts = {}) {
    *   (the editor: on; games: off, they set up their own look).
    */
   async function applyProjectData(d, { worldLook = projectWorldLook } = {}) {
+    // The rock shapes start generating in worker threads NOW, alongside the
+    // terrain and look below; restorePropSlots waits for what is left.
+    void _prewarmLevelRocks(d.props?.slots);
     // Files the project carries (imported textures, GLBs...) before anything
     // that refers to them.
     projectAssets.load(d.assets);

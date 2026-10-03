@@ -37,8 +37,31 @@ After alg's audit (games/alg-rts/TODO.md "PERF + LOAD AUDIT 2"):
       queries exceeded").
 - [x] FIRST LAUNCH no longer reloads: nam.html writes nam-valley's terrain
       config before the engine loads (the engine default is 2048 m).
-- [ ] Left from nam's stages: unit visuals 7.3 s, rice terraces 4.4-5.3 s,
-      the level 5.6 s — not looked into (alg had no such stages).
+- [x] NODE BUILDS SHARED (engine, 2026-10-03): a boot trace put 13.3 s of
+      ~35 s busy in three's node builds — 728 builds for 199 distinct
+      shaders. three keys every InstancedMesh's build on its uuid; with the
+      matrices as vertex attributes (instanceAttributes) the shader no longer
+      depends on the mesh, so render/sharedInstanceBuilds.js drops the uuid
+      and gives each mesh its own matrix buffer in the shared build
+      (?instshare=0 = one build each). Plus the rock/cliff kit on ONE
+      material (main.js kitMaterialFor — every shape had its own, so they
+      could never share). **Builds 728 → 405; main-thread build time
+      12.7 → 7.3 s.** PROVEN: every drawn instanced mesh reads its own
+      matrices, GPU readback = CPU array (0 error, 5 camera spots); frame
+      unchanged (alg A/B within noise).
+- [x] ROCK SHAPES IN WORKERS: the 20 kit shapes took 3.4 s of main thread at
+      "Loading nam-valley" (~170 ms each: a dense sphere cut by every chip
+      plane, then simplified). Now generated in up to 6 worker threads,
+      started when the level starts loading, awaited at the props
+      (proceduralRock.js prewarmRockGeometries). BIT-IDENTICAL to the main
+      thread's (20/20: attributes, index, bounds). Level stage ~6.4 → ~3.4 s.
+- [x] Stats-gl overlay came BACK on any resize (the engine's layout rewrote
+      its whole style) — keeps its hidden state now.
+- Boot after all this: dev ~24-28 s (heat-noisy; was 32.5), PRODUCTION 16.0 s.
+- [ ] Left: unit visuals ~7 s and rice terraces ~5 s are mostly the frame
+      AFTER them building what they added (renderWithClouds in the trace) —
+      fewer builds now; re-trace to see what is left. "Preparing effects"
+      ~4 s; 4.5 s near-idle at ~16-20 s of the trace (waiting on what?).
 
 ### Done 2026-09-29
 - [x] WADING BIRDS WALK (you: "they slide when they move"): egrets and

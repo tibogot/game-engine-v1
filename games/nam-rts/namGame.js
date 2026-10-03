@@ -191,6 +191,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // Instance matrices uploaded only when they change, not on every draw
     // (main.js; alg-rts audit 2026-10-03). ?instubo=1 = three's per-draw copy.
     instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
+    // Instanced meshes on one material share ONE node build (engine
+    // render/sharedInstanceBuilds.js). ?instshare=0 = one build each.
+    shareInstanceBuilds: new URLSearchParams(location.search).get("instshare") !== "0",
     // Plant-field draws that cannot hold a plant skipped on the CPU (engine
     // plantCpuCull, ported from alg-rts). ?plantcull=0 = draw them all.
     plantCpuCull: new URLSearchParams(location.search).get("plantcull") !== "0",
