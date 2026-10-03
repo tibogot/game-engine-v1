@@ -861,6 +861,17 @@ function _buildSkyProControls(parent, ts, app) {
     hint: "0 = the darks only lose colour, 1 = the blue of rod vision, 2 = a stronger, cinematic blue.",
   });
 
+  // the night sky (Tidewater's own terms, scaled; with the look off it is Tidewater's sky exactly)
+  const ns = _section(wrap, "Night sky", false);
+  _slider(ns, S, "nightHalo", { label: "Moon halo", min: 0, max: 4, step: 0.05, hint: "More glow round the moon (added to the sky's own aureole)." });
+  _slider(ns, S, "nightRing", { label: "22° ring", min: 0, max: 1, step: 0.05, hint: "The faint ring round the moon of a hazy night (ice crystals). 0 = none." });
+  _slider(ns, S, "nightCloudMoon", { label: "Cloud moonlight", min: 0.5, max: 5, step: 0.05, hint: "Moonlight on the clouds only: silver edges near the moon. The world's moonlight is unchanged." });
+  _slider(ns, S, "nightHorizon", { label: "Horizon glow", min: 0, max: 4, step: 0.05, hint: "A faint glow low on the horizon, so a dark land or sea never meets a black sky." });
+  _slider(ns, S, "nightStars", { label: "Star brightness", min: 0, max: 4, step: 0.05 });
+  _slider(ns, S, "nightStarDensity", { label: "Star count", min: 0.5, max: 4, step: 0.05 });
+  _slider(ns, S, "nightStarSize", { label: "Star size", min: 0.5, max: 3, step: 0.05, hint: "The same light spread wider: bigger, not whiter." });
+  _slider(ns, S, "nightMilkyWay", { label: "Milky Way", min: 1, max: 8, step: 0.1, hint: "1 = Tidewater's faint smooth band. Higher brightens it and brings out its star clouds, core and dust lane." });
+
   const hz = _section(wrap, "Haze & shafts", true);
   _slider(hz, S, "haze", {
     label: "Haze density", min: 0, max: 4, step: 0.05,

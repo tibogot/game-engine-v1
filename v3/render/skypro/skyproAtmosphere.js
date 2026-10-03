@@ -126,7 +126,10 @@ fn skySunDiskP( dir: vec3f, ap: vec4f, sp1: vec4f, tT: texture_2d<f32>, smp: sam
 	let T = atmosphereSampleTransmittance( ap.w, dir.y, tT, smp ); // atmosphereTransmittanceToSpace
 	return T * mask * limb * 2500.0 * sp1.x * smoothstep( -0.02, 0.0, dir.y );
 }
-fn skyStarsP( dir: vec3f, ap: vec4f, sp0: vec4f, sp1: vec4f ) -> vec3f {
+// PORT, the night look (all identity at sp2 = ( 0, 0, 1, 1 ), sp3 = ( 1, 1, 0, 0 )): sp2 = ( moon halo
+// extra, horizon glow extra, star brightness x, star size x ), sp3 = ( star density x, Milky Way glow x,
+// 22 deg ring, - )
+fn skyStarsP( dir: vec3f, ap: vec4f, sp0: vec4f, sp1: vec4f, sp2: vec4f, sp3: vec4f ) -> vec3f {
 	let a = abs( dir );
 	let onX = a.x > a.y && a.x > a.z;
 	let onY = a.y > a.z;
@@ -136,7 +139,7 @@ fn skyStarsP( dir: vec3f, ap: vec4f, sp0: vec4f, sp1: vec4f ) -> vec3f {
 	let h = skyHash13( cell );
 	let bx = dot( dir, vec3f( ${f(MW.x)}, ${f(MW.y)}, ${f(MW.z)} ) ) * 4.0;
 	let band = exp( - bx * bx );
-	let has = h < band * 0.035 + 0.025;
+	let has = h < ( band * 0.035 + 0.025 ) * sp3.x;
 	let uc = max( skyHash13( cell + 7.7 ), 2e-4 );
 	let m = log2( uc ) * 0.602 + 6.5;
 	let dark = 1.0 - smoothstep( -0.28, -0.1, ap.y );
@@ -145,13 +148,38 @@ fn skyStarsP( dir: vec3f, ap: vec4f, sp0: vec4f, sp1: vec4f ) -> vec3f {
 	let sdir = normalize( select( select( vec3f( sp, sign( dir.z ) ), vec3f( sp.x, sign( dir.y ), sp.y ), onY ), vec3f( sign( dir.x ), sp ), onX ) );
 	let d = length( dir - sdir ) * ${f(STAR_CELLS)};
 	let flux = pow( uc, -0.8 );
-	let size = log2( flux ) * 0.08 + 1.0;
+	let size = ( log2( flux ) * 0.08 + 1.0 ) * sp2.w;
 	let psf = exp( d * d / ( size * size ) * ${f(-0.5 / (STAR_SIGMA * STAR_SIGMA))} ) / ( size * size );
 	let tw = sin( sp1.y * ( skyHash13( cell + 13.3 ) * 9.0 + 5.0 ) + h * 60.0 ) * mix( 0.18, 0.06, clamp( dir.y * 2.0, 0.0, 1.0 ) ) + 1.0;
 	let col = mix( vec3f( 1.0, 0.8, 0.6 ), vec3f( 0.75, 0.85, 1.0 ), skyHash13( cell + 17.0 ) ) * 0.5 + 0.5;
-	let star = col * ( psf * flux * vis * tw * 0.0075 );
-	let glow = vec3f( 0.55, 0.6, 0.75 ) * ( band * dark * 0.0035 );
+	let star = col * ( psf * flux * vis * tw * 0.0075 * sp2.z );
+	// PORT, the night look: the band's STRUCTURE grows with the Milky Way gain (none at gain 1 =
+	// Tidewater's smooth band) — a brighter core, mottled star clouds, a dark dust lane down the middle
+	let mwK = max( sp3.y - 1.0, 0.0 );
+	var mwS = 1.0;
+	if ( mwK > 0.0 && band > 0.01 ) { mwS = skyMilkyWayP( dir, bx ); }
+	let glow = vec3f( 0.55, 0.6, 0.75 ) * ( band * dark * 0.0035 * ( 1.0 + mwK * mwS ) );
 	return ( star + glow ) * sp0.w * smoothstep( 0.0, 0.2, dir.y );
+}
+// PORT, the night look: value noise (trilinear over skyHash13) and the Milky Way's structure, 0..~2.5
+fn skyVNoise3( p: vec3f ) -> f32 {
+	let i = floor( p ); let f = fract( p ); let u = f * f * ( 3.0 - 2.0 * f );
+	let a = mix( skyHash13( i ), skyHash13( i + vec3f( 1.0, 0.0, 0.0 ) ), u.x );
+	let b = mix( skyHash13( i + vec3f( 0.0, 1.0, 0.0 ) ), skyHash13( i + vec3f( 1.0, 1.0, 0.0 ) ), u.x );
+	let c = mix( skyHash13( i + vec3f( 0.0, 0.0, 1.0 ) ), skyHash13( i + vec3f( 1.0, 0.0, 1.0 ) ), u.x );
+	let d = mix( skyHash13( i + vec3f( 0.0, 1.0, 1.0 ) ), skyHash13( i + vec3f( 1.0, 1.0, 1.0 ) ), u.x );
+	return mix( mix( a, b, u.y ), mix( c, d, u.y ), u.z );
+}
+fn skyMilkyWayP( dir: vec3f, bx: f32 ) -> f32 {
+	// star clouds: 3 octaves on the sky sphere (offset so the lattice is never axis-aligned)
+	let q = dir * 6.0 + vec3f( 17.3, 4.1, 9.7 );
+	let n = skyVNoise3( q ) * 0.55 + skyVNoise3( q * 2.13 ) * 0.3 + skyVNoise3( q * 4.37 ) * 0.15;
+	let clouds = smoothstep( 0.3, 0.75, n );
+	// the dust lane: a dark streak near the band's centre line, wandering with the noise
+	let lane = exp( - pow( ( bx - ( n - 0.5 ) * 0.5 ) / 0.22, 2.0 ) );
+	// the core (Sagittarius): brighter toward one point ON the band (dot with the pole = 0), 25 deg up
+	let core = exp( ( dot( dir, normalize( vec3f( -0.891, 0.415, 0.184 ) ) ) - 1.0 ) * 3.0 );
+	return max( clouds * ( 1.0 + core * 1.5 ) * ( 1.0 - lane * 0.75 ), 0.0 );
 }
 fn skyMoonP( dir: vec3f, sp0: vec4f ) -> vec3f {
 	let cosA = dot( dir, sp0.xyz );
@@ -169,12 +197,24 @@ fn skyMoonSkyP( dir: vec3f, sp0: vec4f, sp1: vec4f ) -> vec3f {
 	return vec3f( 0.005, 0.0068, 0.0105 ) * ( grad + aureole ) * sp1.z * up;
 }
 // everything behind the clouds except the sun and moon disks
-fn skyBackgroundP( dir: vec3f, starK: f32, ap: vec4f, sp0: vec4f, sp1: vec4f, svT: texture_2d<f32>, smp: sampler ) -> vec3f {
+fn skyBackgroundP( dir: vec3f, starK: f32, ap: vec4f, sp0: vec4f, sp1: vec4f, sp2: vec4f, sp3: vec4f, svT: texture_2d<f32>, smp: sampler ) -> vec3f {
 	var L = atmosphereSkyLuminanceP( dir, ap, svT, smp );
 	if ( sp0.w > 0.001 ) {
-		L += skyMoonSkyP( dir, sp0, sp1 ) + skyStarsP( dir, ap, sp0, sp1 ) * starK;
+		L += skyMoonSkyP( dir, sp0, sp1 ) + skyStarsP( dir, ap, sp0, sp1, sp2, sp3 ) * starK;
+		L += skyNightLookP( dir, sp0, sp1, sp2, sp3 );
 	}
 	return L;
+}
+// PORT, the night look's additions to the night sky (0 with sp2.xy = sp3.z = 0): a wider halo round
+// the moon (its aureole, more of it), the faint 22 deg ring of hazy nights, a glow low on the horizon
+fn skyNightLookP( dir: vec3f, sp0: vec4f, sp1: vec4f, sp2: vec4f, sp3: vec4f ) -> vec3f {
+	let ang = acos( clamp( dot( dir, sp0.xyz ), -1.0, 1.0 ) );
+	let up = smoothstep( -0.05, 0.15, sp0.y );
+	let halo = ( exp( ang * -9.0 ) * 1.6 + exp( ang * -3.5 ) * 0.5 ) * sp2.x;
+	let rd = ( ang - 0.384 ) / 0.02;
+	let ring = exp( - rd * rd ) * 0.35 * sp3.z;
+	let low = pow( 1.0 - clamp( dir.y, 0.0, 1.0 ), 8.0 ) * sp2.y;
+	return vec3f( 0.005, 0.0068, 0.0105 ) * ( ( halo + ring ) * up + low ) * sp1.z;
 }
 `);
 
@@ -401,9 +441,9 @@ fn atIrradiance( which: u32, ap: vec4f, tT: texture_2d<f32>, svT: texture_2d<f32
 
 // the dome (Sky.js skyRadiance / skyRadianceWithClouds without the clouds; the caller composites them)
 const RADIANCE_FN = /* wgsl */`
-fn skyRadianceP( dir: vec3f, withSun: f32, starK: f32, ap: vec4f, sp0: vec4f, sp1: vec4f,
+fn skyRadianceP( dir: vec3f, withSun: f32, starK: f32, ap: vec4f, sp0: vec4f, sp1: vec4f, sp2: vec4f, sp3: vec4f,
 	tT: texture_2d<f32>, svT: texture_2d<f32>, smp: sampler ) -> vec3f {
-	var L = skyBackgroundP( dir, starK, ap, sp0, sp1, svT, smp );
+	var L = skyBackgroundP( dir, starK, ap, sp0, sp1, sp2, sp3, svT, smp );
 	if ( withSun > 0.5 ) { L += skyMoonP( dir, sp0 ) + skySunDiskP( dir, ap, sp1, tT, smp ); }
 	return L;
 }`;
@@ -439,6 +479,9 @@ export function createSkyProAtmosphere({ renderer }) {
   const uAP = uniform(new THREE.Vector4(0, 1, 0, RG_KM + 0.002)); // ( real sun dir, view height km )
   const uSP0 = uniform(new THREE.Vector4(-0.3, 0.5, 0.8, 0)); // ( moon dir, star intensity )
   const uSP1 = uniform(new THREE.Vector4(1, 0, 0, 0)); // ( sun disc intensity, time, night, - )
+  // the night look (identity = Tidewater's sky): ( halo, horizon glow, star gain, star size ), ( star density, Milky Way, ring, - )
+  const uSP2 = uniform(new THREE.Vector4(0, 0, 1, 1));
+  const uSP3 = uniform(new THREE.Vector4(1, 1, 0, 0));
 
   const code = wgsl(SAMPLE_WGSL);
   const core = wgsl(CORE_WGSL, [code]);
@@ -456,7 +499,7 @@ export function createSkyProAtmosphere({ renderer }) {
   const lumFn = wgslFn(`fn atSkyLum( dir: vec3f, ap: vec4f, svT: texture_2d<f32>, smp: sampler ) -> vec3f { return atmosphereSkyLuminanceP( normalize( dir ), ap, svT, smp ); }`, [code]);
   const sunFn = wgslFn(`fn atSunDisk( dir: vec3f, ap: vec4f, sp1: vec4f, tT: texture_2d<f32>, smp: sampler ) -> vec3f { return skySunDiskP( normalize( dir ), ap, sp1, tT, smp ); }`, [code]);
   const moonFn = wgslFn(`fn atMoon( dir: vec3f, sp0: vec4f ) -> vec3f { return skyMoonP( normalize( dir ), sp0 ); }`, [code]);
-  const bgFn = wgslFn(`fn atBackground( dir: vec3f, starK: f32, ap: vec4f, sp0: vec4f, sp1: vec4f, svT: texture_2d<f32>, smp: sampler ) -> vec3f { return skyBackgroundP( normalize( dir ), starK, ap, sp0, sp1, svT, smp ); }`, [code]);
+  const bgFn = wgslFn(`fn atBackground( dir: vec3f, starK: f32, ap: vec4f, sp0: vec4f, sp1: vec4f, sp2: vec4f, sp3: vec4f, svT: texture_2d<f32>, smp: sampler ) -> vec3f { return skyBackgroundP( normalize( dir ), starK, ap, sp0, sp1, sp2, sp3, svT, smp ); }`, [code]);
   const transCpuFn = wgslFn(`fn atTransToSpace( dir: vec3f, ap: vec4f, tT: texture_2d<f32>, smp: sampler ) -> vec3f { return atmosphereSampleTransmittance( ap.w, normalize( dir ).y, tT, smp ); }`, [code]);
 
   const inside = (id, w, h) => id.x.lessThan(uint(w)).and(id.y.lessThan(uint(h)));
@@ -518,14 +561,14 @@ export function createSkyProAtmosphere({ renderer }) {
     skyIrradiance: null, sunTransmittance: null, horizon: null,
     textures: { transmittance: transmittanceLUT, multiScat: multiScatLUT, skyView: skyViewLUT, irradiance: irradianceTex },
     /** the shared stateless WGSL (include it: wgslFn(..., [atmo.code])) and its inputs */
-    code, uniforms: { ap: uAP, sp0: uSP0, sp1: uSP1 }, nodes: { transmittance: tNode, skyView: svNode, multiScat: mNode, sampler: smp },
+    code, uniforms: { ap: uAP, sp0: uSP0, sp1: uSP1, sp2: uSP2, sp3: uSP3 }, nodes: { transmittance: tNode, skyView: svNode, multiScat: mNode, sampler: smp },
     // ---- TSL
     /** sky luminance toward dir (no sun or moon disc) — Tidewater atmosphereSkyLuminance */
     skyLuminance: (dir) => lumFn(dir, uAP, svNode, smp),
     /** everything behind the clouds but the discs (starK: 1 view, STAR_REFLECTION for reflections) */
-    skyBackground: (dir, starK = float(1)) => bgFn(dir, starK, uAP, uSP0, uSP1, svNode, smp),
+    skyBackground: (dir, starK = float(1)) => bgFn(dir, starK, uAP, uSP0, uSP1, uSP2, uSP3, svNode, smp),
     /** Sky.js skyRadiance( dir, withSun ): sky + moon + sun disc (withSun 1) or the sky alone (0) */
-    skyRadiance: (dir, withSun = float(1), starK = float(1)) => radFn(dir, withSun, starK, uAP, uSP0, uSP1, tNode, svNode, smp),
+    skyRadiance: (dir, withSun = float(1), starK = float(1)) => radFn(dir, withSun, starK, uAP, uSP0, uSP1, uSP2, uSP3, tNode, svNode, smp),
     sunDisk: (dir) => sunFn(dir, uAP, uSP1, tNode, smp),
     moon: (dir) => moonFn(dir, uSP0),
     transmittanceToSpace: (dir) => transCpuFn(dir, uAP, tNode, smp),
@@ -562,6 +605,10 @@ export function createSkyProAtmosphere({ renderer }) {
     uAP.value.set(s.x, s.y, s.z, viewH);
     if (o.moonDir) uSP0.value.set(o.moonDir.x, o.moonDir.y, o.moonDir.z, o.starIntensity ?? 0);
     uSP1.value.set(o.sunDiskIntensity ?? 1, o.time ?? 0, o.night ?? 0, 0);
+    // the night look (absent = Tidewater's sky exactly)
+    const nl = o.nightLook;
+    uSP2.value.set(nl?.halo ?? 0, nl?.horizon ?? 0, nl?.stars ?? 1, nl?.starSize ?? 1);
+    uSP3.value.set(nl?.starDensity ?? 1, nl?.milkyWay ?? 1, nl?.ring ?? 0, 0);
 
     let dirty = false;
     if (needsStatic) {

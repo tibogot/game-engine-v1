@@ -75,6 +75,15 @@ export const SKYPRO_DEFAULTS = {
   nightGrade: 0.6,
   /** night look: how blue the rod response reads: 0 = only desaturated, 1 = rod blue, 2 = stronger */
   nightBlue: 0.8,
+  /** night look, the sky (skyproAtmosphere skyNightLookP / skyStarsP; Tidewater's sky = 0, 0, 1, 1, 1, 1, 0) */
+  nightHalo: 1.0,        // more glow round the moon (its aureole), added
+  nightHorizon: 1.0,     // a faint glow low on the horizon, added
+  nightStars: 1.5,       // star brightness x
+  nightStarSize: 1.3,    // star size x (same light, spread wider: reads bigger, not whiter)
+  nightStarDensity: 2.0, // how many stars x
+  nightMilkyWay: 3.0,    // the Milky Way's glow x
+  nightRing: 0,          // the 22° ring round the moon of a hazy night, 0..1
+  nightCloudMoon: 2.0,   // the moonlight on the clouds only x (silver edges near the moon; the world's is unchanged)
   /** the lower hemisphere of the sky light (a flat ground of this albedo) */
   groundAlbedo: "#54493a",
   /** air haze density (Tidewater AirHaze: marine + aerosol layers); 0 = no haze pass at all */
@@ -99,8 +108,14 @@ export const SKYPRO_DEFAULTS = {
  * readable in deep blue). The panel's buttons set these; the sliders stay free after.
  */
 export const SKYPRO_NIGHT_STYLES = {
-  realistic: { nightEV: 1.0, nightGrade: 0.6, nightBlue: 0.8 },
-  cinematic: { nightEV: 2.0, nightGrade: 1.0, nightBlue: 1.6 },
+  realistic: {
+    nightEV: 1.0, nightGrade: 0.6, nightBlue: 0.8,
+    nightHalo: 1.0, nightHorizon: 1.0, nightStars: 1.5, nightStarSize: 1.3, nightStarDensity: 2.0, nightMilkyWay: 3.0, nightCloudMoon: 2.0,
+  },
+  cinematic: {
+    nightEV: 2.0, nightGrade: 1.0, nightBlue: 1.6,
+    nightHalo: 1.6, nightHorizon: 1.6, nightStars: 2.2, nightStarSize: 1.5, nightStarDensity: 2.6, nightMilkyWay: 5.0, nightCloudMoon: 2.6,
+  },
 };
 
 const SKY_RADIUS = 4000;
@@ -215,6 +230,7 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   const bufferSize = new THREE.Vector2();
   const sunColor = [0, 0, 0], T = [0, 0, 0];
   const moonColor = new THREE.Vector3();
+  const cloudMoon = new THREE.Vector3();
   let time = 0;
   const out = {
     sunColor: [0, 0, 0], skyIrradiance: [0, 0, 0], horizon: [0, 0, 0], keyIsMoon: false, moonColor, keyDir: lightDir, night: 0,
@@ -244,7 +260,11 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     lightDir.copy(keyIsMoon ? moonDir : s);   // (skyProKeyDir, with a given moon)
     moonColor.set(0.6, 0.7, 1.0).multiplyScalar(0.12 * night);
 
-    atmosphere.update({ dt, cameraY: camera.position.y, sunDir: s, moonDir, starIntensity: night, night, time, sunDiskIntensity: 1 });
+    const nightSky = P.nightLook ? {
+      halo: P.nightHalo, horizon: P.nightHorizon, stars: P.nightStars, starSize: P.nightStarSize,
+      starDensity: P.nightStarDensity, milkyWay: P.nightMilkyWay, ring: P.nightRing,
+    } : null;
+    atmosphere.update({ dt, cameraY: camera.position.y, sunDir: s, moonDir, starIntensity: night, night, time, sunDiskIntensity: 1, nightLook: nightSky });
 
     // Tidewater applyAtmosphereReadback: the sun at sea level x its illuminance x a horizon fade
     atmosphere.sunColorAt(0, s.y, T);
@@ -262,13 +282,15 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     clouds.windSpeed.value = P.windSpeed;
     clouds.horizonMask = !!P.horizonMask;
     camera.updateMatrixWorld();
+    // the night look's moonlight on the clouds (only theirs: the world's key stays moonColor)
+    cloudMoon.copy(moonColor).multiplyScalar(P.nightLook ? Math.max(0, P.nightCloudMoon) : 1);
     clouds.update(dt, camera, {
-      sunDir: s, lightDir, moonColor, windDir, drawingBufferSize: bufferSize,
+      sunDir: s, lightDir, moonColor: cloudMoon, windDir, drawingBufferSize: bufferSize,
       nightAmbient: [skyIrr[0] * night, skyIrr[1] * night, skyIrr[2] * night],
     });
     cirrus.amount.value = P.cirrus;
     cirrus.altitude.value = P.cirrusAlt;
-    cirrus.update(dt, camera, { lightDir, sunDir: s, moonE: moonColor, coverage: P.coverage, windDir, windSpeed: P.windSpeed });
+    cirrus.update(dt, camera, { lightDir, sunDir: s, moonE: cloudMoon, coverage: P.coverage, windDir, windSpeed: P.windSpeed });
     uPxAngle.value = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5)) / Math.max(1, bufferSize.y);
 
     const keyLight = keyIsMoon ? moonColor : new THREE.Vector3(...sunColor);
