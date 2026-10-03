@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local lights lab</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+	html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #dde3ea; font: 12px/1.35 system-ui, sans-serif; }
+	#app, #app canvas { position: absolute; inset: 0; display: block; }
+	#panel { position: absolute; top: 10px; right: 10px; width: 290px; max-height: calc(100% - 20px); overflow: auto; padding: 10px 12px; background: rgba(12, 16, 22, 0.82); border-radius: 8px; backdrop-filter: blur(6px); }
+	#panel h2 { margin: 0 0 2px; font-size: 13px; }
+	#panel .src { margin: 0 0 6px; color: #8d99a6; font-size: 11px; }
+	#panel h3 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8d99a6; }
+	.row { display: grid; grid-template-columns: 96px 1fr 58px; align-items: center; gap: 6px; margin: 3px 0; }
+	.row input[type=range] { width: 100%; }
+	.row input[type=checkbox] { justify-self: start; }
+	.row output { text-align: right; font-variant-numeric: tabular-nums; color: #b8c4d0; }
+	.views { display: flex; flex-wrap: wrap; gap: 4px; }
+	.views button { font: inherit; color: inherit; background: #243040; border: 1px solid #34465c; border-radius: 4px; padding: 3px 7px; cursor: pointer; }
+	.views button.on { background: #3b5574; }
+	.views button:hover { background: #2f3f55; }
+	#stats { margin: 10px 0 4px; font: 11px/1.4 ui-monospace, monospace; white-space: pre; color: #b8c4d0; }
+	.help { margin: 4px 0 0; color: #8d99a6; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="panel">
+	<h2>Local lights lab</h2>
+	<p class="src">Fires, lanterns and muzzle flashes at night (Sky Pro units: moon key 0.084). Three ways to light them: three's default per-light path, DynamicLighting (uniform arrays), TiledLighting (screen tiles).</p>
+</div>
+<script type="module" src="./lights-lab/lab.js"></script>
+</body>
+</html>
