@@ -351,6 +351,16 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       fight). Badges checked on their squads. The sim step (~0.7 ms at 83 men)
       is spread thin (separation 0.14, influence 0.07, avoidance 0.05 …):
       nothing worth cutting yet.
+- [x] **STONES: ONE MATERIAL** (you: "do the stones anyway"): the five
+      ground photos as one texture array (rows packed as the image textures
+      sampled them), each stone's ground a per-instance attribute (layer +
+      tint); one instanced mesh per shape variant: 23 → 9 meshes. Same 5,742
+      stones, same per-ground counts, each keeps its old sink/scale jitter
+      (its index in the old list). Draws −14 in every view (175 / 230 / 276),
+      builds 402 → 392, frame within noise. Side by side at a scree slope: the
+      same; crops differ 1.5-4 levels of 255 (plants and haze move). The
+      array's CPU pixels are released (markGpuOnly). clearWhere moves the
+      ground index with the matrix.
 - [ ] Remaining duplicate builds (~230): mostly DIFFERENT materials with the
       same structure (stone sets, walls, outcrops, vehicle parts — three must
       build per material: the build binds its textures) and the placed

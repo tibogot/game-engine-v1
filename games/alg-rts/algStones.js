@@ -20,7 +20,8 @@
 // footprint (the nav grid), in water, on the oasis grove or outside PLAY.
 // One InstancedMesh per (ground, shape): ~14 draws, no per-frame work.
 import * as THREE from "three";
-import { abs, float, normalWorld, positionWorld, pow, texture, vec2, vec3 } from "three/tsl";
+import { abs, attribute, float, int, normalWorld, positionWorld, pow, texture, uniformArray, vec2, vec3 } from "three/tsl";
+import { markGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import { createRockGeometry } from "../../v3/props/proceduralRock.js";
 import { simplifierReady } from "../../v3/render/instancing/autoLod.js";
 import { PLAY } from "./layout.js";
@@ -46,23 +47,60 @@ const SHAPES = {
   cobble:  { size: [0.24, 0.13, 0.19], tris: 64,  seeds: [8, 9],  extra: { chips: 5, chipMax: 0.06, edgeSoft: 0.03, egg: 0.02, detail: 14, simplifyError: 0.25 } },
 };
 
-/** The stone material for a ground: its photo, triplanar, a tile per ~0.9 m. */
-function stoneMaterial(g) {
-  const load = (url, srgb) => { const t = new THREE.TextureLoader().load(url); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.anisotropy = 4; return t; };
-  const albedo = load(TEX(g.id, "diff"), true);
+const GROUND_KEYS = Object.keys(GROUNDS);
+const PHOTO = 1024;
+
+/**
+ * The grounds' photos as ONE texture array (layer = GROUND_KEYS index). Rows
+ * packed bottom-up: the separate photos were image textures (flipY), so the
+ * triplanar taps land on the same texels as before.
+ */
+async function stonePhotos() {
+  const imgs = await Promise.all(GROUND_KEYS.map((gk) => new THREE.ImageLoader().loadAsync(TEX(GROUNDS[gk].id, "diff"))));
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = PHOTO;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const data = new Uint8Array(PHOTO * PHOTO * 4 * imgs.length), row = PHOTO * 4;
+  imgs.forEach((img, l) => {
+    ctx.clearRect(0, 0, PHOTO, PHOTO);
+    ctx.drawImage(img, 0, 0, PHOTO, PHOTO);
+    const px = ctx.getImageData(0, 0, PHOTO, PHOTO).data, o = l * PHOTO * row;
+    for (let y = 0; y < PHOTO; y++) data.set(px.subarray(y * row, y * row + row), o + (PHOTO - 1 - y) * row);
+  });
+  const tex = new THREE.DataArrayTexture(data, PHOTO, PHOTO, imgs.length);
+  tex.format = THREE.RGBAFormat;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  markGpuOnly(tex);   // static once uploaded: the game drops the CPU pixels
+  return tex;
+}
+
+/**
+ * THE stone material (2026-10-03, perf audit: was one per ground — 5 materials
+ * over 23 instanced meshes, ~46 shader builds and 23 draws). Each stone's
+ * ground is a per-instance attribute (`ground`): its layer of the photo array,
+ * triplanar, a tile per ~0.9 m, and its ground's tint.
+ */
+function stoneMaterial(photos) {
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
-  mat.name = `Stone:${g.id}`;
+  mat.name = "Stone";
+  const layer = int(attribute("ground", "float").add(0.5));
+  const tints = uniformArray(GROUND_KEYS.map((gk) => new THREE.Color(GROUNDS[gk].tint)), "color");
   const S = float(1 / 0.9);
   const w0 = pow(abs(normalWorld), vec3(4));
   const w = w0.div(w0.x.add(w0.y).add(w0.z));
   const p = positionWorld.mul(S);
-  const c = texture(albedo, vec2(p.z, p.y)).rgb.mul(w.x)
-    .add(texture(albedo, vec2(p.x, p.z)).rgb.mul(w.y))
-    .add(texture(albedo, vec2(p.x, p.y)).rgb.mul(w.z));
-  const t = new THREE.Color(g.tint);
+  const c = texture(photos, vec2(p.z, p.y)).depth(layer).rgb.mul(w.x)
+    .add(texture(photos, vec2(p.x, p.z)).depth(layer).rgb.mul(w.y))
+    .add(texture(photos, vec2(p.x, p.y)).depth(layer).rgb.mul(w.z));
   // A shade lighter than the ground photo: a stone's top catches the sun the
   // flat ground photo already had baked in its shadows.
-  mat.colorNode = c.mul(vec3(t.r, t.g, t.b)).mul(1.12);
+  mat.colorNode = c.mul(tints.element(layer)).mul(1.12);
   return mat;
 }
 
@@ -111,20 +149,32 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
     }
   }
 
-  // ── The meshes ─────────────────────────────────────────────────────────
-  const mats = {};
+  // ── The meshes: ONE material, one instanced mesh per shape variant ──────
+  // (each stone's ground rides along as a per-instance attribute).
+  const mat = stoneMaterial(await stonePhotos());
+  const byShape = {};                     // `${shape}|${variant}` → [{ ...p, g }]
+  for (const [key, list] of Object.entries(lists)) {
+    const [gk, shape, v] = key.split("|");
+    const g = GROUND_KEYS.indexOf(gk);
+    // Instance index within its old (ground, shape) list: the sink/scale
+    // jitter below keys on it, so every stone keeps its exact old form.
+    for (let i = 0; i < list.length; i++) (byShape[`${shape}|${v}`] ??= []).push({ ...list[i], g, i });
+  }
   const group = new THREE.Group();
   group.name = "AlgStones";
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), qy = new THREE.Quaternion(), sc = new THREE.Vector3(), pos = new THREE.Vector3();
   const up = new THREE.Vector3(0, 1, 0), nv = new THREE.Vector3();
-  for (const [key, list] of Object.entries(lists)) {
-    const [gk, shape, v] = key.split("|");
+  for (const [key, list] of Object.entries(byShape)) {
+    const [shape, v] = key.split("|");
     const geo = geos[shape][+v];
-    mats[gk] ??= stoneMaterial(GROUNDS[gk]);
-    const mesh = new THREE.InstancedMesh(geo, mats[gk], list.length);
+    const ground = new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1);
+    geo.setAttribute("ground", ground);
+    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
     mesh.name = `Stones:${key}`;
     const hgt = geo.boundingBox.max.y - geo.boundingBox.min.y;
-    list.forEach((p, i) => {
+    list.forEach((p, k) => {
+      const i = p.i;
+      ground.array[k] = p.g;
       // Tilted to the ground (halfway: a stone rests, it does not lie flat on a
       // steep face), turned, and SUNK 20-35% of its height.
       const gn = app.getWorldNormal?.(p.x, p.z);
@@ -133,7 +183,7 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
       const s = p.s * (shape === "boulder" ? 1.2 + (i % 3) * 0.3 : 1);
       pos.set(p.x, p.y - geo.boundingBox.min.y * s - hgt * s * (0.2 + ((i * 7) % 16) / 100), p.z);
       m.compose(pos, q, sc.set(s * (0.85 + ((i * 13) % 30) / 100), s, s));
-      mesh.setMatrixAt(i, m);
+      mesh.setMatrixAt(k, m);
     });
     mesh.instanceMatrix.needsUpdate = true;
     mesh.computeBoundingSphere();
@@ -159,6 +209,9 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
         if (!fn(mm.elements[12], mm.elements[14])) continue;
         mesh.getMatrixAt(mesh.count - 1, mm);
         mesh.setMatrixAt(i, mm);
+        // Its ground (the per-instance photo layer) moves with it.
+        const g = mesh.geometry.getAttribute("ground");
+        if (g) { g.array[i] = g.array[mesh.count - 1]; g.needsUpdate = true; }
         mesh.count--; i--; gone++;
         mesh.instanceMatrix.needsUpdate = true;
       }
