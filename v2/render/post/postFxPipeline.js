@@ -318,9 +318,18 @@ export class PostFxPipeline {
     const scenePass = pass(scene, camera);
     const color = scenePass.getTextureNode("output");
 
+    // The night-vision grade is ALWAYS in the minimal chain (amount 0 = an exact identity, below
+    // the noise floor): a scene that only needs depth (water) still gets its night grade, and
+    // switching the grade on later costs no rebuild here.
+    if (!this._purkinjeUniforms) {
+      this._purkinjeUniforms = createPurkinjeUniforms();
+      this._applyPurkinjeUniforms();
+    }
+    const grade = (n) => purkinje(n, this._purkinjeUniforms);
+
     const pipeline = new THREE.RenderPipeline(renderer);
     pipeline.outputColorTransform = false;
-    pipeline.outputNode = fxaa(renderOutput(color));
+    pipeline.outputNode = fxaa(renderOutput(grade(color)));
 
     // Cloud path: solids → linear RT, clouds composite onto it, then display.
     const linearRT = new THREE.RenderTarget(1, 1, {
@@ -335,7 +344,7 @@ export class PostFxPipeline {
     linearPipeline.outputNode = color;
     const displayPipeline = new THREE.RenderPipeline(renderer);
     displayPipeline.outputColorTransform = false;
-    displayPipeline.outputNode = fxaa(renderOutput(texture(linearRT.texture)));
+    displayPipeline.outputNode = fxaa(renderOutput(grade(texture(linearRT.texture))));
 
     this._minimal = { scenePass, pipeline, linearRT, linearPipeline, displayPipeline };
     this._resizeLinearRT();
@@ -408,11 +417,12 @@ export class PostFxPipeline {
    * Night-vision response. `{ enabled, amount, loLum, hiLum }`; `amount` is meant to be
    * driven per frame from how dark the scene is, the rest are set once.
    */
-  setPurkinje({ enabled, amount, loLum, hiLum } = {}) {
+  setPurkinje({ enabled, amount, loLum, hiLum, tint } = {}) {
     const p = this._purkinjeParams;
     if (amount != null) p.amount = amount;
     if (loLum != null) p.loLum = loLum;
     if (hiLum != null) p.hiLum = hiLum;
+    if (tint != null) p.tint = tint;
     if (this._purkinjeUniforms) this._applyPurkinjeUniforms();
     if (enabled != null) {
       this._purkinjeEnabled = enabled;
@@ -437,9 +447,11 @@ export class PostFxPipeline {
     const u = this._purkinjeUniforms;
     if (!u) return;
     const p = this._purkinjeParams;
-    u.amount.value = p.amount;
+    // (disabled reads as 0: the minimal chain always carries the node)
+    u.amount.value = p.enabled ? p.amount : 0;
     u.loLum.value = p.loLum;
     u.hiLum.value = p.hiLum;
+    if (p.tint) u.tint.value.set(p.tint[0], p.tint[1], p.tint[2]);
   }
 
   setBloomSelective(enabled) {

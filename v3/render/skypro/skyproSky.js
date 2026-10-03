@@ -68,6 +68,13 @@ export const SKYPRO_DEFAULTS = {
   moonElev: 18,
   /** night look: the moon's azimuth, degrees turned from Tidewater's (opposite the sun) */
   moonAzim: 0,
+  /**
+   * night look: the Purkinje grade (rod vision: the darks drain of colour and shift blue, bright
+   * things keep theirs), 0..1, eased in with the night
+   */
+  nightGrade: 0.6,
+  /** night look: how blue the rod response reads: 0 = only desaturated, 1 = rod blue, 2 = stronger */
+  nightBlue: 0.8,
   /** the lower hemisphere of the sky light (a flat ground of this albedo) */
   groundAlbedo: "#54493a",
   /** air haze density (Tidewater AirHaze: marine + aerosol layers); 0 = no haze pass at all */
@@ -84,6 +91,16 @@ export const SKYPRO_DEFAULTS = {
    * of ~10 (Tidewater's units) instead of the ~2 they were tuned with. null = none taken.
    */
   savedLight: null,
+};
+
+/**
+ * The night look's two styles (chosen 2026-10-04 at the bay shot): "realistic" is the default (a
+ * moonlit night, the sea and the moon path carry the frame); "cinematic" is day-for-night (all of it
+ * readable in deep blue). The panel's buttons set these; the sliders stay free after.
+ */
+export const SKYPRO_NIGHT_STYLES = {
+  realistic: { nightEV: 1.0, nightGrade: 0.6, nightBlue: 0.8 },
+  cinematic: { nightEV: 2.0, nightGrade: 1.0, nightBlue: 1.6 },
 };
 
 const SKY_RADIUS = 4000;

@@ -2,6 +2,7 @@ import { section as _section, separator as _separator, slider as _slider, color 
 import { uiById } from "./uiRoot.js";
 import { formatCascades } from "../app/csmSplits.js";
 import { buildOceanV2Controls } from "./buildOceanV2Panel.js";
+import { SKYPRO_NIGHT_STYLES } from "../render/skypro/skyproSky.js";
 
 /** V2 World tab UI — extracted from v2/editor.html buildWorldTab (no volumetric cloud sections). */
 
@@ -832,6 +833,13 @@ function _buildSkyProControls(parent, ts, app) {
     label: "Night look",
     hint: "A layer on top of Tidewater's night, not part of it. Off = the night exactly as Tidewater draws it.",
   });
+  // one click to either style (it turns the look on); the sliders below stay free to tune
+  for (const [name, title] of [["realistic", "Realistic (default)"], ["cinematic", "Cinematic (day-for-night)"]]) {
+    _button(nl, {
+      title,
+      onClick: () => { Object.assign(S, { nightLook: true }, SKYPRO_NIGHT_STYLES[name]); _refreshWidgets(); },
+    });
+  }
   _slider(nl, S, "nightEV", {
     label: "Night exposure (EV)", min: 0, max: 4, step: 0.1,
     hint: "Extra stops at full night, eased in as night falls, on top of the auto exposure's one stop.",
@@ -843,6 +851,14 @@ function _buildSkyProControls(parent, ts, app) {
   _slider(nl, S, "moonAzim", {
     label: "Moon direction (°)", min: -180, max: 180, step: 1,
     hint: "Turns the moon round the horizon from Tidewater's place. The disc, the moonlight, its shadows and the glitter follow.",
+  });
+  _slider(nl, S, "nightGrade", {
+    label: "Night grade", min: 0, max: 1, step: 0.05,
+    hint: "Rod vision (Purkinje): the dark parts of the frame lose their colour and shift blue; the moon, its glitter and lights keep theirs. Eased in as night falls.",
+  });
+  _slider(nl, S, "nightBlue", {
+    label: "Night blue", min: 0, max: 2, step: 0.05,
+    hint: "0 = the darks only lose colour, 1 = the blue of rod vision, 2 = a stronger, cinematic blue.",
   });
 
   const hz = _section(wrap, "Haze & shafts", true);

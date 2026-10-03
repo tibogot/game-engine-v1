@@ -1156,6 +1156,7 @@ export async function createWorldEnvironment({
     // Eye adaptation (Tidewater's auto exposure + the night look): a per-frame factor on the
     // mode's base exposure, written to the renderer only — Li.exposure stays the saved base.
     const exposureK = skyPro.exposureFactor(dtSec);
+    driveSkyProGrade(L);
     if (key === _skyProLightKey) {
       renderer.toneMappingExposure = Li.exposure * exposureK;
       return;
@@ -1171,6 +1172,32 @@ export async function createWorldEnvironment({
     Li.exposure = skyPro.params.exposure;
     updateSunSky();
     renderer.toneMappingExposure = Li.exposure * exposureK;   // (updateSunSky wrote the bare base)
+  }
+
+  /*
+   * The night look's grade: the post chain's Purkinje node (v2/render/post/purkinjeNode.js), on the
+   * linear frame BEFORE exposure, so its thresholds are absolute Sky Pro radiance (Tidewater units:
+   * moonlit sand ~0.01, the moon's glitter 0.1+). Enabling rebuilds the display shaders — a
+   * MEASURED 1.8 s frame in the editor — so it is enabled the first frame this sky drives (load or
+   * mode switch, with the other compiles), never when night first falls mid-game; after that only
+   * `amount` moves (0 by day and with the look off = an exact identity, below the noise floor).
+   */
+  const SKYPRO_GRADE_LUM = { loLum: 0.004, hiLum: 0.06 };
+  const SKYPRO_ROD_TINT = [0.62, 0.86, 1.3];
+  const _gradeTint = [1, 1, 1];
+  let _skyProGradeOn = false;
+  function driveSkyProGrade(L) {
+    const P = skyPro.params;
+    const amount = P.nightLook ? Math.max(0, P.nightGrade) * L.night : 0;
+    // the rod blue, scaled about the grey of the same luminance (0.81): 0 = desaturate only
+    const b = Math.max(0, P.nightBlue);
+    for (let i = 0; i < 3; i++) _gradeTint[i] = 0.81 + (SKYPRO_ROD_TINT[i] - 0.81) * b;
+    if (!_skyProGradeOn) {
+      _skyProGradeOn = true;
+      postFxPipeline?.setPurkinje({ enabled: true, amount, tint: _gradeTint, ...SKYPRO_GRADE_LUM });
+      return;
+    }
+    postFxPipeline?.setPurkinje({ amount, tint: _gradeTint });
   }
 
   /**
@@ -1191,6 +1218,8 @@ export async function createWorldEnvironment({
     cloudShadowsLite.setMap(null);
     // the fog colours back to as authored (driveSkyProFog lit them)
     if (_fogLitByProSky) { _fogLitByProSky = false; syncFog(); }
+    // the night grade off (it stays in the chain, at an exact identity)
+    if (_skyProGradeOn) postFxPipeline?.setPurkinje({ amount: 0 });
     const saved = toolState.skyProSky.savedLight;
     if (!saved) return;
     Object.assign(toolState.light, saved);
