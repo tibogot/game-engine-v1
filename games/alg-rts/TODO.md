@@ -312,6 +312,22 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       - 4x MSAA: off saves 1.3 ms at max zoom, ~0 elsewhere (CPU-bound).
         Kept. ?msaa=0 to measure (engine opt `antialias`).
       - HouseRubble draws with 0 instances (1 wasted draw, negligible).
+- [x] **BOOT ~31 → 26.6 s: the plant fields built their shaders 6-36x over.**
+      Fresh boot trace: the boot is now MAIN-THREAD bound (30.7 of 35.7 s
+      busy; GPU process 37 → 14 s after the parallel pipelines), 10.5 s in
+      the frames behind the loading screen = three building node shaders.
+      renderer._nodes.nodeBuilderCache: 579 builds, 178 distinct shaders —
+      three adds the object's uuid to the cache key of anything with
+      count > 1, and every plant-field mesh had count = plant capacity (its
+      draw is INDIRECT: the GPU sets the count). count = 1 → 402 builds, GPU
+      pipelines 385 → 223. Frame unchanged (6.3 / 8.05 / 11.1). Checked:
+      cedars (variants, shadows), oasis at max zoom (palms, oleander, hedges,
+      grass, far slopes) — all there; console clean.
+- [ ] Remaining duplicate builds (~230): mostly DIFFERENT materials with the
+      same structure (stone sets, walls, outcrops, vehicle parts — three must
+      build per material: the build binds its textures) and the placed
+      foliage's per-object buffers. Cutting them = content work: e.g. the
+      stones as ONE material + texture array (also ~20 fewer draws).
 - [ ] **NEXT (proposed 2026-10-03, continue later)**:
       1. SHADOW PASS — 62 draws a frame at the post, many small (one per
          outcrop / wall / building piece): merge or skip casters too small to

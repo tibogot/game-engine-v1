@@ -462,7 +462,14 @@ export class ScatterField {
       const part = m % this.parts;
       const k = Math.floor(m / this.parts);
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mats[Math.min(part, mats.length - 1)]);
-      mesh.count = this.count;
+      // ONE, not the plant count: the draw is INDIRECT (the GPU writes the
+      // instance count; three only skips a draw whose count is 0). three puts
+      // the object's uuid into the shader cache key of anything with count > 1,
+      // so every mesh of a field built its own copy of the same shader — alg-
+      // rts: 579 builds at boot for 178 distinct shaders, the plant meshes most
+      // of the 401 repeats (100-147 KB of WGSL each). All a field's meshes read
+      // the same storage buffers (firstInstance picks the slice): one build.
+      mesh.count = 1;
       mesh.frustumCulled = false;   // the compute culls, per plant
       mesh.castShadow = false;
       mesh.receiveShadow = false;
@@ -475,7 +482,7 @@ export class ScatterField {
     for (let m = 0; m < this.shadowMeshCount; m++) {
       const part = m % this.parts;
       const mesh = new THREE.Mesh(new THREE.BufferGeometry(), mats[Math.min(part, mats.length - 1)]);
-      mesh.count = this.count;
+      mesh.count = 1;   // indirect: see the drawn meshes above (one shader build)
       mesh.frustumCulled = false;
       mesh.castShadow = true;
       mesh.receiveShadow = false;   // never seen, only rendered into the shadow map
