@@ -53,6 +53,21 @@ export const SKYPRO_DEFAULTS = {
   exposure: 0.55,
   /** Tidewater's eye adaptation on top of `exposure` (skyproExposure.js): x0.6..x6, at most x2 at night */
   autoExposure: true,
+  /**
+   * THE NIGHT LOOK — a layer on top of the faithful Tidewater night, never part of it. Off = the
+   * night exactly as Tidewater draws it.
+   */
+  nightLook: false,
+  /** night look: extra exposure at full night, in stops (eased with the adaptation) */
+  nightEV: 1.0,
+  /**
+   * night look: the moon's height in degrees; 0 = Tidewater's (opposite the sun, lifted to >= ~14°,
+   * ~59° at 23 h). A glitter path that reaches the horizon needs a low moon (~10-25°); 18 keeps the
+   * path and still lights the land for a high RTS camera (12 left it near black).
+   */
+  moonElev: 18,
+  /** night look: the moon's azimuth, degrees turned from Tidewater's (opposite the sun) */
+  moonAzim: 0,
   /** the lower hemisphere of the sky light (a flat ground of this albedo) */
   groundAlbedo: "#54493a",
   /** air haze density (Tidewater AirHaze: marine + aerosol layers); 0 = no haze pass at all */
@@ -202,6 +217,12 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     const night = THREE.MathUtils.smoothstep(-s.y, 0.02, 0.18);   // Tidewater App.updateSun
     if (o.moonDir) moonDir.copy(o.moonDir);
     else moonDir.set(-s.x, Math.abs(s.y) * 0.8 + 0.25, -s.z).normalize();
+    // the night look's moon: placed by height and a turn of its azimuth (disc, key light and glitter follow)
+    if (P.nightLook && (P.moonElev > 0 || P.moonAzim !== 0)) {
+      const el = P.moonElev > 0 ? THREE.MathUtils.degToRad(P.moonElev) : Math.asin(moonDir.y);
+      const az = Math.atan2(moonDir.x, moonDir.z) + THREE.MathUtils.degToRad(P.moonAzim);
+      moonDir.set(Math.sin(az) * Math.cos(el), Math.sin(el), Math.cos(az) * Math.cos(el));
+    }
     const keyIsMoon = s.y <= -0.07;
     lightDir.copy(keyIsMoon ? moonDir : s);   // (skyProKeyDir, with a given moon)
     moonColor.set(0.6, 0.7, 1.0).multiplyScalar(0.12 * night);
@@ -253,13 +274,15 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
     out.groundE[2] = keyLight.z * up + skyIrr[2];
   }
 
-  // ---- eye adaptation (Tidewater's auto exposure)
+  // ---- eye adaptation (Tidewater's auto exposure) + the night look's EV
   const ae = createSkyProExposure({ renderer });
   mesh.userData.exposure = ae.state;   // (debug: the dome is reachable from the scene)
   mesh.userData.light = out;
   /** The factor on P.exposure for this frame (call once per frame, after update). */
   function exposureFactor(dt) {
-    return ae.update(dt, { night: out.night, enabled: !!P.autoExposure });
+    return ae.update(dt, {
+      night: out.night, enabled: !!P.autoExposure, nightEV: P.nightLook ? P.nightEV : 0,
+    });
   }
 
   // ---- the air haze and sun shafts, on the engine's linear HDR frame

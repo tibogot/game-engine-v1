@@ -827,6 +827,24 @@ function _buildSkyProControls(parent, ts, app) {
   });
   _color(li, S, "groundAlbedo", { label: "Ground (sky light)" });
 
+  const nl = _section(wrap, "Night look", true);
+  _toggle(nl, S, "nightLook", {
+    label: "Night look",
+    hint: "A layer on top of Tidewater's night, not part of it. Off = the night exactly as Tidewater draws it.",
+  });
+  _slider(nl, S, "nightEV", {
+    label: "Night exposure (EV)", min: 0, max: 4, step: 0.1,
+    hint: "Extra stops at full night, eased in as night falls, on top of the auto exposure's one stop.",
+  });
+  _slider(nl, S, "moonElev", {
+    label: "Moon height (°)", min: 0, max: 80, step: 1,
+    hint: "0 = Tidewater's moon (opposite the sun, ~59° up at 23 h). A low moon (10-25°) lays a glitter path on the sea toward the horizon and casts long shadows.",
+  });
+  _slider(nl, S, "moonAzim", {
+    label: "Moon direction (°)", min: -180, max: 180, step: 1,
+    hint: "Turns the moon round the horizon from Tidewater's place. The disc, the moonlight, its shadows and the glitter follow.",
+  });
+
   const hz = _section(wrap, "Haze & shafts", true);
   _slider(hz, S, "haze", {
     label: "Haze density", min: 0, max: 4, step: 0.05,

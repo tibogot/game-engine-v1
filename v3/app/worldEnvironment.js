@@ -1150,8 +1150,10 @@ export async function createWorldEnvironment({
     const r = kc[0], g = kc[1], b = kc[2];
     const m = Math.max(r, g, b, 1e-6);
     _skyProColor.setRGB(r / m, g / m, b / m, THREE.LinearSRGBColorSpace);
-    const key = _skyProColor.getHexString() + "," + m.toFixed(3) + "," + skyPro.params.exposure;
-    // Eye adaptation (Tidewater's auto exposure): a per-frame factor on the
+    const kd = L.keyDir;
+    const key = _skyProColor.getHexString() + "," + m.toFixed(3) + "," + skyPro.params.exposure
+      + "," + kd.x.toFixed(3) + "," + kd.y.toFixed(3) + "," + kd.z.toFixed(3);
+    // Eye adaptation (Tidewater's auto exposure + the night look): a per-frame factor on the
     // mode's base exposure, written to the renderer only — Li.exposure stays the saved base.
     const exposureK = skyPro.exposureFactor(dtSec);
     if (key === _skyProLightKey) {
@@ -2025,7 +2027,9 @@ export async function createWorldEnvironment({
       // Sky Pro lights the world entirely, night included (Tidewater App.updateSun): its key light's
       // direction (the moon lifted above the horizon at night, not the dome skies' anti-sun), and
       // the colour and intensity driveSkyProSky took from it (horizon fade and night already in).
-      skyProKeyDir(sunDir, _effectiveLightDir);
+      // (the sky's own key once it runs: the same direction, or the night look's moon)
+      if (skyPro && _skyProReady) _effectiveLightDir.copy(skyPro.light().keyDir);
+      else skyProKeyDir(sunDir, _effectiveLightDir);
       placeSun();
       sun.color.set(Li.dirColor);
       sun.intensity = Li.dirIntensity;
