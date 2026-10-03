@@ -20,6 +20,7 @@ import { createWind, createWindsock } from "./algWind.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { LAYOUT, siteYaw } from "./layout.js";
 import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildKsar, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -219,7 +220,7 @@ export function kitView(geo) {
   if (geo.userData.glass) {
     const gm = new THREE.Mesh(geo.userData.glass, glassMaterial());
     gm.name = "Glass";
-    gm.renderOrder = 2;
+    gm.renderOrder = RENDER_ORDER.GLASS;
     m.add(gm);
   }
   // A gate (the post): each leaf its own mesh on its hinge, shut; the game

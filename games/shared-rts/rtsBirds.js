@@ -39,6 +39,7 @@ import * as THREE from "three";
 import {
   Fn, abs, attribute, cos, float, hash, instanceIndex, max, mix, positionLocal, select, sin, smoothstep, step, uniform, vec3,
 } from "three/tsl";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 export const RTS_BIRD_PARAMS = {
   enabled: true,
@@ -199,7 +200,7 @@ export function createRtsBirds({ app, units = null, params = {}, birds: B }) {
   shadows.frustumCulled = false;
   shadows.castShadow = shadows.receiveShadow = false;
   shadows.count = 0;
-  shadows.renderOrder = 3;
+  shadows.renderOrder = RENDER_ORDER.ON_GROUND;   // over the fields
   app.scene.add(shadows);
 
   const flocks = [];

@@ -16,6 +16,8 @@ import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalf
 import { createAlgSquads, SQUADS } from "./algSquads.js";
 import { createAlgLastSeen } from "./algLastSeen.js";
 import { createAlgPathDots } from "./algPathDots.js";
+import { createSquadBadges } from "./ui/squadBadges.js";
+import { createOrderMarks } from "./ui/orderMarks.js";
 import { createAlgProducer } from "./algProducer.js";
 import { createAlgStructures } from "./algStructures.js";
 import { bakeStructureThumbnails } from "./structureThumbnails.js";
@@ -156,11 +158,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   }
   const stamped = stampShowroom(navGrid, showroom);
 
-  const healthBars = createHealthBarField({ scene: app.scene, groundAt: (x, z) => app.getWorldHeight(x, z) });
-  const selectionRings = createSelectionRingField({ app });
+  // THINNER than nam's (you, 2026-10-03, watching CoH: the rings and frames
+  // too thick, the bars thinner there): bars 0.28 m (0.55), rings a 10% band
+  // (18%), building brackets 0.2 m deep (0.45).
+  const healthBars = createHealthBarField({ scene: app.scene, height: 0.28, groundAt: (x, z) => app.getWorldHeight(x, z) });
+  const selectionRings = createSelectionRingField({ app, inner: 0.9, segments: 56 });
   // Square buildings get corner brackets round their footprint, as in nam;
   // round ones (and units) the rings.
-  const selectionFrames = createSelectionFrameField({ app });
+  const selectionFrames = createSelectionFrameField({ app, thick: 0.2 });
 
   const units = createUnits({ app, navGrid, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS, spawn: {}, origin: muster });
   app.units = units;
@@ -205,6 +210,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
 
   const unitRenderer = await createUnitRenderer({
     app, units, healthBars, selectionRings, fogOfWar, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS,
+    // A French squad's men have no bars of their own: the squad's badge
+    // carries ONE (algSquadBadges.js, CoH).
+    barFor: (u) => !app.algSquads?.of(u),
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // A man down: his pool under his torso (bloodField.js, made with combat).
     onCorpse: (u, x, z, heading) => app.algCombat?.blood.pool(x, z, heading),
@@ -448,6 +456,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // (the box's edge is blocked on the nav grid; room for the formation).
     // SQUADS: a man selects his squad; a move forms each squad (algSquads.js).
     squadOf: (u) => squads.squadOf(u),
+    // CoH's chevrons at each man's spot, coloured by cover (ui/orderMarks.js),
+    // instead of the shared blue ring.
+    orderMarker: (x, y, z, sel, kind) => app.algOrderMarks?.order(x, y, z, sel, kind),
     clampOrder: (x, z) => ({
       x: Math.min(PLAY.x1 - 8, Math.max(PLAY.x0 + 8, x)),
       z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
@@ -476,7 +487,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
   const armyTabs = createArmyTabs({ units, selection, squads, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.squadOf(u) });
+  const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) });
   // Top right now (resourceHud.js); the bottom strip is gone with it.
   const resourceHud = createResourceHud({ mount: document.body, troops: () => units.list.reduce((n, u) => n + (u.alive && u.team === "player" && !u.isStructure ? 1 : 0), 0) });
   hud.strip.style.display = "none";
@@ -555,6 +566,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE PATH DOTS (algPathDots.js): the selected squads' routes on the ground.
   const pathDots = createAlgPathDots({ app, selection, squads });
   app.algPathDots = pathDots;
+  // THE SQUAD BADGES (ui/squadBadges.js): icon, men left, one thin bar (CoH).
+  const squadBadges = createSquadBadges({ app, squads });
+  const orderMarks = createOrderMarks({ app });
+  app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
   app.addPreRenderHook((frameDt) => {
     let dt = frameDt * app.timeScale;
@@ -588,7 +603,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     ghostRings.begin();
     lastSeen.frame(app.camera);
     ghostRings.commit();
-    pathDots.frame();
+    pathDots.frame(app.camera);
+    squadBadges.frame(app.camera);
+    orderMarks.frame(frameDt, app.camera);
     resourceHud.update(economy);
     healthBars.commit();
     selectionRings.commit();

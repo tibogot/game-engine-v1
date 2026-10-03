@@ -32,6 +32,7 @@ import { TRACK_LINES } from "./algTracks.js";
 import { LAYOUT, PLAY } from "./layout.js";
 import { kitView } from "./showroom.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 /** Buildings that can clear the fields under them (the field shader's hole list). */
 const MAX_HOLES = 24;
@@ -438,7 +439,7 @@ function buildSurface(app, plots) {
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = "FieldSurfaces";
-  mesh.renderOrder = 40;      // under the tyre marks (41) and craters (42)
+  mesh.renderOrder = RENDER_ORDER.FIELDS;      // the first ground layer: under everything else see-through
   mesh.frustumCulled = false;
   mesh.castShadow = false;
   mesh.receiveShadow = true;    // lit like the ground round it

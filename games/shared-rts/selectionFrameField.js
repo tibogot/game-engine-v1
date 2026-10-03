@@ -11,6 +11,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import { Fn, attribute, min, vec3 } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const LIFT = 0.25;       // off the ground, as the rings
 const PAD = 1.2;         // metres outside the footprint
@@ -44,7 +45,8 @@ function bracketGeometry() {
   return g;
 }
 
-export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
+// `thick`: the arms' depth in metres (0.45 = nam's; alg-rts draws them thinner, CoH).
+export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff, thick = 0.45 }) {
   const { scene, heightTexNode } = app;
   const geo = bracketGeometry();
   const frameA = new THREE.InstancedBufferAttribute(new Float32Array(max * 4), 4); // x, z, halfX, halfZ
@@ -84,6 +86,7 @@ export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
+  mesh.renderOrder = RENDER_ORDER.ON_GROUND;   // over the ground layers (renderOrder.js)
   scene.add(mesh);
 
   let n = 0;
@@ -98,7 +101,7 @@ export function createSelectionFrameField({ app, max = 64, color = 0x6ab0ff }) {
       if (n >= max) return;
       const arm = Math.max(1.5, Math.min(halfX, halfZ) * 0.45);
       frameA.setXYZW(n, x, z, halfX, halfZ);
-      frameB.setXYZW(n, Math.cos(rotY), Math.sin(rotY), arm, 0.45);
+      frameB.setXYZW(n, Math.cos(rotY), Math.sin(rotY), arm, thick);
       _col.set(tint);
       colorAttr.setXYZW(n, _col.r, _col.g, _col.b, ceilY);
       n++;

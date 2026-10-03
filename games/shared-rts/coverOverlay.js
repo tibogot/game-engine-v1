@@ -41,6 +41,7 @@ import * as THREE from "three";
 import { Fn, float, max, mix, positionLocal, smoothstep, texture, uniform, varying, vec2 } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
 import { WORLD_SIZE } from "../../v3/engine.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 /** How far around the cursor the ground is revealed, metres. */
 const RADIUS = 46;
@@ -129,7 +130,7 @@ export function createCoverOverlay({ app, cover, isArmed = () => true }) {
   const geo = new THREE.PlaneGeometry(RADIUS * 2, RADIUS * 2, SUBDIV, SUBDIV).rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false;
-  mesh.renderOrder = 44;     // after the crater decals (42), before the smoke
+  mesh.renderOrder = RENDER_ORDER.COVER_VIEW;     // after the crater decals (42), before the smoke
   mesh.visible = false;
   mesh.name = "CoverOverlay";
   app.scene.add(mesh);

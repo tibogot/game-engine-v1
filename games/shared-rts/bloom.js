@@ -52,6 +52,7 @@ export const BLOOM = {
  * the TRANSPARENT pass (after all opaque geometry), so keep this true unless the
  * thing is a solid glowing object that writes depth (e.g. a beacon).
  */
+// render-order-ok: a material FACTORY — the mesh that wears it picks its band.
 export function makeBloomMaterial({
   color = 0xffffff,
   opacity = 1,

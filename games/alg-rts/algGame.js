@@ -168,7 +168,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 
   // Terrain last among the opaque things (nam-rts: the dearest shader, drawn
   // first, was shaded under everything and then covered).
-  for (const m of app.getTerrainMeshes?.() ?? []) m.renderOrder = 8;
+  for (const m of app.getTerrainMeshes?.() ?? []) m.renderOrder = 8;   // render-order-ok: the OPAQUE terrain (engine band)
   // The x-ray silhouettes test the ground between a unit and the camera (a
   // hill hides a unit, no silhouette); set before any unit's material is made.
   xrayParams.heightTexNode = app.heightTexNode ?? null;

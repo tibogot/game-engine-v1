@@ -16,9 +16,10 @@
 import * as THREE from "three";
 import { Fn, attribute, positionLocal, uv, sin, cos, abs, float, vec3, mix, smoothstep, uniform, max, fract } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const LIFT = 0.07;            // m above the heightmap (the clipmap rounds the ground a little)
-const RENDER_ORDER = 41;      // just under the craters (42)
+const TRACKS_ORDER = RENDER_ORDER.TRACKS;      // just under the craters
 
 /**
  * @param {object} o
@@ -92,7 +93,7 @@ export function createTrackMarks({ app, max: MAX = 1536, life = 50, tint = 0x9a8
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = "TrackMarks";
-  mesh.renderOrder = RENDER_ORDER;
+  mesh.renderOrder = TRACKS_ORDER;
   mesh.frustumCulled = false;
   mesh.visible = false;
   mesh.castShadow = mesh.receiveShadow = false;

@@ -18,6 +18,7 @@ import {
   Fn, attribute, cameraPosition, cross, float, length, max, min, mix, normalize, output,
   positionLocal, saturate, smoothstep, step, uniform, uv, vec3, vec4,
 } from "three/tsl";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const MAX_TRACERS = 512;
 
@@ -120,7 +121,7 @@ export function createTracerField({ app, intensity = 2.2, bloom = 0.7 } = {}) {
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = "NamTracers";
   mesh.frustumCulled = false;
-  mesh.renderOrder = 52;   // over the flames (51), after every ground layer (≤ 44)
+  mesh.renderOrder = RENDER_ORDER.TRACERS;   // over the flames (51), after every ground layer (≤ 44)
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.visible = false;

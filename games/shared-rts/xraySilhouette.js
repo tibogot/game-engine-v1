@@ -46,10 +46,11 @@ import {
   positionView, positionWorld, saturate, step, uniform, vec3, viewZToPerspectiveDepth,
 } from "three/tsl";
 import { drapeY } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 /** Opaque draw order: after the world, before the units (see the header). */
-export const XRAY_ORDER = 30;
-export const UNIT_ORDER = 31;
+export const XRAY_ORDER = RENDER_ORDER.XRAY;
+export const UNIT_ORDER = RENDER_ORDER.UNITS;
 
 export const XRAY = {
   player: new THREE.Color(0.32, 0.62, 1.0),

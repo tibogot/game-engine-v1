@@ -10,6 +10,7 @@
 // dusk and night (the sun's elevation).
 import * as THREE from "three";
 import { float, mix, normalView, positionGeometry, smoothstep, uniform, uv, vec3 } from "three/tsl";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 const RANGE = 75;          // m: how far the beam reaches / finds a man
 const POOL_R = 6;          // m: the pool of light
@@ -58,7 +59,8 @@ export function createAlgSearchlights(app, { structures, units, cover = null }) 
     const beam = new THREE.Mesh(cone, beamMat);
     const pool = new THREE.Mesh(disc, poolMat);
     beam.frustumCulled = pool.frustumCulled = false;
-    beam.renderOrder = pool.renderOrder = 4;
+    beam.renderOrder = RENDER_ORDER.AIR;
+    pool.renderOrder = RENDER_ORDER.ON_GROUND;   // the pool of light lies over the fields
     app.scene.add(beam, pool);
     const L = { rec, lamp, beam, pool, yaw: 0, pitch: 0, target: null, t: Math.random() * 10, at: new THREE.Vector3(), beamAt: rec.mesh.geometry.userData.lamp?.beam ?? [0, 0.8, 0] };
     lights.push(L);

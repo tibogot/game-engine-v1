@@ -10,6 +10,7 @@
 // structuresRenderer.js for why `fog: false` also matters for static entities.
 import * as THREE from "three";
 import { attribute, uv, step, mix, vec3, float } from "three/tsl";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const BG = new THREE.Color(0x0b0e13);
 const OK = new THREE.Color(0x3ddc60);
@@ -83,7 +84,7 @@ export function createHealthBarField({ scene, max = 1536, height = 0.55, groundA
   const mesh = new THREE.InstancedMesh(geo, mat, max);
   mesh.count = 0;
   mesh.frustumCulled = false; // instances live anywhere; the bounding box is meaningless
-  mesh.renderOrder = 1001;
+  mesh.renderOrder = RENDER_ORDER.HUD_TOP;
   scene.add(mesh);
 
   let n = 0;

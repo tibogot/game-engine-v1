@@ -26,6 +26,7 @@ import {
   normalize, output, positionLocal, saturate, sin, smoothstep, step, texture, uniform, uv,
   varying, vec2, vec3, vec4,
 } from "three/tsl";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 export const EXPLOSION_ATLAS = {
   blast: "/textures/fx/explosion01_5x5.webp",
@@ -146,7 +147,7 @@ function createBook({ app, url, max: MAX, tint, shade, lift = 0, bloom, name }) 
   mesh.name = name;
   mesh.frustumCulled = false;
   // AFTER every ground layer (fields 40, tyre marks 41, craters + blood pools 42, cover overlay 44): smoke at 12 drew under them and a ploughed field showed THROUGH a dust cloud (you, 2026-10-02).
-  mesh.renderOrder = 50;   // with the smoke; the additive flames draw after (51)
+  mesh.renderOrder = RENDER_ORDER.SMOKE;   // with the smoke; the additive flames draw after (51)
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.visible = false;

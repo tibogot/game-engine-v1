@@ -13,6 +13,7 @@
 // camera's left-drag. Picks units by raycasting the meshes tagged in units.js
 // (mesh.userData.unit); box-select projects each unit to screen space.
 import * as THREE from "three";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const _pc = new THREE.Vector3(), _pe = new THREE.Vector3();   // screen picks (vehicles)
 const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
@@ -20,7 +21,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null, orderMarker = null }) {
   // `squadOf(unit) → unit[] | null` (opt-in, alg-rts's squads): a click or a
   // box on one man selects his whole squad, and a move order forms each squad
   // round its own spot instead of a grid of loose men.
@@ -202,7 +203,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     new THREE.RingGeometry(0.5, 1.0, 32).rotateX(-Math.PI / 2),
     new THREE.MeshBasicMaterial({ color: 0x6ab0ff, transparent: true, depthTest: false, depthWrite: false, fog: false }),
   );
-  marker.renderOrder = 1000;
+  marker.renderOrder = RENDER_ORDER.HUD;
   marker.visible = false;
   app.scene.add(marker);
   let markerT = 0, markerRaf = null, markerLast = 0;
@@ -218,7 +219,10 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     marker.material.opacity = 1 - p;
     markerRaf = requestAnimationFrame(animMarker);
   };
-  const pingMarker = (x, y, z) => {
+  // `orderMarker(x, y, z, units, kind)` (a game's opt-in): its own marker instead of
+  // the blue ring (alg-rts: CoH chevrons at each man's spot, by cover).
+  const pingMarker = (x, y, z, kind = "move") => {
+    if (orderMarker) { orderMarker(x, y, z, [...selected], kind); return; }
     marker.position.set(x, y + 0.25, z);
     marker.visible = true;
     markerT = 0;
@@ -280,7 +284,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const enemy = pickEnemy(e.clientX, e.clientY);
     if (enemy) {
       for (const u of selected) u.attack?.(enemy);
-      pingMarker(enemy.position.x, enemy.position.y, enemy.position.z);
+      pingMarker(enemy.position.x, enemy.position.y, enemy.position.z, "attack");
       onOrder("attack", [...selected]);
       return;
     }
@@ -293,7 +297,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       let assigned = 0;
       for (const u of selected) if (harvesting.assignNode(u, node)) assigned++;
       if (assigned) {
-        pingMarker(node.position.x, node.position.y, node.position.z);
+        pingMarker(node.position.x, node.position.y, node.position.z, "harvest");
         if (assigned === selected.size) { onOrder("harvest", [...selected]); return; } // pure harvester selection — done
       }
     }

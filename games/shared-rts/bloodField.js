@@ -23,6 +23,7 @@ import {
   Fn, attribute, float, max, mix, mx_noise_float, positionLocal, smoothstep, sqrt, uniform, uv, vec2, vec3, cos, sin, atan, exp,
 } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 export const BLOOD = {
   /** Pools at once (the oldest recycled). */
@@ -44,7 +45,7 @@ export const BLOOD = {
   drop: [0.2, 0.01, 0.008],
 };
 
-const POOL_ORDER = 42;       // with the crater decals (craterSystem.js)
+const POOL_ORDER = RENDER_ORDER.POOLS;       // with the crater decals (craterSystem.js)
 const SUBDIV = 10;           // a pool is small: 10 × 10 is enough to drape it
 const LIFT = 0.12;
 
@@ -145,7 +146,7 @@ export function createBloodField({ app, params = BLOOD }) {
     dropMat.opacityNode = round.mul(alive).mul(mix(float(1).sub(k.mul(k)), float(0.35).mul(float(1).sub(k)), mist));
   }
   const dropMesh = new THREE.Mesh(dropGeo, dropMat);
-  dropMesh.renderOrder = 49;   // in the air: after the ground layers (≤ 44), the pools among them
+  dropMesh.renderOrder = RENDER_ORDER.AIR;   // in the air: after the ground layers (≤ 44), the pools among them
   dropMesh.frustumCulled = false;
   dropMesh.visible = false;
   dropMesh.name = "BloodDrops";

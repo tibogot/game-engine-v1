@@ -9,9 +9,10 @@
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 
 const P = {
-  spacing: 2.4,    // metres between two dots
-  radius: 0.32,    // a dot (0.16 was invisible from the play camera)
-  maxDots: 60,     // per trail (~145 m)
+  // FIXED, small (you, 2026-10-03: 0.32 "way too big"; the distance-scaled
+  // size tried next was worse than this): 0.15 m every 1.8 m.
+  radius: 0.15, spacing: 1.8,
+  maxDots: 90,     // per trail
   max: 900,        // the whole pool
   colour: 0xf4efe0,
 };
@@ -27,29 +28,30 @@ export function createAlgPathDots({ app, selection, squads = null }) {
   let n = 0;
 
   /** One trail: from (x, z) through the route, a dot every SPACING m. */
-  function trail(x, z, route) {
-    let carry = P.spacing * 0.6, k = 0;   // the first dot a little ahead of the man
+  function trail(x, z, route, radius = P.radius) {
+    const spacing = P.spacing;
+    let carry = spacing * 0.6, k = 0;   // the first dot a little ahead of the man
     let ax = x, az = z;
     for (const wp of route) {
       const dx = wp.x - ax, dz = wp.z - az, len = Math.hypot(dx, dz);
       let s = carry;
       while (s <= len) {
         if (k++ >= P.maxDots || n >= P.max) return;
-        dots.add(ax + (dx * s) / len, az + (dz * s) / len, P.radius);
+        dots.add(ax + (dx * s) / len, az + (dz * s) / len, radius);
         n++;
-        s += P.spacing;
+        s += spacing;
       }
       carry = s - len;
       ax = wp.x; az = wp.z;
     }
     // The goal itself: a slightly bigger dot.
-    if (n < P.max) { dots.add(ax, az, P.radius * 1.6); n++; }
+    if (n < P.max) { dots.add(ax, az, radius * 1.6); n++; }
   }
 
   return {
     params: P,
     /** Each frame (render side). */
-    frame() {
+    frame(camera) {
       dots.begin();
       n = 0;
       const seen = new Set();
@@ -58,7 +60,7 @@ export function createAlgPathDots({ app, selection, squads = null }) {
         const r = u.route;
         if (!r?.length) continue;
         // The squad's first man still walking draws its trail.
-        const sq = squads?.squadOf?.(u);
+        const sq = squads?.of?.(u);   // the squad OBJECT (squadOf returns a fresh array)
         if (sq) { if (seen.has(sq)) continue; seen.add(sq); }
         trail(u.position.x, u.position.z, r);
       }

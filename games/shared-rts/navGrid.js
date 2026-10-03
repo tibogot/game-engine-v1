@@ -11,6 +11,7 @@
 // treeEnv) — no engine changes. Rivers aren't queried yet (GPU-carved). A "nav
 // debug" overlay (red = blocked) can be toggled to verify the grid.
 import * as THREE from "three";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 /**
  * The slope a ground unit refuses to climb, degrees.
@@ -586,7 +587,7 @@ export function createNavGrid({
       }
     }
     debugMesh.instanceMatrix.needsUpdate = true;
-    debugMesh.renderOrder = 998;
+    debugMesh.renderOrder = RENDER_ORDER.DEBUG;
     debugMesh.visible = false;
     app.scene.add(debugMesh);
   }

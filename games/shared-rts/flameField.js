@@ -28,6 +28,7 @@ import {
   positionWorld, saturate, smoothstep, step, texture, uniform, uv, varying, vec2, vec3, vec4,
 } from "three/tsl";
 import { drapeY } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 export const FLAME_ATLAS = {
   url: "/textures/fx/flame02_temperature_16x5.png",
@@ -165,7 +166,7 @@ export function createFlameField({ app, intensity = 0.95, bloom = 0.3 } = {}) {
   const mesh = new THREE.Mesh(geo, material);
   mesh.name = "NamFlames";
   mesh.frustumCulled = false;
-  mesh.renderOrder = 51;   // over the smoke (50), after every ground layer (≤ 44)
+  mesh.renderOrder = RENDER_ORDER.FLAMES;   // over the smoke (50), after every ground layer (≤ 44)
   mesh.castShadow = false;
   mesh.receiveShadow = false;
   mesh.visible = false;

@@ -18,12 +18,13 @@
 import * as THREE from "three";
 import { Fn, attribute, texture, uv, positionLocal, sin, cos, max, pow, smoothstep, float } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const TEXTURE_URL = "/textures/crater-decal.png";
 const MAX_CRATERS = 96;
 const SUBDIV = 28;
 const HEIGHT_OFFSET = 0.15;
-const DECAL_RENDER_ORDER = 42;
+const DECAL_RENDER_ORDER = RENDER_ORDER.CRATERS;
 
 async function loadCraterTexture(url) {
   const tex = await new THREE.TextureLoader().loadAsync(url);

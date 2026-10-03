@@ -228,12 +228,55 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       only when a point changes hands); the SUPPLY LINES dashed from the
       post; supply points as C / M tokens; ONE marker per French squad.
 - [ ] you, look: the minimap (sector tint strength, the line, the badges).
+- [x] **CoH LOOK PASS on selection** (you, 2026-10-03, watching CoH):
+      path dots keep their size ON SCREEN (radius = camera distance x
+      0.0032, 0.07-0.3 m; 0.32 fixed was too big, 0.15 vanished); rings a
+      10% band (18%), building brackets 0.2 m (0.45), bars 0.28 m (0.55) —
+      opt-in options, nam unchanged. SQUAD BADGES (ui/squadBadges.js): over
+      each French squad its men left, a shield with its type (rifle,
+      spanner, parachute, Légion grenade) and ONE thin bar; the men lose
+      their own bars (unitRenderer `barFor`). Click = select the squad,
+      double click = camera. Fixed: path dots and the minimap grouped by
+      `squadOf` — a fresh array each call — so nothing grouped (now
+      `squads.of`).
+- [x] Path dots back to FIXED 0.15 m every 1.8 m (you: the distance-scaled
+      size was worse).
+- [x] **ORDER CHEVRONS** (you, CoH: "that yellow thing" instead of the
+      pulsing ring): ui/orderMarks.js — a golden double chevron drops over
+      EACH MAN's spot, bobs, fades in 1.6 s. Colour = COVER there, as CoH:
+      GREEN heavy (algCover ≥ 0.45: walls, sandbags, banks), YELLOW light /
+      open; an attack: one red over the target. Shared selection got an
+      opt-in `orderMarker(x, y, z, units, kind)` hook (nam keeps its ring).
+- [x] The order mark is CoH's now (your screenshots): FOUR small flat arrows
+      in a ring round each man's spot, tilted like petals, closing in and
+      pointing down at it, unlit and bright; one instanced opaque mesh. (A
+      lit 3D chevron came first: "not that type of 3D".)
+- [x] **THE FIELDS OVER EVERYTHING — fixed for good** (you: "smoke, then a
+      site, now the white dots; it should never happen again"): see-through
+      things draw by renderOrder, the fields were 40 and the rings, path
+      dots, brackets, searchlight pools, bird shadows, the build ghost were
+      0-4 → drawn first, covered. ONE table now, games/shared-rts/
+      renderOrder.js (GROUND 40-44 < ON_GROUND 46 < AIR 49-53 < HUD 1000);
+      every order in shared-rts + alg-rts uses it. tools/
+      renderOrderBandTest.mjs fails on a bare number, on a transparent
+      material with no band, and on a band used without its import.
+- [ ] maybe a THIRD colour (CoH: red = negative cover — a crater, open
+      mud): we have no negative cover yet.
+- [ ] you, look: badge size, the icons (drawn by me — game-icons.net was
+      unreachable), ring/bar thickness.
 - [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
       do?" — later): measure the boot's stages first (alg.html already
       logs them for its progress bar), then the usual suspects: the animal
       morphs (~4.5 s), shader compiles / warm-up, the ground cache bake,
       plants and props built on the main thread, textures not compressed.
       nam went 46 → 24 s the same way.
+- [ ] **BLOW APART VEHICLES AND BUILDINGS** (you, 2026-10-03: "we have a way
+      to make the soldiers explode to pieces, it would be cool for vehicles
+      and buildings"): the men's GIBS cut (algCombat gib, unitRenderer
+      `gibs`) for the rest — a vehicle's wreck throwing its parts (wheels,
+      hatch, turret popped off and tumbling, burning hulk left), a building
+      or sangar collapsing in chunks with dust (rubble left, its footprint
+      opened on the nav grid). Ties into BATTLE DAMAGE on buildings below.
 - [ ] **ANIMALS DIE** (you, 2026-10-03: "they have death animations, we
       have blood and splashes"): the herds' animals take hits — stray
       bullets, grenades, shells, napalm, fire — play their death clip, bleed

@@ -19,6 +19,7 @@ import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFrSandbagWall,
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { kitView } from "./showroom.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 /**
  * What a sapper can build. `pad`: stands on levelled ground (the mirador, the
@@ -135,7 +136,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const mat = ghostMat();
     const ghost = new THREE.Mesh(geoOf(key), mat);
     ghost.visible = false;
-    ghost.renderOrder = 3;
+    ghost.renderOrder = RENDER_ORDER.ON_GROUND;   // over the fields (40)
     app.scene.add(ghost);
     // Fronts toward the camera at three-quarters (your rule), R turns it.
     placing = { key, builders, ghost, mat, yaw: VIEW_YAW + 0.5, at: null, ok: false };

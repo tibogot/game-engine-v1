@@ -297,7 +297,7 @@ function refreshingMaterial(src) {
     metalness: src.metalness ?? 0.1,
     vertexColors: src.vertexColors,
     side: src.side,
-    transparent: src.transparent,
+    transparent: src.transparent,   // render-order-ok: a unit's own part, drawn at UNIT_ORDER
     alphaTest: src.alphaTest,
   });
   m.colorNode = materialColor;
@@ -985,7 +985,7 @@ const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then
  * `paint`: [r, g, b] painted-surface tint for those vehicles (a game's own
  * army colour, rtsObjectMaterialTinted); null = the kit's colours.
  */
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const PROCEDURAL_VEHICLES = procedural;
@@ -1618,7 +1618,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // Health bar — one instance in the shared field (see healthBar.js). As in
       // Company of Heroes, only on a unit that is SELECTED, HOVERED or DAMAGED
       // (your call, 2026-09-30): a bar over every man was a sea of green at 600.
-      if (v.onScreen && (unit.selected || unit === hovered || unit.hp < unit.maxHp)) healthBars.add(
+      // `barFor` (a game's opt-in): false = no bar of his own (alg-rts: a squad's men
+      // share ONE bar on the squad's badge, CoH).
+      if (v.onScreen && (unit.selected || unit === hovered || unit.hp < unit.maxHp) && (!barFor || barFor(unit))) healthBars.add(
         p.x, p.y + (t.barY ?? 6) + bobY, p.z,
         t.barWidth,
         unit.hp / unit.maxHp,

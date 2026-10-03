@@ -14,6 +14,7 @@ import { createExplosionField } from "./explosionField.js";
 import { BLOOM } from "./bloom.js";
 import { SMOKE_TINTS, createLitSmoke } from "./litSmoke.js";
 import * as THREE from "three";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const FLASH_LIFE = 0.07;
 const IMPACT_LIFE = 0.24;
@@ -47,7 +48,7 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
   // gone in ~0.2 s — a bullet off metal. (CoH: speed-stretched sparks;
   // these are short enough that the speck reads as one.)
   const sparks = coh ? createSpriteField({
-    scene, max: 200, color: 0xffd99a, size: 0.45, bloomScale: BLOOM.impact, gravity: 14, renderOrder: 53,
+    scene, max: 200, color: 0xffd99a, size: 0.45, bloomScale: BLOOM.impact, gravity: 14, renderOrder: RENDER_ORDER.LIGHTS,
     scaleAt: (p) => 0.4 + p * 0.6, fadeAt: (p) => p,
   }) : null;
   // TRAIL: a tank shell's thin smoke, left along its flight, fading over ~1.5 s.
@@ -71,15 +72,15 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
   // LIGHT goes over the smoke (renderOrder 53 > 50): a flash under its own
   // dust cloud was hidden by it. Clods and wisps stay under (49).
   const flashes = createSpriteField({
-    scene, max: pool, color: 0xffd27a, size: 2.4, bloomScale: BLOOM.muzzle, scaleAt: grow, renderOrder: 53,
+    scene, max: pool, color: 0xffd27a, size: 2.4, bloomScale: BLOOM.muzzle, scaleAt: grow, renderOrder: RENDER_ORDER.LIGHTS,
   });
   const impacts = createSpriteField({
-    scene, max: pool, color: 0xff9a3c, size: 3.0, bloomScale: BLOOM.impact, scaleAt: grow, renderOrder: 53,
+    scene, max: pool, color: 0xff9a3c, size: 3.0, bloomScale: BLOOM.impact, scaleAt: grow, renderOrder: RENDER_ORDER.LIGHTS,
   });
   // The flash only: the cloud is the flipbook's. Unit size, scaled per blast
   // isn't possible in a shared sprite field, so it is sized for a vehicle.
   const blasts = createSpriteField({
-    scene, max: 16, color: 0xff8a3a, size: 9, bloomScale: BLOOM.fire, scaleAt: grow, renderOrder: 53,
+    scene, max: 16, color: 0xff8a3a, size: 9, bloomScale: BLOOM.fire, scaleAt: grow, renderOrder: RENDER_ORDER.LIGHTS,
   });
   const books = createExplosionField({ app });
   let clock = 0;

@@ -18,6 +18,7 @@ import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three";
 import { Fn, attribute, positionLocal } from "three/tsl";
 import { drapedPosition } from "./terrainDrape.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const INNER = 0.82; // inner/outer radius ratio — matches the old per-unit ring
 const SEGMENTS = 48;
@@ -77,6 +78,9 @@ export function createSelectionRingField({ app, max = 512, color = 0x6ab0ff, inn
 
   const mesh = new THREE.Mesh(geo, mat);
   mesh.frustumCulled = false; // instances live anywhere; the bounds are meaningless
+  // ON the ground: after every ground layer (the alg fields covered the path
+  // dots and the rings at the default 0 — renderOrder.js).
+  mesh.renderOrder = RENDER_ORDER.ON_GROUND;
   scene.add(mesh);
 
   let n = 0;

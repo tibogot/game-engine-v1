@@ -13,6 +13,7 @@
 import * as THREE from "three";
 import { attribute, uv, vec2, float, smoothstep, mul, materialColor } from "three/tsl";
 import { BloomMRTNode } from "./bloom.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 const _obj = new THREE.Object3D();
 
@@ -33,7 +34,7 @@ export function createSpriteField({
   scaleAt = (p) => 0.35 + p * 0.65,
   fadeAt = (p) => p,
   gravity = 0,                       // m/s² pulling vy down (alg-rts' thrown dirt); 0 = drift as before
-  renderOrder = 49,                  // in the air: after the ground layers (≤ 44); a light over the smoke (50) passes 53
+  renderOrder = RENDER_ORDER.AIR,                  // in the air: after the ground layers (≤ 44); a light over the smoke (50) passes 53
 }) {
   const geo = new THREE.PlaneGeometry(size, size);
 
