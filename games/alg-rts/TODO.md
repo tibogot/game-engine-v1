@@ -264,6 +264,8 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       mud): we have no negative cover yet.
 - [ ] you, look: badge size, the icons (drawn by me — game-icons.net was
       unreachable), ring/bar thickness.
+- [ ] **THE PERF + LOAD AUDIT** (you, 2026-10-03): its brief is
+      games/alg-rts/PERF_AUDIT.md — run it in a NEW chat.
 - [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
       do?" — later): measure the boot's stages first (alg.html already
       logs them for its progress bar), then the usual suspects: the animal
