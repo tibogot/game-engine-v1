@@ -191,6 +191,7 @@ import { createFlyHud } from "../ui/flyHud.js";
 import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from "../ui/uiRoot.js";
 import { createShadowTestScene } from "../debug/shadowTestScene.js";
 import { createTerrainShadowMap, terrainShade, terrainSunVisibilityHere, setActiveTerrainShadowMap } from "../render/lighting/terrainSunShadow.js";
+import { installTiledLighting, createLocalLights } from "../render/lighting/localLights.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
 // import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
@@ -371,6 +372,13 @@ export async function startV3App(opts = {}) {
   layoutStatsOverlay();
 
   await renderer.init();
+  /*
+   * LOCAL LIGHTS (opts.localLights, or ?locallights=1): fires, lanterns, muzzle flashes as tiled
+   * point lights (render/lighting/localLights.js). The lighting system must be in place before
+   * anything compiles — every lit material takes its lights node when it is built.
+   */
+  const _localLightsOn = opts.localLights === true || new URLSearchParams(location.search).get("locallights") === "1";
+  if (_localLightsOn) installTiledLighting(renderer);
   initGlbLoaderRenderer(renderer);
   // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
   // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer
@@ -418,6 +426,8 @@ export async function startV3App(opts = {}) {
     WORLD_SIZE * 4, // > maxCameraDistance(4000) + terrain LOD radius(4096) ≈ 8096
   );
   camera.position.set(0, 300, 600);
+  // the local lights' pool (null unless they are on: see _localLightsOn); its tiles follow this camera
+  const localLights = _localLightsOn ? createLocalLights({ scene, camera, renderer }) : null;
 
   let worldEnv = null;
 
@@ -5029,6 +5039,8 @@ export async function startV3App(opts = {}) {
           }
         }
       }
+      // after the hooks (the game has moved its camera): rank the local lights for this view
+      localLights?.update(dt, camera);
       // After the hooks, which is where a game moves its camera: culling
       // against last frame's view pops the river in a frame late at the edge.
       riverV2System?.cullForCamera(camera);
@@ -13076,6 +13088,12 @@ export async function startV3App(opts = {}) {
     worldSize: WORLD_SIZE,
     /** All terrain LOD meshes — games use this to bind world-space shaders (FoW, etc.). */
     getTerrainMeshes: getTerrainMeshesForWorld,
+    /**
+     * Fires, lanterns, muzzle flashes (render/lighting/localLights.js): `add({ position, color,
+     * intensity, range, flicker, ttl, importance })` -> handle { set, remove }. null unless the app
+     * was started with { localLights: true } (or ?locallights=1).
+     */
+    localLights,
     /** Run a callback immediately before the main render pass (same dt as the engine loop). */
     addPreRenderHook(fn) {
       if (typeof fn === "function" && !_preRenderHooks.includes(fn)) _preRenderHooks.push(fn);
