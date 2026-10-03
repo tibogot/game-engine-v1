@@ -168,6 +168,12 @@ const MAT_MAP = {
   husky: { "Material": "Main", "Material.001": "Main_Light", "Material.006": "Muzzle", "Material.002": "Eye_Dark", "Material.003": "Eye_White" },
   deer: { "Eye_Black": "Eye_Dark", "Eye_Lighter": "Eye_Ring" },
 };
+// The read-only measurements printed while building (hoof flex, walk contact,
+// walk smoothness): ~0.15 s a species. On for the labs; a game turns them off
+// (setMorphDiagnostics(false)) — the built animal is the same either way.
+let MORPH_DIAGNOSTICS = true;
+export function setMorphDiagnostics(on) { MORPH_DIAGNOSTICS = !!on; }
+
 /** Measure the donkey once; returns the analysis (`A`). `more`: { husky: gltf } */
 export async function initAnimalMorph(donkeyGltf, more = {}) {
   await MeshoptSimplifier.ready;
@@ -1055,7 +1061,7 @@ function buildAnimalFrom() {
   }
   // Measured, not eyeballed: how far each hoof bends against its lower leg
   // over the Walk — the animal vs the donkey (same clip).
-  {
+  if (MORPH_DIAGNOSTICS) {
     const flex = (src, clip) => {
       const r = cloneSkinned(src), b = {};
       r.traverse((o) => { if (o.isBone) b[o.name] = o; });
@@ -1088,7 +1094,7 @@ function buildAnimalFrom() {
   // Measured contact (read-only): over the Walk, how close does each foot's
   // lowest point come to the ground? A planted foot reaches ~0; a foot whose
   // minimum stays above it FLOATS for the whole cycle.
-  {
+  if (MORPH_DIAGNOSTICS) {
     const r = cloneSkinned(tpl.root);
     let mesh = null; r.traverse((o) => { if (o.isSkinnedMesh) mesh = o; });
     const clip = tpl.clips.find((c) => c.name === "Walk");
@@ -1142,7 +1148,7 @@ function buildAnimalFrom() {
   // Measured smoothness (read-only): sample the Walk finely and find the
   // sharpest kink in the hind hoof's path and in the Body's height — the
   // biggest acceleration against the typical one. The donkey is the yardstick.
-  {
+  if (MORPH_DIAGNOSTICS) {
     const kinks = (src, clip, legs) => {
       const r = cloneSkinned(src), b = {};
       r.traverse((o) => { if (o.isBone) b[o.name] = o; });
@@ -3666,14 +3672,54 @@ function groundClamp(tpl, tolM = 0.015) {
   r.updateMatrixWorld(true);
   const mixer = new THREE.AnimationMixer(r);
   const pos = mesh.geometry.attributes.position, stride = 5, q = V();
+  // three's getVertexPosition rebuilds bone × inverse for every vertex: ~3 s
+  // of boot for the six species (audit 2026-10-03). The same sum with each
+  // bone's matrix built once per pose (bone · boneInverse · bindMatrix), then
+  // only the world-y row of matrixWorld · bindMatrixInverse — the formula of
+  // SkinnedMesh.applyBoneTransform, regrouped. window.__slowClamp = the old.
+  const bones = mesh.skeleton.bones, inv = mesh.skeleton.boneInverses;
+  const fast = !mesh.geometry.morphAttributes.position?.length && !window.__slowClamp;
+  // Read through the attributes once (normalized weights, interleaving).
+  const SIa = mesh.geometry.attributes.skinIndex, SWa = mesh.geometry.attributes.skinWeight;
+  const P = new Float32Array(pos.count * 3), SI = new Uint16Array(pos.count * 4), SW = new Float32Array(pos.count * 4);
+  if (fast) for (let i = 0; i < pos.count; i++) {
+    P[i * 3] = pos.getX(i); P[i * 3 + 1] = pos.getY(i); P[i * 3 + 2] = pos.getZ(i);
+    for (let c = 0; c < 4; c++) { SI[i * 4 + c] = SIa.getComponent(i, c); SW[i * 4 + c] = SWa.getComponent(i, c); }
+  }
+  const BM = new Float32Array(bones.length * 12), _m = new THREE.Matrix4(), _r = new THREE.Matrix4();
   const lowest = () => {
     r.updateMatrixWorld(true);
     mesh.skeleton.update();
     let lo = Infinity;
+    if (!fast) {
+      for (let i = 0; i < pos.count; i += stride) {
+        mesh.getVertexPosition(i, q);
+        q.applyMatrix4(mesh.matrixWorld);
+        if (q.y < lo) lo = q.y;
+      }
+      return lo;
+    }
+    for (let b = 0; b < bones.length; b++) {
+      const e = _m.multiplyMatrices(bones[b].matrixWorld, inv[b]).multiply(mesh.bindMatrix).elements, o = b * 12;
+      BM[o] = e[0]; BM[o + 1] = e[4]; BM[o + 2] = e[8]; BM[o + 3] = e[12];
+      BM[o + 4] = e[1]; BM[o + 5] = e[5]; BM[o + 6] = e[9]; BM[o + 7] = e[13];
+      BM[o + 8] = e[2]; BM[o + 9] = e[6]; BM[o + 10] = e[10]; BM[o + 11] = e[14];
+    }
+    const w = _r.multiplyMatrices(mesh.matrixWorld, mesh.bindMatrixInverse).elements;
+    const r0 = w[1], r1 = w[5], r2 = w[9], r3 = w[13];   // the world-y row
     for (let i = 0; i < pos.count; i += stride) {
-      mesh.getVertexPosition(i, q);
-      q.applyMatrix4(mesh.matrixWorld);
-      if (q.y < lo) lo = q.y;
+      const px = P[i * 3], py = P[i * 3 + 1], pz = P[i * 3 + 2];
+      let sx = 0, sy = 0, sz = 0;
+      for (let c = 0; c < 4; c++) {
+        const wt = SW[i * 4 + c];
+        if (wt === 0) continue;
+        const o = SI[i * 4 + c] * 12;
+        sx += wt * (BM[o] * px + BM[o + 1] * py + BM[o + 2] * pz + BM[o + 3]);
+        sy += wt * (BM[o + 4] * px + BM[o + 5] * py + BM[o + 6] * pz + BM[o + 7]);
+        sz += wt * (BM[o + 8] * px + BM[o + 9] * py + BM[o + 10] * pz + BM[o + 11]);
+      }
+      const y = r0 * sx + r1 * sy + r2 * sz + r3;
+      if (y < lo) lo = y;
     }
     return lo;
   };

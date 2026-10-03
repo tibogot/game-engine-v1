@@ -213,6 +213,25 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       isolation). In the game: 134 pipelines in the window, warm-up stage
       11.0 vs 10.4 s without. That stage is main-thread bound (node builds
       ~1.4 s, texture uploads ~1.2 s on first draw). Reverted.
+- [x] **L3 ANIMAL MORPHS, faster, same animals**: groundClamp's lowest-point
+      search did three's per-vertex getVertexPosition (rebuilds bone ×
+      inverse per vertex); now each bone's matrix once per pose and a tight
+      loop — 640-730 → 257-274 ms a species, track values within 2.4e-7 (one
+      float32 step on values up to 7.85). The builder's read-only measurements
+      (hoof flex, walk contact, smoothness) off in the game
+      (setMorphDiagnostics(false)): clips and geometry IDENTICAL (diff 0),
+      −20-100 ms a species. window.__slowClamp = the old search.
+      Herds stage 8.1-8.9 → 5.4 s.
+- [x] **L5 PIPELINES IN PARALLEL FOR THE WHOLE BOOT** (v3/render/
+      parallelPipelines.js, ?parboot=0 = old): every new pipeline of the GAME
+      SCENE is created async (Chrome compiles them side by side) and three
+      skips its draws behind the loading screen until it is ready; bakes keep
+      the synchronous path (their own scenes). All awaited after the warm-up.
+      **Boot 39.5-41.3 → 32.0-33.3 s** (A/B same build; one disturbed run
+      53.7). Checked: 0 of 562 draws not ready on the first frames after the
+      screen lifts; console clean. (The warm-up-only version had no gain: by
+      then ~250 pipelines had queued one at a time.)
+- [ ] nam: the same boot window (24 s boot) — not tried yet.
 - [ ] Persistent shader cache: Chrome writes DawnWebGPUCache (62 MB) but a
       compute pipeline from a previous load compiled at full cost (46-93 ms)
       in a probe — unproven either way (the probe's device limits differ).

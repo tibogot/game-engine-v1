@@ -20,7 +20,7 @@
 // a bare one behind, up to the gully mouth and back.
 import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
-import { initAnimalMorph, createMorphTemplate } from "../../v3/props/animalMorph.js";
+import { initAnimalMorph, createMorphTemplate, setMorphDiagnostics } from "../../v3/props/animalMorph.js";
 import { createWildHerd } from "../shared-rts/wildHerd.js";
 import { LAYOUT, PLAY, sitePoint } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
@@ -61,6 +61,9 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
     getSharedGltfLoader().loadAsync("/models/Deer_compressed.glb"),
   ]);
   await initAnimalMorph(gltf, { deer: deerGltf });
+  // The builder's read-only measurements (hoof flex, contact, smoothness) are
+  // for the lab: the game skips them — same animals, ~0.3 s less boot.
+  setMorphDiagnostics(false);
   const gazelleTpl = createMorphTemplate("gazelle");
   const sheepTpl = createMorphTemplate("sheep", SHEEP);
   const goatTpl = createMorphTemplate("goat", GOAT);

@@ -36,6 +36,7 @@ import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import { createPerfHud } from "./ui/perfHud.js";
+import { openParallelPipelines } from "../../v3/render/parallelPipelines.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -156,6 +157,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0) },
   });
   app.setFrameThrottle?.(1000);
+  // PIPELINES IN PARALLEL for the whole boot (v3/render/parallelPipelines.js):
+  // the game scene's pipelines compile side by side on the browser's threads
+  // instead of one after another (the boot ended waiting on that queue,
+  // measured 2026-10-03); its draws behind the loading screen wait for them.
+  // Bakes keep the synchronous path. Closed (all awaited) after the warm-up.
+  // ?parboot=0 = one at a time, as before.
+  const bootPipelines = params.get("parboot") !== "0" ? openParallelPipelines(app.renderer, app.scene) : null;
   // The stats-gl overlay: OFF (you, 2026-10-03: "off the stats panel"; it
   // cost 0.4-0.8 ms a frame, measured). ?stats=1 or Dev → Performance.
   app.setStatsOverlay?.(params.get("stats") === "1");
@@ -420,6 +428,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
   // The ground cache around the starting view, all of it, before the screen
   // lifts (the loop only bakes a few tiles a frame).
+  if (bootPipelines) {
+    const t0 = performance.now(), p = await bootPipelines.end();
+    console.log(`[pipelines] ${p.created} built in parallel during the boot, ${p.skipped} draws waited; the last ones took ${Math.round(performance.now() - t0)} ms`);
+  }
   await app.groundCache?.bakeAll(app.camera);
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");

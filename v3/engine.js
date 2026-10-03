@@ -45,6 +45,8 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/bloomMRT.js",
   "v3/render/instancePipeline.js",
   "v3/render/gpuStatsPanel.js",
+  // A boot's render pipelines compiled in parallel (openParallelPipelines)
+  "v3/render/parallelPipelines.js",
   "v3/render/clouds/dayNightCloudLayer.js",
   // Plants a place puts down at exact points (a hamlet's traveller's palms),
   // shaded like the painted fields, and the presets they are built from.
