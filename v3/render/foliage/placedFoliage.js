@@ -24,7 +24,7 @@
  * flutter, from the material.
  */
 import * as THREE from "three";
-import { attribute, cos, float, int, floor, sin, time, uniform, uniformArray, vec4 } from "three/tsl";
+import { attribute, cos, float, int, floor, sin, time, renderGroup, uniform, uniformArray, vec4 } from "three/tsl";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { createFoliageMaterial, makeCardTexture } from "./foliageSystem.js";
 // The canopy-tree no-flip switch (a lab's before / after), public through here.
@@ -70,7 +70,9 @@ export class PlacedFoliage {
       uWindDir: uniform(new THREE.Vector2(0.94, 0.34)),
       uWindStrength: uniform(0.16),
     };
-    const uTypes = uniformArray(this._rows, "vec4");
+    // Shared render group: once per pass, not uploaded again for every draw
+    // (scatterField.js uTypes has the measurement).
+    const uTypes = uniformArray(this._rows, "vec4").setGroup(renderGroup);
     this._src = {
       plantAt: () => {
         const p = attribute("iPos", "vec4");

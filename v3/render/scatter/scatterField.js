@@ -44,7 +44,7 @@
 import * as THREE from "three";
 import {
   Fn, If, abs, atomicAdd, atomicStore, float, floor, hash, instanceIndex, instancedArray, int,
-  length, max, min, sin, smoothstep, step, storage, texture, time, uint, uniform, uniformArray,
+  length, max, min, renderGroup, sin, smoothstep, step, storage, texture, time, uint, uniform, uniformArray,
   vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
@@ -189,7 +189,11 @@ export class ScatterField {
       uCullPadNdcX: uniform(0.35),
       uCullPadNdcYNear: uniform(0.6),
       uCullPadNdcYFar: uniform(0.35),
-      uTypes: uniformArray(this.typeRows, "vec4"),
+      // In three's SHARED render group, not the default per-object one: there
+      // every draw of every pass got its own copy, uploaded again each frame
+      // (alg 2026-10-03: ~1,070 uploads, 1.1 MB a frame, nearly all these
+      // tables). Shared = one buffer per material, sent once per render pass.
+      uTypes: uniformArray(this.typeRows, "vec4").setGroup(renderGroup),
       uShadowDist: uniform(35),
       // World XZ the shadow radius is measured from — see setShadowCentre.
       uShadowCentre: uniform(new THREE.Vector2()),
@@ -201,7 +205,7 @@ export class ScatterField {
     });
     // 1 per type that casts; read by the compute, set by setShadowCasters().
     this._shadowCastValues = new Array(typeCount).fill(0);
-    u.uShadowCast = uniformArray(this._shadowCastValues, "float");
+    u.uShadowCast = uniformArray(this._shadowCastValues, "float").setGroup(renderGroup);   // shared: see uTypes
 
     const bufPos = instancedArray(count, "vec4");
     const bufDir = instancedArray(count, "vec4");

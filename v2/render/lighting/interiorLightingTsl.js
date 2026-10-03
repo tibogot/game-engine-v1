@@ -14,6 +14,7 @@ import {
   mix,
   Loop,
   If,
+  renderGroup,
 } from "three/tsl";
 import {
   INTERIOR_MAX_BOXES,
@@ -30,31 +31,21 @@ export function createInteriorLightingNodes(registry) {
   const uStrength = uniform(0.82);
   const uColor = uniform(new THREE.Color("#0c0e14").convertSRGBToLinear());
 
+  // The arrays live in three's SHARED render group. In the default per-object
+  // group (they were) every draw of every material in every pass carried its
+  // own ~7 KB copy, uploaded again each frame — this hook is on ALL materials
+  // through the fog. Measured alg-rts 2026-10-03, interiors not even in use.
+  const shared = (a) => uniformArray(a, "vec4").setGroup(renderGroup);
   const uSegCount = uniform(0);
-  const uSegA = uniformArray(
-    new Array(INTERIOR_MAX_SEGMENTS).fill(null).map(() => new THREE.Vector4()),
-    "vec4",
-  );
-  const uSegB = uniformArray(
-    new Array(INTERIOR_MAX_SEGMENTS).fill(null).map(() => new THREE.Vector4()),
-    "vec4",
-  );
+  const uSegA = shared(new Array(INTERIOR_MAX_SEGMENTS).fill(null).map(() => new THREE.Vector4()));
+  const uSegB = shared(new Array(INTERIOR_MAX_SEGMENTS).fill(null).map(() => new THREE.Vector4()));
 
   const uBoxCount = uniform(0);
-  const uBoxCenter = uniformArray(
-    new Array(INTERIOR_MAX_BOXES).fill(null).map(() => new THREE.Vector4()),
-    "vec4",
-  );
-  const uBoxHalf = uniformArray(
-    new Array(INTERIOR_MAX_BOXES).fill(null).map(() => new THREE.Vector4()),
-    "vec4",
-  );
+  const uBoxCenter = shared(new Array(INTERIOR_MAX_BOXES).fill(null).map(() => new THREE.Vector4()));
+  const uBoxHalf = shared(new Array(INTERIOR_MAX_BOXES).fill(null).map(() => new THREE.Vector4()));
 
   const uOpenCount = uniform(0);
-  const uOpenPos = uniformArray(
-    new Array(INTERIOR_MAX_OPEN_ENDS).fill(null).map(() => new THREE.Vector4()),
-    "vec4",
-  );
+  const uOpenPos = shared(new Array(INTERIOR_MAX_OPEN_ENDS).fill(null).map(() => new THREE.Vector4()));
 
   const capsuleFactor = Fn(([p, a, b, radius, softness]) => {
     const ab = b.sub(a);

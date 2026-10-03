@@ -367,6 +367,56 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       main-thread build time 7.0 → 4.2 s; frame A/B within noise (default
       9.1 vs 9.3, max 11.9 vs 12.2 ms); matrices proven by GPU readback.
       ?instshare=0 = one build each. (nam: 728 → 405.)
+- [ ] **REPO STUDY (2026-10-03, analysis only, nothing measured) — ranked
+      engine work for BOTH games:**
+      1. ~~STABLE WGSL TEXT~~ MEASURED 2026-10-03, LOW VALUE: 339 of 355 of
+         nam's shaders are ALREADY identical between launches (node ids come
+         out in the same order). And Chrome's disk cache only HALVES a
+         compile: a new 68 KB shader 0.9 s, the same after a reload 0.45 s,
+         in the same page 7 ms. The 16 that differ compile in parallel —
+         under ~1 s to win. Not worth a three patch.
+      2. ONE per-draw uniform buffer (dynamic offsets, one writeBuffer a
+         frame) instead of three's per-object buffers + bind groups
+         (Tidewater MeshRenderer). MEASURED 2026-10-03, alg default view, 183
+         draws, trace 1.2-4.6 s: the render path ~4.8 ms CPU a frame, of it
+         per-object bindings ~2.0 ms (_updateBindings; writeBuffer alone
+         0.7 ms), the native draws 0.4 ms, the shadow render ~0.9 ms. So up
+         to ~1-1.5 ms a frame to win. Deepest change on the list (three's
+         Bindings/backend); do it only behind a flag with a pixel A/B.
+         **FIRST STEP DONE 2026-10-03, no three patch needed:** counting the
+         uploads found 1,067 a frame (1.1 MB) for 227 draws, almost all
+         `uniformArray`s in three's default PER-OBJECT group, re-sent for
+         every draw of every pass: the plant fields' type tables
+         (scatterField uTypes/uShadowCast, placedFoliage uTypes) and the
+         interior-lighting hook's 5 arrays, which are on EVERY material through
+         the fog (unused in the RTS games). Moved to the shared renderGroup:
+         **1,067 → 353 uploads, 1.1 MB → 280 KB a frame; binding update
+         ~1.5 → ~1.1 ms CPU** (alternating loads, both zooms). Pixel A/B at
+         a frozen frame: identical except animated cloth/wire and the HUD.
+         nam after: 459 uploads, 399 KB. NEXT: the rest are per-object
+         uniform blocks (256-672 B) re-sent because a MATERIAL-wide uniform
+         in them changes each frame (e.g. uCamPos) — those belong in a
+         shared group too; then measure what is left before any backend work.
+      3. MULTI-TYPE INDIRECT BATCH for props (Tidewater ReefBatch / the
+         custom path three r184 already allows: one merged geometry,
+         geometry.setIndirect with many offsets, compute cull writes the
+         counts) → ~80 prop renderObjects a pass become 1. One material:
+         per-type textures via texture arrays (the alg stones pattern).
+      4. ~~STAGGERED CASCADES~~ DOES NOT APPLY: the games have no cascades
+         (one fitted map; the editor-only stagger was built and reverted
+         2026-10-01, ~0.2 ms). MEASURED 2026-10-03 (alg, map frozen with
+         app.shadows.debugSkipMask(1), interleaved x4): the WHOLE map costs
+         default 8.60 → 7.89 ms frame (CPU 5.8 → 5.2), max zoom 11.19 →
+         10.61 (CPU 6.4 → 5.5). Redrawing it every 2nd frame = ~0.3 ms on
+         average, paid for with unit/animal shadows stepping at 30 Hz and the
+         fit lagging a frame on pans. Parked unless you want it.
+      5. Shadow LOD picked from the MAIN camera's distance (InstancedMesh2);
+         LOD hysteresis if missing.
+      6. Render bundles only around GPU-indirect draws (args read at replay,
+         so culling still works); static props otherwise freeze culling.
+      NOT worth it: InstancedMesh2 (WebGL-only), BatchedMesh +/- agargaro's
+      extensions (r184 WebGPU still issues one drawIndexed per instance,
+      CPU culling), multiDrawIndirect (Chrome-experimental, three unused).
 - [ ] Remaining duplicate builds (~115 now): mostly DIFFERENT materials with the
       same structure (stone sets, walls, outcrops, vehicle parts — three must
       build per material: the build binds its textures) and the placed
