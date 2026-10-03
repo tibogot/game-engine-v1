@@ -295,6 +295,35 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       after the depth pre-pass) lost its order — the "saving" was trees not
       drawn (found by looking: shadows on the ground, no trees). Doing it right
       = the pre-pass meshes in their own bundle drawn first. Gain unknown.
+- [x] MEASURED, NOT WORTH IT (2026-10-03, same session, continued):
+      - Shadow pass: switching off the 21 shadow draws of every static caster
+        (buildings, walls, outcrops, stones, poles — 58 → 37) saved NOTHING at
+        close/default, 0.4 ms at max. Shadow draws are cheap on the CPU (depth
+        materials). Merging them: no.
+      - Static buildings etc.: hiding ALL 79 static meshes saves 0.74 / 0.86 /
+        2.35 ms — their whole cost incl. GPU shading; a merge only takes the
+        per-draw CPU part (~0.3 ms). No.
+      - Bloom mask from a small effects-only pass (no MSAA mask attachment):
+        built, measured WORSE in CPU-bound views (+0.5-1.35 ms: a second scene
+        walk + the effects twice), −1 ms at max only, and its occlusion was an
+        approximation (the effects write the mask through their own mrtNode,
+        so no per-fragment depth test). Reverted. Bloom itself costs 1.0
+        (default) / 1.7 ms (max) — turning it off is a LOOK call (yours).
+      - 4x MSAA: off saves 1.3 ms at max zoom, ~0 elsewhere (CPU-bound).
+        Kept. ?msaa=0 to measure (engine opt `antialias`).
+      - HouseRubble draws with 0 instances (1 wasted draw, negligible).
+- [ ] **NEXT (proposed 2026-10-03, continue later)**:
+      1. SHADOW PASS — 62 draws a frame at the post, many small (one per
+         outcrop / wall / building piece): merge or skip casters too small to
+         matter at the RTS camera.
+      2. MERGE THE STATIC BUILDINGS — ~24 draws (showroom kit pieces): a few
+         merged meshes per material (they never move).
+      3. MAX-ZOOM GPU (12-13 ms, GPU-bound): terrain shader 2.2 ms, post 1.7
+         (bloom 10 passes, haze).
+      4. Plant render bundles done right (the depth pre-pass in its own bundle
+         drawn first) — only if 1-2 leave the CPU still the limit.
+      5. BOOT (~32 s): fresh production trace to re-rank; stable WGSL names
+         (NodeBuffer_<id>) so a shader cache can work — test in Electron.
 - [ ] One flaky suite: npm test read 197/198 once, 198/198 twice after
       (which one not caught).
 - [ ] Heap left (475 MB): ~150 MB is the DEV SERVER's module text and

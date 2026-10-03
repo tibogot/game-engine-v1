@@ -106,6 +106,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Plant-field draws that cannot hold a plant are skipped on the CPU (main.js
     // plantCpuCull, ScatterField.setCpuDensity). ?plantcull=0 = draw them all.
     plantCpuCull: params.get("plantcull") !== "0",
+    // ?msaa=0: no 4x MSAA (to measure its cost; the look keeps it).
+    antialias: params.get("msaa") !== "0",
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural
     // sky unless it asks, and setWorldLight below only drives this one.
     // ?sky=pro: Sky Pro, with its clouds' shadows on the land (the sun's
