@@ -66,7 +66,8 @@ One screen, most important first. Details stay in the sections below;
 - Soldiers that fit French Algeria (today's pack is Vietnam-era); Colonel
   Delorme (built, not in the game), the FLN chief; faces; crawl / prone
   clips.
-- Weather: the sandstorm. Night: parked until Sky Pro has its night.
+- Weather: the sandstorm. Night: renders now (`?tod=23`, 2026-10-04) — next: its lights
+  (see "NIGHT, NEXT").
 - LATER: the Men of War camera, fog of war without the shroud.
 
 **6. Waiting on you (look / play)** — the "you, look" and "you, play it"
@@ -815,7 +816,7 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
         (fine for a game, too slow to paint with) — invalidate by region
         before turning it on in the editor.
 
-- [ ] **PARKED until Sky Pro has its night** (you, in another session): the
+- [ ] **UNPARKED 2026-10-04 — Sky Pro has its night** (see "NIGHT RENDERS" / "NIGHT, NEXT"): the
       searchlight at night (read Sky Pro's night amount, judge it lit), lit
       windows / lanterns / the mirador lamp — see "DUSK/NIGHT IS BLACK".
 - [x] **A BETTER MINIMAP** (you, 2026-10-01: "reads small; a rotated square
@@ -3339,7 +3340,23 @@ Asset follow-ups:
       tips and turns to its aim. Tested: locked 6.5 s after a man appeared
       in front, pool 0 m off him, revealed the whole time. GPU: on 2.036 /
       off 2.040 ms (noise).
-- [ ] **DUSK/NIGHT IS BLACK**: setTimeOfDay 19.3 (sun 0.05 up) renders the
+- [x] **NIGHT RENDERS (2026-10-04)** — `?tod=23` (or Dev → Sky → Time of day, now 0-24 h):
+      Sky Pro's night + its NIGHT LOOK (Realistic; Dev → Sky → Night look / Night style
+      Cinematic) + Tidewater's high moon (moonElev 0: the look's 18° left the land half as
+      bright, 0.0016 vs 0.0034 at the post). The Aurès grade eases to neutral with
+      `app.sky.night` (its contrast crushed the moonlit walls). Local lights are ON
+      (`app.localLights`, no fixed cost; ?locallights=0). The weather no longer resets the
+      clock at boot. By day nothing changes (frame luma 0.2409 vs 0.2397 look on/off).
+      — you, look: 19.3 h and 23 h, Realistic vs Cinematic.
+- [ ] **NIGHT, NEXT** (proposed 2026-10-04): (1) combat lights — explosions (algCombat
+      fx.explosion), fires (combat.js:158, algStructures.js:152, algDamage.js:113), muzzle flashes
+      (projectiles.js fx.muzzle), shell/rocket flare; (2) fixed lights faded by `app.sky.night` —
+      base (searchlight lamp, mirador, gate, vehicle park, helipad), ksar (souk lanterns: need a
+      lantern mesh; doorways round the square/mosque), hamlet hearths, ALN campfire + cave glow,
+      posts; (3) the searchlight reads `app.sky.night` instead of the sun; (4) illumination flares
+      (gameplay, you decide). The fog of war blends to FIXED colours (fogOfWar.js uShroud /
+      uUnexplored): at night the shroud colour will glow — scale it with the night like the fog.
+- [ ] (was) **DUSK/NIGHT IS BLACK**: setTimeOfDay 19.3 (sun 0.05 up) renders the
       whole world black (not the searchlight — measured without it). The
       night item needs real dusk/night light (moon, ambient) before the
       searchlight can be judged at night — you, look then.

@@ -192,6 +192,7 @@ import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from
 import { createShadowTestScene } from "../debug/shadowTestScene.js";
 import { createTerrainShadowMap, terrainShade, terrainSunVisibilityHere, setActiveTerrainShadowMap } from "../render/lighting/terrainSunShadow.js";
 import { installTiledLighting, createLocalLights } from "../render/lighting/localLights.js";
+import { SKYPRO_NIGHT_STYLES } from "../render/skypro/skyproSky.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
 // import { createGpuStatsPanel } from "../render/gpuStatsPanel.js";
@@ -12620,6 +12621,22 @@ export async function startV3App(opts = {}) {
       },
       /** Sky Pro's live settings (SKYPRO_DEFAULTS' shape: coverage, haze, exposure, …). */
       get skyPro() { return worldToolState.skyProSky; },
+      /**
+       * Sky Pro's night look in one of its styles ("realistic" — the default — or "cinematic",
+       * day-for-night): turns the look on and sets its exposure, grade and night sky together.
+       */
+      setNightStyle(name) {
+        const s = SKYPRO_NIGHT_STYLES[name];
+        if (s) Object.assign(worldToolState.skyProSky, { nightLook: true }, s);
+      },
+      /** The names setNightStyle takes. */
+      nightStyles: Object.keys(SKYPRO_NIGHT_STYLES),
+      /**
+       * How much night it is, 0 (day) .. 1 (full night), eased through dusk: Sky Pro's own
+       * night amount (Tidewater's, from the sun's depth). For a game's lamps, lit windows, a
+       * grade that steps aside at night. 0 in the other sky modes.
+       */
+      get night() { return worldToolState.skyMode === "skypro" ? worldEnv?.skyPro?.light?.().night ?? 0 : 0; },
     },
     // ── Fog override ──────────────────────────────────────────────────────────
     // Height + distance fog live in worldToolState.fog and sync to scene.fogNode.

@@ -109,6 +109,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // cloud-shadow slot: one more texture per lit material, no sampler).
     skyMode: SKY_PRO ? "skypro" : "atmosphere",
     cloudShadows: SKY_PRO,
+    // LOCAL LIGHTS (fires, lamps, muzzle flashes at night: v3/render/lighting/localLights.js,
+    // app.localLights). No fixed cost — measured: installed with no light on screen = not
+    // installed. ?locallights=0 = without.
+    localLights: params.get("locallights") !== "0",
     // Three shapes of every tree (palm clumps, cedars, oaks): one shape
     // repeated across a grove read as a stamp.
     tallPlantVariants: Number(params.get("variants") ?? 3),
@@ -220,6 +224,23 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("farterrain") === "0") app.setFarTerrain?.({ enabled: false });
 
   if (params.get("light") !== "flat") applyAuresLight(app);
+  // THE GRADE STEPS ASIDE AT NIGHT. The Aurès grade (contrast 1.12, warm 0.16, saturation 0.9)
+  // is a summer afternoon's: at night its contrast crushed the moonlit walls to black and its
+  // warmth fought the night look's blue (seen at the post, 23 h). It eases to neutral with the
+  // sky's night amount. `app.algPolish` is the day grade (Dev → Light edits it).
+  app.algPolish = AURES_LIGHT.polish;
+  const NEUTRAL = { contrast: 1, saturation: 1, temperature: 0 };
+  let lastNight = -1, lastDay = "";
+  app.addPreRenderHook(function algNightGrade() {
+    const n = app.sky?.night ?? 0;
+    const day = app.algPolish;
+    const dayKey = `${day.contrast},${day.saturation},${day.temperature}`;
+    if (Math.abs(n - lastNight) < 0.002 && dayKey === lastDay) return;
+    lastNight = n; lastDay = dayKey;
+    const out = { ...day };
+    for (const k of Object.keys(NEUTRAL)) if (day[k] !== undefined) out[k] = day[k] + (NEUTRAL[k] - day[k]) * n;
+    app.postFx?.setPolish?.(out);
+  });
 
   // The new assets, on the map, until gameplay places them (showroom.js).
   if (params.get("showroom") !== "0") {
@@ -436,7 +457,19 @@ export function applyAuresLight(app, L = AURES_LIGHT) {
   // The level's saved look (Atmosphere) is applied by the loader, over the boot mode.
   if (SKY_PRO) app.sky?.setMode?.("skypro");
   app.sky?.set?.({ latitude: L.latitude, dayOfYear: L.dayOfYear });
-  app.sky?.setTimeOfDay?.(L.timeOfDay);
+  // ?tod=23 starts at that hour (the night: Sky Pro's moon, night look and local lights)
+  const tod = Number(params.get("tod"));
+  app.sky?.setTimeOfDay?.(Number.isFinite(tod) && params.has("tod") ? tod : L.timeOfDay);
+  // THE NIGHT LOOK (Sky Pro, the "Realistic" style): exposure, the blue grade, the night sky.
+  // Every term scales with the sky's night amount, so the day is untouched. ?nightlook=0 =
+  // Tidewater's own night, darker.
+  if (SKY_PRO && app.sky?.skyPro) {
+    app.sky.skyPro.nightLook = params.get("nightlook") !== "0";
+    // Tidewater's moon (high: 59° at 23 h), not the night look's low 18°: that one lays a glitter
+    // path on a sea; this map has none, and a low moon left the land half as bright (MEASURED at
+    // the post, 23 h: open ground 0.0016 at 18° vs 0.0034 at Tidewater's).
+    app.sky.skyPro.moonElev = 0;
+  }
   app.postFx?.setPolish?.(L.polish);
   if (SKY_PRO) {
     // Its own light and air (see SKY_PRO): the engine's distance fog would haze twice.

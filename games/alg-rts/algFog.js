@@ -92,11 +92,11 @@ export function createAlgFog(app, { light, applyLight, skyPro = false } = {}) {
   app.addPreRenderHook(() => fog.update());
 
   let current = "clear";
-  function setWeather(key) {
+  function setWeather(key, { keepTime = false } = {}) {
     const W = WEATHER[key];
     if (!W) return;
     current = key;
-    app.sky?.setTimeOfDay?.(W.time);
+    if (!keepTime) app.sky?.setTimeOfDay?.(W.time);
     for (const [k, v] of Object.entries(W.banks)) fog.set(k, v, { quiet: true });
     fog.sync();
     // Under Sky Pro its own air haze is the distance fog (algGame.js SKY_PRO): the banks stay.
@@ -104,6 +104,7 @@ export function createAlgFog(app, { light, applyLight, skyPro = false } = {}) {
     app.fog?.setHeight?.(W.height);
     app.fog?.setDistance?.({ enabled: true, matchSky: true, ...W.distance });
   }
-  setWeather("clear");
+  // the game has set its clock already (applyAuresLight: AURES_LIGHT.timeOfDay, or ?tod=): keep it
+  setWeather("clear", { keepTime: true });
   return { fog, setWeather, rehook: hook, get weather() { return current; } };
 }

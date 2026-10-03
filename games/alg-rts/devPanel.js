@@ -42,6 +42,8 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   // live. Presets set cover, cirrus and haze together; the clouds follow the
   // game's ONE wind (algWind.js: flags, plants) unless you let them drift.
   const L = structuredClone(AURES_LIGHT);
+  // the clock as the game set it (?tod= can start the night)
+  L.timeOfDay = app.sky?.state?.timeOfDay ?? L.timeOfDay;
   const hhmm = (v) => `${Math.floor(v)}:${String(Math.round((v % 1) * 60)).padStart(2, "0")}`;
   const SP = app.sky?.mode === "skypro" ? app.sky.skyPro : null;
   if (SP) {
@@ -59,7 +61,17 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
       get: () => preset,
       set: (k) => { preset = k; const { label, ...p } = PRESETS[k]; void label; Object.assign(SP, p); panel.refresh(); },
     });
-    sky.slider("Time of day", { min: 5, max: 20, step: 0.1, get: () => L.timeOfDay, set: (v) => { L.timeOfDay = v; app.sky?.setTimeOfDay?.(v); }, fmt: hhmm });
+    sky.slider("Time of day", { min: 0, max: 24, step: 0.1, get: () => L.timeOfDay, set: (v) => { L.timeOfDay = v; app.sky?.setTimeOfDay?.(v); }, fmt: hhmm });
+    // THE NIGHT LOOK (engine Sky Pro: exposure, blue grade, night sky; Sky → Night look in the
+    // editor has every slider). Off = Tidewater's own night.
+    sky.toggle("Night look", { get: () => !!SP.nightLook, set: (v) => (SP.nightLook = v) });
+    sky.select("Night style", {
+      options: [["realistic", "Realistic"], ["cinematic", "Cinematic (day-for-night)"]],
+      get: () => (SP.nightEV >= 1.5 ? "cinematic" : "realistic"),
+      set: (k) => { app.sky.setNightStyle?.(k); panel.refresh(); },
+    });
+    sky.slider("Moon height", { min: 0, max: 80, step: 1, get: () => SP.moonElev, set: (v) => (SP.moonElev = v), fmt: (v) => (v ? `${v}°` : "Tidewater's") });
+    sky.slider("Moon direction", { min: -180, max: 180, step: 5, get: () => SP.moonAzim, set: (v) => (SP.moonAzim = v), fmt: (v) => `${v}°` });
     sky.slider("Cloud cover", { min: 0, max: 1, step: 0.01, get: () => SP.coverage, set: (v) => (SP.coverage = v) });
     sky.slider("Cirrus", { min: 0, max: 1.5, step: 0.05, get: () => SP.cirrus, set: (v) => (SP.cirrus = v) });
     sky.slider("Cirrus height", { min: 3000, max: 12000, step: 100, get: () => SP.cirrusAlt, set: (v) => (SP.cirrusAlt = v), fmt: (v) => `${(v / 1000).toFixed(1)} km` });
@@ -106,6 +118,8 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
   } else {
     light.hint("Sky Pro lights the world from its own sun: time of day and exposure are in <b>Sky</b>. The grade below still applies.");
   }
+  // (the day grade: algGame's night hook eases it to neutral as night falls)
+  app.algPolish = L.polish;
   const polish = (k, label, min, max) => light.slider(label, { min, max, step: 0.01, get: () => L.polish[k], set: (v) => { L.polish[k] = v; app.postFx?.setPolish?.(L.polish); } });
   polish("contrast", "Contrast", 0.8, 1.5);
   polish("saturation", "Saturation", 0.5, 1.5);
