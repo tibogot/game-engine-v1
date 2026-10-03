@@ -645,6 +645,9 @@ export async function startV3App(opts = {}) {
   // Depth pre-pass for the plant fields' cut-out cards (FoliageScatterSystem
   // depthPrepass): a game opts in; default off = the fields as they were.
   const foliageDepthPrepass = opts.foliageDepthPrepass === true;
+  // Skip the plant fields' draws that provably hold no plant (ScatterField
+  // setCpuDensity): a game opts in; default off = every draw as before.
+  const plantCpuCull = opts.plantCpuCull === true;
   // Plant detail levels that RECEIVE shadows (ScatterField.setReceiveShadows):
   // 1 = the near level (editor, walking cameras); an RTS camera sees all three
   // at once and asks for them all (alg-rts, 2026-10-01).
@@ -2034,6 +2037,9 @@ export async function startV3App(opts = {}) {
       await sys.init(camera);
       sys.setEnabled(true);
       susukiSystem = sys;
+      // Empty draws skipped on the CPU (ScatterField.setCpuDensity), from the
+      // painted density — a game opts in (opts.plantCpuCull).
+      if (plantCpuCull) sys.field.setCpuDensity([grassTerrainData.susukiDensityTex], { heightAt: getWorldHeight, reach: 35 });
       syncSusukiUniforms();
     } catch (err) {
       console.error("[V3 Susuki] build failed:", err);
@@ -2184,6 +2190,7 @@ export async function startV3App(opts = {}) {
       sys.setEnabled(true);
       foliageScatter = sys;
       sys.field.setThin(_foliageThin);   // a game may have set it before the build
+      if (plantCpuCull) sys.field.setCpuDensity(foliageDensity.texes, { heightAt: getWorldHeight, reach: 10 });
       syncFoliageScatterUniforms();
     } catch (err) {
       console.error("[V3 Foliage] build failed:", err);

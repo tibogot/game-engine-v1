@@ -103,6 +103,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Instance matrices uploaded only when they change, not on every draw
     // (main.js; audit 2026-10-03). ?instubo=1 = three's per-draw uniform copy.
     instanceAttributes: params.get("instubo") !== "1",
+    // Plant-field draws that cannot hold a plant are skipped on the CPU (main.js
+    // plantCpuCull, ScatterField.setCpuDensity). ?plantcull=0 = draw them all.
+    plantCpuCull: params.get("plantcull") !== "0",
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural
     // sky unless it asks, and setWorldLight below only drives this one.
     // ?sky=pro: Sky Pro, with its clouds' shadows on the land (the sun's

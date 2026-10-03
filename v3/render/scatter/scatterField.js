@@ -125,6 +125,7 @@ export class ScatterField {
     this.lods = lods;
     this.parts = parts;
     this.rows = rows;
+    this._ruleRow = ruleRow;   // the CPU cull reads the height band from it
     this.tileSize = tileSize;
     this.receiveLods = receiveLods;
     const V = (this.variants = Math.max(1, Math.round(variants)));
@@ -617,6 +618,195 @@ export class ScatterField {
   }
 
   /**
+   * CPU CULL OF EMPTY DRAWS (2026-10-03). Every mesh is an indirect draw whose
+   * instance count the GPU decides — often 0 (a species that grows nowhere
+   * near, the near detail level of a field seen from far): measured at the
+   * alg-rts post, 26 of 36 tall-plant meshes and 13 of 24 foliage meshes drew
+   * nothing, yet each cost a full submission (~25 µs, ×2 with the depth
+   * pre-pass). With the field's PAINTED density on the CPU (`pages`: the raw
+   * DataTextures — the GPU reads them masked, which only removes plants, so
+   * these are a superset), each frame decides per type × detail level whether
+   * ANY plant could land there, from the same rules the compute uses: inside
+   * the tile round the anchor, within uOuterR1 of it, and the detail band by
+   * flat distance to the camera (± the compute's dither). Draws that cannot
+   * have a plant are hidden; anything that might stays — it never hides a
+   * plant, so it cannot pop. Shadow lists likewise, by uShadowDist round the
+   * shadow centre. null = off (the default: every mesh draws as before).
+   * @param {THREE.DataTexture[] | null} pages  RGBA, 4 types a page, in type order
+   */
+  setCpuDensity(pages, { heightAt = null, reach = 30 } = {}) {
+    this._cpuPages = pages?.length ? pages : null;
+    this._occ = null;
+    // With the ground's height (heightAt(x, z) → world Y) a cell is also tested
+    // against the camera's frustum for the drawn lists (the compute keeps only
+    // plants in view): a box from the cell's lowest to highest ground, grown by
+    // `reach` metres (the tallest plant's height and crown) on every side, so a
+    // plant standing off screen whose crown leans in still counts.
+    this._heightAt = heightAt;
+    this._reach = reach;
+    if (!this._cpuPages) {
+      // Back to the used-types visibility.
+      const used = this._usedTypes ?? [];
+      for (let m = 0; m < this.meshCount; m++) this.meshes[m].visible = !!used[Math.floor(m / (this.parts * this.lods * this.variants))];
+      this._syncShadowVisibility();
+    }
+  }
+
+  // Occupancy: per type, which 16 m cells of the map hold any painted density
+  // (dilated by a cell: the compute samples the texture bilinearly).
+  _buildOccupancy() {
+    const size = this.u.uTerrainSize.value, N = Math.max(8, Math.round(size / 16)), cell = size / N;
+    const T = this.typeCount, occ = Array.from({ length: T }, () => new Uint8Array(N * N));
+    this._cpuPages.forEach((tex, pi) => {
+      const d = tex.image?.data, w = tex.image?.width, h = tex.image?.height;
+      if (!d || !w || !h) return;
+      for (let y = 0; y < h; y++) {
+        const cz = Math.min(N - 1, Math.floor(((y + 0.5) / h) * N)) * N;
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          if (!(d[i] | d[i + 1] | d[i + 2] | d[i + 3])) continue;
+          const c = cz + Math.min(N - 1, Math.floor(((x + 0.5) / w) * N));
+          for (let ch = 0; ch < 4; ch++) { const t = pi * 4 + ch; if (t < T && d[i + ch] > 0) occ[t][c] = 1; }
+        }
+      }
+    });
+    for (const o of occ) {   // dilate one cell
+      const src = o.slice();
+      for (let z = 0; z < N; z++) for (let x = 0; x < N; x++) {
+        if (!src[z * N + x]) continue;
+        for (let dz = -1; dz <= 1; dz++) for (let dx = -1; dx <= 1; dx++) {
+          const zz = z + dz, xx = x + dx;
+          if (zz >= 0 && zz < N && xx >= 0 && xx < N) o[zz * N + xx] = 1;
+        }
+      }
+    }
+    // The ground's height range per cell (5×5 samples + 3 m for what falls
+    // between them, craters and pads): the frustum test's boxes.
+    let hMin = null, hMax = null;
+    if (this._heightAt) {
+      hMin = new Float32Array(N * N); hMax = new Float32Array(N * N);
+      for (let j = 0; j < N; j++) for (let i = 0; i < N; i++) {
+        let lo = Infinity, hi = -Infinity;
+        for (let b = 0; b <= 4; b++) for (let a = 0; a <= 4; a++) {
+          const y = this._heightAt(i * cell - size / 2 + (a / 4) * cell, j * cell - size / 2 + (b / 4) * cell);
+          if (y < lo) lo = y; if (y > hi) hi = y;
+        }
+        hMin[j * N + i] = lo - 3; hMax[j * N + i] = hi + 3;
+      }
+    }
+    this._occ = { N, cell, size, occ, hMin, hMax, versions: this._cpuPages.map((t) => t.version) };
+  }
+
+  _cpuCull(anchorPos) {
+    if (!this._occ || this._cpuPages.some((t, i) => t.version !== this._occ.versions[i])) this._buildOccupancy();
+    const { N, cell, size, occ, hMin, hMax } = this._occ, u = this.u, L = this.lods, T = this.typeCount;
+    // THE COMPUTE'S OWN FRUSTUM TEST (gpuCull.frustumVisibleAtClip), as planes:
+    // its padded NDC bounds (uCullPadNdc*, 0.35-0.6 of the half-screen — far
+    // wider than the screen) with the radius term are linear in the world
+    // position, so each is a plane a·p + d ≥ 0 (clip rows of the camera
+    // matrix). A plain frustum here hid plants the compute kept (measured:
+    // foliage near detail, 1-7 plants for 4 frames in a fast zoom).
+    const R = this._reach;
+    let planes = null;
+    if (hMin) {
+      const e = this._cameraMatrix.elements;
+      const row = (i) => [e[i], e[4 + i], e[8 + i], e[12 + i]];
+      const [r0, r1, r2, r3] = [row(0), row(1), row(2), row(3)];
+      const kX = 1 + u.uCullPadNdcX.value, kYn = 1 + u.uCullPadNdcYNear.value, kYf = 1 + u.uCullPadNdcYFar.value;
+      const fxr = u.uFx.value * R, fyr = u.uFy.value * R;
+      const comb = (a, sa, b, sb, add) => [0, 1, 2, 3].map((k) => sa * a[k] + sb * b[k] + (k === 3 ? add : 0));
+      planes = [
+        comb(r0, 1, r3, kX, fxr), comb(r0, -1, r3, kX, fxr),     // left, right
+        comb(r1, 1, r3, kYn, fyr), comb(r1, -1, r3, kYf, fyr),   // bottom (near), top (far)
+        comb(r3, 1, r3, 0, 0), comb(r3, 1, r2, -1, 0),           // in front, before the far plane
+      ];
+    }
+    let drawDone = 0;   // per type: every detail level already proven possible
+    const ax = anchorPos.x, az = anchorPos.z, cx = u.uCamPos.value.x, cz = u.uCamPos.value.z;
+    const half = u.uTileSize.value * 0.5, R1 = u.uOuterR1.value;
+    const sx = u.uShadowCentre.value.x, sz = u.uShadowCentre.value.y, sR = u.uShadowDist.value + 3;
+    // Detail bands by flat camera distance: the compute's dither (±2, ±4) plus
+    // 10% + 4 m, so a switch distance moved later in the frame (zooming) is
+    // still inside the margin.
+    const l1 = u.uLodDist.value, l2 = u.uLodDist2.value;
+    const lo = (d, k) => d * 0.9 - k, hi = (d, k) => d * 1.1 + k;
+    const bands = L === 1 ? [[0, Infinity]] : L === 2 ? [[0, hi(l1, 6)], [lo(l1, 6), Infinity]]
+      : [[0, hi(l1, 6)], [lo(l1, 6), hi(l2, 8)], [lo(l2, 8), Infinity]];
+    // Cells the tile ∩ outer circle can touch.
+    const reach = Math.min(half, R1);
+    const i0 = Math.max(0, Math.floor((ax - reach + size / 2) / cell)), i1 = Math.min(N - 1, Math.floor((ax + reach + size / 2) / cell));
+    const j0 = Math.max(0, Math.floor((az - reach + size / 2) / cell)), j1 = Math.min(N - 1, Math.floor((az + reach + size / 2) / cell));
+    const possible = (this._possible ??= new Uint8Array(T * L)), shadowOk = (this._shadowOk ??= new Uint8Array(T));
+    possible.fill(0); shadowOk.fill(0);
+    const used = this._usedTypes;
+    for (let t = 0; t < T; t++) {
+      if (used && !used[t]) continue;
+      const o = occ[t];
+      let need = L + (this.shadows ? 1 : 0);
+      // The type's HEIGHT BAND (scatterRuleKeep: smoothstep over min-2..max+2
+      // of the ground height): a cell whose ground range misses it grows none.
+      const rule = hMin && this._ruleRow != null ? this.typeRows[t * this.rows + this._ruleRow] : null;
+      const bandLo = rule ? rule.x - 2 : -Infinity, bandHi = rule ? rule.y + 2 : Infinity;
+      for (let j = j0; j <= j1 && need > 0; j++) {
+        const zMin = j * cell - size / 2, zMax = zMin + cell;
+        for (let i = i0; i <= i1 && need > 0; i++) {
+          if (!o[j * N + i]) continue;
+          const xMin = i * cell - size / 2, xMax = xMin + cell;
+          // The tile square round the anchor, and the outer circle.
+          if (xMax < ax - half || xMin > ax + half || zMax < az - half || zMin > az + half) continue;
+          const ndx = Math.max(xMin - ax, 0, ax - xMax), ndz = Math.max(zMin - az, 0, az - zMax);
+          if (ndx * ndx + ndz * ndz > R1 * R1) continue;
+          if (rule && (hMax[j * N + i] <= bandLo || hMin[j * N + i] >= bandHi)) continue;
+          // In view (the drawn lists only): the cell's ground box grown by the
+          // plants' reach, against the camera frustum.
+          drawDone = 0;
+          for (let l = 0; l < L; l++) drawDone += possible[t * L + l];
+          let inView = drawDone < L;
+          if (inView && planes) {
+            const yMin = hMin[j * N + i], yMax = hMax[j * N + i];
+            // The compute keeps anything whose DEPTH |clip.w| is within its
+            // radius — a slab through the camera, unbounded sideways (for a
+            // high camera it cuts the ground behind it): the box against that slab.
+            const w = planes[4];
+            const wMax = w[0] * (w[0] >= 0 ? xMax : xMin) + w[1] * (w[1] >= 0 ? yMax : yMin) + w[2] * (w[2] >= 0 ? zMax : zMin) + w[3];
+            const wMin = w[0] * (w[0] >= 0 ? xMin : xMax) + w[1] * (w[1] >= 0 ? yMin : yMax) + w[2] * (w[2] >= 0 ? zMin : zMax) + w[3];
+            if (!(wMin <= R && wMax >= -R)) {
+              for (const p of planes) {
+                // The box corner furthest along the plane's normal.
+                const v = p[0] * (p[0] >= 0 ? xMax : xMin) + p[1] * (p[1] >= 0 ? yMax : yMin) + p[2] * (p[2] >= 0 ? zMax : zMin) + p[3];
+                if (v < 0) { inView = false; break; }
+              }
+            }
+          }
+          if (inView) {
+            // Nearest and farthest flat distance from the camera to the cell.
+            const mdx = Math.max(xMin - cx, 0, cx - xMax), mdz = Math.max(zMin - cz, 0, cz - zMax);
+            const dMin = Math.hypot(mdx, mdz);
+            const dMax = Math.hypot(Math.max(Math.abs(xMin - cx), Math.abs(xMax - cx)), Math.max(Math.abs(zMin - cz), Math.abs(zMax - cz)));
+            for (let l = 0; l < L; l++) {
+              if (possible[t * L + l]) continue;
+              if (dMax >= bands[l][0] && dMin < bands[l][1]) { possible[t * L + l] = 1; need--; }
+            }
+          }
+          if (this.shadows && !shadowOk[t]) {
+            const sdx = Math.max(xMin - sx, 0, sx - xMax), sdz = Math.max(zMin - sz, 0, sz - zMax);
+            if (sdx * sdx + sdz * sdz <= sR * sR) { shadowOk[t] = 1; need--; }
+          }
+        }
+      }
+    }
+    const P = this.parts, V = this.variants;
+    for (let m = 0; m < this.meshCount; m++) {
+      const t = Math.floor(m / (P * L * V)), l = Math.floor(m / P) % L;
+      this.meshes[m].visible = !!possible[t * L + l];
+    }
+    for (let m = 0; m < this.shadowMeshCount; m++) {
+      const t = Math.floor(m / P / V);
+      this.shadowMeshes[m].visible = this._shadowCastValues[t] > 0.5 && !!(used ? used[t] : true) && !!shadowOk[t];
+    }
+  }
+
+  /**
    * Keep only this fraction of the plants the paint and density would grow,
    * 0..1. A RUNTIME lever, not a look setting: it is not saved and syncCommon
    * never touches it, so a game can drive it every frame — e.g. from camera
@@ -757,6 +947,7 @@ export class ScatterField {
     const e = camera.projectionMatrix.elements;
     u.uFx.value = e[0];
     u.uFy.value = e[5];
+    if (this._cpuPages) this._cpuCull(anchorPos);
     this.renderer.compute([this.computeReset, this.computeUpdate]);
   }
 }

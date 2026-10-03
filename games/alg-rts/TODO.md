@@ -275,6 +275,26 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       saw this; Electron's first run would have too.
 - [x] gpuBench / the GPU button worked only in dev (window.__V3_DEBUG):
       falls back to the game's app.renderer.
+- [x] **PLANT FIELDS: EMPTY DRAWS CULLED ON THE CPU** (engine opt
+      plantCpuCull, ScatterField.setCpuDensity; ?plantcull=0 = old). The
+      fields draw every species × variant × detail level every frame (125
+      draws at the post, 45% of the frame); the GPU fills each, often with
+      nothing (26 of 36 tall-plant meshes empty at the post). Each frame the
+      CPU now proves, from the PAINTED density (a superset of what the GPU
+      reads), the tile + outer radius, the detail bands (+ margins), the
+      species' height band and THE COMPUTE'S OWN padded frustum + near-depth
+      slab as planes, which draws CANNOT hold a plant, and hides them.
+      PROOF: GPU counts read back over 48 views + 240 frames of fast pan/zoom/
+      spin — no hidden draw ever had a plant (a plain frustum DID miss 1-7
+      foliage plants for 4 frames: the compute pads NDC 0.35-0.6). Hides
+      ~17% (tall) / 12% (foliage) — the rest are empty only by chance (thin
+      density), which cannot be culled safely. **Frame: −0.72 close, −0.40
+      default, −0.42 cedars, −0.71 oasis, ±0 max** (interleaved, same page).
+- [—] **RENDER BUNDLES for the plant fields: NOT KEPT.** An A/B said −1 ms,
+      but the CEDARS DISAPPEARED: inside a bundle the colour pass (depth-equal,
+      after the depth pre-pass) lost its order — the "saving" was trees not
+      drawn (found by looking: shadows on the ground, no trees). Doing it right
+      = the pre-pass meshes in their own bundle drawn first. Gain unknown.
 - [ ] One flaky suite: npm test read 197/198 once, 198/198 twice after
       (which one not caught).
 - [ ] Heap left (475 MB): ~150 MB is the DEV SERVER's module text and

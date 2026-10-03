@@ -49,6 +49,9 @@ export function openParallelPipelines(renderer, scene) {
       backend.createRenderPipeline = createRenderPipeline;
       pipes.isReady = isReady;
       await Promise.all(pending);
+      // A render bundle recorded in the window left out the draws it skipped,
+      // and nothing about it changes when their pipelines arrive: record again.
+      scene.traverse((o) => { if (o.isBundleGroup) o.needsUpdate = true; });
       return { created, skipped };
     },
   };
