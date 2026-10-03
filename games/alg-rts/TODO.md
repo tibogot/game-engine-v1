@@ -426,6 +426,15 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
          only the near level receives shadows. NEXT for nam: the card
          textures as one texture array → one material a field (the alg
          stones pattern); then props the same way if a view shows them.
+      **BIG BATTLE CHECKED (2026-10-03, after all of the above):** 116 men +
+         vehicles + helicopter spawned 80 m apart near (40, 110), ~160 alive
+         with the garrisons, 109 engaged, smoke and shell craters. Locked at
+         60 fps; frame cost back to back 10.7-11.5 ms (~5.5 ms headroom), CPU
+         6.3-7.7 ms; 10 s of play: one 33 ms frame, no shader builds, no long
+         tasks; perfCheck clean (bar the known builds/shader 1.7). Biggest
+         game-side cost: the birds' update ~0.4 ms a frame — fine. Nothing to
+         fix. (The perf line's ↑ shows the GPU button's ~1 s bench pause as a
+         long frame: not a hitch.)
       **FOR THE NEXT GAME (2026-10-03, you: "optimised from the beginning"):**
          shared-rts/rtsPerfBoot.js (rtsEngineOptions + beginRtsPerfBoot —
          alg now boots through it), shared-rts/PERF_RULES.md (14 rules, each
