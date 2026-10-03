@@ -44,7 +44,7 @@ import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
-import { installPortraits } from "./ui/portraits.js";
+import { installPortraits, hasPortrait } from "./ui/portraits.js";
 
 /**
  * WHAT EACH BUILDING PRODUCES, seconds per unit (no costs yet: this game's
@@ -208,6 +208,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   fogOfWar.installPostFx(app);
   app.algFog?.rehook?.();
 
+  // The PAINTED portraits (ui/portraits.js) stand in for the units' 3D
+  // thumbnails. ?portraits=0 = the 3D ones.
+  const usePortraits = new URLSearchParams(location.search).get("portraits") !== "0";
   const unitRenderer = await createUnitRenderer({
     app, units, healthBars, selectionRings, fogOfWar, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS,
     // A French squad's men have no bars of their own: the squad's badge
@@ -220,6 +223,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // ?gibs=0: the skinning pass without the cut (to A/B its cost).
     gibs: new URLSearchParams(location.search).get("gibs") !== "0",
     onGib: (u, parts) => app.algCombat?.gib(u, parts),
+    // A type with a painted portrait (below) needs no 3D thumbnail: that bake
+    // cost ~1.2 s of PNG encodes + ~5 s waiting on its readbacks at boot.
+    thumbnailFor: usePortraits ? (k) => !hasPortrait(k) : null,
   });
   // After the renderer, which builds a view for each unit spawned from now on.
   const vehicles = takeOverVehicles(app, units, showroom);
@@ -229,7 +235,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     await bakeStructureThumbnails(app.renderer, unitRenderer.thumbnails).catch((e) => console.warn("[thumbs] structures:", e));
     // The PAINTED portraits (ui/portraits.js) over the units' 3D ones;
     // the buildings keep theirs. ?portraits=0 = the 3D ones.
-    if (new URLSearchParams(location.search).get("portraits") !== "0") {
+    if (usePortraits) {
       app.algPortraits = await installPortraits(unitRenderer.thumbnails, units).catch((e) => { console.warn("[portraits]", e); return null; });
     }
   }

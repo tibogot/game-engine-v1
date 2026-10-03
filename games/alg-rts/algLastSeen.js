@@ -32,6 +32,16 @@ export function createAlgLastSeen({ app, units, fogOfWar, rings, team = "enemy",
 .alg-ghost i { font-style: normal; color: #c9a69e; font-weight: 400; margin-left: 4px; }`;
   document.head.appendChild(style);
 
+  // The canvas' rect, read again only when it may have moved: reading it every
+  // frame after last frame's label writes forced a layout (0.37 ms a frame in a
+  // fight, audit 2026-10-03).
+  let rect = null;
+  const dirtyRect = () => { rect = null; };
+  const canvasRect = () => (rect ??= app.renderer.domElement.getBoundingClientRect());
+  const resizeObs = typeof ResizeObserver === "function" ? new ResizeObserver(dirtyRect) : null;
+  resizeObs?.observe(app.renderer.domElement);
+  window.addEventListener("resize", dirtyRect);
+
   function addGhost(x, z) {
     const g = ghosts.find((q) => Math.hypot(q.x - x, q.z - z) < P.merge);
     if (g) { g.x = (g.x * g.n + x) / (g.n + 1); g.z = (g.z * g.n + z) / (g.n + 1); g.n++; g.t = simT; g.seenT = 0; return; }
@@ -81,7 +91,8 @@ export function createAlgLastSeen({ app, units, fogOfWar, rings, team = "enemy",
     },
     /** Every frame: the rings and the labels. */
     frame(camera) {
-      const dom = app.renderer.domElement.getBoundingClientRect();
+      if (!ghosts.length) return;
+      const dom = canvasRect();
       for (const g of ghosts) {
         const age = simT - g.t, a = Math.max(0, 1 - age / P.fade);
         const y = app.getWorldHeight?.(g.x, g.z) ?? 0;
@@ -98,6 +109,6 @@ export function createAlgLastSeen({ app, units, fogOfWar, rings, team = "enemy",
         if (label !== g.label) { g.label = label; g.el.innerHTML = label; }
       }
     },
-    dispose() { while (ghosts.length) drop(0); style.remove(); },
+    dispose() { while (ghosts.length) drop(0); style.remove(); resizeObs?.disconnect(); window.removeEventListener("resize", dirtyRect); },
   };
 }

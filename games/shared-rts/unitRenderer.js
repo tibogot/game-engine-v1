@@ -984,8 +984,10 @@ const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then
  * for the types built in code (a type's `procedural` field names its builder).
  * `paint`: [r, g, b] painted-surface tint for those vehicles (a game's own
  * army colour, rtsObjectMaterialTinted); null = the kit's colours.
+ * `thumbnailFor(key)`: false = skip that type's 3D UI thumbnail (the game
+ * supplies its own picture); null = bake every type.
  */
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const PROCEDURAL_VEHICLES = procedural;
@@ -1310,9 +1312,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   // The surface atlas is built in a worker (rtsTextures.rtsAtlas): a portrait
   // baked before its pixels land would show the neutral placeholder for good.
   await rtsAtlasReady();
+  // `thumbnailFor(key)` false = a game has its own picture for that type (alg's
+  // painted portraits): no 3D bake, no readback at boot.
   const thumbnails = await bakeThumbnails({
     renderer: app.renderer,
-    items: UNIT_TYPE_KEYS.map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
+    items: UNIT_TYPE_KEYS.filter((k) => thumbnailFor?.(k) !== false).map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
   });
 
   /** A crowd soldier just killed plays a death clip, then lies there a while. */

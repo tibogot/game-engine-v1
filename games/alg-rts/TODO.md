@@ -6,6 +6,195 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## WHAT IS LEFT — the overview (2026-10-03, you: "make a list of what is remaining")
+
+One screen, most important first. Details stay in the sections below;
+"(sugg.)" = my suggestion, not yet your ask.
+
+**1. Performance + load time** (next, in a NEW chat: PERF_AUDIT.md)
+- **Baseline + ranked list DONE 2026-10-03** (section "PERF + LOAD AUDIT 2"
+  below) — waiting for your go on what to build.
+- Measured baseline → ranked list → build it. Load time (animal morphs
+  ~4.5 s, shader warm-up, ground cache bake, main-thread builds, textures),
+  frame cost (foliage, shadows, scene pass), WebGPU tricks, the editor out of
+  the game build. Smaller tech debt: the far grid (4 MB of Float32), tiling
+  at full zoom-out, the overlay's ~2-billion triangle count, a black band in
+  very high orbit views, a ~1.5k-tri crowd LOD for the bodies.
+
+**2. Gameplay — to make it a whole game**
+- VETERANCY per squad (CoH stars).
+- The ALN AI goes for the supply points and cuts the lines; its bands
+  shown as squads once seen; balance it against paras and Légion.
+- MUNITIONS has one use (grenades): more to spend it on (sugg.) — weapon
+  upgrades, smoke, a mortar barrage, sappers laying mines, call-ins
+  (air strike, napalm).
+- PATHS: a "can't go there" cursor; rock where it's too steep.
+- Poles: the FLN cuts the line → the post loses its radio (minimap).
+- Mines: a minimap mark once spotted, the sapper clears faster; an attack
+  order shouldn't end a patrol.
+- A game around the battle (sugg.): main menu, options (gore switch,
+  sound, keys), pause, end screens that lead somewhere; later missions /
+  a campaign.
+- Balance passes after you play: prices and incomes, squad sizes, retreat,
+  reinforce, the difficulty levels, the bleed rate.
+- Check: the "STARTING army still has armour" item (PARKED section) — may be
+  stale since the squads start (12 appelés + 2 sapeurs).
+
+**3. Destruction and combat feel**
+- Blow apart VEHICLES and BUILDINGS (the men's gib cut for the rest);
+  houses COLLAPSE (a village is one merged mesh today); battle damage;
+  real wreck shapes.
+- ANIMALS DIE (death clips, blood, bodies stay; the rest bolt).
+- A tank shell's direct hit gibs a man; dark caps on cut ends; a man
+  caught in wire.
+- VFX: fire extras (embers, a soot column), the paused "more VFX vs CoH"
+  list, a colour-grade LUT + vignette.
+
+**4. HUD / UX**
+- Selection card: the squad's name and n/size pips; retreat / reinforce
+  icons; real unit icons (mine are drawn stand-ins); building portraits.
+- MINIMAP JUMP: the ground texture lags after a jump.
+- A third cover colour (red, negative cover) once craters / mud count.
+- Sound: a squelch per alert; voices (parked: the free API plan refuses).
+
+**5. World and content**
+- FILL THE MAP: dense scrub along the wadis, orchards as a field kind,
+  oasis gardens and a second oasis, graded terraces and tracks.
+- Buildings: a second outpost (SAS post), the H-34 gunship + a helipad.
+- Animals: shepherds with the flocks, flocks that stay together, the hyena
+  / gazelle / camel into the game, dressed donkeys and camels; more birds.
+- Soldiers that fit French Algeria (today's pack is Vietnam-era); Colonel
+  Delorme (built, not in the game), the FLN chief; faces; crawl / prone
+  clips.
+- Weather: the sandstorm. Night: parked until Sky Pro has its night.
+- LATER: the Men of War camera, fog of war without the shroud.
+
+**6. Waiting on you (look / play)** — the "you, look" and "you, play it"
+lines below: the new HUD (badges, rings, arrows, minimap, resource strip),
+the economy's numbers, the squads, the last-seen markers, the plants, the
+ground, soldier1 vs soldier3, the hero in the lab.
+
+## PERF + LOAD AUDIT 2 (2026-10-03, PERF_AUDIT.md) — baseline + ranked list, **waiting for you**
+
+Measured on the dev server (Vite), test Chrome on the 2nd screen, canvas
+1440x732 @ DPR 1.1, render scale 1, GPU healthy (gpuHealth 100%). Frame =
+gpuBench timeFrames (pipelined CPU+GPU, focus-free). Boot = alg.html stage
+times (raw, learned table blanked) + a main-thread trace parsed by caller.
+
+### Baseline — LOAD (warm, 3 boots: 44.9 / 43.7 / 43.3 s)
+
+| stage | s | what is in it (trace) |
+|---|---|---|
+| page + modules | 1.3 | ~700 unbundled modules (dev server) |
+| engine | 1.7 | |
+| level + v3proj | 5.4 | project loaded at 7.6 s |
+| showroom | 1.5 | contact-AO bake 0.9, kit assembly 0.5 |
+| **Mustering** | **20.9** | unit renderer + clip bakes 1.5 · **3D unit thumbnails: 1.2 s PNG encode + ~5.5 s IDLE waiting on readbacks** · scatterField init 2.2 · **portraits (toBlob) ~6 s** · frames behind the screen |
+| splats, stones, fields | 1.0 | |
+| herds | 5.1 | **groundClamp 3.0 s** + feetFollow 0.6 (per species, CPU skinning every 5th vertex per key per clip) |
+| hens | 0.4 | |
+| warm-up | 4.2 | 312 drawables |
+| bakeAll + 2 frames | 2.3 | |
+
+- **The GPU process compiles ~390 pipelines (519 WGSL programs, 6 MB) EVERY
+  boot**: ~26 s of long GPU-process tasks. The main thread's idle gaps and the
+  portrait / thumbnail stalls are waits on it. **No shader cache across page
+  loads in this Chrome**: the same WGSL after a reload compiled in 66-140 ms
+  (= a fresh miss; same page 5-13 ms). 465 of 517 programs are byte-identical
+  between loads; 52 (197 KB) change every load (would defeat any cache).
+- The scene renders behind the loading screen (throttled 1/s): 10.7 s of
+  main thread, mostly first-draw material builds — they would move to the
+  warm-up, not vanish.
+- Console after boot: only the known "Multiple active KTX2 loaders" warning.
+
+### Baseline — FRAME (ms, scale 1)
+
+| view | frame | CPU | draws | limit |
+|---|---|---|---|---|
+| post, close | 8.2 | 8.2 | 234 | CPU |
+| post, default | 9.3 | 9.8 | 271 | CPU |
+| post, max | 12.7 | 10.4 | 300 | GPU |
+| Ksar el Hamra default / max | 8.7 / 12.4 | 8.3 / 8.9 | 226 / 236 | CPU / GPU |
+| Mechta Ouled Ali (oasis) default / max | 11.7 / 12.4 | 9.4 / 8.9 | 261 / 279 | GPU |
+| Dechra default / max | 8.9 / 13.0 | 8.1 / 8.9 | 233 / 253 | CPU / GPU |
+| **FIGHT** (49 men + half-track, Mechta, default) | **13.6** | **12.2** | 319 | CPU |
+| fight, close | 9.7 | 10.3 | 276 | CPU |
+
+- **Hiding EVERYTHING saves only 0.9 / 1.3 / 1.9 ms** (close / default / max
+  at the post): the frame is fixed cost, mostly CPU. GPU per system at the
+  post, max zoom (hide-it, noise ±0.4-1.4): terrain 2.2 · post 1.7 · haze
+  0.7 · lakes 0.4 · shadow map 0.4 · everything else ≤ 0.3. Default zoom:
+  all ≤ 0.8 (inside the noise; the view is CPU-bound).
+- **CPU, live trace at the post** (~12 ms/frame under tracing): three's
+  render submission 77% (~9 ms for ~300 draws, ~30 µs a draw). In it
+  `writeBuffer` 1.6 ms: **1,807 buffer writes, 2.85 MB uploaded per frame**;
+  ~1.3 MB of it is INSTANCE-MATRIX uniform buffers of STATIC things (stones
+  55 KB each, field walls 20 KB ×2 with their shadow pass, birds, x-ray) re-sent
+  every frame — three's buffer binding reports "changed" every draw. Game JS
+  ~2.5 ms: units 1.0 (1.7 in the fight), herds 0.67, flag cloth 0.37, fog of
+  war 0.24, sky driver 0.15, timestamp resolve 0.2 (dev), HUD markers +
+  minimap ~0.15. Fight: **algLastSeen 0.37 ms = getBoundingClientRect every
+  frame (forced layout)**.
+- Draws at the post, default (297): main pass 209, shadow map 64, bloom 10
+  (it is ON: the threshold bloom of 2026-10-02), PMREM ~4 (Sky Pro env re-bake
+  every 90 frames ≈ 340 draws in one frame; measured ≤ +5 ms that frame,
+  no visible spike in 200 frames). Biggest: tall plants 72 + 12 shadow,
+  foliage 33 + 8, kit/unit meshes 27, stones 21 + 2.
+- Triangles: the renderer's counter never resets (reads 15.7 billion) — no
+  number; fix the counter if you want it.
+
+### Ranked — LOAD (44 s now; target ~25 s first boot, less with a shader cache)
+
+| # | what | gain | build | risk | touches |
+|---|---|---|---|---|---|
+| L1 | Portraits: pre-cut faces offline (packPortraits.py writes one WebP per face) — no 38 toBlob encodes at boot | **~5 s** (6 s measured at boot, 0.36 s idle) | small | low | alg |
+| L2 | Skip the 3D unit thumbnail bake for every type that has a portrait (they are replaced); structure thumbnails after the screen lifts or baked to files | **3-6 s** (1.2 s encode + 5.5 s waiting, partly compiles of thumbnail-only pipelines) | small | low | alg (shared baker untouched) |
+| L3 | Animal morph ground clamp: bake each species' lift curves once (tool → JSON, or IndexedDB keyed by a code hash) or test only the candidate lowest verts | **~3.5 s** | medium | medium — every animal re-checked vs its approved shots | alg + engine animalMorph (nam if it uses morphs) |
+| L4 | Shader cache: find why Chrome keeps none across loads (origin / flag / Dawn blob cache), test in Electron; make the 52 per-load-varying programs stable; trim pipeline variants (390) | **10-20 s on 2nd+ boots** if a cache works; first boot unchanged | medium (investigation) | low | engine, both games |
+| L5 | Overlap GPU compiles with CPU work: start compileAsync of the known materials early (warm-up list) while morphs / scatter / thumbnails run on the CPU | 2-5 s (estimate) | medium | low-medium | shared-rts warm-up |
+| L6 | scatterField init 2.2, ground-cache tiles 1.7 + final bakeAll 2.3, contact AO 0.9: cache or bake fewer before the screen lifts | 1-3 s | medium | low | engine |
+| L7 | Measure on a PRODUCTION build (vite build), the thing Steam/Electron ships; dev modules cost ~1.3 s+ | ~1 s + honest numbers | small | none | build |
+
+### Ranked — FRAME (the frame is CPU-bound in play: draws × three's per-draw cost)
+
+| # | what | gain (est.) | build | risk | touches |
+|---|---|---|---|---|---|
+| F1 | Stop re-uploading unchanged buffers: a buffer binding uploads only when its attribute/array version moved (and the camera "render" group once per pass, not per draw) | 0.5-1 ms CPU every view | small-medium (three patch kept in v3) | medium — anything that edits an array without bumping its version freezes; test both games | engine, both |
+| F2 | Render bundles (three r184 `BundleGroup`) for STATIC draws: kit pieces, stones, walls, poles, ruins | 1-2 ms CPU | medium | medium (bundles freeze uniforms; shadows) | engine, both |
+| F3 | Tall plants: 3 variants in ONE geometry per species/LOD (per-instance variant) — 72 + 12 draws → ~28 | ~1 ms CPU | medium | low (same image) | engine scatter, nam too |
+| F4 | Game JS: algLastSeen rect cached on resize (0.37 ms in fights), flag cloth at 30 Hz / off screen (0.37), herds off screen at low rate (~0.4), timestamp queries only while the dev panel shows (0.2) | ~1-1.3 ms CPU | small | low | alg (+ shared wildHerd) |
+| F5 | Units hook 1.0 → 1.7 ms in a 49-man fight: profile it (combat, separate, grid rebuild) before it grows with bigger battles | 0.5+ ms in fights | small | low | shared-rts |
+| F6 | GPU at max zoom (12.4-13 ms, GPU-bound): bloom 5 mip levels → 3 or half-res, haze 0.7, terrain 2.2 (keep v3: 2.2 ms of 12 is no case for a new terrain) | ~0.5-1 ms at max zoom | small | low-medium (look) | alg / post |
+| F7 | Sky Pro env re-bake: only when the clouds visibly changed (≤5 ms once every 1.5 s) — **you** said leave the sky alone: your call | small | small | low | engine sky |
+| — | NOT worth it now: compute culling + indirect draws, Hi-Z (the GPU is not the limit at play zoom), a new terrain | | | | |
+
+### Built (2026-10-03, your go: "L1 → L2 → F4")
+
+- [x] **L1 portraits**: tools/packPortraits.py cuts one WebP per face
+      (public/textures/ui/portraits/s<cell>.webp, v<cell>.webp, 424 KB;
+      `--split` re-cuts from the atlases); ui/portraits.js only hands out URLs.
+- [x] **L2**: no 3D unit thumbnails for types with a portrait (all 12):
+      createUnitRenderer `thumbnailFor` (shared; null = nam unchanged).
+      ?portraits=0 bakes them again. Structure thumbnails unchanged.
+- [x] MEASURED L1+L2: boot 43.3-44.9 → **41.0-42.0 s (−2.5 s)**, not the ~9 s
+      estimated: Mustering 20.9 → 12.0 s, but herds 5.1 → 8.1-8.4 and the
+      warm-up + last bake 6.5 → 11.3-11.6. Pipelines 389 → 385. **The boot is
+      bound by the GPU process compiling ~385 pipelines one after another**:
+      freeing the main thread moves the wait to the next thing that needs
+      the GPU. → **L4 / L5 (a shader cache, fewer pipelines, overlap) are
+      the only big load levers left**; L3 (morphs) and L6 will mostly move
+      waits too until the compiles shrink.
+- [x] **F4 last-seen markers**: canvas rect cached (ResizeObserver), nothing
+      done with no markers (was a forced layout every frame, 0.37 ms in a fight).
+- [x] **F4 cloth**: flags + windsocks only step when in view (20 m sphere,
+      dt kept and caught up): away from the post 0.52 ms → ≈0 a frame.
+- [—] F4 herds off screen at a lower rate: NOT done — it changes their
+      steps (slope checks, trails, sidesteps) for ~0.3 ms; animals must not
+      break each other.
+- [ ] **you**: the stats overlay is ON by default (?stats=0) and costs
+      0.4-0.8 ms a frame (incl. the per-frame timestamp resolves) — off for
+      a release build (dev panel toggle keeps it)?
+
 ## PERF + QUALITY AUDIT (2026-10-01, you: "measure first, popping, culling, shadows, errors")
 
 Method: games/alg-rts/gpuBench.js (render N frames through the loop +

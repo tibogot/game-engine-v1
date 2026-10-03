@@ -453,7 +453,26 @@ export async function placeShowroom(app, list = SHOWROOM) {
     const mount = o?.geometry?.userData?.flagMount;
     if (mount) flags.push(e.flag === "fln" ? plantPostFlag(app, o, mount, drawFlnDataUrl()) : plantPostFlag(app, o, mount));
   }
-  app.addPreRenderHook((dt) => { for (const f of flags) f.update(dt); });
+  // Cloth only where the camera can see it (or its shadow): an off-screen flag
+  // or windsock keeps its dt and catches up when it comes back into view
+  // (both clamp a long dt). Every flag every frame was 0.37 ms + the socks 0.15
+  // (audit 2026-10-03).
+  const _frustum = new THREE.Frustum(), _vp = new THREE.Matrix4(), _sph = new THREE.Sphere();
+  const frustumNow = () => {
+    const cam = app.camera;
+    _vp.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse);
+    return _frustum.setFromProjectionMatrix(_vp);
+  };
+  const stepSeen = (items, posOf, dt) => {
+    const fr = frustumNow();
+    for (const it of items) {
+      it._dt = (it._dt ?? 0) + dt;
+      if (!fr.intersectsSphere(_sph.set(posOf(it), 20))) continue;
+      it.update(it._dt);
+      it._dt = 0;
+    }
+  };
+  app.addPreRenderHook((dt) => stepSeen(flags, (f) => f.group.position, dt));
   placed.flags = flags;
   // One wind for the flags and the windsock (algWind.js).
   const wind = createWind();
@@ -465,9 +484,9 @@ export async function placeShowroom(app, list = SHOWROOM) {
   const socks = [];
   for (const e of list) {
     const o = placed[e.key], spec = o?.geometry?.userData?.windsock;
-    if (spec) socks.push(createWindsock(app, o, spec, wind));
+    if (spec) socks.push(Object.assign(createWindsock(app, o, spec, wind), { at: o.position }));
   }
-  app.addPreRenderHook((dt) => { for (const s of socks) s.update(dt); });
+  app.addPreRenderHook((dt) => stepSeen(socks, (s) => s.at, dt));
   placed.wind = wind;
   // Rotors turning: an idling helicopter on the pad (~5 rev/s main, 25 tail).
   // Found ONCE: a per-frame getObjectByName walks every hierarchy.

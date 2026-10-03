@@ -13,6 +13,9 @@ cell order (left to right, top to bottom):
   public/textures/ui/portraits_vehicles.webp   3 x 2 cells of 240 x 270
 
   python tools/packPortraits.py <soldiers.png> <vehicles.png>
+
+then cuts each cell into its own file (what the HUD loads):
+  public/textures/ui/portraits/s<cell>.webp, v<cell>.webp
 """
 import sys
 from PIL import Image
@@ -69,7 +72,24 @@ def pack(cs, cols, rows, cw, ch, name, q, contain=False):
     print(f"  -> {OUT}{name} {atlas.size}")
 
 
-soldiers, vehicles = sys.argv[1], sys.argv[2]
-pack(cells(soldiers, 8, 4), 8, 4, 160, 200, "portraits_soldiers.webp", 82)
-# The vehicles sheet's middle gutter is broken by the Alouette's rotor: its rows by hand.
-pack(cells(vehicles, 3, 2, [(44, 537), (549, 1043)]), 3, 2, 240, 270, "portraits_vehicles.webp", 82, contain=True)
+def split(name, cols, rows, cw, ch, prefix, q=88):
+    """One WebP per atlas cell (public/textures/ui/portraits/<prefix><cell>.webp):
+    the HUD loads these as they are. Cutting them in the browser at boot cost
+    ~6 s (38 canvas toBlob encodes queued behind the GPU's shader compiles)."""
+    import os
+    os.makedirs(OUT + "portraits", exist_ok=True)
+    atlas = Image.open(OUT + name).convert("RGB")
+    for i in range(cols * rows):
+        x0, y0 = (i % cols) * cw, (i // cols) * ch
+        atlas.crop((x0, y0, x0 + cw, y0 + ch)).save(f"{OUT}portraits/{prefix}{i}.webp", "WEBP", quality=q, method=6)
+    print(f"  -> {OUT}portraits/{prefix}0..{cols * rows - 1}.webp")
+
+
+# python tools/packPortraits.py --split   only re-cuts the per-face files from the atlases
+if sys.argv[1] != "--split":
+    soldiers, vehicles = sys.argv[1], sys.argv[2]
+    pack(cells(soldiers, 8, 4), 8, 4, 160, 200, "portraits_soldiers.webp", 82)
+    # The vehicles sheet's middle gutter is broken by the Alouette's rotor: its rows by hand.
+    pack(cells(vehicles, 3, 2, [(44, 537), (549, 1043)]), 3, 2, 240, 270, "portraits_vehicles.webp", 82, contain=True)
+split("portraits_soldiers.webp", 8, 4, 160, 200, "s")
+split("portraits_vehicles.webp", 3, 2, 240, 270, "v")

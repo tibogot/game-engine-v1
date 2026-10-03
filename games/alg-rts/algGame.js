@@ -152,10 +152,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0) },
   });
   app.setFrameThrottle?.(1000);
-  // The stats-gl overlay: ON (you, 2026-10-01: "keep the performance stats
-  // overlay enabled even if sometimes its numbers are not totally true").
-  // It costs ~20% of the main thread (measured) — ?stats=0 to judge without.
-  app.setStatsOverlay?.(params.get("stats") !== "0");
+  // The stats-gl overlay: OFF (you, 2026-10-03: "off the stats panel"; it
+  // cost 0.4-0.8 ms a frame, measured). ?stats=1 or Dev → Performance.
+  app.setStatsOverlay?.(params.get("stats") === "1");
   // Cloud shadows start OFF (you, 2026-09-30: sweeping shadows get in the way
   // while debugging). The shadow map stays attached — Dev → Sky → Cloud
   // shadows turns them on, or ?cloudshadows=1 at boot.
