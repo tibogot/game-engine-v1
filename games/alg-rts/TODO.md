@@ -334,6 +334,13 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       - Left in the boot (trace): the frames behind the loading screen (~7 s:
         three building node shaders + first texture uploads — the paint and
         splat arrays, ~90 MB, once), the level file 4.4 s, the engine 1.9 s.
+- [x] LEVEL STAGE looked into (~2.5-3 s): decode 0.11, sky look 0.33,
+      decals 0.51, paint layers 0.25, refreshWorldHeights 0.7 — no single big
+      wait left. The level was DECODED TWICE (the loader's size check, then
+      loadProjectFromBuffer): the loader now passes its `decoded` (~0.1 s).
+      TRIED, NEUTRAL: the parallel-pipeline window opened by the engine from
+      its first frame (instead of after startV3App) — the stage did not move
+      (its idle gap was not the early compiles). Reverted.
 - [ ] Remaining duplicate builds (~230): mostly DIFFERENT materials with the
       same structure (stone sets, walls, outcrops, vehicle parts — three must
       build per material: the build binds its textures) and the placed

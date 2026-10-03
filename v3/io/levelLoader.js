@@ -96,7 +96,7 @@ export function createLevelLoader(app, {
     // hasLook said the level had its own, and the result was a map with no
     // atmosphere at all: nam-valley booted with both fogs off and the module's
     // default sun, and had done since the day it started carrying a look.
-    await app.loadProjectFromBuffer(buf, { worldLook: hasLook });
+    await app.loadProjectFromBuffer(buf, { worldLook: hasLook, decoded });
     return finish(name, hasLook);
   }
 

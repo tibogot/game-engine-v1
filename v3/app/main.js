@@ -9219,9 +9219,11 @@ export async function startV3App(opts = {}) {
    * Same full-world restore as loadProjectFromUrl, from raw .v3proj bytes.
    * Pass `{ worldLook: true }` to also take the project's sky and light.
    */
-  async function loadProjectFromBuffer(buf, { worldLook = projectWorldLook } = {}) {
+  async function loadProjectFromBuffer(buf, { worldLook = projectWorldLook, decoded = null } = {}) {
     if (!isProjectFile(buf)) throw new Error("Not a V3 project file.");
-    await applyProjectData(await decodeProjectFile(buf), { worldLook });
+    // `decoded`: a caller that already decoded this buffer (the level loader
+    // reads its size first) — not again (~0.1 s for an 11 MB level).
+    await applyProjectData(decoded ?? await decodeProjectFile(buf), { worldLook });
   }
 
   /** Toolbar Load — sniffs the file: whole project or bare heightmap. */
