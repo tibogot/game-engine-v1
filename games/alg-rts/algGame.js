@@ -440,8 +440,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // with its first soldier. ?gpuonly=0 keeps them.
   if (params.get("gpuonly") !== "0") {
     const mb = releaseGpuOnly(app.renderer) / 1048576;
-    console.log(`[memory] ${mb.toFixed(0)} MB of GPU-only arrays released from the JS heap`);
-    setInterval(() => releaseGpuOnly(app.renderer), 5000);
+    // The terrain's paint layers are final in the game: their CPU copies too
+    // (retried until no upload or bake is pending).
+    let paintMb = (app.releasePaintCpuCopies?.() ?? 0) / 1048576;
+    console.log(`[memory] ${mb.toFixed(0)} MB of GPU-only arrays + ${paintMb.toFixed(0)} MB of paint layers released from the JS heap`);
+    setInterval(() => {
+      releaseGpuOnly(app.renderer);
+      if (!paintMb) paintMb = (app.releasePaintCpuCopies?.() ?? 0) / 1048576;
+    }, 5000);
   }
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");

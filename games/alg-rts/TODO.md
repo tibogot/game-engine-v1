@@ -231,7 +231,10 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       53.7). Checked: 0 of 562 draws not ready on the first frames after the
       screen lifts; console clean. (The warm-up-only version had no gain: by
       then ~250 pipelines had queued one at a time.)
-- [ ] nam: the same boot window (24 s boot) — not tried yet.
+- [ ] **nam gets all of this LATER** (you, 2026-10-03: "do this for nam too …
+      later, we continue with alg"): the port list is at the top of
+      games/nam-rts/TODO.md (boot measure, parallel pipelines, gpuOnly
+      release, perf line).
 - [ ] Persistent shader cache: Chrome writes DawnWebGPUCache (62 MB) but a
       compute pipeline from a previous load compiled at full cost (46-93 ms)
       in a probe — unproven either way (the probe's device limits differ).
@@ -250,7 +253,18 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       swapping the array freed nothing. A released array asked to upload
       logs an error. ?gpuonly=0 keeps them. Checked: grass, palms, reeds,
       soldiers running, ALN spawned later and fighting; console clean.
-- [ ] Heap left (566 MB): ~150 MB is the DEV SERVER's module text and
+- [x] **HEAP ROUND 2: 566 → 475 MB live**: the terrain paint layers' CPU
+      copies (TextureLibrary.releaseCpuCopies via app.releasePaintCpuCopies,
+      56 MB; a slot change afterwards is refused with an error; preview
+      colours cached) and the ground-cache SPLAT PHOTOS (splatMaterials, 2 ×
+      17 MB, now markGpuOnly: data textures are released once three's
+      uploaded version is current). Checked: lit ground at the post (paint,
+      track, mud splats, grass) and a re-baked far village (same as
+      ?gpuonly=0 — dark only from the fog of war); console clean.
+      In one boot the perf line read 505 MB vs 1,470 MB with ?gpuonly=0.
+- [ ] One flaky suite: npm test read 197/198 once, 198/198 twice after
+      (which one not caught).
+- [ ] Heap left (475 MB): ~150 MB is the DEV SERVER's module text and
       source maps (gone in a production build); texture arrays kept on the
       CPU after upload (2 DataArrayTextures 58 MB, DataTextures ~25 MB);
       the splat map's working copies (~50 MB, the game samples it on the CPU);

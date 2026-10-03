@@ -15,6 +15,20 @@ THE ONE LIST. Every open item in this file is here, ranked inside its group;
 the detail and history below point back as `[→#n]`. Add new asks HERE (and a
 detail note below if it needs one). Tick here when done.
 
+### PERF PORT FROM alg-rts (you, 2026-10-03: "do this for nam too … later")
+After alg's audit (games/alg-rts/TODO.md "PERF + LOAD AUDIT 2"):
+- [ ] Measure nam's boot per stage + GPU/CPU baseline first (the same method).
+- [ ] Parallel pipelines for the whole boot (v3/render/parallelPipelines.js;
+      alg 41 → 32 s).
+- [ ] Release GPU-only arrays (v3/render/gpuOnlyArrays.js: releaseGpuOnly after
+      the boot + every 5 s; alg heap −264 MB) and whatever else alg's heap
+      pass finds (texture library CPU copies, …).
+- [x] instanceAttributes already on (2026-10-03).
+- [ ] Our perf line instead of stats-gl (alg ui/perfHud.js; stats-gl cost
+      0.4-0.8 ms a frame in alg).
+- [ ] Animal morphs: nam's herds don't use animalMorph — check its own boot
+      builds the same way (main-thread work that can be cached or skipped).
+
 ### Done 2026-09-29
 - [x] WADING BIRDS WALK (you: "they slide when they move"): egrets and
       herons (and alg's storks — the shared bird kit) swing each leg from

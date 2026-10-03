@@ -213,8 +213,41 @@ export class TextureLibrary {
 
   // ── GPU upload ─────────────────────────────────────────────────────────────
 
+  /**
+   * A GAME whose paint layers are final drops the CPU copies of the two array
+   * textures (2 × 28 MB at 1024² × 7 — heap snapshot, alg-rts 2026-10-03) once
+   * the GPU has them. The editor never calls this. Returns the bytes freed,
+   * 0 while an upload is still pending (call again later). Afterwards a slot
+   * change is refused with an error (it would upload an empty array).
+   */
+  releaseCpuCopies(renderer) {
+    if (this._cpuReleased) return 0;
+    const texData = renderer?._textures;
+    const uploaded = (t) => texData?.has(t) && texData.get(t).version === t.version;
+    if (!uploaded(this.albedoArrayTex) || !uploaded(this.ormArrayTex) || this._fullUploadPending.size || this._procRunning.size) return 0;
+    // The preview colours read the pixels: keep them.
+    this._previewCache = this.slots.map((_, i) => this.getPreviewColor(i));
+    let bytes = 0;
+    for (const arr of [this._albedoData, this._ormData]) {
+      const buf = arr.buffer;
+      if (!buf.transfer || arr.byteOffset !== 0 || arr.byteLength !== buf.byteLength) continue;
+      bytes += arr.byteLength;
+      buf.transfer(0);   // detach: the texture's source holds the same array
+    }
+    this._cpuReleased = true;
+    // Every method that writes slot pixels refuses from now on (they write the
+    // arrays before uploading, and a detached array throws).
+    for (const m of ["loadAlbedo", "loadNormalMap", "loadRoughness", "loadAO", "loadFileAutoDetect", "loadFromUrlEmbedded",
+      "loadAlbedoFromUrl", "loadNormalFromUrl", "loadRoughnessFromUrl", "loadAOFromUrl",
+      "clearAlbedo", "clearNormal", "clearRoughness", "clearAO", "preloadDefaults", "importData"]) {
+      this[m] = () => { console.error(`[textureLibrary] ${m} after releaseCpuCopies: ignored`); return Promise.resolve(); };
+    }
+    return bytes;
+  }
+
   /** Re-upload every layer of an array texture (the original behaviour). */
   _uploadAll(tex) {
+    if (this._cpuReleased) { console.error("[textureLibrary] slot change after releaseCpuCopies: ignored"); return; }
     tex.clearLayerUpdates();
     this._fullUploadPending.add(tex);
     tex.needsUpdate = true;
@@ -226,6 +259,7 @@ export class TextureLibrary {
    * texture. Falls back to a full upload when one is already pending.
    */
   _uploadLayer(tex, layer) {
+    if (this._cpuReleased) { console.error("[textureLibrary] slot change after releaseCpuCopies: ignored"); return; }
     if (!this._fullUploadPending.has(tex)) tex.addLayerUpdate(layer);
     tex.needsUpdate = true;
   }
@@ -541,6 +575,7 @@ export class TextureLibrary {
    * is still running records it. Resolves when the newest params are showing.
    */
   requestProcedural(i, params) {
+    if (this._cpuReleased) { console.error("[textureLibrary] procedural bake after releaseCpuCopies: ignored"); return Promise.resolve(); }
     this.slots[i].procedural = normalizeProcParams(params);
     this._procLatest.set(i, this.slots[i].procedural);
     const running = this._procRunning.get(i);
@@ -648,6 +683,7 @@ export class TextureLibrary {
 
   // ── Preview colour for a slot (centre pixel of the albedo layer) ───────────
   getPreviewColor(i) {
+    if (this._cpuReleased) return this._previewCache?.[i] ?? [0, 0, 0];
     const mid = (SLOT_RES * SLOT_RES * 0.5 + SLOT_RES * 0.5) | 0;
     const off = (i * SLOT_RES * SLOT_RES + mid) * 4;
     return [this._albedoData[off], this._albedoData[off+1], this._albedoData[off+2]];

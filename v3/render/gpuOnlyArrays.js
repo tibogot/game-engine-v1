@@ -6,9 +6,12 @@
 // zeros, never read, never re-sent. alg-rts held ~260 MB of them (heap
 // snapshot + buffer census, 2026-10-03).
 //
-//   markGpuOnly(attr)            — this attribute's CPU array is never written again
-//   releaseGpuOnly(renderer)     — swap the array of every marked attribute whose
-//                                  GPU buffer exists for an empty one (count kept)
+//   markGpuOnly(attr | dataTex)  — its CPU array is never written or read again
+//   releaseGpuOnly(renderer)     — DETACH the memory (ArrayBuffer.transfer) of
+//                                  every marked item the GPU has (count kept)
+//
+// Data textures too (pixels made on the CPU, uploaded once): released once
+// three's uploaded version is the texture's current one.
 //
 // Call releaseGpuOnly after the boot and now and then (a crowd made empty has
 // no buffer until its first soldier). A released attribute that is asked to
@@ -18,8 +21,31 @@
 const marked = new Set();
 let freed = 0;
 
-export function markGpuOnly(...attrs) {
-  for (const a of attrs) if (a?.isBufferAttribute || a?.isInterleavedBuffer) marked.add(a);
+export function markGpuOnly(...items) {
+  for (const a of items) if (a?.isBufferAttribute || a?.isInterleavedBuffer || a?.isDataTexture || a?.isDataArrayTexture || a?.isData3DTexture) marked.add(a);
+}
+
+/** Detach the memory behind a typed array that owns its whole buffer. Bytes freed, 0 if it cannot. */
+function detach(arr) {
+  const buf = arr?.buffer;
+  if (!buf?.transfer || buf.detached || arr.byteOffset !== 0 || arr.byteLength !== buf.byteLength) return 0;
+  const n = arr.byteLength;
+  buf.transfer(0);
+  return n;
+}
+
+// A DATA TEXTURE (CPU pixels three uploads once): its pixels once the GPU has
+// the current version. The texture's source keeps the array, so detach it.
+function releaseTexture(renderer, t) {
+  const tex = renderer._textures;
+  if (!tex?.has(t) || tex.get(t).version !== t.version) return -1;   // not uploaded yet
+  let bytes = detach(t.image?.data);
+  for (const m of t.mipmaps ?? []) bytes += detach(m.data);
+  Object.defineProperty(t, "needsUpdate", {
+    configurable: true,
+    set(v) { if (v) console.error("[gpuOnly] an upload was asked of a released texture:", t.name || t); },
+  });
+  return bytes;
 }
 
 export function releaseGpuOnly(renderer) {
@@ -27,6 +53,11 @@ export function releaseGpuOnly(renderer) {
   if (!map) return 0;
   let bytes = 0;
   for (const a of marked) {
+    if (a.isTexture) {
+      const b = releaseTexture(renderer, a);
+      if (b >= 0) { bytes += b; marked.delete(a); }
+      continue;
+    }
     if (!map.has(a) || map.get(a).version === undefined) continue;   // no GPU buffer yet
     if (a.usage === 35048 /* DynamicDrawUsage */) { marked.delete(a); continue; }
     // DETACH the memory (ArrayBuffer.transfer): three's storage binding keeps
@@ -35,16 +66,15 @@ export function releaseGpuOnly(renderer) {
     // buffer), so swapping a.array alone freed nothing (measured: 830 MB
     // after a full GC either way). Every view of a detached buffer reads as
     // length 0. Only an array that owns its whole buffer.
-    const arr = a.array, buf = arr?.buffer;
-    if (!buf?.transfer || arr.byteOffset !== 0 || arr.byteLength !== buf.byteLength) { marked.delete(a); continue; }
-    bytes += arr.byteLength;
-    buf.transfer(0);
+    const n = detach(a.array);
+    marked.delete(a);
+    if (!n) continue;
+    bytes += n;
     // An upload asked of it from now on would send nothing: say so.
     Object.defineProperty(a, "needsUpdate", {
       configurable: true,
       set(v) { if (v) console.error("[gpuOnly] an upload was asked of a released array:", a.name || a); },
     });
-    marked.delete(a);
   }
   freed += bytes;
   return bytes;

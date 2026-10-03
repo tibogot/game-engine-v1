@@ -12819,6 +12819,13 @@ export async function startV3App(opts = {}) {
      * draws (the last frame) }, then resets. Costs nothing between reads — a
      * game's own stats panel reads it a few times a second.
      */
+    /**
+     * A game whose terrain paint layers are final drops their CPU copies
+     * (TextureLibrary.releaseCpuCopies, ~56 MB at 1024² × 7). 0 while an
+     * upload or a procedural bake is pending — call again later. Never in
+     * the editor: its slot edits need them.
+     */
+    releasePaintCpuCopies() { return textureLib.releaseCpuCopies(renderer); },
     takeFrameStats() {
       const n = Math.max(1, _fs.n);
       const out = { frames: _fs.n, frameMs: _fs.iv / n, frameMaxMs: _fs.ivMax, cpuMs: _fs.cpu / n, cpuMaxMs: _fs.cpuMax, draws: _fs.draws };

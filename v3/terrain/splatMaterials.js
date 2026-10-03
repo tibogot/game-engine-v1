@@ -19,6 +19,7 @@
  * Built on the CPU once (canvas → array), never per frame.
  */
 import * as THREE from "three";
+import { markGpuOnly } from "../render/gpuOnlyArrays.js";
 
 /** Texels per material side. A splat tiles its material every 2-5 m: 512 is ~0.5-1 cm a texel. */
 export const SPLAT_MAT_SIZE = 512;
@@ -52,6 +53,9 @@ function makeArray(data, layers, srgb) {
   t.generateMipmaps = true;
   t.anisotropy = 4;
   t.needsUpdate = true;
+  // Static once uploaded: a game's releaseGpuOnly drops the CPU pixels
+  // (2 × 17 MB in alg-rts, held by this module's closures too).
+  markGpuOnly(t);
   return t;
 }
 
