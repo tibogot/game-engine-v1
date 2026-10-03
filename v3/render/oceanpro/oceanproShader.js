@@ -22,6 +22,15 @@ import { wgsl, wgslFn } from "three/tsl";
 import { shoreCode } from "./oceanproShore.js";
 
 /**
+ * WGSL handed to three (wgsl / wgslFn): Tidewater's `frame` uniform block is renamed `opFrame`.
+ * three declares its shared frame-group uniforms as `var<uniform> frame` in every material that
+ * has any (fog and cloud shadows moved there in 40093bf), and our `var<private> frame` then failed
+ * to compile ("redeclaration of 'frame'": no ocean, spray or lips). The Tidewater code stays
+ * verbatim; the raw-WebGPU compute kernels keep `frame` (no three uniforms there).
+ */
+export const threeWgsl = (code) => code.replace(/\bframe\b/g, "opFrame");
+
+/**
  * WGSL shared by the water shader and the shore simulation's compute kernel (oceanproShoreSim.js):
  * Tidewater's perlin2 and our terrain height lookup. It reads `frame` fields (terrainSize, maxHeight,
  * heightBase, zenith = the heightmap-is-a-render-target flag); each includer defines that struct.
@@ -982,7 +991,7 @@ fn waterShade( pos: vec3f, screenUV: vec2f, front: f32, lagXZ: vec2f, vHeight: f
 }
 `;
 
-  const all = wgsl(T(COMMON + SEA_DETAIL + ATTENUATION + shoreCode() + simCode + surfFoam + VERTEX + FRAGMENT + HELPERS + SHADE), [cdlod.code]);
+  const all = wgsl(threeWgsl(T(COMMON + SEA_DETAIL + ATTENUATION + shoreCode() + simCode + surfFoam + VERTEX + FRAGMENT + HELPERS + SHADE)), [cdlod.code]);
 
   // ------------------------------------------------------------------ entry points (wgslFn)
   const LOAD_ARGS = `view: mat4x4f, proj: mat4x4f, invProj: mat4x4f, invView: mat4x4f,

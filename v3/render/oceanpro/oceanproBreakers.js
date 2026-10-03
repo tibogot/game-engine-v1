@@ -32,7 +32,7 @@ import {
   Fn, attribute, uniform, float, texture, sampler, select, frontFacing, varyingProperty, wgsl, wgslFn,
 } from "three/tsl";
 import { shoreCode } from "./oceanproShore.js";
-import { SHARED_WGSL } from "./oceanproShader.js";
+import { SHARED_WGSL, threeWgsl } from "./oceanproShader.js";
 import { LACE_TILE, makeLaceTexture } from "./oceanproShoreSim.js";
 import { sprayEmitterWGSL } from "./oceanproSpray.js";
 
@@ -868,4 +868,4 @@ export class OceanProBreakers {
 }
 
 // (a function so the include is one CodeNode per breakers instance)
-function LIP_CODE() { return wgsl(LIP_WGSL); }
+function LIP_CODE() { return wgsl(threeWgsl(LIP_WGSL)); }

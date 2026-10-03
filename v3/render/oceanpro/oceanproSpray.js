@@ -31,7 +31,7 @@
 import * as THREE from "three/webgpu";
 import { Fn, uniform, texture, sampler, instanceIndex, positionGeometry, varyingProperty, wgsl, wgslFn, screenSize } from "three/tsl";
 import { shoreCode } from "./oceanproShore.js";
-import { SHARED_WGSL } from "./oceanproShader.js";
+import { SHARED_WGSL, threeWgsl } from "./oceanproShader.js";
 
 const GRAVITY = 9.81;
 const ROW = 256; // particles per texture row
@@ -488,7 +488,7 @@ export class OceanProSpray {
     geo.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e7);
 
     // (one code node for both functions: three includes it once)
-    const renderCode = wgsl(SPRAY_RENDER);
+    const renderCode = wgsl(threeWgsl(SPRAY_RENDER));
     const vertexFn = wgslFn(`fn opSprayVertexCall( gate: f32, inst: u32, corner: vec2f, state: texture_2d<f32>, crest: texture_2d<f32>,
 	terrainHeight: texture_2d<f32>, cloudShadow: texture_2d<f32>, resolution: vec2f, intensity: f32, maxDistance: f32 ) -> mat4x4f {
 	return opSprayVertex( gate, inst, corner, state, crest, terrainHeight, cloudShadow, resolution, intensity, maxDistance );
