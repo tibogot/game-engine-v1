@@ -323,6 +323,17 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
       pipelines 385 → 223. Frame unchanged (6.3 / 8.05 / 11.1). Checked:
       cedars (variants, shadows), oasis at max zoom (palms, oleander, hedges,
       grass, far slopes) — all there; console clean.
+- [x] **BOOT 26.6 → ~22 s (20.6 / 24.2), same output bit for bit:**
+      - bakeContactAO (rtsParts, every kit piece): the 125-neighbour kernel
+        built once (offsets + weights) instead of a hypot and a radius test
+        per neighbour per vertex: 3.3x faster, max diff 0 (Node test against
+        the old function). Showroom 2.1 → 1.5 s.
+      - animal morphs' feetFollow: each time posed once for the four legs (was
+        once per leg per key): ~100 ms less a species, clips max diff 0 (in
+        page against the committed module). Herds 3.1 → 2.6 s.
+      - Left in the boot (trace): the frames behind the loading screen (~7 s:
+        three building node shaders + first texture uploads — the paint and
+        splat arrays, ~90 MB, once), the level file 4.4 s, the engine 1.9 s.
 - [ ] Remaining duplicate builds (~230): mostly DIFFERENT materials with the
       same structure (stone sets, walls, outcrops, vehicle parts — three must
       build per material: the build binds its textures) and the placed

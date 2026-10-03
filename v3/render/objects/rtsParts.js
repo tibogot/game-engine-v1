@@ -189,15 +189,21 @@ export function bakeContactAO(geo, { cell = 0.22, radius = 2, strength = 0.55, g
   const nz = Math.max(1, Math.ceil((bb.max.z - bb.min.z) / cell) + 1);
   const grid = new Uint8Array(nx * ny * nz);
   const at = (x, y, z) => (z * ny + y) * nx + x;
-  const cellOf = (i) => [
-    Math.min(nx - 1, Math.max(0, Math.floor((pos.getX(i) - bb.min.x) / cell))),
-    Math.min(ny - 1, Math.max(0, Math.floor((pos.getY(i) - bb.min.y) / cell))),
-    Math.min(nz - 1, Math.max(0, Math.floor((pos.getZ(i) - bb.min.z) / cell))),
-  ];
-  for (let i = 0; i < n; i++) { const [x, y, z] = cellOf(i); grid[at(x, y, z)] = 1; }
+  // Each vertex's cell, once (it was worked out twice a vertex).
+  const CX = new Int32Array(n), CY = new Int32Array(n), CZ = new Int32Array(n);
+  for (let i = 0; i < n; i++) {
+    CX[i] = Math.min(nx - 1, Math.max(0, Math.floor((pos.getX(i) - bb.min.x) / cell)));
+    CY[i] = Math.min(ny - 1, Math.max(0, Math.floor((pos.getY(i) - bb.min.y) / cell)));
+    CZ[i] = Math.min(nz - 1, Math.max(0, Math.floor((pos.getZ(i) - bb.min.z) / cell)));
+    grid[at(CX[i], CY[i], CZ[i])] = 1;
+  }
 
+  // The neighbourhood as a list of (dx, dy, dz, weight), in the loops' own
+  // order — the same sums as before, bit for bit, without a hypot and a
+  // radius test per neighbour per vertex (~0.9 s of alg-rts' boot, 2026-10-03).
   // Normalising by the neighbourhood volume keeps `strength` meaning the same
   // thing whatever radius is passed.
+  const KX = [], KY = [], KZ = [], KW = [];
   let maxCount = 0;
   for (let dz = -radius; dz <= radius; dz++)
     for (let dy = -radius; dy <= radius; dy++)
@@ -205,23 +211,19 @@ export function bakeContactAO(geo, { cell = 0.22, radius = 2, strength = 0.55, g
         const d = Math.hypot(dx, dy, dz);
         if (d > radius || d < 0.5) continue;
         maxCount += 1 / (1 + d);
+        KX.push(dx); KY.push(dy); KZ.push(dz); KW.push(1 / (1 + d));
       }
+  const K = KW.length;
 
   const ao = new Float32Array(n);
   for (let i = 0; i < n; i++) {
-    const [cx, cy, cz] = cellOf(i);
+    const cx = CX[i], cy = CY[i], cz = CZ[i];
     let occ = 0;
-    for (let dz = -radius; dz <= radius; dz++) {
-      const z = cz + dz; if (z < 0 || z >= nz) continue;
-      for (let dy = -radius; dy <= radius; dy++) {
-        const y = cy + dy; if (y < 0 || y >= ny) continue;
-        for (let dx = -radius; dx <= radius; dx++) {
-          const x = cx + dx; if (x < 0 || x >= nx) continue;
-          const d = Math.hypot(dx, dy, dz);
-          if (d > radius || d < 0.5) continue;
-          if (grid[at(x, y, z)]) occ += 1 / (1 + d);
-        }
-      }
+    for (let k = 0; k < K; k++) {
+      const z = cz + KZ[k]; if (z < 0 || z >= nz) continue;
+      const y = cy + KY[k]; if (y < 0 || y >= ny) continue;
+      const x = cx + KX[k]; if (x < 0 || x >= nx) continue;
+      if (grid[at(x, y, z)]) occ += KW[k];
     }
     let v = 1 - strength * (occ / maxCount);
     // Everything darkens where it meets the ground: shadow, damp, splashed dirt.

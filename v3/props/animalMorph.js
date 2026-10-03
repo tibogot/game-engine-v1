@@ -3540,6 +3540,33 @@ function feetFollow(tpl, legs, off = { F: 0, B: 0 }) {
     const dclip = gltf.animations.find((c) => c.name === clip.name);
     if (!dclip) continue;
     const a = mixer.clipAction(clip).reset().play(), da = D.mixer.clipAction(dclip).reset().play();
+    // Each time POSED ONCE for all four legs (it was posed per leg per key —
+    // ~0.6 s of alg-rts' boot, 2026-10-03): the donkey's foot in its leg's
+    // frame per donkey time, the animal's leg and IK-parent matrices per time.
+    // Same three calls on the same poses, so the same numbers (a leg's IK
+    // track replaced below is not read back: the action keeps its interpolant,
+    // and IK bones hang from the root, not from the legs).
+    const dPose = new Map(), aPose = new Map();
+    const donkeyAt = (td) => {
+      let p = dPose.get(td);
+      if (!p) {
+        D.mixer.setTime(Math.min(td, dclip.duration)); D.r.updateMatrixWorld(true);
+        p = {};
+        for (const [leg, ik] of PAIRS) if (D.b[leg] && D.b[ik]) p[leg] = D.b[leg].worldToLocal(D.b[ik].getWorldPosition(V()));
+        dPose.set(td, p);
+      }
+      return p;
+    };
+    const animalAt = (t) => {
+      let p = aPose.get(t);
+      if (!p) {
+        mixer.setTime(t); r.updateMatrixWorld(true);
+        p = {};
+        for (const [leg, ik] of PAIRS) if (Bn[leg] && Bn[ik]) p[leg] = { leg: Bn[leg].matrixWorld.clone(), ikParentInv: Bn[ik].parent.matrixWorld.clone().invert() };
+        aPose.set(t, p);
+      }
+      return p;
+    };
     for (const [leg, ik] of PAIRS) {
       const tr = clip.tracks.find((t) => t.name === ik + ".position");
       if (!tr) continue;
@@ -3549,12 +3576,10 @@ function feetFollow(tpl, legs, off = { F: 0, B: 0 }) {
         // a paced clip: the front feet follow the donkey foot of the SHIFTED time
         const dtS = clip.name === "Walk" && tpl.paceShift && leg.startsWith("Front") ? tpl.paceShift[leg.slice(-1)] * dclip.duration : 0;
         const td = dtS ? (((t - dtS) % dclip.duration) + dclip.duration) % dclip.duration : t;
-        D.mixer.setTime(Math.min(td, dclip.duration)); D.r.updateMatrixWorld(true);
-        const dl = D.b[leg].worldToLocal(D.b[ik].getWorldPosition(V()));
+        const dl = donkeyAt(td)[leg].clone();
         dl.y += ((typeof legs === "function" ? legs(leg) : legs) - 1) * A.ext[leg] + (leg.startsWith("Front") ? off.F : off.B);
-        mixer.setTime(t); r.updateMatrixWorld(true);
-        const w = Bn[leg].localToWorld(dl);
-        Bn[ik].parent.worldToLocal(w).toArray(vals, k * 3);
+        const ap = animalAt(t)[leg];
+        dl.applyMatrix4(ap.leg).applyMatrix4(ap.ikParentInv).toArray(vals, k * 3);
         n++;
       }
       tr.values = vals;
