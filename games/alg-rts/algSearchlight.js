@@ -17,6 +17,10 @@ const POOL_R = 6;          // m: the pool of light
 const SWEEP = 1.1;         // rad either side of the tower's front
 const SWEEP_SPEED = 0.35;  // rad/s
 const TRACK_SPEED = 1.6;   // rad/s: turning onto a man
+// The real lights at night (app.localLights, x the night): over the pool and at the lens.
+const POOL_CD = 160;       // cd, POOL_LIFT m above the pool's centre: a lit disc ~POOL_R across
+const POOL_LIFT = 5;
+const LENS_CD = 12;
 
 /** A unit cone along +Z from 0 (radius 0) to 1 (radius 1), open ends. */
 function coneGeometry() {
@@ -63,6 +67,9 @@ export function createAlgSearchlights(app, { structures, units, cover = null }) 
     pool.renderOrder = RENDER_ORDER.ON_GROUND;   // the pool of light lies over the fields
     app.scene.add(beam, pool);
     const L = { rec, lamp, beam, pool, yaw: 0, pitch: 0, target: null, t: Math.random() * 10, at: new THREE.Vector3(), beamAt: rec.mesh.geometry.userData.lamp?.beam ?? [0, 0.8, 0] };
+    // (local lights: the engine's tiled point lights; none without them)
+    L.poolLight = app.localLights?.add({ color: 0xfff0d0, intensity: 0, range: POOL_R * 1.9, importance: 3 }) ?? null;
+    L.lensLight = app.localLights?.add({ color: 0xfff0d0, intensity: 0, range: 5, importance: 1.5 }) ?? null;
     lights.push(L);
   }
 
@@ -124,13 +131,23 @@ export function createAlgSearchlights(app, { structures, units, cover = null }) 
     }
   }
 
-  /** Every frame: the lamp's aim, the beam and the pool; the glow by the sun. */
+  /**
+   * Every frame: the lamp's aim, the beam and the pool; the glow by the night. Under Sky Pro the
+   * key light at night is the MOON (high up), so its height read as day and the lamp stayed at
+   * its dimmest all night (2026-10-04): the sky's night amount instead (app.sky.night); the
+   * sun's height only for the other skies.
+   */
   function frame() {
-    const sy = app.environment?.getLightDirection?.()?.y ?? 0.6;
-    uGlow.value = 0.12 + 0.88 * (1 - THREE.MathUtils.smoothstep(sy, 0.02, 0.35));
+    let night;
+    if (app.sky?.mode === "skypro") night = app.sky.night ?? 0;
+    else night = 1 - THREE.MathUtils.smoothstep(app.environment?.getLightDirection?.()?.y ?? 0.6, 0.02, 0.35);
+    uGlow.value = 0.12 + 0.88 * night;
     for (const L of lights) {
       const on = L.rec.s.alive && L.rec.mesh.visible && !!L.rec.mesh.parent;
       L.beam.visible = L.pool.visible = on;
+      // the real light: where the pool lands (lights the ground and the men in it) and at the lens
+      if (L.poolLight) L.poolLight.set({ intensity: on ? POOL_CD * night : 0 });
+      if (L.lensLight) L.lensLight.set({ intensity: on ? LENS_CD * night : 0 });
       if (!on) continue;
       const m = L.rec.mesh;
       // The drum tips down to the pool.
@@ -150,6 +167,9 @@ export function createAlgSearchlights(app, { structures, units, cover = null }) 
       L.pool.position.copy(L.at).addScaledVector(_n, 0.25);
       L.pool.quaternion.setFromUnitVectors(_z, _n);
       L.pool.scale.setScalar(POOL_R);
+      // (lens first: `o` is _v, which the pool's position reuses)
+      L.lensLight?.set({ position: o });
+      L.poolLight?.set({ position: _v.copy(L.at).addScaledVector(_n, POOL_LIFT) });
     }
   }
 

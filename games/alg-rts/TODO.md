@@ -3354,7 +3354,22 @@ Asset follow-ups:
       by day), on the game clock (slow-mo, pause). Cost below noise in a 48-man night fight.
       ?combatlights=0 = without. — you, look: battle-lab.html?tod=23 (are the rifle pools too
       strong? the blast too wide?).
-- [ ] **NIGHT, NEXT** (proposed 2026-10-04): ~~(1) combat lights~~ DONE above — explosions (algCombat
+- [x] **THE LAMPS OF THE NIGHT (2026-10-04, algNightLamps.js)**: 32 local lights x `app.sky.night`
+      from the showroom's anchors — the post's gate lamps (2), the motor pool's gate, the SAS
+      post's courtyard, the helipad floodlight, lit doorways (ksar: 8 round the mosque; dechra;
+      the mechtas at their recorded doors; one per farmstead), the ALN camp's fire, a glow in the
+      cave mouth. ?lamps=0 = without. Cost below noise (-0.39 / +0.06 ms).
+      THE SEARCHLIGHT reads `app.sky.night` (under Sky Pro the key at night is the high moon: its
+      height read as day, the lamp stayed at its dimmest all night) and carries two real lights:
+      160 cd 5 m over its pool (the ground and the men in it lit) and one at the lens.
+      FIXED COLOURS AT NIGHT: the oven smoke and vehicle dust (unlit sprites) glowed white over
+      the dark ksar — their colour x1 by day, x0.025 at night (algAmbience.js); the fog of war's
+      shroud grey / unexplored black the same (shared fogOfWar.js setLightLevel, default 1 = nam
+      unchanged). — you, look: ?tod=23 at the post, the ksar, the ALN camp (the fire is at the
+      camp's centre, partly behind the hut), a sapper's searchlight.
+- [ ] **NIGHT, NEXT** (proposed 2026-10-04): ~~(1) combat lights~~ ~~(2) fixed lights~~ ~~(3) searchlight~~
+      DONE above; LEFT: souk lanterns (need a lantern mesh), illumination flares (gameplay, you
+      decide) — explosions (algCombat
       fx.explosion), fires (combat.js:158, algStructures.js:152, algDamage.js:113), muzzle flashes
       (projectiles.js fx.muzzle), shell/rocket flare; (2) fixed lights faded by `app.sky.night` —
       base (searchlight lamp, mirador, gate, vehicle park, helipad), ksar (souk lanterns: need a

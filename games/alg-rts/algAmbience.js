@@ -41,6 +41,24 @@ export function createAlgAmbience(app, { units, showroom, wind = null }) {
     scaleAt: (p) => 0.9 + (1 - p) * 4.4, fadeAt: (p) => 0.85 * Math.min(1, (1 - p) * 8) * Math.sqrt(p),
   });
   smoke.mesh.name = "OvenSmoke";
+  /*
+   * THE SMOKE AND DUST AT NIGHT. They are unlit sprites of a fixed colour: at night the oven
+   * plumes stood out bright white over the dark ksar (2026-10-04). Their colour follows the
+   * light: x1 by day, x~0.025 at full night — the moonlit ground's share of the sunlit ground's
+   * radiance after exposure (MEASURED: 0.0034 vs ~0.3, exposure 2.2 vs 1.26).
+   */
+  const DUST_RGB = new THREE.Color(0xe2d2b4), SMOKE_RGB = new THREE.Color(0x6d6a66);
+  let litNight = -1;
+  app.addPreRenderHook(function algSmokeAtNight() {
+    const n = app.sky?.night ?? 0;
+    if (Math.abs(n - litNight) < 0.005) return;
+    litNight = n;
+    const k = 1 + (0.025 - 1) * n;
+    dust.mesh.material.color.copy(DUST_RGB).multiplyScalar(k);
+    smoke.mesh.material.color.copy(SMOKE_RGB).multiplyScalar(k);
+    // the fog of war's shroud grey and unexplored black: the same fixed-colour problem
+    app.fogOfWar?.setLightLevel?.(k);
+  });
   const marks = createTrackMarks({ app, life: MARKS.life });
   const laidAt = new Map();     // vehicle → { x, z } of its last mark
 

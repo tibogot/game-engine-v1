@@ -20,6 +20,7 @@ import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
+import { createAlgNightLamps } from "./algNightLamps.js";
 import { createAlgBattle } from "./algBattle.js";
 import { createAlgPoles } from "./algPoles.js";
 import { createAlgDamage } from "./algDamage.js";
@@ -297,6 +298,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       showroom: app.showroom,
       muster: { x: b.x - Math.sin(yaw) * 42, z: b.z - Math.cos(yaw) * 42, yaw },
     });
+  }
+  // THE LAMPS OF THE NIGHT (algNightLamps.js): gate lamps, lit doorways, the camp's fire —
+  // local lights x the sky's night, nothing by day. ?lamps=0 = without.
+  if (params.get("lamps") !== "0" && app.showroom) {
+    try { app.algNightLamps = createAlgNightLamps(app); } catch (e) { console.warn("[alg lamps] failed:", e); }
   }
   // THE BATTLE (algBattle.js): the villages as victory points (CoH), the cave
   // and the post as sudden death, alerts, village markers, the briefing and

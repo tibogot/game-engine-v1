@@ -357,11 +357,17 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
       node: apply,
       syncCamera,
       setEnabled(on) { uEnabled.value = on ? 1 : 0; },
+      /** The shroud's and the unexplored ground's colours x k (see setLightLevel below). */
+      setLightLevel(k) {
+        uShroud.value.setHex(0x3a4248).multiplyScalar(k);
+        uUnexplored.value.setHex(0x06080c).multiplyScalar(k);
+      },
     };
   }
 
   let post = null;
-  let edgeUniforms = null;          // the play-box edge's (set when the post pass is built)
+  let lightLevel = 1;               // setLightLevel: the fogged colours x this (1 = as authored)
+  let edgeUniforms = null;         // the play-box edge's (set when the post pass is built)
   const edge = { on: !!bounds, mode: "darken", strength: 1, color: "#cdb58e" };
   const pushEdge = () => {
     if (!edgeUniforms) return;
@@ -399,6 +405,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     // because setEnabled may well have run before there was a `post` to tell.
     post.setEnabled(enabled);
     pushEdge();
+    post.setLightLevel(lightLevel);
   }
 
   return {
@@ -416,6 +423,12 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     /** The play-box edge (a game with `bounds`): { on, mode: "darken" | "haze", strength 0-1, color }. */
     get edge() { return { ...edge, available: !!bounds }; },
     setEdge(o = {}) { Object.assign(edge, o); pushEdge(); },
+    /**
+     * The fogged ground blends toward FIXED colours (the shroud's grey, the unexplored black): a
+     * radiance, the same by night as by day — at night the shroud's grey glowed over the moonlit
+     * land. A game scales them with its light: 1 by day (as before), ~0.02 at night.
+     */
+    setLightLevel(k) { lightLevel = k; post?.setLightLevel(k); },
     /** `(color, { scenePass }) => color`, run before the fog of war; null to drop it. */
     setPreModifier(fn) {
       pre = typeof fn === "function" ? fn : null;
