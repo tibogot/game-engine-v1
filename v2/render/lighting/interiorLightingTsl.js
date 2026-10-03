@@ -14,7 +14,7 @@ import {
   mix,
   Loop,
   If,
-  renderGroup,
+  sharedUniformGroup,
 } from "three/tsl";
 import {
   INTERIOR_MAX_BOXES,
@@ -31,11 +31,18 @@ export function createInteriorLightingNodes(registry) {
   const uStrength = uniform(0.82);
   const uColor = uniform(new THREE.Color("#0c0e14").convertSRGBToLinear());
 
-  // The arrays live in three's SHARED render group. In the default per-object
-  // group (they were) every draw of every material in every pass carried its
-  // own ~7 KB copy, uploaded again each frame — this hook is on ALL materials
-  // through the fog. Measured alg-rts 2026-10-03, interiors not even in use.
-  const shared = (a) => uniformArray(a, "vec4").setGroup(renderGroup);
+  // The arrays are SHARED and uploaded only when syncFromRegistry changes them.
+  // In the default per-object group (they were) every draw of every material in
+  // every pass carried its own ~7 KB copy, uploaded again each frame — this hook
+  // is on ALL materials through the fog (alg-rts 2026-10-03: ~700 uploads a
+  // frame, interiors not even in use); in three's renderGroup still once per
+  // material per pass. So: a shared group of our own with no automatic update
+  // (its version moves only in syncFromRegistry). It is NAMED "render" on
+  // purpose — three places bindings by group NAME, so the arrays join the
+  // render bind group instead of taking a new slot (WebGPU guarantees 4).
+  // Arrays only: scalar uniforms put here would merge into render's block.
+  const interiorGroup = sharedUniformGroup("render", 0);
+  const shared = (a) => uniformArray(a, "vec4").setGroup(interiorGroup);
   const uSegCount = uniform(0);
   const uSegA = shared(new Array(INTERIOR_MAX_SEGMENTS).fill(null).map(() => new THREE.Vector4()));
   const uSegB = shared(new Array(INTERIOR_MAX_SEGMENTS).fill(null).map(() => new THREE.Vector4()));
@@ -163,6 +170,7 @@ export function createInteriorLightingNodes(registry) {
         uOpenPos.array[i].set(0, 0, 0, 1);
       }
     }
+    interiorGroup.needsUpdate = true;   // the arrays go up on the next render
   }
 
   return {

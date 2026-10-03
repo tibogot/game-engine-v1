@@ -393,10 +393,22 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
          **1,067 → 353 uploads, 1.1 MB → 280 KB a frame; binding update
          ~1.5 → ~1.1 ms CPU** (alternating loads, both zooms). Pixel A/B at
          a frozen frame: identical except animated cloth/wire and the HUD.
-         nam after: 459 uploads, 399 KB. NEXT: the rest are per-object
-         uniform blocks (256-672 B) re-sent because a MATERIAL-wide uniform
-         in them changes each frame (e.g. uCamPos) — those belong in a
-         shared group too; then measure what is left before any backend work.
+         nam after: 459 uploads, 399 KB.
+         **SECOND STEP DONE 2026-10-03:** the per-object blocks were re-sent
+         because GLOBAL uniforms sat in every material's per-object block:
+         the fog's 28 (scene.fogNode, uValleyTime ticks every frame) and the
+         cloud shadows' 10 (through the sun light; `offset` drifts every
+         frame, even with cloud shadows off) → three's shared FRAME group
+         (sent once a frame per material, only when changed). The interior
+         arrays got a shared group of their own that uploads ONLY when
+         syncFromRegistry runs (named "render" so it joins that bind group
+         instead of taking a 4th slot) — proven: 0 uploads, 68 the frame
+         after a sync, then 0. **alg: 1,067 → 110 uploads a frame, 1.1 MB →
+         37 KB; binding update ~1.5 → ~0.8 ms CPU. nam: 459 → 118, 36 KB.**
+         Pixel A/B identical (only cloth, wire, birds' flight, HUD differ).
+         What is left (~50 per-object uploads) is real per-object data. The
+         Tidewater-style one-buffer rewrite of three would now win at most
+         ~0.5 ms: parked.
       3. MULTI-TYPE INDIRECT BATCH for props (Tidewater ReefBatch / the
          custom path three r184 already allows: one merged geometry,
          geometry.setIndirect with many offsets, compute cull writes the

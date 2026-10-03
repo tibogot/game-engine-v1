@@ -37,7 +37,7 @@
  * map) it branches out before any load.
  */
 import * as THREE from "three";
-import { float, max, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, wgslFn } from "three/tsl";
+import { float, frameGroup, max, positionWorld, select, smoothstep, texture, uniform, vec2, vec3, vec4, wgslFn } from "three/tsl";
 
 // The "load" read: no sampler. mode 0 = off, 1 = the baked field (tiling), 2 = a sky's map (clamped).
 const LOAD_FN = /* wgsl */`
@@ -132,18 +132,23 @@ function bakeField() {
  */
 export function createCloudShadowsLite(sun, params = {}, { attach = true, sampled = false } = {}) {
   const P = { ...CLOUD_SHADOW_LITE_DEFAULTS, ...params };
+  // Through the sun these are in EVERY lit material: three's shared FRAME
+  // group, once a frame per material and only when changed. Per object (the
+  // default), `offset` drifting each frame re-sent every draw's whole object
+  // block, every pass (alg-rts 2026-10-03).
+  const shared = (v) => uniform(v).setGroup(frameGroup);
   const u = {
-    sunCol: uniform(new THREE.Color().copy(sun.color).multiplyScalar(sun.intensity)),
-    cover: uniform(P.cover),
-    darkness: uniform(P.enabled ? P.darkness : 0),
-    scale: uniform(P.scale * 4),   // the baked tile holds 4 cloud periods
-    soft: uniform(P.softness),
-    height: uniform(P.height),
-    offset: uniform(new THREE.Vector2()),
-    toSun: uniform(new THREE.Vector3(0, 1, 0)),
+    sunCol: shared(new THREE.Color().copy(sun.color).multiplyScalar(sun.intensity)),
+    cover: shared(P.cover),
+    darkness: shared(P.enabled ? P.darkness : 0),
+    scale: shared(P.scale * 4),   // the baked tile holds 4 cloud periods
+    soft: shared(P.softness),
+    height: shared(P.height),
+    offset: shared(new THREE.Vector2()),
+    toSun: shared(new THREE.Vector3(0, 1, 0)),
     // a sky's own map (setMap): 0 = the baked field; its centre (xz), size and strength
-    useMap: uniform(0),
-    map: uniform(new THREE.Vector4(0, 0, 1, 0)),
+    useMap: shared(0),
+    map: shared(new THREE.Vector4(0, 0, 1, 0)),
   };
   let fieldNode = null, field = null;
   if (attach && sampled) {

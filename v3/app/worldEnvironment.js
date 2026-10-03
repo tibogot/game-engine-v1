@@ -6,6 +6,7 @@
 import * as THREE from "three";
 import {
   uniform,
+  frameGroup,
   float,
   positionWorld,
   cameraPosition,
@@ -748,11 +749,17 @@ export async function createWorldEnvironment({
   }
 
   const F = toolState.fog;
-  const uHFogEnabled = uniform(F.height.enabled ? 1 : 0);
+  // The fog is on EVERY material (scene.fogNode), so its uniforms go in
+  // three's shared FRAME group: one block per material, sent once a frame and
+  // only when a value changed. In the default per-object group every draw of
+  // every pass carried them, and uValleyTime ticking each frame re-sent each
+  // draw's whole object block (alg-rts 2026-10-03, ~140 uploads a frame).
+  const fogUniform = (v) => uniform(v).setGroup(frameGroup);
+  const uHFogEnabled = fogUniform(F.height.enabled ? 1 : 0);
   // 0 = analytic (Crytek half-space), 1 = valley band, 2 = monsoon. Was a
   // boolean; a third mode needed a number, and naming it after the mode
   // rather than one of its values stops the next one needing another rename.
-  const uHFogMode = uniform(F.height.mode === "monsoon" ? 2 : F.height.mode === "valley" ? 1 : 0);
+  const uHFogMode = fogUniform(F.height.mode === "monsoon" ? 2 : F.height.mode === "valley" ? 1 : 0);
   /*
    * FOG COLOURS CONVERT ONCE — here and at every `.set(hex)` below.
    *
@@ -775,33 +782,33 @@ export async function createWorldEnvironment({
    * what the colour pickers have been promising all along. Fog gets LIGHTER here, and
    * that is the correction.
    */
-  const uHFogColor = uniform(new THREE.Color(F.height.color));
-  const uHFogDensity = uniform(F.height.density);
-  const uHFogFalloff = uniform(F.height.falloff ?? 0.05);
-  const uHFogHeight = uniform(F.height.height);
-  const uValleyBase = uniform(F.height.base ?? -20);
-  const uValleyTop = uniform(F.height.top ?? 55);
-  const uValleyHaze = uniform(F.height.haze ?? 0.0012);
-  const uValleyNoiseWobble = uniform(F.height.noiseWobble ?? 22);
-  const uValleyNoiseScaleA = uniform(F.height.noiseScaleA ?? 0.005);
-  const uValleyNoiseScaleB = uniform(F.height.noiseScaleB ?? 0.01);
-  const uValleyTime = uniform(0);
+  const uHFogColor = fogUniform(new THREE.Color(F.height.color));
+  const uHFogDensity = fogUniform(F.height.density);
+  const uHFogFalloff = fogUniform(F.height.falloff ?? 0.05);
+  const uHFogHeight = fogUniform(F.height.height);
+  const uValleyBase = fogUniform(F.height.base ?? -20);
+  const uValleyTop = fogUniform(F.height.top ?? 55);
+  const uValleyHaze = fogUniform(F.height.haze ?? 0.0012);
+  const uValleyNoiseWobble = fogUniform(F.height.noiseWobble ?? 22);
+  const uValleyNoiseScaleA = fogUniform(F.height.noiseScaleA ?? 0.005);
+  const uValleyNoiseScaleB = fogUniform(F.height.noiseScaleB ?? 0.01);
+  const uValleyTime = fogUniform(0);
   // ── MONSOON mode ──────────────────────────────────────────────────────────
-  const uMonDensity = uniform(F.height.monDensity ?? 0.02);
-  const uMonFalloff = uniform(F.height.monFalloff ?? 0.045);
-  const uMonHeight = uniform(F.height.monHeight ?? 12);
-  const uMonStrata = uniform(F.height.monStrata ?? 0.45);
-  const uMonStrataScale = uniform(F.height.monStrataScale ?? 0.02);
-  const uMonSunTint = uniform(new THREE.Color(F.height.monSunTint ?? "#ffcf9a"));
-  const uMonSunStrength = uniform(F.height.monSunStrength ?? 0.75);
-  const uMonTintPow = uniform(F.height.monTintPow ?? 3.0);
-  const uDFogEnabled = uniform(F.distance.enabled ? 1 : 0);
-  const uDFogColor = uniform(new THREE.Color(F.distance.color));
-  const uDFogSunTint = uniform(new THREE.Color(F.distance.sunTint));
-  const uDFogSunDir = uniform(new THREE.Vector3(0, 1, 0));
-  const uDFogTintPow = uniform(F.distance.tintPow ?? 2.0);
-  const uDFogSunStrength = uniform(0);
-  const uDFogDensity = uniform(F.distance.density);
+  const uMonDensity = fogUniform(F.height.monDensity ?? 0.02);
+  const uMonFalloff = fogUniform(F.height.monFalloff ?? 0.045);
+  const uMonHeight = fogUniform(F.height.monHeight ?? 12);
+  const uMonStrata = fogUniform(F.height.monStrata ?? 0.45);
+  const uMonStrataScale = fogUniform(F.height.monStrataScale ?? 0.02);
+  const uMonSunTint = fogUniform(new THREE.Color(F.height.monSunTint ?? "#ffcf9a"));
+  const uMonSunStrength = fogUniform(F.height.monSunStrength ?? 0.75);
+  const uMonTintPow = fogUniform(F.height.monTintPow ?? 3.0);
+  const uDFogEnabled = fogUniform(F.distance.enabled ? 1 : 0);
+  const uDFogColor = fogUniform(new THREE.Color(F.distance.color));
+  const uDFogSunTint = fogUniform(new THREE.Color(F.distance.sunTint));
+  const uDFogSunDir = fogUniform(new THREE.Vector3(0, 1, 0));
+  const uDFogTintPow = fogUniform(F.distance.tintPow ?? 2.0);
+  const uDFogSunStrength = fogUniform(0);
+  const uDFogDensity = fogUniform(F.distance.density);
 
   const _hfVec = positionWorld.sub(cameraPosition);
   const _hfDist = length(_hfVec);
