@@ -35,7 +35,7 @@ import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
-import { createPerfHud } from "./ui/perfHud.js";
+import { createPerfHud } from "../shared-rts/perfHud.js";
 import { openParallelPipelines } from "../../v3/render/parallelPipelines.js";
 import { releaseGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import "../../v3/styles/editor.css";
@@ -173,7 +173,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The stats-gl overlay: OFF (you, 2026-10-03: "off the stats panel"; it
   // cost 0.4-0.8 ms a frame, measured). ?stats=1 or Dev → Performance.
   app.setStatsOverlay?.(params.get("stats") === "1");
-  // Our own perf line in its place (ui/perfHud.js): frame / CPU / draws twice
+  // Our own perf line in its place (shared-rts/perfHud.js): frame / CPU / draws twice
   // a second off the engine's counters, the honest GPU number on click. ?perf=0 hides.
   app.perfHud = createPerfHud(app, { visible: params.get("perf") !== "0" });
   // Cloud shadows start OFF (you, 2026-09-30: sweeping shadows get in the way

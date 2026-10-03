@@ -17,17 +17,28 @@ detail note below if it needs one). Tick here when done.
 
 ### PERF PORT FROM alg-rts (you, 2026-10-03: "do this for nam too … later")
 After alg's audit (games/alg-rts/TODO.md "PERF + LOAD AUDIT 2"):
-- [ ] Measure nam's boot per stage + GPU/CPU baseline first (the same method).
-- [ ] Parallel pipelines for the whole boot (v3/render/parallelPipelines.js;
-      alg 41 → 32 s).
-- [ ] Release GPU-only arrays (v3/render/gpuOnlyArrays.js: releaseGpuOnly after
-      the boot + every 5 s; alg heap −264 MB) and whatever else alg's heap
-      pass finds (texture library CPU copies, …).
-- [x] instanceAttributes already on (2026-10-03).
-- [ ] Our perf line instead of stats-gl (alg ui/perfHud.js; stats-gl cost
-      0.4-0.8 ms a frame in alg).
-- [ ] Animal morphs: nam's herds don't use animalMorph — check its own boot
-      builds the same way (main-thread work that can be cached or skipped).
+- [x] DONE 2026-10-03 (same day). Baseline: boot 51.7 s ("Preparing
+      effects" — the warm-up compiling one pipeline at a time — 22.1 s).
+- [x] Parallel pipelines for the whole boot (opened after startV3App, closed
+      after the warm-up; ?parboot=0): **boot 51.7 → 32.5 s**, warm-up stage
+      22.1 → 3.3 s. All 682 first-frame draws ready; console clean.
+- [x] GPU-only arrays + paint layers released after the boot (+ every 5 s;
+      ?gpuonly=0): 148 + 56 MB off the JS heap.
+- [x] instanceAttributes (on since the morning) · plant-field count 1 (engine,
+      shared shader builds) · cached canvas rect (shared-rts) — all apply.
+- [x] Plant CPU cull (engine plantCpuCull, ?plantcull=0): PROVEN on nam's map
+      (64 views + 240 moving frames, no hidden draw ever had a plant); hides
+      25% of the foliage draws, 2% of the tall plants; frame ~−0.1 ms (nam's
+      views are GPU-bound on the foliage itself).
+- [x] Stats-gl OFF (?stats=1), the shared perf line in its place
+      (shared-rts/perfHud.js, moved from alg; its GPU button now measures
+      by itself). The engine drains the timestamp pool every 4th tick at the
+      TOP of the loop (every 30th frame overflowed in nam: "Maximum number of
+      queries exceeded").
+- [x] FIRST LAUNCH no longer reloads: nam.html writes nam-valley's terrain
+      config before the engine loads (the engine default is 2048 m).
+- [ ] Left from nam's stages: unit visuals 7.3 s, rice terraces 4.4-5.3 s,
+      the level 5.6 s — not looked into (alg had no such stages).
 
 ### Done 2026-09-29
 - [x] WADING BIRDS WALK (you: "they slide when they move"): egrets and

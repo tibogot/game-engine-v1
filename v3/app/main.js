@@ -4662,6 +4662,13 @@ export async function startV3App(opts = {}) {
   const _fs = { last: performance.now(), n: 0, cpu: 0, cpuMax: 0, iv: 0, ivMax: 0, draws: 0 };
   renderer.setAnimationLoop(() => {
     const now = performance.now();
+    // The overlay hidden: drain the timestamp pool every 4th tick — counted
+    // BEFORE the boot's frame throttle, so bakes rendering outside the loop
+    // while it throttles cannot overflow it either (see the stats block below).
+    if (!_statsOn && hasTimestamps && (++_tsDrain % 4) === 0) {
+      renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+      renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
+    }
     if (_frameThrottleMs > 0) {
       if (now - _lastThrottledFrame < _frameThrottleMs) return;
       _lastThrottledFrame = now;
@@ -5056,12 +5063,9 @@ export async function startV3App(opts = {}) {
     // MEASURED 2026-09-27 (alg-rts, CPU profile): stats-gl's update alone was
     // ~20% of the main thread. (The on-demand GPU panel resolves its own.)
     // The renderer records timestamp queries whatever the overlay does (the
-    // device has the feature): with the overlay off, still drain the pool —
-    // every 30th frame is enough — or it overflows and warns every frame.
-    if (!_statsOn && hasTimestamps && (++_tsDrain % 30) === 0) {
-      renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
-      renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);
-    }
+    // device has the feature): with the overlay off the pool is drained at the
+    // TOP of this loop, every 4th tick (every 30th frame overflowed in nam-rts,
+    // with its reflection passes and bakes during the throttled boot, 2026-10-03).
     if (_statsOn) try {
       if (hasTimestamps) {
         renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);

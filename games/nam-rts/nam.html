@@ -178,6 +178,17 @@
       try {
         // Boot the game. Relative specifier: ES imports resolve against this
         // module's URL (not <base>), and Vite code-splits it at build time.
+        // FIRST LAUNCH (ported from alg-rts 2026-10-03): the engine reads its
+        // terrain size from this page's saved config when it loads; with none
+        // it starts at its default (2048 m), finds nam-valley is 1024 m and
+        // RELOADS the page — a boot thrown away. The level's size, written
+        // before the engine loads (another size still takes the reload path).
+        try {
+          const key = `v3.terrainConfig:${location.pathname.replace(/index\.html$/, "")}`;
+          if (!localStorage.getItem(key)) {
+            localStorage.setItem(key, JSON.stringify({ worldSize: 1024, heightmapSize: 1024, splatSize: 2048, maxHeight: 250 }));
+          }
+        } catch { /* private mode: the reload path */ }
         const { startNamGame } = await import("./namGame.js");
         await startNamGame({
           container: document.getElementById("game"),

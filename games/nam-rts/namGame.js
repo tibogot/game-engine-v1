@@ -107,6 +107,9 @@ import { createFogBanks, siteFogBanks } from "./fogBanks.js";
 import { buildFogBanksPanel } from "../shared-rts/fogBanksPanel.js";
 import { applyCloudShadows, buildCloudShadowsPanel } from "./cloudShadowsPanel.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
+import { openParallelPipelines } from "../../v3/render/parallelPipelines.js";
+import { releaseGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
+import { createPerfHud } from "../shared-rts/perfHud.js";
 import { createEnemyAI } from "./enemyAI.js";
 import { buildRequisitionMast } from "../../v3/render/objects/rtsBuildables.js";
 import { createWaves } from "./waves.js";
@@ -188,6 +191,9 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     // Instance matrices uploaded only when they change, not on every draw
     // (main.js; alg-rts audit 2026-10-03). ?instubo=1 = three's per-draw copy.
     instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
+    // Plant-field draws that cannot hold a plant skipped on the CPU (engine
+    // plantCpuCull, ported from alg-rts). ?plantcull=0 = draw them all.
+    plantCpuCull: new URLSearchParams(location.search).get("plantcull") !== "0",
     // The EDITOR's default paint palette (7 PBR sets, 28 images) was decoded
     // on every boot and then overwritten slot by slot by the level's own
     // paintLayers — nam-valley fills all seven. The engine says a game must
@@ -284,6 +290,18 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
   // nothing in the boot waits on an engine frame (checked), so a slower loop
   // cannot hold a stage up. The loading bar animates on its own rAF.
   app.setFrameThrottle?.(1000);
+  // PIPELINES IN PARALLEL for the whole boot (v3/render/parallelPipelines.js,
+  // ported from alg-rts 2026-10-03: there 41 → 32 s): the game scene's
+  // pipelines compile side by side; its draws behind the loading screen wait
+  // for them; bakes keep the synchronous path. Closed after the warm-up.
+  // ?parboot=0 = one at a time.
+  const bootPipelines = new URLSearchParams(location.search).get("parboot") !== "0"
+    ? openParallelPipelines(app.renderer, app.scene) : null;
+  // The stats-gl overlay OFF (it wrapped every render: 0.4-0.8 ms a frame in
+  // alg-rts) — ?stats=1 for it — and the shared perf line in its place
+  // (shared-rts/perfHud.js: frame / CPU / draws / heap, GPU on click). ?perf=0 hides.
+  app.setStatsOverlay?.(new URLSearchParams(location.search).get("stats") === "1");
+  app.perfHud = createPerfHud(app, { visible: new URLSearchParams(location.search).get("perf") !== "0" });
 
   if (fov != null) {
     app.camera.fov = fov;
@@ -1824,6 +1842,23 @@ export async function startNamGame({ container, onStatus = () => {}, onProgress 
     const w = await warmGamePipelines(app, engineObjects);
     console.log(`[warmup] ${w.warmed} hidden/empty drawables warmed in ${w.ms} ms`);
   } catch (e) { console.warn("[warmup] failed:", e); }
+  if (bootPipelines) {
+    const t0 = performance.now(), p = await bootPipelines.end();
+    console.log(`[pipelines] ${p.created} built in parallel during the boot, ${p.skipped} draws waited; the last ones took ${Math.round(performance.now() - t0)} ms`);
+  }
+  // Drop the CPU copies of what only the GPU reads (ported from alg-rts:
+  // v3/render/gpuOnlyArrays.js — grass, plant fields, crowd skinning — and the
+  // terrain's paint layers): again every 5 s (a crowd's buffers come with its
+  // first man; a paint upload may still be pending). ?gpuonly=0 keeps them.
+  if (new URLSearchParams(location.search).get("gpuonly") !== "0") {
+    const mb = releaseGpuOnly(app.renderer) / 1048576;
+    let paintMb = (app.releasePaintCpuCopies?.() ?? 0) / 1048576;
+    console.log(`[memory] ${mb.toFixed(0)} MB of GPU-only arrays + ${paintMb.toFixed(0)} MB of paint layers released from the JS heap`);
+    setInterval(() => {
+      releaseGpuOnly(app.renderer);
+      if (!paintMb) paintMb = (app.releasePaintCpuCopies?.() ?? 0) / 1048576;
+    }, 5000);
+  }
   // THE PADS AGAIN, at the very end: something late in the boot (the river's
   // re-conform settling, measured 2026-09-26) still rewrote a few after the
   // pass above; a pass here, and one more once the game has run a moment,

@@ -6,10 +6,41 @@
 //   FRAME  the rAF interval — vsync holds it at 16.7 while there is headroom
 //   CPU    the loop's own work (sim, HUD, render submission); max = worst frame
 //   draws  the last frame's draw calls
-//   GPU    on click: gpuBench.measureView — N frames back to back, the honest
+//   GPU    on click: measureFrame (below) — N frames back to back, the honest
 //          frame cost and what limits it (pauses the game ~1 s)
 //
 // ?perf=0 hides it; Dev → Performance toggles it.
+
+/**
+ * The frame's real cost here (alg-rts gpuBench.measureView's method, game-
+ * independent): the loop paused, N frames rendered back to back through the
+ * app's own frame callback (nodeFrame.update first, or shadow maps draw once),
+ * then onSubmittedWorkDone — wall time / N, CPU and GPU overlapped as in play.
+ * CPU: the callback alone, each frame waited out. Pauses the game ~1 s.
+ */
+async function measureFrame(R, { rounds = 3, n = 24 } = {}) {
+  const a = R._animation, loop = a._animationLoop, dev = R.backend.device;
+  a.stop?.();
+  try {
+    const frame = () => { R._nodes.nodeFrame.update(); loop(performance.now()); };
+    for (let i = 0; i < 8; i++) frame();
+    const frames = [], cpu = [];
+    for (let r = 0; r < rounds; r++) {
+      await dev.queue.onSubmittedWorkDone();
+      const t0 = performance.now();
+      for (let i = 0; i < n; i++) frame();
+      await dev.queue.onSubmittedWorkDone();
+      frames.push((performance.now() - t0) / n);
+      for (let i = 0; i < 6; i++) {
+        await dev.queue.onSubmittedWorkDone();
+        const t = performance.now(); frame(); cpu.push(performance.now() - t);
+      }
+    }
+    cpu.sort((x, y) => x - y);
+    const frameMin = Math.min(...frames), c = cpu[cpu.length >> 1];
+    return { frameMin, cpu: c, limit: c > frameMin * 0.85 ? "CPU-bound" : "GPU-bound" };
+  } finally { a.start?.(); a._animationLoop = loop; }
+}
 
 export function createPerfHud(app, { mount = document.body, visible = true } = {}) {
   const el = document.createElement("div");
@@ -28,7 +59,7 @@ export function createPerfHud(app, { mount = document.body, visible = true } = {
   const line = document.createElement("span");
   const gpuBtn = document.createElement("button");
   gpuBtn.textContent = "GPU";
-  gpuBtn.title = "Measure the real frame cost here (gpuBench: frames back to back, ~1 s pause)";
+  gpuBtn.title = "Measure the real frame cost here (frames back to back, ~1 s pause)";
   const gpuOut = document.createElement("span");
   gpuOut.textContent = "the real frame cost here";
   // Row 1: the live line (narrow: the score bar starts ~370 px in). Row 2: GPU.
@@ -53,8 +84,7 @@ export function createPerfHud(app, { mount = document.body, visible = true } = {
     gpuBtn.disabled = true;
     gpuOut.textContent = "measuring…";
     try {
-      const B = await import("../gpuBench.js");
-      const m = await B.measureView({ rounds: 3 });
+      const m = await measureFrame(app.renderer);
       gpuOut.innerHTML = `frame <b class="${cls(m.frameMin)}">${f1(m.frameMin)}</b> · CPU ${f1(m.cpu)} · ${m.limit}`;
     } catch (e) {
       gpuOut.textContent = `failed: ${e?.message ?? e}`;
