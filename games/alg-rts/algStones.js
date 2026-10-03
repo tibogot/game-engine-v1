@@ -20,7 +20,7 @@
 // footprint (the nav grid), in water, on the oasis grove or outside PLAY.
 // One InstancedMesh per (ground, shape): ~14 draws, no per-frame work.
 import * as THREE from "three";
-import { abs, attribute, float, int, normalWorld, positionWorld, pow, texture, uniformArray, vec2, vec3 } from "three/tsl";
+import { abs, attribute, float, int, normalWorld, positionWorld, pow, renderGroup, texture, uniformArray, vec2, vec3 } from "three/tsl";
 import { markGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import { createRockGeometry } from "../../v3/props/proceduralRock.js";
 import { simplifierReady } from "../../v3/render/instancing/autoLod.js";
@@ -90,7 +90,9 @@ function stoneMaterial(photos) {
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   mat.name = "Stone";
   const layer = int(attribute("ground", "float").add(0.5));
-  const tints = uniformArray(GROUND_KEYS.map((gk) => new THREE.Color(GROUNDS[gk].tint)), "color");
+  // Shared render group: one copy per material, not re-sent for every draw
+  // (shared-rts/PERF_RULES.md rule 7 — perfCheck caught it, 2026-10-03).
+  const tints = uniformArray(GROUND_KEYS.map((gk) => new THREE.Color(GROUNDS[gk].tint)), "color").setGroup(renderGroup);
   const S = float(1 / 0.9);
   const w0 = pow(abs(normalWorld), vec3(4));
   const w = w0.div(w0.x.add(w0.y).add(w0.z));

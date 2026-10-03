@@ -25,7 +25,7 @@
 // along the contour. Their scrub and grass are cleared (it is worked land).
 // ?fields=0 = without.
 import * as THREE from "three";
-import { Fn, attribute, positionLocal, uv, sin, cos, float, vec2, vec3, vec4, mix, smoothstep, min, max, abs, fract, floor, step, normalize, varying, texture, dFdx, dFdy, log2, exp2, transformNormalToView, uniform, uniformArray, Loop, int } from "three/tsl";
+import { Fn, attribute, positionLocal, uv, sin, cos, float, vec2, vec3, vec4, mix, smoothstep, min, max, abs, fract, floor, step, normalize, varying, texture, dFdx, dFdy, log2, exp2, transformNormalToView, uniform, uniformArray, Loop, int, renderGroup } from "three/tsl";
 import { drapeY, drapedPosition } from "../shared-rts/terrainDrape.js";
 import { buildFieldWallSegment } from "../../v3/render/objects/rtsAlgVillage.js";
 import { TRACK_LINES } from "./algTracks.js";
@@ -335,7 +335,9 @@ function buildSurface(app, plots) {
   // as CoH does. Up to MAX_HOLES rectangles: (x, z, cos, sin) + (hx, hz).
   const holeA = Array.from({ length: MAX_HOLES }, () => new THREE.Vector4(0, 0, 1, 0));
   const holeB = Array.from({ length: MAX_HOLES }, () => new THREE.Vector4(0, 0, 0, 0));
-  const uHoleA = uniformArray(holeA, "vec4"), uHoleB = uniformArray(holeB, "vec4");
+  // Shared render group (shared-rts/PERF_RULES.md rule 7): one copy per
+  // material, not re-sent for every draw of every pass.
+  const uHoleA = uniformArray(holeA, "vec4").setGroup(renderGroup), uHoleB = uniformArray(holeB, "vec4").setGroup(renderGroup);
   const uHoles = uniform(0);
   mat.positionNode = Fn(() => {
     const f = attribute("aField", "vec4"), f2 = attribute("aField2", "vec4");

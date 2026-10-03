@@ -426,6 +426,14 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
          only the near level receives shadows. NEXT for nam: the card
          textures as one texture array → one material a field (the alg
          stones pattern); then props the same way if a view shows them.
+      **FOR THE NEXT GAME (2026-10-03, you: "optimised from the beginning"):**
+         shared-rts/rtsPerfBoot.js (rtsEngineOptions + beginRtsPerfBoot —
+         alg now boots through it), shared-rts/PERF_RULES.md (14 rules, each
+         with its measurement), and `await app.perfCheck()` (the counters the
+         rules move, ⚠ when out of line). Its first run here caught the stone
+         tints and the field holes as per-object uniformArrays (fixed: 30 → 0
+         per-object array uploads a frame). Still flagged: builds per shader
+         1.7 (the ~115 duplicate builds above).
       (was:) MULTI-TYPE INDIRECT BATCH for props (Tidewater ReefBatch / the
          custom path three r184 already allows: one merged geometry,
          geometry.setIndirect with many offsets, compute cull writes the

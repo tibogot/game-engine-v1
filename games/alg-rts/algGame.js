@@ -35,9 +35,7 @@ import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
-import { createPerfHud } from "../shared-rts/perfHud.js";
-import { openParallelPipelines } from "../../v3/render/parallelPipelines.js";
-import { releaseGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
+import { rtsEngineOptions, beginRtsPerfBoot } from "../shared-rts/rtsPerfBoot.js";
 import "../../v3/styles/editor.css";
 
 const params = new URLSearchParams(location.search);
@@ -98,20 +96,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // loading screen lifts (you saw the post go grey → textured after a second).
   const atlasReady = rtsAtlasReady();
   const app = await startV3App({
+    // The RTS performance defaults (shared-rts/rtsPerfBoot.js): instance
+    // matrices as attributes, shared builds, plant cull + batching, the card
+    // depth pre-pass… each with its ?flag. This game's own options below win.
+    ...rtsEngineOptions(params),
     container,
-    preloadPaintTextures: false,
-    // Instance matrices uploaded only when they change, not on every draw
-    // (main.js; audit 2026-10-03). ?instubo=1 = three's per-draw uniform copy.
-    instanceAttributes: params.get("instubo") !== "1",
-    // Instanced meshes on one material share ONE node build (engine
-    // render/sharedInstanceBuilds.js). ?instshare=0 = one build each.
-    shareInstanceBuilds: params.get("instshare") !== "0",
-    // Plant-field draws that cannot hold a plant are skipped on the CPU (main.js
-    // plantCpuCull, ScatterField.setCpuDensity). ?plantcull=0 = draw them all.
-    plantCpuCull: params.get("plantcull") !== "0",
-    // The plant fields' draws batched: a few objects issuing many indirect
-    // draws each (engine ScatterField._syncBatches). ?plantbatch=0 = one each.
-    batchPlantDraws: params.get("plantbatch") !== "0",
     // ?msaa=0: no 4x MSAA (to measure its cost; the look keeps it).
     antialias: params.get("msaa") !== "0",
     // The Atmosphere sky (3-LUT scattering). A game gets the old procedural
@@ -123,9 +112,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // Three shapes of every tree (palm clumps, cedars, oaks): one shape
     // repeated across a grove read as a stamp.
     tallPlantVariants: Number(params.get("variants") ?? 3),
-    // Cut-out leaf cards drawn depth-first (cedar massif: ~12 ms → near 0).
-    // ?prepass=0 to A/B.
-    foliageDepthPrepass: params.get("prepass") !== "0",
     // Every plant detail level RECEIVES shadows (the engine default is the
     // near one only): the RTS view shows all three at once, and past the
     // first step the crowns went flat and bright — a band that followed the
@@ -135,7 +121,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // 4 the palm fronds and soldiers smeared to grey smudges; 1 was crisp but
     // grainy. Chosen by eye in-game, 2026-09-29.
     csm: { cascades: 2, maxFar: 300, enabled: false, shadowRadius: 2 },
-    light: { shadowNormalBias: 0.12 },
     // Compiled out: what this map never uses — no River v2 river (the wadis
     // are dry paint), no painted grass blades, no flower field — so their
     // terrain tints only multiplied zeros. MEASURED 2026-09-27 at 2x
@@ -168,25 +153,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // village: on = the hatch, off = gone). ?detail=1 = with, to compare.
     groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0) },
   });
-  // ONE engine frame a second behind the loading screen. nam-rts boots faster
-  // with NONE (namGame.js); here that was measured the other way, 2026-10-03:
-  // ready 29.0 / 30.3 s without frames vs 24.7 / 24.7 with, main thread 16-19
-  // vs 13-15 s — this boot gains from the frames it gets. ?bootframes=0 =
-  // none, to compare.
-  app.setFrameThrottle?.(params.get("bootframes") === "0" ? 1e9 : 1000);
-  // PIPELINES IN PARALLEL for the whole boot (v3/render/parallelPipelines.js):
-  // the game scene's pipelines compile side by side on the browser's threads
-  // instead of one after another (the boot ended waiting on that queue,
-  // measured 2026-10-03); its draws behind the loading screen wait for them.
-  // Bakes keep the synchronous path. Closed (all awaited) after the warm-up.
-  // ?parboot=0 = one at a time, as before.
-  const bootPipelines = params.get("parboot") !== "0" ? openParallelPipelines(app.renderer, app.scene) : null;
-  // The stats-gl overlay: OFF (you, 2026-10-03: "off the stats panel"; it
-  // cost 0.4-0.8 ms a frame, measured). ?stats=1 or Dev → Performance.
-  app.setStatsOverlay?.(params.get("stats") === "1");
-  // Our own perf line in its place (shared-rts/perfHud.js): frame / CPU / draws twice
-  // a second off the engine's counters, the honest GPU number on click. ?perf=0 hides.
-  app.perfHud = createPerfHud(app, { visible: params.get("perf") !== "0" });
+  // Boot loop, parallel pipelines, stats-gl off, the perf line
+  // (shared-rts/rtsPerfBoot.js). ONE engine frame a second behind the loading
+  // screen here: nam-rts boots faster with none, this game was measured the
+  // other way (2026-10-03: ready 29.0 / 30.3 s without frames vs 24.7 / 24.7
+  // with). ?bootframes=0 = none, ?parboot=0 ?stats=1 ?perf=0 as before.
+  const perfBoot = beginRtsPerfBoot(app, { params, bootFrames: true });
   // Cloud shadows start OFF (you, 2026-09-30: sweeping shadows get in the way
   // while debugging). The shadow map stays attached — Dev → Sky → Cloud
   // shadows turns them on, or ?cloudshadows=1 at boot.
@@ -445,26 +417,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
   // The ground cache around the starting view, all of it, before the screen
   // lifts (the loop only bakes a few tiles a frame).
-  if (bootPipelines) {
-    const t0 = performance.now(), p = await bootPipelines.end();
-    console.log(`[pipelines] ${p.created} built in parallel during the boot, ${p.skipped} draws waited; the last ones took ${Math.round(performance.now() - t0)} ms`);
-  }
+  await perfBoot.endPipelines();
   await app.groundCache?.bakeAll(app.camera);
-  // Drop the CPU copies of buffers only the GPU writes (v3/render/gpuOnlyArrays.js):
-  // grass, plant fields, crowd skinning — ~260 MB of zeros held for nothing
-  // (heap snapshot, 2026-10-03). Again every 5 s: a crowd gets its buffers
-  // with its first soldier. ?gpuonly=0 keeps them.
-  if (params.get("gpuonly") !== "0") {
-    const mb = releaseGpuOnly(app.renderer) / 1048576;
-    // The terrain's paint layers are final in the game: their CPU copies too
-    // (retried until no upload or bake is pending).
-    let paintMb = (app.releasePaintCpuCopies?.() ?? 0) / 1048576;
-    console.log(`[memory] ${mb.toFixed(0)} MB of GPU-only arrays + ${paintMb.toFixed(0)} MB of paint layers released from the JS heap`);
-    setInterval(() => {
-      releaseGpuOnly(app.renderer);
-      if (!paintMb) paintMb = (app.releasePaintCpuCopies?.() ?? 0) / 1048576;
-    }, 5000);
-  }
+  // Drop the CPU copies of what only the GPU reads — grass, plant fields,
+  // crowd skinning, the paint layers: ~260 MB held for nothing (heap
+  // snapshot, 2026-10-03). After the bake above. ?gpuonly=0 keeps them.
+  perfBoot.releaseMemory();
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
