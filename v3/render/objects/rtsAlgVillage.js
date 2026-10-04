@@ -784,6 +784,78 @@ export function buildThreshingFloor({ seed = 1963, r = 4.5 } = {}) {
   return geo;
 }
 
+// ── VILLAGE LIFE: the small things round a lived-in village ─────────────────
+// (2026-10-04, you: "fill the map — life around the villages"). Small pieces
+// the game scatters just outside each village, INSTANCED (algVillageLife.js):
+// a haystack, a firewood pile, the bread oven, a row of beehives.
+
+/** HAYSTACK — a round stack of straw, a pole through its top, loose straw at its foot. */
+export function buildHaystack({ seed = 2101 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const r = 1.25 + R() * 0.3, h = 2.1 + R() * 0.5;
+  parts.push({ geo: earthBerm([[r + 0.1, -0.12], [r, 0.4], [r * 1.03, h * 0.45], [r * 0.75, h * 0.75], [r * 0.3, h * 0.95], [0.001, h]], { seed, segs: 18, rJit: 0.08, yJit: 0.05 }), pos: [0, 0, 0], mat: MAT.thatch, tone: 0.85 + R() * 0.1 });   // 0.6 read mud-brown
+  parts.push(wirePart([0, h - 0.5, 0], [0.04, h + 0.55, 0.03], 0.05, { mat: MAT.timber, tone: 0.3 }));
+  // Loose straw at the foot: a low skirt, its top well above the ground band.
+  parts.push({ geo: earthBerm([[r + 0.8, -0.3], [r + 0.4, 0.12], [r * 0.9, 0.16], [0.001, 0.16]], { seed: seed + 3, segs: 18, rJit: 0.18, yJit: 0.02 }), pos: [0, 0, 0], mat: MAT.thatch, tone: 0.75 });
+  const geo = finish(parts, { hx: r + 0.6, hz: r + 0.6, height: h + 0.5 });
+  geo.userData.coverPerimeter = false;   // straw stops no bullet
+  return geo;
+}
+
+/** FIREWOOD — a stacked pile of logs, a bundle of brushwood, the chopping block. */
+export function buildWoodpile({ seed = 2102 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const len = 1.8 + R() * 0.6, rr = 0.11;
+  let y = 0.1;
+  for (let row = 0; row < 4; row++) {
+    const n = 5 - row;
+    for (let k = 0; k < n; k++) {
+      const z = (k - (n - 1) / 2) * rr * 2.05 + (R() - 0.5) * 0.03;
+      const x0 = -len / 2 + (R() - 0.5) * 0.25, x1 = len / 2 + (R() - 0.5) * 0.25;
+      parts.push(wirePart([x0, y + rr, z], [x1, y + rr + (R() - 0.5) * 0.04, z], rr * (0.85 + R() * 0.3), { mat: MAT.timber, tone: 0.32 + R() * 0.15 }));
+    }
+    y += rr * 1.75;
+  }
+  parts.push(...brushClump(R, len / 2 + 0.9, 0, 0.25, { h: 1.0, r: 0.5, dry: true }));
+  parts.push({ geo: new THREE.CylinderGeometry(0.27, 0.3, 0.5, 10), pos: [-len / 2 - 0.8, 0.22, 0.45], mat: MAT.timber, tone: 0.42 });
+  return finish(parts, { hx: len / 2 + 1.4, hz: 0.9, height: 1.2 });
+}
+
+/** TABOUNA — the clay bread oven out in the yard: the dome, its mouth, jars, brushwood to fire it. */
+export function buildTabouna({ seed = 2103 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  oven(parts, R, 0, 0, 0);
+  for (let k = 0; k < 3; k++) parts.push(clayJar(-0.95 - (k % 2) * 0.42, -0.02, -0.3 + k * 0.38, 0.8 + R() * 0.3));
+  parts.push(...brushClump(R, 1.0, 0, -0.6, { h: 0.8, r: 0.45, dry: true }));
+  for (let k = 0; k < 4; k++) {
+    const a = 2.2 + k * 0.5;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.45, 0.22, 0.35), pos: [Math.cos(a) * 1.1, 0.04, Math.sin(a) * 1.1], rot: [0, -a, 0], mat: MAT.limestone, tone: 0.5 + R() * 0.15 });
+  }
+  return finish(parts, { hx: 1.6, hz: 1.6, height: 1.0 });
+}
+
+/** BEEHIVES — cork-bark cylinders laid on a low stone shelf, two rows, a slab over them for shade. */
+export function buildBeehives({ seed = 2104 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  for (let k = 0; k < 6; k++) {
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.5, 0.3, 0.7), pos: [-1.25 + k * 0.5, 0.1, 0], rot: [0, (R() - 0.5) * 0.2, 0], mat: MAT.limestone, tone: 0.45 + R() * 0.15 });
+  }
+  for (const [n, y] of [[6, 0.42], [4, 0.82]]) {
+    for (let k = 0; k < n; k++) {
+      const x = (k - (n - 1) / 2) * 0.43 + (R() - 0.5) * 0.03;
+      parts.push({ geo: new THREE.CylinderGeometry(0.19 + R() * 0.02, 0.2, 0.85, 10), pos: [x, y, (R() - 0.5) * 0.06], rot: [Math.PI / 2, 0, 0], mat: MAT.timber, tone: 0.2 + R() * 0.08 });
+    }
+  }
+  // The shade: a flat slab on the top row, a stone on it against the wind.
+  parts.push({ geo: buildBox(2.3, 0.07, 1.0), pos: [0, 1.06, 0], rot: [0, (R() - 0.5) * 0.06, 0.03], mat: MAT.limestone, tone: 0.55 });
+  parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.4, 0.25, 0.35), pos: [0.5, 1.2, 0.1], mat: MAT.limestone, tone: 0.5 });
+  return finish(parts, { hx: 1.5, hz: 0.65, height: 1.3 });
+}
+
 // ── KSAR ────────────────────────────────────────────────────────────────────
 
 /** Highest and lowest ground under a TURNED rectangle (local half sizes). */

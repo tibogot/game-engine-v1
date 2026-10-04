@@ -26,6 +26,7 @@ import { createAlgPoles } from "./algPoles.js";
 import { createAlgDamage } from "./algDamage.js";
 import { createAlgWire } from "./algWire.js";
 import { createAlgFields } from "./algFields.js";
+import { createAlgVillageLife } from "./algVillageLife.js";
 import { createAlgHens } from "./algHens.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
@@ -407,6 +408,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null });
       console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg landmarks] failed:", e); }
+  }
+  // VILLAGE LIFE (algVillageLife.js): haystacks, firewood, bread ovens, beehives
+  // just outside each village — after the fields and landmarks, off both. ?life=0 = without.
+  if (params.get("life") !== "0") {
+    try {
+      const t0 = performance.now();
+      app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? null, plants: app.showroom?.plants ?? null });
+      console.log(`[village life] ${JSON.stringify(app.algVillageLife.stats)} in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[alg village life] failed:", e); }
   }
   if (app.algFields || app.algLandmarks) app.algCover?.bake();
   // The minimap was baked before the fields and farmsteads: again, with them.

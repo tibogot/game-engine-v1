@@ -59,6 +59,12 @@ One screen, most important first. Details stay in the sections below;
 - Sound: a squelch per alert; voices (parked: the free API plan refuses).
 
 **5. World and content**
+- [x] VILLAGE LIFE (2026-10-04, algVillageLife.js + 4 new kit pieces in rtsAlgVillage.js —
+  buildHaystack, buildWoodpile, buildTabouna, buildBeehives, all in the ground-band +
+  coplanar tests): haystacks in a stackyard per village, firewood and bread ovens by the
+  houses, hive rows further out; off the fields, pieces, tracks, water, trees (placed,
+  painted, the oasis groves); block the nav grid. 10 / 10 / 5 / 5, 8 draws, cost in the
+  noise. ?life=0 = without. You, look: sizes, the straw colour, how many.
 - FILL THE MAP: dense scrub along the wadis, (orchards: done 2026-10-04),
   oasis gardens and a second oasis, graded terraces and tracks.
 - Buildings: a second outpost (SAS post), the H-34 gunship + a helipad.
