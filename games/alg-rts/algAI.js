@@ -540,6 +540,32 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   function setState(b, s) { b.state = s; b.t = 0; }
 
+  /**
+   * UNDER A FLARE (algFlares.js): a band caught in the light — seen, concealment gone — that is
+   * not fighting gets out of it, to just past the circle's edge on its own side. An ambush sets
+   * up again there; an approach takes up its route once the flare has burnt out. Returns true
+   * while it is dodging (the state's own logic waits).
+   */
+  function dodgeFlare(b, m) {
+    const F = app.algFlares;
+    if (!F?.count && !b.dodging) return false;
+    const c = centre(m);
+    const lit = F?.litAt(c.x, c.z);
+    if (!lit) {
+      // out of the light (or it burnt out): an approach goes on where it was going
+      if (b.dodging) { b.dodging = false; if (b.state === "approach") moveBand(b, b.via ?? b.spot); }
+      return false;
+    }
+    if (b.dodging && t < b.dodgeUntil) return true;   // already on the way out
+    const dx = c.x - lit.x, dz = c.z - lit.z, d = Math.hypot(dx, dz) || 1;
+    const to = { x: lit.x + (dx / d) * (lit.r + 12), z: lit.z + (dz / d) * (lit.r + 12) };
+    moveBand(b, to);
+    if (b.state === "ambush") b.spot = to;
+    b.dodging = true;
+    b.dodgeUntil = t + 4;
+    return true;
+  }
+
   function stepBand(b, dt) {
     b.t += dt;
     const m = alive(b);
@@ -564,6 +590,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         // Found on the way in — fired on: it opens up (any band, 2026-10-02:
         // a village band walking on under fire read as "they never shoot").
         if (underFire(b, m)) { if (b.mission === "assault") goIn(b); else strike(b); break; }
+        // Caught under a flare: out of the light first.
+        if (dodgeFlare(b, m)) break;
         // Round the guns: at the via point (most of the band), on to the spot.
         if (b.via) {
           const past = m.filter((u) => dist(u.position, b.via) < 15 || !u.isMoving);
@@ -610,6 +638,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const c = centre(near.length ? near : m);
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.trigger);
         if (close || underFire(b, m)) { strike(b); break; }
+        // A flare over the ambush: no hiding in the light — set up again just outside it.
+        if (dodgeFlare(b, m)) break;
         // Waiting: cut scrub stood up in front of them — an AMBUSH SCREEN
         // (algBuild.js, paid from the ALN purse): they are hidden behind it
         // until they fire (algCover concealment).

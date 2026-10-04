@@ -3370,7 +3370,14 @@ Asset follow-ups:
 - [ ] **NIGHT, NEXT** (proposed 2026-10-04): ~~(1) combat lights~~ ~~(2) fixed lights~~ ~~(3) searchlight~~
       DONE above; souk lanterns DONE (2026-10-04: the arcades HAD lanterns — rtsAlgVillage.js
       arcadeRange — now recorded in userData.lanterns: 6, a light each + a warm glass that
-      blooms at night, one instanced draw); LEFT: illumination flares (gameplay, you decide) —
+      blooms at night, one instanced draw); ILLUMINATION FLARES DONE (2026-10-04, algFlares.js):
+      a mortar pit's "Fusée éclairante" — 25 mun, 45 s cooldown, night only (greyed by day),
+      30-200 m; bursts 140 m up 2.5 s after the thump, sinks 5 m/s for 26 s drifting with the
+      wind; one local light I = E h^2 (centre ~8x moonlight from any height, the circle
+      tightening 90 -> 35 m as it sinks); the circle is SEEN (fog-of-war source) and beats
+      concealment; the ALN (algAI.js dodgeFlare) moves an approaching / waiting band out of
+      the light (tested: 51 m out, then on its way). ?flares=0 = without. — you, play it: the
+      map has no mortar pit at the start (sappers build one). —
       explosions (algCombat
       fx.explosion), fires (combat.js:158, algStructures.js:152, algDamage.js:113), muzzle flashes
       (projectiles.js fx.muzzle), shell/rocket flare; (2) fixed lights faded by `app.sky.night` —
