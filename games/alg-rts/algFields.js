@@ -18,6 +18,12 @@
 //             new draws) along some field sides and along the pistes near the
 //             villages, with gaps. Concealment beside them (concealAt(): the
 //             ambush lines); they block nothing.
+//   ORCHARDS  (2026-10-04, you: "orchards") a field kind: OLIVES or ALMONDS
+//             (one species a grove) in rows ~7 m apart over ploughed ground —
+//             the Algerian grove — a few missing, the rows a little off true.
+//             The showroom's PlacedFoliage types (no new draws, culled per
+//             tree). Under their crowns men are partly CONCEALED (concealAt);
+//             the trees block nothing (CoH: infantry walks through a grove).
 //
 // The plots: around each village (algEconomy points), 18-150 m out, on gentle
 // ground (< 11°, < 3.5 m of relief), off the tracks, the wadi, the cliffs,
@@ -56,7 +62,20 @@ const P = {
   trackHedge: { near: 150, offset: 4.2, run: [24, 60], every: 0.55 },
   concealR: 1.8,
 };
-const KINDS = [["plough", 0.45], ["stubble", 0.35], ["green", 0.2]];
+// A fifth of the plots are orchards (the kind is drawn from the same random
+// number as before, so no plot moves). Their ground is the plough's.
+const KINDS = [["plough", 0.36], ["stubble", 0.28], ["green", 0.14], ["orchard", 0.22]];
+const ORCHARD = {
+  row: 7, along: 6.5, inset: 3, missing: 0.08, jitter: 0.6, species: [["olive", 0.7], ["almond", 0.3]],
+  scale: [1.0, 1.3],          // 0.8-1.1 read as saplings in a working grove
+  conceal: 0.5,
+  // GROVES: bigger orchards than the field plots can be (16-30 m: ~5 trees),
+  // their own pass after the fields, their own random stream (no field moves).
+  perVillage: { hamlet: 2, dechra: 3, ksar: 3 }, w: [32, 48], d: [22, 32], tries: 900,
+  // Groves stand on terraces and gentle slopes: the fields' 15° / 5.5 m let
+  // one grove in on this map; 18° / 9 m (the walls step down with the ground).
+  maxTiltDeg: 18, maxRelief: 9,
+};
 
 /** A seeded random stream (the same fields every load). */
 function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = (s * 16807) % 2147483647) / 2147483647); }
@@ -92,7 +111,7 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
   const nearTrack = (x, z, r) => trackPts.some((p) => Math.abs(p.x - x) < r && Math.abs(p.z - z) < r && Math.hypot(p.x - x, p.z - z) < r);
   const toWorld = (b, lx, lz) => { const c = Math.cos(b.yaw), s = Math.sin(b.yaw); return [b.x + lx * c + lz * s, b.z - lx * s + lz * c]; };
 
-  function plotOk(b) {
+  function plotOk(b, maxRelief = P.maxRelief, minNormalY = cosTilt) {
     if (boxes.some((o) => overlaps(b, o, P.gap))) return false;
     let lo = Infinity, hi = -Infinity;
     for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
@@ -101,13 +120,13 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
       const h = H(x, z);
       lo = Math.min(lo, h); hi = Math.max(hi, h);
       if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > h - 0.3) return false;
-      if ((app.getWorldNormal?.(x, z)?.y ?? 1) < cosTilt) return false;
+      if ((app.getWorldNormal?.(x, z)?.y ?? 1) < minNormalY) return false;
       const w = app.samplePaintWeights?.(x, z);
       if (w && (w[4] > 0.35 || w[5] > 0.3 || w[6] > 0.25 || w[3] > 0.4)) return false;   // wadi, cliff, track, oasis grove
       if (navGrid?.isBlockedAtWorld?.(x, z)) return false;
       if (nearTrack(x, z, P.trackClear)) return false;
     }
-    return hi - lo <= P.maxRelief;
+    return hi - lo <= maxRelief;
   }
 
   // ── The plots ─────────────────────────────────────────────────────────────
@@ -130,6 +149,29 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
       for (const [k, p] of KINDS) { if ((u -= p) <= 0) { kind = k; break; } }
       b.kind = kind;
       b.seed = R();
+      plots.push(b);
+      boxes.push(b);
+      got++;
+    }
+  }
+
+  // ── The groves: bigger orchards, placed after the fields ──────────────────
+  const RG = rng(31954);
+  for (const v of economy.points) {
+    const site = LAYOUT.sites.find((s) => s.name === v.name);
+    const r0 = (site?.r ?? 35) + P.ring[0], r1 = P.ring[1];
+    const want = ORCHARD.perVillage[v.kind] ?? 2;
+    let got = 0;
+    for (let t = 0; t < ORCHARD.tries && got < want; t++) {
+      const a = RG() * Math.PI * 2, r = r0 + Math.sqrt(RG()) * (r1 - r0);
+      const x = v.position.x + Math.cos(a) * r, z = v.position.z + Math.sin(a) * r;
+      const gx = H(x + 2, z) - H(x - 2, z), gz = H(x, z + 2) - H(x, z - 2), g = Math.hypot(gx, gz);
+      const yaw = g > 0.25 ? Math.atan2(gx / g, -gz / g) : (site?.turn ?? 0) * (Math.PI / 180) + (RG() - 0.5) * 0.4;
+      const w = ORCHARD.w[0] + RG() * (ORCHARD.w[1] - ORCHARD.w[0]), d = ORCHARD.d[0] + RG() * (ORCHARD.d[1] - ORCHARD.d[0]);
+      const b = { x, z, hx: w / 2, hz: d / 2, yaw };
+      if (!plotOk(b, ORCHARD.maxRelief, Math.cos((ORCHARD.maxTiltDeg * Math.PI) / 180))) continue;
+      b.kind = "orchard";
+      b.seed = RG();
       plots.push(b);
       boxes.push(b);
       got++;
@@ -230,6 +272,30 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
     });
   }
 
+  // ── The orchards' trees: rows along the plot's long side ──────────────────
+  // Their own random stream: the walls and hedges above keep theirs.
+  const RO = rng(41961);
+  let orchardTrees = 0;
+  for (const b of plots) {
+    if (b.kind !== "orchard" || !plants) continue;
+    let u = RO(), sp = ORCHARD.species[0][0];
+    for (const [k, p] of ORCHARD.species) { if ((u -= p) <= 0) { sp = k; break; } }
+    if (!plants.types.has(sp)) plants.setType(sp, structuredClone(FOLIAGE_PRESETS[sp]));
+    const ax = b.hx - ORCHARD.inset, az = b.hz - ORCHARD.inset;
+    const nx = Math.max(1, Math.floor((2 * ax) / ORCHARD.along) + 1), nz = Math.max(1, Math.floor((2 * az) / ORCHARD.row) + 1);
+    const ox = nx > 1 ? (2 * ax) / (nx - 1) : 0, oz = nz > 1 ? (2 * az) / (nz - 1) : 0;
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) {
+      if (RO() < ORCHARD.missing) continue;
+      const lx = (nx > 1 ? -ax + i * ox : 0) + (RO() - 0.5) * ORCHARD.jitter;
+      const lz = (nz > 1 ? -az + j * oz : 0) + (RO() - 0.5) * ORCHARD.jitter;
+      const [x, z] = toWorld(b, lx, lz);
+      if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > H(x, z) - 0.3) continue;
+      const f = RO();
+      plants.add(sp, x, H(x, z) - 0.05, z, { rotY: f * 6.28, scale: ORCHARD.scale[0] + RO() * (ORCHARD.scale[1] - ORCHARD.scale[0]), seed: f });
+      orchardTrees++;
+    }
+  }
+
   // ── Worked land: no scrub, no tufts, no stones in the fields ──────────────
   for (const b of plots) {
     const r = Math.min(b.hx, b.hz) * 0.95;
@@ -250,12 +316,18 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
     const k = `${Math.floor(x / CELL)},${Math.floor(z / CELL)}`;
     (hash.get(k) ?? hash.set(k, []).get(k)).push(x, z);
   }
+  const orchards = plots.filter((b) => b.kind === "orchard");
   function concealAt(x, z) {
     const cx = Math.floor(x / CELL), cz = Math.floor(z / CELL), r2 = P.concealR * P.concealR;
     for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
       const a = hash.get(`${cx + i},${cz + j}`);
       if (!a) continue;
       for (let k = 0; k < a.length; k += 2) if ((a[k] - x) ** 2 + (a[k + 1] - z) ** 2 < r2) return 0.9;
+    }
+    // Under an orchard's crowns.
+    for (const b of orchards) {
+      const c = Math.cos(b.yaw), s = Math.sin(b.yaw), dx = x - b.x, dz = z - b.z;
+      if (Math.abs(c * dx - s * dz) < b.hx && Math.abs(s * dx + c * dz) < b.hz) return ORCHARD.conceal;
     }
     return 0;
   }
@@ -267,7 +339,7 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
     cutHole: (x, z, hx, hz, yaw) => surface?.userData?.cutHole?.(x, z, hx, hz, yaw) ?? false,
     /** Hard cover along the walls, for the cover bake (algCover.js). */
     *coverCircles() { for (const c of cover) yield { x: c.x, z: c.z, radius: 1.1, size: 0.8, hard: true }; },
-    stats: { plots: plots.length, wallSegments: cover.length, hedgePlants: hedge.length, stonesCleared },
+    stats: { plots: plots.length, orchards: orchards.length, orchardTrees, wallSegments: cover.length, hedgePlants: hedge.length, stonesCleared },
   };
 }
 
@@ -303,7 +375,7 @@ function buildSurface(app, plots) {
   geo.setAttribute("position", src.attributes.position);
   geo.setAttribute("uv", src.attributes.uv);
   const a0 = new Float32Array(N * 4), a1 = new Float32Array(N * 4);
-  const KIND = { plough: 0, stubble: 1, green: 2 };
+  const KIND = { plough: 0, stubble: 1, green: 2, orchard: 0 };   // an orchard's ground: ploughed
   plots.forEach((b, i) => {
     a0.set([b.x, b.z, b.yaw, b.hx * 2], i * 4);
     a1.set([b.hz * 2, KIND[b.kind], b.seed, 0], i * 4);

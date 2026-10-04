@@ -59,7 +59,7 @@ One screen, most important first. Details stay in the sections below;
 - Sound: a squelch per alert; voices (parked: the free API plan refuses).
 
 **5. World and content**
-- FILL THE MAP: dense scrub along the wadis, orchards as a field kind,
+- FILL THE MAP: dense scrub along the wadis, (orchards: done 2026-10-04),
   oasis gardens and a second oasis, graded terraces and tracks.
 - Buildings: a second outpost (SAS post), the H-34 gunship + a helipad.
 - Animals: shepherds with the flocks, flocks that stay together, the hyena
@@ -1658,7 +1658,15 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          close the fields come to the villages. Close up the soil is clean:
          a fine clod grain if it shows at play zoom.
    - [ ] Unwalled field sides could get a cleared-stone line (cheaper wall).
-   - [ ] Orchards as a field kind (rows of olives / almonds — placed foliage).
+   - [x] ORCHARDS (2026-10-04, algFields.js): a field kind — OLIVES (70%) or ALMONDS in rows
+         ~7 m apart over ploughed ground, a few missing, rows a little off true, scale 1.0-1.3
+         (0.8-1.1 read as saplings). 22% of the field plots + GROVES, a pass of their own (2 a
+         hamlet, 3 a dechra/ksar, 32-48 × 22-32 m, 18° / 9 m allowed: the fields' 15° / 5.5 m let
+         one in). Own random streams (no field moves; the piste hedges reshuffle a little).
+         Concealment 0.5 under the crowns (concealAt). 11 orchards, 116 trees (showroom
+         PlacedFoliage, no new draws). MEASURED same-page A/B: 0.3-0.6 ms at a grove, 0.3-0.4
+         zoomed out. (A 22 ms reading on the way was the page out of focus — you caught it.)
+   - [ ] you, look: the groves (size, spacing, olive/almond mix); trunks don't block men.
 - [x] **BARBED WIRE THAT MATTERS** (2026-10-01, algWire.js; CoH's wire):
       the sappers' wire is a NO-FOOT footprint (shared navGrid.js cell 3,
       nam unchanged): infantry of both sides path ROUND it (tested: 22 m on
