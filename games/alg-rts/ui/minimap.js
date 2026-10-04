@@ -30,6 +30,7 @@
 //   • No intel (a game hook — nam's radio station): a dead screen, NO RADIO.
 import * as THREE from "three";
 import { TRACK_LINES } from "../algTracks.js";
+import { drawIcon } from "./resourceIcons.js";
 
 const UNITS_HZ = 12;
 const FOG_HZ = 4;
@@ -576,18 +577,17 @@ export function createMinimap({
         const r = 3.6 * s;
         c.fillStyle = col; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.2 * s;
         c.beginPath(); c.arc(m.x, m.y, r, 0, Math.PI * 2); c.fill(); c.stroke();
-        c.fillStyle = "rgba(10,12,8,0.9)"; c.font = `700 ${Math.round(5 * s)}px sans-serif`; c.textAlign = "center"; c.textBaseline = "middle";
-        c.fillText(p.res === "fuel" ? "C" : "M", m.x, m.y + 0.3 * s);
+        drawIcon(c, p.res, m.x, m.y, r * 1.5, "rgba(10,12,8,0.9)");   // its resource's icon (ui/resourceIcons.js)
         // The resource's colour round it: fuel amber, munitions rust.
         c.strokeStyle = p.res === "fuel" ? "#e2b25a" : "#d48a6a"; c.lineWidth = 1 * s;
         c.beginPath(); c.arc(m.x, m.y, r + 1.4 * s, 0, Math.PI * 2); c.stroke();
         continue;
       }
-      // The marker: a flag-diamond, bigger than any unit.
-      const r = 4.6 * s;
-      c.fillStyle = col; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.2 * s;
-      c.beginPath(); c.moveTo(m.x, m.y - r); c.lineTo(m.x + r, m.y); c.lineTo(m.x, m.y + r); c.lineTo(m.x - r, m.y); c.closePath();
-      c.fill(); c.stroke();
+      // The marker: the victory point's STAR (ui/resourceIcons.js), on a dark disc, bigger than any unit.
+      const r = 5 * s;
+      c.fillStyle = "rgba(10,12,8,0.85)";
+      c.beginPath(); c.arc(m.x, m.y, r, 0, Math.PI * 2); c.fill();
+      drawIcon(c, "vp", m.x, m.y, r * 1.7, col);
       label(c, p.name.replace(/^(Mechta|Dechra|Ksar)\s+/, ""), m.x, m.y + rr + fpx * 0.75);
     }
     // THE OBJECTIVES: our post (blue) and the FLN's cave (red, always shown —

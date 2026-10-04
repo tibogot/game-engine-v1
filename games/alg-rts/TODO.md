@@ -54,6 +54,16 @@ One screen, most important first. Details stay in the sections below;
 **4. HUD / UX**
 - Selection card: the squad's name and n/size pips; retreat / reinforce
   icons; real unit icons (mine are drawn stand-ins); building portraits.
+- [x] POINT FLAGS + ICONS (2026-10-04): every capture point has a real cloth flag
+  (algPointFlags.js) that rises with the capture, tricolour or FLN; supply points get a
+  depot (rtsAlgeria.js buildFuelDepot / buildAmmoDump, 2 instanced draws). One icon set
+  (ui/resourceIcons.js: helmet / jerrycan / cartridges / star) used on the point markers
+  (a circular capture ring), the resource strip, the prices and the minimap. Cost
+  0.1-0.45 ms. ?pointflags=0 = without. You, look: the icons, the ring, the flag height.
+- Icons still missing vs CoH: ability icons on the command card (smoke, barrage, LMG are
+  text/stand-ins); veterancy chevrons on the squad portraits; a pop-cap icon (troupes N);
+  alert icons (under attack / point lost / cut off) in the corner feed; a "cut off" chain
+  icon on a supply marker instead of amber alone.
 - [x] MINIMAP JUMP: the ground lagged after a jump — fixed (groundCache catch-up, ~0.3 s).
 - A third cover colour (red, negative cover) once craters / mud count.
 - Sound: a squelch per alert; voices (parked: the free API plan refuses).

@@ -1021,6 +1021,60 @@ export function buildRubbleHeap({ seed = 1961 } = {}) {
 }
 
 /**
+ * FUEL DEPOT — a supply point's fuel (alg-rts, 2026-10-04: the points read on
+ * the ground, CoH's depots): drums standing in a block, two on their sides on
+ * timber chocks, a row of jerrycans, a knee-high sandbag wall on two sides.
+ * The flag is the game's (its own cloth, algPointFlags.js).
+ */
+export function buildFuelDepot({ seed = 2201 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  for (let k = 0; k < 6; k++) {
+    parts.push({ geo: buildOilDrum(), pos: [-0.9 + (k % 3) * 0.64 + (R() - 0.5) * 0.05, 0, -0.35 + Math.floor(k / 3) * 0.64 + (R() - 0.5) * 0.05], rot: [0, R() * 3, 0], mat: MAT.metal, tone: 0.2 + R() * 0.3 });
+  }
+  // Two on their sides, on chocks.
+  for (const z of [0.95, 1.45]) {
+    parts.push({ geo: buildBox(0.12, 0.12, 0.45), pos: [-0.45, 0.06, z], mat: MAT.timber, tone: 0.35 });
+    parts.push({ geo: buildBox(0.12, 0.12, 0.45), pos: [0.35, 0.06, z], mat: MAT.timber, tone: 0.35 });
+  }
+  parts.push({ geo: buildOilDrum(), pos: [-0.5, 0.42, 1.2], rot: [0, 0, Math.PI / 2], mat: MAT.metal, tone: 0.3 + R() * 0.2 });
+  // Jerrycans in a row.
+  for (let k = 0; k < 5; k++) parts.push({ geo: buildBox(0.17, 0.46, 0.34), pos: [1.25, 0.23, -0.6 + k * 0.38], rot: [0, (R() - 0.5) * 0.15, 0], mat: MAT.paint, tone: 0.28 + R() * 0.1 });
+  // A low sandbag wall on two sides.
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  parts.push({ geo: buildSandbagWall({ length: 3.2, courses: 2, seed: seed + 7, bag }), pos: [0, 0, -1.05], mat: null });
+  parts.push({ geo: buildSandbagWall({ length: 2.6, courses: 2, seed: seed + 9, bag }), pos: [-1.65, 0, 0.3], rot: [0, Math.PI / 2, 0], mat: null });
+  const geo = finish(parts, { hx: 1.9, hz: 1.9, height: 1.0 });
+  return geo;
+}
+
+/**
+ * AMMUNITION DUMP — a supply point's munitions: green-painted crates stacked
+ * on a timber pallet, a few loose ones, a knee-high sandbag wall on two sides.
+ */
+export function buildAmmoDump({ seed = 2202 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  parts.push({ geo: buildBox(2.2, 0.12, 1.3), pos: [0, 0.06, 0], mat: MAT.timber, tone: 0.38 });
+  for (let layer = 0; layer < 3; layer++) {
+    const n = 4 - layer;
+    for (let k = 0; k < n; k++) {
+      const w = 0.5, h = 0.3, d = 0.32;
+      parts.push({ geo: buildBox(w, h, d), pos: [-0.75 + k * 0.52 + layer * 0.26 + (R() - 0.5) * 0.03, 0.12 + h / 2 + layer * (h + 0.01), -0.3 + (R() - 0.5) * 0.04], rot: [0, (R() - 0.5) * 0.06, 0], mat: MAT.paint, tone: 0.22 + R() * 0.1 });
+      parts.push({ geo: buildBox(w, h, d), pos: [-0.75 + k * 0.52 + layer * 0.26 + (R() - 0.5) * 0.03, 0.12 + h / 2 + layer * (h + 0.01), 0.1 + (R() - 0.5) * 0.04], rot: [0, (R() - 0.5) * 0.06, 0], mat: MAT.paint, tone: 0.22 + R() * 0.1 });
+    }
+  }
+  // Loose crates by the pallet, one open lid leaning on it.
+  // (spaced and each its own height: two equal tops touching flickered — the coplanar test)
+  for (let k = 0; k < 3; k++) { const h = 0.28 + k * 0.03; parts.push({ geo: buildBox(0.5, h, 0.32), pos: [1.5 + (k % 2) * 0.1, h / 2, -0.6 + k * 0.62], rot: [0, 0.3 + R() * 0.6, 0], mat: MAT.paint, tone: 0.24 + R() * 0.08 }); }
+  parts.push({ geo: buildBox(0.5, 0.03, 0.32), pos: [1.95, 0.25, 0.6], rot: [0, 0.4, 1.0], mat: MAT.timber, tone: 0.4 });
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  parts.push({ geo: buildSandbagWall({ length: 3.2, courses: 2, seed: seed + 7, bag }), pos: [0, 0, -1.05], mat: null });
+  parts.push({ geo: buildSandbagWall({ length: 2.4, courses: 2, seed: seed + 9, bag }), pos: [-1.65, 0, 0.2], rot: [0, Math.PI / 2, 0], mat: null });
+  return finish(parts, { hx: 2.2, hz: 1.6, height: 1.1 });
+}
+
+/**
  * ROCK OUTCROP — a cluster of limestone crags breaking out of a hillside,
  * 1-3 m high, the biggest leaning on the others: hard cover on open slopes
  * (alg-rts algLandmarks.js instances a few seeds of it across the map). The

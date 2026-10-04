@@ -2,6 +2,7 @@
 // three resources (effectifs, carburant, munitions, algEconomy.js), each with
 // its income a minute, and the villages — how many are yours, how many the
 // ALN's. This game's own (nam's shows its requisition points).
+import { iconSvg } from "./resourceIcons.js";
 const CSS = `
 /* TOP RIGHT (2026-10-02, CoH): the numbers off the command card's back. */
 #alg-res {
@@ -12,6 +13,8 @@ const CSS = `
 }
 #alg-res .row { display: flex; align-items: center; gap: 10px; }
 #alg-res .row2 { font-size: 10px; }
+#alg-res .ric { display: inline-flex; color: var(--hud-dim); }
+#alg-res .res.mp .ric { color: var(--hud-brass); } #alg-res .res.fuel .ric { color: #e2b25a; } #alg-res .res.mun .ric { color: #d48a6a; }
 #alg-res .res { display: flex; align-items: baseline; gap: 5px; }
 #alg-res .amount { font-weight: 700; font-size: 14px; color: var(--hud-brass); min-width: 30px; text-align: right; }
 #alg-res .res.fuel .amount { color: #e2b25a; }
@@ -34,9 +37,9 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
   root.id = "alg-res";
   root.innerHTML = `
     <div class="row">
-    <span class="res mp" title="Effectifs (manpower): from Algiers all the time, less the upkeep of your army in the field. Buys and reinforces the squads."><span class="hud-label">Eff.</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
-    <span class="res fuel" title="Carburant: from the villages and fuel points you hold, linked to the post. Vehicles, the Alouette, the tiers."><span class="hud-label">Carb.</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
-    <span class="res mun" title="Munitions: from the villages and munition points you hold, linked to the post. Grenades, the Légion."><span class="hud-label">Mun.</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
+    <span class="res mp" title="Effectifs (manpower): from Algiers all the time, less the upkeep of your army in the field. Buys and reinforces the squads."><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
+    <span class="res fuel" title="Carburant: from the villages and fuel points you hold, linked to the post. Vehicles, the Alouette, the tiers."><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
+    <span class="res mun" title="Munitions: from the villages and munition points you hold, linked to the post. Grenades, the Légion."><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
     </div>
     <div class="row row2">
     <span class="dim" id="alg-res-villages"></span>

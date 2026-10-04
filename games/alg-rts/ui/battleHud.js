@@ -14,6 +14,7 @@
 // what changed. The top of the screen otherwise stays empty (hudBar.js).
 import { MINI } from "./hudBar.js";
 import { rectOf } from "../../shared-rts/canvasRect.js";
+import { iconSvg, pointIcon } from "./resourceIcons.js";
 
 const CSS = `
 #alg-score {
@@ -93,17 +94,20 @@ const CSS = `
   font: 600 11px var(--hud-sans); color: #efe8d2; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,0.6);
   will-change: transform;
 }
-.alg-vmark .flag { width: 14px; height: 14px; transform: rotate(45deg); border: 1.5px solid rgba(10,12,8,0.9); background: #e2d7b8; }
-.alg-vmark.player .flag { background: #5aaeff; } .alg-vmark.enemy .flag { background: #ff5f4e; }
-.alg-vmark .cap { width: 64px; height: 5px; background: rgba(20,22,16,0.85); border: 1px solid rgba(0,0,0,0.7); position: relative; }
-.alg-vmark .cap i { position: absolute; top: 0; bottom: 0; }
-/* A SUPPLY POINT (algEconomy.js): a round token with its letter, smaller. */
-.alg-vmark.supply .flag { transform: none; border-radius: 50%; width: 15px; height: 15px; font: 800 9px/15px var(--hud-sans, sans-serif); text-align: center; color: rgba(10,12,8,0.9); }
-.alg-vmark.supply .name { font-size: 10px; opacity: 0.85; }
-.alg-vmark.supply .cap { width: 40px; height: 4px; }
+/* THE POINT MARKER (2026-10-04, CoH): the point's icon (ui/resourceIcons.js — a star for a
+   village, a jerrycan / cartridges for a supply point) in a dark disc, the CAPTURE RING round it
+   filling toward whoever is winning it (blue France, red FLN); the icon in its holder's colour. */
+.alg-vmark .flag { position: relative; width: 32px; height: 32px; }
+.alg-vmark.supply .flag { width: 26px; height: 26px; }
+.alg-vmark .flag svg.ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
+.alg-vmark .ring .bg { fill: rgba(14,16,12,0.82); stroke: rgba(239,232,210,0.35); stroke-width: 2; }
+.alg-vmark .ring .pr { fill: none; stroke-width: 3.2; stroke-linecap: round; stroke-dasharray: 0 100; }
+.alg-vmark .flag .ic { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: #e2d7b8; }
+.alg-vmark.player .ic { color: #5aaeff; } .alg-vmark.enemy .ic { color: #ff5f4e; }
+.alg-vmark.player .ring .bg { stroke: rgba(90,174,255,0.6); } .alg-vmark.enemy .ring .bg { stroke: rgba(255,95,78,0.6); }
 /* Held, but cut off from the post: pays nothing. */
-.alg-vmark.player.cut .flag { background: #e0a040; }
-.alg-vmark .cap::after { content: ""; position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: rgba(239,232,210,0.6); }
+.alg-vmark.player.cut .ic { color: #e0a040; } .alg-vmark.player.cut .ring .bg { stroke: rgba(224,160,64,0.7); }
+.alg-vmark.supply .name { font-size: 10px; opacity: 0.85; }
 
 .alg-modal-back {
   position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
@@ -254,15 +258,16 @@ export function createBattleHud({ camera, canvas, onJump }) {
       if (!m) {
         const node = document.createElement("div");
         node.className = "alg-vmark";
-        node.innerHTML = `<div class="flag"></div><div class="name"></div><div class="cap"><i></i></div>`;
-        node.querySelector(".name").textContent = p.kind === "supply" ? p.name.split(" · ")[0] : p.name;
-        if (p.kind === "supply") node.querySelector(".flag").textContent = p.res === "fuel" ? "C" : "M";
+        const supply = p.kind === "supply";
+        node.innerHTML = `<div class="flag"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="pr" cx="18" cy="18" r="15" pathLength="100"/></svg>`
+          + `<span class="ic">${iconSvg(pointIcon(p), { size: supply ? 14 : 17 })}</span></div><div class="name"></div>`;
+        node.querySelector(".name").textContent = supply ? p.name.split(" · ")[0] : p.name;
         for (const el of node.querySelectorAll(".flag, .name")) {
           el.addEventListener("pointerenter", () => { hovered = p; });
           el.addEventListener("pointerleave", () => { if (hovered === p) hovered = null; });
         }
         document.body.appendChild(node);
-        m = { node, cap: node.querySelector(".cap i"), last: "" };
+        m = { node, ring: node.querySelector(".ring .pr"), last: "" };
         marks.set(p, m);
       }
       // 9 m over the village's centre, projected; hidden off screen or behind.
@@ -279,10 +284,9 @@ export function createBattleHud({ camera, canvas, onJump }) {
       if (key === m.last) continue;
       m.last = key;
       m.node.className = `alg-vmark ${p.owner ?? ""}${p.kind === "supply" ? " supply" : ""}${p.owner === "player" && p.linked === false ? " cut" : ""}`;
-      // The bar fills from the centre: right (blue) toward the French, left (red) toward the FLN.
-      Object.assign(m.cap.style, v >= 0
-        ? { left: "50%", right: "", width: `${v * 50}%`, background: "#5aaeff" }
-        : { left: "", right: "50%", width: `${-v * 50}%`, background: "#ff5f4e" });
+      // The ring fills clockwise toward whoever is winning it: blue the French, red the FLN.
+      m.ring.style.strokeDasharray = `${(Math.abs(v) * 100).toFixed(1)} 100`;
+      m.ring.style.stroke = v >= 0 ? "#5aaeff" : "#ff5f4e";
     }
   }
 

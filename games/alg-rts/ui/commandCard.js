@@ -16,17 +16,20 @@
 import { HOTKEY, hasIcon, iconStyle } from "./icons.js";
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { costOf, hasCost } from "../algEconomy.js";
+import { iconSvg } from "./resourceIcons.js";
 
 // A price on a button: the effectifs, then the fuel / munitions under it.
 function costTag(c) {
   const k = costOf(c);
-  const parts = [k.mp ? `<b>${k.mp}</b>` : "", k.fuel ? `<b class="fu">${k.fuel}</b>` : "", k.mun ? `<b class="mu">${k.mun}</b>` : ""].filter(Boolean);
+  // Each resource with its icon (ui/resourceIcons.js), as CoH prices things.
+  const ic = (key) => iconSvg(key, { size: 9 });
+  const parts = [k.mp ? `<b>${ic("mp")}${k.mp}</b>` : "", k.fuel ? `<b class="fu">${ic("fuel")}${k.fuel}</b>` : "", k.mun ? `<b class="mu">${ic("mun")}${k.mun}</b>` : ""].filter(Boolean);
   return parts.length ? `<span class="co">${parts.join("")}</span>` : "";
 }
 // The same, spelled out for a tooltip.
 function costText(c) {
   const k = costOf(c);
-  return [k.mp && `${k.mp} effectifs`, k.fuel && `${k.fuel} carburant`, k.mun && `${k.mun} munitions`].filter(Boolean).join(" · ");
+  return [k.mp && `${iconSvg("mp", { size: 11 })} ${k.mp} effectifs`, k.fuel && `${iconSvg("fuel", { size: 11 })} ${k.fuel} carburant`, k.mun && `${iconSvg("mun", { size: 11 })} ${k.mun} munitions`].filter(Boolean).join(" · ");
 }
 
 const CSS = `

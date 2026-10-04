@@ -27,6 +27,7 @@ import { createAlgDamage } from "./algDamage.js";
 import { createAlgWire } from "./algWire.js";
 import { createAlgFields } from "./algFields.js";
 import { createAlgVillageLife } from "./algVillageLife.js";
+import { createAlgPointFlags } from "./algPointFlags.js";
 import { createAlgHens } from "./algHens.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
@@ -421,6 +422,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? null, plants: app.showroom?.plants ?? null });
       console.log(`[village life] ${JSON.stringify(app.algVillageLife.stats)} in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg village life] failed:", e); }
+  }
+  // THE POINTS' FLAGS (algPointFlags.js): a flagpole on every capture point, the flag rising
+  // with the capture; a fuel or ammunition depot on the supply points. ?pointflags=0 = without.
+  if (params.get("pointflags") !== "0" && app.algEconomy) {
+    try {
+      app.algPointFlags = createAlgPointFlags(app, { economy: app.algEconomy, navGrid: app.navGrid ?? null });
+      app.addPreRenderHook((dt) => app.algPointFlags.frame(dt, app.camera));
+      console.log(`[point flags] ${JSON.stringify(app.algPointFlags.stats)}`);
+    } catch (e) { console.warn("[alg point flags] failed:", e); }
   }
   if (app.algFields || app.algLandmarks) app.algCover?.bake();
   // The minimap was baked before the fields and farmsteads: again, with them.
