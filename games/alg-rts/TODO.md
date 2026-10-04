@@ -789,6 +789,18 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       unreachable), ring/bar thickness.
 - [ ] **THE PERF + LOAD AUDIT** (you, 2026-10-03): its brief is
       games/alg-rts/PERF_AUDIT.md — run it in a NEW chat.
+- [x] **FOG OF WAR, CoH LOOK + THE EXPOSURE BUG** (you, 2026-10-04: "should it not look like
+      CoH? isn't the scene too bright?"). The look was nam's (blend to a fixed grey / black
+      unexplored), never a decision. MEASURED the brightness bug: Sky Pro's auto exposure meters
+      the linear frame, the fog darkened half of it zoomed out → exposure x5.9 instead of x2.35,
+      what you SEE washed out. FIX: the fog of war darkens the FINISHED frame (new postFx
+      `setDisplayModifier`, after the meter; fogOfWar `stage: "display"`) — exposure now x2.3
+      fog on and off. LOOK (`look: "coh"`): the ground keeps its colour, darker (unseen x0.5,
+      never explored x0.34), half desaturated, a touch cool; never black. nam unchanged.
+- [ ] you, look: the fog's strength (0.5 / 0.34, the cool tint) in play and at night.
+- [ ] THE START IS STILL BRIGHT on its own (x2.3 at 15:12: auto exposure pushes the sunny
+      desert to mid-grey, the post's white walls clip). Your pick: a lower exposure target
+      for alg, or a later default time (16:30-17:00, lower warmer sun) — A/B them side by side.
 - [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
       do?" — later): measure the boot's stages first (alg.html already
       logs them for its progress bar), then the usual suspects: the animal

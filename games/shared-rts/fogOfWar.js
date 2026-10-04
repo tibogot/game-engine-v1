@@ -58,7 +58,19 @@ function boxBlur(src, size, radius) {
   return dst;
 }
 
-export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false, bounds = null, ridgeLOS = null, bakeHz = 0 }) {
+/**
+ * `look` (alg-rts opts in, 2026-10-04, you: "shouldn't it look like Company of Heroes?"):
+ *   "shroud" (nam, as it was): fogged ground blends toward FIXED colours — a blue-grey shroud,
+ *            near-black unexplored.
+ *   "coh":   the ground keeps ITS colour, darkened and partly desaturated with a slight cool
+ *            tint: unseen ~half as bright, never-explored a little darker still (CoH never
+ *            blacks out the map — the land is known, what is on it is not). Multiplicative, so
+ *            it follows the light by itself (night included).
+ * `stage` "display" (alg-rts): the fog darkens the FINISHED frame (postFx.setDisplayModifier),
+ *   after the exposure meter — darkening half the screen in the scene colour made the auto
+ *   exposure brighten everything x2.5. A pre-modifier (the fog banks) stays in the scene colour.
+ */
+export function createFogOfWar({ app, units, structures, buildings, getRadioIntel = () => false, enabled: startEnabled = false, bounds = null, ridgeLOS = null, bakeHz = 0, look = "shroud", stage = "scene" }) {
   /** { eye, target } metres, or null: plain disks (nam). */
   const ridge = ridgeLOS;
   let bakeAcc = 0, baked = false;
@@ -294,17 +306,28 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     const outsideDim = (xz) => smoothstep(float(0), float(14), outsideD(xz)).mul(uOutOn);
     edgeUniforms = { uOutOn, uOutMode, uOutStrength, uOutColor };
 
-    const shadeRgb = Fn(([rgb, fowUv]) => {
-      const sample = texture(fowTexNode, fowUv);
-      const strength = sample.r.mul(uEnabled);
-      const isShroud = step(float(0.5), sample.g);
-      const lum = rgb.dot(vec3(0.2126, 0.7152, 0.0722));
-      const desat = mix(vec3(lum), rgb, float(1).sub(uDesat));
-      const shrouded = mix(desat, uShroud, strength.mul(float(0.78)));
-      const hidden = mix(rgb, uUnexplored, strength);
-      const fogged = mix(hidden, shrouded, isShroud);
-      return mix(rgb, fogged, strength);
-    });
+    const shadeRgb = look === "coh"
+      // CoH: its own colour, darker, half desaturated, a touch cool (see `look` above).
+      ? Fn(([rgb, fowUv]) => {
+        const sample = texture(fowTexNode, fowUv);
+        const strength = sample.r.mul(uEnabled);
+        const isShroud = step(float(0.5), sample.g);
+        const lum = rgb.dot(vec3(0.2126, 0.7152, 0.0722));
+        const cool = mix(rgb, vec3(lum), float(0.5)).mul(vec3(0.88, 0.94, 1.06));
+        const fogged = cool.mul(mix(float(0.34), float(0.5), isShroud));
+        return mix(rgb, fogged, strength);
+      })
+      : Fn(([rgb, fowUv]) => {
+        const sample = texture(fowTexNode, fowUv);
+        const strength = sample.r.mul(uEnabled);
+        const isShroud = step(float(0.5), sample.g);
+        const lum = rgb.dot(vec3(0.2126, 0.7152, 0.0722));
+        const desat = mix(vec3(lum), rgb, float(1).sub(uDesat));
+        const shrouded = mix(desat, uShroud, strength.mul(float(0.78)));
+        const hidden = mix(rgb, uUnexplored, strength);
+        const fogged = mix(hidden, shrouded, isShroud);
+        return mix(rgb, fogged, strength);
+      });
 
     const apply = Fn(([color]) => {
       const ndc = vec2(screenUV.x, float(1).sub(screenUV.y)).mul(2).sub(1);
@@ -395,11 +418,21 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   let pre = null;
   let postApp = null;
   const hook = (color, ctx) => post.node(pre ? pre(color, ctx) : color);
+  // stage "display": the fog on the finished frame, the pre-modifier alone in the scene colour.
+  const displayStage = () => stage === "display" && !!postApp?.postFx?.setDisplayModifier;
+  const preHook = (color, ctx) => (pre ? pre(color, ctx) : color);
+  const fogHook = (color) => post.node(color);
+  function hookUp() {
+    if (displayStage()) {
+      postApp.postFx.setSceneColorModifier?.(pre ? preHook : null);
+      postApp.postFx.setDisplayModifier(fogHook);
+    } else postApp?.postFx?.setSceneColorModifier?.(hook);
+  }
 
   function installPostFx(appRef) {
     postApp = appRef;
     post = createPostModifier(appRef.camera);
-    appRef.postFx?.setSceneColorModifier?.(hook);
+    hookUp();
     post.syncCamera(appRef.camera);
     // The modifier is created enabled; it has to learn the state it missed,
     // because setEnabled may well have run before there was a `post` to tell.
@@ -432,7 +465,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     /** `(color, { scenePass }) => color`, run before the fog of war; null to drop it. */
     setPreModifier(fn) {
       pre = typeof fn === "function" ? fn : null;
-      if (post) postApp?.postFx?.setSceneColorModifier?.(hook);   // rebuild the chain
+      if (post) hookUp();   // rebuild the chain
     },
     isExplored,
     isVisible,

@@ -12450,6 +12450,8 @@ export async function startV3App(opts = {}) {
        */
       /** Kill lone blown-up pixels (fireflies) in the scene colour — opt-in (alg-rts). */
       setDespeckle(on) { worldEnv?.postFxPipeline?.setDespeckle?.(on); },
+      /** (color, ctx) => color on the finished linear frame, after the exposure meter (see postFxPipeline). */
+      setDisplayModifier(fn) { worldEnv?.postFxPipeline?.setDisplayModifier?.(fn); },
       setSceneColorModifier(fn) {
         worldEnv?.postFxPipeline?.setSceneColorModifier(fn);
       },

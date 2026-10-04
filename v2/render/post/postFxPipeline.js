@@ -155,6 +155,9 @@ export class PostFxPipeline {
     this._sceneColorModifier = null;
     // FIREFLY FILTER on the scene colour (despeckleNode.js) — opt-in, alg-rts.
     this._despeckle = false;
+    // A DISPLAY-stage modifier (setDisplayModifier): after the linear HDR frame is
+    // complete — after Sky Pro's haze and its exposure METER — before tone mapping.
+    this._displayModifier = null;
     this._bloomParams = {
       strength: 0.3,
       threshold: 0.9,
@@ -468,6 +471,19 @@ export class PostFxPipeline {
 
   setSceneColorModifier(fn) {
     this._sceneColorModifier = typeof fn === "function" ? fn : null;
+    if (this._renderPipeline) this._refreshOutputNode();
+  }
+
+  /**
+   * `(color, { scenePass }) => color` on the FINISHED linear frame, just before
+   * tone mapping — null to drop it. What darkens a part of the screen for the
+   * PLAYER (alg-rts's fog of war, 2026-10-04) goes here, not in the scene colour:
+   * Sky Pro's auto exposure meters the linear frame, and a fog of war darkening
+   * half the screen there pushed the exposure x2.5 — everything you could see
+   * washed out when you zoomed out.
+   */
+  setDisplayModifier(fn) {
+    this._displayModifier = typeof fn === "function" ? fn : null;
     if (this._renderPipeline) this._refreshOutputNode();
   }
 
@@ -1064,6 +1080,7 @@ export class PostFxPipeline {
   }
 
   _buildDisplayChain(inputNode) {
+    if (this._displayModifier) inputNode = this._displayModifier(inputNode, { scenePass: this._scenePass });
     /*
      * BEFORE renderOutput, deliberately. The Purkinje shift is a response to ABSOLUTE
      * luminance, and renderOutput is where tone mapping compresses exactly that away —

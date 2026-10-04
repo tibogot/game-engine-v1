@@ -211,6 +211,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     bakeHz: 15,
     // Outside the playable box the land is darkened (CoH): scenery.
     bounds: PLAY,
+    // CoH's look (darker, cooler, never black) on the FINISHED frame — after Sky Pro's
+    // exposure meter, which the fog used to fool into brightening everything (2026-10-04).
+    look: "coh", stage: "display",
   });
   app.fogOfWar = fogOfWar;
   fogOfWar.installPostFx(app);
