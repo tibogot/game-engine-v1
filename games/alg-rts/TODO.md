@@ -95,12 +95,52 @@ One screen, most important first. Details stay in the sections below;
   painted, the oasis groves); block the nav grid. 10 / 10 / 5 / 5, 8 draws, cost in the
   noise. ?life=0 = without. You, look: sizes, the straw colour, how many.
 - MISSION 2 — THE NORTH CONSTANTINOIS COAST, AUGUST 1955 (you, 2026-10-04): a new map,
-  the Aurès untouched. Real ground cut with tools/algDem.mjs (candidates: Collo, Stora /
-  Philippeville, Filfila / El Halia); SMALLER play box (~450-500 m vs 610) with the sea as
-  an edge, less walkable land (hills to the shore, coves, a coast road). Steps: pick the
-  cut → land-only metrics (the sea counts as "flat" today) → make the game map-driven
-  (layout.js per map, ?map=) → Ocean Pro in alg → coastal ground + maquis / cork oak →
-  points, starts, AI. Not started past the cuts.
+  the Aurès untouched. SMALLER play box (~450-500 m vs 610) with the sea as an edge, AT
+  LEAST AS WALKABLE AS THE AURÈS (you, 2026-10-04: CoH maps are near-flat; cover comes
+  from hedges / walls / buildings, not cliffs — Stora was rejected for that). Steps: pick
+  the cut → land-only metrics → make the game map-driven (layout.js per map, ?map=) →
+  Ocean Pro in alg → coastal ground + maquis / cork oak → points, starts, AI.
+  - [x] CUT (you picked Filfila): algDem `--site coast-filfila` (36.9058, 7.0517, 3 km,
+    re-centred on the shore). Land-only metrics now in rtsMapMetrics (`seaMask`) +
+    tools/algMapBox.mjs (ranks boxes with the sea along an edge, chokepoints).
+  - [ ] BOX (proposed, you confirm): 500 m centred (100, -20) — sea N + W (the bay, its
+    beach), the headland to 54 m NE, ridges E. Land 84% (21 ha vs the Aurès box's 37),
+    walkable 99.6% (Aurès 94%), gentle 83% (57%), no neck under 24 m — chokes come
+    from what we place.
+  - [x] MAP-DRIVEN GAME (2026-10-04): layout.js picks maps/aures.js or maps/coast.js by
+    ?map= (none = the Aurès; Node tools = the Aurès). A map holds PLAY, LAYOUT and MAP
+    (level file, tracks, supply points, `handPlaced` = the showroom's gardens). Showroom
+    and landmarks skip sites / tracks a map lacks. CHECKED: the Aurès with no ?map vs
+    HEAD — 518 scene objects, 509 identical, the 9 others animated (smoke, birds, men);
+    same boot logs, same screenshot; fast lane 199/199 green. public/levels/alg-coast.v3proj
+    built by tools/algCoastLevel.mjs (the Aurès look, one paint layer; the sea: see
+    OCEAN PRO below); boots in ~12 s, no errors. Left: a "Draw with an index
+    count of 0" warning on the coast only; the briefing is still the Aurès text (step 6).
+  - [x] OCEAN PRO in alg (step 4, 2026-10-04): the level carries Tidewater's worldOcean
+    (algCoastLevel --ocean), sea level 30 m, the seabed on Tidewater's bay profile (a
+    smoothstep shelf first: a 60-80 m band of foam + a hard line where it went flat).
+    No game code: the engine loads it from the level. COST (gpuBench abCases, scale 1,
+    1523x757): 2.5 ms at the shore (frame 6.7 vs 4.2), 1.1 ms inland (the horizon);
+    hidden meshes = ocean off, so it is the draw, not the sim. gpuHealth's stored "best"
+    (57 TFLOPS) is a bad old reading — its verdict is meaningless until reset. You, look:
+    ?map=coast&fow=0. Next: stones (algStones) keep off the seabed.
+    YOUR "BAD FOAM, HARD EDGES" (2026-10-04) — three causes, all in the LEVEL, none in
+    Ocean Pro: (1) the SWELL was Tidewater's 263° (travelling north, off our land into the
+    bay): the shore field foamed the open water in blocks with hard edges → --swell 45
+    (from the NW, onto the beach), wind 40; (2) a smoothstep seabed (flat at the shore) →
+    Tidewater's bay profile; (3) the cut's coast sat 5 cm over the sea for tens of metres
+    and the swash ran far inland → Tidewater's beach (6.8% + the berm) added to the land.
+    Checked NOT the cause: heightmap row order (GPU column read back = CPU, flip 0), the
+    CPU heights Ocean Pro solves on (= terrain at 7 points), the shore field (debug view
+    13: smooth). The white wisps with dark wedges over the shore are RtsBirds + their
+    shadows. OPEN: a faint dark dotted line in the water a few m off the beach, parallel
+    to it — in the OceanPro surface draw (gone with it hidden; not the spray, lips, birds,
+    wires); suspect cracks between its CDLOD rings seen from the RTS camera (Tidewater's
+    camera is low), not proven.
+  - [ ] COAST GROUND (step 5): ITS OWN TEXTURES (you, 2026-10-04: so it reads as a new
+    terrain) — beach sand, red earth, maquis ground; its own paint layers in the level.
+    Plants: maquis scrub, cork oak, the unused plant-lab trees. The land edges (S, E)
+    still drop at the heightmap border: a far grid of the real coast (algMountains-style).
 - FILL THE MAP: dense scrub along the wadis, (orchards: done 2026-10-04),
   oasis gardens and a second oasis, graded terraces and tracks.
 - Buildings: a second outpost (SAS post), the H-34 gunship + a helipad.

@@ -18,7 +18,7 @@ import { createAlgLandmarks, landmarkEntries } from "./algLandmarks.js";
 import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
-import { LAYOUT, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
+import { LAYOUT, MAP, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgNightLamps } from "./algNightLamps.js";
 import { createAlgBattle } from "./algBattle.js";
@@ -175,7 +175,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // shadows turns them on, or ?cloudshadows=1 at boot.
   app.setCloudShadows?.(SKY_PRO ? { mapOn: params.get("cloudshadows") === "1" } : { enabled: params.get("cloudshadows") === "1" });
 
-  const levels = createLevelLoader(app, { defaultUrl: "/levels/alg-aures.v3proj", onStatus, onProgress });
+  const levels = createLevelLoader(app, { defaultUrl: MAP.level, onStatus, onProgress });
   const boot = await levels.loadBoot();
   // What the ENGINE put in the scene: the warm-up at the end leaves it alone.
   const engineObjects = snapshotEngineScene(app.scene);

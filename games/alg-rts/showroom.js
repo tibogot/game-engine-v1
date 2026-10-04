@@ -18,7 +18,7 @@ import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { drawFlnDataUrl, plantPostFlag } from "./algFlag.js";
 import { createWind, createWindsock } from "./algWind.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
-import { LAYOUT, siteYaw } from "./layout.js";
+import { LAYOUT, MAP, siteYaw } from "./layout.js";
 import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildKsar, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
@@ -87,7 +87,7 @@ const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
  * MEASURED gentle (height spread ~1 m over its yard) and clear of the
  * hamlet's pad and rim.
  */
-const HAMLET_SITE = { ...HAMLETS[0], yaw: siteYaw(HAMLETS[0]) };
+const HAMLET_SITE = HAMLETS[0] ? { ...HAMLETS[0], yaw: siteYaw(HAMLETS[0]) } : null;
 export const SAS_POST = { key: "sasPost", build: buildSasPost, lx: 66, lz: 25, yaw: -0.15 };
 
 /**
@@ -105,17 +105,18 @@ export const ALN_BUILDABLES = [
   { key: "mineMarker", build: buildMineMarker, lx: 60, lz: 60, yaw: 0.4, follow: true },
 ];
 
-/** What to show, and where (world x/z, yaw). */
-const site = (kind) => { const s = LAYOUT.sites.find((q) => q.kind === kind); return { ...s, yaw: siteYaw(s) }; };
+/** What to show, and where (world x/z, yaw). A site this map lacks is null, and nothing stands at it. */
+const site = (kind) => { const s = LAYOUT.sites.find((q) => q.kind === kind); return s ? { ...s, yaw: siteYaw(s) } : null; };
 const DECHRA = site("dechra"), KOUBBA = site("koubba"), CEMETERY = site("cemetery"), KSAR = site("ksar");
 /**
  * Graves lie with the body on its right side facing Mecca: from the Aurès the
  * qibla bears ~108°, so the grave's long axis runs at 18° (NNE–SSW). World
  * -Z is north, +X east (heightmap row 0 = north). In the cemetery's frame.
  */
-const QIBLA_AXIS = (() => { const b = (18 * Math.PI) / 180; return Math.atan2(Math.sin(b), -Math.cos(b)) - CEMETERY.yaw; })();
-const H2 = { ...HAMLETS[1], yaw: siteYaw(HAMLETS[1]) };
-const GARDENS = [
+const QIBLA_AXIS = CEMETERY ? (() => { const b = (18 * Math.PI) / 180; return Math.atan2(Math.sin(b), -Math.cos(b)) - CEMETERY.yaw; })() : 0;
+const H2 = HAMLETS[1] ? { ...HAMLETS[1], yaw: siteYaw(HAMLETS[1]) } : null;
+// Placed by hand on the Aurès (layout.js MAP.handPlaced).
+const GARDENS = !MAP.handPlaced ? [] : [
   // Mechta Ouled Ali.
   { key: "gardenOA1", build: (o) => buildGarden({ ...o, seed: 101, kind: "olive" }), x: 180, z: 87, yaw: HAMLET_SITE.yaw, ground: true },
   { key: "gardenOA2", build: (o) => buildGarden({ ...o, seed: 102, kind: "mixed", w: 16 }), x: 113, z: 76, yaw: HAMLET_SITE.yaw + 0.15, ground: true },
@@ -133,23 +134,25 @@ const GARDENS = [
   { key: "gardenD", build: (o) => buildGarden({ ...o, seed: 124, kind: "olive" }), x: -177, z: 201, yaw: DECHRA.yaw, ground: true },
   { key: "threshD", build: () => buildThreshingFloor({ seed: 125 }), x: -150, z: 160, yaw: 0, rim: 3 },
 ];
+/** `make(site)` if the map has the site, else nothing (filtered out below). */
+const at = (s, make) => (s ? make(s) : null);
 const VILLAGE = [
-  { key: "dechra", build: (o) => buildDechra(o), x: DECHRA.x, z: DECHRA.z, yaw: DECHRA.yaw, ground: true },
-  { key: "koubba", build: (o) => buildKoubba(o), x: KOUBBA.x, z: KOUBBA.z, yaw: KOUBBA.yaw, ground: true },
-  { key: "cemetery", build: (o) => buildCemetery({ ...o, align: QIBLA_AXIS }), x: CEMETERY.x, z: CEMETERY.z, yaw: CEMETERY.yaw, ground: true },
+  at(DECHRA, (s) => ({ key: "dechra", build: (o) => buildDechra(o), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
+  at(KOUBBA, (s) => ({ key: "koubba", build: (o) => buildKoubba(o), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
+  at(CEMETERY, (s) => ({ key: "cemetery", build: (o) => buildCemetery({ ...o, align: QIBLA_AXIS }), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
   // THE KSAR on its knoll (you, 2026-09-29, after a photo of Ghardaïa): built
   // up the real slope; only its souk is levelled — the knoll falls 8 m across
   // the square, so the arcades back into a cut and the square stands on the fill.
   // The pad is the souk's rect (buildKsar: x ±16, z -39.2..-21.5), scaled 1.3.
-  { key: "ksar", build: (o) => buildKsar(o), x: KSAR.x, z: KSAR.z, yaw: KSAR.yaw, ground: true, pad: { lx: 0, lz: -30.35 * 1.3, hx: 16 * 1.3, hz: 8.85 * 1.3, rim: 12 } },
+  at(KSAR, (s) => ({ key: "ksar", build: (o) => buildKsar(o), x: s.x, z: s.z, yaw: s.yaw, ground: true, pad: { lx: 0, lz: -30.35 * 1.3, hx: 16 * 1.3, hz: 8.85 * 1.3, rim: 12 } })),
   // A well at the dechra's foot and at each hamlet; a zeriba beside each hamlet.
   // Pen spots MEASURED: clear of every piece (full footprint), off the wadi
   // bed, the flattest ground within ~70 m.
-  (() => { const [x, z] = fromBase(0, 40, DECHRA); return { key: "wellDechra", build: buildVillageWell, x, z, yaw: DECHRA.yaw, rim: 4 }; })(),
-  (() => { const [x, z] = fromBase(40, -10, HAMLET_SITE); return { key: "wellHamlet1", build: () => buildVillageWell({ seed: 71 }), x, z, yaw: HAMLET_SITE.yaw, rim: 4 }; })(),
-  (() => { const [x, z] = fromBase(34, 0, H2); return { key: "wellHamlet2", build: () => buildVillageWell({ seed: 73 }), x, z, yaw: H2.yaw, rim: 4 }; })(),
-  (() => { const [x, z] = fromBase(24, 58, HAMLET_SITE); return { key: "zeriba1", build: (o) => buildZeriba({ ...o, seed: 81 }), x, z, yaw: HAMLET_SITE.yaw, ground: true }; })(),
-  (() => { const [x, z] = fromBase(48, 26, H2); return { key: "zeriba2", build: (o) => buildZeriba({ ...o, seed: 83, r: 5.5 }), x, z, yaw: H2.yaw, ground: true }; })(),
+  at(DECHRA, (s) => { const [x, z] = fromBase(0, 40, s); return { key: "wellDechra", build: buildVillageWell, x, z, yaw: s.yaw, rim: 4 }; }),
+  at(HAMLET_SITE, (s) => { const [x, z] = fromBase(40, -10, s); return { key: "wellHamlet1", build: () => buildVillageWell({ seed: 71 }), x, z, yaw: s.yaw, rim: 4 }; }),
+  at(H2, (s) => { const [x, z] = fromBase(34, 0, s); return { key: "wellHamlet2", build: () => buildVillageWell({ seed: 73 }), x, z, yaw: s.yaw, rim: 4 }; }),
+  at(HAMLET_SITE, (s) => { const [x, z] = fromBase(24, 58, s); return { key: "zeriba1", build: (o) => buildZeriba({ ...o, seed: 81 }), x, z, yaw: s.yaw, ground: true }; }),
+  at(H2, (s) => { const [x, z] = fromBase(48, 26, s); return { key: "zeriba2", build: (o) => buildZeriba({ ...o, seed: 83, r: 5.5 }), x, z, yaw: s.yaw, ground: true }; }),
   // THE LAND THEY WORK (2026-09-29): walled olive/fig gardens, almond
   // terraces up the slopes, a threshing floor each. Spots MEASURED (a search
   // round each village): clear of every piece, the tracks, the wadi beds and
@@ -157,7 +160,7 @@ const VILLAGE = [
   // stand on a pad), terraces on 9-15 deg with < 4 deg of side tilt, turned
   // so they climb straight uphill (their yaw is the ground's, not the view's).
   ...GARDENS,
-];
+].filter(Boolean);
 
 /**
  * What the SAPPERS build (algBuild.js) is no longer placed at the start (you,
@@ -172,16 +175,16 @@ export const SHOWROOM = [
   ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
-  { key: "mechta", build: buildMechta, x: HAMLETS[0].x, z: HAMLETS[0].z, yaw: siteYaw(HAMLETS[0]) },
-  { key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: HAMLETS[1].x, z: HAMLETS[1].z, yaw: siteYaw(HAMLETS[1]) },
-  (() => { const [x, z] = fromBase(SAS_POST.lx, SAS_POST.lz, HAMLET_SITE); return { key: SAS_POST.key, build: SAS_POST.build, x, z, yaw: HAMLET_SITE.yaw + SAS_POST.yaw, rim: 6 }; })(),
+  at(HAMLET_SITE, (s) => ({ key: "mechta", build: buildMechta, x: s.x, z: s.z, yaw: s.yaw })),
+  at(H2, (s) => ({ key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: s.x, z: s.z, yaw: s.yaw })),
+  at(HAMLET_SITE, (s) => { const [x, z] = fromBase(SAS_POST.lx, SAS_POST.lz, s); return { key: SAS_POST.key, build: SAS_POST.build, x, z, yaw: s.yaw + SAS_POST.yaw, rim: 6 }; }),
   // THE DECHRA, its koubba and cemetery on the crest, wells and zeribas at
   // the villages (rtsAlgVillage.js). `ground`: built on the real slope.
   ...VILLAGE,
   // The ALN command post in the massif.
   { key: "alnCamp", build: buildAlnCamp, x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
   ...ALN_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz, ALN_SITE); return { key: v.key, build: v.build, x, z, yaw: ALN_SITE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
-];
+].filter(Boolean);
 
 let _glass = null;
 /** Cockpit glass: dark, slightly blue, glossy, mostly see-through. */

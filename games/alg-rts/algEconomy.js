@@ -27,6 +27,7 @@
 //   COSTS      charged when a unit is QUEUED (algProducer.js), refused if the
 //              purse can't pay. A number = effectifs alone.
 import * as THREE from "three";
+import { MAP } from "./layout.js";
 
 /** What each unit costs: French { mp, fuel, mun } (per SQUAD for infantry), the ALN's a number. */
 export const COSTS = {
@@ -37,7 +38,6 @@ export const COSTS = {
   moudjahid: 40, fmTeam: 70,
 };
 
-/** The three, in display order. */
 /**
  * POPULATION (balance pass 2026-10-04, CoH's pop cap): what a French unit takes — a man 1 (a
  * squad: its men), a vehicle its number here. The cap grows with the villages held (algUnits.js
@@ -45,6 +45,7 @@ export const COSTS = {
  */
 export const POP = { willys: 2, gmc: 2, halftrack: 3, ebr: 4, amx13: 4, alouette: 4 };
 
+/** The three, in display order. */
 export const RES = [
   { key: "mp", name: "Effectifs", short: "", cls: "mp" },
   { key: "fuel", name: "Carburant", short: "C", cls: "fuel" },
@@ -59,15 +60,8 @@ export function costOf(c) {
 }
 export const hasCost = (c) => { const k = costOf(c); return k.mp > 0 || k.fuel > 0 || k.mun > 0; };
 
-/** The supply points (fuel / munitions), on the pistes between the post and the villages. */
-const SUPPLY = [
-  { name: "Puits d'Ain Tighanimine", x: 134, z: 157, res: "mun" },   // the oasis' dry north shore (132,128 is the pond)
-  { name: "Carrefour de la piste", x: 2, z: 177, res: "fuel" },
-  { name: "Gué de l'oued", x: 193, z: 20, res: "fuel" },          // beside the ford (181,32 is half in the oued)
-  { name: "Col du ravin", x: 19, z: -14, res: "mun" },
-  { name: "Source d'Aïn Kerma", x: -110, z: 150, res: "mun" },         // the step from the crossroads to the dechra
-  { name: "Débouché du ravin", x: -78, z: -82, res: "fuel" },
-];
+/** The supply points (fuel / munitions): the map's own (layout.js MAP.supply). */
+const SUPPLY = MAP.supply ?? [];
 
 const P = {
   start: { player: { mp: 600, fuel: 40, mun: 50 }, enemy: 240 },
@@ -229,14 +223,14 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
     french: purses.player,
     aln: purses.enemy,
     /** The VILLAGES (the war's score). */
-    /** The French population cap now (POP). */
-    popCap: () => Math.min(P.popMax, P.popBase + P.popPerVillage * points.filter((v) => v.owner === "player").length),
     points,
     /** The fuel and munition points. */
     supply,
     /** Villages and supply points (the map's markers, rings, minimap). */
     allPoints,
     get held() { return points.filter((v) => v.owner === "player").length; },
+    /** The French population cap now (POP). */
+    popCap: () => Math.min(P.popMax, P.popBase + P.popPerVillage * points.filter((v) => v.owner === "player").length),
     get heldByEnemy() { return points.filter((v) => v.owner === "enemy").length; },
     /** French points held but cut off from the post (they pay nothing). */
     get cutOff() { return allPoints.filter((v) => v.owner === "player" && !v.linked).length; },

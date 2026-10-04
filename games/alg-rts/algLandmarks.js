@@ -236,7 +236,7 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
   const trees = [];
   for (let t = 0; t < 6000 && trees.length < Q.trees; t++) {
     let x, z;
-    if (R() < 0.6) {
+    if (R() < 0.6 && trackPts.length) {
       // Beside a track, 6-11 m off it.
       const p = trackPts[Math.floor(R() * trackPts.length)], a = R() * Math.PI * 2, d = 6 + R() * 5;
       x = p.x + Math.cos(a) * d; z = p.z + Math.sin(a) * d;
@@ -265,13 +265,13 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
   // (11 m), so far apart; their ground under the crown cleared of scrub.
   const paint = (x, z) => app.samplePaintWeights?.(x, z) ?? null;
   const betoums = [];
+  const villages = LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind));
   for (let t = 0; t < 8000 && betoums.length < Q.betoums; t++) {
     let x, z;
     const u = R();
-    if (u < 0.35) {
+    if (u < 0.35 && villages.length) {
       // Near a village, 35-90 m out.
-      const vs = LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind));
-      const v = vs[Math.floor(R() * vs.length)], a = R() * Math.PI * 2, d = 35 + R() * 55;
+      const v = villages[Math.floor(R() * villages.length)], a = R() * Math.PI * 2, d = 35 + R() * 55;
       x = v.x + Math.cos(a) * d; z = v.z + Math.sin(a) * d;
     } else { x = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0); z = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0); }
     if (slopeDeg(x, z) > 14 || !free(x, z, 5)) continue;
@@ -328,7 +328,6 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
       plantAgave(m.position.x + lx * c + lz * s, m.position.z - lx * s + lz * c, true);
     }
   }
-  const villages = LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind));
   for (const t of TRACK_LINES) {
     for (let i = 2; i < t.line.length - 2; i += 9) {
       const p = t.line[i], q0 = t.line[i - 1];

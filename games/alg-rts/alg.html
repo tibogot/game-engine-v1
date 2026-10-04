@@ -120,11 +120,14 @@
       // uses those as the bar's scale. Within a stage the bar creeps toward
       // that stage's share; the level download reports real bytes. The first
       // boot on a machine uses these rough weights.
-      const KEY = "algrts.bootStages";
+      // One table per map (?map=, layout.js): its level loads under its own name.
+      const MAP_ID = new URLSearchParams(location.search).get("map");
+      const LEVEL_STAGE = `Loading alg-${MAP_ID ?? "aures"}.v3proj…`;
+      const KEY = MAP_ID && MAP_ID !== "aures" ? `algrts.bootStages.${MAP_ID}` : "algrts.bootStages";
       const DEFAULT = {
-        order: ["Starting engine…", "Loading level…", "Loading alg-aures.v3proj…", "Placing assets…",
+        order: ["Starting engine…", "Loading level…", LEVEL_STAGE, "Placing assets…",
           "Setting up camera…", "Mustering…", "Painting surfaces…"],
-        ms: { "Starting engine…": 2500, "Loading level…": 4000, "Loading alg-aures.v3proj…": 3000,
+        ms: { "Starting engine…": 2500, "Loading level…": 4000, [LEVEL_STAGE]: 3000,
           "Placing assets…": 3000, "Mustering…": 2000, "Painting surfaces…": 800 },
       };
       let learned = DEFAULT;

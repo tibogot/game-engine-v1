@@ -2,7 +2,9 @@
 // tools/algTracks.mjs over the real ground, painted and rutted in the map)
 // as lines the game can ask about. Today the ALN lays its ambushes along
 // them; patrols, convoys and mines will walk the same lines.
-import { TRACKS } from "./tracks.js";
+import { MAP } from "./layout.js";
+
+const TRACKS = MAP.tracks ?? [];
 
 /** Catmull-Rom through the control points, every `step` metres. */
 function resample(pts, step) {
