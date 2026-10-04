@@ -32,7 +32,8 @@ import { vetStats } from "./algVeterancy.js";
 /** Infantry squads: men per squad, the squad's name, and what one man costs to replace. */
 export const SQUADS = {
   appele: { size: 6, name: "Groupe", reinforce: 30 },
-  sapeur: { size: 2, name: "Équipe du génie", reinforce: 45 },
+  // 3 (balance 2026-10-04): two men at 170 were the dearest and the most fragile in the game (CoH: 3-4).
+  sapeur: { size: 3, name: "Équipe du génie", reinforce: 45 },
   para: { size: 5, name: "Stick para", reinforce: 60 },
   legion: { size: 5, name: "Groupe Légion", reinforce: 80 },
 };
@@ -62,7 +63,7 @@ const P = {
  * @param {(n:number)=>boolean} o.pay  spend supplies (the French purse)
  * @param {object} o.post    the post's producer (inside/outside points) — replacements come out of it
  */
-export function createAlgSquads({ app, units, base, muster, pay, post }) {
+export function createAlgSquads({ app, units, base, muster, pay, post, popRoom = () => Infinity }) {
   const list = [];
   const ofUnit = new Map();
   let seq = 0;
@@ -124,6 +125,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post }) {
   function reinforceCost(s) {
     if (!s || s.team !== "player" || s.count + pending.filter((p) => p.squad === s).length >= s.size) return 0;
     if (!squadInBase(s)) return 0;
+    if (popRoom() < 1) return 0;   // the pop cap (algEconomy.js POP)
     return SQUADS[s.typeKey].reinforce;
   }
   /** Call one man in (paid now): he comes out of the gate in the first empty slot. */

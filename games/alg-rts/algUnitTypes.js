@@ -55,7 +55,7 @@ export const ALG_UNIT_TYPES = {
   sapeur: {
     typeKey: "sapeur",
     name: "Sapeurs du Génie",
-    buildLabel: "Génie (2)",
+    buildLabel: "Génie (3)",
     weapon: "rifle",
     isAir: false,
     foot: true,

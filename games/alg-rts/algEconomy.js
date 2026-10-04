@@ -38,6 +38,13 @@ export const COSTS = {
 };
 
 /** The three, in display order. */
+/**
+ * POPULATION (balance pass 2026-10-04, CoH's pop cap): what a French unit takes — a man 1 (a
+ * squad: its men), a vehicle its number here. The cap grows with the villages held (algUnits.js
+ * refuses a unit or a reinforcement past it).
+ */
+export const POP = { willys: 2, gmc: 2, halftrack: 3, ebr: 4, amx13: 4, alouette: 4 };
+
 export const RES = [
   { key: "mp", name: "Effectifs", short: "", cls: "mp" },
   { key: "fuel", name: "Carburant", short: "C", cls: "fuel" },
@@ -67,7 +74,10 @@ const P = {
   // Per minute. The French: Algiers' effectifs, a trickle of the rest.
   base: { player: { mp: 280, fuel: 4, mun: 6 }, enemy: 15 },
   // UPKEEP (effectifs a minute): every man past the first UPKEEP_FREE, every vehicle.
-  upkeepMan: 1.5, upkeepVehicle: 5, upkeepFree: 14, mpFloor: 100,
+  // (balance 2026-10-04: 1.5 / 5 cost a 50-strong army 9% of its effectifs; CoH's ~30%)
+  upkeepMan: 2.5, upkeepVehicle: 8, upkeepFree: 14, mpFloor: 100,
+  // POP CAP: 30, +5 a village held, 50 at most (the start army is 16).
+  popBase: 30, popPerVillage: 5, popMax: 50,
   // A village to its holder (the ALN: one number, as before).
   village: {
     hamlet: { mp: 20, fuel: 6, mun: 8 }, dechra: { mp: 25, fuel: 8, mun: 10 }, ksar: { mp: 30, fuel: 10, mun: 12 },
@@ -219,6 +229,8 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
     french: purses.player,
     aln: purses.enemy,
     /** The VILLAGES (the war's score). */
+    /** The French population cap now (POP). */
+    popCap: () => Math.min(P.popMax, P.popBase + P.popPerVillage * points.filter((v) => v.owner === "player").length),
     points,
     /** The fuel and munition points. */
     supply,

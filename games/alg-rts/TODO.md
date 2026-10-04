@@ -41,8 +41,21 @@ One screen, most important first. Details stay in the sections below;
 - A game around the battle (sugg.): main menu, options (gore switch,
   sound, keys), pause, end screens that lead somewhere; later missions /
   a campaign.
-- Balance passes after you play: prices and incomes, squad sizes, retreat,
-  reinforce, the difficulty levels, the bleed rate.
+- [x] BALANCE PASS 1 (2026-10-04, measured with __ALG.fastForward(s) — a hands-off game and
+  a scripted holding player, 15 min each, Normal):
+  - the FLN STALLED from minute 6 (two ambush bands lay in one scrub to minute 12, holding
+    the cap: no band, no assault) → an empty ambush re-plans, two in a row go home;
+  - French POP CAP 30 + 5 a village (max 50; man 1, jeep/GMC 2, half-track 3, armour and
+    Alouette 4), training and reinforcing refused past it, "troupes N/cap" on the HUD;
+  - upkeep 2.5 a man past 14 (was 1.5), 8 a vehicle (was 5);
+  - the FLN's cap follows its villages (×0.7 + 0.15 a village: Normal 18 → 34) — its purse
+    piled up past 2000 unspent, so taking its villages cost it nothing;
+  - sapeurs 3 men (were 2 at 170, the dearest men in the game).
+  Measured, NOT changed: raids hit 0 times against a player guarding every point (they go
+  for UNguarded ones — 45% kept); FLN 42 dead vs French 3 against static FM squads.
+- You, play: is the FLN too weak against held positions (42:3)? the pop cap too tight early?
+- Balance after you play: prices and incomes, retreat, reinforce, the difficulty levels,
+  the bleed rate.
 - Check: the "STARTING army still has armour" item (PARKED section) — may be
   stale since the squads start (12 appelés + 2 sapeurs).
 

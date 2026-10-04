@@ -131,6 +131,11 @@ const P = {
   raidShare: 0.45,            // of the bands, when a supply point is worth raiding
   raidLoot: 60,               // supplies the ALN takes from a depot it turns
   raidMin: 0.4,               // the least score worth a raid (pickRaid)
+  emptyAmbushHome: 2,         // empty ambushes in a row (nobody came): the band goes home
+  // THE CAP FOLLOWS THE VILLAGES (balance 2026-10-04: the purse piled up past 2000 unspent —
+  // the cap was the only limit, so taking FLN villages cost it nothing): fighters out at most =
+  // maxLive × (capBase + capPerVillage × villages it holds) — Normal 18 → 34.
+  capBase: 0.7, capPerVillage: 0.15,
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -181,6 +186,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   };
   const french = () => units.list.filter((u) => u.alive && u.team === "player");
   const liveFighters = () => units.list.filter((u) => u.alive && u.team === "enemy").length;
+  const cap = () => Math.round(P.maxLive * (P.capBase + P.capPerVillage * (app.algEconomy?.heldByEnemy ?? 0)));
 
   /**
    * How good a spot is to lie up in: CONCEALMENT round it (the game's own
@@ -504,7 +510,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   function newBand({ size: want = null, mission = null } = {}) {
     const size = want ?? Math.round(rand(...P.bandSize));
-    const room = P.maxLive - liveFighters();
+    const room = cap() - liveFighters();
     const n = Math.min(size, room);
     if (n < 3) return;
     // MEN GONE TO GROUND come back out FREE (already paid for): three or more
@@ -658,7 +664,14 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (b.t > P.waitMax) {
           const tg = pickTarget(c);
           if (tg && dist(tg.at, c) < 80) { strike(b); for (const u of m) u.orderTo(tg.at.x, tg.at.z); }
-          else plan(b);
+          else {
+            // NOBODY CAME (balance run 2026-10-04: two bands lay in the same scrub from minute 3
+            // to 12, holding the live cap — no band, no assault after it): a new mission (a raid,
+            // a village, a mine); two empty ambushes in a row, home — the cap frees for a fresh band.
+            b.emptyAmbushes = (b.emptyAmbushes ?? 0) + 1;
+            if (b.emptyAmbushes >= P.emptyAmbushHome) withdraw(b);
+            else { b.mission = null; plan(b); }
+          }
         }
         break;
       }
@@ -1317,7 +1330,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     nextAssault -= dt;
     if (nextAssault > 0) return;
     if (bands.some((b) => b.mission === "assault" && alive(b).length)) { nextAssault = 30; return; }
-    if (P.maxLive - liveFighters() < P.assaultSize[0]) { nextAssault = 30; return; }   // room for a real one, or wait
+    if (cap() - liveFighters() < P.assaultSize[0]) { nextAssault = 30; return; }   // room for a real one, or wait
     if (newBand({ size: Math.round(rand(...P.assaultSize)), mission: "assault" })) nextAssault = rand(...P.assaultEvery);
     else nextAssault = 40;
   }
@@ -1368,6 +1381,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** The last lookout signal ({ at, t }) and men waiting to come back out. */
     get lastSignal() { return lastSignal; },
     get pool() { return pool; },
+    /** The fighters it may have out now (the cap follows its villages). */
+    get cap() { return cap(); },
     knownFrench: () => knownFrench(),
     /** The mule train under way (null: none) and the last one's outcome. */
     get convoy() { return convoy; },

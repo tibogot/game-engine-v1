@@ -36,7 +36,7 @@ import { createAlgSight } from "./algSight.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
-import { COSTS, createAlgEconomy, costOf } from "./algEconomy.js";
+import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
@@ -185,7 +185,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     startMen.appele.push(units.spawn("appele", p.x, p.z, { lookRole: i % 6 }));
   }
   // …and a sapeur team beside them (the lean start: they dig the post's defences).
-  for (let i = 0; i < 2; i++) {
+  for (let i = 0; i < SQUADS.sapeur.size; i++) {
     const p = navGrid.nearestOpenWorld(muster.x + rx * (12 + i * 2.5), muster.z + rz * (12 + i * 2.5), true) ?? { x: muster.x, z: muster.z };
     startMen.sapeur.push(units.spawn("sapeur", p.x, p.z, { lookRole: i }));
   }
@@ -342,9 +342,21 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const tiers = createAlgTiers(app, { economy });
   app.algTiers = tiers;
   for (const p of producers) {
-    p.structure.pay = (key) => economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
+    // The French: the POP CAP first (algEconomy.js POP) — a unit past it is refused, unpaid.
+    p.structure.pay = (key) => (p.structure.team !== "player" || popRoom() >= popOf(key)) && economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
     p.structure.refund = (key) => economy.purses[p.structure.team].earn(COSTS[key] ?? 0);
   }
+  // THE POPULATION (balance 2026-10-04): the French in the field + on the queues.
+  const popOf = (key) => POP[key] ?? SQUADS[key]?.size ?? 1;
+  function popNow() {
+    let n = 0;
+    for (const u of units.list) if (u.alive && u.team === "player" && !u.isStructure) n += u.type?.foot ? 1 : POP[u.typeKey] ?? 2;
+    for (const p of producers) if (p.structure.team === "player") for (const k of p.structure.queue) n += popOf(k);
+    return n;
+  }
+  const popRoom = () => economy.popCap() - popNow();
+  economy.pop = popNow;
+  economy.popRoom = popRoom;
   // THE SQUADS (algSquads.js): the start army into squads; retreat to the
   // post's zone, heal and reinforce there.
   const postProd = producers.find((p) => p.structure.typeKey === "post") ?? null;
@@ -353,6 +365,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     base: postProd?.centre ?? muster, muster,
     pay: (n) => economy.french.spend(n),
     post: postProd ?? { inside: muster, outside: muster },
+    popRoom: () => popRoom(),
   });
   app.algSquads = squads;
   // VETERANCY (algVeterancy.js): a squad's kills earn it stars.
@@ -397,7 +410,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     productionFor: (s) => {
       const list = Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => {
         const need = s.team === "player" ? tiers.needs(key) : 1;
-        return { key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: COSTS[key] ?? 0,
+        const c = COSTS[key] ?? 0;
+        return { key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: s.team === "player" ? { ...costOf(c), pop: popOf(key) } : c,
           locked: need > tiers.tier ? `Tier ${need}: ${tiers.TIERS[need - 1].name}` : null };
       });
       const nx = tiers.next();
@@ -411,8 +425,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       }
       return list;
     },
-    canAfford: (cost) => economy.french.canAfford(cost),
-    shortOf: (cost) => economy.french.short(cost),
+    canAfford: (cost) => economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop),
+    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? `troops (cap ${economy.popCap()}: hold more villages)` : ""].filter(Boolean).join(", "),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
@@ -526,7 +540,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // The tactical map from the start: the post has its own radio mast.
   const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) });
   // Top right now (resourceHud.js); the bottom strip is gone with it.
-  const resourceHud = createResourceHud({ mount: document.body, troops: () => units.list.reduce((n, u) => n + (u.alive && u.team === "player" && !u.isStructure ? 1 : 0), 0) });
+  const resourceHud = createResourceHud({ mount: document.body, troops: () => `${popNow()}/${economy.popCap()}` });
   hud.strip.style.display = "none";
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
@@ -617,10 +631,15 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
+  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); };
+  // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
+  // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
+  let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
+  app.fastForward = (seconds) => { for (let i = Math.round(seconds / sim.stepSeconds); i > 0; i--) { ffTime += sim.stepSeconds; simStep(sim.stepSeconds); } };
   app.addPreRenderHook((frameDt) => {
     let dt = frameDt * app.timeScale;
     if (app.timeStep) { dt = app.timeStep; app.timeStep = 0; }
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    sim.advance(dt, simStep);
     searchlights.frame();
     combat.frame(dt);
     grenades.frame();
