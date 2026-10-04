@@ -203,14 +203,14 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     me.hint("Outside the playable box: <b>Darken</b> as Company of Heroes, or <b>Haze</b> — the land fades into dust that thickens further out (reads from the free camera too). Live, not saved: tell me the one to keep.");
   }
 
-  // ── Gore (algCombat.js GIBS): men blown apart, OFF by default ───────────
+  // ── Gore (algCombat.js GIBS): men blown apart, CoH's close blasts by default ──
   if (app.algCombat) {
     const gore = panel.section("Gore");
     gore.select("Blown apart", {
-      options: [["off", "Off (default)"], ["coh", "CoH: close blasts"], ["always", "Every blast kill"]],
+      options: [["off", "Off"], ["coh", "CoH: close blasts (default)"], ["always", "Every blast kill"]],
       get: () => GIBS.mode, set: (v) => (GIBS.mode = v),
     });
-    gore.hint("Men killed close to a blast come apart. Off by default for this war; <b>?gore=1</b> boots with it on.");
+    gore.hint("Men killed close to a blast come apart. CoH's close blasts by default; <b>?gore=0</b> boots with it off.");
   }
 
   // ── Sound (algSounds.js) ─────────────────────────────────────────────────

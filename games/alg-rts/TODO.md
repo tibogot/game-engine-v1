@@ -1516,9 +1516,9 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       · Rule (algCombat GIBS): inside 30% of the blast radius, or 40% of
         the time inside half of it — when the blast KILLS him. A mortar (45)
         can't kill a fresh man (60 hp): only the wounded; a grenade (70) can.
-        OFF BY DEFAULT (you, 2026-10-02: "not by default for this war, but
-        we should be able to enable it"): ?gore=1 boots it on, Dev → Gore and
-        the lab switch it live (Off / CoH / every blast kill). ?gibs=0 = the
+        ON BY DEFAULT since 2026-10-04 (you: "make Gore CoH close blasts by
+        default"; it was off from 2026-10-02): ?gore=0 boots it off, Dev → Gore
+        and the lab switch it live (Off / CoH / every blast kill). ?gibs=0 = the
         old kernel (A/B).
    - [ ] you, look in the lab (×¼, Close): the throw height and spread, the
          cut ends (open: no red cap yet).

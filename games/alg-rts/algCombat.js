@@ -46,10 +46,10 @@ const ALG_FIRE = {
  * comes apart (shared crowdSkinning GIB — in the skinning pass, no draw of
  * its own). `mode`: "coh" (inside 30% of the blast radius, or 40% of the time
  * inside half of it), "always" (every man a blast kills — the lab), "off".
- * OFF BY DEFAULT for this war (you, 2026-10-02): ?gore=1 boots it on (CoH),
- * Dev → Gore or the battle lab switch it live. Blood is separate (?blood=0).
+ * ON BY DEFAULT, CoH's close blasts (you, 2026-10-04; it was off since 2026-10-02):
+ * ?gore=0 boots it off, Dev → Gore or the battle lab switch it live. Blood is separate (?blood=0).
  */
-export const GIBS = { mode: typeof location !== "undefined" && new URLSearchParams(location.search).get("gore") === "1" ? "coh" : "off" };
+export const GIBS = { mode: typeof location !== "undefined" && new URLSearchParams(location.search).get("gore") === "0" ? "off" : "coh" };
 const gibChance = (d, r) => (GIBS.mode === "always" ? d < r : GIBS.mode === "coh" ? d < r * 0.3 || (d < r * 0.5 && Math.random() < 0.4) : false);
 
 const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
