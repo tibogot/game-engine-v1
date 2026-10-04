@@ -1,16 +1,29 @@
 // ROCK LAB — shows the rock-lab level (tools/rockLabLevel.mjs) from the angles
-// that matter for a stylised off-road game: straight down on the rock pile
-// (the reference shot), a low chase view, along the wall, the boulder field,
-// and the east end where the mesh cliffs stop and the bare terrain slope goes on.
+// that matter for a stylised off-road game: straight down on a rock pile (the
+// reference shot), a low chase view, the mountain, the trail, an outcrop, the
+// boulder field — with live A/B switches for the look (see flickerSwitches).
 //
-// No gameplay and no physics: a car-sized box sits on the track for scale.
-// Everything else is the level, loaded through the engine like any game.
+// The off-road truck (games/offroad/) waits on the trail with its physics
+// running: Enter drives it (chase camera), Enter again hands the camera back.
+// Everything else is the level, loaded through the engine.
 // ?tod=<hour> sets the time of day (Sky Pro).
-import * as THREE from "three";
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { SPOTS } from "./spots.js";
+import { createOffroadDrive } from "../offroad/offroadDrive.js";
 
 const DEFAULT_LEVEL = "/levels/rock-lab.v3proj";
+
+/**
+ * Grip per paint slot of THIS level (tools/rockLabLevel.mjs): 0 golden meadow
+ * (grass drags), 1 rock, 2 bare earth, 3 dirt track, 4-6 spare meadow.
+ */
+const ROCK_LAB_SURFACES = [
+  { mu: 0.85, roll: 0.04 },
+  { mu: 1.0, roll: 0.01 },
+  { mu: 0.8, roll: 0.03 },
+  { mu: 0.95, roll: 0.012 },
+  { mu: 0.85, roll: 0.04 }, { mu: 0.85, roll: 0.04 }, { mu: 0.85, roll: 0.04 },
+];
 
 export async function startRockLab({ container, hud, onStatus = () => {} } = {}) {
   onStatus("Starting engine…");
@@ -30,20 +43,23 @@ export async function startRockLab({ container, hud, onStatus = () => {} } = {})
 
   applyLight(app);
 
-  const car = makeScaleCar();
-  const placeCar = () => {
-    const { x, z, yaw } = SPOTS.car;
-    car.position.set(x, app.getWorldHeight(x, z), z);
-    car.rotation.y = yaw;
-  };
-  placeCar();
-  app.scene.add(car);
+  // The off-road truck, physics running, waiting where the trail is busiest.
+  let driveLine = null, driveBtn = null;
+  const drive = createOffroadDrive(app, {
+    spawn: SPOTS.car,
+    surfaces: ROCK_LAB_SURFACES,
+    onStatus: (s) => {
+      if (driveLine) driveLine.textContent = `${Math.abs(s.speedKmh).toFixed(0)} km/h · ${s.lowRange ? "LOW" : "HIGH"} range · diffs ${s.diffLock ? "LOCKED" : "open"} · ${s.wheelsDown}/4 wheels down`;
+    },
+  });
+  const car = drive.truck.root;
 
   app.controls.enableZoom = true;
   const buttons = {};
   const go = (key) => {
     const v = SPOTS.views[key];
     if (!v) return;
+    if (drive.active) { drive.setActive(false); driveBtn?.classList.remove("on"); }
     app.camera.position.set(...v.pos);
     app.controls.target.set(...v.target);
     app.controls.update();
@@ -54,6 +70,15 @@ export async function startRockLab({ container, hud, onStatus = () => {} } = {})
     const title = document.createElement("div");
     title.textContent = `Rock lab · ${level.loaded ? level.name : "no level"}`;
     hud.append(title);
+    driveBtn = document.createElement("button");
+    driveBtn.textContent = "Enter  Drive the truck";
+    driveBtn.onclick = () => { drive.setActive(!drive.active); driveBtn.classList.toggle("on", drive.active); driveBtn.blur(); };
+    window.addEventListener("keydown", (e) => { if (e.key === "Enter") setTimeout(() => driveBtn.classList.toggle("on", drive.active)); });
+    hud.append(driveBtn);
+    driveLine = document.createElement("div");
+    driveLine.className = "note";
+    driveLine.textContent = "Z/W/↑ go · S/↓ brake/reverse · Q/A/← D/→ steer · Space handbrake · G low range · X diff locks · R reset";
+    hud.append(driveLine);
     Object.entries(SPOTS.views).forEach(([key, v], i) => {
       const b = document.createElement("button");
       b.textContent = `${i + 1}  ${v.label}`;
@@ -62,7 +87,7 @@ export async function startRockLab({ container, hud, onStatus = () => {} } = {})
       hud.append(b);
     });
     const carBtn = document.createElement("button");
-    carBtn.textContent = "C  Scale car (4.4 m)";
+    carBtn.textContent = "C  Truck (5 m)";
     carBtn.classList.add("on");
     carBtn.onclick = () => { car.visible = !car.visible; carBtn.classList.toggle("on", car.visible); };
     hud.append(carBtn);
@@ -89,7 +114,7 @@ export async function startRockLab({ container, hud, onStatus = () => {} } = {})
     });
   }
   go("top");
-  return { app, car, go, spots: SPOTS };
+  return { app, car, go, drive, spots: SPOTS };
 }
 
 /**
@@ -179,30 +204,4 @@ function flickerSwitches(app) {
       },
     },
   ];
-}
-
-/**
- * A boxy 4x4 the size of a Defender (4.4 x 1.8 m, 2 m tall): orange body, white
- * roof, dark wheels. Only there so the rocks can be judged against a vehicle.
- */
-function makeScaleCar() {
-  const g = new THREE.Group();
-  g.name = "ScaleCar";
-  const body = new THREE.MeshStandardMaterial({ color: 0xd2552e, roughness: 0.6 });
-  const roof = new THREE.MeshStandardMaterial({ color: 0xf2f2ee, roughness: 0.5 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.9 });
-  const add = (geo, mat, x, y, z) => {
-    const m = new THREE.Mesh(geo, mat);
-    m.position.set(x, y, z);
-    m.castShadow = true;
-    m.receiveShadow = true;
-    g.add(m);
-    return m;
-  };
-  add(new THREE.BoxGeometry(1.8, 0.9, 4.4), body, 0, 0.95, 0);
-  add(new THREE.BoxGeometry(1.7, 0.75, 2.9), body, 0, 1.75, -0.5);
-  add(new THREE.BoxGeometry(1.74, 0.08, 2.95), roof, 0, 2.14, -0.5);
-  const wheel = new THREE.CylinderGeometry(0.4, 0.4, 0.3, 16).rotateZ(Math.PI / 2);
-  for (const [x, z] of [[-0.85, 1.4], [0.85, 1.4], [-0.85, -1.4], [0.85, -1.4]]) add(wheel, dark, x, 0.4, z);
-  return g;
 }
