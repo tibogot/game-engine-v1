@@ -17,7 +17,20 @@
  *   3 Oleander      the wadi banks, pink
  *   4 Tamarisk      behind the oleander, round the oases
  *   5 Prickly pear  hedges round the hamlets
- *   6-7             unused (zero paint), kept as they were
+ *   6 Thistle       purple DRIFTS on the open ground round the villages
+ *   7 Asphodel      white DRIFTS on the grazed slopes
+ *
+ * DENSE WHERE THEY GROW (2026-10-04, you: "the small plants are too sparse —
+ * denser where we place them, not spread"). A 0.75 m slot holds one plant: it
+ * grows if (the SUM of the paints there, capped at 1) x the field density x a
+ * clump noise beats a hash; then the type is drawn by its SHARE of the paint.
+ * At field density 0.45 and alfa painted under the thistles, a thistle drift
+ * was ~1 thistle in 4 slots. Now the field density is 0.9 and every other
+ * species is painted at HALF (GROUND_HALF: the same plants as before), while
+ * the flowers' drifts are fewer, wider, full strength in their core, and push
+ * the alfa and doum out of them: ~3x denser thistle and asphodel where they
+ * grow, a solid patch of colour. Oleander keeps its full paint: its pink
+ * ribbons along the wadis double.
  *
  * Density is DERIVED from the map: height (from the land's own histogram),
  * slope (nothing above the 34° nav limit), the lakes (tools/algOasis.mjs),
@@ -153,27 +166,37 @@ const villageD = (x, z) => Math.min(...LAYOUT.sites.filter((s) => ["hamlet", "de
 /** Metres outside a hamlet's cleared ring (negative = inside it). */
 const hamletOut = (x, z) => Math.min(...LAYOUT.sites.filter((s) => s.kind === "hamlet").map((s) => Math.hypot(x - s.x, z - s.z) - s.r));
 
+// The flowers' drifts (0-1), shared by their own slots and by the species they push out.
+const thistleDrift = (x, z, s) => (1 - smooth((s - 16) / 5)) * (1 - smooth((villageD(x, z) - 220) / 60)) * patches(x, z, 18, 0.3, 31);
+const asphodelDrift = (x, z, s) => band(s, 5, 25, 4) * patches(x, z, 32, 0.3, 33);
+/** What is left for the green species inside a flower drift. */
+const outOfDrifts = (x, z, s) => 1 - 0.85 * Math.max(thistleDrift(x, z, s), asphodelDrift(x, z, s));
+// Everything but the flowers and the oleander at half the paint: the field
+// density doubled (0.45 → 0.9), so these grow exactly as many as before.
+const GROUND_HALF = 0.5;
+
 const GROUND = [
-  { name: "Alfa", preset: "alfa", fn: (x, z, h, s) => (1 - smooth((s - 20) / 6)) * patches(x, z, 25, 0.45, 13) * 0.55 },
+  { name: "Alfa", preset: "alfa", fn: (x, z, h, s) => (1 - smooth((s - 20) / 6)) * patches(x, z, 25, 0.45, 13) * 0.55 * GROUND_HALF * outOfDrifts(x, z, s) },
   // Doum: the valley sides — moderate slopes (8-26°), in clumps, sparse. (Off
   // from 2026-09-26: its far LOD drew flat green mats; fixed 2026-09-30.)
-  { name: "Doum palm", preset: "doumPalm", fn: (x, z, h, s) => smooth((s - 8) / 4) * (1 - smooth((s - 26) / 5)) * patches(x, z, 18, 0.6, 29) * 0.35 },
+  { name: "Doum palm", preset: "doumPalm", fn: (x, z, h, s) => smooth((s - 8) / 4) * (1 - smooth((s - 26) / 5)) * patches(x, z, 18, 0.6, 29) * 0.35 * GROUND_HALF * outOfDrifts(x, z, s) },
   // Nam's typha is lime green with orange heads — a paddy in the monsoon.
   // An oasis in summer: olive leaves going straw at the tips, dark brown
   // heads (you: "flat bright colour is really not good for our terrain").
-  { name: "Reed-mace", preset: "typha", look: { colorBase: "#3b4a2a", colorTip: "#9a9460", colorHead: "#4a3020", translucency: 0.45 }, fn: (x, z) => band(oasisD(x, z), 0.92, 1.22, 0.08) },
+  { name: "Reed-mace", preset: "typha", look: { colorBase: "#3b4a2a", colorTip: "#9a9460", colorHead: "#4a3020", translucency: 0.45 }, fn: (x, z) => band(oasisD(x, z), 0.92, 1.22, 0.08) * GROUND_HALF },
   // The wadi banks: oleander right on the lip of the bed, tamarisk behind
   // it and round the oases' outer ring, in patches.
   { name: "Oleander", preset: "oleander", fn: (x, z) => band(wadiD(x, z), 0.95, 1.9, 0.25) * patches(x, z, 14, 0.6, 21) * 0.5 },
-  { name: "Tamarisk", preset: "tamarisk", fn: (x, z) => Math.max(band(wadiD(x, z), 1.6, 3.2, 0.4) * patches(x, z, 22, 0.4, 23) * 0.18, band(oasisD(x, z), 2.2, 3.4, 0.3) * patches(x, z, 16, 0.5, 25) * 0.2) },
+  { name: "Tamarisk", preset: "tamarisk", fn: (x, z) => Math.max(band(wadiD(x, z), 1.6, 3.2, 0.4) * patches(x, z, 22, 0.4, 23) * 0.18, band(oasisD(x, z), 2.2, 3.4, 0.3) * patches(x, z, 16, 0.5, 25) * 0.2) * GROUND_HALF },
   // Prickly-pear hedges round the hamlets: a broken ring just outside.
-  { name: "Prickly pear", preset: "pricklyPear", fn: (x, z) => band(hamletOut(x, z), 1, 9, 2) * patches(x, z, 9, 0.55, 27) * 0.45 },
+  { name: "Prickly pear", preset: "pricklyPear", fn: (x, z) => band(hamletOut(x, z), 1, 9, 2) * patches(x, z, 9, 0.55, 27) * 0.45 * GROUND_HALF },
   // THE WILDFLOWERS (2026-10-01, late summer), in DRIFTS — at the RTS camera
   // a flower is a patch of colour, not a plant: thistles (purple) on the
   // rough open ground round the villages, asphodel (pale, drying) on the
   // grazed hillsides.
-  { name: "Thistle", preset: "thistle", fn: (x, z, h, s) => (1 - smooth((s - 16) / 5)) * (1 - smooth((villageD(x, z) - 220) / 60)) * patches(x, z, 11, 0.36, 31) * 0.8 },
-  { name: "Asphodel", preset: "asphodel", fn: (x, z, h, s) => band(s, 5, 25, 4) * patches(x, z, 20, 0.36, 33) * 0.7 },
+  // Full strength in the drift (was ×0.8 / ×0.7 in smaller, more scattered patches).
+  { name: "Thistle", preset: "thistle", fn: (x, z, h, s) => thistleDrift(x, z, s) },
+  { name: "Asphodel", preset: "asphodel", fn: (x, z, h, s) => asphodelDrift(x, z, s) },
 ];
 
 // The wadi beds (paint slot 4, tools/algWadi.mjs): gravel, flash floods — bare.
@@ -239,7 +262,8 @@ GROUND.forEach((sp, i) => { man.foliagePlants[i] = slot(sp, sp.look ?? {}); });
 // Wind ON for the ground plants (the engine ships it off, "judged at rest"):
 // reeds, oleander and tamarisk stood frozen while the flags flew (you saw it).
 man.foliageField = { ...(man.foliageField ?? {}), windMul: 1, flutter: 0.5 };
-Object.assign(man.foliageField, { density: 0.45, lodDistance: 70, lodDistance2: 170, fadeStart: 300, fadeEnd: 380 });
+// clumping stays 0.75 (tried 0.35 2026-10-04: +0.3-0.5 ms for little visible gain).
+Object.assign(man.foliageField, { density: 0.9, clumping: 0.75, lodDistance: 70, lodDistance2: 170, fadeStart: 300, fadeEnd: 380 });
 
 const tall = paintMap(512, 1, TALL);
 const ground = paintMap(1024, 2, GROUND);

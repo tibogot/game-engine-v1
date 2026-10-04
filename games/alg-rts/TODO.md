@@ -801,6 +801,16 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
 - [ ] THE START IS STILL BRIGHT on its own (x2.3 at 15:12: auto exposure pushes the sunny
       desert to mid-grey, the post's white walls clip). Your pick: a lower exposure target
       for alg, or a later default time (16:30-17:00, lower warmer sun) — A/B them side by side.
+- [x] **SMALL PLANTS DENSE WHERE THEY GROW** (you, 2026-10-04: "too sparse, denser where we
+      place them"). tools/algVegetation.mjs: a 0.75 m slot grows (paint SUM capped 1) × field
+      density × clump, then picks a type by its SHARE — a thistle drift was ~1 thistle in 4 slots.
+      Field density 0.45 → 0.9 with every other species at half paint (same plants as before);
+      thistle + asphodel in fewer, wider drifts at full strength that push the alfa and doum out;
+      oleander keeps full paint (doubles along the wadis). Close up a real thistle carpet now.
+      Tried field clumping 0.35 (fills the drifts' gaps): +0.3-0.5 ms, little visible — reverted
+      (0.75). MEASURED vs before: village 9.23 vs 9.55 ms, slopes 8.17 vs 7.41, wide 10.17 vs 9.70.
+      Bigger flower heads for more colour: you said no (2026-10-04).
+- [ ] you, look in play: the thistle / asphodel drifts, the oleander lines.
 - [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
       do?" — later): measure the boot's stages first (alg.html already
       logs them for its progress bar), then the usual suspects: the animal
