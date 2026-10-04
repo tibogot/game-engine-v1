@@ -75,6 +75,13 @@ One screen, most important first. Details stay in the sections below;
   houses, hive rows further out; off the fields, pieces, tracks, water, trees (placed,
   painted, the oasis groves); block the nav grid. 10 / 10 / 5 / 5, 8 draws, cost in the
   noise. ?life=0 = without. You, look: sizes, the straw colour, how many.
+- MISSION 2 — THE NORTH CONSTANTINOIS COAST, AUGUST 1955 (you, 2026-10-04): a new map,
+  the Aurès untouched. Real ground cut with tools/algDem.mjs (candidates: Collo, Stora /
+  Philippeville, Filfila / El Halia); SMALLER play box (~450-500 m vs 610) with the sea as
+  an edge, less walkable land (hills to the shore, coves, a coast road). Steps: pick the
+  cut → land-only metrics (the sea counts as "flat" today) → make the game map-driven
+  (layout.js per map, ?map=) → Ocean Pro in alg → coastal ground + maquis / cork oak →
+  points, starts, AI. Not started past the cuts.
 - FILL THE MAP: dense scrub along the wadis, (orchards: done 2026-10-04),
   oasis gardens and a second oasis, graded terraces and tracks.
 - Buildings: a second outpost (SAS post), the H-34 gunship + a helipad.
