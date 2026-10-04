@@ -395,6 +395,62 @@ export const OCEAN2_DEFAULTS = {
   envReflect: 1.0,
   /** Multiplier on the environment tap, matching scene.environmentIntensity. */
   envIntensity: 1.0,
+  /*
+   * ── THE REFLECTION THAT POINTS BELOW THE HORIZON ───────────────────────────
+   * How hard a reflection ray heading DOWNWARD is folded back up to the sky
+   * before the environment is sampled. 1 = sample it as-is; 0.25 = a ray 40°
+   * below the horizon reads the sky 10° above it.
+   *
+   * THIS IS THE FIX FOR THE BLACK STREAKS ON WAVE BACKS, and the environment is
+   * where they come from — not the foam, not the spectrum. The IBL is baked from
+   * the sky dome ALONE (worldEnvironment.ensureProcEnvRig puts nothing else in
+   * the capture scene), and that dome renders its lower hemisphere BLACK:
+   * verified by hiding the world and pointing the camera at the nadir, which
+   * gives 0,0,0. So the environment map has a black floor.
+   *
+   * From an RTS camera a few metres up, the back of every wave tilts its normal
+   * away and the mirror ray dips below horizontal — and at that grazing angle
+   * Fresnel is ~1, so the water IS that ray. The sea gets painted with the black
+   * floor of its own environment, in streaks that follow the wave troughs. It is
+   * not visible from a high orbit because from up there the rays point down into
+   * the water, not out past the horizon.
+   *
+   * Folding is right, not just convenient: a ray that leaves a wave back heading
+   * down hits the sea again a short way off and comes back up. Its second bounce
+   * is a grazing reflection of the sky just above the horizon — which is exactly
+   * what a compressed |y| samples. The analytic sky never had this problem
+   * (`analyticSky` saturates `dir.y`, so below the horizon it already returns the
+   * horizon colour); only the environment tap did, which is why this arrived
+   * with the environment and not with the waves.
+   */
+  // WORK IN PROGRESS (committed 2026-10-04, OFF): 1 = no fold, the sea exactly as before in
+  // every game that uses Ocean V2 (Apex Rush among them). The fix this was written for is ~0.25.
+  envHorizonFold: 1,
+  /*
+   * ── AND WHEN TO STOP TRUSTING THE ENVIRONMENT AT ALL ───────────────────────
+   * The roughness range over which the reflection hands back from the
+   * environment map to the analytic sky. Below `envRoughStart` it is all
+   * environment; above `envRoughEnd` it is all analytic sky.
+   *
+   * `envHorizonFold` fixes the DIRECTION of a tap, but not the CONVOLUTION: a
+   * prefiltered map is an average over a whole lobe, and the wider that lobe
+   * gets the more of this map's black lower hemisphere it averages in, whichever
+   * way it is pointed. Measured on the RTS camera: with the fold on and the
+   * distance roughness below also on, the middle distance came out visibly
+   * murkier than with the environment switched off entirely — the black floor
+   * arriving through the mip rather than through the ray.
+   *
+   * Handing over is the right answer rather than a patch, because a wide lobe
+   * has no use for what the environment uniquely offers. Its whole value is the
+   * sharp, specific mirror at low roughness — a cloud, a hill, a sun path. Once
+   * it has been blurred to a smooth gradient the analytic sky is the same
+   * gradient, minus the contamination, and its zenith and horizon are pushed
+   * from the real sky every frame (`setSkyColors`), so nothing is being guessed.
+   */
+  // WORK IN PROGRESS (OFF): roughness never reaches 1, so no handover happens — the reflection
+  // is exactly as before. The values this was written for: start 0.15, end 0.38.
+  envRoughStart: 1.0,
+  envRoughEnd: 1.5,
 
   /*
    * ── ROUGHNESS, AND WHY IT IS NOT A CONSTANT ────────────────────────────────
@@ -417,6 +473,42 @@ export const OCEAN2_DEFAULTS = {
   /** Clamp on that term. Unclamped, a near-silhouette pixel can drive roughness
    *  to 1 and punch a dull grey hole in the horizon. */
   specAAMax: 0.3,
+
+  /*
+   * ── THE VARIANCE THE FADES THREW AWAY, WHICH specAA CANNOT SEE ─────────────
+   * Weight on the slope variance this shader deliberately REMOVES with distance,
+   * added back as roughness.
+   *
+   * specAA above measures the variance still present in `worldN`, from its
+   * screen-space derivative. That only works while there is something left to
+   * differentiate. Every fade here takes variance out BEFORE the derivative is
+   * taken: the detail normal is gone by `detailEnd` (220 m), the FFT amplitude
+   * by `fftEnd` (1600 m), and in between the slope taps climb their mips. Past
+   * `fftEnd` the normal is exactly (0,1,0), its derivative is exactly zero, and
+   * the roughness collapses to `waterRoughness` — 0.035, a mirror.
+   *
+   * So the sea gets SMOOTHER as it recedes, when the physics says the opposite:
+   * the further off it is, the more unresolved waves are inside one pixel and
+   * the broader its lobe should be. That is the polished sheet at the horizon,
+   * and it is also why turning specAA up does not fix it — measured on the RTS
+   * camera, specAA at 8 / max 1.0 left the horizon band untouched and only made
+   * the NEAR field blotchy, because near is where the variance it can measure
+   * actually lives.
+   *
+   * The cure is to put the variance back from the same fades that removed it.
+   * Slope variance composes additively and roughness² IS that variance, so each
+   * source contributes (its own slope variance) × (the fraction faded out), and
+   * the sum lands straight in alpha alongside the specAA term.
+   */
+  // WORK IN PROGRESS (OFF): 0 = nothing added, the roughness exactly as before. Written for 1.0.
+  fadeRoughness: 0,
+  /*
+   * Mean square slope of the swell the FFT carries, used as the variance credited
+   * back as `fftEnd` fades it out. Cox-Munk puts a real sea at mss ≈ 0.003 +
+   * 0.00512·U, so ~0.035 at 6 m/s; this sits a little above that because the
+   * cascades also carry chop the linear figure does not.
+   */
+  fftSlopeVar: 0.06,
 
   /**
    * OFF BY DEFAULT, and this is not timidity — it is the single most expensive
@@ -855,6 +947,11 @@ export function createOceanSurface({
   u.waterRoughness = uniform(D.waterRoughness);
   u.specAA = uniform(D.specAA);
   u.specAAMax = uniform(D.specAAMax);
+  u.envHorizonFold = uniform(D.envHorizonFold);
+  u.envRoughStart = uniform(D.envRoughStart);
+  u.envRoughEnd = uniform(D.envRoughEnd);
+  u.fadeRoughness = uniform(D.fadeRoughness);
+  u.fftSlopeVar = uniform(D.fftSlopeVar);
   u.skyHorizonSpread = uniform(Math.sin(D.skyHorizonSpread * DEG2RAD));
   u.skySunGlow = uniform(D.skySunGlow);
   u.skySunGlowSize = uniform(D.skySunGlowSize);
@@ -1338,8 +1435,15 @@ export function createOceanSurface({
     const worldN = vec3(nSlope.x.negate(), float(1), nSlope.y.negate()).normalize().toVar();
     const flatN = worldN.toVar(); // kept for the glint, before detail roughens it
 
+    // Hoisted out of the block below: the roughness term further down needs to
+    // know how much of the detail normal was faded away, and with no normal map
+    // there was never any to lose.
+    const detailFade = (normalMap
+      ? float(1).sub(smoothstep(u.detailEnd.mul(0.7), u.detailEnd, camDist))
+      : float(1)).toVar();
+
     if (normalMap) {
-      const fade = float(1).sub(smoothstep(u.detailEnd.mul(0.7), u.detailEnd, camDist));
+      const fade = detailFade;
       const base = wXZ.mul(u.normalTiling);
       const drift = vec2(cos(u.windAngle), sin(u.windAngle))
         .mul(u.time.mul(u.normalFlowSpeed));
@@ -1371,9 +1475,32 @@ export function createOceanSurface({
     const dNy = dFdy(worldN);
     const normalVar = dot(dNx, dNx).add(dot(dNy, dNy));
     const kernelRough = min(normalVar.mul(u.specAA), u.specAAMax).toVar();
+
+    /*
+     * ── AND THE VARIANCE THE DERIVATIVE NEVER GETS TO SEE ────────────────────
+     * The term above can only measure what is still in the normal. Everything
+     * this shader fades out with distance is gone before `dFdx` runs: the detail
+     * normal by `detailEnd`, the FFT amplitude by `fftEnd`, the slope taps into
+     * their mips in between. Past `fftEnd` the normal is exactly flat, its
+     * derivative is exactly zero, and `kernelRough` is zero — at the one
+     * distance it was written to serve. What is left is `waterRoughness`, 0.035,
+     * and a polished sheet of sky where the roughest water in the frame should
+     * be.
+     *
+     * Each fade knows exactly how much variance it removed, so each one pays it
+     * back: slope variance is additive and roughness² IS variance, so the terms
+     * go straight into alpha next to `kernelRough`. The detail normal's share is
+     * its own strength squared; the swell's is the sea's mean square slope.
+     */
+    const fadeVar = u.normalStrength.mul(u.normalStrength)
+      .mul(float(1).sub(detailFade))
+      .add(u.fftSlopeVar.mul(float(1).sub(distFade)))
+      .mul(u.fadeRoughness)
+      .toVar();
+
     // Roughness composes in alpha (= roughness²), not in roughness.
     const baseAlpha = u.waterRoughness.mul(u.waterRoughness);
-    const specAlpha2 = saturate(baseAlpha.add(kernelRough)).toVar();
+    const specAlpha2 = saturate(baseAlpha.add(kernelRough).add(fadeVar)).toVar();
     const envRough = saturate(sqrt(specAlpha2)).toVar();
 
     // ── Reflection ───────────────────────────────────────────────────────────
@@ -1387,10 +1514,30 @@ export function createOceanSurface({
      * `envPresent` is 0 until a host calls setEnvMap, so with no environment
      * this collapses to exactly the analytic sky it replaced.
      */
-    const envColor = envTap(reflectDir, envRough).mul(u.envIntensity);
-    const reflected = mix(
-      skyColor, envColor, saturate(u.envReflect.mul(u.envPresent)),
-    ).toVar();
+    /*
+     * Fold a downward ray back above the horizon before sampling. The capture
+     * scene behind this map is the sky dome on its own, and that dome's lower
+     * hemisphere is black — so a raw downward tap paints the back of every wave
+     * with the environment's floor. `max(y, |y|·fold)` is the whole fold: it
+     * leaves an upward ray alone (fold < 1) and maps a downward one to a shallow
+     * angle just above the horizon, which is where its real second bounce off
+     * the sea would have come from. See `envHorizonFold`.
+     */
+    // (at fold >= 1 the ray is left exactly as it was: max(y, |y|·1) would MIRROR a downward
+    // ray, not leave it — so 1 is "off", as the default's comment says)
+    const envDir = normalize(vec3(
+      reflectDir.x,
+      mix(max(reflectDir.y, abs(reflectDir.y).mul(u.envHorizonFold)), reflectDir.y, step(float(1), u.envHorizonFold)),
+      reflectDir.z,
+    )).toVar();
+    const envColor = envTap(envDir, envRough).mul(u.envIntensity);
+    // ...and hand back to the analytic sky as the lobe widens past the point
+    // where a prefiltered tap is mostly an average of a hemisphere this map does
+    // not have. See `envRoughStart`.
+    const envW = saturate(u.envReflect.mul(u.envPresent))
+      .mul(float(1).sub(smoothstep(u.envRoughStart, u.envRoughEnd, envRough)))
+      .toVar();
+    const reflected = mix(skyColor, envColor, envW).toVar();
 
     If(u.ssrEnabled.greaterThan(0).and(camDist.lessThan(u.ssrEnd)), () => {
       const vsNrm = cameraViewMatrix.mul(vec4(worldN, 0)).xyz.normalize().toVar();
@@ -1518,7 +1665,9 @@ export function createOceanSurface({
     // white dots — the classic aliased-ocean look, and the one thing a player
     // notices before anything else about the water.
     const ggxAlpha = clamp(sqrt(float(2).div(u.glintPower.add(2))), float(0.01), float(1));
-    const a2 = saturate(ggxAlpha.mul(ggxAlpha).add(kernelRough));
+    // Same two widening terms as the environment tap — they are the same
+    // physical fact, so the glint and the reflection have to agree about it.
+    const a2 = saturate(ggxAlpha.mul(ggxAlpha).add(kernelRough).add(fadeVar));
     const denom = NdotH.mul(NdotH).mul(a2.sub(1)).add(1);
     const specD = a2.mul(a2).div(denom.mul(denom));
     body.addAssign(u.sunColor.mul(specD.mul(NdotL).mul(u.glintIntensity).mul(fresnelW.add(0.15)))
@@ -1853,10 +2002,13 @@ export function createOceanSurface({
     const fT = float(0.02).add(float(0.98).mul(pow(oneMinusT, float(5))));
     const fUnder = mix(fT, float(1), tir).toVar();
 
+    // Same handover as the reflection above — `transDir` already points up out
+    // of the water, so the fold has nothing to do here, but a wide lobe reads
+    // the same contaminated average and belongs to the analytic sky either way.
     const windowSky = mix(
       analyticSky(transDir),
       envTap(transDir, envRough).mul(u.envIntensity),
-      saturate(u.envReflect.mul(u.envPresent)),
+      envW,
     ).mul(u.uwWindowSky);
     // The sun through the window: a hard disc and a soft aureole around it.
     const sunCos = saturate(dot(transDir, u.sunDir));
@@ -1912,7 +2064,9 @@ export function createOceanSurface({
     "runupNearEnd", "runupFarEnd", "wetFade", "wetDarken", "wetGloss",
     "foamSunLit", "edgeWidth", "edgeIntensity", "foamNoiseScale", "foamJitter", "foamWarpScale",
     "foamWarpStrength", "foamGain", "foamContrast", "foamErode",
-    "envReflect", "envIntensity", "waterRoughness", "specAA", "specAAMax",
+    "envReflect", "envIntensity", "envHorizonFold", "envRoughStart", "envRoughEnd",
+    "waterRoughness",
+    "specAA", "specAAMax", "fadeRoughness", "fftSlopeVar",
     "foamCutoff", "foamTransition", "foamDrift", "foamDetailNear", "foamDetailFar", "foamFarDensity",
     "foamMacroScale", "foamMacroAmt", "foamMacroDrift", "foamLodPixels",
     "horizonFadeStart", "horizonFadeEnd", "opacity",

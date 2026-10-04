@@ -335,7 +335,22 @@ export function buildOceanV2Controls(parent, v2, { onChange, getStats = () => nu
     s.slider(b, "specAA", {
       label: "Distance roughness", min: 0, max: 1.5, step: 0.02,
       hint: "Folds the wave detail a pixel cannot resolve back in as roughness, so the "
-        + "horizon neither goes glassy nor sparkles.",
+        + "horizon neither goes glassy nor sparkles. Measures the normal that is still "
+        + "there — the slider below covers what the distance fades removed first.",
+    });
+    s.slider(b, "fadeRoughness", {
+      label: "Faded-detail roughness", min: 0, max: 3, step: 0.05,
+      hint: "Puts back, as roughness, the slope variance this shader fades out with "
+        + "distance. Past the FFT range the normal is perfectly flat, so 'Distance "
+        + "roughness' above measures nothing and the far sea renders as a mirror of the "
+        + "sky. Turn to 0 to see that.",
+    });
+    s.slider(b, "envHorizonFold", {
+      label: "Env horizon fold", min: 0.05, max: 1, step: 0.05,
+      hint: "Folds a reflection ray that points DOWN back above the horizon before the "
+        + "environment is sampled. The IBL is baked from the sky dome alone and its lower "
+        + "hemisphere is black, so at 1 (no fold) the backs of waves seen from a low "
+        + "camera go black.",
     });
 
     const a = s.advanced();
@@ -349,6 +364,23 @@ export function buildOceanV2Controls(parent, v2, { onChange, getStats = () => nu
     s.slider(a, "skySunGlow", { label: "Sun aureole", min: 0, max: 2, step: 0.02 });
     s.slider(a, "skySunGlowSize", { label: "Aureole tightness", min: 1, max: 64, step: 1 });
     s.slider(a, "specAAMax", { label: "Distance roughness cap", min: 0, max: 1, step: 0.01 });
+    s.slider(a, "fftSlopeVar", {
+      label: "Swell slope variance", min: 0, max: 0.3, step: 0.005,
+      hint: "Mean square slope credited back as the FFT fades out. Cox-Munk puts a real "
+        + "sea near 0.035 at 6 m/s; a little above that covers the chop the linear figure "
+        + "misses.",
+    });
+    s.slider(a, "envRoughStart", {
+      label: "Env handover start", min: 0, max: 1, step: 0.01,
+      hint: "Roughness at which the reflection begins handing back from the environment "
+        + "map to the analytic sky. A prefiltered tap averages over its whole lobe, so the "
+        + "wider the lobe the more of this map's black floor it collects however it is "
+        + "pointed — and a blurred environment has nothing the analytic sky lacks.",
+    });
+    s.slider(a, "envRoughEnd", {
+      label: "Env handover end", min: 0, max: 1.5, step: 0.01,
+      hint: "Roughness at which the environment map is fully replaced by the analytic sky.",
+    });
     separator(a);
     s.toggle(a, "ssrEnabled", {
       label: "Reflections (SSR)",
