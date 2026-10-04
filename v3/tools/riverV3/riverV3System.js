@@ -45,7 +45,7 @@ const CULL_SLACK = 4;
 const JOIN_SLACK = 3;
 
 const COL_ACTIVE = 0x7fe9ff, COL_IDLE = 0x2c7f96, COL_PINNED = 0xffc04a, COL_SELECTED = 0xffffff;
-const COL_JUNCTION = 0xff7a3d;
+const COL_JUNCTION = 0xff7a3d, COL_WIDTH = 0x8cff9a, COL_LEVEL = 0xffd166;
 
 const _cullMat = new THREE.Matrix4();
 const _cullFrustum = new THREE.Frustum();
@@ -88,6 +88,8 @@ export class RiverV3System {
     this._flowIndex = null;
     this._flowIds = [];
     this._lastSnap = null;
+    /** reach id → { x, z }: open mouths (a waterfall takes the water there). */
+    this._openMouths = new Map();
     /** reach id → { mesh, cullChunks } */
     this._meshes = new Map();
 
@@ -101,6 +103,8 @@ export class RiverV3System {
 
     this._geoNode = new THREE.SphereGeometry(1, 12, 8);
     this._geoJunction = new THREE.OctahedronGeometry(1.5, 0);
+    this._geoWidth = new THREE.OctahedronGeometry(1, 0);
+    this._geoLevel = new THREE.ConeGeometry(0.7, 2, 8);
     this._matCache = new Map();
     const cone = new THREE.ConeGeometry(0.45, 1.5, 7); cone.rotateX(Math.PI / 2); cone.translate(0, 0, 0.2);
     this._geoArrow = cone;
@@ -171,7 +175,8 @@ export class RiverV3System {
       junctions: this.junctions, reaches: live,
       sampleGround: (x, z) => this.sampleBase(x, z), params: this.params,
     });
-    const list = live.filter((r) => this.sol.reaches.has(r.id)).map((r) => ({ id: r.id, solved: this.sol.reaches.get(r.id) }));
+    const list = live.filter((r) => this.sol.reaches.has(r.id))
+      .map((r) => ({ id: r.id, solved: this.sol.reaches.get(r.id), mouth: this._openMouths.get(r.id) ?? null }));
     this._flowIds = list.map((e) => e.id);
     this._flowIndex = buildFlowIndex(list.map((e) => e.solved), { worldSize: WORLD_SIZE, bedCurve: this.params.bedCurve });
 
@@ -188,6 +193,45 @@ export class RiverV3System {
   }
 
   refreshConform() { this.applyConform({ commit: true }); }
+
+  // ── Mouths: where a reach hands its water to a waterfall (as River v2) ────
+
+  /**
+   * The downstream end of a FREE reach (one that ends on no junction) as a
+   * waterfall lip: `{ x, y, z, yaw, width, speed, depth }`, or null.
+   */
+  mouthOf(reachId) {
+    const r = this.reach(reachId), s = this.sol?.reaches.get(reachId);
+    if (!r || r.to != null || !s || s.count < 2) return null;
+    const n = s.count - 1;
+    return { x: s.x[n], y: s.level[n], z: s.z[n], yaw: Math.atan2(s.tanX[n], s.tanZ[n]), width: s.width[n], speed: s.speed[n], depth: s.depth[n] };
+  }
+
+  /** Every free reach end: [{ id, ...mouthOf }]. */
+  mouths() {
+    const out = [];
+    for (const r of this.reaches) { const m = this.mouthOf(r.id); if (m) out.push({ id: r.id, ...m }); }
+    return out;
+  }
+
+  /**
+   * Open (a fall takes the water; the channel runs to the LIP at x, z and stops
+   * dead) or close a reach's mouth. Re-conforms.
+   */
+  setMouthOpen(reachId, open, x = null, z = null) {
+    const had = this._openMouths.get(reachId) ?? null;
+    if (!open) {
+      if (!had) return;
+      this._openMouths.delete(reachId);
+    } else {
+      const s = this.sol?.reaches.get(reachId), n = s ? s.count - 1 : 0;
+      const next = { x: Number.isFinite(x) ? x : s?.x[n], z: Number.isFinite(z) ? z : s?.z[n] };
+      if (!Number.isFinite(next.x)) return;
+      if (had && had.x === next.x && had.z === next.z) return;
+      this._openMouths.set(reachId, next);
+    }
+    if (this.reach(reachId)) this.applyConform({ commit: true });
+  }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Water surface (River v2's shader, one ribbon per reach)
@@ -352,6 +396,27 @@ export class RiverV3System {
         this.handleGroup.add(m);
       });
     }
+    // The selected node gets a width pair (green diamonds across the stream)
+    // and a level cone (gold, above it); a selected junction gets the cone.
+    // Only on the selection: on every node at once a river becomes a hedge.
+    const sn = this.selectedNode();
+    if (sn) {
+      const y = this._nodeY(sn.reach, sn.nodeIdx), t = this._nodeTangent(sn.reach, sn.nodeIdx);
+      const half = (sn.node.width ?? this.params.newWidth) * 0.5;
+      for (const side of [-1, 1]) {
+        const m = new THREE.Mesh(this._geoWidth, this._handleMat(COL_WIDTH));
+        m.position.set(sn.node.x - t.z * half * side, y, sn.node.z + t.x * half * side);
+        m.scale.setScalar(sc * 0.8);
+        m.userData = { kind: "width", reachId: sn.reach.id, nodeIdx: sn.nodeIdx, side };
+        m.renderOrder = 951;
+        this.handleGroup.add(m);
+      }
+      this._addLevelCone(sn.node.x, y, sn.node.z, sc, { kind: "level", reachId: sn.reach.id, nodeIdx: sn.nodeIdx });
+    } else if (this.selected?.kind === "junction") {
+      const J = this.junction(this.selected.junctionId);
+      const lv = J ? (this.sol?.junctions.get(J.id)?.level ?? this.sampleBase(J.x, J.z)) : 0;
+      if (J) this._addLevelCone(J.x, lv, J.z, sc, { kind: "level", junctionId: J.id });
+    }
     for (const J of this.junctions) {
       const sel = this.selected?.kind === "junction" && this.selected.junctionId === J.id;
       const m = new THREE.Mesh(this._geoJunction, this._handleMat(sel ? COL_SELECTED : Number.isFinite(J.y) ? COL_PINNED : COL_JUNCTION));
@@ -362,6 +427,22 @@ export class RiverV3System {
       m.renderOrder = 951;
       this.handleGroup.add(m);
     }
+  }
+
+  _addLevelCone(x, y, z, sc, data) {
+    const m = new THREE.Mesh(this._geoLevel, this._handleMat(COL_LEVEL));
+    m.position.set(x, y + sc * 3.2, z);
+    m.scale.setScalar(sc);
+    m.userData = data;
+    m.renderOrder = 951;
+    this.handleGroup.add(m);
+  }
+
+  /** Unit flow direction at a node (from its neighbours). */
+  _nodeTangent(reach, k) {
+    const n = reach.nodes, a = n[Math.max(0, k - 1)], b = n[Math.min(n.length - 1, k + 1)];
+    const dx = b.x - a.x, dz = b.z - a.z, L = Math.hypot(dx, dz) || 1;
+    return { x: dx / L, z: dz / L };
   }
 
   _rebuildArrows() {
@@ -741,8 +822,9 @@ export class RiverV3System {
 
   beginDrag(pick) {
     if (!pick) return false;
-    this.selected = pick.kind === "junction" ? { kind: "junction", junctionId: pick.junctionId } : { kind: "node", reachId: pick.reachId, nodeIdx: pick.nodeIdx };
-    if (pick.kind === "node") this.activeReachId = pick.reachId;
+    // Width and level handles carry the node / junction they belong to.
+    this.selected = pick.junctionId != null ? { kind: "junction", junctionId: pick.junctionId } : { kind: "node", reachId: pick.reachId, nodeIdx: pick.nodeIdx };
+    if (pick.reachId != null) this.activeReachId = pick.reachId;
     this._pushUndo();
     this._drag = { ...pick };
     this.dragging = true;
@@ -751,22 +833,63 @@ export class RiverV3System {
     return true;
   }
 
-  get dragKind() { return this._drag ? "node" : null; }
+  /** "node" / "junction" move over the terrain; "width" / "level" use analytic planes. */
+  get dragKind() { return this._drag?.kind ?? null; }
 
-  dragTo({ terrainHit }) {
+  /**
+   * @param {{terrainHit?:{x:number,z:number}|null, raycaster?:THREE.Raycaster, camera?:THREE.Camera}} ctx
+   */
+  dragTo({ terrainHit = null, raycaster = null, camera = null }) {
     const d = this._drag;
-    if (!d || !terrainHit) return;
-    if (d.kind === "junction") {
-      const J = this.junction(d.junctionId);
-      if (!J) return;
-      J.x = terrainHit.x; J.z = terrainHit.z;
-    } else {
+    if (!d) return;
+    if (d.kind === "junction" || d.kind === "node") {
+      if (!terrainHit) return;
+      const tgt = d.kind === "junction" ? this.junction(d.junctionId) : this.reach(d.reachId)?.nodes[d.nodeIdx];
+      if (!tgt) return;
+      tgt.x = terrainHit.x; tgt.z = terrainHit.z;
+      this._tidy();
+    } else if (d.kind === "width") {
       const r = this.reach(d.reachId), nd = r?.nodes[d.nodeIdx];
-      if (!nd) return;
-      nd.x = terrainHit.x; nd.z = terrainHit.z;
+      if (!nd || !raycaster) return;
+      const hit = this._rayOnHorizontalPlane(raycaster, this._nodeY(r, d.nodeIdx));
+      if (!hit) return;
+      const t = this._nodeTangent(r, d.nodeIdx);
+      // Across-stream distance only: dragging along the river changes nothing.
+      nd.width = Math.min(200, Math.max(1, 2 * Math.abs((hit.x - nd.x) * -t.z + (hit.z - nd.z) * t.x)));
+    } else if (d.kind === "level") {
+      const at = d.junctionId != null ? this.junction(d.junctionId) : this.reach(d.reachId)?.nodes[d.nodeIdx];
+      if (!at || !raycaster || !camera) return;
+      const y = this._rayOnVerticalPlane(raycaster, camera, at.x, at.z);
+      if (y == null) return;
+      // RELATIVE to where the drag began: the cone floats a few metres above
+      // the water, and taking the hit height itself (River v2 does) made the
+      // level jump up by that much on the first move.
+      if (d.startHit == null) {
+        d.startHit = y;
+        d.startLevel = d.junctionId != null
+          ? (this.sol?.junctions.get(d.junctionId)?.level ?? y)
+          : this._nodeY(this.reach(d.reachId), d.nodeIdx);
+      }
+      at.y = d.startLevel + (y - d.startHit);  // dragging the cone PINS the level
     }
-    this._tidy();
     this.applyConform({ commit: false });
+    this.syncSelectionToState();
+  }
+
+  _rayOnHorizontalPlane(raycaster, y) {
+    const r = raycaster.ray;
+    if (Math.abs(r.direction.y) < 1e-6) return null;
+    const t = (y - r.origin.y) / r.direction.y;
+    return t < 0 ? null : { x: r.origin.x + r.direction.x * t, z: r.origin.z + r.direction.z * t };
+  }
+
+  /** Height where the ray meets the vertical plane through (x, z) facing the camera. */
+  _rayOnVerticalPlane(raycaster, camera, x, z) {
+    const nx = camera.position.x - x, nz = camera.position.z - z, L = Math.hypot(nx, nz) || 1;
+    const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(new THREE.Vector3(nx / L, 0, nz / L), new THREE.Vector3(x, 0, z));
+    const hit = new THREE.Vector3();
+    if (!raycaster.ray.intersectPlane(plane, hit)) return null;
+    return Math.max(-MAX_HEIGHT, Math.min(MAX_HEIGHT * 1.5, hit.y));
   }
 
   endDrag() {

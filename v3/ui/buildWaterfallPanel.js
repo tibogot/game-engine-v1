@@ -57,8 +57,11 @@ export function buildWaterfallPanel(root, { system, editor, onLookChanged, onOpe
         const bind = { river: attached ? String(f.river) : "" };
         W(dropdown(sel, bind, "river", {
           label: "Fed by river",
-          options: [["", "None (free lip)"], ...mouths.map((m) => [String(m.id), `River ${m.id} — ${m.width.toFixed(0)} m, ${m.speed.toFixed(1)} m/s`])],
-          onChange: () => editor.attachSelected(bind.river === "" ? null : Number(bind.river)),
+          options: [["", "None (free lip)"], ...mouths.map((m) => [String(m.id),
+            `${String(m.id).startsWith("v3:") ? `River v3 reach ${String(m.id).slice(3)}` : `River ${m.id}`} — ${m.width.toFixed(0)} m, ${m.speed.toFixed(1)} m/s`])],
+          // River v2 ids are numbers; River v3 reaches are "v3:<id>" strings.
+          onChange: () => editor.attachSelected(bind.river === "" ? null
+            : bind.river.startsWith("v3:") ? bind.river : Number(bind.river)),
           hint: "Attached, the lip is the river's mouth and follows it. Width, speed and level come from the river; the river's channel stops at the lip.",
         }));
       }

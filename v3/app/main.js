@@ -7538,6 +7538,8 @@ export async function startV3App(opts = {}) {
   ]);
 
   // ── Waterfalls ─────────────────────────────────────────────────────────────
+  const isV3River = (id) => typeof id === "string" && id.startsWith("v3:");
+  const v3ReachId = (id) => Number(id.slice(3));
   // Water surface Y at a point: ocean, lakes, River v2 — what a fall lands in.
   function waterLevelAt(wx, wz) {
     let level = -Infinity;
@@ -7573,11 +7575,20 @@ export async function startV3App(opts = {}) {
     },
     sampleWater: waterLevelAt,
     getRiverWater: () => riverV2Slice.riverV2.water,
-    getRiverMouth: (id) => riverV2System.mouthOf(id),
+    // A fall attaches to a River v2 river (numeric id) or a River v3 reach
+    // ("v3:<reach id>" — the two id spaces overlap, so v3's carry a prefix).
+    getRiverMouth: (id) => (isV3River(id) ? riverV3System?.mouthOf(v3ReachId(id)) : riverV2System.mouthOf(id)),
     // The ground before any river carved it — see the brink march.
     sampleBaseGround: (x, z) => riverV2System.sampleBase(x, z),
-    getRiverMouths: () => riverV2System.mouths(),
-    setRiverMouthOpen: (id, open) => riverV2System.setMouthOpen(id, open),
+    getRiverMouths: () => [
+      ...riverV2System.mouths(),
+      ...(riverV3System?.mouths() ?? []).map((m) => ({ ...m, id: `v3:${m.id}` })),
+    ],
+    // v3 takes the fall's LIP (x, z), as River v2's design note asks; v2's call
+    // is left exactly as it was.
+    setRiverMouthOpen: (id, open, x, z) => (isV3River(id)
+      ? riverV3System?.setMouthOpen(v3ReachId(id), open, x, z)
+      : riverV2System.setMouthOpen(id, open)),
   });
   worldEnv?.addWaterSurface(waterfallSystem);
   /** A fall only turns about Y: the rotate gizmo shows just that ring. */
@@ -9390,6 +9401,40 @@ export async function startV3App(opts = {}) {
     }
   });
 
+  // OPEN A LEVEL BY URL: editor.html?project=/levels/river-lab.v3proj — a test
+  // bench is one link away instead of a file dialog. A level of another terrain
+  // size saves that size and reloads (the same rule as the toolbar Load); the
+  // URL is still there after the reload, so the level then opens at its size.
+  if (isEditor) {
+    const projectUrl = new URLSearchParams(location.search).get("project");
+    if (projectUrl) pendingWorldImport.then(async () => {
+      try {
+        const res = await fetch(projectUrl);
+        if (!res.ok) throw new Error(`${projectUrl}: HTTP ${res.status}`);
+        const buf = await res.arrayBuffer();
+        if (!isProjectFile(buf)) throw new Error(`${projectUrl} is not a V3 project file.`);
+        const d = await decodeProjectFile(buf);
+        const t = d.terrain ?? {};
+        if (t.heightmapSize !== HEIGHTMAP_SIZE || Math.round(t.worldSize) !== WORLD_SIZE || Math.round(t.maxHeight) !== MAX_HEIGHT) {
+          // Once only: if the size did not take, say so rather than loop.
+          const key = `v3.projectUrlReload:${projectUrl}`;
+          let tried = false;
+          try { tried = sessionStorage.getItem(key) === "1"; sessionStorage.setItem(key, "1"); } catch { /* storage blocked */ }
+          if (tried) throw new Error(`${projectUrl} needs a ${t.worldSize} m / ${t.heightmapSize}² terrain and the editor could not switch to it.`);
+          saveTerrainConfig({ ...t, splatSize: t.splatSize ?? SPLAT_RES });
+          location.reload();
+          return;
+        }
+        try { sessionStorage.removeItem(`v3.projectUrlReload:${projectUrl}`); } catch { /* storage blocked */ }
+        await applyProjectData(d);
+        statusBar?.setMessage(`Opened ${projectUrl}`);
+      } catch (err) {
+        console.error(err);
+        statusBar?.setMessage(`Open failed: ${err.message ?? err}`, { kind: "error", holdMs: 0 });
+      }
+    });
+  }
+
   if (isEditor) buildSplinePanel({
     toolState: splineToolState,
     splineSystem: splineSys,
@@ -9817,7 +9862,11 @@ export async function startV3App(opts = {}) {
   renderer.domElement.addEventListener("mousemove", e => {
     if (playMode.active || editorMode !== "riverv3" || !riverV3System?.dragging) return;
     refreshMouse(e);
-    riverV3System.dragTo({ terrainHit: getTerrainHitWorld(e) });
+    raycaster.setFromCamera(mouse, camera);
+    // Width and level handles resolve against analytic planes: no terrain raycast.
+    const k = riverV3System.dragKind;
+    const terrainHit = k === "node" || k === "junction" ? getTerrainHitWorld(e) : null;
+    riverV3System.dragTo({ terrainHit, raycaster, camera });
   });
   renderer.domElement.addEventListener("mousedown", e => {
     if (playMode.active || editorMode !== "riverv3" || e.button !== 0 || !riverV3System) return;

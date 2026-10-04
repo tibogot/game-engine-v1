@@ -22,6 +22,10 @@
  * tributary can never fill its parent's bed, and vice versa.
  *
  * Within one reach the nearest segment still decides, exactly as in v2.
+ *
+ * OPEN MOUTHS (a waterfall takes a reach's water): as River v2, the reach
+ * stops dead at a half-plane through the fall's LIP, honoured by every one of
+ * its segments — no half-disc of bank filling the brink the water leaves over.
  */
 
 const CELL = 16;
@@ -34,7 +38,8 @@ const smooth01 = (e0, e1, x) => {
 
 /**
  * Pack solved reaches into flat arrays in texture units (UV, normalized height).
- * @param {Array<{id:any, solved:object}>} list
+ * @param {Array<{id:any, solved:object, mouth?:{x:number,z:number}|null}>} list
+ *   `mouth`: the reach's open mouth (a waterfall lip), world metres
  */
 export function packReaches(list, { worldSize, maxHeight }) {
   let n = 0;
@@ -42,6 +47,11 @@ export function packReaches(list, { worldSize, maxHeight }) {
   const P = {
     u: new Float64Array(n), v: new Float64Array(n), level: new Float64Array(n), halfW: new Float64Array(n),
     depth: new Float64Array(n), bank: new Float64Array(n), reach: new Int32Array(n), last: new Uint8Array(n),
+    // Open mouth per point (−1 = none) and the half-plane's normal: the
+    // reach's own downstream direction AT the lip, so everything past the lip
+    // stops — not just segments upstream of it (v2's (mouth − segment start)
+    // normal only worked for a lip beyond the last node).
+    mu: new Float64Array(n).fill(-1), mv: new Float64Array(n), mnx: new Float64Array(n), mnz: new Float64Array(n),
     layout: [],
   };
   let o = 0;
@@ -49,7 +59,17 @@ export function packReaches(list, { worldSize, maxHeight }) {
     const s = r.solved;
     if (!s || s.count < 2) return;
     P.layout.push({ id: r.id, offset: o, count: s.count });
+    let nx = 0, nz = 0;
+    if (r.mouth) {
+      let bi = 0, bd = Infinity;
+      for (let i = 0; i < s.count; i++) {
+        const d = (s.x[i] - r.mouth.x) ** 2 + (s.z[i] - r.mouth.z) ** 2;
+        if (d < bd) { bd = d; bi = i; }
+      }
+      nx = s.tanX[bi]; nz = s.tanZ[bi];
+    }
     for (let i = 0; i < s.count; i++, o++) {
+      if (r.mouth) { P.mnx[o] = nx; P.mnz[o] = nz; }
       P.u[o] = s.x[i] / worldSize + 0.5;
       P.v[o] = s.z[i] / worldSize + 0.5;
       P.level[o] = s.level[i] / maxHeight;
@@ -58,6 +78,7 @@ export function packReaches(list, { worldSize, maxHeight }) {
       P.bank[o] = s.bank[i] / worldSize;
       P.reach[o] = ri;
       P.last[o] = i === s.count - 1 ? 1 : 0;
+      if (r.mouth) { P.mu[o] = r.mouth.x / worldSize + 0.5; P.mv[o] = r.mouth.z / worldSize + 0.5; }
     }
   });
   return P;
@@ -198,6 +219,9 @@ export function buildRiverV3TerrainOp({ packed: P, size, u }) {
           let t = ((uu - ax) * abx + (v - az) * abz) / Math.max(abx * abx + abz * abz, 1e-12);
           t = t < 0 ? 0 : t > 1 ? 1 : t;
           const dx = uu - ax - abx * t, dz = v - az - abz * t, d = dx * dx + dz * dz;
+          // Past an open mouth this reach stops dead (see the header).
+          const mu = P.mu[k];
+          if (mu >= 0 && (uu - mu) * P.mnx[k] + (v - P.mv[k]) * P.mnz[k] > 0) continue;
           const rk = P.reach[k];
           // Already have this reach? Keep its nearer segment.
           let slot = -1;
@@ -248,13 +272,16 @@ export function buildRiverV3TerrainOp({ packed: P, size, u }) {
  * on one reach never marks another dirty (v2 compared by path offset, and one
  * reach gaining a station shifted every later one).
  */
+/** Floats per station in a snapshot: u, v, level, halfW, depth, bank, mouth u/v. */
+const F = 8;
+
 export function snapshotReaches(packed, maxReach, paramsKey) {
   const byId = new Map();
   for (const e of packed.layout) {
-    const d = new Float64Array(e.count * 6);
+    const d = new Float64Array(e.count * F);
     for (let i = 0; i < e.count; i++) {
       const j = e.offset + i;
-      d.set([packed.u[j], packed.v[j], packed.level[j], packed.halfW[j], packed.depth[j], packed.bank[j]], i * 6);
+      d.set([packed.u[j], packed.v[j], packed.level[j], packed.halfW[j], packed.depth[j], packed.bank[j], packed.mu[j], packed.mv[j]], i * F);
     }
     byId.set(e.id, d);
   }
@@ -270,19 +297,19 @@ export function networkDirtyRect(prev, next, size) {
   if (!prev || !next || prev.maxReach !== next.maxReach || prev.paramsKey !== next.paramsKey) return null;
   let r = null;
   const grow = (d, i) => {
-    const x = d[i * 6] * size, z = d[i * 6 + 1] * size;
+    const x = d[i * F] * size, z = d[i * F + 1] * size;
     if (!r) r = { x0: x, z0: z, x1: x, z1: z };
     else { r.x0 = Math.min(r.x0, x); r.z0 = Math.min(r.z0, z); r.x1 = Math.max(r.x1, x); r.z1 = Math.max(r.z1, z); }
   };
-  const all = (d) => { for (let i = 0; i < d.length / 6; i++) grow(d, i); };
+  const all = (d) => { for (let i = 0; i < d.length / F; i++) grow(d, i); };
   for (const [id, a] of prev.byId) {
     const b = next.byId.get(id);
     if (!b) { all(a); continue; }
     if (a.length !== b.length) { all(a); all(b); continue; }
-    const cnt = a.length / 6;
+    const cnt = a.length / F;
     for (let i = 0; i < cnt; i++) {
       let same = true;
-      for (let f = 0; f < 6; f++) if (a[i * 6 + f] !== b[i * 6 + f]) { same = false; break; }
+      for (let f = 0; f < F; f++) if (a[i * F + f] !== b[i * F + f]) { same = false; break; }
       if (same) continue;
       for (const q of [i - 1, i, i + 1]) if (q >= 0 && q < cnt) { grow(a, q); grow(b, q); }
     }

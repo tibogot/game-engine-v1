@@ -197,6 +197,20 @@ const U = { bedCurve: 0.55, freeboardN: 0.6 / MAXH, lipFrac: 0.28, slopeToUv: MA
   ok("low tributary: it is flagged as climbing (red arrows)", sol.reaches.get(2).hasUphill);
 }
 
+// ── 12. An open mouth (waterfall lip) stops the reach dead ──────────────────
+{
+  const sol = solveNetwork({ junctions: [], reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 200), node(0, 0), node(0, -150)] }], sampleGround: ground });
+  const s = sol.reaches.get(1);
+  const g = toGrid();
+  const shut = Float32Array.from(g), open = Float32Array.from(g);
+  const full = { x0: 0, z0: 0, x1: SIZE - 1, z1: SIZE - 1 };
+  buildRiverV3TerrainOp({ packed: packReaches([{ id: 1, solved: s }], { worldSize: WORLD, maxHeight: MAXH }), size: SIZE, u: U }).apply(shut, g, full);
+  buildRiverV3TerrainOp({ packed: packReaches([{ id: 1, solved: s, mouth: { x: 0, z: -50 } }], { worldSize: WORLD, maxHeight: MAXH }), size: SIZE, u: U }).apply(open, g, full);
+  const at = (z) => Math.floor((z / WORLD + 0.5) * SIZE) * SIZE + Math.floor(0.5 * SIZE);
+  ok("open mouth: past the lip is natural ground", open[at(-100)] === g[at(-100)] && shut[at(-100)] !== g[at(-100)]);
+  ok("open mouth: before the lip the channel is unchanged", open[at(50)] === shut[at(50)]);
+}
+
 // ── 10. One reach, no junction: v3's terrain == v2's, texel for texel ──────
 {
   const { buildRiverTerrainOp } = await import("../v3/tools/riverV2Terrain.js");
