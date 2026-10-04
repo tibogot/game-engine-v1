@@ -28,6 +28,7 @@ import {
 } from "n8ao-webgpu";
 import { createPolishUniforms, polish } from "./polishNode.js";
 import { createPurkinjeUniforms, purkinje } from "./purkinjeNode.js";
+import { despeckle } from "./despeckleNode.js";
 
 /**
  * Blend mode for the `emissive` MRT attachment: "blend this target exactly the
@@ -152,6 +153,8 @@ export class PostFxPipeline {
     this._bloomSelective = false;
     /** Optional `(sceneColorNode) => sceneColorNode` before bloom (RTS fog of war). */
     this._sceneColorModifier = null;
+    // FIREFLY FILTER on the scene colour (despeckleNode.js) — opt-in, alg-rts.
+    this._despeckle = false;
     this._bloomParams = {
       strength: 0.3,
       threshold: 0.9,
@@ -710,8 +713,8 @@ export class PostFxPipeline {
     this._scenePass = pass(scene, camera);
     this._sceneExtra = new Set();
     this._wrapSceneTextureRequests(this._scenePass);
-    this._scenePassColor = this._scenePass.getTextureNode("output");
     this._applySceneMRT();
+    this._rebuildSceneColor();
 
     if (this._ssaoEnabled) this._ensureSsaoBuilt();
 
@@ -887,7 +890,31 @@ export class PostFxPipeline {
    * the cloud path then needs NO second bloom pass because the solids' glow
    * is baked into the linear RT before the clouds composite on top.
    */
+  /**
+   * The scene colour every consumer reads (the bloom, a game's colour modifier,
+   * the composite): the pass's own texture, or it despeckled (setDespeckle).
+   * Pixels that GLOW are exempt when the selective bloom's mask exists.
+   */
+  _rebuildSceneColor() {
+    const raw = this._scenePass.getTextureNode("output");
+    const mask = this._bloomParams.mask && this._emissiveWanted() ? this._scenePass.getTextureNode("emissive") : null;
+    this._scenePassColor = this._despeckle ? despeckle(raw, mask) : raw;
+  }
+
+  /** Kill lone blown-up pixels in the scene colour (despeckleNode.js). Off by default. */
+  setDespeckle(enabled) {
+    enabled = !!enabled;
+    if (this._despeckle === enabled) return;
+    this._despeckle = enabled;
+    if (!this._scenePass) return;
+    this._rebuildSceneColor();
+    if (!this._renderPipeline) return;
+    this._rebuildBloomPasses();
+    this._refreshOutputNode();
+  }
+
   _rebuildBloomPasses() {
+    if (this._scenePass) this._rebuildSceneColor();
     if (this._bloomPass?.dispose) this._bloomPass.dispose();
     if (this._cloudBloomPass?.dispose) this._cloudBloomPass.dispose();
     const bp = this._bloomParams;

@@ -54,7 +54,7 @@ One screen, most important first. Details stay in the sections below;
 **4. HUD / UX**
 - Selection card: the squad's name and n/size pips; retreat / reinforce
   icons; real unit icons (mine are drawn stand-ins); building portraits.
-- MINIMAP JUMP: the ground texture lags after a jump.
+- [x] MINIMAP JUMP: the ground lagged after a jump — fixed (groundCache catch-up, ~0.3 s).
 - A third cover colour (red, negative cover) once craters / mud count.
 - Sound: a squelch per alert; voices (parked: the free API plan refuses).
 
@@ -710,6 +710,12 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       +0.1 m) hid the 6%-high foundation. The field shader now has HOLES
       (up to 24 footprints, soft 0.5 m): a site clears the field under it
       (algFields `cutHole`, called by algBuild; wire excepted).
+- [x] FIXED 2026-10-04 (v3/terrain/groundCache.js): MEASURED a jump left ~335
+      tiles at 3 a frame = 1.8 s blurry. Now while >24 tiles are MISSING the
+      cache bakes for up to 10 ms of CPU a frame (`catchUpMs`), the tiles ON
+      SCREEN first (the camera's ground footprint), fine rings first, centre
+      out: fully sharp in 16-18 frames (~0.3 s), frames ≤ 33 ms meanwhile.
+      Pans unchanged (3 a frame). The old note:
 - [ ] **MINIMAP JUMPS: the ground texture takes time to update** (you): the
       ground cache re-bakes its rings round the new focus, and until it has
       the terrain shows unbaked / wrong. Ideas: a coarse ring covering the
@@ -1263,8 +1269,20 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       and the mask ignores weak emissive (saturate((m − 0.5)/0.7), plants'
       leaf light no longer glows). You: no flashes with bloom on. FX glows
       (flash, explosion, flame, tracer, sprites) write their own mask.
-      [ ] the firefly pixels' SOURCE is still unknown (they're harmless now:
-          clipped on screen, clamped in the bloom).
+      [x] 2026-10-04 (you: "I can still see them, less visible"): the lone
+          pixels themselves flickered as saturated dots. MEASURED again: 99.99%
+          of pixels < 1.8, ~8 a frame at 3-500 (once 9552) with all eight
+          neighbours 0.3-0.6, everywhere (hiding plants, terrain or any mesh
+          group moved the count by noise only; Sky Pro haze off: no change) —
+          grazing-angle specular blow-ups, coloured because one light term
+          blows up (the low sun's orange, the sky's blue). FIX: a DESPECKLE on
+          the scene colour before anything reads it (v2/render/post/
+          despeckleNode.js, opt-in `postFx.setDespeckle`, alg on, ?despeckle=0
+          to compare): a pixel > 3× its brightest neighbour and > 2 is pulled
+          down; glowing pixels (the bloom mask) are exempt; stars sit under 2.
+          Same-frame readback: spikes over 12 4 → 0, 16 pixels changed in 10
+          frames of 12.7 M, none under 2. GPU: noise (7.43 vs 7.62 ms).
+      [ ] you, look: still any flashing dot? (at night too: the stars.)
       PLANT PASS 3 (2026-10-02): reed-mace (18 strap leaves taller than the
       stalks, chocolate heads); asphodel rebuilt from the plant (keeled leaves,
       curved stems, six-tepal flowers with the brown midrib); TAMARISK = the

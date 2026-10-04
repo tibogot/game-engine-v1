@@ -201,6 +201,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // scene colour times the mask.
   app.postFx?.setBloomSelective(true);
   app.postFx?.setBloom({ enabled: params.get("bloom") !== "0", strength: 1.2, threshold: 0, radius: 0.6, smoothWidth: 0.01, resolution: 0.125, mask: true });
+  // FIREFLIES (2026-10-04, you: "I can still see the flashing coloured lights"): lone shading
+  // blow-ups (3-500x their neighbours, ~8 a frame) pulled down before anything reads the
+  // scene colour (v2/render/post/despeckleNode.js). ?despeckle=0 = without (A/B).
+  app.postFx?.setDespeckle?.(params.get("despeckle") !== "0");
   // CRISP, NOT SOFT (you, 2026-10-01: "CoH looks really good resolution").
   // FXAA ran ON TOP of the 4x MSAA and blurred every pixel of the frame:
   // MEASURED same frame, the fine detail (Laplacian) went ×2.7 with it off —

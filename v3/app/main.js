@@ -12448,6 +12448,8 @@ export async function startV3App(opts = {}) {
        * before bloom (FoW). `scenePass` is the pass that rendered the scene:
        * `scenePass.getViewZNode()` is the depth, with no copy.
        */
+      /** Kill lone blown-up pixels (fireflies) in the scene colour — opt-in (alg-rts). */
+      setDespeckle(on) { worldEnv?.postFxPipeline?.setDespeckle?.(on); },
       setSceneColorModifier(fn) {
         worldEnv?.postFxPipeline?.setSceneColorModifier(fn);
       },

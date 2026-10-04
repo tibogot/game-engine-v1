@@ -76,6 +76,17 @@ export const GROUND_CACHE_DEFAULTS = {
    */
   tilesPerFrame: 3,
   /**
+   * CATCHING UP after a JUMP (a minimap click, a focus key; 2026-10-04, you:
+   * "the terrain goes blurry first, then adapts"). MEASURED: a jump leaves
+   * ~335 tiles to bake and a tile costs ~1 ms (almost all CPU: two render
+   * calls) — at 3 a frame the ground stayed soft for 1.9 s. While more than
+   * `catchUpAt` tiles are MISSING, bake for up to `catchUpMs` of CPU a frame
+   * instead — and the tiles ON SCREEN first (VIEW below). A pan never gets
+   * that far behind, so it keeps the 3-a-frame pace. 0 = off.
+   */
+  catchUpMs: 10,
+  catchUpAt: 24,
+  /**
    * One render pass per target and tile (paint, splats, decals and the cavity
    * finish as meshes of one scene, in renderOrder) instead of up to four. Each
    * pass is a submit of its own: MEASURED ~0.08 ms apiece on the RTS laptop,
@@ -1033,9 +1044,54 @@ export function createGroundCache({
     return c;
   }
 
-  /** Every tile of every ring that is missing or stale, nearest to the look point first. */
+  // ── VIEW: the ground the camera can see (a convex quad, world XZ) ─────────
+  // The four screen corners' rays met with the ground at the look point's
+  // height; the top ones capped (near the horizon they run off to infinity).
+  const _NDC = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  const _vd = new THREE.Vector3();
+  const view = [{ x: 0, z: 0 }, { x: 0, z: 0 }, { x: 0, z: 0 }, { x: 0, z: 0 }];
+  let viewOk = false;
+  function viewFootprint(camera, gy) {
+    viewOk = false;
+    if (!camera?.isPerspectiveCamera) return;
+    const o = camera.position;
+    const ts = [];
+    for (const [nx, ny] of _NDC) {
+      _vd.set(nx, ny, 0.5).unproject(camera).sub(o).normalize();
+      ts.push(_vd.y < -1e-3 ? (o.y - gy) / -_vd.y : Infinity);
+      ts.push(_vd.x, _vd.z);
+    }
+    const nearT = Math.max(ts[0], ts[3]);              // the bottom corners
+    if (!Number.isFinite(nearT)) return;
+    const cap = nearT * 4;
+    for (let i = 0; i < 4; i++) {
+      const t = Math.min(ts[i * 3], cap);
+      view[i].x = o.x + ts[i * 3 + 1] * t;
+      view[i].z = o.z + ts[i * 3 + 2] * t;
+    }
+    viewOk = true;
+  }
+  /** Does the box [x0,x1]×[z0,z1] overlap the view quad? (separating axes) */
+  function inView(x0, z0, x1, z1) {
+    if (!viewOk) return true;
+    let a = Infinity, b = -Infinity, c = Infinity, d = -Infinity;
+    for (const p of view) { a = Math.min(a, p.x); b = Math.max(b, p.x); c = Math.min(c, p.z); d = Math.max(d, p.z); }
+    if (a > x1 || b < x0 || c > z1 || d < z0) return false;
+    for (let i = 0; i < 4; i++) {
+      const p = view[i], q = view[(i + 1) % 4];
+      const nx = -(q.z - p.z), nz = q.x - p.x;
+      let qmin = Infinity, qmax = -Infinity;
+      for (const v of view) { const t = v.x * nx + v.z * nz; qmin = Math.min(qmin, t); qmax = Math.max(qmax, t); }
+      const b0 = x0 * nx + z0 * nz, b1 = x1 * nx + z0 * nz, b2 = x0 * nx + z1 * nz, b3 = x1 * nx + z1 * nz;
+      if (Math.max(b0, b1, b2, b3) < qmin || Math.min(b0, b1, b2, b3) > qmax) return false;
+    }
+    return true;
+  }
+
+  /** Every tile of every ring that is missing or stale, in the order to bake them. */
   function pendingTiles(c) {
     const out = [];
+    let missingN = 0;
     for (const r of rings) {
       const S = r.S;
       for (let j = 0; j < T; j++) for (let i = 0; i < T; i++) {
@@ -1043,15 +1099,24 @@ export function createGroundCache({
         const missing = r.slotTX[s] !== tx || r.slotTZ[s] !== tz;
         if (!missing && !r.slotStale[s]) continue;
         const dx = (tx + 0.5) * S - c.x, dz = (tz + 0.5) * S - c.y;
-        // Missing tiles first (they gate what may be read) and COARSE rings
-        // first among them: a missing coarse tile shows bare base colour, a
-        // missing fine one only the next ring's softer texels. Then stale
-        // tiles, nearest first.
         const d = Math.hypot(dx, dz) / S;
-        out.push({ r, tx, tz, pri: missing ? (N - r.k) * 1000 + d : 1e7 + d * S });
+        let pri;
+        if (!missing) pri = 1e7 + d * S;                       // stale: nearest first, last of all
+        else {
+          missingN++;
+          // The COARSEST ring first: a hole there shows bare base colour.
+          // Then what is ON SCREEN, FINE rings first, centre-out: the ground
+          // you look at sharpens first (a missing fine tile only shows the
+          // next ring's softer texels). Off screen last, coarse first.
+          if (r.k === N - 1) pri = d;
+          else if (inView(tx * S, tz * S, (tx + 1) * S, (tz + 1) * S)) pri = 1000 + r.k * 1000 + d;
+          else pri = 1e5 + (N - r.k) * 1000 + d;
+        }
+        out.push({ r, tx, tz, pri });
       }
     }
     out.sort((a, b) => a.pri - b.pri);
+    out.missing = missingN;
     return out;
   }
 
@@ -1060,10 +1125,18 @@ export function createGroundCache({
     if (syncDecals()) markAllStale();
     if (lookChanged(heightVersion)) markAllStale();
     const c = retarget(camera);
+    viewFootprint(camera, getGroundY ? getGroundY(c.x, c.y) : 0);
     const todo = pendingTiles(c);
-    const n = Math.min(todo.length, O.tilesPerFrame);
-    for (let i = 0; i < n; i++) bakeTile(todo[i].r, todo[i].tx, todo[i].tz);
+    // A jump (far behind): a time budget instead of a tile count.
+    const burst = O.catchUpMs > 0 && todo.missing > O.catchUpAt;
+    const t0 = burst ? performance.now() : 0;
+    let n = 0;
+    while (n < todo.length && (n < O.tilesPerFrame || (burst && performance.now() - t0 < O.catchUpMs))) {
+      bakeTile(todo[n].r, todo[n].tx, todo[n].tz);
+      n++;
+    }
     stats.lastFrameTiles = n;
+    stats.burst = burst;
     stats.pending = todo.length - n;
     for (const r of rings) updateValidBox(r);
   }
