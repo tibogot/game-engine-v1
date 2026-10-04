@@ -228,6 +228,13 @@ export function createRiverMaterial({
   inputs = null, basis = null, thicknessNode = null, verticalDepthNode = null,
   coverageNode = null, extraFoamNode = null, blendOutput = false,
   waves = true, waterlineDiscard = true,
+  /** River v3: a bool node — drop this fragment (another reach owns the pixel
+   *  at a junction, so two surfaces never draw over each other). null = never. */
+  discardNode = null,
+  /** River v3: a float node scaling the wave relief (0 = flat). Reaches
+   *  meeting at a junction fade their waves out there, so the two surfaces
+   *  are at one height on the seam. null = 1. */
+  waveScaleNode = null,
   grabFree = false, groundYNode = null,
 } = {}) {
   const p = { ...RIVER_MATERIAL_DEFAULTS, ...params };
@@ -355,7 +362,8 @@ export function createRiverMaterial({
     const breakUp = _vnoise(vec2(arc.mul(0.35), across.mul(0.6))).mul(0.6).add(0.7);
     const stand = sin(arc.mul(kStand)).mul(turbA).mul(u.standingAmplitude).mul(breakUp);
 
-    return swell.add(stand).mul(taper).mul(u.waveEnabled);
+    const out = swell.add(stand).mul(taper).mul(u.waveEnabled);
+    return waveScaleNode ? out.mul(waveScaleNode) : out;
   });
 
   /** Scene distance from camera, in metres, at a screen UV. */
@@ -499,6 +507,7 @@ export function createRiverMaterial({
     // The ribbon deliberately overhangs its banks so the waterline is found per
     // pixel rather than by the mesh edge. This is where that gets cut.
     if (waterlineDiscard) Discard(thickness.lessThanEqual(0));
+    if (discardNode) Discard(discardNode);
 
     // ── 4. Refraction ──────────────────────────────────────────────────────
     const distortion = tsn.xy.mul(

@@ -87,6 +87,19 @@ const conf = {
   let down = true;
   for (const s of [r1, r2, r3]) for (let i = 1; i < s.count; i++) if (s.level[i] > s.level[i - 1] + 1e-6) down = false;
   ok("confluence: every reach runs downhill through the junction", down);
+  // Backwater: within the junction's reach of it, every surface IS the
+  // junction level — so the surfaces meet at one height on the seam.
+  const flatEnd = (s, fromEnd, m) => {
+    let worst = 0;
+    for (let i = 0; i < s.count; i++) {
+      const d = fromEnd ? s.total - s.arc[i] : s.arc[i];
+      if (d <= m) worst = Math.max(worst, Math.abs(s.level[i] - L));
+    }
+    return worst;
+  };
+  const Lb = 6 + 4 + 2;   // the two widest half widths at J (12 m, 8 m wide) + 2
+  const wTrib = Math.max(flatEnd(r1, true, Lb), flatEnd(r2, true, Lb), flatEnd(r3, false, Lb));
+  ok("confluence: backwater — every surface holds the junction level near it", wTrib < 1e-6, `worst ${wTrib}`);
 }
 
 // ── 5. A split divides the flow by width², and conserves it ─────────────────

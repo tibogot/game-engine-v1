@@ -26,7 +26,7 @@
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { attribute } from "three/tsl";
+import { attribute, texture, positionWorld, abs, vec2 } from "three/tsl";
 import { WORLD_SIZE, MAX_HEIGHT, HEIGHTMAP_SIZE } from "../../terrain/heightmapTexture.js";
 import { createRiverMaterial } from "../../render/water/riverV2Material.js";
 import { riverWaterParams } from "../../app/state/riverV2State.js";
@@ -39,6 +39,8 @@ const LAYER = "riverV3";
 const MAX_UNDO = 64;
 const ARROW_SPACING = 14;
 const RIBBON_OVERHANG = 2.5;
+/** Metres before a junction end over which the surface waves fade out. */
+const WAVE_FADE = 8;
 const CULL_ROWS = 16;
 const CULL_SLACK = 4;
 /** Metres beyond a reach's half width within which a click JOINS it. */
@@ -98,7 +100,15 @@ export class RiverV3System {
     this.arrowGroup = new THREE.Group(); this.arrowGroup.name = "RiverV3Arrows"; this.arrowGroup.visible = false; scene.add(this.arrowGroup);
 
     this._waterNormalMap = waterNormalMap;
-    this._water = createRiverMaterial({ normalMap: waterNormalMap });
+    // Junction ownership (riverV3Terrain.js): per heightmap texel, 1 + the
+    // index of the nearest reach. Each ribbon carries its own index (aReach)
+    // and drops the pixels another reach owns.
+    this._ownerData = new Float32Array(HEIGHTMAP_SIZE * HEIGHTMAP_SIZE);
+    this._ownerTex = new THREE.DataTexture(this._ownerData, HEIGHTMAP_SIZE, HEIGHTMAP_SIZE, THREE.RedFormat, THREE.FloatType);
+    this._ownerTex.minFilter = this._ownerTex.magFilter = THREE.NearestFilter;
+    this._ownerTex.flipY = false;
+    this._ownerTex.needsUpdate = true;
+    this._water = createRiverMaterial({ normalMap: waterNormalMap, discardNode: this._ownerDiscard(), waveScaleNode: attribute("aWaveFade", "float") });
     this._grabFree = false;
 
     this._geoNode = new THREE.SphereGeometry(1, 12, 8);
@@ -154,6 +164,10 @@ export class RiverV3System {
       lipFrac: Math.min(0.9, Math.max(0.02, p.lipFraction ?? 0.28)),
       slopeToUv: MAX_HEIGHT / (slope * WORLD_SIZE),
       flareMax: Math.max(1, p.bankFlareMax ?? 4),
+      // Natural levee: held to the surface's overhang + 1 m, eased out by + 4 m.
+      overhangUV: RIBBON_OVERHANG / WORLD_SIZE,
+      levee0: 1 / WORLD_SIZE,
+      levee1: 4 / WORLD_SIZE,
     };
   }
 
@@ -176,17 +190,23 @@ export class RiverV3System {
       sampleGround: (x, z) => this.sampleBase(x, z), params: this.params,
     });
     const list = live.filter((r) => this.sol.reaches.has(r.id))
-      .map((r) => ({ id: r.id, solved: this.sol.reaches.get(r.id), mouth: this._openMouths.get(r.id) ?? null }));
+      .map((r) => ({
+        id: r.id, solved: this.sol.reaches.get(r.id), mouth: this._openMouths.get(r.id) ?? null,
+        extStart: r.from != null, extEnd: r.to != null,
+      }));
     this._flowIds = list.map((e) => e.id);
     this._flowIndex = buildFlowIndex(list.map((e) => e.solved), { worldSize: WORLD_SIZE, bedCurve: this.params.bedCurve });
 
     const packed = packReaches(list, { worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT });
     const u = this._conformParams();
     const op = buildRiverV3TerrainOp({ packed, size: HEIGHTMAP_SIZE, u });
+    if (op) op.owner = this._ownerData;
     const snap = op ? snapshotReaches(packed, op.maxReach, JSON.stringify(u)) : null;
     const dirty = this.layers.operator(LAYER) ? networkDirtyRect(this._lastSnap, snap, HEIGHTMAP_SIZE) : null;
     this._lastSnap = snap;
     this.layers.setOperator(LAYER, op, dirty);
+    // The compose just rewrote the owner map where it recomposed.
+    this._ownerTex.needsUpdate = true;
 
     if (rebuild) this._rebuildVisual();
     if (commit) this.onConformCommitted?.();
@@ -247,20 +267,38 @@ export class RiverV3System {
     const drop = p.surfaceDrop ?? 0.05;
     const step = Math.max(0.25, p.meshStep ?? 0.8);
     const cols = Math.max(2, Math.round(p.meshAcross ?? 12));
-    const rows = Math.max(2, Math.min(4096, Math.round(s.total / step) + 1));
+    // An end on a JUNCTION runs on past the end by its own half width plus the
+    // overhang, straight along its end tangent: where the river bends at a
+    // junction the two square ends otherwise leave a wedge nobody draws.
+    // Ownership (riverV3Terrain.js) then trims the overlap to one seam.
+    const runOn = (i) => s.width[i] * 0.5 + Math.min(s.bank[i] * 0.5, RIBBON_OVERHANG);
+    const extS = reach.from != null ? runOn(0) : 0;
+    const extE = reach.to != null ? runOn(s.count - 1) : 0;
+    const len = s.total + extS + extE;
+    const rows = Math.max(2, Math.min(4096, Math.round(len / step) + 1));
     const vCount = rows * (cols + 1);
     const pos = new Float32Array(vCount * 3), uvs = new Float32Array(vCount * 2);
     const flow = new Float32Array(vCount * 4), wave = new Float32Array(vCount * 2);
+    const fade = new Float32Array(vCount);
+    // Waves fade to nothing over the last WAVE_FADE m before a junction end and
+    // stay flat on the run-on: the neighbour reach's waves have another phase,
+    // and a few cm of height step on the seam showed as slivers of riverbed.
+    const fadeAt = (arc) => Math.min(
+      extS > 0 ? Math.min(1, Math.max(0, arc / WAVE_FADE)) : 1,
+      extE > 0 ? Math.min(1, Math.max(0, (s.total - arc) / WAVE_FADE)) : 1,
+    );
     let si = 0;
     for (let r = 0; r < rows; r++) {
-      const arc = (r / (rows - 1)) * s.total;
-      while (si < s.count - 2 && s.arc[si + 1] < arc) si++;
+      const arc = -extS + (r / (rows - 1)) * len;
+      const arcC = Math.min(s.total, Math.max(0, arc));
+      while (si < s.count - 2 && s.arc[si + 1] < arcC) si++;
       const a0 = s.arc[si], a1 = s.arc[si + 1];
-      const t = a1 > a0 ? Math.min(1, Math.max(0, (arc - a0) / (a1 - a0))) : 0;
+      const t = a1 > a0 ? Math.min(1, Math.max(0, (arcC - a0) / (a1 - a0))) : 0;
       const lerp = (arr) => arr[si] + (arr[si + 1] - arr[si]) * t;
-      const cx = lerp(s.x), cz = lerp(s.z);
       let tx = lerp(s.tanX), tz = lerp(s.tanZ);
       const tl = Math.hypot(tx, tz) || 1; tx /= tl; tz /= tl;
+      // Beyond an end: straight on along the end tangent.
+      const cx = lerp(s.x) + tx * (arc - arcC), cz = lerp(s.z) + tz * (arc - arcC);
       const px = -tz, pz = tx;
       const halfW = lerp(s.width) * 0.5;
       const span = halfW + Math.min(lerp(s.bank) * 0.5, RIBBON_OVERHANG);
@@ -273,6 +311,7 @@ export class RiverV3System {
         uvs[v * 2] = arc; uvs[v * 2 + 1] = across;
         flow[v * 4] = tx; flow[v * 4 + 1] = tz; flow[v * 4 + 2] = spd; flow[v * 4 + 3] = halfW;
         wave[v * 2] = tb; wave[v * 2 + 1] = dp;
+        fade[v] = fadeAt(arc);
       }
     }
     const idx = new Uint32Array((rows - 1) * cols * 6);
@@ -286,6 +325,11 @@ export class RiverV3System {
     g.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
     g.setAttribute("aFlow", new THREE.BufferAttribute(flow, 4));
     g.setAttribute("aWave", new THREE.BufferAttribute(wave, 2));
+    g.setAttribute("aWaveFade", new THREE.BufferAttribute(fade, 1));
+    // Which reach this surface is, for the junction ownership test (1-based,
+    // as the owner map stores it).
+    const ri = this._flowIds.indexOf(reach.id) + 1;
+    g.setAttribute("aReach", new THREE.BufferAttribute(new Float32Array(vCount).fill(ri), 1));
     g.setIndex(new THREE.BufferAttribute(idx, 1));
     g.computeBoundingSphere();
     if (g.boundingSphere) g.boundingSphere.radius += 2;
@@ -507,6 +551,27 @@ export class RiverV3System {
 
   syncMaterial() { this._water.syncParams(riverWaterParams(this.params.water)); }
 
+  /**
+   * The ownership test for the river shader's `discardNode`: this fragment's
+   * world XZ looked up in the owner map; drop it when ANOTHER reach owns the
+   * texel (0 = nobody: keep, so a ribbon's own overhang still finds the bank).
+   */
+  _ownerDiscard() {
+    const mine = attribute("aReach", "float");
+    // Owned by ANOTHER reach at this world XZ? Asked at the fragment and 5 cm
+    // to each diagonal, and dropped only if every answer says so. One tap was
+    // a one-pixel crack along every seam: the two surfaces are different
+    // meshes, so on a texel border their interpolated positions differ by a
+    // hair, each lands in the other's texel, and BOTH discard. The taps make
+    // the surfaces overlap by a few cm instead — invisible where they agree.
+    const E = 0.05;
+    const otherAt = (dx, dz) => {
+      const o = texture(this._ownerTex, positionWorld.xz.add(vec2(dx, dz)).div(WORLD_SIZE).add(0.5)).r;
+      return o.greaterThan(0.5).and(abs(o.sub(mine)).greaterThan(0.5));
+    };
+    return otherAt(0, 0).and(otherAt(E, E)).and(otherAt(-E, E)).and(otherAt(E, -E)).and(otherAt(-E, -E));
+  }
+
   update(dt) {
     this._time += dt;
     this._water.update(dt, this._time);
@@ -524,7 +589,7 @@ export class RiverV3System {
     if (on === this._grabFree) return;
     this._grabFree = on;
     const old = this._water;
-    this._water = createRiverMaterial({ normalMap: this._waterNormalMap, grabFree: on, groundYNode: on ? groundYNode : null });
+    this._water = createRiverMaterial({ normalMap: this._waterNormalMap, grabFree: on, groundYNode: on ? groundYNode : null, discardNode: this._ownerDiscard(), waveScaleNode: attribute("aWaveFade", "float") });
     this.syncMaterial();
     if (this._lastSun) this._water.setSunDir(this._lastSun);
     if (this._lastSky) this._water.setSkyColors(...this._lastSky);

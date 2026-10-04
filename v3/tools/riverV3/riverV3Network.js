@@ -313,6 +313,23 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
     if (r.to != null) { lv[n - 1] = jLevel.get(r.to); pin[n - 1] = 1; }
   }
 
+  // ── Backwater length per junction ─────────────────────────────────────────
+  // How far up (and down) each reach the junction's level holds: the two
+  // widest half-widths meeting there plus 2 m — far enough that every surface
+  // reaches the ownership seam (which lies within the trunk's half width of
+  // the junction) at the junction's own level.
+  const halfAt = new Map();                  // junction id → half widths of the ends there
+  for (const r of order) {
+    const w = geo.get(r.id).width;
+    if (r.from != null) (halfAt.get(r.from) ?? halfAt.set(r.from, []).get(r.from)).push(w[0] * 0.5);
+    if (r.to != null) (halfAt.get(r.to) ?? halfAt.set(r.to, []).get(r.to)).push(w[w.length - 1] * 0.5);
+  }
+  const backwater = (jid) => {
+    const hs = (halfAt.get(jid) ?? [0]).slice().sort((a, b) => b - a);
+    return (hs[0] ?? 0) + (hs[1] ?? 0) + 2;
+  };
+  const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+
   // ── Stations ──────────────────────────────────────────────────────────────
   const out = new Map();
   for (const r of order) {
@@ -352,6 +369,29 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
     const last = G0.spans[n - 2];
     put(n - 2, last.len, arc0, last.xs[SPAN_SUB], last.zs[SPAN_SUB],
       last.xs[SPAN_SUB] - last.xs[SPAN_SUB - 1], last.zs[SPAN_SUB] - last.zs[SPAN_SUB - 1]);
+
+    // BACKWATER: near a junction the surface blends to the junction's level and
+    // holds it over the last `Lb` metres (and the first, for a reach leaving a
+    // junction) — real confluences do this, the trunk's level backing up the
+    // tributary's mouth. Without it a steep tributary met the trunk ~0.25 m
+    // above it at the ownership seam, and from an angle the height step opened
+    // a sawtooth of riverbed between the two surfaces (seen in the river lab).
+    // Both blends keep the profile non-increasing: the junction level is below
+    // everything upstream of it and above everything downstream.
+    if (r.to != null) {
+      const J = jLevel.get(r.to), Lb = backwater(r.to);
+      for (let s = 0; s < count; s++) {
+        const w = smoothstep(arc0 - 2 * Lb, arc0 - Lb, S.arc[s]);
+        if (w > 0) S.level[s] = S.level[s] + (J - S.level[s]) * w;
+      }
+    }
+    if (r.from != null) {
+      const J = jLevel.get(r.from), Lb = backwater(r.from);
+      for (let s = 0; s < count; s++) {
+        const w = 1 - smoothstep(Lb, 2 * Lb, S.arc[s]);
+        if (w > 0) S.level[s] = S.level[s] + (J - S.level[s]) * w;
+      }
+    }
 
     // Flow: continuity with this reach's discharge.
     const q = reachQ.get(r.id);

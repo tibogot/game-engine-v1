@@ -15,8 +15,12 @@
  *                            channels is one clean channel — and the smooth
  *                            min dips a little below both where they meet,
  *                            which is the scour hole real confluences have)
- *   both on their banks    → the LOWER bank, so two lips never make a ridge
- *                            across the mouth
+ *   both on their banks    → the LOWER bank (a smooth corner), floored just
+ *                            above the water. Plain "lower" let a bank that had
+ *                            eased down to a floodplain below the river win, and
+ *                            the river spilled onto the corner; plain "higher"
+ *                            stood one reach's lip across the edge of the other's
+ *                            mouth. Both seen up close in the river lab.
  *
  * This is Unreal Water's "Min at the confluence" rule, generalised: a
  * tributary can never fill its parent's bed, and vice versa.
@@ -38,8 +42,9 @@ const smooth01 = (e0, e1, x) => {
 
 /**
  * Pack solved reaches into flat arrays in texture units (UV, normalized height).
- * @param {Array<{id:any, solved:object, mouth?:{x:number,z:number}|null}>} list
- *   `mouth`: the reach's open mouth (a waterfall lip), world metres
+ * @param {Array<{id:any, solved:object, mouth?:{x:number,z:number}|null, extStart?:boolean, extEnd?:boolean}>} list
+ *   `mouth`: the reach's open mouth (a waterfall lip), world metres;
+ *   `extStart` / `extEnd`: that end sits on a junction (its surface runs on)
  */
 export function packReaches(list, { worldSize, maxHeight }) {
   let n = 0;
@@ -52,6 +57,11 @@ export function packReaches(list, { worldSize, maxHeight }) {
     // stops — not just segments upstream of it (v2's (mouth − segment start)
     // normal only worked for a lip beyond the last node).
     mu: new Float64Array(n).fill(-1), mv: new Float64Array(n), mnx: new Float64Array(n), mnz: new Float64Array(n),
+    // 1 on a reach's first/last point when that end sits on a JUNCTION: its
+    // water surface runs on past the end there (see the ribbon builder), so it
+    // may own the pixels just beyond it. Without that, where a river bends at
+    // a junction the two square ribbon ends leave a thin wedge nobody draws.
+    ext: new Uint8Array(n),
     layout: [],
   };
   let o = 0;
@@ -70,6 +80,7 @@ export function packReaches(list, { worldSize, maxHeight }) {
     }
     for (let i = 0; i < s.count; i++, o++) {
       if (r.mouth) { P.mnx[o] = nx; P.mnz[o] = nz; }
+      if ((i === 0 && r.extStart) || (i === s.count - 1 && r.extEnd)) P.ext[o] = 1;
       P.u[o] = s.x[i] / worldSize + 0.5;
       P.v[o] = s.z[i] / worldSize + 0.5;
       P.level[o] = s.level[i] / maxHeight;
@@ -88,10 +99,14 @@ export function packReaches(list, { worldSize, maxHeight }) {
  * @param {object} o
  * @param {object} o.packed  packReaches output
  * @param {number} o.size    heightmap texels per side
- * @param {object} o.u       { bedCurve, freeboardN, lipFrac, slopeToUv, flareMax }
+ * @param {object} o.u       { bedCurve, freeboardN, lipFrac, slopeToUv, flareMax,
+ *   overhangUV?, levee0?, levee1? } — the last three (UV) switch on the natural
+ *   levee under the water surface's overhang; absent = River v2's section
  * @returns {null|{rect, apply, maxReach}}
  */
-export function buildRiverV3TerrainOp({ packed: P, size, u }) {
+export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
+  // No levee constants → no levee (hold = 1 everywhere): River v2's section.
+  const u = uIn.levee1 > 0 ? uIn : { ...uIn, overhangUV: -2, levee0: 0, levee1: 1 };
   const n = P.u.length;
   const segs = [];
   let maxReach = 0;
@@ -166,10 +181,11 @@ export function buildRiverV3TerrainOp({ packed: P, size, u }) {
 
   // The cross-section of segment k at parameter t, distance `dist` (UV), over
   // ground `natural`. Returns NaN where it has eased back to natural ground.
-  let secIn = false;
+  let secIn = false, secLevel = 0;
   function section(natural, k, t, dist) {
     const lerp = (a) => a[k] + (a[k + 1] - a[k]) * t;
     const level = lerp(P.level), halfW = lerp(P.halfW);
+    secLevel = level;
     if (dist <= halfW) {
       secIn = true;
       const depth = lerp(P.depth);
@@ -184,7 +200,17 @@ export function buildRiverV3TerrainOp({ packed: P, size, u }) {
     const ub = Math.min(1, (dist - halfW) / Math.max(flare, 1e-9));
     if (ub >= 1) return NaN;
     const lip = level + (rim - level) * smooth01(0, u.lipFrac, ub);
-    return lip + (natural - lip) * smooth01(u.lipFrac, 1, ub);
+    const h = lip + (natural - lip) * smooth01(u.lipFrac, 1, ub);
+    // NATURAL LEVEE: under the water surface's overhang (and a little past it)
+    // the bank never drops below half a freeboard above the water. A floodplain
+    // at the river's own level otherwise sat a few cm above the surface, the
+    // waves lifted the water over it, and it showed as a sheet of water cut off
+    // by the ribbon's straight edge (seen beside a tributary in the river lab).
+    // Further out it eases back to the natural ground.
+    const beyond = dist - halfW;
+    const hold = smooth01(u.overhangUV + u.levee0, u.overhangUV + u.levee1, beyond);
+    const floor = level + u.freeboardN * 0.5;
+    return h < floor ? h + (floor - h) * (1 - hold) : h;
   }
 
   // The best segment of each of the K nearest REACHES. A confluence is three
@@ -194,7 +220,18 @@ export function buildRiverV3TerrainOp({ packed: P, size, u }) {
   const K = 4;
   const bd = new Float64Array(K), bk = new Int32Array(K), bt = new Float64Array(K), br = new Int32Array(K);
 
+  // OWNERSHIP (op.owner, set by the caller): per texel, 1 + the index of the
+  // reach whose segment is nearest, 0 where no river reaches. A reach's water
+  // surface draws only where it owns the pixel, so at a junction the surfaces
+  // meet on one seam instead of overlapping (overlap drew the water twice,
+  // darker, with the tributary's square end poking into the trunk).
   function apply(out, ground, r) {
+    const owner = op.owner ?? null;
+    if (owner) {
+      for (let z = Math.max(0, r.z0); z <= Math.min(size - 1, r.z1); z++) {
+        owner.fill(0, z * size + Math.max(0, r.x0), z * size + Math.min(size - 1, r.x1) + 1);
+      }
+    }
     const rx0 = Math.max(r.x0, rect.x0), rz0 = Math.max(r.z0, rect.z0);
     const rx1 = Math.min(r.x1, rect.x1), rz1 = Math.min(r.z1, rect.z1);
     const inv = 1 / size;
@@ -245,26 +282,59 @@ export function buildRiverV3TerrainOp({ packed: P, size, u }) {
         const i = tz * size + tx, natural = ground[i];
         // Combine: inside any channel → the lowest bed (smooth min, which also
         // digs the confluence scour); otherwise the lowest bank.
-        let bed = Infinity, bedDepth = 0, bank = NaN;
+        // The OWNER follows the water, not the distance: inside a channel, the
+        // reach with the lowest bed (the same one that shapes it); on the banks,
+        // the nearest. Owning by distance gave the tributary a wedge of the
+        // trunk's channel that its own, narrower surface could not cover —
+        // holes in the water at the confluence (seen in the river lab).
+        // A reach can only own pixels its SURFACE covers — along its length, not
+        // past its first or last station (its ribbon ends square there). Lowest
+        // bed among those wins. "Lowest bed" alone handed a deeper downstream
+        // reach the pixels just above its start, where it has no surface: a
+        // stepped hole in the water above the junction (seen in the river lab).
+        let bed = Infinity, bedDepth = 0, bank = NaN, own = bk[0], ownBed = Infinity;
+        let bankHi = NaN, bankLevel = 0, nBanks = 0;
         for (let q = 0; q < nb; q++) {
-          const hq = section(natural, bk[q], bt[q], Math.sqrt(bd[q]));
+          const kq = bk[q];
+          const hq = section(natural, kq, bt[q], Math.sqrt(bd[q]));
           if (secIn) {
+            const firstSeg = kq === 0 || P.last[kq - 1] === 1, lastSeg = P.last[kq + 1] === 1;
+            // Past an end the surface only exists if that end runs on (a
+            // junction end); in-channel there means within half a width of
+            // the end, which the run-on covers.
+            const covered = !(firstSeg && bt[q] <= 0 && !P.ext[kq]) && !(lastSeg && bt[q] >= 1 && !P.ext[kq + 1]);
+            if (covered && hq < ownBed) { ownBed = hq; own = kq; }
             if (bed === Infinity) { bed = hq; bedDepth = P.depth[bk[q]]; continue; }
             const kk = 0.3 * Math.min(bedDepth, P.depth[bk[q]]);
             const hh = Math.max(kk - Math.abs(bed - hq), 0) / Math.max(kk, 1e-12);
             bed = Math.min(bed, hq) - hh * hh * kk * 0.25;
             bedDepth = Math.min(bedDepth, P.depth[bk[q]]);
           } else if (!Number.isNaN(hq)) {
-            bank = Number.isNaN(bank) ? hq : Math.min(bank, hq);
+            if (Number.isNaN(bank)) { bank = hq; bankHi = hq; bankLevel = secLevel; nBanks = 1; }
+            // The floor is set against the HIGHER water: a tributary still runs
+            // down to the junction, so beside its last metres its surface stands
+            // above the trunk's, and a floor at the trunk's level let it show
+            // over the corner (measured: corner 0.13 m over the junction level,
+            // the tributary 0.2-0.3 m).
+            else { bank = Math.min(bank, hq); bankHi = Math.max(bankHi, hq); bankLevel = Math.max(bankLevel, secLevel); nBanks++; }
           }
         }
+        // Two banks meeting (the corner between channels): the LOWER one, for
+        // a smooth corner — "higher" stood the trunk's lip up across the edge
+        // of the tributary's mouth (rectangles of dry bank, seen up close) —
+        // but never below the water, or a bank that has already eased down to a
+        // floodplain lower than the river lets the river spill onto the corner
+        // (the square notch seen first). One bank: exactly River v2's section.
+        if (nBanks > 1) bank = Math.max(bank, Math.min(bankHi, bankLevel + u.freeboardN * 0.25));
+        if (owner) owner[i] = P.reach[own] + 1;
         if (bed !== Infinity) out[i] = bed;
         else if (!Number.isNaN(bank)) out[i] = bank;
       }
     }
   }
 
-  return { rect, apply, maxReach };
+  const op = { rect, apply, maxReach, owner: null };
+  return op;
 }
 
 /**
