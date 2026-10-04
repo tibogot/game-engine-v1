@@ -15,6 +15,7 @@
 import { MINI } from "./hudBar.js";
 import { rectOf } from "../../shared-rts/canvasRect.js";
 import { iconSvg, pointIcon } from "./resourceIcons.js";
+import { hasIcon, iconStyle } from "./icons.js";
 
 const CSS = `
 #alg-score {
@@ -55,6 +56,10 @@ const CSS = `
 #alg-alerts .al.good { border-left-color: #5aaeff; }
 #alg-alerts .al .t { color: var(--hud-dim); font: 10px var(--hud-mono); margin-right: 6px; }
 #alg-alerts .al.old { opacity: 0; }
+#alg-alerts .al.has-ic { position: relative; padding-left: 30px; }
+#alg-alerts .al .aic { position: absolute; left: 7px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); background: var(--hud-brass);
+  -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+#alg-alerts .al.bad .aic { background: #ff6a55; } #alg-alerts .al.good .aic { background: #5aaeff; }
 #alg-alerts .al.tip { border-left-color: var(--hud-brass); background: #2a2614; border-color: #5c5126; color: #f1e6c4; }
 #alg-alerts .al.tip::before { content: "ADVICE  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
 
@@ -187,10 +192,12 @@ export function createBattleHud({ camera, canvas, onJump }) {
   document.body.appendChild(feed);
   const alerts = [];   // { node, x, z, t0 }
   let latest = null;
-  function alert(text, { x, z, kind = "", time = 0, life = 14 } = {}) {
+  function alert(text, { x, z, kind = "", time = 0, life = 14, icon = null } = {}) {
     const node = document.createElement("div");
-    node.className = `al ${kind}`;
-    node.innerHTML = kind === "tip" ? text : `<span class="t">${fmtTime(time)}</span>${text}`;
+    node.className = `al ${kind}${icon ? " has-ic" : ""}`;
+    // CoH's alert pictures (ui/icons.js alert*), the kind's colour.
+    const ic = icon && hasIcon(icon) ? `<span class="aic" style="${iconStyle(icon)}"></span>` : "";
+    node.innerHTML = kind === "tip" ? text : `${ic}<span class="t">${fmtTime(time)}</span>${text}`;
     const a = { node, x, z, t0: performance.now(), life: life * 1000 };
     if (x != null) node.addEventListener("click", () => onJump(x, z));
     // Click a tip away.

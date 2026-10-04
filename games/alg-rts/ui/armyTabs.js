@@ -14,6 +14,7 @@
 // change, otherwise only a bar's width and a class are written.
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { HUD_H, HUD_STRIP_H } from "./hudBar.js";
+import { iconStyle } from "./icons.js";
 
 const LINK = 15;           // m: men closer than this to one of the group are in it
 const EVERY = 0.25;        // s between regroupings
@@ -50,6 +51,10 @@ const CSS = `
 #alg-tabs .st.cover { color: #b8d08a; }
 #alg-tabs .st.retreat { color: #fff; background: #7a5a18; }
 #alg-tabs .n.short { color: #ffcf8a; }
+/* The squad's veterancy, CoH's gold chevrons (ui/icons.js vet1-3) in the portrait's corner. */
+#alg-tabs .vet { position: absolute; right: 3px; bottom: 10px; width: 15px; height: 13px; background: #f2c94c;
+  -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center; filter: drop-shadow(0 1px 1px #000); }
 #alg-tabs .hp { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 4px; background: #23261d; border: 1px solid #3a4031; }
 #alg-tabs .hp i { display: block; height: 100%; background: var(--hud-olive); }
 #alg-tabs .hp i.low { background: var(--hud-red); }
@@ -135,7 +140,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       if (url) el.style.backgroundImage = `url(${url})`;
       // A squad: men alive / its full strength (CoH's pips as a number).
       const n = g.squad ? `${g.length}/${g.squad.size}` : g.length > 1 ? `${g.length}` : "";
-      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<div class="hp"><i></i></div>`;
+      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<span class="vet" hidden></span><div class="hp"><i></i></div>`;
       el.addEventListener("click", (e) => {
         const live = g.filter((m) => m.alive);
         if (!live.length) return;
@@ -146,7 +151,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         if (live.length) focus(live.reduce((s, m) => s + m.position.x, 0) / live.length, live.reduce((s, m) => s + m.position.z, 0) / live.length);
       });
       root.appendChild(el);
-      views.push({ el, g, bar: el.querySelector(".hp i"), st: el.querySelector(".st"), hpLast: -1, stLast: null, fireLast: null, selLast: null });
+      views.push({ el, g, bar: el.querySelector(".hp i"), st: el.querySelector(".st"), vet: el.querySelector(".vet"), vetLast: 0, hpLast: -1, stLast: null, fireLast: null, selLast: null });
     });
     if (groups.length > MAX_TABS) {
       const more = document.createElement("div");
@@ -176,6 +181,8 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         v.st.textContent = label;
         v.st.style.display = label ? "" : "none";
       }
+      const vet = Math.min(3, v.g.squad?.stars ?? 0);
+      if (vet !== v.vetLast) { v.vetLast = vet; v.vet.hidden = !vet; if (vet) v.vet.style.cssText = iconStyle(`vet${vet}`); }
       if (fire !== v.fireLast) { v.fireLast = fire; v.el.classList.toggle("fire", fire); }
       const isSel = v.g.some((u) => sel.has(u));
       if (isSel !== v.selLast) { v.selLast = isSel; v.el.classList.toggle("sel", isSel); }

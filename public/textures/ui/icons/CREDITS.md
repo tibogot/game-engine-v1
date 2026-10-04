@@ -21,3 +21,17 @@ set to `currentColor` (recoloured in CSS).
 | searchlight.svg | light-bulb | Lorc |
 | sangar.svg | stone-wall | Delapouite |
 | ambushScreen.svg | knapsack | Lorc |
+| smoke.svg | smoke-bomb | Darkzaitzev |
+| barrage.svg | incoming-rocket | Lorc |
+| flare.svg | distress-signal | Delapouite |
+| lmg.svg | machine-gun-magazine | Delapouite |
+| retreat.svg | run | Lorc |
+| reinforce.svg | backup | Lorc |
+| vet1.svg | rank-1 | Skoll |
+| vet2.svg | rank-2 | Skoll |
+| vet3.svg | rank-3 | Skoll |
+| alertAttack.svg | explosion-rays | Lorc |
+| alertSeen.svg | eye-target | Delapouite |
+| alertCut.svg | breaking-chain | Skoll |
+| alertFlag.svg | flag-objective | Delapouite |
+| alertMine.svg | land-mine | Lorc |

@@ -35,6 +35,13 @@ const P = {
 };
 // Named places an alert can be "near" (not the cemetery or the koubba: the
 // village beside them names it better).
+// Each alert's picture (ui/icons.js), CoH's: by the HQ line it comes with.
+const ICON_OF = {
+  hq_contact: "alertAttack", hq_postAttack: "alertAttack", hq_buildingLost: "alertAttack", hq_vehicleLost: "alertAttack", hq_enemyMG: "alertAttack",
+  hq_villageTaken: "alertFlag", hq_villageLost: "alertFlag", hq_villageThreat: "alertFlag",
+  hq_enemySeen: "alertSeen", hq_muleTrain: "alertSeen", hq_cacheFound: "alertSeen",
+  hq_mine: "alertMine",
+};
 const PLACES = LAYOUT.sites.filter((s) => !["cemetery", "koubba"].includes(s.kind));
 
 export function createAlgBattle(app, { units, economy, structures, mines = null, minimap = null, rtsCamera = null }) {
@@ -56,8 +63,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     return best ? `near ${best.name}` : "in the djebel";
   };
   /** An alert; `radio`: the HQ line said with it (algVoices.js, tools/algVoiceLines.mjs). */
-  function say(text, x, z, kind, radio = null) {
-    hud.alert(text, { x, z, kind, time: clock });
+  function say(text, x, z, kind, radio = null, icon = ICON_OF[radio] ?? null) {
+    hud.alert(text, { x, z, kind, time: clock, icon });
     if (radio) app.algVoices?.radio(radio);
     if (x != null) minimap?.ping?.(x, z);
   }
@@ -95,6 +102,41 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
         if (aln) { L.turnAt = clock; say(`The FLN is working <b>${v.name}</b>. Send men before it turns.`, x, z, "bad", "hq_villageThreat"); }
       }
       L.value = v.value;
+    }
+  }
+
+  // THE SUPPLY POINTS (2026-10-04, with the ALN's raids in algAI.js): raided, lost, taken,
+  // and CUT OFF — a chain broken further back stops the far ones paying (one alert for all).
+  const supplyLast = new Map(economy.supply.map((v) => [v, { owner: v.owner, value: v.value, linked: v.linked, raidAt: -1e9 }]));
+  const resName = (v) => (v.res === "fuel" ? "fuel" : "munitions");
+  const shortName = (v) => v.name.split(" · ")[0];
+  function watchSupply() {
+    const cut = [];
+    for (const v of economy.supply) {
+      const L = supplyLast.get(v), { x, z } = v.position;
+      if (v.owner !== L.owner) {
+        if (v.owner === "player") say(`<b>${shortName(v)}</b> is yours: +${economy.params.supplyPoint} ${resName(v)} a minute while it is linked to the post.`, x, z, "good", null, "alertFlag");
+        else if (L.owner === "player") say(`<b>${shortName(v)}</b> lost: its ${resName(v)} stops.`, x, z, "bad", "hq_villageLost", "alertFlag");
+        L.owner = v.owner;
+      }
+      // Raided: FLN men in its ring and the needle going their way.
+      if (v.owner === "player" && v.value < L.value - 1e-4 && clock - L.raidAt > 45) {
+        const aln = units.list.some((u) => u.alive && u.team === "enemy" && u.type?.foot && Math.hypot(u.position.x - x, u.position.z - z) < v.radius);
+        if (aln) { L.raidAt = clock; say(`<b>FLN raiders</b> at ${shortName(v)}! The depot is theirs unless you send men.`, x, z, "bad", "hq_contact", "alertAttack"); }
+      }
+      L.value = v.value;
+      if (L.linked && !v.linked && v.owner === "player") cut.push(v);
+      L.linked = v.linked;
+    }
+    // Villages cut off count too (they pay nothing either).
+    for (const v of economy.points) {
+      const L = villageLast.get(v);
+      if (L.linked && !v.linked && v.owner === "player") cut.push(v);
+      L.linked = v.linked;
+    }
+    if (cut.length) {
+      const names = cut.map(shortName).join(", ");
+      say(`<b>Cut off</b>: ${names} — no longer linked to the post, ${cut.length > 1 ? "they pay" : "it pays"} nothing. Retake the point between.`, cut[0].position.x, cut[0].position.z, "bad", null, "alertCut");
     }
   }
 
@@ -314,6 +356,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     watchUnits();
     watchBuildings();
     watchVillages();
+    watchSupply();
     watchMines();
     watchConvoy();
     if (!over) stepScore(dt);
@@ -328,7 +371,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   return {
     params: P, score, stats,
     /** An alert from another system (algTiers.js). */
-    say: (text, x = null, z = null, kind = "good", radio = null) => say(text, x, z, kind, radio),
+    say: (text, x = null, z = null, kind = "good", radio = null, icon = undefined) => say(text, x, z, kind, radio, icon),
     get over() { return over; },
     get clock() { return clock; },
     /** Start without the briefing (?brief=0): the remembered difficulty. */

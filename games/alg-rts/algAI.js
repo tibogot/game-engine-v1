@@ -28,6 +28,13 @@
 // than 18 fighters out at once. Orders, paths and the fighting are the shared
 // machinery (units.orderTo, navGrid, combat.js's holdFire).
 //
+// Or, about 45% of the time when one is worth it, a SUPPLY RAID (2026-10-04, you: "the ALN goes
+// for the supply points and cuts the lines"): the band goes for a French fuel / munitions point
+// (algEconomy.js supply) — the one the most other points hang on first (take it and the far ones
+// are CUT OFF from the post), lightly guarded, not under the post's guns — stands in its ring
+// holding fire until it turns, loots the depot (the ALN purse) and melts away. A keystone point
+// keeps a cell of two to hold it. French coming: it strikes, as a village band does.
+//
 // French on a TRACK (the piste, a mule path — algTracks.js) get the road
 // ambush: the band lies up along that track, 15-45 m off it.
 //
@@ -120,6 +127,10 @@ const P = {
   assaultSize: [8, 11],       // men (two FMs while the caches allow)
   assaultBreak: 0.55,         // share lost: the assault breaks
   assaultMax: 150,            // s an assault lasts at most
+  // ── 2026-10-04: supply raids ──
+  raidShare: 0.45,            // of the bands, when a supply point is worth raiding
+  raidLoot: 60,               // supplies the ALN takes from a depot it turns
+  raidMin: 0.4,               // the least score worth a raid (pickRaid)
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
@@ -616,7 +627,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); sendHome(u); }
           }
           if (b.mission === "assault") { goIn(b); break; }
-          setState(b, b.mission === "village" || b.mission === "defend" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
+          setState(b, b.mission === "village" || b.mission === "defend" || b.mission === "raid" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
           break;
         }
         // Everyone stopped short (no route for anyone): wire in the way? Cut
@@ -670,6 +681,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
           break;
         }
         if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
+        // A RAID: the point turned — the depot looted, the line cut. A keystone keeps a cell of
+        // two to hold it; the rest (all of them, elsewhere) melt away.
+        if (b.mission === "raid") {
+          if (b.village?.owner === "enemy") {
+            app.algEconomy?.aln.earn(P.raidLoot);
+            raids++;
+            if (b.keystone && m.length >= P.cellMinBand) leaveCell(b, b.village);
+            withdraw(b);
+          }
+          break;
+        }
         // TURNED: leave a cell to hold it, the rest go on (a band that sat in
         // a won village forever was a band the war no longer had). Already
         // held (a second band arrived): on to something else. Too small to
@@ -838,6 +860,44 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     return best;
   }
 
+  // ── THE SUPPLY RAIDS (2026-10-04) ───────────────────────────────────────
+  /** How many French points hang on `s`: linked now, cut off from the post were it to fall. */
+  function cutsOff(s) {
+    const E = app.algEconomy;
+    if (!E || !post) return 0;
+    const held = E.allPoints.filter((v) => v.owner === "player" && v !== s);
+    const reach = new Set(), front = [{ position: post }];
+    for (let i = 0; i < front.length; i++) {
+      for (const v of held) if (!reach.has(v) && dist(v.position, front[i].position) <= E.params.link) { reach.add(v); front.push(v); }
+    }
+    return held.filter((v) => v.linked && !reach.has(v)).length;
+  }
+  /**
+   * A supply point worth raiding (or null): French-held and linked first, more for each point
+   * that hangs on it; neutral ones a little (deny them); fewer guards, nearer, better; none
+   * under the post's guns, none another band is already raiding.
+   */
+  function pickRaid(from) {
+    let best = null, bestS = P.raidMin;
+    for (const s of app.algEconomy?.supply ?? []) {
+      if (s.owner === "enemy") continue;
+      if (bands.some((b) => b.mission === "raid" && b.village === s && alive(b).length)) continue;
+      const guards = french().filter((u) => !u.isAir && dist(u.position, s.position) < 60).length;
+      let sc = s.owner === "player" ? (s.linked ? 1.6 + 0.7 * cutsOff(s) : 0.7) : 0.5;
+      sc -= guards * 0.6 + dist(from, s.position) / 700;
+      if (dist(s.position, post) < P.postKeepOff + 40) sc -= 1;
+      if (sc > bestS) { bestS = sc; best = s; }
+    }
+    return best;
+  }
+  function planRaid(b, s) {
+    if (!planVillage(b, s)) return false;
+    b.mission = "raid";
+    b.keystone = cutsOff(s) > 0;
+    return true;
+  }
+  let raids = 0;
+
   /**
    * A village to work: one the ALN does not hold. French-held counts most,
    * then neutral; nearer the band better; French troops round it worse.
@@ -860,7 +920,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const a = Math.atan2(c.z - v.position.z, c.x - v.position.x);
     let spot = null;
     for (let i = 0; i < 16 && !spot; i++) {
-      const r = 12 + i * 1.5, aa = a + (i % 2 ? 1 : -1) * i * 0.25;
+      const sup = v.kind === "supply";   // a supply point's ring is 22 m, not 40
+      const r = (sup ? 6 : 12) + i * (sup ? 1 : 1.5), aa = a + (i % 2 ? 1 : -1) * i * 0.25;
       const x = v.position.x + Math.cos(aa) * r, z = v.position.z + Math.sin(aa) * r;
       if (!app.navGrid?.isBlockedAtWorld?.(x, z, true)) spot = { x, z };
     }
@@ -1107,6 +1168,16 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       const lost = lostVillages.find((l) => l.v.owner !== "enemy");
       if (lost && planVillage(b, lost.v)) { b.mission = "village"; b.retake = true; return; }
     }
+    // A SUPPLY RAID, about 45% of the time one is worth it (or still on: re-planned on the way).
+    if (b.mission === "raid") {
+      const s = b.village && b.village.owner !== "enemy" ? b.village : pickRaid(c);
+      if (s && planRaid(b, s)) return;
+      b.mission = null;
+    }
+    if (!b.mission && Math.random() < P.raidShare) {
+      const s = pickRaid(c);
+      if (s && planRaid(b, s)) return;
+    }
     // A mine on the piste, about a third of the time there is room for one.
     if (!b.mission && Math.random() < P.mineShare && planMine(b)) return;
     if (b.mission === "mine") {
@@ -1301,6 +1372,11 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** The mule train under way (null: none) and the last one's outcome. */
     get convoy() { return convoy; },
     get lastConvoy() { return lastConvoy; },
+    /** Dev: supply raids that turned their point; the point a band at (x, z) would raid now. */
+    get raids() { return raids; },
+    raidFor: (x, z) => pickRaid({ x, z }),
+    /** Dev: a band now, sent to raid (the best point, or none). */
+    raidNow() { return newBand({ mission: "raid" }); },
     /** Dev: a mule train now. */
     convoyNow() { if (!convoy) startConvoy(); },
     /** Dev: the last ambush-screen attempt ("placed" or why not). */
@@ -1319,7 +1395,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend") && b.village ? ` (${b.mission === "defend" ? "defend " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }

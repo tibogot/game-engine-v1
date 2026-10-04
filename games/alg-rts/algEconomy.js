@@ -74,6 +74,7 @@ const P = {
   },
   villageAln: { hamlet: 40, dechra: 60, ksar: 80 },
   supplyPoint: 12,                        // its resource a minute
+  supplyAln: 6,                           // the ALN's supplies a minute per supply point it holds (algAI.js raids)
   // m between two held points of a supply line. 180: the ksar needs the col,
   // the far mechta the ford, the dechra Aïn Kerma (240 linked nearly all
   // straight to the post).
@@ -176,6 +177,7 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
       let n = P.base.enemy;
       for (const v of points) if (v.owner === "enemy") n += P.villageAln[v.kind] ?? P.villageAln.hamlet;
       n += P.cache * structures.list.filter((s) => s.typeKey === "armsCache" && s.alive).length;
+      n += P.supplyAln * supply.filter((v) => v.owner === "enemy").length;
       return n;
     }
     const inc = { ...P.base.player };

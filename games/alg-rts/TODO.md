@@ -25,8 +25,13 @@ One screen, most important first. Details stay in the sections below;
 - [x] VETERANCY + SMOKE + FM 24/29 + MORTAR BARRAGE (2026-10-04, your go) — see
   "SQUAD ABILITIES" below. Next on it: vehicle veterancy, the ALN's, more
   munitions sinks (sappers' mines, call-ins).
-- The ALN AI goes for the supply points and cuts the lines; its bands
-  shown as squads once seen; balance it against paras and Légion.
+- [x] SUPPLY RAIDS (2026-10-04, algAI.js pickRaid / planRaid): ~45% of bands go for a French
+  supply point — the one others hang on first (take it → the far ones CUT OFF), few guards, not
+  under the post's guns; they turn it holding fire, loot the depot (+60 ALN), melt away; a
+  keystone keeps a cell of 2-3. The ALN earns 6/min per supply point held. Alerts (algBattle
+  watchSupply): raiders at X, X lost / yours, CUT OFF (one alert for all). Dev: __ALG.algAI
+  .raidNow() / raidFor(x, z) / raids. You, play: is 45% too much pressure?
+- The ALN's bands shown as squads once seen; balance it against paras and Légion.
 - MUNITIONS: grenades, smoke, the FM 24/29, the barrage, flares now; still
   (sugg.) sappers laying mines, call-ins (air strike, napalm).
 - PATHS: a "can't go there" cursor; rock where it's too steep.
@@ -60,10 +65,11 @@ One screen, most important first. Details stay in the sections below;
   (ui/resourceIcons.js: helmet / jerrycan / cartridges / star) used on the point markers
   (a circular capture ring), the resource strip, the prices and the minimap. Cost
   0.1-0.45 ms. ?pointflags=0 = without. You, look: the icons, the ring, the flag height.
-- Icons still missing vs CoH: ability icons on the command card (smoke, barrage, LMG are
-  text/stand-ins); veterancy chevrons on the squad portraits; a pop-cap icon (troupes N);
-  alert icons (under attack / point lost / cut off) in the corner feed; a "cut off" chain
-  icon on a supply marker instead of amber alone.
+- [x] ICONS 2 (2026-10-04, game-icons.net, CREDITS.md): smoke, barrage, flare, FM 24/29,
+  retreat, reinforce on the command card; veterancy CHEVRONS (rank 1-3) on the squad badges
+  and the army tabs; alert pictures in the feed (attack, flag, seen, mine, cut-off chain).
+- Icons still missing vs CoH: a pop-cap icon (troupes N); a "cut off" chain icon on a supply
+  marker instead of amber alone; real unit portraits.
 - [x] MINIMAP JUMP: the ground lagged after a jump — fixed (groundCache catch-up, ~0.3 s).
 - A third cover colour (red, negative cover) once craters / mud count.
 - Sound: a squelch per alert; voices (parked: the free API plan refuses).

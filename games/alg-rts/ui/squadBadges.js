@@ -3,7 +3,7 @@
 // CoH draws it —
 //   ( n ) [shield]     the men left in the squad · the squad's type
 //         ▬▬▬▬▬        ONE thin bar: the health of the men it has
-//   ★★ over the shield: the squad's VETERANCY (algVeterancy.js); a brass
+//   chevrons over the shield: the squad's VETERANCY (algVeterancy.js); a brass
 //   "FM" tag at its foot: the FM 24/29 upgrade (algSquads UPGRADES).
 // The men themselves no longer carry bars (unitRenderer `barFor`). Blue rim
 // = yours, white = selected, amber = retreating. Click a badge: select the
@@ -13,6 +13,7 @@
 // badge only touches the DOM when what it shows has changed.
 
 import { rectOf } from "../../shared-rts/canvasRect.js";
+import { iconStyle } from "./icons.js";
 
 const ICONS = {
   // A rifle, slung diagonally.
@@ -38,8 +39,10 @@ const CSS = `
 .alg-sqb .bar { grid-row: 2; grid-column: 2; width: 26px; height: 3px; background: rgba(10,12,14,0.9); border: 1px solid rgba(0,0,0,0.7);
   justify-self: center; position: relative; }
 .alg-sqb .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #3ddc60; }
-.alg-sqb .st { position: absolute; left: 17px; width: 22px; top: -10px; text-align: center; color: #f2c94c;
-  font: 700 9px/9px var(--hud-sans, sans-serif); letter-spacing: -1px; text-shadow: 0 1px 2px #000, 0 0 2px #000; }
+/* Veterancy: CoH's gold CHEVRONS (ui/icons.js vet1-3, a mask), over the shield. */
+.alg-sqb .st { position: absolute; left: 21px; width: 14px; height: 12px; top: -13px; background: #f2c94c;
+  -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
+  -webkit-mask-position: center; mask-position: center; filter: drop-shadow(0 1px 1px #000); }
 .alg-sqb .up { position: absolute; left: 33px; top: 17px; padding: 0 2px; border-radius: 2px; background: #c9a54a; color: #15120a;
   font: 800 7px/9px var(--hud-sans, sans-serif); box-shadow: 0 1px 2px rgba(0,0,0,0.8); }
 `;
@@ -107,7 +110,9 @@ export function createSquadBadges({ app, squads }) {
       b.fill.style.background = f > 0.6 ? "#3ddc60" : f > 0.3 ? "#f5c542" : "#e4483a";
       b.el.classList.toggle("sel", sel);
       b.el.classList.toggle("ret", !!s.retreating);
-      b.st.textContent = "★".repeat(s.stars ?? 0);
+      const vet = Math.min(3, s.stars ?? 0);
+      b.st.hidden = !vet;
+      if (vet) b.st.style.cssText = iconStyle(`vet${vet}`);
       b.up.hidden = !s.upgrades?.lmg;
     }
     for (const [s, b] of badges) if (!live.has(s)) { b.el.remove(); badges.delete(s); }
