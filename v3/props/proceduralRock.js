@@ -342,6 +342,29 @@ export const ROCK_PRESETS = {
     // of those at once is half a million).
     detail: 60, targetTriangles: 4800, simplifyError: 0.006, shadeWeight: 1,
   },
+  /**
+   * BLOCK — the stylised off-road boulder (reference: "over the hill",
+   * 2026-10-04): a squarish body with a FLAT TOP and big flat faces, edges
+   * rounded soft rather than chipped sharp. The egg-shaped boulder above reads
+   * as a pebble scaled up next to it. Few chips, deep enough to make broad
+   * facets (a facet spreads ~sqrt(2Rd)), none on the top, and a wide edgeSoft
+   * so the faces meet in a soft bevel.
+   */
+  block: {
+    sizeX: 1.05, sizeY: 0.8, sizeZ: 0.9, egg: 0.05, lump: 0.12, squareness: 2.8,
+    chips: 16, chipMin: 0.06, chipMax: 0.18, chipBias: 1.2, chipJitter: 0.8,
+    bigCuts: 3, bigMin: 0.12, bigMax: 0.24, maxChipUp: 0.45,
+    topCut: 0.18, baseCut: 0.2, edgeSoft: 0.025,
+    detail: 36, targetTriangles: 900, simplifyError: 0.02, shadeWeight: 1,
+  },
+  /** CRAG — the same block at house size (5-8 m): shallower chips, more of them. */
+  crag: {
+    sizeX: 3.4, sizeY: 2.4, sizeZ: 2.9, egg: 0.06, lump: 0.15, squareness: 2.9,
+    chips: 26, chipMin: 0.04, chipMax: 0.12, chipBias: 1.3, chipJitter: 0.8,
+    bigCuts: 6, bigMin: 0.08, bigMax: 0.18, maxChipUp: 0.4,
+    topCut: 0.22, baseCut: 0.16, edgeSoft: 0.015,
+    detail: 56, targetTriangles: 3000, simplifyError: 0.008, shadeWeight: 1,
+  },
 };
 
 /**
@@ -358,6 +381,12 @@ export const ROCK_CLASSES = {
   pebble:  { lodScale: 0.2,  maxShadowCascade: 0,        collide: "none" },
   // A landmark: worth drawing, and worth a shadow, from anywhere on the map.
   megalith: { lodScale: 2.2, maxShadowCascade: Infinity, collide: "solid" },
+  // The blocky off-road set. Classes of their own, so the rock-set brush
+  // (which mixes boulder / lump / rock / pebble) is unchanged.
+  // Big pieces keep full detail further out: a detail-level swap on a
+  // house-sized rock pops visibly as the camera moves (rock lab, 2026-10-04).
+  block: { lodScale: 1.6, maxShadowCascade: Infinity, collide: "solid" },
+  crag:  { lodScale: 3.5, maxShadowCascade: Infinity, collide: "solid" },
 };
 
 /**
@@ -389,6 +418,15 @@ export const ROCK_KIT = [
   // as one boulder that came apart. Either works alone.
   { name: "Rock: Split A", cls: "megalith", seed: 41, sizeX: 2.9, sizeY: 3.1, sizeZ: 2.7, sliceCut: 0.42, sliceYaw: 0 },
   { name: "Rock: Split B", cls: "megalith", seed: 41, sizeX: 2.9, sizeY: 3.1, sizeZ: 2.7, sliceCut: 0.42, sliceYaw: Math.PI },
+  // BLOCKS and CRAGS (2026-10-04): the stylised off-road set, flat-topped
+  // with soft edges. One tall, one flat, two in between.
+  { name: "Rock: Block A", cls: "block", seed: 51 },
+  { name: "Rock: Block B", cls: "block", seed: 52, sizeX: 1.2, sizeY: 0.6, sizeZ: 0.95 },
+  { name: "Rock: Block C", cls: "block", seed: 53, sizeX: 0.9, sizeY: 1.0, sizeZ: 0.85 },
+  { name: "Rock: Block D", cls: "block", seed: 54 },
+  { name: "Rock: Crag A", cls: "crag", seed: 61 },
+  { name: "Rock: Crag B", cls: "crag", seed: 62, sizeX: 4.2, sizeY: 2.0, sizeZ: 3.2 },
+  { name: "Rock: Crag C", cls: "crag", seed: 63, sizeX: 3.0, sizeY: 3.1, sizeZ: 2.7 },
 ];
 
 /**
@@ -411,6 +449,11 @@ export const ROCK_CLIFF_PRESETS = [
   { name: "Cliff: Chip Slab",   generator: "rock", params: { ...CLIFF_BASE, seed: 2, sizeX: 18, sizeY: 12, sizeZ: 10, topCut: 0.35 } },
   { name: "Cliff: Chip Mesa",   generator: "rock", params: { ...CLIFF_BASE, seed: 3, sizeX: 16, sizeY: 10, sizeZ: 14, egg: -0.2, topCut: 0.4 } },
   { name: "Cliff: Chip Block",  generator: "rock", params: { ...CLIFF_BASE, seed: 5, sizeX: 18, sizeY: 12, sizeZ: 10, topCut: 0.35, squareness: 3 } },
+  // CRAG WALLS (2026-10-04, the off-road look): straighter walls, fewer and
+  // deeper chips so the faces are broad planes, soft edges — the chip cliffs
+  // above read as pillows next to the reference's wall.
+  { name: "Cliff: Crag Wall",   generator: "rock", params: { ...CLIFF_BASE, seed: 7, sizeX: 18, sizeY: 12, sizeZ: 9, egg: -0.12, squareness: 3.4, chips: 70, chipMin: 0.03, chipMax: 0.09, bigCuts: 7, bigMin: 0.06, bigMax: 0.14, maxChipUp: 0.35, topCut: 0.3, edgeSoft: 0.01 } },
+  { name: "Cliff: Crag Tower",  generator: "rock", params: { ...CLIFF_BASE, seed: 8, sizeX: 10, sizeY: 18, sizeZ: 9, egg: -0.15, squareness: 3.2, chips: 70, chipMin: 0.03, chipMax: 0.09, bigCuts: 7, bigMin: 0.06, bigMax: 0.14, maxChipUp: 0.35, topCut: 0.25, edgeSoft: 0.01 } },
 ];
 
 /** Geometry for a kit entry by name, or null. */

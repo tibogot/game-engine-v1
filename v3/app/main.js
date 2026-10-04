@@ -8,6 +8,7 @@ import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.j
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
 import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
+import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { ScatterField } from "../render/scatter/scatterField.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
@@ -381,6 +382,12 @@ export async function startV3App(opts = {}) {
   const _localLightsOn = opts.localLights === true || new URLSearchParams(location.search).get("locallights") === "1";
   if (_localLightsOn) installTiledLighting(renderer);
   initGlbLoaderRenderer(renderer);
+  // Instanced matrices uploaded in the frame they change, not the next one
+  // (render/instanceMatrixSync.js — the rock-lab "flashing stones").
+  // opts.instanceMatrixSync === false = three's own order, to A/B.
+  if (opts.instanceMatrixSync !== false && new URLSearchParams(location.search).get("instsync") !== "0") {
+    installInstanceMatrixSync(renderer);
+  }
   // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
   // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer
   // and re-sends the whole buffer on every draw of every pass, changed or not
@@ -424,7 +431,11 @@ export async function startV3App(opts = {}) {
     60,
     viewport.clientWidth / Math.max(viewport.clientHeight, 1),
     0.5,
-    WORLD_SIZE * 4, // > maxCameraDistance(4000) + terrain LOD radius(4096) ≈ 8096
+    // > maxCameraDistance(4000) + terrain LOD radius(4096) ≈ 8096. Never under
+    // 4096 (what a 1024 m world always had): the sky domes are 4000 m out
+    // (SKY_RADIUS), and a 512 m world's 2048 m far plane clipped the whole sky
+    // to black (rock lab, 2026-10-04). Worlds of 1024 m and up are unchanged.
+    Math.max(WORLD_SIZE * 4, 4096),
   );
   camera.position.set(0, 300, 600);
   // the local lights' pool (null unless they are on: see _localLightsOn); its tiles follow this camera
@@ -4827,7 +4838,9 @@ export async function startV3App(opts = {}) {
         if (wantRevo !== revoGrass.enabled) revoGrass.setEnabled(wantRevo);
         if (wantRevo) {
           const _revoAnchor = grassViewAnchor(revoGrassState.tileSize);
-          grassFarShading.setActive(true);
+          // `farShading: false` = a level whose ground paint already IS the
+          // grass colour (rock lab): the imitation field would only differ.
+          grassFarShading.setActive(revoGrassState.farShading !== false);
           grassFarShading.setAnchor(_revoAnchor);
           grassPush.setAnchor(_revoAnchor.x, _revoAnchor.z);
           if (playMode.active) _stampPlayerGrass();
@@ -8150,6 +8163,12 @@ export async function startV3App(opts = {}) {
     const typeIdx = propStore.registerPrimitive(presetName, geometry, material);
     if (typeIdx < 0) return;
     propStore.types[typeIdx].solid = true;
+    // A cliff is building-sized (up to ~35 m): switching it to a simplified
+    // detail level at the boulder distances (60 / 150 m) pops a huge area of
+    // silhouette and edge shading — it read as the cliffs FLICKERING whenever
+    // the camera moved (rock lab, 2026-10-04; forcing full detail stopped it).
+    // Full detail to 240 m, the middle level to 600 m.
+    propStore.types[typeIdx].lodScale = 4;
     propInstancer.onTypeRegistered(typeIdx);
     const slotIdx = propSlots.length;
     propSlots.push({
@@ -8259,7 +8278,9 @@ export async function startV3App(opts = {}) {
     // every kit shape must be a registered type; registering must not steal
     // the slot the user had active
     const keepSlot = propState.activeSlot;
-    const missing = ROCK_KIT.filter((k) => !propSlots.some((s) => s.name === k.name && s.builtin));
+    // not the off-road blocks and crags (2026-10-04): the brush never mixes
+    // them, and turning it on must not add them to every project's slots
+    const missing = ROCK_KIT.filter((k) => k.cls !== "block" && k.cls !== "crag" && !propSlots.some((s) => s.name === k.name && s.builtin));
     for (const k of missing) addRock(k.name);
     propState.activeSlot = keepSlot;
     if (missing.length) uiById("props-panel")?._rebuildPropUi?.();

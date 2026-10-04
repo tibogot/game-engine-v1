@@ -36,6 +36,7 @@ import {
   atomicAdd,
   atomicStore,
   cameraPosition,
+  cameraViewMatrix,
   clamp,
   cos,
   float,
@@ -61,6 +62,7 @@ import {
   uv,
   vec2,
   vec3,
+  vec4,
   PI2,
   positionLocal,
 } from "three/tsl";
@@ -216,6 +218,7 @@ export class RevoGrassSystem {
       uBaseWindShade: uniform(rp.baseWindShade ?? 0.75),
       uBaseShadeH:    uniform(rp.baseShadeHeight ?? 1),
       uBend:          uniform(rp.bend ?? 2),
+      uViewNormal:    uniform(rp.viewNormal ? 1 : 0),
     };
   }
 
@@ -595,7 +598,16 @@ export class RevoGrassSystem {
     // TRUE answer — which is why this survives `faceCamera` without the baked
     // lightmap the original needs.
     const nLift = float(0.45).mul(cos(tilt));
-    mat.normalNode = normalize(vec3(facing.x.mul(nLift), 1, facing.y.mul(nLift)));
+    const nWorld = normalize(vec3(facing.x.mul(nLift), 1, facing.y.mul(nLift)));
+    // normalNode is a VIEW-space normal (three: normalView = setupNormal()),
+    // and nWorld is world space. Fed raw, "up" becomes "toward the top of the
+    // screen": right for a camera standing in the grass, and increasingly wrong
+    // as it looks down — from overhead the field lit as if edge-on to the sun,
+    // a dark disc round the camera that changed with its pitch (rock lab,
+    // 2026-10-04). `viewNormal` transforms it. OFF by default: nam-rts and
+    // alg-rts were judged with the old lighting; turn it on there by eye.
+    const nView = normalize(cameraViewMatrix.mul(vec4(nWorld, 0)).xyz);
+    mat.normalNode = normalize(mix(nWorld, nView, u.uViewNormal));
 
     // ── Colour: root-to-tip ramp, per-blade jitter, root AO, wind tint ──
     const albedo = Fn(() => {
@@ -665,6 +677,7 @@ export class RevoGrassSystem {
     u.uBaseWindShade.value = rp.baseWindShade ?? 0.75;
     u.uBaseShadeH.value = rp.baseShadeHeight ?? 1;
     u.uBend.value = rp.bend ?? 2;
+    u.uViewNormal.value = rp.viewNormal ? 1 : 0;
     u.uBladeRadius.value = rp.bladeHeight ?? 1.1;
     // The slope rule belongs to the world, not to one grass system: both read
     // the Grass panel's Terrain section, so switching systems cannot change

@@ -86,6 +86,16 @@ export const REVO_GRASS_DEFAULTS = {
   // says — there is no separate RTS mode to switch.
   faceCamera: 0,
   receiveShadow: true,
+  // Light the blades with their normal in VIEW space, as three expects. Off
+  // = the original behaviour (a world-up normal read as view space: right at
+  // ground level, darker the more the camera looks down). Off by default so
+  // levels judged by eye with the old lighting keep it; see revoGrassSystem.js.
+  viewNormal: false,
+  // Past the tile the terrain paints an imitation of the grass (grassFarTsl.js).
+  // false = leave the ground's own paint: for a level painted to MATCH its
+  // grass, where the imitation (built from the blade colours, not as they
+  // read lit) shows as a ring round the camera.
+  farShading: true,
 };
 
 /**
