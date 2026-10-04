@@ -25,6 +25,9 @@ import { createAlgCombat } from "./algCombat.js";
 import { POSTURE, createInfantryPosture } from "../shared-rts/infantryPosture.js";
 import { createAlgGrenades } from "./algGrenades.js";
 import { createAlgFlares } from "./algFlares.js";
+import { createAlgBarrage } from "./algBarrage.js";
+import { createAlgVeterancy } from "./algVeterancy.js";
+import { UPGRADES } from "./algSquads.js";
 import { createAlgAI } from "./algAI.js";
 import { createAlgAccuracy, ACCURACY } from "./algAccuracy.js";
 import { createAlgMines } from "./algMines.js";
@@ -349,6 +352,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     post: postProd ?? { inside: muster, outside: muster },
   });
   app.algSquads = squads;
+  // VETERANCY (algVeterancy.js): a squad's kills earn it stars.
+  const veterancy = createAlgVeterancy({ app, squads });
+  app.algVeterancy = veterancy;
   squads.adopt(startMen.appele.filter(Boolean), "appele");
   squads.adopt(startMen.sapeur.filter(Boolean), "sapeur");
   // A faint ring round each village in its holder's colour (the shared ring
@@ -416,6 +422,15 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       ? [
         { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true },
         grenades?.ability(sel),
+        // FUMIGÈNE (algGrenades.js + algSmoke.js): a screening cloud nobody sees through.
+        grenades?.ability(sel, "smoke"),
+        // FM 24/29 (algSquads UPGRADES): the appelés' light machine gun, for munitions.
+        (() => {
+          const sq = squads.squadsIn(sel).filter((s) => squads.upgradeCost(s, "lmg"));
+          if (!sq.length) return null;
+          const g = UPGRADES.lmg;
+          return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? ` (${sq.length} squads: each pays).` : ""), ready: economy.french.canAfford(g.cost) };
+        })(),
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
         sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
           && { key: "cutWire", label: "Couper", hint: "Cut the nearest barbed wire (40 m): ~8 s for one sapper, less for more.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
@@ -438,12 +453,16 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       : sel.length === 1 && sel[0].site && sel[0].alive
         ? [{ key: "cancelSite", label: `Annuler (+${BUILD_COSTS[sel[0].key]})`, hint: `Cancel the site: ${BUILD_COSTS[sel[0].key]} supplies back.`, ready: true }]
         // The MORTAR PIT: an illumination flare at night (algFlares.js).
-        : [flares?.ability(sel)].filter(Boolean)),
+        // and the BARRAGE (algBarrage.js), day or night.
+        : [barrage?.ability(sel), flares?.ability(sel)].filter(Boolean)),
     onAbility: (key, sel) => {
       if (key === "cancelSite") build?.cancelSite(sel[0]);
       if (key === "cutWire") app.algWire?.orderCut(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
+      if (key === "smoke") grenades?.begin(sel, "smoke");
+      if (key === "lmg") { for (const s of squads.squadsIn(sel)) squads.upgrade(s, "lmg"); commandCard.render(sel); }
+      if (key === "barrage") barrage?.begin(sel);
       if (key === "flare") flares?.begin(sel);
       if (key === "retreat") { for (const s of squads.squadsIn(sel)) squads.retreat(s); app.algSounds?.order?.("move", sel); commandCard.render(sel); }
       if (key === "reinforce") { for (const s of squads.squadsIn(sel)) squads.reinforce(s); commandCard.render(sel); }
@@ -460,6 +479,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let patrols = null;   // made after combat (algPatrols.js)
   let grenades = null;  // made after combat (algGrenades.js)
   let flares = null;    // the mortar pit's illumination flares (algFlares.js), after combat
+  let barrage = null;   // the mortar pit's barrage (algBarrage.js), after combat
   let build = null;     // made after the cover (algBuild.js)
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
@@ -542,7 +562,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algPosture = posture;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
-    onDeath: (e) => { selection.remove?.(e); controlGroups?.render(); },
+    onDeath: (e) => { veterancy.onDeath(e); selection.remove?.(e); controlGroups?.render(); },
     onShot: posture.onShot, onSplash: posture.onSplash,
     // ACCURACY (algAccuracy.js): a round rolls to hit — range, posture,
     // cover. ?acc=0 = every round hits (the old fights, A/B).
@@ -557,6 +577,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     flares = createAlgFlares({ app, units, selection, purse: economy.french, cover: coverSys.cover });
     app.algFlares = flares;
   }
+
+  // THE MORTAR BARRAGE (algBarrage.js): six bombs on a zone from the pit, for munitions.
+  barrage = createAlgBarrage({ app, selection, projectiles: combat.projectiles, structures, purse: economy.french });
+  app.algBarrage = barrage;
 
   // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
   // thin, back into the cave before the armour comes. ?ai=0 = without.
@@ -593,11 +617,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.addPreRenderHook((frameDt) => {
     let dt = frameDt * app.timeScale;
     if (app.timeStep) { dt = app.timeStep; app.timeStep = 0; }
-    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
+    sim.advance(dt, (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); });
     searchlights.frame();
     combat.frame(dt);
     grenades.frame();
     flares?.frame();
+    barrage.frame();
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];

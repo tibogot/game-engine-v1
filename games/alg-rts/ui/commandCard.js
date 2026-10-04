@@ -291,7 +291,7 @@ export function createCommandCard({
   window.addEventListener("keydown", (e) => {
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target?.matches?.("input, textarea, select")) return;
     const k = e.key === "Delete" ? "Del" : e.key?.length === 1 ? e.key.toUpperCase() : null;
-    if (!k || k === "G") return;   // G: algGrenades.js has its own (it targets)
+    if (!k || k === "G" || k === "B") return;   // G, B: algGrenades.js has its own (it targets)
     const b = buttons.find((x) => HOTKEY[x.key] === k);
     if (b) { b.el.click(); e.preventDefault(); }
   });

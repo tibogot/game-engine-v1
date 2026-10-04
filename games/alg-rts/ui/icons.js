@@ -12,7 +12,7 @@ export const ICON = {
   sandbags: "sandbags", wire: "wire", mgNest: "mgNest", mortarPit: "mortarPit",
   mirador: "mirador", searchlight: "searchlight", sangar: "sangar", ambushScreen: "ambushScreen",
 };
-export const HOTKEY = { patrol: "P", grenade: "G", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y" };
+export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", barrage: "M" };
 
 const BASE = "/textures/ui/icons/";
 /** An icon element's inline style (a mask in the current colour). */

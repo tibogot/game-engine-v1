@@ -1,24 +1,25 @@
-// GRENADES — the infantry's thrown ability, the Company of Heroes way (your
-// go, 2026-09-30).
+// GRENADES — the infantry's thrown abilities, the Company of Heroes way (your
+// go, 2026-09-30; the SMOKE grenade 2026-10-04).
 //
-//   select infantry → GRENADE on the command card (or G) → a ring the size of
-//   the blast follows the cursor, green in reach of a man who has one ready,
-//   amber beyond (he walks up first) → left-click throws, right-click / Esc
-//   cancels.
+//   select infantry → GRENADE (G) or FUMIGÈNE (B) on the command card → a
+//   ring the size of the blast / the cloud follows the cursor, green in reach
+//   of a man who has one ready, amber beyond (he walks up first) →
+//   left-click throws, right-click / Esc cancels.
 //
-// ONE man throws — the one with a grenade ready nearest the point (CoH: one
+// ONE man throws — the one with that grenade ready nearest the point (CoH: one
 // grenade per squad use). He walks into reach if he has to, stops, turns to
 // the point and throws: the pack's grenade_throw clip (the rifle slung for it,
 // unitRenderer.js), started 0.6 s in so the wind-up is short, the grenade
 // leaving his hand where the clip's throwing arm peaks (MEASURED on the clip:
 // the arm, forearm and hand all peak at 1.85 s → 1.25 s after he starts). The
-// grenade is an arcing shell (projectiles.spawnArc), and where it lands
-// combat.splashAt does the blast — the damage, and the SUPPRESSION round it
-// (infantryPosture.js onSplash): men near it go down.
+// grenade is an arcing shell (projectiles.spawnArc): a FRAG lands as a blast
+// (combat.splashAt — damage, and the SUPPRESSION round it, infantryPosture.js
+// onSplash); a SMOKE grenade lands as a screening cloud (algSmoke.js: nobody
+// sees through it — algCombat's onArcImpact).
 //
 // His rifle is quiet while he throws (combat skips a man `throwing`), and a
-// new order cancels the throw. Then his grenade is on cooldown. The ALN AI
-// throws too (algAI.js), through order().
+// new order cancels the throw. Then that grenade is on cooldown (each kind its
+// own). The ALN AI throws frags too (algAI.js), through order().
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 
 export const GRENADE = {
@@ -30,6 +31,20 @@ export const GRENADE = {
   clipStart: 0.6,   // s into grenade_throw where the throw starts
   release: 1.25,    // s after that the grenade leaves the hand
   done: 2.0,        // s after that he is back to his rifle
+};
+
+/** The two kinds a man carries: what the button, the ring and the landing are. */
+export const THROWS = {
+  grenade: {
+    key: "grenade", label: "Grenade", hotkey: "g", cd: "grenadeCd", range: GRENADE.range, ring: GRENADE.blast,
+    cooldown: GRENADE.cooldown, cost: GRENADE.cost,
+    hint: `A man throws a grenade (${GRENADE.range} m, blast ${GRENADE.blast} m): damage, and men near it go down. G.`,
+  },
+  smoke: {
+    key: "smoke", label: "Fumigène", hotkey: "b", cd: "smokeCd", range: 28, ring: 11,
+    cooldown: 40, cost: { mun: 10 },
+    hint: "A man throws a smoke grenade (28 m): a cloud ~11 m across for ~20 s that NOBODY sees or shoots through — cross open ground, blind an MG, cover a retreat. B.",
+  },
 };
 
 /**
@@ -45,27 +60,28 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   const P = GRENADE;
   const dom = app.renderer.domElement;
   const rings = createSelectionRingField({ app, max: 24, inner: 0.9, opacity: 0.8 });
-  let targeting = null;   // { sel, at } while the player aims
-  const throws = [];      // { u, x, z, t, thrown, walking }
+  let targeting = null;   // { sel, at, kind } while the player aims
+  const throws = [];      // { u, x, z, t, thrown, walking, kind }
 
   /** Can this unit throw at all (a man on foot whose type carries grenades)? */
   const carries = (u) => u?.alive && !u.isStructure && u.type?.grenade;
-  const ready = (u) => carries(u) && !(u.grenadeCd > 0) && !u.throwing;
+  const ready = (u, kind = "grenade") => carries(u) && !(u[THROWS[kind].cd] > 0) && !u.throwing;
 
-  // ── The command card's button ────────────────────────────────────────────
-  function ability(sel) {
+  // ── The command card's buttons ───────────────────────────────────────────
+  function ability(sel, kind = "grenade") {
+    const K = THROWS[kind];
     const men = sel.filter((u) => carries(u) && u.team === "player");
     if (!men.length) return null;
-    const cds = men.map((u) => (u.throwing ? P.cooldown : Math.max(0, u.grenadeCd ?? 0)));
+    const cds = men.map((u) => (u.throwing ? K.cooldown : Math.max(0, u[K.cd] ?? 0)));
     const cd = Math.min(...cds);
-    return { key: "grenade", label: "Grenade", cost: purse ? P.cost : undefined, hint: `A man throws a grenade (${P.range} m, blast ${P.blast} m): damage, and men near it go down. G.`, ready: cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd) };
+    return { key: K.key, label: K.label, cost: purse ? K.cost : undefined, hint: K.hint, ready: cd <= 0 && (!purse || purse.canAfford(K.cost)), cooldown: Math.ceil(cd) };
   }
 
   // ── Aiming ───────────────────────────────────────────────────────────────
-  function begin(sel = selection.selected) {
-    const men = (sel ?? []).filter((u) => ready(u) && u.team === "player");
-    if (!men.length || (purse && !purse.canAfford(P.cost))) return false;
-    targeting = { sel: men, at: null };
+  function begin(sel = selection.selected, kind = "grenade") {
+    const men = (sel ?? []).filter((u) => ready(u, kind) && u.team === "player");
+    if (!men.length || (purse && !purse.canAfford(THROWS[kind].cost))) return false;
+    targeting = { sel: men, at: null, kind };
     dom.style.cursor = "crosshair";
     return true;
   }
@@ -81,17 +97,18 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.button !== 0) { cancel(); return; }
     aimAt(e);
-    const at = targeting.at, men = targeting.sel.filter(ready);
+    const { at, kind } = targeting, men = targeting.sel.filter((u) => ready(u, kind));
     if (!e.shiftKey) cancel();
     if (!at || !men.length) return;
     // The man nearest the point throws.
     const u = men.reduce((b, m) => (dist(m, at) < dist(b, at) ? m : b));
-    order(u, at.x, at.z);
+    order(u, at.x, at.z, kind);
   };
   const onKey = (e) => {
     if (e.key === "Escape" && targeting) { cancel(); return; }
-    if ((e.key === "g" || e.key === "G") && !e.ctrlKey && !e.metaKey && !targeting && !isTyping(e)) {
-      if (begin()) e.preventDefault();
+    if (e.ctrlKey || e.metaKey || targeting || isTyping(e)) return;
+    for (const K of Object.values(THROWS)) {
+      if (e.key.toLowerCase() === K.hotkey && begin(selection.selected, K.key)) { e.preventDefault(); return; }
     }
   };
   const onContext = (e) => { if (targeting) { e.preventDefault(); e.stopImmediatePropagation(); cancel(); } };
@@ -104,12 +121,12 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   const dist = (u, p) => Math.hypot(u.position.x - p.x, u.position.z - p.z);
   const isTyping = (e) => /input|textarea|select/i.test(e.target?.tagName ?? "");
 
-  /** `u` throws at (x, z) — walking into reach first if he must. */
-  function order(u, x, z) {
+  /** `u` throws a `kind` grenade at (x, z) — walking into reach first if he must. */
+  function order(u, x, z, kind = "grenade") {
     for (let i = throws.length - 1; i >= 0; i--) if (throws[i].u === u) throws.splice(i, 1);
-    const job = { u, x, z, t: -1, thrown: false, walking: false };
+    const job = { u, x, z, t: -1, thrown: false, walking: false, kind };
     throws.push(job);
-    if (dist(u, job) > P.range * 0.95) { u.moveOrder(x, z); job.walking = true; }
+    if (dist(u, job) > THROWS[kind].range * 0.95) { u.moveOrder(x, z); job.walking = true; }
     onChange();
   }
 
@@ -121,20 +138,23 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
 
   // ── The throw, on the fixed sim clock ────────────────────────────────────
   function step(dt) {
-    for (const u of units.list) if (u.grenadeCd > 0) { u.grenadeCd -= dt; if (u.grenadeCd <= 0) onChange(); }
+    for (const u of units.list) {
+      if (u.grenadeCd > 0) { u.grenadeCd -= dt; if (u.grenadeCd <= 0) onChange(); }
+      if (u.smokeCd > 0) { u.smokeCd -= dt; if (u.smokeCd <= 0) onChange(); }
+    }
     for (let i = throws.length - 1; i >= 0; i--) {
-      const job = throws[i], u = job.u;
+      const job = throws[i], u = job.u, K = THROWS[job.kind];
       if (!u.alive) { end(job, i); continue; }
       if (job.t < 0) {
         // Walking into reach; the player moving him elsewhere cancels.
         if (job.walking && !u.isMoving) { end(job, i); continue; }
-        if (dist(u, job) > P.range * 0.95) continue;
+        if (dist(u, job) > K.range * 0.95) continue;
         // The French pay as the throw starts (the munitions ran out meanwhile: no throw).
-        if (purse && u.team === "player" && !purse.spend(P.cost)) { end(job, i); continue; }
+        if (purse && u.team === "player" && !purse.spend(K.cost)) { end(job, i); continue; }
         u.stop();
         u.faceToward(job.x, job.z);
         u.throwing = { start: P.clipStart };
-        u.grenadeCd = P.cooldown;
+        u[K.cd] = K.cooldown;
         job.t = 0;
         onChange();
         continue;
@@ -147,7 +167,10 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
         const h = app.getWorldHeight?.(job.x, job.z) ?? 0;
         const from = u.position.clone(); from.y += 1.9;
         const to = from.clone().set(job.x, h + 0.2, job.z);
-        projectiles.spawnArc(from, to, { damage: P.damage, splash: P.blast, owner: u, flight: 0.7 + from.distanceTo(to) / 30, kind: "grenade" });
+        const flight = 0.7 + from.distanceTo(to) / 30;
+        // A smoke canister: no damage, no warning ring (splash 0) — it lands as a cloud.
+        if (job.kind === "smoke") projectiles.spawnArc(from, to, { damage: 0, splash: 0, owner: u, flight, kind: "smoke" });
+        else projectiles.spawnArc(from, to, { damage: P.damage, splash: P.blast, owner: u, flight, kind: "grenade" });
       }
       if (job.t >= P.done) end(job, i);
     }
@@ -159,11 +182,12 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
     if (targeting?.at) {
       // The man who would throw (the nearest ready one) and his reach: green
       // in it, amber beyond — he walks up first.
-      const men = targeting.sel.filter(ready);
+      const K = THROWS[targeting.kind];
+      const men = targeting.sel.filter((u) => ready(u, targeting.kind));
       if (men.length) {
         const u = men.reduce((b, m) => (dist(m, targeting.at) < dist(b, targeting.at) ? m : b));
-        rings.add(targeting.at.x, targeting.at.z, P.blast, dist(u, targeting.at) <= P.range ? 0x58e070 : 0xffb020);
-        rings.add(u.position.x, u.position.z, P.range, 0x6ab0ff);
+        rings.add(targeting.at.x, targeting.at.z, K.ring, dist(u, targeting.at) <= K.range ? 0x58e070 : 0xffb020);
+        rings.add(u.position.x, u.position.z, K.range, 0x6ab0ff);
       }
     }
     projectiles.drawWarnings(rings);   // grenades and mortar bombs in the air

@@ -56,6 +56,7 @@ export function createAlgAccuracy({ cover = null, params = ACCURACY } = {}) {
     else if (tgt.posture === "kneel") p *= params.kneel;
     if (tgt.isMoving) p *= params.moving;
     if (cover) p *= 1 - params.coverHide * cover.coverBetween(e.position.x, e.position.z, tgt.position.x, tgt.position.z);
-    return p;
+    // VETERANCY (algVeterancy.js): a veteran squad's men shoot straighter.
+    return Math.min(0.95, p * (e.vetAcc ?? 1));
   };
 }

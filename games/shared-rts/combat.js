@@ -112,6 +112,10 @@ export function createCombat({
   /** Called when a rocket connects (damage lands on IMPACT, not on fire). */
   function onImpact(target, amount, at, owner = null, { shell = false, bullet = false } = {}) {
     if (!target?.alive) return;
+    // Who hit him last (a game's veterancy credits the kill: alg-rts
+    // algVeterancy.js). A splash passes no owner here (no directional cover),
+    // so splashAt records its own first.
+    if (owner) target.lastHitBy = owner;
     // What the hit LOOKS like (projectiles.js says what hit it): a shell or a
     // rocket bursts; a bullet sparks off metal and stone but not off a man —
     // in Company of Heroes you read a rifle hit from the man, not a flare on
@@ -203,6 +207,7 @@ export function createCombat({
       const amount = damage * (1 - (d / radius) ** 1.5) * (soft ? 1 : vehicleMul);
       if (amount <= 0) return;
       if (gibChance && onFoot(o) && gibChance(d, radius, o)) o.gibbed = true;
+      if (owner) o.lastHitBy = owner;      // the kill's credit (onImpact gets no owner)
       onImpact(o, amount, at, null);       // null owner: no directional cover
       if (o.alive) o.gibbed = false;      // he lived: the next death is his own
     };

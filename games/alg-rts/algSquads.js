@@ -19,8 +19,15 @@
 //                       comes out of the gate in the dead man's slot (his kit)
 //                       and runs to his squad.
 //   WIPED OUT           a squad with no one left is gone (its tab with it).
+//   VETERANCY           the squad's XP and stars (algVeterancy.js): every man of
+//                       it, newcomers too, fights with the squad's stars.
+//   UPGRADES            bought for the SQUAD (munitions), kept by its slot:
+//                       FM 24/29 — the appelés' slot-2 man (already dressed as
+//                       the FM gunner) carries the light machine gun; a
+//                       replacement in that slot gets it back.
 //
 // The ALN keeps its own bands (algAI.js); vehicles stay single units.
+import { vetStats } from "./algVeterancy.js";
 
 /** Infantry squads: men per squad, the squad's name, and what one man costs to replace. */
 export const SQUADS = {
@@ -28,6 +35,15 @@ export const SQUADS = {
   sapeur: { size: 2, name: "Équipe du génie", reinforce: 45 },
   para: { size: 5, name: "Stick para", reinforce: 60 },
   legion: { size: 5, name: "Groupe Légion", reinforce: 80 },
+};
+
+/** Squad upgrades: who can buy it, the price, the slot that carries it, his weapon. */
+export const UPGRADES = {
+  lmg: {
+    label: "FM 24/29", squads: ["appele"], cost: { mun: 60 }, slot: 2,
+    weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 },
+    hint: "The squad's FM gunner gets the FM 24/29 light machine gun: bursts that pin men down at 42 m. Kept by the squad (a replacement in his slot picks it up).",
+  },
 };
 
 const P = {
@@ -61,6 +77,8 @@ export function createAlgSquads({ app, units, base, muster, pay, post }) {
       id: ++seq, typeKey, team, size: def.size, name: `${def.name} ${n}`,
       slots: new Array(def.size).fill(null),
       retreating: false,
+      xp: 0, stars: 0,          // algVeterancy.js
+      upgrades: {},             // UPGRADES keys bought
       get members() { return s.slots.filter((u) => u?.alive); },
       get count() { return s.members.length; },
       get leader() { return s.members[0] ?? null; },
@@ -123,8 +141,44 @@ export function createAlgSquads({ app, units, base, muster, pay, post }) {
   function wrapDamage(u) {
     if (u._squadDmg) return;
     const td = u.takeDamage.bind(u);
-    u.takeDamage = (n) => td(u.squad?.retreating ? n * P.retreatDamage : n);
+    // A veteran squad takes less (vetArmor, set each step by applyKit).
+    u.takeDamage = (n) => td((u.squad?.retreating ? n * P.retreatDamage : n) * (u.vetArmor ?? 1));
     u._squadDmg = true;
+  }
+
+  /**
+   * Every man's kit and bonuses from his squad: the weapon of his slot (an
+   * upgrade, or his type's), and the squad's veterancy (algVeterancy.js).
+   */
+  function applyKit(s) {
+    const v = vetStats(s.stars);
+    s.slots.forEach((u, i) => {
+      if (!u?.alive) return;
+      const up = Object.keys(s.upgrades).map((k) => UPGRADES[k]).find((g) => g.slot === i && g.squads.includes(s.typeKey));
+      const w = up?.weapon ?? u.type;
+      u.weapon = w.weapon ?? null;
+      u.range = w.range ?? 0;
+      u.damage = w.damage ?? 0;
+      u.fireRate = (w.fireRate ?? 1) * v.fireRate;
+      u.vetAcc = v.acc;
+      u.vetArmor = v.armor;
+      u.suppressMul = v.suppress;
+    });
+  }
+
+  /** What the upgrade `key` costs this squad now (null: it can't have it, or has it). */
+  function upgradeCost(s, key) {
+    const g = UPGRADES[key];
+    if (!g || !s || s.team !== "player" || !g.squads.includes(s.typeKey) || s.upgrades[key]) return null;
+    return g.cost;
+  }
+  /** Buy the upgrade `key` for the squad (paid now). */
+  function upgrade(s, key) {
+    const cost = upgradeCost(s, key);
+    if (!cost || !pay(cost)) return false;
+    s.upgrades[key] = true;
+    applyKit(s);
+    return true;
   }
 
   /** FIXED STEP, after posture (it overrides a retreating man's posture). */
@@ -132,6 +186,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post }) {
     for (const s of [...list]) {
       for (const u of s.slots) if (u && !u.alive) leave(u);
       if (!list.includes(s)) continue;
+      applyKit(s);
       if (s.retreating) {
         for (const u of s.members) {
           u.pinned = false; u.suppressed = false; u.posture = "stand";
@@ -166,7 +221,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post }) {
   }
 
   return {
-    list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase,
+    list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase, upgrade, upgradeCost,
     /** A new man of a squad being BOUGHT (the producer's batch): `slot` 0 opens a new squad. */
     bought(u, key, slot) {
       if (!SQUADS[key] || u.team !== "player") return;

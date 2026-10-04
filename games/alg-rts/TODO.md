@@ -22,12 +22,13 @@ One screen, most important first. Details stay in the sections below;
   very high orbit views, a ~1.5k-tri crowd LOD for the bodies.
 
 **2. Gameplay — to make it a whole game**
-- VETERANCY per squad (CoH stars).
+- [x] VETERANCY + SMOKE + FM 24/29 + MORTAR BARRAGE (2026-10-04, your go) — see
+  "SQUAD ABILITIES" below. Next on it: vehicle veterancy, the ALN's, more
+  munitions sinks (sappers' mines, call-ins).
 - The ALN AI goes for the supply points and cuts the lines; its bands
   shown as squads once seen; balance it against paras and Légion.
-- MUNITIONS has one use (grenades): more to spend it on (sugg.) — weapon
-  upgrades, smoke, a mortar barrage, sappers laying mines, call-ins
-  (air strike, napalm).
+- MUNITIONS: grenades, smoke, the FM 24/29, the barrage, flares now; still
+  (sugg.) sappers laying mines, call-ins (air strike, napalm).
 - PATHS: a "can't go there" cursor; rock where it's too steep.
 - Poles: the FLN cuts the line → the post loses its radio (minimap).
 - Mines: a minimap mark once spotted, the sapper clears faster; an attack
@@ -649,6 +650,34 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       called the pass timer trustworthy is gone.
    - [ ] **you**: press Check GPU health once right after a fresh EC reset,
          so "best seen" is a healthy reference.
+
+## SQUAD ABILITIES — veterancy, smoke, FM 24/29, barrage (2026-10-04, your go)
+- [x] **VETERANCY** (algVeterancy.js): a squad's kills earn XP (moudjahid 10,
+      FM team 14, vehicle 30, building 25 — credited to the man who hit him
+      last: shared combat.js `lastHitBy`, splash included); stars at 40 / 110
+      / 220. Each star: +12% accuracy, −8% damage taken, −15% suppression
+      taken (shared infantryPosture `suppressMul`), +5% rate of fire. The
+      stars are the SQUAD's: replacements fight with them. Shown ★ over the
+      badge; a promotion is announced. Tested: 4 kills → ★, 12 → ★★.
+- [x] **FUMIGÈNE** (B, 10 munitions, 40 s per man): the same throw as the
+      grenade (algGrenades.js kinds), lands as a SMOKE SCREEN (algSmoke.js):
+      ~11 m, ~22 s, nobody sees or shoots through it (shared combat.js
+      `smoke`; the sight model moved to shared-rts/smokeColumns.js, nam's
+      Beer-Lambert column). Drawn with the battle's lit puffs (no draw of its
+      own). Tested: 0.88 through the cloud (combat holds fire at 0.6), 0 at
+      30 m beside; tools/smokeColumnsTest.mjs.
+- [x] **FM 24/29** (U, 60 munitions, appelé squads): the squad's slot-2 man
+      (already dressed as the FM gunner) fires the light MG — range 42, MG
+      bursts and suppression. Kept by the squad: a replacement in his slot
+      picks it up. "FM" tag on the badge.
+- [x] **TIR DE BARRAGE** (M, 45 munitions, 75 s per pit — algBarrage.js): the
+      mortar pit puts 6 bombs on a 12 m zone up to 150 m away, one every
+      1.4 s; its own fire waits meanwhile. Day or night.
+- [ ] you, play it: the prices (10 / 60 / 45), the XP pace, the smoke's
+      size and look (tinted greyer after the first look: it read white).
+- [ ] Next: vehicle veterancy; the ALN's (its bands); the AI using smoke
+      against your MG nests; smoke from the mortar (a smoke barrage); the
+      fog of war hiding men INSIDE a cloud (combat already can't see them).
 
 ## SQUADS + RETREAT + REINFORCE (2026-10-03, you: "let's go")
 - [x] algSquads.js — a LAYER over the men (every man stays a unit in

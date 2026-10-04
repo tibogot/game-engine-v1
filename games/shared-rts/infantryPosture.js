@@ -72,7 +72,8 @@ const DIRS = [[1, 0], [0, 1], [-1, 0], [0, -1]];
  */
 export function createInfantryPosture({ units, cover = null, params = POSTURE }) {
   const onFoot = (u) => !!u?.type?.foot;
-  const add = (u, a, cap = params.max) => { const s = u.suppression ?? 0; u.suppression = Math.max(s, Math.min(cap, s + a)); };
+  // `u.suppressMul` (a game's opt-in, 1 = as before): a veteran shrugs off part of it (alg-rts).
+  const add = (u, a, cap = params.max) => { a *= u.suppressMul ?? 1; const s = u.suppression ?? 0; u.suppression = Math.max(s, Math.min(cap, s + a)); };
   const near = [];
   let seq = 0;
 

@@ -5,7 +5,8 @@
 // scorch marks), wired to this game's units.
 //
 // The buildings fight and are fought (algStructures.js); cover and
-// concealment are this map's (algCover.js). Not yet (TODO.md): smoke, sound.
+// concealment are this map's (algCover.js). SMOKE SCREENS (algSmoke.js) break
+// the lines of fire: a smoke grenade's cloud, combat asks it before every shot.
 import { createCombatFx } from "../shared-rts/combatFx.js";
 import { createFlameField } from "../shared-rts/flameField.js";
 import { createCraterSystem } from "../shared-rts/craterSystem.js";
@@ -13,6 +14,7 @@ import { createProjectiles } from "../shared-rts/projectiles.js";
 import { createCombat } from "../shared-rts/combat.js";
 import { createBloodField } from "../shared-rts/bloodField.js";
 import { createAlgLights } from "./algLights.js";
+import { createAlgSmoke } from "./algSmoke.js";
 
 /**
  * @param {object} app
@@ -81,6 +83,9 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // local lights, nothing by day). ?combatlights=0 = without.
   if (new URLSearchParams(location.search).get("combatlights") !== "0") app.algLights = createAlgLights({ app, fx, fire });
 
+  // SMOKE SCREENS (algSmoke.js): drawn with the battle's lit puffs, read by combat for sight.
+  const smoke = createAlgSmoke({ app, lit: fx.lit ?? null });
+
   // Late-bound: projectiles need combat.onImpact, combat needs projectiles.
   let combat = null;
   const projectiles = createProjectiles({
@@ -94,7 +99,8 @@ export async function createAlgCombat(app, { units, structures: built = null, co
       incoming: (at, left) => app.algSounds?.sfx.incoming(at, left),
     },
     onImpact: (target, dmg, at, owner, opts) => combat?.onImpact(target, dmg, at, owner, opts),
-    onArcImpact: (at, dmg, splash, owner, o) => combat?.splashAt(at, dmg, splash, owner, o),
+    // A smoke grenade (kind "smoke") lands as a cloud, not a blast.
+    onArcImpact: (at, dmg, splash, owner, o) => (o?.kind === "smoke" ? smoke.burst(at.x, at.z) : combat?.splashAt(at, dmg, splash, owner, o)),
   });
 
   // BLOOD (bloodField.js): a man hit sprays from the wound, a man down lies
@@ -106,7 +112,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, hitChance, gibChance,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, hitChance, gibChance, smoke,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);
@@ -116,7 +122,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   });
 
   return {
-    fx, fire, craters, projectiles, combat, blood,
+    fx, fire, craters, projectiles, combat, blood, smoke,
     /**
      * A man came apart (unitRenderer onGib): a burst of blood where he stood,
      * a pool where his trunk lands, small ones under his limbs. `parts`:
@@ -129,6 +135,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     },
     /** On the fixed sim clock, after the units have moved. */
     step(dt, simTime) {
+      smoke.step(dt);
       combat.update(dt);
       built?.step(dt, projectiles);      // the mortar pit's bombs
       cover?.step(dt, units.list);       // "I just fired" reveal timers
