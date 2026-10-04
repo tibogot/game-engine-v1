@@ -61,6 +61,10 @@ export const AURES_LIGHT = {
   latitude: 35.2,
   dayOfYear: 196,
   timeOfDay: 15.2,
+  // SKY PRO's base exposure (2026-10-04, you picked "B · darker" in the live light A/B):
+  // the engine's 0.55 metered the sunny start x2.3 and the post's whites clipped, the sand
+  // pale. Dev → Sky → Exposure / Time of day adjust it live.
+  skyProExposure: 0.42,
   // The sun carries the frame (nam's lesson: a sky-lit frame is flat), the
   // fill stays warm and low, exposure brings the mean back up.
   world: { dir: 4.8, skyFill: 0.4, hemi: 0.9, exposure: 1.45 },
@@ -489,6 +493,13 @@ export function applyAuresLight(app, L = AURES_LIGHT) {
     // path on a sea; this map has none, and a low moon left the land half as bright (MEASURED at
     // the post, 23 h: open ground 0.0016 at 18° vs 0.0034 at Tidewater's).
     app.sky.skyPro.moonElev = 0;
+    // The day darker (skyProExposure above), the NIGHT as it was tuned: the stops taken off
+    // the base are given back on the night look's own EV, which scales with the night amount.
+    const base = app.sky.skyPro.exposure;
+    if (L.skyProExposure && base > 0) {
+      app.sky.skyPro.exposure = L.skyProExposure;
+      app.sky.skyPro.nightEV = (app.sky.skyPro.nightEV ?? 0) + Math.log2(base / L.skyProExposure);
+    }
   }
   app.postFx?.setPolish?.(L.polish);
   if (SKY_PRO) {

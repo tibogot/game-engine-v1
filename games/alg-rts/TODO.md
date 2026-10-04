@@ -804,9 +804,12 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       fog on and off. LOOK (`look: "coh"`): the ground keeps its colour, darker (unseen x0.5,
       never explored x0.34), half desaturated, a touch cool; never black. nam unchanged.
 - [ ] you, look: the fog's strength (0.5 / 0.34, the cool tint) in play and at night.
-- [ ] THE START IS STILL BRIGHT on its own (x2.3 at 15:12: auto exposure pushes the sunny
-      desert to mid-grey, the post's white walls clip). Your pick: a lower exposure target
-      for alg, or a later default time (16:30-17:00, lower warmer sun) — A/B them side by side.
+- [x] THE START WAS TOO BRIGHT (x2.3 at 15:12, the post's whites clipped). A live A/B of four
+      looks (now / darker / 16:45 / 16:45 darker), you picked "B · darker": Sky Pro base
+      exposure 0.42 (engine 0.55) in AURES_LIGHT.skyProExposure, 15:12 kept. The night keeps
+      its tuned brightness: the 0.39 stop is given back on the night look's EV (1.0 → 1.39,
+      scaled by the night amount: 0.42 × 2^1.39 = 0.55 × 2^1). Dev → Sky → Exposure and Time
+      of day still adjust it live.
 - [x] **SMALL PLANTS DENSE WHERE THEY GROW** (you, 2026-10-04: "too sparse, denser where we
       place them"). tools/algVegetation.mjs: a 0.75 m slot grows (paint SUM capped 1) × field
       density × clump, then picks a type by its SHARE — a thistle drift was ~1 thistle in 4 slots.
@@ -817,6 +820,15 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       (0.75). MEASURED vs before: village 9.23 vs 9.55 ms, slopes 8.17 vs 7.41, wide 10.17 vs 9.70.
       Bigger flower heads for more colour: you said no (2026-10-04).
 - [ ] you, look in play: the thistle / asphodel drifts, the oleander lines.
+- [ ] **REAL CRATERS** (you, 2026-10-04: "in CoH they look like real craters, not decals"):
+      a crater STAMP into the GPU heightmap (bowl + rim; the scorch decal stays on top) —
+      everything reading the height follows (terrain, grass, painted plants, decals, units).
+      (1) DECORATION craters at load (an old battlefield), stamped BEFORE trees/props/fields
+      are placed: 0 per frame, a few ms load, ~half a day. (2) DYNAMIC on real impacts: ~0.5-1
+      ms ONCE per crater (stamp + the ground-cache tiles under it + the CPU height copy — the
+      readback trap that lost the pads), queued a few a frame for big barrages; shallow =
+      walkable; CRATERS AS COVER (CoH) in the cover map. 1-2 days. Plan: build (2), use the
+      same stamp for (1).
 - [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
       do?" — later): measure the boot's stages first (alg.html already
       logs them for its progress bar), then the usual suspects: the animal
