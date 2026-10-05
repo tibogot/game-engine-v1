@@ -19,8 +19,9 @@ export const REFS = {
     rider: { hip: [336, 207], knee: [258, 216], ankle: [278, 300], head: [329, 107] } },   // left (near) leg raised into the iron
   mount4: { size: [614, 501], horse: { nose: [58, 296], poll: [76, 192], tail: [440, 214], foreNear: [186, 455], hindNear: [445, 460] } },
   mount5: { size: [591, 459], horse: { nose: [55, 270], poll: [72, 175], tail: [425, 205], foreNear: [180, 420], hindNear: [425, 425] } },   // landmarks approximate
-  dismount4: { size: [486, 406], horse: { nose: [52, 148], poll: [74, 90], tail: [335, 196], foreNear: [148, 338], hindNear: [306, 392] } },   // approximate
+  dismount4: { size: [486, 406], horse: { nose: [57, 160], poll: [74, 100], tail: [366, 220], foreNear: [154, 366], hindNear: [320, 394] } },   // read off a grid
   dismount5: { size: [412, 378], horse: { nose: [35, 132], poll: [46, 80], tail: [318, 166], foreNear: [134, 322], hindNear: [292, 330] } },   // approximate
+  dismount6: { size: [407, 323], horse: { nose: [32, 128], poll: [62, 70], tail: [325, 140], foreNear: [158, 285], hindNear: [295, 248] } },   // approximate
   mount10: { size: [489, 388], horse: { nose: [25, 172], poll: [48, 104], tail: [348, 182], foreNear: [154, 366], hindNear: [308, 361] },
     rider: { hip: [217, 151], knee: [194, 202], ankle: [212, 265], head: [195, 45] } },
 };
@@ -47,10 +48,11 @@ function makeProject(H, W, Hh) {
 export function fitRefCamera(H, name) {
   const ref = REFS[name], [W, Hh] = ref.size;
   const key = `${H.horse.height}`;
-  if (ref._q?.[key]) return ref._q[key];
+  if (ref._q?.[key]) return ref._q[key];   // (cached per horse height)
   const L = horseLandmarks(H), names = Object.keys(ref.horse);
   const { set, proj } = makeProject(H, W, Hh);
-  const err = (q) => { set(q); let e = 0; for (const n of names) { const r = proj(L[n]); if (r[2] > 1) return 1e9; e += (r[0] - ref.horse[n][0]) ** 2 + (r[1] - ref.horse[n][1]) ** 2; } return e; };
+  // a game camera: above the ground, a normal lens (a planar set of points also fits a camera under the floor)
+  const err = (q) => { if (q[1] < 0.6 || q[6] < 25 || q[6] > 65) return 1e9; set(q); let e = 0; for (const n of names) { const r = proj(L[n]); if (r[2] > 1) return 1e9; e += (r[0] - ref.horse[n][0]) ** 2 + (r[1] - ref.horse[n][1]) ** 2; } return e; };
   let best = [3.6, 1.3, 0.6, 0.2, 0.8, 0, 30], be = err(best);
   // deterministic search: shrinking coordinate steps (reproducible fits)
   for (let step = 0.8; step > 0.002; step *= 0.7) {
@@ -122,4 +124,55 @@ export async function compareRefs(H, pairs, { scale = 0.6 } = {}) {
   img.onclick = () => img.remove();
   document.body.appendChild(img);
   return out;
+}
+
+// One pose, big, for review: the reference screenshot (left) beside ours
+// (right), same picture size, through a hand-set camera (offset from the horse,
+// look-at offset, lens). Stays on screen until clicked.
+export const POSE_CAMS = {
+  dismount4: { pos: [2.52, 2.89, -0.88], look: [0, 1.36, -0.07], fov: 45 },   // fitted (azimuth 108°, elevation 30°, 3.1 m), rms 18 px
+  dismount5: { pos: [2.93, 2.66, -0.53], look: [0, 1.13, -0.02], fov: 45 },   // fitted, rms 14 px
+  dismount6: { pos: [3.9, 2.3, 0.6], look: [0, 0.95, -0.1], fov: 40 },   // set by hand (the landmark fit went too close)
+  frontLeft: { pos: [4.3, 2.5, 1.3], look: [0.2, 1.05, -0.25], fov: 38 },   // dismount4 / dismount5
+  side: { pos: [-4.6, 1.75, 0.6], look: [0, 1.05, 0.15], fov: 40 },   // the horse's right side, facing right in the picture (idleSide)
+  behind: { pos: [0.2, 2.75, -3.9], look: [0, 1.4, 0], fov: 40 },   // matched to dismountB1–B3
+};
+export async function showPose(H, ref, clip, frame, camName = "behind", label = "") {
+  const E = H.editor, c = H.ctrl, R0 = H.renderer;
+  // "fit": the camera fitted to the screenshot's horse landmarks (REFS)
+  let C = POSE_CAMS[camName];
+  if (camName === "fit") { const q = fitRefCamera(H, ref); C = { pos: q.slice(0, 3), look: q.slice(3, 6), fov: q[6] }; }
+  const im = new Image(); im.src = `/v3/horse-lab/refs/${ref}.png`; await im.decode();
+  const Hh = Math.min(innerHeight - 20, 760), W = Math.round(Hh * im.width / im.height);
+  E.open(clip); E.playing = false;
+  if (!clip.startsWith("ride:")) {
+    // play up to the frame at 60 fps (as the game does): released irons fall, smoothing settles
+    const ms = H.rider.mountSys; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null;
+    for (let i = 0; i <= frame; i++) { ms.edit = { clip, t: i / 60, playing: i > 0 }; H.rider.update(i ? 1 / 60 : 0, {}); }
+    E.setT(frame / 60);
+  }
+  const cam = new THREE.PerspectiveCamera(C.fov, W / Hh, 0.05, 500);
+  const helpers = [...Object.values(E.handles), ...Object.values(E.paths), E.tc.getHelper(), ...E.kneeArrows];
+  H.D.paused = true;   // hold the stepped state while rendering
+  for (let r = 0; r < 3; r++) {
+    await new Promise((rr) => requestAnimationFrame(rr));
+    R0.setSize(W, Hh, false); for (const h of helpers) h.visible = false;
+    // offsets are in the HORSE's frame (x = its left, z = forward): turn them with it
+    const cy = Math.cos(c.yaw), sy = Math.sin(c.yaw), rot = (v) => [v[0] * cy + v[2] * sy, v[1], -v[0] * sy + v[2] * cy];
+    const cp = rot(C.pos), cl = rot(C.look);
+    cam.position.set(c.pos.x + cp[0], c.y + cp[1], c.pos.z + cp[2]); cam.lookAt(c.pos.x + cl[0], c.y + cl[1], c.pos.z + cl[2]); cam.updateMatrixWorld();
+    R0.render(H.scene, cam);
+  }
+  const sheet = document.createElement("canvas"); sheet.width = W * 2 + 10; sheet.height = Hh;
+  const g = sheet.getContext("2d"); g.fillStyle = "#222"; g.fillRect(0, 0, sheet.width, Hh);
+  g.drawImage(im, 0, 0, W, Hh); g.drawImage(R0.domElement, W + 10, 0, W, Hh);
+  g.fillStyle = "#fff"; g.font = "bold 20px sans-serif";
+  g.fillText("REFERENCE", 10, 28); g.fillText(`OURS  ${label}`, W + 20, 28);
+  H.D.paused = false;
+  R0.setSize(innerWidth, innerHeight, true); E.tc.getHelper().visible = true; E.close();
+  document.getElementById("sheet")?.remove();
+  const img = document.createElement("img"); img.id = "sheet"; img.src = sheet.toDataURL();
+  img.style.cssText = "position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:50;max-width:98vw;max-height:96vh;border:2px solid #fff";
+  img.title = "click to close"; img.onclick = () => img.remove();
+  document.body.appendChild(img);
 }

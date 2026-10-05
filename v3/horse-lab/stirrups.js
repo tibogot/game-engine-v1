@@ -13,7 +13,7 @@ const clamp = THREE.MathUtils.clamp;
 // ONE length, riding and mounting alike (× k): the idle riding foot sits at
 // the end of it. It never stretches or shrinks — a foot that wants the iron
 // goes to where the strap holds it (the mount raises the knee to reach it).
-export const STRAP = { len: 0.665 };   // x k (0.977): 0.65 m, the reference long leg (knee ~140) with room to rise at trot / gallop; the iron ~0.76 m off the ground
+export const STRAP = { len: 0.573 };   // x k (0.977): 0.56 m, knee bent like the reference side view
 export const STRAP_BUILTIN = STRAP.len;
 // ball-of-foot BONE → tread centre: 2.3 cm of sole under the bone (measured on the
 // robot mesh) + half the tread's thickness. (0.035 left the foot 6 mm above the iron.)
@@ -79,7 +79,7 @@ export class Stirrups {
       // to a foot from a distance (that read as an elastic strap)
       const tread = f.ankle ? (f.ball ? toL(f.ball.clone().addScaledVector(upW, -BALL_TO_TREAD)) : toL(f.ankle.clone().addScaledVector(upW, -g.ankleAboveTread).addScaledVector(f.fwd, 0.04))) : null;   // under the ball of the foot (sole)
       if (f.in > 0.5 && tread && !sd.held && (sd.p.distanceTo(tread) < 0.12 || f.force)) sd.held = true;
-      if (!(f.in > 0.5)) sd.held = false;
+      if (!(f.in > 0.5)) { if (sd.held) sd.inW = 0; sd.held = false; }   // let go AT ONCE (fading out dragged the iron up with a lifting foot)
       sd.inW += ((sd.held ? 1 : 0) - sd.inW) * (1 - Math.exp(-14 * dt));
       // a foot in the iron only SWINGS it (toward the foot's direction from the
       // bar); the strap's length never changes — the foot is placed at the

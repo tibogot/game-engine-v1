@@ -1,21 +1,21 @@
 {
  "version": 1,
  "pelvisUp": 0.1073,
- "strapLen": 0.6655,
+ "strapLen": 0.5733,
  "poses": {
   "idle": {
-   "lean": -0.12,
+   "lean": 0.14,
    "seatUp": 0,
-   "handFwd": 0.2,
-   "handUp": 0.08,
-   "handApart": 0.125,
+   "handFwd": 0.27,
+   "handUp": 0.25,
+   "handApart": 0.14,
    "stirrupDrop": 0.63,
-   "stirrupFwd": 0.04,
+   "stirrupFwd": 0.14,
    "slack": 1,
    "seatFwd": 0,
-   "footW": 0.4,
-   "kneeOut": 0.55,
-   "chest": 0.3
+   "footW": 0.46,
+   "kneeOut": 0.85,
+   "chest": 0.12
   },
   "walk": {
    "lean": 0.03,

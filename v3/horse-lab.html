@@ -74,8 +74,9 @@
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
       import { Tack } from "./horse-lab/tack.js";
       import { AnimEditor } from "./horse-lab/animEditor.js";
+      import { addHat } from "./horse-lab/hat.js";
       import { checkClip, checkRiding, frameSheet } from "./horse-lab/riderCheck.js";
-      import { compareRefs, fitRefCamera, REFS } from "./horse-lab/refCompare.js";
+      import { compareRefs, fitRefCamera, REFS, showPose } from "./horse-lab/refCompare.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -138,6 +139,7 @@
       const riderData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
       scene.add(riderData.rig);
       const rider = new RiderController(riderData, ctrl, scene);
+      addHat(rider);                                       // cowboy hat on the head bone
       // the saddle, built on this horse's back (tack.js)
       const tack = new Tack(horse, rider);
       console.log("[horse-lab] saddle fit", tack.fit);
@@ -403,7 +405,7 @@
         }
       }
 
-      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

@@ -43,6 +43,7 @@ export const RP = {
   handFwd: 0, handUp: 0,   // offsets on top of the posture
   headFollow: 0,       // 1 = the rider looks where the camera looks (his option); 0 = ahead + into turns
   reinSlack: 1.06,     // rein length ÷ hand-to-bit distance at rest
+  elbowsOut: 1.6,      // how far the elbows point out to the sides (the reference rides with them wide)
   heelDown: -0.2,      // rad the heel sits below the toe in the iron — NEGATIVE: the reference rider's toe points a little DOWN, heel ~11° up
   posting: 0.075,      // m the rider rises at the trot (once per stride)
   reinLoop: 0.55,      // m of rein hanging between the fists (the closed loop over the withers)
@@ -574,7 +575,7 @@ export class RiderController {
         P.handFwd + RP.handFwd + follow.z - inside * 0.05 + outside * 0.04,
       );
       const T = pushOut(S.localToWorld(local), neck, 0.07 * this.k);   // never inside the neck (it rises toward the rider when rearing)
-      const pole = lft.clone().multiplyScalar(g.side * (0.6 + inside * 0.3)).addScaledVector(up, -0.55 + inside * 0.5).addScaledVector(fwd, -0.35).normalize();   // elbows out; the turning arm's elbow lifts
+      const pole = lft.clone().multiplyScalar(g.side * (RP.elbowsOut + inside * 0.3)).addScaledVector(up, -0.15 + inside * 0.5).addScaledVector(fwd, -0.2).normalize();   // elbows out to the sides (the reference)   // elbows out; the turning arm's elbow lifts
       solveTwoBone(g.u, g.l, wpos(g.tip), T, pole, new V3(), true);
       this.orientHand(hd, fwd, up, lft);
     }
@@ -624,18 +625,24 @@ export class RiderController {
   }
 
   // Fist: knuckles forward and a little in, level; palm in and down.
-  orientHand(hd, fwd, up, lft) {
+  orientHand(hd, fwd, up, lft, w = 1) {
+    const D = fwd.clone().multiplyScalar(0.85).addScaledVector(up, -0.08).addScaledVector(lft, -hd.side * 0.4).normalize();
+    const N = lft.clone().multiplyScalar(-hd.side * 0.75).addScaledVector(up, -0.6);
+    this.orientHandTo(hd, D, N, w);
+  }
+  // point the fingers along D with the palm facing N (any hand pose)
+  orientHandTo(hd, D, N, w = 1) {
+    if (w <= 0.001) return;
+    D = D.clone().normalize(); N = N.clone();
     const H = wpos(hd.hand);
     const curDir = wpos(hd.middle).sub(H).normalize();
     const curN = new V3().crossVectors(wpos(hd.index).sub(H), wpos(hd.pinky).sub(H)).normalize().multiplyScalar(hd.palmSign);
-    const D = fwd.clone().multiplyScalar(0.85).addScaledVector(up, -0.08).addScaledVector(lft, -hd.side * 0.4).normalize();
-    const N = lft.clone().multiplyScalar(-hd.side * 0.75).addScaledVector(up, -0.6);
     const q1 = new THREE.Quaternion().setFromUnitVectors(curDir, D);
     const n1 = curN.applyQuaternion(q1);
     const a = n1.addScaledVector(D, -n1.dot(D)).normalize();
     const bN = N.addScaledVector(D, -N.dot(D)).normalize();
     const ang = Math.atan2(new V3().crossVectors(a, bN).dot(D), a.dot(bN));
     const q2 = new THREE.Quaternion().setFromAxisAngle(D, ang);
-    rotateWorld(hd.hand, q2.multiply(q1));
+    rotateWorld(hd.hand, new THREE.Quaternion().slerp(q2.multiply(q1), w));
   }
 }
