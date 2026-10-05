@@ -123,6 +123,9 @@ export class Tack {
     add(slab({ z0: 0.14, z1: 0.22, nz: 1, na: 14, aRange: () => [100 * DEG, 260 * DEG], top: () => 0.024, bot: 0.006 }), dark);
 
     S.add(this.group);
+    rider.tack = this;                                      // the mount uses the skin to keep knees out of the horse
+    this.skin = skin;                                       // (z, angle) → skin radius round the axis (riderCheck: legs inside the horse)
+    this.axisY = P.axisY;
     this.fit = { seatTop: +at(0, 0, 0.014 + sT).y.toFixed(3), backAt0: +(skin(0, 0) + P.axisY).toFixed(3), flapOuterAtBar: +(at(0.18 * k, 58 * DEG, 0.03).x).toFixed(3) };
   }
 

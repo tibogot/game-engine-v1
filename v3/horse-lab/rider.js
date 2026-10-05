@@ -23,7 +23,7 @@ import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 import { rotateWorld, solveTwoBone } from "./horse.js";
 import { Rein } from "./reins.js";
 import { MountSystem } from "./mount.js";
-import { Stirrups, stirrupGeom } from "./stirrups.js";
+import { Stirrups, stirrupGeom, BALL_TO_TREAD } from "./stirrups.js";
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -33,7 +33,7 @@ export const RP = {
   seatSpring: 260,     // 1/s² — stiffness of the seat following the saddle
   seatDamp: 0.45,      // damping ratio (<1 = a little bounce)
   bounceMax: 0.07,     // m the seat may lag the saddle
-  pelvisUp: 0.19,      // m pelvis bone above the saddle frame's 0 (the seat leather is ~9 cm up: tack.js)
+  pelvisUp: 0.107,     // m pelvis bone above the saddle frame's 0 (seat leather ~9 cm up, tack.js) — set by eye in the editor (riding idle)
   absorb: 0.65,        // share of the saddle's rocking the spine takes back out
   upright: 0.6,        // share of the horse's slope pitch the spine takes back out
   stirrupWidth: 0.36,  // m from the spine to each ankle
@@ -43,14 +43,15 @@ export const RP = {
   handFwd: 0, handUp: 0,   // offsets on top of the posture
   headFollow: 0,       // 1 = the rider looks where the camera looks (his option); 0 = ahead + into turns
   reinSlack: 1.06,     // rein length ÷ hand-to-bit distance at rest
+  heelDown: -0.2,      // rad the heel sits below the toe in the iron — NEGATIVE: the reference rider's toe points a little DOWN, heel ~11° up
   posting: 0.075,      // m the rider rises at the trot (once per stride)
   reinLoop: 0.55,      // m of rein hanging between the fists (the closed loop over the withers)
   show: true,
 };
 
 // Postures (m / rad). Hands are relative to the saddle frame.
-const POSES = {
-  idle:   { lean: -0.04, seatUp: 0,    handFwd: 0.25, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.63, stirrupFwd: 0.12, slack: 1.0 },
+export const POSES = {
+  idle:   { lean: -0.12, seatUp: 0,    handFwd: 0.2, handUp: 0.08, handApart: 0.125, stirrupDrop: 0.63, stirrupFwd: 0.04, slack: 1.0 },   // the reference game's seated pose: long leg, foot under the knee, hands low over the pommel
   walk:   { lean: 0.03,  seatUp: 0,    handFwd: 0.26, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.63, stirrupFwd: 0.10, slack: 1.0 },
   trot:   { lean: 0.12,  seatUp: 0.01, handFwd: 0.28, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.64, stirrupFwd: 0.08, slack: 1.0 },
   canter: { lean: 0.22,  seatUp: 0.03, handFwd: 0.32, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.6, stirrupFwd: 0.06, slack: 0.98 },
@@ -61,7 +62,25 @@ const POSES = {
   buck:   { lean: -0.32, seatUp: 0.04, handFwd: 0.20, handUp: 0.36, handApart: 0.14,  stirrupDrop: 0.63, stirrupFwd: 0.22, slack: 1.0 },
   back:   { lean: -0.12, seatUp: 0,    handFwd: 0.20, handUp: 0.33, handApart: 0.135, stirrupDrop: 0.63, stirrupFwd: 0.16, slack: 0.95 },
 };
+// added for the animation editor (riding mode): seat forward / back, foot
+// width out from the spine, how far the knees point out round the barrel
+for (const p of Object.values(POSES)) { p.seatFwd ??= 0; p.footW ??= 0.4; p.kneeOut ??= 0.55; p.chest ??= 0.3; }
 const POSE_KEYS = Object.keys(POSES.idle);
+export const POSES_BUILTIN = JSON.parse(JSON.stringify(POSES));
+export const PELVIS_UP_BUILTIN = RP.pelvisUp;
+
+// Riding postures as saved by the editor (v3/horse-lab/anims/riding.json):
+// every posture, the seat height and the stirrup strap length.
+export function ridingData(strap) {
+  return { version: 1, pelvisUp: RP.pelvisUp, heelDown: RP.heelDown, strapLen: strap.len, poses: JSON.parse(JSON.stringify(POSES)) };
+}
+export function applyRidingData(d, strap) {
+  if (!d?.poses) return;
+  for (const [name, p] of Object.entries(d.poses)) if (POSES[name]) Object.assign(POSES[name], p);
+  if (typeof d.pelvisUp === "number") RP.pelvisUp = d.pelvisUp;
+  if (typeof d.heelDown === "number") RP.heelDown = d.heelDown;
+  if (typeof d.strapLen === "number") strap.len = d.strapLen;
+}
 
 const SEAT = new V3(0, 1.47, -0.05);
 const BIT = new V3(0.07, 1.6, 1.33);
@@ -131,10 +150,17 @@ export function solveLeg(leg, target, pole) {
 }
 // A foot in a stirrup: ankle→ball pointing forward, toe 10° up (heel down),
 // turned 12° out — riders' feet do not hang toe-down like the sitting clip's.
-export function levelFoot(g, fwd, up, lft, toeOut = 0.21) {
+// The foot in the iron: its SOLE tilted heelDown rad from flat. footPitch =
+// how far the ankle→ball line points down on a flat foot (~31° for the robot);
+// tilting that line UP 10° (the old way) put the heel ~41° down, toes in the air.
+export function ridingFootDir(fwd, up, lft, side, footPitch = 0.54, heelDown = RP.heelDown, toeOut = 0.21) {
+  const a = footPitch - heelDown;                          // ankle→ball below horizontal
+  return fwd.clone().multiplyScalar(Math.cos(a)).addScaledVector(up, -Math.sin(a)).addScaledVector(lft, side * toeOut).normalize();
+}
+export function levelFoot(g, fwd, up, lft, footPitch) {
   const A = wpos(g.tip), Bl = wpos(g.ball);
   const cur = Bl.sub(A).normalize();
-  const want = fwd.clone().addScaledVector(up, 0.18).addScaledVector(lft, g.side * toeOut).normalize();
+  const want = ridingFootDir(fwd, up, lft, g.side, footPitch);
   rotateWorld(g.tip, new THREE.Quaternion().setFromUnitVectors(cur, want));
 }
 
@@ -165,7 +191,8 @@ function legAxes(leg, fwdW) {
 // (swing-twist), degrees — independent of the IK (a natural hip stays within
 // about ±45°). This is the check that catches 'the hip spins'; the kneecap-vs-
 // bend check below cannot, because the solver aims the kneecap itself.
-export function hipTwistDeg(rd, legIndex) {
+// each thigh's bind orientation relative to the pelvis (from the skin's inverse binds)
+function bindRel(rd) {
   const Q = THREE.Quaternion;
   if (!rd._bindRel) {
     let skin = null; rd.r.model.traverse((o) => { if (o.isSkinnedMesh && !skin) skin = o; });
@@ -173,6 +200,49 @@ export function hipTwistDeg(rd, legIndex) {
     const bindQ = (bone) => { const m = sk.boneInverses[sk.bones.indexOf(bone)].clone().invert(); const q = new Q(); m.decompose(new V3(), q, new V3()); return q; };
     rd._bindRel = rd.B.legs.map((g) => bindQ(rd.B.pelvis).invert().multiply(bindQ(g.u)));
   }
+  return rd._bindRel;
+}
+// The NATURAL knee direction for a foot target: the bind-pose thigh swung
+// (no roll about its own axis) from its rest axis to where it will point — a
+// standing leg's knee forward, a leg raised in front knee UP, a leg reaching
+// back knee DOWN. Hip twist ~0 by construction. Two passes: the thigh axis
+// depends on the knee bend, which depends on the pole.
+export function naturalKneeDir(rd, g, target, prev = null) {
+  // The knee lies on a circle round the hip→foot line. For each point on it,
+  // the thigh is the bind thigh SWUNG there (no roll); keep the one whose shin
+  // hangs in that thigh's own bend plane, behind the kneecap — a knee that
+  // hinges like a knee. (A fixed-point guess settled on a wrong branch when
+  // the leg folds tight, stepping into the iron: the hip rolled 87°.)
+  const Q = THREE.Quaternion, i = rd.B.legs.indexOf(g);
+  const Qt = rd.B.pelvis.getWorldQuaternion(new Q()).multiply(bindRel(rd)[i]);
+  const a0 = g.axU.clone().applyQuaternion(Qt).normalize(), f0 = g.frU.clone().applyQuaternion(Qt).normalize();
+  const H = wpos(g.u), K = wpos(g.l), F = wpos(g.tip);
+  const a = H.distanceTo(K), b = K.distanceTo(F);
+  const d = target.clone().sub(H); const c = clamp(d.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3); d.normalize();
+  const cosA = clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1), sinA = Math.sqrt(1 - cosA * cosA);
+  const foot = H.clone().addScaledVector(d, c);
+  const u = new V3(0, 1, 0).cross(d); if (u.lengthSq() < 1e-6) u.set(1, 0, 0).cross(d); u.normalize();
+  const v = new V3().crossVectors(d, u);
+  const sw = new Q(), ax = new V3(), fr = new V3(), sh = new V3(), n = new V3();
+  const score = (phi) => {
+    const p = u.clone().multiplyScalar(Math.cos(phi)).addScaledVector(v, Math.sin(phi));
+    ax.copy(d).multiplyScalar(cosA).addScaledVector(p, sinA);
+    fr.copy(f0).applyQuaternion(sw.setFromUnitVectors(a0, ax));
+    sh.copy(foot).sub(H).addScaledVector(ax, -a).normalize();               // knee → foot
+    n.crossVectors(ax, fr);
+    const off = Math.abs(sh.dot(n));                                        // shin out of the bend plane
+    const back = sh.dot(fr) > 0.05 ? 1 : 0;                                 // shin in FRONT of the kneecap: hyperextended
+    const stay = prev ? 0.15 * (1 - p.dot(prev)) : 0;                      // prefer last frame's knee: no branch jumps
+    return { p, cost: off + back * 2 + stay };
+  };
+  let best = null;
+  for (let k = 0; k < 72; k++) { const r = score((k / 72) * Math.PI * 2); if (!best || r.cost < best.cost) best = { ...r, phi: (k / 72) * Math.PI * 2 }; }
+  for (let step = Math.PI / 72; step > 1e-3; step /= 2) for (const dp of [-step, step]) { const r = score(best.phi + dp); if (r.cost < best.cost) best = { ...r, phi: best.phi + dp }; }
+  return best.p;
+}
+export function hipTwistDeg(rd, legIndex) {
+  const Q = THREE.Quaternion;
+  bindRel(rd);
   const g = rd.B.legs[legIndex];
   const rel = rd.B.pelvis.getWorldQuaternion(new Q()).invert().multiply(g.u.getWorldQuaternion(new Q()));
   const delta = rel.clone().multiply(rd._bindRel[legIndex].clone().invert());
@@ -367,6 +437,7 @@ export class RiderController {
     if (hc.gaitName === "Walk") return hc.v < -0.05 ? "back" : "walk";
     return "idle";
   }
+  // (the editor pins a posture with forcePose and wants it applied at once)
 
   update(dt, { lookYaw = 0, input = {} } = {}) {
     if (!this.r.rig.visible) return;
@@ -380,10 +451,10 @@ export class RiderController {
     for (const t of this.touched) { t.p.copy(t.b.position); t.q.copy(t.b.quaternion); }
 
     // Posture blend
-    this.poseName = this.targetPose();
+    this.poseName = this.forcePose ?? this.targetPose();
     const tp = POSES[this.poseName];
     const pk = lerpK(["jump", "rear", "buck"].includes(this.poseName) ? 7 : 3.5, dt);
-    for (const key of POSE_KEYS) this.pose[key] += (tp[key] - this.pose[key]) * pk;
+    for (const key of POSE_KEYS) this.pose[key] += (tp[key] - this.pose[key]) * (this.forcePose ? 1 : pk);
     const P = this.pose;
 
     // Saddle frame (the horse is already updated this frame)
@@ -423,7 +494,7 @@ export class RiderController {
       post = RP.posting * (0.5 - 0.5 * Math.cos(2 * Math.PI * ph)) * trotA.getEffectiveWeight();
     }
     this.post = post;
-    const seat = new V3(anchor.x, this.seatY, anchor.z).addScaledVector(up, RP.pelvisUp + P.seatUp + post).addScaledVector(fwd, post * 0.6);
+    const seat = new V3(anchor.x, this.seatY, anchor.z).addScaledVector(up, RP.pelvisUp + P.seatUp + post).addScaledVector(fwd, post * 0.6 + P.seatFwd);
     rig.position.copy(seat.sub(wpos(B.pelvis)));
     rig.updateMatrixWorld(true);
 
@@ -440,13 +511,17 @@ export class RiderController {
     rotateWorld(B.spine1, q.setFromAxisAngle(lft, lean * 0.5));
     rotateWorld(B.spine2, q.setFromAxisAngle(lft, lean * 0.3));
     rotateWorld(B.spine3, q.setFromAxisAngle(lft, lean * 0.2));
+    // chest up: straighten the sitting clip's hunch (upper back + neck back, head level) — the reference sits tall
+    rotateWorld(B.spine2, q.setFromAxisAngle(lft, -P.chest * 0.4));
+    rotateWorld(B.spine3, q.setFromAxisAngle(lft, -P.chest * 0.6));
+    rotateWorld(B.head, q.setFromAxisAngle(lft, P.chest * 0.6));          // the head stays level (not tipped back with the chest)
     rotateWorld(B.spine1, q.setFromAxisAngle(fwd, roll * 0.6));
     rotateWorld(B.spine2, q.setFromAxisAngle(wUp, steer * 0.14));             // shoulders into the turn
 
     // Legs into the stirrups
     for (const g of B.legs) {
       const sg = stirrupGeom(this.k), hangL = sg.hang(g.side);
-      const ankL = new V3(g.side * RP.stirrupWidth * this.k / 1.07, -P.stirrupDrop * this.k / 1.07, P.stirrupFwd);
+      const ankL = new V3(g.side * P.footW * this.k / 1.07, -P.stirrupDrop * this.k / 1.07, P.stirrupFwd);
       // the tread hangs from a fixed strap: the foot is AT its end — never
       // lower (stretch) nor higher (the iron would ride up: an elastic strap).
       // Postures that rise (gallop, jump) lift the seat; the knees bend.
@@ -457,10 +532,10 @@ export class RiderController {
       const tr = ankL.clone().add(off).sub(hangL);
       ankL.copy(hangL).addScaledVector(tr.normalize(), sg.len).sub(off);
       const T = S.localToWorld(ankL);
-      const pole = fwd.clone().multiplyScalar(0.85).addScaledVector(lft, g.side * 0.55).normalize();
+      const pole = fwd.clone().multiplyScalar(0.85).addScaledVector(lft, g.side * P.kneeOut).normalize();
       solveLeg(g, T, pole);
-      levelFoot(g, fwd, up, lft);                        // in the iron: foot level, heel a touch down, toe a touch out
-      g.ballOff = S.worldToLocal(wpos(g.ball).addScaledVector(up, -0.035)).sub(S.worldToLocal(wpos(g.tip)));
+      levelFoot(g, fwd, up, lft, this.mountSys.footPitch);   // in the iron: sole near level, heel a touch down, toe a touch out
+      g.ballOff = S.worldToLocal(wpos(g.ball).addScaledVector(up, -BALL_TO_TREAD)).sub(S.worldToLocal(wpos(g.tip)));
     }
 
     // Horse collision for hands + reins: oval sections along the withers and

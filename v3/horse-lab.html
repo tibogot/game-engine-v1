@@ -70,10 +70,12 @@
       import GUI from "./ui/labGui.js";
       import { buildArena, zoneAt } from "./horse-lab/arena.js";
       import { loadHorse, HorseController, HP, GEARS } from "./horse-lab/horse.js";
-      import { loadRider, RiderController, RP } from "./horse-lab/rider.js";
+      import { loadRider, RiderController, RP, applyRidingData } from "./horse-lab/rider.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
       import { Tack } from "./horse-lab/tack.js";
       import { AnimEditor } from "./horse-lab/animEditor.js";
+      import { checkClip, checkRiding, frameSheet } from "./horse-lab/riderCheck.js";
+      import { compareRefs, fitRefCamera, REFS } from "./horse-lab/refCompare.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -140,6 +142,10 @@
       const tack = new Tack(horse, rider);
       console.log("[horse-lab] saddle fit", tack.fit);
       await rider.mountSys.loadAnims();                     // get on / off as saved from the animation editor
+      try {                                                 // riding postures, seat height, strap length (editor)
+        const r = await fetch("/v3/horse-lab/anims/riding.json?" + Date.now());
+        if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) applyRidingData(await r.json(), rider.stirrups.STRAP);
+      } catch { /* the built-in postures */ }
       $("loading").remove();
       $("s-gaits").textContent = `${horse.gait.Walk.speed.toFixed(2)} / ${horse.gait.Gallop.speed.toFixed(2)} m/s`;
       console.log("[horse-lab] horse", { gait: horse.gait, halfLen: horse.halfLen, halfWid: horse.halfWid, scale: horse.scale });
@@ -178,7 +184,7 @@
         if (k === "r") ctrl.startRear();
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
-        if (k === "k") editor.open(rider.mode === "riding" ? "dismount" : "mount");
+        if (k === "k") { editor.open(editor.clip); camDist = Math.min(camDist, 4.5); }   // the last thing edited (riding idle first)
       });
       addEventListener("keyup", (e) => {
         down.delete(e.code);
@@ -201,19 +207,26 @@
 
       // ── Third-person camera ──────────────────────────────────────────────────
       let camYaw = 0, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
+      const camPan = new THREE.Vector3();                   // animation editor: right-drag pans the view
       const camTarget = new THREE.Vector3(0, 1.8, 2);
       const canvas = renderer.domElement;
       canvas.addEventListener("click", () => { if (!D.editing) canvas.requestPointerLock?.(); });
       addEventListener("mousemove", (e) => {
         if (D.gizmoDrag) return;                              // dragging an editor handle, not the camera
+        if (D.editing && (e.buttons & 2) && e.target === canvas) {   // editor: right-drag pans
+          const r = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0), u = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 1);
+          camPan.addScaledVector(r, -e.movementX * 0.0012 * camDist).addScaledVector(u, e.movementY * 0.0012 * camDist);
+          return;
+        }
         const locked = document.pointerLockElement === canvas;
         if (!locked && !(e.buttons & 1)) return;
         if (!locked && e.target !== canvas) return;
         camYaw -= e.movementX * 0.0028;
-        camPitch = THREE.MathUtils.clamp(camPitch + e.movementY * 0.0022, -0.1, 1.25);
+        camPitch = THREE.MathUtils.clamp(camPitch + e.movementY * 0.0022, D.editing ? -0.5 : -0.1, D.editing ? 1.5 : 1.25);
         lastMouse = performance.now();
       });
-      canvas.addEventListener("wheel", (e) => { camDist = THREE.MathUtils.clamp(camDist * (e.deltaY > 0 ? 1.1 : 0.9), 3, 22); }, { passive: true });
+      canvas.addEventListener("wheel", (e) => { camDist = THREE.MathUtils.clamp(camDist * (e.deltaY > 0 ? 1.1 : 0.9), D.editing ? 0.6 : 3, 22); }, { passive: true });   // the editor zooms in to a foot
+      canvas.addEventListener("contextmenu", (e) => { if (D.editing) e.preventDefault(); });
       const camRay = new THREE.Raycaster();
       function updateCamera(dt) {
         const side = CAM_MODES[D.camera];
@@ -222,8 +235,9 @@
         const M = rider.mountSys;
         const tgt = foot ? { x: M.gpos.x, y: rider.r.rig.position.y - 0.4, z: M.gpos.z, yaw: M.gyaw, v: M.gv } : { x: ctrl.pos.x, y: ctrl.y + ctrl.lift * 0.6, z: ctrl.pos.z, yaw: ctrl.yaw, v: ctrl.v };
         if (side !== undefined) camYaw = tgt.yaw + side;      // locked beside the horse, legs in view
-        else if (Math.abs(tgt.v) > 0.3 && performance.now() - lastMouse > 1500) camYaw += angDiff(tgt.yaw, camYaw) * lerpK(1.6, dt);
+        else if (!D.editing && Math.abs(tgt.v) > 0.3 && performance.now() - lastMouse > 1500) camYaw += angDiff(tgt.yaw, camYaw) * lerpK(1.6, dt);   // (not while editing: the gait plays on the spot)
         const want = new THREE.Vector3(tgt.x, tgt.y + (side !== undefined ? 0.9 : 1.8), tgt.z);
+        if (D.editing) want.add(camPan); else camPan.set(0, 0, 0);
         camTarget.lerp(want, lerpK(10, dt));
         const pitch = side !== undefined ? 0.06 : camPitch;
         const cp = Math.cos(pitch), sp = Math.sin(pitch);
@@ -258,7 +272,6 @@
       rF.add(RP, "absorb", 0, 1, 0.01).name("spine absorbs rocking");
       rF.add(RP, "upright", 0, 1, 0.01).name("stay upright on slopes");
       rF.add(RP, "pelvisUp", -0.05, 0.25, 0.005).name("seat height");
-      rF.add(RP, "stirrupWidth", 0.2, 0.6, 0.005).name("stirrup width");
       rF.add(RP, "grip", 0, 1.3, 0.01).name("fist grip");
       rF.add(RP, "handFwd", -0.2, 0.2, 0.005).name("hands forward +");
       rF.add(RP, "handUp", -0.2, 0.2, 0.005).name("hands up +");
@@ -302,8 +315,13 @@
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
       });
-      const editor = new AnimEditor({ renderer, scene, camera, rider, ctrl, D });
-      gui.add({ open: () => editor.toggle() }, "open").name("🎬 animation editor (K)");
+      // the editor reads / restores this camera (reference overlay: a saved view per screenshot)
+      const camState = {
+        get: () => ({ yaw: camYaw, pitch: camPitch, dist: camDist, pan: camPan.toArray(), fov: camera.fov }),
+        set: (v) => { camYaw = v.yaw; camPitch = v.pitch; camDist = v.dist; camPan.fromArray(v.pan); camera.fov = v.fov; camera.updateProjectionMatrix(); lastMouse = performance.now() + 1e9; },
+      };
+      const editor = new AnimEditor({ renderer, scene, camera, rider, ctrl, D, camState });
+      gui.add({ open: () => editor.open(editor.clip) }, "open").name("🎬 animation editor (K)");
       const timer = new THREE.Timer();
       let msAvg = 16, hudT = 0;
       renderer.setAnimationLoop((now) => {
@@ -320,8 +338,10 @@
           const onHorse = rider.mode === "riding";
           // on foot the keys move the robot; the horse stands
           editor.update(rawDt);
-          ctrl.update(dt, onHorse && !editor.isOpen ? inp : { fwd: 0, turn: 0, run: false });
-          rider.update(dt, { lookYaw: camYaw, input: onHorse ? {} : inp });
+          const rdt = editor.ride ? rawDt * editor.rideRate() : dt;   // riding mode: the gait plays (or holds) under the rider
+          ctrl.update(rdt, editor.isOpen ? editor.horseInput() : onHorse ? inp : { fwd: 0, turn: 0, run: false });
+          editor.afterHorse();
+          rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : inp });
           editor.afterUpdate();
         }
         if (D.probes) {
@@ -383,7 +403,7 @@
         }
       }
 
-      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, tack, editor, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>
