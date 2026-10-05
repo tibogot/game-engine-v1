@@ -36,7 +36,12 @@ export const HP = {               // tunables (the lab GUI edits these)
   maxLift: 0.5,                   // m a hoof may be raised above the clip's flat ground
   neckLevel: 0.5,                 // share of the body pitch the neck takes back out
   headTurn: 0.45,                 // rad the neck bends into a full-rate turn
-  jumpHeight: 0.9,                // m the jump arc lifts the horse
+  autoJump: true,                 // galloping at a jumpable obstacle: the horse jumps it by itself (like Zelda / RDR)
+  autoJumpRange: 7,               // m ahead where it commits to the jump
+  jumpWindup: 0.28,               // s from Space to the stride start — CONSTANT, so the take-off spot is predictable
+                                  // (the rest of the stride is played at whatever speed fits: 0.8×–2.2×)
+  jumpLeadIn: 1.7,                // playback speed of the jump clip's 0.5 s run-up (snappier take-off)
+  jumpHeight: 0.5,                // m of EXTRA arc on top of the clip's own ~1 m jump (hooves clear ~1.5 m: fences, platform A)
   rearAngle: 1.05,                // rad (60°) the body pitches up when rearing (R)
   rearHip: 0.8,                   // hip height when up, × its standing height (hind hocks + stifles clearly bent)
   rearStep: 0.24,                 // m each hind hoof steps forward under the body going up (and back after)
@@ -130,6 +135,7 @@ const clamp = THREE.MathUtils.clamp;
 // quaternion signs continuous.
 function cleanClip(clip) {
   let fixed = 0;
+  if (typeof location !== "undefined" && new URLSearchParams(location.search).has("rawclips")) return 0;   // debug: clips as exported
   for (const tr of clip.tracks) {
     const n = tr.getValueSize(), t = tr.times, v = tr.values, K = t.length;
     if (K < 3) continue;
@@ -161,6 +167,51 @@ function cleanClip(clip) {
   return fixed;
 }
 
+// 1-2-1 low-pass on quaternion keys (slerp-based), `passes` times, on the
+// leg/hip bones. Removes key-to-key zig-zag; keeps the motion's shape.
+const LEG_TRACK = /^(BackShoulder|BackLeg|BackUpperLeg|BackLowerLeg|FrontShoulder|FrontUpperLeg|FrontLowerLeg)[LR]\.quaternion$/;
+function smoothLegTracks(clip, passes) {
+  if (typeof location !== "undefined" && new URLSearchParams(location.search).has("rawclips")) return;
+  const qa = new THREE.Quaternion(), qb = new THREE.Quaternion(), qc = new THREE.Quaternion();
+  for (const tr of clip.tracks) {
+    if (!LEG_TRACK.test(tr.name)) continue;
+    const v = tr.values, K = tr.times.length;
+    for (let p = 0; p < passes; p++) {
+      const src = v.slice();
+      for (let i = 1; i < K - 1; i++) {
+        qa.fromArray(src, (i - 1) * 4); qb.fromArray(src, i * 4); qc.fromArray(src, (i + 1) * 4);
+        const nb = qa.clone().slerp(qc, 0.5);                     // neighbours' midpoint
+        qb.slerp(nb, 0.5).normalize();                            // = 1-2-1 weights
+        qb.toArray(v, i * 4);
+      }
+    }
+  }
+}
+
+const TIP_LEGS = [["FrontLowerLegL", "IKFrontLegL"], ["FrontLowerLegR", "IKFrontLegR"], ["BackLowerLegL", "IKBackLegL"], ["BackLowerLegR", "IKBackLegR"]];
+
+// How different two clip poses are: summed rotation (degrees) of the leg,
+// body and neck bones. Blending poses far apart is what makes legs look thin
+// and misplaced for a moment (gallop mid-stride → jump take-off was ~470°).
+const POSE_BONES = ["FrontUpperLegL", "FrontLowerLegL", "FrontUpperLegR", "FrontLowerLegR", "BackLegL", "BackUpperLegL", "BackLowerLegL", "BackLegR", "BackUpperLegR", "BackLowerLegR", "BackShoulderL", "BackShoulderR", "FrontShoulderL", "FrontShoulderR", "Body", "Back", "Neck1"];
+const _interp = new WeakMap(), _qa = new THREE.Quaternion(), _qb2 = new THREE.Quaternion();
+function boneQuat(clip, bone, t, out) {
+  let m = _interp.get(clip);
+  if (!m) { m = {}; for (const tr of clip.tracks) { const [b, prop] = tr.name.split("."); if (prop === "quaternion") m[b] = tr.createInterpolant(); } _interp.set(clip, m); }
+  const it = m[bone];
+  if (!it) return null;
+  const v = it.evaluate(Math.min(Math.max(t, 0), clip.duration));
+  return out.set(v[0], v[1], v[2], v[3]).normalize();
+}
+export function poseDiff(clipA, tA, clipB, tB) {
+  let s = 0;
+  for (const b of POSE_BONES) {
+    const a = boneQuat(clipA, b, tA, _qa), c = boneQuat(clipB, b, tB, _qb2);
+    if (a && c) s += a.angleTo(c);
+  }
+  return s * 180 / Math.PI;
+}
+
 export async function loadHorse(url, { height = 2.15 } = {}) {
   const gltf = await getSharedGltfLoader().loadAsync(encodeURI(url));
   const model = gltf.scene;
@@ -168,6 +219,12 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
   const clips = {};
   for (const c of gltf.animations) if (!c.name.includes("|")) clips[c.name] = c;
   for (const c of Object.values(clips)) cleanClip(c);
+  // Gallop_Jump's back-LEFT leg is keyed with a zig-zag: hip, BackLeg, upper
+  // and lower leg all jump out of line at the SAME keys (0.08, 0.17, 0.50 s, up
+  // to 18°) and back — the leg visibly shakes after Space. The right side is
+  // smooth. Low-pass the clip's leg tracks; first/last keys stay (the gallop
+  // hand-over still matches).
+  if (clips.Gallop_Jump) smoothLegTracks(clips.Gallop_Jump, 2);
   model.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.frustumCulled = false; } });
 
   const rig = new THREE.Group();
@@ -195,7 +252,7 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
   const halfLen = Math.abs(wp("FrontUpperLegL").z - wp("BackUpperLegL").z) / 2;
   const halfWid = Math.max(0.18, Math.abs(wp("FFL").x - wp("FFR").x) / 2);
 
-  let foot, jump;
+  let foot, jump, tips;
   // Measure gaits on a throwaway mixer.
   const gait = {};
   {
@@ -233,11 +290,13 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
     {
       const clip = clips.Gallop_Jump, act = mixer.clipAction(clip);
       act.play();
-      const N = 120, lows = [];
+      const N = 120, lows = [], lowF = [], lowH = [];
       for (let i = 0; i < N; i++) {
         mixer.setTime((i / N) * clip.duration);
         rig.updateMatrixWorld(true);
         lows.push(Math.min(...FEET.map((f) => wp(f).y)));
+        lowF.push(Math.min(wp("FFL").y, wp("FFR").y));
+        lowH.push(Math.min(wp("FFBL").y, wp("FFBR").y));
       }
       act.stop();
       const ref = Math.min(...lows), air = lows.map((y) => y > ref + 0.05 * height);
@@ -246,7 +305,9 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
         if (i < N && air[i]) { if (run < 0) run = i; }
         else if (run >= 0) { if ((i - run) / N > best[1] - best[0] || best[0] === 0.35) best = [run / N, i / N]; run = -1; }
       }
-      jump = { t0: best[0] * clip.duration, t1: best[1] * clip.duration };
+      // how high the LOWEST hoof is above the ground, through the clip (m) — the
+      // horse's real clearance, used so obstacles only block what it cannot clear
+      jump = { t0: best[0] * clip.duration, t1: best[1] * clip.duration, clear: lows.map((y) => Math.max(0, y - ref)), clearF: lowF.map((y) => Math.max(0, y - ref)), clearH: lowH.map((y) => Math.max(0, y - ref)), duration: clip.duration };
     }
     // Stand the Idle pose on y = 0.
     mixer.setTime(0);
@@ -258,6 +319,9 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
     // Where the four hooves stand (rig space): the body is placed from the
     // ground under THESE points, so it takes the big height differences.
     rig.updateMatrixWorld(true);
+    // Each hoof hangs off an IK bone that is NOT in the leg chain. Store where
+    // it sits in its leg's last bone, standing: the controller keeps it there.
+    tips = TIP_LEGS.map(([leg, ik]) => ({ leg, ik, off: bone(leg).worldToLocal(wp(ik)) }));
     foot = { fz: (wp("FFL").z + wp("FFR").z) / 2, hz: (wp("FFBL").z + wp("FFBR").z) / 2, x: Math.abs(wp("FFL").x - wp("FFR").x) / 2, sole: (wp("FFL").y + wp("FFBL").y) / 2,
       shY: wp("FrontUpperLegL").y, shZ: wp("FrontUpperLegL").z,
       hipY: (wp("BackLegL").y + wp("BackLegR").y) / 2, hipZ: (wp("BackLegL").z + wp("BackLegR").z) / 2 };
@@ -266,7 +330,7 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
     rig.updateMatrixWorld(true);
   }
 
-  return { rig, model, clips, bone, gait, halfLen, halfWid, foot, jump, height, scale: s };
+  return { rig, model, clips, bone, gait, halfLen, halfWid, foot, jump, tips, height, scale: s };
 }
 
 // ── Controller ───────────────────────────────────────────────────────────────
@@ -291,6 +355,8 @@ export class HorseController {
     this.necks = ["Neck1", "Neck2", "Neck3"].map((n) => h.bone(n));
     this.headB = h.bone("Head");
     this.lift = 0; this.ikW = 1;
+    this.blendLog = [];                                      // every crossfade: from, to, pose difference (audit)
+    this.jumpQueued = false;
     this.rearT = -1; this.rearA = 0; this.rearPitch = 0; this.rearDy = 0;
     this.rearFold = 0; this.rearPaw = 0; this.rearToss = 0; this.landT = -1;
     this.rearLeg = REAR_LEGS.map(() => ({ A: 0, fold: 0, paw: 0, toss: 0 }));
@@ -416,7 +482,7 @@ export class HorseController {
       next.time = ((ph + g.touch) % 1) * g.duration;
     }
     next.play();
-    if (prev && prev !== next) prev.crossFadeTo(next, fade, false);
+    if (prev && prev !== next) { this.logBlend(prev, next); prev.crossFadeTo(next, fade, false); }
     this.cur = next;
     this.gaitName = name;
   }
@@ -455,6 +521,15 @@ export class HorseController {
     return o;
   }
 
+  // Height of the lowest hoof above the take-off ground right now (m): the
+  // clip's own clearance at this moment of the jump plus any extra arc.
+  jumpClearance() {
+    if (!(this.oneShot && this.oneShotName === "Gallop_Jump")) return 0;
+    const j = this.h.jump, n = j.clear.length;
+    const i = Math.min(n - 1, Math.max(0, Math.floor(this.oneShot.time / j.duration * n)));
+    return j.clear[i] + this.lift;
+  }
+
   startRear() {
     if (this.oneShot && ["Idle_2", "Idle_Headlow", "Eating"].includes(this.oneShotName)) this.endOneShot();   // fidgets may be cut
     if (this.oneShot || this.rearT >= 0 || Math.abs(this.v) > 1.6) return false;
@@ -464,17 +539,81 @@ export class HorseController {
     return true;
   }
 
-  playOneShot(name, { holdSpeed = false } = {}) {
+  logBlend(from, to) {
+    const d = poseDiff(from.getClip(), from.time, to.getClip(), to.time);
+    this.blendLog.push({ from: from.getClip().name, to: to.getClip().name, deg: Math.round(d) });
+    if (this.blendLog.length > 200) this.blendLog.shift();
+  }
+
+  // Space while galloping: the jump clip begins at gallop frame 0 (pose
+  // difference 0°; mid-stride it is up to ~470° and the blend shows thin,
+  // misplaced legs). So queue it and take off at the start of the next stride.
+  // Distance (m, from the horse's centre) to the nearest thing ahead it would
+  // have to jump: a fence/rock/wall face, or a rise in the ground (a platform
+  // edge). null if the way is clear for `range` m.
+  obstacleAhead(range) {
+    const fwd = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const left = new V3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
+    const down = new V3(0, -1, 0);
+    let best = null;
+    // across the horse's width (an angled approach meets the fence off-centre)
+    for (const side of [-0.3, 0, 0.3]) for (const up of [0.3, 0.7, 1.1]) {
+      const o = this.pos.clone().addScaledVector(left, side); o.y = this.y + up;
+      this.ray.set(o, fwd); this.ray.far = range;
+      const hit = this.ray.intersectObjects(this.world.blockers, false)[0];
+      if (!hit || (best && hit.distance >= best.dist)) continue;
+      const pt = hit.point.clone().addScaledVector(fwd, 0.04);
+      this.ray.set(new V3(pt.x, pt.y + 6, pt.z), down); this.ray.far = 12;
+      const topHit = this.ray.intersectObjects(this.world.blockers, false)[0];
+      best = { dist: hit.distance, top: (topHit ? topHit.point.y : hit.point.y) - this.y };
+    }
+    for (let s = 0.5; s <= range && (!best || s < best.dist); s += 0.25) {
+      const p = this.pos.clone().addScaledVector(fwd, s);
+      const h = this.sampleGround(p.x, p.z, this.y, 10);
+      if (h !== null && h - this.y > HP.stepMax) { best = { dist: s, top: h - this.y }; break; }
+    }
+    return best;
+  }
+
+  // Can the horse get its front hooves over this (top: m above the ground)?
+  jumpable(o) {
+    if (!o) return false;
+    if (this.peakFrontFor !== HP.jumpHeight) this.peakFront = undefined;
+    this.peakFrontFor = HP.jumpHeight;
+    if (this.peakFront === undefined) { let m = 0; for (let t = this.h.jump.t0; t <= this.h.jump.t1; t += 0.01) m = Math.max(m, this.clearanceAt(t, "front")); this.peakFront = m; }
+    return o.top > 0.35 && o.top < this.peakFront - 0.1;
+  }
+
+  // Seconds from now to take-off so the horse's centre is over the obstacle
+  // (+0.25 m: its middle) at the top of the arc. No obstacle: the wind-up.
+  jumpWindupFor(dist) {
+    if (dist === null) return HP.jumpWindup;
+    const j = this.h.jump, v = Math.max(this.v, 1);
+    let tPeak = j.t0, cPeak = -1;
+    for (let t = j.t0; t <= j.t1; t += 0.01) { const c = this.clearanceAt(t); if (c > cPeak) { cPeak = c; tPeak = t; } }
+    const airT = HP.jumpHeight > 0 ? Math.max(j.t1 - j.t0, Math.sqrt(8 * HP.jumpHeight / 9.8)) : j.t1 - j.t0;
+    const airRate = (j.t1 - j.t0) / airT;
+    const W = (dist + 0.25) / v - j.t0 / HP.jumpLeadIn - (tPeak - j.t0) / airRate;
+    return clamp(W, 0.12, 1.6);
+  }
+
+  queueJump() {
+    // also while still speeding up into the gallop (Space pressed early): wait up to 1.2 s
+    if (this.rearT < 0 && (!this.oneShot || this.oneShotName.startsWith("Idle")) && (this.gaitName === "Gallop" || this.lastRun)) { this.jumpQueued = true; this.jumpQueueT = 2.2; this.jumpRate = undefined; }
+  }
+
+  playOneShot(name, { holdSpeed = false, fade = 0.2, at = 0 } = {}) {
     if (this.rearT >= 0) return;
     if (this.oneShot && ["Idle_2", "Idle_Headlow"].includes(this.oneShotName) && name !== this.oneShotName) this.oneShot = null;   // idle fidgets may be cut by any action
     if (this.oneShot || !this.h.clips[name]) return;
     const a = this.act(name);
     a.reset();
+    a.time = at;
     a.setLoop(THREE.LoopOnce, 1);
     a.clampWhenFinished = true;
     a.setEffectiveTimeScale(1);
     a.play();
-    if (this.cur && this.cur !== a) this.cur.crossFadeTo(a, 0.2, false);
+    if (this.cur && this.cur !== a) { this.logBlend(this.cur, a); this.cur.crossFadeTo(a, fade, false); }
     this.oneShot = a;
     this.oneShotName = name;
     this.holdSpeed = holdSpeed;
@@ -488,6 +627,7 @@ export class HorseController {
     const next = this.act(back);
     next.reset().setLoop(THREE.LoopRepeat, Infinity);
     next.play();
+    this.logBlend(a, next);
     a.crossFadeTo(next, 0.25, false);
     this.cur = next;
     this.gaitName = back;
@@ -503,28 +643,101 @@ export class HorseController {
     return hit ? hit.point.y : null;
   }
 
+  // Hoof clearance (m above the take-off ground) at a given time of the jump
+  // clip: the clip's own lowest-hoof height plus the extra arc.
+  clearanceAt(clipT, feet = "all") {
+    const j = this.h.jump, n = j.clear.length;
+    const arr = feet === "front" ? j.clearF : feet === "hind" ? j.clearH : j.clear;
+    const i = Math.min(n - 1, Math.max(0, Math.floor(clipT / j.duration * n)));
+    let lift = 0;
+    if (clipT > j.t0 && clipT < j.t1) { const u = (clipT - j.t0) / (j.t1 - j.t0); lift = 4 * HP.jumpHeight * u * (1 - u); }
+    return arr[i] + lift;
+  }
+
+  // The clearance the hooves will have when they reach something `dist` m
+  // ahead (0 when not jumping): the jump is predicted, not sampled now.
+  clearanceIn(dist, feet = "all") {
+    if (!(this.oneShot && this.oneShotName === "Gallop_Jump")) return 0;
+    // speed: the jump carries its gallop speed (a block this frame must not
+    // make the prediction think it will never get there)
+    const v = Math.max(Math.abs(this.v), this.h.gait.Gallop.speed * 0.6), a = this.oneShot;
+    const tf = this.jumpClipTimeAfter(a.time, Math.max(0, dist) / v);
+    return tf >= a.getClip().duration ? 0 : this.clearanceAt(tf, feet);
+  }
+
+  // Where the jump clip will be after `secs` of real time, stepping through
+  // its speeds: quick run-up, the flight (stretched to the air time), landing.
+  jumpClipTimeAfter(t, secs) {
+    const j = this.h.jump;
+    const airT = HP.jumpHeight > 0 ? Math.max(j.t1 - j.t0, Math.sqrt(8 * HP.jumpHeight / 9.8)) : j.t1 - j.t0;
+    const phases = [[j.t0, HP.jumpLeadIn], [j.t1, (j.t1 - j.t0) / airT], [Infinity, 1]];
+    for (const [end, rate] of phases) {
+      if (t >= end) continue;
+      const need = (end - t) / rate;
+      if (secs <= need) return t + secs * rate;
+      secs -= need; t = end;
+    }
+    return t;
+  }
+
   blockedAhead(dir) {
     const { halfLen } = this.h;
     const fwd = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)).multiplyScalar(dir);
     const left = new V3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
-    // Step test: the ground just past the chest must not be a wall.
-    const ahead = this.pos.clone().addScaledVector(fwd, halfLen + 0.35);
+    // Step test: the ground just past the chest must not be a wall — unless
+    // the hooves will be above it when they get there (jumping onto it).
+    // look further ahead the faster we go: a galloping stride reaches ~1 m past
+    // the chest, so a refusal must stop before the legs get to the wall
+    const reach = halfLen + 0.35 + Math.min(1, Math.abs(this.v) * 0.2);
+    const ahead = this.pos.clone().addScaledVector(fwd, reach);
     const h = this.sampleGround(ahead.x, ahead.z, this.y, 10);
-    const clear = this.oneShotName === "Gallop_Jump" && this.oneShot ? HP.jumpHeight : 0;   // a jump clears low things
-    if (h === null || h - this.y > HP.stepMax + clear) return true;
-    // Chest-height rays against fences, walls, arches, rocks.
-    this.ray.far = halfLen + 0.8;
-    for (const up of [0.6, 1.2]) for (const side of [-0.3, 0, 0.3]) {
+    // a step the legs can take, or a rise the front hooves will be ABOVE when they get there
+    if (h === null) return true;
+    const rise = h - this.y;
+    // Once committed to a jump, anything the horse can clear at the top of its
+    // arc does not block (forgiving, like horse games: an angled approach meets
+    // the fence a little before the peak and failed by a centimetre).
+    const committed = this.oneShot && this.oneShotName === "Gallop_Jump" && this.oneShot.time < this.h.jump.t1;
+    const canClear = (top) => committed && this.jumpable({ top });
+    if (rise > HP.stepMax && !canClear(rise) && rise > this.clearanceIn(reach - this.h.foot.fz, "front") - 0.05) return true;
+    // Fences, walls, arches, rocks: for each hit, find the obstacle's TOP and
+    // block only if it is higher than the hooves will be when they reach it.
+    const down = new V3(0, -1, 0);
+    this.ray.far = halfLen + 0.8 + Math.min(1, Math.abs(this.v) * 0.2);
+    for (const up of [0.3, 0.6, 1.0, 1.4]) for (const side of [-0.3, 0, 0.3]) {
       const o = this.pos.clone().addScaledVector(left, side);
-      o.y = this.y + up + clear;
+      o.y = this.y + up;
       this.ray.set(o, fwd);
-      if (this.ray.intersectObjects(this.world.blockers, false).length) return true;
+      const hit = this.ray.intersectObjects(this.world.blockers, false)[0];
+      if (!hit) continue;
+      const p = hit.point.clone().addScaledVector(fwd, 0.04);
+      this.ray.set(new V3(p.x, p.y + 6, p.z), down);
+      this.ray.far = 12;
+      const topHit = this.ray.intersectObjects(this.world.blockers, false)[0];
+      this.ray.far = halfLen + 0.8 + Math.min(1, Math.abs(this.v) * 0.2);
+      const top = topHit ? topHit.point.y : hit.point.y;
+      // front hooves reach it first, hind hooves ~1.1 m later — each must be
+      // above it when IT gets there (the lowest hoof at take-off is a hind one)
+      if (canClear(top - this.y)) continue;
+      const ft = this.h.foot, rise = top - this.y + 0.05;
+      if (rise > this.clearanceIn(hit.distance - ft.fz, "front")) return true;
+      if (rise > this.clearanceIn(hit.distance - ft.hz, "hind")) return true;
     }
     return false;
   }
 
   // input: { fwd: -1..1, turn: -1..1, run: bool }
   update(dt, input) {
+    this.lastRun = !!input.run && input.fwd > 0;
+    // Auto-jump: galloping toward something it can clear, the horse commits to
+    // the jump itself; the take-off spot is then placed by jumpWindupFor().
+    if (HP.autoJump && this.gaitName === "Gallop" && input.fwd > 0 && !this.oneShot && !this.jumpQueued && this.rearT < 0 && this.v > this.h.gait.Gallop.speed * 0.75) {
+      this.autoT = (this.autoT ?? 0) + 1;
+      if (this.autoT % 3 === 0) {
+        const o = this.obstacleAhead(HP.autoJumpRange);
+        if (o && o.dist > 2.5 && this.jumpable(o)) this.queueJump();
+      }
+    }
     const g = this.h.gait, walkV = g.Walk.speed, galV = g.Gallop.speed;
     const busy = (this.oneShot && !this.holdSpeed) || this.rearT >= 0;
 
@@ -547,7 +760,13 @@ export class HorseController {
     // Move (stop dead against walls)
     if (Math.abs(this.v) > 1e-3) {
       this.blocked = this.blockedAhead(Math.sign(this.v));
-      if (this.blocked) this.v = 0;
+      if (this.blocked) {
+        this.v = 0;
+        this.jumpQueued = false;
+        // a refusal: blocked before the horse is really in the air cancels the
+        // jump (else its legs reach forward into the obstacle while it stands)
+        if (this.oneShot && this.oneShotName === "Gallop_Jump" && this.oneShot.time < this.h.jump.t0 + 0.1) this.endOneShot();
+      }
       else {
         this.pos.x += Math.sin(this.yaw) * this.v * dt;
         this.pos.z += Math.cos(this.yaw) * this.v * dt;
@@ -569,7 +788,28 @@ export class HorseController {
         const ts = Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV;
         this.cur.setEffectiveTimeScale(Math.sign(ts || 1) * clamp(Math.abs(ts), 0.35, 1.6));
       } else if (this.gaitName === "Gallop") {
-        this.cur.setEffectiveTimeScale(clamp(this.v / galV, 0.6, 1.25));
+        let ts = clamp(this.v / galV, 0.6, 1.25);
+        if (this.jumpQueued) {
+          if (this.jumpRate === undefined) {                 // first gallop frame with a jump queued
+            const d = this.cur.getClip().duration, left0 = d - (this.cur.time % d);
+            // How long until take-off: aimed at the obstacle ahead if there is
+            // one (the horse "finds its distance"), else the plain wind-up.
+            const W = this.jumpWindupFor(this.obstacleAhead(10)?.dist ?? null);
+            // Pick how many more strides to take so the stride speed stays
+            // closest to normal (0.75×–2×), then fit them into W exactly.
+            let best = null;
+            for (let n = 0; n < 4; n++) {
+              const left = left0 + n * d, rate = left / (ts * W);
+              const cost = rate < 0.75 || rate > 2 ? 10 + Math.abs(Math.log(rate)) : Math.abs(Math.log(rate));
+              if (!best || cost < best.cost) best = { n, rate, cost };
+            }
+            this.jumpSkipWrap = best.n;
+            this.jumpRate = clamp(best.rate, 0.6, 3.2);
+            this.jumpQueueT = Math.max(this.jumpQueueT, W + 0.5);
+          }
+          ts *= this.jumpRate;
+        }
+        this.cur.setEffectiveTimeScale(ts);
       } else {
         this.cur.setEffectiveTimeScale(1);
         this.idleT += dt;
@@ -589,8 +829,17 @@ export class HorseController {
     for (const p of P) { const h = this.sampleGround(p.x, p.z, this.y); p.y = h ?? this.y; }
     const gF = (P[0].y + P[1].y) / 2, gB = (P[2].y + P[3].y) / 2, gL = (P[0].y + P[2].y) / 2, gR = (P[1].y + P[3].y) / 2;
     const ty = gB + (gF - gB) * (-Hz) / (Fz - Hz);            // ground line at the body origin
-    const k = ty < this.y ? lerpK(9, dt) : lerpK(14, dt);
-    this.y += (ty - this.y) * k;
+    if (this.airborne) {
+      // In the air the body keeps its take-off height (the clip and the arc
+      // carry it) — it does not snap to whatever is underneath. If the ground
+      // below rises above the hooves (landing ON a platform), the body is only
+      // lifted as much as needed to keep the hooves on top of it.
+      const clearNow = this.jumpClearance();
+      if (ty > this.y + clearNow) this.y = ty - clearNow;
+    } else {
+      const k = ty < this.y ? lerpK(9, dt) : lerpK(14, dt);
+      this.y += (ty - this.y) * k;
+    }
     const tp = -Math.atan2(gF - gB, Fz - Hz) * HP.pitchFollow;
     const lean = -(this.turnRate / HP.turnGallop) * clamp(this.v / galV, 0, 1) * HP.lean;
     const trl = Math.atan2(gL - gR, 2 * Fx) * HP.rollFollow + lean;
@@ -603,12 +852,16 @@ export class HorseController {
     let airborne = false;
     if (this.oneShot && this.oneShotName === "Gallop_Jump") {
       const { t0, t1 } = this.h.jump, t = this.oneShot.time;
-      const airT = Math.sqrt(8 * HP.jumpHeight / 9.8);
-      this.oneShot.setEffectiveTimeScale(t >= t0 && t <= t1 ? (t1 - t0) / airT : 1);
+      // The clip already jumps ~1 m (hoof IK used to pull it back down, which
+      // is why it once looked flat). Extra height is optional; only then is
+      // the air time stretched to match (t = √(8h/g) for the extra arc).
+      const airT = HP.jumpHeight > 0 ? Math.max(t1 - t0, Math.sqrt(8 * HP.jumpHeight / 9.8)) : t1 - t0;
+      this.oneShot.setEffectiveTimeScale(t < t0 ? HP.jumpLeadIn : t <= t1 ? (t1 - t0) / airT : 1);   // quick run-up, then real air time
       if (t >= t0 - 0.06 && t <= t1 + 0.06) airborne = true;
       if (t > t0 && t < t1) { const u = (t - t0) / (t1 - t0); this.lift = 4 * HP.jumpHeight * u * (1 - u); }
     }
     this.ikW += ((airborne ? 0 : 1) - this.ikW) * lerpK(14, dt);
+    this.airborne = airborne;
 
     // Rear (procedural — the pack has no rearing clip): the body pitches up
     // over the planted hind hooves (hind IK gathers the legs, cannons stay
@@ -670,6 +923,22 @@ export class HorseController {
     for (const t of this.touched) { t.b.position.copy(t.p); t.b.quaternion.copy(t.q); }
     this.mixer.update(dt);
     for (const t of this.touched) { t.p.copy(t.b.position); t.q.copy(t.b.quaternion); }
+    this.glueHooves();
+    if (this.jumpQueued) {
+      this.jumpQueueT -= dt;
+      if (this.jumpQueueT < 0 || this.rearT >= 0 || (this.oneShot && !this.oneShotName.startsWith("Idle"))) this.jumpQueued = false;
+      else if (this.gaitName === "Gallop" && (!this.oneShot || this.oneShotName.startsWith("Idle"))) {
+        const t = this.cur.time % this.cur.getClip().duration;
+        // the stride just wrapped to frame 0 (or we first see it right at the start)
+        const wrapped = (this.prevGallopT !== undefined && t < this.prevGallopT) || (this.prevGallopT === undefined && t < 0.06);
+        if (wrapped && this.jumpSkipWrap > 0) this.jumpSkipWrap--;
+        else if (wrapped) {
+          this.jumpQueued = false;
+          this.playOneShot("Gallop_Jump", { holdSpeed: true, fade: 0.06, at: t });
+        }
+      }
+    }
+    this.prevGallopT = this.gaitName === "Gallop" && this.cur ? this.cur.time % this.cur.getClip().duration : undefined;
     if (this.rearLeg.some((L) => L.fold > 0 || L.paw > 0)) {
       r.updateMatrixWorld(true);
       const lftAxis = new V3(1, 0, 0).applyQuaternion(r.quaternion);
@@ -693,6 +962,21 @@ export class HorseController {
     else this.bodyOff = 0;
     r.updateMatrixWorld(true);
     this.levelNeck();
+  }
+
+  // The hooves are skinned to IK bones that are NOT children of the legs. The
+  // clips keep them together, but any blend (crossfade, gait change, one-shot
+  // start) mixes the leg ROTATIONS and the IK bone POSITIONS separately, so the
+  // hoof drifted off the leg (measured: 11 cm in the gallop, 25 cm starting a
+  // jump) and the skin between stretched thin. Put each IK bone back at its
+  // leg's tip every frame; its rotation (the hoof angle) stays the clip's.
+  glueHooves() {
+    this.h.rig.updateMatrixWorld(true);
+    for (const t of this.h.tips) {
+      const leg = this.h.bone(t.leg), ik = this.h.bone(t.ik);
+      ik.position.copy(ik.parent.worldToLocal(leg.localToWorld(t.off.clone())));
+      ik.updateMatrixWorld(true);
+    }
   }
 
   // How fast the clip's planted hooves move vs how fast the body moves (0 = no skating).

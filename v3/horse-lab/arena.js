@@ -228,8 +228,8 @@ export function buildArena(scene) {
   fence(-24, -30, -24, -16); fence(24, -30, 24, -16);
   const wood = new THREE.MeshStandardMaterial({ color: 0x9a6a33, roughness: 0.85 });
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
-  const postIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 1.35, 0.16), wood, posts.length);
-  posts.forEach(([x, z, ry], i) => postIM.setMatrixAt(i, m4.compose(ps.set(x, 0.675, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, 1, 1))));
+  const postIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.16, 1.18, 0.16), wood, posts.length);
+  posts.forEach(([x, z, ry], i) => postIM.setMatrixAt(i, m4.compose(ps.set(x, 0.59, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, 1, 1))));
   const railIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.12, 1), wood, rails.length);
   rails.forEach(([x, y, z, ry, l], i) => railIM.setMatrixAt(i, m4.compose(ps.set(x, y, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, 1, l))));
   postIM.computeBoundingSphere(); railIM.computeBoundingSphere();

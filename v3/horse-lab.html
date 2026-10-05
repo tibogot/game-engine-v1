@@ -21,6 +21,10 @@
       #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 30;
                  font-size: 18px; text-shadow: 0 1px 3px rgba(0,0,0,.6); pointer-events: none; }
       #err { color: #ff8c8c; white-space: pre-wrap; font-size: 11px; }
+      #audit { position: fixed; left: 50%; top: 10px; transform: translateX(-50%); z-index: 25; max-width: 760px;
+               background: rgba(12,16,20,0.93); border: 1px solid #2c3540; border-radius: 8px; padding: 10px 12px;
+               font: 12px/1.45 ui-monospace, monospace; color: #dfe6ea; white-space: pre-wrap; display: none; }
+      #audit .bad { color: #ff8c8c; } #audit .good { color: #9be39b; } #audit a { color: #8fb3ff; }
     </style>
   </head>
   <body>
@@ -28,9 +32,10 @@
       <div>Controls:</div>
       <div>Move — <b>W A S D</b> (Z Q S D on AZERTY) or arrows</div>
       <div>Gallop — move + hold <b>Shift</b></div>
-      <div>Jump — <b>Space</b> while galloping</div>
+      <div>Jump — galloping at a fence: automatic · or <b>Space</b></div>
       <div>Head toss — <b>H</b> · Eat — <b>E</b> · Rear — <b>R</b> · Buck — <b>B</b></div>
       <div>Enable/Disable hoof IK — <b>C</b></div>
+      <div>Pause — <b>P</b> · next frame (paused) — <b>N</b></div>
       <div>Look around — <b>click</b>, then mouse (Esc to free it)</div>
       <div>Zoom — mouse wheel</div>
     </div>
@@ -49,6 +54,7 @@
     <div id="frame">Frame: —</div>
     <div id="state">Current State: —</div>
     <div id="loading">loading horse…</div>
+    <div id="audit"></div>
 
     <script type="module">
       // ── Horse lab ────────────────────────────────────────────────────────────
@@ -62,6 +68,7 @@
       import { buildArena, zoneAt } from "./horse-lab/arena.js";
       import { loadHorse, HorseController, HP } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP } from "./horse-lab/rider.js";
+      import { runAudit } from "./horse-lab/audit.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -143,10 +150,12 @@
         down.add(e.code); shift = e.shiftKey;
         if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
         if (e.repeat) return;
-        if (e.code === "Space" && ctrl.gaitName === "Gallop") ctrl.playOneShot("Gallop_Jump", { holdSpeed: true });
+        if (e.code === "Space") ctrl.queueJump();   // takes off at the start of the next gallop stride
         const k = e.key.toLowerCase();
         if (k === "h" && Math.abs(ctrl.v) < 0.3) ctrl.playOneShot("Idle_2");
         if (k === "e" && Math.abs(ctrl.v) < 0.3) ctrl.playOneShot("Eating");
+        if (k === "p") { D.paused = !D.paused; D.step = 0; }      // freeze to inspect a moment
+        if ((k === "." || k === "n") && D.paused) D.step++;                    // one frame forward while frozen
         if (k === "r") ctrl.startRear();
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
@@ -196,7 +205,7 @@
       }
 
       // ── GUI ──────────────────────────────────────────────────────────────────
-      const D = { timeScale: 1, skeleton: false, probes: false, camera: "follow" };
+      const D = { timeScale: 1, skeleton: false, probes: false, camera: "follow", auditing: false };
       const CAM_MODES = { "left side": -Math.PI / 2, "right side": Math.PI / 2, front: Math.PI };
       const gui = new GUI({ title: "Horse lab" });
       const lookF = gui.addFolder("Horse look");
@@ -228,7 +237,10 @@
       ikF.add(HP, "maxLift", 0, 0.8, 0.01).name("max hoof lift (m)");
       ikF.add(HP, "neckLevel", 0, 1, 0.01).name("neck levels head on slopes");
       ikF.add(HP, "headTurn", 0, 1, 0.01).name("head turns into turns (rad)");
-      ikF.add(HP, "jumpHeight", 0.2, 1.6, 0.01).name("jump height (m)");
+      ikF.add(HP, "autoJump").name("auto-jump fences (gallop)");
+      ikF.add(HP, "jumpHeight", 0, 1.2, 0.01).name("jump: extra height (m)");
+      ikF.add(HP, "jumpWindup", 0.1, 0.6, 0.01).name("jump: Space → take-off (s)");
+      ikF.add(HP, "jumpLeadIn", 1, 2.5, 0.05).name("jump: run-up speed ×");
       ikF.add(HP, "rearAngle", 0.3, 1.3, 0.01).name("rear angle (rad)");
       ikF.add(HP, "rearHold", 0.2, 3, 0.05).name("rear hold (s)");
       const gaits = gui.addFolder("Gaits");
@@ -239,7 +251,8 @@
       gaits.add(HP, "turnWalk", 0.3, 2.5, 0.05).name("turn walk (rad/s)");
       gaits.add(HP, "turnGallop", 0.3, 2.5, 0.05).name("turn gallop (rad/s)");
       const dbg = gui.addFolder("Debug");
-      dbg.add(D, "camera", ["follow", "left side", "right side", "front"]).name("camera");
+      dbg.add({ audit: () => doAudit() }, "audit").name("run motion audit");
+      dbg.add(D, "camera",["follow", "left side", "right side", "front"]).name("camera");
       dbg.add(D, "timeScale", 0.05, 1.5, 0.01).name("time scale");
       dbg.add(D, "skeleton").name("show skeleton").onChange((v) => {
         if (skel) { scene.remove(skel); skel.dispose?.(); skel = null; }
@@ -259,9 +272,15 @@
         timer.update(now);
         const rawDt = Math.min(timer.getDelta(), 0.1);
         msAvg += (rawDt * 1000 - msAvg) * 0.05;
-        const dt = rawDt * D.timeScale;
-        ctrl.update(dt, input());
-        rider.update(dt, { lookYaw: camYaw });
+        let dt = rawDt * D.timeScale;
+        if (D.paused) {                                       // P: frozen; '.' steps one 1/60 s frame
+          dt = D.step > 0 ? 1 / 60 : 0;
+          if (D.step > 0) D.step--;
+        }
+        if (!D.auditing) {                                 // the audit drives the horse itself
+          ctrl.update(dt, input());
+          rider.update(dt, { lookYaw: camYaw });
+        }
         if (D.probes) {
           ctrl.probes.forEach((p, i) => probes[i].position.copy(p));
           ctrl.legs.forEach((g, i) => { hits[i].position.copy(g.hit); hits[i].visible = g.on && HP.ik; });
@@ -286,7 +305,33 @@
         }
       });
 
-      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, RP, arena, HP, D, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      // Motion audit (horse-lab/audit.js): every action, IK on vs the clip,
+      // frame by frame. Run it after any change to the horse or rider code.
+      function doAudit() {
+        const el = $("audit");
+        el.style.display = "block";
+        el.textContent = "running motion audit…";
+        D.auditing = true;
+        setTimeout(() => {
+          let rows = [];
+          try { rows = runAudit({ ctrl, rider, HP }); } catch (e) { showErr(e); } finally { D.auditing = false; }
+          console.table(rows);
+          const bad = rows.filter((r) => !r.ok);
+          el.innerHTML = "";
+          const head = document.createElement("div");
+          head.innerHTML = `<b>Motion audit</b> — ${rows.length - bad.length}/${rows.length} actions clean · <a href="#">close</a>`;
+          head.querySelector("a").onclick = (e) => { e.preventDefault(); el.style.display = "none"; };
+          el.appendChild(head);
+          for (const r of rows) {
+            const line = document.createElement("div");
+            line.className = r.ok ? "good" : "bad";
+            line.textContent = r.ok ? `✓ ${r.action}` : `✗ ${r.action}: ${r.fails.join("; ")}`;
+            el.appendChild(line);
+          }
+        }, 30);
+      }
+
+      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>
