@@ -68,7 +68,7 @@
       import { buildArena, zoneAt } from "./horse-lab/arena.js";
       import { loadHorse, HorseController, HP } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP } from "./horse-lab/rider.js";
-      import { runAudit } from "./horse-lab/audit.js";
+      import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -307,14 +307,21 @@
 
       // Motion audit (horse-lab/audit.js): every action, IK on vs the clip,
       // frame by frame. Run it after any change to the horse or rider code.
-      function doAudit() {
+      async function doAudit() {
+        if (D.auditing) return;
         const el = $("audit");
         el.style.display = "block";
         el.textContent = "running motion audit…";
+        const back = { pos: ctrl.pos.clone(), yaw: ctrl.yaw };     // put the horse back where it was after
         D.auditing = true;
-        setTimeout(() => {
-          let rows = [];
-          try { rows = runAudit({ ctrl, rider, HP }); } catch (e) { showErr(e); } finally { D.auditing = false; }
+        let rows = [];
+        try {
+          rows = await runAuditAsync({ ctrl, rider, HP }, { onProgress: (name, i, n) => (el.textContent = `running motion audit… ${i + 1}/${n} · ${name}`) });
+        } catch (e) { showErr(e); } finally {
+          ctrl.pos.copy(back.pos); ctrl.yaw = back.yaw; ctrl.v = 0;
+          D.auditing = false;
+        }
+        {
           console.table(rows);
           const bad = rows.filter((r) => !r.ok);
           el.innerHTML = "";
@@ -328,7 +335,7 @@
             line.textContent = r.ok ? `✓ ${r.action}` : `✗ ${r.action}: ${r.fails.join("; ")}`;
             el.appendChild(line);
           }
-        }, 30);
+        }
       }
 
       window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };

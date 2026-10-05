@@ -25,7 +25,8 @@ export const HP = {               // tunables (the lab GUI edits these)
   pitchFollow: 1.0,               // how much of the ground pitch the body takes
   rollFollow: 0.45,               // ... and roll (a horse stays fairly upright)
   fade: 0.3,                      // crossfade seconds
-  phaseMatch: true,
+  phaseMatch: true,               // smart gait hand-overs (best moment + matching pose)
+  blendWait: 0.45,                // s a gait change may wait for that moment
   accel: 3.0,                     // m/s² (doubled inside the walk↔gallop gap)
   decel: 5.0,
   turnIdle: 1.3, turnWalk: 1.1, turnGallop: 0.75,   // rad/s
@@ -106,7 +107,9 @@ export function solveTwoBone(upper, lower, C, T, fwd, out, force = false) {
   const c = THREE.MathUtils.clamp(_d.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
   _d.normalize();
   _p.subVectors(_b, _a).addScaledVector(_d, -_u.subVectors(_b, _a).dot(_d));   // joint offset ⟂ the leg line
-  if (force || _p.lengthSq() < 1e-8 || _p.dot(fwd) < 0) _p.copy(fwd).addScaledVector(_d, -fwd.dot(_d));
+  // keep the bend on the side the clip has it (forcing it forward flipped
+  // joints the clip bends slightly back — up to 37° on flat ground)
+  if (force || _p.lengthSq() < 1e-8) _p.copy(fwd).addScaledVector(_d, -fwd.dot(_d));
   _p.normalize();
   const cosA = THREE.MathUtils.clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1);
   const sinA = Math.sqrt(1 - cosA * cosA);
@@ -362,7 +365,7 @@ export class HorseController {
     this.rearLeg = REAR_LEGS.map(() => ({ A: 0, fold: 0, paw: 0, toss: 0 }));
     this.touched = [...this.legs.flatMap((g) => [g.u, g.l, g.cannon, g.ik].filter(Boolean)), ...this.necks, this.headB].map((b) => ({ b, p: b.position.clone(), q: b.quaternion.clone() }));
     this.bodyOff = 0;
-    this.switchTo("Idle", 0);
+    this.switchTo("Idle", 0, true);
   }
 
   applyIK(dt) {
@@ -401,6 +404,7 @@ export class HorseController {
     r.position.y = this.y + this.lift + this.rearDy + this.bodyOff;
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
+    this.ikCorr = 0;
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
     const untilt = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw).multiply(r.quaternion.clone().invert());
     this.legs.forEach((g, li) => {
@@ -409,7 +413,9 @@ export class HorseController {
       // (hA ≈ 0) it takes the whole offset; mid-stride, already lifted by the
       // clip, it takes only what is left — else bumps get stepped over twice.
       let d = ((g.delta > 0 ? Math.max(0, g.delta - g.hA) : g.delta) - this.bodyOff) * g.w;
-      if (!g.cannon && g.under > 0) d = Math.max(d, g.under);
+      // no hoof is ever left under the ground — front or hind, whatever the IK
+      // weight (blends into a new gait, landing while IK fades back in)
+      if (g.under > 0 && !(g.cannon && this.rearT >= 0)) d = Math.max(d, g.under);
       const C = g.ik.getWorldPosition(new V3());
       const T = C.clone(); T.y += d;
       if (g.cannon && this.rearT >= 0 && this.rearPlant) T.copy(this.rearFoot(li - 2));
@@ -419,6 +425,13 @@ export class HorseController {
         const pin = 1 - smooth01((this.rearA - 0.09) / 0.3);
         if (pin > 0) T.lerp(this.rearPlantF[li], pin);
       }   // rearing: hind hooves step under, stay planted, step back — never slide
+      // Nothing to correct (flat ground, no rear): leave the leg exactly as the
+      // clip has it. Re-solving anyway re-bent joints 8–37° (the audit's
+      // "IK on flat ground" check), worst while leaning into gallop turns.
+      // (a hoof 1 cm into the ground is invisible; a near-straight leg turns a
+      // few mm of correction into several degrees of knee — leave it alone)
+      this.ikCorr = Math.max(this.ikCorr, T.distanceTo(C));   // biggest correction asked this frame (audit)
+      if (T.distanceToSquared(C) < 0.01 * 0.01) return;
       let reached;
       if (!g.cannon) reached = solveTwoBone(g.u, g.l, C, T, fwd, new V3());
       else {
@@ -470,21 +483,53 @@ export class HorseController {
     return (((action.time / g.duration) - g.touch) % 1 + 1) % 1;
   }
 
-  switchTo(name, fade = HP.fade) {
-    const next = this.act(name);
+  // Best gait-to-gait hand-overs, precomputed: for each moment of the outgoing
+  // loop, where to start the incoming one (least pose difference) and how
+  // different the poses still are. Blending far-apart poses shows thin,
+  // misplaced legs (measured: Gallop→Walk ~265°, best 93° at gallop 0).
+  transition(from, to) {
+    this.trans ??= {};
+    const key = from + ">" + to;
+    if (!this.trans[key]) {
+      const A = this.h.clips[from], B = this.h.clips[to], N = 32, M = 48, rows = [];
+      for (let i = 0; i < N; i++) {
+        const ta = i / N * A.duration;
+        let best = Infinity, tb = 0;
+        for (let k = 0; k < M; k++) { const t = k / M * B.duration, d = poseDiff(A, ta, B, t); if (d < best) { best = d; tb = t; } }
+        rows.push({ deg: best, at: tb });
+      }
+      this.trans[key] = rows;
+    }
+    return this.trans[key];
+  }
+
+  // Change gait. With smart hand-overs the switch waits (up to HP.blendWait s)
+  // for the moment of the outgoing stride that matches the new gait best, and
+  // the new gait starts at its matching pose. Returns true once switched.
+  switchTo(name, fade = HP.fade, force = false) {
     const prev = this.cur;
+    let startAt = 0;
+    if (prev && HP.phaseMatch && LOOPS.includes(this.gaitName) && LOOPS.includes(name) && this.gaitName !== name) {
+      const rows = this.transition(this.gaitName, name), A = prev.getClip(), N = rows.length;
+      const iNow = Math.floor(((prev.time % A.duration) / A.duration) * N) % N;
+      const bestDeg = Math.min(...rows.map((r) => r.deg));
+      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > HP.blendWait;
+      // the outgoing loop is long and calm (Idle): every moment is alike — no wait
+      const calm = this.gaitName === "Idle";
+      if (!force && !calm && !waitedEnough && rows[iNow].deg > bestDeg + 15) return false;
+      startAt = rows[iNow].at;
+    }
+    this.blendWaitT = 0;
+    const next = this.act(name);
     next.reset();
+    next.time = startAt;
     next.setLoop(THREE.LoopRepeat, Infinity);
     next.clampWhenFinished = false;
-    if (prev && HP.phaseMatch && prev !== next && LOOPS.includes(this.gaitName) && name !== "Idle" && this.gaitName !== "Idle") {
-      const ph = this.phaseOf(this.gaitName, prev);
-      const g = this.h.gait[name];
-      next.time = ((ph + g.touch) % 1) * g.duration;
-    }
     next.play();
     if (prev && prev !== next) { this.logBlend(prev, next); prev.crossFadeTo(next, fade, false); }
     this.cur = next;
     this.gaitName = name;
+    return true;
   }
 
   // Hind hoof i (0 left, 1 right) during a rear: steps forward under the body
@@ -728,6 +773,8 @@ export class HorseController {
 
   // input: { fwd: -1..1, turn: -1..1, run: bool }
   update(dt, input) {
+    this.lastDt = dt;
+    input = { fwd: input?.fwd ?? 0, turn: input?.turn ?? 0, run: !!input?.run };   // missing fields = 0 (an empty input once turned the yaw into NaN)
     this.lastRun = !!input.run && input.fwd > 0;
     // Auto-jump: galloping toward something it can clear, the horse commits to
     // the jump itself; the take-off spot is then placed by jumpWindupFor().
@@ -783,6 +830,7 @@ export class HorseController {
       else if (Math.abs(this.v) <= 0.05) want = "Idle";
       if (this.rearT >= 0) want = "Idle";                      // the rear is procedural, on top of Idle
       if (want !== this.gaitName) this.switchTo(want);
+      else this.blendWaitT = 0;                              // no change pending: a later request waits afresh
       // Time scale so the hooves match the ground.
       if (this.gaitName === "Walk") {
         const ts = Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV;

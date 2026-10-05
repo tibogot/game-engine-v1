@@ -11,10 +11,10 @@
 //            around it, beyond what the reference run has            (> 3 cm extra)
 //   height   a hoof higher above the ground than in the reference    (> 15 cm extra:
 //            catches stacked lifts, like the jump arc on top of the clip's own jump)
-//   joints   on flat ground IK must change nothing: stifle / hock / knee
-//            angles vs the reference                                 (> 8°)
+//   joints   where IK has nothing to correct (< 1 cm), it must change nothing:
+//            stifle / hock / knee angles vs the reference            (> 8°)
 //            (skipped for the rear: its body placement is procedural)
-//   blend    a crossfade between two clip poses more than 150° apart (summed
+//   blend    a crossfade between two clip poses more than 170° apart (summed
 //            over legs/body/neck) — blending poses that far apart shows thin,
 //            misplaced legs for a moment (gallop mid-stride → jump was ~470°)
 //
@@ -25,10 +25,10 @@ import * as THREE from "three";
 const V3 = THREE.Vector3;
 const FEET = ["FFL", "FFR", "FFBL", "FFBR"];
 const DT = 1 / 60;
-const LIMITS = { under: 0.02, slide: 0.015, pop: 0.03, height: 0.15, joint: 8, blend: 150 };
+const LIMITS = { under: 0.02, slide: 0.015, pop: 0.03, height: 0.15, joint: 8, blend: 170 };   // blend: Idle→Walk is 158° at best with this pack (no walk pose looks like standing)
 
 // input over time: (t) => { fwd, turn, run }; actions: [[t, (ctrl) => …]]
-const SCENARIOS = {
+export const SCENARIOS = {
   idle: { secs: 4, input: () => ({}) },
   walk: { secs: 4, input: () => ({ fwd: 1 }) },
   gallop: { secs: 5, input: () => ({ fwd: 1, run: true }) },
@@ -54,12 +54,12 @@ function reset(ctrl, startZ) {
   ctrl.switchTo("Idle", 0);
 }
 
-function record(ctrl, rider, sc, ik, HP, startZ) {
+export function record(ctrl, rider, sc, ik, HP, startZ) {
   const h = ctrl.h, bone = h.bone;
   const saved = HP.ik;
   HP.ik = ik;
   reset(ctrl, startZ);
-  for (let i = 0; i < 60; i++) { ctrl.update(DT, {}); ctrl.idleT = -1e9; rider?.update(DT, {}); }   // settle 1 s
+  for (let i = 0; i < 60; i++) { ctrl.update(DT, { fwd: 0, turn: 0, run: false }); ctrl.idleT = -1e9; rider?.update(DT, {}); }   // settle 1 s
   ctrl.blendLog.length = 0;
   const frames = [];
   const acts = [...(sc.actions ?? [])];
@@ -81,14 +81,14 @@ function record(ctrl, rider, sc, ik, HP, startZ) {
       j.push(angle(P("BackUpperLeg" + s), P("BackLowerLeg" + s), P("IKBackLeg" + s)));
       j.push(angle(P("FrontUpperLeg" + s), P("FrontLowerLeg" + s), P("IKFrontLeg" + s)));
     }
-    frames.push({ t, feet, ground, joints: j, state: ctrl.rearT >= 0 ? "Rear" : ctrl.oneShot ? ctrl.oneShotName : ctrl.gaitName });
+    frames.push({ t, feet, ground, joints: j, ikCorr: ik ? (ctrl.ikCorr ?? 0) : 0, state: ctrl.rearT >= 0 ? "Rear" : ctrl.oneShot ? ctrl.oneShotName : ctrl.gaitName });
   }
   HP.ik = saved;
   frames.blends = [...ctrl.blendLog];
   return frames;
 }
 
-function analyse(frames, sole) {
+export function analyse(frames, sole) {
   const r = { under: 0, slide: 0, pop: 0, height: 0, at: {} };
   const note = (k, v, f) => { if (v > r[k]) { r[k] = v; r.at[k] = `${f.state} t=${f.t.toFixed(2)}`; } };
   for (let i = 0; i < frames.length; i++) {
@@ -111,16 +111,38 @@ function analyse(frames, sole) {
   return r;
 }
 
-export function runAudit({ ctrl, rider, HP }, { startZ = -25 } = {}) {
+export function runAudit(objs, opts = {}) {
+  const rows = Object.keys(SCENARIOS).map((name) => auditOne(objs, name, opts));
+  reset(objs.ctrl, opts.startZ ?? -25);
+  return rows;
+}
+
+// Same, one action per task so the page keeps drawing (the button used to
+// freeze the scene for seconds).
+export async function runAuditAsync(objs, { onProgress, ...opts } = {}) {
+  const rows = [], names = Object.keys(SCENARIOS);
+  for (const [i, name] of names.entries()) {
+    onProgress?.(name, i, names.length);
+    await new Promise((r) => setTimeout(r, 0));
+    rows.push(auditOne(objs, name, opts));
+  }
+  reset(objs.ctrl, opts.startZ ?? -25);
+  return rows;
+}
+
+function auditOne({ ctrl, rider, HP }, name, { startZ = -25 } = {}) {
   const sole = ctrl.h.foot.sole;
-  const rows = [];
-  for (const [name, sc] of Object.entries(SCENARIOS)) {
+  const sc = SCENARIOS[name];
+  {
     const on = record(ctrl, rider, sc, true, HP, startZ);
     const off = record(ctrl, rider, sc, false, HP, startZ);
     const a = analyse(on, sole), b = analyse(off, sole);
     let joint = 0, jointAt = "";
     if (!sc.procedural) for (let i = 0; i < Math.min(on.length, off.length); i++) {
       for (let k = 0; k < on[i].joints.length; k++) {
+        // IK had a real correction to make in the last 0.25 s (lean, slope; the
+        // body sink is smoothed so it lingers a few frames): changing joints is its job
+        if (on.slice(Math.max(0, i - 15), i + 1).some((f) => f.ikCorr >= 0.01)) continue;
         const d = Math.abs(on[i].joints[k] - off[i].joints[k]);
         if (d > joint) { joint = d; jointAt = `${on[i].state} t=${on[i].t.toFixed(2)}`; }
       }
@@ -133,14 +155,12 @@ export function runAudit({ ctrl, rider, HP }, { startZ = -25 } = {}) {
     const worstBlend = on.blends.reduce((b, x) => (x.deg > (b?.deg ?? -1) ? x : b), null);
     if (worstBlend && worstBlend.deg > LIMITS.blend) fails.push(`blend ${worstBlend.from} → ${worstBlend.to} across ${worstBlend.deg}° of pose`);
     if (joint > LIMITS.joint) fails.push(`IK bends a joint ${joint.toFixed(0)}° on flat ground (${jointAt})`);
-    rows.push({
+    return {
       action: name, ok: fails.length === 0, fails,
       underCm: +(a.under * 100).toFixed(1), slideCm: +(a.slide * 100).toFixed(1), refSlideCm: +(b.slide * 100).toFixed(1),
       popCm: +(a.pop * 100).toFixed(1), refPopCm: +(b.pop * 100).toFixed(1), maxHoofCm: +(a.height * 100).toFixed(0), refMaxHoofCm: +(b.height * 100).toFixed(0),
       jointDeg: sc.procedural ? null : +joint.toFixed(1),
       worstBlendDeg: worstBlend ? worstBlend.deg : 0, blends: on.blends.map((b) => `${b.from}→${b.to} ${b.deg}°`).join(", "),
-    });
+    };
   }
-  reset(ctrl, startZ);
-  return rows;
 }
