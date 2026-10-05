@@ -22,6 +22,7 @@ import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 import { rotateWorld, solveTwoBone } from "./horse.js";
 import { Rein } from "./reins.js";
+import { MountSystem } from "./mount.js";
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -90,6 +91,83 @@ export async function loadRider(url, { height = 1.78 } = {}) {
 
 const wpos = (o) => o.getWorldPosition(new V3());
 
+// ── Leg IK with the twist controlled ────────────────────────────────────────
+// Aiming each bone at the next point (shortest-arc rotation) leaves its spin
+// round its own axis to chance: the thigh rotated at the hip while the knee
+// still landed in the right place (user: 'a complete hip rotation'). Here each
+// bone gets a FULL orientation: its axis along the limb AND its front (the
+// kneecap, measured in the rest pose) turned toward the way the knee bends.
+const _m1 = new THREE.Matrix4(), _m2 = new THREE.Matrix4(), _qa = new THREE.Quaternion(), _qp2 = new THREE.Quaternion();
+function basis(m, axis, front) {
+  const f = front.clone().addScaledVector(axis, -front.dot(axis)).normalize();
+  const sd = new V3().crossVectors(axis, f);
+  return m.makeBasis(axis, f, sd);
+}
+function setBoneWorld(bone, axisL, frontL, axisW, frontW) {
+  basis(_m1, axisL, frontL); basis(_m2, axisW, frontW);
+  const qW = _qa.setFromRotationMatrix(_m2.multiply(_m1.transpose()));
+  bone.parent.getWorldQuaternion(_qp2);
+  bone.quaternion.copy(_qp2.invert().multiply(qW));
+  bone.updateMatrixWorld(true);
+}
+// leg = { u: thigh, l: calf, tip: foot, axU, frU, axL, frL } (local axes from the rest pose)
+export function solveLeg(leg, target, pole) {
+  const H = wpos(leg.u), K0 = wpos(leg.l), F0 = wpos(leg.tip);
+  const a = H.distanceTo(K0), b = K0.distanceTo(F0);
+  const d = target.clone().sub(H);
+  const c = clamp(d.length(), Math.abs(a - b) + 1e-3, a + b - 1e-3);
+  d.normalize();
+  const p = pole.clone().addScaledVector(d, -pole.dot(d));
+  if (p.lengthSq() < 1e-8) p.set(0, 0, 1);
+  p.normalize();
+  const cosA = clamp((a * a + c * c - b * b) / (2 * a * c), -1, 1), sinA = Math.sqrt(1 - cosA * cosA);
+  const K = H.clone().addScaledVector(d, cosA * a).addScaledVector(p, sinA * a);
+  const F = H.clone().addScaledVector(d, c);
+  const ax1 = K.clone().sub(H).normalize(), ax2 = F.clone().sub(K).normalize();
+  setBoneWorld(leg.u, leg.axU, leg.frU, ax1, p);   // kneecap toward the bend
+  setBoneWorld(leg.l, leg.axL, leg.frL, ax2, p);   // shin front the same way
+  return F;
+}
+// measured in the REST pose (constructor, before any animation): bone axis =
+// direction to the child, front = the character's forward, both in bone space
+function legAxes(leg, fwdW) {
+  const ql = leg.u.getWorldQuaternion(new THREE.Quaternion()).invert(), qc = leg.l.getWorldQuaternion(new THREE.Quaternion()).invert();
+  leg.axU = leg.l.position.clone().normalize();
+  leg.frU = fwdW.clone().applyQuaternion(ql).normalize();
+  leg.axL = leg.tip.position.clone().normalize();
+  leg.frL = fwdW.clone().applyQuaternion(qc).normalize();
+}
+// Hip rotation round the thigh axis compared with the skeleton's BIND pose
+// (swing-twist), degrees — independent of the IK (a natural hip stays within
+// about ±45°). This is the check that catches 'the hip spins'; the kneecap-vs-
+// bend check below cannot, because the solver aims the kneecap itself.
+export function hipTwistDeg(rd, legIndex) {
+  const Q = THREE.Quaternion;
+  if (!rd._bindRel) {
+    let skin = null; rd.r.model.traverse((o) => { if (o.isSkinnedMesh && !skin) skin = o; });
+    const sk = skin.skeleton;
+    const bindQ = (bone) => { const m = sk.boneInverses[sk.bones.indexOf(bone)].clone().invert(); const q = new Q(); m.decompose(new V3(), q, new V3()); return q; };
+    rd._bindRel = rd.B.legs.map((g) => bindQ(rd.B.pelvis).invert().multiply(bindQ(g.u)));
+  }
+  const g = rd.B.legs[legIndex];
+  const rel = rd.B.pelvis.getWorldQuaternion(new Q()).invert().multiply(g.u.getWorldQuaternion(new Q()));
+  const delta = rel.clone().multiply(rd._bindRel[legIndex].clone().invert());
+  const axis = g.axU.clone().applyQuaternion(rel).normalize();
+  const proj = axis.multiplyScalar(new V3(delta.x, delta.y, delta.z).dot(axis));
+  const tw = new Q(proj.x, proj.y, proj.z, delta.w).normalize();
+  return 2 * Math.acos(Math.min(1, Math.abs(tw.w))) * 180 / Math.PI;
+}
+
+// how far a leg's kneecap is turned away from its bend direction (degrees)
+export function legTwistDeg(leg) {
+  const H = wpos(leg.u), K = wpos(leg.l), F = wpos(leg.tip);
+  const d = F.clone().sub(H).normalize();
+  const bend = K.clone().sub(H).addScaledVector(d, -K.clone().sub(H).dot(d));
+  if (bend.length() < 0.02) return 0;                      // straight leg: any twist reads as straight
+  const front = leg.frU.clone().applyQuaternion(leg.u.getWorldQuaternion(new THREE.Quaternion()));
+  return front.addScaledVector(d, -front.dot(d)).angleTo(bend) * 180 / Math.PI;
+}
+
 // Push a point out of oval capsules (same shapes the reins collide with), plus a margin.
 function pushOut(p, caps, margin) {
   const ab = new V3(), d = new V3(), vt = new V3();
@@ -137,7 +215,8 @@ export class RiderController {
 
     this.mixer = new THREE.AnimationMixer(r.model);
     const sit = r.clips.Sitting_Idle_Loop_Armature ?? r.clips.Sitting_Idle_Loop;
-    this.mixer.clipAction(sit).play();
+    this.sitAction = this.mixer.clipAction(sit);
+    this.sitAction.play();
 
     // Saddle frame + bit rings, attached to horse bones at their idle placement.
     const hr = horseCtrl.h.rig;
@@ -190,6 +269,42 @@ export class RiderController {
     this.RI = { side: 13, loop: 14 };
     this.rein = new Rein(scene, { n: this.RI.side * 2 + this.RI.loop + 3 });   // 13 + fist + 14 + fist + 13 segments
     this.reins = [this.rein];
+    // on foot / mounting / dismounting (mount.js)
+    // rest-pose leg axes for the twist-controlled leg IK (before any animation runs)
+    r.rig.updateMatrixWorld(true);
+    const fwdRest = new V3(0, 0, 1).applyQuaternion(r.rig.getWorldQuaternion(new THREE.Quaternion()));
+    for (const g of this.B.legs) legAxes(g, fwdRest);
+    this.mountSys = new MountSystem(this);
+  }
+
+  get mode() { return this.mountSys.mode; }
+
+  // Horse collision shapes for hands + reins (withers, neck, head to the mouth).
+  neckCaps() {
+    const hc = this.hc;
+    const hUp = new V3(0, 1, 0).applyQuaternion(hc.h.rig.quaternion), hLat = new V3(1, 0, 0).applyQuaternion(hc.h.rig.quaternion);
+    const pts = this.neckDef.map((d) => wpos(d.bone).addScaledVector(hUp, d.up * this.k));
+    const neck = [];
+    for (let i = 0; i < pts.length - 1; i++) neck.push({ a: pts[i], b: pts[i + 1], lat: hLat, ra: this.neckDef[i].r.map((x) => x * this.k), rb: this.neckDef[i + 1].r.map((x) => x * this.k) });
+    const mouth = wpos(this.bits[0]).add(wpos(this.bits[1])).multiplyScalar(0.5);
+    const poll = wpos(hc.h.bone("Head"));
+    const hd = mouth.clone().sub(poll).normalize(), down = new V3().crossVectors(hLat, hd).normalize();
+    const jaw = poll.clone().addScaledVector(down, 0.15 * this.k).addScaledVector(hd, 0.04 * this.k);
+    neck.push({ a: jaw, b: mouth, lat: hLat, ra: [0.15 * this.k, 0.15 * this.k], rb: [0.075 * this.k, 0.08 * this.k] });
+    return neck;
+  }
+
+  // Not riding: the reins lie on the neck, their loop resting on the withers.
+  restReins(dt) {
+    const S = this.saddle, k = this.k, n = this.rein.n;
+    const { side: S1, loop: L1 } = this.RI;
+    const iLp = S1, iLt = S1 + 1, iRt = iLt + L1, iRp = iRt + 1;
+    const w = (x, z) => S.localToWorld(new V3(x * k, 0.17, z * k));
+    const pins = [[0, wpos(this.bits[0])], [iLp, w(0.13, 0.5)], [iLt, w(0.1, 0.46)], [iRt, w(-0.1, 0.46)], [iRp, w(-0.13, 0.5)], [n - 1, wpos(this.bits[1])]];
+    const seg = new Float32Array(n - 1);
+    const lenL = pins[0][1].distanceTo(pins[1][1]) * 1.12, lenR = pins[5][1].distanceTo(pins[4][1]) * 1.12, loop = 0.2 + RP.reinLoop;
+    for (let i = 0; i < n - 1; i++) seg[i] = i < iLp ? lenL / S1 : (i === iLp || i === iRt) ? 0.07 : i < iRt ? loop / L1 : lenR / S1;
+    this.rein.step(dt, pins, seg, this.neckCaps());
   }
 
   setVisible(v) {
@@ -212,8 +327,9 @@ export class RiderController {
     return "idle";
   }
 
-  update(dt, { lookYaw = 0 } = {}) {
+  update(dt, { lookYaw = 0, input = {} } = {}) {
     if (!this.r.rig.visible) return;
+    if (this.mountSys.update(dt, { fwd: input.fwd ?? 0, turn: input.turn ?? 0, run: !!input.run })) return;   // on foot / mounting
     const hc = this.hc, B = this.B, rig = this.r.rig;
     // Restore what the ANIMATION wrote last frame (not the rest pose): the
     // mixer skips a bone whose animated value did not change since its last
@@ -290,7 +406,7 @@ export class RiderController {
     for (const g of B.legs) {
       const T = S.localToWorld(new V3(g.side * RP.stirrupWidth * this.k / 1.07, -P.stirrupDrop * this.k / 1.07, P.stirrupFwd));
       const pole = fwd.clone().multiplyScalar(0.85).addScaledVector(lft, g.side * 0.55).normalize();
-      solveTwoBone(g.u, g.l, wpos(g.tip), T, pole, new V3(), true);
+      solveLeg(g, T, pole);
     }
 
     // Horse collision for hands + reins: oval sections along the withers and
@@ -343,6 +459,9 @@ export class RiderController {
     // Fists
     for (const hd of this.hands) for (const c of hd.curl) c.b.quaternion.multiply(q.setFromAxisAngle(c.axis, c.angle * RP.grip));
     rig.updateMatrixWorld(true);
+    // just sat down: blend away from the mount's last pose
+    if (this.pendingBlend) { this.mountSys.blend = { snap: this.pendingBlend, t: 0, dur: 0.35 }; this.pendingBlend = null; }
+    this.mountSys.applyBlend(dt);
 
     // Reins (rope physics), fist → bit ring, the inside rein shortened
     // Through each fist: the strap enters on the little-finger side (from the

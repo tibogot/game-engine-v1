@@ -33,6 +33,7 @@
       <div>Move — <b>W A S D</b> (Z Q S D on AZERTY) or arrows</div>
       <div>Speed — tap <b>Shift</b> = faster gear, <b>X</b> = slower · hold <b>Shift</b> = gallop</div>
       <div>Jump — galloping at a fence: automatic · or <b>Space</b></div>
+      <div>Get off / on the horse — <b>F</b> (standing still / next to it)</div>
       <div>Head toss — <b>H</b> · Eat — <b>E</b> · Rear — <b>R</b> · Buck — <b>B</b></div>
       <div>Enable/Disable hoof IK — <b>C</b></div>
       <div>Pause — <b>P</b> · next frame (paused) — <b>N</b></div>
@@ -148,7 +149,7 @@
       // Speed gears: TAP Shift = one gear up, X = one gear down; HOLD Shift
       // (> 0.25 s) = gallop while held. (Not Ctrl for down: Ctrl+W closes the tab.)
       const down = new Set();
-      let shiftDownAt = -1, gearUp = false, gearDown = false;
+      let shiftDownAt = -1, gearUp = false, gearDown = false, note = "", noteT = 0;
       addEventListener("keydown", (e) => {
         down.add(e.code);
         if (e.key === "Shift" && shiftDownAt < 0) shiftDownAt = performance.now();
@@ -161,6 +162,11 @@
         if (k === "e" && Math.abs(ctrl.v) < 0.3) ctrl.playOneShot("Eating");
         if (k === "p") { D.paused = !D.paused; D.step = 0; }      // freeze to inspect a moment
         if ((k === "." || k === "n") && D.paused) D.step++;                    // one frame forward while frozen
+        if (k === "f") {
+          const res = rider.mountSys.toggle();
+          const msg = { moving: "stop the horse first", blocked: "no room to get off on either side", far: "get closer to the horse" }[res];
+          if (msg) { note = msg; noteT = 2.5; }
+        }
         if (k === "r") ctrl.startRear();
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
@@ -201,9 +207,13 @@
       const camRay = new THREE.Raycaster();
       function updateCamera(dt) {
         const side = CAM_MODES[D.camera];
-        if (side !== undefined) camYaw = ctrl.yaw + side;      // locked beside the horse, legs in view
-        else if (Math.abs(ctrl.v) > 0.3 && performance.now() - lastMouse > 1500) camYaw += angDiff(ctrl.yaw, camYaw) * lerpK(1.6, dt);
-        const want = new THREE.Vector3(ctrl.pos.x, ctrl.y + ctrl.lift * 0.6 + (side !== undefined ? 0.9 : 1.8), ctrl.pos.z);
+        // follow whoever is controlled: the horse, or the robot on foot
+        const foot = rider.mode === "ground" || rider.mode === "approach";
+        const M = rider.mountSys;
+        const tgt = foot ? { x: M.gpos.x, y: rider.r.rig.position.y - 0.4, z: M.gpos.z, yaw: M.gyaw, v: M.gv } : { x: ctrl.pos.x, y: ctrl.y + ctrl.lift * 0.6, z: ctrl.pos.z, yaw: ctrl.yaw, v: ctrl.v };
+        if (side !== undefined) camYaw = tgt.yaw + side;      // locked beside the horse, legs in view
+        else if (Math.abs(tgt.v) > 0.3 && performance.now() - lastMouse > 1500) camYaw += angDiff(tgt.yaw, camYaw) * lerpK(1.6, dt);
+        const want = new THREE.Vector3(tgt.x, tgt.y + (side !== undefined ? 0.9 : 1.8), tgt.z);
         camTarget.lerp(want, lerpK(10, dt));
         const pitch = side !== undefined ? 0.06 : camPitch;
         const cp = Math.cos(pitch), sp = Math.sin(pitch);
@@ -294,8 +304,11 @@
           if (D.step > 0) D.step--;
         }
         if (!D.auditing) {                                 // the audit drives the horse itself
-          ctrl.update(dt, input());
-          rider.update(dt, { lookYaw: camYaw });
+          const inp = input();
+          const onHorse = rider.mode === "riding";
+          // on foot the keys move the robot; the horse stands
+          ctrl.update(dt, onHorse ? inp : { fwd: 0, turn: 0, run: false });
+          rider.update(dt, { lookYaw: camYaw, input: onHorse ? {} : inp });
         }
         if (D.probes) {
           ctrl.probes.forEach((p, i) => probes[i].position.copy(p));
@@ -314,11 +327,12 @@
           $("s-slip").textContent = `${(ctrl.slip() * 100).toFixed(0)} %`;
           $("s-tilt").textContent = `${THREE.MathUtils.radToDeg(-ctrl.pitch).toFixed(1)}° / ${THREE.MathUtils.radToDeg(ctrl.roll).toFixed(1)}°`;
           $("s-ik").textContent = HP.ik ? `on · ${(ctrl.bodyOff * 100).toFixed(0)} cm` : "off";
-          $("s-pose").textContent = RP.show ? rider.poseName : "off";
+          $("s-pose").textContent = !RP.show ? "off" : rider.mode === "riding" ? rider.poseName : rider.mode;
+          noteT -= 0.2;
           $("s-zone").textContent = zoneAt(ctrl.pos.x, ctrl.pos.z);
           $("s-draws").textContent = renderer.info.render.drawCalls;
           $("frame").textContent = `Frame: ${msAvg.toFixed(1)} ms`;
-          $("state").textContent = `Current State: ${name}`;
+          $("state").textContent = noteT > 0 ? note : `Current State: ${rider.mode === "riding" ? name : "rider " + rider.mode}`;
         }
       });
 
