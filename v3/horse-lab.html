@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>V3 Lab — Horse Riding (step 1: the horse)</title>
+    <style>
+      body { margin: 0; overflow: hidden; background: #8a9db3; color: #fff;
+             font: 15px/1.55 system-ui, sans-serif; }
+      #controls { position: fixed; top: 10px; left: 12px; z-index: 10; pointer-events: none;
+                  text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+      #controls b { font-weight: 600; }
+      #stats { position: fixed; top: 246px; max-height: 40vh; left: 10px; z-index: 10; min-width: 230px;
+               background: rgba(12,16,20,0.78); border: 1px solid #2c3540; border-radius: 8px;
+               padding: 8px 11px; font-size: 12px; color: #dfe6ea; }
+      #stats .row { display: flex; justify-content: space-between; gap: 14px; }
+      #stats .row b { color: #fff; font-weight: 600; font-variant-numeric: tabular-nums; }
+      #frame { position: fixed; left: 12px; bottom: 8px; z-index: 10; color: #e8692e;
+               font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,.4); }
+      #state { position: fixed; right: 300px; bottom: 8px; z-index: 10;
+               text-shadow: 0 1px 2px rgba(0,0,0,.55); }
+      #loading { position: fixed; inset: 0; display: grid; place-items: center; z-index: 30;
+                 font-size: 18px; text-shadow: 0 1px 3px rgba(0,0,0,.6); pointer-events: none; }
+      #err { color: #ff8c8c; white-space: pre-wrap; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <div id="controls">
+      <div>Controls:</div>
+      <div>Move — <b>W A S D</b> (Z Q S D on AZERTY) or arrows</div>
+      <div>Gallop — move + hold <b>Shift</b></div>
+      <div>Jump — <b>Space</b> while galloping</div>
+      <div>Head toss — <b>H</b> · Eat — <b>E</b> · Rear — <b>R</b> · Buck — <b>B</b></div>
+      <div>Enable/Disable hoof IK — <b>C</b></div>
+      <div>Look around — <b>click</b>, then mouse (Esc to free it)</div>
+      <div>Zoom — mouse wheel</div>
+    </div>
+    <div id="stats">
+      <div class="row"><span>Gait</span><b id="s-gait">—</b></div>
+      <div class="row"><span>Speed</span><b id="s-speed">—</b></div>
+      <div class="row"><span>Hoof slip</span><b id="s-slip">—</b></div>
+      <div class="row"><span>Walk / gallop (measured)</span><b id="s-gaits">—</b></div>
+      <div class="row"><span>Pitch / roll</span><b id="s-tilt">—</b></div>
+      <div class="row"><span>Hoof IK · body drop</span><b id="s-ik">—</b></div>
+      <div class="row"><span>Rider posture</span><b id="s-pose">—</b></div>
+      <div class="row"><span>Surface</span><b id="s-zone">—</b></div>
+      <div class="row"><span>Draw calls</span><b id="s-draws">—</b></div>
+      <div id="err"></div>
+    </div>
+    <div id="frame">Frame: —</div>
+    <div id="state">Current State: —</div>
+    <div id="loading">loading horse…</div>
+
+    <script type="module">
+      // ── Horse lab ────────────────────────────────────────────────────────────
+      // A three.js WebGPU rebuild of the Godot "Horse Riding Simulator" test yard,
+      // made from our own parts. Step 1: the Quaternius horse alone — gaits with
+      // phase-matched crossfades, ground following, slope pitch/roll, blocking.
+      // Next steps (not here yet): hoof IK on the bumps/stairs, neck IK on
+      // slopes, then the rider (the UAL robot), mount/dismount, reins, dust.
+      import * as THREE from "three";
+      import GUI from "./ui/labGui.js";
+      import { buildArena, zoneAt } from "./horse-lab/arena.js";
+      import { loadHorse, HorseController, HP } from "./horse-lab/horse.js";
+      import { loadRider, RiderController, RP } from "./horse-lab/rider.js";
+
+      const $ = (id) => document.getElementById(id);
+      const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
+      addEventListener("error", (e) => showErr(e.error ?? e.message));
+      addEventListener("unhandledrejection", (e) => showErr(e.reason));
+      const lerpK = (rate, dt) => 1 - Math.exp(-rate * dt);
+      const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
+
+      // ── Renderer / scene ─────────────────────────────────────────────────────
+      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+      renderer.setSize(innerWidth, innerHeight);
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.0;
+      renderer.info.autoReset = false;
+      document.body.appendChild(renderer.domElement);
+      await renderer.init();
+
+      const scene = new THREE.Scene();
+      const SKY = new THREE.Color(0x8a9db3);
+      scene.background = SKY;
+      scene.fog = new THREE.Fog(SKY, 110, 280);
+
+      const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
+      scene.add(new THREE.HemisphereLight(0xe2ebff, 0x8c8a80, 1.5));
+      const sun = new THREE.DirectionalLight(0xfff2e0, 2.6);
+      sun.castShadow = true;
+      sun.shadow.mapSize.set(2048, 2048);
+      sun.shadow.bias = -0.0004;
+      sun.shadow.normalBias = 0.03;
+      {
+        const c = sun.shadow.camera;
+        c.left = -24; c.right = 24; c.top = 24; c.bottom = -24; c.near = 1; c.far = 120;
+      }
+      scene.add(sun, sun.target);
+
+      const arena = buildArena(scene);
+
+      // ── Horse ────────────────────────────────────────────────────────────────
+      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: 2.3 });
+      scene.add(horse.rig);
+      // Coat: the pack exports the horse 40% metallic, which renders dark and
+      // muddy without reflections — make it a matte coat, brighter chestnut;
+      // the darker / lighter coat zones follow the chosen colour.
+      const coat = { color: "#b8743d" };
+      const horseMats = {};
+      horse.model.traverse((o) => { if (o.isMesh) { horseMats[o.material.name] = o.material; o.material.metalness = 0; o.material.roughness = 0.78; } });
+      function applyCoat() {
+        const c = new THREE.Color(coat.color);
+        horseMats.Main?.color.copy(c);
+        horseMats.Main_Dark?.color.copy(c).multiplyScalar(0.76);
+        horseMats.Main_Light?.color.copy(c).lerp(new THREE.Color(1, 0.95, 0.85), 0.2);
+      }
+      applyCoat();
+      const ctrl = new HorseController(horse, arena);
+      ctrl.pos.set(0, 0, 2);
+      $("loading").textContent = "loading rider…";
+      const riderData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
+      scene.add(riderData.rig);
+      const rider = new RiderController(riderData, ctrl, scene);
+      $("loading").remove();
+      $("s-gaits").textContent = `${horse.gait.Walk.speed.toFixed(2)} / ${horse.gait.Gallop.speed.toFixed(2)} m/s`;
+      console.log("[horse-lab] horse", { gait: horse.gait, halfLen: horse.halfLen, halfWid: horse.halfWid, scale: horse.scale });
+
+      // Debug: ground probes + skeleton
+      const probeMat = new THREE.MeshBasicMaterial({ color: 0xff3366, depthTest: false });
+      const hitMat = new THREE.MeshBasicMaterial({ color: 0x33ff88, depthTest: false });
+      const hits = [0, 1, 2, 3].map(() => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 8), hitMat); m.renderOrder = 5; m.visible = false; scene.add(m); return m; });
+      const probes = [0, 1, 2, 3].map(() => { const m = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), probeMat); m.renderOrder = 5; m.visible = false; scene.add(m); return m; });
+      let skel = null;
+
+      // ── Input ────────────────────────────────────────────────────────────────
+      // Movement on e.code (physical WASD = ZQSD on AZERTY); actions on e.key.
+      const down = new Set();
+      let shift = false;
+      addEventListener("keydown", (e) => {
+        down.add(e.code); shift = e.shiftKey;
+        if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
+        if (e.repeat) return;
+        if (e.code === "Space" && ctrl.gaitName === "Gallop") ctrl.playOneShot("Gallop_Jump", { holdSpeed: true });
+        const k = e.key.toLowerCase();
+        if (k === "h" && Math.abs(ctrl.v) < 0.3) ctrl.playOneShot("Idle_2");
+        if (k === "e" && Math.abs(ctrl.v) < 0.3) ctrl.playOneShot("Eating");
+        if (k === "r") ctrl.startRear();
+        if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
+        if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
+      });
+      addEventListener("keyup", (e) => { down.delete(e.code); shift = e.shiftKey; });
+      addEventListener("blur", () => { down.clear(); shift = false; });
+      const input = () => ({
+        fwd: (down.has("KeyW") || down.has("ArrowUp") ? 1 : 0) - (down.has("KeyS") || down.has("ArrowDown") ? 1 : 0),
+        turn: (down.has("KeyA") || down.has("ArrowLeft") ? 1 : 0) - (down.has("KeyD") || down.has("ArrowRight") ? 1 : 0),
+        run: shift,
+      });
+
+      // ── Third-person camera ──────────────────────────────────────────────────
+      let camYaw = 0, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
+      const camTarget = new THREE.Vector3(0, 1.8, 2);
+      const canvas = renderer.domElement;
+      canvas.addEventListener("click", () => canvas.requestPointerLock?.());
+      addEventListener("mousemove", (e) => {
+        const locked = document.pointerLockElement === canvas;
+        if (!locked && !(e.buttons & 1)) return;
+        if (!locked && e.target !== canvas) return;
+        camYaw -= e.movementX * 0.0028;
+        camPitch = THREE.MathUtils.clamp(camPitch + e.movementY * 0.0022, -0.1, 1.25);
+        lastMouse = performance.now();
+      });
+      canvas.addEventListener("wheel", (e) => { camDist = THREE.MathUtils.clamp(camDist * (e.deltaY > 0 ? 1.1 : 0.9), 3, 22); }, { passive: true });
+      const camRay = new THREE.Raycaster();
+      function updateCamera(dt) {
+        const side = CAM_MODES[D.camera];
+        if (side !== undefined) camYaw = ctrl.yaw + side;      // locked beside the horse, legs in view
+        else if (Math.abs(ctrl.v) > 0.3 && performance.now() - lastMouse > 1500) camYaw += angDiff(ctrl.yaw, camYaw) * lerpK(1.6, dt);
+        const want = new THREE.Vector3(ctrl.pos.x, ctrl.y + ctrl.lift * 0.6 + (side !== undefined ? 0.9 : 1.8), ctrl.pos.z);
+        camTarget.lerp(want, lerpK(10, dt));
+        const pitch = side !== undefined ? 0.06 : camPitch;
+        const cp = Math.cos(pitch), sp = Math.sin(pitch);
+        camera.position.set(
+          camTarget.x - Math.sin(camYaw) * cp * camDist,
+          camTarget.y + sp * camDist,
+          camTarget.z - Math.cos(camYaw) * cp * camDist,
+        );
+        camRay.set(new THREE.Vector3(camera.position.x, 60, camera.position.z), new THREE.Vector3(0, -1, 0));
+        const g = camRay.intersectObjects(arena.ground, false)[0];
+        if (g) camera.position.y = Math.max(camera.position.y, g.point.y + 0.4);
+        camera.lookAt(camTarget);
+        sun.position.set(camTarget.x + 22, camTarget.y + 34, camTarget.z + 14);
+        sun.target.position.copy(camTarget);
+      }
+
+      // ── GUI ──────────────────────────────────────────────────────────────────
+      const D = { timeScale: 1, skeleton: false, probes: false, camera: "follow" };
+      const CAM_MODES = { "left side": -Math.PI / 2, "right side": Math.PI / 2, front: Math.PI };
+      const gui = new GUI({ title: "Horse lab" });
+      const lookF = gui.addFolder("Horse look");
+      lookF.addColor(coat, "color").name("coat colour").onChange(applyCoat);
+      const body = gui.addFolder("Body on the ground");
+      body.add(HP, "pitchFollow", 0, 1, 0.01).name("pitch follows slope");
+      body.add(HP, "rollFollow", 0, 1, 0.01).name("roll follows slope");
+      body.add(HP, "lean", 0, 0.3, 0.01).name("lean into turns");
+      body.add(HP, "stepMax", 0.2, 1.5, 0.01).name("max step up (m)");
+      const rF = gui.addFolder("Rider");
+      rF.add(RP, "show").name("rider on the horse").onChange((v) => rider.setVisible(v));
+      rF.add(RP, "seatSpring", 40, 600, 1).name("seat spring");
+      rF.add(RP, "seatDamp", 0.1, 1.5, 0.01).name("seat damping");
+      rF.add(RP, "absorb", 0, 1, 0.01).name("spine absorbs rocking");
+      rF.add(RP, "upright", 0, 1, 0.01).name("stay upright on slopes");
+      rF.add(RP, "pelvisUp", -0.05, 0.25, 0.005).name("seat height");
+      rF.add(RP, "stirrupWidth", 0.2, 0.6, 0.005).name("stirrup width");
+      rF.add(RP, "grip", 0, 1.3, 0.01).name("fist grip");
+      rF.add(RP, "handFwd", -0.2, 0.2, 0.005).name("hands forward +");
+      rF.add(RP, "handUp", -0.2, 0.2, 0.005).name("hands up +");
+      rF.add(RP, "bitFollow", 0, 1, 0.01).name("hands follow the mouth");
+      rF.add(RP, "steerHands", 0, 2, 0.01).name("hands steer");
+      rF.add(RP, "reinSlack", 0.95, 1.4, 0.005).name("rein length");
+      rF.add(RP, "reinLoop", 0.1, 1.2, 0.01).name("rein loop between hands (m)");
+      rF.add(RP, "headFollow", 0, 1, 0.01).name("rider looks at camera");
+      const ikF = gui.addFolder("Hoof IK + neck");
+      const ikCtl = ikF.add(HP, "ik").name("hoof IK (C)");
+      ikF.add(HP, "maxDrop", 0, 0.6, 0.01).name("max body drop (m)");
+      ikF.add(HP, "maxLift", 0, 0.8, 0.01).name("max hoof lift (m)");
+      ikF.add(HP, "neckLevel", 0, 1, 0.01).name("neck levels head on slopes");
+      ikF.add(HP, "headTurn", 0, 1, 0.01).name("head turns into turns (rad)");
+      ikF.add(HP, "jumpHeight", 0.2, 1.6, 0.01).name("jump height (m)");
+      ikF.add(HP, "rearAngle", 0.3, 1.3, 0.01).name("rear angle (rad)");
+      ikF.add(HP, "rearHold", 0.2, 3, 0.05).name("rear hold (s)");
+      const gaits = gui.addFolder("Gaits");
+      gaits.add(HP, "phaseMatch").name("phase-matched switch");
+      gaits.add(HP, "fade", 0.05, 0.8, 0.01).name("crossfade (s)");
+      gaits.add(HP, "accel", 0.5, 8, 0.1).name("accel (m/s²)");
+      gaits.add(HP, "decel", 0.5, 12, 0.1).name("decel (m/s²)");
+      gaits.add(HP, "turnWalk", 0.3, 2.5, 0.05).name("turn walk (rad/s)");
+      gaits.add(HP, "turnGallop", 0.3, 2.5, 0.05).name("turn gallop (rad/s)");
+      const dbg = gui.addFolder("Debug");
+      dbg.add(D, "camera", ["follow", "left side", "right side", "front"]).name("camera");
+      dbg.add(D, "timeScale", 0.05, 1.5, 0.01).name("time scale");
+      dbg.add(D, "skeleton").name("show skeleton").onChange((v) => {
+        if (skel) { scene.remove(skel); skel.dispose?.(); skel = null; }
+        if (v) { skel = new THREE.SkeletonHelper(horse.model); scene.add(skel); }
+      });
+      dbg.add(D, "probes").name("show ground probes").onChange((v) => [...probes, ...hits].forEach((p) => (p.visible = v)));
+
+      // ── Loop ─────────────────────────────────────────────────────────────────
+      addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+      const timer = new THREE.Timer();
+      let msAvg = 16, hudT = 0;
+      renderer.setAnimationLoop((now) => {
+        timer.update(now);
+        const rawDt = Math.min(timer.getDelta(), 0.1);
+        msAvg += (rawDt * 1000 - msAvg) * 0.05;
+        const dt = rawDt * D.timeScale;
+        ctrl.update(dt, input());
+        rider.update(dt, { lookYaw: camYaw });
+        if (D.probes) {
+          ctrl.probes.forEach((p, i) => probes[i].position.copy(p));
+          ctrl.legs.forEach((g, i) => { hits[i].position.copy(g.hit); hits[i].visible = g.on && HP.ik; });
+        }
+        updateCamera(rawDt);
+        renderer.info.reset();
+        renderer.render(scene, camera);
+        hudT += rawDt;
+        if (hudT > 0.2) {
+          hudT = 0;
+          const name = ctrl.rearT >= 0 ? "Rear" : ctrl.oneShot ? ctrl.oneShotName : ctrl.gaitName;
+          $("s-gait").textContent = name + (ctrl.blocked ? " (blocked)" : "");
+          $("s-speed").textContent = `${ctrl.v.toFixed(2)} m/s`;
+          $("s-slip").textContent = `${(ctrl.slip() * 100).toFixed(0)} %`;
+          $("s-tilt").textContent = `${THREE.MathUtils.radToDeg(-ctrl.pitch).toFixed(1)}° / ${THREE.MathUtils.radToDeg(ctrl.roll).toFixed(1)}°`;
+          $("s-ik").textContent = HP.ik ? `on · ${(ctrl.bodyOff * 100).toFixed(0)} cm` : "off";
+          $("s-pose").textContent = RP.show ? rider.poseName : "off";
+          $("s-zone").textContent = zoneAt(ctrl.pos.x, ctrl.pos.z);
+          $("s-draws").textContent = renderer.info.render.drawCalls;
+          $("frame").textContent = `Frame: ${msAvg.toFixed(1)} ms`;
+          $("state").textContent = `Current State: ${name}`;
+        }
+      });
+
+      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, RP, arena, HP, D, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+    </script>
+  </body>
+</html>
