@@ -41,6 +41,7 @@ export const RP = {
   handFwd: 0, handUp: 0,   // offsets on top of the posture
   headFollow: 0,       // 1 = the rider looks where the camera looks (his option); 0 = ahead + into turns
   reinSlack: 1.06,     // rein length ÷ hand-to-bit distance at rest
+  posting: 0.075,      // m the rider rises at the trot (once per stride)
   reinLoop: 0.55,      // m of rein hanging between the fists (the closed loop over the withers)
   show: true,
 };
@@ -49,6 +50,8 @@ export const RP = {
 const POSES = {
   idle:   { lean: -0.04, seatUp: 0,    handFwd: 0.25, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.50, stirrupFwd: 0.12, slack: 1.0 },
   walk:   { lean: 0.03,  seatUp: 0,    handFwd: 0.26, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.50, stirrupFwd: 0.10, slack: 1.0 },
+  trot:   { lean: 0.12,  seatUp: 0.01, handFwd: 0.28, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.47, stirrupFwd: 0.08, slack: 1.0 },
+  canter: { lean: 0.22,  seatUp: 0.03, handFwd: 0.32, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.46, stirrupFwd: 0.06, slack: 0.98 },
   gallop: { lean: 0.42,  seatUp: 0.07, handFwd: 0.38, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.43, stirrupFwd: 0.04, slack: 0.97 },
   jump:   { lean: 0.75,  seatUp: 0.14, handFwd: 0.50, handUp: 0.33, handApart: 0.12,  stirrupDrop: 0.42, stirrupFwd: 0.0,  slack: 1.05 },
   eat:    { lean: 0.12,  seatUp: 0,    handFwd: 0.42, handUp: 0.24, handApart: 0.11,  stirrupDrop: 0.50, stirrupFwd: 0.12, slack: 1.6 },
@@ -203,6 +206,8 @@ export class RiderController {
       if (hc.oneShotName === "Attack_Kick") return "buck";
     }
     if (hc.gaitName === "Gallop") return "gallop";
+    if (hc.gaitName === "Canter") return "canter";
+    if (hc.gaitName === "Trot") return "trot";
     if (hc.gaitName === "Walk") return hc.v < -0.05 ? "back" : "walk";
     return "idle";
   }
@@ -251,7 +256,17 @@ export class RiderController {
     rig.quaternion.copy(sq);
     rig.position.set(0, 0, 0);
     rig.updateMatrixWorld(true);
-    const seat = new V3(anchor.x, this.seatY, anchor.z).addScaledVector(up, RP.pelvisUp + P.seatUp);
+    // Posting trot: rise once per stride with one diagonal, sit on the other
+    // (follows the trot action's own clock, faded with its blend weight).
+    let post = 0;
+    const trotA = hc.actions.Trot;
+    if (trotA && trotA.getEffectiveWeight() > 0.01) {
+      const clip = trotA.getClip(), p0 = clip.userData?.phase?.[0] ?? 0;
+      const ph = trotA.time / clip.duration - p0;
+      post = RP.posting * (0.5 - 0.5 * Math.cos(2 * Math.PI * ph)) * trotA.getEffectiveWeight();
+    }
+    this.post = post;
+    const seat = new V3(anchor.x, this.seatY, anchor.z).addScaledVector(up, RP.pelvisUp + P.seatUp + post).addScaledVector(fwd, post * 0.6);
     rig.position.copy(seat.sub(wpos(B.pelvis)));
     rig.updateMatrixWorld(true);
 

@@ -19,12 +19,16 @@ import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 
 const V3 = THREE.Vector3;
 export const FEET = ["FFL", "FFR", "FFBL", "FFBR"];
-const LOOPS = ["Idle", "Walk", "Gallop"];
+const LOOPS = ["Idle", "Walk", "Trot", "Canter", "Gallop"];
+// Gears, slowest first. Canter = the gallop clip played slower.
+export const GEARS = ["Walk", "Trot", "Canter", "Gallop"];
 
 export const HP = {               // tunables (the lab GUI edits these)
   pitchFollow: 1.0,               // how much of the ground pitch the body takes
   rollFollow: 0.45,               // ... and roll (a horse stays fairly upright)
   fade: 0.3,                      // crossfade seconds
+  trotRate: 1.9,                  // trot speed = walk speed × this (the trot plays the re-timed walk faster)
+  canterRate: 0.75,               // canter speed = gallop speed × this (the gallop clip, slower)
   phaseMatch: true,               // smart gait hand-overs (best moment + matching pose)
   blendWait: 0.45,                // s a gait change may wait for that moment
   accel: 3.0,                     // m/s² (doubled inside the walk↔gallop gap)
@@ -191,6 +195,58 @@ function smoothLegTracks(clip, passes) {
   }
 }
 
+// Which bones belong to each leg (FEET order: FL, FR, BL, BR).
+const LEG_BONES = [
+  ["FrontShoulderL", "FrontUpperLegL", "FrontLowerLegL", "IKFrontLegL", "FFL", "PoleTargetL"],
+  ["FrontShoulderR", "FrontUpperLegR", "FrontLowerLegR", "IKFrontLegR", "FFR", "PoleTargetR"],
+  ["BackShoulderL", "BackLegL", "BackUpperLegL", "BackLowerLegL", "IKBackLegL", "FFBL", "PoleTargetBackL"],
+  ["BackShoulderR", "BackLegR", "BackUpperLegR", "BackLowerLegR", "IKBackLegR", "FFBR", "PoleTargetBackR"],
+];
+
+// A trot made from the walk. The walk lifts the legs one after another; a
+// trot moves DIAGONAL pairs together. Measure each hoof's swing phase (first
+// harmonic of its height over the clip), then time-shift every track of that
+// leg so FL+BR swing together and FR+BL half a cycle later — the same re-timing
+// the camel's pace used. The body gets a bounce on each diagonal beat.
+// footTr[k][i] = [hoofY, hoofZ] sampled at N even times over the walk.
+function buildTrot(walk, footTr, modelScale) {
+  const N = footTr[0].length, D = walk.duration;
+  const phase = footTr.map((t) => {
+    let c = 0, sn = 0;
+    t.forEach(([y], i) => { const a = 2 * Math.PI * i / N; c += y * Math.cos(a); sn += y * Math.sin(a); });
+    return Math.atan2(sn, c) / (2 * Math.PI);                 // swing peak at this fraction of the cycle
+  });
+  const p0 = phase[0];
+  const target = [p0, p0 + 0.5, p0 + 0.5, p0];               // FL, FR, BL, BR
+  const wrap = (x) => x - Math.round(x);
+  const shift = phase.map((ph, k) => wrap(ph - target[k]));
+  const legOf = {};
+  LEG_BONES.forEach((names, k) => names.forEach((n) => (legOf[n] = k)));
+  const trot = walk.clone();
+  trot.name = "Trot";
+  for (const tr of trot.tracks) {
+    const bone = tr.name.split(".")[0], k = legOf[bone];
+    if (k === undefined || !shift[k]) continue;
+    const it = tr.createInterpolant(), n = tr.getValueSize();
+    const out = new Float32Array(tr.values.length);
+    for (let i = 0; i < tr.times.length; i++) {
+      let t = tr.times[i] + shift[k] * D;
+      t = ((t % D) + D) % D;
+      out.set(it.evaluate(t), i * n);
+    }
+    tr.values = out;
+  }
+  // bounce: lowest at mid-stance of each diagonal (twice per cycle). Body moves
+  // in armature space: up is local +z, 1 unit = 100 × the model scale (m).
+  const body = trot.tracks.find((t) => t.name === "Body.position");
+  if (body) {
+    const A = 0.035 / (100 * modelScale), low = p0 + 0.5;
+    for (let i = 0; i < body.times.length; i++) body.values[i * 3 + 2] -= A * Math.cos(4 * Math.PI * (body.times[i] / D - low));
+  }
+  trot.userData = { shift, phase };
+  return trot;
+}
+
 const TIP_LEGS = [["FrontLowerLegL", "IKFrontLegL"], ["FrontLowerLegR", "IKFrontLegR"], ["BackLowerLegL", "IKBackLegL"], ["BackLowerLegR", "IKBackLegR"]];
 
 // How different two clip poses are: summed rotation (degrees) of the leg,
@@ -260,7 +316,8 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
   const gait = {};
   {
     const mixer = new THREE.AnimationMixer(model);
-    for (const name of ["Walk", "Gallop", "Idle"]) {
+    const footTracks = {};
+    const measureGait = (name) => {
       const clip = clips[name];
       const act = mixer.clipAction(clip);
       act.play();
@@ -287,7 +344,16 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
       });
       vs.sort((a, b) => a - b);
       gait[name] = { speed: name === "Idle" ? 0 : Math.max(0, vs[vs.length >> 1] ?? 0), touch, duration: clip.duration };
-    }
+      footTracks[name] = tr;
+    };
+    for (const name of ["Walk", "Gallop", "Idle"]) measureGait(name);
+    // TROT from the walk: each leg re-timed so diagonal pairs move together
+    // (FL+BR, then FR+BL), plus a body bounce on each diagonal beat.
+    clips.Trot = buildTrot(clips.Walk, footTracks.Walk, s);
+    measureGait("Trot");
+    // CANTER: the gallop clip, its own action (played slower)
+    clips.Canter = clips.Gallop.clone(); clips.Canter.name = "Canter";
+    gait.Canter = { ...gait.Gallop };
     // Gallop_Jump: when are all four hooves off the ground? The clip barely
     // leaves the floor, so the controller adds a real ballistic arc there.
     {
@@ -415,7 +481,9 @@ export class HorseController {
       let d = ((g.delta > 0 ? Math.max(0, g.delta - g.hA) : g.delta) - this.bodyOff) * g.w;
       // no hoof is ever left under the ground — front or hind, whatever the IK
       // weight (blends into a new gait, landing while IK fades back in)
-      if (g.under > 0 && !(g.cannon && this.rearT >= 0)) d = Math.max(d, g.under);
+      // (under was measured before the body sank by bodyOff: add that back)
+      const needUp = g.under - this.bodyOff;
+      if (needUp > 0.01 && !(g.cannon && this.rearT >= 0)) d = Math.max(d, needUp);   // ≤ 1 cm into the ground is invisible
       const C = g.ik.getWorldPosition(new V3());
       const T = C.clone(); T.y += d;
       if (g.cannon && this.rearT >= 0 && this.rearPlant) T.copy(this.rearFoot(li - 2));
@@ -431,7 +499,7 @@ export class HorseController {
       // (a hoof 1 cm into the ground is invisible; a near-straight leg turns a
       // few mm of correction into several degrees of knee — leave it alone)
       this.ikCorr = Math.max(this.ikCorr, T.distanceTo(C));   // biggest correction asked this frame (audit)
-      if (T.distanceToSquared(C) < 0.01 * 0.01) return;
+      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01)) return;
       let reached;
       if (!g.cannon) reached = solveTwoBone(g.u, g.l, C, T, fwd, new V3());
       else {
@@ -513,7 +581,7 @@ export class HorseController {
       const rows = this.transition(this.gaitName, name), A = prev.getClip(), N = rows.length;
       const iNow = Math.floor(((prev.time % A.duration) / A.duration) * N) % N;
       const bestDeg = Math.min(...rows.map((r) => r.deg));
-      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > HP.blendWait;
+      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > HP.blendWait * (name === "Idle" ? 1.8 : 1);   // a stop may take a last step
       // the outgoing loop is long and calm (Idle): every moment is alike — no wait
       const calm = this.gaitName === "Idle";
       if (!force && !calm && !waitedEnough && rows[iNow].deg > bestDeg + 15) return false;
@@ -642,9 +710,17 @@ export class HorseController {
     return clamp(W, 0.12, 1.6);
   }
 
+  gallopLike() { return this.gaitName === "Gallop" || this.gaitName === "Canter"; }
+
+  // Target ground speed of each gear (m/s), slowest first.
+  gearSpeeds() {
+    const g = this.h.gait;
+    return [g.Walk.speed, g.Walk.speed * HP.trotRate, g.Gallop.speed * HP.canterRate, g.Gallop.speed];
+  }
+
   queueJump() {
     // also while still speeding up into the gallop (Space pressed early): wait up to 1.2 s
-    if (this.rearT < 0 && (!this.oneShot || this.oneShotName.startsWith("Idle")) && (this.gaitName === "Gallop" || this.lastRun)) { this.jumpQueued = true; this.jumpQueueT = 2.2; this.jumpRate = undefined; }
+    if (this.rearT < 0 && (!this.oneShot || this.oneShotName.startsWith("Idle")) && (this.gallopLike() || this.lastRun)) { this.jumpQueued = true; this.jumpQueueT = 2.2; this.jumpRate = undefined; }
   }
 
   playOneShot(name, { holdSpeed = false, fade = 0.2, at = 0 } = {}) {
@@ -666,7 +742,10 @@ export class HorseController {
   }
 
   endOneShot() {
-    const back = Math.abs(this.v) < 0.05 ? "Idle" : (this.v > this.h.gait.Walk.speed * 1.75 ? "Gallop" : "Walk");
+    const S = this.gearSpeeds();
+    let gi = 0;
+    while (gi < GEARS.length - 1 && this.v > (S[gi] + S[gi + 1]) / 2) gi++;
+    const back = Math.abs(this.v) < 0.05 ? "Idle" : GEARS[gi];
     const a = this.oneShot;
     this.oneShot = null;
     const next = this.act(back);
@@ -774,11 +853,11 @@ export class HorseController {
   // input: { fwd: -1..1, turn: -1..1, run: bool }
   update(dt, input) {
     this.lastDt = dt;
-    input = { fwd: input?.fwd ?? 0, turn: input?.turn ?? 0, run: !!input?.run };   // missing fields = 0 (an empty input once turned the yaw into NaN)
+    input = { fwd: input?.fwd ?? 0, turn: input?.turn ?? 0, run: !!input?.run, gearUp: !!input?.gearUp, gearDown: !!input?.gearDown };   // missing fields = 0 (an empty input once turned the yaw into NaN)
     this.lastRun = !!input.run && input.fwd > 0;
     // Auto-jump: galloping toward something it can clear, the horse commits to
     // the jump itself; the take-off spot is then placed by jumpWindupFor().
-    if (HP.autoJump && this.gaitName === "Gallop" && input.fwd > 0 && !this.oneShot && !this.jumpQueued && this.rearT < 0 && this.v > this.h.gait.Gallop.speed * 0.75) {
+    if (HP.autoJump && this.gallopLike() && input.fwd > 0 && !this.oneShot && !this.jumpQueued && this.rearT < 0 && this.v > this.h.gait.Gallop.speed * 0.65) {
       this.autoT = (this.autoT ?? 0) + 1;
       if (this.autoT % 3 === 0) {
         const o = this.obstacleAhead(HP.autoJumpRange);
@@ -789,17 +868,23 @@ export class HorseController {
     const busy = (this.oneShot && !this.holdSpeed) || this.rearT >= 0;
 
     // Speed
+    // Gears: tap up / down; holding the sprint key gallops while held;
+    // standing still puts the gear back to walk.
+    const S = this.gearSpeeds();
+    if (input.gearUp) this.gear = Math.min(GEARS.length - 1, (this.gear ?? 0) + 1);
+    if (input.gearDown) this.gear = Math.max(0, (this.gear ?? 0) - 1);
+    if (input.fwd <= 0 && Math.abs(this.v) < 0.05) this.gear = 0;
+    this.effGear = input.run ? GEARS.length - 1 : (this.gear ?? 0);
     let target = 0;
     if (!busy) {
-      if (input.fwd > 0) target = input.run ? galV : walkV;
+      if (input.fwd > 0) target = S[this.effGear];
       else if (input.fwd < 0) target = -walkV * 0.55;
     }
-    const inGap = this.v > walkV * 1.5 && this.v < galV * 0.6;   // no trot clip: hurry through
-    const acc = (Math.abs(target) > Math.abs(this.v) ? HP.accel : HP.decel) * (inGap ? 2 : 1);
+    const acc = Math.abs(target) > Math.abs(this.v) ? HP.accel : HP.decel;
     this.v += clamp(target - this.v, -acc * dt, acc * dt);
 
     // Turning
-    const tr = this.gaitName === "Gallop" ? HP.turnGallop : Math.abs(this.v) > 0.1 ? HP.turnWalk : HP.turnIdle;
+    const tr = this.gallopLike() ? HP.turnGallop : this.gaitName === "Trot" ? (HP.turnWalk + HP.turnGallop) / 2 : Math.abs(this.v) > 0.1 ? HP.turnWalk : HP.turnIdle;
     const wantTurn = busy ? 0 : input.turn * tr;
     this.turnRate += (wantTurn - this.turnRate) * lerpK(8, dt);
     this.yaw += this.turnRate * dt;
@@ -823,20 +908,31 @@ export class HorseController {
     // Gait selection (with hysteresis)
     if (!this.oneShot) {
       const turning = Math.abs(this.turnRate) > 0.15;
-      let want = this.gaitName;
-      if (this.gaitName === "Gallop") { if (this.v < walkV * 1.6) want = "Walk"; }
-      else if (this.v > walkV * 1.9) want = "Gallop";
-      else if (Math.abs(this.v) > 0.05 || turning || target !== 0) want = "Walk";
-      else if (Math.abs(this.v) <= 0.05) want = "Idle";
+      // gait from speed: the band of each gear, with hysteresis (±6 %) so
+      // it does not flicker between two gaits at a boundary
+      let want;
+      if (Math.abs(this.v) <= 0.05 && !turning && target === 0) want = "Idle";
+      else if (this.v <= 0.05) want = "Walk";
+      else {
+        let i = Math.max(0, GEARS.indexOf(this.gaitName));
+        while (i < GEARS.length - 1 && this.v > (S[i] + S[i + 1]) / 2 * 1.06) i++;
+        while (i > 0 && this.v < (S[i - 1] + S[i]) / 2 * 0.94) i--;
+        want = GEARS[i];
+      }
       if (this.rearT >= 0) want = "Idle";                      // the rear is procedural, on top of Idle
       if (want !== this.gaitName) this.switchTo(want);
       else this.blendWaitT = 0;                              // no change pending: a later request waits afresh
       // Time scale so the hooves match the ground.
       if (this.gaitName === "Walk") {
-        const ts = Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV;
+        // stopping: keep stepping at a normal pace for one last step, so the
+        // walk reaches a pose it can stand from (else a 235° blend into Idle)
+        const stopping = this.blendWaitT > 0 && Math.abs(this.v) < 0.3;
+        const ts = stopping ? 1 : Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV;
         this.cur.setEffectiveTimeScale(Math.sign(ts || 1) * clamp(Math.abs(ts), 0.35, 1.6));
-      } else if (this.gaitName === "Gallop") {
-        let ts = clamp(this.v / galV, 0.6, 1.25);
+      } else if (this.gaitName === "Trot") {
+        this.cur.setEffectiveTimeScale(clamp(this.v / g.Trot.speed, 1.0, 2.6));
+      } else if (this.gallopLike()) {
+        let ts = this.gaitName === "Canter" ? clamp(this.v / galV, 0.55, 0.95) : clamp(this.v / galV, 0.6, 1.25);
         if (this.jumpQueued) {
           if (this.jumpRate === undefined) {                 // first gallop frame with a jump queued
             const d = this.cur.getClip().duration, left0 = d - (this.cur.time % d);
@@ -975,7 +1071,7 @@ export class HorseController {
     if (this.jumpQueued) {
       this.jumpQueueT -= dt;
       if (this.jumpQueueT < 0 || this.rearT >= 0 || (this.oneShot && !this.oneShotName.startsWith("Idle"))) this.jumpQueued = false;
-      else if (this.gaitName === "Gallop" && (!this.oneShot || this.oneShotName.startsWith("Idle"))) {
+      else if (this.gallopLike() && (!this.oneShot || this.oneShotName.startsWith("Idle"))) {
         const t = this.cur.time % this.cur.getClip().duration;
         // the stride just wrapped to frame 0 (or we first see it right at the start)
         const wrapped = (this.prevGallopT !== undefined && t < this.prevGallopT) || (this.prevGallopT === undefined && t < 0.06);
@@ -986,7 +1082,7 @@ export class HorseController {
         }
       }
     }
-    this.prevGallopT = this.gaitName === "Gallop" && this.cur ? this.cur.time % this.cur.getClip().duration : undefined;
+    this.prevGallopT = this.gallopLike() && this.cur ? this.cur.time % this.cur.getClip().duration : undefined;
     if (this.rearLeg.some((L) => L.fold > 0 || L.paw > 0)) {
       r.updateMatrixWorld(true);
       const lftAxis = new V3(1, 0, 0).applyQuaternion(r.quaternion);

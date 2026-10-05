@@ -32,6 +32,9 @@ export const SCENARIOS = {
   idle: { secs: 4, input: () => ({}) },
   walk: { secs: 4, input: () => ({ fwd: 1 }) },
   gallop: { secs: 5, input: () => ({ fwd: 1, run: true }) },
+  trot: { secs: 4, input: (t) => ({ fwd: 1, gearUp: t === 0 }) },
+  canter: { secs: 4.5, input: (t) => ({ fwd: 1, gearUp: t < 0.04 }) },
+  "gear up and down": { secs: 9, input: (t) => ({ fwd: t < 8 ? 1 : 0, gearUp: [0.5, 2, 3.5].some((x) => Math.abs(t - x) < 0.008), gearDown: [5, 6.5].some((x) => Math.abs(t - x) < 0.008) }) },
   "walk back": { secs: 3, input: () => ({ fwd: -1 }) },
   "turn on spot": { secs: 3, input: () => ({ turn: 1 }) },
   "walk + turn": { secs: 3, input: () => ({ fwd: 1, turn: -1 }) },
@@ -48,7 +51,7 @@ function angle(a, b, c) { return a.clone().sub(b).angleTo(c.clone().sub(b)) * 18
 function reset(ctrl, startZ) {
   ctrl.pos.set(0, 0, startZ); ctrl.yaw = 0; ctrl.v = 0; ctrl.turnRate = 0; ctrl.y = 0;
   ctrl.pitch = 0; ctrl.roll = 0; ctrl.oneShot = null; ctrl.rearT = -1; ctrl.landT = -1;
-  ctrl.idleT = -1e9; ctrl.lift = 0; ctrl.ikW = 1; ctrl.bodyOff = 0;
+  ctrl.idleT = -1e9; ctrl.lift = 0; ctrl.ikW = 1; ctrl.bodyOff = 0; ctrl.gear = 0;
   ctrl.mixer.stopAllAction();
   ctrl.cur = null; ctrl.gaitName = "";
   ctrl.switchTo("Idle", 0);
@@ -68,7 +71,7 @@ export function record(ctrl, rider, sc, ik, HP, startZ) {
     const t = i * DT;
     while (acts.length && acts[0][0] <= t) acts.shift()[1](ctrl);
     const inp = sc.input(t);
-    ctrl.update(DT, { fwd: inp.fwd ?? 0, turn: inp.turn ?? 0, run: !!inp.run });
+    ctrl.update(DT, { fwd: inp.fwd ?? 0, turn: inp.turn ?? 0, run: !!inp.run, gearUp: !!inp.gearUp, gearDown: !!inp.gearDown });
     ctrl.idleT = -1e9;
     rider?.update(DT, {});
     h.rig.updateMatrixWorld(true);

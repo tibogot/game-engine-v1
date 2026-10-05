@@ -31,7 +31,7 @@
     <div id="controls">
       <div>Controls:</div>
       <div>Move — <b>W A S D</b> (Z Q S D on AZERTY) or arrows</div>
-      <div>Gallop — move + hold <b>Shift</b></div>
+      <div>Speed — tap <b>Shift</b> = faster gear, <b>X</b> = slower · hold <b>Shift</b> = gallop</div>
       <div>Jump — galloping at a fence: automatic · or <b>Space</b></div>
       <div>Head toss — <b>H</b> · Eat — <b>E</b> · Rear — <b>R</b> · Buck — <b>B</b></div>
       <div>Enable/Disable hoof IK — <b>C</b></div>
@@ -40,6 +40,7 @@
       <div>Zoom — mouse wheel</div>
     </div>
     <div id="stats">
+      <div class="row"><span>Gear</span><b id="s-gear">—</b></div>
       <div class="row"><span>Gait</span><b id="s-gait">—</b></div>
       <div class="row"><span>Speed</span><b id="s-speed">—</b></div>
       <div class="row"><span>Hoof slip</span><b id="s-slip">—</b></div>
@@ -66,7 +67,7 @@
       import * as THREE from "three";
       import GUI from "./ui/labGui.js";
       import { buildArena, zoneAt } from "./horse-lab/arena.js";
-      import { loadHorse, HorseController, HP } from "./horse-lab/horse.js";
+      import { loadHorse, HorseController, HP, GEARS } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP } from "./horse-lab/rider.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
 
@@ -144,12 +145,16 @@
 
       // ── Input ────────────────────────────────────────────────────────────────
       // Movement on e.code (physical WASD = ZQSD on AZERTY); actions on e.key.
+      // Speed gears: TAP Shift = one gear up, X = one gear down; HOLD Shift
+      // (> 0.25 s) = gallop while held. (Not Ctrl for down: Ctrl+W closes the tab.)
       const down = new Set();
-      let shift = false;
+      let shiftDownAt = -1, gearUp = false, gearDown = false;
       addEventListener("keydown", (e) => {
-        down.add(e.code); shift = e.shiftKey;
+        down.add(e.code);
+        if (e.key === "Shift" && shiftDownAt < 0) shiftDownAt = performance.now();
         if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
         if (e.repeat) return;
+        if (e.key.toLowerCase() === "x") gearDown = true;
         if (e.code === "Space") ctrl.queueJump();   // takes off at the start of the next gallop stride
         const k = e.key.toLowerCase();
         if (k === "h" && Math.abs(ctrl.v) < 0.3) ctrl.playOneShot("Idle_2");
@@ -160,13 +165,24 @@
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
       });
-      addEventListener("keyup", (e) => { down.delete(e.code); shift = e.shiftKey; });
-      addEventListener("blur", () => { down.clear(); shift = false; });
-      const input = () => ({
-        fwd: (down.has("KeyW") || down.has("ArrowUp") ? 1 : 0) - (down.has("KeyS") || down.has("ArrowDown") ? 1 : 0),
-        turn: (down.has("KeyA") || down.has("ArrowLeft") ? 1 : 0) - (down.has("KeyD") || down.has("ArrowRight") ? 1 : 0),
-        run: shift,
+      addEventListener("keyup", (e) => {
+        down.delete(e.code);
+        if (e.key === "Shift") {
+          if (shiftDownAt >= 0 && performance.now() - shiftDownAt < 250) gearUp = true;   // a tap
+          shiftDownAt = -1;
+        }
       });
+      addEventListener("blur", () => { down.clear(); shiftDownAt = -1; });
+      const input = () => {
+        const i = {
+          fwd: (down.has("KeyW") || down.has("ArrowUp") ? 1 : 0) - (down.has("KeyS") || down.has("ArrowDown") ? 1 : 0),
+          turn: (down.has("KeyA") || down.has("ArrowLeft") ? 1 : 0) - (down.has("KeyD") || down.has("ArrowRight") ? 1 : 0),
+          run: shiftDownAt >= 0 && performance.now() - shiftDownAt >= 250,   // held: sprint
+          gearUp, gearDown,
+        };
+        gearUp = gearDown = false;                            // one-shot events
+        return i;
+      };
 
       // ── Third-person camera ──────────────────────────────────────────────────
       let camYaw = 0, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
@@ -292,6 +308,7 @@
         if (hudT > 0.2) {
           hudT = 0;
           const name = ctrl.rearT >= 0 ? "Rear" : ctrl.oneShot ? ctrl.oneShotName : ctrl.gaitName;
+          $("s-gear").textContent = GEARS[ctrl.effGear ?? 0] + (ctrl.effGear !== ctrl.gear ? " (sprint)" : "");
           $("s-gait").textContent = name + (ctrl.blocked ? " (blocked)" : "");
           $("s-speed").textContent = `${ctrl.v.toFixed(2)} m/s`;
           $("s-slip").textContent = `${(ctrl.slip() * 100).toFixed(0)} %`;
