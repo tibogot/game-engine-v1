@@ -15,6 +15,8 @@ const clamp = THREE.MathUtils.clamp;
 // goes to where the strap holds it (the mount raises the knee to reach it).
 export const STRAP = { len: 0.573 };   // x k (0.977): 0.56 m, knee bent like the reference side view
 export const STRAP_BUILTIN = STRAP.len;
+// STRAP.len (and riding.json strapLen) are in the units it was tuned in: × the 2.1 m horse's scale
+export const STRAP_K = 2.1 / 2.15;
 // ball-of-foot BONE → tread centre: 2.3 cm of sole under the bone (measured on the
 // robot mesh) + half the tread's thickness. (0.035 left the foot 6 mm above the iron.)
 export const BALL_TO_TREAD = 0.029;
@@ -23,7 +25,8 @@ export const BALL_TO_TREAD = 0.029;
 export function stirrupGeom(k) {
   return {
     hang: (s) => new V3(s * 0.25 * k, -0.08, 0.18),       // where the leather comes out from under the skirt, on the flap (saddle.js)
-    len: STRAP.len * k,                                    // strap + iron, hang point → tread (m)
+    len: STRAP.len * STRAP_K,                              // strap + iron, hang point → tread (m): sized to the RIDER's leg, not the horse
+                                                           // (scaled with the horse, a smaller horse never lowered the iron for getting on)
     barrel: 0.24 * k,                                      // the iron is kept at least this far out (horse's side)
     ankleAboveTread: 0.09,
   };
@@ -105,8 +108,21 @@ export class Stirrups {
       const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, dir, z));
       sd.strap.quaternion.copy(q);
       sd.ring.position.copy(P);
-      // the arch spans across the horse; the foot goes through it front to back
-      sd.ring.quaternion.copy(q);
+      // The iron TURNS with its use: hanging free its arch lies flat along the horse's side
+      // (the reference); a foot in it turns it so the foot passes straight through — toe
+      // toward the horse while mounting, forward once riding. Turned smoothly, never snapped.
+      const lftW = new V3(1, 0, 0).applyQuaternion(sq);
+      let pass = lftW.clone();
+      if (sd.held && f.ball && f.ankle) { const fd = f.ball.clone().sub(f.ankle); if (fd.lengthSq() > 1e-6) pass = fd.normalize(); }
+      pass.addScaledVector(dir, -pass.dot(dir));
+      if (pass.lengthSq() < 1e-6) pass.copy(fwdW).addScaledVector(dir, -fwdW.dot(dir));
+      pass.normalize();
+      if (sd.passPrev && pass.dot(sd.passPrev) < 0) pass.negate();          // the iron is symmetric: never spin it 180°
+      const px = new V3().crossVectors(dir, pass).normalize();
+      const qr = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(px, dir, pass));
+      if (!sd.qRing || dt <= 0) sd.qRing = qr.clone(); else sd.qRing.slerp(qr, 1 - Math.exp(-dt / 0.08));
+      sd.passPrev = pass.clone();
+      sd.ring.quaternion.copy(sd.qRing);
     });
   }
 

@@ -40,9 +40,9 @@ export const MP = {
   jogSpeed: 3.2,
   turnRate: 2.6,          // rad/s on foot
   reach: 3.2,             // m: how close to the horse F mounts
-  stand: 0.52,            // m (× k) out from the saddle centre: right against the horse's side (ref 1: back upright, not reaching)
+  stand: 0.66,            // m (× k) out from the saddle centre: an arm's length from the horse — room for the left knee to come up
   standZ: -0.02,          // m (× k) forward of the saddle centre: beside the saddle, just behind the stirrup (reference)
-  faceYaw: -1.45,         // rad in the saddle frame: facing the horse's side, a touch toward its head (reference)
+  faceYaw: -0.95,         // rad in the saddle frame: turned toward the horse's head, beside its shoulder (back-view ref B1), turning to its side as the foot goes in
   letDown: false,
   pull: 0.07,             // m the foot draws the near iron out from the horse's side         // false = the stirrup stays at riding length; the foot must reach it
   mountDrop: 0.18,        // m below the hip the let-down stirrup is taken (natural up to ~10–20 cm below;
@@ -105,6 +105,8 @@ export const CHANNELS = [
   { name: "nearGrip", type: "num", label: "near hand closed", min: 0, max: 1 },
   { name: "farGrip", type: "num", label: "far hand closed", min: 0, max: 1 },
   { name: "nearElbowBack", type: "num", label: "near elbow back", min: 0, max: 2.5 },
+  { name: "nearFootTurn", type: "num", label: "near foot: into the horse → turned", min: 0, max: 1, def: 1 },
+  { name: "farKneeUp", type: "num", label: "far knee UP", min: 0, max: 1 },
   { name: "tilt", type: "num", label: "tilt to his left (rad)", min: -0.8, max: 0.8 },
   { name: "handW", type: "num", label: "hands on targets", min: 0, max: 1 },
   { name: "nearTwist", type: "num", label: "near knee turn (+ out)", min: -1.6, max: 1.6 },
@@ -125,7 +127,7 @@ export function perfToData(M) {
 export function compilePerf(data) {
   const M = { duration: data.duration, data };
   for (const c of CHANNELS) {
-    const ch = data.channels[c.name] ?? (data.channels[c.name] = { type: c.type, keys: [[0, 0]] });   // a channel added since the file was saved
+    const ch = data.channels[c.name] ?? (data.channels[c.name] = { type: c.type, keys: [[0, c.def ?? 0]] });   // a channel added since the file was saved
     const keys = ch.keys.slice().sort((a, b) => a[0] - b[0]);
     M[c.name] = c.type === "step" ? stepTrack(keys) : track(keys);
   }
@@ -137,6 +139,8 @@ export function compilePerf(data) {
 // height in that frame, `ph` = the robot's standing pelvis height, `st` = the
 // stirrup point (same as riding), `seat` = the riding pelvis height.
 function buildMount({ G, ph, st, seat, k, au, pull, farHang }) {
+  // the riding idle hands (rider.js), so the get-on ends exactly on them
+  const I = POSES.idle, rideHand = (sd) => [sd * I.handApart, I.handUp + RP.handUp, I.handFwd + RP.handFwd];
   const GA = G + au;                                           // ankle height when the foot is on the ground
   const D = MP.stand;                                         // how far out from the horse the rider stands (× k)
   // The reference game's get-on (same robot): BESIDE the saddle, just behind
@@ -147,13 +151,14 @@ function buildMount({ G, ph, st, seat, k, au, pull, farHang }) {
   // ACROSS the saddle, the right leg bent and kicked up over the croup, and
   // only then turns to sit.
   const Z = MP.standZ;
-  const stand = [D * k, G + ph, Z * k];
+  const bend = 0.06;                                          // knees soft, hips back: a natural stance, not bolt upright
+  const stand = [D * k, G + ph - bend, Z * k];
   return {
     pelvis: track([
       [0.0, stand],
       // weight onto the RIGHT foot (his right = toward the tail) so the left knee comes up freely
-      [0.3, [D * k, G + ph - 0.01, (Z - 0.05) * k]],
-      [0.5, [D * k, G + ph - MP.crouch - 0.01, (Z - 0.07) * k]],
+      [0.3, [D * k, G + ph - bend - 0.01, (Z - 0.05) * k]],
+      [0.5, [(D - 0.03) * k, G + ph - bend - 0.02, (Z - 0.07) * k]],   // weight on the right leg, a little toward the horse
       [0.72, [(D - 0.04) * k, G + ph - 0.04, (Z - 0.03) * k]],         // then over the stirrup foot
       [1.12, [0.42 * k, st.y + 0.62, 0.02 * k]],                // spring up: standing in the stirrup, hips at saddle height
       // lying FORWARD along the horse (the reference): chest on the withers, head by
@@ -165,9 +170,10 @@ function buildMount({ G, ph, st, seat, k, au, pull, farHang }) {
       [2.6, [0.0, seat, 0.0]],                                  // seated
     ]),
     // facing the horse's side all the way up and while lying across; turns only to sit
-    yaw: track([[0, MP.faceYaw], [0.5, MP.faceYaw], [0.8, -1.5], [1.12, -1.35], [1.3, -0.8], [1.6, -0.5], [1.85, -0.3], [2.2, -0.05], [2.6, 0]]),   // turns to face FORWARD as he goes over (lying along the neck)
+    yaw: track([[0, MP.faceYaw], [0.25, MP.faceYaw], [0.55, -1.3], [0.8, -1.5], [1.12, -1.35], [1.3, -0.8], [1.6, -0.5], [1.85, -0.3], [2.2, -0.05], [2.6, 0]]),   // turns to face FORWARD as he goes over (lying along the neck)
     // upright while the knee comes up, then folded over the saddle (torso near flat), then up to sit
-    lean: track([[0, 0.02], [0.3, 0.02], [0.5, 0.03], [0.75, 0.06], [0.95, 0.4],   // ref 1–2: upright while the knee comes up
+    lean: track([[0, 0.14], [0.3, 0.16], [0.5, 0.16], [0.75, 0.14],   // a natural forward bend toward the horse from the start
+      [0.95, 0.4],   // ref 1–2: upright while the knee comes up
       [1.3, 0.75], [1.55, 0.95], [1.85, 0.8], [2.2, 0.5], [2.6, 0.05]]),   // ref 4: ~45° over the withers; ref 5–6: folded low over the neck; ref 7–8: sits down still leaning
     // the stirrup foot (rider's left on the left side)
     nearFoot: track([
@@ -187,8 +193,9 @@ function buildMount({ G, ph, st, seat, k, au, pull, farHang }) {
       // (the reference) after the push it HANGS down behind the left leg, then
       // swings up BACK over the croup — thigh reaching back, knee bent ~90°, shin
       // hanging down — and over to the far side
-      [1.05, [0.5 * k, GA + 0.15, -0.12 * k]],
-      [1.3, [0.42 * k, -0.3, -0.58 * k]],                       // ref 4: hanging down and back along the near side, slightly bent
+      [1.05, [0.6 * k, GA + 0.3, -0.3 * k]],                   // pushed off: trailing BACK and to his right, heel up, knee bending (it hung beside the left foot)
+      [1.24, [0.52 * k, -0.3, -0.48 * k]],                     // the KNEE comes up first (foot tucked up under him, out by the horse's side)…
+      [1.34, [0.42 * k, -0.22, -0.56 * k]],                     // …then the leg reaches back toward the croup
       [1.4, [0.34 * k, 0.0, -0.84 * k]],                       // rises with the leg LONG (bent, the knee hung into the haunch)
       [1.5, [0.12 * k, 0.3, -0.86 * k]],                       // ref 5: stretched back over the croup, only slightly bent (a close foot folded the knee hard)
       [1.68, [-0.12 * k, 0.28, -0.8 * k]],
@@ -200,8 +207,8 @@ function buildMount({ G, ph, st, seat, k, au, pull, farHang }) {
     ]),
     // hands: near (left) on the withers; far (right) on the front of the saddle,
     // then over to the FAR side of the seat while lying across, then the rein
-    nearHand: track([[0.0, [(D - 0.05) * k, -0.25, (Z + 0.12) * k]], [0.3, [0.1 * k, 0.18, 0.3 * k]], [1.1, [0.1 * k, 0.18, 0.3 * k]], [1.35, [0.1 * k, 0.2, 0.4 * k]], [1.85, [0.1 * k, 0.2, 0.4 * k]], [2.6, [0.125, 0.25, 0.25]]]),
-    farHand: track([[0.0, [(D - 0.05) * k, -0.25, (Z - 0.12) * k]], [0.38, [0.05 * k, 0.15, -0.25 * k]], [1.1, [0.05 * k, 0.15, -0.25 * k]], [1.35, [-0.06 * k, 0.2, 0.38 * k]], [1.85, [-0.06 * k, 0.2, 0.38 * k]], [2.6, [-0.125, 0.25, 0.25]]]),   // both hands on the neck while lying forward (the reference)
+    nearHand: track([[0.0, [(D - 0.05) * k, -0.25, (Z + 0.12) * k]], [0.3, [0.15, 0.12, 0.48 * k]], [0.8, [0.15, 0.12, 0.48 * k]], [1.1, [0.1 * k, 0.18, 0.3 * k]],   /* ref 1: left hand on the SIDE of the withers, chest high (on top it hunched him) */ [1.35, [0.1 * k, 0.2, 0.4 * k]], [1.85, [0.1 * k, 0.2, 0.4 * k]], [2.6, rideHand(1)]]),
+    farHand: track([[0.0, [(D - 0.05) * k, -0.25, (Z - 0.12) * k]], [0.38, [0.12, 0.13, -0.18 * k]], [0.8, [0.12, 0.13, -0.18 * k]],   /* ref 2: right hand UP on the seat, forearm rising to it */ [1.1, [0.05 * k, 0.15, -0.25 * k]],   /* ref 1: right hand on the side of the cantle */ [1.35, [-0.06 * k, 0.2, 0.38 * k]], [1.85, [-0.06 * k, 0.2, 0.38 * k]], [2.6, rideHand(-1)]]),   // both hands on the neck while lying forward (the reference)
     handW: track([[0.0, 0], [0.3, 1], [2.6, 1]]),             // from hanging arms to IK
     // phase weights (knee directions, stirrups, gaze)
     astride: track([[2.0, 0], [2.4, 1]]),
@@ -209,8 +216,9 @@ function buildMount({ G, ph, st, seat, k, au, pull, farHang }) {
     swing: track([[1.05, 0], [1.35, 1], [1.95, 1], [2.25, 0]]),
     look: track([[0, 0.3], [0.9, 0.3], [1.6, 0]]),
     // ref 1–2: the left knee rolls OUT toward the horse's shoulder as it rises; the right knee a little out while it trails on the near side
-    nearTwist: track([[0.2, 0], [0.5, 0.6], [0.8, 0.6], [1.1, 0.15], [1.3, 0]]), farTwist: track([[0, 0]]),
-    tilt: track([[0, 0]]), elbowsOut: track([[0, 0.6]]), nearElbowBack: track([[0, 0]]), nearGrip: track([[0, 1]]), farGrip: track([[0, 1]]),
+    nearTwist: track([[0.2, 0], [0.5, 0.15], [0.8, 0.15], [1.1, 0.05], [1.3, 0]])   /* (rolling the knee toward the horse crossed the shins) */, farTwist: track([[0, 0]]),
+    tilt: track([[0, 0]]), elbowsOut: track([[0, 0.6]]), nearElbowBack: track([[0, 0]]), farKneeUp: track([[0.78, 0], [0.98, 1], [1.33, 1], [1.45, 0]])   /* the right knee out to the EXTERIOR from the push-off (pointing in, it had to turn all the way round) */, nearFootTurn: track([[0, 0.3], [1.0, 0.3], [1.45, 1]]),   /* ref 1–2: foot (and iron) straight into the horse; they turn as he springs and swings over */
+    nearGrip: track([[0, 1], [0.2, 0.15], [0.9, 0.15], [1.2, 1]]),   /* ref 1: left hand OPEN flat on the withers, forearm rising to it */ farGrip: track([[0, 1]]),
     nearIn: stepTrack([[0, 0], [0.56, 1]]), farIn: stepTrack([[0, 0], [2.17, 1]]),
     duration: 2.6,
     stand,
@@ -294,6 +302,8 @@ function buildDismount({ G, ph, st, seat, k, au }) {
     elbowsOut: track([[0, 1.6], [0.3, 1.9], [0.55, 1.9], [0.8, 1.1], [1.0, 1.0], [1.15, 3.2], [1.4, 2.2], [1.7, 0.9], [2.4, 0.9]]),   /* sliding: elbows out and bent; landed: a little out, soft */   // ref 4: left elbow out while leaning back; ref 5: elbows out WIDE, hands on the seat
     // fingers: the reins, then the right hand OPEN in the air (back-view ref 2), both on the saddle while sideways, open as he lets go
     nearGrip: track([[0, 1], [0.6, 1], [0.75, 0.3], [0.95, 0.3], [1.1, 0.45], [1.4, 0.45], [1.6, 0.25]]), farGrip: track([[0, 1], [0.25, 0.2], [0.6, 0.2], [0.95, 0.2], [1.1, 0.45], [1.4, 0.45], [1.6, 0.25]])   /* resting on the seat: fingers half closed (a full fist pushed the thumb through the hand) */,   // back-view refs: elbows wide, away from the torso   // back-view ref 2: tilted well to his left
+    farKneeUp: track([[0, 0]]),
+    nearFootTurn: track([[0, 1]]),
     nearIn: stepTrack([[0, 1], [0.35, 0]])   /* back-view ref 2: the left foot is already out of its iron */, farIn: stepTrack([[0, 0]])   /* the right foot leaves its iron as the get-off starts */,
     duration: 2.4,
     stand: [landX + 0.04 * k, G + ph, 0.02 * k],
@@ -409,7 +419,7 @@ export class MountSystem {
     this.rd.B.pelvis.position.lerp(b.snap.pel, w);
     rig.updateMatrixWorld(true);
   }
-  startBlend(dur = 0.3) { this.blend = { snap: this.snapshot(), t: 0, dur }; this.footPrev = null; this.groundW = null; this.ironW = null; this.ikIronW = null; this.polePrev = null; this.armPolePrev = null; this.tgtPrev = null; }
+  startBlend(dur = 0.3) { this.blend = { snap: this.snapshot(), t: 0, dur }; this.footPrev = null; this.groundW = null; this.ironW = null; this.ikIronW = null; this.polePrev = null; this.armPolePrev = null; this.tgtPrev = null; this.poleTurn = null; }
 
   // ── saddle frame helpers ──────────────────────────────────────────────────
   frame() {
@@ -640,6 +650,10 @@ export class MountSystem {
           tread.sub(Hb).setLength(sg.len).add(Hb);
           if (tread.x * ironSide < sg.barrel && tread.y < -0.05) tread.x = ironSide * sg.barrel;
         }
+        // until the iron is caught, the foot goes to where the iron REALLY hangs (the feet go to
+        // the iron, not the iron to the feet); once held, the iron follows the leg as before
+        const sd = rd.stirrups.side[ironSide > 0 ? 0 : 1];
+        if (sd?.p && !sd.held) tread.copy(sd.p);
         local.lerp(tread.sub(off), w);
       }
       return toW(local);
@@ -662,8 +676,11 @@ export class MountSystem {
       this.tgtPrev[name] = l.clone();
       return S.localToWorld(l);
     };
-    const nearTgt0 = ease('nf', inIronTarget(nearT, 0, s), this.ikIronW[0] > 0.5 ? 0.02 : 0.05), farTgt0 = ease('ff', inIronTarget(farT, 1, -s), this.ikIronW[1] > 0.5 ? 0.02 : 0.05);
-    const nearTgt = soft(legs[0].u, legs[0].l, legs[0].tip, nearTgt0), farTgt = soft(legs[1].u, legs[1].l, legs[1].tip, farTgt0);
+    const nearTgt0 = ease('nf', inIronTarget(nearT, 0, s), 0.07), farTgt0 = ease('ff', inIronTarget(farT, 1, -s), 0.07);   // (a faster ease for a held foot let the catch jump)
+    // (a foot standing on the ground keeps its straight leg: the soft cap lifted the planted foot off the floor)
+    // eased in over the first 12 cm of lift (switching it on at lift-off jolted the knee 8 cm)
+    const capW = (key) => smooth((key.y - (G + this.ankleUp + 0.02)) / 0.12);
+    const nearTgt = nearTgt0.clone().lerp(soft(legs[0].u, legs[0].l, legs[0].tip, nearTgt0), capW(nearT)), farTgt = farTgt0.clone().lerp(soft(legs[1].u, legs[1].l, legs[1].tip, farTgt0), capW(farT));
     // A knee is stopped by the horse: if the natural knee would put the thigh
     // or shin inside the barrel, it rolls round the hip→foot line by the
     // SMALLEST angle that clears the skin (+3 cm) — like a real knee sliding
@@ -688,6 +705,16 @@ export class MountSystem {
     this.polePrev ??= [null, null];
     const kneePole = (i, g, target, twist) => {
       const p0 = naturalKneeDir(rd, g, target, this.polePrev[i]);
+      // the far knee lifted UP and to the rider's own RIGHT, away from the left leg (legs spread; it hung pointing down)
+      if (i === 1 && M.farKneeUp) { const w = M.farKneeUp(T) * (1 - astride); if (w > 0.001) { const side = lftR.clone().multiplyScalar(g.side); p0.lerp(up.clone().multiplyScalar(0.8).addScaledVector(side, 0.55).addScaledVector(fwdR, 0.25).normalize(), w).normalize();   /* up and to HIS right: the legs spread apart */ } }
+      // climbing on the near iron: the knee points like a knee on a high step — toward the horse's
+      // shoulder (forward along it, a little in toward it, a little up). The 'natural' direction
+      // swung it across the other leg as he pushed up.
+      if (i === 0 && this.ikIronW?.[0] > 0) {
+        const fH = new V3(0, 0, 1).applyQuaternion(sq), inH = new V3(1, 0, 0).applyQuaternion(sq).multiplyScalar(-s);
+        const climb = fH.multiplyScalar(0.75).addScaledVector(inH, 0.55).addScaledVector(up, 0.25).normalize();
+        p0.lerp(climb, this.ikIronW[0] * (1 - astride)).normalize();
+      }
       const d = target.clone().sub(wpos(g.u)).normalize();
       p0.applyAxisAngle(d, -g.side * twist);                     // + twist = knee rolls OUT (away from the body's centre)
       let p = p0;
@@ -710,8 +737,16 @@ export class MountSystem {
         const pp = prev.clone().addScaledVector(d, -prev.dot(d));
         if (pp.lengthSq() > 0.01) {
           pp.normalize();
-          const ang = Math.atan2(new V3().crossVectors(pp, p).dot(d), pp.dot(p)), mx = 6 * ds;
-          p = pp.applyAxisAngle(d, clamp(ang, -mx, mx));
+          let ang = Math.atan2(new V3().crossVectors(pp, p).dot(d), pp.dot(p)), mx = 6 * ds;
+          // nearly opposite: keep turning the way it started (deciding afresh each frame flipped the
+          // direction every frame and the knee never got there — it stayed pointing in)
+          this.poleTurn ??= [0, 0];
+          if (Math.abs(ang) > 2.6 && this.poleTurn[i]) ang = this.poleTurn[i] * (2 * Math.PI - Math.abs(ang)) * (Math.sign(ang) === this.poleTurn[i] ? 0 : 1) + (Math.sign(ang) === this.poleTurn[i] ? ang : 0);
+          this.poleTurn[i] = Math.abs(ang) > 0.05 ? Math.sign(ang) : 0;
+          // eased (time constant 0.07 s) as well as speed-limited: the slide-along-the-horse search
+          // picks in 0.1 rad steps and stepped the knee 3 cm every few frames
+          const eased = ang * (1 - Math.exp(-ds / 0.07));
+          p = pp.applyAxisAngle(d, clamp(eased, -mx, mx));
         }
       }
       this.polePrev[i] = p.clone();
@@ -741,6 +776,16 @@ export class MountSystem {
         const gw0 = 1 - smooth((tgt.y - (G + this.ankleUp)) / 0.3);
         const dangle = (1 - gw0) * (1 - this.ironW[fi]);
         let dir = naturalFootDir(g, 0.25 + 0.6 * dangle);
+        // the near foot turns toward the iron while it RISES, so it arrives lined up (it pivoted at the catch)
+        if (fi === 0 && M.nearFootTurn) {
+          const lift = 1 - (this.groundW?.[0] ?? 1);                 // 0 standing on the ground → 1 lifted
+          const wPre = clamp(lift, 0, 1) * (1 - M.nearFootTurn(T)) * (1 - astride);
+          if (wPre > 0.001) {
+            const into = new V3(1, 0, 0).applyQuaternion(sq).multiplyScalar(-s), pitch = this.footPitch;
+            const pre = into.multiplyScalar(Math.cos(pitch)).addScaledVector(up, -Math.sin(pitch)).normalize();
+            dir.lerp(pre, wPre).normalize();
+          }
+        }
         const flat = fwdR.clone().addScaledVector(up, -fwdR.dot(up)).normalize().multiplyScalar(Math.cos(this.footPitch)).addScaledVector(up, -Math.sin(this.footPitch)).normalize();
         // ground contact weight, smoothed over TIME (it flipped within a few
         // frames at lift-off and flicked the foot 25°)
@@ -756,8 +801,11 @@ export class MountSystem {
         // ankle 40–49°) with the iron's level pitch; the full riding foot only once seated
         const ironLv = this.ironW[fi] * smooth((tgt.y - (G + this.ankleUp)) / 0.4);
         if (ironLv > 0.001) {
-          const h = dir.clone().addScaledVector(up, -dir.dot(up)); if (h.lengthSq() > 1e-6) h.normalize(); else h.copy(fwS);
-          const pa = this.footPitch - RP.heelDown;
+          let h = dir.clone().addScaledVector(up, -dir.dot(up)); if (h.lengthSq() > 1e-6) h.normalize(); else h.copy(fwS);
+          // the near foot goes in STRAIGHT, toe toward the horse, and stays so (the iron with it)
+          // until footTurn lets it rotate — smoothly — to its natural / riding heading
+          if (fi === 0) { const intoHorse = lfS.clone().multiplyScalar(-s); h = intoHorse.lerp(h, M.nearFootTurn(T)).normalize(); }
+          const pa = this.footPitch - 0.06;   // stepping in / standing in the iron: sole level, heel a touch down (the riding toe-down comes with astride)
           const level = h.multiplyScalar(Math.cos(pa)).addScaledVector(up, -Math.sin(pa)).normalize();
           dir.lerp(level, ironLv).normalize();
         }
@@ -765,7 +813,10 @@ export class MountSystem {
         aimFoot(g, dir);
         // ankle → tread (the ball, 3.5 cm under it) in the saddle frame, for next frame's iron target
         const S0 = this.rd.saddle;
-        g.ballOffL = S0.worldToLocal(wpos(g.ball).addScaledVector(up, -BALL_TO_TREAD)).sub(S0.worldToLocal(wpos(g.tip)));
+        // smoothed: it feeds next frame's foot target, which moves the knee, which turns the foot —
+        // taken raw, that loop made the knee shake 3.5 cm every frame
+        const offNow = S0.worldToLocal(wpos(g.ball).addScaledVector(up, -BALL_TO_TREAD)).sub(S0.worldToLocal(wpos(g.tip)));
+        if (g.ballOffL && ds > 0) g.ballOffL.lerp(offNow, 1 - Math.exp(-ds / 0.15)); else g.ballOffL = offNow;
       });
     }
     // Hands: from the hanging clip pose to their targets (weight), elbows out-down
@@ -775,7 +826,8 @@ export class MountSystem {
       const cur = wpos(g.tip);
       const T3 = cur.clone().lerp(soft(g.u, g.l, g.tip, ease(g === arms[0] ? 'nh' : 'fh', toW(mir(tgt)))), w);
       const back = g === arms[0] ? M.nearElbowBack(T) : 0;      // the near elbow pushed BACK (propping, body turning with it)
-      const pole = lftR.clone().multiplyScalar(g.side * M.elbowsOut(T)).addScaledVector(up, -0.35).addScaledVector(fwdR, -0.3 - back).normalize();   // elbows out from the body (keyed)
+      const pole = lftR.clone().multiplyScalar(g.side * M.elbowsOut(T)).addScaledVector(up, -0.35).addScaledVector(fwdR, -0.3 - back).normalize()   // elbows out from the body (keyed)
+        .lerp(lftR.clone().multiplyScalar(g.side * RP.elbowsOut).addScaledVector(up, -0.15).addScaledVector(fwdR, -0.2).normalize(), astride).normalize();   // seated: the riding elbows (they snapped at the hand-over)
       // the elbow TURNS, it does not jump (≤ 5 rad/s) — key and rule changes snapped it 4–5 cm in a frame
       this.armPolePrev ??= [null, null];
       const ai = g === arms[0] ? 0 : 1, pp = this.armPolePrev[ai];

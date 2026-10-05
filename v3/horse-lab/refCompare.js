@@ -17,6 +17,8 @@ const V3 = THREE.Vector3;
 export const REFS = {
   mount1: { size: [609, 496], horse: { nose: [42, 152], poll: [68, 71], tail: [446, 184], foreNear: [181, 446], hindNear: [420, 439] },
     rider: { hip: [336, 207], knee: [258, 216], ankle: [278, 300], head: [329, 107] } },   // left (near) leg raised into the iron
+  mount2: { size: [551, 483], horse: { nose: [45, 150], poll: [72, 78], tail: [445, 190], foreNear: [192, 405], hindNear: [400, 393] } },   // approximate
+  mount3: { size: [624, 414], horse: { nose: [45, 148], poll: [72, 45], tail: [445, 180], foreNear: [192, 378], hindNear: [402, 370] } },   // approximate
   mount4: { size: [614, 501], horse: { nose: [58, 296], poll: [76, 192], tail: [440, 214], foreNear: [186, 455], hindNear: [445, 460] } },
   mount5: { size: [591, 459], horse: { nose: [55, 270], poll: [72, 175], tail: [425, 205], foreNear: [180, 420], hindNear: [425, 425] } },   // landmarks approximate
   dismount4: { size: [486, 406], horse: { nose: [57, 160], poll: [74, 100], tail: [366, 220], foreNear: [154, 366], hindNear: [320, 394] } },   // read off a grid
@@ -133,6 +135,8 @@ export const POSE_CAMS = {
   dismount4: { pos: [2.52, 2.89, -0.88], look: [0, 1.36, -0.07], fov: 45 },   // fitted (azimuth 108°, elevation 30°, 3.1 m), rms 18 px
   dismount5: { pos: [2.93, 2.66, -0.53], look: [0, 1.13, -0.02], fov: 45 },   // fitted, rms 14 px
   dismount6: { pos: [3.9, 2.3, 0.6], look: [0, 0.95, -0.1], fov: 40 },   // set by hand (the landmark fit went too close)
+  mount2: { pos: [2.5, 1.45, -1.9], look: [0.05, 0.85, 0.2], fov: 46 },   // set by hand: behind his back, close, eye about at the horse's back
+  behindLeft: { pos: [0.75, 1.95, -3.0], look: [0.35, 1.05, 0.3], fov: 42 },   // mountB1–B3 (behind the horse, a little to its left)
   frontLeft: { pos: [4.3, 2.5, 1.3], look: [0.2, 1.05, -0.25], fov: 38 },   // dismount4 / dismount5
   side: { pos: [-4.6, 1.75, 0.6], look: [0, 1.05, 0.15], fov: 40 },   // the horse's right side, facing right in the picture (idleSide)
   behind: { pos: [0.2, 2.75, -3.9], look: [0, 1.4, 0], fov: 40 },   // matched to dismountB1–B3
@@ -147,7 +151,7 @@ export async function showPose(H, ref, clip, frame, camName = "behind", label = 
   E.open(clip); E.playing = false;
   if (!clip.startsWith("ride:")) {
     // play up to the frame at 60 fps (as the game does): released irons fall, smoothing settles
-    const ms = H.rider.mountSys; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null;
+    const ms = H.rider.mountSys; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null; ms.poleTurn = null;
     for (let i = 0; i <= frame; i++) { ms.edit = { clip, t: i / 60, playing: i > 0 }; H.rider.update(i ? 1 / 60 : 0, {}); }
     E.setT(frame / 60);
   }

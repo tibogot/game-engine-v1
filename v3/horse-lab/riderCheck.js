@@ -136,7 +136,7 @@ export function checkClip(H, clip) {
   const wasOpen = E.isOpen, wasClip = E.clip, wasMode = ms.mode;
   E.open(clip);
   const dur = E.data.duration, frames = [];
-  ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null;
+  ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null; ms.poleTurn = null;
   for (let i = 0; i <= Math.round(dur * 60); i++) {
     ms.edit = { clip, t: i * DT, playing: i > 0 };
     rd.update(i ? DT : 0, { lookYaw: 0, input: {} });

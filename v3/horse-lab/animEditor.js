@@ -19,11 +19,12 @@ import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { CHANNELS, perfToData } from "./mount.js";
 import { POSES, POSES_BUILTIN, RP, ridingData, applyRidingData } from "./rider.js";
+import { STRAP_K } from "./stirrups.js";
 
 // the reference screenshots (v3/horse-lab/refs, kept out of git)
 const REF_FILES = ["mount1", "mount2", "mount3", "mount4", "mount5", "mount6", "mount7", "mount8", "mount9", "mount10",
   "dismount1", "dismount2", "dismount3", "dismount4", "dismount5", "dismount6", "dismount7", "dismount8",
-  "idleSide", "dismountB0", "dismountB1", "dismountB2", "dismountB3"];   // B = seen from behind
+  "idleSide", "mountB1", "mountB2", "mountB3", "dismountB0", "dismountB1", "dismountB2", "dismountB3"];   // B = seen from behind
 
 // ── riding mode: one posture per gait, no timeline — the horse plays the gait
 // in place under the rider and every value is a slider (or a handle) ──
@@ -265,7 +266,7 @@ export class AnimEditor {
     const ms = this.ms;
     this.clip = clip; this.ui.clip.value = clip;
     ms.side = 1;
-    ms.mode = clip; ms.t = 0; ms.blend = null; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null;
+    ms.mode = clip; ms.t = 0; ms.blend = null; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null; ms.poleTurn = null;
     if (ms.acts.idle && ms.cur !== ms.acts.idle) ms.play("idle", 0.01);
     ms.edit = { clip, t: 0, playing: false };
     this.rider.update(0, { lookYaw: 0, input: {} });    // builds the code performance (the starting data)
@@ -330,14 +331,14 @@ export class AnimEditor {
     const P = POSES[this.ride], k = this.rider.k;
     if (key === "pelvisUp") RP.pelvisUp = v;
     else if (key === "heelDown") RP.heelDown = v;
-    else if (key === "strap") { this.strap().len = v / k; this.ms.perf = {}; }   // the code mount re-measures the iron
+    else if (key === "strap") { this.strap().len = v / STRAP_K; this.ms.perf = {}; }   // the code mount re-measures the iron
     else P[key] = v;
     this.dirty = true;
   }
   getRide(key) {
     if (key === "pelvisUp") return RP.pelvisUp;
     if (key === "heelDown") return RP.heelDown;
-    if (key === "strap") return this.strap().len * this.rider.k;
+    if (key === "strap") return this.strap().len * STRAP_K;
     return POSES[this.ride][key];
   }
   // handle positions in the saddle frame (left side) for the riding posture
@@ -506,7 +507,7 @@ export class AnimEditor {
     this.ctrl.idleT = -1e9;                                 // the horse stands still (no head tosses)
     if (this.playing) {
       this.t += dt * this.speed;
-      if (this.t > dur) { if (this.loop) { this.t = 0; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null; } else { this.t = dur; this.playing = false; } }
+      if (this.t > dur) { if (this.loop) { this.t = 0; ms.groundW = null; ms.ironW = null; ms.ikIronW = null; ms.polePrev = null; ms.armPolePrev = null; ms.tgtPrev = null; ms.poleTurn = null; } else { this.t = dur; this.playing = false; } }
     }
     ms.mode = this.clip;
     ms.edit = { clip: this.clip, t: this.t, playing: this.playing };

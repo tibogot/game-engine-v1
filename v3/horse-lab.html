@@ -118,7 +118,7 @@
       const arena = buildArena(scene);
 
       // ── Horse ────────────────────────────────────────────────────────────────
-      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? 2.1) }   /* ?hh= horse height for tests */);
+      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? 1.75) }   /* ?hh= horse height for tests; 1.75: the irons hang low enough (~0.55 m) to get on like the reference with the riding-length strap */);
       scene.add(horse.rig);
       // Coat: the pack exports the horse 40% metallic, which renders dark and
       // muddy without reflections — make it a matte coat, brighter chestnut;
