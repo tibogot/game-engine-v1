@@ -10,12 +10,15 @@ import * as THREE from "three";
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
 
-export const STRAP = { len: 0.78 };   // long, like the reference: the foot reaches it from the ground   // × k; tunable (the lab panel and the tests change it)
+// ONE length, riding and mounting alike (× k): the idle riding foot sits at
+// the end of it. It never stretches or shrinks — a foot that wants the iron
+// goes to where the strap holds it (the mount raises the knee to reach it).
+export const STRAP = { len: 0.52 };
 
 // saddle frame: x = the horse's left, y = up (0 = saddle surface), z = forward
 export function stirrupGeom(k) {
   return {
-    hang: (s) => new V3(s * 0.33 * k, -0.06, 0.28),       // the stirrup bar: straight ABOVE the riding iron (measured: the ball of the foot at x 0.36, z 0.28)
+    hang: (s) => new V3(s * 0.25 * k, -0.08, 0.18),       // where the leather comes out from under the skirt, on the flap (saddle.js)
     len: STRAP.len * k,                                    // strap + iron, hang point → tread (m)
     barrel: 0.24 * k,                                      // the iron is kept at least this far out (horse's side)
     ankleAboveTread: 0.09,
@@ -49,6 +52,7 @@ export class Stirrups {
 
   // feet: [{ in: 0..1, ankle: world V3 | null, fwd: world V3, extra: m the strap is let down } for left, right]
   update(dt, feet) {
+    // (feet[i].force: take the iron wherever it is — riding, where the feet are always in)
     this.g = stirrupGeom(this.k);  // strap length may have been changed
     const S = this.S, g = this.g;
     S.updateMatrixWorld(true);
@@ -67,15 +71,24 @@ export class Stirrups {
         sd.p.add(v).add(new V3(0, -9.8 * h * h, 0));
       }
       // foot in the stirrup: the tread sits under the ball of the foot
-      sd.inW += ((f.in > 0.5 ? 1 : 0) - sd.inW) * (1 - Math.exp(-14 * dt));
-      if (f.ankle && sd.inW > 0.01) {
-        const tread = f.ball ? toL(f.ball.clone().addScaledVector(upW, -0.035)) : toL(f.ankle.clone().addScaledVector(upW, -g.ankleAboveTread).addScaledVector(f.fwd, 0.04));   // under the ball of the foot (sole)
-        sd.p.lerp(tread, sd.inW);
+      // the iron is taken only when the foot is AT it (≤ 12 cm) — never pulled
+      // to a foot from a distance (that read as an elastic strap)
+      const tread = f.ankle ? (f.ball ? toL(f.ball.clone().addScaledVector(upW, -0.035)) : toL(f.ankle.clone().addScaledVector(upW, -g.ankleAboveTread).addScaledVector(f.fwd, 0.04))) : null;   // under the ball of the foot (sole)
+      if (f.in > 0.5 && tread && !sd.held && (sd.p.distanceTo(tread) < 0.12 || f.force)) sd.held = true;
+      if (!(f.in > 0.5)) sd.held = false;
+      sd.inW += ((sd.held ? 1 : 0) - sd.inW) * (1 - Math.exp(-14 * dt));
+      // a foot in the iron only SWINGS it (toward the foot's direction from the
+      // bar); the strap's length never changes — the foot is placed at the
+      // iron by its own IK, not the iron at the foot
+      if (tread && sd.inW > 0.01) {
+        const held = H.clone().addScaledVector(tread.clone().sub(H).normalize(), g.len);
+        sd.p.lerp(held, sd.inW);
       }
-      // the strap cannot stretch, and the iron stays off the horse's side
-      const d = sd.p.clone().sub(H), len = g.len + (f.extra ?? 0);
-      if (d.length() > len) sd.p.copy(H).addScaledVector(d.normalize(), len);
-      if (sd.p.x * sd.s < g.barrel && sd.p.y < -0.05) sd.p.x = sd.s * g.barrel;
+      // rigid strap, and the iron stays off the horse's side
+      for (let it = 0; it < 2; it++) {
+        sd.p.sub(H).setLength(g.len).add(H);
+        if (sd.p.x * sd.s < g.barrel && sd.p.y < -0.05) sd.p.x = sd.s * g.barrel;
+      }
       // draw: strap from the hang point to the top of the iron, iron upright along the strap
       const P = S.localToWorld(sd.p.clone()), Hw = S.localToWorld(H.clone());
       const dir = Hw.clone().sub(P).normalize();

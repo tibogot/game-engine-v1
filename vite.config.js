@@ -57,8 +57,35 @@ function trunkManifestPlugin() {
   };
 }
 
+// Horse lab animation editor (dev only): POST /__horse-lab/anims?name=mount
+// saves the keyed performance to v3/horse-lab/anims/<name>.json.
+const HORSE_ANIMS_DIR = path.join(__dirname, "v3/horse-lab/anims");
+function horseLabAnimsPlugin() {
+  return {
+    name: "horse-lab-anims",
+    configureServer(server) {
+      server.middlewares.use("/__horse-lab/anims", (req, res, next) => {
+        if (req.method !== "POST") return next();
+        const name = new URL(req.url, "http://x").searchParams.get("name") ?? "";
+        if (!/^[a-z0-9_-]{1,40}$/i.test(name)) { res.statusCode = 400; return res.end("bad name"); }
+        let body = "";
+        req.on("data", (c) => { body += c; if (body.length > 2e6) req.destroy(); });
+        req.on("end", () => {
+          try {
+            const data = JSON.parse(body);
+            fs.mkdirSync(HORSE_ANIMS_DIR, { recursive: true });
+            fs.writeFileSync(path.join(HORSE_ANIMS_DIR, name + ".json"), `${JSON.stringify(data, null, 1)}\n`);
+            res.setHeader("Content-Type", "application/json");
+            res.end(JSON.stringify({ ok: true, file: "v3/horse-lab/anims/" + name + ".json" }));
+          } catch (e) { res.statusCode = 400; res.end(String(e)); }
+        });
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [trunkManifestPlugin()],
+  plugins: [trunkManifestPlugin(), horseLabAnimsPlugin()],
   resolve: {
     alias: [
       {

@@ -39,6 +39,7 @@
       <div>Pause — <b>P</b> · next frame (paused) — <b>N</b></div>
       <div>Look around — <b>click</b>, then mouse (Esc to free it)</div>
       <div>Zoom — mouse wheel</div>
+      <div>Animation editor — <b>K</b></div>
     </div>
     <div id="stats">
       <div class="row"><span>Gear</span><b id="s-gear">—</b></div>
@@ -71,6 +72,8 @@
       import { loadHorse, HorseController, HP, GEARS } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP } from "./horse-lab/rider.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
+      import { Tack } from "./horse-lab/tack.js";
+      import { AnimEditor } from "./horse-lab/animEditor.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -133,6 +136,10 @@
       const riderData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
       scene.add(riderData.rig);
       const rider = new RiderController(riderData, ctrl, scene);
+      // the saddle, built on this horse's back (tack.js)
+      const tack = new Tack(horse, rider);
+      console.log("[horse-lab] saddle fit", tack.fit);
+      await rider.mountSys.loadAnims();                     // get on / off as saved from the animation editor
       $("loading").remove();
       $("s-gaits").textContent = `${horse.gait.Walk.speed.toFixed(2)} / ${horse.gait.Gallop.speed.toFixed(2)} m/s`;
       console.log("[horse-lab] horse", { gait: horse.gait, halfLen: horse.halfLen, halfWid: horse.halfWid, scale: horse.scale });
@@ -151,6 +158,7 @@
       const down = new Set();
       let shiftDownAt = -1, gearUp = false, gearDown = false, note = "", noteT = 0;
       addEventListener("keydown", (e) => {
+        if (editor.isOpen && editor.onKey(e)) return;          // the editor has the keyboard while open
         down.add(e.code);
         if (e.key === "Shift" && shiftDownAt < 0) shiftDownAt = performance.now();
         if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
@@ -170,6 +178,7 @@
         if (k === "r") ctrl.startRear();
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
+        if (k === "k") editor.open(rider.mode === "riding" ? "dismount" : "mount");
       });
       addEventListener("keyup", (e) => {
         down.delete(e.code);
@@ -194,8 +203,9 @@
       let camYaw = 0, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
       const camTarget = new THREE.Vector3(0, 1.8, 2);
       const canvas = renderer.domElement;
-      canvas.addEventListener("click", () => canvas.requestPointerLock?.());
+      canvas.addEventListener("click", () => { if (!D.editing) canvas.requestPointerLock?.(); });
       addEventListener("mousemove", (e) => {
+        if (D.gizmoDrag) return;                              // dragging an editor handle, not the camera
         const locked = document.pointerLockElement === canvas;
         if (!locked && !(e.buttons & 1)) return;
         if (!locked && e.target !== canvas) return;
@@ -292,11 +302,13 @@
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
       });
+      const editor = new AnimEditor({ renderer, scene, camera, rider, ctrl, D });
+      gui.add({ open: () => editor.toggle() }, "open").name("🎬 animation editor (K)");
       const timer = new THREE.Timer();
       let msAvg = 16, hudT = 0;
       renderer.setAnimationLoop((now) => {
         timer.update(now);
-        const rawDt = Math.min(timer.getDelta(), 0.1);
+        const rawDt = Math.min(Math.max(0, timer.getDelta()), 0.1);   // never negative (pauses / reloads): a negative dt made the body height run away
         msAvg += (rawDt * 1000 - msAvg) * 0.05;
         let dt = rawDt * D.timeScale;
         if (D.paused) {                                       // P: frozen; '.' steps one 1/60 s frame
@@ -307,8 +319,10 @@
           const inp = input();
           const onHorse = rider.mode === "riding";
           // on foot the keys move the robot; the horse stands
-          ctrl.update(dt, onHorse ? inp : { fwd: 0, turn: 0, run: false });
+          editor.update(rawDt);
+          ctrl.update(dt, onHorse && !editor.isOpen ? inp : { fwd: 0, turn: 0, run: false });
           rider.update(dt, { lookYaw: camYaw, input: onHorse ? {} : inp });
+          editor.afterUpdate();
         }
         if (D.probes) {
           ctrl.probes.forEach((p, i) => probes[i].position.copy(p));
@@ -369,7 +383,7 @@
         }
       }
 
-      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, tack, editor, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

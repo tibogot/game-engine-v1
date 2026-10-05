@@ -33,7 +33,7 @@ export const RP = {
   seatSpring: 260,     // 1/s² — stiffness of the seat following the saddle
   seatDamp: 0.45,      // damping ratio (<1 = a little bounce)
   bounceMax: 0.07,     // m the seat may lag the saddle
-  pelvisUp: 0.1,       // m pelvis bone above the saddle surface
+  pelvisUp: 0.19,      // m pelvis bone above the saddle frame's 0 (the seat leather is ~9 cm up: tack.js)
   absorb: 0.65,        // share of the saddle's rocking the spine takes back out
   upright: 0.6,        // share of the horse's slope pitch the spine takes back out
   stirrupWidth: 0.36,  // m from the spine to each ankle
@@ -131,11 +131,25 @@ export function solveLeg(leg, target, pole) {
 }
 // A foot in a stirrup: ankle→ball pointing forward, toe 10° up (heel down),
 // turned 12° out — riders' feet do not hang toe-down like the sitting clip's.
-export function levelFoot(g, fwd, up, lft) {
+export function levelFoot(g, fwd, up, lft, toeOut = 0.21) {
   const A = wpos(g.tip), Bl = wpos(g.ball);
   const cur = Bl.sub(A).normalize();
-  const want = fwd.clone().addScaledVector(up, 0.18).addScaledVector(lft, g.side * 0.21).normalize();
+  const want = fwd.clone().addScaledVector(up, 0.18).addScaledVector(lft, g.side * toeOut).normalize();
   rotateWorld(g.tip, new THREE.Quaternion().setFromUnitVectors(cur, want));
+}
+
+// A natural foot for a free leg: perpendicular to the shin, on the kneecap's
+// side, toe tipped down ankleDown rad from square (a relaxed ankle) — then
+// optionally blended toward a flat foot (on the ground) and the riding foot.
+export function naturalFootDir(g, ankleDown = 0.25) {
+  const K = wpos(g.l), A = wpos(g.tip), ax = A.clone().sub(K).normalize();
+  const front = g.frL.clone().applyQuaternion(g.l.getWorldQuaternion(new THREE.Quaternion()));
+  front.addScaledVector(ax, -front.dot(ax)).normalize();
+  return front.multiplyScalar(Math.cos(ankleDown)).addScaledVector(ax, Math.sin(ankleDown)).normalize();
+}
+export function aimFoot(g, dir) {
+  const cur = wpos(g.ball).sub(wpos(g.tip)).normalize();
+  rotateWorld(g.tip, new THREE.Quaternion().setFromUnitVectors(cur, dir.clone().normalize()));
 }
 
 // measured in the REST pose (constructor, before any animation): bone axis =
@@ -166,6 +180,21 @@ export function hipTwistDeg(rd, legIndex) {
   const proj = axis.multiplyScalar(new V3(delta.x, delta.y, delta.z).dot(axis));
   const tw = new Q(proj.x, proj.y, proj.z, delta.w).normalize();
   return 2 * Math.acos(Math.min(1, Math.abs(tw.w))) * 180 / Math.PI;
+}
+
+// Ankle twist: the foot (ankle → ball) against the SHIN's front (the calf's
+// rest-pose front, i.e. where the kneecap faces), both across the shin, in
+// degrees. A natural foot points within ~30–40° of the knee (toe-out); much
+// more is a foot twisted at the ankle (user: 'the foot bends wrongly in the
+// iron'). Independent of levelFoot — it reads only bones and the rest pose.
+export function footTwistDeg(leg) {
+  const K = wpos(leg.l), A = wpos(leg.tip), Bl = wpos(leg.ball);
+  const ax = A.clone().sub(K).normalize();
+  const front = leg.frL.clone().applyQuaternion(leg.l.getWorldQuaternion(new THREE.Quaternion()));
+  const foot = Bl.sub(A);
+  const a = foot.addScaledVector(ax, -foot.dot(ax)), b = front.addScaledVector(ax, -front.dot(ax));
+  if (a.length() < 1e-3 || b.length() < 1e-3) return 0;
+  return a.angleTo(b) * 180 / Math.PI;
 }
 
 // how far a leg's kneecap is turned away from its bend direction (degrees)
@@ -418,13 +447,20 @@ export class RiderController {
     for (const g of B.legs) {
       const sg = stirrupGeom(this.k), hangL = sg.hang(g.side);
       const ankL = new V3(g.side * RP.stirrupWidth * this.k / 1.07, -P.stirrupDrop * this.k / 1.07, P.stirrupFwd);
-      // the tread hangs from a fixed strap: the foot cannot go lower than it reaches
-      const tr = ankL.clone().add(new V3(0, -sg.ankleAboveTread, 0)).sub(hangL);
-      if (tr.length() > sg.len) ankL.copy(hangL).addScaledVector(tr.normalize(), sg.len).add(new V3(0, sg.ankleAboveTread, 0));
+      // the tread hangs from a fixed strap: the foot is AT its end — never
+      // lower (stretch) nor higher (the iron would ride up: an elastic strap).
+      // Postures that rise (gallop, jump) lift the seat; the knees bend.
+      // The iron's tread goes under the BALL of the foot (stirrups.js), so the
+      // strap length is measured to there: ball offset from the ankle as last
+      // frame's foot had it (it was measured to the ankle: the foot sat 10 cm off its iron)
+      const off = g.ballOff ?? new V3(0, -0.06, 0.12);                 // ankle → tread, saddle frame
+      const tr = ankL.clone().add(off).sub(hangL);
+      ankL.copy(hangL).addScaledVector(tr.normalize(), sg.len).sub(off);
       const T = S.localToWorld(ankL);
       const pole = fwd.clone().multiplyScalar(0.85).addScaledVector(lft, g.side * 0.55).normalize();
       solveLeg(g, T, pole);
       levelFoot(g, fwd, up, lft);                        // in the iron: foot level, heel a touch down, toe a touch out
+      g.ballOff = S.worldToLocal(wpos(g.ball).addScaledVector(up, -0.035)).sub(S.worldToLocal(wpos(g.tip)));
     }
 
     // Horse collision for hands + reins: oval sections along the withers and
@@ -477,7 +513,7 @@ export class RiderController {
     // Fists
     for (const hd of this.hands) for (const c of hd.curl) c.b.quaternion.multiply(q.setFromAxisAngle(c.axis, c.angle * RP.grip));
     rig.updateMatrixWorld(true);
-    this.stirrups.update(dt, this.B.legs.map((g) => ({ in: 1, ankle: wpos(g.tip), ball: wpos(g.ball), fwd })));
+    this.stirrups.update(dt, this.B.legs.map((g) => ({ in: 1, force: true, ankle: wpos(g.tip), ball: wpos(g.ball), fwd })));
     // just sat down: blend away from the mount's last pose
     if (this.pendingBlend) { this.mountSys.blend = { snap: this.pendingBlend, t: 0, dur: 0.35 }; this.pendingBlend = null; }
     this.mountSys.applyBlend(dt);
