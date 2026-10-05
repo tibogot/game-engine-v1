@@ -91,7 +91,10 @@ export function record(ctrl, rider, sc, ik, HP, startZ) {
   return frames;
 }
 
-export function analyse(frames, sole) {
+// ref: the IK-off run of the same action — a hoof only counts as PLANTED where
+// the clip itself has it down (a swinging hoof skimming the ground, lowered a
+// cm by the body sinking in a turn, is not "sliding")
+export function analyse(frames, sole, ref = null) {
   const r = { under: 0, slide: 0, pop: 0, height: 0, at: {} };
   const note = (k, v, f) => { if (v > r[k]) { r[k] = v; r.at[k] = `${f.state} t=${f.t.toFixed(2)}`; } };
   for (let i = 0; i < frames.length; i++) {
@@ -103,7 +106,8 @@ export function analyse(frames, sole) {
       if (i > 0) {
         const p = frames[i - 1];
         const hp = p.feet[k].y - sole - p.ground[k];
-        if (h < 0.02 && hp < 0.02) note("slide", Math.hypot(f.feet[k].x - p.feet[k].x, f.feet[k].z - p.feet[k].z), f);
+        const refDown = !ref || (ref[i] && ref[i - 1] && ref[i].feet[k].y - sole - ref[i].ground[k] < 0.02 && ref[i - 1].feet[k].y - sole - ref[i - 1].ground[k] < 0.02);
+        if (h < 0.02 && hp < 0.02 && refDown) note("slide", Math.hypot(f.feet[k].x - p.feet[k].x, f.feet[k].z - p.feet[k].z), f);
       }
       if (i > 0 && i < frames.length - 1) {
         const mid = frames[i - 1].feet[k].clone().add(frames[i + 1].feet[k]).multiplyScalar(0.5);
@@ -139,7 +143,7 @@ function auditOne({ ctrl, rider, HP }, name, { startZ = -25 } = {}) {
   {
     const on = record(ctrl, rider, sc, true, HP, startZ);
     const off = record(ctrl, rider, sc, false, HP, startZ);
-    const a = analyse(on, sole), b = analyse(off, sole);
+    const a = analyse(on, sole, off), b = analyse(off, sole);
     let joint = 0, jointAt = "";
     if (!sc.procedural) for (let i = 0; i < Math.min(on.length, off.length); i++) {
       for (let k = 0; k < on[i].joints.length; k++) {

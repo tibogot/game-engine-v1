@@ -112,7 +112,7 @@
       const arena = buildArena(scene);
 
       // ── Horse ────────────────────────────────────────────────────────────────
-      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: 2.3 });
+      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? 2.1) }   /* ?hh= horse height for tests */);
       scene.add(horse.rig);
       // Coat: the pack exports the horse 40% metallic, which renders dark and
       // muddy without reflections — make it a matte coat, brighter chestnut;

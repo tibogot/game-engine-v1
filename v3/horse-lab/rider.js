@@ -23,6 +23,7 @@ import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 import { rotateWorld, solveTwoBone } from "./horse.js";
 import { Rein } from "./reins.js";
 import { MountSystem } from "./mount.js";
+import { Stirrups, stirrupGeom } from "./stirrups.js";
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -49,16 +50,16 @@ export const RP = {
 
 // Postures (m / rad). Hands are relative to the saddle frame.
 const POSES = {
-  idle:   { lean: -0.04, seatUp: 0,    handFwd: 0.25, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.50, stirrupFwd: 0.12, slack: 1.0 },
-  walk:   { lean: 0.03,  seatUp: 0,    handFwd: 0.26, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.50, stirrupFwd: 0.10, slack: 1.0 },
-  trot:   { lean: 0.12,  seatUp: 0.01, handFwd: 0.28, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.47, stirrupFwd: 0.08, slack: 1.0 },
-  canter: { lean: 0.22,  seatUp: 0.03, handFwd: 0.32, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.46, stirrupFwd: 0.06, slack: 0.98 },
-  gallop: { lean: 0.42,  seatUp: 0.07, handFwd: 0.38, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.43, stirrupFwd: 0.04, slack: 0.97 },
+  idle:   { lean: -0.04, seatUp: 0,    handFwd: 0.25, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.63, stirrupFwd: 0.12, slack: 1.0 },
+  walk:   { lean: 0.03,  seatUp: 0,    handFwd: 0.26, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.63, stirrupFwd: 0.10, slack: 1.0 },
+  trot:   { lean: 0.12,  seatUp: 0.01, handFwd: 0.28, handUp: 0.25, handApart: 0.125, stirrupDrop: 0.64, stirrupFwd: 0.08, slack: 1.0 },
+  canter: { lean: 0.22,  seatUp: 0.03, handFwd: 0.32, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.6, stirrupFwd: 0.06, slack: 0.98 },
+  gallop: { lean: 0.42,  seatUp: 0.07, handFwd: 0.38, handUp: 0.25, handApart: 0.12, stirrupDrop: 0.54, stirrupFwd: 0.04, slack: 0.97 },
   jump:   { lean: 0.75,  seatUp: 0.14, handFwd: 0.50, handUp: 0.33, handApart: 0.12,  stirrupDrop: 0.42, stirrupFwd: 0.0,  slack: 1.05 },
-  eat:    { lean: 0.12,  seatUp: 0,    handFwd: 0.42, handUp: 0.24, handApart: 0.11,  stirrupDrop: 0.50, stirrupFwd: 0.12, slack: 1.6 },
+  eat:    { lean: 0.12,  seatUp: 0,    handFwd: 0.42, handUp: 0.24, handApart: 0.11,  stirrupDrop: 0.63, stirrupFwd: 0.12, slack: 1.6 },
   rear:   { lean: 0.6,   seatUp: 0.03, handFwd: 0.44, handUp: 0.32, handApart: 0.11,  stirrupDrop: 0.46, stirrupFwd: 0.02, slack: 1.1 },
-  buck:   { lean: -0.32, seatUp: 0.04, handFwd: 0.20, handUp: 0.36, handApart: 0.14,  stirrupDrop: 0.50, stirrupFwd: 0.22, slack: 1.0 },
-  back:   { lean: -0.12, seatUp: 0,    handFwd: 0.20, handUp: 0.33, handApart: 0.135, stirrupDrop: 0.50, stirrupFwd: 0.16, slack: 0.95 },
+  buck:   { lean: -0.32, seatUp: 0.04, handFwd: 0.20, handUp: 0.36, handApart: 0.14,  stirrupDrop: 0.63, stirrupFwd: 0.22, slack: 1.0 },
+  back:   { lean: -0.12, seatUp: 0,    handFwd: 0.20, handUp: 0.33, handApart: 0.135, stirrupDrop: 0.63, stirrupFwd: 0.16, slack: 0.95 },
 };
 const POSE_KEYS = Object.keys(POSES.idle);
 
@@ -274,6 +275,7 @@ export class RiderController {
     r.rig.updateMatrixWorld(true);
     const fwdRest = new V3(0, 0, 1).applyQuaternion(r.rig.getWorldQuaternion(new THREE.Quaternion()));
     for (const g of this.B.legs) legAxes(g, fwdRest);
+    this.stirrups = new Stirrups(scene, this.saddle, this.k);
     this.mountSys = new MountSystem(this);
   }
 
@@ -309,6 +311,7 @@ export class RiderController {
 
   setVisible(v) {
     this.r.rig.visible = v;
+    this.stirrups?.setVisible(v);
     for (const l of this.reins) l.setVisible(v);
   }
 
@@ -404,7 +407,12 @@ export class RiderController {
 
     // Legs into the stirrups
     for (const g of B.legs) {
-      const T = S.localToWorld(new V3(g.side * RP.stirrupWidth * this.k / 1.07, -P.stirrupDrop * this.k / 1.07, P.stirrupFwd));
+      const sg = stirrupGeom(this.k), hangL = sg.hang(g.side);
+      const ankL = new V3(g.side * RP.stirrupWidth * this.k / 1.07, -P.stirrupDrop * this.k / 1.07, P.stirrupFwd);
+      // the tread hangs from a fixed strap: the foot cannot go lower than it reaches
+      const tr = ankL.clone().add(new V3(0, -sg.ankleAboveTread, 0)).sub(hangL);
+      if (tr.length() > sg.len) ankL.copy(hangL).addScaledVector(tr.normalize(), sg.len).add(new V3(0, sg.ankleAboveTread, 0));
+      const T = S.localToWorld(ankL);
       const pole = fwd.clone().multiplyScalar(0.85).addScaledVector(lft, g.side * 0.55).normalize();
       solveLeg(g, T, pole);
     }
@@ -459,6 +467,7 @@ export class RiderController {
     // Fists
     for (const hd of this.hands) for (const c of hd.curl) c.b.quaternion.multiply(q.setFromAxisAngle(c.axis, c.angle * RP.grip));
     rig.updateMatrixWorld(true);
+    this.stirrups.update(dt, this.B.legs.map((g) => ({ in: 1, ankle: wpos(g.tip), fwd })));
     // just sat down: blend away from the mount's last pose
     if (this.pendingBlend) { this.mountSys.blend = { snap: this.pendingBlend, t: 0, dur: 0.35 }; this.pendingBlend = null; }
     this.mountSys.applyBlend(dt);

@@ -26,6 +26,7 @@
 import * as THREE from "three";
 import { rotateWorld, solveTwoBone } from "./horse.js";
 import { solveLeg } from "./rider.js";
+import { stirrupGeom } from "./stirrups.js";
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -39,6 +40,13 @@ export const MP = {
   jogSpeed: 3.2,
   turnRate: 2.6,          // rad/s on foot
   reach: 3.2,             // m: how close to the horse F mounts
+  stand: 0.5,             // m (× k) out from the saddle centre: ~0.35 m from the horse's side, at its shoulder
+  letDown: false,
+  pull: 0.07,             // m the foot draws the near iron out from the horse's side         // false = the stirrup stays at riding length; the foot must reach it
+  mountDrop: 0.18,        // m below the hip the let-down stirrup is taken (natural up to ~10–20 cm below;
+                          // at riding length it hung 23–31 cm ABOVE the hip and the hip spun 160°+)
+  kneeUp: 0.3,
+  crouch: 0,           // m the hips dip while the foot goes up (more dip = the stirrup is relatively higher)           // how much the stirrup leg's knee points UP (toward the chest) while the foot is raised
 };
 
 // A path of keys [t, value] evaluated with a smooth (Catmull-Rom) curve; values
@@ -73,15 +81,16 @@ function track(keys) {
 // horse's left, y = up (0 = saddle surface), z = forward. `G` = the ground's
 // height in that frame, `ph` = the robot's standing pelvis height, `st` = the
 // stirrup point (same as riding), `seat` = the riding pelvis height.
-function buildMount({ G, ph, st, seat, k, au }) {
+function buildMount({ G, ph, st, seat, k, au, pull }) {
   const GA = G + au;                                           // ankle height when the foot is on the ground
-  const stand = [0.66 * k, G + ph, 0.16 * k];
+  const D = MP.stand;                                         // how far out from the horse the rider stands (× k)
+  const stand = [D * k, G + ph, 0.16 * k];
   return {
     pelvis: track([
       [0.0, stand],
-      [0.5, [0.62 * k, G + ph - 0.07, 0.13 * k]],               // a little dip: the foot goes up
-      [0.72, [0.6 * k, G + ph + 0.02, 0.1 * k]],                // weight onto the stirrup foot
-      [1.0, [0.44 * k, st.y + 0.62, 0.06 * k]],                 // spring up: standing in the stirrup, leg straight, hips at saddle height
+      [0.5, [(D - 0.03) * k, G + ph - MP.crouch, 0.12 * k]],          // a slight dip as the foot goes up
+      [0.72, [(D - 0.06) * k, G + ph - 0.04, 0.1 * k]],                // weight onto the stirrup foot
+      [1.12, [0.44 * k, st.y + 0.62, 0.06 * k]],                // spring up (over the stirrup foot): standing in it, leg straight, hips at saddle height
       [1.3, [0.24 * k, 0.33, 0.0]],                             // over the saddle, lying forward
       [1.75, [0.06 * k, 0.3, -0.04 * k]],                       // the leg goes over
       [2.15, [0.0, seat + 0.05, 0.0]],
@@ -92,21 +101,26 @@ function buildMount({ G, ph, st, seat, k, au }) {
     lean: track([[0, 0.02], [0.5, 0.12], [0.95, 0.42], [1.3, 0.8], [1.6, 0.95], [1.85, 0.55], [2.15, 0.14], [2.6, 0.03]]),
     // the stirrup foot (rider's left on the left side)
     nearFoot: track([
-      [0.0, [0.66 * k, GA, 0.29 * k]],
-      [0.24, [0.66 * k, GA, 0.29 * k]],
+      [0.0, [D * k, GA, 0.29 * k]],
+      [0.24, [D * k, GA, 0.29 * k]],
       // the stirrup is let down for mounting (the horse is tall: at its riding
       // length it hangs ABOVE the robot's hip, which forced the knee behind the
       // leg and spun the hip 150°) — the foot goes in just below hip height
-      [0.46, [st.x + 0.1 * k, G + ph - 0.22, st.z + 0.06]],
-      [0.6, [st.x + 0.04 * k, G + ph - 0.16, st.z]],
-      [0.72, [st.x + 0.04 * k, G + ph - 0.16, st.z]],
-      [1.0, [st.x, st.y, st.z]],                                // rises with the rider, back to riding length
+      // the foot goes into the REAL stirrup (fixed strap): the iron is pulled
+      // out toward the rider, which lifts it a little, foot about 20 cm above
+      // the hip — knee high, a slight crouch
+      // to where the near iron HANGS (barely pulled out): the foot goes to the
+      // stirrup, the stirrup does not fly to the foot
+      [0.46, pull(MP.pull + 0.03)],
+      [0.6, pull(MP.pull)],
+      [0.72, pull(MP.pull)],
+      [1.12, [st.x, st.y, st.z]],                               // the iron rises with the rider
       [2.6, [st.x, st.y, st.z]],
     ]),
     // the swinging leg (rider's right on the left side)
     farFoot: track([
-      [0.0, [0.66 * k, GA, 0.03 * k]],
-      [0.8, [0.64 * k, GA, 0.03 * k]],                          // pushes off the ground
+      [0.0, [D * k, GA, 0.03 * k]],
+      [0.8, [(D - 0.02) * k, GA, 0.03 * k]],                          // pushes off the ground
       [1.05, [0.56 * k, GA + 0.25, -0.08 * k]],
       [1.35, [0.42 * k, -0.08, -0.3 * k]],                      // trailing, lifting behind
       [1.62, [0.12 * k, 0.42, -0.5 * k]],                       // over the croup, knee bent (the leg is ~0.9 m)
@@ -118,13 +132,69 @@ function buildMount({ G, ph, st, seat, k, au }) {
     nearHand: track([[0.0, [0.3 * k, -0.25, 0.3 * k]], [0.3, [0.12 * k, 0.15, 0.42 * k]], [1.9, [0.12 * k, 0.15, 0.42 * k]], [2.6, [0.125, 0.25, 0.25]]]),
     farHand: track([[0.0, [0.3 * k, -0.25, 0.0]], [0.38, [0.03 * k, 0.12, -0.24 * k]], [1.2, [0.03 * k, 0.12, -0.24 * k]], [1.5, [0.0, 0.16, 0.16 * k]], [1.95, [0.0, 0.16, 0.16 * k]], [2.6, [-0.125, 0.25, 0.25]]]),
     handW: track([[0.0, 0], [0.3, 1], [2.6, 1]]),             // from hanging arms to IK
+    // phase weights (knee directions, stirrups, gaze)
+    astride: (T) => smooth((T - 2.0) / 0.4),
+    raised: (T) => smooth((T - 0.2) / 0.25) * (1 - smooth((T - 0.9) / 0.25)),
+    swing: (T) => smooth((T - 1.05) / 0.3) * (1 - smooth((T - 1.95) / 0.3)),
+    look: (T) => clamp(1 - T / 1.6, 0, 1),
+    nearIn: (T) => (T > 0.4 ? 1 : 0), farIn: (T) => (T > 2.3 ? 1 : 0),
+    duration: 2.6,
     stand,
+  };
+}
+
+// The DISMOUNT (its own movement, not the mount backwards — like the reference
+// game): stand up in the near stirrup, swing the far leg back over the croup
+// with the body upright, hang a moment beside the horse, step down far foot
+// first, near foot out of the iron, stand.
+function buildDismount({ G, ph, st, seat, k, au }) {
+  const GA = G + au, D = MP.stand;
+  const inStir = [st.x - 0.1 * k, st.y + 0.74, st.z - 0.05];   // standing in the near stirrup
+  return {
+    pelvis: track([
+      [0.0, [0.0, seat, 0.0]],
+      [0.45, inStir],
+      [0.9, [st.x - 0.06 * k, st.y + 0.77, -0.06 * k]],
+      [1.35, [st.x + 0.1 * k, st.y + 0.68, 0.0]],               // beside the horse, still in the stirrup
+      [1.8, [(D - 0.06) * k, G + ph - 0.07, 0.08 * k]],          // landed on the far foot, knees soft
+      [2.4, [D * k, G + ph, 0.12 * k]],
+    ]),
+    yaw: track([[0, 0], [0.45, -0.15], [0.9, -0.75], [1.35, -1.55], [1.8, -1.8], [2.4, -1.85]]),
+    lean: track([[0, 0.03], [0.45, 0.3], [0.9, 0.42], [1.35, 0.22], [1.8, 0.14], [2.4, 0.02]]),
+    nearFoot: track([
+      [0.0, [st.x, st.y, st.z]],
+      [1.5, [st.x, st.y, st.z]],
+      [1.75, [st.x + 0.18 * k, (st.y + GA) / 2, st.z + 0.05]],  // out of the iron, down
+      [2.05, [D * k, GA, 0.27 * k]],
+      [2.4, [D * k, GA, 0.27 * k]],
+    ]),
+    farFoot: track([
+      [0.0, [-st.x, st.y, st.z]],
+      [0.35, [-st.x + 0.06 * k, st.y + 0.08, st.z - 0.1 * k]],  // out of its stirrup
+      [0.65, [-0.12 * k, 0.22, -0.48 * k]],                     // lifting behind
+      [0.9, [0.1 * k, 0.4, -0.55 * k]],                         // over the croup
+      [1.15, [0.36 * k, 0.0, -0.36 * k]],
+      [1.4, [0.46 * k, st.y - 0.12, -0.1 * k]],                 // hanging beside the near leg
+      [1.75, [(D - 0.02) * k, GA, 0.03 * k]],                   // lands
+      [2.4, [D * k, GA, 0.03 * k]],
+    ]),
+    nearHand: track([[0.0, [0.125, 0.25, 0.25]], [0.3, [0.12 * k, 0.15, 0.42 * k]], [1.6, [0.12 * k, 0.15, 0.42 * k]], [2.4, [0.3 * k, -0.25, 0.3 * k]]]),
+    farHand: track([[0.0, [-0.125, 0.25, 0.25]], [0.3, [0.0, 0.16, 0.16 * k]], [0.95, [0.0, 0.16, 0.16 * k]], [1.3, [0.06 * k, 0.12, -0.08 * k]], [1.7, [0.06 * k, 0.12, -0.08 * k]], [2.4, [0.3 * k, -0.25, 0.0]]]),
+    handW: track([[0.0, 1], [1.85, 1], [2.4, 0]]),
+    astride: (T) => 1 - smooth(T / 0.35),
+    raised: () => 0,
+    swing: (T) => smooth((T - 0.45) / 0.2) * (1 - smooth((T - 1.25) / 0.2)),
+    look: (T) => smooth((T - 1.3) / 0.3) * (1 - smooth((T - 2.05) / 0.3)),
+    nearIn: (T) => (T < 1.55 ? 1 : 0), farIn: (T) => (T < 0.3 ? 1 : 0),
+    duration: 2.4,
+    stand: [D * k, G + ph, 0.12 * k],
   };
 }
 
 export class MountSystem {
   constructor(rider) {
     this.rd = rider;
+    this.MP = MP;                // the settings THIS page uses (a test importing the module again gets a separate copy)
     const r = rider.r, hc = rider.hc;
     this.mode = "riding";
     this.t = 0;
@@ -212,10 +282,25 @@ export class MountSystem {
     const G = S.worldToLocal(new V3(a.x, hc.y, a.z)).y;
     return { S, q, toW, G };
   }
+  // the riding ankle position (left side), where the fixed strap holds the tread
   stirrup() {
-    const k = this.rd.k;
-    return new V3(0.38 * k / 1.07, -0.5 * k / 1.07, 0.12);
+    const k = this.rd.k, g = stirrupGeom(k), H = g.hang(1);
+    const x = 0.38 * k / 1.07, z = 0.12, dx = x - H.x, dz = z - H.z;
+    return new V3(x, H.y - Math.sqrt(g.len * g.len - dx * dx - dz * dz) + g.ankleAboveTread, z);
   }
+  // an ankle in the near stirrup with the iron pulled out sideways by `out` m
+  // The strap is LET DOWN for mounting (what riders do on a tall horse) so
+  // the foot goes in a little below the hip; mountExtra = how much longer.
+  stirrupPulled(out, fwd = 0.06) {
+    const g = stirrupGeom(this.rd.k), H = g.hang(1), { G } = this.frame();
+    if (!MP.letDown) { this.mountExtra = 0; return [H.x + out, H.y - Math.sqrt(Math.max(0, g.len * g.len - out * out - fwd * fwd)) + g.ankleAboveTread, H.z + fwd]; }
+    const ankleY = G + this.pelvisH - MP.mountDrop, dy = H.y + g.ankleAboveTread - ankleY;
+    this.mountExtra = Math.max(this.mountExtra ?? 0, Math.sqrt(dy * dy + out * out + fwd * fwd) - g.len);
+    return [H.x + out, ankleY, H.z + fwd];
+  }
+  // how far the near strap is let down at mount time T: lowered while walking
+  // up, back to riding length once seated
+  strapExtra(T) { return (this.mountExtra ?? 0) * smooth((T - 0.02) / 0.3) * (1 - smooth((T - 2.1) / 0.45)); }
   // Which side can the rider get on/off: left first (tradition), else right.
   clearSide(prefer = 1) {
     const { toW } = this.frame(), hc = this.hc, k = this.rd.k;
@@ -239,7 +324,7 @@ export class MountSystem {
       const s = this.clearSide(1);
       if (!s) return "blocked";
       this.side = s;
-      this.mode = "dismount"; this.t = MP.duration;
+      this.mode = "dismount"; this.t = 0;
       this.rd.dismountBlendFrom = this.snapshot();
       this.startBlend(0.25);
       this.play("idle", 0.4);
@@ -276,7 +361,7 @@ export class MountSystem {
     if (this.mode === "approach") {
       // walk to the mounting spot, then turn to face the horse, then mount
       const { toW, q } = this.frame(), k = rd.k, s = this.side;
-      const spot = toW(new V3(s * 0.66 * k, 0, 0.16 * k));
+      const spot = toW(new V3(s * MP.stand * k, 0, 0.16 * k));
       const dx = spot.x - this.gpos.x, dz = spot.z - this.gpos.z, dist = Math.hypot(dx, dz);
       const faceYaw = new THREE.Euler().setFromQuaternion(q, "YXZ").y + s * -1.85;   // facing the horse (towards its tail a little)
       let want;
@@ -318,13 +403,13 @@ export class MountSystem {
     rig.quaternion.setFromAxisAngle(new V3(0, 1, 0), this.gyaw);
     rig.updateMatrixWorld(true);
     this.applyBlend(dt);
+    rd.stirrups.update(dt, [{ in: 0 }, { in: 0 }]);
     rd.restReins(dt);
   }
 
   updatePerformance(dt) {
     const rd = this.rd, r = rd.r, rig = r.rig, B = rd.B, s = this.side, k = rd.k;
-    const dir = this.mode === "mount" ? 1 : -1;
-    this.t = clamp(this.t + dir * dt, 0, MP.duration);
+    const isMount = this.mode === "mount";
     for (const t of rd.touched) { t.b.position.copy(t.p); t.b.quaternion.copy(t.q); }
     rd.mixer.update(dt);
     for (const t of rd.touched) { t.p.copy(t.b.position); t.q.copy(t.b.quaternion); }
@@ -334,8 +419,13 @@ export class MountSystem {
     const seat = 0.1 + 0.035;                                  // pelvis above the saddle surface when seated
     this.perf ??= {};
     const key = `${s}:${G.toFixed(2)}`;
-    if (!this.perf[key]) this.perf[key] = buildMount({ G, ph: this.pelvisH, st, seat, k, au: this.ankleUp });
-    const M = this.perf[key];
+    if (!this.perf[key]) this.mountExtra = 0;
+    if (!this.perf[key]) this.perf[key] = { mount: null, dismount: null };
+    const P0 = this.perf[key];
+    if (!P0.mount) P0.mount = buildMount({ G, ph: this.pelvisH, st, seat, k, au: this.ankleUp, pull: (o) => this.stirrupPulled(o) });
+    if (!P0.dismount) P0.dismount = buildDismount({ G, ph: this.pelvisH, st, seat, k, au: this.ankleUp });
+    const M = isMount ? P0.mount : P0.dismount;
+    this.t = clamp(this.t + dt, 0, M.duration);
     const T = this.t;
     const mir = (v) => (v.x *= s, v);                          // the right side is the mirror image
     // Root: facing (yaw in the saddle frame), part of the lean; pelvis on its path.
@@ -367,14 +457,14 @@ export class MountSystem {
     // way the rider faces (and up as the foot lifts) — splaying it sideways
     // looked broken. Only astride the horse (seated) do the knees go out round
     // the barrel, like riding; the swinging leg's knee points DOWN over the croup.
-    const astride = smooth((T - 2.0) / 0.4);
+    const astride = M.astride(T);
     const kneeFwd = fwdR.clone().multiplyScalar(0.95).addScaledVector(up, 0.3).normalize();
     // foot raised to the stirrup (about hip height): the knee comes UP toward the
     // chest; once standing in the stirrup the leg straightens, knee forward again
-    const raised = smooth((T - 0.2) / 0.25) * (1 - smooth((T - 0.9) / 0.25));
+    const raised = M.raised(T);
     const kneeUp = up.clone().addScaledVector(fwdR, 0.35).addScaledVector(lftR, -legs[0].side * 0.15).normalize();
-    const kneeNear = kneeFwd.clone().lerp(kneeUp, raised * 0.35).normalize().lerp(fwdR.clone().multiplyScalar(0.85).addScaledVector(lftR, legs[0].side * 0.55).normalize(), astride).normalize();
-    const swing = smooth((T - 1.05) / 0.3) * (1 - smooth((T - 1.95) / 0.3));
+    const kneeNear = kneeFwd.clone().lerp(kneeUp, raised * MP.kneeUp).normalize().lerp(fwdR.clone().multiplyScalar(0.85).addScaledVector(lftR, legs[0].side * 0.55).normalize(), astride).normalize();
+    const swing = M.swing(T);
     const kneeFar = kneeFwd.clone().lerp(up.clone().negate().addScaledVector(fwdR, 0.3).normalize(), swing)
       .lerp(fwdR.clone().multiplyScalar(0.85).addScaledVector(lftR, legs[1].side * 0.55).normalize(), astride).normalize();
     const nearT = M.nearFoot(T), farT = M.farFoot(T);
@@ -392,16 +482,23 @@ export class MountSystem {
       solveTwoBone(g.u, g.l, cur, T3, pole, new V3(), true);
     });
     // head looks at what it's doing: the stirrup early, forward late
-    const look = clamp(1 - T / 1.6, 0, 1);
+    const look = M.look(T);
     rotateWorld(B.head, qq.setFromAxisAngle(lftR, 0.35 * look));
     // fists close on the reins / saddle as the hands arrive
     const q2 = new THREE.Quaternion();
     for (const hd of rd.hands) for (const c of hd.curl) c.b.quaternion.multiply(q2.setFromAxisAngle(c.axis, c.angle * w * 0.85));
     rig.updateMatrixWorld(true);
     this.applyBlend(dt);
+    // the near foot takes its iron as it arrives (0.4 s); the far foot finds
+    // its own as the rider sits (2.3 s)
+    const nearIn = M.nearIn(T), farIn = M.farIn(T);
+    const nearIdx = s > 0 ? 0 : 1;
+    const fw = new V3(0, 0, 1).applyQuaternion(sq);
+    const ex = this.strapExtra(T);
+    rd.stirrups.update(dt, [0, 1].map((i) => ({ in: i === nearIdx ? nearIn : farIn, ankle: wpos(B.legs[i].tip), fwd: fw, extra: i === nearIdx ? ex : 0 })));
     rd.restReins(dt);
     // ends
-    if (this.mode === "mount" && T >= MP.duration) {
+    if (this.mode === "mount" && T >= M.duration) {
       this.mode = "riding";
       rd.seatY = null;                                         // re-seed the seat spring
       rd.sitAction.reset().play();
@@ -409,7 +506,7 @@ export class MountSystem {
       this.cur = null;
       rd.pendingBlend = this.snapshot();                       // riding blends away from this pose
     }
-    if (this.mode === "dismount" && T <= 0) {
+    if (this.mode === "dismount" && T >= M.duration) {
       this.mode = "ground";
       const p = wpos(rd.B.pelvis);
       this.gpos.set(p.x, 0, p.z);
