@@ -36,7 +36,7 @@ export const RP = {
   pelvisUp: 0.1,       // m pelvis bone above the saddle surface
   absorb: 0.65,        // share of the saddle's rocking the spine takes back out
   upright: 0.6,        // share of the horse's slope pitch the spine takes back out
-  stirrupWidth: 0.38,  // m from the spine to each ankle
+  stirrupWidth: 0.36,  // m from the spine to each ankle
   grip: 1,             // finger curl (0 open … 1 fist)
   bitFollow: 0.45,     // how much the hands follow the horse's head nod
   steerHands: 1,       // how far the hands move when steering
@@ -129,6 +129,15 @@ export function solveLeg(leg, target, pole) {
   setBoneWorld(leg.l, leg.axL, leg.frL, ax2, p);   // shin front the same way
   return F;
 }
+// A foot in a stirrup: ankle→ball pointing forward, toe 10° up (heel down),
+// turned 12° out — riders' feet do not hang toe-down like the sitting clip's.
+export function levelFoot(g, fwd, up, lft) {
+  const A = wpos(g.tip), Bl = wpos(g.ball);
+  const cur = Bl.sub(A).normalize();
+  const want = fwd.clone().addScaledVector(up, 0.18).addScaledVector(lft, g.side * 0.21).normalize();
+  rotateWorld(g.tip, new THREE.Quaternion().setFromUnitVectors(cur, want));
+}
+
 // measured in the REST pose (constructor, before any animation): bone axis =
 // direction to the child, front = the character's forward, both in bone space
 function legAxes(leg, fwdW) {
@@ -250,7 +259,7 @@ export class RiderController {
 
     this.B = {
       pelvis: b("pelvis"), spine1: b("spine_01"), spine2: b("spine_02"), spine3: b("spine_03"), neck: b("neck_01"), head: b("Head"),
-      legs: [["thigh_l", "calf_l", "foot_l", 1], ["thigh_r", "calf_r", "foot_r", -1]].map(([t, c, f, s]) => ({ u: b(t), l: b(c), tip: b(f), side: s })),
+      legs: [["thigh_l", "calf_l", "foot_l", "ball_l", 1], ["thigh_r", "calf_r", "foot_r", "ball_r", -1]].map(([t, c, f, bl, s]) => ({ u: b(t), l: b(c), tip: b(f), ball: b(bl), side: s })),
       arms: [["upperarm_l", "lowerarm_l", "hand_l", 1], ["upperarm_r", "lowerarm_r", "hand_r", -1]].map(([t, c, f, s]) => ({ u: b(t), l: b(c), tip: b(f), side: s })),
     };
     const all = [this.B.pelvis, this.B.spine1, this.B.spine2, this.B.spine3, this.B.neck, this.B.head,
@@ -415,6 +424,7 @@ export class RiderController {
       const T = S.localToWorld(ankL);
       const pole = fwd.clone().multiplyScalar(0.85).addScaledVector(lft, g.side * 0.55).normalize();
       solveLeg(g, T, pole);
+      levelFoot(g, fwd, up, lft);                        // in the iron: foot level, heel a touch down, toe a touch out
     }
 
     // Horse collision for hands + reins: oval sections along the withers and
@@ -467,7 +477,7 @@ export class RiderController {
     // Fists
     for (const hd of this.hands) for (const c of hd.curl) c.b.quaternion.multiply(q.setFromAxisAngle(c.axis, c.angle * RP.grip));
     rig.updateMatrixWorld(true);
-    this.stirrups.update(dt, this.B.legs.map((g) => ({ in: 1, ankle: wpos(g.tip), fwd })));
+    this.stirrups.update(dt, this.B.legs.map((g) => ({ in: 1, ankle: wpos(g.tip), ball: wpos(g.ball), fwd })));
     // just sat down: blend away from the mount's last pose
     if (this.pendingBlend) { this.mountSys.blend = { snap: this.pendingBlend, t: 0, dur: 0.35 }; this.pendingBlend = null; }
     this.mountSys.applyBlend(dt);

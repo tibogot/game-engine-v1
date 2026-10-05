@@ -15,7 +15,7 @@ export const STRAP = { len: 0.78 };   // long, like the reference: the foot reac
 // saddle frame: x = the horse's left, y = up (0 = saddle surface), z = forward
 export function stirrupGeom(k) {
   return {
-    hang: (s) => new V3(s * 0.2 * k, -0.02, -0.02 * k),   // where the strap leaves the saddle flap
+    hang: (s) => new V3(s * 0.33 * k, -0.06, 0.28),       // the stirrup bar: straight ABOVE the riding iron (measured: the ball of the foot at x 0.36, z 0.28)
     len: STRAP.len * k,                                    // strap + iron, hang point → tread (m)
     barrel: 0.24 * k,                                      // the iron is kept at least this far out (horse's side)
     ankleAboveTread: 0.09,
@@ -69,7 +69,7 @@ export class Stirrups {
       // foot in the stirrup: the tread sits under the ball of the foot
       sd.inW += ((f.in > 0.5 ? 1 : 0) - sd.inW) * (1 - Math.exp(-14 * dt));
       if (f.ankle && sd.inW > 0.01) {
-        const tread = toL(f.ankle.clone().addScaledVector(upW, -g.ankleAboveTread).addScaledVector(f.fwd, 0.04));
+        const tread = f.ball ? toL(f.ball.clone().addScaledVector(upW, -0.035)) : toL(f.ankle.clone().addScaledVector(upW, -g.ankleAboveTread).addScaledVector(f.fwd, 0.04));   // under the ball of the foot (sole)
         sd.p.lerp(tread, sd.inW);
       }
       // the strap cannot stretch, and the iron stays off the horse's side

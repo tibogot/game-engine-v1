@@ -25,7 +25,7 @@
 // a second, so nothing snaps.
 import * as THREE from "three";
 import { rotateWorld, solveTwoBone } from "./horse.js";
-import { solveLeg } from "./rider.js";
+import { solveLeg, levelFoot } from "./rider.js";
 import { stirrupGeom } from "./stirrups.js";
 
 const V3 = THREE.Vector3;
@@ -472,6 +472,12 @@ export class MountSystem {
     const onGround = (p) => p.y <= G + 0.01;
     solveLeg(legs[0], footTarget(nearT), kneeNear);
     solveLeg(legs[1], footTarget(farT), kneeFar);
+    // a foot in its iron is levelled like riding (near / far by the phase)
+    {
+      const fwS = new V3(0, 0, 1).applyQuaternion(sq), lfS = new V3(1, 0, 0).applyQuaternion(sq);
+      if (M.nearIn(T)) levelFoot(legs[0], fwS, up, lfS);
+      if (M.farIn(T)) levelFoot(legs[1], fwS, up, lfS);
+    }
     // Hands: from the hanging clip pose to their targets (weight), elbows out-down
     const w = M.handW(T);
     const arms = s > 0 ? [B.arms[0], B.arms[1]] : [B.arms[1], B.arms[0]];
@@ -495,7 +501,7 @@ export class MountSystem {
     const nearIdx = s > 0 ? 0 : 1;
     const fw = new V3(0, 0, 1).applyQuaternion(sq);
     const ex = this.strapExtra(T);
-    rd.stirrups.update(dt, [0, 1].map((i) => ({ in: i === nearIdx ? nearIn : farIn, ankle: wpos(B.legs[i].tip), fwd: fw, extra: i === nearIdx ? ex : 0 })));
+    rd.stirrups.update(dt, [0, 1].map((i) => ({ in: i === nearIdx ? nearIn : farIn, ankle: wpos(B.legs[i].tip), ball: wpos(B.legs[i].ball), fwd: fw, extra: i === nearIdx ? ex : 0 })));
     rd.restReins(dt);
     // ends
     if (this.mode === "mount" && T >= M.duration) {
