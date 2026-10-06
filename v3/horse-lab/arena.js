@@ -10,6 +10,7 @@
 //   ground   — surfaces the horse stands on (down rays)
 //   blockers — things it must not walk through (chest-height forward rays)
 import * as THREE from "three";
+import { lineProxy } from "./collision.js";
 import { float, floor, mix, positionWorld, smoothstep, vec3, max, abs, fract, normalWorld, select } from "three/tsl";
 
 export const ZONES = [
@@ -222,6 +223,10 @@ export function buildArena(scene) {
       rails.push([mx, 0.55, mz, ry, len / n]);
       rails.push([mx, 1.05, mz, ry, len / n]);
     }
+    // the rays hit one plain box per run of rails (the door gap stays open)
+    const at = (i) => [ax + (bx - ax) * i / n, az + (bz - az) * i / n];
+    const runs = gapAt < 0 ? [[0, n]] : [[0, gapAt], [gapAt + 1, n]];
+    for (const [i0, i1] of runs) if (i1 > i0) { const [x0, z0] = at(i0), [x1, z1] = at(i1); blockers.push(lineProxy(x0, z0, x1, z1, 1.18)); }
   };
   fence(-58, -58, -36, -58); fence(-36, -58, -36, -36, 3); fence(-36, -36, -58, -36); fence(-58, -36, -58, -58);   // corral
   fence(-24, -30, 24, -30);                                       // a long run
@@ -233,7 +238,7 @@ export function buildArena(scene) {
   const railIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.1, 0.12, 1), wood, rails.length);
   rails.forEach(([x, y, z, ry, l], i) => railIM.setMatrixAt(i, m4.compose(ps.set(x, y, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, 1, l))));
   postIM.computeBoundingSphere(); railIM.computeBoundingSphere();
-  add(postIM, "block"); add(railIM, "block");
+  add(postIM, "none"); add(railIM, "none");             // drawn only: the rays hit the proxies
   // Corral door frame at the gap
   {
     const gx = -36, gz = -58 + 22 * 3.5 / 8;          // middle of rail section 3 of 8

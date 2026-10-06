@@ -70,6 +70,9 @@
       import GUI from "./ui/labGui.js";
       import { buildArena, zoneAt as yardZoneAt } from "./horse-lab/arena.js";
       import { buildParkour } from "./horse-lab/parkour.js";
+      import { buildFarm } from "./horse-lab/farm.js";
+      import { createLabSky } from "./horse-lab/sky.js";
+      import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
       import { loadHorse, HorseController, HP, GEARS } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP, applyRidingData } from "./horse-lab/rider.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
@@ -87,7 +90,8 @@
       const angDiff = (a, b) => Math.atan2(Math.sin(a - b), Math.cos(a - b));
 
       // ── Renderer / scene ─────────────────────────────────────────────────────
-      const renderer = new THREE.WebGPURenderer({ antialias: true });
+      // ?gpu=1: GPU timestamps for perf measurement (__HORSE.perf()); a constructor option, off by default
+      const renderer = new THREE.WebGPURenderer({ antialias: true, trackTimestamp: new URLSearchParams(location.search).has("gpu") });
       renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
       renderer.setSize(innerWidth, innerHeight);
       renderer.shadowMap.enabled = true;
@@ -104,7 +108,8 @@
       scene.fog = new THREE.Fog(SKY, 110, 280);
 
       const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 500);
-      scene.add(new THREE.HemisphereLight(0xe2ebff, 0x8c8a80, 1.5));
+      const hemi = new THREE.HemisphereLight(0xe2ebff, 0x8c8a80, 1.5);
+      scene.add(hemi);
       const sun = new THREE.DirectionalLight(0xfff2e0, 2.6);
       sun.castShadow = true;
       sun.shadow.mapSize.set(2048, 2048);
@@ -115,11 +120,17 @@
         c.left = -24; c.right = 24; c.top = 24; c.bottom = -24; c.near = 1; c.far = 120;
       }
       scene.add(sun, sun.target);
+      // the sky: Sky Pro (lights, exposure, fog follow it) — ?sky=flat for the old flat colour
+      const labSky = new URLSearchParams(location.search).get("sky") === "flat" ? null : createLabSky({ renderer, camera, scene, sun, hemi });
 
-      // level: the jump course (default) or the reference yard (?level=yard)
+      // level: the jump course (default), the farm with its sheep herd (?level=farm), or the reference yard (?level=yard)
       const LEVEL = new URLSearchParams(location.search).get("level") ?? "parkour";
-      const arena = LEVEL === "yard" ? buildArena(scene) : buildParkour(scene);
+      const arena = LEVEL === "yard" ? buildArena(scene) : LEVEL === "farm" ? buildFarm(scene, renderer) : buildParkour(scene);
       const zoneAt = arena.zoneAt ?? yardZoneAt;
+      // static level meshes sharing a material → one draw each (they stay the horse's ray targets)
+      const merged = mergeStatic(scene, scene.children.slice());
+      console.log("[horse-lab] static meshes merged", merged);
+      arena.init?.().catch(showErr);                          // the farm builds its sheep in the background
 
       // ── Horse ────────────────────────────────────────────────────────────────
       const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? 1.75) }   /* ?hh= horse height for tests; 1.75: the irons hang low enough (~0.55 m) to get on like the reference with the riding-length strap */);
@@ -128,13 +139,14 @@
       // muddy without reflections — make it a matte coat, brighter chestnut;
       // the darker / lighter coat zones follow the chosen colour.
       const coat = { color: "#b8743d" };
-      const horseMats = {};
-      horse.model.traverse((o) => { if (o.isMesh) { horseMats[o.material.name] = o.material; o.material.metalness = 0; o.material.roughness = 0.78; } });
+      // its 8 parts (one per material, each with its own copy of the skeleton) → one skinned mesh,
+      // colour per vertex; merged BEFORE the saddle is fitted (it raycasts the horse's meshes)
+      const horseSkin = new URLSearchParams(location.search).has("nomerge") ? null : mergeSkinned(horse.model, { roughness: 0.78, metalness: 0, flatShading: true });
       function applyCoat() {
         const c = new THREE.Color(coat.color);
-        horseMats.Main?.color.copy(c);
-        horseMats.Main_Dark?.color.copy(c).multiplyScalar(0.76);
-        horseMats.Main_Light?.color.copy(c).lerp(new THREE.Color(1, 0.95, 0.85), 0.2);
+        setZoneColor(horseSkin, "Main", c);
+        setZoneColor(horseSkin, "Main_Dark", c.clone().multiplyScalar(0.76));
+        setZoneColor(horseSkin, "Main_Light", c.clone().lerp(new THREE.Color(1, 0.95, 0.85), 0.2));
       }
       applyCoat();
       const ctrl = new HorseController(horse, arena);
@@ -142,11 +154,14 @@
       else ctrl.pos.set(0, 0, 2);
       $("loading").textContent = "loading rider…";
       const riderData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
+      mergeSkinned(riderData.model ?? riderData.rig);   // body + joints → one skinned mesh
       scene.add(riderData.rig);
       const rider = new RiderController(riderData, ctrl, scene);
       addHat(rider);                                       // cowboy hat on the head bone
       // the saddle, built on this horse's back (tack.js)
       const tack = new Tack(horse, rider);
+      mergeRigid(tack.group, { roughness: 0.8, flatShading: true, side: THREE.DoubleSide });   // saddle parts → one mesh on its bone
+      if (rider.hat) mergeRigid(rider.hat, { roughness: 0.85, flatShading: true });           // hat parts → one
       console.log("[horse-lab] saddle fit", tack.fit);
       await rider.mountSys.loadAnims();                     // get on / off as saved from the animation editor
       try {                                                 // riding postures, seat height, strap length (editor)
@@ -265,6 +280,8 @@
       const D = { timeScale: 1, skeleton: false, probes: false, camera: "follow", auditing: false };
       const CAM_MODES = { "left side": -Math.PI / 2, "right side": Math.PI / 2, front: Math.PI };
       const gui = new GUI({ title: "Horse lab" });
+      arena.addGui?.(gui);
+      labSky?.addGui(gui);
       const lookF = gui.addFolder("Horse look");
       lookF.addColor(coat, "color").name("coat colour").onChange(applyCoat);
       const body = gui.addFolder("Body on the ground");
@@ -307,7 +324,7 @@
       gaits.add(HP, "turnWalk", 0.3, 2.5, 0.05).name("turn walk (rad/s)");
       gaits.add(HP, "turnGallop", 0.3, 2.5, 0.05).name("turn gallop (rad/s)");
       const dbg = gui.addFolder("Debug");
-      dbg.add({ level: LEVEL }, "level", ["parkour", "yard"]).name("level (reloads)").onChange((v) => { const u = new URL(location.href); u.searchParams.set("level", v); location.href = u.href; });
+      dbg.add({ level: LEVEL }, "level", ["parkour", "farm", "yard"]).name("level (reloads)").onChange((v) => { const u = new URL(location.href); u.searchParams.set("level", v); location.href = u.href; });
       dbg.add({ audit: () => doAudit() }, "audit").name("run motion audit");
       dbg.add(D, "camera",["follow", "left side", "right side", "front"]).name("camera");
       dbg.add(D, "timeScale", 0.05, 1.5, 0.01).name("time scale");
@@ -341,6 +358,7 @@
           dt = D.step > 0 ? 1 / 60 : 0;
           if (D.step > 0) D.step--;
         }
+        const tCpu0 = performance.now();
         if (!D.auditing) {                                 // the audit drives the horse itself
           const inp = input();
           const onHorse = rider.mode === "riding";
@@ -350,6 +368,7 @@
           ctrl.update(rdt, editor.isOpen ? editor.horseInput() : onHorse ? inp : { fwd: 0, turn: 0, run: false });
           editor.afterHorse();
           rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : inp });
+          arena.update?.(dt, { ctrl, rider });                    // the farm's herd
           editor.afterUpdate();
         }
         if (D.probes) {
@@ -357,8 +376,16 @@
           ctrl.legs.forEach((g, i) => { hits[i].position.copy(g.hit); hits[i].visible = g.on && HP.ik; });
         }
         updateCamera(rawDt);
+        if (!D.skyOff) labSky?.update(rawDt, camTarget);
+        const tCpu1 = performance.now();
         renderer.info.reset();
         renderer.render(scene, camera);
+        if (renderer.backend.trackTimestamp) renderer.resolveTimestampsAsync(THREE.TimestampQuery.COMPUTE);   // (unresolved queries overflow the pool: the herd and the sky run compute)
+        if (renderer.backend.trackTimestamp && !PERF.on) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
+        if (PERF.on) {                                        // __HORSE.perf(): CPU update / render-submit ms, GPU ms, draws
+          PERF.upd += tCpu1 - tCpu0; PERF.sub += performance.now() - tCpu1; PERF.draws += renderer.info.render.drawCalls; PERF.n++;
+          if (renderer.backend.trackTimestamp) renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER).then(() => { PERF.gpu += renderer.info.render.timestamp; PERF.gn++; });
+        }
         hudT += rawDt;
         if (hudT > 0.2) {
           hudT = 0;
@@ -411,7 +438,14 @@
         }
       }
 
-      window.__HORSE = { renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      const PERF = { on: false, upd: 0, sub: 0, draws: 0, n: 0, gpu: 0, gn: 0 };
+      async function perf(frames = 240) {
+        Object.assign(PERF, { on: true, upd: 0, sub: 0, draws: 0, n: 0, gpu: 0, gn: 0 });
+        while (PERF.n < frames) await new Promise((r) => requestAnimationFrame(r));
+        PERF.on = false;
+        return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
+      }
+      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

@@ -6,6 +6,7 @@
 // The fixed length is the point: mounting now has to lift the foot to where a
 // real stirrup is, instead of the old invisible "let-down" one.
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 const V3 = THREE.Vector3;
 const clamp = THREE.MathUtils.clamp;
@@ -44,12 +45,12 @@ export class Stirrups {
       const strap = new THREE.Mesh(new THREE.BoxGeometry(0.032, 1, 0.006), leather);
       const ring = new THREE.Group();
       // sized for a boot: ~13 cm across inside, ~15 cm tall, tread 8 cm deep
-      const arch = new THREE.Mesh(new THREE.TorusGeometry(0.07, 0.009, 6, 16, Math.PI), iron);   // upper half-ring
-      arch.scale.set(1, 2.1, 1);                               // taller than wide, like a real iron
-      const tread = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.016, 0.08), iron);
-      tread.position.y = -0.002;
-      ring.add(arch, tread);
-      for (const m of [strap, arch, tread]) { m.castShadow = true; m.receiveShadow = true; }
+      // the iron: arch + tread as ONE geometry (one draw per iron)
+      const archG = new THREE.TorusGeometry(0.07, 0.009, 6, 16, Math.PI).scale(1, 2.1, 1);   // upper half-ring, taller than wide like a real iron
+      const treadG = new THREE.BoxGeometry(0.15, 0.016, 0.08).translate(0, -0.002, 0);
+      const ironMesh = new THREE.Mesh(mergeGeometries([archG, treadG]), iron);
+      ring.add(ironMesh);
+      for (const m of [strap, ironMesh]) { m.castShadow = true; m.receiveShadow = true; }
       scene.add(strap, ring);
       return { s, strap, ring, p: null, q: null, inW: 0 };   // p = tread centre (saddle frame), q = previous
     });

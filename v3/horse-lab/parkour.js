@@ -17,7 +17,9 @@
 // The strip x −8…8, z −28…15 stays empty: the motion audit runs there.
 // Returns { ground, blockers, half, spawn, zoneAt, fences } like the arena.
 import * as THREE from "three";
-import { float, floor, mix, positionWorld, positionGeometry, smoothstep, vec3, max, abs, fract, normalWorld, select } from "three/tsl";
+import { boxProxy, lineProxy } from "./collision.js";
+import { createSigns } from "./signs.js";
+import { attribute, instancedBufferAttribute, float, floor, mix, positionWorld, positionGeometry, smoothstep, vec3, max, abs, fract, normalWorld, select } from "three/tsl";
 
 const FX = 137, Z0 = -45, Z1 = 115;   // walls
 
@@ -38,38 +40,40 @@ function gridMaterial() {
 }
 
 // prototype-style solid: flat colour, a darker 0.5 m checker on every face
-function protoMaterial(hex, dark = 0.86) {
-  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.8 });
+// (one material per colour; mergeStatic bakes the colours of a family into one draw)
+const PROTO = new Map(), PROTO_VC = {};
+const protoShade = (dark) => {
   const q = positionWorld.sub(normalWorld.mul(0.01)).div(0.5);
   const c = floor(q.x).add(floor(q.y)).add(floor(q.z)).mod(2);
-  m.colorNode = vec3(...new THREE.Color(hex).toArray()).mul(select(abs(c).lessThan(0.5), float(1), float(dark)));
+  return select(abs(c).lessThan(0.5), float(1), float(dark));
+};
+function protoMaterial(hex, dark = 0.86) {
+  const key = hex + "|" + dark;
+  if (PROTO.has(key)) return PROTO.get(key);
+  const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.8 });
+  m.colorNode = vec3(...new THREE.Color(hex).toArray()).mul(protoShade(dark));
+  m.userData.family = "proto|" + dark;
+  m.userData.bakeColor = new THREE.Color(hex);
+  m.userData.vertexColored = () => {
+    if (!PROTO_VC[dark]) { PROTO_VC[dark] = new THREE.MeshStandardNodeMaterial({ roughness: 0.8 }); PROTO_VC[dark].colorNode = attribute("color", "vec3").mul(protoShade(dark)); }
+    return PROTO_VC[dark];
+  };
+  PROTO.set(key, m);
   return m;
 }
 
 // show-jumping pole: six stripes along its length, whatever the length
-function poleMaterial(a, b) {
+// colour per pole (an instanced attribute): every pole of the course in one draw
+function poleMaterial(colAttr, b) {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.6 });
   const s = fract(positionGeometry.z.add(0.5).mul(6)).lessThan(0.5);
-  m.colorNode = select(s, vec3(...new THREE.Color(a).toArray()), vec3(...new THREE.Color(b).toArray()));
+  m.colorNode = select(s, instancedBufferAttribute(colAttr), vec3(...new THREE.Color(b).toArray()));
   return m;
 }
 
-function sign(text, h = 0.9) {
-  const cv = document.createElement("canvas"), ctx = cv.getContext("2d");
-  const font = "700 92px system-ui, sans-serif";
-  ctx.font = font;
-  const w = Math.ceil(ctx.measureText(text).width) + 60;
-  cv.width = w; cv.height = 130;
-  ctx.fillStyle = "rgba(24,28,34,0.82)"; ctx.beginPath(); ctx.roundRect(0, 0, w, 130, 26); ctx.fill();
-  ctx.font = font; ctx.textBaseline = "middle"; ctx.fillStyle = "#fff"; ctx.fillText(text, 30, 68);
-  const tex = new THREE.CanvasTexture(cv);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
-  s.scale.set(h * w / 130, h, 1);
-  return s;
-}
 
 export function buildParkour(scene) {
+  const signs = createSigns();                             // every board in one draw
   const ground = [], blockers = [], fences = [];
   const add = (m, kind) => {
     m.castShadow = kind !== "floor"; m.receiveShadow = true;
@@ -94,23 +98,28 @@ export function buildParkour(scene) {
   // ── fence parts (instanced: poles, standards, wings) ──
   const stands = [], wings = [];
   const white = 0xf2f2ee, orange = 0xe8742c, blue = 0x2f6fd6, red = 0xd23a32;
-  const poleMats = { orange: poleMaterial(orange, white), blue: poleMaterial(blue, white), red: poleMaterial(red, white) };
+  const poleColor = { orange, blue, red };
   const polesBy = { orange: [], blue: [], red: [] };
 
   // A fence across the path at (x, z): `dir` is the riding direction (rad,
   // 0 = +z, π/2 = +x); `skew` turns the fence line off square (an angled fence).
   // type: vertical | oxer | wall | logs | pole
-  const fence = (n, x, z, dir, h, { type = "vertical", width = 4, spread = 1.2, skew = 0, color = "orange", label } = {}) => {
+  // base: the ground it stands on (a hill), m
+  const fence = (n, x, z, dir, h, { type = "vertical", width = 4, spread = 1.2, skew = 0, color = "orange", label, base = 0 } = {}) => {
     const ry = dir + skew;                                   // the poles lie along the fence line: local z after a yaw of ry + π/2
     const along = new THREE.Vector3(Math.cos(ry), 0, -Math.sin(ry));   // fence line (perpendicular to the path)
     const fwd = new THREE.Vector3(Math.sin(ry), 0, Math.cos(ry));
     const rails = (cx, cz, top) => {
       const k = top > 1.05 ? 4 : top > 0.7 ? 3 : 2;
-      for (let i = 0; i < k; i++) polesBy[color].push([cx, top - i * (top - 0.25) / Math.max(1, k - 1) - 0.055, cz, ry + Math.PI / 2, width]);
+      for (let i = 0; i < k; i++) polesBy[color].push([cx, base + top - i * (top - 0.25) / Math.max(1, k - 1) - 0.055, cz, ry + Math.PI / 2, width]);
+      // the rays see one solid box for the rail line + standards (nothing slips between rails)
+      blockers.push(lineProxy(cx - along.x * (width / 2 + 0.17), cz - along.z * (width / 2 + 0.17), cx + along.x * (width / 2 + 0.17), cz + along.z * (width / 2 + 0.17), base + top, 0.14));
       for (const s of [-1, 1]) {
-        stands.push([cx + along.x * s * (width / 2 + 0.1), cz + along.z * s * (width / 2 + 0.1), top + 0.3, ry]);
+        stands.push([cx + along.x * s * (width / 2 + 0.1), cz + along.z * s * (width / 2 + 0.1), base + top + 0.3, ry]);
         // wings: a slanted board out from each standard (the run-out guide)
-        wings.push([cx + along.x * s * (width / 2 + 0.75) - fwd.x * 0.35, cz + along.z * s * (width / 2 + 0.75) - fwd.z * 0.35, Math.max(0.9, top), ry + s * 0.45]);
+        const wx = cx + along.x * s * (width / 2 + 0.75) - fwd.x * 0.35, wz = cz + along.z * s * (width / 2 + 0.75) - fwd.z * 0.35, wh = base + Math.max(0.9, top);
+        wings.push([wx, wz, wh, ry + s * 0.45]);
+        blockers.push(boxProxy(0.08, wh, 1.3, wx, wh / 2, wz, ry + s * 0.45));
       }
     };
     let top = h;
@@ -131,12 +140,10 @@ export function buildParkour(scene) {
         add(c, "block");
       }
       top = 0.75;
-    } else if (type === "pole") polesBy[color].push([x, h - 0.06, z, ry + Math.PI / 2, width]);
+    } else if (type === "pole") { polesBy[color].push([x, h - 0.06, z, ry + Math.PI / 2, width]); blockers.push(lineProxy(x - along.x * width / 2, z - along.z * width / 2, x + along.x * width / 2, z + along.z * width / 2, h, 0.12)); }
     // the sign stands beside the fence, past the wing: above it, it hid the horse mid-jump
-    const s = sign(label ?? `${n} · ${top.toFixed(2)} m`, 0.6);
-    s.position.set(x + along.x * (width / 2 + 2.6), 1.9, z + along.z * (width / 2 + 2.6));
-    scene.add(s);
-    fences.push({ n, x, z, dir: ry, h: top, type, base: 0 });   // dir: square to the fence line
+    signs.add(label ?? `${n} · ${top.toFixed(2)} m`, x + along.x * (width / 2 + 2.6), base + 1.9, z + along.z * (width / 2 + 2.6), ry + Math.PI);   // facing the rider coming at it
+    fences.push({ n, x, z, dir: ry, h: top, type, base });   // dir: square to the fence line
   };
 
   const E = Math.PI / 2, W = -Math.PI / 2;
@@ -166,7 +173,7 @@ export function buildParkour(scene) {
     const b = new THREE.Mesh(new THREE.BoxGeometry(12, 1.0, 10), protoMaterial(0x6f9a4e, 0.9));
     b.position.set(24, 0.5, 70);
     add(b, "ground");
-    const s = sign("14 · bank up 1.00 m, drop off"); s.position.set(30, 2.6, 70); scene.add(s);
+    signs.add("14 · bank up 1.00 m, drop off", 30, 2.6, 75.5, Math.PI / 2);
     fences.push({ n: 14, x: 30, z: 70, dir: W, h: 1.0, type: "bank" });
   }
   // 15–16: a hill (rise 1.6 m over 16 m), a fence on the top and one on the way down
@@ -184,20 +191,9 @@ export function buildParkour(scene) {
     top.position.set(-16, H / 2, 70);
     add(top, "ground");
     ramp(-24, -1, H, 0);                                     // down from −24 to −40
-    fence(15, -16, 70, W, 0.9);                              // on the hilltop: lift it by the hill
-    for (const p of polesBy.orange.slice(-3)) p[1] += H;
-    for (const s of stands.slice(-2)) s[2] += H;
-    for (const w of wings.slice(-2)) w[2] += H;
-    scene.children[scene.children.length - 1].position.y += H;
-    fences[fences.length - 1].base = H;
-    // on the slope: posts stand on the ramp surface (y offset by the slope)
-    const yAt = (x) => H * (1 - (-24 - x) / L);
-    fence(16, -33, 70, W, 0.8, { label: "16 · 0.80 m · downhill" });
-    for (const p of polesBy.orange.slice(-3)) p[1] += yAt(-33);   // (0.8 m: three poles)
-    for (const s of stands.slice(-2)) s[2] += yAt(-33);
-    for (const w of wings.slice(-2)) w[2] += yAt(-33);           // stands and wings rise from y 0, through the ramp
-    scene.children[scene.children.length - 1].position.y += yAt(-33);   // its sign
-    fences[fences.length - 1].base = yAt(-33);
+    fence(15, -16, 70, W, 0.9, { base: H });                 // on the hilltop
+    const yAt = (x) => H * (1 - (-24 - x) / L);              // on the slope: the ramp's surface
+    fence(16, -33, 70, W, 0.8, { base: yAt(-33), label: "16 · 0.80 m · downhill" });
   }
   fence(17, -62, 70, W, 1.4, { color: "red", label: "17 · 1.40 m (near max)" });
   // West loop: centre (−95, 35), r 35, from z = 70 back down to z = 0
@@ -215,25 +211,27 @@ export function buildParkour(scene) {
   // instance the parts
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), ps = new THREE.Vector3();
   const pg = new THREE.CylinderGeometry(0.06, 0.06, 1, 10); pg.rotateX(Math.PI / 2);   // length along local z
-  for (const [k, list] of Object.entries(polesBy)) {
-    if (!list.length) continue;
-    const im = new THREE.InstancedMesh(pg, poleMats[k], list.length);
-    list.forEach(([x, y, z, ry, l], i) => im.setMatrixAt(i, m4.compose(ps.set(x, y, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, 1, l))));
-    im.computeBoundingSphere(); im.computeBoundingBox?.();
-    add(im, "block");
-  }
-  const standMat = protoMaterial(white, 0.9);
-  const sIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.14, 1, 0.14), standMat, stands.length);
-  stands.forEach(([x, z, h, ry], i) => sIM.setMatrixAt(i, m4.compose(ps.set(x, h / 2, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, h, 1))));
-  sIM.computeBoundingSphere();
-  add(sIM, "block");
-  const wIM = new THREE.InstancedMesh(new THREE.BoxGeometry(0.08, 1, 1.3), standMat, wings.length);
-  wings.forEach(([x, z, h, ry], i) => wIM.setMatrixAt(i, m4.compose(ps.set(x, h / 2, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, h, 1))));
-  wIM.computeBoundingSphere();
-  add(wIM, "block");
+  // all poles in one instanced mesh (their colour per instance)
+  const poles = Object.entries(polesBy).flatMap(([k, list]) => list.map((r) => [...r, poleColor[k]]));
+  const colAttr = new THREE.InstancedBufferAttribute(new Float32Array(poles.length * 3), 3);
+  const col = new THREE.Color();
+  const im = new THREE.InstancedMesh(pg, poleMaterial(colAttr, white), poles.length);
+  poles.forEach(([x, y, z, ry, l, hex], i) => {
+    im.setMatrixAt(i, m4.compose(ps.set(x, y, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(1, 1, l)));
+    col.setHex(hex); colAttr.setXYZ(i, col.r, col.g, col.b);
+  });
+  im.computeBoundingSphere();
+  add(im, "none");                                           // drawn only: the rays hit the proxies
+  // standards and wings: one unit box, sized per instance — one draw
+  const boxes = [...stands.map(([x, z, h, ry]) => [x, z, h, ry, 0.14, 0.14]), ...wings.map(([x, z, h, ry]) => [x, z, h, ry, 0.08, 1.3])];
+  const bIM = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), protoMaterial(white, 0.9), boxes.length);
+  boxes.forEach(([x, z, h, ry, sx, sz], i) => bIM.setMatrixAt(i, m4.compose(ps.set(x, h / 2, z), q.setFromEuler(e.set(0, ry, 0)), sc.set(sx, h, sz))));
+  bIM.computeBoundingSphere();
+  add(bIM, "none");
 
   // start pad marker
-  const st = sign("START → lane 1", 0.7); st.position.set(-90, 2.2, -6); scene.add(st);
+  signs.add("START → lane 1", -90, 2.2, -6, -Math.PI / 2, 0.7);
+  signs.build(scene);
 
   const zoneAt = (x, z) => {
     let best = null, bd = 1e9;
