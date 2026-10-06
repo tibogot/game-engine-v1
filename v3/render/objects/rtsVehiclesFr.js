@@ -31,6 +31,7 @@
  *     the canvas tilt over the bed (the big khaki shape that reads from above)
  */
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { MAT, assemble, bakeContactAO, buildBox, rng } from "./rtsParts.js";
 import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 import { VEHICLE_KIT } from "./rtsVehicles.js";
@@ -42,13 +43,13 @@ const { S, indexed, axleX, alongZ, trackBand, trackPath, packGear, loftSkin, ski
  * to idler, the road wheels (rubber, disc, hub, bolts), sprocket teeth, the
  * idler, return rollers. Pushes into G (the rolling gear). Real metres.
  */
-function trackSide(G, { xc, tw, t, wheelR, wheelsZ, sprocket, idler, rollers = null, paintTone }) {
+function trackSide(G, { xc, tw, t, wheelR, wheelsZ, sprocket, idler, rollers = null, paintTone, d2 = false, bogies = null, frameY = 0.72 }) {
   const path = trackPath({ front: sprocket, rear: idler, wheelsZ, wheelR, t, rollers });
   G(indexed(trackBand(path, xc, tw, t)), [0, 0, 0], MAT.steel, 0.03, undefined, [0, 0, 0, 2]);
   const wheel = (cy, cz, r) => [cy, cz, r, 1];
   for (const z of wheelsZ) {
     const w = wheel(wheelR + t, z, wheelR);
-    G(axleX(wheelR, tw * 0.8, 16), [xc, wheelR + t, z], MAT.rubber, 0.5, undefined, w);
+    G(d2 ? tyre(wheelR, tw * 0.8, wheelR * 0.6, 20) : axleX(wheelR, tw * 0.8, 16), [xc, wheelR + t, z], MAT.rubber, 0.5, undefined, w);
     G(axleX(wheelR * 0.62, tw * 0.82, 12), [xc, wheelR + t, z], MAT.paint, paintTone, undefined, w);
     G(axleX(0.07, tw * 0.9, 8), [xc, wheelR + t, z], MAT.steel, 0.3, undefined, w);
     for (let k = 0; k < 6; k++) {
@@ -63,20 +64,86 @@ function trackSide(G, { xc, tw, t, wheelR, wheelsZ, sprocket, idler, rollers = n
     G(buildBox(tw * 0.6, 0.07, 0.07), [xc, sprocket.c[1] + Math.sin(a) * (sprocket.r - 0.01), sprocket.c[0] + Math.cos(a) * (sprocket.r - 0.01)], MAT.steel, 0.25, [a, 0, 0], sw);
   }
   const iw = wheel(idler.c[1], idler.c[0], idler.r);
-  G(axleX(idler.r, tw * 0.8, 16), [xc, idler.c[1], idler.c[0]], MAT.rubber, 0.45, undefined, iw);
+  G(d2 ? tyre(idler.r, tw * 0.8, idler.r * 0.6, 20) : axleX(idler.r, tw * 0.8, 16), [xc, idler.c[1], idler.c[0]], MAT.rubber, 0.45, undefined, iw);
   G(axleX(idler.r * 0.6, tw * 0.82, 12), [xc, idler.c[1], idler.c[0]], MAT.paint, paintTone, undefined, iw);
   for (const r of rollers ?? []) G(axleX(r.r, tw * 0.5, 10), [xc, r.y, r.z], MAT.rubber, 0.4, undefined, wheel(r.y, r.z, r.r));
+  // BOGIES (detail 2, the reference photos): each pair of road wheels on a bracket inboard of
+  // them, hung from the frame on an arm — the M3's two-bogie run, not a row of loose wheels.
+  const still = [0, 0, 0, 0], inX = xc - Math.sign(xc) * tw * 0.62, cy = wheelR + t;
+  for (const [za, zb] of bogies ?? []) {
+    const zm = (za + zb) / 2;
+    G(roundedPlate(0.07, 0.2, Math.abs(za - zb) + 0.16, 0.025), [inX, cy + 0.03, zm], MAT.paint, paintTone * 0.85, undefined, still);
+    G(buildBox(0.09, frameY - cy, 0.14), [inX, (frameY + cy) / 2 + 0.05, zm], MAT.paint, paintTone * 0.8, undefined, still);
+    G(axleX(0.06, 0.12, 10), [inX - Math.sign(xc) * 0.02, cy + 0.06, zm], MAT.steel, 0.25, undefined, still);   // the pivot
+  }
 }
 
 /** Per-part tone of the painted panels (the kit's OD tone, as the US vehicles). */
 const VA = 0.15;
 
 /**
+ * DETAIL 2 (the vehicle lab, 2026-10-06 — "less low-poly"): an armour PLATE with its edges
+ * rounded a few cm (they catch the light, as real plate does: a razor box edge is what reads
+ * as low-poly), its UVs in metres from the position like buildBox's (the atlas tiles at size).
+ */
+function roundedPlate(w, h, d, r = 0.028) {
+  const rr = Math.min(r, Math.min(w, h, d) * 0.45);
+  const g = new RoundedBoxGeometry(w, h, d, 2, rr);
+  // UVs as buildBox's: each face's 0..1 scaled to its size in metres (/2). A position-based
+  // projection switched axis on the rounded edges and smeared the atlas there (white dashes).
+  const uv = g.attributes.uv, span = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  if (g.groups.length) {
+    const done = new Set();
+    for (const grp of g.groups) {
+      const [a, b] = span[grp.materialIndex] ?? [1, 1];
+      for (let k = grp.start; k < grp.start + grp.count; k++) {
+        const vi = g.index ? g.index.getX(k) : k;
+        if (done.has(vi)) continue;
+        done.add(vi);
+        uv.setXY(vi, (uv.getX(vi) * a) / 2, (uv.getY(vi) * b) / 2);
+      }
+    }
+  }
+  return g.index ? g : indexed(g);   // (RoundedBoxGeometry has no index; the kit merges indexed parts)
+}
+/**
+ * A TYRE (detail 2; you, 2026-10-06: "those vertical lines look bad"): a cylinder's flat caps
+ * stretched the whole rubber cell across the sidewall — its stripes, a metre wide. Turned from
+ * a profile instead: the sidewall bulging out of the rim to a rounded shoulder, the tread flat;
+ * UVs a few cm of the cell, so the rubber reads plain. Axis along X, indexed.
+ */
+function tyre(R, w, rim = R * 0.58, seg = 28) {
+  const h = w / 2, prof = [
+    [rim, -h * 0.9], [rim + (R - rim) * 0.45, -h], [R - 0.045, -h * 0.94], [R - 0.012, -h * 0.72], [R, -h * 0.42],
+    [R, h * 0.42], [R - 0.012, h * 0.72], [R - 0.045, h * 0.94], [rim + (R - rim) * 0.45, h], [rim, h * 0.9],
+  ].map(([r, y]) => new THREE.Vector2(r, y));   // this order faces OUT (checked: 504 / 504)
+  const g = new THREE.LatheGeometry(prof, seg).rotateZ(Math.PI / 2);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.45 + uv.getX(i) * 0.06, 0.45 + uv.getY(i) * 0.03);   // mid-cell: its edge is pale
+  return g;
+}
+/** A small part's UVs moved to the middle of its atlas cell (near 0 they sample the pale edge). */
+function midCell(g) {
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.45 + uv.getX(i) * 0.2, 0.45 + uv.getY(i) * 0.2);
+  return g;
+}
+/** A jerrycan: the can, its three-bar handle, the pressed X a shade darker. */
+function jerrycan(P, x, y, z, rotY = 0, tone = 0.42) {
+  P(roundedPlate(0.3, 0.44, 0.15, 0.02), [x, y, z], MAT.paint, tone, [0, rotY, 0]);
+  P(buildBox(0.16, 0.04, 0.05), [x, y + 0.24, z], MAT.paint, tone * 0.85, [0, rotY, 0]);
+}
+
+/**
  * "Vert armée" under the Aurès sun: the atlas's olive paint multiplied by this
  * (rtsObjectMaterialTinted). The US olive drab went LIME in this light; the
  * French green was browner and duller to begin with.
+ * OLIVE BRUN (the vehicle lab, 2026-10-06, against photos of French M3s): ~sRGB (92, 88, 62).
+ * The old [0.74, 0.66, 0.5] kept almost no blue and still read yellow-green in the sun; it is
+ * FR_PAINT_TINT_OLD, a button in the lab while the choice is open.
  */
-export const FR_PAINT_TINT = [0.74, 0.66, 0.5];
+export const FR_PAINT_TINT = [0.71, 0.57, 0.92];
+export const FR_PAINT_TINT_OLD = [0.74, 0.66, 0.5];
 
 // ── PANHARD EBR ──────────────────────────────────────────────────────────────
 
@@ -838,8 +905,15 @@ export function buildAMX13({ seed = 13 } = {}) {
 // ── M3 HALF-TRACK ────────────────────────────────────────────────────────────
 
 /** Real: 6.2 m long with the roller, 2.2 m wide. userData: stencil, gear, length. */
-export function buildHalfTrack({ seed = 3 } = {}) {
+export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   const R = rng(seed);
+  // DETAIL 2 (the vehicle lab): rounded plates, rivets and seams, stowage, tyre treads; 1 = the
+  // game's, unchanged (every part and every R() call as before).
+  const D2 = detail >= 2;
+  // crew: false — no box men; the SEATS go out in userData.seats for real (animated) soldiers.
+  const seats = [];
+  const plate = (w, h, d) => (D2 ? roundedPlate(w, h, d) : buildBox(w, h, d));
+  const vt = (t) => (D2 ? t * (0.94 + R() * 0.12) : t);   // plates a shade apart
   const hull = [], gear = [], spins = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
   const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
@@ -850,13 +924,29 @@ export function buildHalfTrack({ seed = 3 } = {}) {
   P(axleX(0.08, 1.7, 8), [0, WR, AXF], MAT.steel, 0.2);
 
   // ── The armoured bonnet with its radiator louvres, flat wings over the wheels.
-  P(buildBox(0.95, 0.62, 1.5), [0, 1.24, 1.95], MAT.paint, VA);
-  P(buildBox(1.0, 0.05, 1.5), [0, 1.57, 1.95], MAT.paint, VA * 1.05);
-  P(buildBox(0.9, 0.55, 0.06), [0, 1.24, 2.73], MAT.paint, VA * 0.95);
+  P(plate(0.95, 0.62, 1.5), [0, 1.24, 1.95], MAT.paint, vt(VA));
+  P(plate(1.0, 0.05, 1.5), [0, 1.57, 1.95], MAT.paint, vt(VA * 1.05));
+  P(plate(0.9, 0.55, 0.06), [0, 1.24, 2.73], MAT.paint, vt(VA * 0.95));
   for (let k = 0; k < 6; k++) P(buildBox(0.72, 0.04, 0.03), [0, 1.04 + k * 0.08, 2.77], MAT.steel, 0.05);
   for (const sx of [-1, 1]) {
-    P(buildBox(0.44, 0.05, 1.3), [sx * 0.8, 1.2, 2.0], MAT.paint, VA);
-    P(buildBox(0.42, 0.05, 0.36), [sx * 0.8, 1.08, 2.72], MAT.paint, VA, [0.6, 0, 0]);
+    if (D2) {
+      // The M3's MUDGUARD (the reference photos, 2026-10-06): curled down at the nose, flat by the
+      // bonnet, sweeping down behind the wheel into the step under the door — a chain of plates.
+      const path = [[2.98, 0.9], [2.9, 1.04], [2.74, 1.13], [2.45, 1.16], [1.75, 1.16], [1.52, 1.12], [1.36, 1.02], [1.24, 0.9], [1.08, 0.84], [0.55, 0.84]];
+      const ft = vt(VA);
+      for (let k = 0; k < path.length - 1; k++) {
+        const [z0, y0] = path[k], [z1, y1] = path[k + 1], L = Math.hypot(z1 - z0, y1 - y0);
+        P(buildBox(0.6, 0.045, L + 0.03), [sx * 0.8, (y0 + y1) / 2, (z0 + z1) / 2], MAT.paint, ft, [Math.atan2(-(y1 - y0), z1 - z0), 0, 0]);
+      }
+      // Its rolled outer edge, a shade darker: what draws the curve at a distance.
+      for (let k = 0; k < path.length - 1; k++) {
+        const [z0, y0] = path[k], [z1, y1] = path[k + 1], L = Math.hypot(z1 - z0, y1 - y0);
+        P(buildBox(0.04, 0.09, L + 0.03), [sx * 1.09, (y0 + y1) / 2 - 0.02, (z0 + z1) / 2], MAT.paint, ft * 0.8, [Math.atan2(-(y1 - y0), z1 - z0), 0, 0]);
+      }
+    } else {
+      P(plate(0.44, 0.05, 1.3), [sx * 0.8, 1.2, 2.0], MAT.paint, vt(VA));
+      P(buildBox(0.42, 0.05, 0.36), [sx * 0.8, 1.08, 2.72], MAT.paint, VA, [0.6, 0, 0]);
+    }
     P(new THREE.CylinderGeometry(0.1, 0.11, 0.14, 12).rotateX(Math.PI / 2), [sx * 0.62, 1.34, 2.78], MAT.steel, 0.15);
     P(new THREE.CylinderGeometry(0.08, 0.08, 0.02, 12).rotateX(Math.PI / 2), [sx * 0.62, 1.34, 2.86], MAT.white, 0.45);
   }
@@ -867,44 +957,155 @@ export function buildHalfTrack({ seed = 3 } = {}) {
   // ── The armoured box: sides, the cab's armoured windscreen (plates up,
   //    vision slits), the rear door, all open on top.
   const BZ0 = 1.2, BZ1 = -2.85, BL = BZ0 - BZ1, BZ = (BZ0 + BZ1) / 2, BW = 1.0, TOPY = 2.05;
-  P(buildBox(BW * 2, 0.08, BL), [0, 1.05, BZ], MAT.paint, VA * 0.85);                             // floor
-  for (const sx of [-1, 1]) P(buildBox(0.06, TOPY - 1.05, BL + 0.04), [sx * BW, (TOPY + 1.05) / 2, BZ], MAT.paint, VA);   // past the floor's ends
-  P(buildBox(BW * 2, TOPY - 1.11, 0.06), [0, (TOPY + 1.05) / 2, BZ1], MAT.paint, VA);   // 3 cm under the sides' top
+  P(plate(BW * 2, 0.08, BL), [0, 1.05, BZ], MAT.paint, vt(VA * 0.85));                             // floor
+  // The CAB (detail 2, the reference photos): its sides cut down to the door line in front of
+  // the troop box, as the M3's are.
+  const CABZ = 0.15, DOORY = 1.62;
+  for (const sx of [-1, 1]) {
+    if (D2) {
+      P(plate(0.06, TOPY - 1.05, CABZ - BZ1 + 0.02), [sx * BW, (TOPY + 1.05) / 2, (CABZ + BZ1 - 0.02) / 2], MAT.paint, vt(VA));
+      P(plate(0.06, DOORY - 1.05, BZ0 - CABZ + 0.02), [sx * BW, (DOORY + 1.05) / 2, (BZ0 + CABZ + 0.02) / 2], MAT.paint, vt(VA));
+    } else P(plate(0.06, TOPY - 1.05, BL + 0.04), [sx * BW, (TOPY + 1.05) / 2, BZ], MAT.paint, vt(VA));   // past the floor's ends
+  }
+  P(plate(BW * 2, TOPY - 1.11, 0.06), [0, (TOPY + 1.05) / 2, BZ1], MAT.paint, vt(VA));   // 3 cm under the sides' top
   P(buildBox(0.6, 0.72, 0.03), [0, 1.5, BZ1 - 0.035], MAT.paint, VA * 1.08);                     // rear door
-  P(buildBox(BW * 2, 0.5, 0.06), [0, 1.5, BZ0], MAT.paint, VA);                                  // dash
-  P(buildBox(BW * 2, 0.55, 0.06), [0, 2.02, BZ0 - 0.05], MAT.paint, VA * 1.02, [-0.25, 0, 0]);   // windscreen armour, raised
-  for (const sx of [-1, 1]) P(buildBox(0.5, 0.05, 0.02), [sx * 0.45, 2.02, BZ0 - 0.01], MAT.steel, 0.02, [-0.25, 0, 0]);
-  // Cab doors cut lower.
-  for (const sx of [-1, 1]) P(buildBox(0.06, 0.4, 0.9), [sx * (BW + 0.01), 1.3, 0.65], MAT.paint, VA * 1.04);
+  P(plate(BW * 2, 0.5, 0.06), [0, 1.5, BZ0], MAT.paint, vt(VA));                                  // dash
+  if (D2) {
+    // The WINDSCREEN: a frame on the dash, two panes, the armour flap hinged on top and raised
+    // like a visor (the French photo); the wheel, the dash's dials, the cab's seats.
+    const WY0 = 1.75, WY1 = 2.2, WZ = BZ0 - 0.02;
+    for (const x of [-BW + 0.03, 0, BW - 0.03]) P(buildBox(0.06, WY1 - WY0, 0.06), [x, (WY0 + WY1) / 2, WZ], MAT.paint, VA * 0.9);
+    P(buildBox(BW * 2, 0.06, 0.07), [0, WY1, WZ], MAT.paint, VA * 0.9);
+    for (const sx of [-1, 1]) P(buildBox(BW - 0.08, WY1 - WY0 - 0.04, 0.015), [sx * (BW / 2), (WY0 + WY1) / 2, WZ], MAT.steel, 0.05);
+    const fa = 1.15, fh = 0.48;
+    P(plate(BW * 2 + 0.02, fh, 0.05), [0, WY1 + 0.03 + Math.cos(fa) * fh / 2, WZ + Math.sin(fa) * fh / 2], MAT.paint, vt(VA * 1.02), [fa, 0, 0]);
+    for (const sx of [-1, 1]) P(buildBox(0.04, 0.05, 0.1), [sx * 0.8, WY1 + 0.03, WZ + 0.03], MAT.steel, 0.2);   // hinges
+    P(buildBox(BW * 2 - 0.1, 0.06, 0.3), [0, 1.73, BZ0 - 0.17], MAT.paint, VA * 0.7);                       // dash top
+    for (const x of [-0.6, -0.45, -0.3]) P(new THREE.CylinderGeometry(0.035, 0.035, 0.02, 10).rotateX(Math.PI / 2), [x, 1.62, BZ0 - 0.04], MAT.white, 0.35);
+    // The WHEEL where the Driving clip's hands close (measured in the lab: 1.85 up, 0.77 along,
+    // 0.52 apart), its column down to the dash; the board under the dash his boots stop at.
+    const WH = [-0.49, 1.85, 0.77], WA = 0.64, cd = [0, -Math.sin(WA), Math.cos(WA)];
+    P(new THREE.TorusGeometry(0.25, 0.02, 6, 22), WH, MAT.rubber, 0.3, [WA, 0, 0]);
+    P(alongZ(0.025, 0.025, 0.55, 6), [WH[0], WH[1] + cd[1] * 0.28, WH[2] + cd[2] * 0.28], MAT.steel, 0.15, [WA, 0, 0]);
+    P(buildBox(BW * 2 - 0.1, 0.2, 0.05), [0, 1.16, BZ0], MAT.paint, VA * 0.7);
+    for (const x of [-0.45, 0.45]) {
+      P(roundedPlate(0.5, 0.1, 0.42, 0.03), [x, 1.42, 0.5], MAT.canvas, 0.3);                                // seat
+      P(roundedPlate(0.5, 0.45, 0.08, 0.03), [x, 1.7, 0.27], MAT.canvas, 0.28, [-0.12, 0, 0]);              // back
+      P(buildBox(0.4, 0.33, 0.36), [x, 1.25, 0.5], MAT.paint, VA * 0.7);
+    }
+    // Cab doors, cut low, with their hinges.
+    for (const sx of [-1, 1]) {
+      P(plate(0.05, DOORY - 1.12, 0.86), [sx * (BW + 0.03), (DOORY + 1.12) / 2, 0.66], MAT.paint, vt(VA * 1.04));
+      for (const y of [1.25, 1.5]) P(buildBox(0.03, 0.06, 0.05), [sx * (BW + 0.06), y, 1.07], MAT.steel, 0.2);
+    }
+    // The troop box's benches: lockers along each side, cushions on top.
+    for (const sx of [-1, 1]) {
+      P(buildBox(0.34, 0.38, 2.45), [sx * (BW - 0.2), 1.28, -1.42], MAT.paint, VA * 0.8);
+      P(roundedPlate(0.36, 0.07, 2.45, 0.025), [sx * (BW - 0.2), 1.5, -1.42], MAT.canvas, 0.32);
+    }
+  } else {
+    P(plate(BW * 2, 0.55, 0.06), [0, 2.02, BZ0 - 0.05], MAT.paint, vt(VA * 1.02), [-0.25, 0, 0]);   // windscreen armour, raised
+    for (const sx of [-1, 1]) P(buildBox(0.5, 0.05, 0.02), [sx * 0.45, 2.02, BZ0 - 0.01], MAT.steel, 0.02, [-0.25, 0, 0]);
+    // Cab doors cut lower.
+    for (const sx of [-1, 1]) P(plate(0.06, 0.4, 0.9), [sx * (BW + 0.01), 1.3, 0.65], MAT.paint, vt(VA * 1.04));
+  }
   // The .50 on its pulpit ring over the cab, the men in the back, stowage.
   P(new THREE.TorusGeometry(0.42, 0.04, 6, 20).rotateX(Math.PI / 2), [0.45, 2.45, 0.6], MAT.steel, 0.2);
   for (const sx of [-1, 1]) P(buildBox(0.05, 0.9, 0.05), [0.45 + sx * 0.4, 2.0, 0.6], MAT.steel, 0.2);
   P(buildBox(0.14, 0.14, 1.1), [0.45, 2.55, 1.0], MAT.steel, 0.12);
   P(alongZ(0.025, 0.025, 0.4, 6), [0.45, 2.55, 1.7], MAT.steel, 0.1);
-  soldierSeated(P, -0.45, 1.2, 0.6, R);                                                           // driver
-  for (let k = 0; k < 4; k++) {
-    const sx = k % 2 ? 1 : -1, z = -0.5 - Math.floor(k / 2) * 1.0;
-    P(buildBox(0.36, 0.5, 0.24), [sx * 0.6, 1.55, z], MAT.canvas, 0.5 + R() * 0.1, [0, sx * Math.PI / 2, 0]);
-    P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [sx * 0.6, 1.95, z], MAT.paint, VA * 1.1);
+  if (crew) {
+    soldierSeated(P, -0.45, 1.2, 0.6, R);                                                         // driver
+    for (let k = 0; k < 4; k++) {
+      const sx = k % 2 ? 1 : -1, z = -0.5 - Math.floor(k / 2) * 1.0;
+      P(buildBox(0.36, 0.5, 0.24), [sx * 0.6, 1.55, z], MAT.canvas, 0.5 + R() * 0.1, [0, sx * Math.PI / 2, 0]);
+      P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [sx * 0.6, 1.95, z], MAT.paint, VA * 1.1);
+    }
+  } else {
+    // SEATS (feet on the floor, facing yaw; the soldier at the game's height): the driver at
+    // the wheel, a man beside him, men on the benches facing in — a gap or two, not a full load.
+    seats.push({ p: [-0.45, 1.03, 0.48], yaw: 0, clip: "drive" }, { p: [0.45, 1.09, 0.6], yaw: 0, clip: "sit" });
+    [-0.45, -1.15, -1.85, -2.45].forEach((z, k) => {
+      for (const sx of [-1, 1]) {
+        if ((k + (sx > 0 ? 1 : 0)) % 3 === 2) continue;
+        seats.push({ p: [sx * (BW - 0.2), 1.09, z], yaw: -sx * Math.PI / 2, clip: (k + (sx > 0 ? 1 : 0)) % 2 ? "sit_talk" : "sit" });
+      }
+    });
   }
   for (const sx of [-1, 1]) P(buildBox(0.1, 0.25, 1.8), [sx * (BW + 0.08), 1.75, -1.6], MAT.canvas, 0.35);     // bedrolls on the rails
   P(buildBox(0.3, 0.44, 0.14), [0.6, 1.4, BZ1 - 0.1], MAT.paint, 0.42);                          // jerrycan
   // Mine racks on the sides, the M3's tell.
   for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) P(new THREE.CylinderGeometry(0.15, 0.15, 0.08, 12).rotateZ(Math.PI / 2), [sx * (BW + 0.08), 1.25, -0.2 - k * 0.35], MAT.paint, VA * 0.8);
 
+  if (D2) {
+    // (NO RIVETS as geometry: 2 cm heads caught the sun and read as white dashes at the RTS's
+    //  distance — measured in the lab; small detail belongs in the texture.)
+    for (const sx of [-1, 1]) {
+      // Plate SEAMS: the cab's join and the door's edges, a strap of plate a little proud.
+      P(buildBox(0.014, TOPY - 1.12, 0.05), [sx * (BW + 0.038), (TOPY + 1.1) / 2, 0.15], MAT.paint, VA * 0.78);
+      P(buildBox(0.014, 0.42, 0.04), [sx * (BW + 0.045), 1.3, 1.1], MAT.paint, VA * 0.78);
+    }
+    // STOWAGE, as every half-track in the field carried it.
+    // A rack of jerrycans on the back plate (the old one at 0.6 stays) with its strap.
+    for (const x of [-0.62, -0.28]) jerrycan(P, x, 1.4, BZ1 - 0.12, 0, 0.38 + R() * 0.08);
+    P(buildBox(1.6, 0.03, 0.03), [0, 1.48, BZ1 - 0.2], MAT.canvas, 0.25);
+    // A rolled tarpaulin across the bonnet, strapped.
+    P(new THREE.CylinderGeometry(0.13, 0.13, 0.86, 12).rotateZ(Math.PI / 2), [0, 1.72, 2.45], MAT.canvas, 0.42);
+    for (const x of [-0.25, 0.25]) P(new THREE.TorusGeometry(0.135, 0.012, 4, 12).rotateY(Math.PI / 2), [x, 1.72, 2.45], MAT.canvas, 0.2);
+    // Pioneer tools on the left side: a shovel and a pick on their brackets.
+    P(new THREE.CylinderGeometry(0.02, 0.02, 1.0, 6).rotateX(Math.PI / 2), [-(BW + 0.07), 1.62, -2.05], MAT.timber, 0.4);
+    P(buildBox(0.02, 0.24, 0.2), [-(BW + 0.07), 1.62, -2.65], MAT.steel, 0.25);
+    P(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 6).rotateX(Math.PI / 2), [-(BW + 0.07), 1.45, -2.0], MAT.timber, 0.35);
+    P(buildBox(0.03, 0.42, 0.04), [-(BW + 0.07), 1.45, -2.48], MAT.steel, 0.2);
+    for (const z of [-1.7, -2.4]) P(buildBox(0.05, 0.3, 0.03), [-(BW + 0.05), 1.53, z], MAT.steel, 0.2);
+    // In the back: ammunition boxes and a crate.
+    for (let k = 0; k < 3; k++) P(roundedPlate(0.3, 0.17, 0.16, 0.012), [0.2 - k * 0.04, 1.18 + k * 0.17, -2.55 + (k % 2) * 0.05], MAT.paint, 0.3 + R() * 0.08, [0, R() * 0.3, 0]);
+    P(roundedPlate(0.4, 0.36, 0.4, 0.015), [-0.25, 1.27, -2.5], MAT.timber, 0.45, [0, 0.12, 0]);
+    // A helmet hung on the right side, the radio's whip at the back corner.
+    P(new THREE.SphereGeometry(0.15, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1).rotateZ(-Math.PI / 2), [BW + 0.08, 1.85, 0.0], MAT.paint, VA * 1.1);
+    P(new THREE.CylinderGeometry(0.008, 0.012, 2.2, 4), [-(BW - 0.08), TOPY + 1.05, BZ1 + 0.1], MAT.steel, 0.1);
+    // The front BUMPER, a channel across the full width, the roller's frame behind it.
+    P(roundedPlate(2.24, 0.18, 0.14, 0.02), [0, 0.8, 3.0], MAT.paint, VA * 0.85);
+    // Brush guards over the headlights.
+    for (const sx of [-1, 1]) for (const dx of [-0.07, 0, 0.07]) P(buildBox(0.012, 0.24, 0.012), [sx * 0.62 + dx, 1.34, 2.92], MAT.steel, 0.18);
+  }
+
   // ── Front wheels (they roll), the rear track unit.
   const wheelAt = (x, z) => {
     const s = [WR, z, WR, 1];
-    G(axleX(WR, 0.26, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
+    G(D2 ? tyre(WR, 0.27, 0.265) : axleX(WR, 0.26, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
     G(axleX(0.27, 0.28, 14), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
     G(axleX(0.09, 0.3, 8), [x, WR, z], MAT.steel, 0.3, undefined, s);
+    if (D2) {
+      // TREAD: the military chevron — two staggered rows of angled lugs ON the tread, inside
+      // its width (they roll with it); the hub's bolts.
+      for (let k = 0; k < 40; k++) {
+        const row = k % 2 ? 1 : -1, a = (k / 40) * Math.PI * 2;
+        const lug = midCell(buildBox(0.1, 0.012, 0.05)).rotateY(row * 0.45).translate(row * 0.055, WR + 0.006, 0).rotateX(a);
+        G(lug, [x, WR, z], MAT.rubber, 0.1, undefined, s);
+      }
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        G(new THREE.CylinderGeometry(0.018, 0.018, 0.32, 6).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.17, Math.sin(a) * 0.17), [x, WR, z], MAT.steel, 0.35, undefined, s);
+      }
+    }
   };
   for (const sx of [-1, 1]) wheelAt(sx * 0.84, AXF);
   for (const sx of [-1, 1]) {
-    trackSide(G, {
-      xc: sx * 0.82, tw: 0.3, t: 0.04, wheelR: 0.2, wheelsZ: [-0.55, -1.0, -1.45, -1.9],   // 0.23 overlapped its neighbours side to side
-      sprocket: { c: [0.05, 0.56], r: 0.26 }, idler: { c: [-2.5, 0.52], r: 0.24 }, paintTone: VA * 0.9,
-    });
+    if (D2) {
+      // The M3's run (the photos): the sprocket up front and the idler behind both RAISED off
+      // the ground, two bogies of paired wheels between, one return roller under the top run.
+      trackSide(G, {
+        xc: sx * 0.82, tw: 0.3, t: 0.04, wheelR: 0.2, wheelsZ: [-0.52, -0.98, -1.52, -1.98],
+        sprocket: { c: [0.08, 0.6], r: 0.27 }, idler: { c: [-2.56, 0.58], r: 0.24 }, paintTone: VA * 0.9,
+        rollers: [{ z: -1.25, y: 0.77, r: 0.08 }], d2: true, bogies: [[-0.52, -0.98], [-1.52, -1.98]],
+      });
+    } else {
+      trackSide(G, {
+        xc: sx * 0.82, tw: 0.3, t: 0.04, wheelR: 0.2, wheelsZ: [-0.55, -1.0, -1.45, -1.9],   // 0.23 overlapped its neighbours side to side
+        sprocket: { c: [0.05, 0.56], r: 0.26 }, idler: { c: [-2.5, 0.52], r: 0.24 }, paintTone: VA * 0.9,
+      });
+    }
   }
 
   const geo = assemble(hull);
@@ -925,6 +1126,7 @@ export function buildHalfTrack({ seed = 3 } = {}) {
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
+  geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.2 * S, hz: 3.2 * S };
   return geo;

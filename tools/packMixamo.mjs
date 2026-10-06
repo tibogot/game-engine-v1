@@ -181,6 +181,11 @@ const ROLES = {
   "welding": "repair",
   "working on device": "repair",
   "kneeling working": "repair",
+  // The crew in the vehicles (the vehicle lab, 2026-10-06): seated, the rifle slung.
+  "driving": "drive",
+  "sitting idle": "sit",
+  "sitting talking": "sit_talk",
+  "sitting laughing": "sit_laugh",
 };
 
 // Shouldered rifle (firing / aiming clips): the butt sits this far from the
@@ -378,6 +383,39 @@ for (const l of loaded) {
   });
 }
 if (!clips.length) fail("no animation clips found");
+
+// ── Long clips CUT to a loop ────────────────────────────────────────────────
+// Mixamo's "Sitting Talking" runs 44 s (46 k keys: +1.1 MB, and the crowd bakes
+// every frame at 30 Hz — it doubled the bake). Cut at the time inside the window
+// whose pose is NEAREST the first frame (summed bone rotation gap), so it loops
+// without a pop. MEASURED in the pack's report below.
+const CUT = { sit_talk: [8, 16] };
+for (const clip of clips) {
+  const win = CUT[clip.name];
+  if (!win || clip.duration <= win[1]) continue;
+  const qs = clip.tracks.filter((t) => t instanceof THREE.QuaternionKeyframeTrack).map((t) => t.createInterpolant());
+  const at = (t) => qs.map((ip) => ip.evaluate(t).slice());
+  const q0 = at(0);
+  let best = win[0], bestGap = Infinity;
+  for (let t = win[0]; t <= win[1]; t += 1 / 30) {
+    const q = at(t);
+    let gap = 0;
+    for (let k = 0; k < q.length; k++) gap += 1 - Math.abs(q[k][0] * q0[k][0] + q[k][1] * q0[k][1] + q[k][2] * q0[k][2] + q[k][3] * q0[k][3]);
+    if (gap < bestGap) { bestGap = gap; best = t; }
+  }
+  const was = clip.duration;
+  for (const tr of clip.tracks) {
+    const ip = tr.createInterpolant(), end = ip.evaluate(best).slice(), w = tr.getValueSize();
+    const keep = [...tr.times].findIndex((t) => t >= best);
+    const n = keep < 0 ? tr.times.length : keep;
+    const times = new Float32Array(n + 1), values = new Float32Array((n + 1) * w);
+    times.set(tr.times.subarray(0, n)); values.set(tr.values.subarray(0, n * w));
+    times[n] = best; values.set(end, n * w);
+    tr.times = times; tr.values = values;
+  }
+  clip.duration = best;
+  console.log(`  ${clip.name}: cut ${was.toFixed(1)} s → ${best.toFixed(2)} s (loop gap ${bestGap.toFixed(3)})`);
+}
 
 // ── The hips: in place, and transitions that land where the next clip starts ──
 // "In Place" can't be ticked for a transition on Mixamo, and one download
@@ -665,7 +703,7 @@ function addWeaponBone() {
   );
   for (const sd of soldiers) sd.mesh.bind(skeleton, sd.mesh.bindMatrix);
 
-  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed)/.test(c.name);
+  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit)/.test(c.name);
   const usesShovel = (c) => /^dig/.test(c.name);
   const shown = (b, on) => b.scale.clone().multiplyScalar(on ? 1 : 1e-4).toArray();
   const stowed = new Set(), withTool = new Set();

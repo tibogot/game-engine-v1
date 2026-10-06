@@ -70,8 +70,24 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
 - A pop-cap icon; a "cut off" chain icon on supply markers; real unit portraits; building
   portraits; a squelch per alert; voices (parked: the free API plan refuses).
 
-**I. (sugg.) A VEHICLE + BUILDING LOOK AUDIT** — see the reply of 2026-10-06: measured first
-  (vehicles 2.6-10k tris, a mechta house ~600), close-ups vs CoH, a ranked list, then build.
+**I. VEHICLE LAB (started 2026-10-06; vehicle-lab.html, one vehicle at a time, avant/après)**
+- [x] HALF-TRACK at detail 2 (buildHalfTrack({ detail: 2, crew: false }), from photos of French
+  M3s): curved mudguards, bumper, the cab cut low with a framed windscreen and raised flap,
+  dash/wheel/seats, bench lockers; turned TYRES (the cylinder caps stretched the rubber cell into
+  stripes; a lathe profile, chevron lugs); BOGIES (two pairs, raised sprocket and idler, return
+  roller); stowage. 5.3k → 20k tris (8k of it the crew). Detail 1 = the game's, bit-identical.
+  Tried and dropped: shader dust/grime (you: "look kind of bad"), rivets (white dashes at range).
+- [x] CREW CLIPS packed: drive / sit / sit_talk (Mixamo; "Sitting Talking" cut 44 s → 10 s loop
+  in packMixamo CUT). Seats in userData.seats, measured against the clips (the wheel where the
+  Driving hands close). In the lab only (plain mixers).
+- [x] PAINT: OLIVE BRUN is the game's (FR_PAINT_TINT, ~sRGB 92/88/62); the old lime is
+  FR_PAINT_TINT_OLD and a lab button — **you: "not sure yet"**, choose later.
+- [ ] Detail 2 + the CREW in the GAME: unitRenderer draws crew poses in the soldier crowd at
+  each vehicle's seats (no draws added, ~3k tris a man); drop the soldierSeated box men.
+- [ ] NEXT VEHICLES, one at a time: the JEEP (same striped tyres, two box men), then GMC, EBR,
+  AMX-13, Alouette (pilot). Then buildings.
+- [ ] GUNS: the Quaternius Ultimate Guns pack (assets-src/soldiers/Ultimate Guns Pack-glb, not
+  compressed) — compare a bolt-action (FLN Mauser/Lebel) and the SMG (MAT 49) against ours.
 
 ## WHAT IS LEFT — the overview (2026-10-03, you: "make a list of what is remaining")
 
