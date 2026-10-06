@@ -36,6 +36,8 @@ const CSS = `
 .alg-sqb svg.shield .ic { color: #dfe9f2; stroke: currentColor; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .alg-sqb.sel svg.shield .rim { stroke: #ffffff; stroke-width: 2; }
 .alg-sqb.ret svg.shield .rim { stroke: #e0a040; }
+.alg-sqb.enemy svg.shield .rim { stroke: #ff5f4e; } .alg-sqb.enemy svg.shield { pointer-events: none; cursor: default; }
+.alg-sqb.enemy .n { border-color: rgba(255,120,100,0.7); }
 .alg-sqb .bar { grid-row: 2; grid-column: 2; width: 26px; height: 3px; background: rgba(10,12,14,0.9); border: 1px solid rgba(0,0,0,0.7);
   justify-self: center; position: relative; }
 .alg-sqb .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #3ddc60; }
@@ -52,7 +54,9 @@ const CSS = `
  * @param {object} o.app      (camera, renderer, selection, rtsCamera)
  * @param {object} o.squads   algSquads
  */
-export function createSquadBadges({ app, squads }) {
+export function createSquadBadges({ app, squads, groups = null }) {
+  // `groups()`: more squads to badge — the FLN's bands ({ id, team, typeKey, members, stars }),
+  // shown while any of their men is seen (fog of war), not clickable.
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -60,16 +64,16 @@ export function createSquadBadges({ app, squads }) {
   const badges = new Map();   // squad → { el, n, fill, last, x, y, shown }
   const v = app.camera.position.clone();
 
-  function make(s) {
+  function make(s, key = s) {
     const el = document.createElement("div");
-    el.className = "alg-sqb";
+    el.className = `alg-sqb${s.team === "enemy" ? " enemy" : ""}`;
     el.innerHTML = `<div class="n"></div>`
       + `<svg class="shield" viewBox="-2 -2 28 32"><path class="rim" d="M12 0 L24 3.5 V13 C24 21 18.5 25.5 12 28 C5.5 25.5 0 21 0 13 V3.5 Z"/>`
       + `<g class="ic" transform="translate(4.2 4.6) scale(0.65)">${ICONS[s.typeKey] ?? ICONS.appele}</g></svg>`
       + `<div class="bar"><i></i></div><div class="st"></div><div class="up" hidden>FM</div>`;
     document.body.appendChild(el);
     const shield = el.querySelector("svg.shield");
-    shield.addEventListener("click", (e) => { e.stopPropagation(); app.selection?.select(s.members); });
+    shield.addEventListener("click", (e) => { e.stopPropagation(); if (s.team === "player") app.selection?.select(s.members); });
     shield.addEventListener("dblclick", (e) => {
       e.stopPropagation();
       const l = s.leader;
@@ -77,7 +81,7 @@ export function createSquadBadges({ app, squads }) {
     });
     shield.addEventListener("pointerdown", (e) => e.stopPropagation());
     const b = { el, n: el.querySelector(".n"), fill: el.querySelector(".bar i"), st: el.querySelector(".st"), up: el.querySelector(".up"), last: "", pos: "", shown: true };
-    badges.set(s, b);
+    badges.set(key, b);
     return b;
   }
 
@@ -85,12 +89,16 @@ export function createSquadBadges({ app, squads }) {
   function frame(camera) {
     const r = rectOf(canvas);   // cached: a read per frame forced a layout (shared-rts/canvasRect.js)
     const live = new Set();
-    for (const s of squads.list) {
-      if (s.team !== "player") continue;
+    const fog = app.fogOfWar;
+    for (const s of [...squads.list, ...(groups?.() ?? [])]) {
+      const enemy = s.team === "enemy";
+      if (s.team !== "player" && !enemy) continue;
       const men = s.members;
       if (!men.length) continue;
-      live.add(s);
-      const b = badges.get(s) ?? make(s);
+      if (enemy && fog?.enabled && !men.some((u) => fog.isVisible(u.position.x, u.position.z))) continue;
+      live.add(s.id ?? s);
+      const key0 = s.id ?? s;
+      const b = badges.get(key0) ?? make(s, key0);
       // Over the squad: its men's centre, 3.6 m up (over their heads at 1.3x).
       let x = 0, y = 0, z = 0, hp = 0, max = 0, sel = false;
       for (const u of men) { x += u.position.x; y += u.position.y; z += u.position.z; hp += u.hp; max += u.maxHp; sel ||= !!u.selected; }

@@ -20,7 +20,9 @@ const P = {
   enterReach: 3.2,        // m from the door: in he goes
   // (a bullet's chance on a man inside: algAccuracy.js ACCURACY.inside)
   blastDamage: 0,         // extra to each man inside a burst lands on (its own splash does plenty: 30 killed 5 of 6 with one grenade)
-  bailBlasts: 2, bailWindow: 10,   // bursts within this many s: they bail out
+  // ONE burst and they bail out (CoH; 2 let a fire-and-manoeuvre assault's grenades wipe a
+  // wounded squad inside: 24 of 24 lost in the bench, 2026-10-06)
+  bailBlasts: 1, bailWindow: 10,
   maxSuppression: 0.35,   // never pinned inside
   window: 0.55,           // m inside the wall a man stands at his window
 };

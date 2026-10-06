@@ -181,7 +181,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         v.st.textContent = label;
         v.st.style.display = label ? "" : "none";
       }
-      const vet = Math.min(3, v.g.squad?.stars ?? 0);
+      const vet = Math.min(3, v.g.squad?.stars ?? v.g[0]?.stars ?? 0);   // a vehicle: its own (algVeterancy.js)
       if (vet !== v.vetLast) { v.vetLast = vet; v.vet.hidden = !vet; if (vet) v.vet.style.cssText = iconStyle(`vet${vet}`); }
       if (fire !== v.fireLast) { v.fireLast = fire; v.el.classList.toggle("fire", fire); }
       const isSel = v.g.some((u) => sel.has(u));

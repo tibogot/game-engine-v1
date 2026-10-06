@@ -6,6 +6,73 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## WHAT IS LEFT — 2026-10-06 (you: "make a list of what is remaining")
+
+Most important first; details in the sections below. (sugg.) = mine, not yet your ask.
+
+**A. Play it (you + your friend) — most of the balance waits on this**
+- The FLN vs held positions and garrisons (42:3 in the open test; houses now ~1:1), the pop
+  cap early, raids at 45%, prices and incomes, vehicles' turning speed, the welding glow.
+
+**B. Performance + load time** — the audit is DONE (its own chat, 2026-10-03/04): boot
+  ~44 → ~22 s (20.6-24.2; parallel pipelines, plant fields sharing shader builds, contact AO
+  precomputed …), uniform uploads 1,067 → 110 a frame, rtsPerfBoot + PERF_RULES + perfCheck.
+  Left, from its section below: a persistent shader cache across loads, the remaining
+  duplicate builds, the last per-frame uploads. (I listed "44 s" from the old overview
+  without checking — corrected 2026-10-06.)
+
+**C. The FLN's brain** — DONE 2026-10-06 (algAI.js, algVeterancy.js, ui/squadBadges.js):
+- [x] FIRE AND MANOEUVRE: an assault splits — a BASE OF FIRE (its FMs + a rifleman or two)
+  lies up 28-40 m off in cover with a line on the target (algSight) and opens up; the
+  MANOEUVRE group goes round to a FLANK 20-30 m out at 70-110°, out of the French MGs,
+  reachable (navGrid.sameRegion — an unreachable spot left the flank 163 m off for 90 s);
+  when the French there are suppressed / pinned (or 25 s of fire) it goes in, grenades first;
+  the base keeps firing. Targets: villages under French MGs score lower. MEASURED, 6 French
+  riflemen in a village vs one assault, 4 rounds: before 6 French / 18 FLN dead, the village
+  taken 1 of 4; after 15 / 12, taken 3 of 4 (2 of 3 with smoke).
+- [x] HOUSES: a French-held house is the grenades' first target (one per house every 10 s);
+  a garrison now bails out on ONE burst (two let wounded garrisons die inside: 24 of 24).
+- [x] SMOKE: a screen across the French line when the flank goes in and when a band
+  withdraws under fire (6 smokes, 19 grenades in 3 assaults).
+- [x] VETERANCY: vehicles earn their own stars (accuracy, armour, rate of fire; chevrons on
+  their tab); THE KATIBA hardens as a whole — 8 / 20 / 40 French killed → every fighter a
+  star (accuracy, suppression, rate of fire), announced.
+- [x] The FLN's bands shown as squads once seen: a red shield, their men, the katiba's stars.
+- You, play: is the FLN now too strong? (A lone squad in the open loses a village; a
+  garrison is forced out by a grenade and must fall back — your MG nests and mortar count.)
+
+**D. Destruction + combat feel**
+- Houses damaged / COLLAPSING (with the garrison inside); real CRATERS (dynamic, cover).
+- Wrecks blown apart further / pushed by a tank; the Alouette's crash site.
+- ANIMALS DIE; a tank shell's direct hit gibs a man; fire extras (embers, soot column);
+  the "more VFX vs CoH" list; a colour-grade LUT + vignette.
+
+**E. Gameplay features**
+- Sappers lay mines; call-ins (air strike, napalm); attack-move.
+- A "can't go there" cursor; infantry SLOWED (not stopped) by low walls / brush.
+- The farms and the ksar garrisonable; poles cut → the post loses its radio; mines on the
+  minimap once spotted.
+
+**F. The game around the battle (release)**
+- Dev panel hidden unless ?dev=1; Options: graphics preset (low / medium / high), UI scale.
+- A title screen (map / mission choice), end screens that lead somewhere, a campaign;
+  English as an option.
+
+**G. World + content**
+- MISSION 2, the coast (own chat): confirm the box, its ground, plants, points, AI.
+- Fill the map (wadi scrub, a second oasis, terraces); a second outpost (SAS post); the H-34
+  gunship + helipad; the hyena / gazelle / camel in the game, shepherds with the flocks.
+- Soldiers dressed for French Algeria (today's pack is Vietnam-era); Colonel Delorme, the
+  FLN chief; crawl / prone clips; a REPAIR clip (you: Mixamo "Hammering" / "Repairing" …).
+- The sandstorm; the night's lights, next.
+
+**H. HUD**
+- A pop-cap icon; a "cut off" chain icon on supply markers; real unit portraits; building
+  portraits; a squelch per alert; voices (parked: the free API plan refuses).
+
+**I. (sugg.) A VEHICLE + BUILDING LOOK AUDIT** — see the reply of 2026-10-06: measured first
+  (vehicles 2.6-10k tris, a mechta house ~600), close-ups vs CoH, a ranked list, then build.
+
 ## WHAT IS LEFT — the overview (2026-10-03, you: "make a list of what is remaining")
 
 One screen, most important first. Details stay in the sections below;

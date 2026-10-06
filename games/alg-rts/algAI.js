@@ -132,6 +132,15 @@ const P = {
   raidLoot: 60,               // supplies the ALN takes from a depot it turns
   raidMin: 0.4,               // the least score worth a raid (pickRaid)
   emptyAmbushHome: 2,         // empty ambushes in a row (nobody came): the band goes home
+  // ── 2026-10-06: FIRE AND MANOEUVRE (the assault no longer walks in as one blob) ──
+  baseRing: [28, 40],         // m from the target: the base of fire (in cover, a line on it)
+  flankRing: [20, 30],        // m from the target: the manoeuvre group's flank
+  flankAngle: [1.2, 1.9],     // rad off the base's line round the target
+  suppressedShare: 0.5,       // of the French there suppressed / pinned: the flank goes in
+  baseFireMax: 25,            // s of covering fire before it goes in anyway
+  deployMax: 90,              // s to get into place at all
+  houseThrow: 18,             // m from a French-held house the grenadiers go to
+  smokeNear: 45,              // m: French this close when the band withdraws / goes in → smoke
   // THE CAP FOLLOWS THE VILLAGES (balance 2026-10-04: the purse piled up past 2000 unspent —
   // the cap was the only limit, so taking FLN villages cost it nothing): fighters out at most =
   // maxLive × (capBase + capPerVillage × villages it holds) — Normal 18 → 34.
@@ -770,6 +779,48 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
         break;
       }
+      case "deploy": {
+        // FIRE AND MANOEUVRE, getting into place (planFireManoeuvre).
+        if (!m.length) return setState(b, "done");
+        const tg = b.assault, base = b.base.filter((u) => u.alive), flank = b.flank.filter((u) => u.alive);
+        const lost = 1 - m.length / Math.max(1, b.start);
+        if (lost >= P.assaultBreak || b.t > P.deployMax) { if (flank.length >= 2 && b.t > P.deployMax) { goIn(b); break; } withdraw(b); break; }
+        // In place: within 9 m, or stopped within 25 m (a stop far off is not "there": once more).
+        const there = (list, spot) => list.length && list.filter((u) => dist(u.position, spot) < 9 || (!u.isMoving && dist(u.position, spot) < 25)).length >= Math.ceil(list.length * 0.6);
+        for (const [list, spot] of [[base, b.baseSpot], [flank, b.flankSpot]]) {
+          for (const u of list) {
+            if (u.isMoving || dist(u.position, spot) < 25 || u._resent > t - 6) continue;
+            u._resent = t;
+            const q = app.navGrid?.nearestOpenWorld?.(spot.x + rand(-3, 3), spot.z + rand(-3, 3), true) ?? spot;
+            u.orderTo(q.x, q.z);
+          }
+        }
+        // The base in place (or fired on): it opens up.
+        if (b.fireT == null && (there(base, b.baseSpot) || underFire(b, base))) {
+          b.fireT = 0;
+          for (const u of base) { u.holdFire = false; u.haltMovement?.(); }
+        }
+        if (b.fireT != null) b.fireT += dt;
+        // The flank fired on on its way: it fires back, and keeps going.
+        if (flank.some((u) => (u.suppression ?? 0) > P.fireBackAt)) for (const u of flank) u.holdFire = false;
+        // In: the flank in place and the French there suppressed — or the base has fired long enough.
+        if (there(flank, b.flankSpot) && b.fireT != null) {
+          const fr = french().filter((u) => !u.isAir && u.type?.foot && dist(u.position, tg.at) < 22);
+          const sup = fr.length ? fr.filter((u) => u.pinned || u.suppressed || (u.suppression ?? 0) > 0.3 || u.inside).length / fr.length : 1;
+          if (sup >= P.suppressedShare || b.fireT > P.baseFireMax) {
+            // A French-held house: grenades at it first (the garrison bails out after two).
+            if (tg.house?.men.length && app.algGrenades) {
+              const g = app.algGrenades;
+              const gu = flank.find((u) => u.type?.grenade && !(u.grenadeCd > 0));
+              if (gu) { g.order(gu, tg.house.x + rand(-1, 1), tg.house.z + rand(-1, 1)); tg.house._grenT = t; }
+            }
+            goIn(b);
+          }
+        }
+        b.tact = (b.tact ?? 0) - dt;
+        if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
+        break;
+      }
       case "assault": {
         // In among them, firing: until the band breaks, the target falls
         // (a structure destroyed, a village turned: a cell is left in it), or
@@ -784,7 +835,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
           b.tact = P.tactEvery;
           tactics(b, m, dt);
           for (const u of m) {
-            if (u.isMoving || u.target?.alive || u.attackTarget?.alive || u.pinned) continue;
+            if (u._base || u.isMoving || u.target?.alive || u.attackTarget?.alive || u.pinned) continue;   // the base stays and fires
             let best = null, bd = 80;
             for (const f of french()) { if (f.isAir) continue; const d = dist(f.position, u.position); if (d < bd) { bd = d; best = f; } }
             if (best) u.orderTo(best.position.x, best.position.z);
@@ -841,6 +892,9 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const R = g.params.range, blast = g.params.blast;
     const fr = french().filter((f) => !f.isAir);
     for (const st of app.algStructures?.list ?? []) if (st.alive && st.team === "player" && st.weapon === "mg") fr.push(st);
+    // A house the French hold (algGarrison.js): a grenade in it is worth the most.
+    // (one grenade a house every 10 s: they pile up otherwise — the bail-out is what clears it)
+    for (const h of app.algGarrison?.houses ?? []) if (h.team === "player" && h.men.length && t - (h._grenT ?? -1e9) > 10) fr.push({ alive: true, team: "player", house: h, position: { x: h.x, y: 0, z: h.z } });
     let best = null, bestS = 0;
     for (const u of m) {
       if (!u.type?.grenade || u.grenadeCd > 0 || u.throwing || u.pinned) continue;
@@ -849,7 +903,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         const d = dist(f.position, u.position);
         if (d > R || d < blast + 1) continue;   // not on his own head
         let s;
-        if (f.isStructure) s = (f.weapon ?? f.type?.weapon) === "mg" ? 2.5 : 0;
+        if (f.house) s = 2 + f.house.men.length * 0.6;
+        else if (f.isStructure) s = (f.weapon ?? f.type?.weapon) === "mg" ? 2.5 : 0;
         else if (!f.type?.foot) s = 0;
         else {
           // Men round him in the blast; worth it bunched or in cover.
@@ -857,10 +912,11 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
           for (const o of units.near(f.position.x, f.position.z, blast, _near)) if (o.alive && o.team === "player" && o.type?.foot && dist(o.position, f.position) < blast) n++;
           s = n + (f.inCover || f.posture === "kneel" ? 1.5 : 0) - 1.2;
         }
-        if (s > bestS) { bestS = s; best = { u, x: f.position.x, z: f.position.z }; }
+        if (s > bestS) { bestS = s; best = { u, x: f.position.x, z: f.position.z, house: f.house ?? null }; }
       }
     }
     if (!best) return;
+    if (best.house) best.house._grenT = t;
     g.order(best.u, best.x + rand(-0.8, 0.8), best.z + rand(-0.8, 0.8));
     b.grenT = P.grenadeEvery;
   }
@@ -1301,15 +1357,67 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
    * sandbags… nearest the cave), else their troops in the field, else the
    * post's outskirts. Stage 50-70 m short (ambushSpot, cover), then go in.
    */
+  /** A line of fire from a spot on the ground to `at` (algSight: ridges and tall buildings). */
+  const sightFrom = (x, z, at) => {
+    const S = app.algSight;
+    if (!S) return true;
+    const a = { position: { x, y: app.getWorldHeight(x, z), z }, type: { foot: true } };
+    const b2 = { position: { x: at.x, y: app.getWorldHeight(at.x, at.z), z: at.z }, type: { foot: true } };
+    return !S.blocker(a, b2);
+  };
+  /** A spot round `at`, `ring` m out, around angle `a0` ± `spread`: open, out of the MGs, scored. */
+  function spotAround(at, a0, spread, ring, { needSight = false, mgs = frenchMGs(), from = null } = {}) {
+    let best = null, bestS = -Infinity;
+    for (let i = 0; i < 32; i++) {
+      const a = a0 + rand(-spread, spread), r = rand(...ring);
+      const x = at.x + Math.cos(a) * r, z = at.z + Math.sin(a) * r;
+      if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+      // REACHABLE from the band (open but cut off, the flank stood 163 m away for 90 s).
+      if (from && app.navGrid?.sameRegion && !app.navGrid.sameRegion(from.x, from.z, x, z)) continue;
+      if (dist({ x, z }, post) < P.postKeepOff) continue;
+      if (mgExposure(x, z, mgs, 4) > 0) continue;
+      if (needSight && !sightFrom(x, z, at)) continue;
+      const s = cover(x, z) * 2 + Math.max(-1, Math.min(1, (app.getWorldHeight(x, z) - app.getWorldHeight(at.x, at.z)) / 15)) - r / 200 + rand(0, 0.2);
+      if (s > bestS) { bestS = s; best = { x, z }; }
+    }
+    return best;
+  }
+  /**
+   * SMOKE (2026-10-06, the FLN's brain): one man throws a smoke grenade a third of the way from
+   * the band toward the nearest French within smokeNear — a screen across their line of fire
+   * (algSmoke: nobody sees or shoots through it). When it withdraws under fire, when its flank
+   * goes in. Free for the ALN (no purse).
+   */
+  function throwSmoke(men) {
+    const g = app.algGrenades;
+    if (!g || !men.length) return false;
+    const c = centre(men);
+    let near = null, nd = P.smokeNear;
+    for (const f of french()) { if (f.isAir) continue; const d = dist(f.position, c); if (d < nd) { nd = d; near = f; } }
+    if (!near) return false;
+    const u = men.find((x) => x.alive && x.type?.grenade && !(x.smokeCd > 0) && !x.throwing && !x.pinned);
+    if (!u) return false;
+    const k = Math.min(0.4, 12 / Math.max(nd, 1));
+    g.order(u, c.x + (near.position.x - c.x) * k, c.z + (near.position.z - c.z) * k, "smoke");
+    return true;
+  }
+  /** Men to a spot, spread round it. */
+  const moveGroup = (men, to, spread = 2.5) => men.forEach((u, i) => {
+    const a = (i / Math.max(1, men.length)) * Math.PI * 2, r = i === 0 ? 0 : spread + (i % 2) * 1.2;
+    u.orderTo(to.x + Math.cos(a) * r, to.z + Math.sin(a) * r);
+  });
+
   function planAssault(b) {
     const c = centre(alive(b));
     let tgt = null;
     const fr = french().filter((u) => !u.isAir);
     const guards = (p) => fr.filter((u) => dist(u.position, p) < 60).length;
+    const mgs = frenchMGs();
     let best = -Infinity;
     for (const v of app.algEconomy?.points ?? []) {
       if (v.owner !== "player") continue;
-      const s = 3 - guards(v.position) * 0.5 - dist(c, v.position) / 400;
+      // WEAK SPOTS: few guards, near, and not under the French MGs.
+      const s = 3 - guards(v.position) * 0.5 - dist(c, v.position) / 400 - mgExposure(v.position.x, v.position.z, mgs) * 1.5;
       if (s > best) { best = s; tgt = { at: v.position, name: v.name, village: v }; }
     }
     if (!tgt) {
@@ -1322,17 +1430,60 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       const a = Math.atan2(c.z - post.z, c.x - post.x);
       tgt = { at: { x: post.x + Math.cos(a) * 70, z: post.z + Math.sin(a) * 70 }, name: "le poste" };
     }
+    // A HOUSE the French hold in it (algGarrison.js): the flank's grenadiers go for it.
+    tgt.house = (app.algGarrison?.houses ?? []).filter((h) => h.team === "player" && h.men.length && dist(h, tgt.at) < 45)
+      .sort((h1, h2) => dist(h1, tgt.at) - dist(h2, tgt.at))[0] ?? null;
+    b.assault = tgt; b.target = { lead: null, at: tgt.at, size: 0 };
+    if (planFireManoeuvre(b, c, tgt, mgs)) return true;
+    // Too few to split, or no ground for it: as before, one group.
     const spot = ambushSpot(c, tgt.at) ?? { x: tgt.at.x + (c.x - tgt.at.x) * 0.25, z: tgt.at.z + (c.z - tgt.at.z) * 0.25 };
-    b.assault = tgt; b.target = { lead: null, at: tgt.at, size: 0 }; b.spot = spot;
+    b.spot = spot;
     holdFire(b, true);
     sendBand(b, spot);
     setState(b, "approach");
     return true;
   }
 
-  /** In they go: everyone at the target, firing. */
+  /**
+   * FIRE AND MANOEUVRE (2026-10-06 — the assault walked in as one group and lost 3 to 1: 18
+   * dead to 6, the village taken once in 4): the FMs and a rifleman or two are the BASE OF
+   * FIRE, lying up 28-40 m off in cover with a line on the target; the rest go round to a FLANK
+   * 20-30 m out at 70-110° from the base's line, out of the French MGs, holding fire; when the
+   * French there are suppressed or pinned (or after baseFireMax s of fire) the flank goes in,
+   * grenades first — at a French-held house, its grenadiers go for the house.
+   */
+  function planFireManoeuvre(b, c, tgt, mgs) {
+    const m = alive(b);
+    const fms = m.filter((u) => u.typeKey === "fmTeam"), rifles = m.filter((u) => u.typeKey !== "fmTeam");
+    const base = [...fms, ...rifles.slice(0, fms.length ? 1 : 2)];
+    const flank = m.filter((u) => !base.includes(u));
+    if (flank.length < 3 || base.length < 1) return false;
+    const a0 = Math.atan2(c.z - tgt.at.z, c.x - tgt.at.x);
+    const baseSpot = spotAround(tgt.at, a0, 0.7, P.baseRing, { needSight: true, mgs, from: c });
+    if (!baseSpot) return false;
+    const aBase = Math.atan2(baseSpot.z - tgt.at.z, baseSpot.x - tgt.at.x);
+    const focus = tgt.house ?? tgt.at;
+    const ring = tgt.house ? [P.houseThrow - 4, P.houseThrow + 2] : P.flankRing;
+    let flankSpot = null;
+    for (const side of Math.random() < 0.5 ? [1, -1] : [-1, 1]) {
+      flankSpot = spotAround(focus, aBase + side * rand(...P.flankAngle), 0.35, ring, { mgs, from: c });
+      if (flankSpot) break;
+    }
+    if (!flankSpot) return false;
+    for (const u of base) u._base = true;
+    b.base = base; b.flank = flank; b.baseSpot = baseSpot; b.flankSpot = flankSpot;
+    b.fireT = null;
+    holdFire(b, true);
+    moveGroup(base, baseSpot);
+    moveGroup(flank, flankSpot);
+    setState(b, "deploy");
+    return true;
+  }
+
+  /** In they go: everyone at the target, firing (split: the flank; the base keeps firing). */
   function goIn(b) {
-    const m = alive(b), tg = b.assault;
+    const m = alive(b).filter((u) => !u._base), tg = b.assault;
+    throwSmoke(m);   // a screen across the defenders' line as they go
     holdFire(b, false);
     m.forEach((u, i) => {
       const a = (i / Math.max(1, m.length)) * Math.PI * 2, r = 4 + (i % 3) * 3;
@@ -1354,6 +1505,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   function withdraw(b) {
     app.algGarrison?.exitAll(alive(b));   // out of a house first (algGarrison.js)
+    if (underFire(b, alive(b))) throwSmoke(alive(b));   // pressed: a screen to run behind
+    for (const u of b.members) u._base = false;
     holdFire(b, true);
     for (const u of alive(b)) { u.attackTarget = null; u.target = null; sendHome(u); }
     setState(b, "withdraw");

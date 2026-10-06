@@ -663,11 +663,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const pathDots = createAlgPathDots({ app, selection, squads });
   app.algPathDots = pathDots;
   // THE SQUAD BADGES (ui/squadBadges.js): icon, men left, one thin bar (CoH).
-  const squadBadges = createSquadBadges({ app, squads });
+  // (+ the FLN's bands as squads once seen: a red shield, their men and the katiba's stars)
+  const squadBadges = createSquadBadges({ app, squads, groups: () => (app.algAI?.bands ?? []).filter((b) => b.state !== "gather" && b.state !== "done").map((b) => ({ id: b, team: "enemy", typeKey: "moudjahid", members: b.members.filter((u) => u.alive && !u.inside), stars: veterancy.katiba.stars })) });
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
-  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); };
+  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
