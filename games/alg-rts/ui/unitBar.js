@@ -13,7 +13,7 @@
 // Per frame (tick): the pips and the lines are rewritten only when they change.
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 
-const WEAPON = { rifle: "Rifles", mg: "Machine gun", cannon: "Gun", gunship: "Rockets + MG" };
+const WEAPON = { rifle: "Fusils", mg: "Mitrailleuse", cannon: "Canon", gunship: "Roquettes + mitrailleuse" };
 
 const CSS = `
 #rts-unit-bar { height: 100%; }
@@ -84,7 +84,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
           <div class="who">${u.type?.name ?? u.name ?? u.typeKey}</div>
           ${isStruct || !u.type?.foot ? `<div class="hpbar"><i></i></div>` : `<div class="pips"></div>`}
           <div class="chips"></div>
-          <div class="sub">${isStruct ? (u.team === "player" ? "Structure" : "Enemy structure") : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
+          <div class="sub">${isStruct ? (u.team === "player" ? "Bâtiment" : "Bâtiment ennemi") : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
         </div>
       </div>`;
     one = { units, pips: root.querySelector(".pips"), hpbar: root.querySelector(".hpbar i"), chips: root.querySelector(".chips") };
@@ -137,17 +137,17 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
     }
     // What they are doing, then where they stand (the cover map's thresholds).
     let chips = "";
-    if (live.some((u) => u.pinned)) chips += `<span class="chip pinned">PINNED</span>`;
-    else if (live.some((u) => u.suppressed)) chips += `<span class="chip supp">SUPPRESSED</span>`;
-    if (live.some((u) => u.target?.alive || u.attackTarget?.alive)) chips += `<span class="chip act">FIRING</span>`;
-    else if (live.some((u) => u.isMoving)) chips += `<span class="chip act">MOVING</span>`;
+    if (live.some((u) => u.pinned)) chips += `<span class="chip pinned">CLOUÉS AU SOL</span>`;
+    else if (live.some((u) => u.suppressed)) chips += `<span class="chip supp">SOUS LE FEU</span>`;
+    if (live.some((u) => u.target?.alive || u.attackTarget?.alive)) chips += `<span class="chip act">FEU</span>`;
+    else if (live.some((u) => u.isMoving)) chips += `<span class="chip act">EN MOUVEMENT</span>`;
     if (!one.units[0].isStructure) {
       const st = stanceFor(live);
       if (st) {
-        if (st.revealed) chips += `<span class="chip seen">SPOTTED</span>`;
-        else if (st.concealment >= 0.3) chips += `<span class="chip conceal">CONCEALED</span>`;
-        if (st.cover >= 0.35) chips += `<span class="chip cover">HARD COVER</span>`;
-        else if (st.cover >= 0.12) chips += `<span class="chip cover">LIGHT COVER</span>`;
+        if (st.revealed) chips += `<span class="chip seen">REPÉRÉS</span>`;
+        else if (st.concealment >= 0.3) chips += `<span class="chip conceal">CAMOUFLÉS</span>`;
+        if (st.cover >= 0.35) chips += `<span class="chip cover">COUVERTURE SOLIDE</span>`;
+        else if (st.cover >= 0.12) chips += `<span class="chip cover">COUVERTURE LÉGÈRE</span>`;
       }
     }
     if (chips !== lastChips) { lastChips = chips; one.chips.innerHTML = chips; }

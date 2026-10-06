@@ -66,8 +66,8 @@ export function createAlgFlares({ app, units, selection, purse = null, cover = n
     return {
       key: "flare", label: "Fusée éclairante", cost: purse ? P.cost : undefined,
       hint: dark
-        ? `A parachute flare over a point up to ${P.range} m away: ~${P.life} s of light, the ground under it SEEN and no one hidden in it. The ALN keeps out of it.`
-        : "Only at night: a flare in the sun lights nothing.",
+        ? `Une fusée à parachute au-dessus d'un point jusqu'à ${P.range} m : ~${P.life} s de lumière, le terrain dessous VU et personne n'y reste caché. L'ALN l'évite.`
+        : "De nuit seulement : une fusée en plein soleil n'éclaire rien.",
       ready: dark && cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd),
     };
   }

@@ -61,7 +61,7 @@ const CSS = `
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 #alg-alerts .al.bad .aic { background: #ff6a55; } #alg-alerts .al.good .aic { background: #5aaeff; }
 #alg-alerts .al.tip { border-left-color: var(--hud-brass); background: #2a2614; border-color: #5c5126; color: #f1e6c4; }
-#alg-alerts .al.tip::before { content: "ADVICE  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
+#alg-alerts .al.tip::before { content: "CONSEIL  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
 
 #alg-obj {
   position: fixed; left: 8px; top: 72px; z-index: 56; width: 300px;   /* under the dev stats strip */
@@ -183,7 +183,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     el.heldF.textContent = heldFr;
     el.heldA.textContent = heldAln;
     el.drain.className = `drain${heldFr < heldAln ? " bad" : heldFr > heldAln ? " good" : ""}`;
-    el.drain.textContent = heldFr < heldAln ? "◀ you are bleeding" : heldFr > heldAln ? "the FLN bleeds ▶" : "villages";
+    el.drain.textContent = heldFr < heldAln ? "◀ vous perdez des points" : heldFr > heldAln ? "le FLN perd des points ▶" : "villages";
   }
 
   // ── Alerts ────────────────────────────────────────────────────────────────
@@ -224,7 +224,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     const key = JSON.stringify([list, headRight]);
     if (key === objKey) return;
     objKey = key;
-    obj.innerHTML = `<div class="hd">Objectives<span>${headRight}</span></div>` + list.map((o, i) =>
+    obj.innerHTML = `<div class="hd">Objectifs<span>${headRight}</span></div>` + list.map((o, i) =>
       `<div class="o ${o.state ?? ""}${o.x != null ? " go" : ""}" data-i="${i}"><div class="m"></div><div><div class="t">${o.text}</div>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></div>`).join("");
     obj.querySelectorAll(".o.go").forEach((n) => {
       const o = list[+n.dataset.i];
@@ -327,8 +327,8 @@ export function createBattleHud({ camera, canvas, onJump }) {
      */
     briefing(html, onStart, { levels = [], current = "normal" } = {}) {
       let pick = current;
-      const back = modal(`${html}${levels.length ? `<div class="kicker">Difficulty</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
-        [{ label: "To your posts", go: true, onClick: () => onStart(pick) }]);
+      const back = modal(`${html}${levels.length ? `<div class="kicker">Difficulté</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
+        [{ label: "À vos postes", go: true, onClick: () => onStart(pick) }]);
       back.querySelectorAll("[data-lv]").forEach((b) => b.addEventListener("click", () => {
         pick = b.dataset.lv;
         back.querySelectorAll("[data-lv]").forEach((o) => o.classList.toggle("sel", o === b));
@@ -336,7 +336,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
       return back;
     },
     end(html, { onReplay }) {
-      return modal(html, [{ label: "Keep watching" }, { label: "Play again", go: true, onClick: onReplay }]);
+      return modal(html, [{ label: "Continuer à regarder" }, { label: "Rejouer", go: true, onClick: onReplay }]);
     },
     dispose() {
       window.removeEventListener("keydown", onKey);

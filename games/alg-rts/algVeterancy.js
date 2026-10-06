@@ -49,7 +49,7 @@ export function createAlgVeterancy({ app, squads }) {
     while (s.stars < P.thresholds.length && s.xp >= P.thresholds[s.stars]) {
       s.stars++;
       const l = s.leader?.position;
-      app.algBattle?.say?.(`<b>${s.name}</b> — ${"★".repeat(s.stars)} vétérans: they shoot straighter and hold under fire.`, l?.x ?? null, l?.z ?? null, "good");
+      app.algBattle?.say?.(`<b>${s.name}</b> — ${"★".repeat(s.stars)} vétérans : ils tirent plus juste et tiennent mieux sous le feu.`, l?.x ?? null, l?.z ?? null, "good");
     }
   }
 

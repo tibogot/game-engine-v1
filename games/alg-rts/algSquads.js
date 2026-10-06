@@ -43,7 +43,7 @@ export const UPGRADES = {
   lmg: {
     label: "FM 24/29", squads: ["appele"], cost: { mun: 60 }, slot: 2,
     weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 },
-    hint: "The squad's FM gunner gets the FM 24/29 light machine gun: bursts that pin men down at 42 m. Kept by the squad (a replacement in his slot picks it up).",
+    hint: "Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend)."
   },
 };
 

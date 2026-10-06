@@ -8,19 +8,19 @@
 // Chosen on the briefing (remembered), or ?difficulty=easy|normal|hard.
 const LEVELS = {
   easy: {
-    label: "Easy", alnStart: 320, alnBase: 25, moudjahid: 35, headStart: 4,
+    label: "Facile", alnStart: 320, alnBase: 25, moudjahid: 35, headStart: 4,
     firstBandAt: 40, bandEvery: [70, 115], maxLive: 16, frStart: 750,
-    blurb: "Small bands, slow to come.",
+    blurb: "Petites bandes, lentes à venir.",
   },
   normal: {
     label: "Normal", alnStart: 480, alnBase: 45, moudjahid: 30, headStart: 8,
     firstBandAt: 18, bandEvery: [50, 85], maxLive: 26, frStart: 600,
-    blurb: "A katiba that fights for every village.",
+    blurb: "Une katiba qui se bat pour chaque village.",
   },
   hard: {
-    label: "Hard", alnStart: 700, alnBase: 70, moudjahid: 25, headStart: 12,
+    label: "Difficile", alnStart: 700, alnBase: 70, moudjahid: 25, headStart: 12,
     firstBandAt: 10, bandEvery: [35, 60], maxLive: 36, frStart: 500,
-    blurb: "The whole wilaya against one post.",
+    blurb: "Toute la wilaya contre un seul poste.",
   },
 };
 export const DIFFICULTIES = Object.entries(LEVELS).map(([key, v]) => ({ key, label: v.label, blurb: v.blurb }));

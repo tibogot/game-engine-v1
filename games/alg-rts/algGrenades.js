@@ -38,12 +38,12 @@ export const THROWS = {
   grenade: {
     key: "grenade", label: "Grenade", hotkey: "g", cd: "grenadeCd", range: GRENADE.range, ring: GRENADE.blast,
     cooldown: GRENADE.cooldown, cost: GRENADE.cost,
-    hint: `A man throws a grenade (${GRENADE.range} m, blast ${GRENADE.blast} m): damage, and men near it go down. G.`,
+    hint: `Un homme lance une grenade (${GRENADE.range} m, souffle ${GRENADE.blast} m) : dégâts, et les hommes autour se jettent à terre. G.`,
   },
   smoke: {
     key: "smoke", label: "Fumigène", hotkey: "b", cd: "smokeCd", range: 28, ring: 11,
     cooldown: 40, cost: { mun: 10 },
-    hint: "A man throws a smoke grenade (28 m): a cloud ~11 m across for ~20 s that NOBODY sees or shoots through — cross open ground, blind an MG, cover a retreat. B.",
+    hint: "Un homme lance un fumigène (28 m) : un nuage de ~11 m pendant ~20 s que PERSONNE ne voit ni ne traverse au tir — franchir un terrain découvert, aveugler une mitrailleuse, couvrir un repli. B.",
   },
 };
 

@@ -149,7 +149,7 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
     ability(sel) {
       if (!sel.some((u) => u.team === "player" && isSapper(u))) return null;
       const any = units.list.some(repairable) || (structures.list ?? []).some(repairable);
-      return { key: "repair", label: "Réparer", hint: "Repair a damaged vehicle or building of yours: click it (or right-click it with sapeurs selected). Free; stops under fire.", ready: any };
+      return { key: "repair", label: "Réparer", hint: "Réparer un de vos véhicules ou bâtiments endommagés : cliquez dessus (ou clic droit avec des sapeurs sélectionnés). Gratuit ; s'arrête sous le feu.", ready: any };
     },
     get jobs() { return jobs; },
     dispose() {

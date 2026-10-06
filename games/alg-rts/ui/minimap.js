@@ -731,10 +731,10 @@ export function createMinimap({
     c.textAlign = "center"; c.textBaseline = "middle";
     c.fillStyle = "#8d8a78";
     c.font = `bold ${15 * s}px 'Segoe UI', system-ui, sans-serif`;
-    c.fillText("NO  RADIO", px / 2, px / 2 - 8 * s);
+    c.fillText("PAS DE RADIO", px / 2, px / 2 - 8 * s);
     c.font = `${9 * s}px 'Segoe UI', system-ui, sans-serif`;
     c.fillStyle = "#6b6a5c";
-    c.fillText("BUILD A RADIO STATION", px / 2, px / 2 + 12 * s);
+    c.fillText("CONSTRUISEZ UNE STATION RADIO", px / 2, px / 2 + 12 * s);
   }
 
   let unitsT = 0;

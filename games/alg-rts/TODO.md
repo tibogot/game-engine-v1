@@ -38,9 +38,19 @@ One screen, most important first. Details stay in the sections below;
 - Poles: the FLN cuts the line → the post loses its radio (minimap).
 - Mines: a minimap mark once spotted, the sapper clears faster; an attack
   order shouldn't end a patrol.
-- A game around the battle (sugg.): main menu, options (gore switch,
-  sound, keys), pause, end screens that lead somewhere; later missions /
-  a campaign.
+- [x] PAUSE + PLAYER OPTIONS (2026-10-06, ui/gameMenu.js): Esc / F10 pause everything (the
+  sim, the score clock, animals, flags — algGame.js gives the game's hooks no time while
+  app.paused; the camera keeps moving; the sound held). Menu: Reprendre / Options / Commandes
+  / Recommencer. Options (kept between games): sound on/off, master, effects, radio voices,
+  ambience; gore; advice tips; pan speed, edge scrolling. Commandes: every key.
+- [ ] RELEASE: the dev panel (and the stats strip) hidden unless ?dev=1 — the player has the
+  pause menu's Options. Later in Options: a graphics preset (low / medium / high) with the
+  perf work; UI scale.
+- [x] FRENCH for the player (2026-10-06, you): briefing, objectives, alerts, advice, tooltips,
+  hints, chips, tabs, end screen, loading — the dev panel and the console stay English.
+  Later (sugg.): English as an option (a strings table).
+- A game around the battle (sugg.): a title screen (map / mission choice once the coast is
+  in), end screens that lead somewhere; later missions / a campaign.
 - [x] BALANCE PASS 1 (2026-10-04, measured with __ALG.fastForward(s) — a hands-off game and
   a scripted holding player, 15 min each, Normal):
   - the FLN STALLED from minute 6 (two ambush bands lay in one scrub to minute 12, holding

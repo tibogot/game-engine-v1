@@ -420,14 +420,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         const why = tiers.blockedBy(nx);
         list.push({
           key: "tier", label: `▲ ${nx.name}`, cost: nx.cost, tier: true,
-          locked: why && !why.endsWith("supplies") ? why : null,
-          tip: `Tier ${nx.n}: ${nx.note}. Needs ${nx.villages} village${nx.villages > 1 ? "s" : ""} held.`,
+          locked: why && !why.endsWith("ressources") ? why : null,
+          tip: `Échelon ${nx.n} : ${nx.note}. Il faut tenir ${nx.villages} village${nx.villages > 1 ? "s" : ""}.`,
         });
       }
       return list;
     },
     canAfford: (cost) => economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop),
-    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? `troops (cap ${economy.popCap()}: hold more villages)` : ""].filter(Boolean).join(", "),
+    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? `troupes (plafond ${economy.popCap()} : tenez plus de villages)` : ""].filter(Boolean).join(", "),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
@@ -438,7 +438,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // GRENADE (algGrenades.js): one man of the selection throws.
     abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
       ? [
-        { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrol the nearest track in file, back and forth (vehicles: the piste). A GMC on patrol delivers supplies to the villages you hold.", ready: true },
+        { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrouille en file sur la piste la plus proche, aller et retour (véhicules : la piste). Un GMC en patrouille ravitaille les villages que vous tenez.", ready: true },
         grenades?.ability(sel),
         // FUMIGÈNE (algGrenades.js + algSmoke.js): a screening cloud nobody sees through.
         grenades?.ability(sel, "smoke"),
@@ -447,31 +447,31 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
           const sq = squads.squadsIn(sel).filter((s) => squads.upgradeCost(s, "lmg"));
           if (!sq.length) return null;
           const g = UPGRADES.lmg;
-          return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? ` (${sq.length} squads: each pays).` : ""), ready: economy.french.canAfford(g.cost) };
+          return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? ` (${sq.length} groupes : chacun paie).` : ""), ready: economy.french.canAfford(g.cost) };
         })(),
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
         // RÉPARER (algRepair.js): sappers fix a damaged vehicle or building.
         repair?.ability(sel),
         sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
-          && { key: "cutWire", label: "Couper", hint: "Cut the nearest barbed wire (40 m): ~8 s for one sapper, less for more.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
+          && { key: "cutWire", label: "Couper", hint: "Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
         // calls a man in for a squad short of men, at the post.
         squads.squadsIn(sel).length > 0 && {
           key: "retreat", label: squads.squadsIn(sel).every((s) => s.retreating) ? "En retraite" : "Retraite",
-          hint: "Run back to the post: hold fire, can't be pinned, faster, take less fire. The wounded heal at the post.", ready: true,
+          hint: "Repli sur le poste : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent au poste.", ready: true,
         },
         (() => {
           const sq = squads.squadsIn(sel), cost = sq.reduce((n, s) => n + squads.reinforceCost(s), 0);
           if (!sq.length) return null;
           const short = sq.some((s) => s.count + squads.pendingFor(s) < s.size);
           return { key: "reinforce", label: "Renforcer", cost: cost || undefined,
-            hint: !short ? "Squad at full strength." : cost ? "One man per short squad, out of the post's gate." : "Bring the squad back to the post to reinforce it (Retraite).",
+            hint: !short ? "Groupe au complet." : cost ? "Un homme par groupe incomplet, sorti par la porte du poste." : "Ramenez le groupe au poste pour le renforcer (Retraite).",
             ready: cost > 0 && economy.french.canAfford(cost) };
         })(),
       ].filter(Boolean)
       // A sappers' site (algBuild.js): cancel it, the price back.
       : sel.length === 1 && sel[0].site && sel[0].alive
-        ? [{ key: "cancelSite", label: `Annuler (+${BUILD_COSTS[sel[0].key]})`, hint: `Cancel the site: ${BUILD_COSTS[sel[0].key]} supplies back.`, ready: true }]
+        ? [{ key: "cancelSite", label: `Annuler (+${BUILD_COSTS[sel[0].key]})`, hint: `Annuler le chantier : ${BUILD_COSTS[sel[0].key]} ressources rendues.`, ready: true }]
         // The MORTAR PIT: an illumination flare at night (algFlares.js).
         // and the BARRAGE (algBarrage.js), day or night.
         : [barrage?.ability(sel), flares?.ability(sel)].filter(Boolean)),

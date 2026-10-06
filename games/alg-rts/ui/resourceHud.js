@@ -37,9 +37,9 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
   root.id = "alg-res";
   root.innerHTML = `
     <div class="row">
-    <span class="res mp" title="Effectifs (manpower): from Algiers all the time, less the upkeep of your army in the field. Buys and reinforces the squads."><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
-    <span class="res fuel" title="Carburant: from the villages and fuel points you hold, linked to the post. Vehicles, the Alouette, the tiers."><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
-    <span class="res mun" title="Munitions: from the villages and munition points you hold, linked to the post. Grenades, the Légion."><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
+    <span class="res mp" title="Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes."><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
+    <span class="res fuel" title="Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons."><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
+    <span class="res mun" title="Munitions : des villages et des points de munitions que vous tenez, reliés au poste. Grenades, capacités, la Légion."><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
     </div>
     <div class="row row2">
     <span class="dim" id="alg-res-villages"></span>
@@ -72,7 +72,7 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
     }
     elVillages.innerHTML = `villages <b class="hud-num">${held}</b>/${total}`
       + (theirs ? ` <span class="enemy">· ALN <b class="hud-num">${theirs}</b></span>` : "")
-      + (cut ? ` <span class="cut" title="Points you hold that are cut off from the post: no supply line, they pay nothing.">· ${cut} coupé${cut > 1 ? "s" : ""}</span>` : "");
+      + (cut ? ` <span class="cut" title="Points que vous tenez mais coupés du poste : sans ligne de ravitaillement, ils ne rapportent rien.">· ${cut} coupé${cut > 1 ? "s" : ""}</span>` : "");
     if (men != null) elTroops.innerHTML = `troupes <b class="hud-num">${men}</b>`;
   }
 

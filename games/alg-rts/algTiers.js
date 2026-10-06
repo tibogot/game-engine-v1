@@ -9,15 +9,15 @@
 // tanks back).
 export const TIERS = [
   {
-    n: 1, name: "Section d'infanterie", note: "from the start",
+    n: 1, name: "Section d'infanterie", note: "dès le départ",
     units: ["appele", "sapeur", "willys", "gmc"], cost: 0, villages: 0,
   },
   {
-    n: 2, name: "Moyens héliportés", note: "the helipad opens: paras, the Alouette; the half-track",
+    n: 2, name: "Moyens héliportés", note: "l'héliport ouvre : paras, l'Alouette ; le half-track",
     units: ["para", "alouette", "halftrack"], cost: { mp: 150, fuel: 40 }, villages: 1,
   },
   {
-    n: 3, name: "Blindés", note: "armour: the EBR, the AMX-13; the Légion",
+    n: 3, name: "Blindés", note: "les blindés : l'EBR, l'AMX-13 ; la Légion",
     units: ["ebr", "amx13", "legion"], cost: { mp: 200, fuel: 90 }, villages: 2,
   },
 ];
@@ -30,10 +30,10 @@ export function createAlgTiers(app, { economy }) {
   const next = () => TIERS.find((t) => t.n === tier + 1) ?? null;
   /** Why the next tier can't be bought now (null: it can). */
   function blockedBy(t = next()) {
-    if (!t) return "all unlocked";
-    if (economy.held < t.villages) return `hold ${t.villages} village${t.villages > 1 ? "s" : ""} (you hold ${economy.held})`;
+    if (!t) return "tout est débloqué";
+    if (economy.held < t.villages) return `tenir ${t.villages} village${t.villages > 1 ? "s" : ""} (vous en tenez ${economy.held})`;
     // Ends "supplies": the card shows it as merely too poor, not locked.
-    if (!economy.french.canAfford(t.cost)) return `${economy.french.short?.(t.cost) || "more"} supplies`;
+    if (!economy.french.canAfford(t.cost)) return `${economy.french.short?.(t.cost) || "plus de"} ressources`;
     return null;
   }
   return {
@@ -48,7 +48,7 @@ export function createAlgTiers(app, { economy }) {
       const t = next();
       if (!t || blockedBy(t) || !economy.french.spend(t.cost)) return false;
       tier = t.n;
-      app.algBattle?.say?.(`<b>${t.name}</b> unlocked: ${t.note}.`);
+      app.algBattle?.say?.(`<b>${t.name}</b> débloqué : ${t.note}.`);
       app.algVoices?.radio("hq_tier");
       return true;
     },

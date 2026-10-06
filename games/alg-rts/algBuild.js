@@ -27,12 +27,12 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
  * for one sapper. `structure`: its combat stats' key (algStructures.js STATS).
  */
 export const BUILDS = {
-  sandbags: { label: "Sacs de sable", tip: "Sandbag wall: hard cover for men behind it.", cost: 20, time: 6, build: () => buildFrSandbagWall(), follow: true },
-  wire: { label: "Barbelés", tip: "Barbed wire: men must go round or cut it; a vehicle crushes it.", cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
-  mgNest: { label: "Nid de MG", tip: "MG nest: an AA-52 behind sandbags.", cost: 90, time: 14, build: () => buildMgNest(), pad: true, structure: "mgNest" },
-  mortarPit: { label: "Mortier", tip: "81 mm mortar pit: bombs 25-120 m out, over cover.", cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
-  mirador: { label: "Mirador", tip: "Watchtower: sees 110 m, an MG in the cabin.", cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
-  searchlight: { label: "Projecteur", tip: "Searchlight tower: sees 100 m.", cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
+  sandbags: { label: "Sacs de sable", tip: "Mur de sacs de sable : une couverture solide pour les hommes derrière.", cost: 20, time: 6, build: () => buildFrSandbagWall(), follow: true },
+  wire: { label: "Barbelés", tip: "Barbelés : il faut les contourner ou les couper ; un véhicule les écrase.", cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
+  mgNest: { label: "Nid de MG", tip: "Nid de mitrailleuse : une AA-52 derrière des sacs de sable.", cost: 90, time: 14, build: () => buildMgNest(), pad: true, structure: "mgNest" },
+  mortarPit: { label: "Mortier", tip: "Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris.", cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
+  mirador: { label: "Mirador", tip: "Mirador : voit à 110 m, une mitrailleuse dans la cabine.", cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
+  searchlight: { label: "Projecteur", tip: "Tour de projecteur : voit à 100 m.", cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
   // THE ALN BUILDS TOO (you, 2026-09-30): the same sites, paid from the ALN's
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
   // them — the AI places them through place()). Both lie on the slope, as
@@ -92,9 +92,9 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     // Why not (the first reason found): for a tooltip, and for testing.
     let why = null;
     for (const p of pts) {
-      if (!(p.wx > PLAY.x0 + 4 && p.wx < PLAY.x1 - 4 && p.wz > PLAY.z0 + 4 && p.wz < PLAY.z1 - 4)) why ??= "outside the play area";
-      else if ((app.getWaterLevelAt?.(p.wx, p.wz) ?? -Infinity) > p.h - 0.2) why ??= "water";
-      else if (navGrid?.isBlockedAtWorld?.(p.wx, p.wz)) why ??= "blocked";
+      if (!(p.wx > PLAY.x0 + 4 && p.wx < PLAY.x1 - 4 && p.wz > PLAY.z0 + 4 && p.wz < PLAY.z1 - 4)) why ??= "hors de la zone de jeu";
+      else if ((app.getWaterLevelAt?.(p.wx, p.wz) ?? -Infinity) > p.h - 0.2) why ??= "dans l'eau";
+      else if (navGrid?.isBlockedAtWorld?.(p.wx, p.wz)) why ??= "emplacement occupé";
     }
     let ok = !why;
     // Plane h = a + b·dx + c·dz over the footprint (symmetric grid: terms separate).
@@ -105,14 +105,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     let tilt = null, y = a;
     if (B.follow) {
       const n = new THREE.Vector3(-b, 1, -c).normalize();
-      if (n.y < FOLLOW_NY) { ok = false; why ??= "too steep"; }
+      if (n.y < FOLLOW_NY) { ok = false; why ??= "trop en pente"; }
       // Lowest corner decides: nothing floats, the uphill side sinks a little.
       let dip = 0;
       for (const p of pts) dip = Math.max(dip, a + b * (p.lx - f.cx) + c * (p.lz - f.cz) - p.h);
       y = a - b * f.cx - c * f.cz - dip;
       tilt = n;
-    } else if (hi - lo > Math.max(0.6, 2 * Math.max(f.hx, f.hz) * PAD_SLOPE)) { ok = false; why ??= "too steep"; }
-    if (ok && B.cost > 0 && !purseOf(key)?.canAfford(B.cost)) { ok = false; why = "not enough supplies"; }
+    } else if (hi - lo > Math.max(0.6, 2 * Math.max(f.hx, f.hz) * PAD_SLOPE)) { ok = false; why ??= "trop en pente"; }
+    if (ok && B.cost > 0 && !purseOf(key)?.canAfford(B.cost)) { ok = false; why = "pas assez de ressources"; }
     return { ok, why, y, tilt, f };
   }
 

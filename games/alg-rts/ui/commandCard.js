@@ -149,7 +149,7 @@ export function createCommandCard({
     const hk = HOTKEY[b.key];
     tip.innerHTML = `<div class="t"><b>${esc(b.label)}</b>${hasCost(b.cost) ? `<span>${costText(b.cost)}</span>` : ""}</div>`
       + (b.info ? `<div class="d">${esc(b.info)}</div>` : "")
-      + (b.locked ? `<div class="l">Locked — ${esc(b.locked)}</div>` : hasCost(b.cost) && !canAfford(b.cost) ? `<div class="l">Missing ${esc(shortOf(b.cost) || "resources")}</div>` : "")
+      + (b.locked ? `<div class="l">Verrouillé — ${esc(b.locked)}</div>` : hasCost(b.cost) && !canAfford(b.cost) ? `<div class="l">Manque : ${esc(shortOf(b.cost) || "ressources")}</div>` : "")
       + (hk ? `<div class="k">Key <kbd>${hk}</kbd></div>` : "");
     tip.style.display = "block";
     const r = b.el.getBoundingClientRect(), panel = root.getBoundingClientRect();
@@ -175,8 +175,8 @@ export function createCommandCard({
     root.replaceChildren();
     const grid = document.createElement("div");
     grid.className = "cc-grid";
-    grid.appendChild(button({ kind: "act", key: "stop", label: "Halte", icon: "stop", info: "Stop: drop the current order and hold here.", run: onStop }));
-    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Put the camera on the selection.", run: onFocus }));
+    grid.appendChild(button({ kind: "act", key: "stop", label: "Halte", icon: "stop", info: "Halte : abandonner l'ordre en cours et tenir ici.", run: onStop }));
+    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Centrer la caméra sur la sélection.", run: onFocus }));
     abilityButtons(selected, grid);
     // What these men can raise (the union of every builder's list).
     const can = new Set();
@@ -206,7 +206,7 @@ export function createCommandCard({
       const pic = o.tier ? null : thumbnails?.get(o.key);
       grid.appendChild(button({
         kind: "train", key: o.key, label: o.tier ? o.label.replace(/^▲\s*/, "") : o.label, cost: o.cost ?? 0, pic, icon: o.tier ? "tier" : null,
-        tier: !!o.tier, locked: o.locked, info: o.tip ?? (o.tier ? "" : `Train one. Leaves through the gate to the rally point.`),
+        tier: !!o.tier, locked: o.locked, info: o.tip ?? (o.tier ? "" : `Former. Sort par la porte vers le point de ralliement.`),
         run: () => onBuild(s, o.key),
       }));
     }
@@ -220,10 +220,10 @@ export function createCommandCard({
     root.replaceChildren();
     const grid = document.createElement("div");
     grid.className = "cc-grid";
-    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Put the camera on it.", run: onFocus }));
+    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Centrer la caméra dessus.", run: onFocus }));
     abilityButtons([s], grid);
     root.appendChild(grid);
-    const st = s.constructing ? "Under construction" : (s.deploy ?? 1) < 1 ? "Calibrating" : s.range ? `Defensive · ${Math.round(s.range)} m` : "";
+    const st = s.constructing ? "En construction" : (s.deploy ?? 1) < 1 ? "Réglage" : s.range ? `Défensif · ${Math.round(s.range)} m` : "";
     if (st) { const h = document.createElement("div"); h.className = "cc-hint"; h.textContent = st; root.appendChild(h); }
     refresh();
   }
@@ -272,9 +272,9 @@ export function createCommandCard({
       if (qEl && sig !== queueSig) {
         queueSig = sig;
         qEl.innerHTML = queue.length
-          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" data-qi="${i}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="Click: cancel (full refund)">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
+          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" data-qi="${i}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="Clic : annuler (remboursé)">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
             + (queue.length > 7 ? `<span class="idle">+${queue.length - 7}</span>` : "")
-          : `<span class="idle">${baseRef.constructing ? "Under construction" : "Nothing in training"}</span>`;
+          : `<span class="idle">${baseRef.constructing ? "En construction" : "Rien en formation"}</span>`;
       }
       const bar = qEl?.querySelector(".bar i");
       if (bar) bar.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;

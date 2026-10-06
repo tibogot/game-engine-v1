@@ -63,11 +63,11 @@ const CSS = `
 
 /** What a group is doing, most urgent first: [class, label, words]. */
 function stateOf(g) {
-  if (g.squad?.retreating) return ["retreat", "RETR", "retreating"];
-  if (g.some((u) => u.pinned)) return ["pinned", "PIN", "pinned down"];
-  if (g.some((u) => u.suppressed)) return ["supp", "SUP", "suppressed"];
-  if (g.some((u) => u.target?.alive || u.attackTarget?.alive)) return ["fight", "FEU", "firing"];
-  if (g.some((u) => u.isMoving)) return ["move", "»", "moving"];
+  if (g.squad?.retreating) return ["retreat", "REPLI", "en repli"];
+  if (g.some((u) => u.pinned)) return ["pinned", "CLOUÉ", "cloués au sol"];
+  if (g.some((u) => u.suppressed)) return ["supp", "FEU!", "sous le feu"];
+  if (g.some((u) => u.target?.alive || u.attackTarget?.alive)) return ["fight", "FEU", "font feu"];
+  if (g.some((u) => u.isMoving)) return ["move", "»", "en mouvement"];
   if (g.some((u) => u.inCover)) return ["cover", "ABRI", "in cover"];
   return ["idle", "", "holding"];
 }
@@ -187,8 +187,8 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       const isSel = v.g.some((u) => sel.has(u));
       if (isSel !== v.selLast) { v.selLast = isSel; v.el.classList.toggle("sel", isSel); }
       const name = v.g.squad?.name ?? v.g[0].type?.name ?? v.g[0].typeKey;
-      const count = v.g.squad ? ` (${live.length}/${v.g.squad.size} men)` : v.g.length > 1 ? ` ×${v.g.length}` : "";
-      v.el.title = `${name}${count} — ${words}, ${pct}% health\nClick: select · Shift: add · Double-click: go there${v.g.squad ? " · T: retreat · Y: reinforce (at the post)" : ""}`;
+      const count = v.g.squad ? ` (${live.length}/${v.g.squad.size} hommes)` : v.g.length > 1 ? ` ×${v.g.length}` : "";
+      v.el.title = `${name}${count} — ${words}, ${pct} % de santé\nClic : sélectionner · Maj : ajouter · Double-clic : y aller${v.g.squad ? " · T : retraite · Y : renforcer (au poste)" : ""}`;
     }
   }
 

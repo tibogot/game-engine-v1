@@ -34,6 +34,7 @@ import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
 import { createAlgSplats } from "./algSplats.js";
 import { createAlgSounds } from "./algSounds.js";
+import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
@@ -96,7 +97,7 @@ const SKY_PRO = params.get("sky") !== "atmosphere";
 const FAR_GRASS_TINT = params.get("grassfar") === "1" || params.get("gc") === "0" || params.get("fargrass") === "0";
 
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
-  onStatus("Starting engine…");
+  onStatus("Démarrage du moteur…");
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
   // so it paints while the engine and the level load, and awaited before the
@@ -242,6 +243,19 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   app.algPolish = AURES_LIGHT.polish;
   const NEUTRAL = { contrast: 1, saturation: 1, temperature: 0 };
   let lastNight = -1, lastDay = "";
+  // PAUSE (ui/gameMenu.js): while app.paused the game's frame hooks get no time — the sim, the
+  // score clock, the animals, the flags, the smoke all stop; the camera (a pre-UPDATE hook) and
+  // the engine's own hooks keep real time.
+  {
+    const add = app.addPreRenderHook.bind(app), remove = app.removePreRenderHook?.bind(app);
+    const wrapped = new Map();
+    app.addPreRenderHook = (fn) => {
+      const w = Object.defineProperty((dt) => fn(app.paused ? 0 : dt), "name", { value: fn.name || "algHook" });
+      wrapped.set(fn, w);
+      return add(w);
+    };
+    if (remove) app.removePreRenderHook = (fn) => remove(wrapped.get(fn) ?? fn);
+  }
   app.addPreRenderHook(function algNightGrade() {
     const n = app.sky?.night ?? 0;
     const day = app.algPolish;
@@ -255,13 +269,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 
   // The new assets, on the map, until gameplay places them (showroom.js).
   if (params.get("showroom") !== "0") {
-    onStatus("Placing assets…");
+    onStatus("Mise en place du décor…");
     // + the farmsteads and ruins between the villages (algLandmarks.js). ?landmarks=0 = without.
     const extra = params.get("landmarks") !== "0" ? landmarkEntries(app, SHOWROOM) : [];
     app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }
 
-  onStatus("Setting up camera…");
+  onStatus("Réglage de la caméra…");
   // THE COMPANY OF HEROES LENS (you, 2026-09-30): a narrower field of view
   // (40°, was the app's 60 — on a 2:1 window that was ~103° across: small,
   // far units and stretched edges) from further back, so the same ground
@@ -303,7 +317,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // outside the post's gate, selectable, orderable. ?units=0 = without.
   if (params.get("units") !== "0" && app.showroom) {
     const b = LAYOUT.sites.find((s) => s.kind === "french"), yaw = siteYaw(b);
-    onStatus("Mustering…");
+    onStatus("Rassemblement des troupes…");
     app.algUnits = await createAlgUnits(app, {
       showroom: app.showroom,
       muster: { x: b.x - Math.sin(yaw) * 42, z: b.z - Math.cos(yaw) * 42, yaw },
@@ -348,7 +362,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // gravel, rubble, leaves, laid by rule into the ground cache. ?splats=0 =
   // without (and nothing to lay without the cache, ?gc=0).
   if (params.get("splats") !== "0" && app.groundCache) {
-    onStatus("Weathering the ground…");
+    onStatus("Usure du terrain…");
     try { app.algSplats = await createAlgSplats(app); } catch (e) { console.warn("[alg splats] failed:", e); }
   }
   // STONES (algStones.js): loose stones textured with the ground they lie on,
@@ -369,6 +383,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       } catch (e) { console.warn("[alg voices] failed:", e); }
     }
   }
+  // THE GAME MENU (ui/gameMenu.js): Esc / F10 — pause, the player's options, the keys.
+  app.algMenu = createGameMenu({ app, audio: app.algSounds?.audio ?? null, voices: app.algVoices ?? null, rtsCamera });
   // AMBIENCE (algAmbience.js): dust behind the vehicles, smoke from the
   // bread ovens. ?ambience=0 = without.
   if (params.get("ambience") !== "0") {
@@ -398,7 +414,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // them and along the pistes near the villages. Then the cover map again,
   // with the walls in it. ?fields=0 = without.
   if (params.get("fields") !== "0" && app.algEconomy) {
-    onStatus("Ploughing the fields…");
+    onStatus("Labour des champs…");
     try {
       const t0 = performance.now();
       app.algFields = createAlgFields(app, { economy: app.algEconomy, navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, plants: app.showroom?.plants ?? null });
@@ -438,7 +454,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
   if (params.get("herds") !== "0") {
-    onStatus("Herding the flocks…");
+    onStatus("Rentrée des troupeaux…");
     try {
       app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom });
     } catch (e) { console.warn("[alg herds] failed:", e); }
@@ -454,7 +470,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     app.devPanel = createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight: applyAuresLight });
   }
 
-  onStatus("Painting surfaces…");
+  onStatus("Peinture des surfaces…");
   await atlasReady;
   // needsUpdate uploads on the NEXT render: let two frames draw it under the
   // loading screen before it lifts.
@@ -464,7 +480,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // 26 pipelines built mid-fight and a 987 ms frame before it had this
   // (shared-rts/pipelineWarmup.js). ?warmup=0 to A/B.
   if (params.get("warmup") !== "0") {
-    onStatus("Preparing effects…");
+    onStatus("Préparation des effets…");
     try {
       const w = await warmGamePipelines(app, engineObjects);
       console.log(`[warmup] ${w.warmed} drawables warmed in ${w.ms} ms`);

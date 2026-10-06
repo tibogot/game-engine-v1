@@ -47,6 +47,9 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
 
   // ── The radio's colour: a band-pass, a soft clip, a little hiss under it ──
   let radioIn = null;
+  // The radio's own level (the pause menu's "Voix radio", ui/gameMenu.js), kept in the mixer's store.
+  let level = audio.settings.voices ?? 1, outNode = null;
+  function setLevel(v) { level = v; if (outNode) outNode.gain.value = 0.55 * v; audio.set("voices", v); }
   function radioChain() {
     if (radioIn) return radioIn;
     const hp = ctx.createBiquadFilter(); hp.type = "highpass"; hp.frequency.value = 420;
@@ -55,7 +58,8 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
     const k = 18, n = 1024, curve = new Float32Array(n);
     for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = ((1 + k) * x) / (1 + k * Math.abs(x)); }
     shaper.curve = curve;
-    const out = ctx.createGain(); out.gain.value = 0.55;
+    const out = ctx.createGain(); out.gain.value = 0.55 * level;
+    outNode = out;
     hp.connect(lp).connect(shaper).connect(out).connect(audio.buses?.ui ?? ctx.destination);
     radioIn = hp;
     return radioIn;
@@ -173,6 +177,7 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
   }
 
   return {
+    setLevel,
     ready, say, step,
     /** An order given (selection.js onOrder): the lead man acknowledges. */
     order(kind, list) {

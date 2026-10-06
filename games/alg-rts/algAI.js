@@ -1298,12 +1298,12 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     if (!tgt) {
       const outposts = (app.algStructures?.list ?? []).filter((s) => s.alive && s.team === "player" && s.typeKey !== "post" && s.typeKey !== "motorPool" && s.typeKey !== "helipad");
       outposts.sort((a, b2) => dist(a.position, c) - dist(b2.position, c));
-      if (outposts[0]) tgt = { at: outposts[0].position, name: outposts[0].name ?? "an outpost", structure: outposts[0] };
+      if (outposts[0]) tgt = { at: outposts[0].position, name: outposts[0].name ?? "un avant-poste", structure: outposts[0] };
     }
-    if (!tgt) { const t2 = pickTarget(c); if (t2) tgt = { at: t2.at, name: "French troops" }; }
+    if (!tgt) { const t2 = pickTarget(c); if (t2) tgt = { at: t2.at, name: "des troupes françaises" }; }
     if (!tgt) {
       const a = Math.atan2(c.z - post.z, c.x - post.x);
-      tgt = { at: { x: post.x + Math.cos(a) * 70, z: post.z + Math.sin(a) * 70 }, name: "the post" };
+      tgt = { at: { x: post.x + Math.cos(a) * 70, z: post.z + Math.sin(a) * 70 }, name: "le poste" };
     }
     const spot = ambushSpot(c, tgt.at) ?? { x: tgt.at.x + (c.x - tgt.at.x) * 0.25, z: tgt.at.z + (c.z - tgt.at.z) * 0.25 };
     b.assault = tgt; b.target = { lead: null, at: tgt.at, size: 0 }; b.spot = spot;
@@ -1321,7 +1321,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       const a = (i / Math.max(1, m.length)) * Math.PI * 2, r = 4 + (i % 3) * 3;
       u.orderTo(tg.at.x + Math.cos(a) * r, tg.at.z + Math.sin(a) * r);
     });
-    app.algBattle?.say?.(`<b>FLN attack</b> on ${tg.name}!`, tg.at.x, tg.at.z, "bad", "hq_contact");
+    app.algBattle?.say?.(`<b>Attaque du FLN</b> sur ${tg.name} !`, tg.at.x, tg.at.z, "bad", "hq_contact");
     setState(b, "assault");
   }
 

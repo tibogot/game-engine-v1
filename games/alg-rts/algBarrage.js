@@ -50,7 +50,7 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
     const s = sel[0], cd = Math.max(0, s.barrageCd ?? 0), busy = fires.some((f) => f.pit === s);
     return {
       key: "barrage", label: busy ? "Tir en cours" : "Tir de barrage", cost: purse ? P.cost : undefined,
-      hint: `${P.bombs} bombs on a zone up to ${P.range} m away, ${P.spread} m across, over ~${Math.round(P.bombs * P.every)} s: from above, so cover saves nobody. Clears an MG nest or a dug-in band. M.`,
+      hint: `${P.bombs} obus sur une zone jusqu'à ${P.range} m, ${P.spread} m de large, en ~${Math.round(P.bombs * P.every)} s : ils tombent du ciel, aucun abri ne protège. Nettoie un nid de mitrailleuse ou une bande retranchée. M.`,
       ready: !busy && cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd),
     };
   }
