@@ -399,7 +399,7 @@ function buildInstancedType(tpl, scene) {
 // soldiers costs no draw calls and (measured in the lab) no CPU either.
 
 /** Vehicle crews (createUnitRenderer `crew`) are drawn only within this many metres of the camera. */
-const CREW_FAR = 135;   // the alg camera: 80 m default (edges ~110), 190 max
+const CREW_FAR = 135;   // the alg camera: 65 m default, 85 max (190 until 2026-10-07)
 const MAX_CROWD = 160; // soldiers a TYPE may field at once; a body's crowd holds the sum of its types
 const CROUCH_AIM_AT = 0.98;   // share of rifle_crouch_firing held as the kneeling aim (its loop's end ≈ its aim)
 const GIB_MAX = 40;    // men of one body lying blown apart at once (each ~16 s); past it, a plain corpse

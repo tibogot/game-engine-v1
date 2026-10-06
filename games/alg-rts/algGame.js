@@ -283,7 +283,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // fills the screen with bigger units; the start tilted ~43° (CoH's
   // editor default is 45). The zoom range grown by tan 30° / tan 20° ≈ 1.6
   // so the closest and furthest views cover what they did.
-  const rtsCamera = createRtsCamera({ app, fov: 40, distMin: 28, distDefault: 80, distMax: 190, pitchNear: 35, pitchFar: 60 });
+  // THE CEILING (a player, 2026-10-07, zoomed right out: "CoH doesn't let you"): 190 m was a
+  // satellite view, 165 m up, men 3 px — the drama, the cover, the ambush all gone. CoH holds the
+  // camera at about a battle's width: 85 m now (~70 m up; 110 first, "still too high"), the last stretch of the wheel slowing
+  // into it (softTop), and the tilt steep and nearly fixed (48-56°, was 35-60: zooming is closer /
+  // further, not from the ground / from a plane). Seeing the whole map is the minimap's job.
+  const rtsCamera = createRtsCamera({ app, fov: 40, distMin: 24, distDefault: 65, distMax: 85, pitchNear: 48, pitchFar: 56 });
+  rtsCamera.params.softTop = 0.3;
   // EDGE SCROLL the CoH way (a player, 2026-10-07: "not UX friendly" — the HUD along the edges
   // blocked it and the 14 px band reached full speed only at the last pixels): the window's edge,
   // whatever is under it; a 24 px band, the arrow cursor.
@@ -460,7 +466,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
   if (app.algFields || app.algLandmarks) app.algCover?.bake();
   // The minimap was baked before the fields and farmsteads: again, with them.
-  if (app.algFields || app.algLandmarks) app.algUnits?.minimap?.rebuildTerrain?.();
+  if (app.algFields || app.algLandmarks) { app.algUnits?.minimap?.rebuildTerrain?.(); app.algTacMap?.map?.rebuildTerrain?.(); }
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
   if (params.get("herds") !== "0") {

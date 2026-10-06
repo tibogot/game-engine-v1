@@ -45,6 +45,7 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     rotSpeed:  80 * DEG,  // radians/SECOND while Q or E held
     heightSmooth: 4,      // terrain-height follow rate (1/s); 0 = snap instantly
     zoomSmooth: 12,       // how fast the zoom eases to the wheel's target (1/s)
+    softTop: 0,           // share of the zoom range under the ceiling where zooming out slows (0 = off)
     edgeScroll: true,     // pan when the pointer rests near the viewport edge
     fov,                  // RTS-mode lens (degrees); null = the app camera's
     edgeBand:   14,       // px from the edge that starts an edge-scroll pan
@@ -103,7 +104,14 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     // The wheel moves the TARGET; drive() eases toward it. Stepping `dist`
     // itself made every notch a jump, which is the single thing that reads as
     // cheap next to a commercial RTS.
-    distTarget = clampDist(distTarget * (e.deltaY > 0 ? 1.12 : 1 / 1.12));
+    // softTop (0 = off): over the top share of the range the zoom-out notch shrinks (to a quarter
+    // at the ceiling), so the limit is eased into, not hit like a wall.
+    let step = 1.12;
+    if (e.deltaY > 0 && params.softTop > 0) {
+      const hi = Math.min(params.distMax, DIST_CEILING), band = (hi - DIST_MIN) * params.softTop;
+      step = 1 + 0.12 * THREE.MathUtils.clamp((hi - distTarget) / band, 0.25, 1);
+    }
+    distTarget = clampDist(distTarget * (e.deltaY > 0 ? step : 1 / 1.12));
   };
   const dom = () => app.renderer?.domElement ?? null;
   const onPointerMove = (e) => { ptrX = e.clientX; ptrY = e.clientY; overCanvas = true; };

@@ -50,6 +50,7 @@ import { createHudBar } from "./ui/hudBar.js";
 import { createUnitBar } from "./ui/unitBar.js";
 import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
+import { createTacticalMap } from "./ui/tacticalMap.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
 import { installPortraits, hasPortrait } from "./ui/portraits.js";
@@ -574,7 +575,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
   const armyTabs = createArmyTabs({ units, selection, squads, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
-  const minimap = createMinimap({ app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, mount: hud.left, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) });
+  const mapOpts = { app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) };
+  const minimap = createMinimap({ ...mapOpts, mount: hud.left });
+  // THE TACTICAL MAP (ui/tacticalMap.js): the same map full screen, Tab.
+  const tacMap = createTacticalMap({ app, create: (mount) => createMinimap({ ...mapOpts, mount, id: "alg-tacmap", markScale: 2.3, labelPx: 15 }) });
+  app.algTacMap = tacMap;
   // Top right now (resourceHud.js); the bottom strip is gone with it.
   const resourceHud = createResourceHud({ mount: document.body, troops: () => `${popNow()}/${economy.popCap()}` });
   hud.strip.style.display = "none";
@@ -735,6 +740,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     armyTabs.tick(frameDt);
     queueBadges.frame();
     minimap.draw();
+    tacMap.draw();
   });
 
   return { navGrid, units, unitRenderer, selection, sim, stamped, vehicles, hud, unitBar, commandCard, minimap, controlGroups, combat, ai };

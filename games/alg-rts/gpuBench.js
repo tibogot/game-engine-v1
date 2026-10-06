@@ -97,7 +97,7 @@ export const TOGGLES = {
 };
 
 // ── Views ────────────────────────────────────────────────────────────────────
-/** zoomT 0 = 28 m, the default 80 m ≈ 0.32, 1 = 190 m. */
+/** zoomT 0 = 24 m, the default 65 m ≈ 0.67, 1 = 85 m. */
 export const ZOOMS = { close: 0, default: 0.321, max: 1 };
 
 export async function setView({ x, z, zoom, yaw } = {}) {

@@ -67,7 +67,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   function say(text, x, z, kind, radio = null, icon = ICON_OF[radio] ?? null) {
     hud.alert(text, { x, z, kind, time: clock, icon });
     if (radio) app.algVoices?.radio(radio);
-    if (x != null) minimap?.ping?.(x, z);
+    if (x != null) { minimap?.ping?.(x, z); app.algTacMap?.map?.ping?.(x, z); }
   }
   // Throttle: one alert per `key` per place (a 90 m cell) per `every` seconds.
   const lastAt = new Map();

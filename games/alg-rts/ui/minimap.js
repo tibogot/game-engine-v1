@@ -87,7 +87,7 @@ const STEEP = [128, 86, 58], WATER = [58, 118, 112], VOID = [20, 19, 15];
 const LIGHT = (() => { const l = [-1, -1, 1.6], n = Math.hypot(...l); return l.map((v) => v / n); })();
 
 /** The terrain, tracks and building plan at `px` × `px`, once. */
-function bakeBase(app, frame, px, world) {
+function bakeBase(app, frame, px, world, markS = px / 160) {
   const half = world / 2;
   const A = frame.area;
   const canvas = document.createElement("canvas");
@@ -143,7 +143,7 @@ function bakeBase(app, frame, px, world) {
   }
   ctx.putImageData(img, 0, 0);
 
-  const s = px / 160;   // line widths were tuned on a 160 px map
+  const s = markS;   // line widths were tuned on a 160 px map (px / 160 there)
   // The tracks (algTracks.js), as a CoH map shows its roads: the piste a pale
   // line, the mule paths a thin dashed one.
   ctx.lineJoin = ctx.lineCap = "round";
@@ -289,19 +289,22 @@ function bakeBase(app, frame, px, world) {
 export function createMinimap({
   app, units, selection = null, structures = null, fogOfWar = null, requisition = null,
   mount = document.body, intel = null, upYaw = 0, area = null, squadOf = null,
+  // THE TACTICAL MAP (ui/tacticalMap.js) is a second one, big: its own id, and its marks and
+  // labels `markScale` times the small map's (not px / 160 — on a 700 px map that drew 4x marks).
+  id = "rts-minimap", markScale = null, labelPx = 10.5,
 }) {
   const world = app.worldSize ?? 1000;
   const box = area ?? { x0: -world / 2, x1: world / 2, z0: -world / 2, z1: world / 2 };
 
   const root = document.createElement("div");
-  root.id = "rts-minimap";
+  root.id = id;
   mount.appendChild(root);
   // The canvases at the slot's REAL pixel size (a 160 px canvas stretched by
   // CSS was soft on a high-DPI screen).
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const css = root.clientWidth || 160;
   const px = Math.max(96, Math.round(css * dpr));
-  const s = px / 160;
+  const s = markScale ? markScale * dpr : px / 160;
   // TURNED WITH THE CAMERA, and SHAPED LIKE THE PLAY AREA (you, 2026-10-01:
   // the view outline must read as the game does — so the map turns with the
   // start camera — but "a rotated map shouldn't sit inside a non-rotated
@@ -309,7 +312,7 @@ export function createMinimap({
   // border round it. The land beyond the play area is cut away.
   const frame = makeFrame(box, upYaw, px, world);
   const shape = [[box.x0, box.z0], [box.x1, box.z0], [box.x1, box.z1], [box.x0, box.z1]].map(([x, z]) => frame.toMini(x, z));
-  const fpx = Math.round(10.5 * dpr);   // label size, device px
+  const fpx = Math.round(labelPx * dpr);   // label size, device px
 
   const layer = (name) => {
     const c = document.createElement("canvas");
@@ -319,7 +322,7 @@ export function createMinimap({
     return { c, ctx: c.getContext("2d") };
   };
   const base = layer("base"), terr = layer("territory"), fog = layer("fog"), dyn = layer("units"), cam = layer("camera");
-  base.ctx.drawImage(bakeBase(app, frame, px, world), 0, 0);
+  base.ctx.drawImage(bakeBase(app, frame, px, world, s), 0, 0);
 
   // The clip and the frame: the play area's outline, in % of the box.
   const pct = (q) => `${((q.x / px) * 100).toFixed(2)}% ${((q.y / px) * 100).toFixed(2)}%`;
@@ -335,10 +338,10 @@ export function createMinimap({
 
   const style = document.createElement("style");
   style.textContent = `
-    #rts-minimap { position: relative; width: 100%; height: 100%; cursor: crosshair; }
-    #rts-minimap canvas, #rts-minimap svg.frame { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-    #rts-minimap svg.frame { pointer-events: none; }
-    #rts-minimap.locked { cursor: default; }
+    #${id} { position: relative; width: 100%; height: 100%; cursor: crosshair; }
+    #${id} canvas, #${id} svg.frame { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #${id} svg.frame { pointer-events: none; }
+    #${id}.locked { cursor: default; }
     /* The HUD corner holds a SHAPED map: no square panel behind it, a shadow
        that follows the shape instead. */
     #alg-hud .block-left { background: transparent !important; border: 0 !important; box-shadow: none !important;
@@ -764,7 +767,7 @@ export function createMinimap({
     /** An alert's place (algBattle.js): brass rings over it for 3 s. */
     ping(x, z) { pings.push({ x, z, t: performance.now() }); },
     /** Re-bake the terrain (after the ground or the buildings change). */
-    rebuildTerrain() { base.ctx.clearRect(0, 0, px, px); base.ctx.drawImage(bakeBase(app, frame, px, world), 0, 0); },
+    rebuildTerrain() { base.ctx.clearRect(0, 0, px, px); base.ctx.drawImage(bakeBase(app, frame, px, world, s), 0, 0); },
     dispose() {
       root.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);

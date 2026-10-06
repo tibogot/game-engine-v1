@@ -37,8 +37,18 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    - [x] EDGE SCROLL the CoH way (a player: "not UX friendly"): rtsCamera edgeMode "screen" — the
      window's edge scrolls over the HUD too (it blocked it), 24 px band, full speed in its outer 60%,
      an arrow cursor; not while a button is held on a panel or a crosshair owns the cursor.
-   - [ ] next: dead trees, ruined huts, terraces on the open slopes; the lab's wheel ruts + macro
-     photo into the map.
+   - [x] MACRO PHOTO + RELIEF in the game (algMacroGround.js: dirt_aerial_02, 0.7, 45 m tile; normal
+     2.5 on soil / scree / tracks). The wheel ruts were already on. DEAD TREES: 18 snags on the open
+     ground (deadTree preset, the dipterocarp builder's `dead` option).
+   - [x] THE CAMERA CEILING (a player zoomed right out; CoH doesn't let you): zoom 28-190 m → 24-85 m
+     (~70 m up at most, was 165; 110 first, "still too high"), tilt 35-60° → 48-56°, the last 30% of
+     zoom-out slowing (softTop).
+   - [x] THE TACTICAL MAP (ui/tacticalMap.js — CoH's answer to "I want to see more"): Tab held = a
+     look, tapped = stays open (Tab / Esc closes). A second minimap at full size (its own markScale),
+     baked at boot (133 ms at 638 px, scale 1), drawn only while open. Left click = camera, right
+     click = the selection moves; alerts ping it. In the keys page and the manual.
+     Later: a legend; orders beyond move (attack-move, retreat); unit-type icons at this size.
+   - [ ] next: ruined huts, terraces on the open slopes.
 2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more

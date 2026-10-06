@@ -204,6 +204,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         ${row("Déplacer / attaquer", "clic droit")}
         ${row("Groupes", "Ctrl + 1…9", "1…9")}
         ${row("Voir la couverture", "V (maintenu)")}
+        ${row("Carte tactique", "Tab (maintenu ou tapé)")}
         ${row("Dernière alerte", "Espace")}
         ${row("Tourner un bâtiment", "R")}
         ${row("Pause / menu", "Échap", "F10")}
@@ -255,6 +256,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
       <p><b>Construire</b> (sapeurs sélectionnés) : sacs de sable, barbelés, nid de mitrailleuse, fosse de mortier, mirador, projecteur. Choisissez sur leur fiche, placez avec le clic gauche, ${K("R")} pour tourner.</p>`],
     ["Ordres spéciaux", `
       <ul>
+        <li><b>Carte tactique</b> : maintenez ${K("Tab")} pour un coup d'œil sur toute la vallée, tapez-le pour la garder ouverte. Clic gauche : la caméra y va ; clic droit : la sélection y part.</li>
         <li><b>Couverture</b> : maintenez ${K("V")} pour voir où les hommes sont à couvert (vert) et cachés (cyan). Derrière murs et rochers on survit ; à découvert, non.</li>
         <li><b>Garnison</b> : infanterie sélectionnée, <b>clic droit sur une maison</b> : le groupe entre et tire par les fenêtres. Une grenade dedans les fait sortir. ${K("K")} : sortir.</li>
         <li><b>Grenade</b> ${K("G")}, <b>fumigène</b> ${K("B")} : visez avec le clic gauche. La fumée coupe la vue.</li>
@@ -291,7 +293,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   function open() { pause(); mainPage(); }
   // Esc: not while another mode owns it (a targeting crosshair, a building being placed) or a
   // modal of the battle's own is up (the briefing, the end).
-  const busy = () => !!app.renderer.domElement.style.cursor || app.algBuild?.placing || (!!document.querySelector(".alg-modal-back") && !back);
+  const busy = () => app.algTacMap?.open || !!app.renderer.domElement.style.cursor || app.algBuild?.placing || (!!document.querySelector(".alg-modal-back") && !back);
   function onKey(e) {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName ?? "") && e.key !== "Escape") return;
     if (e.key === "F10") { e.preventDefault(); if (paused) resume(); else open(); return; }
