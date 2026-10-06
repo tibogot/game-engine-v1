@@ -22,8 +22,14 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      as Cliff rock) merged into slot 5 → slot 1 = RED EARTH (red_dirt_mud_01, ochre tint); soft
      red patches 20-60 m, stony scree patches, the ground WORN pale round the post / villages /
      wells with paths out. Valley soil only. Re-run from a clean map (it only raises weights).
+   - [x] FOG OF WAR lighter, CoH (fogOfWar coh look: unexplored 0.34 → 0.6 bright, seen-before 0.5 →
+     0.72, 55% desaturated; live: app.fogOfWar.cohLook.{dark,shroud,desat}).
+   - [ ] FOG LAB's interactive ground mist (v3/fog/groundFogTsl.js) — for WEATHER, not the fog of war:
+     a dawn mist in the wadi cut by units, the SANDSTORM, smoke screens units push through.
+     Needs: a camera-following field (512-1024²), many movers carving holes, the slab following
+     the terrain height, retuned colours; est. 1-3 ms full screen (32-step raymarch).
    - [ ] next: COVER DENSITY (walls along the pistes, boulder clusters, terraces, dead trees,
-     ruined huts); the lighter FOG OF WAR; the lab's wheel ruts + macro photo into the map.
+     ruined huts); the lab's wheel ruts + macro photo into the map.
 2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more

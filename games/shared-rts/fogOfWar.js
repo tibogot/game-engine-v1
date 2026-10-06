@@ -306,6 +306,11 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     const outsideDim = (xz) => smoothstep(float(0), float(14), outsideD(xz)).mul(uOutOn);
     edgeUniforms = { uOutOn, uOutMode, uOutStrength, uOutColor };
 
+    // The CoH look's levels (live: fog.cohLook). 2026-10-07 (the AAA gap list: "unexplored = black-
+    // brown, half the screen muddy"): was 0.34 / 0.5 brightness — CoH keeps fogged ground ~60-70%
+    // and lets it read, desaturated. Now unexplored 0.6, seen-before 0.72, 55% of the colour gone.
+    const uCohDark = uniform(0.6), uCohShroud = uniform(0.72), uCohDesat = uniform(0.55);
+    cohLook = { dark: uCohDark, shroud: uCohShroud, desat: uCohDesat };
     const shadeRgb = look === "coh"
       // CoH: its own colour, darker, half desaturated, a touch cool (see `look` above).
       ? Fn(([rgb, fowUv]) => {
@@ -313,8 +318,8 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
         const strength = sample.r.mul(uEnabled);
         const isShroud = step(float(0.5), sample.g);
         const lum = rgb.dot(vec3(0.2126, 0.7152, 0.0722));
-        const cool = mix(rgb, vec3(lum), float(0.5)).mul(vec3(0.88, 0.94, 1.06));
-        const fogged = cool.mul(mix(float(0.34), float(0.5), isShroud));
+        const cool = mix(rgb, vec3(lum), uCohDesat).mul(vec3(0.9, 0.95, 1.04));
+        const fogged = cool.mul(mix(uCohDark, uCohShroud, isShroud));
         return mix(rgb, fogged, strength);
       })
       : Fn(([rgb, fowUv]) => {
@@ -391,6 +396,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   let post = null;
   let lightLevel = 1;               // setLightLevel: the fogged colours x this (1 = as authored)
   let edgeUniforms = null;         // the play-box edge's (set when the post pass is built)
+  let cohLook = null;              // the "coh" look's level uniforms (set with the pass)
   const edge = { on: !!bounds, mode: "darken", strength: 1, color: "#cdb58e" };
   const pushEdge = () => {
     if (!edgeUniforms) return;
@@ -455,6 +461,8 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     installPostFx,
     /** The play-box edge (a game with `bounds`): { on, mode: "darken" | "haze", strength 0-1, color }. */
     get edge() { return { ...edge, available: !!bounds }; },
+    /** The "coh" look's live levels { dark, shroud, desat } (uniforms; null before the pass is built). */
+    get cohLook() { return cohLook; },
     setEdge(o = {}) { Object.assign(edge, o); pushEdge(); },
     /**
      * The fogged ground blends toward FIXED colours (the shroud's grey, the unexplored black): a
