@@ -96,7 +96,7 @@ export function rideCourse(H, { line = courseLine(), gait = "Gallop", secs = 240
   reset(ctrl, p0[0], p0[1], Math.atan2(p1[0] - p0[0], p1[1] - p0[1]), gait === "Canter" ? S[2] : S[3], gait);
   const fences = arena.fences.map((f) => ({ n: f.n, x: f.x, z: f.z, h: f.h, dir: f.dir, half: f.type === "oxer" ? 0.66 : f.type === "logs" ? 0.42 : f.type === "wall" ? 0.3 : f.type === "bank" ? 0 : 0.08, base: f.base ?? 0, jumped: false, blocked: 0, passed: false, near: Infinity, clear: Infinity }));
   const hooves = ctrl.legs.map((g) => g.ff), hp = new ctrl.pos.constructor();
-  let k = 0, wasJ = false, jumpAt = null, stuck = 0;
+  let k = 0, wasJ = false, jumpAt = null, stuck = 0, hardStops = 0, vPrevC = null;
   const n = Math.round(secs / DT);
   for (let i = 0; i < n; i++) {
     // target: the first line point at least `look` m ahead of the nearest one
@@ -116,7 +116,7 @@ export function rideCourse(H, { line = courseLine(), gait = "Gallop", secs = 240
       const d = Math.hypot(f.x - ctrl.pos.x, f.z - ctrl.pos.z);
       f.near = Math.min(f.near, d);
       if (d < 1.0) { f.passed = true; if (j) f.jumped = true; }
-      if (ctrl.blocked && d < 4) f.blocked++;
+      if ((ctrl.blocked || (ctrl.refusing && Math.abs(ctrl.v) < 0.1)) && d < 5) f.blocked++;
       // the lowest hoof over the obstacle's footprint, above its top (< 0: through the rails)
       if (d < 4 && f.half > 0) for (const b of hooves) {
         b.getWorldPosition(hp);
@@ -124,15 +124,21 @@ export function rideCourse(H, { line = courseLine(), gait = "Gallop", secs = 240
         if (Math.abs(along) < f.half + 0.06 && Math.abs(side) < 2) f.clear = Math.min(f.clear, hp.y - ctrl.h.foot.sole - (f.base + f.h));
       }
     }
-    stuck = ctrl.blocked ? stuck + 1 : 0;
+    // stopped at something: the old hard block, or a sliding-stop refusal standing its ground
+    const standing = ctrl.blocked || (ctrl.refusing && Math.abs(ctrl.v) < 0.1);
+    stuck = standing ? stuck + 1 : 0;
+    if (vPrevC !== null && vPrevC - ctrl.v > 1.0) hardStops++;   // a one-frame stop (> 60 m/s²): a regression since the sliding refusal
+    vPrevC = ctrl.v;
     if (stuck > 90) {                                         // refused for 1.5 s: note it, put the horse past the fence, carry on
       const f = fences.filter((f) => f.near < 6).sort((a, b) => Math.hypot(a.x - ctrl.pos.x, a.z - ctrl.pos.z) - Math.hypot(b.x - ctrl.pos.x, b.z - ctrl.pos.z))[0];
       if (f) f.refused = true;
+      ctrl.refusing = false; ctrl.refuseV = 0; ctrl.rearT = -1;
       const kk = Math.min(line.length - 2, k + 6);
       ctrl.pos.set(line[kk][0], 0, line[kk][1]); ctrl.y = 0; ctrl.v = S[3] * 0.8; stuck = 0; k = kk;
     }
   }
   void jumpAt;
   const rows = fences.filter((f) => f.near < 3).map((f) => ({ n: f.n, h: f.h, result: f.refused ? "REFUSED" : f.jumped ? "jumped" : f.passed ? "THROUGH" : "missed", blockedFrames: f.blocked, clear: f.clear === Infinity ? null : +f.clear.toFixed(2) }));
+  rows.hardStops = hardStops;
   return rows;
 }

@@ -34,6 +34,10 @@ export const HP = {               // tunables (the lab GUI edits these)
   blendWait: 0.45,                // s a gait change may wait for that moment
   accel: 3.0,                     // m/s² (doubled inside the walk↔gallop gap)
   decel: 5.0,
+  slideDecel: 6.5,                // m/s²: a refusal brakes once stopping in the room left needs this much (a gallop slides ~1.9 m)
+  slideMax: 11,                   // m/s²: the hardest it brakes (an obstacle seen late)
+  slidePitch: 0.14,               // rad the body sits back in a sliding stop
+  refuseRear: true,               // a refusal at a gallop ends in a rear (slower: a head toss)
   turnIdle: 1.3, turnWalk: 1.1, turnGallop: 0.75,   // rad/s
   lean: 0.12,                     // rad of lean into a full-rate gallop turn
   stepOver: 0.35,                 // m: a thing on the ground lower than this is stepped over (ground poles), never a wall
@@ -823,6 +827,17 @@ export class HorseController {
     return clamp(W, 0.12, 1.6);
   }
 
+  // The nearest thing ahead it will NOT jump — too tall, a wall, or anything
+  // when it is not galloping fast enough to (the auto-jump's own conditions):
+  // what a refusal brakes for. null if the way is clear.
+  refuseAhead() {
+    const range = Math.min(9, this.v * this.v / (2 * HP.slideDecel) + this.h.halfLen + 2.5);
+    const o = this.obstacleAhead(range);
+    if (!o || o.top < HP.stepOver) return null;               // a ground pole: stepped over, never refused (blockedAhead's own rule)
+    const willJump = this.jumpable(o) && ((HP.autoJump && this.gallopLike() && this.v > this.gallopV() * 0.65) || this.jumpQueued);
+    return willJump ? null : o;
+  }
+
   gallopLike() { return this.gaitName === "Gallop" || this.gaitName === "Canter"; }
 
   // Target ground speed of each gear (m/s), slowest first.
@@ -1057,8 +1072,48 @@ export class HorseController {
       if (this.oneShot && this.oneShotName === "Gallop_Jump") target = Math.max(target, this.gallopV() * 0.98);   // the jump is ridden at gallop speed
       else if (input.fwd < 0) target = -walkV * 0.55;
     }
-    const acc = Math.abs(target) > Math.abs(this.v) ? HP.accel : HP.decel;
+    // REFUSAL — a SLIDING STOP: something ahead it will not jump (too tall, a
+    // wall, any fence when not galloping) → brake just hard enough to stop short
+    // of it (v² / 2a), instead of running into the block and going from full
+    // gallop to 0 in one frame. Hard enough at speed and it slides (slideW: the
+    // gallop slows under it, the body sits back); at a walk it simply stops.
+    let brake = 0;
+    const jumping = this.oneShot && this.oneShotName === "Gallop_Jump";
+    if (this.v > 0.05 && !busy && !jumping && !(this.jumpQueued && this.jumpAtObs)) {
+      const o = this.refuseAhead();
+      if (o) {
+        // stop short of where the block would trigger: blockedAhead's rays reach
+        // halfLen + 0.8 + (up to 1 m more with speed) — a fixed 0.9 still hit it at 1.9 m/s
+        const room = o.dist - (this.h.halfLen + 0.95 + Math.min(1, this.v * 0.2));
+        const need = room > 0.15 ? this.v * this.v / (2 * room) : Infinity;
+        if (need >= HP.slideDecel || room <= 0.15) {
+          target = 0;
+          brake = Math.min(HP.slideMax, Math.max(HP.decel, need * 1.05));
+          if (!this.refusing) { this.refusing = true; this.refuseV = Math.max(this.v, this.vRecent ?? 0); }   // the speed it came in at (fastest of the last second): its reaction when stopped
+        }
+      }
+    }
+    // a refusal HOLDS: stopped facing it, pushing on does not creep it forward
+    // (at a standstill nothing needs braking, which let it walk on into the block);
+    // it lets go when turned away or when forward is released
+    if (this.refusing) {
+      const o = input.fwd > 0 ? this.obstacleAhead(this.h.halfLen + 3) : null;
+      if (o && !(this.jumpable(o) && this.jumpQueued)) { target = Math.min(target, 0); if (!brake) brake = this.v > 0.3 ? HP.slideDecel : HP.slideMax; }   // (full force only to hold it: it stopped 1 m early)
+      else this.refusing = false;
+    }
+    this.vRecent = Math.max(this.v, (this.vRecent ?? 0) - dt * 3);   // fastest of about the last second
+    const acc = brake || (Math.abs(target) > Math.abs(this.v) ? HP.accel : HP.decel);
     this.v += clamp(target - this.v, -acc * dt, acc * dt);
+    // the slide's weight (look): braking hard from above a trot
+    const sliding = brake > HP.decel * 1.15 && this.v > this.gearSpeeds()[1] * 0.8;
+    this.slideW = clamp((this.slideW ?? 0) + (sliding ? dt / 0.15 : this.v < 0.4 ? -dt / 0.35 : 0), 0, 1);
+    // stopped after a refusal: a head toss, or a rear if it came in at a gallop
+    if (this.refuseV && Math.abs(this.v) < 0.05) {
+      if (this.refuseV > this.gallopV() * 0.85 && HP.refuseRear) this.startRear();
+      else if (this.refuseV > this.gearSpeeds()[1] * 1.1) this.playOneShot("Idle_2", { fade: 0.25 });
+      this.refuseV = 0;
+    }
+    if (this.refuseV && !this.refusing) this.refuseV = 0;    // turned away and went on before stopping: no reaction
 
     // Turning
     const tr = this.gallopLike() ? HP.turnGallop : this.gaitName === "Trot" ? (HP.turnWalk + HP.turnGallop) / 2 : Math.abs(this.v) > 0.1 ? HP.turnWalk : HP.turnIdle;
@@ -1096,6 +1151,14 @@ export class HorseController {
         while (i > 0 && this.v < (S[i - 1] + S[i]) / 2 * 0.94) i--;
         want = GEARS[i];
       }
+      // sliding: the gallop stays on (slowing under the slide) instead of stepping
+      // down through canter / trot / walk in a second; it settles into Idle at the end
+      // (forced, slow: a phase-matched switch waited on a stride that had all but
+      // stopped, and the horse stood in a stretched gallop pose)
+      if (this.slideW > 0.3 && this.gallopLike()) {
+        if (this.v > 0.45) want = this.gaitName;
+        else { this.switchTo("Idle", 0.45, true); want = "Idle"; }
+      }
       if (this.rearT >= 0) want = "Idle";                      // the rear is procedural, on top of Idle
       if (want !== this.gaitName) this.switchTo(want);
       else this.blendWaitT = 0;                              // no change pending: a later request waits afresh
@@ -1110,6 +1173,7 @@ export class HorseController {
         this.cur.setEffectiveTimeScale(clamp(this.v / g.Trot.speed, 1.0, 2.6 * HP.speedScale));
       } else if (this.gallopLike()) {
         let ts = this.gaitName === "Canter" ? clamp(this.v / galV, 0.55, 0.95 * HP.speedScale) : clamp(this.v / galV, 0.6, 1.25 * HP.speedScale);   // (galV: the clip's native speed — with speedScale the legs play faster)
+        if (this.slideW > 0) ts = Math.min(ts, Math.max(0.12, this.v / galV));   // sliding: the stride slows with the speed (hooves skid)
         if (this.jumpQueued) {
           if (this.jumpRate === undefined) {                 // first gallop frame with a jump queued
             const d = this.cur.getClip().duration, left0 = d - (this.cur.time % d);
@@ -1231,7 +1295,7 @@ export class HorseController {
     // hind hooves at ~0.9 of their standing height; IK gathers the legs under.
     const r = this.h.rig;
     r.position.set(this.pos.x, this.y + this.lift, this.pos.z);
-    r.rotation.set(this.pitch - this.rearPitch + 0.05 * landDip, this.yaw, this.roll);
+    r.rotation.set(this.pitch - this.rearPitch + 0.05 * landDip - (this.slideW ?? 0) * HP.slidePitch, this.yaw, this.roll);   // (sliding: sits back on its hindquarters)
     r.position.y -= 0.035 * landDip;
     this.rearDy = -0.035 * landDip;
     if (this.rearA > 0) {
