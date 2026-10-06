@@ -28,8 +28,14 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      a dawn mist in the wadi cut by units, the SANDSTORM, smoke screens units push through.
      Needs: a camera-following field (512-1024²), many movers carving holes, the slab following
      the terrain height, retuned colours; est. 1-3 ms full screen (32-step raymarch).
-   - [ ] next: COVER DENSITY (walls along the pistes, boulder clusters, terraces, dead trees,
-     ruined huts); the lab's wheel ruts + macro photo into the map.
+   - [x] COVER DENSITY, first pass (2026-10-07). MEASURED first (distance from every 8 m of the battle
+     box to hard cover): 62% within 15 m, 18% beyond 25 m — the gaps were the FLATS (outcrops only
+     on 9-32° slopes) and the long pistes. Added: 34 BOULDER CLUSTERS on the flats (algLandmarks,
+     4-6 boulders, the crags' instances); broken DRY-STONE WALLS along the pistes (algFields
+     trackWall, the field walls' instances, 5.4 m out, not within 40 m of a village). Now 74%
+     within 15 m, 10% beyond 25 m (measured). No new draws.
+   - [ ] next: dead trees, ruined huts, terraces on the open slopes; the lab's wheel ruts + macro
+     photo into the map.
 2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more

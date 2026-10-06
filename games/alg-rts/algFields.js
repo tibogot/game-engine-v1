@@ -60,6 +60,13 @@ const P = {
   // staggered behind it half the time — a hedge, not a fence.
   hedgeStep: 1.05, hedgeDouble: 0.5,
   trackHedge: { near: 150, offset: 4.2, run: [24, 60], every: 0.55 },
+  // DRY-STONE WALLS along the pistes AWAY from the villages (the AAA gap list, 2026-10-07: the long
+  // pistes between the villages were bare — CoH's roads run between walls): broken runs one side or
+  // the other, gaps where they've fallen, the field walls' own segments (no new draws).
+  // (Measured: within 110 m of a village is MOST of the pistes in this 610 m box — 256 of 418 track
+  // points; only 162 segments placed. Now everywhere but the villages themselves (40 m), 5.4 m out:
+  // clear of the hedges' 4.2.)
+  trackWall: { far: 40, offset: 5.4, run: [22, 60], every: 0.7, fallen: 0.14 },
   concealR: 1.8,
 };
 // A fifth of the plots are orchards (the kind is drawn from the same random
@@ -228,6 +235,39 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
         }
       }
     });
+  }
+  // ── Walls along the pistes, away from the villages ────────────────────────
+  {
+    const TW = P.trackWall;
+    for (const t of TRACK_LINES) {
+      let run = 0, side = R() < 0.5 ? 1 : -1, on = false, carry = 0;
+      for (let i = 1; i < t.line.length; i++) {
+        const p = t.line[i], q0 = t.line[i - 1];
+        // (The VILLAGES only: the supply points sit along the pistes, and within 150 m of any of the
+        // ten nearly every piste counted as "near" — one run placed.)
+        const near = economy.points.some((v) => v.kind !== "supply" && Math.hypot(v.position.x - p.x, v.position.z - p.z) < TW.far);
+        if (near) { on = false; continue; }
+        if (run <= 0) { on = R() < TW.every; side = -side; run = TW.run[0] + R() * (TW.run[1] - TW.run[0]); }
+        const step = Math.hypot(p.x - q0.x, p.z - q0.z);
+        run -= step;
+        if (!on) { carry = 0; continue; }
+        const tx = (p.x - q0.x) / (step || 1), tz = (p.z - q0.z) / (step || 1);
+        for (let s = carry; s < step; s += P.seg) {
+          carry = s + P.seg - step;
+          if (R() < TW.fallen) continue;
+          const x = q0.x + tx * s + tz * TW.offset * side, z = q0.z + tz * s - tx * TW.offset * side;
+          if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > H(x, z) - 0.3 || navGrid?.isBlockedAtWorld?.(x, z)) continue;
+          const w = app.samplePaintWeights?.(x, z);
+          if (w && (w[4] > 0.3 || w[5] > 0.3)) continue;        // not in a wadi, not on a cliff
+          if (boxes.some((o) => overlaps({ x, z, hx: 1.1, hz: 1.1, yaw: 0 }, o, 0.5))) continue;
+          const wy = Math.atan2(-tz, tx);
+          const pitch = Math.atan2(H(x + tx, z + tz) - H(x - tx, z - tz), 2);
+          q.setFromAxisAngle(Y, wy + (R() - 0.5) * 0.12).multiply(qz.setFromAxisAngle(Z, pitch * 0.8));
+          segs[Math.floor(R() * 3)].push(m4.compose(new THREE.Vector3(x, H(x, z) - 0.06, z), q, one).clone());
+          cover.push({ x, z });
+        }
+      }
+    }
   }
   const walls = variants.map((geo, i) => {
     const mesh = new THREE.InstancedMesh(geo, kitView(geo).material, Math.max(1, segs[i].length));

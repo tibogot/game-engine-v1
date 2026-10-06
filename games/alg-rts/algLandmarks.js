@@ -163,6 +163,9 @@ const Q = {
   broomClumps: 14,
   agaveRun: 0.35,         // chance of a row at a track point near a village
   clear: 8,               // m from tracks, fields, pieces
+  // BOULDER CLUSTERS on the FLATS (the AAA gap list, 2026-10-07: the outcrops only sit on slopes, the
+  // open flats had nothing): groups of 3-5 boulders, hard cover, apart from each other and the crags.
+  clusters: 34, clusterSpacing: 42, clusterSlope: 9,
 };
 
 /**
@@ -214,6 +217,25 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     rocks.push({ x, z, k, v: Math.floor(R() * variants.length), yaw: R() * Math.PI * 2 });
     taken.push({ x, z, r: 4 * k });
   }
+  // ── Boulder clusters on the flats ────────────────────────────────────────
+  const centres = [];
+  for (let t = 0; t < 8000 && centres.length < Q.clusters; t++) {
+    const x = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0), z = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0);
+    if (slopeDeg(x, z) > Q.clusterSlope || !free(x, z, 5)) continue;
+    if (centres.some((c) => Math.hypot(c.x - x, c.z - z) < Q.clusterSpacing)) continue;
+    if (rocks.some((r) => Math.hypot(r.x - x, r.z - z) < Q.clusterSpacing * 0.6)) continue;
+    centres.push({ x, z });
+    const n = 4 + Math.floor(R() * 3), a0 = R() * Math.PI * 2;
+    for (let i = 0; i < n; i++) {
+      const a = a0 + (i / n) * Math.PI * 2 + (R() - 0.5) * 0.8, d = i === 0 ? 0 : 2.4 + R() * 2.6;
+      const bx = x + Math.cos(a) * d, bz = z + Math.sin(a) * d;
+      if (i && !free(bx, bz, 1)) continue;
+      const k = i === 0 ? 0.9 + R() * 0.3 : 0.5 + R() * 0.3;   // (0.6 / 0.32 read as pebbles from the RTS camera)
+      rocks.push({ x: bx, z: bz, k, v: Math.floor(R() * variants.length), yaw: R() * Math.PI * 2 });
+    }
+    taken.push({ x, z, r: 6 });
+  }
+
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
   for (const r of rocks) {
     lists[r.v].push(m4.compose(new THREE.Vector3(r.x, H(r.x, r.z) - 0.15, r.z), q.setFromAxisAngle(up, r.yaw), new THREE.Vector3(r.k, r.k * (0.85 + R() * 0.3), r.k)).clone());
@@ -374,6 +396,6 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     rocks, trees, meshes, agaves, brooms, betoums, tamarisks,
     /** Hard cover round the outcrops, for the cover bake (algCover.js). */
     *coverCircles() { for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true }; },
-    stats: { outcrops: rocks.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
+    stats: { outcrops: rocks.length, clusters: centres.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
   };
 }
