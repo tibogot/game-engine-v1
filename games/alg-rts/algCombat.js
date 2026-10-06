@@ -54,7 +54,7 @@ const gibChance = (d, r) => (GIBS.mode === "always" ? d < r : GIBS.mode === "coh
 
 const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
 
-export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null }) {
+export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null, splashMul = null }) {
   // The CoH look (2026-10-01, research in TODO.md): see ALG_FIRE above.
   // LIT SMOKE (shared litSmoke.js, 2026-10-02): the dust and smoke lit by
   // the sun (a six-way book) instead of the old painted-light book.
@@ -112,7 +112,7 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
-    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, hitChance, gibChance, smoke,
+    units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, splashMul, hitChance, gibChance, smoke,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);

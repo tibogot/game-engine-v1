@@ -514,6 +514,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   function newBand({ size: want = null, mission = null } = {}) {
     const size = want ?? Math.round(rand(...P.bandSize));
+    // MEN ALREADY OUT, idle (the head start, stragglers, a convoy's escort): a band of them
+    // first, whatever the cap — 19 standing at the rally over a cap of 18 never formed one.
+    const idle = units.list.filter((u) => u.alive && u.team === "enemy" && !inBand.has(u) && !homebound.has(u) && !u.ghost && !u.inside && (u.typeKey === "moudjahid" || u.typeKey === "fmTeam")).length;
+    if (idle >= 3) { bands.push({ state: "gather", size: Math.min(idle, size), members: [], t: 0, start: 0, mission }); return true; }
     const room = cap() - liveFighters();
     const n = Math.min(size, room);
     if (n < 3) return;
@@ -716,7 +720,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (b.village?.owner === "enemy") {
           if (garrisonOf(b.village)) { b.mission = null; plan(b); }
           else if (m.length >= P.cellMinBand) { leaveCell(b, b.village); b.mission = null; plan(b); }
-          else { b.mission = "garrison"; b.start = m.length; holdFire(b, true); cellSpots(b.village, m.length).forEach((p, i) => m[i]?.orderTo(p.x, p.z)); setState(b, "garrison"); }
+          else { b.mission = "garrison"; b.start = m.length; holdFire(b, true); placeCell(b.village, m); setState(b, "garrison"); }
         }
         break;
       }
@@ -808,6 +812,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         // Into the mouth: gone to ground. They count toward the next band.
         for (const u of m) if (atHome(u)) goToGround(u);
         if (!alive(b).length) setState(b, "done");
+        else if (b.t > 150) { for (const u of alive(b)) if (!u.isMoving) goToGround(u); }   // no way home (a pocket, measured: 2 men stood 6 min): they slip away into the djebel
         else if (b.t > 90 && (b.resent = (b.resent ?? 0) - dt) <= 0) { b.resent = 5; for (const u of alive(b)) sendHome(u); }   // stragglers, every 5 s (not every tick)
         break;
       }
@@ -1075,6 +1080,14 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   // ── Garrisons, retakes, building (2026-10-01) ─────────────────────────────
   const garrisonOf = (v) => bands.find((g) => g.state === "garrison" && g.village === v && alive(g).length);
+  /** A village's cell: INTO A HOUSE when one is free near its middle (algGarrison.js — the
+   *  French need grenades or the mortar to get it out), else spots in cover among the houses. */
+  function placeCell(v, men) {
+    const G = app.algGarrison;
+    const h = G?.houseNear(v.position.x, v.position.z, 34, "enemy", men.length);
+    if (h && G.order(men, h, { ai: true })) return;
+    cellSpots(v, men.length).forEach((p, i) => men[i]?.orderTo(p.x, p.z));
+  }
   /** Spots among a village's houses where a man has cover: the best few of a ring. */
   function cellSpots(v, n) {
     const c = app.algCover, out = [];
@@ -1095,7 +1108,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const g = { state: "garrison", village: v, members: cell, size: k, start: k, t: 0, mission: "garrison" };
     bands.push(g);
     holdFire(g, true);
-    cellSpots(v, k).forEach((p, i) => cell[i]?.orderTo(p.x, p.z));
+    placeCell(v, cell);
     // A sangar at the village's edge, facing the post: what the cell falls
     // back behind (algBuild.js, paid from the ALN purse; the cell raises it).
     const build = app.algBuild, aln = app.algEconomy?.aln;
@@ -1340,6 +1353,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   }
 
   function withdraw(b) {
+    app.algGarrison?.exitAll(alive(b));   // out of a house first (algGarrison.js)
     holdFire(b, true);
     for (const u of alive(b)) { u.attackTarget = null; u.target = null; sendHome(u); }
     setState(b, "withdraw");

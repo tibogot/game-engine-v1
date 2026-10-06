@@ -36,3 +36,5 @@ set to `currentColor` (recoloured in CSS).
 | alertFlag.svg | flag-objective | Delapouite |
 | alertMine.svg | land-mine | Lorc |
 | repair.svg | auto-repair | Lorc |
+| garrison.svg | house | Delapouite |
+| unload.svg | exit-door | Delapouite |

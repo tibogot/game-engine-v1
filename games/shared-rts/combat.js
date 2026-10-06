@@ -42,6 +42,8 @@ export function createCombat({
   // A round fired at a target, a shell landed: (shooter, target) / (at, radius)
   // — infantryPosture.js hangs suppression on them. None: nam as it was.
   onShot = null, onSplash = null,
+  // (unit) → × a blast's damage on him (alg-rts: a man inside a house, algGarrison.js). None: 1.
+  splashMul = null,
   // A unit hit: (target, amount, at, owner) — alg-rts sprays blood from a man.
   onHit = null,
   // (a, b) → true when the ground or a building stands between them (a game's
@@ -209,7 +211,7 @@ export function createCombat({
       const d = Math.hypot(o.position.x - at.x, o.position.z - at.z);
       if (d > radius) return;
       const soft = o.isStructure || onFoot(o);
-      const amount = damage * (1 - (d / radius) ** 1.5) * (soft ? 1 : vehicleMul);
+      const amount = damage * (1 - (d / radius) ** 1.5) * (soft ? 1 : vehicleMul) * (splashMul ? splashMul(o) : 1);
       if (amount <= 0) return;
       if (gibChance && onFoot(o) && gibChance(d, radius, o)) o.gibbed = true;
       if (owner) o.lastHitBy = owner;      // the kill's credit (onImpact gets no owner)
@@ -264,8 +266,9 @@ export function createCombat({
 
     // Units close the distance; structures can't move, so they just wait.
     if (!e.isStructure) {
-      if (e.playerMove) {
-        // On the player's move: shoot if he is in reach, never go after him.
+      if (e.playerMove || e.inside) {
+        // On the player's move (or in a building, alg-rts algGarrison.js): shoot if he is in
+        // reach, never go after him.
         if (d > e.range) return;
       } else if (d > e.range * 0.9) {
         // Chase — re-issue periodically so we track a moving target without

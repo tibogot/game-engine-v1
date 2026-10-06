@@ -192,7 +192,8 @@ export function buildMechta({ seed = 1954, count = 10 } = {}) {
     cx: ((bb.min.x + bb.max.x) / 2) * S, cz: ((bb.min.z + bb.max.z) / 2) * S,
     hx: ((bb.max.x - bb.min.x) / 2) * S, hz: ((bb.max.z - bb.min.z) / 2) * S,
   };
-  geo.userData.houses = houses.map((h) => ({ door: [h.door[0] * S, h.door[1] * S], x: h.x * S, z: h.z * S }));
+  // (w / d / yaw: the walls' box, for a game's garrisons — alg-rts algGarrison.js)
+  geo.userData.houses = houses.map((h) => ({ door: [h.door[0] * S, h.door[1] * S], x: h.x * S, z: h.z * S, w: h.w * S, d: h.d * S, yaw: h.yaw }));
   // WHAT BLOCKS (a player, 2026-10-06: "let me go inside the villages" — the whole hamlet was
   // one blocked block): each house and its lean-to, each yard wall; the lane, the gaps between
   // houses and the threshing floor are open. COVER along every house wall and yard wall.

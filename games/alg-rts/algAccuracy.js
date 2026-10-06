@@ -38,6 +38,7 @@ export const ACCURACY = {
   prone: 0.5,       // × for a man lying (pinned)
   coverHide: 0.3,   // × (1 - coverHide * coverBetween)
   moving: 0.75,     // × for a man on the move
+  inside: 0.35,     // × for a man in a house (algGarrison.js): a window, not the street (0.5 measured: 20 lost vs 25 in the street — too little)
 };
 
 /**
@@ -55,6 +56,7 @@ export function createAlgAccuracy({ cover = null, params = ACCURACY } = {}) {
     if (tgt.posture === "prone") p *= params.prone;
     else if (tgt.posture === "kneel") p *= params.kneel;
     if (tgt.isMoving) p *= params.moving;
+    if (tgt.inside) p *= params.inside;
     if (cover) p *= 1 - params.coverHide * cover.coverBetween(e.position.x, e.position.z, tgt.position.x, tgt.position.z);
     // VETERANCY (algVeterancy.js): a veteran squad's men shoot straighter.
     return Math.min(0.95, p * (e.vetAcc ?? 1));

@@ -209,6 +209,8 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   geo.userData.flagMount = { pos: [-9 * S, 0.5 * S, -3.5 * S], poleHeight: poleH * S };
   geo.userData.footprint = { cx: 0, cz: 0, hx: 22 * S, hz: 20 * S };
   geo.userData.navRects = nav.map((r) => ({ ...r, cx: r.cx * S, cz: r.cz * S, hx: r.hx * S, hz: r.hz * S }));
+  // The stone house, for a game's garrison (alg-rts algGarrison.js): its walls' box and its door.
+  geo.userData.houses = [{ x: HX * S, z: HZ * S, w: HW * S, d: HD * S, yaw: 0, door: [HX * S, (HZ - HD / 2 - 1.2) * S] }];
   geo.userData.coverLines = cover.map((pts) => ({ hard: true, pts: pts.map(([x, z]) => [x * S, z * S]) }));
   geo.userData.coverPerimeter = false;
   geo.userData.height = 8 * S;

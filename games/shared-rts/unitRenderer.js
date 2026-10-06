@@ -1405,6 +1405,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         if (v.root) v.root.visible = false;
         continue;
       }
+      // In a building (alg-rts algGarrison.js): not drawn, no bar, no ring — the house's badge says it.
+      if (unit.inside) {
+        if (v.root) v.root.visible = false;
+        continue;
+      }
 
       const t = unit.type;
       const p = unit.position;

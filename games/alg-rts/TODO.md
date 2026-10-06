@@ -82,9 +82,22 @@ One screen, most important first. Details stay in the sections below;
   - Found on the way: a withdrawing band re-ordered every man home EVERY TICK when the cave
     mouth was unreachable (it fell on a blocked cell at 2 m) → home snapped to open ground,
     stragglers re-sent every 5 s.
-  - [ ] Later (sugg.): GARRISON houses (CoH: a squad inside, fires from the windows, grenades
-    / mortar clear it); infantry SLOWED (not stopped) by low walls and brush; the ksar's
-    alleys open.
+  - [x] GARRISONS (2026-10-06, algGarrison.js): 41 houses (mechtas, dechra, the camp's) hold a
+    squad (6, the mosque 8). Right-click a house with infantry (a house cursor over a free one)
+    → in by the door; not drawn, held (shared `inside` flag: units / renderer / separation);
+    the men take the windows FACING THE NEAREST ENEMY, twice a second (fixed windows: 0 kills
+    from a house, measured). Bullets ×0.35 on a man inside (algAccuracy), never pinned, blasts
+    ×0.8 (shared combat splashMul); two bursts on the house in 10 s → they bail out.
+    MEASURED, 7 FLN at 20 m for 45 s, 9 rounds: inside 15 French / 14 FLN lost, in the street
+    21 / 10. Two grenades on a house of six: ~2 dead, always bail out (at ×1.0: 4 dead;
+    ×0.6: 0.1). Out: any move order, RETRAITE, SORTIR (K). Badges over held houses (blue /
+    red, n / places; click = select). The FLN's village cells take a house (algAI placeCell;
+    3 houses held by minute 8); AI walks to a door retried, a blocked door re-snapped.
+    Also: idle FLN men at the rally form a band whatever the cap; a withdrawing band with
+    no way home melts away after 150 s.
+  - [ ] Later (sugg.): a house's own damage / collapse with its garrison (destruction pass);
+    the FLN's assault bands clearing a French-held house (grenades first); infantry SLOWED
+    (not stopped) by low walls and brush; the ksar's alleys and the farms garrisonable.
 - FROM YOUR FRIEND'S PLAY (2026-10-06) — all four checked in the code, all real:
   - [x] (done 2026-10-06: selection.js attackUnits + canTarget, red sight cursor) RIGHT-CLICK AN ENEMY UNIT = attack: today only enemy BUILDINGS are picked
     (shared-rts/selection.js pickEnemy raycasts structures) — a click on a soldier or a

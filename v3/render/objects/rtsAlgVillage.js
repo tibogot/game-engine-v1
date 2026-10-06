@@ -131,7 +131,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
         }
         nest = [mx + 0.22, ny + 0.22, mz];
         for (const [ox, oz] of [[0, -1.12], [-1.12, 0]]) parts.push({ geo: buildBox(ox ? 0.05 : 0.35, 0.9, oz ? 0.05 : 0.35), pos: [mx + ox, my + MH - 1.6, mz + oz], mat: MAT.steel, tone: 0.02 });
-        houses.push({ x: cx, z: cz, mosque: true, sw: w + 0.36, sd: d + 0.36, minaret: { x: mx, z: mz } });
+        houses.push({ x: cx, z: cz, mosque: true, sw: w + 0.36, sd: d + 0.36, minaret: { x: mx, z: mz }, door: [cx - 1.2, cz - d / 2 - 1.2] });
         x += w + 3.5;
         continue;
       }
@@ -197,7 +197,8 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   // The footprint reaches the far lane (the last house of a row can run past
   // width / 2).
   const geo = finish(parts, { hx: Math.max(width / 2 + 4, xEnd + 3), hz: (rows * rowStep) / 2 + 3, cx: 0, cz: 0, height: 14 });
-  geo.userData.houses = houses.map((h) => ({ x: h.x * 1.3, z: h.z * 1.3, mosque: !!h.mosque }));
+  // (w / d / yaw / door: the walls' box, for a game's garrisons — alg-rts algGarrison.js)
+  geo.userData.houses = houses.map((h) => ({ x: h.x * 1.3, z: h.z * 1.3, mosque: !!h.mosque, w: h.sw * 1.3, d: h.sd * 1.3, yaw: 0, door: h.door ? [h.door[0] * 1.3, h.door[1] * 1.3] : null }));
   geo.userData.trees = scaled(trees);
   // WHAT BLOCKS (2026-10-06, a player: "let me go inside the villages"): each house on its
   // socle, the mosque and its minaret, the courtyard walls — the lanes between the rows and the
