@@ -157,6 +157,7 @@ export function landmarkEntries(app, list) {
 const Q = {
   outcrops: 42, outcropSpacing: 34, outcropSlope: [9, 32],   // degrees
   trees: 24, treeSpacing: 55,
+  deadTrees: 18, deadSpacing: 38,   // snags on the open plain (2026-10-07)
   betoums: 10, betoumSpacing: 70,   // the landmark shade trees (2026-10-03)
   tamariskGroups: 9,                // along the wadis and the oasis edge
   mastShare: 0.13,        // agaves with their flower mast
@@ -282,6 +283,27 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     }
   }
 
+  // ── DEAD TREES (2026-10-07, the AAA list's "map density"): grey snags alone
+  // on the open plain and the lower slopes — what a dry fought-over valley has
+  // that a garden doesn't. Away from the living trees, not on the tracks.
+  const dead = [];
+  for (let t = 0; t < 4000 && dead.length < Q.deadTrees; t++) {
+    const x = PLAY.x0 + 8 + R() * (PLAY.x1 - PLAY.x0 - 16), z = PLAY.z0 + 8 + R() * (PLAY.z1 - PLAY.z0 - 16);
+    if (slopeDeg(x, z) > 24) continue;
+    if (taken.some((tk) => Math.hypot(tk.x - x, tk.z - z) < tk.r + 4)) continue;
+    if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > H(x, z) - 0.3 || navGrid?.isBlockedAtWorld?.(x, z)) continue;
+    if (nearTrack(x, z, 6)) continue;
+    if (trees.some((tr) => Math.hypot(tr.x - x, tr.z - z) < 20)) continue;
+    if (dead.some((d) => Math.hypot(d.x - x, d.z - z) < Q.deadSpacing)) continue;
+    dead.push({ x, z });
+  }
+  if (plants && dead.length) {
+    if (!plants.types.has("deadTree")) plants.setType("deadTree", structuredClone(FOLIAGE_PRESETS.deadTree));
+    for (const d of dead) {
+      plants.add("deadTree", d.x, H(d.x, d.z) - 0.1, d.z, { rotY: R() * 6.28, scale: 0.8 + R() * 0.6, seed: R() });
+    }
+  }
+
   // ── BETOUMS (Atlas pistachio, 2026-10-03): the landmark shade trees — alone
   // on the open plain, near the villages, a few in the wide wadi beds. Big
   // (11 m), so far apart; their ground under the crown cleared of scrub.
@@ -396,6 +418,6 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     rocks, trees, meshes, agaves, brooms, betoums, tamarisks,
     /** Hard cover round the outcrops, for the cover bake (algCover.js). */
     *coverCircles() { for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true }; },
-    stats: { outcrops: rocks.length, clusters: centres.length, trees: trees.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
+    stats: { outcrops: rocks.length, clusters: centres.length, trees: trees.length, dead: dead.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
   };
 }

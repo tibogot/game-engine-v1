@@ -309,6 +309,17 @@ export const FOLIAGE_PRESETS = {
     plumesPerStem: 0, plumeSpread: 0, crownDepth: 1.1,
     colorBase: "#2b421f", colorTip: "#6f8a3c", colorHead: "#8a8478", size: 4.5, translucency: 0.5,
   },
+  // DEAD TREE — a snag on the open plain (alg-rts, 2026-10-07: what a dry
+  // battlefield has that a garden doesn't): the olive's frame, no leaves, the
+  // wood weathered silver-grey, some limbs snapped (`dead`, dipterocarpGeometry.js).
+  deadTree: {
+    kind: "dipterocarp", dead: true,
+    fronds: 5, frondLength: 1.0, leaflets: 0, leafletWidth: 0.75, leafletAngle: 30,
+    spread: 0.55, arch: 0.8, droop: 0.2, stemWidth: 2.6, bareStalk: 0.3,
+    plumesPerStem: 0, plumeSpread: 0, crownDepth: 0.8,
+    // #6b645a, not #9a948a: the first read bone-white, a stick in the sun.
+    colorBase: "#4a443c", colorTip: "#6b645a", colorHead: "#6b645a", size: 5, translucency: 0,
+  },
   // ALMOND — the terraces' tree: an upright vase of thin dark limbs and a
   // light, open crown of narrow grey-green leaves (in summer; the white
   // blossom is February's).

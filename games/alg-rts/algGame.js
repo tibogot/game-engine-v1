@@ -33,6 +33,7 @@ import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
 import { createAlgSplats } from "./algSplats.js";
+import { applyMacroGround } from "./algMacroGround.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
@@ -369,6 +370,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("splats") !== "0" && app.groundCache) {
     onStatus("Usure du terrain…");
     try { app.algSplats = await createAlgSplats(app); } catch (e) { console.warn("[alg splats] failed:", e); }
+  }
+  // THE MACRO PHOTO (algMacroGround.js): the ground's large-scale variation. ?macro=0 = without.
+  if (params.get("macro") !== "0") {
+    try { await applyMacroGround(app); } catch (e) { console.warn("[alg macro] failed:", e); }
   }
   // STONES (algStones.js): loose stones textured with the ground they lie on,
   // placed from the map's paint. ?stones=0 = without.

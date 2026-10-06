@@ -39,6 +39,9 @@
  *   plumesPerStem buttress roots
  *   crownDepth    how deep each sub-crown is, in its radius (0.6 the
  *                 dipterocarp's flattened heads; ~1.1 a round oak crown)
+ *   dead          true: a DEAD tree (alg-rts, 2026-10-07 — the snags on the open
+ *                 plain): no leaves, the limbs reach to their heads and fork
+ *                 into bare twigs; one limb in three snapped off short.
  *   `size` 30 m (an emergent over a 20-25 m canopy).
  */
 import { woodKit, BILLBOARD } from "./banyanGeometry.js";
@@ -124,7 +127,9 @@ export function buildDipterocarp(type, ctx) {
 
   // LIMBS: thick, rising steeply out of the fork, then leaning out to their
   // head — a dipterocarp's crown is held UP on a few big arms.
+  const dead = type.dead === true;
   for (const h of heads) {
+    if (dead) { deadLimb(h); continue; }
     const end = [h.c[0], h.c[1] - h.r * 0.35, h.c[2]];
     const ctrl = [lerp3(fork, end, 0.25)[0], forkY + (end[1] - forkY) * 0.75, lerp3(fork, end, 0.25)[2]];
     const pts = bez(fork, ctrl, end, far ? 3 : near ? 7 : 5);
@@ -142,6 +147,37 @@ export function buildDipterocarp(type, ctx) {
       }
     }
   }
+
+  // A DEAD limb: out to the head (or snapped short), then bare forks — two
+  // levels of twigs out to the head's surface, the silhouette a dead tree is.
+  function deadLimb(h) {
+    const snapped = rand() < 0.3;
+    const end = snapped ? lerp3(fork, h.c, 0.45 + rand() * 0.2) : [h.c[0], h.c[1] - h.r * 0.15, h.c[2]];
+    const ctrl = [lerp3(fork, end, 0.3)[0], forkY + (end[1] - forkY) * 0.8, lerp3(fork, end, 0.3)[2]];
+    const pts = bez(fork, ctrl, end, far ? 3 : near ? 7 : 5);
+    const r0 = boleR * 0.6;
+    tube(pts, pts.map((_, k) => r0 * (1 - (snapped ? 0.35 : 0.72) * (k / (pts.length - 1)))), far ? 4 : near ? 6 : 5, { t0: 0.55, t1: 1, tone: 0.05, cap: snapped });
+    if (snapped || far) return;
+    for (let b = 0; b < (near ? 4 : 3); b++) {
+      const ba = (h.a ?? 0) + (b / 3 - 0.5) * 2.2 + (rand() - 0.5) * 0.6;
+      const up = 0.15 + rand() * 0.6;
+      const tip = add(h.c, [Math.cos(ba) * h.r * (1 - up * 0.5), h.r * up, Math.sin(ba) * h.r * (1 - up * 0.5)]);
+      const from = pts[Math.max(1, pts.length - 1 - (b % 3))];
+      const bp = bez(from, add(lerp3(from, tip, 0.5), [0, h.r * 0.12, 0]), tip, near ? 4 : 3);
+      const rb = r0 * 0.45;
+      tube(bp, bp.map((_, k) => rb * (1 - 0.75 * (k / (bp.length - 1)))), 3, { t0: 0.8, t1: 1, tone: 0.07, cap: true });
+      if (!near) continue;
+      // Twigs off the branch's outer half.
+      for (let t = 0; t < 2; t++) {
+        const f = bp[Math.min(bp.length - 2, 2 + t)];
+        const ta = ba + (t ? 1 : -1) * (0.5 + rand() * 0.5);
+        const tt = add(f, [Math.cos(ta) * h.r * 0.38, h.r * (0.18 + rand() * 0.3), Math.sin(ta) * h.r * 0.38]);
+        const tp = bez(f, lerp3(f, tt, 0.5), tt, 2);
+        tube(tp, tp.map((_, k) => rb * 0.45 * (1 - 0.7 * (k / (tp.length - 1)))), 3, { t0: 0.9, t1: 1, tone: 0.09, cap: true });
+      }
+    }
+  }
+  if (dead) return finish();
 
   // CLUMPS: billboards over each head's upper surface (a flattened ball),
   // shared out by the head's area. Each carries its OWN head's outward normal,
