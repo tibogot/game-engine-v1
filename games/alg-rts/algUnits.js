@@ -72,9 +72,13 @@ function padEdge(m, px, pz) {
   return [fp.cx + (px / d) * r, fp.cz + (pz / d) * r];
 }
 
-/** The French vehicles built in code, by a unit type's `procedural` key. */
+/**
+ * The French vehicles built in code, by a unit type's `procedural` key. The jeep and the
+ * half-track at DETAIL 2 (the vehicle lab, 2026-10-06), their crew real soldiers on the
+ * builders' seats (FR_CREW, below) instead of the box men.
+ */
 const FR_VEHICLES = {
-  willys: () => buildWillys(), gmc: () => buildGMC(), halftrack: () => buildHalfTrack(),
+  willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC(), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
   amx13: () => buildAMX13(), ebr: () => buildEBR(), alouette: () => buildAlouette(),
 };
 
@@ -235,6 +239,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // carries ONE (algSquadBadges.js, CoH).
     barFor: (u) => !app.algSquads?.of(u),
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
+    // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
+    crew: { willys: "appele", halftrack: "appele" },
     // A man down: his pool under his torso (bloodField.js, made with combat).
     onCorpse: (u, x, z, heading) => app.algCombat?.blood.pool(x, z, heading),
     // Men blown apart by a close blast (algCombat GIBS): their blood.

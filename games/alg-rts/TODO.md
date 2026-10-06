@@ -82,10 +82,17 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   Driving hands close). In the lab only (plain mixers).
 - [x] PAINT: OLIVE BRUN is the game's (FR_PAINT_TINT, ~sRGB 92/88/62); the old lime is
   FR_PAINT_TINT_OLD and a lab button — **you: "not sure yet"**, choose later.
-- [ ] Detail 2 + the CREW in the GAME: unitRenderer draws crew poses in the soldier crowd at
-  each vehicle's seats (no draws added, ~3k tris a man); drop the soldierSeated box men.
-- [ ] NEXT VEHICLES, one at a time: the JEEP (same striped tyres, two box men), then GMC, EBR,
-  AMX-13, Alouette (pilot). Then buildings.
+- [x] Detail 2 + the CREW in the GAME (jeep + half-track): unitRenderer `crew` ({ vehicle
+  typeKey: soldier typeKey }) draws appelés in the soldier crowd on each manned vehicle's
+  userData.seats (no draw added, lane 2, not pickable; only on screen); FR_VEHICLES builds the
+  two at detail 2, crew: false. Wrecks: detail 2, empty. The box men stay on the others.
+- [x] JEEP at detail 2 (from Willys MB photos): the cutout tub, curled fenders, seats at a
+  seated man's height, the gun at a standing gunner's chest; no bent aerial, no wire cutter
+  (you). WHEELS rebuilt (you: "look bad close"): chevron bars ON the tyre, a turned combat rim;
+  the half-track's front wheels too. 2.6k → 10.5k tris (crew aside).
+- [ ] NEXT VEHICLES, one at a time: GMC, EBR, AMX-13, Alouette (pilot). Then buildings.
+- [ ] Crew ideas: men get out when the vehicle is hit/destroyed (now they vanish with it);
+  the gunner's clip firing when the vehicle fires.
 - [ ] GUNS: the Quaternius Ultimate Guns pack (assets-src/soldiers/Ultimate Guns Pack-glb, not
   compressed) — compare a bolt-action (FLN Mauser/Lebel) and the SMG (MAT 49) against ours.
 

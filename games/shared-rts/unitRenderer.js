@@ -992,7 +992,7 @@ const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then
  * `thumbnailFor(key)`: false = skip that type's 3D UI thumbnail (the game
  * supplies its own picture); null = bake every type.
  */
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const PROCEDURAL_VEHICLES = procedural;
@@ -1139,6 +1139,26 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   // nothing can pick them. Each idles on its own clock, facing its own way.
   const statics = [];
   const _st = new THREE.Object3D();
+
+  // CREW (opt-in, `crew`: { vehicle typeKey: soldier typeKey } — alg-rts, the vehicle lab,
+  // 2026-10-06): real soldiers on the SEATS a procedural vehicle gives out (its geometry's
+  // userData.seats: { p, yaw, clip } in the vehicle's own metres), drawn in that soldier
+  // type's crowd after its living — no draw of their own, not pickable. Each seat's matrix:
+  // the vehicle's, the body's place in its template, the seat, the soldier's scale.
+  const crewOf = {};
+  for (const k of UNIT_TYPE_KEYS) {
+    const look = crew?.[UNIT_TYPES[k].typeKey ?? k];
+    if (!look || templates[k].skinned) continue;
+    const root = templates[k].root;
+    root.updateMatrixWorld(true);
+    const invRoot = new THREE.Matrix4().copy(root.matrixWorld).invert();
+    root.traverse((o) => {
+      if (crewOf[k] || !o.isMesh || !o.geometry.userData.seats?.length) return;
+      crewOf[k] = { look, seats: o.geometry.userData.seats, rel: new THREE.Matrix4().multiplyMatrices(invRoot, o.matrixWorld) };
+    });
+  }
+  const crewNow = [];   // this frame's manned vehicles: { m, c, t, seeds }
+  const _crewSeat = new THREE.Matrix4(), _crewQ = new THREE.Quaternion(), _crewS = new THREE.Vector3(), _crewP = new THREE.Vector3(), _crewY = new THREE.Vector3(0, 1, 0);
 
   // Instanced units have no mesh of their own, so a raycast hit lands on the
   // shared InstancedMesh and identifies the unit by instanceId. This maps the
@@ -1391,6 +1411,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     const pxPerM = rect ? rect.height / (2 * Math.tan(THREE.MathUtils.degToRad((camera.fov ?? 50) / 2))) : 0;
     let nextHovered = null, hoverD = Infinity;
     crowdUnits.length = 0;
+    crewNow.length = 0;   // this frame's manned vehicles only
 
     for (const unit of units.list) {
       const v = views.get(unit);
@@ -1535,6 +1556,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           if (inst.odometer) inst.odometer.setX(i, v.odo);
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
+          const c = crewOf[t.typeKey];
+          if (c && v.onScreen) {
+            if (!v.crew) v.crew = { t: Math.random() * 20, seeds: c.seats.map(() => [Math.random(), Math.random(), Math.random(), 0]), m: new THREE.Matrix4() };
+            v.crew.t += dt;
+            v.crew.m.multiplyMatrices(x.matrix, c.rel);
+            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale });
+          }
         }
       }
 
@@ -1696,6 +1724,21 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           f.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
             unit.team === "player" ? 0 : 1, { extra: v.seed });
         }
+        // The crews of the manned vehicles of this look (lane 2: no x-ray of their own —
+        // the vehicle has its silhouette). A seat's clip missing from the pack: idle.
+        for (const cr of crewNow) {
+          if (cr.c.look !== view.key) continue;
+          cr.c.seats.forEach((seat, si) => {
+            const clip = f.has(seat.clip) ? seat.clip : g.roles.idle;
+            _crewP.fromArray(seat.p);
+            _crewQ.setFromAxisAngle(_crewY, seat.yaw + (UNIT_TYPES[view.key].facingOffset ?? 0));
+            _crewS.setScalar(g.scale / (cr.scale || 1));
+            _crewSeat.compose(_crewP, _crewQ, _crewS);
+            _mat.multiplyMatrices(cr.m, _crewSeat).multiply(g.rel);
+            const tt = cr.t + si * 1.7;
+            f.addPose(_mat, clip, tt, clip, tt, 0, 2, { extra: cr.seeds[si] });
+          });
+        }
         for (const unit of view.dead) {
           const v = views.get(unit);
           _mat.multiplyMatrices(v.xform.matrix, g.rel);
@@ -1763,6 +1806,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       return statics.length;
     },
     thumbnails,
+    /** The manned vehicle types (crew): { typeKey: { look, seats, rel } } — for the dev panel and tests. */
+    crewOf,
     roots,          // raycast targets for selection (instanced meshes + skinned groups)
     unitByMesh,
     unitFromHit,    // resolves a raycast hit, instanced or not
