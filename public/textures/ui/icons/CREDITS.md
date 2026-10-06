@@ -35,3 +35,4 @@ set to `currentColor` (recoloured in CSS).
 | alertCut.svg | breaking-chain | Skoll |
 | alertFlag.svg | flag-objective | Delapouite |
 | alertMine.svg | land-mine | Lorc |
+| repair.svg | auto-repair | Lorc |

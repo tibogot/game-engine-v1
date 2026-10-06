@@ -54,6 +54,24 @@ One screen, most important first. Details stay in the sections below;
   Measured, NOT changed: raids hit 0 times against a player guarding every point (they go
   for UNguarded ones — 45% kept); FLN 42 dead vs French 3 against static FM squads.
 - You, play: is the FLN too weak against held positions (42:3)? the pop cap too tight early?
+- FROM YOUR FRIEND'S PLAY (2026-10-06) — all four checked in the code, all real:
+  - [x] (done 2026-10-06: selection.js attackUnits + canTarget, red sight cursor) RIGHT-CLICK AN ENEMY UNIT = attack: today only enemy BUILDINGS are picked
+    (shared-rts/selection.js pickEnemy raycasts structures) — a click on a soldier or a
+    vehicle is a move order. + a red attack cursor over an enemy.
+  - [x] (done: combat.js e.playerMove — a squad ordered away ran 66 m in 12 s under fire, shooting on the move at 0.6 accuracy) MOVE MEANS MOVE (CoH): an auto-target makes a moving unit HALT in range and even
+    CHASE an enemy up to 1.15× its range (combat.js engage) — a move away gets pulled back
+    into the fight. A player's move order: no chasing, no stopping; fire on the move.
+    Auto-engage only when idle, short leash. (Attack-move as a separate order, later.)
+  - [x] (done: algRepair.js — right-click or RÉPARER (J); 3 hp/s a man, jeep 40→120 in ~13 s; stops under fire) SAPEURS REPAIR VEHICLES (and the post / buildings, CoH engineers): no repair exists.
+    Right-click a damaged friendly vehicle with sapeurs → they walk up and repair, a wrench
+    button too; free, slow, stops under fire.
+  - [ ] REPAIR EFFECT (you, 2026-10-06): something cool while sapeurs repair — welding
+    sparks at the contact point (short bright streaks, a small flash, a light flicker at
+    night), a wrench chip over the vehicle; the work sound (hammer / torch).
+  - [x] (done: units.js type.drive — U-turn crab angle 163° max / 23° mean → 2° / 1°; tracks pivot, wheels steer, accel + brake; 12/12 long drives arrive) VEHICLES SLIDE: they move along the path at full speed from the first frame and the
+    hull turns after (shared-rts/units.js: heading follows the motion) — crabbing sideways
+    mid-turn. Drive ALONG the hull: turn while rolling (wheels) or pivot first (tracks),
+    slow into tight turns, accelerate / brake. Per-type flag, nam unchanged.
 - Balance after you play: prices and incomes, retreat, reinforce, the difficulty levels,
   the bleed rate.
 - Check: the "STARTING army still has armour" item (PARKED section) — may be

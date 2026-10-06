@@ -11,6 +11,11 @@
 import * as THREE from "three";
 
 const ACQUIRE_MULT = 1.15; // auto-acquire slightly beyond weapon range
+// MOVE MEANS MOVE (opt-in — a game sets `e.playerMove` on its player's move orders; alg-rts,
+// 2026-10-06, a player: "too hard to make them move away, too attracted by the enemy"): such a
+// unit never chases an auto-target and never stops for one; it shoots on the move at what is in
+// reach, at this share of its accuracy (CoH's moving penalty). Arrived, or told to attack: as ever.
+const MOVING_ACC = 0.6;
 /**
  * A unit with no target looks for one this often (s), not every sim step. A
  * search sifts everyone within weapon reach — nearly all friends — and 600 men
@@ -228,6 +233,7 @@ export function createCombat({
     // (and a man throwing a grenade: algGrenades.js — his own flag, so a throw
     // ending never re-opens the fire of a band told to hold it meanwhile)
     if (e.holdFire || e.throwing) { e.target = null; return; }
+    if (e.playerMove && (!e.isMoving || e.attackTarget)) e.playerMove = false;
 
     // Forget dead targets.
     if (e.target && !e.target.alive) e.target = null;
@@ -258,7 +264,10 @@ export function createCombat({
 
     // Units close the distance; structures can't move, so they just wait.
     if (!e.isStructure) {
-      if (d > e.range * 0.9) {
+      if (e.playerMove) {
+        // On the player's move: shoot if he is in reach, never go after him.
+        if (d > e.range) return;
+      } else if (d > e.range * 0.9) {
         // Chase — re-issue periodically so we track a moving target without
         // running A* every frame. orderTo (not moveOrder) so the attack order
         // survives.
@@ -273,7 +282,7 @@ export function createCombat({
       // attack order survives; stop() would forget the target we're shooting.
       // (Only once it can SEE him: a unit moving round a house for a line
       // would otherwise stop again every tick, in range and blind.)
-      if (e.isMoving && (!blocksSight || canSee(e, tgt))) e.haltMovement();
+      if (e.isMoving && !e.playerMove && (!blocksSight || canSee(e, tgt))) e.haltMovement();
     }
 
     // Smoke rolling in between breaks the shot. An AUTO-acquired target is
@@ -306,7 +315,7 @@ export function createCombat({
       // An AA gun hits aircraft harder than ground (airMul / groundMul, 1 for
       // everything else).
       const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));
-      const miss = !!hitChance && Math.random() >= hitChance(e, tgt, d);
+      const miss = !!hitChance && Math.random() >= hitChance(e, tgt, d) * (e.playerMove ? MOVING_ACC : 1);
       projectiles.spawn(from, tgt, dmg, e, null, { miss });
       onShot?.(e, tgt);   // hit or miss: fire suppresses
       // A muzzle flash in a dark jungle is the loudest thing on the map.

@@ -232,6 +232,8 @@ export const ALG_UNIT_TYPES = {
   // comes with its own rules. `procedural` names the builder (algUnits.js).
   // Hotchkiss/Willys MB jeep, the patrol's car. Plays like nam's M151.
   willys: {
+    // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
+    drive: { kind: "wheels", turn: 1.6, accel: 6 },
     typeKey: "willys", name: "Jeep Willys", weapon: "mg",
     isAir: false, hover: 0, speed: 12, radius: 2.9, turnRate: 3.4, maxHp: 120,
     range: 34, damage: 14, fireRate: 1.8, canHitAir: false, vision: 38,
@@ -241,6 +243,8 @@ export const ALG_UNIT_TYPES = {
   // GMC CCKW "Jimmy", the convoy truck. Unarmed; plays like nam's M35 (no
   // building yet).
   gmc: {
+    // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
+    drive: { kind: "wheels", turn: 1.0, accel: 3 },
     typeKey: "gmc", name: "Camion GMC",
     isAir: false, hover: 0, speed: 9, radius: 3.6, turnRate: 3.0, maxHp: 160,
     range: 0, damage: 0, fireRate: 1, canHitAir: false, vision: 34,
@@ -249,6 +253,8 @@ export const ALG_UNIT_TYPES = {
   },
   // M3 half-track, the APC. Plays like nam's M113 (its .50 reaches aircraft).
   halftrack: {
+    // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
+    drive: { kind: "wheels", turn: 0.9, accel: 2.6 },
     typeKey: "halftrack", name: "Half-track M3", weapon: "mg",
     isAir: false, hover: 0, speed: 10, radius: 4.3, turnRate: 2.5, maxHp: 240,
     range: 38, damage: 16, fireRate: 1.6, canHitAir: true, vision: 38,
@@ -258,6 +264,8 @@ export const ALG_UNIT_TYPES = {
   // AMX-13, the light tank with the oscillating turret. Plays like nam's
   // M551 Sheridan.
   amx13: {
+    // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
+    drive: { kind: "tracks", turn: 0.8, accel: 2.4 },
     typeKey: "amx13", name: "AMX-13", weapon: "cannon",
     isAir: false, hover: 0, speed: 8.5, radius: 4.6, turnRate: 2.1, maxHp: 260,
     range: 42, damage: 26, fireRate: 0.85, canHitAir: false, vision: 36,
@@ -267,6 +275,8 @@ export const ALG_UNIT_TYPES = {
   // Panhard EBR, the eight-wheeled armoured car. Sheridan's numbers too for
   // now (its real edge, speed on tracks, comes with this game's balance).
   ebr: {
+    // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
+    drive: { kind: "wheels", turn: 1.1, accel: 3.2 },
     typeKey: "ebr", name: "Panhard EBR", weapon: "cannon",
     isAir: false, hover: 0, speed: 13, radius: 4.6, turnRate: 2.1, maxHp: 260,
     range: 42, damage: 26, fireRate: 0.85, canHitAir: false, vision: 36,

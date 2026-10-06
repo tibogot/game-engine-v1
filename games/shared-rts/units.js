@@ -55,6 +55,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
   // treating it as arrived made every separation nudge cancel a heli's order.
   let arrived = true;
   let heading = 0;
+  let driveV = 0, turningHard = false;   // type.drive: speed now (accelerates, brakes); turning on the spot / hard
   let emerging = null;        // { toX, toZ, rallyX, rallyZ } — scripted drive out of a building
   let stuckT = 0;             // seconds without a NEW closest-distance to the waypoint
   let bestTgtDist = Infinity; // closest we've ever been to the current waypoint
@@ -467,11 +468,45 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         const len = Math.hypot(dirX, dirZ) || 1;
         dirX /= len; dirZ /= len;
 
-        const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * dt, dh);
+        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1);
+        // DRIVE ALONG THE HULL (opt-in per type: type.drive = { kind: "wheels" | "tracks",
+        // turn rad/s, accel m/s²} — alg-rts 2026-10-06, a player: "vehicles slide"). Without it a
+        // vehicle went where the path pointed at full speed and the hull turned after (crabbing).
+        // Now it goes where it FACES: wheels steer while rolling, slowing into a tight turn;
+        // tracks pivot on the spot first when the turn is sharp; both speed up and brake. The
+        // last couple of metres are plain (no orbiting a parking spot).
+        const D = type.drive;
+        turningHard = false;
+        if (D && !type.isAir && reverseT <= 0) {
+          const last = waypoints.length <= 1;
+          const want = Math.atan2(dirX, dirZ);
+          let off = want - heading;
+          while (off > Math.PI) off -= Math.PI * 2;
+          while (off < -Math.PI) off += Math.PI * 2;
+          off = Math.abs(off);
+          let k = 1;
+          if (!(last && dh < 2.5)) {
+            if (D.kind === "tracks" && off > 0.6) { heading = turnToward(heading, want, D.turn * 1.3 * dt); k = 0; }
+            else {
+              heading = turnToward(heading, want, D.turn * dt);
+              k = Math.max(D.kind === "tracks" ? 0.15 : 0.3, Math.cos(Math.min(off, Math.PI / 2)));
+            }
+            dirX = Math.sin(heading); dirZ = Math.cos(heading);
+            turningHard = off > 0.35;
+          }
+          // Brake for the last waypoint: no faster than it can stop in.
+          const stopV = last ? Math.sqrt(2 * D.accel * 1.4 * Math.max(0, dh - 0.3)) : Infinity;
+          const wantV = Math.min(speed * k, stopV);
+          driveV += THREE.MathUtils.clamp(wantV - driveV, -D.accel * 1.6 * dt, D.accel * dt);
+          speed = Math.max(0, driveV);
+        }
+
+        const step = Math.min(speed * dt, dh);
         tryMove(pos.x + dirX * step, pos.z + dirZ * step);
         arrived = false;
       } else if (!waypoints.length) {
         arrived = true;
+        driveV = 0;
         stuckT = 0; escapeT = 0; reverseT = 0; unit.ghost = false; escalation = 0;
       }
 
@@ -482,7 +517,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       const moved = Math.hypot(movedX, movedZ);
       // While reversing, keep facing forward — a vehicle backing up doesn't spin
       // around to look where it's going.
-      if (moved > 1e-3 && reverseT <= 0) {
+      if (moved > 1e-3 && reverseT <= 0 && !type.drive) {
         heading = turnToward(heading, Math.atan2(movedX, movedZ), (type.turnRate ?? 3) * dt);
       }
 
@@ -502,8 +537,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         // orbiting, head-on grinds and dead ends (distance never improves in
         // any of those).
         const distToTgt = Math.hypot(target.x - pos.x, target.z - pos.z);
-        if (reverseT > 0 || escapeT > 0) {
-          stuckT = 0; // deliberately not progressing — don't judge mid-manoeuvre
+        if (reverseT > 0 || escapeT > 0 || turningHard) {
+          stuckT = 0; // deliberately not progressing — don't judge mid-manoeuvre (or mid-turn: a driven hull)
         } else if (distToTgt < bestTgtDist - 0.35) {
           bestTgtDist = distToTgt;
           stuckT = 0;

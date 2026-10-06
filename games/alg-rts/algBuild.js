@@ -268,7 +268,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       s.hp = s.progress * 100;
     }
     for (let i = sites.length - 1; i >= 0; i--) if (sites[i].progress >= 1) finish(sites[i]);
-    for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting) u.working = null;   // a wire-cutter is algWire.js's
+    for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting && !u.repairing) u.working = null;   // a wire-cutter is algWire.js's, a repairer algRepair.js's
   }
   /** A site stops being a site (finished or cancelled): out of the list and the selection. */
   function retire(s) {

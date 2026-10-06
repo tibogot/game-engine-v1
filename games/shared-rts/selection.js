@@ -21,7 +21,10 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null, orderMarker = null }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null }) {
+  // `attackUnits` (opt-in, alg-rts 2026-10-06): a right-click on an enemy UNIT is an attack order
+  // too (not only on a building), and the cursor turns to a red sight over one; `canTarget(u)`:
+  // may the player point at him (seen — not in the fog)?
   // `squadOf(unit) → unit[] | null` (opt-in, alg-rts's squads): a click or a
   // box on one man selects his whole squad, and a move order forms each squad
   // round its own spot instead of a grid of loose men.
@@ -258,6 +261,29 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     return null;
   }
 
+  /** An enemy UNIT under the cursor (attackUnits only), one the player can see. */
+  function pickEnemyUnit(clientX, clientY) {
+    if (!attackUnits) return null;
+    const u = meshPick(clientX, clientY);
+    return u?.alive && !u.isStructure && u.team && u.team !== "player" && (canTarget?.(u) ?? true) ? u : null;
+  }
+  // THE ATTACK CURSOR (attackUnits): a red sight over an enemy while men are selected. Looked
+  // up at most every 90 ms; never over another mode's cursor (a grenade's crosshair).
+  const ATTACK_CURSOR = `url("data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 28 28"><g fill="none" stroke="#000" stroke-opacity=".7" stroke-width="4"><circle cx="14" cy="14" r="8"/><path d="M14 1v7M14 20v7M1 14h7M20 14h7"/></g><g fill="none" stroke="#ff4a3a" stroke-width="2"><circle cx="14" cy="14" r="8"/><path d="M14 1v7M14 20v7M1 14h7M20 14h7"/></g></svg>')}") 14 14, crosshair`;
+  let hoverT = 0, hoverOn = false;
+  const onHover = (e) => {
+    if (!attackUnits) return;
+    const now = performance.now();
+    if (now - hoverT < 90) return;
+    hoverT = now;
+    const cur = dom.style.cursor;
+    if (cur && !hoverOn) return;   // another mode owns it
+    const armed = [...selected].some((u) => !u.isStructure && u.team === "player" && u.range > 0);
+    const on = armed && !!(pickEnemy(e.clientX, e.clientY) ?? pickEnemyUnit(e.clientX, e.clientY));
+    if (on !== hoverOn) { hoverOn = on; dom.style.cursor = on ? ATTACK_CURSOR : ""; }
+  };
+  dom.addEventListener("pointermove", onHover);
+
   /** Raycast the enemy structures under the cursor, if any. */
   function pickEnemy(clientX, clientY) {
     if (!structuresRenderer) return null;
@@ -281,7 +307,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     if (!selected.size) return;
 
     // Right-clicking an enemy is an ATTACK order.
-    const enemy = pickEnemy(e.clientX, e.clientY);
+    const enemy = pickEnemy(e.clientX, e.clientY) ?? pickEnemyUnit(e.clientX, e.clientY);
     if (enemy) {
       for (const u of selected) u.attack?.(enemy);
       pingMarker(enemy.position.x, enemy.position.y, enemy.position.z, "attack");
@@ -442,6 +468,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dom.removeEventListener("contextmenu", onContextMenu);
+      dom.removeEventListener("pointermove", onHover);
       boxEl.remove();
       if (markerRaf) cancelAnimationFrame(markerRaf);
       app.scene.remove(marker);

@@ -37,6 +37,7 @@ import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
+import { createAlgRepair } from "./algRepair.js";
 import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
@@ -449,6 +450,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
           return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? ` (${sq.length} squads: each pays).` : ""), ready: economy.french.canAfford(g.cost) };
         })(),
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
+        // RÉPARER (algRepair.js): sappers fix a damaged vehicle or building.
+        repair?.ability(sel),
         sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
           && { key: "cutWire", label: "Couper", hint: "Cut the nearest barbed wire (40 m): ~8 s for one sapper, less for more.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
@@ -475,6 +478,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     onAbility: (key, sel) => {
       if (key === "cancelSite") build?.cancelSite(sel[0]);
       if (key === "cutWire") app.algWire?.orderCut(sel);
+      if (key === "repair") repair?.begin(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
       if (key === "smoke") grenades?.begin(sel, "smoke");
@@ -498,6 +502,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let flares = null;    // the mortar pit's illumination flares (algFlares.js), after combat
   let barrage = null;   // the mortar pit's barrage (algBarrage.js), after combat
   let build = null;     // made after the cover (algBuild.js)
+  let repair = null;    // made after the build (algRepair.js)
   let controlGroups = null;   // made after the selection it listens to
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
@@ -515,7 +520,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
     }),
     // The radio answers an order (algSounds.js).
+    // Right-click an enemy soldier or vehicle you can see = attack; the red sight over him.
+    attackUnits: true,
+    canTarget: (u) => !fogOfWar?.enabled || fogOfWar.isVisible(u.position.x, u.position.z),
     onOrder: (kind, list) => {
+      // MOVE MEANS MOVE (shared-rts/combat.js): a move is obeyed — no chasing, no stopping to
+      // fight on the way (they shoot on the move); an attack order ends it.
+      for (const u of list) if (!u.isStructure) u.playerMove = kind === "move";
+      repair?.cancel(list);   // a new order ends a repair
       // A new order calls a retreating squad off its retreat (CoH).
       for (const s of squads.squadsIn(list)) if (s.retreating) squads.endRetreat(s);
       app.algSounds?.order(kind, list); app.algVoices?.order(kind, list);
@@ -558,6 +570,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     onCover: () => coverSys.cover.bake(),
   });
   app.algBuild = build;
+  // REPAIR (algRepair.js): sapeurs fix damaged vehicles and buildings (CoH's engineers).
+  repair = createAlgRepair(app, { units, structures, isSapper: (u) => u.typeKey === "sapeur" });
+  app.algRepair = repair;
   // THE SEARCHLIGHTS (algSearchlight.js): sweep, lock on, reveal who is lit.
   const searchlights = createAlgSearchlights(app, { structures, units, cover: coverSys.cover });
   app.algSearchlights = searchlights;
@@ -631,7 +646,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
-  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); searchlights.step(d); };
+  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); searchlights.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
