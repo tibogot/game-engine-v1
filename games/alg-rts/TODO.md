@@ -6,6 +6,33 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## THE GAP TO A AAA RTS (CoH) — 2026-10-07 (you: "keep this list so we remember it")
+
+The systems are close to CoH (VPs, 3 resources, squads, cover, garrisons, suppression, veterancy,
+call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order of impact / effort:
+
+1. [~] **TERRAIN DETAIL + MAP DENSITY** (started 2026-10-07). Ground: one brown with fine noise, no
+   mid-scale structure — needs layers (worn paths, tyre ruts, mud/puddle patches, dry-grass tufts,
+   stones, debris), WEAR round the post and the tracks, colour variety (ochre, red earth, grey
+   limestone, yellow grass). Density: big empty stretches between the points = a shooting gallery;
+   CoH's maps are crammed with COVER — terraces, dry-stone walls along tracks, olive groves,
+   ditches, boulders, dead trees, abandoned huts. The FOG OF WAR too heavy (unexplored = black-brown;
+   CoH fades + desaturates).
+2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
+   smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
+3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more
+   contrast object vs ground; the lighter fog of war.
+4. [ ] **SOUND**: unit voice lines (orders, "sous le feu !", "grenade !"), dense battle ambience,
+   distance-filtered gunfire, music for tension (voices parked: another way than the API).
+5. [ ] **SOLDIERS DRESSED FOR FRENCH ALGERIA** (today Vietnam-era US kit) + their PORTRAITS (US GIs).
+6. [ ] **GAMEPLAY DEPTH**: cover shown at the CURSOR before a move; CREW-SERVED MGs (set up, a field of
+   fire, flanked); vehicle ARMOUR BY FACING + penetration; more abilities; DOCTRINES; FLN
+   ASYMMETRY (tunnels, melting into villages, mines, sabotage, distinct roles: sniper, sapper,
+   scout); retreat point, wounded, dropped weapons.
+7. [ ] **THE GAME AROUND**: title screen, campaign + story (Colonel Delorme), briefings, saves; more
+   maps (mission 2, the coast).
+- Buildings: archetypes per village (loggia, ruin, courtyard, shop), roof clutter, the Aurès stone.
+
 ## WHAT IS LEFT — 2026-10-06 (you: "make a list of what is remaining")
 
 Most important first; details in the sections below. (sugg.) = mine, not yet your ask.
