@@ -122,7 +122,7 @@ function vehicleOf(geo, key) {
  * builder gives out (userData.seats), each on its clip from a different moment. Plain mixers here;
  * the game would draw them in the crowd. Parented to the vehicle: they ride its turntable.
  */
-async function addCrew(group, seats, renderer) {
+async function addCrew(group, seats, renderer, turretMesh = null) {
   if (!seats?.length) return { mixers: [], men: [] };
   initGlbLoaderRenderer(renderer);
   const gltf = await new Promise((res, rej) => getSharedGltfLoader().load("/models/soldiers/soldiers.glb", res, undefined, rej));
@@ -136,7 +136,7 @@ async function addCrew(group, seats, renderer) {
     man.scale.setScalar(1.3);                       // the pack is 1.8 m; the game's men are 1.8 × 1.3
     man.position.fromArray(seat.p);
     man.rotation.y = seat.yaw;
-    group.add(man);
+    (seat.turret && turretMesh ? turretMesh : group).add(man);   // a gunner rides his mount
     const clip = clips.get(seat.clip) ?? clips.get("sit");
     const mixer = new THREE.AnimationMixer(man);
     mixer.clipAction(clip).play();
@@ -209,7 +209,7 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   after.group.position.x = GAP;
   scene.add(before.group, after.group);
   after.paint(PAINTS.brun.tint);   // the closest to the French photos; the panel switches
-  const crew = await addCrew(after.group, afterGeo.userData.seats, renderer);
+  const crew = await addCrew(after.group, afterGeo.userData.seats, renderer, after.turretMesh);
 
   // A man at the game's 1.3 scale, between them.
   {

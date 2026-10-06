@@ -247,6 +247,9 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       if (owner) owner.gunShots = (owner.gunShots ?? 0) + 1;
     } else {
       fx?.muzzle(src.x, src.y, src.z);
+      // A gun mount's KICK (unitRenderer: a few cm back, no hull rock — its own count, so a
+      // cannon's recoil is untouched).
+      if (owner && !owner.isStructure) owner.mgShots = (owner.mgShots ?? 0) + 1;
     }
 
     // The gunship's rocket: every `rocketEvery`th shot, carrying the damage.

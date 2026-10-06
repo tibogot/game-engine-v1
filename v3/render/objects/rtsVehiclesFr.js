@@ -410,6 +410,10 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   // the gun at a real man's height, the wire cutter; 1 = the game's, unchanged.
   const D2 = detail >= 2;
   const seats = [];
+  // The GUN MOUNT turns (detail 2; the weapons pass, 2026-10-07: the gunner tracks his target, as
+  // CoH's): its parts in their own geometry, built about the pedestal's top (userData.turret).
+  const mount = [], MP = [0, 1.9, -0.68];
+  const M = (geo, pos, mat, tone) => mount.push({ geo, pos: [pos[0] - MP[0], pos[1] - MP[1], pos[2] - MP[2]], mat, tone });
   const hull = [], gear = [], spins = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
   const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
@@ -519,9 +523,10 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   if (D2) {
     // The gun at a STANDING man's chest (the gunner behind it, on the floor).
     P(new THREE.CylinderGeometry(0.04, 0.06, 1.25, 8), [0, 1.27, -0.68], MAT.steel, 0.25);
-    P(buildBox(0.14, 0.14, 0.9), [0, 1.95, -0.42], MAT.steel, 0.12);
-    P(alongZ(0.025, 0.025, 0.5, 6), [0, 1.95, 0.28], MAT.steel, 0.1);
-    P(buildBox(0.16, 0.14, 0.26), [0.14, 1.87, -0.6], MAT.paint, 0.35);
+    M(new THREE.CylinderGeometry(0.07, 0.07, 0.1, 10), [0, 1.9, -0.68], MAT.steel, 0.2);      // the cradle
+    M(buildBox(0.14, 0.14, 0.9), [0, 1.95, -0.42], MAT.steel, 0.12);
+    M(alongZ(0.025, 0.025, 0.5, 6), [0, 1.95, 0.28], MAT.steel, 0.1);
+    M(buildBox(0.16, 0.14, 0.26), [0.14, 1.87, -0.6], MAT.paint, 0.35);
   } else {
     P(new THREE.CylinderGeometry(0.04, 0.05, 0.8, 8), [0, 1.05, -0.8], MAT.steel, 0.25);
     P(buildBox(0.14, 0.14, 0.9), [0, 1.52, -0.55], MAT.steel, 0.12);
@@ -544,7 +549,8 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
     seats.push(
       { p: [0.3, 0.57, -0.25], yaw: 0, clip: "drive" },
       { p: [-0.3, 0.6, -0.25], yaw: 0, clip: "sit" },
-      { p: [0, 0.645, -1.05], yaw: 0, clip: "rifle_aim_idle" },
+      // The gunner rides the mount (turret: in its frame — he turns with the gun).
+      D2 ? { p: [0, 0.645 - MP[1], -1.05 - MP[2]], yaw: 0, clip: "rifle_aim_idle", turret: true } : { p: [0, 0.645, -1.05], yaw: 0, clip: "rifle_aim_idle" },
     );
   }
   if (D2) {
@@ -586,7 +592,13 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   geo.userData.gear = gearGeo;
   geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   // WHERE ITS GUN FIRES (the weapons pass): the pedestal MG's muzzle.
-  geo.userData.muzzles = [{ p: D2 ? [0, 1.95 * S, 0.55 * S] : [0, 1.52 * S, 0.22 * S] }];
+  geo.userData.muzzles = [D2 ? { p: [0, (1.95 - MP[1]) * S, (0.55 - MP[2]) * S], turret: true } : { p: [0, 1.52 * S, 0.22 * S] }];
+  if (D2) {
+    const mountGeo = assemble(mount);
+    bakeContactAO(mountGeo, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+    mountGeo.scale(S, S, S);
+    geo.userData.turret = { geo: mountGeo, pivot: MP.map((c) => c * S), muzzle: geo.userData.muzzles[0].p };
+  }
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 0.8 * S, hz: 1.8 * S };
   return geo;
@@ -1277,6 +1289,9 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   const D2 = detail >= 2;
   // crew: false — no box men; the SEATS go out in userData.seats for real (animated) soldiers.
   const seats = [];
+  // The .50's MOUNT turns round its pulpit ring (detail 2; the weapons pass).
+  const mount = [], MP = [0.45, 2.45, 0.6];
+  const M = (geo, pos, mat, tone) => mount.push({ geo, pos: [pos[0] - MP[0], pos[1] - MP[1], pos[2] - MP[2]], mat, tone });
   const plate = (w, h, d) => (D2 ? roundedPlate(w, h, d) : buildBox(w, h, d));
   const vt = (t) => (D2 ? t * (0.94 + R() * 0.12) : t);   // plates a shade apart
   const hull = [], gear = [], spins = [];
@@ -1377,8 +1392,9 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   // The .50 on its pulpit ring over the cab, the men in the back, stowage.
   P(new THREE.TorusGeometry(0.42, 0.04, 6, 20).rotateX(Math.PI / 2), [0.45, 2.45, 0.6], MAT.steel, 0.2);
   for (const sx of [-1, 1]) P(buildBox(0.05, 0.9, 0.05), [0.45 + sx * 0.4, 2.0, 0.6], MAT.steel, 0.2);
-  P(buildBox(0.14, 0.14, 1.1), [0.45, 2.55, 1.0], MAT.steel, 0.12);
-  P(alongZ(0.025, 0.025, 0.4, 6), [0.45, 2.55, 1.7], MAT.steel, 0.1);
+  ((D2 ? M : P))(buildBox(0.14, 0.14, 1.1), [0.45, 2.55, 1.0], MAT.steel, 0.12);
+  ((D2 ? M : P))(alongZ(0.025, 0.025, 0.4, 6), [0.45, 2.55, 1.7], MAT.steel, 0.1);
+  if (D2) M(buildBox(0.1, 0.12, 0.3), [0.45, 2.5, 0.75], MAT.steel, 0.2);   // the carriage on the ring
   if (crew) {
     soldierSeated(P, -0.45, 1.2, 0.6, R);                                                         // driver
     for (let k = 0; k < 4; k++) {
@@ -1491,7 +1507,13 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   geo.userData.gear = gearGeo;
   geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   // WHERE ITS GUN FIRES (the weapons pass): the .50 on its ring over the cab.
-  geo.userData.muzzles = [{ p: [0.45 * S, 2.55 * S, 1.92 * S] }];
+  geo.userData.muzzles = [D2 ? { p: [0, (2.55 - MP[1]) * S, (1.92 - MP[2]) * S], turret: true } : { p: [0.45 * S, 2.55 * S, 1.92 * S] }];
+  if (D2) {
+    const mountGeo = assemble(mount);
+    bakeContactAO(mountGeo, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+    mountGeo.scale(S, S, S);
+    geo.userData.turret = { geo: mountGeo, pivot: MP.map((c) => c * S), muzzle: geo.userData.muzzles[0].p };
+  }
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.2 * S, hz: 3.2 * S };
   return geo;

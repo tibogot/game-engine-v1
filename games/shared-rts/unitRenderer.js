@@ -1612,6 +1612,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         // Visual only — the sim never sees it.
         if ((unit.gunShots ?? 0) !== (v.gunShots ?? 0)) { v.gunShots = unit.gunShots; v.recoil = 1; }
         v.recoil = Math.max(0, (v.recoil ?? 0) - dt * 2);
+        // A machine gun's burst: the mount kicks a few centimetres (the weapons pass, 2026-10-07).
+        if ((unit.mgShots ?? 0) !== (v.mgShots ?? 0)) { v.mgShots = unit.mgShots; v.mgKick = 1; }
+        v.mgKick = Math.max(0, (v.mgKick ?? 0) - dt * 9);
       }
       if (v.inst?.odometer) {
         // Distance travelled along the hull's own forward: reversing rolls back.
@@ -1636,6 +1639,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
               else if (part.kind === "turret") _euler.y = part.baseEuler.y + v.turretAngle;
               else _euler.x = v.tailAngle;
               _kickPos.copy(part.basePos);
+              if (part.kind === "turret" && !(kick > 0) && v.mgKick > 0) {
+                const back = 0.06 * v.mgKick * (0.6 + 0.4 * Math.sin(v.mgKick * 40)) / inst.scale;   // a judder
+                _kickPos.x -= Math.sin(v.turretAngle) * back;
+                _kickPos.z -= Math.cos(v.turretAngle) * back;
+              }
               if (part.kind === "turret" && kick > 0) {
                 // Back along the gun's line, 0.45 m in the world (the template is scaled).
                 const back = 0.45 * kick / inst.scale;
@@ -1660,7 +1668,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             if (!v.crew) v.crew = { t: Math.random() * 20, seeds: c.seats.map(() => [Math.random(), Math.random(), Math.random(), 0]), m: new THREE.Matrix4() };
             v.crew.t += dt;
             v.crew.m.multiplyMatrices(x.matrix, c.rel);
-            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale });
+            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale, v, x });
           }
         }
       }
@@ -1833,7 +1841,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             _crewQ.setFromAxisAngle(_crewY, seat.yaw + (UNIT_TYPES[view.key].facingOffset ?? 0));
             _crewS.setScalar(g.scale / (cr.scale || 1));
             _crewSeat.compose(_crewP, _crewQ, _crewS);
-            _mat.multiplyMatrices(cr.m, _crewSeat).multiply(g.rel);
+            // A seat on the TURRET (a gun mount's gunner) turns with it.
+            const tp = seat.turret ? cr.v.inst.parts.find((q) => q.kind === "turret") : null;
+            if (tp) {
+              _mzE.copy(tp.baseEuler); _mzE.y = tp.baseEuler.y + cr.v.turretAngle;
+              _mzLocal.compose(tp.basePos, _mzQ.setFromEuler(_mzE), tp.baseScale);
+              _mat.multiplyMatrices(cr.x.matrix, tp.parentRel).multiply(_mzLocal).multiply(_crewSeat).multiply(g.rel);
+            } else _mat.multiplyMatrices(cr.m, _crewSeat).multiply(g.rel);
             const tt = cr.t + si * 1.7;
             f.addPose(_mat, clip, tt, clip, tt, 0, 2, { extra: cr.seeds[si] });
           });

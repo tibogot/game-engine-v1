@@ -136,7 +136,9 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   the real Alouette II carried guns / SS.11 missiles, not bombs.) Decide: keep, swap for rockets
   or missiles, or make it a called strike.
 - [ ] AN AIR STRIKE as a CALL-IN (you, 2026-10-07: replaces the Alouette's bombs, CoH-style).
-- [ ] SOLDIERS fire from their rifle's muzzle (the weapon bone), not 1.6 m over their feet.
+- [x] SOLDIERS fire from their rifle's muzzle (unitRenderer rifleMuzzle).
+- [x] GUN MOUNTS that TURN (jeep, half-track at detail 2: userData.turret, the gunner on it) and kick a
+  few cm per burst (owner.mgShots); the tank gun's ground-dust ring removed (you).
 - [ ] Every other weapon's origin and look in the same pass: vehicle MGs from their barrels, the
   AMX/EBR cannon from the gun, mortars, napalm, grenades — muzzle flash, tracer, impact.
 - [ ] Crew ideas: men get out when the vehicle is hit/destroyed (now they vanish with it);
