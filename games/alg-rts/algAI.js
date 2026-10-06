@@ -164,8 +164,12 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   // HOME: where a man goes to ground — the nearest REFUGE (a casemate the
   // French have not found and destroyed: algLandmarks.js), or the cave.
   const refugeMouths = new Map();
+  // The cave's mouth on open ground: on the 2 m grid (2026-10-06) its point fell on a blocked
+  // cell — men withdrawing had no path home and were re-sent every tick.
+  let caveHome = null;
   function homeFor(p) {
-    let best = caveMouth, bd = dist(p, caveMouth);
+    caveHome ??= app.navGrid?.nearestOpenWorld?.(caveMouth.x, caveMouth.z, true) ?? caveMouth;
+    let best = caveHome, bd = dist(p, caveHome);
     for (const s of app.algStructures?.list ?? []) {
       if (s.typeKey !== "refuge" || !s.alive) continue;
       let m = refugeMouths.get(s);
@@ -804,7 +808,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         // Into the mouth: gone to ground. They count toward the next band.
         for (const u of m) if (atHome(u)) goToGround(u);
         if (!alive(b).length) setState(b, "done");
-        else if (b.t > 90) for (const u of alive(b)) sendHome(u);   // stragglers
+        else if (b.t > 90 && (b.resent = (b.resent ?? 0) - dt) <= 0) { b.resent = 5; for (const u of alive(b)) sendHome(u); }   // stragglers, every 5 s (not every tick)
         break;
       }
     }

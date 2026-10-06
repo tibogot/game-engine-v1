@@ -33,7 +33,7 @@
 import * as THREE from "three";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { MAT, buildBox, rng, wirePart } from "./rtsParts.js";
-import { house, oven } from "./rtsMechta.js";
+import { house, houseNav, oven, wallRect } from "./rtsMechta.js";
 import { brushClump, clayJar, dryStone, earthBerm, fieldStone, finish } from "./rtsAlgeria.js";
 
 const FLAT = () => 0;
@@ -131,7 +131,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
         }
         nest = [mx + 0.22, ny + 0.22, mz];
         for (const [ox, oz] of [[0, -1.12], [-1.12, 0]]) parts.push({ geo: buildBox(ox ? 0.05 : 0.35, 0.9, oz ? 0.05 : 0.35), pos: [mx + ox, my + MH - 1.6, mz + oz], mat: MAT.steel, tone: 0.02 });
-        houses.push({ x: cx, z: cz, mosque: true });
+        houses.push({ x: cx, z: cz, mosque: true, sw: w + 0.36, sd: d + 0.36, minaret: { x: mx, z: mz } });
         x += w + 3.5;
         continue;
       }
@@ -149,7 +149,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
       const lip = 0.2 + (houses.length % 2) * 0.05;
       const sh = y - low + 0.7 + lip;
       parts.push({ geo: buildBox(w + 0.36, sh, d + 0.36), pos: [cx, y + lip - sh / 2, cz], mat: MAT.rubble, tone: 0.32 + R() * 0.15 });
-      houses.push({ x: cx, z: cz, door: hh.door, w, d, row: r });
+      houses.push({ x: cx, z: cz, door: hh.door, w, d, sw: w + 0.36, sd: d + 0.36, row: r });
       x += w + (R() < 0.2 ? 1.8 + R() : 0.08);
     }
   }
@@ -199,6 +199,18 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   const geo = finish(parts, { hx: Math.max(width / 2 + 4, xEnd + 3), hz: (rows * rowStep) / 2 + 3, cx: 0, cz: 0, height: 14 });
   geo.userData.houses = houses.map((h) => ({ x: h.x * 1.3, z: h.z * 1.3, mosque: !!h.mosque }));
   geo.userData.trees = scaled(trees);
+  // WHAT BLOCKS (2026-10-06, a player: "let me go inside the villages"): each house on its
+  // socle, the mosque and its minaret, the courtyard walls — the lanes between the rows and the
+  // stairs up the ends are open ground. COVER along every house and courtyard wall.
+  const navs = houses.map((h) => houseNav({ x: h.x, z: h.z, yaw: 0, w: h.sw - 0.3, d: h.sd - 0.3, lean: null }, 0.5));   // the socle's box (house() adds the eaves' 0.3); 0.5 proud, not the mechta's 0.9 — the lanes between the rows are narrower
+  const yardRuns = coverLines.flatMap((l) => l.pts.slice(1).map((p, i) => [l.pts[i], p]));
+  geo.userData.navRects = [
+    ...navs.flatMap((n) => n.rects),
+    ...houses.filter((h) => h.minaret).map((h) => ({ cx: h.minaret.x, cz: h.minaret.z, hx: 1.65, hz: 1.65 })),
+    ...yardRuns.map(([a, b]) => wallRect(a, b, 1.2 / KIT)),
+  ].map((r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT }));
+  coverLines.push(...navs.map((n) => ({ pts: n.outline, hard: true })));
+  geo.userData.coverPerimeter = false;
   geo.userData.coverLines = scaledLines(coverLines);
   // The nest's floor, in the piece's frame (scaled): a game stands its stork there.
   geo.userData.nest = nest ? { x: nest[0] * 1.3, y: nest[1] * 1.3, z: nest[2] * 1.3 } : null;
@@ -296,7 +308,10 @@ export function buildCemetery({ seed = 1958, rows = 5, cols = 7, align = 0, grou
   groundWall(parts, R, groundAt, [-hx, -hz], [-hx * 0.2, -hz], { h: 0.7 });
   groundWall(parts, R, groundAt, [hx * 0.35, -hz], [hx, -hz], { h: 0.6 });
   parts.push(...brushClump(R, hx - 0.5, groundAt(hx - 0.5, hz - 0.5), hz - 0.5, { h: 1.8, r: 0.7, dry: true }));
-  return finish(parts, { hx: hx + 0.5, hz: hz + 0.5, height: 1.2 });
+  const geo = finish(parts, { hx: hx + 0.5, hz: hz + 0.5, height: 1.2 });
+  // Men walk among the graves; a vehicle does not (navGrid vehicleOnly, 2026-10-06).
+  geo.userData.navRects = [{ ...geo.userData.footprint, vehicleOnly: true }];
+  return geo;
 }
 
 // ── WELL ────────────────────────────────────────────────────────────────────
@@ -398,7 +413,10 @@ export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT } = {}) {
   parts.push(...stoneTrough(rng(seed + 3), -1.5, tg, 1.5, 0.4, { len: 2.0 }));
   const fg = groundAt(2, 2.2);
   parts.push({ geo: earthBerm([[1.2, -0.15], [0.9, 0.35], [0.4, 0.6], [0.001, 0.65]], { seed, segs: 12, rJit: 0.15, yJit: 0.08 }), pos: [2, fg, 2.2], mat: MAT.thatch, tone: 0.45 });
-  return finish(parts, { hx: r + 1.2, hz: r + 1.6, height: 1.8 });
+  const geo = finish(parts, { hx: r + 1.2, hz: r + 1.6, height: 1.8 });
+  // Men push through the thorn; a vehicle does not (navGrid vehicleOnly, 2026-10-06).
+  geo.userData.navRects = [{ ...geo.userData.footprint, vehicleOnly: true }];
+  return geo;
 }
 
 // ── THE LAND ROUND THE VILLAGE ──────────────────────────────────────────────
@@ -461,8 +479,7 @@ export function buildGarden({ seed = 1961, w = 18, d = 13, kind = "olive", groun
   geo.userData.coverLines = scaledLines([{ pts: wall, hard: true }]);
   geo.userData.coverPerimeter = false;
   // The walls block; the gate (1.6 x 2, a nav cell wide at 1.3) stays open.
-  // Each rect at least half a 4 m nav cell thick, or it stamps no cell.
-  const t = 2 / KIT;
+  const t = 1.2 / KIT;   // ≥ half a 2 m nav cell (alg-rts's grid since 2026-10-06; 4 m before)
   geo.userData.navRects = [
     { cx: 0, cz: hz, hx: hx + 0.3, hz: t },
     { cx: -hx, cz: 0, hx: t, hz: hz + 0.3 },
@@ -568,7 +585,7 @@ export function buildFarmstead({ seed = 1970, groundAt = FLAT } = {}) {
   geo.userData.coverLines = scaledLines([...yardLines, outline(0.6, 3.2, w / 2 + 0.2, d / 2 + 0.2, 0), outline(-w / 2 - bd / 2 - 0.2, -1.4, bw / 2 + 0.2, bd / 2 + 0.2, Math.PI / 2)]);
   geo.userData.coverPerimeter = false;
   // The houses block; the yard, its gate and the pen stay open (men walk in).
-  const t = 2 / KIT;
+  const t = 1.2 / KIT;   // ≥ half a 2 m nav cell (alg-rts's grid since 2026-10-06; 4 m before)
   geo.userData.navRects = [
     { cx: 0.6, cz: 3.2, hx: w / 2 + 0.2, hz: d / 2 + 0.2 },
     { cx: -w / 2 - bd / 2 - 0.2, cz: -1.4, hx: bd / 2 + 0.2, hz: bw / 2 + 0.2 },
@@ -679,7 +696,7 @@ export function buildBurntFarm({ seed = 1990, groundAt = FLAT } = {}) {
   geo.userData.coverLines = scaledLines([{ hard: true, pts: [[-W / 2, -D / 2], [W / 2, -D / 2], [W / 2, D / 2], [-W / 2, D / 2], [-W / 2, -D / 2]] }]);
   geo.userData.coverPerimeter = false;
   // Its walls block; men get in through the broken low bays (a gap each side).
-  const t = 2 / KIT;
+  const t = 1.2 / KIT;   // ≥ half a 2 m nav cell (alg-rts's grid since 2026-10-06; 4 m before)
   geo.userData.navRects = [
     { cx: -W / 4 - 1, cz: -D / 2, hx: W / 4 - 1, hz: t },
     { cx: W / 4 + 1, cz: D / 2, hx: W / 4 - 1, hz: t },

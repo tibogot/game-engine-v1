@@ -64,6 +64,27 @@ One screen, most important first. Details stay in the sections below;
   Measured, NOT changed: raids hit 0 times against a player guarding every point (they go
   for UNguarded ones — 45% kept); FLN 42 dead vs French 3 against static FM squads.
 - You, play: is the FLN too weak against held positions (42:3)? the pop cap too tight early?
+- [x] OPEN VILLAGES (2026-10-06, your friend: "too many unwalkable places, let me into the
+  villages"). Measured first: each village was ONE blocked block (its whole outline), 87% of
+  a mechta's capture ring blocked; men and vehicles blocked in the same places.
+  - NAV GRID 2 m (was 4: a lane was a cell or nothing): ?navcell=4 = the old one. Sim cost
+    ~+10% (849 vs 786 ms a simulated minute; paths 139 ms in 5 min). minCell option in
+    shared navGrid (nam unchanged).
+  - Mechta / dechra (rtsMechta houseNav): each house + lean-to, each yard / courtyard wall
+    blocks; the lanes, gaps, threshing floor open; COVER along every house wall. Margin 1.2 m
+    (dechra 0.65: narrower lanes) — a 2 m cell blocks only when its centre is inside, so a
+    smaller margin let men stand ~1 m inside walls (measured: 80 samples → 1 in 5760).
+  - The FLN camp: rocks, house, dugout, stores block; sangars (open at the back) and the
+    forecourt walls VEHICLES ONLY (new navGrid vehicleOnly); cover along all. Thorn pens and
+    the cemetery: vehicles only. Thin walls 2.4 m bands (were 4 m, sized for the old grid).
+  - Rings blocked: mechtas 87 / 86% → 26 / 40%, dechra 67 → 35%, ksar 41 → 39% (one mass by
+    design, open souk); camp 100 → 24%. The play area 14.0 → 10.7% (4.8% of it steep).
+  - Found on the way: a withdrawing band re-ordered every man home EVERY TICK when the cave
+    mouth was unreachable (it fell on a blocked cell at 2 m) → home snapped to open ground,
+    stragglers re-sent every 5 s.
+  - [ ] Later (sugg.): GARRISON houses (CoH: a squad inside, fires from the windows, grenades
+    / mortar clear it); infantry SLOWED (not stopped) by low walls and brush; the ksar's
+    alleys open.
 - FROM YOUR FRIEND'S PLAY (2026-10-06) — all four checked in the code, all real:
   - [x] (done 2026-10-06: selection.js attackUnits + canTarget, red sight cursor) RIGHT-CLICK AN ENEMY UNIT = attack: today only enemy BUILDINGS are picked
     (shared-rts/selection.js pickEnemy raycasts structures) — a click on a soldier or a

@@ -11,7 +11,9 @@
  *
  * Kit contract (rtsParts.js): one merged geometry on the atlas material,
  * origin at the ground centre on y = 0, `userData.footprint` for the pad and
- * nav, `userData.houses` for the pieces a game might want (doors, yards).
+ * nav, `userData.houses` for the pieces a game might want (doors, yards),
+ * `userData.navRects` (each house and yard wall: the lane, the gaps and the
+ * threshing floor are open ground, 2026-10-06) and `coverLines` (along them).
  * Real metres, scaled by 1.3 at the end.
  */
 import * as THREE from "three";
@@ -60,8 +62,10 @@ export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace 
     }
   }
   // A lean-to against one end: rubble half-walls under a roof of brush on poles.
+  let lean = null;
   if (leanTo && R() < 0.45) {   // none in an attached row (a dechra): it hit the neighbour
     const lw = 2.2 + R(), ex = (R() < 0.5 ? -1 : 1) * (w / 2 + lw / 2);
+    lean = { ex, lw };
     put(buildBox(lw, 1.2, 0.4), [ex, 0.6, -doorFace * (d / 2 - 0.2)], MAT.rubble, 0.45);
     // 5 cm lower and 3 cm inside the front wall's end: equal tops and ends z-fought.
     put(buildBox(0.4, 1.15, d - 0.46), [ex + Math.sign(ex) * (lw / 2 - 0.23), 0.575, 0.03 * doorFace], MAT.rubble, 0.45);
@@ -95,8 +99,27 @@ export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace 
     put(jar, [dx + 1.0, 0.33, fz + doorFace * 0.4], MAT.laterite, 0.55);
   }
   const doorW = [x + (dx) * c + (fz + doorFace * 1.2) * s, z - dx * s + (fz + doorFace * 1.2) * c];
-  return { door: doorW, x, z, yaw, w, d };
+  return { door: doorW, x, z, yaw, w, d, lean };
 }
+
+/**
+ * What a house blocks and shelters, in its piece's frame (pre-scale): its walls' box turned
+ * by its yaw, as an axis-aligned rect (`m` metres proud — a man stands against the wall, not
+ * in it: a 2 m nav cell is blocked only when its CENTRE is inside, so a man in the next one
+ * can stand ~1.4 m from that centre; 0.9 (1.2 m scaled) keeps him out of the wall — measured),
+ * and its lean-to's; `outline` the wall line for the cover map.
+ */
+export function houseNav(h, m = 0.9) {
+  const c = Math.abs(Math.cos(h.yaw)), s = Math.abs(Math.sin(h.yaw));
+  const box = (x, z, w, d) => ({ cx: x, cz: z, hx: c * w / 2 + s * d / 2 + m, hz: s * w / 2 + c * d / 2 + m });
+  const rects = [box(h.x, h.z, h.w + 0.3, h.d + 0.3)];
+  if (h.lean) rects.push(box(h.x + h.lean.ex * Math.cos(h.yaw), h.z - h.lean.ex * Math.sin(h.yaw), h.lean.lw, h.d));
+  const r = rects[0], o = { x0: r.cx - r.hx + m, x1: r.cx + r.hx - m, z0: r.cz - r.hz + m, z1: r.cz + r.hz - m };
+  return { rects, outline: [[o.x0, o.z0], [o.x1, o.z0], [o.x1, o.z1], [o.x0, o.z1], [o.x0, o.z0]] };
+}
+/** A wall from a to b (pre-scale, along X or Z) as a nav rect `t` thick each side (≥ a 2 m nav cell). */
+export const wallRect = (a, b, t = 1.2 / S) => ({ cx: (a[0] + b[0]) / 2, cz: (a[1] + b[1]) / 2, hx: Math.abs(b[0] - a[0]) / 2 + t, hz: Math.abs(b[1] - a[1]) / 2 + t });
+const scaleRect = (r) => ({ ...r, cx: r.cx * S, cz: r.cz * S, hx: r.hx * S, hz: r.hz * S });
 
 /** A dry-stone yard wall from a to b (world x/z), ~1.5 m, uneven. */
 export function yardWall(parts, R, a, b, hgt = 1.5) {
@@ -126,6 +149,7 @@ export function buildMechta({ seed = 1954, count = 10 } = {}) {
   const R = rng(seed);
   const parts = [];
   const houses = [];
+  const yards = [];   // the yard walls' runs [a, b] (pre-scale)
   // Houses both sides of the lane in ATTACHED rows (a dechra is built wall to
   // wall; an alley now and then), each its own size and height.
   let zL = -count * 3.2, zR = -count * 3.2 + 2.5;
@@ -145,6 +169,7 @@ export function buildMechta({ seed = 1954, count = 10 } = {}) {
       yardWall(parts, R, [back, zc - w / 2], [far, zc - w / 2]);
       yardWall(parts, R, [far, zc - w / 2], [far, zc + w / 2]);
       yardWall(parts, R, [far, zc + w / 2], [back, zc + w / 2]);
+      yards.push([[back, zc - w / 2], [far, zc - w / 2]], [[far, zc - w / 2], [far, zc + w / 2]], [[far, zc + w / 2], [back, zc + w / 2]]);
       if (R() < 0.5) oven(parts, R, (back + far) / 2, zc + (R() - 0.5) * 2, R() * 6);
     }
   }
@@ -168,6 +193,13 @@ export function buildMechta({ seed = 1954, count = 10 } = {}) {
     hx: ((bb.max.x - bb.min.x) / 2) * S, hz: ((bb.max.z - bb.min.z) / 2) * S,
   };
   geo.userData.houses = houses.map((h) => ({ door: [h.door[0] * S, h.door[1] * S], x: h.x * S, z: h.z * S }));
+  // WHAT BLOCKS (a player, 2026-10-06: "let me go inside the villages" — the whole hamlet was
+  // one blocked block): each house and its lean-to, each yard wall; the lane, the gaps between
+  // houses and the threshing floor are open. COVER along every house wall and yard wall.
+  const navs = houses.map((h) => houseNav(h));
+  geo.userData.navRects = [...navs.flatMap((n) => n.rects), ...yards.map(([a, b]) => wallRect(a, b))].map(scaleRect);
+  geo.userData.coverLines = [...navs.map((n) => n.outline), ...yards].map((pts) => ({ hard: true, pts: pts.map(([x, z]) => [x * S, z * S]) }));
+  geo.userData.coverPerimeter = false;
   geo.userData.height = 6 * S;
   return geo;
 }

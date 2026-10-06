@@ -96,13 +96,25 @@ function sangar(parts, R, { x, z, rad = 1.9, h = 1.05, face }) {
 export function buildAlnCamp({ seed = 1954 } = {}) {
   const R = rng(seed);
   const parts = [];
+  // WHAT BLOCKS (2026-10-06, a player: "too many unwalkable places" — the camp was one 57 x 52 m
+  // block): the rocks, the house, the dugout, the stores; the sangars (open at the back: men get
+  // in) and the knee-high forecourt walls stop vehicles only. Pre-scale; COVER along all of it.
+  const nav = [], cover = [];
+  const rect = (cx, cz, hx, hz, vehicleOnly = false) => nav.push({ cx, cz, hx, hz, vehicleOnly });
+  const rock = (geo, x, z) => {
+    geo.computeBoundingBox();
+    const b = geo.boundingBox, cx = x + (b.min.x + b.max.x) / 2, cz = z + (b.min.z + b.max.z) / 2, hx = (b.max.x - b.min.x) * 0.42, hz = (b.max.z - b.min.z) * 0.42;
+    rect(cx, cz, hx, hz);
+    cover.push([[cx - hx, cz - hz], [cx + hx, cz - hz], [cx + hx, cz + hz], [cx - hx, cz + hz], [cx - hx, cz - hz]]);
+    return geo;
+  };
 
   // ── The rock the camp is set against, and the cave in it ─────────────────
   // A long outcrop behind the camp (+Z, away from the camera), two lesser
   // ones at its flanks: the mountain the camp hides in.
-  parts.push({ geo: outcrop(R, 14, 10.5, 7, seed), pos: [0, -0.3, 13.5], mat: MAT.limestone, tone: 0.45 });
-  parts.push({ geo: outcrop(R, 6, 4.5, 5, seed + 1), pos: [-15, -0.3, 8], mat: MAT.limestone, tone: 0.4 });
-  parts.push({ geo: outcrop(R, 5, 3.2, 4, seed + 2), pos: [15, -0.3, 10], mat: MAT.limestone, tone: 0.5 });
+  parts.push({ geo: rock(outcrop(R, 14, 10.5, 7, seed), 0, 13.5), pos: [0, -0.3, 13.5], mat: MAT.limestone, tone: 0.45 });
+  parts.push({ geo: rock(outcrop(R, 6, 4.5, 5, seed + 1), -15, 8), pos: [-15, -0.3, 8], mat: MAT.limestone, tone: 0.4 });
+  parts.push({ geo: rock(outcrop(R, 5, 3.2, 4, seed + 2), 15, 10), pos: [15, -0.3, 10], mat: MAT.limestone, tone: 0.5 });
   // The cave mouth: a dark arch in the big rock's face, a timber lintel, a
   // stone step, sacks and a crate just inside.
   {
@@ -120,6 +132,8 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
 
   // ── The stone house they took over: the PC ───────────────────────────────
   const HX = -5, HZ = 1.5, HW = 9, HD = 6, HH = 2.9;
+  rect(HX, HZ, HW / 2 + 0.9, HD / 2 + 0.9);
+  cover.push([[HX - HW / 2, HZ - HD / 2], [HX + HW / 2, HZ - HD / 2], [HX + HW / 2, HZ + HD / 2], [HX - HW / 2, HZ + HD / 2], [HX - HW / 2, HZ - HD / 2]]);
   parts.push({ geo: buildBox(HW, HH, HD), pos: [HX, HH / 2, HZ], mat: MAT.rubble, tone: 0.55 });
   // Earth roof, a stone parapet, beam ends, and brushwood heaped over it all
   // against the spotter planes.
@@ -136,6 +150,8 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.5, 0.4, 0.05), pos: [HX + sx * 2.6, 1.9, fz - 0.01], mat: MAT.steel, tone: 0.02 });
   for (const [a, b] of [[[-11, -6.5], [-7, -6.5]], [[-3, -6.5], [1, -6.5]], [[-11, -6.5], [-11, -1.5]], [[1, -6.5], [1, -1.5]]]) {
     const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
+    rect((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.abs(dx) / 2 + 0.9, Math.abs(dz) / 2 + 0.9, true);
+    cover.push([a, b]);
     parts.push({ geo: buildBox(0.5, 1.0 + R() * 0.2, len + 0.3), pos: [(a[0] + b[0]) / 2, 0.52, (a[1] + b[1]) / 2], rot: [0, Math.atan2(dx, dz), 0], mat: MAT.rubble, tone: 0.45 + R() * 0.15 });
   }
   // A whip aerial off the roof, the wire strung to a pole: the wilaya's radio.
@@ -145,6 +161,8 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   // ── The dugout: half into the ground, roofed with logs and earth ─────────
   {
     const DX = 8, DZ = -1, DW = 6, DD = 4;
+    rect(DX, DZ, DW / 2 + 0.7, DD / 2 + 0.9);
+    cover.push([[DX - DW / 2, DZ - DD / 2], [DX + DW / 2, DZ - DD / 2], [DX + DW / 2, DZ + DD / 2], [DX - DW / 2, DZ + DD / 2]]);
     // Low stone walls above the pit, the log roof over them, earth on top.
     for (const sz of [-1, 1]) parts.push({ geo: buildBox(DW, 0.8, 0.5), pos: [DX, 0.4, DZ + sz * DD / 2], mat: MAT.rubble, tone: 0.5 });
     parts.push({ geo: buildBox(0.5, 0.76, DD - 0.06), pos: [DX + DW / 2, 0.38, DZ], mat: MAT.rubble, tone: 0.5 });   // lower and inside the long walls: flush corners z-fought
@@ -160,6 +178,7 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   // ── Stores under a brush lean-to: sacks of flour, ammunition boxes ───────
   {
     const LX = -15, LZ = -3;
+    rect(LX, LZ, 2.4, 1.7);
     for (const [px, pz] of [[-2, -1.4], [2, -1.4], [-2, 1.4], [2, 1.4]]) parts.push({ geo: new THREE.CylinderGeometry(0.07, 0.09, 2.1, 6), pos: [LX + px, 1.05, LZ + pz], mat: MAT.timber, tone: 0.3 });
     parts.push({ geo: buildBox(4.8, 0.25, 3.4), pos: [LX, 2.15, LZ], rot: [0.1, 0, 0], mat: MAT.thatch, tone: 0.35 });
     for (let k = 0; k < 8; k++) parts.push({ geo: buildBox(0.75, 0.42, 0.5), pos: [LX - 1.5 + (k % 4) * 0.85, 0.22 + Math.floor(k / 4) * 0.42, LZ + 0.6], rot: [0, (R() - 0.5) * 0.3, 0], mat: MAT.hessian, tone: 0.45 + R() * 0.2 });
@@ -174,9 +193,11 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   parts.push({ geo: new THREE.CylinderGeometry(0.28, 0.22, 0.32, 10), pos: [-3, 0.3, -4], mat: MAT.steel, tone: 0.1 });
 
   // ── Sangars round the camp, the guns facing out (downhill = the camera) ──
-  sangar(parts, R, { x: -17, z: -11, face: -Math.PI / 2 - 0.5 });
-  sangar(parts, R, { x: 4, z: -12, face: -Math.PI / 2 });
-  sangar(parts, R, { x: 19, z: -6, face: -Math.PI / 2 + 0.6 });
+  for (const sg of [{ x: -17, z: -11, face: -Math.PI / 2 - 0.5 }, { x: 4, z: -12, face: -Math.PI / 2 }, { x: 19, z: -6, face: -Math.PI / 2 + 0.6 }]) {
+    sangar(parts, R, sg);
+    rect(sg.x, sg.z, 2.6, 2.6, true);
+    cover.push(Array.from({ length: 8 }, (_, k) => { const a = sg.face + Math.PI * 0.35 + (k / 7) * Math.PI * 1.3; return [sg.x + Math.cos(a) * 1.9, sg.z + Math.sin(a) * 1.9]; }));
+  }
 
   // ── The flagpole's foot, in the forecourt: a heap of stones ──────────────
   const poleH = 7;
@@ -187,6 +208,9 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   geo.scale(S, S, S);
   geo.userData.flagMount = { pos: [-9 * S, 0.5 * S, -3.5 * S], poleHeight: poleH * S };
   geo.userData.footprint = { cx: 0, cz: 0, hx: 22 * S, hz: 20 * S };
+  geo.userData.navRects = nav.map((r) => ({ ...r, cx: r.cx * S, cz: r.cz * S, hx: r.hx * S, hz: r.hz * S }));
+  geo.userData.coverLines = cover.map((pts) => ({ hard: true, pts: pts.map(([x, z]) => [x * S, z * S]) }));
+  geo.userData.coverPerimeter = false;
   geo.userData.height = 8 * S;
   return geo;
 }

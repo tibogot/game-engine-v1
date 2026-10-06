@@ -31,10 +31,11 @@ export function createNavGrid({
   maxCellsPerSide = 256,
   minPropRadius = 1.0,     // props smaller than this don't block (grass, flowers…)
   shorelineMargin = 3.5,   // metres of clearance kept between ground units and water
+  minCell = 4,             // metres: the finest cell (alg-rts 2: streets through its villages)
 } = {}) {
   const world = app.worldSize ?? 1000;
   const half = world / 2;
-  const cell = Math.max(4, world / maxCellsPerSide);
+  const cell = Math.max(minCell, world / maxCellsPerSide);
   const cols = Math.max(1, Math.ceil(world / cell));
   const rows = cols;
   const blocked = new Uint8Array(cols * rows);
@@ -217,6 +218,9 @@ export function createNavGrid({
   function stampFootprint(f) {
     // NO FOOT (barbed wire): only on open ground — it never opens a wall.
     if (f.noFoot) { eachFootprintCell(f, (i) => { if (blocked[i] === 0) blocked[i] = 3; }); return; }
+    // VEHICLES ONLY (a thorn pen, a low wall: men push through, a truck does not) — the
+    // footbridge's cell kind; only on open ground, it never opens a wall either.
+    if (f.vehicleOnly) { eachFootprintCell(f, (i) => { if (blocked[i] === 0) blocked[i] = 2; }); return; }
     const cos = Math.cos(f.ry), sin = Math.sin(f.ry);
     const rad = Math.hypot(f.hx, f.hz);
     const min = worldToCell(f.x - rad, f.z - rad);
@@ -688,8 +692,8 @@ export function createNavGrid({
      * An oriented rectangle units cannot enter — a placed building's footprint
      * (centre, half extents, yaw), kept across rebuilds. Returns a handle.
      */
-    addFootprint: dirty((x, z, hx, hz, ry = 0, { noFoot = false } = {}) => {
-      const f = { x, z, hx, hz, ry, noFoot };
+    addFootprint: dirty((x, z, hx, hz, ry = 0, { noFoot = false, vehicleOnly = false } = {}) => {
+      const f = { x, z, hx, hz, ry, noFoot, vehicleOnly };
       footprints.push(f);
       stampFootprint(f);
       return f;

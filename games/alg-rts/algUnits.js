@@ -136,7 +136,7 @@ function stampShowroom(navGrid, showroom) {
     // walk over (terraces, threshing floors), a garden's walls alone.
     for (const f of ud.navRects ?? [ud.footprint]) {
       const c = o.localToWorld(o.position.clone().set(f.cx, 0, f.cz));
-      navGrid.addFootprint(c.x, c.z, f.hx, f.hz, o.rotation.y);
+      navGrid.addFootprint(c.x, c.z, f.hx, f.hz, o.rotation.y, { vehicleOnly: !!f.vehicleOnly });
     }
     n++;
   }
@@ -151,7 +151,11 @@ function stampShowroom(navGrid, showroom) {
  * @param {(sel:object[]) => void} [o.onSelect]
  */
 export async function createAlgUnits(app, { showroom, muster, onSelect = () => {} }) {
-  const navGrid = createNavGrid({ app });
+  // 2 m CELLS (2026-10-06, a player: "too many unwalkable places, let me into the villages"):
+  // on the 4 m grid a village's lane, its yards and the gaps between houses were whole cells
+  // or nothing — the mechtas were one blocked block. ?navcell=4 = the old grid (A/B).
+  const NAV_CELL = Number(new URLSearchParams(location.search).get("navcell")) || 2;
+  const navGrid = createNavGrid({ app, minCell: NAV_CELL, maxCellsPerSide: Math.ceil((app.worldSize ?? 1024) / NAV_CELL) });
   app.navGrid = navGrid;
   // Nobody walks out of the playable area (layout.js PLAY): four blocked
   // strips round it, kept through every nav rebuild like any footprint.
