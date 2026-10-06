@@ -236,7 +236,10 @@ const EBR_HULL = [
   { z: -2.78, cy: 0.98, w: 0.34, h: 0.18, hb: 0.22, n: 4.0 },
 ];
 
-export function buildEBR({ seed = 75 } = {}) {
+export function buildEBR({ seed = 75, detail = 1 } = {}) {
+  // DETAIL 2 (the vehicle lab, 2026-10-07): the corner wheels on the turned tyre with its chevron
+  // tread and a combat rim (the cylinder's caps stretched the rubber into stripes). 1 = the game's.
+  const D2 = detail >= 2;
   const R = rng(seed);
   const hull = [], gear = [], spins = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
@@ -324,6 +327,14 @@ export function buildEBR({ seed = 75 } = {}) {
         G(buildBox(w + 0.04, 0.05, 0.08), [x, r + Math.sin(a) * (r + 0.01), z + Math.cos(a) * (r + 0.01)], MAT.steel, 0.2, [a, 0, 0], s);
       }
       G(axleX(0.2, w + 0.04, 12), [x, r, z], MAT.paint, VA, undefined, s);
+    } else if (D2) {
+      G(tyre(r, w, 0.3, 18, true), [x, r, z], MAT.rubber, 0.5, undefined, s);
+      G(chevronTread(r, w, { bars: 18, fill: 0.5, depth: 0.025 }), [x, r, z], MAT.rubber, 0.3, undefined, s);
+      G(combatRim(0.3, w, 12, true), [x, r, z], MAT.paint, VA * 0.95, undefined, s);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        G(new THREE.CylinderGeometry(0.018, 0.018, w * 0.8, 4).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.17, Math.sin(a) * 0.17), [x, r, z], MAT.steel, 0.35, undefined, s);
+      }
     } else {
       G(axleX(r, w, 22), [x, r, z], MAT.rubber, 0.5, undefined, s);
       G(axleX(0.3, w + 0.02, 16), [x, r, z], MAT.paint, VA * 0.95, undefined, s);
@@ -1129,7 +1140,9 @@ export function buildAlouette({ detail = 1, crew = true } = {}) {
  * gear, turret { geo, pivot, muzzle } (the M113 contract: the renderer turns
  * the turret about Y round its pivot).
  */
-export function buildAMX13({ seed = 13 } = {}) {
+export function buildAMX13({ seed = 13, detail = 1 } = {}) {
+  // DETAIL 2 (the vehicle lab, 2026-10-07): the road wheels and idler on the turned rubber tyre.
+  const D2 = detail >= 2;
   const R = rng(seed);
   const hull = [], turret = [], gear = [], spins = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
@@ -1175,12 +1188,12 @@ export function buildAMX13({ seed = 13 } = {}) {
   trackSide(G, {
     xc: -(HW + 0.2), tw: 0.35, t, wheelR, wheelsZ: [1.55, 0.78, 0, -0.78, -1.55],
     sprocket: { c: [2.1, 0.72], r: 0.3 }, idler: { c: [-2.15, 0.38], r: 0.3 },
-    rollers: [{ z: 0.95, y: 0.86, r: 0.1 }, { z: -0.6, y: 0.83, r: 0.1 }], paintTone: VA * 0.9,
+    rollers: [{ z: 0.95, y: 0.86, r: 0.1 }, { z: -0.6, y: 0.83, r: 0.1 }], paintTone: VA * 0.9, d2: D2,
   });
   trackSide(G, {
     xc: HW + 0.2, tw: 0.35, t, wheelR, wheelsZ: [1.55, 0.78, 0, -0.78, -1.55],
     sprocket: { c: [2.1, 0.72], r: 0.3 }, idler: { c: [-2.15, 0.38], r: 0.3 },
-    rollers: [{ z: 0.95, y: 0.86, r: 0.1 }, { z: -0.6, y: 0.83, r: 0.1 }], paintTone: VA * 0.9,
+    rollers: [{ z: 0.95, y: 0.86, r: 0.1 }, { z: -0.6, y: 0.83, r: 0.1 }], paintTone: VA * 0.9, d2: D2,
   });
 
   // ── The FL-10 turret, set BACK on the hull: fixed collar + oscillating top.

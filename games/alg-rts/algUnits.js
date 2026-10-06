@@ -78,8 +78,8 @@ function padEdge(m, px, pz) {
  * builders' seats (FR_CREW, below) instead of the box men.
  */
 const FR_VEHICLES = {
-  willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC(), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
-  amx13: () => buildAMX13(), ebr: () => buildEBR(), alouette: () => buildAlouette({ detail: 2, crew: false }),
+  willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC({ detail: 2 }), gmcOpen: () => buildGMC({ detail: 2, crew: false, tilt: false }), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
+  amx13: () => buildAMX13({ detail: 2 }), ebr: () => buildEBR({ detail: 2 }), alouette: () => buildAlouette({ detail: 2, crew: false }),
 };
 
 /**
@@ -240,7 +240,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     barFor: (u) => !app.algSquads?.of(u),
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
-    crew: { willys: "appele", halftrack: "appele", alouette: "appele" },
+    crew: { willys: "appele", halftrack: "appele", alouette: "appele", gmcOpen: "appele" },
+    // The GMC a MIX (you, 2026-10-07): closed under its tilt, or open with men on the benches.
+    variants: { gmc: { gmcOpen: { ...ALG_UNIT_TYPES.gmc, typeKey: "gmcOpen", procedural: "gmcOpen" } } },
     // A man down: his pool under his torso (bloodField.js, made with combat).
     onCorpse: (u, x, z, heading) => app.algCombat?.blood.pool(x, z, heading),
     // Men blown apart by a close blast (algCombat GIBS): their blood.

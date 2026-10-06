@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
-import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAlouette, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
@@ -56,6 +56,8 @@ const VEHICLES = {
   gmc: { build: buildGMC, label: "Camion GMC (bâché)" },
   gmcOpen: { build: (o) => buildGMC({ ...o, tilt: !o }), label: "Camion GMC (ouvert)" },
   alouette: { build: buildAlouette, label: "Alouette II" },
+  ebr: { build: buildEBR, label: "Panhard EBR" },
+  amx13: { build: buildAMX13, label: "AMX-13" },
 };
 
 /** The canopy's glass (the showroom's): see-through, after the opaque pass, no depth write. */
@@ -79,6 +81,8 @@ function vehicleOf(geo, key) {
     g.add(gear);
   }
   const rotors = [];
+  const tur = geo.userData.turret;
+  if (tur) { const tm = new THREE.Mesh(tur.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); tm.position.fromArray(tur.pivot); tm.castShadow = tm.receiveShadow = true; g.add(tm); }
   if (geo.userData.glass) { const gm = new THREE.Mesh(geo.userData.glass, glassMaterial()); gm.renderOrder = RENDER_ORDER.GLASS; g.add(gm); }
   for (const [axis, r] of [["y", geo.userData.rotors?.main], ["x", geo.userData.rotors?.tail]]) {
     if (!r) continue;

@@ -286,6 +286,10 @@ function refreshingMaterial(src) {
   if (src.isNodeMaterial) {
     if (src.colorNode) return src;
     const m = src.clone();
+    // three r184's NodeMaterial clone DROPS `map` (checked in the page: src.map set, clone's null) —
+    // materialColor then read the plain colour and every vehicle's flags, cockades and plates
+    // drew as flat white / grey cards (you, 2026-10-07). Carry it over.
+    m.map = src.map;
     m.colorNode = materialColor;
     // colorNode feeds RGB only — the cut-out would be lost and every stencil
     // drawn as a solid square. The alpha test reads opacity: give it the sheet's.
@@ -1007,9 +1011,16 @@ function canopyGlass() {
   return _canopyGlass;
 }
 
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null }) {
-  const UNIT_TYPES = types;
-  const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, variants = null }) {
+  // VARIANTS (opt-in, `variants`: { typeKey: { variantKey: typeDef } } — alg-rts, 2026-10-07: "the
+  // GMC: use a mix", closed and open): extra LOOKS of a unit type, each its own template and
+  // instanced draw; a unit of that type takes one of them (or the type's own) at random when it
+  // is added. The sim never sees them: the unit is still of its type.
+  const VARIANTS = {};
+  for (const [base, vs] of Object.entries(variants ?? {})) VARIANTS[base] = [base, ...Object.keys(vs)];
+  const VARIANT_KEYS = new Set(Object.values(variants ?? {}).flatMap((vs) => Object.keys(vs)));
+  const UNIT_TYPES = { ...types, ...Object.assign({}, ...Object.values(variants ?? {})) };
+  const UNIT_TYPE_KEYS = [...(typeKeys ?? Object.keys(types)), ...VARIANT_KEYS];
   const PROCEDURAL_VEHICLES = procedural;
   const { scene } = app;
   initGlbLoaderRenderer(app.renderer); // idempotent; wires KTX2 support
@@ -1201,8 +1212,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   /** Build the visuals for one unit. Also used for units spawned at runtime. */
   function addUnit(unit) {
     const t = unit.type;
-    const tpl = templates[t.typeKey];
-    const inst = instanced[t.typeKey];
+    const looks = VARIANTS[t.typeKey];
+    const vkey = looks ? looks[Math.floor(Math.random() * looks.length)] : t.typeKey;
+    const tpl = templates[vkey];
+    const inst = instanced[vkey];
     // a type with several bodies shares its soldiers out between their crowds
     const crds = crowdsOf(t.typeKey);
     const crd = crds.length ? crds[Math.floor(Math.random() * crds.length)] : null;
@@ -1213,7 +1226,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       const xform = new THREE.Object3D();
       xform.scale.setScalar(inst.scale);
       views.set(unit, {
-        inst, xform,
+        inst, xform, vkey,
         bob: Math.random() * 6, mainAngle: Math.random() * 6, tailAngle: 0,
         turretAngle: 0, odo: 0, lastX: unit.position.x, lastZ: unit.position.z,
       });
@@ -1366,7 +1379,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   // painted portraits): no 3D bake, no readback at boot.
   const thumbnails = await bakeThumbnails({
     renderer: app.renderer,
-    items: UNIT_TYPE_KEYS.filter((k) => thumbnailFor?.(k) !== false).map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
+    items: UNIT_TYPE_KEYS.filter((k) => !VARIANT_KEYS.has(k) && thumbnailFor?.(k) !== false).map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
   });
 
   /** A crowd soldier just killed plays a death clip, then lies there a while. */
@@ -1581,7 +1594,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           if (inst.odometer) inst.odometer.setX(i, v.odo);
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
-          const c = crewOf[t.typeKey];
+          const c = crewOf[v.vkey ?? t.typeKey];
           // Not when the camera is far out (a seated man ~3 px, 3k triangles skinned each frame).
           if (c && v.onScreen && (!camera || camera.position.distanceToSquared(p) < CREW_FAR * CREW_FAR)) {
             if (!v.crew) v.crew = { t: Math.random() * 20, seeds: c.seats.map(() => [Math.random(), Math.random(), Math.random(), 0]), m: new THREE.Matrix4() };
