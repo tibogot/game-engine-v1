@@ -46,10 +46,10 @@
    "chest": 0.3
   },
   "canter": {
-   "lean": 0.22,
-   "seatUp": 0.03,
-   "handFwd": 0.32,
-   "handUp": 0.25,
+   "lean": 0.35,
+   "seatUp": 0.05,
+   "handFwd": 0.36,
+   "handUp": 0.2,
    "handApart": 0.12,
    "stirrupDrop": 0.6,
    "stirrupFwd": 0.06,
@@ -57,21 +57,21 @@
    "seatFwd": 0,
    "footW": 0.4,
    "kneeOut": 0.55,
-   "chest": 0.3
+   "chest": 0.12
   },
   "gallop": {
-   "lean": 0.42,
-   "seatUp": 0.07,
-   "handFwd": 0.38,
-   "handUp": 0.25,
+   "lean": 0.62,
+   "seatUp": 0.12,
+   "handFwd": 0.46,
+   "handUp": 0.17,
    "handApart": 0.12,
    "stirrupDrop": 0.54,
-   "stirrupFwd": 0.04,
+   "stirrupFwd": 0,
    "slack": 0.97,
    "seatFwd": 0,
    "footW": 0.4,
    "kneeOut": 0.55,
-   "chest": 0.3
+   "chest": 0
   },
   "jump": {
    "lean": 0.75,

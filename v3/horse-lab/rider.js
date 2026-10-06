@@ -575,7 +575,13 @@ export class RiderController {
         P.handFwd + RP.handFwd + follow.z - inside * 0.05 + outside * 0.04,
       );
       const T = pushOut(S.localToWorld(local), neck, 0.07 * this.k);   // never inside the neck (it rises toward the rider when rearing)
-      const pole = lft.clone().multiplyScalar(g.side * (RP.elbowsOut + inside * 0.3)).addScaledVector(up, -0.15 + inside * 0.5).addScaledVector(fwd, -0.2).normalize();   // elbows out to the sides (the reference)   // elbows out; the turning arm's elbow lifts
+      // never a locked arm: the elbow stays bent and soaks up the neck's bob
+      // (a straight arm reads as a push-up on the withers at the gallop)
+      const sh = wpos(g.u), armLen = g.l.position.length() * g.u.getWorldScale(new V3()).x + g.tip.position.length() * g.l.getWorldScale(new V3()).x;
+      const toT = T.clone().sub(sh), maxR = armLen * 0.86;
+      if (toT.length() > maxR) T.copy(sh).addScaledVector(toT.normalize(), maxR);
+      const tuck = clamp((P.lean - 0.25) / 0.4, 0, 1);                           // leaning forward (canter, gallop): elbows in and back, not winged out
+      const pole = lft.clone().multiplyScalar(g.side * (RP.elbowsOut * (1 - tuck * 0.55) + inside * 0.3)).addScaledVector(up, -0.15 - tuck * 0.35 + inside * 0.5).addScaledVector(fwd, -0.2 - tuck * 0.5).normalize();   // elbows out to the sides (the reference)   // elbows out; the turning arm's elbow lifts
       solveTwoBone(g.u, g.l, wpos(g.tip), T, pole, new V3(), true);
       this.orientHand(hd, fwd, up, lft);
     }
