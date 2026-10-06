@@ -122,6 +122,70 @@ function tyre(R, w, rim = R * 0.58, seg = 28) {
   for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.45 + uv.getX(i) * 0.06, 0.45 + uv.getY(i) * 0.03);   // mid-cell: its edge is pale
   return g;
 }
+/**
+ * The TREAD of a tyre(R, w) (you, 2026-10-06: "from close the wheels look bad" — loose plates
+ * stood off the round tyre like a cog's teeth): chevron BARS that lie ON the tyre, each from just
+ * past the centre line over the shoulder and down the sidewall, following its curve and sunk 1 cm
+ * into it. Alternate bars start from either side (the NDT's staggered chevron). Axis along X.
+ */
+function chevronTread(R, w, { bars = 30, depth = 0.016, skew = 0.22, fill = 0.42 } = {}) {
+  const h = w / 2;
+  // The tyre's surface (tyre()'s profile, one half), centre → shoulder → sidewall: [y, r].
+  const half = [[0, R], [h * 0.42, R], [h * 0.72, R - 0.012], [h * 0.94, R - 0.045]];
+  const pos = [];
+  const at = (y, r, a) => [y, Math.cos(a) * r, Math.sin(a) * r];
+  const pitch = (Math.PI * 2) / bars, wA = pitch * fill;
+  for (let k = 0; k < bars; k++) {
+    const s = k % 2 ? 1 : -1, a0 = k * pitch;
+    // Sections along the bar: from 0.15 h past the centre (on the far side) out to the sidewall.
+    const prof = [[-0.15 * h, R], ...half.slice(1)].map(([y, r]) => [s * y, r]);
+    const sec = prof.map(([y, r]) => {
+      const a = a0 + skew * (y * s) / h;
+      return [at(y, r - 0.01, a - wA / 2), at(y, r + depth, a - wA / 2), at(y, r + depth, a + wA / 2), at(y, r - 0.01, a + wA / 2)];
+    });
+    const tris = [];
+    const quad = (a, b, c, d) => tris.push([a, b, c], [a, c, d]);
+    for (let j = 0; j < sec.length - 1; j++) {
+      const A = sec[j], B = sec[j + 1];
+      quad(A[1], B[1], B[2], A[2]);   // top
+      quad(A[0], B[0], B[1], A[1]);   // one flank
+      quad(A[2], B[2], B[3], A[3]);   // the other
+    }
+    const f = sec[0], l = sec[sec.length - 1];
+    quad(f[0], f[1], f[2], f[3]);
+    quad(l[0], l[1], l[2], l[3]);
+    // Every face OUT of its own bar: wound so its normal points away from the bar's centre.
+    const all = sec.flat(), cen = [0, 1, 2].map((i) => all.reduce((t, q) => t + q[i], 0) / all.length);
+    for (const [p0, p1, p2] of tris) {
+      const e1 = [0, 1, 2].map((i) => p1[i] - p0[i]), e2 = [0, 1, 2].map((i) => p2[i] - p0[i]);
+      const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+      const m = [0, 1, 2].map((i) => (p0[i] + p1[i] + p2[i]) / 3 - cen[i]);
+      pos.push(...p0, ...(n[0] * m[0] + n[1] * m[1] + n[2] * m[2] >= 0 ? [...p1, ...p2] : [...p2, ...p1]));
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.computeVertexNormals();
+  const uv = new Float32Array((pos.length / 3) * 2).fill(0.47);
+  g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+  return indexed(g);
+}
+/**
+ * A COMBAT RIM (detail 2), turned: the lip at the tyre's bead, the dished face, the raised ring
+ * the bolts sit on, the domed hub cap — both faces. Axis along X, the bead at radius `rim`.
+ */
+function combatRim(rim, w, seg = 14) {
+  const h = w / 2;
+  const prof = [
+    [0.001, -h * 0.75], [0.06, -h * 0.72], [0.13, -h * 0.62], [rim - 0.02, -h * 0.8], [rim + 0.008, -h * 0.98], [rim, -h * 0.9],
+    [rim, h * 0.9], [rim + 0.008, h * 0.98], [rim - 0.02, h * 0.8], [rim * 0.74, h * 0.48], [rim * 0.62, h * 0.6],
+    [rim * 0.52, h * 0.62], [rim * 0.44, h * 0.52], [rim * 0.34, h * 0.5], [rim * 0.28, h * 0.82], [rim * 0.16, h * 0.95], [0.001, h * 0.98],
+  ].map(([r, y]) => new THREE.Vector2(r, y));
+  const g = new THREE.LatheGeometry(prof, seg).rotateZ(Math.PI / 2);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.45 + uv.getX(i) * 0.05, 0.45 + uv.getY(i) * 0.05);
+  return g;
+}
 /** A small part's UVs moved to the middle of its atlas cell (near 0 they sample the pale edge). */
 function midCell(g) {
   const uv = g.attributes.uv;
@@ -138,11 +202,12 @@ function jerrycan(P, x, y, z, rotY = 0, tone = 0.42) {
  * "Vert armée" under the Aurès sun: the atlas's olive paint multiplied by this
  * (rtsObjectMaterialTinted). The US olive drab went LIME in this light; the
  * French green was browner and duller to begin with.
- * OLIVE BRUN (the vehicle lab, 2026-10-06, against photos of French M3s): ~sRGB (92, 88, 62).
+ * OLIVE BRUN (the vehicle lab, 2026-10-06, against photos of French M3s). First (92, 88, 62):
+ * red over green, and the blue sky in the shade turned it lilac; now green just over red.
  * The old [0.74, 0.66, 0.5] kept almost no blue and still read yellow-green in the sun; it is
  * FR_PAINT_TINT_OLD, a button in the lab while the choice is open.
  */
-export const FR_PAINT_TINT = [0.71, 0.57, 0.92];
+export const FR_PAINT_TINT = [0.62, 0.58, 0.81];   // ~ (86, 89, 58): green kept over red, or the shade goes LILAC (lab, measured)
 export const FR_PAINT_TINT_OLD = [0.74, 0.66, 0.5];
 
 // ── PANHARD EBR ──────────────────────────────────────────────────────────────
@@ -303,8 +368,28 @@ function soldierSeated(P, x, y, z, R) {
   P(new THREE.CylinderGeometry(0.17, 0.17, 0.02, 14).scale(1, 1, 1.1), [x, y + 0.66, z], MAT.paint, VA);
 }
 
-export function buildWillys({ seed = 44 } = {}) {
+/**
+ * The jeep's SIDE with its door CUTOUT (detail 2, the reference photos): no doors, the tub's top
+ * edge dips in a curve between the cowl and the rear wheel — THE jeep line. A (z, y) profile
+ * extruded 5 cm across; UVs in metres / 2 like buildBox's.
+ */
+function jeepSide(z0, z1, yb, yt, cut) {
+  const sh = new THREE.Shape();
+  sh.moveTo(z1, yb); sh.lineTo(z0, yb); sh.lineTo(z0, yt);
+  for (const [z, y] of cut) sh.lineTo(z, y);
+  sh.lineTo(z1, yt); sh.lineTo(z1, yb);
+  const g = new THREE.ExtrudeGeometry(sh, { depth: 0.05, bevelEnabled: false, curveSegments: 4 }).rotateY(-Math.PI / 2);
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 2, uv.getY(i) / 2);
+  return indexed(g);
+}
+
+export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   const R = rng(seed);
+  // DETAIL 2 (the vehicle lab): the cutout sides, curled fenders, turned tyres, the seats and
+  // the gun at a real man's height, the wire cutter; 1 = the game's, unchanged.
+  const D2 = detail >= 2;
+  const seats = [];
   const hull = [], gear = [], spins = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
   const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
@@ -318,20 +403,44 @@ export function buildWillys({ seed = 44 } = {}) {
   // ── The tub: floor, sides, the rear panel, the seats.
   const TZ0 = 0.3, TZ1 = -1.62, TL = TZ0 - TZ1, TZ = (TZ0 + TZ1) / 2;
   P(buildBox(1.26, 0.05, TL - 0.04), [0, 0.62, TZ], MAT.paint, VA * 0.9);   // short of the sides' ends
+  // The cutout's top edge, front (the cowl) to back (ahead of the rear wheel).
+  const CUT = [[0.22, 1.05], [0.12, 1.0], [0.02, 0.92], [-0.1, 0.86], [-0.25, 0.84], [-0.4, 0.87], [-0.5, 0.95], [-0.58, 1.03], [-0.64, 1.06]];
   for (const sx of [-1, 1]) {
-    P(buildBox(0.05, 0.44, TL), [sx * 0.64, 0.84, TZ], MAT.paint, VA);
-    P(buildBox(0.26, 0.3, 0.86), [sx * 0.49, 0.8, AXR], MAT.paint, VA * 0.92);          // rear wheel arch
-    P(buildBox(0.08, 0.04, TL - 0.06), [sx * 0.64, 1.07, TZ], MAT.paint, VA * 0.85);   // rolled lip (short of the side's ends)
+    if (D2) {
+      P(jeepSide(TZ0, TZ1, 0.62, 1.06, CUT), [sx * 0.64 + 0.025, 0, 0], MAT.paint, VA);
+      // The rolled lip along the cut and on along the rear, a shade darker: it draws the line.
+      P(tube([[sx * 0.645, 1.065, TZ0], ...CUT.map(([z, y]) => [sx * 0.645, y + 0.01, z]), [sx * 0.645, 1.07, -1.0], [sx * 0.645, 1.07, TZ1 + 0.03]], 0.022, 28, 5), [0, 0, 0], MAT.paint, VA * 0.8);
+      P(buildBox(0.26, 0.3, 0.86), [sx * 0.49, 0.8, AXR], MAT.paint, VA * 0.92);        // rear wheel arch
+    } else {
+      P(buildBox(0.05, 0.44, TL), [sx * 0.64, 0.84, TZ], MAT.paint, VA);
+      P(buildBox(0.26, 0.3, 0.86), [sx * 0.49, 0.8, AXR], MAT.paint, VA * 0.92);          // rear wheel arch
+      P(buildBox(0.08, 0.04, TL - 0.06), [sx * 0.64, 1.07, TZ], MAT.paint, VA * 0.85);   // rolled lip (short of the side's ends)
+    }
   }
   P(buildBox(1.28, 0.41, 0.05), [0, 0.835, TZ1], MAT.paint, VA);   // 2 cm under the sides' top
   P(buildBox(1.34, 0.04, 0.08), [0, 1.075, TZ1], MAT.paint, VA * 0.85);   // 5 mm over the side lips
-  for (const sx of [-1, 1]) {
-    P(buildBox(0.44, 0.1, 0.44), [sx * 0.3, 0.84, -0.3], MAT.canvas, 0.3);
-    P(buildBox(0.42, 0.44, 0.08), [sx * 0.3, 1.08, -0.54], MAT.canvas, 0.3);
+  if (D2) {
+    // Seats at a SEATED MAN's height (the Mixamo poses: hips ~0.5 m over the feet): canvas
+    // cushions on painted boxes, their backs; the bench at the back.
+    for (const sx of [-1, 1]) {
+      P(buildBox(0.4, 0.4, 0.4), [sx * 0.3, 0.86, -0.3], MAT.paint, VA * 0.75);
+      P(roundedPlate(0.46, 0.09, 0.46, 0.03), [sx * 0.3, 1.1, -0.3], MAT.canvas, 0.3);
+      P(roundedPlate(0.44, 0.48, 0.08, 0.03), [sx * 0.3, 1.38, -0.55], MAT.canvas, 0.3, [-0.1, 0, 0]);
+    }
+    P(roundedPlate(1.1, 0.1, 0.4, 0.03), [0, 0.98, -1.4], MAT.canvas, 0.3);
+    P(buildBox(1.26, 0.36, 0.08), [0, 0.92, TZ0], MAT.paint, VA);                         // cowl
+    // The WHEEL where the Driving clip's hands close (0.82 up, 0.29 ahead of the driver's feet).
+    P(new THREE.TorusGeometry(0.19, 0.018, 6, 20), [0.27, 1.39, 0.04], MAT.rubber, 0.3, [0.64, 0, 0]);
+    P(alongZ(0.022, 0.022, 0.5, 6), [0.27, 1.25, 0.22], MAT.steel, 0.15, [0.64, 0, 0]);
+  } else {
+    for (const sx of [-1, 1]) {
+      P(buildBox(0.44, 0.1, 0.44), [sx * 0.3, 0.84, -0.3], MAT.canvas, 0.3);
+      P(buildBox(0.42, 0.44, 0.08), [sx * 0.3, 1.08, -0.54], MAT.canvas, 0.3);
+    }
+    P(buildBox(1.1, 0.1, 0.4), [0, 0.98, -1.35], MAT.canvas, 0.3);
+    P(buildBox(1.26, 0.36, 0.08), [0, 0.92, TZ0], MAT.paint, VA);                         // cowl
+    P(new THREE.TorusGeometry(0.17, 0.018, 5, 16).rotateX(Math.PI / 2 - 0.9), [0.3, 1.12, 0.12], MAT.steel, 0.05);
   }
-  P(buildBox(1.1, 0.1, 0.4), [0, 0.98, -1.35], MAT.canvas, 0.3);
-  P(buildBox(1.26, 0.36, 0.08), [0, 0.92, TZ0], MAT.paint, VA);                         // cowl
-  P(new THREE.TorusGeometry(0.17, 0.018, 5, 16).rotateX(Math.PI / 2 - 0.9), [0.3, 1.12, 0.12], MAT.steel, 0.05);
 
   // ── Bonnet, the slotted grille with the lamps in it, flat fenders, bumper.
   P(buildBox(0.78, 0.06, 1.2), [0, 1.03, 0.92], MAT.paint, VA * 1.05);
@@ -341,8 +450,17 @@ export function buildWillys({ seed = 44 } = {}) {
   for (const sx of [-1, 1]) {
     P(new THREE.CylinderGeometry(0.085, 0.085, 0.05, 12).rotateX(Math.PI / 2), [sx * 0.33, 0.9, 1.56], MAT.steel, 0.2);
     P(new THREE.CylinderGeometry(0.07, 0.07, 0.02, 12).rotateX(Math.PI / 2), [sx * 0.33, 0.9, 1.585], MAT.white, 0.45);
-    P(buildBox(0.3, 0.04, 1.05), [sx * 0.6, 0.86, 1.02], MAT.paint, VA);
-    P(buildBox(0.28, 0.04, 0.26), [sx * 0.6, 0.77, 1.58], MAT.paint, VA, [0.75, 0, 0]);
+    if (D2) {
+      // The FENDER (the photos): flat by the bonnet, its front curled down — a chain of plates.
+      const fp = [[0.36, 0.86], [1.3, 0.86], [1.43, 0.845], [1.54, 0.8], [1.61, 0.72], [1.64, 0.64]];
+      for (let k = 0; k < fp.length - 1; k++) {
+        const [z0, y0] = fp[k], [z1, y1] = fp[k + 1], L = Math.hypot(z1 - z0, y1 - y0);
+        P(buildBox(0.3, 0.04, L + 0.02), [sx * 0.6, (y0 + y1) / 2, (z0 + z1) / 2], MAT.paint, VA, [Math.atan2(-(y1 - y0), z1 - z0), 0, 0]);
+      }
+    } else {
+      P(buildBox(0.3, 0.04, 1.05), [sx * 0.6, 0.86, 1.02], MAT.paint, VA);
+      P(buildBox(0.28, 0.04, 0.26), [sx * 0.6, 0.77, 1.58], MAT.paint, VA, [0.75, 0, 0]);
+    }
     P(buildBox(0.04, 0.24, 0.8), [sx * 0.46, 0.73, 1.0], MAT.paint, VA * 0.9);
   }
   P(buildBox(1.5, 0.12, 0.1), [0, 0.46, 1.66], MAT.paint, VA * 0.9);
@@ -353,28 +471,74 @@ export function buildWillys({ seed = 44 } = {}) {
   P(buildBox(1.08, 0.02, 0.32), [0, 1.12, 0.56], MAT.steel, 0.08);
 
   // ── Tail: spare wheel and a jerrycan.
-  G(axleX(WR * 0.95, 0.18, 18).rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.12], MAT.rubber, 0.5, undefined, [0, 0, 0, 0]);
-  G(axleX(0.18, 0.2, 12).rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.12], MAT.paint, VA, undefined, [0, 0, 0, 0]);
+  // The jeep's WHEEL at detail 2 (axis along X, at the origin): the turned tyre, the combat rim,
+  // the hub, the chevron tread, the rim's bolts — ONE, for the four wheels and the spare (you:
+  // "it should use the same wheel").
+  const jeepWheel = () => {
+    // Optimised (you: "optimise the jeep"): 20 segments round the tyre, 22 bars a touch wider,
+    // a 14-segment rim — 13.0k → see the lab's count; the same read at any zoom we play at.
+    const parts = [[tyre(WR, 0.2, 0.2, 20), MAT.rubber, 0.5], [chevronTread(WR, 0.2, { bars: 22, fill: 0.46 }), MAT.rubber, 0.3], [combatRim(0.2, 0.2), MAT.paint, VA * 0.9]];
+    // The five bolts on the rim's raised ring, a centimetre proud of it on both faces.
+    for (let k = 0; k < 5; k++) {
+      const a = (k / 5) * Math.PI * 2;
+      parts.push([new THREE.CylinderGeometry(0.013, 0.013, 0.145, 6).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.11, Math.sin(a) * 0.11), MAT.steel, 0.35]);
+    }
+    return parts;
+  };
+  if (D2) {
+    // The spare, on the tail, standing across the back (turned a quarter about Y).
+    for (const [g, m, t] of jeepWheel()) G(g.rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.14], m, t, undefined, [0, 0, 0, 0]);
+  } else {
+    G(axleX(WR * 0.95, 0.18, 18).rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.12], MAT.rubber, 0.5, undefined, [0, 0, 0, 0]);
+    G(axleX(0.18, 0.2, 12).rotateY(Math.PI / 2), [0.28, 0.86, TZ1 - 0.12], MAT.paint, VA, undefined, [0, 0, 0, 0]);
+  }
   P(buildBox(0.16, 0.46, 0.32), [-0.34, 0.875, TZ1 - 0.13], MAT.paint, 0.4);
 
   // ── The .30 on its pedestal behind the seats, its ammo box; the whip aerial
   //    bent over and tied down.
-  P(new THREE.CylinderGeometry(0.04, 0.05, 0.8, 8), [0, 1.05, -0.8], MAT.steel, 0.25);
-  P(buildBox(0.14, 0.14, 0.9), [0, 1.52, -0.55], MAT.steel, 0.12);
-  P(alongZ(0.025, 0.025, 0.5, 6), [0, 1.52, -0.05], MAT.steel, 0.1);
-  P(buildBox(0.16, 0.14, 0.26), [0.14, 1.44, -0.72], MAT.paint, 0.35);
-  P(tube([[-0.58, 0.98, TZ1 + 0.1], [-0.6, 1.9, TZ1 + 0.4], [-0.55, 2.2, -0.6], [-0.5, 2.1, 0.2]], 0.012, 12, 4), [0, 0, 0], MAT.steel, 0.35);
+  if (D2) {
+    // The gun at a STANDING man's chest (the gunner behind it, on the floor).
+    P(new THREE.CylinderGeometry(0.04, 0.06, 1.25, 8), [0, 1.27, -0.68], MAT.steel, 0.25);
+    P(buildBox(0.14, 0.14, 0.9), [0, 1.95, -0.42], MAT.steel, 0.12);
+    P(alongZ(0.025, 0.025, 0.5, 6), [0, 1.95, 0.28], MAT.steel, 0.1);
+    P(buildBox(0.16, 0.14, 0.26), [0.14, 1.87, -0.6], MAT.paint, 0.35);
+  } else {
+    P(new THREE.CylinderGeometry(0.04, 0.05, 0.8, 8), [0, 1.05, -0.8], MAT.steel, 0.25);
+    P(buildBox(0.14, 0.14, 0.9), [0, 1.52, -0.55], MAT.steel, 0.12);
+    P(alongZ(0.025, 0.025, 0.5, 6), [0, 1.52, -0.05], MAT.steel, 0.1);
+    P(buildBox(0.16, 0.14, 0.26), [0.14, 1.44, -0.72], MAT.paint, 0.35);
+  }
+  // (Detail 2 drops it — you, 2026-10-06: the bent whip read as "a long curved tube".)
+  if (!D2) P(tube([[-0.58, 0.98, TZ1 + 0.1], [-0.6, 1.9, TZ1 + 0.4], [-0.55, 2.2, -0.6], [-0.5, 2.1, 0.2]], 0.012, 12, 4), [0, 0, 0], MAT.steel, 0.35);
 
   // ── The crew: the driver, and the gunner standing at the gun.
-  soldierSeated(P, 0.3, 0.9, -0.34, R);
-  P(buildBox(0.38, 0.58, 0.24), [0, 1.2, -1.05], MAT.canvas, 0.52);
-  for (const dx of [-0.18, 0.18]) P(buildBox(0.09, 0.09, 0.4), [dx, 1.45, -0.86], MAT.canvas, 0.5, [0.2, 0, 0]);
-  P(new THREE.SphereGeometry(0.1, 10, 7), [0, 1.62, -1.06], MAT.canvas, 0.15);
-  P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [0, 1.66, -1.06], MAT.paint, VA * 1.1);
+  if (crew) {
+    soldierSeated(P, 0.3, 0.9, -0.34, R);
+    P(buildBox(0.38, 0.58, 0.24), [0, 1.2, -1.05], MAT.canvas, 0.52);
+    for (const dx of [-0.18, 0.18]) P(buildBox(0.09, 0.09, 0.4), [dx, 1.45, -0.86], MAT.canvas, 0.5, [0.2, 0, 0]);
+    P(new THREE.SphereGeometry(0.1, 10, 7), [0, 1.62, -1.06], MAT.canvas, 0.15);
+    P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [0, 1.66, -1.06], MAT.paint, VA * 1.1);
+  } else {
+    // SEATS for real soldiers (feet on the floor): the driver (left: a left-hand drive), the man
+    // beside him, the gunner standing behind the gun.
+    seats.push(
+      { p: [0.3, 0.57, -0.25], yaw: 0, clip: "drive" },
+      { p: [-0.3, 0.6, -0.25], yaw: 0, clip: "sit" },
+      { p: [0, 0.645, -1.05], yaw: 0, clip: "rifle_aim_idle" },
+    );
+  }
+  if (D2) {
+    // The tools on the left flank under the cut. (No wire cutter: you, 2026-10-06, "remove".)
+    P(new THREE.CylinderGeometry(0.02, 0.02, 1.0, 6).rotateX(Math.PI / 2), [0.69, 0.72, -0.9], MAT.timber, 0.4);
+    P(buildBox(0.02, 0.2, 0.18), [0.69, 0.72, -1.45], MAT.steel, 0.25);
+    P(new THREE.CylinderGeometry(0.02, 0.02, 0.7, 6).rotateX(Math.PI / 2), [0.69, 0.8, -0.95], MAT.timber, 0.35);
+    P(buildBox(0.03, 0.2, 0.1), [0.69, 0.8, -0.6], MAT.steel, 0.25);
+  }
 
   // ── Wheels.
   const wheelAt = (x, z) => {
     const s = [WR, z, WR, 1];
+    if (D2) { for (const [g, m, t] of jeepWheel()) G(g, [x, WR, z], m, t, undefined, s); return; }
     G(axleX(WR, 0.19, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
     G(axleX(0.2, 0.2, 14), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
     G(axleX(0.07, 0.22, 8), [x, WR, z], MAT.steel, 0.3, undefined, s);
@@ -400,6 +564,7 @@ export function buildWillys({ seed = 44 } = {}) {
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
+  geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 0.8 * S, hz: 1.8 * S };
   return geo;
@@ -1073,22 +1238,20 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   // ── Front wheels (they roll), the rear track unit.
   const wheelAt = (x, z) => {
     const s = [WR, z, WR, 1];
-    G(D2 ? tyre(WR, 0.27, 0.265) : axleX(WR, 0.26, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
-    G(axleX(0.27, 0.28, 14), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
-    G(axleX(0.09, 0.3, 8), [x, WR, z], MAT.steel, 0.3, undefined, s);
     if (D2) {
-      // TREAD: the military chevron — two staggered rows of angled lugs ON the tread, inside
-      // its width (they roll with it); the hub's bolts.
-      for (let k = 0; k < 40; k++) {
-        const row = k % 2 ? 1 : -1, a = (k / 40) * Math.PI * 2;
-        const lug = midCell(buildBox(0.1, 0.012, 0.05)).rotateY(row * 0.45).translate(row * 0.055, WR + 0.006, 0).rotateX(a);
-        G(lug, [x, WR, z], MAT.rubber, 0.1, undefined, s);
-      }
+      // The jeep's wheel at the half-track's size (you: "yes" — the plate lugs read as a cog).
+      G(tyre(WR, 0.27, 0.265, 22), [x, WR, z], MAT.rubber, 0.5, undefined, s);
+      G(chevronTread(WR, 0.27, { bars: 24, fill: 0.46, depth: 0.02 }), [x, WR, z], MAT.rubber, 0.3, undefined, s);
+      G(combatRim(0.265, 0.27, 16), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
       for (let k = 0; k < 6; k++) {
         const a = (k / 6) * Math.PI * 2;
-        G(new THREE.CylinderGeometry(0.018, 0.018, 0.32, 6).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.17, Math.sin(a) * 0.17), [x, WR, z], MAT.steel, 0.35, undefined, s);
+        G(new THREE.CylinderGeometry(0.016, 0.016, 0.19, 6).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.145, Math.sin(a) * 0.145), [x, WR, z], MAT.steel, 0.35, undefined, s);
       }
+      return;
     }
+    G(axleX(WR, 0.26, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
+    G(axleX(0.27, 0.28, 14), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
+    G(axleX(0.09, 0.3, 8), [x, WR, z], MAT.steel, 0.3, undefined, s);
   };
   for (const sx of [-1, 1]) wheelAt(sx * 0.84, AXF);
   for (const sx of [-1, 1]) {

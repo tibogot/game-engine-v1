@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
-import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildHalfTrack } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
@@ -43,9 +43,15 @@ function gradientSky(k = 1) {
  */
 const PAINTS = {
   ancien: { label: "Ancien (lime)", tint: FR_PAINT_TINT_OLD },
-  brun: { label: "Olive brun (jeu)", tint: FR_PAINT_TINT },     // ~ (92, 88, 62)
-  sombre: { label: "Olive sombre", tint: [0.53, 0.44, 0.77] },  // ~ (80, 78, 56)
-  kaki: { label: "Kaki", tint: [0.81, 0.6, 0.92] },             // ~ (98, 90, 62)
+  brun: { label: "Olive brun (jeu)", tint: FR_PAINT_TINT },     // ~ (86, 89, 58)
+  sombre: { label: "Olive sombre", tint: [0.5, 0.47, 0.66] },   // ~ (78, 81, 53): olive brun, darker
+  kaki: { label: "Kaki", tint: [0.81, 0.6, 0.92] },             // ~ (98, 90, 62); red over green: lilac in the shade
+};
+
+/** The vehicles in the lab (?v=): the builder, the gear channel, the panel's name. */
+const VEHICLES = {
+  halftrack: { build: buildHalfTrack, label: "Half-track M3" },
+  willys: { build: buildWillys, label: "Jeep Willys MB" },
 };
 
 /** A vehicle as the game draws it: the body, its decals, its running gear. */
@@ -152,9 +158,11 @@ export async function startVehicleLab(container) {
   scene.add(ground);
 
   // BEFORE / AFTER, 5 m apart either side of the middle, each on a turntable.
-  const before = vehicleOf(buildHalfTrack(), "halftrack");
-  const afterGeo = buildHalfTrack({ detail: 2, crew: false });
-  const after = vehicleOf(afterGeo, "halftrack");
+  const vKey = VEHICLES[new URLSearchParams(location.search).get("v")] ? new URLSearchParams(location.search).get("v") : "halftrack";
+  const V = VEHICLES[vKey];
+  const before = vehicleOf(V.build(), vKey);
+  const afterGeo = V.build({ detail: 2, crew: false });
+  const after = vehicleOf(afterGeo, vKey);
   const GAP = 4.2;
   before.group.position.x = -GAP;
   after.group.position.x = GAP;
@@ -205,7 +213,8 @@ export async function startVehicleLab(container) {
       font: 700 11px "Segoe UI", sans-serif; letter-spacing: .12em; color: #f1e6c4; background: rgba(22,17,12,.85); border: 1px solid #6b5636; pointer-events: none; }
   </style>
   <div id="vlab"><h1>Vehicle Lab</h1>
-    <p style="margin-top:0">Half-track M3 — <b>avant</b> (gauche, le jeu) / <b>après</b> (droite, détail 2).</p>
+    <p style="margin-top:0">${V.label} — <b>avant</b> (gauche, le jeu) / <b>après</b> (droite, détail 2).</p>
+    <h2>Véhicule</h2><div class="g">${Object.entries(VEHICLES).map(([k, v]) => `<button data-veh="${k}">${v.label}</button>`).join("")}</div>
     <h2>Vues</h2><div class="g"><button data-v="close">Gros plan</button><button data-v="play">Zoom de jeu</button><button data-v="play2">Zoom proche</button><button data-v="spin">Rotation</button></div>
     <h2>Peinture (après)</h2><div class="g">${Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}">${p.label}</button>`).join("")}</div>
     <h2>Lumière</h2><div class="g"><button data-v="day">Jour</button><button data-v="night">Nuit</button></div>
@@ -216,6 +225,7 @@ export async function startVehicleLab(container) {
   el.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;
+    if (b.dataset.veh) { location.search = `?v=${b.dataset.veh}`; return; }
     if (b.dataset.paint) { after.paint(PAINTS[b.dataset.paint].tint); return; }
     const v = b.dataset.v;
     if (v === "close") close();
