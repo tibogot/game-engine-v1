@@ -17,7 +17,7 @@
  * The gate faces -Z.
  */
 import * as THREE from "three";
-import { MAT, assemble, bakeContactAO, buildBox, buildOilDrum, buildSandbagRing, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
+import { MAT, assemble, bakeContactAO, buildBox, buildCorrugatedPanel, buildOilDrum, buildSandbagRing, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
 import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 
 const S = 1.3;
@@ -58,7 +58,7 @@ function archWall(width, height, t, openings) {
  * merlons, loopholes, and the wall-walk inside. Pushes into `parts`.
  * `skip`: [x0, x1] ranges with no wall (the gate).
  */
-function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0 }) {
+function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0, detail = 1 }) {
   const foot = 1.0;                   // rubble course height
   // Wall-walk surface, inside. `walkDrop`: the side runs sit 3 cm lower, so
   // their walks never share a top face with the front and back runs' at the
@@ -78,13 +78,31 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0 }) {
     parts.push(place({ geo: buildBox(w, H - foot + 0.02, T), pos: [cx, foot - 0.02 + (H - foot + 0.02) / 2, 0], mat: MAT.white, tone: 0.38 + R() * 0.1 }, rot));
     // Wall-walk: a stone banquette along the inside face.
     parts.push(place({ geo: buildBox(w - 0.06, walkY, 1.0), pos: [cx, walkY / 2, T / 2 + 0.5], mat: MAT.rubble, tone: 0.35 }, rot));   // ends 3 cm in: flush with the footing's ends they z-fought
-    // Merlons along the top, square, with the cope a shade darker.
-    const n = Math.max(1, Math.round(w / 1.25));
-    const pitch = w / n;
-    for (let k = 0; k < n; k++) {
-      const x = a + pitch * (k + 0.5);
-      parts.push(place({ geo: buildBox(pitch * 0.58, 0.62, T), pos: [x, H + 0.31, 0], mat: MAT.white, tone: 0.55 + R() * 0.1 }, rot));
-      parts.push(place({ geo: buildBox(pitch * 0.58 + 0.06, 0.06, T + 0.06), pos: [x, H + 0.65, 0], mat: MAT.concrete, tone: 0.5 }, rot));
+    if (detail >= 2) {
+      // THE BORDJ'S PARAPET (the buildings lab, 2026-10-07, from photos of Algerian bordjs — you:
+      // "go with 1"): no merlons (the toy-castle cliché) but a plain, heavy parapet with its
+      // coping, a row of narrow slits under it, and BUTTRESSES stepping down the outer face.
+      parts.push(place({ geo: buildBox(w, 0.72, T), pos: [cx, H + 0.36, 0], mat: MAT.white, tone: 0.52 + R() * 0.06 }, rot));
+      parts.push(place({ geo: buildBox(w + 0.02, 0.1, T + 0.12), pos: [cx, H + 0.77, 0], mat: MAT.concrete, tone: 0.5 }, rot));
+      const ns = Math.max(1, Math.round(w / 1.6));
+      for (let k = 0; k < ns; k++) parts.push(place({ geo: buildBox(0.1, 0.42, T + 0.03), pos: [a + (w * (k + 0.5)) / ns, H + 0.32, 0], mat: MAT.steel, tone: 0.0 }, rot));
+      const nb = Math.floor(w / 4.4);
+      for (let k = 1; k <= nb; k++) {
+        const bx = a + (w * k) / (nb + 1);
+        // Two steps: the lower deeper (in the rubble footing's stone), the upper whitewashed.
+        parts.push(place({ geo: buildBox(0.7, 1.3, 0.62), pos: [bx, 0.65, -T / 2 - 0.27], mat: MAT.rubble, tone: 0.45 + R() * 0.1 }, rot));
+        parts.push(place({ geo: buildBox(0.56, H - 1.0, 0.32), pos: [bx, 1.25 + (H - 1.0) / 2 - 0.05, -T / 2 - 0.13], mat: MAT.white, tone: 0.5 + R() * 0.08 }, rot));
+        parts.push(place({ geo: buildBox(0.62, 0.08, 0.4), pos: [bx, H + 0.16, -T / 2 - 0.15], mat: MAT.concrete, tone: 0.48 }, rot));
+      }
+    } else {
+      // Merlons along the top, square, with the cope a shade darker.
+      const n = Math.max(1, Math.round(w / 1.25));
+      const pitch = w / n;
+      for (let k = 0; k < n; k++) {
+        const x = a + pitch * (k + 0.5);
+        parts.push(place({ geo: buildBox(pitch * 0.58, 0.62, T), pos: [x, H + 0.31, 0], mat: MAT.white, tone: 0.55 + R() * 0.1 }, rot));
+        parts.push(place({ geo: buildBox(pitch * 0.58 + 0.06, 0.06, T + 0.06), pos: [x, H + 0.65, 0], mat: MAT.concrete, tone: 0.5 }, rot));
+      }
     }
     // Loopholes: dark slits through the wall at firing height, every ~2.5 m.
     const m = Math.max(1, Math.floor(w / 2.5));
@@ -96,15 +114,30 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0 }) {
 }
 
 /** A square tower, crenellated, with a sandbagged gun position on its roof. */
-function tower(parts, R, { x, z, W, H, seed }) {
+function tower(parts, R, { x, z, W, H, seed, detail = 1 }) {
   const foot = 1.2;
-  parts.push({ geo: buildBox(W + 0.1, foot, W + 0.1), pos: [x, foot / 2, z], mat: MAT.rubble, tone: 0.5 });
+  if (detail >= 2) {
+    // The TALUS: the tower stands on a sloped stone skirt (a 4-sided frustum turned square).
+    const tal = new THREE.CylinderGeometry((W / 2) * Math.SQRT2 + 0.02, (W / 2 + 0.55) * Math.SQRT2, 1.8, 4, 1).rotateY(Math.PI / 4);
+    const uv = tal.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * W * 2, uv.getY(i) * 0.9);
+    parts.push({ geo: indexed(tal), pos: [x, 0.9, z], mat: MAT.rubble, tone: 0.5 });
+  } else parts.push({ geo: buildBox(W + 0.1, foot, W + 0.1), pos: [x, foot / 2, z], mat: MAT.rubble, tone: 0.5 });
   parts.push({ geo: buildBox(W, H - foot + 0.02, W), pos: [x, foot - 0.02 + (H - foot + 0.02) / 2, z], mat: MAT.white, tone: 0.56 });
   // A string course under the parapet: the line that makes it a tower, not a box.
   parts.push({ geo: buildBox(W + 0.24, 0.18, W + 0.24), pos: [x, H - 0.05, z], mat: MAT.concrete, tone: 0.55 });
-  // Merlons round the roof edge.
+  // Merlons round the roof edge (detail 2: a solid parapet, corbelled out, slits in it).
   const n = 4, pitch = W / n;
-  for (const [dx, dz, ry] of [[0, -1, 0], [0, 1, 0], [-1, 0, Math.PI / 2], [1, 0, Math.PI / 2]]) {
+  if (detail >= 2) {
+    const PW = W + 0.4, ph = 0.72;   // the merlons' height: the tower's MG (towerGuns, ~1 m up) must show over it
+    parts.push({ geo: buildBox(W + 0.5, 0.22, W + 0.5), pos: [x, H + 0.06, z], mat: MAT.concrete, tone: 0.5 });   // the corbel band
+    for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+      const side = dx !== 0, len = side ? PW - 0.66 : PW;   // the side pieces between the long ones (no shared faces)
+      const px = x + dx * (PW / 2 - 0.16), pz = z + dz * (PW / 2 - 0.16);
+      parts.push({ geo: buildBox(side ? 0.32 : len, ph, side ? len : 0.32), pos: [px, H + 0.17 + ph / 2, pz], mat: MAT.white, tone: 0.6 });
+      parts.push({ geo: buildBox(side ? 0.42 : len + 0.08, 0.08, side ? len + 0.02 : 0.42), pos: [px, H + 0.17 + ph + 0.04 + (side ? 0.01 : 0), pz], mat: MAT.concrete, tone: 0.5 });
+      for (const o of [-1.2, 0, 1.2]) parts.push({ geo: buildBox(side ? 0.34 : 0.1, 0.3, side ? 0.1 : 0.34), pos: [px + (side ? 0 : o), H + 0.52, pz + (side ? o : 0)], mat: MAT.steel, tone: 0 });
+    }
+  } else for (const [dx, dz, ry] of [[0, -1, 0], [0, 1, 0], [-1, 0, Math.PI / 2], [1, 0, Math.PI / 2]]) {
     for (let k = 0; k < n; k++) {
       const off = -W / 2 + pitch * (k + 0.5);
       // The side rows (±X) sit 4 cm lower and 3 cm further in than the front
@@ -132,7 +165,7 @@ function tower(parts, R, { x, z, W, H, seed }) {
 }
 
 /** A flat-roofed whitewashed block: doors, windows with shutters, a parapet. */
-function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4 }) {
+function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4, detail = 1, roof = "barracks" }) {
   const foot = 0.6;
   parts.push({ geo: buildBox(w + 0.08, foot, d + 0.08), pos: [x, foot / 2, z], mat: MAT.rubble, tone: 0.4 });
   parts.push({ geo: buildBox(w, h - foot + 0.02, d), pos: [x, foot - 0.02 + (h - foot + 0.02) / 2, z], mat: MAT.white, tone: 0.5 + R() * 0.1 });
@@ -162,9 +195,47 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4 }
       }
     }
   }
+  if (detail < 2) return;
+  // ── THE ROOF IN USE (detail 2): the flat grey slabs were the biggest dead areas seen from the
+  // RTS camera. A water tank on its stand, a stovepipe, a sandbagged look-out, kit drying, and a
+  // ladder up from the yard.
+  const ry = h + 0.2;
+  const ex = x + (w / 2 - 1.4) * (R() < 0.5 ? -1 : 1);
+  // The water tank (a drum on its side would be the jerrican age; this is the post's own).
+  parts.push({ geo: new THREE.CylinderGeometry(0.6, 0.6, 1.1, 14), pos: [ex, ry + 1.15, z - d / 4], mat: MAT.metal, tone: 0.35 });
+  for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push({ geo: buildBox(0.08, 0.6, 0.08), pos: [ex + a * 0.42, ry + 0.3, z - d / 4 + b * 0.42], mat: MAT.steel, tone: 0.3 });
+  // Stovepipes, each with its cap.
+  for (const k of [-1, 1]) {
+    const px = x + k * w * 0.22, pz = z + d * 0.18;
+    parts.push({ geo: new THREE.CylinderGeometry(0.08, 0.08, 1.3, 8), pos: [px, ry + 0.65, pz], mat: MAT.steel, tone: 0.2 });
+    parts.push({ geo: new THREE.ConeGeometry(0.2, 0.16, 8), pos: [px, ry + 1.38, pz], mat: MAT.steel, tone: 0.18 });
+  }
+  if (roof === "barracks") {
+    // A look-out on the barracks: a sandbag horseshoe at the outer corner, a tarp over it.
+    const lx = x - w / 2 + 1.6, lz = z - doorSide * (d / 2 - 1.4);
+    parts.push({ geo: buildSandbagRing({ radius: 1.2, courses: 3, seed: Math.round(x * 13) + 5, gapDeg: 90 }), pos: [lx, ry, lz], rot: [0, doorSide > 0 ? 0 : Math.PI, 0], mat: null });
+    for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push({ geo: buildBox(0.07, 1.6, 0.07), pos: [lx + a * 0.9, ry + 0.8, lz + b * 0.9], mat: MAT.timber, tone: 0.3 });
+    parts.push({ geo: buildBox(2.1, 0.04, 2.1), pos: [lx, ry + 1.62, lz], rot: [0.08, 0, 0.05], mat: MAT.canvas, tone: 0.42 });
+    // A washing line: two poles, the line, the shirts and a blanket on it.
+    const wx0 = x + 0.5, wx1 = x + w / 2 - 2.6, wz = z + d / 2 - 1.0;
+    for (const px of [wx0, wx1]) parts.push({ geo: buildBox(0.06, 1.7, 0.06), pos: [px, ry + 0.85, wz], mat: MAT.timber, tone: 0.3 });
+    parts.push(wirePart([wx0, ry + 1.6, wz], [wx1, ry + 1.6, wz], 0.01, { mat: MAT.hessian, tone: 0.5 }));
+    for (let k = 0; k < 5; k++) {
+      const t = (k + 0.7) / 6, kind = R();
+      parts.push({ geo: buildBox(kind < 0.3 ? 1.1 : 0.5, kind < 0.3 ? 0.9 : 0.6, 0.02), pos: [wx0 + (wx1 - wx0) * t, ry + 1.6 - (kind < 0.3 ? 0.45 : 0.3), wz], rot: [0, (R() - 0.5) * 0.2, 0], mat: kind < 0.3 ? MAT.canvas : kind < 0.65 ? MAT.white : MAT.paint, tone: 0.4 + R() * 0.2 });
+    }
+  } else {
+    // The command post: the radio's antenna base and a crate of batteries.
+    parts.push({ geo: buildBox(0.8, 0.5, 0.6), pos: [x + w / 4, ry + 0.25, z + d / 4], mat: MAT.paint, tone: 0.35 });
+    parts.push({ geo: buildBox(0.6, 0.4, 0.5), pos: [x - w / 4, ry + 0.2, z - d / 3], mat: MAT.timber, tone: 0.4 });
+  }
+  // The LADDER up from the yard, against the door face.
+  const lx2 = x + w / 2 - 0.7, lz2 = z + doorSide * (d / 2 + 0.25);
+  for (const s of [-1, 1]) parts.push({ geo: buildBox(0.06, h + 0.9, 0.06), pos: [lx2 + s * 0.26, (h + 0.9) / 2, lz2], rot: [-doorSide * 0.12, 0, 0], mat: MAT.timber, tone: 0.32 });
+  for (let k = 1; k < 9; k++) parts.push({ geo: buildBox(0.52, 0.045, 0.045), pos: [lx2, (k * (h + 0.6)) / 9, lz2 + doorSide * 0.12 * (0.5 - k / 9) * 0.9], mat: MAT.timber, tone: 0.3 });
 }
 
-export function buildFrenchPost({ seed = 1957 } = {}) {
+export function buildFrenchPost({ seed = 1957, detail = 1 } = {}) {
   const R = rng(seed);
   const parts = [];
   const L = 22, H = 3.2, T = 0.6, hl = L / 2;
@@ -193,7 +264,7 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   ];
   for (const r of runs) {
     const place = side(r.angle, r.off);
-    wallRun(parts, R, { len: L - T * 2 + 0.02, H, T, place: (p) => place(p), skip: r.skip, walkDrop: r.walkDrop ?? 0 });
+    wallRun(parts, R, { len: L - T * 2 + 0.02, H, T, place: (p) => place(p), skip: r.skip, walkDrop: r.walkDrop ?? 0, detail });
   }
   // Corner piers where the runs meet (the runs stop short of the corners).
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
@@ -203,8 +274,8 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
 
   // ── Two towers on the diagonal: front-left and back-right ──────────────────
   const TW = 5, TH = 6.8;
-  tower(parts, R, { x: -hl + TW / 2 - 1.0, z: -hl + TW / 2 - 1.0, W: TW, H: TH, seed: seed + 1 });
-  tower(parts, R, { x: hl - TW / 2 + 1.0, z: hl - TW / 2 + 1.0, W: TW, H: TH, seed: seed + 2 });
+  tower(parts, R, { x: -hl + TW / 2 - 1.0, z: -hl + TW / 2 - 1.0, W: TW, H: TH, seed: seed + 1, detail });
+  tower(parts, R, { x: hl - TW / 2 + 1.0, z: hl - TW / 2 + 1.0, W: TW, H: TH, seed: seed + 2, detail });
   // Where each tower's MG is (its breech, a metre over the roof): a game fires
   // the post's guns from there (userData.towerGuns, scaled below).
   const towerGuns = [-1, 1].map((sg) => [sg * (hl - TW / 2 + 1.0), TH + 1.0, sg * (hl - TW / 2 + 1.0)]);
@@ -220,9 +291,21 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   const sideW = (gW + 0.1 - gateW) / 2 - 0.03;   // 3 cm back from the arch's jambs (flush, they z-fought)
   for (const sx of [-1, 1]) parts.push({ geo: buildBox(sideW, 1.04, gD + 0.1), pos: [sx * (gateW / 2 + 0.03 + sideW / 2), 0.52, gz - 0.4 + gD / 2], mat: MAT.rubble, tone: 0.5 });
   parts.push({ geo: buildBox(gateW - 0.04, 0.08, gD + 0.06), pos: [0, 0.04 + 0.02, gz - 0.4 + gD / 2], mat: MAT.limestone, tone: 0.45 });
-  // Stepped top: the bordj's gate is the one tall thing on the front.
-  parts.push({ geo: buildBox(gW * 0.62, 0.9, gD - 0.1), pos: [0, gH + 0.45, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.64 });
-  parts.push({ geo: buildBox(gW * 0.3, 0.6, gD - 0.2), pos: [0, gH + 1.2, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.66 });
+  if (detail >= 2) {
+    // The gate's PARAPET, plain and heavy like the walls', with slits; a BRETÈCHE over the arch —
+    // the box the gate is defended from, corbelled out, its floor open to drop through.
+    parts.push({ geo: buildBox(gW, 0.9, gD - 0.1), pos: [0, gH + 0.45, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.64 });
+    parts.push({ geo: buildBox(gW + 0.04, 0.1, gD + 0.02), pos: [0, gH + 0.95, gz - 0.4 + gD / 2], mat: MAT.concrete, tone: 0.5 });
+    for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.1, 0.42, 0.04), pos: [sx * (gW / 2 - 0.6), gH + 0.45, gz - 0.4 + 0.02], mat: MAT.steel, tone: 0 });
+    const bz = gz - 0.4 - 0.32;
+    parts.push({ geo: buildBox(1.8, 1.0, 0.6), pos: [0, gH - 0.15, bz], mat: MAT.white, tone: 0.6 });
+    for (const sx of [-1, 0, 1]) parts.push({ geo: buildBox(0.16, 0.3, 0.5), pos: [sx * 0.75, gH - 0.8, bz + 0.04], mat: MAT.concrete, tone: 0.5 });   // the corbels
+    parts.push({ geo: buildBox(0.12, 0.38, 0.04), pos: [0, gH - 0.1, bz - 0.31], mat: MAT.steel, tone: 0 });
+  } else {
+    // Stepped top: the bordj's gate is the one tall thing on the front.
+    parts.push({ geo: buildBox(gW * 0.62, 0.9, gD - 0.1), pos: [0, gH + 0.45, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.64 });
+    parts.push({ geo: buildBox(gW * 0.3, 0.6, gD - 0.2), pos: [0, gH + 1.2, gz - 0.4 + gD / 2], mat: MAT.white, tone: 0.66 });
+  }
   parts.push({ geo: buildBox(gW + 0.3, 0.16, gD + 0.3), pos: [0, gH, gz - 0.4 + gD / 2], mat: MAT.concrete, tone: 0.55 });
   // Pilasters either side of the arch.
   for (const sx of [-1, 1]) {
@@ -254,8 +337,8 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   parts.push({ geo: buildSandbagWall({ length: 3.6, courses: 5, seed: seed + 8, bag, batter: 0.04 }), pos: [1.6, 0, gz - 6.4], mat: null });
 
   // ── Inside: the barracks along the back wall, the command post on the left ─
-  block(parts, R, { x: 1.5, z: hl - T - 3.4, w: 14, d: 6, h: 3.3, doorSide: -1, doors: 2, windows: 6 });
-  block(parts, R, { x: -hl + T + 3.3, z: -0.4, w: 6, d: 8, h: 3.6, doorSide: 1, doors: 1, windows: 2 });   // clear of the barracks (they overlapped by 0.5 m)
+  block(parts, R, { x: 1.5, z: hl - T - 3.4, w: 14, d: 6, h: 3.3, doorSide: -1, doors: 2, windows: 6, detail, roof: "barracks" });
+  block(parts, R, { x: -hl + T + 3.3, z: -0.4, w: 6, d: 8, h: 3.6, doorSide: 1, doors: 1, windows: 2, detail, roof: "command" });   // clear of the barracks (they overlapped by 0.5 m)
 
   // The radio mast beside the command post: a tapering lattice, guyed.
   {
@@ -291,6 +374,53 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
   parts.push({ geo: new THREE.CylinderGeometry(1.1, 1.1, 1.6, 14), pos: [hl - T - 2.2, 2.5, -hl + T + 2.2], mat: MAT.paint, tone: 0.55 });
   for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
     parts.push({ geo: buildBox(0.12, 1.7, 0.12), pos: [hl - T - 2.2 + sx * 0.8, 0.85, -hl + T + 2.2 + sz * 0.8], mat: MAT.timber, tone: 0.3 });
+  }
+
+  if (detail >= 2) {
+    // ── THE YARD'S LIFE (detail 2; the period photographs: a post is full of things) ──
+    // The PARADE GROUND: whitewashed stones in a square round the flag.
+    for (let k = 0; k < 28; k++) {
+      const t = (k % 7) / 7, e = Math.floor(k / 7), half = 2.6;
+      const [x, z] = [[-half + t * 2 * half, -half], [half, -half + t * 2 * half], [half - t * 2 * half, half], [-half, half - t * 2 * half]][e];
+      parts.push({ geo: buildBox(0.3, 0.16, 0.22), pos: [x, 0.08, -2.5 + z], rot: [0, R() * 0.6, 0], mat: MAT.white, tone: 0.65 + R() * 0.1 });
+    }
+    // The VEHICLE SHED against the right wall: posts, a lean-to of corrugated sheet falling to
+    // the yard, drums and a spare tyre under it.
+    {
+      const x0 = hl - T - 0.1, x1 = hl - T - 3.6, z0 = -4.6, z1 = 2.6, yHi = 3.0, yLo = 2.3;
+      for (const z of [z0 + 0.1, (z0 + z1) / 2, z1 - 0.1]) parts.push({ geo: buildBox(0.14, yLo, 0.14), pos: [x1 + 0.1, yLo / 2, z], mat: MAT.timber, tone: 0.3 });
+      parts.push({ geo: buildBox(0.16, 0.16, z1 - z0), pos: [x1 + 0.1, yLo + 0.08, (z0 + z1) / 2], mat: MAT.timber, tone: 0.28 });
+      const run = x0 - x1, ang = Math.atan2(yHi - yLo, run), slope = Math.hypot(run, yHi - yLo) + 0.3;
+      const sheet = buildCorrugatedPanel({ width: z1 - z0 + 0.3, height: slope, thickness: 0.022, ribs: 14, ribDepth: 0.03 });
+      // The panel stands in XY (width x, length y, ribs in z): width along the wall (Z), its
+      // length rising from the yard to the wall (+X), its face up.
+      const c = Math.cos(ang), sn = Math.sin(ang);
+      sheet.applyMatrix4(new THREE.Matrix4().makeBasis(new THREE.Vector3(0, 0, 1), new THREE.Vector3(c, sn, 0), new THREE.Vector3(-sn, c, 0)));
+      // (The panel runs 0 → length from its origin: start it at the low eave, over the posts.)
+      parts.push({ geo: sheet, pos: [x1 - 0.15 * c, yLo + 0.16 - 0.15 * sn, (z0 + z1) / 2], mat: MAT.metal, tone: 0.45 });
+      for (let k = 0; k < 4; k++) parts.push({ geo: buildOilDrum({}), pos: [hl - T - 0.6, 0, z0 + 0.6 + k * 0.62], rot: [0, R() * 3, 0], mat: MAT.paint, tone: 0.3 + R() * 0.3 });
+      parts.push({ geo: new THREE.TorusGeometry(0.36, 0.13, 8, 16), pos: [hl - T - 1.6, 0.13, z1 - 1.2], rot: [Math.PI / 2, 0, 0], mat: MAT.rubber, tone: 0.4 });
+    }
+    // A SQUAD TENT beside it: canvas walls, a pyramid roof, the door flap rolled.
+    {
+      const tx = 3.2, tz = -0.6, tw = 3.6, th = 1.1;
+      parts.push({ geo: buildBox(tw, th, tw), pos: [tx, th / 2, tz], mat: MAT.canvas, tone: 0.45 });
+      const roof = new THREE.CylinderGeometry(0.08, (tw / 2) * Math.SQRT2 + 0.2, 1.7, 4, 1).rotateY(Math.PI / 4);
+      const uv = roof.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 6, uv.getY(i) * 1.2);
+      parts.push({ geo: indexed(roof), pos: [tx, th + 0.85, tz], mat: MAT.canvas, tone: 0.5 });
+      parts.push({ geo: buildBox(1.0, 0.95, 0.04), pos: [tx, 0.48, tz - tw / 2 - 0.03], mat: MAT.steel, tone: 0.05 });   // the open door
+      parts.push({ geo: new THREE.CylinderGeometry(0.1, 0.1, 1.0, 8).rotateZ(Math.PI / 2), pos: [tx, 1.0, tz - tw / 2 - 0.08], mat: MAT.canvas, tone: 0.35 });
+      for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push(wirePart([tx + sx * tw / 2, th, tz + sz * tw / 2], [tx + sx * (tw / 2 + 0.9), 0, tz + sz * (tw / 2 + 0.9)], 0.012, { mat: MAT.hessian, tone: 0.4 }));
+    }
+    // The MORTAR PIT: a ring of sandbags, the tube on its baseplate pointing out, bombs boxed.
+    {
+      const mx = -2.6, mz = 1.4;
+      parts.push({ geo: buildSandbagRing({ radius: 1.5, courses: 3, seed: seed + 11, gapDeg: 70 }), pos: [mx, 0, mz], mat: null });
+      parts.push({ geo: buildBox(0.5, 0.06, 0.5), pos: [mx, 0.03, mz], mat: MAT.steel, tone: 0.2 });
+      parts.push({ geo: new THREE.CylinderGeometry(0.05, 0.05, 1.2, 8), pos: [mx, 0.6, mz + 0.2], rot: [0.75, 0, 0], mat: MAT.steel, tone: 0.15 });
+      for (const sx of [-1, 1]) parts.push(wirePart([mx, 0.75, mz + 0.35], [mx + sx * 0.32, 0, mz + 0.65], 0.02, { tone: 0.3 }));
+      for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.5, 0.18, 0.3), pos: [mx + 0.6, 0.09 + k * 0.18, mz - 0.5], rot: [0, R() * 0.3, 0], mat: MAT.paint, tone: 0.3 + R() * 0.1 });
+    }
   }
 
   // ── Barbed wire outside the walls: pickets and three strands ───────────────
@@ -347,6 +477,53 @@ export function buildFrenchPost({ seed = 1957 } = {}) {
       const c = [x + f.n[0] * 0.012, y, z + f.n[2] * 0.012];
       st.push(stencilPatch(cell, flatSurface(c, f.n, f.r, w, cell), { lift: 0.004 + placed * 0.0004 }));
       placed++;
+    }
+    if (detail >= 2) {
+      // WEATHER (detail 2): dust thrown up the foot of every outer wall, over the footing, and
+      // grime washed down from the coping in streaks. The faces' local frame as above.
+      for (const f of faces) {
+        for (let t = -L / 2 + 2.8; t < L / 2 - 2.4; t += 4.3) {
+          if (f.avoid?.(t)) continue;
+          const [x, z] = f.at(t);
+          st.push(stencilPatch("wallFootDust", flatSurface([x + f.n[0] * 0.014, 1.32, z + f.n[2] * 0.014], f.n, f.r, 4.6, "wallFootDust"), { lift: 0.003 }));
+        }
+        for (let k = 0; k < 6; k++) {
+          const t = (R() - 0.5) * (L - 12);
+          if (f.avoid?.(t)) continue;
+          const [x, z] = f.at(t), cell = R() < 0.5 ? "rainStreakA" : "rainStreakB";
+          st.push(stencilPatch(cell, flatSurface([x + f.n[0] * 0.016, H - 0.55, z + f.n[2] * 0.016], f.n, f.r, 0.55 + R() * 0.3, cell), { lift: 0.0035 }));
+        }
+      }
+    }
+    if (detail >= 2) {
+      // The TOWERS: grime under the corbel on their outer faces, dust above the talus.
+      for (const [tx, tz] of [[-hl + TW / 2 - 1.0, -hl + TW / 2 - 1.0], [hl - TW / 2 + 1.0, hl - TW / 2 + 1.0]]) {
+        const sx = Math.sign(tx), sz = Math.sign(tz);
+        for (const [n, r, c] of [[[sx, 0, 0], [0, 0, -sx], (o) => [tx + sx * (TW / 2 + 0.016), tz + o]], [[0, 0, sz], [sz, 0, 0], (o) => [tx + o, tz + sz * (TW / 2 + 0.016)]]]) {
+          for (const o of [-1.4, 0.3, 1.6]) {
+            const [px, pz] = c(o + (R() - 0.5) * 0.6), cell = R() < 0.5 ? "rainStreakA" : "rainStreakB";
+            st.push(stencilPatch(cell, flatSurface([px, TH - 0.75, pz], n, r, 0.6 + R() * 0.3, cell), { lift: 0.0035 }));
+          }
+          const [qx, qz] = c(0);
+          st.push(stencilPatch("wallFootDust", flatSurface([qx, 2.15, qz], n, r, TW - 0.1, "wallFootDust"), { lift: 0.003 }));
+        }
+      }
+      // The BLOCKS in the yard: dust up their feet on every face.
+      for (const b of [{ x: 1.5, z: hl - T - 3.4, w: 14, d: 6 }, { x: -hl + T + 3.3, z: -0.4, w: 6, d: 8 }]) {
+        const faces2 = [
+          { n: [0, 0, -1], r: [-1, 0, 0], len: b.w, at: (t) => [b.x + t, b.z - b.d / 2 - 0.014] },
+          { n: [0, 0, 1], r: [1, 0, 0], len: b.w, at: (t) => [b.x + t, b.z + b.d / 2 + 0.014] },
+          { n: [-1, 0, 0], r: [0, 0, 1], len: b.d, at: (t) => [b.x - b.w / 2 - 0.014, b.z + t] },
+          { n: [1, 0, 0], r: [0, 0, -1], len: b.d, at: (t) => [b.x + b.w / 2 + 0.014, b.z + t] },
+        ];
+        for (const f of faces2) {
+          const n2 = Math.max(1, Math.round(f.len / 3.4)), wd = f.len / n2;
+          for (let k = 0; k < n2; k++) {
+            const [px, pz] = f.at(-f.len / 2 + wd * (k + 0.5));
+            st.push(stencilPatch("wallFootDust", flatSurface([px, 0.95, pz], f.n, f.r, wd + 0.04, "wallFootDust"), { lift: 0.003 + k * 0.0002 }));
+          }
+        }
+      }
     }
     // Two on each tower's outer faces.
     for (const [tx, tz] of [[-hl + TW / 2 - 1.0, -hl + TW / 2 - 1.0], [hl - TW / 2 + 1.0, hl - TW / 2 + 1.0]]) {

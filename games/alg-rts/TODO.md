@@ -103,6 +103,21 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   whether the game's stencil atlas (public/textures/alg-atlas.png?) has the cockade cell.
 - [ ] Vehicle lab PAUSED (you, 2026-10-07): EBR, AMX-13 later. Next: the BUILDINGS lab.
 
+**K. BUILDINGS LAB (started 2026-10-07; building-lab.html — the vehicle lab's scene)**
+- [ ] The mechta house at detail 2 (buildMechtaHouse / house({ detail: 2 }): battered irregular
+  stone walls, the Ghoufi LOGGIA upstairs, lintels) — you: "so identical I'm not sure it's
+  better". The shape alone is too subtle at RTS range.
+- [ ] **AURÈS STONE for the rubble cell (makeAuresStoneTexture: tan flat slabs in mud mortar,
+  vs the grey cobbles) — you: "hard to decide, leave it for now".** It changes EVERY wall in
+  the game (rtsTextures makeSurfaceAtlas cell 19). Lab switch: "Pierre (les deux)".
+- [x] The FRENCH POST at detail 2 (lab only, from photos of bordjs): no merlons — a plain heavy
+  parapet with slits, buttresses, towers on a talus with a corbelled parapet (kept at the
+  merlons' height: the tower MGs show), the gatehouse's parapet and bretèche; the yard (vehicle
+  shed, squad tent, mortar pit, parade ground), the roofs in use (water tanks, stovepipes, a
+  look-out, washing, a ladder); weather stencils (wallFootDust, rainStreakA/B). 14.5k → 21.6k.
+- [ ] **The post in the GAME at detail 2 — you: "nice"; check the gate, tower guns, units out.**
+- [ ] Optimise the detail-2 pieces (you, 2026-10-07: "as optimized as possible").
+
 **J. WEAPONS, BULLETS AND BOMBS PASS (you, 2026-10-07: "we will have to work later on weapons
   and bullets and bombs")**
 - [ ] The Alouette's fire comes out of its AA-52's MUZZLE (the gun is modelled now, side mount).

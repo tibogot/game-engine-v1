@@ -130,7 +130,11 @@ async function addCrew(group, seats, renderer) {
   return { mixers, men };
 }
 
-export async function startVehicleLab(container) {
+/**
+ * `catalog` (the buildings lab passes its own): { key: { build({ detail, crew }), label } };
+ * `title`, `kind` (the panel's heading), `def` (the key shown first).
+ */
+export async function startVehicleLab(container, { catalog = VEHICLES, title = "Vehicle Lab", kind = "Véhicule", def = "halftrack", gap = 4.2 } = {}) {
   const renderer = new THREE.WebGPURenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.setSize(innerWidth, innerHeight);
@@ -178,12 +182,12 @@ export async function startVehicleLab(container) {
   scene.add(ground);
 
   // BEFORE / AFTER, 5 m apart either side of the middle, each on a turntable.
-  const vKey = VEHICLES[new URLSearchParams(location.search).get("v")] ? new URLSearchParams(location.search).get("v") : "halftrack";
-  const V = VEHICLES[vKey];
+  const vKey = catalog[new URLSearchParams(location.search).get("v")] ? new URLSearchParams(location.search).get("v") : def;
+  const V = catalog[vKey];
   const before = vehicleOf(V.build(), vKey);
   const afterGeo = V.build({ detail: 2, crew: false });
   const after = vehicleOf(afterGeo, vKey);
-  const GAP = 4.2;
+  const GAP = typeof gap === "function" ? gap(vKey) : gap;
   before.group.position.x = -GAP;
   after.group.position.x = GAP;
   scene.add(before.group, after.group);
@@ -232,9 +236,9 @@ export async function startVehicleLab(container) {
     .vlab-tag { position: fixed; z-index: 40; transform: translate(-50%, -100%); padding: 2px 8px; border-radius: 3px;
       font: 700 11px "Segoe UI", sans-serif; letter-spacing: .12em; color: #f1e6c4; background: rgba(22,17,12,.85); border: 1px solid #6b5636; pointer-events: none; }
   </style>
-  <div id="vlab"><h1>Vehicle Lab</h1>
+  <div id="vlab"><h1>${title}</h1>
     <p style="margin-top:0">${V.label} — <b>avant</b> (gauche, le jeu) / <b>après</b> (droite, détail 2).</p>
-    <h2>Véhicule</h2><div class="g">${Object.entries(VEHICLES).map(([k, v]) => `<button data-veh="${k}">${v.label}</button>`).join("")}</div>
+    <h2>${kind}</h2><div class="g">${Object.entries(catalog).map(([k, v]) => `<button data-veh="${k}">${v.label}</button>`).join("")}</div>
     <h2>Vues</h2><div class="g"><button data-v="close">Gros plan</button><button data-v="play">Zoom de jeu</button><button data-v="play2">Zoom proche</button><button data-v="spin">Rotation</button></div>
     <h2>Peinture (après)</h2><div class="g">${Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}">${p.label}</button>`).join("")}</div>
     <h2>Lumière</h2><div class="g"><button data-v="day">Jour</button><button data-v="night">Nuit</button></div>

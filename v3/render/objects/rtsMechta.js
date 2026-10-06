@@ -22,10 +22,46 @@ import { MAT, assemble, bakeContactAO, buildBox, rng } from "./rtsParts.js";
 const S = 1.3;
 
 /**
+ * DETAIL 2 (the buildings lab, 2026-10-07, from photos of Ghoufi and the Aurès villages): a dry
+ * stone WALL is never a box — it leans in as it rises (the batter), its faces and edges wander,
+ * its top is uneven. A box cut into a grid, every vertex pushed by a smooth noise of its OWN
+ * position (shared corners move together: no cracks), the top drawn in. UVs in metres / 2 per
+ * face, as buildBox's.
+ */
+const wob = (x, y, z, k) => Math.sin(x * 1.7 + z * 0.9 + k) * 0.6 + Math.sin(y * 2.3 + x * 0.7 - z * 1.3 + k * 2) * 0.4;
+function stoneMass(w, h, d, { batter = 0.07, amp = 0.05, topAmp = 0.1, seed = 0 } = {}) {
+  const sx = Math.max(2, Math.round(w / 0.8)), sy = Math.max(2, Math.round(h / 0.7)), sz = Math.max(2, Math.round(d / 0.8));
+  const g = new THREE.BoxGeometry(w, h, d, sx, sy, sz);
+  const uv = g.attributes.uv, span = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  const done = new Set();
+  for (const grp of g.groups) {
+    const [a, b] = span[grp.materialIndex];
+    for (let k = grp.start; k < grp.start + grp.count; k++) {
+      const vi = g.index.getX(k);
+      if (done.has(vi)) continue;
+      done.add(vi);
+      uv.setXY(vi, (uv.getX(vi) * a) / 2, (uv.getY(vi) * b) / 2);
+    }
+  }
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const f = (y + h / 2) / h;                          // 0 at the foot, 1 at the top
+    const inset = 1 - batter * f;
+    const n = wob(x, y, z, seed), m = wob(z, y, x, seed + 3);
+    const top = y > h / 2 - 1e-4 ? wob(x * 0.8, 0, z * 0.8, seed + 7) * topAmp : 0;
+    p.setXYZ(i, x * inset + n * amp * f, y + top, z * inset + m * amp * f);
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
+/**
  * One house, centred at (x, z), turned by `yaw`, pushing into `parts`.
  * Returns its door point (world, pre-scale) and its outline for yards.
  */
-export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1, leanTo = true }) {
+export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace = -1, leanTo = true, detail = 1 }) {
+  const D2 = detail >= 2;
   const c = Math.cos(yaw), s = Math.sin(yaw);
   // Local → world for a part authored in the house's frame.
   const put = (geo, lp, mat, tone, rot = [0, 0, 0]) => {
@@ -33,7 +69,8 @@ export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace 
     parts.push({ geo, pos: [wx, lp[1], wz], rot: [rot[0], rot[1] + yaw, rot[2]], mat, tone });
   };
   // Walls: one rubble block, the top a hair rough (the courses are not level).
-  put(buildBox(w, h, d), [0, h / 2, 0], MAT.rubble, 0.62 + R() * 0.2);
+  const wallTone = 0.62 + R() * 0.2;
+  put(D2 ? stoneMass(w, h, d, { seed: x * 0.37 + z * 0.11 }) : buildBox(w, h, d), [0, h / 2, 0], MAT.rubble, wallTone);
   // The lane front: bare stone, mud-plastered, or limewashed — the plaster a
   // skin a few cm proud, ragged at the top where it has washed off.
   const fz0 = doorFace * (d / 2 + 0.02);
@@ -78,13 +115,39 @@ export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace 
   put(buildBox(1.5, 2.2, 0.04), [dx, 1.1, fz], MAT.white, 0.5 + R() * 0.15);
   put(buildBox(0.9, 1.75, 0.05), [dx, 0.88, fz + doorFace * 0.01], MAT.timber, 0.12 + R() * 0.12);
   put(buildBox(1.2, 0.12, 0.4), [dx, 0.06, fz + doorFace * 0.2], MAT.rubble, 0.55);
+  if (D2) {
+    // The doorway's LINTEL: two rough beams over the door, their ends in the wall, proud of it;
+    // the jambs' posts either side. What makes it a door in stone, not a sticker.
+    for (const k of [0, 1]) put(buildBox(1.7, 0.12, 0.16), [dx, 2.02 + k * 0.13, fz + doorFace * (0.07 - k * 0.02)], MAT.timber, 0.2 + k * 0.08, [0, 0, (k - 0.5) * 0.03]);
+    for (const sx of [-1, 1]) put(buildBox(0.12, 1.85, 0.1), [dx + sx * 0.52, 0.93, fz + doorFace * 0.05], MAT.timber, 0.22);
+  }
   // Small openings high up: dark slots, one on each other face, some missing.
   for (const [ox, oz, ry] of [[w / 2 + 0.01, 0, Math.PI / 2], [-w / 2 - 0.01, 0, Math.PI / 2], [0, -fz, 0]]) {
     if (R() < 0.3) continue;
-    put(buildBox(0.4, 0.34, 0.04), [ox === 0 ? (R() - 0.5) * w * 0.5 : ox, h - 0.8, oz === 0 && ox !== 0 ? (R() - 0.5) * d * 0.4 : oz], MAT.steel, 0.02, [0, ry, 0]);
+    const px = ox === 0 ? (R() - 0.5) * w * 0.5 : ox, pz = oz === 0 && ox !== 0 ? (R() - 0.5) * d * 0.4 : oz;
+    put(buildBox(0.4, 0.34, 0.04), [px, h - 0.8, pz], MAT.steel, 0.02, [0, ry, 0]);
+    // Its lintel: a short beam over it, proud of the wall (detail 2).
+    if (D2) {
+      const out = ox === 0 ? [0, 0, Math.sign(pz) * 0.06] : [Math.sign(ox) * 0.06, 0, 0];
+      put(buildBox(0.7, 0.09, 0.14), [px + out[0], h - 0.58, pz + out[2]], MAT.timber, 0.22, [0, ry, 0]);
+    }
   }
   // A second storey, set back on part of the roof, with its own beams and roof.
-  if (storey2) {
+  if (storey2 && D2) {
+    // The LOGGIA (Ghoufi, the photos): an upper room open to the front — stone back and ends,
+    // the front on wooden posts under a beam, the room's dark inside behind them; its roof.
+    const w2 = w * 0.62, d2 = d * 0.85, h2 = 2.2, ox = (w - w2) / 2 * (R() < 0.5 ? -1 : 1), y0 = h + 0.26;
+    const fd = doorFace * (d2 / 2);
+    put(stoneMass(w2, h2, 0.45, { batter: 0.04, amp: 0.03, topAmp: 0.04, seed: x + 5 }), [ox, y0 + h2 / 2, -fd + doorFace * 0.22], MAT.rubble, wallTone);
+    for (const ex of [-1, 1]) put(stoneMass(0.45, h2, d2, { batter: 0.04, amp: 0.03, topAmp: 0.04, seed: x + ex }), [ox + ex * (w2 / 2 - 0.22), y0 + h2 / 2, 0], MAT.rubble, wallTone);
+    put(buildBox(w2 - 0.9, h2 - 0.1, 0.05), [ox, y0 + h2 / 2, -fd + doorFace * 0.47], MAT.steel, 0.03);              // the dark room
+    put(buildBox(w2 - 0.9, 0.06, d2 - 0.5), [ox, y0 + 0.03, doorFace * 0.2], MAT.earth, 0.35);                        // its floor
+    const np = Math.max(2, Math.round((w2 - 0.9) / 1.2));
+    for (let k = 1; k < np; k++) put(buildBox(0.16, h2 - 0.2, 0.16), [ox - (w2 - 0.9) / 2 + (k * (w2 - 0.9)) / np, y0 + (h2 - 0.2) / 2, fd - doorFace * 0.12], MAT.timber, 0.2 + R() * 0.1);
+    put(buildBox(w2 - 0.4, 0.18, 0.2), [ox, y0 + h2 - 0.1, fd - doorFace * 0.12], MAT.timber, 0.18);                   // the beam
+    put(buildBox(w2 + 0.3, 0.24, d2 + 0.3), [ox, y0 + h2 + 0.12, 0], MAT.earth, 0.5);
+    for (let k = 0; k < 4; k++) put(buildBox(0.14, 0.14, 0.34), [ox - w2 / 2 + 0.3 + k * (w2 - 0.6) / 3, y0 + h2 - 0.04, -fd - doorFace * 0.14], MAT.timber, 0.2);
+  } else if (storey2) {
     const w2 = w * 0.55, d2 = d * 0.9, h2 = 2.3, ox = (w - w2) / 2 * (R() < 0.5 ? -1 : 1);
     put(buildBox(w2, h2, d2), [ox, h + 0.26 + h2 / 2, 0], MAT.rubble, 0.64 + R() * 0.15);
     put(buildBox(w2 + 0.3, 0.24, d2 + 0.3), [ox, h + 0.26 + h2 + 0.12, 0], MAT.earth, 0.5);
@@ -109,6 +172,20 @@ export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace 
  * can stand ~1.4 m from that centre; 0.9 (1.2 m scaled) keeps him out of the wall — measured),
  * and its lean-to's; `outline` the wall line for the cover map.
  */
+/**
+ * ONE house on its own (the buildings lab): the hamlet's house with a loggia, at the origin,
+ * door to +Z, scaled like the hamlet. `detail` 1 = the game's house, 2 = the lab's.
+ */
+export function buildMechtaHouse({ seed = 7, detail = 1 } = {}) {
+  const R = rng(seed), parts = [];
+  house(parts, R, { x: 0, z: 0, yaw: 0, w: 6.4, d: 4.8, h: 2.9, storey2: true, doorFace: 1, leanTo: true, detail });
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.25, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.5 });
+  geo.scale(S, S, S);
+  geo.computeBoundingBox();
+  return geo;
+}
+
 export function houseNav(h, m = 0.9) {
   const c = Math.abs(Math.cos(h.yaw)), s = Math.abs(Math.sin(h.yaw));
   const box = (x, z, w, d) => ({ cx: x, cz: z, hx: c * w / 2 + s * d / 2 + m, hz: s * w / 2 + c * d / 2 + m });

@@ -994,6 +994,76 @@ export function makeRubbleTexture({ size = 512, seed = 149 } = {}) {
 }
 
 /**
+ * AURÈS STONE (the buildings lab, 2026-10-07 — candidate for the rubble cell; photos of Ghoufi
+ * and the Aurès villages): not round grey cobbles but FLAT SLABS of the local limestone and
+ * sandstone, honey to ochre, laid in thin courses — long, low stones (~40 x 13 cm), a course of
+ * thin ones now and then — bedded in MUD mortar of the same earth, a little darker, not black
+ * gaps. Each slab lit along its top edge, its foot in its own shadow.
+ * The lattice wraps (5 across, 15 up a 2 m cell): the tile tiles.
+ */
+export function makeAuresStoneTexture({ size = 512, seed = 163 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const NX = 5, NY = 15, P = 8;
+    // Course heights vary: every third course is thin (a packing course).
+    const pt = (ix, iy) => {
+      const wx = ((ix % NX) + NX) % NX, wy = ((iy % NY) + NY) % NY;
+      return [
+        ix + 0.5 + (hash2(wx + seed, wy * 7) - 0.5) * 0.95 + (wy % 2) * 0.45,
+        iy + 0.5 + (hash2(wx * 5, wy + seed) - 0.5) * 0.3,
+      ];
+    };
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const wx = (fbm(u * P * 3 + seed, v * P * 3, P * 3, 3) - 0.5) * 0.6;
+        const wy = (fbm(u * P * 4 + 41, v * P * 4 + seed, P * 4, 3) - 0.5) * 0.45;
+        const fx = u * NX + wx, fy = v * NY + wy;
+        const cx = Math.floor(fx), cy = Math.floor(fy);
+        let d1 = 9, d2 = 9, id = 0, oy = 0;
+        for (let j = -1; j <= 1; j++) for (let i = -1; i <= 2; i++) {
+          const [px, py] = pt(cx + i, cy + j);
+          // Slabs: far wider than tall — y distances count three times.
+          const dd = Math.hypot(fx - px, (fy - py) * 2.4);
+          if (dd < d1) { d2 = d1; d1 = dd; id = (((cx + i) % NX + NX) % NX) * 31 + (((cy + j) % NY + NY) % NY); oy = fy - py; }
+          else if (dd < d2) d2 = dd;
+        }
+        const edge = d2 - d1;
+        const tone = hash2(id + seed, id * 3 + 1);
+        const mott = fbm(u * P * 4 + seed, v * P * 4, P * 4, 3);
+        const grain = fbm(u * P * 26 + id, v * P * 10, P * 26, 2) - 0.5;   // bedding, along the slab
+        // Tan limestone to buff sandstone, greyed by weather; a few pale, a few rust-stained.
+        // (First try was honey-pink and read as BRICK: green and blue kept closer to red.)
+        const kind = hash2(id, seed + 9);
+        let r = lerp(150, 200, tone) + (mott - 0.5) * 26 + grain * 22;
+        let gg = r * (kind > 0.8 ? 0.93 : kind < 0.15 ? 0.8 : 0.87);
+        let b = r * (kind > 0.8 ? 0.82 : kind < 0.15 ? 0.6 : 0.7);
+        const blot = clamp01((fbm(u * P * 6 + id * 3, v * P * 6, P * 6, 3) - 0.64) * 4) * 0.35;
+        r *= 1 - blot * 0.3; gg *= 1 - blot * 0.32; b *= 1 - blot * 0.3;
+        // Relief: the slab's top edge lit, its underside dark (the course above overhangs).
+        const lit = clamp01(oy * 2.2 + 0.5);
+        const k = lerp(0.72, 1.1, lit);
+        r *= k; gg *= k; b *= k;
+        // MUD mortar: the same earth, darker; thin, deepest under a slab.
+        const width = lerp(0.06, 0.15, fbm(u * P * 5 + 13, v * P * 5, P * 5, 2));
+        const joint = clamp01(1 - edge / width);
+        const under = oy > 0 ? 0 : 1;
+        const jr = lerp(122, 82, under), jg = lerp(102, 66, under), jb = lerp(78, 48, under);
+        r = lerp(r, jr, joint * 0.92); gg = lerp(gg, jg, joint * 0.92); b = lerp(b, jb, joint * 0.92);
+        // Dust at the wall's foot.
+        const dust = clamp01(1 - v * 3.5) * 0.35;
+        r = lerp(r, 172, dust); gg = lerp(gg, 138, dust); b = lerp(b, 100, dust);
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
+/**
  * Dry spoil — the Aurès's ground thrown up by a shovel or graded flat: pale
  * ochre dust over a buff clay, grit, and pebbles of limestone lying in it,
  * each lit on top and shadowed at its foot. For the Algeria game's berms,
