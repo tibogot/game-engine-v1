@@ -68,7 +68,8 @@
       // slopes, then the rider (the UAL robot), mount/dismount, reins, dust.
       import * as THREE from "three";
       import GUI from "./ui/labGui.js";
-      import { buildArena, zoneAt } from "./horse-lab/arena.js";
+      import { buildArena, zoneAt as yardZoneAt } from "./horse-lab/arena.js";
+      import { buildParkour } from "./horse-lab/parkour.js";
       import { loadHorse, HorseController, HP, GEARS } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP, applyRidingData } from "./horse-lab/rider.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
@@ -115,7 +116,10 @@
       }
       scene.add(sun, sun.target);
 
-      const arena = buildArena(scene);
+      // level: the jump course (default) or the reference yard (?level=yard)
+      const LEVEL = new URLSearchParams(location.search).get("level") ?? "parkour";
+      const arena = LEVEL === "yard" ? buildArena(scene) : buildParkour(scene);
+      const zoneAt = arena.zoneAt ?? yardZoneAt;
 
       // ── Horse ────────────────────────────────────────────────────────────────
       const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? 1.75) }   /* ?hh= horse height for tests; 1.75: the irons hang low enough (~0.55 m) to get on like the reference with the riding-length strap */);
@@ -134,7 +138,8 @@
       }
       applyCoat();
       const ctrl = new HorseController(horse, arena);
-      ctrl.pos.set(0, 0, 2);
+      if (arena.spawn) { ctrl.pos.set(arena.spawn.x, 0, arena.spawn.z); ctrl.yaw = arena.spawn.yaw; }
+      else ctrl.pos.set(0, 0, 2);
       $("loading").textContent = "loading rider…";
       const riderData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
       scene.add(riderData.rig);
@@ -208,7 +213,7 @@
       };
 
       // ── Third-person camera ──────────────────────────────────────────────────
-      let camYaw = 0, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
+      let camYaw = ctrl.yaw, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
       const camPan = new THREE.Vector3();                   // animation editor: right-drag pans the view
       const camTarget = new THREE.Vector3(0, 1.8, 2);
       const canvas = renderer.domElement;
@@ -302,6 +307,7 @@
       gaits.add(HP, "turnWalk", 0.3, 2.5, 0.05).name("turn walk (rad/s)");
       gaits.add(HP, "turnGallop", 0.3, 2.5, 0.05).name("turn gallop (rad/s)");
       const dbg = gui.addFolder("Debug");
+      dbg.add({ level: LEVEL }, "level", ["parkour", "yard"]).name("level (reloads)").onChange((v) => { const u = new URL(location.href); u.searchParams.set("level", v); location.href = u.href; });
       dbg.add({ audit: () => doAudit() }, "audit").name("run motion audit");
       dbg.add(D, "camera",["follow", "left side", "right side", "front"]).name("camera");
       dbg.add(D, "timeScale", 0.05, 1.5, 0.01).name("time scale");
