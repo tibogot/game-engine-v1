@@ -240,8 +240,10 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   // ── FEU (the weapons pass, 2026-10-07: "a fire button to see how they look when they fire"):
   // the GAME's own shots and effects (projectiles + combatFx, the alg-rts weapon looks), each
   // vehicle firing from its builder's muzzle at a target 32 m ahead of it.
-  const fakeApp = { scene, renderer, camera, getWorldHeight: () => 0 };
-  const fx = createCombatFx({ app: fakeApp, style: "coh" });
+  // (The GAME's smoke: lit by the sun — litSmoke, as algCombat creates it. The first cut left it out
+  // and drew the old painted puffs; you: "the smoke doesn't look like the one in my game".)
+  const fakeApp = { scene, renderer, camera, getWorldHeight: () => 0, light: { getDirection: () => sun.position.clone().normalize(), sun, hemi: null } };
+  const fx = createCombatFx({ app: fakeApp, style: "coh", litSmoke: true });
   const shots = createProjectiles({
     app: fakeApp, fx, weapons: ALG_FIRE, tracerColours: ALG_TRACERS,
     onImpact: (t, dmg, at, owner, o) => (o?.shell ? fx.shellHit?.(at.x, at.y, at.z) : fx.bulletHit ? fx.bulletHit(at.x, at.y, at.z, { metal: true }) : fx.impact(at.x, at.y, at.z)),
@@ -273,6 +275,20 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
       sh.cd = 1 / (typeDef?.fireRate ?? 1.5);
       const from = sh.v.muzzle() ?? sh.v.group.position.clone().setY(1.6);
       shots.spawn(from, sh.target, 0, sh.owner, null, { exact: !!sh.v.muzzle(), miss: Math.random() < 0.4 });
+      if (shots.weapons[sh.owner.weapon]?.shell) sh.recoil = 1;
+    }
+    // RECOIL, as the game's (unitRenderer): the turret thrown back along its gun, the hull rocked
+    // nose-up; it snaps back at once and returns slowly (kick = recoil²).
+    for (const sh of shooters) {
+      sh.recoil = Math.max(0, (sh.recoil ?? 0) - dt * 2);
+      const kick = sh.recoil ** 2, tm = sh.v.turretMesh;
+      sh.v.group.rotation.x = -0.035 * kick;
+      if (tm) {
+        sh.base ??= tm.position.clone();
+        tm.position.copy(sh.base);
+        tm.position.x -= Math.sin(tm.rotation.y) * 0.45 * kick;
+        tm.position.z -= Math.cos(tm.rotation.y) * 0.45 * kick;
+      }
     }
     shots.update(dt, camera);
     fx.update(dt, camera);

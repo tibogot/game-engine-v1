@@ -1221,6 +1221,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const _mzLocal = new THREE.Matrix4(), _mzQ = new THREE.Quaternion(), _mzE = new THREE.Euler();
   function muzzleOf(unit, k = 0) {
     const v = views.get(unit);
+    if (v?.crowd) return rifleMuzzle(v);
     if (!v?.inst) return null;
     const x = v.xform;
     for (const part of v.inst.parts) {
@@ -1237,6 +1238,35 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       return m.p.clone().applyMatrix4(part.rel).applyMatrix4(x.matrix);
     }
     return null;
+  }
+
+  /**
+   * A SOLDIER's rifle muzzle (the weapons pass, 2026-10-07): the weapon piece placed as
+   * writePieces places it — his skeleton's weapon bone at his current pose — and the point
+   * at the barrel's front. null when his rifle is slung (a dig, a throw) or he has none.
+   */
+  const _rB = new THREE.Matrix4(), _rM = new THREE.Matrix4();
+  const muzzleLocal = new Map();   // weapon piece → its barrel's front, in its own frame
+  function rifleMuzzle(v) {
+    const P = v.crowd.pieces;
+    if (!P || !v.weapon || STOWED.test(v.cur.clip)) return null;
+    const piece = P.registry.get(`w:${v.weapon}`);
+    if (!piece) return null;
+    let ml = muzzleLocal.get(piece);
+    if (!ml) {
+      // The front 3 cm of the geometry's vertices, averaged: the bore's end, not a corner.
+      const pos = piece.im.geometry.attributes.position;
+      let zMax = -Infinity;
+      for (let i = 0; i < pos.count; i++) zMax = Math.max(zMax, pos.getZ(i));
+      const c = new THREE.Vector3(); let n = 0;
+      for (let i = 0; i < pos.count; i++) if (pos.getZ(i) > zMax - 0.03) { c.x += pos.getX(i); c.y += pos.getY(i); n++; }
+      ml = new THREE.Vector3(c.x / n, c.y / n, zMax);
+      muzzleLocal.set(piece, ml);
+    }
+    v.crowd.field.boneMatrix(v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade, piece.bone, _rB, {});
+    v.xform.updateMatrix();
+    _rM.multiplyMatrices(v.xform.matrix, P.pre).multiply(_rB).multiply(piece.K);
+    return ml.clone().applyMatrix4(_rM);
   }
 
   /** Build the visuals for one unit. Also used for units spawned at runtime. */

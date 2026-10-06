@@ -245,14 +245,16 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
         // The blast raises the dust off the ground under and ahead of the
         // gun: a low ring of puffs (dry ground — this map is all dry).
         const g = groundAt(x, z, y - 2);
-        for (let k = 0; k < 5; k++) {
-          const a = (k / 5) * Math.PI * 2 + Math.random() * 0.5, r = 1.8 + Math.random() * 1.4;
-          books.puff(x + Math.cos(a) * r, g - 0.6, z + Math.sin(a) * r, { size: 2.6, duration: 1.6 + Math.random() * 0.6 });
+        // (Smaller since the weapons pass, 2026-10-07: from the real muzzle, at the game's zoom the
+        // old ring and cloud hid the whole tank for a second after every shot.)
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2 + Math.random() * 0.6, r = 1.4 + Math.random() * 1.1;
+          books.puff(x + Math.cos(a) * r, g - 0.6, z + Math.sin(a) * r, { size: 1.9, duration: 1.3 + Math.random() * 0.5 });
         }
       }
       // A puff's card centres ~0.4 of its size above the point: start it low
       // so the smoke comes OUT of the muzzle rather than hanging over it.
-      books.puff(x, y - 1.6, z, { size: 4.2, duration: 1.9, grey: 1 });
+      books.puff(x, y - (coh ? 1.1 : 1.6), z, { size: coh ? 2.9 : 4.2, duration: coh ? 1.5 : 1.9, grey: 1 });
     },
     /** A round into the ground: a kick of dirt, no fire. */
     dirt(x, y, z, size = 1.3) {
