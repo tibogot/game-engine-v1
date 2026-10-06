@@ -90,7 +90,27 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   seated man's height, the gun at a standing gunner's chest; no bent aerial, no wire cutter
   (you). WHEELS rebuilt (you: "look bad close"): chevron bars ON the tyre, a turned combat rim;
   the half-track's front wheels too. 2.6k → 10.5k tris (crew aside).
-- [ ] NEXT VEHICLES, one at a time: GMC, EBR, AMX-13, Alouette (pilot). Then buildings.
+- [x] GMC at detail 2 (lab only, from CCKW photos): flat-topped wings, the tilt's flat roof on
+  rounded shoulders, leaf springs, winch rope, light wheels. `tilt`: CLOSED 9.3k tris, no crew
+  in the back (the cab's cheap figure) / OPEN 11.2k + 10 men on the benches.
+- [ ] **REMIND YOU: the GMC in the game — a MIX of closed and open trucks ("still not sure",
+  2026-10-07).** Then switch FR_VEHICLES gmc to detail 2 (+ crew for the open ones).
+- [x] ALOUETTE at detail 2, IN THE GAME (from photos): the centre body open above the tank
+  (fuel tank, gearbox frame), an AA-52 on its side mount, pilot + passenger as real soldiers.
+  The CANOPY GLASS is now drawn in the game (unitRenderer; only the showroom drew it — the
+  bubble was a bare frame), no shadow. 6.3k body tris (was 6.4k).
+- [ ] The Alouette's side COCKADE drew as a grey disc in the game (fine in the lab) — check
+  whether the game's stencil atlas (public/textures/alg-atlas.png?) has the cockade cell.
+- [ ] Vehicle lab PAUSED (you, 2026-10-07): EBR, AMX-13 later. Next: the BUILDINGS lab.
+
+**J. WEAPONS, BULLETS AND BOMBS PASS (you, 2026-10-07: "we will have to work later on weapons
+  and bullets and bombs")**
+- [ ] The Alouette's fire comes out of its AA-52's MUZZLE (the gun is modelled now, side mount).
+- [ ] Its BOMBS: is that CoH-like? (CoH's planes strafe/bomb as off-map calls, not unit weapons;
+  the real Alouette II carried guns / SS.11 missiles, not bombs.) Decide: keep, swap for rockets
+  or missiles, or make it a called strike.
+- [ ] Every other weapon's origin and look in the same pass: vehicle MGs from their barrels, the
+  AMX/EBR cannon from the gun, mortars, napalm, grenades — muzzle flash, tracer, impact.
 - [ ] Crew ideas: men get out when the vehicle is hit/destroyed (now they vanish with it);
   the gunner's clip firing when the vehicle fires.
 - [ ] GUNS: the Quaternius Ultimate Guns pack (assets-src/soldiers/Ultimate Guns Pack-glb, not

@@ -10,10 +10,11 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
-import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAlouette, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 /** The game's sun (alg-rts, Partly cloudy, 15:12) and a moonlit night. */
 const SUN = { dir: new THREE.Vector3(-0.739, 0.65, 0.175).normalize(), intensity: 10, color: 0xfff2dd };
@@ -52,9 +53,18 @@ const PAINTS = {
 const VEHICLES = {
   halftrack: { build: buildHalfTrack, label: "Half-track M3" },
   willys: { build: buildWillys, label: "Jeep Willys MB" },
+  gmc: { build: buildGMC, label: "Camion GMC (bâché)" },
+  gmcOpen: { build: (o) => buildGMC({ ...o, tilt: !o }), label: "Camion GMC (ouvert)" },
+  alouette: { build: buildAlouette, label: "Alouette II" },
 };
 
-/** A vehicle as the game draws it: the body, its decals, its running gear. */
+/** The canopy's glass (the showroom's): see-through, after the opaque pass, no depth write. */
+let _glass = null;
+const glassMaterial = () => _glass ??= Object.assign(new THREE.MeshStandardNodeMaterial({
+  color: 0x2a3a44, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide,
+}), { name: "CockpitGlass" });
+
+/** A vehicle as the game draws it: the body, its decals, its running gear (a helicopter: its glass, its rotors). */
 function vehicleOf(geo, key) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
@@ -68,7 +78,17 @@ function vehicleOf(geo, key) {
     gear.castShadow = gear.receiveShadow = true;
     g.add(gear);
   }
-  const tris = [geo, geo.userData.gear].reduce((n, x) => n + (x ? (x.index ? x.index.count : x.attributes.position.count) / 3 : 0), 0);
+  const rotors = [];
+  if (geo.userData.glass) { const gm = new THREE.Mesh(geo.userData.glass, glassMaterial()); gm.renderOrder = RENDER_ORDER.GLASS; g.add(gm); }
+  for (const [axis, r] of [["y", geo.userData.rotors?.main], ["x", geo.userData.rotors?.tail]]) {
+    if (!r) continue;
+    const m = new THREE.Mesh(r.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    m.position.fromArray(r.pivot);
+    m.castShadow = true;
+    g.add(m);
+    rotors.push({ m, axis });
+  }
+  const tris = [geo, geo.userData.gear, geo.userData.glass, geo.userData.rotors?.main?.geo, geo.userData.rotors?.tail?.geo].reduce((n, x) => n + (x ? (x.index ? x.index.count : x.attributes.position.count) / 3 : 0), 0);
   /** Repaint (the lab's candidates): the body and the gear's painted parts. */
   // Each tint its OWN program: three keys a node material by its graph's shape, and the tints
   // differ only in a constant — the first one compiled was drawn for all (measured in the lab).
@@ -77,7 +97,7 @@ function vehicleOf(geo, key) {
     body.material = own(rtsObjectMaterialTinted(tint), `vlab-body:${tint.join(",")}`);
     if (gear) gear.material = own(rtsRunningGearMaterial(tint, `${key}:${tint.join(",")}`), `vlab-gear:${tint.join(",")}`);
   };
-  return { group: g, tris, paint };
+  return { group: g, tris, paint, rotors };
 }
 
 /**
@@ -249,6 +269,7 @@ export async function startVehicleLab(container) {
     last = now;
     if (spin) { yaw += dt * 0.25; setYaw(); }
     for (const m of crew.mixers) m.update(dt);
+    for (const v of [before, after]) for (const r of v.rotors) r.m.rotation[r.axis] += dt * (r.axis === "y" ? 4 : 18);
     controls.update();
     [[before.group, tags[0]], [after.group, tags[1]]].forEach(([g, t]) => {
       v.set(g.position.x, 4.2, 0).project(camera);

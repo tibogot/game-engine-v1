@@ -29,6 +29,7 @@ import { rtsObjectMaterial, rtsObjectMaterialTinted } from "../../v3/render/obje
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { mayCastShadow, stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { rectOf } from "./canvasRect.js";
+import { RENDER_ORDER } from "./renderOrder.js";
 
 
 // Mesh → owning unit, for selection raycasts. A WeakMap (not mesh.userData)
@@ -112,7 +113,7 @@ function buildTemplate(gltf, { targetLength, targetHeight, excludeRotorsFromBox,
     // Shadow-cast policy lives on the unit TYPE (unitTypes.js): the shadow pass
     // redraws every caster once per CSM cascade, so a caster nobody can see still
     // costs 3 draws.
-    o.castShadow = castShadow;
+    o.castShadow = castShadow && o.name !== "Glass";   // a canopy casts no solid shadow
     o.receiveShadow = true;
     const kind = rotorKind(o, root);
     if (kind === "main") { o.name = "MainRotor"; rotors++; }
@@ -330,7 +331,7 @@ function buildInstancedType(tpl, scene) {
     im.castShadow = o.castShadow && mayCastShadow(o.material);
     im.receiveShadow = true;
     im.frustumCulled = false; // instances live anywhere; the shared bounds are meaningless
-    im.renderOrder = UNIT_ORDER; // after the silhouettes (xraySilhouette.js)
+    im.renderOrder = o.name === "Glass" ? o.renderOrder : UNIT_ORDER; // after the silhouettes (xraySilhouette.js); a canopy in its glass band
 
     // Team color (teams.js). Allocated UP FRONT, not lazily via setColorAt: three
     // decides whether to compile `vInstanceColor` into the shader by looking at
@@ -992,6 +993,18 @@ const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then
  * `thumbnailFor(key)`: false = skip that type's 3D UI thumbnail (the game
  * supplies its own picture); null = bake every type.
  */
+/** The cockpit glass every canopy shares (the showroom's). */
+let _canopyGlass = null;
+function canopyGlass() {
+  if (!_canopyGlass) {
+    _canopyGlass = new THREE.MeshStandardNodeMaterial({
+      color: 0x2a3a44, roughness: 0.08, metalness: 0.2, transparent: true, opacity: 0.32, depthWrite: false, side: THREE.DoubleSide,
+    });
+    _canopyGlass.name = "CockpitGlass";
+  }
+  return _canopyGlass;
+}
+
 export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null }) {
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
@@ -1026,6 +1039,16 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     }
     // Its own odometer per type (the channel): see rtsRunningGearMaterial.
     if (geo.userData.gear) scene.add(new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial(paint, t.typeKey ?? k)));
+    // A CANOPY (the Alouette's bubble): glass the crew shows through. The builders made it from
+    // the start, but only the showroom drew it — in the game the bubble was its bare frame
+    // (the vehicle lab, 2026-10-07). See-through, after the opaque pass, no depth write.
+    if (geo.userData.glass) {
+      const gm = new THREE.Mesh(geo.userData.glass, canopyGlass());
+      gm.name = "Glass";
+      gm.renderOrder = RENDER_ORDER.GLASS;
+      gm.castShadow = false;
+      scene.add(gm);
+    }
     // Rotors: named so the instancer spins them round their own pivots
     // (MainRotor about Y, TailRotor about X).
     const rot = geo.userData.rotors;

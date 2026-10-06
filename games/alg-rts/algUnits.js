@@ -79,7 +79,7 @@ function padEdge(m, px, pz) {
  */
 const FR_VEHICLES = {
   willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC(), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
-  amx13: () => buildAMX13(), ebr: () => buildEBR(), alouette: () => buildAlouette(),
+  amx13: () => buildAMX13(), ebr: () => buildEBR(), alouette: () => buildAlouette({ detail: 2, crew: false }),
 };
 
 /**
@@ -240,7 +240,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     barFor: (u) => !app.algSquads?.of(u),
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
-    crew: { willys: "appele", halftrack: "appele" },
+    crew: { willys: "appele", halftrack: "appele", alouette: "appele" },
     // A man down: his pool under his torso (bloodField.js, made with combat).
     onCorpse: (u, x, z, heading) => app.algCombat?.blood.pool(x, z, heading),
     // Men blown apart by a close blast (algCombat GIBS): their blood.

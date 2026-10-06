@@ -112,11 +112,14 @@ function roundedPlate(w, h, d, r = 0.028) {
  * a profile instead: the sidewall bulging out of the rim to a rounded shoulder, the tread flat;
  * UVs a few cm of the cell, so the rubber reads plain. Axis along X, indexed.
  */
-function tyre(R, w, rim = R * 0.58, seg = 28) {
-  const h = w / 2, prof = [
-    [rim, -h * 0.9], [rim + (R - rim) * 0.45, -h], [R - 0.045, -h * 0.94], [R - 0.012, -h * 0.72], [R, -h * 0.42],
-    [R, h * 0.42], [R - 0.012, h * 0.72], [R - 0.045, h * 0.94], [rim + (R - rim) * 0.45, h], [rim, h * 0.9],
-  ].map(([r, y]) => new THREE.Vector2(r, y));   // this order faces OUT (checked: 504 / 504)
+function tyre(R, w, rim = R * 0.58, seg = 28, lite = false) {
+  const h = w / 2, prof = (lite
+    // LITE (the truck: ten wheels): the sidewall's bulge and the shoulder in 6 rings, not 10.
+    ? [[rim, -h * 0.9], [R - 0.05, -h], [R, -h * 0.55], [R, h * 0.55], [R - 0.05, h], [rim, h * 0.9]]
+    : [
+      [rim, -h * 0.9], [rim + (R - rim) * 0.45, -h], [R - 0.045, -h * 0.94], [R - 0.012, -h * 0.72], [R, -h * 0.42],
+      [R, h * 0.42], [R - 0.012, h * 0.72], [R - 0.045, h * 0.94], [rim + (R - rim) * 0.45, h], [rim, h * 0.9],
+    ]).map(([r, y]) => new THREE.Vector2(r, y));   // this order faces OUT (checked: 504 / 504)
   const g = new THREE.LatheGeometry(prof, seg).rotateZ(Math.PI / 2);
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.45 + uv.getX(i) * 0.06, 0.45 + uv.getY(i) * 0.03);   // mid-cell: its edge is pale
@@ -174,13 +177,17 @@ function chevronTread(R, w, { bars = 30, depth = 0.016, skew = 0.22, fill = 0.42
  * A COMBAT RIM (detail 2), turned: the lip at the tyre's bead, the dished face, the raised ring
  * the bolts sit on, the domed hub cap — both faces. Axis along X, the bead at radius `rim`.
  */
-function combatRim(rim, w, seg = 14) {
+function combatRim(rim, w, seg = 14, lite = false) {
   const h = w / 2;
-  const prof = [
+  // LITE: the inner face flat, the outer face's lip, dish, bolt ring and cap in 10 rings.
+  const prof = (lite ? [
+    [0.001, -h * 0.75], [rim, -h * 0.9], [rim, h * 0.9], [rim + 0.008, h * 0.98], [rim * 0.9, h * 0.75],
+    [rim * 0.66, h * 0.5], [rim * 0.5, h * 0.62], [rim * 0.36, h * 0.5], [rim * 0.24, h * 0.88], [0.001, h * 0.95],
+  ] : [
     [0.001, -h * 0.75], [0.06, -h * 0.72], [0.13, -h * 0.62], [rim - 0.02, -h * 0.8], [rim + 0.008, -h * 0.98], [rim, -h * 0.9],
     [rim, h * 0.9], [rim + 0.008, h * 0.98], [rim - 0.02, h * 0.8], [rim * 0.74, h * 0.48], [rim * 0.62, h * 0.6],
     [rim * 0.52, h * 0.62], [rim * 0.44, h * 0.52], [rim * 0.34, h * 0.5], [rim * 0.28, h * 0.82], [rim * 0.16, h * 0.95], [0.001, h * 0.98],
-  ].map(([r, y]) => new THREE.Vector2(r, y));
+  ]).map(([r, y]) => new THREE.Vector2(r, y));
   const g = new THREE.LatheGeometry(prof, seg).rotateZ(Math.PI / 2);
   const uv = g.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.45 + uv.getX(i) * 0.05, 0.45 + uv.getY(i) * 0.05);
@@ -582,8 +589,15 @@ function wing(r, w, a0 = 0.15, a1 = 2.4, seg = 12) {
   return g;
 }
 
-export function buildGMC({ seed = 353 } = {}) {
+export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = {}) {
   const R = rng(seed);
+  // DETAIL 2 (the vehicle lab, 2026-10-07, from CCKW photos): the FLAT-TOPPED front wings (the
+  // banjo arches were the silhouette's mistake), the TILT's flat roof on rounded shoulders, the
+  // leaf springs, the winch's rope; light wheels. `tilt`: closed (no one in the back — you: "a
+  // closed version, we don't have to add soldiers inside") or off, its bows over men on
+  // benches. 1 = the game's, unchanged.
+  const D2 = detail >= 2;
+  const seats = [];
   const hull = [], gear = [], spins = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
   const G = (geo, pos, mat, tone, rot, spin) => { gear.push({ geo, pos, mat, tone, rot }); spins.push({ spin, n: geo.attributes.position.count }); };
@@ -616,9 +630,30 @@ export function buildGMC({ seed = 353 } = {}) {
 
   // ── The banjo wings over the front wheels, and running boards to the cab.
   for (const sx of [-1, 1]) {
-    P(wing(WR + 0.14, 0.44, 0.1, 2.5), [sx * 0.88, WR, AXF], MAT.paint, VA);
-    P(buildBox(0.36, 0.05, 1.05), [sx * 0.92, 0.92, 0.95], MAT.paint, VA * 0.9);          // running board
-    P(buildBox(0.36, 0.04, 0.42), [sx * 0.92, 1.08, 1.62], MAT.paint, VA, [0.5, 0, 0]);   // wing's tail down to the board
+    if (D2) {
+      // The CCKW's WING (the photos): the running board under the door, up over the wheel, FLAT
+      // beside the bonnet, the front curled down — a chain of plates, its rolled outer lip darker.
+      const fp = [[0.2, 1.0], [1.05, 1.0], [1.22, 1.08], [1.38, 1.3], [1.55, 1.38], [2.62, 1.38], [2.86, 1.33], [3.0, 1.2], [3.06, 1.02]];
+      for (let k = 0; k < fp.length - 1; k++) {
+        const [z0, y0] = fp[k], [z1, y1] = fp[k + 1], L = Math.hypot(z1 - z0, y1 - y0);
+        P(buildBox(0.58, 0.04, L + 0.02), [sx * 0.85, (y0 + y1) / 2, (z0 + z1) / 2], MAT.paint, VA, [Math.atan2(-(y1 - y0), z1 - z0), 0, 0]);
+      }
+      P(tube(fp.map(([z, y]) => [sx * 1.14, y - 0.015, z]), 0.026, 24, 4), [0, 0, 0], MAT.paint, VA * 0.8);
+      P(buildBox(0.03, 0.4, 1.5), [sx * 0.56, 1.18, 2.22], MAT.paint, VA * 0.85);   // the inner skirt by the bonnet
+    } else {
+      P(wing(WR + 0.14, 0.44, 0.1, 2.5), [sx * 0.88, WR, AXF], MAT.paint, VA);
+      P(buildBox(0.36, 0.05, 1.05), [sx * 0.92, 0.92, 0.95], MAT.paint, VA * 0.9);          // running board
+      P(buildBox(0.36, 0.04, 0.42), [sx * 0.92, 1.08, 1.62], MAT.paint, VA, [0.5, 0, 0]);   // wing's tail down to the board
+    }
+  }
+  if (D2) {
+    // The winch's rope wound on its drum; the LEAF SPRINGS between the rear axles.
+    P(axleX(0.18, 0.56, 12), [0, 0.95, 3.2], MAT.hessian, 0.35);
+    for (const sx of [-1, 1]) {
+      P(buildBox(0.1, 0.05, 1.55), [sx * 0.85, 0.7, (AX1 + AX2) / 2], MAT.steel, 0.2);
+      P(buildBox(0.1, 0.05, 1.1), [sx * 0.85, 0.65, (AX1 + AX2) / 2], MAT.steel, 0.18);
+      P(buildBox(0.14, 0.2, 0.24), [sx * 0.85, 0.82, (AX1 + AX2) / 2], MAT.paint, VA * 0.8);   // the hanger
+    }
   }
 
   // ── The closed cab: body, rounded roof, split windscreen, doors with windows.
@@ -639,9 +674,21 @@ export function buildGMC({ seed = 353 } = {}) {
     roof.rotateX(-Math.PI / 2).scale(CW / 2 + 0.02, 0.22, 1);   // -90: the arc on TOP (+90 hangs it below the axis)
     P(roof, [0, 2.48, CZ], MAT.paint, VA * 1.05);
   }
-  // Driver behind the glass (left-hand drive: +X).
-  P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [0.45, 2.3, CZ + 0.05], MAT.paint, VA * 1.1);
-  P(buildBox(0.4, 0.4, 0.24), [0.45, 2.02, CZ], MAT.canvas, 0.5);
+  // Driver behind the glass (left-hand drive: +X). Closed (tilt on) at detail 2: the cheap
+  // figure — behind the cab's glass a real man adds 3k triangles nobody sees.
+  if (crew || (D2 && tilt)) {
+    P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [0.45, 2.3, CZ + 0.05], MAT.paint, VA * 1.1);
+    P(buildBox(0.4, 0.4, 0.24), [0.45, 2.02, CZ], MAT.canvas, 0.5);
+  } else {
+    // The driver and the man beside him, on the cab floor (the clips' hips ~0.5 m up).
+    seats.push({ p: [0.45, 1.04, CZ - 0.05], yaw: 0, clip: "drive" }, { p: [-0.45, 1.1, CZ - 0.05], yaw: 0, clip: "sit" });
+  }
+  if (D2) {
+    // The wheel where the Driving clip's hands close (0.82 up, 0.29 ahead of his feet).
+    P(new THREE.TorusGeometry(0.21, 0.02, 6, 20), [0.41, 1.86, CZ + 0.24], MAT.rubber, 0.3, [0.64, 0, 0]);
+    P(alongZ(0.025, 0.025, 0.5, 6), [0.41, 1.72, CZ + 0.42], MAT.steel, 0.15, [0.64, 0, 0]);
+    for (const sx of [-1, 1]) P(buildBox(0.5, 0.5, 0.45), [sx * 0.45, 1.3, CZ - 0.3], MAT.canvas, 0.3);   // the seat
+  }
 
   // ── The bed: floor, low sides, and the canvas tilt over its bows.
   const BZ0 = 0.0, BZ1 = -3.55, BL = BZ0 - BZ1, BZ = (BZ0 + BZ1) / 2;
@@ -651,7 +698,85 @@ export function buildGMC({ seed = 353 } = {}) {
     for (let k = 0; k < 5; k++) P(buildBox(0.08, 0.5, 0.08), [sx * 1.12, 1.52, BZ0 - 0.2 - k * (BL - 0.4) / 4], MAT.paint, VA * 0.9);
   }
   P(buildBox(2.1, 0.5, 0.06), [0, 1.52, BZ1 + 0.03], MAT.paint, VA * 0.95);                 // tailgate
-  {
+  // The TILT's section (the photos): straight sides, rounded SHOULDERS, a near-flat crowned roof.
+  const TW = 1.13, TTOP = 2.84, SH = 0.3, TBOT = 1.42;
+  const tiltSection = (n = 5) => {
+    const pts = [[-TW, TBOT], [-TW, TTOP - SH]];
+    for (let i = 1; i < n; i++) { const a = Math.PI - (i / n) * (Math.PI / 2); pts.push([-TW + SH + Math.cos(a) * SH, TTOP - SH + Math.sin(a) * SH]); }
+    pts.push([-TW + SH, TTOP], [0, TTOP + 0.05], [TW - SH, TTOP]);
+    for (let i = 1; i < n; i++) { const a = Math.PI / 2 - (i / n) * (Math.PI / 2); pts.push([TW - SH + Math.cos(a) * SH, TTOP - SH + Math.sin(a) * SH]); }
+    pts.push([TW, TTOP - SH], [TW, TBOT]);
+    return pts;
+  };
+  if (D2 && tilt) {
+    // CLOSED: the canvas as one skin over the section, sagging between the five bows; both ends
+    // closed (the front against the cab, the rear curtain down with its roll on top).
+    const sec = tiltSection(), Z0 = BZ0 - 0.06, Z1 = BZ1 + 0.04, STEPS = 16;
+    const pos = [], uv = [], idx = [];
+    let u = 0; const us = [0];
+    for (let i = 1; i < sec.length; i++) us.push(u += Math.hypot(sec[i][0] - sec[i - 1][0], sec[i][1] - sec[i - 1][1]));
+    for (let j = 0; j <= STEPS; j++) {
+      const t = j / STEPS, z = Z0 + (Z1 - Z0) * t;
+      const sag = Math.abs(Math.sin(t * 4 * Math.PI)) * 0.045;   // the bows at the quarters
+      sec.forEach(([x, y], i) => {
+        const roof = Math.max(0, (y - (TTOP - SH)) / SH);
+        pos.push(x * (1 - sag * 0.15 * roof), y - sag * roof, z);
+        uv.push(us[i] / 2, (z - Z0) / 2);
+      });
+    }
+    const W = sec.length;
+    for (let j = 0; j < STEPS; j++) for (let i = 0; i < W - 1; i++) {
+      const a = j * W + i, b = a + 1, c = a + W, d = c + 1;
+      idx.push(a, b, c, b, d, c);   // outward (the lab: the other way showed the inside)
+    }
+    const skin = new THREE.BufferGeometry();
+    skin.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    skin.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+    skin.setIndex(idx);
+    skin.computeVertexNormals();
+    P(skin, [0, 0, 0], MAT.canvas, 0.44);
+    // The ends: the section filled.
+    const shape = new THREE.Shape(sec.map(([x, y]) => new THREE.Vector2(x, y)));
+    const end = (z, flip) => {
+      const g = new THREE.ShapeGeometry(shape, 2);
+      const a = g.attributes.uv;
+      for (let i = 0; i < a.count; i++) a.setXY(i, a.getX(i) / 2, a.getY(i) / 2);
+      if (flip) g.rotateY(Math.PI);
+      return g.translate(0, 0, z);
+    };
+    P(end(Z0, false), [0, 0, 0], MAT.canvas, 0.4);
+    P(end(Z1, true), [0, 0, 0], MAT.canvas, 0.4);
+    P(axleX(0.1, TW * 2 - 0.2, 10), [0, TTOP - 0.12, Z1 - 0.06], MAT.canvas, 0.32);   // the curtain's roll
+    // Lashings down the sides, the hem's rope.
+    for (let k = 0; k < 6; k++) for (const sx of [-1, 1]) P(buildBox(0.02, 0.32, 0.03), [sx * (TW + 0.012), TBOT + 0.14, Z0 - 0.3 - k * (Z0 - Z1 - 0.6) / 5], MAT.hessian, 0.4);
+    for (const sx of [-1, 1]) P(buildBox(0.025, 0.03, Z0 - Z1), [sx * (TW + 0.012), TBOT + 0.02, (Z0 + Z1) / 2], MAT.hessian, 0.35);
+  } else if (D2) {
+    // OPEN: the BOWS without their tilt — five steel hoops on the tilt's section, the ridge.
+    const sec = tiltSection(3);
+    for (let k = 0; k < 5; k++) {
+      const z = BZ0 - 0.2 - k * (BL - 0.4) / 4;
+      P(tube(sec.map(([x, y]) => [x * 0.985, Math.max(y, 1.62), z]), 0.022, 18, 4), [0, 0, 0], MAT.paint, VA * 0.85);
+    }
+    P(tube([[0, TTOP + 0.05, BZ0 - 0.2], [0, TTOP + 0.05, BZ1 + 0.2]], 0.02, 2, 4), [0, 0, 0], MAT.paint, VA * 0.85);   // the ridge
+    // The troop seats down both sides (the side racks folded down), on brackets.
+    for (const sx of [-1, 1]) {
+      P(roundedPlate(0.34, 0.06, BL - 0.7, 0.02), [sx * 0.86, 1.71, BZ - 0.15], MAT.timber, 0.4);
+      for (let k = 0; k < 4; k++) P(buildBox(0.05, 0.42, 0.05), [sx * 0.75, 1.48, BZ0 - 0.6 - k * (BL - 1.3) / 3], MAT.steel, 0.2);
+    }
+    // Stowage against the cab: jerrycans, an ammunition box, a crate.
+    for (const x of [-0.25, 0.05]) jerrycan(P, x, 1.49, BZ0 - 0.2, 0, 0.38 + R() * 0.08);
+    P(roundedPlate(0.42, 0.34, 0.36, 0.015), [0.42, 1.44, BZ0 - 0.3], MAT.timber, 0.45, [0, 0.15, 0]);
+    P(roundedPlate(0.32, 0.18, 0.18, 0.012), [0.38, 1.7, BZ0 - 0.3], MAT.paint, 0.32);
+    // The men on the benches, facing in (a gap or two: not a full load).
+    if (!crew) {
+      [-0.7, -1.3, -1.9, -2.5, -3.05].forEach((z, k) => {
+        for (const sx of [-1, 1]) {
+          if ((k + (sx > 0 ? 1 : 0)) % 4 === 3) continue;
+          seats.push({ p: [sx * 0.86, 1.27, z], yaw: -sx * Math.PI / 2, clip: (k + (sx > 0 ? 1 : 0)) % 2 ? "sit_talk" : "sit" });
+        }
+      });
+    }
+  } else {
     // The tilt: straight sides and a rounded top, one skin, sagging a little
     // between the bows; the rear flap rolled up.
     const TW = 1.13, TOP = 2.78, SIDE0 = 1.75;
@@ -674,25 +799,41 @@ export function buildGMC({ seed = 353 } = {}) {
     for (let k = 0; k < 6; k++) for (const sx of [-1, 1]) P(buildBox(0.02, 0.5, 0.02), [sx * (TW + 0.02), SIDE0 - 0.1, BZ0 - 0.3 - k * (BL - 0.6) / 5], MAT.hessian, 0.4);
   }
   // Seen through the open back: two men on the benches, a crate.
-  for (const sx of [-1, 1]) P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [sx * 0.62, 2.1, BZ1 + 0.6], MAT.paint, VA * 1.1);
+  if (!D2) for (const sx of [-1, 1]) P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [sx * 0.62, 2.1, BZ1 + 0.6], MAT.paint, VA * 1.1);
 
+  // The truck's WHEEL at detail 2 (the jeep's, at R 0.46): tyre, chevron tread, combat rim,
+  // six bolts; `inner` (the inside of a dual pair): the tyre and tread only.
+  // OPTIMISED (you: "as much as possible"): the lite tyre (6 rings, 14 round), 15 tread bars, the
+  // lite rim, bolts as 4-sided studs; the INNER of a dual pair a bare tyre (the outer hides it).
+  const truckWheel = (w, inner = false) => {
+    const parts = [[tyre(WR, w, 0.27, 14, true), MAT.rubber, 0.5]];
+    if (inner) return parts;
+    parts.push([chevronTread(WR, w, { bars: 15, fill: 0.5, depth: 0.022 }), MAT.rubber, 0.3], [combatRim(0.27, w, 12, true), MAT.paint, VA * 0.9]);
+    for (let k = 0; k < 6; k++) {
+      const a = (k / 6) * Math.PI * 2;
+      parts.push([new THREE.CylinderGeometry(0.016, 0.016, w * 0.8, 4).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.15, Math.sin(a) * 0.15), MAT.steel, 0.35]);
+    }
+    return parts;
+  };
   // ── Spare wheel behind the cab; mudflaps, tail lights.
-  G(axleX(WR * 0.95, 0.26, 18).rotateY(Math.PI / 2), [-0.55, 1.75, 0.05], MAT.rubber, 0.5, undefined, [0, 0, 0, 0]);
+  if (D2) for (const [g, m, t] of truckWheel(0.26)) G(g.rotateY(Math.PI / 2), [-0.55, 1.75, 0.05], m, t, undefined, [0, 0, 0, 0]);
+  else G(axleX(WR * 0.95, 0.26, 18).rotateY(Math.PI / 2), [-0.55, 1.75, 0.05], MAT.rubber, 0.5, undefined, [0, 0, 0, 0]);
   for (const sx of [-1, 1]) {
     P(buildBox(0.5, 0.4, 0.02), [sx * 0.9, 0.7, -2.85], MAT.rubber, 0.4);
     P(buildBox(0.12, 0.1, 0.05), [sx * 1.0, 1.1, BZ1 - 0.03], MAT.steel, 0.15);
   }
 
   // ── Wheels: singles in front, duals behind.
-  const wheelAt = (x, z, w) => {
+  const wheelAt = (x, z, w, inner = false) => {
     const s = [WR, z, WR, 1];
+    if (D2) { for (const [g, m, t] of truckWheel(w, inner)) G(g, [x, WR, z], m, t, undefined, s); return; }
     G(axleX(WR, w, 20), [x, WR, z], MAT.rubber, 0.5, undefined, s);
     G(axleX(0.26, w + 0.02, 14), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
     G(axleX(0.09, w + 0.05, 8), [x, WR, z], MAT.steel, 0.3, undefined, s);
   };
   for (const sx of [-1, 1]) {
     wheelAt(sx * 0.88, AXF, 0.26);
-    for (const z of [AX1, AX2]) { wheelAt(sx * 0.7, z, 0.24); wheelAt(sx * 1.0, z, 0.24); }
+    for (const z of [AX1, AX2]) { wheelAt(sx * 0.7, z, 0.24, true); wheelAt(sx * 1.0, z, 0.24); }
   }
 
   const geo = assemble(hull);
@@ -714,6 +855,7 @@ export function buildGMC({ seed = 353 } = {}) {
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
+  geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.2 * S, hz: 3.5 * S };
   return geo;
@@ -748,8 +890,14 @@ const ALOUETTE_CABIN = [
  * the renderer spins MainRotor about Y and TailRotor about X round their
  * pivots), length. Real: 9.66 m overall, 2.75 m high, 10.2 m rotor.
  */
-export function buildAlouette() {
+export function buildAlouette({ detail = 1, crew = true } = {}) {
   const st = ALOUETTE_CABIN;
+  // DETAIL 2 (the vehicle lab, 2026-10-07, from Alouette II photos): the centre body OPEN above
+  // the tank (the fuel tank and the gearbox in their frame, as the real one), an AA-52 on its
+  // side mount (the game's gunship); `crew: false` — the pilot and his passenger real soldiers
+  // in the bubble, not white balls on boxes. 1 = the game's, unchanged.
+  const D2 = detail >= 2;
+  const seats = [];
   const hull = [], main = [], tail = [];
   const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
   const DK = VA * 0.72;                 // the ALAT's dark olive, darker than the ground vehicles
@@ -787,17 +935,35 @@ export function buildAlouette() {
   for (const sx of [-1, 1]) {
     P(buildBox(0.42, 0.1, 0.44), [sx * 0.3, 0.9, 0.85], MAT.canvas, 0.25);
     P(buildBox(0.38, 0.55, 0.08), [sx * 0.3, 1.2, 0.6], MAT.canvas, 0.25);
-    P(buildBox(0.38, 0.5, 0.26), [sx * 0.3, 1.2, 0.8], MAT.canvas, 0.45);
-    P(new THREE.SphereGeometry(0.13, 12, 9), [sx * 0.3, 1.62, 0.84], MAT.white, 0.55);
-    P(buildBox(0.1, 0.1, 0.4), [sx * 0.3 + 0.12, 1.3, 1.02], MAT.canvas, 0.45, [0.6, 0, 0]);
+    if (crew) {
+      P(buildBox(0.38, 0.5, 0.26), [sx * 0.3, 1.2, 0.8], MAT.canvas, 0.45);
+      P(new THREE.SphereGeometry(0.13, 12, 9), [sx * 0.3, 1.62, 0.84], MAT.white, 0.55);
+      P(buildBox(0.1, 0.1, 0.4), [sx * 0.3 + 0.12, 1.3, 1.02], MAT.canvas, 0.45, [0.6, 0, 0]);
+    }
   }
+  // The pilot (the Driving pose: hands forward, on the cyclic and the collective) and the man
+  // beside him; feet below the cushions (the clips' hips ~0.5 m over the feet), hidden by the nose.
+  if (!crew) seats.push({ p: [0.3, 0.47, 0.82], yaw: 0, clip: "drive" }, { p: [-0.3, 0.5, 0.82], yaw: 0, clip: "sit" });
   P(buildBox(0.8, 0.34, 0.26), [0, 1.05, 1.75], MAT.steel, 0.12, [0.35, 0, 0]);
   P(new THREE.CylinderGeometry(0.018, 0.018, 0.55, 6), [0.3, 1.0, 1.2], MAT.steel, 0.2, [0.3, 0, 0]);
 
   // ── The centre body: a solid box behind the cabin, down to the skids'
   //    cross tubes; its side panels, the fuel filler, the step.
   const BZ0 = 0.36, BZ1 = -1.1, BY0 = 0.55, BY1 = 1.98, BW = 0.6;
-  P(buildBox(BW * 2, BY1 - BY0, BZ0 - BZ1), [0, (BY0 + BY1) / 2, (BZ0 + BZ1) / 2], MAT.paint, DK);
+  if (D2) {
+    // OPEN above the tank: the body to 1.5 m, the fuel tank across it, the gearbox's frame up to
+    // the fairing — four corner tubes and their diagonals.
+    const TOPB = 1.5;
+    P(buildBox(BW * 2, TOPB - BY0, BZ0 - BZ1), [0, (BY0 + TOPB) / 2, (BZ0 + BZ1) / 2], MAT.paint, DK);
+    P(axleX(0.26, 1.0, 14), [0, TOPB + 0.24, -0.45], MAT.paint, DK * 1.12);
+    for (const sx of [-1, 1]) for (const [z0, z1] of [[BZ0 - 0.06, 0.45], [BZ1 + 0.06, -0.35]]) {
+      P(strut([sx * (BW - 0.06), TOPB, z0], [sx * 0.3, BY1, z1], 0.03, 6), [0, 0, 0], MAT.steel, 0.3);
+    }
+    for (const sx of [-1, 1]) P(strut([sx * (BW - 0.06), TOPB, BZ0 - 0.06], [sx * 0.3, BY1, -0.35], 0.022, 5), [0, 0, 0], MAT.steel, 0.28);
+    P(buildBox(0.66, 0.05, 0.9), [0, BY1 - 0.02, 0.05], MAT.steel, 0.22);   // the gearbox deck
+  } else {
+    P(buildBox(BW * 2, BY1 - BY0, BZ0 - BZ1), [0, (BY0 + BY1) / 2, (BZ0 + BZ1) / 2], MAT.paint, DK);
+  }
   for (const sx of [-1, 1]) {
     // Panel seams and a hatch on each side.
     for (const z of [0.0, -0.55]) P(buildBox(0.012, BY1 - BY0 - 0.1, 0.025), [sx * (BW + 0.006), (BY0 + BY1) / 2, z], MAT.steel, 0.1);
@@ -875,6 +1041,16 @@ export function buildAlouette() {
   for (const sx of [-1, 1]) P(buildBox(0.035, 0.3, 0.36), [sx * 0.7, stabY + 0.04, stabZ], MAT.paint, DK);
   P(tube([[0, tEnd.B[1] - 0.46, TZ1 + 0.55], [0, 0.55, TZ1 + 0.2], [0, 0.42, TZ1 - 0.25], [0, 0.7, TZ1 - 0.45], [0, tEnd.B[1] - 0.2, TZ1 - 0.1]], 0.028, 16, 5), [0, 0, 0], MAT.steel, 0.3);
 
+  if (D2) {
+    // The AA-52 on its mount off the left side (the gunship): the cradle on the front cross tube,
+    // the gun along the cabin, its ammunition box; the barrel's jacket and the flash hider.
+    P(strut([1.0, 0.42, 1.25], [0.98, 0.95, 1.3], 0.03, 6), [0, 0, 0], MAT.steel, 0.3);
+    P(buildBox(0.1, 0.12, 0.62), [0.98, 1.0, 1.42], MAT.steel, 0.12);
+    P(alongZ(0.028, 0.028, 0.55, 8), [0.98, 1.02, 2.0], MAT.steel, 0.1);
+    P(alongZ(0.04, 0.04, 0.1, 8), [0.98, 1.02, 2.3], MAT.steel, 0.15);
+    P(buildBox(0.14, 0.16, 0.24), [0.98, 0.86, 1.3], MAT.paint, 0.35);
+  }
+
   // ── Skids: long, low, turned up at the front; two arched cross tubes.
   for (const sx of [-1, 1]) {
     const x = sx * 1.02;
@@ -924,8 +1100,9 @@ export function buildAlouette() {
   // ARMÉE DE TERRE down the lower nose.
   const mk = [];
   for (const sx of [-1, 1]) {
-    mk.push(stencilPatch("frCocarde", flatSurface([sx * (BW + 0.004), 1.45, -0.72], [sx, 0, 0], [0, 0, -sx], 0.46, "frCocarde"), { lift: 0.004 }));
-    mk.push(stencilPatch("frSerialWhite", flatSurface([sx * (BW + 0.004), 1.62, -0.1], [sx, 0, 0], [0, 0, -sx], 0.62, "frSerialWhite"), { lift: 0.004 }));
+    // (Detail 2: the body stops at 1.5 m — the cockade and serial come down onto it.)
+    mk.push(stencilPatch("frCocarde", flatSurface([sx * (BW + 0.004), D2 ? 1.04 : 1.45, D2 ? -0.3 : -0.72], [sx, 0, 0], [0, 0, -sx], 0.46, "frCocarde"), { lift: 0.004 }));
+    mk.push(stencilPatch("frSerialWhite", flatSurface([sx * (BW + 0.004), D2 ? 1.38 : 1.62, -0.1], [sx, 0, 0], [0, 0, -sx], 0.62, "frSerialWhite"), { lift: 0.004 }));
     const { p, n } = skinAt(st, 1.2, sx > 0 ? -0.62 : Math.PI + 0.62);
     mk.push(stencilPatch("frArmeeWhite", flatSurface(p.toArray(), n.toArray(), [0, 0, -sx], 0.9, "frArmeeWhite"), { lift: 0.01 }));
   }
@@ -935,6 +1112,7 @@ export function buildAlouette() {
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
   geo.userData.glass = glass;
+  geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   geo.userData.rotors = {
     main: { geo: mainGeo, pivot: [0, hubY * S, hubZ * S] },
     tail: { geo: tailGeo, pivot: tailPivot.map((c) => c * S) },
