@@ -54,7 +54,9 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   minimap once spotted.
 
 **F. The game around the battle (release)**
-- Dev panel hidden unless ?dev=1; Options: graphics preset (low / medium / high), UI scale.
+- Dev panel hidden unless ?dev=1; Options: graphics preset (low / medium / high).
+- [x] UI scale (Options → Taille de l'interface, 115% default; ui/uiScale.js) and a MANUEL in the
+  pause menu (7 tabs: but, ressources, unités, bâtiments, ordres, appuis, le FLN) — 2026-10-07.
 - A title screen (map / mission choice), end screens that lead somewhere, a campaign;
   English as an option.
 

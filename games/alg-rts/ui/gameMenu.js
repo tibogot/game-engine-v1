@@ -7,14 +7,18 @@
 //               advice tips), the camera (pan speed, edge scrolling) — kept between games
 //               (localStorage "algrts.options.v1"; the volumes live in the mixer's own store).
 //   COMMANDES   the keys.
+//   MANUEL      how the game works (you, 2026-10-07: "make a manual"): the goal, the resources,
+//               the units, the post and the buildings, the special orders — in French, short.
 //   RECOMMENCER a new battle (the briefing again).
 // Esc does not pause while another mode owns it (a grenade or a building being placed: their
 // own Esc cancels them).
 import { HOTKEY } from "./icons.js";
 import { GIBS } from "../algCombat.js";
+import { createUiScale } from "./uiScale.js";
 
 const STORE = "algrts.options.v1";
-const DEFAULTS = { gore: "coh", tips: true, panSpeed: 55, edgeScroll: true };
+// uiScale: the HUD's size (ui/uiScale.js). 1.15 by default (you: "the text is a bit small").
+const DEFAULTS = { gore: "coh", tips: true, panSpeed: 55, edgeScroll: true, uiScale: 1.15 };
 
 /** The saved options (defaults where none). */
 export function loadOptions() {
@@ -36,6 +40,17 @@ const CSS = `
 .alg-menu .keyt td { padding: 4px 0; border-bottom: 1px solid var(--hud-edge); }
 .alg-menu .keyt td:first-child { width: 150px; }
 .alg-menu .keyt kbd { font: 11px var(--hud-mono); padding: 0 5px; border: 1px solid var(--hud-edge-hi); border-radius: 2px; margin-right: 3px; color: var(--hud-text); }
+.alg-menu.manual { width: min(640px, 92vw); }
+.alg-menu .man { max-height: 62vh; overflow-y: auto; padding-right: 8px; margin-bottom: 14px; font-size: 13px; line-height: 1.5; color: var(--hud-text); }
+.alg-menu .man h3 { margin: 16px 0 6px; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--hud-brass); }
+.alg-menu .man h3:first-child { margin-top: 0; }
+.alg-menu .man p { margin: 0 0 8px; }
+.alg-menu .man ul { margin: 0 0 8px; padding-left: 18px; }
+.alg-menu .man li { margin: 2px 0; }
+.alg-menu .man kbd { font: 11px var(--hud-mono); padding: 0 5px; border: 1px solid var(--hud-edge-hi); border-radius: 2px; }
+.alg-menu .man .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.alg-menu .man .tabs button { padding: 4px 10px; font-size: 11px; }
+.alg-menu .man .tabs button.on { border-color: var(--hud-brass); color: #f1dfa6; }
 #alg-paused { position: fixed; top: 64px; left: calc((100vw - var(--alg-dev-w, 340px)) / 2); transform: translateX(-50%); z-index: 89;
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
@@ -56,8 +71,12 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   const opts = loadOptions();
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(opts)); } catch { /* private window */ } };
 
+  // The HUD's size (ui/uiScale.js), from the saved option.
+  const uiScale = createUiScale(opts.uiScale);
+  app.algUiScale = uiScale;
   // The saved options, applied now.
   function apply() {
+    uiScale.set(opts.uiScale);
     GIBS.mode = opts.gore;
     app.algOptions = opts;
     if (rtsCamera?.params) { rtsCamera.params.panSpeed = opts.panSpeed; rtsCamera.params.edgeScroll = opts.edgeScroll; }
@@ -109,11 +128,13 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         <button class="go" data-a="resume">Reprendre</button>
         <button data-a="options">Options</button>
         <button data-a="keys">Commandes</button>
+        <button data-a="manual">Manuel</button>
         <button data-a="restart">Recommencer la bataille</button>
       </div>`, (el) => {
       el.querySelector('[data-a="resume"]').onclick = resume;
       el.querySelector('[data-a="options"]').onclick = optionsPage;
       el.querySelector('[data-a="keys"]').onclick = keysPage;
+      el.querySelector('[data-a="manual"]').onclick = () => manualPage();
       el.querySelector('[data-a="restart"]').onclick = () => location.reload();
     });
   }
@@ -136,6 +157,9 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
           <label class="r">Corps déchiquetés<select data-k="gore"><option value="coh"${opts.gore === "coh" ? " selected" : ""}>Explosions proches</option><option value="off"${opts.gore === "off" ? " selected" : ""}>Non</option></select><output></output></label>
           <label class="r">Conseils<input type="checkbox" data-k="tips" ${opts.tips ? "checked" : ""}><output></output></label>
         </fieldset>
+        <fieldset><legend>Affichage</legend>
+          ${slider("uiScale", "Taille de l'interface", opts.uiScale, 1, 1.5, 0.05, pct)}
+        </fieldset>
         <fieldset><legend>Caméra</legend>
           ${slider("panSpeed", "Vitesse de défilement", opts.panSpeed, 25, 110, 5, (v) => `${v}`)}
           <label class="r">Défilement au bord<input type="checkbox" data-k="edgeScroll" ${opts.edgeScroll ? "checked" : ""}><output></output></label>
@@ -151,6 +175,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         if (t.type === "range") {
           const v = Number(t.value);
           if (k === "panSpeed") { opts.panSpeed = v; save(); apply(); out.textContent = `${v}`; return; }
+          if (k === "uiScale") { opts.uiScale = v; save(); apply(); out.textContent = pct(v); return; }
           out.textContent = pct(v);
           if (k === "voices") voices?.setLevel?.(v);
           else audio?.set(k, v);
@@ -188,6 +213,78 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
       <div class="row"><button data-a="back">Retour</button><button class="go" data-a="resume">Reprendre</button></div>`, (el) => {
       el.querySelector('[data-a="back"]').onclick = mainPage;
       el.querySelector('[data-a="resume"]').onclick = resume;
+    });
+  }
+
+  // ── THE MANUAL ─────────────────────────────────────────────────────────────
+  const K = (k) => `<kbd>${k}</kbd>`;
+  const MANUAL = [
+    ["But", `
+      <p>Algérie, 1957, la vallée de Tighanimine dans les Aurès. Vous commandez le poste français ; le FLN tient la montagne.</p>
+      <p><b>Les villages sont l'enjeu.</b> Chaque camp part de <b>500 points</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu.</p>
+      <ul>
+        <li><b>Prendre un village :</b> postez des hommes <b>à pied</b> dans son cercle, sans ennemi dedans.</li>
+        <li><b>Victoire immédiate :</b> détruisez la <b>grotte du FLN</b> (au nord-ouest).</li>
+        <li><b>Défaite immédiate :</b> le <b>poste</b> est détruit.</li>
+      </ul>`],
+    ["Ressources", `
+      <p>Trois ressources, en haut à droite :</p>
+      <ul>
+        <li><b>Effectifs</b> : former les unités. Le poste en rapporte toujours un peu.</li>
+        <li><b>Carburant</b> : les véhicules, l'Alouette, les échelons.</li>
+        <li><b>Munitions</b> : grenades, capacités (barrage, frappe aérienne…), la Légion.</li>
+      </ul>
+      <p>Les villages et les points de ravitaillement que vous tenez en rapportent, s'ils sont <b>reliés au poste</b> par des terrains à vous. Un GMC en patrouille ravitaille les villages tenus.</p>
+      <p><b>Échelons</b> (sur la fiche du poste) : <b>Moyens héliportés</b> (tenir 1 village) ouvre les paras, l'Alouette, le half-track ; <b>Blindés</b> (tenir 2 villages) ouvre l'EBR, l'AMX-13, la Légion.</p>`],
+    ["Unités", `
+      <ul>
+        <li><b>Appelés</b> (groupe de 6) : l'infanterie de base. Grenades, fumigène ; l'amélioration <b>FM 24/29</b> leur donne un fusil-mitrailleur.</li>
+        <li><b>Sapeurs du Génie</b> (3) : construisent, réparent, coupent les barbelés.</li>
+        <li><b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface.</li>
+        <li><b>Légionnaires</b> : l'infanterie la plus solide.</li>
+        <li><b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain.</li>
+        <li><b>Camion GMC</b> : transporte, ravitaille les villages en patrouille.</li>
+        <li><b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions.</li>
+        <li><b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments.</li>
+        <li><b>Alouette II</b> : hélicoptère armé d'une AA-52.</li>
+      </ul>
+      <p>L'infanterie se commande <b>par groupe</b> : un clic sur un homme sélectionne tout son groupe. Les unités gagnent des <b>galons</b> (vétérance) en combattant.</p>`],
+    ["Le poste et les bâtiments", `
+      <p><b>Le poste de Tighanimine</b> (le fort blanc au drapeau) : cliquez-le pour former l'infanterie, débloquer les échelons, et appeler la <b>frappe aérienne</b>. Ses tours tirent seules sur l'ennemi proche.</p>
+      <p><b>Le parc auto</b> forme les véhicules ; <b>l'hélisurface</b> les paras et l'Alouette.</p>
+      <p><b>Construire</b> (sapeurs sélectionnés) : sacs de sable, barbelés, nid de mitrailleuse, fosse de mortier, mirador, projecteur. Choisissez sur leur fiche, placez avec le clic gauche, ${K("R")} pour tourner.</p>`],
+    ["Ordres spéciaux", `
+      <ul>
+        <li><b>Couverture</b> : maintenez ${K("V")} pour voir où les hommes sont à couvert (vert) et cachés (cyan). Derrière murs et rochers on survit ; à découvert, non.</li>
+        <li><b>Garnison</b> : infanterie sélectionnée, <b>clic droit sur une maison</b> : le groupe entre et tire par les fenêtres. Une grenade dedans les fait sortir. ${K("K")} : sortir.</li>
+        <li><b>Grenade</b> ${K("G")}, <b>fumigène</b> ${K("B")} : visez avec le clic gauche. La fumée coupe la vue.</li>
+        <li><b>Retraite</b> ${K("T")} : le groupe rentre au poste, plus vite. <b>Renforcer</b> ${K("Y")} : au poste, remplace les hommes perdus.</li>
+        <li><b>Réparer</b> ${K("J")} : sapeurs sélectionnés, clic droit sur un véhicule ou un bâtiment abîmé.</li>
+        <li><b>Couper les barbelés</b> ${K("X")} : les sapeurs coupent les plus proches.</li>
+        <li><b>Patrouille</b> ${K("P")} : aller-retour sur la piste la plus proche.</li>
+      </ul>`],
+    ["Appuis", `
+      <ul>
+        <li><b>Tir de barrage</b> ${K("M")} (fosse de mortier) : six obus sur une zone ; les abris ne protègent pas.</li>
+        <li><b>Fusée éclairante</b> (fosse de mortier, la nuit) : éclaire une zone et révèle ceux qui s'y cachent.</li>
+        <li><b>Frappe aérienne</b> ${K("L")} (le poste) : un T-6 arrive en quelques secondes, mitraille une ligne jusqu'au point puis y largue deux bombes.</li>
+      </ul>
+      <p>Pour ces trois appuis : cliquez le bouton, un cercle suit la souris, <b>clic gauche</b> pour tirer, clic droit ou ${K("Échap")} pour annuler.</p>`],
+    ["Le FLN", `
+      <p>Le FLN ne se bat pas à découvert : ses bandes attendent dans les broussailles et frappent ceux qui s'approchent, puis se replient vers la montagne. Ses <b>caches d'armes</b> arment des tireurs FM : trouvez-les et détruisez-les.</p>
+      <p>Éclairez avec la jeep, avancez groupés, gardez le FM avec vous, et méfiez-vous des villages tranquilles.</p>`],
+  ];
+  function manualPage(i = 0) {
+    show(`<div class="kicker">Pause</div><h2>Manuel</h2>
+      <div class="man">
+        <div class="tabs">${MANUAL.map(([t], k) => `<button data-t="${k}"${k === i ? ' class="on"' : ""}>${t}</button>`).join("")}</div>
+        <h3>${MANUAL[i][0]}</h3>${MANUAL[i][1]}
+      </div>
+      <div class="row"><button data-a="back">Retour</button><button class="go" data-a="resume">Reprendre</button></div>`, (el) => {
+      el.classList.add("manual");
+      el.querySelector('[data-a="back"]').onclick = mainPage;
+      el.querySelector('[data-a="resume"]').onclick = resume;
+      el.querySelectorAll("[data-t]").forEach((b) => (b.onclick = () => manualPage(+b.dataset.t)));
     });
   }
 
