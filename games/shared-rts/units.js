@@ -683,7 +683,7 @@ export function createUnits({
       rebuildGrid();
       for (let i = 0; i < units.length; i++) {
         const a = units[i];
-        if (a.ghost || !a.alive || a.inside) continue; // phasing through a tangle / dead / in a building
+        if (a.ghost || !a.alive || a.inside || a.noPush) continue; // phasing through a tangle / dead / in a building / at work against a hull
         // EACH PAIR IS RESOLVED BY ITS LARGER UNIT (equal radii: the lower
         // index), so a unit looks only as far as ITS OWN size reaches: two
         // radii for the overlap, one more for how far pushes earlier in this
@@ -699,7 +699,7 @@ export function createUnits({
         const ax0 = a.position.x, az0 = a.position.z, reach2 = reach * reach;
         for (const b of _sepNear) {
           const j = b._gridIdx;
-          if (j === i || b.inside || b.radius > a.radius || (b.radius === a.radius && j < i)) continue;
+          if (j === i || b.inside || b.noPush || b.radius > a.radius || (b.radius === a.radius && j < i)) continue;
           const dx = b.position.x - ax0, dz = b.position.z - az0;
           if (dx * dx + dz * dz <= reach2) _sepIdx.push(j);
         }

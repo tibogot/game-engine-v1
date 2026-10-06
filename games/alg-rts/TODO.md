@@ -109,9 +109,23 @@ One screen, most important first. Details stay in the sections below;
   - [x] (done: algRepair.js — right-click or RÉPARER (J); 3 hp/s a man, jeep 40→120 in ~13 s; stops under fire) SAPEURS REPAIR VEHICLES (and the post / buildings, CoH engineers): no repair exists.
     Right-click a damaged friendly vehicle with sapeurs → they walk up and repair, a wrench
     button too; free, slow, stops under fire.
-  - [ ] REPAIR EFFECT (you, 2026-10-06): something cool while sapeurs repair — welding
-    sparks at the contact point (short bright streaks, a small flash, a light flicker at
-    night), a wrench chip over the vehicle; the work sound (hammer / torch).
+  - [x] REPAIR EFFECT (2026-10-06): WELDING on a vehicle — bursts of 12-16 spark STREAKS (you:
+    real sparks read as lines, not dots) on the bullets' tracer field (shared tracerField, one
+    draw; projectiles now expose their clock), fanned from the torch toward each man and down,
+    0.1-0.35 s; a white flash now and then; a flickering blue-white light at night
+    (localLights); the sappers' work sound. AGAINST THE HULL (you: "too far"): they stood by the
+    vehicle's 4.3 m collision circle, ~5 m off a 1.2 m-wide hull — now ~0.5 m off its side
+    (hull size from algWrecks.sizeOf; shared units `noPush` while there), spread along it,
+    the sparks at the plating. Sappers KNEEL at it (the crouch pose) instead of
+    the dig clip — a "repair"/"hammer" clip is used when the pack has one (packMixamo maps
+    Hammering / Repairing / Fixing / Welding / Working On Device).
+  - [x] WRECKS (2026-10-06, algWrecks.js): a destroyed vehicle stays — charred, turret
+    askew, burning 35 s then smoking 2 min; an obstacle (nav) and HARD cover (cover 0 →
+    0.95-1.0 beside it). Max 16, oldest goes. Instanced per type, made empty at load (warmed).
+    The cover: new shared cover.addCover stamps only the new circles (0.2 ms; a full bake
+    67 ms), and the terrain banks are baked once (was every re-bake: 118 → 60-70 ms).
+  - [ ] Later (sugg.): wrecks that can be blown apart further / pushed by a tank; the
+    Alouette's crash site; houses collapsing with their garrison (destruction pass).
   - [x] (done: units.js type.drive — U-turn crab angle 163° max / 23° mean → 2° / 1°; tracks pivot, wheels steer, accel + brake; 12/12 long drives arrive) VEHICLES SLIDE: they move along the path at full speed from the first frame and the
     hull turns after (shared-rts/units.js: heading follows the motion) — crabbing sideways
     mid-turn. Drive ALONG the hull: turn while rolling (wheels) or pivot first (tracks),

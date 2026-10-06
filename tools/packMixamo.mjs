@@ -175,6 +175,12 @@ const ROLES = {
   "digging": "dig",
   "shoveling": "dig",
   "hammering": "hammer",
+  // A sapper repairing a vehicle (alg-rts algRepair.js): any of these Mixamo names.
+  "repairing": "repair",
+  "fixing": "repair",
+  "welding": "repair",
+  "working on device": "repair",
+  "kneeling working": "repair",
 };
 
 // Shouldered rifle (firing / aiming clips): the butt sits this far from the

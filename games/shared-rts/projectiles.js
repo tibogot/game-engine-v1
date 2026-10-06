@@ -404,6 +404,8 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
 
   return {
     spawn, spawnArc, drawWarnings, update, tracers,
+    /** The tracers' clock (a game firing its own streaks on them: alg-rts welding sparks). */
+    get clock() { return clock; },
     /** The live per-weapon look (W_): a lab may tune it while it plays. */
     weapons: W_,
     get shellsInAir() { return shells.filter((s) => s.alive).length; },

@@ -442,6 +442,8 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
     crouchWalk: exact("rifle_crouch_walk")?.name ?? null,
     prone: exact("rifle_prone_idle")?.name ?? null,
     dig: exact("dig")?.name ?? null,
+    // repairing a vehicle (alg-rts algRepair.js): its own clip when the pack has one
+    repair: (exact("repair") ?? exact("hammer"))?.name ?? null,
     grenade: exact("grenade_throw")?.name ?? null,
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
@@ -690,7 +692,7 @@ function withSkinnedKit(source, root, names) {
 }
 
 // Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
-const STOWED = /^(dig|hammer|grenade_throw|unarmed)/;
+const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed)/;
 const USES_TOOL = /^dig/;
 
 /**
@@ -942,6 +944,8 @@ function measureGroundSpeed(root, clip) {
  */
 function soldierClip(unit, v, roles) {
   if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
+  // Repairing (alg-rts `repairing`): the repair clip, else kneeling at it — never the shovel.
+  if (unit.repairing && (roles.repair || roles.crouchIdle)) return roles.repair ?? roles.crouchIdle;
   if (unit.working && roles.dig) return roles.dig;
   const low = unit.posture;   // "stand" | "kneel" | "prone"; undefined = stand
   if (unit.isMoving) {

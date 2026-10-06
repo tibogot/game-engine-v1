@@ -189,47 +189,64 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
    * rocks are placed AFTER the level loads — baking in the constructor would
    * produce an empty grid and no error, which is the worst of both.
    */
+  let banksDone = false;
+  /** Stamp one obstacle {x, z, radius, size?, hard?}; its cell box [c0, c1, r0, r1], or null. */
+  function stampProp(p) {
+    const r = p.radius;
+    if (r < params.minPropRadius) return null;
+    // A prop gives cover in a ring AROUND it, not inside it — you cannot
+    // stand in the middle of a boulder. The band is the prop's own footprint
+    // plus coverReach, and the value falls off across it.
+    const reach = r + params.coverReach;
+    const c0 = toCell(p.x - reach), c1 = toCell(p.x + reach);
+    const r0 = toCell(p.z - reach), r1 = toCell(p.z + reach);
+    for (let cz = r0; cz <= r1; cz++) {
+      for (let cx = c0; cx <= c1; cx++) {
+        const wx = (cx * CELL) - half + CELL * 0.5;
+        const wz = (cz * CELL) - half + CELL * 0.5;
+        // Distance to the nearest point of the CELL, not to its centre. With
+        // 4 m cells and a 4 m band, a centre test drops cells the band runs
+        // straight through — a unit standing four metres from a boulder got
+        // no cover at all because the centre of its cell happened to land
+        // 0.3 m outside. Cover has to be conservative at this resolution.
+        const ex = Math.max(0, Math.abs(wx - p.x) - CELL * 0.5);
+        const ez = Math.max(0, Math.abs(wz - p.z) - CELL * 0.5);
+        const d = Math.hypot(ex, ez);
+        if (d > reach) continue;
+        // Full value at the prop's edge, nothing at the far end of the reach.
+        const t = d <= r ? 1 : 1 - (d - r) / params.coverReach;
+        // Bigger props are better cover, saturating: a 3 m boulder is not
+        // three times the protection of a 1 m one, it is just enough.
+        // A built piece says its own size (a sandbag wall is thin but it
+        // is exactly what cover is for).
+        const size = p.size ?? Math.min(1, r / 2.5);
+        const v = Math.round(255 * t * (0.45 + 0.55 * size));
+        const i = cz * n + cx;
+        if (v > coverGrid[i]) coverGrid[i] = v;
+        if (p.hard && v > hardGrid[i]) hardGrid[i] = v;
+      }
+    }
+    return [c0, c1, r0, r1];
+  }
+  /** The cover overlay's texels over a cell box (the concealment read is the costly part). */
+  function refreshOverlay(c0, c1, r0, r1) {
+    for (let cz = Math.max(0, r0); cz <= Math.min(n - 1, r1); cz++) {
+      for (let cx = Math.max(0, c0); cx <= Math.min(n - 1, c1); cx++) {
+        const i = cz * n + cx;
+        const wx = (cx * CELL) - half + CELL * 0.5;
+        const wz = (cz * CELL) - half + CELL * 0.5;
+        overlayData[i * 4] = Math.max(coverGrid[i], bankGrid[i]);
+        overlayData[i * 4 + 1] = Math.round(255 * concealmentAt(wx, wz) / params.maxConcealment);
+        overlayData[i * 4 + 3] = 255;
+      }
+    }
+    overlayTex.needsUpdate = true;
+  }
   function bake() {
     coverGrid.fill(0);
     hardGrid.fill(0);
     let stamped = 0;
-    for (const p of staticObstacles()) {
-      const r = p.radius;
-      if (r < params.minPropRadius) continue;
-      // A prop gives cover in a ring AROUND it, not inside it — you cannot
-      // stand in the middle of a boulder. The band is the prop's own footprint
-      // plus coverReach, and the value falls off across it.
-      const reach = r + params.coverReach;
-      const c0 = toCell(p.x - reach), c1 = toCell(p.x + reach);
-      const r0 = toCell(p.z - reach), r1 = toCell(p.z + reach);
-      for (let cz = r0; cz <= r1; cz++) {
-        for (let cx = c0; cx <= c1; cx++) {
-          const wx = (cx * CELL) - half + CELL * 0.5;
-          const wz = (cz * CELL) - half + CELL * 0.5;
-          // Distance to the nearest point of the CELL, not to its centre. With
-          // 4 m cells and a 4 m band, a centre test drops cells the band runs
-          // straight through — a unit standing four metres from a boulder got
-          // no cover at all because the centre of its cell happened to land
-          // 0.3 m outside. Cover has to be conservative at this resolution.
-          const ex = Math.max(0, Math.abs(wx - p.x) - CELL * 0.5);
-          const ez = Math.max(0, Math.abs(wz - p.z) - CELL * 0.5);
-          const d = Math.hypot(ex, ez);
-          if (d > reach) continue;
-          // Full value at the prop's edge, nothing at the far end of the reach.
-          const t = d <= r ? 1 : 1 - (d - r) / params.coverReach;
-          // Bigger props are better cover, saturating: a 3 m boulder is not
-          // three times the protection of a 1 m one, it is just enough.
-          // A built piece says its own size (a sandbag wall is thin but it
-          // is exactly what cover is for).
-          const size = p.size ?? Math.min(1, r / 2.5);
-          const v = Math.round(255 * t * (0.45 + 0.55 * size));
-          const i = cz * n + cx;
-          if (v > coverGrid[i]) coverGrid[i] = v;
-          if (p.hard && v > hardGrid[i]) hardGrid[i] = v;
-        }
-      }
-      stamped++;
-    }
+    for (const p of staticObstacles()) if (stampProp(p)) stamped++;
 
     // Terrain cover, for the overlay and coverAt() (the per-shot rule is
     // terrainBetween): a cell with a BANK beside it — ground 1.2 m or more
@@ -237,8 +254,11 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
     // as much again): a wadi's bank, a crest, a riser. A plain hillside rises
     // on and on and is not a bank. Not directional here (a snapshot); the
     // shot decides which side it covers.
-    bankGrid.fill(0);
-    if (params.terrainCover > 0 && app.getWorldHeight) {
+    // The ground does not change in a game: the banks are found ONCE (a re-bake for a new wall
+    // or wreck redid them every time — most of a 118 ms bake, measured alg-rts 2026-10-06).
+    if (!banksDone && params.terrainCover > 0 && app.getWorldHeight) {
+      banksDone = true;
+      bankGrid.fill(0);
       const H = app.getWorldHeight;
       for (let cz = 0; cz < n; cz++) {
         for (let cx = 0; cx < n; cx++) {
@@ -254,18 +274,16 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
         }
       }
     }
-    for (let cz = 0; cz < n; cz++) {
-      for (let cx = 0; cx < n; cx++) {
-        const i = cz * n + cx;
-        const wx = (cx * CELL) - half + CELL * 0.5;
-        const wz = (cz * CELL) - half + CELL * 0.5;
-        overlayData[i * 4] = Math.max(coverGrid[i], bankGrid[i]);
-        overlayData[i * 4 + 1] = Math.round(255 * concealmentAt(wx, wz) / params.maxConcealment);
-        overlayData[i * 4 + 3] = 255;
-      }
-    }
-    overlayTex.needsUpdate = true;
+    refreshOverlay(0, n - 1, 0, n - 1);
     return stamped;
+  }
+  /**
+   * ADD cover without a re-bake (alg-rts's vehicle wrecks): only these circles are stamped and
+   * only their cells' overlay refreshed — a whole bake is ~60 ms of hitch mid-fight (measured
+   * 2026-10-06). Removing cover still needs bake().
+   */
+  function addCover(list) {
+    for (const p of list) { const b = stampProp(p); if (b) refreshOverlay(...b); }
   }
 
   /** Cover standing at a world point, 0..1 (a bank counts, when terrain cover is on). */
@@ -383,7 +401,7 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
   }
 
   return {
-    params, bake, step, reveal,
+    params, bake, addCover, step, reveal,
     /** R = cover, G = concealment, both 0..1 over the whole world. */
     overlayTex,
     get gridSize() { return n; },

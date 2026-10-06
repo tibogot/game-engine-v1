@@ -39,6 +39,7 @@ import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
+import { createAlgWrecks } from "./algWrecks.js";
 import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
@@ -606,9 +607,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // uncapped did, in the lab) — that stays the MG's job.
   const posture = createInfantryPosture({ units, cover: coverSys.cover, params: { ...POSTURE, perRound: { ...POSTURE.perRound, rifle: 0.12 }, capByWeapon: { rifle: 0.8 } } });
   app.algPosture = posture;
+  // WRECKS (algWrecks.js): a destroyed vehicle stays, burnt, burning, as cover and an obstacle.
+  const wrecks = createAlgWrecks(app, { types: ALG_UNIT_TYPES, builders: FR_VEHICLES, paint: FR_PAINT_TINT, navGrid, cover: coverSys.cover });
+  app.algWrecks = wrecks;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
-    onDeath: (e) => { veterancy.onDeath(e); selection.remove?.(e); controlGroups?.render(); },
+    onDeath: (e) => { veterancy.onDeath(e); selection.remove?.(e); controlGroups?.render(); if (!e.isStructure && !e.type?.foot && !e.isAir) wrecks.add(e); },
     onShot: posture.onShot, onSplash: (at, r, owner) => { posture.onSplash(at, r, owner); garrison?.onSplash(at, r); },
     // The walls take some of a blast (algGarrison.js) — two grenades on a house of six: at full,
     // 4 dead; at 0.6, 0.1 (and every squad bailed out); 0.8 between, as CoH.
