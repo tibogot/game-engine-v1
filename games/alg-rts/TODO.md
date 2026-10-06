@@ -135,7 +135,7 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   AMX/EBR cannon from the gun, mortars, napalm, grenades — muzzle flash, tracer, impact.
 - [ ] Crew ideas: men get out when the vehicle is hit/destroyed (now they vanish with it);
   the gunner's clip firing when the vehicle fires.
-- [ ] GUNS: the Quaternius Ultimate Guns pack (assets-src/soldiers/Ultimate Guns Pack-glb, not
+- [x] (done 2026-10-07, weapon lab: kept ours) GUNS: the Quaternius Ultimate Guns pack (assets-src/soldiers/Ultimate Guns Pack-glb, not
   compressed) — compare a bolt-action (FLN Mauser/Lebel) and the SMG (MAT 49) against ours.
 
 ## WHAT IS LEFT — the overview (2026-10-03, you: "make a list of what is remaining")
