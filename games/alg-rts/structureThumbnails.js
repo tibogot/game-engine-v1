@@ -29,7 +29,7 @@ const walls = (box) => {
   for (const k of ["x", "z"]) { box.min[k] = Math.max(box.min[k], -16); box.max[k] = Math.min(box.max[k], 16); }
 };
 const ITEMS = [
-  ["struct:post", () => facing(kitView(buildFrenchPost())), walls],
+  ["struct:post", () => facing(kitView(buildFrenchPost({ detail: 2 }))), walls],
   ["struct:motorPool", () => facing(kitView(buildMotorPool()))],
   ["struct:helipad", () => facing(kitView(buildHelipad()))],
 ];

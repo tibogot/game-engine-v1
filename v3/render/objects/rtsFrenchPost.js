@@ -113,6 +113,50 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0, det
   }
 }
 
+/**
+ * THE AA-52 ON ITS TRIPOD (detail 2; you, 2026-10-07: "better looking machine guns on the HQ") —
+ * the French army's machine gun from 1952, what a post's towers mounted: a slab-sided receiver,
+ * the long bare barrel with its carrying handle and flash hider, the steel butt, the pistol grip,
+ * the belt from a box on the left; the tripod's three splayed legs; ammunition boxes at its feet.
+ * Real sizes (the gun 1.15 m). Authored along +Z (the muzzle), the tripod's feet on y = 0 at the
+ * origin; turned by `yaw` and set at `at`. Pushes into `parts`.
+ */
+function aa52OnTripod(parts, at, yaw, R) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const put = (geo, lp, mat, tone, rot = [0, 0, 0]) => parts.push({
+    geo, pos: [at[0] + lp[0] * c + lp[2] * s, at[1] + lp[1], at[2] - lp[0] * s + lp[2] * c], rot: [rot[0], rot[1] + yaw, rot[2]], mat, tone,
+  });
+  const tube = (a, b, r) => {
+    const wa = [at[0] + a[0] * c + a[2] * s, at[1] + a[1], at[2] - a[0] * s + a[2] * c];
+    const wb = [at[0] + b[0] * c + b[2] * s, at[1] + b[1], at[2] - b[0] * s + b[2] * c];
+    parts.push(wirePart(wa, wb, r, { tone: 0.22 }));
+  };
+  const HY = 0.62;   // the cradle's height over the feet
+  // The tripod: the rear leg long and low, the two front legs splayed; the cradle on the head.
+  tube([0, HY, 0], [0, 0, -0.6], 0.022);
+  for (const sx of [-1, 1]) tube([0, HY, 0], [sx * 0.3, 0, 0.28], 0.02);
+  put(new THREE.CylinderGeometry(0.05, 0.06, 0.1, 8), [0, HY - 0.02, 0], MAT.steel, 0.2);
+  put(buildBox(0.08, 0.06, 0.22), [0, HY + 0.05, 0.02], MAT.steel, 0.18);
+  // The gun, a hair nose-down over the cradle.
+  const gy = HY + 0.15, tilt = -0.03;
+  put(buildBox(0.075, 0.11, 0.42), [0, gy, 0.02], MAT.steel, 0.08, [tilt, 0, 0]);                 // receiver
+  put(buildBox(0.08, 0.03, 0.3), [0, gy + 0.07, 0.04], MAT.steel, 0.12, [tilt, 0, 0]);            // top cover
+  put(new THREE.CylinderGeometry(0.017, 0.017, 0.56, 8).rotateX(Math.PI / 2), [0, gy + 0.02, 0.5], MAT.steel, 0.05, [tilt, 0, 0]);   // barrel
+  put(new THREE.CylinderGeometry(0.03, 0.022, 0.1, 8).rotateX(Math.PI / 2), [0, gy + 0.025, 0.82], MAT.steel, 0.1, [tilt, 0, 0]);    // flash hider
+  put(new THREE.CylinderGeometry(0.026, 0.026, 0.08, 8).rotateX(Math.PI / 2), [0, gy + 0.02, 0.26], MAT.steel, 0.14, [tilt, 0, 0]);   // barrel nut
+  put(buildBox(0.018, 0.09, 0.03), [0, gy + 0.075, 0.38], MAT.steel, 0.1);                        // carrying handle, its post
+  put(buildBox(0.022, 0.022, 0.16), [0, gy + 0.12, 0.38], MAT.timber, 0.2);                       // and grip
+  put(buildBox(0.012, 0.05, 0.012), [0, gy + 0.07, 0.74], MAT.steel, 0.1);                        // front sight
+  put(buildBox(0.05, 0.1, 0.34), [0, gy - 0.03, -0.34], MAT.steel, 0.1, [0.14, 0, 0]);            // steel butt
+  put(buildBox(0.05, 0.13, 0.05), [0, gy - 0.12, -0.21], MAT.steel, 0.1, [0.3, 0, 0]);            // butt's monopod
+  put(buildBox(0.04, 0.12, 0.055), [0, gy - 0.1, -0.1], MAT.timber, 0.22, [-0.35, 0, 0]);         // pistol grip
+  // The belt box on the left, the belt rising into the feed.
+  put(buildBox(0.12, 0.17, 0.26), [-0.16, gy - 0.12, 0.05], MAT.paint, 0.32);
+  put(buildBox(0.03, 0.11, 0.08), [-0.085, gy - 0.02, 0.05], MAT.steel, 0.4, [0, 0, -0.5]);   // the belt (the corrugated cell read rust-orange)
+  // Spare boxes and a bag at its feet.
+  for (let k = 0; k < 2; k++) put(buildBox(0.26, 0.15, 0.12), [0.34, 0.075, -0.3 + k * 0.16], MAT.paint, 0.3 + R() * 0.1, [0, R() * 0.3, 0]);
+}
+
 /** A square tower, crenellated, with a sandbagged gun position on its roof. */
 function tower(parts, R, { x, z, W, H, seed, detail = 1 }) {
   const foot = 1.2;
@@ -154,8 +198,18 @@ function tower(parts, R, { x, z, W, H, seed, detail = 1 }) {
   // The gun: a tripod MG, barrel out over the ring toward the outside corner.
   const gx = x + Math.sign(x) * 0.2, gz = z + Math.sign(z) * 0.2;
   const yaw = Math.atan2(Math.sign(x), Math.sign(z));
-  parts.push({ geo: buildBox(0.14, 0.14, 1.3), pos: [gx + Math.sin(yaw) * 0.5, H + 1.0, gz + Math.cos(yaw) * 0.5], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.1 });
-  parts.push({ geo: buildBox(0.3, 0.26, 0.5), pos: [gx, H + 0.95, gz], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.15 });
+  if (detail >= 2) {
+    // The AA-52 on its tripod, on a sandbag step (the ring is 3 courses: the gun must clear it).
+    // (A slab of hessian read as a box: three short rows of real bags, two courses.)
+    for (let k = -1; k <= 1; k++) {
+      const ox = Math.cos(yaw) * k * 0.3, oz = -Math.sin(yaw) * k * 0.3;
+      parts.push({ geo: buildSandbagWall({ length: 1.2, courses: 2, seed: seed * 7 + k + 3, bag: { length: 0.5, width: 0.3, height: 0.18, segU: 5, segV: 3 } }), pos: [gx + ox, H + 0.12, gz + oz], rot: [0, yaw + Math.PI / 2, 0], mat: null });
+    }
+    aa52OnTripod(parts, [gx, H + 0.48, gz], yaw, R);
+  } else {
+    parts.push({ geo: buildBox(0.14, 0.14, 1.3), pos: [gx + Math.sin(yaw) * 0.5, H + 1.0, gz + Math.cos(yaw) * 0.5], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.1 });
+    parts.push({ geo: buildBox(0.3, 0.26, 0.5), pos: [gx, H + 0.95, gz], rot: [0, yaw, 0], mat: MAT.steel, tone: 0.15 });
+  }
   // Loopholes on each face, two storeys.
   for (const [nx, nz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
     for (const y of [2.4, H - 1.4]) {
@@ -278,7 +332,11 @@ export function buildFrenchPost({ seed = 1957, detail = 1 } = {}) {
   tower(parts, R, { x: hl - TW / 2 + 1.0, z: hl - TW / 2 + 1.0, W: TW, H: TH, seed: seed + 2, detail });
   // Where each tower's MG is (its breech, a metre over the roof): a game fires
   // the post's guns from there (userData.towerGuns, scaled below).
-  const towerGuns = [-1, 1].map((sg) => [sg * (hl - TW / 2 + 1.0), TH + 1.0, sg * (hl - TW / 2 + 1.0)]);
+  // (Detail 2: the AA-52's MUZZLE — the gun 0.2 m off the centre toward the outside corner, its
+  // flash hider 0.86 m out along the diagonal, 1.27 m over the roof.)
+  const towerGuns = [-1, 1].map((sg) => detail >= 2
+    ? [sg * (hl - TW / 2 + 1.0 + 0.2 + 0.86 * Math.SQRT1_2), TH + 1.27, sg * (hl - TW / 2 + 1.0 + 0.2 + 0.86 * Math.SQRT1_2)]
+    : [sg * (hl - TW / 2 + 1.0), TH + 1.0, sg * (hl - TW / 2 + 1.0)]);
 
   // ── The gatehouse ──────────────────────────────────────────────────────────
   const gH = 5.4, gW = gateW + 3.2, gD = 1.4;

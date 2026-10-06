@@ -49,7 +49,7 @@ function trackSide(G, { xc, tw, t, wheelR, wheelsZ, sprocket, idler, rollers = n
   const wheel = (cy, cz, r) => [cy, cz, r, 1];
   for (const z of wheelsZ) {
     const w = wheel(wheelR + t, z, wheelR);
-    G(d2 ? tyre(wheelR, tw * 0.8, wheelR * 0.6, 20) : axleX(wheelR, tw * 0.8, 16), [xc, wheelR + t, z], MAT.rubber, 0.5, undefined, w);
+    G(d2 ? tyre(wheelR, tw * 0.8, wheelR * 0.6, 14, true) : axleX(wheelR, tw * 0.8, 16), [xc, wheelR + t, z], MAT.rubber, 0.5, undefined, w);
     G(axleX(wheelR * 0.62, tw * 0.82, 12), [xc, wheelR + t, z], MAT.paint, paintTone, undefined, w);
     G(axleX(0.07, tw * 0.9, 8), [xc, wheelR + t, z], MAT.steel, 0.3, undefined, w);
     for (let k = 0; k < 6; k++) {
@@ -64,7 +64,7 @@ function trackSide(G, { xc, tw, t, wheelR, wheelsZ, sprocket, idler, rollers = n
     G(buildBox(tw * 0.6, 0.07, 0.07), [xc, sprocket.c[1] + Math.sin(a) * (sprocket.r - 0.01), sprocket.c[0] + Math.cos(a) * (sprocket.r - 0.01)], MAT.steel, 0.25, [a, 0, 0], sw);
   }
   const iw = wheel(idler.c[1], idler.c[0], idler.r);
-  G(d2 ? tyre(idler.r, tw * 0.8, idler.r * 0.6, 20) : axleX(idler.r, tw * 0.8, 16), [xc, idler.c[1], idler.c[0]], MAT.rubber, 0.45, undefined, iw);
+  G(d2 ? tyre(idler.r, tw * 0.8, idler.r * 0.6, 14, true) : axleX(idler.r, tw * 0.8, 16), [xc, idler.c[1], idler.c[0]], MAT.rubber, 0.45, undefined, iw);
   G(axleX(idler.r * 0.6, tw * 0.82, 12), [xc, idler.c[1], idler.c[0]], MAT.paint, paintTone, undefined, iw);
   for (const r of rollers ?? []) G(axleX(r.r, tw * 0.5, 10), [xc, r.y, r.z], MAT.rubber, 0.4, undefined, wheel(r.y, r.z, r.r));
   // BOGIES (detail 2, the reference photos): each pair of road wheels on a bracket inboard of
@@ -484,7 +484,7 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   const jeepWheel = () => {
     // Optimised (you: "optimise the jeep"): 20 segments round the tyre, 22 bars a touch wider,
     // a 14-segment rim — 13.0k → see the lab's count; the same read at any zoom we play at.
-    const parts = [[tyre(WR, 0.2, 0.2, 20), MAT.rubber, 0.5], [chevronTread(WR, 0.2, { bars: 22, fill: 0.46 }), MAT.rubber, 0.3], [combatRim(0.2, 0.2), MAT.paint, VA * 0.9]];
+    const parts = [[tyre(WR, 0.2, 0.2, 16, true), MAT.rubber, 0.5], [chevronTread(WR, 0.2, { bars: 18, fill: 0.5 }), MAT.rubber, 0.3], [combatRim(0.2, 0.2, 12, true), MAT.paint, VA * 0.9]];   // OPTIMISED 2 (lite profiles)
     // The five bolts on the rim's raised ring, a centimetre proud of it on both faces.
     for (let k = 0; k < 5; k++) {
       const a = (k / 5) * Math.PI * 2;
@@ -1418,9 +1418,9 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
     const s = [WR, z, WR, 1];
     if (D2) {
       // The jeep's wheel at the half-track's size (you: "yes" — the plate lugs read as a cog).
-      G(tyre(WR, 0.27, 0.265, 22), [x, WR, z], MAT.rubber, 0.5, undefined, s);
-      G(chevronTread(WR, 0.27, { bars: 24, fill: 0.46, depth: 0.02 }), [x, WR, z], MAT.rubber, 0.3, undefined, s);
-      G(combatRim(0.265, 0.27, 16), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
+      G(tyre(WR, 0.27, 0.265, 18, true), [x, WR, z], MAT.rubber, 0.5, undefined, s);
+      G(chevronTread(WR, 0.27, { bars: 18, fill: 0.5, depth: 0.02 }), [x, WR, z], MAT.rubber, 0.3, undefined, s);
+      G(combatRim(0.265, 0.27, 12, true), [x, WR, z], MAT.paint, VA * 0.9, undefined, s);
       for (let k = 0; k < 6; k++) {
         const a = (k / 6) * Math.PI * 2;
         G(new THREE.CylinderGeometry(0.016, 0.016, 0.19, 6).rotateZ(Math.PI / 2).translate(0, Math.cos(a) * 0.145, Math.sin(a) * 0.145), [x, WR, z], MAT.steel, 0.35, undefined, s);

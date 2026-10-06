@@ -115,8 +115,13 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   merlons' height: the tower MGs show), the gatehouse's parapet and bretèche; the yard (vehicle
   shed, squad tent, mortar pit, parade ground), the roofs in use (water tanks, stovepipes, a
   look-out, washing, a ladder); weather stencils (wallFootDust, rainStreakA/B). 14.5k → 21.6k.
-- [ ] **The post in the GAME at detail 2 — you: "nice"; check the gate, tower guns, units out.**
-- [ ] Optimise the detail-2 pieces (you, 2026-10-07: "as optimized as possible").
+- [x] The post IN THE GAME at detail 2 (showroom + its portrait). Checked: flag, the towers' AA-52s
+  fire from the muzzle (towerGuns moved), a squad trained, the gate swung, the men came out.
+- [x] AA-52 on its tripod on the towers (aa52OnTripod), on a sandbag step. ~600 tris a gun.
+- [x] Optimised: light tyre/rim on the jeep and the half-track (jeep 10.5k → 7.9k, half-track
+  20.9k → 17.4k); vehicle crews skipped beyond 135 m from the camera (CREW_FAR).
+- [x] GUN PACK checked (weapon-lab.html): modern guns (AK, M4, scoped, shotguns), 750-2,800 tris vs
+  ours 170-280, no period MG — keep the procedural weapons.
 
 **J. WEAPONS, BULLETS AND BOMBS PASS (you, 2026-10-07: "we will have to work later on weapons
   and bullets and bombs")**

@@ -171,7 +171,8 @@ const SAPPER_BUILT = new Set(["mirador", "mgNest", "searchlight", "mortarPit", "
 const START_DEFENCES = typeof location !== "undefined" && new URLSearchParams(location.search).get("defences") === "1";
 
 export const SHOWROOM = [
-  { key: "frenchPost", build: buildFrenchPost, x: BASE.x, z: BASE.z, yaw: BASE.yaw },
+  // Detail 2 (the buildings lab, 2026-10-07): the bordj — no merlons, the yard in use, AA-52s.
+  { key: "frenchPost", build: () => buildFrenchPost({ detail: 2 }), x: BASE.x, z: BASE.z, yaw: BASE.yaw },
   ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
