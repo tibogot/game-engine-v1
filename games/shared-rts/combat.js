@@ -55,6 +55,9 @@ export function createCombat({
   // (distance, radius, man) → true: a man on foot this close to a blast, if it
   // kills him, comes apart (unitRenderer gibs). None: nobody does (nam).
   gibChance = null,
+  // (unit) → the world point its gun fires from, or null (alg-rts: the vehicles' muzzles,
+  // unitRenderer.muzzleOf). None: 1.6 m over the unit, as nam.
+  unitMuzzle = null,
 }) {
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
@@ -64,6 +67,8 @@ export function createCombat({
   /** Where a shot leaves from. */
   function muzzleOf(e) {
     if (e.isStructure) return structuresRenderer.muzzleOf(e);
+    const m = unitMuzzle?.(e);
+    if (m) return m;
     return _muzzle.set(e.position.x, e.position.y + (e.isAir ? 0 : 1.6), e.position.z).clone();
   }
 
@@ -319,7 +324,7 @@ export function createCombat({
       // everything else).
       const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));
       const miss = !!hitChance && Math.random() >= hitChance(e, tgt, d) * (e.playerMove ? MOVING_ACC : 1);
-      projectiles.spawn(from, tgt, dmg, e, null, { miss });
+      projectiles.spawn(from, tgt, dmg, e, null, { miss, exact: !e.isStructure && !!unitMuzzle?.(e) });
       onShot?.(e, tgt);   // hit or miss: fire suppresses
       // A muzzle flash in a dark jungle is the loudest thing on the map.
       // This is what stops concealment being a free permanent buff: it buys

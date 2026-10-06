@@ -349,6 +349,9 @@ function buildInstancedType(tpl, scene) {
     scene.add(im);
 
     const part = { im, kind };
+    // Where this part's guns fire (the builders' userData.muzzles; the weapons pass, 2026-10-07).
+    const mz = o.geometry.userData?.muzzles;
+    if (mz?.length) part.muzzles = mz.map((m) => ({ p: new THREE.Vector3(...m.p), turret: !!m.turret }));
     if (kind) {
       // A rotor spins about ITS OWN pivot, so we rebuild its local matrix per
       // unit from the spin angle and compose it with the pivot's place in the model.
@@ -1209,6 +1212,33 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     }
   }
 
+  /**
+   * WHERE A UNIT'S GUN FIRES, in the world (the weapons pass, 2026-10-07: rounds came from 1.6 m
+   * over the hull's centre): a vehicle whose builder gave `muzzles` — its body's or its turret's,
+   * at the turret's current angle and the hull's tilt. null for everyone else (the caller keeps
+   * its own). `k` cycles a vehicle's guns.
+   */
+  const _mzLocal = new THREE.Matrix4(), _mzQ = new THREE.Quaternion(), _mzE = new THREE.Euler();
+  function muzzleOf(unit, k = 0) {
+    const v = views.get(unit);
+    if (!v?.inst) return null;
+    const x = v.xform;
+    for (const part of v.inst.parts) {
+      if (!part.muzzles) continue;
+      const m = part.muzzles[k % part.muzzles.length];
+      x.updateMatrix();
+      if (m.turret) {
+        const tp = v.inst.parts.find((q) => q.kind === "turret");
+        if (!tp) return null;
+        _mzE.copy(tp.baseEuler); _mzE.y = tp.baseEuler.y + v.turretAngle;
+        _mzLocal.compose(tp.basePos, _mzQ.setFromEuler(_mzE), tp.baseScale);
+        return m.p.clone().applyMatrix4(_mzLocal).applyMatrix4(tp.parentRel).applyMatrix4(x.matrix);
+      }
+      return m.p.clone().applyMatrix4(part.rel).applyMatrix4(x.matrix);
+    }
+    return null;
+  }
+
   /** Build the visuals for one unit. Also used for units spawned at runtime. */
   function addUnit(unit) {
     const t = unit.type;
@@ -1853,6 +1883,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     pickCrowdUnit,  // crowd soldiers have no mesh — pick them by screen proximity
     addUnit,
     sync,
+    muzzleOf,
     /** A crowd soldier's clip this frame (and the one he fades from) — for tests and the dev panel. */
     clipOf(unit) { const v = views.get(unit); return v?.cur ? { clip: v.cur.clip, from: v.prev.clip, fade: v.fade, move: !!v.move } : null; },
     /** The unit under the pointer (screen space, as of the last sync), or null. */

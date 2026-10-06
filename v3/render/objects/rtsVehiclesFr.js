@@ -369,6 +369,8 @@ export function buildEBR({ seed = 75, detail = 1 } = {}) {
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
+  // WHERE ITS GUN FIRES (the weapons pass): the 75 mm's brake (the FL-11 turret is fixed here).
+  geo.userData.muzzles = [{ p: [0, (ty + 0.5) * S, 4.4 * S] }];
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.3 * S, hz: 2.9 * S };
   return geo;
@@ -583,6 +585,8 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
   geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
+  // WHERE ITS GUN FIRES (the weapons pass): the pedestal MG's muzzle.
+  geo.userData.muzzles = [{ p: D2 ? [0, 1.95 * S, 0.55 * S] : [0, 1.52 * S, 0.22 * S] }];
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 0.8 * S, hz: 1.8 * S };
   return geo;
@@ -1128,6 +1132,9 @@ export function buildAlouette({ detail = 1, crew = true } = {}) {
     main: { geo: mainGeo, pivot: [0, hubY * S, hubZ * S] },
     tail: { geo: tailGeo, pivot: tailPivot.map((c) => c * S) },
   };
+  // WHERE ITS GUN FIRES (the weapons pass): the AA-52's flash hider on the side mount (detail 2),
+  // else under the cabin's nose.
+  geo.userData.muzzles = [{ p: D2 ? [0.98 * S, 1.02 * S, 2.38 * S] : [0.7 * S, 0.9 * S, 2.0 * S] }];
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: -2 * S, hx: 1.3 * S, hz: 4.5 * S };
   return geo;
@@ -1253,6 +1260,8 @@ export function buildAMX13({ seed = 13, detail = 1 } = {}) {
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
   geo.userData.turret = { geo: turretGeo, pivot: pivot.map((c) => c * S), muzzle: [0, gunY * S, muzzleZ * S] };
+  // WHERE ITS GUN FIRES (the weapons pass): the 75 mm's brake, in the TURRET's frame.
+  geo.userData.muzzles = [{ p: [0, gunY * S, (muzzleZ + 0.1) * S], turret: true }];
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.4 * S, hz: 2.6 * S };
   return geo;
@@ -1481,6 +1490,8 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   geo.userData.stencil = stencil;
   geo.userData.gear = gearGeo;
   geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
+  // WHERE ITS GUN FIRES (the weapons pass): the .50 on its ring over the cab.
+  geo.userData.muzzles = [{ p: [0.45 * S, 2.55 * S, 1.92 * S] }];
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.2 * S, hz: 3.2 * S };
   return geo;

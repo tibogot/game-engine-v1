@@ -223,7 +223,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
    * (rifle when there is no owner — the stress test's shots). `miss`: the
    * round (not a shell, not a rocket) goes into the dirt round him instead.
    */
-  function spawn(from, target, damage, owner, _speed = null, { miss = false } = {}) {
+  function spawn(from, target, damage, owner, _speed = null, { miss = false, exact = false } = {}) {
     const w = W_[owner?.weapon] ?? W_.rifle;
     const colour = w.shell ? TC.shell
       : owner?.team === "enemy" ? TC.green : TC.red;
@@ -233,7 +233,8 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     if (w.shell) {
       // A tank gun: the shell leaves the end of the barrel, not the hull's
       // middle, and the muzzle blast is the loudest thing in the fight.
-      if (owner && !owner.isStructure) {
+      // (`exact`: `from` IS the muzzle — a game that knows its guns, alg-rts.)
+      if (owner && !owner.isStructure && !exact) {
         _dir.set(target.position.x - owner.position.x, 0, target.position.z - owner.position.z).normalize();
         // The barrel reaches past the hull (1.1 radii puts the M48 muzzle at
         // its 5.5 m barrel tip): 0.9 of the radius left the gun

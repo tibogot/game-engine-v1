@@ -35,10 +35,13 @@ import { createAlgSmoke } from "./algSmoke.js";
  * The colours: desaturated red-orange for both sides (the ALN fought with
  * French and German arms: no Soviet green here).
  */
-const ALG_FIRE = {
+export const ALG_FIRE = {
   rifle: { speed: 100, width: 0.09, length: 1.6, tracerEvery: 6, dim: 0.45, dark: 6, jitter: 0.3, dirt: 0.9 },
   mg: { speed: 100, width: 0.12, length: 2.5, tracerEvery: 4, dim: 0.6, dark: 4, jitter: 0.8, dirt: 1.1, burst: 4, gap: 0.06, spread: 3.2 },
   cannon: { speed: 140, width: 0.35, length: 5, dim: 0.75 },
+  // The Alouette: its AA-52's bursts only — NO rockets/bombs (you, 2026-10-07: "the Alouette
+  // shouldn't keep bombs — a called-in air strike, as in CoH").
+  gunship: { speed: 100, width: 0.12, length: 2.5, tracerEvery: 3, dim: 0.6, dark: 3, jitter: 0.8, dirt: 1.1, burst: 5, gap: 0.05, spread: 3.6, rocketEvery: 0 },
 };
 /**
  * MEN BLOWN APART, the Company of Heroes 1 way (you, 2026-10-02): most deaths
@@ -52,7 +55,7 @@ const ALG_FIRE = {
 export const GIBS = { mode: typeof location !== "undefined" && new URLSearchParams(location.search).get("gore") === "0" ? "off" : "coh" };
 const gibChance = (d, r) => (GIBS.mode === "always" ? d < r : GIBS.mode === "coh" ? d < r * 0.3 || (d < r * 0.5 && Math.random() < 0.4) : false);
 
-const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
+export const ALG_TRACERS = { red: [0.95, 0.42, 0.18], green: [0.95, 0.42, 0.18] };
 
 export async function createAlgCombat(app, { units, structures: built = null, cover = null, blocksSight = null, onDeath = () => {}, onShot = null, onSplash = null, hitChance = null, splashMul = null }) {
   // The CoH look (2026-10-01, research in TODO.md): see ALG_FIRE above.
@@ -113,6 +116,8 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
   combat = createCombat({
     units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, splashMul, hitChance, gibChance, smoke,
+    // Vehicles fire from their guns (the weapons pass): the renderer knows the muzzles.
+    unitMuzzle: (e) => app.algUnits?.unitRenderer?.muzzleOf(e) ?? null,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);

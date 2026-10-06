@@ -15,6 +15,10 @@ import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
+import { createCombatFx } from "../shared-rts/combatFx.js";
+import { createProjectiles } from "../shared-rts/projectiles.js";
+import { ALG_FIRE, ALG_TRACERS } from "./algCombat.js";
+import { ALG_UNIT_TYPES } from "./algUnitTypes.js";
 
 /** The game's sun (alg-rts, Partly cloudy, 15:12) and a moonlit night. */
 const SUN = { dir: new THREE.Vector3(-0.739, 0.65, 0.175).normalize(), intensity: 10, color: 0xfff2dd };
@@ -82,7 +86,8 @@ function vehicleOf(geo, key) {
   }
   const rotors = [];
   const tur = geo.userData.turret;
-  if (tur) { const tm = new THREE.Mesh(tur.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); tm.position.fromArray(tur.pivot); tm.castShadow = tm.receiveShadow = true; g.add(tm); }
+  let turretMesh = null;
+  if (tur) { const tm = new THREE.Mesh(tur.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); tm.position.fromArray(tur.pivot); tm.castShadow = tm.receiveShadow = true; g.add(tm); turretMesh = tm; }
   if (geo.userData.glass) { const gm = new THREE.Mesh(geo.userData.glass, glassMaterial()); gm.renderOrder = RENDER_ORDER.GLASS; g.add(gm); }
   for (const [axis, r] of [["y", geo.userData.rotors?.main], ["x", geo.userData.rotors?.tail]]) {
     if (!r) continue;
@@ -101,7 +106,15 @@ function vehicleOf(geo, key) {
     body.material = own(rtsObjectMaterialTinted(tint), `vlab-body:${tint.join(",")}`);
     if (gear) gear.material = own(rtsRunningGearMaterial(tint, `${key}:${tint.join(",")}`), `vlab-gear:${tint.join(",")}`);
   };
-  return { group: g, tris, paint, rotors };
+  /** The world point a gun fires from (the builder's muzzles; a turret's turn with it). */
+  const muzzle = (k = 0) => {
+    const mz = geo.userData.muzzles;
+    if (!mz?.length) return null;
+    const m = mz[k % mz.length];
+    g.updateMatrixWorld(true);
+    return new THREE.Vector3(...m.p).applyMatrix4(m.turret && turretMesh ? turretMesh.matrixWorld : body.matrixWorld);
+  };
+  return { group: g, tris, paint, rotors, muzzle, turretMesh };
 }
 
 /**
@@ -224,6 +237,47 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     renderer.toneMappingExposure = on ? NIGHT.exposure * 0.55 : 0.55;
   }
 
+  // ── FEU (the weapons pass, 2026-10-07: "a fire button to see how they look when they fire"):
+  // the GAME's own shots and effects (projectiles + combatFx, the alg-rts weapon looks), each
+  // vehicle firing from its builder's muzzle at a target 32 m ahead of it.
+  const fakeApp = { scene, renderer, camera, getWorldHeight: () => 0 };
+  const fx = createCombatFx({ app: fakeApp, style: "coh" });
+  const shots = createProjectiles({
+    app: fakeApp, fx, weapons: ALG_FIRE, tracerColours: ALG_TRACERS,
+    onImpact: (t, dmg, at, owner, o) => (o?.shell ? fx.shellHit?.(at.x, at.y, at.z) : fx.bulletHit ? fx.bulletHit(at.x, at.y, at.z, { metal: true }) : fx.impact(at.x, at.y, at.z)),
+  });
+  const typeDef = ALG_UNIT_TYPES[vKey] ?? ALG_UNIT_TYPES[vKey.replace(/Open$/, "")] ?? null;
+  const shooters = [before, after].map((v) => ({
+    v, owner: { weapon: typeDef?.weapon ?? "mg", team: "player", position: v.group.position, radius: typeDef?.radius ?? 3, isStructure: false },
+    target: { position: new THREE.Vector3(v.group.position.x, 0, 32), isAir: false, isStructure: false, radius: 2, alive: true },
+    cd: 0,
+  }));
+  for (const sh of shooters) {
+    const t = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.4, 3.2), new THREE.MeshStandardNodeMaterial({ color: 0x4a4a3c, roughness: 0.9 }));
+    t.position.set(sh.target.position.x, 0.7, sh.target.position.z);
+    t.castShadow = true;
+    scene.add(t);
+  }
+  let firing = false;
+  const fireStep = (dt) => {
+    for (const sh of shooters) {
+      // A turret turns to its target first.
+      const tm = sh.v.turretMesh;
+      if (tm) {
+        const want = Math.atan2(sh.target.position.x - sh.v.group.position.x, sh.target.position.z - sh.v.group.position.z) - sh.v.group.rotation.y;
+        tm.rotation.y += Math.atan2(Math.sin(want - tm.rotation.y), Math.cos(want - tm.rotation.y)) * Math.min(1, dt * 4);
+      }
+      if (!firing) continue;
+      sh.cd -= dt;
+      if (sh.cd > 0) continue;
+      sh.cd = 1 / (typeDef?.fireRate ?? 1.5);
+      const from = sh.v.muzzle() ?? sh.v.group.position.clone().setY(1.6);
+      shots.spawn(from, sh.target, 0, sh.owner, null, { exact: !!sh.v.muzzle(), miss: Math.random() < 0.4 });
+    }
+    shots.update(dt, camera);
+    fx.update(dt, camera);
+  };
+
   const el = document.createElement("div");
   el.innerHTML = `<style>
     #vlab { position: fixed; left: 12px; top: 12px; z-index: 50; width: 250px; padding: 12px 14px 14px;
@@ -245,6 +299,7 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     <h2>${kind}</h2><div class="g">${Object.entries(catalog).map(([k, v]) => `<button data-veh="${k}">${v.label}</button>`).join("")}</div>
     <h2>Vues</h2><div class="g"><button data-v="close">Gros plan</button><button data-v="play">Zoom de jeu</button><button data-v="play2">Zoom proche</button><button data-v="spin">Rotation</button></div>
     <h2>Peinture (après)</h2><div class="g">${Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}">${p.label}</button>`).join("")}</div>
+    <h2>Tir</h2><div class="g"><button data-v="fire">Feu</button><button data-v="aim">Vue du tir</button></div>
     <h2>Lumière</h2><div class="g"><button data-v="day">Jour</button><button data-v="night">Nuit</button></div>
     <h2>Coût</h2><table><tr><td>Avant</td><td>${before.tris.toLocaleString()} tris</td></tr><tr><td>Après</td><td>${after.tris.toLocaleString()} tris</td></tr></table>
     <p>Le soleil, l'ombre et l'exposition du jeu ; un ciel de remplacement. Glisser pour tourner, molette pour zoomer.</p></div>`;
@@ -260,6 +315,8 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     if (v === "play") play(77, 42);
     if (v === "play2") play(32, 36);
     if (v === "spin") spin = !spin;
+    if (v === "fire") { firing = !firing; b.textContent = firing ? "Cessez le feu" : "Feu"; if (firing) { spin = false; yaw = 0; setYaw(); } }
+    if (v === "aim") { controls.target.set(0, 1.5, 14); camera.position.set(-16, 11, -6); controls.update(); }
     if (v === "day") night(false);
     if (v === "night") night(true);
   });
@@ -277,6 +334,7 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     last = now;
     if (spin) { yaw += dt * 0.25; setYaw(); }
     for (const m of crew.mixers) m.update(dt);
+    fireStep(dt);
     for (const v of [before, after]) for (const r of v.rotors) r.m.rotation[r.axis] += dt * (r.axis === "y" ? 4 : 18);
     controls.update();
     [[before.group, tags[0]], [after.group, tags[1]]].forEach(([g, t]) => {
@@ -287,5 +345,5 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     });
     renderer.render(scene, camera);
   });
-  return { renderer, scene, camera, controls, before, after, crew, paints: PAINTS, close, play, night, setYaw: (y) => { yaw = y; setYaw(); }, spin: (on) => { spin = on; } };
+  return { renderer, scene, camera, controls, before, after, crew, paints: PAINTS, fire: (on) => { firing = on; if (on) { spin = false; yaw = 0; setYaw(); } }, close, play, night, setYaw: (y) => { yaw = y; setYaw(); }, spin: (on) => { spin = on; } };
 }

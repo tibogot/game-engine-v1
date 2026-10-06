@@ -127,10 +127,16 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
 
 **J. WEAPONS, BULLETS AND BOMBS PASS (you, 2026-10-07: "we will have to work later on weapons
   and bullets and bombs")**
-- [ ] The Alouette's fire comes out of its AA-52's MUZZLE (the gun is modelled now, side mount).
-- [ ] Its BOMBS: is that CoH-like? (CoH's planes strafe/bomb as off-map calls, not unit weapons;
+- [x] VEHICLES FIRE FROM THEIR GUNS (2026-10-07): builders' userData.muzzles (jeep MG, half-track .50,
+  Alouette AA-52, EBR / AMX-13 75 mm — the AMX's in its turret's frame); unitRenderer.muzzleOf
+  (tilt + turret angle); combat `unitMuzzle`; projectiles `exact` (the cannon no longer moved its
+  start to radius x 1.1). Was: every round from 1.6 m over the hull's centre.
+- [x] The vehicle lab's FEU button: the game's own shots and effects from each muzzle at a target.
+- [x] (you: NO bombs; done: gunship rocketEvery 0, AA-52 bursts) Its BOMBS: is that CoH-like? (CoH's planes strafe/bomb as off-map calls, not unit weapons;
   the real Alouette II carried guns / SS.11 missiles, not bombs.) Decide: keep, swap for rockets
   or missiles, or make it a called strike.
+- [ ] AN AIR STRIKE as a CALL-IN (you, 2026-10-07: replaces the Alouette's bombs, CoH-style).
+- [ ] SOLDIERS fire from their rifle's muzzle (the weapon bone), not 1.6 m over their feet.
 - [ ] Every other weapon's origin and look in the same pass: vehicle MGs from their barrels, the
   AMX/EBR cannon from the gun, mortars, napalm, grenades — muzzle flash, tracer, impact.
 - [ ] Crew ideas: men get out when the vehicle is hit/destroyed (now they vanish with it);
