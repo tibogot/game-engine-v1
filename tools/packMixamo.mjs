@@ -52,7 +52,7 @@
 //   - vertex data cut to position/normal/uv/skinIndex/skinWeight, then welded
 //   - clips: tracks checked against the skeleton, redundant keys removed
 //   - ONE texture per soldier, the colour map. Normal and metal/roughness maps
-//     are dropped: the crowd renderer (games/shared-rts/crowdSkinning.js) sets
+//     are dropped: the crowd renderer (v3/render/crowdSkinning.js) sets
 //     its own normalNode, which makes three ignore any normal map, and a matte
 //     uniform seen from an RTS camera shows nothing a roughness map adds.
 //   - single-sided materials: a closed body never shows its inside.
