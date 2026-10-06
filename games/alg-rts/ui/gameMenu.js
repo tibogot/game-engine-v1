@@ -40,7 +40,7 @@ const CSS = `
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
 
-const ABILITY_NAMES = { patrol: "Patrouille", grenade: "Grenade", smoke: "Fumigène", stop: "Halte", focus: "Caméra sur la sélection", cutWire: "Couper les barbelés", cancelSite: "Annuler un chantier", retreat: "Retraite", reinforce: "Renforcer", lmg: "FM 24/29", barrage: "Tir de barrage", repair: "Réparer" };
+const ABILITY_NAMES = { patrol: "Patrouille", grenade: "Grenade", smoke: "Fumigène", stop: "Halte", focus: "Caméra sur la sélection", cutWire: "Couper les barbelés", cancelSite: "Annuler un chantier", retreat: "Retraite", reinforce: "Renforcer", lmg: "FM 24/29", barrage: "Tir de barrage", airStrike: "Frappe aérienne", repair: "Réparer" };
 
 /**
  * @param {object} o

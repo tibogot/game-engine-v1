@@ -26,6 +26,7 @@ import { POSTURE, createInfantryPosture } from "../shared-rts/infantryPosture.js
 import { createAlgGrenades } from "./algGrenades.js";
 import { createAlgFlares } from "./algFlares.js";
 import { createAlgBarrage } from "./algBarrage.js";
+import { createAlgAirStrike } from "./algAirStrike.js";
 import { createAlgVeterancy } from "./algVeterancy.js";
 import { UPGRADES } from "./algSquads.js";
 import { createAlgAI } from "./algAI.js";
@@ -490,7 +491,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         ? [{ key: "cancelSite", label: `Annuler (+${BUILD_COSTS[sel[0].key]})`, hint: `Annuler le chantier : ${BUILD_COSTS[sel[0].key]} ressources rendues.`, ready: true }]
         // The MORTAR PIT: an illumination flare at night (algFlares.js).
         // and the BARRAGE (algBarrage.js), day or night.
-        : [barrage?.ability(sel), flares?.ability(sel)].filter(Boolean)),
+        // The POST: the AIR STRIKE call-in (algAirStrike.js).
+        : [barrage?.ability(sel), flares?.ability(sel), airStrike?.ability(sel)].filter(Boolean)),
     onAbility: (key, sel) => {
       if (key === "cancelSite") build?.cancelSite(sel[0]);
       if (key === "cutWire") app.algWire?.orderCut(sel);
@@ -501,6 +503,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "smoke") grenades?.begin(sel, "smoke");
       if (key === "lmg") { for (const s of squads.squadsIn(sel)) squads.upgrade(s, "lmg"); commandCard.render(sel); }
       if (key === "barrage") barrage?.begin(sel);
+      if (key === "airStrike") airStrike?.begin(sel);
       if (key === "flare") flares?.begin(sel);
       if (key === "retreat") { for (const s of squads.squadsIn(sel)) squads.retreat(s); app.algSounds?.order?.("move", sel); commandCard.render(sel); }
       if (key === "reinforce") { for (const s of squads.squadsIn(sel)) squads.reinforce(s); commandCard.render(sel); }
@@ -517,7 +520,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let patrols = null;   // made after combat (algPatrols.js)
   let grenades = null;  // made after combat (algGrenades.js)
   let flares = null;    // the mortar pit's illumination flares (algFlares.js), after combat
-  let barrage = null;   // the mortar pit's barrage (algBarrage.js), after combat
+  let barrage = null;
+  let airStrike = null; // the post's air strike call-in (algAirStrike.js), after combat   // the mortar pit's barrage (algBarrage.js), after combat
   let build = null;     // made after the cover (algBuild.js)
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
@@ -642,6 +646,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE MORTAR BARRAGE (algBarrage.js): six bombs on a zone from the pit, for munitions.
   barrage = createAlgBarrage({ app, selection, projectiles: combat.projectiles, structures, purse: economy.french });
   app.algBarrage = barrage;
+  airStrike = createAlgAirStrike({ app, selection, projectiles: combat.projectiles, combat: combat.combat ?? combat, purse: economy.french });
+  app.algAirStrike = airStrike;
 
   // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
   // thin, back into the cave before the armour comes. ?ai=0 = without.
@@ -676,7 +682,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
-  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
+  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -690,6 +696,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     grenades.frame();
     flares?.frame();
     barrage.frame();
+    airStrike.frame();
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];

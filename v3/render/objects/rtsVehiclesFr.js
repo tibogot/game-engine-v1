@@ -1518,3 +1518,75 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
   geo.userData.footprint = { cx: 0, cz: 0, hx: 1.2 * S, hz: 3.2 * S };
   return geo;
 }
+
+// ── T-6 TEXAN ────────────────────────────────────────────────────────────────
+
+/**
+ * THE T-6 TEXAN (the air strike call-in, 2026-10-07 — you: "the Alouette shouldn't keep bombs: a
+ * called-in air strike, as in CoH"): the trainer the French air force armed by the hundred for
+ * Algeria — guns in pods under the wings, rockets or bombs on the racks. A long greenhouse canopy,
+ * the round radial engine's cowl, straight tapered wings with their dihedral, the triangular fin.
+ * Olive drab, cockades. Built along +Z (the nose), the wheels up (it only ever flies), origin at
+ * the centre of gravity. Real metres x 1.3 like everything man-made. userData.prop: the two-blade
+ * propeller on its pivot (it spins about Z).
+ */
+export function buildT6() {
+  const hull = [], prop = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const DK = VA * 0.85;
+  // Fuselage: a tapered tube, round at the engine, the tail a slim cone.
+  {
+    const prof = [[0, -4.6], [0.12, -4.5], [0.38, -3.0], [0.55, -1.0], [0.62, 0.6], [0.66, 1.6], [0.64, 2.4], [0.5, 2.62], [0.001, 2.64]]
+      .map(([r, y]) => new THREE.Vector2(r, y));
+    const g = new THREE.LatheGeometry(prof, 14).rotateX(Math.PI / 2);
+    const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 2, uv.getY(i) * 3.5);
+    P(indexed(g), [0, 0, 0], MAT.paint, DK);
+  }
+  // The engine's cowl ring and the exhaust stub.
+  P(alongZ(0.7, 0.7, 0.5, 16), [0, 0, 2.2], MAT.paint, DK * 0.85);
+  P(alongZ(0.06, 0.06, 0.5, 6), [0.55, -0.35, 1.8], MAT.steel, 0.2);
+  // The long canopy: a glazed tube with its frames.
+  P(roundedPlate(0.62, 0.5, 3.0, 0.2), [0, 0.6, 0.0], MAT.steel, 0.05);
+  for (const z of [-1.3, -0.4, 0.5, 1.3]) P(buildBox(0.66, 0.06, 0.06), [0, 0.86, z], MAT.paint, DK);
+  // Wings: tapered, a little dihedral (two halves), the tips rounded off; ailerons a shade off.
+  for (const sx of [-1, 1]) {
+    const w = new THREE.Shape([new THREE.Vector2(0, 1.3), new THREE.Vector2(6.3, 0.55), new THREE.Vector2(6.45, 0.1), new THREE.Vector2(6.3, -0.55), new THREE.Vector2(0, -1.05)]);
+    const g = indexed(new THREE.ExtrudeGeometry(w, { depth: 0.16, bevelEnabled: false }));
+    g.rotateX(Math.PI / 2);
+    if (sx < 0) g.scale(-1, 1, 1);
+    const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 2, uv.getY(i) / 2);
+    P(g, [sx * 0.4, -0.25, 0.2], MAT.paint, DK, [0, 0, sx * 0.09]);
+    // The gun pod and two bomb racks under each wing.
+    P(alongZ(0.11, 0.11, 1.4, 8), [sx * 2.2, -0.55, 0.6], MAT.paint, DK * 0.9);
+    P(alongZ(0.025, 0.025, 0.5, 6), [sx * 2.2, -0.55, 1.5], MAT.steel, 0.1);
+    P(alongZ(0.16, 0.14, 1.1, 8), [sx * 1.3, -0.65, 0.4], MAT.steel, 0.25);
+  }
+  // The tail: tailplanes and the triangular fin with its rudder.
+  for (const sx of [-1, 1]) P(buildBox(2.0, 0.08, 0.9), [sx * 1.1, 0.0, -4.0], MAT.paint, DK, [0, sx * 0.12, 0]);
+  {
+    const f = new THREE.Shape([new THREE.Vector2(0, 0), new THREE.Vector2(-1.4, 0), new THREE.Vector2(-1.2, 1.55), new THREE.Vector2(-0.55, 1.55)]);
+    const g = indexed(new THREE.ExtrudeGeometry(f, { depth: 0.08, bevelEnabled: false }));
+    g.rotateY(Math.PI / 2);
+    const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 2, uv.getY(i) / 2);
+    P(g, [-0.04, 0.2, -3.2], MAT.paint, DK);
+  }
+  // The propeller: the spinner and two blades (its own geometry: it turns).
+  prop.push({ geo: new THREE.ConeGeometry(0.22, 0.45, 10).rotateX(Math.PI / 2), pos: [0, 0, 0.2], mat: MAT.steel, tone: 0.35 });
+  for (const a of [0, Math.PI]) prop.push({ geo: buildBox(0.16, 1.25, 0.04), pos: [0, Math.cos(a) * 0.68, 0], rot: [0, 0.3, a], mat: MAT.steel, tone: 0.08 });
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.15, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  const propGeo = assemble(prop);
+  bakeContactAO(propGeo, { cell: 0.1, radius: 1, strength: 0.1, groundFade: 0, floor: 0.8 });   // (the kit material reads "ao")
+  // Markings: the cockade on each wing (top), on the fuselage's flanks.
+  const st = [];
+  for (const sx of [-1, 1]) {
+    st.push(stencilPatch("frCocarde", flatSurface([sx * 4.6, -0.25 + 0.16 + 4.6 * Math.tan(0.09) + 0.01, 0.15], [-sx * Math.sin(0.09), Math.cos(0.09), 0], [Math.cos(0.09), sx * Math.sin(0.09), 0], 1.0, "frCocarde"), { lift: 0.03 }));
+    st.push(stencilPatch("frCocarde", flatSurface([sx * 0.6, 0.0, -2.0], [sx, 0, 0], [0, 0, -sx], 0.7, "frCocarde"), { lift: 0.02 }));
+  }
+  const stencil = mergeStencils(st);
+  for (const g of [geo, propGeo, stencil]) g?.scale(S, S, S);
+  geo.userData.stencil = stencil;
+  geo.userData.prop = { geo: propGeo, pivot: [0, 0, 2.66 * S] };
+  return geo;
+}

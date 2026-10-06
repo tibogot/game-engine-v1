@@ -12,12 +12,12 @@ export const ICON = {
   sandbags: "sandbags", wire: "wire", mgNest: "mgNest", mortarPit: "mortarPit",
   mirador: "mirador", searchlight: "searchlight", sangar: "sangar", ambushScreen: "ambushScreen",
   // 2026-10-04 (you: "compare with CoH" — every ability has its picture there)
-  smoke: "smoke", barrage: "barrage", flare: "flare", lmg: "lmg", retreat: "retreat", reinforce: "reinforce", repair: "repair", garrison: "garrison", unload: "unload",
+  smoke: "smoke", barrage: "barrage", airStrike: "barrage", flare: "flare", lmg: "lmg", retreat: "retreat", reinforce: "reinforce", repair: "repair", garrison: "garrison", unload: "unload",
   // veterancy chevrons (1-3) and the alert feed's pictures
   vet1: "vet1", vet2: "vet2", vet3: "vet3",
   alertAttack: "alertAttack", alertSeen: "alertSeen", alertCut: "alertCut", alertFlag: "alertFlag", alertMine: "alertMine",
 };
-export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", barrage: "M", repair: "J", unload: "K" };
+export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", barrage: "M", airStrike: "L", repair: "J", unload: "K" };
 
 const BASE = "/textures/ui/icons/";
 /** An icon element's inline style (a mask in the current colour). */

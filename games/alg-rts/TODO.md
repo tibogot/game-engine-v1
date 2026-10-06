@@ -135,7 +135,11 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
 - [x] (you: NO bombs; done: gunship rocketEvery 0, AA-52 bursts) Its BOMBS: is that CoH-like? (CoH's planes strafe/bomb as off-map calls, not unit weapons;
   the real Alouette II carried guns / SS.11 missiles, not bombs.) Decide: keep, swap for rockets
   or missiles, or make it a called strike.
-- [ ] AN AIR STRIKE as a CALL-IN (you, 2026-10-07: replaces the Alouette's bombs, CoH-style).
+- [x] AN AIR STRIKE as a CALL-IN (algAirStrike.js): select the POST (Poste de Tighanimine, its production card) → Frappe aérienne (L), 120 mun,
+  150 s cooldown; a T-6 Texan (buildT6) comes from the post's side, strafes a 45 m line up to the
+  point (bullets, FLN only), drops 2 bombs on it, climbs away. Tested: a band of 6 wiped.
+- [ ] Air strike: BALANCE in play (a band of 6 wiped in one pass may be too strong for 120 mun);
+  its SOUND (engine growl, guns, whistle); the FLN's own counter (none yet).
 - [x] SOLDIERS fire from their rifle's muzzle (unitRenderer rifleMuzzle).
 - [x] GUN MOUNTS that TURN (jeep, half-track at detail 2: userData.turret, the gunner on it) and kick a
   few cm per burst (owner.mgShots); the tank gun's ground-dust ring removed (you).

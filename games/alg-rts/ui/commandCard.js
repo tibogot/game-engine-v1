@@ -210,6 +210,8 @@ export function createCommandCard({
         run: () => onBuild(s, o.key),
       }));
     }
+    // A producer's own ABILITIES after its production (the post: the air strike call-in).
+    abilityButtons([s], grid);
     root.appendChild(grid);
     queueSig = "";
     refresh();
