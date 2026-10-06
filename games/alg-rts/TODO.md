@@ -18,6 +18,12 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    CoH's maps are crammed with COVER — terraces, dry-stone walls along tracks, olive groves,
    ditches, boulders, dead trees, abandoned huts. The FOG OF WAR too heavy (unexplored = black-brown;
    CoH fades + desaturates).
+   - [x] GROUND BREAKUP (tools/algGroundBreakup.mjs, 2026-10-07): slot 1 "Limestone ridge" (same photo
+     as Cliff rock) merged into slot 5 → slot 1 = RED EARTH (red_dirt_mud_01, ochre tint); soft
+     red patches 20-60 m, stony scree patches, the ground WORN pale round the post / villages /
+     wells with paths out. Valley soil only. Re-run from a clean map (it only raises weights).
+   - [ ] next: COVER DENSITY (walls along the pistes, boulder clusters, terraces, dead trees,
+     ruined huts); the lighter FOG OF WAR; the lab's wheel ruts + macro photo into the map.
 2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more
