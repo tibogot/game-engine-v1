@@ -26,6 +26,14 @@ import * as THREE from "three";
  *      InstanceNode.update did it for the builder's mesh only. Same rule as
  *      main.js's patch: a caller's update ranges win, else only the instances
  *      drawn (mesh.count) go up.
+ *   4. a draw whose matrices CHANGED is refreshed. three refreshes a draw (runs
+ *      updateBefore and the uploads) once per render through the BUILD's observer
+ *      (RenderObject.getMonitor → getNodeBuilderState().observer) — shared too, so
+ *      only the first mesh of a build drawn in a frame got it; the others were
+ *      judged by equals(), which never looks at the instance matrices. FOUND
+ *      2026-10-07 (alg-rts, you: "some soldiers' gun and backpack stay in place"):
+ *      the kit's 60 meshes on two materials, all but the first frozen where they
+ *      were first drawn — their buffers at version 1 while the matrices were at 539.
  * The builder's own mesh keeps three's path unchanged.
  */
 
@@ -140,6 +148,24 @@ export function installSharedInstanceBuilds(renderer) {
       ro.initialCacheKey = ro.getCacheKey();   // made before the patch; nothing built yet
     }
     return ro;
+  };
+
+  // A shared-build draw whose matrices moved since ITS last refresh is refreshed
+  // (4. above) — the builder's too: whichever mesh of a build is drawn first takes
+  // three's once-a-frame refresh, and it need not be the builder.
+  const seen = new WeakMap();   // render object → instanceMatrix.version at its last refresh
+  const needsRefresh = nodes.needsRefresh;
+  nodes.needsRefresh = function (renderObject, ...rest) {
+    const o = renderObject.object;
+    if (o?.isInstancedMesh === true && shareable(o)) {
+      const v = o.instanceMatrix.version;
+      if (seen.get(renderObject) !== v) {
+        seen.set(renderObject, v);
+        needsRefresh.call(this, renderObject, ...rest);   // keep three's observer bookkeeping
+        return true;
+      }
+    }
+    return needsRefresh.call(this, renderObject, ...rest);
   };
 
   // Before the draw's attribute uploads (Renderer._renderObjectDirect calls
