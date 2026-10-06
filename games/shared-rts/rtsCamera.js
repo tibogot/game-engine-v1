@@ -48,6 +48,11 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     edgeScroll: true,     // pan when the pointer rests near the viewport edge
     fov,                  // RTS-mode lens (degrees); null = the app camera's
     edgeBand:   14,       // px from the edge that starts an edge-scroll pan
+    // "canvas" (nam, as it was): only while the pointer is over the 3D view — the HUD along the
+    // edges blocks it. "screen" (alg-rts, 2026-10-07, a player: "edge scrolling isn't UX friendly"):
+    // CoH's — the WINDOW's edge scrolls whatever is under the pointer, full speed in the outer part
+    // of the band, a direction-arrow cursor while it does; not while a button is held on a panel.
+    edgeMode:   "canvas",
     minClearance: 6,      // metres the camera keeps above the ground beneath IT
     distMax,              // furthest zoom — see the note on DIST_CEILING
   };
@@ -103,6 +108,12 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
   const dom = () => app.renderer?.domElement ?? null;
   const onPointerMove = (e) => { ptrX = e.clientX; ptrY = e.clientY; overCanvas = true; };
   const onPointerLeave = () => { overCanvas = false; };
+  // "screen" mode: the pointer anywhere in the window; out of it (or a button held on a panel) = no scroll.
+  let inWindow = false, heldOnPanel = false;
+  const onWinMove = (e) => { ptrX = e.clientX; ptrY = e.clientY; inWindow = true; };
+  const onWinOut = (e) => { if (!e.relatedTarget) inWindow = false; };
+  const onWinDown = (e) => { heldOnPanel = e.target !== dom(); };
+  const onWinUp = () => { heldOnPanel = false; };
 
   function bind() {
     window.addEventListener("keydown", onKeyDown);
@@ -113,6 +124,10 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     const el = dom();
     el?.addEventListener("pointermove", onPointerMove);
     el?.addEventListener("pointerleave", onPointerLeave);
+    window.addEventListener("pointermove", onWinMove, { passive: true });
+    document.addEventListener("pointerout", onWinOut);
+    window.addEventListener("pointerdown", onWinDown, true);
+    window.addEventListener("pointerup", onWinUp, true);
   }
   function unbind() {
     window.removeEventListener("keydown", onKeyDown);
@@ -124,6 +139,11 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     const el = dom();
     el?.removeEventListener("pointermove", onPointerMove);
     el?.removeEventListener("pointerleave", onPointerLeave);
+    window.removeEventListener("pointermove", onWinMove);
+    document.removeEventListener("pointerout", onWinOut);
+    window.removeEventListener("pointerdown", onWinDown, true);
+    window.removeEventListener("pointerup", onWinUp, true);
+    setEdgeCursor("");
   }
 
   /**
@@ -132,7 +152,30 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
    * that merely passes the edge does not yank the view.
    * @returns {{ mf: number, mr: number }} forward / right, each -1..1
    */
+  // The direction-arrow cursor while edge scrolling ("screen" mode), over everything — but not when
+  // another mode owns the cursor (a targeting crosshair on the canvas).
+  let edgeCursor = "";
+  let edgeStyle = null;
+  function setEdgeCursor(c) {
+    if (c === edgeCursor) return;
+    edgeCursor = c;
+    if (!edgeStyle) { edgeStyle = document.createElement("style"); document.head.appendChild(edgeStyle); }
+    edgeStyle.textContent = c ? `* { cursor: ${c} !important; }` : "";
+  }
+  function edgePanScreen() {
+    const el = dom();
+    if (!params.edgeScroll || !inWindow || heldOnPanel || !el || el.style.cursor) { setEdgeCursor(""); return { mf: 0, mr: 0 }; }
+    const W = innerWidth, H = innerHeight, band = Math.max(1, params.edgeBand);
+    // Full speed in the outer 60% of the band, easing in over the inner 40%.
+    const ramp = (d) => THREE.MathUtils.clamp((band - d) / (band * 0.4), 0, 1);
+    const mr = ramp(ptrX) * -1 + ramp(W - 1 - ptrX);
+    const mf = ramp(ptrY) * 1 + ramp(H - 1 - ptrY) * -1;
+    const v = mf > 0.05 ? "n" : mf < -0.05 ? "s" : "", h = mr > 0.05 ? "e" : mr < -0.05 ? "w" : "";
+    setEdgeCursor(v || h ? `${v}${h}-resize` : "");
+    return { mf, mr };
+  }
   function edgePan() {
+    if (params.edgeMode === "screen") return edgePanScreen();
     if (!params.edgeScroll || !overCanvas) return { mf: 0, mr: 0 };
     const el = dom();
     if (!el) return { mf: 0, mr: 0 };

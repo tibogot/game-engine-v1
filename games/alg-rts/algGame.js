@@ -283,6 +283,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // editor default is 45). The zoom range grown by tan 30° / tan 20° ≈ 1.6
   // so the closest and furthest views cover what they did.
   const rtsCamera = createRtsCamera({ app, fov: 40, distMin: 28, distDefault: 80, distMax: 190, pitchNear: 35, pitchFar: 60 });
+  // EDGE SCROLL the CoH way (a player, 2026-10-07: "not UX friendly" — the HUD along the edges
+  // blocked it and the 14 px band reached full speed only at the last pixels): the window's edge,
+  // whatever is under it; a 24 px band, the arrow cursor.
+  rtsCamera.params.edgeMode = "screen";
+  rtsCamera.params.edgeBand = 24;
   rtsCamera.setMode("rts");
   // The camera stays over the playable area (layout.js PLAY): the rest is scenery.
   rtsCamera.setBounds(PLAY);

@@ -34,6 +34,9 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      4-6 boulders, the crags' instances); broken DRY-STONE WALLS along the pistes (algFields
      trackWall, the field walls' instances, 5.4 m out, not within 40 m of a village). Now 74%
      within 15 m, 10% beyond 25 m (measured). No new draws.
+   - [x] EDGE SCROLL the CoH way (a player: "not UX friendly"): rtsCamera edgeMode "screen" — the
+     window's edge scrolls over the HUD too (it blocked it), 24 px band, full speed in its outer 60%,
+     an arrow cursor; not while a button is held on a panel or a crosshair owns the cursor.
    - [ ] next: dead trees, ruined huts, terraces on the open slopes; the lab's wheel ruts + macro
      photo into the map.
 2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
