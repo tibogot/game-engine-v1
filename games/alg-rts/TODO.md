@@ -48,7 +48,13 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      baked at boot (133 ms at 638 px, scale 1), drawn only while open. Left click = camera, right
      click = the selection moves; alerts ping it. In the keys page and the manual.
      Later: a legend; orders beyond move (attack-move, retreat); unit-type icons at this size.
-   - [ ] next: ruined huts, terraces on the open slopes.
+   - [x] RUINED HUTS + OPEN TERRACES (2026-10-07): 6 ruined gourbis (rtsAlgVillage buildRuinedHut —
+     roofless dry stone, back wall head-high, one side fallen to a stony bank, a door, a fallen
+     beam; hard cover, walked into) and 4 almond terraces on the bare slopes between the villages
+     (algLandmarks, 8-17° along, < 4° across, turned uphill). Cover effect MEASURED small: cells with
+     coverAt ≥ 0.5 within 15 m of 86.0% → 86.6% of the box (a different measure from the 74% above,
+     not comparable) — the huts are for the look and as landmarks, the walls did the cover work.
+   - Item 1 is DONE apart from the fog-lab mist (weather). Next: item 2.
 2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more

@@ -707,6 +707,83 @@ export function buildBurntFarm({ seed = 1990, groundAt = FLAT } = {}) {
 }
 
 /**
+ * RUINED HUT — a gourbi of dry stone left to fall in (alg-rts, 2026-10-07: the
+ * small ruins a CoH map is crammed with, between the villages): no roof, the
+ * back wall still head-high, the sides broken down bay by bay, one of them
+ * collapsed to a stony bank spilled outward, a doorway in the front, a beam
+ * fallen across, a thorn bush grown in a corner. Hard cover; men walk in
+ * through the door and over the fallen side.
+ */
+export function buildRuinedHut({ seed = 2010, groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const W = 5 + R() * 1.4, D = 3.8 + R() * 0.8, T = 0.5;
+  const fallen = R() < 0.5 ? 1 : -1;          // which side fell (+X / -X)
+  const door = (R() - 0.5) * (W - 2.4);        // the doorway's centre along the front
+  // A wall in bays ~1.2 m, each its own height (`hFn(t)`), reaching below the ground.
+  const wall = (a, b, hFn, skip = () => false) => {
+    const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz), yaw = Math.atan2(dx, dz);
+    const n = Math.max(1, Math.round(len / 1.2));
+    for (let k = 0; k < n; k++) {
+      const tm = (k + 0.5) / n;
+      const x = a[0] + dx * tm, z = a[1] + dz * tm;
+      if (skip(x, z)) continue;
+      const g0 = groundAt(a[0] + dx * (k / n), a[1] + dz * (k / n)), g1 = groundAt(a[0] + dx * ((k + 1) / n), a[1] + dz * ((k + 1) / n));
+      const h = hFn(tm, R);
+      if (h < 0.15) continue;
+      const top = Math.min(g0, g1) + h, low = Math.min(g0, g1) - 0.35;
+      // Each bay a few cm thicker or thinner (equal faces z-fight; a random twist made them
+      // NEARLY coplanar — rtsPropsCoplanarTest caught it).
+      parts.push({ geo: buildBox(T + (k % 2) * 0.04, top - low, len / n + 0.03), pos: [x, (top + low) / 2, z], rot: [0, yaw, 0], mat: MAT.rubble, tone: 0.38 + R() * 0.16 });
+      // Loose stones on the broken top.
+      if (R() < 0.45) parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.4 + R() * 0.2, 0.22, 0.35 + R() * 0.15), pos: [x, top + 0.06, z], rot: [0, R() * 3, 0], mat: MAT.rubble, tone: 0.4 + R() * 0.15 });
+    }
+  };
+  const hx = W / 2, hz = D / 2;
+  // The back: the best standing, head-high, a bite out of it.
+  wall([-hx, hz], [hx, hz], (t, r) => (Math.abs(t - 0.7) < 0.12 ? 0.9 : 1.7 + r() * 0.5));
+  // The front, round the doorway: shoulder-high, falling toward the fallen side.
+  wall([-hx, -hz], [hx, -hz], (t, r) => 1.1 + r() * 0.5 - Math.max(0, (t - 0.5) * fallen) * 1.2, (x) => Math.abs(x - door) < 0.6);
+  // The standing side.
+  const sx = -fallen * hx;
+  wall([sx, -hz + 0.25], [sx, hz - 0.25], (t, r) => 1.2 + t * 0.6 + r() * 0.3);
+  // The fallen side: knee-high stubs, and its stones spilled out in a bank.
+  const fx = fallen * hx;
+  wall([fx, -hz + 0.25], [fx, hz - 0.25], (t, r) => (r() < 0.35 ? 0 : 0.3 + r() * 0.35));
+  for (let k = 0; k < 10; k++) {
+    const z = (R() - 0.5) * (D - 0.4), x = fx + fallen * (0.3 + R() * 1.6);
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.45 + R() * 0.35, 0.25 + R() * 0.2, 0.4 + R() * 0.3), pos: [x, groundAt(x, z) + 0.08, z], rot: [R(), R() * 3, R()], mat: MAT.rubble, tone: 0.35 + R() * 0.18 });
+  }
+  // Rubble inside.
+  for (let k = 0; k < 6; k++) {
+    const x = (R() - 0.5) * (W - 1.4), z = (R() - 0.5) * (D - 1.4);
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.4 + R() * 0.3, 0.2 + R() * 0.2, 0.35 + R() * 0.25), pos: [x, groundAt(x, z) + 0.06, z], rot: [R(), R() * 3, R()], mat: MAT.rubble, tone: 0.32 + R() * 0.18 });
+  }
+  // The ridge beam, fallen: one end on the back wall, the other on the floor.
+  const bz0 = hz - 0.3, bz1 = -hz * 0.3, bx = (R() - 0.5) * W * 0.4;
+  const by0 = groundAt(bx, bz0) + 1.5, by1 = groundAt(bx, bz1) + 0.12;
+  const blen = Math.hypot(bz0 - bz1, by0 - by1);
+  parts.push({ geo: buildBox(0.16, 0.16, blen), pos: [bx, (by0 + by1) / 2, (bz0 + bz1) / 2], rot: [-Math.atan2(by0 - by1, bz0 - bz1), (R() - 0.5) * 0.3, 0], mat: MAT.timber, tone: 0.12 });
+  // A thorn bush in the standing corner.
+  const cx = sx * 0.7, cz = hz - 0.8;
+  parts.push(...brushClump(R, cx, groundAt(cx, cz), cz, { h: 1.0, r: 0.5, dry: true }));
+  const geo = finish(parts, { hx: hx + 2.2, hz: hz + 0.6, cx: fallen * 0.9, height: 2.3 });
+  // Cover: every wall (the fallen side still a stony bank to lie behind).
+  geo.userData.coverLines = scaledLines([{ hard: true, pts: [[-hx, -hz], [hx, -hz], [hx, hz], [-hx, hz], [-hx, -hz]] }]);
+  geo.userData.coverPerimeter = false;
+  // The standing walls block; in through the door and over the fallen side.
+  const t = 1.2 / KIT;   // ≥ half a 2 m nav cell
+  const dl = door - 0.6 - -hx, dr = hx - (door + 0.6);
+  geo.userData.navRects = [
+    { cx: 0, cz: hz, hx, hz: t },
+    { cx: sx, cz: 0, hx: t, hz },
+    ...(dl > 0.4 ? [{ cx: -hx + dl / 2, cz: -hz, hx: dl / 2, hz: t }] : []),
+    ...(dr > 0.4 ? [{ cx: hx - dr / 2, cz: -hz, hx: dr / 2, hz: t }] : []),
+  ].map((r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT }));
+  return geo;
+}
+
+/**
  * TERRACES — almonds on a slope: dry-stone retaining walls along the
  * contour, each holding the ground up behind it (its height is what the
  * slope gives: a low kerb on the flat, a metre and more on a hillside), a

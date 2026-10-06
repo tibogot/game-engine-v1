@@ -17,13 +17,15 @@
 import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 import * as THREE from "three";
-import { buildBurntFarm, buildFarmstead, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildBurntFarm, buildFarmstead, buildRomanRuin, buildRuinedHut, buildTerraces } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildArmsCache, buildLookout, buildRefuge, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { kitView } from "./showroom.js";
 
 const P = {
   farmsteads: 7, roman: 2, burnt: 1,
+  huts: 6, hutSpacing: 45,   // ruined gourbis between the rest (2026-10-07, the AAA list's density)
+  terraces: 4, terraceSlope: [8, 17],   // almond terraces on the open slopes between the villages
   caches: 3,              // hidden arms caches (plus the camp's own)
   refuges: 2, lookouts: 3,
   // 3 of 10 placed with 90 m from EVERY site (the passes, springs and
@@ -45,14 +47,14 @@ export function landmarkEntries(app, list) {
   const trackPts = TRACK_LINES.flatMap((t) => t.line);
   const trackDist = (x, z) => { let d = Infinity; for (const p of trackPts) d = Math.min(d, Math.hypot(p.x - x, p.z - z)); return d; };
   const placed = [];
-  const ok = (x, z, needTrack) => {
+  const ok = (x, z, needTrack, spacing = P.spacing) => {
     if (!(x > PLAY.x0 + 30 && x < PLAY.x1 - 30 && z > PLAY.z0 + 30 && z < PLAY.z1 - 30)) return false;
     for (const s of LAYOUT.sites) {
       const big = ["hamlet", "dechra", "ksar", "french", "aln"].includes(s.kind);
       if (Math.hypot(s.x - x, s.z - z) < (s.r ?? 20) + (big ? P.siteClear : P.minorClear)) return false;
     }
     for (const e of list) if (Math.hypot(e.x - x, e.z - z) < P.pieceClear) return false;
-    for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < P.spacing) return false;
+    for (const p of placed) if (Math.hypot(p.x - x, p.z - z) < spacing) return false;
     const td = trackDist(x, z);
     if (td < P.track[0] || (needTrack && td > P.track[1])) return false;
     let lo = Infinity, hi = -Infinity;
@@ -70,6 +72,8 @@ export function landmarkEntries(app, list) {
     ...Array.from({ length: P.roman }, (_, i) => ({ key: `romanRuin${i + 1}`, build: (o) => buildRomanRuin({ ...o, seed: 1980 + i * 5 }), track: false })),
     ...Array.from({ length: P.burnt }, (_, i) => ({ key: `burntFarm${i + 1}`, build: (o) => buildBurntFarm({ ...o, seed: 1990 + i }), track: true })),
     ...Array.from({ length: P.farmsteads }, (_, i) => ({ key: `mechtaFarm${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1970 + i * 7 }), track: true })),
+    // Last, and closer together: small, they fill the gaps the big pieces left.
+    ...Array.from({ length: P.huts }, (_, i) => ({ key: `ruinedHut${i + 1}`, build: (o) => buildRuinedHut({ ...o, seed: 2010 + i * 3 }), track: false, spacing: P.hutSpacing })),
   ];
   const out = [];
   // HIDDEN ARMS CACHES (2026-10-01): the FLN's armouries in the hills — each
@@ -143,13 +147,42 @@ export function landmarkEntries(app, list) {
   for (const w of want) {
     for (let t = 0; t < P.tries; t++) {
       const x = PLAY.x0 + R() * (PLAY.x1 - PLAY.x0), z = PLAY.z0 + R() * (PLAY.z1 - PLAY.z0);
-      if (!ok(x, z, w.track)) continue;
+      if (!ok(x, z, w.track, w.spacing)) continue;
       // Fronts toward the player's camera, three-quarters (your rule).
       const e = { key: w.key, build: w.build, x, z, yaw: VIEW_YAW + (R() < 0.5 ? 0.5 : -0.5) + (R() - 0.5) * 0.3, ground: true };
       placed.push(e);
       out.push(e);
       break;
     }
+  }
+  // TERRACES on the open slopes (2026-10-07, the AAA list): the villages' own are by hand
+  // (showroom.js); these fill the bare hillsides between, near the same rule — 8-17° along the piece
+  // under 4° of side tilt, turned to climb straight uphill (yaw = the slope's, measured to match).
+  const slope = (x, z) => {
+    const gx = (H(x + 4, z) - H(x - 4, z)) / 8, gz = (H(x, z + 4) - H(x, z - 4)) / 8;
+    return { deg: Math.atan(Math.hypot(gx, gz)) * 180 / Math.PI, yaw: Math.atan2(gx, gz) };
+  };
+  for (let k = 0, t = 0; k < P.terraces && t < P.tries; t++) {
+    const x = PLAY.x0 + 40 + R() * (PLAY.x1 - PLAY.x0 - 80), z = PLAY.z0 + 40 + R() * (PLAY.z1 - PLAY.z0 - 80);
+    const c = slope(x, z);
+    if (c.deg < P.terraceSlope[0] || c.deg > P.terraceSlope[1]) continue;
+    const ux = Math.sin(c.yaw), uz = Math.cos(c.yaw), sx = uz, sz = -ux;
+    // Every point of the piece on the same kind of slope, and level across it.
+    let good = true;
+    for (const a of [-10, 0, 10]) for (const b of [-10, 0, 10]) {
+      const px = x + ux * a + sx * b, pz = z + uz * a + sz * b, q = slope(px, pz);
+      if (q.deg < P.terraceSlope[0] - 2 || q.deg > P.terraceSlope[1] + 3 || Math.abs(((q.yaw - c.yaw + 9.42) % 6.28) - 3.14) > 0.5) { good = false; break; }
+      if ((app.getWaterLevelAt?.(px, pz) ?? -Infinity) > H(px, pz) - 0.3) { good = false; break; }
+      const w = app.samplePaintWeights?.(px, pz);
+      if (w && (w[4] > 0.3 || w[5] > 0.25 || w[3] > 0.4 || w[6] > 0.4)) { good = false; break; }
+    }
+    if (!good) continue;
+    if (Math.abs(H(x + sx * 10, z + sz * 10) - H(x - sx * 10, z - sz * 10)) > 1.4) continue;   // < 4° side tilt
+    if (trackDist(x, z) < 22) continue;
+    if (LAYOUT.sites.some((s) => Math.hypot(s.x - x, s.z - z) < (s.r ?? 20) + P.minorClear + 10)) continue;
+    if (list.some((e) => Math.hypot(e.x - x, e.z - z) < 40) || out.some((p) => Math.hypot(p.x - x, p.z - z) < 50)) continue;
+    out.push({ key: `terracesOpen${k + 1}`, build: (o) => buildTerraces({ ...o, seed: 2030 + k * 5, rows: 3 + (k % 2) }), x, z, yaw: c.yaw, ground: true });
+    k++;
   }
   return out;
 }
