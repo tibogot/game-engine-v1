@@ -126,8 +126,9 @@ function weather(parts, R, { x, z, yaw, w, d, h, front, skin, skinTop, dx }) {
  * ladder; patches of new mud on the old; a ladder up the front. On the roof clear of the upper
  * storey. In the house's frame (`put`), the roof's top at h + 0.26. Merged with the house: 0 draws.
  */
-function roofLife(put, R, { w, d, h, upper, front, dx }) {
-  const top = h + 0.26;
+export function roofLife(put, R, { w, d, h, upper, front, dx, top = h + 0.26, rug = true, laundry = true, frontLadder = true, patch = MAT.earth, patchTone = null }) {
+  // (`top`, `rug`, `laundry`, `frontLadder`: the ksar's houses — their own roof height, their own
+  // laundry, parapets a rug and a lane ladder do not fit.)
   // The free roof: the whole of it, or the part beside the upper storey.
   let x0 = -w / 2 + 0.55, x1 = w / 2 - 0.55;
   if (upper) { if (upper.ox > 0) x1 = upper.ox - upper.w2 / 2 - 0.35; else x0 = upper.ox + upper.w2 / 2 + 0.35; }
@@ -146,7 +147,7 @@ function roofLife(put, R, { w, d, h, upper, front, dx }) {
     // top its own height, ≥ 4 mm apart (bases -10/-18/-26 mud, -14 grain, -22 hatch; tops +35/+47/
     // +59 mud, +28 grain, +42 hatch) — two items may overlap on a roof.
     const th = 0.045 + k * 0.012;
-    put(buildBox(pw, th + k * 0.008, pd), [x, top - 0.01 - k * 0.008 + (th + k * 0.008) / 2, z], MAT.earth, 0.62 + R() * 0.2, [0, (R() - 0.5) * 0.3, 0]);
+    put(buildBox(pw, th + k * 0.008, pd), [x, top - 0.01 - k * 0.008 + (th + k * 0.008) / 2, z], patch, patchTone != null ? patchTone + (R() - 0.5) * 0.12 : 0.62 + R() * 0.2, [0, (R() - 0.5) * 0.3, 0]);
   }
   // Firewood: a loose pile of branches, every one its own way (aligned boxes read as a crate).
   if (R() < 0.55) tries(0.8, (x, z) => {
@@ -182,7 +183,7 @@ function roofLife(put, R, { w, d, h, upper, front, dx }) {
     for (const sx of [-0.2, 0.2]) put(buildBox(0.07, 1.1, 0.07), [x + Math.cos(a) * sx, top + 0.45, z - Math.sin(a) * sx], MAT.timber, 0.3, [0.25, a, 0]);
   });
   // A washing line on two poles, cloths over it (white, the canvas's beige, a red rug).
-  if (R() < 0.35) tries(1.2, (x, z) => {
+  if (R() < 0.35 && laundry) tries(1.2, (x, z) => {
     const len = Math.min(2.6, x1 - x0 - 0.2), a = (R() - 0.5) * 0.4;
     const ex = Math.cos(a) * len / 2, ez = -Math.sin(a) * len / 2;
     for (const sg of [-1, 1]) put(buildBox(0.06, 1.7, 0.06), [x + sg * ex, top + 0.85, z + sg * ez], MAT.timber, 0.3);
@@ -195,7 +196,7 @@ function roofLife(put, R, { w, d, h, upper, front, dx }) {
     }
   });
   // A rug over the parapet on the lane side: the red of a Chaouia weave, hanging down the wall.
-  if (R() < 0.3) {
+  if (R() < 0.3 && rug) {
     const rx = x0 + R() * Math.max(0, x1 - x0 - 1.4) + 0.7, rw = 1.0 + R() * 0.5;
     if (Math.abs(rx - dx) > 1.2) {
       const zf = front * (d / 2 + 0.2);
@@ -204,7 +205,7 @@ function roofLife(put, R, { w, d, h, upper, front, dx }) {
     }
   }
   // A ladder up the front, from the lane to the roof.
-  if (R() < 0.25) {
+  if (R() < 0.25 && frontLadder) {
     const lx = dx + (R() < 0.5 ? -1 : 1) * (1.3 + R() * 0.4);
     if (Math.abs(lx) < w / 2 - 0.4) {
       const lz = front * (d / 2 + 0.55), tilt = -front * 0.22;
@@ -242,12 +243,25 @@ export function house(parts, R, { x, z, yaw, w, d, h, storey2 = false, doorFace 
   // The roof: beaten earth over brush over beams, a low parapet of stone at the
   // edge, a little proud all round; a spout on one side.
   put(buildBox(w + 0.3, 0.26, d + 0.3), [0, h + 0.13, 0], MAT.earth, 0.45 + R() * 0.15);
-  put(buildBox(w + 0.32, 0.2, 0.22), [0, h + 0.36, d / 2 + 0.05], MAT.rubble, 0.4);
-  put(buildBox(w + 0.32, 0.2, 0.22), [0, h + 0.36, -d / 2 - 0.05], MAT.rubble, 0.4);
-  // The end pieces 3 cm lower and 3 cm inside the long ones' ends: flush
-  // corners z-fought on every roof.
-  put(buildBox(0.22, 0.17, d + 0.1), [w / 2 + 0.02, h + 0.36, 0], MAT.rubble, 0.4);
-  put(buildBox(0.22, 0.17, d + 0.1), [-w / 2 - 0.02, h + 0.36, 0], MAT.rubble, 0.4);
+  // THE PARAPET, each house its own (the buildings pass, 2026-10-08: one ring on every roof read
+  // as a grid of one box): its height, its tone, and on some a stretch fallen from one long side.
+  // Its own stream (the village layout is unchanged).
+  const RP = rng(Math.floor(x * 53 + z * 29 + w * 11) >>> 0);
+  const ph = 0.16 + RP() * 0.22, pTone = 0.32 + RP() * 0.16;
+  const gapSide = RP() < 0.35 ? (RP() < 0.5 ? 1 : -1) : 0;
+  for (const sz of [1, -1]) {
+    const pz = sz * (d / 2 + 0.05);
+    if (sz !== gapSide) { put(buildBox(w + 0.32, ph, 0.22), [0, h + 0.26 + ph / 2, pz], MAT.rubble, pTone); continue; }
+    // A gap 0.8-1.8 m, somewhere along it, its two ends left ragged (a little lower).
+    const gw = 0.8 + RP() * 1.0, gc = (RP() - 0.5) * (w - gw - 1.4);
+    const a0 = -(w + 0.32) / 2, a1 = gc - gw / 2, b0 = gc + gw / 2, b1 = (w + 0.32) / 2;
+    put(buildBox(a1 - a0, ph, 0.22), [(a0 + a1) / 2, h + 0.26 + ph / 2, pz], MAT.rubble, pTone);
+    put(buildBox(b1 - b0, ph - 0.04, 0.22), [(b0 + b1) / 2, h + 0.26 + (ph - 0.04) / 2, pz], MAT.rubble, pTone);
+  }
+  // The end pieces 3 cm shorter (centred on the long ones: neither top nor base shared) and
+  // 3 cm inside the long ones' ends: flush corners z-fought on every roof.
+  put(buildBox(0.22, ph - 0.03, d + 0.1), [w / 2 + 0.02, h + 0.26 + ph / 2, 0], MAT.rubble, pTone);
+  put(buildBox(0.22, ph - 0.03, d + 0.1), [-w / 2 - 0.02, h + 0.26 + ph / 2, 0], MAT.rubble, pTone);
   put(buildBox(0.12, 0.12, 0.7), [w / 2 + 0.4, h + 0.1, (R() - 0.5) * d * 0.6], MAT.timber, 0.3, [0, Math.PI / 2, 0.15]);
   // Beam ends under the eaves, along the long walls: the Chaouia house's tell.
   const nb = Math.max(3, Math.round(w / 0.7));

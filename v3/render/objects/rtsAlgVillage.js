@@ -33,7 +33,8 @@
 import * as THREE from "three";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { MAT, buildBox, rng, wirePart } from "./rtsParts.js";
-import { house, houseNav, oven, wallRect } from "./rtsMechta.js";
+import { house, houseNav, oven, roofLife, wallRect } from "./rtsMechta.js";
+import { flatSurface, stencilPatch } from "./rtsStencils.js";
 import { ashlarBlock, brushClump, clayJar, dryStone, earthBerm, faceted, fieldStone, finish } from "./rtsAlgeria.js";
 
 const FLAT = () => 0;
@@ -50,6 +51,17 @@ function groundSpan(groundAt, cx, cz, w, d) {
 /** Shift every part pushed since index `from` up by `dy`. */
 function lift(parts, from, dy) {
   for (let i = from; i < parts.length; i++) if (parts[i].pos) parts[i].pos = [parts[i].pos[0], parts[i].pos[1] + dy, parts[i].pos[2]];
+}
+/** The heights of the flat (unrotated) faces of parts[from..to): their boxes' tops and bottoms. */
+function flatLevels(parts, from, to) {
+  const out = [];
+  for (let i = from; i < to; i++) {
+    const q = parts[i];
+    if (!q.geo || !q.pos || (q.rot && (Math.abs(q.rot[0]) > 1e-3 || Math.abs(q.rot[2]) > 1e-3))) continue;
+    if (!q.geo.boundingBox) q.geo.computeBoundingBox();
+    out.push(q.pos[1] + q.geo.boundingBox.max.y, q.pos[1] + q.geo.boundingBox.min.y);
+  }
+  return out;
 }
 
 /**
@@ -90,6 +102,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
   let mosqueDone = false;
   let nest = null;       // the stork's nest on the minaret: where its bird stands
   const houses = [];
+  let prevLevels = null, prevRow = -1;   // the last house's flat faces (attached rows)
   for (let r = 0; r < rows; r++) {
     const zr = z0 + r * rowStep + (R() - 0.5) * 0.8;
     let x = -width / 2 + R() * 2;
@@ -142,6 +155,17 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
       const n0 = parts.length;
       const hh = house(parts, R, { x: cx, z: cz, yaw: 0, w, d, h, storey2: R() < 0.3, doorFace: -1, leanTo: false });
       lift(parts, n0, y);
+      // ATTACHED ROWS: a level of this house (a parapet's top, its roof's) within 6 mm of the house
+      // before it in the row z-fights where their roofs meet (seen once the parapets varied,
+      // 2026-10-08) — lift this one 2.3 cm, as the ksar does.
+      if (prevRow === r && prevLevels) {
+        for (let pass = 0; pass < 4; pass++) {
+          const mine = flatLevels(parts, n0, parts.length);
+          if (!mine.some((a) => prevLevels.some((b) => Math.abs(a - b) < 0.006))) break;
+          lift(parts, n0, 0.023);
+        }
+      }
+      prevLevels = flatLevels(parts, n0, parts.length); prevRow = r;
       // The socle: from below the lowest ground to 20 cm up the walls, a
       // little wider than the house — the terrace this row is built on.
       // Neighbours alternate 5 cm in height: attached socles overlap, and
@@ -1227,11 +1251,12 @@ function ksarHouse(parts, R, { x, z, yaw, w, d, h, y, low, frontGround, mat, ton
     put(buildBox(0.92, 1.9, 0.05), [dx, fg + 0.95, fz - 0.02], MAT.timber, 0.12 + R() * 0.15);
   }
   // A room on the roof at the back (the summer room), its own parapet.
-  let room = false, shade = false;
+  let room = false, shade = false, roomFront = null;
   if (w > 4.6 && R() < 0.45) {
     room = true;
     const w2 = w * (0.4 + R() * 0.15), d2 = d * (0.45 + R() * 0.1), h2 = 2.3 + R() * 0.4;
     const ox = (R() - 0.5) * (w - w2 - 0.8), oz = d / 2 - d2 / 2 - 0.35;
+    roomFront = oz - d2 / 2;
     const m2 = R() < 0.7 ? mat : MAT.plasterPale;
     put(buildBox(w2, h2, d2), [ox, h + h2 / 2, oz], m2, tone * (0.9 + R() * 0.2));
     parapet(put, R, { ox, oz, w: w2, d: d2, top: h + h2, mat: m2, tone, ph: 0.35, horns: R() < 0.5 });
@@ -1268,6 +1293,57 @@ function ksarHouse(parts, R, { x, z, yaw, w, d, h, y, low, frontGround, mat, ton
   }
   // A spout through the parapet (the roof drains to the lane).
   if (R() < 0.5) put(buildBox(0.14, 0.12, 0.6), [(R() - 0.5) * (w - 1), h + 0.15, -d / 2 - 0.26], MAT.timber, 0.25);
+  // THE BUILDINGS PASS (2026-10-08): the town's own stream (from the house's place — the town as
+  // approved is unchanged): a few roof things where the roof is free (front of a roof room; no
+  // shade over them), and the plaster's weather.
+  const RW = rng((Math.floor(Math.abs(x * 41.3 + z * 87.9)) + 11) >>> 0);
+  if (!shade || RW() < 0.4) {
+    // In front of a roof room only: roofLife's roof, cut short at the room's front wall.
+    const dFree = roomFront == null ? d : (roomFront + d / 2) * 2 - 0.2;
+    if (dFree > 2.2) roofLife((geo, lp, m, t, rot) => put(geo, [lp[0], lp[1], lp[2] - (d - dFree) / 2], m, t, rot), RW,
+      { w, d: dFree, h, top: h, front: -1, dx: 99, rug: false, laundry: false, frontLadder: false, patch: mat, patchTone: tone * 0.9 });   // (repairs in fresh plaster, not dark mud)
+  }
+  ksarWeather(parts, RW, { x, y, z, yaw, w, d, h, fg, dx });
+}
+
+/**
+ * THE KSAR'S WEATHER (the buildings pass, 2026-10-08): on the ochre plaster — dark streaks from
+ * the parapet's foot (the stone cells: the whitewash's light grime would read lighter than the
+ * plaster), the plaster fallen off in patches low on the walls (below the windows, clear of the
+ * door), the lane's dust up the front and up the back (uphill: the floor). Not up the sides: the
+ * ground falls along them. Carried among the parts (stencilsOf in finish).
+ */
+function ksarWeather(parts, R, { x, y, z, yaw, w, d, h, fg, dx }) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  const V = (v) => [v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c];
+  const P = (lx, ly, lz) => [x + lx * c + lz * s, y + ly, z - lx * s + lz * c];
+  let k = 0;
+  const stamp = (cell, at, n, r, width, lift) => parts.push({ stencil: stencilPatch(cell, flatSurface(at, V(n), V(r), width, cell), { lift: lift + (k++ % 9) * 0.0003 }), pos: [0, 0, 0] });
+  const faces = [
+    { n: [0, 0, -1], r: [-1, 0, 0], len: w, at: (t) => [-t, -d / 2 - 0.085], foot: fg, front: true },
+    { n: [0, 0, 1], r: [1, 0, 0], len: w, at: (t) => [t, d / 2 + 0.02], foot: 0 },
+    { n: [1, 0, 0], r: [0, 0, -1], len: d, at: (t) => [w / 2 + 0.02, -t] },
+    { n: [-1, 0, 0], r: [0, 0, 1], len: d, at: (t) => [-w / 2 - 0.02, t] },
+  ];
+  for (const f of faces) {
+    const at = (t, ly) => { const [lx, lz] = f.at(t); return P(lx, ly, lz); };
+    if (f.foot != null) {
+      const nb = Math.max(1, Math.ceil(f.len / 4.4)), bw = f.len / nb;
+      for (let i = 0; i < nb; i++) stamp("stoneFootDust", at(-f.len / 2 + bw * (i + 0.5), f.foot + bw / 10 - 0.04), f.n, f.r, bw + 0.02, 0.003);
+    }
+    // Streaks from the parapet's foot.
+    for (let i = 0, n = 1 + Math.floor(R() * (f.len > 5 ? 3 : 2)); i < n; i++) {
+      const t = (R() - 0.5) * (f.len - 1.2), sw = 0.45 + R() * 0.35, sh = sw / 0.4;
+      stamp("stoneStreak", at(t, h - 0.05 - sh / 2), f.n, f.r, sw, 0.005);
+    }
+    // Plaster fallen, low: under the ground storey's windows (2.6 m), clear of the door.
+    for (let i = 0, n = R() < 0.6 ? 1 + (R() < 0.4 ? 1 : 0) : 0; i < n; i++) {
+      const t = (R() - 0.5) * (f.len - 1.6), pw = 0.7 + R() * 0.5;
+      if (f.front && Math.abs(-t - dx) < 1.3) continue;
+      const base = f.foot ?? Math.max(0, fg);
+      stamp(R() < 0.5 ? "plasterFallA" : "plasterFallB", at(t, base + 0.55 + R() * 0.7), f.n, f.r, pw, 0.007);
+    }
+  }
 }
 
 /**
@@ -1531,7 +1607,7 @@ export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
     const out = [];
     for (let i = p.range[0]; i < p.range[1]; i++) {
       const q = parts[i];
-      if (!q.pos || (q.rot && (Math.abs(q.rot[0]) > 1e-3 || Math.abs(q.rot[2]) > 1e-3))) continue;
+      if (!q.geo || !q.pos || (q.rot && (Math.abs(q.rot[0]) > 1e-3 || Math.abs(q.rot[2]) > 1e-3))) continue;   // (a stencil entry: no geo)
       if (!q.geo.boundingBox) q.geo.computeBoundingBox();
       out.push(q.pos[1] + q.geo.boundingBox.max.y, q.pos[1] + q.geo.boundingBox.min.y);
     }

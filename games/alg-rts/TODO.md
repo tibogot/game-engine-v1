@@ -23,8 +23,12 @@ Keep this file current: tick things off here, add new asks here.
    read as white icicles on grey rubble) + ROOF LIFE (firewood, brush heaps, grain mats, jars, a hatch
    and its ladder, washing lines, a rug over the parapet, mud repairs, a ladder up the front; own
    random stream: the village layout is UNCHANGED, checked). +~900 tris a village, +1 draw (its
-   stencils). NEXT: the KSAR's houses (own builder) the same; parapets / heights variety; the Aurès
-   stone; the mechta house detail 2. Was: flat slab roofs, the same house repeated (the dechra reads as
+   stencils). STEP 2 (same day): the KSAR (ksarHouse): roof life in front of its roof rooms (repairs
+   in its own plaster, not dark mud), plaster weather (dark streaks from the parapet, plaster fallen
+   low on the walls, dust up the front and back — not the sides: the ground falls along them).
+   PARAPETS each house its own (height 0.16-0.38, tone, a stretch fallen on a third); the dechra
+   lifts a house 2.3 cm when a flat level meets the house before it in its row (flatLevels), as the
+   ksar does. LEFT (your calls, parked): the Aurès stone; the mechta house detail 2. Was: flat slab roofs, the same house repeated (the dechra reads as
    a grid of one box), no weathering (no grime at the foot, streaks under sills and parapets, no
    chipped plaster showing stone), no clutter on roofs and in lanes beyond a crate. CoH's houses
    each read as one place. Fix in the kit (rtsAlgVillage / rtsMechta): per-house variety (heights,
