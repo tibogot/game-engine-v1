@@ -34,6 +34,7 @@ import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones } from "./algStones.js";
 import { createAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
+import { installGameCursors } from "./ui/cursors.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
@@ -306,6 +307,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     rtsCamera.setYaw(VIEW_YAW);
   }
   app.rtsCamera = rtsCamera;
+  // THE GAME'S CURSORS (ui/cursors.js): a brass arrow, the targeting reticle, the edge arrows.
+  app.algCursors = installGameCursors({ app });
   // The ground cache centres on the camera's focus: turning or zooming the
   // camera then re-bakes nothing.
   app.groundCache?.setFocusFn(() => rtsCamera.getView().focus);

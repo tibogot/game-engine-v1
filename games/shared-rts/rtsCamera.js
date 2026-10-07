@@ -54,6 +54,7 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     // CoH's — the WINDOW's edge scrolls whatever is under the pointer, full speed in the outer part
     // of the band, a direction-arrow cursor while it does; not while a button is held on a panel.
     edgeMode:   "canvas",
+    edgeCursors: null,    // { n, ne, e, se, s, sw, w, nw }: a game's CSS cursors for the edge scroll
     minClearance: 6,      // metres the camera keeps above the ground beneath IT
     distMax,              // furthest zoom — see the note on DIST_CEILING
   };
@@ -168,7 +169,8 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     if (c === edgeCursor) return;
     edgeCursor = c;
     if (!edgeStyle) { edgeStyle = document.createElement("style"); document.head.appendChild(edgeStyle); }
-    edgeStyle.textContent = c ? `* { cursor: ${c} !important; }` : "";
+    // `html, html *` (not `*`): over a game's own !important cursor rule (alg-rts ui/cursors.js).
+    edgeStyle.textContent = c ? `html, html * { cursor: ${c} !important; }` : "";
   }
   function edgePanScreen() {
     const el = dom();
@@ -179,7 +181,8 @@ export function createRtsCamera({ app, fov = null, distMin = 18, distDefault = 5
     const mr = ramp(ptrX) * -1 + ramp(W - 1 - ptrX);
     const mf = ramp(ptrY) * 1 + ramp(H - 1 - ptrY) * -1;
     const v = mf > 0.05 ? "n" : mf < -0.05 ? "s" : "", h = mr > 0.05 ? "e" : mr < -0.05 ? "w" : "";
-    setEdgeCursor(v || h ? `${v}${h}-resize` : "");
+    // A game's own arrows (params.edgeCursors { n, ne, e, … }: CSS cursor values), else the system's.
+    setEdgeCursor(v || h ? (params.edgeCursors?.[v + h] ?? `${v}${h}-resize`) : "");
     return { mf, mr };
   }
   function edgePan() {

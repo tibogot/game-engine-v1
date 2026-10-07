@@ -56,6 +56,7 @@ import { createUnitBar } from "./ui/unitBar.js";
 import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
 import { createTacticalMap } from "./ui/tacticalMap.js";
+import { createAlgCoverCursor } from "./algCoverCursor.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
 import { installPortraits, hasPortrait } from "./ui/portraits.js";
@@ -532,6 +533,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
   let controlGroups = null;   // made after the selection it listens to
+  let coverCursor = null;
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
     // The sappers' sites (algBuild.js, made later): a click picks one.
@@ -543,6 +545,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // CoH's chevrons at each man's spot, coloured by cover (ui/orderMarks.js),
     // instead of the shared blue ring.
     orderMarker: (x, y, z, sel, kind) => app.algOrderMarks?.order(x, y, z, sel, kind),
+    // COVER AT THE CURSOR (algCoverCursor.js): a move's spots snapped onto the cover near them.
+    adjustSlots: (slots, arr) => coverCursor?.adjustSlots(slots, arr),
     clampOrder: (x, z) => ({
       x: Math.min(PLAY.x1 - 8, Math.max(PLAY.x0 + 8, x)),
       z: Math.min(PLAY.z1 - 8, Math.max(PLAY.z0 + 8, z)),
@@ -583,6 +587,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const mapOpts = { app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) };
   const minimap = createMinimap({ ...mapOpts, mount: hud.left });
   // THE TACTICAL MAP (ui/tacticalMap.js): the same map full screen, Tab.
+  // COVER AT THE CURSOR: each man's spot, coloured by its cover, before the order.
+  coverCursor = createAlgCoverCursor({ app, selection });
+  app.algCoverCursor = coverCursor;
   const tacMap = createTacticalMap({ app, create: (mount) => createMinimap({ ...mapOpts, mount, id: "alg-tacmap", markScale: 2.3, labelPx: 15 }) });
   app.algTacMap = tacMap;
   // Top right now (resourceHud.js); the bottom strip is gone with it.
@@ -707,6 +714,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     flares?.frame();
     barrage.frame();
     airStrike.frame();
+    coverCursor?.frame();
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];

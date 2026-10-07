@@ -76,13 +76,35 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
 4. [ ] **SOUND**: unit voice lines (orders, "sous le feu !", "grenade !"), dense battle ambience,
    distance-filtered gunfire, music for tension (voices parked: another way than the API).
 5. [ ] **SOLDIERS DRESSED FOR FRENCH ALGERIA** (today Vietnam-era US kit) + their PORTRAITS (US GIs).
-6. [ ] **GAMEPLAY DEPTH**: cover shown at the CURSOR before a move; CREW-SERVED MGs (set up, a field of
+6. [~] **GAMEPLAY DEPTH** (started 2026-10-07):
+   - [x] COVER AT THE CURSOR (algCoverCursor.js): men selected, each man's spot shows under the
+     cursor coloured by cover (orderMarks preview: green heavy, yellow light, pale open, cyan
+     concealed); and the men GO TO THE COVER — each spot snapped onto the best cover within 3.2 m,
+     then stepped in to ~1 m from the rock / building beside it. One rule for the preview and the
+     order (selection.js formationAt + adjustSlots). MEASURED, a click 3 m beside a wall: the six
+     men's cover 0/0.2/0/0.63/0/0 → 0.63/1/0.63/1/0.2/0.63.
+     Found by it: the POST's cover ran round its footprint — on the barbed wire 5.5 m out (men at
+     the wire had hard cover). Now on its walls (rtsFrenchPost coverLines).
+     Later: the field walls are not on the nav grid, so men are not stepped in to them.
+   - [x] THE GAME'S CURSORS (ui/cursors.js): a brass arrow everywhere, a brass reticle for the
+     targeting modes ("crosshair" mapped on the canvas), brass edge-scroll arrows (rtsCamera
+     params.edgeCursors).
+   - [ ] next: CREW-SERVED MGs.
+   Was: CREW-SERVED MGs (set up, a field of
    fire, flanked); vehicle ARMOUR BY FACING + penetration; more abilities; DOCTRINES; FLN
    ASYMMETRY (tunnels, melting into villages, mines, sabotage, distinct roles: sniper, sapper,
    scout); retreat point, wounded, dropped weapons.
 7. [ ] **THE GAME AROUND**: title screen, campaign + story (Colonel Delorme), briefings, saves; more
    maps (mission 2, the coast).
 - Buildings: archetypes per village (loggia, ruin, courtyard, shop), roof clutter, the Aurès stone.
+8. [ ] **PLAY THE FLN** (you, 2026-10-07: "soon prepare to choose the Algerian camp"). Needs: (a) the
+   code SIDE-AGNOSTIC — today "player" = French everywhere (teams, purse, production, HUD, minimap,
+   briefing, victory); (b) the camera from the FLN's side (VIEW_YAW + π, the cave at the bottom of
+   the minimap, buildings facing it); (c) a FRENCH AI — the big one (patrols, garrisons, reinforcing,
+   taking villages back, call-ins); (d) the FLN's own toolkit worth playing (item 6's asymmetry).
+   Plan: (a) a little at a time from now (cheap now, dear later); (b)+(c) after item 6.
+- Corrugated iron: the post's, the huts' and the other pieces' sheets still on the 2 m mapping
+  (some banding) — give them buildCorrugatedPanel's sheet mapping as the motor pool (2026-10-07).
 
 ## WHAT IS LEFT — 2026-10-06 (you: "make a list of what is remaining")
 

@@ -270,7 +270,16 @@ for (const backend of ["batched", "instanced"]) {
     nearSplit[0] > farSplit[0] && nearSplit.reduce((a, b) => a + b) === n,
     `far L0=${farSplit[0]} → near L0=${nearSplit[0]} (of ${n})`,
   );
-  check(`${backend}: LOD pass stays cheap`, city.stats.lastLodMs < 8, `${city.stats.lastLodMs.toFixed(2)} ms for ${n} buildings`);
+  // BEST OF FIVE passes (2026-10-07): one pass timed alone failed at random under the 8-way
+  // parallel suite (9.5 ms once, 0.42 ms run alone) — a load spike hits one pass, a genuinely
+  // slow LOD pass is slow every time.
+  let lodMs = city.stats.lastLodMs;
+  for (let k = 0; k < 5; k++) {
+    cam.position.set(0, 40, (k % 2) * 1500);
+    city.update(10, cam);
+    lodMs = Math.min(lodMs, city.stats.lastLodMs);
+  }
+  check(`${backend}: LOD pass stays cheap`, lodMs < 8, `${lodMs.toFixed(2)} ms for ${n} buildings (best of 6)`);
 
   if (backend === "batched") {
     check("batched: the whole city is one mesh", city.stats.meshes === 1);

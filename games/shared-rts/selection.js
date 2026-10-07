@@ -21,7 +21,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null, adjustSlots = null }) {
   // `attackUnits` (opt-in, alg-rts 2026-10-06): a right-click on an enemy UNIT is an attack order
   // too (not only on a building), and the cursor turns to a red sight over one; `canTarget(u)`:
   // may the player point at him (seen — not in the fog)?
@@ -334,6 +334,63 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   };
 
   /**
+   * WHERE A MOVE TO (px, pz) PUTS EACH SELECTED UNIT — no side effects. orderMove uses it, and so
+   * does a game's cursor preview (alg-rts: cover shown at the cursor, 2026-10-07), so what is
+   * shown is what is ordered. `adjustSlots(slots, units)` (a game's, opt-in) may move them (onto
+   * cover). Squads: `arr` comes back in squad order, one slot per man.
+   */
+  function formationAt(px, pz) {
+    // Spread units around the target so they don't stack on one point. Spacing
+    // must clear the biggest unit's separation radius — otherwise their goal
+    // points overlap and they shove each other forever instead of settling.
+    //
+    // Assign the CLOSEST unit to each slot (greedy) so the group doesn't cross
+    // over itself on the way, and so two units never chase the same slot.
+    const arr = [...selected].filter((u) => !u.isStructure); // buildings don't move
+    if (!arr.length) return { arr, slots: [] };
+    const maxR = Math.max(...arr.map((u) => u.radius ?? 3));
+    const spacing = Math.max(6, maxR * 2.6);
+    const cols = Math.ceil(Math.sqrt(arr.length));
+
+    let slots = arr.map((_, i) => {
+      const gx = (i % cols) - (cols - 1) / 2;
+      const gz = Math.floor(i / cols) - (cols - 1) / 2;
+      return { x: px + gx * spacing, z: pz + gz * spacing };
+    });
+    // SQUADS (opt-in): each squad (or lone unit) gets a spot on a coarse grid,
+    // its men a loose cluster round it — a squad stays a squad on arrival.
+    if (squadOf) {
+      const groups = [];
+      const seen = new Set();
+      for (const u of arr) {
+        if (seen.has(u)) continue;
+        const mates = (squadOf(u) ?? [u]).filter((m) => arr.includes(m));
+        if (!mates.includes(u)) mates.push(u);
+        for (const m of mates) seen.add(m);
+        groups.push(mates);
+      }
+      const gCols = Math.ceil(Math.sqrt(groups.length));
+      const gSpace = Math.max(16, maxR * 4);
+      const order = [];
+      slots = [];
+      groups.forEach((g, gi) => {
+        const cx = px + ((gi % gCols) - (gCols - 1) / 2) * gSpace;
+        const cz = pz + (Math.floor(gi / gCols) - (Math.ceil(groups.length / gCols) - 1) / 2) * gSpace;
+        g.forEach((m, k) => {
+          // A loose ring round the spot (the first man at its middle).
+          const ring = k === 0 ? 0 : 2.6 + (k > 6 ? 2.6 : 0), a = k * 2.39996;
+          slots.push({ x: cx + Math.cos(a) * ring, z: cz + Math.sin(a) * ring });
+          order.push(m);
+        });
+      });
+      arr.length = 0;
+      arr.push(...order);
+    }
+    if (adjustSlots) slots = adjustSlots(slots, arr) ?? slots;
+    return { arr, slots };
+  }
+
+  /**
    * MOVE the selection to world (x, z): a formation round the point, rally
    * points for selected buildings, shared path searches. The ground's
    * right-click and the minimap's (a game's) both come here. `y`: the marker's
@@ -356,52 +413,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     for (const s of selected) {
       if (s.isStructure && s.rally) { s.rally.x = hit.point.x; s.rally.z = hit.point.z; }
     }
-    // Spread units around the target so they don't stack on one point. Spacing
-    // must clear the biggest unit's separation radius — otherwise their goal
-    // points overlap and they shove each other forever instead of settling.
-    //
-    // Assign the CLOSEST unit to each slot (greedy) so the group doesn't cross
-    // over itself on the way, and so two units never chase the same slot.
-    const arr = [...selected].filter((u) => !u.isStructure); // buildings don't move
+    const { arr, slots } = formationAt(hit.point.x, hit.point.z);
     if (!arr.length) return;
-    const maxR = Math.max(...arr.map((u) => u.radius ?? 3));
-    const spacing = Math.max(6, maxR * 2.6);
-    const cols = Math.ceil(Math.sqrt(arr.length));
-
-    let slots = arr.map((_, i) => {
-      const gx = (i % cols) - (cols - 1) / 2;
-      const gz = Math.floor(i / cols) - (cols - 1) / 2;
-      return { x: hit.point.x + gx * spacing, z: hit.point.z + gz * spacing };
-    });
-    // SQUADS (opt-in): each squad (or lone unit) gets a spot on a coarse grid,
-    // its men a loose cluster round it — a squad stays a squad on arrival.
-    if (squadOf) {
-      const groups = [];
-      const seen = new Set();
-      for (const u of arr) {
-        if (seen.has(u)) continue;
-        const mates = (squadOf(u) ?? [u]).filter((m) => arr.includes(m));
-        if (!mates.includes(u)) mates.push(u);
-        for (const m of mates) seen.add(m);
-        groups.push(mates);
-      }
-      const gCols = Math.ceil(Math.sqrt(groups.length));
-      const gSpace = Math.max(16, maxR * 4);
-      const order = [];
-      slots = [];
-      groups.forEach((g, gi) => {
-        const cx = hit.point.x + ((gi % gCols) - (gCols - 1) / 2) * gSpace;
-        const cz = hit.point.z + (Math.floor(gi / gCols) - (Math.ceil(groups.length / gCols) - 1) / 2) * gSpace;
-        g.forEach((m, k) => {
-          // A loose ring round the spot (the first man at its middle).
-          const ring = k === 0 ? 0 : 2.6 + (k > 6 ? 2.6 : 0), a = k * 2.39996;
-          slots.push({ x: cx + Math.cos(a) * ring, z: cz + Math.sin(a) * ring });
-          order.push(m);
-        });
-      });
-      arr.length = 0;
-      arr.push(...order);
-    }
 
     // ONE path search per cluster of units, not one per unit: every ground
     // unit within 15 m of a unit that already searched takes a copy of that
@@ -450,6 +463,11 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     get selected() { return [...selected]; },
     clear,
     orderMove,
+    /** Where a move to (x, z) would put the selection, without ordering it (a cursor preview). */
+    previewMove(x, z) {
+      if (clampOrder) ({ x, z } = clampOrder(x, z));
+      return formationAt(x, z);
+    },
     /** Drop a unit from the selection when it dies. */
     remove(unit) {
       if (!selected.has(unit)) return;

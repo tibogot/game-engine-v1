@@ -20,6 +20,7 @@
 // Tracers are tracerField.js (one draw, GPU-placed, one row written per round).
 // Rockets and mortar shells are the only projectiles simulated on the CPU.
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BLOOM } from "./bloom.js";
 import { createSpriteField } from "./spriteField.js";
 import { createTracerField, TRACER_COLOURS } from "./tracerField.js";
@@ -127,8 +128,49 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
   // cm; x 1.3 unit scale and a little more to be seen at RTS distance) — and
   // it TUMBLES; the mortar bomb flies nose first. Was the 1.8 m bomb (you,
   // 2026-09-30: "it looks like a huge bomb").
-  const GRENADE_SCALE = new THREE.Vector3(0.28, 0.28, 0.16);
   const _gq = new THREE.Quaternion(), _gAxis = new THREE.Vector3(1, 0.3, 0).normalize();
+
+  // ── THE THROWN ONES (2026-10-07, you: "the fumigène looks like a huge capsule that makes no
+  // sense, the grenade could look better"): their OWN small meshes, not the mortar bomb — the
+  // smoke grenade flew as the full 1.8 m bomb, the grenade as that bomb squashed. Both ~3x real
+  // size (x 1.3 unit scale, and to be seen from the RTS camera: 2x read as specks), long axis Z, painted
+  // by vertex colour; one instanced draw each.
+  const handMat = new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.15 });
+  const paint = (g, hex) => {
+    const c = new THREE.Color(hex), n = g.attributes.position.count, a = new Float32Array(n * 3);
+    for (let i = 0; i < n; i++) { a[i * 3] = c.r; a[i * 3 + 1] = c.g; a[i * 3 + 2] = c.b; }
+    g.setAttribute("color", new THREE.BufferAttribute(a, 3));
+    return g;
+  };
+  const clean = (g) => { for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal") g.deleteAttribute(k); return g; };
+  // GRENADE (the defensive kind, an OF 37 / Mk 2): a ribbed olive egg, the grey fuse and spoon.
+  const fragGeo = (() => {
+    const pts = [];
+    for (let i = 0; i <= 16; i++) {
+      const t = i / 16, y = (t - 0.5) * 0.2;
+      const r = 0.07 * Math.sin(Math.PI * (0.06 + t * 0.88)) ** 0.7 * (1 + 0.07 * Math.cos(t * Math.PI * 10));   // the bands
+      pts.push(new THREE.Vector2(Math.max(0.004, r), y));
+    }
+    const body = paint(clean(new THREE.LatheGeometry(pts, 10)), 0x4b5230);
+    const fuse = paint(clean(new THREE.CylinderGeometry(0.026, 0.03, 0.05, 8).translate(0, 0.12, 0)), 0x8c8a80);
+    const spoon = paint(clean(new THREE.BoxGeometry(0.022, 0.15, 0.012).translate(0.045, 0.06, 0).rotateZ(-0.12)), 0x9a988c);
+    return mergeGeometries([body, fuse, spoon]).rotateX(Math.PI / 2).scale(1.4, 1.4, 1.4);
+  })();
+  // SMOKE GRENADE (an M18 can): olive, a pale band, a grey cap and its fuse.
+  const smokeCanGeo = (() => {
+    const body = paint(clean(new THREE.CylinderGeometry(0.065, 0.065, 0.22, 12)), 0x5a6140);
+    const band = paint(clean(new THREE.CylinderGeometry(0.067, 0.067, 0.045, 12).translate(0, 0.05, 0)), 0xd9d2b6);
+    const cap = paint(clean(new THREE.CylinderGeometry(0.058, 0.066, 0.03, 12).translate(0, 0.125, 0)), 0x8a8a82);
+    const fuse = paint(clean(new THREE.CylinderGeometry(0.02, 0.022, 0.045, 8).translate(0, 0.16, 0)), 0x9a988c);
+    return mergeGeometries([body, band, cap, fuse]).rotateX(Math.PI / 2).scale(1.4, 1.4, 1.4);
+  })();
+  const handMesh = (geo, name) => {
+    const m = new THREE.InstancedMesh(geo, handMat, MAX_SHELLS);
+    m.count = 0; m.frustumCulled = false; m.castShadow = false; m.name = name; m.visible = false;
+    scene.add(m);
+    return m;
+  };
+  const fragMesh = handMesh(fragGeo, "ThrownGrenades"), canMesh = handMesh(smokeCanGeo, "ThrownSmoke");
 
   /**
    * Lob a shell from `from` onto the point `to`, landing in `flight` seconds
@@ -374,7 +416,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     if (n > 0) bodyMesh.instanceMatrix.needsUpdate = true;
 
     // Shells: ballistic, and they land on the POINT, whatever has moved.
-    let m = 0;
+    let m = 0, mf = 0, mc = 0;
     for (const s of shells) {
       if (!s.alive) continue;
       s.t += dt;
@@ -389,10 +431,19 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       }
       _obj.position.copy(s.pos);
       _obj.lookAt(_look.copy(s.pos).add(s.vel));
-      if (s.kind === "grenade") {
-        _obj.quaternion.multiply(_gq.setFromAxisAngle(_gAxis, s.t * 14));   // end over end
-        _obj.scale.copy(GRENADE_SCALE);
-      } else _obj.scale.setScalar(1);
+      _obj.scale.setScalar(1);
+      if (s.kind === "grenade" || s.kind === "smoke") {
+        // End over end; the can slower, trailing a thin wisp (its fuse lit).
+        _obj.quaternion.multiply(_gq.setFromAxisAngle(_gAxis, s.t * (s.kind === "smoke" ? 9 : 14)));
+        _obj.updateMatrix();
+        // A faint trail behind each, so the arc reads from the RTS camera: the can's thicker (its
+        // fuse is smoking), the grenade's a thread.
+        const smoke = s.kind === "smoke";
+        (smoke ? canMesh : fragMesh).setMatrixAt(smoke ? mc++ : mf++, _obj.matrix);
+        s.puffT = (s.puffT ?? 0) - dt;
+        if (s.puffT <= 0) { s.puffT = smoke ? 0.04 : 0.05; smokeTrail.spawn(s.pos.x, s.pos.y, s.pos.z, smoke ? 0.9 : 0.45, { scale: smoke ? 0.24 : 0.1 }); }
+        continue;
+      }
       _obj.updateMatrix();
       shellMesh.setMatrixAt(m, _obj.matrix);
       m++;
@@ -400,6 +451,11 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     shellMesh.count = m;
     shellMesh.visible = m > 0;
     if (m > 0) shellMesh.instanceMatrix.needsUpdate = true;
+    for (const [mesh, k] of [[fragMesh, mf], [canMesh, mc]]) {
+      mesh.count = k;
+      mesh.visible = k > 0;
+      if (k > 0) mesh.instanceMatrix.needsUpdate = true;
+    }
 
     flares.update(dt, camera);
     smokeTrail.update(dt, camera);

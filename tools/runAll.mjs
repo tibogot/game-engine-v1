@@ -84,6 +84,15 @@ const SLOW = new Set([
   "roadHoldTest.mjs",
 ]);
 
+/*
+ * NOT IN THE FAST LANE EITHER (2026-10-07, you: "I'm tired of this — I'm not working on it for
+ * days, solve it or ignore it"): Apex Rush's city kit. Its traffic check runs a sim whose closest
+ * pair of cars varies run to run (3.8 m once against a 5 m floor) and its LOD timing hit 9.5 ms
+ * under the 8-way pool (0.4 ms alone; now best of six). It failed the RTS work's commit runs at
+ * random. A full run (`npm run test:all`) keeps it — run that when working on Apex Rush.
+ */
+const OTHER_GAME = new Set(["cityKitTest.mjs"]);
+
 const FAST = process.argv.includes("--fast");
 
 // Only `*Test.mjs` / `*.run.mjs` are discovered, and that is what keeps the
@@ -93,11 +102,11 @@ const FAST = process.argv.includes("--fast");
 // loop. Use this runner instead of a loop.
 const files = readdirSync(HERE)
   .filter((f) => /Test(\.run)?\.mjs$/.test(f))
-  .filter((f) => !(FAST && SLOW.has(f)))
+  .filter((f) => !(FAST && (SLOW.has(f) || OTHER_GAME.has(f))))
   .sort();
 
 if (FAST) {
-  console.log(`fast lane: skipping ${SLOW.size} long vehicle sims`);
+  console.log(`fast lane: skipping ${SLOW.size} long vehicle sims + Apex Rush's city kit (cityKitTest)`);
   console.log("run without --fast before committing, or after any vehicle / BVH change\n");
 }
 

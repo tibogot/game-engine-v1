@@ -7,6 +7,11 @@
 //   YELLOW  light cover or open ground
 // An attack order: one red set over the target.
 //
+// THE PREVIEW (2026-10-07, "cover at the cursor"): the same marks, still and smaller, where each
+// man WOULD stand while the cursor is over the ground (algCoverCursor.js) — and two more colours:
+//   PALE    open ground (no cover)
+//   CYAN    open but concealed (scrub: not seen)
+//
 // ONE instanced mesh (4 arrows x 64 spots), opaque: the ground and the walls
 // hide it where they should, and it needs no see-through draw order.
 import * as THREE from "three";
@@ -22,13 +27,18 @@ const P = {
   tilt: 0.55,      // rad: the arrows' lean (0 = flat on the ground, π/2 = upright; 0.75 showed the far ones edge-on)
   size: 0.5,       // m, an arrow's length
   heavy: 0.45,     // algCover's cover from which a spot is GREEN
+  light: 0.1,      // … YELLOW from here (below: open)
+  hidden: 0.3,     // concealment from which an open spot is CYAN
   spots: 64,
+  previews: 48,
 };
 
 const COL = {
   heavy: new THREE.Color(0x6cf04e),
   light: new THREE.Color(0xffcc1a),
   attack: new THREE.Color(0xff4a2a),
+  open: new THREE.Color(0xd8d2c0),
+  hidden: new THREE.Color(0x4ee0e8),
 };
 
 /** A flat arrow, tip at the origin, its body along +Y (length 1). */
@@ -51,7 +61,7 @@ function arrowGeometry() {
  */
 export function createOrderMarks({ app }) {
   const mat = new MeshBasicNodeMaterial({ side: THREE.DoubleSide, fog: false });
-  const max = P.spots * 4;
+  const max = (P.spots + P.previews) * 4;
   const mesh = new THREE.InstancedMesh(arrowGeometry(), mat, max);
   mesh.count = 0;
   mesh.frustumCulled = false;
@@ -81,6 +91,19 @@ export function createOrderMarks({ app }) {
   function coverKind(x, z) {
     const c = app.algCover?.coverAt?.(x, z) ?? 0;
     return c >= P.heavy ? "heavy" : "light";
+  }
+  /** The preview's four kinds (open and concealed told apart). */
+  function previewKind(x, z) {
+    const cv = app.algCover;
+    const c = cv?.coverAt?.(x, z) ?? 0;
+    if (c >= P.heavy) return "heavy";
+    if (c >= P.light) return "light";
+    return (cv?.concealmentAt?.(x, z) ?? 0) >= P.hidden ? "hidden" : "open";
+  }
+  let previewSpots = [];
+  /** Show the preview at these spots ([{ x, z }]), or none ([] / null). */
+  function preview(spots) {
+    previewSpots = (spots ?? []).slice(0, P.previews).map((p) => ({ x: p.x, z: p.z, y: app.getWorldHeight?.(p.x, p.z) ?? 0, col: COL[previewKind(p.x, p.z)] }));
   }
 
   /** Each frame (render side). */
@@ -123,6 +146,24 @@ export function createOrderMarks({ app }) {
         n++;
       }
     }
+    // The preview: still, square to the world, a little BIGGER than an order's (0.72 read as specks
+    // at play zoom).
+    const kp = P.size * 1.15, rp = P.rTo + 0.3;
+    for (const m of previewSpots) {
+      for (let q = 0; q < 4; q++) {
+        const a = Math.PI / 4 + q * Math.PI / 2, ox = Math.cos(a), oz = Math.sin(a);
+        Y.set(ox * ct, st, oz * ct);
+        X.set(-oz, 0, ox);
+        Z.crossVectors(X, Y);
+        m4.makeBasis(X, Y, Z);
+        sc.makeScale(kp, kp, kp);
+        m4.multiply(sc);
+        m4.setPosition(m.x + ox * rp, m.y + P.lift, m.z + oz * rp);
+        mesh.setMatrixAt(n, m4);
+        mesh.setColorAt(n, m.col);
+        n++;
+      }
+    }
     if (n || mesh.count) {
       mesh.count = n;
       mesh.instanceMatrix.needsUpdate = true;
@@ -130,5 +171,5 @@ export function createOrderMarks({ app }) {
     }
   }
 
-  return { params: P, order, frame, dispose() { app.scene.remove(mesh); mesh.geometry.dispose(); mat.dispose(); } };
+  return { params: P, order, preview, previewKind, frame, dispose() { app.scene.remove(mesh); mesh.geometry.dispose(); mat.dispose(); } };
 }

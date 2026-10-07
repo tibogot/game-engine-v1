@@ -599,6 +599,12 @@ export function buildFrenchPost({ seed = 1957, detail = 1 } = {}) {
   geo.userData.stencil = stencil;
   const half = (wr + 0.5) * S;
   geo.userData.footprint = { cx: 0, cz: -1.5 * S, hx: half, hz: half + 1.5 * S };
+  // COVER on the WALLS (alg-rts algCover; scaled, piece frame). Without it the cover ran round the
+  // footprint's edge — the barbed wire 5.5 m out, 7 m at the gate's apron: men standing at the wire
+  // had hard cover (2026-10-07, shown up by the cover preview at the cursor).
+  const w = hl * S;
+  geo.userData.coverLines = [{ hard: true, pts: [[-w, -w], [w, -w], [w, w], [-w, w], [-w, -w]] }];
+  geo.userData.coverPerimeter = false;
   geo.userData.flagMount = { pos: [0, 0.3 * S, -2.5 * S], poleHeight: poleH * S };
   geo.userData.gate = { leaves: gateLeaves, width: gateW * S, z: (gz - 0.4) * S };
   geo.userData.parts = { ...(geo.userData.parts ?? {}), gateLeft: gateLeaves[0].geo, gateRight: gateLeaves[1].geo };
