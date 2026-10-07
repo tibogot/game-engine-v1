@@ -838,6 +838,14 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             if (u._base || u.isMoving || u.target?.alive || u.attackTarget?.alive || u.pinned) continue;   // the base stays and fires
             let best = null, bd = 80;
             for (const f of french()) { if (f.isAir) continue; const d = dist(f.position, u.position); if (d < bd) { bd = d; best = f; } }
+            // AN FM GUNNER (algMgTeam.js) is the band's base of fire, not a stormer: in reach, it
+            // swings its arc onto him; out of reach, it goes only as far as firing range.
+            if (best && u.typeKey === "fmTeam" && app.algMgTeams) {
+              if (bd <= u.range * 1.05) { app.algMgTeams.aimAt(u, best.position.x, best.position.z); continue; }
+              const k = (bd - u.range * 0.75) / bd;
+              u.orderTo(u.position.x + (best.position.x - u.position.x) * k, u.position.z + (best.position.z - u.position.z) * k);
+              continue;
+            }
             if (best) u.orderTo(best.position.x, best.position.z);
           }
         }
@@ -879,6 +887,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     b.grenT = (b.grenT ?? rand(1, 3)) - P.tactEvery;
     for (const u of m) {
       if (u.throwing || u.isMoving || u.pinned) continue;
+      // A set-up machine gun stays and fires (algMgTeam.js): it does not run for cover.
+      if (app.algMgTeams?.stateOf(u) === "set") continue;
       const s = u.firedOnBy;
       if (!s?.alive || (u.suppression ?? 0) < 0.15 || u.inCover) continue;
       if (u.coverSought > t - 6) continue;   // he looked just now

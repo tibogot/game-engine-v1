@@ -93,7 +93,8 @@ export function createInfantryPosture({ units, cover = null, params = POSTURE })
     onShot(shooter, target) {
       if (!target?.alive) return;
       target.firedOnBy = shooter;   // who: the AI takes cover FROM him (algAI.js)
-      const w = shooter?.weapon, a = params.perRound[w] ?? params.perRoundDefault;
+      // suppressOut: a shooter's own multiplier (alg-rts: a SET-UP machine gun pins harder).
+      const w = shooter?.weapon, a = (params.perRound[w] ?? params.perRoundDefault) * (shooter?.suppressOut ?? 1);
       const cap = params.capByWeapon?.[w] ?? params.max;
       if (onFoot(target)) add(target, a, cap);
       const r = params.area[w];

@@ -89,7 +89,23 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    - [x] THE GAME'S CURSORS (ui/cursors.js): a brass arrow everywhere, a brass reticle for the
      targeting modes ("crosshair" mapped on the canvas), brass edge-scroll arrows (rtsCamera
      params.edgeCursors).
-   - [ ] next: CREW-SERVED MGs.
+   - [x] MACHINE-GUN TEAMS (algMgTeam.js, 2026-10-07): the French PIÈCE FM (3 men, post, 240 mp + 20 mun,
+     tier 1; the gunner slot 0: mg 48 m, 5 rps) and the FLN's FM gunners. Stopped → SETS UP (2.5 s,
+     prone) facing its move / the nearest enemy / where pointed (O); set up it fires only in a 60°
+     ARC (shared combat.js `e.arc`), never chases (`noChase`), pins harder (`suppressOut` 1.6); an
+     enemy outside the arc → it swings round at ~26°/s NOT firing (180° ≈ 7 s); a move order → it
+     PACKS UP (2 s) first. Arc wedge on the ground (yellow yours, red the enemy's when seen).
+     MEASURED: 3 FLN in the arc at ~40 m pinned within 1 s; a flanker at 125° pinned only after the
+     ~4.5 s swing. AI: FM gunners don't run for cover once set, swing onto the nearest French in
+     reach, close only to firing range. In 20 min of play they spent 42 of 162 attack samples set
+     and firing (was 0: they stormed in with the riflemen, packed).
+     LIVE DEMO fixes (you watched it): the round's 6 m area pinned 2 of 5 and pinned men crawled on
+     at 30% — the rush reached the gun. Now a set-up gun SWEEPS (every enemy on foot within 12 m of
+     its target, in the arc, 0.85/s) and pinned men crawl at 10% (alg posture movePinned 0.1). Replay:
+     4 of 5 pinned within 1 s, the rush stopped 13 m short; a flank at ~110° had a ~3 s window.
+   - [ ] NEXT (you, "we will continue later"): the built mgNest gets the same arc; the gunner lying
+     flat visibly; then vehicle ARMOUR BY FACING; then SOUND; then a real playtest to tune the FLN,
+     prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of
    fire, flanked); vehicle ARMOUR BY FACING + penetration; more abilities; DOCTRINES; FLN
    ASYMMETRY (tunnels, melting into villages, mines, sabotage, distinct roles: sniper, sapper,

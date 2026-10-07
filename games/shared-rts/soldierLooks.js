@@ -114,6 +114,16 @@ export const LOOKS = {
     kit: ["pack", "belt"], roles: SECTION_ROLES,
     extras: { scarf: 0.35, mustache: 0.3, cigarette: 0.12, sunglasses: 0.08, grenades: 0.25 },
   },
+  // The PIÈCE FM (alg-rts): the section's look, the gunner (0) with the FM, the chef de pièce (2)
+  // with a MAT 49 and binoculars, the loader (1) with his rifle and a pack of magazines.
+  appelePiece: {
+    label: "Pièce FM", note: "the section's look: gunner, loader, chef de pièce",
+    green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, hatColor: 0x77744f, weapon: "mas49_56",
+    variants: [{ w: 0.7 }, { w: 0.3, helmet: false, headgear: "bushHat" }],
+    kit: ["pack", "belt"],
+    roles: { 0: { name: "LMG", weapon: "fm2429" }, 2: { name: "leader", weapon: "mat49", kit: ["binoculars"] } },
+    extras: { scarf: 0.3, mustache: 0.3, cigarette: 0.15, grenades: 0.2 },
+  },
   paraSection: {
     label: "Para section", note: "mixed: casquettes Bigeard and red berets",
     camo: { base: 0xa59c72, green: 0x55603a, brown: 0x6a4b2f }, helmet: false, weapon: "mat49",

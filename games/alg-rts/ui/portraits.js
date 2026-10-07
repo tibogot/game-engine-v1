@@ -18,7 +18,8 @@ const vehicleUrl = (cell) => `${DIR}v${cell}.webp`;
 /** Sheet cell → who. The first face of a list is the type's portrait. */
 const FACES = {
   appele: [0, 1, 9, 10, 3, 11, 14, 15],      // helmets, bush hat, camo cover
-  sapeur: [2, 13, 12],                       // goggles on the helmet, the beret
+  sapeur: [2, 13, 12],
+  piece: [10, 3, 1],                         // the section's faces: the gunner's team                       // goggles on the helmet, the beret
   para: [4, 5],                              // red berets
   legion: [6, 7],                            // white képis
   colonel: [8],                              // the officer's képi: Colonel Delorme

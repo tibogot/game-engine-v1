@@ -49,6 +49,40 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // THE PIÈCE FM (2026-10-07, CoH's machine-gun team): three men round a section's FM 24/29 used as
+  // the base of fire — the gunner (slot 0: the gun, algSquads SQUADS.piece.kit), his loader and the
+  // chef de pièce. The gun SETS UP before it fires, in an arc (algMgTeam.js). The men are appelés
+  // (their body and section look; the gunner dressed by role).
+  piece: {
+    typeKey: "piece",
+    name: "Pièce FM",
+    buildLabel: "Pièce FM (3)",
+    weapon: "rifle",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 5.0,
+    radius: 1.0,
+    turnRate: 6,
+    maxHp: 60,
+    range: 30,
+    damage: 6,
+    fireRate: 2.4,
+    canHitAir: true,
+    vision: 46,
+    url: "/models/soldiers/soldiers.glb",
+    body: "soldier1",
+    look: "appelePiece",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // The SAPEUR of the Génie: the French army's engineer, who digs the post's
   // defences (algBuild.js). A rifleman too, a worse one. `builds`: what his
   // command card offers (keys of algBuild.js BUILDS).

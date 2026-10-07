@@ -34,6 +34,8 @@ export const SQUADS = {
   appele: { size: 6, name: "Groupe", reinforce: 30 },
   // 3 (balance 2026-10-04): two men at 170 were the dearest and the most fragile in the game (CoH: 3-4).
   sapeur: { size: 3, name: "Équipe du génie", reinforce: 45 },
+  // The machine-gun team (algMgTeam.js): slot 0 carries the gun (`kit`, as an upgrade's weapon).
+  piece: { size: 3, name: "Pièce FM", reinforce: 40, kit: { 0: { weapon: "mg", range: 48, damage: 6, fireRate: 5 } } },
   para: { size: 5, name: "Stick para", reinforce: 60 },
   legion: { size: 5, name: "Groupe Légion", reinforce: 80 },
 };
@@ -157,7 +159,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     s.slots.forEach((u, i) => {
       if (!u?.alive) return;
       const up = Object.keys(s.upgrades).map((k) => UPGRADES[k]).find((g) => g.slot === i && g.squads.includes(s.typeKey));
-      const w = up?.weapon ?? u.type;
+      const w = up?.weapon ?? SQUADS[s.typeKey]?.kit?.[i] ?? u.type;
       u.weapon = w.weapon ?? null;
       u.range = w.range ?? 0;
       u.damage = w.damage ?? 0;

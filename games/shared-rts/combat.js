@@ -94,6 +94,16 @@ export function createCombat({
    * standing: a soldier in elephant grass and a tank in the open, both at 30 m,
    * are not equally findable, and a single scaled range could not say so.
    */
+  /**
+   * A FIRE ARC (alg-rts, a set-up machine gun: algMgTeam.js): `e.arc` = { facing, half } in the
+   * units' heading convention (atan2(dx, dz)). Nothing outside it is picked up or fired at.
+   */
+  const inArc = (e, o) => {
+    let a = Math.atan2(o.position.x - e.position.x, o.position.z - e.position.z) - e.arc.facing;
+    a = Math.atan2(Math.sin(a), Math.cos(a));
+    return Math.abs(a) <= e.arc.half;
+  };
+
   function acquire(e) {
     let best = null, bestD = Infinity;
     const reach = e.range * ACQUIRE_MULT;
@@ -101,6 +111,7 @@ export function createCombat({
       if (!o.alive || o.team === e.team) return;
       if (o.passive) return;
       if (o.isAir && !e.canHitAir) return; // jeeps can't shoot helicopters
+      if (e.arc && !inArc(e, o)) return;
       const d = flat(e, o);
       // An AA gun (the ZPU) takes any aircraft in reach over anything on the
       // ground: aircraft are ranked as if much nearer. The reach test below
@@ -271,7 +282,8 @@ export function createCombat({
 
     // Units close the distance; structures can't move, so they just wait.
     if (!e.isStructure) {
-      if (e.playerMove || e.inside) {
+      // (`noChase`: a set-up machine gun — going after a target would be packing up.)
+      if (e.playerMove || e.inside || e.noChase) {
         // On the player's move (or in a building, alg-rts algGarrison.js): shoot if he is in
         // reach, never go after him.
         if (d > e.range) return;
@@ -309,6 +321,9 @@ export function createCombat({
       }
       return;
     }
+
+    // Out of a set-up gun's arc: it does not fire (algMgTeam.js turns it round).
+    if (e.arc && !inArc(e, tgt)) { if (!e.attackTarget) e.target = null; return; }
 
     if (d <= e.range && e.cooldown <= 0) {
       // fireMul: a suppressed / pinned man shoots slower (infantryPosture.js)

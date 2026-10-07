@@ -10,7 +10,7 @@
 export const TIERS = [
   {
     n: 1, name: "Section d'infanterie", note: "dès le départ",
-    units: ["appele", "sapeur", "willys", "gmc"], cost: 0, villages: 0,
+    units: ["appele", "sapeur", "piece", "willys", "gmc"], cost: 0, villages: 0,
   },
   {
     n: 2, name: "Moyens héliportés", note: "l'héliport ouvre : paras, l'Alouette ; le half-track",

@@ -57,6 +57,7 @@ import { createCommandCard } from "./ui/commandCard.js";
 import { createMinimap } from "./ui/minimap.js";
 import { createTacticalMap } from "./ui/tacticalMap.js";
 import { createAlgCoverCursor } from "./algCoverCursor.js";
+import { createAlgMgTeams } from "./algMgTeam.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
 import { installPortraits, hasPortrait } from "./ui/portraits.js";
@@ -67,7 +68,7 @@ import { installPortraits, hasPortrait } from "./ui/portraits.js";
  */
 const PRODUCTION = {
   // Infantry per SQUAD (algSquads.js), vehicles one each.
-  post: { appele: 14, sapeur: 10, legion: 24 },
+  post: { appele: 14, sapeur: 10, piece: 14, legion: 24 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { para: 18, alouette: 30 },   // paras: the heliborne reserve
   caveEntrance: { moudjahid: 4, fmTeam: 7 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
@@ -462,6 +463,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       ? [
         { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrouille en file sur la piste la plus proche, aller et retour (véhicules : la piste). Un GMC en patrouille ravitaille les villages que vous tenez.", ready: true },
         grenades?.ability(sel),
+        // ORIENTER (algMgTeam.js): point a machine-gun team's arc.
+        mgTeams?.ability(sel),
         // FUMIGÈNE (algGrenades.js + algSmoke.js): a screening cloud nobody sees through.
         grenades?.ability(sel, "smoke"),
         // FM 24/29 (algSquads UPGRADES): the appelés' light machine gun, for munitions.
@@ -508,6 +511,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
       if (key === "smoke") grenades?.begin(sel, "smoke");
+      if (key === "aimArc") mgTeams?.begin(sel);
       if (key === "lmg") { for (const s of squads.squadsIn(sel)) squads.upgrade(s, "lmg"); commandCard.render(sel); }
       if (key === "barrage") barrage?.begin(sel);
       if (key === "airStrike") airStrike?.begin(sel);
@@ -533,7 +537,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
   let controlGroups = null;   // made after the selection it listens to
-  let coverCursor = null;
+  let coverCursor = null, mgTeams = null;
   const selection = createSelection({
     app, units, unitRenderer, structuresRenderer: structures.renderer,
     // The sappers' sites (algBuild.js, made later): a click picks one.
@@ -634,7 +638,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // firing steadily at a man puts him on a knee; one rifle alone doesn't.
   // Capped at 0.8 (pinned = 1.0): rifles alone never put a man flat (0.12
   // uncapped did, in the lab) — that stays the MG's job.
-  const posture = createInfantryPosture({ units, cover: coverSys.cover, params: { ...POSTURE, perRound: { ...POSTURE.perRound, rifle: 0.12 }, capByWeapon: { rifle: 0.8 } } });
+  const posture = createInfantryPosture({ units, cover: coverSys.cover, params: { ...POSTURE, perRound: { ...POSTURE.perRound, rifle: 0.12 }, capByWeapon: { rifle: 0.8 }, movePinned: 0.1 } });   // pinned = barely a crawl (CoH: pinned men can't advance; at 0.3 a pinned rush still reached the gun)
+  // MACHINE-GUN TEAMS (algMgTeam.js): the pièce FM's gunner and the FLN's FM gunners set up, fire
+  // in an arc, pack up to move.
+  mgTeams = createAlgMgTeams({ app, units, selection, fogOfWar,
+    isGunner: (u) => u.typeKey === "fmTeam" || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u) });
+  app.algMgTeams = mgTeams;
   app.algPosture = posture;
   // WRECKS (algWrecks.js): a destroyed vehicle stays, burnt, burning, as cover and an obstacle.
   const wrecks = createAlgWrecks(app, { types: ALG_UNIT_TYPES, builders: FR_VEHICLES, paint: FR_PAINT_TINT, navGrid, cover: coverSys.cover });
@@ -699,7 +708,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
-  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
+  const simStep = (d) => { ai?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -715,6 +724,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     barrage.frame();
     airStrike.frame();
     coverCursor?.frame();
+    mgTeams?.frame();
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];

@@ -55,7 +55,7 @@ const CSS = `
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
 
-const ABILITY_NAMES = { patrol: "Patrouille", grenade: "Grenade", smoke: "Fumigène", stop: "Halte", focus: "Caméra sur la sélection", cutWire: "Couper les barbelés", cancelSite: "Annuler un chantier", retreat: "Retraite", reinforce: "Renforcer", lmg: "FM 24/29", barrage: "Tir de barrage", airStrike: "Frappe aérienne", repair: "Réparer" };
+const ABILITY_NAMES = { patrol: "Patrouille", grenade: "Grenade", smoke: "Fumigène", stop: "Halte", focus: "Caméra sur la sélection", cutWire: "Couper les barbelés", cancelSite: "Annuler un chantier", retreat: "Retraite", reinforce: "Renforcer", lmg: "FM 24/29", barrage: "Tir de barrage", airStrike: "Frappe aérienne", repair: "Réparer", aimArc: "Orienter la mitrailleuse" };
 
 /**
  * @param {object} o
@@ -241,6 +241,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
       <ul>
         <li><b>Appelés</b> (groupe de 6) : l'infanterie de base. Grenades, fumigène ; l'amélioration <b>FM 24/29</b> leur donne un fusil-mitrailleur.</li>
         <li><b>Sapeurs du Génie</b> (3) : construisent, réparent, coupent les barbelés.</li>
+        <li><b>Pièce FM</b> (3) : une mitrailleuse et ses servants. Arrêtée, elle <b>se met en batterie</b> (quelques secondes) et ne tire que dans son <b>secteur</b> (le cône au sol) — mais elle cloue au sol tout ce qui y entre. Pour bouger, elle se replie d'abord. Prenez-la de flanc ou aveuglez-la au fumigène.</li>
         <li><b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface.</li>
         <li><b>Légionnaires</b> : l'infanterie la plus solide.</li>
         <li><b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain.</li>
@@ -259,6 +260,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         <li><b>Carte tactique</b> : maintenez ${K("Tab")} pour un coup d'œil sur toute la vallée, tapez-le pour la garder ouverte. Clic gauche : la caméra y va ; clic droit : la sélection y part.</li>
         <li><b>Couverture</b> : maintenez ${K("V")} pour voir où les hommes sont à couvert (vert) et cachés (cyan). Derrière murs et rochers on survit ; à découvert, non.</li>
         <li><b>Garnison</b> : infanterie sélectionnée, <b>clic droit sur une maison</b> : le groupe entre et tire par les fenêtres. Une grenade dedans les fait sortir. ${K("K")} : sortir.</li>
+        <li><b>Orienter la mitrailleuse</b> ${K("O")} : pièce FM sélectionnée, cliquez où elle doit tirer : en batterie, elle pivote (lentement) ; repliée, elle se mettra en batterie face à ce point.</li>
         <li><b>Grenade</b> ${K("G")}, <b>fumigène</b> ${K("B")} : visez avec le clic gauche. La fumée coupe la vue.</li>
         <li><b>Retraite</b> ${K("T")} : le groupe rentre au poste, plus vite. <b>Renforcer</b> ${K("Y")} : au poste, remplace les hommes perdus.</li>
         <li><b>Réparer</b> ${K("J")} : sapeurs sélectionnés, clic droit sur un véhicule ou un bâtiment abîmé.</li>

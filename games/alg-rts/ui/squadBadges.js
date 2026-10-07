@@ -18,6 +18,8 @@ import { iconStyle } from "./icons.js";
 const ICONS = {
   // A rifle, slung diagonally.
   appele: `<path d="M4.5 19.5 L18.5 5.5" stroke-width="2.4"/><path d="M3 18 L6 21" stroke-width="3.2"/><path d="M18.5 5.5 L21 3" stroke-width="1.2"/><path d="M11 13 L9.5 11.5" stroke-width="1.6"/>`,
+  // A machine gun on its bipod: the pièce FM (algMgTeam.js).
+  piece: `<path d="M3 10.5 L21 10.5" stroke-width="2.4"/><path d="M5 10.5 L4 14 L7 14 Z" fill="currentColor" stroke-width="1.2"/><path d="M11 8 L13 8 L13 10.5" stroke-width="1.6"/><path d="M16 10.5 L13.5 18 M16 10.5 L18.5 18" stroke-width="1.6"/>`,
   // A spanner (Feather "tool", MIT).
   sapeur: `<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke-width="1.9"/>`,
   // A parachute: canopy, lines, the man.
