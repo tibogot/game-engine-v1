@@ -24,7 +24,7 @@
 
 export const VET = {
   thresholds: [40, 110, 220],
-  value: { man: 10, fmTeam: 14, vehicle: 30, structure: 25 },
+  value: { man: 10, fmTeam: 14, tireur: 16, vehicle: 30, structure: 25 },
   katiba: [8, 20, 40],   // French dead at the ALN's hands: the katiba's stars
   perStar: { acc: 0.12, armor: 0.08, suppress: 0.15, fireRate: 0.05 },
 };

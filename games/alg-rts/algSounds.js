@@ -44,7 +44,7 @@ export function createAlgSounds({ app, rtsCamera, units }) {
   const sfx = {
     shot(owner, w, at) {
       const k = owner?.weapon ?? "rifle";
-      const slot = k === "rifle" ? (owner?.team === "enemy" ? "boltRifle" : "rifle") : k === "mg" ? "mg" : k === "cannon" ? "cannon" : "rifle";
+      const slot = k === "sniper" ? "boltRifle" : k === "rifle" ? (owner?.team === "enemy" ? "boltRifle" : "rifle") : k === "mg" ? "mg" : k === "cannon" ? "cannon" : "rifle";
       audio.play(slot, at.x, at.y, at.z);
     },
     rocket(at) { audio.play("cannon", at.x, at.y, at.z, { gain: 0.6, rate: 1.2 }); },

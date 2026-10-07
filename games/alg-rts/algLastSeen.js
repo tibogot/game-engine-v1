@@ -81,6 +81,8 @@ export function createAlgLastSeen({ app, units, fogOfWar, rings, team = "enemy",
 
   return {
     get list() { return ghosts; },
+    /** A marker where something unseen gave itself away (algSniper.js: an unseen shot). */
+    addGhost,
     /** Sim seconds (the game's fixed step). */
     step(dt) {
       simT += dt;

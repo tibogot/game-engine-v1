@@ -71,8 +71,11 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      +0.09 ms GPU (1.34 vs 1.25, noise 0.04) → ~0.2 ms at the cap.
    - [ ] next: HOUSE DAMAGE + COLLAPSE (the village meshes are merged: a house id per vertex, or the
      houses split out); FELLED TREES; more wreck slots / blow-apart parts.
-3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more
-   contrast object vs ground; the lighter fog of war.
+3. [x] **IMAGE** (2026-10-07): the CoH afternoon — sun 16:00, contrast 1.18, vignette 0.25 (your "C"
+   of an A/B/C); AO BAKED, not screen-space: the ground darkened round every building, wall and
+   rock (algGroundContact.js, ground-cache splats, 0 ms) + the kit's per-vertex bakeContactAO.
+   N8AO measured +0.35-0.8 ms at game zoom (mostly its normal MRT), near-invisible top-down: off.
+   If ever wanted: three's GTAONode depth-only, half res (no normal MRT) — not built.
 4. [~] **SOUND** — the no-recordings pass DONE 2026-10-07 (rtsAudio `distanceFx`, alg only): a
    synthesised VALLEY ECHO on far shots (dry crack close, half echo under 1 kHz from 300 m), sound
    ARRIVING LATE past 140 m, the AMBIENCE DUCKED to ~35% by a fight near the camera (back in ~3 s);
@@ -123,6 +126,16 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      (Fast-forward gave other numbers — measure combat in real time.) AI: a man shooting an armoured
      front goes round to the side he is nearer (rarely triggers: bands already withdraw from armour).
      Manual: the units tab.
+   - [x] FLN ASYMMETRY 1 — THE SNIPER (algSniper.js, type `tireur`, 2026-10-07): out of the cave (90,
+     1/2/3 out by difficulty, first at 240 s), run outside the bands: concealed to a perch 46-54 m
+     from the French the katiba knows of (out of MG reach, a line of fire, no French within 45 m =
+     beyond their 42 m sight, scored on scrub + height), 62 m, 80 dmg, one round / 4.5 s, men on foot
+     only, half the cover's cut pierced, shown 1.2 s a shot; 3 shots then 10-25 m on along his side;
+     French on foot within 24 m → away; hurt → home. FAIR: every round a tracer, an unseen shot drops
+     a "last seen" ring + "Tireur embusqué !" (once a minute). MEASURED, a section idle at Mechta
+     Ouled Ali: 2 dead + 1 at 4 hp in ~30 s of fire, never seen. NEXT in the asymmetry: sabotage
+     (the telegraph line, booby-trapped houses, mines on mule paths), tunnels between refuges; then
+     civilians (soldier lab) → melting into villages + bouclage et fouille.
    - [ ] NEXT: then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of

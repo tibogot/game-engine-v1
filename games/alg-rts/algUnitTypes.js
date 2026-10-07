@@ -224,6 +224,48 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // THE SNIPER (2026-10-07, the FLN's asymmetry — "tireur d'élite"): one man with a scoped
+  // rifle (a MAS 36 or a captured Mauser), far out on a height. Weapon "sniper": 62 m (a
+  // rifleman's 30, the French see 42), one round every 4.5 s, a man on foot only
+  // (`footOnly`: no use against armour), 80 damage — an appelé, a sapper or a para dead in one
+  // hit in the open or light cover (60 measured: a hit through a wall left a man on 12), a
+  // légionnaire in two; behind a stone wall a man may live (combat's cover cut). The shot gives him away for 1.2 s, not a rifleman's 4
+  // (`revealTime`), but every round is a tracer: the player sees where it came from
+  // (algSniper.js marks the spot). Fragile (45 hp): found, he dies. The AI moves him
+  // (algSniper.js): concealed to a perch above the French, a few shots, then away.
+  tireur: {
+    typeKey: "tireur",
+    name: "Tireur d'élite",
+    buildLabel: "Tireur",
+    weapon: "sniper",
+    footOnly: true,
+    coverPierce: 0.5,   // half the cover's damage cut (combat.js): full cover → a hit leaves a man on 20
+    revealTime: 1.2,
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 5.5,
+    radius: 1.0,
+    turnRate: 5,
+    maxHp: 45,
+    range: 62,
+    damage: 80,
+    fireRate: 0.22,
+    canHitAir: false,
+    vision: 62,
+    url: "/models/soldiers/soldiers.glb",
+    bodies: ["aln1", "aln2"],
+    look: "alnSection",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // The FM GUNNER (2026-10-01, you: "ambushes can't pin"): a moudjahid with a
   // captured FM 24/29 — the ALN's light MG. Weapon "mg": every burst
   // SUPPRESSES an area (infantryPosture.js), so a band with one can pin a

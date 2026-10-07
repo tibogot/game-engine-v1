@@ -115,6 +115,7 @@ export function createCombat({
       if (o.passive) return;
       if (o.isAir && !e.canHitAir) return; // jeeps can't shoot helicopters
       if (e.arc && !inArc(e, o)) return;
+      if (e.type?.footOnly && !onFoot(o)) return;   // a sniper: men on foot, not armour
       const d = flat(e, o);
       // An AA gun (the ZPU) takes any aircraft in reach over anything on the
       // ground: aircraft are ranked as if much nearer. The reach test below
@@ -159,9 +160,11 @@ export function createCombat({
     //
     // A shot with no owner (burning napalm, a scripted hit) is not coming from
     // anywhere, so nothing shelters you from it.
+    // (`coverPierce` 0..1, a type's: the share of the cover its round goes through — alg-rts'
+    // sniper, an aimed head shot over the wall.)
     if (cover && owner?.position) {
       amount *= 1 - cover.coverBetween(
-        owner.position.x, owner.position.z, target.position.x, target.position.z);
+        owner.position.x, owner.position.z, target.position.x, target.position.z) * (1 - (owner.type?.coverPierce ?? 0));
     }
 
     if (armourMul) amount *= armourMul(target, owner, { bullet, shell });

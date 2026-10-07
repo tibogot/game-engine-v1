@@ -391,7 +391,7 @@ export function createCover({ app, worldSize = 2048, params = COVER, extra = nul
   }
 
   /** A unit that fires gives itself away, however deep it is lying. */
-  function reveal(e) { e.revealed = params.revealTime; }
+  function reveal(e) { e.revealed = e.type?.revealTime ?? params.revealTime; }   // a sniper: shorter
 
   /** FIXED-STEP: run the reveal timers down. */
   function step(dt, entities) {

@@ -40,6 +40,8 @@ export const ALG_FIRE = {
   rifle: { speed: 100, width: 0.09, length: 1.6, tracerEvery: 6, dim: 0.45, dark: 6, jitter: 0.3, dirt: 0.9 },
   mg: { speed: 100, width: 0.12, length: 2.5, tracerEvery: 4, dim: 0.6, dark: 4, jitter: 0.8, dirt: 1.1, burst: 4, gap: 0.06, spread: 3.2 },
   cannon: { speed: 140, width: 0.35, length: 5, dim: 0.75 },
+  // The FLN's sniper: EVERY round a tracer — the player's way to see where it came from.
+  sniper: { speed: 150, width: 0.08, length: 2.2, tracerEvery: 1, dim: 0.6, dark: 1, jitter: 0.1, dirt: 1 },
   // The Alouette: its AA-52's bursts only — NO rockets/bombs (you, 2026-10-07: "the Alouette
   // shouldn't keep bombs — a called-in air strike, as in CoH").
   gunship: { speed: 100, width: 0.12, length: 2.5, tracerEvery: 3, dim: 0.6, dark: 3, jitter: 0.8, dirt: 1.1, burst: 5, gap: 0.05, spread: 3.6, rocketEvery: 0 },

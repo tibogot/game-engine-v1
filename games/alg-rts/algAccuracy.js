@@ -33,6 +33,7 @@ export const ACCURACY = {
   // [point blank, edge of range], men on foot as the target.
   rifle: [0.4, 0.15],
   mg: [0.55, 0.3],
+  sniper: [0.95, 0.8],   // the FLN's tireur (algSniper.js): aimed, from a rest (kneeling + cover still cut it)
   gunship: [0.5, 0.3],
   kneel: 0.8,       // × for a man kneeling (suppressed, or in cover)
   prone: 0.5,       // × for a man lying (pinned)

@@ -35,7 +35,7 @@ export const COSTS = {
   para: { mp: 320, fuel: 25 }, legion: { mp: 380, mun: 45 },
   willys: { mp: 110, fuel: 20 }, gmc: { mp: 140, fuel: 30 }, halftrack: { mp: 190, fuel: 50 },
   ebr: { mp: 240, fuel: 75 }, amx13: { mp: 290, fuel: 105 }, alouette: { mp: 280, fuel: 120 },
-  moudjahid: 40, fmTeam: 70,
+  moudjahid: 40, fmTeam: 70, tireur: 90,
 };
 
 /**

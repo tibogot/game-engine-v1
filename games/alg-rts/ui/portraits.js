@@ -25,6 +25,7 @@ const FACES = {
   colonel: [8],                              // the officer's képi: Colonel Delorme
   moudjahid: [16, 17, 18, 19, 20, 23, 24, 26, 27, 31],
   fmTeam: [21, 22, 25, 28, 29],              // bandoliers: the FM gunners
+  tireur: [27, 24],                          // the snipers (algSniper.js): two of the katiba's faces
   siTahar: [30],                             // the hooded kachabia: Commandant Si Tahar
 };
 const VEHICLE_CELLS = { willys: 0, gmc: 1, halftrack: 2, amx13: 3, ebr: 4, alouette: 5 };
