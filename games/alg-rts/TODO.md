@@ -47,7 +47,9 @@ Keep this file current: tick things off here, add new asks here.
 7. [x] **THE HUD EATS THE LEFT THIRD** (2026-10-07): objectives COLLAPSED to one line by default (the
    objective at hand + the clock; click the header for the list, remembered); alerts 4 at most,
    10 s (6 / 14 s); hints 12 s (24).
-9. [ ] **A POINTER CURSOR ON EVERYTHING CLICKABLE** (you, 2026-10-07: "anything clickable should have a
+9. [x] **A POINTER CURSOR ON EVERYTHING CLICKABLE** — DONE 2026-10-08 (ui/cursors.js HAND + CLICKABLE:
+   buttons, menu inputs, tabs, tiles, groups, badges, alerts, objectives, briefing; locked buttons keep
+   the arrow; the maps keep the reticle). Was: (you, 2026-10-07: "anything clickable should have a
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
