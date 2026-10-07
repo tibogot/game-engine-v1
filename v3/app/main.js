@@ -12508,6 +12508,8 @@ export async function startV3App(opts = {}) {
        * so set it once; drive `{ amount }` per frame.
        */
       setPurkinje(o) { worldEnv?.setPurkinje?.(o); },
+      /** The live PostFxPipeline (dev measurement: its scene MRT, the AO node). */
+      get pipeline() { return worldEnv?.postFxPipeline ?? null; },
       /**
        * The colour grade ("polish": brightness, contrast, saturation,
        * temperature, tint, vignette, grain) for a game that owns its look.

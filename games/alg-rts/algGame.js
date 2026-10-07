@@ -36,6 +36,7 @@ import { createAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
+import { contactSplats } from "./algGroundContact.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
@@ -472,6 +473,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     } catch (e) { console.warn("[alg point flags] failed:", e); }
   }
   if (app.algFields || app.algLandmarks) app.algCover?.bake();
+  // GROUND CONTACT SHADE (algGroundContact.js): the ground darkened round every building, wall
+  // and rock, baked into the ground once — the image pass's AO at no cost a frame. ?contact=0 = off.
+  if (app.algSplats && params.get("contact") !== "0") {
+    const list = contactSplats(app, app.algSplats.matIndex("dust"));
+    app.algSplats.add(list);
+    console.log(`[contact shade] ${list.length} splats`);
+  }
   // The minimap was baked before the fields and farmsteads: again, with them.
   if (app.algFields || app.algLandmarks) { app.algUnits?.minimap?.rebuildTerrain?.(); app.algTacMap?.map?.rebuildTerrain?.(); }
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,

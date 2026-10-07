@@ -272,6 +272,10 @@ export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
   console.log(`[alg splats] ${out.length + strips.length} splats in ${ms} ms`, byMat);
   return {
     count: out.length + strips.length, byMat, ms, splats: out, strips,
+    /** The library index of a material key (MATS), for a game's own splats. */
+    matIndex: (key) => M[key],
+    /** Lay more splats (the contact shade, algGroundContact.js), drawn after these. */
+    add(list) { out.push(...list); push(); gc.markAllStale?.(); },
     /** The piste strips on / off (the Ground Lab's before / after); `?ruts=0` boots off. */
     setStrips(on) { stripsOn = !!on; push(); gc.markAllStale?.(); },
     /** Re-lay the ruts with new looks ({ rut, wander, opacity, normal, tile }), live. */
