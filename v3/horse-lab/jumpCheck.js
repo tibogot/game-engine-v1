@@ -9,6 +9,8 @@
 //   noReach   never got to the fence (too slow / steered away)
 //
 // Usage (console): (await import('/v3/horse-lab/jumpCheck.js')).jumpCheck(__HORSE)
+import { GEARS } from "./horse.js";
+
 const DT = 1 / 60;
 
 // A fence line as a segment (x0,z0)→(x1,z1): approach square to it from `side`.
@@ -22,7 +24,7 @@ export const FENCES = {
 function reset(ctrl, x, z, yaw, v, gait) {
   ctrl.pos.set(x, 0, z); ctrl.yaw = yaw; ctrl.v = v; ctrl.turnRate = 0; ctrl.y = 0;
   ctrl.pitch = 0; ctrl.roll = 0; ctrl.oneShot = null; ctrl.rearT = -1; ctrl.landT = -1;
-  ctrl.idleT = -1e9; ctrl.lift = 0; ctrl.ikW = 1; ctrl.bodyOff = 0; ctrl.gear = gait === "Canter" ? 2 : 0;
+  ctrl.idleT = -1e9; ctrl.lift = 0; ctrl.ikW = 1; ctrl.bodyOff = 0; ctrl.gear = gait === "Canter" ? GEARS.indexOf("Canter") : 0;
   ctrl.jumpQueued = false; ctrl.airborne = false; ctrl.autoT = 0; ctrl.prevGallopT = undefined;
   ctrl.mixer.stopAllAction(); ctrl.cur = null; ctrl.gaitName = "";
   ctrl.switchTo(v > 0 ? gait : "Idle", 0, true);
@@ -41,8 +43,7 @@ export function ride(H, fence, { dist = 14, ang = 0, off = 0, side = 1, gait = "
   const dx = hx * c + hz * s, dz = -hx * s + hz * c;
   const sx = mx - dx * dist / Math.max(0.3, (dx * -nx + dz * -nz)), sz = mz - dz * dist / Math.max(0.3, (dx * -nx + dz * -nz));
   const yaw = Math.atan2(dx, dz);
-  const S = ctrl.gearSpeeds();
-  reset(ctrl, sx, sz, yaw, flying ? (gait === "Canter" ? S[2] : S[3]) : 0, gait);
+  reset(ctrl, sx, sz, yaw, flying ? ctrl.gaitV(gait === "Canter" ? "Canter" : "Gallop") : 0, gait);
   const n = Math.round(secs / DT);
   let jumped = false, blockedT = -1, minV = Infinity, crossedAt = -1;
   const sd = () => (ctrl.pos.x - mx) * nx + (ctrl.pos.z - mz) * nz;   // signed distance to the fence line (+ = start side)
@@ -92,8 +93,7 @@ export function rideCourse(H, { line = courseLine(), gait = "Gallop", secs = 240
   if (shift) line = line.map((p, i) => { const q = line[Math.min(line.length - 1, i + 1)], r = line[Math.max(0, i - 1)], dx = q[0] - r[0], dz = q[1] - r[1], L = Math.hypot(dx, dz) || 1; return [p[0] - dz / L * shift, p[1] + dx / L * shift]; });   // ride off-centre
   const { ctrl, arena } = H;
   const p0 = start ?? line[0], p1 = line[1];
-  const S = ctrl.gearSpeeds();
-  reset(ctrl, p0[0], p0[1], Math.atan2(p1[0] - p0[0], p1[1] - p0[1]), gait === "Canter" ? S[2] : S[3], gait);
+  reset(ctrl, p0[0], p0[1], Math.atan2(p1[0] - p0[0], p1[1] - p0[1]), ctrl.gaitV(gait === "Canter" ? "Canter" : "Gallop"), gait);
   const fences = arena.fences.map((f) => ({ n: f.n, x: f.x, z: f.z, h: f.h, dir: f.dir, half: f.type === "oxer" ? 0.66 : f.type === "logs" ? 0.42 : f.type === "wall" ? 0.3 : f.type === "bank" ? 0 : 0.08, base: f.base ?? 0, jumped: false, blocked: 0, passed: false, near: Infinity, clear: Infinity }));
   const hooves = ctrl.legs.map((g) => g.ff), hp = new ctrl.pos.constructor();
   let k = 0, wasJ = false, jumpAt = null, stuck = 0, hardStops = 0, vPrevC = null;
@@ -134,7 +134,7 @@ export function rideCourse(H, { line = courseLine(), gait = "Gallop", secs = 240
       if (f) f.refused = true;
       ctrl.refusing = false; ctrl.refuseV = 0; ctrl.rearT = -1;
       const kk = Math.min(line.length - 2, k + 6);
-      ctrl.pos.set(line[kk][0], 0, line[kk][1]); ctrl.y = 0; ctrl.v = S[3] * 0.8; stuck = 0; k = kk;
+      ctrl.pos.set(line[kk][0], 0, line[kk][1]); ctrl.y = 0; ctrl.v = ctrl.gaitV("Gallop") * 0.8; stuck = 0; k = kk;
     }
   }
   void jumpAt;

@@ -22,7 +22,12 @@ const V3 = THREE.Vector3;
 export const FEET = ["FFL", "FFR", "FFBL", "FFBR"];
 const LOOPS = ["Idle", "Walk", "Trot", "Canter", "Gallop"];
 // Gears, slowest first. Canter = the gallop clip played slower.
-export const GEARS = ["Walk", "Trot", "Canter", "Gallop"];
+// No trot by default: the pack has no trot clip, and the one made from the walk
+// (buildTrot) has no suspension or bounce — it read wrong. Walk → canter → gallop,
+// like the reference; setTrotGear(true) (?trot=1) puts it back between them.
+const ALL_GEARS = ["Walk", "Trot", "Canter", "Gallop"];
+export const GEARS = ALL_GEARS.filter((g) => g !== "Trot");
+export function setTrotGear(on) { GEARS.length = 0; GEARS.push(...ALL_GEARS.filter((g) => on || g !== "Trot")); }
 
 export const HP = {               // tunables (the lab GUI edits these)
   pitchFollow: 1.0,               // how much of the ground pitch the body takes
@@ -57,6 +62,8 @@ export const HP = {               // tunables (the lab GUI edits these)
   tailSway: 1,                    // tail inertia (0 = as keyed): how much of the spring's lag shows
   tailStiff: 55,                  // its spring (1/s²): lower = slower, looser swing
   tailDamp: 0.55,                 // × critical damping: < 1 swings a little before settling
+  tailJolt: 0.6,                  // how hard the croup's up/down jolt each stride throws the tail
+  tailWave: 1,                    // the stride wave + side flutter along the tail at speed (0 = none)
   jumpMaxTop: 1.5,                // m: the highest obstacle any horse takes on (above: a refusal)
   jumpBoostMax: 0.75,             // m more arc a jump may add for the obstacle in front of it (fitJump): a 1.4 m fence needs ~0.6
   jumpMargin: 0.15,               // m every hoof passes above the obstacle's top (the baked clearance reads ~7 cm high vs the real hooves)
@@ -853,11 +860,23 @@ export class HorseController {
 
   gallopLike() { return this.gaitName === "Gallop" || this.gaitName === "Canter"; }
 
+  // Target ground speed of a gait (m/s) — the trot's also serves as a speed
+  // mark ("above a trot") when the trot is not a gear.
+  gaitV(name) {
+    const g = this.h.gait, k = HP.speedScale;
+    return { Walk: g.Walk.speed, Trot: g.Walk.speed * HP.trotRate, Canter: g.Gallop.speed * HP.canterRate, Gallop: g.Gallop.speed }[name] * k;
+  }
   // Target ground speed of each gear (m/s), slowest first.
-  gearSpeeds() {
+  gearSpeeds() { return GEARS.map((n) => this.gaitV(n)); }
+  // The speed where gear i hands over to gear i+1: halfway — except walk →
+  // canter (no trot between): halfway between the fastest the walk can step
+  // (1.6× its clip) and the slowest the canter does (0.55×), else the walk's
+  // hooves skid for half a second on the way up
+  gearEdge(S, i) {
+    const mid = (S[i] + S[i + 1]) / 2;
+    if (GEARS[i] !== "Walk" || GEARS[i + 1] !== "Canter") return mid;
     const g = this.h.gait;
-    const k = HP.speedScale;
-    return [g.Walk.speed * k, g.Walk.speed * HP.trotRate * k, g.Gallop.speed * HP.canterRate * k, g.Gallop.speed * k];
+    return Math.min(mid, (g.Walk.speed * 1.6 + g.Gallop.speed * 0.55) / 2);
   }
   // the gallop gear's ground speed (m/s)
   gallopV() {
@@ -911,7 +930,7 @@ export class HorseController {
   endOneShot() {
     const S = this.gearSpeeds();
     let gi = 0;
-    while (gi < GEARS.length - 1 && this.v > (S[gi] + S[gi + 1]) / 2) gi++;
+    while (gi < GEARS.length - 1 && this.v > this.gearEdge(S, gi)) gi++;
     const back = Math.abs(this.v) < 0.05 ? "Idle" : GEARS[gi];
     const a = this.oneShot;
     this.oneShot = null;
@@ -1118,12 +1137,12 @@ export class HorseController {
     const acc = brake || (Math.abs(target) > Math.abs(this.v) ? HP.accel : HP.decel);
     this.v += clamp(target - this.v, -acc * dt, acc * dt);
     // the slide's weight (look): braking hard from above a trot
-    const sliding = brake > HP.decel * 1.15 && this.v > this.gearSpeeds()[1] * 0.8;
+    const sliding = brake > HP.decel * 1.15 && this.v > this.gaitV("Trot") * 0.8;
     this.slideW = clamp((this.slideW ?? 0) + (sliding ? dt / 0.15 : this.v < 0.4 ? -dt / 0.35 : 0), 0, 1);
     // stopped after a refusal: a head toss, or a rear if it came in at a gallop
     if (this.refuseV && Math.abs(this.v) < 0.05) {
       if (this.refuseV > this.gallopV() * 0.85 && HP.refuseRear) this.startRear();
-      else if (this.refuseV > this.gearSpeeds()[1] * 1.1) this.playOneShot("Idle_2", { fade: 0.25 });
+      else if (this.refuseV > this.gaitV("Trot") * 1.1) this.playOneShot("Idle_2", { fade: 0.25 });
       this.refuseV = 0;
     }
     if (this.refuseV && !this.refusing) this.refuseV = 0;    // turned away and went on before stopping: no reaction
@@ -1160,8 +1179,8 @@ export class HorseController {
       else if (this.v <= 0.05) want = "Walk";
       else {
         let i = Math.max(0, GEARS.indexOf(this.gaitName));
-        while (i < GEARS.length - 1 && this.v > (S[i] + S[i + 1]) / 2 * 1.06) i++;
-        while (i > 0 && this.v < (S[i - 1] + S[i]) / 2 * 0.94) i--;
+        while (i < GEARS.length - 1 && this.v > this.gearEdge(S, i) * 1.06) i++;
+        while (i > 0 && this.v < this.gearEdge(S, i - 1) * 0.94) i--;
         want = GEARS[i];
       }
       // sliding: the gallop stays on (slowing under the slide) instead of stepping
@@ -1421,18 +1440,43 @@ export class HorseController {
   // (world rotation, slightly under-damped), lagging more toward the tip — it
   // trails a turn, swings on with each stride, settles after a stop. Played as
   // keyed the tail moved rigidly with the horse ("stiff").
+  // At a gait two more things move it (a straight gallop turns the body very
+  // little, so the spring alone left the tail streaming like a flag on a pole):
+  // - the croup's JOLT: its world acceleration (up/down each stride) pushes on
+  //   each bone like a weight on a lever (tailJolt);
+  // - a WAVE timed to the stride, running dock → tip and growing toward the tip,
+  //   plus a smaller side flutter (tailWave, scaled by speed).
   tailSway(dt) {
     if (!this.tailB.length || !(HP.tailSway > 0) || dt <= 0) return;
     dt = Math.min(dt, 1 / 30);
     const k = HP.tailStiff, c = 2 * Math.sqrt(k) * HP.tailDamp;
     this.tailS ??= this.tailB.map(() => ({ q: null, w: new V3() }));
     const qt = new THREE.Quaternion(), qp = new THREE.Quaternion(), dq = new THREE.Quaternion(), e = new V3();
+    // the croup's acceleration (world), from the tail root's motion
+    const root = this.tailB[0].parent.getWorldPosition(new V3());
+    const T = (this.tailT ??= { p: root.clone(), v: new V3(), a: new V3() });
+    const vNow = root.clone().sub(T.p).divideScalar(dt);
+    T.a.lerp(vNow.clone().sub(T.v).divideScalar(dt).clampLength(0, 40), 0.5);   // (half-smoothed: one-frame spikes)
+    T.v.copy(vNow); T.p.copy(root);
+    // the wave: stride phase and how much (0 standing … 1 full gallop)
+    const amt = clamp(Math.abs(this.v) / this.gallopV(), 0, 1) * HP.tailWave;
+    const clipD = this.cur?.getClip().duration || 1;
+    const ph = this.cur && this.gaitName !== "Idle" ? (this.cur.time / clipD) * Math.PI * 2 : 0;
+    const sideAx = new V3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)), upAx = new V3(0, 1, 0), qw = new THREE.Quaternion();
+    const n = this.tailB.length, pos = this.tailB.map((b) => b.getWorldPosition(new V3()));
     this.tailB.forEach((b, i) => {
-      const st = this.tailS[i];
+      const st = this.tailS[i], f = i / Math.max(1, n - 1);
       b.parent.updateMatrixWorld(true);
       b.parent.getWorldQuaternion(qp);
       qt.copy(qp).multiply(b.quaternion);                    // the animated world rotation (under its already-swayed parent)
+      if (amt > 0.001) {
+        qt.premultiply(qw.setFromAxisAngle(sideAx, amt * (0.35 + 0.65 * f) * 0.16 * Math.sin(ph - 1.1 * i)));        // up/down, travelling to the tip
+        qt.premultiply(qw.setFromAxisAngle(upAx, amt * f * 0.09 * Math.sin(1.7 * ph - 0.9 * i + 0.6 + 0.5 * Math.sin(ph * 0.5))));   // side flutter
+      }
       if (!st.q) { st.q = qt.clone(); return; }
+      // the jolt: the bone's lever (toward the next joint) × the croup's acceleration
+      const lever = (i + 1 < n ? pos[i + 1].clone().sub(pos[i]) : pos[i].clone().sub(pos[i - 1] ?? root)).normalize();
+      st.w.addScaledVector(lever.cross(T.a), -HP.tailJolt * (0.5 + f) * dt);
       // spring: angular error target ← current, as a rotation vector
       dq.copy(qt).multiply(st.q.clone().invert());
       if (dq.w < 0) dq.set(-dq.x, -dq.y, -dq.z, -dq.w);

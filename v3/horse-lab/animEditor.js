@@ -20,6 +20,7 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { CHANNELS, perfToData } from "./mount.js";
 import { POSES, POSES_BUILTIN, RP, ridingData, applyRidingData } from "./rider.js";
 import { STRAP_K } from "./stirrups.js";
+import { GEARS } from "./horse.js";
 
 // the reference screenshots (v3/horse-lab/refs, kept out of git)
 const REF_FILES = ["mount1", "mount2", "mount3", "mount4", "mount5", "mount6", "mount7", "mount8", "mount9", "mount10",
@@ -28,7 +29,7 @@ const REF_FILES = ["mount1", "mount2", "mount3", "mount4", "mount5", "mount6", "
 
 // ── riding mode: one posture per gait, no timeline — the horse plays the gait
 // in place under the rider and every value is a slider (or a handle) ──
-const RIDE_GAIT = { idle: {}, walk: { fwd: 1, gear: 0 }, trot: { fwd: 1, gear: 1 }, canter: { fwd: 1, gear: 2 }, gallop: { fwd: 1, run: true, gear: 3 }, back: { fwd: -1, gear: 0 } };
+const RIDE_GAIT = { idle: {}, walk: { fwd: 1, gear: "Walk" }, trot: { fwd: 1, gear: "Trot" }, canter: { fwd: 1, gear: "Canter" }, gallop: { fwd: 1, run: true, gear: "Gallop" }, back: { fwd: -1, gear: "Walk" } };
 const RIDE_PARAMS = [
   { key: "pelvisUp", label: "seat height (ALL postures)", min: 0.05, max: 0.3, all: true },
   { key: "strap", label: "stirrup strap, m (ALL + mounting)", min: 0.3, max: 0.7, all: true },
@@ -316,7 +317,7 @@ export class AnimEditor {
   horseInput() {
     const g = this.ride ? RIDE_GAIT[this.ride] : null;
     if (!g) return { fwd: 0, turn: 0, run: false };
-    this.ctrl.gear = g.gear ?? 0;
+    this.ctrl.gear = Math.max(0, GEARS.indexOf(g.gear));        // (no trot gear: its posture rides at a walk)
     return { fwd: g.fwd ?? 0, turn: 0, run: !!g.run };
   }
   rideRate() { return this.playing ? this.speed : 0; }

@@ -5,6 +5,19 @@ keep it updated the same turn something is agreed, done or dropped.
 
 Order = suggested priority. ★ = my top picks.
 
+## 0. The armoured horse (`?horse=armored`)
+
+- [ ] ★ **Decide whether the armoured horse becomes the default** (the panel's
+      "horse (reloads)" switch picks it today).
+- [ ] **Get-on for the taller horse**: the mount was keyed on the 1.75 m horse;
+      on the 2.02 m one the pushing foot floats ~0.30 m.
+- [ ] **Rider foot angles** at the gallop and in the jump (checkRiding flags).
+- [ ] **Canter graze at fence 5b** (−0.01 m on the course ride).
+- [ ] **The model's licence**: check it before it ships in a game.
+- [ ] **Tail feel**: you judge the gallop wiggle (sliders "tail: …" in
+      "Body on the ground").
+- [ ] Re-run the yard jumpCheck with the new gears (it was cut short).
+
 ## 1. Fix what we know is rough (small, existing systems)
 
 - [ ] **Bounce (2 fences 3.5 m apart)**: clears, but the hooves graze the second
@@ -88,6 +101,16 @@ Order = suggested priority. ★ = my top picks.
       herding fails a suite instead of being found by riding.
 
 ## Done (recent)
+
+- Horse switch at the top of the panel: low-poly / armoured (reloads, keeps
+  the level; same as `?horse=armored`).
+- Gears walk → canter → gallop: the trot made from the walk read wrong (no
+  suspension, no bounce); `?trot=1` brings it back. A real trot needs a trot
+  clip and a posting rider.
+- Tail moves at a gait: the stride's jolt and a wave dock → tip, on top of the
+  turn/stop spring.
+- Armoured horse rigged on the Quaternius skeleton, with a hair-card tail
+  (round dock bend, weights blended along the tail).
 
 - Sliding refusal: brakes early (v²/2a) for anything it won't jump, slides
   (~0.8 s from a gallop, gallop slowing under it, body sitting back), stops

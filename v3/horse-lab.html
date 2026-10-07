@@ -73,7 +73,7 @@
       import { buildFarm } from "./horse-lab/farm.js";
       import { createLabSky } from "./horse-lab/sky.js";
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
-      import { loadHorse, HorseController, HP, GEARS } from "./horse-lab/horse.js";
+      import { loadHorse, HorseController, HP, GEARS, setTrotGear } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP, applyRidingData } from "./horse-lab/rider.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
       import { Tack } from "./horse-lab/tack.js";
@@ -125,6 +125,7 @@
 
       // level: the jump course (default), the farm with its sheep herd (?level=farm), or the reference yard (?level=yard)
       const LEVEL = new URLSearchParams(location.search).get("level") ?? "parkour";
+      if (new URLSearchParams(location.search).has("trot")) setTrotGear(true);   // ?trot=1: the made-up trot back as a gear (off: walk → canter → gallop)
       const arena = LEVEL === "yard" ? buildArena(scene) : LEVEL === "farm" ? buildFarm(scene, renderer) : buildParkour(scene);
       const zoneAt = arena.zoneAt ?? yardZoneAt;
       // static level meshes sharing a material → one draw each (they stay the horse's ray targets)
@@ -293,6 +294,12 @@
       const D = { timeScale: 1, skeleton: false, probes: false, camera: "follow", auditing: false };
       const CAM_MODES = { "left side": -Math.PI / 2, "right side": Math.PI / 2, front: Math.PI };
       const gui = new GUI({ title: "Horse lab" });
+      // which horse (reloads: the body is fitted to the skeleton at load) — same as ?horse=armored
+      gui.add({ horse: ARMORED ? "armoured" : "low-poly" }, "horse", ["low-poly", "armoured"]).name("horse (reloads)").onChange((v) => {
+        const u = new URL(location.href);
+        if (v === "armoured") u.searchParams.set("horse", "armored"); else u.searchParams.delete("horse");
+        location.href = u.href;
+      });
       arena.addGui?.(gui);
       labSky?.addGui(gui);
       const lookF = gui.addFolder("Horse look");
@@ -302,6 +309,11 @@
       body.add(HP, "rollFollow", 0, 1, 0.01).name("roll follows slope");
       body.add(HP, "lean", 0, 0.3, 0.01).name("lean into turns");
       body.add(HP, "stepMax", 0.2, 1.5, 0.01).name("max step up (m)");
+      body.add(HP, "tailSway", 0, 1, 0.01).name("tail: inertia");
+      body.add(HP, "tailStiff", 10, 150, 1).name("tail: spring");
+      body.add(HP, "tailDamp", 0.15, 1.5, 0.01).name("tail: damping");
+      body.add(HP, "tailJolt", 0, 2, 0.01).name("tail: stride jolt");
+      body.add(HP, "tailWave", 0, 2.5, 0.01).name("tail: wave at speed");
       const rF = gui.addFolder("Rider");
       rF.add(RP, "show").name("rider on the horse").onChange((v) => rider.setVisible(v));
       rF.add(RP, "seatSpring", 40, 600, 1).name("seat spring");
