@@ -66,7 +66,9 @@ const params = new URLSearchParams(location.search);
 export const AURES_LIGHT = {
   latitude: 35.2,
   dayOfYear: 196,
-  timeOfDay: 15.2,
+  // 16:00 (you picked "C" in the A/B/C, 2026-10-07; was 15.2): a lower sun, longer CoH shadows
+  // that still leave the courtyards readable (16:36 sank them to black).
+  timeOfDay: 16.0,
   // SKY PRO's base exposure (2026-10-04, you picked "B · darker" in the live light A/B):
   // the engine's 0.55 metered the sunny start x2.3 and the post's whites clipped, the sand
   // pale. Dev → Sky → Exposure / Time of day adjust it live.
@@ -74,7 +76,9 @@ export const AURES_LIGHT = {
   // The sun carries the frame (nam's lesson: a sky-lit frame is flat), the
   // fill stays warm and low, exposure brings the mean back up.
   world: { dir: 4.8, skyFill: 0.4, hemi: 0.9, exposure: 1.45 },
-  polish: { enabled: true, contrast: 1.12, saturation: 0.9, temperature: 0.16 },
+  // The grade (same "C"; was contrast 1.12, saturation 0.9, no vignette). The vignette runs in the
+  // polish pass that already ran — no pass added.
+  polish: { enabled: true, contrast: 1.18, saturation: 0.92, temperature: 0.16, vignetteStrength: 0.25, vignetteFalloff: 0.6, vignetteRoundness: 1 },
   // Dust, not mist: a warm pale haze that eats the far ground and the plain.
   haze: { color: "#d9c6a4", density: 0.00055 },
 };
@@ -243,7 +247,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("farterrain") === "0") app.setFarTerrain?.({ enabled: false });
 
   if (params.get("light") !== "flat") applyAuresLight(app);
-  // THE GRADE STEPS ASIDE AT NIGHT. The Aurès grade (contrast 1.12, warm 0.16, saturation 0.9)
+  // THE GRADE STEPS ASIDE AT NIGHT. The Aurès grade (contrast 1.18, warm 0.16, saturation 0.92)
   // is a summer afternoon's: at night its contrast crushed the moonlit walls to black and its
   // warmth fought the night look's blue (seen at the post, 23 h). It eases to neutral with the
   // sky's night amount. `app.algPolish` is the day grade (Dev → Light edits it).

@@ -20,7 +20,7 @@ import { LAYOUT } from "./layout.js";
 export const WEATHER = {
   clear: {
     label: "Clear afternoon",
-    time: 15.2,
+    time: 16.0,   // AURES_LIGHT.timeOfDay (look "C", 2026-10-07)
     banks: { enabled: false },
     height: { enabled: false },
     distance: { color: "#d9c6a4", density: 0.00055 },
@@ -36,7 +36,7 @@ export const WEATHER = {
   },
   dustHaze: {
     label: "Dust haze",
-    time: 15.2,
+    time: 16.0,   // AURES_LIGHT.timeOfDay (look "C", 2026-10-07)
     banks: { enabled: true, color: "#c9ae84", shade: "#8d7454", sunTint: "#ffd29a", density: 0.7, wisps: 0.9, drift: 1.4 },
     height: { enabled: true, mode: "analytic", color: "#c2a47a", density: 0.008, falloff: 0.05, base: -10, top: 30, haze: 0.0009 },
     distance: { color: "#c8ad85", density: 0.0014 },
