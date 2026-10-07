@@ -1,0 +1,29 @@
+{
+ "format": "firepro-sixway-1",
+ "cols": 8,
+ "rows": 8,
+ "cell": 192,
+ "frames": 64,
+ "mvScale": 24.59,
+ "emissionMax": 15.135,
+ "fill": 0.995,
+ "size": 10,
+ "pitch": 40,
+ "duration": 4,
+ "loop": false,
+ "seconds": 10.9,
+ "preset": "blast",
+ "bake": {
+  "center": [
+   0,
+   5,
+   0
+  ],
+  "size": 10,
+  "pitch": 40,
+  "start": 0,
+  "duration": 4,
+  "loop": false,
+  "blend": 0
+ }
+}

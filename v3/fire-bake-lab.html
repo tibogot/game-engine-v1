@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fire bake lab</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+	html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #dde3ea; font: 12px/1.35 system-ui, sans-serif; }
+	#app, #app canvas { position: absolute; inset: 0; display: block; }
+	#panel { position: absolute; top: 10px; right: 10px; width: 300px; max-height: calc(100% - 20px); overflow: auto; padding: 10px 12px; background: rgba(12, 16, 22, 0.86); border-radius: 8px; backdrop-filter: blur(6px); }
+	#panel h2 { margin: 0 0 2px; font-size: 13px; }
+	#panel .src { margin: 0 0 6px; color: #8d99a6; font-size: 11px; }
+	#panel h3 { margin: 10px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: #8d99a6; }
+	.row { display: grid; grid-template-columns: 96px 1fr 52px; align-items: center; gap: 6px; margin: 3px 0; }
+	.row input[type=range] { width: 100%; }
+	.row output { text-align: right; font-variant-numeric: tabular-nums; color: #b8c4d0; }
+	.views { display: flex; flex-wrap: wrap; gap: 4px; }
+	.views button { font: inherit; color: inherit; background: #243040; border: 1px solid #34465c; border-radius: 4px; padding: 3px 7px; cursor: pointer; }
+	.views button.on { background: #3b5574; }
+	.views button:hover { background: #2f3f55; }
+	.views button:disabled { opacity: 0.45; cursor: default; }
+	#status { margin: 8px 0 4px; font: 11px/1.4 ui-monospace, monospace; white-space: pre-wrap; color: #b8c4d0; }
+	#atlases { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+	#atlases figure { margin: 0; }
+	#atlases canvas { width: 100%; image-rendering: pixelated; background: repeating-conic-gradient(#333 0 25%, #222 0 50%) 0 0 / 12px 12px; display: block; }
+	#atlases figcaption { color: #8d99a6; font-size: 10px; }
+	#labels { position: absolute; left: 0; right: 320px; bottom: 14px; display: flex; justify-content: center; gap: 18%; pointer-events: none; color: #fff; text-shadow: 0 1px 3px #000; font-weight: 600; letter-spacing: 0.04em; }
+	.help { margin: 4px 0 0; color: #8d99a6; font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="labels"><span>LIVE SIM (Fire Pro)</span><span>BAKED FLIPBOOK (one card)</span></div>
+<div id="panel">
+	<h2>Fire bake lab</h2>
+	<p class="src">Fire Pro (Dan Greenheck, MIT — v3/vendor/fire-pro) simulates; the lab bakes it into the game's six-way book (litSmoke format) + emission in B.a + real motion vectors. Left: the live volume. Right: the baked card, same sun.</p>
+</div>
+<script type="module" src="./fire-bake-lab/lab.js"></script>
+</body>
+</html>

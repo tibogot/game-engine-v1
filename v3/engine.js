@@ -53,6 +53,9 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/gpuOnlyArrays.js",
   // GPU crowd skinning: one draw for a whole crowd (RTS soldiers and animals, the horse lab's herd)
   "v3/render/crowdSkinning.js",
+  // A baked Fire Pro book (v3/fire-bake-lab) played on one card — six-way smoke, flame light,
+  // motion blend; the shared-rts FX compare lab draws its Fire Pro side with it
+  "v3/fire-bake-lab/bookCard.js",
   "v3/render/clouds/dayNightCloudLayer.js",
   // Plants a place puts down at exact points (a hamlet's traveller's palms),
   // shaded like the painted fields, and the presets they are built from.
