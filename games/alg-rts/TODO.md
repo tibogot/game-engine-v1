@@ -119,6 +119,20 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    the minimap, buildings facing it); (c) a FRENCH AI — the big one (patrols, garrisons, reinforcing,
    taking villages back, call-ins); (d) the FLN's own toolkit worth playing (item 6's asymmetry).
    Plan: (a) a little at a time from now (cheap now, dear later); (b)+(c) after item 6.
+9. [ ] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). Perf ~0 (strings looked up when the UI
+   is built; one Arabic web font ~100-300 KB at load). The work: (a) EXTRACT every UI string (HUD,
+   buttons, tooltips, alerts, tips, briefing, manual, end screens — several hundred, all hard-coded
+   French today) into one table — do it TOGETHER with item 8 (both touch every string); (b) English
+   translation; (c) ARABIC by a native speaker (moudjahid, katiba, wilaya, harki…) + RIGHT-TO-LEFT
+   UI (panels mirrored, alignment, button order; letter joining is the browser's, canvas labels
+   too); (d) voices per language — the dearest part, text-only first. Order: FR+EN table first,
+   Arabic + RTL once the UI is stable.
+10. [ ] **LATER (2026-10-07 answers)**: STEAM = an Electron build (WebGPU as now; test a persistent
+   shader cache there — boot); MULTIPLAYER = deterministic lockstep (orders only, ~0 perf, ~0.1-0.2 s
+   order delay; needs a SEEDED rng instead of Math.random in the sim, nothing visual feeding the sim,
+   a deterministic AI, desync checks; Steam relay free) — prepare the sim early, co-op vs AI first;
+   MOBILE browser = its own late port (memory 1.5-2 GB → slim down, a low preset, touch controls;
+   tablets first).
 - Corrugated iron: the post's, the huts' and the other pieces' sheets still on the 2 m mapping
   (some banding) — give them buildCorrugatedPanel's sheet mapping as the motor pool (2026-10-07).
 
