@@ -12,7 +12,7 @@ import { createFlameField } from "../shared-rts/flameField.js";
 import { createCraterSystem } from "../shared-rts/craterSystem.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
 import { createCombat } from "../shared-rts/combat.js";
-import { createBloodField } from "../shared-rts/bloodField.js";
+import { BLOOD, createBloodField } from "../shared-rts/bloodField.js";
 import { createAlgLights } from "./algLights.js";
 import { createAlgSmoke } from "./algSmoke.js";
 
@@ -73,7 +73,14 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     },
   });
   const fire = createFlameField({ app });
-  const craters = await createCraterSystem({ app });
+  // THE BATTLE LEAVES MARKS (2026-10-07): lit shell holes (bowl, rim, thrown earth — the texture
+  // decal read as a flat black blot), 256 kept, and the plants where the shell landed blown away.
+  const craters = await createCraterSystem({ app, look: "procedural", max: 256 });
+  const stamp = craters.addCrater;
+  craters.addCrater = (x, z, r = 4) => {
+    stamp(x, z, r);
+    if (r >= 1.5) app.clearVegetation?.(x, z, r * 0.7, { grass: r * 0.6, edge: 0.6 });
+  };
 
   // Every blast flushes birds out of the trees near it (rtsBirds.flush); a
   // man going down (the dust puff) does not. The birds come after combat
@@ -108,7 +115,8 @@ export async function createAlgCombat(app, { units, structures: built = null, co
 
   // BLOOD (bloodField.js): a man hit sprays from the wound, a man down lies
   // in his pool. Two draws for the whole battle; ?blood=0 = none.
-  const blood = createBloodField({ app });
+  // A pool lasts as long as its body (algUnits: CORPSES, 90 s).
+  const blood = createBloodField({ app, params: { ...BLOOD, poolLife: 95 } });
   const onFootUnit = (e) => !!e?.type?.foot;
 
   // The buildings (algStructures.js): targets, and the armed ones fighters.

@@ -55,8 +55,22 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      coverAt ≥ 0.5 within 15 m of 86.0% → 86.6% of the box (a different measure from the 74% above,
      not comparable) — the huts are for the look and as landmarks, the walls did the cover work.
    - Item 1 is DONE apart from the fog-lab mist (weather). Next: item 2.
-2. [ ] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
+2. [~] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
+   Already there (inventory 2026-10-07): craters (shared craterSystem, 96, one draw), burning wrecks
+   (algWrecks, 16, fire 35 s + smoke 155 s, cover + nav), breached sandbags, cut wire, houses that
+   burn and drop rubble heaps (algDamage), damaged structures smoking.
+   - [x] CRATERS THAT READ (craterSystem look "procedural", alg only): the texture decal was unlit —
+     flat black blots. Now a MULTIPLY decal from the crater's profile: the ground photo darkened in
+     a bowl and a scorched pit, lightened on a ragged rim, a scorched ring with rays and pale clods
+     round it; the sun on the profile's normal shades the near wall and lights the far one
+     (app.light.getDirection). A lit painted colour read as smooth plastic beside the photo. 256
+     kept; the painted plants and grass cleared where a shell lands.
+   - [x] THE BODIES STAY: unitRenderer CORPSES {seconds, max} (shared, default 14 s / no cap);
+     alg 90 s, 48 at most (the oldest go), the blood pools 95 s. MEASURED: 24 bodies on screen
+     +0.09 ms GPU (1.34 vs 1.25, noise 0.04) → ~0.2 ms at the cap.
+   - [ ] next: HOUSE DAMAGE + COLLAPSE (the village meshes are merged: a house id per vertex, or the
+     houses split out); FELLED TREES; more wreck slots / blow-apart parts.
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more
    contrast object vs ground; the lighter fog of war.
 4. [ ] **SOUND**: unit voice lines (orders, "sous le feu !", "grenade !"), dense battle ambience,

@@ -4,7 +4,12 @@
 // (next step); nothing here imports from nam-rts.
 import { createNavGrid } from "../shared-rts/navGrid.js";
 import { createUnits } from "../shared-rts/units.js";
-import { createUnitRenderer } from "../shared-rts/unitRenderer.js";
+import { CORPSES, createUnitRenderer } from "../shared-rts/unitRenderer.js";
+
+// THE BODIES STAY (2026-10-07, the AAA list's "the battle leaves marks"): 14 s and gone read as
+// a clean-up; CoH's field stays strewn. 90 s, 48 at most (each is posed every frame).
+CORPSES.seconds = 90;
+CORPSES.max = 48;
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { createSelectionFrameField } from "../shared-rts/selectionFrameField.js";

@@ -992,7 +992,13 @@ const _sphere = new THREE.Sphere();
 const STATIC_SEED = [0.5, 0.5, 0.5, 0]; // a static figure's look variation: the middle, own headwear
 /** Every clip a MOVE plays (the fade out of one into a pose is a join, not a crossfade). */
 const MOVES_CLIPS = new Set(Object.values(MOVES).flat().map((st) => st.clip));
-const CORPSE_SECONDS = 14;  // a body stays this long after its death clip, then goes
+/**
+ * How long a body stays after its death clip, and how many lie at once (the oldest go first).
+ * A game may change it before its battle: alg-rts keeps them (2026-10-07, "the battle leaves
+ * marks" — CoH's field stays strewn). A body is a skinned figure posed every frame like a
+ * living man, hence the cap.
+ */
+export const CORPSES = { seconds: 14, max: Infinity };
 
 /**
  * `types` / `typeKeys`: the game's unit list. `procedural`: { key: () => geometry }
@@ -1442,6 +1448,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     items: UNIT_TYPE_KEYS.filter((k) => !VARIANT_KEYS.has(k) && thumbnailFor?.(k) !== false).map((k) => ({ key: k, make: () => cloneTemplateRoot(k) })),
   });
 
+  const corpseOrder = [];   // bodies in the order they fell (CORPSES.max)
   /** A crowd soldier just killed plays a death clip, then lies there a while. */
   function drawCorpse(unit, v, dt) {
     const r = v.crowd.roles;
@@ -1461,7 +1468,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     if (v.gib) {
       v.deadT += dt;
       v.gib.t += dt;
-      if (v.deadT > CORPSE_SECONDS + 2) return;
+      if (v.deadT > CORPSES.seconds + 2) return;
       v.view.dead.push(unit);
       return;
     }
@@ -1479,6 +1486,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // Where his TORSO will lie (a game lays blood there — alg-rts): the
       // pack's deaths travel (tools/packMixamo.mjs report: forward 0.30 m,
       // backward 0.83 m), the chest ~0.45 m on from the hips.
+      // The cap: past it, the longest dead goes.
+      v.diedAt = performance.now();
+      v.diedAt = performance.now();
+      corpseOrder.push(v);
+      while (corpseOrder.length > CORPSES.max) corpseOrder.shift().gone = true;
+      while (corpseOrder.length && performance.now() - corpseOrder[0].diedAt > (CORPSES.seconds + 20) * 1000) corpseOrder.shift();
       if (onCorpse) {
         const h = unit.heading + (unit.type.facingOffset ?? 0);
         const off = DEATH_CHEST[v.cur.clip] ?? 0.75;
@@ -1486,7 +1499,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       }
     }
     v.deadT += dt;
-    if (v.deadT > v.crowd.field.duration(v.cur.clip) + CORPSE_SECONDS) return;
+    if (v.gone || v.deadT > v.crowd.field.duration(v.cur.clip) + CORPSES.seconds) return;
     v.cur.t += dt;
     v.prev.t += dt;
     v.fade = Math.min(1, v.fade + dt / (v.fadeS ?? 0.2));
