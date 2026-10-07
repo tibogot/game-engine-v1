@@ -37,6 +37,7 @@ import { applyMacroGround } from "./algMacroGround.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
+import { createAlgTelegraph } from "./algTelegraph.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
@@ -367,6 +368,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // draw each. ?poles=0 = without.
   if (params.get("poles") !== "0") {
     try { app.algPoles = createAlgPoles(app, { navGrid: app.navGrid ?? null }); } catch (e) { console.warn("[alg poles] failed:", e); }
+    // THE LINE AS A STAKE (algTelegraph.js): the FLN fells poles, the post loses Algiers.
+    if (app.algPoles && app.algUnits) {
+      app.algTelegraph = createAlgTelegraph(app, { poles: app.algPoles, units: app.algUnits.units });
+      app.addPreRenderHook(function algTelegraphStep() { app.algTelegraph.step(); });
+    }
   }
   // BIRDS (algBirds.js, the shared engine): storks crossing and landing in
   // the open, crows, a stork on the minaret's nest, griffon vultures on the

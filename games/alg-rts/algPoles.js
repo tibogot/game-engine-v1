@@ -103,10 +103,13 @@ export function createAlgPoles(app, { navGrid = null } = {}) {
   };
   const UPV = new THREE.Vector3(0, 1, 0);
   let spans = 0;
+  // Each span's run of indices (algTelegraph.js drops the wires of a felled pole's spans).
+  const spanList = [];   // { a, b: pole indices, i0, i1: index range }
   for (let i = 1; i < poles.length; i++) {
     const p0 = poles[i - 1], p1 = poles[i];
     if (p0.track !== p1.track || p1.s - p0.s > P.spacing * 2.2) continue;    // a gap: the line breaks
     spans++;
+    const i0 = idx.length;
     const span = Math.hypot(p1.x - p0.x, p1.z - p0.z);
     const sag = span * P.sagPerM * (0.85 + ((i * 0.618) % 1) * 0.3);
     for (let k = 0; k < wiresLocal.length; k++) {
@@ -121,6 +124,7 @@ export function createAlgPoles(app, { navGrid = null } = {}) {
       ribbon(pts, flatSide, UPV);                   // seen from above
       ribbon(pts, UPV, flatSide);                   // seen from the side
     }
+    spanList.push({ a: i - 1, b: i, i0, i1: idx.length });
   }
   const wgeo = new THREE.BufferGeometry();
   wgeo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
@@ -134,5 +138,32 @@ export function createAlgPoles(app, { navGrid = null } = {}) {
   app.scene.add(wires);
 
 
-  return { poles, mesh, wires, spans, dispose() { app.scene.remove(mesh, wires); wgeo.dispose(); geo.dispose(); } };
+  /** The spans' wires minus those of `hidden` (a Set of spanList entries): a rare rebuild (a pole felled / mended). */
+  function setHiddenSpans(hidden) {
+    const keep = [];
+    let from = 0;
+    for (const sp of spanList) {
+      if (!hidden.has(sp)) continue;
+      for (let k = from; k < sp.i0; k++) keep.push(idx[k]);
+      from = sp.i1;
+    }
+    for (let k = from; k < idx.length; k++) keep.push(idx[k]);
+    wgeo.setIndex(keep);
+  }
+  /** Pole `i` standing (true) or FELLED (lying across the verge, its foot where it stood). */
+  function setStanding(i, standing) {
+    const p = poles[i];
+    if (standing) m4.compose(new THREE.Vector3(p.x, p.y, p.z), p.q, one);
+    else {
+      // Toppled away from the track about its own foot, a little skewed.
+      // (About the track's tangent; negative = the top goes out to the verge, not onto the road.)
+      const fall = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(Math.sin(p.yaw), 0, Math.cos(p.yaw)), -1.45);
+      m4.compose(new THREE.Vector3(p.x, p.y + 0.12, p.z), fall.multiply(p.q), one);
+    }
+    // Through the static batch when the poles are in it (algGame.js batchStaticInstances).
+    if (app.algStaticBatch) app.algStaticBatch.setMatrixAt(mesh, i, m4);
+    else { mesh.setMatrixAt(i, m4); mesh.instanceMatrix.needsUpdate = true; }
+  }
+
+  return { poles, mesh, wires, spans, spanList, setHiddenSpans, setStanding, dispose() { app.scene.remove(mesh, wires); wgeo.dispose(); geo.dispose(); } };
 }

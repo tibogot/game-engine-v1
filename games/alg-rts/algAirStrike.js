@@ -65,6 +65,8 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
   function ability(sel) {
     if (sel.length !== 1 || !isPost(sel[0])) return null;
     const s = sel[0], cd = Math.max(0, s.airCd ?? 0), busy = runs.some((r) => r.post === s);
+    // THE LINE CUT (algTelegraph.js): no line to Algiers, no aircraft.
+    if (app.algTelegraph?.cut) return { key: "airStrike", label: "Ligne coupée", cost: purse ? P.cost : undefined, hint: "Le FLN a coupé la ligne télégraphique : le poste ne peut plus demander d'avion. Des sapeurs peuvent la réparer (clic droit sur le poteau abattu).", ready: false, cooldown: 0 };
     return {
       key: "airStrike", label: busy ? "Avion en route" : "Frappe aérienne", cost: purse ? P.cost : undefined,
       hint: `Un T-6 mitraille une ligne de ${P.strafe} m jusqu'au point, puis y largue ${P.bombs} bombes. ~${P.delay} s pour arriver, depuis le poste. Les abris ne protègent pas des bombes. L.`,
@@ -74,7 +76,7 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
 
   function begin(sel = selection.selected) {
     const post = (sel ?? []).find(isPost);
-    if (!post || (post.airCd ?? 0) > 0 || runs.some((r) => r.post === post) || (purse && !purse.canAfford(P.cost))) return false;
+    if (!post || app.algTelegraph?.cut || (post.airCd ?? 0) > 0 || runs.some((r) => r.post === post) || (purse && !purse.canAfford(P.cost))) return false;
     targeting = { post, at: null };
     dom.style.cursor = "crosshair";
     return true;

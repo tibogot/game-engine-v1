@@ -79,6 +79,8 @@ const P = {
   villageTrigger: 35,         // French this close to an occupying band: open fire
   mineShare: 0.3,             // of the bands (while the map has room for a mine)
   mineWork: 8,                // seconds at the spot to lay it
+  cutShare: 0.2,              // of the bands: cut the telegraph line (algTelegraph.js), while it stands
+  cutWork: 10,                // seconds at the pole to bring it down
   mineKeepOff: 90,            // no French within this of the spot
   mineApart: 45,              // from the other mines
   mgKeepOff: 8,               // metres past an MG's range an ambush spot must keep
@@ -651,7 +653,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
             else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); sendHome(u); }
           }
           if (b.mission === "assault") { goIn(b); break; }
-          setState(b, b.mission === "village" || b.mission === "defend" || b.mission === "raid" ? "occupy" : b.mission === "mine" ? "lay" : "ambush");
+          setState(b, b.mission === "village" || b.mission === "defend" || b.mission === "raid" ? "occupy" : b.mission === "mine" || b.mission === "cut" ? "lay" : "ambush");
           break;
         }
         // Everyone stopped short (no route for anyone): wire in the way? Cut
@@ -763,7 +765,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         if (!m.length) return setState(b, "done");
         const c = centre(m);
         if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.trigger)) { strike(b); break; }
-        if (b.t > P.mineWork) { app.algMines?.lay(b.minePt.x, b.minePt.z); withdraw(b); }
+        if (b.mission === "cut") { if (b.t > P.cutWork) { app.algTelegraph?.fell(b.cutPole.i); withdraw(b); } }
+        else if (b.t > P.mineWork) { app.algMines?.lay(b.minePt.x, b.minePt.z); withdraw(b); }
         break;
       }
       case "strike": {
@@ -1036,23 +1039,37 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   }
 
   /**
-   * A stretch of piste to mine: no French within mineKeepOff, clear of the
+   * A stretch of piste (or mule path) to mine: no French within mineKeepOff, clear of the
    * post and of the other mines; nearer the band better. False if none.
    */
+  /** CUT THE LINE: the band goes to a telegraph pole far from the French and fells it. */
+  function planCut(b) {
+    const pole = app.algTelegraph?.poleFor?.(centre(alive(b)));
+    if (!pole) return false;
+    b.mission = "cut"; b.cutPole = pole; b.target = null;
+    b.spot = app.navGrid?.nearestOpenWorld?.(pole.x, pole.z, true) ?? { x: pole.x, z: pole.z };
+    holdFire(b, true);
+    sendBand(b, b.spot);
+    setState(b, "approach");
+    return true;
+  }
   function planMine(b) {
     const mines = app.algMines;
     if (!mines || mines.count >= mines.params.max) return false;
     const c = centre(alive(b));
     const fr = french().filter((u) => !u.isAir);
     let best = null, bestS = -Infinity;
+    // The PISTE (the trucks and the armour) and the MULE PATHS too (2026-10-07, sabotage: the
+    // French patrols on foot walk them — a man who has not spotted it sets it off), the piste a
+    // little preferred.
     for (const t of TRACK_LINES) {
-      if (t.kind !== "piste") continue;
+      if (t.kind !== "piste" && t.kind !== "mule") continue;
       for (let i = 2; i < t.line.length - 2; i += 3) {
         const p = t.line[i];
         if (dist(p, post) < P.mineKeepOff) continue;
         if (fr.some((u) => dist(u.position, p) < P.mineKeepOff)) continue;
         if (mines.list.some((q) => dist(q, p) < P.mineApart)) continue;
-        const s = -dist(p, c) / 400 + Math.random() * 0.4;
+        const s = -dist(p, c) / 400 + Math.random() * 0.4 + (t.kind === "piste" ? 0.1 : 0);
         if (s > bestS) { bestS = s; best = p; }
       }
     }
@@ -1293,6 +1310,11 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     if (b.mission === "mine") {
       if (planMine(b)) return;
       b.mission = "ambush";
+    }
+    // THE LINE (algTelegraph.js): a pole far from the French, now and then.
+    if ((!b.mission && Math.random() < P.cutShare) || b.mission === "cut") {
+      if (planCut(b)) return;
+      if (b.mission === "cut") b.mission = "ambush";
     }
     // Political work, about half the time a village is worth it.
     if (!b.mission) {
@@ -1587,6 +1609,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     raidFor: (x, z) => pickRaid({ x, z }),
     /** Dev: a band now, sent to raid (the best point, or none). */
     raidNow() { return newBand({ mission: "raid" }); },
+    /** Dev: a band now, sent to cut the telegraph line. */
+    cutNow() { return newBand({ mission: "cut" }); },
     /** Dev: a mule train now. */
     convoyNow() { if (!convoy) startConvoy(); },
     /** Dev: the last ambush-screen attempt ("placed" or why not). */
@@ -1605,7 +1629,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
     /** Dev: what each band is doing. */
     describe() {
-      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
+      return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "cut" ? " (cut the line)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
     },
   };
 }

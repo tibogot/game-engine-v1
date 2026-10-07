@@ -40,7 +40,7 @@ const layoutOf = (g) => {
  * @returns {{ batches: THREE.InstancedMesh[], members: number, restore(): void }}
  */
 export function batchStaticInstances(renderer, root, meshes, { name = "StaticBatch" } = {}) {
-  const none = { batches: [], members: 0, restore() {} };
+  const none = { batches: [], members: 0, restore() {}, setMatrixAt(m, i, x) { m.setMatrixAt(i, x); m.instanceMatrix.needsUpdate = true; return false; } };
   const dev = renderer?.backend?.device;
   if (!dev?.features?.has?.("indirect-first-instance")) return none;
 
@@ -56,6 +56,7 @@ export function batchStaticInstances(renderer, root, meshes, { name = "StaticBat
   }
 
   const batches = [], hidden = [];
+  const memberAt = new Map();   // member → { mesh, no } (its first instance in the batch)
   const mw = new THREE.Matrix4(), mi = new THREE.Matrix4();
   for (const list of groups.values()) {
     if (list.length < 2) continue;
@@ -91,6 +92,7 @@ export function batchStaticInstances(renderer, root, meshes, { name = "StaticBat
       // The member's own placement baked into its instances.
       m.updateWorldMatrix(true, false);
       mw.copy(m.matrixWorld);
+      memberAt.set(m, { mesh, no });
       for (let i = 0; i < m.count; i++) {
         m.getMatrixAt(i, mi);
         mesh.setMatrixAt(no + i, mi.premultiply(mw));
@@ -115,6 +117,21 @@ export function batchStaticInstances(renderer, root, meshes, { name = "StaticBat
   return {
     batches,
     members: hidden.length,
+    /**
+     * A member's instance `i` moved (a rare event: a telegraph pole felled): `matrix` is in the
+     * member's own space, as its setMatrixAt took it. Writes the member AND the batch, so
+     * restore() shows it too. False if `member` is not batched (then only the member).
+     */
+    setMatrixAt(member, i, matrix) {
+      member.setMatrixAt(i, matrix);
+      member.instanceMatrix.needsUpdate = true;
+      const at = memberAt.get(member);
+      if (!at) return false;
+      member.updateWorldMatrix(true, false);
+      at.mesh.setMatrixAt(at.no + i, mi.copy(matrix).premultiply(member.matrixWorld));
+      at.mesh.instanceMatrix.needsUpdate = true;
+      return true;
+    },
     restore() {
       for (const b of batches) { root.remove(b); b.geometry.dispose(); }
       for (const m of hidden) m.visible = true;

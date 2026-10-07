@@ -185,6 +185,8 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
       return n;
     }
     const inc = { ...P.base.player };
+    // THE LINE CUT (algTelegraph.js): Algiers' effectifs come slower.
+    if (app?.algTelegraph?.cut) inc.mp *= app.algTelegraph.params.mpMul;
     for (const v of points) {
       if (v.owner !== "player" || !v.linked) continue;
       const g = P.village[v.kind] ?? P.village.hamlet;

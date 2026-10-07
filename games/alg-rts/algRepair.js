@@ -54,6 +54,8 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
     };
     for (const u of units.list) if (repairable(u)) test(u, u.radius ?? u.type?.radius ?? 3);
     for (const s of structures.list ?? []) if (repairable(s)) test(s, s.radius ?? 6);
+    // A felled telegraph pole (algTelegraph.js): mended the same way.
+    for (const s of app.algTelegraph?.repairTargets?.() ?? []) if (repairable(s)) test(s, 2);
     return best;
   }
 

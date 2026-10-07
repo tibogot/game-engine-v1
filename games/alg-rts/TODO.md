@@ -133,9 +133,20 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      only, half the cover's cut pierced, shown 1.2 s a shot; 3 shots then 10-25 m on along his side;
      French on foot within 24 m → away; hurt → home. FAIR: every round a tracer, an unseen shot drops
      a "last seen" ring + "Tireur embusqué !" (once a minute). MEASURED, a section idle at Mechta
-     Ouled Ali: 2 dead + 1 at 4 hp in ~30 s of fire, never seen. NEXT in the asymmetry: sabotage
-     (the telegraph line, booby-trapped houses, mines on mule paths), tunnels between refuges; then
-     civilians (soldier lab) → melting into villages + bouclage et fouille.
+     Ouled Ali: 2 dead + 1 at 4 hp in ~30 s of fire, never seen.
+   - [x] FLN ASYMMETRY 2 — SABOTAGE (2026-10-07):
+     THE LINE CUT (algTelegraph.js): a band's "cut" mission (algAI planCut, 20% of plans) fells a
+     pole far from the French (90 m, out of MG reach, 120 m from the post): it lies across the
+     verge, its spans' wires gone. While cut: NO AIR STRIKE (its button "Ligne coupée") and the
+     effectifs from Algiers ×0.6 (MEASURED 270 → 158 /min); "Ligne coupée !" alert. SAPPERS mend it
+     like a vehicle (right-click the pole; 45 hp of work: 3 men ~6 s). The poles are in the static
+     batch: staticInstanceBatch got setMatrixAt(member, i, m) (the felled pole stood still before).
+     MINES ON THE MULE PATHS too (planMine: piste + mule, the piste a little preferred).
+     BOOBY-TRAPPED HOUSES (algGarrison): the FLN's last man out leaves a trap half the time (3 at
+     most); the first French man in sets it off (110 dmg, 5 m, on him) — MEASURED 2 dead, 1 hurt of
+     6; "Maison piégée !". A SAPPER within 9 m of the door finds and clears it.
+     NEXT: tunnels between refuges; then civilians (soldier lab) → melting into villages + bouclage
+     et fouille.
    - [ ] NEXT: then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of

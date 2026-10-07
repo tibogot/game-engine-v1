@@ -25,6 +25,11 @@ const P = {
   bailBlasts: 1, bailWindow: 10,
   maxSuppression: 0.35,   // never pinned inside
   window: 0.55,           // m inside the wall a man stands at his window
+  // BOOBY TRAPS (2026-10-07, the FLN's sabotage): the last FLN man out of a house sometimes
+  // leaves a grenade on a wire behind the door. The first French in sets it off (a grenade's
+  // burst on the doorway: the men going in and anyone at the windows). A SAPPER passing within
+  // trapSpot m finds it and takes it out. Never more than trapMax set at once.
+  trapChance: 0.5, trapMax: 3, trapDamage: 110, trapRadius: 5, trapSpot: 9,   // (90 at the door: the man 3 m out took 38)
 };
 
 /**
@@ -101,7 +106,17 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     }
     return n;
   }
+  /** A French man at the door of a trapped house: it goes off. */
+  function springTrap(h, u) {
+    h.trap = false;
+    // On the man pushing the door (he is still up to enterReach out of it).
+    const at = { x: u.position.x, y: app.getWorldHeight(u.position.x, u.position.z) + 0.4, z: u.position.z };
+    app.algCombat?.combat?.splashAt?.(at, P.trapDamage, P.trapRadius, { team: "enemy", position: at }, { kind: "grenade" });
+    app.algBattle?.say?.("<b>Maison piégée !</b> Une grenade derrière la porte. Faites passer les sapeurs d'abord : ils trouvent les pièges.", at.x, at.z, "bad", "hq_contact", "alertMine");
+  }
   function enter(u, h) {
+    // A trapped house (left by the FLN): the first French man in sets it off.
+    if (h.trap && u.team === "player") { springTrap(h, u); if (!u.alive) return; }
     const slot = h.slots[h.men.length] ?? h.slots[0];
     h.men.push(u);
     h.team = u.team;
@@ -118,6 +133,8 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     if (!h) return;
     const i = h.men.indexOf(u);
     if (i >= 0) h.men.splice(i, 1);
+    // The FLN's last man out, alive, may leave it trapped.
+    if (!h.men.length && u.team === "enemy" && u.alive && !h.trap && houses.filter((q) => q.trap).length < P.trapMax && Math.random() < P.trapChance) h.trap = true;
     if (!h.men.length) h.team = null;
     u.inside = false;
     u.garrison = null;
@@ -176,8 +193,19 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
 
   // ── The sim step ──────────────────────────────────────────────────────────
   let faceT = 0;
+  let trapScan = 0;
   function step(dt) {
     clock += dt;
+    // A SAPPER near a trapped house finds the trap (twice a second; most houses are not trapped).
+    trapScan -= dt;
+    if (trapScan <= 0) {
+      trapScan = 0.5;
+      for (const h of houses) {
+        if (!h.trap) continue;
+        const sap = units.list.find((u) => u.alive && u.team === "player" && u.typeKey === "sapeur" && Math.hypot(u.position.x - h.door.x, u.position.z - h.door.z) < P.trapSpot);
+        if (sap) { h.trap = false; app.algBattle?.say?.("<b>Piège désamorcé</b> par les sapeurs : une grenade derrière une porte.", h.door.x, h.door.z, "good", null, "alertMine"); }
+      }
+    }
     for (const [u, h] of pending) {
       if (!u.alive || u.inside || (h.team && h.team !== u.team)) { pending.delete(u); continue; }
       if (Math.hypot(u.position.x - h.door.x, u.position.z - h.door.z) < P.enterReach) {
