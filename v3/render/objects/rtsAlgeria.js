@@ -13,7 +13,7 @@
 import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import { MAT, assemble, bakeContactAO, buildBox, buildCorrugatedPanel, buildOilDrum, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
-import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
+import { flatSurface, mergeStencils, stencilPatch, stencilsOf } from "./rtsStencils.js";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 
 const S = 1.3;
@@ -25,6 +25,9 @@ export function finish(parts, { hx, hz, cx = 0, cz = 0, height, ao = {} }) {
   geo.scale(S, S, S);
   geo.userData.footprint = { cx: cx * S, cz: cz * S, hx: hx * S, hz: hz * S };
   geo.userData.height = height * S;
+  // Paint carried among the parts (a house's weathering: rtsMechta house()).
+  const sg = stencilsOf(parts, S);
+  if (sg) geo.userData.stencil = sg;
   return geo;
 }
 
@@ -312,7 +315,11 @@ function whiteStone(R, x, y, z, size = 0.2) {
 function finishWithStencils(parts, st, opts) {
   const geo = finish(parts, opts);
   const sg = mergeStencils(st);
-  if (sg) { sg.scale(S, S, S); geo.userData.stencil = sg; }
+  if (sg) {
+    sg.scale(S, S, S);
+    // With any paint the parts carried (finish), one geometry.
+    geo.userData.stencil = geo.userData.stencil ? mergeStencils([geo.userData.stencil, sg]) : sg;
+  }
   return geo;
 }
 

@@ -17,7 +17,14 @@ Keep this file current: tick things off here, add new asks here.
    the shaded side of a house and the ground in its shadow are near black — no sky fill. CoH's
    shade keeps its detail (a cool, lighter fill). Fix: more sky/ambient in shade (Sky Pro's
    ambient, or the shadow strength < 1). Hours, 0 ms. The single biggest look win.
-2. [ ] **BUILDINGS ARE CLEAN BOXES**: flat slab roofs, the same house repeated (the dechra reads as
+2. [~] **BUILDINGS ARE CLEAN BOXES** — STEP 1 DONE 2026-10-08 (rtsMechta house(): the mechta, dechra
+   and farmstead houses): WEATHER as stencils (foot dust, grime streaks under the eaves, plaster fallen
+   off a limewashed front; new stone cells stoneStreak / stoneFootDust — the whitewash's light grime
+   read as white icicles on grey rubble) + ROOF LIFE (firewood, brush heaps, grain mats, jars, a hatch
+   and its ladder, washing lines, a rug over the parapet, mud repairs, a ladder up the front; own
+   random stream: the village layout is UNCHANGED, checked). +~900 tris a village, +1 draw (its
+   stencils). NEXT: the KSAR's houses (own builder) the same; parapets / heights variety; the Aurès
+   stone; the mechta house detail 2. Was: flat slab roofs, the same house repeated (the dechra reads as
    a grid of one box), no weathering (no grime at the foot, streaks under sills and parapets, no
    chipped plaster showing stone), no clutter on roofs and in lanes beyond a crate. CoH's houses
    each read as one place. Fix in the kit (rtsAlgVillage / rtsMechta): per-house variety (heights,

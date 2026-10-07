@@ -83,6 +83,10 @@ export const STENCILS = {
   rainStreakA:  { x: 0,   y: 1632, w: 128, h: 320 },
   rainStreakB:  { x: 128, y: 1632, w: 128, h: 320 },
   wallFootDust: { x: 256, y: 1632, w: 640, h: 128 },
+  // WEATHER on STONE (the village houses, 2026-10-08): the whitewash's light grime read as white
+  // icicles on grey rubble — on stone, water leaves DARK stains and the dust is the ground's earth.
+  stoneStreak:   { x: 896, y: 1632, w: 128, h: 320 },
+  stoneFootDust: { x: 256, y: 1760, w: 640, h: 128 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -247,10 +251,12 @@ function drawFrench(g, text, wear) {
   rainStreak(g, STENCILS.rainStreakA, 3);
   rainStreak(g, STENCILS.rainStreakB, 17);
   footDust(g, STENCILS.wallFootDust, 23);
+  rainStreak(g, STENCILS.stoneStreak, 29, { top: [62, 56, 48], end: [92, 84, 72], wash: [70, 63, 54] });
+  footDust(g, STENCILS.stoneFootDust, 31, { top: [138, 116, 88], foot: [112, 92, 68], splash: [130, 110, 84] });
 }
 
 /** Grime washed down a wall: a few ragged drips from the top, each its own length and width. */
-function rainStreak(g, c, seed) {
+function rainStreak(g, c, seed, { top = [168, 158, 142], end = [194, 184, 168], wash = [158, 146, 124] } = {}) {
   let s = seed * 2654435761 >>> 0;
   const r = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
   // (First cut: thin and near-black — a comb. Fewer, wider, lighter washes.)
@@ -261,20 +267,19 @@ function rainStreak(g, c, seed) {
     let x = x0, w = w0;
     for (let y = 0; y < len; y += 4) {
       const t = y / len;
-      const col = Math.round(168 + t * 26);
-      g.fillStyle = `rgb(${col}, ${col - 10}, ${col - 26})`;
+      g.fillStyle = `rgb(${[0, 1, 2].map((i) => Math.round(top[i] + (end[i] - top[i]) * t)).join(", ")})`;
       g.fillRect(x, c.y + y, Math.max(2, w), 5);
       x += (r() - 0.5) * 1.6;
       w = w0 * (1 - t * 0.75) + (r() - 0.5) * 2;
     }
     // A wider wash at the top, where the water left the coping.
-    g.fillStyle = "rgb(158, 146, 124)";
+    g.fillStyle = `rgb(${wash.join(", ")})`;
     g.fillRect(x0 - 4, c.y, w0 + 8, 10 + r() * 10);
   }
 }
 
 /** Dust up a wall's foot: ochre, the top edge a wandering line, splashes above it. */
-function footDust(g, c, seed) {
+function footDust(g, c, seed, { top: c0 = [186, 170, 142], foot: c1 = [164, 146, 118], splash = [184, 168, 140] } = {}) {
   let s = seed * 2654435761 >>> 0;
   const r = () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
   const ph = [r() * 6, r() * 6, r() * 6];
@@ -282,11 +287,11 @@ function footDust(g, c, seed) {
     const top = c.h * (0.25 + 0.2 * Math.sin(x * 0.013 + ph[0]) + 0.12 * Math.sin(x * 0.041 + ph[1]) + 0.06 * Math.sin(x * 0.17 + ph[2]));
     for (let y = Math.max(0, Math.floor(top)); y < c.h; y += 4) {
       const t = (y - top) / (c.h - top);
-      g.fillStyle = `rgb(${Math.round(186 - t * 22)}, ${Math.round(170 - t * 24)}, ${Math.round(142 - t * 24)})`;
+      g.fillStyle = `rgb(${[0, 1, 2].map((i) => Math.round(c0[i] + (c1[i] - c0[i]) * t)).join(", ")})`;
       g.fillRect(c.x + x, c.y + y, 2, 4);
     }
     if (r() < 0.08) {   // a splash above the line
-      g.fillStyle = "rgb(184, 168, 140)";
+      g.fillStyle = `rgb(${splash.join(", ")})`;
       g.fillRect(c.x + x, c.y + top - 6 - r() * 18, 3 + r() * 4, 3 + r() * 4);
     }
   }
@@ -441,6 +446,26 @@ export function mergeStencils(patches) {
   if (!list.length) return null;
   const g = mergeGeometries(list, false);
   for (const p of list) p.dispose();
+  return g;
+}
+
+/**
+ * STENCILS CARRIED IN A PARTS LIST (2026-10-08, the village weathering): a builder pushes
+ * `{ stencil: geo, pos: [0, 0, 0] }` among its parts (assemble skips them: no `geo`), so anything
+ * that moves the parts afterwards — a dechra seating a house on the slope (rtsAlgVillage lift) —
+ * moves the paint with them. This collects them, each moved by its `pos`, merged and `scale`d
+ * like the piece. Null when there are none.
+ */
+export function stencilsOf(parts, scale = 1) {
+  const list = [];
+  for (const p of parts) {
+    if (!p?.stencil) continue;
+    const [x, y, z] = p.pos ?? [0, 0, 0];
+    if (x || y || z) p.stencil.translate(x, y, z);
+    list.push(p.stencil);
+  }
+  const g = mergeStencils(list);
+  if (g && scale !== 1) g.scale(scale, scale, scale);
   return g;
 }
 
