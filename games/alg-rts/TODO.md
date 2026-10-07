@@ -10,7 +10,10 @@ Keep this file current: tick things off here, add new asks here.
 ## environment, gameplay"). LOOKED AT in the game: the post, Dechra Tighanimine, Ksar el Hamra,
 ## Mechta el Oued, the open fields at full zoom-out, a staged fight by the SAS post. Ranked by
 ## what it does for the look / play ÷ the work. Perf: all ~0 ms unless said.
-1. [ ] **SHADOWS GO BLACK** (every view, worst at the mechtas and the ksar since the 16:00 sun):
+1. [x] **SHADOWS GO BLACK** — DONE 2026-10-07: the cause MEASURED — the hemisphere light and the
+   environment intensity change nothing visible under Sky Pro (×20: same); the auto exposure meters
+   the SUNLIT ground, so the shade is dark relative to it. Fix: engine skyProSky.sunScale (day
+   only), alg 0.55 — a weaker key against the same sky; the shade keeps its stone. Was: (every view, worst at the mechtas and the ksar since the 16:00 sun):
    the shaded side of a house and the ground in its shadow are near black — no sky fill. CoH's
    shade keeps its detail (a cool, lighter fill). Fix: more sky/ambient in shade (Sky Pro's
    ambient, or the shadow strength < 1). Hours, 0 ms. The single biggest look win.
@@ -22,11 +25,15 @@ Keep this file current: tick things off here, add new asks here.
    atlas cells weathered (grime gradient up from the ground, streaks), plaster-loss patches.
    Days; 0 ms (merged geometry, same atlas). Includes the parked "mechta house detail 2" and the
    Aurès stone.
-3. [ ] **WHITES BLOW OUT**: a dechra roof and the post's walls read as pure white glare. The
+3. [x] **WHITES BLOW OUT** — DONE: makeWhitewashTexture 196-222 → 180-204. Was:: a dechra roof and the post's walls read as pure white glare. The
    whitewash albedo too high for the CoH grade — cap it (~0.7). Minutes.
-4. [ ] **THE THRESHING FLOORS ARE A BLURRY SMUDGE** (every village): a dark soft disc in the stone
+4. [x] **THE THRESHING FLOORS ARE A BLURRY SMUDGE** — DONE: the smudge was a SECOND floor inside the
+   mechta model (a flat 28-sided disc, its baked AO a dark blur); removed — the paved one beside each
+   hamlet stays. Was: (every village): a dark soft disc in the stone
    ring. Give it a beaten-earth/flag texture (a ground splat) or drop the disc. An hour.
-5. [ ] **GREENS AND WATER TOO SATURATED** next to the desert: the oasis water bright cyan, the
+5. [~] **GREENS AND WATER TOO SATURATED** — the oasis WATER done (algGame: lake absorption G 0.16 →
+   0.2, inscatter #0b2418 → olive #1f2a14: cyan → olive pond; a mud brown read as a puddle). The
+   oasis GRASS left as is (an oasis is green) — your call. Was: next to the desert: the oasis water bright cyan, the
    grass vivid green — a different game's palette beside the ochre. Pull both toward the grade
    (water darker/olive, grass drier). An hour.
 6. [x] **UNITS HARD TO FIND** (2026-10-07). Re-checked: the "missing" men of the staged fight were

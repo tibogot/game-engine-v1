@@ -75,6 +75,11 @@ export const AURES_LIGHT = {
   // the engine's 0.55 metered the sunny start x2.3 and the post's whites clipped, the sand
   // pale. Dev → Sky → Exposure / Time of day adjust it live.
   skyProExposure: 0.42,
+  // THE SHADE (2026-10-07, CoH audit 2 item 1: shaded walls and ground read near black). Sky Pro's
+  // sun at this × against the same sky (engine skyProSky.sunScale, day only): the auto exposure
+  // brings the sunlit ground back and the shade rises with it — detail in the shadows, as in CoH.
+  // MEASURED that the hemisphere light and the environment intensity do nothing visible here.
+  skyProSunScale: 0.55,
   // The sun carries the frame (nam's lesson: a sky-lit frame is flat), the
   // fill stays warm and low, exposure brings the mean back up.
   world: { dir: 4.8, skyFill: 0.4, hemi: 0.9, exposure: 1.45 },
@@ -249,6 +254,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("farterrain") === "0") app.setFarTerrain?.({ enabled: false });
 
   if (params.get("light") !== "flat") applyAuresLight(app);
+  // THE OASIS WATER (2026-10-07, CoH audit 2 item 5: the ponds read bright cyan beside the ochre —
+  // another game's palette). The level's lake water let green through and scattered a green tint;
+  // an Aurès oasis pond is olive and murky: more absorption in green, an olive-brown inscatter.
+  // (Tried a mud brown first: read as a puddle.) The level file keeps its own values.
+  {
+    const L = app.lakeSystem, w = L?.toolState?.lake?.water;
+    if (w) { Object.assign(w, { absorptionR: 0.42, absorptionG: 0.2, absorptionB: 0.45, inscatterTint: "#1f2a14", inscatterStrength: 0.8 }); L.syncMaterial?.(); }
+  }
   // THE GRADE STEPS ASIDE AT NIGHT. The Aurès grade (contrast 1.18, warm 0.16, saturation 0.92)
   // is a summer afternoon's: at night its contrast crushed the moonlit walls to black and its
   // warmth fought the night look's blue (seen at the post, 23 h). It eases to neutral with the
@@ -591,6 +604,7 @@ export function applyAuresLight(app, L = AURES_LIGHT) {
     // path on a sea; this map has none, and a low moon left the land half as bright (MEASURED at
     // the post, 23 h: open ground 0.0016 at 18° vs 0.0034 at Tidewater's).
     app.sky.skyPro.moonElev = 0;
+    if (L.skyProSunScale) app.sky.skyPro.sunScale = L.skyProSunScale;
     // The day darker (skyProExposure above), the NIGHT as it was tuned: the stops taken off
     // the base are given back on the night look's own EV, which scales with the night amount.
     const base = app.sky.skyPro.exposure;

@@ -574,7 +574,8 @@ export function makeWhitewashTexture({ size = 512, seed = 97 } = {}) {
       for (let x = 0; x < S; x++) {
         const u = x / (S - 1);
         const mott = fbm(u * P * 2 + seed, v * P * 2, P * 2, 3);
-        let k = lerp(196, 222, mott);
+        // 180-204 (was 196-222: under alg-rts' CoH grade a sunlit wall or roof read as pure glare).
+        let k = lerp(180, 204, mott);
         const streak = vnoise(u * P * 30, v * P * 2, P * 30) - 0.5;
         k += streak * 10;
         // Dust climbing from the foot, red-brown.

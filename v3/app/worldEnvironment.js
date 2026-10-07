@@ -1163,7 +1163,8 @@ export async function createWorldEnvironment({
     _skyProColor.setRGB(r / m, g / m, b / m, THREE.LinearSRGBColorSpace);
     const kd = L.keyDir;
     const key = _skyProColor.getHexString() + "," + m.toFixed(3) + "," + skyPro.params.exposure
-      + "," + kd.x.toFixed(3) + "," + kd.y.toFixed(3) + "," + kd.z.toFixed(3);
+      + "," + kd.x.toFixed(3) + "," + kd.y.toFixed(3) + "," + kd.z.toFixed(3)
+      + "," + (toolState.skyProSky?.sunScale ?? 1) + "," + (L.night ?? 0).toFixed(3);   // (a game's sunScale, eased by night)
     // Eye adaptation (Tidewater's auto exposure + the night look): a per-frame factor on the
     // mode's base exposure, written to the renderer only — Li.exposure stays the saved base.
     const exposureK = skyPro.exposureFactor(dtSec);
@@ -2075,7 +2076,14 @@ export async function createWorldEnvironment({
       else skyProKeyDir(sunDir, _effectiveLightDir);
       placeSun();
       sun.color.set(Li.dirColor);
-      sun.intensity = Li.dirIntensity;
+      // A game's SHADE (skyProSky.sunScale < 1, alg-rts 2026-10-07: shaded walls and ground read
+      // near black — the sky is the only light in the shade, and the auto exposure meters the
+      // sunlit ground): a weaker key against the same sky; the exposure brings the sunlit ground
+      // back and the shade rises with it. Day only — at night the key is the night look's moon.
+      // (The hemisphere light does nothing here: Sky Pro's sky is the scene environment.)
+      const k = toolState.skyProSky?.sunScale ?? 1;
+      const night = skyPro && _skyProReady ? skyPro.light().night ?? 0 : 0;
+      sun.intensity = Li.dirIntensity * (1 + (k - 1) * (1 - night));
     } else if (isDomeMode(toolState.skyMode) && sunUp < 0) {
       _effectiveLightDir.copy(sunDir).negate();
       placeSun();

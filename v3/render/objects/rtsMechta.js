@@ -3,8 +3,8 @@
  * under flat roofs of beaten earth, the roof beams' ends sticking out under
  * the eaves, a low timber door, a couple of small openings, some houses a
  * storey higher, the doorways limewashed. Houses lean on each other and on
- * courtyard walls; a domed bread oven (tabouna) in a yard, a round threshing
- * floor at the edge. The civilians' world in the Algeria game.
+ * courtyard walls; a domed bread oven (tabouna) in a yard (the threshing floor is
+ * its own piece beside the hamlet). The civilians' world in the Algeria game.
  *
  * A hamlet is an ARRANGEMENT round a lane, not one house stamped N times
  * (nam-rts's hamlet lesson): every house its own size, height and door side.
@@ -220,7 +220,7 @@ export function oven(parts, R, x, z, yaw) {
 
 /**
  * A hamlet of `count` houses along a lane (the lane runs along +Z through the
- * origin, doors facing it), yards behind some, an oven, a threshing floor.
+ * origin, doors facing it), yards behind some, an oven.
  */
 export function buildMechta({ seed = 1954, count = 10 } = {}) {
   const R = rng(seed);
@@ -250,14 +250,9 @@ export function buildMechta({ seed = 1954, count = 10 } = {}) {
       if (R() < 0.5) oven(parts, R, (back + far) / 2, zc + (R() - 0.5) * 2, R() * 6);
     }
   }
-  // The threshing floor: a round of beaten earth ringed with stones, at the
-  // lane's end.
-  const tz = Math.max(zL, zR) + 6;
-  parts.push({ geo: new THREE.CylinderGeometry(4.5, 4.6, 0.12, 28), pos: [0, 0.06, tz], mat: MAT.earth, tone: 0.95 });
-  for (let k = 0; k < 22; k++) {
-    const a = (k / 22) * Math.PI * 2;
-    parts.push({ geo: buildBox(0.5, 0.25, 0.35), pos: [Math.cos(a) * 4.7, 0.12, tz + Math.sin(a) * 4.7], rot: [0, -a, 0], mat: MAT.rubble, tone: 0.5 + R() * 0.2 });
-  }
+  // (The threshing floor that stood at the lane's end is gone, 2026-10-07: a flat 28-sided disc
+  // whose baked contact AO spread into a blurry dark smudge at play zoom — CoH audit 2 item 4.
+  // Each alg-rts hamlet has the paved one beside it: rtsAlgVillage buildThreshingFloor.)
 
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.35, radius: 2, strength: 0.45, groundFade: 0.3, floor: 0.5 });
