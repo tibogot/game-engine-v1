@@ -35,6 +35,7 @@ import { createAlgStones } from "./algStones.js";
 import { createAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { installGameCursors } from "./ui/cursors.js";
+import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
@@ -497,6 +498,17 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // needsUpdate uploads on the NEXT render: let two frames draw it under the
   // loading screen before it lifts.
   app.setFrameThrottle?.(0);
+  // STATIC PROPS BATCHED (v3/render/staticInstanceBatch.js, 2026-10-07 perf audit): the field
+  // walls, outcrops, village props, poles and depots (one kit material) and the loose stones
+  // (theirs) drew as ~26 instanced meshes in every pass; one indirect-drawing mesh per material
+  // now. Only what never changes after the boot. ?staticbatch=0 = without.
+  if (params.get("staticbatch") !== "0") {
+    const STATIC = /^(FieldWalls|Outcrops|VillageLife:|TelegraphPoles|SupplyDepot:|Stones:)/;
+    const list = [];
+    app.scene.traverse((o) => { if (o.isInstancedMesh && STATIC.test(o.name)) list.push(o); });
+    app.algStaticBatch = batchStaticInstances(app.renderer, app.scene, list, { name: "AlgStatic" });
+    console.log(`[static batch] ${app.algStaticBatch.members} meshes → ${app.algStaticBatch.batches.length} batches`);
+  }
   // Build every pipeline the game will need NOW, under the loading screen, not
   // on the frame a unit type, effect or place is first drawn — nam-rts measured
   // 26 pipelines built mid-fight and a 987 ms frame before it had this

@@ -9,6 +9,7 @@ import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "..
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
 import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
+import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
 import { ScatterField } from "../render/scatter/scatterField.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
@@ -387,6 +388,10 @@ export async function startV3App(opts = {}) {
   // opts.instanceMatrixSync === false = three's own order, to A/B.
   if (opts.instanceMatrixSync !== false && new URLSearchParams(location.search).get("instsync") !== "0") {
     installInstanceMatrixSync(renderer);
+  }
+  // Instanced meshes with nothing in them (count 0) not submitted at all (render/emptyDrawSkip.js).
+  if (opts.emptyDrawSkip !== false && new URLSearchParams(location.search).get("emptyskip") !== "0") {
+    installEmptyDrawSkip(renderer);
   }
   // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
   // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer

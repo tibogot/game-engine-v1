@@ -45,6 +45,8 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/bloomMRT.js",
   "v3/render/instancePipeline.js",
   "v3/render/gpuStatsPanel.js",
+  // Static instanced props merged into one indirect-drawing mesh per material (batchStaticInstances)
+  "v3/render/staticInstanceBatch.js",
   // A boot's render pipelines compiled in parallel (openParallelPipelines)
   "v3/render/parallelPipelines.js",
   // CPU copies of GPU-only buffers dropped (markGpuOnly / releaseGpuOnly)

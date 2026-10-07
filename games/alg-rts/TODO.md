@@ -106,6 +106,22 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
 - Corrugated iron: the post's, the huts' and the other pieces' sheets still on the 2 m mapping
   (some banding) — give them buildCorrugatedPanel's sheet mapping as the motor pool (2026-10-07).
 
+## PERF AUDIT 3 — the top-down camera (2026-10-07, you: "a serious audit, no false positives")
+
+MEASURED (loop paused, frames back to back; GPU by the interleaved harness; fresh page, peace):
+default view frame 6.9 ms, CPU 6.6 (3.9 of it three submitting ~200 render objects: 115 main +
+88 shadow), GPU ~1.3 (5.5 over the scrub slopes). CPU-BOUND everywhere; game logic only 0.9 ms.
+- [x] EMPTY DRAWS SKIPPED (v3/render/emptyDrawSkip.js, engine, all games): ~40 empty instanced
+  objects a frame (wreck pool, rubble, order marks, decal/ring fields) → submission 4.06 → 3.44 ms.
+- [x] STATIC PROPS BATCHED (v3/render/staticInstanceBatch.js; alg: walls, outcrops, village props,
+  poles, depots, stones): 27 meshes → 3 indirect-drawing meshes (needs indirect-first-instance)
+  → submission −0.29 ms (default) / −0.33 (max zoom); GPU unchanged; image identical.
+- [ ] Later: cache the static casters' shadow while the camera is still (~40% of submission is the
+  shadow pass); GPU for weaker machines (terrain 1.2 ms, placed plants 0.7 over the scrub).
+- REJECTED, measured: a shorter camera far plane (removes 0 objects); cascades → one fitted map
+  (already so); "2.9 M triangles" (renderer.info never resets here); off-screen unit skipping
+  (0.23 ms in all); occlusion culling (top-down). Re-measure in a big battle before unit work.
+
 ## WHAT IS LEFT — 2026-10-06 (you: "make a list of what is remaining")
 
 Most important first; details in the sections below. (sugg.) = mine, not yet your ask.
