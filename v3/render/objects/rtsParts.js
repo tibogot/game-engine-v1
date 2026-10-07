@@ -58,6 +58,8 @@ export const MAT = {
   limestone: 21,
   // The Saharan ksar (rtsAlgVillage.js buildKsar): lime plaster, ochre and pale.
   plaster: 22, plasterPale: 23,
+  // The Roman ruins' dressed stone (rtsAlgVillage buildRomanRuin detail 2): row seven.
+  ashlar: 24,
 };
 
 /** Strip anything merge would choke on, and guarantee the attribute set. */

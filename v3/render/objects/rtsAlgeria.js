@@ -11,6 +11,7 @@
  * rtsGroundBandTest + rtsPropsCoplanarTest (every export named build*).
  */
 import * as THREE from "three";
+import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import { MAT, assemble, bakeContactAO, buildBox, buildCorrugatedPanel, buildOilDrum, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
 import { flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
@@ -675,6 +676,31 @@ function jitterByPosition(g, amt, seed, { flatTop = null } = {}) {
     if (flatTop != null) ny = Math.min(ny, flatTop);
     p.setXYZ(i, x * (1 + h(x, y, z, 1) * amt * 2), ny, z * (1 + h(x, y, z, 3) * amt * 2));
   }
+  return g;
+}
+
+/**
+ * A CUT BLOCK, weathered (the Roman ruin, 2026-10-07 — you, with a CoH screenshot: ours were perfect
+ * sharp boxes): w × h × d, chamfered (below), shaded faceted, its UVs at the kit's 2 m a tile from
+ * a random point so no two blocks show the same patch of the texture.
+ */
+export function ashlarBlock(seed, w, h, d, { chip = null } = {}) {
+  const r = rng(seed);
+  // A CHAMFERED box: each corner cut back by its own bevel (three points per corner, the hull of
+  // the 24): every edge a narrow worn face, one corner in four BITTEN deep. (Pulling a low-poly
+  // box's corners in instead made every block a lozenge.) 44 triangles.
+  const b0 = chip ?? Math.min(0.07, Math.min(w, h, d) * 0.16);
+  const pts = [];
+  for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+    const b = Math.min(b0 * (0.6 + r() * 0.8) * (r() < 0.25 ? 3 : 1), Math.min(w, h, d) * 0.45);
+    const X = sx * w / 2, Y = sy * h / 2, Z = sz * d / 2;
+    pts.push(new THREE.Vector3(X - sx * b, Y, Z), new THREE.Vector3(X, Y - sy * b, Z), new THREE.Vector3(X, Y, Z - sz * b));
+  }
+  let g = new ConvexGeometry(pts);
+  g.deleteAttribute("normal"); g.deleteAttribute("uv");
+  g = faceted(g, { boxUV: true });
+  const uv = g.attributes.uv, ou = r() * 2, ov = r() * 2;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) + ou, uv.getY(i) + ov);
   return g;
 }
 

@@ -1215,15 +1215,56 @@ export function makePlasterTexture({ size = 512, seed = 191, pale = false } = {}
   });
 }
 
+/**
+ * DRESSED STONE — a Roman block's face (the ruins, 2026-10-07: the plaster cell's red flecks read
+ * as paint, its ochre as cheese; CoH's ruins are a warm weathered limestone). Warm sand-grey,
+ * mottled in big soft patches, fine grain, small dark PITS (the stone's holes), lichen-dark
+ * blotches here and there, and the grime of centuries gathered toward the foot (v = 0) with rain
+ * streaks down from the top.
+ */
+export function makeAshlarTexture({ size = 512, seed = 241 } = {}) {
+  return makeTexture(size, (g, S) => {
+    const img = g.createImageData(S, S);
+    const d = img.data;
+    const P = 8;
+    for (let y = 0; y < S; y++) {
+      const v = 1 - y / (S - 1);
+      for (let x = 0; x < S; x++) {
+        const u = x / (S - 1);
+        const mott = fbm(u * P + seed, v * P, P, 4);                          // big soft patches
+        const warm = fbm(u * P * 0.5 + 31, v * P * 0.5 + seed, P, 3);          // warmer / greyer zones
+        const grain = fbm(u * P * 24 + 7, v * P * 24 + seed, P * 24, 2) - 0.5;
+        let r = lerp(168, 206, mott), gg = lerp(146, 182, mott), b = lerp(112, 142, mott);
+        // Toward grey in some zones, toward honey in others.
+        const k = (warm - 0.5) * 2;
+        r += k * 10; gg += k * 4; b -= k * 6;
+        r += grain * 18; gg += grain * 16; b += grain * 13;
+        // Pits: small dark holes.
+        const pit = clamp01((vnoise(u * P * 40 + seed, v * P * 40, P * 40) - 0.83) * 9);
+        // Old dark blotches (lichen, soot).
+        const blot = clamp01((fbm(u * P * 3 + 91, v * P * 3 + seed, P * 3, 3) - 0.66) * 5) * 0.32;
+        // Grime from the foot; streaks from the top.
+        const grime = clamp01(0.42 - v) * 0.55;
+        const streak = clamp01((vnoise(u * P * 16, v * P * 1.3 + seed, P * 16) - 0.58) * 3) * clamp01(v * 1.6 - 0.5) * 0.18;
+        const dark = 1 - pit * 0.45 - blot - grime * 0.5 - streak;
+        r *= dark; gg *= dark; b *= dark * 0.98;
+        const i = (y * S + x) * 4;
+        d[i] = r; d[i + 1] = gg; d[i + 2] = b; d[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+  });
+}
+
 export const ATLAS_COLS = 4;
 // FIVE rows, not four: the sixteen were full, and the Khmer ruins need stone
 // that is actually stone (sandstone, laterite, moss). The fifth row costs a
 // quarter more atlas — 2048x2560 instead of 2048x2048 — and the shader reads
 // its size from these two constants, so nothing else has to know.
 // SIX since 2026-09-27: the Algeria game needed dry desert spoil (cell 20);
-// 2048x3072; 21 limestone; 22-23 the ksar's plasters (FULL: a 25th surface
-// needs a seventh row).
-export const ATLAS_ROWS = 6;
+// 2048x3072; 21 limestone; 22-23 the ksar's plasters. SEVEN since 2026-10-07: 24 the Roman
+// ruins' dressed stone (2048x3584; 25-27 free).
+export const ATLAS_ROWS = 7;
 /** Fraction of a cell kept clear at its border, so mips cannot bleed across. */
 export const ATLAS_PAD = 0.004;
 
@@ -1268,6 +1309,7 @@ export function makeSurfaceAtlas({ cell = 512 } = {}) {
     makeLimestoneTexture({ size: cell }), // 21 (Algeria)
     makePlasterTexture({ size: cell }),               // 22 (Algeria): the ksar's ochre
     makePlasterTexture({ size: cell, pale: true, seed: 211 }), // 23: its paler houses
+    makeAshlarTexture({ size: cell }),               // 24: the Roman ruins' dressed stone (row seven)
   ];
   sources.forEach((t, i) => {
     const col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;

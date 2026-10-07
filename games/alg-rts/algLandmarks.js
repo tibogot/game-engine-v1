@@ -69,7 +69,7 @@ export function landmarkEntries(app, list) {
   };
   // The ruins FIRST: placed after the farmsteads they found no room (one of 3).
   const want = [
-    ...Array.from({ length: P.roman }, (_, i) => ({ key: `romanRuin${i + 1}`, build: (o) => buildRomanRuin({ ...o, seed: 1980 + i * 5 }), track: false })),
+    ...Array.from({ length: P.roman }, (_, i) => ({ key: `romanRuin${i + 1}`, build: (o) => buildRomanRuin({ ...o, seed: 1980 + i * 5, detail: 2 }), track: false })),   // detail 2: the buildings lab, 2026-10-07
     ...Array.from({ length: P.burnt }, (_, i) => ({ key: `burntFarm${i + 1}`, build: (o) => buildBurntFarm({ ...o, seed: 1990 + i }), track: true })),
     ...Array.from({ length: P.farmsteads }, (_, i) => ({ key: `mechtaFarm${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1970 + i * 7 }), track: true })),
     // Last, and closer together: small, they fill the gaps the big pieces left.

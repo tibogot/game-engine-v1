@@ -283,6 +283,8 @@ for (const [name, fn] of [...Object.entries(algeria), ...Object.entries(algVilla
 }
 // Detail 2 (the buildings lab): the motor pool's lapped roof sheets.
 check("buildMotorPool detail 2", algeria.buildMotorPool({ detail: 2 }));
+check("buildRomanRuin detail 2", algVillage.buildRomanRuin({ detail: 2 }));
+check("buildRomanRuin detail 2 mirrored", algVillage.buildRomanRuin({ detail: 2, seed: 1985 }));
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);
