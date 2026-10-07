@@ -28,7 +28,9 @@ const STATS = {
   helipad: { vision: 50 },
   caveEntrance: { vision: 60 },
   mirador: { team: "player", name: "Mirador", hp: 500, weapon: "mg", range: 48, damage: 8, fireRate: 2.4, canHitAir: true, muzzleAt: [0, 6.2 * S + 1.4, 0], vision: 110 },
-  mgNest: { team: "player", name: "Nid de mitrailleuse", hp: 700, weapon: "mg", range: 40, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55 },
+  // `arcGun`: an EMPLACED machine gun (algMgTeam.js) — it fires in an arc round the way it was
+  // built facing (the gun's rest: its barrel, local −Z), swings slowly, never packs up.
+  mgNest: { team: "player", name: "Nid de mitrailleuse", hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
   mortarPit: { team: "player", name: "Mortier de 81", hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
   searchlight: { team: "player", name: "Projecteur", hp: 400, vision: 100 },
   armsCache: { team: "enemy", name: "Cache d'armes", hp: 500, vision: 30 },
@@ -73,6 +75,11 @@ export function createAlgStructures({ app, showroom, producers, units }) {
       visionEye: Math.min(14, (mesh.geometry.userData.height ?? 5) * 0.9),
     });
     const gun = mesh.children.find((c) => c.name === "Gun") ?? null;
+    if (st.arcGun) {
+      s.arcGun = true;
+      const y = mesh.rotation.y;
+      s._mg = { state: "set", t: 0, still: 0, facing: Math.atan2(-Math.sin(y), -Math.cos(y)), want: null, scanT: 0, held: null };
+    }
     const muzzles = st.muzzles ? (mesh.geometry.userData[st.muzzles] ?? []).map((p) => toW(...p))
       : st.muzzleAt ? [toW(...st.muzzleAt)] : [];
     const rec = { s, mesh, gun, muzzles, fp, height: mesh.geometry.userData.height ?? 5, mortar: st.mortar ?? null, mortarT: Math.random() * 3 };
@@ -188,8 +195,10 @@ export function createAlgStructures({ app, showroom, producers, units }) {
           r.mesh.visible = seen;
           if (!seen) continue;
         }
-        if (s.alive && r.gun && s.target?.alive) {
-          const dx = s.target.position.x - s.position.x, dz = s.target.position.z - s.position.z;
+        // An emplaced gun with nothing to shoot rests along its arc (where it is turning to).
+        const aimAt = s.target?.alive ? s.target.position : s._mg ? { x: s.position.x + Math.sin(s._mg.facing) * 10, z: s.position.z + Math.cos(s._mg.facing) * 10 } : null;
+        if (s.alive && r.gun && aimAt) {
+          const dx = aimAt.x - s.position.x, dz = aimAt.z - s.position.z;
           // The gun's barrel is its local −Z; the building's yaw taken off.
           const want = Math.atan2(-dx, -dz) - r.mesh.rotation.y;
           let d = want - r.gun.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));

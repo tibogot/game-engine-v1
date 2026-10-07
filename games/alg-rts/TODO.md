@@ -103,8 +103,12 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      at 30% — the rush reached the gun. Now a set-up gun SWEEPS (every enemy on foot within 12 m of
      its target, in the arc, 0.85/s) and pinned men crawl at 10% (alg posture movePinned 0.1). Replay:
      4 of 5 pinned within 1 s, the rush stopped 13 m short; a flank at ~110° had a ~3 s window.
-   - [ ] NEXT (you, "we will continue later"): the built mgNest gets the same arc; the gunner lying
-     flat visibly; then vehicle ARMOUR BY FACING; then SOUND; then a real playtest to tune the FLN,
+   - [x] THE MG NEST gets the arc (algStructures `arcGun`, driven by algMgTeam as an always-set gun):
+     facing where it was built, the same 60° arc, sweep and slow swing, never packed; Orienter (O) on
+     its card. Shown live: 4 FLN pinned 34 m out; a flank → ~110° swing in 3 s without firing.
+     The gunner DOES lie flat (the "crouch" was the set-up transition caught mid-way); his CREW now
+     lies down beside him while the gun is set up.
+   - [ ] NEXT: vehicle ARMOUR BY FACING; then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of
    fire, flanked); vehicle ARMOUR BY FACING + penetration; more abilities; DOCTRINES; FLN

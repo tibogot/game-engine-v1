@@ -43,10 +43,12 @@ const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
  * @param {(u) => boolean} o.isGunner
  * @param {object} [o.fogOfWar]
  */
-export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = null }) {
+export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = null, emplacements = () => [] }) {
   const P = MG_TEAM;
   const near = [];
-  const gunners = () => units.list.filter((u) => u.alive && isGunner(u));
+  // EMPLACED GUNS (the MG nest, algStructures `arcGun`): always set up, their facing where they
+  // were built — the same arc, sweep and slow swing, never packed.
+  const gunners = () => [...units.list.filter((u) => u.alive && isGunner(u)), ...emplacements().filter((s) => s.alive && s.arcGun)];
 
   /** The nearest enemy within reach (no arc), or null. */
   function nearestEnemy(u, reach) {
@@ -131,6 +133,11 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
           }
           u.arc = { facing: st.facing, half: P.half };
           faceArc(u, st);
+          // THE CREW lies down with the gun (CoH): his squad mates standing by him, not moving.
+          for (const m of u.squad?.members ?? []) {
+            if (m === u || m.isMoving || m.inside) continue;
+            if (Math.hypot(m.position.x - u.position.x, m.position.z - u.position.z) < 6) m.posture = "prone";
+          }
           // The sweep, while it is firing at someone in reach.
           const tg = u.target;
           if (u.deploy === 1 && tg?.alive && Math.hypot(tg.position.x - u.position.x, tg.position.z - u.position.z) <= u.range) {
@@ -171,7 +178,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
   // ── POINT THE ARC (O): the selected gunners face where you click ──────────
   const dom = app.renderer.domElement;
   let aiming = null;   // the gunners, while the cursor waits for a click
-  const selectedGunners = (sel = selection.selected) => (sel ?? []).filter((u) => u.alive && u.team === "player" && isGunner(u));
+  const selectedGunners = (sel = selection.selected) => (sel ?? []).filter((u) => u.alive && u.team === "player" && (u.arcGun || isGunner(u)));
   function ability(sel) {
     const g = selectedGunners(sel);
     if (!g.length) return null;

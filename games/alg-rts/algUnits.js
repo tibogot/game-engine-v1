@@ -502,7 +502,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         // The MORTAR PIT: an illumination flare at night (algFlares.js).
         // and the BARRAGE (algBarrage.js), day or night.
         // The POST: the AIR STRIKE call-in (algAirStrike.js).
-        : [barrage?.ability(sel), flares?.ability(sel), airStrike?.ability(sel)].filter(Boolean)),
+        // The MG NEST: point its arc (algMgTeam.js).
+        : [barrage?.ability(sel), flares?.ability(sel), airStrike?.ability(sel), mgTeams?.ability(sel)].filter(Boolean)),
     onAbility: (key, sel) => {
       if (key === "cancelSite") build?.cancelSite(sel[0]);
       if (key === "cutWire") app.algWire?.orderCut(sel);
@@ -642,7 +643,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // MACHINE-GUN TEAMS (algMgTeam.js): the pièce FM's gunner and the FLN's FM gunners set up, fire
   // in an arc, pack up to move.
   mgTeams = createAlgMgTeams({ app, units, selection, fogOfWar,
-    isGunner: (u) => u.typeKey === "fmTeam" || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u) });
+    isGunner: (u) => u.typeKey === "fmTeam" || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u),
+    emplacements: () => structures.list });
   app.algMgTeams = mgTeams;
   app.algPosture = posture;
   // WRECKS (algWrecks.js): a destroyed vehicle stays, burnt, burning, as cover and an obstacle.
