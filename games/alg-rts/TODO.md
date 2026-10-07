@@ -6,6 +6,45 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## CoH AUDIT 2 — 2026-10-07 (you: "another audit to compare with CoH: textures, buildings,
+## environment, gameplay"). LOOKED AT in the game: the post, Dechra Tighanimine, Ksar el Hamra,
+## Mechta el Oued, the open fields at full zoom-out, a staged fight by the SAS post. Ranked by
+## what it does for the look / play ÷ the work. Perf: all ~0 ms unless said.
+1. [ ] **SHADOWS GO BLACK** (every view, worst at the mechtas and the ksar since the 16:00 sun):
+   the shaded side of a house and the ground in its shadow are near black — no sky fill. CoH's
+   shade keeps its detail (a cool, lighter fill). Fix: more sky/ambient in shade (Sky Pro's
+   ambient, or the shadow strength < 1). Hours, 0 ms. The single biggest look win.
+2. [ ] **BUILDINGS ARE CLEAN BOXES**: flat slab roofs, the same house repeated (the dechra reads as
+   a grid of one box), no weathering (no grime at the foot, streaks under sills and parapets, no
+   chipped plaster showing stone), no clutter on roofs and in lanes beyond a crate. CoH's houses
+   each read as one place. Fix in the kit (rtsAlgVillage / rtsMechta): per-house variety (heights,
+   setbacks, parapets, roof pieces: pots, laundry, firewood, a ladder, a terrace awning), the
+   atlas cells weathered (grime gradient up from the ground, streaks), plaster-loss patches.
+   Days; 0 ms (merged geometry, same atlas). Includes the parked "mechta house detail 2" and the
+   Aurès stone.
+3. [ ] **WHITES BLOW OUT**: a dechra roof and the post's walls read as pure white glare. The
+   whitewash albedo too high for the CoH grade — cap it (~0.7). Minutes.
+4. [ ] **THE THRESHING FLOORS ARE A BLURRY SMUDGE** (every village): a dark soft disc in the stone
+   ring. Give it a beaten-earth/flag texture (a ground splat) or drop the disc. An hour.
+5. [ ] **GREENS AND WATER TOO SATURATED** next to the desert: the oasis water bright cyan, the
+   grass vivid green — a different game's palette beside the ochre. Pull both toward the grade
+   (water darker/olive, grass drier). An hour.
+6. [x] **UNITS HARD TO FIND** (2026-10-07). Re-checked: the "missing" men of the staged fight were
+   off the bottom of the screen (my camera), and the x-ray works. What was really wrong: the men
+   are small khaki figures on green with nothing to find them by, and the enemy MG's arc painted a
+   solid red field over the SAS post. Done: UNIT MARKS (algUnitMarks.js) — a faint team ring
+   under every man on foot you can see (blue / red, not when selected or inside), one draw;
+   the MG arc DRAPED radially (it floated over the yard) and its fill a TINT (0.03 yours, 0.015
+   the enemy's: unlit, the scene exposure multiplies it — 0.05 read as ~40% red), the edge
+   carries it. The portraits' US helmets: gap list item 5.
+7. [x] **THE HUD EATS THE LEFT THIRD** (2026-10-07): objectives COLLAPSED to one line by default (the
+   objective at hand + the clock; click the header for the list, remembered); alerts 4 at most,
+   10 s (6 / 14 s); hints 12 s (24).
+8. [ ] **GAMEPLAY, still missing vs CoH**: building damage stages + collapse (gap list 2), crews
+   that bail out of a dead vehicle, DROPPED WEAPONS picked up (an FM off a dead FLN gunner),
+   squad UPGRADES (an FM for the section, a radio), DOCTRINES / commander choices; the voices.
+   Done since audit 1: cover at the cursor, MG arcs, armour by facing, sniper, sabotage, tunnels.
+
 ## THE GAP TO A AAA RTS (CoH) — 2026-10-07 (you: "keep this list so we remember it")
 
 The systems are close to CoH (VPs, 3 resources, squads, cover, garrisons, suppression, veterancy,

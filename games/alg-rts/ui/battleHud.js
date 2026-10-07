@@ -78,6 +78,15 @@ const CSS = `
 #alg-obj .o.done .m { background: var(--hud-olive); border-color: var(--hud-olive); }
 #alg-obj .o.bad .m { background: var(--hud-red); border-color: var(--hud-red); }
 #alg-obj .sub { color: var(--hud-dim); font-size: 11px; }
+/* COLLAPSED (CoH audit 2, 2026-10-07: the HUD ate the left third of the map): the header and
+   the objective at hand on one line; click the header for the list. */
+#alg-obj .hd { cursor: pointer; user-select: none; }
+#alg-obj .hd .l { font-style: normal; } #alg-obj .hd .tw { font-style: normal; color: var(--hud-dim); margin-right: 5px; letter-spacing: 0; }
+#alg-obj.closed { width: auto; max-width: 300px; padding: 5px 10px 6px; }
+#alg-obj.closed .o { display: none; }
+#alg-obj.closed .o.now { display: flex; }
+#alg-obj.closed .o.now .sub { display: none; }
+#alg-obj.closed .hd { margin-bottom: 2px; }
 
 .alg-vmark .flag, .alg-vmark .name { pointer-events: auto; cursor: help; }
 #alg-vtip {
@@ -192,7 +201,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
   document.body.appendChild(feed);
   const alerts = [];   // { node, x, z, t0 }
   let latest = null;
-  function alert(text, { x, z, kind = "", time = 0, life = 14, icon = null } = {}) {
+  function alert(text, { x, z, kind = "", time = 0, life = 10, icon = null } = {}) {
     const node = document.createElement("div");
     node.className = `al ${kind}${icon ? " has-ic" : ""}`;
     // CoH's alert pictures (ui/icons.js alert*), the kind's colour.
@@ -205,7 +214,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     feed.appendChild(node);
     alerts.push(a);
     if (x != null) latest = a;
-    while (alerts.length > 6) alerts.shift().node.remove();
+    while (alerts.length > 4) alerts.shift().node.remove();   // (6 stacked up to the objectives)
   }
   function ageAlerts(now) {
     for (let i = alerts.length - 1; i >= 0; i--) {
@@ -219,13 +228,26 @@ export function createBattleHud({ camera, canvas, onJump }) {
   obj.id = "alg-obj";
   document.body.appendChild(obj);
   let objKey = "";
+  // Collapsed by default (one line), remembered.
+  const OBJ_STORE = "algrts.objectives.open";
+  let objOpen = false;
+  try { objOpen = localStorage.getItem(OBJ_STORE) === "1"; } catch { /* private window */ }
+  obj.classList.toggle("closed", !objOpen);
   /** [{ text, sub, state: ""|"done"|"bad", x, z }] — rewritten only when it changes. */
   function setObjectives(list, headRight = "") {
     const key = JSON.stringify([list, headRight]);
     if (key === objKey) return;
     objKey = key;
-    obj.innerHTML = `<div class="hd">Objectifs<span>${headRight}</span></div>` + list.map((o, i) =>
-      `<div class="o ${o.state ?? ""}${o.x != null ? " go" : ""}" data-i="${i}"><div class="m"></div><div><div class="t">${o.text}</div>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></div>`).join("");
+    // The objective at hand (shown when collapsed): the first one failing, else the first not done.
+    const now = Math.max(0, list.findIndex((o) => o.state === "bad") >= 0 ? list.findIndex((o) => o.state === "bad") : list.findIndex((o) => o.state !== "done"));
+    obj.innerHTML = `<div class="hd"><i class="l"><i class="tw">${objOpen ? "▾" : "▸"}</i>Objectifs</i><span>${headRight}</span></div>` + list.map((o, i) =>
+      `<div class="o ${o.state ?? ""}${o.x != null ? " go" : ""}${i === now ? " now" : ""}" data-i="${i}"><div class="m"></div><div><div class="t">${o.text}</div>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></div>`).join("");
+    obj.querySelector(".hd").addEventListener("click", () => {
+      objOpen = !objOpen;
+      try { localStorage.setItem(OBJ_STORE, objOpen ? "1" : "0"); } catch { /* ignore */ }
+      obj.classList.toggle("closed", !objOpen);
+      obj.querySelector(".hd .tw").textContent = objOpen ? "▾" : "▸";
+    });
     obj.querySelectorAll(".o.go").forEach((n) => {
       const o = list[+n.dataset.i];
       n.addEventListener("click", () => onJump(o.x, o.z));

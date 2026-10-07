@@ -215,13 +215,21 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
 
   // ── THE ARC ON THE GROUND: a draped wedge per shown gun ───────────────────
   const N = P.wedgeSegs;
+  // RADIAL rings too (2026-10-07, the audit: a 42 m wedge sampled only at its two ends floated
+  // over the dips and painted across the SAS post's yard and walls): DRAPED every ~6 m out.
+  const M = 7;
   const makeWedge = () => {
     const g = new THREE.BufferGeometry();
-    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array((N + 1) * 2 * 3), 3));
+    g.setAttribute("position", new THREE.BufferAttribute(new Float32Array((N + 1) * (M + 1) * 3), 3));
     const idx = [];
-    for (let i = 0; i < N; i++) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+    for (let i = 0; i < N; i++) for (let j = 0; j < M; j++) {
+      const a = i * (M + 1) + j, b = a + M + 1;
+      idx.push(a, a + 1, b, a + 1, b + 1, b);
+    }
     g.setIndex(idx);
-    const fill = new THREE.Mesh(g, new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+    const fillMat = new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.16, depthWrite: false, side: THREE.DoubleSide, fog: false });
+    fillMat.forceSinglePass = true;   // flat on the ground: the back-face pass only doubled it
+    const fill = new THREE.Mesh(g, fillMat);
     const edgeG = new THREE.BufferGeometry();
     edgeG.setAttribute("position", new THREE.BufferAttribute(new Float32Array((N + 3) * 3), 3));
     const edge = new THREE.Line(edgeG, new THREE.LineBasicNodeMaterial({ transparent: true, opacity: 0.85, depthWrite: false, fog: false }));
@@ -233,14 +241,16 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
   };
   const pool = [];
   const H = (x, z) => (app.getWorldHeight?.(x, z) ?? 0) + 0.35;
-  function drawWedge(w, u, st, colour, alpha) {
+  function drawWedge(w, u, st, colour, alpha, fillK = 0.16) {
     const pos = w.fill.geometry.attributes.position, e = w.edge.geometry.attributes.position;
     const r0 = 1.6, r1 = u.range, x0 = u.position.x, z0 = u.position.z;
     for (let i = 0; i <= N; i++) {
       const a = st.facing - P.half + (2 * P.half * i) / N, sx = Math.sin(a), cz = Math.cos(a);
-      const ax = x0 + sx * r0, az = z0 + cz * r0, bx = x0 + sx * r1, bz = z0 + cz * r1;
-      pos.setXYZ(i * 2, ax, H(ax, az), az);
-      pos.setXYZ(i * 2 + 1, bx, H(bx, bz), bz);
+      for (let j = 0; j <= M; j++) {
+        const r = r0 + (r1 - r0) * (j / M), x = x0 + sx * r, z = z0 + cz * r;
+        pos.setXYZ(i * (M + 1) + j, x, H(x, z), z);
+      }
+      const bx = x0 + sx * r1, bz = z0 + cz * r1;
       e.setXYZ(i + 1, bx, H(bx, bz), bz);
     }
     const a0 = st.facing - P.half, a1 = st.facing + P.half;
@@ -248,7 +258,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
     e.setXYZ(N + 2, x0 + Math.sin(a1) * r0, H(x0 + Math.sin(a1) * r0, z0 + Math.cos(a1) * r0), z0 + Math.cos(a1) * r0);
     pos.needsUpdate = e.needsUpdate = true;
     w.fill.material.color.set(colour); w.edge.material.color.set(colour);
-    w.fill.material.opacity = 0.16 * alpha; w.edge.material.opacity = 0.85 * alpha;
+    w.fill.material.opacity = fillK * alpha; w.edge.material.opacity = 0.85 * alpha;
     w.fill.visible = w.edge.visible = true;
   }
 
@@ -270,9 +280,14 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
         if (fogOfWar?.enabled && !fogOfWar.isVisible(u.position.x, u.position.z)) continue;
         colour = 0xff5a3c; alpha = 0.7;
       }
+      // THE FILL IS A TINT, the edge carries the arc (2026-10-07, the audit: the enemy's read as a
+      // solid red field over the SAS post). The fill is unlit, so the scene's EXPOSURE scales it
+      // many times before it blends: 0.05 read as ~40% red, 0 → none, 0.012 → a light warm tint
+      // (measured in the game, Sky Pro day). Yours a little stronger: you placed it.
+      const fillK = u.team === "player" ? 0.03 : 0.015;
       const show = st.state === "packed" ? { ...st, facing: st.want } : st;
       const w = pool[k] ?? (pool[k] = makeWedge());
-      drawWedge(w, u, show, colour, alpha);
+      drawWedge(w, u, show, colour, alpha, fillK);
       k++;
     }
     for (let i = k; i < pool.length; i++) pool[i].fill.visible = pool[i].edge.visible = false;

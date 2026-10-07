@@ -328,7 +328,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (told.has("bandSeen")) advise("band", "Une bande du FLN ne se bat pas à découvert : elle attend dans les broussailles et frappe ceux qui s'approchent. Éclairez avec la jeep, amenez le FM, restez groupés.");
     if ((tipGap -= dt) > 0 || !tips.length) return;
     tipGap = 14;
-    hud.alert(tips.shift(), { kind: "tip", life: 24 });
+    hud.alert(tips.shift(), { kind: "tip", life: 12 });   // (24: a hint sat over the map half a minute)
   }
   let started = false, startAt = 0;
 

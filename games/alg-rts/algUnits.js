@@ -18,6 +18,7 @@ import { createSimClock } from "../shared-rts/simClock.js";
 import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { createAlgSnipers } from "./algSniper.js";
+import { createAlgUnitMarks } from "./algUnitMarks.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { createAlgSquads, SQUADS } from "./algSquads.js";
 import { createAlgLastSeen } from "./algLastSeen.js";
@@ -714,6 +715,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
+  // UNIT MARKS (algUnitMarks.js): a faint team ring under every man you can see. ?marks=0 = without.
+  const unitMarks = new URLSearchParams(location.search).get("marks") !== "0" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
+  app.algUnitMarks = unitMarks;
   const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
@@ -731,6 +735,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     airStrike.frame();
     coverCursor?.frame();
     mgTeams?.frame();
+    unitMarks?.frame();
     fogOfWar.update(dt);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];
