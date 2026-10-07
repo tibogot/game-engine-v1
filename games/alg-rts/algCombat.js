@@ -87,9 +87,12 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // man going down (the dust puff) does not. The birds come after combat
   // (algGame.js), so they are looked up at the moment of the blast.
   const explosion = fx.explosion;
-  fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); app.algDamage?.blast(x, z, opts?.size ?? 10); } };
+  fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); app.algDamage?.blast(x, z, opts?.size ?? 10); app.algAnimals?.hurt(x, z, (opts?.size ?? 10) * 0.5, 70); } };
   const grenade = fx.grenade;
-  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); app.algDamage?.blast(x, z, 6); };
+  fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); app.algDamage?.blast(x, z, 6); app.algAnimals?.hurt(x, z, 4, 70); };
+  // A STRAY ROUND landing (projectiles' misses): an animal standing there is hit (ANIMALS DIE).
+  const dirt = fx.dirt;
+  if (dirt) fx.dirt = (x, y, z, size) => { dirt(x, y, z, size); app.algAnimals?.hurt(x, z, 0.8, 9); };
   // AT NIGHT the shots, blasts and fires light what is round them (algLights.js: the engine's
   // local lights, nothing by day). ?combatlights=0 = without.
   if (new URLSearchParams(location.search).get("combatlights") !== "0") app.algLights = createAlgLights({ app, fx, fire });

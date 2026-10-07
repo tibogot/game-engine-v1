@@ -1305,7 +1305,14 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       hatch, turret popped off and tumbling, burning hulk left), a building
       or sangar collapsing in chunks with dust (rubble left, its footprint
       opened on the nav grid). Ties into BATTLE DAMAGE on buildings below.
-- [ ] **ANIMALS DIE** (you, 2026-10-03: "they have death animations, we
+- [x] **ANIMALS DIE** — DONE 2026-10-07 (shared wildHerd `hurt` / `scare` / `onDeath`, opt-in;
+      alg: algGame `app.algAnimals`, fed by algCombat's explosion / grenade / stray-round (fx.dirt)
+      hooks and the live fires, 2/s). hp by size; the Death clip once, held on its last frame, the
+      body stays (the same draw: no cost); a smaller blood pool than a man's; the rest within 45 m
+      bolt (the working donkeys too). Hens (no death clip) just go. MEASURED: one 7 m shell at the
+      edge of a 14-animal flock killed 7-8; a goat dies to ~2 stray rounds; a hit test = 7.7 µs
+      for all 185 animals. Later: a village whose flock you killed turns against you.
+- [x] (was) **ANIMALS DIE** (you, 2026-10-03: "they have death animations, we
       have blood and splashes"): the herds' animals take hits — stray
       bullets, grenades, shells, napalm, fire — play their death clip, bleed
       (the shared bloodField pools + spray, as the men), the body stays;

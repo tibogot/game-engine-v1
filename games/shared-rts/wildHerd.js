@@ -9,7 +9,7 @@
 import * as THREE from "three";
 import { createCrowdField } from "./crowdSkinning.js";
 
-const CLIP_NAMES = { eat: "Eating", idle: "Idle", look: "Idle_2", low: "Idle_Headlow", walk: "Walk", run: "Gallop" };
+const CLIP_NAMES = { eat: "Eating", idle: "Idle", look: "Idle_2", low: "Idle_Headlow", walk: "Walk", run: "Gallop", death: "Death" };
 
 /**
  * One kind of animal as a crowd: `spots` [{ x, z, height }] (height in metres,
@@ -28,8 +28,16 @@ const CLIP_NAMES = { eat: "Eating", idle: "Idle", look: "Idle_2", low: "Idle_Hea
  * round what is in between). With
  * `follow: "tight"` (a donkey on a lead) it keeps walking at the home while
  * the anchor moves, and only grazes when it stops.
+ *
+ * ANIMALS DIE (alg-rts, 2026-10-07 — you: "they have death animations, we have blood"): `hurt(x, z,
+ * radius, damage)` from the game (a blast, a stray round, fire). Nobody aims at them. Each has
+ * `hp` (by its size: `hpPerMetre` x its height). At 0 it plays its Death clip ONCE and lies there
+ * for good (the body is the same draw it always was — no cost); `onDeath(h)` lets the game bleed
+ * it. Any hit — killed or not — makes the animals within `scareRadius` bolt away from it (also
+ * the working ones, which never run from soldiers). A kind with no death clip (the hens) simply
+ * goes. Dead animals do nothing else.
  */
-export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], walkSpeed = 0.9, runSpeed = 7, name = "Wild", bolt = true, roam = 20, clipNames = CLIP_NAMES } = {}) {
+export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], walkSpeed = 0.9, runSpeed = 7, name = "Wild", bolt = true, roam = 20, clipNames = CLIP_NAMES, hpPerMetre = 18, scareRadius = 45, onDeath = null } = {}) {
   if (!spots.length) return null;
   const box = new THREE.Box3().setFromObject(tpl.root);
   const baseH = Math.max(0.01, box.max.y - box.min.y);
@@ -52,7 +60,10 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
     // `anyGround`: goes wherever its lead goes (a pack animal led by men over
     // ground its herd's canStand refuses — alg-rts' FLN mule train).
     anyGround: !!s.anyGround,
+    hp: Math.max(4, hpPerMetre * s.height),
   }));
+  const deathDur = clips.death?.duration ?? 0;
+  let onDeathCb = onDeath;
   /** An anchored animal's home: its place in the anchor's (moving) frame. */
   const homeFromAnchor = (h) => {
     const A = h.anchor, c = Math.cos(A.yaw ?? 0), s = Math.sin(A.yaw ?? 0);
@@ -109,7 +120,40 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
   // drawn or shadowed. Its walk/graze state still advances.
   const frustum = new THREE.Frustum(), viewProj = new THREE.Matrix4(), sphere = new THREE.Sphere();
   let alarmT = 0;
+  /** Bolt from a point (a blast, a shot): every living animal within `r`, away from it. */
+  function scare(x, z, r = scareRadius) {
+    for (const h of herd) {
+      if (h.state === "dead" || h.state === "run") continue;
+      if ((h.x - x) ** 2 + (h.z - z) ** 2 > r * r) continue;
+      const flee = pickFlight(h, { x, z });
+      if (flee) { h.target = flee; h.speed = runSpeed * (0.9 + rnd() * 0.2); go(h, "run", "run", 14); }
+    }
+  }
   return {
+    /** A hit at (x, z): `damage` to every animal within `radius` (falling off to half at its edge). Returns how many died. */
+    hurt(x, z, radius, damage) {
+      let killed = 0, any = false;
+      for (const h of herd) {
+        if (h.state === "dead") continue;
+        const d = Math.hypot(h.x - x, h.z - z);
+        if (d > radius + 0.6 * h.scale) continue;
+        any = true;
+        h.hp -= damage * (1 - 0.5 * Math.min(1, d / Math.max(0.1, radius)));
+        if (h.hp > 0) continue;
+        killed++;
+        h.state = "dead"; h.timer = 1e9; h.target = null; h.vel = 0;
+        if (deathDur > 0) { h.prev = h.cur; h.tPrev = h.tCur; h.cur = "death"; h.tCur = 0; h.fade = 0; h.rate = 1; }
+        else h.gone = true;
+        onDeathCb?.(h);
+      }
+      if (any || radius > 3) scare(x, z);
+      return killed;
+    },
+    scare,
+    /** The game's hook for a death (blood): (h) => …, h.x / h.z / h.yaw / h.scale. */
+    set onDeath(fn) { onDeathCb = fn; },
+    /** Living animals of this herd. */
+    get alive() { return herd.reduce((n, h) => n + (h.state === "dead" ? 0 : 1), 0); },
     mesh: field.mesh, count: spots.length,
     get herd() { return herd.map((h) => ({ state: h.state, at: [+h.x.toFixed(1), +h.z.toFixed(1)] })); },
     /** Dev: the animals' own records (state, target, home, timer…). */
@@ -125,7 +169,7 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
         alarmT = 0.3;
         const T = threats();
         for (const h of herd) {
-          if (h.state === "run") continue;
+          if (h.state === "run" || h.state === "dead") continue;
           for (const t of T) {
             if ((t.x - h.x) ** 2 + (t.z - h.z) ** 2 < 35 * 35) { near = t; break; }
           }
@@ -136,6 +180,21 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
       if (cam) frustum.setFromProjectionMatrix(viewProj.multiplyMatrices(cam.projectionMatrix, cam.matrixWorldInverse));
       field.begin();
       for (const h of herd) {
+        if (h.state === "dead") {
+          if (h.gone) continue;
+          // Its death, once, then held on the last frame.
+          h.tCur = Math.min(deathDur - 0.02, h.tCur + dt);
+          h.fade = Math.min(1, h.fade + dt / 0.2);
+          if (cam) {
+            sphere.center.set(h.x, h.y + baseH * h.scale * 0.5, h.z);
+            sphere.radius = baseH * h.scale + 12;
+            if (!frustum.intersectsSphere(sphere)) continue;
+          }
+          p.set(h.x, h.y, h.z); q.setFromAxisAngle(up, h.yaw);
+          m.compose(p, q, sc.setScalar(h.scale));
+          field.addPose(m, h.prev, h.tPrev, h.cur, h.tCur, h.fade);
+          continue;
+        }
         // One of them spooked: its group bolts (whoever is within 60 m of the
         // threat — not every deer of the kind on the map), each its own way.
         // (A WALKING deer with no clear flight kept its walk target: assigning

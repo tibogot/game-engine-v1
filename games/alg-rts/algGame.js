@@ -486,7 +486,26 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("hens") !== "0") {
     try {
       app.algHens = await createAlgHens(app, { units: app.algUnits?.units ?? null, showroom: app.showroom ?? {}, navGrid: app.navGrid ?? null });
-    } catch (e) { console.warn("[alg hens] failed:", e); }
+
+  // ANIMALS DIE (2026-10-07; shared wildHerd `hurt`): blasts, stray rounds and fire hit the herds
+  // and the hens (algCombat feeds it); a dead one bleeds and lies there, the rest bolt.
+  {
+    const all = () => [...(app.algHerds?.herds ?? []), ...(app.algHens?.herds ?? [])].filter(Boolean);
+    // (a sheep's pool ~0.45 of a man's)
+    for (const h of all()) h.onDeath = (a) => { app.algCombat?.blood.pool(a.x, a.z, a.yaw, Math.min(1, 0.3 + a.scale * 0.6)); app.algCombat?.blood.hit({ x: a.x, y: a.y + 0.6, z: a.z }); };
+    app.algAnimals = {
+      hurt(x, z, radius, damage) { let n = 0; for (const h of all()) n += h.hurt?.(x, z, radius, damage) ?? 0; return n; },
+      get alive() { return all().reduce((n, h) => n + (h.alive ?? 0), 0); },
+    };
+    // FIRE burns them too: twice a second, every live fire hurts what stands in it.
+    let fireT = 0;
+    app.addPreRenderHook?.((dt) => {
+      if ((fireT -= dt) > 0) return;
+      fireT = 0.5;
+      const F = app.algCombat?.fire, now = F?.now ?? 0;
+      for (const f of F?.fires ?? []) if (f.end > now) app.algAnimals.hurt(f.x, f.z, f.radius, 6);
+    });
+  }    } catch (e) { console.warn("[alg hens] failed:", e); }
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {
