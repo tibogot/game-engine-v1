@@ -133,7 +133,15 @@
       arena.init?.().catch(showErr);                          // the farm builds its sheep in the background
 
       // ── Horse ────────────────────────────────────────────────────────────────
-      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? 1.75) }   /* ?hh= horse height for tests; 1.75: the irons hang low enough (~0.55 m) to get on like the reference with the riding-length strap */);
+      // ?horse=armored: the armoured horse model put on this skeleton (horseBody.js) — real size, ~2.0 m to the ears
+      const ARMORED = new URLSearchParams(location.search).get("horse") === "armored";
+      let armorScene = null;
+      if (ARMORED) {
+        const { initGlbLoaderRenderer, getSharedGltfLoader } = await import("../v2/core/foliage/glbLoader.js");
+        initGlbLoaderRenderer(renderer);                   // its textures are KTX2
+        armorScene = (await getSharedGltfLoader().loadAsync("/models/armored_horse_compressed.glb")).scene;
+      }
+      const horse = await loadHorse("/models/Horse by Quaternius -_compressed.glb", { height: +(new URLSearchParams(location.search).get("hh") ?? (ARMORED ? 2.02 : 1.75)), body: armorScene }   /* ?hh= horse height for tests; 1.75: the irons hang low enough (~0.55 m) to get on like the reference with the riding-length strap */);
       scene.add(horse.rig);
       // Coat: the pack exports the horse 40% metallic, which renders dark and
       // muddy without reflections — make it a matte coat, brighter chestnut;
@@ -141,7 +149,11 @@
       const coat = { color: "#b8743d" };
       // its 8 parts (one per material, each with its own copy of the skeleton) → one skinned mesh,
       // colour per vertex; merged BEFORE the saddle is fitted (it raycasts the horse's meshes)
-      const horseSkin = new URLSearchParams(location.search).has("nomerge") ? null : mergeSkinned(horse.model, { roughness: 0.78, metalness: 0, flatShading: true });
+      if (ARMORED) {                                       // its reins + stirrups out (ours replace them), rigid plates / saddle / bridle
+        const { trimArmorPieces } = await import("./horse-lab/horseBody.js");
+        console.log("[horse-lab] armoured pieces", trimArmorPieces(horse));
+      }
+      const horseSkin = ARMORED || new URLSearchParams(location.search).has("nomerge") ? null : mergeSkinned(horse.model, { roughness: 0.78, metalness: 0, flatShading: true });
       function applyCoat() {
         const c = new THREE.Color(coat.color);
         setZoneColor(horseSkin, "Main", c);
@@ -160,6 +172,7 @@
       addHat(rider);                                       // cowboy hat on the head bone
       // the saddle, built on this horse's back (tack.js)
       const tack = new Tack(horse, rider);
+      if (ARMORED) tack.setVisible(false);                  // the model has its own saddle (our saddle still gives the rider its seat)
       mergeRigid(tack.group, { roughness: 0.8, flatShading: true, side: THREE.DoubleSide });   // saddle parts → one mesh on its bone
       if (rider.hat) mergeRigid(rider.hat, { roughness: 0.85, flatShading: true });           // hat parts → one
       console.log("[horse-lab] saddle fit", tack.fit);

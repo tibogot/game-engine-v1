@@ -15,6 +15,7 @@
 // moment is measured, and the incoming clip starts at the same point of the
 // stride as the outgoing one, so the crossfade never makes a leg jump.
 import * as THREE from "three";
+import { fitBodyToRig } from "./horseBody.js";
 import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 
 const V3 = THREE.Vector3;
@@ -53,6 +54,10 @@ export const HP = {               // tunables (the lab GUI edits these)
                                   // (the rest of the stride is played at whatever speed fits: 0.8×–2.2×)
   jumpLeadIn: 1.7,                // playback speed of the jump clip's 0.5 s run-up (snappier take-off)
   jumpHeight: 0.5,                // m of EXTRA arc on top of the clip's own ~1 m jump (hooves clear ~1.5 m: fences, platform A)
+  tailSway: 1,                    // tail inertia (0 = as keyed): how much of the spring's lag shows
+  tailStiff: 55,                  // its spring (1/s²): lower = slower, looser swing
+  tailDamp: 0.55,                 // × critical damping: < 1 swings a little before settling
+  jumpMaxTop: 1.5,                // m: the highest obstacle any horse takes on (above: a refusal)
   jumpBoostMax: 0.75,             // m more arc a jump may add for the obstacle in front of it (fitJump): a 1.4 m fence needs ~0.6
   jumpMargin: 0.15,               // m every hoof passes above the obstacle's top (the baked clearance reads ~7 cm high vs the real hooves)
   jumpLatest: 1.7,                // m (+ 0.12 s of travel): a queued jump still waiting for its stride takes off NOW
@@ -280,7 +285,9 @@ export function poseDiff(clipA, tA, clipB, tB) {
   return s * 180 / Math.PI;
 }
 
-export async function loadHorse(url, { height = 2.15 } = {}) {
+// body: another horse model (a static glTF scene) to put on this skeleton —
+// horseBody.js fits the skeleton and the clips to it before anything is measured.
+export async function loadHorse(url, { height = 2.15, body = null, rigid } = {}) {
   const gltf = await getSharedGltfLoader().loadAsync(encodeURI(url));
   const model = gltf.scene;
   // The GLB carries every clip twice (plain + "AnimalArmature|…"); keep the plain ones.
@@ -311,6 +318,8 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
   const s = height / (box0.max.y - box0.min.y);
   model.scale.setScalar(s);
   rig.updateMatrixWorld(true);
+  let bodyFit = null;
+  if (body) bodyFit = fitBodyToRig({ model, clips, bodyScene: body, rigid });
   const fr = wp("FrontUpperLegL"), frR = wp("FrontUpperLegR"), bk = wp("BackUpperLegL");
   model.position.x -= (fr.x + frR.x) / 2;
   model.position.z -= (fr.z + bk.z) / 2;
@@ -408,7 +417,7 @@ export async function loadHorse(url, { height = 2.15 } = {}) {
     rig.updateMatrixWorld(true);
   }
 
-  return { rig, model, clips, bone, gait, halfLen, halfWid, foot, jump, tips, height, scale: s };
+  return { rig, model, clips, bone, gait, halfLen, halfWid, foot, jump, tips, height, scale: s, bodyFit };
 }
 
 // ── Controller ───────────────────────────────────────────────────────────────
@@ -438,7 +447,9 @@ export class HorseController {
     this.rearT = -1; this.rearA = 0; this.rearPitch = 0; this.rearDy = 0;
     this.rearFold = 0; this.rearPaw = 0; this.rearToss = 0; this.landT = -1;
     this.rearLeg = REAR_LEGS.map(() => ({ A: 0, fold: 0, paw: 0, toss: 0 }));
-    this.touched = [...this.legs.flatMap((g) => [g.u, g.l, g.cannon, g.ik].filter(Boolean)), ...this.necks, this.headB].map((b) => ({ b, p: b.position.clone(), q: b.quaternion.clone() }));
+    // the tail: a spring on each bone (tailSway) — restored every frame like the IK bones
+    this.tailB = [2, 3, 4, 5, 6, 7].map((i) => h.bone(`Tail${i}`)).filter(Boolean);
+    this.touched = [...this.legs.flatMap((g) => [g.u, g.l, g.cannon, g.ik].filter(Boolean)), ...this.necks, this.headB, ...this.tailB].map((b) => ({ b, p: b.position.clone(), q: b.quaternion.clone() }));
     this.bodyOff = 0;
     this.switchTo("Idle", 0, true);
   }
@@ -729,7 +740,9 @@ export class HorseController {
     if (this.peakFront === undefined) { const b = this.jumpBoost; this.jumpBoost = 0; let m = 0; for (let t = this.h.jump.t0; t <= this.h.jump.t1; t += 0.01) m = Math.max(m, this.clearanceAt(t, "front")); this.peakFront = m; this.jumpBoost = b; }
     // anything up to what the arc can be raised to (fitJump adds the height a
     // given obstacle needs, up to HP.jumpBoostMax)
-    return o.top > 0.35 && o.top < this.peakFront + HP.jumpBoostMax * 0.3;    // (the arc only rises by part of its boost where the hooves cross; measured: 1.4 m clears, 1.6 m refuses)
+    // (the arc only rises by part of its boost where the hooves cross; measured: 1.4 m clears, 1.6 m refuses) —
+    // and never above HP.jumpMaxTop whatever the horse: a bigger body (the armoured one) jumped 1.6 m
+    return o.top > 0.35 && o.top < Math.min(HP.jumpMaxTop, this.peakFront + HP.jumpBoostMax * 0.3);
   }
 
   // At take-off: raise this jump's arc as much as THIS obstacle needs, so the
@@ -1401,6 +1414,40 @@ export class HorseController {
     else this.bodyOff = 0;
     r.updateMatrixWorld(true);
     this.levelNeck();
+    this.tailSway(dt);
+  }
+
+  // TAIL INERTIA: each tail bone follows its animated pose through a spring
+  // (world rotation, slightly under-damped), lagging more toward the tip — it
+  // trails a turn, swings on with each stride, settles after a stop. Played as
+  // keyed the tail moved rigidly with the horse ("stiff").
+  tailSway(dt) {
+    if (!this.tailB.length || !(HP.tailSway > 0) || dt <= 0) return;
+    dt = Math.min(dt, 1 / 30);
+    const k = HP.tailStiff, c = 2 * Math.sqrt(k) * HP.tailDamp;
+    this.tailS ??= this.tailB.map(() => ({ q: null, w: new V3() }));
+    const qt = new THREE.Quaternion(), qp = new THREE.Quaternion(), dq = new THREE.Quaternion(), e = new V3();
+    this.tailB.forEach((b, i) => {
+      const st = this.tailS[i];
+      b.parent.updateMatrixWorld(true);
+      b.parent.getWorldQuaternion(qp);
+      qt.copy(qp).multiply(b.quaternion);                    // the animated world rotation (under its already-swayed parent)
+      if (!st.q) { st.q = qt.clone(); return; }
+      // spring: angular error target ← current, as a rotation vector
+      dq.copy(qt).multiply(st.q.clone().invert());
+      if (dq.w < 0) dq.set(-dq.x, -dq.y, -dq.z, -dq.w);
+      const ang = 2 * Math.acos(Math.min(1, dq.w)), sn = Math.sqrt(Math.max(1e-12, 1 - dq.w * dq.w));
+      e.set(dq.x / sn, dq.y / sn, dq.z / sn).multiplyScalar(ang);
+      st.w.addScaledVector(e, k * dt).multiplyScalar(Math.max(0, 1 - c * dt));
+      const wl = st.w.length();
+      if (wl > 1e-6) st.q.premultiply(new THREE.Quaternion().setFromAxisAngle(st.w.clone().divideScalar(wl), wl * dt)).normalize();
+      if (ang > 1.2) st.q.slerp(qt, 0.5);                   // never far off (a teleport, a blend)
+      // how much of the lag shows: more toward the tip
+      const lag = HP.tailSway * (0.25 + 0.6 * i / Math.max(1, this.tailB.length - 1));
+      const out = qt.clone().slerp(st.q, lag);
+      b.quaternion.copy(qp.invert().multiply(out));
+      b.updateMatrixWorld(true);
+    });
   }
 
   // The hooves are skinned to IK bones that are NOT children of the legs. The
