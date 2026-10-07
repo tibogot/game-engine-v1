@@ -115,6 +115,10 @@ const P = {
   cacheFirst: 120,            // s before the FLN first checks for a lost cache
   cacheEvery: 45,             // s between its checks
   cacheMin: 2,                // it keeps at least this many (or as many as it started with)
+  // THE TUNNELS (2026-10-07): new refuges dug near the villages it holds, the nearest the post
+  // first, up to refugeMax standing; a band of men gone to ground comes out of the refuge
+  // nearest the French it knows of (none within refugeSafe m).
+  refugeFirst: 300, refugeEvery: 150, refugeMax: 4, refugeApart: 90, refugeSafe: 60,
   // ── 2026-10-02: an enemy that fights back ──
   fireBackAt: 0.1,            // suppression that counts as "under fire" (rifles add 0.12 a round)
   strikeMax: 50,              // s a strike may run while the band is not losing
@@ -512,6 +516,62 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     cacheWhy = "no spot round the held villages";
   }
 
+  /**
+   * THE TUNNELS (2026-10-07): every P.refugeEvery s, while fewer than P.refugeMax refuges stand,
+   * a cell in a village the FLN holds digs a new one 18-40 m out, in the best cover — the held
+   * village NEAREST the post first (the network creeps toward the French), P.refugeApart from
+   * any other refuge. Hidden until seen, built or not (algBuild / algStructures).
+   */
+  let refugeT = P.refugeFirst, refugeSite = null, refugeWhy = null;
+  function stepRefuges(dt, force = false) {
+    if (refugeSite) {
+      if (!refugeSite.done && refugeSite.alive) {
+        const fog = app.fogOfWar, seen = !fog?.enabled || fog.canSeeEntity?.(refugeSite);
+        if (seen) refugeSite.wasSeen = true;
+        refugeSite.mesh.visible = seen || !!refugeSite.wasSeen;
+        return;
+      }
+      refugeSite = null;
+    }
+    refugeT -= dt;
+    if (refugeT > 0 && !force) return;
+    refugeT = P.refugeEvery;
+    // Standing, and dug or being dug (a site placed a moment ago is not a structure yet).
+    const refuges = [...(app.algStructures?.list ?? []).filter((s) => s.typeKey === "refuge" && s.alive),
+      ...(app.algBuild?.sites ?? []).filter((s) => s.key === "refuge" && !s.done && s.alive)];
+    if (refuges.length >= P.refugeMax) { refugeWhy = "enough refuges"; return; }
+    const build = app.algBuild, aln = app.algEconomy?.aln;
+    if (!build || !aln) { refugeWhy = "no build"; return; }
+    if (!aln.canAfford(build.costOf("refuge"))) { refugeWhy = "ALN cannot afford it"; return; }
+    const held = (app.algEconomy?.points ?? []).filter((v) => v.owner === "enemy" && garrisonOf(v));
+    if (!held.length) { refugeWhy = "no village held with a cell"; return; }
+    held.sort((a, b) => dist(a.position, post) - dist(b.position, post));
+    for (const v of held) {
+      if (refuges.some((r) => dist(r.position, v.position) < P.refugeApart)) continue;
+      const men = alive(garrisonOf(v));
+      const spots = [];
+      for (let i = 0; i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2 + rand(-0.12, 0.12), r = rand(18, 40);
+        const x = v.position.x + Math.cos(a) * r, z = v.position.z + Math.sin(a) * r;
+        spots.push({ x, z, s: cover(x, z) + rand(0, 0.15) });
+      }
+      spots.sort((p, q) => q.s - p.s);
+      for (const p of spots) {
+        const yaw = rand(0, Math.PI * 2);
+        if (!build.survey("refuge", p.x, p.z, yaw).ok) continue;
+        refuges.push({ position: { x: p.x, z: p.z } });
+        build.place("refuge", p.x, p.z, yaw, men).then((site) => {
+          if (!site) return;
+          refugeSite = site;
+          site.mesh.visible = false;
+        });
+        refugeWhy = `digging one at ${v.name}`;
+        return;
+      }
+    }
+    refugeWhy = "no spot near the held villages";
+  }
+
   /** Orders the band to `to`, spread out a little (a loose file, not a knot). */
   function moveBand(b, to) {
     const m = alive(b);
@@ -538,8 +598,13 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     // none stands) — refuges keep the katiba close and cheap; destroy them.
     if (pool >= 3) {
       const k = Math.min(pool, n);
+      // THE TUNNELS: out of the refuge nearest the French it knows of (else nearest the post),
+      // never one with French at its mouth.
+      const known = knownFrench(), fr = french();
+      const focus = known.length ? centre(known) : post;
       const front = (app.algStructures?.list ?? []).filter((s) => s.typeKey === "refuge" && s.alive)
-        .map((s) => homeFor(s.position)).sort((a, b) => dist(a, post) - dist(b, post))[0] ?? cave.structure.rally;
+        .map((s) => homeFor(s.position)).filter((m) => !fr.some((u) => dist(u.position, m) < P.refugeSafe))
+        .sort((a, b) => dist(a, focus) - dist(b, focus))[0] ?? cave.structure.rally;
       for (let i = 0; i < k; i++) {
         const a = (i / k) * Math.PI * 2;
         units.spawn("moudjahid", front.x + Math.cos(a) * 3, front.z + Math.sin(a) * 3, { team: "enemy" });
@@ -1576,6 +1641,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       watchLookouts();
       stepConvoy(dt);
       stepCaches(dt);
+      stepRefuges(dt);
       // Twice a second: villages to defend, assaults to launch.
       defT -= dt;
       if (defT <= 0) { defT = 0.5; sendDefence(); }
@@ -1622,6 +1688,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** Dev: the cover route a band at `from` would walk to `to` ([] straight, null none) and the last one found. */
     coverRouteFor: (from, to) => coverRoute(from, to),
     get lastRoute() { return lastRoute; },
+    /** Dev: the refuge being dug (null: none), why the last try did not start one; dig now. */
+    get refugeSite() { return refugeSite; },
+    get refugeWhy() { return refugeWhy; },
+    refugeNow() { refugeT = 0; stepRefuges(0, true); return refugeWhy; },
     /** Dev: the cache being hidden now (null: none) and why the last try did not start one. */
     get cacheSite() { return cacheSite; },
     get cacheWhy() { return cacheWhy; },

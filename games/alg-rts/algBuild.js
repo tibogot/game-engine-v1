@@ -15,7 +15,7 @@
 // Game code: this game's buildings, prices and rules. The same flow in nam-rts
 // is nam's own (buildPlacement.js / buildings.js).
 import * as THREE from "three";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildRefuge, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { kitView } from "./showroom.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
@@ -42,6 +42,10 @@ export const BUILDS = {
   // when the French have found theirs (algAI.js) — each standing cache arms
   // two FM teams. Hidden from the French until seen, built or not.
   armsCache: { label: "Cache d'armes", tip: "Arms cache: arms two FM teams.", cost: 120, time: 40, build: () => buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }), follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
+  // A NEW REFUGE (2026-10-07, the tunnels): the FLN digs one near a village it holds, the
+  // nearest the post first (algAI.js stepRefuges) — its bands go to ground and come back out of
+  // it. Hidden from the French until seen.
+  refuge: { label: "Refuge", tip: "A hidden casemate: bands go to ground in it and come back out.", cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
   ambushScreen: { label: "Écran d'embuscade", tip: "Cut scrub on a stone footing: men behind it are hidden until they fire.", cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
 };
 /** Who may raise `key`: his type lists it (the sappers), or the piece names his type. */

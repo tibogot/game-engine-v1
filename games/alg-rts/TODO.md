@@ -145,8 +145,14 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      BOOBY-TRAPPED HOUSES (algGarrison): the FLN's last man out leaves a trap half the time (3 at
      most); the first French man in sets it off (110 dmg, 5 m, on him) — MEASURED 2 dead, 1 hurt of
      6; "Maison piégée !". A SAPPER within 9 m of the door finds and clears it.
-     NEXT: tunnels between refuges; then civilians (soldier lab) → melting into villages + bouclage
-     et fouille.
+   - [x] FLN ASYMMETRY 3 — THE TUNNELS (2026-10-07, algAI stepRefuges): the FLN DIGS new refuges
+     (algBuild `refuge`, 100, 45 s, hidden until seen) 18-40 m from a village it holds with a cell,
+     the one nearest the post first, 90 m from any other, up to 4 standing (first at 300 s, then
+     every 150 s). Men gone to ground come back out of the refuge NEAREST THE FRENCH it knows of
+     (none within 60 m of its mouth), not always the front one. MEASURED (fast-forward): 2 → 3
+     refuges, the new one at (-30, -48); 3 bands formed out of it. The French answer: find them
+     (the "Refuge découvert" alert) and destroy them.
+     NEXT: civilians (soldier lab: villagers' looks) → melting into villages + bouclage et fouille.
    - [ ] NEXT: then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of
