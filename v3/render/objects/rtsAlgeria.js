@@ -412,8 +412,15 @@ export function buildHelipad({ seed = 23 } = {}) {
  * leaves on steel frames, hinged on the columns, their own geometry
  * (userData.gate, as the post's gate) so a game swings them open, outward.
  * The other two bays stay open: the ramps and the hoist are the look.
+ *
+ * DETAIL 2 (the buildings lab, 2026-10-07 — "the rusted metal reads too much tiling"): the roof
+ * is SHEETS, ~0.9 m, lapped, not two 15 m panels. Each maps the texture once up its length (the
+ * rust at its foot, where water sits — a 2 m tile put a rust band every 2 m up the slope: the
+ * rows of orange arcs) from its own random point across, so no two neighbours match; one in
+ * seven is a newer replacement, cleaner (the texture's upper band). The cladding the same. A
+ * gutter each side, a downpipe into a drum, a dirty plinth round the workshop, a lamp at its door.
  */
-export function buildMotorPool({ seed = 29 } = {}) {
+export function buildMotorPool({ seed = 29, detail = 1 } = {}) {
   const R = rng(seed);
   const parts = [];
   const X0 = -7, X1 = 7, Z0 = -4, Z1 = 4, EH = 4.4;   // the shed: 14 × 8 m, eaves 4.4
@@ -435,7 +442,33 @@ export function buildMotorPool({ seed = 29 } = {}) {
     const up = new THREE.Vector3(0, rise, -sz * half).normalize();
     const ax = new THREE.Vector3(1, 0, 0), nz = new THREE.Vector3().crossVectors(ax, up);
     const m = new THREE.Matrix4().makeBasis(ax, up, nz).setPosition(0, roofY, sz * half);
-    parts.push({ geo: buildCorrugatedPanel({ width: X1 - X0 + 0.8 + (sz > 0 ? 0.06 : 0), height: slopeLen, ribs: 96, ribDepth: 0.03, offset: sz > 0 ? 0.02 : 0 }), matrix: m, mat: MAT.metal, tone: 0.5 });
+    if (detail < 2) {
+      parts.push({ geo: buildCorrugatedPanel({ width: X1 - X0 + 0.8 + (sz > 0 ? 0.06 : 0), height: slopeLen, ribs: 96, ribDepth: 0.03, offset: sz > 0 ? 0.02 : 0 }), matrix: m, mat: MAT.metal, tone: 0.5 });
+      continue;
+    }
+    // Sheets 0.92 m wide on a 0.86 m pitch (6 cm laps), alternately proud (never coplanar);
+    // alternate ones start 3 cm lower at the eave and end 3 cm higher under the ridge cap, so
+    // their end caps never share a plane either.
+    const SW = 0.92, PITCH = 0.86, rx0 = X0 - 0.4, rx1 = X1 + 0.4;
+    const n = Math.ceil((rx1 - rx0 - SW) / PITCH) + 1;
+    for (let k = 0; k < n; k++) {
+      const x = Math.min(rx0 + SW / 2 + k * PITCH, rx1 - SW / 2);
+      const newer = R() < 0.14, drop = (k % 2) * 0.03, len = slopeLen + drop * 2;   // ends apart at BOTH ends
+      const geo = buildCorrugatedPanel({
+        width: SW, height: len, ribs: 6, ribDepth: 0.03, offset: (k % 2) * 0.025 + (sz > 0 ? 0.05 : 0),
+        // Once up its length; a newer sheet only the texture's cleaner top band.
+        uvScale: newer ? [1, 0.7 / len] : [1, 2 / len], uvOffset: [R() * 2, newer ? 0.62 : 0],
+      });
+      const mk = m.clone().multiply(new THREE.Matrix4().makeTranslation(x, -drop, 0));
+      parts.push({ geo, matrix: mk, mat: MAT.metal, tone: newer ? 0.85 + R() * 0.1 : 0.3 + R() * 0.4 });
+    }
+    // The gutter under the eave, its downpipe at the front-left corner into a drum.
+    const gz = sz * (half + 0.1), gy = roofY - 0.16;
+    parts.push({ geo: buildBox(rx1 - rx0, 0.12, 0.14), pos: [(rx0 + rx1) / 2, gy, gz], mat: MAT.steel, tone: 0.42 });
+    if (sz < 0) {
+      parts.push(wirePart([rx0 + 0.25, gy - 0.05, gz], [rx0 + 0.25, F + 0.95, gz], 0.05, { tone: 0.4 }));
+      parts.push({ geo: buildOilDrum(), pos: [rx0 + 0.25, F, gz - 0.1], rot: [0, 0.4, 0], mat: MAT.metal, tone: 0.3 });
+    }
   }
   parts.push({ geo: buildBox(X1 - X0 + 0.9, 0.1, 0.34), pos: [0, roofY + rise + 0.07, 0], mat: MAT.metal, tone: 0.35 });
   const underRoof = (z) => roofY + rise * (1 - Math.abs(z) / half) - 0.1;
@@ -453,7 +486,8 @@ export function buildMotorPool({ seed = 29 } = {}) {
   for (const z of [-3.2, -1.6, 1.6, 3.2]) parts.push(beamPart([X0 - 0.3, underRoof(z) + 0.02, z], [X1 + 0.3, underRoof(z) + 0.02, z], 0.08, 0.1, MAT.steel, 0.35));
   // The back wall: corrugated sheets, lapped (offset alternately: never coplanar).
   for (let k = 0; k < 7; k++) {
-    parts.push({ geo: buildCorrugatedPanel({ width: 2.12, height: EH - 0.05 - (k % 2) * 0.04, ribs: 12, ribDepth: 0.03, offset: (k % 2) * 0.03 }), pos: [X0 + 1 + k * 2, F + 0.03, Z1 + 0.12], mat: MAT.metal, tone: 0.36 + R() * 0.25 });
+    const h = EH - 0.05 - (k % 2) * 0.04;
+    parts.push({ geo: buildCorrugatedPanel({ width: 2.12, height: h, ribs: 12, ribDepth: 0.03, offset: (k % 2) * 0.03, ...(detail >= 2 ? { uvScale: [1, 2 / h], uvOffset: [R() * 2, 0] } : {}) }), pos: [X0 + 1 + k * 2, F + 0.03, Z1 + 0.12], mat: MAT.metal, tone: 0.36 + R() * 0.25 });
   }
   // A tarpaulin hung down the left end against the wind.
   parts.push({ geo: buildBox(0.04, 2.6, 5.2), pos: [X0 - 0.16, F + EH - 1.3, 1.2], rot: [0.02, 0, 0.03], mat: MAT.canvas, tone: 0.45 });
@@ -465,6 +499,13 @@ export function buildMotorPool({ seed = 29 } = {}) {
   parts.push({ geo: buildBox(ww + 0.34, 0.18, wd + 0.34), pos: [wcx, F + wH + 0.04, wcz], mat: MAT.concrete, tone: 0.55 });
   for (const [dx, dz, lx, lz] of [[0, -1, ww + 0.4, 0.14], [0, 1, ww + 0.4, 0.14], [-1, 0, 0.14, wd + 0.12], [1, 0, 0.14, wd + 0.12]]) {
     parts.push({ geo: buildBox(lx, 0.3, lz), pos: [wcx + dx * (ww / 2 + 0.13), F + wH + 0.23, wcz + dz * (wd / 2 + 0.13)], mat: MAT.white, tone: 0.55 });
+  }
+  if (detail >= 2) {
+    // A dirty plinth round its foot (splash, oil, boots), proud of the whitewash.
+    parts.push({ geo: buildBox(ww + 0.06, 0.55, wd + 0.06), pos: [wcx, F + 0.27, wcz], mat: MAT.concrete, tone: 0.3 });
+    // The lamp over the door: a bracket and an enamel shade.
+    parts.push(wirePart([wcx - 1, F + 2.62, wz0 - 0.02], [wcx - 1, F + 2.62, wz0 - 0.5], 0.02, { tone: 0.25 }));
+    parts.push({ geo: new THREE.ConeGeometry(0.17, 0.12, 10, 1, false).translate(0, -0.06, 0), pos: [wcx - 1, F + 2.6, wz0 - 0.5], mat: MAT.paint, tone: 0.3 });
   }
   // Door, window with open shutters, a sill — on the face the camera sees.
   const fz = wz0 - 0.04;
@@ -524,7 +565,8 @@ export function buildMotorPool({ seed = 29 } = {}) {
   const gableGeo = faceted(new THREE.ExtrudeGeometry(gable, { depth: 0.04, bevelEnabled: false }).rotateY(Math.PI / 2));
   for (const [wx, tone] of [[gX0 + 0.14, 0.4], [gX1 + 0.14, 0.34]]) {
     for (let k = 0; k < 4; k++) {
-      parts.push({ geo: buildCorrugatedPanel({ width: 2.06, height: EH - 0.1 - (k % 2) * 0.04, ribs: 12, ribDepth: 0.03, offset: (k % 2) * 0.03 }), pos: [wx + (k % 2) * 0.03, F + 0.03, Z0 + 1 + k * 2], rot: [0, Math.PI / 2, 0], mat: MAT.metal, tone: tone + R() * 0.2 });
+      const h = EH - 0.1 - (k % 2) * 0.04;
+      parts.push({ geo: buildCorrugatedPanel({ width: 2.06, height: h, ribs: 12, ribDepth: 0.03, offset: (k % 2) * 0.03, ...(detail >= 2 ? { uvScale: [1, 2 / h], uvOffset: [R() * 2, 0] } : {}) }), pos: [wx + (k % 2) * 0.03, F + 0.03, Z0 + 1 + k * 2], rot: [0, Math.PI / 2, 0], mat: MAT.metal, tone: tone + R() * 0.2 });
     }
     parts.push({ geo: gableGeo.clone(), pos: [wx + 0.05, F + EH - 0.1, 0], mat: MAT.metal, tone: tone - 0.05 });
   }

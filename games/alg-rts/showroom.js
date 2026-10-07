@@ -65,7 +65,8 @@ export const BASE_BUILDABLES = [
   { key: "helipad", build: buildHelipad, lx: 56, lz: 2, yaw: 0 },
   { key: "mortarPit", build: buildMortarPit, lx: 36, lz: -24, yaw: 0.1 },
   // Behind the vehicle park, toward the valley.
-  { key: "motorPool", build: buildMotorPool, lx: -48, lz: -30, yaw: 0 },
+  // Detail 2 (the buildings lab, 2026-10-07): the roof in lapped sheets, no rust grid.
+  { key: "motorPool", build: (o) => buildMotorPool({ ...o, detail: 2 }), lx: -48, lz: -30, yaw: 0 },
   { key: "sandbags1", build: buildFrSandbagWall, lx: 8, lz: 30, yaw: 0.1, follow: true },
   { key: "sandbags2", build: () => buildFrSandbagWall({ seed: 7 }), lx: 2, lz: 31, yaw: -0.15, follow: true },
   { key: "wire1", build: buildBarbedWire, lx: -2, lz: 38, yaw: 0, follow: true },

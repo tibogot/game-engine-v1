@@ -6,6 +6,7 @@
 //   right  APRÈS — the same builder at detail 2
 import { buildMechtaHouse } from "../../v3/render/objects/rtsMechta.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
+import { buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
 import { startVehicleLab } from "./vehicleLab.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
@@ -13,6 +14,7 @@ import { MAT } from "../../v3/render/objects/rtsParts.js";
 const BUILDINGS = {
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
   poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
+  parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },
 };
 
 /**

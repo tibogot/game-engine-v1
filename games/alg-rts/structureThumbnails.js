@@ -30,7 +30,7 @@ const walls = (box) => {
 };
 const ITEMS = [
   ["struct:post", () => facing(kitView(buildFrenchPost({ detail: 2 }))), walls],
-  ["struct:motorPool", () => facing(kitView(buildMotorPool()))],
+  ["struct:motorPool", () => facing(kitView(buildMotorPool({ detail: 2 })))],
   ["struct:helipad", () => facing(kitView(buildHelipad()))],
 ];
 

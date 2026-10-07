@@ -381,6 +381,11 @@ export const CORRUGATED_DEFAULTS = {
   // exactly the flicker a wall of them shows. A real roof laps one sheet OVER
   // the next anyway, so this is both the fix and the correct construction.
   offset: 0,
+  // The texture's mapping (default: 2 m a tile, from the sheet's corner). A SHEET-SIZED mapping
+  // (uvScale [1, 2 / height]) puts the texture's rust once at the sheet's foot instead of every
+  // 2 m up it, and a random uvOffset[0] per sheet stops a roof repeating one pattern
+  // (alg-rts motor pool, 2026-10-07: "the rusted metal reads too much tiling").
+  uvScale: [1, 1], uvOffset: [0, 0],
 };
 
 /**
@@ -408,7 +413,7 @@ export function buildCorrugatedPanel(opts = {}) {
     for (let i = 0; i < m; i++) {
       pos.push(loop[i][0], y, loop[i][1]);
       // v must run UP the sheet: rust bleeds down it (see rtsTextures.js).
-      uvs.push((loop[i][0] + o.width * 0.5) / 2, (y / 2));
+      uvs.push(((loop[i][0] + o.width * 0.5) / 2) * o.uvScale[0] + o.uvOffset[0], (y / 2) * o.uvScale[1] + o.uvOffset[1]);
     }
   }
   for (let i = 0; i < m; i++) {

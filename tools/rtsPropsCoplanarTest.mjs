@@ -281,6 +281,8 @@ for (const [name, fn] of [...Object.entries(algeria), ...Object.entries(algVilla
   if (g?.isBufferGeometry) check(name, g);
   for (const sub of Object.values(g?.userData?.parts ?? {})) if (sub?.isBufferGeometry) check(`${name} part`, sub);
 }
+// Detail 2 (the buildings lab): the motor pool's lapped roof sheets.
+check("buildMotorPool detail 2", algeria.buildMotorPool({ detail: 2 }));
 
 console.log(failed ? `\n${failed} FAILED` : "\nall passed");
 process.exit(failed ? 1 : 0);

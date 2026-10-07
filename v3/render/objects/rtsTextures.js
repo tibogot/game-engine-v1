@@ -85,7 +85,10 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
  * fixings. Painting corrugation shading in here as well would double it up and
  * fight the real lighting.
  */
-export function makeCorrugatedIronTexture({ size = 512, rust = 0.55, seed = 3 } = {}) {
+// RETUNED 2026-10-07 (alg-rts, "the rusted metal reads too much tiling"): rust 0.55 → 0.45, the
+// blotches held to the sheet's foot (floor 0.35 → 0.18 away from it), the rust duller and browner
+// (the orange 168,92,44 read as camouflage blobs), the streaks carrying more of it.
+export function makeCorrugatedIronTexture({ size = 512, rust = 0.45, seed = 3 } = {}) {
   return makeTexture(size, (g, S) => {
     const img = g.createImageData(S, S);
     const d = img.data;
@@ -104,7 +107,7 @@ export function makeCorrugatedIronTexture({ size = 512, rust = 0.55, seed = 3 } 
         // Rust takes hold in blotches, heavily biased to the lower third.
         const blotch = fbm(nx * 1.3 + seed * 3, ny * 1.3, P, 4);
         const lowBias = clamp01(1.25 - v * 1.7);
-        let corrosion = clamp01((blotch - (1 - rust) * 0.72) * 3.0) * clamp01(0.35 + lowBias);
+        let corrosion = clamp01((blotch - (1 - rust) * 0.72) * 3.0) * clamp01(0.18 + lowBias);
 
         // Bleed: rust runs DOWN from wherever it started. Sampling the same
         // field a little higher up and carrying it down is what makes a streak.
@@ -112,11 +115,11 @@ export function makeCorrugatedIronTexture({ size = 512, rust = 0.55, seed = 3 } 
         const streak = clamp01((above - (1 - rust) * 0.78) * 2.6)
                      * clamp01(0.85 - v * 0.35)
                      * (0.45 + 0.55 * fbm(nx * 9, ny * 1.4, P * 4, 2));
-        corrosion = clamp01(corrosion + streak * 0.7);
+        corrosion = clamp01(corrosion + streak * 0.85);
 
         // Two rust tones: fresh orange over old dark brown.
         const tone = fbm(nx * 4.4 + 9, ny * 4.4, P * 2, 2);
-        const rr = lerp(96, 168, tone), rg = lerp(52, 92, tone), rb = lerp(30, 44, tone);
+        const rr = lerp(88, 146, tone), rg = lerp(54, 84, tone), rb = lerp(36, 48, tone);
         r = lerp(r, rr, corrosion); gg = lerp(gg, rg, corrosion); b = lerp(b, rb, corrosion);
 
         // Dirt splash at the very bottom.
