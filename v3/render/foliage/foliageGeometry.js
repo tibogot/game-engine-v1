@@ -573,15 +573,16 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
  */
 function buildBlades(type, ctx) {
   const { near, far } = ctx;
-  // Far: fewer blades, each wider, so the tuft keeps its coverage (a dense
-  // tussock of 60 wiry blades is 24 broad ones at 140 m).
+  // NESTED (2026-10-07): every level grows the same tuft and the coarse ones leave blades out; only
+  // FAR widens what it keeps (a dense tussock of 60 wiry blades is 24 broad ones at 140 m). Each
+  // level used to grow its own fan — every blade turned at the switch (mid matched 27%).
   const n = type.fronds ?? 14;
-  const count = Math.max(3, Math.round(n * (far ? (n > 30 ? 0.4 : 0.55) : near ? 1 : 0.75)));
+  const keep = far ? (n > 30 ? 0.4 : 0.55) : near ? 1 : 0.75;
   addBladeFan(ctx, {
-    count,
-    rows: near ? 5 : far ? 2 : 3,
+    count: Math.max(3, Math.round(n)), keep,
+    rows: near ? 5 : far ? 2 : 4,
     len: type.frondLength ?? 1.0,
-    width: 0.035 * (type.leafletWidth ?? 1) * Math.sqrt(Math.max(1, n * (near ? 1 : 0.75) / count)),
+    width: 0.035 * (type.leafletWidth ?? 1) * (far ? Math.sqrt(1 / keep) : 1),
     spread: type.spread ?? 0.35,
     arch: type.arch ?? 0.9,
     dry: type.dry ?? 0,
@@ -593,13 +594,16 @@ function buildBlades(type, ctx) {
  * A fan of long tapered blades rising from one point, each bending over and
  * twisting so it is not a flat ribbon. The base of a reed clump or a cattail.
  */
-function addBladeFan({ rand, push, vcount, I }, { count, rows, len: baseLen, width, spread, arch, dry = 0 }) {
+function addBladeFan({ rand, push, vcount, I }, { count, rows, len: baseLen, width, spread, arch, dry = 0, keep = 1 }) {
+  // `keep` < 1: a coarse level — the same blades (the full count's angles and draws), a golden-ratio
+  // share of them drawn, so the level is a SUBSET of the near one, not a different tuft.
   for (let b = 0; b < count; b++) {
     const a = (b / count) * Math.PI * 2 + rand() * 0.8;
     const br = rand();
     // A DRY blade (straw, the shader's rand 1..1.5 flag): `dry` of them.
     // (No extra rand() unless asked: every other fan keeps its exact shape.)
     const flag = dry > 0 && rand() < dry ? 1 + br * 0.45 : br;
+    if (keep < 1 && ((b * 0.6180339887) % 1) >= keep) continue;
     const len = baseLen * (0.6 + br * 0.7);
     const dir = [Math.cos(a), 0, Math.sin(a)];
     const side = [-Math.sin(a), 0, Math.cos(a)];
@@ -648,7 +652,7 @@ function buildStalked(type, ctx, head) {
   // TALLER than its flower stalks (2026-10-02: they stopped short of them,
   // so the heads stood on bare sticks over a tuft).
   addBladeFan(ctx, {
-    count: Math.max(2, Math.round((type.fronds ?? 7) * (far ? 0.5 : near ? 1 : 0.75))),
+    count: Math.max(2, Math.round(type.fronds ?? 7)), keep: far ? 0.5 : near ? 1 : 0.75,
     rows: near ? 5 : far ? 2 : 3,
     len: height * (plume ? 0.8 : 1.1),
     width: (plume ? 0.03 : 0.026) * (type.leafletWidth ?? 1),
@@ -1386,7 +1390,7 @@ function asphodelFlower(ctx, c, face, r, spin, near) {
 function buildAsphodelFar(type, ctx) {
   const { near, far, rand } = ctx;
   addBladeFan(ctx, {
-    count: Math.max(6, Math.round((type.fronds ?? 14) * 1.7 * (far ? 0.45 : near ? 1 : 0.7))),
+    count: Math.max(6, Math.round((type.fronds ?? 14) * 1.7)), keep: far ? 0.45 : near ? 1 : 0.7,
     // Soft, long, flopping out toward the ground (stiff ones read as a yucca).
     rows: near ? 5 : 2, len: 0.55, width: 0.034, spread: 0.85, arch: 1.35,
   });

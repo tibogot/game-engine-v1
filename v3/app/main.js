@@ -690,6 +690,10 @@ export async function startV3App(opts = {}) {
   // 1 = the near level (editor, walking cameras); an RTS camera sees all three
   // at once and asks for them all (alg-rts, 2026-10-01).
   const scatterReceiveLods = Number.isFinite(opts.scatterReceiveLods) ? opts.scatterReceiveLods : 1;
+  // The nearest a view-driven plant detail step may come, [mid, far] metres (ScatterField
+  // lodFloors). An RTS camera wants every step OFF its screen (alg-rts, 2026-10-07: plants
+  // switching level as they crossed the screen read as pops); default [60, 110].
+  ScatterField.defaultLodFloors = Array.isArray(opts.scatterLodFloors) ? opts.scatterLodFloors : [60, 110];
   // A/B switches for the terrain layer path, per page load (editor or game):
   // ?topk=3 (0 = classic, every layer on every pixel) and ?far=1 (near/far
   // blend on the top-K layers). See SPLAT_FEATURES in splatOverlayTsl.js.

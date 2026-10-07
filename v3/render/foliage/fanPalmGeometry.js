@@ -75,11 +75,19 @@ const STEM = 1, TRUNK = 3;
 const FAN = 5.8;
 const DEAD = 2.3;
 
+/** How much the coarse levels grow their kept fans [mid, far] (the area they lose by leaving some out). */
+export const LOD_GROW = [1, 1.25];   // mid: none (a grown fan IS the pop — 0.92 match ungrown, 0.80 at 1.12); far: keep the clump full
+
 export function buildFanPalm(type, ctx) {
   const { near, far, rand, push, vcount, I, finish } = ctx;
 
   const H = type.frondLength ?? 1;
-  const leafN = Math.max(6, Math.round((type.fronds ?? 22) * (far ? 0.42 : near ? 1 : 0.72)));
+  // NESTED LODS (2026-10-07, you: "the LOD doesn't match the original, it pops"): every level grows
+  // the SAME crown — the full count, the same random draws — and the coarse ones leave leaves out,
+  // spread evenly over the ages. (Each level used to grow its own crown from a smaller count:
+  // every leaf moved at the switch; mid matched near on 78% of the silhouette.)
+  const leafN = Math.max(6, Math.round(type.fronds ?? 22));
+  const keepFrac = far ? 0.42 : near ? 1 : 0.72;
   const rings = Math.max(4, Math.round((type.leaflets ?? 16) * (near ? 1 : 0.5)));
   // 1:20 — a column. The sugar palm is the stoutest trunk on the map.
   const trunkR = 0.025 * H * (type.stemWidth ?? 1);
@@ -258,10 +266,12 @@ export function buildFanPalm(type, ctx) {
     const lift = 1.5 - Math.pow(age, 0.85) * (1.5 + 0.75 * droop) * openness + (rand() - 0.5) * 0.18;
     // The coarse levels GROW their surviving leaves as they drop their count
     // — the bamboo lesson. Without it a distant grove thins into wisps.
-    const lodGrow = far ? 1.5 : near ? 1 : 1.18;
-    leaf(crownO, a, lift, leafLen * (0.82 + 0.18 * Math.min(1, age * 2)),
-      leafLen * 0.62 * fanScale * lodGrow * (0.85 + rand() * 0.3), false, rand(),
-      0.94 - crownShade * Math.pow(age, 0.8));
+    const lodGrow = far ? LOD_GROW[1] : near ? 1 : LOD_GROW[0];
+    const len = leafLen * (0.82 + 0.18 * Math.min(1, age * 2));
+    const size = leafLen * 0.62 * fanScale * lodGrow * (0.85 + rand() * 0.3), rnd = rand();
+    // The kept ones: a golden-ratio stride, so every age keeps its share.
+    if (((i * 0.6180339887) % 1) >= keepFrac) continue;
+    leaf(crownO, a, lift, len, size, false, rnd, 0.94 - crownShade * Math.pow(age, 0.8));
   }
 
   // ── The skirt ─────────────────────────────────────────────────────────────

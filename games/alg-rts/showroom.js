@@ -289,12 +289,15 @@ export function kitView(geo) {
  * prickly-pear hedges outside the garden walls.
  */
 function placePlants(app, placed) {
-  // Detail steps at 60 / 140 m from the camera (3D: at max zoom the camera is
-  // 164 m up, so every orchard is at the far detail). shadowLods 3: the far
+  // Detail steps at 135 / 220 m from the camera (2026-10-07, you: "the LOD pops"): at 60 / 140 the
+  // first step ran ACROSS the RTS view (the camera is 50-85 m from the ground, so every tree on
+  // screen sits round 60 m) and betoums, olives, cedars and hedges switched as you panned. Now
+  // everything on screen is full detail at every zoom (the farthest ground seen is ~120 m off).
+  // MEASURED over a village: +0.32 ms GPU at max zoom, +0.07 at mid. shadowLods 3: the far
   // detail casts too (the plant fields cast with it) — at 2 every orchard past
   // 140 m lost its shadow, and at the default zoom that line crossed the top
   // of the screen, so trees dropped their shadows as you panned.
-  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: [60, 140], shadowLods: 3 });
+  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: [135, 220], shadowLods: 3 });
   pf.setType("canaryPalm", structuredClone(FOLIAGE_PRESETS.canaryPalm));
   // Either side of the gate, a few metres out (post-local).
   for (const [lx, lz, scale, seed] of [[-7, 22, 1, 17], [7, 22, 0.95, 29]]) {

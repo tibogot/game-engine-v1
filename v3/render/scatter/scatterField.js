@@ -66,6 +66,8 @@ const THIN_BAND = 0.1;
 const thinThreshold = (k) => k.mul(1 + THIN_BAND);
 
 export class ScatterField {
+  /** lodFloors for fields made from now on (main.js opts.scatterLodFloors). */
+  static defaultLodFloors = [60, 110];
   /** Batch the per-draw meshes (see _syncBatches). Set before fields are made: main.js opts.batchPlantDraws. */
   static batchDraws = false;
 
@@ -131,6 +133,8 @@ export class ScatterField {
     this._ruleRow = ruleRow;   // the CPU cull reads the height band from it
     this.tileSize = tileSize;
     this.receiveLods = receiveLods;
+    /** Metres a view-driven LOD step never comes nearer than [mid, far] (setViewDistances, footprint). */
+    this.lodFloors = [...ScatterField.defaultLodFloors];
     const V = (this.variants = Math.max(1, Math.round(variants)));
     const subTypes = typeCount * V;
     const draws = (this.draws = subTypes * lods);
@@ -1049,8 +1053,14 @@ export class ScatterField {
       // corner of it. The LOD steps are measured from the CAMERA (screen size)
       // and need no cap — only the fade is measured from the anchor, and it
       // starts past the last visible corner and ends inside the wrap.
-      u.uLodDist.value  = n + span * 0.55;
-      u.uLodDist2.value = n + span * 0.85 + 2;
+      // FLOORS (alg-rts, 2026-10-07 — you: "the LOD pops"): the steps are a share of the view's
+      // depth, so ZOOMED IN they came right up to the camera — mid at 22 m, FAR at 32 m with the
+      // camera 24 m off the ground: the crudest plant (built for ~140 m) drawn big at the top of the
+      // screen, and every plant crossing the line while panning jumped. Detail is SCREEN SIZE: a
+      // step never comes nearer than `lodFloors` metres.
+      const [f1, f2] = this.lodFloors;
+      u.uLodDist.value  = Math.max(n + span * 0.55, f1);
+      u.uLodDist2.value = Math.max(n + span * 0.85 + 2, f2, u.uLodDist.value + 2);
       const wrap = this.tileSize * 0.5 - 2;
       const r1 = Math.min(Math.max(footprint.radius * 1.15, footprint.radius + 12), wrap);
       u.uOuterR0.value = Math.min(footprint.radius, r1 - 4);

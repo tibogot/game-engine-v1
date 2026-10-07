@@ -131,6 +131,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // first step the crowns went flat and bright — a band that followed the
     // camera (you, 2026-10-01). ?recvlods=1 = the old way, to A/B.
     scatterReceiveLods: Number(params.get("recvlods") ?? 3),
+    // Plant detail steps OFF the screen at every zoom (the farthest corner seen is ~125 m): a step
+    // on screen was a band of plants changing as you panned. MEASURED: +0.45 ms GPU at max zoom.
+    scatterLodFloors: [130, 180],
     // shadowRadius 2 (engine default 4): the PCF disc is radius × texel, and at
     // 4 the palm fronds and soldiers smeared to grey smudges; 1 was crisp but
     // grainy. Chosen by eye in-game, 2026-09-29.
