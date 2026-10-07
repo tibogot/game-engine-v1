@@ -14,6 +14,7 @@
 // owner's team) — but they do wreck the village they land in (algDamage).
 import * as THREE from "three";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
+import { t } from "./i18n/i18n.js";
 
 export const BARRAGE = {
   cost: { mun: 45 },
@@ -49,8 +50,8 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
     if (sel.length !== 1 || !isPit(sel[0])) return null;
     const s = sel[0], cd = Math.max(0, s.barrageCd ?? 0), busy = fires.some((f) => f.pit === s);
     return {
-      key: "barrage", label: busy ? "Tir en cours" : "Tir de barrage", cost: purse ? P.cost : undefined,
-      hint: `${P.bombs} obus sur une zone jusqu'à ${P.range} m, ${P.spread} m de large, en ~${Math.round(P.bombs * P.every)} s : ils tombent du ciel, aucun abri ne protège. Nettoie un nid de mitrailleuse ou une bande retranchée. M.`,
+      key: "barrage", label: busy ? t("Tir en cours") : t("Tir de barrage"), cost: purse ? P.cost : undefined,
+      hint: t("{bombs} obus sur une zone jusqu'à {range} m, {spread} m de large, en ~{secs} s : ils tombent du ciel, aucun abri ne protège. Nettoie un nid de mitrailleuse ou une bande retranchée. M.", { bombs: P.bombs, range: P.range, spread: P.spread, secs: Math.round(P.bombs * P.every) }),
       ready: !busy && cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd),
     };
   }

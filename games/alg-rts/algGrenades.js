@@ -21,6 +21,7 @@
 // new order cancels the throw. Then that grenade is on cooldown (each kind its
 // own). The ALN AI throws frags too (algAI.js), through order().
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
+import { t } from "./i18n/i18n.js";
 
 export const GRENADE = {
   range: 24,        // metres he can throw
@@ -36,14 +37,14 @@ export const GRENADE = {
 /** The two kinds a man carries: what the button, the ring and the landing are. */
 export const THROWS = {
   grenade: {
-    key: "grenade", label: "Grenade", hotkey: "g", cd: "grenadeCd", range: GRENADE.range, ring: GRENADE.blast,
+    key: "grenade", label: t("Grenade"), hotkey: "g", cd: "grenadeCd", range: GRENADE.range, ring: GRENADE.blast,
     cooldown: GRENADE.cooldown, cost: GRENADE.cost,
-    hint: `Un homme lance une grenade (${GRENADE.range} m, souffle ${GRENADE.blast} m) : dégâts, et les hommes autour se jettent à terre. G.`,
+    hint: t("Un homme lance une grenade ({range} m, souffle {blast} m) : dégâts, et les hommes autour se jettent à terre. G.", { range: GRENADE.range, blast: GRENADE.blast }),
   },
   smoke: {
-    key: "smoke", label: "Fumigène", hotkey: "b", cd: "smokeCd", range: 28, ring: 11,
+    key: "smoke", label: t("Fumigène"), hotkey: "b", cd: "smokeCd", range: 28, ring: 11,
     cooldown: 40, cost: { mun: 10 },
-    hint: "Un homme lance un fumigène (28 m) : un nuage de ~11 m pendant ~20 s que PERSONNE ne voit ni ne traverse au tir — franchir un terrain découvert, aveugler une mitrailleuse, couvrir un repli. B.",
+    hint: t("Un homme lance un fumigène (28 m) : un nuage de ~11 m pendant ~20 s que PERSONNE ne voit ni ne traverse au tir — franchir un terrain découvert, aveugler une mitrailleuse, couvrir un repli. B."),
   },
 };
 

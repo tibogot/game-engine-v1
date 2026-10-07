@@ -16,6 +16,7 @@
 // the enemy's set-up guns when you can see them.
 import * as THREE from "three";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
+import { t } from "./i18n/i18n.js";
 
 export const MG_TEAM = {
   setup: 2.5,          // s to set up once stopped
@@ -182,7 +183,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
   function ability(sel) {
     const g = selectedGunners(sel);
     if (!g.length) return null;
-    return { key: "aimArc", label: "Orienter", hint: "Orienter la mitrailleuse : cliquez où elle doit tirer. En batterie, elle pivote (lentement) ; repliée, elle se mettra en batterie face à ce point. O.", ready: true };
+    return { key: "aimArc", label: t("Orienter"), hint: t("Orienter la mitrailleuse : cliquez où elle doit tirer. En batterie, elle pivote (lentement) ; repliée, elle se mettra en batterie face à ce point. O."), ready: true };
   }
   function begin(sel = selection.selected) {
     const g = selectedGunners(sel);

@@ -7,33 +7,40 @@
 // Locked units show on their building's card, greyed, saying what unlocks
 // them. Once unlocked a tier stays (losing a village later doesn't take the
 // tanks back).
+import { t } from "./i18n/i18n.js";
+
 export const TIERS = [
   {
-    n: 1, name: "Section d'infanterie", note: "dès le départ",
+    n: 1, name: t("Section d'infanterie"), note: t("dès le départ"),
     units: ["appele", "sapeur", "piece", "willys", "gmc"], cost: 0, villages: 0,
   },
   {
-    n: 2, name: "Moyens héliportés", note: "l'héliport ouvre : paras, l'Alouette ; le half-track",
+    n: 2, name: t("Moyens héliportés"), note: t("l'héliport ouvre : paras, l'Alouette ; le half-track"),
     units: ["para", "alouette", "halftrack"], cost: { mp: 150, fuel: 40 }, villages: 1,
   },
   {
-    n: 3, name: "Blindés", note: "les blindés : l'EBR, l'AMX-13 ; la Légion",
+    n: 3, name: t("Blindés"), note: t("les blindés : l'EBR, l'AMX-13 ; la Légion"),
     units: ["ebr", "amx13", "legion"], cost: { mp: 200, fuel: 90 }, villages: 2,
   },
 ];
-const tierOfUnit = Object.fromEntries(TIERS.flatMap((t) => t.units.map((u) => [u, t.n])));
+const tierOfUnit = Object.fromEntries(TIERS.flatMap((tr) => tr.units.map((u) => [u, tr.n])));
 
 export function createAlgTiers(app, { economy }) {
   let tier = 1;
   /** The tier a unit needs (units not listed: always open — the ALN's). */
   const needs = (key) => tierOfUnit[key] ?? 1;
-  const next = () => TIERS.find((t) => t.n === tier + 1) ?? null;
+  const next = () => TIERS.find((tr) => tr.n === tier + 1) ?? null;
   /** Why the next tier can't be bought now (null: it can). */
-  function blockedBy(t = next()) {
-    if (!t) return "tout est débloqué";
-    if (economy.held < t.villages) return `tenir ${t.villages} village${t.villages > 1 ? "s" : ""} (vous en tenez ${economy.held})`;
-    // Ends "supplies": the card shows it as merely too poor, not locked.
-    if (!economy.french.canAfford(t.cost)) return `${economy.french.short?.(t.cost) || "plus de"} ressources`;
+  function blockedBy(tr = next()) {
+    if (!tr) return t("tout est débloqué");
+    if (economy.held < tr.villages) return tr.villages > 1
+      ? t("tenir {n} villages (vous en tenez {held})", { n: tr.villages, held: economy.held })
+      : t("tenir 1 village (vous en tenez {held})", { held: economy.held });
+    // Merely too poor, not locked: the card (algUnits.js) tells the two apart by the villages.
+    if (!economy.french.canAfford(tr.cost)) {
+      const short = economy.french.short?.(tr.cost);
+      return short ? t("{short} ressources", { short }) : t("plus de ressources");
+    }
     return null;
   }
   return {
@@ -45,10 +52,10 @@ export function createAlgTiers(app, { economy }) {
     blockedBy,
     /** Buy the next tier (the post's card). True if done. */
     unlock() {
-      const t = next();
-      if (!t || blockedBy(t) || !economy.french.spend(t.cost)) return false;
-      tier = t.n;
-      app.algBattle?.say?.(`<b>${t.name}</b> débloqué : ${t.note}.`);
+      const tr = next();
+      if (!tr || blockedBy(tr) || !economy.french.spend(tr.cost)) return false;
+      tier = tr.n;
+      app.algBattle?.say?.(t("<b>{name}</b> débloqué : {note}.", { name: tr.name, note: tr.note }));
       app.algVoices?.radio("hq_tier");
       return true;
     },

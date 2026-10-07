@@ -11,6 +11,8 @@
 //
 // Free per frame: a felled pole is one instance matrix and a rebuilt wire index (rare events).
 
+import { t } from "./i18n/i18n.js";
+
 export const TELEGRAPH = {
   mpMul: 0.6,        // × the base effectifs while the line is cut
   repairHp: 45,      // the work to mend a pole (sappers: 3 hp/s a man)
@@ -38,14 +40,14 @@ export function createAlgTelegraph(app, { poles, units, params = TELEGRAPH }) {
     poles.setStanding(i, false);
     // What the sappers right-click: a "structure" of the French with no hp left.
     const target = {
-      isStructure: true, telegraph: true, typeKey: "telegraph", name: "Ligne télégraphique", team: "player",
-      alive: true, hp: 0, maxHp: P.repairHp, radius: 1.5, type: { typeKey: "telegraph", name: "Ligne télégraphique" },
+      isStructure: true, telegraph: true, typeKey: "telegraph", name: t("Ligne télégraphique"), team: "player",
+      alive: true, hp: 0, maxHp: P.repairHp, radius: 1.5, type: { typeKey: "telegraph", name: t("Ligne télégraphique") },
       position: { x: p.x, y: p.y, z: p.z },
     };
     const wasUp = !cuts.length;
     cuts.push({ i, target });
     refreshWires();
-    if (wasUp) say("<b>Ligne coupée !</b> Le FLN a abattu un poteau : plus d'appui aérien, et les effectifs d'Alger arrivent moins vite. Envoyez des sapeurs la réparer.", p.x, p.z, "bad", "hq_contact", "alertAttack");
+    if (wasUp) say(t("<b>Ligne coupée !</b> Le FLN a abattu un poteau : plus d'appui aérien, et les effectifs d'Alger arrivent moins vite. Envoyez des sapeurs la réparer."), p.x, p.z, "bad", "hq_contact", "alertAttack");
     return true;
   }
 
@@ -56,7 +58,7 @@ export function createAlgTelegraph(app, { poles, units, params = TELEGRAPH }) {
     refreshWires();
     if (!cuts.length) {
       const p = poles.poles[c.i];
-      say("<b>Ligne rétablie.</b> Le poste a de nouveau Alger au bout du fil.", p.x, p.z, "good");
+      say(t("<b>Ligne rétablie.</b> Le poste a de nouveau Alger au bout du fil."), p.x, p.z, "good");
     }
   }
 

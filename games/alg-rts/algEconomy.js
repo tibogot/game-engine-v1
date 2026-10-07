@@ -28,6 +28,7 @@
 //              purse can't pay. A number = effectifs alone.
 import * as THREE from "three";
 import { MAP } from "./layout.js";
+import { t } from "./i18n/i18n.js";
 
 /** What each unit costs: French { mp, fuel, mun } (per SQUAD for infantry), the ALN's a number. */
 export const COSTS = {
@@ -47,9 +48,9 @@ export const POP = { willys: 2, gmc: 2, halftrack: 3, ebr: 4, amx13: 4, alouette
 
 /** The three, in display order. */
 export const RES = [
-  { key: "mp", name: "Effectifs", short: "", cls: "mp" },
-  { key: "fuel", name: "Carburant", short: "C", cls: "fuel" },
-  { key: "mun", name: "Munitions", short: "M", cls: "mun" },
+  { key: "mp", name: t("Effectifs"), short: "", cls: "mp" },
+  { key: "fuel", name: t("Carburant"), short: "C", cls: "fuel" },
+  { key: "mun", name: t("Munitions"), short: "M", cls: "mun" },
 ];
 
 /** A cost as { mp, fuel, mun } (a number = effectifs). */
@@ -143,7 +144,7 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
     value: 0, owner: null, progress: 0, linked: false, linkFrom: null, radius: P.radius,
   }));
   const supply = SUPPLY.map((s) => ({
-    name: `${s.name} · ${s.res === "fuel" ? "carburant" : "munitions"}`, kind: "supply", res: s.res,
+    name: s.res === "fuel" ? t("{name} · carburant", { name: s.name }) : t("{name} · munitions", { name: s.name }), kind: "supply", res: s.res,
     position: at(s.x, s.z), value: 0, owner: null, progress: 0, linked: false, linkFrom: null, radius: P.supplyRadius,
   }));
   const allPoints = [...points, ...supply];

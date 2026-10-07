@@ -6,21 +6,23 @@
 // a head start of fighters already out of the cave, and the French purse.
 //
 // Chosen on the briefing (remembered), or ?difficulty=easy|normal|hard.
+import { t } from "./i18n/i18n.js";
+
 const LEVELS = {
   easy: {
-    label: "Facile", alnStart: 320, alnBase: 25, moudjahid: 35, headStart: 4,
+    label: t("Facile"), alnStart: 320, alnBase: 25, moudjahid: 35, headStart: 4,
     firstBandAt: 40, bandEvery: [70, 115], maxLive: 16, frStart: 750, snipers: 1,
-    blurb: "Petites bandes, lentes à venir.",
+    blurb: t("Petites bandes, lentes à venir."),
   },
   normal: {
-    label: "Normal", alnStart: 480, alnBase: 45, moudjahid: 30, headStart: 8,
+    label: t("Normal"), alnStart: 480, alnBase: 45, moudjahid: 30, headStart: 8,
     firstBandAt: 18, bandEvery: [50, 85], maxLive: 26, frStart: 600, snipers: 2,
-    blurb: "Une katiba qui se bat pour chaque village.",
+    blurb: t("Une katiba qui se bat pour chaque village."),
   },
   hard: {
-    label: "Difficile", alnStart: 700, alnBase: 70, moudjahid: 25, headStart: 12,
+    label: t("Difficile"), alnStart: 700, alnBase: 70, moudjahid: 25, headStart: 12,
     firstBandAt: 10, bandEvery: [35, 60], maxLive: 36, frStart: 500, snipers: 3,
-    blurb: "Toute la wilaya contre un seul poste.",
+    blurb: t("Toute la wilaya contre un seul poste."),
   },
 };
 export const DIFFICULTIES = Object.entries(LEVELS).map(([key, v]) => ({ key, label: v.label, blurb: v.blurb }));

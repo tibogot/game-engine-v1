@@ -22,6 +22,8 @@
 //              star more (accuracy, suppression, rate of fire; damage taken as before — the
 //              guerrilla's edge is in the shooting, not the skin). Announced to the player.
 
+import { t } from "./i18n/i18n.js";
+
 export const VET = {
   thresholds: [40, 110, 220],
   value: { man: 10, fmTeam: 14, tireur: 16, vehicle: 30, structure: 25 },
@@ -61,7 +63,7 @@ export function createAlgVeterancy({ app, squads }) {
         const td = k.takeDamage.bind(k);
         k.takeDamage = (n) => td(n * vetStats(k.stars ?? 0).armor);
       }
-      app.algBattle?.say?.(`<b>${k.type?.name ?? "Un véhicule"}</b> — ${"★".repeat(k.stars)} : un équipage aguerri.`, k.position.x, k.position.z, "good");
+      app.algBattle?.say?.(t("<b>{name}</b> — {stars} : un équipage aguerri.", { name: k.type?.name ?? t("Un véhicule"), stars: "★".repeat(k.stars) }), k.position.x, k.position.z, "good");
     }
   }
   /** Every ALN fighter at the katiba's stars (each step: the new ones too). */
@@ -86,7 +88,7 @@ export function createAlgVeterancy({ app, squads }) {
       katiba.kills++;
       while (katiba.stars < P.katiba.length && katiba.kills >= P.katiba[katiba.stars]) {
         katiba.stars++;
-        app.algBattle?.say?.(`<b>La katiba s'aguerrit</b> — ${"★".repeat(katiba.stars)} : ses combattants tirent plus juste et tiennent mieux sous le feu.`, null, null, "bad");
+        app.algBattle?.say?.(t("<b>La katiba s'aguerrit</b> — {stars} : ses combattants tirent plus juste et tiennent mieux sous le feu.", { stars: "★".repeat(katiba.stars) }), null, null, "bad");
       }
     }
     if (!k || k.team !== "player" || e.team === k.team) return;
@@ -100,7 +102,7 @@ export function createAlgVeterancy({ app, squads }) {
     while (s.stars < P.thresholds.length && s.xp >= P.thresholds[s.stars]) {
       s.stars++;
       const l = s.leader?.position;
-      app.algBattle?.say?.(`<b>${s.name}</b> — ${"★".repeat(s.stars)} vétérans : ils tirent plus juste et tiennent mieux sous le feu.`, l?.x ?? null, l?.z ?? null, "good");
+      app.algBattle?.say?.(t("<b>{name}</b> — {stars} vétérans : ils tirent plus juste et tiennent mieux sous le feu.", { name: s.name, stars: "★".repeat(s.stars) }), l?.x ?? null, l?.z ?? null, "good");
     }
   }
 

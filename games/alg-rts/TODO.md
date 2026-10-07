@@ -207,7 +207,15 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    the minimap, buildings facing it); (c) a FRENCH AI — the big one (patrols, garrisons, reinforcing,
    taking villages back, call-ins); (d) the FLN's own toolkit worth playing (item 6's asymmetry).
    Plan: (a) a little at a time from now (cheap now, dear later); (b)+(c) after item 6.
-9. [ ] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). Perf ~0 (strings looked up when the UI
+9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:
+   i18n/i18n.js `t(fr, vars)` — the French is the key, English in i18n/en/<area>.js (battle, menu,
+   units, hud, systems); 422 lines wrapped across ~45 files + alg.html; the language in the options
+   menu (Langue) and on the briefing (Français / English), first visit = the browser's language,
+   ?lang=en|fr. tools/algI18nTest.mjs: every t() line has English, same {placeholders}, one English
+   per French line. GLOSSARY kept: appelés, moudjahidine, katiba, mechta/dechra/ksar, wilaya, FLN/ALN
+   in the English; Pièce FM = MG Team, FM = LMG, Sapeurs du Génie = Combat Engineers, Effectifs =
+   Manpower, Échelons = Tiers, Moyens héliportés = Airmobile. RULE: every new player-facing line goes
+   through t() with its English. NEXT: Arabic (below). Was: Perf ~0 (strings looked up when the UI
    is built; one Arabic web font ~100-300 KB at load). The work: (a) EXTRACT every UI string (HUD,
    buttons, tooltips, alerts, tips, briefing, manual, end screens — several hundred, all hard-coded
    French today) into one table — do it TOGETHER with item 8 (both touch every string); (b) English

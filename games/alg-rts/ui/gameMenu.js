@@ -15,6 +15,7 @@
 import { HOTKEY } from "./icons.js";
 import { GIBS } from "../algCombat.js";
 import { createUiScale } from "./uiScale.js";
+import { t, LANG, LANGS, setLang } from "../i18n/i18n.js";
 
 const STORE = "algrts.options.v1";
 // uiScale: the HUD's size (ui/uiScale.js). 1.15 by default (you: "the text is a bit small").
@@ -34,6 +35,7 @@ const CSS = `
 .alg-menu input[type=range] { width: 100%; accent-color: #c9a54a; }
 .alg-menu select { font: 12px var(--hud-sans); background: #252920; color: var(--hud-text); border: 1px solid #454c3a; border-radius: var(--hud-radius); padding: 3px 6px; }
 .alg-menu input[type=checkbox] { accent-color: #c9a54a; width: 15px; height: 15px; justify-self: start; }
+.alg-menu fieldset .note { font-size: 11px; color: var(--hud-dim); }
 .alg-menu .main { display: grid; gap: 8px; margin: 6px 0 4px; }
 .alg-menu .main button { width: 100%; text-align: left; padding: 11px 16px; }
 .alg-menu .keyt { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 14px; }
@@ -55,7 +57,7 @@ const CSS = `
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
 
-const ABILITY_NAMES = { patrol: "Patrouille", grenade: "Grenade", smoke: "Fumigène", stop: "Halte", focus: "Caméra sur la sélection", cutWire: "Couper les barbelés", cancelSite: "Annuler un chantier", retreat: "Retraite", reinforce: "Renforcer", lmg: "FM 24/29", barrage: "Tir de barrage", airStrike: "Frappe aérienne", repair: "Réparer", aimArc: "Orienter la mitrailleuse" };
+const ABILITY_NAMES = { patrol: t("Patrouille"), grenade: t("Grenade"), smoke: t("Fumigène"), stop: t("Halte"), focus: t("Caméra sur la sélection"), cutWire: t("Couper les barbelés"), cancelSite: t("Annuler un chantier"), retreat: t("Retraite"), reinforce: t("Renforcer"), lmg: "FM 24/29", barrage: t("Tir de barrage"), airStrike: t("Frappe aérienne"), repair: t("Réparer"), unload: t("Sortir / débarquer"), aimArc: t("Orienter la mitrailleuse") };
 
 /**
  * @param {object} o
@@ -86,7 +88,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   let back = null, paused = false, savedScale = 1, heldAudio = false;
   const badge = document.createElement("div");
   badge.id = "alg-paused";
-  badge.textContent = "PAUSE";
+  badge.textContent = t("PAUSE");
   badge.hidden = true;
   document.body.appendChild(badge);
 
@@ -123,13 +125,13 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   }
 
   function mainPage() {
-    show(`<div class="kicker">Sand &amp; Blood</div><h2>Pause</h2>
+    show(`<div class="kicker">Sand &amp; Blood</div><h2>${t("Pause")}</h2>
       <div class="main">
-        <button class="go" data-a="resume">Reprendre</button>
-        <button data-a="options">Options</button>
-        <button data-a="keys">Commandes</button>
-        <button data-a="manual">Manuel</button>
-        <button data-a="restart">Recommencer la bataille</button>
+        <button class="go" data-a="resume">${t("Reprendre")}</button>
+        <button data-a="options">${t("Options")}</button>
+        <button data-a="keys">${t("Commandes")}</button>
+        <button data-a="manual">${t("Manuel")}</button>
+        <button data-a="restart">${t("Recommencer la bataille")}</button>
       </div>`, (el) => {
       el.querySelector('[data-a="resume"]').onclick = resume;
       el.querySelector('[data-a="options"]').onclick = optionsPage;
@@ -144,36 +146,41 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
     const s = audio?.settings ?? {};
     const slider = (key, label, v, min, max, step, fmt) =>
       `<label class="r">${label}<input type="range" data-k="${key}" min="${min}" max="${max}" step="${step}" value="${v}"><output>${fmt(v)}</output></label>`;
-    show(`<div class="kicker">Pause</div><h2>Options</h2>
+    show(`<div class="kicker">${t("Pause")}</div><h2>${t("Options")}</h2>
       <div class="opts">
-        <fieldset><legend>Son</legend>
-          <label class="r">Son<input type="checkbox" data-k="sound" ${s.muted ? "" : "checked"}><output></output></label>
-          ${slider("master", "Volume général", s.master ?? 0.8, 0, 1, 0.05, pct)}
-          ${slider("sfx", "Combats et véhicules", s.sfx ?? 1, 0, 1, 0.05, pct)}
-          ${slider("voices", "Voix radio", s.voices ?? 1, 0, 1, 0.05, pct)}
-          ${slider("ambience", "Ambiance", s.ambience ?? 0.7, 0, 1, 0.05, pct)}
+        <fieldset><legend>${t("Son")}</legend>
+          <label class="r">${t("Son")}<input type="checkbox" data-k="sound" ${s.muted ? "" : "checked"}><output></output></label>
+          ${slider("master", t("Volume général"), s.master ?? 0.8, 0, 1, 0.05, pct)}
+          ${slider("sfx", t("Combats et véhicules"), s.sfx ?? 1, 0, 1, 0.05, pct)}
+          ${slider("voices", t("Voix radio"), s.voices ?? 1, 0, 1, 0.05, pct)}
+          ${slider("ambience", t("Ambiance"), s.ambience ?? 0.7, 0, 1, 0.05, pct)}
         </fieldset>
-        <fieldset><legend>Jeu</legend>
-          <label class="r">Corps déchiquetés<select data-k="gore"><option value="coh"${opts.gore === "coh" ? " selected" : ""}>Explosions proches</option><option value="off"${opts.gore === "off" ? " selected" : ""}>Non</option></select><output></output></label>
-          <label class="r">Conseils<input type="checkbox" data-k="tips" ${opts.tips ? "checked" : ""}><output></output></label>
+        <fieldset><legend>${t("Jeu")}</legend>
+          <label class="r">${t("Corps déchiquetés")}<select data-k="gore"><option value="coh"${opts.gore === "coh" ? " selected" : ""}>${t("Explosions proches")}</option><option value="off"${opts.gore === "off" ? " selected" : ""}>${t("Non")}</option></select><output></output></label>
+          <label class="r">${t("Conseils")}<input type="checkbox" data-k="tips" ${opts.tips ? "checked" : ""}><output></output></label>
         </fieldset>
-        <fieldset><legend>Affichage</legend>
-          ${slider("uiScale", "Taille de l'interface", opts.uiScale, 1, 1.5, 0.05, pct)}
+        <fieldset><legend>${t("Langue")}</legend>
+          <label class="r">${t("Langue")}<select data-k="lang">${LANGS.map((l) => `<option value="${l.key}"${l.key === LANG ? " selected" : ""}>${l.label}</option>`).join("")}</select><output></output></label>
+          <div class="note">${t("La partie recommence dans la langue choisie.")}</div>
         </fieldset>
-        <fieldset><legend>Caméra</legend>
-          ${slider("panSpeed", "Vitesse de défilement", opts.panSpeed, 25, 110, 5, (v) => `${v}`)}
-          <label class="r">Défilement au bord<input type="checkbox" data-k="edgeScroll" ${opts.edgeScroll ? "checked" : ""}><output></output></label>
+        <fieldset><legend>${t("Affichage")}</legend>
+          ${slider("uiScale", t("Taille de l'interface"), opts.uiScale, 1, 1.5, 0.05, pct)}
+        </fieldset>
+        <fieldset><legend>${t("Caméra")}</legend>
+          ${slider("panSpeed", t("Vitesse de défilement"), opts.panSpeed, 25, 110, 5, (v) => `${v}`)}
+          <label class="r">${t("Défilement au bord")}<input type="checkbox" data-k="edgeScroll" ${opts.edgeScroll ? "checked" : ""}><output></output></label>
         </fieldset>
       </div>
-      <div class="row"><button data-a="back">Retour</button><button class="go" data-a="resume">Reprendre</button></div>`, (el) => {
+      <div class="row"><button data-a="back">${t("Retour")}</button><button class="go" data-a="resume">${t("Reprendre")}</button></div>`, (el) => {
       el.querySelector('[data-a="back"]').onclick = mainPage;
       el.querySelector('[data-a="resume"]').onclick = resume;
       el.addEventListener("input", (e) => {
-        const t = e.target, k = t.dataset.k;
+        const el2 = e.target, k = el2.dataset.k;
         if (!k) return;
-        const out = t.closest("label")?.querySelector("output");
-        if (t.type === "range") {
-          const v = Number(t.value);
+        const out = el2.closest("label")?.querySelector("output");
+        if (k === "lang") { if (el2.value !== LANG) setLang(el2.value); return; }
+        if (el2.type === "range") {
+          const v = Number(el2.value);
           if (k === "panSpeed") { opts.panSpeed = v; save(); apply(); out.textContent = `${v}`; return; }
           if (k === "uiScale") { opts.uiScale = v; save(); apply(); out.textContent = pct(v); return; }
           out.textContent = pct(v);
@@ -182,10 +189,10 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
           // (paused: the mixer's set() resumes the context — hold it again)
           if (paused && audio && !audio.settings.muted) { audio.ctx.suspend(); heldAudio = true; }
         } else if (k === "sound") {
-          audio?.set("muted", !t.checked);
+          audio?.set("muted", !el2.checked);
           if (paused && audio && !audio.settings.muted) { audio.ctx.suspend(); heldAudio = true; }
-        } else if (k === "gore") { opts.gore = t.value; save(); apply(); }
-        else if (k === "tips" || k === "edgeScroll") { opts[k] = t.checked; save(); apply(); }
+        } else if (k === "gore") { opts.gore = el2.value; save(); apply(); }
+        else if (k === "tips" || k === "edgeScroll") { opts[k] = el2.checked; save(); apply(); }
       });
     });
   }
@@ -193,25 +200,25 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   function keysPage() {
     const row = (what, ...keys) => `<tr><td>${what}</td><td>${keys.map((k) => `<kbd>${k}</kbd>`).join(" ")}</td></tr>`;
     const abil = Object.entries(HOTKEY).map(([k, key]) => row(ABILITY_NAMES[k] ?? k, key)).join("");
-    show(`<div class="kicker">Pause</div><h2>Commandes</h2>
+    show(`<div class="kicker">${t("Pause")}</div><h2>${t("Commandes")}</h2>
       <table class="keyt">
-        ${row("Déplacer la caméra", "Z Q S D", "↑ ← ↓ →")}
-        ${row("Tourner la caméra", "A", "E")}
-        ${row("Zoom", "molette")}
-        ${row("Sélectionner", "clic gauche", "glisser")}
-        ${row("Ajouter à la sélection", "Maj + clic")}
-        ${row("Tous du même type", "double-clic")}
-        ${row("Déplacer / attaquer", "clic droit")}
-        ${row("Groupes", "Ctrl + 1…9", "1…9")}
-        ${row("Voir la couverture", "V (maintenu)")}
-        ${row("Carte tactique", "Tab (maintenu ou tapé)")}
-        ${row("Dernière alerte", "Espace")}
-        ${row("Tourner un bâtiment", "R")}
-        ${row("Pause / menu", "Échap", "F10")}
+        ${row(t("Déplacer la caméra"), "Z Q S D", "↑ ← ↓ →")}
+        ${row(t("Tourner la caméra"), "A", "E")}
+        ${row(t("Zoom"), t("molette"))}
+        ${row(t("Sélectionner"), t("clic gauche"), t("glisser"))}
+        ${row(t("Ajouter à la sélection"), t("Maj + clic"))}
+        ${row(t("Tous du même type"), t("double-clic"))}
+        ${row(t("Déplacer / attaquer"), t("clic droit"))}
+        ${row(t("Groupes"), "Ctrl + 1…9", "1…9")}
+        ${row(t("Voir la couverture"), t("V (maintenu)"))}
+        ${row(t("Carte tactique"), t("Tab (maintenu ou tapé)"))}
+        ${row(t("Dernière alerte"), t("Espace"))}
+        ${row(t("Tourner un bâtiment"), "R")}
+        ${row(t("Pause / menu"), t("Échap"), "F10")}
         ${abil}
       </table>
-      <div class="keys">Les touches suivent leur place sur le clavier : sur un clavier QWERTY, la caméra se déplace avec W A S D et tourne avec Q / E.</div>
-      <div class="row"><button data-a="back">Retour</button><button class="go" data-a="resume">Reprendre</button></div>`, (el) => {
+      <div class="keys">${t("Les touches suivent leur place sur le clavier : sur un clavier QWERTY, la caméra se déplace avec W A S D et tourne avec Q / E.")}</div>
+      <div class="row"><button data-a="back">${t("Retour")}</button><button class="go" data-a="resume">${t("Reprendre")}</button></div>`, (el) => {
       el.querySelector('[data-a="back"]').onclick = mainPage;
       el.querySelector('[data-a="resume"]').onclick = resume;
     });
@@ -219,72 +226,74 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
 
   // ── THE MANUAL ─────────────────────────────────────────────────────────────
   const K = (k) => `<kbd>${k}</kbd>`;
+  const P = (s) => `<p>${s}</p>`;
+  const UL = (...items) => `<ul>${items.map((s) => `<li>${s}</li>`).join("")}</ul>`;
   const MANUAL = [
-    ["But", `
-      <p>Algérie, 1957, la vallée de Tighanimine dans les Aurès. Vous commandez le poste français ; le FLN tient la montagne.</p>
-      <p><b>Les villages sont l'enjeu.</b> Chaque camp part de <b>500 points</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu.</p>
-      <ul>
-        <li><b>Prendre un village :</b> postez des hommes <b>à pied</b> dans son cercle, sans ennemi dedans.</li>
-        <li><b>Victoire immédiate :</b> détruisez la <b>grotte du FLN</b> (au nord-ouest).</li>
-        <li><b>Défaite immédiate :</b> le <b>poste</b> est détruit.</li>
-      </ul>`],
-    ["Ressources", `
-      <p>Trois ressources, en haut à droite :</p>
-      <ul>
-        <li><b>Effectifs</b> : former les unités. Le poste en rapporte toujours un peu.</li>
-        <li><b>Carburant</b> : les véhicules, l'Alouette, les échelons.</li>
-        <li><b>Munitions</b> : grenades, capacités (barrage, frappe aérienne…), la Légion.</li>
-      </ul>
-      <p>Les villages et les points de ravitaillement que vous tenez en rapportent, s'ils sont <b>reliés au poste</b> par des terrains à vous. Un GMC en patrouille ravitaille les villages tenus.</p>
-      <p><b>Échelons</b> (sur la fiche du poste) : <b>Moyens héliportés</b> (tenir 1 village) ouvre les paras, l'Alouette, le half-track ; <b>Blindés</b> (tenir 2 villages) ouvre l'EBR, l'AMX-13, la Légion.</p>`],
-    ["Unités", `
-      <ul>
-        <li><b>Appelés</b> (groupe de 6) : l'infanterie de base. Grenades, fumigène ; l'amélioration <b>FM 24/29</b> leur donne un fusil-mitrailleur.</li>
-        <li><b>Sapeurs du Génie</b> (3) : construisent, réparent, coupent les barbelés.</li>
-        <li><b>Pièce FM</b> (3) : une mitrailleuse et ses servants. Arrêtée, elle <b>se met en batterie</b> (quelques secondes) et ne tire que dans son <b>secteur</b> (le cône au sol) — mais elle cloue au sol tout ce qui y entre. Pour bouger, elle se replie d'abord. Prenez-la de flanc ou aveuglez-la au fumigène.</li>
-        <li><b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface.</li>
-        <li><b>Légionnaires</b> : l'infanterie la plus solide.</li>
-        <li><b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain.</li>
-        <li><b>Camion GMC</b> : transporte, ravitaille les villages en patrouille.</li>
-        <li><b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions.</li>
-        <li><b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments. <b>Le blindage dépend du côté touché</b> : les balles ricochent sur l'avant, mordent sur les flancs et percent l'arrière (l'AMX-13 tient des minutes face à un groupe, une vingtaine de secondes de dos). Gardez l'avant vers l'ennemi ; grenades et mines frappent de partout.</li>
-        <li><b>Alouette II</b> : hélicoptère armé d'une AA-52.</li>
-      </ul>
-      <p>L'infanterie se commande <b>par groupe</b> : un clic sur un homme sélectionne tout son groupe. Les unités gagnent des <b>galons</b> (vétérance) en combattant.</p>`],
-    ["Le poste et les bâtiments", `
-      <p><b>Le poste de Tighanimine</b> (le fort blanc au drapeau) : cliquez-le pour former l'infanterie, débloquer les échelons, et appeler la <b>frappe aérienne</b>. Ses tours tirent seules sur l'ennemi proche.</p>
-      <p><b>Le parc auto</b> forme les véhicules ; <b>l'hélisurface</b> les paras et l'Alouette.</p>
-      <p><b>Construire</b> (sapeurs sélectionnés) : sacs de sable, barbelés, nid de mitrailleuse, fosse de mortier, mirador, projecteur. Choisissez sur leur fiche, placez avec le clic gauche, ${K("R")} pour tourner.</p>`],
-    ["Ordres spéciaux", `
-      <ul>
-        <li><b>Carte tactique</b> : maintenez ${K("Tab")} pour un coup d'œil sur toute la vallée, tapez-le pour la garder ouverte. Clic gauche : la caméra y va ; clic droit : la sélection y part.</li>
-        <li><b>Couverture</b> : maintenez ${K("V")} pour voir où les hommes sont à couvert (vert) et cachés (cyan). Derrière murs et rochers on survit ; à découvert, non.</li>
-        <li><b>Garnison</b> : infanterie sélectionnée, <b>clic droit sur une maison</b> : le groupe entre et tire par les fenêtres. Une grenade dedans les fait sortir. ${K("K")} : sortir.</li>
-        <li><b>Orienter la mitrailleuse</b> ${K("O")} : pièce FM sélectionnée, cliquez où elle doit tirer : en batterie, elle pivote (lentement) ; repliée, elle se mettra en batterie face à ce point.</li>
-        <li><b>Grenade</b> ${K("G")}, <b>fumigène</b> ${K("B")} : visez avec le clic gauche. La fumée coupe la vue.</li>
-        <li><b>Retraite</b> ${K("T")} : le groupe rentre au poste, plus vite. <b>Renforcer</b> ${K("Y")} : au poste, remplace les hommes perdus.</li>
-        <li><b>Réparer</b> ${K("J")} : sapeurs sélectionnés, clic droit sur un véhicule ou un bâtiment abîmé.</li>
-        <li><b>Couper les barbelés</b> ${K("X")} : les sapeurs coupent les plus proches.</li>
-        <li><b>Patrouille</b> ${K("P")} : aller-retour sur la piste la plus proche.</li>
-      </ul>`],
-    ["Appuis", `
-      <ul>
-        <li><b>Tir de barrage</b> ${K("M")} (fosse de mortier) : six obus sur une zone ; les abris ne protègent pas.</li>
-        <li><b>Fusée éclairante</b> (fosse de mortier, la nuit) : éclaire une zone et révèle ceux qui s'y cachent.</li>
-        <li><b>Frappe aérienne</b> ${K("L")} (le poste) : un T-6 arrive en quelques secondes, mitraille une ligne jusqu'au point puis y largue deux bombes.</li>
-      </ul>
-      <p>Pour ces trois appuis : cliquez le bouton, un cercle suit la souris, <b>clic gauche</b> pour tirer, clic droit ou ${K("Échap")} pour annuler.</p>`],
-    ["Le FLN", `
-      <p>Le FLN ne se bat pas à découvert : ses bandes attendent dans les broussailles et frappent ceux qui s'approchent, puis se replient vers la montagne. Ses <b>caches d'armes</b> arment des tireurs FM : trouvez-les et détruisez-les.</p>
-      <p>Éclairez avec la jeep, avancez groupés, gardez le FM avec vous, et méfiez-vous des villages tranquilles.</p>`],
+    [t("But"),
+      P(t("Algérie, 1957, la vallée de Tighanimine dans les Aurès. Vous commandez le poste français ; le FLN tient la montagne.")) +
+      P(t("<b>Les villages sont l'enjeu.</b> Chaque camp part de <b>500 points</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu.")) +
+      UL(
+        t("<b>Prendre un village :</b> postez des hommes <b>à pied</b> dans son cercle, sans ennemi dedans."),
+        t("<b>Victoire immédiate :</b> détruisez la <b>grotte du FLN</b> (au nord-ouest)."),
+        t("<b>Défaite immédiate :</b> le <b>poste</b> est détruit."),
+      )],
+    [t("Ressources"),
+      P(t("Trois ressources, en haut à droite :")) +
+      UL(
+        t("<b>Effectifs</b> : former les unités. Le poste en rapporte toujours un peu."),
+        t("<b>Carburant</b> : les véhicules, l'Alouette, les échelons."),
+        t("<b>Munitions</b> : grenades, capacités (barrage, frappe aérienne…), la Légion."),
+      ) +
+      P(t("Les villages et les points de ravitaillement que vous tenez en rapportent, s'ils sont <b>reliés au poste</b> par des terrains à vous. Un GMC en patrouille ravitaille les villages tenus.")) +
+      P(t("<b>Échelons</b> (sur la fiche du poste) : <b>Moyens héliportés</b> (tenir 1 village) ouvre les paras, l'Alouette, le half-track ; <b>Blindés</b> (tenir 2 villages) ouvre l'EBR, l'AMX-13, la Légion."))],
+    [t("Unités"),
+      UL(
+        t("<b>Appelés</b> (groupe de 6) : l'infanterie de base. Grenades, fumigène ; l'amélioration <b>FM 24/29</b> leur donne un fusil-mitrailleur."),
+        t("<b>Sapeurs du Génie</b> (3) : construisent, réparent, coupent les barbelés."),
+        t("<b>Pièce FM</b> (3) : une mitrailleuse et ses servants. Arrêtée, elle <b>se met en batterie</b> (quelques secondes) et ne tire que dans son <b>secteur</b> (le cône au sol) — mais elle cloue au sol tout ce qui y entre. Pour bouger, elle se replie d'abord. Prenez-la de flanc ou aveuglez-la au fumigène."),
+        t("<b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface."),
+        t("<b>Légionnaires</b> : l'infanterie la plus solide."),
+        t("<b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain."),
+        t("<b>Camion GMC</b> : transporte, ravitaille les villages en patrouille."),
+        t("<b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions."),
+        t("<b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments. <b>Le blindage dépend du côté touché</b> : les balles ricochent sur l'avant, mordent sur les flancs et percent l'arrière (l'AMX-13 tient des minutes face à un groupe, une vingtaine de secondes de dos). Gardez l'avant vers l'ennemi ; grenades et mines frappent de partout."),
+        t("<b>Alouette II</b> : hélicoptère armé d'une AA-52."),
+      ) +
+      P(t("L'infanterie se commande <b>par groupe</b> : un clic sur un homme sélectionne tout son groupe. Les unités gagnent des <b>galons</b> (vétérance) en combattant."))],
+    [t("Le poste et les bâtiments"),
+      P(t("<b>Le poste de Tighanimine</b> (le fort blanc au drapeau) : cliquez-le pour former l'infanterie, débloquer les échelons, et appeler la <b>frappe aérienne</b>. Ses tours tirent seules sur l'ennemi proche.")) +
+      P(t("<b>Le parc auto</b> forme les véhicules ; <b>l'hélisurface</b> les paras et l'Alouette.")) +
+      P(t("<b>Construire</b> (sapeurs sélectionnés) : sacs de sable, barbelés, nid de mitrailleuse, fosse de mortier, mirador, projecteur. Choisissez sur leur fiche, placez avec le clic gauche, {key} pour tourner.", { key: K("R") }))],
+    [t("Ordres spéciaux"),
+      UL(
+        t("<b>Carte tactique</b> : maintenez {key} pour un coup d'œil sur toute la vallée, tapez-le pour la garder ouverte. Clic gauche : la caméra y va ; clic droit : la sélection y part.", { key: K("Tab") }),
+        t("<b>Couverture</b> : maintenez {key} pour voir où les hommes sont à couvert (vert) et cachés (cyan). Derrière murs et rochers on survit ; à découvert, non.", { key: K("V") }),
+        t("<b>Garnison</b> : infanterie sélectionnée, <b>clic droit sur une maison</b> : le groupe entre et tire par les fenêtres. Une grenade dedans les fait sortir. {key} : sortir.", { key: K("K") }),
+        t("<b>Orienter la mitrailleuse</b> {key} : pièce FM sélectionnée, cliquez où elle doit tirer : en batterie, elle pivote (lentement) ; repliée, elle se mettra en batterie face à ce point.", { key: K("O") }),
+        t("<b>Grenade</b> {g}, <b>fumigène</b> {b} : visez avec le clic gauche. La fumée coupe la vue.", { g: K("G"), b: K("B") }),
+        t("<b>Retraite</b> {t} : le groupe rentre au poste, plus vite. <b>Renforcer</b> {y} : au poste, remplace les hommes perdus.", { t: K("T"), y: K("Y") }),
+        t("<b>Réparer</b> {key} : sapeurs sélectionnés, clic droit sur un véhicule ou un bâtiment abîmé.", { key: K("J") }),
+        t("<b>Couper les barbelés</b> {key} : les sapeurs coupent les plus proches.", { key: K("X") }),
+        t("<b>Patrouille</b> {key} : aller-retour sur la piste la plus proche.", { key: K("P") }),
+      )],
+    [t("Appuis"),
+      UL(
+        t("<b>Tir de barrage</b> {key} (fosse de mortier) : six obus sur une zone ; les abris ne protègent pas.", { key: K("M") }),
+        t("<b>Fusée éclairante</b> (fosse de mortier, la nuit) : éclaire une zone et révèle ceux qui s'y cachent."),
+        t("<b>Frappe aérienne</b> {key} (le poste) : un T-6 arrive en quelques secondes, mitraille une ligne jusqu'au point puis y largue deux bombes.", { key: K("L") }),
+      ) +
+      P(t("Pour ces trois appuis : cliquez le bouton, un cercle suit la souris, <b>clic gauche</b> pour tirer, clic droit ou {key} pour annuler.", { key: K(t("Échap")) }))],
+    [t("Le FLN"),
+      P(t("Le FLN ne se bat pas à découvert : ses bandes attendent dans les broussailles et frappent ceux qui s'approchent, puis se replient vers la montagne. Ses <b>caches d'armes</b> arment des tireurs FM : trouvez-les et détruisez-les.")) +
+      P(t("Éclairez avec la jeep, avancez groupés, gardez le FM avec vous, et méfiez-vous des villages tranquilles."))],
   ];
   function manualPage(i = 0) {
-    show(`<div class="kicker">Pause</div><h2>Manuel</h2>
+    show(`<div class="kicker">${t("Pause")}</div><h2>${t("Manuel")}</h2>
       <div class="man">
-        <div class="tabs">${MANUAL.map(([t], k) => `<button data-t="${k}"${k === i ? ' class="on"' : ""}>${t}</button>`).join("")}</div>
+        <div class="tabs">${MANUAL.map(([title], k) => `<button data-t="${k}"${k === i ? ' class="on"' : ""}>${title}</button>`).join("")}</div>
         <h3>${MANUAL[i][0]}</h3>${MANUAL[i][1]}
       </div>
-      <div class="row"><button data-a="back">Retour</button><button class="go" data-a="resume">Reprendre</button></div>`, (el) => {
+      <div class="row"><button data-a="back">${t("Retour")}</button><button class="go" data-a="resume">${t("Reprendre")}</button></div>`, (el) => {
       el.classList.add("manual");
       el.querySelector('[data-a="back"]').onclick = mainPage;
       el.querySelector('[data-a="resume"]').onclick = resume;

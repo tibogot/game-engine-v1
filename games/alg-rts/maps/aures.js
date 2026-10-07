@@ -37,6 +37,7 @@
 //     a few fords — the chokepoints an open valley does not have.
 
 import { TRACKS } from "../tracks.js";
+import { t } from "../i18n/i18n.js";
 
 /**
  * THE PLAYABLE AREA: the camera, the units' paths and the minimap stay in
@@ -106,13 +107,14 @@ export const MAP = {
   level: "/levels/alg-aures.v3proj",
   tracks: TRACKS,
   // The supply points (fuel / munitions), on the pistes between the post and the villages.
+  // Their names are descriptions, not place names: translated (i18n/en/systems.js).
   supply: [
-    { name: "Puits d'Ain Tighanimine", x: 134, z: 157, res: "mun" },   // the oasis' dry north shore (132,128 is the pond)
-    { name: "Carrefour de la piste", x: 2, z: 177, res: "fuel" },
-    { name: "Gué de l'oued", x: 193, z: 20, res: "fuel" },          // beside the ford (181,32 is half in the oued)
-    { name: "Col du ravin", x: 19, z: -14, res: "mun" },
-    { name: "Source d'Aïn Kerma", x: -110, z: 150, res: "mun" },         // the step from the crossroads to the dechra
-    { name: "Débouché du ravin", x: -78, z: -82, res: "fuel" },
+    { name: t("Puits d'Ain Tighanimine"), x: 134, z: 157, res: "mun" },   // the oasis' dry north shore (132,128 is the pond)
+    { name: t("Carrefour de la piste"), x: 2, z: 177, res: "fuel" },
+    { name: t("Gué de l'oued"), x: 193, z: 20, res: "fuel" },          // beside the ford (181,32 is half in the oued)
+    { name: t("Col du ravin"), x: 19, z: -14, res: "mun" },
+    { name: t("Source d'Aïn Kerma"), x: -110, z: 150, res: "mun" },         // the step from the crossroads to the dechra
+    { name: t("Débouché du ravin"), x: -78, z: -82, res: "fuel" },
   ],
   handPlaced: true,
 };

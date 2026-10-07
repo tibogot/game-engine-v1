@@ -16,6 +16,7 @@ import { MINI } from "./hudBar.js";
 import { rectOf } from "../../shared-rts/canvasRect.js";
 import { iconSvg, pointIcon } from "./resourceIcons.js";
 import { hasIcon, iconStyle } from "./icons.js";
+import { t } from "../i18n/i18n.js";
 
 const CSS = `
 #alg-score {
@@ -61,7 +62,7 @@ const CSS = `
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 #alg-alerts .al.bad .aic { background: #ff6a55; } #alg-alerts .al.good .aic { background: #5aaeff; }
 #alg-alerts .al.tip { border-left-color: var(--hud-brass); background: #2a2614; border-color: #5c5126; color: #f1e6c4; }
-#alg-alerts .al.tip::before { content: "CONSEIL  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
+#alg-alerts .al.tip::before { content: var(--alg-tip-label, "CONSEIL") "  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
 
 #alg-obj {
   position: fixed; left: 8px; top: 72px; z-index: 56; width: 300px;   /* under the dev stats strip */
@@ -128,6 +129,7 @@ const CSS = `
   background: rgba(8, 9, 6, 0.55); padding: 16px;
 }
 .alg-modal {
+  position: relative;
   width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto;
   background: var(--hud-bg); border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); padding: 20px 24px; color: var(--hud-text);
@@ -151,6 +153,13 @@ const CSS = `
 .alg-modal table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-variant-numeric: tabular-nums; }
 .alg-modal td { padding: 3px 0; border-bottom: 1px solid var(--hud-edge); }
 .alg-modal td + td { text-align: right; }
+/* The language switch on the briefing (top right; algBattle.js brief()). */
+.alg-modal .langs { position: absolute; top: 12px; right: 14px; display: flex; gap: 2px; }
+.alg-modal .langs button {
+  padding: 2px 7px; font: 600 9px var(--hud-sans); letter-spacing: 0.12em;
+  background: transparent; border-color: var(--hud-edge); color: var(--hud-dim);
+}
+.alg-modal .langs button.on { border-color: var(--hud-brass); color: #f1dfa6; background: #3a3417; cursor: default; }
 `;
 
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -165,13 +174,15 @@ export function createBattleHud({ camera, canvas, onJump }) {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
+  // The tips' label (CSS ::before), in the player's language.
+  document.documentElement.style.setProperty("--alg-tip-label", JSON.stringify(t("CONSEIL")));
 
   // ── Score ─────────────────────────────────────────────────────────────────
   const score = document.createElement("div");
   score.id = "alg-score";
   score.innerHTML = `
     <div class="side fr"><span class="hud-label">France</span><span class="num">500</span><span class="bar"><i></i></span></div>
-    <div class="mid"><span class="held"><span class="f">0</span> · <span class="a">0</span></span><span class="drain">villages</span></div>
+    <div class="mid"><span class="held"><span class="f">0</span> · <span class="a">0</span></span><span class="drain">${t("villages")}</span></div>
     <div class="side aln"><span class="bar"><i></i></span><span class="num">500</span><span class="hud-label">FLN</span></div>`;
   document.body.appendChild(score);
   const el = {
@@ -192,7 +203,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     el.heldF.textContent = heldFr;
     el.heldA.textContent = heldAln;
     el.drain.className = `drain${heldFr < heldAln ? " bad" : heldFr > heldAln ? " good" : ""}`;
-    el.drain.textContent = heldFr < heldAln ? "◀ vous perdez des points" : heldFr > heldAln ? "le FLN perd des points ▶" : "villages";
+    el.drain.textContent = heldFr < heldAln ? t("◀ vous perdez des points") : heldFr > heldAln ? t("le FLN perd des points ▶") : t("villages");
   }
 
   // ── Alerts ────────────────────────────────────────────────────────────────
@@ -240,7 +251,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     objKey = key;
     // The objective at hand (shown when collapsed): the first one failing, else the first not done.
     const now = Math.max(0, list.findIndex((o) => o.state === "bad") >= 0 ? list.findIndex((o) => o.state === "bad") : list.findIndex((o) => o.state !== "done"));
-    obj.innerHTML = `<div class="hd"><i class="l"><i class="tw">${objOpen ? "▾" : "▸"}</i>Objectifs</i><span>${headRight}</span></div>` + list.map((o, i) =>
+    obj.innerHTML = `<div class="hd"><i class="l"><i class="tw">${objOpen ? "▾" : "▸"}</i>${t("Objectifs")}</i><span>${headRight}</span></div>` + list.map((o, i) =>
       `<div class="o ${o.state ?? ""}${o.x != null ? " go" : ""}${i === now ? " now" : ""}" data-i="${i}"><div class="m"></div><div><div class="t">${o.text}</div>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></div>`).join("");
     obj.querySelector(".hd").addEventListener("click", () => {
       objOpen = !objOpen;
@@ -349,8 +360,8 @@ export function createBattleHud({ camera, canvas, onJump }) {
      */
     briefing(html, onStart, { levels = [], current = "normal" } = {}) {
       let pick = current;
-      const back = modal(`${html}${levels.length ? `<div class="kicker">Difficulté</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
-        [{ label: "À vos postes", go: true, onClick: () => onStart(pick) }]);
+      const back = modal(`${html}${levels.length ? `<div class="kicker">${t("Difficulté")}</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
+        [{ label: t("À vos postes"), go: true, onClick: () => onStart(pick) }]);
       back.querySelectorAll("[data-lv]").forEach((b) => b.addEventListener("click", () => {
         pick = b.dataset.lv;
         back.querySelectorAll("[data-lv]").forEach((o) => o.classList.toggle("sel", o === b));
@@ -358,7 +369,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
       return back;
     },
     end(html, { onReplay }) {
-      return modal(html, [{ label: "Continuer à regarder" }, { label: "Rejouer", go: true, onClick: onReplay }]);
+      return modal(html, [{ label: t("Continuer à regarder") }, { label: t("Rejouer"), go: true, onClick: onReplay }]);
     },
     dispose() {
       window.removeEventListener("keydown", onKey);

@@ -12,8 +12,9 @@
 //
 // Per frame (tick): the pips and the lines are rewritten only when they change.
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
+import { t } from "../i18n/i18n.js";
 
-const WEAPON = { rifle: "Fusils", mg: "Mitrailleuse", cannon: "Canon", gunship: "Roquettes + mitrailleuse" };
+const WEAPON = { rifle: t("Fusils"), mg: t("Mitrailleuse"), cannon: t("Canon"), gunship: t("Roquettes + mitrailleuse") };
 
 const CSS = `
 #rts-unit-bar { height: 100%; }
@@ -84,7 +85,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
           <div class="who">${u.type?.name ?? u.name ?? u.typeKey}</div>
           ${isStruct || !u.type?.foot ? `<div class="hpbar"><i></i></div>` : `<div class="pips"></div>`}
           <div class="chips"></div>
-          <div class="sub">${isStruct ? (u.team === "player" ? "Bâtiment" : "Bâtiment ennemi") : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
+          <div class="sub">${isStruct ? (u.team === "player" ? t("Bâtiment") : t("Bâtiment ennemi")) : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
         </div>
       </div>`;
     one = { units, pips: root.querySelector(".pips"), hpbar: root.querySelector(".hpbar i"), chips: root.querySelector(".chips") };
@@ -112,7 +113,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
       const url = portrait(g.unit);
       if (url) tile.style.backgroundImage = `url(${url})`;
       tile.innerHTML = `<span class="name">${g.unit.type?.name ?? g.unit.name ?? key}</span>${g.count > 1 ? `<span class="count">${g.count}</span>` : ""}`;
-      tile.title = "Click: only this type · Double-click: all of this type";
+      tile.title = t("Clic : seulement ce type · Double-clic : tous ceux de ce type");
       tile.addEventListener("click", () => onPickGroup(current.filter((u) => u.typeKey === key)));
       tile.addEventListener("dblclick", () => onSelectAllType(key));
       tiles.appendChild(tile);
@@ -137,17 +138,17 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
     }
     // What they are doing, then where they stand (the cover map's thresholds).
     let chips = "";
-    if (live.some((u) => u.pinned)) chips += `<span class="chip pinned">CLOUÉS AU SOL</span>`;
-    else if (live.some((u) => u.suppressed)) chips += `<span class="chip supp">SOUS LE FEU</span>`;
-    if (live.some((u) => u.target?.alive || u.attackTarget?.alive)) chips += `<span class="chip act">FEU</span>`;
-    else if (live.some((u) => u.isMoving)) chips += `<span class="chip act">EN MOUVEMENT</span>`;
+    if (live.some((u) => u.pinned)) chips += `<span class="chip pinned">${t("CLOUÉS AU SOL")}</span>`;
+    else if (live.some((u) => u.suppressed)) chips += `<span class="chip supp">${t("SOUS LE FEU")}</span>`;
+    if (live.some((u) => u.target?.alive || u.attackTarget?.alive)) chips += `<span class="chip act">${t("FEU")}</span>`;
+    else if (live.some((u) => u.isMoving)) chips += `<span class="chip act">${t("EN MOUVEMENT")}</span>`;
     if (!one.units[0].isStructure) {
       const st = stanceFor(live);
       if (st) {
-        if (st.revealed) chips += `<span class="chip seen">REPÉRÉS</span>`;
-        else if (st.concealment >= 0.3) chips += `<span class="chip conceal">CAMOUFLÉS</span>`;
-        if (st.cover >= 0.35) chips += `<span class="chip cover">COUVERTURE SOLIDE</span>`;
-        else if (st.cover >= 0.12) chips += `<span class="chip cover">COUVERTURE LÉGÈRE</span>`;
+        if (st.revealed) chips += `<span class="chip seen">${t("REPÉRÉS")}</span>`;
+        else if (st.concealment >= 0.3) chips += `<span class="chip conceal">${t("CAMOUFLÉS")}</span>`;
+        if (st.cover >= 0.35) chips += `<span class="chip cover">${t("COUVERTURE SOLIDE")}</span>`;
+        else if (st.cover >= 0.12) chips += `<span class="chip cover">${t("COUVERTURE LÉGÈRE")}</span>`;
       }
     }
     if (chips !== lastChips) { lastChips = chips; one.chips.innerHTML = chips; }

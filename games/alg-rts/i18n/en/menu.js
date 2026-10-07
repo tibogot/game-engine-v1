@@ -1,0 +1,136 @@
+// English for the menu area (French key -> English). See ../i18n.js.
+export default {
+  // Pause menu
+  "PAUSE": "PAUSED",
+  "Pause": "Paused",
+  "Reprendre": "Resume",
+  "Options": "Options",
+  "Commandes": "Controls",
+  "Manuel": "Manual",
+  "Recommencer la bataille": "Restart the battle",
+  "Retour": "Back",
+
+  // Options
+  "Son": "Sound",
+  "Volume général": "Master volume",
+  "Combats et véhicules": "Combat and vehicles",
+  "Voix radio": "Radio voices",
+  "Ambiance": "Ambience",
+  "Jeu": "Game",
+  "Corps déchiquetés": "Dismemberment",
+  "Explosions proches": "Close explosions",
+  "Non": "Off",
+  "Conseils": "Tips",
+  "Langue": "Language",
+  "La partie recommence dans la langue choisie.": "The game restarts in the chosen language.",
+  "Affichage": "Display",
+  "Taille de l'interface": "Interface size",
+  "Caméra": "Camera",
+  "Vitesse de défilement": "Scroll speed",
+  "Défilement au bord": "Edge scrolling",
+
+  // Ability names (controls page)
+  "Patrouille": "Patrol",
+  "Grenade": "Grenade",
+  "Fumigène": "Smoke",
+  "Halte": "Halt",
+  "Caméra sur la sélection": "Camera to selection",
+  "Couper les barbelés": "Cut the wire",
+  "Annuler un chantier": "Cancel a construction",
+  "Retraite": "Retreat",
+  "Renforcer": "Reinforce",
+  "Tir de barrage": "Barrage",
+  "Frappe aérienne": "Air strike",
+  "Réparer": "Repair",
+  "Sortir / débarquer": "Exit / unload",
+  "Orienter la mitrailleuse": "Aim the machine gun",
+
+  // Controls page
+  "Déplacer la caméra": "Move the camera",
+  "Tourner la caméra": "Rotate the camera",
+  "Zoom": "Zoom",
+  "molette": "mouse wheel",
+  "Sélectionner": "Select",
+  "clic gauche": "left click",
+  "glisser": "drag",
+  "Ajouter à la sélection": "Add to selection",
+  "Maj + clic": "Shift + click",
+  "Tous du même type": "All of the same type",
+  "double-clic": "double-click",
+  "Déplacer / attaquer": "Move / attack",
+  "clic droit": "right click",
+  "Groupes": "Groups",
+  "Voir la couverture": "Show cover",
+  "V (maintenu)": "V (hold)",
+  "Carte tactique": "Tactical map",
+  "Tab (maintenu ou tapé)": "Tab (hold or tap)",
+  "Dernière alerte": "Last alert",
+  "Espace": "Space",
+  "Tourner un bâtiment": "Rotate a building",
+  "Pause / menu": "Pause / menu",
+  "Échap": "Esc",
+  "Les touches suivent leur place sur le clavier : sur un clavier QWERTY, la caméra se déplace avec W A S D et tourne avec Q / E.": "Keys follow their position on the keyboard: on a QWERTY keyboard, the camera moves with W A S D and rotates with Q / E.",
+
+  // Manual — tabs
+  "But": "Goal",
+  "Ressources": "Resources",
+  "Unités": "Units",
+  "Le poste et les bâtiments": "The post and buildings",
+  "Ordres spéciaux": "Special orders",
+  "Appuis": "Support",
+  "Le FLN": "The FLN",
+
+  // Manual — Goal
+  "Algérie, 1957, la vallée de Tighanimine dans les Aurès. Vous commandez le poste français ; le FLN tient la montagne.": "Algeria, 1957: the Tighanimine valley in the Aurès. You command the French post; the FLN holds the mountain.",
+  "<b>Les villages sont l'enjeu.</b> Chaque camp part de <b>500 points</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu.": "<b>The villages are what you fight for.</b> Each side starts with <b>500 points</b>. Whoever holds <b>fewer</b> villages loses points every second; at 0, they have lost.",
+  "<b>Prendre un village :</b> postez des hommes <b>à pied</b> dans son cercle, sans ennemi dedans.": "<b>Taking a village:</b> put men <b>on foot</b> inside its circle, with no enemy in it.",
+  "<b>Victoire immédiate :</b> détruisez la <b>grotte du FLN</b> (au nord-ouest).": "<b>Instant victory:</b> destroy the <b>FLN cave</b> (to the north-west).",
+  "<b>Défaite immédiate :</b> le <b>poste</b> est détruit.": "<b>Instant defeat:</b> your <b>post</b> is destroyed.",
+
+  // Manual — Resources
+  "Trois ressources, en haut à droite :": "Three resources, top right:",
+  "<b>Effectifs</b> : former les unités. Le poste en rapporte toujours un peu.": "<b>Manpower</b>: trains units. The post always brings in a little.",
+  "<b>Carburant</b> : les véhicules, l'Alouette, les échelons.": "<b>Fuel</b>: vehicles, the Alouette, the tiers.",
+  "<b>Munitions</b> : grenades, capacités (barrage, frappe aérienne…), la Légion.": "<b>Munitions</b>: grenades, abilities (barrage, air strike…), the Legion.",
+  "Les villages et les points de ravitaillement que vous tenez en rapportent, s'ils sont <b>reliés au poste</b> par des terrains à vous. Un GMC en patrouille ravitaille les villages tenus.": "The villages and supply points you hold bring them in, as long as they are <b>connected to the post</b> through ground you hold. A GMC truck on patrol resupplies the villages you hold.",
+  "<b>Échelons</b> (sur la fiche du poste) : <b>Moyens héliportés</b> (tenir 1 village) ouvre les paras, l'Alouette, le half-track ; <b>Blindés</b> (tenir 2 villages) ouvre l'EBR, l'AMX-13, la Légion.": "<b>Tiers</b> (on the post's panel): <b>Airmobile</b> (hold 1 village) unlocks the paras, the Alouette, the half-track; <b>Armour</b> (hold 2 villages) unlocks the EBR, the AMX-13, the Legion.",
+
+  // Manual — Units
+  "<b>Appelés</b> (groupe de 6) : l'infanterie de base. Grenades, fumigène ; l'amélioration <b>FM 24/29</b> leur donne un fusil-mitrailleur.": "<b><i>Appelés</i></b> (conscripts, squad of 6): the basic infantry. Grenades, smoke; the <b>FM 24/29</b> upgrade gives them a light machine gun.",
+  "<b>Sapeurs du Génie</b> (3) : construisent, réparent, coupent les barbelés.": "<b>Combat engineers</b> (3): build, repair, cut barbed wire.",
+  "<b>Pièce FM</b> (3) : une mitrailleuse et ses servants. Arrêtée, elle <b>se met en batterie</b> (quelques secondes) et ne tire que dans son <b>secteur</b> (le cône au sol) — mais elle cloue au sol tout ce qui y entre. Pour bouger, elle se replie d'abord. Prenez-la de flanc ou aveuglez-la au fumigène.": "<b>MG team</b> (3): a machine gun and its crew. When it stops it <b>sets up</b> (a few seconds) and only fires within its <b>arc</b> (the cone on the ground) — but it pins down anything that enters it. To move, it packs up first. Flank it or blind it with smoke.",
+  "<b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface.": "<b>Colonial paras</b>: elite infantry, arrive at the helipad.",
+  "<b>Légionnaires</b> : l'infanterie la plus solide.": "<b><i>Légionnaires</i></b>: the toughest infantry.",
+  "<b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain.": "<b>Willys jeep</b>: fast, one machine gun; scouts ahead.",
+  "<b>Camion GMC</b> : transporte, ravitaille les villages en patrouille.": "<b>GMC truck</b>: carries troops, resupplies villages on patrol.",
+  "<b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions.": "<b>M3 half-track</b>: light armour, a .50 cal that can also hit aircraft.",
+  "<b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments. <b>Le blindage dépend du côté touché</b> : les balles ricochent sur l'avant, mordent sur les flancs et percent l'arrière (l'AMX-13 tient des minutes face à un groupe, une vingtaine de secondes de dos). Gardez l'avant vers l'ennemi ; grenades et mines frappent de partout.": "<b>Panhard EBR, AMX-13</b>: armoured vehicles with a 75 mm gun, for positions and buildings. <b>Armour depends on the side hit</b>: bullets bounce off the front, bite into the sides and punch through the rear (an AMX-13 lasts minutes facing a squad, about twenty seconds from behind). Keep the front towards the enemy; grenades and mines hit from any side.",
+  "<b>Alouette II</b> : hélicoptère armé d'une AA-52.": "<b>Alouette II</b>: helicopter armed with an AA-52 machine gun.",
+  "L'infanterie se commande <b>par groupe</b> : un clic sur un homme sélectionne tout son groupe. Les unités gagnent des <b>galons</b> (vétérance) en combattant.": "Infantry is commanded <b>by squad</b>: clicking one man selects his whole squad. Units earn <b>stripes</b> (veterancy) by fighting.",
+
+  // Manual — The post and buildings
+  "<b>Le poste de Tighanimine</b> (le fort blanc au drapeau) : cliquez-le pour former l'infanterie, débloquer les échelons, et appeler la <b>frappe aérienne</b>. Ses tours tirent seules sur l'ennemi proche.": "<b>The Tighanimine post</b> (the white fort with the flag): click it to train infantry, unlock tiers, and call in the <b>air strike</b>. Its towers fire on nearby enemies by themselves.",
+  "<b>Le parc auto</b> forme les véhicules ; <b>l'hélisurface</b> les paras et l'Alouette.": "<b>The motor pool</b> builds vehicles; <b>the helipad</b> the paras and the Alouette.",
+  "<b>Construire</b> (sapeurs sélectionnés) : sacs de sable, barbelés, nid de mitrailleuse, fosse de mortier, mirador, projecteur. Choisissez sur leur fiche, placez avec le clic gauche, {key} pour tourner.": "<b>Building</b> (engineers selected): sandbags, barbed wire, machine-gun nest, mortar pit, watchtower, searchlight. Pick from their panel, place with left click, {key} to rotate.",
+
+  // Manual — Special orders
+  "<b>Carte tactique</b> : maintenez {key} pour un coup d'œil sur toute la vallée, tapez-le pour la garder ouverte. Clic gauche : la caméra y va ; clic droit : la sélection y part.": "<b>Tactical map</b>: hold {key} for a look at the whole valley, tap it to keep it open. Left click: the camera goes there; right click: the selection heads there.",
+  "<b>Couverture</b> : maintenez {key} pour voir où les hommes sont à couvert (vert) et cachés (cyan). Derrière murs et rochers on survit ; à découvert, non.": "<b>Cover</b>: hold {key} to see where men are in cover (green) and hidden (cyan). Behind walls and rocks you survive; in the open, you don't.",
+  "<b>Garnison</b> : infanterie sélectionnée, <b>clic droit sur une maison</b> : le groupe entre et tire par les fenêtres. Une grenade dedans les fait sortir. {key} : sortir.": "<b>Garrison</b>: with infantry selected, <b>right-click a house</b>: the squad goes in and fires from the windows. A grenade inside drives them out. {key}: exit.",
+  "<b>Orienter la mitrailleuse</b> {key} : pièce FM sélectionnée, cliquez où elle doit tirer : en batterie, elle pivote (lentement) ; repliée, elle se mettra en batterie face à ce point.": "<b>Aim the machine gun</b> {key}: with an MG team selected, click where it should fire: set up, it turns (slowly); packed up, it will set up facing that point.",
+  "<b>Grenade</b> {g}, <b>fumigène</b> {b} : visez avec le clic gauche. La fumée coupe la vue.": "<b>Grenade</b> {g}, <b>smoke</b> {b}: aim with left click. Smoke blocks line of sight.",
+  "<b>Retraite</b> {t} : le groupe rentre au poste, plus vite. <b>Renforcer</b> {y} : au poste, remplace les hommes perdus.": "<b>Retreat</b> {t}: the squad runs back to the post, faster. <b>Reinforce</b> {y}: at the post, replaces lost men.",
+  "<b>Réparer</b> {key} : sapeurs sélectionnés, clic droit sur un véhicule ou un bâtiment abîmé.": "<b>Repair</b> {key}: with engineers selected, right-click a damaged vehicle or building.",
+  "<b>Couper les barbelés</b> {key} : les sapeurs coupent les plus proches.": "<b>Cut the wire</b> {key}: the engineers cut the nearest barbed wire.",
+  "<b>Patrouille</b> {key} : aller-retour sur la piste la plus proche.": "<b>Patrol</b> {key}: back and forth along the nearest track.",
+
+  // Manual — Support
+  "<b>Tir de barrage</b> {key} (fosse de mortier) : six obus sur une zone ; les abris ne protègent pas.": "<b>Barrage</b> {key} (mortar pit): six shells on an area; cover does not protect.",
+  "<b>Fusée éclairante</b> (fosse de mortier, la nuit) : éclaire une zone et révèle ceux qui s'y cachent.": "<b>Flare</b> (mortar pit, at night): lights up an area and reveals anyone hiding there.",
+  "<b>Frappe aérienne</b> {key} (le poste) : un T-6 arrive en quelques secondes, mitraille une ligne jusqu'au point puis y largue deux bombes.": "<b>Air strike</b> {key} (the post): a T-6 arrives within seconds, strafes a line up to the point, then drops two bombs on it.",
+  "Pour ces trois appuis : cliquez le bouton, un cercle suit la souris, <b>clic gauche</b> pour tirer, clic droit ou {key} pour annuler.": "For all three: click the button, a circle follows the mouse, <b>left click</b> to fire, right click or {key} to cancel.",
+
+  // Manual — The FLN
+  "Le FLN ne se bat pas à découvert : ses bandes attendent dans les broussailles et frappent ceux qui s'approchent, puis se replient vers la montagne. Ses <b>caches d'armes</b> arment des tireurs FM : trouvez-les et détruisez-les.": "The FLN does not fight in the open: its bands wait in the scrub, strike whoever comes close, then fall back to the mountain. Its <b>arms caches</b> equip machine gunners: find them and destroy them.",
+  "Éclairez avec la jeep, avancez groupés, gardez le FM avec vous, et méfiez-vous des villages tranquilles.": "Scout with the jeep, advance together, keep the machine gun with you, and beware of quiet villages.",
+};

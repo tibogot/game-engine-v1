@@ -63,6 +63,7 @@ import { createAlgMgTeams } from "./algMgTeam.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
 import { installPortraits, hasPortrait } from "./ui/portraits.js";
+import { t } from "./i18n/i18n.js";
 
 /**
  * WHAT EACH BUILDING PRODUCES, seconds per unit (no costs yet: this game's
@@ -283,7 +284,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   if (showroom?.frenchPost) {
     const g = showroom.frenchPost.geometry.userData.gate;
     producers.push(createAlgProducer({
-      mesh: showroom.frenchPost, units, typeKey: "post", name: "Poste de Tighanimine", maxHp: 2000,
+      mesh: showroom.frenchPost, units, typeKey: "post", name: t("Poste de Tighanimine"), maxHp: 2000,
       builds: PRODUCTION.post,
       // In the courtyard behind the gate; out through the arch; the muster.
       inside: [0, g.z + 4.5 * S], outside: [0, g.z - 3.2 * S], rally: muster,
@@ -300,7 +301,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     const c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y);
     const rw = { x: m.position.x + park[0] * c + park[1] * s, z: m.position.z - park[0] * s + park[1] * c };
     producers.push(createAlgProducer({
-      mesh: m, units, typeKey: "motorPool", name: "Parc auto", maxHp: 1400,
+      mesh: m, units, typeKey: "motorPool", name: t("Parc auto"), maxHp: 1400,
       builds: PRODUCTION.motorPool,
       inside: [g.x, 0], outside: out,
       rally: navGrid.nearestOpenWorld(rw.x, rw.z, false) ?? rw,
@@ -314,7 +315,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     const [px, pz] = [-24, -26];
     const rally = { x: m.position.x + px * c + pz * s, z: m.position.z - px * s + pz * c };
     producers.push(createAlgProducer({
-      mesh: m, units, typeKey: "helipad", name: "Hélisurface", maxHp: 900,
+      mesh: m, units, typeKey: "helipad", name: t("Hélisurface"), maxHp: 900,
       builds: PRODUCTION.helipad,
       // Paras trained here walk off the pad's edge, toward the holding point.
       inside: [0, 0], outside: padEdge(m, px, pz), rally,
@@ -333,7 +334,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // The tunnel is the gate: nothing to swing.
     const m = showroom.caveEntrance;
     producers.push(createAlgProducer({
-      mesh: m, units, typeKey: "caveEntrance", name: "Grotte", maxHp: 1600, team: "enemy",
+      mesh: m, units, typeKey: "caveEntrance", name: t("Grotte"), maxHp: 1600, team: "enemy",
       builds: PRODUCTION.caveEntrance,
       inside: [0.15 * S, 2.2 * S], outside: [0.4 * S, -6 * S],
       // They gather 22 m out TOWARD THE VALLEY (the French post), not
@@ -438,21 +439,23 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         const need = s.team === "player" ? tiers.needs(key) : 1;
         const c = COSTS[key] ?? 0;
         return { key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: s.team === "player" ? { ...costOf(c), pop: popOf(key) } : c,
-          locked: need > tiers.tier ? `Tier ${need}: ${tiers.TIERS[need - 1].name}` : null };
+          locked: need > tiers.tier ? t("Tier {n}: {name}", { n: need, name: tiers.TIERS[need - 1].name }) : null };
       });
       const nx = tiers.next();
       if (s.typeKey === "post" && nx) {
         const why = tiers.blockedBy(nx);
         list.push({
           key: "tier", label: `▲ ${nx.name}`, cost: nx.cost, tier: true,
-          locked: why && !why.endsWith("ressources") ? why : null,
-          tip: `Échelon ${nx.n} : ${nx.note}. Il faut tenir ${nx.villages} village${nx.villages > 1 ? "s" : ""}.`,
+          locked: why && economy.held < nx.villages ? why : null,   // too poor alone: not locked (the cost shows it)
+          tip: nx.villages > 1
+            ? t("Échelon {n} : {note}. Il faut tenir {villages} villages.", { n: nx.n, note: nx.note, villages: nx.villages })
+            : t("Échelon {n} : {note}. Il faut tenir 1 village.", { n: nx.n, note: nx.note }),
         });
       }
       return list;
     },
     canAfford: (cost) => economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop),
-    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? `troupes (plafond ${economy.popCap()} : tenez plus de villages)` : ""].filter(Boolean).join(", "),
+    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} : tenez plus de villages)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", "),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
@@ -463,7 +466,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // GRENADE (algGrenades.js): one man of the selection throws.
     abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
       ? [
-        { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? "En patrouille" : "Patrouille", hint: "Patrouille en file sur la piste la plus proche, aller et retour (véhicules : la piste). Un GMC en patrouille ravitaille les villages que vous tenez.", ready: true },
+        { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? t("En patrouille") : t("Patrouille"), hint: t("Patrouille en file sur la piste la plus proche, aller et retour (véhicules : la piste). Un GMC en patrouille ravitaille les villages que vous tenez."), ready: true },
         grenades?.ability(sel),
         // ORIENTER (algMgTeam.js): point a machine-gun team's arc.
         mgTeams?.ability(sel),
@@ -474,7 +477,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
           const sq = squads.squadsIn(sel).filter((s) => squads.upgradeCost(s, "lmg"));
           if (!sq.length) return null;
           const g = UPGRADES.lmg;
-          return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? ` (${sq.length} groupes : chacun paie).` : ""), ready: economy.french.canAfford(g.cost) };
+          return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? t(" ({n} groupes : chacun paie).", { n: sq.length }) : ""), ready: economy.french.canAfford(g.cost) };
         })(),
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
         // RÉPARER (algRepair.js): sappers fix a damaged vehicle or building.
@@ -482,25 +485,25 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         // SORTIR (algGarrison.js): out of the house.
         garrison?.ability(sel),
         sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
-          && { key: "cutWire", label: "Couper", hint: "Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs.", ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
+          && { key: "cutWire", label: t("Couper"), hint: t("Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs."), ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
         // calls a man in for a squad short of men, at the post.
         squads.squadsIn(sel).length > 0 && {
-          key: "retreat", label: squads.squadsIn(sel).every((s) => s.retreating) ? "En retraite" : "Retraite",
-          hint: "Repli sur le poste : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent au poste.", ready: true,
+          key: "retreat", label: squads.squadsIn(sel).every((s) => s.retreating) ? t("En retraite") : t("Retraite"),
+          hint: t("Repli sur le poste : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent au poste."), ready: true,
         },
         (() => {
           const sq = squads.squadsIn(sel), cost = sq.reduce((n, s) => n + squads.reinforceCost(s), 0);
           if (!sq.length) return null;
           const short = sq.some((s) => s.count + squads.pendingFor(s) < s.size);
-          return { key: "reinforce", label: "Renforcer", cost: cost || undefined,
-            hint: !short ? "Groupe au complet." : cost ? "Un homme par groupe incomplet, sorti par la porte du poste." : "Ramenez le groupe au poste pour le renforcer (Retraite).",
+          return { key: "reinforce", label: t("Renforcer"), cost: cost || undefined,
+            hint: !short ? t("Groupe au complet.") : cost ? t("Un homme par groupe incomplet, sorti par la porte du poste.") : t("Ramenez le groupe au poste pour le renforcer (Retraite)."),
             ready: cost > 0 && economy.french.canAfford(cost) };
         })(),
       ].filter(Boolean)
       // A sappers' site (algBuild.js): cancel it, the price back.
       : sel.length === 1 && sel[0].site && sel[0].alive
-        ? [{ key: "cancelSite", label: `Annuler (+${BUILD_COSTS[sel[0].key]})`, hint: `Annuler le chantier : ${BUILD_COSTS[sel[0].key]} ressources rendues.`, ready: true }]
+        ? [{ key: "cancelSite", label: t("Annuler (+{n})", { n: BUILD_COSTS[sel[0].key] }), hint: t("Annuler le chantier : {n} ressources rendues.", { n: BUILD_COSTS[sel[0].key] }), ready: true }]
         // The MORTAR PIT: an illumination flare at night (algFlares.js).
         // and the BARRAGE (algBarrage.js), day or night.
         // The POST: the AIR STRIKE call-in (algAirStrike.js).
@@ -695,7 +698,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // them), the French patrols and convoys along the tracks (algPatrols.js).
   const mines = createAlgMines(app, { units, combat: combat.combat });
   app.algMines = mines;
-  patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(`+${n.fuel} C +${n.mun} M · convoi ${v.name}`) });
+  patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(t("+{fuel} C +{mun} M · convoi {name}", { fuel: n.fuel, mun: n.mun, name: v.name })) });
   app.algPatrols = patrols;
 
   const sim = createSimClock({ hz: 60 });

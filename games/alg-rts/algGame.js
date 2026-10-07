@@ -46,6 +46,7 @@ import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWa
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import { rtsEngineOptions, beginRtsPerfBoot } from "../shared-rts/rtsPerfBoot.js";
 import "../../v3/styles/editor.css";
+import { t } from "./i18n/i18n.js";
 
 const params = new URLSearchParams(location.search);
 
@@ -106,7 +107,7 @@ const SKY_PRO = params.get("sky") !== "atmosphere";
 const FAR_GRASS_TINT = params.get("grassfar") === "1" || params.get("gc") === "0" || params.get("fargrass") === "0";
 
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
-  onStatus("Démarrage du moteur…");
+  onStatus(t("Démarrage du moteur…"));
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
   // so it paints while the engine and the level load, and awaited before the
@@ -281,13 +282,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 
   // The new assets, on the map, until gameplay places them (showroom.js).
   if (params.get("showroom") !== "0") {
-    onStatus("Mise en place du décor…");
+    onStatus(t("Mise en place du décor…"));
     // + the farmsteads and ruins between the villages (algLandmarks.js). ?landmarks=0 = without.
     const extra = params.get("landmarks") !== "0" ? landmarkEntries(app, SHOWROOM) : [];
     app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }
 
-  onStatus("Réglage de la caméra…");
+  onStatus(t("Réglage de la caméra…"));
   // THE COMPANY OF HEROES LENS (you, 2026-09-30): a narrower field of view
   // (40°, was the app's 60 — on a 2:1 window that was ~103° across: small,
   // far units and stretched edges) from further back, so the same ground
@@ -342,7 +343,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // outside the post's gate, selectable, orderable. ?units=0 = without.
   if (params.get("units") !== "0" && app.showroom) {
     const b = LAYOUT.sites.find((s) => s.kind === "french"), yaw = siteYaw(b);
-    onStatus("Rassemblement des troupes…");
+    onStatus(t("Rassemblement des troupes…"));
     app.algUnits = await createAlgUnits(app, {
       showroom: app.showroom,
       muster: { x: b.x - Math.sin(yaw) * 42, z: b.z - Math.cos(yaw) * 42, yaw },
@@ -392,7 +393,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // gravel, rubble, leaves, laid by rule into the ground cache. ?splats=0 =
   // without (and nothing to lay without the cache, ?gc=0).
   if (params.get("splats") !== "0" && app.groundCache) {
-    onStatus("Usure du terrain…");
+    onStatus(t("Usure du terrain…"));
     try { app.algSplats = await createAlgSplats(app); } catch (e) { console.warn("[alg splats] failed:", e); }
   }
   // THE MACRO PHOTO (algMacroGround.js): the ground's large-scale variation. ?macro=0 = without.
@@ -448,7 +449,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // them and along the pistes near the villages. Then the cover map again,
   // with the walls in it. ?fields=0 = without.
   if (params.get("fields") !== "0" && app.algEconomy) {
-    onStatus("Labour des champs…");
+    onStatus(t("Labour des champs…"));
     try {
       const t0 = performance.now();
       app.algFields = createAlgFields(app, { economy: app.algEconomy, navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, plants: app.showroom?.plants ?? null });
@@ -495,7 +496,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // HERDS (algHerds.js): sheep and goats grazing together round the mechtas,
   // the dechra and the springs; they bolt from soldiers. ?herds=0 = without.
   if (params.get("herds") !== "0") {
-    onStatus("Rentrée des troupeaux…");
+    onStatus(t("Rentrée des troupeaux…"));
     try {
       app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom });
     } catch (e) { console.warn("[alg herds] failed:", e); }
@@ -530,7 +531,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     app.devPanel = createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight: applyAuresLight });
   }
 
-  onStatus("Peinture des surfaces…");
+  onStatus(t("Peinture des surfaces…"));
   await atlasReady;
   // needsUpdate uploads on the NEXT render: let two frames draw it under the
   // loading screen before it lifts.
@@ -551,7 +552,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // 26 pipelines built mid-fight and a 987 ms frame before it had this
   // (shared-rts/pipelineWarmup.js). ?warmup=0 to A/B.
   if (params.get("warmup") !== "0") {
-    onStatus("Préparation des effets…");
+    onStatus(t("Préparation des effets…"));
     try {
       const w = await warmGamePipelines(app, engineObjects);
       console.log(`[warmup] ${w.warmed} drawables warmed in ${w.ms} ms`);

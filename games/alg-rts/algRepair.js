@@ -9,6 +9,7 @@
 // bursts of sparks where each man works, now and then a white flash, and at night a flickering
 // blue-white light on it (app.localLights); the sappers' work sound (algSounds "build").
 import * as THREE from "three";
+import { t } from "./i18n/i18n.js";
 
 const SPARK = [1.0, 0.72];   // a spark's colour (tracerField: r, g; the core is white-hot)
 
@@ -244,7 +245,7 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
     ability(sel) {
       if (!sel.some((u) => u.team === "player" && isSapper(u))) return null;
       const any = units.list.some(repairable) || (structures.list ?? []).some(repairable);
-      return { key: "repair", label: "Réparer", hint: "Réparer un de vos véhicules ou bâtiments endommagés : cliquez dessus (ou clic droit avec des sapeurs sélectionnés). Gratuit ; s'arrête sous le feu.", ready: any };
+      return { key: "repair", label: t("Réparer"), hint: t("Réparer un de vos véhicules ou bâtiments endommagés : cliquez dessus (ou clic droit avec des sapeurs sélectionnés). Gratuit ; s'arrête sous le feu."), ready: any };
     },
     get jobs() { return jobs; },
     dispose() {

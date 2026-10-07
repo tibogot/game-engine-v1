@@ -28,16 +28,17 @@
 //
 // The ALN keeps its own bands (algAI.js); vehicles stay single units.
 import { vetStats } from "./algVeterancy.js";
+import { t } from "./i18n/i18n.js";
 
 /** Infantry squads: men per squad, the squad's name, and what one man costs to replace. */
 export const SQUADS = {
-  appele: { size: 6, name: "Groupe", reinforce: 30 },
+  appele: { size: 6, name: t("Groupe"), reinforce: 30 },
   // 3 (balance 2026-10-04): two men at 170 were the dearest and the most fragile in the game (CoH: 3-4).
-  sapeur: { size: 3, name: "Équipe du génie", reinforce: 45 },
+  sapeur: { size: 3, name: t("Équipe du génie"), reinforce: 45 },
   // The machine-gun team (algMgTeam.js): slot 0 carries the gun (`kit`, as an upgrade's weapon).
-  piece: { size: 3, name: "Pièce FM", reinforce: 40, kit: { 0: { weapon: "mg", range: 48, damage: 6, fireRate: 5 } } },
-  para: { size: 5, name: "Stick para", reinforce: 60 },
-  legion: { size: 5, name: "Groupe Légion", reinforce: 80 },
+  piece: { size: 3, name: t("Pièce FM"), reinforce: 40, kit: { 0: { weapon: "mg", range: 48, damage: 6, fireRate: 5 } } },
+  para: { size: 5, name: t("Stick para"), reinforce: 60 },
+  legion: { size: 5, name: t("Groupe Légion"), reinforce: 80 },
 };
 
 /** Squad upgrades: who can buy it, the price, the slot that carries it, his weapon. */
@@ -45,7 +46,7 @@ export const UPGRADES = {
   lmg: {
     label: "FM 24/29", squads: ["appele"], cost: { mun: 60 }, slot: 2,
     weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 },
-    hint: "Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend)."
+    hint: t("Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend)."),
   },
 };
 

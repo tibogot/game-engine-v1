@@ -16,6 +16,7 @@
 // brackets; the ALN's can be right-clicked to attack.
 import * as THREE from "three";
 import { vec3 } from "three/tsl";
+import { t } from "./i18n/i18n.js";
 
 const S = 1.3;
 
@@ -30,12 +31,12 @@ const STATS = {
   mirador: { team: "player", name: "Mirador", hp: 500, weapon: "mg", range: 48, damage: 8, fireRate: 2.4, canHitAir: true, muzzleAt: [0, 6.2 * S + 1.4, 0], vision: 110 },
   // `arcGun`: an EMPLACED machine gun (algMgTeam.js) — it fires in an arc round the way it was
   // built facing (the gun's rest: its barrel, local −Z), swings slowly, never packs up.
-  mgNest: { team: "player", name: "Nid de mitrailleuse", hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
-  mortarPit: { team: "player", name: "Mortier de 81", hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
-  searchlight: { team: "player", name: "Projecteur", hp: 400, vision: 100 },
-  armsCache: { team: "enemy", name: "Cache d'armes", hp: 500, vision: 30 },
+  mgNest: { team: "player", name: t("Nid de mitrailleuse"), hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
+  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
+  searchlight: { team: "player", name: t("Projecteur"), hp: 400, vision: 100 },
+  armsCache: { team: "enemy", name: t("Cache d'armes"), hp: 500, vision: 30 },
   refuge: { team: "enemy", name: "Refuge", hp: 450, vision: 30 },
-  lookout: { team: "enemy", name: "Guetteur", hp: 150, vision: 95 },
+  lookout: { team: "enemy", name: t("Guetteur"), hp: 150, vision: 95 },
   sangar: { team: "enemy", name: "Sangar", hp: 500, weapon: "mg", range: 38, damage: 9, fireRate: 2.6, canHitAir: true, vision: 45 },
 };
 
@@ -107,10 +108,10 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     if (!rec) return s.position.clone();
     if (rec.gun) { rec.gun.getWorldPosition(_v); return _v.clone().add(new THREE.Vector3(0, 0.3, 0)); }
     if (rec.muzzles.length) {
-      const t = s.target?.position;
-      if (!t) return rec.muzzles[0].clone();
+      const tp = s.target?.position;
+      if (!tp) return rec.muzzles[0].clone();
       let best = rec.muzzles[0], bd = Infinity;
-      for (const m of rec.muzzles) { const d = Math.hypot(m.x - t.x, m.z - t.z); if (d < bd) { bd = d; best = m; } }
+      for (const m of rec.muzzles) { const d = Math.hypot(m.x - tp.x, m.z - tp.z); if (d < bd) { bd = d; best = m; } }
       return best.clone();
     }
     return s.position.clone().add(new THREE.Vector3(0, 3, 0));

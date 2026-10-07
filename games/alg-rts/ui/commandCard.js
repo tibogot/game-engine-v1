@@ -17,6 +17,7 @@ import { HOTKEY, hasIcon, iconStyle } from "./icons.js";
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { costOf, hasCost } from "../algEconomy.js";
 import { iconSvg } from "./resourceIcons.js";
+import { t } from "../i18n/i18n.js";
 
 // A price on a button: the effectifs, then the fuel / munitions under it.
 function costTag(c) {
@@ -29,7 +30,7 @@ function costTag(c) {
 // The same, spelled out for a tooltip.
 function costText(c) {
   const k = costOf(c);
-  return [k.mp && `${iconSvg("mp", { size: 11 })} ${k.mp} effectifs`, k.fuel && `${iconSvg("fuel", { size: 11 })} ${k.fuel} carburant`, k.mun && `${iconSvg("mun", { size: 11 })} ${k.mun} munitions`].filter(Boolean).join(" · ");
+  return [k.mp && `${iconSvg("mp", { size: 11 })} ${t("{n} effectifs", { n: k.mp })}`, k.fuel && `${iconSvg("fuel", { size: 11 })} ${t("{n} carburant", { n: k.fuel })}`, k.mun && `${iconSvg("mun", { size: 11 })} ${t("{n} munitions", { n: k.mun })}`].filter(Boolean).join(" · ");
 }
 
 const CSS = `
@@ -149,8 +150,8 @@ export function createCommandCard({
     const hk = HOTKEY[b.key];
     tip.innerHTML = `<div class="t"><b>${esc(b.label)}</b>${hasCost(b.cost) ? `<span>${costText(b.cost)}</span>` : ""}</div>`
       + (b.info ? `<div class="d">${esc(b.info)}</div>` : "")
-      + (b.locked ? `<div class="l">Verrouillé — ${esc(b.locked)}</div>` : hasCost(b.cost) && !canAfford(b.cost) ? `<div class="l">Manque : ${esc(shortOf(b.cost) || "ressources")}</div>` : "")
-      + (hk ? `<div class="k">Key <kbd>${hk}</kbd></div>` : "");
+      + (b.locked ? `<div class="l">${t("Verrouillé — {why}", { why: esc(b.locked) })}</div>` : hasCost(b.cost) && !canAfford(b.cost) ? `<div class="l">${t("Manque : {what}", { what: esc(shortOf(b.cost) || t("ressources")) })}</div>` : "")
+      + (hk ? `<div class="k">${t("Touche")} <kbd>${hk}</kbd></div>` : "");
     tip.style.display = "block";
     const r = b.el.getBoundingClientRect(), panel = root.getBoundingClientRect();
     tip.style.left = `${Math.max(8, Math.min(window.innerWidth - 258, r.left + r.width / 2 - 125))}px`;
@@ -175,8 +176,8 @@ export function createCommandCard({
     root.replaceChildren();
     const grid = document.createElement("div");
     grid.className = "cc-grid";
-    grid.appendChild(button({ kind: "act", key: "stop", label: "Halte", icon: "stop", info: "Halte : abandonner l'ordre en cours et tenir ici.", run: onStop }));
-    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Centrer la caméra sur la sélection.", run: onFocus }));
+    grid.appendChild(button({ kind: "act", key: "stop", label: t("Halte"), icon: "stop", info: t("Halte : abandonner l'ordre en cours et tenir ici."), run: onStop }));
+    grid.appendChild(button({ kind: "act", key: "focus", label: t("Caméra"), icon: "focus", info: t("Centrer la caméra sur la sélection."), run: onFocus }));
     abilityButtons(selected, grid);
     // What these men can raise (the union of every builder's list).
     const can = new Set();
@@ -206,7 +207,7 @@ export function createCommandCard({
       const pic = o.tier ? null : thumbnails?.get(o.key);
       grid.appendChild(button({
         kind: "train", key: o.key, label: o.tier ? o.label.replace(/^▲\s*/, "") : o.label, cost: o.cost ?? 0, pic, icon: o.tier ? "tier" : null,
-        tier: !!o.tier, locked: o.locked, info: o.tip ?? (o.tier ? "" : `Former. Sort par la porte vers le point de ralliement.`),
+        tier: !!o.tier, locked: o.locked, info: o.tip ?? (o.tier ? "" : t("Former. Sort par la porte vers le point de ralliement.")),
         run: () => onBuild(s, o.key),
       }));
     }
@@ -222,10 +223,10 @@ export function createCommandCard({
     root.replaceChildren();
     const grid = document.createElement("div");
     grid.className = "cc-grid";
-    grid.appendChild(button({ kind: "act", key: "focus", label: "Caméra", icon: "focus", info: "Centrer la caméra dessus.", run: onFocus }));
+    grid.appendChild(button({ kind: "act", key: "focus", label: t("Caméra"), icon: "focus", info: t("Centrer la caméra dessus."), run: onFocus }));
     abilityButtons([s], grid);
     root.appendChild(grid);
-    const st = s.constructing ? "En construction" : (s.deploy ?? 1) < 1 ? "Réglage" : s.range ? `Défensif · ${Math.round(s.range)} m` : "";
+    const st = s.constructing ? t("En construction") : (s.deploy ?? 1) < 1 ? t("Réglage") : s.range ? t("Défensif · {m} m", { m: Math.round(s.range) }) : "";
     if (st) { const h = document.createElement("div"); h.className = "cc-hint"; h.textContent = st; root.appendChild(h); }
     refresh();
   }
@@ -274,9 +275,9 @@ export function createCommandCard({
       if (qEl && sig !== queueSig) {
         queueSig = sig;
         qEl.innerHTML = queue.length
-          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" data-qi="${i}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="Clic : annuler (remboursé)">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
+          ? queue.slice(0, 7).map((k, i) => `<span class="q${i === 0 ? " first" : ""}" data-qi="${i}" style="background-image:url(${thumbnails?.get(k) ?? ""})" title="${t("Clic : annuler (remboursé)")}">${i === 0 ? `<span class="bar"><i></i></span>` : ""}</span>`).join("")
             + (queue.length > 7 ? `<span class="idle">+${queue.length - 7}</span>` : "")
-          : `<span class="idle">${baseRef.constructing ? "En construction" : "Rien en formation"}</span>`;
+          : `<span class="idle">${baseRef.constructing ? t("En construction") : t("Rien en formation")}</span>`;
       }
       const bar = qEl?.querySelector(".bar i");
       if (bar) bar.style.width = `${Math.round((baseRef.progress ?? 0) * 100)}%`;

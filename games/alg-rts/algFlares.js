@@ -20,6 +20,7 @@ import * as THREE from "three";
 import { uniform, vec3 } from "three/tsl";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { BloomMRTNode } from "../shared-rts/bloom.js";
+import { t } from "./i18n/i18n.js";
 
 export const FLARE = {
   cost: { mun: 25 },
@@ -64,10 +65,10 @@ export function createAlgFlares({ app, units, selection, purse = null, cover = n
     if (sel.length !== 1 || !isPit(sel[0])) return null;
     const s = sel[0], cd = Math.max(0, s.flareCd ?? 0), dark = night() >= P.nightMin;
     return {
-      key: "flare", label: "Fusée éclairante", cost: purse ? P.cost : undefined,
+      key: "flare", label: t("Fusée éclairante"), cost: purse ? P.cost : undefined,
       hint: dark
-        ? `Une fusée à parachute au-dessus d'un point jusqu'à ${P.range} m : ~${P.life} s de lumière, le terrain dessous VU et personne n'y reste caché. L'ALN l'évite.`
-        : "De nuit seulement : une fusée en plein soleil n'éclaire rien.",
+        ? t("Une fusée à parachute au-dessus d'un point jusqu'à {range} m : ~{life} s de lumière, le terrain dessous VU et personne n'y reste caché. L'ALN l'évite.", { range: P.range, life: P.life })
+        : t("De nuit seulement : une fusée en plein soleil n'éclaire rien."),
       ready: dark && cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd),
     };
   }

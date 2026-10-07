@@ -31,6 +31,7 @@
 import * as THREE from "three";
 import { TRACK_LINES } from "../algTracks.js";
 import { drawIcon } from "./resourceIcons.js";
+import { t } from "../i18n/i18n.js";
 
 const UNITS_HZ = 12;
 const FOG_HZ = 4;
@@ -604,7 +605,7 @@ export function createMinimap({
       if (fr) c.rect(m.x - r, m.y - r, r * 2, r * 2);
       else { c.moveTo(m.x, m.y - r * 1.2); c.lineTo(m.x + r * 1.1, m.y + r * 0.8); c.lineTo(m.x - r * 1.1, m.y + r * 0.8); c.closePath(); }
       c.fill(); c.stroke();
-      label(c, fr ? "POSTE" : "GROTTE", m.x, m.y + r + fpx * 0.85);
+      label(c, fr ? t("POSTE") : t("GROTTE"), m.x, m.y + r + fpx * 0.85);
     }
 
     // Built defences and buildings that are units of play (a mirador, a nest).
@@ -734,10 +735,10 @@ export function createMinimap({
     c.textAlign = "center"; c.textBaseline = "middle";
     c.fillStyle = "#8d8a78";
     c.font = `bold ${15 * s}px 'Segoe UI', system-ui, sans-serif`;
-    c.fillText("PAS DE RADIO", px / 2, px / 2 - 8 * s);
+    c.fillText(t("PAS DE RADIO"), px / 2, px / 2 - 8 * s);
     c.font = `${9 * s}px 'Segoe UI', system-ui, sans-serif`;
     c.fillStyle = "#6b6a5c";
-    c.fillText("CONSTRUISEZ UNE STATION RADIO", px / 2, px / 2 + 12 * s);
+    c.fillText(t("CONSTRUISEZ UNE STATION RADIO"), px / 2, px / 2 + 12 * s);
   }
 
   let unitsT = 0;

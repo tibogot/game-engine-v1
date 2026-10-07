@@ -14,6 +14,7 @@
 // The badge over a held house: its holder's colour and the men in it (n / places).
 import * as THREE from "three";
 import { iconStyle } from "./ui/icons.js";
+import { t } from "./i18n/i18n.js";
 
 const P = {
   cap: 6, mosqueCap: 8,
@@ -112,7 +113,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     // On the man pushing the door (he is still up to enterReach out of it).
     const at = { x: u.position.x, y: app.getWorldHeight(u.position.x, u.position.z) + 0.4, z: u.position.z };
     app.algCombat?.combat?.splashAt?.(at, P.trapDamage, P.trapRadius, { team: "enemy", position: at }, { kind: "grenade" });
-    app.algBattle?.say?.("<b>Maison piégée !</b> Une grenade derrière la porte. Faites passer les sapeurs d'abord : ils trouvent les pièges.", at.x, at.z, "bad", "hq_contact", "alertMine");
+    app.algBattle?.say?.(t("<b>Maison piégée !</b> Une grenade derrière la porte. Faites passer les sapeurs d'abord : ils trouvent les pièges."), at.x, at.z, "bad", "hq_contact", "alertMine");
   }
   function enter(u, h) {
     // A trapped house (left by the FLN): the first French man in sets it off.
@@ -203,7 +204,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
       for (const h of houses) {
         if (!h.trap) continue;
         const sap = units.list.find((u) => u.alive && u.team === "player" && u.typeKey === "sapeur" && Math.hypot(u.position.x - h.door.x, u.position.z - h.door.z) < P.trapSpot);
-        if (sap) { h.trap = false; app.algBattle?.say?.("<b>Piège désamorcé</b> par les sapeurs : une grenade derrière une porte.", h.door.x, h.door.z, "good", null, "alertMine"); }
+        if (sap) { h.trap = false; app.algBattle?.say?.(t("<b>Piège désamorcé</b> par les sapeurs : une grenade derrière une porte."), h.door.x, h.door.z, "good", null, "alertMine"); }
       }
     }
     for (const [u, h] of pending) {
@@ -252,7 +253,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
         h.blasts.length = 0;
         const out = toWorld(h, 0, -(h.hd + 9));
         men.forEach((u, k) => u.orderTo(out.x + (k % 3 - 1) * 2.5, out.z + Math.floor(k / 3) * 2.5));
-        if (men[0]?.team === "player") app.algBattle?.say?.(`<b>${men[0].squad?.name ?? "Le groupe"}</b> chassé de sa maison !`, h.x, h.z, "bad", null, "alertAttack");
+        if (men[0]?.team === "player") app.algBattle?.say?.(t("<b>{name}</b> chassé de sa maison !", { name: men[0].squad?.name ?? t("Le groupe") }), h.x, h.z, "bad", null, "alertAttack");
       }
     }
     for (const s of reRetreat) squads?.retreat?.(s);
@@ -345,7 +346,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
         h.badge.last = key;
         h.badge.el.classList.toggle("enemy", h.team === "enemy");
         h.badge.txt.textContent = `${h.men.length}/${h.cap}`;
-        h.badge.el.title = h.team === "player" ? "Maison occupée — clic : sélectionner · Sortir (K)" : "Maison tenue par le FLN — grenades et mortier les en chassent";
+        h.badge.el.title = h.team === "player" ? t("Maison occupée — clic : sélectionner · Sortir (K)") : t("Maison tenue par le FLN — grenades et mortier les en chassent");
       }
     }
   }
@@ -367,7 +368,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     /** The command card's SORTIR for a selection with men inside (null: none). */
     ability(sel) {
       if (!sel.some((u) => u.inside && u.team === "player")) return null;
-      return { key: "unload", label: "Sortir", hint: "Sortir de la maison par la porte.", ready: true };
+      return { key: "unload", label: t("Sortir"), hint: t("Sortir de la maison par la porte."), ready: true };
     },
     dispose() {
       dom.removeEventListener("contextmenu", onContext, true);

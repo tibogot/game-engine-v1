@@ -9,6 +9,8 @@
 // --rig-texture originalsoldier, judged in games/shared-rts/soldier-lab.html) — a
 // `body` per type and its faction `look` (soldierLooks.js), replacing nam's
 // stand-in. The numbers are this game's to tune.
+import { t } from "./i18n/i18n.js";
+
 export const RTS_SCALE = 1.3;
 const REAL = { soldierHeight: 1.8 };
 
@@ -18,7 +20,7 @@ export const ALG_UNIT_TYPES = {
     typeKey: "appele",
     grenade: true,   // algGrenades.js: the GRENADE ability
     name: "Appelés",
-    buildLabel: "Groupe (6)",   // a SQUAD a click (algSquads.js)
+    buildLabel: t("Groupe (6)"),   // a SQUAD a click (algSquads.js)
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -55,8 +57,8 @@ export const ALG_UNIT_TYPES = {
   // (their body and section look; the gunner dressed by role).
   piece: {
     typeKey: "piece",
-    name: "Pièce FM",
-    buildLabel: "Pièce FM (3)",
+    name: t("Pièce FM"),
+    buildLabel: t("Pièce FM (3)"),
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -88,8 +90,8 @@ export const ALG_UNIT_TYPES = {
   // command card offers (keys of algBuild.js BUILDS).
   sapeur: {
     typeKey: "sapeur",
-    name: "Sapeurs du Génie",
-    buildLabel: "Génie (3)",
+    name: t("Sapeurs du Génie"),
+    buildLabel: t("Génie (3)"),
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -126,8 +128,8 @@ export const ALG_UNIT_TYPES = {
   para: {
     typeKey: "para",
     grenade: true,   // algGrenades.js: the GRENADE ability
-    name: "Paras coloniaux",
-    buildLabel: "Stick para (5)",
+    name: t("Paras coloniaux"),
+    buildLabel: t("Stick para (5)"),
     weapon: "rifle",
     isAir: false,
     foot: true,
@@ -235,8 +237,8 @@ export const ALG_UNIT_TYPES = {
   // (algSniper.js): concealed to a perch above the French, a few shots, then away.
   tireur: {
     typeKey: "tireur",
-    name: "Tireur d'élite",
-    buildLabel: "Tireur",
+    name: t("Tireur d'élite"),
+    buildLabel: t("Tireur"),
     weapon: "sniper",
     footOnly: true,
     coverPierce: 0.5,   // half the cover's damage cut (combat.js): full cover → a hit leaves a man on 20
@@ -274,7 +276,7 @@ export const ALG_UNIT_TYPES = {
   // cache (algAI.js) — destroy the caches and the MGs stop coming.
   fmTeam: {
     typeKey: "fmTeam",
-    name: "Tireur FM",
+    name: t("Tireur FM"),
     buildLabel: "FM 24/29",
     weapon: "mg",
     isAir: false,
@@ -310,7 +312,7 @@ export const ALG_UNIT_TYPES = {
   willys: {
     // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
     drive: { kind: "wheels", turn: 1.6, accel: 6 },
-    typeKey: "willys", name: "Jeep Willys", weapon: "mg",
+    typeKey: "willys", name: t("Jeep Willys"), weapon: "mg",
     isAir: false, hover: 0, speed: 12, radius: 2.9, turnRate: 3.4, maxHp: 120,
     range: 34, damage: 14, fireRate: 1.8, canHitAir: false, vision: 38,
     procedural: "willys", excludeRotorsFromBox: false, facingOffset: 0,
@@ -321,7 +323,7 @@ export const ALG_UNIT_TYPES = {
   gmc: {
     // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
     drive: { kind: "wheels", turn: 1.0, accel: 3 },
-    typeKey: "gmc", name: "Camion GMC",
+    typeKey: "gmc", name: t("Camion GMC"),
     isAir: false, hover: 0, speed: 9, radius: 3.6, turnRate: 3.0, maxHp: 160,
     range: 0, damage: 0, fireRate: 1, canHitAir: false, vision: 34,
     procedural: "gmc", excludeRotorsFromBox: false, facingOffset: 0,
@@ -331,7 +333,7 @@ export const ALG_UNIT_TYPES = {
   halftrack: {
     // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")
     drive: { kind: "wheels", turn: 0.9, accel: 2.6 },
-    typeKey: "halftrack", name: "Half-track M3", weapon: "mg",
+    typeKey: "halftrack", name: t("Half-track M3"), weapon: "mg",
     isAir: false, hover: 0, speed: 10, radius: 4.3, turnRate: 2.5, maxHp: 240,
     range: 38, damage: 16, fireRate: 1.6, canHitAir: true, vision: 38,
     procedural: "halftrack", excludeRotorsFromBox: false, facingOffset: 0,

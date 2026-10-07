@@ -3,6 +3,7 @@
 // its income a minute, and the villages — how many are yours, how many the
 // ALN's. This game's own (nam's shows its requisition points).
 import { iconSvg } from "./resourceIcons.js";
+import { t } from "../i18n/i18n.js";
 const CSS = `
 /* TOP RIGHT (2026-10-02, CoH): the numbers off the command card's back. */
 #alg-res {
@@ -37,9 +38,9 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
   root.id = "alg-res";
   root.innerHTML = `
     <div class="row">
-    <span class="res mp" title="Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes."><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
-    <span class="res fuel" title="Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons."><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
-    <span class="res mun" title="Munitions : des villages et des points de munitions que vous tenez, reliés au poste. Grenades, capacités, la Légion."><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
+    <span class="res mp" title="${t("Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes.")}"><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
+    <span class="res fuel" title="${t("Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons.")}"><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
+    <span class="res mun" title="${t("Munitions : des villages et des points de munitions que vous tenez, reliés au poste. Grenades, capacités, la Légion.")}"><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
     </div>
     <div class="row row2">
     <span class="dim" id="alg-res-villages"></span>
@@ -70,10 +71,10 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
       elAmt[k].textContent = Math.floor(f[k]).toLocaleString();
       elInc[k].textContent = `+${Math.round(inc[k])}`;
     }
-    elVillages.innerHTML = `villages <b class="hud-num">${held}</b>/${total}`
+    elVillages.innerHTML = t("villages <b class=\"hud-num\">{n}</b>/{total}", { n: held, total })
       + (theirs ? ` <span class="enemy">· ALN <b class="hud-num">${theirs}</b></span>` : "")
-      + (cut ? ` <span class="cut" title="Points que vous tenez mais coupés du poste : sans ligne de ravitaillement, ils ne rapportent rien.">· ${cut} coupé${cut > 1 ? "s" : ""}</span>` : "");
-    if (men != null) elTroops.innerHTML = `troupes <b class="hud-num">${men}</b>`;
+      + (cut ? ` <span class="cut" title="${t("Points que vous tenez mais coupés du poste : sans ligne de ravitaillement, ils ne rapportent rien.")}">· ${cut > 1 ? t("{n} coupés", { n: cut }) : t("{n} coupé", { n: cut })}</span>` : "");
+    if (men != null) elTroops.innerHTML = `${t("troupes")} <b class="hud-num">${men}</b>`;
   }
 
   /** A moment's notice beside the numbers (a convoy's delivery: "+30 · convoi"). */

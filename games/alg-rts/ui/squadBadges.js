@@ -14,6 +14,7 @@
 
 import { rectOf } from "../../shared-rts/canvasRect.js";
 import { iconStyle } from "./icons.js";
+import { t } from "../i18n/i18n.js";
 
 const ICONS = {
   // A rifle, slung diagonally.
@@ -72,7 +73,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
     el.innerHTML = `<div class="n"></div>`
       + `<svg class="shield" viewBox="-2 -2 28 32"><path class="rim" d="M12 0 L24 3.5 V13 C24 21 18.5 25.5 12 28 C5.5 25.5 0 21 0 13 V3.5 Z"/>`
       + `<g class="ic" transform="translate(4.2 4.6) scale(0.65)">${ICONS[s.typeKey] ?? ICONS.appele}</g></svg>`
-      + `<div class="bar"><i></i></div><div class="st"></div><div class="up" hidden>FM</div>`;
+      + `<div class="bar"><i></i></div><div class="st"></div><div class="up" hidden>${t("FM")}</div>`;
     document.body.appendChild(el);
     const shield = el.querySelector("svg.shield");
     shield.addEventListener("click", (e) => { e.stopPropagation(); if (s.team === "player") app.selection?.select(s.members); });

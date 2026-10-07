@@ -14,6 +14,7 @@ import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { FR_PAINT_TINT, buildT6 } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { t } from "./i18n/i18n.js";
 
 export const AIRSTRIKE = {
   cost: { mun: 120 },
@@ -66,10 +67,10 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
     if (sel.length !== 1 || !isPost(sel[0])) return null;
     const s = sel[0], cd = Math.max(0, s.airCd ?? 0), busy = runs.some((r) => r.post === s);
     // THE LINE CUT (algTelegraph.js): no line to Algiers, no aircraft.
-    if (app.algTelegraph?.cut) return { key: "airStrike", label: "Ligne coupée", cost: purse ? P.cost : undefined, hint: "Le FLN a coupé la ligne télégraphique : le poste ne peut plus demander d'avion. Des sapeurs peuvent la réparer (clic droit sur le poteau abattu).", ready: false, cooldown: 0 };
+    if (app.algTelegraph?.cut) return { key: "airStrike", label: t("Ligne coupée"), cost: purse ? P.cost : undefined, hint: t("Le FLN a coupé la ligne télégraphique : le poste ne peut plus demander d'avion. Des sapeurs peuvent la réparer (clic droit sur le poteau abattu)."), ready: false, cooldown: 0 };
     return {
-      key: "airStrike", label: busy ? "Avion en route" : "Frappe aérienne", cost: purse ? P.cost : undefined,
-      hint: `Un T-6 mitraille une ligne de ${P.strafe} m jusqu'au point, puis y largue ${P.bombs} bombes. ~${P.delay} s pour arriver, depuis le poste. Les abris ne protègent pas des bombes. L.`,
+      key: "airStrike", label: busy ? t("Avion en route") : t("Frappe aérienne"), cost: purse ? P.cost : undefined,
+      hint: t("Un T-6 mitraille une ligne de {strafe} m jusqu'au point, puis y largue {bombs} bombes. ~{delay} s pour arriver, depuis le poste. Les abris ne protègent pas des bombes. L.", { strafe: P.strafe, bombs: P.bombs, delay: P.delay }),
       ready: !busy && cd <= 0 && (!purse || purse.canAfford(P.cost)), cooldown: Math.ceil(cd),
     };
   }

@@ -23,6 +23,8 @@
 // fragile (45 hp): a rifleman's 30 m reach is too short, so you go up to him or use a flare,
 // a mortar, a vehicle.
 
+import { t } from "./i18n/i18n.js";
+
 export const SNIPER = {
   firstAt: 240,          // s into the war
   every: [150, 220],     // s between recruits
@@ -36,6 +38,9 @@ export const SNIPER = {
   idleRepick: 40,        // s on a perch with nothing to shoot → a new one
   alertEvery: 60,        // s between alerts per sniper
 };
+
+// The alert, built out here: inside createAlgSnipers `t` is the clock, not the translator.
+const sniperAlert = () => t("<b>Tireur embusqué !</b> Les tirs viennent de là — montez-y, ou éclairez-le (fusée).");
 
 export function createAlgSnipers(app, { units, cave, params = SNIPER }) {
   const P = params;
@@ -198,7 +203,7 @@ export function createAlgSnipers(app, { units, cave, params = SNIPER }) {
     app.algLastSeen?.addGhost?.(jx, jz);
     if (st && t - st.alertAt > P.alertEvery) {
       st.alertAt = t;
-      app.algBattle?.say?.("<b>Tireur embusqué !</b> Les tirs viennent de là — montez-y, ou éclairez-le (fusée).", jx, jz, "bad", "hq_contact", "alertAttack");
+      app.algBattle?.say?.(sniperAlert(), jx, jz, "bad", "hq_contact", "alertAttack");
     }
   }
 

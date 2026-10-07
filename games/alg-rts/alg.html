@@ -92,6 +92,9 @@
     <div id="hud"></div>
 
     <script type="module">
+      // LANGUAGES (i18n/i18n.js): French is the key; English lives in i18n/en/systems.js.
+      // Tiny module (the dictionaries only) — the screen is in the player's language at once.
+      import { t } from "./i18n/i18n.js";
       const boot = document.getElementById("boot");
       const msg = document.getElementById("msg");
       const pctEl = document.getElementById("pct");
@@ -101,12 +104,13 @@
 
       // ── Tips: things that are true about this game as it stands ──────────
       const TIPS = [
-        "Aurès, November 1954. The massif is theirs; the valleys are yours.",
-        "The post trains appelés: its gate opens for every man it sends out.",
-        "Up on the minimap is toward the enemy — your post is at the bottom.",
-        "Q / E turn the camera, the wheel zooms, C frees it.",
-        "Ctrl + a number makes a control group; the number calls it back.",
+        t("Aurès, novembre 1954. Le massif est à eux ; les vallées sont à vous."),
+        t("Le poste forme des appelés : sa porte s'ouvre pour chaque homme qu'il envoie."),
+        t("Le haut de la minicarte est tourné vers l'ennemi — votre poste est en bas."),
+        t("Q / E tournent la caméra, la molette zoome, C la libère."),
+        t("Ctrl + un chiffre crée un groupe ; le chiffre le rappelle."),
       ];
+      msg.textContent = t("Chargement");
       let tipI = Math.floor(Math.random() * TIPS.length);
       const showTip = () => {
         tipEl.style.opacity = 0;
@@ -198,14 +202,14 @@
         clearInterval(tipTimer);
         fill.style.width = "100%";
         pctEl.textContent = "100%";
-        msg.textContent = "Ready";
+        msg.textContent = t("Prêt");
         setTimeout(() => boot.classList.add("hidden"), 250);
         setTimeout(() => boot.remove(), 900);
       } catch (e) {
         console.error("[alg-rts] failed to start", e);
         cancelAnimationFrame(raf);
         clearInterval(tipTimer);
-        msg.textContent = "Failed to start";
+        msg.textContent = t("Échec du démarrage");
         err.style.display = "block";
         err.textContent = e?.stack || e?.message || String(e);
       }

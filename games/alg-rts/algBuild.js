@@ -20,6 +20,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { kitView } from "./showroom.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
+import { t } from "./i18n/i18n.js";
 
 /**
  * What a sapper can build. `pad`: stands on levelled ground (the mirador, the
@@ -27,12 +28,12 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
  * for one sapper. `structure`: its combat stats' key (algStructures.js STATS).
  */
 export const BUILDS = {
-  sandbags: { label: "Sacs de sable", tip: "Mur de sacs de sable : une couverture solide pour les hommes derrière.", cost: 20, time: 6, build: () => buildFrSandbagWall(), follow: true },
-  wire: { label: "Barbelés", tip: "Barbelés : il faut les contourner ou les couper ; un véhicule les écrase.", cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
-  mgNest: { label: "Nid de MG", tip: "Nid de mitrailleuse : une AA-52 derrière des sacs de sable.", cost: 90, time: 14, build: () => buildMgNest(), pad: true, structure: "mgNest" },
-  mortarPit: { label: "Mortier", tip: "Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris.", cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
-  mirador: { label: "Mirador", tip: "Mirador : voit à 110 m, une mitrailleuse dans la cabine.", cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
-  searchlight: { label: "Projecteur", tip: "Tour de projecteur : voit à 100 m.", cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
+  sandbags: { label: t("Sacs de sable"), tip: t("Mur de sacs de sable : une couverture solide pour les hommes derrière."), cost: 20, time: 6, build: () => buildFrSandbagWall(), follow: true },
+  wire: { label: t("Barbelés"), tip: t("Barbelés : il faut les contourner ou les couper ; un véhicule les écrase."), cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
+  mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => buildMgNest(), pad: true, structure: "mgNest" },
+  mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris."), cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
+  mirador: { label: "Mirador", tip: t("Mirador : voit à 110 m, une mitrailleuse dans la cabine."), cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
+  searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
   // THE ALN BUILDS TOO (you, 2026-09-30): the same sites, paid from the ALN's
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
   // them — the AI places them through place()). Both lie on the slope, as
@@ -41,12 +42,12 @@ export const BUILDS = {
   // A NEW ARMS CACHE (2026-10-02): the FLN hides one in a village it holds
   // when the French have found theirs (algAI.js) — each standing cache arms
   // two FM teams. Hidden from the French until seen, built or not.
-  armsCache: { label: "Cache d'armes", tip: "Arms cache: arms two FM teams.", cost: 120, time: 40, build: () => buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }), follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
+  armsCache: { label: t("Cache d'armes"), tip: "Arms cache: arms two FM teams.", cost: 120, time: 40, build: () => buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }), follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
   // A NEW REFUGE (2026-10-07, the tunnels): the FLN digs one near a village it holds, the
   // nearest the post first (algAI.js stepRefuges) — its bands go to ground and come back out of
   // it. Hidden from the French until seen.
   refuge: { label: "Refuge", tip: "A hidden casemate: bands go to ground in it and come back out.", cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
-  ambushScreen: { label: "Écran d'embuscade", tip: "Cut scrub on a stone footing: men behind it are hidden until they fire.", cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
+  ambushScreen: { label: t("Écran d'embuscade"), tip: "Cut scrub on a stone footing: men behind it are hidden until they fire.", cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
 };
 /** Who may raise `key`: his type lists it (the sappers), or the piece names his type. */
 export const canBuild = (u, key) => !!(u?.type?.builds?.includes(key) || BUILDS[key]?.by?.includes(u?.typeKey));
@@ -96,9 +97,9 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     // Why not (the first reason found): for a tooltip, and for testing.
     let why = null;
     for (const p of pts) {
-      if (!(p.wx > PLAY.x0 + 4 && p.wx < PLAY.x1 - 4 && p.wz > PLAY.z0 + 4 && p.wz < PLAY.z1 - 4)) why ??= "hors de la zone de jeu";
-      else if ((app.getWaterLevelAt?.(p.wx, p.wz) ?? -Infinity) > p.h - 0.2) why ??= "dans l'eau";
-      else if (navGrid?.isBlockedAtWorld?.(p.wx, p.wz)) why ??= "emplacement occupé";
+      if (!(p.wx > PLAY.x0 + 4 && p.wx < PLAY.x1 - 4 && p.wz > PLAY.z0 + 4 && p.wz < PLAY.z1 - 4)) why ??= t("hors de la zone de jeu");
+      else if ((app.getWaterLevelAt?.(p.wx, p.wz) ?? -Infinity) > p.h - 0.2) why ??= t("dans l'eau");
+      else if (navGrid?.isBlockedAtWorld?.(p.wx, p.wz)) why ??= t("emplacement occupé");
     }
     let ok = !why;
     // Plane h = a + b·dx + c·dz over the footprint (symmetric grid: terms separate).
@@ -109,14 +110,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     let tilt = null, y = a;
     if (B.follow) {
       const n = new THREE.Vector3(-b, 1, -c).normalize();
-      if (n.y < FOLLOW_NY) { ok = false; why ??= "trop en pente"; }
+      if (n.y < FOLLOW_NY) { ok = false; why ??= t("trop en pente"); }
       // Lowest corner decides: nothing floats, the uphill side sinks a little.
       let dip = 0;
       for (const p of pts) dip = Math.max(dip, a + b * (p.lx - f.cx) + c * (p.lz - f.cz) - p.h);
       y = a - b * f.cx - c * f.cz - dip;
       tilt = n;
-    } else if (hi - lo > Math.max(0.6, 2 * Math.max(f.hx, f.hz) * PAD_SLOPE)) { ok = false; why ??= "trop en pente"; }
-    if (ok && B.cost > 0 && !purseOf(key)?.canAfford(B.cost)) { ok = false; why = "pas assez de ressources"; }
+    } else if (hi - lo > Math.max(0.6, 2 * Math.max(f.hx, f.hz) * PAD_SLOPE)) { ok = false; why ??= t("trop en pente"); }
+    if (ok && B.cost > 0 && !purseOf(key)?.canAfford(B.cost)) { ok = false; why = t("pas assez de ressources"); }
     return { ok, why, y, tilt, f };
   }
 
@@ -226,7 +227,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       // Picked like a structure (the shared selection's buildingRenderer):
       // the command card shows it under construction, with Annuler.
       site: true, isStructure: true, alive: true, team: teamOf(key), constructing: true,
-      typeKey: `site:${key}`, name: `Chantier · ${B.label}`, position: mesh.position,
+      typeKey: `site:${key}`, name: t("Chantier · {label}", { label: B.label }), position: mesh.position,
       hp: 0, maxHp: 100, selected: false,
       setSelected(on) { this.selected = on; },
       barW: Math.min(8, 3 + Math.max(f.hx, f.hz) * 0.4),

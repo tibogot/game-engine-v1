@@ -15,6 +15,7 @@
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { HUD_H, HUD_STRIP_H } from "./hudBar.js";
 import { iconStyle } from "./icons.js";
+import { t } from "../i18n/i18n.js";
 
 const LINK = 15;           // m: men closer than this to one of the group are in it
 const EVERY = 0.25;        // s between regroupings
@@ -63,13 +64,13 @@ const CSS = `
 
 /** What a group is doing, most urgent first: [class, label, words]. */
 function stateOf(g) {
-  if (g.squad?.retreating) return ["retreat", "REPLI", "en repli"];
-  if (g.some((u) => u.pinned)) return ["pinned", "CLOUÉ", "cloués au sol"];
-  if (g.some((u) => u.suppressed)) return ["supp", "FEU!", "sous le feu"];
-  if (g.some((u) => u.target?.alive || u.attackTarget?.alive)) return ["fight", "FEU", "font feu"];
-  if (g.some((u) => u.isMoving)) return ["move", "»", "en mouvement"];
-  if (g.some((u) => u.inCover)) return ["cover", "ABRI", "in cover"];
-  return ["idle", "", "holding"];
+  if (g.squad?.retreating) return ["retreat", t("REPLI"), t("en repli")];
+  if (g.some((u) => u.pinned)) return ["pinned", t("CLOUÉ"), t("cloués au sol")];
+  if (g.some((u) => u.suppressed)) return ["supp", t("FEU!"), t("sous le feu")];
+  if (g.some((u) => u.target?.alive || u.attackTarget?.alive)) return ["fight", t("FEU"), t("font feu")];
+  if (g.some((u) => u.isMoving)) return ["move", "»", t("en mouvement")];
+  if (g.some((u) => u.inCover)) return ["cover", t("ABRI"), t("à couvert")];
+  return ["idle", "", t("en position")];
 }
 
 export function createArmyTabs({ units, selection, thumbnails, focus = () => {}, team = "player", mount = document.body, squads = null }) {
@@ -187,8 +188,8 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       const isSel = v.g.some((u) => sel.has(u));
       if (isSel !== v.selLast) { v.selLast = isSel; v.el.classList.toggle("sel", isSel); }
       const name = v.g.squad?.name ?? v.g[0].type?.name ?? v.g[0].typeKey;
-      const count = v.g.squad ? ` (${live.length}/${v.g.squad.size} hommes)` : v.g.length > 1 ? ` ×${v.g.length}` : "";
-      v.el.title = `${name}${count} — ${words}, ${pct} % de santé\nClic : sélectionner · Maj : ajouter · Double-clic : y aller${v.g.squad ? " · T : retraite · Y : renforcer (au poste)" : ""}`;
+      const count = v.g.squad ? ` (${t("{n}/{max} hommes", { n: live.length, max: v.g.squad.size })})` : v.g.length > 1 ? ` ×${v.g.length}` : "";
+      v.el.title = `${name}${count} — ${t("{state}, {pct} % de santé", { state: words, pct })}\n${t("Clic : sélectionner · Maj : ajouter · Double-clic : y aller")}${v.g.squad ? t(" · T : retraite · Y : renforcer (au poste)") : ""}`;
     }
   }
 
