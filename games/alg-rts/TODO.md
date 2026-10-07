@@ -58,6 +58,13 @@ Keep this file current: tick things off here, add new asks here.
 7. [x] **THE HUD EATS THE LEFT THIRD** (2026-10-07): objectives COLLAPSED to one line by default (the
    objective at hand + the clock; click the header for the list, remembered); alerts 4 at most,
    10 s (6 / 14 s); hints 12 s (24).
+10. [~] **THE MAP FELT EMPTY** (you, 2026-10-08: "a lot of the map is just nature, no action"). MEASURED:
+   48% of the walkable ground > 90 m from any objective, 28% > 120 m (12 objectives in 610 m; CoH: a
+   point every 60-80 m). DONE: 7 more supply points in the biggest gaps, each on a landmark already
+   there (Roman ruins, Roman temple, Abandoned mechta, West gorge, South pass, Almond terraces, Ruined
+   gourbi; maps/aures.js), the income 12 → 9 a minute a point. After: > 90 m 18%, > 120 m 4%.
+   NEXT: play it (the supply chain, the FLN's raids on 13 points, the income); maybe special points
+   (a hilltop that sees further, a ruin to garrison); civilians and herds between them.
 9. [x] **A POINTER CURSOR ON EVERYTHING CLICKABLE** — DONE 2026-10-08 (ui/cursors.js HAND + CLICKABLE:
    buttons, menu inputs, tabs, tiles, groups, badges, alerts, objectives, briefing; locked buttons keep
    the arrow; the maps keep the reticle). Was: (you, 2026-10-07: "anything clickable should have a

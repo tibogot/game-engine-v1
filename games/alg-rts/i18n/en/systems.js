@@ -95,4 +95,11 @@ export default {
   "Col du ravin": "Ravine pass",
   "Source d'Aïn Kerma": "Aïn Kerma spring",
   "Débouché du ravin": "Ravine mouth",
+  "Ruines romaines": "Roman ruins",
+  "Temple romain": "Roman temple",
+  "Mechta abandonnée": "Abandoned mechta",
+  "Gorge de l'ouest": "West gorge",
+  "Col du sud": "South pass",
+  "Terrasses d'amandiers": "Almond terraces",
+  "Gourbi en ruine": "Ruined gourbi",
 };

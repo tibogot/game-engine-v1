@@ -115,6 +115,18 @@ export const MAP = {
     { name: t("Col du ravin"), x: 19, z: -14, res: "mun" },
     { name: t("Source d'Aïn Kerma"), x: -110, z: 150, res: "mun" },         // the step from the crossroads to the dechra
     { name: t("Débouché du ravin"), x: -78, z: -82, res: "fuel" },
+    // THE DEAD ZONES (2026-10-08, you: "a lot of the map is just nature, no action"). MEASURED:
+    // 48% of the walkable ground lay > 90 m from any objective, 28% > 120 m (CoH: a point every
+    // 60-80 m). Seven more, in the biggest gaps, each on a landmark already standing there (the
+    // ruins, a ruined hut, the terraces, the west gully, the southern col). MEASURED after: > 90 m
+    // 48% → 18%, > 120 m 28% → 4%, > 60 m 72% → 50% (19 objectives in the 610 m box).
+    { name: t("Ruines romaines"), x: -268, z: 272, res: "mun" },         // romanRuin2
+    { name: t("Temple romain"), x: -70, z: 276, res: "fuel" },           // romanRuin1
+    { name: t("Mechta abandonnée"), x: 238, z: 214, res: "mun" },        // ruinedHut1 / 3
+    { name: t("Gorge de l'ouest"), x: -272, z: 4, res: "fuel" },         // the west gully mouth
+    { name: t("Col du sud"), x: 31, z: -241, res: "mun" },               // the FLN's hills
+    { name: t("Terrasses d'amandiers"), x: 160, z: -192, res: "fuel" },  // terracesOpen3
+    { name: t("Gourbi en ruine"), x: 36, z: 92, res: "mun" },            // ruinedHut5, mid-valley
   ],
   handPlaced: true,
 };

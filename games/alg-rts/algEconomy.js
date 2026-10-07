@@ -78,7 +78,7 @@ const P = {
     hamlet: { mp: 20, fuel: 6, mun: 8 }, dechra: { mp: 25, fuel: 8, mun: 10 }, ksar: { mp: 30, fuel: 10, mun: 12 },
   },
   villageAln: { hamlet: 40, dechra: 60, ksar: 80 },
-  supplyPoint: 12,                        // its resource a minute
+  supplyPoint: 9,                         // its resource a minute (12 with 6 points; 9 with 13, 2026-10-08: more ground worth holding, each worth less)
   supplyAln: 6,                           // the ALN's supplies a minute per supply point it holds (algAI.js raids)
   // m between two held points of a supply line. 180: the ksar needs the col,
   // the far mechta the ford, the dechra Aïn Kerma (240 linked nearly all
