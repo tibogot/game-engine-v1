@@ -247,7 +247,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         <li><b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain.</li>
         <li><b>Camion GMC</b> : transporte, ravitaille les villages en patrouille.</li>
         <li><b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions.</li>
-        <li><b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments.</li>
+        <li><b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments. <b>Le blindage dépend du côté touché</b> : les balles ricochent sur l'avant, mordent sur les flancs et percent l'arrière (l'AMX-13 tient des minutes face à un groupe, une vingtaine de secondes de dos). Gardez l'avant vers l'ennemi ; grenades et mines frappent de partout.</li>
         <li><b>Alouette II</b> : hélicoptère armé d'une AA-52.</li>
       </ul>
       <p>L'infanterie se commande <b>par groupe</b> : un clic sur un homme sélectionne tout son groupe. Les unités gagnent des <b>galons</b> (vétérance) en combattant.</p>`],

@@ -56,6 +56,7 @@
 //   GRENADE a man with one ready throws it (algGrenades.js) at French men
 //           in cover or bunched up, or at an MG nest, within his throw — one
 //           grenade per band every few seconds, not a hail.
+import { ARMOUR, faceHit } from "./algArmour.js";
 import { TRACK_LINES, nearestTrack } from "./algTracks.js";
 import { PLAY } from "./layout.js";
 
@@ -889,6 +890,19 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       if (u.throwing || u.isMoving || u.pinned) continue;
       // A set-up machine gun stays and fires (algMgTeam.js): it does not run for cover.
       if (app.algMgTeams?.stateOf(u) === "set") continue;
+      // ARMOUR BY FACING (algArmour.js): a man shooting at an armoured vehicle's FRONT goes round to
+      // its side (every 6 s at most) — his rounds glance off the front.
+      const tv = u.target;
+      if (tv?.alive && ARMOUR.types[tv.typeKey] && (u._flankT ?? -99) < t - 6 && faceHit(tv, u.position.x, u.position.z) === 0) {
+        u._flankT = t;
+        const d = Math.max(14, Math.min(u.range * 0.8, dist(u.position, tv.position)));
+        // To the side he is already nearer (the shortest way off the front).
+        const rel = Math.atan2(u.position.x - tv.position.x, u.position.z - tv.position.z) - (tv.heading ?? 0);
+        const side = (Math.sin(rel) >= 0 ? 1 : -1) * Math.PI / 2;
+        const a = (tv.heading ?? 0) + side + (Math.random() - 0.5) * 0.5;
+        const q = app.navGrid?.nearestOpenWorld?.(tv.position.x + Math.sin(a) * d, tv.position.z + Math.cos(a) * d, true);
+        if (q) { u.orderTo(q.x, q.z); continue; }
+      }
       const s = u.firedOnBy;
       if (!s?.alive || (u.suppression ?? 0) < 0.15 || u.inCover) continue;
       if (u.coverSought > t - 6) continue;   // he looked just now

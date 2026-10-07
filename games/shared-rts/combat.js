@@ -58,6 +58,9 @@ export function createCombat({
   // (unit) → the world point its gun fires from, or null (alg-rts: the vehicles' muzzles,
   // unitRenderer.muzzleOf). None: 1.6 m over the unit, as nam.
   unitMuzzle = null,
+  // (target, owner, { bullet, shell }) → × the damage of a hit landing on him (alg-rts: ARMOUR BY
+  // FACING, algArmour.js — a bullet off a tank's front glances, its rear does not). None: 1.
+  armourMul = null,
 }) {
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
@@ -160,6 +163,8 @@ export function createCombat({
       amount *= 1 - cover.coverBetween(
         owner.position.x, owner.position.z, target.position.x, target.position.z);
     }
+
+    if (armourMul) amount *= armourMul(target, owner, { bullet, shell });
 
     if (target.takeDamage) target.takeDamage(amount);
     else {

@@ -108,7 +108,15 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      its card. Shown live: 4 FLN pinned 34 m out; a flank → ~110° swing in 3 s without firing.
      The gunner DOES lie flat (the "crouch" was the set-up transition caught mid-way); his CREW now
      lies down beside him while the gun is set up.
-   - [ ] NEXT: vehicle ARMOUR BY FACING; then SOUND; then a real playtest to tune the FLN,
+   - [x] ARMOUR BY FACING (algArmour.js, shared combat `armourMul`): bullets on the AMX-13 / EBR /
+     half-track × [front, side, rear] = [0.05, 0.25, 0.45] / [0.07, 0.3, 0.55] / [0.25, 0.5, 0.75]
+     (front within 50° of the nose, rear within 50° of the tail); direct shells less steep;
+     explosions (grenades, mines, splash) full from anywhere; jeep and GMC none. MEASURED in real
+     time, 6 FLN riflemen at 26 m: AMX-13 front −18 hp / 15 s (~3.5 min), rear destroyed in 24 s.
+     (Fast-forward gave other numbers — measure combat in real time.) AI: a man shooting an armoured
+     front goes round to the side he is nearer (rarely triggers: bands already withdraw from armour).
+     Manual: the units tab.
+   - [ ] NEXT: then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of
    fire, flanked); vehicle ARMOUR BY FACING + penetration; more abilities; DOCTRINES; FLN

@@ -7,6 +7,7 @@
 // The buildings fight and are fought (algStructures.js); cover and
 // concealment are this map's (algCover.js). SMOKE SCREENS (algSmoke.js) break
 // the lines of fire: a smoke grenade's cloud, combat asks it before every shot.
+import { armourMul } from "./algArmour.js";
 import { createCombatFx } from "../shared-rts/combatFx.js";
 import { createFlameField } from "../shared-rts/flameField.js";
 import { createCraterSystem } from "../shared-rts/craterSystem.js";
@@ -126,6 +127,8 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, splashMul, hitChance, gibChance, smoke,
     // Vehicles fire from their guns (the weapons pass): the renderer knows the muzzles.
     unitMuzzle: (e) => app.algUnits?.unitRenderer?.muzzleOf(e) ?? null,
+    // ARMOUR BY FACING (algArmour.js): a bullet off a tank's front glances; its rear does not.
+    armourMul,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
     onDeath: (e) => {
       if (e.isStructure) built?.wreck(e);
