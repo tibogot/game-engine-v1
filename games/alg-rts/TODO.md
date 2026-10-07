@@ -73,7 +73,14 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      houses split out); FELLED TREES; more wreck slots / blow-apart parts.
 3. [ ] **IMAGE**: a colour grade + vignette, ambient occlusion pinning objects to the ground, more
    contrast object vs ground; the lighter fog of war.
-4. [ ] **SOUND**: unit voice lines (orders, "sous le feu !", "grenade !"), dense battle ambience,
+4. [~] **SOUND** — the no-recordings pass DONE 2026-10-07 (rtsAudio `distanceFx`, alg only): a
+   synthesised VALLEY ECHO on far shots (dry crack close, half echo under 1 kHz from 300 m), sound
+   ARRIVING LATE past 140 m, the AMBIENCE DUCKED to ~35% by a fight near the camera (back in ~3 s);
+   ANTI-PHASING (you heard flanging): 70 ms min gap per shot slot, a copy close behind the last
+   ≥7% apart in pitch, never the same file twice in a row, the echo pre-delayed 45 ms.
+   PAUSED (you): the VOICES — you record them (FR) + a native for the FLN, or Azure TTS (fr-FR,
+   ar-DZ) first; the rifle/MG CANDIDATES to rotate (pick by ear in Dev → Sound); MUSIC (your call).
+   Was: (orders, "sous le feu !", "grenade !"), dense battle ambience,
    distance-filtered gunfire, music for tension (voices parked: another way than the API).
 5. [ ] **SOLDIERS DRESSED FOR FRENCH ALGERIA** (today Vietnam-era US kit) + their PORTRAITS (US GIs).
 6. [~] **GAMEPLAY DEPTH** (started 2026-10-07):

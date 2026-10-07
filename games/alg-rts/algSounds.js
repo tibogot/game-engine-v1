@@ -30,7 +30,9 @@ const LABELS = {
 const VEHICLE_LOOP = { willys: "jeep", gmc: "truck", halftrack: "truck", ebr: "truck", amx13: "truck" };
 
 export function createAlgSounds({ app, rtsCamera, units }) {
-  const audio = createRtsAudio({ app, getView: () => rtsCamera.getView?.(), manifestUrl: "/sounds/alg/manifest.json", storeKey: "algrts.audio.v1", startMuted: true });
+  // distanceFx (rtsAudio.js): far shots ring off the valley and arrive late; a fight near the
+  // camera pushes the wind and cicadas down (2026-10-07, the sound pass without recordings).
+  const audio = createRtsAudio({ app, getView: () => rtsCamera.getView?.(), manifestUrl: "/sounds/alg/manifest.json", storeKey: "algrts.audio.v1", startMuted: true, distanceFx: {} });
   // OFF BY DEFAULT (you, 2026-10-01): Dev → Sound turns it on, and that is
   // remembered. Once, a browser that had saved "on" before is set off too.
   try {

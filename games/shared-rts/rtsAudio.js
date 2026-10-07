@@ -28,7 +28,7 @@ import * as THREE from "three";
 const MAX_VOICES = 40;
 const XFADE = 1.2;     // seconds a loop crossfades from its end into its start
 
-export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted = true }) {
+export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted = true, distanceFx = null }) {
   const STORE = storeKey;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   const ctx = new Ctx({ latencyHint: "interactive" });
@@ -56,11 +56,48 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
     buses.ambience.disconnect();
     buses.ambience.connect(ambComp).connect(master);
   }
+  // ── DISTANCE, the way a valley sounds (opt-in `distanceFx`, alg-rts 2026-10-07) ─────────────
+  //   ECHO      a far shot rings off the slopes: a send to one shared convolver whose impulse is
+  //             SYNTHESISED (no recording): two slap-backs off the valley walls and a long diffuse
+  //             tail, low-passed. The send grows with distance — near, a dry crack; far, the
+  //             crack is gone and the echo is most of what you hear.
+  //   DELAY     sound takes ~3 ms a metre: past `delayFrom` m a shot is heard after its flash.
+  //   DUCKING   a fight near the camera pushes the AMBIENCE bed (wind, cicadas) down, and it
+  //             comes back as the fight dies — the battle takes the soundscape over.
+  const DFX = distanceFx ? { echoMax: 0.75, echoFrom: 1.2, echoSpan: 5, delayFrom: 140, soundSpeed: 343, duck: 0.65, duckK: 0.9, duckRelease: 0.35, ...distanceFx } : null;
+  let echoIn = null, battle = 0;
+  if (DFX) {
+    const sr = ctx.sampleRate, len = Math.round(sr * 3.2);
+    const ir = ctx.createBuffer(2, len, sr);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < len; i++) {
+        const t = i / sr;
+        // the diffuse tail: noise decaying over ~2.5 s, slow onset (no direct sound in it)
+        // (a 45 ms pre-delay: echo energy overlapping the dry crack combs against it — the "jet")
+        let v = t < 0.045 ? 0 : (Math.random() * 2 - 1) * Math.exp(-t / 0.75) * Math.min(1, (t - 0.045) / 0.06) * 0.35;
+        // two slaps off the valley walls, a little different per ear
+        for (const [at, a] of [[0.32 + c * 0.04, 0.9], [0.86 - c * 0.05, 0.55], [1.45 + c * 0.03, 0.3]]) {
+          const k = (t - at) / 0.025;
+          if (k > 0 && k < 6) v += (Math.random() * 2 - 1) * a * Math.exp(-k);
+        }
+        d[i] = v;
+      }
+    }
+    const conv = ctx.createConvolver();
+    conv.buffer = ir;
+    const tone = ctx.createBiquadFilter();
+    tone.type = "lowpass"; tone.frequency.value = 2400; tone.Q.value = 0.4;
+    const wet = ctx.createGain(); wet.gain.value = 0.9;
+    echoIn = ctx.createGain();
+    echoIn.connect(conv).connect(tone).connect(wet).connect(buses.sfx);
+  }
+
   // Muted is OFF, not silent: the context is suspended, so the audio thread
   // does no work at all (and no loop is kept alive — see updateLoops).
   function applyMix() {
     master.gain.value = settings.muted ? 0 : settings.master;
-    for (const k in buses) buses[k].gain.value = settings[k];
+    for (const k in buses) { buses[k].gain.cancelScheduledValues?.(0); buses[k].gain.value = settings[k]; }
     if (settings.muted) ctx.suspend(); else if (!document.hidden) ctx.resume();
   }
   applyMix();
@@ -134,7 +171,19 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
     const pan = ctx.createStereoPanner();
     pan.pan.value = sp ? sp.pan : 0;
     g.connect(lp).connect(pan).connect(buses[S.bus ?? "sfx"]);
-    return { g, lp, pan, S, level: 0, srcs: [] };
+    // The valley echo: the further, the more of it (sfx one-shots and loops alike).
+    if (echoIn && sp && !S.loop && (S.bus ?? "sfx") === "sfx" && S.echo !== false) {
+      const ref = S.ref ?? 40;
+      const k = Math.min(1, Math.max(0, (sp.eff - ref * DFX.echoFrom) / (ref * DFX.echoSpan)));
+      if (k > 0.02) {
+        const send = ctx.createGain();
+        send.gain.value = DFX.echoMax * k;
+        pan.connect(send).connect(echoIn);
+        // Far, the dry sound gives way to its echo (applied where the level is set: `dry`).
+        return { g, lp, pan, S, level: 0, srcs: [], dry: 1 - 0.5 * k };
+      }
+    }
+    return { g, lp, pan, S, level: 0, srcs: [], dry: 1 };
   }
   function source(v, buf, rate) {
     const src = ctx.createBufferSource();
@@ -176,7 +225,10 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
     const level = (S.vol ?? 1) * (o.gain ?? 1) * (sp ? sp.gain : 1);
     if (level < 0.012) return null;
     const now = ctx.currentTime;
-    // The same sound started twice within a few ms only phases against itself.
+    // ANTI-PHASING (you, 2026-10-07: "phasing/flanging when two shots play almost together"): the
+    // same recording twice within tens of ms combs against itself. So: never the same sound twice
+    // inside `gap` (raised: 25-60 ms IS the flanging range); never the same FILE twice in a row
+    // when there are several; and a copy close behind the last one is pitched clearly apart.
     if (now - S.last < (S.gap ?? 0.015)) return null;
     const files = chosen(S).filter(isBuf);
     if (!files.length) { chosen(S).forEach((f) => load(f.f)); return null; }
@@ -189,16 +241,24 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
       if (!q || q.level >= level) return null;
       stop(q, 0.03);
     }
-    const file = files[(Math.random() * files.length) | 0];
+    let file = files[(Math.random() * files.length) | 0];
+    if (files.length > 1 && file === S.lastFile) file = files[(files.indexOf(file) + 1 + ((Math.random() * (files.length - 1)) | 0)) % files.length];
     const buf = buffers.get(file.f);
     const v = chain(S, sp);
     v.level = level;
     const pv = S.pitch ?? 0.05;
-    const rate = (o.rate ?? 1) * (1 + (Math.random() * 2 - 1) * pv);
+    let rate = (o.rate ?? 1) * (1 + (Math.random() * 2 - 1) * pv);
+    // Close behind the last copy of the same file: at least 7% apart in pitch (the comb then sweeps
+    // fast enough to read as two shots, not one smeared one).
+    if (file === S.lastFile && now - S.last < 0.15 && Math.abs(rate / (S.lastRate || rate) - 1) < 0.07) rate = S.lastRate * (S.lastRate > (o.rate ?? 1) ? 0.92 : 1.08);
     const s = source(v, buf, rate);
     v.srcs.push(s);
-    v.g.gain.value = level * (file.gain ?? 1);
-    const t = now + (o.delay ?? 0);
+    v.g.gain.value = level * (file.gain ?? 1) * v.dry;
+    // Sound takes time to arrive from far away.
+    const travel = DFX && sp && sp.eff > DFX.delayFrom ? (sp.eff - DFX.delayFrom) / DFX.soundSpeed : 0;
+    const t = now + (o.delay ?? 0) + travel;
+    // A fight near the camera (the ducking): its loudness, here.
+    if (DFX && (S.bus ?? "sfx") === "sfx" && sp && sp.eff < (S.ref ?? 40) * 2.5) battle += level;
     const start = file.start ?? 0;
     const end = Math.min(buf.duration, file.end || buf.duration);
     const dur = Math.max(0.02, end - start);
@@ -211,7 +271,7 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
     }
     s.src.onended = () => release(v);
     S.live.push(v); liveCount++;
-    S.last = now;
+    S.last = now; S.lastFile = file; S.lastRate = rate;
     return v;
   }
 
@@ -237,8 +297,18 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
   }
 
   const _sp = {};
+  let _lastDuck = 0;
   function updateLoops() {
     if (ctx.state !== "running") return;
+    // THE DUCKING: the fight's loudness near the camera, decaying; the ambience bed pushed down
+    // by it (at most DFX.duck), coming back over a few seconds.
+    if (DFX) {
+      const now = ctx.currentTime, dt = Math.min(0.25, now - _lastDuck);
+      _lastDuck = now;
+      battle *= Math.exp(-dt / DFX.duckRelease * 0.35);
+      const duck = Math.min(DFX.duck, battle * DFX.duckK * 0.1);
+      buses.ambience.gain.setTargetAtTime(settings.ambience * (1 - duck), now, duck > 0.05 ? 0.15 : 1.2);
+    }
     const want = new Map();  // slot -> [{key, level, sp, rate}]
     for (const p of providers) {
       for (const c of p() ?? []) {

@@ -9,8 +9,8 @@
    "vol": 0.55,
    "voices": 8,
    "ref": 45,
-   "pitch": 0.06,
-   "gap": 0.025,
+   "pitch": 0.08,
+   "gap": 0.07,
    "files": [
     {
      "f": "rifle/163460.mp3",
@@ -55,8 +55,8 @@
    "vol": 0.6,
    "voices": 5,
    "ref": 55,
-   "pitch": 0.04,
-   "gap": 0.04,
+   "pitch": 0.06,
+   "gap": 0.055,
    "files": [
     {
      "f": "mg/165394.mp3",
@@ -101,8 +101,8 @@
    "vol": 0.9,
    "voices": 4,
    "ref": 90,
-   "pitch": 0.05,
-   "gap": 0.05,
+   "pitch": 0.06,
+   "gap": 0.08,
    "files": [
     {
      "f": "cannon/448002.mp3",
@@ -791,8 +791,8 @@
    "vol": 0.55,
    "voices": 8,
    "ref": 45,
-   "pitch": 0.06,
-   "gap": 0.025,
+   "pitch": 0.08,
+   "gap": 0.07,
    "files": [
     {
      "f": "boltRifle/166191.mp3",
