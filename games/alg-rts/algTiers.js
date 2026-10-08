@@ -12,7 +12,7 @@ import { t } from "./i18n/i18n.js";
 export const TIERS = [
   {
     n: 1, name: t("Section d'infanterie"), note: t("dès le départ"),
-    units: ["appele", "sapeur", "piece", "willys", "gmc"], cost: 0, villages: 0,
+    units: ["appele", "sapeur", "piece", "lanceFlammes", "willys", "gmc"], cost: 0, villages: 0,
   },
   {
     n: 2, name: t("Moyens héliportés"), note: t("l'héliport ouvre : paras, l'Alouette ; le half-track"),

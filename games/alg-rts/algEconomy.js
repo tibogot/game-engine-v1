@@ -37,6 +37,8 @@ import { t } from "./i18n/i18n.js";
 /** What each unit costs: French { mp, fuel, mun } (per SQUAD for infantry), the ALN's a number. */
 export const COSTS = {
   appele: { mp: 270 }, sapeur: { mp: 170 }, piece: { mp: 240, mun: 20 },
+  // The lance-flammes (algFlamethrower.js): munitions-heavy, as CoH's flamethrowers.
+  lanceFlammes: { mp: 200, mun: 45 },
   para: { mp: 320, fuel: 25 }, legion: { mp: 380, mun: 45 },
   willys: { mp: 110, fuel: 20 }, gmc: { mp: 140, fuel: 30 }, halftrack: { mp: 190, fuel: 50 },
   ebr: { mp: 240, fuel: 75 }, amx13: { mp: 290, fuel: 105 }, alouette: { mp: 280, fuel: 120 },

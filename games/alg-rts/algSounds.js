@@ -63,6 +63,9 @@ export function createAlgSounds({ app, rtsCamera, units }) {
   // …and its ROAR while the stream burns, at the nozzle.
   audio.addLoopProvider(() => (app.algFlamers?.fx?.streams() ?? []).filter((s) => s.firing)
     .map((s) => ({ slot: "flameLoop", key: s.key, x: s.nozzle.x, y: s.nozzle.y, z: s.nozzle.z, level: 1 })));
+  // …and the ground it set burning crackles, as the other fires.
+  audio.addLoopProvider(() => (app.algFlamers?.fx?.burning() ?? [])
+    .map((p) => ({ slot: "fireLoop", key: p.key, x: p.x, y: app.getWorldHeight(p.x, p.z), z: p.z, level: 0.6 * Math.min(1, p.left / 1.5) })));
 
   function blast(x, y, z, size = 10) {
     audio.play("explosion", x, y, z, { gain: Math.min(1.3, Math.max(0.5, size / 12)), rate: size > 18 ? 0.85 : 1 });

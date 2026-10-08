@@ -85,7 +85,25 @@ export async function createAlgFlamethrowers({ app, units, isFlamer }) {
       if (want && !u.fireAt) u.fireAt = (tgt) => fireAt(u, tgt);
       else if (!want && u.fireAt && u._flamerArmed) delete u.fireAt;
       if (want) u._flamerArmed = true;
+      if (want) retarget(u);
     }
+  }
+
+  // HIS TARGET: combat.js keeps an auto-target until it dies — the operator ran after a routed
+  // man out of reach while four more stood at his elbow (battle lab). Not chasing: a man who
+  // is running or out of reach is let go for the NEAREST one in reach. An attack order stands.
+  function retarget(u) {
+    if (u.attackTarget || u.holdFire) return;
+    const t = u.target, d = t?.alive ? flat(u.position, t.position) : Infinity;
+    if (d <= P.range && !(t._fleeing > clock)) return;
+    let best = null, bd = P.range;
+    for (const o of units.near(u.position.x, u.position.z, P.range, near)) {
+      if (!o.alive || o.team === u.team || o.isAir || o.passive) continue;
+      const od = flat(u.position, o.position);
+      if (od <= bd) { bd = od; best = o; }
+    }
+    if (best) { u.target = best; if (u.isMoving && !u.playerMove) u.haltMovement?.(); }
+    else if (t && (t._fleeing > clock)) u.target = null;   // he runs: let him go
   }
 
   const _dir = new THREE.Vector3(), _noz = new THREE.Vector3();
@@ -173,17 +191,20 @@ export async function createAlgFlamethrowers({ app, units, isFlamer }) {
       if ((s.groundT -= dt) <= 0 && reach > P.range * 0.6) {
         s.groundT = P.groundEvery;
         const gx = ox + _dir.x * reach * 0.92, gz = oz + _dir.z * reach * 0.92;
-        fireField()?.addFire(gx, app.getWorldHeight(gx, gz) + 0.3, gz, P.groundR, P.groundLife, { heat: 1 });
-        patches.push({ x: gx, z: gz, r: P.groundR * 1.3, end: clock + P.groundLife, owner: u });
+        // Drawn with the baked burning-ground book (flameStreamFx), the game's flame cards only
+        // without it: the old cards beside the baked stream did not match.
+        if (!fx?.burnGround(gx, gz, P.groundLife)) fireField()?.addFire(gx, app.getWorldHeight(gx, gz) + 0.3, gz, P.groundR, P.groundLife, { heat: 1 });
+        patches.push({ x: gx, z: gz, r: P.groundR * 1.3, end: clock + P.groundLife, owner: u, team: u.team });
       }
     }
 
-    // BURNING GROUND hurts who stands in it (his own side too: it is fire).
+    // BURNING GROUND hurts the enemy standing in it — not the side that lit it: the operator
+    // walking on after a routed man stepped into his own fire (battle lab, 2026-10-09).
     for (let i = patches.length - 1; i >= 0; i--) {
       const f = patches[i];
       if (clock > f.end) { patches.splice(i, 1); continue; }
       for (const o of units.near(f.x, f.z, f.r, near)) {
-        if (!o.alive || o.isAir || o.inside || !o.type?.foot) continue;
+        if (!o.alive || o.isAir || o.inside || !o.type?.foot || o.team === f.team) continue;
         if (Math.hypot(o.position.x - f.x, o.position.z - f.z) < f.r) burn(o, P.groundDps * dt, f.owner?.alive ? f.owner : null);
       }
     }

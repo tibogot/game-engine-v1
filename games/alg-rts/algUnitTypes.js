@@ -89,7 +89,7 @@ export const ALG_UNIT_TYPES = {
   // Mle 1950 — his weapon "flamer" fires its own way (algFlamethrower.js: a stream that burns
   // everyone in it, pins, routs, clears houses) — and his loader (slot 1: a rifle, algSquads
   // SQUADS.lanceFlammes.kit). Short reach (the stream's), fragile: the tanks can go up.
-  // NOT on the post's build list yet: the battle lab stages it (you judge it there first).
+  // Built at the post (algUnits PRODUCTION, tier 1; 200 effectifs + 45 munitions, algEconomy).
   lanceFlammes: {
     typeKey: "lanceFlammes",
     name: t("Lance-flammes"),

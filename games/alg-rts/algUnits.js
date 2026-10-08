@@ -73,7 +73,7 @@ import { t } from "./i18n/i18n.js";
  */
 const PRODUCTION = {
   // Infantry per SQUAD (algSquads.js), vehicles one each.
-  post: { appele: 14, sapeur: 10, piece: 14, legion: 24 },
+  post: { appele: 14, sapeur: 10, piece: 14, lanceFlammes: 16, legion: 24 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { para: 18, alouette: 30 },   // paras: the heliborne reserve
   caveEntrance: { moudjahid: 4, fmTeam: 7, tireur: 8 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)

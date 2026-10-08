@@ -292,6 +292,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         t("<b>Appelés</b> (groupe de 6) : l'infanterie de base. Grenades, fumigène ; l'amélioration <b>FM 24/29</b> leur donne un fusil-mitrailleur."),
         t("<b>Sapeurs du Génie</b> (3) : construisent, réparent, coupent les barbelés."),
         t("<b>Pièce FM</b> (3) : une mitrailleuse et ses servants. Arrêtée, elle <b>se met en batterie</b> (quelques secondes) et ne tire que dans son <b>secteur</b> (le cône au sol) — mais elle cloue au sol tout ce qui y entre. Pour bouger, elle se replie d'abord. Prenez-la de flanc ou aveuglez-la au fumigène."),
+        t("<b>Lance-flammes</b> (2) : un opérateur et son pourvoyeur. À 15 m, le jet brûle tout ce qu'il touche — <b>les abris n'y font rien</b> — cloue au sol, puis <b>met en fuite</b> ; il <b>vide une maison</b> et laisse le sol en feu. Fragile : si l'opérateur tombe, ses réservoirs peuvent exploser."),
         t("<b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface."),
         t("<b>Légionnaires</b> : l'infanterie la plus solide."),
         t("<b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain."),

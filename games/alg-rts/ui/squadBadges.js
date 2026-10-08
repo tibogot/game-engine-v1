@@ -21,6 +21,8 @@ const ICONS = {
   appele: `<path d="M4.5 19.5 L18.5 5.5" stroke-width="2.4"/><path d="M3 18 L6 21" stroke-width="3.2"/><path d="M18.5 5.5 L21 3" stroke-width="1.2"/><path d="M11 13 L9.5 11.5" stroke-width="1.6"/>`,
   // A machine gun on its bipod: the pièce FM (algMgTeam.js).
   piece: `<path d="M3 10.5 L21 10.5" stroke-width="2.4"/><path d="M5 10.5 L4 14 L7 14 Z" fill="currentColor" stroke-width="1.2"/><path d="M11 8 L13 8 L13 10.5" stroke-width="1.6"/><path d="M16 10.5 L13.5 18 M16 10.5 L18.5 18" stroke-width="1.6"/>`,
+  // A flame: the lance-flammes (algFlamethrower.js).
+  lanceFlammes: `<path d="M12 21 C7 21 5 17.5 6.5 14 C7.5 11.5 9.5 10.5 9.5 7.5 C11.5 9 12.5 11 12 13 C13.5 12 14.5 10 14 7 C17 9.5 19 13 17.5 17 C16.5 19.5 14.5 21 12 21 Z" fill="currentColor" stroke-width="1.2"/>`,
   // A spanner (Feather "tool", MIT).
   sapeur: `<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" stroke-width="1.9"/>`,
   // A parachute: canopy, lines, the man.

@@ -30,6 +30,10 @@ export const FLAME_STREAM = {
   bloom: 0.35,       // share of it in the bloom buffer
   hold: 0.35,        // s without a fire() call before the stream is let go
   max: 6,            // streams at once (3 cards each)
+  // BURNING GROUND where a stream comes down: the napalm ground book (fp_napalmFire), one
+  // billboard per patch — the game's old flame cards beside the baked stream did not match.
+  patches: 14,       // patches at once (the oldest gives way)
+  patchCard: 4.6,    // m: the card (its strip of flames ~3.5 m)
 };
 
 const ease = THREE.MathUtils.smoothstep;
@@ -39,12 +43,14 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
   const [loop, start, stop] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`${P.base}${k}`)));
   const books = [start, loop, stop];
   const anchor = loop.meta.anchor ?? [0.05, 0.42];
+  const groundBook = await loadBookTextures(`${P.base}napalmFire`).catch(() => null);
+  const groundAt = app.heightTexNode ? (x, z) => drapeY(app.heightTexNode, x, z) : null;
 
   // The pool: `max` slots of three cards, handed to streams as they light.
   const slots = Array.from({ length: P.max }, () => books.map((b) => {
     // Into the REAL ground under each pixel (one heightmap tap, as litSmoke): a slope rising
     // through the stream was cut in a hard line at a single fade height (you, 2026-10-09).
-    const c = createBookCard({ groundAt: app.heightTexNode ? (x, z) => drapeY(app.heightTexNode, x, z) : null });
+    const c = createBookCard({ groundAt });
     c.setBook(b.tex, b.meta);
     c.u.uGroundFade.value = 1.0;
     c.mesh.visible = false;
@@ -55,6 +61,26 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
     return c;
   }));
   const free = [...slots];
+
+  // The burning-ground cards: { c, x, z, t0, end, phase } (end < clock: free).
+  const patches = groundBook ? Array.from({ length: P.patches }, () => {
+    const c = createBookCard({ groundAt });
+    c.setBook(groundBook.tex, groundBook.meta);
+    c.u.uGroundFade.value = 0.5;
+    c.u.uBloom.value = P.bloom;
+    c.u.uTint.value.fromArray(groundBook.meta.tint ?? [0.08, 0.08, 0.09]);
+    c.mesh.visible = false;
+    c.mesh.renderOrder = RENDER_ORDER.SMOKE;
+    app.scene.add(c.mesh);
+    return { c, x: 0, z: 0, t0: 0, end: -1, phase: 0 };
+  }) : [];
+  /** The ground burns at (x, z) for `life` s (the oldest patch gives way when all burn). */
+  function burnGround(x, z, life = 7) {
+    if (!patches.length) return false;
+    const p = patches.find((q) => q.end < clock) ?? patches.reduce((a, b) => (a.t0 < b.t0 ? a : b));
+    Object.assign(p, { x, z, t0: clock, end: clock + life, phase: Math.random() * 10 });
+    return true;
+  }
   const streams = new Map();   // key → { cards, firing, since, stop, last, nozzle, axis }
   let clock = 0;
 
@@ -74,7 +100,7 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
   }
   const isFiring = (key) => !!streams.get(key)?.firing;
 
-  const _sun = new THREE.Vector3(0.3, 0.8, 0.4), _col = new THREE.Color(), _sky = new THREE.Color();
+  const _sun = new THREE.Vector3(0.3, 0.8, 0.4), _col = new THREE.Color(), _sky = new THREE.Color(), _ctr = new THREE.Vector3();
   function update(dt, camera) {
     clock += dt;
     // The scene's light, as litSmoke reads it.
@@ -85,6 +111,17 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
     if (hemi && hemi.intensity > 0.01) _sky.copy(hemi.color).multiplyScalar(hemi.intensity * 0.75);
     else _sky.setRGB(0.55, 0.62, 0.75).multiplyScalar((sun?.intensity ?? 3) * 0.1 * 0.75);
 
+    // Burning ground: in over 0.4 s, out over its last 1.5 s.
+    for (const p of patches) {
+      p.c.mesh.visible = p.end > clock;
+      if (!p.c.mesh.visible) continue;
+      const m = groundBook.meta, k = P.patchCard / m.size;
+      const gy = app.getWorldHeight?.(p.x, p.z) ?? 0;
+      p.c.u.uFireK.value = P.fireK;
+      p.c.u.uFade.value = ease(clock - p.t0, 0, 0.4) * (1 - ease(clock, p.end - 1.5, p.end));
+      p.c.update({ age: (clock + p.phase) / m.duration, camera, size: P.patchCard, sunDir: _sun, sunColor: _col, ambient: _sky,
+        center: _ctr.set(p.x, gy + (m.bake?.center?.[1] ?? m.size / 2) * k, p.z) });
+    }
     for (const [key, s] of streams) {
       const sa = (clock - s.since) / P.ignite;
       // Let go (no call for `hold` s) — but not before the stream is out.
@@ -112,14 +149,16 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
   }
 
   return {
-    params: P, fire, isFiring, update,
+    params: P, fire, isFiring, update, burnGround,
+    /** The ground burning now (for sounds): [{ x, z, left }]. */
+    burning: () => patches.filter((p) => p.end > clock).map((p) => ({ key: p, x: p.x, z: p.z, left: p.end - clock })),
     /** The streams lit now (for sounds, lights): [{ key, nozzle, axis, firing }]. */
     streams: () => [...streams].map(([key, s]) => ({ key, nozzle: s.nozzle, axis: s.axis, firing: s.firing })),
     /** How far the stream reaches from its nozzle (m), at full length. */
     reach: () => P.card * (P.reachShare - anchor[0]),
-    clear() { for (const s of streams.values()) { for (const c of s.cards) c.mesh.visible = false; free.push(s.cards); } streams.clear(); },
+    clear() { for (const s of streams.values()) { for (const c of s.cards) c.mesh.visible = false; free.push(s.cards); } streams.clear(); for (const p of patches) { p.end = -1; p.c.mesh.visible = false; } },
     dispose() {
-      for (const cards of slots) for (const c of cards) { app.scene.remove(c.mesh); c.mesh.geometry.dispose(); c.mesh.material.dispose(); }
+      for (const c of [...slots.flat(), ...patches.map((p) => p.c)]) { app.scene.remove(c.mesh); c.mesh.geometry.dispose(); c.mesh.material.dispose(); }
       streams.clear();
     },
   };
