@@ -982,6 +982,116 @@
      "end": 119.37
     }
    ]
+  },
+  "flameIgnite": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.8,
+   "voices": 3,
+   "ref": 50,
+   "pitch": 0.05,
+   "gap": 0.3,
+   "files": [
+    {
+     "f": "flameIgnite/260554.mp3",
+     "id": 260554,
+     "by": "LookIMadeAThing",
+     "t": "Freesound - Basic Fire whoosh",
+     "url": "https://freesound.org/people/LookIMadeAThing/sounds/260554/",
+     "gain": 1,
+     "dur": 3.89297
+    },
+    {
+     "f": "flameIgnite/447941.mp3",
+     "id": 447941,
+     "by": "Breviceps",
+     "t": "Freesound - Blast + Flamethrower cooldown",
+     "url": "https://freesound.org/people/Breviceps/sounds/447941/",
+     "gain": 1,
+     "dur": 1.9234
+    },
+    {
+     "f": "flameIgnite/260584.mp3",
+     "id": 260584,
+     "by": "LookIMadeAThing",
+     "t": "Freesound - Basic Fire whoosh 3",
+     "url": "https://freesound.org/people/LookIMadeAThing/sounds/260584/",
+     "gain": 1,
+     "dur": 3.89297
+    }
+   ]
+  },
+  "flameLoop": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.75,
+   "loops": 3,
+   "ref": 50,
+   "loop": true,
+   "files": [
+    {
+     "f": "flameLoop/563138.mp3",
+     "id": 563138,
+     "by": "Nox_Sound",
+     "t": "Freesound - Foley_Object_Flame_Thrower_Loop_Stereo.wav",
+     "url": "https://freesound.org/people/Nox_Sound/sounds/563138/",
+     "gain": 1,
+     "dur": 11.9873
+    },
+    {
+     "f": "flameLoop/581078.mp3",
+     "id": 581078,
+     "by": "magnuswaker",
+     "t": "Freesound - Flame Loop",
+     "url": "https://freesound.org/people/magnuswaker/sounds/581078/",
+     "gain": 1,
+     "dur": 6.67922
+    }
+   ]
+  },
+  "flameStop": {
+   "use": [
+    1
+   ],
+   "bus": "sfx",
+   "vol": 0.6,
+   "voices": 3,
+   "ref": 45,
+   "pitch": 0.06,
+   "gap": 0.3,
+   "files": [
+    {
+     "f": "flameStop/171255.mp3",
+     "id": 171255,
+     "by": "qubodup",
+     "t": "Freesound - Sliding Trailer Woosh",
+     "url": "https://freesound.org/people/qubodup/sounds/171255/",
+     "gain": 1,
+     "dur": 1.62694
+    },
+    {
+     "f": "flameStop/105016.mp3",
+     "id": 105016,
+     "by": "Julien%20Matthey",
+     "t": "Freesound - JM_FX_Fireball 01.wav",
+     "url": "https://freesound.org/people/Julien%20Matthey/sounds/105016/",
+     "gain": 1,
+     "dur": 1.9624
+    },
+    {
+     "f": "flameStop/178886.mp3",
+     "id": 178886,
+     "by": "martian",
+     "t": "Freesound - red whoosh gladiator 04.wav",
+     "url": "https://freesound.org/people/martian/sounds/178886/",
+     "gain": 1,
+     "dur": 2.5854
+    }
+   ]
   }
  }
 }

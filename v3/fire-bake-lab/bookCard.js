@@ -8,7 +8,8 @@
 //             it ADDS light (a thin flame has little opacity and all its glow)
 //   motion    both frames slid along M.rg before they are mixed (litSmoke's blend)
 import * as THREE from "three";
-import { Fn, float, floor, fract, mix, positionWorld, saturate, select, smoothstep, texture, uniform, uv, vec2, vec3, vec4, max } from "three/tsl";
+import { BloomMRTNode } from "../render/bloomMRT.js";
+import { float, floor, fract, mix, positionWorld, saturate, select, smoothstep, texture, uniform, uv, vec2, vec3, vec4, max } from "three/tsl";
 
 /** Atlas bytes (frame 0 top-left) → textures (row 0 = v 0, so the rows go bottom-up). */
 export function bookTextures({ W, H, A, B, M }) {
@@ -37,7 +38,13 @@ export async function loadBookTextures(base) {
   return { meta, tex: { a, b, mv } };
 }
 
-export function createBookCard() {
+/**
+ * `groundAt(x, z)` (optional, TSL nodes → the ground's height node): fade into the REAL terrain
+ * under each pixel (a game passes its heightmap tap, terrainDrape.drapeY). Without it the card
+ * fades above one height (uGroundY) — on a slope the ground rose through the card before the
+ * fade and the depth test cut it there in a hard line (the flamethrower in the battle lab).
+ */
+export function createBookCard({ groundAt = null } = {}) {
   const uAge = uniform(0);            // 0..1 through the book
   const uLoop = uniform(0);
   const uSunL = uniform(new THREE.Vector3(0, 1, 0));   // the sun in the card's frame
@@ -58,6 +65,7 @@ export function createBookCard() {
   // ground, and the depth test cut it there in a hard straight line (the flamethrower's belly).
   const uGroundY = uniform(0), uGroundFade = uniform(0.6);           // the whole card (a one-shot fades out at its end)
   const uFrames = uniform(64);
+  const uBloom = uniform(0.3);        // share of the flame's light written to the bloom buffer
   const uCols = uniform(8), uRows = uniform(8), uInset = uniform(0.5 / 192);
 
   // Placeholder textures until the first bake: TSL fixes the texture nodes at build.
@@ -71,7 +79,8 @@ export function createBookCard() {
     return vec2(col.add(q.x).div(uCols), uRows.sub(1).sub(row).add(q.y).div(uRows));
   };
 
-  const shade = Fn(() => {
+  // Plain node expressions (no Fn): the colour and the BLOOM output share every sample.
+  const { shade, bloomOut } = (() => {
     const last = uFrames.sub(1);
     // A one-shot plays frame 0 → N-1 over its life; a loop wraps N-1 → 0.
     const f = select(uLoop.greaterThan(0.5), fract(uAge).mul(uFrames), uAge.clamp(0, 1).mul(last));
@@ -100,10 +109,12 @@ export function createBookCard() {
     const reachEdge = uAnchorU.add(uReach.mul(float(1).sub(uAnchorU)));
     let border = smoothstep(0, uFadeL.max(1e-4), uv().x).mul(smoothstep(0, 0.12, float(1).sub(uv().x))).mul(smoothstep(0, 0.12, e.y))
       .mul(float(1).sub(smoothstep(reachEdge.sub(0.04), reachEdge, uv().x)));
-    const ground = select(uGroundFade.greaterThan(0), saturate(positionWorld.y.sub(uGroundY).div(uGroundFade.max(1e-3))), float(1));
+    const groundY = groundAt ? groundAt(positionWorld.x, positionWorld.z) : uGroundY;
+    const ground = select(uGroundFade.greaterThan(0), saturate(positionWorld.y.sub(groundY).div(uGroundFade.max(1e-3))), float(1));
     border = border.mul(ground);
     const a = A.w.mul(border).mul(uFade);
-    return vec4(smoke.mul(a).add(glow.mul(border).mul(uFade)), a);
+    const light = glow.mul(border).mul(uFade);
+    return { shade: vec4(smoke.mul(a).add(light), a), bloomOut: vec4(light.mul(uBloom), a) };
   })();
 
   const material = new THREE.MeshBasicNodeMaterial({
@@ -114,6 +125,9 @@ export function createBookCard() {
   material.colorNode = shade.xyz;
   material.opacityNode = shade.w;
   material.fog = false;
+  // THE FLAME GLOWS in a game's selective bloom (its emissive MRT buffer, v3/render/bloomMRT.js);
+  // on a plain target (the labs) this collapses to the normal output.
+  material.mrtNode = new BloomMRTNode({ emissive: bloomOut });
 
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
   mesh.name = "Baked book card";
@@ -124,7 +138,7 @@ export function createBookCard() {
   const _r = new THREE.Vector3(), _u = new THREE.Vector3(), _b = new THREE.Vector3(), _m = new THREE.Matrix4(), _y = new THREE.Vector3();
   return {
     mesh,
-    u: { uFireK, uMotion, uTint, uSun, uAmb, uFade, uReach, uGroundY, uGroundFade },
+    u: { uFireK, uMotion, uTint, uSun, uAmb, uFade, uReach, uGroundY, uGroundFade, uBloom },
     /** Show a book: textures { a, b, mv } and its meta. */
     setBook(tex, meta) {
       tA.value = tex.a; tB.value = tex.b; tM.value = tex.mv;

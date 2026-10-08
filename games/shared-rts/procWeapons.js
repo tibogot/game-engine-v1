@@ -168,6 +168,32 @@ function mas36() {
 }
 
 /**
+ * LANCE-FLAMMES Mle 1950 — the French flamethrower's gun (from memory, the M2 family's layout:
+ * ~1.05 m). A rear trigger grip, a forward grip, the valve body over the rear grip with the
+ * hose leaving it down and back to the tanks, a plain tube, and at the front the igniter's
+ * fatter cylinder round the nozzle — the shape that reads from the RTS camera. Origin at the
+ * rear grip; the flame leaves the nozzle at LF50_MUZZLE.
+ */
+export const LF50_MUZZLE = [0, 0.045, 1.02];
+function lf50() {
+  const M = COLORS.metal, G = 0x3c3f33, B = COLORS.bakelite;
+  return toGeometry([
+    tiltX(box(B, [0, -0.06, 0], [0.03, 0.11, 0.04]), -0.25, [0, 0]),     // rear (trigger) grip
+    box(M, [0, -0.012, 0.01], [0.006, 0.03, 0.05]),                       // trigger guard
+    box(G, [0, 0.04, 0.02], [0.05, 0.06, 0.16]),                          // valve body
+    cyl(M, 0, 0.045, -0.12, 0.08, 0.018),                                 // tail of the tube
+    tiltX(cyl(DARK_HOSE, 0, 0.02, -0.2, -0.04, 0.02), 0.9, [0.02, -0.04]),   // the hose, down and back
+    cyl(M, 0, 0.045, 0.08, 0.86, 0.016),                                  // the tube
+    tiltX(box(B, [0, -0.04, 0.42], [0.03, 0.09, 0.035]), -0.15, [0, 0.42]), // forward grip
+    box(M, [0, 0.01, 0.42], [0.025, 0.02, 0.05]),                         // its clamp
+    cyl(G, 0, 0.045, 0.82, 0.98, 0.034),                                  // the igniter cylinder
+    cyl(M, 0, 0.045, 0.98, 1.02, 0.018, 0.012),                           // the nozzle
+    box(M, [0, 0.085, 0.9], [0.012, 0.02, 0.05]),                         // igniter cap on top
+  ]);
+}
+const DARK_HOSE = 0x1d1c19;
+
+/**
  * FM 24/29 — the French section's light machine gun (from memory: 1.08 m,
  * 25-round box magazine on TOP, pistol grip, bipod near the muzzle, carrying
  * handle). The top magazine and the bipod make it the most recognisable gun in
@@ -259,6 +285,7 @@ export const WEAPONS = {
   fm2429: { label: "FM 24/29", faction: "French — section LMG", build: gripped("fm2429", fm2429), buildRaw: fm2429 },
   mauser98: { label: "Mauser 98k", faction: "ALN — bolt rifle", build: gripped("mauser98", mauser98), buildRaw: mauser98 },
   enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: gripped("enfield", enfield), buildRaw: enfield },
+  lf50: { label: "Lance-flammes Mle 1950", faction: "French — flamethrower", build: gripped("lf50", lf50), buildRaw: lf50, muzzle: LF50_MUZZLE },
 };
 
 /**

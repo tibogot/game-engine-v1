@@ -85,6 +85,41 @@ export const ALG_UNIT_TYPES = {
     castShadow: true,
   },
 
+  // THE LANCE-FLAMMES (2026-10-09, CoH's flamethrower team, French only): the operator with the
+  // Mle 1950 — his weapon "flamer" fires its own way (algFlamethrower.js: a stream that burns
+  // everyone in it, pins, routs, clears houses) — and his loader (slot 1: a rifle, algSquads
+  // SQUADS.lanceFlammes.kit). Short reach (the stream's), fragile: the tanks can go up.
+  // NOT on the post's build list yet: the battle lab stages it (you judge it there first).
+  lanceFlammes: {
+    typeKey: "lanceFlammes",
+    name: t("Lance-flammes"),
+    buildLabel: t("Lance-flammes (2)"),
+    weapon: "flamer",
+    isAir: false,
+    foot: true,
+    hover: 0,
+    speed: 4.8,
+    radius: 1.0,
+    turnRate: 6,
+    maxHp: 65,
+    range: 15,
+    damage: 0,
+    fireRate: 4,
+    canHitAir: false,
+    vision: 40,
+    url: "/models/soldiers/soldiers.glb",
+    body: "soldier1",
+    look: "appeleLanceFlammes",
+    skinned: true,
+    targetHeight: REAL.soldierHeight * RTS_SCALE,
+    excludeRotorsFromBox: false,
+    facingOffset: 0,
+    ringRadius: 1.7,
+    barWidth: 2.2,
+    barY: 3.4,
+    castShadow: true,
+  },
+
   // The SAPEUR of the Génie: the French army's engineer, who digs the post's
   // defences (algBuild.js). A rifleman too, a worse one. `builds`: what his
   // command card offers (keys of algBuild.js BUILDS).

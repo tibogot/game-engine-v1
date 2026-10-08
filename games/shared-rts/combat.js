@@ -342,6 +342,9 @@ export function createCombat({
       // onImpact), not instantly.
       // The muzzle flash is projectiles.js's: a rifle, an MG burst and a tank
       // gun each flash differently.
+      // A weapon that fires itself (alg-rts: the lance-flammes' stream, algFlamethrower.js): no
+      // round — it burns what is in front of it, its own way. Suppression and the reveal as a shot.
+      if (e.fireAt) { e.fireAt(tgt, d); onShot?.(e, tgt); cover?.reveal(e); return; }
       const from = muzzleOf(e);
       // An AA gun hits aircraft harder than ground (airMul / groundMul, 1 for
       // everything else).

@@ -61,6 +61,7 @@ import { createMinimap } from "./ui/minimap.js";
 import { createTacticalMap } from "./ui/tacticalMap.js";
 import { createAlgCoverCursor } from "./algCoverCursor.js";
 import { createAlgMgTeams } from "./algMgTeam.js";
+import { createAlgFlamethrowers } from "./algFlamethrower.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
 import { installPortraits, hasPortrait } from "./ui/portraits.js";
@@ -692,6 +693,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     hitChance: new URLSearchParams(location.search).get("acc") !== "0" ? createAlgAccuracy({ cover: coverSys.cover }) : null,
   });
   app.algCombat = combat;
+  // LANCE-FLAMMES (algFlamethrower.js): whoever carries the flamer fires a stream that burns
+  // everyone in it (combat.js `fireAt`), pins, routs, clears houses, sets fires.
+  const flamers = await createAlgFlamethrowers({ app, units, isFlamer: (u) => u.weapon === "flamer" });
+  app.algFlamers = flamers;
   app.algAccuracy = ACCURACY;   // dev: the table, live
   grenades = createAlgGrenades({ app, units, projectiles: combat.projectiles, selection, purse: economy.french });
   app.algGrenades = grenades;
@@ -748,7 +753,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
   const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
-  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); searchlights.step(d); veterancy.step(); };
+  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -759,6 +764,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     sim.advance(dt, simStep);
     searchlights.frame();
     combat.frame(dt);
+    flamers.frame(dt);
     grenades.frame();
     flares?.frame();
     barrage.frame();

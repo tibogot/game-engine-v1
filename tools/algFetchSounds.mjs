@@ -39,6 +39,11 @@ export const SLOTS = {
   truck:     { q: "truck engine loop", dur: [4, 60], bus: "sfx", vol: 0.4, loops: 2, ref: 40, loop: true },
   heli:      { q: "helicopter loop", dur: [4, 60], bus: "sfx", vol: 0.55, loops: 2, ref: 60, loop: true },
   fireLoop:  { q: "fire crackling loop", dur: [4, 60], bus: "sfx", vol: 0.5, loops: 2, ref: 35, loop: true },
+  // The LANCE-FLAMMES (2026-10-09): the trigger (a whoosh as it lights), the stream's roar while
+  // it fires (a loop), the cut-off (the jet dying).
+  flameIgnite: { q: "flamethrower", dur: [0.4, 4], bus: "sfx", vol: 0.8, voices: 3, ref: 50, pitch: 0.05, gap: 0.3 },
+  flameLoop:   { q: "flamethrower loop", dur: [2, 40], bus: "sfx", vol: 0.75, loops: 3, ref: 50, loop: true },
+  flameStop:   { q: "fire whoosh", dur: [0.3, 3], bus: "sfx", vol: 0.6, voices: 3, ref: 45, pitch: 0.06, gap: 0.3 },
   build:     { q: "shovel digging", dur: [1, 20], bus: "sfx", vol: 0.4, voices: 2, ref: 30, pitch: 0.05, gap: 0.5 },
   // The land (ambience bed + places).
   wind:      { q: "desert wind loop", dur: [10, 120], bus: "ambience", vol: 0.08, loops: 1, loop: true },

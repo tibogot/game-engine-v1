@@ -37,6 +37,9 @@ export const SQUADS = {
   sapeur: { size: 3, name: t("Équipe du génie"), reinforce: 45 },
   // The machine-gun team (algMgTeam.js): slot 0 carries the gun (`kit`, as an upgrade's weapon).
   piece: { size: 3, name: t("Pièce FM"), reinforce: 40, kit: { 0: { weapon: "mg", range: 48, damage: 6, fireRate: 5 } } },
+  // The flamethrower team (algFlamethrower.js): slot 0 the operator (his type's lance), slot 1 the
+  // loader with a rifle.
+  lanceFlammes: { size: 2, name: t("Lance-flammes"), reinforce: 45, kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
   para: { size: 5, name: t("Stick para"), reinforce: 60 },
   legion: { size: 5, name: t("Groupe Légion"), reinforce: 80 },
 };

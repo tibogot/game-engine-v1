@@ -4,6 +4,8 @@ export default {
   "Groupe (6)": "Squad (6)",
   "Pièce FM": "MG Team",
   "Pièce FM (3)": "MG Team (3)",
+  "Lance-flammes": "Flamethrower",
+  "Lance-flammes (2)": "Flamethrower (2)",
   "Sapeurs du Génie": "Combat Engineers",
   "Génie (3)": "Engineers",
   "Paras coloniaux": "Colonial Paras",

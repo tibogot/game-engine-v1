@@ -124,6 +124,16 @@ export const LOOKS = {
     roles: { 0: { name: "LMG", weapon: "fm2429" }, 2: { name: "leader", weapon: "mat49", kit: ["binoculars"] } },
     extras: { scarf: 0.3, mustache: 0.3, cigarette: 0.15, grenades: 0.2 },
   },
+  // The LANCE-FLAMMES team (alg-rts, 2026-10-09: French only, two men, CoH-style): the operator
+  // (0) with the lance and the tanks on his back (no pack), the loader (1) with his rifle and pack.
+  appeleLanceFlammes: {
+    label: "Lance-flammes", note: "two men: the operator (lance + tanks), the loader (rifle, pack)",
+    green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, hatColor: 0x77744f, weapon: "mas49_56",
+    variants: [{ w: 0.8 }, { w: 0.2, helmet: false, headgear: "bushHat" }],
+    kit: ["pack", "belt"],
+    roles: { 0: { name: "flamethrower", weapon: "lf50", kit: ["flameTanks"], drop: ["pack"] } },
+    extras: { scarf: 0.3, mustache: 0.3, cigarette: 0.1 },
+  },
   paraSection: {
     label: "Para section", note: "mixed: casquettes Bigeard and red berets",
     camo: { base: 0xa59c72, green: 0x55603a, brown: 0x6a4b2f }, helmet: false, weapon: "mat49",
@@ -920,6 +930,30 @@ function pack() {
 }
 
 /**
+ * The FLAMETHROWER's tanks (the lance-flammes Mle 1950, from memory — the M2 family's layout):
+ * two upright fuel tanks side by side on a back frame, the smaller pressure bottle between and
+ * behind them, a strap bar across. Where the pack sits (it replaces it), a little taller: ~0.5 m
+ * of steel on the back, the operator's silhouette from the RTS camera.
+ */
+function flameTanks() {
+  const STEEL = 0x55573f, BOTTLE = 0x3d3f35;
+  const tank = (x) => [
+    ...band(STEEL, [{ y: 0.96, rx: 0.085, rz: 0.085, xc: x }, { y: 1.42, rx: 0.085, rz: 0.085, xc: x }], { segs: 10, zc: -0.255 }),
+    dome(STEEL, 1.42, 0.05, 0.085, 0.085, { segs: 10, xc: x, zc: -0.255 }),
+    // the bottom cap: the top's dome turned half over about X (a ROTATION — a plain flip of y
+    // would mirror it and turn its faces inside out, as the pack's roll warns)
+    mapPart(dome(STEEL, 0.96, 0.04, 0.085, 0.085, { segs: 10, xc: x, zc: -0.255 }), ([px, py, pz]) => [px, 1.92 - py, -0.51 - pz]),
+  ];
+  return toGeometry([
+    ...tank(0.1), ...tank(-0.1),
+    ...band(BOTTLE, [{ y: 1.0, rx: 0.05, rz: 0.05 }, { y: 1.36, rx: 0.05, rz: 0.05 }], { segs: 8, zc: -0.36 }),
+    dome(BOTTLE, 1.36, 0.035, 0.05, 0.05, { segs: 8, zc: -0.36 }),
+    prim.box(DARK, [0, 1.3, -0.2], [0.34, 0.035, 0.03]),          // the strap bar
+    prim.box(DARK, [0, 1.0, -0.2], [0.34, 0.035, 0.03]),
+  ]);
+}
+
+/**
  * Backpack radio (the SCR-300 / AN-PRC-10 family, from memory): a tall box on
  * the back and a whip antenna ~1.3 m over the head — the most readable shape a
  * squad has from the RTS camera, so the antenna is drawn a little thick.
@@ -1421,6 +1455,7 @@ function robeWeights(p) {
 /** Kit pieces and the bone each rides on. */
 export const KIT = {
   pack: { bone: "Spine2", build: pack },
+  flameTanks: { bone: "Spine2", build: flameTanks },
   radio: { bone: "Spine2", build: radio },
   belt: { bone: "Hips", build: belt },
   sunglasses: { bone: "Head", build: sunglasses },

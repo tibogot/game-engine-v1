@@ -24,7 +24,7 @@ const LABELS = {
   rifle: "Rifle (French)", boltRifle: "Rifle (ALN)", mg: "Machine gun", cannon: "Tank gun",
   impact: "Bullet impact", explosion: "Explosion", explFar: "Explosion, far", incoming: "Mortar whistle",
   cry: "A man hit", jeep: "Jeep (loop)", truck: "Truck / half-track (loop)", heli: "Alouette (loop)",
-  fireLoop: "Fire (loop)", build: "Sappers digging", wind: "Wind (bed)", cicadas: "Cicadas (bed)",
+  fireLoop: "Fire (loop)", flameIgnite: "Flamethrower (lights)", flameLoop: "Flamethrower (loop)", flameStop: "Flamethrower (cut-off)", build: "Sappers digging", wind: "Wind (bed)", cicadas: "Cicadas (bed)",
   adhan: "Call to prayer", dog: "Dog", goat: "Goats / sheep", donkey: "Donkey", uiClick: "UI click", radio: "Radio (orders)",
 };
 const VEHICLE_LOOP = { willys: "jeep", gmc: "truck", halftrack: "truck", ebr: "truck", amx13: "truck" };
@@ -55,6 +55,15 @@ export function createAlgSounds({ app, rtsCamera, units }) {
       audio.play("incoming", at.x, at.y + 20, at.z, { delay: Math.max(0, left - len) });
     },
   };
+  /** THE LANCE-FLAMMES (algFlamethrower.js, flameStreamFx onState): it lights, it is let go. */
+  function flame(state, u) {
+    const p = u?.position;
+    if (p) audio.play(state === "start" ? "flameIgnite" : "flameStop", p.x, p.y + 1, p.z);
+  }
+  // …and its ROAR while the stream burns, at the nozzle.
+  audio.addLoopProvider(() => (app.algFlamers?.fx?.streams() ?? []).filter((s) => s.firing)
+    .map((s) => ({ slot: "flameLoop", key: s.key, x: s.nozzle.x, y: s.nozzle.y, z: s.nozzle.z, level: 1 })));
+
   function blast(x, y, z, size = 10) {
     audio.play("explosion", x, y, z, { gain: Math.min(1.3, Math.max(0.5, size / 12)), rate: size > 18 ? 0.85 : 1 });
   }
@@ -171,7 +180,7 @@ export function createAlgSounds({ app, rtsCamera, units }) {
 
   app.addPreRenderHook((dt) => { life(Math.min(dt, 0.1)); audio.update(); });
   return {
-    audio, sfx, blast, death, order, measure, labels: LABELS,
+    audio, sfx, blast, death, flame, order, measure, labels: LABELS,
     getView: () => rtsCamera.getView?.(),
     dispose() { window.removeEventListener("pointerdown", onDown, true); audio.ctx.close(); },
   };

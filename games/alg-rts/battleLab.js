@@ -14,6 +14,7 @@ import * as THREE from "three";
 import { ALG_UNIT_TYPES } from "./algUnitTypes.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { GIBS } from "./algCombat.js";
+import { SQUADS } from "./algSquads.js";
 
 /** What can stand in a squad: every ground type (any of them on either side). */
 const GROUND = Object.keys(ALG_UNIT_TYPES).filter((k) => !ALG_UNIT_TYPES[k].isAir);
@@ -112,9 +113,17 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
       const typeKey = k === "fr" ? S.fr : S.aln, n = k === "fr" ? S.frN : S.alnN;
       if (S.cover[k]) await raiseWalls(k, Math.min(n, 4) * (ALG_UNIT_TYPES[typeKey].foot ? 3.2 : 9));
       const foe = centreOf(k === "fr" ? "aln" : "fr");
-      for (const p of slots(k, typeKey, n)) {
+      const squad = SQUADS[typeKey];
+      for (const [i, p] of slots(k, typeKey, n).entries()) {
         const u = units.spawn(typeKey, p.x, p.z, { team: k === "fr" ? "player" : "enemy" });
         if (!u) continue;
+        // As the game's squads dress and arm them (algSquads applyKit): each man his SLOT's look
+        // and kit — the pièce FM's gunner his FM, the lance-flammes' loader his rifle.
+        if (squad) {
+          const slot = i % squad.size, kit = squad.kit?.[slot];
+          u.lookRole = slot;
+          if (kit) Object.assign(u, { weapon: kit.weapon ?? null, range: kit.range ?? 0, damage: kit.damage ?? 0, fireRate: kit.fireRate ?? 1 });
+        }
         u.faceToward?.(u.position.x + (foe.x - centreOf(k).x), u.position.z + (foe.z - centreOf(k).z));
         u.holdFire = S.hold;
         u.labSide = k;

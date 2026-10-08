@@ -114,6 +114,16 @@
         <button data-view="shoulder">Over shoulder</button>
       </div>
 
+      <h2>Flame (lance-flammes)</h2>
+      <div class="btns" id="flame">
+        <button data-flame="burst">Fire a burst</button>
+        <button data-flame="hold">Hold the trigger</button>
+      </div>
+      <label>Flame size <input id="flame-size" type="range" min="8" max="40" step="0.5" value="22" /> <b id="flame-size-v">22 m</b></label>
+      <label>Ignition <input id="flame-ign" type="range" min="0.3" max="3" step="0.05" value="0.8" /> <b id="flame-ign-v">0.8 s</b></label>
+      <label>Brightness <input id="flame-k" type="range" min="0" max="4" step="0.05" value="1" /> <b id="flame-k-v">1.0</b></label>
+      <div class="sub" id="flame-note">Every man carrying the <b>Lance-flammes Mle 1950</b> fires the Fire Pro books (v3/fire-bake-lab) from his lance's muzzle, along the lance: START (the head shoots out) → LOOP → STOP (it breaks off). Look <b>Lance-flammes</b>, a firing / aim clip.</div>
+
       <h2>Debug</h2>
       <label><input id="weights" type="checkbox" /> Skin weights (colour = strongest bone)</label>
       <label><input id="wire" type="checkbox" /> Wireframe</label>
@@ -153,6 +163,7 @@
       import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
       import { TransformControls } from "three/addons/controls/TransformControls.js";
       import { TOOLS, WEAPONS, weaponMaterial } from "./procWeapons.js";
+      import { createBookCard, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
       import { GRIPS, gripMatrix, isZeroGrip } from "./soldierGrips.js";
       import {
         HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookMaterial, markHelmet, measureCrown, neckPlane,
@@ -1225,6 +1236,74 @@
         placeWeapons: () => placeWeapons(), clips, autoFitLeft: () => autoFitLeft(), get gProxy() { return gProxy; }, get markers() { return markers; },
       };
 
+      // ── Flame: the lance-flammes' stream, from the muzzle of every lance ────
+      // The same three books and the same sequence as the FX compare lab's flamethrower
+      // (games/shared-rts/fxCompareLab.js): one AXIAL card per book and per man, laid along his
+      // lance from its nozzle (WEAPONS.lf50.muzzle, the weapon's own frame) and turned about it
+      // to face the camera, following the clip's motion.
+      const flame = { books: null, cards: new Map(), firing: false, since: -1e9, stop: -1e9, release: false, hold: false, stopAt: 0, t: 0 };
+      try {
+        const [loop, start, stop] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`/textures/fx/firepro/fp_${k}`)));
+        flame.books = { loop, start, stop };
+      } catch (e) { $("flame-note").textContent = "The flamethrower books are not baked (v3/fire-bake-lab: Flamethrower, … start, … stop)."; }
+      const flameUi = { size: 22, ign: 0.8, k: 1, speed: 1.4 };
+      for (const [id, key, unit, dec] of [["flame-size", "size", " m", 0], ["flame-ign", "ign", " s", 2], ["flame-k", "k", "", 1]]) {
+        $(id).addEventListener("input", () => { flameUi[key] = +$(id).value; $(`${id}-v`).textContent = (+$(id).value).toFixed(dec) + unit; });
+      }
+      function flameTrigger(on, seconds = 3) {
+        if (on) { if (!flame.firing) { flame.firing = true; flame.since = flame.t; flame.release = false; } flame.stopAt = flame.t + seconds; }
+        else if (flame.firing) flame.release = true;
+      }
+      for (const b of $("flame").querySelectorAll("button")) b.addEventListener("click", () => {
+        b.blur();
+        if (b.dataset.flame === "burst") { flame.hold = false; flameTrigger(true, 3); }
+        else { flame.hold = !flame.hold; flameTrigger(flame.hold, 1e9); }
+        $("flame").querySelector('[data-flame="hold"]').classList.toggle("on", flame.hold);
+      });
+      const ease = THREE.MathUtils.smoothstep;
+      const _noz = new THREE.Vector3(), _dir = new THREE.Vector3(), _sunDir = new THREE.Vector3(), _col = new THREE.Color(), _amb = new THREE.Color();
+      function flameCards(s) {
+        let c = flame.cards.get(s.root);
+        if (!c) {
+          c = ["start", "loop", "stop"].map((k) => { const card = createBookCard(); card.setBook(flame.books[k].tex, flame.books[k].meta); card.mesh.visible = false; scene.add(card.mesh); return card; });
+          flame.cards.set(s.root, c);
+        }
+        return c;
+      }
+      function flameFrame(dt) {
+        flame.t += dt;
+        if (!flame.books) return;
+        const t = flame.t, B = flame.books;
+        if (flame.firing && !flame.hold && t >= flame.stopAt) flame.release = true;
+        const sa = (t - flame.since) / flameUi.ign;
+        if (flame.firing && flame.release && sa >= 1) { flame.firing = false; flame.stop = t; }
+        const so = (t - flame.stop) * flameUi.speed / B.stop.meta.duration;
+        const w = flame.firing ? [1 - ease(sa, 0.85, 1), ease(sa, 0.85, 1), 0] : [0, 1 - ease(so, 0, 0.06), ease(so, 0, 0.03) * (1 - ease(so, 0.8, 1))];
+        const age = [Math.min(sa, 1), (t * flameUi.speed) / B.loop.meta.duration, Math.min(so, 1)];
+        _sunDir.copy(sun.position).sub(sun.target.position).normalize();
+        _col.copy(sun.color).multiplyScalar(sun.intensity * (0.4 / 0.65));
+        _amb.setRGB(0.55, 0.62, 0.75).multiplyScalar(0.55);
+        const live = new Set();
+        for (const s of soldiers) {
+          if (s.weaponKey !== "lf50" || !s.weapon) continue;
+          live.add(s.root);
+          s.weapon.updateWorldMatrix(true, false);
+          _noz.fromArray(WEAPONS.lf50.muzzle).applyMatrix4(s.weapon.matrixWorld);
+          _dir.set(0, 0, 1).transformDirection(s.weapon.matrixWorld);
+          flameCards(s).forEach((c, i) => {
+            const book = [B.start, B.loop, B.stop][i];
+            c.mesh.visible = w[i] > 0.002 && s.root.visible !== false;
+            if (!c.mesh.visible) return;
+            c.u.uFireK.value = flameUi.k;
+            c.u.uTint.value.fromArray(book.meta.tint ?? [0.19, 0.19, 0.19]);
+            const side = c.updateAxial({ age: age[i], camera, nozzle: _noz, axis: _dir, anchor: book.meta.anchor ?? [0.05, 0.42], size: flameUi.size, sunDir: _sunDir, sunColor: _col, ambient: _amb });
+            c.u.uFade.value = w[i] * ease(side, 0.18, 0.5);
+          });
+        }
+        // Men rebuilt (look / body / count changed): their old cards go.
+        for (const [root, cs] of flame.cards) if (!live.has(root)) { for (const c of cs) { scene.remove(c.mesh); c.mesh.geometry.dispose(); c.mesh.material.dispose(); } flame.cards.delete(root); }
+      }
+
       // ── Loop ───────────────────────────────────────────────────────────────
       const clock = new THREE.Clock();
       renderer.setAnimationLoop(() => {
@@ -1246,6 +1325,7 @@
         // The grips: every weapon to its man's clip (the dragged one stays under the gizmo).
         placeWeapons();
         syncProxy();
+        flameFrame(dt);
         const gNow = `${soldiers[0]?.root.uuid}|${gClip()}|${gWeapon()}|${gTarget}|${gMode}`;
         if (gNow !== gLast) gRefresh();
         controls.update();
