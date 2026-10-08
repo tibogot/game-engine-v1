@@ -722,7 +722,8 @@ times (raw, learned table blanked) + a main-thread trace parsed by caller.
 - Triangles: the renderer's counter never resets (reads 15.7 billion) — no
   number; fix the counter if you want it.
 
-### Ranked — LOAD (44 s now; target ~25 s first boot, less with a shader cache)
+### Ranked — LOAD (the 2026-10-03 baseline: 44 s; target ~25 s. REACHED: ~22 s on 2026-10-04 — see
+### "BOOT 26.6 → ~22 s" below. The rows here are history, not today's numbers.)
 
 | # | what | gain | build | risk | touches |
 |---|---|---|---|---|---|
@@ -1400,12 +1401,16 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       readback trap that lost the pads), queued a few a frame for big barrages; shallow =
       walkable; CRATERS AS COVER (CoH) in the cover map. 1-2 days. Plan: build (2), use the
       same stamp for (1).
-- [ ] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can
-      do?" — later): measure the boot's stages first (alg.html already
-      logs them for its progress bar), then the usual suspects: the animal
-      morphs (~4.5 s), shader compiles / warm-up, the ground cache bake,
-      plants and props built on the main thread, textures not compressed.
-      nam went 46 → 24 s the same way.
+- [x] **LOAD TIME** (you, 2026-10-03: "quite slow, is it the best we can do?") — DONE by the perf
+      audit, 2026-10-04: boot ~44 → ~22 s (20.6-24.2). BUT re-measured 2026-10-08: 34.3 / 32.5 s
+      (two boots; stages: engine 3.0, level file 6.0, scene 2.8, troops 3.8, ground 3.9, fields 1.0,
+      herds 2.6, effects warm-up 7.2). A regression since 10-04 (suspects: the 1,736 contact-shade
+      splats in the ground bake, 3 more soldier clips baked into the crowd, the village weathering
+      + roof life, the static batch, the 7 points) or other conditions (heat, the browser on the
+      second screen, DevTools attached) — NOT YET A/B'd. NEXT: A/B against the 10-04 state, then
+      the ideas: show the briefing earlier and finish the warm-up / herds BEHIND it (the felt wait
+      −7-10 s); a persistent shader cache (Electron); the herd templates cached or in a worker;
+      the level file's download vs decode; the ground bake lazy (on-screen first).
 - [ ] **BLOW APART VEHICLES AND BUILDINGS** (you, 2026-10-03: "we have a way
       to make the soldiers explode to pieces, it would be cool for vehicles
       and buildings"): the men's GIBS cut (algCombat gib, unitRenderer
@@ -3303,8 +3308,8 @@ lift off the pad; the ALN comes out of the cave mouth.
       crowd draw per kind; builds in ~4.5 s at boot. `?herds=0` = without.
    - [ ] **you, look** at them in the game (colours under the Aurès sun: the
          sheep is a Hamra-like white fleece with a red-brown face).
-   - [ ] Boot cost ~4.5 s: cache the built templates (or build them in a
-         worker) if load time matters.
+   - [ ] Boot cost ~2.6 s (was ~4.5 s; the 2026-10-04 audit's feetFollow fix; 2.6 measured again
+         2026-10-08): cache the built templates (or build them in a worker) if load time matters.
    - [ ] A shepherd with each flock (a man or a boy walking with it), dogs.
    - [ ] The flock keeps together when it bolts (now each animal runs its
          own way, like deer).
