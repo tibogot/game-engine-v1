@@ -1421,7 +1421,20 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       fetched at the very top of the boot and decoded off the main thread (createImageBitmap — the
       same pixels as an <img>, checked byte for byte on every photo): stones' photos 1166 → 22-33 ms,
       splats 1768 → 211 ms. BOOT ~37 → 28.4 / 28.8 / 29.5 s, steadier. Left vs 10-04 (~26): the
-      warm-up's 92 more drawables (~2 s), herds / hens. NEXT: fix those, biggest first
+      warm-up's 92 more drawables (~2 s), herds / hens.
+      AUDIT (instrumented boot: long tasks + logs): MAIN-THREAD BOUND, 21 of 29 s long tasks; the
+      biggest blocks: the shader warm-up 5.1 s in one task (326-348 node builds for ~160 distinct
+      shaders — three keys every InstancedMesh on its uuid; sharedInstanceBuilds covers plain ones),
+      the buildings generated 2.8 s, the herds 2-4 s.
+      TRIED, REVERTED: sharing builds of meshes WITH instanceColor (348 → 326 builds, gain within
+      noise, colours not provable) — the remaining copies are separate MATERIALS.
+      DONE: THE BRIEFING DURING THE BOOT (algGame bootReady): shown over the loading screen as soon
+      as the battle exists (15-18 s), "Préparation… NN %" until the end, then "À vos postes".
+      RE-MEASURED cool (fresh browser, interleaved): without (?brief=0) 29.5 / 31.9 / 27.8 / 44.9 s,
+      with it 26.2 / 43.7 / 25.8 / 26.2 s — it costs nothing (medians ~30.7 vs ~26.2). The briefing
+      is up at ~15-18 s. OPEN: an outlier ~44 s now and then on BOTH sides — find what stalls.
+      NEXT: cache the generated buildings (~2.5 s) and the herd models (~2-3 s) in files; share the
+      ring overlays' and unit parts' materials (~30 builds). Then
       (stones → a prebuilt array file or a worker; the warm-up's 92 new drawables; splats), then
       the ideas: show the briefing earlier and finish the warm-up / herds BEHIND it (the felt wait
       −7-10 s); a persistent shader cache (Electron); the herd templates cached or in a worker;

@@ -358,10 +358,23 @@ export function createBattleHud({ camera, canvas, onJump }) {
      * The briefing, with the difficulty: `levels` [{ key, label, blurb }],
      * `current` the remembered one; onStart(key) when the player goes.
      */
-    briefing(html, onStart, { levels = [], current = "normal" } = {}) {
+    briefing(html, onStart, { levels = [], current = "normal", ready = null } = {}) {
       let pick = current;
       const back = modal(`${html}${levels.length ? `<div class="kicker">${t("Difficulté")}</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
         [{ label: t("À vos postes"), go: true, onClick: () => onStart(pick) }]);
+      // SHOWN DURING THE BOOT (2026-10-08: the last ~8 s of the boot — the herds, the shaders —
+      // are spent reading): above the loading screen, its button "Préparation…" and off until
+      // `ready` resolves.
+      if (ready) {
+        back.style.zIndex = "2147483001";
+        const go = back.querySelector("button.go");
+        go.disabled = true;
+        go.textContent = t("Préparation…");
+        // The loading bar is behind the briefing: its percentage shown on the button (alg.html #boot .pct).
+        const pct = document.querySelector("#boot .pct");
+        const tick = setInterval(() => { if (pct?.textContent) go.textContent = `${t("Préparation…")} ${pct.textContent}`; }, 250);
+        ready.then(() => { clearInterval(tick); go.disabled = false; go.textContent = t("À vos postes"); go.focus(); });
+      }
       back.querySelectorAll("[data-lv]").forEach((b) => b.addEventListener("click", () => {
         pick = b.dataset.lv;
         back.querySelectorAll("[data-lv]").forEach((o) => o.classList.toggle("sel", o === b));

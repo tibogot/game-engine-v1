@@ -1,6 +1,7 @@
 // English for the battle area (French key -> English). See ../i18n.js.
 // algBattle.js (alerts, objectives, tips, village tooltip, briefing, the end) and ui/battleHud.js.
 export default {
+  "Préparation…": "Preparing…",
   // ── Places and kinds ──────────────────────────────────────────────────────
   "point de ravitaillement": "supply point",
   "mechta": "<i>mechta</i>",

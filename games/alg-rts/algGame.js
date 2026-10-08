@@ -381,6 +381,17 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       });
     } catch (e) { console.warn("[alg battle] failed:", e); }
   }
+  // THE BRIEFING DURING THE BOOT (2026-10-08, the boot audit: the rest of the boot — the ground,
+  // the fields, the herds, the shader warm-up — is ~13 s the player can spend reading): shown
+  // now, over the loading screen; its "À vos postes" waits for the end of the boot (bootReady).
+  // ?brief=0 starts at the remembered difficulty.
+  let bootReady = null;
+  if (app.algBattle && params.get("brief") !== "0") {
+    let release;
+    bootReady = new Promise((r) => { release = r; });
+    bootReady.release = release;
+    try { app.algBattle.brief({ ready: bootReady }); } catch (e) { console.warn("[alg brief] failed:", e); }
+  }
   // THE TELEGRAPH LINE (algPoles.js): poles and wires along the pistes, one
   // draw each. ?poles=0 = without.
   if (params.get("poles") !== "0") {
@@ -585,9 +596,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
-  // The briefing (and the difficulty), once the loading screen has faded
-  // (alg.html: 250 ms); ?brief=0 starts at the remembered difficulty.
-  if (app.algBattle) { if (params.get("brief") !== "0") setTimeout(() => app.algBattle.brief(), 450); else app.algBattle.start(); }
+  // The briefing is up already (above); its button is released now. ?brief=0: straight in.
+  if (bootReady) bootReady.release();
+  else if (app.algBattle) app.algBattle.start();
   return app;
 }
 
