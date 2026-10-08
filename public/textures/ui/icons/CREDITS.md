@@ -38,3 +38,4 @@ set to `currentColor` (recoloured in CSS).
 | repair.svg | auto-repair | Lorc |
 | garrison.svg | house | Delapouite |
 | unload.svg | exit-door | Delapouite |
+| transport.svg | (drawn for this game, 2026-10-08) | — |

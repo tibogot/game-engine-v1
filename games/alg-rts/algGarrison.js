@@ -367,7 +367,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     },
     /** The command card's SORTIR for a selection with men inside (null: none). */
     ability(sel) {
-      if (!sel.some((u) => u.inside && u.team === "player")) return null;
+      if (!sel.some((u) => u.garrison && u.team === "player")) return null;
       return { key: "unload", label: t("Sortir"), hint: t("Sortir de la maison par la porte."), ready: true };
     },
     dispose() {

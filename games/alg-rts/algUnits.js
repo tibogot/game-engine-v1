@@ -47,6 +47,7 @@ import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
+import { createAlgTransports } from "./algTransports.js";
 import { createAlgWrecks } from "./algWrecks.js";
 import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
@@ -486,6 +487,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         repair?.ability(sel),
         // SORTIR (algGarrison.js): out of the house.
         garrison?.ability(sel),
+        // DÉBARQUER (algTransports.js): out of the truck / half-track.
+        transports?.ability(sel),
         sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
           && { key: "cutWire", label: t("Couper"), hint: t("Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs."), ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
@@ -516,6 +519,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "cutWire") app.algWire?.orderCut(sel);
       if (key === "repair") repair?.begin(sel);
       if (key === "unload") { garrison?.exitAll(sel); commandCard.render(sel); }
+      if (key === "disembark") { transports?.disembark(sel); commandCard.render(sel); }
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
       if (key === "smoke") grenades?.begin(sel, "smoke");
@@ -544,6 +548,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let build = null;     // made after the cover (algBuild.js)
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
+  let transports = null;   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
   let controlGroups = null;   // made after the selection it listens to
   let coverCursor = null, mgTeams = null;
   const selection = createSelection({
@@ -572,7 +577,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       // fight on the way (they shoot on the move); an attack order ends it.
       for (const u of list) if (!u.isStructure) u.playerMove = kind === "move";
       // A move takes men out of a house first (by its door); an attack is fired from inside.
-      if (kind === "move") garrison?.exitAll(list);
+      if (kind === "move") { garrison?.exitAll(list); transports?.exitAll(list); }   // (and out of a truck)
       repair?.cancel(list);   // a new order ends a repair
       // A new order calls a retreating squad off its retreat (CoH).
       for (const s of squads.squadsIn(list)) if (s.retreating) squads.endRetreat(s);
@@ -637,6 +642,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // GARRISONS (algGarrison.js): a squad inside a house, firing from its windows (CoH).
   garrison = createAlgGarrison(app, { units, squads, navGrid, showroom, fogOfWar });
   app.algGarrison = garrison;
+  // TRANSPORTS (algTransports.js): a squad rides in a GMC or a half-track.
+  transports = createAlgTransports(app, { units, navGrid });
+  app.algTransports = transports;
   // THE SEARCHLIGHTS (algSearchlight.js): sweep, lock on, reveal who is lit.
   const searchlights = createAlgSearchlights(app, { structures, units, cover: coverSys.cover });
   app.algSearchlights = searchlights;
@@ -667,11 +675,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algWrecks = wrecks;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
-    onDeath: (e) => { veterancy.onDeath(e); selection.remove?.(e); controlGroups?.render(); if (!e.isStructure && !e.type?.foot && !e.isAir) wrecks.add(e); },
+    onDeath: (e) => { veterancy.onDeath(e); selection.remove?.(e); controlGroups?.render(); transports?.onDeath(e); if (!e.isStructure && !e.type?.foot && !e.isAir) wrecks.add(e); },
     onShot: (e, tgt) => { posture.onShot(e, tgt); app.algSnipers?.onShot(e, tgt); }, onSplash: (at, r, owner) => { posture.onSplash(at, r, owner); garrison?.onSplash(at, r); },
     // The walls take some of a blast (algGarrison.js) — two grenades on a house of six: at full,
     // 4 dead; at 0.6, 0.1 (and every squad bailed out); 0.8 between, as CoH.
-    splashMul: (o) => (o.inside ? 0.8 : 1),
+    // (men aboard a vehicle: none — it is the vehicle that takes it, algTransports.js)
+    splashMul: (o) => (o.carrier ? 0 : o.inside ? 0.8 : 1),
     // ACCURACY (algAccuracy.js): a round rolls to hit — range, posture,
     // cover. ?acc=0 = every round hits (the old fights, A/B).
     hitChance: new URLSearchParams(location.search).get("acc") !== "0" ? createAlgAccuracy({ cover: coverSys.cover }) : null,
@@ -733,7 +742,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
   const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
-  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
+  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -782,6 +791,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     pathDots.frame(app.camera);
     squadBadges.frame(app.camera);
     garrison?.frame(app.camera);
+    transports?.frame(app.camera);
     orderMarks.frame(frameDt, app.camera);
     resourceHud.update(economy);
     healthBars.commit();

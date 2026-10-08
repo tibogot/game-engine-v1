@@ -239,7 +239,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
 
   function keysPage() {
     const row = (what, ...keys) => `<tr><td>${what}</td><td>${keys.map((k) => `<kbd>${k}</kbd>`).join(" ")}</td></tr>`;
-    const abil = Object.entries(HOTKEY).map(([k, key]) => row(ABILITY_NAMES[k] ?? k, key)).join("");
+    const abil = Object.entries(HOTKEY).filter(([k]) => k !== "disembark").map(   // (DÉBARQUER shares SORTIR's K: listed once)
+      ([k, key]) => row(ABILITY_NAMES[k] ?? k, key)).join("");
     show(`<div class="kicker">${t("Pause")}</div><h2>${t("Commandes")}</h2>
       <table class="keyt">
         ${row(t("Déplacer la caméra"), "Z Q S D", "↑ ← ↓ →")}
@@ -294,8 +295,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         t("<b>Paras coloniaux</b> : infanterie d'élite, arrivent par l'hélisurface."),
         t("<b>Légionnaires</b> : l'infanterie la plus solide."),
         t("<b>Jeep Willys</b> : rapide, une mitrailleuse ; éclaire le terrain."),
-        t("<b>Camion GMC</b> : transporte, ravitaille les villages en patrouille."),
-        t("<b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions."),
+        t("<b>Camion GMC</b> : transporte un groupe (clic droit sur le camion, infanterie sélectionnée ; Débarquer pour descendre). Rapide mais sans blindage : un camion miné ou pris en embuscade, et le groupe à bord en paie le prix. Vide, en patrouille, il ravitaille les villages tenus."),
+        t("<b>Half-track M3</b> : blindé léger, une .50 qui touche aussi les avions. Transporte un groupe à l'abri : s'il est détruit, les hommes à bord s'en sortent bien mieux que d'un camion."),
         t("<b>Panhard EBR, AMX-13</b> : blindés à canon de 75, contre les positions et les bâtiments. <b>Le blindage dépend du côté touché</b> : les balles ricochent sur l'avant, mordent sur les flancs et percent l'arrière (l'AMX-13 tient des minutes face à un groupe, une vingtaine de secondes de dos). Gardez l'avant vers l'ennemi ; grenades et mines frappent de partout."),
         t("<b>Alouette II</b> : hélicoptère armé d'une AA-52."),
       ) +

@@ -74,9 +74,12 @@ const P = {
   base: { player: { mp: 280, fuel: 4, mun: 6 }, enemy: 15 },
   // UPKEEP (effectifs a minute): every man past the first UPKEEP_FREE, every vehicle.
   // (balance 2026-10-04: 1.5 / 5 cost a 50-strong army 9% of its effectifs; CoH's ~30%)
-  upkeepMan: 2.5, upkeepVehicle: 8, upkeepFree: 14, mpFloor: 100,
-  // POP CAP: 30, +5 a village held, 50 at most (the start army is 16).
-  popBase: 30, popPerVillage: 5, popMax: 50,
+  // (2026-10-08, a scripted game: income fell to ~166 a minute under upkeep, one squad a minute while
+  // losing three men a minute — the army never grew: 2.5 → 2.)
+  upkeepMan: 2, upkeepVehicle: 8, upkeepFree: 14, mpFloor: 100,
+  // POP CAP: 40, +5 a village held, 60 at most (the start army is 16). (2026-10-08: 30 → 50 was ~5
+  // squads early, 8 at most — "too few units", you; with cover softened, numbers now take positions.)
+  popBase: 40, popPerVillage: 5, popMax: 60,
   // A village to its holder (the ALN: one number, as before).
   village: {
     hamlet: { mp: 20, fuel: 6, mun: 8 }, dechra: { mp: 25, fuel: 8, mun: 10 }, ksar: { mp: 30, fuel: 10, mun: 12 },
@@ -207,7 +210,7 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
       let fr = 0, al = 0;
       for (const u of units.list) {
         // MEN ON FOOT only (CoH's capture): a tank parked in a mechta wins nobody over.
-        if (!u.alive || u.isAir || u.ghost || !u.type?.foot) continue;
+        if (!u.alive || u.isAir || u.ghost || !u.type?.foot || u.carrier) continue;   // (aboard a truck: not)
         if (Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) > v.radius) continue;
         if (u.team === "player") fr++; else if (u.team === "enemy") al++;
       }

@@ -96,6 +96,23 @@ Keep this file current: tick things off here, add new asks here.
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
+14. [x] **TRANSPORTS (2026-10-08, you: "what is the truck for?")**: the GMC and the M3 half-track each
+   carry ONE squad (algTransports.js). Right-click your vehicle with infantry selected (a truck
+   cursor over one with room); aboard: not drawn, never targeted, no blast reaches them, no fire,
+   no capture; DÉBARQUER (K) on the vehicle or the men, or any move order to the men: out at the
+   tailgate. The vehicle destroyed: all thrown out, hurt — GMC ~16/60 hp left each, half-track
+   ~40/60 (measured). A badge rides on a loaded vehicle (n/6, our truck icon). An empty GMC on
+   patrol still delivers supplies. Checked in the game. LATER, maybe: the open GMC's bench men drawn
+   only when loaded (now always — decoration).
+13. [~] **BALANCE PASS — "too few units, I had to build mortars and fortifications" (2026-10-08, you)**.
+   A scripted French player (Normal): 88 French lost v 14 FLN by 6:52, every village lost; fuel 963 and
+   munitions 1321 unspent; effectifs ~166/min after upkeep. Battle lab (fixed first: its arena sat on a
+   ruined hut, the FLN squad inside its walls — battleLab.js now picks the clearest patch): hard cover
+   0.8 made numbers useless (12 v 6 FLN behind sandbags: the FLN won 2 of 3). DONE: hard cover 0.5,
+   cover 0.35 (algCover.js — 12 v 6 now 11-0, 11-0, 9-0; 6 v 6 still the defender's); pop cap 40 + 5 a
+   village, 60 max; upkeep 2 a man. NEXT: fuel / munitions sinks for infantry (grenades and smoke cost
+   munitions, squad upgrades, cheaper transport); the snowball (a lost village cuts your cap AND
+   raises the FLN's — keep one of the two); replay and judge.
 12. [x] **POINTS STAY HELD — CoH's rule (2026-10-08, you)**: before, a point nobody stood on drifted
    to neutral (a full one lost in ~3 min, a fresh one in ~2), so men had to sit on every flag. Now
    a HELD point stays its holder's and a dent heals back (0.005/s); only an unfinished capture of a
@@ -110,8 +127,10 @@ Keep this file current: tick things off here, add new asks here.
    (you: "better to be able to select them") a click on an enemy INSPECTS it: red ring, its bar, its
    portrait and weapon in the unit bar, the command card empty — never in the selection, so no
    order, ability or hotkey reaches it; let go when it dies, slips into the fog, or you click; (c) the faint team ring under EVERY man (unit marks, audit 2 item 6)
-   OFF — CoH rings only the selection, the badges find the men; ?marks=1 brings it back. Checked in
-   the game.
+   OFF — CoH rings only the selection, the badges find the men; ?marks=1 brings it back. (d) the
+   squad BADGE (number, shield, bar) sat over the men's CENTRE and floated over empty ground when
+   they spread — now over ONE man, the leader (first alive, out in the open), 3 m up, as CoH
+   (ui/squadBadges.js). Checked in the game.
 8. [ ] **GAMEPLAY, still missing vs CoH**: building damage stages + collapse (gap list 2), crews
    that bail out of a dead vehicle, DROPPED WEAPONS picked up (an FM off a dead FLN gunner),
    squad UPGRADES (an FM for the section, a radio), DOCTRINES / commander choices; the voices.

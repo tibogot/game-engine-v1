@@ -7,6 +7,7 @@
 //               they are given any other order (a move, Stop). Contact is
 //               fought as ever (combat.js chases and fires), then the file
 //               picks the track up again where it left it.
+//   (A GMC also CARRIES a squad — algTransports.js; empty or loaded, on patrol it delivers.)
 //   CONVOI      a GMC on patrol that passes through a village the French
 //               HOLD delivers supplies there (+30, once a village each two
 //               minutes a truck): the road has to be kept open for the trucks

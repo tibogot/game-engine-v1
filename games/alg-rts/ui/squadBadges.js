@@ -102,10 +102,14 @@ export function createSquadBadges({ app, squads, groups = null }) {
       live.add(s.id ?? s);
       const key0 = s.id ?? s;
       const b = badges.get(key0) ?? make(s, key0);
-      // Over the squad: its men's centre, 3.6 m up (over their heads at 1.3x).
-      let x = 0, y = 0, z = 0, hp = 0, max = 0, sel = false;
-      for (const u of men) { x += u.position.x; y += u.position.y; z += u.position.z; hp += u.hp; max += u.maxHp; sel ||= !!u.selected; }
-      v.set(x / men.length, y / men.length + 3.6, z / men.length).project(camera);
+      // Over ONE MAN, as CoH: the squad's leader (the first alive, out in the open), 3 m up (just over
+      // his head at 1.3x). Over the men's CENTRE it floated over empty ground whenever they spread —
+      // a straggler, a man running back, a band strung out in the scrub (you, 2026-10-08: "the bar
+      // and icon move alone, not on the unit").
+      let hp = 0, max = 0, sel = false;
+      for (const u of men) { hp += u.hp; max += u.maxHp; sel ||= !!u.selected; }
+      const lead = men.find((u) => !u.inside) ?? men[0];
+      v.set(lead.position.x, lead.position.y + 3.0, lead.position.z).project(camera);
       const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
       if (on !== b.shown) { b.el.style.display = on ? "" : "none"; b.shown = on; }
       if (!on) continue;

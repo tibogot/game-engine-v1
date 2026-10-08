@@ -13,11 +13,13 @@ export const ICON = {
   mirador: "mirador", searchlight: "searchlight", sangar: "sangar", ambushScreen: "ambushScreen",
   // 2026-10-04 (you: "compare with CoH" — every ability has its picture there)
   smoke: "smoke", barrage: "barrage", airStrike: "barrage", flare: "flare", lmg: "lmg", aimArc: "mgNest", retreat: "retreat", reinforce: "reinforce", repair: "repair", garrison: "garrison", unload: "unload",
+  // 2026-10-08: the transports (algTransports.js) — the badge's truck (drawn here, ours), DÉBARQUER as SORTIR
+  transport: "transport", disembark: "unload",
   // veterancy chevrons (1-3) and the alert feed's pictures
   vet1: "vet1", vet2: "vet2", vet3: "vet3",
   alertAttack: "alertAttack", alertSeen: "alertSeen", alertCut: "alertCut", alertFlag: "alertFlag", alertMine: "alertMine",
 };
-export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", barrage: "M", airStrike: "L", repair: "J", unload: "K", aimArc: "O" };
+export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O" };
 
 const BASE = "/textures/ui/icons/";
 /** An icon element's inline style (a mask in the current colour). */

@@ -54,24 +54,32 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
 
   function findArena() {
     const armed = (app.algStructures?.list ?? []).map((s) => s.position);
+    // NOTHING STANDING ON IT (2026-10-08: the map grew denser and the arena landed on a ruined hut —
+    // the FLN squad stood inside its walls, every duel measured them in hard cover): every placed
+    // piece's footprint kept off, and no cover on the ground (the walls, rocks, field walls).
+    const pieces = Object.values(app.showroom ?? {}).filter((m) => m?.position && m.geometry?.userData?.footprint)
+      .map((m) => { const fp = m.geometry.userData.footprint; return { x: m.position.x, z: m.position.z, r: Math.hypot(fp.hx, fp.hz) + 6 }; });
+    const coverAt = (x, z) => app.algCover?.coverAt?.(x, z) ?? 0;
     let best = null;
     for (let x = PLAY.x0 + 60; x <= PLAY.x1 - 60; x += 12) {
       for (let z = PLAY.z0 + 60; z <= PLAY.z1 - 60; z += 12) {
         const c = { x, z };
         if (armed.some((p) => Math.hypot(p.x - x, p.z - z) < 140)) continue;
-        let lo = Infinity, hi = -Infinity, ok = true;
+        let lo = Infinity, hi = -Infinity, ok = true, bad = 0;
         for (let r = -ARENA_LEN / 2; r <= ARENA_LEN / 2 && ok; r += 9) {
           for (let f = -ARENA_W / 2; f <= ARENA_W / 2; f += 9) {
             const p = at(c, r, f), h = H(p.x, p.z);
             if (nav?.isBlockedAtWorld?.(p.x, p.z) || (app.getWaterLevelAt?.(p.x, p.z) ?? -Infinity) > h - 0.2) { ok = false; break; }
+            if (coverAt(p.x, p.z) > 0.1 || pieces.some((q) => Math.hypot(q.x - p.x, q.z - p.z) < q.r)) bad++;
             lo = Math.min(lo, h); hi = Math.max(hi, h);
           }
         }
         if (!ok) continue;
         const relief = hi - lo;
-        // Flat enough first, then the flattest, near the post as a tiebreak.
-        const score = relief + Math.hypot(x - 90, z - 213) * 0.002;
-        if (relief < FLAT * 2 && (!best || score < best.score)) best = { x, z, relief, score };
+        // Flat enough first, then the CLEAREST (fewest samples on cover or a piece — none left on
+        // the denser map), then the flattest, near the post as a tiebreak.
+        const score = bad * 4 + relief + Math.hypot(x - 90, z - 213) * 0.002;
+        if (relief < FLAT * 2 && (!best || score < best.score)) best = { x, z, relief, score, bad };
       }
     }
     return best ?? { x: 0, z: 0, relief: NaN };

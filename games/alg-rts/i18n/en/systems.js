@@ -1,5 +1,10 @@
 // English for the systems area (French key -> English). See ../i18n.js.
 export default {
+  // algTransports.js
+  "<b>Véhicule détruit</b> avec un groupe à bord : les survivants sautent.": "<b>Vehicle destroyed</b> with a squad aboard: the survivors jump out.",
+  "Groupe à bord — clic : le sélectionner · Débarquer": "Squad aboard — click: select it · Disembark",
+  "Débarquer": "Disembark",
+  "Le groupe descend à l'arrière du véhicule.": "The squad gets out at the back of the vehicle.",
   // algGrenades.js
   "Grenade": "Grenade",
   "Un homme lance une grenade ({range} m, souffle {blast} m) : dégâts, et les hommes autour se jettent à terre. G.":

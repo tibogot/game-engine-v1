@@ -29,7 +29,16 @@ import { createCoverOverlay } from "../shared-rts/coverOverlay.js";
 //                rtsAlgVillage.js): a garden's dry-stone walls, the terrace
 //                walls, the dechra's courtyards — hard cover along the wall,
 //                not over the plot it encloses.
-export const ALG_COVER = { ...COVER, concealFloor: 0.2, concealCeil: 0.65, maxConcealment: 0.6, terrainCover: 0.5 };
+//   HOW MUCH (balance pass 2026-10-08, you: "I had to build mortars and fortifications to win, too
+//                few units"): the battle lab, 6 appelés v 6 moudjahidine 24 m apart, the FLN
+//                behind sandbags (3 duels each):
+//                  hard 0.8 / cover 0.55 (shared's)   6 v 6: FLN 6-0 · 12 v 6: FLN wins 2 of 3
+//                  hard 0.5 / cover 0.35 (kept)        6 v 6: FLN 6-0, 5-0, 1-1 · 12 v 6: French 11-0, 11-0, 9-0
+//                Before, cover made numbers useless — two squads could not take a held position,
+//                so only splash (mortars, grenades) could. Now cover still wins an even fight, and
+//                bringing two squads takes the position (CoH's heavy / light cover, ~half / a third).
+//                A grenade first flips an even fight either way (2 of 3).
+export const ALG_COVER = { ...COVER, maxHardCover: 0.5, maxCover: 0.35, concealFloor: 0.2, concealCeil: 0.65, maxConcealment: 0.6, terrainCover: 0.5 };
 
 /** Stone and sandbags: hard cover. */
 const HARD = new Set(["frenchPost", "sangar", "mgNest", "mortarPit", "sandbags", "sandbags1", "sandbags2", "dechra", "ksar", "mechta", "mechta2", "koubba", "caveEntrance", "sasPost", "armsCache", "alnCamp", "wellHamlet1", "wellHamlet2"]);
