@@ -1,0 +1,2282 @@
+{
+ "note": "alg-rts voices — the GameDev Market Military Voice Pack (English placeholder, every language version), tools/algImportRadioPack.mjs.",
+ "voices": {
+  "fr": [
+   "pack"
+  ],
+  "hq": [
+   "pack"
+  ]
+ },
+ "lines": {
+  "fr_select": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/yes_sir_1.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/yes_sir_2.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/yes_sir_3.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/yes_sir_4.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/yes_sir_5.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/yes_sir_6.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/yes_sir_7.mp3",
+     "voice": "pack",
+     "text": "Yes Sir"
+    },
+    {
+     "f": "fr/sir_yes_sir_1.mp3",
+     "voice": "pack",
+     "text": "Sir Yes Sir"
+    },
+    {
+     "f": "fr/sir_yes_sir_2.mp3",
+     "voice": "pack",
+     "text": "Sir Yes Sir"
+    },
+    {
+     "f": "fr/sir_yes_sir_3.mp3",
+     "voice": "pack",
+     "text": "Sir Yes Sir"
+    },
+    {
+     "f": "fr/sir_yes_sir_4.mp3",
+     "voice": "pack",
+     "text": "Sir Yes Sir"
+    },
+    {
+     "f": "fr/sir_yes_sir_5.mp3",
+     "voice": "pack",
+     "text": "Sir Yes Sir"
+    },
+    {
+     "f": "fr/sir_yes_sir_6.mp3",
+     "voice": "pack",
+     "text": "Sir Yes Sir"
+    },
+    {
+     "f": "fr/standing_by_1.mp3",
+     "voice": "pack",
+     "text": "Standing By"
+    },
+    {
+     "f": "fr/standing_by_2.mp3",
+     "voice": "pack",
+     "text": "Standing By"
+    },
+    {
+     "f": "fr/standing_by_3.mp3",
+     "voice": "pack",
+     "text": "Standing By"
+    },
+    {
+     "f": "fr/reporting_1.mp3",
+     "voice": "pack",
+     "text": "Reporting"
+    },
+    {
+     "f": "fr/reporting_2.mp3",
+     "voice": "pack",
+     "text": "Reporting"
+    },
+    {
+     "f": "fr/reporting_3.mp3",
+     "voice": "pack",
+     "text": "Reporting"
+    }
+   ]
+  },
+  "fr_move": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/move_out_1.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_2.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_3.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_4.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_5.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_6.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/roger_1.mp3",
+     "voice": "pack",
+     "text": "Roger"
+    },
+    {
+     "f": "fr/roger_2.mp3",
+     "voice": "pack",
+     "text": "Roger"
+    },
+    {
+     "f": "fr/roger_3.mp3",
+     "voice": "pack",
+     "text": "Roger"
+    },
+    {
+     "f": "fr/roger_4.mp3",
+     "voice": "pack",
+     "text": "Roger"
+    },
+    {
+     "f": "fr/roger_that_1.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_2.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_3.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_4.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_5.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_6.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/copy_that_1.mp3",
+     "voice": "pack",
+     "text": "Copy That"
+    },
+    {
+     "f": "fr/copy_that_2.mp3",
+     "voice": "pack",
+     "text": "Copy That"
+    },
+    {
+     "f": "fr/understood_1.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_2.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_3.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_4.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_5.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_6.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/order_acknowledged_1.mp3",
+     "voice": "pack",
+     "text": "Order Acknowledged"
+    },
+    {
+     "f": "fr/order_acknowledged_2.mp3",
+     "voice": "pack",
+     "text": "Order Acknowledged"
+    },
+    {
+     "f": "fr/order_acknowledged_3.mp3",
+     "voice": "pack",
+     "text": "Order Acknowledged"
+    },
+    {
+     "f": "fr/affirmative_1.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_2.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_3.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_4.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_5.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_6.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    }
+   ]
+  },
+  "fr_attack": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/engaging_enemy_1.mp3",
+     "voice": "pack",
+     "text": "Engaging Enemy"
+    },
+    {
+     "f": "fr/engaging_enemy_2.mp3",
+     "voice": "pack",
+     "text": "Engaging Enemy"
+    },
+    {
+     "f": "fr/engaging_enemy_3.mp3",
+     "voice": "pack",
+     "text": "Engaging Enemy"
+    },
+    {
+     "f": "fr/open_fire_1.mp3",
+     "voice": "pack",
+     "text": "Open Fire"
+    },
+    {
+     "f": "fr/open_fire_2.mp3",
+     "voice": "pack",
+     "text": "Open Fire"
+    },
+    {
+     "f": "fr/open_fire_3.mp3",
+     "voice": "pack",
+     "text": "Open Fire"
+    },
+    {
+     "f": "fr/open_fire_4.mp3",
+     "voice": "pack",
+     "text": "Open Fire"
+    },
+    {
+     "f": "fr/open_fire_5.mp3",
+     "voice": "pack",
+     "text": "Open Fire"
+    },
+    {
+     "f": "fr/open_fire_6.mp3",
+     "voice": "pack",
+     "text": "Open Fire"
+    },
+    {
+     "f": "fr/opening_fire_1.mp3",
+     "voice": "pack",
+     "text": "Opening Fire"
+    },
+    {
+     "f": "fr/opening_fire_2.mp3",
+     "voice": "pack",
+     "text": "Opening Fire"
+    },
+    {
+     "f": "fr/opening_fire_3.mp3",
+     "voice": "pack",
+     "text": "Opening Fire"
+    },
+    {
+     "f": "fr/opening_fire_4.mp3",
+     "voice": "pack",
+     "text": "Opening Fire"
+    },
+    {
+     "f": "fr/opening_fire_5.mp3",
+     "voice": "pack",
+     "text": "Opening Fire"
+    },
+    {
+     "f": "fr/opening_fire_6.mp3",
+     "voice": "pack",
+     "text": "Opening Fire"
+    },
+    {
+     "f": "fr/engage_the_enemy_1.mp3",
+     "voice": "pack",
+     "text": "Engage The Enemy"
+    },
+    {
+     "f": "fr/engage_the_enemy_2.mp3",
+     "voice": "pack",
+     "text": "Engage The Enemy"
+    },
+    {
+     "f": "fr/engage_the_enemy_3.mp3",
+     "voice": "pack",
+     "text": "Engage The Enemy"
+    },
+    {
+     "f": "fr/engaging_target_1.mp3",
+     "voice": "pack",
+     "text": "Engaging Target"
+    },
+    {
+     "f": "fr/engaging_target_2.mp3",
+     "voice": "pack",
+     "text": "Engaging Target"
+    },
+    {
+     "f": "fr/engaging_target_3.mp3",
+     "voice": "pack",
+     "text": "Engaging Target"
+    }
+   ]
+  },
+  "fr_vehicleMove": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/roger_that_1.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_2.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_3.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_4.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_5.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/roger_that_6.mp3",
+     "voice": "pack",
+     "text": "Roger That"
+    },
+    {
+     "f": "fr/copy_that_1.mp3",
+     "voice": "pack",
+     "text": "Copy That"
+    },
+    {
+     "f": "fr/copy_that_2.mp3",
+     "voice": "pack",
+     "text": "Copy That"
+    },
+    {
+     "f": "fr/move_out_1.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_2.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_3.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_4.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_5.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/move_out_6.mp3",
+     "voice": "pack",
+     "text": "Move Out"
+    },
+    {
+     "f": "fr/affirmative_1.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_2.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_3.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_4.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_5.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    },
+    {
+     "f": "fr/affirmative_6.mp3",
+     "voice": "pack",
+     "text": "Affirmative"
+    }
+   ]
+  },
+  "fr_contact": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/enemy_spotted_1.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted"
+    },
+    {
+     "f": "fr/enemy_spotted_2.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted"
+    },
+    {
+     "f": "fr/enemy_spotted_3.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted"
+    },
+    {
+     "f": "fr/enemy_spotted_4.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted"
+    },
+    {
+     "f": "fr/enemy_spotted_5.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted"
+    },
+    {
+     "f": "fr/hostiles_detected_1.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_2.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_3.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_4.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_5.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_6.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_7.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_8.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostiles_detected_9.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected"
+    },
+    {
+     "f": "fr/hostile_1.mp3",
+     "voice": "pack",
+     "text": "Hostile"
+    },
+    {
+     "f": "fr/hostile_2.mp3",
+     "voice": "pack",
+     "text": "Hostile"
+    },
+    {
+     "f": "fr/hostile_3.mp3",
+     "voice": "pack",
+     "text": "Hostile"
+    },
+    {
+     "f": "fr/hostile_4.mp3",
+     "voice": "pack",
+     "text": "Hostile"
+    },
+    {
+     "f": "fr/hostile_5.mp3",
+     "voice": "pack",
+     "text": "Hostile"
+    },
+    {
+     "f": "fr/hostile_6.mp3",
+     "voice": "pack",
+     "text": "Hostile"
+    },
+    {
+     "f": "fr/target_spotted_1.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    },
+    {
+     "f": "fr/target_spotted_2.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    },
+    {
+     "f": "fr/target_spotted_3.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    },
+    {
+     "f": "fr/target_spotted_4.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    },
+    {
+     "f": "fr/target_spotted_5.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    },
+    {
+     "f": "fr/target_spotted_6.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    },
+    {
+     "f": "fr/target_spotted_7.mp3",
+     "voice": "pack",
+     "text": "Target Spotted"
+    }
+   ]
+  },
+  "fr_underFire": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/we_are_under_fire_1.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/we_are_under_fire_2.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/we_are_under_fire_3.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/we_are_under_fire_4.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/we_are_under_fire_5.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/we_are_under_fire_6.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/we_are_under_fire_7.mp3",
+     "voice": "pack",
+     "text": "We Are Under Fire"
+    },
+    {
+     "f": "fr/take_cover_1.mp3",
+     "voice": "pack",
+     "text": "Take Cover"
+    },
+    {
+     "f": "fr/take_cover_2.mp3",
+     "voice": "pack",
+     "text": "Take Cover"
+    },
+    {
+     "f": "fr/take_cover_3.mp3",
+     "voice": "pack",
+     "text": "Take Cover"
+    },
+    {
+     "f": "fr/take_cover_4.mp3",
+     "voice": "pack",
+     "text": "Take Cover"
+    },
+    {
+     "f": "fr/take_cover_5.mp3",
+     "voice": "pack",
+     "text": "Take Cover"
+    },
+    {
+     "f": "fr/take_cover_6.mp3",
+     "voice": "pack",
+     "text": "Take Cover"
+    },
+    {
+     "f": "fr/get_down_1.mp3",
+     "voice": "pack",
+     "text": "Get Down"
+    },
+    {
+     "f": "fr/get_down_2.mp3",
+     "voice": "pack",
+     "text": "Get Down"
+    },
+    {
+     "f": "fr/get_down_3.mp3",
+     "voice": "pack",
+     "text": "Get Down"
+    },
+    {
+     "f": "fr/get_down_4.mp3",
+     "voice": "pack",
+     "text": "Get Down"
+    },
+    {
+     "f": "fr/get_down_5.mp3",
+     "voice": "pack",
+     "text": "Get Down"
+    },
+    {
+     "f": "fr/get_down_6.mp3",
+     "voice": "pack",
+     "text": "Get Down"
+    }
+   ]
+  },
+  "fr_pinned": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/im_under_heavy_fire_1.mp3",
+     "voice": "pack",
+     "text": "Im Under Heavy Fire"
+    },
+    {
+     "f": "fr/im_under_heavy_fire_2.mp3",
+     "voice": "pack",
+     "text": "Im Under Heavy Fire"
+    },
+    {
+     "f": "fr/im_under_heavy_fire_3.mp3",
+     "voice": "pack",
+     "text": "Im Under Heavy Fire"
+    },
+    {
+     "f": "fr/im_under_heavy_fire_4.mp3",
+     "voice": "pack",
+     "text": "Im Under Heavy Fire"
+    },
+    {
+     "f": "fr/im_under_heavy_fire_5.mp3",
+     "voice": "pack",
+     "text": "Im Under Heavy Fire"
+    },
+    {
+     "f": "fr/im_under_heavy_fire_6.mp3",
+     "voice": "pack",
+     "text": "Im Under Heavy Fire"
+    },
+    {
+     "f": "fr/under_heavy_fire_1.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Fire"
+    },
+    {
+     "f": "fr/under_heavy_fire_2.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Fire"
+    },
+    {
+     "f": "fr/under_heavy_fire_3.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Fire"
+    },
+    {
+     "f": "fr/under_heavy_fire_4.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Fire"
+    },
+    {
+     "f": "fr/under_heavy_fire_5.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Fire"
+    },
+    {
+     "f": "fr/under_heavy_fire_6.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Fire"
+    },
+    {
+     "f": "fr/stay_low_1.mp3",
+     "voice": "pack",
+     "text": "Stay Low"
+    },
+    {
+     "f": "fr/stay_low_2.mp3",
+     "voice": "pack",
+     "text": "Stay Low"
+    },
+    {
+     "f": "fr/stay_low_3.mp3",
+     "voice": "pack",
+     "text": "Stay Low"
+    }
+   ]
+  },
+  "fr_grenade": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/grenade_1.mp3",
+     "voice": "pack",
+     "text": "Grenade"
+    },
+    {
+     "f": "fr/grenade_2.mp3",
+     "voice": "pack",
+     "text": "Grenade"
+    },
+    {
+     "f": "fr/grenade_3.mp3",
+     "voice": "pack",
+     "text": "Grenade"
+    },
+    {
+     "f": "fr/grenade_4.mp3",
+     "voice": "pack",
+     "text": "Grenade"
+    },
+    {
+     "f": "fr/grenade_5.mp3",
+     "voice": "pack",
+     "text": "Grenade"
+    },
+    {
+     "f": "fr/grenade_6.mp3",
+     "voice": "pack",
+     "text": "Grenade"
+    },
+    {
+     "f": "fr/fire_in_the_hole_1.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/fire_in_the_hole_2.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/fire_in_the_hole_3.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/fire_in_the_hole_4.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/fire_in_the_hole_5.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/fire_in_the_hole_6.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/fire_in_the_hole_7.mp3",
+     "voice": "pack",
+     "text": "Fire In The Hole"
+    },
+    {
+     "f": "fr/throwing_grenade_1.mp3",
+     "voice": "pack",
+     "text": "Throwing Grenade"
+    },
+    {
+     "f": "fr/throwing_grenade_2.mp3",
+     "voice": "pack",
+     "text": "Throwing Grenade"
+    },
+    {
+     "f": "fr/throwing_grenade_3.mp3",
+     "voice": "pack",
+     "text": "Throwing Grenade"
+    }
+   ]
+  },
+  "fr_manDown": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/man_down_1.mp3",
+     "voice": "pack",
+     "text": "Man Down"
+    },
+    {
+     "f": "fr/man_down_2.mp3",
+     "voice": "pack",
+     "text": "Man Down"
+    },
+    {
+     "f": "fr/man_down_3.mp3",
+     "voice": "pack",
+     "text": "Man Down"
+    },
+    {
+     "f": "fr/man_down_4.mp3",
+     "voice": "pack",
+     "text": "Man Down"
+    },
+    {
+     "f": "fr/man_down_5.mp3",
+     "voice": "pack",
+     "text": "Man Down"
+    },
+    {
+     "f": "fr/medic_1.mp3",
+     "voice": "pack",
+     "text": "Medic"
+    },
+    {
+     "f": "fr/medic_2.mp3",
+     "voice": "pack",
+     "text": "Medic"
+    },
+    {
+     "f": "fr/medic_3.mp3",
+     "voice": "pack",
+     "text": "Medic"
+    },
+    {
+     "f": "fr/medic_4.mp3",
+     "voice": "pack",
+     "text": "Medic"
+    },
+    {
+     "f": "fr/need_medic_1.mp3",
+     "voice": "pack",
+     "text": "Need Medic"
+    },
+    {
+     "f": "fr/need_medic_2.mp3",
+     "voice": "pack",
+     "text": "Need Medic"
+    },
+    {
+     "f": "fr/need_medic_3.mp3",
+     "voice": "pack",
+     "text": "Need Medic"
+    },
+    {
+     "f": "fr/need_medic_4.mp3",
+     "voice": "pack",
+     "text": "Need Medic"
+    },
+    {
+     "f": "fr/im_hit_1.mp3",
+     "voice": "pack",
+     "text": "Im Hit"
+    },
+    {
+     "f": "fr/im_hit_2.mp3",
+     "voice": "pack",
+     "text": "Im Hit"
+    },
+    {
+     "f": "fr/im_hit_3.mp3",
+     "voice": "pack",
+     "text": "Im Hit"
+    },
+    {
+     "f": "fr/im_hit_4.mp3",
+     "voice": "pack",
+     "text": "Im Hit"
+    },
+    {
+     "f": "fr/im_hit_5.mp3",
+     "voice": "pack",
+     "text": "Im Hit"
+    }
+   ]
+  },
+  "fr_build": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/im_on_it_1.mp3",
+     "voice": "pack",
+     "text": "Im On It"
+    },
+    {
+     "f": "fr/im_on_it_2.mp3",
+     "voice": "pack",
+     "text": "Im On It"
+    },
+    {
+     "f": "fr/im_on_it_3.mp3",
+     "voice": "pack",
+     "text": "Im On It"
+    },
+    {
+     "f": "fr/order_acknowledged_1.mp3",
+     "voice": "pack",
+     "text": "Order Acknowledged"
+    },
+    {
+     "f": "fr/order_acknowledged_2.mp3",
+     "voice": "pack",
+     "text": "Order Acknowledged"
+    },
+    {
+     "f": "fr/order_acknowledged_3.mp3",
+     "voice": "pack",
+     "text": "Order Acknowledged"
+    },
+    {
+     "f": "fr/understood_1.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_2.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_3.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_4.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_5.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    },
+    {
+     "f": "fr/understood_6.mp3",
+     "voice": "pack",
+     "text": "Understood"
+    }
+   ]
+  },
+  "fr_victory": {
+   "side": "fr",
+   "files": [
+    {
+     "f": "fr/area_secure_1.mp3",
+     "voice": "pack",
+     "text": "Area Secure"
+    },
+    {
+     "f": "fr/area_secure_2.mp3",
+     "voice": "pack",
+     "text": "Area Secure"
+    },
+    {
+     "f": "fr/area_secure_3.mp3",
+     "voice": "pack",
+     "text": "Area Secure"
+    },
+    {
+     "f": "fr/all_clear_1.mp3",
+     "voice": "pack",
+     "text": "All Clear"
+    },
+    {
+     "f": "fr/all_clear_2.mp3",
+     "voice": "pack",
+     "text": "All Clear"
+    },
+    {
+     "f": "fr/all_clear_3.mp3",
+     "voice": "pack",
+     "text": "All Clear"
+    }
+   ]
+  },
+  "hq_contact": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/hostiles_detected_1.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_2.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_3.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_4.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_5.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_6.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_7.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_8.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_9.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_spotted_1.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_spotted_2.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_spotted_3.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_spotted_4.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_spotted_5.mp3",
+     "voice": "pack",
+     "text": "Enemy Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_engaged_1.mp3",
+     "voice": "pack",
+     "text": "Enemy Engaged",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_engaged_2.mp3",
+     "voice": "pack",
+     "text": "Enemy Engaged",
+     "pre": true
+    },
+    {
+     "f": "hq/enemy_engaged_3.mp3",
+     "voice": "pack",
+     "text": "Enemy Engaged",
+     "pre": true
+    }
+   ]
+  },
+  "hq_enemySeen": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/hostiles_detected_1.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_2.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_3.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_4.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_5.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_6.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_7.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_8.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/hostiles_detected_9.mp3",
+     "voice": "pack",
+     "text": "Hostiles Detected",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_1.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_2.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_3.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_4.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_5.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_6.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_7.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/visual_on_target_1.mp3",
+     "voice": "pack",
+     "text": "Visual On Target",
+     "pre": true
+    },
+    {
+     "f": "hq/visual_on_target_2.mp3",
+     "voice": "pack",
+     "text": "Visual On Target",
+     "pre": true
+    },
+    {
+     "f": "hq/visual_on_target_3.mp3",
+     "voice": "pack",
+     "text": "Visual On Target",
+     "pre": true
+    }
+   ]
+  },
+  "hq_enemyMG": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/under_heavy_enemy_fire_1.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_2.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_3.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_4.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_5.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_6.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/take_cover_1.mp3",
+     "voice": "pack",
+     "text": "Take Cover",
+     "pre": true
+    },
+    {
+     "f": "hq/take_cover_2.mp3",
+     "voice": "pack",
+     "text": "Take Cover",
+     "pre": true
+    },
+    {
+     "f": "hq/take_cover_3.mp3",
+     "voice": "pack",
+     "text": "Take Cover",
+     "pre": true
+    },
+    {
+     "f": "hq/take_cover_4.mp3",
+     "voice": "pack",
+     "text": "Take Cover",
+     "pre": true
+    },
+    {
+     "f": "hq/take_cover_5.mp3",
+     "voice": "pack",
+     "text": "Take Cover",
+     "pre": true
+    },
+    {
+     "f": "hq/take_cover_6.mp3",
+     "voice": "pack",
+     "text": "Take Cover",
+     "pre": true
+    }
+   ]
+  },
+  "hq_villageTaken": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/area_secure_1.mp3",
+     "voice": "pack",
+     "text": "Area Secure",
+     "pre": true
+    },
+    {
+     "f": "hq/area_secure_2.mp3",
+     "voice": "pack",
+     "text": "Area Secure",
+     "pre": true
+    },
+    {
+     "f": "hq/area_secure_3.mp3",
+     "voice": "pack",
+     "text": "Area Secure",
+     "pre": true
+    },
+    {
+     "f": "hq/captured_1.mp3",
+     "voice": "pack",
+     "text": "Captured",
+     "pre": true
+    },
+    {
+     "f": "hq/captured_2.mp3",
+     "voice": "pack",
+     "text": "Captured",
+     "pre": true
+    },
+    {
+     "f": "hq/all_clear_1.mp3",
+     "voice": "pack",
+     "text": "All Clear",
+     "pre": true
+    },
+    {
+     "f": "hq/all_clear_2.mp3",
+     "voice": "pack",
+     "text": "All Clear",
+     "pre": true
+    },
+    {
+     "f": "hq/all_clear_3.mp3",
+     "voice": "pack",
+     "text": "All Clear",
+     "pre": true
+    }
+   ]
+  },
+  "hq_villageLost": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/objective_failed_1.mp3",
+     "voice": "pack",
+     "text": "Objective Failed",
+     "pre": true
+    },
+    {
+     "f": "hq/objective_failed_2.mp3",
+     "voice": "pack",
+     "text": "Objective Failed",
+     "pre": true
+    },
+    {
+     "f": "hq/objective_failed_3.mp3",
+     "voice": "pack",
+     "text": "Objective Failed",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_1.mp3",
+     "voice": "pack",
+     "text": "Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_2.mp3",
+     "voice": "pack",
+     "text": "Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_3.mp3",
+     "voice": "pack",
+     "text": "Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_4.mp3",
+     "voice": "pack",
+     "text": "Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_5.mp3",
+     "voice": "pack",
+     "text": "Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_6.mp3",
+     "voice": "pack",
+     "text": "Fall Back",
+     "pre": true
+    }
+   ]
+  },
+  "hq_villageThreat": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/need_support_1.mp3",
+     "voice": "pack",
+     "text": "Need Support",
+     "pre": true
+    },
+    {
+     "f": "hq/need_support_2.mp3",
+     "voice": "pack",
+     "text": "Need Support",
+     "pre": true
+    },
+    {
+     "f": "hq/need_support_3.mp3",
+     "voice": "pack",
+     "text": "Need Support",
+     "pre": true
+    },
+    {
+     "f": "hq/need_support_4.mp3",
+     "voice": "pack",
+     "text": "Need Support",
+     "pre": true
+    },
+    {
+     "f": "hq/need_support_5.mp3",
+     "voice": "pack",
+     "text": "Need Support",
+     "pre": true
+    },
+    {
+     "f": "hq/need_support_6.mp3",
+     "voice": "pack",
+     "text": "Need Support",
+     "pre": true
+    },
+    {
+     "f": "hq/require_support_1.mp3",
+     "voice": "pack",
+     "text": "Require Support",
+     "pre": true
+    },
+    {
+     "f": "hq/require_support_2.mp3",
+     "voice": "pack",
+     "text": "Require Support",
+     "pre": true
+    },
+    {
+     "f": "hq/require_support_3.mp3",
+     "voice": "pack",
+     "text": "Require Support",
+     "pre": true
+    },
+    {
+     "f": "hq/require_support_4.mp3",
+     "voice": "pack",
+     "text": "Require Support",
+     "pre": true
+    },
+    {
+     "f": "hq/require_support_5.mp3",
+     "voice": "pack",
+     "text": "Require Support",
+     "pre": true
+    },
+    {
+     "f": "hq/require_support_6.mp3",
+     "voice": "pack",
+     "text": "Require Support",
+     "pre": true
+    }
+   ]
+  },
+  "hq_vehicleLost": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/taking_casualties_1.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_2.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_3.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_4.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_5.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_6.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_1.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_2.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_3.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_4.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_5.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_6.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    }
+   ]
+  },
+  "hq_buildingLost": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/taking_casualties_1.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_2.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_3.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_4.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_5.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/taking_casualties_6.mp3",
+     "voice": "pack",
+     "text": "Taking Casualties",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_1.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_2.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_3.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_4.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_5.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    },
+    {
+     "f": "hq/status_critical_6.mp3",
+     "voice": "pack",
+     "text": "Status Critical",
+     "pre": true
+    }
+   ]
+  },
+  "hq_postAttack": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/request_immediate_support_1.mp3",
+     "voice": "pack",
+     "text": "Request Immediate Support",
+     "pre": true
+    },
+    {
+     "f": "hq/request_immediate_support_2.mp3",
+     "voice": "pack",
+     "text": "Request Immediate Support",
+     "pre": true
+    },
+    {
+     "f": "hq/request_immediate_support_3.mp3",
+     "voice": "pack",
+     "text": "Request Immediate Support",
+     "pre": true
+    },
+    {
+     "f": "hq/request_immediate_support_4.mp3",
+     "voice": "pack",
+     "text": "Request Immediate Support",
+     "pre": true
+    },
+    {
+     "f": "hq/request_immediate_support_5.mp3",
+     "voice": "pack",
+     "text": "Request Immediate Support",
+     "pre": true
+    },
+    {
+     "f": "hq/request_immediate_support_6.mp3",
+     "voice": "pack",
+     "text": "Request Immediate Support",
+     "pre": true
+    },
+    {
+     "f": "hq/need_backup_1.mp3",
+     "voice": "pack",
+     "text": "Need Backup",
+     "pre": true
+    },
+    {
+     "f": "hq/need_backup_2.mp3",
+     "voice": "pack",
+     "text": "Need Backup",
+     "pre": true
+    },
+    {
+     "f": "hq/need_backup_3.mp3",
+     "voice": "pack",
+     "text": "Need Backup",
+     "pre": true
+    },
+    {
+     "f": "hq/need_backup_4.mp3",
+     "voice": "pack",
+     "text": "Need Backup",
+     "pre": true
+    },
+    {
+     "f": "hq/mayday_1.mp3",
+     "voice": "pack",
+     "text": "Mayday",
+     "pre": true
+    },
+    {
+     "f": "hq/mayday_2.mp3",
+     "voice": "pack",
+     "text": "Mayday",
+     "pre": true
+    },
+    {
+     "f": "hq/mayday_3.mp3",
+     "voice": "pack",
+     "text": "Mayday",
+     "pre": true
+    },
+    {
+     "f": "hq/mayday_4.mp3",
+     "voice": "pack",
+     "text": "Mayday",
+     "pre": true
+    },
+    {
+     "f": "hq/mayday_5.mp3",
+     "voice": "pack",
+     "text": "Mayday",
+     "pre": true
+    },
+    {
+     "f": "hq/mayday_6.mp3",
+     "voice": "pack",
+     "text": "Mayday",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_1.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_2.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_3.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_4.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_5.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    },
+    {
+     "f": "hq/under_heavy_enemy_fire_6.mp3",
+     "voice": "pack",
+     "text": "Under Heavy Enemy Fire",
+     "pre": true
+    }
+   ]
+  },
+  "hq_cacheFound": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/weapons_here_1.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_2.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_3.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_4.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_5.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_6.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_7.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    },
+    {
+     "f": "hq/weapons_here_8.mp3",
+     "voice": "pack",
+     "text": "Weapons Here",
+     "pre": true
+    }
+   ]
+  },
+  "hq_muleTrain": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/target_spotted_1.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_2.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_3.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_4.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_5.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_6.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/target_spotted_7.mp3",
+     "voice": "pack",
+     "text": "Target Spotted",
+     "pre": true
+    },
+    {
+     "f": "hq/visual_on_target_1.mp3",
+     "voice": "pack",
+     "text": "Visual On Target",
+     "pre": true
+    },
+    {
+     "f": "hq/visual_on_target_2.mp3",
+     "voice": "pack",
+     "text": "Visual On Target",
+     "pre": true
+    },
+    {
+     "f": "hq/visual_on_target_3.mp3",
+     "voice": "pack",
+     "text": "Visual On Target",
+     "pre": true
+    }
+   ]
+  },
+  "hq_mine": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/danger_1.mp3",
+     "voice": "pack",
+     "text": "Danger",
+     "pre": true
+    },
+    {
+     "f": "hq/danger_2.mp3",
+     "voice": "pack",
+     "text": "Danger",
+     "pre": true
+    },
+    {
+     "f": "hq/danger_3.mp3",
+     "voice": "pack",
+     "text": "Danger",
+     "pre": true
+    },
+    {
+     "f": "hq/watch_out_1.mp3",
+     "voice": "pack",
+     "text": "Watch Out",
+     "pre": true
+    },
+    {
+     "f": "hq/watch_out_2.mp3",
+     "voice": "pack",
+     "text": "Watch Out",
+     "pre": true
+    },
+    {
+     "f": "hq/watch_out_3.mp3",
+     "voice": "pack",
+     "text": "Watch Out",
+     "pre": true
+    },
+    {
+     "f": "hq/watch_out_4.mp3",
+     "voice": "pack",
+     "text": "Watch Out",
+     "pre": true
+    }
+   ]
+  },
+  "hq_reinforce": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/the_cavalry_has_arrived_1.mp3",
+     "voice": "pack",
+     "text": "The Cavalry Has Arrived",
+     "pre": true
+    },
+    {
+     "f": "hq/the_cavalry_has_arrived_2.mp3",
+     "voice": "pack",
+     "text": "The Cavalry Has Arrived",
+     "pre": true
+    },
+    {
+     "f": "hq/the_cavalry_has_arrived_3.mp3",
+     "voice": "pack",
+     "text": "The Cavalry Has Arrived",
+     "pre": true
+    },
+    {
+     "f": "hq/the_cavalry_has_arrived_4.mp3",
+     "voice": "pack",
+     "text": "The Cavalry Has Arrived",
+     "pre": true
+    },
+    {
+     "f": "hq/the_cavalry_has_arrived_5.mp3",
+     "voice": "pack",
+     "text": "The Cavalry Has Arrived",
+     "pre": true
+    },
+    {
+     "f": "hq/the_cavalry_has_arrived_6.mp3",
+     "voice": "pack",
+     "text": "The Cavalry Has Arrived",
+     "pre": true
+    }
+   ]
+  },
+  "hq_tier": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/order_received_1.mp3",
+     "voice": "pack",
+     "text": "Order Received",
+     "pre": true
+    },
+    {
+     "f": "hq/order_received_2.mp3",
+     "voice": "pack",
+     "text": "Order Received",
+     "pre": true
+    },
+    {
+     "f": "hq/order_received_3.mp3",
+     "voice": "pack",
+     "text": "Order Received",
+     "pre": true
+    }
+   ]
+  },
+  "hq_victory": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/operation_successful_1.mp3",
+     "voice": "pack",
+     "text": "Operation Successful",
+     "pre": true
+    },
+    {
+     "f": "hq/operation_successful_2.mp3",
+     "voice": "pack",
+     "text": "Operation Successful",
+     "pre": true
+    },
+    {
+     "f": "hq/operation_successful_3.mp3",
+     "voice": "pack",
+     "text": "Operation Successful",
+     "pre": true
+    },
+    {
+     "f": "hq/operation_successful_4.mp3",
+     "voice": "pack",
+     "text": "Operation Successful",
+     "pre": true
+    },
+    {
+     "f": "hq/operation_successful_5.mp3",
+     "voice": "pack",
+     "text": "Operation Successful",
+     "pre": true
+    },
+    {
+     "f": "hq/operation_successful_6.mp3",
+     "voice": "pack",
+     "text": "Operation Successful",
+     "pre": true
+    },
+    {
+     "f": "hq/well_done_1.mp3",
+     "voice": "pack",
+     "text": "Well Done",
+     "pre": true
+    },
+    {
+     "f": "hq/well_done_2.mp3",
+     "voice": "pack",
+     "text": "Well Done",
+     "pre": true
+    },
+    {
+     "f": "hq/well_done_3.mp3",
+     "voice": "pack",
+     "text": "Well Done",
+     "pre": true
+    },
+    {
+     "f": "hq/well_done_4.mp3",
+     "voice": "pack",
+     "text": "Well Done",
+     "pre": true
+    },
+    {
+     "f": "hq/well_done_5.mp3",
+     "voice": "pack",
+     "text": "Well Done",
+     "pre": true
+    }
+   ]
+  },
+  "hq_defeat": {
+   "side": "hq",
+   "files": [
+    {
+     "f": "hq/abort_mission_1.mp3",
+     "voice": "pack",
+     "text": "Abort Mission",
+     "pre": true
+    },
+    {
+     "f": "hq/abort_mission_2.mp3",
+     "voice": "pack",
+     "text": "Abort Mission",
+     "pre": true
+    },
+    {
+     "f": "hq/abort_mission_3.mp3",
+     "voice": "pack",
+     "text": "Abort Mission",
+     "pre": true
+    },
+    {
+     "f": "hq/abort_mission_4.mp3",
+     "voice": "pack",
+     "text": "Abort Mission",
+     "pre": true
+    },
+    {
+     "f": "hq/abort_mission_5.mp3",
+     "voice": "pack",
+     "text": "Abort Mission",
+     "pre": true
+    },
+    {
+     "f": "hq/abort_mission_6.mp3",
+     "voice": "pack",
+     "text": "Abort Mission",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_fall_back_1.mp3",
+     "voice": "pack",
+     "text": "Fall Back Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_fall_back_2.mp3",
+     "voice": "pack",
+     "text": "Fall Back Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_fall_back_3.mp3",
+     "voice": "pack",
+     "text": "Fall Back Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_fall_back_4.mp3",
+     "voice": "pack",
+     "text": "Fall Back Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/fall_back_fall_back_5.mp3",
+     "voice": "pack",
+     "text": "Fall Back Fall Back",
+     "pre": true
+    },
+    {
+     "f": "hq/retreat_1.mp3",
+     "voice": "pack",
+     "text": "Retreat",
+     "pre": true
+    },
+    {
+     "f": "hq/retreat_2.mp3",
+     "voice": "pack",
+     "text": "Retreat",
+     "pre": true
+    },
+    {
+     "f": "hq/retreat_3.mp3",
+     "voice": "pack",
+     "text": "Retreat",
+     "pre": true
+    },
+    {
+     "f": "hq/retreat_4.mp3",
+     "voice": "pack",
+     "text": "Retreat",
+     "pre": true
+    },
+    {
+     "f": "hq/retreat_5.mp3",
+     "voice": "pack",
+     "text": "Retreat",
+     "pre": true
+    }
+   ]
+  }
+ }
+}

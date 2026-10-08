@@ -53,6 +53,16 @@ const CSS = `
 .alg-menu .man .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
 .alg-menu .man .tabs button { padding: 4px 10px; font-size: 11px; }
 .alg-menu .man .tabs button.on { border-color: var(--hud-brass); color: #f1dfa6; }
+/* THE MENU AND SOUND BUTTONS (2026-10-08, you: "how does the player know he can open a menu?"):
+   top right, hung on the resources' left side (CoH's corner; it follows their width and their
+   scale, and the dev panel's tab keeps the corner itself); Esc / F10 still work. */
+#alg-sys { position: absolute; right: calc(100% + 6px); top: -1px; bottom: -1px; display: flex; gap: 4px; }
+body > #alg-sys { position: fixed; right: calc(var(--alg-dev-w, 340px) + 8px); top: 8px; bottom: auto; height: 50px; z-index: 56; }
+#alg-sys button { width: 34px; height: 100%; padding: 0; display: grid; place-items: center; cursor: pointer;
+  background: var(--hud-bg); border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius); color: var(--hud-text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); transition: color 0.12s, border-color 0.12s; }
+#alg-sys button:hover { color: #f1dfa6; border-color: var(--hud-brass); }
+#alg-sys button.off { color: var(--hud-dim); }
 #alg-paused { position: fixed; top: 64px; left: calc((100vw - var(--alg-dev-w, 340px)) / 2); transform: translateX(-50%); z-index: 89;
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
@@ -91,6 +101,35 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   badge.textContent = t("PAUSE");
   badge.hidden = true;
   document.body.appendChild(badge);
+
+  // The two buttons: the menu (as Esc) and the sound on / off (as Options → Son; off by default,
+  // so this is where a player learns the game has sound).
+  const ICON_MENU = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h10M3 8h10M3 12h10"/></svg>`;
+  const ICON_SOUND = (on) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="currentColor" fill-opacity="0.25"/>${on ? `<path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>` : `<path d="M11 6l4 4M15 6l-4 4"/>`}</svg>`;
+  const sys = document.createElement("div");
+  sys.id = "alg-sys";
+  sys.innerHTML = `<button data-a="menu" title="${t("Menu (Échap)")}">${ICON_MENU}</button><button data-a="sound"></button>`;
+  (document.getElementById("alg-res") ?? document.body).appendChild(sys);
+  const soundBtn = sys.querySelector('[data-a="sound"]');
+  function syncSound() {
+    const on = !!audio && !audio.settings.muted;
+    soundBtn.innerHTML = ICON_SOUND(on);
+    soundBtn.classList.toggle("off", !on);
+    soundBtn.title = on ? t("Couper le son") : t("Activer le son");
+    soundBtn.hidden = !audio;
+  }
+  syncSound();
+  sys.addEventListener("pointerdown", (e) => e.stopPropagation());
+  sys.querySelector('[data-a="menu"]').onclick = () => { if (paused) resume(); else open(); };
+  soundBtn.onclick = () => {
+    audio?.set("muted", !audio.settings.muted);
+    // (paused: the mixer's set() resumes the context — hold it again)
+    if (paused && audio && !audio.settings.muted) { audio.ctx.suspend(); heldAudio = true; }
+    syncSound();
+    // the options page, if open, follows
+    const box = back?.querySelector('[data-k="sound"]');
+    if (box) box.checked = !audio.settings.muted;
+  };
 
   function pause() {
     if (paused) return;
@@ -191,6 +230,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         } else if (k === "sound") {
           audio?.set("muted", !el2.checked);
           if (paused && audio && !audio.settings.muted) { audio.ctx.suspend(); heldAudio = true; }
+          syncSound();
         } else if (k === "gore") { opts.gore = el2.value; save(); apply(); }
         else if (k === "tips" || k === "edgeScroll") { opts[k] = el2.checked; save(); apply(); }
       });
@@ -320,6 +360,6 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   return {
     open, pause, resume, options: opts,
     get paused() { return paused; },
-    dispose() { resume(); window.removeEventListener("keydown", onKey, true); badge.remove(); style.remove(); },
+    dispose() { resume(); window.removeEventListener("keydown", onKey, true); badge.remove(); sys.remove(); style.remove(); },
   };
 }

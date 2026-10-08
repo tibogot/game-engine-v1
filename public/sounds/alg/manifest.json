@@ -740,7 +740,16 @@
   },
   "radio": {
    "use": [
-    0
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
    ],
    "bus": "ui",
    "vol": 0.45,
@@ -780,6 +789,66 @@
      "dur": 0.43,
      "start": 0,
      "end": 0.43
+    },
+    {
+     "f": "radio/pack_bleep_1.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 1",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_2.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 2",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_3.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 3",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_4.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 4",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_5.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 5",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_6.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 6",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_7.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 7",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_8.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 8",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_9.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 9",
+     "gain": 1
+    },
+    {
+     "f": "radio/pack_bleep_10.mp3",
+     "by": "GameDev Market Military Voice Pack PRO",
+     "t": "Radio Bleep 10",
+     "gain": 1
     }
    ]
   },

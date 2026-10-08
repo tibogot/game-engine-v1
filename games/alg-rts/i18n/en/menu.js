@@ -69,6 +69,9 @@ export default {
   "Tourner un bâtiment": "Rotate a building",
   "Pause / menu": "Pause / menu",
   "Échap": "Esc",
+  "Menu (Échap)": "Menu (Esc)",
+  "Couper le son": "Sound off",
+  "Activer le son": "Sound on",
   "Les touches suivent leur place sur le clavier : sur un clavier QWERTY, la caméra se déplace avec W A S D et tourne avec Q / E.": "Keys follow their position on the keyboard: on a QWERTY keyboard, the camera moves with W A S D and rotates with Q / E.",
 
   // Manual — tabs

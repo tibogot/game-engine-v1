@@ -151,8 +151,8 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    ARRIVING LATE past 140 m, the AMBIENCE DUCKED to ~35% by a fight near the camera (back in ~3 s);
    ANTI-PHASING (you heard flanging): 70 ms min gap per shot slot, a copy close behind the last
    ≥7% apart in pitch, never the same file twice in a row, the echo pre-delayed 45 ms.
-   PAUSED (you): the VOICES — you record them (FR) + a native for the FLN, or Azure TTS (fr-FR,
-   ar-DZ) first; the rifle/MG CANDIDATES to rotate (pick by ear in Dev → Sound); MUSIC (your call).
+   VOICES: an English placeholder pack in since 2026-10-08 (see SOLDIERS' VOICES below); French
+   recordings + a native for the FLN later. The rifle/MG CANDIDATES to rotate (pick by ear in Dev → Sound); MUSIC (your call).
    Was: (orders, "sous le feu !", "grenade !"), dense battle ambience,
    distance-filtered gunfire, music for tension (voices parked: another way than the API).
 5. [ ] **SOLDIERS DRESSED FOR FRENCH ALGERIA** (today Vietnam-era US kit) + their PORTRAITS (US GIs).
@@ -2058,6 +2058,20 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
          Ilyass — ids in tools/genVoices.mjs), or RECORD the lines (you /
          friends; any mp3 named as the manifest expects). French script
          fixed once ("On est bloqués !"); you check the rest.
+   - [x] **PLACEHOLDER VOICES IN (2026-10-08)**: the GameDev Market Military
+         Voice Pack PRO (English, male only; assets-src/sounds/radio-pack/,
+         536 MB WAV, not shipped) → tools/algImportRadioPack.mjs: 27 lines,
+         390 takes (324 files, mono 24 kHz mp3 48 kb/s, silence cut,
+         -16 LUFS) = 1.7 MB in public/sounds/alg/voices/. The soldiers use
+         the dry "Male" takes (positional); the HQ the pack's "MaleRadio"
+         takes (`pre: true`: not filtered twice, the squelch kept); the
+         squelch slot = the pack's 10 Radio Bleeps. Two takes per line
+         preloaded, the rest on first use. Same voices in EVERY language
+         version (CoH dubs; the authentic way is each side in its own tongue
+         for every player). Left out: the female voices, the gamey lines
+         ("Tango Down", "Okey Dokey", "First Blood"…). The ALN stay SILENT.
+   - [ ] LATER: French recordings for the French (same ids, re-run nothing:
+         replace the files + manifest), Arabic (Darija) for the ALN.
 - [ ] **LATER — MEN OF WAR CAMERA + FOG OF WAR WITHOUT THE SHROUD** (you,
       2026-10-02: "with these fogs do I still need fog of war? Men of War
       lets you pivot the camera"). Atmospheric fog is the LOOK; fog of war

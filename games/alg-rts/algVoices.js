@@ -1,7 +1,10 @@
 // THE VOICES — soldiers who talk, and the radio (you, 2026-10-02: "the
 // soldiers' communication is missing, the enemies' too; radio calls in French
-// and Arabic"). The lines: tools/algVoiceLines.mjs, generated once by
-// tools/genVoices.mjs (ElevenLabs) into public/sounds/alg/voices/.
+// and Arabic"). The line ids: tools/algVoiceLines.mjs. The files today (2026-10-08): the
+// GameDev Market Military Voice Pack, English, imported by tools/algImportRadioPack.mjs into
+// public/sounds/alg/voices/ — a placeholder for every language version until French recordings
+// (the French) and Arabic ones (the ALN, silent meanwhile). Its HQ takes are recorded through a
+// radio already (`pre`), so they skip the radio filter below; the squelch stays.
 //
 //   BARKS   said by the man, from where he is (heard round the camera's focus,
 //           panned from the screen): orders acknowledged, contact, under fire,
@@ -108,10 +111,13 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
     }
     const voice = voiceOf(o.unit, side);
     const mine = line.files.filter((f) => f.voice === voice);
-    const pool = mine.length ? mine : line.files;
+    const all = mine.length ? mine : line.files;
+    // The takes in hand (two per line preloaded); the rest of the line's takes load now, for later.
+    const pool = all.filter((f) => buffers.get(f.f) instanceof AudioBuffer);
+    if (pool.length < all.length) for (const f of all) load(f.f);
+    if (!pool.length) return false;                                       // next time
     const file = pool[(Math.random() * pool.length) | 0];
     const buf = buffers.get(file.f);
-    if (!(buf instanceof AudioBuffer)) { load(file.f); return false; }   // next time
     lastSaid.set(id, t);
     busyUntil[side] = t + buf.duration + 0.35;
 
@@ -122,7 +128,9 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
     g.gain.value = (radio ? 1 : 0.95 * sp.gain);
     if (radio) {
       audio.play("radio", null, 0, 0, { gain: 0.7 });                    // the squelch first
-      src.connect(g).connect(radioChain());
+      // `pre`: recorded through a radio already (the voice pack's MaleRadio) — not filtered twice.
+      const chain = radioChain();
+      src.connect(g).connect(file.pre ? outNode : chain);
       src.start(t + 0.12);
     } else {
       const pan = ctx.createStereoPanner(); pan.pan.value = sp.pan;
@@ -132,8 +140,9 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
     return true;
   }
 
-  // Preload every file once the manifest is in (they are small: ~2 MB in all).
-  ready.then(() => { for (const l of Object.values(manifest?.lines ?? {})) for (const f of l.files) load(f.f); });
+  // Preload two takes of each line once the manifest is in (the voice pack is ~320 files, 1.7 MB:
+  // not all fetched during the boot); a line's other takes load the first time it is said.
+  ready.then(() => { for (const l of Object.values(manifest?.lines ?? {})) for (const f of l.files.slice(0, 2)) load(f.f); });
 
   // ── What makes a man speak: state changes, scanned 5 times a second ──────
   const was = new WeakMap();   // unit → { sup, pin, thr, work, tgt, alive, tgtT }
