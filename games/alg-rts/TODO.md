@@ -1415,7 +1415,13 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       getImageData into a 20 MB array on the main thread, its time swings with what else loads);
       the shader WARM-UP 3.1 → 5.2 s (313 → 405 drawables: the systems added since); splats 0.7 →
       1.8 s; herds 3.0 → 3.8-4.5 s; hens 0.5 → 1.1 s; level file 3.6 → 5.0 s (11.4 → 12.7 MB);
-      GPU-only arrays 296 → 354 MB. The contact shade itself: ~0.3 s. NEXT: fix those, biggest first
+      GPU-only arrays 296 → 354 MB. The contact shade itself: ~0.3 s.
+      FIXED 2026-10-08 (part 1): the STONES' and the SPLATS' photos were only asked for when those
+      steps ran, then waited behind the boot (stones' photos 1.2 s in the boot vs 0.14 s idle). Now
+      fetched at the very top of the boot and decoded off the main thread (createImageBitmap — the
+      same pixels as an <img>, checked byte for byte on every photo): stones' photos 1166 → 22-33 ms,
+      splats 1768 → 211 ms. BOOT ~37 → 28.4 / 28.8 / 29.5 s, steadier. Left vs 10-04 (~26): the
+      warm-up's 92 more drawables (~2 s), herds / hens. NEXT: fix those, biggest first
       (stones → a prebuilt array file or a worker; the warm-up's 92 new drawables; splats), then
       the ideas: show the briefing earlier and finish the warm-up / herds BEHIND it (the felt wait
       −7-10 s); a persistent shader cache (Electron); the herd templates cached or in a worker;

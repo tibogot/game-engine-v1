@@ -55,8 +55,22 @@ const PHOTO = 1024;
  * packed bottom-up: the separate photos were image textures (flipY), so the
  * triplanar taps land on the same texels as before.
  */
+/**
+ * THE PHOTOS, FETCHED EARLY (the boot A/B, 2026-10-08): asked for only when the stones were built,
+ * they waited behind the rest of the boot — 1.2 s there, 0.14 s on an idle page. algGame starts
+ * this at the very top of the boot; fetched and decoded OFF the main thread (createImageBitmap).
+ */
+let _photos = null;
+export function prefetchStonePhotos() {
+  _photos ??= Promise.all(GROUND_KEYS.map(async (gk) => {
+    const res = await fetch(TEX(GROUNDS[gk].id, "diff"));
+    return createImageBitmap(await res.blob());
+  }));
+  return _photos;
+}
+
 async function stonePhotos() {
-  const imgs = await Promise.all(GROUND_KEYS.map((gk) => new THREE.ImageLoader().loadAsync(TEX(GROUNDS[gk].id, "diff"))));
+  const imgs = await prefetchStonePhotos();
   const canvas = document.createElement("canvas");
   canvas.width = canvas.height = PHOTO;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -107,8 +121,9 @@ function stoneMaterial(photos) {
 }
 
 export async function createAlgStones(app, { seed = 1954 } = {}) {
-  const t0 = performance.now();
+  const t0 = performance.now(), lap = [];
   await simplifierReady;
+  lap.push(["simplifier", performance.now()]);
   // Shapes, built once.
   const geos = {};
   for (const [k, s] of Object.entries(SHAPES)) {
@@ -153,7 +168,9 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
 
   // ── The meshes: ONE material, one instanced mesh per shape variant ──────
   // (each stone's ground rides along as a per-instance attribute).
+  lap.push(["shapes+placing", performance.now()]);
   const mat = stoneMaterial(await stonePhotos());
+  lap.push(["photos", performance.now()]);
   const byShape = {};                     // `${shape}|${variant}` → [{ ...p, g }]
   for (const [key, list] of Object.entries(lists)) {
     const [gk, shape, v] = key.split("|");
@@ -197,7 +214,9 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
   app.scene.add(group);
   const counts = {};
   for (const [key, list] of Object.entries(lists)) { const gk = key.split("|")[0]; counts[gk] = (counts[gk] ?? 0) + list.length; }
-  console.log(`[stones] ${n} stones in ${group.children.length} draws (${Object.entries(counts).map(([k, c]) => `${k} ${c}`).join(", ")}) in ${Math.round(performance.now() - t0)} ms`);
+  // (its parts: the boot regression A/B, 2026-10-08 — 0.4 s on 10-04, 0.5-4.1 s since)
+  const parts = lap.map(([k, at], i) => `${k} ${Math.round(at - (i ? lap[i - 1][1] : t0))}`).join(", ");
+  console.log(`[stones] ${n} stones in ${group.children.length} draws (${Object.entries(counts).map(([k, c]) => `${k} ${c}`).join(", ")}) in ${Math.round(performance.now() - t0)} ms (${parts}, meshes ${Math.round(performance.now() - lap.at(-1)[1])})`);
   /**
    * Take out every stone `fn(x, z)` says to (worked land: algFields.js). Each
    * goes by moving the mesh's last instance into its slot: once, at load.

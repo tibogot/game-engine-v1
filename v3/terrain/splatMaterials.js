@@ -31,14 +31,29 @@ export const splatMaterialFromSlug = (slug) => ({
   surface: `/textures/splats/${slug}/${slug}_s.webp`,
 });
 
+/**
+ * FETCHED EARLY, DECODED OFF THE MAIN THREAD (alg-rts' boot A/B, 2026-10-08): the photos were
+ * asked for only when the library was built, then waited behind the rest of a game's boot (alg's
+ * splats 0.7 → 1.8 s). A game calls prefetchSplatMaterials(materials) at the top of its boot; the
+ * library then finds them loaded. createImageBitmap: the same pixels as an <img> (checked byte for
+ * byte), decoded on a worker thread.
+ */
+const _images = new Map();   // url → Promise<ImageBitmap>
 function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error(`splat material image failed: ${url}`));
-    img.src = url;
-  });
+  let p = _images.get(url);
+  if (!p) {
+    p = fetch(url).then((r) => {
+      if (!r.ok) throw new Error(`splat material image failed: ${url} (${r.status})`);
+      return r.blob();
+    }).then((b) => createImageBitmap(b));
+    _images.set(url, p);
+  }
+  return p;
+}
+
+/** Start fetching and decoding a library's photos now (see loadImage). */
+export function prefetchSplatMaterials(materials) {
+  for (const m of materials) for (const url of [m.colour, m.surface]) if (url) loadImage(url).catch(() => {});
 }
 
 function makeArray(data, layers, srgb) {
@@ -92,6 +107,7 @@ export async function loadSplatMaterials(materials) {
       surface[o + p + 2] = ROUGH; surface[o + p + 3] = 255;
     }
   }));
+  for (const m of materials) { _images.delete(m.colour); _images.delete(m.surface); }   // (in the arrays now)
   const names = materials.map((m) => m.name);
   // Each material's MEAN colour, linear — what the ground cache divides by to
   // sit a photo on ground of another tone (groundCache setSplats `match`).

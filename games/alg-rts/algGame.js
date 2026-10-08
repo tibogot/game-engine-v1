@@ -31,8 +31,8 @@ import { createAlgPointFlags } from "./algPointFlags.js";
 import { createAlgHens } from "./algHens.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
-import { createAlgStones } from "./algStones.js";
-import { createAlgSplats } from "./algSplats.js";
+import { createAlgStones, prefetchStonePhotos } from "./algStones.js";
+import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
@@ -113,6 +113,9 @@ const FAR_GRASS_TINT = params.get("grassfar") === "1" || params.get("gc") === "0
 
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
   onStatus(t("Démarrage du moteur…"));
+  // The stones' ground photos: fetched and decoded now, behind the engine's start (algStones.js).
+  prefetchStonePhotos();
+  prefetchAlgSplats();   // and the ground splats' (algSplats.js)
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
   // so it paints while the engine and the level load, and awaited before the

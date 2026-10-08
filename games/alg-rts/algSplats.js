@@ -20,7 +20,7 @@
 //   everywhere     wind-blown sand, rare old scorches
 //
 // Materials: Poly Haven (CC0), tools/fetchSplatMaterials.mjs.
-import { loadSplatMaterials, splatMaterialFromSlug } from "../../v3/terrain/splatMaterials.js";
+import { loadSplatMaterials, prefetchSplatMaterials, splatMaterialFromSlug } from "../../v3/terrain/splatMaterials.js";
 import { LAYOUT, PLAY } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 
@@ -126,6 +126,9 @@ function rules(g) {
  * Lay the splats and hand them to the ground cache. Returns
  * { count, byMat, ms } or null when the cache is off.
  */
+/** Start fetching and decoding the splat photos now — algGame calls it at the top of the boot. */
+export function prefetchAlgSplats() { prefetchSplatMaterials(MAT_KEYS.map((k) => splatMaterialFromSlug(MATS[k].slug))); }
+
 export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
   const gc = app.groundCache;
   if (!gc) return null;
