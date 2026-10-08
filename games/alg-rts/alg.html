@@ -35,6 +35,19 @@
       #boot .art {
         position: absolute; inset: 0; width: 100%; height: 100%;
         object-fit: cover; object-position: 20% 20%;
+        /* THE SLIDES (2026-10-09, you: "more images so the loading is less boring"): each picture
+           drifts in very slowly and the next fades over it — transform and opacity only, run by
+           the compositor: nothing for the boot's busy main thread to do. */
+        transition: opacity 1.4s ease;
+        animation: boot-drift 30s ease-out forwards;
+      }
+      #boot .art.waiting { opacity: 0; }
+      @keyframes boot-drift { from { transform: scale(1); } to { transform: scale(1.08); } }
+      /* The picture's caption, bottom left, over the shade. */
+      #boot .cap {
+        position: absolute; left: 3.2%; bottom: 6.5%; max-width: min(380px, 34vw);
+        font-size: 12px; font-style: italic; letter-spacing: 0.04em; line-height: 1.5; color: #d8c9a8;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9); opacity: 0; transition: opacity 1.2s ease;
       }
       /* Darken the foot of the art so the bar and tips read over the dust. */
       #boot .shade {
@@ -82,6 +95,7 @@
     <div id="boot">
       <img class="art" src="/textures/sand&amp;blood.webp" alt="Sand &amp; Blood" />
       <div class="shade"></div>
+      <div class="cap" id="cap"></div>
       <div class="load">
         <div class="tip" id="tip"></div>
         <div class="row"><span id="msg">Chargement</span><span class="pct" id="pct">0%</span></div>
@@ -118,6 +132,42 @@
       };
       tipEl.textContent = TIPS[tipI++ % TIPS.length];
       const tipTimer = setInterval(showTip, 6500);
+
+      // ── THE SLIDES: the cover first (the title is painted in it), then these, one every
+      // SLIDE_S seconds (public/textures/loading/, WebP ~150 KB each). Each is fetched a moment
+      // after the page opens — never in the way of the cover — and shown only once decoded (off
+      // the main thread). The last one stays. Add a picture: one line here.
+      const SLIDES = [
+        { src: "/textures/loading/aures-descente.webp", pos: "50% 45%", cap: t("Aurès, 1956. Une section de paras descend vers le douar.") },
+      ];
+      const SLIDE_S = 7;
+      const capEl = document.getElementById("cap");
+      const shade = boot.querySelector(".shade");
+      let slideI = 0;
+      const slideTimers = [];
+      const nextSlide = () => {
+        const s = SLIDES[slideI++];
+        if (!s || !boot.isConnected) return;
+        const img = new Image();
+        img.className = "art waiting";
+        img.alt = "";
+        img.decoding = "async";
+        img.style.objectPosition = s.pos ?? "50% 50%";
+        img.src = s.src;
+        img.decode().then(() => {
+          if (!boot.isConnected) return;
+          boot.insertBefore(img, shade);          // over the last picture, under the shade and the bar
+          requestAnimationFrame(() => {
+            img.classList.remove("waiting");
+            capEl.style.opacity = 0;
+            setTimeout(() => { capEl.textContent = s.cap ?? ""; capEl.style.opacity = s.cap ? 1 : 0; }, 700);
+          });
+          if (slideI < SLIDES.length) slideTimers.push(setTimeout(nextSlide, SLIDE_S * 1000));
+        }).catch(() => {});                       // a picture that fails: the screen keeps the last
+      };
+      // Fetched a second in (the cover is up by then): in the cache when their turn comes.
+      slideTimers.push(setTimeout(() => SLIDES.forEach((s) => { const p = new Image(); p.src = s.src; }), 1000));
+      slideTimers.push(setTimeout(nextSlide, SLIDE_S * 1000));
 
       // ── A progress bar that knows how long each stage takes (as nam.html) ─
       // Every boot records how long each status stage lasted and the next boot
@@ -199,7 +249,7 @@
         try { localStorage.setItem(KEY, JSON.stringify({ order: seen.map((x) => x.s), ms })); } catch { /* private mode */ }
 
         cancelAnimationFrame(raf);
-        clearInterval(tipTimer);
+        clearInterval(tipTimer); slideTimers.forEach(clearTimeout);
         fill.style.width = "100%";
         pctEl.textContent = "100%";
         msg.textContent = t("Prêt");
@@ -208,7 +258,7 @@
       } catch (e) {
         console.error("[alg-rts] failed to start", e);
         cancelAnimationFrame(raf);
-        clearInterval(tipTimer);
+        clearInterval(tipTimer); slideTimers.forEach(clearTimeout);
         msg.textContent = t("Échec du démarrage");
         err.style.display = "block";
         err.textContent = e?.stack || e?.message || String(e);

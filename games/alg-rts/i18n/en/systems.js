@@ -1,5 +1,7 @@
 // English for the systems area (French key -> English). See ../i18n.js.
 export default {
+  // alg.html — the loading screen's slides (2026-10-09)
+  "Aurès, 1956. Une section de paras descend vers le douar.": "Aurès, 1956. A section of paras heads down toward the douar.",
   // algTransports.js
   "<b>Véhicule détruit</b> avec un groupe à bord : les survivants sautent.": "<b>Vehicle destroyed</b> with a squad aboard: the survivors jump out.",
   "Groupe à bord — clic : le sélectionner · Débarquer": "Squad aboard — click: select it · Disembark",

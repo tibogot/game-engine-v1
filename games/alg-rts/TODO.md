@@ -96,6 +96,13 @@ Keep this file current: tick things off here, add new asks here.
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
+16. [x] **THE HUD OFF THE SCREEN + FULLSCREEN (2026-10-09, you)**: the bottom-right block spilled past
+   the screen's edge — the interface scale measured it while the dev panel's width was still unset
+   (the CSS fell back to 340 px: the block mid-screen, scaled from its centre), then the panel
+   collapsed and the block, still scaled from there, ran off the edge. Now --alg-dev-w is 0 from the
+   boot's start (?dev=0 had a 340 px strip too) and the scale re-measures when the panel opens or
+   closes (uiScale.js). FULLSCREEN: a button beside the menu and the sound, and Options → Affichage;
+   Esc still opens the menu in fullscreen (Keyboard Lock, Chrome / Edge) — hold Esc to leave.
 15. [x] **THE TIERS EXPLAINED (2026-10-08, you: "some units read Verrouillé — why?"; "the player should
    understand the game well")**: a locked button says what unlocks it and where ("at the post, ▲
    Airmobile — hold 1 village, 150 manpower, 40 fuel") and a click on it goes to the post; an alert

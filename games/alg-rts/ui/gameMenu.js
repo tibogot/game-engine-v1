@@ -108,9 +108,38 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   const ICON_SOUND = (on) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="currentColor" fill-opacity="0.25"/>${on ? `<path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>` : `<path d="M11 6l4 4M15 6l-4 4"/>`}</svg>`;
   const sys = document.createElement("div");
   sys.id = "alg-sys";
-  sys.innerHTML = `<button data-a="menu" title="${t("Menu (Échap)")}">${ICON_MENU}</button><button data-a="sound"></button>`;
+  // FULLSCREEN (2026-10-09, you: "a full-screen option — it avoids clicking elsewhere in the browser"):
+  // the whole page (the HUD included), the browser's bars gone; Esc still opens the menu where the
+  // browser lets the game keep it (Keyboard Lock, Chrome / Edge) — hold Esc to leave fullscreen.
+  const ICON_FS = (on) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${on
+    ? `<path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4"/>`
+    : `<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>`}</svg>`;
+  sys.innerHTML = `<button data-a="fullscreen"></button><button data-a="menu" title="${t("Menu (Échap)")}">${ICON_MENU}</button><button data-a="sound"></button>`;
   (document.getElementById("alg-res") ?? document.body).appendChild(sys);
   const soundBtn = sys.querySelector('[data-a="sound"]');
+  const fsBtn = sys.querySelector('[data-a="fullscreen"]');
+  const fsOn = () => !!document.fullscreenElement;
+  async function setFullscreen(on) {
+    try {
+      if (on && !fsOn()) {
+        await document.documentElement.requestFullscreen({ navigationUI: "hide" });
+        // Esc to the game, not to the browser (it would leave fullscreen): Chrome / Edge only.
+        try { await navigator.keyboard?.lock?.(["Escape"]); } catch { /* not offered */ }
+      } else if (!on && fsOn()) {
+        navigator.keyboard?.unlock?.();
+        await document.exitFullscreen();
+      }
+    } catch (e) { console.warn("[fullscreen]", e); }
+  }
+  function syncFs() {
+    fsBtn.innerHTML = ICON_FS(fsOn());
+    fsBtn.title = fsOn() ? t("Quitter le plein écran (ou maintenir Échap)") : t("Plein écran");
+    const box = back?.querySelector('[data-k="fullscreen"]');
+    if (box) box.checked = fsOn();
+  }
+  syncFs();
+  document.addEventListener("fullscreenchange", syncFs);
+  fsBtn.onclick = () => setFullscreen(!fsOn());
   function syncSound() {
     const on = !!audio && !audio.settings.muted;
     soundBtn.innerHTML = ICON_SOUND(on);
@@ -203,6 +232,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
           <div class="note">${t("La partie recommence dans la langue choisie.")}</div>
         </fieldset>
         <fieldset><legend>${t("Affichage")}</legend>
+          <label class="r">${t("Plein écran")}<input type="checkbox" data-k="fullscreen" ${document.fullscreenElement ? "checked" : ""}><output></output></label>
+          <div class="note">${t("Maintenez Échap pour quitter le plein écran.")}</div>
           ${slider("uiScale", t("Taille de l'interface"), opts.uiScale, 1, 1.5, 0.05, pct)}
         </fieldset>
         <fieldset><legend>${t("Caméra")}</legend>
@@ -231,7 +262,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
           audio?.set("muted", !el2.checked);
           if (paused && audio && !audio.settings.muted) { audio.ctx.suspend(); heldAudio = true; }
           syncSound();
-        } else if (k === "gore") { opts.gore = el2.value; save(); apply(); }
+        } else if (k === "fullscreen") { setFullscreen(el2.checked); }
+        else if (k === "gore") { opts.gore = el2.value; save(); apply(); }
         else if (k === "tips" || k === "edgeScroll") { opts[k] = el2.checked; save(); apply(); }
       });
     });
@@ -362,6 +394,6 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   return {
     open, pause, resume, options: opts,
     get paused() { return paused; },
-    dispose() { resume(); window.removeEventListener("keydown", onKey, true); badge.remove(); sys.remove(); style.remove(); },
+    dispose() { resume(); window.removeEventListener("keydown", onKey, true); document.removeEventListener("fullscreenchange", syncFs); badge.remove(); sys.remove(); style.remove(); },
   };
 }

@@ -114,6 +114,11 @@ const FAR_GRASS_TINT = params.get("grassfar") === "1" || params.get("gc") === "0
 
 export async function startAlgGame({ container, onStatus = () => {}, onProgress = null } = {}) {
   onStatus(t("Démarrage du moteur…"));
+  // NO DEV PANEL YET (it comes late in the boot; ?dev=0: never): its width 0, or every HUD rule's
+  // `var(--alg-dev-w, 340px)` laid the HUD out 340 px in from the right — and the interface scale
+  // measured it there (2026-10-09, you: "the UI bottom right clips under the screen").
+  const rootStyle = document.documentElement.style;
+  if (!rootStyle.getPropertyValue("--alg-dev-w")) rootStyle.setProperty("--alg-dev-w", "0px");
   // The stones' ground photos: fetched and decoded now, behind the engine's start (algStones.js).
   prefetchStonePhotos();
   prefetchAlgSplats();   // and the ground splats' (algSplats.js)

@@ -53,11 +53,17 @@ export function createUiScale(initial = 1) {
   const hud = document.getElementById("alg-hud");
   if (hud) mo.observe(hud, { childList: true });
   addEventListener("resize", applyAll);
+  // The dev panel opening or closing moves the HUD (--alg-dev-w on <html>): re-measure, or a panel
+  // scaled from where it WAS spills off the screen where it IS (the command card, 2026-10-09).
+  let pend = 0;
+  const reMeasure = () => { if (!pend) pend = requestAnimationFrame(() => { pend = 0; applyAll(); }); };
+  const rootMo = new MutationObserver(reMeasure);
+  rootMo.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
   applyAll();
   return {
     get scale() { return scale; },
     set(s) { scale = s; applyAll(); },
     refresh: applyAll,
-    dispose() { mo.disconnect(); removeEventListener("resize", applyAll); },
+    dispose() { mo.disconnect(); rootMo.disconnect(); removeEventListener("resize", applyAll); },
   };
 }
