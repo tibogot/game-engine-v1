@@ -71,6 +71,7 @@
       import { buildArena, zoneAt as yardZoneAt } from "./horse-lab/arena.js";
       import { buildParkour } from "./horse-lab/parkour.js";
       import { buildJoust } from "./horse-lab/joust.js";
+      import { createCavalry } from "./horse-lab/cavalry.js";
       import { buildFarm } from "./horse-lab/farm.js";
       import { createLabSky } from "./horse-lab/sky.js";
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
@@ -309,6 +310,12 @@
         location.href = u.href;
       });
       arena.addGui?.(gui);
+      // a cavalry of knights as GPU crowds (baked from this knight) — the RTS soldiers' path
+      let cavalry = null;
+      { const cf = gui.addFolder("Cavalry (GPU crowd)"); const CV = { knights: 0, gait: "gallop" };
+        const apply = () => { cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D }); cavalry.set(CV.knights, CV.gait); };
+        cf.add(CV, "knights", 0, 120, 1).name("knights (bakes on first use)").onChange(apply);
+        cf.add(CV, "gait", ["gallop", "canter", "walk"]).onChange(apply); cf.close(); }
       if (joust) {
         const jf = gui.addFolder("Tilt (lance targets)");
         jf.add({ go: () => { RP.lance = true; ctrl.pos.set(joust.start.x, 0, joust.start.z); ctrl.yaw = joust.start.yaw; ctrl.v = 0; } }, "go").name("go to the tilt (lance on)");
@@ -423,6 +430,7 @@
           poseEd.afterFrame();
           arena.update?.(dt, { ctrl, rider });                    // the farm's herd
           joust?.update(dt, rider, ctrl);
+          cavalry?.update(dt);
           editor.afterUpdate();
         }
         if (D.probes) {
@@ -499,7 +507,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>
