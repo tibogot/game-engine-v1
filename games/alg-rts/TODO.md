@@ -88,6 +88,13 @@ Keep this file current: tick things off here, add new asks here.
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
+11. [x] **PLAYTEST FIXES (2026-10-08)**: (a) a wounded FLN fighter floated a big bar of his own
+   under his band's badge — soldiers never carry a bar now (the badge's one thin bar, CoH), vehicles
+   keep theirs (algUnits barFor); (b) the FLN could be SELECTED with a click, and a selected enemy
+   obeyed your move / attack orders — a click on an enemy now clears, orders go to your units only
+   (shared-rts/selection.js); (c) the faint team ring under EVERY man (unit marks, audit 2 item 6)
+   OFF — CoH rings only the selection, the badges find the men; ?marks=1 brings it back. Checked in
+   the game.
 8. [ ] **GAMEPLAY, still missing vs CoH**: building damage stages + collapse (gap list 2), crews
    that bail out of a dead vehicle, DROPPED WEAPONS picked up (an FM off a dead FLN gunner),
    squad UPGRADES (an FM for the section, a radio), DOCTRINES / commander choices; the voices.

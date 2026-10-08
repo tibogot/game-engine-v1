@@ -185,6 +185,10 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         // RTS; the unit bar's double-click takes the whole map.
         if (!down.shift) clear();
         for (const u of onScreenOfType(unit.typeKey)) setSelected(u, true);
+      } else if (unit && unit.team !== "player") {
+        // An ENEMY under the cursor is not yours to select (you, 2026-10-08: "I could select the
+        // ALN" — and, selected, it took your move orders). A plain click there clears, as on the ground.
+        if (!down.shift) clear();
       } else if (unit) {
         if (down.shift) {
           // Shift-click toggles the man's whole squad (or the man alone).
@@ -304,14 +308,16 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     // Right-click works in BOTH camera modes — it never fights orbit's
     // left-drag. (Left-click/box-select stays RTS-only to avoid that clash.)
     e.preventDefault();
-    if (!selected.size) return;
+    // Orders go to the PLAYER's units only, whatever the selection holds.
+    const mine = [...selected].filter((u) => u.team === "player");
+    if (!mine.length) return;
 
     // Right-clicking an enemy is an ATTACK order.
     const enemy = pickEnemy(e.clientX, e.clientY) ?? pickEnemyUnit(e.clientX, e.clientY);
     if (enemy) {
-      for (const u of selected) u.attack?.(enemy);
+      for (const u of mine) u.attack?.(enemy);
       pingMarker(enemy.position.x, enemy.position.y, enemy.position.z, "attack");
-      onOrder("attack", [...selected]);
+      onOrder("attack", mine);
       return;
     }
 
@@ -346,7 +352,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     //
     // Assign the CLOSEST unit to each slot (greedy) so the group doesn't cross
     // over itself on the way, and so two units never chase the same slot.
-    const arr = [...selected].filter((u) => !u.isStructure); // buildings don't move
+    const arr = [...selected].filter((u) => !u.isStructure && u.team === "player"); // buildings don't move; never an enemy
     if (!arr.length) return { arr, slots: [] };
     const maxR = Math.max(...arr.map((u) => u.radius ?? 3));
     const spacing = Math.max(6, maxR * 2.6);
@@ -478,7 +484,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     /** Replace the selection with the given units (used by the unit bar). */
     select(arr) {
       clear();
-      for (const u of arr) setSelected(u, true);
+      for (const u of arr) if (u.team === "player") setSelected(u, true);
       notify();
     },
     dispose() {

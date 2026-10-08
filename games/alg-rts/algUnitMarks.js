@@ -5,7 +5,8 @@
 // selection ring instead; a man in a house has none (the house's badge says it).
 //
 // ONE draw for all of them (shared selectionRingField: an instanced ring draped on the ground).
-// Per frame: one pass over the units, ~6 floats each. ?marks=0 = without.
+// Per frame: one pass over the units, ~6 floats each. OFF by default since 2026-10-08 (CoH rings
+// only the selection — you); ?marks=1 = on.
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 
 export const UNIT_MARKS = {

@@ -247,9 +247,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const usePortraits = new URLSearchParams(location.search).get("portraits") !== "0";
   const unitRenderer = await createUnitRenderer({
     app, units, healthBars, selectionRings, fogOfWar, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS,
-    // A French squad's men have no bars of their own: the squad's badge
-    // carries ONE (algSquadBadges.js, CoH).
-    barFor: (u) => !app.algSquads?.of(u),
+    // A SOLDIER has no bar of his own: his squad's badge (French) or his band's (FLN) carries ONE
+    // thin bar for them all (ui/squadBadges.js, CoH). Vehicles keep theirs. (An FLN fighter had
+    // none in mind: not in a French squad, a wounded one floated a big bar under his band's badge
+    // — you, 2026-10-08.)
+    barFor: (u) => !u.type?.foot && !app.algSquads?.of(u),
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
     crew: { willys: "appele", halftrack: "appele", alouette: "appele", gmcOpen: "appele" },
@@ -718,8 +720,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
-  // UNIT MARKS (algUnitMarks.js): a faint team ring under every man you can see. ?marks=0 = without.
-  const unitMarks = new URLSearchParams(location.search).get("marks") !== "0" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
+  // UNIT MARKS (algUnitMarks.js): a faint team ring under every man you can see. OFF since
+  // 2026-10-08 (you: "a blue circle round the units even when not selected — that's not how CoH
+  // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
+  const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
   const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
