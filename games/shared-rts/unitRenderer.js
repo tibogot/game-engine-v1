@@ -471,6 +471,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
   // same pass, no draw of its own), hidden per soldier (skinnedKitNodes).
   const kitSkinned = [...new Set(looks.filter(Boolean).flatMap((l) => [
     ...(l.kit ?? []), ...Object.keys(l.extras ?? {}), ...Object.values(l.roles ?? {}).flatMap((r) => r.kit ?? []),
+    ...(l.variants ?? []).flatMap((v) => v.kit ?? []),   // (a variant's own kit: the civilians' gandouras)
   ]))].filter((k) => KIT[k]?.skinned);
   const crowdGeometry = kitSkinned.length ? withSkinnedKit(source, root, kitSkinned) : null;
 
@@ -799,7 +800,7 @@ function buildPieces(field, source, rel, looks, scene, root, cap) {
 }
 
 /** The key of a headgear piece: its builder and its colour. */
-const hatKey = (look) => `${look.headgear}|${look.hatColor ?? ""}|${look.badge ?? ""}`;
+const hatKey = (look) => `${look.headgear}|${look.hatColor ?? ""}|${look.badge ?? ""}|${look.scarf ?? ""}|${look.veil ?? ""}`;   // (scarf: a mendil's stripes)
 
 const _B = new THREE.Matrix4();
 const _P = new THREE.Matrix4();

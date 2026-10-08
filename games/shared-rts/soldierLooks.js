@@ -197,6 +197,67 @@ export const LOOKS = {
     kit: ["musette"],
     extras: { beard: 0.5, mustache: 0.45, bandolier: 0.5, bandoliers: 0.35, cigarette: 0.1 },
   },
+  // ── CIVILIANS (2026-10-08): no weapon (the unarmed clips: tools/packMixamo --unarmed), the
+  // ALN's two bodies under their own clothes, the same North African skin range.
+  civMan: {
+    label: "Villageois", note: "gandoura to mid-calf (cream, grey, brown), dark trousers; chèche or chéchia",
+    // (recoloured alone, cream showed the body's camouflage blotches: the gandoura covers the body,
+    // the trousers below it dark — sirwal)
+    // the shirt under the gandoura a middle of its colours (cream, grey, brown): a glimpse at the
+    // shoulder reads as cloth, not a uniform
+    green: 0xa89d86, khaki: 0x4f463c, helmet: false, weapon: null,
+    skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["aln1", "aln2"],
+    variants: [
+      { w: 0.25, headgear: "cheche", hatColor: 0xe6e0d0, kit: ["gandoura"] },
+      { w: 0.15, headgear: "cheche", hatColor: 0xc9b78f, kit: ["gandouraGrey"] },
+      { w: 0.2, headgear: "chechia", hatColor: 0x8e2a22, kit: ["gandoura"] },
+      { w: 0.2, headgear: "chechia", hatColor: 0x5a3324, kit: ["gandouraBrown"] },
+      { w: 0.2, headgear: "cheche", hatColor: 0xe6e0d0, kit: ["gandouraGrey"] },
+    ],
+    extras: { mustache: 0.55, beard: 0.3, kachabia: 0.25 },
+  },
+  civElder: {
+    label: "Ancien", note: "the village's elder: white gandoura, brown kachabia, a white turban, a beard",
+    green: 0xe2dac6, khaki: 0x5a5046, helmet: false, headgear: "cheche", hatColor: 0xf0ebe0, weapon: null,
+    kit: ["gandoura", "kachabia"], skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["aln1", "aln2"],
+    extras: { beard: 0.85, mustache: 0.15 },
+  },
+  civShepherd: {
+    label: "Berger", note: "worn brown wool, a straw hat or a chèche, the kachabia against the cold",
+    green: 0x8a7556, khaki: 0x4a4036, helmet: false, weapon: null,
+    skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["aln1", "aln2"], kit: ["gandouraBrown"],
+    variants: [
+      { w: 0.5, headgear: "bushHat", hatColor: 0xc4aa70 },
+      { w: 0.5, headgear: "cheche", hatColor: 0xb8a882 },
+    ],
+    extras: { kachabia: 0.6, mustache: 0.5, beard: 0.35 },
+  },
+  // The clothes UNDER a robe are painted the robe's colour (green / khaki): whatever of them shows
+  // on a stride — at the shoulder, at the hem — reads as the robe (on the black mlaya a white vest
+  // showed). The body is painted by the LOOK (not a variant): the white and the black are two
+  // looks, mixed in the game.
+  civWomanHaik: {
+    label: "Femme (haïk)", note: "the white haïk over head and body, long sleeves, the face veiled below the eyes",
+    green: 0xe3ddce, khaki: 0xdcd5c4, helmet: false, headgear: "haikVeil", hatColor: 0xe8e3d6, weapon: null,
+    kit: ["haik", "sleevesWhite"],
+    smoothFace: true, skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["soldier1"],   // the clean-shaven body (you: "why the one with the mustache?")
+  },
+  civWomanMlaya: {
+    label: "Femme (mlaya)", note: "the black mlaya of Constantine and the east, the face veil black too (you, 2026-10-08)",
+    green: 0x22201f, khaki: 0x22201f, helmet: false, headgear: "haikVeil", hatColor: 0x262422, veil: 0x1c1a19, weapon: null,
+    kit: ["mlaya", "sleevesBlack"],
+    smoothFace: true, skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["soldier1"],
+  },
+  civWomanRural: {
+    label: "Femme (melhfa)", note: "Chaouia hills: a dark draped melhfa, a bright striped head scarf",
+    green: 0x2c3550, greenAlt: 0x5a2630, khaki: 0x2a2f45, helmet: false, headgear: "mendil", weapon: null,
+    kit: ["melhfa", "sleevesDark"], smoothFace: true, skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["soldier1"],   // (the clean-shaven body)
+    variants: [
+      { w: 0.35, scarf: [0xb8432f, 0xd9a441] },
+      { w: 0.35, scarf: [0x2f6b4a, 0xd8c26a] },
+      { w: 0.3, scarf: [0x7a2a5a, 0xe0a36a] },
+    ],
+  },
   alnKachabia: {
     label: "ALN, kachabia", note: "hooded wool cloak over the drill",
     green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, headgear: "cheche", hatColor: 0xdcd5c3,
@@ -325,6 +386,19 @@ export function lookColorNode(map, look, neck = null, vary = null) {
     const tan = look.skinTan ?? [0.84, 0.7, 0.58];
     const tone = mix(vec3(1, 1, 1), vec3(...tan), vary.z.mul(look.skinRange ?? 1));
     out = out.mul(mix(vec3(1, 1, 1), tone, skinMask));
+  }
+
+  // NO FACIAL HAIR (the women, 2026-10-08 — you: "your melhfa femme has a moustache, that reads
+  // wrong"): the bodies are men's, their stubble and mustache PAINTED in the texture. In the band
+  // of the face from the chin to under the nose (the head bone's height -9 … +6 cm), a dark warm
+  // texel (the hair: brown, dark) is painted the skin's own tone instead.
+  if (look.smoothFace && neck) {
+    const hM = dot(positionGeometry.sub(vec3(neck.point)), vec3(neck.up)).div(neck.unitsPerMetre ?? 1);
+    const band = smoothstep(-0.1, -0.085, hM).mul(float(1).sub(smoothstep(0.055, 0.07, hM)));
+    const hair = float(1).sub(smoothstep(0.42, 0.5, v)).mul(smoothstep(deg(4), deg(8), h)).mul(float(1).sub(smoothstep(deg(46), deg(52), h)));
+    let skin = col(look.faceSkin ?? 0xb37b55);
+    if (vary) skin = skin.mul(mix(vec3(1, 1, 1), vec3(...(look.skinTan ?? [0.84, 0.7, 0.58])), vary.z.mul(look.skinRange ?? 1)));
+    out = mix(out, skin.mul(mix(float(0.92), float(1.05), lum.div(0.25).clamp(0, 1))), band.mul(hair));
   }
 
   if (look.helmet && look.helmetColor !== undefined) {
@@ -771,7 +845,76 @@ const GRENADE = (() => {
   return [[dark, 0.004, bomb.map(([x, y]) => [x * 1.15, y * 1.15 - 0.001])], [gold, 0.006, bomb], ...flames];
 })();
 
-export const HEADGEAR = { bushHat, bigeard, beret, cheche, chechePulled, fieldCap };
+// ── CIVILIANS (2026-10-08, you: "make civilians in the soldier lab — women too") ─────────────
+// From memory of photos of the Aurès and the Algerian countryside, to be judged in the lab:
+// the men in a gandoura or a burnous, a chèche wound as a turban or the red felt chéchia; the
+// women in the white HAÏK (a cloth over head and body, the face veiled below the eyes — the
+// towns' and big villages' dress) or, in the Chaouia hills, a dark draped MELHFA and a bright
+// striped head scarf (mendil).
+
+/** Chéchia: the red felt skullcap, a little flat top. */
+function chechia(look) {
+  const c = look.hatColor ?? 0x8e2a22, d = shade(c, 0.82);
+  return toGeometry([
+    // down to the brow (at -0.085 aln1's camouflaged headband showed under it)
+    ...band(c, [{ y: -0.118, rx: 0.135, rz: 0.141 }, { y: -0.03, rx: 0.13, rz: 0.136 }, { y: 0.012, rx: 0.12, rz: 0.126 }]),
+    dome(d, 0.012, 0.008, 0.12, 0.126),
+  ]);
+}
+
+/**
+ * Mendil: the rural woman's head scarf — over the crown, down the sides to below the ears and
+ * hanging at the back to the shoulders, knotted at the nape; bright STRIPES (`look.scarf`: two hex).
+ */
+function mendil(look) {
+  const [a, b] = look.scarf ?? [0xb8432f, 0xd9a441];
+  const stripe = (i) => (i % 3 === 0 ? b : a);
+  // The face left open BELOW the brow only (-0.105: the eyes are at -0.156); above it the cloth
+  // goes all round — the first cut was open up to the crown and the hair showed (you, 2026-10-08).
+  const open = { from: Math.PI / 2 + 0.75, to: Math.PI * 2.5 - 0.75, segs: 16 };
+  return toGeometry([
+    ...band(stripe, [{ y: -0.29, rx: 0.15, rz: 0.165 }, { y: -0.18, rx: 0.146, rz: 0.16 }, { y: -0.1, rx: 0.145, rz: 0.154 }], open),
+    ...band(stripe, [{ y: -0.105, rx: 0.145, rz: 0.155 }, { y: -0.05, rx: 0.14, rz: 0.15 }, { y: -0.01, rx: 0.122, rz: 0.132 }]),
+    dome(a, -0.01, 0.03, 0.122, 0.132),
+    // the brow band across the front, over the forehead
+    ...band(b, [{ y: -0.115, rx: 0.15, rz: 0.16 }, { y: -0.065, rx: 0.146, rz: 0.156 }], FRONT(0.9)),
+    // the tails down the back, to the shoulder blades
+    ...band(stripe, [{ y: -0.42, rx: 0.12, rz: 0.15 }, { y: -0.27, rx: 0.152, rz: 0.168 }], BACK(0.55)),
+    ...band(stripe, [{ y: -0.27, rx: 0.15, rz: 0.166 }, { y: -0.42, rx: 0.118, rz: 0.148 }], BACK(0.55)),
+  ]);
+}
+
+/**
+ * Haïk veil: the white cloth over the head, round it and down to the shoulders, the face open
+ * between brow and nose — and the 'aâjar', the white veil across the face below the eyes.
+ */
+function haikVeil(look) {
+  // `veil`: the face veil's colour — white even under the black mlaya (Constantine and the east).
+  const c = look.hatColor ?? 0xe8e3d6, d = shade(c, 0.9), veil = look.veil ?? c;
+  const open = { from: Math.PI / 2 + 0.8, to: Math.PI * 2.5 - 0.8, segs: 18 };   // (±0.62 framed the face like a visor)
+  return toGeometry([
+    // Open round the face BELOW the brow only; all round above it (the hair showed, 2026-10-08).
+    // Rounded over the crown (straight sides read as a tall cylinder hat).
+    ...band(c, [
+      { y: -0.4, rx: 0.2, rz: 0.2 }, { y: -0.3, rx: 0.16, rz: 0.175 },
+      { y: -0.17, rx: 0.155, rz: 0.165 }, { y: -0.1, rx: 0.15, rz: 0.158 },
+    ], open),
+    ...band(c, [
+      { y: -0.105, rx: 0.15, rz: 0.159 }, { y: -0.04, rx: 0.138, rz: 0.147 },
+      { y: -0.005, rx: 0.114, rz: 0.122 }, { y: 0.018, rx: 0.075, rz: 0.08 },
+    ], { segs: 18 }),
+    dome(c, 0.018, 0.01, 0.075, 0.08),
+    // the edge over the brow
+    ...band(d, [{ y: -0.125, rx: 0.156, rz: 0.166 }, { y: -0.075, rx: 0.15, rz: 0.159 }], FRONT(0.8)),
+    // the 'aâjar' below the eyes, ear to ear (the face as chechePulled measured it)
+    ...band(veil, [
+      { y: -0.3, rx: 0.12, rz: 0.152, zo: 0.012 }, { y: -0.25, rx: 0.133, rz: 0.17, zo: 0.012 },
+      { y: -0.2, rx: 0.131, rz: 0.172, zo: 0.012 }, { y: -0.178, rx: 0.129, rz: 0.16, zo: 0.012 },
+    ], FRONT(1.25)),
+  ]);
+}
+
+export const HEADGEAR = { bushHat, bigeard, beret, cheche, chechePulled, fieldCap, chechia, mendil, haikVeil };
 
 // ── 4. Kit ──────────────────────────────────────────────────────────────────
 // Rigid pieces on a bone, like the headgear: vertex-coloured, no texture, and
@@ -1187,6 +1330,127 @@ function kachabiaWeights(p) {
   return [["Hips", 1 - legs], ["LeftUpLeg", legs * left], ["RightUpLeg", legs * (1 - left)]];
 }
 
+/**
+ * A WOMAN'S ROBE — closed, from the shoulders to the ankles, wide at the hem: the haïk (white)
+ * or the melhfa (dark, draped). Skinned like the kachabia (kachabiaWeights): it rides the spine,
+ * then blends into each thigh by side, so a walking stride stretches it instead of tearing it.
+ */
+function robe(c, inner, rings = null) {
+  // FITTED to the bodies (MEASURED in the lab, aln1 / aln2 standing, arms left out): the torso
+  // runs z -0.18 … +0.21 at the chest (the vest's pouches in front), x ±0.21 at the belt; the
+  // shoulders ~1.45-1.5 m. 2 cm proud of that, the cloth over the shoulders, the arms out under it.
+  // (A bell 0.36 wide read as a tent; one cut at 0.19 let the pouches through.)
+  // The hem near the ground and DEEP front to back (0.24 let the stepping leg's calf out behind,
+  // seen walking from behind): a stride stays inside the cloth.
+  rings ??= [
+    { y: 0.03, rx: 0.29, rz: 0.33, zo: 0.0 },
+    { y: 0.25, rx: 0.275, rz: 0.28, zo: 0.005 },
+    // Room at the hips (MEASURED, soldier1: its thigh pouch rides the thigh and came through the
+    // cloth on a stride, the robe here mostly on the hips).
+    { y: 0.5, rx: 0.275, rz: 0.245, zo: 0.01 },
+    { y: 0.8, rx: 0.275, rz: 0.24, zo: 0.015 },
+    { y: 1.0, rx: 0.235, rz: 0.215, zo: 0.015 },
+    { y: 1.2, rx: 0.215, rz: 0.225, zo: 0.015 },
+    { y: 1.36, rx: 0.235, rz: 0.225, zo: 0.02 },
+    { y: 1.47, rx: 0.2, rz: 0.2, zo: 0.02 },
+    { y: 1.54, rx: 0.11, rz: 0.11, zo: 0.02 },
+  ];
+
+  return toGeometry([
+    ...band(c, rings, { segs: 20 }),
+    ...band(inner, [...rings].reverse().map((r) => ({ ...r, rx: r.rx - 0.005, rz: r.rz - 0.005 })), { segs: 20 }),
+  ]);
+}
+const haik = () => robe(0xe3ddce, 0xbdb5a2);
+const melhfa = () => robe(0x2c3550, 0x1d2335);
+// The MLAYA: the black haik of Constantine and the east (the Aures included).
+const mlaya = () => robe(0x22201f, 0x141312);
+
+/**
+ * LONG SLEEVES (you, 2026-10-08: "the long sleeves is needed"): a tube down each arm from the
+ * shoulder to the wrist, skinned to the arm (sleeveWeights). The arms at rest, MEASURED in the lab
+ * (aln1 / aln2, one skeleton): shoulder joint (±0.213, 1.296), elbow (±0.471, 1.201), wrist
+ * (±0.634, 1.177); the upper arm ~0.1 m thick round its axis (z centre -0.02), the forearm ~0.06
+ * (z centre +0.02). The sleeve 1.5-2 cm proud of that, wider at the cuff, as cloth hangs.
+ */
+function sleeveTube(c, sx) {
+  const path = [
+    // starting well inside the robe's shoulder and full there: an arm swung forward opened a gap
+    // at the back of the shoulder (soldier1, walking)
+    { x: 0.11, y: 1.34, z: -0.02, r: 0.14, ry: 0.14 },
+    { x: 0.2, y: 1.31, z: -0.025, r: 0.13, ry: 0.13 },
+    { x: 0.3, y: 1.27, z: -0.02, r: 0.115, ry: 0.12 },
+    // The elbow and forearm wide (0.085 let the bent elbow through, seen walking): a loose sleeve.
+    { x: 0.42, y: 1.22, z: 0.0, r: 0.105, ry: 0.105 },
+    { x: 0.5, y: 1.2, z: 0.015, r: 0.1, ry: 0.1 },
+    { x: 0.6, y: 1.185, z: 0.03, r: 0.095, ry: 0.095 },
+  ].map((q) => ({ ...q, x: q.x * sx }));
+  const segs = 12;
+  const rings = path.map((q, k) => {
+    const nx = path[Math.min(k + 1, path.length - 1)], pv = path[Math.max(k - 1, 0)];
+    const d = new THREE.Vector3(nx.x - pv.x, nx.y - pv.y, nx.z - pv.z).normalize();
+    const u = new THREE.Vector3(0, 1, 0).addScaledVector(d, -d.y).normalize();
+    const v = new THREE.Vector3().crossVectors(d, u).normalize();
+    return Array.from({ length: segs }, (_, i) => {
+      const a = (i / segs) * Math.PI * 2, cu = Math.cos(a) * q.ry, sv = Math.sin(a) * q.r;
+      return [q.x + u.x * cu + v.x * sv, q.y + u.y * cu + v.y * sv, q.z + u.z * cu + v.z * sv];
+    });
+  });
+  const p = part(c), inner = part(shade(c, 0.7));
+  for (let k = 0; k < rings.length - 1; k++) {
+    for (let i = 0; i < segs; i++) {
+      const j = (i + 1) % segs, A = rings[k], B = rings[k + 1];
+      // the outside, and the inside a shade darker (the cuff shows it)
+      tri(p, A[i], B[i], B[j]); tri(p, A[i], B[j], A[j]);
+      tri(inner, A[i], B[j], B[i]); tri(inner, A[i], A[j], B[j]);
+    }
+  }
+  return [p, inner];
+}
+const sleeves = (c) => () => toGeometry([...sleeveTube(c, 1), ...sleeveTube(c, -1)]);
+
+/** A sleeve's skin weights: the shoulder into the upper arm, the upper arm into the forearm at the elbow. */
+function sleeveWeights(p) {
+  const s = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const side = p.x >= 0 ? "Left" : "Right", ax = Math.abs(p.x);
+  if (ax < 0.24) { const t = s(0.12, 0.22, ax); return [["Spine2", 1 - t], [`${side}Arm`, t]]; }
+  const t = s(0.43, 0.51, ax);
+  return [[`${side}Arm`, 1 - t], [`${side}ForeArm`, t]];
+}
+/**
+ * The men's GANDOURA: a long tunic to mid-calf, closer than the women's robes — it must fit
+ * INSIDE the kachabia worn over it (≥ 5 mm in at its back and sides) and still clear the body
+ * (measured: the chest z -0.185 … +0.217). The trousers show below it (the look's khaki).
+ */
+const GANDOURA = [
+  { y: 0.3, rx: 0.25, rz: 0.22, zo: 0.01 },
+  { y: 0.6, rx: 0.245, rz: 0.21, zo: 0.01 },
+  { y: 0.95, rx: 0.232, rz: 0.205, zo: 0.012 },
+  { y: 1.2, rx: 0.212, rz: 0.205, zo: 0.011 },
+  { y: 1.36, rx: 0.2, rz: 0.21, zo: 0.015 },
+  { y: 1.47, rx: 0.17, rz: 0.18, zo: 0.02 },
+  { y: 1.54, rx: 0.1, rz: 0.1, zo: 0.02 },
+];
+const gandoura = () => robe(0xd9cfb9, 0xb2a993, GANDOURA);
+const gandouraGrey = () => robe(0x8f8d84, 0x6e6c64, GANDOURA);
+const gandouraBrown = () => robe(0x8a7556, 0x66563f, GANDOURA);
+
+/**
+ * A LONG ROBE's skin weights (the women's robes, the gandouras): as the kachabia's down to the
+ * knee, and BELOW it into each shin (LeftLeg / RightLeg), so the hem follows the whole leg — on
+ * the thighs alone the stepping calf came through the cloth behind (seen walking, 2026-10-08).
+ * The knee at rest is ~0.5 m.
+ */
+function robeWeights(p) {
+  if (p.y >= 0.62) return kachabiaWeights(p);
+  const s = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const left = s(-0.1, 0.1, p.x), shin = s(0.58, 0.4, p.y);
+  return [
+    ["LeftUpLeg", left * (1 - shin)], ["LeftLeg", left * shin],
+    ["RightUpLeg", (1 - left) * (1 - shin)], ["RightLeg", (1 - left) * shin],
+  ];
+}
+
 /** Kit pieces and the bone each rides on. */
 export const KIT = {
   pack: { bone: "Spine2", build: pack },
@@ -1208,6 +1472,16 @@ export const KIT = {
   flag: { bone: "Spine2", build: flnFlag },
   // skinned: built at rest in metres, weighted per vertex by `weights`
   kachabia: { skinned: true, build: kachabia, weights: kachabiaWeights },
+  // the women's robes (civilians): skinned the same way
+  haik: { skinned: true, build: haik, weights: robeWeights },
+  melhfa: { skinned: true, build: melhfa, weights: robeWeights },
+  mlaya: { skinned: true, build: mlaya, weights: robeWeights },
+  sleevesWhite: { skinned: true, build: sleeves(0xe3ddce), weights: sleeveWeights },
+  sleevesBlack: { skinned: true, build: sleeves(0x22201f), weights: sleeveWeights },
+  sleevesDark: { skinned: true, build: sleeves(0x2c3550), weights: sleeveWeights },
+  gandoura: { skinned: true, build: gandoura, weights: robeWeights },
+  gandouraGrey: { skinned: true, build: gandouraGrey, weights: robeWeights },
+  gandouraBrown: { skinned: true, build: gandouraBrown, weights: robeWeights },
 };
 
 /** The per-soldier extras a look can roll (look.extras = { name: chance }). */

@@ -556,9 +556,10 @@
           root.getObjectByName(bone).add(piece);
         }
         // Weapon: his role's / look's, unless one was picked by hand for everyone.
-        const weapon = weaponKey === "auto" ? (load.weapon ?? DEFAULT_RIFLE) : weaponKey;
+        // A look with `weapon: null` (the civilians) carries none; one that never said, the default rifle.
+        const weapon = weaponKey === "auto" ? (load.look.weapon === null ? "none" : (load.weapon ?? DEFAULT_RIFLE)) : weaponKey;
         if (!look.headgear) return weapon;
-        const hk = `${lookKey}|${look.headgear}|${look.hatColor ?? ""}`;
+        const hk = `${lookKey}|${look.headgear}|${look.hatColor ?? ""}|${look.scarf ?? ""}|${look.veil ?? ""}`;   // (scarf: a mendil's stripes)
         if (!hatGeo.has(hk)) hatGeo.set(hk, HEADGEAR[look.headgear](look));
         if (!hatMats.has(hk)) hatMats.set(hk, headgearMaterial(look));
         const hat = new THREE.Mesh(hatGeo.get(hk), hatMats.get(hk));
