@@ -66,6 +66,9 @@ const CSS = `
 #rts-cmd-card .cc-b.poor .ic, #rts-cmd-card .cc-b.poor .pic { opacity: 0.45; }
 #rts-cmd-card .cc-b.locked { cursor: not-allowed; filter: grayscale(1); opacity: 0.5; }
 #rts-cmd-card .cc-b.locked .co { display: none; }
+/* The post's tier button when it can be bought (2026-10-08): a slow brass pulse. */
+#rts-cmd-card .cc-b.tier.ready { animation: cc-ready 1.6s ease-in-out infinite; }
+@keyframes cc-ready { 0%, 100% { box-shadow: 0 0 0 0 rgba(242, 201, 76, 0); } 50% { box-shadow: 0 0 0 3px rgba(242, 201, 76, 0.55); } }
 #rts-cmd-card .cc-b.locked::before { content: "🔒"; position: absolute; right: 3px; top: 1px; font-size: 9px; filter: grayscale(1); }
 #rts-cmd-card .cc-q { display: flex; gap: 4px; align-items: center; min-height: 34px; }
 #rts-cmd-card .cc-q .q { position: relative; width: 34px; height: 34px; flex: none; background: #1b1e17 center 22%/cover no-repeat; border: 1px solid #454c3a; border-radius: var(--hud-radius); }
@@ -101,7 +104,8 @@ export function createCommandCard({
   onStop = () => {},
   onFocus = () => {},
   onBuild = () => {},          // (structure, key) — enqueue production on that structure
-  productionFor = () => [],    // (structure) → [{ key, label, cost, locked, tier, tip }]
+  productionFor = () => [],    // (structure) → [{ key, label, cost, locked, tier, tip, ready }]
+  onLocked = null,             // (button) → a click on a locked one (alg-rts: to the post, where tiers are bought)
   canAfford = () => true,      // (cost) → affordable right now? (cost: a number = effectifs, or { mp, fuel, mun })
   shortOf = () => "",          // (cost) → what is missing ("45 Carburant"), for the tooltip
   structureBuilds = [],        // [{ key, label, tip }] — what a builder can raise
@@ -129,15 +133,17 @@ export function createCommandCard({
   let prodSig = "", prodT = 0, abilSig = "";
 
   // ── Buttons ────────────────────────────────────────────────────────────────
-  function button({ kind, key, label, cost = 0, icon = null, pic = null, verb = false, tier = false, locked = null, info = "", run }) {
+  function button({ kind, key, label, cost = 0, icon = null, pic = null, verb = false, tier = false, locked = null, info = "", ready = false, run }) {
     const el = document.createElement("button");
-    el.className = `cc-b${verb ? " verb" : ""}${tier ? " tier" : ""}${locked ? " locked" : ""}`;
+    el.className = `cc-b${verb ? " verb" : ""}${tier ? " tier" : ""}${locked ? " locked" : ""}${ready ? " ready" : ""}`;
     const hk = HOTKEY[key];
     el.innerHTML = `${pic ? `<span class="pic" style="background-image:url(${pic})"></span>` : icon && hasIcon(icon) ? `<span class="ic" style="${iconStyle(icon)}"></span>` : ""}`
       + `${hk ? `<span class="hk">${hk}</span>` : ""}${costTag(cost)}<span class="lb">${esc(label)}</span>`;
     const b = { el, kind, key, cost, label, info, locked, run };
     el.addEventListener("click", () => {
-      if (b.locked || el.classList.contains("cool")) return;
+      // A LOCKED unit: to where it is unlocked (the game's `onLocked`: the post).
+      if (b.locked) { onLocked?.(b); return; }
+      if (el.classList.contains("cool")) return;
       if (hasCost(b.cost) && !canAfford(b.cost)) return;
       run();
     });
@@ -207,7 +213,7 @@ export function createCommandCard({
       const pic = o.tier ? null : thumbnails?.get(o.key);
       grid.appendChild(button({
         kind: "train", key: o.key, label: o.tier ? o.label.replace(/^▲\s*/, "") : o.label, cost: o.cost ?? 0, pic, icon: o.tier ? "tier" : null,
-        tier: !!o.tier, locked: o.locked, info: o.tip ?? (o.tier ? "" : t("Former. Sort par la porte vers le point de ralliement.")),
+        tier: !!o.tier, locked: o.locked, ready: !!o.ready, info: o.tip ?? (o.tier ? "" : t("Former. Sort par la porte vers le point de ralliement.")),
         run: () => onBuild(s, o.key),
       }));
     }

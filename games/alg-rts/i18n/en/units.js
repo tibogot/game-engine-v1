@@ -91,7 +91,6 @@ export default {
   "Parc auto": "Motor Pool",
   "Hélisurface": "Helipad",
   "Grotte": "Cave",
-  "Tier {n}: {name}": "Tier {n}: {name}",
   "Échelon {n} : {note}. Il faut tenir {villages} villages.": "Tier {n}: {note}. Requires holding {villages} villages.",
   "Échelon {n} : {note}. Il faut tenir 1 village.": "Tier {n}: {note}. Requires holding 1 village.",
   "troupes (plafond {cap} : tenez plus de villages)": "troops (cap {cap}: hold more villages)",

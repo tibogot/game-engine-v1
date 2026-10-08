@@ -25,8 +25,35 @@ export const TIERS = [
 ];
 const tierOfUnit = Object.fromEntries(TIERS.flatMap((tr) => tr.units.map((u) => [u, tr.n])));
 
-export function createAlgTiers(app, { economy }) {
+export function createAlgTiers(app, { economy, post = () => null }) {
   let tier = 1;
+  // `post()`: the post's structure — the tiers are bought on its card (the alert and a locked
+  // button take you there: you, 2026-10-08, "the player should understand the game well").
+  /** Where and what, in one line: "au poste, ▲ Moyens héliportés — tenir 1 village, 150 effectifs, 40 carburant". */
+  function howTo(tr) {
+    const c = tr.cost ?? {}, price = [c.mp ? t("{n} effectifs", { n: c.mp }) : "", c.fuel ? t("{n} carburant", { n: c.fuel }) : ""].filter(Boolean).join(", ");
+    const hold = tr.villages > 1 ? t("tenir {n} villages", { n: tr.villages }) : t("tenir 1 village");
+    return t("au poste, ▲ {name} — {hold}, {price}", { name: tr.name, hold, price });
+  }
+  /** Select the post and bring the camera to it (the alert's click, a locked button's). */
+  function goToPost() {
+    const s = post();
+    if (!s) return;
+    app.rtsCamera?.focusOn(s.position.x, s.position.z);
+    app.selection?.select([s]);
+  }
+  // THE ALERT: once a tier CAN be bought (the villages held and the price in hand), once per tier.
+  let announced = 1, watchT = 0;
+  function watch(dt) {
+    if ((watchT -= dt) > 0) return;
+    watchT = 1;
+    const tr = next();
+    if (!tr || announced >= tr.n || blockedBy(tr)) return;
+    announced = tr.n;
+    const s = post();
+    app.algBattle?.say?.(t("<b>Échelon disponible : {name}</b> ({note}). Cliquez ici, puis ▲ {name} sur la fiche du poste.", { name: tr.name, note: tr.note }),
+      s?.position.x, s?.position.z, "good", null, "alertFlag", goToPost);
+  }
   /** The tier a unit needs (units not listed: always open — the ALN's). */
   const needs = (key) => tierOfUnit[key] ?? 1;
   const next = () => TIERS.find((tr) => tr.n === tier + 1) ?? null;
@@ -50,6 +77,13 @@ export function createAlgTiers(app, { economy }) {
     unlocked: (key) => needs(key) <= tier,
     next,
     blockedBy,
+    howTo, goToPost, watch,
+    /** The resources' readout: "échelon 1/3", and its tooltip (what the next one needs). */
+    readout() {
+      const tr = next();
+      return { text: t("échelon {n}/{of}", { n: tier, of: TIERS.length }),
+        tip: tr ? t("Échelon suivant : {how}.", { how: howTo(tr) }) : t("Tous les échelons sont débloqués.") };
+    },
     /** Buy the next tier (the post's card). True if done. */
     unlock() {
       const tr = next();

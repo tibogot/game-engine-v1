@@ -96,6 +96,12 @@ Keep this file current: tick things off here, add new asks here.
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
+15. [x] **THE TIERS EXPLAINED (2026-10-08, you: "some units read Verrouillé — why?"; "the player should
+   understand the game well")**: a locked button says what unlocks it and where ("at the post, ▲
+   Airmobile — hold 1 village, 150 manpower, 40 fuel") and a click on it goes to the post; an alert
+   when a tier CAN be bought (click: the camera to the post, the post selected); the post's tier button
+   pulses while it can be bought; "tier n/3" in the resources, the next one's needs on hover
+   (algTiers.js howTo / watch / readout). Checked in the game.
 14. [x] **TRANSPORTS (2026-10-08, you: "what is the truck for?")**: the GMC and the M3 half-track each
    carry ONE squad (algTransports.js). Right-click your vehicle with infantry selected (a truck
    cursor over one with room); aboard: not drawn, never targeted, no blast reaches them, no fire,

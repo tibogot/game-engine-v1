@@ -1,5 +1,14 @@
 // English for the hud area (French key -> English). See ../i18n.js.
 export default {
+  // algTiers.js — the tiers explained (2026-10-08)
+  "tenir {n} villages": "hold {n} villages",
+  "tenir 1 village": "hold 1 village",
+  "au poste, ▲ {name} — {hold}, {price}": "at the post, ▲ {name} — {hold}, {price}",
+  "<b>Échelon disponible : {name}</b> ({note}). Cliquez ici, puis ▲ {name} sur la fiche du poste.": "<b>Tier available: {name}</b> ({note}). Click here, then ▲ {name} on the post's card.",
+  "échelon {n}/{of}": "tier {n}/{of}",
+  "Échelon suivant : {how}.": "Next tier: {how}.",
+  "Tous les échelons sont débloqués.": "Every tier is unlocked.",
+  "débloquez-le {how}. (Clic : aller au poste.)": "unlock it {how}. (Click: go to the post.)",
   // ui/commandCard.js
   "{n} effectifs": "{n} manpower",
   "{n} carburant": "{n} fuel",

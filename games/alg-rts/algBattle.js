@@ -65,8 +65,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     return best ? t("près de {name}", { name: best.name }) : t("dans le djebel");
   };
   /** An alert; `radio`: the HQ line said with it (algVoices.js, tools/algVoiceLines.mjs). */
-  function say(text, x, z, kind, radio = null, icon = ICON_OF[radio] ?? null) {
-    hud.alert(text, { x, z, kind, time: clock, icon });
+  function say(text, x, z, kind, radio = null, icon = ICON_OF[radio] ?? null, onClick = null) {
+    hud.alert(text, { x, z, kind, time: clock, icon, onClick });
     if (radio) app.algVoices?.radio(radio);
     if (x != null) { minimap?.ping?.(x, z); app.algTacMap?.map?.ping?.(x, z); }
   }
@@ -383,7 +383,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
   return {
     params: P, score, stats,
     /** An alert from another system (algTiers.js). */
-    say: (text, x = null, z = null, kind = "good", radio = null, icon = undefined) => say(text, x, z, kind, radio, icon),
+    say: (text, x = null, z = null, kind = "good", radio = null, icon = undefined, onClick = null) => say(text, x, z, kind, radio, icon, onClick),
     get over() { return over; },
     get clock() { return clock; },
     /** Start without the briefing (?brief=0): the remembered difficulty. */

@@ -212,14 +212,15 @@ export function createBattleHud({ camera, canvas, onJump }) {
   document.body.appendChild(feed);
   const alerts = [];   // { node, x, z, t0 }
   let latest = null;
-  function alert(text, { x, z, kind = "", time = 0, life = 10, icon = null } = {}) {
+  // `onClick`: more than the camera jump (a tier's alert selects the post).
+  function alert(text, { x, z, kind = "", time = 0, life = 10, icon = null, onClick = null } = {}) {
     const node = document.createElement("div");
     node.className = `al ${kind}${icon ? " has-ic" : ""}`;
     // CoH's alert pictures (ui/icons.js alert*), the kind's colour.
     const ic = icon && hasIcon(icon) ? `<span class="aic" style="${iconStyle(icon)}"></span>` : "";
     node.innerHTML = kind === "tip" ? text : `${ic}<span class="t">${fmtTime(time)}</span>${text}`;
     const a = { node, x, z, t0: performance.now(), life: life * 1000 };
-    if (x != null) node.addEventListener("click", () => onJump(x, z));
+    if (x != null) node.addEventListener("click", () => { onJump(x, z); onClick?.(); });
     // Click a tip away.
     if (kind === "tip" && x == null) node.addEventListener("click", () => { a.life = 0; });
     feed.appendChild(node);

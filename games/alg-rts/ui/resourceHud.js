@@ -30,7 +30,8 @@ const CSS = `
 #alg-res .flash.on { opacity: 1; transition: none; }
 `;
 
-export function createResourceHud({ mount = document.body, troops = null } = {}) {
+export function createResourceHud({ mount = document.body, troops = null, tier = null } = {}) {
+  // `tier()`: { text, tip } — the tier you are at, the next one's needs on hover (algTiers.js).
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -46,6 +47,8 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
     <span class="dim" id="alg-res-villages"></span>
     <span class="sep"></span>
     <span class="dim" id="alg-res-troops"></span>
+    <span class="sep"></span>
+    <span class="dim" id="alg-res-tier"></span>
     <span class="flash" id="alg-res-flash"></span>
     </div>
   `;
@@ -56,6 +59,7 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
   const elVillages = root.querySelector("#alg-res-villages");
   const elFlash = root.querySelector("#alg-res-flash");
   const elTroops = root.querySelector("#alg-res-troops");
+  const elTier = root.querySelector("#alg-res-tier");
   let last = "", flashT = 0;
 
   /** Each frame; touches the DOM only when something shown has changed. */
@@ -63,8 +67,8 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
     const f = economy.french;
     const inc = economy.incomeOf("player");
     const held = economy.held, total = economy.points.length, theirs = economy.heldByEnemy, cut = economy.cutOff;
-    const men = troops?.() ?? null;
-    const key = `${KEYS.map((k) => Math.floor(f[k]) + "/" + Math.round(inc[k])).join("|")}|${held}|${theirs}|${cut}|${men}`;
+    const men = troops?.() ?? null, tr = tier?.() ?? null;
+    const key = `${KEYS.map((k) => Math.floor(f[k]) + "/" + Math.round(inc[k])).join("|")}|${held}|${theirs}|${cut}|${men}|${tr?.text}|${tr?.tip}`;
     if (key === last) return;
     last = key;
     for (const k of KEYS) {
@@ -75,6 +79,9 @@ export function createResourceHud({ mount = document.body, troops = null } = {})
       + (theirs ? ` <span class="enemy">· ALN <b class="hud-num">${theirs}</b></span>` : "")
       + (cut ? ` <span class="cut" title="${t("Points que vous tenez mais coupés du poste : sans ligne de ravitaillement, ils ne rapportent rien.")}">· ${cut > 1 ? t("{n} coupés", { n: cut }) : t("{n} coupé", { n: cut })}</span>` : "");
     if (men != null) elTroops.innerHTML = `${t("troupes")} <b class="hud-num">${men}</b>`;
+    elTier.hidden = !tr;
+    elTier.previousElementSibling.hidden = !tr;
+    if (tr) { elTier.textContent = tr.text; elTier.title = tr.tip; }
   }
 
   /** A moment's notice beside the numbers (a convoy's delivery: "+30 · convoi"). */
