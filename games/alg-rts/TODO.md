@@ -1433,8 +1433,15 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       RE-MEASURED cool (fresh browser, interleaved): without (?brief=0) 29.5 / 31.9 / 27.8 / 44.9 s,
       with it 26.2 / 43.7 / 25.8 / 26.2 s — it costs nothing (medians ~30.7 vs ~26.2). The briefing
       is up at ~15-18 s. OPEN: an outlier ~44 s now and then on BOTH sides — find what stalls.
-      NEXT: cache the generated buildings (~2.5 s) and the herd models (~2-3 s) in files; share the
-      ring overlays' and unit parts' materials (~30 builds). Then
+      LOOKED AT 2026-10-08, NOT DONE: (a) the BUILDINGS in a worker — the costly ones (dechra, ksar,
+      gardens, terraces) are built on the real slope, so need the terrain (after the level), and
+      nearly every later step needs them: no overlap to win. (b) the HERDS' models loaded early (the
+      herds step 3-4.5 → 1.1 s; ~2.7 s of it was the donkey + deer GLB load) — A/B'd: the boot got
+      SLOWER (30.6 / 29.5 / 32.1 s vs 27.3 / 28.4 s): the GLB parse moved onto the level load, the
+      critical path. Reverted. LESSON: an early start only wins for work OFF the main thread (the
+      photos: fetch + createImageBitmap); a GLB parse is main-thread work and just moves.
+      Boot now ~26-28 s; the briefing up at ~15-18 s.
+      LEFT (small): share the ring overlays' and the unit parts' materials (~30 builds, ~1 s). Then
       (stones → a prebuilt array file or a worker; the warm-up's 92 new drawables; splats), then
       the ideas: show the briefing earlier and finish the warm-up / herds BEHIND it (the felt wait
       −7-10 s); a persistent shader cache (Electron); the herd templates cached or in a worker;
