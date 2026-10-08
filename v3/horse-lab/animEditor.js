@@ -20,12 +20,34 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { CHANNELS, perfToData } from "./mount.js";
 import { POSES, POSES_BUILTIN, RP, ridingData, applyRidingData } from "./rider.js";
 import { STRAP_K } from "./stirrups.js";
-import { GEARS } from "./horse.js";
+import { GEARS, HP } from "./horse.js";
+import { REAR_REFS, rearViewFit } from "./refCompare.js";
 
 // the reference screenshots (v3/horse-lab/refs, kept out of git)
 const REF_FILES = ["mount1", "mount2", "mount3", "mount4", "mount5", "mount6", "mount7", "mount8", "mount9", "mount10",
   "dismount1", "dismount2", "dismount3", "dismount4", "dismount5", "dismount6", "dismount7", "dismount8",
-  "idleSide", "mountB1", "mountB2", "mountB3", "dismountB0", "dismountB1", "dismountB2", "dismountB3"];   // B = seen from behind
+  "idleSide", "mountB1", "mountB2", "mountB3", "dismountB0", "dismountB1", "dismountB2", "dismountB3",   // B = seen from behind
+  "rear1", "rear2", "rear3", "rear4", "rearLeg"];
+
+// ── rear mode: the rear (R) is procedural — no keys; its settings are sliders
+// and the timeline scrubs it (replayed from the start at a fixed 1/60 s, so a
+// time always shows the same pose) ──
+const REAR_PARAMS = [
+  { key: "rearAngle", label: "body angle (rad)", min: 0.3, max: 1.3 },
+  { key: "rearArch", label: "neck arch (rad)", min: 0, max: 1.5 },
+  { key: "rearNeck", label: "neck levelling", min: 0, max: 1 },
+  { key: "rearHeadFlex", label: "nose tuck (rad)", min: 0, max: 1.2 },
+  { key: "rearReach", label: "forelegs reach ×", min: 0, max: 3 },
+  { key: "rearKnee", label: "front knees fold ×", min: 0, max: 2 },
+  { key: "rearHip", label: "hip height when up ×", min: 0.6, max: 1 },
+  { key: "rearStep", label: "hind feet step under (m)", min: 0, max: 0.5 },
+  { key: "rearHipFwd", label: "hips ahead of hind feet (m)", min: -0.1, max: 0.3 },
+  { key: "rearPrep", label: "gather (s)", min: 0.1, max: 1 },
+  { key: "rearRise", label: "rise (s)", min: 0.2, max: 1.5 },
+  { key: "rearHold", label: "hold (s)", min: 0.2, max: 3 },
+  { key: "rearFall", label: "come down (s)", min: 0.2, max: 1.5 },
+];
+const rearLength = () => HP.rearPrep + HP.rearRise + HP.rearHold + HP.rearFall + HP.rearSettle;
 
 // ── riding mode: one posture per gait, no timeline — the horse plays the gait
 // in place under the rider and every value is a slider (or a handle) ──
@@ -100,7 +122,7 @@ export class AnimEditor {
     el.innerHTML = `
       <div class="bar">
         <b>Animation</b>
-        <select data-k="clip"><optgroup label="movements"><option value="mount">get on (mount)</option><option value="dismount">get off (dismount)</option></optgroup>
+        <select data-k="clip"><optgroup label="movements"><option value="mount">get on (mount)</option><option value="dismount">get off (dismount)</option><option value="rear">rear (R) — procedural</option></optgroup>
           <optgroup label="riding posture">${Object.keys(RIDE_GAIT).map((p) => `<option value="ride:${p}">riding — ${p}</option>`).join("")}</optgroup></select>
         <button data-k="play" title="Space">▶ play</button>
         <select data-k="speed"><option value="0.25">×0.25</option><option value="0.5" selected>×0.5</option><option value="1">×1</option></select>
@@ -121,6 +143,7 @@ export class AnimEditor {
         opacity <input data-k="refOp" type="range" min="0" max="1" step="0.05" value="0.5" style="width:90px">
         lens <input data-k="fov" type="range" min="10" max="80" step="0.5" value="55" style="width:110px"> <span data-k="fovv" style="width:40px"></span>
         <button data-k="refSave">save this view</button>
+        <button data-k="refFit" title="rear screenshots: finds our rear's matching moment and the camera that puts our horse on the picture">fit view (rear)</button>
         <span class="hint">line the horse up with the picture: drag = orbit · right-drag = pan · wheel = zoom · lens = perspective</span>
       </div>
       <div class="body"><div class="rows"></div><canvas></canvas>
@@ -147,6 +170,7 @@ export class AnimEditor {
     this.ui.refOp.oninput = () => (this.refImg.style.opacity = this.ui.refOp.value);
     this.ui.fov.oninput = () => { this.camera.fov = +this.ui.fov.value; this.camera.updateProjectionMatrix(); };
     q("refSave").onclick = () => this.saveRefView();
+    q("refFit").onclick = () => this.fitRearRef();
     // channel rows
     const rows = el.querySelector(".rows");
     this.rowEls = {};
@@ -183,6 +207,20 @@ export class AnimEditor {
       r.append(s, v); r.slider = s; r.val = v;
       rr.appendChild(r); this.rideEls[p.key] = r;
     }
+    // rear sliders (HP, the horse's own settings: they change the game's rear too)
+    const rq = this.rearRows = document.createElement("div");
+    rq.style.cssText = "display:none;flex:1;columns:2;padding:6px 10px";
+    el.querySelector(".body").appendChild(rq);
+    this.rearEls = {};
+    for (const p of REAR_PARAMS) {
+      const r = document.createElement("div"); r.className = "row"; r.style.breakInside = "avoid";
+      r.innerHTML = `<span class="nm">${p.label}</span>`;
+      const s = document.createElement("input"); s.type = "range"; s.min = p.min; s.max = p.max; s.step = 0.01; s.style.width = "160px";
+      const v = document.createElement("span"); v.className = "val";
+      s.oninput = () => { HP[p.key] = +s.value; this.rearDirty = true; this.data.duration = rearLength(); };
+      r.append(s, v); r.slider = s; r.val = v;
+      rq.appendChild(r); this.rearEls[p.key] = r;
+    }
     // timeline
     const cv = this.cv = el.querySelector("canvas");
     let drag = null;
@@ -192,7 +230,7 @@ export class AnimEditor {
     cv.addEventListener("pointerdown", (e) => {
       if (!this.data) return;
       const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-      const row = Math.floor((y - RULER) / ROW), c = CHANNELS[row];
+      const row = Math.floor((y - RULER) / ROW), c = this.rearMode ? null : CHANNELS[row];   // (rear: no key rows, only scrubbing)
       cv.setPointerCapture(e.pointerId);
       if (c) {
         this.select(c.name);
@@ -210,6 +248,7 @@ export class AnimEditor {
     });
     cv.addEventListener("pointerup", () => { if (drag?.key) { this.sortKeys(drag.c.name); this.changed(); } drag = null; });
     cv.addEventListener("dblclick", (e) => {
+      if (this.rearMode) return;
       const r = cv.getBoundingClientRect(), row = Math.floor((e.clientY - r.top - RULER) / ROW), c = CHANNELS[row];
       if (!c) return;
       this.pushUndo();
@@ -262,6 +301,8 @@ export class AnimEditor {
 
   // ── open / close ──────────────────────────────────────────────────────────
   open(clip = this.clip) {
+    if (clip === "rear") return this.openRear();
+    this.leaveRear();
     if (clip.startsWith("ride:")) return this.openRide(clip.slice(5));
     this.leaveRide();
     const ms = this.ms;
@@ -313,6 +354,71 @@ export class AnimEditor {
     this.el.querySelector(".rows").style.display = ""; this.cv.style.display = ""; this.rrows.style.display = "none";
     for (const k of ["key", "del", "loop", "dur", "durl"]) this.el.querySelector(`[data-k=${k}]`).style.display = "";
   }
+  // the rear (R): the rider sits, the horse rears on the spot; the timeline
+  // scrubs it, the sliders are its settings
+  openRear() {
+    this.leaveRide();
+    const ms = this.ms, rd = this.rider;
+    if (ms.mode !== "riding") { ms.edit = null; ms.mode = "riding"; ms.blend = null; rd.seatY = null; rd.sitAction.reset().play(); ms.cur?.stop(); ms.cur = null; }
+    ms.edit = null;
+    this.rearMode = true; this.rearSimT = null; this.rearDirty = true;
+    this.clip = "rear"; this.ui.clip.value = "rear";
+    this.data = { duration: rearLength(), channels: {} };
+    this.t = Math.min(this.t ?? 0, this.data.duration); this.playing = false; this.selKey = null;
+    this.isOpen = true; this.D.editing = true;
+    this.el.style.display = "block";
+    document.body.classList.add("ae-open");
+    for (const h of Object.values(this.handles)) h.visible = false;
+    for (const l of Object.values(this.paths)) l.visible = false;
+    this.tc.detach();
+    this.el.querySelector(".rows").style.display = "none"; this.rrows.style.display = "none"; this.rearRows.style.display = "block";
+    for (const k of ["key", "del", "dur", "durl", "save", "reset", "undo"]) this.el.querySelector(`[data-k=${k}]`).style.display = "none";
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.status("rear — scrub the timeline; sliders change the horse's rear (the game's too); pick rear1–4 above and press “fit view (rear)”");
+  }
+  leaveRear() {
+    if (!this.rearMode) return;
+    this.rearMode = false;
+    this.el.querySelector(".rows").style.display = ""; this.rearRows.style.display = "none";
+    for (const k of ["key", "del", "dur", "durl", "save", "reset", "undo"]) this.el.querySelector(`[data-k=${k}]`).style.display = "";
+  }
+  // the horse + rider exactly as they are t s into a rear (replayed at 1/60 s;
+  // forward from where it is, or from a fresh start when going back / a setting changed)
+  rearSimTo(t) {
+    const c = this.ctrl, rd = this.rider, DT = 1 / 60, idle = { fwd: 0, turn: 0, run: false }, st = (n) => { for (let i = 0; i < n; i++) { c.update(DT, idle); rd.update(DT, { lookYaw: 0, input: {} }); } };
+    if (this.rearDirty || this.rearSimT == null || t < this.rearSimT - 1e-6) {
+      if (c.oneShot) c.endOneShot(); c.refusing = false; c.v = 0; c.idleT = -1e9;
+      for (let i = 0; i < 600 && (c.rearT >= 0 || c.rearA > 0); i++) st(1);   // an earlier rear runs out first (startRear refuses while one runs)
+      st(20);
+      c.startRear();
+      this.rearSimT = 0; this.rearDirty = false;
+    }
+    while (this.rearSimT < t - 1e-6) { st(1); this.rearSimT += DT; }
+  }
+  // "fit view (rear)": the moment of our rear and the camera that put our horse
+  // on the picked rear screenshot (the landmark fit, refCompare.js)
+  fitRearRef() {
+    const name = this.refName;
+    if (!REAR_REFS[name]) return this.status("pick one of rear1–rear4 in Reference first");
+    if (!this.rearMode) this.openRear();
+    const H = { ctrl: this.ctrl, horse: this.ctrl.h, rider: this.rider };
+    const view = { W: innerWidth, Hh: innerHeight, ph: this.el.offsetHeight };
+    let best = null, q0 = null;
+    this.rearDirty = true;
+    for (let t = 0.1; t <= this.data.duration - HP.rearSettle; t += 0.05) {
+      this.rearSimTo(t);
+      const f = rearViewFit(H, name, view, q0); q0 = f.q;
+      if (!best || f.rms < best.rms) best = { ...f, t };
+    }
+    this.setT(best.t); this.rearSimTo(best.t);
+    // the page's orbit camera from that world camera: target = the look point
+    const c = this.ctrl, want = new V3(c.pos.x, c.y + c.lift * 0.6 + 1.8, c.pos.z);
+    const d = best.pos.clone().sub(best.look), dist = d.length();
+    this.camState.set({ yaw: Math.atan2(-d.x, -d.z), pitch: Math.asin(d.y / dist), dist, pan: best.look.clone().sub(want).toArray(), fov: best.fov });
+    this.ui.fov.value = best.fov;
+    this.status(`${name}: our rear at ${best.t.toFixed(2)} s fits best (±${best.rms.toFixed(0)} px on the screenshot) — the view is set; “save this view” keeps it`);
+  }
+
   // the horse's input while editing; the gait is chosen by the posture
   horseInput() {
     const g = this.ride ? RIDE_GAIT[this.ride] : null;
@@ -320,7 +426,7 @@ export class AnimEditor {
     this.ctrl.gear = Math.max(0, GEARS.indexOf(g.gear));        // (no trot gear: its posture rides at a walk)
     return { fwd: g.fwd ?? 0, turn: 0, run: !!g.run };
   }
-  rideRate() { return this.playing ? this.speed : 0; }
+  rideRate() { return this.rearMode ? 0 : this.playing ? this.speed : 0; }   // (rear: the editor steps the horse itself, rearSimTo)
   // treadmill: the horse goes nowhere, so the rider stays in view
   afterHorse() {
     if (!this.isOpen) return;
@@ -359,7 +465,7 @@ export class AnimEditor {
   }
   close() {
     if (!this.isOpen) return;
-    this.leaveRide();
+    this.leaveRide(); this.leaveRear();
     this.isOpen = false; this.D.editing = false; this.D.gizmoDrag = false;
     this.ms.edit = null;                                    // the performance runs to its end (riding / on foot)
     this.tc.detach();
@@ -497,6 +603,17 @@ export class AnimEditor {
     if (!this.isOpen) return;
     this.placeRef();
     this.ui.fovv.textContent = this.camera.fov.toFixed(1) + "°";
+    if (this.rearMode) {
+      const dur = this.data.duration = rearLength();
+      if (this.playing) { this.t += dt * this.speed; if (this.t > dur) { if (this.loop) this.t = 0; else { this.t = dur; this.playing = false; } } }
+      this.rearSimTo(this.t);
+      this.ui.play.textContent = this.playing ? "❚❚ pause" : "▶ play";
+      this.ui.time.textContent = `${this.t.toFixed(2)} / ${dur.toFixed(2)} s · f${Math.round(this.t * FPS)} · body ${(this.ctrl.rearPitch * 57.3).toFixed(0)}°`;
+      for (const p of REAR_PARAMS) { const r = this.rearEls[p.key]; if (document.activeElement !== r.slider) r.slider.value = HP[p.key]; r.val.textContent = (+HP[p.key]).toFixed(2); }
+      this.camera.setViewOffset(innerWidth, innerHeight, 0, this.el.offsetHeight / 2, innerWidth, innerHeight);
+      this.drawTimeline();
+      return;
+    }
     if (this.ride) {
       this.ctrl.idleT = -1e9;
       this.ui.play.textContent = this.playing ? "❚❚ hold" : "▶ play gait";
@@ -574,8 +691,14 @@ export class AnimEditor {
       g.strokeStyle = major ? "#4a5866" : "#2c3640"; g.beginPath(); g.moveTo(x, major ? 8 : 15); g.lineTo(x, H); g.stroke();
       if (major) { g.fillStyle = "#8fa0ad"; g.fillText(t.toFixed(1), x + 3, 8); }
     }
+    if (this.rearMode) {
+      // the rear's phases as bands: gather · rise · hold · come down · settle
+      const ph = [["gather", HP.rearPrep, "#3a4a5a"], ["rise", HP.rearRise, "#4b6b3a"], ["hold (up)", HP.rearHold, "#6b5a2a"], ["come down", HP.rearFall, "#5a3a4a"], ["settle", HP.rearSettle, "#333c46"]];
+      let t0 = 0;
+      for (const [nm, d, col] of ph) { const x0 = X(t0), x1 = X(t0 + d); g.fillStyle = col; g.fillRect(x0, RULER + 4, x1 - x0, 22); g.fillStyle = "#dfe6ec"; g.fillText(nm, x0 + 4, RULER + 15); t0 += d; }
+    }
     // rows
-    CHANNELS.forEach((c, i) => {
+    if (!this.rearMode) CHANNELS.forEach((c, i) => {
       const y = RULER + i * ROW;
       g.fillStyle = c.name === this.sel ? "rgba(59,110,168,0.18)" : i % 2 ? "rgba(255,255,255,0.02)" : "transparent";
       g.fillRect(0, y, W, ROW);

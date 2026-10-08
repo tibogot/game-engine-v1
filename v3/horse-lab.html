@@ -78,9 +78,10 @@
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
       import { Tack } from "./horse-lab/tack.js";
       import { AnimEditor } from "./horse-lab/animEditor.js";
+      import { PoseEditor } from "./horse-lab/poseEditor.js";
       import { addHat } from "./horse-lab/hat.js";
       import { checkClip, checkRiding, frameSheet } from "./horse-lab/riderCheck.js";
-      import { compareRefs, fitRefCamera, REFS, showPose } from "./horse-lab/refCompare.js";
+      import { compareRefs, compareRear, fitRefCamera, REFS, showPose } from "./horse-lab/refCompare.js";
 
       const $ = (id) => document.getElementById(id);
       const showErr = (e) => { $("err").textContent += `${e?.stack ?? e}\n`; console.error(e); };
@@ -134,8 +135,9 @@
       arena.init?.().catch(showErr);                          // the farm builds its sheep in the background
 
       // ── Horse ────────────────────────────────────────────────────────────────
-      // ?horse=armored: the armoured horse model put on this skeleton (horseBody.js) — real size, ~2.0 m to the ears
-      const ARMORED = new URLSearchParams(location.search).get("horse") === "armored";
+      // the armoured horse model put on this skeleton (horseBody.js) — real size, ~2.0 m to the ears.
+      // The DEFAULT; ?horse=lowpoly: the Quaternius horse as it comes (?horse=armored still works)
+      const ARMORED = new URLSearchParams(location.search).get("horse") !== "lowpoly";
       let armorScene = null;
       if (ARMORED) {
         const { initGlbLoaderRenderer, getSharedGltfLoader } = await import("../v2/core/foliage/glbLoader.js");
@@ -200,6 +202,7 @@
       const down = new Set();
       let shiftDownAt = -1, gearUp = false, gearDown = false, note = "", noteT = 0;
       addEventListener("keydown", (e) => {
+        if (poseEd.isOpen && poseEd.onKey(e)) return;          // the pose editor has the keyboard while open
         if (editor.isOpen && editor.onKey(e)) return;          // the editor has the keyboard while open
         down.add(e.code);
         if (e.key === "Shift" && shiftDownAt < 0) shiftDownAt = performance.now();
@@ -221,6 +224,7 @@
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
         if (k === "k") { editor.open(editor.clip); camDist = Math.min(camDist, 4.5); }   // the last thing edited (riding idle first)
+        if (k === "j") { editor.close(); poseEd.open(); camDist = Math.min(camDist, 6); }
       });
       addEventListener("keyup", (e) => {
         down.delete(e.code);
@@ -294,10 +298,10 @@
       const D = { timeScale: 1, skeleton: false, probes: false, camera: "follow", auditing: false };
       const CAM_MODES = { "left side": -Math.PI / 2, "right side": Math.PI / 2, front: Math.PI };
       const gui = new GUI({ title: "Horse lab" });
-      // which horse (reloads: the body is fitted to the skeleton at load) — same as ?horse=armored
+      // which horse (reloads: the body is fitted to the skeleton at load) — armoured by default, ?horse=lowpoly
       gui.add({ horse: ARMORED ? "armoured" : "low-poly" }, "horse", ["low-poly", "armoured"]).name("horse (reloads)").onChange((v) => {
         const u = new URL(location.href);
-        if (v === "armoured") u.searchParams.set("horse", "armored"); else u.searchParams.delete("horse");
+        if (v === "armoured") u.searchParams.delete("horse"); else u.searchParams.set("horse", "lowpoly");
         location.href = u.href;
       });
       arena.addGui?.(gui);
@@ -309,11 +313,13 @@
       body.add(HP, "rollFollow", 0, 1, 0.01).name("roll follows slope");
       body.add(HP, "lean", 0, 0.3, 0.01).name("lean into turns");
       body.add(HP, "stepMax", 0.2, 1.5, 0.01).name("max step up (m)");
-      body.add(HP, "tailSway", 0, 1, 0.01).name("tail: inertia");
-      body.add(HP, "tailStiff", 10, 150, 1).name("tail: spring");
-      body.add(HP, "tailDamp", 0.15, 1.5, 0.01).name("tail: damping");
-      body.add(HP, "tailJolt", 0, 2, 0.01).name("tail: stride jolt");
-      body.add(HP, "tailWave", 0, 2.5, 0.01).name("tail: wave at speed");
+      body.add(HP, "earsUp", 0, 1, 0.01).name("ears up while moving");
+      body.add(HP, "tailSway", 0, 1, 0.01).name("tail: rope (0 = keyed)");
+      body.add(HP, "tailPose", 0.002, 0.15, 0.001).name("tail: holds its shape");
+      body.add(HP, "tailDrag", 0, 0.15, 0.001).name("tail: air drag");
+      body.add(HP, "tailGravity", 0, 2, 0.01).name("tail: weight");
+      body.add(HP, "tailBendMax", 0.1, 1.2, 0.01).name("tail: max bend per joint (rad)");
+      body.add(HP, "tailWave", 0, 3, 0.01).name("tail: flutter at speed");
       const rF = gui.addFolder("Rider");
       rF.add(RP, "show").name("rider on the horse").onChange((v) => rider.setVisible(v));
       rF.add(RP, "seatSpring", 40, 600, 1).name("seat spring");
@@ -340,6 +346,8 @@
       ikF.add(HP, "jumpWindup", 0.1, 0.6, 0.01).name("jump: Space → take-off (s)");
       ikF.add(HP, "jumpLeadIn", 1, 2.5, 0.05).name("jump: run-up speed ×");
       ikF.add(HP, "rearAngle", 0.3, 1.3, 0.01).name("rear angle (rad)");
+      ikF.add(HP, "rearArch", 0, 1.5, 0.01).name("rear: neck arch (rad)");
+      ikF.add(HP, "rearHeadFlex", 0, 1.2, 0.01).name("rear: nose tuck (rad)");
       ikF.add(HP, "rearHold", 0.2, 3, 0.05).name("rear hold (s)");
       const gaits = gui.addFolder("Gaits");
       gaits.add(HP, "phaseMatch").name("phase-matched switch");
@@ -371,7 +379,10 @@
         set: (v) => { camYaw = v.yaw; camPitch = v.pitch; camDist = v.dist; camPan.fromArray(v.pan); camera.fov = v.fov; camera.updateProjectionMatrix(); lastMouse = performance.now() + 1e9; },
       };
       const editor = new AnimEditor({ renderer, scene, camera, rider, ctrl, D, camState });
-      gui.add({ open: () => editor.open(editor.clip) }, "open").name("🎬 animation editor (K)");
+      // the pose editor (J): click a joint, turn it, keys on a layer over the rear (anims/poses.json)
+      const poseEd = new PoseEditor({ renderer, scene, camera, rider, ctrl, D, camState });
+      gui.add({ open: () => { editor.close(); poseEd.open(); camDist = Math.min(camDist, 6); } }, "open").name("🦴 pose editor (J)");
+      gui.add({ open: () => { poseEd.close(); editor.open(editor.clip); } }, "open").name("🎬 animation editor (K)");
       const timer = new THREE.Timer();
       let msAvg = 16, hudT = 0;
       renderer.setAnimationLoop((now) => {
@@ -389,10 +400,14 @@
           const onHorse = rider.mode === "riding";
           // on foot the keys move the robot; the horse stands
           editor.update(rawDt);
-          const rdt = editor.ride ? rawDt * editor.rideRate() : dt;   // riding mode: the gait plays (or holds) under the rider
-          ctrl.update(rdt, editor.isOpen ? editor.horseInput() : onHorse ? inp : { fwd: 0, turn: 0, run: false });
+          poseEd.update(rawDt);                                 // its layer off; open: the rear stepped to its time
+          const rdt = poseEd.isOpen ? 0 : editor.ride || editor.rearMode ? rawDt * editor.rideRate() : dt;   // riding mode: the gait plays (or holds) under the rider; rear / pose editor: the editor steps the horse itself
+          ctrl.update(rdt, poseEd.isOpen ? { fwd: 0, turn: 0, run: false } : editor.isOpen ? editor.horseInput() : onHorse ? inp : { fwd: 0, turn: 0, run: false });
           editor.afterHorse();
+          poseEd.applyHorse();                                  // the pose layer on the horse (before the rider follows it)
           rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : inp });
+          poseEd.applyRider();
+          poseEd.afterFrame();
           arena.update?.(dt, { ctrl, rider });                    // the farm's herd
           editor.afterUpdate();
         }
@@ -470,7 +485,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

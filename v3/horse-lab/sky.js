@@ -11,6 +11,7 @@
 // view direction and it re-centres on the camera, so it is drawn at 1/10 scale.
 import * as THREE from "three";
 import { createSkyProSky, skyProSunFromTime } from "../render/skypro/skyproSky.js";
+const _kd = new THREE.Vector3(), _r = new THREE.Vector3(), _u = new THREE.Vector3(), _s = new THREE.Vector3();
 
 export const SKY = { timeOfDay: 15.5, coverage: 0.42, cirrus: 0.5, exposure: 0.55, autoExposure: true };
 
@@ -37,8 +38,16 @@ export function createLabSky({ renderer, camera, scene, sun, hemi }) {
     sun.color.setRGB(kc[0] / m, kc[1] / m, kc[2] / m, THREE.LinearSRGBColorSpace);
     sun.intensity = m;
     // the sun follows the camera target (its shadow box is ±24 m round it)
-    sun.position.copy(target).addScaledVector(L.keyDir, 60);
-    sun.target.position.copy(target);
+    // ...SNAPPED to the shadow map's texel grid (seen from the sun): following
+    // the camera target smoothly slid the map under the scene by fractions of
+    // a texel every frame, and every shadow edge crawled and shimmered while riding
+    const sc = sun.shadow.camera, texel = (sc.right - sc.left) / sun.shadow.mapSize.x;
+    const kd = _kd.set(L.keyDir.x, L.keyDir.y, L.keyDir.z).normalize();
+    const right = _r.set(0, 1, 0).cross(kd).normalize(), upL = _u.copy(kd).cross(right).normalize();
+    const a = Math.round(target.dot(right) / texel) * texel, b = Math.round(target.dot(upL) / texel) * texel, c = target.dot(kd);
+    const snapped = _s.copy(right).multiplyScalar(a).addScaledVector(upL, b).addScaledVector(kd, c);
+    sun.position.copy(snapped).addScaledVector(kd, 60);
+    sun.target.position.copy(snapped);
     hemi.intensity = 0;
     renderer.toneMappingExposure = SKY.exposure * sky.exposureFactor(dt);
     if (scene.fog) scene.fog.color.setRGB(L.horizon[0], L.horizon[1], L.horizon[2], THREE.LinearSRGBColorSpace);

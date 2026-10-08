@@ -30,6 +30,7 @@ const clamp = THREE.MathUtils.clamp;
 const lerpK = (rate, dt) => 1 - Math.exp(-rate * dt);
 
 export const RP = {
+  hillLean: 0.6,                  // rad the rider leans INTO a full hill (forward up, back down)
   seatSpring: 260,     // 1/s² — stiffness of the seat following the saddle
   seatDamp: 0.45,      // damping ratio (<1 = a little bounce)
   bounceMax: 0.07,     // m the seat may lag the saddle
@@ -283,14 +284,18 @@ function pushOut(p, caps, margin) {
   const ab = new V3(), d = new V3(), vt = new V3();
   for (const sg of caps) {
     ab.subVectors(sg.b, sg.a);
-    const t = d.subVectors(p, sg.a).dot(ab) / ab.lengthSq();
-    if (t < 0 || t > 1) continue;
+    // past either end the push FADES out (over 15 % of the segment) — a hard
+    // cut there made the hand jump 5 cm the moment the neck bobbed past it
+    const t0 = d.subVectors(p, sg.a).dot(ab) / ab.lengthSq();
+    const fade = t0 < 0 ? 1 - Math.min(1, -t0 / 0.15) : t0 > 1 ? 1 - Math.min(1, (t0 - 1) / 0.15) : 1;
+    if (fade <= 0) continue;
+    const t = Math.min(1, Math.max(0, t0));
     const c = sg.a.clone().addScaledVector(ab, t);
     d.subVectors(p, c);
     vt.crossVectors(ab, sg.lat).normalize();
     const rl = sg.ra[0] + (sg.rb[0] - sg.ra[0]) * t + margin, rv = sg.ra[1] + (sg.rb[1] - sg.ra[1]) * t + margin;
     const dl = d.dot(sg.lat), dv = d.dot(vt), e = (dl / rl) ** 2 + (dv / rv) ** 2;
-    if (e < 1 && e > 1e-9) { const sc = 1 / Math.sqrt(e) - 1; p.addScaledVector(sg.lat, dl * sc).addScaledVector(vt, dv * sc); }
+    if (e < 1 && e > 1e-9) { const sc = (1 / Math.sqrt(e) - 1) * fade * fade * (3 - 2 * fade); p.addScaledVector(sg.lat, dl * sc).addScaledVector(vt, dv * sc); }
   }
   return p;
 }
@@ -506,12 +511,14 @@ export class RiderController {
     const steer = clamp(hc.turnRate / Math.max(0.1, (hc.gaitName === "Gallop" ? 0.75 : 1.1)), -1, 1) * RP.steerHands;
     const lag = (this.seatY - anchor.y) * 2.5;
     const lean = P.lean - (hc.pitch - hc.rearPitch) * RP.upright - rel.x * RP.absorb - lag;
+    // into the hill: forward going up, back going down (he tipped with the saddle the other way)
+    const leanH = lean + (hc.rearT < 0 ? (hc.hillK ?? 0) * RP.hillLean : 0);
     const roll = -rel.z * RP.absorb - hc.roll * 0.4;
     const q = new THREE.Quaternion();
     const wUp = new V3(0, 1, 0);
-    rotateWorld(B.spine1, q.setFromAxisAngle(lft, lean * 0.5));
-    rotateWorld(B.spine2, q.setFromAxisAngle(lft, lean * 0.3));
-    rotateWorld(B.spine3, q.setFromAxisAngle(lft, lean * 0.2));
+    rotateWorld(B.spine1, q.setFromAxisAngle(lft, leanH * 0.5));
+    rotateWorld(B.spine2, q.setFromAxisAngle(lft, leanH * 0.3));
+    rotateWorld(B.spine3, q.setFromAxisAngle(lft, leanH * 0.2));
     // chest up: straighten the sitting clip's hunch (upper back + neck back, head level) — the reference sits tall
     rotateWorld(B.spine2, q.setFromAxisAngle(lft, -P.chest * 0.4));
     rotateWorld(B.spine3, q.setFromAxisAngle(lft, -P.chest * 0.6));
@@ -562,7 +569,8 @@ export class RiderController {
     if (!this.bitAvg) this.bitAvg = bitL.clone();
     this.bitAvg.lerp(bitL, lerpK(1.2, dt));
     const follow = bitL.clone().sub(this.bitAvg).multiplyScalar(RP.bitFollow);
-    follow.x = 0; follow.clampLength(0, 0.12);
+    follow.x = 0;
+    { const L = follow.length(); if (L > 1e-6) follow.multiplyScalar(0.12 * Math.tanh(L / 0.12) / L); }   // soft 12 cm limit (a hard clamp held the hands still, then let go)
     for (let i = 0; i < 2; i++) {
       const g = B.arms[i], hd = this.hands[i];
       const inside = steer * g.side > 0 ? Math.abs(steer) : 0;               // the hand on the turn's side
@@ -578,8 +586,11 @@ export class RiderController {
       // never a locked arm: the elbow stays bent and soaks up the neck's bob
       // (a straight arm reads as a push-up on the withers at the gallop)
       const sh = wpos(g.u), armLen = g.l.position.length() * g.u.getWorldScale(new V3()).x + g.tip.position.length() * g.l.getWorldScale(new V3()).x;
-      const toT = T.clone().sub(sh), maxR = armLen * 0.86;
-      if (toT.length() > maxR) T.copy(sh).addScaledVector(toT.normalize(), maxR);
+      // a SOFT limit: past 72 % of the arm the reach eases toward 90 % (never
+      // straight). A hard cut at 86 % froze the elbow at 119° for half of every
+      // gallop stride, then let it snap away — the elbow jitter
+      const toT = T.clone().sub(sh), d = toT.length(), k0 = armLen * 0.72, k1 = armLen * 0.9;
+      if (d > k0) T.copy(sh).addScaledVector(toT.normalize(), k0 + (k1 - k0) * Math.tanh((d - k0) / (k1 - k0)));
       const tuck = clamp((P.lean - 0.25) / 0.4, 0, 1);                           // leaning forward (canter, gallop): elbows in and back, not winged out
       const pole = lft.clone().multiplyScalar(g.side * (RP.elbowsOut * (1 - tuck * 0.55) + inside * 0.3)).addScaledVector(up, -0.15 - tuck * 0.35 + inside * 0.5).addScaledVector(fwd, -0.2 - tuck * 0.5).normalize();   // elbows out to the sides (the reference)   // elbows out; the turning arm's elbow lifts
       solveTwoBone(g.u, g.l, wpos(g.tip), T, pole, new V3(), true);
@@ -590,7 +601,7 @@ export class RiderController {
     const look = clamp(Math.atan2(Math.sin(lookYaw - hc.yaw), Math.cos(lookYaw - hc.yaw)), -1.1, 1.1) * RP.headFollow + steer * 0.25;
     rotateWorld(B.neck, q.setFromAxisAngle(wUp, look * 0.4));
     rotateWorld(B.head, q.setFromAxisAngle(wUp, look * 0.6));
-    rotateWorld(B.head, q.setFromAxisAngle(lft, -lean * 0.35));            // eyes stay up when leaning
+    rotateWorld(B.head, q.setFromAxisAngle(lft, -leanH * 0.35));            // eyes stay up when leaning
 
     // Fists
     for (const hd of this.hands) for (const c of hd.curl) c.b.quaternion.multiply(q.setFromAxisAngle(c.axis, c.angle * RP.grip));

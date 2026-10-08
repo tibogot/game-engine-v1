@@ -183,6 +183,64 @@ export function fitBodyToRig({ model, clips, bodyScene, rigid = () => false }) {
   const grid = makeGrid(warpedOld, 0.06);
   const inv = new THREE.Matrix4().copy(model.matrixWorld).invert();
   const nrmM = new THREE.Matrix3();
+  // A vertex keeps a bone only if that bone is about as near as its nearest bone.
+  // The smoothing (and the old mesh) bled the SPINE ("Back") down the back of
+  // each hind thigh to hock height, 55 cm below it: rearing, the spine tipped up
+  // and dragged that skin into a 5× stretched spike between the hind legs.
+  // Each bone is a segment (its joint → the mean of its children's joints);
+  // weights fade out from 15 to 25 cm farther than the nearest segment, then
+  // renormalise — the croup (spine and hip both near) keeps both.
+  const segs = bones.map((b) => {
+    const a = b.getWorldPosition(new V3()), kids = b.children.filter((k) => k.isBone);
+    const e = kids.length ? kids.reduce((s, k) => s.add(k.getWorldPosition(new V3())), new V3()).divideScalar(kids.length) : a.clone();
+    return [a, e];
+  });
+  const segD = (p, [a, e]) => { const ab = e.clone().sub(a), L2 = ab.lengthSq(); const t = L2 > 1e-9 ? Math.max(0, Math.min(1, p.clone().sub(a).dot(ab) / L2)) : 0; return a.clone().addScaledVector(ab, t).distanceTo(p); };
+  // LEGS hinge at their joints. Weights copied from the old mesh's big triangles
+  // blended each joint over ~20 cm (hock: cannon → gaskin from 36 to 56 cm
+  // up; the original horse: 6 cm) and the hind leg bent like a rubber hose.
+  // Below the thigh / forearm, the share a vertex has on its leg's chain is
+  // given again by WHERE it lies along that chain: the segment it is beside
+  // owns it, with a ±HP_SKIN.joint blend at each joint.
+  const byName = (n) => bones.findIndex((b) => b.name === n);
+  const legChains = [];
+  for (const s of ["L", "R"]) {
+    legChains.push([byName(`BackUpperLeg${s}`), byName(`BackLowerLeg${s}`), byName(`IKBackLeg${s}`), byName(`FFB${s}`)]);       // stifle · hock · fetlock · toe
+    legChains.push([byName(`FrontUpperLeg${s}`), byName(`FrontLowerLeg${s}`), byName(`IKFrontLeg${s}`), byName(`FF${s}`)]);    // elbow · knee · fetlock · toe
+  }
+  const chainPts = legChains.filter((ch) => ch.every((i) => i >= 0)).map((ch) => ({ ch, P: ch.map((i) => bones[i].getWorldPosition(new V3())) }));
+  const sharpLegs = (W, p) => {
+    for (const { ch, P } of chainPts) {
+      let mass = 0;
+      for (const b of ch) mass += W.get(b) ?? 0;
+      if (mass < 0.5) continue;                               // not this leg (or the thigh / body above it)
+      // nearest point on the chain: segment j (bone ch[j]) and distance along it
+      let best = null;
+      for (let j = 0; j < 3; j++) {
+        const a = P[j], e = P[j + 1], ab = e.clone().sub(a), L = ab.length();
+        const t = Math.max(0, Math.min(1, p.clone().sub(a).dot(ab) / (L * L)));
+        const d = a.clone().addScaledVector(ab, t).distanceTo(p);
+        if (!best || d < best.d) best = { d, j, s: t * L, L };
+      }
+      const J = HP_SKIN.joint, w = new Map();
+      const { j, s, L } = best;
+      if (s < J && j > 0) { const u = 0.5 + 0.5 * (s / J); w.set(ch[j], u); w.set(ch[j - 1], 1 - u); }            // near the joint above
+      else if (L - s < J && j < 2) { const u = 0.5 + 0.5 * ((L - s) / J); w.set(ch[j], u); w.set(ch[j + 1], 1 - u); }   // near the joint below
+      else w.set(ch[j], 1);
+      if (j === 0 && s < J) w.set(ch[0], 1);                   // the top of the chain: as it was blended into the thigh (left below)
+      for (const b of ch) W.delete(b);
+      for (const [b, x] of w) W.set(b, (W.get(b) ?? 0) + x * mass);
+      return;
+    }
+  };
+  const gateWeights = (W, p) => {
+    if (W.size < 2) return;
+    const d = new Map([...W.keys()].map((b) => [b, segD(p, segs[b])]));
+    const dmin = Math.min(...d.values());
+    let s = 0;
+    for (const [b, w] of W) { const k = 1 - Math.max(0, Math.min(1, (d.get(b) - dmin - 0.15) / 0.1)); const w2 = w * k * k * (3 - 2 * k); W.set(b, w2); s += w2; }
+    if (s > 1e-6) for (const [b, w] of W) W.set(b, w / s);
+  };
   const meshes = parts.map((m, pi) => {
     const pts = partPts[pi], n = pts.length;
     const g = new THREE.BufferGeometry();
@@ -216,7 +274,13 @@ export function fitBodyToRig({ model, clips, bodyScene, rigid = () => false }) {
       for (let i = 0; i < n; i++) { si[i * 4] = b; sw[i * 4] = 1; }
     } else {
       const W0 = pts.map((pt) => new Map(weightsAt(pt)));
-      const Ws = smoothWeights(W0, pts, m.geometry.index, 20);   // soft joints (~10 cm: the source triangles), one weight per welded vertex
+      // the LEGS barely smoothed: 20 passes spread each joint over ~15 cm of skin
+      // and the hock / knee bent like a rubber hose; 2 passes keep a joint a joint
+      const legBone = new Set(bones.map((b, i) => (/^(Front(Upper|Lower)Leg|Back(Upper|Lower)Leg|IK|FF)/.test(b.name) ? i : -1)).filter((i) => i >= 0));
+      const top = (Wi) => [...Wi.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+      const Ws = smoothWeights(W0, pts, m.geometry.index, 20, (i) => (legBone.has(top(W0[i])) ? HP_SKIN.legPasses : 20));   // soft joints (~10 cm: the source triangles), one weight per welded vertex
+      for (let i = 0; i < n; i++) gateWeights(Ws[i], pts[i]);
+      for (let i = 0; i < n; i++) sharpLegs(Ws[i], pts[i]);
       for (let i = 0; i < n; i++) {
         const top = [...Ws[i].entries()].sort((a, b) => b[1] - a[1]).slice(0, 4), s = top.reduce((a, [, w]) => a + w, 0) || 1;
         top.forEach(([b, w], k) => { si[i * 4 + k] = b; sw[i * 4 + k] = w / s; });
@@ -350,6 +414,8 @@ function layTailBones({ bones, clips, curve }) {
     b.updateMatrixWorld(true);
     delta.set(b.name, b.position.clone().sub(old));
   });
+  // the tail's end, in the last bone's space: the tip point of the tail rope (horse.js tailSway)
+  chain.at(-1).userData.tipLocal = chain.at(-1).worldToLocal(curve.getPointAt(1).clone());
   for (const clip of Object.values(clips)) for (const tr of clip.tracks) {
     const [name, prop] = tr.name.split(".");
     if (prop !== "position" || !delta.has(name)) continue;
@@ -478,7 +544,9 @@ export function calmTail(clips, bones) {
 // are WELDED first, so both sides of a seam get one weight (no cracks at the
 // fetlocks). Then `iters` rounds of: each vertex = half its own, half its
 // neighbours' mean.
-function smoothWeights(W, pts, index, iters) {
+export const HP_SKIN = { joint: +(globalThis.location ? new URLSearchParams(location.search).get("legjoint") ?? 0.035 : 0.035), legPasses: +(globalThis.location ? new URLSearchParams(location.search).get("legpasses") ?? 20 : 20) };   // smoothing passes on the leg skin; ?legpasses= to compare (2 vs 20 measured: no visible difference — the curve look is the pose, not the skin)
+
+function smoothWeights(W, pts, index, iters, capOf = null) {
   const n = pts.length, key = new Map(), canon = new Int32Array(n);
   for (let i = 0; i < n; i++) {
     const p = pts[i], k = `${Math.round(p.x * 2e4)},${Math.round(p.y * 2e4)},${Math.round(p.z * 2e4)}`;
@@ -493,8 +561,12 @@ function smoothWeights(W, pts, index, iters) {
   }
   let cw = Array.from({ length: m }, () => new Map());
   for (let i = 0; i < n; i++) for (const [b, w] of W[i]) cw[canon[i]].set(b, Math.max(cw[canon[i]].get(b) ?? 0, w));   // welded: one weight
+  // how many passes each welded vertex takes (the fewest of its copies)
+  const cap = new Int32Array(m).fill(iters);
+  if (capOf) for (let i = 0; i < n; i++) cap[canon[i]] = Math.min(cap[canon[i]], capOf(i));
   for (let it = 0; it < iters; it++) {
     const next = cw.map((own, v) => {
+      if (it >= cap[v]) return own;
       const out = new Map();
       for (const [b, w] of own) out.set(b, w * 0.5);
       const list = nb[v];
