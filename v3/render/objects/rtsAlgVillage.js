@@ -855,6 +855,391 @@ function buildRomanRuin2({ seed = 1980, groundAt = FLAT } = {}) {
   return geo;
 }
 
+// ── ROMAN SITES (2026-10-08, you: "those Roman stones and towers are the most beautiful things we
+// have — reuse them, variants in other places; don't change the ones we have") ─────────────────
+// The temple's own pieces (romanKit: the worn ashlar block, the fluted drum, the Doric capital, the
+// same stone with its grey replacements) put together into the other things the Aurès is strewn
+// with, each SEEDED — no two alike. The temple (buildRomanRuin2) keeps its own copy of the helpers,
+// untouched: its look is the reference.
+//   buildRomanColumn      a column still standing on its stylobate, a neighbour fallen in the grass
+//   buildRomanColonnade   a street portico (Timgad's decumanus): a row at broken heights, a run
+//                         still carrying its architrave, the back wall low
+//   buildRomanBlockField  a Roman road's paving, heaved and half gone; drums, blocks, a milestone
+//   buildRomanArch        Trajan's arch at Timgad: three bays, engaged columns, the attic broken
+//   buildRomanOilPress    an olive press: two tall pierced uprights, the round press bed, the basin
+
+/** The temple's pieces, on a parts list (local units, before finish()'s scale). */
+function romanKit(parts, R, seed, groundAt) {
+  const J = 0.03, STONE = MAT.ashlar;
+  const stone = () => (R() < 0.9 ? STONE : MAT.limestone);
+  let nb = 0;
+  // `chip`: the corners' bevel (null: the block's own, a corner in four bitten deep).
+  const block = (w, h, d, x, y, z, ry = 0, tone = 0.12 + R() * 0.3, rot = null, chip = null) =>
+    parts.push({ geo: ashlarBlock(seed * 1000 + nb++, w - J, h - J, d - J, { chip }), pos: [x, y + h / 2, z], rot: rot ?? [0, ry, 0], mat: stone(), tone });
+  /** A block lying in the ground, sunk a third, tilted, any turn. */
+  const sunk = (x, z, s = 1) => {
+    const h = (0.5 + R() * 0.3) * s;
+    block((0.8 + R() * 0.8) * s, h, (0.6 + R() * 0.4) * s, x, groundAt(x, z) - h * 0.35, z, 0, 0.1 + R() * 0.25, [(R() - 0.5) * 0.4, R() * 3, (R() - 0.5) * 0.4]);
+  };
+  const rubble = (x, z, n, spread, hgt) => {
+    for (let k = 0; k < n; k++) {
+      const a = R() * Math.PI * 2, rr = Math.sqrt(R()) * spread, px = x + Math.cos(a) * rr, pz = z + Math.sin(a) * rr;
+      const s = 0.35 + R() * 0.45, up = hgt * (1 - rr / spread) * R();
+      parts.push({ geo: fieldStone(Math.floor(R() * 1e6), s * (1 + R() * 0.6), s * 0.75, s), pos: [px, groundAt(px, pz) + up, pz], rot: [R() * 0.6, R() * 3, R() * 0.6], mat: stone(), tone: 0.08 + R() * 0.28 });
+    }
+  };
+  /** A column's square plinth and round base at y; returns their top. */
+  const columnBase = (x, y, z) => {
+    block(1.2, 0.26, 1.2, x, y, z, R() * 0.1, 0.2 + R() * 0.2);
+    parts.push({ geo: new THREE.CylinderGeometry(0.44, 0.5, 0.22, 24), pos: [x, y + 0.26 + 0.11, z], mat: STONE, tone: 0.3 });
+    return y + 0.48;
+  };
+  /** A column of fluted drums on its base at y, `want` tall (whole drums); returns its top. */
+  const column = (x, y, z, want, turn = R() * 3) => {
+    let top = columnBase(x, y, z);
+    const n = Math.round(want / 1.04);
+    for (let d = 0; d < n; d++) {
+      const h = 1.04, wr = (0.41 - d * 0.008) * (0.96 + R() * 0.05);
+      parts.push({ geo: flutedDrum(wr, wr - 0.008, h - J, { open: d < n - 1 }), pos: [x + (R() - 0.5) * 0.03, top + h / 2, z + (R() - 0.5) * 0.03], rot: [0, (R() - 0.5) * 0.06 + turn, 0], mat: STONE, tone: 0.18 + R() * 0.24 });
+      top += h;
+    }
+    return top;
+  };
+  /** The Doric capital (a flared cushion and the abacus slab) on y; upside down when `flip`. Returns its top. */
+  const capital = (x, y, z, flip = false) => {
+    const s = flip ? -1 : 1;
+    const echinus = new THREE.CylinderGeometry(0.62, 0.4, 0.28, 24);
+    if (flip) echinus.rotateX(Math.PI);
+    parts.push({ geo: echinus, pos: [x, y + s * 0.14, z], mat: STONE, tone: 0.3 });
+    parts.push({ geo: ashlarBlock(seed * 1000 + nb++, 1.36, 0.3, 1.36), pos: [x, y + s * (0.28 + 0.15 + J), z], rot: [0, (R() - 0.5) * 0.06, 0], mat: STONE, tone: 0.26 + R() * 0.1 });
+    return y + s * (0.58 + J);
+  };
+  /** A column fallen in the grass: `n` drums in a line from (x, z) along `yaw`, half sunk. */
+  const fallen = (x, z, yaw, n) => {
+    const dx = Math.cos(yaw), dz = -Math.sin(yaw);
+    for (let k = 0; k < n; k++) {
+      const px = x + dx * k * 1.12 + (R() - 0.5) * 0.25, pz = z + dz * k * 1.12 + (R() - 0.5) * 0.25;
+      parts.push({ geo: flutedDrum(0.4, 0.4, 1.0), pos: [px, groundAt(px, pz) + 0.26, pz], rot: [(R() - 0.5) * 0.2, yaw + (R() - 0.5) * 0.25, Math.PI / 2], mat: STONE, tone: 0.16 + R() * 0.2 });
+    }
+    return [x + dx * n * 1.12, z + dz * n * 1.12];
+  };
+  return { J, STONE, block, sunk, rubble, columnBase, column, capital, fallen };
+}
+
+/** The lone column: a stylobate, one column whole or broken, a neighbour's stump, one fallen. */
+export function buildRomanColumn({ seed = 2101, groundAt = FLAT } = {}) {
+  const R = rng(seed), parts = [], K = romanKit(parts, R, seed, groundAt);
+  const { top, low } = groundSpan(groundAt, 0, 0, 3.4, 3.4);
+  const base = low - 0.3, sy = top + 0.4;
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) K.block(1.7, sy - base, 1.7, sx * 0.85, base, sz * 0.85, (R() - 0.5) * 0.03, 0.06 + R() * 0.2);
+  // Whole with its capital (half of them), whole carrying a piece of architrave, or broken.
+  const kind = R();
+  let height = K.column(0, sy, 0, kind < 0.75 ? 5.2 : [3.1, 4.2][Math.floor(R() * 2)]);
+  if (kind < 0.75) {
+    height = K.capital(0, height + K.J, 0);
+    if (kind >= 0.4) { K.block(2.4, 0.62, 1.0, 0.5 * (R() < 0.5 ? 1 : -1), height, 0, (R() - 0.5) * 0.2, 0.22); height += 0.62; }
+  }
+  // A neighbour's stump on its own footing (one in two), the fallen one the other way.
+  const a2 = R() * Math.PI * 2;
+  if (R() < 0.55) {
+    const x = Math.cos(a2) * 3.9, z = -Math.sin(a2) * 3.9, g = groundAt(x, z);   // clear of the stylobate's corner
+    K.block(1.5, 0.55, 1.5, x, g - 0.3, z, R() * 0.2, 0.1 + R() * 0.2);
+    K.column(x, g + 0.25, z, [0, 1.04, 2.1][Math.floor(R() * 3)]);
+  }
+  const yaw = a2 + Math.PI + (R() - 0.5) * 1.4;
+  const [ex, ez] = K.fallen(Math.cos(yaw) * 2.5, -Math.sin(yaw) * 2.5, yaw, 3 + Math.floor(R() * 3));
+  if (R() < 0.7) K.capital(ex + (R() - 0.5), groundAt(ex, ez) + 0.56, ez + (R() - 0.5), true);
+  for (let k = 0, n = 6 + Math.floor(R() * 4); k < n; k++) {
+    const a = R() * Math.PI * 2, r = 3.2 + R() * 3.4;
+    K.sunk(Math.cos(a) * r, Math.sin(a) * r);
+  }
+  K.rubble((R() < 0.5 ? -1 : 1) * 1.9, (R() < 0.5 ? -1 : 1) * 1.6, 7, 1.3, 0.5);
+  const geo = finish(parts, { hx: 6.5, hz: 6.5, height: height + 0.4 - top, ao: { strength: 0.6, radius: 2.5 } });
+  geo.userData.coverLines = scaledLines([{ hard: true, pts: [[-1.7, -1.7], [1.7, -1.7], [1.7, 1.7], [-1.7, 1.7], [-1.7, -1.7]] }]);
+  geo.userData.coverPerimeter = false;
+  geo.userData.navRects = [{ cx: 0, cz: 0, hx: 1.7 * KIT, hz: 1.7 * KIT }];
+  return geo;
+}
+
+/** The portico: a stylobate, a row of columns at broken heights, a run still under its architrave. */
+export function buildRomanColonnade({ seed = 2201, groundAt = FLAT, count = 6 } = {}) {
+  const R = rng(seed), parts = [], K = romanKit(parts, R, seed, groundAt);
+  const SP = 2.6, L = (count - 1) * SP + 2.4, D = 2.6;
+  const { top, low } = groundSpan(groundAt, 0, 0, L, D + 4);
+  const base = low - 0.3, sy = top + 0.35;
+  // The stylobate: two rows of long blocks, their joints offset.
+  for (const [z, off] of [[-D / 4, 0], [D / 4, 0.8]]) {
+    let x = -L / 2;
+    if (off) { K.block(off, sy - base, D / 2, x + off / 2, base, z, 0, 0.06 + R() * 0.2); x += off; }
+    while (x < L / 2 - 0.05) {
+      const x1 = Math.min(L / 2, x + 1.5 + R() * 1.1);
+      if (x1 - x > 0.3) K.block(x1 - x, sy - base, D / 2, (x + x1) / 2, base, z, (R() - 0.5) * 0.02, 0.06 + R() * 0.22);
+      x = x1;
+    }
+  }
+  // The heights: a run of two (or three) whole columns, the rest broken; -1 = the base gone too.
+  const run = R() < 0.35 && count > 3 ? 3 : 2, p = Math.floor(R() * (count - run + 1));
+  const hs = Array.from({ length: count }, (_, i) => (i >= p && i < p + run ? 5.2 : [-1, 0, 1.04, 1.04, 2.1, 3.1, 4.2][Math.floor(R() * 7)]));
+  const xs = hs.map((_, i) => -L / 2 + 1.2 + i * SP);
+  let capTop = sy;
+  hs.forEach((h, i) => {
+    if (h < 0) return;
+    const t = h ? K.column(xs[i], sy, 0, h) : K.columnBase(xs[i], sy, 0);
+    if (h >= 5.2) capTop = Math.max(capTop, K.capital(xs[i], t + K.J, 0));
+  });
+  // The architrave over the run: beams jointed over the columns' centres, the ends out to the capitals' edge.
+  for (let i = p; i < p + run - 1; i++) {
+    const x0 = xs[i] - (i === p ? 0.68 : 0), x1 = xs[i + 1] + (i === p + run - 2 ? 0.68 : 0);
+    K.block(x1 - x0, 0.62, 1.0, (x0 + x1) / 2, capTop, 0, (R() - 0.5) * 0.015, 0.2 + R() * 0.08);
+  }
+  // The portico's back wall: a few courses along part of its length, stepped down where it fell.
+  const wz = D / 2 + 1.7, wl = L * (0.45 + R() * 0.4), w0 = R() < 0.5 ? -L / 2 : L / 2 - wl;
+  for (let row = 0; row < 3; row++) {
+    let x = w0 + (row % 2) * 0.6;
+    while (x < w0 + wl - 0.05) {
+      // High at the portico's end, falling away towards the open one.
+      const x1 = Math.min(w0 + wl, x + 1.2 + R() * 0.9), f = (x - w0) / wl;
+      const stand = (w0 < 0 ? 3 - f * 2.6 : 0.4 + f * 2.6) + (R() - 0.5);
+      if (row < stand && x1 - x > 0.3) { const g = groundAt((x + x1) / 2, wz); K.block(x1 - x, 0.7, 0.8, (x + x1) / 2, g - 0.25 + row * 0.7, wz); }
+      x = x1;
+    }
+  }
+  // What fell: a column forward into the street, its capital, an architrave block, the paving.
+  const fi = hs.findIndex((h) => h >= 0 && h < 2.2);
+  if (fi >= 0) {
+    const yaw = Math.PI / 2 + (R() - 0.5) * 0.6, [ex, ez] = K.fallen(xs[fi] + (R() - 0.5) * 0.4, -D / 2 - 1.0, yaw, 3 + Math.floor(R() * 2));
+    K.capital(ex + (R() - 0.5) * 0.8, groundAt(ex, ez) + 0.56, ez - 0.4, true);
+  }
+  { const x = xs[Math.min(count - 1, p + run)] ?? 0, z = -D / 2 - 1.4; K.block(2.6, 0.6, 0.95, x, groundAt(x, z) - 0.14, z, 0, 0.2, [0.1, (R() - 0.5) * 0.9, -0.08]); }
+  for (let k = 0; k < 9; k++) {
+    const x = (R() - 0.5) * L, z = -D / 2 - 0.8 - R() * 3.2;
+    K.block(1.3 + R() * 0.5, 0.26, 1.0 + R() * 0.4, x, groundAt(x, z) - 0.12, z, 0, 0.14 + R() * 0.2, [(R() - 0.5) * 0.05, (R() - 0.5) * 0.25, (R() - 0.5) * 0.05], 0.015);   // (clear of the ground band)
+  }
+  for (let k = 0; k < 8; k++) K.sunk((R() - 0.5) * (L + 5), (R() < 0.5 ? -1 : 1) * (D / 2 + 2.6 + R() * 2.4));
+  K.rubble(xs[p + run - 1] + 1.6, D / 2 + 0.6, 8, 1.4, 0.6);
+  const geo = finish(parts, { hx: L / 2 + 2.5, hz: 5.5, height: capTop + 0.8 - top, ao: { strength: 0.6, radius: 2.5 } });
+  geo.userData.coverLines = scaledLines([
+    { hard: true, pts: [[-L / 2, -D / 2], [L / 2, -D / 2], [L / 2, D / 2], [-L / 2, D / 2], [-L / 2, -D / 2]] },
+    { hard: true, pts: [[w0, wz], [w0 + wl, wz]] },
+  ]);
+  geo.userData.coverPerimeter = false;
+  geo.userData.navRects = [{ cx: 0, cz: 0, hx: (L / 2) * KIT, hz: (D / 2) * KIT }];
+  return geo;
+}
+
+/** A Roman road's paving, heaved and half gone, the curbs broken; stumps, drums, a milestone. */
+export function buildRomanBlockField({ seed = 2301, groundAt = FLAT } = {}) {
+  const R = rng(seed), parts = [], K = romanKit(parts, R, seed, groundAt);
+  const L = 16, W = 4.4, yaw = (R() - 0.5) * 0.5, c = Math.cos(yaw), s = Math.sin(yaw);
+  const at = (u, v) => [u * c + v * s, -u * s + v * c];       // along / across the road → local
+  // The paving: rows of big slabs, thinning towards the ends (robbed for the mechtas' walls).
+  for (let u = -L / 2; u < L / 2;) {
+    const lu = 1.0 + R() * 0.6;
+    for (let v = -W / 2; v < W / 2 - 0.1;) {
+      const lv = Math.min(W / 2 - v, 0.9 + R() * 0.7);
+      if (R() < 0.7 - (Math.abs(u) / L) * 0.8) {
+        const [x, z] = at(u + lu / 2, v + lv / 2);
+        // Low, dusty (darker), heaved a little; its top >= ~0.1 m above the ground everywhere — the
+        // ground band (rtsGroundBandTest: a flat face < 6 cm up flickers against the terrain).
+        K.block(lu, 0.28, lv, x, groundAt(x, z) - 0.14, z, 0, 0.0 + R() * 0.14, [(R() - 0.5) * 0.05, yaw + (R() - 0.5) * 0.1, (R() - 0.5) * 0.05], 0.015);
+      }
+      v += lv;
+    }
+    u += lu;
+  }
+  // The curbs, one in three gone.
+  for (const v of [-W / 2 - 0.25, W / 2 + 0.25]) {
+    for (let u = -L / 2; u < L / 2 - 0.3; u += 1.45) {
+      if (R() < 0.35) continue;
+      const [x, z] = at(u + 0.7, v);
+      K.block(1.4, 0.5, 0.5, x, groundAt(x, z) - 0.22, z, 0, 0.1 + R() * 0.2, [(R() - 0.5) * 0.12, yaw + (R() - 0.5) * 0.1, (R() - 0.5) * 0.12]);
+    }
+  }
+  // A portico once along one side: its stumps (a base, a drum or two).
+  const side = R() < 0.5 ? -1 : 1, stumps = [];
+  for (let u = -L / 2 + 2 + R() * 1.5; u < L / 2 - 1.5; u += 3.2 + R() * 0.8) {
+    if (R() < 0.25) continue;
+    const [x, z] = at(u, side * (W / 2 + 1.9)), g = groundAt(x, z);
+    K.column(x, g - 0.15, z, [0, 1.04, 1.04, 2.1][Math.floor(R() * 4)]);
+    stumps.push([x, z]);
+  }
+  // Drums fallen in pairs and threes, a capital, an architrave block.
+  for (let k = 0; k < 3; k++) {
+    const [x, z] = at((R() - 0.5) * L, -side * (W / 2 + 1.2 + R() * 2.5) * (R() < 0.3 ? -1 : 1));
+    K.fallen(x, z, R() * Math.PI * 2, 1 + Math.floor(R() * 3));
+  }
+  { const [x, z] = at((R() - 0.5) * L * 0.6, side * (W / 2 + 3.4)); K.capital(x, groundAt(x, z) + 0.56, z, true); }
+  { const [x, z] = at((R() - 0.5) * L * 0.6, -side * (W / 2 + 2)); K.block(2.6, 0.6, 0.95, x, groundAt(x, z) - 0.15, z, 0, 0.2, [0.08, R() * 3, -0.06]); }
+  // The milestone, leaning by the road on its block.
+  {
+    const [x, z] = at((R() - 0.5) * L * 0.7, -side * (W / 2 + 1.1)), g = groundAt(x, z);
+    K.block(0.95, 0.5, 0.95, x, g - 0.3, z, R(), 0.15);
+    parts.push({ geo: faceted(new THREE.CylinderGeometry(0.29, 0.33, 1.9, 18), { boxUV: true }), pos: [x, g + 0.2 + 0.93, z], rot: [(R() - 0.5) * 0.16, R() * 3, (R() - 0.5) * 0.16], mat: K.STONE, tone: 0.3 + R() * 0.15 });
+  }
+  for (let k = 0; k < 11; k++) { const [x, z] = at((R() - 0.5) * (L + 4), (R() < 0.5 ? -1 : 1) * (W / 2 + 0.8 + R() * 4)); K.sunk(x, z, 0.8 + R() * 0.4); }
+  K.rubble(...at(L / 2 - 2 * R(), side * (W / 2 + 1.0)), 7, 1.3, 0.4);
+  const geo = finish(parts, { hx: L / 2 + 2, hz: L / 2 + 2, height: 3.6, ao: { strength: 0.55, radius: 2.2 } });
+  // Low cover along the stumps' line; the road and its blocks walked over.
+  if (stumps.length > 1) geo.userData.coverLines = scaledLines([{ hard: true, pts: stumps }]);
+  geo.userData.coverPerimeter = false;
+  geo.userData.navRects = [];
+  return geo;
+}
+
+/**
+ * Trajan's arch at Timgad: a central bay and two small ones in coursed ashlar, the arches ringed
+ * with voussoirs, four engaged columns a face on pedestals, the entablature, the attic broken at
+ * one end. The great landmark: its bays are the way through.
+ */
+export function buildRomanArch({ seed = 2401, groundAt = FLAT } = {}) {
+  const R = rng(seed), parts = [], K = romanKit(parts, R, seed, groundAt);
+  const W = 12.4, DP = 2.4, CH = 0.6, H = 8.4, RING = 0.6;
+  const { top, low } = groundSpan(groundAt, 0, 0, W, DP);
+  const base = low - 0.3, y0 = top;
+  // The bays: centre, half-width (= the arch's radius), springing height above the ground.
+  // (the small bays' ring thinner, in more stones: at the big ring's size they read jumbled)
+  const bays = [{ cx: 0, r: 1.7, spring: 4.2, ring: RING, n: 11 }, { cx: -3.95, r: 0.8, spring: 2.4, ring: 0.42, n: 9 }, { cx: 3.95, r: 0.8, spring: 2.4, ring: 0.42, n: 9 }];
+  /**
+   * How far a bay (with its ring) reaches either side of its centre in a course [a, b]: below the
+   * springing the opening's half-width; above it the ring's outside at the course's TOP — the
+   * course then runs in behind the ring (hidden by its proud face) and no sky shows over it.
+   */
+  const reach = (bay, a, b) => {
+    // … but never into the opening itself (its half-width at the course's bottom).
+    if (b <= bay.spring) return bay.r;
+    const sq = (v) => (v > 0 ? Math.sqrt(v) : 0);
+    return Math.max(sq((bay.r + bay.ring) ** 2 - (b - bay.spring) ** 2), sq(bay.r ** 2 - Math.max(0, a - bay.spring) ** 2));
+  };
+  // The footing: one course under everything, the bays' thresholds included.
+  for (let x = -W / 2; x < W / 2 - 0.05;) { const x1 = Math.min(W / 2, x + 1.4 + R() * 0.8); K.block(x1 - x, y0 - base + 0.1, DP + 0.3, (x + x1) / 2, base, 0, 0, 0.05 + R() * 0.15); x = x1; }
+  // The courses: solid between the bays' reaches; a row of blocks, the joints offset each course.
+  const yTop = y0 + 0.1 + Math.round((H - 0.1) / CH) * CH;
+  let row = 0;
+  for (let a = y0 + 0.1; a < yTop - 0.01; a += CH, row++) {
+    const b = a + CH;
+    const cut = bays.map((bay) => [bay.cx - reach(bay, a - y0 - 0.1, b - y0 - 0.1), bay.cx + reach(bay, a - y0 - 0.1, b - y0 - 0.1)]).filter(([l, r]) => r > l).sort((p, q) => p[0] - q[0]);
+    const solid = [];
+    let from = -W / 2;
+    for (const [l, r] of cut) { if (l > from) solid.push([from, l]); from = Math.max(from, r); }
+    if (from < W / 2) solid.push([from, W / 2]);
+    for (const [s0, s1] of solid) {
+      let x = s0 + ((row % 2) ? -0.5 : 0);
+      while (x < s1 - 0.05) {
+        const xa = Math.max(x, s0), xb = Math.min(s1, x + 1.2 + R() * 0.8);
+        if (xb - xa > 0.15) K.block(xb - xa, CH, DP, (xa + xb) / 2, a, 0, 0, 0.1 + R() * 0.25 + (row < 2 ? -0.05 : 0));
+        x = xb;
+      }
+    }
+  }
+  // The voussoirs round each bay; the keystone a little proud.
+  for (const bay of bays) {
+    const n = bay.n, rg = bay.ring, rm = bay.r + rg / 2, sp = y0 + 0.1 + bay.spring;
+    for (let k = 0; k < n; k++) {
+      const am = Math.PI * (k + 0.5) / n, key = k === (n - 1) / 2;
+      const w = rm * (Math.PI / n), cx = bay.cx + Math.cos(am) * rm, cy = sp + Math.sin(am) * rm;
+      // A light, even bevel: deep bitten corners made the ring read jumbled.
+      // Depths alternating by 2 cm: neighbours overlap at the intrados, and equal faces were coplanar.
+      K.block(w, rg * (key ? 1.15 : 1), DP + (key ? 0.2 : k % 2 ? 0.1 : 0.06), cx, cy - rg / 2, 0, 0, 0.16 + R() * 0.2, [0, 0, am - Math.PI / 2], 0.02);
+    }
+    // The impost: a moulded slab where the arch springs, either side.
+    // (4 cm proud into the opening and 3 cm above the course it sits in: flush, its faces lay in
+    // the opening's side and the course's top — coplanar)
+    for (const sx of [-1, 1]) K.block(0.5, 0.22, DP + 0.24, bay.cx + sx * (bay.r + 0.21), sp - 0.19, 0, 0, 0.24);
+  }
+  // The engaged columns, both faces: pedestals, drums half in the wall, capitals.
+  const ent = yTop - 1.1;                                    // the entablature's underside
+  const outer = R() < 0.5 ? -1 : 1;                          // the end whose attic fell
+  // Four drums a column; the pedestal takes up the rest, so each capital meets the entablature.
+  const colH = 4 * 1.04, pedH = ent - (y0 + 0.1) - 0.48 - colH - 0.58 - K.J;
+  for (const fz of [-1, 1]) {
+    for (const x of [-5.5, -2.43, 2.43, 5.5]) {
+      const z = fz * (DP / 2 + 0.12);
+      K.block(1.25, pedH, 1.0, x, y0 + 0.1, fz * (DP / 2 + 0.25), 0, 0.14 + R() * 0.2);
+      const broken = Math.sign(x) === outer && Math.abs(x) > 5 && fz === -1;
+      const t = K.column(x, y0 + 0.1 + pedH, z, broken ? 2.08 : colH, 0);
+      if (!broken) K.capital(x, t + K.J, z);
+    }
+  }
+  // The entablature: an architrave course and a cornice, proud of the faces over the capitals.
+  for (let x = -W / 2 - 0.2; x < W / 2 + 0.15;) { const x1 = Math.min(W / 2 + 0.2, x + 1.6 + R() * 0.8); K.block(x1 - x, 0.62, DP + 1.6, (x + x1) / 2, ent, 0, 0, 0.2 + R() * 0.12); x = x1; }
+  for (let x = -W / 2 - 0.35; x < W / 2 + 0.3;) { const x1 = Math.min(W / 2 + 0.35, x + 1.5 + R() * 0.7); if (!(Math.sign((x + x1) / 2) === outer && Math.abs((x + x1) / 2) > W / 2 - 1.6)) K.block(x1 - x, 0.32, DP + 2.1, (x + x1) / 2, ent + 0.62, 0, 0, 0.26 + R() * 0.1); x = x1; }
+  // The attic: two courses over the middle, stepped down towards the end that fell.
+  const at0 = ent + 0.94;
+  for (let r = 0; r < 3; r++) {
+    for (let x = -W / 2 + 0.6 + (r % 2) * 0.5; x < W / 2 - 0.65;) {
+      const x1 = Math.min(W / 2 - 0.6, x + 1.3 + R() * 0.8), m = (x + x1) / 2;
+      const keep = 3 - Math.max(0, (m * outer + 1.5) / 1.6) + (R() - 0.5) * 0.6;
+      if (r < keep) K.block(x1 - x, 0.66, DP - 0.2, m, at0 + r * 0.66, 0, 0, 0.16 + R() * 0.22);
+      x = x1;
+    }
+  }
+  // What fell from the attic and the cornice, at the broken end.
+  K.rubble(outer * (W / 2 + 0.6), -0.4, 14, 2.2, 1.0);
+  for (let k = 0; k < 4; k++) { const x = outer * (W / 2 + 1 + R() * 3), z = (R() - 0.5) * 6; K.sunk(x, z, 1.1); }
+  K.fallen(outer * (W / 2 + 1.4), -DP / 2 - 1.8, outer > 0 ? -0.3 : Math.PI + 0.3, 2);
+  for (let k = 0; k < 6; k++) { const a = R() * Math.PI * 2, r = 7 + R() * 3; K.sunk(Math.cos(a) * r, Math.sin(a) * r * 0.7); }
+  const geo = finish(parts, { hx: W / 2 + 3, hz: 6, height: at0 + 2 - top, ao: { strength: 0.55, radius: 2.5 } });
+  // The piers block; the three bays are the way through.
+  const piers = [[-W / 2, -3.95 - 0.8], [-3.95 + 0.8, -1.7], [1.7, 3.95 - 0.8], [3.95 + 0.8, W / 2]];
+  geo.userData.navRects = piers.map(([a, b]) => ({ cx: ((a + b) / 2) * KIT, cz: 0, hx: ((b - a) / 2 + 0.15) * KIT, hz: (DP / 2 + 0.35) * KIT }));
+  geo.userData.coverLines = scaledLines(piers.map(([a, b]) => ({ hard: true, pts: [[a, -DP / 2], [b, -DP / 2], [b, DP / 2], [a, DP / 2], [a, -DP / 2]] })));
+  geo.userData.coverPerimeter = false;
+  return geo;
+}
+
+/** The olive press: its room's footings, two tall pierced uprights, the round press bed, a basin, the weight. */
+export function buildRomanOilPress({ seed = 2501, groundAt = FLAT } = {}) {
+  const R = rng(seed), parts = [], K = romanKit(parts, R, seed, groundAt);
+  const RW = 7.6, RD = 5;
+  // The room's footings: one or two courses, gaps where the stones were taken.
+  for (const [ax, az, bx, bz] of [[-RW / 2, -RD / 2, RW / 2, -RD / 2], [RW / 2, -RD / 2, RW / 2, RD / 2], [RW / 2, RD / 2, -RW / 2, RD / 2], [-RW / 2, RD / 2, -RW / 2, -RD / 2]]) {
+    const len = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / len, uz = (bz - az) / len, ry = -Math.atan2(uz, ux);
+    // Each wall from half a thickness behind its corner to half a thickness short of the next: the
+    // corners covered once (two walls' blocks crossing there lay their tops in one plane).
+    for (let t = -0.3; t < len - 0.5;) {
+      const t1 = Math.min(len - 0.3, t + 0.9 + R() * 0.6), m = (t + t1) / 2, x = ax + ux * m, z = az + uz * m, g = groundAt(x, z);
+      if (R() > 0.2) {
+        K.block(t1 - t, 0.5, 0.6, x, g - 0.2, z, ry, 0.08 + R() * 0.2);
+        if (R() < 0.45) K.block((t1 - t) * 0.8, 0.45, 0.55, x, g + 0.3, z, ry + (R() - 0.5) * 0.1, 0.12 + R() * 0.2);
+      }
+      t = t1;
+    }
+  }
+  // The uprights (orthostats): monoliths with the window the press beam's end went through.
+  const ox = -RW / 2 + 1.1, gO = groundAt(ox, 0), brokenOne = R() < 0.35;
+  K.block(1.2, 0.35, 2.4, ox, gO - 0.15, 0, 0, 0.12);                // their sill
+  for (const sz of [-1, 1]) {
+    const z = sz * 0.62, y = gO + 0.2, st = (w, h, d, yy, tone) => parts.push({ geo: ashlarBlock(seed * 7 + sz * 13 + Math.floor(yy * 10), w, h, d), pos: [ox, yy + h / 2, z], rot: [0, (R() - 0.5) * 0.04, (R() - 0.5) * 0.03], mat: K.STONE, tone });
+    if (brokenOne && sz > 0) {
+      st(0.78, 1.3, 0.5, y, 0.18);
+      parts.push({ geo: ashlarBlock(seed * 7 + 99, 0.78, 1.6, 0.5), pos: [ox + 1.4, groundAt(ox + 1.4, z + 0.6) + 0.22, z + 0.6], rot: [Math.PI / 2 - 0.08, 0.4, 0], mat: K.STONE, tone: 0.2 });
+      continue;
+    }
+    st(0.78, 2.15, 0.5, y, 0.16 + R() * 0.08);
+    for (const sx of [-1, 1]) parts.push({ geo: ashlarBlock(seed * 7 + sz * 5 + sx, 0.2, 0.5, 0.5), pos: [ox + sx * 0.29, y + 2.15 + 0.25, z], mat: K.STONE, tone: 0.2 });
+    st(0.82, 0.5, 0.52, y + 2.65, 0.22 + R() * 0.08);
+  }
+  // The press bed: a round stone with its channel and spout; the basin the oil ran into.
+  const bx = ox + 2.4, gB = groundAt(bx, 0);
+  // (Lathe profiles run from the bottom up: three's faces then look outward.)
+  const bed = new THREE.LatheGeometry([[1.02, 0], [1.06, 0.04], [1.02, 0.35], [0.89, 0.36], [0.86, 0.29], [0.73, 0.29], [0.7, 0.36], [0, 0.36]].map(([x, y]) => new THREE.Vector2(x, y)), 22);
+  parts.push({ geo: faceted(bed, { boxUV: true }), pos: [bx, gB - 0.08, 0], mat: K.STONE, tone: 0.28 });
+  K.block(0.36, 0.2, 0.32, bx + 1.12, gB + 0.1, 0, 0, 0.26);
+  const basin = new THREE.LatheGeometry([[0.56, 0], [0.6, 0.02], [0.56, 0.52], [0.44, 0.52], [0.4, 0.12], [0, 0.1]].map(([x, y]) => new THREE.Vector2(x, y)), 16);
+  parts.push({ geo: faceted(basin, { boxUV: true }), pos: [bx + 1.75, groundAt(bx + 1.75, 0) - 0.25, 0], mat: K.STONE, tone: 0.22 });
+  // The counterweight, rolled over; a second bed broken in two by the wall.
+  parts.push({ geo: faceted(new THREE.CylinderGeometry(0.62, 0.66, 1.05, 12), { boxUV: true }), pos: [ox + 0.4, groundAt(ox + 0.4, -RD / 2 + 1.2) + 0.5, -RD / 2 + 1.2], rot: [Math.PI / 2, R() * 3, 0.05], mat: K.STONE, tone: 0.18 });
+  for (const sx of [-1, 1]) K.block(0.95, 0.32, 0.6, RW / 2 - 1.4 + sx * 0.5, groundAt(RW / 2 - 1.4, RD / 2 - 1.1) - 0.1, RD / 2 - 1.1, sx * 0.5 + (R() - 0.5) * 0.2, 0.2, [(R() - 0.5) * 0.2, sx * 0.5, (R() - 0.5) * 0.2]);
+  K.rubble(RW / 2 - 0.6, -RD / 2 + 0.6, 9, 1.4, 0.5);
+  K.rubble(-RW / 2 + 0.4, RD / 2 - 0.2, 6, 1.1, 0.4);
+  for (let k = 0; k < 6; k++) { const a = R() * Math.PI * 2, r = 5 + R() * 2.5; K.sunk(Math.cos(a) * r, Math.sin(a) * r * 0.8); }
+  const geo = finish(parts, { hx: RW / 2 + 2, hz: RD / 2 + 2, height: 3.6, ao: { strength: 0.6, radius: 2.2 } });
+  geo.userData.coverLines = scaledLines([{ hard: true, pts: [[-RW / 2, -RD / 2], [RW / 2, -RD / 2], [RW / 2, RD / 2], [-RW / 2, RD / 2], [-RW / 2, -RD / 2]] }]);
+  geo.userData.coverPerimeter = false;
+  geo.userData.navRects = [{ cx: ox * KIT, cz: 0, hx: 0.7 * KIT, hz: 1.3 * KIT }];
+  return geo;
+}
+
 /**
  * BURNT FARM — a colon's farm the ALN burnt early in the war: the long
  * stuccoed house roofless, its walls standing to different heights with the

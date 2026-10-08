@@ -6,17 +6,44 @@
 //   right  APRÈS — the same builder at detail 2
 import { buildMechtaHouse } from "../../v3/render/objects/rtsMechta.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
-import { buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildSandstoneRock, sandstoneLook, sandstoneMaterial } from "./algSandstone.js";
 import { startVehicleLab } from "./vehicleLab.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
+
+// ?seed=: the new pieces' variant (the panel's "Variante suivante").
+const SEED = Number(new URLSearchParams(location.search).get("seed")) || 0;
+
+// THE ROMAN SITES (2026-10-08, you: "variants of that Roman ruin, it looks so nice — but don't
+// change it"): the temple as it is in the game on the LEFT, the new site on the RIGHT.
+const temple = () => buildRomanRuin({ seed: 1980, detail: 2 });
+const roman = (label, build, gap) => ({ label, gap, before: temple, after: () => build({ seed: build.seed0 + SEED }), tags: ["TEMPLE (LE JEU)", `NOUVEAU · variante ${SEED + 1}`], note: "le temple du jeu à gauche (référence, inchangé), le nouveau site à droite." });
+Object.assign(buildRomanColumn, { seed0: 2101 }); Object.assign(buildRomanColonnade, { seed0: 2201 }); Object.assign(buildRomanBlockField, { seed0: 2301 });
+Object.assign(buildRomanArch, { seed0: 2401 }); Object.assign(buildRomanOilPress, { seed0: 2501 });
+
+// THE SANDSTONE ROCKS (you, a CoH 3 screenshot): the game's outcrop on the LEFT, the new rock RIGHT.
+let _sand = null;
+const rock = (label, shape, gap) => ({
+  label, gap, before: () => buildRockOutcrop({ seed: 2000 }),
+  after: () => { const g = buildSandstoneRock(shape, 1 + SEED); g.userData.labMaterial = _sand ??= sandstoneMaterial(); return g; },
+  tags: ["ROCHER (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "l'affleurement du jeu à gauche, le nouveau rocher de grès à droite.",
+});
 
 const BUILDINGS = {
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
   poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
   parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },
   ruineRomaine: { build: (o) => buildRomanRuin({ ...o }), label: "Ruine romaine", gap: 15 },
+  colonne: roman("Colonne seule", buildRomanColumn, 17),
+  colonnade: roman("Colonnade", buildRomanColonnade, 26),
+  voie: roman("Voie romaine", buildRomanBlockField, 24),
+  arc: roman("Arc de Trajan", buildRomanArch, 24),
+  pressoir: roman("Pressoir à huile", buildRomanOilPress, 19),
+  rocheBanc: rock("Rocher : grand banc", "mesa", 16),
+  rocheBloc: rock("Rocher : bloc", "block", 10),
+  rocheDalle: rock("Rocher : dalle basse", "low", 10),
 };
 
 /**
@@ -45,5 +72,23 @@ export async function startBuildingLab(container) {
   panel.insertBefore(box, panel.querySelector("h2:nth-of-type(3)"));
   box.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setStone(b.dataset.stone); });
   setStone("aures");   // the candidate first
+  // Another seed of the new piece (the Roman sites, the rocks).
+  const key = new URLSearchParams(location.search).get("v");
+  if (BUILDINGS[key]?.after) {
+    const v = document.createElement("div");
+    v.innerHTML = `<h2>Variante</h2><div class="g"><button data-seed="-1">Précédente</button><button data-seed="1">Suivante</button></div>`;
+    panel.insertBefore(v, box);
+    // The rocks: the top in the sides' layered stone, or the cracked photo (you, 2026-10-08).
+    if (key.startsWith("roche")) {
+      const t = document.createElement("div");
+      t.innerHTML = `<h2>Dessus du rocher</h2><div class="g"><button data-top="1">Même pierre</button><button data-top="0">Craquelé</button></div>`;
+      panel.insertBefore(t, box);
+      t.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) sandstoneLook.topSame.value = Number(b.dataset.top); });
+    }
+    v.addEventListener("click", (e) => {
+      const b = e.target.closest("button");
+      if (b) location.search = `?v=${key}&seed=${Math.max(0, SEED + Number(b.dataset.seed))}`;
+    });
+  }
   return Object.assign(lab, { setStone });
 }

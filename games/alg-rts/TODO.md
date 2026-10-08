@@ -65,6 +65,19 @@ Keep this file current: tick things off here, add new asks here.
    gourbi; maps/aures.js), the income 12 → 9 a minute a point. After: > 90 m 18%, > 120 m 4%.
    NEXT: play it (the supply chain, the FLN's raids on 13 points, the income); maybe special points
    (a hilltop that sees further, a ruin to garrison); civilians and herds between them.
+   - [~] **ROMAN SITES + SANDSTONE ROCKS, IN THE BUILDINGS LAB** (2026-10-08, you: "variants of the
+     Roman ruin — don't change it"; a CoH 3 screenshot of big desert rocks). NOT ON THE MAP YET.
+     · Roman (rtsAlgVillage.js romanKit = the temple's own pieces; the temple untouched): lone
+       column ~3.1k tris, colonnade ~7k, Roman road ~4.6k, Trajan's arch ~15k, olive press ~2.9k;
+       seeded (lab: Variante). You: approved.
+     · Sandstone (algSandstone.js; proceduralRock.js gained undercut / strata / joints-as-planes /
+       topRelief, all off by default): banc / bloc / dalle, 6.5-7.5k tris, triplanar in the ROCK'S
+       space (world space slid on the turntable), the top the same layered stone (button: cracked).
+       You: "exactly the CoH image" — keep it the lab's default. Generation 1-1.7 s a shape: in the
+       game, a worker (rockGeometryWorker.js) or baked to a file.
+     · NEXT: an Aurès colour for the game beside the CoH one; the rocks' sand apron (the game's
+       splats; a lab preview); the small arches' stones; a fallen drum through a block on the road.
+       Then placing them on the map (landmarks + the empty stretches).
 9. [x] **A POINTER CURSOR ON EVERYTHING CLICKABLE** — DONE 2026-10-08 (ui/cursors.js HAND + CLICKABLE:
    buttons, menu inputs, tabs, tiles, groups, badges, alerts, objectives, briefing; locked buttons keep
    the arrow; the maps keep the reticle). Was: (you, 2026-10-07: "anything clickable should have a

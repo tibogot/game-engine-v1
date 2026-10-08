@@ -73,7 +73,9 @@ const glassMaterial = () => _glass ??= Object.assign(new THREE.MeshStandardNodeM
 /** A vehicle as the game draws it: the body, its decals, its running gear (a helicopter: its glass, its rotors). */
 function vehicleOf(geo, key) {
   const g = new THREE.Group();
-  const body = new THREE.Mesh(geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+  // `labMaterial`: a piece with its own material (the buildings lab's rocks), not the kit's atlas.
+  const own0 = geo.userData.labMaterial ?? null;
+  const body = new THREE.Mesh(geo, own0 ?? rtsObjectMaterialTinted(FR_PAINT_TINT));
   body.castShadow = body.receiveShadow = true;
   const st = stencilMesh(geo.userData.stencil);
   if (st) body.add(st);
@@ -103,6 +105,7 @@ function vehicleOf(geo, key) {
   // differ only in a constant — the first one compiled was drawn for all (measured in the lab).
   const own = (m, k) => { m.customProgramCacheKey = () => k; return m; };
   const paint = (tint) => {
+    if (own0) return;
     body.material = own(rtsObjectMaterialTinted(tint), `vlab-body:${tint.join(",")}`);
     if (gear) gear.material = own(rtsRunningGearMaterial(tint, `${key}:${tint.join(",")}`), `vlab-gear:${tint.join(",")}`);
   };
@@ -201,8 +204,9 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   // BEFORE / AFTER, 5 m apart either side of the middle, each on a turntable.
   const vKey = catalog[new URLSearchParams(location.search).get("v")] ? new URLSearchParams(location.search).get("v") : def;
   const V = catalog[vKey];
-  const before = vehicleOf(V.build(), vKey);
-  const afterGeo = V.build({ detail: 2, crew: false });
+  // An entry may give its own pair (`before` / `after`, the buildings lab's new pieces beside a reference).
+  const before = vehicleOf(V.before ? V.before() : V.build(), vKey);
+  const afterGeo = V.after ? V.after() : V.build({ detail: 2, crew: false });
   const after = vehicleOf(afterGeo, vKey);
   const GAP = typeof gap === "function" ? gap(vKey) : gap;
   before.group.position.x = -GAP;
@@ -219,7 +223,8 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     scene.add(man);
   }
 
-  let spin = true, yaw = -0.6;
+  // The turntable starts OFF (you, 2026-10-08: world-projected textures slid as it turned); "Rotation" turns it on.
+  let spin = false, yaw = -0.6;
   const setYaw = () => { before.group.rotation.y = yaw; after.group.rotation.y = yaw; };
   setYaw();
   function close() { controls.target.set(0, 1.2, 0); camera.position.set(4, 5.5, 13); controls.update(); }
@@ -311,7 +316,7 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
       font: 700 11px "Segoe UI", sans-serif; letter-spacing: .12em; color: #f1e6c4; background: rgba(22,17,12,.85); border: 1px solid #6b5636; pointer-events: none; }
   </style>
   <div id="vlab"><h1>${title}</h1>
-    <p style="margin-top:0">${V.label} — <b>avant</b> (gauche, le jeu) / <b>après</b> (droite, détail 2).</p>
+    <p style="margin-top:0">${V.label} — ${V.note ?? "<b>avant</b> (gauche, le jeu) / <b>après</b> (droite, détail 2)."}</p>
     <h2>${kind}</h2><div class="g">${Object.entries(catalog).map(([k, v]) => `<button data-veh="${k}">${v.label}</button>`).join("")}</div>
     <h2>Vues</h2><div class="g"><button data-v="close">Gros plan</button><button data-v="play">Zoom de jeu</button><button data-v="play2">Zoom proche</button><button data-v="spin">Rotation</button></div>
     <h2>Peinture (après)</h2><div class="g">${Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}">${p.label}</button>`).join("")}</div>
@@ -320,7 +325,7 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     <h2>Coût</h2><table><tr><td>Avant</td><td>${before.tris.toLocaleString()} tris</td></tr><tr><td>Après</td><td>${after.tris.toLocaleString()} tris</td></tr></table>
     <p>Le soleil, l'ombre et l'exposition du jeu ; un ciel de remplacement. Glisser pour tourner, molette pour zoomer.</p></div>`;
   document.body.appendChild(el);
-  const tags = ["AVANT", "APRÈS"].map((t) => { const d = document.createElement("div"); d.className = "vlab-tag"; d.textContent = t; document.body.appendChild(d); return d; });
+  const tags = (V.tags ?? ["AVANT", "APRÈS"]).map((t) => { const d = document.createElement("div"); d.className = "vlab-tag"; d.textContent = t; document.body.appendChild(d); return d; });
   el.addEventListener("click", (e) => {
     const b = e.target.closest("button");
     if (!b) return;

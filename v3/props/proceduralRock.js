@@ -93,6 +93,27 @@ export const DEFAULT_ROCK_PARAMS = {
   squareness: 2,
   /** Chip edge softness, fraction of mean size. */
   edgeSoft: 0.012,
+  /**
+   * SANDSTONE (alg-rts, 2026-10-08 — CoH's desert slabs): all 0 = off, every older preset unchanged.
+   * Each pulls the SIDES in (directions near the horizon; the top and the base are left alone):
+   *   undercut        the foot eaten back by wind and sand, fraction of radius …
+   *   undercutHeight  … fading out by this fraction of the height
+   *   strata          bedding bands up the height (count) …
+   *   strataDepth     … each band set back its own random amount up to this, fraction of radius
+   *   joints          vertical cracks: planes right THROUGH the rock (count), so a crack runs up a
+   *                   side and on across the top (you, 2026-10-08: "the tops too flat — cracks") …
+   *   jointDepth      … this deep (fraction of radius), opening towards the top …
+   *   jointWidth      … this wide, metres
+   *   topRelief       low swells and dips over the top, fraction of radius (0 = the cut's flat)
+   */
+  undercut: 0,
+  undercutHeight: 0.3,
+  strata: 0,
+  strataDepth: 0.04,
+  joints: 0,
+  jointDepth: 0.08,
+  jointWidth: 0.35,
+  topRelief: 0,
   /** Sphere tessellation (IcosahedronGeometry detail). */
   detail: 40,
   /** Triangle target after simplification. */
@@ -236,6 +257,20 @@ export function createRockGeometry(params = {}) {
   if (p.topCut > 0) planes.push(0, 1, 0, p.sizeY * (1 - p.topCut));
   const P = new Float64Array(planes);
   const pc = P.length / 4;
+  // Sandstone: each band's set-back, the joints' azimuths and depths (drawn only when asked for,
+  // so the older presets' random streams are untouched).
+  const bands = p.strata > 0 ? Array.from({ length: Math.ceil(p.strata) + 2 }, () => rng()) : null;
+  // A joint: a vertical plane (its normal's angle, its offset from the middle along it, its depth).
+  const joints = p.joints > 0 ? Array.from({ length: Math.floor(p.joints) }, () => {
+    const a = rng() * Math.PI * 2, nx = Math.cos(a), nz = Math.sin(a);
+    return { nx, nz, o: (rng() - 0.5) * 1.3 * (p.sizeX * Math.abs(nx) + p.sizeZ * Math.abs(nz)), d: 0.5 + rng() * 0.5 };
+  }) : null;
+  // The top's swells: three crossed waves, 3-9 m long.
+  const swells = p.topRelief > 0 ? Array.from({ length: 3 }, () => {
+    const a = rng() * Math.PI, k = (Math.PI * 2) / (3 + rng() * 6);
+    return { kx: Math.cos(a) * k, kz: Math.sin(a) * k, ph: rng() * 6.283 };
+  }) : null;
+  const sandstone = p.undercut > 0 || bands || joints || swells;
 
   // dense indexed sphere
   let geo = new THREE.IcosahedronGeometry(1, Math.max(4, Math.floor(p.detail)));
@@ -261,7 +296,35 @@ export function createRockGeometry(params = {}) {
     }
     let s = 0;
     for (const t of ts) s += Math.exp(-(t - m) / k);
-    const r = m - k * Math.log(s);
+    let r = m - k * Math.log(s);
+    if (sandstone) {
+      // t: height 0 (foot) … 1 (top); sw: how much a side this direction is.
+      const t = Math.min(1, Math.max(0, (y * r + p.sizeY) / (2 * p.sizeY))), sw = 1 - y * y;
+      let f = 1;
+      if (p.undercut > 0) { const u = Math.max(0, 1 - t / p.undercutHeight); f -= p.undercut * u * u * sw; }
+      if (bands) {
+        // Each band set back its own amount; the step between two bands eased over a sixth of a band.
+        const b = t * p.strata, kb = Math.min(bands.length - 1, Math.floor(b) + 1), fr = b - Math.floor(b);
+        const e = Math.min(1, fr / 0.16), ease = e * e * (3 - 2 * e);
+        f -= p.strataDepth * (bands[kb - 1] + (bands[kb] - bands[kb - 1]) * ease) * sw;
+      }
+      const qx = x * r, qz = z * r;
+      if (joints) {
+        for (const j of joints) {
+          const dist = qx * j.nx + qz * j.nz - j.o;
+          const g = Math.exp(-((dist / p.jointWidth) ** 2));
+          // Up the sides and across the top; shallow at the foot.
+          f -= p.jointDepth * j.d * g * (0.25 + 0.75 * t) * (sw + (1 - sw) * 0.22);   // across the top: a crack, not a trench
+        }
+      }
+      if (swells && y > 0.2) {
+        let w = 0;
+        for (const s of swells) w += Math.sin(qx * s.kx + qz * s.kz + s.ph);
+        const upw = Math.min(1, (y - 0.2) / 0.5);
+        f -= p.topRelief * (0.5 + w / 6) * upw * upw;
+      }
+      r *= f;
+    }
     pos.setXYZ(i, x * r, y * r, z * r);
   }
   geo.computeVertexNormals();
