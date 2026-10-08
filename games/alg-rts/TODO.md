@@ -1407,7 +1407,16 @@ GPU ms and the per-pass timer are NOT reliable for A/Bs here.
       herds 2.6, effects warm-up 7.2). A regression since 10-04 (suspects: the 1,736 contact-shade
       splats in the ground bake, 3 more soldier clips baked into the crowd, the village weathering
       + roof life, the static batch, the 7 points) or other conditions (heat, the browser on the
-      second screen, DevTools attached) — NOT YET A/B'd. NEXT: A/B against the 10-04 state, then
+      second screen, DevTools attached). A/B'd 2026-10-08 (the 10-04 commit 41cf269 in a worktree on
+      :5174 vs today on :5173, boots interleaved, no other WebGPU tab): OLD 26.1 / 27.2 / 26.9 / 23.8 /
+      27.3 / 26.9 s (~26); TODAY 38.9 / 30.0 / 42.3 / 31.0 / 43.0 / 39.3 s (~37, and far more
+      variable). The REGRESSION IS REAL (~+11 s). Per system (the boot's own "in N ms" logs, old →
+      today): STONES 0.4 → 0.5-4.1 s (since "stones: one material" 2ae2d9e: 5 photos decoded +
+      getImageData into a 20 MB array on the main thread, its time swings with what else loads);
+      the shader WARM-UP 3.1 → 5.2 s (313 → 405 drawables: the systems added since); splats 0.7 →
+      1.8 s; herds 3.0 → 3.8-4.5 s; hens 0.5 → 1.1 s; level file 3.6 → 5.0 s (11.4 → 12.7 MB);
+      GPU-only arrays 296 → 354 MB. The contact shade itself: ~0.3 s. NEXT: fix those, biggest first
+      (stones → a prebuilt array file or a worker; the warm-up's 92 new drawables; splats), then
       the ideas: show the briefing earlier and finish the warm-up / herds BEHIND it (the felt wait
       −7-10 s); a persistent shader cache (Electron); the herd templates cached or in a worker;
       the level file's download vs decode; the ground bake lazy (on-screen first).
