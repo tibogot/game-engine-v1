@@ -8,7 +8,7 @@
 //             it ADDS light (a thin flame has little opacity and all its glow)
 //   motion    both frames slid along M.rg before they are mixed (litSmoke's blend)
 import * as THREE from "three";
-import { Fn, float, floor, fract, mix, select, smoothstep, texture, uniform, uv, vec2, vec3, vec4, max } from "three/tsl";
+import { Fn, float, floor, fract, mix, positionWorld, saturate, select, smoothstep, texture, uniform, uv, vec2, vec3, vec4, max } from "three/tsl";
 
 /** Atlas bytes (frame 0 top-left) → textures (row 0 = v 0, so the rows go bottom-up). */
 export function bookTextures({ W, H, A, B, M }) {
@@ -48,7 +48,15 @@ export function createBookCard() {
   const uEmax = uniform(1);
   const uMvScale = uniform(24);
   const uMotion = uniform(1);
-  const uFade = uniform(1);           // the whole card (a one-shot fades out at its end)
+  const uFade = uniform(1);
+  // AXIAL cards (a flamethrower's stream): how far along the card the stream has reached
+  // from the nozzle (0..1 of the rest of the card), and where the nozzle sits on it (u).
+  const uReach = uniform(1), uAnchorU = uniform(0);
+  // The left edge's fade: 12% as litSmoke, none on an axial card (its nozzle sits at the edge).
+  const uFadeL = uniform(0.12);
+  // INTO THE GROUND softly (m; 0 = off): a card tilted to face the camera dips under the
+  // ground, and the depth test cut it there in a hard straight line (the flamethrower's belly).
+  const uGroundY = uniform(0), uGroundFade = uniform(0.6);           // the whole card (a one-shot fades out at its end)
   const uFrames = uniform(64);
   const uCols = uniform(8), uRows = uniform(8), uInset = uniform(0.5 / 192);
 
@@ -89,7 +97,11 @@ export function createBookCard() {
     // The card's outer 12% fades, as litSmoke's: smoke that leaves the bake box (a
     // plume past the top, wind past the side) ends softly, not on a square edge.
     const e = uv().min(float(1).sub(uv()));
-    const border = smoothstep(0, 0.12, e.x).mul(smoothstep(0, 0.12, e.y));
+    const reachEdge = uAnchorU.add(uReach.mul(float(1).sub(uAnchorU)));
+    let border = smoothstep(0, uFadeL.max(1e-4), uv().x).mul(smoothstep(0, 0.12, float(1).sub(uv().x))).mul(smoothstep(0, 0.12, e.y))
+      .mul(float(1).sub(smoothstep(reachEdge.sub(0.04), reachEdge, uv().x)));
+    const ground = select(uGroundFade.greaterThan(0), saturate(positionWorld.y.sub(uGroundY).div(uGroundFade.max(1e-3))), float(1));
+    border = border.mul(ground);
     const a = A.w.mul(border).mul(uFade);
     return vec4(smoke.mul(a).add(glow.mul(border).mul(uFade)), a);
   })();
@@ -109,10 +121,10 @@ export function createBookCard() {
   mesh.renderOrder = 10;
   mesh.visible = false;
 
-  const _r = new THREE.Vector3(), _u = new THREE.Vector3(), _b = new THREE.Vector3();
+  const _r = new THREE.Vector3(), _u = new THREE.Vector3(), _b = new THREE.Vector3(), _m = new THREE.Matrix4(), _y = new THREE.Vector3();
   return {
     mesh,
-    u: { uFireK, uMotion, uTint, uSun, uAmb, uFade },
+    u: { uFireK, uMotion, uTint, uSun, uAmb, uFade, uReach, uGroundY, uGroundFade },
     /** Show a book: textures { a, b, mv } and its meta. */
     setBook(tex, meta) {
       tA.value = tex.a; tB.value = tex.b; tM.value = tex.mv;
@@ -125,6 +137,7 @@ export function createBookCard() {
     /** Per frame: where the book is (0..1, loops wrap), the camera, and the scene's light. */
     update({ age, camera, center, size, sunDir, sunColor, ambient }) {
       uAge.value = age;
+      uFadeL.value = 0.12; uReach.value = 1; uAnchorU.value = 0;
       mesh.position.copy(center);
       mesh.quaternion.copy(camera.quaternion);
       mesh.scale.setScalar(size);
@@ -132,6 +145,40 @@ export function createBookCard() {
       uSunL.value.set(sunDir.dot(_r), sunDir.dot(_u), sunDir.dot(_b)).normalize();
       uSun.value.copy(sunColor);
       uAmb.value.copy(ambient);
+    },
+    /**
+     * Per frame, an AXIAL card: its X runs along `axis` (the stream: nozzle → aim) and it turns
+     * about that line to face the camera, its Y toward the sky; the book's nozzle point
+     * (`meta.anchor`, card uv) sits on `nozzle`. `reach` 0..1 grows the stream out of the
+     * nozzle. Returns how side-on the stream is to the camera (1 side-on … 0 end-on): a flat
+     * card collapses to a line end-on, so the caller fades it (and draws something else).
+     */
+    updateAxial({ age, camera, nozzle, axis, anchor, size, reach = 1, sunDir, sunColor, ambient }) {
+      uAge.value = age;
+      uReach.value = reach;
+      uFadeL.value = 0;
+      uAnchorU.value = anchor[0];
+      _r.copy(axis).normalize();
+      _b.setFromMatrixPosition(camera.matrixWorld).sub(nozzle);
+      const dist = _b.length();
+      _b.addScaledVector(_r, -_b.dot(_r));                  // toward the camera, square to the stream
+      const side = dist > 1e-6 ? _b.length() / dist : 0;
+      if (_b.lengthSq() < 1e-8) _b.set(0, 1, 0).addScaledVector(_r, -_r.y);
+      _b.normalize();
+      _u.crossVectors(_b, _r);
+      // Keep the book's up (its smoke rises) toward the sky: mirror the card if Y points down.
+      const flip = _u.y < 0 ? -1 : 1;
+      _u.multiplyScalar(flip);
+      // The rotation takes the right-handed frame (Y unflipped); the mirror is the scale.
+      mesh.quaternion.setFromRotationMatrix(_m.makeBasis(_r, _y.copy(_u).multiplyScalar(flip), _b));
+      mesh.scale.set(size, size * flip, size);
+      mesh.position.copy(nozzle)
+        .addScaledVector(_r, (0.5 - anchor[0]) * size)
+        .addScaledVector(_u, (0.5 - anchor[1]) * size);
+      uSunL.value.set(sunDir.dot(_r), sunDir.dot(_u), sunDir.dot(_b)).normalize();
+      uSun.value.copy(sunColor);
+      uAmb.value.copy(ambient);
+      return side;
     },
   };
 }

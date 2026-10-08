@@ -1,0 +1,43 @@
+{
+ "format": "firepro-sixway-1",
+ "cols": 8,
+ "rows": 8,
+ "cell": 192,
+ "frames": 64,
+ "mvScale": 24.198,
+ "emissionMax": 6.1095,
+ "fill": 0.995,
+ "size": 11,
+ "pitch": 40,
+ "duration": 2.6666666666666665,
+ "loop": true,
+ "anchor": [
+  0.0455,
+  0.4199
+ ],
+ "tint": [
+  0.0296,
+  0.0296,
+  0.0296
+ ],
+ "seconds": 25.5,
+ "preset": "flamethrower",
+ "bake": {
+  "center": [
+   1.5,
+   2.2,
+   0
+  ],
+  "size": 11,
+  "pitch": 40,
+  "start": 3,
+  "duration": 2.6666666666666665,
+  "loop": true,
+  "blend": 16,
+  "anchor": [
+   -3.5,
+   1.05,
+   0
+  ]
+ }
+}

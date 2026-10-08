@@ -78,14 +78,21 @@ async function buildSim(preset, parent, { bake = false } = {}) {
       : { lightingDivisor: 4, filter: "quadratic", raySteps: 128, halfResolution: true },
   });
   parent.add(sim);
-  // `until` (s): an emitter that only runs at the start (a shell's jet of earth).
+  // `from` / `until` (s): an emitter that runs only for a while (a shell's jet of earth; a
+  // flamethrower's fuel, which starts after its air jet).
   const timed = [];
   for (const f of preset.fires) {
     const e = sim.addEmitter({ shape: { type: "sphere", radius: f.radius }, emission: f.emission, velocity: f.velocity });
     e.object.position.set(...f.at);
-    if (f.until != null) timed.push({ e, until: f.until });
+    if (f.until != null || f.from != null) timed.push({ e, from: f.from ?? 0, until: f.until ?? Infinity });
   }
-  for (const force of preset.forces) sim.addForce(force);
+  // `fadeUntil` (s): a force whose strength falls to nothing by then (the flamethrower START's
+  // extra turbulence tears the burning head, then dies out so the book ends as the loop begins).
+  const fading = [];
+  for (const { fadeUntil, ...force } of preset.forces) {
+    const h = sim.addForce(force);
+    if (fadeUntil) fading.push({ h, strength: force.strength, fadeUntil });
+  }
   // `delay` (s): a blast that goes off later — napalm splashes landing one after another.
   const blasts = preset.blasts.map((b) => {
     const { at, delay = 0, ...opts } = b;
@@ -95,7 +102,8 @@ async function buildSim(preset, parent, { bake = false } = {}) {
   });
   /** Before each step at sim time `t`: start or stop the timed emitters, fire the blasts due. */
   const timeEmitters = (t) => {
-    for (const { e, until } of timed) (t < until ? e.start() : e.stop());
+    for (const f of fading) f.h.configure({ strength: f.strength * Math.max(0, 1 - t / f.fadeUntil) });
+    for (const { e, from, until } of timed) (t >= from && t < until ? e.start() : e.stop());
     for (const b of blasts) if (!b.fired && t + 1e-6 >= b.delay) { b.ex.trigger(); b.fired = true; }
   };
   /** From the top: every blast fires again (at the next step from t = 0). */

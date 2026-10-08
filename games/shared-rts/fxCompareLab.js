@@ -88,6 +88,7 @@ const ui = {
   scene: "blast", paused: false,                  // "blast" (shell + wreck) | "napalm"
   napEvery: 22,
   fpImpactCard: 22, fpGroundCard: 13, fpColumnCard: 24,
+  aim: "across", ftCard: 22, ftDown: 2, ftBurst: 3, ftBurnOn: true, ftBurnCard: 8, ftIgnite: 0.8, ftSpeed: 1.4,
 };
 const fakeApp = {
   scene, renderer, camera, getWorldHeight: () => 0,
@@ -151,7 +152,7 @@ function blast() {
 function rtsView() {
   const t = (ui.dist - RTS.distMin) / (RTS.distMax - RTS.distMin);
   const pitch = THREE.MathUtils.degToRad(RTS.pitchNear + (RTS.pitchFar - RTS.pitchNear) * t);
-  controls.target.set(0, 1.5, ui.scene === "napalm" ? 0 : (BLAST_Z + WRECK_Z) / 2);
+  controls.target.set(ui.scene === "flame" ? FT_AT.x + 11 : 0, 1.5, ui.scene === "blast" ? (BLAST_Z + WRECK_Z) / 2 : 0);
   camera.position.copy(controls.target).add(new THREE.Vector3(0, Math.sin(pitch), Math.cos(pitch)).multiplyScalar(ui.dist));
   controls.update();
 }
@@ -231,6 +232,91 @@ function clearNapalm() {
   if (namNapalm) { namNapalm.strike.clear(); namNapalm.smoke.clear(); namNapalm.fireballs.clear(); namNapalm.flames.clear(); }
   fpNap.at = -1e9;
 }
+// ── FLAMETHROWER ───────────────────────────────────────────────────────────────
+// The game has none yet: Fire Pro only. One AXIAL card (bookCard.updateAxial): laid along
+// the aim from the nozzle, turned about that line to face the camera; it grows out of the
+// nozzle when the trigger goes (`reach`) and burns out after. Where the stream ends, the
+// ground burns (the napalm ground book, billboarded). End-on to the camera a flat card is a
+// line, so it fades there — the burning end is what you see of a stream coming at you.
+const FT_AT = new THREE.Vector3(-8, 0, 0);
+const FT_REACH = 0.62;      // the stream's end, as a share of the card from its nozzle (fp_flamethrower)
+// THREE BOOKS from one sim (v3/fire-bake-lab: Flamethrower start / Flamethrower / … stop):
+// the trigger pulled plays START (the burning head shooting out, the rope unrolling behind it),
+// which crossfades into the LOOP; let go plays STOP (the stream breaks off at the nozzle and
+// burns out). The first cut wiped the finished loop out of the gun — "looks fake" (you, 2026-10-09).
+const ft = { firing: false, since: -1e9, stop: -1e9, stopAt: 0, release: false, next: 1, burnAt: -1e9, end: new THREE.Vector3() };
+let ftBook = null, ftCard = null, ftBurn = null, ftStartBook = null, ftStopBook = null, ftStart = null, ftStop = null;
+try {
+  [ftBook, ftStartBook, ftStopBook] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`/textures/fx/firepro/fp_${k}`)));
+  const card = (b) => { const c = createBookCard(); c.setBook(b.tex, b.meta); c.mesh.visible = false; scene.add(c.mesh); return c; };
+  ftCard = card(ftBook); ftStart = card(ftStartBook); ftStop = card(ftStopBook);
+  if (napBooks) { ftBurn = createBookCard(); ftBurn.setBook(napBooks.ground.tex, napBooks.ground.meta); ftBurn.mesh.visible = false; scene.add(ftBurn.mesh); }
+} catch { status.textContent += "flamethrower books not baked yet (v3/fire-bake-lab: Flamethrower, … start, … stop)\n"; }
+// A soldier stand-in: body, head, and the gun he fires from (turned to the aim each frame).
+const soldier = new THREE.Group();
+{
+  const olive = new THREE.MeshStandardNodeMaterial({ color: 0x4b4a33, roughness: 0.9 });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.28, 1.0, 4, 10), olive); body.position.y = 0.85;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), olive); head.position.y = 1.62;
+  const gun = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.08, 0.08), new THREE.MeshStandardNodeMaterial({ color: 0x1c1c1c, roughness: 0.6 }));
+  gun.position.set(0.4, 1.05, 0.18);
+  const tanks = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.6, 10), olive); tanks.position.set(-0.32, 1.1, 0);
+  soldier.add(body, head, gun, tanks);
+  soldier.position.copy(FT_AT);
+  soldier.visible = false;
+  scene.add(soldier);
+}
+const _aim = new THREE.Vector3(), _noz = new THREE.Vector3();
+/** The aim, from the button: across the screen, 45° away, toward / away from the camera, or sweeping. */
+function aimDir(out) {
+  const yaw = { across: 0, angle: 0.785, toward: -1.42, away: 1.42 }[ui.aim] ?? 0.9 * Math.sin(clock * 0.7);
+  const down = THREE.MathUtils.degToRad(ui.ftDown);
+  return out.set(Math.cos(yaw) * Math.cos(down), -Math.sin(down), -Math.sin(yaw) * Math.cos(down)).normalize();
+}
+function ftTrigger(on, seconds = ui.ftBurst) {
+  if (on) { if (!ft.firing) { ft.firing = true; ft.since = clock; ft.release = false; } ft.stopAt = clock + seconds; }
+  else if (ft.firing) ft.release = true;   // let go — but not before the stream is out (below)
+}
+const startAge = () => (clock - ft.since) / ui.ftIgnite;      // 0..1: the ignition, played in ftIgnite s
+function ftFrame(sunCol, sky) {
+  const on = ui.scene === "flame";
+  soldier.visible = on;
+  if (!ftCard) return;
+  if (on && ui.auto && !ft.firing && clock >= ft.next) { ftTrigger(true); ft.next = clock + ui.ftBurst + 2.5; }
+  if (ft.firing && clock >= ft.stopAt) ft.release = true;
+  // The STOP book starts from a whole stream: a release during the ignition waits for it.
+  if (ft.firing && ft.release && startAge() >= 1) { ft.firing = false; ft.stop = clock; ft.burnAt = clock; }
+  aimDir(_aim);
+  soldier.rotation.y = Math.atan2(-_aim.z, _aim.x);
+  _noz.set(0.85, 1.05, 0.18).applyAxisAngle(THREE.Object3D.DEFAULT_UP, soldier.rotation.y).add(FT_AT);
+  const anchor = ftBook.meta.anchor ?? [0.05, 0.42];
+  const sa = startAge();
+  const so = (clock - ft.stop) * ui.ftSpeed / ftStopBook.meta.duration;   // 0..1 through the stop
+  // Weights: start → loop over the start's last 15%; loop → stop over the stop's first 6%.
+  const wStart = ft.firing ? 1 - ease(sa, 0.85, 1) : 0;
+  const wLoop = ft.firing ? ease(sa, 0.85, 1) : 1 - ease(so, 0, 0.06);
+  const wStop = ft.firing ? 0 : ease(so, 0, 0.03) * (1 - ease(so, 0.8, 1));
+  const draw = (c, book, w, age) => {
+    c.mesh.visible = on && ui.showFP && w > 0.002;
+    if (!c.mesh.visible) return;
+    c.u.uFireK.value = ui.fpFire;
+    c.u.uTint.value.fromArray(book.meta.tint ?? [0.19, 0.19, 0.19]);
+    const side = c.updateAxial({ age, camera, nozzle: _noz, axis: _aim, anchor, size: ui.ftCard, sunDir: _dir, sunColor: sunCol, ambient: sky });
+    c.u.uFade.value = w * ease(side, 0.18, 0.5);
+  };
+  draw(ftStart, ftStartBook, wStart, Math.min(sa, 1));
+  draw(ftCard, ftBook, wLoop, (clock * ui.ftSpeed) / ftBook.meta.duration);
+  draw(ftStop, ftStopBook, wStop, Math.min(so, 1));
+  // Where the stream comes down: it burns once the head has landed (most of the way through
+  // the ignition), follows the aim while firing, and keeps burning a while after.
+  if (ft.firing) ft.end.copy(_noz).addScaledVector(_aim, ui.ftCard * (FT_REACH - anchor[0])).setY(0);
+  if (ftBurn) {
+    const g = ft.firing ? ease(sa, 0.55, 0.95) : 1 - ease(clock - ft.burnAt, 3, 5);
+    ftBurn.mesh.visible = on && ui.showFP && ui.ftBurnOn && g > 0.002 && ft.since > -1e8;
+    if (ftBurn.mesh.visible) drawCard(ftBurn, napBooks.ground.meta, { age: clock / napBooks.ground.meta.duration, size: ui.ftBurnCard, x: ft.end.x, z: ft.end.z, fade: g, sunCol, sky });
+  }
+}
+
 function setScene(name) {
   ui.scene = name;
   fire.clear();
@@ -238,8 +324,12 @@ function setScene(name) {
   clearNapalm();
   fpNap.at = -1e9;
   placeWrecks();
+  ft.firing = false; ft.stop = -1e9; ft.since = -1e9; ft.burnAt = -1e9; ft.next = clock + 0.5;
   if (name === "napalm") { ui.dist = 85; nextNapalm = clock + 0.5; }
+  else if (name === "flame") { ui.dist = 30; }
   else { ui.dist = 52; nextAuto = clock + 0.5; }
+  // The flamethrower's head is the densest burning fuel: at x2 it was a white ball.
+  ui.fpFire = name === "flame" ? 1 : 2;
   rtsView();
   refreshPanel();
 }
@@ -255,7 +345,7 @@ async function runOnce(game, fp, seconds) {
   placeWrecks();
   await sleep(1500);                       // warm: programs built, the fires up
   gpuSamples = [];
-  if (ui.scene === "napalm") napalmRun(); else blast();
+  if (ui.scene === "napalm") napalmRun(); else if (ui.scene === "flame") ftTrigger(fp, seconds); else blast();
   await sleep(seconds * 1000);
   const s = gpuSamples; gpuSamples = null;
   s.sort((a, b) => a - b);
@@ -263,21 +353,21 @@ async function runOnce(game, fp, seconds) {
   return { mean, p95: s[Math.floor(s.length * 0.95)] ?? 0, n: s.length };
 }
 async function measureGpu() {
-  const auto = ui.auto, gap = ui.gap, nap = ui.scene === "napalm";
+  const auto = ui.auto, gap = ui.gap, nap = ui.scene === "napalm", flame = ui.scene === "flame";
   ui.auto = false;
   ui.gap = 0;                              // the measured side in the middle of the view, not at its edge
   status.textContent = `measuring… keep this window in front (≈ ${nap ? 90 : 40} s)`;
   await sleep((nap ? 20 : ui.every) * 1000);            // let the last blast clear
   const secs = nap ? 12 : 7;               // a napalm run: impact + the burn that follows
   const none = await runOnce(false, false, secs);
-  const game = await runOnce(true, false, secs);
-  await sleep(nap ? 20000 : 9000);                       // the game's dust lingers: clear it before Fire Pro
+  const game = flame ? null : await runOnce(true, false, secs);   // no flamethrower in the game yet
+  if (!flame) await sleep(nap ? 20000 : 9000);                       // the game's dust lingers: clear it before Fire Pro
   const fp = await runOnce(false, true, secs);
   ui.gap = gap; ui.showGame = ui.showFP = true; placeWrecks(); ui.auto = auto; refreshPanel();
   const f = (r) => `+${(r.mean - none.mean).toFixed(2)} ms avg, +${(r.p95 - none.p95).toFixed(2)} ms p95`;
-  status.textContent = `GPU (view ${ui.dist} m, ${secs} s from the ${nap ? "napalm run" : "blast, wrecks burning"})\n`
+  status.textContent = `GPU (view ${ui.dist} m, ${secs} s from the ${nap ? "napalm run" : flame ? "trigger, burning end on" : "blast, wrecks burning"})\n`
     + `nothing   ${none.mean.toFixed(2)} ms avg (${none.n} frames)\n`
-    + `GAME      ${f(game)}\nFIRE PRO  ${f(fp)}${nap ? "" : `  [${FP_BOOKS[ui.fpBook]}]`}`;
+    + `GAME      ${game ? f(game) : "— (no flamethrower in the game)"}\nFIRE PRO  ${f(fp)}${nap || flame ? "" : `  [${FP_BOOKS[ui.fpBook]}]`}`;
   return { none, game, fp };
 }
 
@@ -342,14 +432,15 @@ renderer.setAnimationLoop((now) => {
   }
 
   fpNapalmFrame(sunCol, sky);
+  ftFrame(sunCol, sky);
   renderer.render(scene, camera);
   renderer.resolveTimestampsAsync(THREE.TimestampQuery.RENDER);
   const gpu = renderer.info.render.timestamp;
   if (gpu > 0 && gpuSamples) gpuSamples.push(gpu);
-  const nap = ui.scene === "napalm";
+  const nap = ui.scene === "napalm", flame = ui.scene === "flame";
   [[nap ? -NAPALM.length / 2 - 6 : -ui.gap, nap ? napZ("game") : WRECK_Z + 4, tags[0], ui.showGame],
    [nap ? -NAPALM.length / 2 - 6 : ui.gap, nap ? napZ("fp") : WRECK_Z + 4, tags[1], ui.showFP]].forEach(([x, z, tag, on]) => {
-    tag.style.display = on ? "" : "none";
+    tag.style.display = on && !flame ? "" : "none";
     _p.set(x, 0, z).project(camera);
     tag.style.left = `${(_p.x * 0.5 + 0.5) * innerWidth}px`;
     tag.style.top = `${(-_p.y * 0.5 + 0.5) * innerHeight}px`;
@@ -362,7 +453,7 @@ renderer.setAnimationLoop((now) => {
 const ui_ = { sections: [], groups: [], checks: [] };
 function section(title, sceneOnly = null) {
   const box = document.createElement("div");
-  if (sceneOnly) box.dataset.scene = sceneOnly;
+  if (sceneOnly) box.dataset.scene = sceneOnly;   // one scene, or several separated by spaces
   const h = document.createElement("h3"); h.textContent = title;
   box.append(h);
   panel.append(box);
@@ -416,13 +507,14 @@ function setShow(game, fp) {
   if (ui.scene === "napalm") { clearNapalm(); napalmRun(); nextNapalm = clock + ui.napEvery; }
 }
 function fireNow() {
+  if (ui.scene === "flame") { ftTrigger(true); ft.next = clock + ui.ftBurst + 2.5; return; }
   if (ui.scene === "blast") { blast(); nextAuto = clock + ui.every; }
   else { napalmRun(); nextNapalm = clock + ui.napEvery; }
 }
 
 let s_ = section("Scene");
-buttons(s_, [["Shell & wreck", () => setScene("blast"), "blast"], ["Napalm", () => setScene("napalm"), "napalm"]], (k) => ui.scene === k);
-s_ = section("Show");
+buttons(s_, [["Shell & wreck", () => setScene("blast"), "blast"], ["Napalm", () => setScene("napalm"), "napalm"], ["Flamethrower", () => setScene("flame"), "flame"]], (k) => ui.scene === k);
+s_ = section("Show", "blast napalm");
 buttons(s_, [["Both", () => setShow(true, true), "both"], ["Game only", () => setShow(true, false), "game"], ["Fire Pro only", () => setShow(false, true), "fp"]],
   (k) => (k === "both" ? ui.showGame && ui.showFP : k === "game" ? ui.showGame && !ui.showFP : !ui.showGame && ui.showFP));
 
@@ -433,6 +525,8 @@ s_ = section("Play", "blast"); s_.querySelector("h3").remove();
 slider(s_, "every (s)", "every", 3, 15, 0.5);
 s_ = section("Play", "napalm"); s_.querySelector("h3").remove();
 slider(s_, "every (s)", "napEvery", 8, 40, 1);
+s_ = section("Play", "flame"); s_.querySelector("h3").remove();
+slider(s_, "burst (s)", "ftBurst", 0.5, 8, 0.5);
 
 s_ = section("Camera (RTS)");
 buttons(s_, [["Near 18 m", () => { ui.dist = 18; rtsView(); }, 18], ["Play 52 m", () => { ui.dist = 52; rtsView(); }, 52], ["Far 85 m", () => { ui.dist = 85; rtsView(); }, 85]], (k) => ui.dist === k);
@@ -456,6 +550,17 @@ slider(s_, "burning ground (m)", "fpGroundCard", 4, 30, 0.5);
 slider(s_, "smoke column (m)", "fpColumnCard", 6, 50, 0.5);
 slider(s_, "splash play time ×", "fpLife", 0.5, 4, 0.1);
 
+s_ = section("Flamethrower — Fire Pro only", "flame");
+note(s_, "The game has no flamethrower yet. Aim:");
+buttons(s_, [["Across", () => { ui.aim = "across"; }, "across"], ["At an angle", () => { ui.aim = "angle"; }, "angle"],
+  ["Toward camera", () => { ui.aim = "toward"; }, "toward"], ["Away", () => { ui.aim = "away"; }, "away"], ["Sweep", () => { ui.aim = "sweep"; }, "sweep"]], (k) => ui.aim === k);
+slider(s_, "stream card (m)", "ftCard", 8, 50, 0.5);
+slider(s_, "ignition (s)", "ftIgnite", 0.3, 3, 0.05);
+slider(s_, "flame speed ×", "ftSpeed", 0.5, 3, 0.05);
+slider(s_, "aim down (°)", "ftDown", 0, 15, 0.5);
+check(s_, "burning end", "ftBurnOn");
+slider(s_, "burning end (m)", "ftBurnCard", 3, 20, 0.5);
+note(s_, "Trigger: the START book (the head shoots out, the rope unrolls) played in \"ignition\" s, into the LOOP; release: the STOP book (it breaks off at the nozzle, burns out). Speed × plays loop and stop faster (the sim is slower than a real jet).");
 s_ = section("Fire Pro flames");
 slider(s_, "brightness ×", "fpFire", 0, 8, 0.1);
 note(s_, "The game side keeps its own brightness. No bloom in this lab, on either side.");
@@ -469,16 +574,18 @@ note(s_, "Each side alone, in the middle of the view, over one blast / one napal
 s_.append(status);
 
 function refreshPanel() {
-  for (const box of ui_.sections) box.style.display = !box.dataset.scene || box.dataset.scene === ui.scene ? "" : "none";
+  for (const box of ui_.sections) box.style.display = !box.dataset.scene || box.dataset.scene.split(" ").includes(ui.scene) ? "" : "none";
   for (const f of ui_.groups) f();
   for (const f of ui_.checks) f();
-  fireBtn.firstChild.textContent = ui.scene === "blast" ? "Blast now" : "Napalm run now";
-  howEl.textContent = ui.scene === "blast"
+  fireBtn.firstChild.textContent = ui.scene === "blast" ? "Blast now" : ui.scene === "flame" ? "Fire a burst" : "Napalm run now";
+  howEl.textContent = ui.scene === "flame"
+    ? "FLAMETHROWER: the Fire Pro book laid along the aim from the nozzle, turned about the stream to face the camera; the ground burns where it lands. The game has no flamethrower to compare with."
+    : ui.scene === "blast"
     ? "LEFT: the game's own effects (shared-rts combatFx + lit smoke, flameField — what alg-rts plays). RIGHT: the Fire Pro books (v3/fire-bake-lab). Back row: a shell blast. Front row: a burning wreck."
     : "BACK ROW: nam's real napalm (napalmStrike: fireball flipbooks, flame cards, smoke palls). FRONT ROW: the same run drawn with the Fire Pro books. One side alone burns in the middle.";
 }
 refreshPanel();
 
-window.__fxCompare = { ui, fx, fire, refreshPanel, fireNow, setShow, blastCard, wreckCard, blast, rtsView, renderer, camera, controls, measureGpu, setBlastBook, setScene, napalmRun, fpNap, get clock() { return clock; } };
+window.__fxCompare = { ui, fx, fire, refreshPanel, fireNow, setShow, blastCard, wreckCard, blast, rtsView, renderer, camera, controls, measureGpu, setBlastBook, setScene, napalmRun, fpNap, ft, ftTrigger, get clock() { return clock; } };
 placeWrecks();
 rtsView();

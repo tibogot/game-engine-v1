@@ -262,6 +262,8 @@ export async function bakeBook({ renderer, scene, sim, preset, opts, beforeStep 
       /** The cloud's widest reach over the book, as a share of the card. */
       fill: +Math.min(1, (reach * 2) / cell).toFixed(3),
       size: S, pitch: bake.pitch, duration: bake.duration, loop: !!bake.loop,
+      /** Where the preset's anchor (a flamethrower's nozzle) lands on the card, uv (0..1, v up). */
+      anchor: bake.anchor ? (() => { const v = new THREE.Vector3(...bake.anchor).project(camera); return [+((v.x + 1) / 2).toFixed(4), +((v.y + 1) / 2).toFixed(4)]; })() : null,
       /** The sim's smoke albedo (linear): the maps are lit as white, the player tints them. */
       tint: new THREE.Color(look.smoke.color).toArray().map((v) => +v.toFixed(4)),
       seconds: +((performance.now() - t0) / 1000).toFixed(1),

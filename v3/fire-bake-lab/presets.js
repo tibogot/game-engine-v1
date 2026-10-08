@@ -113,6 +113,26 @@ export const PRESETS = {
     forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.4 }, { type: "turbulence", strength: 2, scale: 2.5 }],
     bake: { center: [0, 3.2, 0], size: 9, pitch: 40, start: 4, duration: 64 / 24, loop: true, blend: 16 },
   },
+  flamethrower: {
+    label: "Flamethrower",
+    note: "loop: a fuel jet from a nozzle at hip height, along +X (Fire Pro's Flamethrower preset). The game lays this card ALONG the aim.",
+    sim: {
+      voxelSize: 0.05, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 17,
+      grid: { maxVoxels: 10_000_000, cutoff: 0.05, ground: true },
+      // Dan's preset drew a thin 4.5 m rod here (2026-10-08): 3x the fuel, a wider faster jet,
+      // a slower burn (it carries further), more soot and swirl → a rope that billows at its end.
+      flame: { lifespan: 2, heatRate: 5, smokeRate: 1.5, expansionRate: 0.8, cooling: 0.62, brightness: 1.4, opacity: 1, temperature: 3200, sootGlow: 1 },
+      smoke: { dissipation: 0.35, color: "#303030", density: 1.5, scattering: 0.38, shadowDensity: 3.5 },
+      motion: { buoyancy: 1.2, smokeWeight: 0.12, damping: 0.15, vorticity: 3 },
+      fuel: { enabled: true, ignitionHeat: 0.4, burnRate: 1.5 },
+    },
+    // The nozzle: thickened fuel, lit as it leaves (heat), thrown at 12 m/s.
+    fires: [{ kind: "emitter", at: [-3.5, 1.05, 0], radius: 0.3, emission: { flame: 0, heatRate: 80, smokeRate: 0, fuelRate: 30 }, velocity: { direction: [1, 0, 0], speed: 16 } }],
+    blasts: [],
+    forces: [{ type: "turbulence", strength: 1.5, scale: 4 }],
+    // `anchor`: the nozzle — the bake records where it lands on the card (meta.anchor).
+    bake: { center: [1.5, 2.2, 0], size: 11, pitch: 40, start: 3, duration: 64 / 24, loop: true, blend: 16, anchor: [-3.5, 1.05, 0] },
+  },
   column: {
     label: "Smoke column",
     note: "loop: thick dark smoke rising off a wreck (no flame)",
@@ -146,4 +166,27 @@ export const PRESETS = {
     forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.16 }, { type: "turbulence", strength: 0.8, scale: 4.6 }],
     bake: { center: [0, 1.5, 0], size: 3.2, pitch: 40, start: 3, duration: 64 / 24, loop: true, blend: 16 },
   },
+};
+
+// THE FLAMETHROWER'S START AND STOP, from the same sim (you, 2026-10-09: the stream wiping out
+// of the gun "looks fake"). START: from the first fuel out of the nozzle (t = 0) until the
+// rope is whole — the burning head shoots out, the rope unrolls behind it, the billow forms
+// where it lands. STOP: the nozzle shuts at 3 s (a timed emitter) and the stream breaks off,
+// its tail flying on and burning out. The game plays start → loop → stop on one anchor.
+const FT = PRESETS.flamethrower;
+PRESETS.flamethrowerStart = {
+  ...FT, label: "Flamethrower start",
+  note: "one-shot: the trigger pulled — the burning head shoots out, the rope unrolls behind it",
+  // The sim's head was a smooth white ball (still air, even burning): strong fine turbulence
+  // tears it, and FADES OUT by 2.6 s, so the book ends as the loop begins.
+  forces: [...FT.forces, { type: "turbulence", strength: 9, scale: 2.2, fadeUntil: 2.6 }],
+  // The sim's air starts at rest, so the head takes ~2.5 s to reach the loop's length; baked
+  // whole (to where the loop book starts, 3 s) and PLAYED FASTER in the game (ignition ~0.8 s).
+  bake: { ...FT.bake, start: 0, duration: 2.9, loop: false, blend: 0 },
+};
+PRESETS.flamethrowerStop = {
+  ...FT, label: "Flamethrower stop",
+  note: "one-shot: the trigger let go at 3 s — the stream breaks off at the nozzle and burns out",
+  fires: FT.fires.map((f) => ({ ...f, until: 3 })),
+  bake: { ...FT.bake, start: 3, duration: 2, loop: false, blend: 0 },
 };
