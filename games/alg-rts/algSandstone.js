@@ -13,8 +13,9 @@
 //   the EDGES      the generator's baked curvature: worn edges lighter, the joints darker
 // The sand skirt at the foot is the game's contact splats (algGroundContact.js) — not in the lab.
 import * as THREE from "three";
-import { abs, attribute, clamp, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
+import { abs, attribute, clamp, dot, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { createRockGeometry } from "../../v3/props/proceduralRock.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 /** The shapes (metres, half-extents): a long mesa slab, a shorter block, a low boulder. */
 export const SANDSTONE_SHAPES = {
@@ -65,7 +66,26 @@ export const sandstoneLook = {
   edgeLight: uniform(0.35),    // worn edges lighter
   creaseDark: uniform(0.45),   // joints and hollows darker
   footDark: uniform(0.22),     // the foot in its own dust and shade
+  saturation: uniform(1),      // 1 = the photos' own colour
 };
+
+/**
+ * THE COLOURS (2026-10-08, you: "keep the CoH look as the lab's default, but I need a version that
+ * goes with the game"): CoH = the photos as they are (the red desert of the screenshot); AURÈS =
+ * the same stone greyed towards the map's ochre and limestone (the ground photos, the kit's stone).
+ */
+export const SANDSTONE_COLOURS = {
+  coh: { label: "CoH (rouge)", tint: [1, 1, 1], saturation: 1, topDark: 0.6 },
+  // (the photo greyed alone reads PINK — red without its orange: the tint puts the yellow back)
+  aures: { label: "Aurès (ocre)", tint: [1.14, 1.0, 0.72], saturation: 0.5, topDark: 0.66 },
+  aures2: { label: "Aurès (gris)", tint: [1.06, 1.0, 0.84], saturation: 0.22, topDark: 0.7 },
+};
+export function setSandstoneColour(key) {
+  const c = SANDSTONE_COLOURS[key];
+  sandstoneLook.tint.value.setRGB(...c.tint);
+  sandstoneLook.saturation.value = c.saturation;
+  sandstoneLook.topDark.value = c.topDark;
+}
 
 /**
  * The material: triplanar photos and their normal maps, the top its own photo. In the ROCK'S OWN
@@ -102,8 +122,47 @@ export function sandstoneMaterial() {
   const nObj = mix(sideNrm, wY, up).normalize();
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
   mat.name = "Sandstone";
+  // Saturation about the colour's own luminance, then the tint.
+  col = mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, L.saturation);
   mat.colorNode = col.mul(L.tint);
   // normalNode is VIEW space (three r184): the rock's-space normal through its instance and model.
   mat.normalNode = transformNormalToView(nObj).normalize();
   return mat;
+}
+
+/**
+ * THE SAND APRON — LAB PREVIEW (in the game, the ground splats do it: algGroundContact.js): pale
+ * blown sand and grit round a rock's foot, ragged at its edge, fading out ~35% past the rock. A
+ * disc 4 cm above the lab's flat ground, drawn after it with no depth write (no z-fight).
+ */
+export function sandApron(geo) {
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox, rx = (bb.max.x - bb.min.x) / 2 * 1.35 + 1.5, rz = (bb.max.z - bb.min.z) / 2 * 1.35 + 1.5;
+  const disc = new THREE.CircleGeometry(1, 64).rotateX(-Math.PI / 2).scale(rx, 1, rz);
+  disc.translate((bb.max.x + bb.min.x) / 2, 0.04, (bb.max.z + bb.min.z) / 2);
+  const sand = photo(TEX("gravelly_sand", "diff"), true);
+  sand.repeat.set((rx * 2) / 3, (rz * 2) / 3);
+  // The fade: a soft radial gradient whose edge is broken by noise (an alphaMap: plain, no nodes).
+  const N = 256, cv = document.createElement("canvas");
+  cv.width = cv.height = N;
+  const ctx = cv.getContext("2d"), img = ctx.createImageData(N, N);
+  const wob = Array.from({ length: 6 }, (_, k) => ({ f: 3 + k * 2, a: 0.05 / (1 + k * 0.5), p: k * 1.7 }));
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const u = (x + 0.5) / N * 2 - 1, v = (y + 0.5) / N * 2 - 1, ang = Math.atan2(v, u);
+    let r = Math.hypot(u, v);
+    for (const w of wob) r += Math.sin(ang * w.f + w.p) * w.a;
+    const t = Math.min(1, Math.max(0, (r - 0.42) / 0.55)), a = (1 - t * t * (3 - 2 * t)) * 0.85;
+    const o = (y * N + x) * 4;
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = Math.round(a * 255);
+    img.data[o + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const fade = new THREE.CanvasTexture(cv);
+  const mat = new THREE.MeshStandardNodeMaterial({ map: sand, alphaMap: fade, color: 0xffeedd, roughness: 1, metalness: 0, transparent: true, depthWrite: false });
+  mat.name = "SandApron";
+  mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2;
+  const m = new THREE.Mesh(disc, mat);
+  m.receiveShadow = true;
+  m.renderOrder = RENDER_ORDER.FIELDS;   // painted on the ground, as the fields
+  return m;
 }

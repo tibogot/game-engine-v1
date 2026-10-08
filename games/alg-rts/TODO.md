@@ -75,9 +75,13 @@ Keep this file current: tick things off here, add new asks here.
        space (world space slid on the turntable), the top the same layered stone (button: cracked).
        You: "exactly the CoH image" — keep it the lab's default. Generation 1-1.7 s a shape: in the
        game, a worker (rockGeometryWorker.js) or baked to a file.
-     · NEXT: an Aurès colour for the game beside the CoH one; the rocks' sand apron (the game's
-       splats; a lab preview); the small arches' stones; a fallen drum through a block on the road.
-       Then placing them on the map (landmarks + the empty stretches).
+     · DONE after (same day): the rock COLOURS — CoH (rouge, the lab's default), Aurès (ocre),
+       Aurès (gris) (greyed alone the red photo read PINK: the tint puts the yellow back); a SAND
+       APRON preview (lab only; the game's splats will do it); the arch's voussoirs true WEDGES
+       (rectangles gapped and read jumbled), ashlarBlock `bite: false`; the Roman kit keeps what
+       lies on the ground (no drum laid through a block, nothing strewn on the road).
+     · NEXT: you pick the game's rock colour; then placing rocks + sites on the map (landmarks +
+       the empty stretches), the rock shapes generated off the boot's main thread.
 9. [x] **A POINTER CURSOR ON EVERYTHING CLICKABLE** — DONE 2026-10-08 (ui/cursors.js HAND + CLICKABLE:
    buttons, menu inputs, tabs, tiles, groups, badges, alerts, objectives, briefing; locked buttons keep
    the arrow; the maps keep the reticle). Was: (you, 2026-10-07: "anything clickable should have a

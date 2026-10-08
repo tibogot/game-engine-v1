@@ -8,7 +8,7 @@ import { buildMechtaHouse } from "../../v3/render/objects/rtsMechta.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
-import { buildSandstoneRock, sandstoneLook, sandstoneMaterial } from "./algSandstone.js";
+import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { startVehicleLab } from "./vehicleLab.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
@@ -81,9 +81,21 @@ export async function startBuildingLab(container) {
     // The rocks: the top in the sides' layered stone, or the cracked photo (you, 2026-10-08).
     if (key.startsWith("roche")) {
       const t = document.createElement("div");
-      t.innerHTML = `<h2>Dessus du rocher</h2><div class="g"><button data-top="1">Même pierre</button><button data-top="0">Craquelé</button></div>`;
+      // The colour (CoH stays the default) and the sand apron at the foot (the game's splats: a preview).
+      t.innerHTML = `<h2>Dessus du rocher</h2><div class="g"><button data-top="1">Même pierre</button><button data-top="0">Craquelé</button></div>
+        <h2>Couleur du rocher</h2><div class="g">${Object.entries(SANDSTONE_COLOURS).map(([k, c]) => `<button data-col="${k}">${c.label}</button>`).join("")}</div>
+        <h2>Sable au pied</h2><div class="g"><button data-apron="1">Avec</button><button data-apron="0">Sans</button></div>`;
       panel.insertBefore(t, box);
-      t.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) sandstoneLook.topSame.value = Number(b.dataset.top); });
+      const rockMesh = lab.after.group.children[0];
+      const apron = sandApron(rockMesh.geometry);
+      lab.after.group.add(apron);
+      t.addEventListener("click", (e) => {
+        const b = e.target.closest("button");
+        if (!b) return;
+        if (b.dataset.top) sandstoneLook.topSame.value = Number(b.dataset.top);
+        if (b.dataset.col) setSandstoneColour(b.dataset.col);
+        if (b.dataset.apron) apron.visible = b.dataset.apron === "1";
+      });
     }
     v.addEventListener("click", (e) => {
       const b = e.target.closest("button");

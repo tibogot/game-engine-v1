@@ -691,7 +691,7 @@ function jitterByPosition(g, amt, seed, { flatTop = null } = {}) {
  * sharp boxes): w × h × d, chamfered (below), shaded faceted, its UVs at the kit's 2 m a tile from
  * a random point so no two blocks show the same patch of the texture.
  */
-export function ashlarBlock(seed, w, h, d, { chip = null } = {}) {
+export function ashlarBlock(seed, w, h, d, { chip = null, bite = true } = {}) {
   const r = rng(seed);
   // A CHAMFERED box: each corner cut back by its own bevel (three points per corner, the hull of
   // the 24): every edge a narrow worn face, one corner in four BITTEN deep. (Pulling a low-poly
@@ -699,7 +699,8 @@ export function ashlarBlock(seed, w, h, d, { chip = null } = {}) {
   const b0 = chip ?? Math.min(0.07, Math.min(w, h, d) * 0.16);
   const pts = [];
   for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
-    const b = Math.min(b0 * (0.6 + r() * 0.8) * (r() < 0.25 ? 3 : 1), Math.min(w, h, d) * 0.45);
+    // `bite: false`: no corner bitten deep (an arch's voussoirs) — the same draws, so every other block is unchanged.
+    const b = Math.min(b0 * (0.6 + r() * 0.8) * (r() < 0.25 && bite ? 3 : 1), Math.min(w, h, d) * 0.45);
     const X = sx * w / 2, Y = sy * h / 2, Z = sz * d / 2;
     pts.push(new THREE.Vector3(X - sx * b, Y, Z), new THREE.Vector3(X, Y - sy * b, Z), new THREE.Vector3(X, Y, Z - sz * b));
   }
