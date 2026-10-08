@@ -248,16 +248,6 @@ export const LOOKS = {
     kit: ["mlaya", "sleevesBlack"],
     smoothFace: true, skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["soldier1"],
   },
-  civWomanRural: {
-    label: "Femme (melhfa)", note: "Chaouia hills: a dark draped melhfa, a bright striped head scarf",
-    green: 0x2c3550, greenAlt: 0x5a2630, khaki: 0x2a2f45, helmet: false, headgear: "mendil", weapon: null,
-    kit: ["melhfa", "sleevesDark"], smoothFace: true, skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["soldier1"],   // (the clean-shaven body)
-    variants: [
-      { w: 0.35, scarf: [0xb8432f, 0xd9a441] },
-      { w: 0.35, scarf: [0x2f6b4a, 0xd8c26a] },
-      { w: 0.3, scarf: [0x7a2a5a, 0xe0a36a] },
-    ],
-  },
   alnKachabia: {
     label: "ALN, kachabia", note: "hooded wool cloak over the drill",
     green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, headgear: "cheche", hatColor: 0xdcd5c3,
@@ -849,8 +839,8 @@ const GRENADE = (() => {
 // From memory of photos of the Aurès and the Algerian countryside, to be judged in the lab:
 // the men in a gandoura or a burnous, a chèche wound as a turban or the red felt chéchia; the
 // women in the white HAÏK (a cloth over head and body, the face veiled below the eyes — the
-// towns' and big villages' dress) or, in the Chaouia hills, a dark draped MELHFA and a bright
-// striped head scarf (mendil).
+// towns' and big villages' dress) or the black MLAYA of Constantine and the east. (A melhfa and
+// striped mendil were tried and dropped — you: "they look wrong".)
 
 /** Chéchia: the red felt skullcap, a little flat top. */
 function chechia(look) {
@@ -859,28 +849,6 @@ function chechia(look) {
     // down to the brow (at -0.085 aln1's camouflaged headband showed under it)
     ...band(c, [{ y: -0.118, rx: 0.135, rz: 0.141 }, { y: -0.03, rx: 0.13, rz: 0.136 }, { y: 0.012, rx: 0.12, rz: 0.126 }]),
     dome(d, 0.012, 0.008, 0.12, 0.126),
-  ]);
-}
-
-/**
- * Mendil: the rural woman's head scarf — over the crown, down the sides to below the ears and
- * hanging at the back to the shoulders, knotted at the nape; bright STRIPES (`look.scarf`: two hex).
- */
-function mendil(look) {
-  const [a, b] = look.scarf ?? [0xb8432f, 0xd9a441];
-  const stripe = (i) => (i % 3 === 0 ? b : a);
-  // The face left open BELOW the brow only (-0.105: the eyes are at -0.156); above it the cloth
-  // goes all round — the first cut was open up to the crown and the hair showed (you, 2026-10-08).
-  const open = { from: Math.PI / 2 + 0.75, to: Math.PI * 2.5 - 0.75, segs: 16 };
-  return toGeometry([
-    ...band(stripe, [{ y: -0.29, rx: 0.15, rz: 0.165 }, { y: -0.18, rx: 0.146, rz: 0.16 }, { y: -0.1, rx: 0.145, rz: 0.154 }], open),
-    ...band(stripe, [{ y: -0.105, rx: 0.145, rz: 0.155 }, { y: -0.05, rx: 0.14, rz: 0.15 }, { y: -0.01, rx: 0.122, rz: 0.132 }]),
-    dome(a, -0.01, 0.03, 0.122, 0.132),
-    // the brow band across the front, over the forehead
-    ...band(b, [{ y: -0.115, rx: 0.15, rz: 0.16 }, { y: -0.065, rx: 0.146, rz: 0.156 }], FRONT(0.9)),
-    // the tails down the back, to the shoulder blades
-    ...band(stripe, [{ y: -0.42, rx: 0.12, rz: 0.15 }, { y: -0.27, rx: 0.152, rz: 0.168 }], BACK(0.55)),
-    ...band(stripe, [{ y: -0.27, rx: 0.15, rz: 0.166 }, { y: -0.42, rx: 0.118, rz: 0.148 }], BACK(0.55)),
   ]);
 }
 
@@ -914,7 +882,7 @@ function haikVeil(look) {
   ]);
 }
 
-export const HEADGEAR = { bushHat, bigeard, beret, cheche, chechePulled, fieldCap, chechia, mendil, haikVeil };
+export const HEADGEAR = { bushHat, bigeard, beret, cheche, chechePulled, fieldCap, chechia, haikVeil };
 
 // ── 4. Kit ──────────────────────────────────────────────────────────────────
 // Rigid pieces on a bone, like the headgear: vertex-coloured, no texture, and
@@ -1332,7 +1300,7 @@ function kachabiaWeights(p) {
 
 /**
  * A WOMAN'S ROBE — closed, from the shoulders to the ankles, wide at the hem: the haïk (white)
- * or the melhfa (dark, draped). Skinned like the kachabia (kachabiaWeights): it rides the spine,
+ * (white) or the mlaya (black). Skinned like the kachabia (kachabiaWeights): it rides the spine,
  * then blends into each thigh by side, so a walking stride stretches it instead of tearing it.
  */
 function robe(c, inner, rings = null) {
@@ -1362,7 +1330,6 @@ function robe(c, inner, rings = null) {
   ]);
 }
 const haik = () => robe(0xe3ddce, 0xbdb5a2);
-const melhfa = () => robe(0x2c3550, 0x1d2335);
 // The MLAYA: the black haik of Constantine and the east (the Aures included).
 const mlaya = () => robe(0x22201f, 0x141312);
 
@@ -1474,11 +1441,9 @@ export const KIT = {
   kachabia: { skinned: true, build: kachabia, weights: kachabiaWeights },
   // the women's robes (civilians): skinned the same way
   haik: { skinned: true, build: haik, weights: robeWeights },
-  melhfa: { skinned: true, build: melhfa, weights: robeWeights },
   mlaya: { skinned: true, build: mlaya, weights: robeWeights },
   sleevesWhite: { skinned: true, build: sleeves(0xe3ddce), weights: sleeveWeights },
   sleevesBlack: { skinned: true, build: sleeves(0x22201f), weights: sleeveWeights },
-  sleevesDark: { skinned: true, build: sleeves(0x2c3550), weights: sleeveWeights },
   gandoura: { skinned: true, build: gandoura, weights: robeWeights },
   gandouraGrey: { skinned: true, build: gandouraGrey, weights: robeWeights },
   gandouraBrown: { skinned: true, build: gandouraBrown, weights: robeWeights },
