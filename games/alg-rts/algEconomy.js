@@ -16,9 +16,13 @@
 //
 //   INFLUENCE  each point has a value, −1 (the ALN's) … +1 (the French's).
 //              Men ON FOOT within 40 m push it their way (not vehicles) — the more
-//              men, the faster (up to three count). Nobody there, it drifts
-//              back toward neutral. Past ±0.6 the point is HELD, and stays held
-//              until the value crosses back through 0.
+//              men, the faster (up to three count). Past ±0.6 the point is HELD, and
+//              stays held until the value crosses back through 0.
+//              NOBODY THERE (CoH's rule, 2026-10-08 — you: "do we have to keep soldiers
+//              on the point?"): a HELD point stays its holder's, and a dent the other
+//              side made in it heals back; only an UNFINISHED capture of a neutral
+//              point slides back to neutral. To take a point you must go and stand on
+//              it; to keep it, keep it linked (below) and defend it.
 //   POINTS     `points`  the VILLAGES (the war's score, the AI, the objectives);
 //              `supply`  the FUEL / MUNITION points along the pistes;
 //              `allPoints` both (the map's markers and rings).
@@ -89,7 +93,7 @@ const P = {
   supplyRadius: 22,                       // a supply point's capture ring
   // Influence per second per man (up to 3): ~20 s from neutral with 3+.
   push: 0.01,
-  drift: 0.005,                           // back toward 0 per second, nobody there
+  drift: 0.005,                           // per second, nobody there: an unfinished capture back toward 0, a held point back to its holder
   hold: 0.6,
 };
 
@@ -209,7 +213,11 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
       }
       const net = Math.max(-3, Math.min(3, fr - al));
       if (fr || al) v.value += net * P.push * dt * (v.kind === "supply" ? 1.6 : 1);
-      else v.value -= Math.sign(v.value) * Math.min(Math.abs(v.value), P.drift * dt);
+      else {
+        // Nobody there: a held point heals toward its holder's full; a neutral one slides back to 0.
+        const goal = v.owner === "player" ? 1 : v.owner === "enemy" ? -1 : 0;
+        v.value += Math.sign(goal - v.value) * Math.min(Math.abs(goal - v.value), P.drift * dt);
+      }
       v.value = Math.max(-1, Math.min(1, v.value));
       if (v.value >= P.hold) v.owner = "player";
       else if (v.value <= -P.hold) v.owner = "enemy";

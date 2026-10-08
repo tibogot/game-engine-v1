@@ -96,6 +96,13 @@ Keep this file current: tick things off here, add new asks here.
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
+12. [x] **POINTS STAY HELD — CoH's rule (2026-10-08, you)**: before, a point nobody stood on drifted
+   to neutral (a full one lost in ~3 min, a fresh one in ~2), so men had to sit on every flag. Now
+   a HELD point stays its holder's and a dent heals back (0.005/s); only an unfinished capture of a
+   neutral point slides back. The pressure is the supply chain (a cut-off point pays nothing) and
+   the FLN's raids, which must stand on a point to take it (algEconomy stepInfluence).
+   LATER, maybe: villages leaning back to the FLN at night / far from a French post (its political
+   work) — only if the game feels too easy.
 11. [x] **PLAYTEST FIXES (2026-10-08)**: (a) a wounded FLN fighter floated a big bar of his own
    under his band's badge — soldiers never carry a bar now (the badge's one thin bar, CoH), vehicles
    keep theirs (algUnits barFor); (b) the FLN could be SELECTED with a click, and a selected enemy
