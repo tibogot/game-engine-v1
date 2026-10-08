@@ -17,7 +17,8 @@
 import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 import * as THREE from "three";
-import { buildBurntFarm, buildFarmstead, buildRomanRuin, buildRuinedHut, buildTerraces } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildBurntFarm, buildFarmstead, buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin, buildRuinedHut, buildTerraces } from "../../v3/render/objects/rtsAlgVillage.js";
+import { SANDSTONE_GAME, SANDSTONE_SHAPES } from "./algSandstone.js";
 import { buildArmsCache, buildLookout, buildRefuge, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { kitView } from "./showroom.js";
@@ -184,6 +185,27 @@ export function landmarkEntries(app, list) {
     out.push({ key: `terracesOpen${k + 1}`, build: (o) => buildTerraces({ ...o, seed: 2030 + k * 5, rows: 3 + (k % 2) }), x, z, yaw: c.yaw, ground: true });
     k++;
   }
+  // THE ROMAN SITES (2026-10-08, the buildings lab — you: "variants of that Roman ruin, in other
+  // places"): placed LAST with their OWN random stream, so every piece above (and the supply points
+  // set on them, maps/aures.js) stays exactly where it was. Big ones apart, small ones in the gaps.
+  const RR = rng(2101);
+  const roman = [
+    { key: "romanArch1", build: (o) => buildRomanArch({ ...o, seed: 2401 }), track: false, spacing: 70 },
+    { key: "romanColonnade1", build: (o) => buildRomanColonnade({ ...o, seed: 2201 }), track: false, spacing: 65 },
+    ...[0, 1, 2].map((i) => ({ key: `romanColumn${i + 1}`, build: (o) => buildRomanColumn({ ...o, seed: 2101 + i }), track: false, spacing: 50 })),
+    ...[0, 1].map((i) => ({ key: `romanRoad${i + 1}`, build: (o) => buildRomanBlockField({ ...o, seed: 2301 + i }), track: false, spacing: 60 })),
+    ...[0, 1].map((i) => ({ key: `romanPress${i + 1}`, build: (o) => buildRomanOilPress({ ...o, seed: 2501 + i }), track: false, spacing: 50 })),
+  ];
+  for (const w of roman) {
+    for (let t = 0; t < P.tries; t++) {
+      const x = PLAY.x0 + RR() * (PLAY.x1 - PLAY.x0), z = PLAY.z0 + RR() * (PLAY.z1 - PLAY.z0);
+      if (!ok(x, z, w.track, w.spacing) || out.some((p) => Math.hypot(p.x - x, p.z - z) < Math.min(w.spacing, 45))) continue;
+      const e = { key: w.key, build: w.build, x, z, yaw: VIEW_YAW + (RR() < 0.5 ? 0.5 : -0.5) + (RR() - 0.5) * 0.3, ground: true };
+      placed.push(e);
+      out.push(e);
+      break;
+    }
+  }
   return out;
 }
 
@@ -200,6 +222,8 @@ const Q = {
   // BOULDER CLUSTERS on the FLATS (the AAA gap list, 2026-10-07: the outcrops only sit on slopes, the
   // open flats had nothing): groups of 3-5 boulders, hard cover, apart from each other and the crags.
   clusters: 34, clusterSpacing: 42, clusterSlope: 9,
+  // SANDSTONE (2026-10-08): the big CoH-style rocks, in the open stretches.
+  sandstone: 14, sandstoneSpacing: 55, sandstoneSlope: 13, sandstoneRelief: 2.4, sandstoneSiteClear: 45,
 };
 
 /**
@@ -447,10 +471,55 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     for (const b of brooms) plants.add("broom", b.x, H(b.x, b.z) - 0.05, b.z, { rotY: R() * 6.28, scale: 0.8 + R() * 0.5, seed: R() });
   }
 
+  // ── THE SANDSTONE ROCKS (2026-10-08, the buildings lab — CoH's desert slabs): big, in the open
+  // stretches far from the objectives, on gentle ground; impassable, hard cover along their length.
+  // LAST and with their own random stream: nothing above moves. The mesh comes later
+  // (algSandstone buildSandstoneField: the shapes are made in workers) — these are only places.
+  const RS = rng(2601);
+  const sandstone = [];
+  const sites = LAYOUT.sites;
+  const others = [...trees, ...dead, ...betoums, ...tamarisks];
+  for (let i = 0, t = 0; i < Q.sandstone && t < 12000; t++) {
+    const v = i % SANDSTONE_GAME.length, S = SANDSTONE_SHAPES[SANDSTONE_GAME[v][0]];
+    // (0.8-1.15 read small from the RTS camera: CoH's are big — the banc 20-28 m long)
+    const k = (v < 2 ? 1.05 : 0.95) + RS() * 0.35, ax = S.sizeX * k, az = S.sizeZ * k, r = Math.hypot(ax, az) * 0.8;
+    const x = PLAY.x0 + RS() * (PLAY.x1 - PLAY.x0), z = PLAY.z0 + RS() * (PLAY.z1 - PLAY.z0), yaw = RS() * Math.PI * 2;
+    if (slopeDeg(x, z) > Q.sandstoneSlope || !free(x, z, r + 2)) continue;
+    if (sites.some((s) => Math.hypot(s.x - x, s.z - z) < (s.r ?? 20) + Q.sandstoneSiteClear)) continue;
+    if (sandstone.some((o) => Math.hypot(o.x - x, o.z - z) < Q.sandstoneSpacing)) continue;
+    if (others.some((o) => Math.hypot(o.x - x, o.z - z) < r + 3)) continue;
+    // Its footprint: gentle enough (the rock is sunk to its lowest corner), dry, not built on.
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    let lo = Infinity, hi = -Infinity, bad = false;
+    for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) {
+      const px = x + a * ax * c + b * az * sn, pz = z - a * ax * sn + b * az * c, h = H(px, pz);
+      lo = Math.min(lo, h); hi = Math.max(hi, h);
+      if ((app.getWaterLevelAt?.(px, pz) ?? -Infinity) > h - 0.3 || navGrid?.isBlockedAtWorld?.(px, pz)) bad = true;
+    }
+    if (bad || hi - lo > Q.sandstoneRelief) continue;
+    sandstone.push({ x, y: lo - 0.3 * k, z, yaw, k, v, ax, az });
+    taken.push({ x, z, r });
+    navGrid?.addFootprint?.(x, z, ax * 0.85, az * 0.85, yaw);
+    app.clearVegetation?.(x, z, Math.max(ax, az) + 1.5, { grass: 0, edge: 0.6 });
+    i++;
+  }
+  /** A sandstone rock's hard cover: circles along its long axis. */
+  function* sandCircles(o) {
+    const long = o.ax >= o.az, R0 = Math.min(o.ax, o.az) * 0.95, L = Math.max(o.ax, o.az) - R0;
+    const n = Math.max(1, Math.ceil(L / R0) + 1), c = Math.cos(o.yaw), sn = Math.sin(o.yaw);
+    for (let j = 0; j < n; j++) {
+      const t = n === 1 ? 0 : -L + (2 * L * j) / (n - 1), lx = long ? t : 0, lz = long ? 0 : t;
+      yield { x: o.x + lx * c + lz * sn, z: o.z - lx * sn + lz * c, radius: R0, size: 1, hard: true };
+    }
+  }
+
   return {
-    rocks, trees, meshes, agaves, brooms, betoums, tamarisks,
-    /** Hard cover round the outcrops, for the cover bake (algCover.js). */
-    *coverCircles() { for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true }; },
-    stats: { outcrops: rocks.length, clusters: centres.length, trees: trees.length, dead: dead.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
+    rocks, trees, meshes, agaves, brooms, betoums, tamarisks, sandstone,
+    /** Hard cover round the outcrops and the sandstone, for the cover bake (algCover.js). */
+    *coverCircles() {
+      for (const r of rocks) yield { x: r.x, z: r.z, radius: 2.4 * r.k, size: 1, hard: true };
+      for (const o of sandstone) yield* sandCircles(o);
+    },
+    stats: { outcrops: rocks.length, clusters: centres.length, sandstone: sandstone.length, trees: trees.length, dead: dead.length, agaves: agaves.length, masts: agaves.filter((a) => a.mast).length, brooms: brooms.length, betoums: betoums.length, tamarisks: tamarisks.length },
   };
 }

@@ -6,6 +6,9 @@
 //     (hold Shift to add to the current selection)
 //   • Double-click a unit, or Ctrl + click → every unit of that TYPE on screen
 //     (Shift as well: add them to the selection)
+//   • Left-click an ENEMY       → INSPECT it (2026-10-08, you: "better to be able to select them",
+//     as CoH): its ring and its bar show, the game's panel shows what it is (`onInspect`) — but it
+//     is NEVER in the selection, so no order, ability or hotkey can reach it
 //   • Left-click empty ground   → clear selection
 //   • Right-click ground        → move every selected unit there (spread out)
 //
@@ -21,7 +24,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null, adjustSlots = null }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, onInspect = null, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null, adjustSlots = null }) {
   // `attackUnits` (opt-in, alg-rts 2026-10-06): a right-click on an enemy UNIT is an attack order
   // too (not only on a building), and the cursor turns to a red sight over one; `canTarget(u)`:
   // may the player point at him (seen — not in the fog)?
@@ -47,6 +50,9 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     if (!squadOf) return;
     for (const u of [...selected]) for (const m of squadOf(u) ?? []) if (m.alive && !selected.has(m)) setSelected(m, true);
   };
+  // The enemy being INSPECTED (one at most): flagged `selected` for its ring and bar only.
+  let inspected = null;
+  const uninspect = () => { if (inspected) { inspected.setSelected(false); inspected = null; onInspect?.(null); } };
   const notify = () => { expandSquads(); onChange([...selected]); };
   const setSelected = (unit, on) => {
     if (on) selected.add(unit); else selected.delete(unit);
@@ -156,6 +162,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     if (e.button !== 0 || !down) return;
     boxEl.style.display = "none";
 
+    uninspect();   // whatever this click does, the enemy looked at is let go
     if (dragging) {
       // Box-select: every unit whose screen point is inside the rectangle.
       const minX = Math.min(e.clientX, down.x), maxX = Math.max(e.clientX, down.x);
@@ -180,14 +187,25 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const now = performance.now();
       const dbl = unit && lastClick.unit === unit && now - lastClick.t < DOUBLE_CLICK_MS;
       lastClick = { unit, t: now };
-      if (unit && !unit.isStructure && (down.ctrl || dbl)) {
+      if (unit && unit.team !== "player" && !unit.isStructure && onInspect) {
+        // An ENEMY: inspected, not selected — your selection is let go (as a click elsewhere).
+        if (!down.shift) {
+          clear();
+          uninspect();
+          inspected = unit;
+          unit.setSelected(true);
+          down = null; dragging = false;
+          notify();
+          onInspect(unit);
+          return;
+        }
+      } else if (unit && !unit.isStructure && (down.ctrl || dbl)) {
         // Every unit of that type the player can SEE (on screen), as in every
         // RTS; the unit bar's double-click takes the whole map.
         if (!down.shift) clear();
         for (const u of onScreenOfType(unit.typeKey)) setSelected(u, true);
       } else if (unit && unit.team !== "player") {
-        // An ENEMY under the cursor is not yours to select (you, 2026-10-08: "I could select the
-        // ALN" — and, selected, it took your move orders). A plain click there clears, as on the ground.
+        // An enemy with no inspect panel (or Shift held): not yours to select — a plain click clears.
         if (!down.shift) clear();
       } else if (unit) {
         if (down.shift) {
@@ -476,13 +494,17 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     },
     /** Drop a unit from the selection when it dies. */
     remove(unit) {
+      if (unit === inspected) { uninspect(); return; }
       if (!selected.has(unit)) return;
       selected.delete(unit);
       unit.setSelected(false);
       notify();
     },
     /** Replace the selection with the given units (used by the unit bar). */
+    /** The enemy being inspected (never in `selected`), or null. */
+    get inspected() { return inspected; },
     select(arr) {
+      uninspect();
       clear();
       for (const u of arr) if (u.team === "player") setSelected(u, true);
       notify();

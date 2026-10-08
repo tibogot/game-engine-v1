@@ -37,6 +37,7 @@ import { applyMacroGround } from "./algMacroGround.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
+import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
 import { createAlgTelegraph } from "./algTelegraph.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
@@ -116,6 +117,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The stones' ground photos: fetched and decoded now, behind the engine's start (algStones.js).
   prefetchStonePhotos();
   prefetchAlgSplats();   // and the ground splats' (algSplats.js)
+  // The sandstone rocks' shapes, in worker threads (algSandstone.js; ~1-1.7 s each on one thread).
+  if (params.get("landmarks") !== "0") prefetchSandstone();
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
   // so it paints while the engine and the level load, and awaited before the
@@ -490,6 +493,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const t0 = performance.now();
       app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null });
       console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
+      // The SANDSTONE rocks: their shapes come from the workers started at the top of the boot.
+      const t1 = performance.now();
+      const field = await buildSandstoneField(app.algLandmarks.sandstone);
+      if (field) { field.updateMatrix(); app.scene.add(field); app.algLandmarks.sandstoneMesh = field; app.algLandmarks.sandstoneLook = sandstoneLook; }
+      // ?rocktop=0: the tops in the cracked photo (from the RTS camera the layered one shows as stripes).
+      if (params.get("rocktop") === "0") sandstoneLook.topSame.value = 0;
+      console.log(`[sandstone] ${app.algLandmarks.sandstone.length} rocks, ${field ? field.geometry.index.count / 3 : 0} tris, waited ${Math.round(performance.now() - t1)} ms`);
     } catch (e) { console.warn("[alg landmarks] failed:", e); }
   }
   // VILLAGE LIFE (algVillageLife.js): haystacks, firewood, bread ovens, beehives
@@ -514,7 +524,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // GROUND CONTACT SHADE (algGroundContact.js): the ground darkened round every building, wall
   // and rock, baked into the ground once — the image pass's AO at no cost a frame. ?contact=0 = off.
   if (app.algSplats && params.get("contact") !== "0") {
-    const list = contactSplats(app, app.algSplats.matIndex("dust"));
+    const list = contactSplats(app, app.algSplats.matIndex("dust"), app.algSplats.matIndex("sandGrav"));
     app.algSplats.add(list);
     console.log(`[contact shade] ${list.length} splats`);
   }

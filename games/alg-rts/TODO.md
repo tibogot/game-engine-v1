@@ -80,8 +80,16 @@ Keep this file current: tick things off here, add new asks here.
        APRON preview (lab only; the game's splats will do it); the arch's voussoirs true WEDGES
        (rectangles gapped and read jumbled), ashlarBlock `bite: false`; the Roman kit keeps what
        lies on the ground (no drum laid through a block, nothing strewn on the road).
-     · NEXT: you pick the game's rock colour; then placing rocks + sites on the map (landmarks +
-       the empty stretches), the rock shapes generated off the boot's main thread.
+     · ON THE MAP (2026-10-08, algLandmarks.js): 9 Roman sites (arch by the temple, colonnade, 3
+       columns, 2 roads, 2 presses) placed LAST on their own random stream (every older piece and
+       supply point unmoved); 13-14 sandstone rocks (Aurès ochre) in the open stretches, 45 m+ off
+       the sites, ×1.05-1.4 (smaller read small from the RTS camera), impassable, hard cover along
+       their length, a sand apron splat (algGroundContact). Their shapes in WORKERS from the top of
+       the boot (waited 21 ms), ONE merged mesh (~81k tris, one draw; not instanced: three's
+       transformNormalToView skips the instance turn). GPU with / without (rocks + Roman sites,
+       Roman quarter, play zoom): 11.54 vs 11.56 ms — no measurable cost (noise ±1.9 ms).
+     · YOU, LOOK: the rock TOP from the RTS camera — the layered stone shows as parallel stripes
+       from above; ?rocktop=0 = the cracked photo (reads more like a rock top from up there).
 9. [x] **A POINTER CURSOR ON EVERYTHING CLICKABLE** — DONE 2026-10-08 (ui/cursors.js HAND + CLICKABLE:
    buttons, menu inputs, tabs, tiles, groups, badges, alerts, objectives, briefing; locked buttons keep
    the arrow; the maps keep the reticle). Was: (you, 2026-10-07: "anything clickable should have a
@@ -91,8 +99,10 @@ Keep this file current: tick things off here, add new asks here.
 11. [x] **PLAYTEST FIXES (2026-10-08)**: (a) a wounded FLN fighter floated a big bar of his own
    under his band's badge — soldiers never carry a bar now (the badge's one thin bar, CoH), vehicles
    keep theirs (algUnits barFor); (b) the FLN could be SELECTED with a click, and a selected enemy
-   obeyed your move / attack orders — a click on an enemy now clears, orders go to your units only
-   (shared-rts/selection.js); (c) the faint team ring under EVERY man (unit marks, audit 2 item 6)
+   obeyed your move / attack orders — orders go to your units only (shared-rts/selection.js); then
+   (you: "better to be able to select them") a click on an enemy INSPECTS it: red ring, its bar, its
+   portrait and weapon in the unit bar, the command card empty — never in the selection, so no
+   order, ability or hotkey reaches it; let go when it dies, slips into the fog, or you click; (c) the faint team ring under EVERY man (unit marks, audit 2 item 6)
    OFF — CoH rings only the selection, the badges find the men; ?marks=1 brings it back. Checked in
    the game.
 8. [ ] **GAMEPLAY, still missing vs CoH**: building damage stages + collapse (gap list 2), crews

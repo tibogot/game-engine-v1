@@ -578,6 +578,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       for (const s of squads.squadsIn(list)) if (s.retreating) squads.endRetreat(s);
       app.algSounds?.order(kind, list); app.algVoices?.order(kind, list);
     },
+    // An ENEMY clicked: INSPECTED (shared-rts/selection.js) — its portrait, weapon and health in the
+    // unit bar, the command card EMPTY (nothing of yours to order). null: back to the selection.
+    onInspect: (u) => {
+      const sel = selection.selected;
+      hud.setCollapsed(!u && !sel.length);
+      unitBar.render(u ? [u] : sel);
+      commandCard.render(u ? [] : sel);
+    },
     onChange: (sel) => {
       // Nothing selected: the card folds away (hudBar.js).
       hud.setCollapsed(!sel.length);
@@ -744,6 +752,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     mgTeams?.frame();
     unitMarks?.frame();
     fogOfWar.update(dt);
+    // An inspected enemy that slipped back into the fog is let go (dead: onDeath does it).
+    const ins = selection.inspected;
+    if (ins && fogOfWar.enabled && !fogOfWar.canSeeEntity(ins)) selection.remove(ins);
     // The V overlay: centred on the selection until the pointer has moved.
     const lead = selection.selected?.find((e) => !e.isStructure) ?? selection.selected?.[0];
     if (lead?.position) coverSys.overlay.setFallback(lead.position.x, lead.position.z);

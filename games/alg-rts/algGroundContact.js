@@ -26,7 +26,7 @@ export const CONTACT = {
 };
 
 /** The contact splats for everything standing on the map (call once its pieces exist). */
-export function contactSplats(app, matIndex) {
+export function contactSplats(app, matIndex, sandIndex = null) {
   const C = CONTACT, out = [];
   const base = { mat: matIndex, opacity: C.opacity, tint: C.tint, tile: 3, soft: C.soft, push: 0, warp: 0.15, normal: 0, match: 1, _layer: 50 };
   // Buildings: their blocks (or footprint), turned with them.
@@ -47,6 +47,14 @@ export function contactSplats(app, matIndex) {
   for (const c of app.algLandmarks?.coverCircles?.() ?? []) {
     const r = 2 * c.radius * C.rock;
     out.push({ ...base, x: c.x, z: c.z, w: r, l: r, yaw: (c.x * 7.3 + c.z) % 6.28 });
+  }
+  // SANDSTONE: their APRON — pale blown sand and grit round the foot, wider than the rock (the
+  // buildings lab's preview, 2026-10-08), under the shade above. Its own colour, not the ground's.
+  if (sandIndex != null) {
+    for (const o of app.algLandmarks?.sandstone ?? []) {
+      out.push({ mat: sandIndex, opacity: 0.5, tint: [1.0, 0.95, 0.86], tile: 3, soft: 0.7, push: 0, warp: 0.4, normal: 0, match: 0, _layer: 45,
+        x: o.x, z: o.z, w: 2 * (o.ax * 1.25 + 2.5), l: 2 * (o.az * 1.25 + 2.5), yaw: -o.yaw });
+    }
   }
   return out;
 }

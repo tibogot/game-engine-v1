@@ -14,7 +14,8 @@
 // The sand skirt at the foot is the game's contact splats (algGroundContact.js) — not in the lab.
 import * as THREE from "three";
 import { abs, attribute, clamp, dot, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
-import { createRockGeometry } from "../../v3/props/proceduralRock.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { createRockGeometry, getRockGeometry, prewarmRockGeometries } from "../../v3/props/proceduralRock.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 
 /** The shapes (metres, half-extents): a long mesa slab, a shorter block, a low boulder. */
@@ -40,8 +41,48 @@ export const SANDSTONE_SHAPES = {
 };
 
 export function buildSandstoneRock(shape = "mesa", seed = 1) {
+  return createRockGeometry(sandstoneParams(shape, seed));
+}
+/** A shape's generator params (the memo's key: the game asks for exactly these). */
+export function sandstoneParams(shape, seed) {
   const { label, ...p } = SANDSTONE_SHAPES[shape];
-  return createRockGeometry({ ...p, seed });
+  return { ...p, seed };
+}
+
+// ── IN THE GAME (2026-10-08) ─────────────────────────────────────────────────────────────────
+/** The game's shapes: two seeds of each (generated in workers from the top of the boot). */
+export const SANDSTONE_GAME = [["mesa", 1], ["mesa", 2], ["block", 1], ["block", 2], ["low", 1], ["low", 2]];
+let _prefetch = null;
+/** Start the shapes in worker threads (1-1.7 s each on one thread: off the boot's main thread). */
+export function prefetchSandstone() {
+  return (_prefetch ??= prewarmRockGeometries(SANDSTONE_GAME.map(([sh, sd]) => sandstoneParams(sh, sd))));
+}
+
+/**
+ * The placed rocks ({ x, y, z, yaw, k, v } — v an index into SANDSTONE_GAME) as ONE merged mesh:
+ * each baked into place (a dozen rocks, one draw). Not instanced: three's transformNormalToView
+ * leaves out the instance's turn, so the photos' relief would light wrong on a turned instance.
+ * The photos then sit in world space — the rocks never move, and the layers stay level.
+ */
+export async function buildSandstoneField(placed, { colour = "aures" } = {}) {
+  if (!placed.length) return null;
+  await prefetchSandstone();
+  setSandstoneColour(colour);
+  const m = new THREE.Matrix4(), q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+  const geos = placed.map((r) => {
+    const [sh, sd] = SANDSTONE_GAME[r.v];
+    const g = getRockGeometry(sandstoneParams(sh, sd)).clone();
+    g.applyMatrix4(m.compose(new THREE.Vector3(r.x, r.y, r.z), q.setFromAxisAngle(up, r.yaw), new THREE.Vector3(r.k, r.k, r.k)));
+    return g;
+  });
+  const geo = mergeGeometries(geos);
+  for (const g of geos) g.dispose();
+  geo.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geo, sandstoneMaterial());
+  mesh.name = "SandstoneRocks";
+  mesh.castShadow = mesh.receiveShadow = true;
+  mesh.matrixAutoUpdate = false;
+  return mesh;
 }
 
 const TEX = (id, m) => `/textures/ground/${id}/${id}_${m}_1k.jpg`;

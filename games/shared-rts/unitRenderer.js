@@ -1793,7 +1793,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
 
       // Selection ring — one instance in the shared field. The draping over the
       // terrain happens in its vertex shader, so all we push is centre + radius.
-      if (unit.selected) selectionRings?.add(p.x, p.z, t.ringRadius);
+      // (an enemy is only ever "selected" when INSPECTED — selection.js: its ring red)
+      if (unit.selected) selectionRings?.add(p.x, p.z, t.ringRadius, unit.team === "enemy" ? 0xff5a46 : undefined);
     }
 
     for (const k of UNIT_TYPE_KEYS) {
