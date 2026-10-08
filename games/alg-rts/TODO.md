@@ -96,6 +96,16 @@ Keep this file current: tick things off here, add new asks here.
    pointer cursor"): buttons, command card, army tabs, alerts, objectives, minimap / tactical map,
    badges, the briefing and menu — in the game's own cursor style (ui/cursors.js: a white hand,
    like the arrow and reticle), not Chrome's default. Next after your current work.
+17. [x] **ATTACK-MOVE + FIELD REINFORCEMENT (2026-10-09, the CoH audit, your pick)**: ASSAUT (algAttackMove.js)
+   — Ctrl + right-click, or N on the card then a click (right-click / Esc cancels): the move's formation
+   and paths, the men free to fight (no playerMove): they engage what they meet, then each walks on to
+   his own spot; ends there or with any other order. Not on the camera's A (W/A/S/D, Q/E by position).
+   REINFORCE AT A HALF-TRACK (algSquads fieldPoints): every man of the squad within 30 m of one of your
+   half-tracks standing still → the man climbs out of its tailgate (a green ring shows the reach while a
+   short squad is selected). MEASURED in the game: a squad 120 m out, 4 → 6 at the half-track; none while
+   it moves; the assault engaged 3 FLN on the way and went on to the goal. PORTRAITS checked: the 16 ALN
+   faces of the painted sheet are all wired (moudjahid, fmTeam, tireur, Si Tahar); the French M1 helmets
+   are historical. Missing: CIVILIAN portraits (with the civilians).
 16. [x] **THE HUD OFF THE SCREEN + FULLSCREEN (2026-10-09, you)**: the bottom-right block spilled past
    the screen's edge — the interface scale measured it while the dev panel's width was still unset
    (the CSS fell back to 340 px: the block mid-screen, scaled from its centre), then the panel

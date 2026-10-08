@@ -1,5 +1,12 @@
 // English for the hud area (French key -> English). See ../i18n.js.
 export default {
+  // algAttackMove.js, field reinforcement (2026-10-09)
+  "Assaut": "Assault",
+  "Avancer en combattant : les hommes s'arrêtent pour tirer sur tout ennemi à portée, puis reprennent leur route. Un clic au sol ; plus vite : Ctrl + clic droit.": "Advance and fight: the men stop to fire at any enemy in reach, then go on. A click on the ground; faster: Ctrl + right-click.",
+  "Assaut (avancer en combattant)": "Assault (advance and fight)",
+  "Ctrl + clic droit": "Ctrl + right-click",
+  "Un homme par groupe incomplet : par la porte du poste, ou par l'arrière d'un half-track à l'arrêt si le groupe se tient près de lui.": "One man per squad short of men: through the post's gate, or out of the back of a half-track standing still if the squad is near it.",
+  "Ramenez le groupe au poste (Retraite), ou près d'un half-track à l'arrêt (30 m), pour le renforcer.": "Bring the squad back to the post (Retreat), or near a half-track standing still (30 m), to reinforce it.",
   // algTiers.js — the tiers explained (2026-10-08)
   "tenir {n} villages": "hold {n} villages",
   "tenir 1 village": "hold 1 village",

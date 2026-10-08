@@ -18,6 +18,9 @@
 //                       in per click (a fraction of the squad's price): he
 //                       comes out of the gate in the dead man's slot (his kit)
 //                       and runs to his squad.
+//                       IN THE FIELD (2026-10-09, CoH's half-track): every man of
+//                       the squad within 30 m of one of your half-tracks STANDING
+//                       STILL — the man climbs out of its tailgate instead.
 //   WIPED OUT           a squad with no one left is gone (its tab with it).
 //   VETERANCY           the squad's XP and stars (algVeterancy.js): every man of
 //                       it, newcomers too, fights with the squad's stars.
@@ -59,6 +62,7 @@ const P = {
   retreatSpeed: 1.4,
   retreatDamage: 0.6,
   reinforceTime: 4,      // s for a replacement to come out of the gate
+  fieldRadius: 30,       // m: a squad this near a still half-track reinforces there
 };
 
 /**
@@ -69,7 +73,8 @@ const P = {
  * @param {(n:number)=>boolean} o.pay  spend supplies (the French purse)
  * @param {object} o.post    the post's producer (inside/outside points) — replacements come out of it
  */
-export function createAlgSquads({ app, units, base, muster, pay, post, popRoom = () => Infinity }) {
+export function createAlgSquads({ app, units, base, muster, pay, post, popRoom = () => Infinity, fieldPoints = () => [] }) {
+  // `fieldPoints()`: the vehicles a squad may reinforce at in the field (alg: your half-tracks standing still).
   const list = [];
   const ofUnit = new Map();
   let seq = 0;
@@ -110,6 +115,14 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
 
   const inBase = (x, z) => Math.hypot(x - base.x, z - base.z) < P.baseRadius;
   const squadInBase = (s) => s.members.length > 0 && s.members.every((u) => inBase(u.position.x, u.position.z));
+  /** The field point (a still half-track) every man of the squad is within reach of, or null. */
+  function fieldPointOf(s) {
+    if (!s.members.length) return null;
+    for (const v of fieldPoints()) {
+      if (s.members.every((u) => Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < P.fieldRadius)) return v;
+    }
+    return null;
+  }
 
   /** RETREAT: run for the post. */
   function retreat(s) {
@@ -130,7 +143,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
   /** What one more man costs this squad (0 = can't). */
   function reinforceCost(s) {
     if (!s || s.team !== "player" || s.count + pending.filter((p) => p.squad === s).length >= s.size) return 0;
-    if (!squadInBase(s)) return 0;
+    if (!squadInBase(s) && !fieldPointOf(s)) return 0;
     if (popRoom() < 1) return 0;   // the pop cap (algEconomy.js POP)
     return SQUADS[s.typeKey].reinforce;
   }
@@ -141,7 +154,8 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     const taken = new Set(pending.filter((p) => p.squad === s).map((p) => p.slot));
     const slot = s.slots.findIndex((u, i) => !u?.alive && !taken.has(i));
     if (slot < 0) return false;
-    pending.push({ squad: s, slot, t: P.reinforceTime });
+    // At the post if it is there, else at the half-track it stands by.
+    pending.push({ squad: s, slot, t: P.reinforceTime, at: squadInBase(s) ? null : fieldPointOf(s) });
     return true;
   }
 
@@ -215,21 +229,26 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
       if (p.t > 0) continue;
       pending.splice(i, 1);
       const s = p.squad;
-      const u = units.spawn(s.typeKey, post.inside.x, post.inside.z, { snap: false, team: s.team, lookRole: p.slot });
+      // In the field: out of the half-track's tailgate (still there and alive), to his squad.
+      const v = p.at?.alive ? p.at : null;
+      let sx = post.inside.x, sz = post.inside.z;
+      if (v) { const h = v.heading ?? 0, back = (v.radius ?? 4) + 1; sx = v.position.x - Math.sin(h) * back; sz = v.position.z - Math.cos(h) * back; }
+      const u = units.spawn(s.typeKey, sx, sz, { snap: !!v, team: s.team, lookRole: p.slot });
       if (!u) continue;
       wrapDamage(u);
       join(s, u, p.slot);
       if (!list.includes(s)) list.push(s);
       const l = s.members.find((m) => m !== u) ?? null;
       const to = l ? l.position : muster;
-      u.emerge(post.outside.x, post.outside.z, to.x + 2, to.z + 2);
+      if (v) u.orderTo(to.x + 2, to.z + 2);
+      else u.emerge(post.outside.x, post.outside.z, to.x + 2, to.z + 2);
       // Selected squad: the newcomer joins the selection.
       if ((s.members.find((m) => m !== u))?.selected && app.selection) app.selection.select([...new Set([...app.selection.selected, u])]);
     }
   }
 
   return {
-    list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase, upgrade, upgradeCost,
+    list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase, upgrade, upgradeCost, fieldPointOf,
     /** A new man of a squad being BOUGHT (the producer's batch): `slot` 0 opens a new squad. */
     bought(u, key, slot) {
       if (!SQUADS[key] || u.team !== "player") return;

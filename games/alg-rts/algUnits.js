@@ -48,6 +48,7 @@ import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
 import { createAlgTransports } from "./algTransports.js";
+import { createAlgAttackMove } from "./algAttackMove.js";
 import { createAlgWrecks } from "./algWrecks.js";
 import { createAlgTiers } from "./algTiers.js";
 import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
@@ -396,6 +397,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     app, units,
     base: postProd?.centre ?? muster, muster,
     pay: (n) => economy.french.spend(n),
+    // REINFORCING IN THE FIELD (CoH): at any of your half-tracks standing still.
+    fieldPoints: () => units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving),
     post: postProd ?? { inside: muster, outside: muster },
     popRoom: () => popRoom(),
   });
@@ -408,6 +411,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // A faint ring round each village in its holder's colour (the shared ring
   // field: a thin band on a big circle).
   const villageRings = createSelectionRingField({ app, max: 16, inner: 0.975, segments: 96, opacity: 0.55 });
+  // The REINFORCE REACH (algSquads fieldPoints): round each still half-track while a squad short of
+  // men is selected — where it can call a man in.
+  const reachRings = createSelectionRingField({ app, max: 8, inner: 0.975, segments: 96, opacity: 0.5 });
 
   // ── The HUD (this game's files, ./ui/) ─────────────────────────────────
   const hud = createHudBar();
@@ -430,7 +436,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   });
   const commandCard = createCommandCard({
     thumbnails: unitRenderer.thumbnails,
-    onStop: () => { for (const u of app.selection?.selected ?? []) u.stop?.(); },
+    onStop: () => { attackMove?.cancel(app.selection?.selected); for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {
       const sel = app.selection?.selected ?? [];
       if (!sel.length) return;
@@ -476,6 +482,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // GRENADE (algGrenades.js): one man of the selection throws.
     abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
       ? [
+        // ASSAUT (algAttackMove.js): advance and fight on the way.
+        attackMove?.ability(sel),
         { key: "patrol", label: sel.every((u) => patrols?.has(u)) ? t("En patrouille") : t("Patrouille"), hint: t("Patrouille en file sur la piste la plus proche, aller et retour (véhicules : la piste). Un GMC en patrouille ravitaille les villages que vous tenez."), ready: true },
         grenades?.ability(sel),
         // ORIENTER (algMgTeam.js): point a machine-gun team's arc.
@@ -509,7 +517,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
           if (!sq.length) return null;
           const short = sq.some((s) => s.count + squads.pendingFor(s) < s.size);
           return { key: "reinforce", label: t("Renforcer"), cost: cost || undefined,
-            hint: !short ? t("Groupe au complet.") : cost ? t("Un homme par groupe incomplet, sorti par la porte du poste.") : t("Ramenez le groupe au poste pour le renforcer (Retraite)."),
+            hint: !short ? t("Groupe au complet.") : cost ? t("Un homme par groupe incomplet : par la porte du poste, ou par l'arrière d'un half-track à l'arrêt si le groupe se tient près de lui.") : t("Ramenez le groupe au poste (Retraite), ou près d'un half-track à l'arrêt (30 m), pour le renforcer."),
             ready: cost > 0 && economy.french.canAfford(cost) };
         })(),
       ].filter(Boolean)
@@ -527,6 +535,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "repair") repair?.begin(sel);
       if (key === "unload") { garrison?.exitAll(sel); commandCard.render(sel); }
       if (key === "disembark") { transports?.disembark(sel); commandCard.render(sel); }
+      if (key === "attackMove") attackMove?.begin(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
       if (key === "smoke") grenades?.begin(sel, "smoke");
@@ -556,6 +565,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
   let transports = null;   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
+  let attackMove = null;   // ASSAUT: advance and fight (algAttackMove.js), after the selection
   let controlGroups = null;   // made after the selection it listens to
   let coverCursor = null, mgTeams = null;
   const selection = createSelection({
@@ -585,6 +595,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       for (const u of list) if (!u.isStructure) u.playerMove = kind === "move";
       // A move takes men out of a house first (by its door); an attack is fired from inside.
       if (kind === "move") { garrison?.exitAll(list); transports?.exitAll(list); }   // (and out of a truck)
+      attackMove?.cancel(list);   // a new order ends an assault (algAttackMove.go sets it again after)
       repair?.cancel(list);   // a new order ends a repair
       // A new order calls a retreating squad off its retreat (CoH).
       for (const s of squads.squadsIn(list)) if (s.retreating) squads.endRetreat(s);
@@ -609,6 +620,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     },
   });
   app.selection = selection;
+  attackMove = createAlgAttackMove(app, { selection });
+  app.algAttackMove = attackMove;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   hud.setCollapsed(true);   // nothing selected at the start
   // THE ARMY TABS (ui/armyTabs.js): every group you have, down the right edge.
@@ -753,7 +766,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
   const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
-  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); searchlights.step(d); veterancy.step(); };
+  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -797,6 +810,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (busy) villageRings.add(v.position.x, v.position.z, R, v.owner === "player" ? (v.linked ? 0x58a8ff : 0xe0a040) : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
     }
     villageRings.commit();
+    reachRings.begin();
+    if (squads.squadsIn(selection.selected ?? []).some((q) => q.count + squads.pendingFor(q) < q.size)) {
+      for (const u of units.list) if (u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving) reachRings.add(u.position.x, u.position.z, squads.P.fieldRadius, 0x58e070);
+    }
+    reachRings.commit();
     ghostRings.begin();
     lastSeen.frame(app.camera);
     ghostRings.commit();
