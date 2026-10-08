@@ -70,6 +70,7 @@
       import GUI from "./ui/labGui.js";
       import { buildArena, zoneAt as yardZoneAt } from "./horse-lab/arena.js";
       import { buildParkour } from "./horse-lab/parkour.js";
+      import { buildJoust } from "./horse-lab/joust.js";
       import { buildFarm } from "./horse-lab/farm.js";
       import { createLabSky } from "./horse-lab/sky.js";
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
@@ -128,6 +129,8 @@
       const LEVEL = new URLSearchParams(location.search).get("level") ?? "parkour";
       if (new URLSearchParams(location.search).has("trot")) setTrotGear(true);   // ?trot=1: the made-up trot back as a gear (off: walk → canter → gallop)
       const arena = LEVEL === "yard" ? buildArena(scene) : LEVEL === "farm" ? buildFarm(scene, renderer) : buildParkour(scene);
+      // the tilt lane (quintains + rings) for the couched lance — parkour field only
+      const joust = LEVEL === "parkour" ? buildJoust(scene) : null;
       const zoneAt = arena.zoneAt ?? yardZoneAt;
       // static level meshes sharing a material → one draw each (they stay the horse's ray targets)
       const merged = mergeStatic(scene, scene.children.slice());
@@ -221,6 +224,7 @@
           if (msg) { note = msg; noteT = 2.5; }
         }
         if (k === "r") ctrl.startRear();
+        if (k === "l" && RP.lance) RP.lanceDown = !RP.lanceDown;   // lance: raise / couch it
         if (k === "b" && Math.abs(ctrl.v) < 1.6) ctrl.playOneShot("Attack_Kick");
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
         if (k === "k") { editor.open(editor.clip); camDist = Math.min(camDist, 4.5); }   // the last thing edited (riding idle first)
@@ -305,6 +309,12 @@
         location.href = u.href;
       });
       arena.addGui?.(gui);
+      if (joust) {
+        const jf = gui.addFolder("Tilt (lance targets)");
+        jf.add({ go: () => { RP.lance = true; ctrl.pos.set(joust.start.x, 0, joust.start.z); ctrl.yaw = joust.start.yaw; ctrl.v = 0; } }, "go").name("go to the tilt (lance on)");
+        jf.add({ reset: () => joust.reset() }, "reset").name("reset targets");
+        jf.close();
+      }
       labSky?.addGui(gui);
       const lookF = gui.addFolder("Horse look");
       lookF.addColor(coat, "color").name("coat colour").onChange(applyCoat);
@@ -322,6 +332,9 @@
       body.add(HP, "tailWave", 0, 3, 0.01).name("tail: flutter at speed");
       const rF = gui.addFolder("Rider");
       rF.add(RP, "show").name("rider on the horse").onChange((v) => rider.setVisible(v));
+      rF.add(RP, "lance").name("lance (joust)");
+      rF.add(RP, "lanceDown").name("lance couched (L)").listen?.();
+      rF.add(RP, "banner").name("banner (standard bearer)");
       rF.add(RP, "seatSpring", 40, 600, 1).name("seat spring");
       rF.add(RP, "seatDamp", 0.1, 1.5, 0.01).name("seat damping");
       rF.add(RP, "absorb", 0, 1, 0.01).name("spine absorbs rocking");
@@ -409,6 +422,7 @@
           poseEd.applyRider();
           poseEd.afterFrame();
           arena.update?.(dt, { ctrl, rider });                    // the farm's herd
+          joust?.update(dt, rider, ctrl);
           editor.afterUpdate();
         }
         if (D.probes) {
@@ -485,7 +499,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

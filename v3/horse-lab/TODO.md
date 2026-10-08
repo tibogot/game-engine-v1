@@ -43,7 +43,10 @@ Order = suggested priority. ★ = my top picks.
   FIXED: every 12° slope counted as a jumpable BANK (auto-jump hopped up hills);
   a bank is now an edge (> stepOver within 25 cm).
 - [ ] Real climb / descend STRIDES (shorter, hind legs under downhill) — needs clips or IK stride work.
-- [ ] Steps 0.6–0.75 m: a small hop, not a climb.
+- DONE: stepping DOWN lands past the edge, eased (no 38 cm snap, no hoof on the
+  corner); a lifted hoof is never asked past 95 % of the leg (no locked-straight
+  leg at a 70 cm step). 0.6–0.75 m steps CLIMB cleanly — a hop would need a
+  walk/canter jump clip; left for now.
 - [ ] Turning pivots on the front feet + a little sideways slide (RDR2).
 
 ## ▶ The pose editor (J) — poseEditor.js

@@ -529,7 +529,9 @@ export class HorseController {
           for (let k = 1; k <= 6; k++) {
             const s = L * k / 6, h1 = this.sampleGround(_c.x + fwdX * s, _c.z + fwdZ * s, y0, 0.9);
             if (h1 !== null && (hy === null || h1 > hy)) hy = h1;
-            if (h1 !== null && hyUnder !== null && h1 > hyUnder + 0.08 && (!g.land || h1 > g.land.y + 0.04)) g.land = { y: h1, x: _c.x + fwdX * (s + 0.05), z: _c.z + fwdZ * (s + 0.05) };   // a world point just past the edge
+            if (h1 !== null && hyUnder !== null && h1 > hyUnder + 0.08 && (!g.land || g.land.down || h1 > g.land.y + 0.04)) g.land = { y: h1, x: _c.x + fwdX * (s + 0.05), z: _c.z + fwdZ * (s + 0.05) };   // a world point just past the edge
+            // the ground DROPS away ahead (stepping down): land past the edge, on the lower ground
+            else if (h1 !== null && hyUnder !== null && h1 < hyUnder - 0.08 && !g.land) g.land = { y: h1, top: hyUnder, down: true, x: _c.x + fwdX * (s + 0.08), z: _c.z + fwdZ * (s + 0.08) };
           }
         }
         if (g.land) {                                          // reach toward the landing spot as the hoof comes down
@@ -539,7 +541,9 @@ export class HorseController {
           const u = clamp(1 - g.hA / Math.max(0.05, g.hPeak), 0, 1);
           const gap = Math.max(0, (g.land.x - _c.x) * fwdX + (g.land.z - _c.z) * fwdZ);
           g.landShift = gap * u * u * (3 - 2 * u);
-          hy = Math.max(hy ?? -1e9, g.land.y);
+          // up: at least the step's height; down: from the top it leaves, eased to
+          // the lower ground as it comes down (it snapped 38 cm at touchdown)
+          hy = g.land.down ? g.land.top + (g.land.y - g.land.top) * u * u * (3 - 2 * u) : Math.max(hy ?? -1e9, g.land.y);
         }
       } else {
         g.inSwing = false;
@@ -560,7 +564,7 @@ export class HorseController {
     });
     // 2. sink the body so the lowest hoof can reach
     const target = Math.max(minD, -HP.maxDrop) * this.ikW * (1 - this.rearA);
-    this.bodyOff += (target - this.bodyOff) * lerpK(10, dt);
+    this.bodyOff += (target - this.bodyOff) * lerpK(target < this.bodyOff ? 22 : 10, dt);   // sinks fast (a planted hoof stepping down would hover), rises gently
     r.position.y = this.y + this.lift + this.rearDy + this.bodyOff;
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
@@ -586,10 +590,21 @@ export class HorseController {
       const C = g.ik.getWorldPosition(new V3());
       const T = C.clone(); T.y += d;
       if (g.landShift) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.landShift * g.w);   // onto the step (foot placement)
+      if (!g.cannon && d > 0.05 && g.hA > 0.02 && this.rearT < 0) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), HP.stepReach * (d - 0.05));
+      // never past the leg's reach: the step-up's forward shift + height put the
+      // target out of reach and the leg locked straight out in front (one frame)
+      if (!g.cannon && g.hA > 0.02 && d > 0.05) {   // (a LIFTED hoof being raised: a planted foreleg stands at ~100 % of its length)
+        const top = g.u.getWorldPosition(new V3()), kn = g.l.getWorldPosition(new V3());
+        const len = top.distanceTo(kn) + kn.distanceTo(C), maxR = len * 0.95, dv = T.clone().sub(top);
+        if (dv.length() > maxR) {
+          const fw = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), along = dv.dot(fw);
+          const perp = dv.clone().addScaledVector(fw, -along), room = Math.sqrt(Math.max(0, maxR * maxR - perp.lengthSq()));
+          if (along > room) T.addScaledVector(fw, room - along);   // take the excess off the forward reach first
+        }
+      }
       // a front hoof lifted onto higher ground also reaches FORWARD (the forearm
       // comes up and forward, the hoof lands ahead on the step) — lifted straight
       // up, the knee had to fold shut (36°) with the hoof pulled back under
-      if (!g.cannon && d > 0.05 && g.hA > 0.02 && this.rearT < 0) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), HP.stepReach * (d - 0.05));
       if (g.cannon && this.rearT >= 0 && this.rearPlant) T.copy(this.rearFoot(li - 2));
       // front hooves stay exactly where they stand while the horse gathers,
       // released as that leg's own push-off starts

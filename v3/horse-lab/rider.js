@@ -39,6 +39,20 @@ export const RP = {
   upright: 0.6,        // share of the horse's slope pitch the spine takes back out
   stirrupWidth: 0.36,  // m from the spine to each ankle
   grip: 1,             // finger curl (0 open … 1 fist)
+  // JOUST: a lance couched under the right arm (off: the riding hands as they were)
+  lance: false,
+  lanceHand: [-0.15, 0.52, 0.18],  // right fist in the saddle frame (x: − = right, y up, z forward): in front of the chest, the lance under the armpit — lower, it could not clear the armoured crest
+  lanceAcross: 0.2,    // rad the lance points LEFT of straight ahead (over the horse's neck, as in a joust)
+  lanceDip: -0.03,     // rad the tip points down (− = a touch up: it rides over the neck)
+  lanceDown: false,    // couched for the charge (L key); raised: carried upright, the butt on the thigh
+  lanceUpHand: [-0.24, 0.24, 0.14], lanceUpGrip: 0.95, lanceUpTilt: 0.22,   // raised: the fist by the thigh, m of pole below it, rad leaning forward
+  lanceTime: 0.7,      // s to lower or raise it
+  lanceLen: 3.6, lanceBack: 0.75,   // m long; m behind the fist (its butt tucked at the armpit)
+  // BANNER: a standard-bearer's flag held upright in the right hand (wins over the lance)
+  banner: false,
+  bannerHand: [-0.3, 0.2, 0.12],  // right fist in the saddle frame: beside the right thigh, forearm low
+  bannerTilt: 0.1,     // rad the pole leans forward (and a little out)
+  bannerGrip: 1.05,    // m from the butt to the fist (the pole is 3.1 m)
   bitFollow: 0.45,     // how much the hands follow the horse's head nod
   steerHands: 1,       // how far the hands move when steering
   handFwd: 0, handUp: 0,   // offsets on top of the posture
@@ -73,6 +87,77 @@ export const PELVIS_UP_BUILTIN = RP.pelvisUp;
 
 // Riding postures as saved by the editor (v3/horse-lab/anims/riding.json):
 // every posture, the seat height and the stirrup strap length.
+// A jousting lance, 3.6 m along +z from its butt: a turned wooden shaft (one
+// smooth profile) painted in spiral stripes, a leather-wrapped grip, a flared
+// steel vamplate (hand guard) just ahead of the fist, a three-pronged coronel.
+function lanceStripes() {
+  const cv = document.createElement("canvas"); cv.width = 64; cv.height = 256;
+  const g = cv.getContext("2d");
+  g.fillStyle = "#efe6cf"; g.fillRect(0, 0, 64, 256);
+  g.fillStyle = "#a51c25";
+  for (let k = -2; k < 6; k++) { g.beginPath(); g.moveTo(0, k * 64); g.lineTo(64, k * 64 + 64); g.lineTo(64, k * 64 + 96); g.lineTo(0, k * 64 + 32); g.fill(); }   // diagonal: wraps into a spiral
+  g.globalAlpha = 0.08; for (let y = 0; y < 256; y += 3) { g.fillStyle = y % 6 ? "#000" : "#fff"; g.fillRect(0, y, 64, 1); }   // a little grain
+  const t = new THREE.CanvasTexture(cv); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace; t.repeat.set(1, 7);
+  return t;
+}
+// A standard-bearer's banner: an ash pole with a gilded spear finial, and a
+// heraldic flag (quarterly azure and or, a red cross, a swallowtail fly end)
+function makeBanner() {
+  const pg = new THREE.Group(); pg.name = "bannerPole";
+  const wood = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.7 });
+  const gold = new THREE.MeshStandardMaterial({ color: 0xd8a83a, roughness: 0.3, metalness: 0.9 });
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.026, 3.0, 12), wood); pole.position.y = 1.5; pole.castShadow = true; pg.add(pole);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.04, 14, 10), gold); ball.position.y = 3.02; pg.add(ball);
+  const tip = new THREE.Mesh(new THREE.ConeGeometry(0.035, 0.18, 4), gold); tip.position.y = 3.14; tip.castShadow = true; pg.add(tip);
+  const ferrule = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.02, 0.08, 10), gold); ferrule.position.y = 0.04; pg.add(ferrule);
+  // the flag's picture: a long tapering pennon (a gonfanon) — blue and gold
+  // bands, a red cross at the hoist, a gold fringe, the fly cut into two tails
+  const cv = document.createElement("canvas"); cv.width = 512; cv.height = 192;
+  const c = cv.getContext("2d");
+  for (let k = 0; k < 4; k++) { c.fillStyle = k % 2 ? "#d9a632" : "#1f3f8f"; c.fillRect(0, k * 48, 512, 48); }
+  c.fillStyle = "#efe6cf"; c.fillRect(0, 0, 150, 192);
+  c.fillStyle = "#a51c25"; c.fillRect(56, 0, 38, 192); c.fillRect(0, 77, 150, 38);
+  c.fillStyle = "#e8c35a"; c.fillRect(0, 0, 512, 6); c.fillRect(0, 186, 512, 6);
+  c.globalCompositeOperation = "destination-in";             // keep only the pennon's outline
+  c.beginPath(); c.moveTo(0, 0); c.lineTo(512, 62); c.lineTo(340, 96); c.lineTo(512, 130); c.lineTo(0, 192); c.closePath(); c.fill();
+  const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  const W = 1.5, Hc = 0.62, nx = 18, ny = 6;
+  const geo = new THREE.PlaneGeometry(W, Hc, nx, ny);
+  const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, alphaTest: 0.5, roughness: 0.85 }));
+  cloth.name = "bannerCloth"; cloth.frustumCulled = false; cloth.castShadow = true;
+  // PlaneGeometry rows run top → bottom, columns left (at the pole) → right (the fly): the uvs already match
+  return { pole: pg, cloth, W, Hc, nx, ny, wind: 0.15, t: 0 };
+}
+
+function makeLance() {
+  const g = new THREE.Group(); g.name = "lance";
+  const lathe = (profile, mat, seg = 18) => {                // profile: [radius, z] pairs, along +z
+    const geo = new THREE.LatheGeometry(profile.map(([r, z]) => new THREE.Vector2(r, z)), seg);
+    geo.rotateX(Math.PI / 2);                                 // lathe axis y → +z
+    const m = new THREE.Mesh(geo, mat); m.castShadow = true; g.add(m); return m;
+  };
+  const wood = new THREE.MeshStandardMaterial({ map: lanceStripes(), roughness: 0.55 });
+  const leather = new THREE.MeshStandardMaterial({ color: 0x3b2416, roughness: 0.85 });
+  const steel = new THREE.MeshStandardMaterial({ color: 0xb9bec6, roughness: 0.3, metalness: 0.9, side: THREE.DoubleSide });
+  // butt: a rounded end, swelling a little before the grip (it locks under the arm)
+  lathe([[0, 0], [0.026, 0.01], [0.034, 0.06], [0.038, 0.45], [0.03, 0.62]], wood);
+  lathe([[0.03, 0.62], [0.031, 0.66], [0.029, 0.72], [0.031, 0.78], [0.029, 0.84], [0.032, 0.9]], leather);   // the grip, wrapped
+  // vamplate: a steel funnel opening back over the hand, a rolled rim
+  lathe([[0.034, 1.08], [0.06, 1.04], [0.11, 0.97], [0.15, 0.9], [0.165, 0.86], [0.158, 0.85]], steel, 28);
+  // shaft: thick behind the guard, a long smooth taper to the tip
+  const shaft = []; for (let i = 0; i <= 16; i++) { const u = i / 16, z = 0.9 + u * 2.6; shaft.push([0.046 * (1 - u) ** 0.8 + 0.014 * u, z]); }
+  shaft.unshift([0.032, 0.9]);
+  lathe(shaft, wood);
+  // coronel: a steel cap with three short prongs (blunted: a tilt lance)
+  lathe([[0.014, 3.5], [0.022, 3.52], [0.024, 3.56], [0.02, 3.58]], steel);
+  for (let k = 0; k < 3; k++) {
+    const p = new THREE.Mesh(new THREE.ConeGeometry(0.008, 0.045, 6), steel);
+    p.rotation.x = Math.PI / 2; const a = (k / 3) * Math.PI * 2;
+    p.position.set(Math.cos(a) * 0.014, Math.sin(a) * 0.014, 3.6); g.add(p);
+  }
+  return g;
+}
+
 export function ridingData(strap) {
   return { version: 1, pelvisUp: RP.pelvisUp, heelDown: RP.heelDown, strapLen: strap.len, poses: JSON.parse(JSON.stringify(POSES)) };
 }
@@ -391,6 +476,8 @@ export class RiderController {
     for (const g of this.B.legs) legAxes(g, fwdRest);
     this.stirrups = new Stirrups(scene, this.saddle, this.k);
     this.mountSys = new MountSystem(this);
+    this.lance = makeLance(); this.lance.visible = false; scene.add(this.lance);
+    this.banner = makeBanner(); this.banner.pole.visible = this.banner.cloth.visible = false; scene.add(this.banner.pole, this.banner.cloth);
   }
 
   get mode() { return this.mountSys.mode; }
@@ -571,10 +658,13 @@ export class RiderController {
     const follow = bitL.clone().sub(this.bitAvg).multiplyScalar(RP.bitFollow);
     follow.x = 0;
     { const L = follow.length(); if (L > 1e-6) follow.multiplyScalar(0.12 * Math.tanh(L / 0.12) / L); }   // soft 12 cm limit (a hard clamp held the hands still, then let go)
+    { const want = RP.lanceDown ? 1 : 0; this.lanceT ??= want; this.lanceT += Math.sign(want - this.lanceT) * Math.min(Math.abs(want - this.lanceT), dt / RP.lanceTime); const u = this.lanceT; this.lanceA = u * u * (3 - 2 * u); }
     for (let i = 0; i < 2; i++) {
       const g = B.arms[i], hd = this.hands[i];
       const inside = steer * g.side > 0 ? Math.abs(steer) : 0;               // the hand on the turn's side
       const outside = steer * g.side < 0 ? Math.abs(steer) : 0;
+      const bannerOn = RP.banner && this.mode === "riding";
+      const lanceOn = RP.lance && !RP.banner && this.mode === "riding";
       const local = new V3(
         // turning: the hand on the turn side lifts and opens out to the side
         // (his screenshot); the other stays low and gives a little forward
@@ -582,6 +672,10 @@ export class RiderController {
         P.handUp + RP.handUp + follow.y + inside * 0.15 - outside * 0.02,
         P.handFwd + RP.handFwd + follow.z - inside * 0.05 + outside * 0.04,
       );
+      // jousting: the right fist low at the front of the right hip (the lance
+      // couched), the left takes both reins in the middle
+      if (bannerOn) { if (g.side < 0) local.set(...RP.bannerHand); else { local.x = 0.02; local.z += 0.02; } }
+      else if (lanceOn) { if (g.side < 0) local.set(...RP.lanceUpHand.map((x, k) => x + (RP.lanceHand[k] - x) * this.lanceA)); else { local.x = 0.02; local.z += 0.02; } }   // raised by the thigh → couched at the chest
       const T = pushOut(S.localToWorld(local), neck, 0.07 * this.k);   // never inside the neck (it rises toward the rider when rearing)
       // never a locked arm: the elbow stays bent and soaks up the neck's bob
       // (a straight arm reads as a push-up on the withers at the gallop)
@@ -592,9 +686,16 @@ export class RiderController {
       const toT = T.clone().sub(sh), d = toT.length(), k0 = armLen * 0.72, k1 = armLen * 0.9;
       if (d > k0) T.copy(sh).addScaledVector(toT.normalize(), k0 + (k1 - k0) * Math.tanh((d - k0) / (k1 - k0)));
       const tuck = clamp((P.lean - 0.25) / 0.4, 0, 1);                           // leaning forward (canter, gallop): elbows in and back, not winged out
-      const pole = lft.clone().multiplyScalar(g.side * (RP.elbowsOut * (1 - tuck * 0.55) + inside * 0.3)).addScaledVector(up, -0.15 - tuck * 0.35 + inside * 0.5).addScaledVector(fwd, -0.2 - tuck * 0.5).normalize();   // elbows out to the sides (the reference)   // elbows out; the turning arm's elbow lifts
+      const pole = bannerOn && g.side < 0 ? lft.clone().multiplyScalar(-0.8).addScaledVector(up, -0.4).addScaledVector(fwd, -0.3).normalize()   // elbow out to the right and down
+        : lanceOn && g.side < 0 ? lft.clone().multiplyScalar(-0.8 + 0.55 * this.lanceA).addScaledVector(up, -0.4 - 0.3 * this.lanceA).addScaledVector(fwd, -0.3 - 0.3 * this.lanceA).normalize()   // elbow down, back, against the ribs (the lance under it)
+        : lft.clone().multiplyScalar(g.side * (RP.elbowsOut * (1 - tuck * 0.55) + inside * 0.3)).addScaledVector(up, -0.15 - tuck * 0.35 + inside * 0.5).addScaledVector(fwd, -0.2 - tuck * 0.5).normalize();   // elbows out to the sides (the reference)   // elbows out; the turning arm's elbow lifts
       solveTwoBone(g.u, g.l, wpos(g.tip), T, pole, new V3(), true);
-      this.orientHand(hd, fwd, up, lft);
+      if (bannerOn && g.side < 0) this.orientHandTo(hd, lft.clone().multiplyScalar(0.75).addScaledVector(fwd, 0.55), lft.clone().multiplyScalar(0.4).addScaledVector(fwd, -0.5));   // fingers round the upright pole, knuckles out
+      else if (lanceOn && g.side < 0) {
+        this.orientHandTo(hd, lft.clone().multiplyScalar(0.75).addScaledVector(fwd, 0.55), lft.clone().multiplyScalar(0.4).addScaledVector(fwd, -0.5));   // raised: round the upright shaft
+        this.orientHandTo(hd, fwd.clone().multiplyScalar(0.55).addScaledVector(up, -0.6).addScaledVector(lft, 0.25), lft.clone(), this.lanceA);   // couched   // fingers forward-down round the shaft, palm in
+      }
+      else this.orientHand(hd, fwd, up, lft);
     }
 
     // Head: toward the camera, a little into the turn
@@ -606,6 +707,8 @@ export class RiderController {
     // Fists
     for (const hd of this.hands) for (const c of hd.curl) c.b.quaternion.multiply(q.setFromAxisAngle(c.axis, c.angle * RP.grip));
     rig.updateMatrixWorld(true);
+    this.placeLance(fwd, up, lft, hc, dt);
+    this.placeBanner(hc, dt);
     this.stirrups.update(dt, this.B.legs.map((g) => ({ in: 1, force: true, ankle: wpos(g.tip), ball: wpos(g.ball), fwd })));
     // just sat down: blend away from the mount's last pose
     if (this.pendingBlend) { this.mountSys.blend = { snap: this.pendingBlend, t: 0, dur: 0.35 }; this.pendingBlend = null; }
@@ -639,6 +742,121 @@ export class RiderController {
       else seg[i] = lenR / S1;
     }
     this.rein.step(dt, [[0, ringL], [iLp, fist[0].pinky], [iLt, fist[0].thumb], [iRt, fist[1].thumb], [iRp, fist[1].pinky], [n - 1, ringR]], seg, neck);
+  }
+
+  // The lance through the right fist: over the horse's neck to the left, the
+  // tip a little down, the butt under the armpit
+  placeLance(fwd, up, lft, hc, dtL = 1 / 60) {
+    // aimed in the WORLD: the horse's heading, true vertical — the rider holds it
+    // on the target. Built from the saddle's axes it rocked with the horse's back:
+    // the tip bobbed 55 cm every gallop stride
+    if (hc) { fwd = new V3(Math.sin(hc.yaw), 0, Math.cos(hc.yaw)); up = new V3(0, 1, 0); lft = new V3(Math.cos(hc.yaw), 0, -Math.sin(hc.yaw)); }
+    const on = RP.lance && !RP.banner && this.mode === "riding" && this.r.rig.visible;
+    this.lance.visible = on;
+    if (!on) return;
+    const hd = this.hands[1], grip = wpos(hd.middle).lerp(wpos(hd.tipM), 0.5);
+    // NEVER through the horse: tested against its neck + head (the reins'
+    // capsules, inflated by the lance's thickness); touching, it angles further
+    // across (it then crosses close to the saddle, where the neck is low) and a
+    // little up — the least that clears, eased so it does not twitch
+    const aim = (ac, dp) => fwd.clone().multiplyScalar(Math.cos(ac)).addScaledVector(lft, Math.sin(ac)).addScaledVector(up, -Math.sin(dp)).normalize();
+    // (against the horse's REAL skin — neck, head and the armour plates on the
+    // crest, which stand well out of the reins' simple neck capsules)
+    const pts = this.horseSkinPoints(hc), clear2 = (0.045 + 0.03) ** 2, L = RP.lanceLen - RP.lanceBack;
+    const touches = (d) => {
+      for (const p of pts) {
+        const t = clamp(p.clone().sub(grip).dot(d), 0.3, L);
+        if (grip.clone().addScaledVector(d, t).distanceToSquared(p) < clear2) return true;
+      }
+      return false;
+    };
+    // ONE correction along ONE path (across + a little up together), the least
+    // that clears — found by bisection, with a 3 cm margin so it does not flicker
+    // at the edge — then eased. (Trying several kinds of fix and taking the first
+    // that cleared jumped between them: the lance shook 11° a frame at idle.)
+    const along = (k) => aim(RP.lanceAcross + 0.75 * k, RP.lanceDip - 0.45 * k);
+    let need = 0;
+    if (touches(along(0))) {
+      let lo = 0, hi = 0.8;
+      if (touches(along(hi))) need = hi;
+      else { for (let it = 0; it < 10; it++) { const m = (lo + hi) / 2; if (touches(along(m))) lo = m; else hi = m; } need = hi; }
+      need = Math.min(0.8, need + 0.03);
+    }
+    this.lanceK ??= need;
+    // held at the HIGHEST it needed over the last ~2 s: at a gallop the neck
+    // rises into the lance's path every stride — following that, the tip bobbed
+    // 60 cm a stride; a rider holds it steady above the whole bob
+    // (only measured once it is (nearly) couched: raised, the fist is low by the
+    // thigh and the couched line from THERE runs through the neck — that held
+    // the lance pointing up for seconds after lowering it)
+    if ((this.lanceA ?? 1) < 0.9) need = Math.min(need, this.lanceNeed ?? 0);
+    this.lanceNeed = Math.max(need, (this.lanceNeed ?? need) - 0.12 * Math.min(dtL, 0.05));   // a peak that sinks ~0.12 a second
+    this.lanceK += (this.lanceNeed - this.lanceK) * (1 - Math.exp(-(this.lanceNeed > this.lanceK ? 10 : 1.5) * Math.min(dtL, 0.05)));
+    this.lanceFix = [0.75 * this.lanceK, -0.45 * this.lanceK];
+    const dirC = aim(RP.lanceAcross + this.lanceFix[0], RP.lanceDip + this.lanceFix[1]);
+    // raised → couched: the shaft swings down from upright over the horse's head
+    const dirU = up.clone().addScaledVector(fwd, Math.sin(RP.lanceUpTilt)).addScaledVector(lft, -0.03).normalize();
+    const a = this.lanceA ?? 1, qU = new THREE.Quaternion().setFromUnitVectors(new V3(0, 0, 1), dirU), qC = new THREE.Quaternion().setFromUnitVectors(new V3(0, 0, 1), dirC);
+    const qL = qU.slerp(qC, a), dir = new V3(0, 0, 1).applyQuaternion(qL);
+    this.lance.position.copy(grip).addScaledVector(dir, -(RP.lanceUpGrip + (RP.lanceBack - RP.lanceUpGrip) * a));
+    this.lance.quaternion.copy(qL);
+    this.lance.scale.setScalar(RP.lanceLen / 3.6);
+    this.lance.userData.gripAt = RP.lanceBack;
+  }
+
+  // Sample points of the horse's neck + head skin this frame (every 5th vertex
+  // whose main bone is a neck / head / ear bone; armour plates included)
+  horseSkinPoints(hc) {
+    if (!this.skinPick) {
+      this.skinPick = [];
+      hc.h.model.traverse((m) => {
+        if (!m.isSkinnedMesh || !m.visible || m.name === "tail") return;
+        const g = m.geometry, si = g.attributes.skinIndex, sw = g.attributes.skinWeight, ids = [];
+        for (let i = 0; i < g.attributes.position.count; i += 5) {
+          let bi = 0, bw = 0;
+          for (let k = 0; k < 4; k++) if (sw.getComponent(i, k) > bw) { bw = sw.getComponent(i, k); bi = si.getComponent(i, k); }
+          if (/^(Neck[23]|Head|Ear)/.test(m.skeleton.bones[bi]?.name)) ids.push(i);   // (not Neck1: the base of the neck is beside the fist itself)
+        }
+        if (ids.length) this.skinPick.push({ m, ids });
+      });
+    }
+    const out = [];
+    for (const { m, ids } of this.skinPick) for (const i of ids) { const v = new V3().fromBufferAttribute(m.geometry.attributes.position, i); m.applyBoneTransform(i, v); out.push(v.applyMatrix4(m.matrixWorld)); }
+    return out;
+  }
+
+  // The banner: the pole through the right fist, upright (world vertical, a
+  // little forward and out); the flag on its upper end droops when still and
+  // streams back with speed, fluttering (its vertices set each frame)
+  placeBanner(hc, dt = 1 / 60) {
+    const B = this.banner, on = RP.banner && this.mode === "riding" && this.r.rig.visible;
+    B.pole.visible = B.cloth.visible = on;
+    if (!on || !hc) return;
+    const fwd = new V3(Math.sin(hc.yaw), 0, Math.cos(hc.yaw)), lft = new V3(Math.cos(hc.yaw), 0, -Math.sin(hc.yaw)), up = new V3(0, 1, 0);
+    const hd = this.hands[1], grip = wpos(hd.middle).lerp(wpos(hd.tipM), 0.5);
+    const dir = up.clone().addScaledVector(fwd, Math.sin(RP.bannerTilt)).addScaledVector(lft, -0.04).normalize();
+    B.pole.position.copy(grip).addScaledVector(dir, -RP.bannerGrip);
+    B.pole.quaternion.setFromUnitVectors(new V3(0, 1, 0), dir);
+    B.pole.updateMatrixWorld(true);
+    // wind: the horse's speed (+ a light breeze), smoothed
+    B.wind += (clamp(Math.abs(hc.v) / 5, 0, 1) * 0.85 + 0.15 - B.wind) * (1 - Math.exp(-2 * dt));
+    B.t += dt * (2.5 + 9 * B.wind);
+    const g = B.cloth.geometry, P = g.attributes.position, { W, Hc, nx, ny } = B;
+    const top = B.pole.localToWorld(new V3(0, 2.92, 0)), back = fwd.clone().negate();
+    const droop = (1 - B.wind) * 1.25;                         // rad: hanging down along the pole when still
+    for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) {
+      const u = i / nx, y = (j / ny) * Hc, x = u * W;
+      const a = droop * (0.25 + 0.75 * u);
+      const base = top.clone().addScaledVector(dir, -y);
+      // flutter only OUTWARD (to the right, away from the rider): swinging both
+      // ways the gallop flutter went into his right shoulder
+      const amp = 0.025 + 0.1 * B.wind, fl = -amp * u * (1 + Math.sin(B.t - u * 6 + y * 2.2)) - 0.02 * u * (1 + Math.sin(B.t * 1.7 - u * 9)) - 0.03 * u;
+      const p = base.addScaledVector(back, x * Math.cos(a)).addScaledVector(up, -x * Math.sin(a)).addScaledVector(lft, fl);
+      const over = p.clone().sub(top).dot(lft);                 // never on the rider's side of the pole
+      if (over > 0.01) p.addScaledVector(lft, 0.01 - over);
+      P.setXYZ(j * (nx + 1) + i, p.x, p.y, p.z);
+    }
+    P.needsUpdate = true; g.computeVertexNormals(); g.computeBoundingSphere();
   }
 
   // Fist: knuckles forward and a little in, level; palm in and down.
