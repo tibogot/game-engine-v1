@@ -124,6 +124,15 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   is a 310° pose gap; the chosen one (walk 0.5 → canter 0.01: left fore planted /
   landing) is 83° and already footfall-consistent. A real departure stride would
   need its own keyed transition. Landing → gallop: 8° hand-over (fine).
+- DONE (user: "the stopping is a bit weird"): filmed stops from a walk and a gallop.
+  The walk stopped dead (5 m/s², 0.3 s, mid-stride) then finished its step
+  standing; the halt waited a whole stride ×1.8 (marched on the spot up to 2 s).
+  Now: a walk halts at 1.7 m/s² (~0.8 s, HP.walkHalt); the stand blend (0.5 s,
+  hooves held) starts when stopped if the stride is at an acceptable moment
+  (≤170°, ~¾ of it, HP.haltMaxDeg), else within ~0.3 s; the feet square up by a
+  step. From a gallop the canter hands to the walk after ~0.35 s at its slowest
+  (was 0.75 s: it coasted). Tried and dropped: holding a slow last step until the
+  stride's one best moment (110°) — up to 2 s of crawling.
 - DONE: turning on the spot = on the haunches (HP.spinPivot: pivots 0.8 × half
   the body behind the middle, only with no forward input); planted hooves held,
   a hoof left 12 cm behind steps (7 cm lift, only when it starts from the ground).

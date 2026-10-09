@@ -40,6 +40,11 @@ export const HP = {               // tunables (the lab GUI edits these)
   blendWait: 0.45,                // s a gait change may wait for that moment
   accel: 3.0,                     // m/s² (doubled inside the walk↔gallop gap)
   decel: 5.0,
+  haltOnStride: false,            // (tried: waiting for that moment — up to 2 s of slow walking)
+  haltNow: true,                  // the walk → stand blend starts as soon as it has stopped
+  haltMaxDeg: 170,                // the halt blends at once only up to this pose gap (beyond, legs look thin mid-blend — the audit's limit)
+  haltFade: 0.5,                  // s that blend takes (planted hooves held through it)            // the halt's last step ends at a stride moment the standing pose matches
+  walkHalt: 1.7,                  // m/s² a walk comes to a halt at (~0.8 s from a walk: about a stride)
   slideDecel: 6.5,                // m/s²: a refusal brakes once stopping in the room left needs this much (a gallop slides ~1.9 m)
   slideMax: 11,                   // m/s²: the hardest it brakes (an obstacle seen late)
   slidePitch: 0.14,               // rad the body sits back in a sliding stop
@@ -1052,10 +1057,21 @@ export class HorseController {
       // (at least one whole stride of the outgoing gait: a slow canter's stride is longer
       // than blendWait — timed out, it blended canter → walk across 180°)
       const stride = A.duration / Math.max(0.2, Math.abs(prev.getEffectiveTimeScale()));
-      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > Math.max(HP.blendWait, stride * 1.05) * (name === "Idle" ? 1.8 : 1);   // a stop may take a last step
+      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > (name === "Idle" ? HP.blendWait * 1.8 : Math.max(HP.blendWait, stride * 1.05));   // (a halt: ~0.8 s at most — waiting a whole stride ×1.8 it marched on the spot for 2 s)   // a stop may take a last step
       // the outgoing loop is long and calm (Idle): every moment is alike — no wait
       const calm = this.gaitName === "Idle";
-      if (!force && !calm && !waitedEnough && rows[iNow].deg > bestDeg + 15) return false;
+      // canter → walk: the hooves are held through a 0.38 s blend, so a fair moment
+      // will do (waiting for the best one held it at its slowest pace for 0.75 s: it coasted)
+      const slack = this.gaitName === GEARS[1] && name === "Walk" ? 45 : 15;
+      // a HALT goes when the horse has stopped: the stance only matches the walk at one
+      // moment a stride (waiting for it, it marched on the spot or crawled for 2 s);
+      // the planted hooves are held through a longer blend and step square after
+      if (HP.haltNow && this.gaitName === "Walk" && name === "Idle") {
+        fade = Math.max(fade, HP.haltFade);
+        if (rows[iNow].deg <= HP.haltMaxDeg) force = true;      // an acceptable moment (~¾ of the stride): go now
+        else if (!waitedEnough) return false;                   // else the last step goes on a little (≤ ~0.3 s at its pace)
+      }
+      if (!force && !calm && !waitedEnough && rows[iNow].deg > bestDeg + slack) return false;
       startAt = rows[iNow].at;
     }
     this.blendWaitT = 0;
@@ -1620,7 +1636,18 @@ export class HorseController {
       else this.refusing = false;
     }
     this.vRecent = Math.max(this.v, (this.vRecent ?? 0) - dt * 3);   // fastest of about the last second
-    const acc = brake || (Math.abs(target) > Math.abs(this.v) ? HP.accel : HP.decel);
+    // HALTING from the walk: over about a stride (a horse does not stop dead —
+    // at 5 m/s² it stopped in 0.3 s mid-stride and finished its step standing)
+    // ...and the last step ends where the standing pose fits: below ~0.4 m/s it keeps
+    // a slow step going until the stride reaches a moment the Idle hand-over matches
+    // (stopping at any moment, it then stepped on the spot or blended across 190°)
+    if (HP.haltOnStride && !brake && this.gaitName === "Walk" && Math.abs(target) < 0.05 && this.v > 0 && this.v < 0.5 && this.cur) {
+      const rows = this.transition("Walk", "Idle"), A = this.cur.getClip(), N = rows.length;
+      const iNow = Math.floor(((this.cur.time % A.duration) / A.duration) * N) % N, best = Math.min(...rows.map((r) => r.deg));
+      const iStop = (iNow + Math.round(N * 0.1)) % N;          // (where the stride will be once it has braked from here)
+      if (rows[iStop].deg > best + 25) target = 0.45;
+    }
+    const acc = brake || (Math.abs(target) > Math.abs(this.v) ? HP.accel : this.gaitName === "Walk" && Math.abs(target) < 0.05 && this.v > 0 ? HP.walkHalt : HP.decel);
     this.v += clamp(target - this.v, -acc * dt, acc * dt);
     // the slide's weight (look): braking hard from above a trot
     const sliding = brake > HP.decel * 1.15 && this.v > this.gaitV("Trot") * 0.8;
