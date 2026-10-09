@@ -84,7 +84,7 @@ function ringStand(M) {
 }
 
 // the lane: start / end posts with flags, a low painted kerb on the far side
-export function buildJoust(scene) {
+export function buildJoust(scene, debug = null) {
   const M = mats(), root = new THREE.Group(); root.name = "joust";
   const { laneZ: Z, x0, x1, reach } = JOUST, side = Z - reach;   // the lance side (−z when riding east)
   const quintains = [], rings = [];
@@ -111,12 +111,15 @@ export function buildJoust(scene) {
   const kerb = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0, 0.08, 0.12), M.cream); kerb.position.set(0, 0.04, Z + 1.6); root.add(kerb);
   shadowed(root);
   scene.add(root);
+  // the debug view: the shields' and the rings' hit shapes
+  for (const q of quintains) debug?.addShape(q.shield, { type: "box", half: new V3(JOUST.shield[0] / 2, JOUST.shield[1] / 2, 0.04) });
+  for (const r of rings) debug?.addShape(r.ring, { type: "disc", r: JOUST.ring, live: () => !r.taken });
 
   // score
   const hud = document.createElement("div");
   hud.style.cssText = "position:fixed;right:12px;bottom:12px;z-index:20;background:rgba(14,18,22,.8);color:#f1e3c0;font:600 14px system-ui;padding:8px 12px;border-radius:6px;border-left:4px solid #d9a632;display:none";
   document.body.appendChild(hud);
-  let last = null, msg = "", msgT = 0;
+  let last = null, msg = "", msgT = 0, lastHit = false;
   const say = (s) => { msg = s; msgT = 1.6; };
 
   const tipOf = (rider) => rider.lance.localToWorld(new V3(0, 0, 3.6));
@@ -139,6 +142,7 @@ export function buildJoust(scene) {
       r.ring.quaternion.copy(rider.lance.getWorldQuaternion(new THREE.Quaternion()));
     }
     if (!on) { last = null; return; }
+    let this_hit = false;
     const tip = tipOf(rider), a = last ?? tip;
     last = tip.clone();
     const speed = ctrl ? Math.abs(ctrl.v) : 0;
@@ -150,6 +154,7 @@ export function buildJoust(scene) {
       if (throughDisc(a, tip, c, nrm, Math.min(w, h) * 0.55) && q.cool !== true && speed > 1) {
         q.spin = (q.spin || 0) + Math.sign(nrm.dot(tip.clone().sub(a))) * (2 + speed * 1.4);   // struck: the arm spins away from the blow
         q.hits++; q.cool = true; setTimeout(() => (q.cool = false), 600);
+        debug?.flash(tip); debug?.note(`HIT quintain shield: ${speed.toFixed(1)} m/s, the tip`); this_hit = true;
         say(speed > 4 ? "a clean strike!" : "hit");
       }
     }
@@ -159,10 +164,12 @@ export function buildJoust(scene) {
       r.ring.updateMatrixWorld(true);
       const c = r.ring.getWorldPosition(new V3()), nrm = new V3(0, 0, 1).transformDirection(r.ring.matrixWorld);
       if (throughDisc(a, tip, c, nrm, JOUST.ring)) {
+        debug?.flash(c, 0xffd76a); debug?.note("RING threaded by the tip"); this_hit = true;
         r.order = rings.filter((o) => o.taken).length; r.taken = true; r.slide = 3.5; r.g.remove(r.ring); scene.add(r.ring);
         say("ring taken!");
       }
     }
+    lastHit = this_hit;
     msgT -= dt;
     const ringsTaken = rings.filter((r) => r.taken).length, struck = quintains.filter((q) => q.hits > 0).length;
     hud.innerHTML = `⚔ Tilt — rings <b>${ringsTaken}/${rings.length}</b> · quintains <b>${struck}/${quintains.length}</b>${msgT > 0 ? ` · <span style="color:#ffd76a">${msg}</span>` : ""}`;
@@ -174,5 +181,5 @@ export function buildJoust(scene) {
   }
   // start of the lane, facing down it (for the panel's "go to the tilt")
   const start = { x: JOUST.x0 - 14, z: JOUST.laneZ, yaw: Math.PI / 2 };
-  return { root, update, reset, start, quintains, rings };
+  return { root, update, reset, start, quintains, rings, get hitNow() { return lastHit; } };
 }

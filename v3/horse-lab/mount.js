@@ -509,6 +509,7 @@ export class MountSystem {
   updateFoot(dt, input) {
     const rd = this.rd, r = rd.r, rig = r.rig, hc = this.hc;
     let fwd = input.fwd, turn = input.turn, run = input.run;
+    if (input.hold) { fwd = 0; turn = 0; run = false; }        // aiming the bow: stand (the bow turns the body)
     if (this.mode === "approach") {
       // walk to the mounting spot, then turn to face the horse, then mount
       const { toW, q } = this.frame(), k = rd.k, s = this.side;
@@ -549,6 +550,9 @@ export class MountSystem {
     if (sp < 0.08 && Math.abs(turn) < 0.1) this.play("idle");
     else if (run && sp > this.speed.walk * 1.3) { this.play("jog"); this.cur.setEffectiveTimeScale(clamp(sp / this.speed.jog, 0.5, 1.5)); }
     else { this.play("walk"); this.cur.setEffectiveTimeScale(Math.sign(this.gv || 1) * clamp(Math.max(sp, 0.4) / this.speed.walk, 0.4, 1.5)); }
+    // the last ANIMATED pose back first (the mixer skips unchanged bones; the bow
+    // pose written over them would otherwise stay and add up)
+    for (const t of rd.touched) { t.b.position.copy(t.p); t.b.quaternion.copy(t.q); }
     rd.mixer.update(dt);
     for (const t of rd.touched) { t.p.copy(t.b.position); t.q.copy(t.b.quaternion); }
     rig.position.set(this.gpos.x, gy, this.gpos.z);

@@ -29,6 +29,87 @@ Order = suggested priority. ★ = my top picks.
 - Uncommitted with it: the tail rope (tailSway rewrite + ground), ears up
   while moving (calmEars), rearArch / rearReach / rearKnee tunables + sliders.
 
+## ▶ The jump matched to Muybridge — 2026-10-09
+
+- User: "the jump looks off compared to a horse jump, especially the back legs".
+  Reference: Muybridge, Animal Locomotion plate 638 ("Daisy" over a hurdle,
+  Wikimedia Commons, public domain; frames read on a grid). Measured ours the
+  same way (scratchpad jumpmeasure.js / jumpfilm.js): hind hooves were 12–32°
+  IN FRONT of the hip all flight (real: 26–38° BEHIND), hocks folded 84–95° early
+  (real: ~160° trailing), hind feet landed WITH the forefeet (bucking look), the
+  descent dived ~23° too far nose-down.
+- DONE (uncommitted): JUMP_HIND keys in horse.js (hip→hoof line, reach, cannon
+  angle; u = hind lift-off … forefeet land) placed by the hind IK once each hoof
+  has LEFT the ground; fold over the fence tied to where the hoof is vs the rail
+  (+ never lower than rail + 10 cm); hand-off to the clip: over the spot first,
+  then down; descent kept near level (jumpPitchFix, done as the forefeet land)
+  with the lifted forelegs keeping the clip's reach down. HP.jumpHind / jumpPitch
+  (0 = the clip's). Course clearance ≥ the clip's at every fence (1.2 m: 14 cm,
+  1.4 m: 12 cm); motion audit 15/15 both horses.
+- DONE: take-off gather — the clip squatted the hips to 0.77 of the hind leg (Daisy
+  0.92 → 0.83); the body is held up (HP.jumpGather 0.9, limited to what the planted
+  hind legs can still reach: they are near straight), planted hooves stay on the
+  ground (the "never under" fix now counts the raise). Body pitch at lift-off
+  measured equal to Daisy's (+20°): the rearing look is the raised neck.
+- DONE: the tail is carried out level behind from the gather to the landing
+  (HP.jumpTailLift, the rear's tail-lift reused) — it hung limp.
+- DONE: both hind feet plant together at take-off (HP.jumpPlant 0.42 m: the right
+  hind's landing spot moved forward through its last swing, held while planted,
+  handed to the flight pose as it leaves): −30/−31° at the plant (Daisy ~−25°).
+  (Kept through the flight it popped 20 cm at the jump's end — the audit caught it.)
+- DONE: landing — one foreleg straight reaching for the ground, the other held
+  folded (knee ~96°) and unfolding just before its own touch-down (HP.jumpForeSplit).
+  TRIED and dropped: planting the forefeet apart (scissor): the clip's landing
+  SKATES ~3 m/s forward, so a held hoof folded the knee 58° under weight. A real
+  scissor needs the horse to slow on landing (root motion) — next step if wanted.
+- Neck: Daisy keeps her head fairly high over this hurdle (no deep bascule) —
+  ours matches the reference; a show-jumper bascule is a separate choice.
+- [ ] Muybridge's other plates (636, 641, 644: Pandora, other heights) to check
+  higher fences.
+
+## ▶ The bow on foot (bow.js) — 2026-10-09
+
+- DONE (first pass, uncommitted): procedural archery over the idle / walk clips —
+  side-on stance, waist bends with the aim, bow arm IK + fist on the grip, draw
+  hand hooks the string to a cheek anchor; a recurve whose limbs bend so the
+  string keeps its length; arrows (shaft, cresting, 3 vanes, leaf head) fly with
+  gravity + drag and stick (targets follow, ground, fences); back quiver with
+  reach / pull / nock; release snap, string ring, follow-through. Archery range
+  on the parkour field (butts 10–60 m with ring scores + the lance lane's jar,
+  straw man, sandbag, crates). Debug: predicted arc, flight trails, hit notes.
+  Measured: crosshair → gold at 10–45 m (6–9 cm), red at 60 m; all 5 physics
+  targets hit. Cost: +29 draws with the bow on; aiming ~1.1 ms CPU (~2 ms while
+  drawing: the bow mesh rebuilds).
+- REDONE (user: "not anatomy, not possible"): the quiver fetch. Measured before: wrist
+  bent 159°, elbow locked / snapping, hand path through the body, nocking at full
+  arm's length (string 0.9 m from the right shoulder: arm locked, wrist 77°). Now:
+  keyed path in the chest frame (rise → beside the ear → nocks → pull along the
+  quiver, arrow pivoting on the lip → out beside the right shoulder, arrow hanging
+  clear → across the chest → string); elbow up-out reaching back; wrists limited
+  to the forearm (draw hand 0–34°, bow hand ≤ 30°, the bow follows the fist);
+  reach capped (no locked elbow). Nocking with the bow LOW ("ready"), then the bow
+  rises onto the target while drawing (push–pull). Test: scratchpad fetch2.js.
+- REDONE AGAIN (user: "fingers completely wrong", "smoother, slower, realistic every
+  frame"): measured frame by frame (scratchpad fetch3.js: elbow, wrist, forearm roll,
+  hand speed/accel, arrow vs hand/head/chest; fetch5.js big frames; hand1.js hand
+  close-ups). Found: pinch gap 14 cm (thumb never met the index), hook palm turned
+  away from the face (forearm at full pronation), elbow pole along the arm (flips
+  52°/frame, misses 32 cm), 3 IK passes (15 cm misses), palm asked outside the
+  forearm's roll range, arrow never freed (pull shorter than the arrow). Now: pinch
+  searched on this hand (thumb opposition 1 rad); forearm ROLL keyed directly
+  (BP.tauGrab −35, BP.tauHook −70; range −165…−15, ≤300°/s); elbow continuous
+  (≤3°/frame toward its side); 8 IK passes; over-the-shoulder reach (elbow up in
+  front, fingers down to the nocks); minimum-jerk curves, 3.15 s; quiver 0.48 m
+  (arrows stand 30 cm out). Result: hand ≤2.3 m/s, misses 0–0.2 cm, roll −100…−43,
+  elbow 43–134°, wrist ≤34°, 14 minor flags.
+- [ ] Walk while aiming (no strafe clips: slow walk facing the aim? lower-body turn?).
+- [ ] The hand passes through the cowboy hat's brim reaching the quiver.
+- [ ] Second and later arrows: the fetch starts from the release pose (not tested frame by frame yet).
+- [ ] Draw cost: bow normals analytic instead of computeVertexNormals.
+- [ ] Stuck arrows: 3 draws each (up to 24) — merge or instance.
+- [ ] Horse archery (the same pose on the saddle).
+- [ ] The user to judge the look (anchor height, stance, camera) against the reference.
+
 ## ▶ Legs on steps (foot placement) — 2026-10-08
 
 - DONE: swinging hooves look ahead (stepLook) and commit to landing ON higher
