@@ -38,4 +38,7 @@ export const MAP = {
   tutorial: true,
   // The knoll (the high-ground / cover lesson), as the level tool raises it.
   knoll: { x: 70, z: -58, r: 30, h: 5 },
+  // A FARMSTEAD west of the track (algGame.js places it; algCivilians puts its "shepherd" there —
+  // the moussebel of the shepherd's lesson). `turn`: off the camera's three-quarter view.
+  farmsteads: [{ x: -58, z: 64, turn: 0.5 }],
 };

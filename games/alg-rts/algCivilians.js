@@ -137,8 +137,12 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
   // The MOUSSEBEL's farms: a few farmsteads, drawn anew each game; a "shepherd" in each yard.
   const auxes = [];
   if (new URLSearchParams(location.search).get("moussebel") !== "0") {
-    const farms = Object.entries(showroom).filter(([k, o]) => /^mechtaFarm/.test(k) && o?.isObject3D).map(([, o]) => o);
-    for (let i = farms.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [farms[i], farms[j]] = [farms[j], farms[i]]; }
+    const own = (k) => /^mechtaFarmMap/.test(k);
+    const entries = Object.entries(showroom).filter(([k, o]) => /^mechtaFarm/.test(k) && o?.isObject3D);
+    for (let i = entries.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [entries[i], entries[j]] = [entries[j], entries[i]]; }
+    // A map's own farmsteads first (the training's lesson needs its one).
+    entries.sort(([a], [b]) => (own(b) ? 1 : 0) - (own(a) ? 1 : 0));
+    const farms = entries.map(([, o]) => o);
     for (const o of farms.slice(0, P.farms)) {
       // the yard: in front of the house (the farmstead's front, its gate, is at local -Z)
       const c = Math.cos(o.rotation.y), s = Math.sin(o.rotation.y);

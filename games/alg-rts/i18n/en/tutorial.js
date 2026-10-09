@@ -11,8 +11,8 @@ export default {
   "Instruction": "Training",
   "Passer ›": "Skip ›",
   "Algérie, 1956 · Camp d'instruction": "Algeria, 1956 · Training camp",
-  "Avant le djebel, le camp. Quatorze leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, la retraite, le poste et ses échelons, le half-track — puis une vraie bande du FLN.":
-    "Before the djebel, the camp. Fourteen short lessons: the camera, orders, cover, villages and supply, combat, retreat, the post and its tiers, the half-track — then a real FLN band.",
+  "Avant le djebel, le camp. Quinze leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, les moussebels, la retraite, le poste et ses échelons, le half-track — puis une vraie bande du FLN.":
+    "Before the djebel, the camp. Fifteen short lessons: the camera, orders, cover, villages and supply, combat, the moussebels, retreat, the post and its tiers, the half-track — then a real FLN band.",
   "Chaque leçon s'affiche en haut de l'écran et passe d'elle-même une fois faite. <b>Passer</b> saute celle que vous connaissez. <kbd>Échap</kbd> : pause, options, manuel.":
     "Each lesson shows at the top of the screen and moves on by itself once done. <b>Skip</b> passes one you already know. <kbd>Esc</kbd>: pause, options, manual.",
   "Instruction terminée": "Training complete",
@@ -40,8 +40,15 @@ export default {
     "Behind a wall you live; in the open you don't. Hold <kbd>V</kbd>: <b>green</b> = heavy cover, <b>yellow</b> = light. Send the squad behind the sandbags: under the cursor, each man shows the cover he will have.",
   // 5 take the village
   "Prendre un village": "Taking a village",
-  "Les villages sont l'enjeu : chacun rapporte et compte comme point de victoire. Postez des <b>hommes à pied</b> dans le cercle de la <b>Mechta d'exercice</b> : son anneau se remplit vers vous (plus ils sont nombreux, plus c'est rapide).":
-    "Villages are what the war is about: each one pays and counts as a victory point. Put <b>men on foot</b> in the circle of the <b>Practice mechta</b>: its ring fills toward you (the more men, the faster).",
+  "Les villages sont l'enjeu : chacun rapporte et compte comme point de victoire. Postez des <b>hommes à pied</b> dans le cercle de la <b>Mechta d'exercice</b> : son anneau se remplit vers vous (plus ils sont nombreux, plus c'est rapide). Ses habitants ne sont pas des cibles : quand on tire, ils rentrent chez eux.":
+    "Villages are what the war is about: each one pays and counts as a victory point. Put <b>men on foot</b> in the circle of the <b>Practice mechta</b>: its ring fills toward you (the more men, the faster). Its people are not targets: when the shooting starts, they go indoors.",
+  // 7b the shepherd
+  "Le berger": "The shepherd",
+  "Le FLN a ses auxiliaires, les <b>moussebels</b> : habillés comme tout le monde, ils prennent le fusil quand vous approchez. Un berger garde la <b>ferme</b> à l'ouest de la piste. Allez-y avec un groupe — de préférence d'abri en abri — et neutralisez-le s'il tire.":
+    "The FLN has its auxiliaries, the <b>moussebels</b>: dressed like anyone else, they take up a rifle when you come close. A shepherd keeps the <b>farm</b> west of the track. Go there with a squad — from cover to cover if you can — and deal with him if he fires.",
+  "il a tiré": "he fired",
+  "neutralisez-le": "take him down",
+  "approchez de la ferme": "approach the farm",
   "{pct} % vers vous": "{pct} % toward you",
   // 6 supply
   "Le ravitaillement": "Supply",

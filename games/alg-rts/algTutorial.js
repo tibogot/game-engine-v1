@@ -141,7 +141,7 @@ export function createAlgTutorial(app) {
   // 5. take the village
   L.push({
     title: t("Prendre un village"),
-    text: t("Les villages sont l'enjeu : chacun rapporte et compte comme point de victoire. Postez des <b>hommes à pied</b> dans le cercle de la <b>Mechta d'exercice</b> : son anneau se remplit vers vous (plus ils sont nombreux, plus c'est rapide)."),
+    text: t("Les villages sont l'enjeu : chacun rapporte et compte comme point de victoire. Postez des <b>hommes à pied</b> dans le cercle de la <b>Mechta d'exercice</b> : son anneau se remplit vers vous (plus ils sont nombreux, plus c'est rapide). Ses habitants ne sont pas des cibles : quand on tire, ils rentrent chez eux."),
     start() { const v = hamlet(); if (v) app.rtsCamera?.focusOn(v.position.x, v.position.z); },
     done: () => hamlet()?.owner === "player",
     sub: () => { const v = hamlet(); return v ? t("{pct} % vers vous", { pct: Math.max(0, Math.round(v.value * 100)) }) : ""; },
@@ -159,6 +159,27 @@ export function createAlgTutorial(app) {
     text: t("Trois cibles au nord du village (elles ne tirent pas). Sélectionnez un groupe et faites <b>clic droit sur un ennemi</b> : le curseur devient un viseur rouge, vos hommes l'attaquent."),
     start(s) { s.f = fighters(3, 20, -46, { hold: true, spread: 3 }); app.rtsCamera?.focusOn(10, -30); },
     done: (s) => allDead(s.f),
+  });
+  // 7b. the shepherd (the moussebel, algCivilians.js): the farmstead west of the track
+  L.push({
+    title: t("Le berger"),
+    text: t("Le FLN a ses auxiliaires, les <b>moussebels</b> : habillés comme tout le monde, ils prennent le fusil quand vous approchez. Un berger garde la <b>ferme</b> à l'ouest de la piste. Allez-y avec un groupe — de préférence d'abri en abri — et neutralisez-le s'il tire."),
+    start(s) {
+      s.a = app.algCivilians?.auxes?.[0] ?? null;
+      const p = s.a?.u.position ?? { x: MAP.farmsteads?.[0]?.x ?? -58, z: MAP.farmsteads?.[0]?.z ?? 64 };
+      s.m = { x: p.x, z: p.z, r: 10, color: 0xe0574a }; markers.push(s.m);
+      app.rtsCamera?.focusOn(p.x - 6, p.z - 8);   // (north of him: the farm mid-screen, clear of the panel)
+    },
+    done(s) {
+      if (!s.a) return true;   // no civilians (?civ=0): nothing to teach here
+      if (s.a.fighter) s.f = [s.a.fighter];   // (a skip clears him)
+      return s.a.revealed && !!s.a.fighter && !s.a.fighter.alive;
+    },
+    sub: (s) => (s.a?.revealed ? `✓ ${t("il a tiré")} · ${t("neutralisez-le")}` : t("approchez de la ferme")),
+    end(s) {
+      markers.splice(markers.indexOf(s.m), 1);
+      if (s.a && !s.a.revealed) { s.a.revealed = true; s.a.u.inside = true; }   // skipped before he showed: gone
+    },
   });
   // 8. assault
   L.push({
@@ -253,7 +274,7 @@ export function createAlgTutorial(app) {
   // ── The panel ─────────────────────────────────────────────────────────────
   const style = document.createElement("style");
   style.textContent = `
-#alg-score { display: none !important; }   /* the training has no score */
+#alg-score, #alg-obj { display: none !important; }   /* the training: no score, its lessons are the objectives */
 #alg-tut { position: fixed; top: 14px; left: calc((100vw - var(--alg-dev-w, 0px)) / 2); transform: translateX(-50%); z-index: 57;
   width: min(560px, 76vw); padding: 10px 14px 12px; background: var(--hud-bg, rgba(16,14,10,0.9)); border: 1px solid var(--hud-brass, #c9a54a);
   border-radius: var(--hud-radius, 3px); box-shadow: 0 6px 18px rgba(0,0,0,0.45); font-family: var(--hud-sans, sans-serif); color: var(--hud-text, #e8dcc4); }
@@ -351,7 +372,7 @@ export function createAlgTutorial(app) {
       return hud.briefing(`
         <div class="kicker">${t("Algérie, 1956 · Camp d'instruction")}</div>
         <h2>${t("Instruction")}</h2>
-        <p>${t("Avant le djebel, le camp. Quatorze leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, la retraite, le poste et ses échelons, le half-track — puis une vraie bande du FLN.")}</p>
+        <p>${t("Avant le djebel, le camp. Quinze leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, les moussebels, la retraite, le poste et ses échelons, le half-track — puis une vraie bande du FLN.")}</p>
         <p>${t("Chaque leçon s'affiche en haut de l'écran et passe d'elle-même une fois faite. <b>Passer</b> saute celle que vous connaissez. <kbd>Échap</kbd> : pause, options, manuel.")}</p>`,
         () => this.start(), { ready });
     },

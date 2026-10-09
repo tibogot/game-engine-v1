@@ -355,6 +355,10 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      `rules`); the Aurès systems (landmarks, fields, herds, hens, life, poles, AI, fog) OFF unless
      the URL says. All 14 driven through in the game, then the end screen. English in
      i18n/en/tutorial.js.
+   - [x] (2026-10-09) the CIVILIANS on in the training (the mechta's people; lesson 5 says they are not
+     targets), and lesson 8 THE SHEPHERD: a farmstead west of the track (MAP.farmsteads, placed by
+     algGame), its moussebel; done when he has fired and is down (checked: revealed at ~21 s, the
+     squad took him, no loss). 15 lessons. The training also hides the objectives panel now.
    - [ ] **you**: play it as a new player — wording, the order of the lessons, the pace.
    - [ ] the training's thumbnail on the menu (it shows the Aurès painting).
    - [ ] the Aurès' ALN cave still shows on the training's minimap ("CAVE"): the final band comes

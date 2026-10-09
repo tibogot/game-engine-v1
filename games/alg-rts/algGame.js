@@ -19,6 +19,7 @@ import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, MAP, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
+import { buildFarmstead } from "../../v3/render/objects/rtsAlgVillage.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgNightLamps } from "./algNightLamps.js";
 import { createAlgBattle } from "./algBattle.js";
@@ -56,7 +57,8 @@ const params = new URLSearchParams(location.search);
 // the telegraph, the FLN's own AI (the lessons bring their enemies) and the fog of war. Written
 // into the address so every module that reads its switch sees it.
 if (MAP.tutorial) {
-  const OFF = ["landmarks", "fields", "herds", "hens", "life", "poles", "ai", "fow", "civ"];
+  // (the civilians stay: the mechta's people, and the shepherd's lesson)
+  const OFF = ["landmarks", "fields", "herds", "hens", "life", "poles", "ai", "fow"];
   let changed = false;
   for (const k of OFF) if (!params.has(k)) { params.set(k, "0"); changed = true; }
   if (changed) history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
@@ -320,6 +322,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     onStatus(t("Mise en place du décor…"));
     // + the farmsteads and ruins between the villages (algLandmarks.js). ?landmarks=0 = without.
     const extra = params.get("landmarks") !== "0" ? landmarkEntries(app, SHOWROOM) : [];
+    // A map's own farmsteads (maps/training.js: the shepherd's lesson), landmarks or not.
+    (MAP.farmsteads ?? []).forEach((f, i) => extra.push({ key: `mechtaFarmMap${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1975 + i * 7 }), x: f.x, z: f.z, yaw: VIEW_YAW + (f.turn ?? 0), ground: true }));
     app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }
 
@@ -566,20 +570,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algHens = await createAlgHens(app, { units: app.algUnits?.units ?? null, showroom: app.showroom ?? {}, navGrid: app.navGrid ?? null });
 
-  // CIVILIANS (algCivilians.js): the villages' people — their own list and crowd, never a target;
-  // they go indoors when the shooting comes near. After the herds (a shepherd behind each flock).
-  // ?civ=0 = without.
-  if (params.get("civ") !== "0" && app.algEconomy && app.algGarrison) {
-    try {
-      const t0 = performance.now();
-      app.algCivilians = await createAlgCivilians(app, {
-        economy: app.algEconomy, garrison: app.algGarrison, herds: app.algHerds ?? null, navGrid: app.navGrid ?? null,
-        showroom: app.showroom ?? {}, fogOfWar: app.fogOfWar ?? null, battleUnits: app.algUnits?.units ?? null,
-      });
-      app.addPreRenderHook((dt) => { const d = dt * (app.timeScale ?? 1); app.algCivilians.step(d); app.algCivilians.frame(d, app.camera); });
-      console.log(`[civilians] ${JSON.stringify(app.algCivilians.stats)} in ${Math.round(performance.now() - t0)} ms`);
-    } catch (e) { console.warn("[alg civilians] failed:", e); }
-  }
   // ANIMALS DIE (2026-10-07; shared wildHerd `hurt`): blasts, stray rounds and fire hit the herds
   // and the hens (algCombat feeds it); a dead one bleeds and lies there, the rest bolt.
   {
@@ -599,6 +589,20 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       for (const f of F?.fires ?? []) if (f.end > now) app.algAnimals.hurt(f.x, f.z, f.radius, 6);
     });
   }    } catch (e) { console.warn("[alg hens] failed:", e); }
+  }
+  // CIVILIANS (algCivilians.js): the villages' people — their own list and crowd, never a target;
+  // they go indoors when the shooting comes near. After the herds (a shepherd behind each flock).
+  // ?civ=0 = without.
+  if (params.get("civ") !== "0" && app.algEconomy && app.algGarrison) {
+    try {
+      const t0 = performance.now();
+      app.algCivilians = await createAlgCivilians(app, {
+        economy: app.algEconomy, garrison: app.algGarrison, herds: app.algHerds ?? null, navGrid: app.navGrid ?? null,
+        showroom: app.showroom ?? {}, fogOfWar: app.fogOfWar ?? null, battleUnits: app.algUnits?.units ?? null,
+      });
+      app.addPreRenderHook((dt) => { const d = dt * (app.timeScale ?? 1); app.algCivilians.step(d); app.algCivilians.frame(d, app.camera); });
+      console.log(`[civilians] ${JSON.stringify(app.algCivilians.stats)} in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[alg civilians] failed:", e); }
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {
