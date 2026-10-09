@@ -84,6 +84,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   jumpRunRamp: true,              // the run-up's leg pace eases up from the gallop's (false = jumps straight to jumpLeadIn)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
+  spinPivot: 0.8,                 // turning on the spot pivots this far behind the middle (× half the body length: over the hind legs) — 0 = about the middle
   wcFade: 0.38,                   // s the walk <-> canter crossfade takes (planted hooves held through it)
   departFirst: true,              // gearing up from the walk: no faster than the walk can step until the canter has begun
   startLock: 0.9,                 // s after starting / stopping during which planted hooves are held where they stand (0 = off)
@@ -696,9 +697,9 @@ export class HorseController {
       // than the ground goes by: unlocked it would slide forward)
       // (leaving the gallop a held hoof stays held until it lifts: released while
       // planted it slid 8 cm a frame)
-      const locking = !this.oneShot && this.rearT < 0 && (((this.startLockT ?? 0) > 0 || (this.walkStopping && this.gaitName === "Walk")) && Math.abs(this.turnRate ?? 0) < 0.4 || (this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
+      const locking = !this.oneShot && this.rearT < 0 && (((this.startLockT ?? 0) > 0 || (this.walkStopping && this.gaitName === "Walk")) && Math.abs(this.turnRate ?? 0) < 0.4 || (this.spinning && HP.spinPivot > 0) || (this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
       if (g.lock && T.distanceTo(g.lock) > 1.2) g.lock = null;   // a teleport (a swinging hoof being released gets far from its spot)
-      const letGo = g.lock && (this.oneShot || this.rearT >= 0 || ((this.startLockT ?? 0) > 0 && Math.abs(this.turnRate ?? 0) >= 0.4));   // (a jump / rear / turn on the spot began: let go smoothly)                      // a jump began: let go smoothly, planted or not
+      const letGo = g.lock && (this.oneShot || this.rearT >= 0);   // a jump / rear began: let go smoothly, planted or not (a turn starting needs none: a held hoof stays until the walk lifts it)
       // stood still with a hold left (after a stop): eased over 0.5 s to where the
       // standing pose puts it (dropped at once it jumped there)
       // — by a little STEP, one hoof at a time (eased along the ground it skated 86 cm)
@@ -707,13 +708,14 @@ export class HorseController {
       if (settle) this.settling = li;
       // held at a START too long — the body walking on left it behind (1 m: the legs
       // could not reach, the body sank, the nose dived): it STEPS to catch up
-      const behind = g.lock && (this.startLockT ?? 0) > 0 && !settle && Math.hypot(T.x - g.lock.x, T.z - g.lock.z) > 0.12 * (this.h.height / 2.02);
-      if (behind) { g.catchUp = true; settle = true; }
-      if (!g.lock) g.catchUp = false;
+      const behind = g.lock && ((this.startLockT ?? 0) > 0 || this.spinning) && !settle && Math.hypot(T.x - g.lock.x, T.z - g.lock.z) > 0.12 * (this.h.height / 2.02);
+      if (behind) { if (!g.catchUp) g.stepArc = (g.lockRel ?? 0) === 0 && g.hA < 0.02; g.catchUp = true; settle = true; }   // (its own lift only for a step from the ground: the walk may already be lifting it)
+      if ((settle || letGo) && !g.catchUp && (g.lockRel ?? 0) === 0 && g.hA < 0.02) g.stepArc = true;   // (let go while planted: it steps, it does not skate)
+      if (!g.lock) { g.catchUp = false; g.stepArc = false; }
       if (g.hA < 0.02 && (locking || g.lock) && !letGo && !settle && !g.catchUp) { if (!g.lock) g.lock = T.clone(); g.lockRel = 0; }
       else if (g.lock && (g.hA > 0.04 || letGo || settle || g.catchUp)) { g.lockRel = Math.min(1, (g.lockRel ?? 0) + (this.lastDt ?? 1 / 60) / (settle ? 0.32 : 0.12)); if (g.lockRel >= 1) { g.lock = null; if (this.settling === li) this.settling = undefined; } }
       else if (g.lock && !locking && Math.abs(this.v) < 0.3 && g.hA < 0.02 && (g.lockRel ?? 0) === 0 && T.distanceTo(g.lock) < 0.025) { g.lock = null; }   // (already where it stands: nothing to step)
-      if (g.lock && (settle || g.catchUp) && (g.lockRel ?? 0) > 0) T.y += Math.sin(Math.PI * g.lockRel) * 0.07 * (this.h.height / 2.02);   // the step's lift
+      if (g.lock && g.stepArc && (g.lockRel ?? 0) > 0) T.y += Math.sin(Math.PI * g.lockRel) * 0.07 * (this.h.height / 2.02);   // the step's lift
       if (g.lock) { const k = 1 - smooth01(g.lockRel ?? 0); T.x += (g.lock.x - T.x) * k; T.z += (g.lock.z - T.z) * k; }
       if (g.jumpShift) {                                         // take-off: planted forward, beside the other —
         const k = g.jumpAir ? 1 - smooth01(g.jumpLegW ?? 0) : 1;  // only for the stance: it hands over to the flight pose as the hoof leaves
@@ -1635,7 +1637,19 @@ export class HorseController {
     const tr = this.gallopLike() ? HP.turnGallop : this.gaitName === "Trot" ? (HP.turnWalk + HP.turnGallop) / 2 : Math.abs(this.v) > 0.1 ? HP.turnWalk : HP.turnIdle;
     const wantTurn = busy ? 0 : input.turn * tr;
     this.turnRate += (wantTurn - this.turnRate) * lerpK(8, dt);
-    this.yaw += this.turnRate * dt;
+    // TURNING ON THE SPOT, on the haunches: the turn pivots about a point behind
+    // the middle (over the hind legs) — spun about its middle all four hooves slid
+    // 0.8–1.5 m in a 150° turn; the forehand now walks round the planted hind feet
+    const dYaw = this.turnRate * dt;
+    const spin = HP.spinPivot > 0 && input.fwd === 0 && Math.abs(this.v) < 0.3 && this.rearT < 0 && !this.oneShot ? 1 - clamp(Math.abs(this.v) / 0.3, 0, 1) : 0;   // (only a true turn on the spot: walking off while turning, the pivot slid the planted hooves)
+    if (spin > 0 && dYaw) {
+      const back = HP.spinPivot * this.h.halfLen * spin;
+      const px = this.pos.x - Math.sin(this.yaw) * back, pz = this.pos.z - Math.cos(this.yaw) * back;
+      const rx = this.pos.x - px, rz = this.pos.z - pz, cs = Math.cos(dYaw), sn = Math.sin(dYaw);
+      this.pos.x = px + rx * cs + rz * sn; this.pos.z = pz - rx * sn + rz * cs;   // (rotated about the pivot, the same way the yaw turns)
+    }
+    this.yaw += dYaw;
+    this.spinning = spin > 0.5 && Math.abs(this.turnRate) > 0.15;
 
     // Move (stop dead against walls)
     if (Math.abs(this.v) > 1e-3) {

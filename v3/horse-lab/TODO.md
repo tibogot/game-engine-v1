@@ -124,7 +124,12 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   is a 310° pose gap; the chosen one (walk 0.5 → canter 0.01: left fore planted /
   landing) is 83° and already footfall-consistent. A real departure stride would
   need its own keyed transition. Landing → gallop: 8° hand-over (fine).
-- [ ] Turning on the spot.
+- DONE: turning on the spot = on the haunches (HP.spinPivot: pivots 0.8 × half
+  the body behind the middle, only with no forward input); planted hooves held,
+  a hoof left 12 cm behind steps (7 cm lift, only when it starts from the ground).
+  150° turn (scratchpad spin.js): hoof slides 0.8–1.5 m → 10–30 cm, steps per leg
+  2–3 → 4–5. A turn starting no longer lets go of held hooves (they slid 7 cm a
+  frame walking off while turning) — they stay until the walk lifts them.
 
 ## ▶ The tail (horse.js tailSway) — 2026-10-09
 
