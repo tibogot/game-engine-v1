@@ -71,6 +71,9 @@ export const HP = {               // tunables (the lab GUI edits these)
   tailDrag: 0.009,                // linear damping (per 1/120 s step): light hair settles even slow (0.004 swung it under the belly stopping)
   tailSmooth: 0.012,              // the hair's bending stiffness: each point pulled toward its neighbours' middle (waves stay, hooks go)
   tailAir: 0.5,                   // the air's drag on the hair (∝ speed²; per m): at a gallop it streams back ~25° below level
+  tailLegHit: true,               // the tail collides with the hind legs (debug toggle)
+  tailKeySmooth: 14,              // 1/s: how fast the tail's keyed shape is followed (lower = the clip's swings softened more)
+  tailDock: 0.45,                 // how firmly the dock (the first segment, bone) holds its keyed line, per step
   tailHair: 0.08,                 // how much of the pull to the keyed shape the hair keeps (the dock: all of it)
   tailGravity: 1,                 // × g on the rope
   tailBendMax: 0.35,              // rad: the sharpest any tail joint bends (~20°; looser whipped the tip into hooks)
@@ -2003,7 +2006,7 @@ export class HorseController {
       S = this.tailR = { p: anim.map((p) => p.clone()), o: anim.map((p) => p.clone()), acc: 0, t: 0 };
     }
     // fixed steps (stable whatever the frame rate)
-    const h = 1 / 120, fwd = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const h0 = 1 / 120, fwd = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
     const side = new V3(Math.cos(this.yaw), 0, -Math.sin(this.yaw));
     const amt = clamp(Math.abs(this.v) / this.gallopV(), 0, 1) * HP.tailWave;
     const groundY = this.y + 0.05;                           // (the hair cards' half-width above the ground under the horse)
@@ -2049,25 +2052,39 @@ export class HorseController {
       this.tailButtR = clamp(rr - 0.02, 0.12, 0.45);
     }
     const caps = [[hipL, hipR, this.tailButtR]];
-    for (const s2 of ["L", "R"]) {
+    if (HP.tailLegHit) for (const s2 of ["L", "R"]) {
       const a = P0("BackLeg" + s2), b = P0("BackUpperLeg" + s2), c2 = P0("BackLowerLeg" + s2), d2 = P0("IKBackLeg" + s2);
       caps.push([a, b, 0.13 * sc], [b, c2, 0.075 * sc], [c2, d2, 0.055 * sc]);
     }
     const hairR = 0.035 * sc;                                  // the bundle's own half-thickness
-    S.acc =Math.min(S.acc + Math.max(0, dt), 4 * h);
-    const tmp = new V3();
-    while (S.acc >= h) {
-      S.acc -= h; S.t += h;
-      S.p[0].copy(anim[0]); S.o[0].copy(anim[0]);            // the dock follows the croup
+    // the keyed shape, SMOOTHED (relative to the dock, ~0.07 s): the clips whip the
+    // tail fast — sped up for a jump's run-up (to 2×) the firm dock followed it 10–14° a frame
+    if (dt > 0) {
+      const kS = lerpK(HP.tailKeySmooth, dt);
+      S.animRel = S.animRel && S.animRel.length === m ? S.animRel : anim.map((a) => a.clone().sub(anim[0]));
+      for (let i = 1; i < m; i++) { S.animRel[i].lerp(anim[i].clone().sub(anim[0]), kS); anim[i] = anim[0].clone().add(S.animRel[i]); }
+    }
+    // STEPS that add up to exactly this frame's time, the keyed pose moved through
+    // them from last frame's (a fixed 1/120 s step + carry-over did 1, 2 or 3
+    // steps on uneven frames while the croup moved every frame: the tail's root
+    // lagged it by 0–8 ms — ~5 cm at a gallop — and shook, flipping 64 % of frames)
+    const tmp = new V3(), DTc = Math.min(Math.max(0, dt), 0.05), nS = DTc > 0 ? Math.ceil(DTc / h0 - 1e-6) : 0, h = nS ? DTc / nS : h0, rk = h / h0;
+    const animPrev = S.animPrev && S.animPrev.length === m ? S.animPrev : anim;
+    const velK = h / (S.hPrev ?? h);                           // (Verlet: the carried velocity rescaled to the new step)
+    const pull = (k) => 1 - Math.pow(1 - clamp(k, 0, 1), rk);   // a per-1/120 s pull, for this step's size
+    for (let si = 0; si < nS; si++) {
+      S.t += h;
+      const u = (si + 1) / nS, A = anim.map((a, i) => animPrev[i].clone().lerp(a, u));
+      S.p[0].copy(A[0]); S.o[0].copy(A[0]);                    // the dock follows the croup
       for (let i = 1; i < m; i++) {
         const p = S.p[i], o = S.o[i], f = i / (m - 1);
         // inertia, slowed by the AIR: drag grows with the square of the speed
         // (hair: at a gallop it streams back ~25° below level, at a walk it hangs
         // and sways, stopping it swings through and settles). A fixed heavy
         // damping (6 % a step) made it a stiff, dead rope.
-        tmp.subVectors(p, o);
+        tmp.subVectors(p, o).multiplyScalar(si === 0 ? velK : 1);
         const sp = tmp.length() / h;
-        tmp.multiplyScalar((1 - HP.tailDrag) / (1 + HP.tailAir * sp * h));
+        tmp.multiplyScalar(Math.pow(1 - HP.tailDrag, rk) / (1 + HP.tailAir * sp * h));
         o.copy(p);
         p.add(tmp);
         p.y -= 9.8 * HP.tailGravity * h * h;
@@ -2077,9 +2094,11 @@ export class HorseController {
         // is carried by the horse; the HAIR below only remembers its shape faintly
         // and otherwise hangs and trails. (Pulled toward the clip's swing all along,
         // the whole tail flapped like a stick hinged at the croup, 0.8 m a stride.)
-        const dock = i <= 1 ? 1 : HP.tailHair;
-        const k = HP.tailPose * dock * (1 - 0.85 * f);
-        p.lerp(anim[i], k + tailLift * 0.07 * (1 - 0.5 * f) * (i <= 1 ? 1 : 0.3));   // (carried out while rearing / jumping: the DOCK firmer — the hair pulled too hooked up like a scorpion's)
+        // (the DOCK is bone: held firmly to its keyed line — loosely held, the first
+        // segment flopped and shook at the croup in the gallop and the jump;
+        // the second eases from bone to hair)
+        const k = i === 1 ? HP.tailDock : i === 2 ? HP.tailDock * 0.35 + HP.tailPose * HP.tailHair * (1 - 0.85 * f) : HP.tailPose * HP.tailHair * (1 - 0.85 * f);
+        p.lerp(A[i], pull(k + tailLift * 0.07 * (1 - 0.5 * f) * (i <= 1 ? 1 : 0.3)));   // (carried out while rearing / jumping: the DOCK firmer — the hair pulled too hooked up like a scorpion's)
       }
       // lengths (a few passes, the dock fixed), then never forward into the croup
       for (let it = 0; it < 4; it++) {
@@ -2091,18 +2110,18 @@ export class HorseController {
           else { a.addScaledVector(tmp, 0.5 * corr); b.addScaledVector(tmp, -0.5 * corr); }
         }
         // the hair's own bending stiffness: a soft pull toward the neighbours' middle
-        for (let i = 2; i < m - 1; i++) S.p[i].lerp(tmp.addVectors(S.p[i - 1], S.p[i + 1]).multiplyScalar(0.5), HP.tailSmooth);
+        for (let i = 2; i < m - 1; i++) S.p[i].lerp(tmp.addVectors(S.p[i - 1], S.p[i + 1]).multiplyScalar(0.5), pull(HP.tailSmooth));
         // no joint folds sharper than tailBendMax: the ends of each pair of segments
         // kept at least that far apart (a rope with some body, not a chain)
         for (let i = 1; i < m - 1; i++) {
           const a = S.p[i - 1], c2 = S.p[i + 1];
           tmp.subVectors(c2, a); const d = tmp.length() || 1e-6;
-          const bend = i <= 1 ? HP.tailBendMax : HP.tailBendMax * 1.5;   // (the hair bends more than the dock)
+          const bend = i <= 2 ? HP.tailBendMax * 0.55 : HP.tailBendMax * 1.5;   // (the dock and where the hair leaves it: a smooth curve — a looser joint there made a flickering hump; the hair lower down bends more)
           const minD = Math.sqrt(rest[i - 1] ** 2 + rest[i] ** 2 + 2 * rest[i - 1] * rest[i] * Math.cos(bend));
           if (d < minD) { const k2 = (minD - d) / d; if (i > 1) a.addScaledVector(tmp, -0.5 * k2); c2.addScaledVector(tmp, i > 1 ? 0.5 * k2 : k2); }
         }
         for (let i = 1; i < m; i++) {
-          const ahead = tmp.subVectors(S.p[i], anim[0]).dot(fwd) - 0.02;
+          const ahead = tmp.subVectors(S.p[i], A[0]).dot(fwd) - 0.02;
           if (ahead > 0) S.p[i].addScaledVector(fwd, -ahead);
           // never into the ground (rearing drops the dock low): it rests on it and drags
           if (S.p[i].y < groundY) { S.p[i].y = groundY; S.o[i].lerp(S.p[i], 0.5); }
@@ -2114,6 +2133,7 @@ export class HorseController {
         }
       }
     }
+    if (nS) { S.animPrev = anim.map((v) => v.clone()); S.hPrev = h; }
     // each bone points at the next point (blended with the keyed pose by tailSway)
     const cur = new V3(), want = new V3(), q = new THREE.Quaternion(), qw = new THREE.Quaternion(), qp = new THREE.Quaternion();
     for (let i = 0; i < n; i++) {
