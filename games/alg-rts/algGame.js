@@ -43,6 +43,7 @@ import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu } from "./ui/gameMenu.js";
 import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
+import { createAlgCivilians } from "./algCivilians.js";
 import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import { rtsEngineOptions, beginRtsPerfBoot } from "../shared-rts/rtsPerfBoot.js";
@@ -55,7 +56,7 @@ const params = new URLSearchParams(location.search);
 // the telegraph, the FLN's own AI (the lessons bring their enemies) and the fog of war. Written
 // into the address so every module that reads its switch sees it.
 if (MAP.tutorial) {
-  const OFF = ["landmarks", "fields", "herds", "hens", "life", "poles", "ai", "fow"];
+  const OFF = ["landmarks", "fields", "herds", "hens", "life", "poles", "ai", "fow", "civ"];
   let changed = false;
   for (const k of OFF) if (!params.has(k)) { params.set(k, "0"); changed = true; }
   if (changed) history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
@@ -565,6 +566,20 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       app.algHens = await createAlgHens(app, { units: app.algUnits?.units ?? null, showroom: app.showroom ?? {}, navGrid: app.navGrid ?? null });
 
+  // CIVILIANS (algCivilians.js): the villages' people — their own list and crowd, never a target;
+  // they go indoors when the shooting comes near. After the herds (a shepherd behind each flock).
+  // ?civ=0 = without.
+  if (params.get("civ") !== "0" && app.algEconomy && app.algGarrison) {
+    try {
+      const t0 = performance.now();
+      app.algCivilians = await createAlgCivilians(app, {
+        economy: app.algEconomy, garrison: app.algGarrison, herds: app.algHerds ?? null, navGrid: app.navGrid ?? null,
+        showroom: app.showroom ?? {}, fogOfWar: app.fogOfWar ?? null, battleUnits: app.algUnits?.units ?? null,
+      });
+      app.addPreRenderHook((dt) => { const d = dt * (app.timeScale ?? 1); app.algCivilians.step(d); app.algCivilians.frame(d, app.camera); });
+      console.log(`[civilians] ${JSON.stringify(app.algCivilians.stats)} in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[alg civilians] failed:", e); }
+  }
   // ANIMALS DIE (2026-10-07; shared wildHerd `hurt`): blasts, stray rounds and fire hit the herds
   // and the hens (algCombat feeds it); a dead one bleeds and lies there, the rest bolt.
   {

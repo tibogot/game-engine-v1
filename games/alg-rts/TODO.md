@@ -314,6 +314,21 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      refuges, the new one at (-30, -48); 3 bands formed out of it. The French answer: find them
      (the "Refuge découvert" alert) and destroy them.
      NEXT: civilians (soldier lab: villagers' looks) → melting into villages + bouclage et fouille.
+     - [x] CIVILIANS, step 1 (2026-10-09, algCivilians.js): the villages' people — 4 a hamlet, 6 the
+       dechra, 8 the ksar (an elder, men in gandoura and chèche / chéchia, women in the haïk or the
+       mlaya), and a SHEPHERD behind each flock. Their own unit list and crowd renderer (shared
+       unitRenderer `unarmed: true` — the pack's unarmed idle / walk / run — and `noXray`): combat,
+       the selection, the AI, capture and the minimap never see them, so they can never be a target.
+       Their day: between the doors, the well and the village ground, often two together. Shooting
+       within 75 m: they run for the nearest door and go in (a stuck runner tries another door, then
+       goes in where he is); out again after ~25 s of quiet. Fog: seen only where you see. ?civ=0 =
+       without; off in the training. MEASURED: GPU within the noise (~0.1-0.2 ms, interleaved A/B with
+       a no-op case); boot +1.3 s (the renderer parses and bakes the soldiers' pack again — share the
+       template if it matters).
+     - [ ] **you**: look at them in the game (who, how many, how they move).
+     - [ ] step 2: the ARMED SHEPHERD (you, 2026-10-08) — a shepherd's hut; a "shepherd" who is a FLN
+       auxiliary, unarmed until French come close, then fires (an enemy unit from then on).
+     - [ ] they walk through soldiers (two lists: no avoidance between them); night: indoors?
    - [ ] NEXT: then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.
    Was: CREW-SERVED MGs (set up, a field of

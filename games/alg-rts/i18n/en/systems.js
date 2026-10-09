@@ -1,5 +1,10 @@
 // English for the systems area (French key -> English). See ../i18n.js.
 export default {
+  // algCivilians.js — the villages' people (2026-10-09)
+  "Villageois": "Villager",
+  "Villageoise": "Villager",
+  "Ancien": "Elder",
+  "Berger": "Shepherd",
   // alg.html — the loading screen's slides (2026-10-09)
   "Aurès, 1956. Une section de paras descend vers le douar.": "Aurès, 1956. A section of paras heads down toward the douar.",
   // algTransports.js

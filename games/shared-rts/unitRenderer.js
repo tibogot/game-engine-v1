@@ -413,7 +413,7 @@ const GIB_MAX = 40;    // men of one body lying blown apart at once (each ~16 s)
  * (crowdSkinning view()), so there is no per-pixel branching between looks.
  * `members`: [{ key, type }] (the unit type key and its definition).
  */
-function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
+function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = false } = {}) {
   const root = tpl.root;
   root.updateMatrixWorld(true);
 
@@ -437,7 +437,9 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
   // Bake EVERY clip but the pack's first unarmed test downloads (they would
   // only cost table memory); the per-soldier state picks among them.
   const clips = {};
-  for (const a of tpl.animations) if (!/^unarmed_/.test(a.name)) clips[a.name] = a;
+  // UNARMED (2026-10-09, alg-rts civilians: a renderer of their own, `unarmed: true`): the pack's
+  // unarmed idle / walk / run are kept, and a type with `unarmed` plays them (soldierClip).
+  for (const a of tpl.animations) if (unarmed || !/^unarmed_/.test(a.name)) clips[a.name] = a;
   clips[idle.name] = idle;
   clips[run.name] = run;
   const roles = {
@@ -457,6 +459,10 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
     grenade: exact("grenade_throw")?.name ?? null,
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
+    // the unarmed set (an `unarmed` renderer only)
+    calm: unarmed ? exact("unarmed_idle")?.name ?? null : null,
+    walk: unarmed ? exact("unarmed_walk")?.name ?? null : null,
+    flee: unarmed ? exact("unarmed_run")?.name ?? null : null,
   };
 
   // The faction LOOKS in the crowd shader (soldierLooks.js): the body's colour
@@ -552,6 +558,9 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
   // speed), in the WORLD — the template is scaled to the type's height — so
   // the run plays at the unit's own pace and the feet don't skate.
   const runSpeed = measureGroundSpeed(root, run) || 0;
+  // …and of the unarmed walk and run, for the same reason.
+  const walkSpeed = roles.walk ? measureGroundSpeed(root, exact(roles.walk)) || 0 : 0;
+  const fleeSpeed = roles.flee ? measureGroundSpeed(root, exact(roles.flee)) || 0 : 0;
 
   // The compute pass emits vertices in the TEMPLATE MESH's local space, which
   // knows nothing about buildTemplate's normalisation (the centring offset and
@@ -589,7 +598,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false } = {}) {
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
+  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
 }
 
 /**
@@ -954,6 +963,8 @@ function measureGroundSpeed(root, clip) {
  * idle + run only).
  */
 function soldierClip(unit, v, roles) {
+  // An UNARMED type (civilians): idle, walk, or run when `unit.running`.
+  if (unit.type?.unarmed && roles.calm) return unit.isMoving ? (unit.running ? roles.flee : roles.walk) ?? roles.run : roles.calm;
   if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
   // Repairing (alg-rts `repairing`): the repair clip, else kneeling at it — never the shovel.
   if (unit.repairing && (roles.repair || roles.crouchIdle)) return roles.repair ?? roles.crouchIdle;
@@ -1021,7 +1032,7 @@ function canopyGlass() {
   return _canopyGlass;
 }
 
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, variants = null }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, variants = null, unarmed = false, noXray = false }) {
   // VARIANTS (opt-in, `variants`: { typeKey: { variantKey: typeDef } } — alg-rts, 2026-10-07: "the
   // GMC: use a mix", closed and open): extra LOOKS of a unit type, each its own template and
   // instanced draw; a unit of that type takes one of them (or the type's own) at random when it
@@ -1164,7 +1175,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const groups = [];
   const groupOf = new Map(); // template key → group
   for (const [key, m] of members) {
-    const g = buildCrowdGroup(m.tpl, m.members, app, scene, { gibs });
+    const g = buildCrowdGroup(m.tpl, m.members, app, scene, { gibs, unarmed });
     if (g) { groups.push(g); groupOf.set(key, g); }
   }
   /** Every crowd a type's soldiers go into: one per body. */
@@ -1734,7 +1745,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           v.fadeS = joining ? MOVE_JOIN : fadeFor(v.prev.clip, want);
         }
         const rate = v.move ? v.move.steps[v.move.i].rate ?? 1
-          : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6) : 1;
+          : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6)
+          : v.cur.clip === r.walk && v.crowd.walkSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.walkSpeed, 0.6, 1.6)
+          : v.cur.clip === r.flee && v.crowd.fleeSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.fleeSpeed, 0.6, 1.6) : 1;
         // The crouch-fire clip plays once per shot (a shot restarts it) and
         // then HOLDS its last frame — his aim — instead of looping.
         if (v.cur.clip === r.crouchFire) v.cur.t = Math.min(v.cur.t + dt * rate, f.duration(r.crouchFire) * CROUCH_AIM_AT);
@@ -1923,7 +1936,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // Uploads the per-soldier buffers and dispatches the skinning compute pass.
       f.commit();
       g.xray.count = f.count;
-      g.xray.visible = f.count > 0 && xrayOn();
+      g.xray.visible = !noXray && f.count > 0 && xrayOn();   // (civilians: none — noXray)
     }
   }
 
