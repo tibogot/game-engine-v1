@@ -98,8 +98,20 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   1.7 (run-up) → 0.67 (air) in single frames; now the run-up eases from the
   gallop's pace up (same run-up time: the planner counts on it) and the air pace
   eases in over 0.1 s of clip (same air time). Scratchpad approach.js logs it.
-- [ ] Next transitions to film: walk ↔ canter ↔ gallop gear changes, landing →
-  gallop (1.0 → 1.27 → 1.11), stopping, turning on the spot; feet IK during each.
+- GEAR CHANGES measured (scratchpad gears.js, uneven frames): pose gap of each
+  crossfade — Idle→Walk 200°, Walk→Canter 99°, Canter→Gallop 15°, Gallop→Canter 0°,
+  Canter→Walk 84°, Walk→Idle 117°. The walk ones are the visible snaps (start, stop,
+  walk↔canter): the clips have no pose in common there; needs transition strides
+  (a first step from standing, a canter depart, a last step into the halt).
+  (My hoof "pop" metric is not usable at a gallop: a hoof swinging at 11 m/s.)
+- START / STOP (uncommitted): planted hooves are held where they stand for 0.9 s
+  after Idle↔Walk (HP.startLock) and released as the walk lifts them; a held hoof
+  that falls 12 cm behind STEPS to catch up (held 1 m the body sank, nose dived);
+  standing with holds left, each hoof steps (lifts 7 cm) into place one at a time
+  (eased along the ground it skated). No holds in rears / jumps / turns on the spot.
+  Planted slides (scratchpad startstop.js): start 206 → 25 cm, stop 162 → 78 cm, stand 0.
+- [ ] Stop still slides 78 cm (the walk's last steps blending into the halt).
+- [ ] Walk ↔ canter (99° / 84° blends), landing → gallop, turning on the spot.
 
 ## ▶ The tail (horse.js tailSway) — 2026-10-09
 

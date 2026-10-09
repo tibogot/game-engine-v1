@@ -84,6 +84,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   jumpRunRamp: true,              // the run-up's leg pace eases up from the gallop's (false = jumps straight to jumpLeadIn)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
+  startLock: 0.9,                 // s after starting / stopping during which planted hooves are held where they stand (0 = off)
   walkRate: 1,                    // the walk legs play this much slower (planted hooves locked). TRIED 0.82: the forelegs cannot sweep further back — locked, they over-stretched and lifted (fore stance 56 → 31 %)
   walkNod: 0.12,                  // rad the head + neck nod down with each forefoot's stance at a walk
   gallopRate: 0.85,               // the gallop legs play this much slower (longer strides; planted hooves locked) — 1 = the clip's rate               // rad the neck stretches forward-down at a full gallop
@@ -659,6 +660,7 @@ export class HorseController {
     r.position.y = this.y + this.lift + this.rearDy + this.bodyOff + this.jumpRaise;
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
+    this.startLockT = Math.max(0, (this.startLockT ?? 0) - dt);
     this.ikCorr = this.calmOn ? Math.max(0.011, this.calmMove ?? 0) : 0;   // (the calmed body: the legs re-solved on purpose)
     const jh = this.jumpHind();
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
@@ -692,11 +694,24 @@ export class HorseController {
       // than the ground goes by: unlocked it would slide forward)
       // (leaving the gallop a held hoof stays held until it lifts: released while
       // planted it slid 8 cm a frame)
-      const locking = !this.oneShot && ((this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
-      if (g.lock && !locking && (T.distanceTo(g.lock) > 1.2 || Math.abs(this.v) < 0.3)) g.lock = null;   // (1.2 m: a teleport — a swinging hoof being released gets far from its spot)
-      const letGo = g.lock && this.oneShot;                      // (a jump began: let go smoothly, planted or not)   // (a reset / teleport, or stopped: no stale hold)
-      if (g.hA < 0.02 && (locking || g.lock) && !letGo) { if (!g.lock) g.lock = T.clone(); g.lockRel = 0; }
-      else if (g.lock && (g.hA > 0.04 || letGo)) { g.lockRel = Math.min(1, (g.lockRel ?? 0) + 1 / 60 / 0.12); if (g.lockRel >= 1) g.lock = null; }
+      const locking = !this.oneShot && this.rearT < 0 && (((this.startLockT ?? 0) > 0 && Math.abs(this.turnRate ?? 0) < 0.4) || (this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
+      if (g.lock && T.distanceTo(g.lock) > 1.2) g.lock = null;   // a teleport (a swinging hoof being released gets far from its spot)
+      const letGo = g.lock && (this.oneShot || this.rearT >= 0 || ((this.startLockT ?? 0) > 0 && Math.abs(this.turnRate ?? 0) >= 0.4));   // (a jump / rear / turn on the spot began: let go smoothly)                      // a jump began: let go smoothly, planted or not
+      // stood still with a hold left (after a stop): eased over 0.5 s to where the
+      // standing pose puts it (dropped at once it jumped there)
+      // — by a little STEP, one hoof at a time (eased along the ground it skated 86 cm)
+      let settle = g.lock && !locking && Math.abs(this.v) < 0.3 && g.hA < 0.02 && !this.oneShot && this.rearT < 0;
+      if (settle && this.settling !== undefined && this.settling !== li) settle = false;   // another hoof is stepping
+      if (settle) this.settling = li;
+      // held at a START too long — the body walking on left it behind (1 m: the legs
+      // could not reach, the body sank, the nose dived): it STEPS to catch up
+      const behind = g.lock && (this.startLockT ?? 0) > 0 && !settle && Math.hypot(T.x - g.lock.x, T.z - g.lock.z) > 0.12 * (this.h.height / 2.02);
+      if (behind) { g.catchUp = true; settle = true; }
+      if (!g.lock) g.catchUp = false;
+      if (g.hA < 0.02 && (locking || g.lock) && !letGo && !settle && !g.catchUp) { if (!g.lock) g.lock = T.clone(); g.lockRel = 0; }
+      else if (g.lock && (g.hA > 0.04 || letGo || settle || g.catchUp)) { g.lockRel = Math.min(1, (g.lockRel ?? 0) + (this.lastDt ?? 1 / 60) / (settle ? 0.32 : 0.12)); if (g.lockRel >= 1) { g.lock = null; if (this.settling === li) this.settling = undefined; } }
+      else if (g.lock && !locking && Math.abs(this.v) < 0.3 && g.hA < 0.02 && (g.lockRel ?? 0) === 0 && T.distanceTo(g.lock) < 0.025) { g.lock = null; }   // (already where it stands: nothing to step)
+      if (g.lock && (settle || g.catchUp) && (g.lockRel ?? 0) > 0) T.y += Math.sin(Math.PI * g.lockRel) * 0.07 * (this.h.height / 2.02);   // the step's lift
       if (g.lock) { const k = 1 - smooth01(g.lockRel ?? 0); T.x += (g.lock.x - T.x) * k; T.z += (g.lock.z - T.z) * k; }
       if (g.jumpShift) {                                         // take-off: planted forward, beside the other —
         const k = g.jumpAir ? 1 - smooth01(g.jumpLegW ?? 0) : 1;  // only for the stance: it hands over to the flight pose as the hoof leaves
@@ -1040,6 +1055,10 @@ export class HorseController {
       startAt = rows[iNow].at;
     }
     this.blendWaitT = 0;
+    // STARTING / STOPPING: the crossfade between standing and walking slid the
+    // planted hooves along the ground (3.5–4 cm a frame for 0.3 s): hold every
+    // planted hoof where it stands until the walk lifts it — the first step
+    if (HP.startLock > 0 && ((this.gaitName === "Idle" && name === "Walk") || (this.gaitName === "Walk" && name === "Idle"))) this.startLockT = HP.startLock;
     const next = this.act(name);
     next.reset();
     next.time = startAt;
