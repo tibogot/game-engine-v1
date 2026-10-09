@@ -167,6 +167,32 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
     app.algBattle?.say?.(t("<b>Le berger ouvre le feu !</b> Un moussebel du FLN, à la ferme."), x, z, "bad", "hq_contact");
   }
 
+  // ── Their sound (2026-10-09): voices in a village while its people are out (a loop at the middle
+  // of those out, louder the more there are); a shout as the first runs for a door; the door shut
+  // behind each, and opened as they come back out. (algSounds' slots murmur, shout, door.)
+  const audio = () => app.algSounds?.audio ?? null;
+  const yAt = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
+  const loopsOn = audio()?.addLoopProvider;
+  if (loopsOn) audio().addLoopProvider(() => {
+    const out = [];
+    for (const vg of villages) {
+      let n = 0, x = 0, z = 0;
+      for (const f of vg.people) if (f.state === "wait" || f.state === "walk") { n++; x += f.u.position.x; z += f.u.position.z; }
+      if (n < 2) continue;
+      x /= n; z /= n;
+      out.push({ slot: "murmur", key: vg, x, y: yAt(x, z) + 1.6, z, level: Math.min(1, n / 5) });
+    }
+    return out;
+  });
+  const shoutAt = new Map();   // village → when its last shout was
+  function shout(f) {
+    const now = performance.now() / 1000;
+    if (now - (shoutAt.get(f.vg) ?? -99) < 6 || rnd() > 0.6) return;
+    shoutAt.set(f.vg, now);
+    audio()?.play?.("shout", f.u.position.x, yAt(f.u.position.x, f.u.position.z) + 1.7, f.u.position.z, { gain: 0.9 });
+  }
+  const door = (p, gain = 1) => audio()?.play?.("door", p.x, yAt(p.x, p.z) + 1.2, p.z, { gain, delay: rnd() * 0.15 });
+
   // ── Their day ──────────────────────────────────────────────────────────────
   const fighting = (x, z) => {
     for (const m of battleUnits?.list ?? []) {
@@ -185,6 +211,7 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
       if (dd < bd) { bd = dd; best = d; }
     }
     if (!best) return;
+    if (f.state !== "run") shout(f);
     f.stuck = 0; f.best = Infinity;
     f.door = best;
     f.state = "run";
@@ -218,6 +245,7 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
       if (check && f.state !== "in" && f.state !== "run" && fighting(u.position.x, u.position.z)) goIn(f);
       if (f.state === "run") {
         if (near(u, f.door, P.enter) || (!u.isMoving && near(u, f.door, 6))) {
+          door(f.door);
           f.state = "in"; f.calm = 0; f.retried = false; u.inside = true; u.running = false; u.moveMul = 1;
           u.haltMovement?.();
         } else if (!u.isMoving) u.orderTo(f.door.x, f.door.z);
@@ -227,6 +255,7 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
         if (check) f.calm = fighting(f.door.x, f.door.z) ? 0 : f.calm + P.check;
         if (f.calm >= P.calm + f.lag) {   // not all at once
           u.inside = false; u.position.x = f.door.x; u.position.z = f.door.z;
+          door(f.door, 0.6);
           f.state = "wait"; f.t = 2 + rnd() * 6; f.retried = false;
         }
         continue;

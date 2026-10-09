@@ -1092,6 +1092,154 @@
      "dur": 2.5854
     }
    ]
+  },
+  "murmur": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.22,
+   "loops": 4,
+   "ref": 30,
+   "loop": true,
+   "files": [
+    {
+     "f": "murmur/634880.mp3",
+     "id": 634880,
+     "by": "brunoboselli",
+     "t": "Freesound - Generic Exterior Walla",
+     "url": "https://freesound.org/people/brunoboselli/sounds/634880/",
+     "gain": 4,
+     "dur": 31
+    },
+    {
+     "f": "murmur/834339.mp3",
+     "id": 834339,
+     "by": "IENBA",
+     "t": "Freesound - Outdoors Walla",
+     "url": "https://freesound.org/people/IENBA/sounds/834339/",
+     "gain": 4,
+     "dur": 40
+    }
+   ]
+  },
+  "shout": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.35,
+   "voices": 2,
+   "ref": 35,
+   "pitch": 0.08,
+   "gap": 1.2,
+   "files": [
+    {
+     "f": "shout/57204.mp3",
+     "id": 57204,
+     "by": "Jace",
+     "t": "Freesound - Men Shouting Hey.wav",
+     "url": "https://freesound.org/people/Jace/sounds/57204/",
+     "gain": 0.382,
+     "dur": 1.29,
+     "start": 0.05,
+     "end": 0.43
+    },
+    {
+     "f": "shout/547964.mp3",
+     "id": 547964,
+     "by": "Klangkobold",
+     "t": "Freesound - Panic-stricken screaming #2",
+     "url": "https://freesound.org/people/Klangkobold/sounds/547964/",
+     "gain": 0.501,
+     "dur": 1.41,
+     "start": 0.01,
+     "end": 1.25
+    }
+   ]
+  },
+  "door": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.35,
+   "voices": 3,
+   "ref": 25,
+   "pitch": 0.08,
+   "gap": 0.3,
+   "files": [
+    {
+     "f": "door/266682.mp3",
+     "id": 266682,
+     "by": "wjtaylor",
+     "t": "Freesound - door_close",
+     "url": "https://freesound.org/people/wjtaylor/sounds/266682/",
+     "gain": 0.358,
+     "dur": 0.69,
+     "start": 0.33,
+     "end": 0.69
+    },
+    {
+     "f": "door/219499.mp3",
+     "id": 219499,
+     "by": "JarredGibb",
+     "t": "Freesound - Door - Creak.wav",
+     "url": "https://freesound.org/people/JarredGibb/sounds/219499/",
+     "gain": 2.005,
+     "dur": 0.96,
+     "start": 0.23,
+     "end": 0.83
+    },
+    {
+     "f": "door/377552.mp3",
+     "id": 377552,
+     "by": "Mafon2",
+     "t": "Freesound - Wooden Creak",
+     "url": "https://freesound.org/people/Mafon2/sounds/377552/",
+     "gain": 2.982,
+     "dur": 0.92,
+     "start": 0.03,
+     "end": 0.77
+    }
+   ]
+  },
+  "plane": {
+   "use": [
+    0
+   ],
+   "bus": "sfx",
+   "vol": 0.9,
+   "voices": 2,
+   "ref": 220,
+   "pitch": 0.03,
+   "gap": 1,
+   "files": [
+    {
+     "f": "plane/431206.mp3",
+     "id": 431206,
+     "by": "oscaraudiogeek",
+     "t": "Freesound - Airplane Flyby",
+     "url": "https://freesound.org/people/oscaraudiogeek/sounds/431206/",
+     "gain": 0.961,
+     "dur": 15.85,
+     "start": 0.49,
+     "end": 13.09,
+     "peak": 6.13
+    },
+    {
+     "f": "plane/648720.mp3",
+     "id": 648720,
+     "by": "itinerantmonk108",
+     "t": "Freesound - Bi-plane flyby.wav",
+     "url": "https://freesound.org/people/itinerantmonk108/sounds/648720/",
+     "gain": 1.169,
+     "dur": 14.34,
+     "start": 0,
+     "end": 14.34,
+     "peak": 4.49
+    }
+   ]
   }
  }
 }

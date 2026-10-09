@@ -244,6 +244,14 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    ≥7% apart in pitch, never the same file twice in a row, the echo pre-delayed 45 ms.
    VOICES: an English placeholder pack in since 2026-10-08 (see SOLDIERS' VOICES below); French
    recordings + a native for the FLN later. The rifle/MG CANDIDATES to rotate (pick by ear in Dev → Sound); MUSIC (your call).
+   2026-10-09: THE VILLAGERS heard (algCivilians): a MURMUR loop at each village while 2+ of its people
+   are out (louder with more), a SHOUT as the first runs for a door (one a village per 6 s), the DOOR
+   shut behind each (opened, softer, coming out). THE AIR STRIKE's T-6: a propeller FLYBY, its loudest
+   moment as it passes over the point (shared rtsAudio `peakIn`: the recording entered part-way so its
+   peak — manifest `peak`, else its middle — lands on time). New CC0 slots murmur / shout / door /
+   plane (tools/algFetchSounds.mjs; candidates with words in a European language or a modern plane
+   pruned). LEFT: their `gain` / `peak` measured in the browser (algSounds.measure()); the smoke
+   grenade's hiss, the flare's pop and the grenade throw — later, with your smoke lab.
    Was: (orders, "sous le feu !", "grenade !"), dense battle ambience,
    distance-filtered gunfire, music for tension (voices parked: another way than the API).
 5. [ ] **SOLDIERS DRESSED FOR FRENCH ALGERIA** (today Vietnam-era US kit) + their PORTRAITS (US GIs).

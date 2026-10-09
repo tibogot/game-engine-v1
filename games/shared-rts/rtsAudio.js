@@ -256,10 +256,19 @@ export function createRtsAudio({ app, getView, manifestUrl, storeKey, startMuted
     v.g.gain.value = level * (file.gain ?? 1) * v.dry;
     // Sound takes time to arrive from far away.
     const travel = DFX && sp && sp.eff > DFX.delayFrom ? (sp.eff - DFX.delayFrom) / DFX.soundSpeed : 0;
-    const t = now + (o.delay ?? 0) + travel;
+    let t = now + (o.delay ?? 0) + travel;
+    // `peakIn` (2026-10-09, alg-rts's air strike): the recording's PEAK (its manifest `peak`, s into
+    // the file — else its middle: a flyby is loudest as it passes) lands `peakIn` s from now: the
+    // file is entered part-way, or waited for.
+    let skip = 0;
+    if (o.peakIn != null) {
+      const pk = file.peak ?? ((file.start ?? 0) + Math.min(buf.duration, file.end || buf.duration)) / 2;
+      const lead = (pk - (file.start ?? 0)) / rate - o.peakIn;
+      if (lead > 0) skip = lead * rate; else t += -lead;
+    }
     // A fight near the camera (the ducking): its loudness, here.
     if (DFX && (S.bus ?? "sfx") === "sfx" && sp && sp.eff < (S.ref ?? 40) * 2.5) battle += level;
-    const start = file.start ?? 0;
+    const start = (file.start ?? 0) + skip;
     const end = Math.min(buf.duration, file.end || buf.duration);
     const dur = Math.max(0.02, end - start);
     s.src.start(t, start, dur);

@@ -26,6 +26,7 @@ const LABELS = {
   cry: "A man hit", jeep: "Jeep (loop)", truck: "Truck / half-track (loop)", heli: "Alouette (loop)",
   fireLoop: "Fire (loop)", flameIgnite: "Flamethrower (lights)", flameLoop: "Flamethrower (loop)", flameStop: "Flamethrower (cut-off)", build: "Sappers digging", wind: "Wind (bed)", cicadas: "Cicadas (bed)",
   adhan: "Call to prayer", dog: "Dog", goat: "Goats / sheep", donkey: "Donkey", uiClick: "UI click", radio: "Radio (orders)",
+  murmur: "Villagers (voices, loop)", shout: "Villager shouts", door: "Door shut", plane: "T-6 flyby (air strike)",
 };
 const VEHICLE_LOOP = { willys: "jeep", gmc: "truck", halftrack: "truck", ebr: "truck", amx13: "truck" };
 

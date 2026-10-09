@@ -52,6 +52,13 @@ export const SLOTS = {
   dog:       { q: "dog barking distant", dur: [0.5, 8], bus: "sfx", vol: 0.35, voices: 2, ref: 60, pitch: 0.06, gap: 1.5 },
   goat:      { q: "goat bleat", dur: [0.3, 4], bus: "sfx", vol: 0.3, voices: 2, ref: 35, pitch: 0.1, gap: 1 },
   donkey:    { q: "donkey bray", dur: [1, 8], bus: "sfx", vol: 0.35, voices: 1, ref: 60, pitch: 0.05, gap: 8 },
+  // The VILLAGERS (algCivilians.js, 2026-10-09): voices in a village while its people are out (a
+  // loop at the village, by how many are out); a shout as one runs for a door; the door shut.
+  murmur:    { q: "crowd murmur outdoor", dur: [8, 120], bus: "sfx", vol: 0.22, loops: 4, ref: 30, loop: true },
+  shout:     { q: "male yell", dur: [0.4, 3], bus: "sfx", vol: 0.35, voices: 2, ref: 35, pitch: 0.08, gap: 1.2 },
+  door:      { q: "wooden door close", dur: [0.2, 2.5], bus: "sfx", vol: 0.35, voices: 3, ref: 25, pitch: 0.08, gap: 0.3 },
+  // THE AIR STRIKE (algAirStrike.js): a propeller plane coming in and away over the target.
+  plane:     { q: "propeller plane flyby", dur: [3, 25], bus: "sfx", vol: 0.9, voices: 2, ref: 220, pitch: 0.03, gap: 1 },
   // UI.
   uiClick:   { q: "ui click", dur: [0.02, 0.6], bus: "ui", vol: 0.5, voices: 3, pitch: 0.03, gap: 0.03 },
   radio:     { q: "radio squelch", dur: [0.1, 3], bus: "ui", vol: 0.45, voices: 2, pitch: 0.04, gap: 0.25 },

@@ -120,6 +120,9 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
     app.scene.add(plane);
     runs.push({ post, x, z, dir: d, t: -P.delay, plane, rounds: 0, bombs: 0 });
     app.algSounds?.radio?.();
+    // The ENGINE (2026-10-09): a propeller flyby, its loudest moment as the plane passes over the
+    // point (P.delay s from now — the mixer lines the recording's peak up: `peakIn`).
+    app.algSounds?.audio?.play?.("plane", x, (app.getWorldHeight?.(x, z) ?? 0) + P.low, z, { peakIn: P.delay });
     return true;
   }
 
