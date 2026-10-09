@@ -1577,7 +1577,7 @@ export class HorseController {
       // walk was kept (waiting for its hand-over moment) while the horse sped up to
       // 3 m/s — beyond what the walk's legs can step (1.6× its 1.28 m/s): the hooves
       // skated for ~0.6 s. Until the new gait has begun, no faster than the walk steps.
-      if (HP.departFirst && this.gaitName === "Walk" && target > 0) target = Math.min(target, walkV * HP.speedScale * 1.45);
+      if (HP.departFirst && this.gaitName === "Walk" && target > 0) target = Math.min(target, walkV * 1.75);   // (the walk's legs play up to 1.8× its clip speed)
       // ...and DOWN: the canter cannot step slower than 0.55× (its legs then skate
       // forward under a slowing body) — it slows to that, the walk takes over, then
       // the walk slows on
@@ -1672,10 +1672,11 @@ export class HorseController {
       }
       // (departing: speed held at what the walk can step, so the speed edges never
       // ask for the canter — asked for a faster gear, it departs from there)
-      const capW = this.h.gait.Walk.speed * HP.speedScale * 1.45;
+      const capW = this.h.gait.Walk.speed * 1.75;
       if (HP.departFirst && this.gaitName === "Walk" && (this.effGear ?? 0) > 0 && input.fwd > 0 && this.v > capW * 0.9 && !this.oneShot && this.rearT < 0) want = GEARS[1];
       if (HP.departFirst && this.gaitName === "Canter" && ((this.effGear ?? 0) === 0 || input.fwd <= 0) && this.v < this.h.gait.Gallop.speed * 0.54 && !this.oneShot && this.rearT < 0) want = "Walk";
-      if (HP.departFirst && this.gaitName === "Walk" && want !== "Walk" && want !== "Idle" && ((this.effGear ?? 0) === 0 || input.fwd <= 0)) want = "Walk";   // (slowing in the walk: never back up to the canter — they flip-flopped)
+      if (HP.departFirst && this.gaitName === "Walk" && want !== "Walk" && want !== "Idle" && ((this.effGear ?? 0) === 0 || input.fwd <= 0)) want = "Walk";
+      if (HP.departFirst && this.gaitName === GEARS[1] && want === "Walk" && (this.effGear ?? 0) > 0 && input.fwd > 0) want = GEARS[1];   // (gearing up: the canter, just departed below its own speed band, never drops back)   // (slowing in the walk: never back up to the canter — they flip-flopped)
       if (this.rearT >= 0) want = "Idle";                      // the rear is procedural, on top of Idle
       if (want !== this.gaitName) this.switchTo(want);
       else this.blendWaitT = 0;                              // no change pending: a later request waits afresh
