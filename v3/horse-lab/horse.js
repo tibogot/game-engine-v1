@@ -74,6 +74,12 @@ export const HP = {               // tunables (the lab GUI edits these)
   tailWave: 1,
   earsUp: 1,                      // ears held up while it moves (0 = as the clips fold them back)                    // a little side flutter in the air at speed (0 = none)
   jumpMaxTop: 1.5,                // m: the highest obstacle any horse takes on (above: a refusal)
+  jumpHind: 1,
+  jumpForeSplit: 1,               // the second foreleg kept folded while the first reaches to land (0 = both reach together, the clip's)
+  jumpPlant: 0.42,                // m the right hind lands further forward at take-off (beside the left, as a horse plants both) — 0 = the clip's
+  jumpTailLift: 0.85,             // the tail carried out level behind through a jump (0 = it hangs)
+  jumpGather: 0.9,                // take-off: the hips kept ≥ this × the hind leg (the clip squatted to 0.77) — 0 = the clip's
+  jumpPitch: 1,                   // the jump's descent kept nearer level (the clip dives ~20° too far nose-down) — 0 = the clip's                    // the hind legs follow the measured jump (JUMP_HIND, Muybridge) — 0 = the clip's
   jumpBoostMax: 0.75,             // m more arc a jump may add for the obstacle in front of it (fitJump): a 1.4 m fence needs ~0.6
   jumpMargin: 0.15,               // m every hoof passes above the obstacle's top (the baked clearance reads ~7 cm high vs the real hooves)
   jumpLatest: 1.7,                // m (+ 0.12 s of travel): a queued jump still waiting for its stride takes off NOW
@@ -111,6 +117,37 @@ export const HP = {               // tunables (the lab GUI edits these)
 // → BackLowerLeg (cannon, 0.42 m) → hoof. Bending only the hock tilts the
 // cannon and zig-zags the leg (the user saw it), so the cannon KEEPS its
 // animated angle and the hip + stifle take the change — what a horse does.
+// THE HIND LEGS IN A JUMP — measured frame by frame on Muybridge, Animal
+// Locomotion plate 638 ("Daisy" over a hurdle, side-on; the clip had them tucked
+// forward under the belly like a cat the whole flight and landing with the
+// forefeet — the bucking look). u: 0 = hind lift-off … 1 = forefeet land, then
+// on to the hind touch-down. Each key: [u, line (deg the hoof is BEHIND the hip,
+// from straight down), reach (hip→hoof ÷ the leg's length), cannon (deg the
+// cannon points back from straight down)]. Real: the legs push off straight
+// back, trail behind (hocks ~160°), fold at the hock over the fence with the
+// cannon flicked back, and hang folded BEHIND the hip as the forefeet land;
+// they come forward under the body only after.
+const JUMP_HIND = [
+  [0.0, 32, 0.94, 38],    // F11 lift-off: straight back from the push
+  [0.15, 36, 1.0, 40],    // F12 trailing, straight
+  [0.4, 28, 0.97, 33],    // F13–14
+  [0.6, 25, 0.88, 32],    // F15 starting to fold
+  [0.78, 33, 0.72, 52],   // F16 over the fence: hock folding, cannon flicked back
+  [0.9, 31, 0.6, 25],     // F17 forefeet reaching the ground: folded behind the hip
+  [1.0, 30, 0.6, 14],     // forefeet land: hocks shut, cannons hanging back
+  [1.2, 18, 0.66, 8],     // F18–20 carried forward, still folded
+  [1.45, 2, 0.84, 2],     // reaching under the body for the hind touch-down
+];
+function jumpHindKey(u) {
+  const K = JUMP_HIND;
+  if (u <= K[0][0]) return K[0].slice(1);
+  for (let i = 0; i < K.length - 1; i++) if (u <= K[i + 1][0]) {
+    const a = K[i], b = K[i + 1], t = smooth01((u - a[0]) / (b[0] - a[0]));
+    return [1, 2, 3].map((j) => a[j] + (b[j] - a[j]) * t);
+  }
+  return K[K.length - 1].slice(1);
+}
+
 const LEGS = [
   { upper: "FrontUpperLegL", lower: "FrontLowerLegL", ik: "IKFrontLegL" },
   { upper: "FrontUpperLegR", lower: "FrontLowerLegR", ik: "IKFrontLegR" },
@@ -549,6 +586,19 @@ export class HorseController {
         g.inSwing = false;
         if (g.land) hy = g.land.y;                            // planted on the step: its height and spot, held
       }
+      // TAKE-OFF PLANT: a horse plants both hind feet together, forward under the
+      // belly (Muybridge 638 F7: both ~25° ahead of the hip). The clip lands the
+      // right hind first, almost under the hip, 0.6 m behind the left: its landing
+      // spot is moved forward through its last swing (eased as it comes down),
+      // then held while it stands — the planted hoof never slides
+      if (g.cannon && HP.jumpPlant > 0 && this.oneShot && this.oneShotName === "Gallop_Jump" && this.oneShot.time < this.h.jump.t0) {
+        const want = li === 3 ? HP.jumpPlant : 0;
+        if (g.hA > 0.03 && !g.jumpAir) {                         // swinging in: reach further as it comes down
+          g.jpPeak = Math.max(g.jpPeak ?? 0, g.hA);
+          const u = clamp(1 - g.hA / Math.max(0.05, g.jpPeak), 0, 1);
+          g.jumpShift = Math.max(g.jumpShift ?? 0, want * u * u * (3 - 2 * u));
+        }                                                        // planted: held
+      } else if (!(g.jumpAir)) { g.jumpShift = 0; g.jpPeak = 0; }
       g.on = hy !== null;
       if (g.on && HP.hoofSlope > 0 && g.hA < 0.06) g.nrm = this.groundNormal(_c.x, _c.z, y0) ?? g.nrm; else if (g.hA >= 0.06) g.nrm = null;
       if (g.on) g.hit.set(_c.x, hy, _c.z);
@@ -565,14 +615,45 @@ export class HorseController {
     // 2. sink the body so the lowest hoof can reach
     const target = Math.max(minD, -HP.maxDrop) * this.ikW * (1 - this.rearA);
     this.bodyOff += (target - this.bodyOff) * lerpK(target < this.bodyOff ? 22 : 10, dt);   // sinks fast (a planted hoof stepping down would hover), rises gently
-    r.position.y = this.y + this.lift + this.rearDy + this.bodyOff;
+    // TAKE-OFF: the clip squats the hindquarters ~25–30 % (hips at 0.77 of the leg
+    // length); a real horse gathers with them barely lower than galloping (Muybridge
+    // 638 F5–F10: 0.92 → 0.83). Keep the hips at ≥ HP.jumpGather of the leg; the
+    // planted hooves reach down for it (below), it hands back as the hind leave.
+    this.jumpRaise = 0;
+    if (HP.jumpGather > 0 && this.oneShot && this.oneShotName === "Gallop_Jump") {
+      const t = this.oneShot.time, t0 = this.h.jump.t0;
+      const wT = smooth01((t - 0.06) / 0.12) * (1 - smooth01((t - (t0 - 0.12)) / 0.14));
+      if (wT > 0) {
+        const g = this.legs[3], hip = g.u.getWorldPosition(new V3()), stf = g.l.getWorldPosition(new V3()), hk = g.cannon.getWorldPosition(new V3()), ft = g.ik.getWorldPosition(new V3());
+        const legLen = hip.distanceTo(stf) + stf.distanceTo(hk) + hk.distanceTo(ft);
+        const hipH = hip.y - (this.y + this.lift) + this.bodyOff;   // (the hip over the ground with this frame's sink, before the raise)
+        // never more than a planted hind leg can follow down (it would lift off the
+        // ground: the legs are near straight there already)
+        let room = 0.3;
+        for (const gl of [this.legs[2], this.legs[3]]) {
+          if (gl.hA > 0.03) continue;
+          const h0 = gl.u.getWorldPosition(new V3()), s0 = gl.l.getWorldPosition(new V3()), k0 = gl.cannon.getWorldPosition(new V3()), f0 = gl.ik.getWorldPosition(new V3());
+          const Dmax = (h0.distanceTo(s0) + s0.distanceTo(k0) + k0.distanceTo(f0)) * 0.96, dxz = Math.hypot(h0.x - f0.x, h0.z - f0.z), dy = h0.y - f0.y + this.bodyOff;
+          room = Math.min(room, Math.sqrt(Math.max(0, Dmax * Dmax - dxz * dxz)) - dy);
+        }
+        this.jumpRaiseS = (this.jumpRaiseS ?? 0) + (clamp(Math.min(HP.jumpGather * legLen - hipH, room), 0, 0.3) * wT - (this.jumpRaiseS ?? 0)) * lerpK(18, dt);
+        this.jumpRaise = this.jumpRaiseS;
+      } else this.jumpRaiseS = 0;
+    } else this.jumpRaiseS = 0;
+    r.position.y = this.y + this.lift + this.rearDy + this.bodyOff + this.jumpRaise;
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
     this.ikCorr = 0;
+    const jh = this.jumpHind();
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
     const untilt = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw).multiply(r.quaternion.clone().invert());
     this.legs.forEach((g, li) => {
-      if (g.w < 0.01 && !g.cannon && !(g.under > 0)) return;   // front legs folded by the rear: leave them
+      // (a jumping hind leg is taken over once its hoof has left the ground — see below)
+      if (g.cannon) {
+        if (jh && jh.w > 0) { if (g.hA > 0.04 || g.jumpAir) { g.jumpAir = true; g.jumpLegW = Math.min(1, (g.jumpLegW ?? 0) + dt / 0.15); } }
+        else { g.jumpAir = false; g.jumpLegW = 0; }
+      }
+      if (g.w < 0.01 && !g.cannon && !(g.under > 0) && !this.jumpUndo && !(HP.jumpForeSplit > 0 && this.oneShot && this.oneShotName === "Gallop_Jump")) return;   // front legs folded by the rear: leave them (in a jump's tilt they still get it undone, below)
       // the pastern (fetlock → toe), measured once standing: rearing lines it up with the cannon
       if (g.cannon && !g.pastern && this.rearT < 0 && this.v === 0) {
         const toeB = g.ik.children.find((b) => b.isBone);
@@ -582,14 +663,20 @@ export class HorseController {
       // (hA ≈ 0) it takes the whole offset; mid-stride, already lifted by the
       // clip, it takes only what is left — else bumps get stepped over twice.
       let d = ((g.delta > 0 ? Math.max(0, g.delta - g.hA) : g.delta) - this.bodyOff) * g.w;
+      if (this.jumpRaise > 0) d -= this.jumpRaise * (1 - smooth01(g.hA / 0.12));   // the gathered body raised: hooves on the ground stay on it
       // no hoof is ever left under the ground — front or hind, whatever the IK
       // weight (blends into a new gait, landing while IK fades back in)
       // (under was measured before the body sank by bodyOff: add that back)
-      const needUp = g.under - this.bodyOff;
-      if (needUp > 0.01 && !(g.cannon && this.rearT >= 0)) d = Math.max(d, needUp);   // ≤ 1 cm into the ground is invisible
+      const needUp = g.under - this.bodyOff - (this.jumpRaise ?? 0);   // (and the take-off's raise lifted it too)
+      if ((needUp > 0.01 || this.jumpRaise > 0) && !(g.cannon && this.rearT >= 0)) d = Math.max(d, needUp);   // ≤ 1 cm into the ground is invisible (raised for the take-off: always — the clip's own planted hoof is a few cm in)
       const C = g.ik.getWorldPosition(new V3());
       const T = C.clone(); T.y += d;
       if (g.landShift) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.landShift * g.w);   // onto the step (foot placement)
+      if (g.jumpShift) {                                         // take-off: planted forward, beside the other —
+        const k = g.jumpAir ? 1 - smooth01(g.jumpLegW ?? 0) : 1;  // only for the stance: it hands over to the flight pose as the hoof leaves
+        T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.jumpShift * k);   // (kept through the flight, it snapped off 20 cm at the jump's end)
+        if (g.jumpAir && (g.jumpLegW ?? 0) >= 1) g.jumpShift = 0;
+      }
       if (!g.cannon && d > 0.05 && g.hA > 0.02 && this.rearT < 0) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), HP.stepReach * (d - 0.05));
       // never past the leg's reach: the step-up's forward shift + height put the
       // target out of reach and the leg locked straight out in front (one frame)
@@ -608,6 +695,22 @@ export class HorseController {
       if (g.cannon && this.rearT >= 0 && this.rearPlant) T.copy(this.rearFoot(li - 2));
       // front hooves stay exactly where they stand while the horse gathers,
       // released as that leg's own push-off starts
+      // jumping, the body raised nose-up: a LIFTED forefoot keeps the clip's world
+      // angle round its own shoulder — tilted with the body the forelegs stuck
+      // out flat in front ("diving") instead of reaching down for the ground
+      if (!g.cannon && this.jumpUndo && g.hA > 0.02) {
+        const top = g.u.getWorldPosition(new V3());
+        const k = clamp((g.hA - 0.02) / 0.1, 0, 1);
+        T.lerp(top.clone().add(C.clone().sub(top).applyQuaternion(this.jumpUndo)), k);
+        if (g.on && T.y < g.hit.y + this.h.foot.sole) T.y = g.hit.y + this.h.foot.sole;   // never into the ground
+      }
+      // LANDING: Muybridge 638 F15–16 — one foreleg straight, reaching for the
+      // ground, the other still folded high; the clip brought both down extended
+      // side by side. The second (R) is held folded and unfolds just before its
+      // own touch-down (the clip's landing times kept: planting a hoof earlier or
+      // further, the body passed over it faster than a straight leg allows and the
+      // knee folded 58° under weight — the clip's landing skates ~3 m/s)
+      if (!g.cannon && HP.jumpForeSplit > 0) this.foreScissor(g, li, T, C);
       if (!g.cannon && this.rearT >= 0 && this.rearPlantF && this.rearT < HP.rearPrep + HP.rearRise) {
         const pin = 1 - smooth01((this.rearA - 0.09) / 0.3);
         if (pin > 0) T.lerp(this.rearPlantF[li], pin);
@@ -618,7 +721,7 @@ export class HorseController {
       // (a hoof 1 cm into the ground is invisible; a near-straight leg turns a
       // few mm of correction into several degrees of knee — leave it alone)
       this.ikCorr = Math.max(this.ikCorr, T.distanceTo(C));   // biggest correction asked this frame (audit)
-      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01)) return;
+      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01) && !(g.cannon && g.jumpAir && jh && jh.w > 0)) return;
       let reached;
       // front: the hoof turns WITH the cannon the IK swings (kept at the clip's
       // world angle, a hoof reaching up onto a step folded back under itself)
@@ -629,7 +732,47 @@ export class HorseController {
         // hind: the cannon keeps the clip's angle to the VERTICAL (not to the
         // tilted body); hip + stifle put the hock where the cannon must start.
         const hock = g.cannon.getWorldPosition(new V3());
-        const w = C.clone().sub(hock).applyQuaternion(untilt);
+        let w = C.clone().sub(hock).applyQuaternion(untilt);
+        // JUMPING: the hind legs follow the measured flight (JUMP_HIND) instead of
+        // the clip's tucked-under pose — hoof placed from the hip, cannon angle set
+        // each hind leg only once ITS hoof has left the ground (taken over while
+        // still planted, the push-off hoof slid 35 cm in a frame), eased in over
+        // 0.15 s from where the push left it — the leg extending back as it goes
+        const jwL = jh && jh.w > 0 ? jh.w * smooth01(g.jumpLegW ?? 0) : 0;
+        if (jwL > 0) {
+          const hip = g.u.getWorldPosition(new V3()), stf = g.l.getWorldPosition(new V3());
+          const legLen = hip.distanceTo(stf) + stf.distanceTo(hock) + hock.distanceTo(C);
+          let [line, reach, can] = jumpHindKey(jh.u + (li === 2 ? 0.025 : 0));   // (the left a touch behind: never mirror copies)
+          const fw = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), dn = new V3(0, -1, 0), rad = Math.PI / 180;
+          // OVER THE FENCE the hind legs fold: hocks shut, cannons flicked back
+          // (Muybridge F16 — the fold comes exactly as they pass the rail; trailing
+          // straight there they went 5–7 cm through the 1.2 / 1.4 m rails). And
+          // never lower than the rail top + 10 cm while above it.
+          const O = this.jumpObs;
+          if (O && O.topY !== undefined) {
+            // (where THIS hoof is — placed by the keys, not the clip's tucked-forward
+            // one, which was ~1 m ahead: the fold let go before the hoof got to the rail)
+            const hoofK = hip.clone().addScaledVector(dn, Math.cos(line * rad) * legLen * reach).addScaledVector(fw, -Math.sin(line * rad) * legLen * reach);
+            const sF = hoofK.sub(O.near).dot(O.fwd), dep = O.depth ?? 0.15;
+            const wF = smooth01((sF + 1.7) / 1.1) * (1 - smooth01((sF - dep - 0.3) / 0.6));   // (eased over ~0.2 s: a short ramp folded the thigh 36° in 2 frames)
+            reach += (Math.min(reach, 0.64) - reach) * wF; can += (Math.max(can, 58) - can) * wF;
+            if (sF > -0.35 && sF < dep + 0.35) {
+              const hy = hip.y - Math.cos(line * rad) * legLen * reach, need = O.topY + 0.1 + this.h.foot.sole + 0.06 - hy;   // (+ the hoof below the fetlock)
+              if (need > 0) { reach = Math.max(0.42, reach - need / Math.max(0.3, Math.cos(line * rad) * legLen)); can = Math.min(85, can + 30); }
+            }
+          }
+          const Tj = hip.clone().addScaledVector(dn, Math.cos(line * rad) * legLen * reach).addScaledVector(fw, -Math.sin(line * rad) * legLen * reach);
+          const wj = dn.clone().multiplyScalar(Math.cos(can * rad)).addScaledVector(fw, -Math.sin(can * rad)).multiplyScalar(w.length());
+          // handing back to the clip (its hoof already planted): first over its spot
+          // in the air, THEN down onto it — a plain blend slid the planted hoof 21 cm a frame
+          // (going IN at lift-off: all together; coming OUT the hoof is over its spot first)
+          const wIn = smooth01(g.jumpLegW ?? 0), f = 1 - jh.w, wH = wIn * (1 - smooth01(f / 0.6)), wV = wIn * (1 - smooth01((f - 0.3) / 0.7));
+          const off = Tj.clone().sub(T);
+          T.addScaledVector(new V3(off.x, 0, off.z), wH).add(new V3(0, off.y * wV, 0));
+          w.lerp(wj, jwL).setLength(hock.distanceTo(C));
+          // a hoof never below the ground (the IK's own hit) — landing late, it lands ON it
+          if (g.on && T.y < g.hit.y + this.h.foot.sole) T.y = g.hit.y + this.h.foot.sole;
+        }
         const tipLocal = g.cannon.worldToLocal(C.clone());
         // rearing: the cannon SLANTS forward (hoof ahead of the hock) as it sits
         // down — the hock goes back and down and the hind "knee" visibly bends
@@ -649,15 +792,20 @@ export class HorseController {
           T.lerp(toe.addScaledVector(wd, -L), k);
           g.lineDir = wd; g.lineK = k;
         }
+        const qC0 = g.jumpAir && jh && jh.w > 0 ? g.cannon.getWorldQuaternion(new THREE.Quaternion()) : null;
         const hockReached = solveTwoBone(g.u, g.l, hock, T.clone().sub(w), fwd, new V3(), false, legLat, 1);   // (the stifle, too, only folds forward)
         const tipNow = g.cannon.localToWorld(tipLocal);
         rotateWorld(g.cannon, _q.setFromUnitVectors(tipNow.sub(hockReached).normalize(), w.clone().normalize()));
         reached = hockReached.add(w);
+        // in the air the hoof turns WITH the cannon (the fetlock follows the fold)
+        if (qC0) g.jumpTurn = new THREE.Quaternion().slerp(g.cannon.getWorldQuaternion(new THREE.Quaternion()).multiply(qC0.invert()), jh.w * smooth01(g.jumpLegW ?? 0) * clamp(g.hA / 0.06, 0, 1));
+        else g.jumpTurn = null;
       }
       g.ik.position.copy(g.ik.parent.worldToLocal(reached));
+      if (g.cannon && g.jumpTurn) rotateWorld(g.ik, g.jumpTurn);
       // (only while the hoof is LIFTED: a planted hoof keeps lying on the ground —
       // turned with a cannon the IK bent on a ramp, it stood on its heel)
-      const carry = clamp(g.hA / 0.06, 0, 1) * g.w;
+      const carry = clamp(g.hA / 0.06, 0, 1) * (this.jumpUndo ? 1 : g.w);
       if (qL0 && carry > 0.01) rotateWorld(g.ik, new THREE.Quaternion().slerp(g.l.getWorldQuaternion(new THREE.Quaternion()).multiply(qL0.invert()), carry));
       // planted on a slope: the hoof lies ON it — turned by the slope under it
       // (eased in as it lands); kept at its flat-ground angle it stood on its toe
@@ -692,6 +840,42 @@ export class HorseController {
       }
       g.ik.updateMatrixWorld(true);
     });
+  }
+
+  // The jump's hind-leg phase: u 0 at hind lift-off, 1 as the forefeet land
+  // (clip time: the hind hooves leave ~0.1 s before all four are off, t0), and
+  // the weight of the measured flight over the clip (eased in through the push,
+  // out as the hind hooves come down to land, after the forefeet)
+  jumpHind() {
+    if (!HP.jumpHind || !(this.oneShot && this.oneShotName === "Gallop_Jump")) return null;
+    const t = this.oneShot.time, J = this.h.jump, tl = J.t0 - 0.1, tf = J.t1;
+    const u = (t - tl) / Math.max(0.1, tf - tl);
+    const w = smooth01((u + 0.18) / 0.22) * (1 - smooth01((u - 1.08) / 0.25));   // (off before the clip ends: the hind hooves land on the clip's planted spots ~0.2 s after the forefeet)
+    return w > 0 ? { u, w: w * HP.jumpHind } : null;
+  }
+
+  // the landing's forelegs (see applyIK): the second one stays FOLDED while the
+  // first reaches for the ground, unfolding just before its own touch-down
+  foreScissor(g, li, T, C) {
+    if (li !== 1 || !(this.oneShot && this.oneShotName === "Gallop_Jump")) return;
+    const t = this.oneShot.time, t1 = this.h.jump.t1;
+    const w = smooth01((t - (t1 - 0.3)) / 0.1) * (1 - smooth01((t - (t1 - 0.12)) / 0.17)) * HP.jumpForeSplit;   // (unfolding over 0.17 s: faster it popped 20 cm a frame)
+    if (w <= 0) return;
+    // folded: the hoof drawn up and back under the forearm (the IK bends the knee)
+    const fw = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
+    const k = this.h.height / 2.02;                           // (measured on the 2.02 m horse)
+    T.addScaledVector(new V3(0, 1, 0), 0.24 * k * w).addScaledVector(fw, -0.12 * k * w);
+  }
+
+  // the jump's nose-up correction (rad) over the descent — keyed on the same u
+  jumpPitchFix() {
+    if (!HP.jumpPitch || !(this.oneShot && this.oneShotName === "Gallop_Jump")) return 0;
+    const t = this.oneShot.time, J = this.h.jump, tl = J.t0 - 0.1, u = (t - tl) / Math.max(0.1, J.t1 - tl);
+    const K = [[0.3, 0], [0.5, 6], [0.68, 16], [0.8, 21], [0.9, 14], [0.98, 3], [1.02, 0]];   // (done as the forefeet land: turning the body under a PLANTED hoof dragged it 21–35 cm a frame)
+    if (u <= K[0][0] || u >= K[K.length - 1][0]) return 0;
+    let i = 0; while (u > K[i + 1][0]) i++;
+    const a = K[i], b = K[i + 1];
+    return (a[1] + (b[1] - a[1]) * smooth01((u - a[0]) / (b[0] - a[0]))) * Math.PI / 180 * HP.jumpPitch;
   }
 
   // Neck: level the head on slopes, and bend into turns (Neck1-3 share it).
@@ -935,7 +1119,7 @@ export class HorseController {
     // remembered in the world: the jump only lets THIS obstacle pass under it
     // (a second fence just after the landing still has to be jumped)
     const fwd = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw));
-    this.jumpObs = { ...o, near: this.pos.clone().addScaledVector(fwd, o.dist), fwd };
+    this.jumpObs = { ...o, near: this.pos.clone().addScaledVector(fwd, o.dist), fwd, topY: this.y + o.top };
     const j = this.h.jump, a = this.oneShot, ft = this.h.foot;
     const v = Math.max(Math.abs(this.v), this.gallopV() * 0.6);
     // the arc height sets the air time, and the air time where the hooves are
@@ -1521,6 +1705,19 @@ export class HorseController {
     r.rotation.set(this.pitch - this.rearPitch + 0.05 * landDip - (this.slideW ?? 0) * HP.slidePitch, this.yaw, this.roll);   // (sliding: sits back on its hindquarters)
     r.position.y -= 0.035 * landDip;
     this.rearDy = -0.035 * landDip;
+    // JUMPING: the clip dives nose-down coming over the fence (measured −21° vs
+    // the gallop at the top of the descent, −23° at the worst); a real horse
+    // stays nearly level as the forefeet reach for the ground (Muybridge 638:
+    // +6° at F16–17). Raised by the measured gap, round the withers.
+    const jp = this.jumpPitchFix();
+    if (jp) {
+      const ftJ = this.h.foot, piv = new V3(0, ftJ.hipY, ftJ.shZ);
+      const q0 = new THREE.Quaternion().setFromEuler(r.rotation), p0 = piv.clone().applyQuaternion(q0);
+      r.rotation.x -= jp;
+      const q1 = new THREE.Quaternion().setFromEuler(r.rotation), p1 = piv.clone().applyQuaternion(q1);
+      r.position.add(p0.sub(p1));
+      this.jumpUndo = q0.multiply(q1.invert());              // the tilt, undone (the forelegs keep the clip's reach DOWN)
+    } else this.jumpUndo = null;
     if (this.rearA > 0 || this.rearCrouch > 0) {
       const ft = this.h.foot, hipL = new V3(0, ft.hipY, ft.hipZ);
       const q0 = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw, this.roll, "YXZ"));
@@ -1697,15 +1894,26 @@ export class HorseController {
     // ~50° (top: hanging). Its NATURAL shape (the keyed curve) is turned up
     // about the dock and the rope follows with its usual soft pull — a straight
     // target line with a firm pull, tried first, read as a stiff stick.
-    let tailLift = 0;
+    let tailLift = 0, tailDown = 0.17;                        // (rad below level it is carried)
+    // JUMPING too: a horse lifts its tail with the effort — Muybridge 638 has it
+    // streaming out level behind from the gather to the landing; ours hung limp
+    if (HP.jumpTailLift > 0 && this.oneShot && this.oneShotName === "Gallop_Jump") {
+      const sm = (u) => { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); };
+      const t = this.oneShot.time, J = this.h.jump;
+      tailLift = HP.jumpTailLift * sm((t - 0.05) / 0.25) * (1 - sm((t - J.t1 - 0.1) / 0.3));
+      tailDown = 0.0;
+    }
     if (this.rearT >= 0 && HP.rearTailLift > 0) {
       const sm = (u) => { u = clamp(u, 0, 1); return u * u * (3 - 2 * u); };
       const up = HP.rearPrep + 0.45 * HP.rearRise;
-      const lift = HP.rearTailLift * sm(this.rearT / 0.35) * (1 - sm((this.rearT - up) / HP.rearTailDrop));
-      tailLift = lift;
+      tailLift = HP.rearTailLift * sm(this.rearT / 0.35) * (1 - sm((this.rearT - up) / HP.rearTailDrop));
+      tailDown = 0.17;
+    }
+    {
+      const lift = tailLift;
       if (lift > 0.001) {
         const d = anim[m - 1].clone().sub(anim[0]).normalize();
-        const wantDir = fwd.clone().multiplyScalar(-Math.cos(0.17)).add(new V3(0, -Math.sin(0.17), 0));   // back, ~10° below level
+        const wantDir = fwd.clone().multiplyScalar(-Math.cos(tailDown)).add(new V3(0, -Math.sin(tailDown), 0));   // back, a little below level (rear) / level (jump)
         const q = new THREE.Quaternion().slerp(new THREE.Quaternion().setFromUnitVectors(d, wantDir), lift);
         for (let i = 1; i < m; i++) anim[i] = anim[i].clone().sub(anim[0]).applyQuaternion(q).add(anim[0]);
       }
