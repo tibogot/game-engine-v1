@@ -312,8 +312,24 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    fire, flanked); vehicle ARMOUR BY FACING + penetration; more abilities; DOCTRINES; FLN
    ASYMMETRY (tunnels, melting into villages, mines, sabotage, distinct roles: sniper, sapper,
    scout); retreat point, wounded, dropped weapons.
-7. [ ] **THE GAME AROUND**: title screen, campaign + story (Colonel Delorme), briefings, saves; more
+7. [~] **THE GAME AROUND**: title screen, campaign + story (Colonel Delorme), briefings, saves; more
    maps (mission 2, the coast).
+   - [x] MAIN MENU (2026-10-09): menu.html — the training, the Aurès, the coast (greyed, "bientôt"),
+     language, credits; the home page's card, the pause menu and the end screen lead to it.
+   - [x] THE TRAINING (2026-10-09, you: "a first mission that teaches the basics, another terrain,
+     smaller, aerial grass / aerial rock"): ?map=training — maps/training.js, its level built by
+     tools/algTrainingLevel.mjs (a 330 m green plain, a knoll, framing hills). algTutorial.js:
+     14 lessons in a top panel (camera, select, move, cover behind sandbags, take the mechta, the
+     depot, attack, assault, grenade, retreat + reinforce, train at the post, tier 2, the
+     half-track, a final band) — each moves on by itself once done, "Passer" skips (its FLN
+     cleared). The battle's score, objectives, advice and band sightings OFF there (algBattle
+     `rules`); the Aurès systems (landmarks, fields, herds, hens, life, poles, AI, fog) OFF unless
+     the URL says. All 14 driven through in the game, then the end screen. English in
+     i18n/en/tutorial.js.
+   - [ ] **you**: play it as a new player — wording, the order of the lessons, the pace.
+   - [ ] the training's thumbnail on the menu (it shows the Aurès painting).
+   - [ ] the Aurès' ALN cave still shows on the training's minimap ("CAVE"): the final band comes
+     out of it, so it stays for now.
 - Buildings: archetypes per village (loggia, ruin, courtyard, shop), roof clutter, the Aurès stone.
 8. [ ] **PLAY THE FLN** (you, 2026-10-07: "soon prepare to choose the Algerian camp"). Needs: (a) the
    code SIDE-AGNOSTIC — today "player" = French everywhere (teams, purse, production, HUD, minimap,

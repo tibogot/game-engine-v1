@@ -24,7 +24,7 @@ function* walk(dir) {
   for (const f of readdirSync(dir)) {
     const p = join(dir, f);
     if (statSync(p).isDirectory()) { if (f !== "i18n" && f !== "terrain") yield* walk(p); }
-    else if (p.endsWith(".js") || p.endsWith("alg.html")) yield p;   // (alg.html: the loading screen)
+    else if (p.endsWith(".js") || p.endsWith("alg.html") || p.endsWith("menu.html")) yield p;   // (alg.html: the loading screen; menu.html: the main menu)
   }
 }
 

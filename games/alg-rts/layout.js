@@ -8,8 +8,9 @@
 // helpers below (the same rules on every map).
 import * as aures from "./maps/aures.js";
 import * as coast from "./maps/coast.js";
+import * as training from "./maps/training.js";
 
-const MAPS = { aures, coast };
+const MAPS = { aures, coast, training };
 const asked = typeof location !== "undefined" ? new URLSearchParams(location.search).get("map") : null;
 if (asked && !MAPS[asked]) console.warn(`[alg] no map "${asked}" — the Aurès (maps: ${Object.keys(MAPS).join(", ")})`);
 const M = MAPS[asked] ?? aures;

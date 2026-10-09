@@ -50,6 +50,16 @@ import "../../v3/styles/editor.css";
 import { t } from "./i18n/i18n.js";
 
 const params = new URLSearchParams(location.search);
+// THE TRAINING MAP (maps/training.js `tutorial`): the Aurès' systems that would clutter a lesson
+// OFF unless the URL says otherwise — the scenery pieces, fields, herds and hens, village life,
+// the telegraph, the FLN's own AI (the lessons bring their enemies) and the fog of war. Written
+// into the address so every module that reads its switch sees it.
+if (MAP.tutorial) {
+  const OFF = ["landmarks", "fields", "herds", "hens", "life", "poles", "ai", "fow"];
+  let changed = false;
+  for (const k of OFF) if (!params.has(k)) { params.set(k, "0"); changed = true; }
+  if (changed) history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
+}
 
 /**
  * THE AURÈS IN SUMMER. The war began here on 1 November 1954, but the look to
@@ -393,12 +403,19 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // the fields, the herds, the shader warm-up — is ~13 s the player can spend reading): shown
   // now, over the loading screen; its "À vos postes" waits for the end of the boot (bootReady).
   // ?brief=0 starts at the remembered difficulty.
+  // THE TRAINING (algTutorial.js): its own briefing, its lessons instead of the battle's rules.
+  if (MAP.tutorial && app.algBattle) {
+    try {
+      const { createAlgTutorial } = await import("./algTutorial.js");
+      app.algTutorial = createAlgTutorial(app);
+    } catch (e) { console.warn("[alg tutorial] failed:", e); }
+  }
   let bootReady = null;
   if (app.algBattle && params.get("brief") !== "0") {
     let release;
     bootReady = new Promise((r) => { release = r; });
     bootReady.release = release;
-    try { app.algBattle.brief({ ready: bootReady }); } catch (e) { console.warn("[alg brief] failed:", e); }
+    try { (app.algTutorial ?? app.algBattle).brief({ ready: bootReady }); } catch (e) { console.warn("[alg brief] failed:", e); }
   }
   // THE TELEGRAPH LINE (algPoles.js): poles and wires along the pistes, one
   // draw each. ?poles=0 = without.
@@ -613,6 +630,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
   // The briefing is up already (above); its button is released now. ?brief=0: straight in.
   if (bootReady) bootReady.release();
+  else if (app.algTutorial) app.algTutorial.start();
   else if (app.algBattle) app.algBattle.start();
   return app;
 }

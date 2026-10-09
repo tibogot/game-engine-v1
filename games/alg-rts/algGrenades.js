@@ -63,6 +63,7 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   const rings = createSelectionRingField({ app, max: 24, inner: 0.9, opacity: 0.8 });
   let targeting = null;   // { sel, at, kind } while the player aims
   const throws = [];      // { u, x, z, t, thrown, walking, kind }
+  const thrownCount = {};  // kind → thrown so far (the training's lesson reads it)
 
   /** Can this unit throw at all (a man on foot whose type carries grenades)? */
   const carries = (u) => u?.alive && !u.isStructure && u.type?.grenade;
@@ -165,6 +166,7 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
       job.t += dt;
       if (!job.thrown && job.t >= P.release) {
         job.thrown = true;
+        thrownCount[job.kind] = (thrownCount[job.kind] ?? 0) + 1;
         const h = app.getWorldHeight?.(job.x, job.z) ?? 0;
         const from = u.position.clone(); from.y += 1.9;
         const to = from.clone().set(job.x, h + 0.2, job.z);
@@ -197,6 +199,8 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
 
   return {
     params: P, ability, begin, cancel, order, step, frame,
+    /** Thrown so far, by kind ("grenade", "smoke"). */
+    get thrown() { return thrownCount; },
     get targeting() { return !!targeting; },
     dispose() {
       dom.removeEventListener("pointerdown", onDown, true);

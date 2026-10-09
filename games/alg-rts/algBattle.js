@@ -164,7 +164,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           for (const o of units.list) {
             if (o.alive && o.team === "enemy" && Math.hypot(o.position.x - x, o.position.z - z) < 35) { n++; reported.add(o); }
           }
-          if (!throttled("sight", x, z, P.sightEvery)) { say(n > 1 ? t("Bande du FLN ({n}) repérée {place}.", { n, place: placeName(x, z) }) : t("Combattant du FLN repéré {place}.", { place: placeName(x, z) }), x, z, "", "hq_enemySeen"); told.add("bandSeen"); }
+          if (rules.sightings && !throttled("sight", x, z, P.sightEvery)) { say(n > 1 ? t("Bande du FLN ({n}) repérée {place}.", { n, place: placeName(x, z) }) : t("Combattant du FLN repéré {place}.", { place: placeName(x, z) }), x, z, "", "hq_enemySeen"); told.add("bandSeen"); }
         }
         // The first FLN machine gun seen: say so — it is what pins a section.
         if (u.alive && u.typeKey === "fmTeam" && !told.has("mgSeen") && seenByPlayer(x, z) && (!cave || Math.hypot(x - cave.position.x, z - cave.position.z) > 80)) {
@@ -336,6 +336,9 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     hud.alert(tips.shift(), { kind: "tip", life: 12 });   // (24: a hint sat over the map half a minute)
   }
   let started = false, startAt = 0;
+  // THE RULES (2026-10-09): the training (algTutorial.js) takes them over — no score, its own
+  // objectives and advice. The alerts, markers and the end screen stay.
+  const rules = { score: true, objectives: true, advice: true, sightings: true };
 
   // The village tooltip (hover its marker).
   hud.setTooltip((v) => {
@@ -371,17 +374,17 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     watchSupply();
     watchMines();
     watchConvoy();
-    if (!over) stepScore(dt);
+    if (!over && rules.score) stepScore(dt);
     hud.setScore({ fr: score.player, aln: score.enemy, max: P.start, heldFr: economy.held, heldAln: economy.heldByEnemy });
     hud.markers(economy.allPoints);
-    objectives(dt);
-    advice(dt);
+    if (rules.objectives) objectives(dt);
+    if (rules.advice) advice(dt);
     hud.tick();
   };
   app.addPreRenderHook(frame);
 
   return {
-    params: P, score, stats,
+    params: P, score, stats, rules, hud,
     /** An alert from another system (algTiers.js). */
     say: (text, x = null, z = null, kind = "good", radio = null, icon = undefined, onClick = null) => say(text, x, z, kind, radio, icon, onClick),
     get over() { return over; },

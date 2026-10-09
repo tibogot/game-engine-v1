@@ -383,7 +383,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
       return back;
     },
     end(html, { onReplay }) {
-      return modal(html, [{ label: t("Continuer à regarder") }, { label: t("Rejouer"), go: true, onClick: onReplay }]);
+      return modal(html, [{ label: t("Continuer à regarder") }, { label: t("Menu principal"), onClick: () => { location.href = "./menu.html"; } }, { label: t("Rejouer"), go: true, onClick: onReplay }]);
     },
     dispose() {
       window.removeEventListener("keydown", onKey);

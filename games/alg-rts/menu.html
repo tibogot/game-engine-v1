@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sand &amp; Blood</title>
+    <link rel="icon" href="data:," />
+    <!-- THE MAIN MENU (2026-10-09, you: "a main menu where we choose the maps and the first
+         tutorial mission"). No 3D: it opens at once; a choice loads the game (alg.html?map=…),
+         its loading screen and its briefing as before. The game page still opens on its own. -->
+    <link rel="preload" as="image" href="/textures/sand&amp;blood.webp" />
+    <style>
+      :root {
+        --brass: #c9a54a; --brass-hi: #f1dfa6; --text: #eadfc8; --dim: #a8987a;
+        --panel: rgba(16, 13, 9, 0.84); --edge: rgba(201, 165, 74, 0.35); --edge-hi: rgba(201, 165, 74, 0.8);
+      }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #0d0a07; color: var(--text);
+        font-family: "Segoe UI", system-ui, -apple-system, sans-serif; }
+      .art { position: fixed; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 20% 20%;
+        animation: drift 40s ease-out forwards; }
+      @keyframes drift { from { transform: scale(1); } to { transform: scale(1.06); } }
+      .shade { position: fixed; inset: 0; background:
+        linear-gradient(to right, rgba(10, 8, 5, 0.1) 40%, rgba(10, 8, 5, 0.86) 72%),
+        linear-gradient(to top, rgba(10, 8, 5, 0.7) 0%, rgba(10, 8, 5, 0) 30%); }
+      /* The menu: a column on the right (the art's title and faces stay on the left). */
+      main { position: fixed; top: 0; bottom: 0; right: clamp(16px, 4vw, 64px); width: min(430px, calc(100vw - 32px));
+        display: flex; flex-direction: column; justify-content: center; gap: 10px; }
+      .kicker { font-size: 11px; letter-spacing: 0.32em; text-transform: uppercase; color: var(--brass); margin: 0 0 6px 2px; }
+      .entry { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: center; text-align: left;
+        padding: 10px 12px; background: var(--panel); border: 1px solid var(--edge); border-radius: 3px;
+        color: var(--text); font: inherit; cursor: pointer; transition: border-color 0.15s, transform 0.15s, background 0.15s; }
+      .entry:hover:not(:disabled), .entry:focus-visible { border-color: var(--edge-hi); background: rgba(30, 24, 15, 0.9); transform: translateX(-3px); outline: none; }
+      .entry:disabled { cursor: default; opacity: 0.55; }
+      .entry .thumb { width: 74px; height: 50px; border-radius: 2px; background: #2a2116 center/cover no-repeat; border: 1px solid rgba(0,0,0,0.6); }
+      .entry b { display: block; font-size: 15px; letter-spacing: 0.03em; color: var(--brass-hi); }
+      .entry .sub { display: block; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--brass); margin: 2px 0 4px; }
+      .entry .d { display: block; font-size: 12px; line-height: 1.4; color: var(--dim); }
+      .entry .tag { display: inline-block; margin-left: 6px; padding: 0 5px; font-size: 9px; letter-spacing: 0.12em; border: 1px solid var(--edge); border-radius: 2px; color: var(--dim); vertical-align: 2px; }
+      .row { display: flex; gap: 8px; margin-top: 6px; }
+      .small { flex: 1; padding: 9px 10px; background: var(--panel); border: 1px solid var(--edge); border-radius: 3px; color: var(--text);
+        font: 600 12px "Segoe UI", system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+      .small:hover, .small.on { border-color: var(--edge-hi); color: var(--brass-hi); }
+      .foot { position: fixed; left: 16px; bottom: 12px; font-size: 11px; color: rgba(234, 223, 200, 0.55); letter-spacing: 0.06em; }
+      /* Credits: a sheet over the menu. */
+      .sheet { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8, 6, 4, 0.72); }
+      .sheet[hidden] { display: none; }
+      .sheet > div { width: min(560px, calc(100vw - 32px)); max-height: 80vh; overflow-y: auto; padding: 18px 22px;
+        background: #17120c; border: 1px solid var(--edge-hi); border-radius: 3px; font-size: 13px; line-height: 1.55; }
+      .sheet h2 { margin: 0 0 10px; font-size: 13px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--brass); }
+      .sheet p { margin: 0 0 8px; color: var(--text); }
+      .sheet a { color: var(--brass-hi); }
+      @media (max-width: 720px) { .shade { background: rgba(10, 8, 5, 0.75); } main { justify-content: flex-end; padding-bottom: 40px; } }
+    </style>
+  </head>
+  <body>
+    <img class="art" src="/textures/sand&amp;blood.webp" alt="Sand &amp; Blood" />
+    <div class="shade"></div>
+    <main id="menu"></main>
+    <div class="foot" id="foot"></div>
+    <div class="sheet" id="credits" hidden><div id="creditsBody"></div></div>
+
+    <script type="module">
+      import { t, LANG, LANGS, setLang } from "./i18n/i18n.js";
+      document.documentElement.lang = LANG;
+
+      // THE CHOICES: a map each (layout.js ?map=). `ready: false` shows it, greyed, with its tag.
+      const GAME = "./alg.html";
+      const ENTRIES = [
+        { map: "training", ready: true, thumb: "/textures/loading/aures-descente.webp",
+          title: t("Camp d'instruction"), sub: t("Instruction — 10 minutes"),
+          d: t("Les bases, une à une : la caméra, les ordres, la couverture, les points, le combat, la retraite, le poste. À faire en premier.") },
+        { map: null, ready: true, thumb: "/textures/loading/aures-descente.webp",
+          title: t("Les Aurès — 1956"), sub: t("Bataille"),
+          d: t("Tenez plus de villages que le FLN dans le massif : un poste, quatre villages, une katiba qui frappe et disparaît.") },
+        { map: "coast", ready: false, thumb: null,
+          title: t("Côte du Constantinois — août 1955"), sub: t("Bataille"),
+          d: t("La plaine et la baie de Philippeville, la veille du soulèvement."), tag: t("bientôt") },
+      ];
+
+      const menu = document.getElementById("menu");
+      menu.innerHTML = `<div class="kicker">${t("Algérie, 1954-1962")}</div>`
+        + ENTRIES.map((e, i) => `<button class="entry" data-i="${i}" ${e.ready ? "" : "disabled"}>
+            <span class="thumb" style="${e.thumb ? `background-image:url(${e.thumb})` : ""}"></span>
+            <span><b>${e.title}${e.tag && !e.ready ? `<span class="tag">${e.tag}</span>` : ""}</b><span class="sub">${e.sub}</span><span class="d">${e.d}</span></span>
+          </button>`).join("")
+        + `<div class="row">${LANGS.map((l) => `<button class="small${l.key === LANG ? " on" : ""}" data-lang="${l.key}">${l.label}</button>`).join("")}
+             <button class="small" data-a="credits">${t("Crédits")}</button></div>`;
+      document.getElementById("foot").textContent = t("Sand & Blood — un jeu de stratégie en temps réel. Prototype.");
+
+      menu.addEventListener("click", (ev) => {
+        const b = ev.target.closest("button");
+        if (!b || b.disabled) return;
+        if (b.dataset.lang) { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); return; }
+        if (b.dataset.a === "credits") { document.getElementById("credits").hidden = false; return; }
+        const e = ENTRIES[+b.dataset.i];
+        if (!e) return;
+        // The game, on that map (the Aurès: no ?map, as always).
+        location.href = e.map ? `${GAME}?map=${e.map}` : GAME;
+      });
+      // The first entry that can be played takes the keyboard's focus (Enter starts it).
+      menu.querySelector(".entry:not(:disabled)")?.focus();
+
+      // CREDITS (the assets' own files keep the details: icons/CREDITS.md, the sounds' manifest).
+      document.getElementById("creditsBody").innerHTML = `<h2>${t("Crédits")}</h2>`
+        + `<p>${t("Icônes de l'interface : game-icons.net (Lorc, Delapouite, Skoll…), licence CC BY 3.0.")}</p>`
+        + `<p>${t("Sons : contributeurs de freesound.org (CC0 / CC BY, la liste dans le manifeste des sons) ; voix : GameDev Market Military Voice Pack.")}</p>`
+        + `<p>${t("Textures du sol et de la roche : Poly Haven et ambientCG (CC0).")}</p>`
+        + `<p>${t("Moteur, cartes, unités, effets : faits pour ce jeu (three.js, WebGPU).")}</p>`
+        + `<p style="color:var(--dim)">${t("Cliquez pour fermer.")}</p>`;
+      document.getElementById("credits").addEventListener("click", () => { document.getElementById("credits").hidden = true; });
+      addEventListener("keydown", (ev) => { if (ev.key === "Escape") document.getElementById("credits").hidden = true; });
+    </script>
+  </body>
+</html>

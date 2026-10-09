@@ -200,12 +200,15 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         <button data-a="keys">${t("Commandes")}</button>
         <button data-a="manual">${t("Manuel")}</button>
         <button data-a="restart">${t("Recommencer la bataille")}</button>
+        <button data-a="mainMenu">${t("Menu principal")}</button>
       </div>`, (el) => {
       el.querySelector('[data-a="resume"]').onclick = resume;
       el.querySelector('[data-a="options"]').onclick = optionsPage;
       el.querySelector('[data-a="keys"]').onclick = keysPage;
       el.querySelector('[data-a="manual"]').onclick = () => manualPage();
       el.querySelector('[data-a="restart"]').onclick = () => location.reload();
+      // THE MAIN MENU (menu.html, 2026-10-09): the maps and the training.
+      el.querySelector('[data-a="mainMenu"]').onclick = () => { location.href = "./menu.html"; };
     });
   }
 

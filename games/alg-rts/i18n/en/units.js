@@ -109,8 +109,6 @@ export default {
     "Fall back to the post: no firing, can't be pinned, faster, harder to hit. The wounded heal at the post.",
   "Renforcer": "Reinforce",
   "Groupe au complet.": "Squad at full strength.",
-  "Un homme par groupe incomplet, sorti par la porte du poste.": "One man per understrength squad, out of the post's gate.",
-  "Ramenez le groupe au poste pour le renforcer (Retraite).": "Bring the squad back to the post to reinforce it (Retreat).",
   "Annuler (+{n})": "Cancel (+{n})",
   "Annuler le chantier : {n} ressources rendues.": "Cancel the construction: {n} resources refunded.",
   "+{fuel} C +{mun} M · convoi {name}": "+{fuel} F +{mun} M · convoy {name}",
