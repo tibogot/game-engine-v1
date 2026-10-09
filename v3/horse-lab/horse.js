@@ -78,8 +78,11 @@ export const HP = {               // tunables (the lab GUI edits these)
   earsUp: 1,                      // ears held up while it moves (0 = as the clips fold them back)                    // a little side flutter in the air at speed (0 = none)
   jumpMaxTop: 1.5,                // m: the highest obstacle any horse takes on (above: a refusal)
   jumpHind: 1,
+  jumpRunRamp: true,              // the run-up's leg pace eases up from the gallop's (false = jumps straight to jumpLeadIn)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
+  walkRate: 1,                    // the walk legs play this much slower (planted hooves locked). TRIED 0.82: the forelegs cannot sweep further back — locked, they over-stretched and lifted (fore stance 56 → 31 %)
+  walkNod: 0.12,                  // rad the head + neck nod down with each forefoot's stance at a walk
   gallopRate: 0.85,               // the gallop legs play this much slower (longer strides; planted hooves locked) — 1 = the clip's rate               // rad the neck stretches forward-down at a full gallop
   jumpForeSplit: 1,               // the second foreleg kept folded while the first reaches to land (0 = both reach together, the clip's)
   jumpPlant: 0.42,                // m the right hind lands further forward at take-off (beside the left, as a horse plants both) — 0 = the clip's
@@ -686,7 +689,7 @@ export class HorseController {
       // than the ground goes by: unlocked it would slide forward)
       // (leaving the gallop a held hoof stays held until it lifts: released while
       // planted it slid 8 cm a frame)
-      const locking = this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop" && !this.oneShot;
+      const locking = !this.oneShot && ((this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
       if (g.lock && !locking && (T.distanceTo(g.lock) > 1.2 || Math.abs(this.v) < 0.3)) g.lock = null;   // (1.2 m: a teleport — a swinging hoof being released gets far from its spot)
       const letGo = g.lock && this.oneShot;                      // (a jump began: let go smoothly, planted or not)   // (a reset / teleport, or stopped: no stale hold)
       if (g.hA < 0.02 && (locking || g.lock) && !letGo) { if (!g.lock) g.lock = T.clone(); g.lockRel = 0; }
@@ -945,6 +948,21 @@ export class HorseController {
         const a = HP.gallopNeck * this.neckStretch;
         [0.45, 0.35, 0.2].forEach((wN, i) => this.necks[i] && rotateWorld(this.necks[i], _q.setFromAxisAngle(lat, a * wN)));
         rotateWorld(this.headB, _q.setFromAxisAngle(lat, -a * 0.5));
+      }
+    }
+    // WALKING the head nods: down through each forefoot's stance, up between
+    // (Hansel: ~8–12 cm at the poll; the clip nodded 4 cm)
+    {
+      const ww = this.actions.Walk ? this.actions.Walk.getEffectiveWeight() * clamp(Math.abs(this.v) / 0.6, 0, 1) : 0;
+      let nod = 0;
+      for (const g of this.legs.slice(0, 2)) {
+        g.stanceT = g.hA < 0.02 ? (g.stanceT ?? 0) + (this.lastDt ?? 1 / 60) : 0;
+        if (g.stanceT > 0) nod = Math.max(nod, Math.sin(Math.PI * clamp(g.stanceT / (0.62 / Math.max(0.3, Math.abs(this.cur?.getEffectiveTimeScale?.() ?? 1))), 0, 1)));
+      }
+      this.nodS = (this.nodS ?? 0) + (nod - (this.nodS ?? 0)) * lerpK(10, this.lastDt ?? 1 / 60);
+      if (ww > 0.01 && HP.walkNod > 0 && this.rearT < 0 && !this.oneShot) {
+        const a = HP.walkNod * ww * this.nodS;
+        [0.5, 0.3, 0.2].forEach((wN, i) => this.necks[i] && rotateWorld(this.necks[i], _q.setFromAxisAngle(lat, a * wN)));
       }
     }
     const hill = this.hillK ?? 0;
@@ -1338,6 +1356,8 @@ export class HorseController {
     a.clampWhenFinished = true;
     a.setEffectiveTimeScale(1);
     a.play();
+    // (the jump's run-up starts at the legs' current pace: see the run-up ramp in update)
+    if (name === "Gallop_Jump") this.jumpRun = { s0: this.cur ? Math.abs(this.cur.getEffectiveTimeScale()) : 1, at, tau: 0 };
     if (this.cur && this.cur !== a) { this.logBlend(this.cur, a); this.cur.crossFadeTo(a, fade, false); }
     this.oneShot = a;
     this.oneShotName = name;
@@ -1626,7 +1646,9 @@ export class HorseController {
         // stopping: keep stepping at a normal pace for one last step, so the
         // walk reaches a pose it can stand from (else a 235° blend into Idle)
         const stopping = this.blendWaitT > 0 && Math.abs(this.v) < 0.3;
-        const ts = stopping ? 1 : Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV;
+        // (walking, the legs play HP.walkRate slower than the ground goes by — longer,
+        // calmer steps, the planted hooves locked; Hansel walks ~1.1 s strides)
+        const ts = stopping ? 1 : Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV * HP.walkRate;   // (also with IK off: the audit compares the same stride timing)
         this.cur.setEffectiveTimeScale(Math.sign(ts || 1) * clamp(Math.abs(ts), 0.35, 1.6));
       } else if (this.gaitName === "Trot") {
         this.cur.setEffectiveTimeScale(clamp(this.v / g.Trot.speed, 1.0, 2.6 * HP.speedScale));
@@ -1727,7 +1749,32 @@ export class HorseController {
       // is why it once looked flat). Extra height is optional; only then is
       // the air time stretched to match (t = √(8h/g) for the extra arc).
       const airT = this.airTime();
-      this.oneShot.setEffectiveTimeScale(t < t0 ? (this.jumpLead || HP.jumpLeadIn) : t <= t1 ? (t1 - t0) / airT : 1);   // quick run-up, then real air time
+      // RUN-UP: the legs went from the gallop's pace (~1.1–1.35×) straight to 1.7× —
+      // a visible rush before every fence. Now they start at the gallop's pace and
+      // speed up through the run-up, the same run-up TIME (the jump planner counts
+      // on it): s0 → s1 with (s0 + s1) / 2 = the planned pace
+      let runTs = this.jumpLead || HP.jumpLeadIn;
+      const JR = this.jumpRun;
+      if (JR && t < t0 && HP.jumpRunRamp) {
+        const lead = runTs, s0 = clamp(JR.s0, 0.6, lead), s1 = 2 * lead - s0, T = 2 * Math.max(0.01, t0 - JR.at) / (s0 + s1);
+        JR.tau += this.lastDt ?? 1 / 60;
+        runTs = s0 + (s1 - s0) * clamp(JR.tau / T, 0, 1);
+      }
+      // ...and into the AIR the pace eases down too (from ~2× to the flight's ~0.66×
+      // in a frame it was a stop): over the first 0.1 s of clip, the same air time
+      let airTs = (t1 - t0) / airT;
+      if (JR && HP.jumpRunRamp && t >= t0 && t <= t1) {
+        if (!JR.air) {
+          const r = airTs, L = t1 - t0, D = Math.min(0.1, L * 0.4), a0 = Math.max(r, JR.last ?? r);
+          let lo = 0.2, hi = r;                                      // r2: ramp a0 → r2 over D, then r2; total = L / r
+          for (let it = 0; it < 30; it++) { const m = (lo + hi) / 2, T = 2 * D / (a0 + m) + (L - D) / m; if (T > L / r) lo = m; else hi = m; }
+          JR.air = { a0, r2: (lo + hi) / 2, D };
+        }
+        const u = clamp((t - t0) / JR.air.D, 0, 1);
+        airTs = JR.air.a0 + (JR.air.r2 - JR.air.a0) * u;
+      }
+      if (JR && t < t0) JR.last = runTs;
+      this.oneShot.setEffectiveTimeScale(t < t0 ? runTs : t <= t1 ? airTs : 1);   // run-up, then real air time
       if (t >= t0 - 0.06 && t <= t1 + 0.06) airborne = true;
       if (t > t0 && t < t1) { const u = (t - t0) / (t1 - t0); this.lift = 4 * (HP.jumpHeight + (this.jumpBoost ?? 0)) * u * (1 - u); }
     } else { this.jumpBoost = 0; this.jumpObs = null; if (!this.jumpQueued) { this.jumpAirMin = 0; this.jumpAirFixed = 0; this.jumpLead = 0; } }

@@ -89,7 +89,17 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   queued). Gait blends now wait up to one whole stride (a slow canter timed out
   into a 180° canter→walk blend). Audit 15/15 both horses; course clearance ≥ before.
 - [ ] Gallop forelegs reach only +36° (Annie G. ~+45–50°).
-- [ ] The walk (below numbers).
+- WALK (uncommitted): head nod through each fore stance (HP.walkNod 0.12: 4 → 7 cm).
+  TRIED and dropped: (a) re-timing the legs' keys for even beats — the body's bob
+  is timed to the original footfalls, shifted legs hovered / dragged (hind stance
+  52 → 36 %); (b) slower walk legs with locked hooves — the forelegs cannot sweep
+  further back, fore stance 56 → 31 %. Both need a re-keyed walk clip.
+- TRANSITIONS (uncommitted): into a jump the leg pace went 1.11 → 1.35 (queued) →
+  1.7 (run-up) → 0.67 (air) in single frames; now the run-up eases from the
+  gallop's pace up (same run-up time: the planner counts on it) and the air pace
+  eases in over 0.1 s of clip (same air time). Scratchpad approach.js logs it.
+- [ ] Next transitions to film: walk ↔ canter ↔ gallop gear changes, landing →
+  gallop (1.0 → 1.27 → 1.11), stopping, turning on the spot; feet IK during each.
 
 ## ▶ The tail (horse.js tailSway) — 2026-10-09
 
