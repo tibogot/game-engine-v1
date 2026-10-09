@@ -68,13 +68,19 @@ export const HP = {               // tunables (the lab GUI edits these)
   jumpHeight: 0.5,                // m of EXTRA arc on top of the clip's own ~1 m jump (hooves clear ~1.5 m: fences, platform A)
   tailSway: 1,                    // the tail rope (0 = the tail as keyed)
   tailPose: 0.05,                 // its pull to the keyed shape (per 1/120 s step) at the dock; ~15 % of it at the tip
-  tailDrag: 0.06,                 // air drag (velocity lost per step): what makes it trail and stream at speed
+  tailDrag: 0.009,                // linear damping (per 1/120 s step): light hair settles even slow (0.004 swung it under the belly stopping)
+  tailSmooth: 0.012,              // the hair's bending stiffness: each point pulled toward its neighbours' middle (waves stay, hooks go)
+  tailAir: 0.5,                   // the air's drag on the hair (∝ speed²; per m): at a gallop it streams back ~25° below level
+  tailHair: 0.08,                 // how much of the pull to the keyed shape the hair keeps (the dock: all of it)
   tailGravity: 1,                 // × g on the rope
   tailBendMax: 0.35,              // rad: the sharpest any tail joint bends (~20°; looser whipped the tip into hooks)
   tailWave: 1,
   earsUp: 1,                      // ears held up while it moves (0 = as the clips fold them back)                    // a little side flutter in the air at speed (0 = none)
   jumpMaxTop: 1.5,                // m: the highest obstacle any horse takes on (above: a refusal)
   jumpHind: 1,
+  gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
+  gallopNeck: 0.32,
+  gallopRate: 0.85,               // the gallop legs play this much slower (longer strides; planted hooves locked) — 1 = the clip's rate               // rad the neck stretches forward-down at a full gallop
   jumpForeSplit: 1,               // the second foreleg kept folded while the first reaches to land (0 = both reach together, the clip's)
   jumpPlant: 0.42,                // m the right hind lands further forward at take-off (beside the left, as a horse plants both) — 0 = the clip's
   jumpTailLift: 0.85,             // the tail carried out level behind through a jump (0 = it hangs)
@@ -117,6 +123,10 @@ export const HP = {               // tunables (the lab GUI edits these)
 // → BackLowerLeg (cannon, 0.42 m) → hoof. Bending only the hock tilts the
 // cannon and zig-zags the leg (the user saw it), so the cannon KEEPS its
 // animated angle and the hip + stifle take the change — what a horse does.
+// distance / closest point from p to the segment a–b
+function closestOnSeg(p, a, b) { const ab = b.clone().sub(a), t = clamp(p.clone().sub(a).dot(ab) / Math.max(1e-9, ab.lengthSq()), 0, 1); return a.clone().addScaledVector(ab, t); }
+function segDist(p, a, b) { return p.distanceTo(closestOnSeg(p, a, b)); }
+
 // THE HIND LEGS IN A JUMP — measured frame by frame on Muybridge, Animal
 // Locomotion plate 638 ("Daisy" over a hurdle, side-on; the clip had them tucked
 // forward under the belly like a cat the whole flight and landing with the
@@ -643,7 +653,7 @@ export class HorseController {
     r.position.y = this.y + this.lift + this.rearDy + this.bodyOff + this.jumpRaise;
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
-    this.ikCorr = 0;
+    this.ikCorr = this.calmOn ? Math.max(0.011, this.calmMove ?? 0) : 0;   // (the calmed body: the legs re-solved on purpose)
     const jh = this.jumpHind();
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
     const untilt = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw).multiply(r.quaternion.clone().invert());
@@ -672,6 +682,16 @@ export class HorseController {
       const C = g.ik.getWorldPosition(new V3());
       const T = C.clone(); T.y += d;
       if (g.landShift) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.landShift * g.w);   // onto the step (foot placement)
+      // GALLOP: a planted hoof stays where it touched down (the legs play slower
+      // than the ground goes by: unlocked it would slide forward)
+      // (leaving the gallop a held hoof stays held until it lifts: released while
+      // planted it slid 8 cm a frame)
+      const locking = this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop" && !this.oneShot;
+      if (g.lock && !locking && (T.distanceTo(g.lock) > 1.2 || Math.abs(this.v) < 0.3)) g.lock = null;   // (1.2 m: a teleport — a swinging hoof being released gets far from its spot)
+      const letGo = g.lock && this.oneShot;                      // (a jump began: let go smoothly, planted or not)   // (a reset / teleport, or stopped: no stale hold)
+      if (g.hA < 0.02 && (locking || g.lock) && !letGo) { if (!g.lock) g.lock = T.clone(); g.lockRel = 0; }
+      else if (g.lock && (g.hA > 0.04 || letGo)) { g.lockRel = Math.min(1, (g.lockRel ?? 0) + 1 / 60 / 0.12); if (g.lockRel >= 1) g.lock = null; }
+      if (g.lock) { const k = 1 - smooth01(g.lockRel ?? 0); T.x += (g.lock.x - T.x) * k; T.z += (g.lock.z - T.z) * k; }
       if (g.jumpShift) {                                         // take-off: planted forward, beside the other —
         const k = g.jumpAir ? 1 - smooth01(g.jumpLegW ?? 0) : 1;  // only for the stance: it hands over to the flight pose as the hoof leaves
         T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.jumpShift * k);   // (kept through the flight, it snapped off 20 cm at the jump's end)
@@ -721,7 +741,7 @@ export class HorseController {
       // (a hoof 1 cm into the ground is invisible; a near-straight leg turns a
       // few mm of correction into several degrees of knee — leave it alone)
       this.ikCorr = Math.max(this.ikCorr, T.distanceTo(C));   // biggest correction asked this frame (audit)
-      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01) && !(g.cannon && g.jumpAir && jh && jh.w > 0)) return;
+      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01) && !(g.cannon && g.jumpAir && jh && jh.w > 0) && !this.calmOn) return;
       let reached;
       // front: the hoof turns WITH the cannon the IK swings (kept at the clip's
       // world angle, a hoof reaching up onto a step folded back under itself)
@@ -878,6 +898,34 @@ export class HorseController {
     return (a[1] + (b[1] - a[1]) * smooth01((u - a[0]) / (b[0] - a[0]))) * Math.PI / 180 * HP.jumpPitch;
   }
 
+  // GALLOP / CANTER, CALMER BODY: the clip rocks the body 15° nose up / down and
+  // bobs it 23 cm every stride (Muybridge 626, Annie G.: ~±5°, a long flat
+  // body). The Body bone is eased toward its own running average (HP.gallopCalm
+  // of the swing taken out); the hooves stay where the clip put them — the legs
+  // reach for them by IK (applyIK solves every leg while this is on).
+  calmGallop(dt) {
+    const B = (this.bodyB ??= this.h.bone("Body"));
+    const wa = (n) => (this.actions[n] ? this.actions[n].getEffectiveWeight() : 0);
+    const wT = HP.ik && this.rearT < 0 && !(this.oneShot) ? clamp(wa("Gallop") + wa("Canter") * 0.7, 0, 1) * HP.gallopCalm : 0;
+    this.calmW = (this.calmW ?? 0) + (wT - (this.calmW ?? 0)) * lerpK(6, Math.max(0, dt));   // (eased: cut at a jump's start the body popped)
+    const w = HP.ik ? this.calmW : 0;
+    this.bodyAnim ??= { p: new V3(), q: new THREE.Quaternion() };
+    this.bodyAnim.p.copy(B.position); this.bodyAnim.q.copy(B.quaternion);   // (restored before the mixer: no build-up on held keys)
+    // the running average (≈ one stride)
+    if (!this.calmMean || dt <= 0 && false) this.calmMean = { p: B.position.clone(), q: B.quaternion.clone() };
+    const k = lerpK(3, Math.max(0, dt));
+    this.calmMean.p.lerp(B.position, k); this.calmMean.q.slerp(B.quaternion, k);
+    this.calmOn = w > 0.01;
+    if (!this.calmOn) return;
+    // the hooves where the clip has them now (the IK bones are not under Body)
+    this.h.rig.updateMatrixWorld(true);
+    const p0 = B.getWorldPosition(new V3());
+    B.position.lerp(this.calmMean.p, w);
+    B.quaternion.slerp(this.calmMean.q, w);
+    B.updateMatrixWorld(true);
+    this.calmMove = B.getWorldPosition(new V3()).distanceTo(p0);
+  }
+
   // Neck: level the head on slopes, and bend into turns (Neck1-3 share it).
   levelNeck() {
     const rq = this.h.rig.quaternion;
@@ -887,6 +935,18 @@ export class HorseController {
     // HILLS: uphill the head and neck go DOWN and forward (it pulls itself up),
     // downhill they come up (weight back) — tilted with the body it was the
     // reverse: head 9 cm higher uphill, 9 cm lower downhill
+    // GALLOPING the neck stretches forward and lower (Annie G.), the head
+    // turned back up a little so the nose does not dive
+    {
+      const wa = (n) => (this.actions[n] ? this.actions[n].getEffectiveWeight() : 0);
+      const gw = this.rearT < 0 && !this.oneShot ? clamp(wa("Gallop") + 0.5 * wa("Canter"), 0, 1) * clamp(Math.abs(this.v) / this.gallopV(), 0, 1) : 0;
+      this.neckStretch = (this.neckStretch ?? 0) + (gw - (this.neckStretch ?? 0)) * lerpK(3, 1 / 60);
+      if (this.neckStretch > 0.001 && HP.gallopNeck > 0) {
+        const a = HP.gallopNeck * this.neckStretch;
+        [0.45, 0.35, 0.2].forEach((wN, i) => this.necks[i] && rotateWorld(this.necks[i], _q.setFromAxisAngle(lat, a * wN)));
+        rotateWorld(this.headB, _q.setFromAxisAngle(lat, -a * 0.5));
+      }
+    }
     const hill = this.hillK ?? 0;
     if (hill && this.rearT < 0) rotateWorld(this.neck, _q.setFromAxisAngle(lat, HP.hillHead * hill));
     if (this.rearA > 0) {
@@ -949,7 +1009,10 @@ export class HorseController {
       const rows = this.transition(this.gaitName, name), A = prev.getClip(), N = rows.length;
       const iNow = Math.floor(((prev.time % A.duration) / A.duration) * N) % N;
       const bestDeg = Math.min(...rows.map((r) => r.deg));
-      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > HP.blendWait * (name === "Idle" ? 1.8 : 1);   // a stop may take a last step
+      // (at least one whole stride of the outgoing gait: a slow canter's stride is longer
+      // than blendWait — timed out, it blended canter → walk across 180°)
+      const stride = A.duration / Math.max(0.2, Math.abs(prev.getEffectiveTimeScale()));
+      const waitedEnough = (this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0)) > Math.max(HP.blendWait, stride * 1.05) * (name === "Idle" ? 1.8 : 1);   // a stop may take a last step
       // the outgoing loop is long and calm (Idle): every moment is alike — no wait
       const calm = this.gaitName === "Idle";
       if (!force && !calm && !waitedEnough && rows[iNow].deg > bestDeg + 15) return false;
@@ -1568,7 +1631,13 @@ export class HorseController {
       } else if (this.gaitName === "Trot") {
         this.cur.setEffectiveTimeScale(clamp(this.v / g.Trot.speed, 1.0, 2.6 * HP.speedScale));
       } else if (this.gallopLike()) {
-        let ts = this.gaitName === "Canter" ? clamp(this.v / galV, 0.55, 0.95 * HP.speedScale) : clamp(this.v / galV, 0.6, 1.25 * HP.speedScale);   // (galV: the clip's native speed — with speedScale the legs play faster)
+        let ts = this.gaitName === "Canter" ? clamp(this.v / galV, 0.55, 0.95 * HP.speedScale) : clamp(this.v / galV, 0.6, 1.25 * HP.speedScale);
+        // a LONGER, slower stride (Annie G.: ~0.55 s, 3 m at this speed; the clip
+        // played fast churned 0.45 s / 2.5 m): the legs play slower and the planted
+        // hooves are LOCKED to the ground (applyIK), so they sweep further back
+        // (a jump coming: back to the clip's rate and no locks — the jump is planned on it)
+        this.rateK = (this.rateK ?? 1) + ((this.jumpQueued ? 1 : HP.gallopRate) - (this.rateK ?? 1)) * lerpK(8, 1 / 60);
+        if (this.gaitName === "Gallop") ts *= this.rateK;   // (also with IK off: the audit compares the same stride timing)   // (galV: the clip's native speed — with speedScale the legs play faster)
         if (this.slideW > 0) ts = Math.min(ts, Math.max(0.12, this.v / galV));   // sliding: the stride slows with the speed (hooves skid)
         if (this.jumpQueued) {
           if (this.jumpRate === undefined) {                 // first gallop frame with a jump queued
@@ -1747,9 +1816,11 @@ export class HorseController {
     // mixer skips a bone whose animated value did not change since its last
     // write, so a rest-pose reset survived every clip hold as a one-frame pop.
     for (const t of this.touched) { t.b.position.copy(t.p); t.b.quaternion.copy(t.q); }
+    if (this.bodyAnim) { this.bodyB.position.copy(this.bodyAnim.p); this.bodyB.quaternion.copy(this.bodyAnim.q); }
     this.mixer.update(dt);
     for (const t of this.touched) { t.p.copy(t.b.position); t.q.copy(t.b.quaternion); }
     this.glueHooves();
+    this.calmGallop(dt);
     if (this.jumpQueued) {
       this.jumpQueueT -= dt;
       if (this.jumpQueueT < 0 || this.rearT >= 0 || (this.oneShot && !this.oneShotName.startsWith("Idle") && !this.descending())) this.jumpQueued = false;
@@ -1918,6 +1989,24 @@ export class HorseController {
         for (let i = 1; i < m; i++) anim[i] = anim[i].clone().sub(anim[0]).applyQuaternion(q).add(anim[0]);
       }
     }
+    // the BODY the hair drapes over: the buttocks (a cylinder across the hip
+    // joints, its radius taken once from where the keyed tail lies behind the
+    // quarters) and each hind leg (thigh, gaskin, cannon). Free hair with nothing
+    // to hit hung straight THROUGH the buttocks at rest and swung forward under
+    // the belly, between the legs, when the horse stopped.
+    const P0 = (n) => this.h.bone(n).getWorldPosition(new V3());
+    const hipL = P0("BackLegL"), hipR = P0("BackLegR"), sc = this.h.height / 2.02;
+    if (this.tailButtR === undefined) {
+      let rr = 1;
+      for (let i = 2; i < m; i++) rr = Math.min(rr, segDist(anim[i], hipL, hipR));
+      this.tailButtR = clamp(rr - 0.02, 0.12, 0.45);
+    }
+    const caps = [[hipL, hipR, this.tailButtR]];
+    for (const s2 of ["L", "R"]) {
+      const a = P0("BackLeg" + s2), b = P0("BackUpperLeg" + s2), c2 = P0("BackLowerLeg" + s2), d2 = P0("IKBackLeg" + s2);
+      caps.push([a, b, 0.13 * sc], [b, c2, 0.075 * sc], [c2, d2, 0.055 * sc]);
+    }
+    const hairR = 0.035 * sc;                                  // the bundle's own half-thickness
     S.acc =Math.min(S.acc + Math.max(0, dt), 4 * h);
     const tmp = new V3();
     while (S.acc >= h) {
@@ -1925,15 +2014,25 @@ export class HorseController {
       S.p[0].copy(anim[0]); S.o[0].copy(anim[0]);            // the dock follows the croup
       for (let i = 1; i < m; i++) {
         const p = S.p[i], o = S.o[i], f = i / (m - 1);
-        tmp.subVectors(p, o).multiplyScalar(1 - HP.tailDrag);   // inertia, slowed by the air
+        // inertia, slowed by the AIR: drag grows with the square of the speed
+        // (hair: at a gallop it streams back ~25° below level, at a walk it hangs
+        // and sways, stopping it swings through and settles). A fixed heavy
+        // damping (6 % a step) made it a stiff, dead rope.
+        tmp.subVectors(p, o);
+        const sp = tmp.length() / h;
+        tmp.multiplyScalar((1 - HP.tailDrag) / (1 + HP.tailAir * sp * h));
         o.copy(p);
         p.add(tmp);
         p.y -= 9.8 * HP.tailGravity * h * h;
         // a little flutter in the air at speed (sideways, travelling to the tip)
         if (amt > 0.001) p.addScaledVector(side, amt * f * 6 * h * h * Math.sin(S.t * 11 - i * 1.3 + Math.sin(S.t * 3.1)));
-        // the soft pull to the animated pose: the keyed shape, held loosely toward the tip
-        const k = HP.tailPose * (1 - 0.85 * f);
-        p.lerp(anim[i], k + tailLift * 0.07 * (1 - 0.5 * f));   // (carried out while rearing: a little firmer)
+        // the pull to the animated pose: the DOCK (bone and muscle, the first quarter)
+        // is carried by the horse; the HAIR below only remembers its shape faintly
+        // and otherwise hangs and trails. (Pulled toward the clip's swing all along,
+        // the whole tail flapped like a stick hinged at the croup, 0.8 m a stride.)
+        const dock = i <= 1 ? 1 : HP.tailHair;
+        const k = HP.tailPose * dock * (1 - 0.85 * f);
+        p.lerp(anim[i], k + tailLift * 0.07 * (1 - 0.5 * f) * (i <= 1 ? 1 : 0.3));   // (carried out while rearing / jumping: the DOCK firmer — the hair pulled too hooked up like a scorpion's)
       }
       // lengths (a few passes, the dock fixed), then never forward into the croup
       for (let it = 0; it < 4; it++) {
@@ -1944,12 +2043,15 @@ export class HorseController {
           if (i === 1) b.addScaledVector(tmp, -corr);
           else { a.addScaledVector(tmp, 0.5 * corr); b.addScaledVector(tmp, -0.5 * corr); }
         }
+        // the hair's own bending stiffness: a soft pull toward the neighbours' middle
+        for (let i = 2; i < m - 1; i++) S.p[i].lerp(tmp.addVectors(S.p[i - 1], S.p[i + 1]).multiplyScalar(0.5), HP.tailSmooth);
         // no joint folds sharper than tailBendMax: the ends of each pair of segments
         // kept at least that far apart (a rope with some body, not a chain)
         for (let i = 1; i < m - 1; i++) {
           const a = S.p[i - 1], c2 = S.p[i + 1];
           tmp.subVectors(c2, a); const d = tmp.length() || 1e-6;
-          const minD = Math.sqrt(rest[i - 1] ** 2 + rest[i] ** 2 + 2 * rest[i - 1] * rest[i] * Math.cos(HP.tailBendMax));
+          const bend = i <= 1 ? HP.tailBendMax : HP.tailBendMax * 1.5;   // (the hair bends more than the dock)
+          const minD = Math.sqrt(rest[i - 1] ** 2 + rest[i] ** 2 + 2 * rest[i - 1] * rest[i] * Math.cos(bend));
           if (d < minD) { const k2 = (minD - d) / d; if (i > 1) a.addScaledVector(tmp, -0.5 * k2); c2.addScaledVector(tmp, i > 1 ? 0.5 * k2 : k2); }
         }
         for (let i = 1; i < m; i++) {
@@ -1957,6 +2059,11 @@ export class HorseController {
           if (ahead > 0) S.p[i].addScaledVector(fwd, -ahead);
           // never into the ground (rearing drops the dock low): it rests on it and drags
           if (S.p[i].y < groundY) { S.p[i].y = groundY; S.o[i].lerp(S.p[i], 0.5); }
+          // never into the buttocks or the hind legs: pushed out, a little friction
+          if (i >= 2) for (const [ca, cb, cr] of caps) {
+            const q = closestOnSeg(S.p[i], ca, cb), off = S.p[i].clone().sub(q), d = off.length(), R = cr + hairR;
+            if (d < R && d > 1e-6) { S.p[i].addScaledVector(off, (R - d) / d); S.o[i].lerp(S.p[i], 0.3); }
+          }
         }
       }
     }

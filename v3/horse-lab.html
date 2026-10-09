@@ -379,7 +379,10 @@
       body.add(HP, "earsUp", 0, 1, 0.01).name("ears up while moving");
       body.add(HP, "tailSway", 0, 1, 0.01).name("tail: rope (0 = keyed)");
       body.add(HP, "tailPose", 0.002, 0.15, 0.001).name("tail: holds its shape");
-      body.add(HP, "tailDrag", 0, 0.15, 0.001).name("tail: air drag");
+      body.add(HP, "tailDrag", 0, 0.05, 0.001).name("tail: damping");
+      body.add(HP, "tailAir", 0, 2, 0.01).name("tail: air drag (streams at speed)");
+      body.add(HP, "tailHair", 0, 1, 0.01).name("tail: hair keeps its shape");
+      body.add(HP, "tailSmooth", 0, 0.08, 0.001).name("tail: hair stiffness");
       body.add(HP, "tailGravity", 0, 2, 0.01).name("tail: weight");
       body.add(HP, "tailBendMax", 0.1, 1.2, 0.01).name("tail: max bend per joint (rad)");
       body.add(HP, "tailWave", 0, 3, 0.01).name("tail: flutter at speed");

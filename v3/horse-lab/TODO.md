@@ -67,6 +67,46 @@ Order = suggested priority. ★ = my top picks.
 - [ ] Muybridge's other plates (636, 641, 644: Pandora, other heights) to check
   higher fences.
 
+## ▶ Walk + gallop vs Muybridge — 2026-10-09 (measured, not fixed yet)
+
+Refs: plate 574 (Hansel walking, free), plate 626 (Annie G. galloping) — Commons.
+Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angles).
+- WALK: footfall order right (lateral 4-beat) but uneven: LH→LF 0.15, LF→RH 0.37,
+  RH→RF 0.19, RF→LH 0.29 (real ~0.25 each); duty 0.52–0.56 (real ~0.6–0.65):
+  2 feet down 85 %, 3 feet 15 % (real ~half/half); stride 1.15 m in 0.9 s (real
+  ~1.6–1.8 m, ~1.1 s); head nod 4 cm (real ~8–12 cm).
+- GALLOP: transverse 4-beat, left lead, 26 % suspension — correct. But 0.45 s
+  strides (racing rhythm) at 5.65 m/s = 2.5 m strides (real at that speed ~3+ m,
+  ~0.55 s: legs too busy); body rocks 15° nose up/down and bobs 23 cm (real ~±5°,
+  ~10–15 cm: a rocking horse); head carried high, neck upright (real: neck
+  stretched forward-low); forelegs reach to +35° (Annie G ~+45–50°).
+
+- GALLOP DONE (uncommitted): body rock eased toward its running mean
+  (HP.gallopCalm 0.55, hooves kept by IK: pitch range 15.5° → 9.5°, hip bob
+  23 → 17 cm); neck stretched forward-down (HP.gallopNeck 0.32 rad); slower legs
+  (HP.gallopRate 0.85: stride 0.45 → 0.52 s, 2.5 → 2.9 m) with planted hooves
+  LOCKED until they lift (released over 0.12 s; back to rate 1 when a jump is
+  queued). Gait blends now wait up to one whole stride (a slow canter timed out
+  into a 180° canter→walk blend). Audit 15/15 both horses; course clearance ≥ before.
+- [ ] Gallop forelegs reach only +36° (Annie G. ~+45–50°).
+- [ ] The walk (below numbers).
+
+## ▶ The tail (horse.js tailSway) — 2026-10-09
+
+- User: "too stiff, not only in the jump — smoother, more realistic". Measured: the
+  whole tail swung like a stick hinged at the croup every gallop stride (tip
+  −0.67 → +0.11 m about the dock), heavy fixed damping (6 %/step) killed any follow-through.
+- DONE (uncommitted): dock (first point) carried by the clip, the HAIR keeps only
+  8 % of that pull (HP.tailHair); air drag ∝ speed² (HP.tailAir 0.5: streams ~25°
+  below level at a gallop, hangs at a walk); light linear damping (0.009) so it
+  settles stopping; soft bending stiffness (HP.tailSmooth) — waves, no hooks; hair
+  bends 1.5× the dock; collides with the buttocks + hind legs (it hung through them
+  and swung under the belly stopping); the jump lift firms the dock, not the hair.
+- [ ] The tail still LOOKS like a dark rope (14 cards seen edge-on from the side):
+  fuller, fanning hair cards (more spread low down, lighter tips, a little lateral
+  sway per card) would read softer.
+- [ ] Jump: over the top the lifted dock + falling hair still arcs a little (Muybridge: level).
+
 ## ▶ The bow on foot (bow.js) — 2026-10-09
 
 - DONE (first pass, uncommitted): procedural archery over the idle / walk clips —
