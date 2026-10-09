@@ -50,7 +50,8 @@ export const SQUADS = {
 /** Squad upgrades: who can buy it, the price, the slot that carries it, his weapon. */
 export const UPGRADES = {
   lmg: {
-    label: "FM 24/29", squads: ["appele"], cost: { mun: 60 }, slot: 2,
+    // (2026-10-09, munitions sinks: the Légion's and the paras' too — munitions piled up unspent.)
+    label: "FM 24/29", squads: ["appele", "legion", "para"], cost: { mun: 60 }, slot: 2,
     weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 },
     hint: t("Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend)."),
   },

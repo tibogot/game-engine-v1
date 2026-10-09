@@ -14,7 +14,10 @@ const DEG = Math.PI / 180;
 
 /** `light` + `applyLight`: algGame.js AURES_LIGHT and applyAuresLight. */
 export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight }) {
-  const panel = createDevPanelShell({ id: "alg-dev", storageKey: "alg-rts.devPanel", title: "Dev" });
+  // FOLDED at every start (2026-10-09, you: "hide the right panel by default"): the open/closed
+  // memory is dropped, so it opens only from its tab (« Dev); its section folds are still kept.
+  try { localStorage.removeItem("alg-rts.devPanel.collapsed"); } catch { /* private mode */ }
+  const panel = createDevPanelShell({ id: "alg-dev", storageKey: "alg-rts.devPanel", title: "Dev", startCollapsed: true });
 
   // ── Camera ──────────────────────────────────────────────────────────────
   const p = rtsCamera.params;

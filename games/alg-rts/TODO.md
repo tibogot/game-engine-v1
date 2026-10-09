@@ -133,9 +133,17 @@ Keep this file current: tick things off here, add new asks here.
    ruined hut, the FLN squad inside its walls — battleLab.js now picks the clearest patch): hard cover
    0.8 made numbers useless (12 v 6 FLN behind sandbags: the FLN won 2 of 3). DONE: hard cover 0.5,
    cover 0.35 (algCover.js — 12 v 6 now 11-0, 11-0, 9-0; 6 v 6 still the defender's); pop cap 40 + 5 a
-   village, 60 max; upkeep 2 a man. NEXT: fuel / munitions sinks for infantry (grenades and smoke cost
-   munitions, squad upgrades, cheaper transport); the snowball (a lost village cuts your cap AND
-   raises the FLN's — keep one of the two); replay and judge.
+   village, 60 max; upkeep 2 a man.
+   DONE 2026-10-09 — THE SNOWBALL: one village swung the French cap (−5), the FLN's cap (+15% of
+   maxLive) and its income (85 → 305 a minute over 4 villages, measured). The French cap is now FIXED
+   at 55 (CoH); the FLN's still follows its villages but softer (0.8 + 0.08 a village: 21 → 29, was
+   18 → 34). French income, measured from the economy: half the map 25 fuel / 58 mun a minute, all of
+   it 88 / 107 — kept. MUNITIONS SINKS: the existing ones (grenade 15, smoke 10, flares 25, FM 60,
+   barrage 45, air strike 120) — the 1321 unspent was the bot never using abilities; added: FM 24/29
+   for the Légion and the paras too (every UPGRADES entry now on the card).
+   LEFT: replay and judge (**you**); the FLN's purse still piles up unspent (1670 at 12 min, its cap
+   is its limit) — give it something to buy (more caches, sangars) if it should matter; a fuel sink
+   for infantry (none yet: vehicles and tiers only).
 12. [x] **POINTS STAY HELD — CoH's rule (2026-10-08, you)**: before, a point nobody stood on drifted
    to neutral (a full one lost in ~3 min, a fresh one in ~2), so men had to sit on every flag. Now
    a HELD point stays its holder's and a dent heals back (0.005/s); only an unfinished capture of a

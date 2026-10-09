@@ -469,7 +469,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       return list;
     },
     canAfford: (cost) => economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop),
-    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} : tenez plus de villages)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", "),
+    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} atteint)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", "),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
@@ -490,13 +490,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         mgTeams?.ability(sel),
         // FUMIGÈNE (algGrenades.js + algSmoke.js): a screening cloud nobody sees through.
         grenades?.ability(sel, "smoke"),
-        // FM 24/29 (algSquads UPGRADES): the appelés' light machine gun, for munitions.
-        (() => {
-          const sq = squads.squadsIn(sel).filter((s) => squads.upgradeCost(s, "lmg"));
+        // THE UPGRADES (algSquads UPGRADES), for munitions: FM 24/29 for the appelés, the Légion, the paras.
+        ...Object.entries(UPGRADES).map(([key, g]) => {
+          const sq = squads.squadsIn(sel).filter((s) => squads.upgradeCost(s, key));
           if (!sq.length) return null;
-          const g = UPGRADES.lmg;
-          return { key: "lmg", label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? t(" ({n} groupes : chacun paie).", { n: sq.length }) : ""), ready: economy.french.canAfford(g.cost) };
-        })(),
+          return { key, label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? t(" ({n} groupes : chacun paie).", { n: sq.length }) : ""), ready: economy.french.canAfford(g.cost) };
+        }),
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
         // RÉPARER (algRepair.js): sappers fix a damaged vehicle or building.
         repair?.ability(sel),
@@ -540,7 +539,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "grenade") grenades?.begin(sel);
       if (key === "smoke") grenades?.begin(sel, "smoke");
       if (key === "aimArc") mgTeams?.begin(sel);
-      if (key === "lmg") { for (const s of squads.squadsIn(sel)) squads.upgrade(s, "lmg"); commandCard.render(sel); }
+      if (UPGRADES[key]) { for (const s of squads.squadsIn(sel)) squads.upgrade(s, key); commandCard.render(sel); }
       if (key === "barrage") barrage?.begin(sel);
       if (key === "airStrike") airStrike?.begin(sel);
       if (key === "flare") flares?.begin(sel);

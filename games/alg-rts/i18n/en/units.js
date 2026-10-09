@@ -95,7 +95,7 @@ export default {
   "Grotte": "Cave",
   "Échelon {n} : {note}. Il faut tenir {villages} villages.": "Tier {n}: {note}. Requires holding {villages} villages.",
   "Échelon {n} : {note}. Il faut tenir 1 village.": "Tier {n}: {note}. Requires holding 1 village.",
-  "troupes (plafond {cap} : tenez plus de villages)": "troops (cap {cap}: hold more villages)",
+  "troupes (plafond {cap} atteint)": "troops (cap {cap} reached)",
   "En patrouille": "Patrolling",
   "Patrouille": "Patrol",
   "Patrouille en file sur la piste la plus proche, aller et retour (véhicules : la piste). Un GMC en patrouille ravitaille les villages que vous tenez.":

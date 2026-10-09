@@ -81,7 +81,10 @@ const P = {
   upkeepMan: 2, upkeepVehicle: 8, upkeepFree: 14, mpFloor: 100,
   // POP CAP: 40, +5 a village held, 60 at most (the start army is 16). (2026-10-08: 30 → 50 was ~5
   // squads early, 8 at most — "too few units", you; with cover softened, numbers now take positions.)
-  popBase: 40, popPerVillage: 5, popMax: 60,
+  // THE SNOWBALL (2026-10-09): a lost village cut this cap AND raised the FLN's (algAI cap) AND its
+  // income — losing one point lost the game. The cap is now FIXED, as CoH's: a village lost costs
+  // its income (and raises the FLN's cap, softened), not your army. 55 = the old cap at 3 villages.
+  popBase: 55, popPerVillage: 0, popMax: 55,
   // A village to its holder (the ALN: one number, as before).
   village: {
     hamlet: { mp: 20, fuel: 6, mun: 8 }, dechra: { mp: 25, fuel: 8, mun: 10 }, ksar: { mp: 30, fuel: 10, mun: 12 },

@@ -159,8 +159,9 @@ const P = {
   smokeNear: 45,              // m: French this close when the band withdraws / goes in → smoke
   // THE CAP FOLLOWS THE VILLAGES (balance 2026-10-04: the purse piled up past 2000 unspent —
   // the cap was the only limit, so taking FLN villages cost it nothing): fighters out at most =
-  // maxLive × (capBase + capPerVillage × villages it holds) — Normal 18 → 34.
-  capBase: 0.7, capPerVillage: 0.15,
+  // maxLive × (capBase + capPerVillage × villages it holds). (2026-10-09, the snowball: 0.7 + 0.15 —
+  // Normal 18 → 34, 18 → 30 by 12 min with the French doing nothing; now 21 → 29.)
+  capBase: 0.8, capPerVillage: 0.08,
 };
 
 const rand = (a, b) => a + Math.random() * (b - a);
