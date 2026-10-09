@@ -84,6 +84,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   jumpRunRamp: true,              // the run-up's leg pace eases up from the gallop's (false = jumps straight to jumpLeadIn)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
+  wcFade: 0.38,                   // s the walk <-> canter crossfade takes (planted hooves held through it)
   departFirst: true,              // gearing up from the walk: no faster than the walk can step until the canter has begun
   startLock: 0.9,                 // s after starting / stopping during which planted hooves are held where they stand (0 = off)
   walkRate: 1,                    // the walk legs play this much slower (planted hooves locked). TRIED 0.82: the forelegs cannot sweep further back — locked, they over-stretched and lifted (fore stance 56 → 31 %)
@@ -1060,6 +1061,10 @@ export class HorseController {
     // planted hooves along the ground (3.5–4 cm a frame for 0.3 s): hold every
     // planted hoof where it stands until the walk lifts it — the first step
     if (HP.startLock > 0 && ((this.gaitName === "Idle" && name === "Walk") || (this.gaitName === "Walk" && name === "Idle"))) this.startLockT = HP.startLock;
+    // WALK <-> CANTER: the poses share little (~85-90 deg): a longer blend, the
+    // planted hooves held through it (released as the new gait lifts them)
+    const wc = (this.gaitName === "Walk" && name === GEARS[1]) || (this.gaitName === GEARS[1] && name === "Walk");
+    if (wc && HP.wcFade > fade) { fade = HP.wcFade; if (HP.startLock > 0) this.startLockT = Math.max(this.startLockT ?? 0, HP.wcFade + 0.1); }
     const next = this.act(name);
     next.reset();
     next.time = startAt;

@@ -117,7 +117,14 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   up only to what it can step (1.86 m/s), departs into the canter, THEN gathers
   speed; down, the canter slows to its slowest step, hands to the walk at ~2.3 m/s
   (canter min 0.5×, walk max 1.8×), and the walk never flips back up while slowing.
-- [ ] Walk ↔ canter (99° / 84° blends), landing → gallop, turning on the spot.
+- DONE: walk ↔ canter blend 0.38 s with planted hooves held through it (slides
+  in the change 25 → 13 cm). Measured the footfalls inside the clips (scratchpad
+  clipfeet.js): the canter = the gallop clip slowed; beats RH 0.44 → LH 0.66 →
+  RF 0.81 → LF 0 (left lead). A footfall-matched pairing (the same hind landing)
+  is a 310° pose gap; the chosen one (walk 0.5 → canter 0.01: left fore planted /
+  landing) is 83° and already footfall-consistent. A real departure stride would
+  need its own keyed transition. Landing → gallop: 8° hand-over (fine).
+- [ ] Turning on the spot.
 
 ## ▶ The tail (horse.js tailSway) — 2026-10-09
 
