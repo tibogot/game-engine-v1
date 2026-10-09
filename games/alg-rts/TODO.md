@@ -326,8 +326,14 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        a no-op case); boot +1.3 s (the renderer parses and bakes the soldiers' pack again — share the
        template if it matters).
      - [ ] **you**: look at them in the game (who, how many, how they move).
-     - [ ] step 2: the ARMED SHEPHERD (you, 2026-10-08) — a shepherd's hut; a "shepherd" who is a FLN
-       auxiliary, unarmed until French come close, then fires (an enemy unit from then on).
+     - [x] step 2: the ARMED SHEPHERD (2026-10-09): at 2 FARMSTEADS (mechtaFarm pieces, drawn anew each
+       game) a "shepherd" walks about the yard — a civilian to everything. French within 22 m (foot or
+       vehicle): he is gone from the civilians and a MOUSSEBEL (algUnitTypes: the shepherd's look with
+       an old rifle, 50 hp, 32 m, `noChase` — he holds his yard; the AI never bands him) stands there;
+       alert "Le berger ouvre le feu !". Checked in the game: revealed, fired, a French man down, he
+       took hits. ?moussebel=0 = none.
+     - [ ] maybe: a tell for the careful player (he watches the track, goes in and out of the house),
+       or a sapper's search of the farm (bouclage et fouille) that finds him before he fires.
      - [ ] they walk through soldiers (two lists: no avoidance between them); night: indoors?
    - [ ] NEXT: then SOUND; then a real playtest to tune the FLN,
      prices and the MG numbers (swing 26°/s, setup 2.5 s, sweep 0.85/s) together.

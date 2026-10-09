@@ -16,6 +16,14 @@
 // Their looks are the soldier lab's (shared-rts/soldierLooks.js civMan, civElder, civShepherd,
 // civWomanHaik, civWomanMlaya). Fog of war: seen only where you see (the renderer hides a team
 // that is not the player's). ?civ=0 = without.
+//
+// THE MOUSSEBEL (step 2, 2026-10-09 — you: "a shepherd's house, and when we come very close the
+// shepherd fires at us"): at a few FARMSTEADS (algLandmarks' mechtaFarm pieces: one family's place
+// out in the land, a pen for the goats) a "shepherd" idles in the yard — drawn as a civilian, a
+// civilian to everything in the game. He is the FLN's: when French come within P.revealAt, he is
+// gone from this list and a MOUSSEBEL (algUnitTypes: the same clothes, an old rifle) stands where he
+// was, in the battle — an enemy from then on, firing from his yard (`noChase`). Which farms: drawn
+// anew each game (not the same ones twice). ?moussebel=0 = none.
 import { createUnits } from "../shared-rts/units.js";
 import { createUnitRenderer } from "../shared-rts/unitRenderer.js";
 import { ALG_UNIT_TYPES } from "./algUnitTypes.js";
@@ -35,6 +43,9 @@ const P = {
   check: 0.5,           // s between danger checks
   stuck: 3,             // s without getting anywhere (caught on a wall corner): another door, then in where he is
   shepherdBehind: 7,    // m behind the flock's home
+  // the moussebel (step 2)
+  farms: 2,             // farmsteads with a "shepherd" who is the FLN's (drawn each game)
+  revealAt: 22,         // m: French this near (on foot or in a vehicle) — he takes up his rifle
 };
 
 /** The civilian types: the moudjahid's body and size, their own looks, no weapon. */
@@ -121,6 +132,35 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
     const at = open(fl.anchor.x + 4, fl.anchor.z + 4);
     const u = people.spawn("civShepherd", at.x, at.z, { team: "civil", lookRole: Math.floor(rnd() * 12) });
     if (u) shepherds.push({ u, flock: fl, t: rnd() });
+  }
+
+  // The MOUSSEBEL's farms: a few farmsteads, drawn anew each game; a "shepherd" in each yard.
+  const auxes = [];
+  if (new URLSearchParams(location.search).get("moussebel") !== "0") {
+    const farms = Object.entries(showroom).filter(([k, o]) => /^mechtaFarm/.test(k) && o?.isObject3D).map(([, o]) => o);
+    for (let i = farms.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [farms[i], farms[j]] = [farms[j], farms[i]]; }
+    for (const o of farms.slice(0, P.farms)) {
+      // the yard: in front of the house (the farmstead's front, its gate, is at local -Z)
+      const c = Math.cos(o.rotation.y), s = Math.sin(o.rotation.y);
+      const yard = (lx, lz) => open(o.position.x + lx * c + lz * s, o.position.z - lx * s + lz * c);
+      const spots = [yard(0, -4), yard(-4, -7), yard(4, -8), yard(0, -11)];
+      const at = spots[0];
+      const u = people.spawn("civShepherd", at.x, at.z, { team: "civil", lookRole: Math.floor(rnd() * 12) });
+      if (u) auxes.push({ u, farm: o, spots, t: 4 + rnd() * 10, revealed: false, fighter: null });
+    }
+  }
+  /** The moussebel: French close — the civilian is gone, the FLN's man stands there with his rifle. */
+  function reveal(a, by) {
+    a.revealed = true;
+    const { x, z } = a.u.position;
+    a.u.inside = true;   // out of this list's drawing for good
+    a.u.haltMovement?.();
+    const m = battleUnits?.spawn?.("moussebel", x, z, { team: "enemy", lookRole: a.u.lookRole ?? null });
+    if (!m) return;
+    m.noChase = true;    // he holds his yard
+    m.faceToward?.(by.position.x, by.position.z);
+    a.fighter = m;
+    app.algBattle?.say?.(t("<b>Le berger ouvre le feu !</b> Un moussebel du FLN, à la ferme."), x, z, "bad", "hq_contact");
   }
 
   // ── Their day ──────────────────────────────────────────────────────────────
@@ -221,12 +261,27 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
         u.orderTo(u.position.x + (A.x - u.position.x) * k, u.position.z + (A.z - u.position.z) * k);
       }
     }
+    // The moussebel: about his yard, until the French come.
+    for (const a of auxes) {
+      if (a.revealed) continue;
+      const u = a.u;
+      if (check) {
+        const by = (battleUnits?.list ?? []).find((m) => m.alive && m.team === "player" && !m.isAir && !m.inside && !m.isStructure
+          && Math.abs(m.position.x - u.position.x) < P.revealAt && Math.abs(m.position.z - u.position.z) < P.revealAt
+          && Math.hypot(m.position.x - u.position.x, m.position.z - u.position.z) < P.revealAt);
+        if (by) { reveal(a, by); continue; }
+      }
+      if (u.isMoving || (a.t -= dt) > 0) continue;
+      a.t = 8 + rnd() * 14;
+      const p = a.spots[Math.floor(rnd() * a.spots.length)];
+      u.orderTo(p.x, p.z);
+    }
   }
 
   return {
-    params: P, people, renderer, folk, shepherds, villages, step,
+    params: P, people, renderer, folk, shepherds, villages, auxes, step,
     /** Draw them (each frame). */
     frame(dt, camera) { renderer.sync(dt, camera); },
-    get stats() { return { villages: villages.length, people: folk.length, shepherds: shepherds.length, inside: folk.filter((f) => f.state === "in").length }; },
+    get stats() { return { villages: villages.length, people: folk.length, shepherds: shepherds.length, moussebels: auxes.length, inside: folk.filter((f) => f.state === "in").length }; },
   };
 }

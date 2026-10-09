@@ -264,6 +264,9 @@ export const LOOKS = {
     weapon: "enfield", kit: ["musette", "kachabia"], skinTan: ALN_SKIN, clothRef: 0.045, bodies: ["aln1", "aln2"],
   },
 };
+// THE MOUSSEBEL (2026-10-09, alg-rts algCivilians.js): a FLN auxiliary in a shepherd's clothes —
+// the civShepherd to the last thread, with the old hunting rifle he kept under the straw.
+LOOKS.moussebel = { ...LOOKS.civShepherd, label: "Moussebel", note: "the shepherd's clothes, an old rifle", weapon: "enfield" };
 
 /** The look one soldier wears: `look` with one of its variants (by weight) merged in; r in [0, 1). */
 export function pickVariant(look, r) {

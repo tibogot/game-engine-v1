@@ -5,6 +5,8 @@ export default {
   "Villageoise": "Villager",
   "Ancien": "Elder",
   "Berger": "Shepherd",
+  "Moussebel": "Moussebel",
+  "<b>Le berger ouvre le feu !</b> Un moussebel du FLN, à la ferme.": "<b>The shepherd opens fire!</b> An FLN moussebel (auxiliary), at the farm.",
   // alg.html — the loading screen's slides (2026-10-09)
   "Aurès, 1956. Une section de paras descend vers le douar.": "Aurès, 1956. A section of paras heads down toward the douar.",
   // algTransports.js

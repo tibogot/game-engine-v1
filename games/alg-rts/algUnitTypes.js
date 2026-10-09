@@ -406,4 +406,14 @@ export const ALG_UNIT_TYPES = {
   },
 };
 
+// THE MOUSSEBEL (2026-10-09, algCivilians.js): one of the FLN's auxiliaries — a "shepherd" at a
+// farmstead, a civilian to look at (and drawn as one) until French come close; then he takes up his
+// old rifle and fires, from his yard (`noChase`). Not the katiba's: the AI never takes him into a band
+// (it gathers moudjahidine and FM teams only). A hunting rifle: slower, a little harder than a
+// moudjahid's, a little shorter.
+ALG_UNIT_TYPES.moussebel = {
+  ...ALG_UNIT_TYPES.moudjahid, typeKey: "moussebel", name: t("Moussebel"), buildLabel: t("Moussebel"),
+  look: "moussebel", grenade: false, maxHp: 50, range: 32, damage: 9, fireRate: 1.3, crowdMax: 8,
+};
+
 export const ALG_UNIT_TYPE_KEYS = Object.keys(ALG_UNIT_TYPES);
