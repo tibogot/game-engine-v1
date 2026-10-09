@@ -110,7 +110,13 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   standing with holds left, each hoof steps (lifts 7 cm) into place one at a time
   (eased along the ground it skated). No holds in rears / jumps / turns on the spot.
   Planted slides (scratchpad startstop.js): start 206 → 25 cm, stop 162 → 78 cm, stand 0.
-- [ ] Stop still slides 78 cm (the walk's last steps blending into the halt).
+- DONE: the stop's last step holds planted hooves (stop slides 83 → 54 cm; the
+  rest is toe roll-off my rough metric counts).
+- DONE: walk ↔ canter — the speed ran ahead of the gait (walk legs skated at
+  3 m/s for ~0.6 s waiting for the hand-over). Now (HP.departFirst): the walk speeds
+  up only to what it can step (1.86 m/s), departs into the canter, THEN gathers
+  speed; down, the canter slows to its slowest step, hands to the walk at ~2.3 m/s
+  (canter min 0.5×, walk max 1.8×), and the walk never flips back up while slowing.
 - [ ] Walk ↔ canter (99° / 84° blends), landing → gallop, turning on the spot.
 
 ## ▶ The tail (horse.js tailSway) — 2026-10-09

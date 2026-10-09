@@ -84,6 +84,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   jumpRunRamp: true,              // the run-up's leg pace eases up from the gallop's (false = jumps straight to jumpLeadIn)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
+  departFirst: true,              // gearing up from the walk: no faster than the walk can step until the canter has begun
   startLock: 0.9,                 // s after starting / stopping during which planted hooves are held where they stand (0 = off)
   walkRate: 1,                    // the walk legs play this much slower (planted hooves locked). TRIED 0.82: the forelegs cannot sweep further back — locked, they over-stretched and lifted (fore stance 56 → 31 %)
   walkNod: 0.12,                  // rad the head + neck nod down with each forefoot's stance at a walk
@@ -694,7 +695,7 @@ export class HorseController {
       // than the ground goes by: unlocked it would slide forward)
       // (leaving the gallop a held hoof stays held until it lifts: released while
       // planted it slid 8 cm a frame)
-      const locking = !this.oneShot && this.rearT < 0 && (((this.startLockT ?? 0) > 0 && Math.abs(this.turnRate ?? 0) < 0.4) || (this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
+      const locking = !this.oneShot && this.rearT < 0 && (((this.startLockT ?? 0) > 0 || (this.walkStopping && this.gaitName === "Walk")) && Math.abs(this.turnRate ?? 0) < 0.4 || (this.calmOn && (this.rateK ?? 1) < 0.99 && this.gaitName === "Gallop") || (this.gaitName === "Walk" && HP.walkRate < 0.99 && Math.abs(this.v) > 0.3 && this.rearT < 0));
       if (g.lock && T.distanceTo(g.lock) > 1.2) g.lock = null;   // a teleport (a swinging hoof being released gets far from its spot)
       const letGo = g.lock && (this.oneShot || this.rearT >= 0 || ((this.startLockT ?? 0) > 0 && Math.abs(this.turnRate ?? 0) >= 0.4));   // (a jump / rear / turn on the spot began: let go smoothly)                      // a jump began: let go smoothly, planted or not
       // stood still with a hold left (after a stop): eased over 0.5 s to where the
@@ -1572,6 +1573,15 @@ export class HorseController {
       if (input.fwd > 0) target = S[this.effGear] * (1 - HP.hillSlowUp * Math.max(0, this.hillK ?? 0) - HP.hillSlowDown * Math.max(0, -(this.hillK ?? 0)));   // slower up and down hills
       if (this.oneShot && this.oneShotName === "Gallop_Jump") target = Math.max(target, this.gallopV() * 0.98);   // the jump is ridden at gallop speed
       else if (input.fwd < 0) target = -walkV * 0.55;
+      // GEARING UP out of the walk: the canter DEPARTS first, then gathers speed. The
+      // walk was kept (waiting for its hand-over moment) while the horse sped up to
+      // 3 m/s — beyond what the walk's legs can step (1.6× its 1.28 m/s): the hooves
+      // skated for ~0.6 s. Until the new gait has begun, no faster than the walk steps.
+      if (HP.departFirst && this.gaitName === "Walk" && target > 0) target = Math.min(target, walkV * HP.speedScale * 1.45);
+      // ...and DOWN: the canter cannot step slower than 0.55× (its legs then skate
+      // forward under a slowing body) — it slows to that, the walk takes over, then
+      // the walk slows on
+      if (HP.departFirst && this.gaitName === "Canter" && target < galV * 0.6 && Math.abs(this.v) > 0.05) target = Math.max(target, galV * 0.5);
     }
     // REFUSAL — a SLIDING STOP: something ahead it will not jump (too tall, a
     // wall, any fence when not galloping) → brake just hard enough to stop short
@@ -1660,6 +1670,12 @@ export class HorseController {
         if (this.v > 0.45) want = this.gaitName;
         else { this.switchTo("Idle", 0.45, true); want = "Idle"; }
       }
+      // (departing: speed held at what the walk can step, so the speed edges never
+      // ask for the canter — asked for a faster gear, it departs from there)
+      const capW = this.h.gait.Walk.speed * HP.speedScale * 1.45;
+      if (HP.departFirst && this.gaitName === "Walk" && (this.effGear ?? 0) > 0 && input.fwd > 0 && this.v > capW * 0.9 && !this.oneShot && this.rearT < 0) want = GEARS[1];
+      if (HP.departFirst && this.gaitName === "Canter" && ((this.effGear ?? 0) === 0 || input.fwd <= 0) && this.v < this.h.gait.Gallop.speed * 0.54 && !this.oneShot && this.rearT < 0) want = "Walk";
+      if (HP.departFirst && this.gaitName === "Walk" && want !== "Walk" && want !== "Idle" && ((this.effGear ?? 0) === 0 || input.fwd <= 0)) want = "Walk";   // (slowing in the walk: never back up to the canter — they flip-flopped)
       if (this.rearT >= 0) want = "Idle";                      // the rear is procedural, on top of Idle
       if (want !== this.gaitName) this.switchTo(want);
       else this.blendWaitT = 0;                              // no change pending: a later request waits afresh
@@ -1668,14 +1684,15 @@ export class HorseController {
         // stopping: keep stepping at a normal pace for one last step, so the
         // walk reaches a pose it can stand from (else a 235° blend into Idle)
         const stopping = this.blendWaitT > 0 && Math.abs(this.v) < 0.3;
+        this.walkStopping = stopping;                          // (that last step: planted hooves held — applyIK)
         // (walking, the legs play HP.walkRate slower than the ground goes by — longer,
         // calmer steps, the planted hooves locked; Hansel walks ~1.1 s strides)
         const ts = stopping ? 1 : Math.abs(this.v) < 0.05 && turning ? 0.6 : this.v / walkV * HP.walkRate;   // (also with IK off: the audit compares the same stride timing)
-        this.cur.setEffectiveTimeScale(Math.sign(ts || 1) * clamp(Math.abs(ts), 0.35, 1.6));
+        this.cur.setEffectiveTimeScale(Math.sign(ts || 1) * clamp(Math.abs(ts), 0.35, 1.8));   // (1.8: the canter hands over at ~2.3 m/s — the walk steps that, the canter's legs still match it at 0.5×)
       } else if (this.gaitName === "Trot") {
         this.cur.setEffectiveTimeScale(clamp(this.v / g.Trot.speed, 1.0, 2.6 * HP.speedScale));
       } else if (this.gallopLike()) {
-        let ts = this.gaitName === "Canter" ? clamp(this.v / galV, 0.55, 0.95 * HP.speedScale) : clamp(this.v / galV, 0.6, 1.25 * HP.speedScale);
+        let ts = this.gaitName === "Canter" ? clamp(this.v / galV, 0.5, 0.95 * HP.speedScale) : clamp(this.v / galV, 0.6, 1.25 * HP.speedScale);
         // a LONGER, slower stride (Annie G.: ~0.55 s, 3 m at this speed; the clip
         // played fast churned 0.45 s / 2.5 m): the legs play slower and the planted
         // hooves are LOCKED to the ground (applyIK), so they sweep further back
