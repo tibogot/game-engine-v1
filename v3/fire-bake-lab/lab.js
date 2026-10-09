@@ -80,11 +80,14 @@ async function buildSim(preset, parent, { bake = false } = {}) {
   parent.add(sim);
   // `from` / `until` (s): an emitter that runs only for a while (a shell's jet of earth; a
   // flamethrower's fuel, which starts after its air jet).
-  const timed = [];
+  // `path`: { v: [vx, vy, vz] m/s, g } — the emitter FLIES a ballistic arc from `at` (a clod of
+  // earth thrown out, its trail of dust behind it: a rocket's spikes), stopping at the ground.
+  const timed = [], flying = [];
   for (const f of preset.fires) {
     const e = sim.addEmitter({ shape: { type: "sphere", radius: f.radius }, emission: f.emission, velocity: f.velocity });
     e.object.position.set(...f.at);
     if (f.until != null || f.from != null) timed.push({ e, from: f.from ?? 0, until: f.until ?? Infinity });
+    if (f.path) flying.push({ e, at: f.at, v: f.path.v, g: f.path.g ?? 9.8 });
   }
   // `fadeUntil` (s): a force whose strength falls to nothing by then (the flamethrower START's
   // extra turbulence tears the burning head, then dies out so the book ends as the loop begins).
@@ -104,6 +107,10 @@ async function buildSim(preset, parent, { bake = false } = {}) {
   const timeEmitters = (t) => {
     for (const f of fading) f.h.configure({ strength: f.strength * Math.max(0, 1 - t / f.fadeUntil) });
     for (const { e, from, until } of timed) (t >= from && t < until ? e.start() : e.stop());
+    for (const { e, at, v, g } of flying) {
+      e.object.position.set(at[0] + v[0] * t, Math.max(0.15, at[1] + v[1] * t - 0.5 * g * t * t), at[2] + v[2] * t);
+      e.object.updateMatrixWorld();
+    }
     for (const b of blasts) if (!b.fired && t + 1e-6 >= b.delay) { b.ex.trigger(); b.fired = true; }
   };
   /** From the top: every blast fires again (at the next step from t = 0). */

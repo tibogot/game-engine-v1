@@ -32,6 +32,76 @@ export const PRESETS = {
     // 8 m centred at 3.6 cut the rising soot flat at the top (fill 0.995, 2026-10-07).
     bake: { center: [0, 5, 0], size: 10, pitch: 40, start: 0, duration: 4, loop: false, blend: 0 },
   },
+  // THE ROCKET HITTING THE GROUND (you, 2026-10-09: "some peak of smoke, a realistic explosion"):
+  // a flash and a dust dome, and the SPIKES — the earth thrown out fast, each streak a narrow jet
+  // of heavy dust for a tenth of a second, fanned at steep angles; they arc and fall back. (Fire
+  // Pro has no solid debris: the clods themselves fly as the game's particles on top.)
+  rocket: {
+    label: "Rocket impact",
+    note: "one-shot: a flash, dust spikes thrown out in a fan, the dome, the soot rising",
+    sim: {
+      voxelSize: 0.05, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 21,
+      grid: { maxVoxels: 12_000_000, cutoff: 0.03, ground: true },
+      flame: { lifespan: 0.4, heatRate: 1.5, smokeRate: 3, expansionRate: 3, cooling: 1.0, brightness: 8, opacity: 1, temperature: 2600, sootGlow: 1 },
+      // Thins fast: at 0.3 the spikes had become a 12 M-voxel haze by 2.6 s (the cap).
+      smoke: { dissipation: 0.6, color: "#8f7a5e", density: 5, scattering: 0.38, shadowDensity: 3.5 },
+      motion: { buoyancy: 1.4, smokeWeight: 1.6, damping: 0.2, vorticity: 3 },
+      fuel: { enabled: false },
+    },
+    // The spikes: each a CLOD flying a ballistic arc (lab `path`) and trailing dust for 0.55 s —
+    // fixed nozzles at the centre made a 1.5 m puff (the sim's air stops a jet at once).
+    // [elevation °, azimuth °, speed m/s]
+    fires: [[72, 0, 19], [58, 40, 15], [80, 85, 20], [55, 130, 14], [66, 170, 18], [62, 215, 16], [75, 255, 19], [57, 295, 14], [70, 335, 17]].map(([el, az, sp]) => {
+      const e = (el * Math.PI) / 180, a = (az * Math.PI) / 180;
+      return { kind: "emitter", at: [0, 0.4, 0], radius: 0.24, emission: { flame: 0, heatRate: 0.4, smokeRate: 60 }, velocity: null,
+        path: { v: [Math.cos(e) * Math.cos(a) * sp, Math.sin(e) * sp, Math.cos(e) * Math.sin(a) * sp] }, until: 0.9 };
+    }),
+    blasts: [{ at: [0, 0.4, 0], radius: 1.0, charge: { flame: 0.8, heat: 2.5, smoke: 8, fuel: 0 }, outwardSpeed: 14, variation: { period: 0.5, strength: 0.6 } }],
+    forces: [{ type: "turbulence", strength: 4, scale: 2.5 }, { type: "wind", direction: [1, 0, 0], strength: 0.3 }],
+    bake: { center: [0, 6.5, 0], size: 15, pitch: 40, start: 0, duration: 3, loop: false, blend: 0 },
+  },
+  // WHITE PHOSPHORUS ("Willie Pete" — nam): burning pellets thrown out on arcs, each trailing
+  // brilliant white smoke (the same flying emitters as the rocket's spikes, burning heads),
+  // over a dense white ball that rises.
+  wp: {
+    label: "White phosphorus",
+    note: "one-shot: burning pellets arcing out on white streamers, a white ball rising",
+    sim: {
+      voxelSize: 0.05, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 29,
+      grid: { maxVoxels: 12_000_000, cutoff: 0.03, ground: true },
+      flame: { lifespan: 0.5, heatRate: 1.5, smokeRate: 6, expansionRate: 2, cooling: 0.8, brightness: 10, opacity: 1, temperature: 3600, sootGlow: 0 },
+      smoke: { dissipation: 0.35, color: "#f1f0ea", density: 6, scattering: 0.5, shadowDensity: 2.5 },
+      motion: { buoyancy: 2.2, smokeWeight: 0.5, damping: 0.15, vorticity: 3 },
+      fuel: { enabled: false },
+    },
+    // [elevation °, azimuth °, speed m/s]: wider and lower than a rocket's spikes.
+    fires: [[50, 0, 13], [35, 25, 11], [65, 55, 14], [30, 85, 10], [55, 110, 13], [40, 140, 12], [70, 165, 12],
+      [33, 195, 11], [58, 220, 14], [42, 250, 12], [62, 280, 13], [36, 305, 11], [52, 330, 13], [45, 350, 10]].map(([el, az, sp]) => {
+      const e = (el * Math.PI) / 180, a = (az * Math.PI) / 180;
+      return { kind: "emitter", at: [0, 0.5, 0], radius: 0.2, emission: { flame: 1, heatRate: 1, smokeRate: 50 }, velocity: null,
+        path: { v: [Math.cos(e) * Math.cos(a) * sp, Math.sin(e) * sp, Math.cos(e) * Math.sin(a) * sp] }, until: 1.3 };
+    }),
+    blasts: [{ at: [0, 0.6, 0], radius: 1.1, charge: { flame: 1, heat: 2.5, smoke: 14, fuel: 0 }, outwardSpeed: 10, variation: { period: 0.5, strength: 0.5 } }],
+    forces: [{ type: "turbulence", strength: 3, scale: 2.5 }, { type: "wind", direction: [1, 0, 0], strength: 0.3 }],
+    bake: { center: [0, 6, 0], size: 16, pitch: 40, start: 0, duration: 3.5, loop: false, blend: 0 },
+  },
+  // SIGNAL SMOKE (nam: marking a landing zone): a grenade on the ground pouring thick smoke that
+  // drifts with the wind. Baked WHITE: the game tints it (yellow, purple, red…).
+  signal: {
+    label: "Signal smoke",
+    note: "loop: a smoke grenade on the ground, thick billows drifting downwind (tinted in the game)",
+    sim: {
+      voxelSize: 0.04, brickSize: 16, velocityDivisor: 2, smokeDivisor: 1, seed: 31,
+      grid: { maxVoxels: 8_000_000, cutoff: 0.03, ground: true },
+      flame: { cooling: 0.6, opacity: 1, brightness: 1 },
+      smoke: { dissipation: 0.4, color: "#ffffff", density: 5, scattering: 0.4, shadowDensity: 3 },
+      motion: { buoyancy: 1.1, smokeWeight: 0.15, damping: 0.1, vorticity: 3.5 },
+    },
+    fires: [{ kind: "smoke", at: [0, 0.12, 0], radius: 0.18, emission: { flame: 0, heatRate: 1.6, smokeRate: 40 }, velocity: { direction: [0.3, 1, 0], speed: 2.5 } }],
+    blasts: [],
+    forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.9 }, { type: "turbulence", strength: 1.2, scale: 2 }],
+    bake: { center: [1.6, 2.4, 0], size: 6, pitch: 40, start: 5, duration: 64 / 24, loop: true, blend: 16 },
+  },
   shell: {
     label: "Shell in sand",
     note: "one-shot: a shell landing in earth — a short flash, then a dust burst that slumps and drifts (no fuel)",

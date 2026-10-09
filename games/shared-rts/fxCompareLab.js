@@ -83,8 +83,9 @@ const ui = {
   gap: 10, dist: 52, sunAz: -77, sunEl: 40,
   blastSize: 10, fpBlastCard: 14, fpLife: 1.6, fpFire: 2,
   wreckOn: true, fpWreckCard: 6.5, auto: true, every: 7,
-  fpBook: "shell",                 // which Fire Pro book the blast row plays
+  fpBook: "rocket",                 // which Fire Pro book the blast row plays
   showGame: true, showFP: true,    // a side off = nothing of it drawn (Measure GPU)
+  signalOn: false, signalColor: "yellow", signalCard: 7,   // the signal smoke (Fire Pro only)
   scene: "blast", paused: false,                  // "blast" (shell + wreck) | "napalm"
   napEvery: 22,
   fpImpactCard: 22, fpGroundCard: 13, fpColumnCard: 24,
@@ -111,7 +112,7 @@ let blastMeta = null, wreckMeta = null;
 const status = document.createElement("div");
 status.id = "status";
 /** The one-shot books the blast row can play: a shell in earth, or a fuel fireball. */
-const FP_BOOKS = { shell: "Shell in sand", blast: "Fuel fireball" };
+const FP_BOOKS = { rocket: "Rocket impact", wp: "White phosphorus", shell: "Shell in sand", blast: "Fuel fireball" };
 const fpBooks = {};
 for (const key of Object.keys(FP_BOOKS)) {
   try { fpBooks[key] = await loadBookTextures(`/textures/fx/firepro/fp_${key}`); }
@@ -130,6 +131,18 @@ try {
   wreckCard.setBook(w.tex, w.meta); wreckMeta = w.meta;
 } catch { status.textContent += "fp_wreck not baked yet (v3/fire-bake-lab)\n"; }
 blastCard.mesh.visible = false;
+
+// SIGNAL SMOKE (Fire Pro only — the game has none): one looping card on the ground between
+// the two rows, baked white and TINTED here (the colours a nam LZ is marked with).
+const SIGNAL_TINTS = { yellow: [0.95, 0.78, 0.12], purple: [0.3, 0.1, 0.5], red: [0.85, 0.12, 0.08], green: [0.2, 0.6, 0.18] };
+let signalBook = null, signalCard = null;
+try {
+  signalBook = await loadBookTextures("/textures/fx/firepro/fp_signal");
+  signalCard = createBookCard();
+  signalCard.setBook(signalBook.tex, signalBook.meta);
+  signalCard.mesh.visible = false;
+  scene.add(signalCard.mesh);
+} catch { status.textContent += "fp_signal not baked yet (v3/fire-bake-lab: Signal smoke)\n"; }
 
 let gameFire = null;
 function placeWrecks() {
@@ -431,6 +444,15 @@ renderer.setAnimationLoop((now) => {
     });
   }
 
+  if (signalCard) {
+    signalCard.mesh.visible = ui.scene === "blast" && ui.signalOn;
+    if (signalCard.mesh.visible) {
+      const m = signalBook.meta, k = ui.signalCard / m.size;
+      signalCard.u.uTint.value.fromArray(SIGNAL_TINTS[ui.signalColor]);
+      signalCard.update({ age: clock / m.duration, camera, size: ui.signalCard, sunDir: _dir, sunColor: sunCol, ambient: sky,
+        center: _p.set((m.bake?.center?.[0] ?? 0) * k, (m.bake?.center?.[1] ?? m.size / 2) * k, (BLAST_Z + WRECK_Z) / 2) });
+    }
+  }
   fpNapalmFrame(sunCol, sky);
   ftFrame(sunCol, sky);
   renderer.render(scene, camera);
@@ -542,6 +564,11 @@ s_ = section("Burning wreck — front row", "blast");
 check(s_, "burning", "wreckOn", placeWrecks);
 slider(s_, "FP card (m)", "fpWreckCard", 2, 16, 0.25);
 slider(s_, "gap between (m)", "gap", 4, 30, 0.5, placeWrecks);
+s_ = section("Signal smoke — Fire Pro only", "blast");
+note(s_, "A smoke grenade between the rows (the game has none): one white book, tinted.");
+check(s_, "on", "signalOn");
+buttons(s_, Object.keys(SIGNAL_TINTS).map((c) => [c[0].toUpperCase() + c.slice(1), () => { ui.signalColor = c; }, c]), (k) => ui.signalColor === k);
+slider(s_, "card (m)", "signalCard", 3, 16, 0.5);
 
 s_ = section("Napalm run — Fire Pro cards", "napalm");
 note(s_, "70 m, 4 splashes over 2.2 s, 14 s of burning (nam's numbers). Sizes take effect at once.");
