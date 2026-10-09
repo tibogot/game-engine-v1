@@ -501,12 +501,17 @@ export const FOLIAGE_PRESETS = {
   // wiry, rolled, grey-green going straw, in dense round tufts.
   // (2026-10-02: 60 thin blades, not 26 broad ones — a dense tussock; a
   // third of them dry straw.)
+  // (2026-10-10, alg-rts plant lab "Steppe": at play zoom those 60 wiry blades were two wisps on
+  // the brown — 150 wider blades, more upright: a knee-high hummock with its own shadow, that
+  // reads from the RTS camera. 2.5x the triangles: 1500 / 904 / 240.)
   alfa: {
     kind: "blades",
-    fronds: 60, frondLength: 1.0, leaflets: 6, leafletWidth: 0.42, leafletAngle: 50,
-    spread: 0.4, arch: 0.8, droop: 0.35, stemWidth: 0.8, bareStalk: 0, dry: 0.3,
+    // (110 blades, wider: as full as 150. A tussock's cost is the screen it covers, not its
+    // triangles — 12 blades or 150 drew in the same time, measured 2026-10-10.)
+    fronds: 110, frondLength: 0.95, leaflets: 6, leafletWidth: 1.35, leafletAngle: 50,
+    spread: 0.42, arch: 0.7, droop: 0.35, stemWidth: 0.8, bareStalk: 0, dry: 0.35,
     // (A blade's colour runs most of the way to colorTip — keep the tip muted.)
-    colorBase: "#465238", colorTip: "#86825a", colorHead: "#d9c894", size: 1.0, translucency: 0.9,
+    colorBase: "#4f5a3c", colorTip: "#9a976a", colorHead: "#cbbd8c", size: 1.1, translucency: 0.7,
   },
   // TARO / elephant ear — knee-high heart leaves on thin petioles, wet ground.
   taro: {

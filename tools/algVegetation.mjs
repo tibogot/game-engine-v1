@@ -3,7 +3,11 @@
  * density in its paint maps — so it is map content, saved and editable in
  * the editor, instead of a game script placing trees at boot.
  *
- *   node tools/algVegetation.mjs [--file public/levels/alg-aures.v3proj] [--dry]
+ *   node tools/algVegetation.mjs [--file public/levels/alg-aures.v3proj] [--dry] [--only Alfa,Thistle]
+ *
+ * --only (2026-10-10): rewrite ONLY the named species (their paint channel and their slot); every
+ * other channel and slot stays as the map has it, byte for byte (a whole run had drifted ~7k bytes
+ * from the map since its last run — moving plants nobody asked to move).
  *
  * Tall-plant field (4 slots, the RGBA of `susukiDensity`, 512² over the map):
  *   0 Atlas cedar   the heights, in stands
@@ -46,6 +50,7 @@ import { LAYOUT, PLAY } from "../games/alg-rts/layout.js";
 const args = process.argv.slice(2);
 const FILE = args.includes("--file") ? args[args.indexOf("--file") + 1] : "public/levels/alg-aures.v3proj";
 const dry = args.includes("--dry");
+const ONLY = args.includes("--only") ? args[args.indexOf("--only") + 1].split(",") : null;
 
 /**
  * Where nothing grows: the post and its wire, the vehicle park and helipad
@@ -176,7 +181,10 @@ const outOfDrifts = (x, z, s) => 1 - 0.85 * Math.max(thistleDrift(x, z, s), asph
 const GROUND_HALF = 0.5;
 
 const GROUND = [
-  { name: "Alfa", preset: "alfa", fn: (x, z, h, s) => (1 - smooth((s - 20) / 6)) * patches(x, z, 25, 0.45, 13) * 0.55 * GROUND_HALF * outOfDrifts(x, z, s) },
+  // (2026-10-10: the STEPPE — the tussock redone to read at play zoom, it covers more of the flats
+  // at about the same strength: patch cover 0.6 (was 0.45), 0.45 (was 0.55; 0.9 read best but cost
+  // ~3 ms of GPU: the cost is the plant COUNT — per instance — not their triangles, measured).)
+  { name: "Alfa", preset: "alfa", fn: (x, z, h, s) => (1 - smooth((s - 20) / 6)) * patches(x, z, 25, 0.6, 13) * 0.45 * GROUND_HALF * outOfDrifts(x, z, s) },
   // Doum: the valley sides — moderate slopes (8-26°), in clumps, sparse. (Off
   // from 2026-09-26: its far LOD drew flat green mats; fixed 2026-09-30.)
   { name: "Doum palm", preset: "doumPalm", fn: (x, z, h, s) => smooth((s - 8) / 4) * (1 - smooth((s - 26) / 5)) * patches(x, z, 18, 0.6, 29) * 0.35 * GROUND_HALF * outOfDrifts(x, z, s) },
@@ -253,12 +261,13 @@ const slot = (sp, extra = {}) => ({
   ...structuredClone(FOLIAGE_PRESETS[sp.preset]),
   heightMin: -200, heightMax: 900, onLayer: -1, nearRiver: 0, ...extra,
 });
-man.susuki.plants = TALL.map((sp) => slot(sp));
+const only = (sp) => !ONLY || ONLY.includes(sp.name);
+if (!ONLY) man.susuki.plants = TALL.map((sp) => slot(sp));
 // The tall field's reach and density, as nam-valley's canopy (a tree field
 // must reach as far as the RTS camera sees: 60/140 m LODs were a grass's).
 // translucencyMul 0.6: at the field default (1.1) the date palms read pale lime.
-Object.assign(man.susuki.field, { translucencyMul: 0.6, density: 0.1, clumping: 0.35, clumpSize: 12, lodDistance: 90, lodDistance2: 200, fadeStart: 330, fadeEnd: 420, shadowDistance: 35 });
-GROUND.forEach((sp, i) => { man.foliagePlants[i] = slot(sp, sp.look ?? {}); });
+if (!ONLY) Object.assign(man.susuki.field, { translucencyMul: 0.6, density: 0.1, clumping: 0.35, clumpSize: 12, lodDistance: 90, lodDistance2: 200, fadeStart: 330, fadeEnd: 420, shadowDistance: 35 });
+GROUND.forEach((sp, i) => { if (only(sp)) man.foliagePlants[i] = slot(sp, sp.look ?? {}); });
 // Wind ON for the ground plants (the engine ships it off, "judged at rest"):
 // reeds, oleander and tamarisk stood frozen while the flags flew (you saw it).
 man.foliageField = { ...(man.foliageField ?? {}), windMul: 1, flutter: 0.5 };
@@ -267,8 +276,20 @@ Object.assign(man.foliageField, { density: 0.9, clumping: 0.75, lodDistance: 70,
 
 const tall = paintMap(512, 1, TALL);
 const ground = paintMap(1024, 2, GROUND);
-project.blobs.set("susukiDensity", Buffer.from(tall.out.buffer));
-project.blobs.set("foliagePaint", Buffer.from(ground.out.buffer));
+/** `--only`: the named species' channels from this run, the rest from the map. */
+function merge(blobKey, res, list, fresh) {
+  if (!ONLY) return Buffer.from(fresh.buffer);
+  const old = project.blobs.get(blobKey);
+  const out = Buffer.from(old);
+  list.forEach((sp, ch) => {
+    if (!only(sp)) return;
+    const page = (ch / 4) | 0, c = ch % 4, base = page * res * res * 4;
+    for (let i = 0; i < res * res; i++) out[base + i * 4 + c] = fresh[base + i * 4 + c];
+  });
+  return out;
+}
+project.blobs.set("susukiDensity", merge("susukiDensity", 512, TALL, tall.out));
+project.blobs.set("foliagePaint", merge("foliagePaint", 1024, GROUND, ground.out));
 
 console.log(`land height bands: p30 ${P30.toFixed(0)} · p55 ${P55.toFixed(0)} · p70 ${P70.toFixed(0)} · p90 ${P90.toFixed(0)} m; lakes ${lakes.length}`);
 TALL.forEach((sp, i) => console.log(`tall ${i} ${sp.name.padEnd(14)} ${tall.count[i]} texels`));

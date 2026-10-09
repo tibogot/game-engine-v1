@@ -216,6 +216,20 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      coverAt ≥ 0.5 within 15 m of 86.0% → 86.6% of the box (a different measure from the 74% above,
      not comparable) — the huts are for the look and as landmarks, the walls did the cover work.
    - Item 1 is DONE apart from the fog-lab mist (weather). Next: item 2.
+   - [x] THE ALFA STEPPE (2026-10-10, you: "terrain detail — start with the alfa in the plant lab"). LOOKED
+     first: the map is no longer empty (8.5% of the walkable ground > 60 m from a placed piece), but the
+     open ground was one ochre speckle — and the alfa painted on it read as two wisps at play zoom (60
+     thin blades). Plant lab: a STEPPE patch (24 × 16 m at steppe spacing, Views → Steppe). The tussock
+     redone (FOLIAGE_PRESETS.alfa): 110 wider blades, upright, a knee-high hummock with its own shadow,
+     grey-olive with straw. On the map (tools/algVegetation.mjs, new `--only Alfa`: rewrites that one
+     species' channel and slot, every other plant byte-identical — a whole run had drifted ~7k bytes from
+     the map): patch cover 0.45 → 0.6, strength 0.55 → 0.45 (6× the alfa ground). MEASURED (pinned A/B,
+     play zoom): the alfa +0.7-1.3 ms; all the ground foliage 2.5-2.9 ms (~1.7 before it). The cost is the
+     DRAWS and follows SCREEN COVERAGE × count, not triangles (12 or 150 blades: the same) and not the
+     compute (~0). At 0.9 strength it was +3 ms: halved.
+   - [ ] NEXT (perf): make the ground foliage CHEAPER per pixel — a lighter shader at the far level (no
+     translucency / simpler light), or a shorter far reach for the small plants; measure per type first.
+   - [ ] **you**: the steppe at play zoom — enough, too much, colour.
 2. [~] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).
    Already there (inventory 2026-10-07): craters (shared craterSystem, 96, one draw), burning wrecks

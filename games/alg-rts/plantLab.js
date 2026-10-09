@@ -29,6 +29,12 @@ const SPECIES = [
   ["juniperScrub", "Juniper scrub"], ["doumPalm", "Doum palm"],
 ];
 const STEP = 6;   // m between beds
+
+// THE STEPPE (2026-10-10): a patch of alfa at steppe spacing, in front of the row — the plant
+// judged as the player sees it, a field of tussocks, not one. (The tussock itself: FOLIAGE_PRESETS.alfa,
+// redone here 2026-10-10 — it read as two wisps at play zoom.)
+/** The STEPPE patch: 24 × 16 m in front of the row. */
+const STEPPE = { z: 16, w: 24, d: 16, gap: 1.6 };
 /** The game's sun (alg-rts, Partly cloudy, 15:12). */
 const SUN = { dir: new THREE.Vector3(-0.739, 0.65, 0.175).normalize(), intensity: 10, color: 0xfff2dd };
 
@@ -120,6 +126,16 @@ export async function startPlantLab(container) {
     return { key, name, x, z: 0, size: FOLIAGE_PRESETS[key].size ?? 1 };
   });
 
+  // The STEPPE: tussocks at steppe spacing (jittered), sizes 0.7-1.2.
+  {
+    let s = 7;
+    const r = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+    for (let x = -STEPPE.w / 2; x < STEPPE.w / 2; x += STEPPE.gap) for (let z = -STEPPE.d / 2; z < STEPPE.d / 2; z += STEPPE.gap) {
+      if (r() < 0.25) continue;   // gaps: a steppe, not a lawn
+      const px = x + (r() - 0.5) * STEPPE.gap * 0.9, pz = STEPPE.z + z + (r() - 0.5) * STEPPE.gap * 0.9;
+      pf.add("alfa", px, -0.05, pz, { rotY: r() * 7, scale: 0.7 + r() * 0.5, seed: r() });
+    }
+  }
   // A 1.75 m man for scale.
   {
     const m = new THREE.MeshStandardNodeMaterial({ color: 0x8a7a5a, roughness: 0.9 });
@@ -160,7 +176,8 @@ export async function startPlantLab(container) {
   <div id="plab"><h1>Plant Lab</h1>
     <h2>Canopy tree fix (B)</h2><div class="g"><button data-ab="before">◀ Before</button><button data-ab="after">After ▶</button></div>
     <p id="plab-ab">After: rounded light kept + inner shadow. Applies to the tamarisk tree here and nam-rts's dipterocarps.</p>
-    <h2>Views</h2><div class="g"><button data-play="77">Play zoom</button><button data-play="30">Zoomed in</button></div>
+    <h2>Views</h2><div class="g"><button data-play="77">Play zoom</button><button data-play="30">Zoomed in</button>
+      <button data-steppe="77">Steppe · play zoom</button><button data-steppe="30">Steppe · close</button></div>
     <h2>Beds</h2><div class="g">${beds.map((b, i) => `<button data-bed="${i}">${b.name}</button>`).join("")}</div>
     <p>The game's sun, shadow and exposure; a stand-in sky. Drag to orbit, wheel to zoom.</p></div>`;
   document.body.appendChild(el);
@@ -170,6 +187,7 @@ export async function startPlantLab(container) {
     if (b.dataset.ab) ab(b.dataset.ab);
     if (b.dataset.bed) look(beds[+b.dataset.bed]);
     if (b.dataset.play) play(+b.dataset.play, +b.dataset.play > 50 ? 42 : 36);
+    if (b.dataset.steppe) { play(+b.dataset.steppe, +b.dataset.steppe > 50 ? 42 : 36); controls.target.z += STEPPE.z; camera.position.z += STEPPE.z; controls.update(); }
   });
 
   // BEFORE / AFTER for the canopy-tree fix (the shared dipterocarp builder):
