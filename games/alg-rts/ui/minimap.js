@@ -32,6 +32,7 @@ import * as THREE from "three";
 import { TRACK_LINES } from "../algTracks.js";
 import { drawIcon } from "./resourceIcons.js";
 import { t } from "../i18n/i18n.js";
+import { MAP } from "../layout.js";
 
 const UNITS_HZ = 12;
 const FOG_HZ = 4;
@@ -599,6 +600,8 @@ export function createMinimap({
     const all = typeof structures === "function" ? structures() : structures?.list;
     for (const b of all ?? []) {
       if (!b.alive || (b.typeKey !== "post" && b.typeKey !== "caveEntrance")) continue;
+      // (The training has no cave to take: its lessons bring their own FLN — maps/training.js.)
+      if (b.typeKey === "caveEntrance" && MAP.tutorial) continue;
       const m = frame.toMini(b.position.x, b.position.z), r = 5.5 * s, fr = b.typeKey === "post";
       c.fillStyle = fr ? COL.player : COL.enemy; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.4 * s;
       c.beginPath();

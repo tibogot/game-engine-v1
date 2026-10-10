@@ -31,6 +31,13 @@ export default {
   "Deux T-6 mitraillent et bombardent le point, l'un derrière l'autre.": "Two T-6s strafe and bomb the point, one after the other.",
   "Évacuation sanitaire": "Medevac",
   "Une Alouette se pose : vos blessés à 25 m sont soignés.": "An Alouette lands: your wounded within 25 m are healed.",
+  // the fourth of each (2026-10-10)
+  "Paras d'élite": "Elite paras",
+  "Permanent : chaque stick de paras arrive avec une étoile d'expérience.": "Permanent: every para stick arrives with one veterancy star.",
+  "Esprit de corps": "Esprit de corps",
+  "Permanent : les groupes de la Légion se renforcent à moitié prix.": "Permanent: Legion squads reinforce at half price.",
+  "Alouette armée": "Armed Alouette",
+  "Une Alouette armée tourne 30 s au-dessus d'un point que vos hommes voient et tire sur le FLN qui s'y trouve.": "An armed Alouette circles for 30 s over a point your men can see and fires on the FLN there.",
   // The strip and its messages
   "<b>Effectifs au plafond</b> : pas de place pour un groupe de plus.": "<b>Troop cap reached</b>: no room for another squad.",
   "<b>Les paras sont au sol.</b>": "<b>The paras are on the ground.</b>",

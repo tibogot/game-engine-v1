@@ -146,7 +146,8 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     if (!s || s.team !== "player" || s.count + pending.filter((p) => p.squad === s).length >= s.size) return 0;
     if (!squadInBase(s) && !fieldPointOf(s)) return 0;
     if (popRoom() < 1) return 0;   // the pop cap (algEconomy.js POP)
-    return SQUADS[s.typeKey].reinforce;
+    // (A doctrine may cut it: the Légion's esprit de corps — algDoctrines.js.)
+    return Math.round(SQUADS[s.typeKey].reinforce * (app.algDoctrines?.reinforceMul?.(s.typeKey) ?? 1));
   }
   /** Call one man in (paid now): he comes out of the gate in the first empty slot. */
   function reinforce(s) {

@@ -31,11 +31,14 @@ import { iconStyle } from "./ui/icons.js";
 import { t } from "./i18n/i18n.js";
 
 export const DOCTRINE_PARAMS = {
-  xpPerCp: 90,            // veterancy value per command point (~9 FLN killed)
+  xpPerCp: 70,            // veterancy value per command point (~7 FLN killed; 90 gave 6 points in 15 min — the playtest, 2026-10-10)
   villageXpPerMin: 6,     // per village held, a minute
   heli: { speed: 30, cruise: 32, hover: 6, climb: 3 },
   recon: { life: 25, radius: 90, height: 110, speed: 45, vision: 80 },
   mortar: { shells: 8, every: 1.1, spread: 14, damage: 60, splash: 9, flight: 3.2 },
+  gunship: { life: 30, radius: 22, height: 26, speed: 18, reach: 32, every: 0.35, damage: 7 },
+  eliteStars: 1,
+  espritCorps: 0.5,
 };
 const P = DOCTRINE_PARAMS;
 const STORE = "algrts.doctrine";
@@ -52,6 +55,8 @@ export const DOCTRINES = {
         hint: t("Un stick d'élite sort du poste : un FM et une étoile d'expérience.") },
       { key: "airSupply", icon: "unload", name: t("Ravitaillement aérien"), cp: 2, cost: {}, cooldown: 180,
         hint: t("Un Nord 2501 largue des caisses au poste : +80 munitions, +30 carburant.") },
+      { key: "eliteParas", icon: "vet1", name: t("Paras d'élite"), cp: 3, passive: true,
+        hint: t("Permanent : chaque stick de paras arrive avec une étoile d'expérience.") },
     ],
   },
   legion: {
@@ -64,6 +69,8 @@ export const DOCTRINES = {
         hint: t("Permanent : vos sapeurs bâtissent 60 % plus vite.") },
       { key: "mortar120", icon: "barrage", name: t("Mortier de 120"), cp: 3, cost: { mun: 90 }, cooldown: 120, aim: true, radius: 14,
         hint: t("Huit obus lourds sur un point que vos hommes voient, en dix secondes.") },
+      { key: "espritCorps", icon: "reinforce", name: t("Esprit de corps"), cp: 3, passive: true,
+        hint: t("Permanent : les groupes de la Légion se renforcent à moitié prix.") },
     ],
   },
   air: {
@@ -76,6 +83,8 @@ export const DOCTRINES = {
         hint: t("Deux T-6 mitraillent et bombardent le point, l'un derrière l'autre.") },
       { key: "medevac", icon: "repair", name: t("Évacuation sanitaire"), cp: 2, cost: { mp: 60 }, cooldown: 120, aim: true, radius: 25,
         hint: t("Une Alouette se pose : vos blessés à 25 m sont soignés.") },
+      { key: "gunship", icon: "lmg", name: t("Alouette armée"), cp: 3, cost: { mun: 120 }, cooldown: 150, aim: true, radius: P.gunship.reach,
+        hint: t("Une Alouette armée tourne 30 s au-dessus d'un point que vos hommes voient et tire sur le FLN qui s'y trouve.") },
     ],
   },
 };
@@ -90,7 +99,7 @@ export function storedDoctrine() {
   return "paras";
 }
 
-export function createAlgDoctrines(app, { units, squads, economy, projectiles, airStrike, fogOfWar = null }) {
+export function createAlgDoctrines(app, { units, squads, economy, projectiles, combat = null, airStrike, fogOfWar = null }) {
   const dom = app.renderer.domElement;
   const groundY = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
   const purse = economy.french;
@@ -170,6 +179,19 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, a
     flights.push(f);
     recons.push(f);
   }
+  /** The armed Alouette: a tight circle over (x, z), its AA-52 on the FLN within reach. */
+  const gunships = [];
+  function gunshipOver(x, z) {
+    const G = P.gunship, w = G.speed / G.radius;
+    const mesh = heliMesh();
+    app.scene.add(mesh);
+    const f = {
+      mesh, t: 0, end: G.life, x, z, fireT: 0,
+      at(tt, out) { const a = tt * w; return out.set(x + Math.cos(a) * G.radius, groundY(x, z) + G.height, z + Math.sin(a) * G.radius); },
+    };
+    flights.push(f);
+    gunships.push(f);
+  }
   fogOfWar?.addSourceProvider?.(() => recons.filter((f) => f.t < f.end).map((f) => ({ x: f.x, z: f.z, r: P.recon.vision, eye: 60 })));
 
   // ── Squads out of nowhere (a drop) or out of the post ─────────────────────
@@ -238,6 +260,10 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, a
         later.push({ t: 1.6, fn: () => airStrike.call(p.structure, at.x - (oz / l) * 16, at.z + (ox / l) * 16, null, { free: true }) });
         return true;
       }
+      case "gunship":
+        gunshipOver(at.x, at.z);
+        app.algSounds?.radio?.();
+        return true;
       case "medevac":
         heliTo(at.x, at.z, 6, () => {
           let n = 0;
@@ -261,6 +287,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, a
       cp -= ab.cp;
       unlocked.add(key);
       if (key === "legionEngineers") app.algBuildSpeed = 1.6;
+      if (key === "eliteParas") elite();
       say(t("<b>{name}</b> débloqué.", { name: ab.name }));
       render();
       return;
@@ -391,13 +418,43 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, a
       app.algSounds?.audio?.play?.("incoming", to.x, to.y + 20, to.z, { delay: P.mortar.flight - 1.2 });
       s.left--; s.t = P.mortar.every;
     }
+    // The armed Alouettes: a burst at the nearest FLN man within reach of their circle's centre.
+    const G = P.gunship;
+    for (const g of gunships) {
+      if (g.t >= g.end || (g.fireT -= dt) > 0) continue;
+      g.fireT = G.every;
+      let best = null, bd = G.reach;
+      for (const u of units.list) {
+        if (!u.alive || u.team !== "enemy" || u.inside || u.isStructure) continue;
+        const d = Math.hypot(u.position.x - g.x, u.position.z - g.z);
+        if (d < bd && seen(u.position.x, u.position.z)) { bd = d; best = u; }
+      }
+      if (!best) continue;
+      g.at(g.t, _g);
+      const at = best.position.clone();
+      projectiles.spawn(_g.clone(), { position: at, isAir: false, isStructure: false }, 0, { weapon: "mg", team: "player" }, null, { miss: true, exact: true });
+      combat?.onImpact?.(best, G.damage, at, post()?.structure ?? null, { bullet: true });
+    }
+    if (unlocked.has("eliteParas")) elite();
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i];
       f.t += dt;
       f.tick?.(f.t);
-      if (f.t >= f.end) { app.scene.remove(f.mesh); flights.splice(i, 1); const r = recons.indexOf(f); if (r >= 0) recons.splice(r, 1); }
+      if (f.t >= f.end) {
+        app.scene.remove(f.mesh); flights.splice(i, 1);
+        for (const L of [recons, gunships]) { const r = L.indexOf(f); if (r >= 0) L.splice(r, 1); }
+      }
     }
   }
+  /** Paras d'élite: every para stick of yours with at least P.eliteStars (the drop's, the helipad's). */
+  function elite() {
+    for (const s of squads.list) {
+      if (s.team !== "player" || s.typeKey !== "para" || (s.stars ?? 0) >= P.eliteStars || s._formingElite) continue;
+      s.xp = Math.max(s.xp ?? 0, VET.thresholds[P.eliteStars - 1]);
+      s.stars = P.eliteStars;
+    }
+  }
+  const _g = new THREE.Vector3();
   const _p = new THREE.Vector3(), _q = new THREE.Vector3();
   function frame(dt) {
     if (!doctrine) return;
@@ -412,6 +469,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, a
     if (targeting?.at) rings.add(targeting.at.x, targeting.at.z, targeting.ab.radius ?? 8, targeting.ok ? 0x58e070 : 0xe0574a);
     for (const s of salvos) rings.add(s.x, s.z, P.mortar.spread, 0xffb020);
     for (const f of recons) rings.add(f.x, f.z, P.recon.vision, 0x6ab0ff);
+    for (const f of gunships) rings.add(f.x, f.z, P.gunship.reach, 0xffb020);
     rings.commit();
     if ((uiT -= dt) <= 0) { uiT = 0.25; refresh(); }
   }
@@ -437,6 +495,8 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, a
       const v = VET.value;
       gain(e.isStructure ? v.structure : !e.type?.foot ? v.vehicle : e.typeKey === "fmTeam" ? v.fmTeam : e.typeKey === "tireur" ? v.tireur : v.man);
     },
+    /** A squad type's reinforce price factor (algSquads reinforceCost): the Légion's esprit de corps. */
+    reinforceMul: (typeKey) => (doctrine === "legion" && unlocked.has("espritCorps") && typeKey === "legion" ? P.espritCorps : 1),
     /** Dev: points now. */
     give(n = 1) { cp += n; refresh(); },
     dispose() {

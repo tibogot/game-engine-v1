@@ -167,7 +167,7 @@ Keep this file current: tick things off here, add new asks here.
    squad UPGRADES (an FM for the section, a radio), DOCTRINES / commander choices; the voices.
    - [x] DOCTRINES (2026-10-10, algDoctrines.js): chosen in the briefing beside the difficulty (stored;
      ?doctrine=paras|legion|air|none); COMMAND POINTS from FLN killed by your men (their veterancy
-     value) and villages held (6 a minute each), 90 = one point; a strip above the HUD (right): spend
+     value) and villages held (6 a minute each), 70 = one point (was 90); a strip above the HUD (right): spend
      points to unlock, then a call-in for resources + cooldown, aimed on ground your men SEE.
      PARAS: heliborne drop (an Alouette sets 5 paras down, 1 ★, 340 mp), commando de chasse (elite
      stick: FM + 1 star, 2 ★), air supply (+80 mun +30 fuel, 2 ★). LÉGION: légionnaires without the
@@ -177,7 +177,20 @@ Keep this file current: tick things off here, add new asks here.
      Alouette lands, the wounded within 25 m healed, 2 ★). Not in the training. All nine checked in
      the game. Also: the briefing no longer overflows a short window at UI scale 1.15 (--alg-ui).
    - [ ] **you**: play each — prices, cooldowns, the point rate (90 a point: ~9 FLN killed).
-   - [ ] next: a 4th ability each (CoH has 5); some field works doctrine-gated or cheaper by doctrine.
+   - [x] a 4th each (2026-10-10, all ★ 3): PARAS d'élite (passive: every para stick has a star),
+     LÉGION esprit de corps (passive: Légion squads reinforce at half price — algSquads reinforceCost
+     reads app.algDoctrines.reinforceMul), AIR the armed Alouette (circles a seen point 30 s, a burst
+     every 0.35 s at the nearest FLN within 32 m; 120 mun). Checked: 2 of 5 FLN in the open down in
+     12 s; 80 → 40; 0 → 1 star.
+   - [ ] maybe: a 5th each (CoH); some field works cheaper by doctrine.
+   - PLAYTEST (2026-10-10, my scripted player, Normal, AI + fog + civilians on, Paras, 15 min
+     fast-forwarded): 4/4 villages by 6 min, the FLN taking one back now and then; 62 FLN killed, 50
+     French lost; a fort + a forward post at every village by 4 min (they cost the early manpower);
+     tiers 2 at 1 min, 3 at 5 min; COMMAND POINTS 6 in 15 min (1st at 2 min) — Elite paras (★ 3) never
+     reached; munitions 865 and fuel 448 unspent (the bot throws no grenades, builds no vehicles);
+     manpower the binding limit. The SCORE runs on frames (fast-forward skips it): in real time a
+     3-village lead from ~3 min ends it ~10-11 min — a scripted player with no micro wins Normal.
+     Console clean. DONE: points 90 → 70 a ★. Open: Normal a little harder (or the FLN retaking more) — after your play.
    - [x] FIELD WORKS (2026-10-10, algFieldWorks.js — CoH's engineers build OUT on the map; our base is
      the HQ-upgrade model, kept): on the sappers' card — POSTE AVANCÉ (150 mp, a radio shelter inside a
      point you hold: squads within 30 m reinforce there, as at a still half-track), POSTE DE SECOURS
@@ -186,8 +199,8 @@ Keep this file current: tick things off here, add new asks here.
      FLN turns it at half speed). One of each per point. Checked in the game: placed, refused off a
      point and twice on one, the fort flagged, a squad reinforced at the forward post (the man out 7 m
      from it), wounded healed 15 hp in 6 s.
-   - [ ] seen while testing: a start appelé stuck still at (162, 147) by the base, never reaching an
-     order 100 m away — a pathing snag to look at.
+   - (seen while testing: an appelé "stuck" by the base — NOT a bug: my test had ordered him onto a
+     building's footprint; no route = he holds, by design. All 15 starting men reach an open point.)
    Done since audit 1: cover at the cursor, MG arcs, armour by facing, sniper, sabotage, tunnels.
 
 ## THE GAP TO A AAA RTS (CoH) — 2026-10-07 (you: "keep this list so we remember it")
