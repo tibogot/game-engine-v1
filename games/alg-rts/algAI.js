@@ -85,6 +85,13 @@ const P = {
   postKeepOff: 60,            // French within this of the post count as "at home"
   replanEvery: 10,
   villageShare: 0.55,         // of the bands, when a village is worth taking
+  // THE OPENING (2026-10-10, balance: the French AI held 4/4 villages by 2 min while the first two
+  // bands went to lay mines and died on the French columns): the first `opening` s — and while the
+  // katiba holds no village — every band does political work; mines, raids and the line after.
+  opening: 180,
+  // THE PURSE SETS THE PACE (same day: 775 supplies unspent, 0-10 men out of a cap of 26): the band
+  // clock runs faster with money in hand, and a rich katiba sends bigger bands.
+  richAt: [250, 400], richClock: [1.4, 2], richSize: 500, richExtra: 2, richHire: 400, richHireMax: 6,
   villageTrigger: 35,         // French this close to an occupying band: open fire
   mineShare: 0.3,             // of the bands (while the map has room for a mine)
   mineWork: 8,                // seconds at the spot to lay it
@@ -216,7 +223,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   };
   const french = () => units.list.filter((u) => u.alive && u.team === "player");
   const liveFighters = () => units.list.filter((u) => u.alive && u.team === "enemy").length;
-  const cap = () => Math.round(P.maxLive * (P.capBase + P.capPerVillage * (app.algEconomy?.heldByEnemy ?? 0)));
+  // (+ MONEY HIRES MEN, 2026-10-10: a full purse buys fighters from the wilaya — one over the cap per
+  // 100 supplies above P.richHire, up to P.richHireMax: the purse never sits at 700 unspent again.)
+  const cap = () => Math.round(P.maxLive * (P.capBase + P.capPerVillage * (app.algEconomy?.heldByEnemy ?? 0)))
+    + Math.min(P.richHireMax, Math.max(0, Math.floor(((app.algEconomy?.aln.stock ?? 0) - P.richHire) / 100)));
 
   /**
    * How good a spot is to lie up in: CONCEALMENT round it (the game's own
@@ -595,7 +605,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   const holdFire = (b, on) => { for (const u of b.members) u.holdFire = on; };
 
   function newBand({ size: want = null, mission = null } = {}) {
-    const size = want ?? Math.round(rand(...P.bandSize));
+    const size = want ?? Math.round(rand(...P.bandSize)) + ((app.algEconomy?.aln.stock ?? 0) > P.richSize ? P.richExtra : 0);
     // MEN ALREADY OUT, idle (the head start, stragglers, a convoy's escort): a band of them
     // first, whatever the cap — 19 standing at the rally over a cap of 18 never formed one.
     const idle = units.list.filter((u) => u.alive && u.team === "enemy" && !inBand.has(u) && !homebound.has(u) && !u.ghost && !u.inside && (u.typeKey === "moudjahid" || u.typeKey === "fmTeam")).length;
@@ -1370,6 +1380,12 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       const lost = lostVillages.find((l) => l.v.owner !== "enemy");
       if (lost && planVillage(b, lost.v)) { b.mission = "village"; b.retake = true; return; }
     }
+    // THE OPENING: villages first (a mine or a raid while the French take the valley loses it).
+    const opening = t < P.opening || !(app.algEconomy?.points ?? []).some((v) => v.owner === "enemy");
+    if (opening && (!b.mission || b.mission === "mine" || b.mission === "cut" || b.mission === "raid")) {
+      const v = pickVillage(c);
+      if (v && planVillage(b, v)) { b.mission = "village"; b.village = v; return; }
+    }
     // A SUPPLY RAID, about 45% of the time one is worth it (or still on: re-planned on the way).
     if (b.mission === "raid") {
       const s = b.village && b.village.owner !== "enemy" ? b.village : pickRaid(c);
@@ -1616,7 +1632,9 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   let nextAssault = P.assaultFirst, defT = 0;
   function stepAssaults(dt) {
-    nextAssault -= dt;
+    // (A full purse brings the next assault sooner too: THE PURSE SETS THE PACE, P.richAt.)
+    const stock = app.algEconomy?.aln.stock ?? 0;
+    nextAssault -= dt * (stock > P.richAt[1] ? P.richClock[1] : stock > P.richAt[0] ? P.richClock[0] : 1);
     if (nextAssault > 0) return;
     if (bands.some((b) => b.mission === "assault" && alive(b).length)) { nextAssault = 30; return; }
     if (cap() - liveFighters() < P.assaultSize[0]) { nextAssault = 30; return; }   // room for a real one, or wait
@@ -1656,7 +1674,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       defT -= dt;
       if (defT <= 0) { defT = 0.5; sendDefence(); }
       stepAssaults(dt);
-      nextBand -= dt;
+      const stock = app.algEconomy?.aln.stock ?? 0;
+      nextBand -= dt * (stock > P.richAt[1] ? P.richClock[1] : stock > P.richAt[0] ? P.richClock[0] : 1);
       if (nextBand <= 0) {
         nextBand = rand(...P.bandEvery) * (pool > 6 ? 0.7 : 1);
         // (the pool is spent by newBand: men gone to ground come back out free)

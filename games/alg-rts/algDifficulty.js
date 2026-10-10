@@ -58,7 +58,8 @@ export function applyDifficulty(app, key) {
     if (eco.costs) eco.costs.moudjahid = L.moudjahid;
   }
   // The French commander (algFrenchAI.js) when you are the FLN.
-  if (app.algFrenchAI) Object.assign(app.algFrenchAI.params, { squadsMax: L.frSquads, assaultAt: L.frAssaultAt });
+  // (Only when you are the FLN: the ?bot=1 balance runs keep the bot a Normal company.)
+  if (fln && app.algFrenchAI) Object.assign(app.algFrenchAI.params, { squadsMax: L.frSquads, assaultAt: L.frAssaultAt });
   const ai = app.algAI;
   if (ai?.params) Object.assign(ai.params, { firstBandAt: L.firstBandAt, bandEvery: L.bandEvery, maxLive: L.maxLive });
   ai?.restartClock?.(L.firstBandAt);

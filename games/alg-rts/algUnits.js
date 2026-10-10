@@ -830,7 +830,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algUnitMarks = unitMarks;
   // THE FRENCH COMMANDER (algFrenchAI.js) when YOU are the FLN (?side=fln): builds, takes and holds
   // the villages, retakes, defends the post, calls the T-6, goes for the cave. ?ai=0 = without.
-  const frenchAI = SIDES.human === "enemy" && new URLSearchParams(location.search).get("ai") !== "0"
+  // ?bot=1 (dev, balance runs): it plays the French side too, against the FLN's AI — watch, or
+  // fast-forward and measure (__ALG.fastForward).
+  const botQ = new URLSearchParams(location.search);
+  const frenchAI = (SIDES.human === "enemy" ? botQ.get("ai") !== "0" : botQ.get("bot") === "1")
     ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
     : null;
   app.algFrenchAI = frenchAI;

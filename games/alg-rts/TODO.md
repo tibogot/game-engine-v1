@@ -141,6 +141,17 @@ Keep this file current: tick things off here, add new asks here.
    it 88 / 107 — kept. MUNITIONS SINKS: the existing ones (grenade 15, smoke 10, flares 25, FM 60,
    barrage 45, air strike 120) — the 1321 unspent was the bot never using abilities; added: FM 24/29
    for the Légion and the paras too (every UPGRADES entry now on the card).
+   DONE 2026-10-10 — AI v AI BALANCE RUNS: `?bot=1` (dev) = the French AI (algFrenchAI.js) plays
+   the French side against the FLN's AI; fast-forward and measure (score integrated by hand: the
+   battle's score runs on frames). Found: the FLN's first bands went to LAY MINES and died on the
+   French columns (13 dead by 1:45, 4/4 villages French by 2 min); its band clock, not its purse,
+   set its pace (775 unspent, 0-10 men out of 26). FIXED (algAI.js): THE OPENING — the first 3 min
+   and while it holds no village, every band does political work; THE PURSE SETS THE PACE — band
+   and assault clocks ×1.4 above 250, ×2 above 400; bands +2 above 500; MONEY HIRES MEN — +1 cap per
+   100 above 400, up to +6. Result (Normal): villages contested to ~5 min (2-2 at 4 min), French win
+   ~10.5 min (was ~7.5). Hard: the same, ~11 min. The FLN still loses ~3:1 in men and never HOLDS a
+   village: its design is hit-and-run (a band melts away when French come within 35 m) while the
+   score is villages held — a DESIGN question, **you** (chat 2026-10-10: options A/B/C).
    LEFT: replay and judge (**you**); the FLN's purse still piles up unspent (1670 at 12 min, its cap
    is its limit) — give it something to buy (more caches, sangars) if it should matter; a fuel sink
    for infantry (none yet: vehicles and tiers only).
