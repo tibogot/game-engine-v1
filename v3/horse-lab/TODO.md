@@ -174,6 +174,54 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 
 ## ▶ The bow on foot (bow.js) — 2026-10-09
 
+- 2026-10-10: FETCH TIMELINE EDITOR (U, bowEditor.js) — the arrow fetch as keyed
+  channels in the right shoulder's frame (bow.js FETCH_CHANNELS): hand (gizmo),
+  elbow direction (gizmo), forearm roll, fingers 0 open · 1 pinch · 2 hook, wrist
+  (to the nocks / along the arrow), head turn + tip; "…Low" channels = the start
+  from rest (bow down) vs after a shot. Monotone cubic between keys (no overshoot).
+  Same IK + limits as the game underneath. Phase bands draggable (keys stretch),
+  notes per frame, per-frame checks (red ticks), "rebuild from code" samples the
+  coded fetch and thins it (26 hand keys). Save → anims/bow-fetch.json, loaded at
+  start; BP.keyed toggles keys / code. A frame is replayed from t=0 at 1/60 s
+  (the elbow + roll are rate-limited, a pose depends on its path).
+  Keyed vs coded in game (fetch3.js): 9 vs 12 minor flags, hand 2.14 vs 2.02 m/s.
+  Also: from the follow-through the elbow + roll now carry on (no reset).
+  - "from rest" now starts as the game does (the aim's lead-in: frame 0 at aimW 0.6).
+  - READY BOW (nocking) re-posed: BP.readyRoll 1.0 — the lower limb out toward the
+    target + ground, top back toward the right shoulder (the archery nocking pose);
+    before it crossed the right thigh and swept through the left leg on the way up.
+  - BRING (1.85–2.7, user: "the shoulder goes inside the hip at 2.27"): the elbow
+    key steered forward-down swung the elbow in across the chest (13 cm inside the
+    shoulder, upper arm 4.7 cm from the torso). Now it stays out at the side and drops
+    to the nock's; the carried arrow leans out from the body (it grazed the flank).
+  - Films of the skinned robot must go through real frames (await rAF): a render in
+    a tight loop shows the mesh one frame late (WebGPU skinning updates per frame).
+  - 2026-10-11: MIXAMO "Shooting Arrow" (refs/, not in git) is now the reference:
+    mixamoRef.js loads it; the editor's "from Mixamo" turns its pinch point, elbow,
+    forearm roll, torso turn / lean and bow-hand rise into keys (right shoulder frame,
+    ×arm length 0.97) on ITS timing; "show Mixamo" puts its figure beside the robot,
+    synced. Saved → anims/bow-fetch.json (the game plays it).
+    Cycle matched: fetch 1.95 s (reach .83 · grab .1 · pull .17 · bring .33 · nock .52),
+    draw 0.8, release → arms lower 0.8 → next fetch FROM REST (BP.repeatFromHold off).
+    New: channels bowReady / turn / lean; quiver re-placed (BP.quiverNocks: nocks just
+    behind the neck, where Mixamo grabs); keyed grab pull onto our quiver; the carried
+    arrow TRAILS along the hand's path (hanging, it went through the head); soft reach
+    limit; forearm roll up to 800°/s (Mixamo ~1000); ready bow at the left hip
+    (readyIn −0.1, readyDown/readyFwd 0.36). Checks: "jerks" vs Mixamo's own hand ×1.5,
+    the torso as an elliptic cylinder. Left: 2 small flags (0.05 start ease, 0.73).
+    Full draw unchanged (abduction 101°, elbow 173°, anchor 6.7 cm).
+  - JUMPS in the game's cycle (user: "a jump of position at the last frame", outside
+    the editor) — measured frame to frame over two shots (scratchpad jumps.js), all fixed:
+    fetch → string 13–20 cm (the keys hand over to the nock pose across the nock; the
+    torso's lean straightens over 0.55 s); the bow flashing to "ready" for one frame at
+    each fetch (keys read after the phase change); the bow rising in the aim's lead-in;
+    the elbow at part IK weight (it now fades with the hand); the lowering (Mixamo's
+    path in front of the chest — fading the weight flipped the folded arm, 32 cm); the
+    bow elbow snapping straight mid-draw (its wrist eases into full reach); the reach /
+    wrist limits handing over across the nock. Left: the release's own 3.3 cm snap.
+  NEXT: the user marks frames with notes → I change the keys. Later: the draw /
+  release on the same timeline.
+
 - 2026-10-10: QUIVER hollow fixed (single-sided tube: the inner wall was not drawn,
   the ground showed through the mouth) — an inner wall facing in + a floor.
 - FULL DRAW measured vs a 2025 Frontiers review (elite archers) + coaching steps

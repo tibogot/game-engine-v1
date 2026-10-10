@@ -51,7 +51,7 @@ function launchAngle(x, y, v) {
 
 export const BP = {
   on: false,            // the bow, on foot (V)
-  drawTime: 0.9,        // s from brace to full draw
+  drawTime: 0.8,        // s from brace to full draw (Mixamo "Shooting Arrow": 1.95 → 2.75 s)
   minSpeed: 20, maxSpeed: 62,   // m/s off the string: a light draw … a full draw
   hipOpen: 0.32,        // rad the feet stay turned toward the target from side-on
   chestOpen: 0.25,      // rad the chest stays turned toward the target from side-on
@@ -61,12 +61,20 @@ export const BP = {
   cant: 0.1,            // rad the bow leans (top to the right)
   lookReady: 0.45,      // share of the turn to the target the head makes while fetching / nocking
   lookDown: 0.3,        // rad the head tips down onto the hands then
-  readyIn: 0.18,        // m the ready bow is held in from the bow shoulder toward the middle
-  followThrough: 0.9,   // s the follow-through is held after a shot
+  readyRoll: 1.0,       // rad the READY bow (nocking) is rolled round the arrow: its lower limb out toward the target and the ground, the top back toward the right shoulder (0: the lower limb crossed the thighs)
+  readyIn: -0.1,        // m the ready bow is held in from the bow shoulder toward the middle (−: out; Mixamo nocks in front of the left hip)
+  readyDown: 0.36,      // m below the bow shoulder (chest frame)
+  readyFwd: 0.36,       // m in front of it        // m the ready bow is held in from the bow shoulder toward the middle
+  followThrough: 0.1,   // s the arms stay up after a shot (Mixamo: 0.1 s, then they lower)
+  lowerTime: 0.8,       // s the arms take to lower after it (Mixamo 4.0 → 4.8 s); the next arrow is fetched from rest
+  repeatFromHold: false, // true: the next arrow straight from the follow-through (the hand up by the neck)
   fetchTime: 3.15,       // s: hand to the quiver, arrow out, onto the string (reach 1.1, close 0.2, pull 0.55, bring 0.85, nock 0.3)
   aimTime: 0.28,        // s to raise / lower the bow
   tauGrab: -35,         // the right forearm's roll at the quiver (degrees, −90 relaxed, 0 palm up)
   tauHook: -70,         // … and on the string
+  quiverNocks: [-0.06, 0.34, -0.08],   // m from the right shoulder (right, up, forward): where the hand takes an arrow
+  quiverAxis: [0.3, 0.94, 0.085],       // the quiver's slant (same frame): up, toward the right shoulder, tops a touch forward
+  keyed: true,          // the fetch from the timeline editor (anims/bow-fetch.json) when there is one
   debug: false,
 };
 
@@ -351,7 +359,7 @@ function makeBow() {
 // ── the arrow ────────────────────────────────────────────────────────────────
 // +z from the nock throat (0) to the point (0.76 m: the robot draws ~64 cm); shared geometry and materials
 const ARROW_LEN = 0.84;   // (longer than the draw, ~0.77 m at full draw with the bow arm straight)
-const TWIST_R = [-165, -15];                                      // the right forearm's roll range (forearmTwist), relaxed −90
+const TWIST_R0 = -165, TWIST_R1 = -15, TWIST_R = [TWIST_R0, TWIST_R1];   // the right forearm's roll range (forearmTwist), relaxed −90
 let ARROW = null;
 function arrowParts() {
   if (ARROW) return ARROW;
@@ -445,6 +453,69 @@ function pathAt(pts, s) {
   return samp[j - 1].clone().lerp(samp[j], clamp(f, 0, 1));
 }
 
+// ── the keyed fetch (bow timeline editor, U) ──────────────────────────────────
+// A channel is keys [t, value] (value a number or [x, y, z]); between keys a
+// monotone cubic per component (Fritsch–Butland: no overshoot past a key, so a
+// hand keyed beside the body never swings into it), flat at the ends.
+// Positions / directions are in the right SHOULDER's frame: x right, y up the
+// back, z forward (the chest's axes, from the right shoulder joint).
+export const FETCH_CHANNELS = [
+  { name: "hand", type: "vec", label: "right hand (after a shot)", color: 0x4fd06a },
+  { name: "handLow", type: "vec", label: "right hand (from rest) — start", color: 0x2f9a4a, low: true },
+  { name: "elbow", type: "dir", label: "elbow points (after a shot)", color: 0xf0b030 },
+  { name: "elbowLow", type: "dir", label: "elbow points (from rest) — start", color: 0xb07e1a, low: true },
+  { name: "roll", type: "num", label: "forearm roll ° (−90 relaxed, 0 palm up)", min: TWIST_R0, max: TWIST_R1 },
+  { name: "fingers", type: "num", label: "fingers: 0 open · 1 pinch · 2 hook", min: 0, max: 2 },
+  { name: "wristNocks", type: "num", label: "wrist: fingers down to the nocks", min: 0, max: 1 },
+  { name: "wristString", type: "num", label: "wrist: hand along the arrow", min: 0, max: 1 },
+  { name: "bowReady", type: "num", label: "bow raised to ready (from rest)", min: 0, max: 1 },
+  { name: "turn", type: "num", label: "torso turn ° (+ toward the bow)", min: -40, max: 40 },
+  { name: "lean", type: "num", label: "torso lean ° (+ forward)", min: -15, max: 40 },
+  { name: "look", type: "num", label: "head turned to target (share)", min: 0, max: 1 },
+  { name: "headDown", type: "num", label: "head tipped down (rad)", min: -0.2, max: 0.8 },
+];
+const CH_DEFAULT = { bowReady: 1, turn: 0, lean: 0, look: 0.45, headDown: 0.3, fingers: 0, wristNocks: 0, wristString: 0, roll: -90 };
+const mjE = (x) => { x = clamp(x, 0, 1); return x * x * x * (10 - 15 * x + 6 * x * x); };
+export function keyAt(keys, t) {
+  const n = keys.length; if (!n) return null;
+  if (n === 1 || t <= keys[0][0]) return keys[0][1];
+  if (t >= keys[n - 1][0]) return keys[n - 1][1];
+  let i = 0; while (keys[i + 1][0] < t) i++;
+  const arr = Array.isArray(keys[0][1]), get = (j, c) => (arr ? keys[j][1][c] : keys[j][1]);
+  const tt = (j) => keys[j][0], h = tt(i + 1) - tt(i), u = (t - tt(i)) / h;
+  const d = (j, c) => (get(j + 1, c) - get(j, c)) / Math.max(1e-6, tt(j + 1) - tt(j));
+  const tan = (j, c) => {
+    if (j === 0 || j === n - 1) return 0;
+    const d0 = d(j - 1, c), d1 = d(j, c); if (d0 * d1 <= 0) return 0;
+    const h0 = tt(j) - tt(j - 1), h1 = tt(j + 1) - tt(j), w0 = 2 * h1 + h0, w1 = h1 + 2 * h0;
+    return (w0 + w1) / (w0 / d0 + w1 / d1);
+  };
+  const u2 = u * u, u3 = u2 * u;
+  const one = (c) => (2 * u3 - 3 * u2 + 1) * get(i, c) + (u3 - 2 * u2 + u) * h * tan(i, c) + (-2 * u3 + 3 * u2) * get(i + 1, c) + (u3 - u2) * h * tan(i + 1, c);
+  return arr ? keys[i][1].map((_, c) => one(c)) : one(0);
+}
+// the fetch's channel values at t; from rest a "…Low" channel replaces its main
+// one until its last key, then hands over in 0.3 s
+export function fetchKeysAt(anim, t, fromHold) {
+  const C = anim.channels, out = {};
+  for (const ch of FETCH_CHANNELS) {
+    if (ch.low) continue;
+    if (!C[ch.name]?.keys.length) { out[ch.name] = CH_DEFAULT[ch.name] ?? 0; continue; }
+    let v = keyAt(C[ch.name].keys, t);
+    const L = !fromHold && C[ch.name + "Low"]?.keys.length ? C[ch.name + "Low"].keys : null;
+    if (L) {
+      const tL = L[L.length - 1][0];
+      if (t <= tL) v = keyAt(L, t);
+      else {
+        const a = keyAt(L, tL), b = keyAt(C[ch.name].keys, tL), k = 1 - mjE((t - tL) / 0.3);
+        v = Array.isArray(v) ? v.map((x, i) => x + (a[i] - b[i]) * k) : v + (a - b) * k;
+      }
+    }
+    out[ch.name] = v;
+  }
+  return out;
+}
+
 // ── the archer ───────────────────────────────────────────────────────────────
 export class Archer {
   constructor({ rider, scene, world, range = null }) {
@@ -478,6 +549,17 @@ export class Archer {
     this.debug = createBowDebug(scene);
   }
   get aiming() { return this.aimW > 0.02 || this.aimHeld; }
+  // the keyed fetch (anims/bow-fetch.json) plays instead of the coded one
+  useKeys() { return !!this.anim && BP.keyed && !this.useCode; }
+  fetchLen() { return this.useKeys() ? this.anim.phases.nock[1] : BP.fetchTime; }
+  fetchPhases() { return this.useKeys() ? this.anim.phases : { reach: [0, 1.1], close: [1.1, 1.3], pull: [1.3, 1.85], bring: [1.85, 2.7], nock: [2.7, 3.15] }; }
+  // the timeline editor: a fetch from its start, the aim held fixed
+  // (edit = { aim: { P, d }, fromHold }; the editor then steps update() itself)
+  // (from rest it starts as the game does: the bow down, aim pressed — the fetch
+  // begins as the bow comes up, aimW 0.55, the body still turning)
+  editReset(fromHold) {
+    Object.assign(this, { phase: fromHold ? "fetch" : "empty", t: 0, fetchStart: null, fetchFree: 0, arrowTaken: false, elbowDir: null, twistPrev: undefined, fetchFromHold: fromHold, ext: fromHold ? 1 : 0, aimW: fromHold ? 1 : 0, draw: 0 });
+  }
   get active() { return BP.on && this.rd.mode === "ground"; }
 
   // the chest's frame from the bones: S (spine_03), u up the back, L to the left, f forward
@@ -517,14 +599,17 @@ export class Archer {
   // direction is asked RELATIVE to the arm — world directions bent it 159°), the
   // forearm's roll stays in `twist` (degrees, forearmTwist), the target never
   // past maxReach, and the right elbow is continuous frame to frame.
-  reachNatural(arm, hd, T, pole, Dw, N, fingers, pt, w, maxReach, maxWrist, twist = null) {
+  reachNatural(arm, hd, T, pole, Dw, N, fingers, pt, w, maxReach, maxWrist, twist = null, softK = 0.9) {
     if (w <= 0.001) return;
-    try { return this._reachNatural(arm, hd, T, pole, Dw, N, fingers, pt, w, maxReach, maxWrist, twist); }
+    try { return this._reachNatural(arm, hd, T, pole, Dw, N, fingers, pt, w, maxReach, maxWrist, twist, softK); }
     finally { if (twist && this.twistPrevNext !== undefined) this.twistPrev = this.twistPrevNext; }
   }
-  _reachNatural(arm, hd, T, pole, Dw, N, fingers, pt, w, maxReach, maxWrist, twist) {
+  _reachNatural(arm, hd, T, pole, Dw, N, fingers, pt, w, maxReach, maxWrist, twist, softK) {
     const S = wpos(arm.u), start = pt(), want = start.clone().lerp(T, w);
-    { const d = want.clone().sub(S); if (d.length() > maxReach) want.copy(S).addScaledVector(d.normalize(), maxReach); }
+    // (a SOFT reach limit: from 90 % of it the target eases in to the limit — a hard clamp
+    // at a near-straight arm (Mixamo's reach over the shoulder) missed by 3.5 cm and snapped)
+    { const d = want.clone().sub(S), n = d.length(), k0 = maxReach * softK;
+      if (n > k0) want.copy(S).addScaledVector(d.normalize(), k0 + (maxReach - k0) * Math.tanh((n - k0) / (maxReach - k0))); }
     let tgt = wpos(arm.tip).add(want.clone().sub(start));
     // the ELBOW is continuous: it starts where it was last frame and turns toward
     // the asked side at a limited rate, round the shoulder→wrist line. (A fixed
@@ -541,6 +626,10 @@ export class Archer {
         if (ang > 1e-4) cur.applyAxisAngle(new V3().crossVectors(cur, pn).normalize(), stp);
       }
       this.elbowDir = cur.clone(); pole = cur;
+      // (part weight — easing on / off the IK: the elbow is the clip's as much as the hand
+      // is; the IK's full side at a weight near 0 put the elbow 14 cm off the clip's and
+      // it snapped back as the IK let go)
+      if (w < 0.999) { const ce = perp(wpos(arm.l).sub(S0)); if (ce.lengthSq() > 1e-6) pole = ce.normalize().lerp(cur, smooth(w)).normalize(); }
     }
     this.twistPrevNext = undefined;
     for (let it = 0; it < 8; it++) {                                // (the carried point is ~10 cm off the wrist and turns with it: 3 passes left 15 cm)
@@ -561,11 +650,11 @@ export class Archer {
       // the forearm's ROLL, as a body controls it: the asked palm gives a roll,
       // which is clamped into the forearm's range (taken round from the middle of
       // the range, so an out-of-reach palm goes to the nearer end) and may change
-      // at most ~300°/s — a clamp alone flipped 150° in a frame between its ends
+      // at most ~800°/s — a clamp alone flipped 150° in a frame between its ends
       if (twist) {
         const { tw: raw, F: F2 } = this.forearmTwist(arm, hd), mid = (twist[0] + twist[1]) / 2;
         const want = clamp(raw + 360 * Math.round((mid - raw) / 360), twist[0], twist[1]);
-        const prev = this.twistPrev ?? want, rate = 300 * (this._dt ?? 1 / 60);
+        const prev = this.twistPrev ?? want, rate = 800 * (this._dt ?? 1 / 60);   // (°/s: a fast fetch rolls the forearm ~1000°/s — Mixamo; 300 lagged and then jerked)
         const c = prev + clamp(want - prev, -rate, rate);
         const now = raw + 360 * Math.round((c - raw) / 360);
         if (Math.abs(c - now) > 0.01) rotateWorld(hd.hand, new Q().setFromAxisAngle(F2, (c - now) * Math.PI / 180));
@@ -576,6 +665,12 @@ export class Archer {
       if (err.lengthSq() < 1e-6) break;
       tgt.add(err);
       if (arm === this.rd.B.arms[1]) { const S1 = wpos(arm.u), d1 = tgt.clone().sub(S1), m = this.armMax(arm); if (d1.length() > m) tgt.copy(S1).addScaledVector(d1.normalize(), m); }
+      else {
+        // the bow arm: its wrist eases into full reach over the last 1.5 % (near straight, 2 cm
+        // of reach swing the elbow ~28°: crossing the arm's length in a frame snapped it straight)
+        const S1 = wpos(arm.u), d1 = tgt.clone().sub(S1), n1 = d1.length(), m = (S1.distanceTo(wpos(arm.l)) + wpos(arm.l).distanceTo(wpos(arm.tip))) * 1.004, k1 = m * 0.975;   // (ends just past full length: still near straight at full draw)
+        if (n1 > k1) tgt.copy(S1).addScaledVector(d1.normalize(), k1 + (m - k1) * Math.tanh((n1 - k1) / (m - k1)));
+      }
     }
   }
   // the wrist's furthest from the shoulder: 93 % of the arm (the elbow keeps ~35° of bend)
@@ -598,6 +693,7 @@ export class Archer {
   update(dt, { camera, aim = false, fire = false } = {}) {
     this._dt = dt;
     const rd = this.rd, on = this.active;
+    if (this.edit) { aim = true; fire = false; }
     this.bow.group.visible = this.quiver.group.visible = on;
     this.updateArrows(dt);
     this.range?.update(dt);
@@ -606,11 +702,12 @@ export class Archer {
     this.aimHeld = aim;
     this.aimW = clamp(this.aimW + (aim ? 1 : -1) * dt / BP.aimTime, 0, 1);
     const aw = smooth(this.aimW);
+    const KF = this.phase === "fetch" && this.useKeys() ? fetchKeysAt(this.anim, this.t, this.fetchFromHold) : null;
 
     // ── where to shoot: the camera's crosshair ─────────────────────────────
     // solved from where the arrow will leave: its nock in the fingers (last frame), else the head
     const from = this.lastHook && this.aimW > 0.5 ? this.lastHook : wpos(B.head);
-    const { P, d: dAim } = this.aimFrom(camera, from);
+    const { P, d: dAim } = this.edit?.aim ?? this.aimFrom(camera, from);
     this.aimPoint = P;
     const aimYaw = Math.atan2(dAim.x, dAim.z), aimPitch = Math.asin(clamp(dAim.y, -1, 1));
     // ── stance: side-on to the target (the feet turn; next frame's walk/idle
@@ -631,19 +728,32 @@ export class Archer {
       [[B.spine1, 0.3], [B.spine2, 0.35], [B.spine3, 0.35]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(UP, tw * k)));
       const bend = aimPitch * BP.bend * aw;
       [[B.spine1, 0.35], [B.spine2, 0.35], [B.spine3, 0.3]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(h, bend * k)));
+      // the keyed torso (Mixamo: it turns ~28° toward the bow and leans ~28° forward over it to nock)
+      // (on the string the fetch's last turn / lean straightens out over 0.55 s — Mixamo's
+      // lean goes 25° → 7° as it raises the bow; dropped at once, the head jumped 19 cm)
+      if (KF) this.keyEnd = { turn: KF.turn, lean: KF.lean };
+      const out = KF ? 1 : this.phase === "nocked" && this.keyEnd ? 1 - mjE(this.t / 0.55) : 0;
+      const TL = KF ?? (out > 0 ? this.keyEnd : null);
+      if (TL && (TL.turn || TL.lean)) {
+        const L0 = this.chest().L;
+        [[B.spine1, 0.3], [B.spine2, 0.35], [B.spine3, 0.35]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(UP, TL.turn * out * Math.PI / 180 * aw * k)));
+        [[B.spine1, 0.4], [B.spine2, 0.35], [B.spine3, 0.25]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(L0, TL.lean * out * Math.PI / 180 * aw * k)));
+      }
       // head: turned back along the arrow, level
       const ch2 = this.chest(), f2 = ch2.f.clone().setY(0).normalize();
       // (fetching / nocking the head looks at the hands — forward and down, turned only
       // part way; it turns to the target as the bow comes up. Turned to the target the
       // whole time, the neck read as wrenched round)
-      const up2 = smooth(this.ext ?? 0), lookK = BP.lookReady + (1 - BP.lookReady) * up2;
+      const up2 = smooth(this.ext ?? 0), KV = KF;
+      const lookK = KV ? KV.look : BP.lookReady + (1 - BP.lookReady) * up2, downK = KV ? KV.headDown : BP.lookDown * (1 - up2);
+      this._look = lookK; this._down = downK;
       // (measured from where the HEAD faces — not the chest: the clip's head is already
       // turned a little, and adding the full chest-to-target turn on top put it 17° past the arrow)
       const hf = new V3(0, 0, 1).applyQuaternion(B.head.getWorldQuaternion(new Q())).setY(0).normalize();
       const look = Math.atan2(new V3().crossVectors(hf, dh).y, hf.dot(dh)) * aw * lookK;
       rotateWorld(B.neck, q.setFromAxisAngle(UP, look * 0.45));
       rotateWorld(B.head, q.setFromAxisAngle(UP, look * 0.55));
-      rotateWorld(B.head, q.setFromAxisAngle(ch2.L.clone().negate(), -BP.lookDown * aw * (1 - up2)));   // eyes down onto the hands
+      rotateWorld(B.head, q.setFromAxisAngle(ch2.L.clone().negate(), -downK * aw));   // eyes down onto the hands
       rotateWorld(B.head, q.setFromAxisAngle(dAim, -bend * 0.8));   // eyes level again after the side bend
       rotateWorld(B.head, q.setFromAxisAngle(h, aimPitch * (1 - BP.bend) * 0.5 * aw - 0.08 * aw));   // and a touch down onto the arrow
     }
@@ -654,9 +764,10 @@ export class Archer {
     // ── the shot's phases (empty → fetch → nocked / drawing → release) ─────
     this.t += dt;
     const fire0 = this.fireHeld; this.fireHeld = fire;
-    if (this.phase === "empty" && this.aimW > 0.55) { this.phase = "fetch"; this.t = 0; this.fetchStart = null; this.fetchFree = 0; this.arrowTaken = false; this.elbowDir = null; this.twistPrev = undefined; this.fetchFromHold = false; }
+    if (this.edit) this.t = Math.min(this.t, this.fetchLen());   // (the editor: the fetch only)
+    if (this.phase === "empty" && this.aimW > 0.55 && !this.edit?.fromHold) { this.phase = "fetch"; this.t = 0; this.fetchStart = null; this.fetchFree = 0; this.arrowTaken = false; this.elbowDir = null; this.twistPrev = undefined; this.fetchFromHold = false; }
     if ((this.phase === "fetch" || this.phase === "nocked") && this.aimW < 0.3) { this.phase = "empty"; this.draw = 0; }   // lowered: the arrow back in the quiver
-    if (this.phase === "fetch" && this.t >= BP.fetchTime) { this.phase = "nocked"; this.t = 0; }
+    if (this.phase === "fetch" && this.t >= this.fetchLen() && !this.edit) { this.phase = "nocked"; this.t = 0; }
     if (this.phase === "nocked") {
       if (fire && this.aimW > 0.9) this.draw = Math.min(1, this.draw + dt / BP.drawTime);
       else if (!fire && fire0 && this.draw > 0.22) this.shoot();
@@ -665,8 +776,8 @@ export class Archer {
     // FOLLOW-THROUGH: the bow arm stays up and the string hand stays back by the neck
     // for ~0.9 s after the shot (coaching: "hold the follow-through"); the next arrow
     // is then fetched straight from there (it dropped to the hip at 0.45 s, then climbed)
-    if (this.phase === "release" && this.t > BP.followThrough) {
-      if (this.aimW > 0.55) { this.phase = "fetch"; this.t = 0; this.fetchStart = null; this.fetchFree = 0; this.arrowTaken = false; this.elbowDir = null; this.twistPrev = undefined; this.fetchFromHold = true; }   // (straight on: no frame with the hand let go)
+    if (this.phase === "release" && this.t > BP.followThrough + (BP.repeatFromHold ? 0 : BP.lowerTime)) {
+      if (this.aimW > 0.55) { this.phase = "fetch"; this.t = 0; this.fetchStart = null; this.fetchFree = 0; this.arrowTaken = false; this.fetchFromHold = BP.repeatFromHold; if (!BP.repeatFromHold) { this.elbowDir = null; this.twistPrev = undefined; } }   // (the elbow and the forearm's roll carry on from the release)   // (straight on: no frame with the hand let go)
       else { this.phase = "empty"; this.t = 0; }
     }
     // ── bow arm ───────────────────────────────────────────────────────────
@@ -675,8 +786,11 @@ export class Archer {
     // ~0.9 m from the right shoulder, out of the draw arm's reach (measured: the
     // arm locked straight, the wrist bent 77°). Drawing RAISES the bow onto the
     // aim line as the string comes back (push–pull), at full extension by half draw.
+    // (after the shot, from rest: up for the follow-through, then the arms lower)
+    const lowerK = this.phase === "release" && !BP.repeatFromHold ? smooth((this.t - BP.followThrough) / BP.lowerTime) : 0;
     const extWant = this.phase === "release" ? 1 : this.phase === "nocked" ? smooth(this.draw / 0.5) : 0;
     this.ext = (this.ext ?? 0) + (extWant - (this.ext ?? 0)) * lerpK(extWant > (this.ext ?? 0) ? 14 : 4, dt);
+    if (lowerK > 0) this.ext = Math.min(this.ext, 1 - lowerK);   // (lowering: on the arms' eased curve — dropped at its fastest first, the near-straight bow elbow snapped 7 cm)
     const ex = this.ext;
     const arm = B.arms[0], hdL = rd.hands[0];
     const armLen = wpos(arm.u).distanceTo(wpos(arm.l)) + wpos(arm.l).distanceTo(wpos(arm.tip));
@@ -691,29 +805,33 @@ export class Archer {
     this.drawFull = tR;
     // the READY position: the bow low but in FRONT of the body's middle (held far left
     // and low, the string hand had to cross the belly with its forearm flat)
-    const Rready = SL.clone().addScaledVector(ch.u, -0.22).addScaledVector(ch.f, 0.42).addScaledVector(ch.L, -BP.readyIn).addScaledVector(dAim, 0.06);
+    // (the keys read again: the phase may have just changed — read before it, the bow
+    // flashed up to "ready" for one frame as each fetch from rest began)
+    const KFb = this.phase === "fetch" && this.useKeys() ? fetchKeysAt(this.anim, this.t, this.fetchFromHold) : null;
+    const bowW = (KFb && !this.fetchFromHold ? clamp(KFb.bowReady, 0, 1) : this.phase === "empty" && this.useKeys() ? 0 : 1) * (1 - lowerK), awB = aw * bowW;   // (keyed: the bow stays down while the aim comes in — the fetch's keys raise it)   // (the bow arm's share of the aim)
+    const Rready = SL.clone().addScaledVector(ch.u, -BP.readyDown).addScaledVector(ch.f, BP.readyFwd).addScaledVector(ch.L, -BP.readyIn).addScaledVector(dAim, 0.06);
     const R = Rready.lerp(Raim, ex);
     const dReady = dAim.clone().multiplyScalar(0.75).addScaledVector(UP, -0.6).addScaledVector(h, 0.15).normalize();
     const dArrow = dReady.lerp(dAim, ex).normalize();               // the arrow's line now
     // the bow's frame from the fist: palm toward the string side, knuckles along the arm
-    const DA = dArrow.clone().addScaledVector(h, 0.12).normalize(), NA = h.clone().applyAxisAngle(dArrow, BP.cant);
+    const DA = dArrow.clone().addScaledVector(h, 0.12).normalize(), NA = h.clone().applyAxisAngle(dArrow, BP.cant + BP.readyRoll * (1 - ex));   // (ready: the bow rolled round the arrow)
     // relaxed: the bow low in the left hand, top forward-up
     const DR = ch.f.clone().multiplyScalar(0.75).addScaledVector(ch.u, -0.45).normalize(), NR2 = ch.L.clone().negate();   // the wrist cocked up: the bow leans forward ~60°, not flat
-    const Dl = DR.clone().lerp(DA, aw).normalize(), Nl = NR2.clone().lerp(NA, aw).normalize();
+    const Dl = DR.clone().lerp(DA, awB).normalize(), Nl = NR2.clone().lerp(NA, awB).normalize();
     const yB = new V3().crossVectors(Nl, Dl).normalize(), zB = Dl.clone().addScaledVector(yB, -Dl.dot(yB)).normalize(), xB = new V3().crossVectors(yB, zB);
     const REST = new V3(0.021, 0.064, 0.002);                       // the arrow on the shelf (bow space)
     const restOff = xB.clone().multiplyScalar(REST.x).addScaledVector(yB, REST.y).addScaledVector(zB, REST.z);
     const Tgrip = R.clone().sub(restOff);
     const Trel = SL.clone().addScaledVector(ch.u, -0.5).addScaledVector(ch.f, 0.13).addScaledVector(ch.L, 0.06);
-    const Tl = Trel.clone().lerp(Tgrip, aw);
-    const poleL = ch.L.clone().multiplyScalar(0.3).addScaledVector(ch.u, -0.4).addScaledVector(ch.f, -0.6).normalize().lerp(h.clone().negate().multiplyScalar(0.8).addScaledVector(UP, -0.45).normalize(), aw).normalize();
+    const Tl = Trel.clone().lerp(Tgrip, awB);
+    const poleL = ch.L.clone().multiplyScalar(0.3).addScaledVector(ch.u, -0.4).addScaledVector(ch.f, -0.6).normalize().lerp(h.clone().negate().multiplyScalar(0.8).addScaledVector(UP, -0.45).normalize(), awB).normalize();
     // follow-through: the bow hand gives forward and the bow tips forward after the shot
     const ft = this.phase === "release" ? Math.sin(Math.min(1, this.t / 0.45) * Math.PI) * (1 - this.t / 0.6) : 0;
     if (ft > 0) Tl.addScaledVector(dAim, 0.03 * ft).addScaledVector(UP, -0.05 * ft);
     const FIST = [[1.0, 1.25, 0.9], [1.05, 1.3, 0.9], [1.05, 1.3, 0.9], [1.1, 1.3, 0.9], [0.45, 0.5, 0.35], [-0.5]];
     // the wrist within 30° of the forearm; the BOW follows the fist as it ends up
     // (forcing the bow's direction on the hand bent the wrist 67° at "ready")
-    this.reachNatural(arm, hdL, Tl, poleL, { toward: Dl, k: 1 }, Nl, FIST, () => this.gripPoint(hdL), 1, 9, 0.52);
+    this.reachNatural(arm, hdL, Tl, poleL, { toward: Dl, k: 1 }, Nl, FIST, () => this.gripPoint(hdL), 1, 9, 0.52);   // (its wrist's reach eases in: _reachNatural)
     const grip = this.gripPoint(hdL);
     this.bowHandLen = wpos(arm.tip).distanceTo(grip) + restOff.length();
     {
@@ -771,46 +889,89 @@ export class Archer {
       // Each movement is one smooth curve with a bell-shaped speed (minimum
       // jerk), the wrist within 30 deg of the forearm, the reach never locked.
       const T0 = this.t, mj = (x) => { x = clamp(x, 0, 1); return x * x * x * (10 - 15 * x + 6 * x * x); };
-      const ST = { reach: [0, 1.1], close: [1.1, 1.3], pull: [1.3, 1.85], bring: [1.85, 2.7], nock: [2.7, 3.15] };
+      const ST = this.fetchPhases();
       const pr = (k) => clamp((T0 - ST[k][0]) / (ST[k][1] - ST[k][0]), 0, 1);
       const SR = wpos(armR.u), Rt = ch.L.clone().negate(), cu = ch.u, cf = ch.f, Lf = ch.L;
       const toW = (x, y, z) => SR.clone().addScaledVector(Rt, x).addScaledVector(cu, y).addScaledVector(cf, z);
-      if (!this.fetchStart) { const d = (this.fetchFromHold && this.lastHook ? this.lastHook.clone() : this.pinchPoint()).sub(SR);   // (from the follow-through: where the hand WAS — before this frame's IK the bones are the hanging clip's)
-        this.fetchStart = [d.dot(Rt), d.dot(cu), d.dot(cf)]; this.twistPrev = this.fetchTau0 = this.forearmTwist(armR, hdR).tw; }   // (the roll starts from the clip's)
+      // (the editor's "after a shot": where the follow-through leaves the hand — the full-draw anchor, 13 cm back)
+      const holdHand = () => Raim.clone().addScaledVector(dAim, -(brace + REST.z) - (Math.max(brace, this.drawFull - 0.015) - brace) - 0.13).addScaledVector(h, 0.06).addScaledVector(UP, -0.02);
+      if (!this.fetchStart) { const d = (this.fetchFromHold && this.edit ? holdHand() : this.fetchFromHold && this.lastHook ? this.lastHook.clone() : this.pinchPoint()).sub(SR);   // (from the follow-through: where the hand WAS — before this frame's IK the bones are the hanging clip's)
+        this.fetchStart = [d.dot(Rt), d.dot(cu), d.dot(cf)];
+        this.twistPrev = this.fetchTau0 = this.fetchFromHold ? (this.twistPrev ?? BP.tauHook) : this.forearmTwist(armR, hdR).tw; }   // (the roll starts from the clip's, or the release's)
       const armLenR = wpos(armR.u).distanceTo(wpos(armR.l)) + wpos(armR.l).distanceTo(wpos(armR.tip));
       const reachMax = armLenR * 0.86 + wpos(armR.tip).distanceTo(this.pinchPoint());   // the elbow never straight (it locked at 7° pulling up)
       const grab = q.mouth.clone().addScaledVector(q.axis, ARROW_LEN + 0.02 - QUIVER_LEN - 0.035);   // just below the nocks
       let pull = 0.62; while (pull > 0.05 && grab.clone().addScaledVector(q.axis, pull).distanceTo(SR) > reachMax) pull -= 0.02;
       const pulled = grab.clone().addScaledVector(q.axis, pull);
-      let T;
+      const nv = (x, y, z) => Rt.clone().multiplyScalar(x).addScaledVector(cu, y).addScaledVector(cf, z).normalize();
+      const tau0 = this.fetchTau0 ?? -90;
+      const REACH = [[0.3, 0.4, 0.25], [0.35, 0.5, 0.3], [0.4, 0.55, 0.3], [0.45, 0.6, 0.35], [0.15, 0.2, 0.1], [-0.35]];   // relaxed: curled a little, more toward the pinky
+      const mixF = (a, b2, k) => a.map((r, x) => r.map((v, y) => v + (b2[x][y] - v) * k));
+      let T, pole, N2, Dw, fing, pt;
+      if (this.useKeys()) {
+        // ── KEYED (the timeline editor): the keys are where the hand is ASKED to
+        // be — the same IK and limits as the coded fetch carry it there
+        const K = fetchKeysAt(this.anim, T0, this.fetchFromHold), K0 = fetchKeysAt(this.anim, 0, this.fetchFromHold);
+        const fade = 1 - mj(T0 / 0.6);                      // (from where the hand really is to the keys)
+        T = toW(...K.hand.map((x, i) => x + (this.fetchStart[i] - K0.hand[i]) * fade));
+        // onto the string: the keys were made with a level arrow; the real nock point is blended in over the bring
+        const kN = fetchKeysAt(this.anim, ST.nock[0], this.fetchFromHold).hand;
+        T.add(nockAt(0).sub(toW(...kN)).multiplyScalar(mj(pr("bring"))));
+        // at the arrows: the keys at the grab are drawn onto this quiver's nocks — from the
+        // second half of the reach, through the close and the pull, let go over the bring
+        const kG = fetchKeysAt(this.anim, ST.close[0], this.fetchFromHold).hand, rl = ST.reach[1] - ST.reach[0];
+        const gW = mj((T0 - (ST.close[0] - rl / 2)) / (rl / 2)) * (1 - mj(pr("bring")));   // (in over the reach's second half, out over the whole bring: faster, the hand jerked)
+        if (gW > 0) T.add(grab.clone().sub(toW(...kG)).multiplyScalar(gW));
+        pole = nv(...K.elbow);
+        N2 = K.roll + (tau0 - K0.roll) * (1 - mj(T0 / 0.6));
+        // NOCKING ends exactly in the pose the string holds next (the nock point, the draw
+        // elbow, the hook's roll): the keys hand over across the nock phase — at the end
+        // they were 13–15 cm off it and the hand jumped as the draw began
+        const kN2 = mj(pr("nock"));
+        if (kN2 > 0) { T.lerp(nockAt(0), kN2); pole.lerp(poleR, kN2).normalize(); N2 += (BP.tauHook - N2) * kN2; }
+        const wn = clamp(K.wristNocks, 0, 1), ws = clamp(K.wristString, 0, 1);
+        Dw = ws > 0.001 || wn > 0.01 ? { toward: q.axis.clone().negate().multiplyScalar(wn).addScaledVector(DH, ws).normalize(), k: Math.max(wn, ws) } : null;
+        const fl = clamp(K.fingers, 0, 2);
+        fing = fl <= 1 ? mixF(REACH, PINCH, fl) : mixF(PINCH, HOOK, fl - 1);
+        pt = () => (fl > 1 ? this.pinchPoint().lerp(this.hookPoint(), fl - 1) : this.pinchPoint());
+      } else {
       if (T0 < ST.close[0]) T = pathAt(this.fetchFromHold || this.fetchStart[1] > 0 ? [toW(...this.fetchStart), toW(0.03, 0.36, 0.02), grab] : [toW(...this.fetchStart), toW(-0.06, -0.14, 0.24), toW(-0.02, 0.16, 0.25), toW(0.03, 0.36, 0.02), grab], mj(pr("reach")));   // (from the follow-through, the hand is already up by the neck: straight over the shoulder)
       else if (T0 < ST.pull[0]) T = grab.clone();
       else if (T0 < ST.bring[0]) T = grab.clone().lerp(pulled, mj(pr("pull")));
-      else if (T0 < ST.nock[0]) T = pathAt([pulled, toW(0.2, 0.18, 0.12), toW(0.06, -0.04, 0.32), nockAt(0)], mj(pr("bring")))   // (down in front of the right shoulder to the chest: out to the side first, the forearm swung round flat);
+      else if (T0 < ST.nock[0]) T = pathAt([pulled, toW(0.2, 0.18, 0.12), toW(0.14, -0.04, 0.3), nockAt(0)], mj(pr("bring")))   // (down in front of the right shoulder to the chest: out to the side first, the forearm swung round flat);
       else T = nockAt(0);
+      // (bringing the arrow down to the bow the elbow stays OUT at the side, then drops to
+      // the nock's — steered forward-down it swung in across the chest and the upper arm
+      // sank into the body at 2.3 s)
       // the elbow — always steered ACROSS the arm, never along it (along it the
       // solver had no side to choose and flipped 15° a frame): hanging → out and
       // forward (reaching back past the ear) → forward (pulling up) → down and
       // forward (bringing round) → the draw's
-      const nv = (x, y, z) => Rt.clone().multiplyScalar(x).addScaledVector(cu, y).addScaledVector(cf, z).normalize();
-      const pole = (this.fetchFromHold ? nv(0.55, 0.3, 0.6) : nv(0.5, -0.6, -0.2)).lerp(nv(0.55, -0.1, 0.8), mj(T0 / 0.5)).lerp(nv(0.3, 0.75, 0.6), mj((T0 - 0.45) / 0.6)).lerp(nv(0.35, 0.45, 0.8), mj(pr("pull"))).lerp(nv(0.1, -0.5, 0.8), mj(pr("bring") / 0.5)).lerp(poleR, mj((pr("bring") - 0.5) / 0.5)).normalize();
+      pole = (this.fetchFromHold ? nv(0.55, 0.3, 0.6) : nv(0.5, -0.6, -0.2)).lerp(nv(0.55, -0.1, 0.8), mj(T0 / 0.5)).lerp(nv(0.3, 0.75, 0.6), mj((T0 - 0.45) / 0.6)).lerp(nv(0.35, 0.45, 0.8), mj(pr("pull"))).lerp(nv(0.75, -0.25, 0.4), mj(pr("bring") / 0.5)).lerp(poleR, mj((pr("bring") - 0.5) / 0.5)).normalize();
       // the palm: toward the head while rising, toward the back of the head at the
       // quiver (the scratching-the-back hand, fingers up), toward the body as it
       // comes round, toward the face on the string — the forearm's roll is limited too
       // the forearm's roll (degrees; −90 relaxed, 0 palm up, −165 palm down):
       // from the clip's, through the reach, at the nocks, pulling, bringing, to the hook
-      const tau0 = this.fetchTau0 ?? -90;
-      const N2 = tau0 + (-55 - tau0) * mj(T0 / 0.6) + (BP.tauGrab - -55) * mj((T0 - 0.5) / 0.6) + (-85 - BP.tauGrab) * mj(pr("pull")) + (-100 - -85) * mj(pr("bring")) + (BP.tauHook - -100) * mj(pr("nock"));
+      N2 = tau0 + (-55 - tau0) * mj(T0 / 0.6) + (BP.tauGrab - -55) * mj((T0 - 0.5) / 0.6) + (-85 - BP.tauGrab) * mj(pr("pull")) + (-100 - -85) * mj(pr("bring")) + (BP.tauHook - -100) * mj(pr("nock"));
       const downK = mj((T0 - 0.5) / 0.5) * (1 - mj(pr("pull") / 0.6));        // fingers down onto the nocks
-      const Dw = pr("nock") > 0 ? { toward: DH, k: mj(pr("nock")) } : downK > 0.01 ? { toward: q.axis.clone().negate(), k: downK } : null;
-      const REACH = [[0.3, 0.4, 0.25], [0.35, 0.5, 0.3], [0.4, 0.55, 0.3], [0.45, 0.6, 0.35], [0.15, 0.2, 0.1], [-0.35]];   // relaxed: curled a little, more toward the pinky
-      const mixF = (a, b2, k) => a.map((r, x) => r.map((v, y) => v + (b2[x][y] - v) * k));
-      const fing = T0 < ST.pull[0] ? mixF(REACH, PINCH, mj(pr("close"))) : mixF(PINCH, HOOK, mj(pr("nock")));
+      Dw = pr("nock") > 0 ? { toward: DH, k: mj(pr("nock")) } : downK > 0.01 ? { toward: q.axis.clone().negate(), k: downK } : null;
+      fing = T0 < ST.pull[0] ? mixF(REACH, PINCH, mj(pr("close"))) : mixF(PINCH, HOOK, mj(pr("nock")));
       // eased in from the clip's pose (no snap of the hand or fingers at the start)
+      pt = () => (pr("nock") > 0 ? this.pinchPoint().lerp(this.hookPoint(), mj(pr("nock"))) : this.pinchPoint());
+      // (the editor's "rebuild from code": what the coded fetch asks, in the shoulder's frame)
+      if (this.rec) {
+        const loc = (v) => [v.dot(Rt), v.dot(cu), v.dot(cf)];
+        this.rec.push({ t: T0, hand: loc(T.clone().sub(SR)), elbow: loc(pole), roll: N2, fingers: T0 < ST.pull[0] ? mj(pr("close")) : 1 + mj(pr("nock")),
+          wristNocks: pr("nock") > 0 ? 0 : downK, wristString: pr("nock") > 0 ? mj(pr("nock")) : 0, look: this._look, headDown: this._down });
+      }
+      }
       const wIn = this.fetchFromHold ? aw : aw * mj(T0 / 0.3);   // (from the follow-through the arm is already on IK: no ease-in from the hanging clip pose)
-      const pt = () => (pr("nock") > 0 ? this.pinchPoint().lerp(this.hookPoint(), mj(pr("nock"))) : this.pinchPoint());
-      this.reachNatural(armR, hdR, T, pole, Dw, N2, fing, pt, wIn, reachMax, 0.52, TWIST_R);
+      this.fetchFrame = { SR, Rt, cu, cf };                   // (the editor's handles)
+      this.reachNatural(armR, hdR, T, pole, Dw, N2, fing, pt, wIn, reachMax * (1 + 2 * mj(pr("nock"))), 0.52 + 0.08 * mj(pr("nock")), TWIST_R);   // (the reach and wrist limits hand over to the string's across the nock: switched at once, the hand stepped 3.8 cm)
       this.arrowTaken = T0 >= ST.close[0] + 0.1;
+      if (!this.arrowTaken) this.arrowPath = null;
+      this.fetchT = T;
       if (this.arrowTaken) {
         // the arrow: its nock in the pinch, pivoting on the quiver lip while it is
         // still in, then swinging in the fingers (in the hand's D-N plane) to the bow
@@ -823,8 +984,22 @@ export class Archer {
         // the hand comes round (laid along the forearm it swept through the chest),
         // and turns toward the bow only once the hand is out in front
         const gEnd = restW.clone().sub(arrowFrom).normalize();
-        const hang = cu.clone().multiplyScalar(-0.85).addScaledVector(Rt, 0.2).addScaledVector(Nh, 0.5).normalize();   // down, on the PALM side (straight down it ran past the wrist)
-        arrowDir = toLip.normalize().lerp(hang, this.fetchFree).normalize().lerp(gEnd, mj((pr("bring") - 0.68) / 0.32)).normalize();
+        const hang = cu.clone().multiplyScalar(-0.85).addScaledVector(Rt, 0.4).addScaledVector(Nh, 0.5).normalize();   // down, on the PALM side (straight down it ran past the wrist), leaning out from the body (it grazed the flank coming over the shoulder)
+        if (this.useKeys()) {
+          // KEYED (fast, Mixamo): the arrow TRAILS along the hand's own path, as a shaft
+          // held by its nock does — out along the quiver, over the top, then turned to the
+          // bow. (Hanging down, it went through the head as the hand whipped over it.)
+          const lp = arrowFrom.clone().sub(SR), path = (this.arrowPath ??= []), last = path[path.length - 1];
+          const cur = [lp.dot(Rt), lp.dot(cu), lp.dot(cf)];
+          if (!last || Math.hypot(cur[0] - last[0], cur[1] - last[1], cur[2] - last[2]) > 0.005) path.push(cur);
+          let need = ARROW_LEN * 0.9, p = arrowFrom.clone(), tip = null;
+          for (let i = path.length - 2; i >= 0 && !tip; i--) {
+            const w = toW(...path[i]), d = w.distanceTo(p);
+            if (d >= need) tip = p.clone().lerp(w, need / d); else { need -= d; p = w; }
+          }
+          if (!tip) tip = p.addScaledVector(q.axis, -need);              // (the rest of it still in the quiver)
+          arrowDir = tip.sub(arrowFrom).normalize().lerp(gEnd, mj((pr("bring") - 0.68) / 0.32)).normalize();
+        } else arrowDir = toLip.normalize().lerp(hang, this.fetchFree).normalize().lerp(gEnd, mj((pr("bring") - 0.68) / 0.32)).normalize();
         if (pr("nock") > 0.15) nockW = arrowFrom.clone();
       }
     } else if (this.phase === "nocked") {
@@ -834,7 +1009,17 @@ export class Archer {
     } else if (this.phase === "release") {
       // the hand flies back past the ear, fingers open
       const k = smooth(this.t / 0.18), back = this.relFrom.clone().addScaledVector(dAim, -0.13 * k).addScaledVector(h, 0.06 * k).addScaledVector(UP, -0.02 * k);
-      this.reachNatural(armR, hdR, back, poleR, { toward: DH, k: 1 }, BP.tauHook, OPEN, () => this.hookPoint(), aw * (this.aimHeld ? 1 : 1 - smooth((this.t - 0.3) / 0.25)), 9, 0.6, TWIST_R);   // (held while aiming: the fetch takes over from here)
+      if (lowerK > 0) {
+        // LOWERING (Mixamo 4.0–4.8 s): the hand comes down IN FRONT of the chest, then out
+        // to hang — along its path (shoulder frame), the elbow turning down; the IK lets go
+        // only at the end, where the hand already hangs. (Fading the weight dragged the
+        // target through the shoulder of the folded arm: the hand dropped 32 cm in a frame.)
+        const chL = this.chest(), SRl = wpos(armR.u), Rtl = chL.L.clone().negate();
+        const toWl = (x, y, z) => SRl.clone().addScaledVector(Rtl, x).addScaledVector(chL.u, y).addScaledVector(chL.f, z);
+        const Tl2 = pathAt([back, toWl(-0.17, 0.06, 0.24), toWl(-0.07, -0.25, 0.33), toWl(0.09, -0.55, 0.25), this.hookPoint()], lowerK);
+        const poleDown = Rtl.clone().multiplyScalar(0.45).addScaledVector(chL.u, -0.85).addScaledVector(chL.f, -0.1).normalize();
+        this.reachNatural(armR, hdR, Tl2, poleR.clone().lerp(poleDown, lowerK).normalize(), lowerK < 0.6 ? { toward: DH, k: 1 - lowerK / 0.6 } : null, BP.tauHook + (-95 - BP.tauHook) * lowerK, OPEN, () => this.hookPoint(), aw * (1 - smooth((lowerK - 0.8) / 0.2)), 9, 0.6, TWIST_R);
+      } else this.reachNatural(armR, hdR, back, poleR, { toward: DH, k: 1 }, BP.tauHook, OPEN, () => this.hookPoint(), aw * (this.aimHeld || !BP.repeatFromHold ? 1 : 1 - smooth((this.t - 0.3) / 0.25)), 9, 0.6, TWIST_R);   // (held while aiming: the fetch takes over from here)
     }
     // ── the bow bends with the string; after a shot the limbs ring
     this.ringT += dt;
@@ -906,10 +1091,14 @@ export class Archer {
 
   // the quiver on the back: its mouth by the right shoulder, leaning across the back
   quiverFrame() {
-    const ch = this.chest();
-    const axis = ch.u.clone().multiplyScalar(0.88).addScaledVector(ch.L, -0.42).addScaledVector(ch.f, -0.12).normalize();
-    const bottom = ch.S.clone().addScaledVector(ch.f, -0.17).addScaledVector(ch.L, 0.12).addScaledVector(ch.u, -0.36).addScaledVector(axis, 0.6 - QUIVER_LEN);   // (the mouth where it was)
-    return { axis, bottom, mouth: bottom.clone().addScaledVector(axis, QUIVER_LEN), ch };
+    // placed by where the hand takes an arrow: the nocks just behind the neck (Mixamo
+    // "Shooting Arrow" grabs there), the quiver slanting down to the left hip
+    const ch = this.chest(), SR = wpos(this.rd.B.arms[1].u), Rt = ch.L.clone().negate();
+    const fr = (v) => Rt.clone().multiplyScalar(v[0]).addScaledVector(ch.u, v[1]).addScaledVector(ch.f, v[2]);
+    const axis = fr(BP.quiverAxis).normalize();
+    const nocks = SR.clone().add(fr(BP.quiverNocks));
+    const mouth = nocks.addScaledVector(axis, -(ARROW_LEN + 0.02 - QUIVER_LEN - 0.035));
+    return { axis, bottom: mouth.clone().addScaledVector(axis, -QUIVER_LEN), mouth, ch };
   }
   placeQuiver(q) {
     const g = this.quiver.group, ch = q.ch;

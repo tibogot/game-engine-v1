@@ -35,6 +35,7 @@
       <div>Jump — galloping at a fence: automatic · or <b>Space</b></div>
       <div>Get off / on the horse — <b>F</b> (standing still / next to it)</div>
       <div>Head toss — <b>H</b> · Eat — <b>E</b> · Rear — <b>R</b> · Buck — <b>B</b></div>
+      <div>Bow timeline editor (the arrow fetch) — <b>U</b></div>
       <div>Bow (on foot) — <b>V</b> on/off · hold <b>right mouse</b> (G) aim · hold <b>left mouse</b> (T) draw, let go to shoot</div>
       <div>Enable/Disable hoof IK — <b>C</b></div>
       <div>Pause — <b>P</b> · next frame (paused) — <b>N</b></div>
@@ -75,6 +76,7 @@
       import { buildContactLane, createLanceDebug } from "./horse-lab/lanceContact.js";
       import { createCavalry } from "./horse-lab/cavalry.js";
       import { Archer, BP, buildRange } from "./horse-lab/bow.js";
+      import { BowEditor } from "./horse-lab/bowEditor.js";
       import { buildFarm } from "./horse-lab/farm.js";
       import { createLabSky } from "./horse-lab/sky.js";
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
@@ -198,6 +200,10 @@
       } catch { /* the built-in postures */ }
       // the bow on foot (bow.js): V on / off, hold right mouse (G) to aim, left mouse (T) to draw, let go to shoot
       const archer = new Archer({ rider, scene, world: arena, range });
+      try {                                                 // the arrow fetch as keyed in the bow timeline editor (U)
+        const r = await fetch("/v3/horse-lab/anims/bow-fetch.json?" + Date.now());
+        if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) archer.anim = await r.json();
+      } catch { /* the coded fetch */ }
       const cross = document.createElement("div");
       cross.style.cssText = "position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;z-index:15;pointer-events:none;display:none;background:radial-gradient(circle,#fff 0 1.5px,transparent 2px),linear-gradient(#fff,#fff) 50% 0/1.5px 6px no-repeat,linear-gradient(#fff,#fff) 50% 100%/1.5px 6px no-repeat,linear-gradient(#fff,#fff) 0 50%/6px 1.5px no-repeat,linear-gradient(#fff,#fff) 100% 50%/6px 1.5px no-repeat;filter:drop-shadow(0 0 1px #000)";
       document.body.appendChild(cross);
@@ -219,6 +225,7 @@
       const down = new Set();
       let shiftDownAt = -1, gearUp = false, gearDown = false, note = "", noteT = 0;
       addEventListener("keydown", (e) => {
+        if (bowEd.isOpen && bowEd.onKey(e)) return;            // the bow timeline editor too
         if (poseEd.isOpen && poseEd.onKey(e)) return;          // the pose editor has the keyboard while open
         if (editor.isOpen && editor.onKey(e)) return;          // the editor has the keyboard while open
         down.add(e.code);
@@ -243,6 +250,7 @@
         if (k === "c") { HP.ik = !HP.ik; ikCtl.updateDisplay(); }
         if (k === "k") { editor.open(editor.clip); camDist = Math.min(camDist, 4.5); }   // the last thing edited (riding idle first)
         if (k === "j") { editor.close(); poseEd.open(); camDist = Math.min(camDist, 6); }
+        if (k === "u") openBowEd();
         if (k === "v") { BP.on = !BP.on; bowCtl?.updateDisplay(); }
       });
       // the bow: right mouse = aim, left mouse = draw (G / T on the keyboard)
@@ -304,7 +312,7 @@
         const want = new THREE.Vector3(tgt.x, tgt.y + (side !== undefined ? 0.9 : 1.8), tgt.z);
         if (D.editing) want.add(camPan); else camPan.set(0, 0, 0);
         // aiming the bow: in close over the right shoulder (the crosshair is the camera's centre)
-        const aw = archer.active ? archer.aimW * archer.aimW * (3 - 2 * archer.aimW) : 0;
+        const aw = archer.active && !archer.edit ? archer.aimW * archer.aimW * (3 - 2 * archer.aimW) : 0;
         if (aw > 0) { const hp = rider.B.head.getWorldPosition(new THREE.Vector3()); want.lerp(hp.add(new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw)).multiplyScalar(0.62)).add(new THREE.Vector3(0, 0.12, 0)), aw); }
         camTarget.lerp(want, lerpK(aw > 0 ? 18 : 10, dt));
         const pitch = side !== undefined ? 0.06 : camPitch, dist = camDist + (2.3 - camDist) * aw;
@@ -359,6 +367,9 @@
           if (range) { M.gpos.set(range.start.x, 0, range.start.z); M.gyaw = range.start.yaw; M.gv = 0; camYaw = range.start.yaw; camPitch = 0.12; }
           BP.on = true; bowCtl.updateDisplay();
         } }, "go").name("→ get off, go to the archery range");
+        bf.add({ open: () => openBowEd() }, "open").name("🎯 fetch timeline editor (U)");
+        bf.add(BP, "keyed").name("fetch: play the editor's keys");
+        bf.add(BP, "readyRoll", -1.6, 1.6, 0.05).name("ready bow roll (rad)");
         bf.add(BP, "debug").name("show flights (debug)");
         bf.add({ clear: () => { archer.clearArrows(); archer.debug.clear(); range?.reset(); } }, "clear").name("pick up arrows, reset targets");
         bf.add(BP, "drawTime", 0.3, 2, 0.05).name("draw time (s)");
@@ -450,6 +461,14 @@
       const editor = new AnimEditor({ renderer, scene, camera, rider, ctrl, D, camState });
       // the pose editor (J): click a joint, turn it, keys on a layer over the rear (anims/poses.json)
       const poseEd = new PoseEditor({ renderer, scene, camera, rider, ctrl, D, camState });
+      // the bow's timeline editor (U): the arrow fetch keyed frame by frame (anims/bow-fetch.json)
+      const bowEd = new BowEditor({ renderer, scene, camera, rider, archer, D, camState });
+      function openBowEd() {
+        editor.close(); poseEd.close();
+        const r = bowEd.isOpen ? (bowEd.close(), {}) : bowEd.open();
+        if (r?.err) { note = r.err; noteT = 2.5; }
+        btn.aim = btn.fire = false;
+      }
       gui.add({ open: () => { editor.close(); poseEd.open(); camDist = Math.min(camDist, 6); } }, "open").name("🦴 pose editor (J)");
       gui.add({ open: () => { poseEd.close(); editor.open(editor.clip); } }, "open").name("🎬 animation editor (K)");
       const timer = new THREE.Timer();
@@ -474,9 +493,12 @@
           ctrl.update(rdt, poseEd.isOpen ? { fwd: 0, turn: 0, run: false } : editor.isOpen ? editor.horseInput() : onHorse ? inp : { fwd: 0, turn: 0, run: false });
           editor.afterHorse();
           poseEd.applyHorse();                                  // the pose layer on the horse (before the rider follows it)
-          rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming } });
-          archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot): over the clip's upper body
-          cross.style.display = archer.active && archer.aimW > 0.6 ? "block" : "none";
+          if (bowEd.isOpen) bowEd.update(rawDt);                // (the bow editor replays the fetch to its playhead itself)
+          else {
+            rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming } });
+            archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot): over the clip's upper body
+          }
+          cross.style.display = archer.active && archer.aimW > 0.6 && !bowEd.isOpen ? "block" : "none";
           poseEd.applyRider();
           poseEd.afterFrame();
           arena.update?.(dt, { ctrl, rider });                    // the farm's herd
@@ -559,7 +581,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>
