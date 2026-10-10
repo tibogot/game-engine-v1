@@ -45,12 +45,12 @@ const LAYOUT = [
 // generator at a low detail (~250 triangles), the cave's own photo and colour — the kit's faceted
 // field stones read as pale beads beside the rock. Four shapes, each placed many times.
 const { label: _l, ...BLOCK } = SANDSTONE_SHAPES.block;
-const PEBBLE = (seed) => ({
+export const PEBBLE = (seed) => ({
   ...BLOCK, seed, sizeX: 0.34, sizeY: 0.21, sizeZ: 0.27, chips: 14, bigCuts: 2, strata: 2, joints: 1, undercut: 0.06,
   detail: 24, targetTriangles: 240, simplifyError: 0.06,   // (the error lets it reach ~260: at 0.005 a pebble kept 2100)
 });
 /** A pebble placed (kit metres; the result in the scaled world, as the rocks). */
-function pebble(m, q, e, rnd, x, y, z, k = 1, yaw = rnd() * 6.3) {
+export function pebble(m, q, e, rnd, x, y, z, k = 1, yaw = rnd() * 6.3) {
   const g = getRockGeometry(PEBBLE(1 + Math.floor(rnd() * 4))).clone();
   e.set((rnd() - 0.5) * 0.25, yaw, (rnd() - 0.5) * 0.25);
   const s = k * (0.8 + rnd() * 0.45);

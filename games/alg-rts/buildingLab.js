@@ -11,6 +11,10 @@ import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanCo
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { startVehicleLab } from "./vehicleLab.js";
 import { buildSandstoneCave } from "./algCave.js";
+import { buildModernAlnCamp } from "./algAlnCamp.js";
+import { buildStoneHouse } from "./algMasonry.js";
+import * as THREE from "three";
+import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
@@ -51,6 +55,28 @@ const BUILDINGS = {
   grotte: {
     label: "Grotte du FLN", gap: 11, before: () => buildCaveEntrance(), after: () => buildSandstoneCave({ variant: SEED }),
     tags: ["GROTTE (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "la grotte du jeu à gauche, la grotte en grès à droite (même étais, même matériel).",
+  },
+  // THE FLN CAMP (same day, you: "it looks wrong and too cheap beside the cave"): the game's on the
+  // LEFT, the sandstone and dry-stone camp on the RIGHT (algAlnCamp.js).
+  // THE NEW STANDARD (2026-10-11, you: "everything but the rocks reads cheap"): the camp's stone
+  // house built as the rocks are (algMasonry.js) — real thickness, rounded corners, photo materials —
+  // beside the game's mechta house (the kit atlas).
+  maisonPierre: {
+    label: "Maison en pierre (PC)", gap: 10, before: () => buildMechtaHouse({}),
+    after: () => {
+      const { group } = buildStoneHouse();
+      // (the lab draws a body mesh per piece: an empty one, the house its `extra`)
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+      g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
+      g.userData.extra = [group];
+      return g;
+    },
+    tags: ["MAISON (KIT DU JEU)", "PIERRE · NOUVEAU"], note: "la maison du jeu à gauche, la maison en pierre du nouveau standard à droite.",
+  },
+  campFln: {
+    label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildModernAlnCamp(),
+    tags: ["CAMP (LE JEU)", "GRÈS + PIERRE SÈCHE"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
   },
 };
 

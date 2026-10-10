@@ -20,6 +20,7 @@
  */
 import * as THREE from "three";
 import { MAT, assemble, bakeContactAO, buildBox, rng } from "./rtsParts.js";
+import { grainSack } from "./rtsAlgeria.js";
 
 const S = 1.3;
 
@@ -78,9 +79,10 @@ function outcrop(R, w, h, d, seed) {
   return out;
 }
 
-/** A dry-stone sangar: a C of stacked stone round a firing position. */
-function sangar(parts, R, { x, z, rad = 1.9, h = 1.05, face }) {
-  const n = 14;
+/** A dry-stone sangar: a C of stacked stone round a firing position. (`stones: false`: the gun only.) */
+function sangar(parts, R, { x, z, rad = 1.9, h = 1.05, face, stones = true }) {
+  if (!stones) h = 0.82;   // (the dry-stone ring is lower: algAlnCamp.js)
+  const n = stones ? 14 : 0;
   for (let k = 0; k < n; k++) {
     const a = face + Math.PI * 0.35 + (k / (n - 1)) * Math.PI * 1.3;       // open at the back
     const px = x + Math.cos(a) * rad, pz = z + Math.sin(a) * rad;
@@ -93,9 +95,14 @@ function sangar(parts, R, { x, z, rad = 1.9, h = 1.05, face }) {
   parts.push({ geo: buildBox(0.22, 0.2, 0.5), pos: [gx - Math.cos(face) * 0.5, h + 0.08, gz - Math.sin(face) * 0.5], rot: [0, Math.PI / 2 - face, 0], mat: MAT.steel, tone: 0.15 });
 }
 
-export function buildAlnCamp({ seed = 1954 } = {}) {
+// `modern: true` (2026-10-11, you: "the FLN camp looks wrong and too cheap low-poly beside the
+// cave"): no faceted outcrops, no box stones, no second cave arch (the real cave is 58 m off) — the
+// sandstone rocks and the dry stone are alg-rts algAlnCamp.js's (`userData.drystone` says where); the
+// brush on the roofs and the stores' sacks are heaps and sacks, not boxes; the house in sandstone.
+export function buildAlnCamp({ seed = 1954, modern = false } = {}) {
   const R = rng(seed);
   const parts = [];
+  const drystone = { walls: [], sangars: [], fire: null, cairn: null };   // kit metres, pre-scale
   // WHAT BLOCKS (2026-10-06, a player: "too many unwalkable places" — the camp was one 57 x 52 m
   // block): the rocks, the house, the dugout, the stores; the sangars (open at the back: men get
   // in) and the knee-high forecourt walls stop vehicles only. Pre-scale; COVER along all of it.
@@ -112,12 +119,14 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   // ── The rock the camp is set against, and the cave in it ─────────────────
   // A long outcrop behind the camp (+Z, away from the camera), two lesser
   // ones at its flanks: the mountain the camp hides in.
-  parts.push({ geo: rock(outcrop(R, 14, 10.5, 7, seed), 0, 13.5), pos: [0, -0.3, 13.5], mat: MAT.limestone, tone: 0.45 });
-  parts.push({ geo: rock(outcrop(R, 6, 4.5, 5, seed + 1), -15, 8), pos: [-15, -0.3, 8], mat: MAT.limestone, tone: 0.4 });
-  parts.push({ geo: rock(outcrop(R, 5, 3.2, 4, seed + 2), 15, 10), pos: [15, -0.3, 10], mat: MAT.limestone, tone: 0.5 });
+  if (!modern) {
+    parts.push({ geo: rock(outcrop(R, 14, 10.5, 7, seed), 0, 13.5), pos: [0, -0.3, 13.5], mat: MAT.limestone, tone: 0.45 });
+    parts.push({ geo: rock(outcrop(R, 6, 4.5, 5, seed + 1), -15, 8), pos: [-15, -0.3, 8], mat: MAT.limestone, tone: 0.4 });
+    parts.push({ geo: rock(outcrop(R, 5, 3.2, 4, seed + 2), 15, 10), pos: [15, -0.3, 10], mat: MAT.limestone, tone: 0.5 });
+  }
   // The cave mouth: a dark arch in the big rock's face, a timber lintel, a
   // stone step, sacks and a crate just inside.
-  {
+  if (!modern) {
     const arch = new THREE.Shape();
     arch.moveTo(-1.7, 0); arch.lineTo(1.7, 0); arch.lineTo(1.7, 1.6);
     arch.absarc(0, 1.6, 1.7, 0, Math.PI, false); arch.lineTo(-1.7, 0);
@@ -134,13 +143,17 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   const HX = -5, HZ = 1.5, HW = 9, HD = 6, HH = 2.9;
   rect(HX, HZ, HW / 2 + 0.9, HD / 2 + 0.9);
   cover.push([[HX - HW / 2, HZ - HD / 2], [HX + HW / 2, HZ - HD / 2], [HX + HW / 2, HZ + HD / 2], [HX - HW / 2, HZ + HD / 2], [HX - HW / 2, HZ - HD / 2]]);
-  parts.push({ geo: buildBox(HW, HH, HD), pos: [HX, HH / 2, HZ], mat: MAT.rubble, tone: 0.55 });
+  parts.push({ geo: buildBox(HW, HH, HD), pos: [HX, HH / 2, HZ], mat: MAT.rubble, tone: 0.55 });   // (modern tried the sandstone cell: a plywood box)
   // Earth roof, a stone parapet, beam ends, and brushwood heaped over it all
   // against the spotter planes.
   parts.push({ geo: buildBox(HW + 0.3, 0.26, HD + 0.3), pos: [HX, HH + 0.13, HZ], mat: MAT.earth, tone: 0.5 });
   for (let k = 0; k < 7; k++) parts.push({ geo: buildBox(0.14, 0.14, 0.36), pos: [HX - HW / 2 + 0.6 + k * (HW - 1.2) / 6, HH - 0.12, HZ - HD / 2 - 0.14], mat: MAT.timber, tone: 0.2 });
   for (let k = 0; k < 9; k++) {
-    parts.push({ geo: buildBox(1.8 + R() * 1.4, 0.35 + R() * 0.3, 1.2 + R() * 0.8), pos: [HX + (R() - 0.5) * (HW - 1.5), HH + 0.4 + R() * 0.15, HZ + (R() - 0.5) * (HD - 1.2)], rot: [(R() - 0.5) * 0.2, R() * 3, (R() - 0.5) * 0.2], mat: MAT.thatch, tone: 0.25 + R() * 0.25 });
+    // (modern: heaps of cut brush — the boxes read as cardboard from the RTS camera)
+    const w = 1.8 + R() * 1.4, h = 0.35 + R() * 0.3, d = 1.2 + R() * 0.8;
+    // (modern: low earth mounds, a few flat brush heaps — round thatch domes read as pies)
+    const earth = modern && k % 3 !== 0;
+    parts.push({ geo: modern ? grainSack(w * (earth ? 1.2 : 1), h * (earth ? 0.6 : 0.75), d * (earth ? 1.2 : 1), seed + k) : buildBox(w, h, d), pos: [HX + (R() - 0.5) * (HW - 1.5), HH + (modern ? 0.18 : 0.4 + R() * 0.15), HZ + (R() - 0.5) * (HD - 1.2)], rot: [(R() - 0.5) * 0.2, R() * 3, (R() - 0.5) * 0.2], mat: earth ? MAT.earth : MAT.thatch, tone: earth ? 0.4 + R() * 0.1 : 0.2 + R() * 0.15 });
   }
   // Front (-Z): the door in a limewashed frame, two small windows, a
   // forecourt walled in dry stone with a gap.
@@ -152,7 +165,8 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
     const dx = b[0] - a[0], dz = b[1] - a[1], len = Math.hypot(dx, dz);
     rect((a[0] + b[0]) / 2, (a[1] + b[1]) / 2, Math.abs(dx) / 2 + 0.9, Math.abs(dz) / 2 + 0.9, true);
     cover.push([a, b]);
-    parts.push({ geo: buildBox(0.5, 1.0 + R() * 0.2, len + 0.3), pos: [(a[0] + b[0]) / 2, 0.52, (a[1] + b[1]) / 2], rot: [0, Math.atan2(dx, dz), 0], mat: MAT.rubble, tone: 0.45 + R() * 0.15 });
+    if (modern) drystone.walls.push([a, b]);
+    else parts.push({ geo: buildBox(0.5, 1.0 + R() * 0.2, len + 0.3), pos: [(a[0] + b[0]) / 2, 0.52, (a[1] + b[1]) / 2], rot: [0, Math.atan2(dx, dz), 0], mat: MAT.rubble, tone: 0.45 + R() * 0.15 });
   }
   // A whip aerial off the roof, the wire strung to a pole: the wilaya's radio.
   parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.05, 6, 6), pos: [HX + 3.5, HH + 3.2, HZ + 2], mat: MAT.timber, tone: 0.3 });
@@ -170,7 +184,7 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
       parts.push({ geo: new THREE.CylinderGeometry(0.14, 0.16, DD + 1.2, 7), pos: [DX - DW / 2 + 0.4 + k * (DW - 0.8) / 8, 0.95, DZ], rot: [Math.PI / 2, 0, 0], mat: MAT.timber, tone: 0.2 + R() * 0.2 });
     }
     parts.push({ geo: buildBox(DW - 0.3, 0.25, DD + 0.6), pos: [DX, 1.2, DZ], mat: MAT.earth, tone: 0.55 });
-    for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(1.6, 0.3, 1.3), pos: [DX - 2 + k * 2, 1.45, DZ + (R() - 0.5)], rot: [0, R() * 3, 0], mat: MAT.thatch, tone: 0.3 });
+    for (let k = 0; k < 3; k++) parts.push({ geo: modern ? grainSack(1.9, 0.28, 1.5, seed + 20 + k) : buildBox(1.6, 0.3, 1.3), pos: [DX - 2 + k * 2, modern ? 1.3 : 1.45, DZ + (R() - 0.5)], rot: [0, R() * 3, 0], mat: modern ? MAT.earth : MAT.thatch, tone: modern ? 0.42 : 0.3 });
     // Its entrance, at the west end: a dark gap and a step down.
     parts.push({ geo: buildBox(0.06, 0.75, 1.2), pos: [DX - DW / 2 - 0.02, 0.4, DZ], mat: MAT.steel, tone: 0.0 });
   }
@@ -181,12 +195,13 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
     rect(LX, LZ, 2.4, 1.7);
     for (const [px, pz] of [[-2, -1.4], [2, -1.4], [-2, 1.4], [2, 1.4]]) parts.push({ geo: new THREE.CylinderGeometry(0.07, 0.09, 2.1, 6), pos: [LX + px, 1.05, LZ + pz], mat: MAT.timber, tone: 0.3 });
     parts.push({ geo: buildBox(4.8, 0.25, 3.4), pos: [LX, 2.15, LZ], rot: [0.1, 0, 0], mat: MAT.thatch, tone: 0.35 });
-    for (let k = 0; k < 8; k++) parts.push({ geo: buildBox(0.75, 0.42, 0.5), pos: [LX - 1.5 + (k % 4) * 0.85, 0.22 + Math.floor(k / 4) * 0.42, LZ + 0.6], rot: [0, (R() - 0.5) * 0.3, 0], mat: MAT.hessian, tone: 0.45 + R() * 0.2 });
+    for (let k = 0; k < 8; k++) parts.push({ geo: modern ? grainSack(0.75, 0.42, 0.5, seed + 40 + k) : buildBox(0.75, 0.42, 0.5), pos: [LX - 1.5 + (k % 4) * 0.85, (modern ? 0 : 0.22) + Math.floor(k / 4) * (modern ? 0.36 : 0.42), LZ + 0.6], rot: [0, (R() - 0.5) * 0.3, 0], mat: MAT.hessian, tone: (modern ? 0.32 : 0.45) + R() * 0.2 });
     for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.9, 0.35, 0.45), pos: [LX - 1 + k * 1.0, 0.18, LZ - 0.9], rot: [0, (R() - 0.5) * 0.2, 0], mat: MAT.paint, tone: 0.3 });
   }
 
   // ── The cooking fire in the forecourt: a ring of stones, the pot ──────────
-  for (let k = 0; k < 9; k++) {
+  if (modern) drystone.fire = [-3, -4];
+  else for (let k = 0; k < 9; k++) {
     const a = (k / 9) * Math.PI * 2;
     parts.push({ geo: buildBox(0.3, 0.2, 0.22), pos: [-3 + Math.cos(a) * 0.55, 0.1, -4 + Math.sin(a) * 0.55], rot: [0, -a, 0], mat: MAT.rubble, tone: 0.4 });
   }
@@ -194,14 +209,17 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
 
   // ── Sangars round the camp, the guns facing out (downhill = the camera) ──
   for (const sg of [{ x: -17, z: -11, face: -Math.PI / 2 - 0.5 }, { x: 4, z: -12, face: -Math.PI / 2 }, { x: 19, z: -6, face: -Math.PI / 2 + 0.6 }]) {
-    sangar(parts, R, sg);
+    sangar(parts, R, { ...sg, stones: !modern });
+    if (modern) drystone.sangars.push(sg);
     rect(sg.x, sg.z, 2.6, 2.6, true);
-    cover.push(Array.from({ length: 8 }, (_, k) => { const a = sg.face + Math.PI * 0.35 + (k / 7) * Math.PI * 1.3; return [sg.x + Math.cos(a) * 1.9, sg.z + Math.sin(a) * 1.9]; }));
+    // (modern: the dry-stone C closes toward `face` — the gun's way — and opens at the back)
+    cover.push(Array.from({ length: 8 }, (_, k) => { const a = modern ? sg.face - Math.PI * 0.65 + (k / 7) * Math.PI * 1.3 : sg.face + Math.PI * 0.35 + (k / 7) * Math.PI * 1.3; return [sg.x + Math.cos(a) * 1.9, sg.z + Math.sin(a) * 1.9]; }));
   }
 
   // ── The flagpole's foot, in the forecourt: a heap of stones ──────────────
   const poleH = 7;
-  for (let k = 0; k < 6; k++) parts.push({ geo: buildBox(0.5, 0.35 + k * 0.03, 0.4), pos: [-9 + (R() - 0.5) * 0.6, 0.18 + k * 0.015 + (k > 3 ? 0.3 : 0), -3.5 + (R() - 0.5) * 0.6], rot: [0, R() * 3, 0], mat: MAT.rubble, tone: 0.5 });
+  if (modern) drystone.cairn = [-9, -3.5];
+  else for (let k = 0; k < 6; k++) parts.push({ geo: buildBox(0.5, 0.35 + k * 0.03, 0.4), pos: [-9 + (R() - 0.5) * 0.6, 0.18 + k * 0.015 + (k > 3 ? 0.3 : 0), -3.5 + (R() - 0.5) * 0.6], rot: [0, R() * 3, 0], mat: MAT.rubble, tone: 0.5 });
 
   const geo = assemble(parts);
   bakeContactAO(geo, { cell: 0.4, radius: 2, strength: 0.5, groundFade: 0.3, floor: 0.45 });
@@ -214,5 +232,6 @@ export function buildAlnCamp({ seed = 1954 } = {}) {
   geo.userData.coverLines = cover.map((pts) => ({ hard: true, pts: pts.map(([x, z]) => [x * S, z * S]) }));
   geo.userData.coverPerimeter = false;
   geo.userData.height = 8 * S;
+  if (modern) geo.userData.drystone = drystone;
   return geo;
 }
