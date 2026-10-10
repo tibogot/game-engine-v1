@@ -106,9 +106,15 @@ const P = {
   coverSeek: 12,              // metres a man fired on looks for shelter
   // ── 2026-10-01: the FLN holds what it takes, comes back for what it loses,
   // and builds (you: "of course you should work on [the AI]") ──
-  cellSize: [2, 3],           // men left as a village's GARRISON once it turns
+  // (2026-10-10, your "A": cells that STAY — 3-4 men, holding till three quarters are down.)
+  cellSize: [3, 4],           // men left as a village's GARRISON once it turns
   cellMinBand: 4,             // a band this big or more leaves a cell
-  cellBreak: 0.7,             // share of the cell lost: the rest run for the cave
+  cellBreak: 0.75,            // share of the cell lost: the rest run for the cave
+  // CONTESTING (same day): a band working a village STANDS AND FIGHTS when the village is not yet
+  // the French's (its needle under `contestValue`) or the French coming are no more than it —
+  // it melts away (the guerrilla's rule) only from a bigger French force at a French village.
+  contestValue: 0.15,
+  behindClock: 1.6,           // the assault clock runs this much faster while the French hold more villages
   retakeWindow: 300,          // s a lost village stays the next band's mission
   retakeSoon: 15,             // the next band comes within this after a loss
   screenWait: 3,              // s in ambush before it puts up a screen (8: they struck first)
@@ -798,7 +804,17 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
           if (1 - m.length / Math.max(1, b.start) >= P.breakLoss + 0.15) withdraw(b);
           break;
         }
-        if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger)) { strike(b); break; }
+        const frNear = french().filter((u) => !u.isAir && dist(u.position, c) < P.villageTrigger + 10).length;
+        if (underFire(b, m) || frNear) {
+          // CONTESTING: a village not yet theirs, or French no more than us — fight for it in place.
+          if (b.mission === "village" && b.village && (b.village.value < P.contestValue || frNear <= m.length)) {
+            holdFire(b, false);
+            b.tact = (b.tact ?? 0) - dt;
+            if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
+            if (1 - m.length / Math.max(1, b.start) >= P.breakLoss + 0.15) withdraw(b);
+          } else strike(b);
+          break;
+        }
         // A RAID: the point turned — the depot looted, the line cut. A keystone keeps a cell of
         // two to hold it; the rest (all of them, elsewhere) melt away.
         if (b.mission === "raid") {
@@ -1634,7 +1650,9 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   function stepAssaults(dt) {
     // (A full purse brings the next assault sooner too: THE PURSE SETS THE PACE, P.richAt.)
     const stock = app.algEconomy?.aln.stock ?? 0;
-    nextAssault -= dt * (stock > P.richAt[1] ? P.richClock[1] : stock > P.richAt[0] ? P.richClock[0] : 1);
+    // (And BEHIND on villages: the katiba masses to take one back — CoH's comeback.)
+    const eco = app.algEconomy, behind = eco && eco.heldByEnemy < eco.held ? P.behindClock : 1;
+    nextAssault -= dt * behind * (stock > P.richAt[1] ? P.richClock[1] : stock > P.richAt[0] ? P.richClock[0] : 1);
     if (nextAssault > 0) return;
     if (bands.some((b) => b.mission === "assault" && alive(b).length)) { nextAssault = 30; return; }
     if (cap() - liveFighters() < P.assaultSize[0]) { nextAssault = 30; return; }   // room for a real one, or wait

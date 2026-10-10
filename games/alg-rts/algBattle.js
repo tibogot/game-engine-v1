@@ -30,7 +30,9 @@ import { t, LANGS, LANG, setLang } from "./i18n/i18n.js";
 
 const P = {
   start: 500,
-  drain: 0.35,          // points a second, per village of difference
+  // (0.35 → 0.175, 2026-10-10, your "C": a 4-0 sweep took ~6 min, a match ~10; CoH's run 25-40 —
+  // room for the comeback.)
+  drain: 0.175,         // points a second, per village of difference
   contactEvery: 30,     // s between two contact alerts in one place
   placeM: 90,           // "one place" for throttling, metres
   sightEvery: 45,       // s between two "band seen" alerts in one place

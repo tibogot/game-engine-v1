@@ -152,6 +152,13 @@ Keep this file current: tick things off here, add new asks here.
    ~10.5 min (was ~7.5). Hard: the same, ~11 min. The FLN still loses ~3:1 in men and never HOLDS a
    village: its design is hit-and-run (a band melts away when French come within 35 m) while the
    score is villages held — a DESIGN question, **you** (chat 2026-10-10: options A/B/C).
+   DONE 2026-10-10 — your "A + C": (A) a band working a village STANDS AND FIGHTS when the village
+   is not yet French (needle < 0.15) or the French coming are no more than it (algAI contestValue);
+   cells 3-4 men (was 2-3), break at 75% (was 70%); the assault clock ×1.6 while the FLN holds fewer
+   villages (behindClock). (C) the score drain halved, 0.35 → 0.175 (algBattle). MEASURED (Normal,
+   French AI v FLN AI): past 25 min (was ~10.5); the FLN holds 1-2 villages most of it, 6 villages
+   retaken, 2-2 at 13, 19 and 20 min; men lost 86 / 142 (was ~1:3); the French still ahead at 25
+   min (FLN score 59). Next: **you** play a match on Normal (both sides) — is it fun at 25-30 min?
    LEFT: replay and judge (**you**); the FLN's purse still piles up unspent (1670 at 12 min, its cap
    is its limit) — give it something to buy (more caches, sangars) if it should matter; a fuel sink
    for infantry (none yet: vehicles and tiers only).
