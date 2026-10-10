@@ -7,25 +7,31 @@
 //
 // Chosen on the briefing (remembered), or ?difficulty=easy|normal|hard.
 import { t } from "./i18n/i18n.js";
+import { isHuman } from "../shared-rts/teams.js";
 
 const LEVELS = {
   easy: {
     label: t("Facile"), alnStart: 320, alnBase: 25, moudjahid: 35, headStart: 4,
     firstBandAt: 40, bandEvery: [70, 115], maxLive: 16, frStart: 750, snipers: 1,
-    blurb: t("Petites bandes, lentes à venir."),
+    // (You as the FLN: your purse and income; the French company's size and start.)
+    flnStart: 520, flnBase: 60, frAiStart: 400, frSquads: 4, frAssaultAt: 7,
+    blurb: t("Petites bandes, lentes à venir."), blurbFln: t("Une compagnie d'appelés, lente à réagir."),
   },
   normal: {
     label: t("Normal"), alnStart: 480, alnBase: 45, moudjahid: 30, headStart: 8,
     firstBandAt: 18, bandEvery: [50, 85], maxLive: 26, frStart: 600, snipers: 2,
-    blurb: t("Une katiba qui se bat pour chaque village."),
+    flnStart: 420, flnBase: 45, frAiStart: 600, frSquads: 6, frAssaultAt: 5,
+    blurb: t("Une katiba qui se bat pour chaque village."), blurbFln: t("Une compagnie qui reprend chaque village."),
   },
   hard: {
     label: t("Difficile"), alnStart: 700, alnBase: 70, moudjahid: 25, headStart: 12,
     firstBandAt: 10, bandEvery: [35, 60], maxLive: 36, frStart: 500, snipers: 3,
-    blurb: t("Toute la wilaya contre un seul poste."),
+    flnStart: 340, flnBase: 35, frAiStart: 850, frSquads: 8, frAssaultAt: 5,
+    blurb: t("Toute la wilaya contre un seul poste."), blurbFln: t("Paras, Légion et Alouettes contre une katiba."),
   },
 };
-export const DIFFICULTIES = Object.entries(LEVELS).map(([key, v]) => ({ key, label: v.label, blurb: v.blurb }));
+// (The blurb describes YOUR enemy: the French when you play the FLN — read when the briefing is built.)
+export const DIFFICULTIES = Object.entries(LEVELS).map(([key, v]) => ({ key, label: v.label, get blurb() { return isHuman("enemy") ? v.blurbFln : v.blurb; } }));
 const STORE = "algrts.difficulty";
 
 export function storedDifficulty() {
@@ -44,12 +50,15 @@ export function applyDifficulty(app, key) {
   const L = LEVELS[key] ?? LEVELS.normal;
   try { localStorage.setItem(STORE, key); } catch { /* ignore */ }
   const eco = app.algEconomy;
+  const fln = isHuman("enemy");
   if (eco) {
-    eco.aln.stock = L.alnStart;
-    eco.french.stock = L.frStart;
-    eco.params.base.enemy = L.alnBase;
+    eco.aln.stock = fln ? L.flnStart : L.alnStart;
+    eco.french.stock = fln ? L.frAiStart : L.frStart;
+    eco.params.base.enemy = fln ? L.flnBase : L.alnBase;
     if (eco.costs) eco.costs.moudjahid = L.moudjahid;
   }
+  // The French commander (algFrenchAI.js) when you are the FLN.
+  if (app.algFrenchAI) Object.assign(app.algFrenchAI.params, { squadsMax: L.frSquads, assaultAt: L.frAssaultAt });
   const ai = app.algAI;
   if (ai?.params) Object.assign(ai.params, { firstBandAt: L.firstBandAt, bandEvery: L.bandEvery, maxLive: L.maxLive });
   ai?.restartClock?.(L.firstBandAt);

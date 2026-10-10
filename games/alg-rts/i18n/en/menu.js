@@ -159,4 +159,11 @@ export default {
   // Manual — The FLN
   "Le FLN ne se bat pas à découvert : ses bandes attendent dans les broussailles et frappent ceux qui s'approchent, puis se replient vers la montagne. Ses <b>caches d'armes</b> arment des tireurs FM : trouvez-les et détruisez-les.": "The FLN does not fight in the open: its bands wait in the scrub, strike whoever comes close, then fall back to the mountain. Its <b>arms caches</b> equip machine gunners: find them and destroy them.",
   "Éclairez avec la jeep, avancez groupés, gardez le FM avec vous, et méfiez-vous des villages tranquilles.": "Scout with the jeep, advance together, keep the machine gun with you, and beware of quiet villages.",
+  "Jouer le FLN": "Playing the FLN",
+  "Vous commandez la katiba de la grotte ; l'armée française tient le poste au sud-est.": "You command the katiba of the cave; the French army holds the post to the south-east.",
+  "<b>Victoire immédiate :</b> détruisez le <b>poste français</b>.": "<b>Instant victory:</b> destroy the <b>French post</b>.",
+  "<b>Défaite immédiate :</b> la <b>grotte</b> est détruite.": "<b>Instant defeat:</b> the <b>cave</b> is destroyed.",
+  "<b>Ravitaillement</b> (en haut à droite) : une seule ressource, versée par les villages qui vous soutiennent, vos caches et vos points. On recrute à la grotte.": "<b>Supplies</b> (top right): a single resource, paid by the villages that support you, your caches and your points. Recruit at the cave.",
+  "Restez dans les <b>broussailles</b> : on vous y voit mal. Frappez les hommes isolés, puis repliez-vous.": "Stay in the <b>scrub</b>: you are hard to see there. Strike isolated men, then fall back.",
+  "Les pages suivantes décrivent l'armée française : ce qu'elle peut vous faire.": "The following pages describe the French army: what it can do to you.",
 };

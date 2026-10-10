@@ -85,6 +85,9 @@ export default {
   "Normal": "Normal",
   "Difficile": "Hard",
   "Petites bandes, lentes à venir.": "Small bands, slow to come.",
+  "Une compagnie d'appelés, lente à réagir.": "A company of conscripts, slow to react.",
+  "Une compagnie qui reprend chaque village.": "A company that retakes every village.",
+  "Paras, Légion et Alouettes contre une katiba.": "Paras, Legion and Alouettes against one katiba.",
   "Une katiba qui se bat pour chaque village.": "A katiba that fights for every village.",
   "Toute la wilaya contre un seul poste.": "The whole wilaya against one post.",
 

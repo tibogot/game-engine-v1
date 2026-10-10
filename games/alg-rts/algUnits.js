@@ -38,6 +38,7 @@ import { createAlgAirStrike } from "./algAirStrike.js";
 import { createAlgVeterancy } from "./algVeterancy.js";
 import { UPGRADES } from "./algSquads.js";
 import { createAlgAI } from "./algAI.js";
+import { createAlgFrenchAI } from "./algFrenchAI.js";
 import { createAlgAccuracy, ACCURACY } from "./algAccuracy.js";
 import { createAlgMines } from "./algMines.js";
 import { createAlgPatrols } from "./algPatrols.js";
@@ -789,7 +790,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
   const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
-  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
+  // THE FRENCH COMMANDER (algFrenchAI.js) when YOU are the FLN (?side=fln): builds, takes and holds
+  // the villages, retakes, defends the post, calls the T-6, goes for the cave. ?ai=0 = without.
+  const frenchAI = SIDES.human === "enemy" && new URLSearchParams(location.search).get("ai") !== "0"
+    ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
+    : null;
+  app.algFrenchAI = frenchAI;
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

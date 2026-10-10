@@ -446,8 +446,19 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      and cave blue, alerts (villages, raids, French patrols spotted, cave attacked / post under fire),
      objectives (destroy the post, hold the cave), FLN tips, its own briefing; the French convoy /
      mine / cache / tier news silenced. Verified in game both sides; French side unchanged.
-   - [ ] still French-worded for the FLN: the difficulty blurbs ("une katiba…"), the end-screen
-     reasons, the pause manual. Then step 2b: the FRENCH AI.
+   - [x] the leftover wording (2026-10-10): difficulty blurbs per side, the score-out end reason,
+     a "Jouer le FLN" first page in the pause manual.
+   - [x] step 2b (2026-10-10): THE FRENCH AI — algFrenchAI.js, on only with ?side=fln. Builds from
+     the post / pad / motor pool (appelés, FM team every 3rd, paras, Légion; jeep → half-track →
+     AMX-13 / EBR), buys tiers (4 / 8 min), FM upgrades with spare munitions; takes villages nearest
+     first, holds each with a squad (a house when free), then the depots; retakes a point whose
+     needle falls (2 squads); defends the post; pulls back squads under 40% and reinforces them;
+     the T-6 on 4+ FLN seen clear of its men; assaults the cave with 3+ spare squads after 7 min.
+     Sees only what its men see (16 m, 40 m if moving/firing). Difficulty: frSquads 4/6/8, the
+     FLN's purse 520/420/340. Measured (fast-forward, the FLN idle): 4 villages by 2 min, cave down
+     at ~10 min; a 12-man raid on a held village: retaken, T-6 called, band down to 4.
+   - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
+     mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:
    i18n/i18n.js `t(fr, vars)` — the French is the key, English in i18n/en/<area>.js (battle, menu,
    units, hud, systems); 422 lines wrapped across ~45 files + alg.html; the language in the options

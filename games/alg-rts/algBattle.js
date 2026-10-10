@@ -259,7 +259,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     let end = null;
     if (cave && !cave.alive) end = { winner: "player", why: t("La grotte du FLN est détruite : la katiba n'a plus où aller.") };
     else if (post && !post.alive) end = { winner: "enemy", why: FLN ? t("Le poste français est tombé : la vallée est libre.") : t("Le poste est tombé.") };
-    else if (score.enemy <= 0) end = { winner: "player", why: t("Les villages sont à vous : le FLN a perdu la vallée.") };
+    else if (score.enemy <= 0) end = { winner: "player", why: FLN ? t("Les villages sont aux Français : la katiba doit quitter la vallée.") : t("Les villages sont à vous : le FLN a perdu la vallée.") };
     else if (score.player <= 0) end = { winner: "enemy", why: t("Les villages sont passés au FLN : Paris rappelle la compagnie.") };
     if (end) finish(end);
   }

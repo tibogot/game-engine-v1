@@ -16,6 +16,7 @@ import { HOTKEY } from "./icons.js";
 import { GIBS } from "../algCombat.js";
 import { createUiScale } from "./uiScale.js";
 import { t, LANG, LANGS, setLang } from "../i18n/i18n.js";
+import { isHuman } from "../../shared-rts/teams.js";
 
 const STORE = "algrts.options.v1";
 // uiScale: the HUD's size (ui/uiScale.js). 1.15 by default (you: "the text is a bit small").
@@ -365,6 +366,16 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
       P(t("Le FLN ne se bat pas à découvert : ses bandes attendent dans les broussailles et frappent ceux qui s'approchent, puis se replient vers la montagne. Ses <b>caches d'armes</b> arment des tireurs FM : trouvez-les et détruisez-les.")) +
       P(t("Éclairez avec la jeep, avancez groupés, gardez le FM avec vous, et méfiez-vous des villages tranquilles."))],
   ];
+  // PLAYING THE FLN (?side=fln): its own page first — the rest is the French manual, kept as the enemy's playbook.
+  if (isHuman("enemy")) MANUAL.unshift([t("Jouer le FLN"),
+    P(t("Vous commandez la katiba de la grotte ; l'armée française tient le poste au sud-est.")) +
+    UL(
+      t("<b>Victoire immédiate :</b> détruisez le <b>poste français</b>."),
+      t("<b>Défaite immédiate :</b> la <b>grotte</b> est détruite."),
+      t("<b>Ravitaillement</b> (en haut à droite) : une seule ressource, versée par les villages qui vous soutiennent, vos caches et vos points. On recrute à la grotte."),
+      t("Restez dans les <b>broussailles</b> : on vous y voit mal. Frappez les hommes isolés, puis repliez-vous."),
+    ) +
+    P(t("Les pages suivantes décrivent l'armée française : ce qu'elle peut vous faire."))]);
   function manualPage(i = 0) {
     show(`<div class="kicker">${t("Pause")}</div><h2>${t("Manuel")}</h2>
       <div class="man">

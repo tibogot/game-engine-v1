@@ -126,6 +126,7 @@ export default {
   "◀ vous perdez des points": "◀ you are losing points",
   "le FLN perd des points ▶": "the FLN is losing points ▶",
   "la France perd des points ▶": "France is losing points ▶",
+  "Les villages sont aux Français : la katiba doit quitter la vallée.": "The villages belong to the French: the katiba must leave the valley.",
   "<b>{name}</b> est passé aux Français. Reprenez-le : postez-y des hommes.": "<b>{name}</b> has gone over to the French. Take it back: post men in it.",
   "<b>{name}</b> vous échappe : les Français l'ont repris.": "<b>{name}</b> is slipping away: the French have taken it back.",
   "<b>{name}</b> n'est plus aux Français.": "<b>{name}</b> no longer belongs to the French.",
