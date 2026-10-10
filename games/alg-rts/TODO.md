@@ -509,8 +509,11 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        turned toward the rally (the first arc crossed the fighters' way out — measured); coverLines:
        the wall and the rock's foot, coverPerimeter off (the open left front: cover 0). A recruit
        walks out of the mouth to the rally, clear of the wall. Close-up checked, console clean.
-     - [ ] still: the fire burning (the game's fire field) and its night glow; a mule tethered
-       (algHerds); look at night (the caveGlow lamp sits at the footprint's centre: the mouth).
+     - [x] THE FIRE AND THE MULE (2026-10-11): the cooking fire = the wrecks' flipbook flame
+       (flameField addFire 0.9 m, heat 0.8, for the match — 0.55 sat in the cards' ground fade and
+       showed nothing) + the ovens' light hearth smoke (algAmbience ovens, always lit) + the night
+       lamps' "campfire" at it; a LOADED MULE tied at a post by the lean-to, hay beside it
+       (algHerds, the cave's `tether`). No new draw. Seen by day and at night (?tod=23).
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
      mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:

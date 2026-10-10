@@ -989,6 +989,9 @@ function caveCamp(parts, R, { lookoutAt = null, stones = true } = {}) {
   rifle(parts, [-2.6, 0.02, -1.6], [-2.5, 1.0, -1.12]);
   for (let k = 0; k < 3; k++) parts.push({ geo: grainSack(0.62, 0.4, 0.44, 7 + k), pos: [2.0 + (k % 2) * 0.55, k === 2 ? 0.34 : 0, -1.2 - (k % 2) * 0.2 + (k === 2 ? -0.1 : 0)], rot: [0, (R() - 0.5) * 0.5 + (k === 2 ? 0.5 : 0), 0], mat: MAT.hessian, tone: 0.32 + R() * 0.12 });
   parts.push(clayJar(2.6, -0.02, -0.7, 0.85));
+  // The MULE's tethering post and its hay (the mule itself: algHerds.js, at the cave's `tether`).
+  parts.push({ geo: new THREE.CylinderGeometry(0.06, 0.07, 1.15, 6), pos: [-7.3, 0.55, -3.3], rot: [0.05, 0, -0.04], mat: MAT.timber, tone: 0.2 });
+  parts.push({ geo: grainSack(0.8, 0.32, 0.6, 31), pos: [-7.9, 0, -2.4], rot: [0, 0.6, 0], mat: MAT.thatch, tone: 0.45 });
   // The LOOKOUT on the rock: a waist-high ring of piled stones (its place from the rock's top).
   if (lookoutAt && stones) {
     const [ox, oy, oz] = lookoutAt;

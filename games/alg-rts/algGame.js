@@ -574,6 +574,18 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.algHerds = await createAlgHerds(app, { units: app.algUnits?.units ?? null, showroom: app.showroom });
     } catch (e) { console.warn("[alg herds] failed:", e); }
   }
+  // THE CAVE'S COOKING FIRE (algCave.js, 2026-10-11): the wrecks' flipbook flame (flameField.js — its
+  // one instanced draw), small and low, for the whole match; the village ovens' light hearth smoke
+  // over it (algAmbience ovens, always lit). Its night light: algNightLamps.js.
+  {
+    const cv = app.showroom?.caveEntrance, cf = cv?.geometry?.userData?.campfire;
+    if (cf) {
+      cv.updateMatrixWorld(true);
+      const w = cv.localToWorld(new cv.position.constructor(...cf)), y = app.getWorldHeight(w.x, w.z);
+      app.algCombat?.fire?.addFire?.(w.x, y + 0.1, w.z, 0.9, 1e7, { heat: 0.8 });   // (0.55 sat in the cards' ground fade: no flame)
+      app.algAmbience?.ovens?.push({ x: w.x, y: y + 0.9, z: w.z, next: 1e9, burn: true, t: 0 });
+    }
+  }
   // HENS (algHens.js, your bird-lab hens) round the houses and yards. ?hens=0 = without.
   if (params.get("hens") !== "0") {
     try {

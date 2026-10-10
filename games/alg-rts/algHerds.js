@@ -175,6 +175,13 @@ export async function createAlgHerds(app, { units = null, showroom = null } = {}
       placed++;
     }
   }
+  // THE CAVE'S MULE (2026-10-11): loaded, tied at the post by the katiba's lean-to (algCave.js).
+  const cave = showroom?.caveEntrance, tp = cave?.geometry?.userData?.tether;
+  if (tp) {
+    cave.updateMatrixWorld(true);
+    const w = cave.localToWorld(new THREE.Vector3(...tp));
+    loadedSpots.push({ x: w.x, z: w.z, height: S * loadedTpl.height * 0.97 });
+  }
   // THE SOUK'S DONKEYS (2026-09-30): one loaded, one bare, tied in the
   // ksar's market square — which is inside the town's walls-radius, so they
   // get their own ground rule (open nav ground within the square).

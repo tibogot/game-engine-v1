@@ -140,6 +140,9 @@ export function buildSandstoneCave({ seed = 1956, variant = 0, colour = "aures" 
   });
   kit.userData.coverLines = [{ pts: arc, hard: true }, { pts: [[-8.4 * S, 0.3 * S], [-2.2 * S, 0.3 * S]], hard: true }, { pts: [[2.2 * S, 0.3 * S], [8.4 * S, 0.3 * S]], hard: true }];
   kit.userData.coverPerimeter = false;
+  // Where the camp lives (piece-local, scaled): the fire (algGame lights it), the mule (algHerds).
+  kit.userData.campfire = [2.6 * S, 0, -2.9 * S];
+  kit.userData.tether = [-7.6 * S, 0, -4.4 * S];
   return kit;
 }
 

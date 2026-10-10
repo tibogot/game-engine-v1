@@ -116,6 +116,9 @@ export function createAlgNightLamps(app) {
   if (S.alnCamp) lamp(S.alnCamp, 0, 0, "campfire");
   const cv = S.caveEntrance?.geometry?.userData?.footprint;
   if (cv) lamp(S.caveEntrance, cv.cx ?? 0, cv.cz ?? 0, "caveGlow");
+  // The katiba's cooking fire in front of the cave (algCave.js): the men round it lit at night.
+  const cf = S.caveEntrance?.geometry?.userData?.campfire;
+  if (cf) lamp(S.caveEntrance, cf[0], cf[2], "campfire");
 
   // ---- the night: every lamp x the night amount (written only when it moves)
   let last = -1;
