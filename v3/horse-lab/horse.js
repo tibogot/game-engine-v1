@@ -92,6 +92,12 @@ export const HP = {               // tunables (the lab GUI edits these)
   spinPivot: 0.8,                 // turning on the spot pivots this far behind the middle (× half the body length: over the hind legs) — 0 = about the middle
   walkEven: 1,                    // the walk's four beats evenly spaced (Muybridge) — 0 = the clip's
   walkEvenShift: [0, 0.073, 0.115, 0.125],   // per leg (LF, RF, LH, RH): how far ahead on its own path (stride share)
+  canterDepart: true,             // walk → canter as a departure stride (legs join the canter one by one, in its footfall order)
+  departWalkU: [0.7, 0.79],       // the walk's moment to depart: its right hind about to land (clip 0.78)
+  departCanterU: 0.4375,          // the canter starts on its first beat: the right (trailing) hind landing
+  departBeat: [0.5625, 0.375, 0.219, 0],   // LF, RF, LH, RH: each leg's beat after that (canter-stride share)
+  departJoin: 0.12,               // s a leg takes to hand from its walk path to the canter's
+  departFade: 0.18,               // s the body's blend into the canter
   wcFade: 0.38,                   // s the walk <-> canter crossfade takes (planted hooves held through it)
   departFirst: true,              // gearing up from the walk: no faster than the walk can step until the canter has begun
   startLock: 0.9,                 // s after starting / stopping during which planted hooves are held where they stand (0 = off)
@@ -366,6 +372,7 @@ const TIP_LEGS = [["FrontLowerLegL", "IKFrontLegL"], ["FrontLowerLegR", "IKFront
 // How different two clip poses are: summed rotation (degrees) of the leg,
 // body and neck bones. Blending poses far apart is what makes legs look thin
 // and misplaced for a moment (gallop mid-stride → jump take-off was ~470°).
+const BODY_BONES = ["Body", "Back", "Neck1", "FrontShoulderL", "FrontShoulderR", "BackShoulderL", "BackShoulderR"];
 const POSE_BONES = ["FrontUpperLegL", "FrontLowerLegL", "FrontUpperLegR", "FrontLowerLegR", "BackLegL", "BackUpperLegL", "BackLowerLegL", "BackLegR", "BackUpperLegR", "BackLowerLegR", "BackShoulderL", "BackShoulderR", "FrontShoulderL", "FrontShoulderR", "Body", "Back", "Neck1"];
 const _interp = new WeakMap(), _qa = new THREE.Quaternion(), _qb2 = new THREE.Quaternion();
 function boneQuat(clip, bone, t, out) {
@@ -376,9 +383,9 @@ function boneQuat(clip, bone, t, out) {
   const v = it.evaluate(Math.min(Math.max(t, 0), clip.duration));
   return out.set(v[0], v[1], v[2], v[3]).normalize();
 }
-export function poseDiff(clipA, tA, clipB, tB) {
+export function poseDiff(clipA, tA, clipB, tB, bones = null) {
   let s = 0;
-  for (const b of POSE_BONES) {
+  for (const b of bones ?? POSE_BONES) {
     const a = boneQuat(clipA, b, tA, _qa), c = boneQuat(clipB, b, tB, _qb2);
     if (a && c) s += a.angleTo(c);
   }
@@ -671,6 +678,7 @@ export class HorseController {
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
     this.startLockT = Math.max(0, (this.startLockT ?? 0) - dt);
+    if (this.depart) { this.depart.t += dt; if (this.gaitName !== "Canter" || this.depart.t > 1.2 || this.oneShot || this.rearT >= 0) this.depart = null; }
     {
       const wW = this.actions.Walk ? this.actions.Walk.getEffectiveWeight() : 0;
       // (about to depart into the canter it goes back to the clip's timing FIRST, inside
@@ -731,7 +739,25 @@ export class HorseController {
         g.evenW = ew;
         g.hA = Math.max(0, g.hA + (P.p.y - P0.p.y) * ew);       // (its lift: from its shifted path)
       }
+      // (the canter departure: this leg still on its walk path until its canter beat)
+      let departP = null;
+      const DP = this.depart;
+      if (DP && this.gaitName === "Canter" && this.walkPaths()) {
+        const cA = this.actions.Canter, cdur = cA.getClip().duration, cts = Math.max(0.2, Math.abs(cA.getEffectiveTimeScale()));
+        const tb = HP.departBeat[li] * cdur / cts, k = 1 - smooth01((DP.t - tb) / HP.departJoin);
+        if (k > 0.001) {
+          const P = this.walkPathAt(li, DP.uW + DP.t * DP.walkRate);
+          const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+          departP = { p: new V3(this.pos.x + P.p.x * cy + P.p.z * sy, this.y + this.lift + P.p.y, this.pos.z - P.p.x * sy + P.p.z * cy), k };
+          if (g.cannon && P.c) g.evenC = new V3(P.c.x * cy + P.c.z * sy, P.c.y, -P.c.x * sy + P.c.z * cy);
+          g.evenW = k;
+          // its lift too (the hold judges by it): the walk path's, blended into the canter's
+          const W0 = this.walkPaths(), minY = (W0.minY ??= W0.paths.map((pp) => Math.min(...pp.map((q) => q.p.y))))[li];
+          g.hA = g.hA * (1 - k) + Math.max(0, P.p.y - minY) * k;
+        }
+      }
       const T = C.clone(); if (evenOff) T.add(evenOff); T.y += d;
+      if (departP) T.lerp(departP.p, departP.k);
       if (evenOff) { const floor = (g.on ? g.hit.y : this.y) + this.h.foot.sole + (C.y - g.ff.getWorldPosition(new V3()).y); if (T.y < floor) T.y = floor; }   // (a shifted hoof never under the ground)
       if (g.landShift) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.landShift * g.w);   // onto the step (foot placement)
       // GALLOP: a planted hoof stays where it touched down (the legs play slower
@@ -749,7 +775,7 @@ export class HorseController {
       if (settle) this.settling = li;
       // held at a START too long — the body walking on left it behind (1 m: the legs
       // could not reach, the body sank, the nose dived): it STEPS to catch up
-      const behind = g.lock && ((this.startLockT ?? 0) > 0 || this.spinning) && !settle && Math.hypot(T.x - g.lock.x, T.z - g.lock.z) > 0.12 * (this.h.height / 2.02);
+      const behind = g.lock && ((this.startLockT ?? 0) > 0 || this.spinning) && !settle && (g.hA < 0.02 || g.catchUp) && Math.hypot(T.x - g.lock.x, T.z - g.lock.z) > 0.12 * (this.h.height / 2.02);
       if (behind) { if (!g.catchUp) g.stepArc = (g.lockRel ?? 0) === 0 && g.hA < 0.02; g.catchUp = true; settle = true; }   // (its own lift only for a step from the ground: the walk may already be lifting it)
       if ((settle || letGo) && !g.catchUp && (g.lockRel ?? 0) === 0 && g.hA < 0.02) g.stepArc = true;   // (let go while planted: it steps, it does not skate)
       if (!g.lock) { g.catchUp = false; g.stepArc = false; }
@@ -1088,6 +1114,33 @@ export class HorseController {
   switchTo(name, fade = HP.fade, force = false) {
     const prev = this.cur;
     let startAt = 0;
+    // THE CANTER DEPARTURE (walk → canter, left lead): the canter starts on its FIRST
+    // beat — the trailing (right) hind landing, clip 0.44 — as the walk lands that
+    // same hind (walk 0.78); the other legs carry on along their walk paths and join
+    // the canter one by one at their own beats (applyIK). The plain blend matched
+    // the poses (left fore planted, 83°) but the other legs swung through each other.
+    let departing = false;
+    if (HP.canterDepart && this.gaitName === "Walk" && name === GEARS[1] && name === "Canter" && prev && !force) {
+      const A = prev.getClip(), uW = (prev.time % A.duration) / A.duration;
+      const stride = A.duration / Math.max(0.2, Math.abs(prev.getEffectiveTimeScale()));
+      const ok = uW >= HP.departWalkU[0] && uW <= HP.departWalkU[1];
+      if (!ok && (this.blendWaitT ?? 0) < stride * 1.05) { this.blendWaitT = (this.blendWaitT ?? 0) + (this.lastDt ?? 0); return false; }
+      if (ok) {
+        this.blendWaitT = 0; startAt = HP.departCanterU * this.h.clips.Canter.duration; fade = HP.departFade; departing = true;
+        this.startLockT = Math.max(this.startLockT ?? 0, 0.7);   // planted hooves held while the legs join the canter (the horse is speeding up: walk paths alone slid)
+        this.depart = { t: 0, uW, walkRate: Math.abs(prev.getEffectiveTimeScale()) / A.duration };
+      }
+    }
+    if (departing) {
+      const next = this.act(name);
+      next.reset(); next.time = startAt; next.setLoop(THREE.LoopRepeat, Infinity); next.clampWhenFinished = false; next.play();
+      // (logged for what really blends: the body, back, neck and shoulders — every leg
+      // is placed by IK on its walk path until it joins the canter, so the legs' 312°
+      // clip-pose gap is never shown)
+      this.logBlend(prev, next, BODY_BONES); prev.crossFadeTo(next, fade, false);
+      this.cur = next; this.gaitName = name;
+      return true;
+    }
     if (prev && HP.phaseMatch && LOOPS.includes(this.gaitName) && LOOPS.includes(name) && this.gaitName !== name) {
       const rows = this.transition(this.gaitName, name), A = prev.getClip(), N = rows.length;
       const iNow = Math.floor(((prev.time % A.duration) / A.duration) * N) % N;
@@ -1120,7 +1173,7 @@ export class HorseController {
     // WALK <-> CANTER: the poses share little (~85-90 deg): a longer blend, the
     // planted hooves held through it (released as the new gait lifts them)
     const wc = (this.gaitName === "Walk" && name === GEARS[1]) || (this.gaitName === GEARS[1] && name === "Walk");
-    if (wc && HP.wcFade > fade) { fade = HP.wcFade; if (HP.startLock > 0) this.startLockT = Math.max(this.startLockT ?? 0, HP.wcFade + 0.1); }
+    if (wc && HP.wcFade > fade && !departing) { fade = HP.wcFade; if (HP.startLock > 0) this.startLockT = Math.max(this.startLockT ?? 0, HP.wcFade + 0.1); }
     const next = this.act(name);
     next.reset();
     next.time = startAt;
@@ -1194,8 +1247,8 @@ export class HorseController {
     return true;
   }
 
-  logBlend(from, to) {
-    const d = poseDiff(from.getClip(), from.time, to.getClip(), to.time);
+  logBlend(from, to, bones = null) {
+    const d = poseDiff(from.getClip(), from.time, to.getClip(), to.time, bones);
     this.blendLog.push({ from: from.getClip().name, to: to.getClip().name, deg: Math.round(d) });
     if (this.blendLog.length > 200) this.blendLog.shift();
   }
@@ -2283,10 +2336,11 @@ export class HorseController {
   // THE WALK'S HOOF PATHS in the horse's ground frame (x side, y up, z forward;
   // origin under the horse), 64 a stride, per leg: the hoof (IK bone) and, for a
   // hind leg, the cannon's direction. Recorded once with a spare mixer.
-  walkPaths() {
-    if (this._walkPaths !== undefined) return this._walkPaths;
-    const clip = this.h.clips.Walk;
-    if (!clip) return (this._walkPaths = null);
+  walkPaths(name = "Walk") {
+    this._paths ??= {};
+    if (this._paths[name] !== undefined) return this._paths[name];
+    const clip = this.h.clips[name];
+    if (!clip) return (this._paths[name] = null);
     const rig = this.h.rig, sp = rig.position.clone(), sq = rig.quaternion.clone();
     const save = this.touched.map((t) => [t.b, t.b.position.clone(), t.b.quaternion.clone()]);
     rig.position.set(0, 0, 0); rig.quaternion.identity(); rig.updateMatrixWorld(true);
@@ -2303,10 +2357,10 @@ export class HorseController {
     a.stop(); m.uncacheRoot(this.h.model);
     for (const [b, pp, q] of save) { b.position.copy(pp); b.quaternion.copy(q); }
     rig.position.copy(sp); rig.quaternion.copy(sq); rig.updateMatrixWorld(true);
-    return (this._walkPaths = { N, paths, dur: clip.duration });
+    return (this._paths[name] = { N, paths, dur: clip.duration });
   }
-  walkPathAt(li, u) {
-    const W = this.walkPaths(), N = W.N, x = ((u % 1) + 1) % 1 * N, i = Math.floor(x), f = x - i;
+  walkPathAt(li, u, name = "Walk") {
+    const W = this.walkPaths(name), N = W.N, x = ((u % 1) + 1) % 1 * N, i = Math.floor(x), f = x - i;
     const A = W.paths[li][i % N], B = W.paths[li][(i + 1) % N];
     return { p: A.p.clone().lerp(B.p, f), c: A.c ? A.c.clone().lerp(B.c, f) : null };
   }

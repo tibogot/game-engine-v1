@@ -141,6 +141,14 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   (walk gear, 0.6 s steady); before a canter departure it returns to the clip's
   timing inside the walk (kept through the blend, a swinging hoof's 40 cm shift
   popped). Shifted hooves never below the ground.
+- DONE: CANTER DEPARTURE (HP.canterDepart): the canter starts on its first beat (the
+  trailing right hind landing, clip 0.44) as the walk lands that same hind (walk
+  0.70–0.79); each leg stays on its WALK path (walkPaths('Walk'), lift blended too)
+  until its own canter beat (departBeat: RH 0, LH .22, RF .375, LF .56), joining over
+  0.12 s; planted hooves held 0.7 s. The body blends in 0.18 s — logged as a
+  body-only pose gap (66°; the legs' 312° clip gap is never shown, they are on IK).
+  Slides in the change 13 → 27 cm (the horse speeds up meanwhile). A held hoof that
+  starts lifting is released, never "caught up" (it got 1.2 m away, snapped 44 cm).
 - DONE: turning on the spot = on the haunches (HP.spinPivot: pivots 0.8 × half
   the body behind the middle, only with no forward input); planted hooves held,
   a hoof left 12 cm behind steps (7 cm lift, only when it starts from the ground).
