@@ -629,16 +629,18 @@ export function buildMotorPool({ seed = 29, detail = 1 } = {}) {
  * its own geometry (`userData.gun`, pivot on the baseplate) so it can lay
  * onto a bearing.
  */
-export function buildMortarPit({ seed = 31 } = {}) {
+// `modern: true` (alg-rts algMortarPit.js, 2026-10-11): the mortar and the stakes only — the berm,
+// the sandbags and the ammunition are the new standard's there.
+export function buildMortarPit({ seed = 31, modern = false } = {}) {
   const R = rng(seed);
   const parts = [];
-  const floorY = 0.1;
+  const floorY = modern ? 0.02 : 0.1;
   // The pit and its berm, one lathe: floor, inner wall, crest, outer slope.
   const prof = [[4.15, -0.14], [3.6, 0.36], [3.0, 0.64], [2.45, 0.6], [2.3, 0.34], [2.1, floorY], [0.001, floorY]];
-  parts.push({ geo: earthBerm(prof, { seed, rFlat: 2.1 }), mat: MAT.spoil, tone: 0.5 });
+  if (!modern) parts.push({ geo: earthBerm(prof, { seed, rFlat: 2.1 }), mat: MAT.spoil, tone: 0.5 });
   // The parapet: two courses on the crest, open at the back (+Z).
   const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
-  for (let c = 0; c < 2; c++) {
+  for (let c = 0; c < (modern ? 0 : 2); c++) {
     const rad = 2.72 - c * 0.04, n = Math.round((2 * Math.PI * rad) / 0.5);   // shoulder to shoulder
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2 + (c % 2) * (Math.PI / n);
@@ -648,9 +650,9 @@ export function buildMortarPit({ seed = 31 } = {}) {
   }
   // Ammunition at the back of the pit: crates, one open with its rounds in
   // their black cardboard tubes; tubes stacked beside.
-  for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.7, 0.26, 0.4), pos: [-0.9 + (k % 2) * 0.05, floorY - 0.02 + 0.13 + Math.floor(k / 2) * 0.26, 1.35 + (k === 1 ? 0.45 : 0)], rot: [0, (R() - 0.5) * 0.2, 0], mat: MAT.timber, tone: 0.3 + R() * 0.15 });
-  parts.push({ geo: buildBox(0.7, 0.2, 0.4), pos: [0.2, floorY - 0.02 + 0.1, 1.6], rot: [0, 0.15, 0], mat: MAT.timber, tone: 0.4 });
-  for (let r = 0, k = 0; r < 3; r++) for (let i = 0; i < 3 - r; i++, k++) {
+  if (!modern) for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.7, 0.26, 0.4), pos: [-0.9 + (k % 2) * 0.05, floorY - 0.02 + 0.13 + Math.floor(k / 2) * 0.26, 1.35 + (k === 1 ? 0.45 : 0)], rot: [0, (R() - 0.5) * 0.2, 0], mat: MAT.timber, tone: 0.3 + R() * 0.15 });
+  if (!modern) parts.push({ geo: buildBox(0.7, 0.2, 0.4), pos: [0.2, floorY - 0.02 + 0.1, 1.6], rot: [0, 0.15, 0], mat: MAT.timber, tone: 0.4 });
+  for (let r = 0, k = 0; r < (modern ? 0 : 3); r++) for (let i = 0; i < 3 - r; i++, k++) {
     parts.push({ geo: new THREE.CylinderGeometry(0.06, 0.06, 0.55, 8).rotateX(Math.PI / 2), pos: [0.95 + i * 0.125 + r * 0.062, floorY + 0.06 + r * 0.105, 1.2], mat: MAT.steel, tone: 0.1 });
   }
   // The aiming stakes: red and white bands (paint over the timber).

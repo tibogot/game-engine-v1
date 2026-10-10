@@ -280,6 +280,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const vehicles = takeOverVehicles(app, units, showroom);
   // The buildings' portraits, into the same map as the units' (the unit bar
   // and the command card look them up by thumbKeyOf: "struct:post", …).
+  app.algUnitRenderer = unitRenderer;   // (static figures: a mortar pit's crew — algBuild.js)
   if (unitRenderer.thumbnails) {
     await bakeStructureThumbnails(app.renderer, unitRenderer.thumbnails).catch((e) => console.warn("[thumbs] structures:", e));
     // The PAINTED portraits (ui/portraits.js) over the units' 3D ones;

@@ -1943,8 +1943,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   return {
     /** People who are not units: [{ x, y, z, yaw }] drawn idle in `typeKey`'s crowd, every frame. */
     addStaticFigures(typeKey, list) {
-      for (const f of list) statics.push({ typeKey, x: f.x, y: f.y, z: f.z, yaw: f.yaw, t: Math.random() * 10 });
-      return statics.length;
+      const added = list.map((f) => ({ typeKey, x: f.x, y: f.y, z: f.z, yaw: f.yaw, t: Math.random() * 10 }));
+      statics.push(...added);
+      return added;
+    },
+    /** Take figures added by addStaticFigures away again (alg-rts: a mortar pit's crew when it falls). */
+    removeStaticFigures(added) {
+      for (const f of added ?? []) { const i = statics.indexOf(f); if (i >= 0) statics.splice(i, 1); }
     },
     thumbnails,
     /** The manned vehicle types (crew): { typeKey: { look, seats, rel } } — for the dev panel and tests. */

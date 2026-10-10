@@ -40,6 +40,8 @@ export const SURFACES = {
   timber: { url: BUILD, id: "bark_willow_02", tile: 1.4, tint: [0.55, 0.46, 0.38], sat: 0.6, rough: 0.9, foot: 0 },
   planks: { url: BUILD, id: "raw_plank_wall", tile: 1.9, tint: [0.68, 0.58, 0.48], sat: 0.55, rough: 0.85, foot: 0 },
   reed: { url: BUILD, id: "reed_roof_04", tile: 2.0, tint: [0.48, 0.4, 0.29], sat: 0.6, rough: 1, foot: 0 },
+  // (a pit's spoil, a berm: the gravelly dug earth)
+  spoil: { url: GROUND, id: "brown_mud_dry", tile: 2.4, tint: [0.82, 0.7, 0.55], sat: 0.75, rough: 1, foot: 0 },
   hessian: { url: BUILD, id: "hessian_230", tile: 0.55, tint: [0.7, 0.58, 0.42], sat: 0.6, rough: 1, foot: 0 },
 };
 /** Live tunables (the lab). */
@@ -300,7 +302,7 @@ function firewood(x, y, z, yaw, seed) {
 }
 
 // ── A SITE: pieces add geometry per surface; the site merges it (one mesh per surface) ──────────
-export const newSite = () => ({ stone: [], earth: [], timber: [], planks: [], reed: [], hessian: [], metal: [], dark: [] });
+export const newSite = () => ({ stone: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], dark: [] });
 let _metal = null;
 const metalMaterial = () => (_metal ??= new THREE.MeshStandardNodeMaterial({ color: 0x2b2a27, roughness: 0.55, metalness: 0.55, name: "Masonry:metal" }));
 /** The site's meshes: one per surface (the materials shared by every site). */

@@ -82,6 +82,8 @@ function vehicleOf(geo, key) {
   g.add(body);
   // Meshes of their own beside the kit's (the buildings lab's sandstone cave: algCave.js).
   for (const x of geo.userData.extra ?? []) g.add(x);
+  // An emplacement's gun (the mortar, the MG nest's): its own mesh on its pivot.
+  if (geo.userData.gun) { const gm = new THREE.Mesh(geo.userData.gun.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); gm.position.fromArray(geo.userData.gun.pivot); gm.castShadow = true; g.add(gm); }
   let gear = null;
   if (geo.userData.gear) {
     gear = new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial(FR_PAINT_TINT, key));

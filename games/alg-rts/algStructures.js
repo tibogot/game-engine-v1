@@ -157,6 +157,8 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     const rec = list.find((r) => r.s === s);
     if (!rec) return;
     rec.mesh.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.material = charMaterial(o.material); });
+    // Its crew (a mortar pit's: algBuild.js) gone with it.
+    if (rec.mesh.userData.crewFigures) { app.algUnitRenderer?.removeStaticFigures?.(rec.mesh.userData.crewFigures); rec.mesh.userData.crewFigures = null; }
     if (rec.gun) rec.gun.rotation.x = 0.5;           // the barrel down
     s.range = 0; s.target = null;
     s.selected = false;

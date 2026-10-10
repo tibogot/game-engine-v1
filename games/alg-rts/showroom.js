@@ -23,6 +23,7 @@ import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildKsar, buildT
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
+import { buildMortarPitV2 } from "./algMortarPit.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -65,7 +66,7 @@ export const BASE_BUILDABLES = [
   { key: "searchlight", build: buildSearchlightTower, lx: 26, lz: 46, yaw: 0.2 },
   // The post's left flank: the pad, the mortars behind the mirador.
   { key: "helipad", build: buildHelipad, lx: 56, lz: 2, yaw: 0 },
-  { key: "mortarPit", build: buildMortarPit, lx: 36, lz: -24, yaw: 0.1 },
+  { key: "mortarPit", build: () => buildMortarPitV2(), lx: 36, lz: -24, yaw: 0.1 },
   // Behind the vehicle park, toward the valley.
   // Detail 2 (the buildings lab, 2026-10-07): the roof in lapped sheets, no rust grid.
   { key: "motorPool", build: (o) => buildMotorPool({ ...o, detail: 2 }), lx: -48, lz: -30, yaw: 0 },
@@ -219,7 +220,8 @@ export function kitView(geo) {
   const st = stencilMesh(geo.userData.stencil);
   if (st) m.add(st);
   // Meshes of their own beside the kit's (the sandstone cave's rock and its dark: algCave.js).
-  for (const x of geo.userData.extra ?? []) m.add(x);
+  // (A piece built many times — a mortar pit — shares its cached geometry: each copy its own clone.)
+  for (const x of geo.userData.extra ?? []) m.add(x.parent ? x.clone() : x);
   // A vehicle's wheels and tracks: their own geometry on the rolling-gear
   // material, which reads a per-INSTANCE odometer — so an InstancedMesh of one.
   const gearGeo = geo.userData.gear;

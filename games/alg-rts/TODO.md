@@ -526,8 +526,18 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        annex, ladder, firewood, aerial), the dugout, the reed store with burlap sacks and plank crates,
        sangars' guns, dry stone + the sandstone rock; nav / cover / garrison house / flag / its fire
        lit. ~90k tris, 10 meshes; GPU cost not measurable (−0.02 ms ± 0.53, framed). Console clean.
+     - [x] ROOFS (you: "roofs in a stony texture — does it feel right?"): no — the Aurès terraces are
+       PACKED CLAY beaten smooth: mud_cracked_dry_03 (tile 1.5, darker), not the gravelly mud.
+     - [x] THE MORTAR PIT on the new standard (2026-10-11, algMortarPit.js; building lab "Fosse de
+       mortier"): a LOW berm of the pit's spoil (a ring, not the old dome; no floor of its own — no
+       z-fight), burlap sandbags in two courses open at the back, plank crates and shell tubes; the
+       kit keeps the 81 mm (its Gun mesh, turned by algStructures) ×1.35 (a true one read as a
+       tripod) and the stakes. A CREW of two appelés when the sappers finish it (unitRenderer static
+       figures — no draw of their own; removeStaticFigures added: gone when it falls). The ghost gets
+       the pit's shape (userData.ghost); each copy clones the shared extras (kitView).
+     - [ ] the crew could crouch / load on each shot (the barrage); camouflage net option.
      - [ ] the building textures are 14 MB of JPG: compress (KTX2 / smaller normal maps) before
-       shipping; then the same standard for the cave's props, the mortar pit, the mechtas, the post.
+       shipping; then the same standard for the cave's props, the mechtas, the post.
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
      mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:

@@ -12,6 +12,8 @@ import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandst
 import { startVehicleLab } from "./vehicleLab.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
+import { buildMortarPitV2 } from "./algMortarPit.js";
+import { buildMortarPit } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildStoneHouse } from "./algMasonry.js";
 import * as THREE from "three";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
@@ -73,6 +75,11 @@ const BUILDINGS = {
       return g;
     },
     tags: ["MAISON (KIT DU JEU)", "PIERRE · NOUVEAU"], note: "la maison du jeu à gauche, la maison en pierre du nouveau standard à droite.",
+  },
+  // THE MORTAR PIT (same day): the game's on the LEFT, the new standard's on the RIGHT.
+  mortier: {
+    label: "Fosse de mortier", gap: 7, before: () => buildMortarPit(), after: () => buildMortarPitV2(),
+    tags: ["MORTIER (LE JEU)", "MORTIER · NOUVEAU"], note: "la fosse du jeu à gauche, la nouvelle à droite.",
   },
   campFln: {
     label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildCampV2(),
