@@ -165,6 +165,20 @@ Keep this file current: tick things off here, add new asks here.
 8. [ ] **GAMEPLAY, still missing vs CoH**: building damage stages + collapse (gap list 2), crews
    that bail out of a dead vehicle, DROPPED WEAPONS picked up (an FM off a dead FLN gunner),
    squad UPGRADES (an FM for the section, a radio), DOCTRINES / commander choices; the voices.
+   - [x] DOCTRINES (2026-10-10, algDoctrines.js): chosen in the briefing beside the difficulty (stored;
+     ?doctrine=paras|legion|air|none); COMMAND POINTS from FLN killed by your men (their veterancy
+     value) and villages held (6 a minute each), 90 = one point; a strip above the HUD (right): spend
+     points to unlock, then a call-in for resources + cooldown, aimed on ground your men SEE.
+     PARAS: heliborne drop (an Alouette sets 5 paras down, 1 ★, 340 mp), commando de chasse (elite
+     stick: FM + 1 star, 2 ★), air supply (+80 mun +30 fuel, 2 ★). LÉGION: légionnaires without the
+     armour tier (1 ★), Légion engineers (passive: sappers ×1.6, 2 ★), 120 mm mortar (8 heavy shells,
+     3 ★). AIR: observation plane (a Piper circles 25 s, its eye in the fog — fogOfWar
+     addSourceProvider, 1 ★), T-6 patrol (two strikes — algAirStrike call `free`, 2 ★), medevac (an
+     Alouette lands, the wounded within 25 m healed, 2 ★). Not in the training. All nine checked in
+     the game. Also: the briefing no longer overflows a short window at UI scale 1.15 (--alg-ui).
+   - [ ] **you**: play each — prices, cooldowns, the point rate (90 a point: ~9 FLN killed).
+   - [ ] next: a 4th ability each (CoH has 5); field structures (forward post, aid station, point
+     fortification — 2026-10-10, the CoH comparison) — some could be doctrine-gated.
    Done since audit 1: cover at the cursor, MG arcs, armour by facing, sniper, sabotage, tunnels.
 
 ## THE GAP TO A AAA RTS (CoH) — 2026-10-07 (you: "keep this list so we remember it")
@@ -227,8 +241,16 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      play zoom): the alfa +0.7-1.3 ms; all the ground foliage 2.5-2.9 ms (~1.7 before it). The cost is the
      DRAWS and follows SCREEN COVERAGE × count, not triangles (12 or 150 blades: the same) and not the
      compute (~0). At 0.9 strength it was +3 ms: halved.
-   - [ ] NEXT (perf): make the ground foliage CHEAPER per pixel — a lighter shader at the far level (no
-     translucency / simpler light), or a shorter far reach for the small plants; measure per type first.
+   - [~] PERF: the ground foliage, 2.1-2.8 ms at play zoom (2026-10-10, pinned A/B — see the memory trap:
+     `.visible` on a scatter field is reset every frame). Per type, ruin / west views: alfa 0.5-1.3,
+     OLEANDER 0.8-1.2 where its banks show, asphodel up to 0.7, doum and thistle 0.3-0.4, the rest ≤ 0.25;
+     shadows 0.2-0.4. RULED OUT, measured: the compute (skipped: 0), the pixels (a quarter of them: the
+     same cost — not fragment-bound), shadow receiving (0), the bark noise every plant's shader computed
+     (moved into a branch: no gain, reverted), a workgroup-aggregated append (no gain, reverted), the
+     reach (it already follows the view: ~100 m). LEFT: it scales with the PLANT COUNT — the per-plant
+     vertex work (wind, sway, placement) or per-instance overhead; blade count did not show clearly
+     (noise ±0.5). The levers that work: density per type (oleander, alfa), uThin. A deeper look needs a
+     GPU profiler on the vertex stage — later, if the frame needs it (it is ~11 ms of 16.7 today).
    - [ ] **you**: the steppe at play zoom — enough, too much, colour.
 2. [~] **THE BATTLE LEAVES MARKS**: persistent craters, scorch, rubble, felled trees, burning wrecks,
    smoke columns; BUILDING DAMAGE STAGES and collapse (with the garrison inside).

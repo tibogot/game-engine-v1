@@ -108,10 +108,10 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
    * Call it on (x, z). The run comes in along the line from the post to the point (from the
    * French side: over their own heads, as the pilots were told), or `dir` if given.
    */
-  function call(post, x, z, dir = null) {
-    if (purse && !purse.spend(P.cost)) return false;
-    post.airCd = P.cooldown;
-    cooling.add(post);
+  function call(post, x, z, dir = null, { free = false } = {}) {
+    // `free` (algDoctrines' T-6 patrol): paid for by the doctrine, no post cooldown.
+    if (!free && purse && !purse.spend(P.cost)) return false;
+    if (!free) { post.airCd = P.cooldown; cooling.add(post); }
     const d = dir ?? new THREE.Vector2(x - post.position.x, z - post.position.z);
     if (d.lengthSq() < 1) d.set(0, 1);
     d.normalize();

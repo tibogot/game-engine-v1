@@ -173,8 +173,11 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     return e.type?.vision ?? DEFAULT_VISION.unit;
   }
 
+  // Extra eyes that are not units (2026-10-10, alg-rts's observation plane): fn() → [{ x, z, r, eye }].
+  const sourceProviders = [];
   function collectVisionSources() {
     const out = [];
+    for (const fn of sourceProviders) for (const s of fn() ?? []) out.push(s);
     for (const u of units.list) {
       if (!u.alive || u.team !== "player") continue;
       out.push({ x: u.position.x, z: u.position.z, r: visionOfEntity(u), eye: u.isAir ? 40 : (u.type?.foot ? 2.2 : 3) });
@@ -476,6 +479,8 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
       if (post) hookUp();   // rebuild the chain
     },
     isExplored,
+    /** Add vision that is not a unit: fn() → [{ x, z, r, eye }] each bake. */
+    addSourceProvider(fn) { sourceProviders.push(fn); },
     isVisible,
     canSeeEntity,
     hasRadioIntel: getRadioIntel,

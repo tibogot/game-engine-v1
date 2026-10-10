@@ -268,7 +268,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       }
       if (!workers) continue;
       // Two sappers 1.5x as fast, three 1.8x: they get in each other's way.
-      s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))));
+      // (`app.algBuildSpeed`: a doctrine's faster engineers — algDoctrines.js, the Légion.)
+      s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))) * (s.team === "player" ? app.algBuildSpeed ?? 1 : 1));
       s.mesh.scale.y = 0.06 + 0.94 * s.progress;
       s.hp = s.progress * 100;
     }

@@ -43,7 +43,8 @@ import { createAlgPatrols } from "./algPatrols.js";
 import { createAlgSight } from "./algSight.js";
 import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
-import { LAYOUT, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
+import { LAYOUT, MAP, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
+import { createAlgDoctrines } from "./algDoctrines.js";
 import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
@@ -694,7 +695,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algWrecks = wrecks;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
-    onDeath: (e) => { veterancy.onDeath(e); selection.remove?.(e); controlGroups?.render(); transports?.onDeath(e); if (!e.isStructure && !e.type?.foot && !e.isAir) wrecks.add(e); },
+    onDeath: (e) => { veterancy.onDeath(e); app.algDoctrines?.onKill(e); selection.remove?.(e); controlGroups?.render(); transports?.onDeath(e); if (!e.isStructure && !e.type?.foot && !e.isAir) wrecks.add(e); },
     onShot: (e, tgt) => { posture.onShot(e, tgt); app.algSnipers?.onShot(e, tgt); }, onSplash: (at, r, owner) => { posture.onSplash(at, r, owner); garrison?.onSplash(at, r); },
     // The walls take some of a blast (algGarrison.js) — two grenades on a house of six: at full,
     // 4 dead; at 0.6, 0.1 (and every squad bailed out); 0.8 between, as CoH.
@@ -723,6 +724,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algBarrage = barrage;
   airStrike = createAlgAirStrike({ app, selection, projectiles: combat.projectiles, combat: combat.combat ?? combat, purse: economy.french });
   app.algAirStrike = airStrike;
+  // DOCTRINES (algDoctrines.js): the commander chosen in the briefing, command points from the
+  // fight, its call-ins on a strip above the HUD. Not in the training.
+  const doctrines = MAP.tutorial ? null : createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, airStrike, fogOfWar });
+  app.algDoctrines = doctrines;
 
   // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
   // thin, back into the cave before the armour comes. ?ai=0 = without.
@@ -765,7 +770,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
   const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
-  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); };
+  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -784,6 +789,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     coverCursor?.frame();
     mgTeams?.frame();
     unitMarks?.frame();
+    doctrines?.frame(dt);
     fogOfWar.update(dt);
     // An inspected enemy that slipped back into the fog is let go (dead: onDeath does it).
     const ins = selection.inspected;

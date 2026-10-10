@@ -5,5 +5,6 @@ import units from "./units.js";
 import hud from "./hud.js";
 import systems from "./systems.js";
 import tutorial from "./tutorial.js";
+import doctrines from "./doctrines.js";
 
-export default { ...battle, ...menu, ...units, ...hud, ...systems, ...tutorial };
+export default { ...battle, ...menu, ...units, ...hud, ...systems, ...tutorial, ...doctrines };

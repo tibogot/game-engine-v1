@@ -59,10 +59,15 @@ export function createUiScale(initial = 1) {
   const reMeasure = () => { if (!pend) pend = requestAnimationFrame(() => { pend = 0; applyAll(); }); };
   const rootMo = new MutationObserver(reMeasure);
   rootMo.observe(document.documentElement, { attributes: true, attributeFilter: ["style"] });
+  // The scale as a CSS variable (--alg-ui): a panel whose height is capped to the window divides
+  // the cap by it (the briefing grew past the screen at 1.15 — 2026-10-10). Set only when the scale
+  // changes: the root's style is watched above.
+  const publish = () => document.documentElement.style.setProperty("--alg-ui", String(scale));
+  publish();
   applyAll();
   return {
     get scale() { return scale; },
-    set(s) { scale = s; applyAll(); },
+    set(s) { scale = s; publish(); applyAll(); },
     refresh: applyAll,
     dispose() { mo.disconnect(); rootMo.disconnect(); removeEventListener("resize", applyAll); },
   };
