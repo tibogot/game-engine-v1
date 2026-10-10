@@ -21,6 +21,7 @@ import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { LAYOUT, MAP, siteYaw } from "./layout.js";
 import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildKsar, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
+import { buildSandstoneCave } from "./algCave.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -81,6 +82,7 @@ function fromBase(lx, lz, site = BASE) {
 }
 
 const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
+const CAVE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("cave") === "old";
 
 /**
  * The SAS post goes BESIDE a hamlet, not at the French base: it is the
@@ -99,7 +101,9 @@ export const SAS_POST = { key: "sasPost", build: buildSasPost, lx: 66, lz: 25, y
  * its front falls away steeply; the right flank and the back-left are gentle.
  */
 export const ALN_BUILDABLES = [
-  { key: "caveEntrance", build: buildCaveEntrance, lx: 58, lz: 4, yaw: -0.2 },
+  // THE SANDSTONE CAVE and its camp (algCave.js, 2026-10-11, from the buildings lab). ?cave=old =
+  // the low-poly one (A/B).
+  { key: "caveEntrance", build: CAVE_OLD ? buildCaveEntrance : () => buildSandstoneCave(), lx: 58, lz: 4, yaw: -0.2 },
   { key: "armsCache", build: buildArmsCache, lx: -66, lz: -22, yaw: 0.25 },
   { key: "sangar", build: buildSangar, lx: 50, lz: 30, yaw: 0.15, follow: true },
   { key: "ambushScreen", build: buildAmbushScreen, lx: 56, lz: 46, yaw: -0.1, follow: true },
@@ -208,6 +212,8 @@ export function kitView(geo) {
   m.castShadow = m.receiveShadow = true;
   const st = stencilMesh(geo.userData.stencil);
   if (st) m.add(st);
+  // Meshes of their own beside the kit's (the sandstone cave's rock and its dark: algCave.js).
+  for (const x of geo.userData.extra ?? []) m.add(x);
   // A vehicle's wheels and tracks: their own geometry on the rolling-gear
   // material, which reads a per-INSTANCE odometer — so an InstancedMesh of one.
   const gearGeo = geo.userData.gear;

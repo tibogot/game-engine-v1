@@ -961,7 +961,7 @@ export function buildCaveEntrance({ seed = 1956, rocks = true, camp = false, cam
  */
 function caveCamp(parts, R, { lookoutAt = null, stones = true } = {}) {
   // A long low dry-stone wall across the front, the way in on the right (a short arc read as cubes).
-  if (stones) dryStone(parts, R, arcPts(-0.4, -0.6, 5.4, Math.PI * 1.02, Math.PI * 1.56, 9), { courses: 3, h: 0.85, depth: 0.55, len: 0.6, tone: 0.32, mat: MAT.sandstone });
+  if (stones) dryStone(parts, R, arcPts(0.2, -0.6, 5.4, Math.PI * 1.62, Math.PI * 2.02, 7), { courses: 3, h: 0.85, depth: 0.55, len: 0.6, tone: 0.32, mat: MAT.sandstone });
   // The cooking fire: a ring of stones, charred logs across it, a pot on three stones.
   const fx = 2.6, fz = -2.9;
   if (stones) for (let k = 0; k < 8; k++) {

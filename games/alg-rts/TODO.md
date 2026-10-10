@@ -501,9 +501,16 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        all small sandstone pebbles (~250 tris; simplifyError 0.06, at 0.005 they kept 2100) — a
        lean-to, crates and rifles, grain SACKS (rtsAlgeria grainSack, no more boxes). One rock mesh
        49k tris + the kit + one plane. Mouth set back so it reads from the RTS 42°.
-     - [ ] INTO THE GAME: the mouth faced AWAY from the camera (that is half of why the old one never
-       read as a cave) — turn it 3/4 to the camera; footprint ~19 m (nav, cover bake); look close + at
-       night; the fire burning (the game's fire field); a mule tethered (algHerds).
+     - [x] IN THE GAME (2026-10-11): showroom.js builds buildSandstoneCave (?cave=old = the low-poly
+       one); its rocks from the boot's worker cache (getRockGeometry of SANDSTONE_GAME shapes +
+       prefetchCave for the pebbles — nothing built on the main thread). The mouth was ALREADY 41°
+       to the camera (3/4): the old one never read because its overhang hid the mouth from above.
+       navRects: the rock band + the wall's stones only (the front walkable); the wall's opening
+       turned toward the rally (the first arc crossed the fighters' way out — measured); coverLines:
+       the wall and the rock's foot, coverPerimeter off (the open left front: cover 0). A recruit
+       walks out of the mouth to the rally, clear of the wall. Close-up checked, console clean.
+     - [ ] still: the fire burning (the game's fire field) and its night glow; a mule tethered
+       (algHerds); look at night (the caveGlow lamp sits at the footprint's centre: the mouth).
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
      mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:

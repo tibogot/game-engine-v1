@@ -15,6 +15,7 @@ import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { SIDES, setHumanSide } from "../shared-rts/teams.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom, SHOWROOM } from "./showroom.js";
+import { prefetchCave } from "./algCave.js";
 import { createAlgLandmarks, landmarkEntries } from "./algLandmarks.js";
 import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
@@ -142,6 +143,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   prefetchAlgSplats();   // and the ground splats' (algSplats.js)
   // The sandstone rocks' shapes, in worker threads (algSandstone.js; ~1-1.7 s each on one thread).
   if (params.get("landmarks") !== "0") prefetchSandstone();
+  prefetchCave();   // the cave's rocks too (algCave.js): in workers from the top of the boot
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
   // so it paints while the engine and the level load, and awaited before the
@@ -329,6 +331,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     const extra = params.get("landmarks") !== "0" ? landmarkEntries(app, SHOWROOM) : [];
     // A map's own farmsteads (maps/training.js: the shepherd's lesson), landmarks or not.
     (MAP.farmsteads ?? []).forEach((f, i) => extra.push({ key: `mechtaFarmMap${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1975 + i * 7 }), x: f.x, z: f.z, yaw: VIEW_YAW + (f.turn ?? 0), ground: true }));
+    // The sandstone cave's rocks (algCave.js), made in workers: waited for here, not built on the main thread.
+    await prefetchCave();
     app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }
 
