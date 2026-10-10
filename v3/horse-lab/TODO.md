@@ -174,6 +174,17 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 
 ## ▶ The bow on foot (bow.js) — 2026-10-09
 
+- 2026-10-10: QUIVER hollow fixed (single-sided tube: the inner wall was not drawn,
+  the ground showed through the mouth) — an inner wall facing in + a floor.
+- FULL DRAW measured vs a 2025 Frontiers review (elite archers) + coaching steps
+  (scratchpad archmeasure.js): bow elbow 120 → 173° (the reach ignored the hand's
+  own ~17 cm), bow-arm abduction 73 → 99° (ref 90–100), anchor 17 → 6.7 cm below
+  the eye (jaw), draw elbow on the arrow line (0.3 cm), shoulders in line with the
+  arrow (chestOpen 0: 0°), force line 4°. Arrow 0.76 → 0.84 m (draw is now 0.77).
+- FOLLOW-THROUGH held 0.9 s (bow arm up, hand back by the neck; it dropped to the
+  hip at 0.45 s), then the next fetch starts from there (it snapped to the hanging
+  clip pose: fetchStart was read before the IK).
+
 - DONE (first pass, uncommitted): procedural archery over the idle / walk clips —
   side-on stance, waist bends with the aim, bow arm IK + fist on the grip, draw
   hand hooks the string to a cheek anchor; a recurve whose limbs bend so the
