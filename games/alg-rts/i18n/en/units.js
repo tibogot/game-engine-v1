@@ -22,6 +22,9 @@ export default {
   "Équipe du génie": "Engineer Team",
   "Stick para": "Para Stick",
   "Groupe Légion": "Légion Squad",
+  "Équipage": "Crew",
+  "Pistolets-mitrailleurs": "Submachine guns",
+  "Un équipage ne se renforce pas : ramenez-le au poste, ses blessés s'y soignent.": "A crew is not reinforced: bring it back to the post, its wounded heal there.",
   "Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend).":
     "The squad's gunner gets the FM 24/29 light machine gun: bursts that pin the enemy at 42 m. The squad keeps it (his replacement picks it up).",
 

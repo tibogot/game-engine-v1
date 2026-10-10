@@ -266,6 +266,9 @@ export const LOOKS = {
 };
 // THE MOUSSEBEL (2026-10-09, alg-rts algCivilians.js): a FLN auxiliary in a shepherd's clothes —
 // the civShepherd to the last thread, with the old hunting rifle he kept under the straw.
+// A VEHICLE CREW out of its wreck (alg-rts algCrews.js): the section's uniform, the armoured arm's
+// black beret, a MAT 49, no pack.
+LOOKS.equipage = { ...LOOKS.appeleSection, label: "Équipage", note: "a crew out of its wreck: black berets, MAT 49s", helmet: false, headgear: "beret", hatColor: 0x1d1d1f, weapon: "mat49", variants: [{ w: 1 }], kit: ["belt"], roles: {}, extras: { mustache: 0.3, cigarette: 0.15 } };
 LOOKS.moussebel = { ...LOOKS.civShepherd, label: "Moussebel", note: "the shepherd's clothes, an old rifle", weapon: "enfield" };
 
 /** The look one soldier wears: `look` with one of its variants (by weight) merged in; r in [0, 1). */

@@ -125,4 +125,7 @@ export default {
   "Col du sud": "South pass",
   "Terrasses d'amandiers": "Almond terraces",
   "Gourbi en ruine": "Ruined gourbi",
+  // algDroppedWeapons.js
+  "Un <b>FM</b> est resté au sol : un groupe sans FM qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a squad without one that passes within 6 m picks it up.",
+  "Un <b>FM</b> est resté au sol : un combattant qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a fighter who passes within 6 m picks it up.",
 };

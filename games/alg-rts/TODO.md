@@ -165,6 +165,17 @@ Keep this file current: tick things off here, add new asks here.
 8. [ ] **GAMEPLAY, still missing vs CoH**: building damage stages + collapse (gap list 2), crews
    that bail out of a dead vehicle, DROPPED WEAPONS picked up (an FM off a dead FLN gunner),
    squad UPGRADES (an FM for the section, a radio), DOCTRINES / commander choices; the voices.
+   - [x] CREWS BAIL OUT (2026-10-10, algCrews.js): a French vehicle destroyed → each crewman 55%
+     to get out (jeep/GMC 2, half-track/AMX/EBR 3), hurt (35-80% hp), as an ÉQUIPAGE squad (own type
+     equipage: section uniform, black beret, MAT 49, no grenades/smoke; "Pistolets-mitrailleurs";
+     never reinforced, its own hint). They run 9 m clear of the wreck. Seen close in the game.
+   - [x] DROPPED WEAPONS (2026-10-10, algDroppedWeapons.js): a dead FLN FM gunner leaves his FM
+     (a French FM only when its squad is wiped out); drawn lying on its side (one InstancedMesh, 12
+     max, 4 min, only where you see). Picked up by a passer-by within 6 m, not in a fight: a French
+     section without an FM → the lmg upgrade free; an FLN fighter → an FM gunner. A one-time alert
+     the first time you see one (worded per side). Verified both sides.
+   - [ ] the RADIO upgrade — needs your call on what it does (see the chat 2026-10-10).
+   - [ ] the VOICES — blocked on recordings / a TTS key (env var only).
    - [x] DOCTRINES (2026-10-10, algDoctrines.js): chosen in the briefing beside the difficulty (stored;
      ?doctrine=paras|legion|air|none); COMMAND POINTS from FLN killed by your men (their veterancy
      value) and villages held (6 a minute each), 70 = one point (was 90); a strip above the HUD (right): spend
@@ -457,6 +468,9 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      Sees only what its men see (16 m, 40 m if moving/firing). Difficulty: frSquads 4/6/8, the
      FLN's purse 520/420/340. Measured (fast-forward, the FLN idle): 4 villages by 2 min, cave down
      at ~10 min; a 12-man raid on a held village: retaken, T-6 called, band down to 4.
+   - [ ] FLN BUILDINGS (you, 2026-10-10: "fine tune and make better buildings (cave) for the
+     FLN"): the cave worth a base — its look, its card, more FLN structures to build/use (the
+     caches, a refuge, a field hospital…) so the FLN side has a base like the post.
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
      mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:

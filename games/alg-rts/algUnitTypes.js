@@ -411,6 +411,12 @@ export const ALG_UNIT_TYPES = {
 // old rifle and fires, from his yard (`noChase`). Not the katiba's: the AI never takes him into a band
 // (it gathers moudjahidine and FM teams only). A hunting rifle: slower, a little harder than a
 // moudjahid's, a little shorter.
+// THE CREW of a destroyed vehicle (algCrews.js): appelés' bodies, the crew's look, MAT 49s at short
+// range, no grenades. Never built (no buildLabel on a card): only out of a wreck.
+ALG_UNIT_TYPES.equipage = {
+  ...ALG_UNIT_TYPES.appele, typeKey: "equipage", name: t("Équipage"), buildLabel: t("Équipage"),
+  look: "equipage", weaponLabel: t("Pistolets-mitrailleurs"), grenade: false, maxHp: 55, range: 24, damage: 5, fireRate: 3.2, crowdMax: 12,
+};
 ALG_UNIT_TYPES.moussebel = {
   ...ALG_UNIT_TYPES.moudjahid, typeKey: "moussebel", name: t("Moussebel"), buildLabel: t("Moussebel"),
   look: "moussebel", grenade: false, maxHp: 50, range: 32, damage: 9, fireRate: 1.3, crowdMax: 8,

@@ -86,7 +86,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
           <div class="who">${u.type?.name ?? u.name ?? u.typeKey}</div>
           ${isStruct || !u.type?.foot ? `<div class="hpbar"><i></i></div>` : `<div class="pips"></div>`}
           <div class="chips"></div>
-          <div class="sub">${isStruct ? (isHuman(u.team) ? t("Bâtiment") : t("Bâtiment ennemi")) : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
+          <div class="sub">${isStruct ? (isHuman(u.team) ? t("Bâtiment") : t("Bâtiment ennemi")) : `${u.type?.weaponLabel ?? WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
         </div>
       </div>`;
     one = { units, pips: root.querySelector(".pips"), hpbar: root.querySelector(".hpbar i"), chips: root.querySelector(".chips") };

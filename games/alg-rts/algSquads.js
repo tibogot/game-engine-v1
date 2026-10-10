@@ -45,6 +45,9 @@ export const SQUADS = {
   lanceFlammes: { size: 2, name: t("Lance-flammes"), reinforce: 45, kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
   para: { size: 5, name: t("Stick para"), reinforce: 60 },
   legion: { size: 5, name: t("Groupe Légion"), reinforce: 80 },
+  // A destroyed vehicle's CREW (algCrews.js): whoever got out, MAT 49s at short range; never
+  // reinforced (reinforce 0: no price, no button).
+  equipage: { size: 3, name: t("Équipage"), reinforce: 0, kit: Object.fromEntries([0, 1, 2].map((i) => [i, { weapon: "rifle", range: 24, damage: 5, fireRate: 3.2 }])) },
 };
 
 /** Squad upgrades: who can buy it, the price, the slot that carries it, his weapon. */
