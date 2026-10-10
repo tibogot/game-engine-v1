@@ -4,6 +4,7 @@
 // ALN's. This game's own (nam's shows its requisition points).
 import { iconSvg } from "./resourceIcons.js";
 import { t } from "../i18n/i18n.js";
+import { isHuman } from "../../shared-rts/teams.js";
 const CSS = `
 /* TOP RIGHT (2026-10-02, CoH): the numbers off the command card's back. */
 #alg-res {
@@ -28,6 +29,7 @@ const CSS = `
 #alg-res .enemy b { color: var(--hud-red); }
 #alg-res .flash { color: var(--hud-brass); font-weight: 600; opacity: 0; transition: opacity 0.4s; }
 #alg-res .flash.on { opacity: 1; transition: none; }
+#alg-res .res.sup .ric { color: #c9b27a; } #alg-res .res.sup .amount { color: #c9b27a; }
 `;
 
 export function createResourceHud({ mount = document.body, troops = null, tier = null } = {}) {
@@ -37,7 +39,21 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
   document.head.appendChild(style);
   const root = document.createElement("div");
   root.id = "alg-res";
-  root.innerHTML = `
+  // PLAYING THE FLN (?side=fln): its one purse — supplies — and its villages; no tiers, no pop cap.
+  const fln = isHuman("enemy");
+  root.innerHTML = fln ? `
+    <div class="row">
+    <span class="res sup" title="${t("Ravitaillement : la katiba vit des villages qui la soutiennent, des caches et des points qu'elle tient. Recrute les combattants.")}"><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="sup">0</span><span class="inc" data-i="sup"></span></span>
+    </div>
+    <div class="row row2">
+    <span class="dim" id="alg-res-villages"></span>
+    <span class="sep" hidden></span>
+    <span class="dim" id="alg-res-troops" hidden></span>
+    <span class="sep"></span>
+    <span class="dim" id="alg-res-tier"></span>
+    <span class="flash" id="alg-res-flash"></span>
+    </div>
+  ` : `
     <div class="row">
     <span class="res mp" title="${t("Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes.")}"><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
     <span class="res fuel" title="${t("Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons.")}"><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
@@ -53,7 +69,7 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
     </div>
   `;
   mount.appendChild(root);
-  const KEYS = ["mp", "fuel", "mun"];
+  const KEYS = fln ? ["sup"] : ["mp", "fuel", "mun"];
   const elAmt = Object.fromEntries(KEYS.map((k) => [k, root.querySelector(`[data-r="${k}"]`)]));
   const elInc = Object.fromEntries(KEYS.map((k) => [k, root.querySelector(`[data-i="${k}"]`)]));
   const elVillages = root.querySelector("#alg-res-villages");
@@ -64,10 +80,11 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
 
   /** Each frame; touches the DOM only when something shown has changed. */
   function update(economy) {
-    const f = economy.french;
-    const inc = economy.incomeOf("player");
-    const held = economy.held, total = economy.points.length, theirs = economy.heldByEnemy, cut = economy.cutOff;
-    const men = troops?.() ?? null, tr = tier?.() ?? null;
+    const f = fln ? { sup: economy.aln.stock } : economy.french;
+    const inc = fln ? { sup: economy.incomeOf("enemy") } : economy.incomeOf("player");
+    const total = economy.points.length;
+    const held = fln ? economy.heldByEnemy : economy.held, theirs = fln ? economy.held : economy.heldByEnemy, cut = fln ? 0 : economy.cutOff;
+    const men = fln ? null : troops?.() ?? null, tr = fln ? null : tier?.() ?? null;
     const key = `${KEYS.map((k) => Math.floor(f[k]) + "/" + Math.round(inc[k])).join("|")}|${held}|${theirs}|${cut}|${men}|${tr?.text}|${tr?.tip}`;
     if (key === last) return;
     last = key;
@@ -76,7 +93,7 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
       elInc[k].textContent = `+${Math.round(inc[k])}`;
     }
     elVillages.innerHTML = t("villages <b class=\"hud-num\">{n}</b>/{total}", { n: held, total })
-      + (theirs ? ` <span class="enemy">· ALN <b class="hud-num">${theirs}</b></span>` : "")
+      + (theirs ? ` <span class="enemy">· ${fln ? t("France") : "ALN"} <b class="hud-num">${theirs}</b></span>` : "")
       + (cut ? ` <span class="cut" title="${t("Points que vous tenez mais coupés du poste : sans ligne de ravitaillement, ils ne rapportent rien.")}">· ${cut > 1 ? t("{n} coupés", { n: cut }) : t("{n} coupé", { n: cut })}</span>` : "");
     if (men != null) elTroops.innerHTML = `${t("troupes")} <b class="hud-num">${men}</b>`;
     elTier.hidden = !tr;

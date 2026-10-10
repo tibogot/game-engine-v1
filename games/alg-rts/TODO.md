@@ -439,6 +439,15 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    the minimap, buildings facing it); (c) a FRENCH AI — the big one (patrols, garrisons, reinforcing,
    taking villages back, call-ins); (d) the FLN's own toolkit worth playing (item 6's asymmetry).
    Plan: (a) a little at a time from now (cheap now, dear later); (b)+(c) after item 6.
+   - [x] step 1 (2026-10-10): `?side=fln` — shared-rts/teams.js SIDES.human / isHuman / isHostile;
+     selection, fog, colours, the cave's card and the ALN purse follow it; 12 FLN men at the cave.
+   - [x] step 2a (2026-10-10): the HUD from the FLN's side — score bar yours-left-blue (FLN · France),
+     the supply strip one "ravitaillement" number + income (no tiers / troops), the minimap's post red
+     and cave blue, alerts (villages, raids, French patrols spotted, cave attacked / post under fire),
+     objectives (destroy the post, hold the cave), FLN tips, its own briefing; the French convoy /
+     mine / cache / tier news silenced. Verified in game both sides; French side unchanged.
+   - [ ] still French-worded for the FLN: the difficulty blurbs ("une katiba…"), the end-screen
+     reasons, the pause manual. Then step 2b: the FRENCH AI.
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:
    i18n/i18n.js `t(fr, vars)` — the French is the key, English in i18n/en/<area>.js (battle, menu,
    units, hud, systems); 422 lines wrapped across ~45 files + alg.html; the language in the options

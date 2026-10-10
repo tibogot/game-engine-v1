@@ -179,12 +179,15 @@ export function createBattleHud({ camera, canvas, onJump }) {
   document.documentElement.style.setProperty("--alg-tip-label", JSON.stringify(t("CONSEIL")));
 
   // ── Score ─────────────────────────────────────────────────────────────────
+  // YOUR side on the left, in blue — the FLN's when you play it (?side=fln): CoH reads yours first.
+  // (The classes .fr/.aln are the left/right slots, blue/red.)
+  const fln = isHuman("enemy");
   const score = document.createElement("div");
   score.id = "alg-score";
   score.innerHTML = `
-    <div class="side fr"><span class="hud-label">France</span><span class="num">500</span><span class="bar"><i></i></span></div>
+    <div class="side fr"><span class="hud-label">${fln ? "FLN" : "France"}</span><span class="num">500</span><span class="bar"><i></i></span></div>
     <div class="mid"><span class="held"><span class="f">0</span> · <span class="a">0</span></span><span class="drain">${t("villages")}</span></div>
-    <div class="side aln"><span class="bar"><i></i></span><span class="num">500</span><span class="hud-label">FLN</span></div>`;
+    <div class="side aln"><span class="bar"><i></i></span><span class="num">500</span><span class="hud-label">${fln ? "France" : "FLN"}</span></div>`;
   document.body.appendChild(score);
   const el = {
     frNum: score.querySelector(".fr .num"), frBar: score.querySelector(".fr .bar i"),
@@ -193,6 +196,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     drain: score.querySelector(".drain"),
   };
   let lastScore = "";
+  /** fr/aln = YOURS / THEIRS (the left / right slots), whichever side you play. */
   function setScore({ fr, aln, max, heldFr, heldAln }) {
     const key = `${Math.ceil(fr)}|${Math.ceil(aln)}|${heldFr}|${heldAln}`;
     if (key === lastScore) return;
@@ -204,7 +208,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
     el.heldF.textContent = heldFr;
     el.heldA.textContent = heldAln;
     el.drain.className = `drain${heldFr < heldAln ? " bad" : heldFr > heldAln ? " good" : ""}`;
-    el.drain.textContent = heldFr < heldAln ? t("◀ vous perdez des points") : heldFr > heldAln ? t("le FLN perd des points ▶") : t("villages");
+    el.drain.textContent = heldFr < heldAln ? t("◀ vous perdez des points") : heldFr > heldAln ? (fln ? t("la France perd des points ▶") : t("le FLN perd des points ▶")) : t("villages");
   }
 
   // ── Alerts ────────────────────────────────────────────────────────────────

@@ -78,6 +78,8 @@ export default {
   "Points que vous tenez mais coupés du poste : sans ligne de ravitaillement, ils ne rapportent rien.": "Points you hold but cut off from the post: with no supply line, they yield nothing.",
   "{n} coupés": "{n} cut off",
   "{n} coupé": "{n} cut off",
+  "Ravitaillement : la katiba vit des villages qui la soutiennent, des caches et des points qu'elle tient. Recrute les combattants.": "Supplies: the katiba lives off the villages that support it, its caches and the points it holds. Recruits fighters.",
+  "France": "France",
   "troupes": "troops",
 
   // ui/tacticalMap.js

@@ -596,7 +596,7 @@ export function createMinimap({
       drawIcon(c, "vp", m.x, m.y, r * 1.7, col);
       label(c, p.name.replace(/^(Mechta|Dechra|Ksar)\s+/, ""), m.x, m.y + rr + fpx * 0.75);
     }
-    // THE OBJECTIVES: our post (blue) and the FLN's cave (red, always shown —
+    // THE OBJECTIVES: the post and the cave (yours blue, theirs red; always shown —
     // the briefing names it), each with its name.
     const all = typeof structures === "function" ? structures() : structures?.list;
     for (const b of all ?? []) {
@@ -604,7 +604,7 @@ export function createMinimap({
       // (The training has no cave to take: its lessons bring their own FLN — maps/training.js.)
       if (b.typeKey === "caveEntrance" && MAP.tutorial) continue;
       const m = frame.toMini(b.position.x, b.position.z), r = 5.5 * s, fr = b.typeKey === "post";
-      c.fillStyle = fr ? COL.player : COL.enemy; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.4 * s;
+      c.fillStyle = isHuman(fr ? "player" : "enemy") ? COL.player : COL.enemy; c.strokeStyle = "rgba(10,12,8,0.9)"; c.lineWidth = 1.4 * s;
       c.beginPath();
       if (fr) c.rect(m.x - r, m.y - r, r * 2, r * 2);
       else { c.moveTo(m.x, m.y - r * 1.2); c.lineTo(m.x + r * 1.1, m.y + r * 0.8); c.lineTo(m.x - r * 1.1, m.y + r * 0.8); c.closePath(); }

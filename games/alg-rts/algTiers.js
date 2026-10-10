@@ -8,6 +8,7 @@
 // them. Once unlocked a tier stays (losing a village later doesn't take the
 // tanks back).
 import { t } from "./i18n/i18n.js";
+import { isHuman } from "../shared-rts/teams.js";
 
 export const TIERS = [
   {
@@ -45,7 +46,7 @@ export function createAlgTiers(app, { economy, post = () => null }) {
   // THE ALERT: once a tier CAN be bought (the villages held and the price in hand), once per tier.
   let announced = 1, watchT = 0;
   function watch(dt) {
-    if ((watchT -= dt) > 0) return;
+    if ((watchT -= dt) > 0 || !isHuman("player")) return;   // (the French tiers: not news when you play the FLN)
     watchT = 1;
     const tr = next();
     if (!tr || announced >= tr.n || blockedBy(tr)) return;
