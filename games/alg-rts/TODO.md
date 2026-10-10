@@ -174,7 +174,12 @@ Keep this file current: tick things off here, add new asks here.
      max, 4 min, only where you see). Picked up by a passer-by within 6 m, not in a fight: a French
      section without an FM → the lmg upgrade free; an FLN fighter → an FM gunner. A one-time alert
      the first time you see one (worded per side). Verified both sides.
-   - [ ] the RADIO upgrade — needs your call on what it does (see the chat 2026-10-10).
+   - [x] the RADIO upgrade (2026-10-10, your "follow your choice": CoH's forward observer) —
+     algSquads UPGRADES.radio, 50 munitions, slot 1 (the radioman's look already carries a set),
+     appelés / Légion / paras, hotkey I. The section gets BARRAGE (RADIO) (M: the nearest mortar
+     pit's barrage, within that pit's range) and T-6 (RADIO) (L: the post's strike, same price,
+     cooldown, cut line) — aimed only on ground your men SEE (barrage ring red; the T-6 click
+     refused, aiming kept). Verified: bought, both fired on seen ground, fogged ground refused.
    - [ ] the VOICES — blocked on recordings / a TTS key (env var only).
    - [x] DOCTRINES (2026-10-10, algDoctrines.js): chosen in the briefing beside the difficulty (stored;
      ?doctrine=paras|legion|air|none); COMMAND POINTS from FLN killed by your men (their veterancy

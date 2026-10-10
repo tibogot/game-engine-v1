@@ -58,6 +58,13 @@ export const UPGRADES = {
     weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 },
     hint: t("Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend)."),
   },
+  // THE RADIO (2026-10-10, CoH's forward observer): the radioman's set (slot 1 — his look already
+  // carries one) — the section calls the mortar barrage and the T-6 itself, on ground it SEES
+  // (algUnits.js radioBarrage / radioAir). No weapon: his rifle stays.
+  radio: {
+    label: t("Radio"), squads: ["appele", "legion", "para"], cost: { mun: 50 }, slot: 1,
+    hint: t("Le radio du groupe reçoit un poste SCR-300 : le groupe appelle lui-même le tir de barrage (la fosse de mortier la plus proche, à sa portée) et le T-6 du poste, sur ce que vos hommes voient. Le groupe le garde (son remplaçant le reprend)."),
+  },
 };
 
 const P = {

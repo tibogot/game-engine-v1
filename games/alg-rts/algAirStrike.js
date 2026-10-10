@@ -76,10 +76,11 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
     };
   }
 
-  function begin(sel = selection.selected) {
+  /** `sight(x, z)`: a radio's call (algUnits radioAir) — only ground the men see is a target. */
+  function begin(sel = selection.selected, { sight = null } = {}) {
     const post = (sel ?? []).find(isPost);
     if (!post || app.algTelegraph?.cut || (post.airCd ?? 0) > 0 || runs.some((r) => r.post === post) || (purse && !purse.canAfford(P.cost))) return false;
-    targeting = { post, at: null };
+    targeting = { post, at: null, sight };
     dom.style.cursor = "crosshair";
     return true;
   }
@@ -94,7 +95,9 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
     e.preventDefault(); e.stopImmediatePropagation();
     if (e.button !== 0) { cancel(); return; }
     aimAt(e);
-    const { post, at } = targeting;
+    const { post, at, sight } = targeting;
+    // A radio's call on ground nobody sees: not a target — keep aiming.
+    if (at && sight && !sight(at.x, at.z)) return;
     cancel();
     if (at) call(post, at.x, at.z);
   };

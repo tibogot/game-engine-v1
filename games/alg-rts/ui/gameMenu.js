@@ -68,7 +68,7 @@ body > #alg-sys { position: fixed; right: calc(var(--alg-dev-w, 340px) + 8px); t
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
 
-const ABILITY_NAMES = { attackMove: t("Assaut"), patrol: t("Patrouille"), grenade: t("Grenade"), smoke: t("Fumigène"), stop: t("Halte"), focus: t("Caméra sur la sélection"), cutWire: t("Couper les barbelés"), cancelSite: t("Annuler un chantier"), retreat: t("Retraite"), reinforce: t("Renforcer"), lmg: "FM 24/29", barrage: t("Tir de barrage"), airStrike: t("Frappe aérienne"), repair: t("Réparer"), unload: t("Sortir / débarquer"), aimArc: t("Orienter la mitrailleuse") };
+const ABILITY_NAMES = { attackMove: t("Assaut"), patrol: t("Patrouille"), grenade: t("Grenade"), smoke: t("Fumigène"), stop: t("Halte"), focus: t("Caméra sur la sélection"), cutWire: t("Couper les barbelés"), cancelSite: t("Annuler un chantier"), retreat: t("Retraite"), reinforce: t("Renforcer"), lmg: "FM 24/29", radio: t("Radio"), barrage: t("Tir de barrage"), airStrike: t("Frappe aérienne"), repair: t("Réparer"), unload: t("Sortir / débarquer"), aimArc: t("Orienter la mitrailleuse") };
 
 /**
  * @param {object} o

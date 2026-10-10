@@ -515,6 +515,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
           if (!sq.length) return null;
           return { key, label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? t(" ({n} groupes : chacun paie).", { n: sq.length }) : ""), ready: economy.french.canAfford(g.cost) };
         }),
+        // THE RADIO (algSquads UPGRADES.radio, CoH's forward observer): the section calls the
+        // nearest mortar pit's barrage and the post's T-6 itself, on ground the men see.
+        ...radioCalls(sel),
         // COUPER (algWire.js): sappers cut the nearest wire within 40 m.
         // RÉPARER (algRepair.js): sappers fix a damaged vehicle or building.
         repair?.ability(sel),
@@ -560,6 +563,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "aimArc") mgTeams?.begin(sel);
       if (UPGRADES[key]) { for (const s of squads.squadsIn(sel)) squads.upgrade(s, key); commandCard.render(sel); }
       if (key === "barrage") barrage?.begin(sel);
+      if (key === "radioBarrage") { const r = radioOf(sel); if (r?.pit) barrage?.begin([r.pit], { sight: seen }); }
+      if (key === "radioAir") { const r = radioOf(sel); if (r?.post) airStrike?.begin([r.post], { sight: seen }); }
       if (key === "airStrike") airStrike?.begin(sel);
       if (key === "flare") flares?.begin(sel);
       if (key === "retreat") { for (const s of squads.squadsIn(sel)) squads.retreat(s); app.algSounds?.order?.("move", sel); commandCard.render(sel); }
@@ -574,6 +579,31 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     },
     mount: hud.right,
   });
+  // THE RADIO's calls (algSquads UPGRADES.radio): the squads with one, the nearest pit, the post.
+  const seen = (x, z) => !fogOfWar.enabled || fogOfWar.isVisible(x, z);
+  function radioOf(sel) {
+    const sq = squads.squadsIn(sel).filter((s) => s.upgrades.radio && s.members.length);
+    if (!sq.length) return null;
+    const at = sq[0].members[0].position;
+    const pit = structures.list.filter((s) => s.alive && s.typeKey === "mortarPit" && isHuman(s.team))
+      .sort((a, b) => Math.hypot(a.position.x - at.x, a.position.z - at.z) - Math.hypot(b.position.x - at.x, b.position.z - at.z))[0] ?? null;
+    const post = structures.list.find((s) => s.alive && s.typeKey === "post" && isHuman(s.team)) ?? null;
+    return { pit, post };
+  }
+  function radioCalls(sel) {
+    const r = radioOf(sel);
+    if (!r) return [];
+    const b = r.pit && barrage?.ability([r.pit]);
+    const a = r.post && airStrike?.ability([r.post]);
+    return [
+      { key: "radioBarrage", label: t("Barrage (radio)"), cost: b?.cost ?? barrage?.params.cost,
+        hint: r.pit ? t("Par radio : la fosse de mortier la plus proche tire son barrage, à sa portée ({range} m d'elle), sur ce que vos hommes voient.", { range: barrage?.params.range ?? 150 }) : t("Par radio : il faut une fosse de mortier (les sapeurs la construisent)."),
+        ready: !!b?.ready, cooldown: b?.cooldown ?? 0 },
+      { key: "radioAir", label: t("T-6 (radio)"), cost: a?.cost ?? airStrike?.params.cost,
+        hint: !r.post ? t("Par radio : plus de poste, plus d'avion.") : app.algTelegraph?.cut ? a.hint : t("Par radio : le poste demande le T-6, sur ce que vos hommes voient. Même prix, même délai que depuis le poste."),
+        ready: !!a?.ready, cooldown: a?.cooldown ?? 0 },
+    ];
+  }
   let patrols = null;   // made after combat (algPatrols.js)
   let grenades = null;  // made after combat (algGrenades.js)
   let flares = null;    // the mortar pit's illumination flares (algFlares.js), after combat

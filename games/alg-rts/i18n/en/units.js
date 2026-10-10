@@ -118,4 +118,12 @@ export default {
   "Annuler (+{n})": "Cancel (+{n})",
   "Annuler le chantier : {n} ressources rendues.": "Cancel the construction: {n} resources refunded.",
   "+{fuel} C +{mun} M · convoi {name}": "+{fuel} F +{mun} M · convoy {name}",
+  "Radio": "Radio",
+  "Le radio du groupe reçoit un poste SCR-300 : le groupe appelle lui-même le tir de barrage (la fosse de mortier la plus proche, à sa portée) et le T-6 du poste, sur ce que vos hommes voient. Le groupe le garde (son remplaçant le reprend).": "The squad's radioman gets an SCR-300 set: the squad calls the barrage itself (the nearest mortar pit, within its range) and the post's T-6, on what your men see. The squad keeps it (his replacement takes it up).",
+  "Barrage (radio)": "Barrage (radio)",
+  "T-6 (radio)": "T-6 (radio)",
+  "Par radio : la fosse de mortier la plus proche tire son barrage, à sa portée ({range} m d'elle), sur ce que vos hommes voient.": "By radio: the nearest mortar pit fires its barrage, within its range ({range} m from it), on what your men see.",
+  "Par radio : il faut une fosse de mortier (les sapeurs la construisent).": "By radio: needs a mortar pit (the sappers build it).",
+  "Par radio : plus de poste, plus d'avion.": "By radio: no post, no aircraft.",
+  "Par radio : le poste demande le T-6, sur ce que vos hommes voient. Même prix, même délai que depuis le poste.": "By radio: the post calls the T-6, on what your men see. Same price, same delay as from the post.",
 };

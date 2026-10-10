@@ -58,10 +58,11 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
   }
 
   // ── Aiming (as the flares: algFlares.js) ────────────────────────────────
-  function begin(sel = selection.selected) {
+  /** `sight(x, z)`: a radio's call (algUnits radioBarrage) — only ground the men see is a target. */
+  function begin(sel = selection.selected, { sight = null } = {}) {
     const pit = (sel ?? []).find(isPit);
     if (!pit || (pit.barrageCd ?? 0) > 0 || fires.some((f) => f.pit === pit) || (purse && !purse.canAfford(P.cost))) return false;
-    targeting = { pit, at: null, ok: false };
+    targeting = { pit, at: null, ok: false, sight };
     dom.style.cursor = "crosshair";
     return true;
   }
@@ -71,7 +72,7 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
     targeting.at = hit?.point ? { x: hit.point.x, z: hit.point.z } : null;
     const p = targeting.pit.position;
     const d = targeting.at ? Math.hypot(targeting.at.x - p.x, targeting.at.z - p.z) : Infinity;
-    targeting.ok = d >= P.minRange && d <= P.range;
+    targeting.ok = d >= P.minRange && d <= P.range && (!targeting.sight || targeting.sight(targeting.at.x, targeting.at.z));
   }
   const onMove = (e) => { if (targeting) aimAt(e); };
   const onDown = (e) => {
