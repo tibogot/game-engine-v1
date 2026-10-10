@@ -782,7 +782,7 @@ function crag(seed, w, h, d) {
  * `groundAt(x, z)` (optional): the wall stands on that ground, each stone
  * on the ground under it — a garden wall down a slope (rtsAlgVillage.js).
  */
-export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false, groundAt = null } = {}) {
+export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, len = 0.5, batter = 0.05, tone = 0.5, closed = false, groundAt = null, mat = MAT.limestone } = {}) {
   const ch = h / courses;
   const segs = [];
   let total = 0;
@@ -810,7 +810,7 @@ export function dryStone(parts, R, pts, { courses = 4, h = 1.1, depth = 0.55, le
         geo: fieldStone(Math.floor(R() * 1e6), l + 0.12, sh, depth * (0.8 + R() * 0.35)),
         pos: [x + nx * inset, (groundAt ? groundAt(x, z) : 0) + c * ch + sh * 0.42 - 0.06, z + nz * inset],
         rot: [(R() - 0.5) * 0.12, yaw + Math.PI / 2 + (R() - 0.5) * 0.25, (R() - 0.5) * 0.12],
-        mat: MAT.limestone, tone: tone - 0.12 + R() * 0.24,   // one stone's face: the rubble cell is a WALL (its joints read as black blotches on a stone)
+        mat, tone: tone - 0.12 + R() * 0.24,   // one stone's face: the rubble cell is a WALL (its joints read as black blotches on a stone)
       });
       s += l;
     }
@@ -863,6 +863,30 @@ export function brushClump(R, x, y, z, { h = 1.2, r = 0.45, dry = false } = {}) 
   return out;
 }
 
+/**
+ * A GRAIN SACK (2026-10-11, the sandstone cave: the hessian boxes read as concrete blocks): a
+ * pillow — a squashed sphere, its belly sagging onto a flat bottom, the cloth lumpy. Centred on
+ * its foot: place it at ground height.
+ */
+export function grainSack(w, h, d, seed = 1) {
+  const g = new THREE.SphereGeometry(0.5, 12, 8);
+  const p = g.attributes.position;
+  let s = seed * 9301 + 49297;
+  const rnd = () => ((s = (s * 9301 + 49297) % 233280) / 233280);
+  const bumps = [0, 1, 2].map(() => [rnd() * 6.3, rnd() * 6.3, 0.03 + rnd() * 0.04]);
+  for (let i = 0; i < p.count; i++) {
+    let x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const lump = bumps.reduce((n, [a, b, k]) => n + Math.sin(x * 7 + a) * Math.sin(z * 6 + b) * k, 0);
+    // Sagging: wider low down, a flat foot.
+    const sag = 1 + 0.18 * (0.5 - y);
+    x *= sag; z *= sag;
+    y = Math.max(y, -0.32);
+    p.setXYZ(i, x * w * (1 + lump), (y + 0.32) * h / 0.82 + lump * 0.3 * h, z * d * (1 + lump));
+  }
+  g.computeVertexNormals();
+  return g;
+}
+
 /** A clay water jar (gargoulette): the one made thing at a refuge that isn't a weapon. */
 export function clayJar(x, y, z, s = 1) {
   const prof = [[0.001, 0], [0.14, 0.01], [0.2, 0.12], [0.21, 0.26], [0.15, 0.4], [0.07, 0.46], [0.08, 0.52], [0.001, 0.52]]
@@ -886,12 +910,17 @@ function rifle(parts, a, b) {
  * it; brush heaped on top against the planes; a low stone breastwork across
  * half the mouth; sacks, a crate, a water jar in the entrance.
  */
-export function buildCaveEntrance({ seed = 1956 } = {}) {
+// `rocks: false` (alg-rts algCave.js, 2026-10-11): the shoring, the breastwork and the gear only —
+// the rock round them is the sandstone generator's there.
+// `camp: true` (same day, the sandstone cave): the katiba's camp in front — a dry-stone wall, a
+// cooking fire, a lean-to, crates and rifles, a lookout's ring on the rock (`lookoutY`: its top).
+// (`campStones: false`: the wall, the fire's ring and the lookout's are the caller's — sandstone.)
+export function buildCaveEntrance({ seed = 1956, rocks = true, camp = false, campStones = true, lookoutAt = null } = {}) {
   const R = rng(seed);
   const parts = [];
   const MW = 3.0, MH = 2.4, TD = 2.6;          // mouth width, height, tunnel depth
   // The rock: flanks, the lintel slab, the mass behind.
-  const rock = (w, h, d, x, y, z, ry = 0, tone = 0.45) => parts.push({ geo: fieldStone(Math.floor(R() * 1e6), w, h, d, 1), pos: [x, y, z], rot: [(R() - 0.5) * 0.12, ry, (R() - 0.5) * 0.12], mat: MAT.limestone, tone });
+  const rock = (w, h, d, x, y, z, ry = 0, tone = 0.45) => rocks && parts.push({ geo: fieldStone(Math.floor(R() * 1e6), w, h, d, 1), pos: [x, y, z], rot: [(R() - 0.5) * 0.12, ry, (R() - 0.5) * 0.12], mat: MAT.limestone, tone });
   rock(4.2, 3.6, 4.4, -(MW / 2 + 1.9), 1.5, 1.0, 0.3);
   rock(2.6, 2.2, 2.8, -(MW / 2 + 3.9), 0.8, -0.2, 1.2, 0.5);
   rock(3.8, 3.2, 4.2, MW / 2 + 1.8, 1.35, 1.2, -0.4, 0.4);
@@ -899,8 +928,9 @@ export function buildCaveEntrance({ seed = 1956 } = {}) {
   rock(6.2, 1.5, 3.6, 0.1, MH + 0.75, 1.3, 0.05, 0.42);                 // the lintel slab
   rock(10, 5.2, 5.5, 0, 2.3, TD + 3.1, 0, 0.45);                       // the hill behind
   // The tunnel: rubble cheeks and roof, the dark at its end.
-  for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.7, MH, TD), pos: [sx * (MW / 2 + 0.3), MH / 2, TD / 2 + 0.05], mat: MAT.rubble, tone: 0.3 });
-  parts.push({ geo: buildBox(MW + 1.3, 0.5, TD), pos: [0, MH + 0.24, TD / 2 + 0.05], mat: MAT.rubble, tone: 0.25 });
+  // (With the sandstone, its jambs are the tunnel's sides: these boxes stood out as pale stacks.)
+  if (rocks) for (const sx of [-1, 1]) parts.push({ geo: buildBox(0.7, MH, TD), pos: [sx * (MW / 2 + 0.3), MH / 2, TD / 2 + 0.05], mat: MAT.rubble, tone: 0.3 });
+  if (rocks) parts.push({ geo: buildBox(MW + 1.3, 0.5, TD), pos: [0, MH + 0.24, TD / 2 + 0.05], mat: MAT.rubble, tone: 0.25 });
   parts.push({ geo: buildBox(MW + 0.2, MH + 0.1, 0.1), pos: [0, MH / 2, TD - 0.02], mat: MAT.steel, tone: 0 });
   // Timber shoring: three sets of posts and caps, into the dark.
   for (let k = 0; k < 3; k++) {
@@ -909,18 +939,61 @@ export function buildCaveEntrance({ seed = 1956 } = {}) {
     parts.push({ geo: new THREE.CylinderGeometry(0.12, 0.12, w + 0.5, 7), pos: [0, MH - 0.12 - k * 0.02, z], rot: [0, 0, Math.PI / 2 + (R() - 0.5) * 0.04], mat: MAT.timber, tone: 0.18 });
   }
   // A breastwork across half the mouth, the way in on the right.
-  dryStone(parts, R, arcPts(-0.9, -0.3, 1.6, Math.PI * 0.55, Math.PI * 1.2, 5), { courses: 3, h: 0.8, depth: 0.5, tone: 0.45 });
+  // (Not with the sandstone: its short arc read as a stack of three cubes beside the big rock.)
+  if (rocks) dryStone(parts, R, arcPts(-0.9, -0.3, 1.6, Math.PI * 0.55, Math.PI * 1.2, 5), { courses: 3, h: 0.8, depth: 0.5, tone: 0.45 });
   // In the entrance: sacks, a crate, the jar; a bedroll.
-  for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.66, 0.42 + k * 0.03, 0.46), pos: [0.75 + k * 0.1, 0.2 + k * 0.4, 1.7 - k * 0.05], rot: [0, (R() - 0.5) * 0.4, 0], mat: MAT.hessian, tone: 0.4 + R() * 0.2 });
+  for (let k = 0; k < 3; k++) parts.push({ geo: rocks ? buildBox(0.66, 0.42 + k * 0.03, 0.46) : grainSack(0.66, 0.42, 0.46, seed + k), pos: [0.75 + k * 0.1, rocks ? 0.2 + k * 0.4 : k * 0.36, 1.7 - k * 0.05], rot: [0, (R() - 0.5) * 0.4, 0], mat: MAT.hessian, tone: 0.4 + R() * 0.2 });
   parts.push({ geo: buildBox(0.8, 0.4, 0.5), pos: [-0.8, 0.18, 1.9], rot: [0, 0.2, 0], mat: MAT.timber, tone: 0.3 });
   parts.push(clayJar(1.2, -0.02, 0.4));
   parts.push({ geo: new THREE.CylinderGeometry(0.16, 0.16, 1.1, 8), pos: [-0.4, 0.14, 0.9], rot: [0, 0.4, Math.PI / 2], mat: MAT.canvas, tone: 0.35 });
   // Brush on the lintel and the flanks, a juniper standing by the mouth.
-  for (const [x, y, z, h] of [[-1.5, MH + 1.3, 1.2, 1.1], [0.8, MH + 1.35, 1.0, 1.2], [2.3, MH + 1.1, 1.8, 0.9], [-3.6, 3.1, 1.5, 1.0], [3.3, 2.7, 1.6, 1.0], [-0.6, MH + 1.2, 2.2, 0.9]]) {
+  if (rocks) for (const [x, y, z, h] of [[-1.5, MH + 1.3, 1.2, 1.1], [0.8, MH + 1.35, 1.0, 1.2], [2.3, MH + 1.1, 1.8, 0.9], [-3.6, 3.1, 1.5, 1.0], [3.3, 2.7, 1.6, 1.0], [-0.6, MH + 1.2, 2.2, 0.9]]) {
     parts.push(...brushClump(R, x, y, z, { h, r: 0.55 }));
   }
-  parts.push(...brushClump(R, 2.3, 0, -1.2, { h: 2.2, r: 0.7 }));
-  return finish(parts, { hx: 7.2, hz: 5.6, cz: 1.8, height: 5.2, ao: { cell: 0.3, strength: 0.55 } });
+  if (rocks) parts.push(...brushClump(R, 2.3, 0, -1.2, { h: 2.2, r: 0.7 }));
+  if (camp) caveCamp(parts, R, { lookoutAt, stones: campStones });
+  return finish(parts, camp ? { hx: 8.6, hz: 7.6, cz: 0.6, height: 5.6, ao: { cell: 0.3, strength: 0.55 } } : { hx: 7.2, hz: 5.6, cz: 1.8, height: 5.2, ao: { cell: 0.3, strength: 0.55 } });
+}
+
+/**
+ * The KATIBA'S CAMP in front of its cave (local metres before the kit's scale; the mouth looks down
+ * −Z): no brush clumps (they read as green blobs beside the sandstone) — stone, timber, cloth.
+ */
+function caveCamp(parts, R, { lookoutAt = null, stones = true } = {}) {
+  // A long low dry-stone wall across the front, the way in on the right (a short arc read as cubes).
+  if (stones) dryStone(parts, R, arcPts(-0.4, -0.6, 5.4, Math.PI * 1.02, Math.PI * 1.56, 9), { courses: 3, h: 0.85, depth: 0.55, len: 0.6, tone: 0.32, mat: MAT.sandstone });
+  // The cooking fire: a ring of stones, charred logs across it, a pot on three stones.
+  const fx = 2.6, fz = -2.9;
+  if (stones) for (let k = 0; k < 8; k++) {
+    const a = (k / 8) * Math.PI * 2 + R() * 0.3;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.26, 0.18, 0.22), pos: [fx + Math.cos(a) * 0.48, 0.06, fz + Math.sin(a) * 0.48], rot: [R() * 0.3, R() * 3, R() * 0.3], mat: MAT.sandstone, tone: 0.2 + R() * 0.1 });
+  }
+  for (let k = 0; k < 3; k++) {
+    const a = k * 1.05 + R() * 0.3;
+    parts.push(wirePart([fx + Math.cos(a) * 0.42, 0.05, fz + Math.sin(a) * 0.42], [fx - Math.cos(a) * 0.12, 0.14, fz - Math.sin(a) * 0.12], 0.055, { mat: MAT.timber, tone: 0.04 }));
+  }
+  parts.push({ geo: new THREE.CylinderGeometry(0.2, 0.16, 0.24, 10), pos: [fx + 0.95, 0.3, fz + 0.2], mat: MAT.steel, tone: 0.1 });
+  if (stones) for (let k = 0; k < 3; k++) parts.push({ geo: fieldStone(Math.floor(R() * 1e6), 0.18, 0.2, 0.18), pos: [fx + 0.95 + Math.cos(k * 2.1) * 0.17, 0.08, fz + 0.2 + Math.sin(k * 2.1) * 0.17], rot: [0, R() * 3, 0], mat: MAT.sandstone, tone: 0.25 });
+  // The LEAN-TO: two tall posts in front, two short behind, a thatch roof sloping back; bedrolls under.
+  const lx = -5.0, lz = -1.6, LW = 2.8, LD = 2.0;
+  for (const [x, z, h] of [[-LW / 2, -LD / 2, 1.75], [LW / 2, -LD / 2, 1.75], [-LW / 2, LD / 2, 0.95], [LW / 2, LD / 2, 0.95]]) {
+    parts.push({ geo: new THREE.CylinderGeometry(0.05, 0.06, h, 6), pos: [lx + x, h / 2, lz + z], rot: [(R() - 0.5) * 0.06, 0, (R() - 0.5) * 0.06], mat: MAT.timber, tone: 0.22 });
+  }
+  const slope = Math.atan2(1.75 - 0.95, LD);
+  parts.push({ geo: buildBox(LW + 0.5, 0.1, Math.hypot(LD, 0.8) + 0.4), pos: [lx, 1.4, lz], rot: [slope, 0.0, 0], mat: MAT.thatch, tone: 0.32 });
+  for (let k = 0; k < 2; k++) parts.push({ geo: new THREE.CylinderGeometry(0.17, 0.17, 1.5, 8), pos: [lx - 0.55 + k * 1.1, 0.17, lz + 0.1], rot: [Math.PI / 2, 0.15 * (k ? 1 : -1), 0], mat: MAT.canvas, tone: 0.3 + k * 0.1 });
+  parts.push(clayJar(lx + 1.25, -0.02, lz - 0.75, 0.9));
+  // By the mouth: captured ammunition crates, sacks, two rifles leaning on the crates.
+  for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.75, 0.32, 0.42), pos: [-2.35, 0.16 + (k === 2 ? 0.32 : 0), -0.9 + (k === 1 ? 0.48 : 0) + (k === 2 ? 0.22 : 0)], rot: [0, 0.25 + (R() - 0.5) * 0.2, 0], mat: MAT.paint, tone: 0.22 });
+  rifle(parts, [-1.9, 0.02, -1.55], [-2.0, 1.0, -1.05]);
+  rifle(parts, [-2.6, 0.02, -1.6], [-2.5, 1.0, -1.12]);
+  for (let k = 0; k < 3; k++) parts.push({ geo: grainSack(0.62, 0.4, 0.44, 7 + k), pos: [2.0 + (k % 2) * 0.55, k === 2 ? 0.34 : 0, -1.2 - (k % 2) * 0.2 + (k === 2 ? -0.1 : 0)], rot: [0, (R() - 0.5) * 0.5 + (k === 2 ? 0.5 : 0), 0], mat: MAT.hessian, tone: 0.32 + R() * 0.12 });
+  parts.push(clayJar(2.6, -0.02, -0.7, 0.85));
+  // The LOOKOUT on the rock: a waist-high ring of piled stones (its place from the rock's top).
+  if (lookoutAt && stones) {
+    const [ox, oy, oz] = lookoutAt;
+    dryStone(parts, R, arcPts(ox, oz, 0.95, Math.PI * 0.9, Math.PI * 2.4, 9), { courses: 2, h: 0.55, depth: 0.4, len: 0.4, tone: 0.32, mat: MAT.sandstone, groundAt: () => oy });
+  }
 }
 
 /**

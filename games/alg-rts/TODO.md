@@ -494,6 +494,16 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    - [ ] FLN BUILDINGS (you, 2026-10-10: "fine tune and make better buildings (cave) for the
      FLN"): the cave worth a base — its look, its card, more FLN structures to build/use (the
      caches, a refuge, a field hospital…) so the FLN side has a base like the post.
+     - [x] LAB (2026-10-11, algCave.js, building lab "grotte"; you: "it looks way better"): the
+       cave in the SANDSTONE generator's blocks (hill, jambs, lintel, outcrops; ×1.3 as the kit),
+       the game cave's shoring and gear (buildCaveEntrance rocks:false), a near-black void at the
+       tunnel's end; the CAMP (camp:true): a dry-stone wall, a fire ring, the lookout's ring on top —
+       all small sandstone pebbles (~250 tris; simplifyError 0.06, at 0.005 they kept 2100) — a
+       lean-to, crates and rifles, grain SACKS (rtsAlgeria grainSack, no more boxes). One rock mesh
+       49k tris + the kit + one plane. Mouth set back so it reads from the RTS 42°.
+     - [ ] INTO THE GAME: the mouth faced AWAY from the camera (that is half of why the old one never
+       read as a cave) — turn it 3/4 to the camera; footprint ~19 m (nav, cover bake); look close + at
+       night; the fire burning (the game's fire field); a mule tethered (algHerds).
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
      mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:

@@ -10,6 +10,8 @@ import { buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlg
 import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { startVehicleLab } from "./vehicleLab.js";
+import { buildSandstoneCave } from "./algCave.js";
+import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 
@@ -44,6 +46,12 @@ const BUILDINGS = {
   rocheBanc: rock("Rocher : grand banc", "mesa", 16),
   rocheBloc: rock("Rocher : bloc", "block", 10),
   rocheDalle: rock("Rocher : dalle basse", "low", 10),
+  // THE FLN CAVE (2026-10-11, you: "use the realistic rocks to make a cave"): the game's on the
+  // LEFT (low-poly limestone), the sandstone cave on the RIGHT — the same shoring and gear.
+  grotte: {
+    label: "Grotte du FLN", gap: 11, before: () => buildCaveEntrance(), after: () => buildSandstoneCave({ variant: SEED }),
+    tags: ["GROTTE (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "la grotte du jeu à gauche, la grotte en grès à droite (même étais, même matériel).",
+  },
 };
 
 /**

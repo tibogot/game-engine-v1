@@ -80,6 +80,8 @@ function vehicleOf(geo, key) {
   const st = stencilMesh(geo.userData.stencil);
   if (st) body.add(st);
   g.add(body);
+  // Meshes of their own beside the kit's (the buildings lab's sandstone cave: algCave.js).
+  for (const x of geo.userData.extra ?? []) g.add(x);
   let gear = null;
   if (geo.userData.gear) {
     gear = new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial(FR_PAINT_TINT, key));
