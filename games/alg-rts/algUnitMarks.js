@@ -8,6 +8,7 @@
 // Per frame: one pass over the units, ~6 floats each. OFF by default since 2026-10-08 (CoH rings
 // only the selection — you); ?marks=1 = on.
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 
 export const UNIT_MARKS = {
   radius: 0.95,             // m, the ring's outer edge (a man's footprint at 1.3x scale)
@@ -28,9 +29,9 @@ export function createAlgUnitMarks(app, { units, selection, fogOfWar = null, par
       const sel = new Set(selection?.selected ?? []);
       for (const u of units.list) {
         if (!u.alive || u.inside || u.vanished || u.ghost || !u.type?.foot || sel.has(u)) continue;
-        if (u.team === "enemy" && fogOfWar?.enabled && !fogOfWar.isVisible(u.position.x, u.position.z)) continue;
-        if (u.team !== "player" && u.team !== "enemy") continue;
-        field.add(u.position.x, u.position.z, P.radius, u.team === "player" ? P.player : P.enemy);
+        if (isHostile(u.team) && fogOfWar?.enabled && !fogOfWar.isVisible(u.position.x, u.position.z)) continue;
+        if (!isHuman(u.team) && !isHostile(u.team)) continue;
+        field.add(u.position.x, u.position.z, P.radius, isHuman(u.team) ? P.player : P.enemy);
       }
     }
     field.commit();

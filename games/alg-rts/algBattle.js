@@ -22,6 +22,7 @@
 // It only WATCHES the game (polls units, villages, mines, buildings once a
 // frame): no hooks into combat, the AI or the units. ?battle=0 = without.
 import { LAYOUT } from "./layout.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { DOCTRINE_LIST, storedDoctrine } from "./algDoctrines.js";
 import { createBattleHud } from "./ui/battleHud.js";
 import { DIFFICULTIES, applyDifficulty, storedDifficulty } from "./algDifficulty.js";
@@ -91,17 +92,17 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     for (const v of economy.points) {
       const L = villageLast.get(v), { x, z } = v.position;
       if (v.owner !== L.owner) {
-        if (v.owner === "player") say(t("<b>{name}</b> est à vous : il rapporte et compte pour vous.", { name: v.name }), x, z, "good", "hq_villageTaken");
-        else if (v.owner === "enemy") say(t("<b>{name}</b> soutient désormais le FLN. Reprenez-le : postez-y des hommes.", { name: v.name }), x, z, "bad", "hq_villageLost");
-        else if (L.owner === "player") say(t("<b>{name}</b> vous échappe : le FLN l'a retourné.", { name: v.name }), x, z, "bad", "hq_villageLost");
-        else if (L.owner === "enemy") say(t("<b>{name}</b> ne soutient plus le FLN.", { name: v.name }), x, z, "good");
+        if (isHuman(v.owner)) say(t("<b>{name}</b> est à vous : il rapporte et compte pour vous.", { name: v.name }), x, z, "good", "hq_villageTaken");
+        else if (isHostile(v.owner)) say(t("<b>{name}</b> soutient désormais le FLN. Reprenez-le : postez-y des hommes.", { name: v.name }), x, z, "bad", "hq_villageLost");
+        else if (isHuman(L.owner)) say(t("<b>{name}</b> vous échappe : le FLN l'a retourné.", { name: v.name }), x, z, "bad", "hq_villageLost");
+        else if (isHostile(L.owner)) say(t("<b>{name}</b> ne soutient plus le FLN.", { name: v.name }), x, z, "good");
         L.owner = v.owner;
       }
       // Turning: FLN men in it and the needle moving their way.
       const falling = v.value < L.value - 1e-4;
       if (falling && v.value > -economy.params.hold && clock - L.turnAt > P.turnEvery) {
         const r = economy.params.radius;
-        const aln = units.list.some((u) => u.alive && u.team === "enemy" && u.type?.foot && Math.hypot(u.position.x - x, u.position.z - z) < r);
+        const aln = units.list.some((u) => u.alive && isHostile(u.team) && u.type?.foot && Math.hypot(u.position.x - x, u.position.z - z) < r);
         if (aln) { L.turnAt = clock; say(t("Le FLN travaille <b>{name}</b>. Envoyez des hommes avant qu'il ne bascule.", { name: v.name }), x, z, "bad", "hq_villageThreat"); }
       }
       L.value = v.value;
@@ -118,23 +119,23 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     for (const v of economy.supply) {
       const L = supplyLast.get(v), { x, z } = v.position;
       if (v.owner !== L.owner) {
-        if (v.owner === "player") say(t("<b>{name}</b> est à vous : +{n} {res} par minute tant qu'il est relié au poste.", { name: shortName(v), n: economy.params.supplyPoint, res: resName(v) }), x, z, "good", null, "alertFlag");
-        else if (L.owner === "player") say(t("<b>{name}</b> perdu : plus de {res} de ce côté.", { name: shortName(v), res: resName(v) }), x, z, "bad", "hq_villageLost", "alertFlag");
+        if (isHuman(v.owner)) say(t("<b>{name}</b> est à vous : +{n} {res} par minute tant qu'il est relié au poste.", { name: shortName(v), n: economy.params.supplyPoint, res: resName(v) }), x, z, "good", null, "alertFlag");
+        else if (isHuman(L.owner)) say(t("<b>{name}</b> perdu : plus de {res} de ce côté.", { name: shortName(v), res: resName(v) }), x, z, "bad", "hq_villageLost", "alertFlag");
         L.owner = v.owner;
       }
       // Raided: FLN men in its ring and the needle going their way.
-      if (v.owner === "player" && v.value < L.value - 1e-4 && clock - L.raidAt > 45) {
-        const aln = units.list.some((u) => u.alive && u.team === "enemy" && u.type?.foot && Math.hypot(u.position.x - x, u.position.z - z) < v.radius);
+      if (isHuman(v.owner) && v.value < L.value - 1e-4 && clock - L.raidAt > 45) {
+        const aln = units.list.some((u) => u.alive && isHostile(u.team) && u.type?.foot && Math.hypot(u.position.x - x, u.position.z - z) < v.radius);
         if (aln) { L.raidAt = clock; say(t("<b>Raid du FLN</b> sur {name} ! Le dépôt est à eux si vous n'envoyez personne.", { name: shortName(v) }), x, z, "bad", "hq_contact", "alertAttack"); }
       }
       L.value = v.value;
-      if (L.linked && !v.linked && v.owner === "player") cut.push(v);
+      if (L.linked && !v.linked && isHuman(v.owner)) cut.push(v);
       L.linked = v.linked;
     }
     // Villages cut off count too (they pay nothing either).
     for (const v of economy.points) {
       const L = villageLast.get(v);
-      if (L.linked && !v.linked && v.owner === "player") cut.push(v);
+      if (L.linked && !v.linked && isHuman(v.owner)) cut.push(v);
       L.linked = v.linked;
     }
     if (cut.length) {
@@ -151,19 +152,19 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       hpOf.set(u, u.alive ? u.hp : 0);
       if (was == null) continue;
       const { x, z } = u.position;
-      if (u.team === "player") {
+      if (isHuman(u.team)) {
         if (u.hp < was - 1e-6 || (was > 0 && !u.alive)) {
           if (!u.alive) stats.lostFr++;
           if (!throttled("contact", x, z, P.contactEvery)) { say(t("<b>Contact</b> {place} !", { place: placeName(x, z) }), x, z, "bad", "hq_contact"); told.add("contactSeen"); }
           else if (!u.alive && !u.type?.foot && !throttled(`lost:${u.typeKey}`, x, z, 10)) say(t("{name} détruit {place}.", { name: u.type?.name ?? t("Un véhicule"), place: placeName(x, z) }), x, z, "bad", "hq_vehicleLost");
         }
-      } else if (u.team === "enemy") {
+      } else if (isHostile(u.team)) {
         if (was > 0 && !u.alive) stats.lostAln++;
         // A band seen: the first sight of these men, away from their cave.
         if (u.alive && !reported.has(u) && seenByPlayer(x, z) && (!cave || Math.hypot(x - cave.position.x, z - cave.position.z) > 80)) {
           let n = 0;
           for (const o of units.list) {
-            if (o.alive && o.team === "enemy" && Math.hypot(o.position.x - x, o.position.z - z) < 35) { n++; reported.add(o); }
+            if (o.alive && isHostile(o.team) && Math.hypot(o.position.x - x, o.position.z - z) < 35) { n++; reported.add(o); }
           }
           if (rules.sightings && !throttled("sight", x, z, P.sightEvery)) { say(n > 1 ? t("Bande du FLN ({n}) repérée {place}.", { n, place: placeName(x, z) }) : t("Combattant du FLN repéré {place}.", { place: placeName(x, z) }), x, z, "", "hq_enemySeen"); told.add("bandSeen"); }
         }
@@ -226,7 +227,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       const was = aliveB.get(s);
       aliveB.set(s, s.alive);
       const { x, z } = s.position;
-      if (was && !s.alive) say(t("{name} détruit.", { name: s.name ?? t("Un bâtiment") }), x, z, s.team === "player" ? "bad" : "good", s.team === "player" ? "hq_buildingLost" : null);
+      if (was && !s.alive) say(t("{name} détruit.", { name: s.name ?? t("Un bâtiment") }), x, z, isHuman(s.team) ? "bad" : "good", isHuman(s.team) ? "hq_buildingLost" : null);
       // A hidden cache comes into sight.
       if (FOUND[s.typeKey] && s.alive && !foundCaches.has(s) && fog()?.enabled && fog().isVisible(x, z)) {   // seen, not the dev switch turning the fog off
         foundCaches.add(s);
@@ -256,7 +257,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
 
   function finish(end) {
     over = end;
-    const win = end.winner === "player";
+    const win = isHuman(end.winner);
     say(win ? t("<b>Victoire.</b>") : t("<b>Défaite.</b>"), null, null, win ? "good" : "bad", win ? "hq_victory" : "hq_defeat");
     hud.end(`
       <div class="kicker">Aurès · ${fmt(clock)}</div>
@@ -272,7 +273,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
 
   // ── OBJECTIVES (top left): what to do now, always in view ────────────────
   const home = post?.position ?? { x: 0, z: 0 };
-  const ownerName = (o) => (o === "player" ? t("à vous") : o === "enemy" ? t("tenu par le FLN") : t("neutre"));
+  const ownerName = (o) => (isHuman(o) ? t("à vous") : isHostile(o) ? t("tenu par le FLN") : t("neutre"));
   let objT = 0;
   function objectives(dt) {
     if ((objT -= dt) > 0) return;
@@ -284,10 +285,10 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       state: fr > al ? "done" : fr < al ? "bad" : "",
     }];
     // The next village to take: the nearest one not yours (to the post).
-    const todo = economy.points.filter((v) => v.owner !== "player")
+    const todo = economy.points.filter((v) => !isHuman(v.owner))
       .sort((a, b) => Math.hypot(a.position.x - home.x, a.position.z - home.z) - Math.hypot(b.position.x - home.x, b.position.z - home.z))[0];
     if (todo) {
-      const fln = units.list.filter((u) => u.alive && u.team === "enemy" && Math.hypot(u.position.x - todo.position.x, u.position.z - todo.position.z) < economy.params.radius).length;
+      const fln = units.list.filter((u) => u.alive && isHostile(u.team) && Math.hypot(u.position.x - todo.position.x, u.position.z - todo.position.z) < economy.params.radius).length;
       list.push({
         text: t("Prendre {name}", { name: todo.name }),
         sub: `${ownerName(todo.owner)}${fln ? ` · <b style='color:var(--hud-red)'>${t("{n} FLN à l'intérieur", { n: fln })}</b>` : ""} · ${t("postez des hommes à pied dans son cercle")}`,
@@ -321,7 +322,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (app.algOptions?.tips === false) return;   // the pause menu's "Conseils" (ui/gameMenu.js)
     // Firsts, from what the watchers and the economy show.
     if (started && clock > startAt + 3) advise("start", t("Encadrez vos hommes à la souris, puis <b>clic droit</b> près d'un village pour les y envoyer. Cliquez sur un objectif pour le voir."));
-    const footIn = units.list.some((u) => u.alive && u.team === "player" && u.type?.foot && economy.points.some((v) => Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < economy.params.radius));
+    const footIn = units.list.some((u) => u.alive && isHuman(u.team) && u.type?.foot && economy.points.some((v) => Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < economy.params.radius));
     if (footIn) advise("inRing", t("Gardez-les dans le cercle : l'anneau du village se remplit vers vous. Seuls les hommes à pied comptent ; plus ils sont nombreux, plus c'est rapide (jusqu'à 3)."));
     if (economy.held > 0) advise("firstVillage", t("Un village à vous rapporte effectifs, carburant et munitions (tant qu'il est relié au poste) et compte comme un point. Le FLN tentera de le retourner — <b>laissez-y quelques hommes</b>."));
     if (stats.lostFr > 0 || told.has("contactSeen")) advise("contact", t("Sous le feu : maintenez <b>V</b> pour voir la couverture (vert) et le camouflage (cyan). Derrière murs et rochers on survit ; à découvert, non."));

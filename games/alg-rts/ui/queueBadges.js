@@ -6,6 +6,7 @@
 // One small DOM badge per producing building, placed each frame by projecting
 // a point over its roof; hidden when idle, off screen or behind the camera.
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 
 const CSS = `
 .alg-qb {
@@ -44,7 +45,7 @@ export function createQueueBadges({ app, producers, thumbnails }) {
       const cam = app.camera, w = window.innerWidth, h = window.innerHeight;
       for (const p of producers) {
         const s = p.structure;
-        if (!s || s.team !== "player") continue;
+        if (!s || !isHuman(s.team)) continue;
         const q = s.alive !== false ? s.queue ?? [] : [];
         const b = q.length ? badgeOf(s) : badges.get(s);
         if (!b) continue;

@@ -21,6 +21,7 @@
 // new order cancels the throw. Then that grenade is on cooldown (each kind its
 // own). The ALN AI throws frags too (algAI.js), through order().
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { t } from "./i18n/i18n.js";
 
 export const GRENADE = {
@@ -72,7 +73,7 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   // ── The command card's buttons ───────────────────────────────────────────
   function ability(sel, kind = "grenade") {
     const K = THROWS[kind];
-    const men = sel.filter((u) => carries(u) && u.team === "player");
+    const men = sel.filter((u) => carries(u) && isHuman(u.team));
     if (!men.length) return null;
     const cds = men.map((u) => (u.throwing ? K.cooldown : Math.max(0, u[K.cd] ?? 0)));
     const cd = Math.min(...cds);
@@ -81,7 +82,7 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
 
   // ── Aiming ───────────────────────────────────────────────────────────────
   function begin(sel = selection.selected, kind = "grenade") {
-    const men = (sel ?? []).filter((u) => ready(u, kind) && u.team === "player");
+    const men = (sel ?? []).filter((u) => ready(u, kind) && isHuman(u.team));
     if (!men.length || (purse && !purse.canAfford(THROWS[kind].cost))) return false;
     targeting = { sel: men, at: null, kind };
     dom.style.cursor = "crosshair";

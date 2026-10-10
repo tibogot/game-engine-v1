@@ -12,6 +12,7 @@
 //
 // Per frame (tick): the pips and the lines are rewritten only when they change.
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { t } from "../i18n/i18n.js";
 
 const WEAPON = { rifle: t("Fusils"), mg: t("Mitrailleuse"), cannon: t("Canon"), gunship: t("Roquettes + mitrailleuse") };
@@ -85,7 +86,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
           <div class="who">${u.type?.name ?? u.name ?? u.typeKey}</div>
           ${isStruct || !u.type?.foot ? `<div class="hpbar"><i></i></div>` : `<div class="pips"></div>`}
           <div class="chips"></div>
-          <div class="sub">${isStruct ? (u.team === "player" ? t("Bâtiment") : t("Bâtiment ennemi")) : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
+          <div class="sub">${isStruct ? (isHuman(u.team) ? t("Bâtiment") : t("Bâtiment ennemi")) : `${WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
         </div>
       </div>`;
     one = { units, pips: root.querySelector(".pips"), hpbar: root.querySelector(".hpbar i"), chips: root.querySelector(".chips") };

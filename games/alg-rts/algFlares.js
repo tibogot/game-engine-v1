@@ -17,6 +17,7 @@
 // MUNITIONS per flare (algEconomy.js), each pit has a cooldown. Nothing runs while no flare is
 // up — no light, no draw (the glow mesh is hidden), no reveal loop.
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { uniform, vec3 } from "three/tsl";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { BloomMRTNode } from "../shared-rts/bloom.js";
@@ -58,7 +59,7 @@ export function createAlgFlares({ app, units, selection, purse = null, cover = n
   const sources = [];      // the fog of war's vision sources (one per burning flare)
 
   const night = () => app.sky?.night ?? 0;
-  const isPit = (s) => s?.alive && s.isStructure && s.typeKey === "mortarPit" && s.team === "player";
+  const isPit = (s) => s?.alive && s.isStructure && s.typeKey === "mortarPit" && isHuman(s.team);
 
   // ── The command card's button ────────────────────────────────────────────
   function ability(sel) {

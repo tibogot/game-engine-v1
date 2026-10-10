@@ -15,6 +15,7 @@
 // Game code: this game's buildings, prices and rules. The same flow in nam-rts
 // is nam's own (buildPlacement.js / buildings.js).
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildRefuge, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
 import { createHealthBarField } from "../shared-rts/healthBar.js";
@@ -68,7 +69,7 @@ function fieldTent() {
 /** Who may raise `key`: his type lists it (the sappers), or the piece names his type. */
 export const canBuild = (u, key) => !!(u?.type?.builds?.includes(key) || BUILDS[key]?.by?.includes(u?.typeKey));
 /** For the command card (the French: the ALN's pieces are the AI's): [{ key, label, tip }] and { key: cost }. */
-export const BUILD_BUTTONS = Object.entries(BUILDS).filter(([, b]) => b.team !== "enemy").map(([key, b]) => ({ key, label: b.label, tip: b.tip }));
+export const BUILD_BUTTONS = Object.entries(BUILDS).filter(([, b]) => !isHostile(b.team)).map(([key, b]) => ({ key, label: b.label, tip: b.tip }));
 export const BUILD_COSTS = Object.fromEntries(Object.entries(BUILDS).map(([k, b]) => [k, b.cost]));
 
 const OK = new THREE.Color(0x46e070), BAD = new THREE.Color(0xe4483a);
@@ -159,7 +160,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const ghostMat = () => new THREE.MeshBasicMaterial({ color: OK, transparent: true, opacity: 0.45, depthWrite: false, fog: false });
   function begin(key, selected) {
     cancel();
-    const builders = selected.filter((u) => u?.alive && u.team === "player" && canBuild(u, key));
+    const builders = selected.filter((u) => u?.alive && isHuman(u.team) && canBuild(u, key));
     if (!builders.length || !BUILDS[key]) return;
     const mat = ghostMat();
     const ghost = new THREE.Mesh(geoOf(key), mat);
@@ -339,12 +340,12 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const bars = createHealthBarField({ scene: app.scene, max: 64, height: 0.45, groundAt: (x, z) => app.getWorldHeight(x, z) });
   // An ALN site is the fog's, as the ALN's buildings are (algStructures):
   // unseen until first explored, its bar only while you can see it.
-  const fogHides = (s, test) => s.team === "enemy" && app.fogOfWar?.enabled && !app.fogOfWar[test](s.x, s.z);
+  const fogHides = (s, test) => isHostile(s.team) && app.fogOfWar?.enabled && !app.fogOfWar[test](s.x, s.z);
   const frame = () => {
     bars.begin();
     for (const s of sites) {
       s.mesh.visible = !fogHides(s, "isExplored");
-      if (!fogHides(s, "isVisible")) bars.add(s.x, s.position.y + s.barY, s.z, s.barW, s.progress, s.team === "enemy", app.camera, s.team === "enemy" ? null : WORK);
+      if (!fogHides(s, "isVisible")) bars.add(s.x, s.position.y + s.barY, s.z, s.barW, s.progress, isHostile(s.team), app.camera, isHostile(s.team) ? null : WORK);
     }
     bars.commit();
   };

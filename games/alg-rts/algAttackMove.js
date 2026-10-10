@@ -9,6 +9,7 @@
 //   ENDS      at the spot, or with any other order (a move, a halt, a retreat).
 // (Not the camera's A: W/A/S/D and Q/E are taken by position on QWERTY and AZERTY alike.)
 import { t } from "./i18n/i18n.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 
 const P = {
   tick: 0.3,          // s between looks at the men on an assault
@@ -26,7 +27,7 @@ export function createAlgAttackMove(app, { selection }) {
   let armed = false, tickT = 0;
 
   /** The player's units of a selection that can go (not buildings, not the enemy, not inside). */
-  const movers = (sel) => (sel ?? []).filter((u) => u.alive && u.team === "player" && !u.isStructure);
+  const movers = (sel) => (sel ?? []).filter((u) => u.alive && isHuman(u.team) && !u.isStructure);
 
   /** ASSAULT toward (x, z): the move's formation, the men free to fight. */
   function go(x, z, y) {
@@ -34,7 +35,7 @@ export function createAlgAttackMove(app, { selection }) {
     const { arr, slots } = selection.previewMove(x, z);
     selection.orderMove(x, z, y);          // paths, the order marks, the radio — as a move
     arr.forEach((u, i) => {
-      if (u.team !== "player" || u.isStructure || !slots[i]) return;
+      if (!isHuman(u.team) || u.isStructure || !slots[i]) return;
       u.playerMove = false;                // fight on the way (combat.js)
       u.attackMove = { x: slots[i].x, z: slots[i].z };
       marching.add(u);

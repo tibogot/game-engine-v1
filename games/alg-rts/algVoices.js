@@ -22,6 +22,7 @@
 // is a buffer source and four nodes, alive for a second or two.
 
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 
 /** Seconds before the same line can be said again (anyone on that side). */
 const COOLDOWN = {
@@ -147,7 +148,7 @@ export function createAlgVoices({ app, audio, units, fogOfWar = null, manifestUr
   // ── What makes a man speak: state changes, scanned 5 times a second ──────
   const was = new WeakMap();   // unit → { sup, pin, thr, work, tgt, alive, tgtT }
   let wait = 0, clock = 0;
-  const seen = (u) => u.team === "player" || !fogOfWar?.enabled || fogOfWar.canSeeEntity(u);
+  const seen = (u) => isHuman(u.team) || !fogOfWar?.enabled || fogOfWar.canSeeEntity(u);
   function friendNear(u, r = 30) {
     let best = null, bd = r;
     for (const o of units.list) {

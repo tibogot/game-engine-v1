@@ -16,6 +16,7 @@
 // camera's left-drag. Picks units by raycasting the meshes tagged in units.js
 // (mesh.userData.unit); box-select projects each unit to screen space.
 import * as THREE from "three";
+import { isHuman, isHostile } from "./teams.js";
 import { RENDER_ORDER } from "./renderOrder.js";
 
 const _pc = new THREE.Vector3(), _pe = new THREE.Vector3();   // screen picks (vehicles)
@@ -98,7 +99,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         _pe.set(u.position.x + r, u.position.y + Math.min(2, r * 0.5), u.position.z).project(camera);
         const rpx = Math.max(10, Math.hypot((_pe.x - _pc.x) * 0.5 * rect.width, (_pe.y - _pc.y) * 0.5 * rect.height));
         const d = Math.hypot(sx - clientX, sy - clientY);
-        if (d < rpx * 1.1 && d - (u.team === "player" ? 4 : 0) < bd) { bd = d - (u.team === "player" ? 4 : 0); best = u; }
+        if (d < rpx * 1.1 && d - (isHuman(u.team) ? 4 : 0) < bd) { bd = d - (isHuman(u.team) ? 4 : 0); best = u; }
       }
       if (best) return best;
     }
@@ -109,7 +110,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const sHits = raycaster.intersectObjects(structuresRenderer.roots, true);
       for (const h of sHits) {
         const s = structuresRenderer.structureFromHit(h);
-        if (s?.alive && s.team === "player") return s;
+        if (s?.alive && isHuman(s.team)) return s;
       }
     }
     // Player-built buildings (helipad) have their own renderer/pick.
@@ -117,7 +118,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const bHits = raycaster.intersectObjects(buildingRenderer.roots, true);
       for (const h of bHits) {
         const b = buildingRenderer.buildingFromHit(h);
-        if (b?.alive && b.team === "player") return b;
+        if (b?.alive && isHuman(b.team)) return b;
       }
     }
     return null;
@@ -130,7 +131,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const out = [];
     const v = new THREE.Vector3();
     for (const u of units.list) {
-      if (!u.alive || u.team !== "player" || u.typeKey !== typeKey) continue;
+      if (!u.alive || !isHuman(u.team) || u.typeKey !== typeKey) continue;
       v.copy(u.position).project(camera);
       if (v.z < 1 && Math.abs(v.x) <= 1 && Math.abs(v.y) <= 1) out.push(u);
     }
@@ -173,7 +174,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       // (the renderer keeps their corpse on the ground), so without the alive
       // check a drag also grabbed every casualty in the rectangle.
       for (const u of units.list) {
-        if (!u.alive || u.team !== "player") continue;
+        if (!u.alive || !isHuman(u.team)) continue;
         // His middle, not his feet (a box drawn round a man's body missed him).
         const p = u.position.clone().setY(u.position.y + (u.type?.foot ? 1 : 0)).project(camera);
         if (p.z > 1) continue; // behind the camera
@@ -187,7 +188,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const now = performance.now();
       const dbl = unit && lastClick.unit === unit && now - lastClick.t < DOUBLE_CLICK_MS;
       lastClick = { unit, t: now };
-      if (unit && unit.team !== "player" && !unit.isStructure && onInspect) {
+      if (unit && !isHuman(unit.team) && !unit.isStructure && onInspect) {
         // An ENEMY: inspected, not selected — your selection is let go (as a click elsewhere).
         if (!down.shift) {
           clear();
@@ -204,7 +205,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         // RTS; the unit bar's double-click takes the whole map.
         if (!down.shift) clear();
         for (const u of onScreenOfType(unit.typeKey)) setSelected(u, true);
-      } else if (unit && unit.team !== "player") {
+      } else if (unit && !isHuman(unit.team)) {
         // An enemy with no inspect panel (or Shift held): not yours to select — a plain click clears.
         if (!down.shift) clear();
       } else if (unit) {
@@ -287,7 +288,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   function pickEnemyUnit(clientX, clientY) {
     if (!attackUnits) return null;
     const u = meshPick(clientX, clientY);
-    return u?.alive && !u.isStructure && u.team && u.team !== "player" && (canTarget?.(u) ?? true) ? u : null;
+    return u?.alive && !u.isStructure && u.team && !isHuman(u.team) && (canTarget?.(u) ?? true) ? u : null;
   }
   // THE ATTACK CURSOR (attackUnits): a red sight over an enemy while men are selected. Looked
   // up at most every 90 ms; never over another mode's cursor (a grenade's crosshair).
@@ -300,7 +301,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     hoverT = now;
     const cur = dom.style.cursor;
     if (cur && !hoverOn) return;   // another mode owns it
-    const armed = [...selected].some((u) => !u.isStructure && u.team === "player" && u.range > 0);
+    const armed = [...selected].some((u) => !u.isStructure && isHuman(u.team) && u.range > 0);
     const on = armed && !!(pickEnemy(e.clientX, e.clientY) ?? pickEnemyUnit(e.clientX, e.clientY));
     if (on !== hoverOn) { hoverOn = on; dom.style.cursor = on ? ATTACK_CURSOR : ""; }
   };
@@ -316,7 +317,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const hits = raycaster.intersectObjects(structuresRenderer.roots, true);
     for (const h of hits) {
       const s = structuresRenderer.structureFromHit(h);
-      if (s?.alive && s.team === "enemy") return s;
+      if (s?.alive && isHostile(s.team)) return s;
     }
     return null;
   }
@@ -327,7 +328,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     // left-drag. (Left-click/box-select stays RTS-only to avoid that clash.)
     e.preventDefault();
     // Orders go to the PLAYER's units only, whatever the selection holds.
-    const mine = [...selected].filter((u) => u.team === "player");
+    const mine = [...selected].filter((u) => isHuman(u.team));
     if (!mine.length) return;
 
     // Right-clicking an enemy is an ATTACK order.
@@ -370,7 +371,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     //
     // Assign the CLOSEST unit to each slot (greedy) so the group doesn't cross
     // over itself on the way, and so two units never chase the same slot.
-    const arr = [...selected].filter((u) => !u.isStructure && u.team === "player"); // buildings don't move; never an enemy
+    const arr = [...selected].filter((u) => !u.isStructure && isHuman(u.team)); // buildings don't move; never an enemy
     if (!arr.length) return { arr, slots: [] };
     const maxR = Math.max(...arr.map((u) => u.radius ?? 3));
     const spacing = Math.max(6, maxR * 2.6);
@@ -506,7 +507,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     select(arr) {
       uninspect();
       clear();
-      for (const u of arr) if (u.team === "player") setSelected(u, true);
+      for (const u of arr) if (isHuman(u.team)) setSelected(u, true);
       notify();
     },
     dispose() {

@@ -29,6 +29,7 @@
 //     moves there (selection.orderMove — the same order as on the ground).
 //   • No intel (a game hook — nam's radio station): a dead screen, NO RADIO.
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { TRACK_LINES } from "../algTracks.js";
 import { drawIcon } from "./resourceIcons.js";
 import { t } from "../i18n/i18n.js";
@@ -453,8 +454,8 @@ export function createMinimap({
       }
       own[j * n + i] = best;
     }
-    const tint = (p) => (p.owner === "player" ? (p.linked === false ? "rgba(224,160,64,0.16)" : "rgba(90,174,255,0.17)")
-      : p.owner === "enemy" ? "rgba(255,95,78,0.17)" : null);
+    const tint = (p) => (isHuman(p.owner) ? (p.linked === false ? "rgba(224,160,64,0.16)" : "rgba(90,174,255,0.17)")
+      : isHostile(p.owner) ? "rgba(255,95,78,0.17)" : null);
     for (let k = 0; k < pts.length; k++) {
       const f = tint(pts[k]);
       if (!f) continue;
@@ -497,7 +498,7 @@ export function createMinimap({
   const seen = new WeakMap();   // unit → { cd, hp }
   const pulses = [];            // { x, y, t }
   const pings = [];             // { x, z, t } — alerts (world coords)
-  const visible = (u) => u.team === "player" || !fogOfWar?.enabled || fogOfWar.isVisible(u.position.x, u.position.z);
+  const visible = (u) => isHuman(u.team) || !fogOfWar?.enabled || fogOfWar.isVisible(u.position.x, u.position.z);
   function watchCombat(now) {
     for (const u of units.list) {
       const last = seen.get(u);
@@ -566,15 +567,15 @@ export function createMinimap({
       // holds one is known from the economy, as in CoH).
       const m = frame.toMini(p.position.x, p.position.z), rr = (p.radius ?? R) * frame.k;
       // Held but cut off from the post (algEconomy.js supply lines): amber.
-      const col = p.owner === "player" ? (p.linked === false ? "#e0a040" : COL.player) : p.owner === "enemy" ? COL.enemy : "#e8dcbc";
+      const col = isHuman(p.owner) ? (p.linked === false ? "#e0a040" : COL.player) : isHostile(p.owner) ? COL.enemy : "#e8dcbc";
       c.beginPath(); c.arc(m.x, m.y, rr, 0, Math.PI * 2);
-      c.fillStyle = p.owner === "player" ? "rgba(90,174,255,0.14)" : p.owner === "enemy" ? "rgba(255,95,78,0.16)" : "rgba(232,220,188,0.1)";
+      c.fillStyle = isHuman(p.owner) ? "rgba(90,174,255,0.14)" : isHostile(p.owner) ? "rgba(255,95,78,0.16)" : "rgba(232,220,188,0.1)";
       c.fill();
       c.strokeStyle = "rgba(10,12,8,0.6)"; c.lineWidth = 2.4 * s; c.stroke();
       c.strokeStyle = col; c.lineWidth = 1 * s; c.globalAlpha = 0.75; c.stroke(); c.globalAlpha = 1;
       const v = p.progress ?? 0;
       if (Math.abs(v) > 0.01 && Math.abs(v) < 0.999) {
-        c.strokeStyle = v > 0 ? COL.player : COL.enemy; c.lineWidth = 2.6 * s;
+        c.strokeStyle = (v > 0) === isHuman("player") ? COL.player : COL.enemy; c.lineWidth = 2.6 * s;   // (progress > 0 = toward the French; blue = toward the human)
         c.beginPath(); c.arc(m.x, m.y, rr, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.abs(v)); c.stroke();
       }
       // A SUPPLY POINT (fuel / munitions): a round token with its letter, no name.
@@ -617,9 +618,9 @@ export function createMinimap({
       c.lineWidth = 0.8 * s; c.strokeStyle = "rgba(10,12,8,0.8)";
       for (const b of list) {
         if (!b.alive || !b.position || b.typeKey === "post" || b.typeKey === "caveEntrance") continue;   // their own markers (above)
-        if (b.team !== "player" && fogOfWar?.enabled && !fogOfWar.isExplored(b.position.x, b.position.z)) continue;
+        if (!isHuman(b.team) && fogOfWar?.enabled && !fogOfWar.isExplored(b.position.x, b.position.z)) continue;
         const m = frame.toMini(b.position.x, b.position.z), r = 2.2 * s;
-        c.fillStyle = b.team === "player" ? "#8fc8ff" : "#ff8f80";
+        c.fillStyle = isHuman(b.team) ? "#8fc8ff" : "#ff8f80";
         c.fillRect(m.x - r, m.y - r, r * 2, r * 2); c.strokeRect(m.x - r, m.y - r, r * 2, r * 2);
       }
     }
@@ -650,9 +651,9 @@ export function createMinimap({
     _sq.clear();
     for (const u of units.list) {
       if (!u.alive) continue;
-      if (u.team !== "player" && fogOfWar?.enabled && !fogOfWar.isVisible(u.position.x, u.position.z)) continue;
+      if (!isHuman(u.team) && fogOfWar?.enabled && !fogOfWar.isVisible(u.position.x, u.position.z)) continue;
       // A French squad: one marker at its men's centre (gathered below).
-      const sq = u.team === "player" && u.type?.foot ? squadOf?.(u) : null;
+      const sq = isHuman(u.team) && u.type?.foot ? squadOf?.(u) : null;
       if (sq) {
         const g = _sq.get(sq) ?? { x: 0, z: 0, n: 0, sel: false };
         g.x += u.position.x; g.z += u.position.z; g.n++; g.sel ||= !!u.selected;
@@ -660,7 +661,7 @@ export function createMinimap({
         continue;
       }
       const m = frame.toMini(u.position.x, u.position.z);
-      const key = u.selected ? "sel" : u.team === "player" ? "player" : "enemy";
+      const key = u.selected ? "sel" : isHuman(u.team) ? "player" : "enemy";
       if (u.isAir) _air[key].push(m.x, m.y, frame.upYaw - (u.heading ?? 0));
       else if (u.type?.foot) _foot[key].push(m.x, m.y);
       else _veh[key].push(m.x, m.y);

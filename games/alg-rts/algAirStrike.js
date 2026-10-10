@@ -10,6 +10,7 @@
 // rounds and bombs hurt only the FLN (combat.splashAt skips the owner's team), but a bomb on a
 // village wrecks it (algDamage). The French pay MUNITIONS; the post has a cooldown.
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { FR_PAINT_TINT, buildT6 } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
@@ -45,7 +46,7 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
   let targeting = null;   // { post, at }
   const runs = [];        // { post, x, z, dir, t, plane, rounds, bombs }
   const cooling = new Set();   // posts with a cooldown running
-  const isPost = (s) => s?.alive && s.isStructure && s.typeKey === "post" && s.team === "player";
+  const isPost = (s) => s?.alive && s.isStructure && s.typeKey === "post" && isHuman(s.team);
   const groundY = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
 
   // The plane: one mesh set, cloned per run (kit material, cockades, a spinning propeller).

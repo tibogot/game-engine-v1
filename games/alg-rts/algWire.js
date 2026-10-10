@@ -16,6 +16,7 @@
 // (navGrid.clearNoFootFootprint), leaves the showroom list (so nothing counts
 // it any more), and puts up a little dust. Nothing here draws.
 import { canBuild } from "./algBuild.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 
 const P = {
   cutTime: 8,             // s for one man
@@ -128,7 +129,7 @@ export function createAlgWire(app, { units, showroom = {}, navGrid = null, ambie
     },
     /** The sappers' order: the wire nearest the selection's centre. */
     orderCut(sel) {
-      const men = sel.filter((u) => u.alive && u.team === "player" && canBuild(u, "wire"));
+      const men = sel.filter((u) => u.alive && isHuman(u.team) && canBuild(u, "wire"));
       if (!men.length) return false;
       const cx = men.reduce((s, u) => s + u.position.x, 0) / men.length, cz = men.reduce((s, u) => s + u.position.z, 0) / men.length;
       return this.cutNearest(men, cx, cz);

@@ -15,6 +15,7 @@
 // while. A wrecked producer stops producing. Selectable: yours, with corner
 // brackets; the ALN's can be right-clicked to attack.
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { vec3 } from "three/tsl";
 import { t } from "./i18n/i18n.js";
 
@@ -191,7 +192,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
         const s = r.s;
         // The ALN's buildings: hidden under the fog until first seen (then
         // they stay, as a last-known position does).
-        if (s.team === "enemy") {
+        if (isHostile(s.team)) {
           // One raised mid-game (a new arms cache, algAI.js) where the French
           // had already been: only once they actually SEE it — "explored"
           // would show it the moment it is finished.
@@ -210,7 +211,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
           r.gun.rotation.y += d * Math.min(1, dt * 4);
         }
         if (s.alive && (s.hp < s.maxHp || s.selected)) {
-          healthBars.add(s.position.x, s.position.y + Math.min(r.height, 12) + 2, s.position.z, Math.min(12, 4 + r.fp.hx * 0.3), s.hp / s.maxHp, s.team === "enemy", camera);
+          healthBars.add(s.position.x, s.position.y + Math.min(r.height, 12) + 2, s.position.z, Math.min(12, 4 + r.fp.hx * 0.3), s.hp / s.maxHp, isHostile(s.team), camera);
         }
         if (s.alive && s.selected) frames.add(s.position.x, s.position.z, r.fp.hx + 0.6, r.fp.hz + 0.6, r.mesh.rotation.y, undefined, r.mesh.position.y + 0.8);
       }

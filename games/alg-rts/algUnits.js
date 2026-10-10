@@ -3,6 +3,7 @@
 // to this game's map, buildings and unit list. The UI is this game's own
 // (next step); nothing here imports from nam-rts.
 import { createNavGrid } from "../shared-rts/navGrid.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { createUnits } from "../shared-rts/units.js";
 import { CORPSES, createUnitRenderer } from "../shared-rts/unitRenderer.js";
 
@@ -355,6 +356,17 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     }));
   }
   app.algProducers = producers;
+  // PLAYING THE FLN (?side=fln, step 1): its AI is off, so its men are yours from the start — a band
+  // of ten moudjahidine and two FM teams out of the cave (the AI's own opening is bands of this size).
+  if (SIDES.human === "enemy") {
+    const cv = producers.find((p) => p.structure.typeKey === "caveEntrance");
+    const o = cv?.outside ?? cv?.structure.position;
+    if (o) for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2, r = 4 + (i % 3) * 2.5;
+      const p = navGrid.nearestOpenWorld(o.x + Math.cos(a) * r, o.z + Math.sin(a) * r, true) ?? o;
+      units.spawn(i < 10 ? "moudjahid" : "fmTeam", p.x, p.z, { team: "enemy", lookRole: i });
+    }
+  }
   // Every building as a combat structure (algStructures.js): the producers
   // and the placed emplacements — targets, and the armed ones fighters.
   const structures = createAlgStructures({ app, showroom, producers, units });
@@ -423,7 +435,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // The boot page's key-hint label sits where the bar goes.
   const hint = document.getElementById("hud");
   if (hint) hint.style.display = "none";
-  const mine = (key) => units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === key);
+  const mine = (key) => units.list.filter((u) => u.alive && isHuman(u.team) && u.typeKey === key);
   const unitBar = createUnitBar({
     thumbnails: unitRenderer.thumbnails,
     onPickGroup: (arr) => app.selection?.select(arr),
@@ -471,8 +483,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       }
       return list;
     },
-    canAfford: (cost) => economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop),
-    shortOf: (cost) => [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} atteint)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", "),
+    // (The HUMAN's purse — the FLN's one number when you play the FLN: ?side=fln.)
+    canAfford: (cost) => (SIDES.human === "enemy" ? economy.aln.canAfford(cost) : economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop)),
+    shortOf: (cost) => (SIDES.human === "enemy" ? "" : [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} atteint)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", ")),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: BUILD_BUTTONS,
@@ -483,7 +496,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // PATROUILLE (algPatrols.js): the selection walks the nearest track in
     // file, back and forth, until given another order.
     // GRENADE (algGrenades.js): one man of the selection throws.
-    abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && u.team === "player")
+    abilitiesFor: (sel) => (sel.some((u) => !u.isStructure && !u.isAir && isHuman(u.team))
       ? [
         // ASSAUT (algAttackMove.js): advance and fight on the way.
         attackMove?.ability(sel),
@@ -506,7 +519,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         garrison?.ability(sel),
         // DÉBARQUER (algTransports.js): out of the truck / half-track.
         transports?.ability(sel),
-        sel.some((u) => u.alive && u.team === "player" && canBuild(u, "wire"))
+        sel.some((u) => u.alive && isHuman(u.team) && canBuild(u, "wire"))
           && { key: "cutWire", label: t("Couper"), hint: t("Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs."), ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
         // calls a man in for a squad short of men, at the post.
@@ -629,7 +642,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE ARMY TABS (ui/armyTabs.js): every group you have, down the right edge.
   // What each building is training, over its roof (ui/queueBadges.js).
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
-  const armyTabs = createArmyTabs({ units, selection, squads, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
+  const armyTabs = createArmyTabs({ units, selection, squads, team: SIDES.human, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
   const mapOpts = { app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) };
   const minimap = createMinimap({ ...mapOpts, mount: hud.left });
@@ -728,7 +741,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algAirStrike = airStrike;
   // DOCTRINES (algDoctrines.js): the commander chosen in the briefing, command points from the
   // fight, its call-ins on a strip above the HUD. Not in the training.
-  const doctrines = MAP.tutorial ? null : createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar });
+  const doctrines = MAP.tutorial || SIDES.human !== "player" ? null : createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar });
   app.algDoctrines = doctrines;
   // FIELD WORKS (algFieldWorks.js): the forward post, the aid station, the fortified point.
   const fieldWorks = createAlgFieldWorks(app, { units, structures, economy });
@@ -738,7 +751,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // thin, back into the cave before the armour comes. ?ai=0 = without.
   const cave = producers.find((p) => p.structure.typeKey === "caveEntrance");
   const postP = producers.find((p) => p.structure.typeKey === "post");
-  const ai = cave && new URLSearchParams(location.search).get("ai") !== "0"
+  // (Not when YOU are the FLN — ?side=fln: its men are yours to command.)
+  const ai = cave && SIDES.human !== "enemy" && new URLSearchParams(location.search).get("ai") !== "0"
     ? createAlgAI(app, { units, cave, post: postP?.centre ?? muster, caveMouth: cave.outside })
     : null;
   app.algAI = ai;
@@ -760,7 +774,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.timeStep ??= 0;
   // LAST SEEN (algLastSeen.js): where an enemy was when he dropped out of sight.
   const ghostRings = createSelectionRingField({ app, max: 32, inner: 0.86, segments: 40, opacity: 0.5 });
-  const lastSeen = createAlgLastSeen({ app, units, fogOfWar, rings: ghostRings });
+  const lastSeen = createAlgLastSeen({ app, units, fogOfWar, rings: ghostRings, team: hostileSide() });
   // THE PATH DOTS (algPathDots.js): the selected squads' routes on the ground.
   const pathDots = createAlgPathDots({ app, selection, squads });
   app.algPathDots = pathDots;
@@ -812,12 +826,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // have men selected (you are giving orders), otherwise only where someone
     // is standing in one — always-on, they cluttered the map (you, 2026-09-29).
     villageRings.begin();
-    const giving = selection.selected?.some((e) => e.team === "player" && !e.isStructure);
+    const giving = selection.selected?.some((e) => isHuman(e.team) && !e.isStructure);
     for (const v of economy.allPoints) {
       const R = v.radius;
       const busy = giving || units.list.some((u) => u.alive && !u.isAir && Math.abs(u.position.x - v.position.x) < R && Math.abs(u.position.z - v.position.z) < R && Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < R);
       // Held but cut off from the post (no supply line): amber, it pays nothing.
-      if (busy) villageRings.add(v.position.x, v.position.z, R, v.owner === "player" ? (v.linked ? 0x58a8ff : 0xe0a040) : v.owner === "enemy" ? 0xff6a5a : 0xd8cfae);
+      if (busy) villageRings.add(v.position.x, v.position.z, R, isHuman(v.owner) ? (v.linked ? 0x58a8ff : 0xe0a040) : isHostile(v.owner) ? 0xff6a5a : 0xd8cfae);
     }
     villageRings.commit();
     reachRings.begin();

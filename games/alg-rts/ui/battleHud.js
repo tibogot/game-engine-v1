@@ -13,6 +13,7 @@
 // Plain DOM in the HUD's own look (hudBar.js tokens); per frame it writes only
 // what changed. The top of the screen otherwise stays empty (hudBar.js).
 import { MINI } from "./hudBar.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { rectOf } from "../../shared-rts/canvasRect.js";
 import { iconSvg, pointIcon } from "./resourceIcons.js";
 import { hasIcon, iconStyle } from "./icons.js";
@@ -324,10 +325,10 @@ export function createBattleHud({ camera, canvas, onJump }) {
       const key = `${p.owner}|${v.toFixed(2)}|${p.linked}`;
       if (key === m.last) continue;
       m.last = key;
-      m.node.className = `alg-vmark ${p.owner ?? ""}${p.kind === "supply" ? " supply" : ""}${p.owner === "player" && p.linked === false ? " cut" : ""}`;
+      m.node.className = `alg-vmark ${isHuman(p.owner) ? "player" : isHostile(p.owner) ? "enemy" : ""}${p.kind === "supply" ? " supply" : ""}${isHuman(p.owner) && p.linked === false ? " cut" : ""}`;
       // The ring fills clockwise toward whoever is winning it: blue the French, red the FLN.
       m.ring.style.strokeDasharray = `${(Math.abs(v) * 100).toFixed(1)} 100`;
-      m.ring.style.stroke = v >= 0 ? "#5aaeff" : "#ff5f4e";
+      m.ring.style.stroke = (v >= 0) === isHuman("player") ? "#5aaeff" : "#ff5f4e";   // (blue = toward the human's side)
     }
   }
 

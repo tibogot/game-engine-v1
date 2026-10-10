@@ -13,6 +13,7 @@
 //               minutes a truck): the road has to be kept open for the trucks
 //               to pay — and that is where the ALN mines it (algMines.js).
 import { TRACK_LINES } from "./algTracks.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 
 const P = {
   tick: 0.5,            // re-plan every half second, not every frame
@@ -70,7 +71,7 @@ export function createAlgPatrols(app, { units, economy, onDelivery = () => {} })
    * one able to, or no track near enough — 150 m).
    */
   function start(selected) {
-    const list = selected.filter((u) => u.alive && u.team === "player" && !u.isAir && !u.isStructure && u.orderTo);
+    const list = selected.filter((u) => u.alive && isHuman(u.team) && !u.isAir && !u.isStructure && u.orderTo);
     if (!list.length) return null;
     for (const u of list) leave(u);
     const vehicles = list.some((u) => !u.type?.foot);

@@ -13,6 +13,7 @@
 //   LEAVE     any move order, RETRAITE, or SORTIR (K): out by the door.
 // The badge over a held house: its holder's colour and the men in it (n / places).
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { iconStyle } from "./ui/icons.js";
 import { t } from "./i18n/i18n.js";
 
@@ -218,7 +219,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
       // Stopped short. The player's man: given up (the player sees it). The AI's: the door
       // re-found on open ground (props placed after the houses can cover it) and the walk
       // retried every 3 s, for 40 s (measured: FLN cells stood 12-25 m off, no route).
-      if (u.team === "player") { pending.delete(u); continue; }
+      if (isHuman(u.team)) { pending.delete(u); continue; }
       u._garT = (u._garT ?? 0) + dt;
       if (u._garT > 40) { pending.delete(u); u._garT = 0; continue; }
       if ((u._garRetry = (u._garRetry ?? 0) - dt) > 0) continue;
@@ -253,7 +254,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
         h.blasts.length = 0;
         const out = toWorld(h, 0, -(h.hd + 9));
         men.forEach((u, k) => u.orderTo(out.x + (k % 3 - 1) * 2.5, out.z + Math.floor(k / 3) * 2.5));
-        if (men[0]?.team === "player") app.algBattle?.say?.(t("<b>{name}</b> chassé de sa maison !", { name: men[0].squad?.name ?? t("Le groupe") }), h.x, h.z, "bad", null, "alertAttack");
+        if (isHuman(men[0]?.team)) app.algBattle?.say?.(t("<b>{name}</b> chassé de sa maison !", { name: men[0].squad?.name ?? t("Le groupe") }), h.x, h.z, "bad", null, "alertAttack");
       }
     }
     for (const s of reRetreat) squads?.retreat?.(s);
@@ -282,12 +283,12 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     }
     return null;
   }
-  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && u.team === "player" && u.type?.foot && !u.isStructure);
+  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && u.type?.foot && !u.isStructure);
   function onContext(e) {
     const men = infantry();
     if (!men.length || app.renderer.domElement.style.cursor === "crosshair") return;
     const h = pickAt(e.clientX, e.clientY);
-    if (!h || (h.team && h.team !== "player")) return;
+    if (!h || (h.team && !isHuman(h.team))) return;
     e.preventDefault();
     e.stopImmediatePropagation();
     // Men already in it stay; the others go in (the first squad fills it).
@@ -305,7 +306,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     hoverT = now;
     if (dom.style.cursor && !hoverOn) return;   // another mode owns it (a sight, a crosshair)
     const h = infantry().length ? pickAt(e.clientX, e.clientY) : null;
-    const on = !!h && (!h.team || h.team === "player") && room(h) > 0;
+    const on = !!h && (!h.team || isHuman(h.team)) && room(h) > 0;
     if (on !== hoverOn) { hoverOn = on; dom.style.cursor = on ? HOUSE_CURSOR : ""; }
   }
   dom.addEventListener("contextmenu", onContext, true);   // capture: before the move order
@@ -325,13 +326,13 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
   function frame(camera) {
     const r = dom.getBoundingClientRect();
     for (const h of houses) {
-      const show = h.men.length > 0 && (h.team === "player" || !fogOfWar?.enabled || fogOfWar.isVisible(h.x, h.z));
+      const show = h.men.length > 0 && (isHuman(h.team) || !fogOfWar?.enabled || fogOfWar.isVisible(h.x, h.z));
       if (!show) { if (h.badge) h.badge.el.style.display = "none"; continue; }
       if (!h.badge) {
         const el = document.createElement("div");
         el.className = "alg-gar";
         el.innerHTML = `<i style="${iconStyle("garrison")}"></i><span></span>`;
-        el.addEventListener("click", (e) => { e.stopPropagation(); if (h.team === "player") app.selection?.select(h.men.filter((u) => u.alive)); });
+        el.addEventListener("click", (e) => { e.stopPropagation(); if (isHuman(h.team)) app.selection?.select(h.men.filter((u) => u.alive)); });
         el.addEventListener("pointerdown", (e) => e.stopPropagation());
         document.body.appendChild(el);
         h.badge = { el, txt: el.querySelector("span"), last: "" };
@@ -344,9 +345,9 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
       const key = `${h.team}|${h.men.length}`;
       if (key !== h.badge.last) {
         h.badge.last = key;
-        h.badge.el.classList.toggle("enemy", h.team === "enemy");
+        h.badge.el.classList.toggle("enemy", isHostile(h.team));
         h.badge.txt.textContent = `${h.men.length}/${h.cap}`;
-        h.badge.el.title = h.team === "player" ? t("Maison occupée — clic : sélectionner · Sortir (K)") : t("Maison tenue par le FLN — grenades et mortier les en chassent");
+        h.badge.el.title = isHuman(h.team) ? t("Maison occupée — clic : sélectionner · Sortir (K)") : t("Maison tenue par le FLN — grenades et mortier les en chassent");
       }
     }
   }
@@ -367,7 +368,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     },
     /** The command card's SORTIR for a selection with men inside (null: none). */
     ability(sel) {
-      if (!sel.some((u) => u.garrison && u.team === "player")) return null;
+      if (!sel.some((u) => u.garrison && isHuman(u.team))) return null;
       return { key: "unload", label: t("Sortir"), hint: t("Sortir de la maison par la porte."), ready: true };
     },
     dispose() {

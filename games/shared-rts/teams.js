@@ -32,6 +32,21 @@ export function teamTint(team, type = null) {
   return TEAM_TINT[team] ?? _white;
 }
 
+/**
+ * THE HUMAN'S SIDE (2026-10-10, alg-rts "play the FLN"). The team strings stay the FACTIONS
+ * ("player" = the French, "enemy" = the FLN in alg-rts) for the economy, the AI, production; who
+ * the person at the keyboard COMMANDS is `SIDES.human` — "player" by default, so every game works
+ * as before. Selection, the fog of war, "yours" vs "hostile" colours ask these, not the strings.
+ */
+export const SIDES = { human: "player" };
+export function setHumanSide(team) { SIDES.human = team === "enemy" ? "enemy" : "player"; }
+/** The human's team. */
+export const isHuman = (team) => team === SIDES.human;
+/** A FACTION that is not the human's — never the civilians ("civil") or a neutral. */
+export const isHostile = (team) => (team === "player" || team === "enemy") && team !== SIDES.human;
+/** The other faction (the AI's, the one "hostile" colours and fogs mean). */
+export const hostileSide = () => (SIDES.human === "player" ? "enemy" : "player");
+
 /** True when a team needs no tinting at all — lets us skip per-unit material clones. */
 export function isUntinted(team, type = null) {
   return teamTint(team, type).equals(_white);

@@ -14,6 +14,7 @@
 //   • explored   — seen before, currently hidden (desaturated shroud)
 //   • visible    — in a friendly vision disk this frame (clear)
 import * as THREE from "three";
+import { isHuman, isHostile } from "./teams.js";
 import {
   Fn, float, max, mix, normalize, screenUV, smoothstep, step, texture, uniform, vec2, vec3, vec4,
 } from "three/tsl";
@@ -179,16 +180,16 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     const out = [];
     for (const fn of sourceProviders) for (const s of fn() ?? []) out.push(s);
     for (const u of units.list) {
-      if (!u.alive || u.team !== "player") continue;
+      if (!u.alive || !isHuman(u.team)) continue;
       out.push({ x: u.position.x, z: u.position.z, r: visionOfEntity(u), eye: u.isAir ? 40 : (u.type?.foot ? 2.2 : 3) });
     }
     for (const s of structures.list) {
-      if (!s.alive || s.team !== "player") continue;
+      if (!s.alive || !isHuman(s.team)) continue;
       if (s.constructing) continue;
       out.push({ x: s.position.x, z: s.position.z, r: visionOfEntity(s), eye: s.visionEye ?? 6 });
     }
     for (const b of buildings.list) {
-      if (!b.alive || b.team !== "player") continue;
+      if (!b.alive || !isHuman(b.team)) continue;
       if (b.constructing || b.built < 1) continue;
       out.push({ x: b.position.x, z: b.position.z, r: visionOfEntity(b) });
     }
@@ -259,7 +260,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   /** Should an enemy entity render this frame? Player stuff is always shown. */
   function canSeeEntity(e) {
     if (!enabled) return true;
-    if (e.team === "player") return true;
+    if (isHuman(e.team)) return true;
     return isVisible(e.position.x, e.position.z);
   }
 

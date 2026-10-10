@@ -13,6 +13,7 @@
 //             is a disaster for the squad in it), the armoured half-track much less.
 // An empty GMC on patrol still delivers supplies to the villages you hold (algPatrols.js).
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { iconStyle } from "./ui/icons.js";
 import { t } from "./i18n/i18n.js";
 
@@ -121,7 +122,7 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     const dmg = P.wreckDamage[v.typeKey] ?? 35;
     m.forEach((u, k) => { unboard(u, k); u.takeDamage?.(dmg * (0.7 + Math.random() * 0.6)); });
     load.delete(v);
-    if (v.team === "player") app.algBattle?.say?.(t("<b>Véhicule détruit</b> avec un groupe à bord : les survivants sautent."), v.position.x, v.position.z, "bad", null, "alertAttack");
+    if (isHuman(v.team)) app.algBattle?.say?.(t("<b>Véhicule détruit</b> avec un groupe à bord : les survivants sautent."), v.position.x, v.position.z, "bad", null, "alertAttack");
   }
 
   // ── The player's order: right-click your vehicle; the cursor over one with room ──
@@ -131,7 +132,7 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     const r = dom.getBoundingClientRect();
     let best = null, bd = Infinity;
     for (const v of units.list) {
-      if (!isCarrier(v) || v.team !== "player") continue;
+      if (!isCarrier(v) || !isHuman(v.team)) continue;
       const rad = v.radius ?? 3;
       _v.set(v.position.x, v.position.y + 1.2, v.position.z).project(app.camera);
       if (_v.z > 1) continue;
@@ -143,7 +144,7 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     }
     return best;
   }
-  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && u.team === "player" && u.type?.foot && !u.inside);
+  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && u.type?.foot && !u.inside);
   function onContext(e) {
     const men = infantry();
     if (!men.length || dom.style.cursor === "crosshair") return;

@@ -12,6 +12,7 @@
 // ?sky=atmosphere (the old Atmosphere sky and its tuned Aurès light, to A/B;
 // the default is SKY PRO since 2026-09-29, see SKY_PRO below)
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
+import { SIDES, setHumanSide } from "../shared-rts/teams.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom, SHOWROOM } from "./showroom.js";
 import { createAlgLandmarks, landmarkEntries } from "./algLandmarks.js";
@@ -52,6 +53,10 @@ import "../../v3/styles/editor.css";
 import { t } from "./i18n/i18n.js";
 
 const params = new URLSearchParams(location.search);
+// THE HUMAN'S SIDE (2026-10-10, "play the FLN", step 1): ?side=fln — you command the FLN (the team
+// "enemy"), see through ITS eyes; the FLN's AI is off then (and no French AI yet: step 2). The team
+// strings stay the factions; shared-rts/teams.js SIDES.human says which one is yours.
+setHumanSide(params.get("side") === "fln" ? "enemy" : "player");
 // THE TRAINING MAP (maps/training.js `tutorial`): the Aurès' systems that would clutter a lesson
 // OFF unless the URL says otherwise — the scenery pieces, fields, herds and hens, village life,
 // the telegraph, the FLN's own AI (the lessons bring their enemies) and the fog of war. Written
@@ -350,7 +355,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The camera stays over the playable area (layout.js PLAY): the rest is scenery.
   rtsCamera.setBounds(PLAY);
   // Start over the playable side's base (layout.js).
-  const base = LAYOUT.sites.find((s) => s.kind === "french");
+  const base = LAYOUT.sites.find((s) => s.kind === (SIDES.human === "enemy" ? "aln" : "french"));
   if (base) {
     rtsCamera.focusOn(base.x, base.z);
     // Look toward the ALN, not at our own edge; the buildings face this view.

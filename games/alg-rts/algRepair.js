@@ -9,6 +9,7 @@
 // bursts of sparks where each man works, now and then a white flash, and at night a flickering
 // blue-white light on it (app.localLights); the sappers' work sound (algSounds "build").
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { t } from "./i18n/i18n.js";
 
 const SPARK = [1.0, 0.72];   // a spark's colour (tracerField: r, g; the core is white-hot)
@@ -84,7 +85,7 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
 
   /** Send these sapeurs to repair `tgt`. True if any went. */
   function order(sel, tgt) {
-    const men = sel.filter((u) => u?.alive && u.team === "player" && isSapper(u));
+    const men = sel.filter((u) => u?.alive && isHuman(u.team) && isSapper(u));
     if (!men.length || !repairable(tgt)) return false;
     men.forEach((u, i) => {
       const p = workSpot(tgt, i, men.length);
@@ -194,7 +195,7 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
 
   // ── The orders: right-click on a damaged one (sapeurs only), or the button then a click ──
   const selection = () => (app.selection?.selected ?? []).filter((u) => !u.isStructure);
-  const onlySappers = (sel) => sel.length > 0 && sel.every((u) => u.team === "player" && isSapper(u));
+  const onlySappers = (sel) => sel.length > 0 && sel.every((u) => isHuman(u.team) && isSapper(u));
   function onContext(ev) {
     if (targeting) { ev.preventDefault(); ev.stopImmediatePropagation(); stopTargeting(); return; }
     const sel = selection();
@@ -207,7 +208,7 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
   }
   let targeting = null;   // the sapeurs, while the button waits for a click
   function begin(sel) {
-    const men = sel.filter((u) => u.team === "player" && isSapper(u));
+    const men = sel.filter((u) => isHuman(u.team) && isSapper(u));
     if (!men.length) return;
     targeting = men;
     dom.style.cursor = "crosshair";
@@ -243,7 +244,7 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
     params: P, step, order, cancel, begin, pickAt,
     /** The command card's button for this selection (null: no sapeurs). */
     ability(sel) {
-      if (!sel.some((u) => u.team === "player" && isSapper(u))) return null;
+      if (!sel.some((u) => isHuman(u.team) && isSapper(u))) return null;
       const any = units.list.some(repairable) || (structures.list ?? []).some(repairable);
       return { key: "repair", label: t("Réparer"), hint: t("Réparer un de vos véhicules ou bâtiments endommagés : cliquez dessus (ou clic droit avec des sapeurs sélectionnés). Gratuit ; s'arrête sous le feu."), ready: any };
     },

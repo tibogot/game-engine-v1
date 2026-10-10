@@ -312,7 +312,10 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    grenade's hiss, the flare's pop and the grenade throw — later, with your smoke lab.
    Was: (orders, "sous le feu !", "grenade !"), dense battle ambience,
    distance-filtered gunfire, music for tension (voices parked: another way than the API).
-5. [ ] **SOLDIERS DRESSED FOR FRENCH ALGERIA** (today Vietnam-era US kit) + their PORTRAITS (US GIs).
+5. [x] **SOLDIERS DRESSED FOR FRENCH ALGERIA** — STALE, checked 2026-10-10: the looks ARE French Algeria (shared-rts
+   soldierLooks: faded M47 fatigues, bush hats, léopard smocks, casquettes Bigeard, red / green berets, MAS 49/56,
+   MAT 49, FM 24/29); the M1 helmets are historical (the French wore them); the portraits checked 2026-10-09.
+   Civilian portraits: not needed (civilians are never selected; the moussebel uses katiba faces).
 6. [~] **GAMEPLAY DEPTH** (started 2026-10-07):
    - [x] COVER AT THE CURSOR (algCoverCursor.js): men selected, each man's spot shows under the
      cursor coloured by cover (orderMarks preview: green heavy, yellow light, pale open, cyan

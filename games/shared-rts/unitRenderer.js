@@ -15,7 +15,7 @@ import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, mod, step, texture, varying, vec3 } from "three/tsl";
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
-import { teamTint, isUntinted } from "./teams.js";
+import { teamTint, isUntinted, isHuman, isHostile } from "./teams.js";
 import { GIB, createCrowdField } from "./crowdSkinning.js";
 import { DEATH_CHEST, MOVES, MOVE_JOIN, deathFrom, fadeFor, postureOf } from "./soldierTransitions.js";
 import {
@@ -1439,7 +1439,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       const d = Math.hypot(clientX - (fx + vx * t), clientY - (fy + vy * t));
       const reach = Math.max(maxPx, Math.min(40, Math.sqrt(L2) * 0.35));
       if (d > reach) continue;
-      const score = d - (unit.team === "player" ? 4 : 0);
+      const score = d - (isHuman(unit.team) ? 4 : 0);
       if (score < bestD) { bestD = score; best = unit; }
     }
     return best;
@@ -1543,13 +1543,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       if (!unit.alive) {
         if (v.root) v.root.visible = false;
         // A crowd soldier with death clips falls, then lies there a while.
-        if (v.crowd?.roles.deaths.length && !(fogOfWar?.enabled && unit.team !== "player" && !fogOfWar.canSeeEntity(unit))) {
+        if (v.crowd?.roles.deaths.length && !(fogOfWar?.enabled && !isHuman(unit.team) && !fogOfWar.canSeeEntity(unit))) {
           drawCorpse(unit, v, dt);
         }
         continue;
       }
 
-      if (fogOfWar?.enabled && unit.team !== "player" && !fogOfWar.canSeeEntity(unit)) {
+      if (fogOfWar?.enabled && !isHuman(unit.team) && !fogOfWar.canSeeEntity(unit)) {
         if (v.root) v.root.visible = false;
         continue;
       }
@@ -1683,7 +1683,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             part.im.setMatrixAt(i, _mat);
             part.im.setColorAt(i, tint); // same material, different side
           }
-          inst.team.setX(i, unit.team === "player" ? 0 : 1);
+          inst.team.setX(i, isHuman(unit.team) ? 0 : 1);
           if (inst.odometer) inst.odometer.setX(i, v.odo);
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
@@ -1800,14 +1800,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         p.x, p.y + (t.barY ?? 6) + bobY, p.z,
         t.barWidth,
         unit.hp / unit.maxHp,
-        unit.team === "enemy",
+        isHostile(unit.team),
         camera,
       );
 
       // Selection ring — one instance in the shared field. The draping over the
       // terrain happens in its vertex shader, so all we push is centre + radius.
       // (an enemy is only ever "selected" when INSPECTED — selection.js: its ring red)
-      if (unit.selected) selectionRings?.add(p.x, p.z, t.ringRadius, unit.team === "enemy" ? 0xff5a46 : undefined);
+      if (unit.selected) selectionRings?.add(p.x, p.z, t.ringRadius, isHostile(unit.team) ? 0xff5a46 : undefined);
     }
 
     for (const k of UNIT_TYPE_KEYS) {
@@ -1857,7 +1857,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           const v = views.get(unit);
           _mat.multiplyMatrices(v.xform.matrix, g.rel);
           f.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
-            unit.team === "player" ? 0 : 1, { extra: v.seed });
+            isHuman(unit.team) ? 0 : 1, { extra: v.seed });
         }
         // The crews of the manned vehicles of this look (lane 2: no x-ray of their own —
         // the vehicle has its silhouette). A seat's clip missing from the pack: idle.
@@ -1886,7 +1886,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           if (v.gib) continue;   // in the gib crowd (below)
           const dying = (clip) => g.roles.deaths.includes(clip);
           f.addPose(_mat, v.prev.clip, v.prev.t, v.cur.clip, v.cur.t, v.fade,
-            unit.team === "player" ? 2 : 3, { holdA: dying(v.prev.clip), holdB: true, extra: v.seed });
+            isHuman(unit.team) ? 2 : 3, { holdA: dying(v.prev.clip), holdB: true, extra: v.seed });
           _sphere.center.copy(v.xform.position);
           _sphere.radius = 3;
           if (!camera || _frustum.intersectsSphere(_sphere)) writePieces(g, v, v.xform.matrix, dying(v.prev.clip), true);
@@ -1916,7 +1916,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             const v = views.get(unit);
             if (!v.gib) continue;
             _mat.multiplyMatrices(v.xform.matrix, g.rel);
-            if (!gf.addPose(_mat, v.cur.clip, v.cur.t, v.cur.clip, v.cur.t, 0, unit.team === "player" ? 2 : 3, { extra: v.seed, gib: v.gib })) break;
+            if (!gf.addPose(_mat, v.cur.clip, v.cur.t, v.cur.clip, v.cur.t, 0, isHuman(unit.team) ? 2 : 3, { extra: v.seed, gib: v.gib })) break;
             _sphere.center.copy(v.xform.position);
             _sphere.radius = 8;   // the parts fly a few metres
             if (g.pieces && (!camera || _frustum.intersectsSphere(_sphere))) {

@@ -15,6 +15,7 @@
 // (fmTeam). The arc shows on the ground (a draped wedge): your guns when selected or setting up,
 // the enemy's set-up guns when you can see them.
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { t } from "./i18n/i18n.js";
 
@@ -179,7 +180,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
   // ── POINT THE ARC (O): the selected gunners face where you click ──────────
   const dom = app.renderer.domElement;
   let aiming = null;   // the gunners, while the cursor waits for a click
-  const selectedGunners = (sel = selection.selected) => (sel ?? []).filter((u) => u.alive && u.team === "player" && (u.arcGun || isGunner(u)));
+  const selectedGunners = (sel = selection.selected) => (sel ?? []).filter((u) => u.alive && isHuman(u.team) && (u.arcGun || isGunner(u)));
   function ability(sel) {
     const g = selectedGunners(sel);
     if (!g.length) return null;
@@ -271,7 +272,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
       const st = u._mg;
       if (!st || u.inside) continue;
       let colour = null, alpha = 1;
-      if (u.team === "player") {
+      if (isHuman(u.team)) {
         if (!sel.has(u) && st.state !== "setting") continue;
         if (st.state === "packed" && st.want == null) continue;
         colour = st.state === "set" ? 0xffcc33 : 0xd8d2c0;
@@ -285,7 +286,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
       // solid red field over the SAS post). The fill is unlit, so the scene's EXPOSURE scales it
       // many times before it blends: 0.05 read as ~40% red, 0 → none, 0.012 → a light warm tint
       // (measured in the game, Sky Pro day). Yours a little stronger: you placed it.
-      const fillK = u.team === "player" ? 0.03 : 0.015;
+      const fillK = isHuman(u.team) ? 0.03 : 0.015;
       const show = st.state === "packed" ? { ...st, facing: st.want } : st;
       const w = pool[k] ?? (pool[k] = makeWedge());
       drawWedge(w, u, show, colour, alpha, fillK);

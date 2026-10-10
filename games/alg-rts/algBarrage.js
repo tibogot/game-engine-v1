@@ -13,6 +13,7 @@
 // MUNITIONS; each pit has a cooldown. Friendly bombs don't hurt the French (splashAt skips the
 // owner's team) — but they do wreck the village they land in (algDamage).
 import * as THREE from "three";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { t } from "./i18n/i18n.js";
 
@@ -42,7 +43,7 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
   const rings = createSelectionRingField({ app, max: 4, inner: 0.93, opacity: 0.75 });
   let targeting = null;    // { pit, at, ok }
   const fires = [];        // { pit, x, z, left, t }
-  const isPit = (s) => s?.alive && s.isStructure && s.typeKey === "mortarPit" && s.team === "player";
+  const isPit = (s) => s?.alive && s.isStructure && s.typeKey === "mortarPit" && isHuman(s.team);
   const recOf = (pit) => structures.records?.find((r) => r.s === pit) ?? null;
 
   // ── The command card's button ────────────────────────────────────────────

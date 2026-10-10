@@ -7,6 +7,7 @@
 // One draw call: the shared ring field with a filled disc, draped on the
 // terrain in the vertex shader like the selection rings.
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
+import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 
 const P = {
   // FIXED, small (you, 2026-10-03: 0.32 "way too big"; the distance-scaled
@@ -56,7 +57,7 @@ export function createAlgPathDots({ app, selection, squads = null }) {
       n = 0;
       const seen = new Set();
       for (const u of selection.selected ?? []) {
-        if (!u.alive || u.team !== "player" || u.isStructure || u.isAir) continue;
+        if (!u.alive || !isHuman(u.team) || u.isStructure || u.isAir) continue;
         const r = u.route;
         if (!r?.length) continue;
         // The squad's first man still walking draws its trail.
