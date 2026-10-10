@@ -90,6 +90,8 @@ export const HP = {               // tunables (the lab GUI edits these)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
   spinPivot: 0.8,                 // turning on the spot pivots this far behind the middle (× half the body length: over the hind legs) — 0 = about the middle
+  walkEven: 1,                    // the walk's four beats evenly spaced (Muybridge) — 0 = the clip's
+  walkEvenShift: [0, 0.073, 0.115, 0.125],   // per leg (LF, RF, LH, RH): how far ahead on its own path (stride share)
   wcFade: 0.38,                   // s the walk <-> canter crossfade takes (planted hooves held through it)
   departFirst: true,              // gearing up from the walk: no faster than the walk can step until the canter has begun
   startLock: 0.9,                 // s after starting / stopping during which planted hooves are held where they stand (0 = off)
@@ -669,6 +671,19 @@ export class HorseController {
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
     this.startLockT = Math.max(0, (this.startLockT ?? 0) - dt);
+    {
+      const wW = this.actions.Walk ? this.actions.Walk.getEffectiveWeight() : 0;
+      // (about to depart into the canter it goes back to the clip's timing FIRST, inside
+      // the walk — kept through the canter blend, a swinging hoof's 40 cm shift no longer
+      // matched the blended legs: it popped)
+      const departing = this.gaitName === "Walk" && (this.effGear ?? 0) > 0 && this.v > this.h.gait.Walk.speed * 1.75 * 0.8;
+      // (only a real walk: the walk gear chosen, walking steadily for 0.6 s — set off
+      // straight into a canter, it flicked on and off again and the hooves popped)
+      this.walkSteadyT = this.gaitName === "Walk" && (this.effGear ?? 0) === 0 && Math.abs(this.v) > 0.25 ? (this.walkSteadyT ?? 0) + dt : 0;
+      const want = HP.walkEven > 0 && this.gaitName === "Walk" && !departing && this.walkSteadyT > 0.6 && !this.oneShot && this.rearT < 0 && !this.spinning ? HP.walkEven : 0;
+      this.walkEvenK = (this.walkEvenK ?? 0) + (want - (this.walkEvenK ?? 0)) * lerpK(want > (this.walkEvenK ?? 0) ? 4 : 12, dt);
+      this.walkEvenW = this.walkEvenK * wW;                    // (× the walk's share of the blend: none of it leaks into the canter)
+    }
     this.ikCorr = this.calmOn ? Math.max(0.011, this.calmMove ?? 0) : 0;   // (the calmed body: the legs re-solved on purpose)
     const jh = this.jumpHind();
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
@@ -696,7 +711,28 @@ export class HorseController {
       const needUp = g.under - this.bodyOff - (this.jumpRaise ?? 0);   // (and the take-off's raise lifted it too)
       if ((needUp > 0.01 || this.jumpRaise > 0) && !(g.cannon && this.rearT >= 0)) d = Math.max(d, needUp);   // ≤ 1 cm into the ground is invisible (raised for the take-off: always — the clip's own planted hoof is a few cm in)
       const C = g.ik.getWorldPosition(new V3());
-      const T = C.clone(); T.y += d;
+      let evenOff = null;
+      // EVEN WALK: the four beats a quarter-stride apart (Muybridge 574: LH → LF →
+      // RH → RF; the clip's were 0 / 0.37 / 0.57 / 0.87 — same-side pairs nearly
+      // together). Each hoof follows the walk's OWN ground path, sampled ahead by
+      // its leg's shift, placed in the ground frame (re-timing the leg keys moved
+      // the hooves with the body's bob, timed to the old footfalls: they hovered)
+      g.evenW = 0;
+      const ew = this.walkEvenW ?? 0;
+      if (ew > 0.001 && this.walkPaths()) {
+        const sh = HP.walkEvenShift[li], A = this.actions.Walk, u = (A.time / A.getClip().duration) + sh;
+        const P = this.walkPathAt(li, u), P0 = this.walkPathAt(li, u - sh);
+        const cy = Math.cos(this.yaw), sy = Math.sin(this.yaw);
+        const toW = (v) => new V3(this.pos.x + v.x * cy + v.z * sy, this.y + this.lift + v.y, this.pos.z - v.x * sy + v.z * cy);
+        // the shift, as a world offset from where the clip's own path puts the hoof now
+        const off = toW(P.p).sub(toW(P0.p));
+        evenOff = off.multiplyScalar(ew);
+        if (g.cannon && P.c) g.evenC = new V3(P.c.x * cy + P.c.z * sy, P.c.y, -P.c.x * sy + P.c.z * cy);
+        g.evenW = ew;
+        g.hA = Math.max(0, g.hA + (P.p.y - P0.p.y) * ew);       // (its lift: from its shifted path)
+      }
+      const T = C.clone(); if (evenOff) T.add(evenOff); T.y += d;
+      if (evenOff) { const floor = (g.on ? g.hit.y : this.y) + this.h.foot.sole + (C.y - g.ff.getWorldPosition(new V3()).y); if (T.y < floor) T.y = floor; }   // (a shifted hoof never under the ground)
       if (g.landShift) T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.landShift * g.w);   // onto the step (foot placement)
       // GALLOP: a planted hoof stays where it touched down (the legs play slower
       // than the ground goes by: unlocked it would slide forward)
@@ -771,7 +807,8 @@ export class HorseController {
       // (a hoof 1 cm into the ground is invisible; a near-straight leg turns a
       // few mm of correction into several degrees of knee — leave it alone)
       this.ikCorr = Math.max(this.ikCorr, T.distanceTo(C));   // biggest correction asked this frame (audit)
-      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01) && !(g.cannon && g.jumpAir && jh && jh.w > 0) && !this.calmOn) return;
+      if (g.evenW > 0.001) this.ikCorr = Math.max(this.ikCorr, 0.011);
+      if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01) && !(g.cannon && g.jumpAir && jh && jh.w > 0) && !this.calmOn && !(g.evenW > 0.001)) return;
       let reached;
       // front: the hoof turns WITH the cannon the IK swings (kept at the clip's
       // world angle, a hoof reaching up onto a step folded back under itself)
@@ -783,6 +820,7 @@ export class HorseController {
         // tilted body); hip + stifle put the hock where the cannon must start.
         const hock = g.cannon.getWorldPosition(new V3());
         let w = C.clone().sub(hock).applyQuaternion(untilt);
+        if (g.evenW > 0 && g.evenC) w.lerp(g.evenC.clone().setLength(w.length()), g.evenW).setLength(hock.distanceTo(C));
         // JUMPING: the hind legs follow the measured flight (JUMP_HIND) instead of
         // the clip's tucked-under pose — hoof placed from the hip, cannon angle set
         // each hind leg only once ITS hoof has left the ground (taken over while
@@ -1719,7 +1757,8 @@ export class HorseController {
       // (departing: speed held at what the walk can step, so the speed edges never
       // ask for the canter — asked for a faster gear, it departs from there)
       const capW = this.h.gait.Walk.speed * 1.75;
-      if (HP.departFirst && this.gaitName === "Walk" && (this.effGear ?? 0) > 0 && input.fwd > 0 && this.v > capW * 0.9 && !this.oneShot && this.rearT < 0) want = GEARS[1];
+      if (HP.departFirst && this.gaitName === "Walk" && (this.effGear ?? 0) > 0 && input.fwd > 0 && this.v > capW * 0.9 && !this.oneShot && this.rearT < 0 && (this.walkEvenW ?? 0) < 0.04) want = GEARS[1];
+      if (this.gaitName === "Walk" && want !== "Walk" && want !== "Idle" && (this.walkEvenW ?? 0) >= 0.04) want = "Walk";   // (the even walk hands back to the clip's timing before any canter)
       if (HP.departFirst && this.gaitName === "Canter" && ((this.effGear ?? 0) === 0 || input.fwd <= 0) && this.v < this.h.gait.Gallop.speed * 0.54 && !this.oneShot && this.rearT < 0) want = "Walk";
       if (HP.departFirst && this.gaitName === "Walk" && want !== "Walk" && want !== "Idle" && ((this.effGear ?? 0) === 0 || input.fwd <= 0)) want = "Walk";
       if (HP.departFirst && this.gaitName === GEARS[1] && want === "Walk" && (this.effGear ?? 0) > 0 && input.fwd > 0) want = GEARS[1];   // (gearing up: the canter, just departed below its own speed band, never drops back)   // (slowing in the walk: never back up to the canter — they flip-flopped)
@@ -2241,6 +2280,37 @@ export class HorseController {
   // hoof drifted off the leg (measured: 11 cm in the gallop, 25 cm starting a
   // jump) and the skin between stretched thin. Put each IK bone back at its
   // leg's tip every frame; its rotation (the hoof angle) stays the clip's.
+  // THE WALK'S HOOF PATHS in the horse's ground frame (x side, y up, z forward;
+  // origin under the horse), 64 a stride, per leg: the hoof (IK bone) and, for a
+  // hind leg, the cannon's direction. Recorded once with a spare mixer.
+  walkPaths() {
+    if (this._walkPaths !== undefined) return this._walkPaths;
+    const clip = this.h.clips.Walk;
+    if (!clip) return (this._walkPaths = null);
+    const rig = this.h.rig, sp = rig.position.clone(), sq = rig.quaternion.clone();
+    const save = this.touched.map((t) => [t.b, t.b.position.clone(), t.b.quaternion.clone()]);
+    rig.position.set(0, 0, 0); rig.quaternion.identity(); rig.updateMatrixWorld(true);
+    const m = new THREE.AnimationMixer(this.h.model), a = m.clipAction(clip); a.play();
+    const N = 64, paths = this.legs.map(() => []);
+    for (let i = 0; i < N; i++) {
+      m.setTime((i / N) * clip.duration); rig.updateMatrixWorld(true); this.glueHooves();
+      this.legs.forEach((g, li) => {
+        const p = g.ik.getWorldPosition(new V3());
+        const c = g.cannon ? p.clone().sub(g.cannon.getWorldPosition(new V3())) : null;
+        paths[li].push({ p, c });
+      });
+    }
+    a.stop(); m.uncacheRoot(this.h.model);
+    for (const [b, pp, q] of save) { b.position.copy(pp); b.quaternion.copy(q); }
+    rig.position.copy(sp); rig.quaternion.copy(sq); rig.updateMatrixWorld(true);
+    return (this._walkPaths = { N, paths, dur: clip.duration });
+  }
+  walkPathAt(li, u) {
+    const W = this.walkPaths(), N = W.N, x = ((u % 1) + 1) % 1 * N, i = Math.floor(x), f = x - i;
+    const A = W.paths[li][i % N], B = W.paths[li][(i + 1) % N];
+    return { p: A.p.clone().lerp(B.p, f), c: A.c ? A.c.clone().lerp(B.c, f) : null };
+  }
+
   glueHooves() {
     this.h.rig.updateMatrixWorld(true);
     for (const t of this.h.tips) {

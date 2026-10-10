@@ -133,6 +133,14 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   step. From a gallop the canter hands to the walk after ~0.35 s at its slowest
   (was 0.75 s: it coasted). Tried and dropped: holding a slow last step until the
   stride's one best moment (110°) — up to 2 s of crawling.
+- DONE: EVEN WALK (HP.walkEven): each hoof follows the walk clip's own ground path
+  (recorded once, walkPaths(): 64 a stride, ground frame + hind cannon direction),
+  sampled ahead by its leg's shift (walkEvenShift LF 0, RF .073, LH .115, RH .125),
+  placed by IK in the ground frame. Beats LF 0 → RH .22 → RF .48 → LH .72 (clip:
+  0 / .37 / .57 / .87); 3 feet down 9 → 22 % of the stride. Only in a real walk
+  (walk gear, 0.6 s steady); before a canter departure it returns to the clip's
+  timing inside the walk (kept through the blend, a swinging hoof's 40 cm shift
+  popped). Shifted hooves never below the ground.
 - DONE: turning on the spot = on the haunches (HP.spinPivot: pivots 0.8 × half
   the body behind the middle, only with no forward input); planted hooves held,
   a hoof left 12 cm behind steps (7 cm lift, only when it starts from the ground).
