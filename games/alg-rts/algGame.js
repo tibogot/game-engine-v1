@@ -577,8 +577,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // THE CAVE'S COOKING FIRE (algCave.js, 2026-10-11): the wrecks' flipbook flame (flameField.js — its
   // one instanced draw), small and low, for the whole match; the village ovens' light hearth smoke
   // over it (algAmbience ovens, always lit). Its night light: algNightLamps.js.
-  {
-    const cv = app.showroom?.caveEntrance, cf = cv?.geometry?.userData?.campfire;
+  // (and the FLN camp's, the same way: algAlnCamp.js)
+  for (const cv of [app.showroom?.caveEntrance, app.showroom?.alnCamp]) {
+    const cf = cv?.geometry?.userData?.campfire;
     if (cf) {
       cv.updateMatrixWorld(true);
       const w = cv.localToWorld(new cv.position.constructor(...cf)), y = app.getWorldHeight(w.x, w.z);

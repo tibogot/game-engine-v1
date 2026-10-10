@@ -22,6 +22,7 @@ import { LAYOUT, MAP, siteYaw } from "./layout.js";
 import { buildCemetery, buildDechra, buildGarden, buildKoubba, buildKsar, buildTerraces, buildThreshingFloor, buildVillageWell, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { buildSandstoneCave } from "./algCave.js";
+import { buildCampV2 } from "./algAlnCamp.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -83,6 +84,7 @@ function fromBase(lx, lz, site = BASE) {
 
 const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
 const CAVE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("cave") === "old";
+const CAMP_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("camp") === "old";
 
 /**
  * The SAS post goes BESIDE a hamlet, not at the French base: it is the
@@ -188,7 +190,9 @@ export const SHOWROOM = [
   // the villages (rtsAlgVillage.js). `ground`: built on the real slope.
   ...VILLAGE,
   // The ALN command post in the massif.
-  { key: "alnCamp", build: buildAlnCamp, x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
+  // (The new standard, 2026-10-11: algAlnCamp.js buildCampV2 — stone houses, dry stone, sandstone.
+  // ?camp=old = the kit one, A/B.)
+  { key: "alnCamp", build: CAMP_OLD ? buildAlnCamp : () => buildCampV2(), x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
   ...ALN_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz, ALN_SITE); return { key: v.key, build: v.build, x, z, yaw: ALN_SITE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
 ].filter(Boolean);
 
@@ -208,7 +212,9 @@ function glassMaterial() {
 /** A kit piece as the game draws it (paint, markings, gear, leaves, rotors) — also the portraits (structureThumbnails.js). */
 export function kitView(geo) {
   // The French side's paint (FR_PAINT_TINT) on everything of this game's.
-  const m = new THREE.Mesh(geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+  // (A piece whose geometry only CARRIES its data — the new-standard camp, algAlnCamp.js — draws
+  // nothing itself: its own invisible material, not the kit's, which wants the kit's attributes.)
+  const m = new THREE.Mesh(geo, geo.userData.labMaterial ?? rtsObjectMaterialTinted(FR_PAINT_TINT));
   m.castShadow = m.receiveShadow = true;
   const st = stencilMesh(geo.userData.stencil);
   if (st) m.add(st);

@@ -113,7 +113,9 @@ export function createAlgNightLamps(app) {
   }
 
   // ---- the ALN: the camp's fire, a glow in the cave mouth
-  if (S.alnCamp) lamp(S.alnCamp, 0, 0, "campfire");
+  // (At its cooking fire when the camp says where: algAlnCamp.js buildCampV2.)
+  const acf = S.alnCamp?.geometry?.userData?.campfire;
+  if (S.alnCamp) lamp(S.alnCamp, acf?.[0] ?? 0, acf?.[2] ?? 0, "campfire");
   const cv = S.caveEntrance?.geometry?.userData?.footprint;
   if (cv) lamp(S.caveEntrance, cv.cx ?? 0, cv.cz ?? 0, "caveGlow");
   // The katiba's cooking fire in front of the cave (algCave.js): the men round it lit at night.

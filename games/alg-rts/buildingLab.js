@@ -11,7 +11,7 @@ import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanCo
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { startVehicleLab } from "./vehicleLab.js";
 import { buildSandstoneCave } from "./algCave.js";
-import { buildModernAlnCamp } from "./algAlnCamp.js";
+import { buildCampV2 } from "./algAlnCamp.js";
 import { buildStoneHouse } from "./algMasonry.js";
 import * as THREE from "three";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
@@ -75,8 +75,8 @@ const BUILDINGS = {
     tags: ["MAISON (KIT DU JEU)", "PIERRE · NOUVEAU"], note: "la maison du jeu à gauche, la maison en pierre du nouveau standard à droite.",
   },
   campFln: {
-    label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildModernAlnCamp(),
-    tags: ["CAMP (LE JEU)", "GRÈS + PIERRE SÈCHE"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
+    label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildCampV2(),
+    tags: ["CAMP (LE JEU)", "CAMP · NOUVEAU STANDARD"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
   },
 };
 

@@ -514,6 +514,20 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        showed nothing) + the ovens' light hearth smoke (algAmbience ovens, always lit) + the night
        lamps' "campfire" at it; a LOADED MULE tied at a post by the lean-to, hay beside it
        (algHerds, the cave's `tether`). No new draw. Seen by day and at night (?tod=23).
+     - [x] THE NEW BUILDING STANDARD + THE FLN CAMP (2026-10-11; you: "everything but the rocks reads
+       cheap — make it way better, very optimized"). algMasonry.js: PHOTO MATERIALS (Poly Haven CC0,
+       tools/fetchBuildingMaterials.mjs → public/textures/build: dry stone, clay plaster, bark,
+       planks, reed, burlap; the ground's dry mud for roofs), triplanar in the piece's space + their
+       normal maps, tinted to the sandstone; ONE material per surface for every building. stoneBlock:
+       rounded-rect walls 0.6 m thick, batter + bulge, broken parapet, sagging earth roof, openings in
+       the wall's depth with lintels and frames, beam ends through the walls, drain logs; per-vertex
+       WEAR (plaster patches with their own relief and lip, grime under the drains). A SITE merges
+       per surface. The camp (algAlnCamp.js buildCampV2, ?camp=old = the kit's): the PC (room +
+       annex, ladder, firewood, aerial), the dugout, the reed store with burlap sacks and plank crates,
+       sangars' guns, dry stone + the sandstone rock; nav / cover / garrison house / flag / its fire
+       lit. ~90k tris, 10 meshes; GPU cost not measurable (−0.02 ms ± 0.53, framed). Console clean.
+     - [ ] the building textures are 14 MB of JPG: compress (KTX2 / smaller normal maps) before
+       shipping; then the same standard for the cave's props, the mortar pit, the mechtas, the post.
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
      mortars / flares / doctrines; FLN-side camera (b) stays as is (CoH's one orientation).
 9. [~] **LANGUAGES: FRENCH, ENGLISH, ARABIC** (you, 2026-10-07). FRENCH + ENGLISH DONE 2026-10-07:
