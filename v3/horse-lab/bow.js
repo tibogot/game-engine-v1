@@ -54,11 +54,14 @@ export const BP = {
   drawTime: 0.9,        // s from brace to full draw
   minSpeed: 20, maxSpeed: 62,   // m/s off the string: a light draw … a full draw
   hipOpen: 0.32,        // rad the feet stay turned toward the target from side-on
-  chestOpen: 0,         // rad the chest stays turned toward the target from side-on
+  chestOpen: 0.25,      // rad the chest stays turned toward the target from side-on
   bend: 0.75,           // share of the aim's pitch taken by the waist (sideways bend)
   anchor: [0.075, 0.07, 0.025],    // the anchor from the head bone: m forward, right, up (under the right cheek bone)
   bowReach: 0.97,       // the bow arm's reach (share of its length)
   cant: 0.1,            // rad the bow leans (top to the right)
+  lookReady: 0.45,      // share of the turn to the target the head makes while fetching / nocking
+  lookDown: 0.3,        // rad the head tips down onto the hands then
+  readyIn: 0.18,        // m the ready bow is held in from the bow shoulder toward the middle
   followThrough: 0.9,   // s the follow-through is held after a shot
   fetchTime: 3.15,       // s: hand to the quiver, arrow out, onto the string (reach 1.1, close 0.2, pull 0.55, bring 0.85, nock 0.3)
   aimTime: 0.28,        // s to raise / lower the bow
@@ -630,9 +633,17 @@ export class Archer {
       [[B.spine1, 0.35], [B.spine2, 0.35], [B.spine3, 0.3]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(h, bend * k)));
       // head: turned back along the arrow, level
       const ch2 = this.chest(), f2 = ch2.f.clone().setY(0).normalize();
-      const look = Math.atan2(new V3().crossVectors(f2, dh).y, f2.dot(dh)) * aw;
-      rotateWorld(B.neck, q.setFromAxisAngle(UP, look * 0.4));
-      rotateWorld(B.head, q.setFromAxisAngle(UP, look * 0.6));
+      // (fetching / nocking the head looks at the hands — forward and down, turned only
+      // part way; it turns to the target as the bow comes up. Turned to the target the
+      // whole time, the neck read as wrenched round)
+      const up2 = smooth(this.ext ?? 0), lookK = BP.lookReady + (1 - BP.lookReady) * up2;
+      // (measured from where the HEAD faces — not the chest: the clip's head is already
+      // turned a little, and adding the full chest-to-target turn on top put it 17° past the arrow)
+      const hf = new V3(0, 0, 1).applyQuaternion(B.head.getWorldQuaternion(new Q())).setY(0).normalize();
+      const look = Math.atan2(new V3().crossVectors(hf, dh).y, hf.dot(dh)) * aw * lookK;
+      rotateWorld(B.neck, q.setFromAxisAngle(UP, look * 0.45));
+      rotateWorld(B.head, q.setFromAxisAngle(UP, look * 0.55));
+      rotateWorld(B.head, q.setFromAxisAngle(ch2.L.clone().negate(), -BP.lookDown * aw * (1 - up2)));   // eyes down onto the hands
       rotateWorld(B.head, q.setFromAxisAngle(dAim, -bend * 0.8));   // eyes level again after the side bend
       rotateWorld(B.head, q.setFromAxisAngle(h, aimPitch * (1 - BP.bend) * 0.5 * aw - 0.08 * aw));   // and a touch down onto the arrow
     }
@@ -678,7 +689,9 @@ export class Archer {
     const disc = bq * bq - (w0.lengthSq() - r * r), tR = disc > 0 ? -bq + Math.sqrt(disc) : Math.max(0.3, -bq);
     const Raim = C.clone().addScaledVector(dAim, tR);
     this.drawFull = tR;
-    const Rready = SL.clone().addScaledVector(ch.u, -0.3).addScaledVector(ch.f, 0.4).addScaledVector(dAim, 0.08);
+    // the READY position: the bow low but in FRONT of the body's middle (held far left
+    // and low, the string hand had to cross the belly with its forearm flat)
+    const Rready = SL.clone().addScaledVector(ch.u, -0.22).addScaledVector(ch.f, 0.42).addScaledVector(ch.L, -BP.readyIn).addScaledVector(dAim, 0.06);
     const R = Rready.lerp(Raim, ex);
     const dReady = dAim.clone().multiplyScalar(0.75).addScaledVector(UP, -0.6).addScaledVector(h, 0.15).normalize();
     const dArrow = dReady.lerp(dAim, ex).normalize();               // the arrow's line now
@@ -732,7 +745,11 @@ export class Archer {
     // back round the string. (Palm forward-right had the hand turned over: the
     // forearm at its full pronation and the fingers curling the wrong way.)
     const NH = h.clone().negate().addScaledVector(dArrow, -0.15).normalize();
-    const poleR = dArrow.clone().multiplyScalar(-0.7).addScaledVector(h, 0.55).addScaledVector(UP, 0.25).normalize();
+    // the draw elbow: back, out and up at full draw — but nocking, with the bow still low,
+    // it hangs DOWN by the side (aimed up there it stuck out forward: a chicken wing)
+    const poleDraw = dArrow.clone().multiplyScalar(-0.7).addScaledVector(h, 0.55).addScaledVector(UP, 0.25).normalize();
+    const poleNock = this.chest().L.clone().multiplyScalar(-0.45).addScaledVector(UP, -0.85).addScaledVector(dArrow, -0.15).normalize();
+    const poleR = poleNock.lerp(poleDraw, smooth(this.ext ?? 0)).normalize();
     let nockW = null, arrowFrom = null, arrowDir = null;
     const q = this.quiverFrame();
     if (this.phase === "fetch") {
@@ -769,7 +786,7 @@ export class Archer {
       if (T0 < ST.close[0]) T = pathAt(this.fetchFromHold || this.fetchStart[1] > 0 ? [toW(...this.fetchStart), toW(0.03, 0.36, 0.02), grab] : [toW(...this.fetchStart), toW(-0.06, -0.14, 0.24), toW(-0.02, 0.16, 0.25), toW(0.03, 0.36, 0.02), grab], mj(pr("reach")));   // (from the follow-through, the hand is already up by the neck: straight over the shoulder)
       else if (T0 < ST.pull[0]) T = grab.clone();
       else if (T0 < ST.bring[0]) T = grab.clone().lerp(pulled, mj(pr("pull")));
-      else if (T0 < ST.nock[0]) T = pathAt([pulled, toW(0.32, 0.1, 0.06), toW(0.13, -0.1, 0.4), nockAt(0)], mj(pr("bring")));
+      else if (T0 < ST.nock[0]) T = pathAt([pulled, toW(0.2, 0.18, 0.12), toW(0.06, -0.04, 0.32), nockAt(0)], mj(pr("bring")))   // (down in front of the right shoulder to the chest: out to the side first, the forearm swung round flat);
       else T = nockAt(0);
       // the elbow — always steered ACROSS the arm, never along it (along it the
       // solver had no side to choose and flipped 15° a frame): hanging → out and

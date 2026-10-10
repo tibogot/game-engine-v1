@@ -181,6 +181,15 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   own ~17 cm), bow-arm abduction 73 → 99° (ref 90–100), anchor 17 → 6.7 cm below
   the eye (jaw), draw elbow on the arrow line (0.3 cm), shoulders in line with the
   arrow (chestOpen 0: 0°), force line 4°. Arrow 0.76 → 0.84 m (draw is now 0.77).
+- After the grab (user: "the forearm does a bad movement", "the neck turns way too
+  much"): the hand swung out to the side then dragged the arrow across the belly
+  (the ready bow was far left and low) — now the ready bow is in front of the middle
+  (BP.readyIn) and the hand brings the arrow down in front of the right shoulder;
+  nocking, the draw elbow hangs DOWN (poleNock), rising behind as the bow comes up
+  (it stuck out forward: a chicken wing). Neck: the head turned from the CHEST's
+  forward put it 17° past the arrow (93° neck twist); now from the head's own facing
+  (0° off the arrow), a slightly open chest (BP.chestOpen 0.25) → 76° twist (human
+  ~70–80); while fetching / nocking it looks at the hands (BP.lookReady, lookDown).
 - FOLLOW-THROUGH held 0.9 s (bow arm up, hand back by the neck; it dropped to the
   hip at 0.45 s), then the next fetch starts from there (it snapped to the hanging
   clip pose: fetchStart was read before the IK).
