@@ -34,6 +34,10 @@ const STATS = {
   mgNest: { team: "player", name: t("Nid de mitrailleuse"), hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
   mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
   searchlight: { team: "player", name: t("Projecteur"), hp: 400, vision: 100 },
+  // FIELD WORKS (algFieldWorks.js)
+  forwardPost: { team: "player", name: t("Poste avancé"), hp: 600, vision: 60 },
+  aidStation: { team: "player", name: t("Poste de secours"), hp: 350, vision: 35 },
+  fortPoint: { team: "player", name: t("Point fortifié"), hp: 500, vision: 40 },
   armsCache: { team: "enemy", name: t("Cache d'armes"), hp: 500, vision: 30 },
   refuge: { team: "enemy", name: "Refuge", hp: 450, vision: 30 },
   lookout: { team: "enemy", name: t("Guetteur"), hp: 150, vision: 95 },

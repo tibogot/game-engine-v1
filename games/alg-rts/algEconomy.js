@@ -202,10 +202,10 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
     if (app?.algTelegraph?.cut) inc.mp *= app.algTelegraph.params.mpMul;
     for (const v of points) {
       if (v.owner !== "player" || !v.linked) continue;
-      const g = P.village[v.kind] ?? P.village.hamlet;
-      inc.mp += g.mp; inc.fuel += g.fuel; inc.mun += g.mun;
+      const g = P.village[v.kind] ?? P.village.hamlet, k = v.fortified ? 1.25 : 1;
+      inc.mp += g.mp * k; inc.fuel += g.fuel * k; inc.mun += g.mun * k;
     }
-    for (const v of supply) if (v.owner === "player" && v.linked) inc[v.res] += P.supplyPoint;
+    for (const v of supply) if (v.owner === "player" && v.linked) inc[v.res] += P.supplyPoint * (v.fortified ? 1.25 : 1);
     inc.mp = Math.max(P.mpFloor, inc.mp - upkeep());
     return inc;
   }
@@ -220,7 +220,8 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
         if (u.team === "player") fr++; else if (u.team === "enemy") al++;
       }
       const net = Math.max(-3, Math.min(3, fr - al));
-      if (fr || al) v.value += net * P.push * dt * (v.kind === "supply" ? 1.6 : 1);
+      // (A FORTIFIED point — algFieldWorks.js — takes the FLN twice as long.)
+      if (fr || al) v.value += net * P.push * dt * (v.kind === "supply" ? 1.6 : 1) * (net < 0 && v.fortified ? 0.5 : 1);
       else {
         // Nobody there: a held point heals toward its holder's full; a neutral one slides back to 0.
         const goal = v.owner === "player" ? 1 : v.owner === "enemy" ? -1 : 0;

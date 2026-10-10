@@ -177,8 +177,17 @@ Keep this file current: tick things off here, add new asks here.
      Alouette lands, the wounded within 25 m healed, 2 ★). Not in the training. All nine checked in
      the game. Also: the briefing no longer overflows a short window at UI scale 1.15 (--alg-ui).
    - [ ] **you**: play each — prices, cooldowns, the point rate (90 a point: ~9 FLN killed).
-   - [ ] next: a 4th ability each (CoH has 5); field structures (forward post, aid station, point
-     fortification — 2026-10-10, the CoH comparison) — some could be doctrine-gated.
+   - [ ] next: a 4th ability each (CoH has 5); some field works doctrine-gated or cheaper by doctrine.
+   - [x] FIELD WORKS (2026-10-10, algFieldWorks.js — CoH's engineers build OUT on the map; our base is
+     the HQ-upgrade model, kept): on the sappers' card — POSTE AVANCÉ (150 mp, a radio shelter inside a
+     point you hold: squads within 30 m reinforce there, as at a still half-track), POSTE DE SECOURS
+     (100 mp, the medic tent: men on foot within 20 m heal 2.5 hp/s out of combat), POINT FORTIFIÉ
+     (120 mp, a sandbag horseshoe — rtsAlgeria buildFortPoint — inside a held point: +25% income, the
+     FLN turns it at half speed). One of each per point. Checked in the game: placed, refused off a
+     point and twice on one, the fort flagged, a squad reinforced at the forward post (the man out 7 m
+     from it), wounded healed 15 hp in 6 s.
+   - [ ] seen while testing: a start appelé stuck still at (162, 147) by the base, never reaching an
+     order 100 m away — a pathing snag to look at.
    Done since audit 1: cover at the cursor, MG arcs, armour by facing, sniper, sabotage, tunnels.
 
 ## THE GAP TO A AAA RTS (CoH) — 2026-10-07 (you: "keep this list so we remember it")

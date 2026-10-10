@@ -54,6 +54,25 @@ export function buildFrSandbagWall({ seed = 3, length = 5 } = {}) {
 }
 
 /**
+ * FORTIFIED POINT (alg-rts field works, 2026-10-10): a horseshoe of sandbags — a 5 m front, its
+ * two sides angled back — and an ammunition box inside: the sappers dig a held point in. Front
+ * (the open side behind, +Z) faces -Z.
+ */
+export function buildFortPoint({ seed = 51 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  const wall = (length, x, z, rotY, s) => parts.push({ geo: buildSandbagWall({ length, courses: 4, seed: s, bag, batter: 0.05 }), pos: [x, 0, z], rot: [0, rotY, 0], mat: null });
+  wall(5, 0, -2.0, 0, seed);
+  wall(3.2, -3.05, -0.55, 1.05, seed + 1);
+  wall(3.2, 3.05, -0.55, -1.05, seed + 2);
+  // the ammunition box and a jerrican in the lee of the front
+  parts.push({ geo: buildBox(0.62, 0.34, 0.4), pos: [0.9, 0.17, -0.95 + R() * 0.1], rot: [0, 0.3, 0], mat: MAT.paint, tone: 0.35 });
+  parts.push({ geo: buildBox(0.36, 0.46, 0.17), pos: [1.55, 0.23, -0.9], rot: [0, -0.2, 0], mat: MAT.paint, tone: 0.3 });
+  return finish(parts, { hx: 3.9, hz: 2.4, cz: -0.6, height: 0.9 });
+}
+
+/**
  * SANDBAG WALL, BREACHED — the same 5 m run after a shell or a grenade: a gap
  * blown through the middle, the stubs either side lower and slumped, the burst
  * bags thrown out flat in front and behind. Same footprint as the whole wall

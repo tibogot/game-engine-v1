@@ -45,6 +45,7 @@ import { createAlgCover } from "./algCover.js";
 import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, MAP, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { createAlgDoctrines } from "./algDoctrines.js";
+import { createAlgFieldWorks } from "./algFieldWorks.js";
 import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
@@ -399,7 +400,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     base: postProd?.centre ?? muster, muster,
     pay: (n) => economy.french.spend(n),
     // REINFORCING IN THE FIELD (CoH): at any of your half-tracks standing still.
-    fieldPoints: () => units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving),
+    // (+ the forward posts the sappers build: algFieldWorks.js)
+    fieldPoints: () => [...units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving), ...(app.algFieldWorks?.forwardPosts() ?? [])],
     post: postProd ?? { inside: muster, outside: muster },
     popRoom: () => popRoom(),
   });
@@ -728,6 +730,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // fight, its call-ins on a strip above the HUD. Not in the training.
   const doctrines = MAP.tutorial ? null : createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, airStrike, fogOfWar });
   app.algDoctrines = doctrines;
+  // FIELD WORKS (algFieldWorks.js): the forward post, the aid station, the fortified point.
+  const fieldWorks = createAlgFieldWorks(app, { units, structures, economy });
+  app.algFieldWorks = fieldWorks;
 
   // THE ALN (algAI.js): bands out of the cave, ambushes where the French are
   // thin, back into the cave before the armour comes. ?ai=0 = without.
@@ -770,7 +775,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // works"): CoH rings only the selection; the squad badges make the men findable. ?marks=1 = on.
   const unitMarks = new URLSearchParams(location.search).get("marks") === "1" ? createAlgUnitMarks(app, { units, selection, fogOfWar }) : null;
   app.algUnitMarks = unitMarks;
-  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); };
+  const simStep = (d) => { ai?.step(d); snipers?.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

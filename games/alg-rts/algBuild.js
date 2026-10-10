@@ -15,7 +15,8 @@
 // Game code: this game's buildings, prices and rules. The same flow in nam-rts
 // is nam's own (buildPlacement.js / buildings.js).
 import * as THREE from "three";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildRefuge, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildRefuge, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { kitView } from "./showroom.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
@@ -34,6 +35,11 @@ export const BUILDS = {
   mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris."), cost: 130, time: 18, build: () => buildMortarPit(), pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: t("Mirador : voit à 110 m, une mitrailleuse dans la cabine."), cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
   searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
+  // FIELD WORKS (2026-10-10, the CoH comparison: what engineers raise OUT on the map — algFieldWorks.js).
+  // `near: "point"`: only inside the ring of a point you hold. `one`: one per point.
+  forwardPost: { label: t("Poste avancé"), tip: t("Poste radio près d'un point que vous tenez : vos groupes à 30 m s'y renforcent, comme au poste."), cost: 150, time: 25, build: () => buildRadioStation({ seed: 41 + Math.floor(Math.random() * 9) }), pad: true, structure: "forwardPost", near: "point", one: true },
+  aidStation: { label: t("Poste de secours"), tip: t("Tente de l'infirmier : vos blessés à 20 m guérissent, hors du combat."), cost: 100, time: 18, build: () => fieldTent(), pad: true, structure: "aidStation" },
+  fortPoint: { label: t("Point fortifié"), tip: t("Sacs de sable dans le cercle d'un point que vous tenez : il rapporte 25 % de plus et le FLN met deux fois plus de temps à le prendre."), cost: 120, time: 20, build: () => buildFortPoint({ seed: 51 + Math.floor(Math.random() * 9) }), follow: true, structure: "fortPoint", near: "point", one: true },
   // THE ALN BUILDS TOO (you, 2026-09-30): the same sites, paid from the ALN's
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
   // them — the AI places them through place()). Both lie on the slope, as
@@ -49,6 +55,16 @@ export const BUILDS = {
   refuge: { label: "Refuge", tip: "A hidden casemate: bands go to ground in it and come back out.", cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
   ambushScreen: { label: t("Écran d'embuscade"), tip: "Cut scrub on a stone footing: men behind it are hidden until they fire.", cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
 };
+/** The medic's tent (nam's kit, the medic variant), with the footprint the build needs. */
+function fieldTent() {
+  const g = buildTent({ medic: true, blastWall: false, seed: 17 + Math.floor(Math.random() * 9) });
+  if (!g.userData.footprint) {
+    g.computeBoundingBox();
+    const b = g.boundingBox;
+    g.userData.footprint = { cx: (b.min.x + b.max.x) / 2, cz: (b.min.z + b.max.z) / 2, hx: (b.max.x - b.min.x) / 2, hz: (b.max.z - b.min.z) / 2 };
+  }
+  return g;
+}
 /** Who may raise `key`: his type lists it (the sappers), or the piece names his type. */
 export const canBuild = (u, key) => !!(u?.type?.builds?.includes(key) || BUILDS[key]?.by?.includes(u?.typeKey));
 /** For the command card (the French: the ALN's pieces are the AI's): [{ key, label, tip }] and { key: cost }. */
@@ -100,6 +116,13 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       if (!(p.wx > PLAY.x0 + 4 && p.wx < PLAY.x1 - 4 && p.wz > PLAY.z0 + 4 && p.wz < PLAY.z1 - 4)) why ??= t("hors de la zone de jeu");
       else if ((app.getWaterLevelAt?.(p.wx, p.wz) ?? -Infinity) > p.h - 0.2) why ??= t("dans l'eau");
       else if (navGrid?.isBlockedAtWorld?.(p.wx, p.wz)) why ??= t("emplacement occupé");
+    }
+    // FIELD WORKS on a point you hold (`near: "point"`), one of a kind there (`one`).
+    const NB = BUILDS[key];
+    if (NB?.near === "point" && !why) {
+      const pt = (app.algEconomy?.allPoints ?? []).find((v) => v.owner === "player" && Math.hypot(v.position.x - x, v.position.z - z) < (v.radius ?? 40));
+      if (!pt) why = t("dans le cercle d'un point que vous tenez");
+      else if (NB.one && sites.concat(app.algStructures?.list ?? []).some((s) => s.alive !== false && (s.key === key || s.typeKey === key || s.typeKey === `site:${key}`) && Math.hypot((s.x ?? s.position.x) - pt.position.x, (s.z ?? s.position.z) - pt.position.z) < (pt.radius ?? 40))) why = t("déjà un sur ce point");
     }
     let ok = !why;
     // Plane h = a + b·dx + c·dz over the footprint (symmetric grid: terms separate).

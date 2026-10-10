@@ -140,7 +140,7 @@ export const ALG_UNIT_TYPES = {
     fireRate: 2.0,
     canHitAir: false,
     vision: 38,
-    builds: ["sandbags", "wire", "mgNest", "mortarPit", "mirador", "searchlight"],
+    builds: ["sandbags", "wire", "mgNest", "mortarPit", "mirador", "searchlight", "forwardPost", "aidStation", "fortPoint"],
     // The appelé's body in the SAPEUR look: pack, belt, work extras — his
     // shovel shows when he digs.
     url: "/models/soldiers/soldiers.glb",

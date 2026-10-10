@@ -16,6 +16,8 @@ export const ICON = {
   // 2026-10-08: the transports (algTransports.js) — the badge's truck (drawn here, ours), DÉBARQUER as SORTIR
   transport: "transport", disembark: "unload",
   attackMove: "alertAttack",
+  // field works (algFieldWorks.js): existing silhouettes
+  forwardPost: "reinforce", aidStation: "repair", fortPoint: "alertFlag",
   // veterancy chevrons (1-3) and the alert feed's pictures
   vet1: "vet1", vet2: "vet2", vet3: "vet3",
   alertAttack: "alertAttack", alertSeen: "alertSeen", alertCut: "alertCut", alertFlag: "alertFlag", alertMine: "alertMine",

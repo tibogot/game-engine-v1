@@ -5,6 +5,15 @@ export default {
   "Villageoise": "Villager",
   "Ancien": "Elder",
   "Berger": "Shepherd",
+  // algFieldWorks.js — the sappers' field works (2026-10-10)
+  "Poste avancé": "Forward post",
+  "Poste radio près d'un point que vous tenez : vos groupes à 30 m s'y renforcent, comme au poste.": "A radio post near a point you hold: your squads within 30 m reinforce there, as at the post.",
+  "Poste de secours": "Aid station",
+  "Tente de l'infirmier : vos blessés à 20 m guérissent, hors du combat.": "The medic's tent: your wounded within 20 m heal, out of combat.",
+  "Point fortifié": "Fortified point",
+  "Sacs de sable dans le cercle d'un point que vous tenez : il rapporte 25 % de plus et le FLN met deux fois plus de temps à le prendre.": "Sandbags inside a point you hold: it pays 25% more and the FLN takes twice as long to capture it.",
+  "dans le cercle d'un point que vous tenez": "inside a point you hold",
+  "déjà un sur ce point": "already one on this point",
   "Moussebel": "Moussebel",
   "<b>Le berger ouvre le feu !</b> Un moussebel du FLN, à la ferme.": "<b>The shepherd opens fire!</b> An FLN moussebel (auxiliary), at the farm.",
   // alg.html — the loading screen's slides (2026-10-09)
