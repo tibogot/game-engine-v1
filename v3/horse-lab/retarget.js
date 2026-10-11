@@ -26,7 +26,7 @@ add("spine_03", "Spine2", "neck_01", "Neck", "body");
 add("neck_01", "Neck", "Head", "Head", "body");
 add("Head", "Head", null, null, "head");
 for (const [s, S] of [["l", "Left"], ["r", "Right"]]) {
-  add(`clavicle_${s}`, `${S}Shoulder`, `upperarm_${s}`, `${S}Arm`, "arm");
+  add(`clavicle_${s}`, `${S}Shoulder`, `upperarm_${s}`, `${S}Arm`, "rest");   // (see "rest" below)
   add(`upperarm_${s}`, `${S}Arm`, `lowerarm_${s}`, `${S}ForeArm`, "arm");
   add(`lowerarm_${s}`, `${S}ForeArm`, `hand_${s}`, `${S}Hand`, "arm");
   add(`hand_${s}`, `${S}Hand`, `middle_01_${s}`, `${S}HandMiddle1`, "palm");
@@ -105,6 +105,10 @@ export function bakeMixamoOnto(ref, robot, fps = 30) {
     if (m.kind === "head") { sd = sUp.clone().applyQuaternion(Qsd); dd = dUp.clone(); }
     const align = basis(sd, ss).multiply(basis(dd, ds).invert());     // robot rest frame → Mixamo rest frame
     m.dRestAligned = align.multiply(D[m.dst].q.clone());               // the robot bone, posed as Mixamo's rest
+    // "rest": a COLLARBONE carries its MOVE from its own rest, not its direction — each
+    // skeleton's rest collarbone is its own neutral (the robot's point 37° back by design,
+    // Y Bot's 12°); copied by direction, Y Bot stood shoulders back, chest out
+    if (m.kind === "rest") m.dRestAligned = D[m.dst].q.clone();
     m.sRestInv = S[m.src].q.clone().invert();
   }
   // the parent of each mapped robot bone (for local rotations): mapped, or its bind

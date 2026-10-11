@@ -582,6 +582,25 @@ export class Archer {
     for (const [b, q, p] of saved) { b.quaternion.copy(q); b.position.copy(p); }
     rd.r.model.updateMatrixWorld(true);
   }
+  // a point kept off the HEAD (the helmet's shell when it is worn, the head inside it
+  // otherwise) by `m` m: pushed straight out from the head's axis. Its frame and size
+  // are the helmet's (built for every rider, hidden or not).
+  keepOffHead(p, m) {
+    const hl = this.rd.helmet, sh = hl?.userData.shell; if (!sh) return p;
+    const pad = hl.visible ? 0 : sh.pad;
+    hl.updateMatrixWorld(true);
+    const l = hl.worldToLocal(p.clone());
+    // its shape: a SMOOTH rounded box round the shell (a squared-off ellipsoid, power 4: the
+    // barrel's straight sides and its crown edge) — pushed straight out from its middle, so
+    // the push turns smoothly from sideways to over the top (choosing one or the other, the
+    // hand jumped 25 cm in a frame)
+    const cy = sh.H * 0.45, a = sh.rx - pad + m, c = sh.rz - pad + m, b = sh.H - pad + m - cy;
+    const dy = l.y - cy, f = (Math.hypot(l.x / a, l.z / c)) ** 4 + (dy / b) ** 4;
+    if (f >= 1 || f < 1e-8) return p;
+    const k = f ** -0.25;
+    l.x *= k; l.z *= k; l.y = cy + dy * k;
+    return hl.localToWorld(l);
+  }
   // the clip's time for this moment of the shot (Mixamo "Shooting Arrow": fetch 0–1.95,
   // draw 1.95–2.8, hold, release 3.85, arms down by 4.8)
   baseTime() {
@@ -841,7 +860,9 @@ export class Archer {
       rotateWorld(B.head, q.setFromAxisAngle(h, aimPitch * (1 - BP.bend) * 0.5 * aw - 0.08 * aw));   // and a touch down onto the arrow
     }
     // ── the anchor and the arrow line
-    const hb = wpos(B.head), [af, ar, au] = BP.anchor;
+    const hb = wpos(B.head), [af, ar0, au] = BP.anchor;
+    // (a helmet on: the string hand anchors against its cheek, not inside it)
+    const helm = rd.helmet?.visible ? rd.helmet.userData.side : 0, ar = Math.max(ar0, helm + 0.012);
     const C = hb.clone().addScaledVector(dh, af).addScaledVector(h, ar).addScaledVector(UP, au);
     const ch = this.chest();
     // ── the shot's phases (empty → fetch → nocked / drawing → release) ─────
@@ -1051,6 +1072,18 @@ export class Archer {
         const kN2 = mj(pr("nock"));
         pole = BA.elbowR.clone(); N2 = BA.handQR; Dw = null;
         if (this.nockCorr) T.sub(this.nockCorr);               // (the other half of the sideways gap)
+        // KEPT OFF THE HEAD, last (after the pull toward the quiver, which drew the wrist 58 %
+        // into a helmet as the hand came over the top): the fingers, and the wrist as the
+        // clip's hand carries it, a hand's width clear
+        {
+          const wOff = this.wristFromPinch ?? wpos(armR.tip).sub(BA.pinch);   // (the hand as it WAS last frame, fingers curled — the clip's straight fingers put the wrist 15 cm off)
+          const want = new V3();
+          for (const [off, m] of [[new V3(), 0.025], [wOff, 0.045]]) { const q0 = T.clone().add(off).add(want); want.add(this.keepOffHead(q0, m).sub(q0)); }
+          // (eased in and out over a few frames — on at full the instant it touched, it snapped)
+          if (T0 < 0.05) this.headPush = new V3();
+          this.headPush = (this.headPush ?? new V3()).lerp(want, lerpK(18, dt));
+          T.add(this.headPush);
+        }
         this.elbowDir = null; this.twistPrev = undefined;    // (the clip's elbow and roll — no lag behind them)
         fing = null;
         fingW = T0 < ST.pull[0] ? [PINCH, mj(pr("close"))] : [mixF(PINCH, HOOK, kN2), 1];
@@ -1117,6 +1150,7 @@ export class Archer {
       this.fetchFrame = { SR, Rt, cu, cf };                   // (the editor's handles)
       this.reachNatural(armR, hdR, T, pole, Dw, N2, fing, pt, wIn, base ? 9 : reachMax * (1 + 2 * mj(pr("nock"))), base ? 1.2 : 0.52 + 0.08 * mj(pr("nock")), base ? null : TWIST_R);   // (the reach and wrist limits hand over to the string's across the nock: switched at once, the hand stepped 3.8 cm)
       if (fingW) this.curl(hdR, fingW[0], fingW[1] * aw);    // (mocap: the clip's fingers until they close on the arrow)
+      this.wristFromPinch = wpos(armR.tip).sub(this.pinchPoint());
       this.arrowTaken = T0 >= ST.close[0] + 0.1;
       if (!this.arrowTaken) this.arrowPath = null;
       this.fetchT = T;
@@ -1142,11 +1176,19 @@ export class Archer {
           if (!last || Math.hypot(cur[0] - last[0], cur[1] - last[1], cur[2] - last[2]) > 0.005) path.push(cur);
           let need = ARROW_LEN * 0.9, p = arrowFrom.clone(), tip = null;
           for (let i = path.length - 2; i >= 0 && !tip; i--) {
-            const w = toW(...path[i]), d = w.distanceTo(p);
+            const w = this.keepOffHead(toW(...path[i]), 0.02), d = w.distanceTo(p);   // (the trail's older points move with the shoulder, the head differently: kept off it)
             if (d >= need) tip = p.clone().lerp(w, need / d); else { need -= d; p = w; }
           }
           if (!tip) tip = p.addScaledVector(q.axis, -need);              // (the rest of it still in the quiver)
           arrowDir = tip.sub(arrowFrom).normalize().lerp(gEnd, mj((pr("bring") - 0.68) / 0.32)).normalize();
+          // (straight, between points of a path curving round the head, the shaft cut through the
+          // helmet: it pivots in the fingers until clear — toward its most buried point pushed out)
+          for (let it = 0; it < 4; it++) {
+            let worst = null, wd = 0;
+            for (let kk = 0.1; kk <= ARROW_LEN; kk += 0.08) { const pa = arrowFrom.clone().addScaledVector(arrowDir, kk), q2 = this.keepOffHead(pa, 0.015), d = q2.distanceTo(pa); if (d > wd) { wd = d; worst = q2; } }
+            if (!worst) break;
+            arrowDir.copy(worst.sub(arrowFrom).normalize());
+          }
         } else arrowDir = toLip.normalize().lerp(hang, this.fetchFree).normalize().lerp(gEnd, mj((pr("bring") - 0.68) / 0.32)).normalize();
         if (pr("nock") > 0.15) nockW = arrowFrom.clone();
       }

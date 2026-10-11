@@ -197,6 +197,20 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   at the cheek (7.5 cm out), knuckles 12.6–13.3 cm (head ±8); the release moves out and away.
   (bow5's targets: the crosshair ray hits the leaning butt face ~14 cm above the boss —
   the "high" offsets are that, not the bow.)
+- Y Bot "shoulders back, chest out" (user): the robot's COLLARBONES point 37° back in its own
+  rest (Y Bot's 12°); copied by direction onto Y Bot (−0.54 / −0.70 forward share). Collarbones
+  now carry their MOVE from each one's own rest ("rest" kind in retarget.js): Y Bot idle
+  −0.10 / −0.30, its own Mixamo stance −0.24 / −0.07. Bow bases re-baked for both riders.
+- HEADGEAR (Rider ▸ headgear: hat / helmet / none, kept in this browser): helmet.js — a
+  great helm fitted to each rider's head (oval, 1.8 cm off it), keeled face plate, a real
+  eye slit under the upper plate's lip, domed crown plate, brass cross + brow strip,
+  breathing holes in a cross, rolled rim, hammered steel (shine varies). The bow anchors
+  against its cheek (anchor out to its side + 1.2 cm). "Too big / not realistic" (user):
+  v1 was round from the head's longest axis (14 cm out every way).
+- The head (helmet worn, else the head inside it) is an OBSTACLE for the fetching hand and
+  the arrow (keepOffHead: a power-4 rounded box round the shell, pushed out from its middle;
+  the push eased in): the wrist went 58–90 % into a helmet over the crown, the arrow 70 %.
+  Now 0 frames inside on both riders; a few hand-jerk flags at 1.22–1.25 (the whip, ~Mixamo's).
 - TODO: the user's look at Y Bot riding / mounting (seat, strap, mount keys retune);
   the release lowering bow elbow (~30° more than the clip for 0.3 s).
 
