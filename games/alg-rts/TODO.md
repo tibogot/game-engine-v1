@@ -546,6 +546,10 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      48-56°), distances ×1.58 so the same ground is in view at every zoom. Adapted with it: plant
      detail floors [190, 260] (were [130, 180]), the haze ×0.64, the sound's listener height ×0.73,
      the seated crews drawn to 200 m (unitRenderer crewFar). ?cam=old = the old camera.
+     TREES POPPED at max zoom (you): the PLACED trees (showroom.js lodDistances) still stepped at 135 m.
+     Measured: the farthest ground seen 167-187 m, the farthest tree in view 150-179 m (6 spots) →
+     placed [215, 300], painted floors [215, 290]. A/B interleaved, max zoom: +0.2 ms (oasis),
+     +0.44 ms (village). Kept the zoom range (cutting it to keep 135 m meant ~90 m, far less than before).
      Checked: our ring's height/width 0.68 (CoH's 0.69; old 0.80). MEASURED (HUD GPU button, the
      Aïn Tighanimine oasis, 3 rounds): default 8.4 ms (old 8.6), zoomed out 8.8 ms (old 9.4).
      - [ ] **you**: play with it; then a CoH screenshot fully zoomed IN and fully OUT to match the ends.

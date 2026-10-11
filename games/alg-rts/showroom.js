@@ -318,7 +318,12 @@ function placePlants(app, placed) {
   // detail casts too (the plant fields cast with it) — at 2 every orchard past
   // 140 m lost its shadow, and at the default zoom that line crossed the top
   // of the screen, so trees dropped their shadows as you panned.
-  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: [135, 220], shadowLods: 3 });
+  // COH 3'S CAMERA (2026-10-11, you: "at max zoom out my trees pop"): the farthest ground seen is now
+  // 167-187 m (measured, 16:9), and a tree just past the top edge still shows its crown (~20 m more):
+  // the first step at 215 m (×1.6). ?cam=old keeps [135, 220].
+  const OLD_CAM = new URLSearchParams(location.search).get("cam") === "old";
+  const pf = new PlacedFoliage({ scene: app.scene, lodDistances: OLD_CAM ? [135, 220] : [215, 300], shadowLods: 3 });
+  app.algPlacedFoliage = pf;   // (the dev console / an A/B of its LOD distances)
   pf.setType("canaryPalm", structuredClone(FOLIAGE_PRESETS.canaryPalm));
   // Either side of the gate, a few metres out (post-local).
   for (const [lx, lz, scale, seed] of [[-7, 22, 1, 17], [7, 22, 0.95, 29]]) {

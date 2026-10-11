@@ -181,9 +181,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     scatterReceiveLods: Number(params.get("recvlods") ?? 3),
     // Plant detail steps OFF the screen at every zoom (the farthest corner seen is ~125 m): a step
     // on screen was a band of plants changing as you panned. MEASURED: +0.45 ms GPU at max zoom.
-    // (CoH 3's camera, 2026-10-11: from further back the far corner is ~175 m, was ~120: the floors
-    // × 1.46 so the steps stay off the screen. ?cam=old keeps the old ones.)
-    scatterLodFloors: OLD_CAM ? [130, 180] : [190, 260],
+    // (CoH 3's camera, 2026-10-11: the farthest ground seen at max zoom is 167-187 m (measured, 16:9;
+    // was ~120) and a tall plant past the top edge still shows its crown: the first step at 215 m.
+    // [190, 260] first: a tree at the top of the screen still popped — you. ?cam=old keeps the old ones.)
+    scatterLodFloors: OLD_CAM ? [130, 180] : [215, 290],
     // shadowRadius 2 (engine default 4): the PCF disc is radius × texel, and at
     // 4 the palm fronds and soldiers smeared to grey smudges; 1 was crisp but
     // grainy. Chosen by eye in-game, 2026-09-29.
