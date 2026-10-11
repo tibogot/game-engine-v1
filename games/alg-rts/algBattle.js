@@ -403,7 +403,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     // (Yours on the left: the FLN's numbers first when you play it.)
     if (isHuman("enemy")) hud.setScore({ fr: score.enemy, aln: score.player, max: P.start, heldFr: economy.heldByEnemy, heldAln: economy.held });
     else hud.setScore({ fr: score.player, aln: score.enemy, max: P.start, heldFr: economy.held, heldAln: economy.heldByEnemy });
-    hud.markers(economy.allPoints);
+    // (a supply point's yield, "+9", beside its icon — CoH 3's "+5"; the battle knows the price, the HUD does not)
+    hud.markers(economy.allPoints, { yieldOf: (p) => (p.kind === "supply" ? economy.params.supplyPoint * (p.fortified ? 1.25 : 1) : null) });
     if (rules.objectives) objectives(dt);
     if (rules.advice) advice(dt);
     hud.tick();

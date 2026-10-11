@@ -123,7 +123,14 @@ const CSS = `
 .alg-vmark.player .ring .bg { stroke: rgba(90,174,255,0.6); } .alg-vmark.enemy .ring .bg { stroke: rgba(255,95,78,0.6); }
 /* Held, but cut off from the post: pays nothing. */
 .alg-vmark.player.cut .ic { color: #e0a040; } .alg-vmark.player.cut .ring .bg { stroke: rgba(224,160,64,0.7); }
-.alg-vmark.supply .name { font-size: 10px; opacity: 0.85; }
+/* A supply point (CoH 3's "+5", 2026-10-12): its yield a minute in a small dark tag beside the icon;
+   amber when France holds it cut off (it pays nothing then). */
+.alg-vmark .top { display: flex; align-items: center; gap: 3px; }
+.alg-vmark .yd { pointer-events: auto; cursor: help; padding: 1px 4px; border-radius: 2px; font: 700 11px var(--hud-mono); letter-spacing: 0.02em;
+  color: #efe8d2; background: rgba(14,16,12,0.82); border: 1px solid rgba(239,232,210,0.3); text-shadow: none; }
+.alg-vmark.player .yd { border-color: rgba(90,174,255,0.6); }
+.alg-vmark.enemy .yd { border-color: rgba(255,95,78,0.6); }
+.alg-vmark.player.cut .yd { color: #e0a040; border-color: rgba(224,160,64,0.7); text-decoration: line-through; }
 
 .alg-modal-back {
   position: fixed; inset: 0; z-index: 90; display: flex; align-items: center; justify-content: center;
@@ -297,7 +304,13 @@ export function createBattleHud({ camera, canvas, onJump }) {
   // ── Village markers ───────────────────────────────────────────────────────
   const marks = new Map();   // point → { node, cap, last }
   let pv = null;             // a scratch vector (the first point's type)
-  function markers(points) {
+  /**
+   * @param {object[]} points
+   * @param {object} [o]
+   * @param {(p: object) => number|null} [o.yieldOf]  a SUPPLY point's yield a minute, shown "+N" beside
+   *   its icon (CoH 3's "+5"; you, 2026-10-12) — null: no tag
+   */
+  function markers(points, { yieldOf = null } = {}) {
     const r = rectOf(canvas);   // cached: a read per frame forced a layout (shared-rts/canvasRect.js)
     for (const p of points) {
       let m = marks.get(p);
@@ -305,20 +318,23 @@ export function createBattleHud({ camera, canvas, onJump }) {
         const node = document.createElement("div");
         node.className = "alg-vmark";
         const supply = p.kind === "supply";
-        node.innerHTML = `<div class="flag"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="pr" cx="18" cy="18" r="15" pathLength="100"/></svg>`
-          + `<span class="ic">${iconSvg(pointIcon(p), { size: supply ? 14 : 17 })}</span></div><div class="name"></div>`;
-        node.querySelector(".name").textContent = supply ? p.name.split(" · ")[0] : p.name;
-        for (const el of node.querySelectorAll(".flag, .name")) {
+        // A SUPPLY point, CoH 3's way (2026-10-12): the icon and its yield side by side, no name (the
+        // hover's tooltip has it); a village keeps its name under its star.
+        node.innerHTML = `<div class="top"><div class="flag"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="pr" cx="18" cy="18" r="15" pathLength="100"/></svg>`
+          + `<span class="ic">${iconSvg(pointIcon(p), { size: supply ? 14 : 17 })}</span></div>${supply ? `<span class="yd"></span>` : ""}</div>${supply ? "" : `<div class="name"></div>`}`;
+        if (!supply) node.querySelector(".name").textContent = p.name;
+        for (const el of node.querySelectorAll(".flag, .name, .yd")) {
           el.addEventListener("pointerenter", () => { hovered = p; });
           el.addEventListener("pointerleave", () => { if (hovered === p) hovered = null; });
         }
         document.body.appendChild(node);
-        m = { node, ring: node.querySelector(".ring .pr"), last: "" };
+        m = { node, ring: node.querySelector(".ring .pr"), yd: node.querySelector(".yd"), last: "" };
         marks.set(p, m);
       }
-      // 9 m over the village's centre, projected; hidden off screen or behind.
+      // Over the point, projected; hidden off screen or behind. A supply point's over its 9 m mast and
+      // flag (at 9 m it sat on the knob — 2026-10-12); a village's 9 m over its centre.
       pv = (pv ?? p.position.clone()).copy(p.position);
-      pv.y += 9;
+      pv.y += p.kind === "supply" ? 12.5 : 9;
       pv.project(camera);
       const on = pv.z < 1 && Math.abs(pv.x) < 1.05 && Math.abs(pv.y) < 1.05;
       m.node.style.display = on ? "" : "none";
@@ -326,9 +342,11 @@ export function createBattleHud({ camera, canvas, onJump }) {
       const sx = r.left + (pv.x * 0.5 + 0.5) * r.width, sy = r.top + (-pv.y * 0.5 + 0.5) * r.height;
       m.node.style.transform = `translate(${sx.toFixed(0)}px, ${sy.toFixed(0)}px) translate(-50%, -100%)`;
       const v = p.progress ?? 0;
-      const key = `${p.owner}|${v.toFixed(2)}|${p.linked}`;
+      const yd = m.yd && yieldOf ? yieldOf(p) : null;
+      const key = `${p.owner}|${v.toFixed(2)}|${p.linked}|${yd}`;
       if (key === m.last) continue;
       m.last = key;
+      if (m.yd) { m.yd.textContent = yd == null ? "" : `+${Math.round(yd)}`; m.yd.hidden = yd == null; }
       m.node.className = `alg-vmark ${isHuman(p.owner) ? "player" : isHostile(p.owner) ? "enemy" : ""}${p.kind === "supply" ? " supply" : ""}${isHuman(p.owner) && p.linked === false ? " cut" : ""}`;
       // The ring fills clockwise toward whoever is winning it: blue the French, red the FLN.
       m.ring.style.strokeDasharray = `${(Math.abs(v) * 100).toFixed(1)} 100`;
