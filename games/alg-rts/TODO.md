@@ -6,6 +6,61 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+## ROAD TO STEAM — 2026-10-11 (you: "everything remaining, to make a finished game to place on
+## Steam, a CoH-like game"). The plan of record; details in the sections below.
+
+TARGET: Steam EARLY ACCESS — the training, 2-3 skirmish maps vs the AI (both sides), one short
+French campaign; the campaign grows during Early Access. A complete, polished loop first.
+
+PHASE 1 — finish what is half-built
+1. [ ] **you**: the village look (new stone vs `?village=old` with photo detail vs `&kitphoto=0`);
+   Normal difficulty both sides; doctrine prices; the training's wording/pace; the steppe;
+   fire / smoke / explosions (your effects lab).
+2. [ ] BUILDING DAMAGE + COLLAPSE (after your building tuning): walls lost, garrisons forced out,
+   rubble — CoH's signature, the biggest gameplay gap left.
+3. [ ] The FRENCH AI: sappers that build, mortars, flares, doctrines.
+4. [ ] The FLN side's own toolkit: structures to build, the cave as a real base, its abilities.
+5. [ ] The souk (ksar); the coplanar scan of the other French pieces at the detail the game builds.
+6. [ ] VOICES + radio calls (FR + Arabic) — blocked on recordings / a TTS key (env var only).
+
+PHASE 2 — content for a launch
+7. [ ] MISSION 2, THE COAST (map planned; its ground and layout to do).
+8. [ ] A THIRD MAP (sugg.: a mountain pass or village) — skirmish variety.
+9. [ ] SKIRMISH from the menu: map, side, difficulty, doctrine.
+10. [ ] A SHORT CAMPAIGN: 3-5 missions, Colonel Delorme, briefings between; objectives beyond
+    holding villages (escort a convoy, defend the post at night, a raid on a cave).
+11. [ ] SAVE / LOAD (between campaign missions at least).
+
+PHASE 3 — a finished product
+12. [ ] OPTIONS: graphics presets (low / medium / high), resolution and render scale, volumes
+    (master / music / effects / voices), KEY REBINDING (AZERTY), UI scale (exists), gore toggle.
+13. [ ] MUSIC: a main theme, battle and calm layers (licensed or commissioned) — none yet.
+14. [ ] RELEASE CLEANUP: the dev panel and stats only with ?dev=1; a clean console (the KTX2
+    warning); the flaky test suite.
+15. [ ] PERF + BOOT: boot 44 s → shader cache, preloading, a real loading screen; test on a
+    weaker GPU and a desktop GPU; publish a minimum spec.
+16. [ ] ARABIC + right-to-left UI (native speaker) — or during Early Access; launch FR + EN.
+
+PHASE 4 — Steam itself
+17. [ ] ELECTRON build: WebGPU, a persistent shader cache, fullscreen, saves on disk.
+18. [ ] STEAMWORKS: the app ($100), achievements, cloud saves, the overlay.
+19. [ ] LEGAL: every asset's licence — Mixamo (soldiers), Poly Haven (CC0), Freesound (some need
+    attribution or forbid commercial use: audit each), fonts, flags; a credits screen.
+20. [ ] STORE PAGE: capsule art (Steam's sizes), screenshots, a trailer (the game's own camera),
+    FR + EN text, tags, the content survey (violence, a historical conflict).
+21. [ ] THE SUBJECT: the Algerian War is sensitive in France and Algeria — both sides with respect,
+    a short historical note at the start, no war-crime gameplay.
+
+PHASE 5 — after launch (the Early Access roadmap)
+22. [ ] More maps and campaign missions; Arabic; an FLN campaign.
+23. [ ] MULTIPLAYER: co-op vs AI first, then PvP — needs a DETERMINISTIC sim (seeded rng, nothing
+    visual feeding the sim): cheap to prepare early, dear to retrofit.
+24. [ ] Mobile / tablet: last, if ever.
+
+ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) building damage +
+collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a short campaign →
+(6) Electron, Steamworks, the store page → Early Access.
+
 ## CoH AUDIT 2 — 2026-10-07 (you: "another audit to compare with CoH: textures, buildings,
 ## environment, gameplay"). LOOKED AT in the game: the post, Dechra Tighanimine, Ksar el Hamra,
 ## Mechta el Oued, the open fields at full zoom-out, a staged fight by the SAS post. Ranked by
