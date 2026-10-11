@@ -14,7 +14,8 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { buildMortarPit } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
+import { buildDechraV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
+import { buildDechra } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import * as THREE from "three";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
@@ -88,6 +89,10 @@ const BUILDINGS = {
   hameau: {
     label: "Hameau (nouveau)", gap: 26, before: () => buildMechta(), after: () => buildMechtaV2(),
     tags: ["HAMEAU (LE JEU)", "HAMEAU · NOUVEAU"], note: "le hameau du jeu à gauche, le nouveau à droite.",
+  },
+  dechraNouveau: {
+    label: "Dechra (nouveau)", gap: 34, before: () => buildDechra(), after: () => buildDechraV2(),
+    tags: ["DECHRA (LE JEU)", "DECHRA · NOUVEAU"], note: "la dechra du jeu à gauche, la nouvelle à droite (sur terrain plat ici).",
   },
   mortier: {
     label: "Fosse de mortier", gap: 7, before: () => buildMortarPit(), after: () => buildMortarPitV2(),

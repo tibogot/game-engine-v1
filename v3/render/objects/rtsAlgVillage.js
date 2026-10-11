@@ -93,9 +93,13 @@ function groundWall(parts, R, groundAt, a, b, { h = 1.0, t = 0.4, mat = MAT.rubb
  * The rows run along local X; the slope rises along +Z (the game turns the
  * village so it climbs away from the camera).
  */
-export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT } = {}) {
+// `onHouse` / `onMosque` / `onYard` (alg-rts algMasonry.js buildDechraV2, 2026-10-11): the village
+// LAID OUT as ever (the same random streams: every house, door and yard where it was), but the houses,
+// their socles, the mosque and the yard walls DRAWN by the caller — handed what to draw (pre-scale).
+export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT, onHouse = null, onMosque = null, onYard = null } = {}) {
   const R = rng(seed);
   const parts = [];
+  const real = parts;   // (what is drawn: the caller's houses go to a throwaway list)
   const rowStep = 9;
   const z0 = -((rows - 1) * rowStep) / 2;
   const mosqueRow = Math.floor(rows / 2);
@@ -114,6 +118,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
         const { top, low } = groundSpan(groundAt, cx, cz, w + 3, d);
         const y = top;
         const sh = y - low + 0.9;
+        const parts = onMosque ? [] : real;   // (shadows the village's list for the mosque's parts)
         parts.push({ geo: buildBox(w + 0.36, sh, d + 0.36), pos: [cx, y + 0.33 - sh / 2, cz], mat: MAT.rubble, tone: 0.4 });   // its own height: neighbours' socles are 0.20/0.25
         parts.push({ geo: buildBox(w, h, d), pos: [cx, y + h / 2, cz], mat: MAT.white, tone: 0.62 });
         parts.push({ geo: buildBox(w + 0.3, 0.24, d + 0.3), pos: [cx, y + h + 0.12, cz], mat: MAT.white, tone: 0.55 });
@@ -145,6 +150,7 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
         nest = [mx + 0.22, ny + 0.22, mz];
         for (const [ox, oz] of [[0, -1.12], [-1.12, 0]]) parts.push({ geo: buildBox(ox ? 0.05 : 0.35, 0.9, oz ? 0.05 : 0.35), pos: [mx + ox, my + MH - 1.6, mz + oz], mat: MAT.steel, tone: 0.02 });
         houses.push({ x: cx, z: cz, mosque: true, sw: w + 0.36, sd: d + 0.36, minaret: { x: mx, z: mz }, door: [cx - 1.2, cz - d / 2 - 1.2] });
+        onMosque?.({ x: cx, z: cz, y, low, w, d, h, minaret: { x: mx, z: mz, y: my, low: m.low, h: MH }, nest });
         x += w + 3.5;
         continue;
       }
@@ -153,8 +159,10 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
       const { top, low } = groundSpan(groundAt, cx, cz, w, d);
       const y = top;
       const n0 = parts.length;
-      const hh = house(parts, R, { x: cx, z: cz, yaw: 0, w, d, h, storey2: R() < 0.3, doorFace: -1, leanTo: false });
-      lift(parts, n0, y);
+      const storey2 = R() < 0.3;
+      const scratch = onHouse ? [] : parts;   // (the caller draws it: the same draws, nothing kept)
+      const hh = house(scratch, R, { x: cx, z: cz, yaw: 0, w, d, h, storey2, doorFace: -1, leanTo: false });
+      if (!onHouse) lift(parts, n0, y);
       // ATTACHED ROWS: a level of this house (a parapet's top, its roof's) within 6 mm of the house
       // before it in the row z-fights where their roofs meet (seen once the parapets varied,
       // 2026-10-08) — lift this one 2.3 cm, as the ksar does.
@@ -172,8 +180,10 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
       // equal tops z-fought.
       const lip = 0.2 + (houses.length % 2) * 0.05;
       const sh = y - low + 0.7 + lip;
-      parts.push({ geo: buildBox(w + 0.36, sh, d + 0.36), pos: [cx, y + lip - sh / 2, cz], mat: MAT.rubble, tone: 0.32 + R() * 0.15 });
+      const socleTone = 0.32 + R() * 0.15;
+      if (!onHouse) parts.push({ geo: buildBox(w + 0.36, sh, d + 0.36), pos: [cx, y + lip - sh / 2, cz], mat: MAT.rubble, tone: socleTone });
       houses.push({ x: cx, z: cz, door: hh.door, w, d, sw: w + 0.36, sd: d + 0.36, row: r });
+      onHouse?.({ x: cx, z: cz, y, low, w, d, h, storey2, lip, doorX: hh.door[0] - cx, seed: houses.length });
       x += w + (R() < 0.2 ? 1.8 + R() : 0.08);
     }
   }
@@ -209,7 +219,8 @@ export function buildDechra({ seed = 1956, rows = 4, width = 34, groundAt = FLAT
     const gap = 0.75;
     const yard = [[[h.x - gap, zf - deep], [x0, zf - deep], [x0, zf]], [[h.x + gap, zf - deep], [x1, zf - deep], [x1, zf]]];
     for (const w of yard) {
-      dryStone(parts, RL, w, { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
+      dryStone(onYard ? [] : parts, RL, w, { courses: 3, h: 1.05, depth: 0.45, len: 0.5, groundAt, tone: 0.48 });
+      onYard?.(w);
       coverLines.push({ pts: w, hard: true });
     }
     const ix = h.x + (RL() < 0.5 ? -1 : 1) * (h.w / 2 - 1.3), iz = zf - deep + 1.2;

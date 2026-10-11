@@ -16,6 +16,7 @@ import * as THREE from "three";
 import { abs, attribute, dot, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { grainSack as grainSackGeo } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildDechra } from "../../v3/render/objects/rtsAlgVillage.js";
 
 // ── MATERIALS ───────────────────────────────────────────────────────────────────────────────────
 const BUILD = (id, m) => `/textures/build/${id}/${id}_${m}_1k.jpg`;
@@ -44,6 +45,8 @@ export const SURFACES = {
   reed: { url: BUILD, id: "reed_roof_04", tile: 1.0, tint: [0.36, 0.3, 0.21], sat: 0.6, rough: 1, foot: 0 },
   // (a pit's spoil, a berm: the gravelly dug earth)
   spoil: { url: GROUND, id: "brown_mud_dry", tile: 2.4, tint: [0.82, 0.7, 0.55], sat: 0.75, rough: 1, foot: 0 },
+  // (whitewash: the mosque, the koubba — the clay plaster lifted to an old white)
+  lime: { url: BUILD, id: "clay_plaster", tile: 2.0, tint: [1.75, 1.68, 1.5], sat: 0.15, rough: 0.95, foot: 0.3 },
   hessian: { url: BUILD, id: "hessian_230", tile: 0.55, tint: [0.7, 0.58, 0.42], sat: 0.6, rough: 1, foot: 0 },
 };
 /** Live tunables (the lab). */
@@ -337,7 +340,7 @@ function firewood(x, y, z, yaw, seed) {
 }
 
 // ── A SITE: pieces add geometry per surface; the site merges it (one mesh per surface) ──────────
-export const newSite = () => ({ stone: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], cloth: [], dark: [] });
+export const newSite = () => ({ stone: [], lime: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], cloth: [], dark: [] });
 let _cloth = null;
 /** Cloth (laundry, rugs): its colour per vertex — white, indigo, madder red, ochre. */
 const clothMaterial = () => (_cloth ??= new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, name: "Masonry:cloth" }));
@@ -599,4 +602,87 @@ export function buildMechtaV2({ seed = 1954, count = 10 } = {}) {
     extra: [group], labMaterial: new THREE.MeshBasicMaterial({ visible: false }),
   });
   return carrier;
+}
+
+// ── THE DECHRA, NEW STANDARD (2026-10-11): rtsAlgVillage buildDechra's village — its rows climbing
+// the real slope, the lanes' stairs, the yards' places, the garrison's houses, the stork's nest — with
+// its HOUSES, their SOCLES, its MOSQUE and its YARD WALLS drawn here (the kit's builder hands them:
+// onHouse / onMosque / onYard, pre-scale). The kit geometry keeps the lane stairs and the yards' ovens
+// and jars, and carries the village's data; the new houses are its `extra`.
+
+/** A whitewashed block: a stoneBlock whose walls go to the LIME surface. */
+function limeBlock(o) {
+  const b = stoneBlock(o);
+  b.lime = b.stone; b.stone = [];
+  return b;
+}
+/** A socle (the terrace a house stands on): from below the ground to `top`, a little wider. */
+function socle(cx, cz, w, d, low, top, seed) {
+  const h = top - low + 0.5, g = new THREE.BoxGeometry(w, h, d, Math.max(1, Math.round(w / 0.9)), 1, Math.max(1, Math.round(d / 0.9)));
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) p.setX(i, p.getX(i) + noise2(p.getY(i) * 3, p.getZ(i) * 2, seed) * 0.04);
+  g.translate(cx, top - h / 2, cz);
+  g.computeVertexNormals();
+  const s = strip(g);
+  s.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(s.attributes.position.count * 2), 2));
+  return s;
+}
+
+export function buildDechraV2(o = {}) {
+  const K = 1.3, site = newSite();
+  const push = (b, y) => { for (const k of Object.keys(site)) if (Array.isArray(b[k])) for (const g of b[k]) { g.translate(0, y, 0); site[k].push(g); } };
+  const onHouse = (hh) => {
+    const x = hh.x * K, z = hh.z * K, y = hh.y * K, w = hh.w * K, d = hh.d * K, h = hh.h * K, s = 3100 + hh.seed * 13;
+    const R = stream(s);
+    const b = stoneBlock({ cx: x, cz: z, w, d, h, t: 0.5, r: 0.36, seed: s,
+      door: { x: hh.doorX * K, w: 0.95, h: 1.85 }, windows: R() < 0.7 ? [{ x: (hh.doorX > 0 ? -w * 0.28 : w * 0.28), w: 0.44, y: h - 0.95, h: 0.36 }] : [],
+      spouts: R() < 0.6 ? [hh.doorX > 0 ? -w * 0.3 : w * 0.32] : [], lime: R() < 0.55 });
+    push(b, y);
+    if (hh.storey2) {
+      const w2 = Math.max(3.2, w * 0.58), ox = ((w - w2) / 2 - 0.15) * (R() < 0.5 ? -1 : 1);
+      push(stoneBlock({ cx: x + ox, cz: z + d * 0.08, w: w2, d: d * 0.78, h: 2.3, t: 0.42, r: 0.28, seed: s + 3,
+        windows: [{ x: 0, w: 0.5, y: 1.0, h: 0.42 }], door: null, spouts: [] }), y + b.roofY - 0.02);
+    }
+    if (R() < 0.45) site.timber.push(...firewood(x + (R() - 0.5) * w * 0.4, y + b.roofY + 0.06, z + (R() - 0.5) * d * 0.3, R() * 3, s));
+    if (R() < 0.45) { for (let k = 0; k < 1 + Math.floor(R() * 3); k++) site.spoil.push(new THREE.SphereGeometry(0.24, 10, 7).scale(1, 1.3, 1).translate(x + (R() - 0.5) * w * 0.5 + k * 0.45, y + b.roofY + 0.33, z + (R() - 0.5) * d * 0.4)); }
+    site.stone.push(socle(x, z, w + 0.4, d + 0.4, hh.low * K - 0.4, y + hh.lip * K * 0.5, s));
+  };
+  let mosque = null;
+  const onMosque = (m) => { mosque = m; };
+  const onYard = (pts) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = [pts[i][0] * K, pts[i][1] * K], b = [pts[i + 1][0] * K, pts[i + 1][1] * K];
+      const gy = (o.groundAt ?? (() => 0))((pts[i][0] + pts[i + 1][0]) / 2, (pts[i][1] + pts[i + 1][1]) / 2) * K;
+      site.stone.push(dryWall(a, b, 1.3, 7700 + i + Math.round(a[0] * 10)).translate(0, gy, 0));
+    }
+  };
+  const kit = buildDechra({ ...o, onHouse, onMosque, onYard });
+  // THE MOSQUE: a whitewashed hall on its socle, its green door, the minaret with its gallery and
+  // lantern, the stork's nest on top.
+  if (mosque) {
+    const m = mosque, x = m.x * K, z = m.z * K, y = m.y * K, w = m.w * K, d = m.d * K, h = m.h * K;
+    const hall = limeBlock({ cx: x, cz: z, w, d, h, t: 0.55, r: 0.3, seed: 911, door: { x: -1.2 * K, w: 1.3, h: 2.5 },
+      windows: [{ x: 1.2 * K, w: 0.55, y: 2.0, h: 0.9 }, { x: 2.9 * K, w: 0.55, y: 2.0, h: 0.9 }], spouts: [] });
+    push(hall, y);
+    site.stone.push(socle(x, z, w + 0.5, d + 0.5, m.low * K - 0.4, y + 0.3, 912));
+    const mn = m.minaret, mx = mn.x * K, mz = mn.z * K, my = mn.y * K, MH = mn.h * K;
+    const shaft = limeBlock({ cx: mx, cz: mz, w: 2.2 * K, d: 2.2 * K, h: MH, t: 0.45, r: 0.12, seed: 913,
+      windows: [{ x: 0, w: 0.35, y: MH - 2.2, h: 0.9 }], door: null, spouts: [] });
+    push(shaft, my);
+    site.stone.push(socle(mx, mz, 2.2 * K + 0.5, 2.2 * K + 0.5, mn.low * K - 0.4, my + 0.4, 914));
+    const lantern = limeBlock({ cx: mx, cz: mz, w: 1.25 * K, d: 1.25 * K, h: 1.5, t: 0.25, r: 0.08, seed: 915, windows: [], door: null, spouts: [] });
+    push(lantern, my + shaft.roofY - 0.02);
+    if (m.nest) {
+      const nx = m.nest[0] * K - 0.22 * K, ny = my + shaft.roofY + lantern.roofY + 0.1, nz = m.nest[2] * K;
+      site.timber.push(new THREE.CylinderGeometry(0.75, 0.6, 0.28, 10).translate(nx, ny, nz));
+      for (let k = 0; k < 12; k++) {
+        const a = (k / 12) * Math.PI * 2;
+        site.timber.push(new THREE.CylinderGeometry(0.025, 0.025, 1.0, 4).rotateZ(Math.PI / 2).rotateY(a + 0.9).translate(nx + Math.cos(a) * 0.6, ny + 0.12, nz + Math.sin(a) * 0.6));
+      }
+      kit.userData.nest = { x: nx, y: ny + 0.2, z: nz };
+    }
+  }
+  const { group } = siteGroup(site, "Dechra");
+  kit.userData.extra = [group];
+  return kit;
 }

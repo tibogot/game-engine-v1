@@ -555,6 +555,17 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        LOD picks per camera). GPU: all four new sites −0.02 ms ± 0.05 hidden (a hamlet framed) —
        free on the GPU; build at boot 39 + 25 + 19 ms (two hamlets, the camp). No simplified far
        LOD of the walls: not worth it at these costs (re-measure if a map has many more villages).
+     - [x] THE DECHRA on the new standard (2026-10-11, algMasonry buildDechraV2; ?village=old = the
+       kit's): rtsAlgVillage buildDechra lays it out as ever (the same random streams: houses, doors,
+       yards, trees, the nest) and HANDS its houses / socles / mosque / yard walls to the caller
+       (onHouse / onMosque / onYard); drawn as stoneBlocks on dry-stone terrace socles, the mosque and
+       minaret in a new LIME surface (whitewash from the clay plaster), the stork's nest rebuilt on the
+       lantern. Lanes' stairs and the yards' ovens stay the kit's. 23 garrison houses found. ~88k tris.
+     - [ ] MEASURE CLEANLY (needs you: Chrome visible on its own screen — the laptop throttled, the
+       baseline drifted 4.2 → 6.1 ms between runs): the dechra framed, on vs off read −1.07 ms in one
+       run and +0.07 in the next; the old dechra ~−0.25. If the new one is really ~1 ms framed, the
+       stone shader (3 photo + 3 normal + 6 plaster taps a pixel) is the suspect: gate the plaster
+       taps by the wear, or 2 projections on walls.
      - [ ] the hamlets in the GAME read dark: the light at that hour and the shadowed lane side (the
        old ones are as dark — ?village=old); judge in a playtest; maybe a warmer stone tint.
      - [ ] the building textures are 14 MB of JPG: compress (KTX2 / smaller normal maps) before

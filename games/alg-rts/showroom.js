@@ -24,7 +24,7 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
-import { buildMechtaV2 } from "./algMasonry.js";
+import { buildDechraV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -147,7 +147,7 @@ const GARDENS = !MAP.handPlaced ? [] : [
 /** `make(site)` if the map has the site, else nothing (filtered out below). */
 const at = (s, make) => (s ? make(s) : null);
 const VILLAGE = [
-  at(DECHRA, (s) => ({ key: "dechra", build: (o) => buildDechra(o), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
+  at(DECHRA, (s) => ({ key: "dechra", build: (o) => (VILLAGE_OLD ? buildDechra(o) : buildDechraV2(o)), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
   at(KOUBBA, (s) => ({ key: "koubba", build: (o) => buildKoubba(o), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
   at(CEMETERY, (s) => ({ key: "cemetery", build: (o) => buildCemetery({ ...o, align: QIBLA_AXIS }), x: s.x, z: s.z, yaw: s.yaw, ground: true })),
   // THE KSAR on its knoll (you, 2026-09-29, after a photo of Ghardaïa): built
