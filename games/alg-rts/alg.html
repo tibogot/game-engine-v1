@@ -14,16 +14,17 @@
     <!-- No icon file: an empty one, or the browser asks for /favicon.ico and logs a 404. -->
     <link rel="icon" href="data:," />
     <!-- The cover art first, so the loading screen is never a black screen. -->
-    <link rel="preload" as="image" href="/textures/sand&amp;blood.webp" />
+    <link rel="preload" as="image" href="/games/alg-rts/menu/menualg2.webp" />
+    <link rel="preload" as="image" href="/games/alg-rts/menu/sandlogo.webp" />
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
       #game { position: fixed; inset: 0; }
       #perf-stats { top: 8px !important; bottom: auto !important; left: 8px !important; }
 
       /* ── Loading screen (nam.html's, in this game's colours) ──────────────
-         Full-screen cover art. The SAND & BLOOD title is painted INTO the art
-         (top left), so there is no logo image over it; object-position keeps
-         that corner in frame on narrow and tall windows. */
+         Full-screen cover art: THE MENU'S (2026-10-11, menu.html — menualg2, mirrored the same
+         way, the logo top left where the menu has it), so a choice in the menu flows straight
+         into the loading screen; the map's slides fade over it, the logo stays on top. */
       #boot {
         position: fixed; inset: 0; z-index: 2147483000; overflow: hidden;
         height: 100svh;
@@ -35,14 +36,16 @@
       #boot .art {
         position: absolute; inset: 0; width: 100%; height: 100%;
         object-fit: cover; object-position: 20% 20%;
-        /* THE SLIDES (2026-10-09, you: "more images so the loading is less boring"): each picture
-           drifts in very slowly and the next fades over it — transform and opacity only, run by
-           the compositor: nothing for the boot's busy main thread to do. */
+        /* THE SLIDES (2026-10-09, you: "more images so the loading is less boring"): the next
+           picture fades over the last. NO ZOOM any more (you, 2026-10-11: "jittering", and a new
+           slide "appears and scales up"): the slow scale stuttered while the boot compiles and
+           uploads (the GPU busy), and each new slide restarted it from 1 over a zoomed one. */
         transition: opacity 1.4s ease;
-        animation: boot-drift 30s ease-out forwards;
       }
       #boot .art.waiting { opacity: 0; }
-      @keyframes boot-drift { from { transform: scale(1); } to { transform: scale(1.08); } }
+      /* The menu's art and logo (menu.html: the same mirror, crop, place and size). */
+      #boot .art.cover { transform: scaleX(-1); }
+      #boot .logo { position: absolute; top: clamp(20px, 6vh, 64px); left: clamp(16px, 5vw, 80px); width: clamp(220px, 26vw, 420px); height: auto; }
       /* The picture's caption, bottom left, over the shade. */
       #boot .cap {
         position: absolute; left: 3.2%; bottom: 6.5%; max-width: min(380px, 34vw);
@@ -93,8 +96,9 @@
   <body>
     <div id="game"></div>
     <div id="boot">
-      <img class="art" src="/textures/sand&amp;blood.webp" alt="Sand &amp; Blood" />
+      <img class="art cover" src="/games/alg-rts/menu/menualg2.webp" alt="" />
       <div class="shade"></div>
+      <img class="logo" src="/games/alg-rts/menu/sandlogo.webp" alt="Sand &amp; Blood" />
       <div class="cap" id="cap"></div>
       <div class="load">
         <div class="tip" id="tip"></div>
@@ -133,12 +137,12 @@
       tipEl.textContent = TIPS[tipI++ % TIPS.length];
       const tipTimer = setInterval(showTip, 6500);
 
-      // ── THE SLIDES: the cover first (the title is painted in it), then these, one every
-      // SLIDE_S seconds (public/textures/loading/, WebP ~150 KB each). Each is fetched a moment
+      // ── THE SLIDES: the cover first (the menu's art, the logo over all), then these, one every
+      // SLIDE_S seconds (public/games/alg-rts/loading/, WebP ~150 KB each). Each is fetched a moment
       // after the page opens — never in the way of the cover — and shown only once decoded (off
       // the main thread). The last one stays. Add a picture: one line here.
       const SLIDES = [
-        { src: "/textures/loading/aures-descente.webp", pos: "50% 45%", cap: t("Aurès, 1956. Une section de paras descend vers le douar.") },
+        { src: "/games/alg-rts/loading/aures-descente.webp", pos: "50% 45%", cap: t("Aurès, 1956. Une section de paras descend vers le douar.") },
       ];
       const SLIDE_S = 7;
       const capEl = document.getElementById("cap");

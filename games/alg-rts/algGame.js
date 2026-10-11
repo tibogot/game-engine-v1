@@ -43,7 +43,8 @@ import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
 import { createAlgTelegraph } from "./algTelegraph.js";
 import { createAlgSounds } from "./algSounds.js";
-import { createGameMenu } from "./ui/gameMenu.js";
+import { createGameMenu, loadOptions } from "./ui/gameMenu.js";
+import { createUiScale } from "./ui/uiScale.js";
 import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { createAlgCivilians } from "./algCivilians.js";
@@ -402,6 +403,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("lamps") !== "0" && app.showroom) {
     try { app.algNightLamps = createAlgNightLamps(app); } catch (e) { console.warn("[alg lamps] failed:", e); }
   }
+  // THE INTERFACE SIZE (ui/uiScale.js), started BEFORE the battle builds its panels and the
+  // briefing: started with the game menu below, the briefing came up at 100 % and jumped to the
+  // option (115 % then) half a second later — "the briefing panel scales up" (you,
+  // 2026-10-11). The game menu reuses this one.
+  try { app.algUiScale = createUiScale(loadOptions().uiScale); } catch (e) { console.warn("[alg ui scale] failed:", e); }
   // THE BATTLE (algBattle.js): the villages as victory points (CoH), the cave
   // and the post as sudden death, alerts, village markers, the briefing and
   // the end screen. ?battle=0 = without; ?brief=0 skips the briefing.

@@ -19,8 +19,9 @@ import { t, LANG, LANGS, setLang } from "../i18n/i18n.js";
 import { isHuman } from "../../shared-rts/teams.js";
 
 const STORE = "algrts.options.v1";
-// uiScale: the HUD's size (ui/uiScale.js). 1.15 by default (you: "the text is a bit small").
-const DEFAULTS = { gore: "coh", tips: true, panSpeed: 55, edgeScroll: true, uiScale: 1.15 };
+// uiScale: the HUD's size (ui/uiScale.js). 100 % by default (you, 2026-10-11; it was 1.15 from 2026-10-07,
+// "the text is a bit small") — the slider in Options still goes to 150 %.
+const DEFAULTS = { gore: "coh", tips: true, panSpeed: 55, edgeScroll: true, uiScale: 1 };
 
 /** The saved options (defaults where none). */
 export function loadOptions() {
@@ -84,8 +85,9 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   const opts = loadOptions();
   const save = () => { try { localStorage.setItem(STORE, JSON.stringify(opts)); } catch { /* private window */ } };
 
-  // The HUD's size (ui/uiScale.js), from the saved option.
-  const uiScale = createUiScale(opts.uiScale);
+  // The HUD's size (ui/uiScale.js), from the saved option — the one algGame.js started before the
+  // briefing when there is one (made here, the briefing showed at 100 % then jumped to the option).
+  const uiScale = app.algUiScale ?? createUiScale(opts.uiScale);
   app.algUiScale = uiScale;
   // The saved options, applied now.
   function apply() {

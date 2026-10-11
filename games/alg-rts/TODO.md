@@ -26,7 +26,9 @@ PHASE 1 — finish what is half-built
 PHASE 2 — content for a launch
 7. [ ] MISSION 2, THE COAST (map planned; its ground and layout to do).
 8. [ ] A THIRD MAP (sugg.: a mountain pass or village) — skirmish variety.
-9. [ ] SKIRMISH from the menu: map, side, difficulty, doctrine.
+9. [~] SKIRMISH from the menu: map, side, difficulty, doctrine. MAP + SIDE done 2026-10-11 (menu.html
+   "Batailles" → alg.html?map=…&side=fln); difficulty stays on the side's briefing; doctrine to do.
+   NEXT: map + side CARDS with art (waiting on a French and an FLN picture, ~600×800).
 10. [ ] A SHORT CAMPAIGN: 3-5 missions, Colonel Delorme, briefings between; objectives beyond
     holding villages (escort a convoy, defend the post at night, a raid on a cave).
 11. [ ] SAVE / LOAD (between campaign missions at least).
@@ -503,6 +505,21 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
    maps (mission 2, the coast).
    - [x] MAIN MENU (2026-10-09): menu.html — the training, the Aurès, the coast (greyed, "bientôt"),
      language, credits; the home page's card, the pause menu and the end screen lead to it.
+   - [x] THE MENU REDONE (2026-10-11, you, step by step): menualg2 art MIRRORED (soldiers right), a
+     drifting SVG-noise SMOKE bank on the left (no image file), the logo top left (sandlogo.webp,
+     cropped, 74 KB), a bare-text column on the left — titles in BEBAS NEUE (fonts/, OFL, self-hosted),
+     white text, no shadows, no boxes, no thumbnails, no blurbs; the choice made / hover in gold
+     #f2c94c (colour only, no movement); no auto-focus (Chrome drew it as chosen). TWO VIEWS:
+     Training camp · Battles (map + FRANCE / FLN → ?side=fln; remembered) · FR / EN · credits.
+     YOUR CURSORS: public/games/alg-rts/cursors/arrow.svg (tip 9 7) + pointer.svg (fingertip 7 5),
+     menu and game (ui/cursors.js installCursorStyle); the drawn ones stay as fallbacks.
+     The game's images now in public/games/alg-rts/ (menu/, loading/, fonts/, cursors/).
+     LOADING SCREEN: opens on the menu's art + logo, NO zoom (it juddered during the boot).
+     BRIEFING POP fixed: the UI scale starts before the briefing (algGame); its default 100 % (was 115).
+     - [ ] the HUD's "selected" brass (--hud-brass #c9a54a) → the menu's gold #f2c94c? (you look first)
+     - [ ] the reticle + 8 edge-scroll arrows as your SVGs (cursors/), when drawn.
+     - [ ] check the menu in FRANÇAIS (the long France side line on one row).
+     - [ ] sandlogo.png, sand-and-blood.webp, training-camp.webp: unused now — delete or assets-src/.
    - [x] THE TRAINING (2026-10-09, you: "a first mission that teaches the basics, another terrain,
      smaller, aerial grass / aerial rock"): ?map=training — maps/training.js, its level built by
      tools/algTrainingLevel.mjs (a 330 m green plain, a knoll, framing hills). algTutorial.js:
@@ -518,7 +535,7 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      algGame), its moussebel; done when he has fired and is down (checked: revealed at ~21 s, the
      squad took him, no loss). 15 lessons. The training also hides the objectives panel now.
    - [ ] **you**: play it as a new player — wording, the order of the lessons, the pace.
-   - [ ] the training's thumbnail on the menu (it shows the Aurès painting).
+   - [x] ~~the training's thumbnail on the menu~~ — the menu has no thumbnails now (2026-10-11).
    - [ ] the Aurès' ALN cave still shows on the training's minimap ("CAVE"): the final band comes
      out of it, so it stays for now.
 - Buildings: archetypes per village (loggia, ruin, courtyard, shop), roof clutter, the Aurès stone.
