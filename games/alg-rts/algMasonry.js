@@ -13,10 +13,10 @@
 //                  made here: a whole site merged into one mesh per material — a few draws for a camp
 // In the BUILDINGS LAB first (the camp's stone house): one piece to prove it.
 import * as THREE from "three";
-import { abs, attribute, dot, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
+import { abs, attribute, dot, select, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { grainSack as grainSackGeo } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildDechra } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 
 // ── MATERIALS ───────────────────────────────────────────────────────────────────────────────────
 const BUILD = (id, m) => `/textures/build/${id}/${id}_${m}_1k.jpg`;
@@ -38,15 +38,18 @@ export const SURFACES = {
   // (warmed to the sandstone's colour: the Aurès build with the rock they stand on)
   stone: { url: BUILD, id: "rabdentse_ruins_wall", tile: 2.2, tint: [3.0, 2.15, 1.42], sat: 0.55, rough: 0.95, foot: 0.32 },
   // (the roofs: PACKED CLAY, beaten smooth and cracked dry — the gravelly mud read as a stony path)
-  earth: { url: GROUND, id: "mud_cracked_dry_03", tile: 1.5, tint: [0.52, 0.45, 0.36], sat: 0.7, rough: 1, foot: 0 },
+  earth: { url: GROUND, id: "mud_cracked_dry_03", tile: 1.5, tint: [0.52, 0.45, 0.36], sat: 0.7, rough: 1, foot: 0, single: true },
   timber: { url: BUILD, id: "bark_willow_02", tile: 1.4, tint: [0.55, 0.46, 0.38], sat: 0.6, rough: 0.9, foot: 0 },
   // (darker: in a shadowed wall the pale planks caught the sky and glowed blue, like panes)
   planks: { url: BUILD, id: "raw_plank_wall", tile: 1.9, tint: [0.4, 0.33, 0.26], sat: 0.55, rough: 0.97, foot: 0 },
   reed: { url: BUILD, id: "reed_roof_04", tile: 1.0, tint: [0.36, 0.3, 0.21], sat: 0.6, rough: 1, foot: 0 },
   // (a pit's spoil, a berm: the gravelly dug earth)
   spoil: { url: GROUND, id: "brown_mud_dry", tile: 2.4, tint: [0.82, 0.7, 0.55], sat: 0.75, rough: 1, foot: 0 },
+  // (the M'zab's plaster: the clay plaster in ochre, and in cream — the ksar)
+  plaster: { url: BUILD, id: "clay_plaster", tile: 2.2, tint: [1.42, 1.08, 0.72], sat: 0.7, rough: 0.95, foot: 0.32, single: true },
+  plasterPale: { url: BUILD, id: "clay_plaster", tile: 2.2, tint: [1.55, 1.36, 1.05], sat: 0.45, rough: 0.95, foot: 0.32, single: true },
   // (whitewash: the mosque, the koubba — the clay plaster lifted to an old white)
-  lime: { url: BUILD, id: "clay_plaster", tile: 2.0, tint: [1.75, 1.68, 1.5], sat: 0.15, rough: 0.95, foot: 0.3 },
+  lime: { url: BUILD, id: "clay_plaster", tile: 2.0, tint: [1.75, 1.68, 1.5], sat: 0.15, rough: 0.95, foot: 0.3, single: true },
   hessian: { url: BUILD, id: "hessian_230", tile: 0.55, tint: [0.7, 0.58, 0.42], sat: 0.6, rough: 1, foot: 0 },
 };
 /** Live tunables (the lab). */
@@ -67,6 +70,28 @@ export function surfaceMaterial(kind) {
   const sum = wx.add(wy).add(wz);
   const p = positionGeometry.div(s.tile);
   const uvX = vec2(p.z, p.y), uvY = vec2(p.x, p.z), uvZ = vec2(p.x, p.y);
+  // ONE PROJECTION (s.single, 2026-10-11, the ksar measured 0.5 ms framed): the face's dominant axis
+  // picks the photo's projection — 2 texture reads a pixel, not 6. Smooth surfaces (plaster, lime,
+  // clay roofs) show no seam worth the blend; the dry stone keeps the full triplanar.
+  if (s.single) {
+    const isX = wx.greaterThan(wy).and(wx.greaterThan(wz)), isY = wy.greaterThan(wz);
+    const uv = select(isX, uvX, select(isY, uvY, uvZ));
+    let c1 = texture(D, uv).rgb;
+    c1 = mix(vec3(dot(c1, vec3(0.2126, 0.7152, 0.0722))), c1, float(s.sat)).mul(vec3(...s.tint));
+    if (s.foot) c1 = mix(c1, c1.mul(vec3(0.62, 0.55, 0.47)), float(1).sub(smoothstep(-0.2, masonryLook.footHeight, positionGeometry.y)).mul(s.foot).mul(masonryLook.footDark));
+    if (kind === "earth") c1 = c1.mul(float(1).sub(attribute("wear", "vec2").x.mul(0.38)));
+    const t1 = texture(N, uv).xyz.mul(2).sub(1);
+    const nXs = vec3(t1.xy.add(vec2(n.z, n.y)), abs(t1.z).mul(n.x)).zyx;
+    const nYs = vec3(t1.xy.add(vec2(n.x, n.z)), abs(t1.z).mul(n.y)).xzy;
+    const nZs = vec3(t1.xy.add(vec2(n.x, n.y)), abs(t1.z).mul(n.z));
+    const n1 = select(isX, nXs, select(isY, nYs, nZs)).normalize();
+    const m1 = new THREE.MeshStandardNodeMaterial({ roughness: s.rough, metalness: 0 });
+    m1.name = `Masonry:${kind}`;
+    m1.colorNode = c1;
+    m1.normalNode = transformNormalToView(n1).normalize();
+    _mats.set(kind, m1);
+    return m1;
+  }
   let col = texture(D, uvX).rgb.mul(wx).add(texture(D, uvY).rgb.mul(wy)).add(texture(D, uvZ).rgb.mul(wz)).div(sum);
   col = mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, float(s.sat)).mul(vec3(...s.tint));
   // The foot: dust and shade up to ~0.9 m (a wall stands in the ground, not on it).
@@ -174,7 +199,7 @@ const strip = (g) => {
  * Returns geometries per surface ({ stone, earth, timber, planks, dark }) and its stone's WEAR
  * sources (where the plaster survives, where the drains streak it) — read per vertex below.
  */
-function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door = null, windows = [], spouts = [], lime = false }) {
+function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door = null, windows = [], spouts = [], lime = false, jag = 1, parapet = 0.42, colStep = 0.7, rowStep = 0.6, cornerSteps = 4, roofStep = 0.45, beams = true }) {
   const fw = w - 2 * r, fd = d - 2 * r, arc = (Math.PI / 2) * r, L = 2 * fw + 2 * fd + 4 * arc;
   const segs = [
     { len: fw, f: (u) => [-w / 2 + r + u, -d / 2, 0, -1] },
@@ -197,25 +222,26 @@ function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door
     holes.push({ s0: frontS(x - ww / 2), s1: frontS(x + ww / 2), y0, y1: y0 + hh, kind, x });
     holes.push({ s0: frontS(x - ww / 2 - 0.28), s1: frontS(x + ww / 2 + 0.28), y0: y0 + hh, y1: y0 + hh + 0.2, kind: "lintel" });
   };
-  if (door) addHole(door.x, door.w, 0, door.h, "door");
+  if (door) addHole(door.x, door.w, door.y ?? 0, door.h, "door");
   for (const wn of windows) addHole(wn.x, wn.w, wn.y, wn.h, "window");
   const sCols = new Set();
   // COLUMNS (2026-10-11, the optimisation pass: 0.28 m everywhere was 62k triangles a hamlet for a
   // bulge that is gentle): ~0.7 m along the straight runs, 4 steps round each corner's arc.
   { let s0 = 0;
     for (const g of segs) {
-      const n = g.len === arc ? 4 : Math.max(1, Math.round(g.len / 0.7));
+      const n = g.len === arc ? cornerSteps : Math.max(1, Math.round(g.len / colStep));
       for (let k = 0; k < n; k++) sCols.add(+(s0 + (g.len * k) / n).toFixed(4));
       s0 += g.len;
     } }
   for (const o of holes) { sCols.add(+o.s0.toFixed(4)); sCols.add(+o.s1.toFixed(4)); }
   const S_ = [...sCols].sort((a, b) => a - b);
   const yRows = new Set([-0.3]);
-  for (let y = 0; y < h; y += 0.6) yRows.add(+y.toFixed(4));   // (0.32 before the pass)
+  for (let y = 0; y < h; y += rowStep) yRows.add(+y.toFixed(4));   // (0.32 before the pass)
   for (const o of holes) { yRows.add(+o.y0.toFixed(4)); yRows.add(+o.y1.toFixed(4)); }
   yRows.add(h);
   const Y_ = [...yRows].sort((a, b) => a - b);
-  const top = S_.map((s) => h + 0.42 + noise2(s * 0.9, 3.1, seed) * 0.13 + noise2(s * 3.1, 7.7, seed) * 0.05);
+  // (`jag`: how broken the parapet's top — the Aurès' dry stone 1, the M'zab's plaster ~0.25)
+  const top = S_.map((s) => h + parapet + (noise2(s * 0.9, 3.1, seed) * 0.13 + noise2(s * 3.1, 7.7, seed) * 0.05) * jag);
   const roofY = h + 0.06;
   const bulge = (s, y) => noise2(s * 1.6, y * 2.1, seed) * 0.035 + noise2(s * 0.45, y * 0.6, seed + 7) * 0.06 - Math.max(0, y) / h * 0.07;
   const outer = (s, y) => { const [x, z, nx, nz] = base(s), b = bulge(s, y); return [x + nx * b, y, z + nz * b]; };
@@ -249,7 +275,7 @@ function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door
     (o.kind === "door" ? planks : dark).push({ q: [[x0, o.y0, zb], [x1, o.y0, zb], [x1, o.y1, zb], [x0, o.y1, zb]], dir: [0, 0, -1] });
     if (o.kind === "door") {
       // A flat stone for a step, and the door's frame posts in the reveal.
-      stoneExtra.push(new THREE.BoxGeometry(x1 - x0 + 0.7, 0.16, 0.75).translate((x0 + x1) / 2, 0.03, front - 0.32).rotateY(0));
+      stoneExtra.push(new THREE.BoxGeometry(x1 - x0 + 0.7, 0.16, 0.75).translate((x0 + x1) / 2, o.y0 + 0.03, front - 0.32).rotateY(0));
       for (const x of [x0 + 0.06, x1 - 0.06]) timber.push(new THREE.BoxGeometry(0.12, o.y1 - o.y0, 0.14).translate(x, (o.y0 + o.y1) / 2, zb - 0.09));
     }
   }
@@ -257,10 +283,10 @@ function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door
     const [xa] = base(o.s0), [xb] = base(o.s1);
     timber.push(new THREE.BoxGeometry(xb - xa + 0.06, o.y1 - o.y0 + 0.05, t + 0.16).translate((xa + xb) / 2, (o.y0 + o.y1) / 2 + 0.01, front + t / 2 - 0.1));
   }
-  for (let x = -w / 2 + r + 0.6; x < w / 2 - r - 0.3; x += 0.95 + noise2(x, 1, seed) * 0.15) {
+  if (beams) for (let x = -w / 2 + r + 0.6; x < w / 2 - r - 0.3; x += 0.95 + noise2(x, 1, seed) * 0.15) {
     timber.push(new THREE.CylinderGeometry(0.11, 0.12, d + 0.44, 8).rotateX(Math.PI / 2).rotateY(noise2(x, 3, seed) * 0.03).translate(cx + x, h - 0.16, cz + noise2(x, 2, seed) * 0.08));
   }
-  const rx = w / 2 - t + 0.05, rz = d / 2 - t + 0.05, ni = Math.ceil((2 * rx) / 0.45), nj = Math.ceil((2 * rz) / 0.45);
+  const rx = w / 2 - t + 0.05, rz = d / 2 - t + 0.05, ni = Math.ceil((2 * rx) / roofStep), nj = Math.ceil((2 * rz) / roofStep);
   const roof = grid(ni, nj, (i, j) => {
     const x = -rx + (2 * rx * i) / ni, z = -rz + (2 * rz * j) / nj;
     const edge = Math.min(1, Math.min(rx - Math.abs(x), rz - Math.abs(z)) / 1.2);
@@ -296,7 +322,7 @@ function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door
   return {
     stone, earth: [withStains(strip(roof), seed)], timber: timber.map(strip),
     planks: planks.length ? [strip(quads(planks))] : [], dark: dark.length ? [strip(quads(dark))] : [],
-    roofY, top: h + 0.42, front,
+    roofY, top: h + parapet, front,
   };
 }
 
@@ -334,7 +360,7 @@ function firewood(x, y, z, yaw, seed) {
 }
 
 // ── A SITE: pieces add geometry per surface; the site merges it (one mesh per surface) ──────────
-export const newSite = () => ({ stone: [], lime: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], cloth: [], dark: [] });
+export const newSite = () => ({ stone: [], lime: [], plaster: [], plasterPale: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], cloth: [], dark: [] });
 let _cloth = null;
 /** Cloth (laundry, rugs): its colour per vertex — white, indigo, madder red, ochre. */
 const clothMaterial = () => (_cloth ??= new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, name: "Masonry:cloth" }));
@@ -677,6 +703,113 @@ export function buildDechraV2(o = {}) {
     }
   }
   const { group } = siteGroup(site, "Dechra");
+  kit.userData.extra = [group];
+  return kit;
+}
+
+// ── THE KSAR, NEW STANDARD (2026-10-11): rtsAlgVillage buildKsar's M'zab town — its outline, its
+// houses packed up the knoll, its alleys, the souk and its arcades, the palms — with its HOUSES and
+// MOSQUE drawn here as plastered blocks (two plaster colours from the clay-plaster photo, ochre and
+// cream; rare whitewash; earth): soft plaster corners, an even parapet with its corner HORNS, small
+// deep windows, the door at the ground in front, a roof room, frond shades, laundry. The souk, the
+// stair and the square stay the kit's; the kit geometry carries the town's data.
+
+/** A plaster block into `site` (world metres): a stoneBlock whose walls go to the plaster `kind`. */
+function plasterBlock(site, kind, o, y) {
+  // (smooth plaster: a coarse grid — the stone's was 124k triangles for the town)
+  const b = stoneBlock({ jag: 0.25, parapet: 0.48, colStep: 1.4, rowStep: 1.6, cornerSteps: 2, roofStep: 1.1, beams: false, ...o });
+  for (const k of Object.keys(site)) if (Array.isArray(b[k])) for (const g of b[k]) { g.translate(0, y, 0); site[k === "stone" ? kind : k].push(g); }
+  return b;
+}
+/** The M'zab parapet's HORNS: a small pyramid at each corner. */
+function horns(site, kind, cx, cz, w, d, yTop, yaw = 0) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+    const lx = sx * (w / 2 - 0.12), lz = sz * (d / 2 - 0.12);
+    const g = new THREE.ConeGeometry(0.24, 0.75, 4).rotateY(Math.PI / 4 + yaw).translate(cx + lx * c + lz * s, yTop + 0.36, cz - lx * s + lz * c);
+    const n = g.attributes.position.count;
+    g.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+    site[kind].push(g);
+  }
+}
+
+export function buildKsarV2(o = {}) {
+  const K = 1.3, site = newSite();
+  const local = () => newSite();
+  const onHouse = (hh) => {
+    const R = stream(Math.floor(Math.abs(hh.x * 131 + hh.z * 71)) + 7);
+    const kind = hh.kind === "pale" ? "plasterPale" : hh.kind === "white" ? "lime" : hh.kind === "earth" ? "earth" : "plaster";
+    const w = hh.w * K, d = hh.d * K, h = hh.h * K, drop = (hh.y - hh.low) * K + 0.3, H = h + drop;
+    const fg = (hh.frontGround - hh.y) * K;               // the door's ground, from the floor
+    const L = local();
+    const dx = (R() - 0.5) * (w - 2.4);
+    const storeys = Math.max(1, Math.round(h / 4));
+    const windows = [];
+    for (let k = 0; k < storeys; k++) {
+      const ly = drop + (k * h) / storeys + (k === 0 ? Math.min(3.2, h / storeys - 0.7) : Math.min(2.6, (h / storeys) * 0.62));
+      const n = k === 0 ? (R() < 0.4 ? 1 : 0) : 1 + Math.floor(R() * Math.max(1, (w - 1.6) / 2.4));
+      for (let i = 0; i < n; i++) {
+        const wx = -w / 2 + 1.0 + ((i + 0.5) * (w - 2.0)) / n;
+        if (Math.abs(wx - dx) > 1.2 || k > 0) windows.push({ x: wx, w: 0.55, y: ly, h: 0.6 });
+      }
+    }
+    const door = fg > -3.2 ? { x: dx, w: 1.15, h: 2.3, y: drop + Math.max(0, fg) } : null;
+    const b = plasterBlock(L, kind, { cx: 0, cz: 0, w, d, h: H, t: 0.45, r: 0.16, seed: Math.floor(R() * 1e6), door, windows, spouts: R() < 0.5 ? [(R() - 0.5) * (w - 1.5)] : [] }, 0);
+    horns(L, kind, 0, 0, w, d, b.top);
+    // The summer room at the back of the roof.
+    if (w > 5.8 && R() < 0.45) {
+      const w2 = w * (0.4 + R() * 0.15), d2 = d * (0.45 + R() * 0.1), ox = (R() - 0.5) * (w - w2 - 1);
+      const rb = plasterBlock(L, R() < 0.7 ? kind : "plasterPale", { cx: ox, cz: d / 2 - d2 / 2 - 0.45, w: w2, d: d2, h: 3.0, t: 0.35, r: 0.12, seed: Math.floor(R() * 1e6), door: { x: 0, w: 1.0, h: 2.1 }, windows: [], spouts: [] }, b.roofY - 0.02);
+      if (R() < 0.5) horns(L, kind, ox, d / 2 - d2 / 2 - 0.45, w2, d2, b.roofY + rb.top - 0.02);
+    } else if (R() < 0.4) {
+      // A frond shade on two poles over the roof's front corner.
+      const sx = (R() < 0.5 ? -1 : 1) * (w / 2 - 1.5), sz = -d / 2 + 1.4;
+      for (const px of [-1, 1]) L.timber.push(new THREE.CylinderGeometry(0.06, 0.07, 2.4, 6).translate(sx + px, b.roofY + 1.2, sz - 0.8));
+      for (let zp = -0.9; zp < 0.9; zp += 0.2) L.timber.push(new THREE.BoxGeometry(2.5, 0.07, 0.11).translate(sx, b.roofY + 2.42, sz + zp));
+    } else if (R() < 0.6) {
+      // Laundry on its line.
+      const len = Math.min(w - 1.2, 3.4), yy = b.roofY + 1.5, lz = (R() - 0.5) * d * 0.3;
+      for (const e of [-len / 2, len / 2]) L.timber.push(new THREE.CylinderGeometry(0.035, 0.04, 1.5, 5).translate(e, b.roofY + 0.75, lz));
+      L.timber.push(new THREE.CylinderGeometry(0.012, 0.012, len, 4).rotateZ(Math.PI / 2).translate(0, yy, lz));
+      for (let k = 0; k < 3; k++) L.cloth.push(cloth(0.4 + R() * 0.25, 0.45 + R() * 0.25, 0.02, CLOTH[1 + Math.floor(R() * 3)]).translate(-len / 2 + 0.45 + k * (len - 0.9) / 2, yy - 0.28, lz));
+    }
+    placeInto(site, L, hh.x * K, hh.z * K, hh.yaw, hh.y * K - drop);
+  };
+  let mosque = null;
+  const kit = buildKsar({ ...o, onHouse, onMosque: (m) => { mosque = m; } });
+  if (mosque) {
+    const m = mosque, drop = (m.top - m.low) * K + 0.3, w = m.w * K, d = m.d * K;
+    const L = local();
+    const b = plasterBlock(L, "plasterPale", { cx: 0, cz: 0, w, d, h: m.h * K + drop, t: 0.55, r: 0.2, seed: 1830,
+      door: { x: -2.8 * K, w: 1.6, h: 2.8, y: drop }, windows: Array.from({ length: 7 }, (_, k) => ({ x: (-m.w / 2 + 1.1 + k * 1.25) * K, w: 0.5, y: drop + m.h * K - 1.9, h: 0.95 })), spouts: [] }, 0);
+    // Its merlons along the front.
+    for (let x = -w / 2 + 0.6; x < w / 2 - 0.3; x += 1.15) {
+      const g = new THREE.ConeGeometry(0.24, 0.65, 4).rotateY(Math.PI / 4).translate(x, b.top + 0.3, -d / 2 + 0.2);
+      g.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+      L.plasterPale.push(g);
+    }
+    placeInto(site, L, m.cx * K, m.cz * K, 0, m.top * K - drop);
+    // THE MINARET: a tapering square shaft (the M'zab's obelisk), slits up its faces, four finger pinnacles.
+    const mn = m.minaret, MH = mn.h * K, WB = mn.wb * K, WT = mn.wt * K, my = mn.top * K, mdrop = (mn.top - mn.low) * K + 0.3;
+    // (FLAT faces: a 4-sided cylinder's smooth normals shaded it as a round tower)
+    const shaft = new THREE.CylinderGeometry(WT / Math.SQRT2, WB / Math.SQRT2, MH + mdrop, 4, 1).rotateY(Math.PI / 4).translate(mn.x * K, my - mdrop + (MH + mdrop) / 2, mn.z * K).toNonIndexed();
+    shaft.deleteAttribute("normal"); shaft.computeVertexNormals();
+    shaft.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(shaft.attributes.position.count * 2), 2));
+    site.plaster.push(shaft);
+    for (const yy of [0.24, 0.41, 0.58, 0.76, 0.9]) {
+      const hw = (WB + (WT - WB) * yy) / 2 + 0.03, y = my + yy * MH;
+      site.dark.push(new THREE.PlaneGeometry(0.34, 0.85).rotateY(Math.PI).translate(mn.x * K, y, mn.z * K - hw));
+    }
+    const cap = new THREE.BoxGeometry(WT + 0.4, 0.38, WT + 0.4).translate(mn.x * K, my + MH + 0.19, mn.z * K);
+    cap.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(cap.attributes.position.count * 2), 2));
+    site.plaster.push(cap);
+    for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
+      const f = new THREE.CylinderGeometry(0.08, 0.26, 2.1, 4).rotateY(Math.PI / 4).translate(mn.x * K + sx * (WT / 2 - 0.05), my + MH + 0.38 + 1.05, mn.z * K + sz * (WT / 2 - 0.05));
+      f.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(f.attributes.position.count * 2), 2));
+      site.plaster.push(f);
+    }
+  }
+  const { group } = siteGroup(site, "Ksar");
   kit.userData.extra = [group];
   return kit;
 }

@@ -1846,9 +1846,12 @@ function arcadeRange(parts, R, { x, z, yaw, len, fy, low, mat = MAT.plaster, ton
  * slope, winding alleys out from the mosque (a stair to the souk, two gates),
  * closed by a wall. `groundAt` as the other villages.
  */
-export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
+// `onHouse` / `onMosque` (alg-rts algMasonry.js buildKsarV2, 2026-10-11): the town laid out as ever
+// (the same random streams), its houses and mosque DRAWN by the caller (pre-scale).
+export function buildKsar({ seed = 1830, groundAt = FLAT, onHouse = null, onMosque = null } = {}) {
   const R = rng(seed);
   const parts = [];
+  const real = parts;
   const houses = [];
   const trees = [];
   // Whitewash rare: in the shade of the lanes it turned blue-grey (seen in the game).
@@ -1881,6 +1884,7 @@ export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
 
   // ── The mosque at the summit, the minaret on its front corner ─────────────
   {
+    const parts = onMosque ? [] : real;   // (the caller draws it: the same draws, nothing kept)
     const w = 11, d = 8.5, h = 4.4, cx = 0, cz = 1.2;
     const { top, low } = groundSpanRot(groundAt, cx, cz, 0, w / 2, d / 2);
     const put = placer(parts, cx, top, cz, 0);
@@ -1914,6 +1918,7 @@ export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
       put(taperBox(0.4, 0.12, 1.6), [mx + sx * (WT / 2 - 0.05), my + MH + 0.3 + 0.8, mz + sz * (WT / 2 - 0.05)], MAT.plaster, 0.55);
     }
     houses.push({ x: cx, z: cz, mosque: true });
+    onMosque?.({ cx, cz, top, low, w, d, h, minaret: { x: cx + mx, z: cz + mz, top: m.top, low: m.low, h: MH, wb: WB, wt: WT } });
   }
 
   // ── THE OUTLINE: not a circle (you, 2026-09-29: a perfect circle of rings
@@ -2009,7 +2014,9 @@ export function buildKsar({ seed = 1830, groundAt = FLAT } = {}) {
     const h = (R() < 0.8 - 0.5 * rn ? 6.1 : 3.2) + R() * 0.7;
     const mat = matPick();
     const n0 = parts.length;
-    ksarHouse(parts, R, { x, z, yaw, w, d, h, y: top, low: Math.min(low, fg), frontGround: fg, mat, tone: toneOf(mat) });
+    const kh = { x, z, yaw, w, d, h, y: top, low: Math.min(low, fg), frontGround: fg, mat, tone: toneOf(mat) };
+    ksarHouse(onHouse ? [] : parts, R, kh);
+    onHouse?.({ ...kh, kind: mat === MAT.plasterPale ? "pale" : mat === MAT.white ? "white" : mat === MAT.earth ? "earth" : "ochre" });
     p.range = [n0, parts.length];
     houses.push({ x, z });
   }

@@ -567,6 +567,17 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        which cost more); OLD dechra −0.52 ± 1.0. Verdict: the new one costs no more than the old.
        (One old-village run read 42 ms frames whether the dechra was shown or not: something else on
        the GPU — discarded.) Shader trimmed anyway: the plaster's normal map dropped (3 taps).
+     - [x] THE KSAR on the new standard (2026-10-11, algMasonry buildKsarV2; ?village=old): the kit's
+       town laid out as ever (onHouse / onMosque hooks in buildKsar), each house a PLASTER block (two
+       plaster surfaces from the clay-plaster photo: ochre, cream; rare lime; earth) with corner
+       HORNS, even parapets, deep small windows, the door at its ground, roof rooms, frond shades,
+       laundry; the mosque with merlons; the minaret a flat-faced tapering shaft with slits and finger
+       pinnacles. Souk / arcades / stair / square stay the kit's. Plaster on a COARSE grid (1.4 m ×
+       1.6 m, 2 corner steps, no beams): 179k → 70k tris. MEASURED CLEANLY: 0.50 ms framed (old
+       0.03) → SINGLE-PROJECTION materials for smooth surfaces (plaster, lime, clay roofs: the face's
+       dominant axis picks the photo — 2 texture reads a pixel, not 6; no seam at the corners, seen
+       close): 0.12 ± 0.24 ms. The dry stone keeps the full triplanar.
+     - [ ] the souk's arcades, square and stair: still the kit's (the town's new houses round them).
      - [ ] (was) MEASURE CLEANLY (needs you: Chrome visible on its own screen — the laptop throttled, the
        baseline drifted 4.2 → 6.1 ms between runs): the dechra framed, on vs off read −1.07 ms in one
        run and +0.07 in the next; the old dechra ~−0.25. If the new one is really ~1 ms framed, the

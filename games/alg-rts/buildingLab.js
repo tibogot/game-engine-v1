@@ -14,8 +14,8 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { buildMortarPit } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildDechraV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
-import { buildDechra } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
+import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import * as THREE from "three";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
@@ -93,6 +93,10 @@ const BUILDINGS = {
   dechraNouveau: {
     label: "Dechra (nouveau)", gap: 34, before: () => buildDechra(), after: () => buildDechraV2(),
     tags: ["DECHRA (LE JEU)", "DECHRA · NOUVEAU"], note: "la dechra du jeu à gauche, la nouvelle à droite (sur terrain plat ici).",
+  },
+  ksarNouveau: {
+    label: "Ksar (nouveau)", gap: 46, before: () => buildKsar(), after: () => buildKsarV2(),
+    tags: ["KSAR (LE JEU)", "KSAR · NOUVEAU"], note: "le ksar du jeu à gauche, le nouveau à droite (terrain plat ici).",
   },
   mortier: {
     label: "Fosse de mortier", gap: 7, before: () => buildMortarPit(), after: () => buildMortarPitV2(),

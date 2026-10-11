@@ -24,7 +24,7 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
-import { buildDechraV2, buildMechtaV2 } from "./algMasonry.js";
+import { buildDechraV2, buildKsarV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -154,7 +154,7 @@ const VILLAGE = [
   // up the real slope; only its souk is levelled — the knoll falls 8 m across
   // the square, so the arcades back into a cut and the square stands on the fill.
   // The pad is the souk's rect (buildKsar: x ±16, z -39.2..-21.5), scaled 1.3.
-  at(KSAR, (s) => ({ key: "ksar", build: (o) => buildKsar(o), x: s.x, z: s.z, yaw: s.yaw, ground: true, pad: { lx: 0, lz: -30.35 * 1.3, hx: 16 * 1.3, hz: 8.85 * 1.3, rim: 12 } })),
+  at(KSAR, (s) => ({ key: "ksar", build: (o) => (VILLAGE_OLD ? buildKsar(o) : buildKsarV2(o)), x: s.x, z: s.z, yaw: s.yaw, ground: true, pad: { lx: 0, lz: -30.35 * 1.3, hx: 16 * 1.3, hz: 8.85 * 1.3, rim: 12 } })),
   // A well at the dechra's foot and at each hamlet; a zeriba beside each hamlet.
   // Pen spots MEASURED: clear of every piece (full footprint), off the wadi
   // bed, the flattest ground within ~70 m.
