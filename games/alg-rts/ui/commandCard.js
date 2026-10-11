@@ -18,6 +18,7 @@ import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { costOf, hasCost } from "../algEconomy.js";
 import { iconSvg } from "./resourceIcons.js";
 import { t } from "../i18n/i18n.js";
+import { HUD_H } from "./hudBar.js";
 
 // A price on a button: the effectifs, then the fuel / munitions under it.
 function costTag(c) {
@@ -131,6 +132,10 @@ export function createCommandCard({
   let buttons = [];        // { el, kind, key, cost, info, run }
   const cdMax = new Map(); // ability key → the longest cooldown seen (for the sweep)
   let prodSig = "", prodT = 0, abilSig = "";
+  let buildPage = false, buildFor = "";   // the build page open, for which selection
+  const ids = new WeakMap();
+  let nextId = 0;
+  const idOf = (e) => { let i = ids.get(e); if (i == null) ids.set(e, (i = ++nextId)); return i; };   // (units carry no id)
 
   // ── Buttons ────────────────────────────────────────────────────────────────
   function button({ kind, key, label, cost = 0, icon = null, pic = null, verb = false, tier = false, locked = null, info = "", ready = false, run }) {
@@ -184,15 +189,25 @@ export function createCommandCard({
     grid.className = "cc-grid";
     grid.appendChild(button({ kind: "act", key: "stop", label: t("Halte"), icon: "stop", info: t("Halte : abandonner l'ordre en cours et tenir ici."), run: onStop }));
     grid.appendChild(button({ kind: "act", key: "focus", label: t("Caméra"), icon: "focus", info: t("Centrer la caméra sur la sélection."), run: onFocus }));
-    abilityButtons(selected, grid);
     // What these men can raise (the union of every builder's list).
     const can = new Set();
     for (const u of selected) for (const k of u.type?.builds ?? []) can.add(k);
-    for (const b of structureBuilds.filter((s) => can.has(s.key))) {
-      grid.appendChild(button({
-        kind: "build", key: b.key, label: b.label, cost: buildingCosts[b.key] ?? 0, icon: b.key, info: b.tip,
-        run: () => onBuildStructure(b.key, selected),
-      }));
+    const builds = structureBuilds.filter((s) => can.has(s.key));
+    // THE BUILD PAGE (CoH's engineers, 2026-10-12 — you: the sappers' card "is clipping under the
+    // screen": 17 buttons, 5 rows in a 3-row panel). The buildings behind one CONSTRUIRE button; the
+    // page they open has RETOUR first. It stays open while the same men are selected.
+    if (buildPage && builds.length) {
+      grid.replaceChildren();
+      grid.appendChild(button({ kind: "act", key: "buildBack", label: t("‹ Retour"), info: t("Revenir aux ordres du groupe."), run: () => { buildPage = false; render(selRef); } }));
+      for (const b of builds) {
+        grid.appendChild(button({
+          kind: "build", key: b.key, label: b.label, cost: buildingCosts[b.key] ?? 0, icon: b.key, info: b.tip,
+          run: () => onBuildStructure(b.key, selected),
+        }));
+      }
+    } else {
+      abilityButtons(selected, grid);
+      if (builds.length) grid.appendChild(button({ kind: "act", key: "buildMenu", label: t("Construire"), icon: "sandbags", info: t("Les ouvrages que ce groupe peut bâtir : sacs de sable, barbelés, nids, fosses…"), run: () => { buildPage = true; render(selRef); } }));
     }
     root.appendChild(grid);
     refresh();
@@ -238,15 +253,37 @@ export function createCommandCard({
   }
 
   function render(selected) {
+    // Another selection: back to the main page (a re-render of the same one keeps the build page).
+    const sig = selected.map(idOf).join(",");
+    if (sig !== buildFor) { buildFor = sig; buildPage = false; }
     selRef = selected;
     buttons = [];
     hideTip();
-    if (!selected.length) { baseRef = null; root.replaceChildren(); return; }
+    if (!selected.length) { baseRef = null; root.replaceChildren(); fit(); return; }
     const producer = selected.find((e) => e.isStructure && e.enqueue);
     const mobile = selected.filter((e) => !e.isStructure);
     if (producer) renderProducer(producer);
     else if (mobile.length) renderUnits(mobile);
     else renderStructure(selected[0]);
+    fit();
+  }
+  // THE SAFETY NET (2026-10-12: the card ran 90 px off the screen): a card taller than its panel grows
+  // the panel UPWARD to fit (it stands on the screen's bottom edge) — never past the window again.
+  // Measured from the CONTENT against the panel's own height (HUD_H): the panel may be folded or
+  // mid-animation when a selection renders (the first cut measured it then and set it too short).
+  // (`.collapsed` wins over this height: hudBar.js.)
+  function fit() {
+    const panel = mount.closest?.(".block-right") ?? null;
+    if (!panel) return;
+    const pad = parseFloat(getComputedStyle(mount).paddingTop) + parseFloat(getComputedStyle(mount).paddingBottom);
+    // The content's own extent (its children), in CSS px (the panel may be scaled: uiScale.js) — not
+    // root.scrollHeight, which is never less than the panel and grew it a pixel a render.
+    const s = Number(getComputedStyle(document.documentElement).getPropertyValue("--alg-ui")) || 1;
+    const top = root.getBoundingClientRect().top;
+    let bottom = top;
+    for (const k of root.children) bottom = Math.max(bottom, k.getBoundingClientRect().bottom);
+    const need = (bottom - top) / s + pad + 2;
+    panel.style.height = need > HUD_H ? `${Math.ceil(need)}px` : "";
   }
 
   // ── Live state (per frame: classes, a variable, text — on change) ─────────

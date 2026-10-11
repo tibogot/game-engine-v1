@@ -25,6 +25,11 @@ export default {
   "ressources": "resources",
   "Touche": "Key",
   "Halte": "Halt",
+  // the build page (2026-10-12)
+  "Construire": "Build",
+  "‹ Retour": "‹ Back",
+  "Revenir aux ordres du groupe.": "Back to the squad's orders.",
+  "Les ouvrages que ce groupe peut bâtir : sacs de sable, barbelés, nids, fosses…": "What this squad can build: sandbags, wire, nests, pits…",
   "Halte : abandonner l'ordre en cours et tenir ici.": "Halt: drop the current order and hold here.",
   "Caméra": "Camera",
   "Centrer la caméra sur la sélection.": "Center the camera on the selection.",

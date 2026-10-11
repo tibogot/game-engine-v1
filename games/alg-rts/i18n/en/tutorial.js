@@ -42,8 +42,8 @@ export default {
     "Behind a wall you live; in the open you don't. Hold <kbd>V</kbd>: <b>green</b> = heavy cover, <b>yellow</b> = light. Send the squad behind the sandbags: under the cursor, each man shows the cover he will have.",
   // 4b the sappers (2026-10-11)
   "Les sapeurs": "The sappers",
-  "Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Sacs de sable</b> sur leur fiche, puis posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>).":
-    "Your <b>sappers</b> (the small squad of 3) build: select them, click <b>Sandbags</b> on their card, then place the wall with a left click (<kbd>R</kbd> turns it, right-click cancels). They go and raise it — cover of your own, wherever you want. They also lay wire, cut the enemy's (<kbd>X</kbd>) and repair vehicles (<kbd>J</kbd>).",
+  "Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Construire</b> puis <b>Sacs de sable</b> sur leur fiche, et posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>).":
+    "Your <b>sappers</b> (the small squad of 3) build: select them, click <b>Build</b> then <b>Sandbags</b> on their card, and place the wall with a left click (<kbd>R</kbd> turns it, right-click cancels). They go and raise it — cover of your own, wherever you want. They also lay wire, cut the enemy's (<kbd>X</kbd>) and repair vehicles (<kbd>J</kbd>).",
   "mur monté": "wall built",
   "mur posé": "wall placed",
   "les sapeurs le montent": "the sappers are raising it",

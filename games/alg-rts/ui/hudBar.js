@@ -61,7 +61,7 @@ const CSS = `
 }
 /* NOTHING SELECTED: the card folds away, only the supply strip stays (you,
    2026-10-02: two empty boxes covered the battlefield most of the time). */
-#alg-hud .block-right.collapsed { height: 0; border-top-color: transparent; box-shadow: none; }
+#alg-hud .block-right.collapsed { height: 0 !important; border-top-color: transparent; box-shadow: none; }   /* (!important: over a card's grown height, commandCard fit) */
 #alg-hud .block-right.collapsed .slot { visibility: hidden; }
 #alg-hud .strip {
   position: absolute; left: -1px; bottom: 100%; height: ${HUD_STRIP_H}px;

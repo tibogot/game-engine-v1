@@ -145,7 +145,7 @@ export function createAlgTutorial(app) {
   // it is for"): build your own cover. Done when a sandbag wall YOU placed is finished.
   L.push({
     title: t("Les sapeurs"),
-    text: t("Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Sacs de sable</b> sur leur fiche, puis posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>)."),
+    text: t("Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Construire</b> puis <b>Sacs de sable</b> sur leur fiche, et posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>)."),
     start(s) {
       let q = squads().find((x) => x.typeKey === "sapeur");
       if (!q) {   // (lost earlier: a fresh squad at the post's gate)
