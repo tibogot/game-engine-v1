@@ -152,6 +152,9 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
     /** World points: where a unit appears, and where it is out (the AI sends the ALN back to the cave's). */
     inside, outside,
     get gateOpen() { return leaves.some((l) => Math.abs(l.rotation.y) > 0.05); },
+    /** Open the gate for a man coming out who is NOT from the queue (a REINFORCEMENT, algSquads.js —
+     *  you, 2026-10-11: "the gate doesn't open for them"); it shuts HOLD_OPEN s after the last call. */
+    openGate() { openUntil = Math.max(openUntil, t + HOLD_OPEN); },
   };
 }
 

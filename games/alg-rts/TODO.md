@@ -575,7 +575,9 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        Now the bench seats are TROOP seats (rtsVehiclesFr.js `troop`, half-track + open GMC),
        drawn only for the men really aboard (unitRenderer `troopsAboard` ← algTransports.menOf);
        driver and gunner always. Checked zoomed in: empty benches → 5 men in → K → empty again.
-     - [ ] BUG: REINFORCE — the men called in by "Renforcer" come out of the post but its GATE
+     - [x] FIXED 2026-10-11 (algProducer openGate, algSquads GATE_AHEAD 1.2 s): checked — the gate
+       opens ~1.2 s before the replacement steps out, shuts 3.5 s after, as for a trained man.
+       BUG: REINFORCE — the men called in by "Renforcer" come out of the post but its GATE
        does NOT open for them; it opens for every man the post TRAINS (algProducer / the gate's
        hook): the reinforcement path must trigger the same gate opening.
    - [x] ~~the training's thumbnail on the menu~~ — the menu has no thumbnails now (2026-10-11).

@@ -67,6 +67,10 @@ export const UPGRADES = {
   },
 };
 
+// s before a replacement steps out of the post that its gate starts to open (the leaves swing at
+// 1.8 rad/s: open by the time he is at it).
+const GATE_AHEAD = 1.2;
+
 const P = {
   baseRadius: 48,        // m round the post's centre: retreat ends here, heals, reinforces
   heal: 3,               // hp per second, in the base zone, out of combat
@@ -238,6 +242,9 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     for (let i = pending.length - 1; i >= 0; i--) {
       const p = pending[i];
       p.t -= dt;
+      // At the post: the gate opens a moment BEFORE he steps out, as for a trained man (algProducer
+      // OPEN_AHEAD) — it never opened for a reinforcement (you, 2026-10-11).
+      if (!p.at && p.t < GATE_AHEAD) post.openGate?.();
       if (p.t > 0) continue;
       pending.splice(i, 1);
       const s = p.squad;
