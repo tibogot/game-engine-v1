@@ -876,6 +876,9 @@ export class Archer {
     this.ext = (this.ext ?? 0) + (extWant - (this.ext ?? 0)) * lerpK(extWant > (this.ext ?? 0) ? 14 : 4, dt);
     if (lowerK > 0) this.ext = Math.min(this.ext, 1 - lowerK);   // (lowering: on the arms' eased curve — dropped at its fastest first, the near-straight bow elbow snapped 7 cm)
     const ex = this.ext;
+    // (mocap: the arms' aim correction follows the CLIP's own raise — it lifts the bow over
+    // the whole draw; by half-draw ours had bent the bow elbow 59° where the clip's is 13°)
+    const exA = base && this.phase === "nocked" ? Math.min(ex, smooth(this.draw)) : ex;
     const arm = B.arms[0], hdL = rd.hands[0];
     const armLen = wpos(arm.u).distanceTo(wpos(arm.l)) + wpos(arm.l).distanceTo(wpos(arm.tip));
     // aim: the rest on the arrow line where the arm reaches
@@ -902,7 +905,11 @@ export class Archer {
     // relaxed: the bow low in the left hand, top forward-up
     const DR = ch.f.clone().multiplyScalar(0.75).addScaledVector(ch.u, -0.45).normalize(), NR2 = ch.L.clone().negate();   // the wrist cocked up: the bow leans forward ~60°, not flat
     const Dl = DR.clone().lerp(DA, awB).normalize(), Nl = NR2.clone().lerp(NA, awB).normalize();
-    const yB = new V3().crossVectors(Nl, Dl).normalize(), zB = Dl.clone().addScaledVector(yB, -Dl.dot(yB)).normalize(), xB = new V3().crossVectors(yB, zB);
+    // (mocap: the bow sits in the fist as the clip holds it, its z IS the arrow — so the aim's
+    // frame is the arrow line itself; the knuckles' 7° (DA) turned the arrow 5° off the aim and
+    // brought the string hand 7.5 cm into the head at full draw)
+    const Dl2 = base ? DR.clone().lerp(dArrow, awB).normalize() : Dl;
+    const yB = new V3().crossVectors(Nl, Dl2).normalize(), zB = Dl2.clone().addScaledVector(yB, -Dl2.dot(yB)).normalize(), xB = new V3().crossVectors(yB, zB);
     const REST = new V3(0.021, 0.064, 0.002);                       // the arrow on the shelf (bow space)
     const restOff = xB.clone().multiplyScalar(REST.x).addScaledVector(yB, REST.y).addScaledVector(zB, REST.z);
     const Tgrip = R.clone().sub(restOff);
@@ -929,14 +936,25 @@ export class Archer {
       const nock0 = grip0.clone().add(new V3(0.021, 0.064, 0.002).applyQuaternion(qb0)).addScaledVector(z0, -(-this.bow.braceZ + 0.002));
       const STp = this.fetchPhases(), mjL = (x) => { x = clamp(x, 0, 1); return x * x * x * (10 - 15 * x + 6 * x * x); };
       const wN = this.phase === "fetch" ? mjL((this.t - STp.bring[0]) / (STp.nock[0] - STp.bring[0])) : this.phase === "nocked" ? 1 : 0;
-      if (wN > 0.001 || ex > 0.001) {
-        const T = grip0.clone().addScaledVector(this.baseArm.pinch.clone().sub(nock0), wN).lerp(Tgrip.clone().addScaledVector(dAim, 0.03 * ft).addScaledVector(UP, -0.05 * ft), ex);
-        this._softL = ex;
+      // (the clip's fingers sit BEHIND the string — it starts drawing as it nocks: the string
+      // follows them back. Only the SIDEWAYS gap (a string can't bend sideways) — and any gap
+      // in front of it — is closed, half by each hand: pushing the whole gap onto the bow
+      // bent the bow elbow 80–106° where the clip's is straight)
+      const gap = this.baseArm.pinch.clone().sub(nock0), along = gap.dot(z0);
+      const corr = gap.clone().addScaledVector(z0, -along).addScaledVector(z0, Math.max(0, along)).multiplyScalar(0.5);
+      this.nockCorr = corr.clone().multiplyScalar(wN);
+      if (wN > 0.001 || exA > 0.001) {
+        // (round the shoulder, not straight across: both ends are near arm's length — the chord
+        // between them passed inside the reach and bent the elbow 75° where the clip's is 28°)
+        const SLb = wpos(arm.u), a0 = grip0.clone().addScaledVector(corr, wN).sub(SLb), a1 = Tgrip.clone().addScaledVector(dAim, 0.03 * ft).addScaledVector(UP, -0.05 * ft).sub(SLb);
+        const la = a0.length(), lb = a1.length(), qd = new Q().setFromUnitVectors(a0.clone().normalize(), a1.clone().normalize());
+        const T = SLb.clone().add(a0.clone().normalize().applyQuaternion(new Q().slerp(qd, exA)).multiplyScalar(la + (lb - la) * exA));
+        this._softL = exA;
         // (the clip's elbow side — but its hanging arm is near straight, where that side is
         // undefined: the solver flipped it 7 cm a frame. Below ~8 cm of bend, a steady side)
         const S0 = wpos(arm.u), axL = wpos(arm.tip).sub(S0).normalize(), eP = wpos(arm.l).sub(S0); eP.addScaledVector(axL, -eP.dot(axL));
         const sK = clamp(eP.length() / 0.08, 0, 1), poleB = eP.normalize().multiplyScalar(sK).addScaledVector(poleL, 1 - sK).normalize();
-        this.reachNatural(arm, hdL, T, poleB.lerp(poleL, ex).normalize(), null, qH.slerp(qAim, ex), null, () => this.gripPoint(hdL), 1, 9, 0.52);
+        this.reachNatural(arm, hdL, T, poleB.lerp(poleL, exA).normalize(), null, qH.slerp(qAim, exA), null, () => this.gripPoint(hdL), 1, 9, 0.52);
         this._softL = 1;
       }
     } else this.reachNatural(arm, hdL, Tl, poleL, { toward: Dl, k: 1 }, Nl, FIST, () => this.gripPoint(hdL), 1, 9, 0.52);   // (its wrist's reach eases in: _reachNatural)
@@ -1032,7 +1050,7 @@ export class Archer {
         if (gW > 0) T.add(grab.clone().sub(toW(...this.baseGrab)).multiplyScalar(gW));
         const kN2 = mj(pr("nock"));
         pole = BA.elbowR.clone(); N2 = BA.handQR; Dw = null;
-        if (kN2 > 0) { T.lerp(nockAt(0), kN2); pole.lerp(poleR, kN2).normalize(); }
+        if (this.nockCorr) T.sub(this.nockCorr);               // (the other half of the sideways gap)
         this.elbowDir = null; this.twistPrev = undefined;    // (the clip's elbow and roll — no lag behind them)
         fing = null;
         fingW = T0 < ST.pull[0] ? [PINCH, mj(pr("close"))] : [mixF(PINCH, HOOK, kN2), 1];
@@ -1142,10 +1160,11 @@ export class Archer {
         this.rd.orientHandTo(hdR, DH, NH, 1);
         const qHook = hdR.hand.getWorldQuaternion(new Q());
         hdR.hand.quaternion.copy(keep); hdR.hand.updateMatrixWorld(true);
-        qDraw = this.baseArm.handQR.clone().slerp(qHook, smooth(ex));
+        qDraw = this.baseArm.handQR.clone().slerp(qHook, smooth(exA));
         this.drawHandQ = qDraw.clone();
       }
-      this.reachNatural(armR, hdR, nockAt(dE), base ? this.baseArm.elbowR.clone().lerp(poleR, smooth(ex)).normalize() : poleR, base ? null : { toward: DH, k: 1 }, base ? qDraw : BP.tauHook, HOOK, () => this.hookPoint(), aw, 9, 0.6, base ? null : TWIST_R);   // (the wrist within 35° of the forearm)
+      const Tn = base ? this.baseArm.pinch.clone().sub(this.nockCorr ?? new V3()).lerp(nockAt(dE), smooth(exA)) : nockAt(dE);   // (mocap: the clip's own nock / early draw, onto the archer's draw line as the bow comes up)
+      this.reachNatural(armR, hdR, Tn, base ? this.baseArm.elbowR.clone().lerp(poleR, smooth(exA)).normalize() : poleR, base ? null : { toward: DH, k: 1 }, base ? qDraw : BP.tauHook, HOOK, () => this.hookPoint(), aw, 9, 0.6, base ? null : TWIST_R);   // (the wrist within 35° of the forearm)
       nockW = this.hookPoint();
       arrowFrom = nockW; arrowDir = restW.clone().sub(nockW).normalize();
     } else if (this.phase === "release") {

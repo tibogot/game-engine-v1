@@ -172,6 +172,34 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   sway per card) would read softer.
 - [ ] Jump: over the top the lifted dock + falling hair still arcs a little (Muybridge: level).
 
+## ▶ Y BOT as the rider (?rider=ybot, ybot.js) — 2026-10-11
+
+- Mixamo's Y Bot (refs/Y Bot.fbx, else the mesh in refs/Shooting Arrow.fbx — this machine
+  only) as a second rider; the robot stays the default (GUI "rider (reloads)").
+  Its bones RENAMED to the robot's (UE) names → rider / mount / stirrups / reins / hat /
+  editors work unchanged. The robot's clips (sit, idle, walk, jog) retargeted onto it
+  (retarget.js both ways: a UE-named source via ref.ue; pelvis from the REST, so the sitting
+  clip sits). Bow base baked per rider (anims/bow-shot-mocap-ybot.json).
+- Fixed on the way: the FBX gives each mesh its own partial skeleton (→ one skeleton of
+  every bone) and repeats each bone as a childless same-named copy (→ removed; restOf
+  keeps the first) — the shins / arms were 108–162° off until then; fingertip bones
+  aimed by their own segment (the robot's leaf ends bent every tip ~90° back).
+- Measured: Y Bot idle / walk / sit = the robot's within 0° per bone; full draw on Y Bot:
+  draw elbow 2.3 cm under the line, bow elbow 173°, abduction 96°, level, neck 76°,
+  anchor 7.2 cm; gold 10–60 m; fetch checks clean.
+- The bow (both riders): the clip's fingers sit BEHIND our string while nocking (it starts
+  drawing) → the string follows them; only the sideways gap closed, half per hand; the
+  aim correction follows the clip's own raise; around-the-shoulder blend. Bow elbow
+  while nocking vs Mixamo: Y Bot 7–22° vs 4–23°; robot 22–39° (its broad shoulders).
+- RELEASE "hand inside the head" (user): it was already inside at FULL DRAW — the arrow ran
+  5.3° off the aim (the knuckles' 7° in the aim frame, wrong once the bow sits as the clip
+  holds it), the string hand 7.5 cm into the head. Now the arrow line: 1.9° off, the string
+  at the cheek (7.5 cm out), knuckles 12.6–13.3 cm (head ±8); the release moves out and away.
+  (bow5's targets: the crosshair ray hits the leaning butt face ~14 cm above the boss —
+  the "high" offsets are that, not the bow.)
+- TODO: the user's look at Y Bot riding / mounting (seat, strap, mount keys retune);
+  the release lowering bow elbow (~30° more than the clip for 0.3 s).
+
 ## ▶ Mixamo → robot RETARGET (retarget.js) — 2026-10-11
 
 - Any Mixamo FBX baked onto the robot (Quaternius UAL, UE bone names; 52 bones mapped:

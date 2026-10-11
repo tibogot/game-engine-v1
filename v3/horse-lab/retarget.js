@@ -42,13 +42,21 @@ for (const [s, S] of [["l", "Left"], ["r", "Right"]]) {
   add(`ball_${s}`, `${S}ToeBase`, `ball_leaf_${s}`, `${S}Toe_End`, "body");
 }
 
-// bind (rest) transforms in the skeleton's own space, by name
-function restOf(skinned) {
+// Mixamo name (no prefix) → UE name, and back — every mapped bone, its child, the end bones
+export const UE_FROM_MIXAMO = {};
+for (const m of MAP) { UE_FROM_MIXAMO[m.src] = m.dst; if (m.sc && m.dc) UE_FROM_MIXAMO[m.sc] = m.dc; }
+export const MIXAMO_FROM_UE = Object.fromEntries(Object.entries(UE_FROM_MIXAMO).map(([k, v]) => [v, k]));
+
+// bind (rest) transforms in the skeleton's own space, by name (Mixamo names; a UE-named
+// skeleton is read through MIXAMO_FROM_UE when `ue` is set)
+function restOf(skinned, ue = false) {
   const sk = skinned.skeleton, out = {};
   sk.bones.forEach((b, i) => {
     const m = sk.boneInverses[i].clone().invert(), p = new V3(), q = new Q(), s = new V3();
     m.decompose(p, q, s);
-    out[b.name.replace(/^mixamorig:?/, "")] = { p, q, bone: b };
+    const nm = b.name.replace(/^mixamorig:?/, "");
+    const key = ue ? MIXAMO_FROM_UE[nm] ?? nm : nm;
+    if (!out[key]) out[key] = { p, q, bone: b };   // (the first: a Mixamo FBX repeats each bone as a childless copy under it)
   });
   return out;
 }
@@ -67,7 +75,9 @@ function basis(a, b) {
  * @returns {{ duration, fps, names, frames: Float32Array[], hips: Float32Array, apply(t, w) }}
  */
 export function bakeMixamoOnto(ref, robot, fps = 30) {
-  const S = restOf(skinOf(ref.root)), D = restOf(skinOf(robot));
+  // (ref.ue: the SOURCE is UE-named — the robot's own clips onto another figure; its bones
+  // are then read under their Mixamo names, ref.bone takes Mixamo names too)
+  const S = restOf(skinOf(ref.root), !!ref.ue), D = restOf(skinOf(robot));
   const maps = MAP.filter((m) => D[m.dst] && S[m.src]);
   // the body's side axis in each rest (left minus right), and up (pelvis → neck)
   const sideOf = (R, l, r) => R[l].p.clone().sub(R[r].p).normalize();
@@ -114,7 +124,7 @@ export function bakeMixamoOnto(ref, robot, fps = 30) {
   const fw = new V3(0, 0, 1).applyQuaternion(d0); fw.y = 0; fw.normalize();
   const yaw0 = Math.atan2(fw.x, fw.z), unyaw = new Q().setFromAxisAngle(new V3(0, 1, 0), -yaw0);
   const hipH = { s: S.Hips.p.y, d: D.pelvis.p.y }, k = Math.abs(hipH.d / hipH.s);
-  const sHips0 = srcRoot.worldToLocal(hips.getWorldPosition(new V3()));
+  const sHips0 = S.Hips.p.clone();                                    // (from the REST: a sitting clip's pelvis drop is kept)
   const n = Math.round(ref.clip.duration * fps) + 1;
   const frames = maps.map(() => new Float32Array(n * 4)), hipsPos = new Float32Array(n * 3);
   const world = maps.map(() => new Q()), local = new Q(), sw = new Q();
@@ -154,6 +164,15 @@ function makePlayer(robot, data) {
   const qa = new Q(), qb = new Q(), pa = new V3(), pb = new V3();
   return {
     duration, fps, names, frames, hips,
+    /** the baked frames as a THREE.AnimationClip on this figure's bone names (for its mixer) */
+    toClip(name) {
+      const times = Array.from({ length: n }, (_, i) => Math.min(i / fps, duration));
+      const tracks = bones.map((b, j) => new THREE.QuaternionKeyframeTrack(`${b.name}.quaternion`, times, Array.from(frames[j])));
+      const pos = [];
+      for (let i = 0; i < n; i++) { const v = pelvisRestLocal.clone().add(pa.fromArray(hips, i * 3).applyQuaternion(rqInv)); pos.push(v.x, v.y, v.z); }
+      tracks.push(new THREE.VectorKeyframeTrack(`${pelvis.name}.position`, times, pos));
+      return new THREE.AnimationClip(name, duration, tracks);
+    },
     /** pose the robot at clip time t, blended over its current pose by w (0..1) */
     apply(t, w = 1, { hips: moveHips = true } = {}) {
       if (w <= 0) return;

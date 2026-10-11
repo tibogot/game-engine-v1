@@ -85,6 +85,7 @@
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
       import { loadHorse, HorseController, HP, GEARS, setTrotGear } from "./horse-lab/horse.js";
       import { loadRider, RiderController, RP, applyRidingData } from "./horse-lab/rider.js";
+      import { loadYBot } from "./horse-lab/ybot.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
       import { Tack } from "./horse-lab/tack.js";
       import { AnimEditor } from "./horse-lab/animEditor.js";
@@ -206,7 +207,19 @@
       if (arena.spawn) { ctrl.pos.set(arena.spawn.x, 0, arena.spawn.z); ctrl.yaw = arena.spawn.yaw; }
       else ctrl.pos.set(0, 0, 2);
       $("loading").textContent = "loading rider…";
-      const riderData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
+      // the rider: the robot (default), or Mixamo's Y Bot (?rider=ybot — its bones renamed to the
+      // robot's, the robot's clips retargeted onto it; v3/horse-lab/refs, this machine only)
+      const RIDER = new URLSearchParams(location.search).get("rider") === "ybot" ? "ybot" : "robot";
+      const robotData = await loadRider("/models/UA1+UA2_compressed.glb", { height: 1.78 });
+      let riderData = robotData;
+      if (RIDER === "ybot") {
+        for (const f of ["Y Bot.fbx", "Shooting Arrow.fbx"]) {
+          try { riderData = await loadYBot(`/v3/horse-lab/refs/${encodeURIComponent(f)}`, robotData, { height: 1.78 }); break; }
+          catch (e) { console.warn("[horse-lab] Y Bot from", f, "failed:", e.message); }
+        }
+        if (riderData === robotData) console.warn("[horse-lab] no Y Bot FBX in v3/horse-lab/refs — the robot rides");
+      }
+      riderData.kind ??= "robot";
       mergeSkinned(riderData.model ?? riderData.rig);   // body + joints → one skinned mesh
       scene.add(riderData.rig);
       const rider = new RiderController(riderData, ctrl, scene);
@@ -229,7 +242,7 @@
         if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) archer.anim = await r.json();
       } catch { /* the coded fetch */ }
       try {                                                 // the shot's whole body from Mixamo, retargeted (editor: "bake Mixamo body")
-        const r = await fetch("/v3/horse-lab/anims/bow-shot-mocap.json?" + Date.now());
+        const r = await fetch(`/v3/horse-lab/anims/bow-shot-mocap${riderData.kind === "ybot" ? "-ybot" : ""}.json?` + Date.now());   // (per rider: baked onto ITS skeleton)
         if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) { archer.base = bakedFromJSON(await r.json(), rider.r.model); archer.calibrateBase(); }
       } catch { /* keyed arms only */ }
       const cross = document.createElement("div");
@@ -363,6 +376,11 @@
       const CAM_MODES = { "left side": -Math.PI / 2, "right side": Math.PI / 2, front: Math.PI };
       const gui = new GUI({ title: "Horse lab" });
       // which horse (reloads: the body is fitted to the skeleton at load) — armoured by default, ?horse=lowpoly
+      gui.add({ rider: riderData.kind }, "rider", ["robot", "ybot"]).name("rider (reloads)").onChange((v) => {
+        const u = new URL(location.href);
+        if (v === "robot") u.searchParams.delete("rider"); else u.searchParams.set("rider", v);
+        location.href = u.href;
+      });
       gui.add({ horse: ARMORED ? "armoured" : "low-poly" }, "horse", ["low-poly", "armoured"]).name("horse (reloads)").onChange((v) => {
         const u = new URL(location.href);
         if (v === "armoured") u.searchParams.delete("horse"); else u.searchParams.set("horse", "lowpoly");
@@ -612,7 +630,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { riderKind: riderData.kind, SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

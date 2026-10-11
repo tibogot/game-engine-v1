@@ -550,7 +550,7 @@ export class BowEditor {
     this.archer.base = bakedFromJSON(json, this.rider.r.model); this.archer.calibrateBase();
     this.dirty = true; this.runChecksSoon();
     try {
-      const r = await fetch(`/__horse-lab/anims?name=bow-shot-mocap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(json) });
+      const r = await fetch(`/__horse-lab/anims?name=bow-shot-mocap${this.rider.r.kind === "ybot" ? "-ybot" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(json) });   // (per rider)
       const j = await r.json(); if (!j.ok) throw new Error("save failed");
       this.status(`Mixamo body baked (${b.names.length} bones, arrow line ${(arrowYaw * 180 / Math.PI).toFixed(0)}°) → ${j.file}`);
     } catch (e) { this.status("baked (playing), not saved — " + e.message); }
