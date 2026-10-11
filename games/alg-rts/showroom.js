@@ -24,6 +24,7 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
+import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { buildDechraV2, buildKsarV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
@@ -86,6 +87,7 @@ function fromBase(lx, lz, site = BASE) {
 
 const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
 const CAVE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("cave") === "old";
+const KIT_PHOTO = typeof location === "undefined" || new URLSearchParams(location.search).get("kitphoto") !== "0";
 const VILLAGE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("village") === "old";
 const CAMP_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("camp") === "old";
 
@@ -218,7 +220,8 @@ export function kitView(geo) {
   // The French side's paint (FR_PAINT_TINT) on everything of this game's.
   // (A piece whose geometry only CARRIES its data — the new-standard camp, algAlnCamp.js — draws
   // nothing itself: its own invisible material, not the kit's, which wants the kit's attributes.)
-  const m = new THREE.Mesh(geo, geo.userData.labMaterial ?? rtsObjectMaterialTinted(FR_PAINT_TINT));
+  // (The kit's colours + the photos' grain and relief: algKitPhoto.js, option B. ?kitphoto=0 = without.)
+  const m = new THREE.Mesh(geo, geo.userData.labMaterial ?? (KIT_PHOTO ? kitPhotoMaterial(FR_PAINT_TINT) : rtsObjectMaterialTinted(FR_PAINT_TINT)));
   m.castShadow = m.receiveShadow = true;
   const st = stencilMesh(geo.userData.stencil);
   if (st) m.add(st);

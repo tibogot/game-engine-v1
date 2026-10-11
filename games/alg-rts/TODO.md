@@ -578,6 +578,23 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        dominant axis picks the photo — 2 texture reads a pixel, not 6; no seam at the corners, seen
        close): 0.12 ± 0.24 ms. The dry stone keeps the full triplanar.
      - [ ] the souk's arcades, square and stair: still the kit's (the town's new houses round them).
+     - [x] OPTION B, the post (2026-10-11, your go): algKitPhoto.js — the KIT's material (its atlas
+       colours, the post's white, the paint tint) with photo GRAIN and RELIEF on top by family
+       (plaster / stone / earth / wood: matId → family), packed into 1 grain texture (RGBA = 4
+       families) + 2 normal textures (2 families' XY each), one projection by the face's axis: 3
+       extra reads a pixel. On every kit piece the game places (showroom kitView; ?kitphoto=0 = off;
+       so ?village=old now shows the old villages WITH the detail — your contrast A/B). Lab "Poste
+       (photo)". Measured cleanly: −0.01 ± 0.07 ms swapping all 63 pieces' material, the post framed.
+       Up close: real dry-stone relief on the footing, plaster grain on the whitewash; at play zoom
+       the post looks the same (by design: its colours kept).
+     - [ ] the post's SHAPES next, if wanted: the footing's cold blue-grey → warm stone, soft wall
+       corners, real roof parapets instead of flat slabs.
+     - [ ] **YOU, UNDECIDED (2026-10-11): "they look better, less low-poly — but before there was more
+       contrast and more colour, it READ better on screen."** The photo materials are all warm and
+       mid-toned, near the ground's own; the kit had whitewash, ochre, grey stone, coloured doors.
+       To judge later in the game (?village=old / ?camp=old / ?cave=old A/B). Options if it stays
+       flat: more limewash and coloured doors and shutters, a value step between walls / roofs /
+       ground, a per-house tint, stronger contact shadow at the foot.
      - [ ] (was) MEASURE CLEANLY (needs you: Chrome visible on its own screen — the laptop throttled, the
        baseline drifted 4.2 → 6.1 ms between runs): the dechra framed, on vs off read −1.07 ms in one
        run and +0.07 in the next; the old dechra ~−0.25. If the new one is really ~1 ms framed, the

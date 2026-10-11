@@ -13,6 +13,8 @@ import { startVehicleLab } from "./vehicleLab.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
+import { kitPhotoMaterial } from "./algKitPhoto.js";
+import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildMortarPit } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
@@ -97,6 +99,13 @@ const BUILDINGS = {
   ksarNouveau: {
     label: "Ksar (nouveau)", gap: 46, before: () => buildKsar(), after: () => buildKsarV2(),
     tags: ["KSAR (LE JEU)", "KSAR · NOUVEAU"], note: "le ksar du jeu à gauche, le nouveau à droite (terrain plat ici).",
+  },
+  // OPTION B (2026-10-11, your go): the post as the kit builds it, its colours kept, the photos'
+  // grain and relief on top (algKitPhoto.js) — the game's post on the LEFT.
+  postePhoto: {
+    label: "Poste (photo)", gap: 42, before: () => buildFrenchPost({ detail: 2 }),
+    after: () => { const g = buildFrenchPost({ detail: 2 }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); return g; },
+    tags: ["POSTE (LE JEU)", "POSTE · DÉTAIL PHOTO"], note: "le poste du jeu à gauche, le même avec le grain et le relief des photos à droite.",
   },
   mortier: {
     label: "Fosse de mortier", gap: 7, before: () => buildMortarPit(), after: () => buildMortarPitV2(),
