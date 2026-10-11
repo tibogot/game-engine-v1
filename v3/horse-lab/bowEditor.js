@@ -25,6 +25,7 @@ import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { BP, FETCH_CHANNELS, keyAt } from "./bow.js";
 import { loadMixamoRef } from "./mixamoRef.js";
+import { bakeMixamoOnto, bakedToJSON, bakedFromJSON } from "./retarget.js";
 
 // the Mixamo reference (v3/horse-lab/refs, kept out of git) and its phases, measured
 // at 30 fps: reach · grab · pull · bring (the bow comes up, the torso turns to it) ·
@@ -94,6 +95,7 @@ export class BowEditor {
         <button data-k="rebuild" title="the keys again from the coded fetch">rebuild from code</button>
         <button data-k="mixamo" title="the keys from the Mixamo clip (refs/Shooting Arrow.fbx): its hand, elbow, roll, torso and timing">from Mixamo</button>
         <label title="the Mixamo figure beside the robot, at the same time"><input data-k="ghost" type="checkbox"> show Mixamo</label>
+        <button data-k="bakeBase" title="the Mixamo clip retargeted onto the robot's whole body (collarbones, spine, hips, legs, head) — saved as anims/bow-shot-mocap.json; the IK then only corrects">bake Mixamo body</button>
         <button data-k="check" title="measure every frame">check frames</button>
         <label title="the game plays these keys (off: the coded fetch)"><input data-k="keyed" type="checkbox"> game plays keys</label>
         <button data-k="save">💾 save</button>
@@ -121,6 +123,7 @@ export class BowEditor {
     q("rebuild").onclick = () => { this.pushUndo(); this.archer.anim = this.data = this.bake(); this.changed(); this.status("rebuilt from the coded fetch (not saved yet)"); };
     q("check").onclick = () => this.runChecks(true);
     q("mixamo").onclick = () => this.fromMixamo();
+    q("bakeBase").onclick = () => this.bakeBase();
     this.ui.ghost = q("ghost"); this.ui.ghost.onchange = () => this.showGhost(this.ui.ghost.checked);
     q("save").onclick = () => this.save();
     q("close").onclick = () => this.close();
@@ -337,7 +340,8 @@ export class BowEditor {
       if (prev) { r.v = r.hand.distanceTo(prev.hand) / DT; r.dElbow = r.elbow - prev.elbow; r.dTwist = ((r.twist - prev.twist + 540) % 360) - 180; vmax = Math.max(vmax, r.v); }
       if (prev2) r.acc = r.hand.clone().sub(prev.hand).sub(prev.hand.clone().sub(prev2.hand)).divideScalar(DT * DT).length();
       const bad = [];
-      if (r.wrist > 40) bad.push(`wrist bent ${r.wrist.toFixed(0)}°`);
+      const wristMax = A.useBase() ? 70 : 40;                // (a wrist goes ~70°; Mixamo bends it to 62° pulling the arrow — ours kept it to 40)
+      if (r.wrist > wristMax) bad.push(`wrist bent ${r.wrist.toFixed(0)}°`);
       if (r.elbow < 8) bad.push(`elbow locked`);
       if (Math.abs(r.dElbow ?? 0) > 8) bad.push(`elbow jumps ${r.dElbow.toFixed(0)}°`);
       if (Math.abs(r.dTwist ?? 0) > 15) bad.push(`roll jumps ${r.dTwist.toFixed(0)}°`);   // (the limit is 800°/s ≈ 13°/frame)
@@ -531,6 +535,25 @@ export class BowEditor {
     M.root.position.set(want.x - hips.x, this.rider.mountSys.gpos.y, want.z - hips.z);
     M.root.visible = true; M.at(this.t);
     this.status("Mixamo figure: in front, to the robot's right, at the playhead's time");
+  }
+  // the clip retargeted onto the robot (retarget.js), its arrow line (right hand → left
+  // hand at full draw, 2.8 s) for the stance; saved, and the bow plays it at once
+  async bakeBase() {
+    let M;
+    try { M = await this.mixRef(); } catch (e) { return this.status("no Mixamo clip: put “Shooting Arrow.fbx” in v3/horse-lab/refs — " + e.message); }
+    const was = { p: M.root.position.clone(), r: M.root.rotation.y };
+    M.root.position.set(0, 0, 0); M.root.rotation.set(0, 0, 0);
+    const b = bakeMixamoOnto(M, this.rider.r.model);
+    const a = b.dirAt(2.8, "Head", "LeftHand"), arrowYaw = Math.atan2(a.x, a.z);   // (the arrow runs from the anchor at the jaw to the bow hand — wrist to wrist was 29° off it)
+    M.root.position.copy(was.p); M.root.rotation.y = was.r; M.at(this.t);
+    const json = bakedToJSON(b, { source: "mixamo:Shooting Arrow", arrowYaw });
+    this.archer.base = bakedFromJSON(json, this.rider.r.model); this.archer.calibrateBase();
+    this.dirty = true; this.runChecksSoon();
+    try {
+      const r = await fetch(`/__horse-lab/anims?name=bow-shot-mocap`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(json) });
+      const j = await r.json(); if (!j.ok) throw new Error("save failed");
+      this.status(`Mixamo body baked (${b.names.length} bones, arrow line ${(arrowYaw * 180 / Math.PI).toFixed(0)}°) → ${j.file}`);
+    } catch (e) { this.status("baked (playing), not saved — " + e.message); }
   }
   mixAcc() {
     if (this._mixAcc) return this._mixAcc;

@@ -77,6 +77,9 @@
       import { createCavalry } from "./horse-lab/cavalry.js";
       import { Archer, BP, buildRange } from "./horse-lab/bow.js";
       import { BowEditor } from "./horse-lab/bowEditor.js";
+      import { bakedFromJSON } from "./horse-lab/retarget.js";
+      import { CSMShadowNode } from "three/addons/csm/CSMShadowNode.js";
+      import { nearAnchoredSplits } from "./app/csmSplits.js";
       import { buildFarm } from "./horse-lab/farm.js";
       import { createLabSky } from "./horse-lab/sky.js";
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
@@ -128,6 +131,27 @@
         c.left = -24; c.right = 24; c.top = 24; c.bottom = -24; c.near = 1; c.far = 120;
       }
       scene.add(sun, sun.target);
+      // CASCADED sun shadows (?csm=0: the old single map). One 2048 map over a 48 m box
+      // was 2.3 cm a texel: the hat, the quiver, an arm cast nothing on the body (its 3 cm
+      // normal bias hid the rest). Three cascades to 90 m, the first ending SH.nearSplit m
+      // from the camera (the archer aiming is ~2.3 m away, riding ~7.5 m): ~5 mm a texel.
+      const SH = { csm: new URLSearchParams(location.search).get("csm") !== "0", cascades: 3, maxFar: 90, nearSplit: 6, mapSize: 2048, radius: 2, normalBias: 0.006, bias: -0.0002 };
+      let csm = null;
+      if (SH.csm) {
+        csm = new CSMShadowNode(sun, { cascades: SH.cascades, maxFar: SH.maxFar, mode: "custom", lightMargin: 40,
+          customSplitsCallback: (n, near, far, target) => nearAnchoredSplits(n, near, far, SH.nearSplit, target) });
+        sun.shadow.shadowNode = csm;
+      }
+      // per cascade: its own bias (a far cascade's texel is bigger: more bias, or acne)
+      const syncCsm = () => {
+        if (!csm) return;
+        csm.lights.forEach((l, i) => {
+          const sh = l.shadow;
+          if (sh.mapSize.x !== SH.mapSize) { sh.mapSize.set(SH.mapSize, SH.mapSize); sh.map?.dispose(); sh.map = null; }
+          sh.radius = SH.radius; sh.normalBias = SH.normalBias * Math.sqrt(i + 1); sh.bias = SH.bias * (i + 1);
+          if (sh.camera.far !== 300) { sh.camera.far = 300; sh.camera.updateProjectionMatrix(); }
+        });
+      };
       // the sky: Sky Pro (lights, exposure, fog follow it) — ?sky=flat for the old flat colour
       const labSky = new URLSearchParams(location.search).get("sky") === "flat" ? null : createLabSky({ renderer, camera, scene, sun, hemi });
 
@@ -191,7 +215,7 @@
       const tack = new Tack(horse, rider);
       if (ARMORED) tack.setVisible(false);                  // the model has its own saddle (our saddle still gives the rider its seat)
       mergeRigid(tack.group, { roughness: 0.8, flatShading: true, side: THREE.DoubleSide });   // saddle parts → one mesh on its bone
-      if (rider.hat) mergeRigid(rider.hat, { roughness: 0.85, flatShading: true });           // hat parts → one
+      if (rider.hat) mergeRigid(rider.hat, { roughness: 0.85 });           // hat parts → one (smooth-shaded: flat, its facets read as dark triangles)
       console.log("[horse-lab] saddle fit", tack.fit);
       await rider.mountSys.loadAnims();                     // get on / off as saved from the animation editor
       try {                                                 // riding postures, seat height, strap length (editor)
@@ -204,6 +228,10 @@
         const r = await fetch("/v3/horse-lab/anims/bow-fetch.json?" + Date.now());
         if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) archer.anim = await r.json();
       } catch { /* the coded fetch */ }
+      try {                                                 // the shot's whole body from Mixamo, retargeted (editor: "bake Mixamo body")
+        const r = await fetch("/v3/horse-lab/anims/bow-shot-mocap.json?" + Date.now());
+        if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) { archer.base = bakedFromJSON(await r.json(), rider.r.model); archer.calibrateBase(); }
+      } catch { /* keyed arms only */ }
       const cross = document.createElement("div");
       cross.style.cssText = "position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;z-index:15;pointer-events:none;display:none;background:radial-gradient(circle,#fff 0 1.5px,transparent 2px),linear-gradient(#fff,#fff) 50% 0/1.5px 6px no-repeat,linear-gradient(#fff,#fff) 50% 100%/1.5px 6px no-repeat,linear-gradient(#fff,#fff) 0 50%/6px 1.5px no-repeat,linear-gradient(#fff,#fff) 100% 50%/6px 1.5px no-repeat;filter:drop-shadow(0 0 1px #000)";
       document.body.appendChild(cross);
@@ -369,6 +397,7 @@
         } }, "go").name("→ get off, go to the archery range");
         bf.add({ open: () => openBowEd() }, "open").name("🎯 fetch timeline editor (U)");
         bf.add(BP, "keyed").name("fetch: play the editor's keys");
+        bf.add(BP, "mocap").name("whole body from Mixamo (retargeted)");
         bf.add(BP, "readyRoll", -1.6, 1.6, 0.05).name("ready bow roll (rad)");
         bf.add(BP, "debug").name("show flights (debug)");
         bf.add({ clear: () => { archer.clearArrows(); archer.debug.clear(); range?.reset(); } }, "clear").name("pick up arrows, reset targets");
@@ -498,6 +527,7 @@
             rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming } });
             archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot): over the clip's upper body
           }
+          D.afterPose?.();                                      // (debug / tools: a pose over the frame's, before it renders)
           cross.style.display = archer.active && archer.aimW > 0.6 && !bowEd.isOpen ? "block" : "none";
           poseEd.applyRider();
           poseEd.afterFrame();
@@ -512,6 +542,7 @@
           ctrl.legs.forEach((g, i) => { hits[i].position.copy(g.hit); hits[i].visible = g.on && HP.ik; });
         }
         updateCamera(rawDt);
+        syncCsm();
         if (!D.skyOff) labSky?.update(rawDt, camTarget);
         const tCpu1 = performance.now();
         renderer.info.reset();
@@ -581,7 +612,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

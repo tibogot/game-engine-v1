@@ -172,6 +172,39 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   sway per card) would read softer.
 - [ ] Jump: over the top the lifted dock + falling hair still arcs a little (Muybridge: level).
 
+## ▶ Mixamo → robot RETARGET (retarget.js) — 2026-10-11
+
+- Any Mixamo FBX baked onto the robot (Quaternius UAL, UE bone names; 52 bones mapped:
+  spine, collarbones, arms, hands + 3 finger joints, legs, feet). Rests matched per
+  bone by a body frame (to the child; body side / forward / across the palm); Mixamo's
+  rotation from its rest carried over; its start facing taken out; pelvis offset ×hip
+  height. Measured: every bone within 0–1° of Mixamo's in the body frame.
+- The BOW plays it as its BASE (BP.mocap, anims/bow-shot-mocap.json, editor "bake
+  Mixamo body"): fetch = clip time, draw 1.95→2.8 by the draw, its hold while held,
+  release 3.85→4.8; phase changes crossfade 0.15 s. Corrections on top only:
+  string hand → our quiver (grab, from the robot's own pose at the grab); the BOW HAND
+  brings the string to the clip's string fingers (the robot's broad chest put it 13 cm
+  out of reach); the bow held as the clip holds it (learnt at its nock, 1.6 s);
+  the hand keeps the clip's world orientation (a roll number flipped 69°); at full draw
+  (by the bow's raise) the archer's form: shoulders levelled, chest open 14°, collarbones
+  to the idle's, the hook grip, head on the arrow.
+- Measured: fetch checks clean; jumps ≤ 4.6 cm (in the release); full draw: shoulders
+  0 cm, neck 76°, head 0°, bow elbow 173°, abduction 92°, anchor 6.8 cm, draw elbow 5.8 cm
+  over the line (ref 0–5); accuracy gold at 10–60 m.
+- NEXT: the editor still edits the old keyed channels — make it key OFFSETS over the
+  clip; more clips (Standing Aim Walk → walking while aiming).
+
+## ▶ Shadows — 2026-10-11 (user: "the robot has so bad shadows… self shadow low quality")
+
+- Was: ONE 2048 sun map over a ±24 m box = 2.3 cm a texel + normalBias 3 cm → the
+  hat, quiver, arrows and arms cast nothing on the body. Now CSMShadowNode (v3's
+  csmSplits.nearAnchoredSplits): 3 cascades to 90 m, the first ending 6 m from the
+  camera (~5 mm texels), bias / normalBias per cascade (SH in horse-lab.html;
+  ?csm=0 = the old map). Close up: hat on the neck, arm + arrow shafts on the back.
+- Cost (debug Chrome, ?gpu=1): GPU ~equal (0.8–1.05 vs 1.1–1.2 ms, noise); draws
+  ×2 (229 → 436 riding, 532 on foot). TODO: the user's MSI measurement.
+- The hat's dark triangles are its flatShading (hat.js, low-poly look), not shadow.
+
 ## ▶ The bow on foot (bow.js) — 2026-10-09
 
 - 2026-10-10: FETCH TIMELINE EDITOR (U, bowEditor.js) — the arrow fetch as keyed
