@@ -17,7 +17,8 @@ const DIR = path.join(ROOT, "public/textures/build");
 // The picks: dry rubble stone in mud mortar (the Aurès houses), a clay plaster, raw planks and a
 // willow's bark (beams, logs), burlap (sacks, tarps), a reed thatch (brush on the roofs).
 export const PICKS = ["rabdentse_ruins_wall", "clay_plaster", "raw_plank_wall", "bark_willow_02", "hessian_230", "reed_roof_04"];
-const MAPS = [["Diffuse", "diff"], ["nor_gl", "nor_gl"], ["Rough", "rough"]];
+// (no roughness: the materials take a constant one — tools/packBuildingTextures.py also packs these)
+const MAPS = [["Diffuse", "diff"], ["nor_gl", "nor_gl"]];
 
 for (const slug of PICKS) {
   const dir = path.join(DIR, slug);
