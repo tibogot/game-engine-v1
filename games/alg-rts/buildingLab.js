@@ -24,7 +24,7 @@ import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
-import { buildAmmoDump } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmmoDump, buildFuelDepot } from "../../v3/render/objects/rtsAlgeria.js";
 import { createPointMark } from "./algPointMarks.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
@@ -33,43 +33,65 @@ import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 // marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
 // (algPointMarks.js: dashed → filled → solid, the disc, the capture wave and streaks); the same
 // depot and flag on both. The panel's "Point" buttons set the state and play a capture.
-const POINT_R = 22;                    // algEconomy supplyRadius
-const POINT = { game: null, neu: null };
-function supplyPoint(which) {
-  const geo = buildAmmoDump();
+// (2026-10-11, you: "I have different points in the game — shouldn't we place them in the lab?")
+// THE GAME'S POINT KINDS (algEconomy.js, algPointFlags.js): a SUPPLY point pays munitions (crates)
+// or fuel (drums), 22 m, a 5 m pole beside the depot; a VILLAGE counts for the score and pays all
+// three, 40 m, a 7 m pole on open ground near its centre (a house stands for the village here).
+const POINT_KINDS = {
+  mun: { R: 22, pole: 5, cloth: [1.6, 1.07], build: () => buildAmmoDump() },
+  fuel: { R: 22, pole: 5, cloth: [1.6, 1.07], build: () => buildFuelDepot() },
+  village: { R: 40, pole: 7, cloth: [2.1, 1.4], build: () => buildMechtaHouse({}), poleAt: [-9, 7] },
+};
+const POINT = { game: null, neu: null, kind: null };
+function supplyPoint(which, kindKey = "mun") {
+  const K = POINT_KINDS[kindKey];
+  POINT.kind = kindKey;
+  const geo = K.build();
   const fp = geo.userData.footprint ?? { hx: 1.5, hz: 1.5 };
   const extra = [];
   // The flag: a pole and a flat cloth that climbs with the hold (the game's waves: algPointFlags).
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 5, 8).translate(0, 2.5, 0), new THREE.MeshStandardNodeMaterial({ color: 0x5a5650, roughness: 0.6, metalness: 0.4 }));
-  pole.position.set(-fp.hx - 0.4, 0, fp.hz * 0.6);
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, K.pole, 8).translate(0, K.pole / 2, 0), new THREE.MeshStandardNodeMaterial({ color: 0x5a5650, roughness: 0.6, metalness: 0.4 }));
+  const [px, pz] = K.poleAt ?? [-fp.hx - 0.4, fp.hz * 0.6];
+  pole.position.set(px, 0, pz);
   pole.castShadow = true;
   const tex = { player: labFlagTex(drawTricoloreDataUrl(256)), enemy: labFlagTex(drawFlnDataUrl(256)) };
-  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.07).translate(0.8, 0.535, 0), new THREE.MeshStandardNodeMaterial({ map: tex.player, side: THREE.DoubleSide, roughness: 0.9 }));
+  const [cw, ch] = K.cloth;
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(cw, ch).translate(cw / 2, ch / 2, 0), new THREE.MeshStandardNodeMaterial({ map: tex.player, side: THREE.DoubleSide, roughness: 0.9 }));
   cloth.castShadow = true;
   pole.add(cloth);
   extra.push(pole);
   const flag = (side, hold) => {
     cloth.visible = !!side && hold > 0;
     if (side) cloth.material.map = tex[side];
-    cloth.position.y = 0.5 + hold * (5 - 1.07 - 0.5);
+    cloth.position.y = 0.5 + hold * (K.pole - ch - 0.5);
   };
-  let marks;
+  let marks, resize;
   if (which === "game") {
-    const ring = new THREE.Mesh(new THREE.RingGeometry(POINT_R * 0.975, POINT_R, 96).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false }));
+    const ring = new THREE.Mesh(gameRingGeo(K.R), new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false }));
     ring.position.y = 0.06;
     ring.renderOrder = RENDER_ORDER.ON_GROUND;
     extra.push(ring);
-    const GAME_COL = { player: 0x58a8ff, enemy: 0xff6a5a, null: 0xd8cfae };
-    marks = { set: ({ owner }) => ring.material.color.set(GAME_COL[owner]), capture() {}, update() {} };
+    const GAME_COL = { player: 0x58a8ff, enemy: 0xff6a5a, cut: 0xe0a040, null: 0xd8cfae };
+    marks = { set: ({ owner, cut }) => ring.material.color.set(GAME_COL[cut && owner === "player" ? "cut" : owner]), capture() {}, update() {} };
+    resize = (r) => { ring.geometry.dispose(); ring.geometry = gameRingGeo(r); };
   } else {
-    marks = createPointMark({ radius: POINT_R });
-    marks.group.rotation.y = 0.6;       // undo the turntable's −0.6, so the fill starts at the top
+    const make = (r) => { const m = createPointMark({ radius: r }); m.group.rotation.y = 0.6; return m; };   // undo the turntable's −0.6: the fill starts at the top
+    marks = make(K.R);
     extra.push(marks.group);
+    // A new radius: the marks rebuilt in place (their geometry is made at their radius).
+    resize = (r) => {
+      const parent = marks.group.parent, next = make(r);
+      parent?.remove(marks.group);
+      marks.dispose();
+      parent?.add(next.group);
+      Object.assign(marks, next);
+    };
   }
   geo.userData.extra = extra;
-  POINT[which === "game" ? "game" : "neu"] = { marks, flag };
+  POINT[which === "game" ? "game" : "neu"] = { marks, flag, resize };
   return geo;
 }
+const gameRingGeo = (r) => new THREE.RingGeometry(r * 0.975, r, 96).rotateX(-Math.PI / 2);
 function labFlagTex(url) { const t = new THREE.TextureLoader().load(url); t.colorSpace = THREE.SRGBColorSpace; return t; }
 
 // ?seed=: the new pieces' variant (the panel's "Variante suivante").
@@ -163,8 +185,16 @@ const BUILDINGS = {
     tags: ["CAMP (LE JEU)", "CAMP · NOUVEAU STANDARD"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
   },
   pointRavit: {
-    label: "Point de ravitaillement", gap: POINT_R + 3, before: () => supplyPoint("game"), after: () => supplyPoint("new"),
-    tags: ["POINT (LE JEU)", "POINT · NOUVEAU"], note: "les marques du jeu à gauche, les nouvelles à droite — « Point » : l'état et la capture.",
+    label: "Point : munitions", gap: POINT_KINDS.mun.R + 3, before: () => supplyPoint("game", "mun"), after: () => supplyPoint("new", "mun"),
+    tags: ["MUNITIONS (LE JEU)", "MUNITIONS · NOUVEAU"], note: "les marques du jeu à gauche, les nouvelles à droite — « Point » : l'état, la capture, le rayon.",
+  },
+  pointCarbu: {
+    label: "Point : carburant", gap: POINT_KINDS.fuel.R + 3, before: () => supplyPoint("game", "fuel"), after: () => supplyPoint("new", "fuel"),
+    tags: ["CARBURANT (LE JEU)", "CARBURANT · NOUVEAU"], note: "le dépôt de fûts — les marques du jeu à gauche, les nouvelles à droite.",
+  },
+  pointVillage: {
+    label: "Point : village", gap: POINT_KINDS.village.R + 3, before: () => supplyPoint("game", "village"), after: () => supplyPoint("new", "village"),
+    tags: ["VILLAGE (LE JEU)", "VILLAGE · NOUVEAU"], note: "un village (40 m, le mât de 7 m) — compte au score, rapporte les trois ressources.",
   },
 };
 
@@ -224,7 +254,7 @@ export async function startBuildingLab(container) {
       if (b) location.search = `?v=${key}&seed=${Math.max(0, SEED + Number(b.dataset.seed))}`;
     });
   }
-  if (new URLSearchParams(location.search).get("v") === "pointRavit") startPointPanel(lab, panel);
+  if (["pointRavit", "pointCarbu", "pointVillage"].includes(new URLSearchParams(location.search).get("v"))) startPointPanel(lab, panel);
   return Object.assign(lab, { setStone });
 }
 
@@ -232,26 +262,40 @@ export async function startBuildingLab(container) {
 function startPointPanel(lab, panel) {
   const both = (fn) => { for (const p of [POINT.game, POINT.neu]) if (p) fn(p); };
   let anim = null;      // { side, t } while a capture is playing
-  const show = (owner, capturer = owner, progress = owner ? 1 : 0) => {
+  let state = { owner: null, capturer: null, progress: 0, cut: false };
+  const show = (owner, capturer = owner, progress = owner ? 1 : 0, cut = false) => {
     anim = null;
-    both((p) => { p.marks.set({ owner, capturer, progress }); p.flag(owner ?? (progress > 0 ? capturer : null), owner ? 1 : progress); });
+    state = { owner, capturer, progress, cut };
+    both((p) => { p.marks.set(state); p.flag(owner ?? (progress > 0 ? capturer : null), owner ? 1 : progress); });
   };
+  // THE RING'S SIZE (the open question: ours 22 m / 40 m, Company of Heroes 3's ~11 m — measured,
+  // assets-src/refs/coh3/README.md). A supply point stops at 22: past it, it would cross the other side.
+  const K = POINT_KINDS[POINT.kind] ?? POINT_KINDS.mun;
+  const sizes = K.R > 22 ? [11, 16, 22, 30, 40] : [11, 16, 22];
   const box = document.createElement("div");
   box.innerHTML = `<h2>Point</h2><div class="g">
     <button data-pt="neutral">Neutre</button><button data-pt="half">Capture 50 %</button>
     <button data-pt="player">Tenu : France</button><button data-pt="enemy">Tenu : FLN</button>
-    <button data-pt="capP">▶ Capture France</button><button data-pt="capE">▶ Capture FLN</button></div>`;
+    <button data-pt="cut">France, coupé</button><button data-pt="capP">▶ Capture France</button>
+    <button data-pt="capE">▶ Capture FLN</button></div>
+    <h2>Rayon</h2><div class="g">${sizes.map((r) => `<button data-r="${r}">${r} m${r === 11 ? " (CoH)" : r === K.R ? " (jeu)" : ""}</button>`).join("")}</div>`;
   panel.insertBefore(box, panel.firstElementChild?.nextSibling ?? null);
   box.addEventListener("click", (e) => {
-    const k = e.target.closest("button")?.dataset.pt;
+    const b = e.target.closest("button");
+    if (b?.dataset.r) { const r = Number(b.dataset.r); both((p) => p.resize(r)); both((p) => p.marks.set(state)); return; }
+    const k = b?.dataset.pt;
     if (k === "neutral") show(null);
     else if (k === "half") show(null, "player", 0.5);
     else if (k === "player" || k === "enemy") show(k);
+    else if (k === "cut") show("player", "player", 1, true);
     else if (k === "capP" || k === "capE") { show(null); anim = { side: k === "capP" ? "player" : "enemy", t: 0 }; }
   });
   show(null);
-  // The point is 44 m across: the RTS camera, a little further out than play.
-  lab.play(105, 48);
+  // Both points in view through the GAME's camera (CoH 3's, algGame.js: a 26° lens, 44° down), back as
+  // far as the pair needs (a village is 80 m across) — the lab's own 40° lens would judge them wrong.
+  lab.camera.fov = 26;
+  lab.camera.updateProjectionMatrix();
+  lab.play(K.R * 7.6, 44);
   const CAP_S = 3;
   let last = performance.now();
   const tick = (now) => {

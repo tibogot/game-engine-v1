@@ -19,10 +19,13 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { Fn, abs, atan, clamp, exp, float, fract, fwidth, length, max, mix, positionLocal, pow, sin, smoothstep, time, uniform, uv, vec3 } from "three/tsl";
 
 /** The sides' colours — the game's own ring colours (algUnits.js villageRings). */
-export const POINT_COLOURS = { player: 0x58a8ff, enemy: 0xff6a5a, neutral: 0xf4efe2 };
+/** The sides' colours — the game's own ring colours (algUnits.js villageRings); `cut`: a French
+ *  point held but CUT OFF from the post (no supply line): amber, it pays nothing. */
+export const POINT_COLOURS = { player: 0x58a8ff, enemy: 0xff6a5a, neutral: 0xf4efe2, cut: 0xe0a040 };
 
 export const POINT_MARKS = {
-  ringWidth: 0.42,      // m: the ring's band
+  ringWidth: 0.02,      // the ring's band, × its radius (0.44 m at 22, 0.8 at 40 — fixed 0.42 was a hairline on a village)
+  ringMin: 0.35,        // m: the band never thinner
   dashes: 44,           // round the ring while nobody holds it
   dashDuty: 0.62,       // of each dash period, drawn
   discFrac: 0.3,        // the centre disc's radius / the ring's
@@ -67,7 +70,8 @@ export function createPointMark({ radius = 22, lift = 0.06 } = {}) {
   const turn = Fn(() => fract(atan(positionLocal.x, positionLocal.z.negate()).div(TAU).add(1)));
 
   // ── RING ──────────────────────────────────────────────────────────────────
-  const ring = new THREE.Mesh(new THREE.RingGeometry(radius - P.ringWidth, radius, 256, 1).rotateX(-Math.PI / 2), flatMat());
+  const W = Math.max(P.ringMin, radius * P.ringWidth);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(radius - W, radius, 256, 1).rotateX(-Math.PI / 2), flatMat());
   {
     const m = ring.material;
     const a = turn();
@@ -81,7 +85,7 @@ export function createPointMark({ radius = 22, lift = 0.06 } = {}) {
     // The band's two edges, soft.
     const r = length(positionLocal.xz);
     const rw = fwidth(r).mul(1.2);
-    const band = smoothstep(radius - P.ringWidth, float(radius - P.ringWidth).add(rw), r).mul(float(1).sub(smoothstep(float(radius).sub(rw), radius, r)));
+    const band = smoothstep(radius - W, float(radius - W).add(rw), r).mul(float(1).sub(smoothstep(float(radius).sub(rw), radius, r)));
     m.colorNode = mix(U.base, U.fill, filled);
     m.opacityNode = mix(dash.mul(0.85), float(0.95), filled).mul(band);
   }
@@ -159,9 +163,10 @@ export function createPointMark({ radius = 22, lift = 0.06 } = {}) {
      * @param {"player"|"enemy"|null} s.owner      who holds it (null: nobody)
      * @param {"player"|"enemy"|null} [s.capturer] who is filling it (the owner's colour when held)
      * @param {number} [s.progress]                0..1 of the ring filled by the capturer
+     * @param {boolean} [s.cut]                    held by France but cut off from the post: amber
      */
-    set({ owner = null, capturer = owner, progress = owner ? 1 : 0 }) {
-      U.fill.value.set(POINT_COLOURS[capturer ?? owner ?? "player"]);
+    set({ owner = null, capturer = owner, progress = owner ? 1 : 0, cut = false }) {
+      U.fill.value.set(cut && owner === "player" ? POINT_COLOURS.cut : POINT_COLOURS[capturer ?? owner ?? "player"]);
       U.progress.value = owner ? 1 : progress;
       heldTarget = owner ? 1 : 0;
     },
