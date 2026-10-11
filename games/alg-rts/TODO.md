@@ -519,7 +519,8 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      - [ ] the HUD's "selected" brass (--hud-brass #c9a54a) → the menu's gold #f2c94c? (you look first)
      - [ ] the reticle + 8 edge-scroll arrows as your SVGs (cursors/), when drawn.
      - [ ] check the menu in FRANÇAIS (the long France side line on one row).
-     - [ ] sandlogo.png, sand-and-blood.webp, training-camp.webp: unused now — delete or assets-src/.
+     - [ ] sandlogo.png, training-camp.webp: unused now — delete or assets-src/. (sand-and-blood.webp
+       is the HOME PAGE card's art, index.html — keep it.)
    - [x] THE TRAINING (2026-10-09, you: "a first mission that teaches the basics, another terrain,
      smaller, aerial grass / aerial rock"): ?map=training — maps/training.js, its level built by
      tools/algTrainingLevel.mjs (a 330 m green plain, a knoll, framing hills). algTutorial.js:
