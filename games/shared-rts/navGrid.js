@@ -443,6 +443,48 @@ export function createNavGrid({
   ];
 
   /**
+   * THE NEAREST REACHABLE POINT to (tx, tz) from (ax, az) — Company of Heroes' formation trick
+   * (Jurney, "CoH Squad Formations Explained", AI Game Programming Wisdom 4): a man's formation spot is
+   * never used as is; a cheap search of at most `maxNodes` cells runs from the squad's spot toward it,
+   * and the point it reached NEAREST the ideal spot is used — so a spot inside a house or behind a wall
+   * becomes the closest point the man can really walk to, and the squad squeezes into narrow places.
+   * Best-first (toward the goal), 8-way, no corner cutting. Returns {x, z} — the ideal point itself
+   * when its cell is reached — or null when (ax, az) has no open ground near it.
+   */
+  const _nrSeen = new Map();
+  function nearestReachable(ax, az, tx, tz, { foot = false, maxNodes = 100 } = {}) {
+    footRules = foot;
+    const s = worldToCell(ax, az);
+    let start = isBlocked(s.cx, s.cz) ? nearestOpen(ax, az, 4) : s;
+    if (!start) return null;
+    const g = worldToCell(tx, tz);
+    const h = (cx, cz) => Math.hypot(cx - g.cx, cz - g.cz);
+    _nrSeen.clear();
+    const open = [{ cx: start.cx, cz: start.cz, h: h(start.cx, start.cz) }];
+    _nrSeen.set(idx(start.cx, start.cz), 1);
+    let best = open[0], n = 0;
+    while (open.length && n < maxNodes) {
+      let bi = 0;
+      for (let i = 1; i < open.length; i++) if (open[i].h < open[bi].h) bi = i;
+      const c = open[bi];
+      open[bi] = open[open.length - 1]; open.pop();
+      n++;
+      if (c.h < best.h) best = c;
+      if (c.cx === g.cx && c.cz === g.cz) return { x: tx, z: tz };
+      for (const [dx, dz] of NB) {
+        const nx = c.cx + dx, nz = c.cz + dz;
+        if (!inBounds(nx, nz) || isBlocked(nx, nz)) continue;
+        if (dx && dz && (isBlocked(c.cx + dx, c.cz) || isBlocked(c.cx, c.cz + dz))) continue;
+        const i = idx(nx, nz);
+        if (_nrSeen.has(i)) continue;
+        _nrSeen.set(i, 1);
+        open.push({ cx: nx, cz: nz, h: h(nx, nz) });
+      }
+    }
+    return cellToWorld(best.cx, best.cz);
+  }
+
+  /**
    * An A* search with its own scratch, which can run to the end at once
    * (findPath) or a slice at a time (the path queue below). A cell's
    * gScore/came are valid only when stamp[i] === gen — a new search bumps gen
@@ -713,6 +755,8 @@ export function createNavGrid({
     /** Searches waiting or under way (dev readout). */
     get queuedPaths() { return queue.length + (queued ? 1 : 0); },
     sameRegion,
+    /** CoH's formation spot: the nearest point to (tx, tz) a short search from (ax, az) reaches (see above). */
+    nearestReachable,
     /** `foot`: under infantry rules (a footbridge is open). Default: vehicle rules. */
     isBlockedAtWorld: (wx, wz, foot = false) => { footRules = foot; const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
     /**

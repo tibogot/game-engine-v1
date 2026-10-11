@@ -377,6 +377,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const spacing = Math.max(6, maxR * 2.6);
     const cols = Math.ceil(Math.sqrt(arr.length));
 
+    let anchors = null;   // each slot's squad spot (the CoH spot search starts there)
     let slots = arr.map((_, i) => {
       const gx = (i % cols) - (cols - 1) / 2;
       const gz = Math.floor(i / cols) - (cols - 1) / 2;
@@ -398,6 +399,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       const gSpace = Math.max(16, maxR * 4);
       const order = [];
       slots = [];
+      anchors = [];
       groups.forEach((g, gi) => {
         const cx = px + ((gi % gCols) - (gCols - 1) / 2) * gSpace;
         const cz = pz + (Math.floor(gi / gCols) - (Math.ceil(groups.length / gCols) - 1) / 2) * gSpace;
@@ -405,6 +407,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
           // A loose ring round the spot (the first man at its middle).
           const ring = k === 0 ? 0 : 2.6 + (k > 6 ? 2.6 : 0), a = k * 2.39996;
           slots.push({ x: cx + Math.cos(a) * ring, z: cz + Math.sin(a) * ring });
+          anchors.push({ x: cx, z: cz });
           order.push(m);
         });
       });
@@ -412,6 +415,25 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       arr.push(...order);
     }
     if (adjustSlots) slots = adjustSlots(slots, arr) ?? slots;
+    // COMPANY OF HEROES' SPOTS (2026-10-12, you: men stuck in a village; Jurney, "CoH Squad Formations
+    // Explained"): no spot is trusted as is. A short search (navGrid.nearestReachable, ~100 cells) runs
+    // from the CLICK to the squad's spot, then from the squad's spot to each man's (after the cover snap,
+    // so the preview shows it too): a spot inside a house or behind a wall becomes the nearest point the
+    // man can really walk to — the squad squeezes into a lane instead of pressing on a wall.
+    const nav = app.navGrid;
+    if (nav?.nearestReachable) {
+      const fixedAnchor = new Map();
+      slots = slots.map((sl, i) => {
+        const u = arr[i];
+        if (u.isAir) return sl;
+        const foot = !!u.type?.foot;
+        let a = anchors?.[i] ?? { x: px, z: pz };
+        const key = a.x + ',' + a.z + ',' + foot;
+        if (!fixedAnchor.has(key)) fixedAnchor.set(key, nav.nearestReachable(px, pz, a.x, a.z, { foot, maxNodes: 160 }) ?? a);
+        a = fixedAnchor.get(key);
+        return nav.nearestReachable(a.x, a.z, sl.x, sl.z, { foot }) ?? sl;
+      });
+    }
     return { arr, slots };
   }
 
@@ -458,7 +480,12 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         c = { x: u.position.x, z: u.position.z, foot, path: nav.findPath(u.position.x, u.position.z, hit.point.x, hit.point.z, { foot }) };
         shared.push(c);
       }
-      return c.path?.length ? [...c.path.slice(0, -1), { x: slot.x, z: slot.z }] : null;
+      if (!c.path?.length) return null;
+      // The last leg to the man's own spot straight only when nothing stands in the way (2026-10-12: it
+      // crossed a wall, he pressed on it); else he searches his own route.
+      const end = c.path.length > 1 ? c.path[c.path.length - 2] : c;
+      if (nav.hasLOS && !nav.hasLOS(end.x, end.z, slot.x, slot.z, { foot })) return null;
+      return [...c.path.slice(0, -1), { x: slot.x, z: slot.z }];
     };
 
     // Squads: each man to his own squad's spot (in the order built above).

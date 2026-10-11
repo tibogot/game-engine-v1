@@ -568,11 +568,16 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        from open ground into a wall (a tangent slide first); the escape walks BACK to his last open spot.
        MEASURED (8 rounds × 2 villages, 15 men, the same orders): stuck 20 → 5 (Ouled Ali), 7 → 1
        (dechra), in a wall 0 → 0, men still trapped a village later: several → none.
-       - [ ] STEP 4, CoH's formation spots: each man's spot (and the cover snap) through a short
-         "nearest reachable point" search (Jurney: 50-100 nodes from the leader); the final leg checked.
-       - [ ] STEP 5: the stuck ladder survives re-orders (combat re-orders every 0.5 s reset it).
+       - [x] STEP 4, CoH's formation spots (2026-10-12): navGrid.nearestReachable (a best-first search of
+         ~100 cells); selection.js formationAt: the click → the squad's spot → each man's (after the cover
+         snap, so the preview shows it); pathFor: the last leg straight only with a clear line.
+       - [x] STEP 5 (2026-10-12): units.js orderTo resets the stuck ladder only for a NEW destination
+         (> 3 m) — combat's 0.5 s re-orders no longer keep a man grinding on a wall.
+         MEASURED after 4 + 5 (same test): stuck 20 → 5 → 1 (Ouled Ali), 7 → 1 → 0 (dechra), walls 0.
        - [ ] STEP 6: per-cell clearance (no one-cell gaps for a 1 m man).
-       - [ ] An automated stuck test (the village orders above) in tools/, so it stays fixed.
+       - [x] tools/navPocketsTest.mjs (fast lane): a walled yard sealed, a spot in it moved to reachable
+         ground, an open spot kept exactly, a wire-closed yard sealed then open once cut, a 900 m² field
+         never sealed.
      - [x] THE COMMAND CARD OFF THE SCREEN (2026-10-12, your screenshot: the sappers' card, 17 buttons,
        ran ~90 px under the window): CoH's BUILD PAGE (ui/commandCard.js: one CONSTRUIRE button opens
        the buildings, RETOUR first; the sappers' lesson text says so) + a SAFETY NET: a card taller

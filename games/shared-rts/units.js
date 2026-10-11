@@ -291,11 +291,16 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
      */
     orderTo(tx, tz, shared = null) {
       if (type.isAir || !navGrid) { unit.moveTo(tx, tz); return; }
+      // A NEW destination (> 3 m from the last) starts the stuck ladder afresh; the SAME one re-sent
+      // (combat re-orders a chase every 0.5 s, attack-move whenever he stands) keeps it climbing — before
+      // (2026-10-12) every re-order reset it, and a man under fire ground on a wall forever.
+      const fresh = !hasGoal || arrived || Math.hypot(goal.x - tx, goal.z - tz) > 3;
       goal.set(tx, 0, tz); hasGoal = true;
       const path = shared ?? navGrid.findPath(pos.x, pos.z, tx, tz, { foot });
       if (path?.length) {
         waypoints.length = 0; waypoints.push(...path);
-        arrived = false; stuckT = 0; repathCd = 0; bestTgtDist = Infinity; escalation = 0;
+        arrived = false; repathCd = 0; bestTgtDist = Infinity;   // (progress is measured to the NEW path)
+        if (fresh) { stuckT = 0; escalation = 0; }
       }
       // else: no route — hold rather than drive through the obstacle.
     },
