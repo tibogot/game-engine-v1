@@ -557,16 +557,20 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      - [ ] CHECK: the grass blades fade 44-68 m from the camera (algGame FAR GRASS note) — from 102 m
        back, are the oases' blades only there zoomed in now? (not checked yet)
    - YOUR TRAINING-CAMP PASS (2026-10-11, beside CoH 3) — the findings, one line each:
-     - [~] THE POINTS' GROUND MARKS (CoH 3: dashed white until held, then a SOLID ring in the
-       holder's colour + a glowing disc at the centre; at the capture a wave of light runs out
-       from the centre and blue streaks rise). LAB first: algPointMarks.js (dashed ring that the
-       capturer's colour fills clockwise from the top, solid when held, the disc with a dashed
-       rim, the capture wave + flash + rising streaks, uniforms only) in the building lab,
-       "Point de ravitaillement" (the game's ring left, the new right; Point: Neutre / Capture
-       50 % / Tenu France / Tenu FLN / ▶ Capture). NEXT: your look → then the GAME: drape it
-       (terrainDrape.js), pool it (one draw for all points' rings, the discs, the bursts),
-       replace the villageRings in algUnits.js, fire capture() on an ownership change.
-     - [ ] THE POINT'S MODEL: the pole reads as an antenna — a sturdier mast, a base (sandbags /
+     - [x] THE SUPPLY POINTS, COH 3'S WAY — IN THE GAME (2026-10-12; the lab first, your passes):
+       algPointRings.js: every supply point's ring in ONE instanced draw, draped, ALWAYS shown (CoH):
+       dash-dot white → the leaning side's colour filling it (|value| / hold) → solid when held,
+       amber when cut off; the capture (2.4 s: flash, two waves, the disc swelling in then fading,
+       the light column, four thin lines) from a pool of 3 effect sets. algPointMarks.js builders
+       shared with the lab. algPointMast.js: a guyed 9 m mast AT THE CENTRE, the depot beside it
+       (algPointFlags, one instanced draw). supplyRadius 22 → 11 m (CoH's; algAI spots 4-10 m in).
+       Villages KEEP their own ring (only the requisition points — you). Measured, 13 points, max
+       zoom: 9.07 ms on / 8.97 ms off (noise). Checked in the training: fill, capture, ring only after.
+       - [ ] the oasis's tall grass hides parts of a ring (the Aïn Tighanimine well): clear the grass
+         inside a point's 11 m, or leave it?
+       - [ ] the held ring reads a lighter blue in the game than in the lab (the game's grade?).
+       - [ ] the villages' own look (CoH marks its victory points differently).
+     - [~] THE POINT'S MODEL (the supply MAST done 2026-10-12, algPointMast.js): the pole reads as an antenna — a sturdier mast, a base (sandbags /
        crates), guy ropes, the depot reading as fuel or ammunition; the villages' flagpole the same
        family; the floating icon (+5) checked at every zoom.
      - [x] BUG: "K to disembark doesn't work" (lesson 14, the half-track) — FIXED 2026-10-11

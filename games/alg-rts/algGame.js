@@ -31,6 +31,7 @@ import { createAlgWire } from "./algWire.js";
 import { createAlgFields } from "./algFields.js";
 import { createAlgVillageLife } from "./algVillageLife.js";
 import { createAlgPointFlags } from "./algPointFlags.js";
+import { createAlgPointRings } from "./algPointRings.js";
 import { createAlgHens } from "./algHens.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
@@ -577,6 +578,16 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.addPreRenderHook((dt) => app.algPointFlags.frame(dt, app.camera));
       console.log(`[point flags] ${JSON.stringify(app.algPointFlags.stats)}`);
     } catch (e) { console.warn("[alg point flags] failed:", e); }
+  }
+  // THE SUPPLY POINTS' RINGS (algPointRings.js, 2026-10-12 — CoH 3's, from the building lab): always
+  // shown, dash-dot white → the side's colour filling it → solid; the capture's flash, waves and
+  // light when one changes hands. One instanced draw. ?pointrings=0 = without.
+  if (params.get("pointrings") !== "0" && app.algEconomy) {
+    try {
+      app.algPointRings = createAlgPointRings(app, { economy: app.algEconomy });
+      app.addPreRenderHook((dt) => app.algPointRings.frame(dt));
+      console.log(`[point rings] ${JSON.stringify(app.algPointRings.stats)}`);
+    } catch (e) { console.warn("[alg point rings] failed:", e); }
   }
   if (app.algFields || app.algLandmarks) app.algCover?.bake();
   // GROUND CONTACT SHADE (algGroundContact.js): the ground darkened round every building, wall

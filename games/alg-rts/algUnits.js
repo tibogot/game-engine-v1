@@ -886,6 +886,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     villageRings.begin();
     const giving = selection.selected?.some((e) => isHuman(e.team) && !e.isStructure);
     for (const v of economy.allPoints) {
+      if (v.kind === "supply") continue;   // (supply points: their own rings, always shown — algPointRings.js, 2026-10-12)
       const R = v.radius;
       const busy = giving || units.list.some((u) => u.alive && !u.isAir && Math.abs(u.position.x - v.position.x) < R && Math.abs(u.position.z - v.position.z) < R && Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < R);
       // Held but cut off from the post (no supply line): amber, it pays nothing.

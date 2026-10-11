@@ -1126,8 +1126,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     const a = Math.atan2(c.z - v.position.z, c.x - v.position.x);
     let spot = null;
     for (let i = 0; i < 16 && !spot; i++) {
-      const sup = v.kind === "supply";   // a supply point's ring is 22 m, not 40
-      const r = (sup ? 6 : 12) + i * (sup ? 1 : 1.5), aa = a + (i % 2 ? 1 : -1) * i * 0.25;
+      const sup = v.kind === "supply";   // a supply point's ring is 11 m (CoH 3's, 2026-10-12), not 40: spots 4-10 m in
+      const r = (sup ? 4 : 12) + i * (sup ? 0.4 : 1.5), aa = a + (i % 2 ? 1 : -1) * i * 0.25;
       const x = v.position.x + Math.cos(aa) * r, z = v.position.z + Math.sin(aa) * r;
       if (!app.navGrid?.isBlockedAtWorld?.(x, z, true)) spot = { x, z };
     }

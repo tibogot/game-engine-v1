@@ -2,8 +2,9 @@
 // flags like the one in the base"; Company of Heroes' flagpoles). Every capture point stands
 // in the world:
 //   VILLAGES       a flagpole on the open ground nearest the village's centre;
-//   SUPPLY POINTS  a depot — fuel drums or ammunition crates (rtsAlgeria.js buildFuelDepot /
-//                  buildAmmoDump) — with its flagpole beside it.
+//   SUPPLY POINTS  a MAST at the point's centre (algPointMast.js: guyed steel, 9 m — CoH 3's,
+//                  2026-10-12) and the depot beside it — fuel drums or ammunition crates
+//                  (rtsAlgeria.js buildFuelDepot / buildAmmoDump); their rings: algPointRings.js.
 // The flag is the post's own cloth (the engine's Verlet flag, algFlag.js textures): the
 // TRICOLOUR when the point leans French, the FLN's when it leans ALN, and it RISES with the
 // capture — half way up at half the hold, at the top once held (CoH's flag). Neutral: a bare
@@ -17,11 +18,14 @@ import { createFlag } from "../../v3/props/liveProps.js";
 import { buildAmmoDump, buildFuelDepot } from "../../v3/render/objects/rtsAlgeria.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { kitView } from "./showroom.js";
+import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
 import { VIEW_YAW } from "./layout.js";
 
 const P = {
   village: { pole: 7, cloth: [2.1, 1.4] },
-  supply: { pole: 5, cloth: [1.6, 1.07] },
+  // A supply point: the MAST (algPointMast.js, 2026-10-12 — CoH 3's, at the point's centre; the thin
+  // 5 m pole "read as an antenna"): the flag runs up to just under its knob.
+  supply: { pole: 8.85, cloth: [1.6, 1.07], mast: 9 },
   simRange: 260,        // m from the camera: past it a flag doesn't wave
   low: 0.5,             // m: the cloth's foot at the bottom of its run
 };
@@ -34,6 +38,7 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
   // ── The depots (one InstancedMesh a kind) ─────────────────────────────────
   const depotGeo = { fuel: buildFuelDepot(), mun: buildAmmoDump() };
   const depotAt = { fuel: [], mun: [] };
+  const mastAt = [];   // the supply points' masts (one InstancedMesh, below)
   // Fronts toward the camera at three-quarters (your rule), the flag at the depot's back corner.
   const yaw = VIEW_YAW + 0.6;
   const c = Math.cos(yaw), s = Math.sin(yaw);
@@ -44,11 +49,15 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
     let fx = pt.position.x, fz = pt.position.z;
     const kind = pt.kind === "supply" ? "supply" : "village";
     if (kind === "supply") {
+      // THE MAST AT THE CENTRE (CoH 3's), the depot beside it — on the mast's local +x, the side
+      // its guy wires leave free (2026-10-12; the flag stood beside the depot before).
       const fp = depotGeo[pt.res].userData.footprint;
-      depotAt[pt.res].push({ x: pt.position.x, z: pt.position.z });
-      navGrid?.addFootprint?.(pt.position.x, pt.position.z, fp.hx, fp.hz, yaw);
-      app.clearVegetation?.(pt.position.x, pt.position.z, Math.max(fp.hx, fp.hz) + 1, { grass: Math.max(fp.hx, fp.hz), edge: 0.7 });
-      [fx, fz] = local(pt.position.x, pt.position.z, -fp.hx - 0.4, fp.hz * 0.6);
+      const [dx, dz] = local(pt.position.x, pt.position.z, fp.hx + 2.6, 0);
+      depotAt[pt.res].push({ x: dx, z: dz });
+      navGrid?.addFootprint?.(dx, dz, fp.hx, fp.hz, yaw);
+      app.clearVegetation?.(dx, dz, Math.max(fp.hx, fp.hz) + 1, { grass: Math.max(fp.hx, fp.hz), edge: 0.7 });
+      app.clearVegetation?.(pt.position.x, pt.position.z, 4.2, { grass: 2.5, edge: 0.7 });   // the mast and its guys
+      mastAt.push({ x: pt.position.x, z: pt.position.z });
     } else {
       // The open ground nearest the village's centre (its centre is often a roof).
       const o = navGrid?.nearestOpenWorld?.(fx, fz, true);
@@ -66,6 +75,7 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
     cloth.material.needsUpdate = true;
     cloth.visible = false;
     pole.material.color.set(0x5a5650);
+    if (kind === "supply") pole.visible = false;   // (the mast is the pole there)
     app.scene.add(flag.group);
     navGrid?.addObstacle?.(fx, fz, 0.4);
     flags.push({ pt, flag, cloth, top: K.pole - K.cloth[1], side: null, sphere: new THREE.Sphere(flag.group.position.clone().setY(flag.group.position.y + K.pole / 2), K.pole) });
@@ -79,6 +89,18 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), one = new THREE.Vector3(1, 1, 1);
     list.forEach((p, k) => mesh.setMatrixAt(k, m4.compose(new THREE.Vector3(p.x, H(p.x, p.z) - 0.06, p.z), q, one)));
     mesh.name = `SupplyDepot:${res}`;
+    mesh.castShadow = mesh.receiveShadow = true;
+    mesh.computeBoundingSphere();
+    app.scene.add(mesh);
+    meshes.push(mesh);
+  }
+  // THE MASTS: every supply point's in one draw, turned as its depot (its guy wires away from it).
+  if (mastAt.length) {
+    const mast = buildPointMast({ height: P.supply.mast, guyR: P.supply.mast * 0.4, away: Math.PI });
+    const mesh = new THREE.InstancedMesh(mast.geometry, pointMastMaterial(), mastAt.length);
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), one = new THREE.Vector3(1, 1, 1);
+    mastAt.forEach((p, k) => mesh.setMatrixAt(k, m4.compose(new THREE.Vector3(p.x, H(p.x, p.z) - 0.05, p.z), q, one)));
+    mesh.name = "SupplyMasts";
     mesh.castShadow = mesh.receiveShadow = true;
     mesh.computeBoundingSphere();
     app.scene.add(mesh);

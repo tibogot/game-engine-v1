@@ -41,7 +41,6 @@ import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 const POINT_KINDS = {
   mun: { R: 11, pole: 5, mast: 9, cloth: [1.6, 1.07], build: () => buildAmmoDump() },
   fuel: { R: 11, pole: 5, mast: 9, cloth: [1.6, 1.07], build: () => buildFuelDepot() },
-  village: { R: 11, pole: 7, mast: 11, cloth: [2.1, 1.4], build: () => buildMechtaHouse({}), poleAt: [-9, 7] },
 };
 const POINT = { game: null, neu: null, kind: null };
 function supplyPoint(which, kindKey = "mun") {
@@ -202,10 +201,6 @@ const BUILDINGS = {
     label: "Point : carburant", gap: POINT_KINDS.fuel.R + 3, before: () => supplyPoint("game", "fuel"), after: () => supplyPoint("new", "fuel"),
     tags: ["CARBURANT (LE JEU)", "CARBURANT · NOUVEAU"], note: "le dépôt de fûts — les marques du jeu à gauche, les nouvelles à droite.",
   },
-  pointVillage: {
-    label: "Point : village", gap: POINT_KINDS.village.R + 3, before: () => supplyPoint("game", "village"), after: () => supplyPoint("new", "village"),
-    tags: ["VILLAGE (LE JEU)", "VILLAGE · NOUVEAU"], note: "un village (40 m, le mât de 7 m) — compte au score, rapporte les trois ressources.",
-  },
 };
 
 /**
@@ -264,7 +259,7 @@ export async function startBuildingLab(container) {
       if (b) location.search = `?v=${key}&seed=${Math.max(0, SEED + Number(b.dataset.seed))}`;
     });
   }
-  if (["pointRavit", "pointCarbu", "pointVillage"].includes(new URLSearchParams(location.search).get("v"))) startPointPanel(lab, panel);
+  if (["pointRavit", "pointCarbu"].includes(new URLSearchParams(location.search).get("v"))) startPointPanel(lab, panel);
   // (`point`: the supply point's two sides, for stills of the capture from the console.)
   return Object.assign(lab, { setStone, point: POINT });
 }

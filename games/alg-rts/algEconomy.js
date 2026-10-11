@@ -98,7 +98,7 @@ const P = {
   link: 180,
   cache: 15,                              // per minute per standing arms cache (ALN)
   radius: 40,
-  supplyRadius: 22,                       // a supply point's capture ring
+  supplyRadius: 11,                       // a supply point's capture ring — CoH 3's 11 m (you, 2026-10-12; was 22)
   // Influence per second per man (up to 3): ~20 s from neutral with 3+.
   push: 0.01,
   drift: 0.005,                           // per second, nobody there: an unfinished capture back toward 0, a held point back to its holder
