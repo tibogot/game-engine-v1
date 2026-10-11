@@ -79,7 +79,7 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
     if (h.roofY == null) {
       // Once per house, the first time it is hit: a ray down onto its village.
       ray.set(from.set(h.x, 400, h.z), down);
-      const hit = ray.intersectObject(h.village, false)[0];
+      const hit = ray.intersectObject(h.village, true)[0];   // (recursive: a new-standard hamlet's houses are its children)
       h.roofY = hit ? hit.point.y : app.getWorldHeight(h.x, h.z) + 4;
     }
     return h.roofY;
@@ -123,7 +123,7 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
         for (; r < 10; r += 0.75) {
           const px = h.x + ux * r, pz = h.z + uz * r;
           ray.set(from.set(px, 400, pz), down);
-          const hit = ray.intersectObject(h.village, false)[0];
+          const hit = ray.intersectObject(h.village, true)[0];   // (recursive: a new-standard hamlet's houses are its children)
           if (!hit || hit.point.y < app.getWorldHeight(px, pz) + 0.6) break;
         }
         addRubble(h.x + ux * (r + 0.6), h.z + uz * (r + 0.6));

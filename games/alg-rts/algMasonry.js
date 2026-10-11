@@ -15,6 +15,7 @@
 import * as THREE from "three";
 import { abs, attribute, dot, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { grainSack as grainSackGeo } from "../../v3/render/objects/rtsAlgeria.js";
 
 // ── MATERIALS ───────────────────────────────────────────────────────────────────────────────────
 const BUILD = (id, m) => `/textures/build/${id}/${id}_${m}_1k.jpg`;
@@ -36,10 +37,11 @@ export const SURFACES = {
   // (warmed to the sandstone's colour: the Aurès build with the rock they stand on)
   stone: { url: BUILD, id: "rabdentse_ruins_wall", tile: 2.2, tint: [3.0, 2.15, 1.42], sat: 0.55, rough: 0.95, foot: 0.32 },
   // (the roofs: PACKED CLAY, beaten smooth and cracked dry — the gravelly mud read as a stony path)
-  earth: { url: GROUND, id: "mud_cracked_dry_03", tile: 1.5, tint: [0.6, 0.52, 0.42], sat: 0.7, rough: 1, foot: 0 },
+  earth: { url: GROUND, id: "mud_cracked_dry_03", tile: 1.5, tint: [0.52, 0.45, 0.36], sat: 0.7, rough: 1, foot: 0 },
   timber: { url: BUILD, id: "bark_willow_02", tile: 1.4, tint: [0.55, 0.46, 0.38], sat: 0.6, rough: 0.9, foot: 0 },
-  planks: { url: BUILD, id: "raw_plank_wall", tile: 1.9, tint: [0.68, 0.58, 0.48], sat: 0.55, rough: 0.85, foot: 0 },
-  reed: { url: BUILD, id: "reed_roof_04", tile: 2.0, tint: [0.48, 0.4, 0.29], sat: 0.6, rough: 1, foot: 0 },
+  // (darker: in a shadowed wall the pale planks caught the sky and glowed blue, like panes)
+  planks: { url: BUILD, id: "raw_plank_wall", tile: 1.9, tint: [0.4, 0.33, 0.26], sat: 0.55, rough: 0.97, foot: 0 },
+  reed: { url: BUILD, id: "reed_roof_04", tile: 1.0, tint: [0.36, 0.3, 0.21], sat: 0.6, rough: 1, foot: 0 },
   // (a pit's spoil, a berm: the gravelly dug earth)
   spoil: { url: GROUND, id: "brown_mud_dry", tile: 2.4, tint: [0.82, 0.7, 0.55], sat: 0.75, rough: 1, foot: 0 },
   hessian: { url: BUILD, id: "hessian_230", tile: 0.55, tint: [0.7, 0.58, 0.42], sat: 0.6, rough: 1, foot: 0 },
@@ -78,6 +80,7 @@ export function surfaceMaterial(kind) {
   // THE STONE'S WEAR (its geometry's `wear`: x = the mud plaster left on it, y = grime): the plaster
   // photo where it survives — its edge broken by the plaster's own grain, not a stencil — smoother
   // there (it fills the joints); the drains' streaks darker.
+  if (kind === "earth") col = col.mul(float(1).sub(attribute("wear", "vec2").x.mul(0.38)));
   if (kind === "stone") {
     const wear = attribute("wear", "vec2");
     const PD = photo(BUILD("clay_plaster", "diff"), true), pp = positionGeometry.div(1.8);
@@ -87,7 +90,12 @@ export function surfaceMaterial(kind) {
     const mask = smoothstep(0.36, 0.47, wear.x.add(lum.sub(0.42).mul(0.9)));   // (the wear averages ~0.25: a quarter of the walls plastered)
     // Its LIP: a coat has a thickness — a little darker where it ends on the stone.
     const lip = mask.mul(float(1).sub(mask)).mul(4);
-    col = mix(col, plaster, mask).mul(float(1).sub(lip.mul(0.28))).mul(float(1).sub(wear.y.mul(0.55)));
+    col = mix(col, plaster, mask).mul(float(1).sub(lip.mul(0.28))).mul(float(1).sub(wear.y.max(0).mul(0.55)));
+    // The limewash (wear.y < 0): white over the stone, the stones' relief still under it, its edge
+    // broken by the plaster's grain.
+    const limeMask = smoothstep(0.35, 0.6, wear.y.negate().add(lum.sub(0.45).mul(0.5)));
+    // (an old wash, warm: a clean white caught the sky in a shadowed wall and read as glass)
+    col = mix(col, vec3(0.62, 0.55, 0.44).mul(lum.mul(0.5).add(0.75)), limeMask);
     // The plaster's own relief (its photo's normal map), not the stones' under it.
     const PN = photo(BUILD("clay_plaster", "nor_gl")), uPX = vec2(pp.z, pp.y), uPY = vec2(pp.x, pp.z), uPZ = vec2(pp.x, pp.y);
     const tp = (uv) => texture(PN, uv).xyz.mul(2).sub(1);
@@ -106,7 +114,8 @@ export function surfaceMaterial(kind) {
   return mat;
 }
 let _dark = null;
-const darkMaterial = () => (_dark ??= new THREE.MeshBasicNodeMaterial({ color: 0x0a0806, name: "Masonry:dark" }));
+// (an opening's inside: a dim room, lit a little — pure black read as a hole cut in the picture)
+const darkMaterial = () => (_dark ??= new THREE.MeshStandardNodeMaterial({ color: 0x1d150e, roughness: 1, metalness: 0, name: "Masonry:dark" }));
 
 // ── NOISE (value noise; Math.imul — a float multiply lost the hash's bits) ───────────────────────
 function hash2(i, j, seed) {
@@ -156,7 +165,7 @@ function quads(list) {
 }
 /** Only position, normal (and the stone's `wear`), indexed: what mergeGeometries needs alike. */
 const strip = (g) => {
-  for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "wear") g.deleteAttribute(k);
+  for (const k of Object.keys(g.attributes)) if (k !== "position" && k !== "normal" && k !== "wear" && k !== "color") g.deleteAttribute(k);
   if (!g.index) g.setIndex([...Array(g.attributes.position.count).keys()]);
   return g;
 };
@@ -168,7 +177,7 @@ const strip = (g) => {
  * Returns geometries per surface ({ stone, earth, timber, planks, dark }) and its stone's WEAR
  * sources (where the plaster survives, where the drains streak it) — read per vertex below.
  */
-function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door = null, windows = [], spouts = [] }) {
+function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door = null, windows = [], spouts = [], lime = false }) {
   const fw = w - 2 * r, fd = d - 2 * r, arc = (Math.PI / 2) * r, L = 2 * fw + 2 * fd + 4 * arc;
   const segs = [
     { len: fw, f: (u) => [-w / 2 + r + u, -d / 2, 0, -1] },
@@ -258,25 +267,44 @@ function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door
   // low on the walls and round the door, where people pass and the render was renewed — and a dark
   // STREAK under each drain, down the front.
   const doorX = door ? cx + door.x : null;
-  const wearAt = (x, y, z) => {
+  const wearAt = (x, y, z, noLime = false) => {
     let p = noise2(x * 0.32 + z * 0.29, y * 0.42, seed + 11) * 0.5 + 0.5;
     p *= 1 - Math.min(1, Math.max(0, (y - h * 0.55) / (h * 0.5)));
     if (doorX != null && Math.abs(x - doorX) < 1.6 && z < front + 0.4 && y < 2.8) p += 0.45 * (1 - Math.abs(x - doorX) / 1.6);
     let g = 0;
     if (z < front + 0.35) for (const sx of spouts) g += Math.exp(-(((x - cx - sx) / 0.32) ** 2)) * Math.min(1, Math.max(0, (roofY - y) / 0.4)) * Math.max(0, 1 - (roofY - y) / 3.2);
+    // THE LIMEWASHED DOORWAY (the Chaouia houses' one bright thing, seen from afar): a white
+    // surround round the door, ragged at its edge (the noise), on the front only. wear.y < 0.
+    if (lime && !noLime && doorX != null && z < front + 0.12) {   // (the outer face only: on the door's reveals it read as a pale pane)
+      const ex = Math.abs(x - doorX) - (door.w / 2 + 0.62), ey = y - (door.h + 0.62);
+      const edge = Math.max(ex, ey) + noise2(x * 2.7, y * 2.7, seed + 31) * 0.12;
+      if (edge < 0) return [Math.min(1, p) * 0.3, -Math.min(1, -edge * 6)];
+    }
     return [Math.min(1, p), Math.min(1, g)];
   };
   const stone = [strip(outerG), strip(quads(cap)), strip(quads(innerFace)), strip(quads(reveal)), ...stoneExtra.map(strip)];
-  for (const g of stone) {
+  // (The limewash on the OUTER WALL only — stone[0]: on a reveal it read as a pale pane.)
+  stone.forEach((g, gi) => {
     const p = g.attributes.position, wear = new Float32Array(p.count * 2);
-    for (let i = 0; i < p.count; i++) { const [a, b] = wearAt(p.getX(i), p.getY(i), p.getZ(i)); wear[i * 2] = a; wear[i * 2 + 1] = b; }
+    for (let i = 0; i < p.count; i++) { const [a, b] = wearAt(p.getX(i), p.getY(i), p.getZ(i), gi !== 0); wear[i * 2] = a; wear[i * 2 + 1] = b; }
     g.setAttribute("wear", new THREE.BufferAttribute(wear, 2));
-  }
+  });
   return {
-    stone, earth: [strip(roof)], timber: timber.map(strip),
+    stone, earth: [withStains(strip(roof), seed)], timber: timber.map(strip),
     planks: planks.length ? [strip(quads(planks))] : [], dark: dark.length ? [strip(quads(dark))] : [],
     roofY, top: h + 0.42, front,
   };
+}
+
+/** The earth's wear (x: a stain — older, darker clay — in patches; y: unused): every earth geometry has it. */
+function withStains(g, seed) {
+  const p = g.attributes.position, wear = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i++) {
+    const v = noise2(p.getX(i) * 0.45, p.getZ(i) * 0.45, seed + 21) * 0.5 + 0.5, v2 = noise2(p.getX(i) * 1.6, p.getZ(i) * 1.6, seed + 22) * 0.5 + 0.5;
+    wear[i * 2] = Math.min(1, Math.max(0, v * 1.4 - 0.45) + Math.max(0, v2 - 0.75));
+  }
+  g.setAttribute("wear", new THREE.BufferAttribute(wear, 2));
+  return g;
 }
 
 /** Pieces of timber: a LADDER leaning from (x, z0) on the ground to the wall at z1, its top at y1. */
@@ -302,7 +330,19 @@ function firewood(x, y, z, yaw, seed) {
 }
 
 // ── A SITE: pieces add geometry per surface; the site merges it (one mesh per surface) ──────────
-export const newSite = () => ({ stone: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], dark: [] });
+export const newSite = () => ({ stone: [], earth: [], spoil: [], timber: [], planks: [], reed: [], hessian: [], metal: [], cloth: [], dark: [] });
+let _cloth = null;
+/** Cloth (laundry, rugs): its colour per vertex — white, indigo, madder red, ochre. */
+const clothMaterial = () => (_cloth ??= new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.95, metalness: 0, name: "Masonry:cloth" }));
+const CLOTH = [[0.82, 0.8, 0.74], [0.2, 0.24, 0.42], [0.55, 0.16, 0.12], [0.7, 0.52, 0.22], [0.78, 0.74, 0.62]];
+/** A cloth (thin box) of one colour. */
+function cloth(w, h, d, col) {
+  const g = new THREE.BoxGeometry(w, h, d);
+  const n = g.attributes.position.count, c = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) c.set(col, i * 3);
+  g.setAttribute("color", new THREE.BufferAttribute(c, 3));
+  return g;
+}
 let _metal = null;
 const metalMaterial = () => (_metal ??= new THREE.MeshStandardNodeMaterial({ color: 0x2b2a27, roughness: 0.55, metalness: 0.55, name: "Masonry:metal" }));
 /** The site's meshes: one per surface (the materials shared by every site). */
@@ -316,7 +356,7 @@ export function siteGroup(site, name = "Site") {
     if (!g) { console.warn(`[masonry] ${name}:${kind} did not merge`); continue; }
     g.computeBoundingSphere();
     tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
-    const m = new THREE.Mesh(g, kind === "dark" ? darkMaterial() : kind === "metal" ? metalMaterial() : surfaceMaterial(kind));
+    const m = new THREE.Mesh(g, kind === "dark" ? darkMaterial() : kind === "metal" ? metalMaterial() : kind === "cloth" ? clothMaterial() : surfaceMaterial(kind));
     m.name = `${name}:${kind}`;
     m.castShadow = kind !== "dark";
     m.receiveShadow = true;
@@ -354,4 +394,185 @@ export function buildStoneHouse({ seed = 1 } = {}) {
   addStoneHouse(site, { seed });
   const { group, tris } = siteGroup(site, "StoneHouse");
   return { group, tris, footprint: { cx: 2.3, cz: 0.5, hx: 8.6, hz: 4.2 } };
+}
+
+// ── THE MECHTA, NEW STANDARD (2026-10-11, you: "let's start the mechta in the lab") ──────────────
+// The Chaouia house of the Aurès hamlets (rtsMechta.js's, the kit's), rebuilt from the same pieces
+// as the PC: dry-stone walls with their wear, a packed-clay terrace inside a broken parapet, beam ends
+// under it, a low door in a timber frame, small openings high up; some with an UPPER ROOM open on a
+// loggia (Ghoufi), some with a LEAN-TO of reed on poles behind low dry walls; firewood on a roof.
+
+/** A small seeded stream (the house's own: the village's layout never shifts). */
+function stream(seed) { let s = (seed * 9301 + 49297) >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
+
+/** Move every geometry of a local site into `site`, turned by `yaw` about Y and set at (x, y, z). */
+function placeInto(site, local, x, z, yaw, y = 0) {
+  const m = new THREE.Matrix4().makeRotationY(yaw).setPosition(x, y, z);
+  for (const [k, list] of Object.entries(local)) for (const g of list) { g.applyMatrix4(m); site[k].push(g); }
+}
+/** Push a stoneBlock's surfaces into a local site, lifted by `y`. */
+function addBlock(local, b, y = 0) {
+  for (const k of Object.keys(local)) if (Array.isArray(b[k])) for (const g of b[k]) { if (y) g.translate(0, y, 0); local[k].push(g); }
+  return b;
+}
+
+/**
+ * A DRY-STONE WALL from a to b (x/z, metres), `h` high, 0.55 thick: a box cut into a grid, every
+ * vertex pushed by a noise of its own position (shared corners move together), the top wandering,
+ * leaning in as it rises — on the stone surface (its wear: none).
+ */
+export function dryWall(a, b, h = 1.4, seed = 1, t = 0.55) {
+  const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+  const g = new THREE.BoxGeometry(len, h, t, Math.max(2, Math.round(len / 0.45)), Math.max(2, Math.round(h / 0.35)), 2);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), f = (y + h / 2) / h;
+    const top = y > h / 2 - 1e-4 ? noise2(x * 0.7, 3.3, seed) * 0.12 : 0;
+    p.setXYZ(i, x + noise2(y * 2, z * 3 + 5, seed) * 0.03, y + top, z * (1 - 0.18 * f) + noise2(x * 1.7, y * 2.1, seed) * 0.05);
+  }
+  g.translate(0, h / 2 - 0.08, 0);
+  g.rotateY(-Math.atan2(b[1] - a[1], b[0] - a[0]));
+  g.translate((a[0] + b[0]) / 2, 0, (a[1] + b[1]) / 2);
+  g.computeVertexNormals();
+  const s = strip(g);
+  s.setAttribute("wear", new THREE.BufferAttribute(new Float32Array(s.attributes.position.count * 2), 2));
+  return s;
+}
+
+/** THE TABOUNA: a domed clay oven, its dark mouth, a flat stone before it. */
+export function addOven(site, x, z, yaw) {
+  const dome = new THREE.SphereGeometry(0.78, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2);
+  dome.scale(1, 0.92, 1).rotateY(yaw).translate(x, -0.05, z);
+  site.spoil.push(dome);
+  site.dark.push(new THREE.PlaneGeometry(0.38, 0.32).translate(0, 0.2, 0.765).rotateY(yaw).translate(x, 0, z));
+}
+
+/**
+ * ONE VILLAGE HOUSE into `site`. (x, z): its centre; `yaw` turns it (its door looks down its local
+ * −Z); w × d × h its walls (world metres). Returns its door (world) and walls' box for a garrison.
+ */
+export function addMechtaHouse(site, { x = 0, z = 0, yaw = 0, w = 7.5, d = 5.6, h = 3.4, storey2 = false, leanTo = null, seed = 1 } = {}) {
+  const R = stream(seed);
+  const local = newSite();
+  const dx = (R() - 0.5) * (w - 2.4);
+  const winX = dx > 0 ? -w * 0.3 : w * 0.3;
+  const low = addBlock(local, stoneBlock({
+    w, d, h, t: 0.5, r: 0.38, seed,
+    door: { x: dx, w: 0.95, h: 1.85 }, windows: R() < 0.8 ? [{ x: winX, w: 0.44, y: h - 0.95, h: 0.36 }] : [],
+    spouts: R() < 0.7 ? [dx > 0 ? -w * 0.32 : w * 0.34] : [], lime: R() < 0.7,
+  }));
+  // LIFE ON THE ROOF (the kit's houses had it, and it read): sacks, jars, a laundry line, a rug
+  // over the parapet. The upper room's side is kept clear.
+  {
+    const ry = low.roofY + 0.05, rw = w / 2 - 0.9, rd = d / 2 - 0.8;
+    const at = () => [(R() - 0.5) * 2 * rw * (storey2 ? 0.5 : 1) + (storey2 ? -Math.sign(dx || 1) * rw * 0.4 : 0), (R() - 0.5) * 2 * rd];
+    if (R() < 0.6) { const [ax, az] = at(); for (let k = 0; k < 2 + Math.floor(R() * 2); k++) local.hessian.push(grainSackGeo(0.7, 0.36, 0.48, seed + k).rotateY(R() * 3).translate(ax + k * 0.55, ry, az + (R() - 0.5) * 0.4)); }
+    if (R() < 0.6) { const [ax, az] = at(); for (let k = 0; k < 1 + Math.floor(R() * 3); k++) local.spoil.push(new THREE.SphereGeometry(0.24, 10, 7).scale(1, 1.3, 1).translate(ax + k * 0.45, ry + 0.28, az)); }
+    if (R() < 0.55) {
+      const [ax, az] = at(), len = 2.2 + R() * 1.2, yy = ry + 1.35;
+      for (const e of [-len / 2, len / 2]) local.timber.push(new THREE.CylinderGeometry(0.035, 0.04, 1.4, 5).translate(ax + e, ry + 0.7, az));
+      // The line itself (cloth hung on nothing read as floating panes from above), and the cloths
+      // the dyed colours — white sheets glared as glass at the RTS camera.
+      local.timber.push(new THREE.CylinderGeometry(0.012, 0.012, len, 4).rotateZ(Math.PI / 2).translate(ax, yy, az));
+      for (let k = 0; k < 3; k++) local.cloth.push(cloth(0.36 + R() * 0.2, 0.42 + R() * 0.2, 0.02, CLOTH[1 + Math.floor(R() * 3)]).translate(ax - len / 2 + 0.4 + k * (len - 0.8) / 2, yy - 0.26, az));
+    }
+    // (No rug over the parapet: its broken top left a draped box floating or sunk — seen close.)
+  }
+  // THE UPPER ROOM: set back on part of the roof, open to the front on a loggia (a wide opening,
+  // its dark room behind), its own roof and beams.
+  if (storey2) {
+    const w2 = Math.max(3.4, w * 0.58), d2 = d * 0.78, h2 = 2.4, ox = ((w - w2) / 2 - 0.15) * (R() < 0.5 ? -1 : 1);
+    const up = addBlock(local, stoneBlock({
+      cx: ox, cz: d * 0.08, w: w2, d: d2, h: h2, t: 0.42, r: 0.28, seed: seed + 3,
+      windows: [{ x: 0, w: w2 - 1.3, y: 0.35, h: h2 - 0.85 }], spouts: [],
+    }), low.roofY - 0.02);
+    // The loggia's POSTS and their beam, in the opening's depth (Ghoufi: the upper room on posts).
+    const y0 = low.roofY - 0.02 + 0.35, hh = h2 - 0.85, zf = up.front + 0.16, half = (w2 - 1.3) / 2;
+    const np = Math.max(2, Math.round((w2 - 1.3) / 1.1));
+    for (let k = 1; k < np; k++) local.timber.push(new THREE.CylinderGeometry(0.08, 0.09, hh, 7).translate(ox - half + (k * 2 * half) / np, y0 + hh / 2, zf));
+    local.timber.push(new THREE.BoxGeometry(2 * half + 0.2, 0.16, 0.18).translate(ox, y0 + hh - 0.08, zf));
+  }
+  // THE LEAN-TO at one end: low dry walls, two poles, a reed roof sloping off the house.
+  const lt = leanTo ?? R() < 0.45;
+  let lean = null;
+  if (lt) {
+    const lw = 2.6 + R() * 0.8, side = R() < 0.5 ? -1 : 1, ex = side * (w / 2 + lw / 2 - 0.1);
+    lean = { ex, lw };
+    local.stone.push(dryWall([ex - lw / 2, d / 2 - 0.3], [ex + lw / 2, d / 2 - 0.3], 1.25, seed + 11));
+    local.stone.push(dryWall([ex + side * (lw / 2 - 0.25), d / 2 - 0.3], [ex + side * (lw / 2 - 0.25), -d / 2 + 0.6], 1.15, seed + 12));
+    for (const pz of [-d / 2 + 0.55, d / 2 - 0.55]) local.timber.push(new THREE.CylinderGeometry(0.07, 0.09, 2.2, 7).translate(ex + side * (lw / 2 - 0.2), 1.1, pz));
+    // Its roof: poles laid side by side across, sloping off the house (the reed photo read as boards).
+    for (let zp = -d / 2 + 0.05; zp < d / 2; zp += 0.17) {
+      local.timber.push(new THREE.CylinderGeometry(0.075, 0.08, lw + 0.5, 6).rotateZ(Math.PI / 2 + side * 0.2 + (R() - 0.5) * 0.04).translate(ex + side * 0.05, 2.18 + (R() - 0.5) * 0.04, zp));
+    }
+  }
+  // What lies on a roof: firewood for the oven, now and then; a ladder up the front.
+  if (R() < 0.5) local.timber.push(...firewood((R() - 0.5) * w * 0.4, low.roofY + 0.06, (R() - 0.5) * d * 0.3, R() * 3, seed));
+  if (!storey2 && R() < 0.35) local.timber.push(...ladder(dx + (dx > 0 ? -1.4 : 1.4), low.front - 1.05, low.front - 0.1, low.top + 0.3));
+  placeInto(site, local, x, z, yaw);
+  const c = Math.cos(yaw), s = Math.sin(yaw), dz = -d / 2 - 1.2;
+  return { x, z, yaw, w, d, lean, door: [x + dx * c + dz * s, z - dx * s + dz * c] };
+}
+
+/** One village house on its own (the buildings lab): a loggia and a lean-to. */
+export function buildMechtaHouseV2({ seed = 7 } = {}) {
+  const site = newSite();
+  addMechtaHouse(site, { w: 8.3, d: 6.2, h: 3.6, storey2: true, leanTo: true, seed });
+  const { group, tris } = siteGroup(site, "Mechta");
+  return { group, tris };
+}
+
+// ── THE HAMLET, NEW STANDARD: rtsMechta buildMechta's arrangement on the new houses ─────────────
+/**
+ * A hamlet of `count` houses in attached rows either side of a lane (the lane along +Z through the
+ * origin, the doors on it), yards walled in dry stone behind some, an oven in a few — the kit's
+ * layout (rtsMechta.js) at the game's scale, every house addMechtaHouse. Returns the CARRIER the game
+ * reads (geometry.userData: footprint, houses, navRects, coverLines) with the hamlet as its `extra`.
+ */
+export function buildMechtaV2({ seed = 1954, count = 10 } = {}) {
+  const K = 1.3, R = stream(seed), site = newSite();
+  const houses = [], nav = [], cover = [];
+  const rectOf = (x, z, w, d, yaw, m = 1.15) => {
+    const c = Math.abs(Math.cos(yaw)), s = Math.abs(Math.sin(yaw));
+    return { cx: x, cz: z, hx: (c * w) / 2 + (s * d) / 2 + m, hz: (s * w) / 2 + (c * d) / 2 + m };
+  };
+  let zL = -count * 3.2 * K, zR = (-count * 3.2 + 2.5) * K;
+  for (let i = 0; i < count; i++) {
+    const side = i % 2 === 0 ? -1 : 1;
+    const w = (4.5 + R() * 3.5) * K, d = (3.8 + R() * 1.8) * K, h = (2.5 + R() * 0.9) * K;
+    const zc = (side < 0 ? zL : zR) + w / 2, xc = side * (2.6 * K + d / 2 + R() * 0.5 * K);
+    const yaw = side * Math.PI / 2 + (R() - 0.5) * 0.06;
+    const hh = addMechtaHouse(site, { x: xc, z: zc, yaw, w, d, h, storey2: R() < 0.35, seed: seed * 31 + i * 7 });
+    houses.push(hh);
+    const r = rectOf(xc, zc, w, d, yaw);
+    nav.push(r);
+    cover.push({ hard: true, pts: [[r.cx - r.hx + 1.15, r.cz - r.hz + 1.15], [r.cx + r.hx - 1.15, r.cz - r.hz + 1.15], [r.cx + r.hx - 1.15, r.cz + r.hz - 1.15], [r.cx - r.hx + 1.15, r.cz + r.hz - 1.15], [r.cx - r.hx + 1.15, r.cz - r.hz + 1.15]] });
+    if (hh.lean) { const lx = xc + hh.lean.ex * Math.cos(yaw), lz = zc - hh.lean.ex * Math.sin(yaw); nav.push(rectOf(lx, lz, hh.lean.lw, d, yaw, 0.6)); }
+    const gap = R() < 0.25 ? (1.8 + R()) * K : 0.05;
+    if (side < 0) zL += w + gap; else zR += w + gap;
+    // A YARD behind some: three dry-stone walls, an oven in half of them.
+    if (R() < 0.6) {
+      const back = side * (3.2 * K + d + 1.2), far = back + side * (5 + R() * 3) * K;
+      const runs = [[[back, zc - w / 2], [far, zc - w / 2]], [[far, zc - w / 2], [far, zc + w / 2]], [[far, zc + w / 2], [back, zc + w / 2]]];
+      runs.forEach(([a, b], k) => {
+        site.stone.push(dryWall(a, b, 1.35 + R() * 0.3, seed + i * 5 + k));
+        nav.push({ cx: (a[0] + b[0]) / 2, cz: (a[1] + b[1]) / 2, hx: Math.abs(b[0] - a[0]) / 2 + 1.2, hz: Math.abs(b[1] - a[1]) / 2 + 1.2 });
+        cover.push({ hard: true, pts: [a, b] });
+      });
+      if (R() < 0.5) addOven(site, (back + far) / 2, zc + (R() - 0.5) * 2, R() * 6);
+    }
+  }
+  const { group, tris } = siteGroup(site, "Hamlet");
+  const bb = new THREE.Box3();
+  group.traverse((o) => { if (o.isMesh) { o.geometry.computeBoundingBox(); bb.union(o.geometry.boundingBox); } });
+  const carrier = new THREE.BufferGeometry();
+  carrier.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+  carrier.setIndex([0, 1, 2]);
+  Object.assign(carrier.userData, {
+    footprint: { cx: (bb.min.x + bb.max.x) / 2, cz: (bb.min.z + bb.max.z) / 2, hx: (bb.max.x - bb.min.x) / 2, hz: (bb.max.z - bb.min.z) / 2 },
+    houses: houses.map((h) => ({ door: h.door, x: h.x, z: h.z, w: h.w, d: h.d, yaw: h.yaw })),
+    navRects: nav, coverLines: cover, coverPerimeter: false, height: 6 * K, tris,
+    extra: [group], labMaterial: new THREE.MeshBasicMaterial({ visible: false }),
+  });
+  return carrier;
 }

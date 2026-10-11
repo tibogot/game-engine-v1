@@ -24,6 +24,7 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
+import { buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
 const BASE = { ...LAYOUT.sites.find((s) => s.kind === "french") };
@@ -85,6 +86,7 @@ function fromBase(lx, lz, site = BASE) {
 
 const ALN_SITE = { ...ALN, yaw: siteYaw(ALN) };
 const CAVE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("cave") === "old";
+const VILLAGE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("village") === "old";
 const CAMP_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("camp") === "old";
 
 /**
@@ -184,8 +186,9 @@ export const SHOWROOM = [
   ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
-  at(HAMLET_SITE, (s) => ({ key: "mechta", build: buildMechta, x: s.x, z: s.z, yaw: s.yaw })),
-  at(H2, (s) => ({ key: "mechta2", build: () => buildMechta({ seed: 1957, count: 7 }), x: s.x, z: s.z, yaw: s.yaw })),
+  // (The new standard, 2026-10-11: algMasonry buildMechtaV2 — ?village=old = the kit's, A/B.)
+  at(HAMLET_SITE, (s) => ({ key: "mechta", build: VILLAGE_OLD ? buildMechta : () => buildMechtaV2(), x: s.x, z: s.z, yaw: s.yaw })),
+  at(H2, (s) => ({ key: "mechta2", build: () => (VILLAGE_OLD ? buildMechta : buildMechtaV2)({ seed: 1957, count: 7 }), x: s.x, z: s.z, yaw: s.yaw })),
   at(HAMLET_SITE, (s) => { const [x, z] = fromBase(SAS_POST.lx, SAS_POST.lz, s); return { key: SAS_POST.key, build: SAS_POST.build, x, z, yaw: s.yaw + SAS_POST.yaw, rim: 6 }; }),
   // THE DECHRA, its koubba and cemetery on the crest, wells and zeribas at
   // the villages (rtsAlgVillage.js). `ground`: built on the real slope.

@@ -14,7 +14,8 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { buildMortarPit } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildStoneHouse } from "./algMasonry.js";
+import { buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
+import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import * as THREE from "three";
 import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
@@ -77,6 +78,17 @@ const BUILDINGS = {
     tags: ["MAISON (KIT DU JEU)", "PIERRE · NOUVEAU"], note: "la maison du jeu à gauche, la maison en pierre du nouveau standard à droite.",
   },
   // THE MORTAR PIT (same day): the game's on the LEFT, the new standard's on the RIGHT.
+  // THE MECHTA (2026-10-11): the lab's best kit house (detail 2) on the LEFT, the new standard RIGHT.
+  mechtaPierre: {
+    label: "Mechta (nouveau)", gap: 8, before: () => buildMechtaHouse({ detail: 2 }),
+    after: () => { const { group } = buildMechtaHouseV2({ seed: 7 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [group]; return g; },
+    tags: ["MECHTA (KIT, DÉTAIL 2)", `MECHTA · NOUVEAU · variante ${SEED + 1}`], note: "la maison du kit à gauche, la nouvelle à droite.",
+  },
+  // THE HAMLET (same day): the game's on the LEFT, the new standard's on the RIGHT.
+  hameau: {
+    label: "Hameau (nouveau)", gap: 26, before: () => buildMechta(), after: () => buildMechtaV2(),
+    tags: ["HAMEAU (LE JEU)", "HAMEAU · NOUVEAU"], note: "le hameau du jeu à gauche, le nouveau à droite.",
+  },
   mortier: {
     label: "Fosse de mortier", gap: 7, before: () => buildMortarPit(), after: () => buildMortarPitV2(),
     tags: ["MORTIER (LE JEU)", "MORTIER · NOUVEAU"], note: "la fosse du jeu à gauche, la nouvelle à droite.",

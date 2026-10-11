@@ -536,6 +536,18 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        figures — no draw of their own; removeStaticFigures added: gone when it falls). The ghost gets
        the pit's shape (userData.ghost); each copy clones the shared extras (kitView).
      - [ ] the crew could crouch / load on each shot (the barrage); camouflage net option.
+     - [x] TEXTURES PACKED (tools/packBuildingTextures.py): no roughness maps, normals 512 px: 14.2 → 2.9 MB.
+     - [x] THE HAMLETS on the new standard (2026-10-11, algMasonry addMechtaHouse / buildMechtaV2;
+       lab "Mechta (nouveau)" + "Hameau (nouveau)"; ?village=old = the kit's): the kit's layout
+       (attached rows on a lane, yards, ovens) at the game's scale, each house a stoneBlock — some
+       with an upper room on a LOGGIA (posts and beam), some a LEAN-TO of laid poles behind dry walls
+       (dryWall), roof life (sacks, jars, a laundry line on its cord, dyed cloths), firewood,
+       ladders; LIMEWASH round some doors (wear.y < 0; outer wall only — on the reveals it read as a
+       pale pane, found by hiding meshes in turn); roof STAINS (earth wear); planks darker. The
+       garrison (10 + 7 houses), civilians (22), damage raycast (recursive now) all read it.
+       ~72k tris a hamlet in 9 meshes; GPU −0.18 ms with it hidden (framed). Console clean.
+     - [ ] the hamlets in the GAME read dark: the light at that hour and the shadowed lane side (the
+       old ones are as dark — ?village=old); judge in a playtest; maybe a warmer stone tint.
      - [ ] the building textures are 14 MB of JPG: compress (KTX2 / smaller normal maps) before
        shipping; then the same standard for the cave's props, the mechtas, the post.
    - [ ] NEXT: playtest it by hand (is Normal fair?); the French don't use sapeurs to build, nor
