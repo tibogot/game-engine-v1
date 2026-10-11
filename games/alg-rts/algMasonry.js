@@ -203,11 +203,18 @@ function stoneBlock({ cx = 0, cz = 0, w, d, h, t = 0.62, r = 0.5, seed = 1, door
   if (door) addHole(door.x, door.w, 0, door.h, "door");
   for (const wn of windows) addHole(wn.x, wn.w, wn.y, wn.h, "window");
   const sCols = new Set();
-  for (let s = 0; s < L; s += 0.28) sCols.add(+s.toFixed(4));
+  // COLUMNS (2026-10-11, the optimisation pass: 0.28 m everywhere was 62k triangles a hamlet for a
+  // bulge that is gentle): ~0.7 m along the straight runs, 4 steps round each corner's arc.
+  { let s0 = 0;
+    for (const g of segs) {
+      const n = g.len === arc ? 4 : Math.max(1, Math.round(g.len / 0.7));
+      for (let k = 0; k < n; k++) sCols.add(+(s0 + (g.len * k) / n).toFixed(4));
+      s0 += g.len;
+    } }
   for (const o of holes) { sCols.add(+o.s0.toFixed(4)); sCols.add(+o.s1.toFixed(4)); }
   const S_ = [...sCols].sort((a, b) => a - b);
   const yRows = new Set([-0.3]);
-  for (let y = 0; y < h; y += 0.32) yRows.add(+y.toFixed(4));
+  for (let y = 0; y < h; y += 0.6) yRows.add(+y.toFixed(4));   // (0.32 before the pass)
   for (const o of holes) { yRows.add(+o.y0.toFixed(4)); yRows.add(+o.y1.toFixed(4)); }
   yRows.add(h);
   const Y_ = [...yRows].sort((a, b) => a - b);
@@ -346,9 +353,19 @@ function cloth(w, h, d, col) {
 let _metal = null;
 const metalMaterial = () => (_metal ??= new THREE.MeshStandardNodeMaterial({ color: 0x2b2a27, roughness: 0.55, metalness: 0.55, name: "Masonry:metal" }));
 /** The site's meshes: one per surface (the materials shared by every site). */
+// THE DETAIL LEVEL (2026-10-11, the optimisation pass, you: "be very careful they are perfectly
+// optimized — maybe LOD"): the SMALL things — sacks, jars, laundry, metal — in a THREE.LOD that
+// shows them only within DETAIL_FAR of the camera, and never in the sun's shadow pass (the LOD picks
+// its level per camera: the shadow camera is far, so they never cast — a sack's shadow is noise).
+// The buildings (stone, earth, timber, planks) stay at every distance: from the RTS camera a house is
+// always on screen as a house.
+export const DETAIL_FAR = 70;
+const DETAIL = new Set(["hessian", "cloth", "metal", "spoil"]);
 export function siteGroup(site, name = "Site") {
   const group = new THREE.Group();
   group.name = name;
+  const detail = new THREE.Group();
+  detail.name = `${name}:detail`;
   let tris = 0;
   for (const [kind, list] of Object.entries(site)) {
     if (!list.length) continue;
@@ -360,7 +377,14 @@ export function siteGroup(site, name = "Site") {
     m.name = `${name}:${kind}`;
     m.castShadow = kind !== "dark";
     m.receiveShadow = true;
-    group.add(m);
+    (DETAIL.has(kind) ? detail : group).add(m);
+  }
+  if (detail.children.length) {
+    const lod = new THREE.LOD();
+    lod.name = `${name}:lod`;
+    lod.addLevel(detail, 0);
+    lod.addLevel(new THREE.Object3D(), DETAIL_FAR);
+    group.add(lod);
   }
   return { group, tris };
 }
@@ -423,7 +447,7 @@ function addBlock(local, b, y = 0) {
  */
 export function dryWall(a, b, h = 1.4, seed = 1, t = 0.55) {
   const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
-  const g = new THREE.BoxGeometry(len, h, t, Math.max(2, Math.round(len / 0.45)), Math.max(2, Math.round(h / 0.35)), 2);
+  const g = new THREE.BoxGeometry(len, h, t, Math.max(2, Math.round(len / 0.9)), 2, 1)   // (the pass: was every 0.45 m by 0.35 m);
   const p = g.attributes.position;
   for (let i = 0; i < p.count; i++) {
     const x = p.getX(i), y = p.getY(i), z = p.getZ(i), f = (y + h / 2) / h;

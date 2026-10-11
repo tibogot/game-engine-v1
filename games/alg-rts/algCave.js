@@ -47,7 +47,7 @@ const LAYOUT = [
 const { label: _l, ...BLOCK } = SANDSTONE_SHAPES.block;
 export const PEBBLE = (seed) => ({
   ...BLOCK, seed, sizeX: 0.34, sizeY: 0.21, sizeZ: 0.27, chips: 14, bigCuts: 2, strata: 2, joints: 1, undercut: 0.06,
-  detail: 24, targetTriangles: 240, simplifyError: 0.06,   // (the error lets it reach ~260: at 0.005 a pebble kept 2100)
+  detail: 20, targetTriangles: 120, simplifyError: 0.1,   // (the pass: 240 → 120 — a 30 cm stone)   // (the error lets it reach ~260: at 0.005 a pebble kept 2100)
 });
 /** A pebble placed (kit metres; the result in the scaled world, as the rocks). */
 export function pebble(m, q, e, rnd, x, y, z, k = 1, yaw = rnd() * 6.3) {

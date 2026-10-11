@@ -546,6 +546,15 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        pale pane, found by hiding meshes in turn); roof STAINS (earth wear); planks darker. The
        garrison (10 + 7 houses), civilians (22), damage raycast (recursive now) all read it.
        ~72k tris a hamlet in 9 meshes; GPU −0.18 ms with it hidden (framed). Console clean.
+     - [x] OPTIMISATION PASS (2026-10-11, you: "perfectly optimized — maybe LOD"). MEASURED first:
+       the stone walls were 62k of a hamlet's 80k triangles (a 0.28 × 0.32 m grid for a gentle
+       bulge). Now: walls ~0.7 m columns on the straight runs + 4 steps per corner, 0.6 m rows; dry
+       walls 0.9 m × 2 rows; camp pebbles 240 → 120 tris. Hamlets 80k → 42k and 47k → 33k, camp
+       sandstone 75k → 54k; look unchanged at play zoom. DETAIL LOD (algMasonry siteGroup): sacks,
+       jars, cloth, metal in a THREE.LOD hidden beyond 70 m AND never in the sun's shadow pass (the
+       LOD picks per camera). GPU: all four new sites −0.02 ms ± 0.05 hidden (a hamlet framed) —
+       free on the GPU; build at boot 39 + 25 + 19 ms (two hamlets, the camp). No simplified far
+       LOD of the walls: not worth it at these costs (re-measure if a map has many more villages).
      - [ ] the hamlets in the GAME read dark: the light at that hour and the shadowed lane side (the
        old ones are as dark — ?village=old); judge in a playtest; maybe a warmer stone tint.
      - [ ] the building textures are 14 MB of JPG: compress (KTX2 / smaller normal maps) before
