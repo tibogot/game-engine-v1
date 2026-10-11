@@ -12,8 +12,11 @@
 //   2 select              a click or a box                     → a squad selected
 //   3 move                right-click to the marker            → men on it
 //   4 cover               V, behind the sandbags               → men in cover by the wall
+//   4b the sappers        build a sandbag wall (2026-10-11)    → a wall YOU placed, finished
 //   5 take the village    men in the mechta's circle           → held
+//   5b the houses         right-click a house, then K (Sortir) → in, then out (2026-10-11)
 //   6 supply              the depot on the track               → held (and linked)
+//   6b how to win         the score bar shown, the score runs  → the FLN's score down 2 (2026-10-11)
 //   7 attack              right-click an enemy                 → the three targets down
 //   8 assault             Ctrl + right-click toward the knoll  → its defenders down, men on top
 //   9 grenade             G on men dug in                      → a grenade thrown, them down
@@ -114,7 +117,7 @@ export function createAlgTutorial(app) {
   // 2. select
   L.push({
     title: t("Sélectionner"),
-    text: t("Cliquez sur un de vos soldats : tout son <b>groupe</b> est sélectionné (des cercles bleus sous les hommes, sa fiche en bas). Encadrer à la souris en sélectionne plusieurs."),
+    text: t("Cliquez sur un de vos soldats : tout son <b>groupe</b> est sélectionné (des cercles bleus sous les hommes, sa fiche en bas). Encadrer à la souris en sélectionne plusieurs. Plus tard : <kbd>Ctrl</kbd> + un chiffre garde une sélection, le chiffre la rappelle."),
     start() { const s = squads()[0]; if (s) app.rtsCamera?.focusOn(s.members[0].position.x, s.members[0].position.z); },
     done: () => (app.selection?.selected ?? []).some((u) => u.team === "player" && u.squad),
   });
@@ -138,6 +141,29 @@ export function createAlgTutorial(app) {
     done: (s) => squads().some((q) => q.members.filter((u) => near(u, s.m, 7) && (app.algCover?.coverAt?.(u.position.x, u.position.z) ?? 0) > 0.25).length >= 3),
     end(s) { markers.splice(markers.indexOf(s.m), 1); },
   });
+  // 4b. THE SAPPERS (2026-10-11, your review: "the sapper squad you start with — nothing says what
+  // it is for"): build your own cover. Done when a sandbag wall YOU placed is finished.
+  L.push({
+    title: t("Les sapeurs"),
+    text: t("Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Sacs de sable</b> sur leur fiche, puis posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>)."),
+    start(s) {
+      let q = squads().find((x) => x.typeKey === "sapeur");
+      if (!q) {   // (lost earlier: a fresh squad at the post's gate)
+        const men = [0, 1, 2].map((k) => units.spawn("sapeur", postSite.x + 10 + k * 1.5, postSite.z - 26, { team: "player" })).filter(Boolean);
+        S.adopt(men, "sapeur");
+        q = squads().find((x) => x.typeKey === "sapeur");
+      }
+      E.french.earn(app.algBuild?.costOf?.("sandbags") * 2 || 40);
+      s.seen = new Set(app.algBuild?.sites ?? []);   // the lessons' own walls: not the player's
+      s.mine = [];
+      if (q) { app.selection?.select(q.members); app.rtsCamera?.focusOn(q.members[0].position.x, q.members[0].position.z); }
+    },
+    tick(s) {
+      for (const site of app.algBuild?.sites ?? []) if (!s.seen.has(site)) { s.seen.add(site); if (site.team === "player" && site.key === "sandbags") s.mine.push(site); }
+    },
+    done: (s) => s.mine.some((site) => site.done),
+    sub: (s) => (s.mine.some((site) => site.done) ? `✓ ${t("mur monté")}` : s.mine.length ? `✓ ${t("mur posé")} · ${t("les sapeurs le montent")}` : t("posez un mur de sacs de sable")),
+  });
   // 5. take the village
   L.push({
     title: t("Prendre un village"),
@@ -146,12 +172,39 @@ export function createAlgTutorial(app) {
     done: () => hamlet()?.owner === "player",
     sub: () => { const v = hamlet(); return v ? t("{pct} % vers vous", { pct: Math.max(0, Math.round(v.value * 100)) }) : ""; },
   });
+  // 5b. THE HOUSES (2026-10-11, your review): a garrison — in, then out with SORTIR (K).
+  const inside = () => mine().filter((u) => u.garrison);
+  L.push({
+    title: t("Les maisons"),
+    text: t("Un mur protège ; une <b>maison</b> protège mieux. Groupe sélectionné, <b>clic droit sur une maison</b> de la mechta (le curseur devient une maison) : les hommes entrent et tirent par les fenêtres. Une grenade ou un obus les en chasse. Pour ressortir : <b>Sortir</b> (<kbd>K</kbd>), ou un simple ordre de marche."),
+    start() { const v = hamlet(); if (v) app.rtsCamera?.focusOn(v.position.x, v.position.z); },
+    done(s) {
+      if (inside().length >= 3) s.in = true;
+      return !!s.in && !inside().length;
+    },
+    sub: (s) => `${s.in ? "✓" : "·"} ${t("entrer dans une maison")} · ${t("ressortir")}`,
+  });
   // 6. supply
   L.push({
     title: t("Le ravitaillement"),
     text: t("Le <b>carburant</b> et les <b>munitions</b> viennent des villages et des <b>points de ravitaillement</b> sur les pistes — s'ils sont <b>reliés au poste</b> par des points à vous. Prenez le <b>dépôt de munitions</b> sur la piste."),
     start() { const d = depot(); if (d) app.rtsCamera?.focusOn(d.position.x, d.position.z); },
     done: () => depot()?.owner === "player",
+  });
+  // 6b. HOW A BATTLE IS WON (2026-10-11, your review: the training never showed the score). The bar
+  // appears from here on and the score runs (the drain: 0.175 a second per village of difference —
+  // the FLN's 500 would last ~48 min against the one mechta, so it can't end the training).
+  L.push({
+    title: t("Gagner la bataille"),
+    text: t("En haut, la <b>barre de score</b> : vous en bleu, le FLN en rouge, 500 points chacun. Le camp qui tient <b>moins de villages</b> perd des points chaque seconde, d'autant plus vite que l'écart est grand ; à zéro, il a perdu. Prendre la grotte du FLN, ou perdre votre poste, finit aussi la bataille. Un village <b>coupé du poste</b> (orange) compte, mais ne rapporte rien. Regardez le score du FLN baisser."),
+    start(s) {
+      document.body.classList.add("alg-tut-score");
+      battle.rules.score = true;
+      s.e0 = battle.score?.enemy ?? null;
+    },
+    done: (s) => s.e0 == null || battle.score.enemy <= s.e0 - 2,
+    // (The mechta not yours — its lesson skipped, or lost: nothing drains; say what to do.)
+    sub: (s) => (s.e0 == null ? "" : E.held > E.heldByEnemy ? t("FLN : {n} points", { n: Math.ceil(battle.score.enemy) }) : t("tenez la mechta : le score du FLN baissera")),
   });
   // 7. attack
   L.push({
@@ -274,7 +327,10 @@ export function createAlgTutorial(app) {
   // ── The panel ─────────────────────────────────────────────────────────────
   const style = document.createElement("style");
   style.textContent = `
-#alg-score, #alg-obj { display: none !important; }   /* the training: no score, its lessons are the objectives */
+/* The training: its lessons are the objectives; the score bar only from "Gagner la bataille" on. */
+body:not(.alg-tut-score) #alg-score, #alg-obj { display: none !important; }
+/* The score bar shown: the panel BELOW it (both at the top centre — it hid the bar it talks about). */
+body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
 #alg-tut { position: fixed; top: 14px; left: calc((100vw - var(--alg-dev-w, 0px)) / 2); transform: translateX(-50%); z-index: 57;
   width: min(560px, 76vw); padding: 10px 14px 12px; background: var(--hud-bg, rgba(16,14,10,0.9)); border: 1px solid var(--hud-brass, #c9a54a);
   border-radius: var(--hud-radius, 3px); box-shadow: 0 6px 18px rgba(0,0,0,0.45); font-family: var(--hud-sans, sans-serif); color: var(--hud-text, #e8dcc4); }
@@ -333,7 +389,8 @@ export function createAlgTutorial(app) {
     const back = hud.end(`
       <div class="kicker">${t("Camp d'instruction")}</div>
       <h2 class="win">${t("Instruction terminée")}</h2>
-      <p>${t("Vous savez déplacer et abriter vos hommes, prendre et relier des points, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon et transporter un groupe. La suite : les Aurès.")}</p>
+      <p>${t("Vous savez déplacer et abriter vos hommes, bâtir avec les sapeurs, tenir une maison, prendre et relier des points, gagner au score, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon et transporter un groupe. La suite : les Aurès.")}</p>
+      <p>${t("En bataille, le <b>brouillard de guerre</b> couvre la carte : vous ne voyez que ce que vos hommes voient. Le <b>manuel</b> (<kbd>Échap</kbd>) reprend tout.")}</p>
       <p><button type="button" class="go" data-a="aures">${t("Les Aurès — 1956 ›")}</button></p>`, { onReplay: () => location.reload() });
     back?.querySelector?.('[data-a="aures"]')?.addEventListener("click", () => { location.href = "./alg.html"; });
   }

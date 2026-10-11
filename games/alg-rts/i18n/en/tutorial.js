@@ -16,8 +16,10 @@ export default {
   "Chaque leçon s'affiche en haut de l'écran et passe d'elle-même une fois faite. <b>Passer</b> saute celle que vous connaissez. <kbd>Échap</kbd> : pause, options, manuel.":
     "Each lesson shows at the top of the screen and moves on by itself once done. <b>Skip</b> passes one you already know. <kbd>Esc</kbd>: pause, options, manual.",
   "Instruction terminée": "Training complete",
-  "Vous savez déplacer et abriter vos hommes, prendre et relier des points, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon et transporter un groupe. La suite : les Aurès.":
-    "You can move and shelter your men, take and link points, attack, launch an assault and throw grenades, retreat and reinforce, train troops, unlock a tier and carry a squad. Next: the Aurès.",
+  "Vous savez déplacer et abriter vos hommes, bâtir avec les sapeurs, tenir une maison, prendre et relier des points, gagner au score, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon et transporter un groupe. La suite : les Aurès.":
+    "You can move and shelter your men, build with the sappers, hold a house, take and link points, win on the score, attack, launch an assault and throw grenades, retreat and reinforce, train troops, unlock a tier and carry a squad. Next: the Aurès.",
+  "En bataille, le <b>brouillard de guerre</b> couvre la carte : vous ne voyez que ce que vos hommes voient. Le <b>manuel</b> (<kbd>Échap</kbd>) reprend tout.":
+    "In battle, the <b>fog of war</b> covers the map: you only see what your men see. The <b>manual</b> (<kbd>Esc</kbd>) covers everything again.",
   "Les Aurès — 1956 ›": "The Aurès — 1956 ›",
 
   // 1 the camera
@@ -28,8 +30,8 @@ export default {
   "tourner": "turn",
   "zoomer": "zoom",
   // 2 select
-  "Cliquez sur un de vos soldats : tout son <b>groupe</b> est sélectionné (des cercles bleus sous les hommes, sa fiche en bas). Encadrer à la souris en sélectionne plusieurs.":
-    "Click one of your soldiers: his whole <b>squad</b> is selected (blue circles under the men, its card at the bottom). Drag a box to select several.",
+  "Cliquez sur un de vos soldats : tout son <b>groupe</b> est sélectionné (des cercles bleus sous les hommes, sa fiche en bas). Encadrer à la souris en sélectionne plusieurs. Plus tard : <kbd>Ctrl</kbd> + un chiffre garde une sélection, le chiffre la rappelle.":
+    "Click one of your soldiers: his whole <b>squad</b> is selected (blue circles under the men, its card at the bottom). Drag a box to select several. Later on: <kbd>Ctrl</kbd> + a number keeps a selection, the number calls it back.",
   // 3 move
   "Se déplacer": "Moving",
   "<b>Clic droit</b> sur le sol : le groupe sélectionné y va. Amenez-le dans le cercle jaune, sur la piste.":
@@ -38,6 +40,26 @@ export default {
   "La couverture": "Cover",
   "Derrière un mur, on survit ; à découvert, non. Maintenez <kbd>V</kbd> : <b>vert</b> = couverture lourde, <b>jaune</b> = légère. Envoyez le groupe derrière les sacs de sable : sous le curseur, chaque homme montre la couverture qu'il aura.":
     "Behind a wall you live; in the open you don't. Hold <kbd>V</kbd>: <b>green</b> = heavy cover, <b>yellow</b> = light. Send the squad behind the sandbags: under the cursor, each man shows the cover he will have.",
+  // 4b the sappers (2026-10-11)
+  "Les sapeurs": "The sappers",
+  "Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Sacs de sable</b> sur leur fiche, puis posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>).":
+    "Your <b>sappers</b> (the small squad of 3) build: select them, click <b>Sandbags</b> on their card, then place the wall with a left click (<kbd>R</kbd> turns it, right-click cancels). They go and raise it — cover of your own, wherever you want. They also lay wire, cut the enemy's (<kbd>X</kbd>) and repair vehicles (<kbd>J</kbd>).",
+  "mur monté": "wall built",
+  "mur posé": "wall placed",
+  "les sapeurs le montent": "the sappers are raising it",
+  "posez un mur de sacs de sable": "place a sandbag wall",
+  // 5b the houses (2026-10-11)
+  "Les maisons": "The houses",
+  "Un mur protège ; une <b>maison</b> protège mieux. Groupe sélectionné, <b>clic droit sur une maison</b> de la mechta (le curseur devient une maison) : les hommes entrent et tirent par les fenêtres. Une grenade ou un obus les en chasse. Pour ressortir : <b>Sortir</b> (<kbd>K</kbd>), ou un simple ordre de marche.":
+    "A wall protects; a <b>house</b> protects better. With a squad selected, <b>right-click a house</b> in the mechta (the cursor turns into a house): the men go in and fire from the windows. A grenade or a shell drives them out. To come out: <b>Exit</b> (<kbd>K</kbd>), or a simple move order.",
+  "entrer dans une maison": "go into a house",
+  "ressortir": "come out",
+  // 6b how to win (2026-10-11)
+  "Gagner la bataille": "Winning the battle",
+  "En haut, la <b>barre de score</b> : vous en bleu, le FLN en rouge, 500 points chacun. Le camp qui tient <b>moins de villages</b> perd des points chaque seconde, d'autant plus vite que l'écart est grand ; à zéro, il a perdu. Prendre la grotte du FLN, ou perdre votre poste, finit aussi la bataille. Un village <b>coupé du poste</b> (orange) compte, mais ne rapporte rien. Regardez le score du FLN baisser.":
+    "At the top, the <b>score bar</b>: you in blue, the FLN in red, 500 points each. The side holding <b>fewer villages</b> loses points every second, the faster the bigger the gap; at zero, it has lost. Taking the FLN's cave, or losing your post, also ends the battle. A village <b>cut off from the post</b> (orange) counts, but pays nothing. Watch the FLN's score fall.",
+  "FLN : {n} points": "FLN: {n} points",
+  "tenez la mechta : le score du FLN baissera": "hold the mechta: the FLN's score will fall",
   // 5 take the village
   "Prendre un village": "Taking a village",
   "Les villages sont l'enjeu : chacun rapporte et compte comme point de victoire. Postez des <b>hommes à pied</b> dans le cercle de la <b>Mechta d'exercice</b> : son anneau se remplit vers vous (plus ils sont nombreux, plus c'est rapide). Ses habitants ne sont pas des cibles : quand on tire, ils rentrent chez eux.":
