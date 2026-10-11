@@ -561,7 +561,13 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        (onHouse / onMosque / onYard); drawn as stoneBlocks on dry-stone terrace socles, the mosque and
        minaret in a new LIME surface (whitewash from the clay plaster), the stork's nest rebuilt on the
        lantern. Lanes' stairs and the yards' ovens stay the kit's. 23 garrison houses found. ~88k tris.
-     - [ ] MEASURE CLEANLY (needs you: Chrome visible on its own screen — the laptop throttled, the
+     - [x] MEASURED CLEANLY (2026-10-11, you at the screen; dechra framed, zoom 0.5, sim paused,
+       8 rounds × 120 frames): NEW dechra hidden −0.47 ± 0.2 ms (its stone −0.21, lime +0.05, earth
+       +0.06), and in a second run +0.26 ± 0.06 (hiding it SHOWS the foliage and ground it covers,
+       which cost more); OLD dechra −0.52 ± 1.0. Verdict: the new one costs no more than the old.
+       (One old-village run read 42 ms frames whether the dechra was shown or not: something else on
+       the GPU — discarded.) Shader trimmed anyway: the plaster's normal map dropped (3 taps).
+     - [ ] (was) MEASURE CLEANLY (needs you: Chrome visible on its own screen — the laptop throttled, the
        baseline drifted 4.2 → 6.1 ms between runs): the dechra framed, on vs off read −1.07 ms in one
        run and +0.07 in the next; the old dechra ~−0.25. If the new one is really ~1 ms framed, the
        stone shader (3 photo + 3 normal + 6 plaster taps a pixel) is the suspect: gate the plaster
