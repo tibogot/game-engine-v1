@@ -55,6 +55,9 @@ import "../../v3/styles/editor.css";
 import { t } from "./i18n/i18n.js";
 
 const params = new URLSearchParams(location.search);
+// ?cam=old: the 40° camera of before CoH 3's was matched (2026-10-11) — the camera, its plant floors,
+// its haze, its listener (below).
+const OLD_CAM = params.get("cam") === "old";
 // THE HUMAN'S SIDE (2026-10-10, "play the FLN", step 1): ?side=fln — you command the FLN (the team
 // "enemy"), see through ITS eyes; the FLN's AI is off then (and no French AI yet: step 2). The team
 // strings stay the factions; shared-rts/teams.js SIDES.human says which one is yours.
@@ -178,7 +181,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     scatterReceiveLods: Number(params.get("recvlods") ?? 3),
     // Plant detail steps OFF the screen at every zoom (the farthest corner seen is ~125 m): a step
     // on screen was a band of plants changing as you panned. MEASURED: +0.45 ms GPU at max zoom.
-    scatterLodFloors: [130, 180],
+    // (CoH 3's camera, 2026-10-11: from further back the far corner is ~175 m, was ~120: the floors
+    // × 1.46 so the steps stay off the screen. ?cam=old keeps the old ones.)
+    scatterLodFloors: OLD_CAM ? [130, 180] : [190, 260],
     // shadowRadius 2 (engine default 4): the PCF disc is radius × texel, and at
     // 4 the palm fronds and soldiers smeared to grey smudges; 1 was crisp but
     // grainy. Chosen by eye in-game, 2026-09-29.
@@ -349,7 +354,17 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // camera at about a battle's width: 85 m now (~70 m up; 110 first, "still too high"), the last stretch of the wheel slowing
   // into it (softTop), and the tilt steep and nearly fixed (48-56°, was 35-60: zooming is closer /
   // further, not from the ground / from a plane). Seeing the whole map is the minimap's job.
-  const rtsCamera = createRtsCamera({ app, fov: 40, distMin: 24, distDefault: 65, distMax: 85, pitchNear: 48, pitchFar: 56 });
+  // COH 3'S CAMERA (you, 2026-10-11: "CoH tilts it a bit more"; measured from its default view,
+  // assets-src/refs/coh3/README.md): a LONG lens from further back, flatter perspective, ~44° down
+  // at the default — ours was 40° / 65 m / 53°. The SAME ground in view at every zoom (distances
+  // × tan 20° / tan 13° ≈ 1.58: the men as big as before — the ceiling's complaint was their size),
+  // the tilt 9° lower (CoH's ~44° at the default). ?cam=old = the 40° camera, to compare.
+  const rtsCamera = createRtsCamera(OLD_CAM
+    ? { app, fov: 40, distMin: 24, distDefault: 65, distMax: 85, pitchNear: 48, pitchFar: 56 }
+    : { app, fov: 26, distMin: 38, distDefault: 102, distMax: 134, pitchNear: 39, pitchFar: 47 });
+  // The sound's listener height (rtsAudio folds it into the distance): the camera now sits higher at
+  // the same zoom, so it is scaled back to what the old one heard (52 m → 71 m at the default).
+  rtsCamera.audioHeightK = OLD_CAM ? 1 : 0.73;
   rtsCamera.params.softTop = 0.3;
   // EDGE SCROLL the CoH way (a player, 2026-10-07: "not UX friendly" — the HUD along the edges
   // blocked it and the 14 px band reached full speed only at the last pixels): the window's edge,
@@ -719,5 +734,6 @@ export function applyAuresLight(app, L = AURES_LIGHT) {
   app.fog?.setHeight?.({ enabled: false });
   // matchSky: the haze takes the horizon's colour, so the plain beyond the map
   // dissolves into the sky behind it instead of ending on a line.
-  app.fog?.setDistance?.({ enabled: true, matchSky: true, color: L.haze.color, density: L.haze.density });
+  // (CoH 3's camera sits ~1.57x further: the haze thinned by as much, so the battle reads as before.)
+  app.fog?.setDistance?.({ enabled: true, matchSky: true, color: L.haze.color, density: L.haze.density * (OLD_CAM ? 1 : 0.64) });
 }

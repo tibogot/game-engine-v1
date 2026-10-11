@@ -34,7 +34,8 @@ const VEHICLE_LOOP = { willys: "jeep", gmc: "truck", halftrack: "truck", ebr: "t
 export function createAlgSounds({ app, rtsCamera, units }) {
   // distanceFx (rtsAudio.js): far shots ring off the valley and arrive late; a fight near the
   // camera pushes the wind and cicadas down (2026-10-07, the sound pass without recordings).
-  const audio = createRtsAudio({ app, getView: () => rtsCamera.getView?.(), manifestUrl: "/sounds/alg/manifest.json", storeKey: "algrts.audio.v1", startMuted: true, distanceFx: {} });
+  // (`audioHeightK`, algGame.js: CoH 3's higher camera heard as the old one did.)
+  const audio = createRtsAudio({ app, getView: () => { const v = rtsCamera.getView?.(); return v && rtsCamera.audioHeightK ? { ...v, height: v.height * rtsCamera.audioHeightK } : v; }, manifestUrl: "/sounds/alg/manifest.json", storeKey: "algrts.audio.v1", startMuted: true, distanceFx: {} });
   // OFF AT EVERY LOAD (you, 2026-10-01; 2026-10-07: "annoying when working on other things"): the
   // volumes are remembered, on/off is not — Dev → Sound or the menu's Son turns it on for this visit.
   audio.set("muted", true);

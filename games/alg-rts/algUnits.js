@@ -264,6 +264,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
     crew: { willys: "appele", halftrack: "appele", alouette: "appele", gmcOpen: "appele" },
+    // Seated men drawn out to the far corner of CoH 3's camera (~175 m at the top zoom; 135 cut them
+    // off mid-screen from 102 m back — 2026-10-11).
+    crewFar: 200,
     // The BENCH men only for the squad really aboard (algTransports; you, 2026-10-11: the
     // training's half-track looked full, K did nothing — it was empty). Driver and gunner always.
     troopsAboard: (u) => app.algTransports?.menOf(u).length ?? 0,

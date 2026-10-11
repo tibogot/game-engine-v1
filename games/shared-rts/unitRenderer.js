@@ -399,7 +399,7 @@ function buildInstancedType(tpl, scene) {
 // soldiers costs no draw calls and (measured in the lab) no CPU either.
 
 /** Vehicle crews (createUnitRenderer `crew`) are drawn only within this many metres of the camera. */
-const CREW_FAR = 135;   // the alg camera: 65 m default, 85 max (190 until 2026-10-07)
+const CREW_FAR = 135;   // the default (nam); a game passes its own `crewFar` (alg-rts: CoH 3's camera, 2026-10-11)
 const MAX_CROWD = 160; // soldiers a TYPE may field at once; a body's crowd holds the sum of its types
 const CROUCH_AIM_AT = 0.98;   // share of rifle_crouch_firing held as the kneeling aim (its loop's end ≈ its aim)
 const GIB_MAX = 40;    // men of one body lying blown apart at once (each ~16 s); past it, a plain corpse
@@ -1032,7 +1032,7 @@ function canopyGlass() {
   return _canopyGlass;
 }
 
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, troopsAboard = null, troopLook = null, variants = null, unarmed = false, noXray = false }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, crewFar = CREW_FAR, troopsAboard = null, troopLook = null, variants = null, unarmed = false, noXray = false }) {
   // VARIANTS (opt-in, `variants`: { typeKey: { variantKey: typeDef } } — alg-rts, 2026-10-07: "the
   // GMC: use a mix", closed and open): extra LOOKS of a unit type, each its own template and
   // instanced draw; a unit of that type takes one of them (or the type's own) at random when it
@@ -1697,7 +1697,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           inst.n = i + 1;
           const c = crewOf[v.vkey ?? t.typeKey];
           // Not when the camera is far out (a seated man ~3 px, 3k triangles skinned each frame).
-          if (c && v.onScreen && (!camera || camera.position.distanceToSquared(p) < CREW_FAR * CREW_FAR)) {
+          if (c && v.onScreen && (!camera || camera.position.distanceToSquared(p) < crewFar * crewFar)) {
             if (!v.crew) v.crew = { t: Math.random() * 20, seeds: c.seats.map(() => [Math.random(), Math.random(), Math.random(), 0]), m: new THREE.Matrix4() };
             v.crew.t += dt;
             v.crew.m.multiplyMatrices(x.matrix, c.rel);
