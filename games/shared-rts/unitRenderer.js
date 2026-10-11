@@ -1032,7 +1032,7 @@ function canopyGlass() {
   return _canopyGlass;
 }
 
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, variants = null, unarmed = false, noXray = false }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, troopsAboard = null, troopLook = null, variants = null, unarmed = false, noXray = false }) {
   // VARIANTS (opt-in, `variants`: { typeKey: { variantKey: typeDef } } — alg-rts, 2026-10-07: "the
   // GMC: use a mix", closed and open): extra LOOKS of a unit type, each its own template and
   // instanced draw; a unit of that type takes one of them (or the type's own) at random when it
@@ -1215,6 +1215,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     });
   }
   const crewNow = [];   // this frame's manned vehicles: { m, c, t, seeds }
+  /** The look the bench men of `unit` are drawn in: the squad aboard's (`troopLook`) when it has a
+   *  crowd that can SIT; otherwise null (the vehicle's crew look — never a man standing on a bench). */
+  const troopLookOf = (unit) => {
+    const key = troopLook?.(unit);
+    if (!key) return null;
+    for (const g of groups) if (g.views.has(key)) return g.field.has("sit") ? key : null;
+    return null;
+  };
   const _crewSeat = new THREE.Matrix4(), _crewQ = new THREE.Quaternion(), _crewS = new THREE.Vector3(), _crewP = new THREE.Vector3(), _crewY = new THREE.Vector3(0, 1, 0);
 
   // Instanced units have no mesh of their own, so a raycast hit lands on the
@@ -1693,7 +1701,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             if (!v.crew) v.crew = { t: Math.random() * 20, seeds: c.seats.map(() => [Math.random(), Math.random(), Math.random(), 0]), m: new THREE.Matrix4() };
             v.crew.t += dt;
             v.crew.m.multiplyMatrices(x.matrix, c.rel);
-            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale, v, x });
+            // TROOP seats (a seat's `troop`): only as many as men really aboard (`troopsAboard`, the game's
+            // transports) — without it, every seat is drawn (nam).
+            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale, v, x, troops: troopsAboard ? troopsAboard(unit) : Infinity, troopLook: troopLookOf(unit) });
           }
         }
       }
@@ -1861,9 +1871,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         }
         // The crews of the manned vehicles of this look (lane 2: no x-ray of their own —
         // the vehicle has its silhouette). A seat's clip missing from the pack: idle.
+        // The BENCH men in the look of the squad aboard (`troopLook`: legionnaires as legionnaires),
+        // in THIS look's pass; the driver and gunner in the vehicle's own crew look.
         for (const cr of crewNow) {
-          if (cr.c.look !== view.key) continue;
+          const crewHere = cr.c.look === view.key, troopsHere = (cr.troopLook ?? cr.c.look) === view.key;
+          if (!crewHere && !troopsHere) continue;
+          let troops = cr.troops;
           cr.c.seats.forEach((seat, si) => {
+            if (seat.troop ? !troopsHere || troops-- <= 0 : !crewHere) return;   // (a bench with nobody really aboard: empty)
             const clip = f.has(seat.clip) ? seat.clip : g.roles.idle;
             _crewP.fromArray(seat.p);
             _crewQ.setFromAxisAngle(_crewY, seat.yaw + (UNIT_TYPES[view.key].facingOffset ?? 0));

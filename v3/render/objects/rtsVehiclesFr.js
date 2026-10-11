@@ -794,12 +794,13 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
     for (const x of [-0.25, 0.05]) jerrycan(P, x, 1.49, BZ0 - 0.2, 0, 0.38 + R() * 0.08);
     P(roundedPlate(0.42, 0.34, 0.36, 0.015), [0.42, 1.44, BZ0 - 0.3], MAT.timber, 0.45, [0, 0.15, 0]);
     P(roundedPlate(0.32, 0.18, 0.18, 0.012), [0.38, 1.7, BZ0 - 0.3], MAT.paint, 0.32);
-    // The men on the benches, facing in (a gap or two: not a full load).
+    // The men on the benches, facing in. TROOP seats (`troop`): drawn only for the men REALLY aboard
+    // (the game's unitRenderer troopsAboard, 2026-10-11 — the half-track looked full when empty).
     if (!crew) {
       [-0.7, -1.3, -1.9, -2.5, -3.05].forEach((z, k) => {
         for (const sx of [-1, 1]) {
           if ((k + (sx > 0 ? 1 : 0)) % 4 === 3) continue;
-          seats.push({ p: [sx * 0.86, 1.27, z], yaw: -sx * Math.PI / 2, clip: (k + (sx > 0 ? 1 : 0)) % 2 ? "sit_talk" : "sit" });
+          seats.push({ p: [sx * 0.86, 1.27, z], yaw: -sx * Math.PI / 2, clip: (k + (sx > 0 ? 1 : 0)) % 2 ? "sit_talk" : "sit", troop: true });
         }
       });
     }
@@ -1409,7 +1410,7 @@ export function buildHalfTrack({ seed = 3, detail = 1, crew = true } = {}) {
     [-0.45, -1.15, -1.85, -2.45].forEach((z, k) => {
       for (const sx of [-1, 1]) {
         if ((k + (sx > 0 ? 1 : 0)) % 3 === 2) continue;
-        seats.push({ p: [sx * (BW - 0.2), 1.09, z], yaw: -sx * Math.PI / 2, clip: (k + (sx > 0 ? 1 : 0)) % 2 ? "sit_talk" : "sit" });
+        seats.push({ p: [sx * (BW - 0.2), 1.09, z], yaw: -sx * Math.PI / 2, clip: (k + (sx > 0 ? 1 : 0)) % 2 ? "sit_talk" : "sit", troop: true });
       }
     });
   }

@@ -212,6 +212,12 @@ export function createAlgTransports(app, { units, navGrid = null }) {
       return { key: "disembark", label: t("Débarquer"), hint: t("Le groupe descend à l'arrière du véhicule."), ready: true };
     },
     disembark(sel) {
+      // The men still RUNNING to the vehicle are told off too (you, 2026-10-11, the training's
+      // half-track: "K to disembark doesn't work" — it emptied the vehicle, then the stragglers
+      // still chasing it, up to `giveUp` s, caught up and climbed in: it looked full again).
+      for (const [u, p] of [...pending]) {
+        if (sel.includes(p.v) || sel.includes(u)) { pending.delete(u); u.haltMovement?.(); }
+      }
       for (const u of sel) if (isCarrier(u)) unloadAll(u);
       exitAll(sel);
     },

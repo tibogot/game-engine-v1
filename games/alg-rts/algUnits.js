@@ -264,6 +264,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
     crew: { willys: "appele", halftrack: "appele", alouette: "appele", gmcOpen: "appele" },
+    // The BENCH men only for the squad really aboard (algTransports; you, 2026-10-11: the
+    // training's half-track looked full, K did nothing — it was empty). Driver and gunner always.
+    troopsAboard: (u) => app.algTransports?.menOf(u).length ?? 0,
+    // …in THEIR look (legionnaires as legionnaires, paras as paras), the crew stays appelés.
+    troopLook: (u) => app.algTransports?.menOf(u)[0]?.typeKey ?? null,
     // The GMC a MIX (you, 2026-10-07): closed under its tilt, or open with men on the benches.
     variants: { gmc: { gmcOpen: { ...ALG_UNIT_TYPES.gmc, typeKey: "gmcOpen", procedural: "gmcOpen" } } },
     // A man down: his pool under his torso (bloodField.js, made with combat).
