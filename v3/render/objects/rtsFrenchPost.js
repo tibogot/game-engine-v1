@@ -92,7 +92,9 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0, det
         // Two steps: the lower deeper (in the rubble footing's stone), the upper whitewashed.
         parts.push(place({ geo: buildBox(0.7, 1.3, 0.62), pos: [bx, 0.65, -T / 2 - 0.27], mat: FOOT, tone: 0.45 + R() * 0.1 }, rot));
         parts.push(place({ geo: buildBox(0.56, H - 1.0, 0.32), pos: [bx, 1.25 + (H - 1.0) / 2 - 0.05, -T / 2 - 0.13], mat: MAT.white, tone: 0.5 + R() * 0.08 }, rot));
-        parts.push(place({ geo: buildBox(0.62, 0.08, 0.4), pos: [bx, H + 0.16, -T / 2 - 0.15], mat: MAT.concrete, tone: 0.48 }, rot));
+        // (3 cm up, 2026-10-11, you: "z-fighting on the top of every column round the post": the shaft's
+        // top at H + 0.20 was the cap's own top — the two faces fought.)
+        parts.push(place({ geo: buildBox(0.62, 0.08, 0.4), pos: [bx, H + 0.19, -T / 2 - 0.15], mat: MAT.concrete, tone: 0.48 }, rot));
       }
     } else {
       // Merlons along the top, square, with the cope a shade darker.
@@ -140,10 +142,10 @@ function aa52OnTripod(parts, at, yaw, R) {
   // The gun, a hair nose-down over the cradle.
   const gy = HY + 0.15, tilt = -0.03;
   put(buildBox(0.075, 0.11, 0.42), [0, gy, 0.02], MAT.steel, 0.08, [tilt, 0, 0]);                 // receiver
-  put(buildBox(0.08, 0.03, 0.3), [0, gy + 0.07, 0.04], MAT.steel, 0.12, [tilt, 0, 0]);            // top cover
+  put(buildBox(0.09, 0.03, 0.3), [0, gy + 0.067, 0.04], MAT.steel, 0.12, [tilt, 0, 0]);           // top cover (3 mm into the receiver: their faces met)
   put(new THREE.CylinderGeometry(0.017, 0.017, 0.56, 8).rotateX(Math.PI / 2), [0, gy + 0.02, 0.5], MAT.steel, 0.05, [tilt, 0, 0]);   // barrel
   put(new THREE.CylinderGeometry(0.03, 0.022, 0.1, 8).rotateX(Math.PI / 2), [0, gy + 0.025, 0.82], MAT.steel, 0.1, [tilt, 0, 0]);    // flash hider
-  put(new THREE.CylinderGeometry(0.026, 0.026, 0.08, 8).rotateX(Math.PI / 2), [0, gy + 0.02, 0.26], MAT.steel, 0.14, [tilt, 0, 0]);   // barrel nut
+  put(new THREE.CylinderGeometry(0.026, 0.026, 0.08, 8).rotateX(Math.PI / 2), [0, gy + 0.02, 0.275], MAT.steel, 0.14, [tilt, 0, 0]);  // barrel nut (off the barrel's end: their discs met)
   put(buildBox(0.018, 0.09, 0.03), [0, gy + 0.075, 0.38], MAT.steel, 0.1);                        // carrying handle, its post
   put(buildBox(0.022, 0.022, 0.16), [0, gy + 0.12, 0.38], MAT.timber, 0.2);                       // and grip
   put(buildBox(0.012, 0.05, 0.012), [0, gy + 0.07, 0.74], MAT.steel, 0.1);                        // front sight
@@ -276,7 +278,7 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4, 
     parts.push(wirePart([wx0, ry + 1.6, wz], [wx1, ry + 1.6, wz], 0.01, { mat: MAT.hessian, tone: 0.5 }));
     for (let k = 0; k < 5; k++) {
       const t = (k + 0.7) / 6, kind = R();
-      parts.push({ geo: buildBox(kind < 0.3 ? 1.1 : 0.5, kind < 0.3 ? 0.9 : 0.6, 0.02), pos: [wx0 + (wx1 - wx0) * t, ry + 1.6 - (kind < 0.3 ? 0.45 : 0.3), wz], rot: [0, (R() - 0.5) * 0.2, 0], mat: kind < 0.3 ? MAT.canvas : kind < 0.65 ? MAT.white : MAT.paint, tone: 0.4 + R() * 0.2 });
+      parts.push({ geo: buildBox(kind < 0.3 ? 1.1 : 0.5, kind < 0.3 ? 0.9 : 0.6, 0.02), pos: [wx0 + (wx1 - wx0) * t, ry + 1.6 - (kind < 0.3 ? 0.45 : 0.3), wz + (k % 2 ? 0.035 : -0.035)], rot: [0, (R() - 0.5) * 0.2, 0], mat: kind < 0.3 ? MAT.canvas : kind < 0.65 ? MAT.white : MAT.paint, tone: 0.4 + R() * 0.2 });
     }
   } else {
     // The command post: the radio's antenna base and a crate of batteries.
@@ -471,7 +473,7 @@ export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubbl
       const uv = roof.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 6, uv.getY(i) * 1.2);
       parts.push({ geo: indexed(roof), pos: [tx, th + 0.85, tz], mat: MAT.canvas, tone: 0.5 });
       parts.push({ geo: buildBox(1.0, 0.95, 0.04), pos: [tx, 0.48, tz - tw / 2 - 0.03], mat: MAT.steel, tone: 0.05 });   // the open door
-      parts.push({ geo: new THREE.CylinderGeometry(0.1, 0.1, 1.0, 8).rotateZ(Math.PI / 2), pos: [tx, 1.0, tz - tw / 2 - 0.08], mat: MAT.canvas, tone: 0.35 });
+      parts.push({ geo: new THREE.CylinderGeometry(0.1, 0.1, 1.06, 8).rotateZ(Math.PI / 2), pos: [tx, 1.0, tz - tw / 2 - 0.08], mat: MAT.canvas, tone: 0.35 });   // (1.06: its ends were the door's, coplanar)
       for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push(wirePart([tx + sx * tw / 2, th, tz + sz * tw / 2], [tx + sx * (tw / 2 + 0.9), 0, tz + sz * (tw / 2 + 0.9)], 0.012, { mat: MAT.hessian, tone: 0.4 }));
     }
     // The MORTAR PIT: a ring of sandbags, the tube on its baseplate pointing out, bombs boxed.

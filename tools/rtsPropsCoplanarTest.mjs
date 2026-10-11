@@ -266,6 +266,8 @@ check("Huey wreck", buildHueyWreck());
 
 console.log("the Algeria game");
 { const post = buildFrenchPost(); check("French post", post); for (const [k, g] of Object.entries(post.userData.parts ?? {})) check(`French post ${k}`, g); }
+// (detail 2 — what the game builds; detail 1 alone let the buttress caps z-fight, 2026-10-11)
+check("French post detail 2", buildFrenchPost({ detail: 2 }));
 check("mechta", buildMechta());
 check("ALN camp", buildAlnCamp());
 for (const [name, fn] of [["EBR", buildEBR], ["Willys", buildWillys], ["GMC", buildGMC], ["AMX-13", buildAMX13], ["half-track", buildHalfTrack], ["Alouette", buildAlouette]]) {
