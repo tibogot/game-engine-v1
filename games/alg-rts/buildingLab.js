@@ -26,6 +26,7 @@ import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtla
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { buildAmmoDump, buildFuelDepot } from "../../v3/render/objects/rtsAlgeria.js";
 import { createPointMark } from "./algPointMarks.js";
+import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 
@@ -38,9 +39,9 @@ import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 // or fuel (drums), 22 m, a 5 m pole beside the depot; a VILLAGE counts for the score and pays all
 // three, 40 m, a 7 m pole on open ground near its centre (a house stands for the village here).
 const POINT_KINDS = {
-  mun: { R: 22, pole: 5, cloth: [1.6, 1.07], build: () => buildAmmoDump() },
-  fuel: { R: 22, pole: 5, cloth: [1.6, 1.07], build: () => buildFuelDepot() },
-  village: { R: 40, pole: 7, cloth: [2.1, 1.4], build: () => buildMechtaHouse({}), poleAt: [-9, 7] },
+  mun: { R: 11, pole: 5, mast: 9, cloth: [1.6, 1.07], build: () => buildAmmoDump() },
+  fuel: { R: 11, pole: 5, mast: 9, cloth: [1.6, 1.07], build: () => buildFuelDepot() },
+  village: { R: 11, pole: 7, mast: 11, cloth: [2.1, 1.4], build: () => buildMechtaHouse({}), poleAt: [-9, 7] },
 };
 const POINT = { game: null, neu: null, kind: null };
 function supplyPoint(which, kindKey = "mun") {
@@ -50,8 +51,17 @@ function supplyPoint(which, kindKey = "mun") {
   const fp = geo.userData.footprint ?? { hx: 1.5, hz: 1.5 };
   const extra = [];
   // The flag: a pole and a flat cloth that climbs with the hold (the game's waves: algPointFlags).
-  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, K.pole, 8).translate(0, K.pole / 2, 0), new THREE.MeshStandardNodeMaterial({ color: 0x5a5650, roughness: 0.6, metalness: 0.4 }));
-  const [px, pz] = K.poleAt ?? [-fp.hx - 0.4, fp.hz * 0.6];
+  // The GAME's thin pole on the left; the NEW MAST on the right (algPointMast.js: tapered, guyed, a
+  // concrete footing), where the point marks are new too.
+  // The GAME: its pole beside the depot (a village's on open ground off its centre). The NEW: the mast
+  // AT THE CENTRE, as CoH's (the disc and the column of light round it), the depot / house moved
+  // beside it (2026-10-11: at 11 m a village's pole at (-9, 7) stood on the ring).
+  if (which !== "game") geo.translate(fp.hx + 2.6, 0, 0);
+  const [px, pz] = which === "game" ? (K.poleAt ?? [-fp.hx - 0.4, fp.hz * 0.6]) : [0, 0];
+  const H = which === "game" ? K.pole : K.mast;
+  const pole = which === "game"
+    ? new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, H, 8).translate(0, H / 2, 0), new THREE.MeshStandardNodeMaterial({ color: 0x5a5650, roughness: 0.6, metalness: 0.4 }))
+    : new THREE.Mesh(buildPointMast({ height: H, guyR: H * 0.4, away: Math.PI }).geometry, pointMastMaterial());   // the wires away from the depot / house
   pole.position.set(px, 0, pz);
   pole.castShadow = true;
   const tex = { player: labFlagTex(drawTricoloreDataUrl(256)), enemy: labFlagTex(drawFlnDataUrl(256)) };
@@ -63,7 +73,7 @@ function supplyPoint(which, kindKey = "mun") {
   const flag = (side, hold) => {
     cloth.visible = !!side && hold > 0;
     if (side) cloth.material.map = tex[side];
-    cloth.position.y = 0.5 + hold * (K.pole - ch - 0.5);
+    cloth.position.y = 0.5 + hold * (H - 0.15 - ch - 0.5);
   };
   let marks, resize;
   if (which === "game") {
@@ -255,7 +265,8 @@ export async function startBuildingLab(container) {
     });
   }
   if (["pointRavit", "pointCarbu", "pointVillage"].includes(new URLSearchParams(location.search).get("v"))) startPointPanel(lab, panel);
-  return Object.assign(lab, { setStone });
+  // (`point`: the supply point's two sides, for stills of the capture from the console.)
+  return Object.assign(lab, { setStone, point: POINT });
 }
 
 /** The supply point's panel: its state on both sides, and a capture played out (3 s, then the flash). */
