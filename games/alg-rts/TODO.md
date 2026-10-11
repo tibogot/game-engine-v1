@@ -557,6 +557,27 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      - [ ] CHECK: the grass blades fade 44-68 m from the camera (algGame FAR GRASS note) — from 102 m
        back, are the oases' blades only there zoomed in now? (not checked yet)
    - YOUR TRAINING-CAMP PASS (2026-10-11, beside CoH 3) — the findings, one line each:
+     - [~] MEN STUCK IN THE VILLAGES (2026-10-12, your screenshots: a man under a porch, inside the
+       red cells; "this should never ever happen"). Research (CoH's Jurney article, Supreme Commander 2's
+       flow fields, 0 A.D.'s clearance grid) + a map of our pipeline. CAUSES: (a) separation FORCED two
+       jammed men into the walls; (b) the escape walked a man in a wall STRAIGHT to the ring-scan's
+       "nearest" open cell — through the wall; (c) 345 SEALED POCKETS (667 cells) on the Aurès: mechta
+       yards, dechra courtyards whose gate the wall rects close — a man in one could never path out.
+       DONE (steps 1-3): navGrid sealPockets (state 4: every walkable region under 600 m² that is not the
+       map's, from scratch at each build / footprint — wire cut opens it again); units forceNudge never
+       from open ground into a wall (a tangent slide first); the escape walks BACK to his last open spot.
+       MEASURED (8 rounds × 2 villages, 15 men, the same orders): stuck 20 → 5 (Ouled Ali), 7 → 1
+       (dechra), in a wall 0 → 0, men still trapped a village later: several → none.
+       - [ ] STEP 4, CoH's formation spots: each man's spot (and the cover snap) through a short
+         "nearest reachable point" search (Jurney: 50-100 nodes from the leader); the final leg checked.
+       - [ ] STEP 5: the stuck ladder survives re-orders (combat re-orders every 0.5 s reset it).
+       - [ ] STEP 6: per-cell clearance (no one-cell gaps for a 1 m man).
+       - [ ] An automated stuck test (the village orders above) in tools/, so it stays fixed.
+     - [x] THE COMMAND CARD OFF THE SCREEN (2026-10-12, your screenshot: the sappers' card, 17 buttons,
+       ran ~90 px under the window): CoH's BUILD PAGE (ui/commandCard.js: one CONSTRUIRE button opens
+       the buildings, RETOUR first; the sappers' lesson text says so) + a SAFETY NET: a card taller
+       than its panel grows the panel UPWARD (measured from its buttons; .collapsed still folds it).
+       Checked every card at 1920 wide: all inside; every squad at once: 4 rows, the panel 221 px.
      - [x] THE SUPPLY POINTS, COH 3'S WAY — IN THE GAME (2026-10-12; the lab first, your passes):
        algPointRings.js: every supply point's ring in ONE instanced draw, draped, ALWAYS shown (CoH):
        dash-dot white → the leaning side's colour filling it (|value| / hold) → solid when held,

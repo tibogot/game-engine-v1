@@ -81,6 +81,9 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
   const blocked = (bx, bz) => !type.isAir && (!!navGrid?.isBlockedAtWorld(bx, bz, foot)
     || !!app.bridgeDecks?.sideWall(pos.x, pos.z, bx, bz));
   const inBlocked = () => blocked(pos.x, pos.z);
+  // The last OPEN ground he stood on (the escape walks back to it: units.js update).
+  const lastOpen = { x, z };
+  let lastOpenOk = false;
 
   /** Move to (nx,nz), sliding along terrain obstacles rather than stopping dead. */
   function tryMove(nx, nz) {
@@ -324,11 +327,16 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
      * inside another unit forever.
      */
     forceNudge(dx, dz) {
+      // NEVER from open ground INTO a wall (2026-10-12, you: men stuck in a village — two men jammed in a
+      // lane were forced into the house wall, then the escape walked one out the far side into a walled
+      // yard). Overlapping a squad-mate a moment is harmless; standing in a wall is not. Returns moved.
+      if (!type.isAir && !inBlocked() && blocked(pos.x + dx, pos.z + dz)) return false;
       // Never off a bridge deck mid-span (bridgeDecks.keepOnDeck): along it only.
       const k = !type.isAir ? app.bridgeDecks?.keepOnDeck?.(pos.x, pos.z, pos.x + dx, pos.z + dz) : null;
       if (k) { dx = k.x - pos.x; dz = k.z - pos.z; }
       pos.x += dx; pos.z += dz;
       if (arrived) target.copy(pos);
+      return true;
     },
 
     /** The route still ahead ([{x,z}], read-only; null when arrived) — the path dots. */
@@ -375,6 +383,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         pos.y = groundAt(pos.x, pos.z) + (type.hover ?? 0);
         return;
       }
+      // (only OPEN ground is a place to come back to)
+      if (!type.isAir && !inBlocked()) { lastOpen.x = pos.x; lastOpen.z = pos.z; lastOpenOk = true; }
 
       // ── Escape blocked terrain ────────────────────────────────────────────
       // If a unit somehow ends up inside a blocked cell (shoved to a boundary,
@@ -383,7 +393,12 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       // wants to make is into blocked ground, so it never moves and never
       // re-plans.
       if (!type.isAir && navGrid && inBlocked()) {
-        const open = navGrid.nearestOpenWorld(pos.x, pos.z, foot);
+        // BACK THE WAY HE CAME (2026-10-12): the last open ground he stood on, if it is still open and
+        // near — the nearest open cell by the grid's ring scan could lie on the FAR side of the wall (a
+        // walled yard: stuck for good). Only failing that, the nearest open ground (never a sealed
+        // pocket now: navGrid sealPockets).
+        const back = lastOpenOk && !blocked(lastOpen.x, lastOpen.z) && Math.hypot(lastOpen.x - pos.x, lastOpen.z - pos.z) < 8;
+        const open = back ? lastOpen : navGrid.nearestOpenWorld(pos.x, pos.z, foot);
         const ex = open.x - pos.x, ez = open.z - pos.z;
         const el = Math.hypot(ex, ez);
         if (el > 1e-3) {
@@ -736,8 +751,13 @@ export function createUnits({
           if (movedA && !movedB) a.nudge(-nx * push, -nz * push);
           else if (movedB && !movedA) b.nudge(nx * push, nz * push);
           else if (!movedA && !movedB) {
-            a.forceNudge(-nx * push, -nz * push);
-            b.forceNudge(nx * push, nz * push);
+            // Pinned against walls both ways: slide them PAST each other along the wall (the tangent)
+            // before forcing — and the force never puts a man into a wall now.
+            const sA = a.nudge(nz * push, -nx * push), sB = b.nudge(-nz * push, nx * push);
+            if (!sA && !sB) {
+              a.forceNudge(-nx * push, -nz * push);
+              b.forceNudge(nx * push, nz * push);
+            }
           }
         }
       }

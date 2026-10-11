@@ -50,8 +50,12 @@ export function createNavGrid({
   // the cells only exist on a footbridge, and every path query goes through wall().)
   // 3 is the reverse, NO FOOT: barbed wire — men go round, a vehicle drives
   // over it (alg-rts algWire.js crushes it). Only foot-only footprints make it.
+  // 4 is a SEALED POCKET (sealPockets, 2026-10-12): open ground no man can walk to from the map — a
+  // walled yard, a courtyard whose gate the wall rects close — blocked for everyone, so nothing is
+  // ever planned or snapped INTO one (a man inside one could never path out: stuck for good).
   let footRules = false;
-  const wall = (i) => blocked[i] === 1 || (!footRules && blocked[i] === 2) || (footRules && blocked[i] === 3);
+  const wall = (i) => blocked[i] === 1 || blocked[i] === 4 || (!footRules && blocked[i] === 2) || (footRules && blocked[i] === 3);
+  const solid = (i) => blocked[i] === 1 || blocked[i] === 4;
   const isBlocked = (cx, cz) => !inBounds(cx, cz) || wall(idx(cx, cz));
 
   const worldToCell = (wx, wz) => ({
@@ -296,8 +300,59 @@ export function createNavGrid({
     for (const b of barriers) stampBarrier(b);
     for (const f of footprints) stampFootprint(f);
     carveBridges(); // last: bridges override obstacles to make crossings walkable
+    sealPockets();
     if (debugMesh) { app.scene.remove(debugMesh); debugMesh.geometry.dispose(); debugMesh = null; }
   }
+
+  /**
+   * SEAL THE POCKETS (2026-10-12, you: men stuck in a village, "this should never ever happen"; 345
+   * sealed walkable islands measured on the Aurès — mechta yards closed by the house and three wall
+   * rects, dechra courtyards whose gate the wall rects overlap). Every walkable region (INFANTRY rules,
+   * the A*'s own moves: 8-way, no corner cutting) smaller than POCKET_MAX cells and not the largest is
+   * marked 4. Recomputed from scratch each time (old 4s cleared first): a pocket that opens again —
+   * its wire cut, its wall gone — is walkable again.
+   */
+  const POCKET_MAX = Math.max(4, Math.ceil(600 / (cell * cell)));   // ~600 m², as blockDryScraps
+  function sealPockets() {
+    for (let i = 0; i < blocked.length; i++) if (blocked[i] === 4) blocked[i] = 0;
+    const was = footRules;
+    footRules = true;
+    const comp = new Int32Array(cols * rows).fill(-1);
+    const sizes = [];
+    const stack = new Int32Array(cols * rows);
+    for (let s = 0; s < comp.length; s++) {
+      if (comp[s] >= 0 || wall(s)) continue;
+      const id = sizes.length;
+      let n = 0, top = 0;
+      stack[top++] = s; comp[s] = id;
+      while (top) {
+        const cur = stack[--top];
+        n++;
+        const ccx = cur % cols, ccz = (cur - ccx) / cols;
+        for (let k = 0; k < 8; k++) {
+          const nb = NB[k];
+          const nx = ccx + nb[0], nz = ccz + nb[1];
+          if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
+          const ni = nz * cols + nx;
+          if (comp[ni] >= 0 || wall(ni)) continue;
+          if (nb[2] > 1 && (wall(ccz * cols + nx) || wall(nz * cols + ccx))) continue;
+          comp[ni] = id;
+          stack[top++] = ni;
+        }
+      }
+      sizes.push(n);
+    }
+    let main = 0;
+    for (let k = 1; k < sizes.length; k++) if (sizes[k] > sizes[main]) main = k;
+    let sealed = 0;
+    for (let i = 0; i < comp.length; i++) {
+      const c = comp[i];
+      if (c >= 0 && c !== main && sizes[c] < POCKET_MAX) { blocked[i] = 4; sealed++; }
+    }
+    footRules = was;
+    lastSealed = sealed;
+  }
+  let lastSealed = 0;
 
   /**
    * Dry ground too small to be ground: a bump in a lakebed, a speck of
@@ -615,7 +670,7 @@ export function createNavGrid({
     const stack = new Int32Array(cols * rows);
     let label = 0;
     for (let s = 0; s < region.length; s++) {
-      if (blocked[s] === 1 || region[s] !== 0) continue;
+      if (solid(s) || region[s] !== 0) continue;
       label++;
       let top = 0;
       stack[top++] = s; region[s] = label;
@@ -627,8 +682,8 @@ export function createNavGrid({
           const nx = ccx + nb[0], nz = ccz + nb[1];
           if (nx < 0 || nz < 0 || nx >= cols || nz >= rows) continue;
           const ni = nz * cols + nx;
-          if (blocked[ni] === 1 || region[ni] !== 0) continue;
-          if (nb[2] > 1 && (blocked[ccz * cols + nx] === 1 || blocked[nz * cols + ccx] === 1)) continue;
+          if (solid(ni) || region[ni] !== 0) continue;
+          if (nb[2] > 1 && (solid(ccz * cols + nx) || solid(nz * cols + ccx))) continue;
           region[ni] = label;
           stack[top++] = ni;
         }
@@ -696,6 +751,7 @@ export function createNavGrid({
       const f = { x, z, hx, hz, ry, noFoot, vehicleOnly };
       footprints.push(f);
       stampFootprint(f);
+      sealPockets();   // a new wall can close a pocket (a sandbag ring, wire round a yard)
       return f;
     }),
     removeFootprint: (f) => { const i = footprints.indexOf(f); if (i >= 0) footprints.splice(i, 1); },
@@ -712,12 +768,15 @@ export function createNavGrid({
       eachFootprintCell(f, (c) => { if (blocked[c] === 3) blocked[c] = 0; });
       const r = Math.hypot(f.hx, f.hz);
       for (const o of footprints) if (o.noFoot && Math.hypot(o.x - f.x, o.z - f.z) < r + Math.hypot(o.hx, o.hz)) stampFootprint(o);
+      sealPockets();   // the wire it cut may have opened a pocket again
       return true;
     }),
     /** Straight-line walkability between two world points (waypoint lookahead). */
     hasLOS: (ax, az, bx, bz, { foot = false } = {}) => { footRules = foot; return hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }); },
     setDebug,
     toggleDebug,
+    /** Cells sealed as pockets at the last build / footprint (sealPockets). */
+    get sealedPockets() { return lastSealed; },
     /** Is the debug overlay showing (the dev panel's checkbox reads it). */
     get debugOn() { return !!debugMesh?.visible; },
   };
