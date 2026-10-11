@@ -99,15 +99,9 @@ export function surfaceMaterial(kind) {
     const limeMask = smoothstep(0.35, 0.6, wear.y.negate().add(lum.sub(0.45).mul(0.5)));
     // (an old wash, warm: a clean white caught the sky in a shadowed wall and read as glass)
     col = mix(col, vec3(0.62, 0.55, 0.44).mul(lum.mul(0.5).add(0.75)), limeMask);
-    // The plaster's own relief (its photo's normal map), not the stones' under it.
-    const PN = photo(BUILD("clay_plaster", "nor_gl")), uPX = vec2(pp.z, pp.y), uPY = vec2(pp.x, pp.z), uPZ = vec2(pp.x, pp.y);
-    const tp = (uv) => texture(PN, uv).xyz.mul(2).sub(1);
-    const qX = tp(uPX), qY = tp(uPY), qZ = tp(uPZ);
-    const pX = vec3(qX.xy.add(vec2(n.z, n.y)), abs(qX.z).mul(n.x)).zyx;
-    const pY = vec3(qY.xy.add(vec2(n.x, n.z)), abs(qY.z).mul(n.y)).xzy;
-    const pZ = vec3(qZ.xy.add(vec2(n.x, n.y)), abs(qZ.z).mul(n.z));
-    const plasterN = pX.mul(wx).add(pY.mul(wy)).add(pZ.mul(wz)).normalize();
-    nObj = mix(nObj, plasterN, mask).normalize();
+    // Under the plaster the stones' relief flattened (2026-10-11, the optimisation pass: the plaster's
+    // own normal map was 3 more texture reads on EVERY stone pixel for a coat a few cm thick).
+    nObj = mix(nObj, n, mask.mul(0.75)).normalize();
   }
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: s.rough, metalness: 0 });
   mat.name = `Masonry:${kind}`;
