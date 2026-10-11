@@ -24,6 +24,53 @@ import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
+import { buildAmmoDump } from "../../v3/render/objects/rtsAlgeria.js";
+import { createPointMark } from "./algPointMarks.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
+import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
+
+// THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
+// marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
+// (algPointMarks.js: dashed → filled → solid, the disc, the capture wave and streaks); the same
+// depot and flag on both. The panel's "Point" buttons set the state and play a capture.
+const POINT_R = 22;                    // algEconomy supplyRadius
+const POINT = { game: null, neu: null };
+function supplyPoint(which) {
+  const geo = buildAmmoDump();
+  const fp = geo.userData.footprint ?? { hx: 1.5, hz: 1.5 };
+  const extra = [];
+  // The flag: a pole and a flat cloth that climbs with the hold (the game's waves: algPointFlags).
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 5, 8).translate(0, 2.5, 0), new THREE.MeshStandardNodeMaterial({ color: 0x5a5650, roughness: 0.6, metalness: 0.4 }));
+  pole.position.set(-fp.hx - 0.4, 0, fp.hz * 0.6);
+  pole.castShadow = true;
+  const tex = { player: labFlagTex(drawTricoloreDataUrl(256)), enemy: labFlagTex(drawFlnDataUrl(256)) };
+  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.07).translate(0.8, 0.535, 0), new THREE.MeshStandardNodeMaterial({ map: tex.player, side: THREE.DoubleSide, roughness: 0.9 }));
+  cloth.castShadow = true;
+  pole.add(cloth);
+  extra.push(pole);
+  const flag = (side, hold) => {
+    cloth.visible = !!side && hold > 0;
+    if (side) cloth.material.map = tex[side];
+    cloth.position.y = 0.5 + hold * (5 - 1.07 - 0.5);
+  };
+  let marks;
+  if (which === "game") {
+    const ring = new THREE.Mesh(new THREE.RingGeometry(POINT_R * 0.975, POINT_R, 96).rotateX(-Math.PI / 2), new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false }));
+    ring.position.y = 0.06;
+    ring.renderOrder = RENDER_ORDER.ON_GROUND;
+    extra.push(ring);
+    const GAME_COL = { player: 0x58a8ff, enemy: 0xff6a5a, null: 0xd8cfae };
+    marks = { set: ({ owner }) => ring.material.color.set(GAME_COL[owner]), capture() {}, update() {} };
+  } else {
+    marks = createPointMark({ radius: POINT_R });
+    marks.group.rotation.y = 0.6;       // undo the turntable's −0.6, so the fill starts at the top
+    extra.push(marks.group);
+  }
+  geo.userData.extra = extra;
+  POINT[which === "game" ? "game" : "neu"] = { marks, flag };
+  return geo;
+}
+function labFlagTex(url) { const t = new THREE.TextureLoader().load(url); t.colorSpace = THREE.SRGBColorSpace; return t; }
 
 // ?seed=: the new pieces' variant (the panel's "Variante suivante").
 const SEED = Number(new URLSearchParams(location.search).get("seed")) || 0;
@@ -115,6 +162,10 @@ const BUILDINGS = {
     label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildCampV2(),
     tags: ["CAMP (LE JEU)", "CAMP · NOUVEAU STANDARD"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
   },
+  pointRavit: {
+    label: "Point de ravitaillement", gap: POINT_R + 3, before: () => supplyPoint("game"), after: () => supplyPoint("new"),
+    tags: ["POINT (LE JEU)", "POINT · NOUVEAU"], note: "les marques du jeu à gauche, les nouvelles à droite — « Point » : l'état et la capture.",
+  },
 };
 
 /**
@@ -173,5 +224,47 @@ export async function startBuildingLab(container) {
       if (b) location.search = `?v=${key}&seed=${Math.max(0, SEED + Number(b.dataset.seed))}`;
     });
   }
+  if (new URLSearchParams(location.search).get("v") === "pointRavit") startPointPanel(lab, panel);
   return Object.assign(lab, { setStone });
+}
+
+/** The supply point's panel: its state on both sides, and a capture played out (3 s, then the flash). */
+function startPointPanel(lab, panel) {
+  const both = (fn) => { for (const p of [POINT.game, POINT.neu]) if (p) fn(p); };
+  let anim = null;      // { side, t } while a capture is playing
+  const show = (owner, capturer = owner, progress = owner ? 1 : 0) => {
+    anim = null;
+    both((p) => { p.marks.set({ owner, capturer, progress }); p.flag(owner ?? (progress > 0 ? capturer : null), owner ? 1 : progress); });
+  };
+  const box = document.createElement("div");
+  box.innerHTML = `<h2>Point</h2><div class="g">
+    <button data-pt="neutral">Neutre</button><button data-pt="half">Capture 50 %</button>
+    <button data-pt="player">Tenu : France</button><button data-pt="enemy">Tenu : FLN</button>
+    <button data-pt="capP">▶ Capture France</button><button data-pt="capE">▶ Capture FLN</button></div>`;
+  panel.insertBefore(box, panel.firstElementChild?.nextSibling ?? null);
+  box.addEventListener("click", (e) => {
+    const k = e.target.closest("button")?.dataset.pt;
+    if (k === "neutral") show(null);
+    else if (k === "half") show(null, "player", 0.5);
+    else if (k === "player" || k === "enemy") show(k);
+    else if (k === "capP" || k === "capE") { show(null); anim = { side: k === "capP" ? "player" : "enemy", t: 0 }; }
+  });
+  show(null);
+  // The point is 44 m across: the RTS camera, a little further out than play.
+  lab.play(105, 48);
+  const CAP_S = 3;
+  let last = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    if (anim) {
+      anim.t += dt / CAP_S;
+      const k = Math.min(1, anim.t);
+      both((p) => { p.marks.set({ owner: null, capturer: anim.side, progress: k }); p.flag(anim.side, k); });
+      if (k >= 1) { const side = anim.side; anim = null; both((p) => { p.marks.capture(side); p.flag(side, 1); }); }
+    }
+    both((p) => p.marks.update(dt));
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
