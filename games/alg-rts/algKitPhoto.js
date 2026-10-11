@@ -15,7 +15,7 @@ import { abs, attribute, dot, float, mix, normalGeometry, positionGeometry, sele
 import { rtsAtlasColor } from "../../v3/render/objects/rtsObjectProps.js";
 
 const FAMILIES = [
-  { id: "plaster", url: "/textures/build/clay_plaster/clay_plaster", mats: [11, 14, 22, 23] },
+  { id: "plaster", url: "/textures/build/clay_plaster/clay_plaster", mats: [11, 14, 22, 23, 10] },   // (+ concrete: the post's roof slabs and copings)
   { id: "stone", url: "/textures/build/rabdentse_ruins_wall/rabdentse_ruins_wall", mats: [19, 21, 24, 16] },
   { id: "earth", url: "/textures/ground/mud_cracked_dry_03/mud_cracked_dry_03", mats: [3, 20] },
   { id: "wood", url: "/textures/build/raw_plank_wall/raw_plank_wall", mats: [2] },

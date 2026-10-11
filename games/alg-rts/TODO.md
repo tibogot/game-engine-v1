@@ -587,7 +587,8 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        (photo)". Measured cleanly: −0.01 ± 0.07 ms swapping all 63 pieces' material, the post framed.
        Up close: real dry-stone relief on the footing, plaster grain on the whitewash; at play zoom
        the post looks the same (by design: its colours kept).
-     - [ ] the post's SHAPES next, if wanted: the footing's cold blue-grey → warm stone, soft wall
+     - [x] the post's footing: the cold blue-grey rubble → MAT.limestone (buildFrenchPost footStone; the game + its portrait); concrete roofs in the plaster grain family.
+     - [ ] the post's SHAPES still, if wanted: soft wall
        corners, real roof parapets instead of flat slabs.
      - [ ] **YOU, UNDECIDED (2026-10-11): "they look better, less low-poly — but before there was more
        contrast and more colour, it READ better on screen."** The photo materials are all warm and

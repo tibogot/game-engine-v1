@@ -4,6 +4,7 @@
 // (games/nam-rts/structureThumbnails.js). Each is built exactly as the game
 // draws it: kitView (showroom.js), French paint, markings, gate shut.
 import * as THREE from "three";
+import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { bakeThumbnails } from "../shared-rts/thumbnails.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { buildHelipad, buildMotorPool } from "../../v3/render/objects/rtsAlgeria.js";
@@ -29,7 +30,7 @@ const walls = (box) => {
   for (const k of ["x", "z"]) { box.min[k] = Math.max(box.min[k], -16); box.max[k] = Math.min(box.max[k], 16); }
 };
 const ITEMS = [
-  ["struct:post", () => facing(kitView(buildFrenchPost({ detail: 2 }))), walls],
+  ["struct:post", () => facing(kitView(buildFrenchPost({ detail: 2, footStone: MAT.limestone }))), walls],
   ["struct:motorPool", () => facing(kitView(buildMotorPool({ detail: 2 })))],
   ["struct:helipad", () => facing(kitView(buildHelipad()))],
 ];

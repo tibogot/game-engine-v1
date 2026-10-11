@@ -6,6 +6,7 @@
 // kit's one atlas material, markings as a child — exactly how nam-rts draws
 // its buildings (buildingRenderer.kitView).
 import * as THREE from "three";
+import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
@@ -184,7 +185,7 @@ const START_DEFENCES = typeof location !== "undefined" && new URLSearchParams(lo
 
 export const SHOWROOM = [
   // Detail 2 (the buildings lab, 2026-10-07): the bordj — no merlons, the yard in use, AA-52s.
-  { key: "frenchPost", build: () => buildFrenchPost({ detail: 2 }), x: BASE.x, z: BASE.z, yaw: BASE.yaw },
+  { key: "frenchPost", build: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), x: BASE.x, z: BASE.z, yaw: BASE.yaw },
   ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.

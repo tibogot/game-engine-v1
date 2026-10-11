@@ -73,11 +73,11 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0, det
     if (w <= 0.05) continue;
     const cx = (a + b) / 2;
     // Rubble footing, a hair proud of the whitewash so the step shows.
-    parts.push(place({ geo: buildBox(w, foot, T + 0.08), pos: [cx, foot / 2, 0], mat: MAT.rubble, tone: 0.45 + R() * 0.15 }, rot));
+    parts.push(place({ geo: buildBox(w, foot, T + 0.08), pos: [cx, foot / 2, 0], mat: FOOT, tone: 0.45 + R() * 0.15 }, rot));
     // Whitewashed wall above it. Its foot sits 2 cm INTO the footing (no shared face).
     parts.push(place({ geo: buildBox(w, H - foot + 0.02, T), pos: [cx, foot - 0.02 + (H - foot + 0.02) / 2, 0], mat: MAT.white, tone: 0.38 + R() * 0.1 }, rot));
     // Wall-walk: a stone banquette along the inside face.
-    parts.push(place({ geo: buildBox(w - 0.06, walkY, 1.0), pos: [cx, walkY / 2, T / 2 + 0.5], mat: MAT.rubble, tone: 0.35 }, rot));   // ends 3 cm in: flush with the footing's ends they z-fought
+    parts.push(place({ geo: buildBox(w - 0.06, walkY, 1.0), pos: [cx, walkY / 2, T / 2 + 0.5], mat: FOOT, tone: 0.35 }, rot));   // ends 3 cm in: flush with the footing's ends they z-fought
     if (detail >= 2) {
       // THE BORDJ'S PARAPET (the buildings lab, 2026-10-07, from photos of Algerian bordjs — you:
       // "go with 1"): no merlons (the toy-castle cliché) but a plain, heavy parapet with its
@@ -90,7 +90,7 @@ function wallRun(parts, R, { len, H, T, rot, place, skip = [], walkDrop = 0, det
       for (let k = 1; k <= nb; k++) {
         const bx = a + (w * k) / (nb + 1);
         // Two steps: the lower deeper (in the rubble footing's stone), the upper whitewashed.
-        parts.push(place({ geo: buildBox(0.7, 1.3, 0.62), pos: [bx, 0.65, -T / 2 - 0.27], mat: MAT.rubble, tone: 0.45 + R() * 0.1 }, rot));
+        parts.push(place({ geo: buildBox(0.7, 1.3, 0.62), pos: [bx, 0.65, -T / 2 - 0.27], mat: FOOT, tone: 0.45 + R() * 0.1 }, rot));
         parts.push(place({ geo: buildBox(0.56, H - 1.0, 0.32), pos: [bx, 1.25 + (H - 1.0) / 2 - 0.05, -T / 2 - 0.13], mat: MAT.white, tone: 0.5 + R() * 0.08 }, rot));
         parts.push(place({ geo: buildBox(0.62, 0.08, 0.4), pos: [bx, H + 0.16, -T / 2 - 0.15], mat: MAT.concrete, tone: 0.48 }, rot));
       }
@@ -164,8 +164,8 @@ function tower(parts, R, { x, z, W, H, seed, detail = 1 }) {
     // The TALUS: the tower stands on a sloped stone skirt (a 4-sided frustum turned square).
     const tal = new THREE.CylinderGeometry((W / 2) * Math.SQRT2 + 0.02, (W / 2 + 0.55) * Math.SQRT2, 1.8, 4, 1).rotateY(Math.PI / 4);
     const uv = tal.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * W * 2, uv.getY(i) * 0.9);
-    parts.push({ geo: indexed(tal), pos: [x, 0.9, z], mat: MAT.rubble, tone: 0.5 });
-  } else parts.push({ geo: buildBox(W + 0.1, foot, W + 0.1), pos: [x, foot / 2, z], mat: MAT.rubble, tone: 0.5 });
+    parts.push({ geo: indexed(tal), pos: [x, 0.9, z], mat: FOOT, tone: 0.5 });
+  } else parts.push({ geo: buildBox(W + 0.1, foot, W + 0.1), pos: [x, foot / 2, z], mat: FOOT, tone: 0.5 });
   parts.push({ geo: buildBox(W, H - foot + 0.02, W), pos: [x, foot - 0.02 + (H - foot + 0.02) / 2, z], mat: MAT.white, tone: 0.56 });
   // A string course under the parapet: the line that makes it a tower, not a box.
   parts.push({ geo: buildBox(W + 0.24, 0.18, W + 0.24), pos: [x, H - 0.05, z], mat: MAT.concrete, tone: 0.55 });
@@ -221,7 +221,7 @@ function tower(parts, R, { x, z, W, H, seed, detail = 1 }) {
 /** A flat-roofed whitewashed block: doors, windows with shutters, a parapet. */
 function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4, detail = 1, roof = "barracks" }) {
   const foot = 0.6;
-  parts.push({ geo: buildBox(w + 0.08, foot, d + 0.08), pos: [x, foot / 2, z], mat: MAT.rubble, tone: 0.4 });
+  parts.push({ geo: buildBox(w + 0.08, foot, d + 0.08), pos: [x, foot / 2, z], mat: FOOT, tone: 0.4 });
   parts.push({ geo: buildBox(w, h - foot + 0.02, d), pos: [x, foot - 0.02 + (h - foot + 0.02) / 2, z], mat: MAT.white, tone: 0.5 + R() * 0.1 });
   // Flat roof: a concrete slab, a low parapet, a spout.
   parts.push({ geo: buildBox(w + 0.3, 0.2, d + 0.3), pos: [x, h + 0.1, z], mat: MAT.concrete, tone: 0.42 });
@@ -289,7 +289,11 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4, 
   for (let k = 1; k < 9; k++) parts.push({ geo: buildBox(0.52, 0.045, 0.045), pos: [lx2, (k * (h + 0.6)) / 9, lz2 + doorSide * 0.12 * (0.5 - k / 9) * 0.9], mat: MAT.timber, tone: 0.3 });
 }
 
-export function buildFrenchPost({ seed = 1957, detail = 1 } = {}) {
+// `footStone` (alg-rts, 2026-10-11): the footing's and banquettes' stone — the rubble cell read cold
+// blue-grey against the ochre ground; MAT.limestone is the Aurès' warm stone.
+let FOOT = MAT.rubble;
+export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubble } = {}) {
+  FOOT = footStone;
   const R = rng(seed);
   const parts = [];
   const L = 22, H = 3.2, T = 0.6, hl = L / 2;
@@ -322,7 +326,7 @@ export function buildFrenchPost({ seed = 1957, detail = 1 } = {}) {
   }
   // Corner piers where the runs meet (the runs stop short of the corners).
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    parts.push({ geo: buildBox(T + 0.04, 1.0, T + 0.04), pos: [sx * (hl - T / 2), 0.5, sz * (hl - T / 2)], mat: MAT.rubble, tone: 0.45 });
+    parts.push({ geo: buildBox(T + 0.04, 1.0, T + 0.04), pos: [sx * (hl - T / 2), 0.5, sz * (hl - T / 2)], mat: FOOT, tone: 0.45 });
     parts.push({ geo: buildBox(T, H - 0.98, T), pos: [sx * (hl - T / 2), 0.98 + (H - 0.98) / 2, sz * (hl - T / 2)], mat: MAT.white, tone: 0.52 });
   }
 
@@ -347,7 +351,7 @@ export function buildFrenchPost({ seed = 1957, detail = 1 } = {}) {
   // a knee-high wall through the gateway, and the men marched through it
   // (you, 2026-09-30). In the passage, a worn threshold slab, 8 cm up.
   const sideW = (gW + 0.1 - gateW) / 2 - 0.03;   // 3 cm back from the arch's jambs (flush, they z-fought)
-  for (const sx of [-1, 1]) parts.push({ geo: buildBox(sideW, 1.04, gD + 0.1), pos: [sx * (gateW / 2 + 0.03 + sideW / 2), 0.52, gz - 0.4 + gD / 2], mat: MAT.rubble, tone: 0.5 });
+  for (const sx of [-1, 1]) parts.push({ geo: buildBox(sideW, 1.04, gD + 0.1), pos: [sx * (gateW / 2 + 0.03 + sideW / 2), 0.52, gz - 0.4 + gD / 2], mat: FOOT, tone: 0.5 });
   parts.push({ geo: buildBox(gateW - 0.04, 0.08, gD + 0.06), pos: [0, 0.04 + 0.02, gz - 0.4 + gD / 2], mat: MAT.limestone, tone: 0.45 });
   if (detail >= 2) {
     // The gate's PARAPET, plain and heavy like the walls', with slits; a BRETÈCHE over the arch —

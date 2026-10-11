@@ -104,7 +104,7 @@ const BUILDINGS = {
   // grain and relief on top (algKitPhoto.js) — the game's post on the LEFT.
   postePhoto: {
     label: "Poste (photo)", gap: 42, before: () => buildFrenchPost({ detail: 2 }),
-    after: () => { const g = buildFrenchPost({ detail: 2 }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); return g; },
+    after: () => { const g = buildFrenchPost({ detail: 2, footStone: MAT.limestone }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); return g; },
     tags: ["POSTE (LE JEU)", "POSTE · DÉTAIL PHOTO"], note: "le poste du jeu à gauche, le même avec le grain et le relief des photos à droite.",
   },
   mortier: {
