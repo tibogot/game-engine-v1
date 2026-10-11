@@ -536,6 +536,48 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      algGame), its moussebel; done when he has fired and is down (checked: revealed at ~21 s, the
      squad took him, no loss). 15 lessons. The training also hides the objectives panel now.
    - [ ] **you**: play it as a new player — wording, the order of the lessons, the pace.
+   - [x] THE MISSING LESSONS (2026-10-11, my review, your go) — 15 → 18 lessons: "Les sapeurs"
+     (build a sandbag wall — the sapper squad you start with), "Les maisons" (a garrison, in then
+     out with Sortir K), "Gagner la bataille" (the score bar shown from there on — the panel moved
+     under it — and the score running; the FLN's 500 → 498). + Ctrl+number in "Sélectionner";
+     the end screen: the fog of war in battle, the manual (Esc). Each checked in the game.
+   - [~] COH 3'S CAMERA (2026-10-11, measured from its default view: assets-src/refs/coh3/README.md):
+     26° lens (was 40°), 102 m out (65), 44° down at the default (53°; 39-47° over the zoom, was
+     48-56°), distances ×1.58 so the same ground is in view at every zoom. Adapted with it: plant
+     detail floors [190, 260] (were [130, 180]), the haze ×0.64, the sound's listener height ×0.73,
+     the seated crews drawn to 200 m (unitRenderer crewFar). ?cam=old = the old camera.
+     Checked: our ring's height/width 0.68 (CoH's 0.69; old 0.80). MEASURED (HUD GPU button, the
+     Aïn Tighanimine oasis, 3 rounds): default 8.4 ms (old 8.6), zoomed out 8.8 ms (old 9.4).
+     - [ ] **you**: play with it; then a CoH screenshot fully zoomed IN and fully OUT to match the ends.
+     - [ ] the capture rings: ours 22 m / 40 m, CoH's ~10-12 m — decide before porting the point marks.
+     - [ ] CHECK: the grass blades fade 44-68 m from the camera (algGame FAR GRASS note) — from 102 m
+       back, are the oases' blades only there zoomed in now? (not checked yet)
+   - YOUR TRAINING-CAMP PASS (2026-10-11, beside CoH 3) — the findings, one line each:
+     - [~] THE POINTS' GROUND MARKS (CoH 3: dashed white until held, then a SOLID ring in the
+       holder's colour + a glowing disc at the centre; at the capture a wave of light runs out
+       from the centre and blue streaks rise). LAB first: algPointMarks.js (dashed ring that the
+       capturer's colour fills clockwise from the top, solid when held, the disc with a dashed
+       rim, the capture wave + flash + rising streaks, uniforms only) in the building lab,
+       "Point de ravitaillement" (the game's ring left, the new right; Point: Neutre / Capture
+       50 % / Tenu France / Tenu FLN / ▶ Capture). NEXT: your look → then the GAME: drape it
+       (terrainDrape.js), pool it (one draw for all points' rings, the discs, the bursts),
+       replace the villageRings in algUnits.js, fire capture() on an ownership change.
+     - [ ] THE POINT'S MODEL: the pole reads as an antenna — a sturdier mast, a base (sandbags /
+       crates), guy ropes, the depot reading as fuel or ammunition; the villages' flagpole the same
+       family; the floating icon (+5) checked at every zoom.
+     - [x] BUG: "K to disembark doesn't work" (lesson 14, the half-track) — FIXED 2026-10-11
+       (algTransports.js disembark): it emptied the vehicle, but men still RUNNING to it (driven
+       off before all were in; they chase it up to 30 s) caught up and climbed in — it looked full
+       again and the lesson (vehicle empty) never ended. DÉBARQUER now calls them off too.
+       Checked in the lesson: 3 in, 3 running, K → 0 aboard, still 0 six seconds later.
+       THE REAL CAUSE of your report: the half-track's MODEL drew men on its benches always —
+       decoration, not units — so the empty half-track looked full and K had nobody to unload.
+       Now the bench seats are TROOP seats (rtsVehiclesFr.js `troop`, half-track + open GMC),
+       drawn only for the men really aboard (unitRenderer `troopsAboard` ← algTransports.menOf);
+       driver and gunner always. Checked zoomed in: empty benches → 5 men in → K → empty again.
+     - [ ] BUG: REINFORCE — the men called in by "Renforcer" come out of the post but its GATE
+       does NOT open for them; it opens for every man the post TRAINS (algProducer / the gate's
+       hook): the reinforcement path must trigger the same gate opening.
    - [x] ~~the training's thumbnail on the menu~~ — the menu has no thumbnails now (2026-10-11).
    - [ ] the Aurès' ALN cave still shows on the training's minimap ("CAVE"): the final band comes
      out of it, so it stays for now.
