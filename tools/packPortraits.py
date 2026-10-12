@@ -39,14 +39,14 @@ def gutters(px, w, h, axis):
     return res
 
 
-def cells(path, cols, rows, rows_override=None):
+def cells(path, cols, rows, rows_override=None, cols_override=None):
     im = Image.open(path).convert("RGB")
     g = im.convert("L")
     w, h = g.size
     px = g.load()
     def between(gs):
         return [(gs[i][1], gs[i + 1][0]) for i in range(len(gs) - 1)]
-    xs = between(gutters(px, w, h, 0))
+    xs = cols_override or between(gutters(px, w, h, 0))
     ys = rows_override or between(gutters(px, w, h, 1))
     if len(xs) != cols or len(ys) != rows:
         raise SystemExit(f"{path}: found {len(xs)} x {len(ys)} cells, expected {cols} x {rows}: {xs} {ys}")
@@ -86,6 +86,13 @@ def split(name, cols, rows, cw, ch, prefix, q=88):
 
 
 # python tools/packPortraits.py --split   only re-cuts the per-face files from the atlases
+# python tools/packPortraits.py --vehicles <sheet>   only the vehicles (2026-10-12: the redo with
+#   French markings). Its cells are split by thin GREY LINES, not dark gutters (the finder saw
+#   5 x 5): the boxes measured, inside the lines (x 476-485, 961-969; y 537-543).
+if sys.argv[1] == "--vehicles":
+    pack(cells(sys.argv[2], 3, 2, [(0, 536), (544, 1086)], [(0, 475), (486, 960), (970, 1448)]), 3, 2, 240, 270, "portraits_vehicles.webp", 82, contain=True)
+    split("portraits_vehicles.webp", 3, 2, 240, 270, "v")
+    sys.exit()
 if sys.argv[1] != "--split":
     soldiers, vehicles = sys.argv[1], sys.argv[2]
     pack(cells(soldiers, 8, 4), 8, 4, 160, 200, "portraits_soldiers.webp", 82)
