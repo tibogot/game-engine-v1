@@ -4,7 +4,14 @@
  * settings, paint layers) — none of its content (decals, lakes, trees, props, painted plants,
  * far terrain).
  *
- *   node tools/algTrainingLevel.mjs --from public/levels/alg-aures.v3proj --out public/levels/alg-training.v3proj [--force 1]
+ *   node tools/algTrainingLevel.mjs                       rebuild the camp IN PLACE, from its own file
+ *   node tools/algTrainingLevel.mjs --from <other.v3proj> --out <new.v3proj> [--force 1]
+ *
+ * ITS OWN MAP (2026-10-12, the cleanup — you: "is it not better if it's a map on its own?"): the
+ * look (sky, light, grass and plant settings, the other paint slots) now comes from the CAMP'S OWN
+ * file by default, no longer from the Aurès' — measured: rebuilt from itself it is byte-identical,
+ * so it needed nothing more from the Aurès. (It was built from alg-aures.v3proj as of 1bf35c9 —
+ * before the alfa steppe.) --from another map still borrows that map's look, on purpose.
  *
  * THE GROUND (games/alg-rts/maps/training.js gives the sites, the track, the box, the knoll):
  *   heights  a plain at 20 m with gentle swells (±1.5 m), flattened round the post and the
@@ -19,8 +26,9 @@ import { PLAY, LAYOUT, MAP } from "../games/alg-rts/maps/training.js";
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, "")] = process.argv[i + 1];
-if (!args.from || !args.out) throw new Error("usage: --from <template.v3proj> --out <new.v3proj> [--force 1]");
-if (fs.existsSync(args.out) && args.force !== "1") throw new Error(`${args.out} exists — --force 1 to rebuild it`);
+args.out ??= "public/levels/alg-training.v3proj";
+args.from ??= args.out;   // in place: the camp's own look
+if (args.from !== args.out && fs.existsSync(args.out) && args.force !== "1") throw new Error(`${args.out} exists — --force 1 to rebuild it`);
 
 const tpl = await readProject(args.from);
 const man = tpl.manifest;

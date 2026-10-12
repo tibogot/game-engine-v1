@@ -36,6 +36,11 @@ export const MAP = {
   handPlaced: false,
   // THE TRAINING (algTutorial.js): the lessons run instead of the FLN's AI and the win rules.
   tutorial: true,
+  // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off): the birds, the
+  // villagers (the mechta's people, the shepherd's lesson), the ground's splats, stones and macro
+  // photo. Not the Aurès' farmsteads, fields, herds, hens, village life or telegraph; no FLN AI
+  // (the lessons bring their enemies), no fog of war. Its own rocks and trees: `scenery` below.
+  systems: { birds: true, civ: true, splats: true, stones: true, macro: true },
   // The knoll (the high-ground / cover lesson), as the level tool raises it.
   knoll: { x: 70, z: -58, r: 30, h: 5 },
   // A FARMSTEAD west of the track (algGame.js places it; algCivilians puts its "shepherd" there —

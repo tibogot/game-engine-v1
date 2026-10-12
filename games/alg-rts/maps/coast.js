@@ -36,4 +36,8 @@ export const MAP = {
   tracks: [],
   supply: [],
   handPlaced: false,
+  // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off). PROVISIONAL, as the map:
+  // the battle's own (the FLN's AI, the fog of war); its scenery chosen when the coast is built —
+  // not the Aurès' by default (2026-10-12, the cleanup).
+  systems: { ai: true, fow: true },
 };

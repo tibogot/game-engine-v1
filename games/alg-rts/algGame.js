@@ -21,6 +21,7 @@ import { createAlgDevPanel } from "./devPanel.js";
 import { createAlgFog } from "./algFog.js";
 import { rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { LAYOUT, MAP, PLAY, VIEW_YAW, siteYaw } from "./layout.js";
+import { systemsOff } from "./mapSystems.js";
 import { buildFarmstead } from "../../v3/render/objects/rtsAlgVillage.js";
 import { createAlgUnits } from "./algUnits.js";
 import { createAlgNightLamps } from "./algNightLamps.js";
@@ -63,15 +64,13 @@ const OLD_CAM = params.get("cam") === "old";
 // "enemy"), see through ITS eyes; the FLN's AI is off then (and no French AI yet: step 2). The team
 // strings stay the factions; shared-rts/teams.js SIDES.human says which one is yours.
 setHumanSide(params.get("side") === "fln" ? "enemy" : "player");
-// THE TRAINING MAP (maps/training.js `tutorial`): the Aurès' systems that would clutter a lesson
-// OFF unless the URL says otherwise — the scenery pieces, fields, herds and hens, village life,
-// the telegraph, the FLN's own AI (the lessons bring their enemies) and the fog of war. Written
-// into the address so every module that reads its switch sees it.
-if (MAP.tutorial) {
-  // (the civilians stay: the mechta's people, and the shepherd's lesson)
-  const OFF = ["landmarks", "fields", "herds", "hens", "life", "poles", "ai", "fow"];
+// WHAT THIS MAP SHOWS (mapSystems.js): each map lists its systems (maps/*.js `systems`); the
+// others OFF unless the URL says otherwise. Written into the address so every module that reads
+// its switch sees it. (The Aurès lists them all: nothing written. The training: the same eight
+// as its old OFF list, in the same order.)
+{
   let changed = false;
-  for (const k of OFF) if (!params.has(k)) { params.set(k, "0"); changed = true; }
+  for (const k of systemsOff(MAP)) if (!params.has(k)) { params.set(k, "0"); changed = true; }
   if (changed) history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
 }
 // A map's OWN scenery (maps/training.js `scenery`): algLandmarks' rocks and lone trees at its counts,

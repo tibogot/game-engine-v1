@@ -129,4 +129,9 @@ export const MAP = {
     { name: t("Gourbi en ruine"), x: 36, z: 92, res: "mun" },            // ruinedHut5, mid-valley
   ],
   handPlaced: true,
+  // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off): all of it.
+  systems: {
+    landmarks: true, fields: true, herds: true, hens: true, life: true, poles: true, ai: true, fow: true,
+    birds: true, splats: true, macro: true, stones: true, civ: true,
+  },
 };
