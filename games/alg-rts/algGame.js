@@ -39,6 +39,7 @@ import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones, prefetchStonePhotos } from "./algStones.js";
 import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
+import { createAlgSea, hideOceanPro } from "./algSea.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
@@ -500,6 +501,24 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("splats") !== "0" && app.groundCache) {
     onStatus(t("Usure du terrain…"));
     try { app.algSplats = await createAlgSplats(app); } catch (e) { console.warn("[alg splats] failed:", e); }
+  }
+  // THE GAME'S OWN SEA (algSea.js, a map with `sea`: the coast): drawn for the RTS camera, the
+  // level's sea level kept; Ocean Pro hidden (it may come late: looked for again every 2 s until
+  // found). ?sea=pro = Ocean Pro instead, to compare.
+  if (MAP.sea && params.get("sea") !== "pro") {
+    try {
+      const oc = app.environment?.ocean?.state, level = oc?.enabled ? oc.seaLevel : null;
+      if (Number.isFinite(level)) {
+        app.algSea = createAlgSea(app, { level });
+        hideOceanPro(app);
+        let lastLook = performance.now();
+        app.addPreRenderHook(() => {
+          if (performance.now() - lastLook < 2000) return;
+          lastLook = performance.now();
+          hideOceanPro(app);
+        });
+      }
+    } catch (e) { console.warn("[alg sea] failed:", e); }
   }
   // THE MACRO PHOTO (algMacroGround.js): the ground's large-scale variation. ?macro=0 = without.
   if (params.get("macro") !== "0") {

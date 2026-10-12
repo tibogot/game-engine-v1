@@ -40,4 +40,6 @@ export const MAP = {
   // the battle's own (the FLN's AI, the fog of war); its scenery chosen when the coast is built —
   // not the Aurès' by default (2026-10-12, the cleanup).
   systems: { ai: true, fow: true },
+  // THE GAME'S OWN SEA (algSea.js) instead of Ocean Pro (2026-10-12): drawn for the RTS camera.
+  sea: true,
 };
