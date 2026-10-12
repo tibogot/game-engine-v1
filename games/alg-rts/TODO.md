@@ -557,6 +557,11 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
      - [ ] CHECK: the grass blades fade 44-68 m from the camera (algGame FAR GRASS note) — from 102 m
        back, are the oases' blades only there zoomed in now? (not checked yet)
    - YOUR TRAINING-CAMP PASS (2026-10-11, beside CoH 3) — the findings, one line each:
+     - [x] BUG (your 2nd training pass, 2026-10-12): after DÉBARQUER the men ran back to the post. A man
+       standing still walks back to his HOLD POINT if moved — theirs was still where they climbed in. The
+       tailgate (algTransports unboard) and a house's door (algGarrison exit) now reset it
+       (haltMovement); a move order given with them comes after and wins. Checked: 0 moving 4 s after K;
+       a move from inside: all out and on their way.
      - [~] MEN STUCK IN THE VILLAGES (2026-10-12, your screenshots: a man under a porch, inside the
        red cells; "this should never ever happen"). Research (CoH's Jurney article, Supreme Commander 2's
        flow fields, 0 A.D.'s clearance grid) + a map of our pipeline. CAUSES: (a) separation FORCED two

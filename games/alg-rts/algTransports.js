@@ -70,6 +70,10 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     const x = v.position.x + Math.sin(a) * back, z = v.position.z + Math.cos(a) * back;
     const p = navGrid?.nearestOpenWorld?.(x, z, true) ?? { x, z };
     u.position.set(p.x, app.getWorldHeight(p.x, p.z), p.z);
+    // HERE is his spot now (2026-10-12, you: "after disembark the soldiers ran back to the base"): a man
+    // standing still walks back to his hold point if moved, and his was still where he CLIMBED IN — the
+    // post, 100 m back. (A move order given with the Débarquer comes after this and wins.)
+    u.haltMovement?.();
   }
   /** Every man of `list` that rides out (a move order, a DÉBARQUER on the men). */
   const exitAll = (list) => { let k = 0; for (const u of list) if (u.carrier) unboard(u, k++); };

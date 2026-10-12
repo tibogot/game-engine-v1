@@ -144,6 +144,9 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     const a = spread * 2.39996, r = spread ? 1.6 : 0;
     const p = navGrid?.nearestOpenWorld?.(h.door.x + Math.cos(a) * r, h.door.z + Math.sin(a) * r, true) ?? h.door;
     u.position.set(p.x, app.getWorldHeight(p.x, p.z), p.z);
+    // His spot is the door now — not where he stood when he went in (as the transports: algTransports
+    // unboard, 2026-10-12; a move order given with the Sortir comes after and wins).
+    u.haltMovement?.();
   }
   const exitAll = (list) => { let k = 0; for (const u of list) if (u.inside) exit(u, k++); };
 
