@@ -20,6 +20,12 @@ PHASE 1 — finish what is half-built
    rubble — CoH's signature, the biggest gameplay gap left.
 3. [ ] The FRENCH AI: sappers that build, mortars, flares, doctrines.
 4. [ ] The FLN side's own toolkit: structures to build, the cave as a real base, its abilities.
+   NO TANKS (2026-10-12, you: "no vehicles at all — strange for a CoH?"): historically the ALN had
+   none in the war (the wilayas on foot, mules; the army of the borders, Tunisia / Morocco, ~30 000
+   men: 81 / 60 mortars from 1959, 120 mortars and 106 / 75 / 37 SR recoilless guns from 1960, much
+   of it Soviet; tanks only after 1962). Its "armour" instead: a 120 mortar team, a recoilless-rifle
+   team (the tank-killer), a tripod HMG against helicopters, MULES (ammunition / a moving supply
+   point); as doctrines: a captured Jeep / GMC, and a late-war ARMY OF THE BORDERS doctrine.
 5. [ ] The souk (ksar); the coplanar scan of the other French pieces at the detail the game builds.
 6. [ ] VOICES + radio calls (FR + Arabic) — blocked on recordings / a TTS key (env var only).
 
@@ -28,7 +34,9 @@ PHASE 2 — content for a launch
 8. [ ] A THIRD MAP (sugg.: a mountain pass or village) — skirmish variety.
 9. [~] SKIRMISH from the menu: map, side, difficulty, doctrine. MAP + SIDE done 2026-10-11 (menu.html
    "Batailles" → alg.html?map=…&side=fln); difficulty stays on the side's briefing; doctrine to do.
-   NEXT: map + side CARDS with art (waiting on a French and an FLN picture, ~600×800).
+   [x] CARDS (2026-10-12, Sudden Strike 5 style): Battles → choose your SIDE (two cards, drawn
+   distressed flags) → choose the BATTLEFIELD (a card per map, its art; the coast "coming soon").
+   The coast card wants its art (the ChatGPT list, sheet 5a).
 10. [ ] A SHORT CAMPAIGN: 3-5 missions, Colonel Delorme, briefings between; objectives beyond
     holding villages (escort a convoy, defend the post at night, a raid on a cave).
 11. [ ] SAVE / LOAD (between campaign missions at least).
