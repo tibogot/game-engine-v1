@@ -15,8 +15,7 @@
 //   wadi bed       cracked riverbed mud, rounded stones
 //   oasis grove    dead leaves under the palms
 //   dirt track     stony path on the shoulders, wheel-churned mud down it
-//   villages       rubble at the walls, trampled ground in the yards,
-//                  furrowed fields beside them
+//   villages       rubble at the walls, trampled ground in the yards (their fields: algFields.js)
 //   everywhere     wind-blown sand, rare old scorches
 //
 // Materials: Poly Haven (CC0), tools/fetchSplatMaterials.mjs.
@@ -36,7 +35,6 @@ const MATS = {
   burnt:     { slug: "burned_ground_01",             tint: [0.9, 0.86, 0.82] },
   leaves:    { slug: "dry_decay_leaves",             tint: [0.95, 0.9, 0.8] },
   redSand:   { slug: "red_sand",                     tint: [1.0, 0.9, 0.8] },
-  furrows:   { slug: "farm_furrows",                 tint: [1.0, 0.92, 0.8] },
   path:      { slug: "stony_dirt_path",              tint: [1.0, 0.93, 0.84] },
   rubble:    { slug: "rubble",                       tint: [1.02, 0.97, 0.9] },
   redCrack:  { slug: "cracked_red_ground",           tint: [0.95, 0.88, 0.8] },
@@ -222,20 +220,9 @@ export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
       placed++;
     }
     byMat.rubble = (byMat.rubble ?? 0) + placed;
-    // Fields: a few furrowed plots beside a hamlet/dechra, on the flat.
-    if (s.kind === "hamlet" || s.kind === "dechra") {
-      for (let f = 0; f < 3; f++) {
-        const a = rnd() * Math.PI * 2, d = r * (1.5 + rnd() * 0.8);
-        const fx = s.x + Math.cos(a) * d, fz = s.z + Math.sin(a) * d;
-        const hx = H(fx + 3, fz) - H(fx - 3, fz), hz = H(fx, fz + 3) - H(fx, fz - 3);
-        if (Math.hypot(hx, hz) / 6 > 0.12) continue;           // fields only on the flat
-        const w0 = weights(fx, fz);
-        if (!w0 || w0[WADI] > 0.3 || w0[TRACK] > 0.3) continue;
-        out.push({ x: fx, z: fz, w: 14 + rnd() * 10, l: 22 + rnd() * 14, yaw: (s.turn ?? 0) * Math.PI / 180 + (rnd() - 0.5) * 0.3,
-          mat: M.furrows, opacity: 0.8, tint: MATS.furrows.tint, tile: 4, soft: 0.12, push: 0.3, warp: 0.08, normal: 1, _layer: -1 });
-        byMat.furrows = (byMat.furrows ?? 0) + 1;
-      }
-    }
+    // (No furrowed-field splats any more — you, 2026-10-12: "it looks very weird". A 4 m photo
+    // tiled over a 30 m plot drew a rail at every seam, its furrows diagonal, the grass showing
+    // through. The real fields are algFields.js.)
   }
   // A campfire's scorch at the katiba camp.
   const camp = LAYOUT.sites.find((s) => s.kind === "aln");
