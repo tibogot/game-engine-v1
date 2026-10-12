@@ -287,6 +287,20 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     app.postFx.apply();
   }
   app.shadows?.setEnabled?.(false);   // the fitted frustum, not cascades (nam-rts measured)
+  // THE SHADOW'S NORMAL BIAS FOLLOWS ITS TEXEL (2026-10-12, you: a lit band at a rock's foot, over
+  // its shadow). 0.12 m (rtsPerfBoot) was set for one 2048 map over the whole ~340 m view — a 17 cm
+  // texel, 0.7 of one. The frustum is FITTED now: 2.3-5.9 cm a texel by zoom, so 0.12 was 2-5
+  // texels, and the ground that far from a caster's foot came out lit — a band under every
+  // overhang. One texel, never under 2 cm. ?nbias=0.12 = the old fixed value.
+  {
+    const fixedNB = params.has("nbias") ? Number(params.get("nbias")) : null;
+    let sunL = null;
+    app.scene.traverse((o) => { if (!sunL && o.isDirectionalLight && o.castShadow) sunL = o; });
+    if (sunL) app.addPreRenderHook?.(() => {
+      const tx = app.shadows?.fitInfo?.()?.texel;
+      sunL.shadow.normalBias = fixedNB ?? (tx > 0 ? Math.max(0.02, tx) : 0.12);
+    });
+  }
 
   // The plain outside the heightmap is bare ground: soil, not the editor's white.
   app.setGroundBase?.({ baseColor: PLAIN_COLOR, lineColor: PLAIN_COLOR, ao: 0 });
