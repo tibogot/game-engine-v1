@@ -87,7 +87,38 @@ function makeFrame(area, upYaw, px, world) {
 // the steep ground, the oasis water green-blue.
 const LOW = [164, 128, 86], HIGH = [216, 194, 150];
 const STEEP = [128, 86, 58], WATER = [58, 118, 112], VOID = [20, 19, 15];
+/** A map's own ground colours by paint layer ([[layer, rgb]]), else the Aurès palette by height. */
+const PAINT_COLS = MAP.minimap?.layers ? Object.entries(MAP.minimap.layers).map(([k, v]) => [+k, v]) : null;
+const CANOPY = [52, 70, 38];
 const LIGHT = (() => { const l = [-1, -1, 1.6], n = Math.hypot(...l); return l.map((v) => v / n); })();
+
+/**
+ * The ground shader's macro photo on the CPU (v3/terrain/splatOverlayTsl.js macroVariation): two
+ * scales, the second turned ~52° and 1.73x, bilinear, the ratio clamped, mixed in by its strength.
+ * AVERAGED over ~20 m (a 3x3 of taps): at a metre or two a pixel the photo's own streaks, every
+ * 45 m, read as a woven pattern; only its big patches belong on the map.
+ */
+function macroSampler(M) {
+  if (!M?.bytes || !(M.strength > 0)) return null;
+  const { bytes, N, tile } = M, k = Math.min(1, M.strength * 1.2), D = 7;
+  const lum = (qx, qy) => {
+    const tx = (qx - Math.floor(qx)) * N - 0.5, ty = (qy - Math.floor(qy)) * N - 0.5;
+    const x0 = Math.floor(tx), y0 = Math.floor(ty), fx = tx - x0, fy = ty - y0;
+    const ld = (dx, dy) => bytes[(((y0 + dy) % N + N) % N) * N + (((x0 + dx) % N + N) % N)];
+    const a = ld(0, 0) + (ld(1, 0) - ld(0, 0)) * fx, b = ld(0, 1) + (ld(1, 1) - ld(0, 1)) * fx;
+    return ((a + (b - a) * fy) / 255) * 2;
+  };
+  const one = (x, z) => {
+    const r1 = lum(x / tile, z / tile);
+    const r2 = lum((x * 0.616 - z * 0.788) / (tile * 1.73) + 0.37, (x * 0.788 + z * 0.616) / (tile * 1.73) + 0.61);
+    return Math.min(2, Math.max(0.35, r1 + (r2 - r1) * 0.42));
+  };
+  return (x, z) => {
+    let r = 0;
+    for (let a = -1; a <= 1; a++) for (let b = -1; b <= 1; b++) r += one(x + a * D, z + b * D);
+    return 1 + (r / 9 - 1) * k;
+  };
+}
 
 /** The terrain, tracks and building plan at `px` × `px`, once. */
 function bakeBase(app, frame, px, world, markS = px / 160) {
@@ -116,6 +147,8 @@ function bakeBase(app, frame, px, world, markS = px / 160) {
   }
   const span = Math.max(1, maxH - minH);
   const mPerPx = 1 / frame.k;
+  const macro = macroSampler(app.algMacroGround);
+  const wxz = (x, y) => { const w = frame.toWorld(x + 0.5, y + 0.5); return [w.x, w.z]; };
   const at = (x, y) => {
     const v = H[Math.min(px - 1, Math.max(0, y)) * px + Math.min(px - 1, Math.max(0, x))];
     return Number.isNaN(v) ? H[y * px + x] : v;
@@ -133,8 +166,23 @@ function bakeBase(app, frame, px, world, markS = px / 160) {
       const ex = 1.8, nl = Math.hypot(gx * ex, gy * ex, 1);
       const shade = Math.min(1.3, Math.max(0.45, ((-gx * ex) * LIGHT[0] + (-gy * ex) * LIGHT[1] + LIGHT[2]) / nl / LIGHT[2]));
       const slope = 1 - 1 / Math.hypot(gx, gy, 1);
-      rgb = lerp3(LOW, HIGH, clamp01((h - minH) / span));
+      if (PAINT_COLS) {
+        // The map's own ground: its paint layers' colours mixed by the paint there, a little paler
+        // up high (maps/training.js minimap.layers — a green plain is not the Aurès' ochre).
+        const w = frame.toWorld(x + 0.5, y + 0.5), pw = app.samplePaintWeights?.(w.x, w.z);
+        let r = 0, g = 0, b = 0, sum = 0;
+        if (pw) for (const [li, col] of PAINT_COLS) { const k = pw[li] ?? 0; r += col[0] * k; g += col[1] * k; b += col[2] * k; sum += k; }
+        rgb = sum > 0.05 ? [r / sum, g / sum, b / sum] : PAINT_COLS[0][1];
+        rgb = rgb.map((c) => c * (0.92 + 0.16 * clamp01((h - minH) / span)));
+      } else rgb = lerp3(LOW, HIGH, clamp01((h - minH) / span));
       if (slope > 0.2) rgb = lerp3(rgb, STEEP, clamp01((slope - 0.2) / 0.3));
+      // WOODS (CoH's map shows them: you plan a covered route on it): the painted tree field
+      // (cedar, holm oak, date palms) a darker green where it is thick.
+      const wood = app.sampleTallPlantDensity ? clamp01((app.sampleTallPlantDensity(...wxz(x, y)) - 0.12) / 0.35) : 0;
+      if (wood > 0) rgb = lerp3(rgb, CANOPY, wood * 0.75);
+      // THE GROUND'S OWN PATCHES (algMacroGround: the macro photo, the shader's very formula) — a
+      // flat plain read as one colour; the game's ground is mottled at tens of metres.
+      if (macro) { const [wx, wz] = wxz(x, y), m = macro(wx, wz); rgb = rgb.map((c) => c * m); }
       rgb = rgb.map((c) => c * shade);
     }
     if (!IN[i] && rgb !== VOID) {
@@ -170,6 +218,36 @@ function bakeBase(app, frame, px, world, markS = px / 160) {
     ctx.beginPath(); pts.forEach((m, i) => ctx[i ? "lineTo" : "moveTo"](m.x, m.y)); ctx.closePath();
     ctx.fillStyle = FIELD[b.kind] ?? FIELD.plough; ctx.fill();
     ctx.strokeStyle = "rgba(70, 58, 44, 0.7)"; ctx.lineWidth = 0.6 * s; ctx.stroke();
+  }
+
+  // LONE TREES AND PALMS (the placed ones: algLandmarks, the showroom's gardens): a dark crown
+  // each, its size the tree's (low plants — agaves, broom, hedges — left out).
+  const pf = app.algPlacedFoliage;
+  if (pf?.plants?.length) {
+    const sizeOf = [];
+    for (const t of pf.types.values()) sizeOf[t.index] = t.type?.size ?? 1;
+    ctx.fillStyle = "rgba(38, 54, 28, 0.8)";
+    for (const p of pf.plants) {
+      const h = (sizeOf[p.typeIndex] ?? 1) * p.scale;
+      if (h < 4) continue;
+      const m = frame.toMini(p.x, p.z), r = Math.max(0.9 * s, Math.min(7, h * 0.3) * frame.k);
+      ctx.beginPath(); ctx.arc(m.x, m.y, r, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  // ROCKS (algLandmarks): the outcrops and boulders, the big sandstone slabs — hard cover, dark stone.
+  const LM = app.algLandmarks;
+  if (LM) {
+    ctx.fillStyle = "rgba(86, 74, 62, 0.9)"; ctx.strokeStyle = "rgba(30, 24, 18, 0.6)"; ctx.lineWidth = 0.5 * s;
+    for (const r of LM.rocks ?? []) {
+      const m = frame.toMini(r.x, r.z);
+      ctx.beginPath(); ctx.arc(m.x, m.y, Math.max(0.7 * s, 1.8 * r.k * frame.k), 0, Math.PI * 2); ctx.fill();
+    }
+    for (const o of LM.sandstone ?? []) {
+      const c = Math.cos(o.yaw), sn = Math.sin(o.yaw);
+      const pts = [[-o.ax, -o.az], [o.ax, -o.az], [o.ax, o.az], [-o.ax, o.az]].map(([lx, lz]) => frame.toMini(o.x + lx * c + lz * sn, o.z - lx * sn + lz * c));
+      ctx.beginPath(); pts.forEach((m, i) => ctx[i ? "lineTo" : "moveTo"](m.x, m.y)); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    }
   }
 
   // THE BUILDINGS' PLAN: every face of a placed building that looks UP and

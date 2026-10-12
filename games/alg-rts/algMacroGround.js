@@ -25,6 +25,8 @@ export async function applyMacroGround(app, P = MACRO) {
   const bytes = new Uint8Array(N * N);
   for (let i = 0; i < N * N; i++) bytes[i] = Math.max(0, Math.min(255, Math.round((lum[i] / mean) * 0.5 * 255)));
   ov.setMacroImage(bytes);
+  // Kept for the minimap (ui/minimap.js): the same light and dark patches as the ground.
+  app.algMacroGround = { bytes, N, strength: P.strength, tile: P.tile };
   ov.uMacroTexStrength.value = P.strength;
   ov.uMacroTexScale.value = P.tile;
   app.groundCache?.markAllStale?.();
