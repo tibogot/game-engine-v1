@@ -204,7 +204,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // round ones (and units) the rings.
   const selectionFrames = createSelectionFrameField({ app, thick: 0.2 });
 
-  const units = createUnits({ app, navGrid, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS, spawn: {}, origin: muster });
+  // faceTargets: a man who stands and fires turns to his target (shared-rts/units.js, 2026-10-12).
+  const units = createUnits({ app, navGrid, types: ALG_UNIT_TYPES, typeKeys: ALG_UNIT_TYPE_KEYS, spawn: {}, origin: muster, faceTargets: true });
   app.units = units;
 
   // TWO GROUPES of appelés formed up in front of the post's gate (2 x 6, each

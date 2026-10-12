@@ -46,7 +46,7 @@ function turnToward(a, b, maxStep) {
   return a + THREE.MathUtils.clamp(d, -maxStep, maxStep);
 }
 
-function makeUnit(app, type, navGrid, x, z, near, team = "player") {
+function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
   const pos = new THREE.Vector3(x, 0, z);
   const target = new THREE.Vector3(x, 0, z);
   const waypoints = [];
@@ -379,6 +379,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
 
     update(dt) {
       const prevX = pos.x, prevZ = pos.z;
+      /** What he is shooting at, if alive: the ordered target first. */
+      const aimAt = () => (unit.attackTarget?.alive && unit.attackTarget.position ? unit.attackTarget : unit.target?.alive && unit.target.position ? unit.target : null);
       if (repathCd > 0) repathCd -= dt;
       sinceIntervene += dt;
 
@@ -562,6 +564,16 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       if (moved > 1e-3 && reverseT <= 0 && !type.drive) {
         heading = turnToward(heading, Math.atan2(movedX, movedZ), (type.turnRate ?? 3) * dt);
       }
+      // FACING WHAT HE SHOOTS AT (opts.faceTargets — alg-rts, 2026-10-12, you: "the soldiers don't
+      // always face what they are shooting at"): nothing turned a man to his target — his heading
+      // came only from his own motion and, once on his spot, the formation's facing; a man who stopped
+      // to fire kept whichever way he had walked (measured: 2-153° off while firing). Standing, on
+      // foot, with a live target: he turns to it (a little faster than walking — a man swings to
+      // a shot). Moving, he still faces his way (CoH: a man on the march fires as he goes).
+      else if (opts.faceTargets && foot && aimAt()) {
+        const tg = aimAt();
+        heading = turnToward(heading, Math.atan2(tg.position.x - pos.x, tg.position.z - pos.z), (type.turnRate ?? 3) * 1.5 * dt);
+      }
       // THE FORMATION'S FACING (selection.js: a right-drag, else the enemy near the spot, else the way
       // he came — CoH, 2026-10-12): a man on foot standing on his spot with nobody to shoot turns to it.
       else if (arrived && foot && unit.faceAngle != null && !unit.target && !unit.attackTarget) {
@@ -666,7 +678,11 @@ export function createUnits({
   // rather than making your first click "build the thing that makes money".
   spawn = { jeep: 8, helicopter: 4, soldier: 6, harvester: 2 },
   origin = { x: 0, z: 0 }, // the starting army musters here (the base)
+  // A man on foot who stands and fires TURNS TO HIS TARGET (alg-rts, 2026-10-12). Off by default:
+  // the other games keep theirs.
+  faceTargets = false,
 } = {}) {
+  const unitOpts = { faceTargets };
   const UNIT_TYPES = types;
   const UNIT_TYPE_KEYS = typeKeys ?? Object.keys(types);
   const units = [];
@@ -707,7 +723,7 @@ export function createUnits({
       let z = o.z + gz * gap;
       // Ground units must not spawn in a lake or on a cliff.
       if (!type.isAir && navGrid) ({ x, z } = navGrid.nearestOpenWorld(x, z, !!type.foot));
-      units.push(makeUnit(app, type, navGrid, x, z, near));
+      units.push(makeUnit(app, type, navGrid, x, z, near, "player", unitOpts));
     }
   }
 
@@ -815,7 +831,7 @@ export function createUnits({
       if (!type) return null;
       let px = x, pz = z;
       if (snap && !type.isAir && navGrid) ({ x: px, z: pz } = navGrid.nearestOpenWorld(x, z, !!type.foot));
-      const u = makeUnit(app, type, navGrid, px, pz, near, team);
+      const u = makeUnit(app, type, navGrid, px, pz, near, team, unitOpts);
       // A game with squads: the man's role in his section's look (before the
       // renderer builds him: unitRenderer reads it in onSpawn).
       if (lookRole != null) u.lookRole = lookRole;
