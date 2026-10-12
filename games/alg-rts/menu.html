@@ -60,14 +60,43 @@
       .entry .tag { display: inline-block; font-family: "Segoe UI", system-ui, sans-serif; line-height: 1.4; margin-left: 10px; padding: 1px 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.12em; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 2px; vertical-align: 5px; }
       /* Every entry (main, choices, Start): brass on hover (colour only, no movement — you, 2026-10-11). */
       .entry:hover:not(:disabled), .entry:focus-visible { color: var(--brass-sel); outline: none; }
-      /* The battle setup: a section label; the choices white, the one made in brass. */
-      .h { margin: 20px 0 0; font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: #fff; }
-      .entry[data-map] b, .entry[data-side] b { font-size: 28px; }
-      .entry.sel { color: var(--brass-sel); }
-      .entry[data-map]:disabled { opacity: 0.3; }
-      .entry[data-side] .sub { font-size: 14px; letter-spacing: 0.05em; line-height: 1.4; opacity: 0.85; margin-top: 5px; }
-      .entry.go { margin-top: 18px; }
-      .entry.go b { font-size: 42px; letter-spacing: 0.08em; }
+      /* THE BATTLE SETUP AS CARDS (2026-10-12, you: "the map and the side are two different things —
+         two nice cards at the centre", from Sudden Strike 5's campaign screen): first the SIDE, two
+         cards with their distressed flag; then the MAP, a card each with its art. A click on a card
+         chooses it. The art dimmed behind (the veil), the column's smoke off. */
+      .veil { position: fixed; inset: 0; background: radial-gradient(ellipse at 50% 55%, rgba(10, 8, 5, 0.55), rgba(10, 8, 5, 0.86) 75%);
+        opacity: 0; pointer-events: none; transition: opacity 0.35s; }
+      body.cards .veil { opacity: 1; }
+      body.cards .smoke { opacity: 0; transition: opacity 0.35s; }
+      body.cards main { left: 0; right: 0; width: auto; align-items: center; gap: 0; padding: 0 16px; }
+      .ttl { margin: 0; font: 400 clamp(34px, 4.2vw, 52px)/1 "Bebas Neue", "Segoe UI", sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: #fff; text-align: center; }
+      .ttl-sub { margin: 8px 0 0; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase; color: rgba(255, 255, 255, 0.7); text-align: center; }
+      /* the rule under the title, a small chevron in its middle (Sudden Strike's) */
+      .rule { position: relative; width: min(320px, 60vw); height: 1px; margin: 16px auto 34px;
+        background: linear-gradient(to right, transparent, rgba(233, 220, 190, 0.7), transparent); }
+      .rule::after { content: ""; position: absolute; left: 50%; top: -4px; width: 7px; height: 7px; margin-left: -4px;
+        border-right: 1px solid rgba(233, 220, 190, 0.8); border-bottom: 1px solid rgba(233, 220, 190, 0.8); transform: rotate(45deg); background: transparent; }
+      .deck { display: flex; flex-wrap: wrap; justify-content: center; gap: clamp(18px, 3vw, 48px); }
+      .card { display: flex; flex-direction: column; align-items: center; width: clamp(240px, 21vw, 320px); padding: 16px 16px 22px;
+        background: rgba(14, 11, 8, 0.92); border: 1px solid rgba(233, 220, 190, 0.32); border-radius: 6px;
+        box-shadow: 0 14px 40px rgba(0, 0, 0, 0.55); color: #fff; font: inherit; text-align: center; cursor: pointer;
+        transition: border-color 0.15s, box-shadow 0.15s; }
+      /* hover / the side or map chosen last: brass edge, a brass glow — colour only, no movement */
+      .card:hover:not(:disabled), .card:focus-visible, .card.sel { border-color: var(--brass-sel); outline: none;
+        box-shadow: 0 0 0 1px var(--brass-sel), 0 14px 40px rgba(0, 0, 0, 0.55), 0 0 26px rgba(242, 201, 76, 0.18); }
+      .card:disabled { cursor: default; opacity: 0.55; }
+      .card .pic { position: relative; width: 100%; aspect-ratio: 1.22; border-radius: 3px; overflow: hidden;
+        -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent); mask-image: linear-gradient(to bottom, #000 62%, transparent); }
+      .card .pic svg, .card .pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
+      .card.map .pic { aspect-ratio: 1.35; }
+      .card .pic.none { background: radial-gradient(ellipse at 50% 40%, #2a2f33, #121416 80%); }
+      .card .pic .soon { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); padding: 3px 10px; font-size: 11px; font-weight: 600;
+        letter-spacing: 0.18em; text-transform: uppercase; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 2px; white-space: nowrap; }
+      .card h3 { margin: 6px 0 0; font: 400 34px/1 "Bebas Neue", "Segoe UI", sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brass-hi); }
+      .card .kind { margin-top: 4px; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
+      .card hr { width: 46%; height: 1px; margin: 12px auto; border: 0; background: linear-gradient(to right, transparent, rgba(233, 220, 190, 0.6), transparent); }
+      .card p { margin: 0; max-width: 250px; font-size: 14px; line-height: 1.5; color: rgba(255, 255, 255, 0.9); }
+      .back { position: fixed; left: clamp(16px, 5vw, 80px); bottom: 44px; }
       .row { display: flex; gap: 22px; margin: 24px 0 0; }
       .small { padding: 4px 0; background: none; border: 0; color: #fff; opacity: 0.75;
         font: 600 13px "Segoe UI", system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; transition: color 0.15s, opacity 0.15s; }
@@ -77,7 +106,7 @@
       /* THE LOGO (you, 2026-10-11: "place it top left"), lined up with the menu column; on the
          main view only — the battle setup is taller and would run into it. */
       .logo { position: fixed; top: clamp(20px, 6vh, 64px); left: clamp(16px, 5vw, 80px); width: clamp(220px, 26vw, 420px); height: auto; pointer-events: none; }
-      body[data-view="battle"] .logo { display: none; }
+      body.cards .logo { display: none; }
       /* Credits: a sheet over the menu. */
       .sheet { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(8, 6, 4, 0.72); }
       .sheet[hidden] { display: none; }
@@ -94,6 +123,7 @@
     <!-- The dark overlay, off (you, 2026-10-11: "remove it"); its .shade style is still above. -->
     <!-- <div class="shade"></div> -->
     <div class="smoke"><i></i><i></i></div>
+    <div class="veil"></div>
     <img class="logo" src="/games/alg-rts/menu/sandlogo.webp" alt="Sand &amp; Blood" />
     <main id="menu"></main>
     <div class="foot" id="foot"></div>
@@ -116,26 +146,63 @@
       document.documentElement.style.setProperty("--smoke-a", smokeTile(900, 0.0034, 7));
       document.documentElement.style.setProperty("--smoke-b", smokeTile(450, 0.0078, 23));
 
-      // TWO VIEWS in the one column (you, 2026-10-11: "the menu where I choose between" the sides):
-      //   MAIN    Training camp · Battles · languages · credits — the same for both sides
-      //   BATTLE  the map, the side (France / FLN), Start → alg.html?map=…&side=fln
+      // THREE VIEWS (you, 2026-10-11, then 2026-10-12: "the map and the side are two different things"):
+      //   MAIN    Training camp · Battles · languages · credits — the same for both sides (the column)
+      //   SIDE    two cards at the centre, France / FLN, their distressed flags (Sudden Strike 5's)
+      //   MAP     a card per map, its art; a click starts → alg.html?map=…&side=fln
       // The difficulty stays on the side's own briefing (algDifficulty.js), not asked twice here.
-      // `d` (a map's blurb) is not shown (you, 2026-10-11: "we dont need it"); kept for a map card later.
       const GAME = "./alg.html";
       const TRAINING = { map: "training", title: t("Camp d'instruction"), sub: t("Instruction — 10 minutes"),
         d: t("Les bases, une à une : la caméra, les ordres, la couverture, les points, le combat, la retraite, le poste. À faire en premier.") };
       // The battle maps (layout.js ?map=; the Aurès: none). `ready: false` shows it, greyed, with its tag.
       const MAPS = [
-        { map: null, ready: true, title: t("Les Aurès — 1956"), sub: t("Bataille"),
+        { map: null, ready: true, title: t("Les Aurès — 1956"), sub: t("Bataille"), art: "/games/alg-rts/loading/aures-descente.webp",
           d: t("Tenez plus de villages que le FLN dans le massif : un poste, quatre villages, une katiba qui frappe et disparaît.") },
         { map: "coast", ready: false, title: t("Côte du Constantinois — août 1955"), sub: t("Bataille"),
           d: t("La plaine et la baie de Philippeville, la veille du soulèvement."), tag: t("bientôt") },
       ];
       // The sides (algGame.js: ?side=fln, else the French).
       const SIDES = [
-        { side: "fr", title: t("France"), sub: t("Tenir le poste et les villages — renforts, blindés, appui aérien") },
-        { side: "fln", title: t("FLN"), sub: t("Frapper depuis la grotte et disparaître — une seule bourse, le ravitaillement") },
+        { side: "fr", title: t("France"), kind: t("Armée française"),
+          d: t("Tenez le poste et les villages avec les renforts, les blindés et l'appui aérien.") },
+        { side: "fln", title: t("FLN"), kind: t("Armée de libération nationale"),
+          d: t("Frappez depuis la grotte, disparaissez dans le djebel, gagnez les villages.") },
       ];
+
+      // THE FLAGS, drawn (no image file): the colours, then worn — the edges torn by a noise
+      // displacement, the cloth eaten in specks, grime and a dark vignette (Sudden Strike's).
+      const flag = (id, body) => `<svg viewBox="0 0 300 246" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <defs>
+          <filter id="w${id}" x="-5%" y="-5%" width="110%" height="110%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="4" seed="${id === "fr" ? 4 : 9}" result="big"/>
+            <feDisplacementMap in="SourceGraphic" in2="big" scale="20" xChannelSelector="R" yChannelSelector="G" result="torn"/>
+            <!-- a few torn HOLES where the mid noise peaks (specks all over read as TV static) -->
+            <feTurbulence type="fractalNoise" baseFrequency="0.045" numOctaves="4" seed="${id === "fr" ? 2 : 5}" result="mid"/>
+            <feColorMatrix in="mid" values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -22 16.3" result="holes"/>
+            <feComposite in="torn" in2="holes" operator="in" result="worn"/>
+            <!-- grime in blotches, and a light grain -->
+            <feColorMatrix in="big" values="0 0 0 0 0.07  0 0 0 0 0.05  0 0 0 0 0.03  0 0 0 2.4 -0.95" result="grime"/>
+            <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="11" result="fine"/>
+            <feColorMatrix in="fine" values="0 0 0 0 0.05  0 0 0 0 0.04  0 0 0 0 0.03  0 0 0 0.6 -0.2" result="grain"/>
+            <feComposite in="grain" in2="grime" operator="over" result="dirt"/>
+            <feComposite in="dirt" in2="worn" operator="atop" result="dirty"/>
+            <feComposite in="dirty" in2="worn" operator="over"/>
+          </filter>
+          <radialGradient id="v${id}" cx="50%" cy="45%" r="62%"><stop offset="55%" stop-color="#000" stop-opacity="0"/><stop offset="100%" stop-color="#000" stop-opacity="0.75"/></radialGradient>
+        </defs>
+        <rect width="300" height="246" fill="#0e0b08"/>
+        <g filter="url(#w${id})">${body}</g>
+        <rect width="300" height="246" fill="url(#v${id})"/>
+      </svg>`;
+      // France: the tricolour. The FLN: green at the hoist, white at the fly, the red crescent and star
+      // across the middle (the crescent's horns toward the fly, the star in them).
+      const FLAG = {
+        fr: flag("fr", `<rect x="18" y="20" width="88" height="196" fill="#1f3f8a"/><rect x="106" y="20" width="88" height="196" fill="#ece6d6"/><rect x="194" y="20" width="88" height="196" fill="#b3262d"/>`),
+        fln: flag("fln", `<mask id="cres"><rect width="300" height="246" fill="#fff"/><circle cx="163" cy="118" r="46" fill="#000"/></mask>
+          <rect x="18" y="20" width="132" height="196" fill="#1f6b3a"/><rect x="150" y="20" width="132" height="196" fill="#ece6d6"/>
+          <circle cx="150" cy="118" r="56" fill="#c0262d" mask="url(#cres)"/>
+          <polygon fill="#c0262d" transform="translate(173 118) rotate(-90) scale(1.25)" points="0,-21 6.2,-6.5 20,-6.5 8.8,2.5 13,16.9 0,8.3 -13,16.9 -8.8,2.5 -20,-6.5 -6.2,-6.5"/>`),
+      };
 
       // The last side and map chosen, remembered (a convenience: the menu works without it).
       const pick = { map: 0, side: "fr" };
@@ -148,22 +215,33 @@
         </button>`;
       const menu = document.getElementById("menu");
       let view = "main";
+      const head = (title, sub = "") => `<h1 class="ttl">${title}</h1>${sub ? `<div class="ttl-sub">${sub}</div>` : ""}<div class="rule"></div>`;
+      const backBtn = `<button class="small back" data-a="back">‹ ${t("Retour")}</button>`;
       function render() {
         document.body.dataset.view = view;
+        document.body.classList.toggle("cards", view !== "main");
+        if (view === "side") {
+          menu.innerHTML = head(t("Choisissez votre camp"), t("Algérie, 1954-1962"))
+            + `<div class="deck">${SIDES.map((s) => `<button class="card${s.side === pick.side ? " sel" : ""}" data-side="${s.side}">
+                <div class="pic">${FLAG[s.side]}</div><h3>${s.title}</h3><div class="kind">${s.kind}</div><hr><p>${s.d}</p></button>`).join("")}</div>`
+            + backBtn;
+          return;
+        }
+        if (view === "map") {
+          const s = SIDES.find((x) => x.side === pick.side);
+          menu.innerHTML = head(t("Choisissez le champ de bataille"), t("Camp : {name}", { name: s.title }))
+            + `<div class="deck">${MAPS.map((m, i) => `<button class="card map${m.ready && i === pick.map ? " sel" : ""}" data-map="${i}" ${m.ready ? "" : "disabled"}>
+                <div class="pic${m.art ? "" : " none"}">${m.art ? `<img src="${m.art}" alt="">` : ""}${m.ready ? "" : `<span class="soon">${m.tag}</span>`}</div>
+                <h3>${m.title}</h3><hr><p>${m.d}</p></button>`).join("")}</div>`
+            + backBtn;
+          return;
+        }
         if (view === "main") {
           menu.innerHTML = `<div class="kicker">${t("Algérie, 1954-1962")}</div>`
             + entry(`data-a="training"`, TRAINING)
             + entry(`data-a="battle"`, { title: t("Batailles"), sub: t("Choisir la carte et le camp") })
             + `<div class="row">${LANGS.map((l) => `<button class="small${l.key === LANG ? " on" : ""}" data-lang="${l.key}">${l.label}</button>`).join("")}
                  <button class="small" data-a="credits">${t("Crédits")}</button></div>`;
-        } else {
-          menu.innerHTML = `<div class="kicker">${t("Bataille")}</div>`
-            + `<div class="h">${t("Carte")}</div>`
-            + MAPS.map((m, i) => entry(`data-map="${i}" ${m.ready ? "" : "disabled"}`, { ...m, sub: "" }, i === pick.map)).join("")
-            + `<div class="h">${t("Camp")}</div>`
-            + SIDES.map((s) => entry(`data-side="${s.side}"`, s, s.side === pick.side)).join("")
-            + `<button class="entry go" data-a="start"><b>${t("Commencer")}</b></button>`
-            + `<div class="row"><button class="small" data-a="back">${t("Retour")}</button></div>`;
         }
       }
       render();
@@ -182,15 +260,14 @@
         const a = b.dataset.a;
         if (a === "credits") { document.getElementById("credits").hidden = false; return; }
         if (a === "training") return start(TRAINING.map, "fr");   // the training teaches the French side
-        if (a === "battle") { view = "battle"; render(); return; }
-        if (a === "back") { view = "main"; render(); return; }
-        if (b.dataset.map) pick.map = +b.dataset.map;
-        if (b.dataset.side) pick.side = b.dataset.side;
-        try { localStorage.setItem("alg-menu-pick", JSON.stringify(pick)); } catch { /* private window */ }
-        if (a === "start") return start(MAPS[pick.map].map, pick.side);
-        render();
-        menu.querySelector(`[data-map="${b.dataset.map}"], [data-side="${b.dataset.side}"]`)?.focus();
+        if (a === "battle") { view = "side"; render(); return; }
+        if (a === "back") return goBack();
+        const save = () => { try { localStorage.setItem("alg-menu-pick", JSON.stringify(pick)); } catch { /* private window */ } };
+        // A card chooses: the side → on to the maps; a map → the battle.
+        if (b.dataset.side) { pick.side = b.dataset.side; save(); view = "map"; render(); return; }
+        if (b.dataset.map) { pick.map = +b.dataset.map; save(); return start(MAPS[pick.map].map, pick.side); }
       });
+      function goBack() { view = view === "map" ? "side" : "main"; render(); }
 
       // CREDITS (the assets' own files keep the details: icons/CREDITS.md, the sounds' manifest).
       document.getElementById("creditsBody").innerHTML = `<h2>${t("Crédits")}</h2>`
@@ -201,16 +278,17 @@
         + `<p style="color:var(--dim)">${t("Cliquez pour fermer.")}</p>`;
       document.getElementById("credits").addEventListener("click", () => { document.getElementById("credits").hidden = true; });
       addEventListener("keydown", (ev) => {
-        // Enter on the battle setup, nothing focused: Start. (No button is focused for you on
-        // load — Chrome draws a focused one as chosen, in brass; you, 2026-10-11: "why is
-        // training camp already selected".)
-        if (ev.key === "Enter" && view === "battle" && document.activeElement === document.body) {
+        // Enter, nothing focused: the card chosen last (its brass edge). (No button is focused for
+        // you on load — Chrome draws a focused one as chosen; you, 2026-10-11: "why is training
+        // camp already selected".)
+        if (ev.key === "Enter" && view !== "main" && document.activeElement === document.body) {
+          if (view === "side") { view = "map"; render(); return; }
           return start(MAPS[pick.map].map, pick.side);
         }
         if (ev.key !== "Escape") return;
         const credits = document.getElementById("credits");
         if (!credits.hidden) credits.hidden = true;
-        else if (view !== "main") { view = "main"; render(); }   // Esc on the battle setup: back
+        else if (view !== "main") goBack();   // Esc: one screen back
       });
     </script>
   </body>
