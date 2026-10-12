@@ -327,12 +327,70 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   // should face, release. (The order itself fires on the release: the contextmenu event.)
   let rPress = null;
   const onRightDown = (e) => { if (e.button === 2) rPress = { x: e.clientX, y: e.clientY }; };
+  // THE DRAG'S PREVIEW (2026-10-12): while the right button drags, an ARROW from the spot the way the
+  // squad will face, and a ring on each man's future spot — formationAt's own (the cover snap, the
+  // reachable spot): what is shown is what is ordered. Gone on the release.
+  const preview = (() => {
+    const g = new THREE.Group();
+    g.visible = false;
+    app.scene?.add(g);
+    const mat = new THREE.MeshBasicMaterial({ color: 0xf2c94c, transparent: true, opacity: 0.85, depthWrite: false, side: THREE.DoubleSide });
+    const ringGeo = new THREE.RingGeometry(0.42, 0.68, 24).rotateX(-Math.PI / 2);
+    const rings = [];
+    // (9 vertices from the start, rewritten in place: a position buffer ADDED later was never drawn)
+    const arrowGeo = new THREE.BufferGeometry();
+    arrowGeo.setAttribute("position", new THREE.BufferAttribute(new Float32Array(27), 3));
+    const arrow = new THREE.Mesh(arrowGeo, mat);
+    arrow.frustumCulled = false;
+    arrow.renderOrder = RENDER_ORDER.ON_GROUND;
+    g.add(arrow);
+    const yAt = (x, z) => (app.getWorldHeight?.(x, z) ?? 0) + 0.25;
+    return {
+      show(a, b, slots) {
+        g.visible = true;
+        while (rings.length < slots.length) { const m = new THREE.Mesh(ringGeo, mat); m.renderOrder = RENDER_ORDER.ON_GROUND; g.add(m); rings.push(m); }
+        rings.forEach((m, i) => { const sl = slots[i]; m.visible = !!sl; if (sl) m.position.set(sl.x, yAt(sl.x, sl.z), sl.z); });
+        // The arrow: a shaft from the spot toward the cursor (6-14 m), a head at its tip.
+        const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1, fx = dx / d, fz = dz / d, rx = fz, rz = -fx;
+        const len = Math.min(14, Math.max(6, d)), hw = 0.28, head = 2.2, hh = 1.4;
+        const tx = a.x + fx * len, tz = a.z + fz * len, bx = tx - fx * head, bz = tz - fz * head;
+        const P = (x, z) => [x, yAt(x, z), z];
+        const q = [
+          ...P(a.x + rx * hw, a.z + rz * hw), ...P(a.x - rx * hw, a.z - rz * hw), ...P(bx - rx * hw, bz - rz * hw),
+          ...P(a.x + rx * hw, a.z + rz * hw), ...P(bx - rx * hw, bz - rz * hw), ...P(bx + rx * hw, bz + rz * hw),
+          ...P(bx + rx * hh, bz + rz * hh), ...P(bx - rx * hh, bz - rz * hh), ...P(tx, tz),
+        ];
+        const pa = arrowGeo.attributes.position;
+        pa.array.set(q);
+        pa.needsUpdate = true;
+      },
+      hide() { g.visible = false; },
+    };
+  })();
+  let previewPending = false, previewEvt = null;
+  const onRightDrag = (e) => {
+    if (!rPress || !(e.buttons & 2) || Math.hypot(e.clientX - rPress.x, e.clientY - rPress.y) <= 18) return;
+    if (![...selected].some((u) => isHuman(u.team) && !u.isStructure)) return;
+    previewEvt = { x: e.clientX, y: e.clientY };
+    if (previewPending) return;
+    previewPending = true;
+    requestAnimationFrame(() => {
+      previewPending = false;
+      if (!rPress || !previewEvt) return;
+      const a = app.pickWorldAtClient?.(rPress.x, rPress.y), b = app.pickWorldAtClient?.(previewEvt.x, previewEvt.y);
+      if (!a?.point || !b?.point || Math.hypot(b.point.x - a.point.x, b.point.z - a.point.z) < 1) return;
+      const { slots } = formationAt(a.point.x, a.point.z, { facing: Math.atan2(b.point.x - a.point.x, b.point.z - a.point.z) });
+      preview.show(a.point, b.point, slots);
+    });
+  };
+  const onRightUp = (e) => { if (e.button === 2) { preview.hide(); previewEvt = null; } };
   const onContextMenu = (e) => {
     // Right-click works in BOTH camera modes — it never fights orbit's
     // left-drag. (Left-click/box-select stays RTS-only to avoid that clash.)
     e.preventDefault();
     const press = rPress;
     rPress = null;
+    preview.hide();
     if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 18 && [...selected].some((u) => isHuman(u.team))) {
       const a = app.pickWorldAtClient?.(press.x, press.y), b = app.pickWorldAtClient?.(e.clientX, e.clientY);
       if (a?.point && b?.point && Math.hypot(b.point.x - a.point.x, b.point.z - a.point.z) > 1) {
@@ -538,6 +596,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   window.addEventListener("pointerup", onPointerUp);
   dom.addEventListener("contextmenu", onContextMenu);
   dom.addEventListener("pointerdown", onRightDown);
+  window.addEventListener("pointermove", onRightDrag);
+  window.addEventListener("pointerup", onRightUp);
 
   return {
     get selected() { return [...selected]; },
@@ -571,6 +631,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       window.removeEventListener("pointerup", onPointerUp);
       dom.removeEventListener("contextmenu", onContextMenu);
       dom.removeEventListener("pointerdown", onRightDown);
+      window.removeEventListener("pointermove", onRightDrag);
+      window.removeEventListener("pointerup", onRightUp);
       dom.removeEventListener("pointermove", onHover);
       boxEl.remove();
       if (markerRaf) cancelAnimationFrame(markerRaf);

@@ -32,27 +32,29 @@ const ICONS = {
   legion: `<circle cx="12" cy="16.5" r="4.6" fill="currentColor" stroke="none"/><path d="M12 11.5 C11 8 13 6 12 2.5 M10 11.8 C8 9.5 9 7.5 7.5 5 M14 11.8 C16 9.5 15 7.5 16.5 5" stroke-width="1.5"/>`,
 };
 
+// (2026-10-12, you: "the badges with the health bar and icon are too small": every part ×1.45 —
+// the shield 22×26 → 32×38, the count 14 → 20 px, the bar 26×3 → 38×5.)
 const CSS = `
 .alg-sqb { position: fixed; left: 0; top: 0; z-index: 40; display: grid; grid-template-columns: auto auto; align-items: center;
-  column-gap: 3px; row-gap: 2px; pointer-events: none; will-change: transform; }
-.alg-sqb .n { grid-row: 1; width: 14px; height: 14px; border-radius: 50%; background: rgba(12,16,22,0.92);
-  border: 1px solid rgba(220,230,240,0.55); color: #e8eef4; font: 700 9px/12px var(--hud-sans, sans-serif); text-align: center; }
-.alg-sqb svg.shield { grid-row: 1; width: 22px; height: 26px; display: block; pointer-events: auto; cursor: pointer; }
+  column-gap: 4px; row-gap: 3px; pointer-events: none; will-change: transform; }
+.alg-sqb .n { grid-row: 1; width: 20px; height: 20px; border-radius: 50%; background: rgba(12,16,22,0.92);
+  border: 1px solid rgba(220,230,240,0.55); color: #e8eef4; font: 700 12px/18px var(--hud-sans, sans-serif); text-align: center; }
+.alg-sqb svg.shield { grid-row: 1; width: 32px; height: 38px; display: block; pointer-events: auto; cursor: pointer; }
 .alg-sqb svg.shield .rim { fill: rgba(12,16,22,0.92); stroke: #5aaeff; stroke-width: 1.6; }
 .alg-sqb svg.shield .ic { color: #dfe9f2; stroke: currentColor; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .alg-sqb.sel svg.shield .rim { stroke: #ffffff; stroke-width: 2; }
 .alg-sqb.ret svg.shield .rim { stroke: #e0a040; }
 .alg-sqb.enemy svg.shield .rim { stroke: #ff5f4e; } .alg-sqb.enemy svg.shield { pointer-events: none; cursor: default; }
 .alg-sqb.enemy .n { border-color: rgba(255,120,100,0.7); }
-.alg-sqb .bar { grid-row: 2; grid-column: 2; width: 26px; height: 3px; background: rgba(10,12,14,0.9); border: 1px solid rgba(0,0,0,0.7);
+.alg-sqb .bar { grid-row: 2; grid-column: 2; width: 38px; height: 5px; background: rgba(10,12,14,0.9); border: 1px solid rgba(0,0,0,0.7);
   justify-self: center; position: relative; }
 .alg-sqb .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #3ddc60; }
 /* Veterancy: CoH's gold CHEVRONS (ui/icons.js vet1-3, a mask), over the shield. */
-.alg-sqb .st { position: absolute; left: 21px; width: 14px; height: 12px; top: -13px; background: #f2c94c;
+.alg-sqb .st { position: absolute; left: 30px; width: 20px; height: 17px; top: -18px; background: #f2c94c;
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center; filter: drop-shadow(0 1px 1px #000); }
-.alg-sqb .up { position: absolute; left: 33px; top: 17px; padding: 0 2px; border-radius: 2px; background: #c9a54a; color: #15120a;
-  font: 800 7px/9px var(--hud-sans, sans-serif); box-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.alg-sqb .up { position: absolute; left: 47px; top: 25px; padding: 0 3px; border-radius: 2px; background: #c9a54a; color: #15120a;
+  font: 800 10px/13px var(--hud-sans, sans-serif); box-shadow: 0 1px 2px rgba(0,0,0,0.8); }
 `;
 
 /**

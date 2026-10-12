@@ -600,7 +600,9 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
          nearest VISIBLE enemy within 60 m of the spot (algUnits facingFor — the fog gives nothing away),
          else the way they go. On his spot, a man with nobody to shoot turns to it (units.js faceAngle).
          Checked: 6 men in the line, all facing the drag's way (0.00 rad off).
-         - [ ] a preview of the right-drag (an arrow, the line's spots) while dragging.
+         - [x] the right-drag PREVIEW (2026-10-12): a gold arrow the way they will face and a ring on each
+           man's future spot (formationAt's own), redrawn once a frame while dragging, gone on release.
+     - [x] SQUAD BADGES ×1.45 (2026-10-12, you: "too small"): shield 32×38, count 20 px, bar 38×5.
        - [ ] STEP 6: per-cell clearance (no one-cell gaps for a 1 m man).
        - [x] tools/navPocketsTest.mjs (fast lane): a walled yard sealed, a spot in it moved to reachable
          ground, an open spot kept exactly, a wire-closed yard sealed then open once cut, a 900 m² field
