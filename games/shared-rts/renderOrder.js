@@ -23,6 +23,7 @@ export const RENDER_ORDER = {
   // (opaque: the terrain's own 8, the editor decals' 9, water 10 — engine)
   XRAY: 30,      // the units' silhouettes through walls (xraySilhouette.js), opaque queue
   UNITS: 31,     // the units, just after their silhouettes
+  SEA: 39,       // a game's own sea (alg-rts algSea.js, see-through): under everything on the ground or over it
   FIELDS: 40,
   TRACKS: 41,
   CRATERS: 42,

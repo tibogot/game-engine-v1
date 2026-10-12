@@ -18,6 +18,7 @@
 // Ocean Pro's meshes are hidden (their update and the scene-depth copy skip a hidden ocean).
 // ?sea=pro = Ocean Pro instead, to compare.
 import * as THREE from "three";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { abs, clamp, exp, float, fract, max, mix, mx_noise_float, normalize, positionWorld, smoothstep, texture, time, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 
 export const SEA = {
@@ -148,7 +149,7 @@ export function createAlgSea(app, { level, size = 6000 } = {}) {
   mesh.name = "AlgSea";
   mesh.position.y = level;
   mesh.receiveShadow = true;
-  mesh.renderOrder = 1;
+  mesh.renderOrder = RENDER_ORDER.SEA;   // see-through: before the fields, rings, smoke over it
   mesh.frustumCulled = false;
   mesh.updateMatrix(); mesh.matrixAutoUpdate = false;
   app.scene.add(mesh);
