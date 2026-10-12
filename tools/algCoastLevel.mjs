@@ -27,6 +27,7 @@
 import fs from "node:fs";
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { PLAY, LAYOUT, MAP, SHORE, SEA_LEVEL } from "../games/alg-rts/maps/coast.js";
+import { trackCarver } from "./lib/trackCarve.mjs";
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, "")] = process.argv[i + 1];
@@ -80,7 +81,7 @@ function polyField(pts) {
   });
   /** { d: distance (m), side: cross > 0 = right of the walk } */
   return (x, z, reach = 400) => {
-    let best = Infinity, side = 0;
+    let best = Infinity, side = 0, px = x, pz = z, tx = 1, tz = 0;
     const ci = Math.floor(x / B), cj = Math.floor(z / B);
     for (let r = 0; r * B <= reach; r++) {
       for (let i = ci - r; i <= ci + r; i++) for (let j = cj - r; j <= cj + r; j++) {
@@ -89,12 +90,12 @@ function polyField(pts) {
           const [ax, az, bx, bz] = segs[idx], dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz || 1;
           const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L));
           const d = Math.hypot(x - (ax + dx * u), z - (az + dz * u));
-          if (d < best) { best = d; side = dx * (z - az) - dz * (x - ax); }
+          if (d < best) { best = d; side = dx * (z - az) - dz * (x - ax); px = ax + dx * u; pz = az + dz * u; const l = Math.sqrt(L); tx = dx / l; tz = dz / l; }
         }
       }
       if (best < (r - 1) * B) break;   // nothing nearer can be further out
     }
-    return { d: best, side };
+    return { d: best, side, px, pz, tx, tz };
   };
 }
 const shoreAt = polyField(spline(SHORE, 2));
@@ -119,7 +120,16 @@ function seabed(d) {
 }
 
 let lastS = 0;   // the last point's signed shore distance (kept per heightmap cell for the paint)
+/** The ground with its track CARVED in (tools/lib/trackCarve.mjs: level across, cut and filled on a
+ *  slope, a shallow hollow, a low bank, the shoulders). */
+const carve = trackCarver((x, z) => naturalAt(x, z), trackAt);
 function heightAt(x, z) {
+  const h = naturalAt(x, z), s = lastS;   // (the carver samples other points: keep this cell's)
+  const v = h > SEA + 0.4 ? carve(x, z, h) : h;   // (not under the sea, not on the swash)
+  lastS = s;
+  return v;
+}
+function naturalAt(x, z) {
   const s = (lastS = shoreSigned(x, z));
   const hm = Math.exp(-((Math.hypot(x - HEAD.x, z - HEAD.z) / (HEAD.r * 1.15)) ** 2));   // the headland
   let h;
