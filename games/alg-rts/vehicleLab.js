@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
-import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAMX13, buildAlouette, buildH21, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
@@ -60,6 +60,7 @@ const VEHICLES = {
   gmc: { build: buildGMC, label: "Camion GMC (bâché)" },
   gmcOpen: { build: (o) => buildGMC({ ...o, tilt: !o }), label: "Camion GMC (ouvert)" },
   alouette: { build: buildAlouette, label: "Alouette II" },
+  h21: { build: () => buildH21(), label: "H-21 « Banane »" },
   ebr: { build: buildEBR, label: "Panhard EBR" },
   amx13: { build: buildAMX13, label: "AMX-13" },
 };
@@ -95,7 +96,7 @@ function vehicleOf(geo, key) {
   let turretMesh = null;
   if (tur) { const tm = new THREE.Mesh(tur.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); tm.position.fromArray(tur.pivot); tm.castShadow = tm.receiveShadow = true; g.add(tm); turretMesh = tm; }
   if (geo.userData.glass) { const gm = new THREE.Mesh(geo.userData.glass, glassMaterial()); gm.renderOrder = RENDER_ORDER.GLASS; g.add(gm); }
-  for (const [axis, r] of [["y", geo.userData.rotors?.main], ["x", geo.userData.rotors?.tail]]) {
+  for (const [axis, r] of [["y", geo.userData.rotors?.main], ["y", geo.userData.rotors?.main2], ["x", geo.userData.rotors?.tail]]) {
     if (!r) continue;
     const m = new THREE.Mesh(r.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
     m.position.fromArray(r.pivot);

@@ -77,6 +77,8 @@ export const STENCILS = {
   plasterFallB: { x: 256, y: 1472, w: 256, h: 160 },
   // A helicopter's serial in white, for the ALAT's dark olive.
   frSerialWhite: { x: 512, y: 1472, w: 384, h: 96 },
+  // MARINE in white along a Navy H-21's flanks (the Aéronavale flew them in Algeria too).
+  frMarineWhite: { x: 512, y: 1568, w: 384, h: 64 },
   // WEATHER on whitewash (the buildings lab, 2026-10-07): grime washed down from a coping or a
   // slit — ragged drips, darker at the top; and the dust thrown up the foot of a wall, its top
   // edge wandering. Hard-edged (the sheet is alpha-tested): shapes, not haze.
@@ -242,6 +244,7 @@ function drawFrench(g, text, wear) {
   c = STENCILS.frUnitCode; text("9e R.C.P.   3", c.x, c.y, c.w, c.h, "#e9e6dc", 70); wear(c.x, c.y, c.w, c.h, 140);
   c = STENCILS.frTailSerial; text("F-MBJK", c.x, c.y, c.w, c.h, "#1d1d1a", 74); wear(c.x, c.y, c.w, c.h, 60);
   c = STENCILS.frSerialWhite; text("MBJ", c.x, c.y, c.w, c.h, "#ece8dc", 86); wear(c.x, c.y, c.w, c.h, 60);
+  c = STENCILS.frMarineWhite; text("MARINE", c.x, c.y, c.w, c.h, "#ece8dc", 58); wear(c.x, c.y, c.w, c.h, 60);
   c = STENCILS.frSasSign;
   g.fillStyle = "#e6e0d0"; g.fillRect(c.x + 4, c.y + 4, c.w - 8, c.h - 8);
   text("S.A.S.", c.x + 10, c.y + 8, c.w - 20, c.h - 16, "#1f3f8f", 70);

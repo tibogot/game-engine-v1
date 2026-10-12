@@ -1591,3 +1591,153 @@ export function buildT6() {
   geo.userData.prop = { geo: propGeo, pivot: [0, 0, 2.66 * S] };
   return geo;
 }
+
+// ── PIASECKI H-21 "BANANE" ──────────────────────────────────────────────────
+
+/**
+ * THE FLYING BANANA (2026-10-12, alg-rts: the transport helicopter — the French in Algeria built the
+ * heliborne assault on it). Measured off a side profile at 70 px a metre (assets-src/refs/h21/, with
+ * the factory 3-view and photos of H-21Bs and Cs): a RAKED glazed nose — the windscreen climbs from a
+ * low chin to the roof, which humps up into the FRONT rotor's pylon; a deep, straight forward body
+ * (belly 1.4 m off the ground at the cockpit, 0.95 at the bend, roof ~3.5 m); a sharp DOG-LEG 9 m
+ * back; the rear body's roof rising to 4.4 m and its belly climbing STEEPER, to a blunt rounded tail
+ * that carries the REAR rotor on a short pylon. Five round portholes at mid-height, the tall door on
+ * the left just ahead of the bend, the engine's round intake on the tail's flanks, cooling grilles on
+ * the rear roof; small fins on short arms either side of the tail; tall main legs just aft of the
+ * bend splayed out to ±2 m, a nose leg under the cockpit.
+ * Real: 16 m, 4.8 m high, rotors 13.4 m (three blades each, counter-rotating), ~20 men.
+ * userData: stencil, glass, rotors { main, main2 } (both spun about Y), length, footprint, door.
+ */
+const H21_BODY = [
+  { z: 8.12, cy: 1.95, w: 0.5, h: 0.32, hb: 0.32, n: 2.2 },   // (a BLUFF nose: a full round chin,
+  { z: 7.9, cy: 2.05, w: 0.78, h: 0.55, hb: 0.55, n: 2.5 },     //  the windscreen climbing steeply)
+  { z: 7.5, cy: 2.2, w: 0.9, h: 0.76, hb: 0.78, n: 2.8 },
+  { z: 6.98, cy: 2.37, w: 0.95, h: 0.95, hb: 0.97, n: 3.1 },
+  { z: 6.45, cy: 2.46, w: 0.97, h: 1.06, hb: 1.06, n: 3.4 },
+  { z: 5.98, cy: 2.48, w: 0.97, h: 1.09, hb: 1.08, n: 3.6 },
+  { z: 4.25, cy: 2.45, w: 0.98, h: 1.09, hb: 1.09, n: 3.7 },
+  { z: 1.5, cy: 2.3, w: 0.98, h: 1.15, hb: 1.15, n: 3.7 },
+  { z: -0.6, cy: 2.18, w: 0.98, h: 1.25, hb: 1.25, n: 3.7 },
+  { z: -1.15, cy: 2.24, w: 0.97, h: 1.27, hb: 1.27, n: 3.7 },
+  { z: -3.55, cy: 2.69, w: 0.95, h: 1.28, hb: 1.28, n: 3.7 },
+  { z: -6.05, cy: 3.1, w: 0.92, h: 1.3, hb: 1.3, n: 3.8 },
+  { z: -7.45, cy: 3.33, w: 0.88, h: 1.03, hb: 1.03, n: 3.8 },
+  { z: -7.85, cy: 3.35, w: 0.75, h: 0.8, hb: 0.8, n: 3.3 },
+  { z: -8.05, cy: 3.35, w: 0.45, h: 0.5, hb: 0.5, n: 2.6 },
+];
+
+export function buildH21({ seed = 21 } = {}) {
+  const st = H21_BODY;
+  const hull = [], main = [], main2 = [];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const DK = VA * 0.72;   // the ALAT's dark olive
+  P(loftSkin(st, { segs: 36, sub: 4 }), [0, 0, 0], MAT.paint, DK);
+  /** A flat piece laid on the skin at (z, a), lifted `off` (portholes, panels). */
+  const onSkin = (geo, z, a, off, mat, tone) => {
+    const { p, n } = skinAt(st, z, a);
+    const t = new THREE.Vector3(0, 0, 1), b = new THREE.Vector3().crossVectors(n, t).normalize();
+    t.crossVectors(b, n).normalize();
+    geo.applyMatrix4(new THREE.Matrix4().makeBasis(t, b, n).setPosition(p.addScaledVector(n, off)));
+    P(geo, [0, 0, 0], mat, tone);
+  };
+  /** A frame bar along the skin through (z, a) points, lifted clear of the glass. */
+  const frame = (pts, r = 0.035) => P(tube(pts.map(([z, a]) => { const { p, n } = skinAt(st, z, a); return p.addScaledVector(n, 0.045).toArray(); }), r, pts.length * 2, 5), [0, 0, 0], MAT.paint, DK * 0.9);
+  // THE NOSE: glazed from the chin over the raked windscreen to the roof and down the cockpit's sides;
+  // the dark cockpit behind it; the frames (two hoops, a centre bar, the side windows' bars).
+  const GZ0 = 8.08, GZ1 = 5.75, GA0 = -0.15, GA1 = Math.PI + 0.15;   // (the chin below stays solid)
+  P(skinPatch(st, GZ0, GZ1, GA0, GA1, 0.012, { nz: 14, na: 18 }), [0, 0, 0], MAT.steel, 0.04);
+  const glass = skinPatch(st, GZ0, GZ1, GA0, GA1, 0.03, { nz: 14, na: 18 });
+  const arc = (z) => Array.from({ length: 13 }, (_, k) => [z, GA0 + ((GA1 - GA0) * k) / 12]);
+  for (const z of [GZ0, 7.2, 6.4, GZ1]) frame(arc(z));
+  for (const a of [GA0, -0.05, 0.6, Math.PI / 2, Math.PI - 0.6, Math.PI + 0.05, GA1]) frame(Array.from({ length: 7 }, (_, k) => [GZ0 - ((GZ0 - GZ1) * k) / 6, a]));
+  // PORTHOLES: five each side at mid-height; the DOOR on the left (+x) just ahead of the bend (on the
+  // right, a sixth porthole there).
+  const PORT = [4.75, 3.85, 2.85, 1.85, 0.85];
+  for (const sx of [1, -1]) {
+    const side = (a) => (sx > 0 ? a : Math.PI - a);
+    for (const z of sx > 0 ? PORT : [...PORT, -0.2]) {
+      onSkin(new THREE.CircleGeometry(0.22, 16), z, side(-0.08), 0.012, MAT.steel, 0.16);   // (glass catching the sky, not a hole)
+      onSkin(new THREE.RingGeometry(0.22, 0.29, 16), z, side(-0.08), 0.02, MAT.paint, DK * 0.78);
+    }
+  }
+  P(skinPatch(st, 0.3, -0.7, -0.78, 0.3, 0.014, { nz: 4, na: 6 }), [0, 0, 0], MAT.paint, DK * 0.84);   // the door
+  frame([[0.3, -0.78], [0.3, 0.3], [-0.7, 0.3], [-0.7, -0.78]], 0.03);
+  onSkin(new THREE.PlaneGeometry(0.5, 0.62), -0.2, 0.02, 0.03, MAT.steel, 0.03);                        // its window
+  // THE ENGINE: its round intake on the tail's flanks (dark, a lip), cooling grilles on the rear roof.
+  for (const sx of [1, -1]) {
+    const a = sx > 0 ? -0.15 : Math.PI + 0.15;
+    onSkin(new THREE.CircleGeometry(0.36, 18), -5.2, a, 0.012, MAT.steel, 0.02);
+    onSkin(new THREE.RingGeometry(0.36, 0.44, 18), -5.2, a, 0.022, MAT.steel, 0.25);
+    for (let k = 0; k < 3; k++) onSkin(new THREE.PlaneGeometry(0.42, 0.34), -2.0 - k * 0.48, sx > 0 ? 0.95 : Math.PI - 0.95, 0.012, MAT.steel, 0.05);
+  }
+  // The rotor pylons: the nose's roof humps up into the front one; a short one on the tail.
+  const FZ = 5.9, RZ = -6.6;
+  const topAt = (z) => skinAt(st, z, Math.PI / 2).p.y;
+  const FT = topAt(FZ), RT = topAt(RZ);
+  const FY = FT + 0.95, RY = RT + 0.62;
+  // (lathed, their feet sunk in the skin: the roof swells into them, no step)
+  const pylon = (pts) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 20);   // (bottom up: faces out)
+  P(pylon([[0, 0.86], [0.3, 0.84], [0.34, 0.62], [0.44, 0.32], [0.58, 0.05], [0.64, -0.42]]), [0, FT, FZ], MAT.paint, DK);
+  P(pylon([[0, 0.54], [0.28, 0.52], [0.32, 0.36], [0.46, 0.12], [0.62, -0.06], [0.64, -0.32]]), [0, RT, RZ], MAT.paint, DK);
+  // The front pylon's fairing sweeps back down into the roof (a half-sphere stretched aft).
+  { const f = new THREE.SphereGeometry(1, 18, 10, 0, Math.PI * 2, 0, Math.PI / 2); f.scale(0.4, 0.78, 1.3);
+    P(f, [0, FT - 0.05, FZ - 0.55], MAT.paint, DK); }
+  for (const [z, y] of [[FZ, FY], [RZ, RY]]) P(new THREE.CylinderGeometry(0.1, 0.13, 0.3, 10), [0, y - 0.12, z], MAT.steel, 0.3);   // the masts
+  // The fins: a short arm out of each side of the tail, a plate at its end.
+  const finY = topAt(-7.3) - 0.75;
+  P(buildBox(3.2, 0.09, 0.32), [0, finY, -7.3], MAT.paint, DK);
+  for (const sx of [-1, 1]) P(buildBox(0.06, 1.4, 0.85), [sx * 1.62, finY + 0.2, -7.35], MAT.paint, DK, [0, 0, -sx * 0.32]);   // (canted out: the photos)
+  // A step under the door.
+  P(buildBox(0.08, 0.05, 0.5), [1.05, 0.7, -0.2], MAT.steel, 0.3);
+  // GEAR: the tall main legs just aft of the bend, splayed to ±2 m on a V and an oleo from high on
+  // the side; the nose leg under the cockpit, braced forward.
+  const bottom = (z) => skinAt(st, z, -Math.PI / 2).p.y;
+  const mz = -1.9, wy = 0.32;
+  for (const sx of [-1, 1]) {
+    const wx = sx * 2.0;
+    P(strut([sx * 0.45, bottom(mz - 0.8) + 0.08, mz - 0.8], [wx, wy + 0.05, mz], 0.055, 6), [0, 0, 0], MAT.steel, 0.25);
+    P(strut([sx * 0.45, bottom(mz + 0.8) + 0.08, mz + 0.8], [wx, wy + 0.05, mz], 0.055, 6), [0, 0, 0], MAT.steel, 0.25);
+    P(strut([sx * 0.93, 1.95, mz], [wx, wy + 0.08, mz], 0.08, 8), [0, 0, 0], MAT.steel, 0.3);   // the oleo
+    P(axleX(0.32, 0.2, 16), [wx, wy, mz], MAT.rubber, 0.2);
+  }
+  const NZ = 5.35;
+  P(strut([0, bottom(NZ) + 0.05, NZ], [0, 0.45, NZ], 0.065, 8), [0, 0, 0], MAT.steel, 0.3);
+  P(strut([0, 0.75, NZ], [0, bottom(6.6) + 0.05, 6.6], 0.04, 6), [0, 0, 0], MAT.steel, 0.25);
+  for (const sx of [-1, 1]) P(buildBox(0.04, 0.4, 0.08), [sx * 0.12, 0.42, NZ], MAT.steel, 0.25);   // the fork
+  P(axleX(0.28, 0.16, 14), [0, 0.28, NZ], MAT.rubber, 0.2);
+  // THE ROTORS: three long blades each (counter-rotating), the hub.
+  const rotor = (list, phase) => {
+    for (let k = 0; k < 3; k++) {
+      const a = (k / 3) * Math.PI * 2 + phase;
+      const b = blade(6.3, 0.42, 0.06, 0.28);
+      b.translate(0.4, 0, 0).rotateY(a);
+      list.push({ geo: b, mat: MAT.steel, tone: 0.1 });
+      list.push({ geo: buildBox(0.5, 0.12, 0.16), pos: [Math.cos(a) * 0.28, k * 0.01, -Math.sin(a) * 0.28], rot: [0, a, 0], mat: MAT.steel, tone: 0.28 });
+    }
+    list.push({ geo: new THREE.CylinderGeometry(0.2, 0.22, 0.24, 14), mat: MAT.steel, tone: 0.2 });
+  };
+  rotor(main, 0.2);
+  rotor(main2, 0.2 + Math.PI / 3);
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.12, radius: 2, strength: 0.3, groundFade: 0.2, floor: 0.55 });
+  const mainGeo = assemble(main), main2Geo = assemble(main2);
+  for (const g of [mainGeo, main2Geo]) bakeContactAO(g, { cell: 0.1, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  // Markings: the cockade on the rear body's flanks, MARINE along the forward body under the portholes (your call: a Navy machine).
+  const mk = [];
+  for (const sx of [-1, 1]) {
+    { const { p, n } = skinAt(st, -3.6, sx > 0 ? 0.1 : Math.PI - 0.1); mk.push(stencilPatch("frCocarde", flatSurface(p.toArray(), n.toArray(), [0, 0, -sx], 1.0, "frCocarde"), { lift: 0.01 })); }
+    { const { p, n } = skinAt(st, 2.8, sx > 0 ? -0.5 : Math.PI + 0.5); mk.push(stencilPatch("frMarineWhite", flatSurface(p.toArray(), n.toArray(), [0, 0, -sx], 2.2, "frMarineWhite"), { lift: 0.01 })); }
+  }
+  const stencil = mergeStencils(mk);
+  void seed;
+  for (const g of [geo, glass, mainGeo, main2Geo, stencil]) g?.scale(S, S, S);
+  geo.computeBoundingBox();
+  geo.userData.stencil = stencil;
+  geo.userData.glass = glass;
+  geo.userData.rotors = { main: { geo: mainGeo, pivot: [0, FY * S, FZ * S] }, main2: { geo: main2Geo, pivot: [0, RY * S, RZ * S] } };
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  geo.userData.footprint = { cx: 0, cz: 0, hx: 2.1 * S, hz: 8.1 * S };
+  geo.userData.door = [1.4 * S, 0, -0.2 * S];   // the left side's door, local (men in and out here)
+  return geo;
+}

@@ -16,8 +16,8 @@ export const TIERS = [
     units: ["appele", "sapeur", "piece", "lanceFlammes", "willys", "gmc"], cost: 0, villages: 0,
   },
   {
-    n: 2, name: t("Moyens héliportés"), note: t("l'héliport ouvre : paras, l'Alouette ; le half-track"),
-    units: ["para", "alouette", "halftrack"], cost: { mp: 150, fuel: 40 }, villages: 1,
+    n: 2, name: t("Moyens héliportés"), note: t("l'héliport ouvre : paras, l'Alouette, l'H-21 ; le half-track"),
+    units: ["para", "alouette", "h21", "halftrack"], cost: { mp: 150, fuel: 40 }, villages: 1,
   },
   {
     n: 3, name: t("Blindés"), note: t("les blindés : l'EBR, l'AMX-13 ; la Légion"),

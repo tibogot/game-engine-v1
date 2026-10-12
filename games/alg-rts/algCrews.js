@@ -6,7 +6,7 @@
 // The helicopter's crew does not (it falls in the djebel).
 
 const P = {
-  crew: { willys: 2, gmc: 2, halftrack: 3, amx13: 3, ebr: 3 },
+  crew: { willys: 2, gmc: 2, halftrack: 3, amx13: 3, ebr: 3, h21: 2 },
   survive: 0.55,        // each man's chance of getting out
   hp: [0.35, 0.8],      // what he has left, of his max
   clear: 9,             // m: run this far from the wreck

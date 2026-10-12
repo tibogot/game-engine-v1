@@ -14,6 +14,7 @@ export default {
   "Tireur": "Sniper",
   "Tireur FM": "LMG Gunner",
   "Jeep Willys": "Willys Jeep",
+  "H-21 « Banane »": "H-21 \"Flying Banana\"",
   "Camion GMC": "GMC Truck",
   "Half-track M3": "Half-track",
 
@@ -58,7 +59,7 @@ export default {
   "Section d'infanterie": "Infantry Section",
   "dès le départ": "from the start",
   "Moyens héliportés": "Airmobile",
-  "l'héliport ouvre : paras, l'Alouette ; le half-track": "the helipad opens: paras, the Alouette; the half-track",
+  "l'héliport ouvre : paras, l'Alouette, l'H-21 ; le half-track": "the helipad opens: paras, the Alouette, the H-21; the half-track",
   "Blindés": "Armour",
   "les blindés : l'EBR, l'AMX-13 ; la Légion": "the armour: the EBR, the AMX-13; the Légion",
   "tout est débloqué": "everything is unlocked",

@@ -12,18 +12,22 @@
 //   LOST      the vehicle destroyed: everyone thrown out, hurt — a soft GMC hurts (a mined truck
 //             is a disaster for the squad in it), the armoured half-track much less.
 // An empty GMC on patrol still delivers supplies to the villages you hold (algPatrols.js).
+// THE H-21 (2026-10-12) carries TWO squads, but only on the ground: it lands to take them on and to
+// set them down (algHeliLift.js), and they use its door, on the left side.
 import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { iconStyle } from "./ui/icons.js";
 import { t } from "./i18n/i18n.js";
 
 const P = {
-  cap: { gmc: 6, gmcOpen: 6, halftrack: 6 },
+  cap: { gmc: 6, gmcOpen: 6, halftrack: 6, h21: 12 },
   reach: 3.5,             // m past the vehicle's radius: in he climbs
   repath: 0.6,            // s between re-aims at a moving vehicle
   giveUp: 30,             // s a man runs after a vehicle before he gives up
   // The vehicle destroyed: each man thrown out takes this (±30 %).
-  wreckDamage: { gmc: 48, gmcOpen: 48, halftrack: 22 },
+  wreckDamage: { gmc: 48, gmcOpen: 48, halftrack: 22, h21: 60 },
+  // The H-21's door (model-local, m: +x is its left side): men step out beside it, along the hull.
+  door: { h21: { side: 4.2, along: -0.3, spread: 0.75 } },
 };
 
 /**
@@ -32,7 +36,7 @@ const P = {
  * @param {object} o.units   the shared units
  * @param {object} [o.navGrid]
  */
-export function createAlgTransports(app, { units, navGrid = null }) {
+export function createAlgTransports(app, { units, navGrid = null, heli = null }) {
   const dom = app.renderer.domElement;
   const load = new Map();      // vehicle → its men
   const pending = new Map();   // man → { v, t, re } on his way to a vehicle
@@ -64,10 +68,18 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     u.carrier = null;
     u.passive = false;
     u.holdFire = u._holdBefore ?? false;
-    // Out at the TAILGATE, fanned out in a short arc behind the vehicle.
-    const h = v.heading ?? 0, back = (v.radius ?? 3) + 1.2;
-    const a = h + Math.PI + (k - 2.5) * 0.32;
-    const x = v.position.x + Math.sin(a) * back, z = v.position.z + Math.cos(a) * back;
+    // Out at the TAILGATE, fanned out in a short arc behind the vehicle — or out of the H-21's side
+    // door, in a line along the hull.
+    const h = v.heading ?? 0, back = (v.radius ?? 3) + 1.2, door = P.door[v.typeKey];
+    let x, z;
+    if (door) {
+      const lx = door.side + (k % 2) * 1.2, lz = door.along + (Math.floor(k / 2) - 2.5) * door.spread * 2;
+      x = v.position.x + lx * Math.cos(h) + lz * Math.sin(h);
+      z = v.position.z - lx * Math.sin(h) + lz * Math.cos(h);
+    } else {
+      const a = h + Math.PI + (k - 2.5) * 0.32;
+      x = v.position.x + Math.sin(a) * back; z = v.position.z + Math.cos(a) * back;
+    }
     const p = navGrid?.nearestOpenWorld?.(x, z, true) ?? { x, z };
     u.position.set(p.x, app.getWorldHeight(p.x, p.z), p.z);
     // HERE is his spot now (2026-10-12, you: "after disembark the soldiers ran back to the base"): a man
@@ -75,10 +87,20 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     // post, 100 m back. (A move order given with the Débarquer comes after this and wins.)
     u.haltMovement?.();
   }
+  /** A helicopter not on the ground: its men wait for it to land. */
+  const flying = (v) => !!heli?.handles(v) && !heli.landed(v);
+  /** A vehicle's whole load out (a flying helicopter: it lands, then they jump). */
+  const unloadAll = (v) => {
+    if (flying(v)) { if (!heli.landing(v)) heli.landNear(v, v.position.x, v.position.z, () => unloadAll(v)); return; }
+    [...menOf(v)].forEach((u, k) => unboard(u, k));
+  };
   /** Every man of `list` that rides out (a move order, a DÉBARQUER on the men). */
-  const exitAll = (list) => { let k = 0; for (const u of list) if (u.carrier) unboard(u, k++); };
-  /** A vehicle's whole load out. */
-  const unloadAll = (v) => { [...menOf(v)].forEach((u, k) => unboard(u, k)); };
+  const exitAll = (list) => {
+    let k = 0;
+    const helis = new Set();
+    for (const u of list) if (u.carrier) { if (flying(u.carrier)) helis.add(u.carrier); else unboard(u, k++); }
+    for (const v of helis) unloadAll(v);
+  };
 
   /** Men told to board `v`; returns how many go. */
   function order(men, v) {
@@ -91,6 +113,8 @@ export function createAlgTransports(app, { units, navGrid = null }) {
       u.moveOrder(v.position.x, v.position.z);
       n++;
     }
+    // A helicopter comes down beside them (algHeliLift.js).
+    if (n && flying(v)) heli.pickUp(v, men.filter((u) => pending.get(u)?.v === v));
     return n;
   }
 
@@ -98,7 +122,15 @@ export function createAlgTransports(app, { units, navGrid = null }) {
     for (const [u, p] of pending) {
       const v = p.v;
       if (!u.alive || u.inside || !v.alive) { pending.delete(u); continue; }
-      if (Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < (v.radius ?? 3) + P.reach) {
+      const near = Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < (v.radius ?? 3) + P.reach;
+      // A helicopter still in the air: they wait under it (no giving up while it comes down).
+      if (flying(v)) {
+        if (!heli.landing(v) && !near) p.t += dt;
+        if (p.t > P.giveUp) { pending.delete(u); continue; }
+        if ((p.re -= dt) <= 0) { p.re = P.repath; if (!near) u.orderTo(v.position.x, v.position.z); }
+        continue;
+      }
+      if (near) {
         pending.delete(u);
         if (menOf(v).length < (P.cap[v.typeKey] ?? 0)) board(u, v);
         continue;
@@ -123,10 +155,11 @@ export function createAlgTransports(app, { units, navGrid = null }) {
   function onDeath(v) {
     const m = [...menOf(v)];
     if (!m.length) return;
-    const dmg = P.wreckDamage[v.typeKey] ?? 35;
+    // Shot down in the air: nobody gets out of that.
+    const dmg = v.isAir ? 1e5 : P.wreckDamage[v.typeKey] ?? 35;
     m.forEach((u, k) => { unboard(u, k); u.takeDamage?.(dmg * (0.7 + Math.random() * 0.6)); });
     load.delete(v);
-    if (isHuman(v.team)) app.algBattle?.say?.(t("<b>Véhicule détruit</b> avec un groupe à bord : les survivants sautent."), v.position.x, v.position.z, "bad", null, "alertAttack");
+    if (isHuman(v.team)) app.algBattle?.say?.(v.isAir ? t("<b>Hélicoptère abattu</b> avec des hommes à bord : aucun survivant.") : t("<b>Véhicule détruit</b> avec un groupe à bord : les survivants sautent."), v.position.x, v.position.z, "bad", null, "alertAttack");
   }
 
   // ── The player's order: right-click your vehicle; the cursor over one with room ──
@@ -213,7 +246,8 @@ export function createAlgTransports(app, { units, navGrid = null }) {
      */
     ability(sel) {
       if (!sel.some((u) => (isCarrier(u) && menOf(u).length) || u.carrier)) return null;
-      return { key: "disembark", label: t("Débarquer"), hint: t("Le groupe descend à l'arrière du véhicule."), ready: true };
+      const air = sel.some((u) => heli?.handles(u) || heli?.handles(u.carrier));
+      return { key: "disembark", label: t("Débarquer"), hint: air ? t("L'hélicoptère se pose sur le terrain plat le plus proche, les hommes sautent à terre par la porte.") : t("Le groupe descend à l'arrière du véhicule."), ready: true };
     },
     disembark(sel) {
       // The men still RUNNING to the vehicle are told off too (you, 2026-10-11, the training's

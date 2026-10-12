@@ -404,6 +404,16 @@ export const ALG_UNIT_TYPES = {
     procedural: "alouette", excludeRotorsFromBox: true, facingOffset: 0,
     ringRadius: 7.5, barWidth: 7, barY: 6, castShadow: true,
   },
+  // Piasecki H-21 "Banane" (2026-10-12): the transport. Unarmed, slow to turn, two squads aboard —
+  // it lands to take them on and set them down (algHeliLift.js, algTransports.js). Lower than the
+  // Alouette: it hops the men from crest to crest.
+  h21: {
+    typeKey: "h21", name: t("H-21 « Banane »"),
+    isAir: true, hover: 20, speed: 19, radius: 7, turnRate: 1.5, maxHp: 220,
+    range: 0, damage: 0, fireRate: 1, canHitAir: false, vision: 60,
+    procedural: "h21", excludeRotorsFromBox: true, facingOffset: 0,
+    ringRadius: 11, barWidth: 9, barY: 7.5, castShadow: true,
+  },
 };
 
 // THE MOUSSEBEL (2026-10-09, algCivilians.js): one of the FLN's auxiliaries — a "shepherd" at a

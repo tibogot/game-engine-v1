@@ -223,6 +223,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
     launchFromY: null,
     /** 0..1: how fast the rotors turn (the renderer reads it). Spools up on a pad. */
     rotorSpin: 1,
+    /** 0..1: the share of its hover an aircraft flies at — a game eases it to 0 to LAND one (alg-rts algHeliLift.js). */
+    altScale: 1,
     /**
      * Take off over `dur` seconds (helipad rise animation). Optional: `hold`
      * seconds sat on the pad first while the rotor spools up (rotorSpin 0→1),
@@ -664,7 +666,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
         if (unit.launchFromY != null) base = Math.max(surf, unit.launchFromY);
         if (unit.launchT >= unit.launchDur) { unit.launchDur = 0; unit.launchFromY = null; unit.rotorSpin = 1; } // done — full hover
       }
-      pos.y = base + (surf + (type.hover ?? 0) - base) * hoverScale;
+      pos.y = base + (surf + (type.hover ?? 0) * (unit.altScale ?? 1) - base) * hoverScale;
     },
   };
   return unit;

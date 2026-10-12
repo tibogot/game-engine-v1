@@ -21,7 +21,7 @@ import { createControlGroups } from "../shared-rts/controlGroups.js";
 import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { createAlgSnipers } from "./algSniper.js";
 import { createAlgUnitMarks } from "./algUnitMarks.js";
-import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildH21, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { createAlgSquads, SQUADS } from "./algSquads.js";
 import { createAlgLastSeen } from "./algLastSeen.js";
 import { createAlgPathDots } from "./algPathDots.js";
@@ -53,6 +53,7 @@ import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
 import { createAlgTransports } from "./algTransports.js";
+import { createAlgHeliLift } from "./algHeliLift.js";
 import { createAlgAttackMove } from "./algAttackMove.js";
 import { createAlgWrecks } from "./algWrecks.js";
 import { createAlgCrews } from "./algCrews.js";
@@ -83,7 +84,7 @@ const PRODUCTION = {
   // Infantry per SQUAD (algSquads.js), vehicles one each.
   post: { appele: 14, sapeur: 10, piece: 14, lanceFlammes: 16, legion: 24 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
-  helipad: { para: 18, alouette: 30 },   // paras: the heliborne reserve
+  helipad: { para: 18, alouette: 30, h21: 34 },   // paras: the heliborne reserve; the H-21 carries them
   caveEntrance: { moudjahid: 4, fmTeam: 7, tireur: 8 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
 };
 
@@ -102,6 +103,7 @@ function padEdge(m, px, pz) {
 const FR_VEHICLES = {
   willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC({ detail: 2 }), gmcOpen: () => buildGMC({ detail: 2, crew: false, tilt: false }), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
   amx13: () => buildAMX13({ detail: 2 }), ebr: () => buildEBR({ detail: 2 }), alouette: () => buildAlouette({ detail: 2, crew: false }),
+  h21: () => buildH21(),
 };
 
 /**
@@ -540,6 +542,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         garrison?.ability(sel),
         // DÉBARQUER (algTransports.js): out of the truck / half-track.
         transports?.ability(sel),
+        // ATTERRIR (algHeliLift.js): an H-21 comes down empty, to wait for men.
+        heliLift?.ability(sel),
         sel.some((u) => u.alive && isHuman(u.team) && canBuild(u, "wire"))
           && { key: "cutWire", label: t("Couper"), hint: t("Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs."), ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
@@ -571,6 +575,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "repair") repair?.begin(sel);
       if (key === "unload") { garrison?.exitAll(sel); commandCard.render(sel); }
       if (key === "disembark") { transports?.disembark(sel); commandCard.render(sel); }
+      if (key === "heliLand") { heliLift?.land(sel); commandCard.render(sel); }
       if (key === "attackMove") attackMove?.begin(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
@@ -627,7 +632,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let build = null;     // made after the cover (algBuild.js)
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
-  let transports = null;   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
+  let transports = null, heliLift = null;   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
   let attackMove = null;   // ASSAUT: advance and fight (algAttackMove.js), after the selection
   let controlGroups = null;   // made after the selection it listens to
   let coverCursor = null, mgTeams = null;
@@ -737,7 +742,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   garrison = createAlgGarrison(app, { units, squads, navGrid, showroom, fogOfWar });
   app.algGarrison = garrison;
   // TRANSPORTS (algTransports.js): a squad rides in a GMC or a half-track.
-  transports = createAlgTransports(app, { units, navGrid });
+  // THE H-21 LIFT (algHeliLift.js): it lands to take squads on and to set them down.
+  heliLift = createAlgHeliLift(app, { units, navGrid });
+  app.algHeliLift = heliLift;
+  transports = createAlgTransports(app, { units, navGrid, heli: heliLift });
   app.algTransports = transports;
   // THE SEARCHLIGHTS (algSearchlight.js): sweep, lock on, reveal who is lit.
   const searchlights = createAlgSearchlights(app, { structures, units, cover: coverSys.cover });
@@ -863,7 +871,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

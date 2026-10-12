@@ -23,6 +23,13 @@ export default {
   "Groupe à bord — clic : le sélectionner · Débarquer": "Squad aboard — click: select it · Disembark",
   "Débarquer": "Disembark",
   "Le groupe descend à l'arrière du véhicule.": "The squad gets out at the back of the vehicle.",
+  "<b>Hélicoptère abattu</b> avec des hommes à bord : aucun survivant.": "<b>Helicopter shot down</b> with men aboard: no survivors.",
+  "L'hélicoptère se pose sur le terrain plat le plus proche, les hommes sautent à terre par la porte.": "The helicopter sets down on the nearest flat ground and the men jump out of the door.",
+  // algHeliLift.js — the H-21 lands to take squads on and set them down (2026-10-12)
+  "<b>Pas de zone d'atterrissage</b> ici : il faut un terrain plat et dégagé.": "<b>No landing zone</b> here: it needs flat, open ground.",
+  "Atterrir": "Land",
+  "Se poser sur le terrain plat et dégagé le plus proche. Au sol, l'hélicoptère peut être touché par toutes les armes. Un ordre de mouvement le fait redécoller.":
+    "Set down on the nearest flat, open ground. On the ground the helicopter can be hit by every weapon. A move order makes it take off again.",
   // algGrenades.js
   "Grenade": "Grenade",
   "Un homme lance une grenade ({range} m, souffle {blast} m) : dégâts, et les hommes autour se jettent à terre. G.":

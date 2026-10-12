@@ -72,6 +72,26 @@ ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) build
 collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a short campaign →
 (6) Electron, Steamworks, the store page → Early Access.
 
+## HELIBORNE — 2026-10-12 (you: "the helicopter should pick up and disembark units; paratroopers
+## dropped by the plane, animated by us")
+1. [x] THE H-21 "BANANE" (rtsVehiclesFr.js buildH21) — rebuilt TWICE against real pictures (you: "it
+   looks very bad, check images online"): measured off a side profile at 70 px/m, photos of H-21B/Cs
+   and a French one in Algeria (assets-src/refs/h21/, `_compare_side.jpg` = ours beside them). Raked
+   glazed nose, the rotor pylon swelling out of the roof, the dog-leg, round portholes, the door,
+   the engine intake, canted fins, tall gear; MARINE on its flanks (you). ~10k tris, 0 coplanar.
+2. [x] THE LIFT (algHeliLift.js + algTransports.js): two squads (12); right-click it with infantry →
+   it lands on flat open ground beside them (9 m clear, < 1.8 m of slope), they board at the door;
+   DÉBARQUER lands it under itself and they jump out at the side door; ATTERRIR lands it empty; any
+   move order lifts it off. On the ground it is NOT an aircraft (`isAir` off): every rifle hits it.
+   Shot down in the air: everyone aboard dies. shared-rts/units.js `altScale` (0..1 of the hover).
+   Helipad, tier 2, 260 mp + 90 fuel, pop 4.
+3. [ ] **you**: play it — the landing time (3.4 s down, 2.8 s up), its price, two squads or one.
+4. [ ] The French AI (algFrenchAI.js) doesn't use the H-21 yet (a heliborne assault on a village).
+5. [ ] A door gun (the French H-21s carried an MG 151 / a .50 in the door) — a CoH-style upgrade?
+6. [ ] THE PARADROP: a Noratlas model (lab first, against photos), a doctrine call-in; the men under
+   a procedural canopy (instanced), a hanging pose and sway, a landing crouch; easy targets while
+   they come down.
+
 ## CoH AUDIT 2 — 2026-10-07 (you: "another audit to compare with CoH: textures, buildings,
 ## environment, gameplay"). LOOKED AT in the game: the post, Dechra Tighanimine, Ksar el Hamra,
 ## Mechta el Oued, the open fields at full zoom-out, a staged fight by the SAS post. Ranked by

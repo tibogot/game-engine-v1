@@ -42,6 +42,7 @@ export const COSTS = {
   para: { mp: 320, fuel: 25 }, legion: { mp: 380, mun: 45 },
   willys: { mp: 110, fuel: 20 }, gmc: { mp: 140, fuel: 30 }, halftrack: { mp: 190, fuel: 50 },
   ebr: { mp: 240, fuel: 75 }, amx13: { mp: 290, fuel: 105 }, alouette: { mp: 280, fuel: 120 },
+  h21: { mp: 260, fuel: 90 },   // (unarmed: it carries two squads — algHeliLift.js)
   moudjahid: 40, fmTeam: 70, tireur: 90,
 };
 
@@ -50,7 +51,7 @@ export const COSTS = {
  * squad: its men), a vehicle its number here. The cap grows with the villages held (algUnits.js
  * refuses a unit or a reinforcement past it).
  */
-export const POP = { willys: 2, gmc: 2, halftrack: 3, ebr: 4, amx13: 4, alouette: 4 };
+export const POP = { willys: 2, gmc: 2, halftrack: 3, ebr: 4, amx13: 4, alouette: 4, h21: 4 };
 
 /** The three, in display order. */
 export const RES = [

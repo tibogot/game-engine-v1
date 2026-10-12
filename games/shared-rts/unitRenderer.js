@@ -1087,7 +1087,9 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     // (MainRotor about Y, TailRotor about X).
     const rot = geo.userData.rotors;
     if (rot) {
-      for (const [name, r] of [["MainRotor", rot.main], ["TailRotor", rot.tail]]) {
+      // (`main2`: a tandem's second main rotor — the H-21 — also spun about Y.)
+      for (const [name, r] of [["MainRotor", rot.main], ["MainRotor2", rot.main2], ["TailRotor", rot.tail]]) {
+        if (!r) continue;
         const m = new THREE.Mesh(r.geo, kitMat);
         m.name = name;
         m.position.set(r.pivot[0], r.pivot[1], r.pivot[2]);
