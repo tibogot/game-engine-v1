@@ -576,6 +576,7 @@ export function createMinimap({
   const seen = new WeakMap();   // unit → { cd, hp }
   const pulses = [];            // { x, y, t }
   const pings = [];             // { x, z, t } — alerts (world coords)
+  let objectives = [];          // [{ x, z }] — where the current objective is (the training's lesson)
   const visible = (u) => isHuman(u.team) || !fogOfWar?.enabled || fogOfWar.isVisible(u.position.x, u.position.z);
   function watchCombat(now) {
     for (const u of units.list) {
@@ -796,6 +797,18 @@ export function createMinimap({
         c.fillStyle = key === "sel" ? COL.sel : key === "player" ? COL.air : COL.enemy; c.stroke(); c.fill();
       }
     }
+    // OBJECTIVES (the training's lesson, algTutorial.js): a gold diamond, a dark edge, a slow ring
+    // going out, OVER the units (under them, the half-track to board hid it) — there while the
+    // lesson lasts (the ground's ring is the same gold).
+    for (const o of objectives) {
+      const m = frame.toMini(o.x, o.z), d = 4.2 * s, f = (now % 1600) / 1600;
+      c.beginPath(); c.moveTo(m.x, m.y - d); c.lineTo(m.x + d, m.y); c.lineTo(m.x, m.y + d); c.lineTo(m.x - d, m.y); c.closePath();
+      c.fillStyle = "#f2c94c"; c.strokeStyle = "rgba(10, 8, 4, 0.85)"; c.lineWidth = 1.4 * s;
+      c.stroke(); c.fill();
+      c.strokeStyle = `rgba(242, 201, 76, ${0.85 * (1 - f)})`; c.lineWidth = 1.3 * s;
+      c.beginPath(); c.arc(m.x, m.y, (6 + 9 * f) * s, 0, Math.PI * 2); c.stroke();
+    }
+
     flushLabels(c);   // names last: on top of the units
   }
 
@@ -849,6 +862,8 @@ export function createMinimap({
     hasRadioIntel: hasIntel,
     /** An alert's place (algBattle.js): brass rings over it for 3 s. */
     ping(x, z) { pings.push({ x, z, t: performance.now() }); },
+    /** Where the current objective is: [{ x, z }] (a lesson's ring, its targets), or none. */
+    setObjectives(list) { objectives = (list ?? []).filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.z)).map((p) => ({ x: p.x, z: p.z })); },
     /** Re-bake the terrain (after the ground or the buildings change). */
     rebuildTerrain() { base.ctx.clearRect(0, 0, px, px); base.ctx.drawImage(bakeBase(app, frame, px, world, s), 0, 0); },
     dispose() {

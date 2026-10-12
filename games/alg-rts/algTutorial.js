@@ -96,6 +96,7 @@ export function createAlgTutorial(app) {
     return null;
   }
   const allDead = (list) => list.length > 0 && list.every((u) => !u.alive);
+  const alive = (list) => (list ?? []).filter((u) => u.alive).map((u) => u.position);
 
   // ── The lessons ───────────────────────────────────────────────────────────
   const view = () => app.rtsCamera?.getView?.();
@@ -169,6 +170,7 @@ export function createAlgTutorial(app) {
     title: t("Prendre un village"),
     text: t("Les villages sont l'enjeu : chacun rapporte et compte comme point de victoire. Postez des <b>hommes à pied</b> dans le cercle de la <b>Mechta d'exercice</b> : son anneau se remplit vers vous (plus ils sont nombreux, plus c'est rapide). Ses habitants ne sont pas des cibles : quand on tire, ils rentrent chez eux."),
     start() { const v = hamlet(); if (v) app.rtsCamera?.focusOn(v.position.x, v.position.z); },
+    where: () => [hamlet()?.position],
     done: () => hamlet()?.owner === "player",
     sub: () => { const v = hamlet(); return v ? t("{pct} % vers vous", { pct: Math.max(0, Math.round(v.value * 100)) }) : ""; },
   });
@@ -178,6 +180,7 @@ export function createAlgTutorial(app) {
     title: t("Les maisons"),
     text: t("Un mur protège ; une <b>maison</b> protège mieux. Groupe sélectionné, <b>clic droit sur une maison</b> de la mechta (le curseur devient une maison) : les hommes entrent et tirent par les fenêtres. Une grenade ou un obus les en chasse. Pour ressortir : <b>Sortir</b> (<kbd>K</kbd>), ou un simple ordre de marche."),
     start() { const v = hamlet(); if (v) app.rtsCamera?.focusOn(v.position.x, v.position.z); },
+    where: () => [hamlet()?.position],
     done(s) {
       if (inside().length >= 3) s.in = true;
       return !!s.in && !inside().length;
@@ -189,6 +192,7 @@ export function createAlgTutorial(app) {
     title: t("Le ravitaillement"),
     text: t("Le <b>carburant</b> et les <b>munitions</b> viennent des villages et des <b>points de ravitaillement</b> sur les pistes — s'ils sont <b>reliés au poste</b> par des points à vous. Prenez le <b>dépôt de munitions</b> sur la piste."),
     start() { const d = depot(); if (d) app.rtsCamera?.focusOn(d.position.x, d.position.z); },
+    where: () => [depot()?.position],
     done: () => depot()?.owner === "player",
   });
   // 6b. HOW A BATTLE IS WON (2026-10-11, your review: the training never showed the score). The bar
@@ -211,6 +215,7 @@ export function createAlgTutorial(app) {
     title: t("Attaquer"),
     text: t("Trois cibles au nord du village (elles ne tirent pas). Sélectionnez un groupe et faites <b>clic droit sur un ennemi</b> : le curseur devient un viseur rouge, vos hommes l'attaquent."),
     start(s) { s.f = fighters(3, 20, -46, { hold: true, spread: 3 }); app.rtsCamera?.focusOn(10, -30); },
+    where: (s) => alive(s.f),
     done: (s) => allDead(s.f),
   });
   // 7b. the shepherd (the moussebel, algCivilians.js): the farmstead west of the track
@@ -254,6 +259,7 @@ export function createAlgTutorial(app) {
       E.french.earn({ mun: 60 });
       app.rtsCamera?.focusOn(at.x, at.z + 25);
     },
+    where: (s) => alive(s.f),
     done: (s) => (app.algGrenades?.thrown?.grenade ?? 0) > s.g0 && allDead(s.f),
     sub: (s) => ((app.algGrenades?.thrown?.grenade ?? 0) > s.g0 ? `✓ ${t("grenade lancée")}` : t("une grenade sur eux")),
   });
@@ -267,6 +273,7 @@ export function createAlgTutorial(app) {
       if (q) { q.members.slice(-2).forEach((u) => u.takeDamage(1e6)); q.members.forEach((u) => { u.hp = Math.min(u.hp, u.maxHp * 0.55); }); app.selection?.select(q.members); app.rtsCamera?.focusOn(q.members[0].position.x, q.members[0].position.z); }
       E.french.earn({ mp: 120 });
     },
+    where: () => [post()?.position],
     done(s) { if (s.q?.retreating) s.ran = true; return !!s.ran && s.q && s.q.count >= s.q.size; },
     sub: (s) => `${s.ran ? "✓" : "·"} ${t("retraite")} · ${s.q ? `${s.q.count}/${s.q.size}` : ""} ${t("hommes")}`,
   });
@@ -275,6 +282,7 @@ export function createAlgTutorial(app) {
     title: t("Le poste"),
     text: t("Le poste forme vos troupes. Cliquez dessus : sa fiche montre ce qu'il produit, avec leur prix (effectifs, carburant, munitions). Formez un groupe d'<b>Appelés</b> — il sort par la porte."),
     start(s) { s.n0 = S.list.filter((q) => q.team === "player").length; E.french.earn({ mp: 300 }); const p = post(); if (p) app.rtsCamera?.focusOn(p.position.x, p.position.z); },
+    where: () => [post()?.position],
     done: (s) => S.list.filter((q) => q.team === "player" && q.count > 0).length > s.n0,
   });
   // 12. the tier
@@ -282,6 +290,7 @@ export function createAlgTutorial(app) {
     title: t("Les échelons"),
     text: t("Les unités plus fortes sont <b>verrouillées</b> : elles s'ouvrent par échelon, au poste. Sur sa fiche, cliquez <b>▲ Moyens héliportés</b> (il faut tenir un village) : paras, Alouette et half-track."),
     start() { E.french.earn({ mp: 200, fuel: 60 }); const p = post(); if (p) { app.rtsCamera?.focusOn(p.position.x, p.position.z); app.selection?.select([p]); } },
+    where: () => [post()?.position],
     done: () => (app.algTiers?.tier ?? 1) >= 2,
   });
   // 13. the half-track
@@ -294,6 +303,7 @@ export function createAlgTutorial(app) {
       s.ht?.faceToward?.(hamletSite.x, hamletSite.z);
       if (s.ht) app.rtsCamera?.focusOn(s.ht.position.x, s.ht.position.z);
     },
+    where: (s) => [s.boarded ? hamletSite : s.ht?.position],
     done(s) {
       const T = app.algTransports;
       if (s.ht && T?.menOf(s.ht).length) s.boarded = true;
@@ -320,6 +330,7 @@ export function createAlgTutorial(app) {
       const left = s.f.filter((u) => u.alive);
       if (left.length <= 3 && !s.hunt) { s.hunt = left; say(t("Les derniers rebelles se terrent dans la mechta (cerclés de rouge) : allez les chercher."), left[0]?.position.x, left[0]?.position.z, ""); }
     },
+    where: (s) => [hamletSite, ...(s.hunt ? alive(s.hunt) : [])],
     done: (s) => allDead(s.f) && hamlet()?.owner === "player",
     sub: (s) => t("{n} rebelles restants", { n: s.f.filter((u) => u.alive).length }),
   });
@@ -381,9 +392,20 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
     if (i + 1 >= L.length) return finish();
     begin(i + 1);
   }
+  /**
+   * THE OBJECTIVE ON THE MINIMAP (2026-10-12, you: "the current lesson's target on the minimap"):
+   * the lesson's ring, its place (the mechta, the depot, the post, the half-track) or its live
+   * targets — a gold diamond on the minimap and the tactical map. None once the lesson is done.
+   */
+  function showWhere(list) {
+    const pts = (list ?? []).filter(Boolean);
+    app.algUnits?.minimap?.setObjectives?.(pts);
+    app.algTacMap?.map?.setObjectives?.(pts);
+  }
   function finish() {
     if (finished) return;
     finished = true;
+    showWhere([]);
     el.hidden = true;
     app.algVoices?.radio?.("hq_victory");
     const back = hud.end(`
@@ -401,6 +423,7 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
     const l = L[i];
     if (l.sub) el.querySelector(".sb").textContent = l.sub(state);
     try { l.tick?.(state); } catch (e) { console.warn("[tutorial] tick", e); }
+    showWhere(waitT > 0 ? [] : l.where ? l.where(state) : state.m ? [state.m] : []);
     if (waitT > 0) { waitT -= P.tick; if (waitT <= 0) next(); return; }
     let ok = false;
     try { ok = l.done(state); } catch (e) { console.warn("[tutorial] check", e); }
