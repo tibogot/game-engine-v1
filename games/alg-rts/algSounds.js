@@ -35,11 +35,12 @@ export function createAlgSounds({ app, rtsCamera, units }) {
   // distanceFx (rtsAudio.js): far shots ring off the valley and arrive late; a fight near the
   // camera pushes the wind and cicadas down (2026-10-07, the sound pass without recordings).
   // (`audioHeightK`, algGame.js: CoH 3's higher camera heard as the old one did.)
-  const audio = createRtsAudio({ app, getView: () => { const v = rtsCamera.getView?.(); return v && rtsCamera.audioHeightK ? { ...v, height: v.height * rtsCamera.audioHeightK } : v; }, manifestUrl: "/sounds/alg/manifest.json", storeKey: "algrts.audio.v1", startMuted: true, distanceFx: {} });
-  // OFF AT EVERY LOAD (you, 2026-10-01; 2026-10-07: "annoying when working on other things"): the
-  // volumes are remembered, on/off is not — Dev → Sound or the menu's Son turns it on for this visit.
-  audio.set("muted", true);
-  // The first click or key anywhere wakes the audio (browsers start it suspended).
+  const audio = createRtsAudio({ app, getView: () => { const v = rtsCamera.getView?.(); return v && rtsCamera.audioHeightK ? { ...v, height: v.height * rtsCamera.audioHeightK } : v; }, manifestUrl: "/sounds/alg/manifest.json", storeKey: "algrts.audio.v1", startMuted: false, distanceFx: {} });
+  // ON AT EVERY LOAD (2026-10-12, you: "make the sound enabled by default"; it was OFF at every load
+  // since 2026-10-01 — "annoying when working on other things"): the volumes are remembered, on/off
+  // is not — the menu's Son turns it off for this visit; ?sound=0 = no sound at all (for work).
+  audio.set("muted", false);
+  // The first click or key anywhere wakes the audio (browsers start it suspended until then).
   const wake = () => { if (!audio.settings.muted) audio.ctx.resume(); };
   window.addEventListener("pointerdown", wake, { once: true, capture: true });
   window.addEventListener("keydown", wake, { once: true, capture: true });
