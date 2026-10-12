@@ -193,8 +193,9 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const h = H(x, z), depth = SEA - h;
   const w = new Float32Array(7);
   if (depth > 0) {
-    // under the sea: the beach's sand running in, then the seabed
-    const sand = 1 - smoothstep(0.6, 3.0, depth);
+    // under the sea: the beach's pale sand running out to ~6 m (the Mediterranean's turquoise band:
+    // light seen through the shallows over pale sand — 3 m was too short), then the darker seabed
+    const sand = 1 - smoothstep(3.5, 7.5, depth);
     w[1] = sand; w[2] = 1 - sand;
   } else {
     const above = -depth;

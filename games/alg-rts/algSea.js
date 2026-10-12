@@ -1,49 +1,52 @@
 // THE GAME'S OWN SEA (2026-10-12, you: "the Tidewater ocean is awesome but not made for a top
 // view — the breaking surf looks bad from above; build the game's own sea, inspired by Tidewater,
-// without modifying it"). Ocean Pro (Tidewater's port) is built for a camera near the water looking
-// at the horizon: curling lips, spray, grazing reflections. From the RTS camera (60-100 m up,
-// looking down) what reads is what you see THROUGH the water and along its edge — so this is:
+// without modifying it"; then "we could do way better looking"). Ocean Pro (Tidewater's port) is
+// built for a camera near the water looking at the horizon. From the RTS camera (60-100 m up,
+// looking down) what reads is what you see THROUGH the water and along its edge — so this is
+// Tidewater's optics seen from above, ONE surface (one draw):
 //
-//   ONE flat lit surface at sea level (one draw), its colour from the DEPTH under it (the map's
-//   heightmap, read in the shader):
-//     the shallows    clear turquoise, the seabed seen through them (transparent near the shore)
-//     the deep        Tidewater's blue-green absorption, opaque from ~4 m
-//   the SURFACE        ripples (three layers of scrolling noise, along the wind) → the sun's glints
-//                      and the sky's reflection, from the scene's own light and environment
-//   the SHORE          (Tidewater's swash and surf, seen from above) a foam line at the water's edge
-//                      that pulses with the swell, and WAVES rolling in through the shallows — bands
-//                      of foam moving toward the beach, born ~4.5 m deep, breaking up into lace
+//   THROUGH the water   the real scene behind it (the shared one-copy-a-frame grab, lakeMaterial's
+//                       sceneColorGrab), ABSORBED per channel by the depth (Beer-Lambert: red goes
+//                       first) — sand a metre down reads turquoise, 10 m down deep blue — plus the
+//                       light the water itself scatters back. At depth 0 nothing is absorbed: the
+//                       shoreline is seamless (the old surface drew a hard line there).
+//   CAUSTICS            on the seabed in the shallows (Caustic_Free.jpg, two layers, their minimum)
+//   the SURFACE         the water normal map, two scrolling layers along the wind: the sun's glints
+//                       and the sky's reflection (the scene's own light and environment, roughness)
+//   the SHORE           the distance-to-shore field (built once at load): waves rolling in, their
+//                       foam LACE from the caustic cells; the SWASH — the surface sits `lift` over
+//                       the sea, so a thin film runs up the beach and back, a lace at its front, and
+//                       the sand it leaves is darker (wet), drying up the slope
 //
 // The map's sea LEVEL (maps/coast.js `sea.level`) is answered to every system by algGame.js (the
-// level file carries no ocean). ?sea=pro = Ocean Pro instead, to compare.
+// level file carries no ocean); only this surface sits `lift` over it. ?sea=pro = Ocean Pro.
 import * as THREE from "three";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
-import { abs, clamp, exp, float, fract, max, mix, mx_noise_float, normalize, positionWorld, smoothstep, texture, time, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
+import { sceneColorGrab } from "../../v3/render/water/lakeMaterial.js";
+import { clamp, exp, float, fract, max, min, mix, mx_noise_float, normalize, positionWorld, screenUV, smoothstep, texture, time, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 
 export const SEA = {
-  shallow: [0.29, 0.6, 0.56],    // over sand, a metre down
-  deep: [0.03, 0.15, 0.21],      // Tidewater's absorption, deep water
-  absorb: 5.5,                   // m: how fast the colour goes from shallow to deep
-  clearDepth: 3.8,               // m: fully opaque from here (the seabed seen above it)
-  edgeAlpha: 0.22,               // opacity at the water's edge (no hard line where it meets the land)
-  roughness: 0.07,
-  windDeg: 45,                   // the swell comes FROM here (the coast level's: NW, onto the beach)
-  rippleAmp: 0.09,               // m
-  clearDist: 22,                 // m from the shore: opaque by here whatever the depth
-  edgeFoam: 1.2,                 // m: the swash's foam at rest (+1.6 m as the swell runs up)
-  waveBorn: 34,                  // m from the shore: the waves are born here and break toward it
-  waveSpacing: 9,                // m between two waves
-  waveSpeed: 0.075,              // waves a second (0.7 m/s toward the beach)
-  waveWobble: 4.5,               // m: how far a wave's line bends
-  foam: [0.93, 0.95, 0.94],
+  // the light the water scatters back (deep, open water seen from above) and how fast each
+  // channel is absorbed (1/m) — the Mediterranean's turquoise shallows, ultramarine deep
+  deep: [0.004, 0.035, 0.2],
+  shallow: [0.02, 0.38, 0.6],   // the light scattered in clear shallows over sand: the turquoise
+  shallowTo: 9,                  // m: shallow scatter → deep scatter
+  sigma: [0.85, 0.23, 0.085],
+  viewK: 1.15,                   // the view ray's path through the water ÷ the depth (the RTS tilt)
+  roughness: 0.06,
+  windDeg: 45,                   // the swell comes FROM here (onto the beach, NW)
+  normalTile: [41, 15],           // m: the two normal-map layers
+  normalStr: 0.3,
+  refract: 0.012,                // screen-uv offset by the surface's slope (×depth, capped)
+  caustics: 1.1,                 // how bright on the seabed
+  causticTile: 7,                // m
+  // the shore (in metres from it, the distance field)
+  waveBorn: 34, waveSpacing: 9, waveSpeed: 0.075, waveWobble: 4.5,
+  foam: [0.92, 0.94, 0.93],
+  // the swash: the surface `lift` m over the sea, a run-up every `period` s
+  lift: 0.35, period: 7.5, wetDark: 0.62,
 };
 
-/**
- * @param {object} app   the v3 app (scene, heightTexNode, maxHeight, worldSize, getWaterLevelAt)
- * @param {object} o
- * @param {number} o.level     the sea level (m)
- * @param {number} [o.size]    m, the surface's side (past the map: the open sea to the horizon)
- */
 /**
  * THE DISTANCE TO THE SHORE (Tidewater's shore field, simply): metres from each water point to the
  * nearest land, on a 2 m grid over the map, built ONCE from the terrain (whatever its shape). The
@@ -80,82 +83,138 @@ function shoreDistance(app, level, N = 512) {
   return tex;
 }
 
+function repeatTex(url, srgb = false) {
+  const t = new THREE.TextureLoader().load(url);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = 8;
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/**
+ * @param {object} app   the v3 app (scene, heightTexNode, maxHeight, worldSize, getWorldHeight)
+ * @param {object} o
+ * @param {number} o.level     the sea level (m)
+ * @param {number} [o.size]    m, the surface's side (past the map: the open sea to the horizon)
+ */
 export function createAlgSea(app, { level, size = 6000 } = {}) {
   const P = SEA;
   const W = app.worldSize, H = app.maxHeight;
-  const uLevel = uniform(level);
+  const U = {
+    level: uniform(level), deep: uniform(new THREE.Color(...P.deep)), shallow: uniform(new THREE.Color(...P.shallow)), sigma: uniform(new THREE.Vector3(...P.sigma)),
+    caustics: uniform(P.caustics), normalStr: uniform(P.normalStr), wetDark: uniform(P.wetDark),
+  };
   const t = time;
   const t0 = performance.now();
   const shoreTex = shoreDistance(app, level);
   const shoreMs = Math.round(performance.now() - t0);
+  const nrmTex = repeatTex("/textures/waterNormal.webp");
+  const cauTex = repeatTex("/textures/Caustic_Free.jpg");
 
-  // The DEPTH under a point: the sea level minus the ground (the heightmap, as terrainDrape's
-  // drapeY reads it; past the map's edge the ground reads 0 → deep).
-  const wp = positionWorld;
+  // ── Where: the ground under the point, the depth, the distance from the shore ──
+  const wp = positionWorld, xz = wp.xz;
   const u = wp.x.add(W * 0.5).div(W), v = wp.z.add(W * 0.5).div(W);
-  const ground = texture(app.heightTexNode, vec2(u, v)).r.mul(H);
   const inMap = smoothstep(0.0, 0.002, u).mul(smoothstep(1.0, 0.998, u)).mul(smoothstep(0.0, 0.002, v)).mul(smoothstep(1.0, 0.998, v));
-  const depth = max(uLevel.sub(mix(float(level - 40), ground, inMap)), 0.0);
-
-  // THE SURFACE: three ripple layers scrolling along the wind; the normal from their slope.
-  const wr = THREE.MathUtils.degToRad(P.windDeg + 180);   // (FROM the wind's direction → toward)
-  const wind = vec2(Math.sin(wr), Math.cos(wr));
-  const layer = (xz, f, speed, amp, seed) => mx_noise_float(vec3(xz.mul(f).add(wind.mul(t.mul(speed))), t.mul(0.07).add(seed))).mul(amp);
-  const hAt = (xz) => layer(xz, 0.09, 0.9, 1.0, 0).add(layer(xz, 0.23, 1.6, 0.45, 3.1)).add(layer(xz, 0.61, 2.4, 0.18, 7.7));
-  const xz = wp.xz, e = 0.35;
-  const h0 = hAt(xz), hx = hAt(xz.add(vec2(e, 0))), hz = hAt(xz.add(vec2(0, e)));
-  // calmer in the shallows (the swell flattens as it feels the bottom) and far out, from above
-  const amp = float(P.rippleAmp).mul(smoothstep(0.0, 2.5, depth).mul(0.6).add(0.4));
-  const nWorld = normalize(vec3(hx.sub(h0).mul(amp).div(e).negate(), 1.0, hz.sub(h0).mul(amp).div(e).negate()));
-
-  // THE COLOUR: Tidewater's absorption by depth.
-  const k = float(1).sub(exp(depth.div(P.absorb).negate()));
-  const water = mix(vec3(...P.shallow), vec3(...P.deep), k);
-
-  // THE SHORE, measured in METRES from it (the distance field; past the map: far out).
+  const ground = mix(float(level - 40), texture(app.heightTexNode, vec2(u, v)).r.mul(H), inMap);
+  const below = U.level.sub(ground);                       // + under the sea, − up the beach
+  const depth = max(below, 0.0);
   const dist = mix(float(64), texture(shoreTex, vec2(u, v)).r.mul(255 / 4), inMap);
-  const lace = mx_noise_float(vec3(xz.mul(0.55), t.mul(0.35))).mul(0.5).add(0.5);           // fine foam lace
-  const clumps = mx_noise_float(vec3(xz.mul(0.07).add(wind.mul(t.mul(0.4))), t.mul(0.05))).mul(0.5).add(0.5);   // where a wave breaks more
-  const swell = t.mul(0.9).sin().mul(0.5).add(0.5);
-  // the edge: the swash, a band a metre or two wide that runs up as the swell comes in
-  const edge = smoothstep(float(P.edgeFoam).add(swell.mul(1.6)), 0.0, dist).mul(smoothstep(0.25, 0.6, lace.add(swell.mul(0.15))));
-  // the waves: lines of constant distance moving toward the beach, a sharp crest and a trail of
-  // foam behind; born waveBorn metres out, strongest where they break, gone at the swash
-  // (the lines BENT by a slow noise — ruled straight stripes read as a pattern, not a sea — and
-  // broken in pieces along their length: a wave breaks here and not there)
+
+  const wr = THREE.MathUtils.degToRad(P.windDeg + 180);   // (FROM the wind's direction → toward)
+  const wind = vec2(Math.sin(wr), Math.cos(wr)), side = vec2(Math.cos(wr), -Math.sin(wr));
+
+  // ── THE SWASH: the run-up (m over the sea) at this point now ─────────────────
+  // a quick rush up, a slow fall back; each stretch of beach on its own phase and reach
+  const along = mx_noise_float(vec3(xz.mul(0.045), 0.0)).mul(0.5).add(0.5);
+  const sw = fract(t.div(P.period).add(along.mul(1.7)));
+  const rush = smoothstep(0.0, 0.28, sw).mul(float(1).sub(smoothstep(0.28, 1.0, sw)));
+  const runup = rush.mul(along.mul(0.55).add(0.45)).mul(P.lift);
+  const film = clamp(runup.sub(below.negate()).div(0.05), 0.0, 1.0).mul(smoothstep(0.0, -0.02, below.negate().sub(P.lift)));   // up the beach, under the film
+  const onBeach = smoothstep(-0.005, 0.005, below.negate());   // 1 where the ground is over the sea
+
+  // ── THE SURFACE: two normal-map layers along the wind ────────────────────────
+  const n1 = texture(nrmTex, xz.div(P.normalTile[0]).add(wind.mul(t.mul(0.018)))).xyz.mul(2).sub(1);
+  const n2 = texture(nrmTex, xz.div(P.normalTile[1]).add(side.mul(t.mul(0.011))).add(wind.mul(t.mul(0.026)))).xyz.mul(2).sub(1);
+  // calm on the beach's film and as the swell feels the bottom
+  const calm = smoothstep(0.0, 1.5, depth).mul(0.75).add(0.25).mul(float(1).sub(onBeach.mul(0.7)));
+  const slope = n1.xy.add(n2.xy).mul(U.normalStr).mul(calm);
+  const nWorld = normalize(vec3(slope.x, 1.0, slope.y));
+
+  // ── THROUGH THE WATER: the seabed, refracted, absorbed; caustics ─────────────
+  const refr = slope.mul(P.refract).mul(min(depth, 2.0)).mul(float(1).sub(onBeach));
+  const behind = sceneColorGrab.sample(screenUV.add(refr).clamp()).rgb;
+  const path = depth.mul(P.viewK);
+  const T = exp(U.sigma.mul(path).negate());   // per channel
+  const cuv = xz.div(P.causticTile);
+  const cau = min(
+    texture(cauTex, cuv.add(wind.mul(t.mul(0.03)))).r,
+    texture(cauTex, cuv.mul(1.31).add(side.mul(t.mul(0.025))).add(0.37)).r,
+  );
+  const cauMask = smoothstep(0.08, 0.5, depth).mul(float(1).sub(smoothstep(1.5, 6.0, depth)));
+  // (the sand under the water is WET: as dark as the wet beach — dry-bright under the shallows, they
+  // read brighter than the wet strip above the waterline)
+  const seabed = behind.mul(U.wetDark).mul(float(1).add(cau.mul(cau).mul(U.caustics).mul(cauMask)));
+
+  // ── THE SHORE: waves rolling in, their lace ─────────────────────────────────
+  // the lace: the caustic cells' bright edges, their UVs WARPED by a noise (straight, the cells drew
+  // a regular net of round holes — "Swiss cheese"), two scales
+  const warp = vec2(mx_noise_float(vec3(xz.mul(0.18), t.mul(0.12))), mx_noise_float(vec3(xz.mul(0.18).add(7.3), t.mul(0.12)))).mul(0.45);
+  const lace = texture(cauTex, xz.div(6.5).add(warp).add(wind.mul(t.mul(0.05)))).r;
+  const lace2 = texture(cauTex, xz.div(2.7).add(warp.mul(1.6)).add(side.mul(t.mul(0.07))).add(0.61)).r;
+  const clumps = mx_noise_float(vec3(xz.mul(0.07).add(wind.mul(t.mul(0.4))), t.mul(0.05))).mul(0.5).add(0.5);
   const wobble = mx_noise_float(vec3(xz.mul(0.035), t.mul(0.04))).mul(P.waveWobble);
   const phase = fract(dist.add(wobble).div(P.waveSpacing).add(t.mul(P.waveSpeed)));
-  const crest = smoothstep(0.0, 0.06, phase).mul(float(1).sub(smoothstep(0.06, 0.45, phase)));
-  const born = smoothstep(P.waveBorn, P.waveBorn * 0.35, dist).mul(smoothstep(0.8, 3.0, dist));
-  const waves = crest.mul(born).mul(smoothstep(0.45, 0.8, clumps.mul(0.75).add(lace.mul(0.4))));
-  const foam = clamp(max(edge, waves), 0.0, 1.0);
+  const crest = smoothstep(0.0, 0.05, phase).mul(float(1).sub(smoothstep(0.05, 0.55, phase)));   // a front and its trail
+  const born = smoothstep(P.waveBorn, P.waveBorn * 0.35, dist).mul(smoothstep(0.3, 2.0, dist));
+  const waveAmt = crest.mul(born).mul(smoothstep(0.35, 0.8, clumps));
+  // foam = a soft BODY (churned, milky water) and the lace over it, both by the amount
+  const laceAt = (amt) => max(
+    smoothstep(float(1).sub(amt), float(1.25).sub(amt), lace.mul(0.6).add(lace2.mul(0.5))),
+    smoothstep(0.25, 1.0, amt).mul(0.55).mul(lace2.mul(0.5).add(0.5)));
+  // the swash: a lace at the film's front as it runs up, lace left in the film as it falls back
+  const front = smoothstep(0.07, 0.0, runup.sub(below.negate())).mul(film).mul(onBeach).mul(smoothstep(0.02, 0.08, runup));
+  const frontLine = front.mul(lace2.mul(0.35).add(0.65));   // a continuous line, a little broken (was specks)
+  const shoreAmt = max(waveAmt, max(frontLine, film.mul(onBeach).mul(0.4)))
+    .add(smoothstep(2.5, 0.0, dist).mul(float(1).sub(onBeach)).mul(0.6));   // the line where it meets the sand
+  const foam = clamp(laceAt(clamp(shoreAmt, 0.0, 1.0)), 0.0, 1.0);
 
-  // OPACITY: clear in the shallows (the seabed shows), solid from clearDepth or clearDist out
-  // (a flat beach's shallows would otherwise stay see-through for tens of metres); foam opaque.
-  const clear = max(smoothstep(0.0, P.clearDepth, depth), smoothstep(0.0, P.clearDist, dist));
-  const alpha = max(mix(float(P.edgeAlpha), float(1), clear), foam);
+  // ── WET SAND: up the beach, darker toward the sea; under the film, a touch more ──
+  // (its top edge ragged: a perfectly even beach slope drew it as a ruled stripe)
+  const rag = mx_noise_float(vec3(xz.mul(0.22), 0.0)).mul(0.06).add(mx_noise_float(vec3(xz.mul(0.9), 0.0)).mul(0.025));
+  const wet = smoothstep(P.lift * 0.85, P.lift * 0.15, below.negate().add(rag)).mul(onBeach);
+  const sandSeen = behind.mul(mix(float(1), U.wetDark, wet.mul(0.8).add(film.mul(0.2))));
 
-  const mat = new THREE.MeshStandardNodeMaterial({ transparent: true, depthWrite: false, metalness: 0, roughness: P.roughness });
+  // ── THE OUTPUT: what is seen through (unlit: the grab is lit already) + the water's own ──
+  // in the sea: the seabed through the water + its scattered light; on the beach: the sand, wet
+  const through = mix(seabed.mul(T), sandSeen, onBeach);
+  const scatter = mix(U.shallow, U.deep, smoothstep(0.5, P.shallowTo, depth));
+  const own = scatter.mul(vec3(1).sub(T)).mul(float(1).sub(onBeach));
+  // (Physical: its SPECULAR can be switched off — on the dry beach the standard material's 4% sky
+  // reflection lit the sand the surface overlaps, and its edge drew a line along the beach)
+  const mat = new THREE.MeshPhysicalNodeMaterial({ transparent: true, depthWrite: false, metalness: 0, roughness: P.roughness, ior: 1.33 });
   mat.name = "AlgSea";
-  mat.colorNode = mix(water, vec3(...P.foam), foam);
-  mat.roughnessNode = mix(float(P.roughness), float(0.65), foam);
-  mat.opacityNode = alpha;
-  // the ripples' normal, foam flatter (the geometry is already in world space: object = world)
-  mat.normalNode = transformNormalToView(normalize(mix(nWorld, vec3(0, 1, 0), foam.mul(0.7))));
+  mat.fog = false;   // the grab is fogged already; the RTS camera sees no horizon
+  mat.colorNode = mix(own, vec3(...P.foam), foam);
+  mat.emissiveNode = through.mul(float(1).sub(foam));
+  // a dry beach is not shiny: the specular only where there is water
+  const wetSurf = max(float(1).sub(onBeach), film);
+  mat.roughnessNode = mix(float(0.95), mix(float(P.roughness), float(0.6), foam), wetSurf);
+  mat.specularIntensityNode = wetSurf;
+  mat.normalNode = transformNormalToView(normalize(mix(vec3(0, 1, 0), nWorld, wetSurf.mul(float(1).sub(foam.mul(0.7))))));
 
   const geo = new THREE.PlaneGeometry(size, size, 1, 1).rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geo, mat);
   mesh.name = "AlgSea";
-  mesh.position.y = level;
+  mesh.position.y = level + P.lift;
   mesh.receiveShadow = true;
-  mesh.renderOrder = RENDER_ORDER.SEA;   // see-through: before the fields, rings, smoke over it
+  mesh.renderOrder = RENDER_ORDER.SEA;   // see-through: after the opaque scene it reads, before the ground marks
   mesh.frustumCulled = false;
   mesh.updateMatrix(); mesh.matrixAutoUpdate = false;
   app.scene.add(mesh);
 
   console.log(`[alg sea] level ${level} m, the shore distance in ${shoreMs} ms`);
   return {
-    params: P, mesh, uLevel, shoreTex,
-    dispose() { app.scene.remove(mesh); geo.dispose(); mat.dispose(); shoreTex.dispose(); },
+    params: P, uniforms: U, mesh, shoreTex,
+    dispose() { app.scene.remove(mesh); geo.dispose(); mat.dispose(); shoreTex.dispose(); nrmTex.dispose(); cauTex.dispose(); },
   };
 }
