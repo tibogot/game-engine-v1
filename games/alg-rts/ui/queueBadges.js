@@ -11,12 +11,13 @@ import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.j
 const CSS = `
 .alg-qb {
   position: fixed; left: 0; top: 0; z-index: 52; pointer-events: none; display: none;
-  transform: translate(-50%, -100%); padding: 3px; gap: 4px; align-items: center;
+  transform: translate(-50%, -100%); padding: 4px; gap: 6px; align-items: center;
   background: rgba(17, 19, 15, 0.92); border: 1px solid var(--hud-brass); border-radius: var(--hud-radius);
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); font: 700 10px var(--hud-mono); color: var(--hud-brass);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4); font: 700 14px var(--hud-mono); color: var(--hud-brass);
 }
-.alg-qb .p { width: 30px; height: 30px; background: #1b1e17 center 22%/cover no-repeat; position: relative; }
-.alg-qb .p i { position: absolute; left: 1px; right: 1px; bottom: 1px; height: 3px; background: #23261d; }
+/* (2026-10-12: ×1.45 with the squad badges and the point markers — the face 30 → 44 px, 10 → 14 px.) */
+.alg-qb .p { width: 44px; height: 44px; background: #1b1e17 center 22%/cover no-repeat; position: relative; }
+.alg-qb .p i { position: absolute; left: 1px; right: 1px; bottom: 1px; height: 4px; background: #23261d; }
 .alg-qb .p i b { display: block; height: 100%; width: 0; background: var(--hud-brass); }
 `;
 

@@ -104,17 +104,20 @@ const CSS = `
 .alg-modal .levels button span { font: 400 11px var(--hud-sans); color: var(--hud-dim); }
 .alg-modal .levels button.sel { border-color: var(--hud-brass); background: #3a3417; }
 
+/* (2026-10-12, you: "the requisition point icons are a bit too small" — every part ×1.45, as the
+   squad badges: the village disc 32 → 46 px, a supply point's 26 → 38, the icons 17 / 14 → 25 / 20,
+   the name and the "+9" 11 → 15 px.) */
 .alg-vmark {
   position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none;
-  display: flex; flex-direction: column; align-items: center; gap: 2px;
-  font: 600 11px var(--hud-sans); color: #efe8d2; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,0.6);
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  font: 600 15px var(--hud-sans); color: #efe8d2; text-shadow: 0 1px 2px #000, 0 0 6px rgba(0,0,0,0.6);
   will-change: transform;
 }
 /* THE POINT MARKER (2026-10-04, CoH): the point's icon (ui/resourceIcons.js — a star for a
    village, a jerrycan / cartridges for a supply point) in a dark disc, the CAPTURE RING round it
    filling toward whoever is winning it (blue France, red FLN); the icon in its holder's colour. */
-.alg-vmark .flag { position: relative; width: 32px; height: 32px; }
-.alg-vmark.supply .flag { width: 26px; height: 26px; }
+.alg-vmark .flag { position: relative; width: 46px; height: 46px; }
+.alg-vmark.supply .flag { width: 38px; height: 38px; }
 .alg-vmark .flag svg.ring { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); overflow: visible; }
 .alg-vmark .ring .bg { fill: rgba(14,16,12,0.82); stroke: rgba(239,232,210,0.35); stroke-width: 2; }
 .alg-vmark .ring .pr { fill: none; stroke-width: 3.2; stroke-linecap: round; stroke-dasharray: 0 100; }
@@ -125,8 +128,8 @@ const CSS = `
 .alg-vmark.player.cut .ic { color: #e0a040; } .alg-vmark.player.cut .ring .bg { stroke: rgba(224,160,64,0.7); }
 /* A supply point (CoH 3's "+5", 2026-10-12): its yield a minute in a small dark tag beside the icon;
    amber when France holds it cut off (it pays nothing then). */
-.alg-vmark .top { display: flex; align-items: center; gap: 3px; }
-.alg-vmark .yd { pointer-events: auto; cursor: help; padding: 1px 4px; border-radius: 2px; font: 700 11px var(--hud-mono); letter-spacing: 0.02em;
+.alg-vmark .top { display: flex; align-items: center; gap: 4px; }
+.alg-vmark .yd { pointer-events: auto; cursor: help; padding: 2px 6px; border-radius: 3px; font: 700 15px var(--hud-mono); letter-spacing: 0.02em;
   color: #efe8d2; background: rgba(14,16,12,0.82); border: 1px solid rgba(239,232,210,0.3); text-shadow: none; }
 .alg-vmark.player .yd { border-color: rgba(90,174,255,0.6); }
 .alg-vmark.enemy .yd { border-color: rgba(255,95,78,0.6); }
@@ -321,7 +324,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
         // A SUPPLY point, CoH 3's way (2026-10-12): the icon and its yield side by side, no name (the
         // hover's tooltip has it); a village keeps its name under its star.
         node.innerHTML = `<div class="top"><div class="flag"><svg class="ring" viewBox="0 0 36 36"><circle class="bg" cx="18" cy="18" r="15"/><circle class="pr" cx="18" cy="18" r="15" pathLength="100"/></svg>`
-          + `<span class="ic">${iconSvg(pointIcon(p), { size: supply ? 14 : 17 })}</span></div>${supply ? `<span class="yd"></span>` : ""}</div>${supply ? "" : `<div class="name"></div>`}`;
+          + `<span class="ic">${iconSvg(pointIcon(p), { size: supply ? 20 : 25 })}</span></div>${supply ? `<span class="yd"></span>` : ""}</div>${supply ? "" : `<div class="name"></div>`}`;
         if (!supply) node.querySelector(".name").textContent = p.name;
         for (const el of node.querySelectorAll(".flag, .name, .yd")) {
           el.addEventListener("pointerenter", () => { hovered = p; });

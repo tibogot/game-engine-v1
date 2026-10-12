@@ -318,11 +318,12 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
   // ── The badges: over each held house its holder's colour and its men ─────
   const style = document.createElement("style");
   style.textContent = `
-.alg-gar { position: fixed; left: 0; top: 0; z-index: 41; display: flex; align-items: center; gap: 3px; padding: 2px 6px 2px 3px;
-  background: rgba(12,16,22,0.88); border: 1px solid rgba(90,174,255,0.8); border-radius: 3px; font: 700 10px/14px var(--hud-sans, sans-serif);
+/* (2026-10-12: ×1.45 with the squad badges — the icon 14 → 20 px, the count 10 → 14 px.) */
+.alg-gar { position: fixed; left: 0; top: 0; z-index: 41; display: flex; align-items: center; gap: 4px; padding: 3px 8px 3px 4px;
+  background: rgba(12,16,22,0.88); border: 1px solid rgba(90,174,255,0.8); border-radius: 3px; font: 700 14px/20px var(--hud-sans, sans-serif);
   color: #dfe9f2; pointer-events: auto; cursor: pointer; will-change: transform; white-space: nowrap; }
 .alg-gar.enemy { border-color: rgba(255,95,78,0.85); }
-.alg-gar i { width: 14px; height: 14px; background: #5aaeff; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+.alg-gar i { width: 20px; height: 20px; background: #5aaeff; -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 .alg-gar.enemy i { background: #ff5f4e; }`;
   document.head.appendChild(style);
   const v = new THREE.Vector3();

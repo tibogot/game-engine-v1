@@ -26,9 +26,9 @@ export function createAlgLastSeen({ app, units, fogOfWar, rings, team = "enemy",
   const style = document.createElement("style");
   style.textContent = `
 .alg-ghost { position: fixed; z-index: 40; pointer-events: none; transform: translate(-50%, -100%);
-  font: 700 11px var(--hud-sans, sans-serif); letter-spacing: 0.04em; color: #ffb3a6;
+  font: 700 15px var(--hud-sans, sans-serif); letter-spacing: 0.04em; color: #ffb3a6;   /* (×1.45, 2026-10-12: 11 / 13 → 15 / 19 px) */
   text-shadow: 0 1px 2px #000, 0 0 4px #000; white-space: nowrap; }
-.alg-ghost b { color: #ff7a66; font-size: 13px; }
+.alg-ghost b { color: #ff7a66; font-size: 19px; }
 .alg-ghost i { font-style: normal; color: #c9a69e; font-weight: 400; margin-left: 4px; }`;
   document.head.appendChild(style);
 
