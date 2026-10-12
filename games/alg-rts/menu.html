@@ -84,14 +84,19 @@
       /* hover / the side or map chosen last: brass edge, a brass glow — colour only, no movement */
       .card:hover:not(:disabled), .card:focus-visible, .card.sel { border-color: var(--brass-sel); outline: none;
         box-shadow: 0 0 0 1px var(--brass-sel), 0 14px 40px rgba(0, 0, 0, 0.55), 0 0 26px rgba(242, 201, 76, 0.18); }
-      .card:disabled { cursor: default; opacity: 0.55; }
+      /* not ready yet: the card stays solid (see-through, the art behind bled into it); its picture
+         greyed and dimmed, its words dimmer */
+      .card:disabled { cursor: default; }
+      .card:disabled .pic img { filter: grayscale(0.55) brightness(0.62); }
+      .card:disabled h3, .card:disabled p { opacity: 0.6; }
       .card .pic { position: relative; width: 100%; aspect-ratio: 1.22; border-radius: 3px; overflow: hidden;
         -webkit-mask-image: linear-gradient(to bottom, #000 62%, transparent); mask-image: linear-gradient(to bottom, #000 62%, transparent); }
       .card .pic svg, .card .pic img { display: block; width: 100%; height: 100%; object-fit: cover; }
       .card.map .pic { aspect-ratio: 1.35; }
       .card .pic.none { background: radial-gradient(ellipse at 50% 40%, #2a2f33, #121416 80%); }
       .card .pic .soon { position: absolute; left: 50%; top: 42%; transform: translate(-50%, -50%); padding: 3px 10px; font-size: 11px; font-weight: 600;
-        letter-spacing: 0.18em; text-transform: uppercase; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 2px; white-space: nowrap; }
+        letter-spacing: 0.18em; text-transform: uppercase; border: 1px solid rgba(255, 255, 255, 0.6); border-radius: 2px; white-space: nowrap;
+        background: rgba(10, 8, 5, 0.6); }
       .card h3 { margin: 6px 0 0; font: 400 34px/1 "Bebas Neue", "Segoe UI", sans-serif; letter-spacing: 0.06em; text-transform: uppercase; color: var(--brass-hi); }
       .card .kind { margin-top: 4px; font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; color: rgba(255, 255, 255, 0.6); }
       .card hr { width: 46%; height: 1px; margin: 12px auto; border: 0; background: linear-gradient(to right, transparent, rgba(233, 220, 190, 0.6), transparent); }
@@ -158,7 +163,8 @@
       const MAPS = [
         { map: null, ready: true, title: t("Les Aurès — 1956"), sub: t("Bataille"), art: "/games/alg-rts/loading/aures-descente.webp",
           d: t("Tenez plus de villages que le FLN dans le massif : un poste, quatre villages, une katiba qui frappe et disparaît.") },
-        { map: "coast", ready: false, title: t("Côte du Constantinois — août 1955"), sub: t("Bataille"),
+        // (its card: your Midjourney art, assets-src/menu/coast-philippeville.png, cut to 640 px)
+        { map: "coast", ready: false, title: t("Côte du Constantinois — août 1955"), sub: t("Bataille"), art: "/games/alg-rts/menu/maps/coast-philippeville.webp",
           d: t("La plaine et la baie de Philippeville, la veille du soulèvement."), tag: t("bientôt") },
       ];
       // The sides (algGame.js: ?side=fln, else the French).
