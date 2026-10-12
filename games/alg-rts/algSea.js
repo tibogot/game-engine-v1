@@ -14,9 +14,8 @@
 //                      that pulses with the swell, and WAVES rolling in through the shallows — bands
 //                      of foam moving toward the beach, born ~4.5 m deep, breaking up into lace
 //
-// The level's sea (its worldOcean: the sea level every system asks, getWaterLevelAt) is kept; only
-// Ocean Pro's meshes are hidden (their update and the scene-depth copy skip a hidden ocean).
-// ?sea=pro = Ocean Pro instead, to compare.
+// The map's sea LEVEL (maps/coast.js `sea.level`) is answered to every system by algGame.js (the
+// level file carries no ocean). ?sea=pro = Ocean Pro instead, to compare.
 import * as THREE from "three";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { abs, clamp, exp, float, fract, max, mix, mx_noise_float, normalize, positionWorld, smoothstep, texture, time, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
@@ -159,12 +158,4 @@ export function createAlgSea(app, { level, size = 6000 } = {}) {
     params: P, mesh, uLevel, shoreTex,
     dispose() { app.scene.remove(mesh); geo.dispose(); mat.dispose(); shoreTex.dispose(); },
   };
-}
-
-/** Hide Ocean Pro's meshes (the ocean, its breaker lips, its spray) — kept hidden: a look-up a frame. */
-export function hideOceanPro(app) {
-  const found = [];
-  app.scene.traverse((o) => { if (o.isMesh && /^OceanPro/.test(o.name)) found.push(o); });
-  for (const m of found) m.visible = false;
-  return found.length;
 }

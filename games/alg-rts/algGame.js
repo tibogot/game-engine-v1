@@ -39,7 +39,7 @@ import { createAlgAmbience } from "./algAmbience.js";
 import { createAlgStones, prefetchStonePhotos } from "./algStones.js";
 import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
-import { createAlgSea, hideOceanPro } from "./algSea.js";
+import { createAlgSea } from "./algSea.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
@@ -238,6 +238,16 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 
   const levels = createLevelLoader(app, { defaultUrl: MAP.level, onStatus, onProgress });
   const boot = await levels.loadBoot();
+  // A map with the GAME'S SEA (maps/coast.js `sea`): its level carries NO ocean (nothing compiled,
+  // nothing drawn — Ocean Pro, kept in a level, compiled at the first frames and logged an MSAA
+  // depth-type WGSL error); the SEA LEVEL is the map's, answered here to every game system that asks
+  // (the nav grid, the units, the minimap, the scenery: app.getWaterLevelAt) before any is built.
+  // ?sea=pro = Ocean Pro switched on at this level instead, to compare.
+  if (MAP.sea) {
+    const L = MAP.sea.level;
+    if (params.get("sea") === "pro") app.environment?.ocean?.set?.({ enabled: true, mode: "pro", seaLevel: L });
+    else { const engineWater = app.getWaterLevelAt; app.getWaterLevelAt = (x, z) => Math.max(engineWater(x, z), L); }
+  }
   // What the ENGINE put in the scene: the warm-up at the end leaves it alone.
   const engineObjects = snapshotEngineScene(app.scene);
 
@@ -502,23 +512,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     onStatus(t("Usure du terrain…"));
     try { app.algSplats = await createAlgSplats(app); } catch (e) { console.warn("[alg splats] failed:", e); }
   }
-  // THE GAME'S OWN SEA (algSea.js, a map with `sea`: the coast): drawn for the RTS camera, the
-  // level's sea level kept; Ocean Pro hidden (it may come late: looked for again every 2 s until
-  // found). ?sea=pro = Ocean Pro instead, to compare.
+  // THE GAME'S OWN SEA (algSea.js, a map with `sea`: the coast): drawn for the RTS camera, at the
+  // map's sea level. ?sea=pro = Ocean Pro instead (switched on above), to compare.
   if (MAP.sea && params.get("sea") !== "pro") {
-    try {
-      const oc = app.environment?.ocean?.state, level = oc?.enabled ? oc.seaLevel : null;
-      if (Number.isFinite(level)) {
-        app.algSea = createAlgSea(app, { level });
-        hideOceanPro(app);
-        let lastLook = performance.now();
-        app.addPreRenderHook(() => {
-          if (performance.now() - lastLook < 2000) return;
-          lastLook = performance.now();
-          hideOceanPro(app);
-        });
-      }
-    } catch (e) { console.warn("[alg sea] failed:", e); }
+    try { app.algSea = createAlgSea(app, { level: MAP.sea.level }); } catch (e) { console.warn("[alg sea] failed:", e); }
   }
   // THE MACRO PHOTO (algMacroGround.js): the ground's large-scale variation. ?macro=0 = without.
   if (params.get("macro") !== "0") {
