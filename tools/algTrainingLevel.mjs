@@ -9,8 +9,8 @@
  * THE GROUND (games/alg-rts/maps/training.js gives the sites, the track, the box, the knoll):
  *   heights  a plain at 20 m with gentle swells (±1.5 m), flattened round the post and the
  *            hamlet; the KNOLL (the high-ground lesson); hills rising outside the box to frame it
- *   paint    slot 0 = AERIAL GRASS (your aerial_grass_rock photo), slot 1 = AERIAL GROUND ROCK
- *            (bare patches, the framing hills, the post's worn yard), slot 6 = the DIRT TRACK
+ *   paint    slot 0 = GREEN GRASS (Grass005, olive tint), slot 1 = DUSTY EARTH (dirt_aerial_02:
+ *            bare patches, the framing hills, the post's worn yard), slot 6 = the DIRT TRACK
  *            (painted along the map's track). The other slots keep the template's photos.
  */
 import fs from "node:fs";
@@ -87,7 +87,7 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const x = -W / 2 + ((j + 0.5) * W) / S, z = -W / 2 + ((i + 0.5) * W) / S, t = i * S + j;
   const ht = heightAt(x, z);
   // bare ground: patches on the plain, the hills' flanks, the post's worn yard
-  let rock = smoothstep(0.58, 0.72, noise(x / 40, z / 40, 21)) * 0.85;
+  let rock = smoothstep(0.64, 0.8, noise(x / 40, z / 40, 21)) * 0.7;   // fewer, softer than a rocky plain
   rock = Math.max(rock, smoothstep(BASE + 6, BASE + 18, ht));
   rock = Math.max(rock, 1 - smoothstep(post.r * 0.7, post.r + 12, Math.hypot(x - post.x, z - post.z)));
   const trk = 1 - smoothstep(3, 5.5, trackDist(x, z));
@@ -110,16 +110,20 @@ if (man.farTerrain) man.farTerrain = { ...man.farTerrain, enabled: false };
 if (man.environment?.worldOcean) man.environment = { ...man.environment, worldOcean: { ...man.environment.worldOcean, enabled: false } };
 const photo = (dir, file) => ({ name: file, url: `${dir}/${file}` });
 const L0 = man.paintLayers[0], L1 = man.paintLayers[1];
+// The camp's OWN look (2026-10-12, not the Aurès): a green spring plain — smooth grass with no
+// stones in the photo, soft normals (the aerial grass-rock photo at normal 1.6 read rocky and
+// bumpy), dusty earth for the bare patches and the post's yard. Tiles in metres: uvScale = W / m.
+const G = "/textures/pbr_materials/Grass005", D = "/textures/ground/dirt_aerial_02";
 man.paintLayers[0] = { ...L0, name: "Training grass",
-  albedo: photo("/textures/pbr_materials/aerial-grass-rock", "aerial_grass_rock_diff_2k.jpg"),
-  normal: photo("/textures/pbr_materials/aerial-grass-rock", "aerial_grass_rock_nor_gl_2k.jpg"),
-  rough: photo("/textures/pbr_materials/aerial-grass-rock", "aerial_grass_rock_rough_2k.jpg"),
-  ao: null, uvScale: 38, normalStr: 1.6, aoStr: 0, tint: "#ffffff" };
+  albedo: photo(G, "Grass005_1K-JPG_Color.jpg"),
+  normal: photo(G, "Grass005_1K-JPG_NormalGL.jpg"),
+  rough: photo(G, "Grass005_1K-JPG_Roughness.jpg"),
+  ao: photo(G, "Grass005_1K-JPG_AmbientOcclusion.jpg"), uvScale: W / 4, normalStr: 0.6, aoStr: 0.3, tint: "#ccc49c" };
 man.paintLayers[1] = { ...L1, name: "Bare ground",
-  albedo: photo("/textures/ground/aerial_ground_rock", "aerial_ground_rock_diff_1k.jpg"),
-  normal: photo("/textures/ground/aerial_ground_rock", "aerial_ground_rock_nor_gl_1k.jpg"),
-  rough: photo("/textures/ground/aerial_ground_rock", "aerial_ground_rock_rough_1k.jpg"),
-  ao: photo("/textures/ground/aerial_ground_rock", "aerial_ground_rock_ao_1k.jpg"), uvScale: 34, normalStr: 2, aoStr: 0.6, tint: "#ffffff" };
+  albedo: photo(D, "dirt_aerial_02_diff_1k.jpg"),
+  normal: photo(D, "dirt_aerial_02_nor_gl_1k.jpg"),
+  rough: photo(D, "dirt_aerial_02_rough_1k.jpg"),
+  ao: photo(D, "dirt_aerial_02_ao_1k.jpg"), uvScale: W / 20, normalStr: 0.6, aoStr: 0.3, tint: "#e8dcc4" };
 
 const blobs = new Map([["heightmap", Buffer.from(h.buffer)], ["splat", splat]]);
 const bytes = await writeProject(args.out, { manifest: man, blobs });
