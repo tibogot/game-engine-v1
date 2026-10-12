@@ -1472,15 +1472,27 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
    * begun to swing out and then finds nowhere to go has no good option left.
    * The margin is wider than the following gap because the car arrives across
    * the traffic rather than into the back of it.
+   *
+   * THE CAR BEHIND IS MOVING, and `tArrive` is how long it has to close in.
+   * The last re-check is made one turn radius before the corner, and in the
+   * ~0.75 s from there to the transfer a follower at 8 m/s eats 6 of the 11.5
+   * m asked for. MEASURED: a car merged 4.1 m in front of one already in the
+   * lane — bumpers inside each other — at the same frame every run. So the
+   * gap behind is the margin PLUS what the follower covers before arrival.
    */
-  function roomAt(row, u, span) {
+  function roomAt(row, u, span, tArrive = 0) {
     const need = (F.trafficGap * 1.6) / span;
     for (let i = 0; i < row.length; i++) {
       const d = fwdU(u, row[i].u);
-      if (d < need || 1 - d < need) return false;
+      if (d < need || 1 - d < need + (row[i].v * tArrive) / span) return false;
     }
     return true;
   }
+  /**
+   * Time to cover `d` metres from speed `v`: the slower of cruising at `v` and
+   * pulling away from rest, so a car stopped at the line is not given forever.
+   */
+  const arriveIn = (d, v) => Math.min(d / Math.max(v, 0.1), Math.sqrt((2 * d) / F.trafficAccel));
 
   const trafficMat = new THREE.MeshStandardNodeMaterial({ color: 0xffffff, roughness: 0.32, metalness: 0.45, vertexColors: true });
   trafficMat.name = "CityTraffic";
@@ -1784,7 +1796,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
     if (h2(c.id, jKey, 77) >= F.trafficTurnChance) return;
     const uEnter0 = (L.across * to.dir + half) / target.span;
     const uEnter = uEnter0 - Math.floor(uEnter0);
-    if (!roomAt(laneCars[tLi], uEnter, target.span)) return;
+    if (!roomAt(laneCars[tLi], uEnter, target.span, arriveIn(toCorner, c.v))) return;
     c.turn = {
       li: tLi,
       r: F.trafficTurnRadius,
@@ -1972,7 +1984,7 @@ export function createCityFurniture({ P, originCellX, originCellZ, params: overr
              * `turnAt` is already set, so a cancelled car will not re-roll at
              * this junction — it simply carries straight on.
              */
-            if (!roomAt(laneCars[T.li], T.uEnter, lanes[T.li].span)) c.turn = null;
+            if (!roomAt(laneCars[T.li], T.uEnter, lanes[T.li].span, arriveIn(-s, c.v))) c.turn = null;
           }
         }
       }
