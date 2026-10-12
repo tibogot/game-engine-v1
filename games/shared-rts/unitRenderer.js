@@ -40,6 +40,7 @@ export const unitByMesh = new WeakMap();
 const _UP = new THREE.Vector3(0, 1, 0);
 const _n = new THREE.Vector3();
 const _alignQ = new THREE.Quaternion();
+const _leanQ = new THREE.Quaternion(), _leanE = new THREE.Euler();
 const _yawQ = new THREE.Quaternion();
 const _targetQ = new THREE.Quaternion();
 
@@ -963,6 +964,8 @@ function measureGroundSpeed(root, clip) {
  * idle + run only).
  */
 function soldierClip(unit, v, roles) {
+  // Hanging in a harness (alg-rts algParadrop.js): the standing idle — his swing is the lean below.
+  if (unit.hanging) return roles.idle;
   // An UNARMED type (civilians): idle, walk, or run when `unit.running`.
   if (unit.type?.unarmed && roles.calm) return unit.isMoving ? (unit.running ? roles.flee : roles.walk) ?? roles.run : roles.calm;
   if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
@@ -1627,6 +1630,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         // that, ease so it rolls smoothly over terrain bumps.
         if (v.oriented) x.quaternion.slerp(_targetQ, Math.min(1, dt * 12));
         else { x.quaternion.copy(_targetQ); v.oriented = true; }
+      }
+      // SWINGING under a canopy (alg-rts algParadrop.js): `unit.lean` = [pitch, roll], upright about his heading.
+      if (unit.lean) {
+        _yawQ.setFromAxisAngle(_UP, yaw);
+        _leanQ.setFromEuler(_leanE.set(unit.lean[0], 0, unit.lean[1]));
+        x.quaternion.copy(_yawQ).multiply(_leanQ);
       }
 
       // rotorSpin: a helicopter spooling up on its pad turns slower (units.js launch).

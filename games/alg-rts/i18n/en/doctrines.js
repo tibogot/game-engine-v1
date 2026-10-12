@@ -4,9 +4,10 @@ export default {
   // Paras
   "Parachutistes": "Paratroopers",
   "Paras": "Paras",
-  "Des hommes largués par hélicoptère où vous voyez, un commando de chasse, des vivres par air.": "Men set down by helicopter wherever you can see, a hunter commando, supplies by air.",
-  "Largage héliporté": "Heliborne drop",
-  "Un stick de cinq paras déposé par hélicoptère sur un point que vos hommes voient.": "A stick of five paras set down by helicopter on a point your men can see.",
+  "Des paras largués d'avion où vous voyez, un commando de chasse, des vivres par air.": "Paras dropped from a plane wherever you can see, a hunter commando, supplies by air.",
+  "Parachutage": "Paradrop",
+  "Un Nord 2501 largue un stick de cinq paras sur un point que vos hommes voient. Sous leur voile, ils ne tirent pas et sont des cibles faciles.": "A Nord 2501 drops a stick of five paras on a point your men can see. Under their canopies they cannot fire and are easy targets.",
+  "<b>Parachutage</b> : le Nord 2501 est en route.": "<b>Paradrop</b>: the Nord 2501 is on its way.",
   "Commando de chasse": "Hunter commando",
   "Un stick d'élite sort du poste : un FM et une étoile d'expérience.": "An elite stick leaves the post: an LMG and one veterancy star.",
   "Ravitaillement aérien": "Air supply",

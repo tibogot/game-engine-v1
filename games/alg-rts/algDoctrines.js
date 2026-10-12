@@ -12,7 +12,8 @@
 //                (right-click / Échap cancels), on ground your men can SEE.
 //
 // The three, from the French army in Algeria:
-//   PARAS (the paras of the 10e DP): men dropped by helicopter anywhere you see; a commando de
+//   PARAS (the paras of the 10e DP): a stick PARACHUTED from a Noratlas anywhere you see
+//                (algParadrop.js — before 2026-10-12, set down by helicopter); a commando de
 //                chasse (the hunter units of the Challe plan); supplies by air.
 //   LÉGION      (the 1er REP and the REI): légionnaires without the armour tier; engineers who
 //                build fast; the 120 mm mortar on any point you see.
@@ -27,6 +28,7 @@ import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { costOf, RES } from "./algEconomy.js";
 import { VET } from "./algVeterancy.js";
+import { createAlgParadrop } from "./algParadrop.js";
 import { iconStyle } from "./ui/icons.js";
 import { t } from "./i18n/i18n.js";
 
@@ -47,10 +49,10 @@ const STORE = "algrts.doctrine";
 export const DOCTRINES = {
   paras: {
     name: t("Parachutistes"), short: t("Paras"),
-    blurb: t("Des hommes largués par hélicoptère où vous voyez, un commando de chasse, des vivres par air."),
+    blurb: t("Des paras largués d'avion où vous voyez, un commando de chasse, des vivres par air."),
     abilities: [
-      { key: "paraDrop", icon: "reinforce", name: t("Largage héliporté"), cp: 1, cost: { mp: 340 }, cooldown: 90, aim: true, radius: 6,
-        hint: t("Un stick de cinq paras déposé par hélicoptère sur un point que vos hommes voient.") },
+      { key: "paraDrop", icon: "reinforce", name: t("Parachutage"), cp: 1, cost: { mp: 340 }, cooldown: 90, aim: true, radius: 8,
+        hint: t("Un Nord 2501 largue un stick de cinq paras sur un point que vos hommes voient. Sous leur voile, ils ne tirent pas et sont des cibles faciles.") },
       { key: "commando", icon: "vet2", name: t("Commando de chasse"), cp: 2, cost: { mp: 380, mun: 40 }, cooldown: 150,
         hint: t("Un stick d'élite sort du poste : un FM et une étoile d'expérience.") },
       { key: "airSupply", icon: "unload", name: t("Ravitaillement aérien"), cp: 2, cost: {}, cooldown: 180,
@@ -194,6 +196,10 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   }
   fogOfWar?.addSourceProvider?.(() => recons.filter((f) => f.t < f.end).map((f) => ({ x: f.x, z: f.z, r: P.recon.vision, eye: 60 })));
 
+  // THE PARADROP (algParadrop.js): the Noratlas, the stick, the canopies.
+  const paradrop = createAlgParadrop(app, { units, squads, navGrid: app.navGrid });
+  app.algParadrop = paradrop;
+
   // ── Squads out of nowhere (a drop) or out of the post ─────────────────────
   function squadAt(key, x, z, { elite = false } = {}) {
     const size = { para: 5, legion: 5 }[key] ?? 5;
@@ -230,9 +236,14 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   function run(ab, at) {
     const p = post();
     switch (ab.key) {
-      case "paraDrop":
-        heliTo(at.x, at.z, 4, () => { if (squadAt("para", at.x, at.z)) say(t("<b>Les paras sont au sol.</b>"), at.x, at.z); });
+      case "paraDrop": {
+        if (popRoom() < 5) { say(t("<b>Effectifs au plafond</b> : pas de place pour un groupe de plus."), at.x, at.z, "bad"); return false; }
+        const from = p ? { x: p.structure.position.x, z: p.structure.position.z } : null;
+        paradrop.drop(at.x, at.z, { key: "para", count: 5, from, elite: unlocked.has("eliteParas") });
+        say(t("<b>Parachutage</b> : le Nord 2501 est en route."), at.x, at.z);
+        app.algSounds?.radio?.();
         return true;
+      }
       case "commando":
         if (!squadFromPost("para", { elite: true })) return false;
         say(t("<b>Un commando de chasse</b> sort du poste."), p?.structure.position.x, p?.structure.position.z);
@@ -436,6 +447,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       combat?.onImpact?.(best, G.damage, at, post()?.structure ?? null, { bullet: true });
     }
     if (unlocked.has("eliteParas")) elite();
+    paradrop.step(dt);
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i];
       f.t += dt;
@@ -465,6 +477,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       if (_q.distanceToSquared(_p) > 1e-4) { _q.y = _p.y; f.mesh.lookAt(_q); }
       f.mesh.userData.spin?.(now);
     }
+    paradrop.frame();
     rings.begin();
     if (targeting?.at) rings.add(targeting.at.x, targeting.at.z, targeting.ab.radius ?? 8, targeting.ok ? 0x58e070 : 0xe0574a);
     for (const s of salvos) rings.add(s.x, s.z, P.mortar.spread, 0xffb020);
@@ -505,6 +518,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("keydown", onKey);
       for (const f of flights) app.scene.remove(f.mesh);
+      paradrop.dispose();
       el.remove(); style.remove();
     },
   };

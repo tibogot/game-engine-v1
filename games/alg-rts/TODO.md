@@ -88,9 +88,19 @@ collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a 
 3. [ ] **you**: play it — the landing time (3.4 s down, 2.8 s up), its price, two squads or one.
 4. [ ] The French AI (algFrenchAI.js) doesn't use the H-21 yet (a heliborne assault on a village).
 5. [ ] A door gun (the French H-21s carried an MG 151 / a .50 in the door) — a CoH-style upgrade?
-6. [ ] THE PARADROP: a Noratlas model (lab first, against photos), a doctrine call-in; the men under
-   a procedural canopy (instanced), a hanging pose and sway, a landing crouch; easy targets while
-   they come down.
+6. [x] THE NORATLAS (rtsVehiclesFr.js buildNoratlas): measured off photos (assets-src/refs/noratlas/,
+   `_compare.jpg`): the fat pod, the glazed nose, the high wing, the deep nacelles running into the
+   twin booms, the fins and tailplane, portholes, the open jump doors. BARE METAL with its own small
+   material (algAluminium.js — the kit atlas has no aluminium). ~8k tris, 0 coplanar. In the vehicle lab.
+7. [x] THE PARADROP (algParadrop.js) = the paras doctrine's 1st call-in, PARACHUTAGE (was a helicopter
+   set-down): the Noratlas runs in low over the zone, five men out of the two doors 0.2 s apart, the
+   static lines open, they swing down under khaki canopies (one instanced dome: gores, scalloped
+   skirt, vent, lines), land crouched (the renderer's kneel), the canopies slump and are gathered.
+   Real units from the door: anyone can shoot them, they can't fire back until down. Renderer hooks:
+   `unit.hanging` (the idle), `unit.lean` (the swing). THE HEIGHT IS THE CAMERA'S: at 62 / 40 / 30 m
+   the plane and the men passed above the top of the screen (measured) — 24 m now, a compressed jump.
+8. [ ] **you**: watch a drop in the game — the height, the plane's size crossing the screen, the canopy
+   colour (khaki; white for supplies?), the sway. The air supply call-in could show the Noratlas too.
 
 ## CoH AUDIT 2 — 2026-10-07 (you: "another audit to compare with CoH: textures, buildings,
 ## environment, gameplay"). LOOKED AT in the game: the post, Dechra Tighanimine, Ksar el Hamra,

@@ -1592,6 +1592,148 @@ export function buildT6() {
   return geo;
 }
 
+// ── NORD 2501 NORATLAS ───────────────────────────────────────────────────────
+
+/**
+ * THE NORATLAS (2026-10-12, alg-rts: the paradrop — you: "the plane should drop them"): the French
+ * air force's transport of the war, the paras' "Nord". Measured off photos (assets-src/refs/noratlas/,
+ * a side view at ~43 px/m): a short FAT POD (15 m, 3 m deep) with a blunt nose glazed on top and a
+ * rounded rear (the clamshell doors); the HIGH WING on its roof, 32.5 m, straight inner section, the
+ * outer panels tapered with a little dihedral; under it two Hercules radials whose nacelles run back
+ * into TWIN BOOMS, ending in two tall fins joined by the tailplane. Round portholes; the paras' jump
+ * doors open at the back of the pod, one each side. Bare metal, cockades, tricolour rudders.
+ * Built along +Z (the nose), wheels up (it only ever flies over), origin under the wing on the
+ * pod's centre line. Real 21.96 m long, 32.5 m span x 1.3 like everything man-made.
+ * userData: stencil, glass, props [{ geo, pivot }] (each spins about Z), doors [[x, y, z], ...]
+ * (where the men jump, local), length.
+ */
+const NORA_POD = [   // z = 5.4 - (m from the nose)
+  { z: 5.4, cy: -0.3, w: 0.45, h: 0.42, hb: 0.42, n: 2.0 },
+  { z: 5.12, cy: -0.14, w: 1.0, h: 1.0, hb: 0.98, n: 2.2 },
+  { z: 4.5, cy: 0.0, w: 1.33, h: 1.34, hb: 1.3, n: 2.5 },
+  { z: 3.4, cy: 0.04, w: 1.45, h: 1.46, hb: 1.46, n: 2.8 },
+  { z: 1.9, cy: 0.04, w: 1.47, h: 1.5, hb: 1.5, n: 3.0 },
+  { z: -5.6, cy: 0.04, w: 1.47, h: 1.5, hb: 1.5, n: 3.0 },
+  { z: -7.1, cy: 0.12, w: 1.43, h: 1.42, hb: 1.32, n: 2.9 },
+  { z: -8.4, cy: 0.36, w: 1.2, h: 1.16, hb: 0.92, n: 2.6 },
+  { z: -9.2, cy: 0.52, w: 0.8, h: 0.84, hb: 0.56, n: 2.2 },
+  { z: -9.5, cy: 0.56, w: 0.3, h: 0.36, hb: 0.24, n: 2.0 },
+];
+
+export function buildNoratlas() {
+  const st = NORA_POD;
+  const hull = [], props = [[], []];
+  const P = (geo, pos, mat, tone = 0.5, rot) => hull.push({ geo, pos, mat, tone, rot });
+  const ALU = 0.85, ALU2 = 0.5, AL = MAT.white;   // BARE METAL: drawn with its own material (alg-rts algAluminium.js); steel = dark, paint = olive
+  P(loftSkin(st, { segs: 32, sub: 4 }), [0, 0, 0], AL, ALU);
+  const onSkin = (geo, z, a, off, mat, tone) => {
+    const { p, n } = skinAt(st, z, a);
+    const t = new THREE.Vector3(0, 0, 1), b = new THREE.Vector3().crossVectors(n, t).normalize();
+    t.crossVectors(b, n).normalize();
+    geo.applyMatrix4(new THREE.Matrix4().makeBasis(t, b, n).setPosition(p.addScaledVector(n, off)));
+    P(geo, [0, 0, 0], mat, tone);
+  };
+  // THE COCKPIT: glazed over the nose's top, the dark flight deck behind the panes; the radome a shade.
+  const GA0 = 0.45, GA1 = Math.PI - 0.45;
+  P(skinPatch(st, 5.15, 4.0, GA0, GA1, 0.012, { nz: 8, na: 10 }), [0, 0, 0], MAT.steel, 0.04);
+  const glass = skinPatch(st, 5.15, 4.0, GA0, GA1, 0.03, { nz: 8, na: 10 });
+  const frame = (pts, r = 0.04) => P(tube(pts.map(([z, a]) => { const { p, n } = skinAt(st, z, a); return p.addScaledVector(n, 0.045).toArray(); }), r, pts.length * 2, 5), [0, 0, 0], AL, ALU2);
+  for (const z of [5.15, 4.6, 4.0]) frame(Array.from({ length: 9 }, (_, k) => [z, GA0 + ((GA1 - GA0) * k) / 8]));
+  for (const a of [GA0, 1.05, Math.PI / 2, Math.PI - 1.05, GA1]) frame(Array.from({ length: 5 }, (_, k) => [5.15 - (1.15 * k) / 4, a]));
+  P(skinPatch(st, 5.42, 5.0, -1.3, 0.3, 0.01, { nz: 4, na: 6 }), [0, 0, 0], MAT.paint, 0.5);   // the nose radome (olive, as the photos' green)
+  // PORTHOLES along both flanks; the JUMP DOORS open at the back of the pod.
+  for (const sx of [1, -1]) {
+    const side = (a) => (sx > 0 ? a : Math.PI - a);
+    for (let z = 3.0; z > -5.8; z -= 1.15) {
+      onSkin(new THREE.CircleGeometry(0.24, 14), z, side(0.05), 0.012, MAT.steel, 0.03);
+      onSkin(new THREE.RingGeometry(0.24, 0.3, 14), z, side(0.05), 0.02, AL, ALU2);
+    }
+    P(skinPatch(st, -6.3, -7.3, side(-0.75), side(0.42), 0.012, { nz: 3, na: 5 }), [0, 0, 0], MAT.steel, 0.03);   // the open door
+  }
+  // The clamshell's seam round the rear.
+  P(tube(Array.from({ length: 17 }, (_, k) => { const { p, n } = skinAt(st, -7.6, (k / 16) * Math.PI * 2); return p.addScaledVector(n, 0.02).toArray(); }), 0.03, 32, 4), [0, 0, 0], AL, ALU2);
+
+  // THE WING: on the pod's roof. A slab from a planform (x across, z along), its edges bevelled round.
+  const WY = 1.5;   // the wing's underside (the pod's roof)
+  const slab = (pts, thick) => {
+    // (shape y = -z: after the turn, +z again — no mirroring, so the faces stay outward)
+    const sh = new THREE.Shape(pts.map(([x, z]) => new THREE.Vector2(x, -z)));
+    const g = indexed(new THREE.ExtrudeGeometry(sh, { depth: thick, bevelEnabled: true, bevelSize: thick * 0.45, bevelThickness: thick * 0.45, bevelSegments: 2, curveSegments: 4 }));
+    g.rotateX(-Math.PI / 2);   // depth → +y (the slab sits on y = 0), shape y → -z
+    const uv = g.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) / 3, uv.getY(i) / 3);
+    return g;
+  };
+  const BX = 4.8;   // the booms' (and the engines') x
+  P(slab([[-BX, 1.0], [BX, 1.0], [BX, -2.9], [-BX, -2.9]], 0.3), [0, WY, 0], AL, ALU);
+  for (const sx of [-1, 1]) {
+    const g = slab([[0, 1.0], [11.4, 0.35], [11.45, -1.25], [0, -2.9]].map(([x, z]) => [sx * x, z]), 0.2);   // (mirrored by its points: a negative scale turns faces inside out)
+    P(g, [sx * BX, WY + 0.05, 0], AL, ALU, [0, 0, sx * 0.07]);
+  }
+  // THE ENGINES AND BOOMS: one lofted body each — the round cowl, then the DEEP nacelle hanging under
+  // the wing (it holds the main wheels: the photos), then the boom, tapering back to the tail; the
+  // exhaust; the oil cooler's scoop.
+  const NY = 1.3;
+  const BOOM = [
+    { z: 2.47, cy: 1.3, w: 0.36, h: 0.36, hb: 0.36, n: 2.0 },
+    { z: 2.32, cy: 1.3, w: 0.8, h: 0.8, hb: 0.8, n: 2.0 },
+    { z: 1.5, cy: 1.28, w: 0.85, h: 0.85, hb: 0.9, n: 2.1 },
+    { z: 0.2, cy: 1.15, w: 0.82, h: 0.95, hb: 1.15, n: 2.4 },
+    { z: -1.9, cy: 1.2, w: 0.74, h: 0.85, hb: 1.05, n: 2.4 },
+    { z: -3.8, cy: 1.5, w: 0.55, h: 0.56, hb: 0.62, n: 2.2 },
+    { z: -8.0, cy: 1.55, w: 0.48, h: 0.48, hb: 0.48, n: 2.0 },
+    { z: -13.0, cy: 1.55, w: 0.42, h: 0.42, hb: 0.42, n: 2.0 },
+    { z: -15.8, cy: 1.55, w: 0.36, h: 0.36, hb: 0.36, n: 2.0 },
+    { z: -16.45, cy: 1.55, w: 0.22, h: 0.22, hb: 0.22, n: 2.0 },
+    { z: -16.56, cy: 1.55, w: 0.05, h: 0.05, hb: 0.05, n: 2.0 },
+  ];
+  for (const sx of [-1, 1]) {
+    P(loftSkin(BOOM, { segs: 20, sub: 3 }), [sx * BX, 0, 0], AL, ALU);
+    P(alongZ(0.82, 0.82, 0.12, 20), [sx * BX, NY, 2.2], AL, ALU2);                  // the cowl's lip
+    P(alongZ(0.1, 0.12, 0.7, 8), [sx * (BX + 0.66), NY - 0.5, 0.6], MAT.steel, 0.15);   // the exhaust
+    P(buildBox(0.5, 0.35, 1.0), [sx * BX, NY - 0.82, 1.4], AL, ALU2);              // the scoop under the cowl
+    P(skinPatch(BOOM, 0.6, -1.6, -Math.PI / 2 - 0.35, -Math.PI / 2 + 0.35, 0.012, { nz: 3, na: 3 }), [sx * BX, 0, 0], AL, ALU2 * 0.6);   // the wheel-well doors
+    // THE FINS: tall, the dorsal fillet sweeping up off the boom, the rudder; a ventral below.
+    const f = new THREE.Shape([[-14.1, 0.3], [-14.9, 1.1], [-15.15, 2.75], [-15.45, 3.0], [-16.3, 3.0], [-16.55, 2.7], [-16.6, -0.75], [-16.3, -0.95], [-15.6, -0.95], [-15.2, -0.35]].map(([z, y]) => new THREE.Vector2(z, y)));
+    const fg = indexed(new THREE.ExtrudeGeometry(f, { depth: 0.12, bevelEnabled: true, bevelSize: 0.05, bevelThickness: 0.05, bevelSegments: 1, curveSegments: 4 }));
+    fg.rotateY(-Math.PI / 2);   // shape x (z) → world z, shape y → y, depth → x
+    const fuv = fg.attributes.uv; for (let i = 0; i < fuv.count; i++) fuv.setXY(i, fuv.getX(i) / 3, fuv.getY(i) / 3);
+    P(fg, [sx * BX + 0.06, NY, 0], AL, ALU);
+  }
+  // The tailplane between the booms' ends, on their tops.
+  P(slab([[-BX - 0.3, -14.7], [BX + 0.3, -14.7], [BX + 0.3, -16.45], [-BX - 0.3, -16.45]], 0.14), [0, 1.55 + 0.3, 0], AL, ALU);   // (on the booms' tops)
+  // THE PROPELLERS: four blades and the spinner each (their own geometry: they turn).
+  props.forEach((list) => {
+    list.push({ geo: new THREE.ConeGeometry(0.34, 0.75, 14).rotateX(Math.PI / 2), pos: [0, 0, 0.3], mat: AL, tone: ALU2 });
+    for (let k = 0; k < 4; k++) {
+      const a = (k / 4) * Math.PI * 2 + 0.4;
+      list.push({ geo: buildBox(0.26, 2.05, 0.06), pos: [Math.sin(a) * 1.15, Math.cos(a) * 1.15, 0], rot: [0, 0.35, -a], mat: MAT.steel, tone: 0.08 });
+    }
+  });
+
+  const geo = assemble(hull);
+  bakeContactAO(geo, { cell: 0.2, radius: 1, strength: 0.25, groundFade: 0, floor: 0.65 });
+  const propGeos = props.map((list) => { const g = assemble(list); bakeContactAO(g, { cell: 0.1, radius: 1, strength: 0.1, groundFade: 0, floor: 0.8 }); return g; });
+  // Markings: cockades on the outer wings (top and under) and the booms; tricolour rudders.
+  const mk = [];
+  for (const sx of [-1, 1]) {
+    const tipX = sx * (BX + 8.0), dy = Math.tan(0.07) * 8.0;
+    mk.push(stencilPatch("frCocarde", flatSurface([tipX, WY + 0.05 + 0.2 + dy + 0.1, -0.6], [-sx * Math.sin(0.07), Math.cos(0.07), 0], [Math.cos(0.07), sx * Math.sin(0.07), 0], 1.5, "frCocarde"), { lift: 0.02 }));
+    mk.push(stencilPatch("frCocarde", flatSurface([tipX, WY + 0.05 + dy - 0.1, -0.6], [sx * Math.sin(0.07), -Math.cos(0.07), 0], [Math.cos(0.07), sx * Math.sin(0.07), 0], 1.5, "frCocarde"), { lift: 0.02 }));
+    mk.push(stencilPatch("frCocarde", flatSurface([sx * (BX + 0.5), NY + 0.05, -6.5], [sx, 0, 0], [0, 0, -sx], 0.85, "frCocarde"), { lift: 0.02 }));
+    for (const fx of [-1, 1]) mk.push(stencilPatch("frTricolore", flatSurface([sx * BX + fx * 0.13, NY + 1.8, -16.0], [fx, 0, 0], [0, 0, -fx], 0.9, "frTricolore"), { lift: 0.02 }));
+  }
+  const stencil = mergeStencils(mk);
+  for (const g of [geo, glass, ...propGeos, stencil]) g?.scale(S, S, S);
+  geo.computeBoundingBox();
+  geo.userData.stencil = stencil;
+  geo.userData.glass = glass;
+  geo.userData.props = propGeos.map((g, i) => ({ geo: g, pivot: [(i ? 1 : -1) * BX * S, NY * S, 2.45 * S] }));
+  geo.userData.doors = [1, -1].map((sx) => [sx * 1.6 * S, -0.2 * S, -6.8 * S]);
+  geo.userData.labLift = 3.0 * S;   // (the vehicle lab: off the ground, its wheels being up)
+  geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;
+  return geo;
+}
+
 // ── PIASECKI H-21 "BANANE" ──────────────────────────────────────────────────
 
 /**

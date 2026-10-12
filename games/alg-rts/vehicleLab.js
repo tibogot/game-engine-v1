@@ -10,7 +10,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
-import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAMX13, buildAlouette, buildH21, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAMX13, buildAlouette, buildH21, buildEBR, buildGMC, buildHalfTrack, buildNoratlas, buildT6, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
@@ -19,6 +19,7 @@ import { createCombatFx } from "../shared-rts/combatFx.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
 import { ALG_FIRE, ALG_TRACERS } from "./algCombat.js";
 import { ALG_UNIT_TYPES } from "./algUnitTypes.js";
+import { aluminiumMaterial } from "./algAluminium.js";
 
 /** The game's sun (alg-rts, Partly cloudy, 15:12) and a moonlit night. */
 const SUN = { dir: new THREE.Vector3(-0.739, 0.65, 0.175).normalize(), intensity: 10, color: 0xfff2dd };
@@ -61,6 +62,8 @@ const VEHICLES = {
   gmcOpen: { build: (o) => buildGMC({ ...o, tilt: !o }), label: "Camion GMC (ouvert)" },
   alouette: { build: buildAlouette, label: "Alouette II" },
   h21: { build: () => buildH21(), label: "H-21 « Banane »" },
+  noratlas: { build: () => { const g = buildNoratlas(); g.userData.labMaterial = aluminiumMaterial(); return g; }, label: "Nord Noratlas" },
+  t6: { build: () => buildT6(), label: "T-6 Texan" },
   ebr: { build: buildEBR, label: "Panhard EBR" },
   amx13: { build: buildAMX13, label: "AMX-13" },
 };
@@ -96,15 +99,17 @@ function vehicleOf(geo, key) {
   let turretMesh = null;
   if (tur) { const tm = new THREE.Mesh(tur.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); tm.position.fromArray(tur.pivot); tm.castShadow = tm.receiveShadow = true; g.add(tm); turretMesh = tm; }
   if (geo.userData.glass) { const gm = new THREE.Mesh(geo.userData.glass, glassMaterial()); gm.renderOrder = RENDER_ORDER.GLASS; g.add(gm); }
-  for (const [axis, r] of [["y", geo.userData.rotors?.main], ["y", geo.userData.rotors?.main2], ["x", geo.userData.rotors?.tail]]) {
+  // (an aeroplane's propellers spin about Z: the T-6's one, the Noratlas's two)
+  const propsOf = [geo.userData.prop, ...(geo.userData.props ?? [])].filter(Boolean).map((r) => ["z", r]);
+  for (const [axis, r] of [["y", geo.userData.rotors?.main], ["y", geo.userData.rotors?.main2], ["x", geo.userData.rotors?.tail], ...propsOf]) {
     if (!r) continue;
-    const m = new THREE.Mesh(r.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    const m = new THREE.Mesh(r.geo, own0 ?? rtsObjectMaterialTinted(FR_PAINT_TINT));
     m.position.fromArray(r.pivot);
     m.castShadow = true;
     g.add(m);
     rotors.push({ m, axis });
   }
-  const tris = [geo, geo.userData.gear, geo.userData.glass, geo.userData.rotors?.main?.geo, geo.userData.rotors?.tail?.geo].reduce((n, x) => n + (x ? (x.index ? x.index.count : x.attributes.position.count) / 3 : 0), 0);
+  const tris = [geo, geo.userData.gear, geo.userData.glass, geo.userData.rotors?.main?.geo, geo.userData.rotors?.main2?.geo, geo.userData.rotors?.tail?.geo, ...propsOf.map(([, r]) => r.geo)].reduce((n, x) => n + (x ? (x.index ? x.index.count : x.attributes.position.count) / 3 : 0), 0);
   /** Repaint (the lab's candidates): the body and the gear's painted parts. */
   // Each tint its OWN program: three keys a node material by its graph's shape, and the tints
   // differ only in a constant — the first one compiled was drawn for all (measured in the lab).
@@ -122,6 +127,8 @@ function vehicleOf(geo, key) {
     g.updateMatrixWorld(true);
     return new THREE.Vector3(...m.p).applyMatrix4(m.turret && turretMesh ? turretMesh.matrixWorld : body.matrixWorld);
   };
+  // An aeroplane (built wheels up, about its centre line) stands in the air here, to be looked at.
+  if (geo.userData.labLift) for (const c of g.children) c.position.y += geo.userData.labLift;
   return { group: g, tris, paint, rotors, muzzle, turretMesh };
 }
 
