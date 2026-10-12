@@ -198,6 +198,29 @@ export async function loadRider(url, { height = 1.78 } = {}) {
 
 const wpos = (o) => o.getWorldPosition(new V3());
 
+// How far a figure's SEAT (the lowest skin that follows the pelvis, near the middle) sits
+// below its pelvis bone, in its rest pose. Riders place the pelvis BONE above the saddle,
+// and skeletons put that bone at different depths in the body (Y Bot's ~7 cm higher than
+// the robot's — it sat 7 cm into the leather): the difference is a rider's seatAdj.
+export function seatDepth(r, clip = null) {
+  let skin = null; r.model.traverse((o) => { if (o.isSkinnedMesh && !skin) skin = o; });
+  // (in the SITTING pose when a clip is given — a seat's shape there, not standing)
+  const saved = []; let mx = null;
+  if (clip) { r.model.traverse((o) => { if (o.isBone) saved.push([o, o.position.clone(), o.quaternion.clone()]); }); mx = new THREE.AnimationMixer(r.model); mx.clipAction(clip).play(); mx.setTime(0.5); }
+  r.rig.updateMatrixWorld(true);
+  const pel = r.bone("pelvis"), pi = skin.skeleton.bones.indexOf(pel), g = skin.geometry, sw = g.attributes.skinWeight, si = g.attributes.skinIndex;
+  const pp = r.rig.worldToLocal(wpos(pel)), v = new V3();
+  let low = Infinity;
+  for (let i = 0; i < g.attributes.position.count; i++) {
+    let w = 0; for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === pi) w += sw.getComponent(i, c);
+    if (w < 0.5) continue;
+    skin.getVertexPosition(i, v); v.applyMatrix4(skin.matrixWorld); r.rig.worldToLocal(v);
+    if (Math.abs(v.x - pp.x) < 0.1) low = Math.min(low, v.y);
+  }
+  if (mx) { mx.stopAllAction(); mx.uncacheRoot(r.model); for (const [b, p0, q0] of saved) { b.position.copy(p0); b.quaternion.copy(q0); } r.rig.updateMatrixWorld(true); }
+  return pp.y - low;
+}
+
 // ── Leg IK with the twist controlled ────────────────────────────────────────
 // Aiming each bone at the next point (shortest-arc rotation) leaves its spin
 // round its own axis to chance: the thigh rotated at the hip while the knee
@@ -587,7 +610,7 @@ export class RiderController {
       post = RP.posting * (0.5 - 0.5 * Math.cos(2 * Math.PI * ph)) * trotA.getEffectiveWeight();
     }
     this.post = post;
-    const seat = new V3(anchor.x, this.seatY, anchor.z).addScaledVector(up, RP.pelvisUp + P.seatUp + post).addScaledVector(fwd, post * 0.6 + P.seatFwd);
+    const seat = new V3(anchor.x, this.seatY, anchor.z).addScaledVector(up, RP.pelvisUp + (this.seatAdj ?? 0) + P.seatUp + post).addScaledVector(fwd, post * 0.6 + P.seatFwd);
     rig.position.copy(seat.sub(wpos(B.pelvis)));
     rig.updateMatrixWorld(true);
 

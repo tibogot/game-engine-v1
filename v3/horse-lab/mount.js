@@ -572,7 +572,7 @@ export class MountSystem {
 
     const { q: sq, toW, G } = this.frame();
     const st = this.stirrup();
-    const seat = RP.pelvisUp + 0.035;                          // pelvis above the saddle frame when seated
+    const seat = RP.pelvisUp + (rd.seatAdj ?? 0) + 0.035;      // pelvis above the saddle frame when seated (seatAdj: this rider's seat depth vs the robot's)
     this.perf ??= {};
     const key = `${s}:${G.toFixed(2)}`;
     if (!this.perf[key]) this.mountExtra = 0;

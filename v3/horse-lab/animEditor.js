@@ -551,7 +551,7 @@ export class AnimEditor {
     this.selKey = null; this.changed(); this.status("reset to the built-in version (not saved yet)");
   }
   async save() {
-    const name = this.ride ? "riding" : this.clip;
+    const name = this.ride ? (this.rider.r.kind === "ybot" ? "riding-ybot" : "riding") : this.clip;   // (each rider its own riding settings)
     const body = JSON.stringify(this.ride ? ridingData(this.strap()) : this.data);
     try {
       const r = await fetch(`/__horse-lab/anims?name=${name}`, { method: "POST", headers: { "Content-Type": "application/json" }, body });

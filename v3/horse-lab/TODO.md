@@ -211,7 +211,15 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   the arrow (keepOffHead: a power-4 rounded box round the shell, pushed out from its middle;
   the push eased in): the wrist went 58–90 % into a helmet over the crown, the arrow 70 %.
   Now 0 frames inside on both riders; a few hand-jerk flags at 1.22–1.25 (the whip, ~Mixamo's).
-- TODO: the user's look at Y Bot riding / mounting (seat, strap, mount keys retune);
+- Y BOT RIDING PASS (2026-10-12), measured against the robot (riderCheck + ridefilm in the
+  saddle frame): it sat 6–8 cm INTO the saddle — its pelvis bone sits ~9 cm higher in its body;
+  the pelvis is placed by the bone. rider.seatAdj = seatDepth(Y Bot) − seatDepth(robot), from
+  each one's SITTING pose (rider.js seatDepth; riding + mount seat). Stirrups 0.56 → 0.52
+  (knee 60 → 70°, the robot's). Its own riding settings: anims/riding-ybot.json (the K editor
+  saves per rider), gallop seatUp 0.09 / lean 0.75 (knees 56°, seat 3 cm up, torso 34°).
+  Now: seated gaits seat −0.8…+1.1 cm (robot −0.7…+0.9), knees 70–71° (70–74°); checks: the
+  same flags as the robot, mount slightly better (no leg inside the horse any more).
+- TODO: the user's look at Y Bot riding / mounting (by eye, near side) (seat, strap, mount keys retune);
   the release lowering bow elbow (~30° more than the clip for 0.3 s).
 
 ## ▶ Mixamo → robot RETARGET (retarget.js) — 2026-10-11

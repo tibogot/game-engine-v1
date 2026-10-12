@@ -84,7 +84,7 @@
       import { createLabSky } from "./horse-lab/sky.js";
       import { mergeStatic, mergeSkinned, mergeRigid, setZoneColor } from "./horse-lab/optimize.js";
       import { loadHorse, HorseController, HP, GEARS, setTrotGear } from "./horse-lab/horse.js";
-      import { loadRider, RiderController, RP, applyRidingData } from "./horse-lab/rider.js";
+      import { loadRider, RiderController, RP, applyRidingData, seatDepth } from "./horse-lab/rider.js";
       import { loadYBot } from "./horse-lab/ybot.js";
       import { runAudit, runAuditAsync } from "./horse-lab/audit.js";
       import { Tack } from "./horse-lab/tack.js";
@@ -224,6 +224,8 @@
       mergeSkinned(riderData.model ?? riderData.rig);   // body + joints → one skinned mesh
       scene.add(riderData.rig);
       const rider = new RiderController(riderData, ctrl, scene);
+      // (another figure: its seat put where the robot's sits — the riding settings were made on the robot)
+      if (riderData !== robotData) { const sit = (d) => d.clips.Sitting_Idle_Loop_Armature; rider.seatAdj = seatDepth(riderData, sit(riderData)) - seatDepth(robotData, sit(robotData)); console.log("[horse-lab] seat depth vs the robot", rider.seatAdj.toFixed(3), "m"); }
       addHat(rider);                                       // cowboy hat on the head bone
       addHelmet(rider);                                    // a knight's great helm (headgear: hat / helmet / none)
       // the saddle, built on this horse's back (tack.js)
@@ -244,8 +246,13 @@
       console.log("[horse-lab] saddle fit", tack.fit);
       await rider.mountSys.loadAnims();                     // get on / off as saved from the animation editor
       try {                                                 // riding postures, seat height, strap length (editor)
-        const r = await fetch("/v3/horse-lab/anims/riding.json?" + Date.now());
+        // (each rider its own riding settings — Y Bot's in riding-ybot.json once saved; until
+        // then the robot's, its stirrups 0.52 / 0.56 shorter: the same knee bend, measured)
+        const own = riderData.kind === "ybot" ? "riding-ybot" : "riding";
+        let r = await fetch(`/v3/horse-lab/anims/${own}.json?` + Date.now()), ownFile = r.ok && (r.headers.get("content-type") ?? "").includes("json");
+        if (!ownFile) r = await fetch("/v3/horse-lab/anims/riding.json?" + Date.now());
         if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) applyRidingData(await r.json(), rider.stirrups.STRAP);
+        if (riderData.kind === "ybot" && !ownFile) rider.stirrups.STRAP.len *= 0.52 / 0.56;
       } catch { /* the built-in postures */ }
       // the bow on foot (bow.js): V on / off, hold right mouse (G) to aim, left mouse (T) to draw, let go to shoot
       const archer = new Archer({ rider, scene, world: arena, range });
