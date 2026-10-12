@@ -589,9 +589,18 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        had no width (now ±0.6 m), and a corner's waypoint was "reached" 2 m short so he cut the corner
        (now only with the next waypoint in a clear line; infantry). RESULT: 2 episodes / 200 s → 0 in
        600 s (68 + 40 orders). My call (you: "you tell me"): keep the march's CoH values as they are.
-       - [ ] LEAPFROGGING (CoH): element leaders break off to cover near their goal, pause, rejoin;
-         "soft" (bend toward cover, no stop) when retreating.
-       - [ ] right-drag to set the destination formation's facing; by default face the enemy.
+       - [x] LEAPFROGGING (2026-10-12, algSquadMarch leapfrog): the element leaders (the first man either
+         side) every 7-13 s dash to the best cover within 8 m of their march spot (algCover ≥ 0.3), hold
+         1-2.2 s facing the march, rejoin at catch-up speed; in the open (wedge) only, never the last
+         30 m. Measured on a long march: covers 0.73-1.00 taken, none in the column on the track.
+         - [ ] "soft" leapfrog on a RETREAT (bend toward cover, no stop) — retreat is algSquads', not a march.
+       - [x] FORMATION FACING (2026-10-12, shared selection.js): the end formation is a LINE across the
+         facing (a shallow arc, the leader in the middle, a 2nd line from the 7th man; squads side by side,
+         not a square grid). The facing: a RIGHT-DRAG (press = the spot, drag = the way to face), else the
+         nearest VISIBLE enemy within 60 m of the spot (algUnits facingFor — the fog gives nothing away),
+         else the way they go. On his spot, a man with nobody to shoot turns to it (units.js faceAngle).
+         Checked: 6 men in the line, all facing the drag's way (0.00 rad off).
+         - [ ] a preview of the right-drag (an arrow, the line's spots) while dragging.
        - [ ] STEP 6: per-cell clearance (no one-cell gaps for a 1 m man).
        - [x] tools/navPocketsTest.mjs (fast lane): a walled yard sealed, a spot in it moved to reachable
          ground, an open spot kept exactly, a wire-closed yard sealed then open once cut, a 900 m² field

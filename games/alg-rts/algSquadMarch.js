@@ -33,6 +33,15 @@ const P = {
   SPEED_MIN: 0.7, SPEED_MAX: 1.3,
   CATCHUP_M: 6,       // farther than this from his spot: full catch-up speed
   RELEASE_M: 50,      // farther than this from the leader (or standing still off his spot): to his own end spot
+  // LEAPFROG (CoH: the element leaders dash to cover, hold, rejoin)
+  LF_FIRST: 4,        // s before an element leader's first leapfrog (+ his own stagger)
+  LF_EVERY: [7, 13],  // s between two of his leapfrogs
+  LF_REACH: 8,        // m from his march spot he looks for cover
+  LF_MIN_COVER: 0.3,  // a cover value worth the dash (algCover: light ~0.5, heavy ~1)
+  LF_DASH: 1.15,      // his pace on the dash
+  LF_GO_MAX: 6,       // s the dash may take before he gives it up
+  LF_HOLD: [1.0, 2.2], // s he holds on the cover
+  LF_NOT_LAST: 30,    // m: not in the march's last stretch
   DRIFT_M: 0.8,       // how far a man's spot wanders
   CONTEXT_S: 0.6,     // how often the ground under the leader is read
   ROAD_M: 5,          // a track this near the leader: the column
@@ -90,6 +99,8 @@ export function createAlgSquadMarch({ app, squads }) {
     marches.delete(s);
     for (const u of m.men) {
       u.formMul = 1;
+      const lf = m.lf.get(u);
+      if (lf && lf.phase !== "march") u.faceAngle = lf.face0 ?? u.faceAngle;   // (mid-leapfrog: the order's facing back)
       // To his own end spot (the move's destination formation) — only if his goal is still ours.
       // (halted by combat on an AI's move: he keeps fighting; on the player's, move means move)
       if (sendHome && u.alive && (u.goalPoint ? m.issued.get(u) === keyOf(u.goalPoint) : m.playerMove) && m.dest.has(u)) {
@@ -110,7 +121,7 @@ export function createAlgSquadMarch({ app, squads }) {
     // (playerMove: the player's MOVE MEANS MOVE (combat.js) carried by the march — combat clears it the moment a
     // man stops, and a follower pauses at each of his short goals: then an enemy in range halted him, wiped his
     // order, and the march read that as a new order and left him behind, 380 m away — 2026-10-12.)
-    const m = { leader, men, dest: new Map(), issued: new Map(), at: new Map(), t: new Map(), ctx: "wedge", ctxT: 0, playerMove: !!leader.playerMove, released: new Set() };
+    const m = { leader, men, dest: new Map(), issued: new Map(), at: new Map(), t: new Map(), ctx: "wedge", ctxT: 0, playerMove: !!leader.playerMove, released: new Set(), lf: new Map() };
     for (const u of men) { const g = u.goalPoint; if (g) m.dest.set(u, { x: g.x, z: g.z }); m.issued.set(u, keyOf(g)); m.t.set(u, 9); }
     leader.formMul = P.LEADER_PACE;
     marches.set(s, m);
@@ -163,7 +174,8 @@ export function createAlgSquadMarch({ app, squads }) {
       // fallen too far behind, or standing still away from his march spot — he walks his own path there,
       // as before the march existed. Never left behind.
       const far = Math.hypot(u.position.x - L.position.x, u.position.z - L.position.z) > P.RELEASE_M;
-      const idle = !u.isMoving && (m.at.get(u) ? Math.hypot(u.position.x - m.at.get(u).x, u.position.z - m.at.get(u).z) > 4 : false);
+      const leaping = m.lf.get(u)?.phase && m.lf.get(u).phase !== "march";   // (holding on cover is not idle)
+      const idle = !leaping && !u.isMoving && (m.at.get(u) ? Math.hypot(u.position.x - m.at.get(u).x, u.position.z - m.at.get(u).z) > 4 : false);
       if ((far || idle) && m.dest.has(u)) {
         const d = m.dest.get(u);
         u.formMul = 1;
@@ -181,6 +193,10 @@ export function createAlgSquadMarch({ app, squads }) {
       if (dl > P.DRIFT_M) { dr.x *= P.DRIFT_M / dl; dr.z *= P.DRIFT_M / dl; }
       const [ox, oz] = shape(k);
       const place = (c) => ({ x: c.x + (ox + dr.x) * c.fz + (oz + dr.z) * c.fx, z: c.z - (ox + dr.x) * c.fx + (oz + dr.z) * c.fz });
+      // LEAPFROG (CoH, 2026-10-12): an ELEMENT LEADER (the first man either side, k 1-2) now and then
+      // dashes to the best cover near his march spot, holds a moment facing the march, then rejoins
+      // (behind: catch-up speed). In the OPEN only (the wedge), never in the last stretch.
+      if (k <= 2 && leapfrog(m, u, k, place(ahead), dt)) return;
       // SPEED: ahead of his spot (along the march) slower, behind faster.
       const slot = place({ ...now, x: L.position.x, z: L.position.z });
       const e = (u.position.x - slot.x) * now.fx + (u.position.z - slot.z) * now.fz;
@@ -203,6 +219,47 @@ export function createAlgSquadMarch({ app, squads }) {
       m.issued.set(u, keyOf(u.goalPoint));
     });
   }
+
+  /** An element leader's leapfrog; true while it drives him (the march leaves him be). */
+  function leapfrog(m, u, k, spot, dt) {
+    const cover = app.algCover;
+    if (!cover?.coverAt) return false;
+    let f = m.lf.get(u);
+    if (!f) m.lf.set(u, (f = { phase: "march", t: P.LF_FIRST + k * 2 + rand() * 4 }));
+    f.t -= dt;
+    const L = m.leader, ld = m.dest.get(L);
+    const late = Math.hypot(ld.x - L.position.x, ld.z - L.position.z) < P.LF_NOT_LAST;
+    if (f.phase === "march") {
+      if (f.t > 0 || m.ctx !== "wedge" || late) return false;
+      // The best cover within LF_REACH of his march spot (two rings and the spot), reachable from it.
+      let best = null, bs = P.LF_MIN_COVER;
+      for (const r of [0, LF_RING_A, P.LF_REACH]) for (let i = 0, n = r ? 10 : 1; i < n; i++) {
+        const a = (i / n) * Math.PI * 2, x = spot.x + Math.cos(a) * r, z = spot.z + Math.sin(a) * r;
+        if (nav?.isBlockedAtWorld(x, z, true)) continue;
+        const c = cover.coverAt(x, z);
+        if (c > bs) { bs = c; best = { x, z }; }
+      }
+      f.t = P.LF_EVERY[0] + (rand() + 0.5) * (P.LF_EVERY[1] - P.LF_EVERY[0]);
+      if (!best) return false;
+      const go = nav?.nearestReachable?.(spot.x, spot.z, best.x, best.z, { foot: true }) ?? best;
+      f.phase = "go"; f.at = go; f.t = P.LF_GO_MAX; f.face0 = u.faceAngle;   // (the order's facing, back after)
+      u.formMul = P.LF_DASH;
+      u.orderTo(go.x, go.z);
+      if (m.playerMove) u.playerMove = true;
+      m.issued.set(u, keyOf(u.goalPoint));
+      return true;
+    }
+    if (f.phase === "go") {
+      const there = Math.hypot(u.position.x - f.at.x, u.position.z - f.at.z) < 1.6 || !u.isMoving;
+      if (there || f.t <= 0) { f.phase = "hold"; f.t = P.LF_HOLD[0] + (rand() + 0.5) * (P.LF_HOLD[1] - P.LF_HOLD[0]); u.formMul = 1; }
+      return true;
+    }
+    // HOLD: on his cover, turned the way the squad goes (units.js faceAngle), then back to the march.
+    u.faceAngle = Math.atan2(L.position.x - u.position.x, L.position.z - u.position.z);
+    if (f.t <= 0 || late) { u.faceAngle = f.face0 ?? null; f.phase = "march"; f.t = P.LF_EVERY[0] + (rand() + 0.5) * (P.LF_EVERY[1] - P.LF_EVERY[0]); m.t.set(u, 9); m.at.delete(u); return false; }
+    return true;
+  }
+  const LF_RING_A = 4;
 
   return {
     params: P, marches, step,

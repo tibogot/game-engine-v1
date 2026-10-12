@@ -200,6 +200,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     /** A posture's speed factor (infantryPosture.js: suppressed 0.7, pinned 0.3). */
     moveMul: 1,
     formMul: 1,      // a march's speed matching (alg-rts algSquadMarch.js); 1 = none
+    faceAngle: null, // where he faces once on his spot (selection.js formation facing); null = as he stands
     selected: false,
     // ── combat (driven by combat.js) ──────────────────────────────────────────
     range: type.range ?? 0,
@@ -271,6 +272,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     moveOrder(tx, tz, shared = null) {
       unit.attackTarget = null;
       unit.target = null;
+      unit.faceAngle = null;   // (a new move: no old facing — selection.js sets this order's after)
       unit.orderTo(tx, tz, shared);
     },
 
@@ -559,6 +561,11 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       // around to look where it's going.
       if (moved > 1e-3 && reverseT <= 0 && !type.drive) {
         heading = turnToward(heading, Math.atan2(movedX, movedZ), (type.turnRate ?? 3) * dt);
+      }
+      // THE FORMATION'S FACING (selection.js: a right-drag, else the enemy near the spot, else the way
+      // he came — CoH, 2026-10-12): a man on foot standing on his spot with nobody to shoot turns to it.
+      else if (arrived && foot && unit.faceAngle != null && !unit.target && !unit.attackTarget) {
+        heading = turnToward(heading, unit.faceAngle, (type.turnRate ?? 3) * dt);
       }
 
       // ── Unstick ladder ────────────────────────────────────────────────────

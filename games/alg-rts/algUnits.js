@@ -651,6 +651,17 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // Right-click an enemy soldier or vehicle you can see = attack; the red sight over him.
     attackUnits: true,
     canTarget: (u) => !fogOfWar?.enabled || fogOfWar.isVisible(u.position.x, u.position.z),
+    // THE FORMATION FACES THE ENEMY (CoH, 2026-10-12): a plain right-click's squads turn to the nearest
+    // VISIBLE enemy within 60 m of the spot (the fog: nothing hidden is given away); none: the way they go.
+    facingFor: (px, pz) => {
+      let best = null, bd = 60;
+      for (const e of units.list) {
+        if (!e.alive || e.isAir || !isHostile(e.team) || e.inside) continue;
+        const d = Math.hypot(e.position.x - px, e.position.z - pz);
+        if (d < bd && (!fogOfWar?.enabled || fogOfWar.isVisible(e.position.x, e.position.z))) { bd = d; best = e; }
+      }
+      return best ? Math.atan2(best.position.x - px, best.position.z - pz) : null;
+    },
     onOrder: (kind, list) => {
       // MOVE MEANS MOVE (shared-rts/combat.js): a move is obeyed — no chasing, no stopping to
       // fight on the way (they shoot on the move); an attack order ends it.

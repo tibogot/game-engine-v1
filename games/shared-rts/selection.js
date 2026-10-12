@@ -25,7 +25,7 @@ const DRAG_THRESHOLD = 6; // px before a click becomes a box-drag
 // `unitRenderer` owns the unit meshes, so picking goes through it. Unit logic
 // (units.js) has no meshes at all. (Note: app.renderer is the WebGPU renderer —
 // different thing, hence the explicit name.)
-export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, onInspect = null, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null, adjustSlots = null }) {
+export function createSelection({ app, units, unitRenderer, structuresRenderer = null, buildingRenderer = null, resourceRenderer = null, harvesting = null, onChange = () => {}, onOrder = () => {}, onInspect = null, clampOrder = null, squadOf = null, orderMarker = null, attackUnits = false, canTarget = null, adjustSlots = null, facingFor = null }) {
   // `attackUnits` (opt-in, alg-rts 2026-10-06): a right-click on an enemy UNIT is an attack order
   // too (not only on a building), and the cursor turns to a red sight over one; `canTarget(u)`:
   // may the player point at him (seen — not in the fog)?
@@ -323,10 +323,23 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   }
 
   // ── Right-click → attack an enemy, else move ────────────────────────────────
+  // RIGHT-DRAG = A MOVE WITH A FACING (CoH, 2026-10-12): press where the squad goes, drag the way it
+  // should face, release. (The order itself fires on the release: the contextmenu event.)
+  let rPress = null;
+  const onRightDown = (e) => { if (e.button === 2) rPress = { x: e.clientX, y: e.clientY }; };
   const onContextMenu = (e) => {
     // Right-click works in BOTH camera modes — it never fights orbit's
     // left-drag. (Left-click/box-select stays RTS-only to avoid that clash.)
     e.preventDefault();
+    const press = rPress;
+    rPress = null;
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 18 && [...selected].some((u) => isHuman(u.team))) {
+      const a = app.pickWorldAtClient?.(press.x, press.y), b = app.pickWorldAtClient?.(e.clientX, e.clientY);
+      if (a?.point && b?.point && Math.hypot(b.point.x - a.point.x, b.point.z - a.point.z) > 1) {
+        orderMove(a.point.x, a.point.z, a.point.y, { facing: Math.atan2(b.point.x - a.point.x, b.point.z - a.point.z) });
+        return;
+      }
+    }
     // Orders go to the PLAYER's units only, whatever the selection holds.
     const mine = [...selected].filter((u) => isHuman(u.team));
     if (!mine.length) return;
@@ -364,7 +377,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
    * shown is what is ordered. `adjustSlots(slots, units)` (a game's, opt-in) may move them (onto
    * cover). Squads: `arr` comes back in squad order, one slot per man.
    */
-  function formationAt(px, pz) {
+  function formationAt(px, pz, { facing = null } = {}) {
     // Spread units around the target so they don't stack on one point. Spacing
     // must clear the biggest unit's separation radius — otherwise their goal
     // points overlap and they shove each other forever instead of settling.
@@ -372,8 +385,17 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     // Assign the CLOSEST unit to each slot (greedy) so the group doesn't cross
     // over itself on the way, and so two units never chase the same slot.
     const arr = [...selected].filter((u) => !u.isStructure && isHuman(u.team)); // buildings don't move; never an enemy
-    if (!arr.length) return { arr, slots: [] };
+    if (!arr.length) return { arr, slots: [], facing: null };
     const maxR = Math.max(...arr.map((u) => u.radius ?? 3));
+    // THE FACING (CoH, 2026-10-12): a right-drag's, else the game's (alg-rts: the enemy near the spot), else
+    // the way the group travels (its middle to the click). Heading convention atan2(dx, dz).
+    if (facing == null) facing = facingFor?.(px, pz, arr) ?? null;
+    if (facing == null) {
+      const mx = arr.reduce((a, u) => a + u.position.x, 0) / arr.length, mz = arr.reduce((a, u) => a + u.position.z, 0) / arr.length;
+      facing = Math.hypot(px - mx, pz - mz) > 2 ? Math.atan2(px - mx, pz - mz) : null;
+    }
+    const fx = facing == null ? 0 : Math.sin(facing), fz = facing == null ? 1 : Math.cos(facing);
+    const rx = fz, rz = -fx;   // to the right of the facing
     const spacing = Math.max(6, maxR * 2.6);
     const cols = Math.ceil(Math.sqrt(arr.length));
 
@@ -395,18 +417,21 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         for (const m of mates) seen.add(m);
         groups.push(mates);
       }
-      const gCols = Math.ceil(Math.sqrt(groups.length));
       const gSpace = Math.max(16, maxR * 4);
       const order = [];
       slots = [];
       anchors = [];
       groups.forEach((g, gi) => {
-        const cx = px + ((gi % gCols) - (gCols - 1) / 2) * gSpace;
-        const cz = pz + (Math.floor(gi / gCols) - (Math.ceil(groups.length / gCols) - 1) / 2) * gSpace;
+        // The squads SIDE BY SIDE across the facing (a front), not a square grid.
+        const off = (gi - (groups.length - 1) / 2) * gSpace;
+        const cx = px + rx * off, cz = pz + rz * off;
         g.forEach((m, k) => {
-          // A loose ring round the spot (the first man at its middle).
-          const ring = k === 0 ? 0 : 2.6 + (k > 6 ? 2.6 : 0), a = k * 2.39996;
-          slots.push({ x: cx + Math.cos(a) * ring, z: cz + Math.sin(a) * ring });
+          // A LINE facing the enemy (CoH's destination formation, 2026-10-12; a loose ring before): the leader
+          // in the middle, the others either side 2.4 m apart, the line bowing back a little at its ends; a
+          // 7th man on, a second line 2.6 m behind.
+          const kk = k > 6 ? k - 6 : k, r = Math.ceil(kk / 2), side = kk % 2 ? 1 : -1;
+          const lat = k === 0 ? 0 : side * r * 2.4, back = -0.35 * r * r - (k > 6 ? 2.6 : 0);
+          slots.push({ x: cx + rx * lat + fx * back, z: cz + rz * lat + fz * back });
           anchors.push({ x: cx, z: cz });
           order.push(m);
         });
@@ -434,7 +459,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
         return nav.nearestReachable(a.x, a.z, sl.x, sl.z, { foot }) ?? sl;
       });
     }
-    return { arr, slots };
+    return { arr, slots, facing };
   }
 
   /**
@@ -443,7 +468,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
    * right-click and the minimap's (a game's) both come here. `y`: the marker's
    * height (the ground's, when not given).
    */
-  function orderMove(x, z, y) {
+  function orderMove(x, z, y, { facing = null } = {}) {
     if (!selected.size) return;
     // A game's playable area: an order outside it goes to the nearest point
     // inside (alg-rts's box; without it the path had no route and men held).
@@ -460,7 +485,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     for (const s of selected) {
       if (s.isStructure && s.rally) { s.rally.x = hit.point.x; s.rally.z = hit.point.z; }
     }
-    const { arr, slots } = formationAt(hit.point.x, hit.point.z);
+    const { arr, slots, facing: face } = formationAt(hit.point.x, hit.point.z, { facing });
     if (!arr.length) return;
 
     // ONE path search per cluster of units, not one per unit: every ground
@@ -490,7 +515,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
 
     // Squads: each man to his own squad's spot (in the order built above).
     if (squadOf) {
-      arr.forEach((u, i) => u.moveOrder(slots[i].x, slots[i].z, pathFor(u, slots[i])));
+      // (the facing AFTER the order: moveOrder clears an old one — units.js turns him to it on his spot)
+      arr.forEach((u, i) => { u.moveOrder(slots[i].x, slots[i].z, pathFor(u, slots[i])); if (!u.isAir) u.faceAngle = face; });
       return;
     }
     const pool = [...arr];
@@ -503,6 +529,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       // moveOrder (not orderTo) — a move command cancels any attack order.
       const u = pool.splice(best, 1)[0];
       u.moveOrder(slot.x, slot.z, pathFor(u, slot));
+      if (!u.isAir) u.faceAngle = face;
     }
   }
 
@@ -510,6 +537,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
   dom.addEventListener("contextmenu", onContextMenu);
+  dom.addEventListener("pointerdown", onRightDown);
 
   return {
     get selected() { return [...selected]; },
@@ -542,6 +570,7 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
       window.removeEventListener("pointermove", onPointerMove);
       window.removeEventListener("pointerup", onPointerUp);
       dom.removeEventListener("contextmenu", onContextMenu);
+      dom.removeEventListener("pointerdown", onRightDown);
       dom.removeEventListener("pointermove", onHover);
       boxEl.remove();
       if (markerRaf) cancelAnimationFrame(markerRaf);
