@@ -41,4 +41,26 @@ export const MAP = {
   // A FARMSTEAD west of the track (algGame.js places it; algCivilians puts its "shepherd" there —
   // the moussebel of the shepherd's lesson). `turn`: off the camera's three-quarter view.
   farmsteads: [{ x: -58, z: 64, turn: 0.5 }],
+  // THE MINIMAP's ground (ui/minimap.js): the paint layers' colours (0 grass, 1 dusty earth,
+  // 6 the track), not the Aurès' ochre by height — on a flat plain that was one brown.
+  minimap: { layers: { 0: [104, 124, 62], 1: [158, 134, 96], 6: [178, 152, 112] } },
+  // THE SCENERY (2026-10-12, you: "some big rocks like the building lab's, a bit more trees, palms
+  // and foliage — nothing much, it's the training camp, but it should look fine"). algLandmarks'
+  // rocks and lone trees, a FEW of each (the Aurès' counts are 3-10x), kept off the lessons'
+  // ground; the bushes and palm clumps are the level's plant paint (tools/algTrainingLevel.mjs,
+  // the same circles). No farmsteads or ruins: the training keeps its one.
+  scenery: {
+    quantities: {
+      outcrops: 3, trees: 9, treeSpacing: 38, deadTrees: 0, betoums: 3, betoumSpacing: 55,
+      tamariskGroups: 0, broomClumps: 4, agaveRun: 0.5, clusters: 7, clusterSpacing: 38,
+      sandstone: 6, sandstoneSpacing: 48, sandstoneSiteClear: 28,
+    },
+    keepClear: [
+      { x: 0, z: 118, r: 70 },     // the post, its vehicle park and helipad
+      { x: 48, z: 36, r: 20 },     // the supply depot (the points lesson)
+      { x: 70, z: -58, r: 18 },    // the knoll's top (the high-ground lesson)
+      { x: -58, z: 64, r: 20 },    // the farmstead (the shepherd's lesson)
+      { x: 10, z: -140, r: 34 },   // the FLN's ground
+    ],
+  },
 };

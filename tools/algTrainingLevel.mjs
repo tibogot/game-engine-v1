@@ -125,6 +125,64 @@ man.paintLayers[1] = { ...L1, name: "Bare ground",
   rough: photo(D, "dirt_aerial_02_rough_1k.jpg"),
   ao: photo(D, "dirt_aerial_02_ao_1k.jpg"), uvScale: W / 20, normalStr: 0.6, aoStr: 0.3, tint: "#e8dcc4" };
 
-const blobs = new Map([["heightmap", Buffer.from(h.buffer)], ["splat", splat]]);
+// ── Plants (2026-10-12, you: "a bit more trees, palms and foliage — nothing much"): the template's
+// plant slots (tools/algVegetation.mjs), painted here SPARSE. Tall field (RGBA 512²): 0 cedar,
+// 1 holm oak, 2 date grove, 3 juniper. Ground field (2 RGBA pages 1024²): 1 doum palm, 5 prickly
+// pear, 6 thistle, 7 asphodel (alfa, reeds, oleander, tamarisk: none — no steppe, no water).
+// Kept off the track and the lessons' ground (training.js scenery.keepClear, the sites).
+const smooth01 = (t) => smoothstep(0, 1, t);
+const patches = (x, z, scale, cover, s) => {
+  const n = noise(x / scale, z / scale, s) * 0.7 + noise(x / (scale * 0.35), z / (scale * 0.35), s + 7) * 0.3;
+  return smooth01((n - (1 - cover)) / 0.12);
+};
+const hamlet = site("hamlet");
+const clearCircles = [...MAP.scenery.keepClear, ...LAYOUT.sites.map((s) => ({ x: s.x, z: s.z, r: s.r + 8 }))];
+const clearK = (x, z) => {
+  let k = smooth01((trackDist(x, z) - 7) / 5);
+  for (const c of clearCircles) k = Math.min(k, smooth01((Math.hypot(x - c.x, z - c.z) - c.r) / 8));
+  return k;
+};
+const TALL = [
+  (x, z, o) => 0.8 * smoothstep(15, 70, o) * patches(x, z, 60, 0.4, 31),                          // cedar: the hills only
+  (x, z, o) => (o > 0 ? 0.5 * patches(x, z, 50, 0.35, 32) : 0.7 * patches(x, z, 45, 0.1, 33)),   // holm oak: a few groves
+  (x, z, o) => {                                                                                    // date palms: clumps
+    if (o > 0) return 0;
+    const dh = Math.hypot(x - hamlet.x, z - hamlet.z);
+    const byHamlet = smoothstep(42, 50, dh) * (1 - smoothstep(62, 75, dh)) * patches(x, z, 18, 0.35, 34);
+    return Math.max(byHamlet, patches(x, z, 30, 0.12, 35)) * 0.9;
+  },
+  (x, z, o) => 0.4 * smoothstep(10, 50, o) * patches(x, z, 40, 0.5, 36),                          // juniper: the hills
+];
+const GROUND = {
+  1: (x, z, o) => 0.3 * patches(x, z, 25, 0.16, 41),                                                // doum palm
+  5: (x, z, o) => { const dh = Math.hypot(x - hamlet.x, z - hamlet.z); return o > 0 ? 0 : 0.45 * smoothstep(40, 46, dh) * (1 - smoothstep(54, 60, dh)) * patches(x, z, 12, 0.45, 42); },
+  6: (x, z, o) => (o > 0 ? 0 : 0.6 * patches(x, z, 35, 0.14, 43)),                                  // thistle drifts
+  7: (x, z, o) => (o > 0 ? 0 : 0.6 * patches(x, z, 30, 0.14, 44)),                                  // asphodel drifts
+};
+function plantPaint(res, pages, fns) {
+  const out = Buffer.alloc(res * res * 4 * pages);
+  const counts = {};
+  for (let pz = 0; pz < res; pz++) {
+    const z = ((pz + 0.5) / res) * W - W / 2;
+    for (let px = 0; px < res; px++) {
+      const x = ((px + 0.5) / res) * W - W / 2, o = outside(x, z);
+      if (o > 200) continue;
+      const k = clearK(x, z);
+      if (!k) continue;
+      for (const [ch, fn] of Object.entries(fns)) {
+        const v = Math.round(Math.max(0, Math.min(1, fn(x, z, o) * k)) * 255);
+        if (!v) continue;
+        out[((ch / 4) | 0) * res * res * 4 + (pz * res + px) * 4 + (ch % 4)] = v;
+        counts[ch] = (counts[ch] ?? 0) + 1;
+      }
+    }
+  }
+  return { out, counts };
+}
+const tallPaint = plantPaint(512, 1, Object.fromEntries(TALL.map((f, i) => [i, f])));
+const groundPaint = plantPaint(1024, 2, GROUND);
+console.log(`plants (texels): tall ${JSON.stringify(tallPaint.counts)} · ground ${JSON.stringify(groundPaint.counts)}`);
+
+const blobs = new Map([["heightmap", Buffer.from(h.buffer)], ["splat", splat], ["susukiDensity", tallPaint.out], ["foliagePaint", groundPaint.out]]);
 const bytes = await writeProject(args.out, { manifest: man, blobs });
 console.log(`${args.out}: ${(bytes / 1e6).toFixed(1)} MB — plain ${BASE} m, the knoll +${knoll.h} m, the hills to ${hi.toFixed(1)} m`);

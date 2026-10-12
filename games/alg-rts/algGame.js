@@ -74,6 +74,9 @@ if (MAP.tutorial) {
   for (const k of OFF) if (!params.has(k)) { params.set(k, "0"); changed = true; }
   if (changed) history.replaceState(null, "", `${location.pathname}?${params}${location.hash}`);
 }
+// A map's OWN scenery (maps/training.js `scenery`): algLandmarks' rocks and lone trees at its counts,
+// even with ?landmarks=0 (which keeps the Aurès' farmsteads and ruins out). ?scenery=0 = without.
+const SCENERY = params.get("landmarks") !== "0" || (!!MAP.scenery && params.get("scenery") !== "0");
 
 /**
  * THE AURÈS IN SUMMER. The war began here on 1 November 1954, but the look to
@@ -147,7 +150,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   prefetchStonePhotos();
   prefetchAlgSplats();   // and the ground splats' (algSplats.js)
   // The sandstone rocks' shapes, in worker threads (algSandstone.js; ~1-1.7 s each on one thread).
-  if (params.get("landmarks") !== "0") prefetchSandstone();
+  if (SCENERY) prefetchSandstone();
   prefetchCave();   // the cave's rocks too (algCave.js): in workers from the top of the boot
   // The kit's surface atlas is painted in a worker; until it lands every
   // building and vehicle wears a flat olive-grey placeholder. Started first
@@ -547,10 +550,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
   // ROCK OUTCROPS + LONE TREES (algLandmarks.js), after the fields so they
   // keep off them. Then the cover map once, with the walls and rocks in it.
-  if (params.get("landmarks") !== "0") {
+  if (SCENERY) {
     try {
       const t0 = performance.now();
-      app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null });
+      app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null,
+        quantities: MAP.scenery?.quantities ?? null, keepClear: MAP.scenery?.keepClear ?? [] });
       console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
       // The SANDSTONE rocks: their shapes come from the workers started at the top of the boot.
       const t1 = performance.now();

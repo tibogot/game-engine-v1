@@ -209,7 +209,7 @@ export function landmarkEntries(app, list) {
   return out;
 }
 
-const Q = {
+const Q_AURES = {
   outcrops: 42, outcropSpacing: 34, outcropSlope: [9, 32],   // degrees
   trees: 24, treeSpacing: 55,
   deadTrees: 18, deadSpacing: 38,   // snags on the open plain (2026-10-07)
@@ -230,7 +230,10 @@ const Q = {
  * The rock outcrops (instanced, hard cover, impassable) and the lone trees
  * (the showroom's PlacedFoliage). Call after the showroom and the fields.
  */
-export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid = null, plants = null }) {
+export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid = null, plants = null, quantities = null, keepClear = [] }) {
+  // A map's own counts over the Aurès' (maps/training.js scenery: a few of each), and its circles
+  // kept clear (the lessons' ground).
+  const Q = { ...Q_AURES, ...quantities };
   const R = rng(2000);
   const H = (x, z) => app.getWorldHeight(x, z);
   const trackPts = TRACK_LINES.flatMap((t) => t.line);
@@ -243,6 +246,7 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
   }
   for (const b of fields?.plots ?? []) taken.push({ x: b.x, z: b.z, r: Math.hypot(b.hx, b.hz) });
   for (const s of LAYOUT.sites) taken.push({ x: s.x, z: s.z, r: (s.r ?? 20) + 6 });
+  for (const c of keepClear) taken.push({ x: c.x, z: c.z, r: c.r });
   const free = (x, z, r) => {
     if (!(x > PLAY.x0 + 6 && x < PLAY.x1 - 6 && z > PLAY.z0 + 6 && z < PLAY.z1 - 6)) return false;
     if (taken.some((t) => Math.hypot(t.x - x, t.z - z) < t.r + r)) return false;
