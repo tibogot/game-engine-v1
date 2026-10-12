@@ -95,7 +95,7 @@ export function createAlgCoverCursor({ app, selection }) {
     if (!hit?.point) { hide(); return; }
     const { arr, slots } = selection.previewMove(hit.point.x, hit.point.z);
     const spots = [];
-    arr.forEach((u, i) => { if (u.type?.foot && u.alive && slots[i]) spots.push(slots[i]); });
+    arr.forEach((u, i) => { if (u.type?.foot && u.alive && slots[i]) spots.push({ x: slots[i].x, z: slots[i].z, squad: u.squad ?? u }); });
     app.algOrderMarks?.preview(spots);
     shown = true;
   }

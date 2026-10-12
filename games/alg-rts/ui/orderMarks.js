@@ -1,5 +1,6 @@
 // THE ORDER MARKS (you, 2026-10-03, from Company of Heroes screenshots): a
-// right-click drops, over the spot EACH MAN will stand on, FOUR small arrows
+// right-click drops, over EACH SQUAD's spot (its middle man's; one a squad, as CoH 3 — 2026-10-12;
+// it was one a man), FOUR small arrows
 // in a ring, tilted like petals, all pointing in and down at the spot — they
 // close in on it, hold, then shrink away. Flat and unlit, bright (not a lit
 // 3D chevron, not a pulsing ring). Their colour is the COVER there, as CoH:
@@ -75,6 +76,26 @@ export function createOrderMarks({ app }) {
   const m4 = new THREE.Matrix4(), sc = new THREE.Matrix4();
   const X = new THREE.Vector3(), Y = new THREE.Vector3(), Z = new THREE.Vector3();
 
+  /**
+   * ONE mark per SQUAD (you, 2026-10-12, from a CoH 3 video: "not for all the soldiers, only one
+   * per squad"): [{ x, z, key }] → the squad's middle, snapped to its man's spot nearest it (a real
+   * spot, so its cover colour is true). `key` = the squad (a man without one is his own).
+   */
+  function perSquad(spots) {
+    const groups = new Map();
+    for (const s of spots) { const g = groups.get(s.key); if (g) g.push(s); else groups.set(s.key, [s]); }
+    const out = [];
+    for (const g of groups.values()) {
+      let mx = 0, mz = 0;
+      for (const s of g) { mx += s.x; mz += s.z; }
+      mx /= g.length; mz /= g.length;
+      let best = g[0], bd = Infinity;
+      for (const s of g) { const d = (s.x - mx) ** 2 + (s.z - mz) ** 2; if (d < bd) { bd = d; best = s; } }
+      out.push(best);
+    }
+    return out;
+  }
+
   function add(x, z, kind) {
     if (marks.length >= P.spots) return;
     marks.push({ x, y: app.getWorldHeight?.(x, z) ?? 0, z, t: 0, col: COL[kind], a0: Math.random() * Math.PI / 2 });
@@ -103,19 +124,21 @@ export function createOrderMarks({ app }) {
   let previewSpots = [];
   /** Show the preview at these spots ([{ x, z }]), or none ([] / null). */
   function preview(spots) {
-    previewSpots = (spots ?? []).slice(0, P.previews).map((p) => ({ x: p.x, z: p.z, y: app.getWorldHeight?.(p.x, p.z) ?? 0, col: COL[previewKind(p.x, p.z)] }));
+    previewSpots = perSquad((spots ?? []).map((p) => ({ x: p.x, z: p.z, key: p.squad ?? p }))).slice(0, P.previews).map((p) => ({ x: p.x, z: p.z, y: app.getWorldHeight?.(p.x, p.z) ?? 0, col: COL[previewKind(p.x, p.z)] }));
   }
 
   /** Each frame (render side). */
   function frame(dt) {
     if (pending) {
-      // Each man's end of route (set by now), else the order's point.
+      // Each man's end of route (set by now), else the order's point — one mark a squad.
+      const ends = [];
       for (const u of pending.units) {
         if (!u.alive) continue;
         const r = u.route;
         const end = r?.length ? r[r.length - 1] : u.isAir ? { x: pending.x, z: pending.z } : null;
-        if (end) add(end.x, end.z, coverKind(end.x, end.z));
+        if (end) ends.push({ x: end.x, z: end.z, key: u.squad ?? u });
       }
+      for (const e of perSquad(ends)) add(e.x, e.z, coverKind(e.x, e.z));
       if (!marks.length) add(pending.x, pending.z, coverKind(pending.x, pending.z));
       pending = null;
     }
