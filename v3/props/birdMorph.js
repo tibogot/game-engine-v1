@@ -14,6 +14,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
 import { setupDraco } from "../../v2/core/dracoLoader.js";
+import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
 
 const URL_CHICKEN = "/models/Chicken_001_compressed.glb";
 
@@ -50,12 +51,75 @@ function classOf([r, g, b]) {
   return "feather";
 }
 
+/*
+ * THE FACE TABLE IS BAKED (2026-10-12). The hen never draws with its texture —
+ * it is vertex-coloured per face — so the texture is only ever read once, here,
+ * and the answer never changes while the GLB doesn't. Sampling it live needed a
+ * SECOND KTX2Loader (forced to RGBA, so the CPU can read it) beside the games'
+ * shared one: its own transcoder download and worker pool at boot, and three's
+ * "Multiple active KTX2 loaders" warning on every alg-rts load.
+ *
+ * So the table lives in FACES_URL, and the GLB loads through the shared loader
+ * (its BC7 texture transcoded and simply not used). No file, a face count that
+ * disagrees with the GLB, or a shared loader without KTX2 → the live sample, as
+ * before. RE-BAKE after changing the chicken GLB: in the bird lab's console,
+ *   copy(JSON.stringify(await (await import("/v3/props/birdMorph.js")).bakeBirdFaces()))
+ * and paste it over public/models/Chicken_001_faces.json.
+ */
+const FACES_URL = "/models/Chicken_001_faces.json";
+const CLS_CHAR = { feather: "f", comb: "c", yellow: "y", eye: "e" };
+const CHAR_CLS = Object.fromEntries(Object.entries(CLS_CHAR).map(([k, v]) => [v, k]));
+
 /**
- * Load the chicken once (RGBA texture) and read each triangle's colour.
- * Returns { faces, classes } (what the texture held, for the lab).
+ * Load the chicken once and give each triangle its colour and class.
+ * Returns { faces, classes, texture, baked } (what the texture held, for the lab).
  */
 export async function initBirdMorph(url = URL_CHICKEN) {
   if (SRC) return SRC.stats;
+  const shared = getSharedGltfLoader();
+  const bake = shared.ktx2Loader && url === URL_CHICKEN
+    ? await fetch(FACES_URL).then((r) => (r.ok ? r.json() : null)).catch(() => null)
+    : null;
+  if (bake) {
+    const gltf = await shared.loadAsync(url);
+    let mesh = null;
+    gltf.scene.traverse((o) => { if (o.isSkinnedMesh && !mesh) mesh = o; });
+    const geo = mesh.geometry;
+    const T = geo.index ? geo.index.count / 3 : geo.attributes.position.count / 3;
+    if (bake.faces === T) {
+      // the texture is not drawn; free the transcoded copy rather than keep it on the GPU
+      mesh.material.map?.dispose();
+      const face = [], classes = {};
+      for (let t = 0; t < T; t++) {
+        const cls = CHAR_CLS[bake.cls[t]];
+        face.push({ cls, rgb: bake.rgb.slice(3 * t, 3 * t + 3), shade: bake.shade[t] });
+        classes[cls] = (classes[cls] ?? 0) + 1;
+      }
+      SRC = { gltf, mesh, face, stats: { faces: T, classes, texture: bake.texture, baked: true } };
+      return SRC.stats;
+    }
+    console.warn(`birdMorph: ${FACES_URL} has ${bake.faces} faces, the GLB ${T} — sampling the texture live; re-bake it (see FACES_URL)`);
+  }
+  return sampleFacesLive(url);
+}
+
+/** The face table as FACES_URL stores it — from a LIVE sample, never from the bake. */
+export async function bakeBirdFaces() {
+  if (SRC?.stats.baked !== false) { SRC = null; await sampleFacesLive(URL_CHICKEN); }
+  const live = SRC;
+  const r = (x, p) => Math.round(x * p) / p;
+  return {
+    glb: URL_CHICKEN,
+    faces: live.face.length,
+    texture: live.stats.texture,
+    cls: live.face.map((f) => CLS_CHAR[f.cls]).join(""),
+    rgb: live.face.flatMap((f) => f.rgb.map((x) => r(x, 1e4))),
+    shade: live.face.map((f) => r(f.shade, 1e4)),
+  };
+}
+
+/** Load the chicken with an RGBA-only transcoder and read each triangle's colour off the texture. */
+async function sampleFacesLive(url) {
   const ktx2 = new KTX2Loader();
   ktx2.setTranscoderPath("https://www.gstatic.com/basis-universal/versioned/2021-04-15-ba1c3e4/");
   // no compressed format supported → the transcoder writes plain RGBA
@@ -97,7 +161,7 @@ export async function initBirdMorph(url = URL_CHICKEN) {
   const fv = face.filter((f) => f.cls === "feather").map((f) => f.shade).sort((a, b) => a - b);
   const lo = fv[Math.floor(fv.length * 0.05)] ?? 0, hi = fv[Math.floor(fv.length * 0.95)] ?? 1;
   for (const f of face) f.shade = Math.min(1, Math.max(0, (f.shade - lo) / Math.max(1e-3, hi - lo)));
-  SRC = { gltf, mesh, face, stats: { faces: T, classes, texture: [W, H] } };
+  SRC = { gltf, mesh, face, stats: { faces: T, classes, texture: [W, H], baked: false } };
   return SRC.stats;
 }
 

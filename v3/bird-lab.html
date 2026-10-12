@@ -39,6 +39,7 @@
       import * as THREE from "three";
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { initBirdMorph, createBirdTemplate } from "./props/birdMorph.js";
+      import { initGlbLoaderRenderer } from "../v2/core/foliage/glbLoader.js";
 
       const $ = (id) => document.getElementById(id);
       addEventListener("error", (e) => { $("err").textContent += e.message + "\n"; });
@@ -51,6 +52,7 @@
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       document.body.appendChild(renderer.domElement);
       await renderer.init();
+      initGlbLoaderRenderer(renderer);   // the shared KTX2 loader the games use; the hen loads through it
 
       const scene = new THREE.Scene();
       const SKY = new THREE.Color("#b9cbd8");

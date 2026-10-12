@@ -45,8 +45,9 @@ PHASE 3 — a finished product
 12. [ ] OPTIONS: graphics presets (low / medium / high), resolution and render scale, volumes
     (master / music / effects / voices), KEY REBINDING (AZERTY), UI scale (exists), gore toggle.
 13. [ ] MUSIC: a main theme, battle and calm layers (licensed or commissioned) — none yet.
-14. [ ] RELEASE CLEANUP: the dev panel and stats only with ?dev=1; a clean console (the KTX2
-    warning); the flaky test suite.
+14. [ ] RELEASE CLEANUP: the dev panel and stats only with ?dev=1. (Done 2026-10-12: the console
+    is clean at boot — the KTX2 warning was the hens' second loader, now a baked face table; and
+    the "flaky" cityKitTest was a real traffic bug, fixed and back in the fast lane.)
 15. [ ] PERF + BOOT: boot 44 s → shader cache, preloading, a real loading screen; test on a
     weaker GPU and a desktop GPU; publish a minimum spec.
 16. [ ] ARABIC + right-to-left UI (native speaker) — or during Early Access; launch FR + EN.

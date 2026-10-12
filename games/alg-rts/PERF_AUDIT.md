@@ -40,8 +40,8 @@ release (Steam later, likely wrapped in Electron, but SOLID first). Two halves:
   a covered window occluded. Only minimising still stops it.
 - The laptop (MSI Thin 15) **throttles at ~87 °C after ~2 min**. Run A/B pairs
   back to back, take breaks, and don't trust one long run.
-- Check the **console, warnings too**, after every boot. A known warning:
-  "Multiple active KTX2 loaders".
+- Check the **console, warnings too**, after every boot. It is CLEAN (2026-10-12): any
+  warning is new. ("Multiple active KTX2 loaders" was the hens; gone — birdMorph.js FACES_URL.)
 - Per-origin localStorage can rig an A/B (stale dev-panel settings): see the
   memory note.
 - `npm test` (fast lane, ~30 s) once before each commit; gate on "N/N suites
