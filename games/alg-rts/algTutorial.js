@@ -124,7 +124,7 @@ export function createAlgTutorial(app) {
   // 3. move
   L.push({
     title: t("Se déplacer"),
-    text: t("<b>Clic droit</b> sur le sol : le groupe sélectionné y va. Amenez-le dans le cercle jaune, sur la piste."),
+    text: t("<b>Clic droit</b> sur le sol : le groupe sélectionné y va. Amenez-le dans le cercle jaune, sur la piste. Pour choisir où il fera face, <b>maintenez le clic droit et glissez</b> : une flèche montre la direction, des anneaux la place de chaque homme."),
     start(s) { s.m = { x: 4, z: 70, r: 7 }; markers.push(s.m); },
     done: (s) => squads().some((q) => q.members.filter((u) => near(u, s.m, s.m.r + 1)).length >= 3),
     end(s) { markers.splice(markers.indexOf(s.m), 1); },

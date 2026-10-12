@@ -34,8 +34,8 @@ export default {
     "Click one of your soldiers: his whole <b>squad</b> is selected (blue circles under the men, its card at the bottom). Drag a box to select several. Later on: <kbd>Ctrl</kbd> + a number keeps a selection, the number calls it back.",
   // 3 move
   "Se déplacer": "Moving",
-  "<b>Clic droit</b> sur le sol : le groupe sélectionné y va. Amenez-le dans le cercle jaune, sur la piste.":
-    "<b>Right-click</b> the ground: the selected squad goes there. Bring it into the yellow circle on the track.",
+  "<b>Clic droit</b> sur le sol : le groupe sélectionné y va. Amenez-le dans le cercle jaune, sur la piste. Pour choisir où il fera face, <b>maintenez le clic droit et glissez</b> : une flèche montre la direction, des anneaux la place de chaque homme.":
+    "<b>Right-click</b> the ground: the selected squad goes there. Bring it into the yellow circle on the track. To choose which way it will face, <b>hold the right button and drag</b>: an arrow shows the direction, rings each man's place.",
   // 4 cover
   "La couverture": "Cover",
   "Derrière un mur, on survit ; à découvert, non. Maintenez <kbd>V</kbd> : <b>vert</b> = couverture lourde, <b>jaune</b> = légère. Envoyez le groupe derrière les sacs de sable : sous le curseur, chaque homme montre la couverture qu'il aura.":
