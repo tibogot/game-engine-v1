@@ -13,6 +13,7 @@ CORPSES.seconds = 90;
 CORPSES.max = 48;
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
+import { createAlgSquadMarch } from "./algSquadMarch.js";
 import { createSelectionFrameField } from "../shared-rts/selectionFrameField.js";
 import { createSelection } from "../shared-rts/selection.js";
 import { createSimClock } from "../shared-rts/simClock.js";
@@ -430,6 +431,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     popRoom: () => popRoom(),
   });
   app.algSquads = squads;
+  // THE SQUAD ON THE MARCH (algSquadMarch.js, 2026-10-12 — Company of Heroes' moving formation): a long
+  // move walks as a squad behind its leader — a column on a track, a wedge in the open. ?march=0 = without.
+  const march = new URLSearchParams(location.search).get("march") === "0" ? null : createAlgSquadMarch({ app, squads });
+  app.algSquadMarch = march;
   // VETERANCY (algVeterancy.js): a squad's kills earn it stars.
   const veterancy = createAlgVeterancy({ app, squads });
   app.algVeterancy = veterancy;
@@ -846,7 +851,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

@@ -639,13 +639,24 @@ export function createNavGrid({
   }
 
   // Sample the segment at half-cell steps; clear only if no cell is blocked.
+  // A WIDE line (2026-10-12, the stuck hunter: men shuffling for good at a wall's outside corner, a
+  // valid path in hand): the smoothing tested a ZERO-width line every metre, and kept segments that
+  // grazed a corner no 1 m-wide man can follow. Now every half metre the line AND two parallel ones
+  // LOS_HALF_W to either side — a smoothed path keeps a body's width off the corners. (A 2 m lane still
+  // passes: its centre ±0.6 m stays in it.)
+  const LOS_HALF_W = 0.6;
   function hasLineOfSight(a, b) {
-    const dist = Math.hypot(b.x - a.x, b.z - a.z);
-    const steps = Math.max(1, Math.ceil(dist / (cell * 0.5)));
+    const dx = b.x - a.x, dz = b.z - a.z;
+    const dist = Math.hypot(dx, dz);
+    if (dist < 1e-6) return true;
+    const px = (-dz / dist) * LOS_HALF_W, pz = (dx / dist) * LOS_HALF_W;
+    const steps = Math.max(1, Math.ceil(dist / 0.5));
     for (let s = 1; s < steps; s++) {
-      const t = s / steps;
-      const c = worldToCell(a.x + (b.x - a.x) * t, a.z + (b.z - a.z) * t);
-      if (isBlocked(c.cx, c.cz)) return false;
+      const t = s / steps, x = a.x + dx * t, z = a.z + dz * t;
+      for (const k of [0, 1, -1]) {
+        const c = worldToCell(x + px * k, z + pz * k);
+        if (isBlocked(c.cx, c.cz)) return false;
+      }
     }
     return true;
   }

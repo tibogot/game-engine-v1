@@ -94,6 +94,15 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     if (!blocked(nx, nz)) { pos.x = nx; pos.z = nz; return; }
     if (!blocked(nx, pos.z)) { pos.x = nx; return; }
     if (!blocked(pos.x, nz)) { pos.z = nz; return; }
+    // ROUND A CORNER (2026-10-12, the stuck hunter: a leader stopped dead at the outside corner of a
+    // walled compound — the move, and both axis slides, all blocked): the same step turned 45° then 90°
+    // either way. Never a dead stop where a step exists.
+    const dx = nx - pos.x, dz = nz - pos.z;
+    for (const a of [0.785, -0.785, 1.571, -1.571]) {
+      const c = Math.cos(a), s = Math.sin(a);
+      const tx = pos.x + dx * c - dz * s, tz = pos.z + dx * s + dz * c;
+      if (!blocked(tx, tz)) { pos.x = tx; pos.z = tz; return; }
+    }
   }
 
   /**
@@ -190,6 +199,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     speedScale: 1,
     /** A posture's speed factor (infantryPosture.js: suppressed 0.7, pinned 0.3). */
     moveMul: 1,
+    formMul: 1,      // a march's speed matching (alg-rts algSquadMarch.js); 1 = none
     selected: false,
     // ── combat (driven by combat.js) ──────────────────────────────────────────
     range: type.range ?? 0,
@@ -231,6 +241,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
     get position() { return pos; },
     get heading() { return heading; },
     get isMoving() { return !arrived; },
+    /** Where he was last ordered to (null: no order) — a squad's march reads it (algSquadMarch.js). */
+    get goalPoint() { return hasGoal ? goal : null; },
 
     setSelected(v) { unit.selected = !!v; },
 
@@ -426,7 +438,14 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
       while (waypoints.length) {
         const wp = waypoints[0];
         const arrive = waypoints.length > 1 ? Math.max(2, type.speed * dt * 1.5) : 0.6;
-        if (Math.hypot(wp.x - pos.x, wp.z - pos.z) <= arrive) {
+        const dWp = Math.hypot(wp.x - pos.x, wp.z - pos.z);
+        // A turning waypoint is only "reached" within the 2 m radius if the NEXT one is in a clear line
+        // from here (or he is truly on it): 2 m short of a corner's waypoint, the line to the next cut
+        // the corner — he ground on it for good (2026-10-12, the stuck hunter, the post's buildings).
+        // (Infantry only: a vehicle turns wide and would circle a corner's waypoint trying to touch it.)
+        const clear = !foot || waypoints.length < 2 || dWp <= 1.2 || !navGrid?.hasLOS
+          || navGrid.hasLOS(pos.x, pos.z, waypoints[1].x, waypoints[1].z, { foot });
+        if (dWp <= arrive && clear) {
           waypoints.shift();
           stuckT = 0; bestTgtDist = Infinity; // new waypoint → fresh progress window
         } else { target.set(wp.x, 0, wp.z); break; }
@@ -488,7 +507,8 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player") {
         const len = Math.hypot(dirX, dirZ) || 1;
         dirX /= len; dirZ /= len;
 
-        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1);
+        // (formMul: a squad's march keeping its shape — alg-rts algSquadMarch.js speed matching)
+        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.formMul ?? 1);
         // DRIVE ALONG THE HULL (opt-in per type: type.drive = { kind: "wheels" | "tracks",
         // turn rad/s, accel m/s²} — alg-rts 2026-10-06, a player: "vehicles slide"). Without it a
         // vehicle went where the path pointed at full speed and the hull turned after (crabbing).

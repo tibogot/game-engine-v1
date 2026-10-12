@@ -574,6 +574,24 @@ call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order 
        - [x] STEP 5 (2026-10-12): units.js orderTo resets the stuck ladder only for a NEW destination
          (> 3 m) — combat's 0.5 s re-orders no longer keep a man grinding on a wall.
          MEASURED after 4 + 5 (same test): stuck 20 → 5 → 1 (Ouled Ali), 7 → 1 → 0 (dechra), walls 0.
+     - [~] THE SQUAD ON THE MARCH (2026-10-12, CoH's moving formation, Jurney's article): algSquadMarch.js —
+       a long move (> 22 m) walks behind the leader (slot 0, at 0.9 pace): followers aim 2 s ahead of him
+       plus their offset (navGrid.nearestReachable), re-aimed every 0.5 s; COLUMN on a track, TIGHT wedge
+       where walls crowd, WIDE wedge in the open (2 readings to switch); speed matching (units formMul,
+       full catch-up past 6 m from his spot); drift 0.8 m; near the end each man to his own spot. Any
+       other order ends it; a combat halt to fight is not one; a man > 50 m behind or idle is RELEASED to
+       his own end spot (never left behind). ?march=0 = without.
+       Fixed on the way: a man halted by combat lost his order and the march abandoned him (380 m away) —
+       the march carries the player's move-means-move; stragglers never catching up — full speed past 6 m.
+       THE STUCK HUNTER (tools/stuckHunter.browser.js: every squad to a random point every 14 s, a man
+       stuck = no progress 4 s while ordered and not fighting) found the last causes, all at the OUTSIDE
+       CORNERS of walls: tryMove stopped dead (now the step turned 45° / 90°), the smoothing's line of walk
+       had no width (now ±0.6 m), and a corner's waypoint was "reached" 2 m short so he cut the corner
+       (now only with the next waypoint in a clear line; infantry). RESULT: 2 episodes / 200 s → 0 in
+       600 s (68 + 40 orders). My call (you: "you tell me"): keep the march's CoH values as they are.
+       - [ ] LEAPFROGGING (CoH): element leaders break off to cover near their goal, pause, rejoin;
+         "soft" (bend toward cover, no stop) when retreating.
+       - [ ] right-drag to set the destination formation's facing; by default face the enemy.
        - [ ] STEP 6: per-cell clearance (no one-cell gaps for a 1 m man).
        - [x] tools/navPocketsTest.mjs (fast lane): a walled yard sealed, a spot in it moved to reachable
          ground, an open spot kept exactly, a wire-closed yard sealed then open once cut, a 900 m² field
