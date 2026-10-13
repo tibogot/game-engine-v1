@@ -82,6 +82,18 @@ PHASE 1 — finish what is half-built
    bright red (the team tint) and crewed by French appelés (the crew map is by type) — it wants its own
    look; a ~390 ms frame seen once as the section spawned (not measured: new squads' shaders?).
    → THE FLN TOOLKIT (A1-A4) IS DONE. NEXT: B, the French AI.
+   B [~] 2026-10-13 — THE FRENCH AI USES ITS TOOLKIT (algFrenchAI.js, when you play the FLN or ?bot=1):
+   it buys ONE team of sapeurs (60 s) that builds, one site at a time — the mortar pit by the post if
+   none, then a mirador (240 s), then an MG nest in each village it holds (algBuild place: the same
+   price and work; it waits for a placement to resolve — a pad levels the ground first, and 4 s was too
+   short: it paid for ten sites at once). The pit's BARRAGE on a knot of 3+ FLN men it SEES, his own 22 m
+   clear; FLARES at night over a fight; GRENADES at FLN men bunched or in a house (one a squad per 8 s).
+   LIFTS: a squad sent >180 m rides a half-track / GMC / the H-21 standing within 60 m (aboard, driven,
+   set down 30 m short); an H-21 bought at 300 s. All five tested (staged in fast-forward: a grenade,
+   a barrage, a flare; an H-21 lift board → fly → out, a half-track lift twice; an MG nest built ~450 s).
+   NOT YET: its DOCTRINE (the doctrine module is the human's side only — the AI needs its own, no
+   strip), smoke, the Alouette, repair/wire-cutting; the sapeurs' order of work could look at threats.
+   The build pace is slow (its manpower goes to squads first) — watch it in a game.
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on

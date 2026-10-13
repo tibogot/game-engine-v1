@@ -913,7 +913,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // fast-forward and measure (__ALG.fastForward).
   const botQ = new URLSearchParams(location.search);
   const frenchAI = (SIDES.human === "enemy" ? botQ.get("ai") !== "0" : botQ.get("bot") === "1")
-    ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
+    ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike, build, barrage, flares, grenades, transports })
     : null;
   app.algFrenchAI = frenchAI;
   const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
