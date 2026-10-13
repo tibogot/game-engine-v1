@@ -29,8 +29,12 @@
 //                       the FM gunner) carries the light machine gun; a
 //                       replacement in that slot gets it back.
 //
-// The ALN keeps its own bands (algAI.js); vehicles stay single units.
+// The ALN AI keeps its own bands (algAI.js); vehicles stay single units.
+// PLAYING THE FLN (?side=fln, 2026-10-13): the human's moudjahidine come in squads too — bought as
+// one at the cave, retreating to it, healing and reinforced there (`aln`, the FLN's home). The AI's
+// men are never in one (it buys single men and makes its own bands).
 import { vetStats } from "./algVeterancy.js";
+import { isHuman } from "../shared-rts/teams.js";
 import { t } from "./i18n/i18n.js";
 
 /** Infantry squads: men per squad, the squad's name, and what one man costs to replace. */
@@ -48,7 +52,14 @@ export const SQUADS = {
   // A destroyed vehicle's CREW (algCrews.js): whoever got out, MAT 49s at short range; never
   // reinforced (reinforce 0: no price, no button).
   equipage: { size: 3, name: t("Équipage"), reinforce: 0, kit: Object.fromEntries([0, 1, 2].map((i) => [i, { weapon: "rifle", range: 24, damage: 5, fireRate: 3.2 }])) },
+  // THE FLN's, for a human playing it: a faoudj of four moudjahidine (the ALN's smallest unit);
+  // the FM gunner and the marksman each a squad of one (retreat, a badge — no reinforcing).
+  moudjahid: { size: 4, name: t("Faoudj"), reinforce: 35, side: "enemy" },
+  fmTeam: { size: 1, name: t("Tireur FM"), reinforce: 0, side: "enemy" },
+  tireur: { size: 1, name: t("Tireur d'élite"), reinforce: 0, side: "enemy" },
 };
+/** Men per purchase at a producer: a squad for the French, and for the FLN only when a human plays it. */
+export const squadSize = (key, team) => (SQUADS[key] && (team === "player" || isHuman(team)) && (SQUADS[key].side ?? "player") === team ? SQUADS[key].size : 1);
 
 /** Squad upgrades: who can buy it, the price, the slot that carries it, his weapon. */
 export const UPGRADES = {
@@ -87,8 +98,12 @@ const P = {
  * @param {object} o.muster  { x, z } where retreating squads form up
  * @param {(n:number)=>boolean} o.pay  spend supplies (the French purse)
  * @param {object} o.post    the post's producer (inside/outside points) — replacements come out of it
+ * @param {object} [o.aln]   the FLN's home when a human plays it: { base, muster, pay, post } (the cave)
  */
-export function createAlgSquads({ app, units, base, muster, pay, post, popRoom = () => Infinity, fieldPoints = () => [] }) {
+export function createAlgSquads({ app, units, base, muster, pay, post, popRoom = () => Infinity, fieldPoints = () => [], aln = null }) {
+  /** A squad's home: the post for the French, the cave for the FLN. */
+  const FR = { base, muster, pay, post };
+  const home = (s) => (s?.team === "enemy" && aln ? aln : FR);
   // `fieldPoints()`: the vehicles a squad may reinforce at in the field (alg: your half-tracks standing still).
   const list = [];
   const ofUnit = new Map();
@@ -128,21 +143,23 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     if (!s.members.length && !pending.some((p) => p.squad === s)) list.splice(list.indexOf(s), 1);
   }
 
-  const inBase = (x, z) => Math.hypot(x - base.x, z - base.z) < P.baseRadius;
-  const squadInBase = (s) => s.members.length > 0 && s.members.every((u) => inBase(u.position.x, u.position.z));
+  const inBase = (x, z, s = null) => { const b = home(s).base; return Math.hypot(x - b.x, z - b.z) < P.baseRadius; };
+  const squadInBase = (s) => s.members.length > 0 && s.members.every((u) => inBase(u.position.x, u.position.z, s));
   /** The field point (a still half-track) every man of the squad is within reach of, or null. */
   function fieldPointOf(s) {
     if (!s.members.length) return null;
     for (const v of fieldPoints()) {
+      if (v.team && v.team !== s.team) continue;
       if (s.members.every((u) => Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) < P.fieldRadius)) return v;
     }
     return null;
   }
 
-  /** RETREAT: run for the post. */
+  /** RETREAT: run for the post (the FLN: for the cave). */
   function retreat(s) {
     if (!s || !s.members.length) return;
     s.retreating = true;
+    const muster = home(s).muster;
     s.members.forEach((u, k) => {
       u.holdFire = true;
       u.target = u.attackTarget = null;
@@ -157,16 +174,17 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
 
   /** What one more man costs this squad (0 = can't). */
   function reinforceCost(s) {
-    if (!s || s.team !== "player" || s.count + pending.filter((p) => p.squad === s).length >= s.size) return 0;
+    if (!s || !(s.team === "player" || (s.team === "enemy" && aln)) || s.count + pending.filter((p) => p.squad === s).length >= s.size) return 0;
+    if (!SQUADS[s.typeKey]?.reinforce) return 0;
     if (!squadInBase(s) && !fieldPointOf(s)) return 0;
-    if (popRoom() < 1) return 0;   // the pop cap (algEconomy.js POP)
+    if (s.team === "player" && popRoom() < 1) return 0;   // the pop cap (algEconomy.js POP; the French's)
     // (A doctrine may cut it: the Légion's esprit de corps — algDoctrines.js.)
     return Math.round(SQUADS[s.typeKey].reinforce * (app.algDoctrines?.reinforceMul?.(s.typeKey) ?? 1));
   }
   /** Call one man in (paid now): he comes out of the gate in the first empty slot. */
   function reinforce(s) {
     const cost = reinforceCost(s);
-    if (!cost || !pay(cost)) return false;
+    if (!cost || !home(s).pay(cost)) return false;
     const taken = new Set(pending.filter((p) => p.squad === s).map((p) => p.slot));
     const slot = s.slots.findIndex((u, i) => !u?.alive && !taken.has(i));
     if (slot < 0) return false;
@@ -231,11 +249,12 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
           u.moveMul = P.retreatSpeed;
         }
         // Home: every man in the zone and (nearly) stopped.
-        if (squadInBase(s) && s.members.every((u) => !u.isMoving || Math.hypot(u.position.x - muster.x, u.position.z - muster.z) < 14)) endRetreat(s);
+        const m = home(s).muster;
+        if (squadInBase(s) && s.members.every((u) => !u.isMoving || Math.hypot(u.position.x - m.x, u.position.z - m.z) < 14)) endRetreat(s);
       }
       // The wounded heal in the post's zone, out of the fight.
       for (const u of s.members) {
-        if (u.hp < u.maxHp && inBase(u.position.x, u.position.z) && !u.target && (u.suppression ?? 0) < 0.1) u.hp = Math.min(u.maxHp, u.hp + P.heal * dt);
+        if (u.hp < u.maxHp && inBase(u.position.x, u.position.z, s) && !u.target && (u.suppression ?? 0) < 0.1) u.hp = Math.min(u.maxHp, u.hp + P.heal * dt);
       }
     }
     // Replacements coming out of the gate.
@@ -244,10 +263,10 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
       p.t -= dt;
       // At the post: the gate opens a moment BEFORE he steps out, as for a trained man (algProducer
       // OPEN_AHEAD) — it never opened for a reinforcement (you, 2026-10-11).
-      if (!p.at && p.t < GATE_AHEAD) post.openGate?.();
+      if (!p.at && p.t < GATE_AHEAD) home(p.squad).post.openGate?.();
       if (p.t > 0) continue;
       pending.splice(i, 1);
-      const s = p.squad;
+      const s = p.squad, post = home(s).post;
       // In the field: out of the half-track's tailgate (still there and alive), to his squad.
       const v = p.at?.alive ? p.at : null;
       let sx = post.inside.x, sz = post.inside.z;
@@ -258,7 +277,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
       join(s, u, p.slot);
       if (!list.includes(s)) list.push(s);
       const l = s.members.find((m) => m !== u) ?? null;
-      const to = l ? l.position : muster;
+      const to = l ? l.position : home(s).muster;
       if (v) u.orderTo(to.x + 2, to.z + 2);
       else u.emerge(post.outside.x, post.outside.z, to.x + 2, to.z + 2);
       // Selected squad: the newcomer joins the selection.
@@ -270,7 +289,8 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase, upgrade, upgradeCost, fieldPointOf,
     /** A new man of a squad being BOUGHT (the producer's batch): `slot` 0 opens a new squad. */
     bought(u, key, slot) {
-      if (!SQUADS[key] || u.team !== "player") return;
+      // (The French's, always — their AI uses them too; the FLN's only when a human plays it.)
+      if (!SQUADS[key] || !(u.team === "player" || isHuman(u.team)) || (SQUADS[key].side ?? "player") !== u.team) return;
       wrapDamage(u);
       let s = slot === 0 ? null : [...list].reverse().find((q) => q.typeKey === key && q._forming);
       if (!s) { s = create(key, u.team); s._forming = true; }

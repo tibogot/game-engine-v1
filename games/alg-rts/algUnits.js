@@ -22,7 +22,7 @@ import { ALG_UNIT_TYPES, ALG_UNIT_TYPE_KEYS } from "./algUnitTypes.js";
 import { createAlgSnipers } from "./algSniper.js";
 import { createAlgUnitMarks } from "./algUnitMarks.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildH21, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { createAlgSquads, SQUADS } from "./algSquads.js";
+import { createAlgSquads, SQUADS, squadSize } from "./algSquads.js";
 import { createAlgLastSeen } from "./algLastSeen.js";
 import { createAlgPathDots } from "./algPathDots.js";
 import { createSquadBadges } from "./ui/squadBadges.js";
@@ -49,17 +49,18 @@ import { createFogOfWar } from "../shared-rts/fogOfWar.js";
 import { LAYOUT, MAP, PLAY, VIEW_YAW, sitePoint } from "./layout.js";
 import { createAlgDoctrines } from "./algDoctrines.js";
 import { createAlgFieldWorks } from "./algFieldWorks.js";
-import { COSTS, POP, createAlgEconomy, costOf } from "./algEconomy.js";
+import { COSTS, POP, createAlgEconomy, costOf, unitCost } from "./algEconomy.js";
 import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
 import { createAlgTransports } from "./algTransports.js";
 import { createAlgHeliLift } from "./algHeliLift.js";
+import { createAlgFlnTricks } from "./algFlnTricks.js";
 import { createAlgAttackMove } from "./algAttackMove.js";
 import { createAlgWrecks } from "./algWrecks.js";
 import { createAlgCrews } from "./algCrews.js";
 import { createAlgDroppedWeapons } from "./algDroppedWeapons.js";
 import { createAlgTiers } from "./algTiers.js";
-import { BUILD_BUTTONS, BUILD_COSTS, canBuild, createAlgBuild } from "./algBuild.js";
+import { BUILD_COSTS, buildButtons, canBuild, createAlgBuild } from "./algBuild.js";
 import { createAlgSearchlights } from "./algSearchlight.js";
 import { createResourceHud } from "./ui/resourceHud.js";
 // This game's own UI (copies of nam's on day one, to be redesigned).
@@ -214,7 +215,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // a squad — algSquads.js — its leader, radioman and FM gunner first)…
   const fx = -Math.sin(muster.yaw), fz = -Math.cos(muster.yaw);   // out of the gate
   const rx = Math.cos(muster.yaw), rz = -Math.sin(muster.yaw);
-  const startMen = { appele: [], sapeur: [] };
+  const startMen = { appele: [], sapeur: [], fln: [] };
   for (let i = 0; i < 12; i++) {
     const col = (i % 6 % 3) - 1 + (i < 6 ? -2.2 : 2.2), row = Math.floor((i % 6) / 3);
     const p = navGrid.nearestOpenWorld(muster.x + fx * row * 3.2 + rx * col * 3.2, muster.z + fz * row * 3.2 + rz * col * 3.2, true) ?? { x: muster.x, z: muster.z };
@@ -359,7 +360,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     const m = showroom.caveEntrance;
     producers.push(createAlgProducer({
       mesh: m, units, typeKey: "caveEntrance", name: t("Grotte"), maxHp: 1600, team: "enemy",
-      builds: PRODUCTION.caveEntrance,
+      // (Playing the FLN, a faoudj of four takes 12 s, not one man's 4 — its AI keeps the 4.)
+      builds: SIDES.human === "enemy" ? { ...PRODUCTION.caveEntrance, moudjahid: 12 } : PRODUCTION.caveEntrance,
+      // A human playing the FLN buys a SQUAD per click (algSquads.js); its AI, single men (algAI.js).
+      countOf: (key) => squadSize(key, "enemy"),
+      onSpawned: (u, key, slot) => app.algSquads?.bought(u, key, slot),
       inside: [0.15 * S, 2.2 * S], outside: [0.4 * S, -6 * S],
       // They gather 22 m out TOWARD THE VALLEY (the French post), not
       // straight out of the mouth: the camp is in a corner of the map, and
@@ -377,10 +382,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   if (SIDES.human === "enemy") {
     const cv = producers.find((p) => p.structure.typeKey === "caveEntrance");
     const o = cv?.outside ?? cv?.structure.position;
-    if (o) for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2, r = 4 + (i % 3) * 2.5;
+    // (Two faoudjs of four and two FM gunners: in squads once the squads exist, below.)
+    if (o) for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2, r = 4 + (i % 3) * 2.5;
       const p = navGrid.nearestOpenWorld(o.x + Math.cos(a) * r, o.z + Math.sin(a) * r, true) ?? o;
-      units.spawn(i < 10 ? "moudjahid" : "fmTeam", p.x, p.z, { team: "enemy", lookRole: i });
+      const u = units.spawn(i < 8 ? "moudjahid" : "fmTeam", p.x, p.z, { team: "enemy", lookRole: i % 4 });
+      if (u) startMen.fln.push(u);
     }
   }
   // Every building as a combat structure (algStructures.js): the producers
@@ -406,8 +413,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algTiers = tiers;
   for (const p of producers) {
     // The French: the POP CAP first (algEconomy.js POP) — a unit past it is refused, unpaid.
-    p.structure.pay = (key) => (p.structure.team !== "player" || popRoom() >= popOf(key)) && economy.purses[p.structure.team].spend(COSTS[key] ?? 0);
-    p.structure.refund = (key) => economy.purses[p.structure.team].earn(COSTS[key] ?? 0);
+    p.structure.pay = (key) => (p.structure.team !== "player" || popRoom() >= popOf(key)) && economy.purses[p.structure.team].spend(unitCost(key, p.structure.team));
+    p.structure.refund = (key) => economy.purses[p.structure.team].earn(unitCost(key, p.structure.team));
   }
   // THE POPULATION (balance 2026-10-04): the French in the field + on the queues.
   const popOf = (key) => POP[key] ?? SQUADS[key]?.size ?? 1;
@@ -423,6 +430,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE SQUADS (algSquads.js): the start army into squads; retreat to the
   // post's zone, heal and reinforce there.
   const postProd = producers.find((p) => p.structure.typeKey === "post") ?? null;
+  const caveProd = producers.find((p) => p.structure.typeKey === "caveEntrance") ?? null;
   const squads = createAlgSquads({
     app, units,
     base: postProd?.centre ?? muster, muster,
@@ -432,8 +440,14 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     fieldPoints: () => [...units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving), ...(app.algFieldWorks?.forwardPosts() ?? [])],
     post: postProd ?? { inside: muster, outside: muster },
     popRoom: () => popRoom(),
+    // PLAYING THE FLN: its squads' home is the cave — they retreat, heal and reinforce there.
+    aln: SIDES.human === "enemy" && caveProd ? { base: caveProd.centre, muster: caveProd.structure.rally ?? caveProd.centre, pay: (n) => economy.aln.spend(n), post: caveProd } : null,
   });
   app.algSquads = squads;
+  if (startMen.fln.length) {
+    squads.adopt(startMen.fln.filter((u) => u.typeKey === "moudjahid"), "moudjahid");
+    for (const u of startMen.fln.filter((u) => u.typeKey === "fmTeam")) squads.adopt([u], "fmTeam");
+  }
   // THE SQUAD ON THE MARCH (algSquadMarch.js, 2026-10-12 — Company of Heroes' moving formation): a long
   // move walks as a squad behind its leader — a column on a track, a wedge in the open. ?march=0 = without.
   const march = new URLSearchParams(location.search).get("march") === "0" ? null : createAlgSquadMarch({ app, squads });
@@ -483,7 +497,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     productionFor: (s) => {
       const list = Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => {
         const need = s.team === "player" ? tiers.needs(key) : 1;
-        const c = COSTS[key] ?? 0;
+        const c = unitCost(key, s.team);
         // LOCKED: what unlocks it and where, in full (you, 2026-10-08: "some units read Verrouillé
         // and I can't make them — why?"); a click on it goes to the post.
         return { key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: s.team === "player" ? { ...costOf(c), pop: popOf(key) } : c,
@@ -508,7 +522,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     shortOf: (cost) => (SIDES.human === "enemy" ? "" : [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} atteint)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", ")),
     onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
-    structureBuilds: BUILD_BUTTONS,
+    structureBuilds: buildButtons(),
     buildingCosts: BUILD_COSTS,
     onBuildStructure: (key, sel) => build?.begin(key, sel),
     // A LOCKED unit clicked: to the post, where its tier is bought (algTiers.js).
@@ -544,20 +558,26 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         transports?.ability(sel),
         // ATTERRIR (algHeliLift.js): an H-21 comes down empty, to wait for men.
         heliLift?.ability(sel),
+        // MINE, COUPER LA LIGNE (algFlnTricks.js): playing the FLN, its moudjahidine's sabotage.
+        ...(flnTricks?.ability(sel) ?? []),
         sel.some((u) => u.alive && isHuman(u.team) && canBuild(u, "wire"))
           && { key: "cutWire", label: t("Couper"), hint: t("Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs."), ready: !!app.algWire?.nearest(sel[0].position.x, sel[0].position.z) },
         // SQUADS (algSquads.js): RETRAITE runs the squads home; RENFORCER
         // calls a man in for a squad short of men, at the post.
         squads.squadsIn(sel).length > 0 && {
           key: "retreat", label: squads.squadsIn(sel).every((s) => s.retreating) ? t("En retraite") : t("Retraite"),
-          hint: t("Repli sur le poste : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent au poste."), ready: true,
+          hint: squads.squadsIn(sel).some((s) => s.team === "enemy")
+            ? t("Repli sur la grotte : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent à la grotte.")
+            : t("Repli sur le poste : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent au poste."), ready: true,
         },
         (() => {
           const sq = squads.squadsIn(sel), cost = sq.reduce((n, s) => n + squads.reinforceCost(s), 0);
           if (!sq.length) return null;
           const short = sq.some((s) => s.count + squads.pendingFor(s) < s.size);
           return { key: "reinforce", label: t("Renforcer"), cost: cost || undefined,
-            hint: sq.every((s) => !SQUADS[s.typeKey]?.reinforce) ? t("Un équipage ne se renforce pas : ramenez-le au poste, ses blessés s'y soignent.") : !short ? t("Groupe au complet.") : cost ? t("Un homme par groupe incomplet : par la porte du poste, ou par l'arrière d'un half-track à l'arrêt si le groupe se tient près de lui.") : t("Ramenez le groupe au poste (Retraite), ou près d'un half-track à l'arrêt (30 m), pour le renforcer."),
+            hint: sq.some((s) => s.team === "enemy")
+              ? (sq.every((s) => !SQUADS[s.typeKey]?.reinforce) ? t("Un tireur seul ne se renforce pas : ramenez-le à la grotte, ses blessures s'y soignent.") : !short ? t("Groupe au complet.") : cost ? t("Un homme par faoudj incomplet, par la grotte.") : t("Ramenez le faoudj à la grotte (Retraite) pour le renforcer."))
+              : sq.every((s) => !SQUADS[s.typeKey]?.reinforce) ? t("Un équipage ne se renforce pas : ramenez-le au poste, ses blessés s'y soignent.") : !short ? t("Groupe au complet.") : cost ? t("Un homme par groupe incomplet : par la porte du poste, ou par l'arrière d'un half-track à l'arrêt si le groupe se tient près de lui.") : t("Ramenez le groupe au poste (Retraite), ou près d'un half-track à l'arrêt (30 m), pour le renforcer."),
             ready: cost > 0 && economy.french.canAfford(cost) };
         })(),
       ].filter(Boolean)
@@ -576,6 +596,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "unload") { garrison?.exitAll(sel); commandCard.render(sel); }
       if (key === "disembark") { transports?.disembark(sel); commandCard.render(sel); }
       if (key === "heliLand") { heliLift?.land(sel); commandCard.render(sel); }
+      if (key === "flnMine") flnTricks?.begin(sel);
+      if (key === "flnCut") { flnTricks?.cut(sel); commandCard.render(sel); }
       if (key === "attackMove") attackMove?.begin(sel);
       if (key === "patrol") { patrols?.start(sel); commandCard.render(sel); }
       if (key === "grenade") grenades?.begin(sel);
@@ -632,7 +654,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let build = null;     // made after the cover (algBuild.js)
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
-  let transports = null, heliLift = null;   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
+  let transports = null, heliLift = null, flnTricks = null;   // (flnTricks: a human FLN's mine and line cut — algFlnTricks.js)   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
   let attackMove = null;   // ASSAUT: advance and fight (algAttackMove.js), after the selection
   let controlGroups = null;   // made after the selection it listens to
   let coverCursor = null, mgTeams = null;
@@ -837,6 +859,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // them), the French patrols and convoys along the tracks (algPatrols.js).
   const mines = createAlgMines(app, { units, combat: combat.combat });
   app.algMines = mines;
+  if (SIDES.human === "enemy") { flnTricks = createAlgFlnTricks(app, { units, selection, mines, purse: economy.aln }); app.algFlnTricks = flnTricks; }
   patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(t("+{fuel} C +{mun} M · convoi {name}", { fuel: n.fuel, mun: n.mun, name: v.name })) });
   app.algPatrols = patrols;
 
@@ -871,7 +894,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -930,6 +953,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     squadBadges.frame(app.camera);
     garrison?.frame(app.camera);
     transports?.frame(app.camera);
+    flnTricks?.frame();
     orderMarks.frame(frameDt, app.camera);
     resourceHud.update(economy);
     tiers.watch(frameDt);   // "tier available" alert (algTiers.js)

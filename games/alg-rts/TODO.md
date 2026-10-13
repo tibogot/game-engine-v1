@@ -6,6 +6,9 @@ started · **you** = your call or your work.
 
 Keep this file current: tick things off here, add new asks here.
 
+**THE SHORT VERSION: [REMAINING.md](REMAINING.md)** — what is left, grouped and in plain words
+(2026-10-13, every open box here checked against the code; maps 2 and 3 apart).
+
 ## ROAD TO STEAM — 2026-10-11 (you: "everything remaining, to make a finished game to place on
 ## Steam, a CoH-like game"). The plan of record; details in the sections below.
 
@@ -26,6 +29,14 @@ PHASE 1 — finish what is half-built
    of it Soviet; tanks only after 1962). Its "armour" instead: a 120 mortar team, a recoilless-rifle
    team (the tank-killer), a tripod HMG against helicopters, MULES (ammunition / a moving supply
    point); as doctrines: a captured Jeep / GMC, and a late-war ARMY OF THE BORDERS doctrine.
+   A1 [x] 2026-10-13 — THE FLN MADE PLAYABLE (?side=fln): (a) its BUILD buttons — the list was a module
+   constant worked out before the side was set, so a moudjahid had none; now sangar, ambush screen,
+   arms cache, refuge on its card (algBuild buildButtons, the moudjahid's `builds`); (b) SQUADS for a
+   human FLN (algSquads `aln`: the cave is their home) — a FAOUDJ of four bought at the cave (150, 12 s),
+   the FM gunner and the marksman squads of one; RETRAITE to the cave, heal and RENFORCER there (35 a
+   man); its AI still buys single men; (c) its sabotage as buttons (algFlnTricks.js): MINE (30, a man
+   digs it in ~6 s, four live, amber rings) and COUPER LA LIGNE (the nearest pole in 45 m, ~10 s).
+   Still French-only: veterancy (algVeterancy counts French kills), upgrades. The MULE TRAIN → A2.
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on

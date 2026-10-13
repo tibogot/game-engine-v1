@@ -12,6 +12,7 @@
 // Free per frame: a felled pole is one instance matrix and a rebuilt wire index (rare events).
 
 import { t } from "./i18n/i18n.js";
+import { isHuman } from "../shared-rts/teams.js";
 
 export const TELEGRAPH = {
   mpMul: 0.6,        // × the base effectifs while the line is cut
@@ -47,7 +48,8 @@ export function createAlgTelegraph(app, { poles, units, params = TELEGRAPH }) {
     const wasUp = !cuts.length;
     cuts.push({ i, target });
     refreshWires();
-    if (wasUp) say(t("<b>Ligne coupée !</b> Le FLN a abattu un poteau : plus d'appui aérien, et les effectifs d'Alger arrivent moins vite. Envoyez des sapeurs la réparer."), p.x, p.z, "bad", "hq_contact", "alertAttack");
+    // (Playing the FLN: its own alert says it — algFlnTricks.js; this one is the post's news.)
+    if (wasUp && isHuman("player")) say(t("<b>Ligne coupée !</b> Le FLN a abattu un poteau : plus d'appui aérien, et les effectifs d'Alger arrivent moins vite. Envoyez des sapeurs la réparer."), p.x, p.z, "bad", "hq_contact", "alertAttack");
     return true;
   }
 
@@ -58,7 +60,8 @@ export function createAlgTelegraph(app, { poles, units, params = TELEGRAPH }) {
     refreshWires();
     if (!cuts.length) {
       const p = poles.poles[c.i];
-      say(t("<b>Ligne rétablie.</b> Le poste a de nouveau Alger au bout du fil."), p.x, p.z, "good");
+      if (isHuman("player")) say(t("<b>Ligne rétablie.</b> Le poste a de nouveau Alger au bout du fil."), p.x, p.z, "good");
+      else say(t("<b>Ligne réparée</b> par les sapeurs français : le poste a de nouveau Alger au bout du fil."), p.x, p.z, "bad");
     }
   }
 
@@ -92,6 +95,13 @@ export function createAlgTelegraph(app, { poles, units, params = TELEGRAPH }) {
     get cuts() { return cuts; },
     /** algRepair.js: the felled poles, as targets. */
     repairTargets: () => cuts.map((c) => c.target),
+    /** The nearest STANDING pole to (x, z) within `reach` m, or null (a human FLN's COUPER LA LIGNE — algFlnTricks.js). */
+    nearestStanding(x, z, reach = Infinity) {
+      if (cuts.length >= P.maxCut) return null;
+      let best = -1, bd = reach;
+      poles.poles.forEach((p, i) => { if (cuts.some((c) => c.i === i)) return; const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = i; } });
+      return best < 0 ? null : { i: best, x: poles.poles[best].x, z: poles.poles[best].z };
+    },
     /** Dev: fell the nearest pole to (x, z). */
     fellNear(x, z) {
       let best = -1, bd = Infinity;

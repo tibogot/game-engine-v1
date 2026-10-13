@@ -46,16 +46,16 @@ export const BUILDS = {
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
   // them — the AI places them through place()). Both lie on the slope, as
   // the showroom's do.
-  sangar: { label: "Sangar", tip: "Dry-stone firing position, an FM over its lip.", cost: 60, time: 16, build: () => buildSangar(), follow: true, structure: "sangar", team: "enemy", by: ["moudjahid"] },
+  sangar: { label: t("Sangar"), tip: t("Position de tir en pierres sèches : un FM tire par-dessus son rebord, les hommes derrière sont à couvert."), cost: 60, time: 16, build: () => buildSangar(), follow: true, structure: "sangar", team: "enemy", by: ["moudjahid"] },
   // A NEW ARMS CACHE (2026-10-02): the FLN hides one in a village it holds
   // when the French have found theirs (algAI.js) — each standing cache arms
   // two FM teams. Hidden from the French until seen, built or not.
-  armsCache: { label: t("Cache d'armes"), tip: "Arms cache: arms two FM teams.", cost: 120, time: 40, build: () => buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }), follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
+  armsCache: { label: t("Cache d'armes"), tip: t("Cache d'armes : chaque cache debout arme deux équipes FM. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 120, time: 40, build: () => buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }), follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
   // A NEW REFUGE (2026-10-07, the tunnels): the FLN digs one near a village it holds, the
   // nearest the post first (algAI.js stepRefuges) — its bands go to ground and come back out of
   // it. Hidden from the French until seen.
-  refuge: { label: "Refuge", tip: "A hidden casemate: bands go to ground in it and come back out.", cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
-  ambushScreen: { label: t("Écran d'embuscade"), tip: "Cut scrub on a stone footing: men behind it are hidden until they fire.", cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
+  refuge: { label: t("Refuge"), tip: t("Casemate cachée : vos hommes s'y terrent et en ressortent. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
+  ambushScreen: { label: t("Écran d'embuscade"), tip: t("Broussailles coupées sur un pied de pierres : les hommes derrière restent cachés jusqu'à ce qu'ils tirent."), cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
 };
 /** The medic's tent (nam's kit, the medic variant), with the footprint the build needs. */
 function fieldTent() {
@@ -69,8 +69,12 @@ function fieldTent() {
 }
 /** Who may raise `key`: his type lists it (the sappers), or the piece names his type. */
 export const canBuild = (u, key) => !!(u?.type?.builds?.includes(key) || BUILDS[key]?.by?.includes(u?.typeKey));
-/** For the command card (the French: the ALN's pieces are the AI's): [{ key, label, tip }] and { key: cost }. */
-export const BUILD_BUTTONS = Object.entries(BUILDS).filter(([, b]) => !isHostile(b.team)).map(([key, b]) => ({ key, label: b.label, tip: b.tip }));
+/**
+ * For the command card: the HUMAN's side's pieces, [{ key, label, tip }] (and { key: cost }).
+ * A FUNCTION, asked when the units are made (2026-10-13): as a module constant it was worked out at
+ * import, before algGame set the side — playing the FLN, a moudjahid had no build button at all.
+ */
+export const buildButtons = () => Object.entries(BUILDS).filter(([, b]) => !isHostile(b.team ?? "player")).map(([key, b]) => ({ key, label: b.label, tip: b.tip }));
 export const BUILD_COSTS = Object.fromEntries(Object.entries(BUILDS).map(([k, b]) => [k, b.cost]));
 
 const OK = new THREE.Color(0x46e070), BAD = new THREE.Color(0xe4483a);

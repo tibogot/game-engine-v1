@@ -32,6 +32,7 @@
 //              purse can't pay. A number = effectifs alone.
 import * as THREE from "three";
 import { MAP } from "./layout.js";
+import { SIDES } from "../shared-rts/teams.js";
 import { t } from "./i18n/i18n.js";
 
 /** What each unit costs: French { mp, fuel, mun } (per SQUAD for infantry), the ALN's a number. */
@@ -45,6 +46,13 @@ export const COSTS = {
   h21: { mp: 260, fuel: 90 },   // (unarmed: it carries two squads — algHeliLift.js)
   moudjahid: 40, fmTeam: 70, tireur: 90,
 };
+/**
+ * PLAYING THE FLN (?side=fln, 2026-10-13): the human buys a faoudj of four at the cave (algSquads.js),
+ * a little under four single men (its AI still buys them one by one at COSTS).
+ */
+export const ALN_SQUAD_COSTS = { moudjahid: 150 };
+/** A unit's price at a producer of `team`: a human FLN's squads their own price. */
+export const unitCost = (key, team) => (team === "enemy" && SIDES.human === "enemy" && ALN_SQUAD_COSTS[key]) || (COSTS[key] ?? 0);
 
 /**
  * POPULATION (balance pass 2026-10-04, CoH's pop cap): what a French unit takes — a man 1 (a

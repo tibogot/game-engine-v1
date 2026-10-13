@@ -21,8 +21,10 @@ export const ICON = {
   // veterancy chevrons (1-3) and the alert feed's pictures
   vet1: "vet1", vet2: "vet2", vet3: "vet3",
   alertAttack: "alertAttack", alertSeen: "alertSeen", alertCut: "alertCut", alertFlag: "alertFlag", alertMine: "alertMine",
+  // PLAYING THE FLN (2026-10-13): its sabotage (algFlnTricks.js) and its pieces (algBuild.js), existing silhouettes
+  flnMine: "alertMine", flnCut: "alertCut", armsCache: "lmg", refuge: "garrison",
 };
-export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", radio: "I", radioBarrage: "M", radioAir: "L", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O", attackMove: "N" };
+export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", radio: "I", radioBarrage: "M", radioAir: "L", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O", attackMove: "N", flnMine: "X", flnCut: "J" };   // (flnMine / flnCut: the FLN's, on the keys only the French use)
 
 const BASE = "/textures/ui/icons/";
 /** An icon element's inline style (a mask in the current colour). */

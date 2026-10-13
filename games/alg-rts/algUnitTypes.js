@@ -230,6 +230,9 @@ export const ALG_UNIT_TYPES = {
   moudjahid: {
     typeKey: "moudjahid",
     grenade: true,   // algGrenades.js: the GRENADE ability
+    // What he raises (algBuild.js BUILDS — their `by` names him too): the card lists them when a human
+    // plays the FLN (2026-10-13); the AI places them itself.
+    builds: ["sangar", "ambushScreen", "armsCache", "refuge"],
     name: "Moudjahidine",
     buildLabel: "Moudjahid",
     weapon: "rifle",
