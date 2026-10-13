@@ -6,7 +6,7 @@
 //   right  APRÈS — the same builder at detail 2
 import { buildMechtaHouse } from "../../v3/render/objects/rtsMechta.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
-import { buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildHelipad, buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { startVehicleLab } from "./vehicleLab.js";
@@ -121,10 +121,37 @@ const rock = (label, shape, gap) => ({
   tags: ["ROCHER (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "l'affleurement du jeu à gauche, le nouveau rocher de grès à droite.",
 });
 
+/** The windsock's cloth for the lab (the game's turns with the wind — algWind.js): red and white bands, filled. */
+function labWindsock(g) {
+  const w = g.userData.windsock, grp = new THREE.Group();
+  if (!w) return grp;
+  const sw = new THREE.Mesh(w.swivel, kitPhotoMaterial(FR_PAINT_TINT));
+  grp.add(sw);
+  const bands = 5, red = new THREE.MeshStandardMaterial({ color: 0xb8352a, roughness: 0.9 }), white = new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.9 });
+  for (let k = 0; k < bands; k++) {
+    const r0 = w.mouthR + (w.tailR - w.mouthR) * (k / bands), r1 = w.mouthR + (w.tailR - w.mouthR) * ((k + 1) / bands), l = w.length / bands;
+    const c = new THREE.Mesh(new THREE.CylinderGeometry(r1, r0, l, 14, 1, true), k % 2 ? white : red);
+    c.material.side = THREE.DoubleSide;
+    c.rotation.z = -Math.PI / 2;
+    c.position.set(w.mouth + l * (k + 0.5), -0.05 * k, 0);
+    grp.add(c);
+  }
+  grp.position.fromArray(w.pivot);
+  grp.rotation.y = 0.6;
+  return grp;
+}
+
 const BUILDINGS = {
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
   poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
   parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },
+  // THE HELIPAD (2026-10-13, you: "add the helipad to the lab to fine-tune it" — the first base building
+  // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.
+  helisurface: {
+    label: "Hélisurface", gap: 24, before: () => buildHelipad(),
+    after: () => { const g = buildHelipad({ detail: 2 }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); g.userData.extra = [labWindsock(g)]; return g; },
+    tags: ["HÉLISURFACE (LE JEU)", "HÉLISURFACE · NOUVELLE"], note: "l'hélisurface du jeu à gauche, la nouvelle à droite : terre battue, H en pierres blanchies, panneaux de signalisation, point carburant.",
+  },
   ruineRomaine: { build: (o) => buildRomanRuin({ ...o }), label: "Ruine romaine", gap: 15 },
   colonne: roman("Colonne seule", buildRomanColumn, 17),
   colonnade: roman("Colonnade", buildRomanColonnade, 26),

@@ -84,7 +84,10 @@ export function kitPhotoMaterial(paintTint) {
   const { grain, nA, nB } = packed();
   const id = attribute("matId", "float");
   const isPaint = step(float(6.5), id).mul(step(id, float(7.5)));
-  const base = rtsAtlasColor(uv()).mul(mix(vec3(1, 1, 1), vec3(...paintTint), isPaint));
+  // The PART's tone (2026-10-13, the helipad: its scoured centre and darker slopes were lost): as the kit's
+  // own material (rtsObjectProps) — 0.74x to 1.2x of the atlas colour.
+  const tone = attribute("tone", "float");
+  const base = rtsAtlasColor(uv()).mul(mix(vec3(1, 1, 1), vec3(...paintTint), isPaint)).mul(mix(float(0.74), float(1.2), tone));
   // The family weights from the material id (exact ids: 0 or 1 each).
   const is = (k) => step(abs(id.sub(k)), float(0.25));
   const fam = FAMILIES.map((f) => f.mats.reduce((a, k) => a.add(is(k)), float(0)).min(1));

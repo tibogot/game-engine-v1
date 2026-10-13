@@ -352,7 +352,8 @@ function finishWithStencils(parts, st, opts) {
  *
  * userData.deckY: the height a helicopter stands at (scaled).
  */
-export function buildHelipad({ seed = 23 } = {}) {
+export function buildHelipad({ seed = 23, detail = 1 } = {}) {
+  if (detail >= 2) return buildHelipadV2({ seed });
   const R = rng(seed);
   const parts = [];
   const D = 7.5;                                   // deck half-side: 15 m, an H-34's rotor with room
@@ -417,6 +418,211 @@ export function buildHelipad({ seed = 23 } = {}) {
   const geo = finishWithStencils(parts, st, { hx: 9.9, hz: 8.9, cx: 1.6, cz: 0.4, height: mH, ao: { cell: 0.3, strength: 0.35 } });
   geo.userData.deckY = slabTop * S;
   // The windsock: the swivel's pivot on the mast top, the cloth's size.
+  geo.userData.windsock = {
+    pivot: [wx * S, (mH - 0.12) * S, wz * S], swivel,
+    mouth: arm * S, mouthR: mouthR * S, tailR: tailR * S, length: sockL * S,
+  };
+  geo.userData.parts = { swivel };
+  return geo;
+}
+
+/**
+ * HELIPAD, DETAIL 2 (2026-10-13, the buildings lab — you: "as nice as possible"). What an Aurès post's
+ * hélisurface was (the archive's: a levelled patch of earth, marked with whitewashed stones — the
+ * 1950s had no ring round the H, that is today's heliport): RAMMED EARTH graded into a low platform,
+ * its edges rolling down into the ground, its centre scoured paler by the rotors' wash; the H laid in
+ * WHITEWASHED STONES, two abreast; the edge stones uneven, a few knocked out of line; two red-and-white
+ * SIGNAL PANELS pegged out for the pilots; the windsock's mast; the FUEL POINT — drums on pallets, a
+ * hand pump and its hose, jerrycans, a tarp over spares, behind sandbags. The same
+ * deck (15 m) and footprint as detail 1: the game lands on it unchanged.
+ */
+function buildHelipadV2({ seed = 23 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const D = 7.5, top = 0.16, fall = 2.2;
+  // The platform: a grid, flat inside, rolling down past the deck's edge; a little unevenness. Split by
+  // radius into the scoured centre (paler, smoother) and the rest — one surface, no overlap.
+  const N = 30, half = D + fall, cell = (2 * half) / N;
+  const hAt = (x, z) => {
+    // (the edge wanders a little: graded by hand, not poured)
+    const a = Math.atan2(z, x), wob = 0.28 * Math.sin(3 * a + seed) + 0.18 * Math.sin(7 * a - seed * 2);
+    const e = Math.max(Math.abs(x), Math.abs(z)) - D - wob;           // >0: past the deck's edge
+    const k = e <= 0 ? 0 : Math.min(1, e / fall);
+    const s = k * k * (3 - 2 * k);
+    const lump = 0.025 * Math.sin(x * 1.7 + seed) * Math.sin(z * 1.3 - seed) + 0.015 * Math.sin(x * 4.1 + z * 3.3);
+    return (top + lump) * (1 - s) - 0.06 * s;
+  };
+  const centre = [], outer = [], slope = [];
+  for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const x0 = -half + i * cell, z0 = -half + j * cell, x1 = x0 + cell, z1 = z0 + cell;
+    const q = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]].map(([x, z]) => [x, hAt(x, z), z]);
+    const mx = x0 + cell / 2, mz = z0 + cell / 2, r = Math.hypot(mx, mz);
+    const off = Math.max(Math.abs(mx), Math.abs(mz)) > D + 0.2;
+    (off ? slope : r < 5.2 ? centre : outer).push(q[0], q[2], q[1], q[0], q[3], q[2]);
+  }
+  const gridGeo = (tris) => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(tris.flat(), 3));
+    const p = g.attributes.position, uv = new Float32Array(p.count * 2);
+    for (let i = 0; i < p.count; i++) { uv[i * 2] = p.getX(i) / 3; uv[i * 2 + 1] = p.getZ(i) / 3; }
+    g.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+    // Indexed, as every kit part (assemble merges like with like), and smooth across the cells.
+    const ig = mergeVertices(g);
+    ig.computeVertexNormals();
+    return ig;
+  };
+  // Three tones: the centre scoured pale by the rotors, the deck, the graded slopes darker (loose soil).
+  parts.push({ geo: gridGeo(slope), mat: MAT.spoil, tone: 0.22 });
+  parts.push({ geo: gridGeo(outer), mat: MAT.spoil, tone: 0.4 });
+  parts.push({ geo: gridGeo(centre), mat: MAT.spoil, tone: 0.62 });
+  // THE H in whitewashed stones: its strokes 0.85 m wide, 6 m long, its uprights along z (it reads
+  // upright from the RTS camera — along x it read as an I-beam, the lab).
+  const stone = (x, z, s) => {
+    const y = hAt(x, z) + s * 0.25;
+    parts.push(whiteStone(R, x, y, z, s));
+  };
+  const fill = (x0, x1, z0, z1, pitch = 0.3) => {
+    for (let x = x0; x <= x1 + 1e-6; x += pitch) for (let z = z0; z <= z1 + 1e-6; z += pitch) {
+      if (R() < 0.04) continue;                                         // a stone gone
+      stone(x + (R() - 0.5) * 0.09, z + (R() - 0.5) * 0.09, 0.15 + R() * 0.05);
+    }
+  };
+  fill(-2.15, -1.3, -3.0, 3.0);                                         // the two uprights
+  fill(1.3, 2.15, -3.0, 3.0);
+  fill(-1.0, 1.0, -0.42, 0.42);                                         // the bar
+  // The EDGE: whitewashed stones a pace apart, uneven, a few out of line.
+  const pitch = 1.1, n = Math.round((2 * D) / pitch);
+  for (let k = 0; k <= n; k++) {
+    const u = -D + (k * 2 * D) / n;
+    for (const [x, z] of [[u, -D], [u, D], [-D, u], [D, u]]) {
+      if ((k === 0 || k === n) && x !== u) continue;
+      if (R() < 0.05) continue;
+      const off = R() < 0.08 ? (R() - 0.5) * 1.2 : (R() - 0.5) * 0.12;
+      stone(x + (Math.abs(x) === D ? off * 0.3 : off), z + (Math.abs(z) === D ? off * 0.3 : off), 0.17 + R() * 0.09);
+    }
+  }
+  // TYRE MARKS where the H-34s and H-21s set down: two pairs of shallow ruts, darker, pressed in a
+  // little off the H's centre, lifted a hair off the earth (strips that follow it). And a SKID scuff
+  // (the Alouette's) across the bar.
+  const strip = (x0, z0, x1, z1, w, tone) => {
+    const n = 10, len = Math.hypot(x1 - x0, z1 - z0), tx = (x1 - x0) / len, tz = (z1 - z0) / len, nx = -tz * w / 2, nz = tx * w / 2;
+    const pos = [], idx = [];
+    for (let k = 0; k <= n; k++) {
+      const f = k / n, x = x0 + (x1 - x0) * f + (R() - 0.5) * 0.03, z = z0 + (z1 - z0) * f + (R() - 0.5) * 0.03;
+      const wk = 1 - Math.abs(f - 0.5) * 0.8;                          // thinner at its ends
+      for (const sgn of [-1, 1]) { const px = x + nx * sgn * wk, pz = z + nz * sgn * wk; pos.push(px, hAt(px, pz) + 0.014, pz); }
+      if (k < n) { const a = k * 2; idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3); }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    // Facing UP (the winding depends on the strip's direction): flip when it came out facing down.
+    if (g.attributes.normal.getY(0) < 0) { for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; } g.setIndex(idx); g.computeVertexNormals(); }
+    parts.push({ geo: g, mat: MAT.earth, tone });
+  };
+  // (the main wheels ~3.7 m apart, an H-34's: they set down just outside the H's uprights, along the
+  // approach — across the stones they read as sticks laid on the H, the lab)
+  for (const [ox, oz, a] of [[0, 0.3, 0.04], [0.25, -0.5, -0.07]]) {
+    const c = Math.cos(a), sn = Math.sin(a);
+    for (const side of [-2.85, 2.85]) {
+      const x = ox + side * c, z = oz - side * sn;
+      strip(x - 1.3 * sn, z - 1.3 * c, x + 1.3 * sn, z + 1.3 * c, 0.42, 0.34 + R() * 0.06);
+    }
+  }
+  strip(-0.15, 3.6, 0.15, 4.4, 0.3, 0.38);                           // the nose wheel's, short
+  // GRIT blown out by the rotors: small ochre stones scattered thicker toward the deck's edge.
+  for (let k = 0; k < 140; k++) {
+    const a = R() * Math.PI * 2, r = 4.5 + Math.sqrt(R()) * (D - 4.3);
+    const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    if (Math.max(Math.abs(x), Math.abs(z)) > D - 0.3) continue;
+    const sz = 0.09 + R() * 0.11;
+    parts.push({ geo: fieldStone(Math.floor(R() * 1e6), sz * 1.4, sz, sz * 1.2), pos: [x, hAt(x, z) + sz * 0.25, z], rot: [0, R() * 3, 0], mat: MAT.limestone, tone: 0.3 + R() * 0.3 });
+  }
+  // DRY TUFTS at the foot of the slopes, where the grading stopped.
+  for (let k = 0; k < 18; k++) {
+    const side = Math.floor(R() * 4), u = (R() - 0.5) * 2 * (D + 1);
+    const out = D + fall * (0.65 + R() * 0.45);
+    const [x, z] = side === 0 ? [u, -out] : side === 1 ? [u, out] : side === 2 ? [-out, u] : [out, u];
+    if (x > D && Math.abs(z - 1.4) < 4.5) continue;                     // (not in the fuel point)
+    parts.push(...brushClump(R, x, hAt(x, z) - 0.08, z, { h: 0.22 + R() * 0.2, r: 0.16 + R() * 0.1, dry: R() < 0.4 }));
+  }
+  // THE PATH to the post (local -x): a double row of whitewashed stones, the way the posts marked theirs.
+  // (only on the graded slope: past it the model does not know the ground's height)
+  for (let k = 0; k < 3; k++) {
+    const x = -D - 0.5 - k * 0.8;
+    for (const z of [-0.85, 0.85]) if (R() > 0.08) stone(x + (R() - 0.5) * 0.15, z + (R() - 0.5) * 0.12, 0.13 + R() * 0.05);
+  }
+  // Wheel chocks by the H, a coil of rope.
+  for (const [x, z, a] of [[3.2, -1.8, 0.2], [3.5, -1.2, 0.3]]) parts.push({ geo: buildBox(0.22, 0.14, 0.35), pos: [x, hAt(x, z) + 0.07, z], rot: [0, a, 0], mat: MAT.timber, tone: 0.25 });
+  parts.push({ geo: new THREE.TorusGeometry(0.22, 0.035, 5, 14).rotateX(Math.PI / 2), pos: [3.9, hAt(3.9, -1.5) + 0.04, -1.5], mat: MAT.hessian, tone: 0.45 });
+
+  // Corner cairns: three stones piled, a stake.
+  for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    const cx = sx * (D + 0.5), cz = sz * (D + 0.5), y0 = hAt(cx, cz);
+    for (let k = 0; k < 3; k++) parts.push(whiteStone(R, cx + (R() - 0.5) * 0.3, y0 + 0.1 + (k === 2 ? 0.18 : 0), cz + (R() - 0.5) * 0.3, 0.2));
+    parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.035, 1.0, 5), pos: [cx, y0 + 0.5, cz], rot: [(R() - 0.5) * 0.1, 0, (R() - 0.5) * 0.1], mat: MAT.timber, tone: 0.3 });
+  }
+
+  // THE WINDSOCK's mast (the sock is the game's: algWind.js), on a footing, guyed.
+  const wx = D + 1.6, wz = D + 0.6, mH = 5.5, wy = hAt(wx, wz);
+  parts.push({ geo: buildBox(0.55, 0.3, 0.55), pos: [wx, wy + 0.05, wz], mat: MAT.concrete, tone: 0.45 });
+  parts.push(wirePart([wx, wy + 0.1, wz], [wx, mH, wz], 0.055, { mat: MAT.white, tone: 0.62 }));
+  for (let k = 0; k < 3; k++) {
+    const a = (k / 3) * Math.PI * 2 + 0.4, gx = wx + Math.cos(a) * 2.2, gz = wz + Math.sin(a) * 2.2;
+    parts.push(wirePart([wx, mH - 1.1, wz], [gx, 0.1, gz], 0.009, { tone: 0.4 }));
+    parts.push({ geo: buildBox(0.07, 0.3, 0.07), pos: [gx, 0.08, gz], rot: [0.25, a, 0], mat: MAT.steel, tone: 0.3 });
+  }
+  const mouthR = 0.3, tailR = 0.12, sockL = 1.7, arm = 0.35;
+  const swivel = assemble([
+    { geo: new THREE.CylinderGeometry(0.05, 0.05, 0.14, 8), pos: [0, 0, 0], mat: MAT.steel, tone: 0.25 },
+    wirePart([0, 0, 0], [arm, 0, 0], 0.02, { tone: 0.3 }),
+    { geo: new THREE.TorusGeometry(mouthR, 0.018, 5, 16).rotateY(Math.PI / 2), pos: [arm, 0, 0], mat: MAT.steel, tone: 0.3 },
+  ]);
+  bakeContactAO(swivel, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
+  swivel.scale(S, S, S);
+
+  // THE FUEL POINT, off the right side: sandbags in an L, drums on pallets.
+  const fx = D + 2.9, fz = 1.4;
+  for (let r = 0; r < 2; r++) {
+    parts.push({ geo: buildBox(1.25, 0.12, 2.5), pos: [fx - 0.3 + r * 1.3, 0.06, fz], mat: MAT.timber, tone: 0.32 + R() * 0.1 });   // pallet
+    // (the drums: most painted army olive, a few bare steel — they read black at tone 0.2)
+    for (let k = 0; k < 4; k++) { const painted = R() < 0.7; parts.push({ geo: buildOilDrum(), pos: [fx - 0.6 + r * 1.3 + (k % 2) * 0.62, 0.12, fz - 0.95 + Math.floor(k / 2) * 0.66], rot: [0, R() * 3, 0], mat: painted ? MAT.paint : MAT.metal, tone: painted ? 0.35 + R() * 0.25 : 0.45 + R() * 0.3 }); }
+  }
+  for (let k = 0; k < 2; k++) {
+    parts.push({ geo: buildBox(0.14, 0.14, 1.1), pos: [fx - 0.4 + k * 0.72, 0.07, fz + 2.3], mat: MAT.timber, tone: 0.35 });
+  }
+  for (let k = 0; k < 2; k++) parts.push({ geo: buildOilDrum(), pos: [fx - 0.04, 0.44, fz + 1.95 + k * 0.64 - 0.05], rot: [0, 0, Math.PI / 2], mat: MAT.paint, tone: 0.4 + R() * 0.2 });
+  // The hand pump on the end drum, its hose coiled on the ground toward the pad.
+  parts.push({ geo: new THREE.CylinderGeometry(0.05, 0.06, 0.45, 8), pos: [fx - 0.29, 1.15, fz - 0.95], mat: MAT.steel, tone: 0.2 });
+  parts.push(wirePart([fx - 0.29, 1.35, fz - 0.95], [fx - 0.02, 1.52, fz - 1.05], 0.016, { tone: 0.2 }));
+  const hose = [];
+  for (let k = 0; k <= 14; k++) { const a = k * 0.55, r = 0.42 - k * 0.012; hose.push([fx - 1.35 + Math.cos(a) * r, 0.05 + k * 0.004, fz - 0.6 + Math.sin(a) * r]); }
+  for (let k = 0; k < hose.length - 1; k++) parts.push(wirePart(hose[k], hose[k + 1], 0.028, { mat: MAT.rubber, tone: 0.15 }));
+  parts.push(wirePart([fx - 0.29, 0.95, fz - 0.95], hose[0], 0.028, { mat: MAT.rubber, tone: 0.15 }));
+  // Jerrycans by the pallets.
+  for (let k = 0; k < 4; k++) parts.push({ geo: buildBox(0.17, 0.46, 0.34), pos: [fx - 1.25 + (k % 2) * 0.22, 0.23, fz + 0.4 + Math.floor(k / 2) * 0.4], rot: [0, (R() - 0.5) * 0.4, k === 3 ? 1.4 : 0], mat: MAT.paint, tone: 0.3 + R() * 0.15 });
+  // Spares under a tarp: crates, the canvas drooping over them, pegged.
+  parts.push({ geo: buildBox(1.6, 0.7, 1.0), pos: [fx + 0.4, 0.35, fz - 2.4], mat: MAT.timber, tone: 0.3 });
+  parts.push({ geo: earthBerm([[0.95, -0.02], [0.92, 0.6], [0.7, 0.78], [0.001, 0.82]], { seed: seed + 11, segs: 16, rJit: 0.08, yJit: 0.04 }), pos: [fx + 0.4, 0, fz - 2.4], scale: [1.0, 1, 0.65], mat: MAT.canvas, tone: 0.32 });
+  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
+  parts.push({ geo: buildSandbagWall({ length: 3.4, courses: 3, seed: seed + 3, bag }), pos: [fx + 0.3, 0, fz - 3.25], mat: null });
+  parts.push({ geo: buildSandbagWall({ length: 3.0, courses: 3, seed: seed + 4, bag }), pos: [fx - 1.7, 0, fz - 1.9], rot: [0, Math.PI / 2, 0], mat: null });
+  // A stretcher leaning on the bags, a fire extinguisher on its stake.
+  for (const sx of [-1, 1]) parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.03, 2.1, 5), pos: [fx - 1.55 + sx * 0.27, 0.62, fz - 0.2], rot: [0, 0, 1.1], mat: MAT.timber, tone: 0.3 });
+  parts.push({ geo: buildBox(0.5, 1.6, 0.02), pos: [fx - 1.5, 0.63, fz - 0.2], rot: [0, 0, 1.1], mat: MAT.canvas, tone: 0.55 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.035, 1.2, 5), pos: [D + 0.9, 0.6, -D + 0.6], mat: MAT.timber, tone: 0.28 });
+  parts.push({ geo: new THREE.CylinderGeometry(0.09, 0.09, 0.42, 10), pos: [D + 0.9, 0.85, -D + 0.48], mat: MAT.paint, tone: 0.05 });
+
+  // Markings: two SIGNAL PANELS pegged out off the H's ends (red and white, the windsock's cloth).
+  const st = [];
+  for (const sz of [-1, 1]) {
+    const px = 0, pz = sz * 4.7;
+    const y = hAt(px, pz) + 0.02;
+    st.push(stencilPatch("sockBands", flatSurface([px, y, pz], [0, 1, 0], [0, 0, 1], 0.72, "sockBands"), { lift: 0.008 }));
+  }
+  const geo = finishWithStencils(parts, st, { hx: 11.2, hz: 9.6, cx: 1.9, cz: 0.2, height: mH, ao: { cell: 0.3, strength: 0.35 } });
+  geo.userData.deckY = top * S;
   geo.userData.windsock = {
     pivot: [wx * S, (mH - 0.12) * S, wz * S], swivel,
     mouth: arm * S, mouthR: mouthR * S, tailR: tailR * S, length: sockL * S,
