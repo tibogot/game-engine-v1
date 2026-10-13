@@ -21,8 +21,10 @@ PHASE 1 — finish what is half-built
    fire / smoke / explosions (your effects lab).
 2. [ ] BUILDING DAMAGE + COLLAPSE (after your building tuning): walls lost, garrisons forced out,
    rubble — CoH's signature, the biggest gameplay gap left.
-3. [ ] The FRENCH AI: sappers that build, mortars, flares, doctrines.
-4. [ ] The FLN side's own toolkit: structures to build, the cave as a real base, its abilities.
+3. [x] The FRENCH AI: sappers that build, mortars, flares, doctrines — DONE 2026-10-13 (B below: + grenades,
+   lifts, its own doctrine; not yet smoke, the Alouette, repair).
+4. [x] The FLN side's own toolkit: structures to build, the cave as a real base, its abilities — DONE
+   2026-10-13 (A1-A4 below: playable, heavy weapons, mule, tiers, field hospital, refuges, two doctrines).
    NO TANKS (2026-10-12, you: "no vehicles at all — strange for a CoH?"): historically the ALN had
    none in the war (the wilayas on foot, mules; the army of the borders, Tunisia / Morocco, ~30 000
    men: 81 / 60 mortars from 1959, 120 mortars and 106 / 75 / 37 SR recoilless guns from 1960, much
