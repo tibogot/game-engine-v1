@@ -13,7 +13,7 @@
  *               7% beyond, a longshore bar) — the colour gradient the game sea (algSea.js) draws
  *   the beach   sand rising gently (5%) for ~28 m, a berm; then the PLAIN, near flat, gentle swells
  *   headland    a dome in the north-east, cliffs where it meets the sea
- *   the wadi    coast.js wadis: a channel down to the bottom of the bay, its mouth in the sea
+ *   (no wadi since 2026-10-13: it cut the map in two; the code still carves one a map lists)
  *   ridges      low (≤ ~10 m) in the south-east, the FLN's side; hills framing it outside the box
  * THE PAINT   0 coastal plain (red earth, dry grass) · 1 beach sand · 2 seabed · 3 maquis ·
  *             4 wadi bed · 5 cliff rock · 6 the track (the template's 4-6 photos kept)
@@ -105,7 +105,8 @@ function shoreSigned(x, z) {
   const { d, side } = shoreAt(x, z, 700);
   return side >= 0 ? d : -d;
 }
-const wadi = LAYOUT.wadis[0], wadiAt = polyField(spline(wadi.points, 2));
+// (no wadi on the coast since 2026-10-13 — kept working if a map lists one)
+const wadi = LAYOUT.wadis[0] ?? null, wadiAt = wadi ? polyField(spline(wadi.points, 2)) : () => ({ d: Infinity });
 const trackAt = polyField(spline(MAP.tracks[0].points, 2));
 const HEAD = { x: 196, z: -196, r: 62, h: 16 };   // the headland's dome
 /** Distance outside the play box (0 inside). */
@@ -158,7 +159,7 @@ function naturalAt(x, z) {
   // last ~18 m, where it runs into the sea (the plain is only ~1.5 m up near the shore: a 2.2 m
   // channel there went under the sea and the sea flooded it inland among the trees)
   const wd = wadiAt(x, z, 60).d;
-  if (wd < wadi.width) {
+  if (wadi && wd < wadi.width) {
     const k = 1 - smoothstep(wadi.width * 0.4, wadi.width, wd);
     const floor = SEA + 0.35 - 0.75 * (1 - smoothstep(4, 18, s));
     h = Math.max(h - k * wadi.depth, Math.min(h, floor));
@@ -215,7 +216,7 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
     const sl = slopeDeg(x, z);
     const rock = smoothstep(20, 30, sl);                                      // cliffs
     const maquis = smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21)) * 0.85 + smoothstep(4, 10, above - 2) * 0.35;
-    const wd = wadiAt(x, z, 30).d, bed = 1 - smoothstep(wadi.width * 0.45, wadi.width * 0.8, wd);
+    const wd = wadiAt(x, z, 30).d, bed = wadi ? 1 - smoothstep(wadi.width * 0.45, wadi.width * 0.8, wd) : 0;
     const trk = 1 - smoothstep(3, 5.5, trackAt(x, z, 30).d);
     w[6] = trk;
     w[4] = (1 - trk) * bed;
@@ -242,7 +243,14 @@ function growK(x, z) {
   for (const c of clearCircles) k = Math.min(k, smooth01((Math.hypot(x - c.x, z - c.z) - c.r) / 8));
   return k;
 }
-const wadiK = (x, z, a, b) => { const d = wadiAt(x, z, 40).d; return smoothstep(b, a, d) * (H(x, z) > SEA + 0.3 ? 1 : 0); };
+const wadiK = (x, z, a, b) => { const d = wadiAt(x, z, 40).d; return smoothstep(b, a, d) * (H(x, z) > SEA + 0.3 ? 1 : 0) * fordClear(x, z); };
+// THE WADI'S PLANTS IN CLUMPS (2026-10-13, you: "a forest in the middle separating the map would not
+// be ideal for combat"): painted solid 16 m out along its whole length, the oleander and tamarisk made
+// a belt no one saw or drove through. Now clumps with gaps (CoH's tree lines: cover and a sight-break
+// you still cross), close to the channel, and its FORDS clear 14 m round.
+const wadiLine = wadi ? spline(wadi.points, 2) : [];
+const fordPts = (wadi?.fords ?? []).map((t) => wadiLine[Math.round(t * (wadiLine.length - 1))]);
+const fordClear = (x, z) => { let k = 1; for (const [fx, fz] of fordPts) k = Math.min(k, smoothstep(10, 16, Math.hypot(x - fx, z - fz))); return k; };
 const post = LAYOUT.sites.find((s) => s.kind === "french");
 const TALL = {
   1: (x, z, o) => (o > 0 ? 0.55 * patches(x, z, 50, 0.4, 32) : 0.65 * patches(x, z, 40, 0.14, 33) * (0.5 + 0.5 * smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21)))),   // cork / holm oak
@@ -251,9 +259,9 @@ const TALL = {
 };
 const GROUND = {
   1: (x, z) => 0.25 * patches(x, z, 25, 0.14, 41),                         // doum palm
-  2: (x, z) => wadiK(x, z, 3, 7) * 0.6 * (1 - smoothstep(-60, 20, z)) ,    // reeds, the wadi's lower reach
-  3: (x, z) => wadiK(x, z, 5, 11) * 0.55,                                  // oleander, its banks
-  4: (x, z) => wadiK(x, z, 8, 16) * 0.35,                                  // tamarisk, behind them
+  2: (x, z) => wadiK(x, z, 2.5, 5) * 0.5 * (1 - smoothstep(-60, 20, z)) * patches(x, z, 10, 0.5, 51),   // reeds, the lower reach, in beds
+  3: (x, z) => wadiK(x, z, 4, 7) * 0.5 * patches(x, z, 14, 0.32, 52),                                   // oleander, clumps on its banks
+  4: (x, z) => wadiK(x, z, 5, 10) * 0.32 * patches(x, z, 22, 0.22, 53),                                 // tamarisk, a few groves
   5: (x, z) => { let v = 0; for (const s of LAYOUT.sites) { const d = Math.hypot(x - s.x, z - s.z); v = Math.max(v, smoothstep(s.r + 8, s.r + 13, d) * (1 - smoothstep(s.r + 20, s.r + 26, d))); } return v * 0.45 * patches(x, z, 12, 0.45, 42); },   // prickly pear
   6: (x, z) => 0.55 * patches(x, z, 35, 0.12, 43),                         // thistle
   7: (x, z) => 0.55 * patches(x, z, 30, 0.12, 44),                         // asphodel

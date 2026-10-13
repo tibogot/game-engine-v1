@@ -8,8 +8,7 @@
 // the map — we barely see it"; the real-coast cut of 2026-10-04 is in git): shaped for play,
 // inspired by the bay of Philippeville. The SEA along the whole north edge and down the west side
 // (about a third of the box), a curved BAY biting into the land in the north-west, a rocky HEADLAND
-// jutting north in the north-east, a sandy BEACH all along, a flat coastal PLAIN, a WADI down from
-// the inland ridges to the bottom of the bay, low RIDGES in the south-east (the FLN's side), hills
+// jutting north in the north-east, a sandy BEACH all along, a flat coastal PLAIN, low RIDGES in the south-east (the FLN's side), hills
 // framing it outside the box. Sea level 30 m (the heightmap can't go below 0: the deep needs room).
 //
 // PROVISIONAL: the starts below only let the map load (the view needs both); the post, the ALN
@@ -40,10 +39,9 @@ export const LAYOUT = {
     { kind: "french", name: "Poste de la plage", x: -125, z: 165, r: 34, turn: 35 },
     { kind: "aln", name: "Katiba des crêtes", x: 175, z: 45, r: 26, turn: -30 },
   ],
-  // The wadi: from the inland ridges to the bottom of the bay (its mouth in the sea).
-  wadis: [
-    { name: "Oued Safsaf", points: [[60, 250], [45, 170], [15, 95], [-10, 20], [-25, -45], [-30, -110]], width: 10, depth: 2.2, fords: [0.3, 0.62] },
-  ],
+  // NO WADI (2026-10-13, you: "the carved dry river — I don't think we need it"): it cut the map in two
+  // with nothing to fight over. The coast's cover is its villages, walls, vines and tree lines.
+  wadis: [],
 };
 
 /** The coast road: the post, north to the bay's little port, east along the shore, up to the ridges. */
@@ -64,6 +62,6 @@ export const MAP = {
   // this level (the level file carries no ocean; algGame answers the sea level to every system).
   sea: { level: SEA_LEVEL },
   // THE MINIMAP's ground (ui/minimap.js), by paint layer (tools/algCoastLevel.mjs): the plain's red
-  // earth, the sand, the seabed (under the water's own colour), the maquis, the wadi, rock, the track.
+  // earth, the sand, the seabed (under the water's own colour), the maquis, (4 unused), rock, the track.
   minimap: { layers: { 0: [168, 128, 92], 1: [214, 196, 156], 2: [190, 178, 140], 3: [118, 122, 72], 4: [150, 132, 104], 5: [128, 112, 96], 6: [178, 152, 112] } },
 };
