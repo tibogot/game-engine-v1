@@ -461,4 +461,14 @@ ALG_UNIT_TYPES.mitrailleuse = {
   speed: 4.2, maxHp: 70, vision: 52,
 };
 
+// THE FLN'S PACK MULE (2026-10-13, A2 — algMules.js): a moving supply point, no weapon. A unit (selected,
+// ordered, shot at) drawn by the herds as a loaded donkey (`drawnElsewhere`); `animal`: it captures
+// nothing, boards nothing, enters no house.
+ALG_UNIT_TYPES.mulet = {
+  ...ALG_UNIT_TYPES.moudjahid, typeKey: "mulet", name: t("Mulet"), buildLabel: t("Mulet de bât"),
+  weapon: null, range: 0, damage: 0, grenade: false, builds: undefined, look: undefined,
+  speed: 2.6, maxHp: 90, vision: 20,   // (a loaded mule's brisk walk: it lags running men, catches up at a halt) radius: 1.4, ringRadius: 2.2, barY: 2.4,
+  animal: true, drawnElsewhere: true,
+};
+
 export const ALG_UNIT_TYPE_KEYS = Object.keys(ALG_UNIT_TYPES);

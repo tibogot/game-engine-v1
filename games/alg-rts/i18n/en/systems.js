@@ -53,6 +53,9 @@ export default {
   "Équipe sans-recul": "Recoilless team",
   "Canon sans recul de 57": "57 mm recoilless rifle",
   "Sans-recul": "Recoilless",
+  // algMules.js — the FLN's pack mule
+  "Mulet": "Mule",
+  "Mulet de bât": "Pack mule",
   "Mitrailleuse lourde": "Heavy machine gun",
   "Mitrailleuse de 12,7": "12.7 mm machine gun",
   // algBuild.js — the FLN's pieces on its own command card (?side=fln, 2026-10-13)

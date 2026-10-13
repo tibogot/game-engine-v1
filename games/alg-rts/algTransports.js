@@ -107,7 +107,7 @@ export function createAlgTransports(app, { units, navGrid = null, heli = null })
     if (!isCarrier(v)) return 0;
     let n = 0;
     for (const u of men) {
-      if (!u?.alive || !u.type?.foot || u.inside || u.team !== v.team) continue;
+      if (!u?.alive || !u.type?.foot || u.type.animal || u.inside || u.team !== v.team) continue;
       if (room(v) <= 0) break;
       pending.set(u, { v, t: 0, re: P.repath });
       u.moveOrder(v.position.x, v.position.z);
@@ -181,7 +181,7 @@ export function createAlgTransports(app, { units, navGrid = null, heli = null })
     }
     return best;
   }
-  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && u.type?.foot && !u.inside);
+  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && u.type?.foot && !u.type.animal && !u.inside);
   function onContext(e) {
     const men = infantry();
     if (!men.length || dom.style.cursor === "crosshair") return;

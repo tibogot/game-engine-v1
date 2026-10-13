@@ -208,8 +208,11 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
             const dH = Math.hypot(h.home.x - h.x, h.home.z - h.z);
             if (h.follow === "tight" && h.anchor.moving) {
               // On the lead: walk AT the home the whole time it moves.
-              if (dH > 0.6 && h.state !== "walk") { h.speed = walkSpeed; go(h, "walk", "walk", 1e9); }
-              if (h.state === "walk") { h.target = h.home; h.timer = 1e9; }
+              // (`anchor.pace`: a lead that sets its own pace — alg-rts's mules, units at 2.6 m/s; a little
+              // faster when left behind, so the animal stays under its unit.)
+              const pace = h.anchor.pace ?? walkSpeed;
+              if (dH > 0.6 && h.state !== "walk") { h.speed = pace; go(h, "walk", "walk", 1e9); }
+              if (h.state === "walk") { h.target = h.home; h.timer = 1e9; if (h.anchor.pace) h.speed = pace * (dH > 2 ? 1.35 : 1); }
             } else if (h.follow === "tight" && h.state === "walk" && h.timer > 1e8) {
               h.timer = 20;                               // the lead stopped: arrive as ever
             } else if (h.follow !== "tight" && h.state !== "walk" && dH > roam * (h.state === "eat" ? 1.6 : 1)) {
@@ -257,7 +260,7 @@ export function createWildHerd(app, tpl, spots, { canStand, threats = () => [], 
         // An anchored animal's walk clip runs at the pace it actually moves (a
         // flock trotting to catch up, a donkey held back by the lead): no
         // sliding feet. The wild ones keep the clip's own rate.
-        const walkRate = h.anchor ? Math.max(0.35, Math.min(2, h.vel / walkSpeed)) : 1;
+        const walkRate = h.anchor ? Math.max(0.35, Math.min(h.anchor.pace ? 3 : 2, h.vel / walkSpeed)) : 1;
         h.tCur += dt * h.rate * (h.state === "run" ? h.speed / runSpeed : h.state === "walk" ? walkRate : 1);
         h.tPrev += dt * h.rate;
         h.fade = Math.min(1, h.fade + dt / (h.state === "run" ? 0.2 : 0.5));

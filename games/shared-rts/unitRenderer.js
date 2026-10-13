@@ -1303,6 +1303,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   /** Build the visuals for one unit. Also used for units spawned at runtime. */
   function addUnit(unit) {
     const t = unit.type;
+    // Drawn by another system (alg-rts: a mule — a donkey in the herds' crowd, algMules.js): no view here.
+    if (t.drawnElsewhere) return;
     const looks = VARIANTS[t.typeKey];
     const vkey = looks ? looks[Math.floor(Math.random() * looks.length)] : t.typeKey;
     const tpl = templates[vkey];

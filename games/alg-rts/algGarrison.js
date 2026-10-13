@@ -98,7 +98,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     if (!h || (h.team && h.team !== team)) return 0;
     let n = 0;
     for (const u of men) {
-      if (!u?.alive || !u.type?.foot || u.inside || u.team !== team) continue;
+      if (!u?.alive || !u.type?.foot || u.type.animal || u.inside || u.team !== team) continue;
       if (room(h) <= 0) break;
       if (navGrid?.isBlockedAtWorld?.(h.door.x, h.door.z, true)) h.door = navGrid.nearestOpenWorld(h.door.x, h.door.z, true);
       pending.set(u, h);
@@ -286,7 +286,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
     }
     return null;
   }
-  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && u.type?.foot && !u.isStructure);
+  const infantry = () => (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && u.type?.foot && !u.type.animal && !u.isStructure);
   function onContext(e) {
     const men = infantry();
     if (!men.length || app.renderer.domElement.style.cursor === "crosshair") return;

@@ -47,6 +47,7 @@ export const COSTS = {
   moudjahid: 40, fmTeam: 70, tireur: 90,
   mortier: 170,   // (a human FLN's mortar team of three — algMortarTeam.js)
   mitrailleuse: 150, // (its tripod HMG of two — algMgTeam.js)
+  mulet: 80,      // (its pack mule — algMules.js)
   sansRecul: 160, // (its recoilless-rifle team of two — algRecoilless.js)
 };
 /**
@@ -227,7 +228,7 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
       let fr = 0, al = 0;
       for (const u of units.list) {
         // MEN ON FOOT only (CoH's capture): a tank parked in a mechta wins nobody over.
-        if (!u.alive || u.isAir || u.ghost || !u.type?.foot || u.carrier) continue;   // (aboard a truck: not)
+        if (!u.alive || u.isAir || u.ghost || !u.type?.foot || u.type.animal || u.carrier) continue;   // (aboard a truck: not; a mule: not)
         if (Math.hypot(u.position.x - v.position.x, u.position.z - v.position.z) > v.radius) continue;
         if (u.team === "player") fr++; else if (u.team === "enemy") al++;
       }

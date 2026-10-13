@@ -53,7 +53,17 @@ PHASE 1 — finish what is half-built
    (algMgTeam.js) but traverses ALL ROUND (no arc: type.prefersAir), 58 m, reaches aircraft and turns
    to them first (×1.5): an Alouette lasts ~4 s, an H-21 ~10 s (at 7 × 4/s × 2.2 one fell in 2 s).
    Its gun is drawn as the FM 24/29 for now. combat.js reads prefersAir / airMul / groundMul from
-   the TYPE too. NEXT: the MULE (a unit that follows a squad: a moving supply point).
+   the TYPE too.
+   THE PACK MULE done 2026-10-13 (algMules.js) — A2 COMPLETE: a unit (80, 10 s, 90 hp, no weapon) drawn
+   by the HERDS as a loaded donkey (a pool of 6 on their own anchors in the train herd: no new draw;
+   unitRenderer skips \`drawnElsewhere\`; wildHerd's tight lead takes \`anchor.pace\` — the donkey stays
+   within ~2 m of its unit). Right-click a faoudj with it selected: it FOLLOWS that squad (2.6 m/s: it
+   lags running men, catches up at a halt). Within 25 m of it a squad REINFORCES as at the cave (algSquads
+   fieldPoints) and the wounded heal slowly. \`animal\`: it captures nothing, boards nothing, enters no
+   house. Gaps: no health bar over it in the field (the renderer draws those); a blast can't hurt the
+   herd's donkey apart from the unit (fine: the unit is what dies); its AI doesn't use mules.
+   STILL OPEN for A2: the FLN AI buying the new teams; portraits for them; the recoilless tube on the
+   shoulder; a real DShK model.
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on
