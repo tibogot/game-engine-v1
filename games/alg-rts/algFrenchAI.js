@@ -20,6 +20,8 @@
 //   THROWS     grenades at FLN men bunched or in a house (algGrenades order, munitions paid);
 //   CARRIES    a squad sent far (>180 m) in a half-track, a GMC or the H-21 standing near it
 //              (algTransports: aboard, driven there, set down); buys an H-21 once the helipad is open.
+//   COMMANDS   a DOCTRINE of his own (algDoctrines.js, no strip): picked at random; its abilities
+//              unlocked as his points come, cheapest first, and used where his men see a reason.
 //
 // He sees what his men see — no more: an FLN man is KNOWN within 16 m of a French unit, or 40 m
 // when he moves or fires (the scrub ambush works on him as it does on you). Re-plans each second.
@@ -51,7 +53,7 @@ const P = {
   heliAt: 300,           // s: an H-21 bought once the helipad is open
 };
 
-export function createAlgFrenchAI(app, { units, squads, economy, producers, tiers = null, garrison = null, airStrike = null, build = null, barrage = null, flares = null, grenades = null, transports = null }) {
+export function createAlgFrenchAI(app, { units, squads, economy, producers, tiers = null, garrison = null, airStrike = null, build = null, barrage = null, flares = null, grenades = null, transports = null, doctrine = null }) {
   const prod = (k) => producers.find((p) => p.structure.typeKey === k) ?? null;
   const post = prod("post"), pool = prod("motorPool"), pad = prod("helipad"), cave = prod("caveEntrance");
   const home = post?.centre ?? post?.structure.position ?? { x: 0, z: 0 };
@@ -233,6 +235,7 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
     fortify(mySquads);
     support(known, mySquads);
     lift(mySquads);
+    command(known, mySquads);
 
     // The T-6: on a knot of FLN men, clear of his own.
     if (airStrike && ps?.alive && clock - lastAir > P.airEvery) {
@@ -337,6 +340,49 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
     }
   }
 
+  // ── B. COMMAND: his doctrine ───────────────────────────────────────────────
+  if (doctrine && !doctrine.doctrine) doctrine.choose(["paras", "legion", "air"][Math.floor(Math.random() * 3)]);
+  /** A knot of n+ FLN he sees, his own `safe` m clear: its centre, or null. */
+  function knot(known, n, safe) {
+    for (const u of known) {
+      if (flnNear(known, u.position, 14) < n) continue;
+      if (units.list.some((f) => mine(f) && !f.isAir && dist(f.position, u.position) < safe)) continue;
+      return { x: u.position.x, z: u.position.z };
+    }
+    return null;
+  }
+  function command(known, mySquads) {
+    if (!doctrine?.doctrine) return;
+    const abs = doctrine.abilities;
+    // Unlock: the cheapest still locked, as soon as the points allow.
+    const next = abs.filter((a) => !doctrine.unlocked.has(a.key)).sort((a, b) => a.cp - b.cp)[0];
+    if (next) doctrine.unlock(next.key);
+    const urgent = [...tasks.values()].filter((tk) => tk.kind === "retake" || tk.kind === "defend").sort((a, b) => rank(a.kind) - rank(b.kind))[0];
+    const fieldCap = P.squadsMax + Math.min(4, Math.floor(clock / 180));
+    for (const a of abs) {
+      if (a.passive || !doctrine.ready(a.key)) continue;
+      let at = null, go = false;
+      switch (a.key) {
+        case "paraDrop": if (urgent) { at = { x: urgent.at.x + 12, z: urgent.at.z + 12 }; go = true; } break;
+        case "commando": case "legionCall": go = mySquads.length < fieldCap; break;
+        case "airSupply": go = economy.french.mun < 60 || economy.french.fuel < 30; break;
+        case "mortar120": case "gunship": at = knot(known, 3, 22); go = !!at; break;
+        case "t6Pair": at = knot(known, 4, 28); go = !!at; break;
+        case "recon": {
+          // Over the point he is losing, or the cave when he has never seen it lately.
+          at = urgent?.at ?? (cave?.structure.alive ? cave.structure.position : null); go = !!at && clock % 60 < 1; break;
+        }
+        case "medevac": {
+          const hurt = units.list.filter((u) => mine(u) && u.type?.foot && u.hp < u.maxHp * 0.6);
+          const c = hurt.find((u) => hurt.filter((o) => dist(o.position, u.position) < 25).length >= 3);
+          if (c) { at = { x: c.position.x, z: c.position.z }; go = true; }
+          break;
+        }
+      }
+      if (go) doctrine.use(a.key, at);
+    }
+  }
+
   // ── B. LIFT: a squad sent far rides a half-track, a GMC or the H-21 ────────
   const lifts = new Map();   // squad → { v, to, phase, since }
   const CARRIERS = new Set(["halftrack", "gmc", "gmcOpen", "h21"]);
@@ -386,6 +432,8 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
     },
     /** What each squad is doing (dev: __ALG.algFrenchAI.report()). */
     report: () => [...tasks.entries()].map(([s, tk]) => `${s.typeKey}#${s.id} ${tk.kind} ${tk.point?.name ?? ""} (${s.members.length})${lifts.has(s) ? ` · ${lifts.get(s).v.typeKey} ${lifts.get(s).phase}` : ""}`),
+    /** His doctrine (dev). */
+    get doctrine() { return doctrine; },
     /** Dev: what the sapeurs build, the lifts in progress. */
     get building() { return building; },
     get lifts() { return lifts; },

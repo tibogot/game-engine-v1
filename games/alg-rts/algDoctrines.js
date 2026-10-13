@@ -141,13 +141,17 @@ export function storedDoctrine() {
 }
 const storeKey = () => (SIDES.human === "enemy" ? STORE + ".fln" : STORE);
 
-export function createAlgDoctrines(app, { units, squads, economy, projectiles, combat = null, airStrike, fogOfWar = null }) {
+/**
+ * `side`: whose doctrine (default: the human's). `ui: false` — an AI's (algFrenchAI.js, 2026-10-13): no
+ * strip, no clicks, no alerts, no fog of its own for you; it calls `use(key, at)` itself.
+ */
+export function createAlgDoctrines(app, { units, squads, economy, projectiles, combat = null, airStrike, fogOfWar = null, side = SIDES.human, ui = true }) {
   const dom = app.renderer.domElement;
   const groundY = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
   // THE SIDE (the human's): the French's purse and post, or the FLN's supplies and cave.
-  const SIDE = SIDES.human, FLN = SIDE === "enemy";
+  const SIDE = side, FLN = SIDE === "enemy";
   const purse = FLN ? economy.aln : economy.french;
-  const say = (text, x = null, z = null, kind = "good") => app.algBattle?.say?.(text, x, z, kind);
+  const say = (text, x = null, z = null, kind = "good") => { if (ui) app.algBattle?.say?.(text, x, z, kind); };
   const post = () => app.algProducers?.find((p) => p.structure.typeKey === (FLN ? "caveEntrance" : "post") && p.structure.team === SIDE) ?? null;
   const seen = (x, z) => !fogOfWar?.enabled || fogOfWar.isVisible(x, z);
   const popRoom = () => (SIDES.human === "enemy" ? Infinity : economy.popRoom?.() ?? Infinity);   // (the pop cap is the French's)
@@ -237,11 +241,11 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     flights.push(f);
     gunships.push(f);
   }
-  fogOfWar?.addSourceProvider?.(() => recons.filter((f) => f.t < f.end).map((f) => ({ x: f.x, z: f.z, r: P.recon.vision, eye: 60 })));
+  if (ui) fogOfWar?.addSourceProvider?.(() => recons.filter((f) => f.t < f.end).map((f) => ({ x: f.x, z: f.z, r: P.recon.vision, eye: 60 })));
 
   // THE PARADROP (algParadrop.js): the Noratlas, the stick, the canopies.
   const paradrop = createAlgParadrop(app, { units, squads, navGrid: app.navGrid });
-  app.algParadrop = paradrop;
+  if (ui) app.algParadrop = paradrop;
 
   // ── Squads out of nowhere (a drop) or out of the post ─────────────────────
   function squadAt(key, x, z, { elite = false } = {}) {
@@ -409,10 +413,12 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   };
   const onKey = (e) => { if (e.key === "Escape" && targeting) cancel(); };
   const onContext = (e) => { if (targeting) { e.preventDefault(); e.stopImmediatePropagation(); cancel(); } };
-  dom.addEventListener("pointerdown", onDown, true);
-  dom.addEventListener("contextmenu", onContext, true);
-  window.addEventListener("pointermove", onMove);
-  window.addEventListener("keydown", onKey);
+  if (ui) {
+    dom.addEventListener("pointerdown", onDown, true);
+    dom.addEventListener("contextmenu", onContext, true);
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("keydown", onKey);
+  }
   const rings = createSelectionRingField({ app, max: 8, inner: 0.93, opacity: 0.75 });
 
   // ── The strip ─────────────────────────────────────────────────────────────
@@ -440,11 +446,11 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
 #alg-doc .ab.cool .ic, #alg-doc .ab.short .ic { color: #6f6553; }
 #alg-doc .ab .sw { position: absolute; left: 0; bottom: 0; height: 2px; background: #c9a54a; }
 #alg-doc .ab.aiming { border-color: #58e070; }`;
-  document.head.appendChild(style);
+  if (ui) document.head.appendChild(style);
   const el = document.createElement("div");
   el.id = "alg-doc";
   el.hidden = true;
-  document.body.appendChild(el);
+  if (ui) document.body.appendChild(el);   // (an AI's strip stays off the page: drawn into nothing)
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
   el.addEventListener("click", (e) => { const b = e.target.closest("[data-ab]"); if (b) press(b.dataset.ab); });
 
@@ -575,7 +581,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     /** The choice (the briefing's, or none). */
     choose(key) {
       doctrine = DOCTRINES[key] ? key : null;
-      try { if (doctrine) localStorage.setItem(storeKey(), doctrine); } catch { /* */ }
+      try { if (doctrine && ui) localStorage.setItem(storeKey(), doctrine); } catch { /* */ }
       unlocked.clear(); cd.clear(); cp = 0; xp = 0;
       app.algBuildSpeed = 1;
       render();
@@ -592,6 +598,27 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     reinforceMul: (typeKey) => (doctrine === "legion" && unlocked.has("espritCorps") && typeKey === "legion" ? P.espritCorps : 1),
     /** Dev: points now. */
     give(n = 1) { cp += n; refresh(); },
+    /** The abilities of the chosen doctrine. */
+    get abilities() { return DOCTRINES[doctrine]?.abilities ?? []; },
+    /** Unlock `key` with the points (an AI: no click). True if it is open now. */
+    unlock(key) {
+      const ab = abilityOf(key);
+      if (!ab) return false;
+      if (unlocked.has(key)) return true;
+      if (cp < ab.cp) return false;
+      press(key);
+      return unlocked.has(key);
+    },
+    /** Ready now: unlocked, off cooldown, affordable (a passive never). */
+    ready: (key) => { const ab = abilityOf(key); return !!ab && ready(ab); },
+    /** Use `key` at `at` (an AI; the same price, cooldown and effect as the human's click). */
+    use(key, at = null) {
+      const ab = abilityOf(key);
+      if (!ab || !ready(ab)) return false;
+      if (!run(ab, at)) return false;
+      purse.spend(ab.cost ?? {}); cd.set(key, ab.cooldown ?? 0);
+      return true;
+    },
     dispose() {
       dom.removeEventListener("pointerdown", onDown, true);
       dom.removeEventListener("contextmenu", onContext, true);
@@ -599,7 +626,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       window.removeEventListener("keydown", onKey);
       for (const f of flights) app.scene.remove(f.mesh);
       paradrop.dispose();
-      el.remove(); style.remove();
+      el.remove(); if (ui) style.remove();
     },
   };
 }

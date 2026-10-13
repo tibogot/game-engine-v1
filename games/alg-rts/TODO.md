@@ -91,9 +91,17 @@ PHASE 1 — finish what is half-built
    LIFTS: a squad sent >180 m rides a half-track / GMC / the H-21 standing within 60 m (aboard, driven,
    set down 30 m short); an H-21 bought at 300 s. All five tested (staged in fast-forward: a grenade,
    a barrage, a flare; an H-21 lift board → fly → out, a half-track lift twice; an MG nest built ~450 s).
-   NOT YET: its DOCTRINE (the doctrine module is the human's side only — the AI needs its own, no
-   strip), smoke, the Alouette, repair/wire-cutting; the sapeurs' order of work could look at threats.
+   NOT YET: smoke, the Alouette, repair/wire-cutting; the sapeurs' order of work could look at threats.
    The build pace is slow (its manpower goes to squads first) — watch it in a game.
+   [x] ITS DOCTRINE (2026-10-13): algDoctrines takes \`side\` and \`ui: false\` (no strip, clicks, alerts,
+   fog vision, storage) and \`unlock\` / \`ready\` / \`use(key, at)\`; the French AI has its own instance
+   (app.algFrenchDoctrines), picks paras / Légion / air at random, unlocks the cheapest as its points
+   come, uses each where its men see a reason (a paradrop on a point it is losing, the 120 / gunship /
+   T-6 on a seen knot clear of its men, the medevac where 3+ wounded stand, air supply when short,
+   the Légion / commando under its squad cap). Tested: Légion (legionnaires, the 120), air (all four),
+   paras (drop + commando when called). Gap: the Légion's esprit de corps doesn't cut the AI's
+   reinforcement price (algSquads reads app.algDoctrines — the human's).
+   → B IS DONE. NEXT: building damage + collapse (the lab, every building).
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on
