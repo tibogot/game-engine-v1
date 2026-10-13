@@ -37,6 +37,13 @@ PHASE 1 — finish what is half-built
    man); its AI still buys single men; (c) its sabotage as buttons (algFlnTricks.js): MINE (30, a man
    digs it in ~6 s, four live, amber rings) and COUPER LA LIGNE (the nearest pole in 45 m, ~10 s).
    Still French-only: veterancy (algVeterancy counts French kills), upgrades. The MULE TRAIN → A2.
+   A2 [~] THE FLN'S HEAVY WEAPONS — the MORTAR TEAM done 2026-10-13 (algMortarTeam.js): three men (170, 16 s
+   at the cave), a 60 mm tube; stopped ~0.5 s it SETS UP (3.5 s: the tube on its bipod, two men kneel),
+   packs up (2.2 s) before any move (the order held), drops it to RETREAT; lobs a bomb every 6.5 s on the
+   nearest Frenchman its side SEES at 25-110 m (no line of sight needed; right-click picks one); TIR DE
+   BARRAGE: five bombs on a point (35, 60 s cooldown); a loader takes the tube if the gunner falls.
+   Reach rings when selected. Its AI doesn't buy it yet. NEXT: the recoilless rifle, the tripod HMG,
+   the mule. (The team's portrait is the generic 3D one.)
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on

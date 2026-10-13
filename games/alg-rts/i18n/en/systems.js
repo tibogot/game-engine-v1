@@ -42,6 +42,13 @@ export default {
   "<b>Mine posée.</b> Elle attend les Français.": "<b>Mine laid.</b> It is waiting for the French.",
   "<b>Ligne coupée !</b> Le poste n'a plus Alger au bout du fil.": "<b>Line cut!</b> The post has lost its line to Algiers.",
   "<b>Ligne réparée</b> par les sapeurs français : le poste a de nouveau Alger au bout du fil.": "<b>Line repaired</b> by the French sappers: the post has its line to Algiers again.",
+  // algMortarTeam.js — the FLN's mortar team (2026-10-13)
+  "Équipe de mortier": "Mortar team",
+  "Mortier de 60": "60 mm mortar",
+  "Tir de barrage": "Barrage",
+  "Le mortier doit être en batterie : arrêtez l'équipe quelques secondes.": "The mortar must be set up: halt the team for a few seconds.",
+  "Le tube refroidit encore ({n} s).": "The tube is still cooling ({n} s).",
+  "Cinq obus sur un point que vous choisissez, entre 25 et 110 m du mortier.": "Five bombs on a point you choose, 25 to 110 m from the mortar.",
   // algBuild.js — the FLN's pieces on its own command card (?side=fln, 2026-10-13)
   "Sangar": "Sangar",
   "Position de tir en pierres sèches : un FM tire par-dessus son rebord, les hommes derrière sont à couvert.": "A dry-stone firing position: an FM fires over its lip, the men behind it are in cover.",

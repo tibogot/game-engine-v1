@@ -435,4 +435,11 @@ ALG_UNIT_TYPES.moussebel = {
   look: "moussebel", grenade: false, maxHp: 50, range: 32, damage: 9, fireRate: 1.3, crowdMax: 8,
 };
 
+// THE FLN'S MORTAR TEAM (2026-10-13, A2 — algMortarTeam.js): three moudjahidine, the gunner with a 60 mm
+// tube (his squad kit: range 0 — the module fires it), two loaders with rifles. Bought by a human FLN.
+ALG_UNIT_TYPES.mortier = {
+  ...ALG_UNIT_TYPES.moudjahid, typeKey: "mortier", name: t("Équipe de mortier"), buildLabel: t("Mortier de 60"),
+  grenade: false, builds: undefined, speed: 5.2, maxHp: 60,
+};
+
 export const ALG_UNIT_TYPE_KEYS = Object.keys(ALG_UNIT_TYPES);
