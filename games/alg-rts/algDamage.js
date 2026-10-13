@@ -25,6 +25,7 @@
 import * as THREE from "three";
 import { buildFrSandbagWallBreached, buildRubbleHeap } from "../../v3/render/objects/rtsAlgeria.js";
 import { kitView } from "./showroom.js";
+import { simulatedWallMesh } from "./algSandbags.js";
 
 const P = {
   wallReach: 1.2,        // m past the wall's footprint a blast still breaches it
@@ -63,7 +64,11 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
       // material invisible — the breached kit wall needs the kit's material, the intact cloth wall goes)
       if (m.geometry.userData?.simWall) {
         for (const c of m.children) if (/^SandbagWall/.test(c.name)) c.visible = false;
-        m.material = kitView(breachedGeo).material;
+        // the simulated breached wall (sandbagBreach.glb) if there is one; else the kit's, drawn
+        const sim = simulatedWallMesh("SandbagBreach", "breach");
+        // (the invisible geometry still becomes the breached one below: the cover map reads it)
+        if (sim) m.add(sim);
+        else m.material = kitView(breachedGeo).material;
       }
       m.geometry = breachedGeo;
       m.userData.breached = true;

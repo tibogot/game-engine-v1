@@ -326,7 +326,11 @@ export function buildSandbagWallV2({ seed = 3, length = 5 } = {}) {
 // they rest on and press into each other (no gaps, no floating), each a flat sewn sack inflated into a
 // pillow with pointed ears. One mesh, its bags' shades in COLOR_0. Loaded once; the wall builder uses
 // it when present (else the bag-by-bag one above).
-let _wall = null, _wallFar = null, _wallP = null;
+let _wallP = null;
+/** The simulated pieces (tools/blender/sandbagWall.py layouts), each { near, far }: the wall, the
+ *  breached wall, the MG nest's ring. */
+const SIM = {};
+const SIM_FILES = { wall: "sandbagWall", breach: "sandbagBreach", ring: "sandbagRing" };
 /** A glb's one mesh → the bag material's attributes (shade from COLOR_0, foot, top/underside, the wall's shade). */
 function prepWall(gltf) {
   let src = null;
@@ -357,18 +361,21 @@ function prepWall(gltf) {
 /** Load the simulated wall, near and far (tools/blender/sandbagWall.py), once. Null if missing. */
 export function loadSandbagWall() {
   return (_wallP ??= import("three/addons/loaders/GLTFLoader.js").then(async ({ GLTFLoader }) => {
-    const ld = new GLTFLoader();
-    const [near, far] = await Promise.all([ld.loadAsync("/models/alg/sandbagWall.glb"), ld.loadAsync("/models/alg/sandbagWall_far.glb").catch(() => null)]);
-    _wall = prepWall(near);
-    _wallFar = far ? prepWall(far) : null;
-    return _wall;
+    const ld = new GLTFLoader(), get = (u) => ld.loadAsync(u).catch(() => null);
+    await Promise.all(Object.entries(SIM_FILES).map(async ([k, base]) => {
+      const [near, far] = await Promise.all([get(`/models/alg/${base}.glb`), get(`/models/alg/${base}_far.glb`)]);
+      if (near) SIM[k] = { near: prepWall(near), far: far ? prepWall(far) : null };
+    }));
+    return SIM.wall?.near ?? null;
   }).catch((e) => { console.warn("[sandbags] the simulated wall did not load:", e); return null; }));
 }
 /** The far version's distance (m from the camera): the RTS camera sits 50-130 m off the ground. */
 export const WALL_FAR = 55;
 /** The simulated wall as a mesh — an LOD (near / far) when the far version exists. Null if not loaded. */
-export function simulatedWallMesh(name = "SandbagWall") {
-  if (!_wall) return null;
+export function simulatedWallMesh(name = "SandbagWall", kind = "wall") {
+  const S = SIM[kind];
+  if (!S) return null;
+  const _wall = S.near, _wallFar = S.far;
   const mk = (g, n) => { const m = new THREE.Mesh(g, sandbagMaterial()); m.name = n; m.castShadow = m.receiveShadow = true; return m; };
   if (!_wallFar) return mk(_wall, name);
   const lod = new THREE.LOD();
@@ -384,6 +391,21 @@ export function simulatedWallMesh(name = "SandbagWall") {
  * (algDamage) — drawn by nothing itself (an invisible material), the simulated wall its `extra`.
  * The kit wall alone if the simulated one is not loaded.
  */
+/** The MG nest (algBuild, showroom): the kit's berm, timbers, boxes and gun; its bags the simulated ring. */
+export function buildMgNestPiece(kitNest) {
+  const ring = simulatedWallMesh("SandbagRing", "ring");
+  if (!ring) return kitNest({});
+  const geo = kitNest({ noBags: true });
+  // its berm's top as the kit builds it (0.95 m: the kit lifts the piece ~0.5 m over its numbers), the
+  // ring simulated on a 0.45 m berm: raised by the difference (the roof bags with it, same lift)
+  const P = geo.getAttribute("position");
+  let top = 0;
+  for (let i = 0; i < P.count; i++) { const r = Math.hypot(P.getX(i), P.getZ(i)); if (r > 1.8 && r < 2.8) top = Math.max(top, P.getY(i)); }
+  ring.position.y = Math.max(0, top - 0.45);
+  geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), ring] };
+  return geo;
+}
+
 export function buildSandbagWallPiece(kitWall) {
   const geo = kitWall();
   const wall = simulatedWallMesh();

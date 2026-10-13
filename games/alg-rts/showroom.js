@@ -26,7 +26,7 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
-import { buildSandbagWallPiece } from "./algSandbags.js";
+import { buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { buildDechraV2, buildKsarV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
@@ -65,7 +65,7 @@ export const BASE_BUILDABLES = [
   // A pad (+1.5 m margin, +4 m rim) must stay clear of the post's pad
   // (half-size 22 × 24 + 1.5): a rim cut into it left the post's wire floating.
   { key: "mirador", build: buildMirador, lx: 34, lz: 22, yaw: 0.25 },
-  { key: "mgNest", build: buildMgNest, lx: -14, lz: 40, yaw: -0.2 },
+  { key: "mgNest", build: () => buildMgNestPiece((o) => buildMgNest(o)), lx: -14, lz: 40, yaw: -0.2 },
   // Out in front, over the wire: the searchlight sweeps the approach.
   { key: "searchlight", build: buildSearchlightTower, lx: 26, lz: 46, yaw: 0.2 },
   // The post's left flank: the pad, the mortars behind the mirador.

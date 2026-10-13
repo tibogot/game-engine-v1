@@ -113,7 +113,7 @@ def drop(x, y, z, yaw, seed):
     bpy.ops.object.transform_apply(location=True, rotation=True)
     # ONLY the neighbours collide (speed): the bags already laid within 0.9 m
     for q in list(near.objects):
-        if q is not ground:
+        if q is not ground and q not in KEEP:   # (the berm, the roof: always collide)
             near.objects.unlink(q)
     for q in laid:
         if abs(q["cx"] - x) < 0.9 and abs(q["cy"] - y) < 0.9:
@@ -143,6 +143,7 @@ def drop(x, y, z, yaw, seed):
 
 
 laid = []
+KEEP = []   # helper colliders that every bag meets (the MG nest's berm, its roof timbers)
 def top_at(x, y):
     """The highest settled point near (x, y) — where the next bag starts its fall."""
     h = 0.0
@@ -153,7 +154,7 @@ def top_at(x, y):
     return h
 
 
-def course(length, rows, y0, c, step_off):
+def course(length, rows, y0, c, step_off, x0=0.0):
     n = max(1, round(length / (BL * 1.0)))   # (clear at the start: overlapping, the cloths tangled and crumpled)
     for row in range(rows):
         y = y0 + row * BW * 0.92
@@ -161,21 +162,85 @@ def course(length, rows, y0, c, step_off):
             x = -length / 2 + (i + 0.5) * (length / n) + step_off * (0.5 if c % 2 else 0) * (1 if row == 0 else -1)
             if abs(x) > length / 2:
                 continue
-            z = top_at(x, y) + 0.04
-            laid.append(drop(x, y, z, 0.0, SEED * 1000 + len(laid)))
+            z = top_at(x0 + x, y) + 0.04
+            laid.append(drop(x0 + x, y, z, 0.0, SEED * 1000 + len(laid)))
     print(f"[wall] course {c}: {len(laid)} bags", flush=True)
 
 
-QUICK = len(args) > 2 and args[2] == "quick"   # a 2 m stretch, two courses, one row: to judge the bags
-L = 2.0 if QUICK else 5.0
+def ring(rad, c, h0):
+    """A course round a circle (the MG nest), open at the back (+Y here = the game's +Z)."""
+    n = round((2 * math.pi * rad) / (BL * 0.95))
+    for k in range(n):
+        a = (k / n) * math.pi * 2 + (c % 2) * (math.pi / n)
+        if math.cos(a - math.pi / 2) > 0.85:
+            continue
+        x, y = math.cos(a) * rad, math.sin(a) * rad
+        z = max(top_at(x, y), h0) + 0.04
+        laid.append(drop(x, y, z, a + math.pi / 2, SEED * 1000 + len(laid)))
+    print(f"[wall] ring {c}: {len(laid)} bags", flush=True)
+
+
+def burst(n, spread_x, seed):
+    """Bags burst by a blast, thrown out flat both ways: half empty (low fill), any turn."""
+    r = random.Random(seed)
+    for k in range(n):
+        x = (r.random() - 0.5) * spread_x
+        y = (-1 if r.random() < 0.6 else 1) * (0.5 + r.random() * 1.1)
+        o = drop(x, y, top_at(x, y) + 0.04, r.uniform(0, 3.1), seed * 10 + k)
+        laid.append(o)
+
+
+def box_collider(cx, cy, cz, sx, sy, sz):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(cx, cy, cz))
+    o = bpy.context.object
+    o.scale = (sx, sy, sz)
+    bpy.ops.object.transform_apply(scale=True)
+    collider(o)
+    near.objects.link(o)
+    return o
+
+
+# THE LAYOUTS (2026-10-14): Blender's Y here IS the game's Z (the result turned 180° before export:
+# glTF maps Blender Y to -Z). The game's pieces (rtsAlgeria): FRONT (the enemy) at -Z.
+LAYOUT = args[2] if len(args) > 2 else "wall"
+QUICK = LAYOUT == "quick"
+extra_colliders = []
 step = BL * 1.0
-for c in range(4 if QUICK else 6):
-    course(L - c * 0.08, 2, 0.0, c, step)
-if not QUICK:
-    for c in range(2):   # the firing step behind
-        course(L - 0.6, 1, BW * 2.1, c, step)
-    for sx in (-1, 1):   # loose bags at the ends
-        laid.append(drop(sx * (L / 2 + 0.35), 0.1, 0.12, R.uniform(0, 3), SEED * 1000 + 900 + sx))
+if LAYOUT in ("wall", "quick"):
+    L = 2.0 if QUICK else 5.0
+    for c in range(4 if QUICK else 6):
+        course(L - c * 0.08, 2, -BW * 0.92, c, step)          # the wall: two bags thick, its face at -Z
+    if not QUICK:
+        for c in range(2):   # the firing step behind (+Z)
+            course(L - 0.6, 1, BW * 1.2, c, step)
+        for sx in (-1, 1):   # loose bags at the ends
+            laid.append(drop(sx * (L / 2 + 0.35), -0.1, 0.12, R.uniform(0, 3), SEED * 1000 + 900 + sx))
+elif LAYOUT == "breach":
+    # the game's breached wall (buildFrSandbagWallBreached): a 4-course stub left, a slumped 3-course one
+    # right, the gap blown through the middle, a scrap of the firing step, the burst bags thrown out
+    L = 5.0
+    for c in range(4):
+        course(1.7 - c * 0.06, 2, -BW * 0.92, c, step, x0=-L / 2 + 0.85)
+    for c in range(3):
+        course(1.3 - c * 0.06, 2, -BW * 0.92, c, step, x0=L / 2 - 0.65)
+    course(1.4, 1, BW * 1.2, 0, step, x0=-L / 2 + 1.0)
+    burst(9, 2.4, SEED + 11)
+elif LAYOUT == "ring":
+    # the MG nest (buildMgNest): its earth berm (flat top 0.45 m up to r 3.1) a collider; four courses
+    # at r 2.3 open at the back; the bags on the half-roof's timbers (1.32-1.4 m, z 0.3..1.8)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=3.15, depth=0.45, location=(0, 0, 0.225))
+    berm = bpy.context.object
+    collider(berm)
+    near.objects.link(berm)
+    extra_colliders.append(berm)
+    KEEP.append(berm)
+    for c in range(4):
+        ring(2.3 - c * 0.05, c, 0.45)
+    roof = box_collider(0, 1.05, 1.36, 4.4, 1.6, 0.08)
+    extra_colliders.append(roof)
+    KEEP.append(roof)
+    course(3.8, 1, 0.95, 0, step)
+
 
 # one mesh: joined, its bottom at 0, its plan centred; decimated; Blender Z-up -> glTF Y-up on export
 bpy.ops.object.select_all(action="DESELECT")
@@ -192,6 +257,11 @@ d.ratio = 1.0   # (each bag decimated on its own already)
 bpy.ops.object.modifier_apply(modifier="Dec")
 bpy.ops.object.shade_smooth()
 bpy.data.objects.remove(ground, do_unlink=True)
+for o in extra_colliders:
+    if o.name in bpy.data.objects:
+        bpy.data.objects.remove(o, do_unlink=True)
+wall.rotation_euler = (0, 0, math.pi)
+bpy.ops.object.transform_apply(rotation=True)
 os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
 bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", use_selection=False, export_texcoords=False,
                           export_materials="NONE", export_vertex_color="ACTIVE", export_yup=True)

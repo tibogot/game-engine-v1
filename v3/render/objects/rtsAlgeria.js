@@ -212,13 +212,15 @@ export function buildMirador({ seed = 13 } = {}) {
  * over the back half on timbers. The gun is its own geometry
  * (`userData.gun`, pivot at its mount) so the game can traverse it.
  */
-export function buildMgNest({ seed = 17 } = {}) {
+// noBags (2026-10-14, alg-rts algSandbags): the ring and the roof's bags left out — the game draws
+// its cloth-simulated ring there instead (public/models/alg/sandbagRing.glb).
+export function buildMgNest({ seed = 17, noBags = false } = {}) {
   const R = rng(seed);
   const parts = [];
   const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
   // The ring, four courses, open at the back (+Z), a spoil berm round it.
   parts.push({ geo: earthBerm([[3.9, -0.14], [3.5, 0.3], [3.15, 0.45], [0.001, 0.45]], { seed, rJit: 0.18, yJit: 0.05, rFlat: 3.1 }), mat: MAT.spoil, tone: 0.55 });
-  for (let c = 0; c < 4; c++) {
+  for (let c = 0; c < (noBags ? 0 : 4); c++) {
     const rad = 2.3 - c * 0.05, n = Math.round((2 * Math.PI * rad) / 0.5);   // shoulder to shoulder
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2 + (c % 2) * (Math.PI / n);
@@ -229,7 +231,7 @@ export function buildMgNest({ seed = 17 } = {}) {
   }
   // The half-roof: timbers across the back, sandbags on them.
   for (let k = 0; k < 5; k++) parts.push({ geo: new THREE.CylinderGeometry(0.07, 0.08, 4.4, 6).rotateZ(Math.PI / 2), pos: [0, 1.32, 0.3 + k * 0.38], mat: MAT.timber, tone: 0.3 });
-  parts.push({ geo: buildSandbagWall({ length: 3.8, courses: 1, seed: seed + 99, bag }), pos: [0, 1.4, 1.0], mat: null });
+  if (!noBags) parts.push({ geo: buildSandbagWall({ length: 3.8, courses: 1, seed: seed + 99, bag }), pos: [0, 1.4, 1.0], mat: null });
   // Ammo boxes and a jerrycan on the floor.
   for (let k = 0; k < 3; k++) parts.push({ geo: buildBox(0.5, 0.28, 0.25), pos: [-1.2 + k * 0.55, 0.59, 0.9 + R() * 0.2], rot: [0, R() * 0.4, 0], mat: MAT.paint, tone: 0.3 });
   const geo = finish(parts, { hx: 4, hz: 4, height: 1.8 });
