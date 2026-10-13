@@ -1149,6 +1149,37 @@ export function buildRefuge({ seed = 1997 } = {}) {
 }
 
 /**
+ * INFIRMERIE (2026-10-13, alg-rts: the FLN's field hospital — the wilayas' infirmiers tended the wounded
+ * in shelters like this in the maquis, hidden among the scrub): a wide brush shade on six poles, two
+ * straw pallets under it with a blanket each, a stretcher of two poles and canvas, a low dry-stone
+ * screen on the weather side, a water jar and a box of dressings. Front (the open side) at -Z.
+ */
+export function buildFlnInfirmary({ seed = 1999 } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const W = 4.4, D = 3.0;
+  for (const [x, z, h] of [[-W / 2, -D / 2, 1.9], [0, -D / 2, 2.0], [W / 2, -D / 2, 1.9], [-W / 2, D / 2, 1.25], [0, D / 2, 1.3], [W / 2, D / 2, 1.25]]) {
+    parts.push({ geo: new THREE.CylinderGeometry(0.05, 0.065, h, 6), pos: [x, h / 2, z], rot: [(R() - 0.5) * 0.06, 0, (R() - 0.5) * 0.06], mat: MAT.timber, tone: 0.22 });
+  }
+  const slope = Math.atan2(1.9 - 1.25, D);
+  parts.push({ geo: buildBox(W + 0.6, 0.12, Math.hypot(D, 0.65) + 0.5), pos: [0, 1.62, 0], rot: [slope, 0, 0], mat: MAT.thatch, tone: 0.3 });
+  for (let k = 0; k < 5; k++) parts.push(...brushClump(R, -W / 2 + 0.4 + k * (W - 0.8) / 4, 1.62, (R() - 0.5) * D * 0.7, { h: 0.35, r: 0.45, dry: R() < 0.6 }));
+  // The pallets: straw, a blanket over each.
+  for (const x of [-1.2, 0.9]) {
+    parts.push({ geo: buildBox(0.85, 0.16, 1.9), pos: [x, 0.08, 0.35], rot: [0, (R() - 0.5) * 0.08, 0], mat: MAT.thatch, tone: 0.5 });
+    parts.push({ geo: buildBox(0.8, 0.06, 1.2), pos: [x, 0.19, 0.6], rot: [0, (R() - 0.5) * 0.1, 0], mat: MAT.canvas, tone: 0.18 + R() * 0.15 });
+  }
+  // The stretcher, out in front: two poles and the canvas between.
+  for (const sx of [-1, 1]) parts.push({ geo: new THREE.CylinderGeometry(0.035, 0.035, 2.2, 6), pos: [-0.2 + sx * 0.28, 0.12, -2.2], rot: [Math.PI / 2, 0, 0], mat: MAT.timber, tone: 0.25 });
+  parts.push({ geo: buildBox(0.52, 0.03, 1.7), pos: [-0.2, 0.13, -2.2], mat: MAT.canvas, tone: 0.55 });
+  // A low dry-stone screen behind, on the weather side.
+  dryStone(parts, R, [[-W / 2 - 0.4, D / 2 + 0.5], [W / 2 + 0.4, D / 2 + 0.5]], { courses: 2, h: 0.7, depth: 0.45, len: 0.5, tone: 0.45 });
+  parts.push(clayJar(W / 2 - 0.2, -0.02, -1.2, 0.9));
+  parts.push({ geo: buildBox(0.5, 0.3, 0.36), pos: [W / 2 - 0.9, 0.15, -1.0], rot: [0, 0.3, 0], mat: MAT.white, tone: 0.55 });   // the dressings
+  return finish(parts, { hx: W / 2 + 0.6, hz: D / 2 + 1.4, cz: -0.3, height: 2.1, ao: { strength: 0.35 } });
+}
+
+/**
  * LOOKOUT (guetteur's post) — a ring of piled stones on a crest, waist-high,
  * a brush shade on two poles over it, a water skin: where an ALN watcher sits
  * all day and signals the bands when the French move (alg-rts algAI.js: the

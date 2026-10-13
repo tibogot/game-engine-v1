@@ -64,6 +64,15 @@ PHASE 1 — finish what is half-built
    herd's donkey apart from the unit (fine: the unit is what dies); its AI doesn't use mules.
    STILL OPEN for A2: the FLN AI buying the new teams; portraits for them; the recoilless tube on the
    shoulder; a real DShK model.
+   A3 [x] 2026-10-13 — A BASE FOR THE FLN (a human playing it): (a) FLN TIERS (algTiers TIERS_FLN,
+   createAlgTiers side "enemy"), bought on the cave's card in supplies: 1 Katiba (moudjahid, FM, sniper,
+   mule) · 2 Armes lourdes (mortar, 12.7 — 120, 1 village) · 3 Armée des frontières (recoilless — 180,
+   2 villages); locked units greyed with what unlocks them; the HUD reads its tier. (b) the INFIRMERIE
+   (rtsAlgeria buildFlnInfirmary: a brush shade on six poles, straw pallets, a stretcher, a dry-stone
+   screen; 90, 22 s, 0 coplanar): its men within 20 m heal (algFieldWorks, the aid station's rule —
+   measured 20 → 51 hp in ~4 s). (c) the REFUGE is its SECOND BASE: its squads within 30 m reinforce
+   there as at the cave (fieldPoints; the map's own refuges too). Not done: production at a refuge
+   (only reinforcing), retreat to the nearest refuge (they run to the cave).
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on

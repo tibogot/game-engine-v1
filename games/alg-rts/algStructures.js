@@ -41,6 +41,7 @@ const STATS = {
   fortPoint: { team: "player", name: t("Point fortifié"), hp: 500, vision: 40 },
   armsCache: { team: "enemy", name: t("Cache d'armes"), hp: 500, vision: 30 },
   refuge: { team: "enemy", name: "Refuge", hp: 450, vision: 30 },
+  infirmary: { team: "enemy", name: t("Infirmerie"), hp: 300, vision: 30 },
   lookout: { team: "enemy", name: t("Guetteur"), hp: 150, vision: 95 },
   sangar: { team: "enemy", name: "Sangar", hp: 500, weapon: "mg", range: 38, damage: 9, fireRate: 2.6, canHitAir: true, vision: 45 },
 };

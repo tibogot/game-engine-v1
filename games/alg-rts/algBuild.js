@@ -16,7 +16,7 @@
 // is nam's own (buildPlacement.js / buildings.js).
 import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildRefuge, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, buildFortPoint, buildRefuge, buildFrSandbagWall, buildMgNest, buildMirador, buildMortarPit, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
@@ -54,7 +54,10 @@ export const BUILDS = {
   // A NEW REFUGE (2026-10-07, the tunnels): the FLN digs one near a village it holds, the
   // nearest the post first (algAI.js stepRefuges) — its bands go to ground and come back out of
   // it. Hidden from the French until seen.
-  refuge: { label: t("Refuge"), tip: t("Casemate cachée : vos hommes s'y terrent et en ressortent. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
+  refuge: { label: t("Refuge"), tip: t("Casemate cachée, une seconde base : vos groupes à 30 m s'y renforcent comme à la grotte. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
+  // THE FLN'S FIELD HOSPITAL (2026-10-13, A3 — algFieldWorks.js): a brush shade, pallets, a stretcher: its
+  // wounded within 20 m heal, out of the fight (the French aid station's rule).
+  infirmary: { label: t("Infirmerie"), tip: t("Abri de l'infirmier sous les broussailles : vos blessés à 20 m guérissent, hors du combat."), cost: 90, time: 22, build: () => buildFlnInfirmary({ seed: 1999 + Math.floor(Math.random() * 9) }), pad: true, structure: "infirmary", team: "enemy", by: ["moudjahid"] },
   ambushScreen: { label: t("Écran d'embuscade"), tip: t("Broussailles coupées sur un pied de pierres : les hommes derrière restent cachés jusqu'à ce qu'ils tirent."), cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
 };
 /** The medic's tent (nam's kit, the medic variant), with the footprint the build needs. */

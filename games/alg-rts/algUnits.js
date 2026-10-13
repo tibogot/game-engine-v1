@@ -413,7 +413,12 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // THE FRENCH TIERS (algTiers.js): unlocked from the post's card.
   const tiers = createAlgTiers(app, { economy, post: () => app.algProducers?.find((p) => p.structure.typeKey === "post" && p.structure.team === "player")?.structure ?? null });
   app.algTiers = tiers;
-  app.algTiers = tiers;
+  // THE FLN'S TIERS (a human playing it — algTiers.js TIERS_FLN): bought on the cave's card, in supplies.
+  // Its AI is not tiered (null when the FLN is the AI's).
+  const flnTiers = SIDES.human === "enemy" ? createAlgTiers(app, { economy, side: "enemy", post: () => app.algProducers?.find((p) => p.structure.typeKey === "caveEntrance")?.structure ?? null }) : null;
+  app.algFlnTiers = flnTiers;
+  /** The tiers that gate a producer's units (null: none — the FLN's AI). */
+  const tiersOf = (s) => (s.team === "player" ? tiers : flnTiers);
   for (const p of producers) {
     // The French: the POP CAP first (algEconomy.js POP) — a unit past it is refused, unpaid.
     p.structure.pay = (key) => (p.structure.team !== "player" || popRoom() >= popOf(key)) && economy.purses[p.structure.team].spend(unitCost(key, p.structure.team));
@@ -441,7 +446,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // REINFORCING IN THE FIELD (CoH): at any of your half-tracks standing still.
     // (+ the forward posts the sappers build: algFieldWorks.js)
     // (+ a human FLN's pack mules: algMules.js)
-    fieldPoints: () => [...units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving), ...(app.algFieldWorks?.forwardPosts() ?? []), ...(app.algMules?.pointsFor("enemy") ?? [])],
+    fieldPoints: () => [...units.list.filter((u) => u.alive && u.team === "player" && u.typeKey === "halftrack" && !u.isMoving), ...(app.algFieldWorks?.forwardPosts() ?? []), ...(app.algMules?.pointsFor("enemy") ?? []), ...(SIDES.human === "enemy" ? app.algFieldWorks?.refuges() ?? [] : [])],
     post: postProd ?? { inside: muster, outside: muster },
     popRoom: () => popRoom(),
     // PLAYING THE FLN: its squads' home is the cave — they retreat, heal and reinforce there.
@@ -499,20 +504,24 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // Locked units show greyed with what unlocks them (algTiers.js); the
     // post's card also carries the NEXT TIER's button.
     productionFor: (s) => {
-      const list = Object.keys(PRODUCTION[s.typeKey] ?? {}).map((key) => {
-        const need = s.team === "player" ? tiers.needs(key) : 1;
+      const tr = tiersOf(s);
+      // (The FLN's AI's cave makes only what its AI makes: its men, gunners and marksmen.)
+      const keys = Object.keys(PRODUCTION[s.typeKey] ?? {}).filter((key) => tr || ["moudjahid", "fmTeam", "tireur"].includes(key) || s.typeKey !== "caveEntrance");
+      const list = keys.map((key) => {
+        const need = tr ? tr.needs(key) : 1;
         const c = unitCost(key, s.team);
         // LOCKED: what unlocks it and where, in full (you, 2026-10-08: "some units read Verrouillé
-        // and I can't make them — why?"); a click on it goes to the post.
+        // and I can't make them — why?"); a click on it goes to the post (the FLN: the cave).
         return { key, label: ALG_UNIT_TYPES[key].buildLabel ?? ALG_UNIT_TYPES[key].name, cost: s.team === "player" ? { ...costOf(c), pop: popOf(key) } : c,
-          locked: need > tiers.tier ? t("débloquez-le {how}. (Clic : aller au poste.)", { how: tiers.howTo(tiers.TIERS[need - 1]) }) : null };
+          locked: tr && need > tr.tier ? (s.team === "player" ? t("débloquez-le {how}. (Clic : aller au poste.)", { how: tr.howTo(tr.TIERS[need - 1]) }) : t("débloquez-le {how}.", { how: tr.howTo(tr.TIERS[need - 1]) })) : null };
       });
-      const nx = tiers.next();
-      if (s.typeKey === "post" && nx) {
-        const why = tiers.blockedBy(nx);
+      const nx = tr?.next();
+      if ((s.typeKey === "post" || (s.typeKey === "caveEntrance" && tr)) && nx) {
+        const why = tr.blockedBy(nx);
+        const heldNow = s.team === "player" ? economy.held : economy.heldByEnemy;
         list.push({
           key: "tier", label: `▲ ${nx.name}`, cost: nx.cost, tier: true,
-          locked: why && economy.held < nx.villages ? why : null,   // too poor alone: not locked (the cost shows it)
+          locked: why && heldNow < nx.villages ? why : null,   // too poor alone: not locked (the cost shows it)
           ready: !why,   // it can be bought now: the button pulses
           tip: nx.villages > 1
             ? t("Échelon {n} : {note}. Il faut tenir {villages} villages.", { n: nx.n, note: nx.note, villages: nx.villages })
@@ -524,13 +533,13 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // (The HUMAN's purse — the FLN's one number when you play the FLN: ?side=fln.)
     canAfford: (cost) => (SIDES.human === "enemy" ? economy.aln.canAfford(cost) : economy.french.canAfford(cost) && (!cost?.pop || popRoom() >= cost.pop)),
     shortOf: (cost) => (SIDES.human === "enemy" ? "" : [economy.french.short(cost), cost?.pop && popRoom() < cost.pop ? t("troupes (plafond {cap} atteint)", { cap: economy.popCap() }) : ""].filter(Boolean).join(", ")),
-    onBuild: (s, key) => { if (key === "tier") { if (tiers.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (tiers.unlocked(key) || s.team !== "player") s.enqueue(key); },
+    onBuild: (s, key) => { const tr = tiersOf(s); if (key === "tier") { if (tr?.unlock()) commandCard.render(app.selection?.selected ?? [s]); return; } if (!tr || tr.unlocked(key)) s.enqueue(key); },
     // THE SAPPERS' BUILDS (algBuild.js): a button per piece, its price on it.
     structureBuilds: buildButtons(),
     buildingCosts: BUILD_COSTS,
     onBuildStructure: (key, sel) => build?.begin(key, sel),
     // A LOCKED unit clicked: to the post, where its tier is bought (algTiers.js).
-    onLocked: () => tiers.goToPost(),
+    onLocked: () => (SIDES.human === "enemy" ? flnTiers : tiers)?.goToPost(),
     // PATROUILLE (algPatrols.js): the selection walks the nearest track in
     // file, back and forth, until given another order.
     // GRENADE (algGrenades.js): one man of the selection throws.
@@ -746,7 +755,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const tacMap = createTacticalMap({ app, create: (mount) => createMinimap({ ...mapOpts, mount, id: "alg-tacmap", markScale: 2.3, labelPx: 15 }) });
   app.algTacMap = tacMap;
   // Top right now (resourceHud.js); the bottom strip is gone with it.
-  const resourceHud = createResourceHud({ mount: document.body, troops: () => `${popNow()}/${economy.popCap()}`, tier: () => tiers.readout() });
+  const resourceHud = createResourceHud({ mount: document.body, troops: () => `${popNow()}/${economy.popCap()}`, tier: () => (flnTiers ?? tiers).readout() });
   hud.strip.style.display = "none";
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
@@ -971,6 +980,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     orderMarks.frame(frameDt, app.camera);
     resourceHud.update(economy);
     tiers.watch(frameDt);   // "tier available" alert (algTiers.js)
+    flnTiers?.watch(frameDt);
     healthBars.commit();
     selectionRings.commit();
     selectionFrames.commit();

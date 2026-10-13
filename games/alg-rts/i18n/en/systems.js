@@ -63,7 +63,9 @@ export default {
   "Position de tir en pierres sèches : un FM tire par-dessus son rebord, les hommes derrière sont à couvert.": "A dry-stone firing position: an FM fires over its lip, the men behind it are in cover.",
   "Cache d'armes : chaque cache debout arme deux équipes FM. Cachée aux Français tant qu'ils ne l'ont pas vue.": "Arms cache: each standing cache arms two FM teams. Hidden from the French until they have seen it.",
   "Refuge": "Refuge",
-  "Casemate cachée : vos hommes s'y terrent et en ressortent. Cachée aux Français tant qu'ils ne l'ont pas vue.": "A hidden casemate: your men go to ground in it and come back out. Hidden from the French until they have seen it.",
+  "Casemate cachée, une seconde base : vos groupes à 30 m s'y renforcent comme à la grotte. Cachée aux Français tant qu'ils ne l'ont pas vue.": "A hidden casemate, a second base: your squads within 30 m reinforce there as at the cave. Hidden from the French until they have seen it.",
+  "Infirmerie": "Field hospital",
+  "Abri de l'infirmier sous les broussailles : vos blessés à 20 m guérissent, hors du combat.": "The medic's shelter under the brush: your wounded within 20 m heal, out of combat.",
   "Broussailles coupées sur un pied de pierres : les hommes derrière restent cachés jusqu'à ce qu'ils tirent.": "Cut scrub on a stone footing: the men behind it stay hidden until they fire.",
   // algHeliLift.js — the H-21 lands to take squads on and set them down (2026-10-12)
   "<b>Pas de zone d'atterrissage</b> ici : il faut un terrain plat et dégagé.": "<b>No landing zone</b> here: it needs flat, open ground.",

@@ -9,6 +9,8 @@
 //                   to turn it (algEconomy reads `fortified`). One of each per point.
 //
 // Destroyed, they stop working (they are structures: the FLN can shoot them down).
+// THE FLN'S (2026-10-13, A3): its INFIRMERIE heals its men as the aid station heals the French; its REFUGES
+// are its forward posts — its squads reinforce there (a human playing the FLN: algSquads `aln`).
 export const FIELDWORKS = { reach: 30, aidReach: 20, aidHeal: 2.5, check: 0.5 };
 const P = FIELDWORKS;
 
@@ -17,12 +19,12 @@ export function createAlgFieldWorks(app, { units, structures, economy }) {
   let checkT = 0;
   function step(dt) {
     // The aid stations: a slow heal to men on foot nearby who are not fighting.
-    const aids = of("aidStation");
+    const aids = [...of("aidStation"), ...of("infirmary")];
     if (aids.length) {
       for (const u of units.list) {
-        if (!u.alive || u.team !== "player" || !u.type?.foot || u.inside || u.hp >= u.maxHp) continue;
+        if (!u.alive || !u.type?.foot || u.type.animal || u.inside || u.hp >= u.maxHp) continue;
         if (u.target || (u.suppression ?? 0) > 0.1) continue;
-        if (aids.some((s) => Math.hypot(u.position.x - s.position.x, u.position.z - s.position.z) < P.aidReach)) u.hp = Math.min(u.maxHp, u.hp + P.aidHeal * dt);
+        if (aids.some((s) => s.team === u.team && Math.hypot(u.position.x - s.position.x, u.position.z - s.position.z) < P.aidReach)) u.hp = Math.min(u.maxHp, u.hp + P.aidHeal * dt);
       }
     }
     if ((checkT -= dt) > 0) return;
@@ -35,5 +37,7 @@ export function createAlgFieldWorks(app, { units, structures, economy }) {
     params: P, step,
     /** Field reinforcement points (algSquads `fieldPoints`): the standing forward posts. */
     forwardPosts: () => of("forwardPost").map((s) => { s.radius ??= 6; return s; }),
+    /** The FLN's: its standing refuges (a human's squads reinforce there). */
+    refuges: () => of("refuge").filter((s) => s.team === "enemy").map((s) => { s.radius ??= 4; return s; }),
   };
 }
