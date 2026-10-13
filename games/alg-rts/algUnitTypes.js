@@ -442,4 +442,23 @@ ALG_UNIT_TYPES.mortier = {
   grenade: false, builds: undefined, speed: 5.2, maxHp: 60,
 };
 
+// THE FLN'S RECOILLESS RIFLE (2026-10-13, A2 — algRecoilless.js): the gunner with the 57 mm SR, a direct-fire
+// SHELL ("cannon": armour's shell table) — the tank-killer; slow, weak against men (footMul). His loader
+// carries a rifle (the squad kit, slot 1). Bought by a human FLN.
+ALG_UNIT_TYPES.sansRecul = {
+  ...ALG_UNIT_TYPES.fmTeam, typeKey: "sansRecul", name: t("Équipe sans-recul"), buildLabel: t("Canon sans recul de 57"),
+  look: "alnRecoilless", weapon: "cannon", range: 55, damage: 90, fireRate: 0.14, footMul: 0.3,
+  speed: 4.8, maxHp: 60, vision: 44,
+};
+
+// THE FLN'S HEAVY MACHINE GUN (2026-10-13, A2): a tripod 12.7 mm DShK (Soviet, through Egypt and the
+// army of the borders) — the answer to the H-21s and Alouettes. Set up like the FM teams (algMgTeam.js:
+// a fire arc, prone), a longer reach; it reaches aircraft and turns to them first (prefersAir, airMul).
+// A team of two: the gunner (his type's gun), the loader a rifle. Bought by a human FLN.
+ALG_UNIT_TYPES.mitrailleuse = {
+  ...ALG_UNIT_TYPES.fmTeam, typeKey: "mitrailleuse", name: t("Mitrailleuse lourde"), buildLabel: t("Mitrailleuse de 12,7"),
+  weapon: "mg", range: 58, damage: 6, fireRate: 3, canHitAir: true, prefersAir: true, airMul: 1.5,   // (7 × 4/s × 2.2 felled an Alouette in 2 s: the lab)
+  speed: 4.2, maxHp: 70, vision: 52,
+};
+
 export const ALG_UNIT_TYPE_KEYS = Object.keys(ALG_UNIT_TYPES);

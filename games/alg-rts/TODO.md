@@ -42,8 +42,18 @@ PHASE 1 — finish what is half-built
    packs up (2.2 s) before any move (the order held), drops it to RETREAT; lobs a bomb every 6.5 s on the
    nearest Frenchman its side SEES at 25-110 m (no line of sight needed; right-click picks one); TIR DE
    BARRAGE: five bombs on a point (35, 60 s cooldown); a loader takes the tube if the gunner falls.
-   Reach rings when selected. Its AI doesn't buy it yet. NEXT: the recoilless rifle, the tripod HMG,
-   the mule. (The team's portrait is the generic 3D one.)
+   Reach rings when selected. Its AI doesn't buy it yet. (The team's portrait is the generic 3D one.)
+   THE RECOILLESS RIFLE done 2026-10-13 (algRecoilless.js): a team of two (160, 15 s), the gunner with
+   the M18 57 mm (procWeapons sr57, look alnRecoilless), a direct-fire SHELL (armour's shell table):
+   90 a shot, one every ~7 s, 55 m, ×0.3 against men (combat footMul); kneels and aims 1.5 s before
+   each engagement, never fires on the move; dust thrown out BEHIND at each shot. Measured: a
+   half-track 240 → 161 → 77. The tube is held upright at rest (the rifle's idle) — on the shoulder
+   would need its own clip.
+   THE TRIPOD HMG done 2026-10-13: a 12.7 mm DShK team of two (150, 14 s), sets up like the FM teams
+   (algMgTeam.js) but traverses ALL ROUND (no arc: type.prefersAir), 58 m, reaches aircraft and turns
+   to them first (×1.5): an Alouette lasts ~4 s, an H-21 ~10 s (at 7 × 4/s × 2.2 one fell in 2 s).
+   Its gun is drawn as the FM 24/29 for now. combat.js reads prefersAir / airMul / groundMul from
+   the TYPE too. NEXT: the MULE (a unit that follows a squad: a moving supply point).
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on

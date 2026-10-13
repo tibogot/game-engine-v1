@@ -207,6 +207,22 @@ export const LOOKS = {
     kit: ["musette"],
     extras: { beard: 0.5, mustache: 0.45, bandolier: 0.5, bandoliers: 0.35, cigarette: 0.1 },
   },
+  // The ALN's RECOILLESS-RIFLE team (alg-rts sansRecul, 2026-10-13): the gunner with the 57 mm SR,
+  // his loader a bolt rifle (role 1) and the spare rounds on his back (the musette).
+  alnRecoilless: {
+    label: "ALN recoilless team", note: "the section's look; the gunner with the M18 57 mm SR, the loader a rifle",
+    green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, weapon: "sr57",
+    skinTan: ALN_SKIN, clothRef: 0.045,
+    variants: [
+      { w: 0.4, headgear: "cheche", hatColor: 0xdcd5c3 },
+      { w: 0.3, headgear: "fieldCap", hatColor: 0x857953 },
+      { w: 0.3, headgear: null, helmet: true },
+    ],
+    bodies: ["aln1", "aln2"],
+    kit: ["musette"],
+    roles: { 1: { name: "loader", weapon: "mas36" } },
+    extras: { beard: 0.5, mustache: 0.45, bandolier: 0.3, cigarette: 0.1 },
+  },
   // ── CIVILIANS (2026-10-08): no weapon (the unarmed clips: tools/packMixamo --unarmed), the
   // ALN's two bodies under their own clothes, the same North African skin range.
   civMan: {

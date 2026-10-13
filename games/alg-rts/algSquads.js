@@ -59,6 +59,10 @@ export const SQUADS = {
   tireur: { size: 1, name: t("Tireur d'élite"), reinforce: 0, side: "enemy" },
   // The mortar team (algMortarTeam.js): slot 0 the tube (range 0: the module aims and fires it).
   mortier: { size: 3, name: t("Mortier"), reinforce: 40, side: "enemy", kit: { 0: { weapon: "mortar", range: 0, damage: 0, fireRate: 1 } } },
+  // The recoilless rifle (algRecoilless.js): slot 0 the gun (his type's), slot 1 the loader's rifle.
+  // The tripod HMG (algMgTeam.js set-up): slot 0 the gun, slot 1 the loader's rifle.
+  mitrailleuse: { size: 2, name: t("Mitrailleuse"), reinforce: 45, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
+  sansRecul: { size: 2, name: t("Sans-recul"), reinforce: 45, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
 };
 /** Men per purchase at a producer: a squad for the French, and for the FLN only when a human plays it. */
 export const squadSize = (key, team) => (SQUADS[key] && (team === "player" || isHuman(team)) && (SQUADS[key].side ?? "player") === team ? SQUADS[key].size : 1);

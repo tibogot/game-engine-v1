@@ -49,6 +49,12 @@ export default {
   "Le mortier doit être en batterie : arrêtez l'équipe quelques secondes.": "The mortar must be set up: halt the team for a few seconds.",
   "Le tube refroidit encore ({n} s).": "The tube is still cooling ({n} s).",
   "Cinq obus sur un point que vous choisissez, entre 25 et 110 m du mortier.": "Five bombs on a point you choose, 25 to 110 m from the mortar.",
+  // algRecoilless.js — the FLN's recoilless rifle (2026-10-13)
+  "Équipe sans-recul": "Recoilless team",
+  "Canon sans recul de 57": "57 mm recoilless rifle",
+  "Sans-recul": "Recoilless",
+  "Mitrailleuse lourde": "Heavy machine gun",
+  "Mitrailleuse de 12,7": "12.7 mm machine gun",
   // algBuild.js — the FLN's pieces on its own command card (?side=fln, 2026-10-13)
   "Sangar": "Sangar",
   "Position de tir en pierres sèches : un FM tire par-dessus son rebord, les hommes derrière sont à couvert.": "A dry-stone firing position: an FM fires over its lip, the men behind it are in cover.",

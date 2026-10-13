@@ -194,6 +194,30 @@ function lf50() {
 const DARK_HOSE = 0x1d1c19;
 
 /**
+ * M18 57 mm RECOILLESS RIFLE (2026-10-13, alg-rts: the ALN's tank-killer — the army of the borders had
+ * 57 and 75 mm SR, many from Egypt and the Eastern bloc). 1.56 m, a plain tube with the flared VENTURI
+ * at the breech (its back-blast), a pistol grip and trigger under the front third, a folding monopod
+ * further on, the sight on the left. Origin at the pistol grip: the breech runs back past the
+ * shoulder, the muzzle well forward — the silhouette from the RTS camera: a long pipe, a fat back.
+ */
+function sr57() {
+  const M = 0x3a3d33, D = COLORS.metal, B = COLORS.bakelite, bore = 0.06;
+  return toGeometry([
+    cyl(M, 0, bore, -0.52, 0.98, 0.045, 0.045, 10),                       // the tube
+    cyl(D, 0, bore, -0.72, -0.52, 0.075, 0.05, 10),                       // the venturi, flared
+    cyl(D, 0, bore, -0.53, -0.47, 0.058, 0.058, 10),                      // the breech ring
+    cyl(D, 0, bore, 0.96, 1.0, 0.05, 0.05, 10),                           // the muzzle band
+    tiltX(box(B, [0, -0.035, 0], [0.03, 0.09, 0.04]), -0.25, [0, 0]),    // pistol grip
+    box(D, [0, -0.012, 0.03], [0.006, 0.026, 0.05]),                      // trigger guard
+    tiltX(box(B, [0, -0.04, -0.3], [0.028, 0.08, 0.035]), -0.2, [0, -0.3]),   // the rear grip under the shoulder
+    box(D, [0, 0.012, 0.42], [0.02, 0.02, 0.06]),                         // monopod clamp
+    block(D, { z: 0.42, top: 0.006, bot: 0.0, w: 0.012 }, { z: 0.7, top: 0.012, bot: 0.006, w: 0.01 }),   // monopod, folded
+    box(D, [-0.06, 0.1, 0.12], [0.03, 0.05, 0.09]),                       // the sight, on the left
+    box(D, [-0.04, 0.08, 0.12], [0.02, 0.012, 0.03]),                     // its bracket
+  ]);
+}
+
+/**
  * FM 24/29 — the French section's light machine gun (from memory: 1.08 m,
  * 25-round box magazine on TOP, pistol grip, bipod near the muzzle, carrying
  * handle). The top magazine and the bipod make it the most recognisable gun in
@@ -286,6 +310,7 @@ export const WEAPONS = {
   mauser98: { label: "Mauser 98k", faction: "ALN — bolt rifle", build: gripped("mauser98", mauser98), buildRaw: mauser98 },
   enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: gripped("enfield", enfield), buildRaw: enfield },
   lf50: { label: "Lance-flammes Mle 1950", faction: "French — flamethrower", build: gripped("lf50", lf50), buildRaw: lf50, muzzle: LF50_MUZZLE },
+  sr57: { label: "M18 57 mm SR", faction: "ALN — recoilless rifle", build: gripped("sr57", sr57), buildRaw: sr57 },
 };
 
 /**

@@ -120,7 +120,7 @@ export function createCombat({
       // An AA gun (the ZPU) takes any aircraft in reach over anything on the
       // ground: aircraft are ranked as if much nearer. The reach test below
       // still uses the real distance.
-      const rank = e.prefersAir && o.isAir ? d * 0.25 : d;
+      const rank = (e.prefersAir ?? e.type?.prefersAir) && o.isAir ? d * 0.25 : d;
       if (d > reach || rank >= bestD) return;
       // Concealment before smoke: it is a grid lookup and two float compares,
       // where the smoke test walks every live column.
@@ -276,7 +276,7 @@ export function createCombat({
     }
     // An AA gun busy with something on the ground looks up every half second:
     // a helicopter coming into reach takes over.
-    if (e.prefersAir && tgt && !tgt.isAir && !e.attackTarget) {
+    if ((e.prefersAir ?? e.type?.prefersAir) && tgt && !tgt.isAir && !e.attackTarget) {
       e.reacquireCd = (e.reacquireCd ?? 0) - dt;
       if (e.reacquireCd <= 0) {
         e.reacquireCd = 0.5;
@@ -348,7 +348,8 @@ export function createCombat({
       const from = muzzleOf(e);
       // An AA gun hits aircraft harder than ground (airMul / groundMul, 1 for
       // everything else).
-      const dmg = e.damage * (tgt.isAir ? (e.airMul ?? 1) : (e.groundMul ?? 1));
+      // footMul (alg-rts, an anti-tank gun: the FLN's recoilless rifle): its shell against a man on foot.
+      const dmg = e.damage * (tgt.isAir ? (e.airMul ?? e.type?.airMul ?? 1) : (e.groundMul ?? e.type?.groundMul ?? 1)) * (tgt.type?.foot ? (e.footMul ?? e.type?.footMul ?? 1) : 1);
       const miss = !!hitChance && Math.random() >= hitChance(e, tgt, d) * (e.playerMove ? MOVING_ACC : 1);
       projectiles.spawn(from, tgt, dmg, e, null, { miss, exact: !e.isStructure && !!unitMuzzle?.(e) });
       onShot?.(e, tgt);   // hit or miss: fire suppresses

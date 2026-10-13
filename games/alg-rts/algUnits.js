@@ -56,6 +56,7 @@ import { createAlgTransports } from "./algTransports.js";
 import { createAlgHeliLift } from "./algHeliLift.js";
 import { createAlgFlnTricks } from "./algFlnTricks.js";
 import { createAlgMortarTeams } from "./algMortarTeam.js";
+import { createAlgRecoilless } from "./algRecoilless.js";
 import { createAlgAttackMove } from "./algAttackMove.js";
 import { createAlgWrecks } from "./algWrecks.js";
 import { createAlgCrews } from "./algCrews.js";
@@ -87,7 +88,7 @@ const PRODUCTION = {
   post: { appele: 14, sapeur: 10, piece: 14, lanceFlammes: 16, legion: 24 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { para: 18, alouette: 30, h21: 34 },   // paras: the heliborne reserve; the H-21 carries them
-  caveEntrance: { moudjahid: 4, fmTeam: 7, tireur: 8, mortier: 16 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
+  caveEntrance: { moudjahid: 4, fmTeam: 7, tireur: 8, mortier: 16, sansRecul: 15, mitrailleuse: 14 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
 };
 
 /** Pad-local point just past the footprint's edge, heading to (px, pz). */
@@ -658,7 +659,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   let build = null;     // made after the cover (algBuild.js)
   let repair = null;    // made after the build (algRepair.js)
   let garrison = null;  // made after the build (algGarrison.js)
-  let transports = null, heliLift = null, flnTricks = null, mortarTeams = null;   // (flnTricks: a human FLN's mine and line cut — algFlnTricks.js)   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
+  let transports = null, heliLift = null, flnTricks = null, mortarTeams = null, recoilless = null;   // (flnTricks: a human FLN's mine and line cut — algFlnTricks.js)   // trucks and half-tracks carrying a squad (algTransports.js), with the garrisons
   let attackMove = null;   // ASSAUT: advance and fight (algAttackMove.js), after the selection
   let controlGroups = null;   // made after the selection it listens to
   let coverCursor = null, mgTeams = null;
@@ -794,7 +795,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // MACHINE-GUN TEAMS (algMgTeam.js): the pièce FM's gunner and the FLN's FM gunners set up, fire
   // in an arc, pack up to move.
   mgTeams = createAlgMgTeams({ app, units, selection, fogOfWar,
-    isGunner: (u) => u.typeKey === "fmTeam" || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u),
+    isGunner: (u) => u.typeKey === "fmTeam" || (u.typeKey === "mitrailleuse" && u.weapon === "mg") || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u),
     emplacements: () => structures.list });
   app.algMgTeams = mgTeams;
   app.algPosture = posture;
@@ -810,7 +811,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
     onDeath: (e) => { dropped.onDeath(e); veterancy.onDeath(e); app.algDoctrines?.onKill(e); selection.remove?.(e); controlGroups?.render(); transports?.onDeath(e); if (!e.isStructure && !e.type?.foot && !e.isAir) { wrecks.add(e); crews.bail(e); } },
-    onShot: (e, tgt) => { posture.onShot(e, tgt); app.algSnipers?.onShot(e, tgt); }, onSplash: (at, r, owner) => { posture.onSplash(at, r, owner); garrison?.onSplash(at, r); },
+    onShot: (e, tgt) => { posture.onShot(e, tgt); app.algSnipers?.onShot(e, tgt); app.algRecoilless?.onShot(e); }, onSplash: (at, r, owner) => { posture.onSplash(at, r, owner); garrison?.onSplash(at, r); },
     // The walls take some of a blast (algGarrison.js) — two grenades on a house of six: at full,
     // 4 dead; at 0.6, 0.1 (and every squad bailed out); 0.8 between, as CoH.
     // (men aboard a vehicle: none — it is the vehicle that takes it, algTransports.js)
@@ -866,6 +867,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   if (SIDES.human === "enemy") {
     flnTricks = createAlgFlnTricks(app, { units, selection, mines, purse: economy.aln }); app.algFlnTricks = flnTricks;
     mortarTeams = createAlgMortarTeams(app, { units, squads, projectiles: combat.projectiles, selection, fogOfWar, purse: economy.aln }); app.algMortarTeams = mortarTeams;
+    recoilless = createAlgRecoilless(app, { squads }); app.algRecoilless = recoilless;
   }
   patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(t("+{fuel} C +{mun} M · convoi {name}", { fuel: n.fuel, mun: n.mun, name: v.name })) });
   app.algPatrols = patrols;
@@ -901,7 +903,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

@@ -133,7 +133,10 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
             // Not firing while it swings more than a little.
             u.deploy = Math.abs(d) > P.half * 0.5 ? 0 : 1;
           }
-          u.arc = { facing: st.facing, half: P.half };
+          // An AA gun on its tripod (the FLN's 12.7, type.prefersAir) traverses ALL ROUND: no arc — it
+          // only had to set up. (Its 60° arc left a helicopter beside it untouched: the lab, 2026-10-13.)
+          u.arc = u.type?.prefersAir ? null : { facing: st.facing, half: P.half };
+          if (u.type?.prefersAir && u.target?.alive) st.facing = angleTo(u, u.target);
           faceArc(u, st);
           // THE CREW lies down with the gun (CoH): his squad mates standing by him, not moving.
           for (const m of u.squad?.members ?? []) {
@@ -270,7 +273,7 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
     let k = 0;
     for (const u of gunners()) {
       const st = u._mg;
-      if (!st || u.inside) continue;
+      if (!st || u.inside || u.type?.prefersAir) continue;   // (an all-round AA gun: no wedge)
       let colour = null, alpha = 1;
       if (isHuman(u.team)) {
         if (!sel.has(u) && st.state !== "setting") continue;

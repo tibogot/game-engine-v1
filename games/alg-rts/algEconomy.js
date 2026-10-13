@@ -46,6 +46,8 @@ export const COSTS = {
   h21: { mp: 260, fuel: 90 },   // (unarmed: it carries two squads — algHeliLift.js)
   moudjahid: 40, fmTeam: 70, tireur: 90,
   mortier: 170,   // (a human FLN's mortar team of three — algMortarTeam.js)
+  mitrailleuse: 150, // (its tripod HMG of two — algMgTeam.js)
+  sansRecul: 160, // (its recoilless-rifle team of two — algRecoilless.js)
 };
 /**
  * PLAYING THE FLN (?side=fln, 2026-10-13): the human buys a faoudj of four at the cave (algSquads.js),
