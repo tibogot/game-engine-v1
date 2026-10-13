@@ -69,6 +69,7 @@ export const SYSTEMS = {
   buildings: byName((n) => n.startsWith("showroom:")),
   units: byName((n) => n.startsWith("Crowd:") || n.startsWith("UnitXray")),
   stones: byName((n) => n === "AlgStones"),
+  sandstone: byName((n) => n === "SandstoneRocks"),   // the big slabs (El Kantara's rims: one merged mesh)
   animals: byName((n) => ANIMALS.test(n)),
   sky: byName((n) => n === "SkyProSkyDome"),
   lakes: byName((n) => n === "Lakes"),

@@ -21,12 +21,27 @@
 //
 // It only WATCHES the game (polls units, villages, mines, buildings once a
 // frame): no hooks into combat, the AI or the units. ?battle=0 = without.
-import { LAYOUT } from "./layout.js";
+import { LAYOUT, MAP } from "./layout.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { DOCTRINE_LIST, storedDoctrine } from "./algDoctrines.js";
 import { createBattleHud } from "./ui/battleHud.js";
 import { DIFFICULTIES, applyDifficulty, storedDifficulty } from "./algDifficulty.js";
 import { t, LANGS, LANG, setLang } from "./i18n/i18n.js";
+
+/**
+ * THE BRIEFING'S HEAD per map and side (2026-10-13, "a new map starts from nothing"): the map's own
+ * (maps/*.js `briefing: { fr: { kicker, title }, fln: { … } }`); the Aurès keeps its lines; another
+ * map without its own shows its name and a plain title — never the Aurès' valley.
+ */
+function briefingHead(fln) {
+  const own = MAP.briefing?.[fln ? "fln" : "fr"];
+  if (own) return own;
+  if (MAP.id === "aures") {
+    return fln ? { kicker: t("Aurès, 1956 · La katiba de la grotte"), title: t("Libérer la vallée") }
+      : { kicker: t("Aurès, 1956 · Poste de Tighanimine"), title: t("Tenir la vallée") };
+  }
+  return { kicker: MAP.name, title: fln ? t("Libérer la région") : t("Tenir la région") };
+}
 
 const P = {
   start: 500,
@@ -426,8 +441,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
       // The language switch (top right): setLang remembers it and reloads the page.
       const langs = `<div class="langs">${LANGS.map((l) => `<button type="button" data-lang="${l.key}" class="${l.key === LANG ? "on" : ""}">${l.label}</button>`).join("")}</div>`;
       const back = hud.briefing(`${langs}${FLN ? `
-        <div class="kicker">${t("Aurès, 1956 · La katiba de la grotte")}</div>
-        <h2>${t("Libérer la vallée")}</h2>
+        <div class="kicker">${briefingHead(true).kicker}</div>
+        <h2>${briefingHead(true).title}</h2>
         <ul>
           <li>${t("Les <b>{n} villages</b> sont l'enjeu de cette guerre. Chacun rapporte à celui qu'il soutient, et chacun est un <b>point de victoire</b> (★ au-dessus d'eux et sur la mini-carte).", { n })}</li>
           <li>${t("La katiba vit d'un seul <b>ravitaillement</b> : les villages qui la soutiennent, ses caches et les points qu'elle tient en versent chaque minute. On recrute à la <b>grotte</b> : moudjahidine, fusils-mitrailleurs, tireurs.")}</li>
@@ -435,13 +450,14 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           <li>${t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez le poste français</b> pour gagner sur-le-champ. <b>Perdez la grotte</b> et tout est fini.")}</li>
           <li>${t("L'armée française a plus d'hommes, de feu et de véhicules. Ne l'affrontez pas à découvert : <b>tenez les broussailles</b>, frappez les hommes isolés, puis disparaissez.")}</li>
         </ul>` : `
-        <div class="kicker">${t("Aurès, 1956 · Poste de Tighanimine")}</div>
-        <h2>${t("Tenir la vallée")}</h2>
+        <div class="kicker">${briefingHead(false).kicker}</div>
+        <h2>${briefingHead(false).title}</h2>
         <ul>
           <li>${t("Les <b>{n} villages</b> sont l'enjeu de cette guerre. Chacun rapporte à celui qu'il soutient, et chacun est un <b>point de victoire</b> (★ au-dessus d'eux et sur la mini-carte).", { n })}</li>
           <li>${t("Les <b>effectifs</b> arrivent d'Alger en continu. Le <b>carburant</b> et les <b>munitions</b> viennent du terrain : les villages et les <b>points de ravitaillement</b> sur les pistes (jerrican / cartouches) — les véhicules et les échelons demandent du carburant, les grenades et la Légion des munitions. Un point ne rapporte que s'il est <b>relié au poste</b> par une chaîne de points que vous tenez ; coupé, il passe à l'orange et ne rapporte rien.")}</li>
           <li>${t("<b>Gagnez un village</b> en y postant des hommes à pied. Son anneau se remplit vers celui qui a le plus d'hommes sur place.")}</li>
-          <li>${t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez la grotte du FLN</b> (nord-ouest) pour gagner sur-le-champ. <b>Perdez le poste</b> et tout est fini.")}</li>
+          <li>${MAP.id === "aures" ? t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez la grotte du FLN</b> (nord-ouest) pour gagner sur-le-champ. <b>Perdez le poste</b> et tout est fini.")
+            : t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez la grotte du FLN</b> pour gagner sur-le-champ. <b>Perdez le poste</b> et tout est fini.")}</li>
           <li>${t("Le <b>FLN</b> ne vous affrontera pas à découvert. Il travaille les villages en silence, tend des embuscades aux hommes isolés, mine les pistes, raide vos dépôts et regagne sa grotte. Tenez garnison, patrouillez, fortifiez.")}</li>
         </ul>`}
         <div class="keys">${t("<kbd>Espace</kbd> aller à la dernière alerte · cliquez une alerte pour y aller · maintenez <kbd>V</kbd> pour voir la couverture · <kbd>R</kbd> tourne un bâtiment · survolez un village pour ses détails · <kbd>Échap</kbd> pause et options")}</div>`,

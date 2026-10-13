@@ -119,6 +119,17 @@ export const AURES_LIGHT = {
 };
 
 /**
+ * THIS MAP'S LIGHT (2026-10-13, "a new map starts from nothing"): the Aurès' above, with the map's own
+ * `light` (maps/*.js) over it — one level deep, so a map can change one number of `world`, `polish`
+ * or `haze` and keep the rest. `skyPro` (a map's only): Sky Pro's own settings (coverage, haze…).
+ */
+export const MAP_LIGHT = (() => {
+  const L = structuredClone(AURES_LIGHT), own = MAP.light ?? {};
+  for (const [k, v] of Object.entries(own)) L[k] = v && typeof v === "object" && !Array.isArray(v) ? { ...(L[k] ?? {}), ...v } : v;
+  return L;
+})();
+
+/**
  * The plain outside the map, matched BY EYE to the textured soil beside it in
  * this light. Not the soil's mean albedo (#735a3e): a flat colour under this
  * warm sun goes orange, where the texture's stones and dust keep it a greyed
@@ -319,7 +330,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // turns them off to compare.
   if (params.get("farterrain") === "0") app.setFarTerrain?.({ enabled: false });
 
-  if (params.get("light") !== "flat") applyAuresLight(app);
+  if (params.get("light") !== "flat") applyAuresLight(app, MAP_LIGHT);
   // THE OASIS WATER (2026-10-07, CoH audit 2 item 5: the ponds read bright cyan beside the ochre —
   // another game's palette). The level's lake water let green through and scattered a green tint;
   // an Aurès oasis pond is olive and murky: more absorption in green, an olive-brown inscatter.
@@ -332,7 +343,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // is a summer afternoon's: at night its contrast crushed the moonlit walls to black and its
   // warmth fought the night look's blue (seen at the post, 23 h). It eases to neutral with the
   // sky's night amount. `app.algPolish` is the day grade (Dev → Light edits it).
-  app.algPolish = AURES_LIGHT.polish;
+  app.algPolish = MAP_LIGHT.polish;
   const NEUTRAL = { contrast: 1, saturation: 1, temperature: 0 };
   let lastNight = -1, lastDay = "";
   // PAUSE (ui/gameMenu.js): while app.paused the game's frame hooks get no time — the sim, the
@@ -583,11 +594,11 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       const t0 = performance.now();
       app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null,
-        quantities: MAP.scenery?.quantities ?? null, keepClear: MAP.scenery?.keepClear ?? [] });
+        quantities: MAP.scenery?.quantities ?? null, keepClear: MAP.scenery?.keepClear ?? [], fixedSandstone: MAP.sandstone?.rocks ?? [] });
       console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
       // The SANDSTONE rocks: their shapes come from the workers started at the top of the boot.
       const t1 = performance.now();
-      const field = await buildSandstoneField(app.algLandmarks.sandstone);
+      const field = await buildSandstoneField(app.algLandmarks.sandstone, { colour: MAP.sandstone?.colour ?? "aures" });
       if (field) { field.updateMatrix(); app.scene.add(field); app.algLandmarks.sandstoneMesh = field; app.algLandmarks.sandstoneLook = sandstoneLook; }
       // ?rocktop=0: the tops in the cracked photo (from the RTS camera the layered one shows as stripes).
       if (params.get("rocktop") === "0") sandstoneLook.topSame.value = 0;
@@ -694,7 +705,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   }
   // Dev controls (?dev=0 hides them).
   if (params.get("dev") !== "0") {
-    app.devPanel = createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLight: applyAuresLight });
+    app.devPanel = createAlgDevPanel({ app, rtsCamera, light: MAP_LIGHT, applyLight: applyAuresLight });
   }
 
   onStatus(t("Peinture des surfaces…"));
@@ -759,6 +770,8 @@ export function applyAuresLight(app, L = AURES_LIGHT) {
     // the post, 23 h: open ground 0.0016 at 18° vs 0.0034 at Tidewater's).
     app.sky.skyPro.moonElev = 0;
     if (L.skyProSunScale) app.sky.skyPro.sunScale = L.skyProSunScale;
+    // A map's own Sky Pro settings (MAP_LIGHT.skyPro: its cloud cover, its haze…).
+    if (L.skyPro) Object.assign(app.sky.skyPro, L.skyPro);
     // The day darker (skyProExposure above), the NIGHT as it was tuned: the stops taken off
     // the base are given back on the night look's own EV, which scales with the night amount.
     const base = app.sky.skyPro.exposure;

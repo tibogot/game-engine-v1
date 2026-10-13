@@ -28,3 +28,19 @@ A capture ring is a circle on flat ground. On screen:
 Ours (algGame.js `createRtsCamera`, 2026-10-11): vertical FOV **40°**, distance **65 m** default
 (24–85), tilt **53°** at the default (48° in, 56° out); ground seen across the centre ≈ 84 m.
 Our capture rings: 22 m (supply) and 40 m (villages).
+
+## Added 2026-10-13
+
+| file | what |
+|---|---|
+| `camera-default-5-dunes-ruin.png` | the default camera over big dune hills: pale crests, red-orange hollows, a Roman ruin, a point on the dunes (the user's, for map 3) |
+
+MEASURED (the game area, x 22-78 %, y 8-68 %, HUD out): frame 4 mean RGB (202,156,122), luma median
+173, saturation 0.39; frame 5 (194,143,109), 167, 0.45. El Kantara's light is tuned to these
+(games/alg-rts/maps/kantara.js `light`).
+| `camera-default-6-dune-point.png`, `-7-dune-point-2.png` | a point on small dunes: crisp curved crests, shaded lee, soldiers for scale |
+| `camera-default-9-sand-mass-red-ground.png` | a raised sand mass with stepped crests (left) falling to flat red pebbly ground (a fuel point, an acacia, a ruined wall, scrub, a jeep) |
+| `camera-default-8-red-ground-ridge.png` | red pebbly ground, a sand ridge crossing it, ruins (their shadows bend over the ridge), scrub |
+
+MEASURED against the soldiers (~1.8 m) and the ring (~22 m): CoH's dunes are SMALL — crests ~2-3 m
+high, ~10-25 m apart, a short steep lee (~5 m), a long gentle back. El Kantara's: 2.8 m, 20 m.

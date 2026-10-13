@@ -26,12 +26,17 @@ PHASE 1 — finish what is half-built
    of it Soviet; tanks only after 1962). Its "armour" instead: a 120 mortar team, a recoilless-rifle
    team (the tank-killer), a tripod HMG against helicopters, MULES (ammunition / a moving supply
    point); as doctrines: a captured Jeep / GMC, and a late-war ARMY OF THE BORDERS doctrine.
+4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
+   move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
+   caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on
+   its OWN maquis map (a djebel camp, the cave, a mule track); the side screen applies to Training.
 5. [ ] The souk (ksar); the coplanar scan of the other French pieces at the detail the game builds.
 6. [ ] VOICES + radio calls (FR + Arabic) — blocked on recordings / a TTS key (env var only).
 
 PHASE 2 — content for a launch
 7. [ ] MISSION 2, THE COAST (map planned; its ground and layout to do).
-8. [ ] A THIRD MAP (sugg.: a mountain pass or village) — skirmish variety.
+8. [~] A THIRD MAP: "LA PORTE DU DÉSERT", El Kantara 1958 — planned 2026-10-13, see MAP 3 below
+   (waiting for your go).
 9. [~] SKIRMISH from the menu: map, side, difficulty, doctrine. MAP + SIDE done 2026-10-11 (menu.html
    "Batailles" → alg.html?map=…&side=fln); difficulty stays on the side's briefing; doctrine to do.
    [x] CARDS (2026-10-12, Sudden Strike 5 style): Battles → choose your SIDE (two cards, drawn
@@ -71,6 +76,218 @@ PHASE 5 — after launch (the Early Access roadmap)
 ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) building damage +
 collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a short campaign →
 (6) Electron, Steamworks, the store page → Early Access.
+
+## MAP 3 — "LA PORTE DU DÉSERT", EL KANTARA 1958 — PLAN 2026-10-13, **waiting for your go**
+## (you: "the edge of the Sahara south of the Aurès… orange sand, red sandstone mesas, canyons,
+## sparse acacias, white houses; clearly different from the Aurès and the coast")
+
+WHERE: EL KANTARA, not Biskra or Bou Saâda. Its nickname is literally "la porte du désert" (Foum
+es-Sahra): the gorge where the road and railway from Constantine come out of the Aurès onto the
+Saharan plain. It gives the map a built-in frame and contrast: the grey Aurès wall to the NORTH,
+outside the box, and the red Sahara opening to the south. Its own landmarks: the oasis palm grove,
+the "red village" (mud brick) and the "white village", and the Roman bridge (el-kantara = "the
+bridge"). TO CHECK before any player text: the 1958 oil route (Hassi Messaoud 1956; oil by road / rail
+via Touggourt–Biskra; the 24" line to Bougie opened 1959).
+
+THE SIZE (sources: coh2.org worldbuilder threads; CoH 3 publishes no numbers):
+- CoH 2 1v1 base to base 207–293 m (Faymonville 207 · Angoville 250 · Langreskaya 256 ·
+  Arnhem 293); guide targets 230–250 m base to base, 150–200 m between VPs, 170–200 m between fuels.
+- A 1v1–2v2 playable example: 352 × 352 m. 4v4 maps: 448–544 × 384–704 (General Mud,
+  Hill 400: 512 × 512).
+- Ours: Aurès 610 m box, starts 470 m apart (4v4 size); the coast 500 m.
+- PROPOSED: a 448 × 448 m play box (CoH 2v2 size, a multiple of 32), starts ~340 m apart: a 1v1
+  card with room for our helicopters and the méharistes' speed. About 11 objectives (the Aurès
+  rule: a point every 60–80 m; dead zones measured the same way afterwards).
+
+THE SKETCH (world m, north up = −Z; French south, FLN north-east, the camera looking NNE):
+
+            N   the Aurès wall + THE GORGE (scenery, outside the box) — road, rail, oued come out
+   −224 ┌─────────────────────[gorge]─────────────────────────────────┐
+        │ RED VILLAGE (mun)   PONT ROMAIN ★      ▓▓ plateau ▓▓  FLN CAMP │
+        │   │oued             road ║             ▓ gully ▓▓ + cave    │
+        │   │                      ║     LOOKOUT on the rim (mun)     │
+        │ PALM GROVE + KSAR ★     CARAVANSERAI (fuel)   ▓ GULLY MOUTH ▓ │
+        │   │ well (mun)           ║               ▓▓ (fuel) ▓▓      │
+        │   │ford       CHECKPOINT (mun)          PUMP STATION ★     │
+        │ WHITE VILLAGE (fuel) ║  BORDJ (French)    ══ pipeline ═══ │
+        │ ~dunes~ nomad tents (mun)   ║                       ~dunes~ │
+    +224 └───────────────────────[to Biskra]──────────────────────────┘
+   (★ = the three big prizes; ▓ = sandstone plateau 6–8 m with bands and gullies)
+
+POINTS (approx. positions, refined on the ground and measured):
+| point | where | leans | notes |
+|---|---|---|---|
+| French start: the BORDJ | (20, 165) | Fr | a Saharan fort, NOT the Aurès post (below) |
+| FLN start: CANYON CAMP | (150, −150) | FLN | buildCampV2 + sandstone cave, in a canyon head |
+| ★ PALM GROVE + KSAR | (−110, −10) | centre | the main prize; ksar held from its souk |
+| ★ PONT ROMAIN | (−40, −150) | FLN | the road's only bridge over the oued: the chokepoint |
+| ★ PUMP STATION | (150, 90) | Fr | the pipeline yard: the FLN's SABOTAGE target |
+| Red village | (−170, −150) | FLN | mud brick (the earth plaster), under the gorge |
+| White village | (−120, 160) | Fr | whitewash (lime), its koubba + cemetery |
+| Caravanserai | (10, −20) | centre | on the road, walled yard |
+| Palm-grove well | (−160, 60) | centre | buildVillageWell, seguias |
+| Lookout | (100, −40) | FLN | on the plateau rim: high ground over the road |
+| Gully mouth | (190, −20) | FLN | the FLN's flanking route down to the pump station |
+| Road checkpoint | (60, 90) | Fr | sandbags, chicane, barrier |
+| Nomad tents | (−195, 110) | Fr | at the dune edge |
+Routes: the ROAD (centre, open: convoys, armour); the OUED + palm grove (west: cover, fords);
+the PLATEAU + GULLIES (east: the FLN's covered approach, the cliffs block vehicles).
+
+THE GROUND (CoH-flat, as walkable as the Aurès: ≥ 94 % ≤ 34°, ≥ 57 % ≤ 15° inside the box):
+- the open plain (reg): orange, near flat, gentle swells;
+- the PLATEAU in the east: +6–8 m, its rim of red sandstone BANDS 2–4 m high (the CoH frames: low
+  shelves with undercut lips, NOT tall mesas), 2–3 gullies 3–5 m deep with walkable floors, ramps up;
+- the OUED from the gorge south past the bridge and the palm grove: banks, 2–3 fords;
+- DUNES only outside the box (south and south-west) + the tall mesas and the gorge on the skyline;
+- the sandstone LIPS are meshes (algSandstone): the heightmap is 1 m cells, it can't make an
+  undercut.
+
+THE PALETTE (to tune against the CoH frames, same camera):
+| what | colour | source |
+|---|---|---|
+| plain (reg) | orange sand ~#d0905a | terrain_red_01 / gravelly_sand, warm tint |
+| rock band feet, gullies | red laterite ~#b0603e | red_laterite_soil_stones |
+| sandstone | brick-red faces, pale tops | algSandstone, the `coh` preset |
+| dunes (edges) | pale apricot ~#e2b884 | coast_sand_01, tinted |
+| oued bed | grey-beige gravel | dry_river_pebbles |
+| palm grove | dark green + damp brown earth | dateGrove, the oasis look |
+| white village | lime white, warm in shade | algMasonry lime |
+| track | pale dusty ruts | the track slot + carve |
+Light: hard sun, ~35–40° up from the west, so the bands throw long shadows; low, warm ambient.
+Contrast: the Aurès is grey-ochre, the coast green and red earth; this map is ORANGE + RED +
+dark-green islands.
+
+REUSED: the level tool pattern (algCoastLevel → a new tools/algKantaraLevel.mjs + maps/kantara.js
++ layout.js + the menu card), trackCarve, algSandstone (`coh`), algCave, buildCampV2, buildKsarV2,
+dateGrove / tamarisk / doum via the paint slots, the zeriba, koubba, cemetery, well, sangars,
+GMC, oil drums, buildFuelDepot, the mule train, the camel MORPH (animalMorph `camel`: walk, gallop,
+pace, idle), algSplats (red_sand, cracked_red_ground, rocky_gravel…).
+
+NEW:
+- [ ] the level tool + map file + menu card (its art from the ChatGPT list) + i18n.
+- [ ] THE BORDJ: a Saharan fort, square banco / whitewashed walls, crenellated, two corner towers,
+      an arched gate; built from algMasonry pieces. It must read as different from the Aurès post.
+- [ ] ACACIA (raddiana): a flat umbrella crown; none exists (only tamarisk / betoum). Sparse, in
+      the oued and the gullies.
+- [ ] THE PIPELINE: pipe runs on saddles, buried stretches (a berm), valve markers, the PUMP STATION
+      (tanks, pump house, pipe stacks); its sabotage (an FLN sapper charge → fire + smoke, reused).
+- [ ] CONVOYS on the road: a GMC tanker variant + an escort; a French map event (or the AI).
+- [ ] MÉHARISTES (the Compagnies sahariennes): the camel exists, its RIDER does not. The horse
+      lab's rider is tied to the horse rig: a soldier seated on the camel, a mounted unit (fast,
+      no cover, shoots dismounted?). The biggest piece of work here: AFTER the map plays.
+- [ ] Red village houses: mud-brick kind (the earth surface), the oasis seguias (dryWall).
+- [ ] (option) THE RAILWAY through the gorge (the line to Biskra): a train as the convoy instead.
+
+ORDER (each step: you look before the next):
+1. [~] THE GROUND + LOOK: heights, paint, sandstone bands, gorge + dunes as the frame; walkable % vs
+       the Aurès; screenshots beside the CoH frames (default zoom + close); console clean; GPU ms.
+       STARTED 2026-10-13 (your go): maps/kantara.js (?map=kantara), tools/algKantaraLevel.mjs (from the
+       coast's look; in place after), maps/kantaraRocks.js (GENERATED: 107 rim slabs + 19 band slabs),
+       algLandmarks `fixedSandstone`, the map's sandstone colour (`coh`). tools/algGradePhoto.mjs: the
+       photos REGRADED (a tint only darkens): desert_reg (orange reg), desert_red, desert_dune, desert_road.
+       In the box: 97.6 % walkable, 92.7 % gentle (the Aurès: 94 / 57). Console clean at boot.
+       - [x] THE DUNE FIELD IN THE BOX (you, the CoH frames 3-4: "some part like desert with dunes"): the
+             south-west quarter, low walkable dunes (crests ~5 m) rising into the frame's tall ones.
+       - [x] The coast template's Pro SEA at 30 m drew over this 20 m plain (dark, foam on the rims):
+             the level now carries the Aurès' (classic, 0 m).
+       - [x] The "dark map" was the FOG OF WAR on unexplored ground (you spotted it): look with it off.
+       - [x] Ramps: a wedge down the rim (the first was a dome on the plain). Grove thinned. The road a
+             pale dusty photo (the mud one read as a dark trench).
+       - [ ] SPLATS OFF for now: the Aurès rules laid 2,690 dark gravel / mud patches, and the sandstone
+             APRONS (algGroundContact) lay grey on the plateau tops round the rim slabs. El Kantara's own
+             rules: red sand, cracked red ground, ruts; no apron on a rim slab.
+       - [x] The rim slabs read as a row of dark tiles (their varnished tops above the plateau): sunk so
+             the top sits ~0.25 m under it — only the face and a lip show, one band along the rim.
+       - [x] The dunes' sand: aerial_beach_01 (Poly Haven, CC0, wind ripples, 30 m) regraded apricot =
+             desert_sand; the box's crests ~4 m, ~30 m apart (46 m showed one crest on screen).
+             tools/fetchGroundSets.mjs takes extra slugs and keeps the regraded sets in sets.json.
+       - [x] REDONE (you, a CoH 3 frame: "the terrain looks very bad compared to the screenshots"; "are
+             you sure CoH has canyons?" — it hasn't, they were my plan's): NO plateau, NO canyons. Rolling
+             relief everywhere (kantara.js HILLS), crested dune hills in the west (SAND), the colour BY
+             THE RELIEF (sand the base, red in the hollows — desert_hollow, an aerial red earth — orange
+             reg in patches east), OUTCROPS on the hills' shoulders (a big slab + smaller, sunk a third;
+             79 slabs, kantaraRocks.js ROCKS), the rocks lifted warm (SANDSTONE_COLOURS.kantara).
+             99.3 % walkable, 89.5 % gentle. The FLN camp in a hollow in the north-east.
+       - [ ] SHELVES (CoH frames 1-2's low red ledges): a row of slabs on open ground read as a LOG —
+             a short terrain step with the slabs sunk in (the first try's rims looked right as a band).
+       - [ ] The relief barely reads from above on the eastern reg: steeper, or the light lower.
+       - [ ] The sand's ripples may be strong beside CoH's smoother dunes (normalStr / the grade).
+       - [x] MEASURED AGAINST CoH (you: "compare more — the texture, the light, how the sand blends with
+             the rocky ground"): the game area's mean colour / luma / saturation, ours vs frames 4-5
+             (assets-src/refs/coh3/; frame 5 = your dunes-and-ruin frame, kept). Ours was (146,84,45),
+             luma 92, saturation 0.70 — the AURÈS' LIGHT (exposure 0.42, a warm grade) on pale sand
+             made it brown-orange. maps/kantara.js `light`: the low 16 h sun kept (CoH's shadows are
+             long), exposure 0.9, a near-neutral grade → (203,167,127), luma 180, sat 0.37 (frame 4:
+             (202,156,122), 173, 0.39). A 13 h sun matched the colour but flattened the relief.
+       - [x] THE BLEND as CoH's: STONY ground (desert_stony: coast_sand_01 lightly graded — pale beige
+             with small stones, CoH frame 3) on the flats in ragged patches, SAND on the dunes (its
+             ripples faint: normal 0.2, the grade's contrast 0.8), RED in the hollows. The orange reg
+             is gone (frames 1-2's red is another biome).
+       - [x] THE CREST (you: "what makes a dune look like a dune is the crest"): the windward back
+             climbs to the very top (a^1.25 — the smoothstep rounded every crest), the slip face drops
+             at once and eases out at its foot; crests 7 m. 99.1 % walkable.
+       - [x] WHAT MAKES CoH's DUNES READ (you: "is it more texture than shape?"): CoH mappers build the
+             ground from stacked layers + SPLATS (hand-placed decals, recoloured) + texture SPLINES —
+             "where the polish comes in" (coh2.org); and the frames' LOW SUN: frame 4's flag shadow
+             bends over a crest a few metres high. Tested: the same dunes at 9° / 17° / 25° of sun —
+             the crests read only with a low sun. Now: the sun ~20° (16.6 h), the dunes 6.5 m (4.5
+             vanished under the rolling ground), their slip faces facing EAST, away from the afternoon
+             sun (SAND.wind) so each crest shades its lee; the paint: the lee a deeper orange, SAND
+             DRIFTED round every rock's foot. Measured: (188,148,107), luma 164, sat 0.43 (frames
+             4/5: (202,156,122) / (194,143,109), 173 / 167, 0.39 / 0.45). 98.9 % walkable.
+       - [x] CoH's DUNES ARE SMALL (you, three more frames: "in my terrain to have a crest you have to
+             make real high sharp dunes — that's not how it looks"): MEASURED against the soldiers and
+             the ring, crests ~2-3 m high, ~10-25 m apart, a short straight lee (~5 m at ~30°), a long
+             gentle back. Ours were 6.5 m / 44 m — hills. Now: a 2.5 m mass of sand with dunes on it,
+             2.8 m / 20 m, the lee a STRAIGHT slope with an eased foot (an eased face had read 7°),
+             crests 70-100 % along; sand RIDGES crossing the red ground elsewhere (frame 8); the ground
+             between RED PEBBLY (desert_pebbly: gravelly_sand regraded, frame 8); the hills under it all
+             gentle (4 m); the rocks smaller (×0.55). 99.7 % walkable. Measured (190,153,113), luma 175.
+       - [x] NOT WAVES — STEPS (you, frames 8-9: "the whole terrain goes down; plateaus with a sharp
+             crest"): the sand a raised, LUMPY MASS cut into LEVELS (1.8 m) — near-flat tops, a sharp
+             lip, a drop sized from the mass's slope so it is ~26° everywhere (a fixed share gave 14°
+             drops on the gentle mass), its lip ×1.3; the crests follow the mass's contours: curved,
+             irregular arcs. Ridges (one or two levels) across the red ground.
+       - [x] NO OUED (none in CoH's frames; its grey bed between sand terraces, its banks smeared with
+             the sandstone paint): wadis []; the sandstone paint only on the frame's faces outside the box.
+       - [x] THE SHADE WARM AND LIGHT (frames 6-7 ~70 % of the lit sand; ours near black, blue-grey):
+             Sky Pro's sun 0.38 against the sky, the ground's bounce the sand's colour (#d2a678), exposure
+             1.12 → (203,165,127), luma 176, sat 0.38 (frame 7: (213,164,127), 177, 0.41).
+       - [x] CoH's POLISH on the red ground: algSplats and algStones read a map's OWN rules / grounds
+             (maps/kantara.js `splats`, `stones`): pebbles, gravel, cracked red earth, dust pans, wind
+             streaks (the grey photos warmed — they read LILAC on the orange), a gravel fringe at the
+             sand's edge, ruts; loose warm stones. SCRUB: `blocksGrass` masked the plants too (it killed
+             every tuft) — off; the tufts denser, a band at the sand's edge, dried yellow-grey.
+       - [ ] **you**: look (?map=kantara&fow=0) — the stepped sand, the red ground, the scrub, the light.
+       - [ ] Still to match: acacias (none yet), ruins / low walls, footprints and tyre tracks (splats),
+             the palms' lime green, the sand a touch white in places.
+       - [ ] El Kantara's own SPLATS (algSplats rules): sand drifts, ripple fields, tyre tracks, red
+             patches — CoH's polish layer. A pale wind line on the crests (a spline of paint)?
+       - [ ] Scrub and small stones; the shelves (a short terrain step + sunk slabs).
+
+   "A NEW MAP STARTS FROM NOTHING" (2026-10-13, you: "a terrain has nothing and we add elements"):
+       - [x] THE BASE LEVEL: tools/algBaseLevel.mjs → public/levels/alg-base.v3proj (the Aurès' look,
+             nothing in it); tools/lib/algLevelBase.mjs says what "empty" is. El Kantara builds from it
+             every time. (The coast and the training still build from their own files: move them.)
+       - [x] THE LIGHT per map: algGame MAP_LIGHT = the Aurès' + the map's `light` (one level deep;
+             `skyPro` for Sky Pro's own settings).
+       - [x] THE BRIEFING per map (algBattle briefingHead: the map's `briefing`, else its name).
+       - [x] SCENERY COUNTS start at 0 on a map that brings `scenery` (algLandmarks Q_COUNTS).
+       - [x] Leaks found on the way: the tactical map's header and the post's name said Tighanimine.
+       - [ ] Still the Aurès': the splat rules (off here), the manual's text (gameMenu: "la vallée de
+             Tighanimine…"), the minimap's ground colours by height (a map gives `minimap.layers`).
+       - [ ] PERF: the slabs = ONE merged mesh, 867k tris (111 rim + 19 band slabs), MEASURED 1.2 ms at
+             render scale 1 over the cirque (frame 5.1 ms; the terrain 1.2) — split it into map tiles
+             (frustum culling) and lighter shapes for the rim slabs (half buried).
+       - [ ] The plateau tops are bare smooth orange: scrub, small stones, red-earth patches (step 2/3).
+       - [ ] Where a rim's slabs stop at a ramp, the bare terrain step shows (a smeared corner): a block.
+       - [ ] The briefing is still the Aurès' ("Hold the valley"): a per-map briefing (step 2).
+       - [ ] The level tool takes ~4 min (plateauSd per cell, 3 gully fields): cache it on a grid.
+2. [ ] THE LAYOUT: sites, road carved, oued, palm grove, ksar, villages, bordj, FLN camp, pump
+       station; the plan image (algPlanView); dead zones measured.
+3. [ ] THE NEW PIECES: bordj, acacia, pipeline + pump station, the tanker.
+4. [ ] THE AI: the FLN (sabotage, ambushes in the gullies, raids from the plateau); the French
+       (convoys, holding the bridge); then the méharistes.
 
 ## HELIBORNE — 2026-10-12 (you: "the helicopter should pick up and disembark units; paratroopers
 ## dropped by the plane, animated by us")

@@ -120,6 +120,9 @@ export const SANDSTONE_COLOURS = {
   // (the photo greyed alone reads PINK — red without its orange: the tint puts the yellow back)
   aures: { label: "Aurès (ocre)", tint: [1.14, 1.0, 0.72], saturation: 0.5, topDark: 0.66 },
   aures2: { label: "Aurès (gris)", tint: [1.06, 1.0, 0.84], saturation: 0.22, topDark: 0.7 },
+  // EL KANTARA (2026-10-13): the CoH red lifted warm and light — on the pale dunes the photos as they
+  // are read as dark chocolate lumps; CoH's outcrops are a light warm sandstone.
+  kantara: { label: "El Kantara (sable)", tint: [1.3, 1.12, 0.98], saturation: 0.95, topDark: 0.85 },
 };
 export function setSandstoneColour(key) {
   const c = SANDSTONE_COLOURS[key];

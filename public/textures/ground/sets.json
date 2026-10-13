@@ -297,6 +297,69 @@
    ],
    "size": 2,
    "aerial": false
+  },
+  {
+   "slug": "aerial_beach_01",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 30,
+   "aerial": true
+  },
+  {
+   "slug": "desert_hollow",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 20,
+   "aerial": true,
+   "gradedFrom": "dirt_aerial_02",
+   "mean": "#b8683e"
+  },
+  {
+   "slug": "desert_pebbly",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 2.48,
+   "aerial": false,
+   "gradedFrom": "gravelly_sand",
+   "mean": "#c87046"
+  },
+  {
+   "slug": "desert_road",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 3,
+   "aerial": false,
+   "gradedFrom": "dry_mud_field_001",
+   "mean": "#d0a47a"
+  },
+  {
+   "slug": "desert_sand",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 30,
+   "aerial": true,
+   "gradedFrom": "aerial_beach_01",
+   "mean": "#dcac78"
   }
  ]
 }

@@ -12,6 +12,7 @@
  *
  *   node tools/fetchGroundSets.mjs            download what is missing, rewrite sets.json
  *   node tools/fetchGroundSets.mjs --list     only rewrite sets.json
+ *   node tools/fetchGroundSets.mjs aerial_beach_01   these too (El Kantara, 2026-10-13: wind-rippled sand for the dunes)
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -30,8 +31,9 @@ export const PICKS = [
 const MAPS = [["Diffuse", "diff"], ["nor_gl", "nor_gl"], ["Rough", "rough"], ["AO", "ao"]];
 
 const listOnly = process.argv.includes("--list");
+const extra = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 if (!listOnly) {
-  for (const slug of PICKS) {
+  for (const slug of [...PICKS, ...extra]) {
     const dir = path.join(DIR, slug);
     fs.mkdirSync(dir, { recursive: true });
     const files = await (await fetch(`https://api.polyhaven.com/files/${slug}`)).json().catch(() => null);
@@ -47,11 +49,15 @@ if (!listOnly) {
   }
 }
 
-// sets.json: every folder with a diffuse, its maps and real size.
+// sets.json: every folder with a diffuse, its maps and real size. A REGRADED copy (tools/algGradePhoto.mjs)
+// is no Poly Haven set: its entry is kept as it is (its size its source's).
+const prev = fs.existsSync(path.join(DIR, "sets.json")) ? JSON.parse(fs.readFileSync(path.join(DIR, "sets.json"), "utf8")).sets : [];
 const sets = [];
 for (const slug of fs.readdirSync(DIR)) {
   const d = path.join(DIR, slug);
   if (!fs.statSync(d).isDirectory() || !fs.existsSync(path.join(d, `${slug}_diff_1k.jpg`))) continue;
+  const graded = prev.find((e) => e.slug === slug && e.gradedFrom);
+  if (graded) { sets.push(graded); continue; }
   const maps = MAPS.map(([, s]) => s).filter((s) => fs.existsSync(path.join(d, `${slug}_${s}_1k.jpg`)));
   let size = null;
   try {

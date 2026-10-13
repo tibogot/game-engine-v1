@@ -20,11 +20,11 @@
 //
 // Materials: Poly Haven (CC0), tools/fetchSplatMaterials.mjs.
 import { loadSplatMaterials, prefetchSplatMaterials, splatMaterialFromSlug } from "../../v3/terrain/splatMaterials.js";
-import { LAYOUT, PLAY } from "./layout.js";
+import { LAYOUT, MAP, PLAY } from "./layout.js";
 import { TRACK_LINES } from "./algTracks.js";
 
 /** The library, and the tint that sits each photo in the Aurès palette. */
-const MATS = {
+const AURES_MATS = {
   stony:     { slug: "dry_ground_rocks",             tint: [1.0, 0.94, 0.86] },
   crackMud:  { slug: "mud_cracked_dry_03",           tint: [1.02, 0.93, 0.82] },
   bedMud:    { slug: "mud_cracked_dry_riverbed_002", tint: [1.0, 0.95, 0.88] },
@@ -45,6 +45,9 @@ const MATS = {
 /** The pistes' wheel ruts (procedural, groundCache rut strips; live: restyleStrips):
  *  rut width m, wander m, opacity, relief, and the dust photo's tile m (MATS.dust). */
 const STRIP = { rut: 0.3, wander: 1.0, opacity: 0.85, normal: 1.0, tile: 3, tint: [1.08, 1.0, 0.9] };
+/** A map may bring its own materials (maps/*.js `splats.mats`) and RULES (`splats.rules(g)`, the same
+ *  shape as `rules` below, read against its own paint slots) — El Kantara's red ground, 2026-10-13. */
+const MATS = { ...AURES_MATS, ...(MAP.splats?.mats ?? {}) };
 const MAT_KEYS = Object.keys(MATS);
 const M = Object.fromEntries(MAT_KEYS.map((k, i) => [k, i]));
 
@@ -144,7 +147,7 @@ export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
       return Math.max(0, Math.min(1, (n - (1 - keep)) / Math.max(0.05, keep) * 1.6));
     },
   };
-  const R = rules(g);
+  const R = (MAP.splats?.rules ?? rules)(g);
   const wind = 0.9;   // prevailing wind heading (rad): the sand drifts lie along it
 
   const out = [];

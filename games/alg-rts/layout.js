@@ -9,8 +9,9 @@
 import * as aures from "./maps/aures.js";
 import * as coast from "./maps/coast.js";
 import * as training from "./maps/training.js";
+import * as kantara from "./maps/kantara.js";
 
-const MAPS = { aures, coast, training };
+const MAPS = { aures, coast, training, kantara };
 const asked = typeof location !== "undefined" ? new URLSearchParams(location.search).get("map") : null;
 if (asked && !MAPS[asked]) console.warn(`[alg] no map "${asked}" — the Aurès (maps: ${Object.keys(MAPS).join(", ")})`);
 const M = MAPS[asked] ?? aures;

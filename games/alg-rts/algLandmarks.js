@@ -226,14 +226,19 @@ const Q_AURES = {
   sandstone: 14, sandstoneSpacing: 55, sandstoneSlope: 13, sandstoneRelief: 2.4, sandstoneSiteClear: 45,
 };
 
+/** The counts in Q_AURES (how many of each); the other keys are placement rules. */
+const Q_COUNTS = ["outcrops", "trees", "deadTrees", "betoums", "tamariskGroups", "broomClumps", "agaveRun", "clusters", "sandstone"];
+
 /**
  * The rock outcrops (instanced, hard cover, impassable) and the lone trees
  * (the showroom's PlacedFoliage). Call after the showroom and the fields.
  */
-export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid = null, plants = null, quantities = null, keepClear = [] }) {
+export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid = null, plants = null, quantities = null, keepClear = [], fixedSandstone = [] }) {
   // A map's own counts over the Aurès' (maps/training.js scenery: a few of each), and its circles
   // kept clear (the lessons' ground).
-  const Q = { ...Q_AURES, ...quantities };
+  // A map that brings its own scenery starts from NOTHING (2026-10-13): every count it does not give
+  // is 0 — only the Aurès (no `quantities`) gets the Aurès' counts. The rules (spacings, slopes) stay.
+  const Q = { ...Q_AURES, ...(quantities ? Object.fromEntries(Q_COUNTS.map((k) => [k, 0])) : {}), ...quantities };
   const R = rng(2000);
   const H = (x, z) => app.getWorldHeight(x, z);
   const trackPts = TRACK_LINES.flatMap((t) => t.line);
@@ -481,6 +486,15 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
   // (algSandstone buildSandstoneField: the shapes are made in workers) — these are only places.
   const RS = rng(2601);
   const sandstone = [];
+  // A map's OWN slabs, placed by its level tool (maps/kantara.js: the plateau's rims and the reg's
+  // bands), first: impassable and hard cover like the ones placed here.
+  for (const o of fixedSandstone) {
+    const S = SANDSTONE_SHAPES[SANDSTONE_GAME[o.v][0]], ax = S.sizeX * o.k, az = S.sizeZ * o.k;
+    sandstone.push({ ...o, ax, az });
+    taken.push({ x: o.x, z: o.z, r: Math.hypot(ax, az) * 0.8 });
+    navGrid?.addFootprint?.(o.x, o.z, ax * 0.85, az * 0.85, o.yaw);
+    app.clearVegetation?.(o.x, o.z, Math.max(ax, az) + 1.5, { grass: 0, edge: 0.6 });
+  }
   const sites = LAYOUT.sites;
   const others = [...trees, ...dead, ...betoums, ...tamarisks];
   for (let i = 0, t = 0; i < Q.sandstone && t < 12000; t++) {

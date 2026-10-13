@@ -9,6 +9,7 @@
 // pulses, the camera's outline), built at boot at its full size so opening it costs nothing; drawn
 // only while open. The game runs on underneath (CoH doesn't pause for it).
 import { t } from "../i18n/i18n.js";
+import { MAP } from "../layout.js";
 const TAP_MS = 250;
 
 /**
@@ -21,7 +22,7 @@ export function createTacticalMap({ app, create }) {
   back.id = "alg-tacmap-back";
   back.innerHTML = `
     <div class="sheet">
-      <div class="head"><span class="kicker">${t("Aurès · vallée de Tighanimine")}</span><span class="title">${t("Carte tactique")}</span></div>
+      <div class="head"><span class="kicker">${MAP.id === "aures" ? t("Aurès · vallée de Tighanimine") : MAP.name}</span><span class="title">${t("Carte tactique")}</span></div>
       <div class="map"></div>
       <div class="foot">${t("<kbd>Clic gauche</kbd> y aller · <kbd>Clic droit</kbd> y envoyer la sélection · <kbd>Tab</kbd> maintenu : un coup d'œil, tapé : reste ouverte · <kbd>Échap</kbd> fermer")}</div>
     </div>`;

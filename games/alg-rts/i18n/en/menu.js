@@ -81,6 +81,12 @@ export default {
   "Côte du Constantinois — août 1955": "The Constantinois coast — August 1955",
   "La plaine et la baie de Philippeville, la veille du soulèvement.": "The plain and the bay of Philippeville, on the eve of the uprising.",
   "bientôt": "coming soon",
+  // maps/kantara.js — map 3 (2026-10-13)
+  "La porte du désert — El Kantara, 1958": "The gate of the desert — El Kantara, 1958",
+  "Le bordj, la palmeraie et les dunes au pied des Aurès, sur la route du pétrole.": "The bordj, the palm grove and the dunes at the foot of the Aurès, on the oil road.",
+  "Bordj d'El Kantara": "Bordj of El Kantara",
+  "Katiba du ravin": "The gully katiba",
+  "Route de Biskra": "Biskra road",
   // menu.html — the battle setup: the map and the side (2026-10-11)
   "Batailles": "Battles",
   "Choisir la carte et le camp": "Choose the map and the side",

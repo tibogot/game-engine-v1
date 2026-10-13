@@ -24,12 +24,12 @@ import { abs, attribute, float, int, normalWorld, positionWorld, pow, renderGrou
 import { markGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import { createRockGeometry } from "../../v3/props/proceduralRock.js";
 import { simplifierReady } from "../../v3/render/instancing/autoLod.js";
-import { PLAY } from "./layout.js";
+import { MAP, PLAY } from "./layout.js";
 
 const TEX = (id, m) => `/textures/ground/${id}/${id}_${m}_1k.jpg`;
 
 /** Per ground: its photo, how many stones per 100 m² at full weight, of which shapes. */
-const GROUNDS = {
+const AURES_GROUNDS = {
   scree:     { slot: 2, id: "rocks_ground_02",        tint: "#ffffff", per100: 5.5, shapes: [["pebble", 0.55], ["rock", 0.4], ["lump", 0.05]] },
   limestone: { slot: 1, id: "rock_boulder_dry", tint: "#ffffff", per100: 1.2, shapes: [["rock", 0.45], ["lump", 0.35], ["boulder", 0.2]] },
   soil:      { slot: 0, id: "brown_mud_dry",        tint: "#ffffff", per100: 0.35, shapes: [["pebble", 0.6], ["rock", 0.4]] },
@@ -47,6 +47,8 @@ const SHAPES = {
   cobble:  { size: [0.24, 0.13, 0.19], tris: 64,  seeds: [8, 9],  extra: { chips: 5, chipMax: 0.06, edgeSoft: 0.03, egg: 0.02, detail: 14, simplifyError: 0.25 } },
 };
 
+/** A map's own grounds (maps/*.js `stones`: the same shape, its own paint slots and photos), else the Aurès'. */
+const GROUNDS = MAP.stones ?? AURES_GROUNDS;
 const GROUND_KEYS = Object.keys(GROUNDS);
 const PHOTO = 1024;
 
