@@ -29,6 +29,11 @@ import { createPointMark } from "./algPointMarks.js";
 import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
+import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+// (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
+await loadSandbags();
+await loadSandbagWall();
 
 // THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
 // marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
@@ -142,6 +147,13 @@ function labWindsock(g) {
 }
 
 const BUILDINGS = {
+  // THE SANDBAGS (2026-10-14, you: "the sandbags look so cheap — can you do better?"): the game's wall LEFT,
+  // the new one RIGHT (algSandbags.js).
+  sacsDeSable: {
+    label: "Sacs de sable (nouveau)", gap: 7.5, before: () => buildFrSandbagWall(),
+    after: () => { const { mesh } = buildSandbagWallV2({ seed: 3 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [mesh]; return g; },
+    tags: ["SACS DE SABLE (LE JEU)", `SACS DE SABLE · NOUVEAU · variante ${SEED + 1}`], note: "le mur du jeu à gauche, le nouveau à droite : sacs en jute, chacun sa forme et sa teinte, posés en quinconce.",
+  },
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
   poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
   parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },

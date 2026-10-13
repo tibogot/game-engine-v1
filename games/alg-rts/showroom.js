@@ -26,6 +26,7 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
+import { buildSandbagWallPiece } from "./algSandbags.js";
 import { buildDechraV2, buildKsarV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
@@ -74,8 +75,8 @@ export const BASE_BUILDABLES = [
   // Behind the vehicle park, toward the valley.
   // Detail 2 (the buildings lab, 2026-10-07): the roof in lapped sheets, no rust grid.
   { key: "motorPool", build: (o) => buildMotorPool({ ...o, detail: 2 }), lx: -48, lz: -30, yaw: 0 },
-  { key: "sandbags1", build: buildFrSandbagWall, lx: 8, lz: 30, yaw: 0.1, follow: true },
-  { key: "sandbags2", build: () => buildFrSandbagWall({ seed: 7 }), lx: 2, lz: 31, yaw: -0.15, follow: true },
+  { key: "sandbags1", build: () => buildSandbagWallPiece(() => buildFrSandbagWall()), lx: 8, lz: 30, yaw: 0.1, follow: true },
+  { key: "sandbags2", build: () => buildSandbagWallPiece(() => buildFrSandbagWall({ seed: 7 })), lx: 2, lz: 31, yaw: -0.15, follow: true },
   { key: "wire1", build: buildBarbedWire, lx: -2, lz: 38, yaw: 0, follow: true },
   { key: "wire2", build: () => buildBarbedWire({ seed: 21 }), lx: 10, lz: 37.5, yaw: 0.12, follow: true },
 ];

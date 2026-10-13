@@ -40,6 +40,7 @@ import { createAlgStones, prefetchStonePhotos } from "./algStones.js";
 import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { createAlgSea } from "./algSea.js";
+import { loadSandbagWall } from "./algSandbags.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
@@ -160,6 +161,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // The stones' ground photos: fetched and decoded now, behind the engine's start (algStones.js).
   prefetchStonePhotos();
   prefetchAlgSplats();   // and the ground splats' (algSplats.js)
+  // The cloth-simulated sandbag wall (algSandbags.js: Blender, near + far), loaded behind the engine's start.
+  const sandbagsReady = loadSandbagWall();
   // The sandstone rocks' shapes, in worker threads (algSandstone.js; ~1-1.7 s each on one thread).
   if (SCENERY) prefetchSandstone();
   prefetchCave();   // the cave's rocks too (algCave.js): in workers from the top of the boot
@@ -379,6 +382,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     (MAP.farmsteads ?? []).forEach((f, i) => extra.push({ key: `mechtaFarmMap${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1975 + i * 7 }), x: f.x, z: f.z, yaw: VIEW_YAW + (f.turn ?? 0), ground: true }));
     // The sandstone cave's rocks (algCave.js), made in workers: waited for here, not built on the main thread.
     await prefetchCave();
+    await sandbagsReady;   // (the post's walls are built from it)
     app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }
 

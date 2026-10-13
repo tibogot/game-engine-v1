@@ -59,6 +59,12 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
       const dx = x - m.position.x, dz = z - m.position.z;
       const lx = c * dx - s * dz - fp.cx, lz = s * dx + c * dz - fp.cz;
       if (Math.abs(lx) > fp.hx + reach || Math.abs(lz) > fp.hz + reach) continue;
+      // (the cloth-simulated wall, algSandbags buildSandbagWallPiece: drawn by its child, the piece's own
+      // material invisible — the breached kit wall needs the kit's material, the intact cloth wall goes)
+      if (m.geometry.userData?.simWall) {
+        for (const c of m.children) if (/^SandbagWall/.test(c.name)) c.visible = false;
+        m.material = kitView(breachedGeo).material;
+      }
       m.geometry = breachedGeo;
       m.userData.breached = true;
       any = true;

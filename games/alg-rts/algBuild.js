@@ -21,6 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
+import { buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { t } from "./i18n/i18n.js";
@@ -31,7 +32,7 @@ import { t } from "./i18n/i18n.js";
  * for one sapper. `structure`: its combat stats' key (algStructures.js STATS).
  */
 export const BUILDS = {
-  sandbags: { label: t("Sacs de sable"), tip: t("Mur de sacs de sable : une couverture solide pour les hommes derrière."), cost: 20, time: 6, build: () => buildFrSandbagWall(), follow: true },
+  sandbags: { label: t("Sacs de sable"), tip: t("Mur de sacs de sable : une couverture solide pour les hommes derrière."), cost: 20, time: 6, build: () => buildSandbagWallPiece(() => buildFrSandbagWall()), follow: true },
   wire: { label: t("Barbelés"), tip: t("Barbelés : il faut les contourner ou les couper ; un véhicule les écrase."), cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
   mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => buildMgNest(), pad: true, structure: "mgNest" },
   mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris."), cost: 130, time: 18, build: () => buildMortarPitV2(), pad: true, structure: "mortarPit" },
