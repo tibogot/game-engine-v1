@@ -4,8 +4,8 @@
  * algDem's Filfila cut, is in git: it gave a straight synthetic beach, a flat shelf and a corner of
  * sea). You: "smaller like CoH, a bit more flat; the sea should take more of the map".
  *
- *   node tools/algCoastLevel.mjs                       rebuild the coast IN PLACE (its own look)
- *   node tools/algCoastLevel.mjs --from <other.v3proj> --out <new.v3proj> [--force 1]
+ *   node tools/algCoastLevel.mjs                       rebuild the coast from the EMPTY base (alg-base.v3proj)
+ *   node tools/algCoastLevel.mjs --from <other.v3proj> --out <new.v3proj>
  *
  * THE GROUND
  *   the shore   coast.js SHORE, smoothed; every point's SIGNED distance to it (+ land, − sea)
@@ -28,12 +28,12 @@ import fs from "node:fs";
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { PLAY, LAYOUT, MAP, SHORE, SEA_LEVEL } from "../games/alg-rts/maps/coast.js";
 import { trackCarver } from "./lib/trackCarve.mjs";
+import { blankManifest, BASE_LEVEL } from "./lib/algLevelBase.mjs";
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, "")] = process.argv[i + 1];
 args.out ??= "public/levels/alg-coast.v3proj";
-args.from ??= args.out;   // in place: the coast's own look
-if (args.from !== args.out && fs.existsSync(args.out) && args.force !== "1") throw new Error(`${args.out} exists — --force 1 to rebuild it`);
+args.from ??= BASE_LEVEL;   // every time from the EMPTY base (tools/lib/algLevelBase.mjs, 2026-10-13), as El Kantara
 
 const tpl = await readProject(args.from);
 const man = tpl.manifest;
@@ -283,13 +283,7 @@ const tallPaint = plantPaint(512, 1, TALL);
 const groundPaint = plantPaint(1024, 2, GROUND);
 
 // ── Manifest: the look kept; the content gone; the coast's photos ──────────
-man.trees = { ...man.trees, instances: [] };
-man.props = { ...man.props, instances: [] };
-man.decals = { ...man.decals, decals: [] };
-man.lakes = { ...man.lakes, lakes: [] };
-man.roads = { nodes: [], edges: [], nextNodeId: 1, selectedNodeId: null };
-for (const k of ["waterfalls", "riversV2", "riverNetwork", "tunnels", "spawn"]) man[k] = null;
-if (man.farTerrain) man.farTerrain = { ...man.farTerrain, enabled: false };
+blankManifest(man);   // (the base is empty already; again, in case --from names another map)
 if (man.environment?.worldOcean) man.environment = { ...man.environment, worldOcean: { ...man.environment.worldOcean, enabled: false, seaLevel: SEA } };
 const photo = (dir, file) => ({ name: file, url: `${dir}/${file}` });
 const set = (slot, name, dir, base, maps, look) => {
