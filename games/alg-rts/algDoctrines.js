@@ -20,6 +20,12 @@
 //   APPUI AÉRIEN (the T-6 squadrons, the Piper spotters, the Alouette's medevac): an observation
 //                plane that reveals a zone; a patrol of two T-6; casualties lifted out and healed.
 //
+// THE FLN'S TWO (2026-10-13, A4 — a human playing it, ?side=fln; points from French killed, its villages):
+//   WILAYA       the maquis: a faoudj from a douar you hold; the informers' network that reveals a
+//                zone; the saboteurs (cheaper mines, more of them); a captured jeep.
+//   ARMÉE DES FRONTIÈRES  the army from Tunisia and Morocco: 81 mm mortar fire; the heavy weapons
+//                tier at once; a section from outside; advisers (every squad with a star).
+//
 // Off in the training (algGame does not make it). ?doctrine=none = no doctrine.
 import * as THREE from "three";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
@@ -29,6 +35,8 @@ import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { costOf, RES } from "./algEconomy.js";
 import { VET } from "./algVeterancy.js";
 import { createAlgParadrop } from "./algParadrop.js";
+import { SIDES } from "../shared-rts/teams.js";
+import { FLN_TRICKS } from "./algFlnTricks.js";
 import { iconStyle } from "./ui/icons.js";
 import { t } from "./i18n/i18n.js";
 
@@ -75,6 +83,35 @@ export const DOCTRINES = {
         hint: t("Permanent : les groupes de la Légion se renforcent à moitié prix.") },
     ],
   },
+  // ── THE FLN'S ──────────────────────────────────────────────────────────────
+  wilaya: {
+    side: "enemy", name: t("Wilaya"), short: t("Wilaya"),
+    blurb: t("Le maquis : des renforts des douars, un réseau d'informateurs, les saboteurs, une jeep capturée."),
+    abilities: [
+      { key: "douar", icon: "reinforce", name: t("Renforts du douar"), cp: 1, cost: 110, cooldown: 90, aim: true, villageOnly: true, radius: 8,
+        hint: t("Un faoudj de quatre hommes du douar rejoint le maquis dans un village que vous tenez.") },
+      { key: "informers", icon: "alertSeen", name: t("Réseau d'informateurs"), cp: 2, cost: 40, cooldown: 100, aim: true, anywhere: true, radius: P.recon.vision,
+        hint: t("Les bergers et les commerçants parlent : tout ce qui se trouve dans la zone est vu pendant 25 s.") },
+      { key: "saboteurs", icon: "alertMine", name: t("Saboteurs"), cp: 2, passive: true,
+        hint: t("Permanent : les mines coûtent moitié moins et huit peuvent attendre en même temps.") },
+      { key: "jeep", icon: "transport", name: t("Jeep capturée"), cp: 3, cost: 150, cooldown: 180,
+        hint: t("Une jeep Willys prise aux Français, sa mitrailleuse : elle sort de la grotte.") },
+    ],
+  },
+  frontieres: {
+    side: "enemy", name: t("Armée des frontières"), short: t("Frontières"),
+    blurb: t("L'armée de l'extérieur : mortiers de 81, armes lourdes tout de suite, une section venue de Tunisie, des conseillers."),
+    abilities: [
+      { key: "mortar81", icon: "barrage", name: t("Tir de mortiers de 81"), cp: 1, cost: 90, cooldown: 120, aim: true, radius: 14,
+        hint: t("Huit obus de 81 sur un point que vos hommes voient, tirés depuis la frontière.") },
+      { key: "borderArms", icon: "tier", name: t("Armes des frontières"), cp: 2, passive: true,
+        hint: t("Permanent : l'échelon des armes lourdes (mortier de 60, mitrailleuse de 12,7) s'ouvre aussitôt.") },
+      { key: "outsideSection", icon: "reinforce", name: t("Section de l'extérieur"), cp: 2, cost: 220, cooldown: 150,
+        hint: t("Deux faoudjs et un tireur FM passés du barrage sortent de la grotte.") },
+      { key: "advisers", icon: "vet1", name: t("Conseillers"), cp: 3, passive: true,
+        hint: t("Permanent : chaque groupe du FLN arrive avec une étoile d'expérience.") },
+    ],
+  },
   air: {
     name: t("Appui aérien"), short: t("Air"),
     blurb: t("Un avion d'observation qui révèle une zone, une patrouille de T-6, l'évacuation des blessés."),
@@ -90,25 +127,30 @@ export const DOCTRINES = {
     ],
   },
 };
-export const DOCTRINE_LIST = Object.entries(DOCTRINES).map(([key, d]) => ({ key, label: d.name, blurb: d.blurb }));
+/** The doctrines of the side you play (the briefing's choice). */
+export const doctrineList = () => Object.entries(DOCTRINES).filter(([, d]) => (d.side ?? "player") === SIDES.human).map(([key, d]) => ({ key, label: d.name, blurb: d.blurb }));
 
-/** The doctrine to start with: ?doctrine=, then the last one chosen, then the paras. */
+/** The doctrine to start with: ?doctrine=, then the last one chosen (per side), then the paras (the FLN: the wilaya). */
 export function storedDoctrine() {
+  const mine = (k) => DOCTRINES[k] && (DOCTRINES[k].side ?? "player") === SIDES.human;
   const q = new URLSearchParams(location.search).get("doctrine");
   if (q === "none") return null;
-  if (q && DOCTRINES[q]) return q;
-  try { const s = localStorage.getItem(STORE); if (s && DOCTRINES[s]) return s; } catch { /* */ }
-  return "paras";
+  if (mine(q)) return q;
+  try { const s = localStorage.getItem(storeKey()); if (mine(s)) return s; } catch { /* */ }
+  return SIDES.human === "enemy" ? "wilaya" : "paras";
 }
+const storeKey = () => (SIDES.human === "enemy" ? STORE + ".fln" : STORE);
 
 export function createAlgDoctrines(app, { units, squads, economy, projectiles, combat = null, airStrike, fogOfWar = null }) {
   const dom = app.renderer.domElement;
   const groundY = (x, z) => app.getWorldHeight?.(x, z) ?? 0;
-  const purse = economy.french;
+  // THE SIDE (the human's): the French's purse and post, or the FLN's supplies and cave.
+  const SIDE = SIDES.human, FLN = SIDE === "enemy";
+  const purse = FLN ? economy.aln : economy.french;
   const say = (text, x = null, z = null, kind = "good") => app.algBattle?.say?.(text, x, z, kind);
-  const post = () => app.algProducers?.find((p) => p.structure.typeKey === "post" && p.structure.team === "player") ?? null;
+  const post = () => app.algProducers?.find((p) => p.structure.typeKey === (FLN ? "caveEntrance" : "post") && p.structure.team === SIDE) ?? null;
   const seen = (x, z) => !fogOfWar?.enabled || fogOfWar.isVisible(x, z);
-  const popRoom = () => economy.popRoom?.() ?? Infinity;
+  const popRoom = () => (SIDES.human === "enemy" ? Infinity : economy.popRoom?.() ?? Infinity);   // (the pop cap is the French's)
 
   let doctrine = null;
   let xp = 0, cp = 0;
@@ -170,9 +212,10 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   }
   /** The observation plane: a circle over (x, z) for P.recon.life s — and its eye. */
   const recons = [];
-  function reconOver(x, z) {
+  function reconOver(x, z, { plane = true } = {}) {
     const R = P.recon, w = R.speed / R.radius;
-    const mesh = planeMesh();
+    // (The FLN's informers: no plane — only the eye. An empty group stands in for the mesh.)
+    const mesh = plane ? planeMesh() : new THREE.Group();
     app.scene.add(mesh);
     const f = {
       mesh, t: 0, end: R.life, x, z,
@@ -202,17 +245,18 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
 
   // ── Squads out of nowhere (a drop) or out of the post ─────────────────────
   function squadAt(key, x, z, { elite = false } = {}) {
-    const size = { para: 5, legion: 5 }[key] ?? 5;
+    const size = { para: 5, legion: 5, moudjahid: 4, fmTeam: 1 }[key] ?? 5;
     if (popRoom() < size) { say(t("<b>Effectifs au plafond</b> : pas de place pour un groupe de plus."), x, z, "bad"); return null; }
     const men = [];
     for (let i = 0; i < size; i++) {
       const a = (i / size) * Math.PI * 2, r = i ? 2.4 : 0;
-      const u = units.spawn(key, x + Math.cos(a) * r, z + Math.sin(a) * r, { team: "player", lookRole: i });
+      const u = units.spawn(key, x + Math.cos(a) * r, z + Math.sin(a) * r, { team: SIDE, lookRole: i });
       if (u) men.push(u);
     }
     if (!men.length) return null;
     squads.adopt(men, key);
     const s = squads.of(men[0]);
+    if (s && FLN && unlocked.has("advisers")) { s.xp = Math.max(s.xp ?? 0, VET.thresholds[0]); s.stars = Math.max(s.stars ?? 0, 1); }
     if (s && elite) { s.upgrades.lmg = true; s.xp = Math.max(s.xp ?? 0, VET.thresholds[0]); s.stars = Math.max(s.stars ?? 0, 1); }
     return s;
   }
@@ -271,6 +315,37 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
         later.push({ t: 1.6, fn: () => airStrike.call(p.structure, at.x - (oz / l) * 16, at.z + (ox / l) * 16, null, { free: true }) });
         return true;
       }
+      // ── the FLN's ──
+      case "douar": {
+        const s = squadAt("moudjahid", at.x, at.z);
+        if (!s) return false;
+        say(t("<b>Un faoudj du douar</b> rejoint le maquis."), at.x, at.z);
+        return true;
+      }
+      case "informers":
+        reconOver(at.x, at.z, { plane: false });
+        say(t("<b>Les informateurs parlent</b> : la zone est vue pendant 25 s."), at.x, at.z);
+        return true;
+      case "jeep": {
+        const o = p?.outside ?? p?.structure.position;
+        if (!o) return false;
+        const u = units.spawn("willys", o.x, o.z, { team: SIDE });
+        if (!u) return false;
+        const r = p.structure.rally ?? o;
+        u.orderTo(r.x + 6, r.z + 6);
+        say(t("<b>Une jeep capturée</b> sort de la grotte."), o.x, o.z);
+        return true;
+      }
+      case "mortar81":
+        mortarOn(at.x, at.z);
+        say(t("<b>Les mortiers de 81 tirent</b> depuis la frontière."), at.x, at.z);
+        return true;
+      case "outsideSection": {
+        const a = squadFromPost("moudjahid"), b = squadFromPost("moudjahid"), c = squadFromPost("fmTeam");
+        if (!a && !b && !c) return false;
+        say(t("<b>Une section de l'extérieur</b> a passé le barrage : elle sort de la grotte."), p?.structure.position.x, p?.structure.position.z);
+        return true;
+      }
       case "gunship":
         gunshipOver(at.x, at.z);
         app.algSounds?.radio?.();
@@ -299,6 +374,9 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       unlocked.add(key);
       if (key === "legionEngineers") app.algBuildSpeed = 1.6;
       if (key === "eliteParas") elite();
+      if (key === "saboteurs") { FLN_TRICKS.mine.cost = 15; if (app.algMines?.params) app.algMines.params.max = 8; }
+      if (key === "borderArms") app.algFlnTiers?.grant?.(2);
+      if (key === "advisers") elite();
       say(t("<b>{name}</b> débloqué.", { name: ab.name }));
       render();
       return;
@@ -313,7 +391,8 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   function aimAt(e) {
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);
     targeting.at = hit?.point ? { x: hit.point.x, z: hit.point.z } : null;
-    targeting.ok = !!targeting.at && (targeting.ab.anywhere || seen(targeting.at.x, targeting.at.z));
+    targeting.ok = !!targeting.at && (targeting.ab.anywhere || seen(targeting.at.x, targeting.at.z))
+      && (!targeting.ab.villageOnly || (economy.points ?? []).some((v) => v.owner === SIDE && Math.hypot(v.position.x - targeting.at.x, v.position.z - targeting.at.z) < (v.radius ?? 40)));
   }
   const onMove = (e) => { if (targeting) aimAt(e); };
   const onDown = (e) => {
@@ -324,7 +403,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     const { ab, at, ok } = targeting;
     cancel();
     if (!at) return;
-    if (!ok) { say(t("Il faut que vos hommes voient ce point."), at.x, at.z, "bad"); return; }
+    if (!ok) { say(ab.villageOnly ? t("Il faut un village que vous tenez.") : t("Il faut que vos hommes voient ce point."), at.x, at.z, "bad"); return; }
     if (!ready(ab)) return;
     if (run(ab, at)) { purse.spend(ab.cost ?? {}); cd.set(ab.key, ab.cooldown ?? 0); }
   };
@@ -369,12 +448,12 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
   el.addEventListener("click", (e) => { const b = e.target.closest("[data-ab]"); if (b) press(b.dataset.ab); });
 
-  const fmtCost = (c) => { const k = costOf(c); return RES.filter((r) => k[r.key] > 0).map((r) => `${k[r.key]}${r.short ? " " + r.short : ""}`).join(" · ") || t("gratuit"); };
+  const fmtCost = (c) => { if (FLN) return c ? t("{n} ravitaillement", { n: c }) : t("gratuit"); const k = costOf(c); return RES.filter((r) => k[r.key] > 0).map((r) => `${k[r.key]}${r.short ? " " + r.short : ""}`).join(" · ") || t("gratuit"); };
   function render() {
     const d = DOCTRINES[doctrine];
     el.hidden = !d;
     if (!d) return;
-    el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${d.short}</span><span class="cp" title="${t("Points de commandement : gagnés en tuant des combattants du FLN et en tenant des villages.")}">★ ${cp}</span></div>
+    el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${d.short}</span><span class="cp" title="${FLN ? t("Points de commandement : gagnés en tuant des soldats français et en tenant des villages.") : t("Points de commandement : gagnés en tuant des combattants du FLN et en tenant des villages.")}">★ ${cp}</span></div>
       <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
       ${d.abilities.map((a) => `<button type="button" class="ab" data-ab="${a.key}" title="${a.hint}"><span class="ic" style="${iconStyle(a.icon)}"></span>
         <span class="nm">${a.name}</span><span class="pr"></span><span class="sw"></span></button>`).join("")}`;
@@ -413,7 +492,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   }
   function step(dt) {
     if (!doctrine) return;
-    gain(((economy.held ?? 0) * P.villageXpPerMin * dt) / 60);
+    gain((((FLN ? economy.heldByEnemy : economy.held) ?? 0) * P.villageXpPerMin * dt) / 60);
     for (const [k, v] of cd) if (v > 0) cd.set(k, Math.max(0, v - dt));
     for (let i = later.length - 1; i >= 0; i--) if ((later[i].t -= dt) <= 0) { later[i].fn(); later.splice(i, 1); }
     for (let i = salvos.length - 1; i >= 0; i--) {
@@ -446,7 +525,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       projectiles.spawn(_g.clone(), { position: at, isAir: false, isStructure: false }, 0, { weapon: "mg", team: "player" }, null, { miss: true, exact: true });
       combat?.onImpact?.(best, G.damage, at, post()?.structure ?? null, { bullet: true });
     }
-    if (unlocked.has("eliteParas")) elite();
+    if (unlocked.has("eliteParas") || unlocked.has("advisers")) elite();
     paradrop.step(dt);
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i];
@@ -461,7 +540,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   /** Paras d'élite: every para stick of yours with at least P.eliteStars (the drop's, the helipad's). */
   function elite() {
     for (const s of squads.list) {
-      if (s.team !== "player" || s.typeKey !== "para" || (s.stars ?? 0) >= P.eliteStars || s._formingElite) continue;
+      if (s.team !== SIDE || (!FLN && s.typeKey !== "para") || (s.stars ?? 0) >= P.eliteStars || s._formingElite) continue;
       s.xp = Math.max(s.xp ?? 0, VET.thresholds[P.eliteStars - 1]);
       s.stars = P.eliteStars;
     }
@@ -496,7 +575,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     /** The choice (the briefing's, or none). */
     choose(key) {
       doctrine = DOCTRINES[key] ? key : null;
-      try { if (doctrine) localStorage.setItem(STORE, doctrine); } catch { /* */ }
+      try { if (doctrine) localStorage.setItem(storeKey(), doctrine); } catch { /* */ }
       unlocked.clear(); cd.clear(); cp = 0; xp = 0;
       app.algBuildSpeed = 1;
       render();
@@ -504,7 +583,8 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     /** A kill (combat's onDeath): the FLN killed by your men fill the bar. */
     onKill(e) {
       const k = e.lastHitBy;
-      if (!doctrine || e.team !== "enemy" || k?.team !== "player") return;
+      const foe = FLN ? "player" : "enemy";
+      if (!doctrine || e.team !== foe || k?.team !== SIDE) return;
       const v = VET.value;
       gain(e.isStructure ? v.structure : !e.type?.foot ? v.vehicle : e.typeKey === "fmTeam" ? v.fmTeam : e.typeKey === "tireur" ? v.tireur : v.man);
     },

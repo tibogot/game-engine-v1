@@ -852,7 +852,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algAirStrike = airStrike;
   // DOCTRINES (algDoctrines.js): the commander chosen in the briefing, command points from the
   // fight, its call-ins on a strip above the HUD. Not in the training.
-  const doctrines = MAP.tutorial || SIDES.human !== "player" ? null : createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar });
+  // (Both sides now: the FLN's two when you play it — 2026-10-13, A4.)
+  const doctrines = MAP.tutorial ? null : createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar });
   app.algDoctrines = doctrines;
   // FIELD WORKS (algFieldWorks.js): the forward post, the aid station, the fortified point.
   const fieldWorks = createAlgFieldWorks(app, { units, structures, economy });

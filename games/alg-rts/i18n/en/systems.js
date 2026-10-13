@@ -34,7 +34,7 @@ export default {
   "Ramenez le faoudj à la grotte (Retraite) pour le renforcer.": "Bring the faoudj back to the cave (Retreat) to reinforce it.",
   // algFlnTricks.js — a human FLN's sabotage (2026-10-13)
   "Mine": "Mine",
-  "Quatre mines sont déjà posées : attendez qu'une saute.": "Four mines are already laid: wait for one to go off.",
+  "Toutes vos mines sont posées : attendez qu'une saute.": "All your mines are laid: wait for one to go off.",
   "Un homme va poser une mine où vous cliquez (une piste de préférence) : ~6 s de travail, puis elle attend une botte ou une roue française.": "A man lays a mine where you click (a track is best): ~6 s of work, then it waits for a French boot or wheel.",
   "Couper la ligne": "Cut the line",
   "Le groupe abat le poteau télégraphique le plus proche (~10 s) : le poste perd son appui aérien et une part de ses effectifs d'Alger jusqu'à ce que ses sapeurs le réparent.": "The group fells the nearest telegraph pole (~10 s): the post loses its air support and part of its manpower from Algiers until its sappers mend it.",

@@ -73,6 +73,15 @@ PHASE 1 — finish what is half-built
    measured 20 → 51 hp in ~4 s). (c) the REFUGE is its SECOND BASE: its squads within 30 m reinforce
    there as at the cave (fieldPoints; the map's own refuges too). Not done: production at a refuge
    (only reinforcing), retreat to the nearest refuge (they run to the cave).
+   A4 [x] 2026-10-13 — FLN DOCTRINES (algDoctrines.js, now per SIDE: purse, home, villages, kills; the
+   briefing lists the side's own, stored per side): WILAYA — Renforts du douar (a faoudj in a village you
+   hold, 110), Réseau d'informateurs (a zone seen 25 s, no plane, 40), Saboteurs (mines 15 and 8 live),
+   Jeep capturée (a Willys out of the cave, 150) · ARMÉE DES FRONTIÈRES — Tir de mortiers de 81 (8 bombs,
+   90), Armes des frontières (tier 2 at once: algTiers grant), Section de l'extérieur (two faoudjs and an
+   FM, 220), Conseillers (every squad a star). All tested in the game. GAPS: the captured jeep is washed
+   bright red (the team tint) and crewed by French appelés (the crew map is by type) — it wants its own
+   look; a ~390 ms frame seen once as the section spawned (not measured: new squads' shaders?).
+   → THE FLN TOOLKIT (A1-A4) IS DONE. NEXT: B, the French AI.
 4b. [ ] FLN-SIDE TRAINING (agreed in talk 2026-10-12, AFTER #4): the common lessons (camera, select,
    move, cover) + the FLN's own (concealment, ambush, hit-and-run to the cave, villages = supplies,
    caches / sangars / screens, sabotage, avoid armour and helicopters; final = a convoy ambush) on

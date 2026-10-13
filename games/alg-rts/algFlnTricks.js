@@ -49,7 +49,7 @@ export function createAlgFlnTricks(app, { units, selection, mines, purse }) {
     const full = (mines.count ?? 0) >= (mines.params?.max ?? 4);
     return [
       { key: "flnMine", label: t("Mine"), cost: P.mine.cost, ready: !full && purse.canAfford(P.mine.cost),
-        hint: full ? t("Quatre mines sont déjà posées : attendez qu'une saute.") : t("Un homme va poser une mine où vous cliquez (une piste de préférence) : ~6 s de travail, puis elle attend une botte ou une roue française.") },
+        hint: full ? t("Toutes vos mines sont posées : attendez qu'une saute.") : t("Un homme va poser une mine où vous cliquez (une piste de préférence) : ~6 s de travail, puis elle attend une botte ou une roue française.") },
       { key: "flnCut", label: t("Couper la ligne"), ready: !!poleFor(men),
         hint: poleFor(men) ? t("Le groupe abat le poteau télégraphique le plus proche (~10 s) : le poste perd son appui aérien et une part de ses effectifs d'Alger jusqu'à ce que ses sapeurs le réparent.") : t("Aucun poteau télégraphique debout à moins de 45 m.") },
     ];

@@ -23,7 +23,7 @@
 // frame): no hooks into combat, the AI or the units. ?battle=0 = without.
 import { LAYOUT, MAP } from "./layout.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
-import { DOCTRINE_LIST, storedDoctrine } from "./algDoctrines.js";
+import { doctrineList, storedDoctrine } from "./algDoctrines.js";
 import { createBattleHud } from "./ui/battleHud.js";
 import { DIFFICULTIES, applyDifficulty, storedDifficulty } from "./algDifficulty.js";
 import { t, LANGS, LANG, setLang } from "./i18n/i18n.js";
@@ -461,7 +461,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           <li>${t("Le <b>FLN</b> ne vous affrontera pas à découvert. Il travaille les villages en silence, tend des embuscades aux hommes isolés, mine les pistes, raide vos dépôts et regagne sa grotte. Tenez garnison, patrouillez, fortifiez.")}</li>
         </ul>`}
         <div class="keys">${t("<kbd>Espace</kbd> aller à la dernière alerte · cliquez une alerte pour y aller · maintenez <kbd>V</kbd> pour voir la couverture · <kbd>R</kbd> tourne un bâtiment · survolez un village pour ses détails · <kbd>Échap</kbd> pause et options")}</div>`,
-      go, { levels: DIFFICULTIES, current: storedDifficulty(), ready, doctrines: app.algDoctrines ? DOCTRINE_LIST : [], doctrine: storedDoctrine() });
+      go, { levels: DIFFICULTIES, current: storedDifficulty(), ready, doctrines: app.algDoctrines ? doctrineList() : [], doctrine: storedDoctrine() });
       back.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); }));
       return back;
     },

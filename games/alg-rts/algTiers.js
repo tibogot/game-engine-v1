@@ -112,6 +112,8 @@ export function createAlgTiers(app, { economy, post = () => null, side = "player
       return { text: t("échelon {n}/{of}", { n: tier, of: TIERS_.length }),
         tip: tr ? t("Échelon suivant : {how}.", { how: howTo(tr) }) : t("Tous les échelons sont débloqués.") };
     },
+    /** A tier GIVEN (the FLN's doctrine "Armes des frontières"): at least `n`, free. */
+    grant(n) { if (n > tier) { tier = Math.min(n, TIERS_.length); app.algBattle?.say?.(t("<b>{name}</b> débloqué : {note}.", { name: TIERS_[tier - 1].name, note: TIERS_[tier - 1].note })); } },
     /** Buy the next tier (the post's card). True if done. */
     unlock() {
       const tr = next();
