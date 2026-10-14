@@ -28,6 +28,10 @@ export default {
   "Un équipage ne se renforce pas : ramenez-le au poste, ses blessés s'y soignent.": "A crew is not reinforced: bring it back to the post, its wounded heal there.",
   "Le tireur du groupe reçoit le fusil-mitrailleur FM 24/29 : des rafales qui clouent au sol à 42 m. Le groupe le garde (son remplaçant le reprend).":
     "The squad's gunner gets the FM 24/29 light machine gun: bursts that pin the enemy at 42 m. The squad keeps it (his replacement picks it up).",
+  "Bazooka": "Bazooka",
+  "Un moudjahid du faoudj reçoit un bazooka M20 passé par les frontières : il perce un half-track ou un blindé léger à 40 m, peu efficace contre les hommes. Le faoudj le garde (son remplaçant le reprend).":
+    "One moudjahid of the faoudj gets an M20 bazooka smuggled across the borders: it punches through a half-track or light armour at 40 m, poor against men. The faoudj keeps it (his replacement picks it up).",
+  " Il faut une cache d'armes debout.": " Needs a standing arms cache.",
 
   // algBuild.js — the engineers' builds
   "Sacs de sable": "Sandbags",

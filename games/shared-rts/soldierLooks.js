@@ -189,6 +189,9 @@ export const LOOKS = {
       // (no standard-bearer: you, 2026-09-30 — the flag kit stays in KIT)
     },
     weaponMix: { mas36: 0.45, mauser98: 0.3, enfield: 0.25 },
+    // Weapons a man of this look may be HANDED later (unitRenderer setWeapon — a squad upgrade:
+    // the faoudj's bazooka, algSquads UPGRADES.bazooka): their pieces are built with the look's.
+    spare: ["m20"],
     extras: { beard: 0.45, mustache: 0.5, bandolier: 0.4, bandoliers: 0.25, cigarette: 0.1, kachabia: 0.2 },
   },
   // The ALN's FM gunners (alg-rts fmTeam): the section's look, every man with

@@ -122,7 +122,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
       const pos = `${sx},${sy}`;
       if (pos !== b.pos) { b.pos = pos; b.el.style.transform = `translate(${sx}px, ${sy}px) translate(-60%, -100%)`; }
       const f = max > 0 ? hp / max : 0;
-      const key = `${men.length}|${Math.round(f * 50)}|${sel}|${s.retreating}|${s.stars ?? 0}|${!!s.upgrades?.lmg}`;
+      const key = `${men.length}|${Math.round(f * 50)}|${sel}|${s.retreating}|${s.stars ?? 0}|${!!(s.upgrades?.lmg || s.upgrades?.bazooka)}`;
       if (key === b.last) continue;
       b.last = key;
       b.n.textContent = men.length;
@@ -133,7 +133,8 @@ export function createSquadBadges({ app, squads, groups = null }) {
       const vet = Math.min(3, s.stars ?? 0);
       b.st.hidden = !vet;
       if (vet) b.st.style.cssText = iconStyle(`vet${vet}`);
-      b.up.hidden = !s.upgrades?.lmg;
+      b.up.hidden = !(s.upgrades?.lmg || s.upgrades?.bazooka);
+      b.up.textContent = s.upgrades?.bazooka ? t("Bazooka") : t("FM");   // (the faoudj's M20, algSquads)
     }
     for (const [s, b] of badges) if (!live.has(s)) { b.el.remove(); badges.delete(s); }
   }

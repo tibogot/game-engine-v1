@@ -29,9 +29,10 @@ export function createAlgRecoilless(app, { squads }) {
     }
   }
 
-  /** combat's onShot: a recoilless shot — the back-blast behind the gunner. */
+  /** combat's onShot: a recoilless shot — the back-blast behind the gunner (the faoudj's bazooka too:
+   *  any man on foot firing a shell). */
   function onShot(e) {
-    if (e.weapon !== "cannon" || e.squad?.typeKey !== P.key) return;
+    if (e.weapon !== "cannon" || !e.type?.foot) return;
     const h = e.heading ?? 0, bx = e.position.x - Math.sin(h) * P.blastBack, bz = e.position.z - Math.cos(h) * P.blastBack;
     const y = app.getWorldHeight?.(bx, bz) ?? e.position.y;
     const fx = app.algCombat?.fx;

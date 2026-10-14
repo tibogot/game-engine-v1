@@ -218,6 +218,32 @@ function sr57() {
 }
 
 /**
+ * M20 3.5-INCH "SUPER BAZOOKA" (2026-10-15, alg-rts: the faoudj's upgrade — smuggled in through Tunisia
+ * and Morocco, some taken from the French). 1.55 m, a plain olive tube in two halves joined by the
+ * coupling ring, open at both ends (a wire guard ring at the back), the pistol grip and trigger near
+ * the middle, the shoulder rest behind it, the folding monopod under the front half, the reflecting
+ * sight on the left, the firing-circuit box on top at the back. Fatter and shorter than the 57 mm SR,
+ * no flared venturi — the two read apart from the RTS camera. Origin at the pistol grip.
+ */
+function m20() {
+  const O = 0x474a35, D = COLORS.metal, B = COLORS.bakelite, bore = 0.075;
+  return toGeometry([
+    cyl(O, 0, bore, -0.7, 0.04, 0.047, 0.047, 10),                        // rear half of the tube
+    cyl(O, 0, bore, 0.08, 0.85, 0.047, 0.047, 10),                        // front half
+    cyl(D, 0, bore, 0.03, 0.09, 0.054, 0.054, 10),                        // the coupling ring
+    cyl(D, 0, bore, -0.72, -0.69, 0.06, 0.06, 10),                        // rear guard ring
+    cyl(D, 0, bore, 0.83, 0.86, 0.052, 0.052, 10),                        // muzzle band
+    tiltX(box(B, [0, -0.035, 0], [0.03, 0.09, 0.04]), -0.25, [0, 0]),    // pistol grip
+    box(D, [0, 0.0, 0.03], [0.006, 0.03, 0.05]),                          // trigger guard
+    box(O, [0, 0.015, -0.26], [0.05, 0.03, 0.16]),                        // the shoulder rest, under the tube
+    box(D, [0, 0.02, 0.32], [0.02, 0.02, 0.05]),                          // monopod clamp
+    block(D, { z: 0.32, top: 0.01, bot: 0.0, w: 0.012 }, { z: 0.6, top: 0.016, bot: 0.008, w: 0.01 }),   // monopod, folded
+    box(D, [-0.065, 0.11, 0.0], [0.03, 0.05, 0.08]),                      // the sight, on the left
+    box(D, [0, 0.135, -0.5], [0.04, 0.025, 0.07]),                        // firing-circuit box, on top at the back
+  ]);
+}
+
+/**
  * FM 24/29 — the French section's light machine gun (from memory: 1.08 m,
  * 25-round box magazine on TOP, pistol grip, bipod near the muzzle, carrying
  * handle). The top magazine and the bipod make it the most recognisable gun in
@@ -311,6 +337,7 @@ export const WEAPONS = {
   enfield: { label: "Lee-Enfield", faction: "ALN — bolt rifle", build: gripped("enfield", enfield), buildRaw: enfield },
   lf50: { label: "Lance-flammes Mle 1950", faction: "French — flamethrower", build: gripped("lf50", lf50), buildRaw: lf50, muzzle: LF50_MUZZLE },
   sr57: { label: "M18 57 mm SR", faction: "ALN — recoilless rifle", build: gripped("sr57", sr57), buildRaw: sr57 },
+  m20: { label: "M20 3.5\" bazooka", faction: "ALN — rocket launcher (faoudj upgrade)", build: gripped("m20", m20), buildRaw: m20 },
 };
 
 /**

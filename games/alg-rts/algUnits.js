@@ -557,7 +557,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
         ...Object.entries(UPGRADES).map(([key, g]) => {
           const sq = squads.squadsIn(sel).filter((s) => squads.upgradeCost(s, key));
           if (!sq.length) return null;
-          return { key, label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? t(" ({n} groupes : chacun paie).", { n: sq.length }) : ""), ready: economy.french.canAfford(g.cost) };
+          const purse = sq[0].team === "enemy" ? economy.aln : economy.french;
+          const blocked = squads.upgradeBlocked(sq[0], key);
+          const why = blocked === "armsCache" ? t(" Il faut une cache d'armes debout.") : "";
+          return { key, label: g.label, cost: g.cost, hint: g.hint + (sq.length > 1 ? t(" ({n} groupes : chacun paie).", { n: sq.length }) : "") + why, ready: !blocked && purse.canAfford(g.cost) };
         }),
         // THE RADIO (algSquads UPGRADES.radio, CoH's forward observer): the section calls the
         // nearest mortar pit's barrage and the post's T-6 itself, on ground the men see.

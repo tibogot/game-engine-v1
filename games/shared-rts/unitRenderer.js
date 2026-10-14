@@ -775,6 +775,7 @@ function buildPieces(field, source, rel, looks, scene, root, cap) {
   const weaponKeys = new Set(looks.flatMap((look) => [
     ...(look.weaponMix ? Object.keys(look.weaponMix) : [look.weapon]),
     ...Object.values(look.roles ?? {}).map((r) => r.weapon).filter(Boolean),
+    ...(look.spare ?? []),
   ]));
   for (const key of weaponKeys) {
     if (!WEAPONS[key]) continue;
@@ -1989,6 +1990,15 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     addUnit,
     sync,
     muzzleOf,
+    /** HAND a crowd soldier another weapon (a squad upgrade: the faoudj's bazooka). The key must be one
+     *  his look builds (its weapons, roles or `spare`); false if he has no such piece. */
+    setWeapon(unit, key) {
+      const v = views.get(unit);
+      if (!v?.crowd || !key) return false;
+      if (!v.crowd.pieces?.registry?.has(`w:${key}`)) return false;
+      v.weapon = key;
+      return true;
+    },
     /** A crowd soldier's clip this frame (and the one he fades from) — for tests and the dev panel. */
     clipOf(unit) { const v = views.get(unit); return v?.cur ? { clip: v.cur.clip, from: v.prev.clip, fade: v.fade, move: !!v.move } : null; },
     /** The unit under the pointer (screen space, as of the last sync), or null. */

@@ -82,6 +82,17 @@ export const UPGRADES = {
     label: t("Radio"), squads: ["appele", "legion", "para"], cost: { mun: 50 }, slot: 1,
     hint: t("Le radio du groupe reçoit un poste SCR-300 : le groupe appelle lui-même le tir de barrage (la fosse de mortier la plus proche, à sa portée) et le T-6 du poste, sur ce que vos hommes voient. Le groupe le garde (son remplaçant le reprend)."),
   },
+  // THE FAOUDJ'S BAZOOKA (2026-10-15, you: "historically they had some"): the M20 3.5-inch, smuggled
+  // in through the borders (and some taken from the French) — CoH's bazooka on a rifle squad. Slot 3,
+  // a rifleman, carries it (`prop`: the renderer hands him the tube). A direct-fire SHELL like the
+  // recoilless ("cannon": algArmour's shell table) — less reach and punch than the 57 mm team, but it
+  // goes WITH the squad: the convoy ambush, a half-track on the move. Weak against men (footMul).
+  // A human FLN's, paid from the FLN stock, only while an ARMS CACHE stands (the smuggled weapons).
+  bazooka: {
+    label: t("Bazooka"), squads: ["moudjahid"], side: "enemy", cost: 80, slot: 3, prop: "m20", needs: "armsCache",
+    weapon: { weapon: "cannon", range: 40, damage: 70, fireRate: 0.16, footMul: 0.35 },
+    hint: t("Un moudjahid du faoudj reçoit un bazooka M20 passé par les frontières : il perce un half-track ou un blindé léger à 40 m, peu efficace contre les hommes. Le faoudj le garde (son remplaçant le reprend)."),
+  },
 };
 
 // s before a replacement steps out of the post that its gate starts to open (the leaves swing at
@@ -222,6 +233,9 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
       u.range = w.range ?? 0;
       u.damage = w.damage ?? 0;
       u.fireRate = (w.fireRate ?? 1) * v.fireRate;
+      u.footMul = w.footMul;   // (an anti-tank weapon's, against men — undefined: his type's)
+      // The upgrade's PROP in his hands (the bazooka's tube), once (a replacement gets it too).
+      if (up?.prop && u._prop !== up.prop && app.algUnitRenderer?.setWeapon?.(u, up.prop)) u._prop = up.prop;
       u.vetAcc = v.acc;
       u.vetArmor = v.armor;
       u.suppressMul = v.suppress;
@@ -231,13 +245,20 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
   /** What the upgrade `key` costs this squad now (null: it can't have it, or has it). */
   function upgradeCost(s, key) {
     const g = UPGRADES[key];
-    if (!g || !s || s.team !== "player" || !g.squads.includes(s.typeKey) || s.upgrades[key]) return null;
+    if (!g || !s || s.team !== (g.side ?? "player") || !g.squads.includes(s.typeKey) || s.upgrades[key]) return null;
+    if (s.team === "enemy" && !aln) return null;   // (the FLN's: only when a human plays it)
     return g.cost;
   }
-  /** Buy the upgrade `key` for the squad (paid now). */
+  /** Why the squad can't buy `key` yet (its `needs`: a standing structure of the side), or "". */
+  function upgradeBlocked(s, key) {
+    const need = UPGRADES[key]?.needs;
+    if (!need) return "";
+    return (app.algStructures?.list ?? []).some((x) => x.typeKey === need && x.alive && x.team === s.team) ? "" : need;
+  }
+  /** Buy the upgrade `key` for the squad (paid now, from its side's purse). */
   function upgrade(s, key) {
     const cost = upgradeCost(s, key);
-    if (!cost || !pay(cost)) return false;
+    if (!cost || upgradeBlocked(s, key) || !home(s).pay(cost)) return false;
     s.upgrades[key] = true;
     applyKit(s);
     return true;
@@ -292,7 +313,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
   }
 
   return {
-    list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase, upgrade, upgradeCost, fieldPointOf,
+    list, P, create, join, leave, retreat, endRetreat, reinforce, reinforceCost, step, inBase, upgrade, upgradeCost, upgradeBlocked, fieldPointOf,
     /** A new man of a squad being BOUGHT (the producer's batch): `slot` 0 opens a new squad. */
     bought(u, key, slot) {
       // (The French's, always — their AI uses them too; the FLN's only when a human plays it.)
