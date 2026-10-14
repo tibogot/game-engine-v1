@@ -66,6 +66,10 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   const P = GRENADE;
   const dom = app.renderer.domElement;
   const rings = createSelectionRingField({ app, max: 24, inner: 0.9, opacity: 0.8 });
+  // The thrower's REACH: a thin, faint line (2026-10-15, you: "a big blue circle around the whole
+  // squad"): the ring's band is a share of its radius, so the 23 m reach in the aim ring's pool was
+  // a 2.3 m bright band. CoH draws the range as a thin line; the blast under the cursor stays bold.
+  const reachRing = createSelectionRingField({ app, max: 2, inner: 0.988, segments: 96, opacity: 0.45 });
   let targeting = null;   // { sel, at, kind } while the player aims
   const throws = [];      // { u, x, z, t, thrown, walking, kind }
   const thrownCount = {};  // kind → thrown so far (the training's lesson reads it)
@@ -212,6 +216,7 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   // ── Every frame: the aim ring, the landing warnings ──────────────────────
   function frame() {
     rings.begin();
+    reachRing.begin();
     if (targeting?.at) {
       // The man who would throw (the nearest ready one) and his reach: green
       // in it, amber beyond — he walks up first.
@@ -220,11 +225,13 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
       if (men.length) {
         const u = men.reduce((b, m) => (dist(m, targeting.at) < dist(b, targeting.at) ? m : b));
         rings.add(targeting.at.x, targeting.at.z, K.ring, dist(u, targeting.at) <= reach(K) ? 0x58e070 : 0xffb020);
-        rings.add(u.position.x, u.position.z, reach(K), 0x6ab0ff);
+        reachRing.add(u.position.x, u.position.z, reach(K), 0xcfe4ff);
       }
     }
     projectiles.drawWarnings(rings);   // grenades and mortar bombs in the air
     rings.commit();
+    reachRing.commit();
+    reachRing.mesh.visible = !!targeting?.at;   // (an empty instanced draw still costs a draw per pass)
   }
 
   return {

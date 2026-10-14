@@ -94,7 +94,12 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
 
   // ── The squads ───────────────────────────────────────────────────────────
   // dist 24: the back rows in rifle range too (30 m), so nobody walks out of cover to shoot.
-  const S = { fr: "appele", frN: 8, aln: "moudjahid", alnN: 8, dist: 24, cover: { fr: false, aln: false }, hold: true };
+  // frN / alnN: SQUADS (2026-10-15, you: "we play with squads and this lab is per unit"): a type with
+  // a squad (algSquads SQUADS) comes as the game's own squads — click one man, the squad is selected,
+  // it moves, retreats, reinforces as in a match; a vehicle is one unit each.
+  const S = { fr: "appele", frN: 2, aln: "moudjahid", alnN: 2, dist: 24, cover: { fr: false, aln: false }, hold: true };
+  /** Men per squad of `typeKey` (1: a vehicle, a type with no squad). */
+  const perSquad = (typeKey) => SQUADS[typeKey]?.size ?? 1;
   let squads = { fr: [], aln: [] };
   let walls = [];   // the sandbag walls placed for cover
   let firedAt = null, killed = { fr: 0, aln: 0 };
@@ -102,13 +107,23 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
   const side = (k) => (k === "fr" ? -1 : 1);   // French on the left of the screen
   const centreOf = (k) => at(arena, side(k) * S.dist / 2, 0);
 
-  /** A squad's slots: files of 4 across the screen's depth, rows away from the enemy. */
+  /** A side's slots: its `n` squads side by side across the screen's depth (a gap between them), each
+   *  squad's men in files of 3, rows away from the enemy; single units (vehicles) files of 4. */
   function slots(k, typeKey, n) {
     const t = ALG_UNIT_TYPES[typeKey], gap = t.foot ? 3.2 : (t.radius ?? 3) * 3.2;
+    const per = perSquad(typeKey), files = per > 1 ? Math.min(per, 3) : 4;
     const out = [];
-    for (let i = 0; i < n; i++) {
-      const col = (i % 4) - (Math.min(n, 4) - 1) / 2, row = Math.floor(i / 4);
-      out.push(at(arena, side(k) * (S.dist / 2 + row * gap), col * gap));
+    if (per === 1) {
+      for (let i = 0; i < n; i++) {
+        const col = (i % files) - (Math.min(n, files) - 1) / 2, row = Math.floor(i / files);
+        out.push(at(arena, side(k) * (S.dist / 2 + row * gap), col * gap));
+      }
+      return out;
+    }
+    const block = files * gap + 3;   // one squad's width, and the gap to the next
+    for (let j = 0; j < n; j++) for (let i = 0; i < per; i++) {
+      const col = (i % files) - (files - 1) / 2, row = Math.floor(i / files);
+      out.push(at(arena, side(k) * (S.dist / 2 + row * gap), (j - (n - 1) / 2) * block + col * gap));
     }
     return out;
   }
@@ -117,9 +132,11 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
     clear();
     for (const k of ["fr", "aln"]) {
       const typeKey = k === "fr" ? S.fr : S.aln, n = k === "fr" ? S.frN : S.alnN;
-      if (S.cover[k]) await raiseWalls(k, Math.min(n, 4) * (ALG_UNIT_TYPES[typeKey].foot ? 3.2 : 9));
+      const per = perSquad(typeKey), wide = per > 1 ? n * (Math.min(per, 3) * 3.2 + 3) : Math.min(n, 4) * (ALG_UNIT_TYPES[typeKey].foot ? 3.2 : 9);
+      if (S.cover[k]) await raiseWalls(k, wide);
       const foe = centreOf(k === "fr" ? "aln" : "fr");
       const squad = SQUADS[typeKey];
+      const men = [];
       for (const [i, p] of slots(k, typeKey, n).entries()) {
         const u = units.spawn(typeKey, p.x, p.z, { team: k === "fr" ? "player" : "enemy" });
         if (!u) continue;
@@ -134,7 +151,10 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
         u.holdFire = S.hold;
         u.labSide = k;
         squads[k].push(u);
+        men.push(u);
       }
+      // The game's squads (the start-of-game way: algSquads adopt): selection, retreat, reinforcing.
+      if (squad && men.length) app.algSquads?.adopt(men, typeKey);
     }
     firedAt = S.hold ? null : performance.now();
     killed = { fr: 0, aln: 0 };
@@ -159,7 +179,7 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
   /** Every lab unit out of the world (no deaths, no dust); walls taken down. */
   function clear() {
     const gone = [...squads.fr, ...squads.aln];
-    for (const u of gone) { u.alive = false; u.hp = 0; app.selection?.remove?.(u); }
+    for (const u of gone) { u.alive = false; u.hp = 0; app.selection?.remove?.(u); app.algSquads?.leave(u); }
     if (gone.length) clearedAt = performance.now();
     // A frame later (the renderer hides a vehicle's model on seeing it dead),
     // out of the list: no corpse left behind (and no pool: see setBlood).
@@ -305,8 +325,9 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
       <h1>Battle Lab</h1>
       <div class="sub">The game's own combat on a flat patch. Left: French · right: ALN.</div>
       <h2>Squads</h2>
-      <div class="row"><span>French</span><select data-k="fr">${opts(S.fr)}</select><input type="number" data-n="frN" min="1" max="24" value="${S.frN}"></div>
-      <div class="row"><span>ALN</span><select data-k="aln">${opts(S.aln)}</select><input type="number" data-n="alnN" min="1" max="24" value="${S.alnN}"></div>
+      <div class="row"><span>French</span><select data-k="fr">${opts(S.fr)}</select><input type="number" data-n="frN" min="1" max="6" value="${S.frN}" title="How many squads (a vehicle: how many)"></div>
+      <div class="row"><span>ALN</span><select data-k="aln">${opts(S.aln)}</select><input type="number" data-n="alnN" min="1" max="6" value="${S.alnN}" title="How many squads (a vehicle: how many)"></div>
+      <div class="sub">${S.frN} × ${perSquad(S.fr)} men vs ${S.alnN} × ${perSquad(S.aln)} — the game's own squads</div>
       <div class="row"><span>Apart</span><input type="range" data-dist min="8" max="80" step="1" value="${S.dist}"><b>${S.dist} m</b></div>
       <label><input type="checkbox" data-cover="fr"${S.cover.fr ? " checked" : ""}> French behind sandbags</label>
       <label><input type="checkbox" data-cover="aln"${S.cover.aln ? " checked" : ""}> ALN behind sandbags</label>
@@ -356,7 +377,7 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
   el.addEventListener("change", (e) => {
     const t = e.target;
     if (t.dataset.k) S[t.dataset.k] = t.value;
-    else if (t.dataset.n) S[t.dataset.n] = Math.max(1, Math.min(24, Number(t.value) || 1));
+    else if (t.dataset.n) S[t.dataset.n] = Math.max(1, Math.min(6, Number(t.value) || 1));
     else if (t.dataset.cover) S.cover[t.dataset.cover] = t.checked;
     else if ("blood" in t.dataset) setBlood(t.checked);
     else if ("gibs" in t.dataset) GIBS.mode = t.value;
