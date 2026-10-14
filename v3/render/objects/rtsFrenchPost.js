@@ -196,14 +196,15 @@ function tower(parts, R, { x, z, W, H, seed, detail = 1 }) {
   }
   // Roof slab, and a ring of sandbags round a gun on it.
   parts.push({ geo: buildBox(W - 0.4, 0.12, W - 0.4), pos: [x, H + 0.06, z], mat: MAT.concrete, tone: 0.35 });
-  parts.push({ geo: buildSandbagRing({ radius: W * 0.28, courses: 3, seed, gapDeg: 60 }), pos: [x, H + 0.12, z], mat: null });
+  if (SLOTS) SLOTS.push({ kind: "tower", pos: [x, H + 0.12, z], yaw: x > 0 ? 0 : Math.PI });   // (the +X+Z tower's, turned for the other)
+  else parts.push({ geo: buildSandbagRing({ radius: W * 0.28, courses: 3, seed, gapDeg: 60 }), pos: [x, H + 0.12, z], mat: null });
   // The gun: a tripod MG, barrel out over the ring toward the outside corner.
   const gx = x + Math.sign(x) * 0.2, gz = z + Math.sign(z) * 0.2;
   const yaw = Math.atan2(Math.sign(x), Math.sign(z));
   if (detail >= 2) {
     // The AA-52 on its tripod, on a sandbag step (the ring is 3 courses: the gun must clear it).
     // (A slab of hessian read as a box: three short rows of real bags, two courses.)
-    for (let k = -1; k <= 1; k++) {
+    for (let k = -1; k <= (SLOTS ? -2 : 1); k++) {
       const ox = Math.cos(yaw) * k * 0.3, oz = -Math.sin(yaw) * k * 0.3;
       parts.push({ geo: buildSandbagWall({ length: 1.2, courses: 2, seed: seed * 7 + k + 3, bag: { length: 0.5, width: 0.3, height: 0.18, segU: 5, segV: 3 } }), pos: [gx + ox, H + 0.12, gz + oz], rot: [0, yaw + Math.PI / 2, 0], mat: null });
     }
@@ -269,7 +270,8 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4, 
   if (roof === "barracks") {
     // A look-out on the barracks: a sandbag horseshoe at the outer corner, a tarp over it.
     const lx = x - w / 2 + 1.6, lz = z - doorSide * (d / 2 - 1.4);
-    parts.push({ geo: buildSandbagRing({ radius: 1.2, courses: 3, seed: Math.round(x * 13) + 5, gapDeg: 90 }), pos: [lx, ry, lz], rot: [0, doorSide > 0 ? 0 : Math.PI, 0], mat: null });
+    if (SLOTS) SLOTS.push({ kind: "lookout", pos: [lx, ry, lz], yaw: doorSide > 0 ? 0 : Math.PI });
+    else parts.push({ geo: buildSandbagRing({ radius: 1.2, courses: 3, seed: Math.round(x * 13) + 5, gapDeg: 90 }), pos: [lx, ry, lz], rot: [0, doorSide > 0 ? 0 : Math.PI, 0], mat: null });
     for (const [a, b] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push({ geo: buildBox(0.07, 1.6, 0.07), pos: [lx + a * 0.9, ry + 0.8, lz + b * 0.9], mat: MAT.timber, tone: 0.3 });
     parts.push({ geo: buildBox(2.1, 0.04, 2.1), pos: [lx, ry + 1.62, lz], rot: [0.08, 0, 0.05], mat: MAT.canvas, tone: 0.42 });
     // A washing line: two poles, the line, the shirts and a blanket on it.
@@ -294,8 +296,12 @@ function block(parts, R, { x, z, w, d, h, doorSide = 1, doors = 2, windows = 4, 
 // `footStone` (alg-rts, 2026-10-11): the footing's and banquettes' stone — the rubble cell read cold
 // blue-grey against the ochre ground; MAT.limestone is the Aurès' warm stone.
 let FOOT = MAT.rubble;
-export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubble } = {}) {
+// noBags (2026-10-14, alg-rts algSandbags): the post's sandbags left out, WHERE they go recorded instead
+// (userData.bagSlots, scaled: { kind, pos, yaw }) — the game sets its cloth-simulated ones there.
+let SLOTS = null;
+export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubble, noBags = false } = {}) {
   FOOT = footStone;
+  SLOTS = noBags ? [] : null;
   const R = rng(seed);
   const parts = [];
   const L = 22, H = 3.2, T = 0.6, hl = L / 2;
@@ -397,8 +403,11 @@ export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubbl
   });
   // A sandbag chicane in front of the gate, two staggered walls.
   const bag = { length: 0.52, width: 0.3, height: 0.19, segU: 6, segV: 4 };
-  parts.push({ geo: buildSandbagWall({ length: 3.6, courses: 5, seed: seed + 7, bag, batter: 0.04 }), pos: [-1.6, 0, gz - 4.2], mat: null });
-  parts.push({ geo: buildSandbagWall({ length: 3.6, courses: 5, seed: seed + 8, bag, batter: 0.04 }), pos: [1.6, 0, gz - 6.4], mat: null });
+  if (SLOTS) SLOTS.push({ kind: "chicane", pos: [-1.6, 0, gz - 4.2], yaw: 0 }, { kind: "chicane", pos: [1.6, 0, gz - 6.4], yaw: Math.PI });
+  else {
+    parts.push({ geo: buildSandbagWall({ length: 3.6, courses: 5, seed: seed + 7, bag, batter: 0.04 }), pos: [-1.6, 0, gz - 4.2], mat: null });
+    parts.push({ geo: buildSandbagWall({ length: 3.6, courses: 5, seed: seed + 8, bag, batter: 0.04 }), pos: [1.6, 0, gz - 6.4], mat: null });
+  }
 
   // ── Inside: the barracks along the back wall, the command post on the left ─
   block(parts, R, { x: 1.5, z: hl - T - 3.4, w: 14, d: 6, h: 3.3, doorSide: -1, doors: 2, windows: 6, detail, roof: "barracks" });
@@ -479,7 +488,8 @@ export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubbl
     // The MORTAR PIT: a ring of sandbags, the tube on its baseplate pointing out, bombs boxed.
     {
       const mx = -2.6, mz = 1.4;
-      parts.push({ geo: buildSandbagRing({ radius: 1.5, courses: 3, seed: seed + 11, gapDeg: 70 }), pos: [mx, 0, mz], mat: null });
+      if (SLOTS) SLOTS.push({ kind: "postpit", pos: [mx, 0, mz], yaw: 0 });
+      else parts.push({ geo: buildSandbagRing({ radius: 1.5, courses: 3, seed: seed + 11, gapDeg: 70 }), pos: [mx, 0, mz], mat: null });
       parts.push({ geo: buildBox(0.5, 0.06, 0.5), pos: [mx, 0.03, mz], mat: MAT.steel, tone: 0.2 });
       parts.push({ geo: new THREE.CylinderGeometry(0.05, 0.05, 1.2, 8), pos: [mx, 0.6, mz + 0.2], rot: [0.75, 0, 0], mat: MAT.steel, tone: 0.15 });
       for (const sx of [-1, 1]) parts.push(wirePart([mx, 0.75, mz + 0.35], [mx + sx * 0.32, 0, mz + 0.65], 0.02, { tone: 0.3 }));
@@ -603,6 +613,8 @@ export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubbl
   geo.scale(S, S, S);
   stencil?.scale(S, S, S);
   geo.userData.stencil = stencil;
+  if (SLOTS) geo.userData.bagSlots = SLOTS.map((b) => ({ ...b, pos: b.pos.map((v) => v * S) }));
+  SLOTS = null;
   const half = (wr + 0.5) * S;
   geo.userData.footprint = { cx: 0, cz: -1.5 * S, hx: half, hz: half + 1.5 * S };
   // COVER on the WALLS (alg-rts algCover; scaled, piece frame). Without it the cover ran round the

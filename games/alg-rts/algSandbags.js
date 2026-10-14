@@ -330,7 +330,8 @@ let _wallP = null;
 /** The simulated pieces (tools/blender/sandbagWall.py layouts), each { near, far }: the wall, the
  *  breached wall, the MG nest's ring. */
 const SIM = {};
-const SIM_FILES = { wall: "sandbagWall", breach: "sandbagBreach", ring: "sandbagRing" };
+const SIM_FILES = { wall: "sandbagWall", breach: "sandbagBreach", ring: "sandbagRing", fort: "sandbagFort", pit: "sandbagPit",
+  chicane: "sandbagChicane", tower: "sandbagTower", lookout: "sandbagLookout", postpit: "sandbagPostPit" };
 /** A glb's one mesh → the bag material's attributes (shade from COLOR_0, foot, top/underside, the wall's shade). */
 function prepWall(gltf) {
   let src = null;
@@ -396,13 +397,31 @@ export function buildMgNestPiece(kitNest) {
   const ring = simulatedWallMesh("SandbagRing", "ring");
   if (!ring) return kitNest({});
   const geo = kitNest({ noBags: true });
-  // its berm's top as the kit builds it (0.95 m: the kit lifts the piece ~0.5 m over its numbers), the
-  // ring simulated on a 0.45 m berm: raised by the difference (the roof bags with it, same lift)
-  const P = geo.getAttribute("position");
-  let top = 0;
-  for (let i = 0; i < P.count; i++) { const r = Math.hypot(P.getX(i), P.getZ(i)); if (r > 1.8 && r < 2.8) top = Math.max(top, P.getY(i)); }
-  ring.position.y = Math.max(0, top - 0.45);
+  // (simulated at the kit's true size — finish() scales every kit piece x1.3 — on its berm and timbers)
   geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), ring] };
+  return geo;
+}
+
+/** The fortified point (algBuild): the kit's ammunition box and jerrican; its three walls simulated. */
+export function buildFortPointPiece(kitFort) {
+  const walls = simulatedWallMesh("SandbagFort", "fort");
+  if (!walls) return kitFort({});
+  const geo = kitFort({ noBags: true });
+  geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), walls] };
+  return geo;
+}
+
+/** The French post (showroom): its gate chicane, tower guns' rings, look-out and mortar ring simulated. */
+export function buildFrenchPostPiece(kitPost) {
+  if (!["chicane", "tower", "lookout", "postpit"].every((k) => SIM[k])) return kitPost({});
+  const geo = kitPost({ noBags: true });
+  const extra = (geo.userData.bagSlots ?? []).map((b, i) => {
+    const m = simulatedWallMesh("PostBags" + i, b.kind);
+    m.position.set(...b.pos);
+    m.rotation.y = b.yaw;
+    return m;
+  });
+  geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), ...extra] };
   return geo;
 }
 

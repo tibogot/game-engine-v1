@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { buildMortarPit, grainSack } from "../../v3/render/objects/rtsAlgeria.js";
 import { newSite, siteGroup } from "./algMasonry.js";
+import { simulatedWallMesh } from "./algSandbags.js";
 
 function hash01(i, seed) { let h = Math.imul(i + 1, 374761393) ^ Math.imul(seed, 668265263); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
 
@@ -46,8 +47,10 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
   const site = newSite();
   const rIn = 2.35, rC = 2.85, rOut = 3.75, hC = 0.5;
   site.spoil.push(berm(rIn, rC, rOut, hC, seed));
-  // THE SANDBAGS on the crest: two courses, staggered, shoulder to shoulder; open at the back.
-  for (let c = 0; c < 2; c++) {
+  // THE SANDBAGS on the crest: two courses, staggered, shoulder to shoulder; open at the back —
+  // simulated in Blender (sandbagWall.py "pit") when loaded, else the kit's grain sacks.
+  const simBags = simulatedWallMesh("SandbagPit", "pit");
+  for (let c = 0; c < (simBags ? 0 : 2); c++) {
     const rad = rC - 0.05 - c * 0.06, n = Math.round((2 * Math.PI * rad) / 0.6);
     for (let k = 0; k < n; k++) {
       const a = (k / n) * Math.PI * 2 + (c % 2) * (Math.PI / n);
@@ -66,6 +69,7 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
   const all = [];
   group.traverse((o) => { if (o.isMesh) { const g = new THREE.BufferGeometry(); g.setAttribute("position", o.geometry.attributes.position); g.setIndex(o.geometry.index); all.push(g); } });
   kit.userData.ghost = mergeGeometries(all);
+  if (simBags) group.add(simBags);
   kit.userData.extra = [group];
   kit.userData.footprint = { cx: 0, cz: 0, hx: rOut, hz: rOut };
   kit.userData.height = 1.4;

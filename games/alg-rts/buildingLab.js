@@ -30,7 +30,8 @@ import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+import { buildFortPointPiece, buildFrenchPostPiece, buildMgNestPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+import { buildFortPoint, buildMgNest } from "../../v3/render/objects/rtsAlgeria.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
 await loadSandbagWall();
@@ -176,6 +177,19 @@ const BUILDINGS = {
   // THE FLN CAVE (2026-10-11, you: "use the realistic rocks to make a cave"): the game's on the
   // LEFT (low-poly limestone), the sandstone cave on the RIGHT — the same shoring and gear.
   grotte: {
+  // THE REST OF THE SANDBAGS (2026-10-14): the kit's LEFT, the cloth-simulated RIGHT (algSandbags.js).
+  sacsNidMg: {
+    label: "Nid de MG (sacs)", gap: 10, before: () => buildMgNest({}), after: () => buildMgNestPiece((o) => buildMgNest(o)),
+    tags: ["NID DE MG (LE JEU)", "NID DE MG · SACS SIMULÉS"], note: "le nid du jeu à gauche, ses sacs simulés à droite (la couronne et le toit).",
+  },
+  sacsPointFort: {
+    label: "Point fortifié (sacs)", gap: 13, before: () => buildFortPoint({}), after: () => buildFortPointPiece((o) => buildFortPoint(o)),
+    tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · SACS SIMULÉS"], note: "le point fortifié du jeu à gauche, ses trois murs simulés à droite.",
+  },
+  sacsPoste: {
+    label: "Poste (sacs)", gap: 42, before: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), after: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
+    tags: ["POSTE (LE JEU)", "POSTE · SACS SIMULÉS"], note: "le poste du jeu à gauche, ses sacs simulés à droite : la chicane, les tours, le guetteur, le mortier.",
+  },
     label: "Grotte du FLN", gap: 11, before: () => buildCaveEntrance(), after: () => buildSandstoneCave({ variant: SEED }),
     tags: ["GROTTE (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "la grotte du jeu à gauche, la grotte en grès à droite (même étais, même matériel).",
   },

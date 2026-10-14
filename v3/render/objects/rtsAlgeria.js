@@ -58,11 +58,12 @@ export function buildFrSandbagWall({ seed = 3, length = 5 } = {}) {
  * two sides angled back — and an ammunition box inside: the sappers dig a held point in. Front
  * (the open side behind, +Z) faces -Z.
  */
-export function buildFortPoint({ seed = 51 } = {}) {
+// noBags (2026-10-14, alg-rts algSandbags): the three walls left out — the game draws its simulated ones.
+export function buildFortPoint({ seed = 51, noBags = false } = {}) {
   const R = rng(seed);
   const parts = [];
   const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
-  const wall = (length, x, z, rotY, s) => parts.push({ geo: buildSandbagWall({ length, courses: 4, seed: s, bag, batter: 0.05 }), pos: [x, 0, z], rot: [0, rotY, 0], mat: null });
+  const wall = (length, x, z, rotY, s) => noBags || parts.push({ geo: buildSandbagWall({ length, courses: 4, seed: s, bag, batter: 0.05 }), pos: [x, 0, z], rot: [0, rotY, 0], mat: null });
   wall(5, 0, -2.0, 0, seed);
   wall(3.2, -3.05, -0.55, 1.05, seed + 1);
   wall(3.2, 3.05, -0.55, -1.05, seed + 2);

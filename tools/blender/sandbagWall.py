@@ -143,6 +143,7 @@ def drop(x, y, z, yaw, seed):
 
 
 laid = []
+KS = 1.3    # the kit's scale (rtsAlgeria finish(): every kit piece x1.3)
 KEEP = []   # helper colliders that every bag meets (the MG nest's berm, its roof timbers)
 def top_at(x, y):
     """The highest settled point near (x, y) — where the next bag starts its fall."""
@@ -154,7 +155,7 @@ def top_at(x, y):
     return h
 
 
-def course(length, rows, y0, c, step_off, x0=0.0):
+def course(length, rows, y0, c, step_off, x0=0.0, z_min=0.0):
     n = max(1, round(length / (BL * 1.0)))   # (clear at the start: overlapping, the cloths tangled and crumpled)
     for row in range(rows):
         y = y0 + row * BW * 0.92
@@ -162,17 +163,33 @@ def course(length, rows, y0, c, step_off, x0=0.0):
             x = -length / 2 + (i + 0.5) * (length / n) + step_off * (0.5 if c % 2 else 0) * (1 if row == 0 else -1)
             if abs(x) > length / 2:
                 continue
-            z = top_at(x0 + x, y) + 0.04
+            z = max(top_at(x0 + x, y), z_min) + 0.04
             laid.append(drop(x0 + x, y, z, 0.0, SEED * 1000 + len(laid)))
     print(f"[wall] course {c}: {len(laid)} bags", flush=True)
 
 
-def ring(rad, c, h0):
-    """A course round a circle (the MG nest), open at the back (+Y here = the game's +Z)."""
+def wall_course(length, rows, cx, cy, yaw, c, z_min=0.0):
+    """A course along direction yaw (Blender XY), centred at (cx, cy); rows stacked toward +normal."""
+    d = Vector((math.cos(yaw), math.sin(yaw), 0)); nrm = Vector((-math.sin(yaw), math.cos(yaw), 0))
+    n = max(1, round(length / BL))
+    for row in range(rows):
+        for i in range(n):
+            t = -length / 2 + (i + 0.5) * (length / n) + (BL * 0.5 if c % 2 else 0) * (1 if row == 0 else -1) * 0.6
+            if abs(t) > length / 2:
+                continue
+            p = Vector((cx, cy, 0)) + d * t + nrm * (row * BW * 0.92)
+            z = max(top_at(p.x, p.y), z_min) + 0.04
+            laid.append(drop(p.x, p.y, z, yaw, SEED * 1000 + len(laid)))
+    print(f"[wall] course {c}: {len(laid)} bags", flush=True)
+
+
+def ring(rad, c, h0, gap_at=math.pi / 2, gap_deg=63.0):
+    """A course round a circle, open toward gap_at (Blender angle; pi/2 = +Y here = the game's +Z,
+    the MG nest's back), gap_deg wide. (Blender X is the game's -X: the export turns it 180°.)"""
     n = round((2 * math.pi * rad) / (BL * 0.95))
     for k in range(n):
         a = (k / n) * math.pi * 2 + (c % 2) * (math.pi / n)
-        if math.cos(a - math.pi / 2) > 0.85:
+        if math.cos(a - gap_at) > math.cos(math.radians(gap_deg) / 2):
             continue
         x, y = math.cos(a) * rad, math.sin(a) * rad
         z = max(top_at(x, y), h0) + 0.04
@@ -225,21 +242,64 @@ elif LAYOUT == "breach":
         course(1.3 - c * 0.06, 2, -BW * 0.92, c, step, x0=L / 2 - 0.65)
     course(1.4, 1, BW * 1.2, 0, step, x0=-L / 2 + 1.0)
     burst(9, 2.4, SEED + 11)
-elif LAYOUT == "ring":
-    # the MG nest (buildMgNest): its earth berm (flat top 0.45 m up to r 3.1) a collider; four courses
-    # at r 2.3 open at the back; the bags on the half-roof's timbers (1.32-1.4 m, z 0.3..1.8)
-    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=3.15, depth=0.45, location=(0, 0, 0.225))
+elif LAYOUT == "fort":
+    # the fortified point (buildFortPoint) at the kit's TRUE size (finish() scales every kit piece x1.3,
+    # KS): a front at game z -2.0 and two sides at (-/+3.05, -0.55) turned +/-1.05 rad, real bags —
+    # five courses (~0.8 m, the wall's)
+    for c in range(5):
+        wall_course(5.0 * KS - c * 0.1, 1, 0.0, -2.0 * KS, 0.0, c)
+        wall_course(3.2 * KS - c * 0.1, 1, -3.05 * KS, -0.55 * KS, -1.05, c)
+        wall_course(3.2 * KS - c * 0.1, 1, 3.05 * KS, -0.55 * KS, 1.05, c)
+elif LAYOUT == "pit":
+    # the mortar pit (algMortarPit buildMortarPitV2): its berm's crest at r 2.85, 0.5 m up — a
+    # cylinder collider to 0.44; two courses on the crest, open at the back (+Z)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=3.3, depth=0.44, location=(0, 0, 0.22))
     berm = bpy.context.object
     collider(berm)
     near.objects.link(berm)
     extra_colliders.append(berm)
     KEEP.append(berm)
+    for c in range(2):
+        ring(2.8 - c * 0.06, c, 0.44)
+elif LAYOUT == "chicane":
+    # the French post's gate chicane (rtsFrenchPost): a 3.6 m wall, five kit courses -> six real ones
+    for c in range(6):
+        wall_course(3.6 * KS - c * 0.08, 1, 0.0, 0.0, 0.0, c)
+elif LAYOUT == "tower":
+    # a tower roof's gun position (rtsFrenchPost tower(), the +X+Z tower; the other turned 180°): a
+    # ring r 1.4 x KS open toward the courtyard (game -X-Z = Blender +X-Y), the AA-52's step of bags
+    # inside toward the outer corner (game +X+Z = Blender -X+Y): 1.2 x KS along the barrel, three rows
     for c in range(4):
-        ring(2.3 - c * 0.05, c, 0.45)
-    roof = box_collider(0, 1.05, 1.36, 4.4, 1.6, 0.08)
+        ring(1.4 * KS - c * 0.05, c, 0.0, -math.pi / 4, 60.0)
+    d = Vector((-1, 1, 0)).normalized()
+    nrm = Vector((-d.y, d.x, 0))
+    ctr = Vector((-0.2 * KS, 0.2 * KS, 0)) - nrm * BW * 0.92
+    for c in range(2):
+        wall_course(1.2 * KS, 3, ctr.x, ctr.y, math.atan2(d.y, d.x), c)
+elif LAYOUT == "lookout":
+    # the barracks' look-out (rtsFrenchPost block "barracks"): a horseshoe r 1.2 x KS open 90° at -Z
+    for c in range(4):
+        ring(1.2 * KS - c * 0.05, c, 0.0, -math.pi / 2, 90.0)
+elif LAYOUT == "postpit":
+    # the post's own mortar pit: a ring r 1.5 x KS open 70° at -Z
+    for c in range(4):
+        ring(1.5 * KS - c * 0.05, c, 0.0, -math.pi / 2, 70.0)
+elif LAYOUT == "ring":
+    # the MG nest (buildMgNest) at the kit's TRUE size (x1.3): its berm (flat top 0.45 x KS up to r
+    # 3.1 x KS) a collider; five courses at r 2.3 x KS open at the back; the roof course on the timbers
+    # (1.32-1.4 x KS high, z 0.3-1.82 x KS)
+    bpy.ops.mesh.primitive_cylinder_add(vertices=48, radius=3.15 * KS, depth=0.45 * KS, location=(0, 0, 0.225 * KS))
+    berm = bpy.context.object
+    collider(berm)
+    near.objects.link(berm)
+    extra_colliders.append(berm)
+    KEEP.append(berm)
+    for c in range(5):
+        ring(2.3 * KS - c * 0.05, c, 0.45 * KS)
+    roof = box_collider(0, 1.05 * KS, 1.36 * KS, 4.4 * KS, 1.6 * KS, 0.08)
     extra_colliders.append(roof)
     KEEP.append(roof)
-    course(3.8, 1, 0.95, 0, step)
+    course(3.8 * KS, 1, 0.95 * KS, 0, step, z_min=1.4 * KS)   # onto the timbers
 
 
 # one mesh: joined, its bottom at 0, its plan centred; decimated; Blender Z-up -> glTF Y-up on export

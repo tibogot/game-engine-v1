@@ -26,7 +26,7 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
-import { buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
+import { buildFrenchPostPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { buildDechraV2, buildKsarV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
@@ -187,7 +187,7 @@ const START_DEFENCES = typeof location !== "undefined" && new URLSearchParams(lo
 
 export const SHOWROOM = [
   // Detail 2 (the buildings lab, 2026-10-07): the bordj — no merlons, the yard in use, AA-52s.
-  { key: "frenchPost", build: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), x: BASE.x, z: BASE.z, yaw: BASE.yaw },
+  { key: "frenchPost", build: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })), x: BASE.x, z: BASE.z, yaw: BASE.yaw },
   ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.

@@ -21,7 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
-import { buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
+import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { t } from "./i18n/i18n.js";
@@ -42,7 +42,7 @@ export const BUILDS = {
   // `near: "point"`: only inside the ring of a point you hold. `one`: one per point.
   forwardPost: { label: t("Poste avancé"), tip: t("Poste radio près d'un point que vous tenez : vos groupes à 30 m s'y renforcent, comme au poste."), cost: 150, time: 25, build: () => buildRadioStation({ seed: 41 + Math.floor(Math.random() * 9) }), pad: true, structure: "forwardPost", near: "point", one: true },
   aidStation: { label: t("Poste de secours"), tip: t("Tente de l'infirmier : vos blessés à 20 m guérissent, hors du combat."), cost: 100, time: 18, build: () => fieldTent(), pad: true, structure: "aidStation" },
-  fortPoint: { label: t("Point fortifié"), tip: t("Sacs de sable dans le cercle d'un point que vous tenez : il rapporte 25 % de plus et le FLN met deux fois plus de temps à le prendre."), cost: 120, time: 20, build: () => buildFortPoint({ seed: 51 + Math.floor(Math.random() * 9) }), follow: true, structure: "fortPoint", near: "point", one: true },
+  fortPoint: { label: t("Point fortifié"), tip: t("Sacs de sable dans le cercle d'un point que vous tenez : il rapporte 25 % de plus et le FLN met deux fois plus de temps à le prendre."), cost: 120, time: 20, build: () => buildFortPointPiece((o) => buildFortPoint({ seed: 51 + Math.floor(Math.random() * 9), ...o })), follow: true, structure: "fortPoint", near: "point", one: true },
   // THE ALN BUILDS TOO (you, 2026-09-30): the same sites, paid from the ALN's
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
   // them — the AI places them through place()). Both lie on the slope, as
