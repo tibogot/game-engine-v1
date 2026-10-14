@@ -122,6 +122,19 @@ export function assemble(parts) {
     out.push(g);
   }
   if (!out.length) return new THREE.BufferGeometry();
+  // THE BUILD ORDER (2026-10-13, construction stages — games/alg-rts/algConstruction.js): only when a
+  // part says when it is built (`build`: 0..1 of the site's progress; `drop`: metres it falls into
+  // place, negative = rises from the ground). One vec2 a vertex, `build`; a finished building's
+  // material never reads it. Parts without one exist from the start.
+  if (parts.some((p) => p?.geo && p.build != null)) {
+    const live = parts.filter((p) => p?.geo);
+    out.forEach((g, i) => {
+      const p = live[i], n = g.attributes.position.count, a = new Float32Array(n * 2);
+      const at = p.build ?? 0, drop = p.drop ?? 0;
+      for (let k = 0; k < n; k++) { a[k * 2] = at; a[k * 2 + 1] = drop; }
+      g.setAttribute("build", new THREE.BufferAttribute(a, 2));
+    });
+  }
   // Which part each triangle came from — for tools (rtsCoplanarWhy.mjs names
   // the PARTS behind a z-fight instead of printing coordinates). Only when
   // asked: ASSEMBLE_TRACE.on.

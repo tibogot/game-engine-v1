@@ -510,7 +510,8 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       const to = new THREE.Vector3(s.x + Math.cos(a) * r, 0, s.z + Math.sin(a) * r);
       to.y = groundY(to.x, to.z);
       const from = p.structure.position.clone().add(new THREE.Vector3(0, 3, 0));
-      projectiles.spawnArc(from, to, { damage: P.mortar.damage, splash: P.mortar.splash, owner: p.structure, flight: P.mortar.flight });
+      // (the Légion's 120 when the French fire it; the FLN's doctrine fires 81s — algDoctrines mortar81)
+      projectiles.spawnArc(from, to, { damage: P.mortar.damage, splash: P.mortar.splash, owner: p.structure, flight: P.mortar.flight, kind: FLN ? "mortar81" : "mortar120" });
       app.algSounds?.audio?.play?.("incoming", to.x, to.y + 20, to.z, { delay: P.mortar.flight - 1.2 });
       s.left--; s.t = P.mortar.every;
     }

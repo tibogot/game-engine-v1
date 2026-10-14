@@ -5,7 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!--
       BATTLE LAB (battleLab.js): the Algeria game booted lean — no AI, no win
-      rules, no fog of war, no flocks — with a panel that stages a fight. Any
+      rules, no fog of war, no flocks — with a panel that stages a fight. ON THE
+      TRAINING CAMP (2026-10-14, you: "it doesn't need the whole terrain"): the
+      smallest map (330 m, near-flat), its post, hamlet and knoll to fight round;
+      ?map=aures for the big map. (Its lessons need the battle rules: off here.) Any
       of the game's URL options still work (?blood=0, ?acc=0, ?sky=atmosphere…);
       the lab's defaults are only filled in where the URL says nothing.
     -->
@@ -32,9 +35,9 @@
     <script type="module">
       // The lab's defaults, written into the URL so the game reads them (and
       // you can see and override them): the AI, the win rules, the fog of
-      // war, the flocks and birds off.
+      // war, the flocks and birds off; the training camp, its villagers off too.
       const q = new URLSearchParams(location.search);
-      for (const [k, v] of Object.entries({ ai: "0", battle: "0", brief: "0", fow: "0", herds: "0", hens: "0", birds: "0" })) if (!q.has(k)) q.set(k, v);
+      for (const [k, v] of Object.entries({ map: "training", ai: "0", battle: "0", brief: "0", fow: "0", herds: "0", hens: "0", birds: "0", civ: "0" })) if (!q.has(k)) q.set(k, v);
       history.replaceState(null, "", `${location.pathname}?${q}`);
 
       const boot = document.getElementById("boot");

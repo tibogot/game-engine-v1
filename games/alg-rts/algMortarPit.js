@@ -43,7 +43,7 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
   const kit = buildMortarPit({ seed, modern: true });
   // The mortar a third bigger than life: at the RTS camera's distance a true 81 mm read as a tripod
   // (CoH's guns are drawn big the same way). Its own copy: the kit's geometry may be shared.
-  kit.userData.gun = { ...kit.userData.gun, geo: kit.userData.gun.geo.clone().scale(1.35, 1.35, 1.35) };
+  kit.userData.gun = { ...kit.userData.gun, geo: kit.userData.gun.geo.clone().scale(1.35, 1.35, 1.35), muzzle: kit.userData.gun.muzzle.map((v) => v * 1.35) };
   const site = newSite();
   const rIn = 2.35, rC = 2.85, rOut = 3.75, hC = 0.5;
   site.spoil.push(berm(rIn, rC, rOut, hC, seed));

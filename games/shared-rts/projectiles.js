@@ -24,6 +24,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { BLOOM } from "./bloom.js";
 import { createSpriteField } from "./spriteField.js";
 import { createTracerField, TRACER_COLOURS } from "./tracerField.js";
+import { createArcTrails } from "./arcTrails.js";
 
 /**
  * How each weapon's rounds look. `speed` is VISUAL (m/s): slow enough to see
@@ -46,7 +47,6 @@ const SMOKE_EVERY = 0.03;
 /** Shells in the air at once, and how hard their arc is thrown. */
 const MAX_SHELLS = 24;
 const SHELL_G = 34;       // metres/s² — a game arc, not ballistics: it has to read in ~3 s
-const SHELL_R = 0.42;
 
 /**
  * `weapons`: a game's own look per weapon, merged over WEAPONS (alg-rts:
@@ -111,13 +111,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
   // on a patch of ground, out of anyone's line of sight, and hurts whoever is
   // standing there when it lands. Dark and small in flight on purpose: what
   // you are meant to see is the warning ring on the ground (drawWarnings).
-  const shellMat = new THREE.MeshStandardNodeMaterial({ color: 0x2b2b28, roughness: 0.8, metalness: 0.2 });
-  const shellGeo = new THREE.CapsuleGeometry(SHELL_R, SHELL_R * 2.4, 3, 7).rotateX(Math.PI / 2);
-  const shellMesh = new THREE.InstancedMesh(shellGeo, shellMat, MAX_SHELLS);
-  shellMesh.count = 0;
-  shellMesh.frustumCulled = false;
-  shellMesh.castShadow = false;
-  scene.add(shellMesh);
+  // (Drawn as THE BOMBS below — a finned model per kind; the dark capsule is gone, 2026-10-14.)
 
   const shells = [];
   for (let i = 0; i < MAX_SHELLS; i++) {
@@ -128,7 +122,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
   // cm; x 1.3 unit scale and a little more to be seen at RTS distance) — and
   // it TUMBLES; the mortar bomb flies nose first. Was the 1.8 m bomb (you,
   // 2026-09-30: "it looks like a huge bomb").
-  const _gq = new THREE.Quaternion(), _gAxis = new THREE.Vector3(1, 0.3, 0).normalize();
+  const _gq = new THREE.Quaternion(), _gAxis = new THREE.Vector3(1, 0.3, 0).normalize(), _wAxis = new THREE.Vector3(), _tail = new THREE.Vector3();
 
   // ── THE THROWN ONES (2026-10-07, you: "the fumigène looks like a huge capsule that makes no
   // sense, the grenade could look better"): their OWN small meshes, not the mortar bomb — the
@@ -171,6 +165,41 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     return m;
   };
   const fragMesh = handMesh(fragGeo, "ThrownGrenades"), canMesh = handMesh(smokeCanGeo, "ThrownSmoke");
+  // Their TRAIL (arcTrails.js, 2026-10-14 — CoH's): a ribbon along the path really flown, so it fits
+  // any throw's length and height. One draw for all of them.
+  const arcTrails = createArcTrails(scene);
+
+  // ── THE BOMBS (2026-10-14, the buildings lab — you: "the mortars use an ugly bomb, no trail"): a
+  // finned MORTAR BOMB (a teardrop body, the tail boom, eight fins, the fuze), one model for every
+  // calibre scaled by its kind; and an AIRCRAFT BOMB for the T-6 (a fatter body, a box tail). Both
+  // ~2.5x real size: an 81 mm round is 0.5 m and reads as a speck from the RTS camera (a 1.2 m one
+  // reads as a mortar bomb). One instanced draw each; nose along +Z.
+  const bombGeo = (() => {
+    // (slim — a real 81 mm bomb is ~1:6; at 1:1.7 it read as a ball with fins, the lab)
+    const prof = [[0.001, 1.0], [0.03, 0.985], [0.07, 0.94], [0.1, 0.86], [0.116, 0.76], [0.116, 0.62], [0.1, 0.5], [0.07, 0.42], [0.036, 0.37], [0.03, 0.36], [0.03, 0.05], [0.042, 0.03], [0.042, 0.0], [0.001, 0.0]];
+    const body = paint(clean(new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 14)), 0x4d5238);
+    const fuze = paint(clean(new THREE.CylinderGeometry(0.018, 0.03, 0.05, 10).translate(0, 1.0, 0)), 0x9a8f6a);
+    const band = paint(clean(new THREE.CylinderGeometry(0.118, 0.118, 0.03, 14).translate(0, 0.7, 0)), 0xb9a65a);   // the calibre band
+    const fins = [];
+    for (let k = 0; k < 8; k++) fins.push(paint(clean(new THREE.BoxGeometry(0.008, 0.22, 0.088).translate(0, 0.14, 0.03 + 0.044).rotateY((k / 8) * Math.PI * 2)), 0x3f4330));
+    return mergeGeometries([body, fuze, band, ...fins]).rotateX(Math.PI / 2);   // (length 1, +Z the nose; scaled per kind)
+  })();
+  const airBombGeo = (() => {
+    const prof = [[0.001, 1.0], [0.06, 0.97], [0.11, 0.89], [0.14, 0.76], [0.14, 0.4], [0.11, 0.28], [0.06, 0.19], [0.001, 0.17]];
+    const body = paint(clean(new THREE.LatheGeometry(prof.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 14)), 0x535a3c);
+    const band = paint(clean(new THREE.CylinderGeometry(0.143, 0.143, 0.03, 14).translate(0, 0.82, 0)), 0xc9b45a);
+    const fins = [];
+    for (let k = 0; k < 4; k++) fins.push(paint(clean(new THREE.BoxGeometry(0.008, 0.2, 0.15).translate(0, 0.1, 0.075).rotateY((k / 4) * Math.PI * 2 + Math.PI / 4)), 0x464c33));
+    const box = paint(clean(new THREE.CylinderGeometry(0.14, 0.14, 0.09, 4, 1, true).rotateY(Math.PI / 4).translate(0, 0.06, 0)), 0x464c33);   // the box tail's frame
+    return mergeGeometries([body, band, ...fins, box]).rotateX(Math.PI / 2);
+  })();
+  const bombMesh = handMesh(bombGeo, "MortarBombs"), airBombMesh = handMesh(airBombGeo, "AirBombs");
+  /** Each arc kind's model and length (m, drawn): the mortar bombs by calibre; the T-6's bomb. */
+  const SHELL_KINDS = {
+    mortar60: { mesh: "bomb", len: 1.1 }, mortar81: { mesh: "bomb", len: 1.4 }, mortar120: { mesh: "bomb", len: 1.9 },
+    bomb: { mesh: "air", len: 2.2 },
+  };
+  const kindOf = (k) => SHELL_KINDS[k] ?? SHELL_KINDS.mortar81;
 
   /**
    * Lob a shell from `from` onto the point `to`, landing in `flight` seconds
@@ -193,6 +222,10 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     // The velocity that puts it on the point in exactly that time under SHELL_G.
     s.vel.subVectors(to, from).divideScalar(s.flight);
     s.vel.y += 0.5 * SHELL_G * s.flight;
+    s.wob = Math.random() * 6.28;
+    // THE LAUNCH (a game's own: fx.shellLaunch(from, direction, kind) — alg-rts's flash and smoke). A
+    // grenade's throw and an aircraft's release have none.
+    if (kind !== "grenade" && kind !== "smoke" && kind !== "bomb") fx?.shellLaunch?.(from, s.vel.clone().normalize(), kind ?? "mortar81");
     return s;
   }
 
@@ -416,7 +449,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     if (n > 0) bodyMesh.instanceMatrix.needsUpdate = true;
 
     // Shells: ballistic, and they land on the POINT, whatever has moved.
-    let m = 0, mf = 0, mc = 0;
+    let mf = 0, mc = 0, mb = 0, ma = 0;
     for (const s of shells) {
       if (!s.alive) continue;
       s.t += dt;
@@ -426,6 +459,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       if (!s.whistled && s.flight - s.t < 1.6) { s.whistled = true; sfx?.incoming(s.to, s.flight - s.t); }
       if (s.t >= s.flight) {
         s.alive = false;
+        arcTrails.end(s, clock);
         onArcImpact(s.to.clone(), s.damage, s.splash, s.owner, { kind: s.kind });
         continue;
       }
@@ -440,18 +474,30 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
         // fuse is smoking), the grenade's a thread.
         const smoke = s.kind === "smoke";
         (smoke ? canMesh : fragMesh).setMatrixAt(smoke ? mc++ : mf++, _obj.matrix);
-        s.puffT = (s.puffT ?? 0) - dt;
-        if (s.puffT <= 0) { s.puffT = smoke ? 0.04 : 0.05; smokeTrail.spawn(s.pos.x, s.pos.y, s.pos.z, smoke ? 0.9 : 0.45, { scale: smoke ? 0.24 : 0.1 }); }
+        // The streak (both); the smoke can's fuse smokes as well (its wisp, the game's smoke).
+        arcTrails.point(s, s.pos.x, s.pos.y, s.pos.z, clock, smoke ? 1.5 : 1);
+        if (smoke) {
+          s.puffT = (s.puffT ?? 0) - dt;
+          if (s.puffT <= 0) { s.puffT = 0.04; smokeTrail.spawn(s.pos.x, s.pos.y, s.pos.z, 0.9, { scale: 0.24 }); }
+        }
         continue;
       }
+      // THE BOMBS: nose along the flight, a slight fin wobble; their model and size by kind; a TRAIL
+      // (fx.shellTrail — a game's own; else a faint wisp, as the grenade's).
+      const K = kindOf(s.kind);
+      _obj.quaternion.multiply(_gq.setFromAxisAngle(_wAxis.set(Math.sin(s.t * 9 + s.wob), Math.cos(s.t * 9 + s.wob), 0), 0.06));
+      _obj.scale.setScalar(K.len);
       _obj.updateMatrix();
-      shellMesh.setMatrixAt(m, _obj.matrix);
-      m++;
+      if (K.mesh === "air") airBombMesh.setMatrixAt(ma++, _obj.matrix); else bombMesh.setMatrixAt(mb++, _obj.matrix);
+      s.puffT = (s.puffT ?? 0) - dt;
+      if (s.puffT <= 0) {
+        s.puffT = 0.03;
+        _tail.copy(s.vel).normalize().multiplyScalar(-K.len * 0.5).add(s.pos);
+        if (fx?.shellTrail) fx.shellTrail(_tail.x, _tail.y, _tail.z, s.kind ?? "mortar81", s.vel);
+        else if (K.mesh !== "air") smokeTrail.spawn(_tail.x, _tail.y, _tail.z, 0.8, { scale: 0.22 + K.len * 0.06 });
+      }
     }
-    shellMesh.count = m;
-    shellMesh.visible = m > 0;
-    if (m > 0) shellMesh.instanceMatrix.needsUpdate = true;
-    for (const [mesh, k] of [[fragMesh, mf], [canMesh, mc]]) {
+    for (const [mesh, k] of [[fragMesh, mf], [canMesh, mc], [bombMesh, mb], [airBombMesh, ma]]) {
       mesh.count = k;
       mesh.visible = k > 0;
       if (k > 0) mesh.instanceMatrix.needsUpdate = true;
@@ -459,6 +505,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
 
     flares.update(dt, camera);
     smokeTrail.update(dt, camera);
+    if (camera) arcTrails.update(clock, camera);
     tracers.render(clock);
   }
 
@@ -469,5 +516,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     /** The live per-weapon look (W_): a lab may tune it while it plays. */
     weapons: W_,
     get shellsInAir() { return shells.filter((s) => s.alive).length; },
+    /** The bombs in the air (a lab's camera follows one): { pos, vel, kind, t, flight }. */
+    get shells() { return shells.filter((s) => s.alive); },
   };
 }

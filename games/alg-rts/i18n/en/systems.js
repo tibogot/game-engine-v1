@@ -73,6 +73,8 @@ export default {
   "Se poser sur le terrain plat et dégagé le plus proche. Au sol, l'hélicoptère peut être touché par toutes les armes. Un ordre de mouvement le fait redécoller.":
     "Set down on the nearest flat, open ground. On the ground the helicopter can be hit by every weapon. A move order makes it take off again.",
   // algGrenades.js
+  "<b>Lancer impossible</b> : le point est hors d'atteinte.": "<b>Can't throw</b>: the point is out of reach.",
+  "<b>Pas assez de munitions</b> pour lancer ({n} M).": "<b>Not enough munitions</b> to throw ({n} M).",
   "Grenade": "Grenade",
   "Un homme lance une grenade ({range} m, souffle {blast} m) : dégâts, et les hommes autour se jettent à terre. G.":
     "One man throws a grenade ({range} m, {blast} m blast): damage, and the men around it hit the dirt. G.",

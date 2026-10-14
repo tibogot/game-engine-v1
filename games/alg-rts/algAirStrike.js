@@ -174,7 +174,7 @@ export function createAlgAirStrike({ app, selection, projectiles, combat, purse 
         const k = r.bombs - (P.bombs - 1) / 2;
         const to = new THREE.Vector3(r.x + r.dir.x * k * 4, 0, r.z + r.dir.y * k * 4);
         to.y = groundY(to.x, to.z);
-        projectiles.spawnArc(_p.clone().add(_q.set(0, -1.2, 0)), to, { damage: P.bombDamage, splash: P.bombSplash, owner: r.post, flight: fall });
+        projectiles.spawnArc(_p.clone().add(_q.set(0, -1.2, 0)), to, { damage: P.bombDamage, splash: P.bombSplash, owner: r.post, flight: fall, kind: "bomb" });
         r.bombs++;
       }
       if (r.t > 12) { app.scene.remove(r.plane); runs.splice(i, 1); }

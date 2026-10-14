@@ -18,7 +18,11 @@
 // sees through it — algCombat's onArcImpact).
 //
 // His rifle is quiet while he throws (combat skips a man `throwing`), and a
-// new order cancels the throw. Then that grenade is on cooldown (each kind its
+// new order cancels the throw — ONLY a new order (2026-10-14, you: "sometimes the grenade does nothing":
+// under fire, his walk into reach was a plain move, combat halted him to shoot the enemy in his rifle's
+// reach, and "he stopped" read as "the player moved him" — dropped in silence. His walk is the
+// player's order now, and only a NEW goal ends the throw; out of munitions or out of reach, he stops
+// and the alert says why). Then that grenade is on cooldown (each kind its
 // own). The ALN AI throws frags too (algAI.js), through order().
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
@@ -122,17 +126,29 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   window.addEventListener("keydown", onKey);
 
   const dist = (u, p) => Math.hypot(u.position.x - p.x, u.position.z - p.z);
+  /** Where he throws from (a little inside the reach: the ring shows the same). */
+  const reach = (K) => K.range * 0.95;
+  const say = (u, text) => { if (isHuman(u.team)) app.algBattle?.say?.(text, u.position.x, u.position.z, "bad"); };
   const isTyping = (e) => /input|textarea|select/i.test(e.target?.tagName ?? "");
 
   /** `u` throws a `kind` grenade at (x, z) — walking into reach first if he must. */
   function order(u, x, z, kind = "grenade") {
     for (let i = throws.length - 1; i >= 0; i--) if (throws[i].u === u) throws.splice(i, 1);
-    const job = { u, x, z, t: -1, thrown: false, walking: false, kind };
+    const job = { u, x, z, t: -1, thrown: false, walking: false, kind, tries: 0 };
     throws.push(job);
-    if (dist(u, job) > THROWS[kind].range * 0.95) { u.moveOrder(x, z); job.walking = true; }
+    if (dist(u, job) > reach(THROWS[kind])) walk(job);
     onChange();
   }
+  /** Into reach: the player's own move (combat lets him walk on — combat.js playerMove). */
+  function walk(job) {
+    job.u.moveOrder(job.x, job.z);
+    job.u.playerMove = true;
+    job.walking = true;
+    job.goal = job.u.goalPoint ? { x: job.u.goalPoint.x, z: job.u.goalPoint.z } : null;
+  }
 
+  /** A new order given to him since (his goal is no longer the throw's walk): the throw is off. */
+  const reordered = (job) => { const g = job.u.goalPoint; return !!g && (!job.goal || Math.hypot(g.x - job.goal.x, g.z - job.goal.z) > 0.5); };
   function end(job, i) {
     job.u.throwing = null;
     throws.splice(i, 1);
@@ -149,11 +165,24 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
       const job = throws[i], u = job.u, K = THROWS[job.kind];
       if (!u.alive) { end(job, i); continue; }
       if (job.t < 0) {
-        // Walking into reach; the player moving him elsewhere cancels.
-        if (job.walking && !u.isMoving) { end(job, i); continue; }
-        if (dist(u, job) > K.range * 0.95) continue;
-        // The French pay as the throw starts (the munitions ran out meanwhile: no throw).
-        if (purse && u.team === "player" && !purse.spend(K.cost)) { end(job, i); continue; }
+        // Walking into reach: a NEW order cancels; a stop does not (combat, a wall, the squad).
+        if (job.walking && reordered(job)) { end(job, i); continue; }
+        if (dist(u, job) > reach(K)) {
+          if (!u.isMoving) {
+            // Stopped short and still out of reach: on again, twice; then he cannot get there.
+            if (++job.tries <= 2) walk(job);
+            else { say(u, t("<b>Lancer impossible</b> : le point est hors d'atteinte.")); end(job, i); }
+          } else if (!u.playerMove) u.playerMove = true;   // (combat clears it on a stop; it is his order)
+          continue;
+        }
+        // The French pay as the throw starts (the munitions ran out meanwhile: no throw — he stops,
+        // he does not walk on into the enemy).
+        if (purse && u.team === "player" && !purse.spend(K.cost)) {
+          u.haltMovement?.();
+          say(u, t("<b>Pas assez de munitions</b> pour lancer ({n} M).", { n: K.cost.mun ?? 0 }));
+          end(job, i);
+          continue;
+        }
         u.stop();
         u.faceToward(job.x, job.z);
         u.throwing = { start: P.clipStart };
@@ -162,8 +191,8 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
         onChange();
         continue;
       }
-      // A move order mid-throw: he drops it (nothing thrown yet) or goes after.
-      if (u.isMoving) { end(job, i); continue; }
+      // A NEW move order mid-throw: he drops it (nothing thrown yet) or goes after. (A nudge does not.)
+      if (u.isMoving && u.goalPoint && Math.hypot(u.goalPoint.x - u.position.x, u.goalPoint.z - u.position.z) > 1.5) { end(job, i); continue; }
       job.t += dt;
       if (!job.thrown && job.t >= P.release) {
         job.thrown = true;
@@ -190,8 +219,8 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
       const men = targeting.sel.filter((u) => ready(u, targeting.kind));
       if (men.length) {
         const u = men.reduce((b, m) => (dist(m, targeting.at) < dist(b, targeting.at) ? m : b));
-        rings.add(targeting.at.x, targeting.at.z, K.ring, dist(u, targeting.at) <= K.range ? 0x58e070 : 0xffb020);
-        rings.add(u.position.x, u.position.z, K.range, 0x6ab0ff);
+        rings.add(targeting.at.x, targeting.at.z, K.ring, dist(u, targeting.at) <= reach(K) ? 0x58e070 : 0xffb020);
+        rings.add(u.position.x, u.position.z, reach(K), 0x6ab0ff);
       }
     }
     projectiles.drawWarnings(rings);   // grenades and mortar bombs in the air

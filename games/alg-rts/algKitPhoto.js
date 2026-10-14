@@ -11,7 +11,7 @@
 // projection (the face's dominant axis), on top of the kit's own atlas read. Built at load from the
 // 512 px maps; until then the detail is flat (the kit as it was).
 import * as THREE from "three";
-import { abs, attribute, dot, float, mix, normalGeometry, positionGeometry, select, step, texture, transformNormalToView, uniform, uv, vec2, vec3 } from "three/tsl";
+import { abs, attribute, clamp, dot, float, mix, normalGeometry, positionGeometry, positionLocal, select, smoothstep, step, texture, transformNormalToView, uniform, uv, vec2, vec3 } from "three/tsl";
 import { rtsAtlasColor } from "../../v3/render/objects/rtsObjectProps.js";
 
 const FAMILIES = [
@@ -74,13 +74,20 @@ function packed() {
 }
 
 const _mats = new Map();
+/** How long a part takes to settle into place once its moment comes (of the site's progress, 0..1). */
+const SETTLE = 0.035;
 /**
  * The kit's material (rtsObjectMaterialTinted's: the atlas colour, the paint tint) with the photo
  * detail on top. One per paint tint.
+ *
+ * `build` (a uniform node, 0..1 — algConstruction.js): a CONSTRUCTION SITE's own material, not cached.
+ * Each part (the geometry's `build` vec2: its moment, its drop) is hidden until the site's progress
+ * reaches its moment, then falls (or rises) into place over SETTLE. All on the GPU, no per-frame CPU;
+ * the same graph for every site (one program). The finished building goes back to the shared one.
  */
-export function kitPhotoMaterial(paintTint) {
+export function kitPhotoMaterial(paintTint, { build = null } = {}) {
   const key = paintTint.join(",");
-  if (_mats.has(key)) return _mats.get(key);
+  if (!build && _mats.has(key)) return _mats.get(key);
   const { grain, nA, nB } = packed();
   const id = attribute("matId", "float");
   const isPaint = step(float(6.5), id).mul(step(id, float(7.5)));
@@ -114,6 +121,18 @@ export function kitPhotoMaterial(paintTint) {
   m.name = `KitPhoto:${key}`;
   m.colorNode = col;
   m.normalNode = transformNormalToView(nObj).normalize();
+  if (build) {
+    const b = attribute("build", "vec2");
+    const k = clamp(build.sub(b.x).div(SETTLE), 0, 1);
+    const shown = step(b.x, build);
+    // Hidden parts sink far below (their triangles, all at one moment, move as one — nothing stretches).
+    m.positionNode = positionLocal.add(vec3(0, b.y.mul(float(1).sub(smoothstep(0, 1, k))), 0)).sub(vec3(0, float(1).sub(shown).mul(1e4), 0));
+    // (the SHADOW pass too: without it the parts still to come cast their shadows — a ghost H in the
+    // bare earth, the lab)
+    m.castShadowPositionNode = m.positionNode;
+    m.name = `KitPhotoSite:${key}`;
+    return m;
+  }
   _mats.set(key, m);
   return m;
 }

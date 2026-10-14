@@ -29,12 +29,17 @@ import { createPointMark } from "./algPointMarks.js";
 import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
+import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildFortPointPiece, buildFrenchPostPiece, buildMgNestPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 import { buildFortPoint, buildMgNest } from "../../v3/render/objects/rtsAlgeria.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
 await loadSandbagWall();
+import { loadZeriba, zeribaMesh } from "./algZeriba.js";
+import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
+await loadZeriba();
+await loadZeriba("zeribaFarm");
 
 // THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
 // marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
@@ -127,6 +132,9 @@ const rock = (label, shape, gap) => ({
   tags: ["ROCHER (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "l'affleurement du jeu à gauche, le nouveau rocher de grès à droite.",
 });
 
+/** The helipad's construction site (the lab's « Construction » panel). */
+let SITE = null;
+
 /** The windsock's cloth for the lab (the game's turns with the wind — algWind.js): red and white bands, filled. */
 function labWindsock(g) {
   const w = g.userData.windsock, grp = new THREE.Group();
@@ -148,12 +156,39 @@ function labWindsock(g) {
 }
 
 const BUILDINGS = {
+  // THE ZERIBA (2026-10-14, you: "what are these things near the villager house?"): the kit's pen LEFT, the
+  // Blender one RIGHT (algZeriba.js, tools/blender/zeribaSim.py).
+  // THE FARMSTEAD'S THORN PEN (2026-10-14, your screenshot: the ring of round lumps by the farm): the farm as
+  // the game builds it LEFT (its pen of brush balls to the right of its yard), the Blender pen RIGHT.
+  enclosFerme: {
+    label: "Enclos de la ferme (nouveau)", gap: 24, before: () => buildFarmstead({ seed: 1970 }),
+    after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [zeribaMesh("ZeribaFarm", "zeribaFarm")].filter(Boolean); return g; },
+    tags: ["FERME (LE JEU) — SON ENCLOS À DROITE DE LA COUR", "ENCLOS · NOUVEAU (BLENDER)"], note: "la ferme du jeu à gauche (son enclos : les boules de broussailles), le nouvel enclos d'épineux à droite.",
+  },
+  zeriba: {
+    label: "Zeriba (nouveau)", gap: 20, before: () => buildZeriba({ seed: 81 }),
+    after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [zeribaMesh()].filter(Boolean); return g; },
+    tags: ["ZERIBA (LE JEU)", "ZERIBA · NOUVEAU (BLENDER)"], note: "l'enclos du jeu à gauche, le nouveau à droite : des buissons d'épineux coupés, empilés en cercle, la cime vers l'extérieur.",
+  },
   // THE SANDBAGS (2026-10-14, you: "the sandbags look so cheap — can you do better?"): the game's wall LEFT,
   // the new one RIGHT (algSandbags.js).
   sacsDeSable: {
     label: "Sacs de sable (nouveau)", gap: 7.5, before: () => buildFrSandbagWall(),
     after: () => { const { mesh } = buildSandbagWallV2({ seed: 3 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [mesh]; return g; },
     tags: ["SACS DE SABLE (LE JEU)", `SACS DE SABLE · NOUVEAU · variante ${SEED + 1}`], note: "le mur du jeu à gauche, le nouveau à droite : sacs en jute, chacun sa forme et sa teinte, posés en quinconce.",
+  },
+  // THE REST OF THE SANDBAGS (2026-10-14): the kit's LEFT, the cloth-simulated RIGHT (algSandbags.js).
+  sacsNidMg: {
+    label: "Nid de MG (sacs)", gap: 10, before: () => buildMgNest({}), after: () => buildMgNestPiece((o) => buildMgNest(o)),
+    tags: ["NID DE MG (LE JEU)", "NID DE MG · SACS SIMULÉS"], note: "le nid du jeu à gauche, ses sacs simulés à droite (la couronne et le toit).",
+  },
+  sacsPointFort: {
+    label: "Point fortifié (sacs)", gap: 13, before: () => buildFortPoint({}), after: () => buildFortPointPiece((o) => buildFortPoint(o)),
+    tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · SACS SIMULÉS"], note: "le point fortifié du jeu à gauche, ses trois murs simulés à droite.",
+  },
+  sacsPoste: {
+    label: "Poste (sacs)", gap: 42, before: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), after: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
+    tags: ["POSTE (LE JEU)", "POSTE · SACS SIMULÉS"], note: "le poste du jeu à gauche, ses sacs simulés à droite : la chicane, les tours, le guetteur, le mortier.",
   },
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
   poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
@@ -162,7 +197,16 @@ const BUILDINGS = {
   // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.
   helisurface: {
     label: "Hélisurface", gap: 24, before: () => buildHelipad(),
-    after: () => { const g = buildHelipad({ detail: 2 }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); g.userData.extra = [labWindsock(g)]; return g; },
+    // (2026-10-13: the CONSTRUCTION too — algConstruction.js: the panel's « Construction » plays it.)
+    after: () => {
+      const g = buildHelipad({ detail: 2 });
+      SITE = createConstruction(g, { paintTint: FR_PAINT_TINT });
+      SITE.sock = labWindsock(g);
+      g.userData.labMaterial = SITE.material;
+      g.userData.extra = [SITE.sock, SITE.dressing];
+      SITE.set(1);
+      return g;
+    },
     tags: ["HÉLISURFACE (LE JEU)", "HÉLISURFACE · NOUVELLE"], note: "l'hélisurface du jeu à gauche, la nouvelle à droite : terre battue, H en pierres blanchies, panneaux de signalisation, point carburant.",
   },
   ruineRomaine: { build: (o) => buildRomanRuin({ ...o }), label: "Ruine romaine", gap: 15 },
@@ -177,19 +221,6 @@ const BUILDINGS = {
   // THE FLN CAVE (2026-10-11, you: "use the realistic rocks to make a cave"): the game's on the
   // LEFT (low-poly limestone), the sandstone cave on the RIGHT — the same shoring and gear.
   grotte: {
-  // THE REST OF THE SANDBAGS (2026-10-14): the kit's LEFT, the cloth-simulated RIGHT (algSandbags.js).
-  sacsNidMg: {
-    label: "Nid de MG (sacs)", gap: 10, before: () => buildMgNest({}), after: () => buildMgNestPiece((o) => buildMgNest(o)),
-    tags: ["NID DE MG (LE JEU)", "NID DE MG · SACS SIMULÉS"], note: "le nid du jeu à gauche, ses sacs simulés à droite (la couronne et le toit).",
-  },
-  sacsPointFort: {
-    label: "Point fortifié (sacs)", gap: 13, before: () => buildFortPoint({}), after: () => buildFortPointPiece((o) => buildFortPoint(o)),
-    tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · SACS SIMULÉS"], note: "le point fortifié du jeu à gauche, ses trois murs simulés à droite.",
-  },
-  sacsPoste: {
-    label: "Poste (sacs)", gap: 42, before: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), after: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
-    tags: ["POSTE (LE JEU)", "POSTE · SACS SIMULÉS"], note: "le poste du jeu à gauche, ses sacs simulés à droite : la chicane, les tours, le guetteur, le mortier.",
-  },
     label: "Grotte du FLN", gap: 11, before: () => buildCaveEntrance(), after: () => buildSandstoneCave({ variant: SEED }),
     tags: ["GROTTE (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "la grotte du jeu à gauche, la grotte en grès à droite (même étais, même matériel).",
   },
@@ -313,8 +344,43 @@ export async function startBuildingLab(container) {
     });
   }
   if (["pointRavit", "pointCarbu"].includes(new URLSearchParams(location.search).get("v"))) startPointPanel(lab, panel);
+  if (SITE) startConstructionPanel(lab, panel, box);
   // (`point`: the supply point's two sides, for stills of the capture from the console.)
   return Object.assign(lab, { setStone, point: POINT });
+}
+
+/**
+ * CONSTRUCTION (the helipad): the site at a given progress, or played through at real pace (P.secs —
+ * a sapper team's build time), the paint and the windsock at their moments.
+ */
+function startConstructionPanel(lab, panel, before) {
+  const secs = 22;
+  const div = document.createElement("div");
+  div.innerHTML = `<h2>Construction</h2><div class="g">${[0, 20, 40, 60, 80, 100].map((p) => `<button data-p="${p}">${p} %</button>`).join("")}<button data-play="1">▶ Lecture (${secs} s)</button></div><div id="build-pct" style="font:12px monospace;margin-top:4px"></div>`;
+  panel.insertBefore(div, before);
+  const stencil = () => { let st = null; lab.after.group.traverse((o) => { if (o.material?.name === "RtsStencil") st = o; }); return st; };
+  const pct = div.querySelector("#build-pct");
+  let play = null;
+  const show = (p) => {
+    SITE.set(p);
+    const st = stencil(); if (st) st.visible = SITE.stencilShown(p);
+    if (SITE.sock) SITE.sock.visible = p >= 0.9;
+    pct.textContent = `${Math.round(p * 100)} %`;
+  };
+  div.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.play) { play = { t0: performance.now() }; return; }
+    play = null;
+    show(Number(b.dataset.p) / 100);
+  });
+  const tick = () => {
+    if (play) { const p = Math.min(1, (performance.now() - play.t0) / 1000 / secs); show(p); if (p >= 1) play = null; }
+    requestAnimationFrame(tick);
+  };
+  tick();
+  show(1);
+  lab.construction = { show, site: SITE };
 }
 
 /** The supply point's panel: its state on both sides, and a capture played out (3 s, then the flash). */

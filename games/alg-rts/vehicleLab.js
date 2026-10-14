@@ -87,7 +87,8 @@ function vehicleOf(geo, key) {
   // Meshes of their own beside the kit's (the buildings lab's sandstone cave: algCave.js).
   for (const x of geo.userData.extra ?? []) g.add(x);
   // An emplacement's gun (the mortar, the MG nest's): its own mesh on its pivot.
-  if (geo.userData.gun) { const gm = new THREE.Mesh(geo.userData.gun.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); gm.position.fromArray(geo.userData.gun.pivot); gm.castShadow = true; g.add(gm); }
+  let gunMesh = null;
+  if (geo.userData.gun) { const gm = new THREE.Mesh(geo.userData.gun.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); gm.position.fromArray(geo.userData.gun.pivot); gm.castShadow = true; g.add(gm); gunMesh = gm; }
   let gear = null;
   if (geo.userData.gear) {
     gear = new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial(FR_PAINT_TINT, key));
@@ -129,7 +130,7 @@ function vehicleOf(geo, key) {
   };
   // An aeroplane (built wheels up, about its centre line) stands in the air here, to be looked at.
   if (geo.userData.labLift) for (const c of g.children) c.position.y += geo.userData.labLift;
-  return { group: g, tris, paint, rotors, muzzle, turretMesh };
+  return { group: g, tris, paint, rotors, muzzle, turretMesh, gunMesh, gun: geo.userData.gun ?? null };
 }
 
 /**
@@ -264,21 +265,31 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   const shots = createProjectiles({
     app: fakeApp, fx, weapons: ALG_FIRE, tracerColours: ALG_TRACERS,
     onImpact: (t, dmg, at, owner, o) => (o?.shell ? fx.shellHit?.(at.x, at.y, at.z) : fx.bulletHit ? fx.bulletHit(at.x, at.y, at.z, { metal: true }) : fx.impact(at.x, at.y, at.z)),
+    // A mortar bomb landing (the game's own blast, sized as algCombat's for a mortar).
+    onArcImpact: (at) => fx.explosion?.(at.x, at.y, at.z, { size: 7 }),
   });
   const typeDef = ALG_UNIT_TYPES[vKey] ?? ALG_UNIT_TYPES[vKey.replace(/Open$/, "")] ?? null;
+  // A MORTAR (a piece with a gun and its muzzle — the buildings lab's pits, 2026-10-14): it LOBS a bomb
+  // (projectiles.spawnArc, the game's) at a target 80 m in front of its tube; its tube kicks back.
   const shooters = [before, after].map((v) => ({
-    v, owner: { weapon: typeDef?.weapon ?? "mg", team: "player", position: v.group.position, radius: typeDef?.radius ?? 3, isStructure: false },
-    target: { position: new THREE.Vector3(v.group.position.x, 0, 32), isAir: false, isStructure: false, radius: 2, alive: true },
+    v, arc: !!v.gun?.muzzle, owner: { weapon: typeDef?.weapon ?? "mg", team: "player", position: v.group.position, radius: typeDef?.radius ?? 3, isStructure: false },
+    target: { position: new THREE.Vector3(v.group.position.x, 0, v.gun?.muzzle ? -80 : 32), isAir: false, isStructure: false, radius: 2, alive: true },
     cd: 0,
   }));
+  // The launch's stand-in (the flash and smoke are your Fire Pro work's: fx.shellLaunch is the hook).
+  fx.shellLaunch ??= (p, dir) => { fx.cannon?.(p.x + dir.x * 0.3, p.y + dir.y * 0.3, p.z + dir.z * 0.3); };
   for (const sh of shooters) {
     const t = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.4, 3.2), new THREE.MeshStandardNodeMaterial({ color: 0x4a4a3c, roughness: 0.9 }));
     t.position.set(sh.target.position.x, 0.7, sh.target.position.z);
     t.castShadow = true;
     scene.add(t);
   }
-  let firing = false;
-  const fireStep = (dt) => {
+  let firing = false, follow = false;
+  const _fol = new THREE.Vector3(), _fo = new THREE.Vector3();
+  // SLOW MOTION (the « Ralenti » buttons): the shots, the effects and the firing clock at this rate.
+  let timeScale = 1;
+  const fireStep = (dt0) => {
+    const dt = dt0 * timeScale;
     for (const sh of shooters) {
       // A turret turns to its target first.
       const tm = sh.v.turretMesh;
@@ -289,6 +300,15 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
       if (!firing) continue;
       sh.cd -= dt;
       if (sh.cd > 0) continue;
+      if (sh.arc) {
+        sh.cd = 3.5;
+        sh.v.group.updateMatrixWorld(true);
+        const from = new THREE.Vector3(...sh.v.gun.muzzle).applyMatrix4(sh.v.gunMesh.matrixWorld);
+        const to = sh.target.position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 6, 0, (Math.random() - 0.5) * 6));
+        shots.spawnArc(from, to, { damage: 0, splash: 0, owner: null, kind: sh.v.gun.kind ?? "mortar81" });
+        sh.recoil = 1;
+        continue;
+      }
       sh.cd = 1 / (typeDef?.fireRate ?? 1.5);
       const from = sh.v.muzzle() ?? sh.v.group.position.clone().setY(1.6);
       shots.spawn(from, sh.target, 0, sh.owner, null, { exact: !!sh.v.muzzle(), miss: Math.random() < 0.4 });
@@ -299,6 +319,13 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     for (const sh of shooters) {
       sh.recoil = Math.max(0, (sh.recoil ?? 0) - dt * 2);
       const kick = sh.recoil ** 2, tm = sh.v.turretMesh;
+      // A mortar: the tube driven back down its own line into the baseplate, the bipod flexing.
+      if (sh.arc && sh.v.gunMesh) {
+        sh.gunBase ??= sh.v.gunMesh.position.clone();
+        const ax = sh.v.gun.axis ?? [0, 1, 0];
+        sh.v.gunMesh.position.copy(sh.gunBase).addScaledVector(new THREE.Vector3(...ax), -0.16 * kick);
+        continue;
+      }
       sh.v.group.rotation.x = -0.035 * kick;
       if (tm) {
         sh.base ??= tm.position.clone();
@@ -332,7 +359,7 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     <h2>${kind}</h2><div class="g">${Object.entries(catalog).map(([k, v]) => `<button data-veh="${k}">${v.label}</button>`).join("")}</div>
     <h2>Vues</h2><div class="g"><button data-v="close">Gros plan</button><button data-v="play">Zoom de jeu</button><button data-v="play2">Zoom proche</button><button data-v="spin">Rotation</button></div>
     <h2>Peinture (après)</h2><div class="g">${Object.entries(PAINTS).map(([k, p]) => `<button data-paint="${k}">${p.label}</button>`).join("")}</div>
-    <h2>Tir</h2><div class="g"><button data-v="fire">Feu</button><button data-v="aim">Vue du tir</button></div>
+    <h2>Tir</h2><div class="g"><button data-v="fire">Feu</button><button data-v="aim">Vue du tir</button><button data-v="follow">Suivre l'obus</button><button data-v="slow">Ralenti ×0.1</button></div>
     <h2>Lumière</h2><div class="g"><button data-v="day">Jour</button><button data-v="night">Nuit</button></div>
     <h2>Coût</h2><table><tr><td>Avant</td><td>${before.tris.toLocaleString()} tris</td></tr><tr><td>Après</td><td>${after.tris.toLocaleString()} tris</td></tr></table>
     <p>Le soleil, l'ombre et l'exposition du jeu ; un ciel de remplacement. Glisser pour tourner, molette pour zoomer.</p></div>`;
@@ -349,7 +376,9 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     if (v === "play2") play(32, 36);
     if (v === "spin") spin = !spin;
     if (v === "fire") { firing = !firing; b.textContent = firing ? "Cessez le feu" : "Feu"; if (firing) { spin = false; yaw = 0; setYaw(); } }
-    if (v === "aim") { controls.target.set(0, 1.5, 14); camera.position.set(-16, 11, -6); controls.update(); }
+    if (v === "aim") { const z = shooters[1].arc ? -30 : 14; controls.target.set(0, 1.5, z); camera.position.set(-16, 11, shooters[1].arc ? 12 : -6); controls.update(); }
+    if (v === "slow") { timeScale = timeScale === 1 ? 0.1 : 1; b.textContent = timeScale === 1 ? "Ralenti ×0.1" : "Vitesse normale"; }
+    if (v === "follow") { follow = !follow; b.textContent = follow ? "Caméra libre" : "Suivre l'obus"; }
     if (v === "day") night(false);
     if (v === "night") night(true);
   });
@@ -368,6 +397,15 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     if (spin) { yaw += dt * 0.25; setYaw(); }
     for (const m of crew.mixers) m.update(dt);
     fireStep(dt);
+    // FOLLOW THE BOMB: the camera beside the newest one in the air, a little behind and above.
+    if (follow) {
+      // (locked to it, beside its flight: a lerp arrived after it had landed)
+      const s = shots.shells.find((q) => q.pos.x > 0) ?? shots.shells.at(-1);
+      if (s) {
+        controls.target.copy(s.pos);
+        camera.position.copy(s.pos).add(_fo.set(6.5, 1.6, -2.4));
+      }
+    }
     for (const v of [before, after]) for (const r of v.rotors) r.m.rotation[r.axis] += dt * (r.axis === "y" ? 4 : 18);
     controls.update();
     [[before.group, tags[0]], [after.group, tags[1]]].forEach(([g, t]) => {
@@ -378,5 +416,5 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     });
     renderer.render(scene, camera);
   });
-  return { renderer, scene, camera, controls, before, after, crew, paints: PAINTS, fire: (on) => { firing = on; if (on) { spin = false; yaw = 0; setYaw(); } }, close, play, night, setYaw: (y) => { yaw = y; setYaw(); }, spin: (on) => { spin = on; } };
+  return { renderer, scene, camera, controls, before, after, crew, paints: PAINTS, slow: (k) => { timeScale = k; }, fire: (on) => { firing = on; if (on) { spin = false; yaw = 0; setYaw(); } }, close, play, night, setYaw: (y) => { yaw = y; setYaw(); }, spin: (on) => { spin = on; } };
 }

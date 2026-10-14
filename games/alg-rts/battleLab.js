@@ -62,10 +62,15 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
       .map((m) => { const fp = m.geometry.userData.footprint; return { x: m.position.x, z: m.position.z, r: Math.hypot(fp.hx, fp.hz) + 6 }; });
     const coverAt = (x, z) => app.algCover?.coverAt?.(x, z) ?? 0;
     let best = null;
-    for (let x = PLAY.x0 + 60; x <= PLAY.x1 - 60; x += 12) {
-      for (let z = PLAY.z0 + 60; z <= PLAY.z1 - 60; z += 12) {
+    // (Scaled to the map, 2026-10-14: 140 m from the armed buildings and 60 m from the edge fitted the
+    // Aurès' 610 m; on the training camp's 330 m the post alone ruled out everything — the arena fell
+    // back to (0, 0), in the practice hamlet's walls.)
+    const size = Math.min(PLAY.x1 - PLAY.x0, PLAY.z1 - PLAY.z0);
+    const keepArmed = Math.min(140, size * 0.33), edge = Math.min(60, size * 0.15);
+    for (let x = PLAY.x0 + edge; x <= PLAY.x1 - edge; x += 12) {
+      for (let z = PLAY.z0 + edge; z <= PLAY.z1 - edge; z += 12) {
         const c = { x, z };
-        if (armed.some((p) => Math.hypot(p.x - x, p.z - z) < 140)) continue;
+        if (armed.some((p) => Math.hypot(p.x - x, p.z - z) < keepArmed)) continue;
         let lo = Infinity, hi = -Infinity, ok = true, bad = 0;
         for (let r = -ARENA_LEN / 2; r <= ARENA_LEN / 2 && ok; r += 9) {
           for (let f = -ARENA_W / 2; f <= ARENA_W / 2; f += 9) {
@@ -79,11 +84,12 @@ export function createBattleLab(app, { rtsCamera = app.rtsCamera } = {}) {
         const relief = hi - lo;
         // Flat enough first, then the CLEAREST (fewest samples on cover or a piece — none left on
         // the denser map), then the flattest, near the post as a tiebreak.
-        const score = bad * 4 + relief + Math.hypot(x - 90, z - 213) * 0.002;
+        const score = bad * 4 + relief + Math.hypot(x - (PLAY.x0 + PLAY.x1) / 2, z - (PLAY.z0 + PLAY.z1) / 2) * 0.002;
         if (relief < FLAT * 2 && (!best || score < best.score)) best = { x, z, relief, score, bad };
       }
     }
-    return best ?? { x: 0, z: 0, relief: NaN };
+    if (!best) console.warn("[battle lab] no clear flat patch on this map: the arena at its centre");
+    return best ?? { x: (PLAY.x0 + PLAY.x1) / 2, z: (PLAY.z0 + PLAY.z1) / 2, relief: NaN };
   }
 
   // ── The squads ───────────────────────────────────────────────────────────

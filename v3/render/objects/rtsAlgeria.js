@@ -475,9 +475,12 @@ function buildHelipadV2({ seed = 23 } = {}) {
     return ig;
   };
   // Three tones: the centre scoured pale by the rotors, the deck, the graded slopes darker (loose soil).
-  parts.push({ geo: gridGeo(slope), mat: MAT.spoil, tone: 0.22 });
-  parts.push({ geo: gridGeo(outer), mat: MAT.spoil, tone: 0.4 });
-  parts.push({ geo: gridGeo(centre), mat: MAT.spoil, tone: 0.62 });
+  // (BUILD ORDER — algConstruction.js: the graded earth rises out of the ground first, the slopes, then
+  // the deck, then its scoured centre)
+  parts.push({ geo: gridGeo(slope), mat: MAT.spoil, tone: 0.22, build: 0.03, drop: -0.35 });
+  parts.push({ geo: gridGeo(outer), mat: MAT.spoil, tone: 0.4, build: 0.12, drop: -0.3 });
+  parts.push({ geo: gridGeo(centre), mat: MAT.spoil, tone: 0.62, build: 0.22, drop: -0.25 });
+  const M = {};   // where each stage's parts start (their build order is set at the end)
   // THE H in whitewashed stones: its strokes 0.85 m wide, 6 m long, its uprights along z (it reads
   // upright from the RTS camera — along x it read as an I-beam, the lab).
   const stone = (x, z, s) => {
@@ -490,9 +493,11 @@ function buildHelipadV2({ seed = 23 } = {}) {
       stone(x + (R() - 0.5) * 0.09, z + (R() - 0.5) * 0.09, 0.15 + R() * 0.05);
     }
   };
+  M.h = parts.length;
   fill(-2.15, -1.3, -3.0, 3.0);                                         // the two uprights
   fill(1.3, 2.15, -3.0, 3.0);
   fill(-1.0, 1.0, -0.42, 0.42);                                         // the bar
+  M.edge = parts.length;
   // The EDGE: whitewashed stones a pace apart, uneven, a few out of line.
   const pitch = 1.1, n = Math.round((2 * D) / pitch);
   for (let k = 0; k <= n; k++) {
@@ -504,6 +509,7 @@ function buildHelipadV2({ seed = 23 } = {}) {
       stone(x + (Math.abs(x) === D ? off * 0.3 : off), z + (Math.abs(z) === D ? off * 0.3 : off), 0.17 + R() * 0.09);
     }
   }
+  M.marks = parts.length;
   // TYRE MARKS where the H-34s and H-21s set down: two pairs of shallow ruts, darker, pressed in a
   // little off the H's centre, lifted a hair off the earth (strips that follow it). And a SKID scuff
   // (the Alouette's) across the bar.
@@ -534,6 +540,7 @@ function buildHelipadV2({ seed = 23 } = {}) {
     }
   }
   strip(-0.15, 3.6, 0.15, 4.4, 0.3, 0.38);                           // the nose wheel's, short
+  M.grit = parts.length;
   // GRIT blown out by the rotors: small ochre stones scattered thicker toward the deck's edge.
   for (let k = 0; k < 140; k++) {
     const a = R() * Math.PI * 2, r = 4.5 + Math.sqrt(R()) * (D - 4.3);
@@ -542,6 +549,7 @@ function buildHelipadV2({ seed = 23 } = {}) {
     const sz = 0.09 + R() * 0.11;
     parts.push({ geo: fieldStone(Math.floor(R() * 1e6), sz * 1.4, sz, sz * 1.2), pos: [x, hAt(x, z) + sz * 0.25, z], rot: [0, R() * 3, 0], mat: MAT.limestone, tone: 0.3 + R() * 0.3 });
   }
+  M.tufts = parts.length;
   // DRY TUFTS at the foot of the slopes, where the grading stopped.
   for (let k = 0; k < 18; k++) {
     const side = Math.floor(R() * 4), u = (R() - 0.5) * 2 * (D + 1);
@@ -550,16 +558,19 @@ function buildHelipadV2({ seed = 23 } = {}) {
     if (x > D && Math.abs(z - 1.4) < 4.5) continue;                     // (not in the fuel point)
     parts.push(...brushClump(R, x, hAt(x, z) - 0.08, z, { h: 0.22 + R() * 0.2, r: 0.16 + R() * 0.1, dry: R() < 0.4 }));
   }
+  M.path = parts.length;
   // THE PATH to the post (local -x): a double row of whitewashed stones, the way the posts marked theirs.
   // (only on the graded slope: past it the model does not know the ground's height)
   for (let k = 0; k < 3; k++) {
     const x = -D - 0.5 - k * 0.8;
     for (const z of [-0.85, 0.85]) if (R() > 0.08) stone(x + (R() - 0.5) * 0.15, z + (R() - 0.5) * 0.12, 0.13 + R() * 0.05);
   }
+  M.chocks = parts.length;
   // Wheel chocks by the H, a coil of rope.
   for (const [x, z, a] of [[3.2, -1.8, 0.2], [3.5, -1.2, 0.3]]) parts.push({ geo: buildBox(0.22, 0.14, 0.35), pos: [x, hAt(x, z) + 0.07, z], rot: [0, a, 0], mat: MAT.timber, tone: 0.25 });
   parts.push({ geo: new THREE.TorusGeometry(0.22, 0.035, 5, 14).rotateX(Math.PI / 2), pos: [3.9, hAt(3.9, -1.5) + 0.04, -1.5], mat: MAT.hessian, tone: 0.45 });
 
+  M.cairns = parts.length;
   // Corner cairns: three stones piled, a stake.
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const cx = sx * (D + 0.5), cz = sz * (D + 0.5), y0 = hAt(cx, cz);
@@ -567,6 +578,7 @@ function buildHelipadV2({ seed = 23 } = {}) {
     parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.035, 1.0, 5), pos: [cx, y0 + 0.5, cz], rot: [(R() - 0.5) * 0.1, 0, (R() - 0.5) * 0.1], mat: MAT.timber, tone: 0.3 });
   }
 
+  M.mast = parts.length;
   // THE WINDSOCK's mast (the sock is the game's: algWind.js), on a footing, guyed.
   const wx = D + 1.6, wz = D + 0.6, mH = 5.5, wy = hAt(wx, wz);
   parts.push({ geo: buildBox(0.55, 0.3, 0.55), pos: [wx, wy + 0.05, wz], mat: MAT.concrete, tone: 0.45 });
@@ -585,6 +597,7 @@ function buildHelipadV2({ seed = 23 } = {}) {
   bakeContactAO(swivel, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
   swivel.scale(S, S, S);
 
+  M.fuel = parts.length;
   // THE FUEL POINT, off the right side: sandbags in an L, drums on pallets.
   const fx = D + 2.9, fz = 1.4;
   for (let r = 0; r < 2; r++) {
@@ -617,6 +630,20 @@ function buildHelipadV2({ seed = 23 } = {}) {
   parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.035, 1.2, 5), pos: [D + 0.9, 0.6, -D + 0.6], mat: MAT.timber, tone: 0.28 });
   parts.push({ geo: new THREE.CylinderGeometry(0.09, 0.09, 0.42, 10), pos: [D + 0.9, 0.85, -D + 0.48], mat: MAT.paint, tone: 0.05 });
 
+  M.end = parts.length;
+  // THE BUILD ORDER of the rest (0..1 of the site's progress; drop: metres it falls into place, <0 rises):
+  const order = (i0, i1, b0, b1, drop) => { for (let i = i0; i < i1; i++) { parts[i].build = b0 + ((b1 - b0) * (i - i0)) / Math.max(1, i1 - i0 - 1); parts[i].drop = drop; } };
+  order(M.h, M.edge, 0.64, 0.88, 0.45);          // the H, stone by stone
+  order(M.edge, M.marks, 0.36, 0.62, 0.45);      // the edge, round all four sides at once
+  order(M.marks, M.grit, 0.99, 0.99, 0);         // the tyre marks: the first landing's
+  order(M.grit, M.tufts, 0.18, 0.3, 0);          // the grit, with the grading
+  order(M.tufts, M.path, 0, 0, 0);               // the tufts were there
+  order(M.path, M.chocks, 0.62, 0.66, 0.4);      // the path's first stones
+  order(M.chocks, M.cairns, 0.97, 0.98, 0.3);    // the chocks, the rope
+  order(M.cairns, M.mast, 0.33, 0.36, 0.35);     // the corner cairns, before the edge
+  order(M.mast, M.mast + 2, 0.89, 0.9, -5.0);    // the mast's footing and mast: raised out of the ground
+  order(M.mast + 2, M.fuel, 0.91, 0.92, 0.2);    // its guys and pegs
+  order(M.fuel, M.end, 0.9, 0.99, 0.35);         // the fuel point, piece by piece
   // Markings: two SIGNAL PANELS pegged out off the H's ends (red and white, the windsock's cloth).
   const st = [];
   for (const sz of [-1, 1]) {
@@ -631,6 +658,9 @@ function buildHelipadV2({ seed = 23 } = {}) {
     mouth: arm * S, mouthR: mouthR * S, tailR: tailR * S, length: sockL * S,
   };
   geo.userData.parts = { swivel };
+  // The construction: the marking stencils go down with the H's end; the site's own dressing (stakes,
+  // string, the stone heap) is algConstruction's.
+  geo.userData.construction = { stencilAt: 0.86, heap: [D + 0.8, -D + 1.6], stakes: D + 0.4 };
   return geo;
 }
 
@@ -885,7 +915,10 @@ export function buildMortarPit({ seed = 31, modern = false } = {}) {
   const gunGeo = assemble(gun);
   bakeContactAO(gunGeo, { cell: 0.06, radius: 1, strength: 0.2, groundFade: 0, floor: 0.7 });
   gunGeo.scale(S, S, S);
-  geo.userData.gun = { geo: gunGeo, pivot: [0, (floorY - 0.02) * S, 0.1 * S] };
+  // `muzzle`: the tube's mouth in the gun's own frame (scaled) — where a bomb leaves (the lab's Feu,
+  // the game's fire); `axis`: the tube's line, the way its recoil drives it back into the baseplate.
+  const mz = along(tubeL);
+  geo.userData.gun = { geo: gunGeo, pivot: [0, (floorY - 0.02) * S, 0.1 * S], muzzle: mz.map((v) => v * S), axis: [0, Math.cos(tilt), Math.sin(tilt)], kind: "mortar81" };
   geo.userData.parts = { gun: gunGeo };
   return geo;
 }

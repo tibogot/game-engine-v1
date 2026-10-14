@@ -77,7 +77,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     _w.set(x + Math.cos(a) * r, 0, z + Math.sin(a) * r);
     _w.y = groundY(_w.x, _w.z);
     _v.set(g.position.x, g.position.y + 1.3, g.position.z);
-    projectiles.spawnArc(_v.clone(), _w.clone(), { damage: P.damage, splash: P.splash, owner: g });
+    projectiles.spawnArc(_v.clone(), _w.clone(), { damage: P.damage, splash: P.splash, owner: g, kind: "mortar60" });
     g.faceToward?.(x, z);
     app.algSounds?.audio?.play?.("cannon", g.position.x, g.position.y + 1, g.position.z, { volume: 0.5 });
   }
