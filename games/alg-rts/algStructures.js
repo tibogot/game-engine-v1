@@ -18,6 +18,7 @@ import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { vec3 } from "three/tsl";
 import { t } from "./i18n/i18n.js";
+import { pitCrewShot } from "./algMortarPit.js";
 
 const S = 1.3;
 
@@ -33,7 +34,9 @@ const STATS = {
   // `arcGun`: an EMPLACED machine gun (algMgTeam.js) — it fires in an arc round the way it was
   // built facing (the gun's rest: its barrel, local −Z), swings slowly, never packs up.
   mgNest: { team: "player", name: t("Nid de mitrailleuse"), hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
-  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 120, every: 7, damage: 45, splash: 7 }, vision: 45 },
+  // THE PIT = DEFENCE, the mobile team = attack (2026-10-16, you: "both" — CoH's British have both): the pit
+  // reaches FARTHER (160 m against the team's 110) and fires a little faster, but never moves.
+  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 160, every: 6, damage: 45, splash: 7 }, vision: 45 },
   searchlight: { team: "player", name: t("Projecteur"), hp: 400, vision: 100 },
   // FIELD WORKS (algFieldWorks.js)
   forwardPost: { team: "player", name: t("Poste avancé"), hp: 600, vision: 60 },
@@ -142,6 +145,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     const from = rec.gun ? rec.gun.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.2, 0)) : s.position.clone().add(new THREE.Vector3(0, 1.5, 0));
     // Aimed where he stands now; a bomb in the air ~3 s — men who keep moving live.
     projectiles.spawnArc(from, best.position.clone(), { damage: m.damage, splash: m.splash, owner: s, kind: "mortar81" });
+    pitCrewShot(app, rec.mesh);
   }
 
   /** Charred and still: the building is a wreck (its own darkened material). */

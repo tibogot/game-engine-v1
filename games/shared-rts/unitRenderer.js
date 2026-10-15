@@ -1956,7 +1956,25 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           _st.scale.setScalar(g.scale);
           _st.updateMatrix();
           _mat.multiplyMatrices(_st.matrix, g.rel);
-          f.addPose(_mat, g.roles.idle, st.t, g.roles.idle, st.t, 0, 2, { extra: STATIC_SEED });
+          // A figure with a ROLE (alg-rts: a mortar pit's crew — setStaticClip) plays that clip, crossfading,
+          // and carries its look's kit like a soldier (rifle, headgear, the bomb in hand); one without
+          // (Kurtz's watchers) idles bare, as before.
+          if (!st.role) { f.addPose(_mat, g.roles.idle, st.t, g.roles.idle, st.t, 0, 2, { extra: STATIC_SEED }); continue; }
+          if (!st.v) {
+            const load = view.look ? loadout(view.look, st.slot ?? 0, () => Math.random()) : null;
+            const c0 = g.roles[st.role] ?? g.roles.idle;
+            st.v = { cur: { clip: c0, t: st.t }, prev: { clip: c0, t: st.t }, fade: 1, deadT: -1, gib: null,
+              weapon: load?.weapon ?? null, hat: load?.look.headgear ? hatKey(load.look) : null,
+              kit: (load?.kit ?? []).filter((k) => KIT[k] && !KIT[k].skinned) };
+          }
+          const sv = st.v, want = g.roles[st.role] ?? g.roles.idle;
+          if (st.after != null && (st.after -= dt) <= 0) { st.after = null; st.role = st.then ?? "mortarRest"; }
+          if (want !== sv.cur.clip || st.restart) {
+            sv.prev = sv.cur; sv.cur = { clip: want, t: st.t0 ?? 0 }; sv.fade = 0; st.restart = false;
+          }
+          sv.cur.t += dt; sv.prev.t += dt; sv.fade = Math.min(1, sv.fade + dt / 0.25);
+          f.addPose(_mat, sv.prev.clip, sv.prev.t, sv.cur.clip, sv.cur.t, sv.fade, 2, { extra: STATIC_SEED });
+          writePieces(g, sv, _st.matrix, false, false);
         }
         view.setRange(start, f.count - start);
       }
@@ -2001,6 +2019,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       const added = list.map((f) => ({ typeKey, x: f.x, y: f.y, z: f.z, yaw: f.yaw, t: Math.random() * 10 }));
       statics.push(...added);
       return added;
+    },
+    /** A static figure's part: `role` (a roles key — "mortarLoad", "mortarRest"…) from `t0` s into its clip;
+     *  `after` s later it goes to `then`. (alg-rts: the mortar pit's crew working the piece.) */
+    setStaticClip(fig, role, { t0 = 0, then = null, after = null } = {}) {
+      if (!fig) return;
+      fig.restart = fig.role === role; fig.role = role; fig.t0 = t0; fig.then = then; fig.after = after;
     },
     /** Take figures added by addStaticFigures away again (alg-rts: a mortar pit's crew when it falls). */
     removeStaticFigures(added) {

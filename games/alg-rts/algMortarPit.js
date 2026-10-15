@@ -77,3 +77,17 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
   kit.userData.crew = [{ x: 0.95, z: 0.35, yaw: Math.PI }, { x: -0.55, z: 1.25, yaw: Math.PI * 0.75 }];
   return kit;
 }
+
+/**
+ * THE PIT'S CREW AT EACH ROUND (2026-10-16 — the mortar teams' clips, now on the pit's two figures:
+ * algBuild gives them the role "mortarRest"). The loader drops the bomb in — his clip started just
+ * before its drop (the round is already leaving) — ducks, and kneels at rest again; the gunner lays the
+ * piece for a few seconds after. `mesh`: the pit (its userData.crewFigures).
+ */
+export function pitCrewShot(app, mesh) {
+  const figs = mesh?.userData?.crewFigures, R = app.algUnitRenderer;
+  if (!figs?.length || !R?.setStaticClip) return;
+  const loader = figs[1] ?? figs[0];
+  R.setStaticClip(loader, "mortarLoad", { t0: 1.15, then: "mortarRest", after: 1.25 });
+  if (figs[1]) R.setStaticClip(figs[0], "mortarLay", { then: "mortarRest", after: 6 });
+}

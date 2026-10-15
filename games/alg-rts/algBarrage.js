@@ -16,11 +16,12 @@ import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { t } from "./i18n/i18n.js";
+import { pitCrewShot } from "./algMortarPit.js";
 
 export const BARRAGE = {
   cost: { mun: 45 },
   cooldown: 75,     // s per pit
-  range: 150,       // m from the pit (its own fire reaches 120)
+  range: 170,       // m from the pit (its own fire reaches 160 — a defensive piece, it outranges the teams)
   minRange: 30,
   bombs: 6,
   every: 1.4,       // s between two bombs
@@ -118,6 +119,7 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
       else _from.copy(f.pit.position).add(_up);
       _to.set(tx, app.getWorldHeight?.(tx, tz) ?? 0, tz);
       projectiles.spawnArc(_from.clone(), _to.clone(), { damage: P.damage, splash: P.splash, owner: f.pit, kind: "mortar81" });
+      pitCrewShot(app, rec?.mesh);
       if (--f.left <= 0) fires.splice(i, 1);
     }
   }

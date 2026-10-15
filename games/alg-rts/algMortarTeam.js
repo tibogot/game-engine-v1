@@ -47,7 +47,8 @@ const KINDS = {
   mortier: MORTAR_TEAM,
   mortierFr: {
     ...MORTAR_TEAM, key: "mortierFr", kind: "mortar81", tube: 0.39,
-    min: 25, max: 140, every: 7.5, damage: 50, splash: 7,
+    // (the ATTACK piece: 110 m — the pit reaches 160; the team must go forward, escorted)
+    min: 25, max: 110, every: 7.5, damage: 50, splash: 7,
     barrage: { cost: { mun: 40 }, shells: 6, every: 2.6, spread: 11, cooldown: 70 },
   },
 };

@@ -35,7 +35,7 @@ export const BUILDS = {
   sandbags: { label: t("Sacs de sable"), tip: t("Mur de sacs de sable : une couverture solide pour les hommes derrière."), cost: 20, time: 6, build: () => buildSandbagWallPiece(() => buildFrSandbagWall()), follow: true },
   wire: { label: t("Barbelés"), tip: t("Barbelés : il faut les contourner ou les couper ; un véhicule les écrase."), cost: 15, time: 5, build: () => buildBarbedWire(), follow: true, noFoot: true },
   mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => buildMgNestPiece((o) => buildMgNest(o)), pad: true, structure: "mgNest" },
-  mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris."), cost: 130, time: 18, build: () => buildMortarPitV2(), pad: true, structure: "mortarPit" },
+  mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 160 m, par-dessus les abris. Plus loin que l'équipe de mortier, mais fixe."), cost: 130, time: 18, build: () => buildMortarPitV2(), pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: t("Mirador : voit à 110 m, une mitrailleuse dans la cabine."), cost: 110, time: 20, build: () => buildMirador(), pad: true, structure: "mirador" },
   searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
   // FIELD WORKS (2026-10-10, the CoH comparison: what engineers raise OUT on the map — algFieldWorks.js).
@@ -333,7 +333,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       const yaw = s.mesh.rotation.y;
       s.mesh.userData.crewFigures = app.algUnitRenderer.addStaticFigures("appele", crew.map((c) => {
         const p = s.mesh.localToWorld(new THREE.Vector3(c.x, 0, c.z));
-        return { x: p.x, y: app.getWorldHeight(p.x, p.z), z: p.z, yaw: yaw + c.yaw };
+        // kneeling at rest by the piece (the mortar crew's own clips: setStaticClip when it fires)
+        return { x: p.x, y: app.getWorldHeight(p.x, p.z), z: p.z, yaw: yaw + c.yaw, role: "mortarRest", slot: crew.indexOf(c) };
       }));
     }
     if (showroom) showroom[s.mesh.name] = s.mesh;    // cover lists the placed pieces

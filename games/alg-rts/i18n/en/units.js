@@ -43,7 +43,7 @@ export default {
   "Nid de MG": "MG Nest",
   "Nid de mitrailleuse : une AA-52 derrière des sacs de sable.": "Machine-gun nest: an AA-52 behind sandbags.",
   "Mortier": "Mortar",
-  "Fosse de mortier de 81 : tire de 25 à 120 m, par-dessus les abris.": "81 mm mortar pit: fires from 25 to 120 m, over cover.",
+  "Fosse de mortier de 81 : tire de 25 à 160 m, par-dessus les abris. Plus loin que l'équipe de mortier, mais fixe.": "81 mm mortar pit: fires from 25 to 160 m, over cover. Outranges the mortar team, but cannot move.",
   "Mirador : voit à 110 m, une mitrailleuse dans la cabine.": "Mirador: sees 110 m, a machine gun in the cabin.",
   "Projecteur": "Searchlight",
   "Tour de projecteur : voit à 100 m.": "Searchlight tower: sees 100 m.",
