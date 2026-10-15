@@ -117,7 +117,7 @@ export function createAlgBarrage({ app, selection, projectiles, structures, purs
       if (rec?.gun) rec.gun.getWorldPosition(_from).add(_up);
       else _from.copy(f.pit.position).add(_up);
       _to.set(tx, app.getWorldHeight?.(tx, tz) ?? 0, tz);
-      projectiles.spawnArc(_from.clone(), _to.clone(), { damage: P.damage, splash: P.splash, owner: f.pit });
+      projectiles.spawnArc(_from.clone(), _to.clone(), { damage: P.damage, splash: P.splash, owner: f.pit, kind: "mortar81" });
       if (--f.left <= 0) fires.splice(i, 1);
     }
   }

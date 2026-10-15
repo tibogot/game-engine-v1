@@ -22,7 +22,7 @@ const GROUND = Object.keys(ALG_UNIT_TYPES).filter((k) => !ALG_UNIT_TYPES[k].isAi
 /** The explosives: what lands, how hard, how wide (the game's own numbers). */
 const DROPS = {
   grenade: { label: "Grenade", arc: true, from: 18, damage: 70, splash: 5, kind: "grenade", flight: 1.1 },   // algGrenades.js
-  mortar: { label: "Mortar 81", arc: true, from: 90, damage: 45, splash: 7 },                                  // algStructures.js mortarPit
+  mortar: { label: "Mortar 81", arc: true, from: 90, damage: 45, splash: 7, kind: "mortar81" },                                  // algStructures.js mortarPit
   shell: { label: "Tank shell", damage: 80, splash: 5 },
   big: { label: "Big blast", damage: 160, splash: 11 },
 };

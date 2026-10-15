@@ -219,9 +219,16 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     s.kind = kind;
     s.t = 0;
     s.flight = flight ?? Math.min(5.5, 1.9 + from.distanceTo(to) / 80);
-    // The velocity that puts it on the point in exactly that time under SHELL_G.
+    // A MORTAR round (kind mortar*) flies a FLATTER arc (2026-10-16, you: "the bombs leave the top of the
+    // camera"): under SHELL_G a 60 m shot rose 30 m, out of the RTS view from launch to just before the
+    // impact. Its apex is set instead — 5 m + a sixth of the range, 8 to 17 m — and its gravity follows
+    // from it (apex = g·T²/8) so it still takes the same time to land. Others (grenades, the T-6's bomb, a
+    // game's own shells) keep SHELL_G.
+    const d = Math.hypot(to.x - from.x, to.z - from.z);
+    s.g = /^mortar/.test(kind ?? "") ? (8 * Math.min(17, Math.max(8, 5 + d / 6))) / (s.flight * s.flight) : SHELL_G;
+    // The velocity that puts it on the point in exactly that time under its gravity.
     s.vel.subVectors(to, from).divideScalar(s.flight);
-    s.vel.y += 0.5 * SHELL_G * s.flight;
+    s.vel.y += 0.5 * s.g * s.flight;
     s.wob = Math.random() * 6.28;
     // THE LAUNCH (a game's own: fx.shellLaunch(from, direction, kind) — alg-rts's flash and smoke). A
     // grenade's throw and an aircraft's release have none.
@@ -453,7 +460,7 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
     for (const s of shells) {
       if (!s.alive) continue;
       s.t += dt;
-      s.vel.y -= SHELL_G * dt;
+      s.vel.y -= (s.g ?? SHELL_G) * dt;
       s.pos.addScaledVector(s.vel, dt);
       // The whistle on the way down, timed to end as it lands.
       if (!s.whistled && s.flight - s.t < 1.6) { s.whistled = true; sfx?.incoming(s.to, s.flight - s.t); }

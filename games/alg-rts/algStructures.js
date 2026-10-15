@@ -141,7 +141,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     s.target = best;
     const from = rec.gun ? rec.gun.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.2, 0)) : s.position.clone().add(new THREE.Vector3(0, 1.5, 0));
     // Aimed where he stands now; a bomb in the air ~3 s — men who keep moving live.
-    projectiles.spawnArc(from, best.position.clone(), { damage: m.damage, splash: m.splash, owner: s });
+    projectiles.spawnArc(from, best.position.clone(), { damage: m.damage, splash: m.splash, owner: s, kind: "mortar81" });
   }
 
   /** Charred and still: the building is a wreck (its own darkened material). */
