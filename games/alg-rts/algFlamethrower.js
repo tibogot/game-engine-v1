@@ -14,10 +14,12 @@
 //                  it) and a house's roof catches.
 //   THE TANKS      the operator going down may burst them (P.tank.chance): a fireball where he
 //                  fell. The CoH risk of carrying one.
-//   SEEN           shared flameStreamFx.js: the baked start → loop → stop, along the aim.
+//   SEEN           shared flameStreamFx.js: the baked start → loop → stop, along the aim; the
+//                  ground it burnt keeps a burn mark (shared scorchMarks.js), its grass gone.
 //   HEARD          algSounds: the ignition, the roar while it fires, the cut-off.
 import * as THREE from "three";
 import { FLAME_STREAM, createFlameStreamFx } from "../shared-rts/flameStreamFx.js";
+import { createScorchMarks } from "../shared-rts/scorchMarks.js";
 
 export const FLAMER = {
   range: 15,           // m: the stream's reach (= the unit's range; flameStreamFx shows this)
@@ -38,6 +40,7 @@ export const FLAMER = {
   roofBurn: 25,        // s the roof burns
   groundEvery: 1.1,    // s between new patches of burning ground at the stream's end
   groundR: 1.7, groundLife: 7, groundDps: 9,
+  scorchR: 2.2,        // m: the burn mark's decal (its char ~1.1 m, the puddles' spread; its grass burnt off)
   tank: { chance: 0.35, damage: 45, radius: 4.5 },
 };
 
@@ -64,6 +67,7 @@ export async function createAlgFlamethrowers({ app, units, isFlamer }) {
     app, params: { ...FLAME_STREAM, ignite: P.ignite, fireK: 0.45, bloom: 0.12 },
     onState: (u, s) => app.algSounds?.flame?.(s, u),
   }).catch((e) => { console.warn("lance-flammes: no stream books", e); return null; });
+  const scorch = app.heightTexNode ? createScorchMarks({ app }) : null;
   // The damage reaches where the fire does: the stream card is sized to P.range (flameStreamFx).
   if (fx && Math.abs(fx.reach() - P.range) > 1) console.warn(`lance-flammes: the stream shows ${fx.reach().toFixed(1)} m, its reach is ${P.range} m`);
 
@@ -120,6 +124,7 @@ export async function createAlgFlamethrowers({ app, units, isFlamer }) {
   /** FIXED-STEP: who the streams burn, who breaks, what catches fire. */
   function step(dt) {
     clock += dt;
+    scorch?.update(dt);
     arm();
     for (const [u, s] of state) {
       // THE TANKS: the operator down — the tanks may go up.
@@ -195,6 +200,8 @@ export async function createAlgFlamethrowers({ app, units, isFlamer }) {
         // without it: the old cards beside the baked stream did not match.
         if (!fx?.burnGround(gx, gz, P.groundLife)) fireField()?.addFire(gx, app.getWorldHeight(gx, gz) + 0.3, gz, P.groundR, P.groundLife, { heat: 1 });
         patches.push({ x: gx, z: gz, r: P.groundR * 1.3, end: clock + P.groundLife, owner: u, team: u.team });
+        // What it burnt stays burnt: the mark, and the grass in it gone (a new mark only).
+        if (scorch?.add(gx, gz, P.scorchR)) app.clearVegetation?.(gx, gz, P.scorchR * 0.55, { grass: P.scorchR * 0.5, edge: 0.6 });
       }
     }
 
@@ -224,10 +231,10 @@ export async function createAlgFlamethrowers({ app, units, isFlamer }) {
   }
 
   return {
-    params: P, fx,
+    params: P, fx, scorch,
     step, frame,
     /** Is `u` firing now (its stream lit)? */
     isFiring: (u) => { const s = state.get(u); return !!s && firing(s); },
-    clear() { state.clear(); patches.length = 0; fx?.clear(); },
+    clear() { state.clear(); patches.length = 0; fx?.clear(); scorch?.clear(); },
   };
 }
