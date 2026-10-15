@@ -405,7 +405,9 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     // Right-clicking an enemy is an ATTACK order.
     const enemy = pickEnemy(e.clientX, e.clientY) ?? pickEnemyUnit(e.clientX, e.clientY);
     if (enemy) {
-      for (const u of mine) u.attack?.(enemy);
+      // (an explicit attack order lifts a HOLD FIRE on those men — the battle lab's hold, 2026-10-16: they
+      // took the target and stood still; a weapon team's crew keeps its noSmallArms all the same)
+      for (const u of mine) { u.holdFire = false; u.attack?.(enemy); }
       pingMarker(enemy.position.x, enemy.position.y, enemy.position.z, "attack");
       onOrder("attack", mine);
       return;
