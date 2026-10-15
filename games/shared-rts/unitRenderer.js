@@ -807,6 +807,7 @@ function buildPieces(field, source, rel, looks, scene, root, cap) {
   const kitMat = headgearMaterial();
   const kitNames = new Set(looks.flatMap((look) => [
     ...(look.kit ?? []), ...Object.values(look.roles ?? {}).flatMap((r) => r.kit ?? []), ...Object.keys(look.extras ?? {}),
+    ...(look.spareKit ?? []),   // (handed out in play: setKit)
   ]));
   for (const name of kitNames) {
     const def = KIT[name];
@@ -2010,6 +2011,16 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       if (!v?.crowd || !key) return false;
       if (!v.crowd.pieces?.registry?.has(`w:${key}`)) return false;
       v.weapon = key;
+      return true;
+    },
+    /** Put a kit piece on a crowd soldier or take it off (alg-rts: the mortar carried). The piece must be
+     *  one his look builds (kit, roles, extras or `spareKit`); false if not. */
+    setKit(unit, name, on) {
+      const v = views.get(unit);
+      if (!v?.crowd || !v.crowd.pieces?.registry?.has(`k:${name}`)) return false;
+      const has = v.kit.includes(name);
+      if (on && !has) v.kit = [...v.kit, name];
+      else if (!on && has) v.kit = v.kit.filter((k) => k !== name);
       return true;
     },
     /** A crowd soldier's clip this frame (and the one he fades from) — for tests and the dev panel. */

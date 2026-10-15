@@ -11,6 +11,9 @@
 //             over the mouth, drops it in (mortar_load) — the round leaves the tube as it slides home —
 //             and ducks, hands to his ears.
 //   PACK UP   any move order: ~2 s to pack (the order held meanwhile), then they go.
+//   CARRIED   (2026-10-16, CoH) packed, the gunner carries the tube slung on his back and the loader
+//             the baseplate: setting up, the plate goes down first, then the tube is lifted off his back
+//             onto it; packing up, the reverse (soldierLooks KIT mortarTube / mortarPlate).
 //   TIR DE BARRAGE  a salvo on a point you click in its reach, one round per load (a cost, a cooldown).
 // The clips are made in tools/packMixamo.mjs (synthMortarClips): no Mixamo clip loads a mortar. The
 // tube is scaled so its mouth is where the loader's hands drop the bomb (a kneeling man's chest).
@@ -191,6 +194,29 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
   }
   const release = (m) => setCrew(m, []);
 
+  // ── CARRIED: who has the tube and the plate on his back, by the state's progress ──
+  // (setting: the plate down at PLATE_AT of the set-up, the tube at TUBE_AT; packing: the reverse)
+  const PLATE_AT = 0.3, TUBE_AT = 0.62;
+  function onGround(m) {
+    if (m.state === "set") return { plate: true, tube: true };
+    if (m.state === "setting") { const k = m.t / P.setup; return { plate: !m.placing && k >= PLATE_AT, tube: !m.placing && k >= TUBE_AT }; }
+    if (m.state === "packing") { const k = m.t / P.pack; return { plate: k < 1 - PLATE_AT, tube: k < 1 - TUBE_AT }; }
+    return { plate: false, tube: false };
+  }
+  const setKit = (u, name, on) => app.algUnitRenderer?.setKit?.(u, name, on);
+  function carry(s, m, g, ld) {
+    const down = onGround(m);
+    const want = { tube: down.tube ? null : g, plate: down.plate ? null : ld ?? g };
+    for (const k of ["tube", "plate"]) {
+      const name = k === "tube" ? "mortarTube" : "mortarPlate";
+      const had = m.carry?.[k] ?? null;
+      if (had === want[k]) continue;
+      if (had) setKit(had, name, false);
+      if (want[k]) setKit(want[k], name, true);
+      (m.carry ??= {})[k] = want[k];
+    }
+  }
+
   function step(dt) {
     for (const s of teams()) {
       const m = stateOf(s), g = gunnerOf(s), K = kindOf(s);
@@ -200,6 +226,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
       // its rifles' reach, it does not walk off its piece toward an enemy 80 m away.
       for (const u of s.members) u.noChase = true;
       const ld = loaderOf(s, g);
+      carry(s, m, g, ld);
       // (the loader walking to his place is part of the set-up, not a move order)
       // (his walk's goal is the nav's, near his spot — a goal metres away is a new order)
       // An ORDER has a goal; a man shuffled by a nudge (or halted on his spot) has none — not a move.
@@ -372,26 +399,34 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
   tubes.visible = false;
   tubes.name = "MortarTeamTubes";
   app.scene.add(tubes);
+  const plates = new THREE.InstancedMesh(new THREE.BoxGeometry(0.38, 0.035, 0.34), rtsObjectMaterialTinted(FR_PAINT_TINT), MAXT);
+  plates.castShadow = true; plates.frustumCulled = false; plates.count = 0; plates.visible = false;
+  plates.name = "MortarTeamPlates";
+  app.scene.add(plates);
   const rings = createSelectionRingField({ app, inner: 0.94, segments: 72 });
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _p = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
   // A tube's recoil: a round driven back into the baseplate (s since it fired → a short kick).
   const kickOf = (m) => (m.load?.fired ? Math.max(0, 1 - (m.load.t - DROP_AT - SLIDE) / 0.25) : 0);
   function frame() {
-    let n = 0;
+    let n = 0, np = 0;
     rings.begin();
     for (const s of teams()) {
       const m = stateOf(s), g = gunnerOf(s), K = kindOf(s);
       if (!g) continue;
-      const k = m.state === "set" ? 1 : m.state === "setting" ? Math.min(1, m.t / P.setup) : m.state === "packing" ? 1 - Math.min(1, m.t / P.pack) : 0;
-      if (k > 0.02 && n < MAXT) {
+      // The plate, then the tube, on the ground once set down (carried before: CARRIED above).
+      const down = m.base ? onGround(m) : { plate: false, tube: false };
+      if (down.plate && np < MAXT) {
+        basePoint(g, m, _p);
+        _p.y = groundY(_p.x, _p.z) + 0.012;
+        _q.setFromAxisAngle(_up, m.facing);
+        plates.setMatrixAt(np++, _m.compose(_p, _q, _s.setScalar(1)));
+      }
+      if (down.tube && n < MAXT) {
         basePoint(g, m, _p);
         const kick = kickOf(m) ** 2 * 0.06;
         _p.y = groundY(_p.x, _p.z) - kick;
         _q.setFromAxisAngle(_up, m.facing);
-        // Set up: it rises out of the ground at its full size (scaled from nothing, the bipod spread
-        // wide at a point read as a toy growing).
         _s.setScalar(K.tube);
-        _p.y -= (1 - k) * mouthH(K) * 1.1;
         tubes.setMatrixAt(n++, _m.compose(_p, _q, _s));
       }
       // The reach, for your selected teams: the outer ring, and the dead zone inside.
@@ -405,6 +440,9 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     tubes.count = n;
     tubes.visible = n > 0;
     if (n) tubes.instanceMatrix.needsUpdate = true;
+    plates.count = np;
+    plates.visible = np > 0;
+    if (np) plates.instanceMatrix.needsUpdate = true;
   }
 
   return {
@@ -419,6 +457,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
       dom.removeEventListener("contextmenu", onContext, true);
       window.removeEventListener("keydown", onKey);
       app.scene.remove(tubes);
+      app.scene.remove(plates);
     },
   };
 }

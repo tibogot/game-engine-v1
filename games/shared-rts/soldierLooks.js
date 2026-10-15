@@ -131,7 +131,8 @@ export const LOOKS = {
     label: "Mortier de 81", note: "the section's look: gunner, loader (rifles slung at the tube), chef de pièce",
     green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, hatColor: 0x77744f, weapon: "mas49_56",
     variants: [{ w: 0.7 }, { w: 0.3, helmet: false, headgear: "bushHat" }],
-    kit: ["pack", "belt"],
+    kit: ["belt"],   // (no pack: the tube and the baseplate ride their backs)
+    spareKit: ["mortarTube", "mortarPlate"],
     roles: { 2: { name: "leader", weapon: "mat49", kit: ["binoculars"] } },
     extras: { scarf: 0.3, mustache: 0.3, cigarette: 0.15 },
   },
@@ -199,6 +200,7 @@ export const LOOKS = {
       2: { name: "LMG", weapon: "fm2429" },
       // (no standard-bearer: you, 2026-09-30 — the flag kit stays in KIT)
     },
+    spareKit: ["mortarTube", "mortarPlate"],   // (the FLN mortar team: algMortarTeam.js)
     weaponMix: { mas36: 0.45, mauser98: 0.3, enfield: 0.25 },
     // Weapons a man of this look may be HANDED later (unitRenderer setWeapon — a squad upgrade:
     // the faoudj's bazooka, algSquads UPGRADES.bazooka): their pieces are built with the look's.
@@ -1019,6 +1021,36 @@ function belt() {
 }
 
 /** Map a part's vertices through fn([x, y, z]) → [x, y, z] (winding kept if fn keeps handedness). */
+/**
+ * THE MORTAR CARRIED (2026-10-16, you: "CoH's mortar team carries it"): the tube slung across the
+ * gunner's back, muzzle up over his right shoulder, its bipod folded along it — the 60/81 mm tube
+ * ~1.05 m. Modelled upright about its own middle, then turned 30° (a ROTATION in x-y, never a mirror)
+ * and set on the back behind where the pack sits (the mortar team carries no pack).
+ */
+function mortarTube() {
+  const STEEL = 0x3e4033, DARKS = 0x2c2d27;
+  const a = (30 * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+  const place = ([x, y, z]) => [x * ca - y * sa, 1.12 + x * sa + y * ca, -0.205 + z];   // (on his back: it sits at -0.16)
+  return toGeometry([
+    ...band(STEEL, [{ y: -0.5, rx: 0.044, rz: 0.044 }, { y: 0.52, rx: 0.042, rz: 0.042 }], { segs: 10 }),
+    ...band(DARKS, [{ y: 0.47, rx: 0.05, rz: 0.05 }, { y: 0.53, rx: 0.05, rz: 0.05 }], { segs: 10 }),   // the muzzle band
+    dome(DARKS, 0.53, 0.004, 0.05, 0.05, { segs: 10 }),
+    mapPart(dome(DARKS, 0.5, 0.05, 0.05, 0.05, { segs: 10 }), ([x, y, z]) => [x, -y, -z]),                // the ball foot
+    // the bipod folded along the tube, on its outer side
+    ...band(DARKS, [{ y: -0.15, rx: 0.012, rz: 0.012, xc: 0.055 }, { y: 0.32, rx: 0.012, rz: 0.012, xc: 0.055 }], { segs: 6 }),
+    ...band(DARKS, [{ y: -0.15, rx: 0.012, rz: 0.012, xc: -0.055 }, { y: 0.32, rx: 0.012, rz: 0.012, xc: -0.055 }], { segs: 6 }),
+    prim.box(DARKS, [0, 0.3, 0], [0.13, 0.03, 0.06]),                                                         // the collar joining them
+  ].map((p) => mapPart(p, place)));
+}
+/** The mortar's BASEPLATE carried flat on the loader's back by its strap (~38 × 34 cm of pressed steel). */
+function mortarPlate() {
+  const STEEL = 0x45463a, DARKS = 0x2c2d27;
+  return toGeometry([
+    prim.box(STEEL, [0, 1.13, -0.18], [0.38, 0.34, 0.03]),            // (flat on his back: it sits at -0.16)
+    prim.box(DARKS, [0, 1.13, -0.205], [0.09, 0.09, 0.03]),            // the socket boss
+    prim.box(DARKS, [0, 1.3, -0.175], [0.3, 0.02, 0.035]),             // the carrying strap's bar
+  ]);
+}
 function mapPart(p, fn) {
   for (let i = 0; i < p.pos.length; i += 3) {
     const [x, y, z] = fn([p.pos[i], p.pos[i + 1], p.pos[i + 2]]);
@@ -1508,6 +1540,9 @@ export const KIT = {
   bandoliers: { bone: "Spine2", build: bandoliers },
   musette: { bone: "Hips", build: musette },
   flag: { bone: "Spine2", build: flnFlag },
+  // The MORTAR carried (alg-rts algMortarTeam.js hands them out: unitRenderer setKit) — never rolled.
+  mortarTube: { bone: "Spine2", build: mortarTube },
+  mortarPlate: { bone: "Spine2", build: mortarPlate },
   // skinned: built at rest in metres, weighted per vertex by `weights`
   kachabia: { skinned: true, build: kachabia, weights: kachabiaWeights },
   // the women's robes (civilians): skinned the same way

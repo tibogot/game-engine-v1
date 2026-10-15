@@ -489,12 +489,13 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       _obj.scale.setScalar(K.len);
       _obj.updateMatrix();
       if (K.mesh === "air") airBombMesh.setMatrixAt(ma++, _obj.matrix); else bombMesh.setMatrixAt(mb++, _obj.matrix);
-      s.puffT = (s.puffT ?? 0) - dt;
-      if (s.puffT <= 0) {
-        s.puffT = 0.03;
+      // The mortar bombs' TRAIL is the grenade's (2026-10-16, you: "the same as the new grenade trail"):
+      // the soft streak along the path flown (arcTrails), from the tail, a little wider for a bigger bomb.
+      // (A dropped aircraft bomb leaves none; fx.shellTrail stays a hook for a game's extra effect.)
+      if (K.mesh !== "air") {
         _tail.copy(s.vel).normalize().multiplyScalar(-K.len * 0.5).add(s.pos);
-        if (fx?.shellTrail) fx.shellTrail(_tail.x, _tail.y, _tail.z, s.kind ?? "mortar81", s.vel);
-        else if (K.mesh !== "air") smokeTrail.spawn(_tail.x, _tail.y, _tail.z, 0.8, { scale: 0.22 + K.len * 0.06 });
+        arcTrails.point(s, _tail.x, _tail.y, _tail.z, clock, 1.3 + K.len * 0.5);
+        fx?.shellTrail?.(_tail.x, _tail.y, _tail.z, s.kind ?? "mortar81", s.vel);
       }
     }
     for (const [mesh, k] of [[fragMesh, mf], [canMesh, mc], [bombMesh, mb], [airBombMesh, ma]]) {
