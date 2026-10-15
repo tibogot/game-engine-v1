@@ -48,7 +48,7 @@ export default {
   "Tir de barrage": "Barrage",
   "Le mortier doit être en batterie : arrêtez l'équipe quelques secondes.": "The mortar must be set up: halt the team for a few seconds.",
   "Le tube refroidit encore ({n} s).": "The tube is still cooling ({n} s).",
-  "Cinq obus sur un point que vous choisissez, entre 25 et 110 m du mortier.": "Five bombs on a point you choose, 25 to 110 m from the mortar.",
+  "{n} obus sur un point que vous choisissez, entre {min} et {max} m du mortier.": "{n} bombs on a point you choose, {min} to {max} m from the mortar.",
   // algRecoilless.js — the FLN's recoilless rifle (2026-10-13)
   "Équipe sans-recul": "Recoilless team",
   "Canon sans recul de 57": "57 mm recoilless rifle",

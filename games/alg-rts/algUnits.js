@@ -86,7 +86,7 @@ import { t } from "./i18n/i18n.js";
  */
 const PRODUCTION = {
   // Infantry per SQUAD (algSquads.js), vehicles one each.
-  post: { appele: 14, sapeur: 10, piece: 14, lanceFlammes: 16, legion: 24 },
+  post: { appele: 14, sapeur: 10, piece: 14, lanceFlammes: 16, mortierFr: 16, legion: 24 },
   motorPool: { willys: 10, gmc: 12, halftrack: 16, ebr: 20, amx13: 24 },
   helipad: { para: 18, alouette: 30, h21: 34 },   // paras: the heliborne reserve; the H-21 carries them
   caveEntrance: { moudjahid: 4, fmTeam: 7, tireur: 8, mortier: 16, sansRecul: 15, mitrailleuse: 14, mulet: 10 },   // the ALN's (its AI queues them; fmTeam needs an arms cache — algAI.js)
@@ -879,9 +879,10 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // them), the French patrols and convoys along the tracks (algPatrols.js).
   const mines = createAlgMines(app, { units, combat: combat.combat });
   app.algMines = mines;
+  // THE MORTAR TEAMS, both sides' (algMortarTeam.js: the French 81, a human FLN's 60).
+  mortarTeams = createAlgMortarTeams(app, { units, squads, projectiles: combat.projectiles, selection, fogOfWar, purses: { player: economy.french, enemy: economy.aln } }); app.algMortarTeams = mortarTeams;
   if (SIDES.human === "enemy") {
     flnTricks = createAlgFlnTricks(app, { units, selection, mines, purse: economy.aln }); app.algFlnTricks = flnTricks;
-    mortarTeams = createAlgMortarTeams(app, { units, squads, projectiles: combat.projectiles, selection, fogOfWar, purse: economy.aln }); app.algMortarTeams = mortarTeams;
     recoilless = createAlgRecoilless(app, { squads }); app.algRecoilless = recoilless;
     mules = createAlgMules(app, { units, squads, selection }); app.algMules = mules;
   }

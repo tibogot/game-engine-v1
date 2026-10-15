@@ -464,6 +464,7 @@ const LOOPS_IN_PLACE = /^rifle_(walk|run|sprint|crouch_walk|crouch_strafe|crawl)
   }
 }
 
+synthMortarClips();
 const weapon = addWeaponBone();
 
 // ── Export meshes + skeleton + clips ────────────────────────────────────────
@@ -703,20 +704,25 @@ function addWeaponBone() {
   );
   for (const sd of soldiers) sd.mesh.bind(skeleton, sd.mesh.bindMatrix);
 
-  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit)/.test(c.name);
+  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit|mortar_)/.test(c.name);
   const usesShovel = (c) => /^dig/.test(c.name);
+  // The mortar loader's BOMB (synthMortarClips): on the Tool bone, in his right palm, shown by its keys.
+  const usesBomb = (c) => !!c.userData?.bomb;
   const shown = (b, on) => b.scale.clone().multiplyScalar(on ? 1 : 1e-4).toArray();
   const stowed = new Set(), withTool = new Set();
   for (const clip of clips) {
     const st = isStowed(clip), sh = usesShovel(clip);
     if (st) stowed.add(clip);
     if (sh) withTool.add(clip);
+    const bm = usesBomb(clip) ? clip.userData.bomb : null;
     clip.tracks.push(
       new THREE.VectorKeyframeTrack(`${bone.name}.scale`, [0], shown(bone, !st)),
       new THREE.VectorKeyframeTrack(`${sling.name}.scale`, [0], shown(sling, st)),
-      new THREE.VectorKeyframeTrack(`${tool.name}.scale`, [0], shown(tool, sh)),
+      bm ? new THREE.VectorKeyframeTrack(`${tool.name}.scale`, bm.times, bm.shown.flatMap((on) => shown(tool, on > 0.5)))
+        : new THREE.VectorKeyframeTrack(`${tool.name}.scale`, [0], shown(tool, sh)),
     );
     if (sh) aimTool(clip, tool);
+    if (bm) holdBomb(clip, tool);
   }
 
   const perClip = new Map();
@@ -801,6 +807,39 @@ function addWeaponBone() {
     clip.tracks.push(
       new THREE.VectorKeyframeTrack(`${weaponBone.name}.position`, times, pos),
       new THREE.QuaternionKeyframeTrack(`${weaponBone.name}.quaternion`, times, quat),
+    );
+  }
+
+  /**
+   * The mortar BOMB in the right palm, per frame at 30 Hz: upright, nose up (+Z of the tool frame), centred
+   * between both palms' height so it sits in the two hands that carry it.
+   */
+  function holdBomb(clip, toolBone) {
+    const mixer5 = new THREE.AnimationMixer(root);
+    const action = mixer5.clipAction(clip).play();
+    const frames = Math.max(2, Math.round(clip.duration * 30));
+    const times = [], pos = [], quat = [];
+    const q = frame(UP, new THREE.Vector3(0, 0, 1));
+    for (let i = 0; i <= frames; i++) {
+      const t = (i / frames) * clip.duration;
+      mixer5.setTime(t);
+      root.updateMatrixWorld(true);
+      const palmR = wp(rh).add(wp(ri)).multiplyScalar(0.5).add(HAND.clone().applyQuaternion(rh.getWorldQuaternion(new THREE.Quaternion())));
+      const palmL = wp(lh).add(wp(li)).multiplyScalar(0.5).add(HAND_L.clone().applyQuaternion(lh.getWorldQuaternion(new THREE.Quaternion())));
+      const mid = palmR.add(palmL).multiplyScalar(0.5);
+      const local = rh.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(mid, q, new THREE.Vector3(1, 1, 1)));
+      const lp = new THREE.Vector3(), lq = new THREE.Quaternion();
+      local.decompose(lp, lq, new THREE.Vector3());
+      times.push(t);
+      pos.push(...lp.toArray());
+      quat.push(...lq.toArray());
+    }
+    action.stop();
+    mixer5.stopAllAction();
+    mixer5.uncacheRoot(root);
+    clip.tracks.push(
+      new THREE.VectorKeyframeTrack(`${toolBone.name}.position`, times, pos),
+      new THREE.QuaternionKeyframeTrack(`${toolBone.name}.quaternion`, times, quat),
     );
   }
 
@@ -912,6 +951,161 @@ function addWeaponBone() {
     );
     return { shouldered: true, reach: reach * 100, yaw: (yaw / (frames + 1)) * 180 / Math.PI };
   }
+}
+
+/**
+ * SYNTHESISED CLIPS — THE MORTAR CREW (2026-10-15, you: "CoH's mortar squad places it, loads it, fires
+ * it"). Mixamo has no mortar clips, so these are MADE here from the kneeling idle: every frame of it,
+ * the arms bent by the same two-bone IK as the shouldered rifle onto hand targets keyed in time, the
+ * spine and head bent forward, all baked at 30 Hz like any clip (the rifle slung: `mortar_` is a stowed
+ * clip; the loader's BOMB rides the Tool bone, shown only while it is in his hands).
+ *
+ * Targets are in the KNEELING MAN's frame, metres: [forward, up from his knee's ground, to his right],
+ * for the palm (between the wrist and the index knuckle). PROBE_SYNTH=1 prints the base pose measured
+ * in that frame — where the hands, knees and shoulders are — to key against.
+ *   mortar_setup  hands to the ground in front, setting the baseplate, rocking it in (loops)
+ *   mortar_lay    the gunner LAYING the piece: both hands on the tube, small sight adjustments (loops;
+ *                 not "aim": that word makes a clip a shouldered-rifle one, isAimClip)
+ *   mortar_wait   the loader between rounds: the next bomb held at his chest (loops)
+ *   mortar_load   ONE round (played from its start): the bomb up over the mouth, dropped in at
+ *                 MORTAR_DROP_AT, then he ducks, hands to his ears, and comes back up
+ */
+function synthMortarClips() {
+  const MORTAR_DROP_AT = 1.3;   // s into mortar_load: the bomb leaves his hands (the game: algMortarTeam DROP_AT)
+  const base = clips.find((c) => c.name === "rifle_crouch_idle");
+  if (!base) { warn("  ! no rifle_crouch_idle: no mortar clips"); return; }
+  const bone = (suffix) => { let b = null; root.traverse((o) => { if (o.isBone && o.name.endsWith(suffix)) b = o; }); return b; };
+  const B = {
+    hips: bone("Hips"), sp: bone("Spine"), sp1: bone("Spine1"), neck: bone("Neck"), head: bone("Head"),
+    ra: bone("RightArm"), rf: bone("RightForeArm"), rh: bone("RightHand"), ri: bone("RightHandIndex1"),
+    la: bone("LeftArm"), lf: bone("LeftForeArm"), lh: bone("LeftHand"), li: bone("LeftHandIndex1"),
+    rk: bone("RightLeg"), lk: bone("LeftLeg"), rs: bone("RightShoulder"), ls: bone("LeftShoulder"),
+  };
+  if (Object.values(B).some((b) => !b)) { warn("  ! the rig lacks a bone the mortar clips need"); return; }
+  const rest = [];
+  root.traverse((o) => { if (o.isBone) rest.push([o, o.position.clone(), o.quaternion.clone()]); });
+  const restore = () => { for (const [o, p, q] of rest) { o.position.copy(p); o.quaternion.copy(q); } root.updateMatrixWorld(true); };
+
+  // The man's frame at this pose: origin on the ground under his hips, forward his hips' facing.
+  const UP = new THREE.Vector3(0, 1, 0);
+  const frameNow = () => {
+    const h = wp(B.hips);
+    const f = new THREE.Vector3(0, 0, 1).applyQuaternion(B.hips.getWorldQuaternion(new THREE.Quaternion()));
+    f.y = 0; f.normalize();
+    const r = new THREE.Vector3().crossVectors(f, UP).normalize();
+    const ground = Math.min(wp(B.rk).y, wp(B.lk).y) - 0.05;   // (the low knee's on the ground: ~5 cm of knee)
+    return { o: new THREE.Vector3(h.x, ground, h.z), f, r };
+  };
+  const toLocal = (F, p) => { const d = p.clone().sub(F.o); return [d.dot(F.f), d.y, d.dot(F.r)].map((v) => +v.toFixed(3)); };
+  const toWorld = (F, a) => F.o.clone().addScaledVector(F.f, a[0]).addScaledVector(UP, a[1]).addScaledVector(F.r, a[2]);
+  const palmOf = (h, i) => wp(h).add(wp(i)).multiplyScalar(0.5);
+
+  const mixer = new THREE.AnimationMixer(root);
+  if (process.env.PROBE_SYNTH) {
+    const a = mixer.clipAction(base).play();
+    mixer.setTime(0); root.updateMatrixWorld(true);
+    const F = frameNow();
+    console.log("  PROBE rifle_crouch_idle, the man's frame [fwd, up, right] m:");
+    for (const [k, b] of Object.entries({ hips: B.hips, head: B.head, rShoulder: B.ra, lShoulder: B.la, rKnee: B.rk, lKnee: B.lk })) console.log(`    ${k.padEnd(10)} ${JSON.stringify(toLocal(F, wp(b)))}`);
+    console.log(`    rPalm      ${JSON.stringify(toLocal(F, palmOf(B.rh, B.ri)))}`);
+    console.log(`    lPalm      ${JSON.stringify(toLocal(F, palmOf(B.lh, B.li)))}`);
+    a.stop();
+  }
+
+  // Keys: [t, rightPalm, leftPalm, spineDeg (forward), headDeg (down), bombShown]
+  const R = (f, u, s) => [f, u, s];
+  // MEASURED (PROBE_SYNTH, the kneeling idle): hips 0.44 m up, shoulders ~0.8 m up and 0.2 m forward, head
+  // 0.95 m up 0.3 m forward, his right knee on the ground, the left up at 0.55 m. Arms ~0.55 m long; a
+  // forward bend of the spine carries the shoulders (and head) forward and down, so the low targets reach.
+  const CLIPS = {
+    mortar_setup: { dur: 2.4, keys: [
+      [0.0, R(0.5, 0.2, 0.16), R(0.52, 0.2, -0.14), 30, 14, 0],
+      [0.6, R(0.56, 0.12, 0.18), R(0.54, 0.13, -0.12), 36, 18, 0],
+      [1.2, R(0.52, 0.18, 0.12), R(0.57, 0.15, -0.18), 32, 16, 0],
+      [1.8, R(0.58, 0.13, 0.16), R(0.52, 0.12, -0.15), 36, 20, 0],
+      [2.4, R(0.5, 0.2, 0.16), R(0.52, 0.2, -0.14), 30, 14, 0],
+    ] },
+    // The GUNNER at the bipod (2026-10-15: bent over the tube, his helmet met the muzzle): his hands low
+    // on the elevating crank and the bipod (~0.4-0.5 m up), his back only a little forward, head up.
+    mortar_lay: { dur: 3.0, keys: [
+      [0.0, R(0.6, 0.4, 0.06), R(0.62, 0.48, -0.07), 12, 4, 0],
+      [1.2, R(0.61, 0.38, 0.07), R(0.63, 0.47, -0.06), 13, 7, 0],
+      [2.0, R(0.59, 0.41, 0.05), R(0.61, 0.49, -0.08), 11, 2, 0],
+      [3.0, R(0.6, 0.4, 0.06), R(0.62, 0.48, -0.07), 12, 4, 0],
+    ] },
+    // The LOADER works at arm's length, his back upright (leaning in, his head went into the muzzle).
+    mortar_wait: { dur: 2.0, keys: [
+      [0.0, R(0.44, 0.68, 0.07), R(0.44, 0.7, -0.07), 4, 4, 1],
+      [1.0, R(0.45, 0.67, 0.07), R(0.45, 0.69, -0.07), 5, 6, 1],
+      [2.0, R(0.44, 0.68, 0.07), R(0.44, 0.7, -0.07), 4, 4, 1],
+    ] },
+    // ONE round: the bomb at his chest (as mortar_wait ends), up over the mouth (~0.64 m in front, 0.8 m
+    // up), dropped in at MORTAR_DROP_AT; the duck — his head down, hands to his ears, NOT leaning in
+    // (the muzzle is right there) — and back up.
+    mortar_load: { dur: 2.4, keys: [
+      [0.0, R(0.44, 0.68, 0.07), R(0.44, 0.7, -0.07), 4, 4, 1],
+      [0.5, R(0.5, 1.02, 0.05), R(0.5, 1.04, -0.05), 2, -6, 1],
+      [0.95, R(0.62, 0.96, 0.05), R(0.62, 0.98, -0.05), 5, 4, 1],
+      [MORTAR_DROP_AT, R(0.64, 0.82, 0.05), R(0.64, 0.84, -0.05), 7, 8, 0],
+      [1.5, R(0.34, 0.9, 0.12), R(0.34, 0.9, -0.12), 2, 26, 0],
+      [1.95, R(0.34, 0.89, 0.12), R(0.34, 0.89, -0.12), 2, 24, 0],
+      [2.4, R(0.44, 0.68, 0.07), R(0.44, 0.7, -0.07), 4, 4, 1],
+    ] },
+  };
+  const smooth = (x) => x * x * (3 - 2 * x);
+  const sample = (keys, t) => {
+    let i = 0;
+    while (i < keys.length - 2 && t > keys[i + 1][0]) i++;
+    const a = keys[i], b = keys[i + 1], u = smooth(THREE.MathUtils.clamp((t - a[0]) / Math.max(1e-6, b[0] - a[0]), 0, 1));
+    const lerp = (x, y) => x.map((v, k) => v + (y[k] - v) * u);
+    return { r: lerp(a[1], b[1]), l: lerp(a[2], b[2]), spine: a[3] + (b[3] - a[3]) * u, head: a[4] + (b[4] - a[4]) * u, bomb: t < keys[keys.length - 1][0] ? a[5] : b[5] };
+  };
+
+  const bones = [];
+  root.traverse((o) => { if (o.isBone) bones.push(o); });
+  for (const [name, C] of Object.entries(CLIPS)) {
+    const action = mixer.clipAction(base).play();
+    const frames = Math.round(C.dur * 30);
+    const times = [], qs = bones.map(() => []), hipsPos = [];
+    const bombAt = [];
+    for (let i = 0; i <= frames; i++) {
+      const t = (i / frames) * C.dur;
+      mixer.setTime(t % base.duration);
+      root.updateMatrixWorld(true);
+      const F = frameNow(), k = sample(C.keys, t);
+      // The bend: spine forward (about his right axis — a forward lean), the head down.
+      const bend = (b, deg) => setWorldQuaternion(b, new THREE.Quaternion().setFromAxisAngle(F.r, THREE.MathUtils.degToRad(-deg)).multiply(b.getWorldQuaternion(new THREE.Quaternion())));
+      bend(B.sp1, k.spine * 0.6); bend(B.sp, k.spine * 0.4);
+      root.updateMatrixWorld(true);
+      bend(B.head, k.head);
+      // The arms onto their palm targets (the wrist = the palm less its offset, the hand kept as posed).
+      for (const [a, f, h, ix, tgt] of [[B.ra, B.rf, B.rh, B.ri, k.r], [B.la, B.lf, B.lh, B.li, k.l]]) {
+        const hq = h.getWorldQuaternion(new THREE.Quaternion());
+        root.updateMatrixWorld(true);
+        const off = palmOf(h, ix).sub(wp(h));
+        twoBoneIK(a, f, h, toWorld(F, tgt).sub(off));
+        setWorldQuaternion(h, hq);
+        root.updateMatrixWorld(true);
+      }
+      times.push(t);
+      bones.forEach((b, j) => qs[j].push(...b.quaternion.toArray()));
+      hipsPos.push(...B.hips.position.toArray());
+      bombAt.push(k.bomb);
+    }
+    action.stop();
+    const clip = new THREE.AnimationClip(name, C.dur, [
+      ...bones.map((b, j) => new THREE.QuaternionKeyframeTrack(`${b.name}.quaternion`, times, qs[j])),
+      new THREE.VectorKeyframeTrack(`${B.hips.name}.position`, times, hipsPos),
+    ]);
+    clip.optimize();
+    clip.userData = { bomb: { times, shown: bombAt } };
+    clips.push(clip);
+    clipSource.set(clip, { file: "(synthesised from rifle_crouch_idle)", mapped: true });
+    restore();
+  }
+  mixer.stopAllAction();
+  mixer.uncacheRoot(root);
+  restore();
 }
 
 function isAimClip(c) { return /firing|shoot|aim/i.test(c.name); }

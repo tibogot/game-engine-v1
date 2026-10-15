@@ -47,6 +47,8 @@ export const SQUADS = {
   // The flamethrower team (algFlamethrower.js): slot 0 the operator (his type's lance), slot 1 the
   // loader with a rifle.
   lanceFlammes: { size: 2, name: t("Lance-flammes"), reinforce: 45, kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
+  // The 81 mm mortar team (algMortarTeam.js): slot 0 the tube (range 0: the module aims and fires it).
+  mortierFr: { size: 3, name: t("Groupe de mortier"), reinforce: 40, kit: { 0: { weapon: "mortar", range: 0, damage: 0, fireRate: 1 } } },
   para: { size: 5, name: t("Stick para"), reinforce: 60 },
   legion: { size: 5, name: t("Groupe Légion"), reinforce: 80 },
   // A destroyed vehicle's CREW (algCrews.js): whoever got out, MAT 49s at short range; never

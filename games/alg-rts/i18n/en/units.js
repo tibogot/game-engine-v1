@@ -23,6 +23,8 @@ export default {
   "Équipe du génie": "Engineer Team",
   "Stick para": "Para Stick",
   "Groupe Légion": "Légion Squad",
+  "Groupe de mortier": "Mortar Team",
+  "Mortier de 81 (3)": "81 mm Mortar (3)",
   "Équipage": "Crew",
   "Pistolets-mitrailleurs": "Submachine guns",
   "Un équipage ne se renforce pas : ramenez-le au poste, ses blessés s'y soignent.": "A crew is not reinforced: bring it back to the post, its wounded heal there.",

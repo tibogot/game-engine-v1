@@ -124,6 +124,17 @@ export const LOOKS = {
     roles: { 0: { name: "LMG", weapon: "fm2429" }, 2: { name: "leader", weapon: "mat49", kit: ["binoculars"] } },
     extras: { scarf: 0.3, mustache: 0.3, cigarette: 0.15, grenades: 0.2 },
   },
+  // The MORTAR team (alg-rts mortierFr, 2026-10-15): the section's look, three riflemen — the gunner (0)
+  // and the loader (1) sling theirs to work the 81 (the mortar clips), the chef de pièce (2) a MAT 49
+  // and binoculars, calling the fall of shot.
+  appeleMortar: {
+    label: "Mortier de 81", note: "the section's look: gunner, loader (rifles slung at the tube), chef de pièce",
+    green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, hatColor: 0x77744f, weapon: "mas49_56",
+    variants: [{ w: 0.7 }, { w: 0.3, helmet: false, headgear: "bushHat" }],
+    kit: ["pack", "belt"],
+    roles: { 2: { name: "leader", weapon: "mat49", kit: ["binoculars"] } },
+    extras: { scarf: 0.3, mustache: 0.3, cigarette: 0.15 },
+  },
   // The LANCE-FLAMMES team (alg-rts, 2026-10-09: French only, two men, CoH-style): the operator
   // (0) with the lance and the tanks on his back (no pack), the loader (1) with his rifle and pack.
   appeleLanceFlammes: {

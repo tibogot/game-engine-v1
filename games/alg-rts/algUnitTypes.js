@@ -442,6 +442,15 @@ ALG_UNIT_TYPES.mortier = {
   grenade: false, builds: undefined, speed: 5.2, maxHp: 60,
 };
 
+// THE FRENCH MORTAR TEAM (2026-10-15, you: "CoH's mortar squad places it, loads it, fires it"): three
+// appelés with an 81 mm — the gunner lays it, the loader drops the bombs, the chef de pièce watches
+// (algMortarTeam.js: set up, fire, pack up, the barrage). Their rifles for the walk; the tube is fired
+// by the module, never through combat (the gunner's kit range 0, algSquads).
+ALG_UNIT_TYPES.mortierFr = {
+  ...ALG_UNIT_TYPES.piece, typeKey: "mortierFr", name: t("Groupe de mortier"), buildLabel: t("Mortier de 81 (3)"),
+  look: "appeleMortar", speed: 4.8,
+};
+
 // THE FLN'S RECOILLESS RIFLE (2026-10-13, A2 — algRecoilless.js): the gunner with the 57 mm SR, a direct-fire
 // SHELL ("cannon": armour's shell table) — the tank-killer; slow, weak against men (footMul). His loader
 // carries a rifle (the squad kit, slot 1). Bought by a human FLN.

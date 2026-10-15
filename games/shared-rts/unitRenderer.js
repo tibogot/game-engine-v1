@@ -458,6 +458,11 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     // repairing a vehicle (alg-rts algRepair.js): its own clip when the pack has one
     repair: (exact("repair") ?? exact("hammer"))?.name ?? null,
     grenade: exact("grenade_throw")?.name ?? null,
+    // The MORTAR CREW (tools/packMixamo synthMortarClips; alg-rts algMortarTeam.js sets unit.mortarClip).
+    mortarSetup: exact("mortar_setup")?.name ?? null,
+    mortarLay: exact("mortar_lay")?.name ?? null,
+    mortarWait: exact("mortar_wait")?.name ?? null,
+    mortarLoad: exact("mortar_load")?.name ?? null,
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
     // the unarmed set (an `unarmed` renderer only)
@@ -713,8 +718,10 @@ function withSkinnedKit(source, root, names) {
 }
 
 // Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
-const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed)/;
+const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_)/;
 const USES_TOOL = /^dig/;
+// The loader's bomb (on the Tool bone; its scale keys hide it once it is in the tube).
+const USES_BOMB = /^mortar_(wait|load)/;
 
 /**
  * The RIGID pieces a soldier type carries — its look's weapons in the hand
@@ -784,6 +791,7 @@ function buildPieces(field, source, rel, looks, scene, root, cap) {
     if (boneOf("Sling") >= 0) add(`s:${key}`, geo, weaponMat, boneOf("Sling"), restOf(boneOf("Sling")));
   }
   if (boneOf("Tool") >= 0) add("shovel", TOOLS.shovel.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
+  if (boneOf("Tool") >= 0 && field.has?.("mortar_load")) add("bomb", TOOLS.bomb.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
 
   // HATS: every headgear the look's variants can roll, modelled from the crown.
   const hatK = toMesh.clone().multiply(new THREE.Matrix4().makeTranslation(crown));
@@ -872,6 +880,9 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false, gibM = nu
   const ta = USES_TOOL.test(a), tb = USES_TOOL.test(b);
   if (ta && tb) put("shovel");
   else if ((ta || tb) && USES_TOOL.test(dom)) putDom("shovel");
+  const ba = USES_BOMB.test(a), bb = USES_BOMB.test(b);
+  if (ba && bb) put("bomb");
+  else if ((ba || bb) && USES_BOMB.test(dom)) putDom("bomb");
   if (v.hat) put(`h:${v.hat}`);
   for (const k of v.kit) put(`k:${k}`);
 }
@@ -970,6 +981,8 @@ function soldierClip(unit, v, roles) {
   // An UNARMED type (civilians): idle, walk, or run when `unit.running`.
   if (unit.type?.unarmed && roles.calm) return unit.isMoving ? (unit.running ? roles.flee : roles.walk) ?? roles.run : roles.calm;
   if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
+  // A mortar crewman's part (alg-rts algMortarTeam.js): set up, lay the gun, wait with a bomb, load it.
+  if (unit.mortarClip && roles[unit.mortarClip]) return roles[unit.mortarClip];
   // Repairing (alg-rts `repairing`): the repair clip, else kneeling at it — never the shovel.
   if (unit.repairing && (roles.repair || roles.crouchIdle)) return roles.repair ?? roles.crouchIdle;
   if (unit.working && roles.dig) return roles.dig;

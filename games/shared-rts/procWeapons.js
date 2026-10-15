@@ -360,7 +360,25 @@ function shovel() {
 }
 
 /** Tools the soldier bones can carry (the TOOL bone shows one per clip). */
-export const TOOLS = { shovel: { label: "Shovel", build: shovel } };
+/**
+ * A MORTAR BOMB in the loader's hands (2026-10-15, the mortar crews: tools/packMixamo synthMortarClips —
+ * the Tool bone carries it, nose up). A 60 mm round drawn up a third so it reads from the RTS camera:
+ * the teardrop body, the tail boom and its fins, the fuze. Centred on its middle (where the hands hold it).
+ */
+function mortarBomb() {
+  const O = 0x55573f, D = COLORS.metal, Y = 0x8a7a3a;
+  return toGeometry([
+    cyl(D, 0, 0, -0.26, -0.12, 0.016, 0.016, 6),         // the tail boom
+    box(D, [0, 0, -0.22], [0.08, 0.004, 0.07]),           // fins
+    box(D, [0, 0, -0.22], [0.004, 0.08, 0.07]),
+    cyl(O, 0, 0, -0.14, -0.06, 0.026, 0.042, 8),          // the body, tapering to the tail
+    cyl(O, 0, 0, -0.06, 0.08, 0.042, 0.04, 8),
+    cyl(Y, 0, 0, 0.0, 0.016, 0.0425, 0.0425, 8),          // its yellow band (HE)
+    cyl(O, 0, 0, 0.08, 0.17, 0.04, 0.014, 8),             // the nose
+    cyl(D, 0, 0, 0.17, 0.21, 0.012, 0.006, 6),            // the fuze
+  ]);
+}
+export const TOOLS = { shovel: { label: "Shovel", build: shovel }, bomb: { label: "Mortar bomb", build: mortarBomb } };
 
 /** The shape helpers, for other low-poly kit (soldierLooks.js headgear). */
 export const prim = { part, tri, quad, block, box, cyl, tiltX, toGeometry };

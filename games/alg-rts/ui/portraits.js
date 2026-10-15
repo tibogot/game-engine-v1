@@ -21,6 +21,7 @@ const FACES = {
   sapeur: [2, 13, 12],
   piece: [10, 3, 1],                         // the section's faces: the gunner's team                       // goggles on the helmet, the beret
   lanceFlammes: [9, 11],                     // appelés' faces: the lance-flammes team
+  mortierFr: [3, 10, 0],                     // appelés' faces: the 81 mm team
   para: [4, 5],                              // red berets
   legion: [6, 7],                            // white képis
   colonel: [8],                              // the officer's képi: Colonel Delorme

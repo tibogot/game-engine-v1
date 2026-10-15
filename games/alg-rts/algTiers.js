@@ -13,7 +13,7 @@ import { isHuman } from "../shared-rts/teams.js";
 export const TIERS = [
   {
     n: 1, name: t("Section d'infanterie"), note: t("dès le départ"),
-    units: ["appele", "sapeur", "piece", "lanceFlammes", "willys", "gmc"], cost: 0, villages: 0,
+    units: ["appele", "sapeur", "piece", "lanceFlammes", "mortierFr", "willys", "gmc"], cost: 0, villages: 0,
   },
   {
     n: 2, name: t("Moyens héliportés"), note: t("l'héliport ouvre : paras, l'Alouette, l'H-21 ; le half-track"),

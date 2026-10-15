@@ -40,6 +40,8 @@ export const COSTS = {
   appele: { mp: 270 }, sapeur: { mp: 170 }, piece: { mp: 240, mun: 20 },
   // The lance-flammes (algFlamethrower.js): munitions-heavy, as CoH's flamethrowers.
   lanceFlammes: { mp: 200, mun: 45 },
+  // The 81 mm team (algMortarTeam.js): CoH's early mortar, a munitions price for its rounds.
+  mortierFr: { mp: 250, mun: 30 },
   para: { mp: 320, fuel: 25 }, legion: { mp: 380, mun: 45 },
   willys: { mp: 110, fuel: 20 }, gmc: { mp: 140, fuel: 30 }, halftrack: { mp: 190, fuel: 50 },
   ebr: { mp: 240, fuel: 75 }, amx13: { mp: 290, fuel: 105 }, alouette: { mp: 280, fuel: 120 },

@@ -22,6 +22,9 @@ const ICONS = {
   appele: `<path d="M4.5 19.5 L18.5 5.5" stroke-width="2.4"/><path d="M3 18 L6 21" stroke-width="3.2"/><path d="M18.5 5.5 L21 3" stroke-width="1.2"/><path d="M11 13 L9.5 11.5" stroke-width="1.6"/>`,
   // A machine gun on its bipod: the pièce FM (algMgTeam.js).
   piece: `<path d="M3 10.5 L21 10.5" stroke-width="2.4"/><path d="M5 10.5 L4 14 L7 14 Z" fill="currentColor" stroke-width="1.2"/><path d="M11 8 L13 8 L13 10.5" stroke-width="1.6"/><path d="M16 10.5 L13.5 18 M16 10.5 L18.5 18" stroke-width="1.6"/>`,
+  // A mortar on its bipod: the mortar teams (algMortarTeam.js), French and FLN.
+  mortierFr: `<path d="M8 20 L14.5 4.5" stroke-width="3"/><path d="M5 20.5 L12 20.5" stroke-width="2"/><path d="M12.5 10 L17 20 M12.5 10 L9.5 20" stroke-width="1.4"/>`,
+  mortier: `<path d="M8 20 L14.5 4.5" stroke-width="3"/><path d="M5 20.5 L12 20.5" stroke-width="2"/><path d="M12.5 10 L17 20 M12.5 10 L9.5 20" stroke-width="1.4"/>`,
   // A flame: the lance-flammes (algFlamethrower.js).
   lanceFlammes: `<path d="M12 21 C7 21 5 17.5 6.5 14 C7.5 11.5 9.5 10.5 9.5 7.5 C11.5 9 12.5 11 12 13 C13.5 12 14.5 10 14 7 C17 9.5 19 13 17.5 17 C16.5 19.5 14.5 21 12 21 Z" fill="currentColor" stroke-width="1.2"/>`,
   // A spanner (Feather "tool", MIT).
