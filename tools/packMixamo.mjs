@@ -24,7 +24,9 @@
 //              as a soldier: the rig keeps Mixamo's own mesh and weights.
 //
 // THE ALGERIA PACK (alg-rts, 2026-09-30):
-//   node tools/packMixamo.mjs --skip soldier3 --rig-texture originalsoldier
+//   node tools/packMixamo.mjs --skip soldier3 --rig-texture originalsoldier --unarmed
+//   (--unarmed is REQUIRED: the civilians play unarmed_idle / walk / run — algCivilians.js. Repacked
+//   without it, 2026-10-15, the villagers lost their animations for a day.)
 //
 // THE FOLDER
 //   *.fbx  Mixamo downloads. ONE "With Skin" (the RIG: its skeleton and skin
@@ -833,6 +835,7 @@ function addWeaponBone() {
       const palmR = wp(rh).add(wp(ri)).multiplyScalar(0.5).add(HAND.clone().applyQuaternion(rh.getWorldQuaternion(new THREE.Quaternion())));
       const palmL = wp(lh).add(wp(li)).multiplyScalar(0.5).add(HAND_L.clone().applyQuaternion(lh.getWorldQuaternion(new THREE.Quaternion())));
       const mid = palmR.add(palmL).multiplyScalar(0.5);
+      if (clip.userData?.toolForward) mid.add(new THREE.Vector3(0, 0, 0.05).applyQuaternion(q));   // (the glasses out before the hands)
       const local = rh.matrixWorld.clone().invert().multiply(new THREE.Matrix4().compose(mid, q, new THREE.Vector3(1, 1, 1)));
       const lp = new THREE.Vector3(), lq = new THREE.Quaternion();
       local.decompose(lp, lq, new THREE.Vector3());
@@ -1050,11 +1053,21 @@ function synthMortarClips() {
     // (the muzzle is right there) — and back up.
     // The CHEF DE PIÈCE SPOTTING (2026-10-16): kneeling a little apart, binoculars to his eyes (both palms
     // just in front of his face — his head at ~0.3 m forward, 0.95 m up), a slow look along the target.
+    // (2026-10-16: the palms 11 cm apart, 14 cm before the head's centre — the binoculars sat between
+    // the hands and half inside the face: never seen. Now ~0.6 m out, 22 cm apart, the glasses out in front.)
     mortar_spot: { dur: 4.0, binos: true, keys: [
-      [0.0, R(0.44, 0.9, 0.055), R(0.44, 0.9, -0.055), 4, -2, 1],
-      [1.5, R(0.44, 0.9, 0.075), R(0.44, 0.9, -0.035), 4, -3, 1],
-      [2.8, R(0.44, 0.9, 0.035), R(0.44, 0.9, -0.075), 4, -1, 1],
-      [4.0, R(0.44, 0.9, 0.055), R(0.44, 0.9, -0.055), 4, -2, 1],
+      [0.0, R(0.53, 0.92, 0.11), R(0.53, 0.92, -0.11), 4, -2, 1],
+      [1.5, R(0.53, 0.92, 0.13), R(0.53, 0.92, -0.09), 4, -3, 1],
+      [2.8, R(0.53, 0.92, 0.09), R(0.53, 0.92, -0.13), 4, -1, 1],
+      [4.0, R(0.53, 0.92, 0.11), R(0.53, 0.92, -0.11), 4, -2, 1],
+    ] },
+    // The crew AT REST by the piece (between rounds, no target): kneeling, the left hand on the raised
+    // knee, the right on the thigh, the rifle staying SLUNG (a mortar_ clip) — on the game's kneeling
+    // idle the rifle jumped back into his hands every time he stopped working (you, 2026-10-16).
+    mortar_rest: { dur: 4.0, keys: [
+      [0.0, R(0.3, 0.6, 0.2), R(0.36, 0.62, -0.16), 6, 2, 0],
+      [2.0, R(0.31, 0.61, 0.2), R(0.37, 0.63, -0.16), 7, 4, 0],
+      [4.0, R(0.3, 0.6, 0.2), R(0.36, 0.62, -0.16), 6, 2, 0],
     ] },
     mortar_load: { dur: 2.4, keys: [
       [0.0, R(0.44, 0.68, 0.07), R(0.44, 0.7, -0.07), 4, 4, 1],

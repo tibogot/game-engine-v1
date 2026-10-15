@@ -230,6 +230,8 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
       if (want[k]) setKit(want[k], name, true);
       (m.carry ??= {})[k] = want[k];
     }
+    // the men with a load on their back run with it, rifle slung (unitRenderer carryRun)
+    for (const u of s.members) u.carrying = !!m.carry && (u === m.carry.tube || u === m.carry.plate);
   }
 
   function step(dt) {
@@ -239,7 +241,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
       if (!g) { m.state = "packed"; release(m); continue; }
       // A mortar team never goes after a target (combat's noChase): it shoots back at what comes in
       // its rifles' reach, it does not walk off its piece toward an enemy 80 m away.
-      for (const u of s.members) u.noChase = true;
+      for (const u of s.members) { u.noChase = true; u.noSmallArms = true; }   // (CoH: the piece is their only weapon)
       const ld = loaderOf(s, g);
       carry(s, m, g, ld);
       // THE CHEF DE PIÈCE (the third man): spots for the piece once it is going up (spotter below)
@@ -317,8 +319,9 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
           const loading = !!m.load;
           m.seen = Math.max(0, (m.seen ?? 0) - dt);
           const engaged = loading || !!m.salvo || m.seen > 0;
-          const gPart = engaged ? "mortarLay" : "idle";
-          const ldPart = loading ? "mortarLoad" : engaged && (m.salvo || m.cd < READY) ? "mortarWait" : "idle";
+          // (at rest: mortar_rest — kneeling, rifle slung; the game's kneeling idle put it back in his hands)
+          const gPart = engaged ? "mortarLay" : "mortarRest";
+          const ldPart = loading ? "mortarLoad" : engaged && (m.salvo || m.cd < READY) ? "mortarWait" : "mortarRest";
           setCrew(m, [...(ld !== g ? [[g, gPart], [ld, ldPart]] : [[g, loading ? "mortarLoad" : gPart]]), ...spotter(m, sp3, dt)]);
           m.cd -= dt;
           if (m.salvo) {

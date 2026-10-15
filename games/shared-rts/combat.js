@@ -258,7 +258,8 @@ export function createCombat({
     // would halt the man in range to shoot and the retreat would never happen.
     // (and a man throwing a grenade: algGrenades.js — his own flag, so a throw
     // ending never re-opens the fire of a band told to hold it meanwhile)
-    if (e.holdFire || e.throwing) { e.target = null; return; }
+    // (noSmallArms: a weapon team's crew — alg-rts mortar teams fight with their piece only, CoH's)
+    if (e.holdFire || e.throwing || e.noSmallArms) { e.target = null; return; }
     if (e.playerMove && (!e.isMoving || e.attackTarget)) e.playerMove = false;
 
     // Forget dead targets.

@@ -381,13 +381,14 @@ function mortarBomb() {
 /** Field BINOCULARS raised to the eyes (the chef de pièce spotting, mortar_spot): two barrels along +Z,
  *  side by side, the eyepieces at −Z (his face), drawn up a little to read. Centred on their middle. */
 function binos() {
+  // (drawn up ~1.6×: at real size, between his hands, the RTS camera never saw them)
   const D = 0x26261f, M = COLORS.metal;
   return toGeometry([
-    cyl(D, 0.032, 0, -0.07, 0.07, 0.026, 0.03, 8),
-    cyl(D, -0.032, 0, -0.07, 0.07, 0.026, 0.03, 8),
-    cyl(M, 0.032, 0, -0.095, -0.07, 0.016, 0.016, 6),
-    cyl(M, -0.032, 0, -0.095, -0.07, 0.016, 0.016, 6),
-    box(D, [0, 0.008, -0.02], [0.03, 0.02, 0.05]),
+    cyl(D, 0.05, 0, -0.11, 0.11, 0.04, 0.046, 8),
+    cyl(D, -0.05, 0, -0.11, 0.11, 0.04, 0.046, 8),
+    cyl(M, 0.05, 0, -0.15, -0.11, 0.024, 0.024, 6),
+    cyl(M, -0.05, 0, -0.15, -0.11, 0.024, 0.024, 6),
+    box(D, [0, 0.012, -0.03], [0.05, 0.03, 0.08]),
   ]);
 }
 export const TOOLS = { shovel: { label: "Shovel", build: shovel }, bomb: { label: "Mortar bomb", build: mortarBomb }, binos: { label: "Binoculars", build: binos } };

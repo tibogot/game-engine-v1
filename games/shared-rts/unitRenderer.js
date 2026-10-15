@@ -440,7 +440,8 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
   const clips = {};
   // UNARMED (2026-10-09, alg-rts civilians: a renderer of their own, `unarmed: true`): the pack's
   // unarmed idle / walk / run are kept, and a type with `unarmed` plays them (soldierClip).
-  for (const a of tpl.animations) if (unarmed || !/^unarmed_/.test(a.name)) clips[a.name] = a;
+  // (soldiers keep the unarmed RUN too: a man carrying a load on his back, rifle slung — the mortar crew)
+  for (const a of tpl.animations) if (unarmed || !/^unarmed_/.test(a.name) || a.name === "unarmed_run") clips[a.name] = a;
   clips[idle.name] = idle;
   clips[run.name] = run;
   const roles = {
@@ -464,6 +465,8 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     mortarWait: exact("mortar_wait")?.name ?? null,
     mortarLoad: exact("mortar_load")?.name ?? null,
     mortarSpot: exact("mortar_spot")?.name ?? null,
+    mortarRest: exact("mortar_rest")?.name ?? null,
+    carryRun: exact("unarmed_run")?.name ?? null,   // (unit.carrying: the mortar's tube or plate on his back)
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
     // the unarmed set (an `unarmed` renderer only)
@@ -568,6 +571,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
   // …and of the unarmed walk and run, for the same reason.
   const walkSpeed = roles.walk ? measureGroundSpeed(root, exact(roles.walk)) || 0 : 0;
   const fleeSpeed = roles.flee ? measureGroundSpeed(root, exact(roles.flee)) || 0 : 0;
+  const carrySpeed = roles.carryRun ? measureGroundSpeed(root, exact(roles.carryRun)) || 0 : 0;
 
   // The compute pass emits vertices in the TEMPLATE MESH's local space, which
   // knows nothing about buildTemplate's normalisation (the centring offset and
@@ -605,7 +609,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
+  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, carrySpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
 }
 
 /**
@@ -995,6 +999,7 @@ function soldierClip(unit, v, roles) {
   if (unit.working && roles.dig) return roles.dig;
   const low = unit.posture;   // "stand" | "kneel" | "prone"; undefined = stand
   if (unit.isMoving) {
+    if (unit.carrying && roles.carryRun) return roles.carryRun;   // a load on his back, rifle slung
     if (low === "prone" && roles.crawl) return roles.crawl;       // pinned, ordered on: he crawls
     return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
   }
@@ -1791,7 +1796,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         const rate = v.move ? v.move.steps[v.move.i].rate ?? 1
           : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6)
           : v.cur.clip === r.walk && v.crowd.walkSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.walkSpeed, 0.6, 1.6)
-          : v.cur.clip === r.flee && v.crowd.fleeSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.fleeSpeed, 0.6, 1.6) : 1;
+          : v.cur.clip === r.flee && v.crowd.fleeSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.fleeSpeed, 0.6, 1.6)
+          : v.cur.clip === r.carryRun && v.crowd.carrySpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.carrySpeed, 0.6, 1.6) : 1;
         // The crouch-fire clip plays once per shot (a shot restarts it) and
         // then HOLDS its last frame — his aim — instead of looping.
         if (v.cur.clip === r.crouchFire) v.cur.t = Math.min(v.cur.t + dt * rate, f.duration(r.crouchFire) * CROUCH_AIM_AT);
