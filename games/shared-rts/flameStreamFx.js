@@ -30,10 +30,11 @@ export const FLAME_STREAM = {
   bloom: 0.35,       // share of it in the bloom buffer
   hold: 0.35,        // s without a fire() call before the stream is let go
   max: 6,            // streams at once (3 cards each)
-  // BURNING GROUND where a stream comes down: the napalm ground book (fp_napalmFire), one
-  // billboard per patch — the game's old flame cards beside the baked stream did not match.
+  // BURNING GROUND where a stream comes down: the burning-fuel book (fp_fuelFire — a few
+  // scattered puddles, low flames, little smoke; the napalm book before it read as a square
+  // sheet of fire under black smoke, 2026-10-16), one billboard per patch.
   patches: 14,       // patches at once (the oldest gives way)
-  patchCard: 4.6,    // m: the card (its strip of flames ~3.5 m)
+  patchCard: 3.6,    // m: the card (its puddles spread ~2.6 m)
 };
 
 const ease = THREE.MathUtils.smoothstep;
@@ -43,7 +44,8 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
   const [loop, start, stop] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`${P.base}${k}`)));
   const books = [start, loop, stop];
   const anchor = loop.meta.anchor ?? [0.05, 0.42];
-  const groundBook = await loadBookTextures(`${P.base}napalmFire`).catch(() => null);
+  const groundBook = await loadBookTextures(`${P.base}fuelFire`)
+    .catch(() => loadBookTextures(`${P.base}napalmFire`)).catch(() => null);
   const groundAt = app.heightTexNode ? (x, z) => drapeY(app.heightTexNode, x, z) : null;
 
   // The pool: `max` slots of three cards, handed to streams as they light.

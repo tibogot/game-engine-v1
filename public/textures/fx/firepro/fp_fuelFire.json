@@ -1,0 +1,35 @@
+{
+ "format": "firepro-sixway-1",
+ "cols": 8,
+ "rows": 8,
+ "cell": 192,
+ "frames": 64,
+ "mvScale": 13.129,
+ "emissionMax": 1.2803,
+ "fill": 0.984,
+ "size": 3,
+ "pitch": 40,
+ "duration": 2.6666666666666665,
+ "loop": true,
+ "anchor": null,
+ "tint": [
+  0.0452,
+  0.0437,
+  0.0409
+ ],
+ "seconds": 17.9,
+ "preset": "fuelFire",
+ "bake": {
+  "center": [
+   0,
+   1.3,
+   0
+  ],
+  "size": 3,
+  "pitch": 40,
+  "start": 3,
+  "duration": 2.6666666666666665,
+  "loop": true,
+  "blend": 16
+ }
+}

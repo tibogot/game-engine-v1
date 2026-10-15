@@ -89,7 +89,7 @@ const ui = {
   scene: "blast", paused: false,                  // "blast" (shell + wreck) | "napalm"
   napEvery: 22,
   fpImpactCard: 22, fpGroundCard: 13, fpColumnCard: 24,
-  aim: "across", ftCard: 22, ftDown: 2, ftBurst: 3, ftBurnOn: true, ftBurnCard: 8, ftIgnite: 0.8, ftSpeed: 1.4,
+  aim: "across", ftCard: 22, ftDown: 2, ftBurst: 3, ftBurnOn: true, ftBurnCard: 3.6, ftIgnite: 0.8, ftSpeed: 1.4,
 };
 const fakeApp = {
   scene, renderer, camera, getWorldHeight: () => 0,
@@ -258,12 +258,14 @@ const FT_REACH = 0.62;      // the stream's end, as a share of the card from its
 // which crossfades into the LOOP; let go plays STOP (the stream breaks off at the nozzle and
 // burns out). The first cut wiped the finished loop out of the gun — "looks fake" (you, 2026-10-09).
 const ft = { firing: false, since: -1e9, stop: -1e9, stopAt: 0, release: false, next: 1, burnAt: -1e9, end: new THREE.Vector3() };
-let ftBook = null, ftCard = null, ftBurn = null, ftStartBook = null, ftStopBook = null, ftStart = null, ftStop = null;
+let ftBook = null, ftCard = null, ftBurn = null, ftBurnBook = null, ftStartBook = null, ftStopBook = null, ftStart = null, ftStop = null;
 try {
   [ftBook, ftStartBook, ftStopBook] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`/textures/fx/firepro/fp_${k}`)));
   const card = (b) => { const c = createBookCard(); c.setBook(b.tex, b.meta); c.mesh.visible = false; scene.add(c.mesh); return c; };
   ftCard = card(ftBook); ftStart = card(ftStartBook); ftStop = card(ftStopBook);
-  if (napBooks) { ftBurn = createBookCard(); ftBurn.setBook(napBooks.ground.tex, napBooks.ground.meta); ftBurn.mesh.visible = false; scene.add(ftBurn.mesh); }
+  // The burning end: the game's burning-fuel book (fp_fuelFire, as flameStreamFx), else the napalm ground.
+  ftBurnBook = await loadBookTextures("/textures/fx/firepro/fp_fuelFire").catch(() => napBooks?.ground ?? null);
+  if (ftBurnBook) { ftBurn = createBookCard(); ftBurn.setBook(ftBurnBook.tex, ftBurnBook.meta); ftBurn.mesh.visible = false; scene.add(ftBurn.mesh); }
 } catch { status.textContent += "flamethrower books not baked yet (v3/fire-bake-lab: Flamethrower, … start, … stop)\n"; }
 // A soldier stand-in: body, head, and the gun he fires from (turned to the aim each frame).
 const soldier = new THREE.Group();
@@ -326,7 +328,7 @@ function ftFrame(sunCol, sky) {
   if (ftBurn) {
     const g = ft.firing ? ease(sa, 0.55, 0.95) : 1 - ease(clock - ft.burnAt, 3, 5);
     ftBurn.mesh.visible = on && ui.showFP && ui.ftBurnOn && g > 0.002 && ft.since > -1e8;
-    if (ftBurn.mesh.visible) drawCard(ftBurn, napBooks.ground.meta, { age: clock / napBooks.ground.meta.duration, size: ui.ftBurnCard, x: ft.end.x, z: ft.end.z, fade: g, sunCol, sky });
+    if (ftBurn.mesh.visible) drawCard(ftBurn, ftBurnBook.meta, { age: clock / ftBurnBook.meta.duration, size: ui.ftBurnCard, x: ft.end.x, z: ft.end.z, fade: g, sunCol, sky });
   }
 }
 

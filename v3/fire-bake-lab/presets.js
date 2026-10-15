@@ -221,6 +221,26 @@ export const PRESETS = {
     forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.3 }, { type: "turbulence", strength: 0.6, scale: 2.5 }],
     bake: { center: [0, 5, 0], size: 10, pitch: 40, start: 9, duration: 4, loop: true, blend: 20 },
   },
+  // BURNING FUEL ON THE GROUND (2026-10-16, you: the flamethrower's "burning end" — the napalm-strip book
+  // on a 4.6 m card drew a block of fire with its black pall cut square at the card's edge). The spatter
+  // where a stream comes down: five small puddles over ~2 m, low ragged flames (< ~1.3 m), a little
+  // light-grey smoke that dies INSIDE the card (fast dissipation) — no square edge, no black wall.
+  fuelFire: {
+    label: "Burning fuel",
+    note: "loop: a flamethrower's fuel burning on the ground — small scattered puddles, low flames, light smoke",
+    sim: {
+      voxelSize: 0.04, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 23,
+      grid: { maxVoxels: 8_000_000, cutoff: 0.05, ground: true },
+      flame: { lifespan: 0.55, heatRate: 3, smokeRate: 0.7, expansionRate: 0.3, cooling: 0.66, brightness: 1.1, opacity: 1, temperature: 2900, sootGlow: 1 },
+      smoke: { dissipation: 2.2, color: "#3c3b39", density: 4, scattering: 0.38, shadowDensity: 3 },
+      motion: { buoyancy: 3.2, smokeWeight: 0.12, damping: 0.12, vorticity: 3.5 },
+    },
+    fires: [[-0.9, -0.3, 0.32], [-0.2, 0.45, 0.26], [0.35, -0.2, 0.38], [1.05, 0.25, 0.24], [0.15, -0.75, 0.2]]
+      .map(([x, z, r], i) => ({ kind: "fire", at: [x * 0.8, 0.12, z * 0.8], radius: r, emission: { flame: 1, heatRate: 4 + i * 0.6, smokeRate: 0.6 }, velocity: null })),
+    blasts: [],
+    forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.12 }, { type: "turbulence", strength: 1.6, scale: 1.8 }],
+    bake: { center: [0, 1.3, 0], size: 3.0, pitch: 40, start: 3, duration: 64 / 24, loop: true, blend: 16 },
+  },
   campfire: {
     label: "Campfire",
     note: "loop: clean small flames (Fire Pro's Campfire preset)",
