@@ -138,7 +138,7 @@ export function createBookCard({ groundAt = null } = {}) {
   const _r = new THREE.Vector3(), _u = new THREE.Vector3(), _b = new THREE.Vector3(), _m = new THREE.Matrix4(), _y = new THREE.Vector3();
   return {
     mesh,
-    u: { uFireK, uMotion, uTint, uSun, uAmb, uFade, uReach, uGroundY, uGroundFade, uBloom },
+    u: { uFireK, uMotion, uTint, uSun, uSunL, uAmb, uFade, uReach, uGroundY, uGroundFade, uBloom },
     /** Show a book: textures { a, b, mv } and its meta. */
     setBook(tex, meta) {
       tA.value = tex.a; tB.value = tex.b; tM.value = tex.mv;

@@ -176,6 +176,12 @@ export function createCombatFx({ app, pool = 40, style = "flipbook", litSmoke = 
     trail: coh ? (x, y, z) => (litOn
       ? lit.puff(x, y, z, { size: 1.2, duration: 1.4 + Math.random() * 0.5, tint: SMOKE_TINTS.grey, opacity: 0.5, grow: 0.6, vel: [0, 0.3, 0] })
       : trail.spawn(x, y, z, 1.2 + Math.random() * 0.5, { vy: 0.3, scale: 0.7 + Math.random() * 0.4 })) : undefined,
+    /**
+     * A BLAST'S PIECES, for a game laying its own baked book on top (alg-rts' mortar, bookShots.js):
+     * the orange flash of a blast (`big`) or a gun's, and the clods thrown up (coh).
+     */
+    flash: (x, y, z, life = 0.12, { big = true } = {}) => (big ? blasts : flashes).spawn(x, y, z, life),
+    throwDirt: coh ? (x, y, z, n, power) => throwDirt(x, y, z, n, power) : () => {},
     /** The lit smoke on or off (live); null without it. */
     get litSmoke() { return lit ? litOn : null; },
     setLitSmoke(on) { if (lit) { litOn = !!on; if (!litOn) lit.clear(); } },

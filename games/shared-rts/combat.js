@@ -224,6 +224,9 @@ export function createCombat({
   function splashAt(at, damage, radius, owner = null, { vehicleMul = 1, kind = null } = {}) {
     // A grenade: its own small burst and a scorch, not a shell's crater.
     if (kind === "grenade" && fx.grenade) { fx.grenade(at.x, at.y, at.z); craters?.addCrater(at.x, at.z, 0.75); }
+    // A mortar bomb: a game's own (alg-rts: the baked "Mortar in earth" book). The crater is handed
+    // over: stamped at once it showed as a black hole before the blast had risen over it.
+    else if (kind?.startsWith?.("mortar") && fx.mortar) fx.mortar(at.x, at.y, at.z, kind, { crater: () => craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7)) });
     else {
       fx.explosion(at.x, at.y, at.z, { size: Math.max(6, radius * 1.1) });
       craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));

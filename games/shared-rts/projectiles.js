@@ -496,12 +496,15 @@ export function createProjectiles({ app, fx = null, sfx = null, onImpact = () =>
       _obj.scale.setScalar(K.len);
       _obj.updateMatrix();
       if (K.mesh === "air") airBombMesh.setMatrixAt(ma++, _obj.matrix); else bombMesh.setMatrixAt(mb++, _obj.matrix);
-      // The mortar bombs' TRAIL is the grenade's (2026-10-16, you: "the same as the new grenade trail"):
-      // the soft streak along the path flown (arcTrails), from the tail, a little wider for a bigger bomb.
+      // The mortar bombs' TRAIL (2026-10-16): the grenade's streak along the path flown (arcTrails), from
+      // the tail — but as CoH 3's (you, ref assets-src/refs/coh3/mortar_fall_trail.png): a THIN smooth
+      // streak with a HOT head (warm yellow-white just behind the bomb, cooling to pale smoke) and only
+      // the last stretch of the flight drawn, fading behind (the whole arc read as a white rope).
       // (A dropped aircraft bomb leaves none; fx.shellTrail stays a hook for a game's extra effect.)
       if (K.mesh !== "air") {
-        _tail.copy(s.vel).normalize().multiplyScalar(-K.len * 0.5).add(s.pos);
-        arcTrails.point(s, _tail.x, _tail.y, _tail.z, clock, 1.3 + K.len * 0.5);
+        // (from just inside the fins: the glow touches the bomb, as the ref's)
+        _tail.copy(s.vel).normalize().multiplyScalar(-K.len * 0.3).add(s.pos);
+        arcTrails.point(s, _tail.x, _tail.y, _tail.z, clock, 1.8 + K.len * 0.4, { life: 1.1, hot: 0.3, detail: 1 });
         fx?.shellTrail?.(_tail.x, _tail.y, _tail.z, s.kind ?? "mortar81", s.vel);
       }
     }

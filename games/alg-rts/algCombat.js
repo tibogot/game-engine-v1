@@ -9,6 +9,8 @@
 // the lines of fire: a smoke grenade's cloud, combat asks it before every shot.
 import { armourMul } from "./algArmour.js";
 import { createCombatFx } from "../shared-rts/combatFx.js";
+import { createBookShots } from "../shared-rts/bookShots.js";
+import { SMOKE_TINTS } from "../shared-rts/litSmoke.js";
 import { createFlameField } from "../shared-rts/flameField.js";
 import { createCraterSystem } from "../shared-rts/craterSystem.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
@@ -65,16 +67,15 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // LIT SMOKE (shared litSmoke.js, 2026-10-02): the dust and smoke lit by
   // the sun (a six-way book) instead of the old painted-light book.
   // ?litsmoke=0 boots with the old one (the battle lab switches it live).
-  const fx = createCombatFx({ app, style: "coh", litSmoke: new URLSearchParams(location.search).get("litsmoke") !== "0",
-    // The blasts' dust columns drift with the map's wind (algWind: the flags'
-    // convention, along (cos d, sin d); x2.2 m/s as the vehicles' dust).
-    wind: () => {
-      const w = app.showroom?.wind;
-      if (!w) return [0, 0];
-      const t = performance.now() / 1000, d = w.dirRad(t), v = w.speed(t) * 2.2;
-      return [Math.cos(d) * v, Math.sin(d) * v];
-    },
-  });
+  // The blasts' dust columns drift with the map's wind (algWind: the flags'
+  // convention, along (cos d, sin d); x2.2 m/s as the vehicles' dust).
+  const wind = () => {
+    const w = app.showroom?.wind;
+    if (!w) return [0, 0];
+    const t = performance.now() / 1000, d = w.dirRad(t), v = w.speed(t) * 2.2;
+    return [Math.cos(d) * v, Math.sin(d) * v];
+  };
+  const fx = createCombatFx({ app, style: "coh", litSmoke: new URLSearchParams(location.search).get("litsmoke") !== "0", wind });
   const fire = createFlameField({ app });
   // THE BATTLE LEAVES MARKS (2026-10-07): lit shell holes (bowl, rim, thrown earth — the texture
   // decal read as a flat black blot), 256 kept, and the plants where the shell landed blown away.
@@ -90,6 +91,38 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // (algGame.js), so they are looked up at the moment of the blast.
   const explosion = fx.explosion;
   fx.explosion = (x, y, z, opts) => { explosion(x, y, z, opts); if (!opts?.dust) { app.algBirds?.flush(x, z, { size: opts?.size ?? 10 }); app.algSounds?.blast(x, y, z, opts?.size ?? 10); app.algDamage?.blast(x, z, opts?.size ?? 10); app.algAnimals?.hurt(x, z, (opts?.size ?? 10) * 0.5, 70); } };
+  // THE MORTAR (2026-10-16, you, CoH 3 refs assets-src/refs/coh3/mortar_*.png): baked in the
+  // fire-bake lab — the LAUNCH (a bright burst at the mouth, then a pale column rising and drifting
+  // downwind) and the IMPACT ("Mortar in earth": a blink of fire, a fountain of earth spikes, the
+  // dome slumping). Pooled cards (bookShots.js); the flash, the clods and a dust that lingers after
+  // the book are the old pieces. Without the books: the old blast, no launch smoke.
+  const shots = await createBookShots({ app, books: { mortarImpact: { pool: 10, fireK: 4 }, mortarLaunch: { pool: 8, fireK: 8 } } });
+  app.algBookShots = shots;
+  const MORTAR_SIZE = { mortar60: 0.78, mortar81: 1, mortar120: 1.3 };
+  const later = [];   // [time left, fn]: the crater, once the blast hides where it lands
+  if (shots.has("mortarImpact")) fx.mortar = (x, y, z, kind, { crater = null } = {}) => {
+    const k = MORTAR_SIZE[kind] ?? 1, [wx, wz] = wind();
+    if (crater) later.push([0.25, crater]);
+    fx.flash(x, y + 1, z, 0.1);
+    fx.throwDirt(x, y, z, Math.round(12 * k), 8 * k);
+    shots.play("mortarImpact", x, z, { size: shots.meta("mortarImpact").size * k });
+    // The dust that hangs over the hole after the book (3.5 s), drifting off slowly (at the full
+    // wind it streaked away as a puff of its own).
+    fx.lit?.puff(x, y + 2.4 * k, z, { size: 8 * k, duration: 7, delay: 1.8, tint: SMOKE_TINTS.dust, opacity: 0.4, grow: 1.25, vel: [wx * 0.4, 0.3, wz * 0.4] });
+    app.algBirds?.flush(x, z, { size: 8 * k }); app.algSounds?.blast(x, y, z, 8 * k); app.algDamage?.blast(x, z, 8 * k); app.algAnimals?.hurt(x, z, 4 * k, 70);
+  };
+  if (shots.has("mortarLaunch")) fx.shellLaunch = (from, dir, kind) => {
+    if (!kind?.startsWith?.("mortar")) return;
+    const k = MORTAR_SIZE[kind] ?? 1;
+    // The first frame is FIRE (the ref): the blast flash, briefly — the book's own lasts a frame.
+    fx.flash(from.x, from.y + 0.4, from.z, 0.07);
+    // The book's mouth is 0.9 m up its ground point: the column leaves the tube's mouth.
+    const gy = app.getWorldHeight?.(from.x, from.z) ?? from.y;
+    const lift = Math.max(0, from.y - gy - 0.9 * k);
+    // Light grey (the CoH ref's column, not the book's near-white: a cotton ball in the game's sun).
+    shots.play("mortarLaunch", from.x, from.z, { size: shots.meta("mortarLaunch").size * k, wind: wind(), lift, tint: [0.24, 0.24, 0.235], opacity: 0.9 });
+  };
+
   const grenade = fx.grenade;
   fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); app.algDamage?.blast(x, z, 6); app.algAnimals?.hurt(x, z, 4, 70); };
   // A STRAY ROUND landing (projectiles' misses): an animal standing there is hit (ANIMALS DIE).
@@ -164,6 +197,9 @@ export async function createAlgCombat(app, { units, structures: built = null, co
       fire.update(dt, simTime);
     },
     /** Every rendered frame: the flashes, impacts and blasts face the camera. */
-    frame(dt) { fx.update(dt, app.camera); blood.update(dt, app.camera); },
+    frame(dt) {
+      fx.update(dt, app.camera); shots.update(dt, app.camera); blood.update(dt, app.camera);
+      for (let i = later.length - 1; i >= 0; i--) if ((later[i][0] -= dt) <= 0) { later[i][1](); later.splice(i, 1); }
+    },
   };
 }

@@ -60,6 +60,69 @@ export const PRESETS = {
     forces: [{ type: "turbulence", strength: 4, scale: 2.5 }, { type: "wind", direction: [1, 0, 0], strength: 0.3 }],
     bake: { center: [0, 6.5, 0], size: 15, pitch: 40, start: 0, duration: 3, loop: false, blend: 0 },
   },
+  // THE MORTAR FIRING (2026-10-16, you, CoH 3 refs assets-src/refs/coh3/mortar_launch_*.png): the
+  // first frames a bright burst of fire at the tube's mouth, then a column of light-grey smoke that
+  // rises out of it and drifts several metres downwind (+X here; the game turns the card). The
+  // mouth is ~0.9 m up (a 60/81 mm tube at its firing angle).
+  mortarLaunch: {
+    label: "Mortar launch",
+    note: "one-shot: a bright burst at the tube's mouth, then a light-grey column rising and drifting downwind",
+    sim: {
+      voxelSize: 0.04, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 41,
+      grid: { maxVoxels: 8_000_000, cutoff: 0.03, ground: true },
+      // The fire is a blink (lifespan) but bright, its smoke glowing as it leaves the mouth.
+      flame: { lifespan: 0.18, heatRate: 2, smokeRate: 4, expansionRate: 2.5, cooling: 1.4, brightness: 9, opacity: 1, temperature: 2700, sootGlow: 2 },
+      // Propellant smoke: pale, thin, and it LINGERS (low dissipation) as a drifting column.
+      smoke: { dissipation: 0.1, color: "#cbc6bd", density: 5, scattering: 0.45, shadowDensity: 2.2 },
+      motion: { buoyancy: 2.6, smokeWeight: 0.15, damping: 0.1, vorticity: 1.8 },
+      fuel: { enabled: false },
+    },
+    fires: [
+      // The shot: fire and smoke blown up out of the tube for a tenth of a second…
+      { kind: "emitter", at: [0, 0.9, 0], radius: 0.22, emission: { flame: 1, heatRate: 3, smokeRate: 100 }, velocity: { direction: [0.15, 1, 0], speed: 14 }, until: 0.15 },
+      // …and the tube breathing smoke a moment after.
+      { kind: "emitter", at: [0, 0.9, 0], radius: 0.16, emission: { flame: 0, heatRate: 0.8, smokeRate: 45 }, velocity: { direction: [0.15, 1, 0], speed: 9 }, until: 0.9 },
+    ],
+    blasts: [{ at: [0, 0.95, 0], radius: 0.45, charge: { flame: 1, heat: 2.5, smoke: 8, fuel: 0 }, outwardSpeed: 5, variation: { period: 0.4, strength: 0.5 } }],
+    forces: [{ type: "wind", direction: [1, 0, 0], strength: 1.6 }, { type: "turbulence", strength: 1.1, scale: 2.5 }],
+    bake: { center: [2.4, 4.8, 0], size: 10.5, pitch: 40, start: 0, duration: 4, loop: false, blend: 0 },
+  },
+  // A MORTAR BOMB LANDING (2026-10-16): HE in earth — not fuel. A bright core for a blink (the
+  // first frame is fire, as the launch), then the EARTH: a narrow fountain of dark dirt spikes
+  // thrown up steeply (a mortar's look, taller and tighter than the rocket's fan), the dust dome
+  // at its foot, and it all slumps and drifts. Dark earth here; the game tints it to the ground.
+  mortarImpact: {
+    label: "Mortar in earth",
+    note: "one-shot: a blink of fire, a tall tight fountain of dark earth spikes, the dome, slump and drift",
+    sim: {
+      voxelSize: 0.05, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 43,
+      grid: { maxVoxels: 12_000_000, cutoff: 0.03, ground: true },
+      flame: { lifespan: 0.32, heatRate: 2.4, smokeRate: 3, expansionRate: 3, cooling: 0.9, brightness: 16, opacity: 1, temperature: 2800, sootGlow: 3 },
+      smoke: { dissipation: 0.55, color: "#6e6152", density: 5.5, scattering: 0.36, shadowDensity: 3.5 },
+      motion: { buoyancy: 1.3, smokeWeight: 1.7, damping: 0.2, vorticity: 4.5 },
+      fuel: { enabled: false },
+    },
+    // The spikes: [elevation °, azimuth °, speed m/s, radius m] — steep (60-86°), clods on ballistic
+    // arcs, uneven: thick slow ones and thin fast ones (all alike read as a broom, the lab).
+    fires: [[78, 10, 16, 0.34], [64, 55, 11, 0.4], [84, 100, 18, 0.22], [62, 150, 10, 0.38], [73, 200, 14, 0.3], [68, 250, 12, 0.36], [86, 290, 19, 0.2], [61, 330, 9, 0.42]].map(([el, az, sp, rad]) => {
+      const e = (el * Math.PI) / 180, a = (az * Math.PI) / 180;
+      return { kind: "emitter", at: [0, 0.35, 0], radius: rad, emission: { flame: 0, heatRate: 0.4, smokeRate: 60 }, velocity: null,
+        path: { v: [Math.cos(e) * Math.cos(a) * sp, Math.sin(e) * sp, Math.cos(e) * Math.sin(a) * sp] }, until: 0.55 };
+    }).concat(
+      // THE GROUND SKIRT (you, 2026-10-16: "a large kind of flat impact at the ground level… not so
+      // flat"): the shockwave throwing a low ring of dust out along the ground — 28 fat jets skimming
+      // out (6-12° up), close enough to MERGE into one ring (14 thin ones drew a starburst of
+      // spokes), heavy dust that billows a little as it slows.
+      Array.from({ length: 28 }, (_, i) => {
+        const a = (i / 28) * Math.PI * 2 + (i % 3) * 0.07, e = ((6 + (i * 37) % 7) * Math.PI) / 180, sp = 9 + (i * 53) % 4;
+        return { kind: "emitter", at: [0, 0.3, 0], radius: 0.5, emission: { flame: 0, heatRate: 0.2, smokeRate: 40 }, velocity: null,
+          // From 0.1 s: started with the blast, its dust smothered the fireball (emission 1.45 → 0.03).
+          path: { v: [Math.cos(e) * Math.cos(a) * sp, Math.sin(e) * sp, Math.cos(e) * Math.sin(a) * sp] }, from: 0.1, until: 0.6 };
+      })),
+    blasts: [{ at: [0, 0.5, 0], radius: 1.0, charge: { flame: 1, heat: 4, smoke: 9, fuel: 0 }, outwardSpeed: 12, variation: { period: 0.5, strength: 0.6 } }],
+    forces: [{ type: "turbulence", strength: 4, scale: 2.2 }, { type: "wind", direction: [1, 0, 0], strength: 0.4 }],
+    bake: { center: [0, 4.2, 0], size: 19, pitch: 40, start: 0, duration: 3.5, loop: false, blend: 0 },
+  },
   // WHITE PHOSPHORUS ("Willie Pete" — nam): burning pellets thrown out on arcs, each trailing
   // brilliant white smoke (the same flying emitters as the rocket's spikes, burning heads),
   // over a dense white ball that rises.
