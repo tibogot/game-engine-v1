@@ -819,11 +819,17 @@ function addWeaponBone() {
     const action = mixer5.clipAction(clip).play();
     const frames = Math.max(2, Math.round(clip.duration * 30));
     const times = [], pos = [], quat = [];
-    const q = frame(UP, new THREE.Vector3(0, 0, 1));
+    let q = frame(UP, new THREE.Vector3(0, 0, 1));
+    const hd = byName("Head");
     for (let i = 0; i <= frames; i++) {
       const t = (i / frames) * clip.duration;
       mixer5.setTime(t);
       root.updateMatrixWorld(true);
+      // binoculars (mortar_spot): along his gaze — the head's forward, levelled — not nose up as a bomb
+      if (clip.userData?.toolForward) {
+        const fwd = new THREE.Vector3(0, 0, 1).applyQuaternion(hd.getWorldQuaternion(new THREE.Quaternion())); fwd.y *= 0.3;
+        q = frame(fwd.normalize(), UP);
+      }
       const palmR = wp(rh).add(wp(ri)).multiplyScalar(0.5).add(HAND.clone().applyQuaternion(rh.getWorldQuaternion(new THREE.Quaternion())));
       const palmL = wp(lh).add(wp(li)).multiplyScalar(0.5).add(HAND_L.clone().applyQuaternion(lh.getWorldQuaternion(new THREE.Quaternion())));
       const mid = palmR.add(palmL).multiplyScalar(0.5);
@@ -1042,6 +1048,14 @@ function synthMortarClips() {
     // ONE round: the bomb at his chest (as mortar_wait ends), up over the mouth (~0.64 m in front, 0.8 m
     // up), dropped in at MORTAR_DROP_AT; the duck — his head down, hands to his ears, NOT leaning in
     // (the muzzle is right there) — and back up.
+    // The CHEF DE PIÈCE SPOTTING (2026-10-16): kneeling a little apart, binoculars to his eyes (both palms
+    // just in front of his face — his head at ~0.3 m forward, 0.95 m up), a slow look along the target.
+    mortar_spot: { dur: 4.0, binos: true, keys: [
+      [0.0, R(0.44, 0.9, 0.055), R(0.44, 0.9, -0.055), 4, -2, 1],
+      [1.5, R(0.44, 0.9, 0.075), R(0.44, 0.9, -0.035), 4, -3, 1],
+      [2.8, R(0.44, 0.9, 0.035), R(0.44, 0.9, -0.075), 4, -1, 1],
+      [4.0, R(0.44, 0.9, 0.055), R(0.44, 0.9, -0.055), 4, -2, 1],
+    ] },
     mortar_load: { dur: 2.4, keys: [
       [0.0, R(0.44, 0.68, 0.07), R(0.44, 0.7, -0.07), 4, 4, 1],
       [0.5, R(0.5, 1.02, 0.05), R(0.5, 1.04, -0.05), 2, -6, 1],
@@ -1098,7 +1112,7 @@ function synthMortarClips() {
       new THREE.VectorKeyframeTrack(`${B.hips.name}.position`, times, hipsPos),
     ]);
     clip.optimize();
-    clip.userData = { bomb: { times, shown: bombAt } };
+    clip.userData = { bomb: { times, shown: bombAt }, toolForward: !!C.binos };
     clips.push(clip);
     clipSource.set(clip, { file: "(synthesised from rifle_crouch_idle)", mapped: true });
     restore();

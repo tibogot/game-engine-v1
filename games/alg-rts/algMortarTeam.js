@@ -156,6 +156,20 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     app.algSounds?.audio?.play?.("cannon", _v.x, _v.y, _v.z, { volume: 0.5 });
   }
 
+  /** The chef de pièce: walking to his place (no part), then kneeling there with his binoculars toward
+   *  the target (mortar_spot; the binoculars he wears on his chest put away meanwhile). [] if none. */
+  function spotter(m, u, dt) {
+    if (!u || !m.spot3) return [];
+    const d = Math.hypot(u.position.x - m.spot3.x, u.position.z - m.spot3.z);
+    if (d > 0.6 && u.isMoving) return [[u, null]];
+    if (u.isMoving) u.haltMovement?.();
+    settle(u, m.spot3, dt);
+    const tx = m.base.x + Math.sin(m.facing) * 40, tz = m.base.z + Math.cos(m.facing) * 40;
+    u.faceToward?.(tx, tz);
+    if (!u._binosAway) { setKit(u, "binoculars", false); u._binosAway = true; }
+    return [[u, "mortarSpot"]];
+  }
+
   /** A crewman onto his exact place: the walk's arrival stops ~0.4 m short (on the tube) — the last
    *  decimetres a shuffle on his knees (no order: nothing reads it as a move). Each shuffle is his new
    *  standing point (haltMovement): a halted unit walks back to where it was halted — the two pulled
@@ -181,6 +195,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
   function setCrew(m, parts) {
     for (const u of m.crew) if (!parts.some(([v]) => v === u)) {
       u.mortarClip = null; u.noPush = false;
+      if (u._binosAway) { setKit(u, "binoculars", true); u._binosAway = false; }
       if (u._mortarHold !== undefined) { u.holdFire = u._mortarHold; delete u._mortarHold; }
     }
     m.crew = parts.map(([u]) => u);
@@ -227,10 +242,15 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
       for (const u of s.members) u.noChase = true;
       const ld = loaderOf(s, g);
       carry(s, m, g, ld);
+      // THE CHEF DE PIÈCE (the third man): spots for the piece once it is going up (spotter below)
+      const sp3 = s.slots.find((u) => u?.alive && u !== g && u !== ld) ?? null;
       // (the loader walking to his place is part of the set-up, not a move order)
       // (his walk's goal is the nav's, near his spot — a goal metres away is a new order)
       // An ORDER has a goal; a man shuffled by a nudge (or halted on his spot) has none — not a move.
-      const moving = s.members.some((u) => u.isMoving && u.goalPoint && !(u === m.placing && Math.hypot(u.goalPoint.x - m.spot.x, u.goalPoint.z - m.spot.z) < 2.5));
+      // (the chef de pièce walking to HIS place is part of it too)
+      const toOwnSpot = (u) => (u === m.placing && m.spot && Math.hypot(u.goalPoint.x - m.spot.x, u.goalPoint.z - m.spot.z) < 2.5)
+        || (u === sp3 && m.spot3 && Math.hypot(u.goalPoint.x - m.spot3.x, u.goalPoint.z - m.spot3.z) < 2.5);
+      const moving = s.members.some((u) => u.isMoving && u.goalPoint && !toOwnSpot(u));
       switch (m.state) {
         case "packed":
           release(m);
@@ -242,6 +262,12 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
             // The baseplate goes down in front of him; he and the loader take their places round it.
             m.base = { x: g.position.x + Math.sin(m.facing) * GUNNER_GAP, z: g.position.z + Math.cos(m.facing) * GUNNER_GAP };
             m.far = farFlank(m.facing);
+            // the chef de pièce's place: 2.5 m out on the far flank, a little back — clear of the crew
+            if (sp3) {
+              const [rx, rz] = flankOf(m), fx = Math.sin(m.facing), fz = Math.cos(m.facing);
+              m.spot3 = { x: m.base.x + rx * 2.5 - fx * 0.8, z: m.base.z + rz * 2.5 - fz * 0.8 };
+              sp3.moveOrder(m.spot3.x, m.spot3.z);
+            }
             // The loader to his place beside the mouth.
             if (ld !== g) {
               const sp = loaderSpot(s, g, m);
@@ -259,7 +285,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
             m.placing.haltMovement?.();
             m.placing = null;
           }
-          setCrew(m, [[g, "mortarSetup"], ...(ld !== g ? [[ld, ld === m.placing ? null : "mortarSetup"]] : [])]);
+          setCrew(m, [[g, "mortarSetup"], ...(ld !== g ? [[ld, ld === m.placing ? null : "mortarSetup"]] : []), ...spotter(m, sp3, dt)]);
           if (ld !== g && !m.placing && m.spot) { settle(ld, m.spot, dt); ld.faceToward?.(m.spot.mx, m.spot.mz); }
           { const gs = gunnerSpot(m); settle(g, gs, dt); g.faceToward?.(gs.mx, gs.mz); }
           if (m.t >= P.setup && !m.placing) { m.state = "set"; m.t = 0; }
@@ -293,7 +319,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
           const engaged = loading || !!m.salvo || m.seen > 0;
           const gPart = engaged ? "mortarLay" : "idle";
           const ldPart = loading ? "mortarLoad" : engaged && (m.salvo || m.cd < READY) ? "mortarWait" : "idle";
-          setCrew(m, ld !== g ? [[g, gPart], [ld, ldPart]] : [[g, loading ? "mortarLoad" : gPart]]);
+          setCrew(m, [...(ld !== g ? [[g, gPart], [ld, ldPart]] : [[g, loading ? "mortarLoad" : gPart]]), ...spotter(m, sp3, dt)]);
           m.cd -= dt;
           if (m.salvo) {
             if (!loading && (m.salvo.t -= dt) <= 0) {

@@ -463,6 +463,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     mortarLay: exact("mortar_lay")?.name ?? null,
     mortarWait: exact("mortar_wait")?.name ?? null,
     mortarLoad: exact("mortar_load")?.name ?? null,
+    mortarSpot: exact("mortar_spot")?.name ?? null,
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
     // the unarmed set (an `unarmed` renderer only)
@@ -718,10 +719,11 @@ function withSkinnedKit(source, root, names) {
 }
 
 // Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
-const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_)/;
+const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_)/;   // (mortar_spot too: rifle slung, binoculars up)
 const USES_TOOL = /^dig/;
 // The loader's bomb (on the Tool bone; its scale keys hide it once it is in the tube).
 const USES_BOMB = /^mortar_(wait|load)/;
+const USES_BINOS = /^mortar_spot/;
 
 /**
  * The RIGID pieces a soldier type carries — its look's weapons in the hand
@@ -792,6 +794,7 @@ function buildPieces(field, source, rel, looks, scene, root, cap) {
   }
   if (boneOf("Tool") >= 0) add("shovel", TOOLS.shovel.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
   if (boneOf("Tool") >= 0 && field.has?.("mortar_load")) add("bomb", TOOLS.bomb.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
+  if (boneOf("Tool") >= 0 && field.has?.("mortar_spot")) add("binos", TOOLS.binos.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
 
   // HATS: every headgear the look's variants can roll, modelled from the crown.
   const hatK = toMesh.clone().multiply(new THREE.Matrix4().makeTranslation(crown));
@@ -884,6 +887,9 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false, gibM = nu
   const ba = USES_BOMB.test(a), bb = USES_BOMB.test(b);
   if (ba && bb) put("bomb");
   else if ((ba || bb) && USES_BOMB.test(dom)) putDom("bomb");
+  const na = USES_BINOS.test(a), nb = USES_BINOS.test(b);
+  if (na && nb) put("binos");
+  else if ((na || nb) && USES_BINOS.test(dom)) putDom("binos");
   if (v.hat) put(`h:${v.hat}`);
   for (const k of v.kit) put(`k:${k}`);
 }
