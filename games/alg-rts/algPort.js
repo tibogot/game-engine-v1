@@ -32,6 +32,9 @@ Object.assign(SURFACES, {
   tiles: { url: BUILD, id: "clay_roof_tiles_02", tile: 2.5, tint: [1.15, 0.98, 0.86], sat: 0.85, rough: 0.9, foot: 0, single: true },
   // dressed blocks: the quay, the mole, plinths and cornices (warmed: the photo is a cool grey)
   quay: { url: BUILD, id: "large_sandstone_blocks", tile: 3.0, tint: [3.6, 3.2, 2.6], sat: 0.45, rough: 0.95, foot: 0.2 },
+  // PAVING (the mole's top, the church square): sea-worn stone flags (Poly Haven seaworn_stone_tiles,
+  // its sRGB mean 134,122,107 lifted to the quay's warm stone) — the blocks' 3 m courses read as a staircase from above
+  paving: { url: BUILD, id: "seaworn_stone_tiles", tile: 2.0, tint: [1.45, 1.35, 1.2], sat: 0.6, rough: 0.95, foot: 0, single: true },
 });
 const WASHES = ["washWhite", "washCream", "washOchre", "washWhite", "washBlue", "washCream"];
 const SHUTTERS = [[0.22, 0.38, 0.27], [0.2, 0.33, 0.5], [0.4, 0.27, 0.17], [0.26, 0.45, 0.42], [0.5, 0.2, 0.15]];
@@ -60,7 +63,7 @@ function gable(x, y0, z, d, rise) {
 }
 
 /** A new port site: the masonry's site + the port's surfaces + the painted list. */
-export const newPortSite = () => ({ ...newSite(), washWhite: [], washCream: [], washOchre: [], washBlue: [], tiles: [], quay: [], paint: [] });
+export const newPortSite = () => ({ ...newSite(), washWhite: [], washCream: [], washOchre: [], washBlue: [], tiles: [], quay: [], paving: [], paint: [] });
 
 /**
  * A GABLE ROOF of canal tiles over a w × d body whose walls top out at y: ridge along X, eaves
@@ -165,6 +168,7 @@ export function portMole(site, { x = 0, z = 0, dir = 0, len = 70, width = 7, sea
   g.push(["quay", box(width, H, len, 0, y0 + H / 2, -len / 2)]);
   // the rock apron along both sides, a slope under the water line
   for (const s of [-1, 1]) g.push(["quay", new THREE.BoxGeometry(3.2, H - 0.6, len).rotateZ(s * 0.5).translate(s * (width / 2 + 0.6), y0 + (H - 0.6) / 2 - 0.3, -len / 2)]);
+  g.push(["paving", box(width - 0.9, 0.06, len - 0.6, 0.45, sea + top + 0.03, -len / 2)]);   // (its top paved, 3 cm proud)
   g.push(["quay", box(0.9, 1.3, len - 6, -width / 2 + 0.45, sea + top + 0.65, -len / 2 + 3)]);
   for (let k = 0; k < Math.floor(len / 9); k++) g.push(["metal", new THREE.CylinderGeometry(0.22, 0.28, 0.6, 10).translate(width / 2 - 0.6, sea + top + 0.3, -6 - k * 9)]);
   // THE LIGHTHOUSE: a white round tower on a square base, its gallery, the lantern (green, the
@@ -245,6 +249,119 @@ export function portBoat({ seed = 1, len = 8.2, beam = 2.5 } = {}) {
   if (R() < 0.6) parts.push(colour(new THREE.SphereGeometry(0.75, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.45, 1.3).translate(0, 0.35, 0.9), [0.36, 0.3, 0.24]));
   for (const p of parts) { for (const k of Object.keys(p.attributes)) if (k !== "position" && k !== "normal" && k !== "color") p.deleteAttribute(k); if (!p.index) p.setIndex([...Array(p.attributes.position.count).keys()]); }
   return mergeGeometries(parts);
+}
+
+// ── THE CHURCH (Jemmapes' — assets-src/refs/coast/Algerie.Jemmapes.Eglise.jpg) ─────────────────────
+/** An arched opening: a dark slab and its half-disc head, on a face looking along `axis` ("x"|"z", sign). */
+function arch(site, axis, sign, cx, y0, cz, w, h) {
+  const rect = h - w / 2;
+  const a = box(axis === "z" ? w : 0.12, rect, axis === "z" ? 0.12 : w, cx, y0 + rect / 2, cz);
+  const head = new THREE.CylinderGeometry(w / 2, w / 2, 0.12, 12, 1, false, -Math.PI / 2, Math.PI).rotateX(-Math.PI / 2);
+  if (axis === "x") head.rotateY(Math.PI / 2);
+  head.translate(cx, y0 + rect, cz);
+  site.dark.push(a, head);
+}
+
+/**
+ * THE CHURCH, in its own frame: the front (the tower, the door) at x = 0 looking down −X, the nave
+ * back along +X — its ridge along X so the canal tiles run down the slopes (the caller turns it).
+ * A stone nave with a tile roof, lower aisles under lean-to roofs, the bell tower out of the front:
+ * the door and a window over it, the clock, the louvred belfry, a four-sided spire.
+ */
+export function portChurch(site, { seed = 7 } = {}) {
+  const L = 24, W = 11, Hn = 9.5, AW = 4.2, HA = 6;
+  // the nave and its roof
+  site.quay.push(box(L, Hn, W, L / 2, Hn / 2, 0));
+  roof(site, "quay", { x: L / 2, z: 0, w: L, d: W, y: Hn, pitch: 0.42, over: 0.35 });
+  // the aisles, their lean-to roofs falling outward
+  for (const s of [-1, 1]) {
+    const az = s * (W / 2 + AW / 2);
+    site.quay.push(box(L - 2, HA, AW, L / 2 + 1, HA / 2, az));
+    const run = AW + 0.5, slope = 0.32;
+    site.tiles.push(new THREE.BoxGeometry(L - 1.6, 0.16, run / Math.cos(slope)).rotateX(-s * slope).translate(L / 2 + 1, HA + Math.tan(slope) * run / 2, az + s * 0.25));
+    // the aisle's front: an arched window; its side: arched windows between buttresses
+    arch(site, "x", -1, 1.94, 2.2, az, 1.3, 3.0);
+    for (let k = 0; k < 4; k++) {
+      const bx = 5 + k * 5;
+      arch(site, "z", s, bx, 1.8, s * (W / 2 + AW + 0.0), 1.1, 2.8);
+      site.quay.push(box(0.7, HA - 1, 0.5, bx + 2.5, (HA - 1) / 2, s * (W / 2 + AW + 0.2)));   // buttress
+    }
+    // the clerestory: small arched windows in the nave wall over the aisle roofs
+    for (let k = 0; k < 5; k++) arch(site, "z", s, 4 + k * 4.3, HA + 1.0, s * (W / 2 + 0.0), 0.9, 1.7);
+  }
+  // THE TOWER, out of the front: 5 m square, 20 m to its cornice; the spire
+  const T = 5, TH = 20, tx = 0.5;
+  site.quay.push(box(T, TH, T, tx, TH / 2, 0));
+  for (const y of [7.2, 13.6]) site.quay.push(box(T + 0.3, 0.3, T + 0.3, tx, y, 0));   // string courses
+  site.quay.push(box(T + 0.6, 0.45, T + 0.6, tx, TH + 0.2, 0));                         // cornice
+  const sp = new THREE.ConeGeometry((T / 2) * Math.SQRT2 * 0.96, 9.5, 4, 1).rotateY(Math.PI / 4).translate(tx, TH + 0.4 + 4.75, 0);
+  site.quay.push(sp);
+  site.metal.push(box(0.08, 1.4, 0.08, tx, TH + 10.6, 0), box(0.08, 0.08, 0.7, tx, TH + 10.9, 0));   // the cross
+  const fx = tx - T / 2;   // the tower's front face
+  arch(site, "x", -1, fx - 0.04, 0, 0, 2.2, 4.0);                     // the door
+  site.quay.push(box(0.4, 0.3, 3.4, fx - 0.15, 0.15, 0));              // its step
+  arch(site, "x", -1, fx - 0.04, 8.2, 0, 1.4, 3.0);                    // the window over it
+  // the clock: a white face, its hands
+  site.paint.push(colour(new THREE.CylinderGeometry(0.85, 0.85, 0.08, 20).rotateZ(Math.PI / 2).translate(fx - 0.06, 12.2, 0), [0.92, 0.9, 0.84]));
+  site.paint.push(colour(box(0.04, 0.65, 0.07, fx - 0.12, 12.42, 0.05), [0.08, 0.08, 0.08]), colour(box(0.04, 0.07, 0.5, fx - 0.12, 12.2, 0.2), [0.08, 0.08, 0.08]));
+  // the belfry: two louvred arches a face
+  for (const [axis, sg, ox, oz] of [["x", -1, fx - 0.04, 0], ["x", 1, tx + T / 2 + 0.04, 0], ["z", -1, tx, -T / 2 - 0.04], ["z", 1, tx, T / 2 + 0.04]]) {
+    for (const o of [-0.75, 0.75]) {
+      const cx = axis === "x" ? ox : ox + o, cz = axis === "x" ? oz + o : oz;
+      arch(site, axis, sg, cx, 15.0, cz, 0.9, 3.4);
+    }
+  }
+  // the nave's front gable: a round window over the aisles' roofline
+  site.dark.push(new THREE.CylinderGeometry(1.0, 1.0, 0.12, 16).rotateZ(Math.PI / 2).translate(-0.06, Hn + 1.4, W / 2 - 3.2));
+  return { L, W: W + 2 * AW, tower: TH + 10 };
+}
+
+// ── THE QUAY'S LIFE: crates, barrels, nets heaped and drying, the fish market's awning ─────────
+/** Clutter along a strip of the quay (local frame): `n` heaps between x0 and x1 at z in [z0, z1]. */
+export function quayLife(site, { x0, x1, z0, z1, seed = 3, ground = () => 0 }) {
+  const R = rng(seed * 131 + 9);
+  const NET = [[0.33, 0.27, 0.2], [0.26, 0.3, 0.24], [0.4, 0.3, 0.22]];
+  const n = Math.round((x1 - x0) / 7);
+  for (let k = 0; k < n; k++) {
+    const x = x0 + (k + 0.3 + R() * 0.4) * ((x1 - x0) / n), z = z0 + R() * (z1 - z0), y = ground(x, z);
+    const kind = R();
+    if (kind < 0.35) {
+      // crates, stacked
+      for (let i = 0; i < 2 + Math.floor(R() * 4); i++) {
+        const s = 0.75 + R() * 0.25, ox = (R() - 0.5) * 1.8, oz = (R() - 0.5) * 1.2, up = i > 2 ? s : 0;
+        site.planks.push(new THREE.BoxGeometry(s, s * 0.8, s).rotateY(R() * 0.5).translate(x + ox, y + s * 0.4 + up, z + oz));
+      }
+    } else if (kind < 0.55) {
+      // barrels, standing, one on its side
+      for (let i = 0; i < 2 + Math.floor(R() * 3); i++) site.planks.push(new THREE.CylinderGeometry(0.36, 0.33, 1.0, 10).translate(x + (R() - 0.5) * 2, y + 0.5, z + (R() - 0.5) * 1.2));
+      site.planks.push(new THREE.CylinderGeometry(0.36, 0.33, 1.0, 10).rotateZ(Math.PI / 2).translate(x + 1.4, y + 0.36, z + 0.6));
+    } else if (kind < 0.8) {
+      // nets heaped, a float or two on top (cork: pale)
+      site.paint.push(colour(new THREE.SphereGeometry(1, 8, 5, 0, Math.PI * 2, 0, Math.PI / 2).scale(1.2 + R() * 0.6, 0.5, 0.9 + R() * 0.4).translate(x, y, z), NET[k % 3]));
+      for (let i = 0; i < 3; i++) site.paint.push(colour(new THREE.SphereGeometry(0.12, 6, 4).translate(x + (R() - 0.5) * 1.6, y + 0.35, z + (R() - 0.5) * 1.0), [0.75, 0.62, 0.42]));
+    } else {
+      // nets drying, hung between two poles
+      const span = 3.2 + R() * 1.5;
+      for (const sx of [-1, 1]) site.timber.push(new THREE.CylinderGeometry(0.06, 0.07, 2.4, 6).translate(x + sx * span / 2, y + 1.2, z));
+      site.paint.push(colour(box(span, 1.5, 0.05, x, y + 1.45, z), NET[(k + 1) % 3]));
+    }
+  }
+}
+
+/** THE FISH MARKET: an awning on posts over two trestle tables, at (x, z) along the quay (local). */
+export function fishMarket(site, { x, z, y = 0, w = 8, d = 4.5 }) {
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) site.timber.push(new THREE.CylinderGeometry(0.08, 0.09, 3.1, 6).translate(x + sx * w / 2, y + 1.55, z + sz * d / 2));
+  // the canvas: striped (the paint mesh: strips of two colours), sloping toward the sea
+  const n = 8;
+  for (let i = 0; i < n; i++) {
+    const g = new THREE.BoxGeometry(w / n + 0.01, 0.05, d + 0.6).rotateX(-0.12).translate(x - w / 2 + (i + 0.5) * (w / n), y + 3.15, z);
+    site.paint.push(colour(g, i % 2 ? [0.85, 0.82, 0.74] : [0.3, 0.42, 0.55]));
+  }
+  for (const o of [-w / 4, w / 4]) {
+    site.planks.push(box(w / 2 - 0.8, 0.08, 1.1, x + o, y + 0.9, z));
+    for (const sx of [-1, 1]) site.timber.push(box(0.08, 0.9, 1.0, x + o + sx * (w / 4 - 0.6), y + 0.45, z));
+    site.paint.push(colour(box(w / 2 - 1.2, 0.12, 0.8, x + o, y + 1.0, z), [0.62, 0.66, 0.7]));   // the catch, silver
+  }
 }
 
 let _paint = null;
@@ -336,7 +453,32 @@ export function createAlgPort(app, { front, mole, sea, seed = 1955, navGrid = nu
     pieces.push({ lx: x + w / 2, lz, hw: w / 2, hd: d / 2 });
     x += w + (R() < 0.25 ? 3.5 : 0.02);   // a lane now and then
   }
+  // THE QUAY'S LIFE in front of the row (a strip 2-7 m before the fronts), the fish market by the mole
+  quayLife(row, { x0: 2, x1: L - 2, z0: -7, z1: -2.2, seed, ground: (lx, lz) => ground(lx, lz, 0.6, 0.6) - 0.05 });
+  fishMarket(row, { x: ww + 9, z: -4.6, y: ground(ww + 9, -4.6, 4, 2.3) - 0.05 });
+  // THE SECOND ROW across a street (~7 m), its houses back to back with the first; THE CHURCH set back
+  // on its square near the middle, its tower over the quay's roofs
+  const cx0 = L * 0.52, CW = 20;   // the church's place in the row (its width with the aisles), the square
+  let x2 = 2;
+  for (let i = 0; x2 < L - 4; i++) {
+    if (x2 + 8 > cx0 - CW / 2 && x2 < cx0 + CW / 2) { x2 = cx0 + CW / 2 + 1.5; continue; }   // the square
+    const w = Math.min(6 + R() * 3, L - x2), d = 7.5 + R() * 2, lz = 17.5 + d / 2 + R() * 0.8;
+    lifted(row, ground(x2 + w / 2, lz, w / 2, d / 2) - 0.25, (st) => portHouse(st, { x: x2 + w / 2, z: lz, w, d, storeys: R() < 0.35 ? 3 : 2, seed: seed + 40 + i }));
+    pieces.push({ lx: x2 + w / 2, lz, hw: w / 2, hd: d / 2 });
+    x2 += w + (R() < 0.3 ? 4 : 0.02);
+  }
+  const cs = newPortSite();
+  const church = portChurch(cs, { seed });
+  const { group: churchGroup } = portGroup(cs, "PortChurch");
+  const clz = 22;   // its front (the tower's face) on the row's z
+  const chY = ground(cx0, clz + church.L / 2, church.W / 2, church.L / 2) - 0.3;
+  churchGroup.position.set(cx0, chY, clz + 2);
+  churchGroup.rotation.y = -Math.PI / 2;   // (its frame's front −X → the row's −z)
+  pieces.push({ lx: cx0, lz: clz + 2 + church.L / 2 - 1, hw: church.W / 2, hd: church.L / 2 + 1.5 });
+  // the square before it, paved
+  row.paving.push(box(CW - 2, 0.08, 6.5, cx0, ground(cx0, clz - 2, CW / 2, 3) + 0.02, clz - 2.3));
   const { group: rowGroup } = portGroup(row, "PortFront");
+  rowGroup.add(churchGroup);
   rowGroup.position.set(ax, 0, az);
   rowGroup.rotation.y = yaw;
   // THE MOLE (built in world space: its own photo frame turns with it — it is one long piece)
