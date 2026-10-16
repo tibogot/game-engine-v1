@@ -18,7 +18,7 @@ import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { vec3 } from "three/tsl";
 import { t } from "./i18n/i18n.js";
-import { pitCrewShot } from "./algMortarPit.js";
+import { pitCrewPlace, pitCrewShot, pitMouth } from "./algMortarPit.js";
 
 const S = 1.3;
 
@@ -36,7 +36,7 @@ const STATS = {
   mgNest: { team: "player", name: t("Nid de mitrailleuse"), hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
   // THE PIT = DEFENCE, the mobile team = attack (2026-10-16, you: "both" — CoH's British have both): the pit
   // reaches FARTHER (160 m against the team's 110) and fires a little faster, but never moves.
-  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 160, every: 6, damage: 45, splash: 7 }, vision: 45 },
+  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 160, every: 6, damage: 42, splash: 7, scatter: 0.11 }, vision: 45 },
   searchlight: { team: "player", name: t("Projecteur"), hp: 400, vision: 100 },
   // FIELD WORKS (algFieldWorks.js)
   forwardPost: { team: "player", name: t("Poste avancé"), hp: 600, vision: 60 },
@@ -137,14 +137,21 @@ export function createAlgStructures({ app, showroom, producers, units }) {
       if (!u.alive || u.team === s.team || u.isAir) continue;
       const d = Math.hypot(u.position.x - s.position.x, u.position.z - s.position.z);
       if (d < m.min || d > m.max || d >= bd) continue;
+      // Only what its side SEES (2026-10-16: the French AI's pit shelled FLN men none of his men could
+      // see, 78 m from the nearest) — its fog, or its AI's eyes (algMortarTeam sees).
+      if (app.algMortarTeams?.sees && !app.algMortarTeams.sees(s.team, u.position.x, u.position.z)) continue;
       best = u; bd = d;
     }
     if (!best) { rec.mortarT = 1; return; }
     rec.mortarT = m.every;
     s.target = best;
-    const from = rec.gun ? rec.gun.getWorldPosition(new THREE.Vector3()).add(new THREE.Vector3(0, 1.2, 0)) : s.position.clone().add(new THREE.Vector3(0, 1.5, 0));
-    // Aimed where he stands now; a bomb in the air ~3 s — men who keep moving live.
-    projectiles.spawnArc(from, best.position.clone(), { damage: m.damage, splash: m.splash, owner: s, kind: "mortar81" });
+    // From the tube's mouth (the launch smoke and the trail start there).
+    const from = rec.gun ? pitMouth(rec.mesh, rec.gun) : s.position.clone().add(new THREE.Vector3(0, 1.5, 0));
+    // Aimed where he stands now; a bomb in the air ~3 s — men who keep moving live. It lands off its
+    // aim as the teams' do (scatter × the distance; it had none, 2026-10-16: every round on a man).
+    const to = best.position.clone(), a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * bd * (m.scatter ?? 0);
+    to.x += Math.cos(a) * r; to.z += Math.sin(a) * r; to.y = app.getWorldHeight?.(to.x, to.z) ?? to.y;
+    projectiles.spawnArc(from, to, { damage: m.damage, splash: m.splash, owner: s, kind: "mortar81" });
     pitCrewShot(app, rec.mesh);
   }
 
@@ -209,6 +216,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
           if (!seen) continue;
         }
         // An emplaced gun with nothing to shoot rests along its arc (where it is turning to).
+        let turning = false;
         const aimAt = s.target?.alive ? s.target.position : s._mg ? { x: s.position.x + Math.sin(s._mg.facing) * 10, z: s.position.z + Math.cos(s._mg.facing) * 10 } : null;
         if (s.alive && r.gun && aimAt) {
           const dx = aimAt.x - s.position.x, dz = aimAt.z - s.position.z;
@@ -216,7 +224,10 @@ export function createAlgStructures({ app, showroom, producers, units }) {
           const want = Math.atan2(-dx, -dz) - r.mesh.rotation.y;
           let d = want - r.gun.rotation.y; d = Math.atan2(Math.sin(d), Math.cos(d));
           r.gun.rotation.y += d * Math.min(1, dt * 4);
+          turning = Math.abs(d) > 0.08;
         }
+        // A mortar pit's crew kneel where the turned piece needs them (algMortarPit.js).
+        if (s.alive && r.mortar && r.gun) pitCrewPlace(app, r.mesh, r.gun, turning);
         if (s.alive && (s.hp < s.maxHp || s.selected)) {
           healthBars.add(s.position.x, s.position.y + Math.min(r.height, 12) + 2, s.position.z, Math.min(12, 4 + r.fp.hx * 0.3), s.hp / s.maxHp, isHostile(s.team), camera);
         }

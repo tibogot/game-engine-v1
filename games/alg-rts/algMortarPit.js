@@ -10,6 +10,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { buildMortarPit, grainSack } from "../../v3/render/objects/rtsAlgeria.js";
 import { newSite, siteGroup } from "./algMasonry.js";
 import { simulatedWallMesh } from "./algSandbags.js";
+import { RTS_SCALE } from "./algUnitTypes.js";
 
 function hash01(i, seed) { let h = Math.imul(i + 1, 374761393) ^ Math.imul(seed, 668265263); h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967295; }
 
@@ -41,9 +42,11 @@ function berm(rIn, rC, rOut, hC, seed) {
 export function buildMortarPitV2({ seed = 31 } = {}) {
   // The kit's piece: the mortar (userData.gun) and the stakes only.
   const kit = buildMortarPit({ seed, modern: true });
-  // The mortar a third bigger than life: at the RTS camera's distance a true 81 mm read as a tripod
-  // (CoH's guns are drawn big the same way). Its own copy: the kit's geometry may be shared.
-  kit.userData.gun = { ...kit.userData.gun, geo: kit.userData.gun.geo.clone().scale(1.35, 1.35, 1.35), muzzle: kit.userData.gun.muzzle.map((v) => v * 1.35) };
+  // The mortar at the MORTAR TEAMS' 81 mm size (its mouth ~1.17 m up: algMortarTeam mortierFr). It was
+  // drawn 1.35× (mouth 1.93 m, 2026-10-11, "a true 81 read as a tripod"): its kneeling loader could not
+  // reach the mouth (you, 2026-10-16). Its own copy: the kit's geometry may be shared.
+  const PIECE = 0.82;
+  kit.userData.gun = { ...kit.userData.gun, geo: kit.userData.gun.geo.clone().scale(PIECE, PIECE, PIECE), muzzle: kit.userData.gun.muzzle.map((v) => v * PIECE) };
   const site = newSite();
   const rIn = 2.35, rC = 2.85, rOut = 3.75, hC = 0.5;
   site.spoil.push(berm(rIn, rC, rOut, hC, seed));
@@ -73,9 +76,48 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
   kit.userData.extra = [group];
   kit.userData.footprint = { cx: 0, cz: 0, hx: rOut, hz: rOut };
   kit.userData.height = 1.4;
-  // ITS CREW (algBuild places them when the pit is finished): one at the mortar, one at the rounds.
+  // ITS CREW (algBuild places them when the pit is finished): the gunner and the loader — where they
+  // start; once it is built they follow the piece as it turns (pitCrewPlace).
   kit.userData.crew = [{ x: 0.95, z: 0.35, yaw: Math.PI }, { x: -0.55, z: 1.25, yaw: Math.PI * 0.75 }];
   return kit;
+}
+
+// Where the crew kneel by the piece: the mortar team's (algMortarTeam.js) — the loader his palms'
+// reach from the mouth, on a flank; the gunner behind the baseplate, a little to the same side.
+const REACH = 0.64 * RTS_SCALE, GUNNER_BACK = 0.6 * RTS_SCALE, GUNNER_SIDE = 0.14 * RTS_SCALE;
+const _m = new THREE.Vector3(), _b = new THREE.Vector3(), _cd = new THREE.Vector3();
+
+/** The mouth of the pit's mortar, in the world (where a bomb leaves). `gun`: the pit's Gun mesh. */
+export function pitMouth(mesh, gun, out = new THREE.Vector3()) {
+  const mz = mesh.geometry.userData.gun?.muzzle;
+  return mz ? gun.localToWorld(out.set(mz[0], mz[1], mz[2])) : gun.getWorldPosition(out).add(_b.set(0, 1.2, 0));
+}
+
+/**
+ * THE CREW FOLLOW THE PIECE (2026-10-16, you: "the loader isn't at the mouth"): the mortar turns to
+ * each target, the figures stood where the pit was built — the loader by the crates, metres from the
+ * tube. Every frame, from the gun's turn: the loader beside the mouth facing it, the gunner behind the
+ * baseplate facing the tube. The flank: the one away from the camera (the tube not hidden behind the
+ * men), chosen while the piece TURNS and kept while it is laid (no swap mid-round). `turning`: the gun
+ * still swinging to its target.
+ */
+export function pitCrewPlace(app, mesh, gun, turning = false) {
+  const figs = mesh?.userData?.crewFigures;
+  if (!figs?.length || !gun) return;
+  const Y = mesh.rotation.y + gun.rotation.y, fx = -Math.sin(Y), fz = -Math.cos(Y);   // the barrel: local −Z
+  const rx = -fz, rz = fx;                                                             // its right
+  if (mesh.userData.crewFlank == null || turning) {
+    app.camera?.getWorldDirection?.(_cd);
+    mesh.userData.crewFlank = rx * _cd.x + rz * _cd.z >= 0 ? 1 : -1;
+  }
+  const k = mesh.userData.crewFlank;
+  gun.getWorldPosition(_b);
+  pitMouth(mesh, gun, _m);
+  const H = (x, z) => app.getWorldHeight?.(x, z) ?? _b.y;
+  const put = (f, x, z, lx, lz) => { f.x = x; f.z = z; f.y = H(x, z); f.yaw = Math.atan2(lx - x, lz - z); };
+  const gunner = figs[0], loader = figs[1];
+  put(gunner, _b.x - fx * GUNNER_BACK + rx * k * GUNNER_SIDE, _b.z - fz * GUNNER_BACK + rz * k * GUNNER_SIDE, _b.x + fx * 0.3, _b.z + fz * 0.3);
+  if (loader) put(loader, _m.x + rx * k * REACH, _m.z + rz * k * REACH, _m.x, _m.z);
 }
 
 /**

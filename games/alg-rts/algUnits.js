@@ -917,7 +917,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // fast-forward and measure (__ALG.fastForward).
   const botQ = new URLSearchParams(location.search);
   const frenchAI = (SIDES.human === "enemy" ? botQ.get("ai") !== "0" : botQ.get("bot") === "1")
-    ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike, build, barrage, flares, grenades, transports,
+    ? createAlgFrenchAI(app, { units, squads, economy, producers, tiers, garrison, airStrike, build, barrage, flares, grenades, transports, mortarTeams,
       // HIS DOCTRINE (no strip): its own instance of the doctrine module, for the French.
       doctrine: MAP.tutorial ? null : (app.algFrenchDoctrines = createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar, side: "player", ui: false })) })
     : null;

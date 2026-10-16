@@ -22,6 +22,9 @@
 //              (algTransports: aboard, driven there, set down); buys an H-21 once the helipad is open.
 //   COMMANDS   a DOCTRINE of his own (algDoctrines.js, no strip): picked at random; its abilities
 //              unlocked as his points come, cheapest first, and used where his men see a reason.
+// AND (2026-10-16): a MORTAR TEAM of 81 (algMortarTeam.js, mortierFr) — one, a second later on; kept
+//   ~60 m behind his hottest fight (it sets up there by itself), its rounds and BARRAGES only on FLN men
+//   his men see (setSight), his own clear of the salvo.
 //
 // He sees what his men see — no more: an FLN man is KNOWN within 16 m of a French unit, or 40 m
 // when he moves or fires (the scrub ambush works on him as it does on you). Re-plans each second.
@@ -51,9 +54,13 @@ const P = {
   grenadeEvery: 8,       // s between two throws of a squad
   liftFar: 180, liftNear: 60, liftDrop: 35, liftBoard: 40,   // m / s: the transports
   heliAt: 300,           // s: an H-21 bought once the helipad is open
+  // The mortar team (2026-10-16)
+  mortarAt: 200, mortar2At: 600,   // s: the first team bought, the second
+  mortarBack: 60,                  // m behind the fight it supports (toward the post)
+  mortarMove: 25,                  // m: a new place only when the fight has moved this much
 };
 
-export function createAlgFrenchAI(app, { units, squads, economy, producers, tiers = null, garrison = null, airStrike = null, build = null, barrage = null, flares = null, grenades = null, transports = null, doctrine = null }) {
+export function createAlgFrenchAI(app, { units, squads, economy, producers, tiers = null, garrison = null, airStrike = null, build = null, barrage = null, flares = null, grenades = null, transports = null, doctrine = null, mortarTeams = null }) {
   const prod = (k) => producers.find((p) => p.structure.typeKey === k) ?? null;
   const post = prod("post"), pool = prod("motorPool"), pad = prod("helipad"), cave = prod("caveEntrance");
   const home = post?.centre ?? post?.structure.position ?? { x: 0, z: 0 };
@@ -129,6 +136,10 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
     // The SAPEURS (one team: the fortifications) and an H-21 (the lifts).
     const sappers = mySquads.some((s) => s.typeKey === "sapeur") || (post?.structure.queue ?? []).includes("sapeur");
     if (!sappers && clock > P.sappersAt && post?.structure.alive && queued(post) < 2) post.structure.enqueue("sapeur");
+    // The MORTAR TEAM(S): one from P.mortarAt, two from P.mortar2At (the post's card, its own price).
+    const mortars = mySquads.filter((s) => s.typeKey === "mortierFr").length + (post?.structure.queue ?? []).filter((k) => k === "mortierFr").length;
+    const wantMortars = !mortarTeams ? 0 : clock > P.mortar2At ? 2 : clock > P.mortarAt ? 1 : 0;
+    if (mortars < wantMortars && post?.structure.alive && queued(post) < 2) post.structure.enqueue("mortierFr");
     const h21s = units.list.filter((u) => mine(u) && u.typeKey === "h21").length + (pad?.structure.queue ?? []).filter((k) => k === "h21").length;
     if (!h21s && clock > P.heliAt && pad?.structure.alive && tiers?.unlocked("h21") && queued(pad) < 1) pad.structure.enqueue("h21");
     const tn = tiers?.next?.();
@@ -172,7 +183,7 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
       else if (clock - tk.orderedAt > 15 && s.members.every((u) => !u.isMoving) && dist(centreOf(s), tk.at) > P.ring * 2.5) { tk.orderedAt = clock; order(s, tk.at, clock); }
     }
 
-    const free = () => mySquads.filter((s) => ready(s) && s.typeKey !== "sapeur" && !lifts.has(s) && (!tasks.has(s) || tasks.get(s).kind === "patrol"));
+    const free = () => mySquads.filter((s) => ready(s) && s.typeKey !== "sapeur" && s.typeKey !== "mortierFr" && !lifts.has(s) && (!tasks.has(s) || tasks.get(s).kind === "patrol"));
     const take = (want, kind, at, point = null) => {
       const have = [...tasks.entries()].filter(([, tk]) => tk.point === point && tk.kind === kind && (point || dist(tk.at, at) < 20)).length;
       for (let n = want - have; n > 0; n--) {
@@ -188,7 +199,7 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
       if (ps.hp < postHp - 1e-6) postHitAt = clock;
       postHp = ps.hp;
       if (clock - postHitAt < 10 || flnNear(known, home, 60) >= 3) {
-        for (const s of mySquads) if (ready(s) && s.typeKey !== "sapeur" && tasks.get(s)?.kind !== "defend" && dist(centreOf(s), home) < P.defendR) assign(s, "defend", home);
+        for (const s of mySquads) if (ready(s) && s.typeKey !== "sapeur" && s.typeKey !== "mortierFr" && tasks.get(s)?.kind !== "defend" && dist(centreOf(s), home) < P.defendR) assign(s, "defend", home);
       }
     }
     // 2. Points of his slipping away.
@@ -234,6 +245,7 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
 
     fortify(mySquads);
     support(known, mySquads);
+    mortars(known, mySquads);
     lift(mySquads);
     command(known, mySquads);
 
@@ -290,6 +302,57 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
     const b = building = { key: job.key, x: sp.x, z: sp.z, since: clock, pending: true, site: null, sentAt: clock };
     tasks.delete(sap);
     Promise.resolve(build.place(job.key, sp.x, sp.z, sp.yaw, sap.members)).then((site) => { b.pending = false; b.site = site ?? null; }, () => { b.pending = false; });
+  }
+
+  // ── THE MORTAR TEAM: behind the hottest fight, shelling what his men see ──────
+  // His eyes for its rounds: an FLN man known (knownFln) within 6 m of the spot.
+  let knownNow = [];
+  mortarTeams?.setSight?.("player", (x, z) => knownNow.some((u) => Math.abs(u.position.x - x) < 6 && Math.abs(u.position.z - z) < 6));
+  const mortarAt = new Map();   // team -> the place it was sent
+  function mortars(known, mySquads) {
+    knownNow = known;
+    if (!mortarTeams) return;
+    // THE FIGHT IT SUPPORTS: where his men see the most FLN men (a task's place, 45 m round); none seen,
+    // the nearest defend / retake / take to the post (by rank it followed a far depot's "take" across
+    // the map, 2026-10-16); none, the post.
+    const all = [...tasks.values()].filter((tk) => tk.kind !== "patrol" && tk.kind !== "hold");
+    const hot = [...tasks.values()].map((tk) => ({ tk, n: flnNear(known, tk.at, 45) })).filter((e) => e.n > 0).sort((a, b) => b.n - a.n || rank(a.tk.kind) - rank(b.tk.kind))[0]?.tk;
+    const fight = hot ?? all.sort((a, b) => dist(a.at, home) - dist(b.at, home))[0] ?? null;
+    // Measured from the ENEMY seen there (their middle), not the task's point: from a village's centre
+    // the team stopped 160 m from the FLN men attacking it, out of its reach.
+    let aim = fight?.at ?? null;
+    if (hot) {
+      const near = known.filter((u) => dist(u.position, hot.at) < 45);
+      aim = { x: near.reduce((a, u) => a + u.position.x, 0) / near.length, z: near.reduce((a, u) => a + u.position.z, 0) / near.length };
+    }
+    let n = 0;
+    for (const s of mySquads) {
+      if (s.typeKey !== "mortierFr" || s.retreating || !s.members.length) continue;
+      const side = n++ === 0 ? 0 : n % 2 ? 12 : -12;   // a second team 12 m to the side (not on one spot)
+      tasks.delete(s);
+      const c = centreOf(s);
+      // ITS PLACE: P.mortarBack short of the fight, on the post's side (by the post with no fight).
+      let to = home;
+      if (aim) {
+        const dx = home.x - aim.x, dz = home.z - aim.z, d = Math.hypot(dx, dz) || 1, back = Math.min(P.mortarBack, d);
+        to = { x: aim.x + (dx / d) * back - (dz / d) * side, z: aim.z + (dz / d) * back + (dx / d) * side };
+      } else to = { x: home.x + side, z: home.z };
+      const was = mortarAt.get(s), state = mortarTeams.stateOf(s);
+      // (not while a salvo is going: a move order packs the piece up)
+      if ((!was || dist(was, to) > P.mortarMove) && dist(c, to) > 12 && !mortarTeams.recordOf(s)?.salvo) {
+        mortarAt.set(s, to);
+        s.members.forEach((u, i) => { u.holdFire = false; u.orderTo(to.x + (i - 1) * 1.6, to.z + (i % 2) * 1.2); });
+      }
+      // ITS BARRAGE: a knot of FLN men seen in its reach, his own clear of the salvo.
+      if (state !== "set") continue;
+      const R = mortarTeams.reachOf(s), g = s.members[0];
+      for (const u of known) {
+        const d = dist(u.position, g.position);
+        if (d < R.min || d > R.max || flnNear(known, u.position, P.barrageR) < P.barrageKnot) continue;
+        if (units.list.some((f) => mine(f) && !f.isAir && dist(f.position, u.position) < P.barrageSafe)) continue;
+        if (mortarTeams.fireBarrage(s, u.position.x, u.position.z)) break;
+      }
+    }
   }
 
   // ── B. SUPPORT: the pit's barrage and flares, the squads' grenades ─────────

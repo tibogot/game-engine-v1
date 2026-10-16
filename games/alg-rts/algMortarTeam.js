@@ -34,8 +34,11 @@ export const MORTAR_TEAM = {
   pack: 2.2,          // s to pack up
   min: 25, max: 110,  // m: its reach
   every: 6.5,         // s between two rounds (by itself; a load takes LOAD of it)
-  damage: 40, splash: 6,
-  scatter: 0.06,      // × the distance: where a bomb may land off its aim
+  // BALANCE (2026-10-16, battle lab: a team on a squad standing in the open at 80 m): at 40 dmg and
+  // 0.06 scatter both teams wiped it in < 50 s (a man every 8-10 s) — CoH's mortar pins and harasses,
+  // a man every ~20 s on men who stand still. Rounds wider (0.11 × the distance: ~9 m at 80) and lighter.
+  damage: 34, splash: 6,
+  scatter: 0.11,      // × the distance: where a bomb may land off its aim
   // (a round per load: 2.6 s apart — the loader's clip, LOAD; it was 1.5 with no one loading)
   barrage: { cost: 35, shells: 5, every: 2.6, spread: 9, cooldown: 60 },
   key: "mortier",
@@ -48,7 +51,7 @@ const KINDS = {
   mortierFr: {
     ...MORTAR_TEAM, key: "mortierFr", kind: "mortar81", tube: 0.39,
     // (the ATTACK piece: 110 m — the pit reaches 160; the team must go forward, escorted)
-    min: 25, max: 110, every: 7.5, damage: 50, splash: 7,
+    min: 25, max: 110, every: 7.5, damage: 42, splash: 7,
     barrage: { cost: { mun: 40 }, shells: 6, every: 2.6, spread: 11, cooldown: 70 },
   },
 };
@@ -97,8 +100,10 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     if (!m) { m = { state: "packed", t: 0, still: 0, held: null, facing: 0, cd: kindOf(s).every * 0.5, salvo: null, cool: 0, load: null, crew: [] }; st.set(s, m); }
     return m;
   };
-  /** The side's eyes: what a human's side sees (its fog) — an AI side sees all (no fog of its own). */
-  const sees = (team, x, z) => !fogOfWar?.enabled || !isHuman(team) || fogOfWar.isVisible(x, z);
+  /** The side's eyes: what a human's side sees (its fog) — an AI side sees all (no fog of its own),
+   *  unless its AI gives its own (setSight: the French commander sees only what his men see). */
+  const sight = {};
+  const sees = (team, x, z) => (sight[team] ? sight[team](x, z) : !fogOfWar?.enabled || !isHuman(team) || fogOfWar.isVisible(x, z));
 
   // Where the piece stands: the baseplate in front of the gunner, the mouth leaning toward the target.
   const mouthH = (K) => MORTAR_MUZZLE.y * K.tube, mouthF = (K) => MORTAR_MUZZLE.z * K.tube;
@@ -479,6 +484,25 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     params: P, kinds: KINDS, step, frame, ability, begin, cancel,
     /** A squad's state (dev, tests): "packed" | "setting" | "set" | "packing". */
     stateOf: (s) => stateOf(s).state,
+    /** An AI's eyes for its side's teams: (x, z) => true when it knows an enemy there. */
+    setSight(team, fn) { sight[team] = fn; },
+    /** What `team` sees at (x, z) — its fog, or its AI's eyes (the mortar pits ask it too). */
+    sees,
+    /**
+     * AN AI'S BARRAGE (the player's is the ability's click): `s` set up, cool, the price paid from its
+     * side's purse, (x, z) in reach. True when the salvo is ordered.
+     */
+    fireBarrage(s, x, z) {
+      const m = st.get(s), g = gunnerOf(s), K = kindOf(s), purse = purseOf(s);
+      if (!m || !g || !K || m.state !== "set" || m.salvo || m.cool > 0) return false;
+      const d = Math.hypot(x - g.position.x, z - g.position.z);
+      if (d < K.min || d > K.max || !purse?.spend(K.barrage.cost)) return false;
+      m.salvo = { x, z, left: K.barrage.shells, t: 0 };
+      m.cool = K.barrage.cooldown;
+      return true;
+    },
+    /** A team's reach (m): { min, max }. */
+    reachOf: (s) => { const K = kindOf(s); return K ? { min: K.min, max: K.max } : null; },
     /** A squad's whole record (dev, tests). */
     recordOf: (s) => st.get(s) ?? null,
     dispose() {
