@@ -198,9 +198,15 @@ export function createAlgSea(app, { level, size = 6000 } = {}) {
   mat.emissiveNode = through.mul(float(1).sub(foam));
   // a dry beach is not shiny: the specular only where there is water
   const wetSurf = max(float(1).sub(onBeach), film);
-  mat.roughnessNode = mix(float(0.95), mix(float(P.roughness), float(0.6), foam), wetSurf);
-  mat.specularIntensityNode = wetSurf;
-  mat.normalNode = transformNormalToView(normalize(mix(vec3(0, 1, 0), nWorld, wetSurf.mul(float(1).sub(foam.mul(0.7))))));
+  // THE RIPPLES ONLY IN THE REFLECTION (2026-10-16, you: "the noise looks weird"): on the base normal
+  // they SHADED the water's own colour like a matte surface — crumpled plaster. Water has no matte
+  // relief: the base is flat (its colour, the foam), the waves live in a CLEARCOAT layer — the glints.
+  mat.roughnessNode = mix(float(0.95), float(0.6), foam);
+  mat.specularIntensityNode = float(0);
+  mat.clearcoatNode = wetSurf.mul(float(1).sub(foam));
+  mat.clearcoatRoughnessNode = float(P.roughness);
+  mat.clearcoatNormalNode = transformNormalToView(normalize(mix(vec3(0, 1, 0), nWorld, wetSurf)));
+  mat.normalNode = transformNormalToView(vec3(0, 1, 0));
 
   const geo = new THREE.PlaneGeometry(size, size, 1, 1).rotateX(-Math.PI / 2);
   const mesh = new THREE.Mesh(geo, mat);

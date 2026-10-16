@@ -914,7 +914,7 @@ export function createMinimap({
     /** Where the current objective is: [{ x, z }] (a lesson's ring, its targets), or none. */
     setObjectives(list) { objectives = (list ?? []).filter((p) => Number.isFinite(p?.x) && Number.isFinite(p?.z)).map((p) => ({ x: p.x, z: p.z })); },
     /** Re-bake the terrain (after the ground or the buildings change). */
-    rebuildTerrain() { base.ctx.clearRect(0, 0, px, px); base.ctx.drawImage(bakeBase(app, frame, px, world, s), 0, 0); },
+    rebuildTerrain() { base.ctx.clearRect(0, 0, px, px); base.ctx.drawImage(bakeBase(app, frame, px, world, s, !dial), 0, 0); },
     dispose() {
       root.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);

@@ -278,13 +278,23 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
     // under the sea: the beach's pale sand running out to ~6 m (the Mediterranean's turquoise band:
     // light seen through the shallows over pale sand — 3 m was too short), then the darker seabed
     const sand = (1 - smoothstep(3.5, 7.5, depth)) * (1 - headShape(x, z).mask);   // (the cap's foot: rock and weed, no sand)
-    w[1] = sand; w[2] = 1 - sand;
+    // THE SEABED (2026-10-16, you: "the noise on the sea looks weird" — coast_sand_05's dark speckle
+    // seen through 2-4 m of clear water, tiled every 40 m): rippled sand, and from ~1.5 m down the
+    // Mediterranean's POSIDONIA meadows — big dark patches with sharp edges (the maquis' rough grass,
+    // dark green under the water), more of them the deeper
+    const grassK = smoothstep(1.2, 3.5, depth) * (0.45 + 0.4 * smoothstep(3.5, 9, depth));
+    const meadow = smoothstep(1 - grassK - 0.04, 1 - grassK + 0.04, noise(x / 38, z / 38, 69) * 0.75 + noise(x / 11, z / 11, 70) * 0.25);
+    w[4] = sand; w[2] = (1 - sand) * (1 - meadow); w[3] = (1 - sand) * meadow;   // (wet sand right under the shallows: slot 4)
   } else {
     const above = -depth;
     // the BEACH by DISTANCE from the shore, ~30 m (by height it ran 60-80 m inland: the plain rises
     // so gently that "under 2.3 m" was most of the coast)
     const hk = headShape(x, z).mask, sd = Sd(x, z);
-    const sand = (1 - smoothstep(24, 34, sd)) * (1 - hk);                    // (no beach round the cap)
+    // THE BEACH (2026-10-16, you: "the beach doesn't read as a beach"): its back edge WANDERS (a ruler-
+    // straight band read as paint), DRY rippled sand above, a WET darker band 2-6 m up from the water
+    const edge = 29 + 9 * (noise(x / 45, z / 45, 67) - 0.5) * 2;
+    const sand = (1 - smoothstep(edge - 6, edge + 3, sd)) * (1 - hk);        // (no beach round the cap)
+    const wet = sand * (1 - smoothstep(2 + 1.5 * noise(x / 11, z / 11, 68), 6.5, sd));
     const sl = slopeDeg(x, z);
     // cliffs; the cap's foot ledge — on the cap only its RISERS (> ~30°): its benches keep their scrub
     const rock = Math.max(smoothstep(20 + 8 * hk, 30 + 6 * hk, sl), hk * (1 - smoothstep(2.5, 4.5, sd)));
@@ -301,7 +311,8 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
     w[6] = trk - ruts - strip;
     w[4] = (1 - trk) * bed;
     w[5] = (1 - trk) * (1 - bed) * rock;
-    w[1] = (1 - trk) * (1 - bed) * (1 - rock) * sand;
+    w[1] = (1 - trk) * (1 - bed) * (1 - rock) * (sand - wet);
+    w[4] += (1 - trk) * (1 - bed) * (1 - rock) * wet;
     const rest = (1 - trk) * (1 - bed) * (1 - rock) * (1 - sand);
     w[3] = rest * Math.min(1, maquis) + strip;
     w[0] = rest * (1 - Math.min(1, maquis)) + ruts;
@@ -387,8 +398,11 @@ set(0, "Coastal plain", "/textures/ground/dirt_aerial_02", "dirt_aerial_02_", PH
 // in under the shallows first)
 // (coast_sand_LIGHT: coast_sand_01 lifted to pale sand — every sand photo we have averages under half
 // brightness, the beach read as the plain's brown; a tint can't brighten past white)
-set(1, "Beach sand", "/textures/ground/coast_sand_light", "coast_sand_light_", PH, { uvScale: W / 12, normalStr: 0.5, aoStr: 0.25, tint: "#ffffff" });
-set(2, "Seabed", "/textures/ground/coast_sand_05", "coast_sand_05_", PH, { uvScale: W / 25, normalStr: 0.5, aoStr: 0.2, tint: "#ffffff" });
+// (2026-10-16: coast_sand_light was gravelly dirt — pebbles, grass tufts: it read as rubble. Now the
+// rippled beach photo graded pale golden (tools/algGradePhoto: aerial_beach_01 → beach_sand_dry / _wet))
+set(1, "Beach sand", "/textures/ground/beach_sand_dry", "beach_sand_dry_", PH, { uvScale: W / 8, normalStr: 0.7, aoStr: 0.25, tint: "#ffffff" });
+set(4, "Wet sand", "/textures/ground/beach_sand_wet", "beach_sand_wet_", PH, { uvScale: W / 8, normalStr: 0.45, aoStr: 0.2, tint: "#ffffff" });
+set(2, "Seabed", "/textures/ground/seabed_sand", "seabed_sand_", PH, { uvScale: W / 10, normalStr: 0.6, aoStr: 0.2, tint: "#ffffff" });   // (rippled sand: tools/algGradePhoto)
 // (2026-10-16, the cap: Grass005 read as a LAWN even darkened — rough grass with its stones showing,
 // pulled to the Stora scrub's dry olive)
 set(3, "Maquis", "/textures/ground/rocky_terrain_02", "rocky_terrain_02_", PH, { uvScale: W / 10, normalStr: 0.6, aoStr: 0.35, tint: "#c4b48c" });
