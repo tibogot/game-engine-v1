@@ -130,6 +130,9 @@ import { buildRevoGrassPanel } from "../ui/buildRevoGrassPanel.js";
 import { DecalSystem } from "../render/decals/decalSystem.js";
 import { createDecalEditor } from "../tools/decalEditor.js";
 import { buildDecalPanel } from "../ui/buildDecalPanel.js";
+import { createPadSystem } from "../terrain/padSystem.js";
+import { createPadEditor } from "../tools/padEditor.js";
+import { buildPadPanel } from "../ui/buildPadPanel.js";
 import { WaterfallSystem } from "../render/waterfall/waterfallSystem.js";
 import { createWaterfallEditor } from "../tools/waterfallEditor.js";
 import { buildWaterfallPanel } from "../ui/buildWaterfallPanel.js";
@@ -3450,6 +3453,10 @@ export async function startV3App(opts = {}) {
   /** Decal mode's editing half (editor only); built after the decal system. */
   let decalEditor = null;
   let decalUi = null;
+  /** Pads (padSystem.js, games too) and Pads mode's editing half; built after the props store. */
+  let padSystem = null;
+  let padEditor = null;
+  let padUi = null;
   /** Waterfalls (G): the runtime system (games too) and its editing half. Built after River v2. */
   let waterfallSystem = null;
   let waterfallEditor = null;
@@ -3491,6 +3498,11 @@ export async function startV3App(opts = {}) {
   function syncDecalPanelVisibility() {
     if (decalPanel) decalPanel.style.display = (editorMode === "decals" && !playMode.active) ? "" : "none";
     decalEditor?.setActive(editorMode === "decals" && !playMode.active);
+    // Pads ride the same call: every place that refreshes the decal panel on a
+    // mode change refreshes this one too.
+    const padPanel = uiById("pad-panel");
+    if (padPanel) padPanel.style.display = (editorMode === "pads" && !playMode.active) ? "" : "none";
+    padEditor?.setActive(editorMode === "pads" && !playMode.active);
   }
 
   function syncWaterfallPanelVisibility() {
@@ -3660,7 +3672,7 @@ export async function startV3App(opts = {}) {
     } else if (m === "spawn") {
       uCursorUV.value.set(-2, -2);
       spawnUi?.refresh();
-    } else if (m === "decals") {
+    } else if (m === "decals" || m === "pads") {
       uCursorUV.value.set(-2, -2);
     } else if (m === "waterfall") {
       uCursorUV.value.set(-2, -2);
@@ -4621,6 +4633,7 @@ export async function startV3App(opts = {}) {
   tc.addEventListener("mouseUp", () => {
     syncEditorOrbitEnabled();
     if (_gizmoTarget === "decal") decalEditor?.gizmoEnd();
+    if (_gizmoTarget === "pad") padEditor?.gizmoEnd();
     if (_gizmoTarget === "waterfall") waterfallEditor?.gizmoEnd();
     _onGizmoDragEnd();
     if (editorMode === "props") refreshPropPlacementPreview();
@@ -4867,6 +4880,11 @@ export async function startV3App(opts = {}) {
         // Sculpting under the marker must not bury it — re-drape every frame.
         spawnSystem.refreshHeight();
       }
+
+      // Pads re-level when the ground under them changed or their prop moved
+      // (two comparisons when nothing did) — before the upload, so it is this frame's.
+      padSystem?.update();
+      padEditor?.update();
 
       // CPU height edits made since the last frame (flattenRect, raiseBerm…)
       // go up in ONE upload, before anything renders the terrain.
@@ -5656,6 +5674,7 @@ export async function startV3App(opts = {}) {
       case "road":    done = undo ? roadHistory.undo() : roadHistory.redo(); break;
       case "lake":    done = undo ? lakeHistory.undo() : lakeHistory.redo(); break;
       case "decals":  done = !!decalEditor && (undo ? decalEditor.history.undo() : decalEditor.history.redo()); break;
+      case "pads":    done = !!padEditor && (undo ? padEditor.history.undo() : padEditor.history.redo()); break;
       case "waterfall": done = !!waterfallEditor && (undo ? waterfallEditor.history.undo() : waterfallEditor.history.redo()); break;
     }
     if (done) return true;
@@ -5769,6 +5788,11 @@ export async function startV3App(opts = {}) {
       e.preventDefault();
       setEditorMode(editorMode === "decals" ? "view" : "decals");
       return;
+    }
+    if (editorMode === "pads" && padEditor && !playMode.active) {
+      if (e.code === "Delete" || e.code === "Backspace") { e.preventDefault(); padEditor.deleteSelected(); return; }
+      if (e.code === "Escape") { e.preventDefault(); padEditor.deselect(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "d") { e.preventDefault(); padEditor.duplicateSelected(); return; }
     }
     if (editorMode === "decals" && decalEditor && !playMode.active) {
       const plain = !e.ctrlKey && !e.metaKey && !e.altKey;
@@ -7359,6 +7383,52 @@ export async function startV3App(opts = {}) {
   const propTextureLibrary = createPropTextureLibrary();
   propInstancer = new PropInstancer(scene, propStore);
   const gltfLoader = getSharedGltfLoader();
+
+  // ── Pads (v3/terrain/padSystem.js) ───────────────────────────────────────────
+  // Flattened zones on the height stack, saved in the level and applied in games.
+  // A pad attached to a prop takes the prop's footprint: its type's merged box,
+  // scaled and turned like the instance (ry in degrees, three.js Y rotation).
+  padSystem = createPadSystem({
+    heightLayers,
+    worldSize: WORLD_SIZE,
+    heightmapSize: HEIGHTMAP_SIZE,
+    maxHeight: MAX_HEIGHT,
+    resolveProp: (id) => {
+      const idx = propStore.indexOfId(id);
+      const inst = idx >= 0 ? propStore.instances[idx] : null;
+      if (!inst) return null;
+      const box = propStore.types[inst.typeIdx]?.mergedBox;
+      const rot = (inst.ry ?? 0) * (Math.PI / 180);
+      if (!box || box.isEmpty()) return { x: inst.px, z: inst.pz, rot, halfX: 1, halfZ: 1 };
+      const cx = ((box.min.x + box.max.x) / 2) * inst.sx, cz = ((box.min.z + box.max.z) / 2) * inst.sz;
+      const c = Math.cos(rot), s = Math.sin(rot);
+      return {
+        x: inst.px + cx * c + cz * s, z: inst.pz - cx * s + cz * c, rot,
+        halfX: ((box.max.x - box.min.x) / 2) * Math.abs(inst.sx),
+        halfZ: ((box.max.z - box.min.z) / 2) * Math.abs(inst.sz),
+      };
+    },
+    onChanged: () => { padUi?.rebuild?.(); sceneOutliner?.update?.(true); },
+  });
+  if (isEditor) {
+    padEditor = createPadEditor({
+      system: padSystem,
+      scene,
+      groundAt: (wx, wz) => terrainStoreAdapter.getWorldHeight(wx, wz),
+      heightVersion: () => heightLayers.version,
+      attachGizmo: (_pad, proxy) => {
+        applyGizmoSettings();
+        tc.attach(proxy);
+        tc.enabled = true;
+        tc.visible = true;
+        _gizmoTarget = "pad";
+      },
+      detachGizmo: () => { if (_gizmoTarget === "pad") _detachGizmo(); },
+      onChanged: () => { padUi?.rebuild?.(); sceneOutliner?.update?.(true); },
+    });
+    const padPanel = uiById("pad-panel");
+    if (padPanel) padUi = buildPadPanel(padPanel, { system: padSystem, editor: padEditor });
+  }
 
   // Instanced cliff collision — one shared BVH per solid type, auto-syncs with
   // propStore edits (place/move/delete never rebakes anything).
@@ -8993,6 +9063,7 @@ export async function startV3App(opts = {}) {
       waterfalls,
       riversV2,
       riverNetwork: riverV3System?.exportData() ?? null,
+      pads:      padSystem?.exportData() ?? null,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
       farTerrain: farTerrain.exportData(),
@@ -9262,6 +9333,10 @@ export async function startV3App(opts = {}) {
     // Decals: absent means none (and the default textures).
     await decalSystem.importData(d.decals ?? null);
     decalEditor?.reset();
+    // Pads: stamps on the height stack the load just reset — applied here in
+    // games too, so a level's pads need no game code.
+    padSystem?.importData(d.pads ?? null);
+    padEditor?.reset();
     if (flowerSystem && d.flowers) flowerState.types.forEach((t, i) => flowerSystem.rebuildType(i, t));
     flowerUi?.rebuild();
 
@@ -9777,6 +9852,7 @@ export async function startV3App(opts = {}) {
       propSys.handleTransformChange();
     }
     if (_gizmoTarget === "decal" && tc.dragging) decalEditor?.gizmoChanged();
+    if (_gizmoTarget === "pad" && tc.dragging) padEditor?.gizmoChanged();
     if (_gizmoTarget === "waterfall" && tc.dragging) waterfallEditor?.gizmoChanged();
   });
 
@@ -10120,6 +10196,23 @@ export async function startV3App(opts = {}) {
     if (!decalEditor || playMode.active || editorMode !== "decals") return;
     decalEditor.hover(tc.dragging ? null : getDecalSurfaceHit(e, { meshes: false }), camera, { shift: e.shiftKey });
   });
+
+  // ── Pads mode mouse events ────────────────────────────────────────────────
+  // Pads are placed and picked on the GROUND (the terrain under the cursor).
+  renderer.domElement.addEventListener("mousemove", (e) => {
+    if (!padEditor || playMode.active || editorMode !== "pads") return;
+    padEditor.hover(tc.dragging ? null : getTerrainHitWorld(e), { shift: e.shiftKey });
+  });
+  renderer.domElement.addEventListener("mousedown", (e) => {
+    if (!padEditor || playMode.active || editorMode !== "pads" || e.button !== 0) return;
+    // A press on a gizmo handle belongs to the gizmo.
+    if (tc.dragging || (_gizmoTarget === "pad" && tc.axis)) return;
+    const did = padEditor.click(getTerrainHitWorld(e), { shift: e.shiftKey });
+    if (did) {
+      e.preventDefault();
+      padEditor.hover(null);
+    }
+  });
   renderer.domElement.addEventListener("mousedown", (e) => {
     if (!decalEditor || playMode.active || editorMode !== "decals" || e.button !== 0) return;
     // A press on a gizmo handle belongs to the gizmo.
@@ -10309,6 +10402,21 @@ export async function startV3App(opts = {}) {
       })),
     });
 
+    // Pads: the eye switches a pad OFF (it stays in the level, the ground goes back).
+    const pads = padSystem?.pads ?? [];
+    groups.push({
+      key: "pads", label: "Pads", icon: "square-dashed", count: pads.length,
+      items: pads.map((p) => {
+        const f = padSystem.footprintOf(p.id);
+        return {
+          key: `pad:${p.id}`, label: `${p.shape === "circle" ? "Circle" : "Pad"} #${p.id}${p.attach != null ? ` · prop #${p.attach}` : ""}`,
+          sub: p.shape === "circle" ? `⌀ ${(f.halfX * 2).toFixed(0)} m` : `${(f.halfX * 2).toFixed(0)} × ${(f.halfZ * 2).toFixed(0)} m`,
+          selected: inspected === `pad:${p.id}` || (editorMode === "pads" && padEditor?.selectedId === p.id),
+          canHide: true, hidden: !p.enabled,
+        };
+      }),
+    });
+
     const roadNodes = roadSystem?.nodes?.length ?? 0;
     groups.push({
       key: "roads", label: "Roads", icon: "route", count: roadNodes ? 1 : 0,
@@ -10331,6 +10439,7 @@ export async function startV3App(opts = {}) {
     return [
       inspector?.key, editorMode, propStore.gen, propInstancer.selectedIds.join(","),
       heightLayers.listLayers().map((l) => `${l.id}${l.name}${l.visible ? "" : "h"}${l.strength}${l.locked ? "l" : ""}`).join(";"), heightLayers.activeLayer,
+      padSystem?.version, padEditor?.selectedId,
       propInstancer.hiddenTypes.size, propInstancer.hiddenIds.size,
       (tunnelSystem?.tunnels ?? []).map((t) => `${t.style}${t.nodes.length}${t.hidden ? "h" : ""}${(t._sampled?.length ?? 0) | 0}`).join(";"), tunnelSystem?.activeIndex,
       (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
@@ -10378,6 +10487,8 @@ export async function startV3App(opts = {}) {
       case "spawn": case "spawnPoint": setEditorMode("spawn"); break;
       case "decals": setEditorMode("decals"); break;
       case "decal": setEditorMode("decals"); decalEditor?.select(i); break;
+      case "pads": setEditorMode("pads"); break;
+      case "pad": setEditorMode("pads"); padEditor?.select(i); break;
       // Environment entries change no tool; they only open in the Inspector.
     }
   }
@@ -10403,6 +10514,7 @@ export async function startV3App(opts = {}) {
       case "road": return roadSystem?.nodes.length ? "road" : null;
       case "spawn": return spawnSystem.placed ? "spawnPoint" : null;
       case "decals": return decalEditor?.selectedId != null ? `decal:${decalEditor.selectedId}` : null;
+      case "pads": return padEditor?.selectedId != null ? `pad:${padEditor.selectedId}` : null;
       default: return null;
     }
   }
@@ -10436,6 +10548,15 @@ export async function startV3App(opts = {}) {
         }
         break;
       case "terrain": box.set(new THREE.Vector3(-WORLD_SIZE / 2, 0, -WORLD_SIZE / 2), new THREE.Vector3(WORLD_SIZE / 2, MAX_HEIGHT * 0.3, WORLD_SIZE / 2)); break;
+      case "pad": {
+        const f = padSystem?.footprintOf(i);
+        const p = padSystem?.get(i);
+        if (!f || !p) break;
+        const r = (p.shape === "circle" ? f.halfX : Math.hypot(f.halfX, f.halfZ)) + p.rim;
+        const y = terrainStoreAdapter.getWorldHeight(f.x, f.z);
+        box.set(new THREE.Vector3(f.x - r, y - 2, f.z - r), new THREE.Vector3(f.x + r, y + 2, f.z + r));
+        break;
+      }
     }
     return box.isEmpty() ? null : box;
   }
@@ -10491,6 +10612,12 @@ export async function startV3App(opts = {}) {
       case "river": { const r = riverV2System.rivers[i]; if (r) (_hiddenMeshes.has(r) ? _hiddenMeshes.delete(r) : _hiddenMeshes.add(r)); break; }
       case "lake": { const l = lakeSystem.lakes[i]; if (l) (_hiddenMeshes.has(l) ? _hiddenMeshes.delete(l) : _hiddenMeshes.add(l)); break; }
       case "road": _roadsHidden = !_roadsHidden; break;
+      // A pad's eye switches it off (one undo step); it stays in the level.
+      case "pad": {
+        const p = padSystem?.get(i);
+        if (p && padEditor) { padEditor.select(i); padEditor.edit({ enabled: !p.enabled }); }
+        break;
+      }
       // Not an editor-only hide: a hidden sculpt layer is out of the terrain.
       case "hlayer": {
         const l = heightLayers.listLayers().find((x) => x.id === i);
@@ -10646,6 +10773,18 @@ export async function startV3App(opts = {}) {
         return [inspect, focus, sep, del("Clear", () => { spawnSystem.clear(); spawnUi?.refresh(); afterDelete(); })];
       case "decal":
         return [inspect, focus, sep, del("Delete", () => { decalEditor?.deleteId(i); afterDelete(); })];
+      case "pad": {
+        const p = padSystem?.get(i);
+        return [
+          inspect, focus,
+          { label: p?.enabled === false ? "Switch on" : "Switch off", onClick: () => toggleSceneHidden(key) },
+          { label: "Duplicate", onClick: () => { setEditorMode("pads"); padEditor?.select(i); padEditor?.duplicateSelected(); } },
+          sep,
+          del("Delete", () => { padEditor?.deleteId(i); afterDelete(); }),
+        ];
+      }
+      case "pads":
+        return [{ label: "Open Pads mode", onClick: () => { setEditorMode("pads"); openRightTab("tools"); } }];
       case "terrain":
         return [inspect, sep, { label: "Add sculpt layer", onClick: addHeightLayer }];
       case "hlayer": {
@@ -10727,6 +10866,28 @@ export async function startV3App(opts = {}) {
         },
         remove: () => { propSys.handleDelete(); deactivatePropSelection(); refreshPropCount(); },
         changed: () => {},
+        /** Select a prop by its id (a pad's "Select its prop"). */
+        selectId: (id) => {
+          const idx = propStore.indexOfId(id);
+          if (idx < 0) return;
+          setEditorMode("props");
+          activatePropSelection(idx);
+          inspector?.inspect(`prop:${id}`);
+        },
+      },
+      pads: {
+        system: padSystem,
+        editor: padEditor,
+        /** The pad attached to this prop, or null. */
+        forProp: (propId) => padSystem?.pads.find((p) => p.attach === propId) ?? null,
+        /** A pad under this prop (its footprint + 1 m), following it — one undo step in Pads mode. */
+        addForProp: (propId) => {
+          const p = padEditor?.addForProp(propId);
+          if (!p) return;
+          statusBar?.setMessage(`Pad #${p.id} added under prop #${propId} — it follows the prop. Edit it in Pads mode or from this Inspector.`);
+          inspector?.inspect(`prop:${propId}`);
+        },
+        inspect: (id) => { inspector?.inspect(`pad:${id}`); openRightTab("inspector"); },
       },
       lakes: { system: lakeSystem, history: lakeHistory, slice: lakeToolSlice.lake, get ui() { return lakeUi; } },
       decals: { system: decalSystem, editor: decalEditor },
@@ -11819,6 +11980,13 @@ export async function startV3App(opts = {}) {
       heightLayers,
       heightLayerUi,
       sculpt,
+      /** Pads (padSystem.js) and their editing half, for scripted checks. */
+      get padSystem() { return padSystem; },
+      get padEditor() { return padEditor; },
+      propStore,
+      pads: {
+        addForProp: (propId) => padEditor?.addForProp(propId),
+      },
       /** Resolves once every queued layer step and pending GPU edit has landed. */
       async settleHeights() { await _heightLayerQueue; await ensureCpuHeightmapFromGpu(); await _heightLayerQueue; },
       /**

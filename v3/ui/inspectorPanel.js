@@ -13,6 +13,7 @@
  * drag, an undo or a tool panel edit shows up here without a rebuild.
  */
 import { section, slider, color, toggle, button, info, hint, numbers, text } from "./widgets.js";
+import { padFields } from "./buildPadPanel.js";
 
 const REFRESH_MS = 200;
 const RAD = Math.PI / 180;
@@ -219,12 +220,35 @@ export function createInspector({ container, deps }) {
         numbers(t, view, ["sx", "sy", "sz"], { label: "Scale", step: 0.01, min: 0.001, onChange: apply, fieldTitles: ["X", "Y", "Z"] }),
       ];
       if (type?.live) hint(t, "A live prop: its own settings are in the Props panel.");
+      // Its pad (padSystem.js): flat ground the shape of the prop, following it.
+      const pad = deps.pads?.forProp(id);
       _actions(container, [
         frameAction(`prop:${id}`),
         { title: "Duplicate", hint: "Ctrl+D", onClick: () => P.duplicate() },
         { title: "Delete", hint: "Del", onClick: () => P.remove() },
+        pad
+          ? { title: "Edit its pad", hint: `Pad #${pad.id} follows this prop`, onClick: () => deps.pads.inspect(pad.id) }
+          : { title: "Add pad under it", hint: "Flat ground the shape of this prop (+1 m), which follows it when it moves", onClick: () => deps.pads?.addForProp(id) },
       ]);
       return hs.map((h) => ({ refresh() { pull(); h.refresh(); } }));
+    },
+
+    // A pad (v3/terrain/padSystem.js) — the same fields as the Pads panel.
+    pad(arg) {
+      const D = deps.pads;
+      const id = Number(arg);
+      stillExists = () => !!D?.system.get(id);
+      const p = D?.system.get(id);
+      if (!p) return null;
+      _title(`${p.shape === "circle" ? "Circle pad" : "Pad"} #${id}`, p.attach != null ? `Pad · follows prop #${p.attach}` : "Pad");
+      const b = section(container, "Pad", true);
+      const hs = padFields(b, id, { system: D.system, editor: D.editor });
+      _actions(container, [
+        frameAction(`pad:${id}`),
+        p.attach != null ? { title: "Select its prop", onClick: () => deps.props?.selectId?.(p.attach) } : null,
+        { title: "Delete", onClick: () => { D.editor.deleteId(id); inspect(null); } },
+      ]);
+      return hs;
     },
 
     propSelection() {

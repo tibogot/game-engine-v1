@@ -62,6 +62,9 @@
           <button class="toolbar-btn" data-mode="decals" title="Decals (C)">
             <i data-lucide="stamp"></i>
           </button>
+          <button class="toolbar-btn" data-mode="pads" title="Pads — flattened zones">
+            <i data-lucide="square-dashed"></i>
+          </button>
           <button class="toolbar-btn" data-mode="waterfall" title="Waterfall (G)">
             <i data-lucide="droplets"></i>
           </button>
@@ -163,6 +166,7 @@
               <option value="tunnel">Tunnel (O)</option>
               <option value="lake">Lake (L)</option>
               <option value="decals">Decals (C)</option>
+              <option value="pads">Pads</option>
               <option value="waterfall">Waterfall (G)</option>
               <option value="ambientFx">Ambient FX</option>
               <option value="road">Road (smart)</option>
@@ -2397,6 +2401,7 @@
 
         <!-- DECAL panel — built dynamically by buildDecalPanel() -->
         <div id="decal-panel" style="display:none"></div>
+        <div id="pad-panel" style="display:none"></div>
 
         <!-- WATERFALL panel — built dynamically by buildWaterfallPanel() -->
         <div id="waterfall-panel" style="display:none"></div>

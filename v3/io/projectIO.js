@@ -112,6 +112,7 @@ export async function encodeProjectFile({
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, riversV2, riverNetwork,
+  pads,                 // padSystem.exportData(): { pads: [...] } or null
   decals,               // decalSystem.exportData(): { slots, decals } or null
   waterfalls,           // waterfallSystem.exportData(): { look, falls } or null
   paintLayers,         // textureLibrary.exportData() — slot metadata, no pixels
@@ -202,6 +203,7 @@ export async function encodeProjectFile({
     waterfalls: waterfalls ?? null,
     riversV2: riversV2 ?? null,
     riverNetwork: riverNetwork ?? null,
+    pads: pads ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
     farTerrain: farTerrain?.manifest ?? null,
@@ -294,6 +296,7 @@ export async function decodeProjectFile(buffer) {
     waterfalls: manifest.waterfalls ?? null,
     riversV2:  manifest.riversV2 ?? null,
     riverNetwork: manifest.riverNetwork ?? null,
+    pads: manifest.pads ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,
     // The ground past the heightmap: its params and grid (Float32, copied for alignment).

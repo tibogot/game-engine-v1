@@ -50,10 +50,15 @@ WebGPU techniques. One item at a time, between game work (see `/MIGRATION.md`).
    - Known limits: layers are additive, so their order does not matter (no "replace" layers); layer
      operations (hide, strength, clear, delete, merge) are not in the undo history; legacy CPU tools
      (erosion sims, road bake) write the ACTIVE layer, like the brushes.
-3. **Pads as saved objects** (Unreal Landscape Patches): a flatten pad (circle/rect, falloff, optional
-   paint) placed in the editor, attachable to a building/prop: move the building, the pad and its ground
-   paint follow. The maths exists (`flattenRect`, `gradeRamp`); this makes it an editor object. The
-   core RTS-map win. https://dev.epicgames.com/documentation/unreal-engine/landscape-patch-system
+3. ~~**Pads as saved objects**~~ DONE 2026-10-17 (Unreal Landscape Patches,
+   https://dev.epicgames.com/documentation/unreal-engine/landscape-patch-system). Pads mode (toolbar):
+   click to place, W/E/R gizmo, Del, Ctrl+D, undo; outline on the ground; panel + Inspector (shape
+   rect/circle, size, rotation, soft edge, height "follow the ground" = average of the ground under it,
+   re-measured when the ground changes, or fixed, offset, on/off); Scene list "Pads" (eye = off);
+   prop Inspector → "Add pad under it" (footprint + margin, follows the prop). Saved in the .v3proj
+   (`pads`) and applied by the engine on load, so games get them with no code. Files:
+   `v3/terrain/padSystem.js` (engine), `v3/tools/padEditor.js`, `v3/ui/buildPadPanel.js`; tests
+   `tools/padSystemTest.mjs` (27). Not yet: painting the ground under a pad (needs layered paint).
 4. **Roads as an operator, like rivers** (today: live grade, then a destructive "Bake"). Fits the new
    lane roads: one spline system that carves, paints and clears vegetation as a layer.
 5. **Gameplay layers for RTS maps**: painted impassable / out-of-bounds / deploy / capture zones,

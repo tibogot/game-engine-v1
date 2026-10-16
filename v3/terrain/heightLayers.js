@@ -107,6 +107,13 @@ export function createHeightLayers({ final, size, onComposed = null }) {
   /** Union of rects composed since the last takePending (not yet on the GPU). */
   let pending = null;
   let version = 0;
+  /**
+   * Bumped only when GROUND itself changes (an absorbed edit, a layer shown /
+   * scaled / cleared, a reset) — not when a stamp or an operator recomposes. A
+   * stamp that READS the ground (a pad that follows it, padSystem.js) watches
+   * this to know when to re-measure, without looping on its own recompose.
+   */
+  let groundVersion = 0;
   let stampSeq = 0;
 
   const clamp = (r) => intersectRect(r, FULL);
@@ -142,6 +149,7 @@ export function createHeightLayers({ final, size, onComposed = null }) {
   function recomputeGround(r) {
     r = r && clamp(r);
     if (!r) return;
+    groundVersion++;
     const live = layers.filter(contributes);
     for (let z = r.z0; z <= r.z1; z++) {
       const o = z * size;
@@ -239,6 +247,16 @@ export function createHeightLayers({ final, size, onComposed = null }) {
   return {
     ground,
     get version() { return version; },
+    get groundVersion() { return groundVersion; },
+    /** Remove every stamp whose key starts with `prefix` (a system clearing its own). */
+    removeStampsWithPrefix(prefix) {
+      let r = null;
+      for (const [k, s] of stamps) if (k.startsWith(prefix)) { r = unionRect(r, s.rect); stamps.delete(k); }
+      if (r) compose(r);
+      return !!r;
+    },
+    /** Is there a stamp under this key? */
+    hasStamp(key) { return stamps.has(key); },
     get river() { return operators.get("river") ?? null; },
     operator(name) { return operators.get(name) ?? null; },
     get stampCount() { return stamps.size; },
@@ -362,6 +380,7 @@ export function createHeightLayers({ final, size, onComposed = null }) {
         onComposed?.(hit);
         return hit;
       }
+      groundVersion++;
       // Under a river or a stamp the new ground has to go back through them.
       // Everywhere else FINAL already is GROUND and there is nothing to redo.
       if (layeredIn(hit)) compose(hit);
@@ -393,6 +412,7 @@ export function createHeightLayers({ final, size, onComposed = null }) {
       if (saved?.meta) importLayers(saved.meta, saved.data);
       pending = null;
       version++;
+      groundVersion++;
     },
 
     // ── Sculpt layers ────────────────────────────────────────────────────────
@@ -504,6 +524,7 @@ export function createHeightLayers({ final, size, onComposed = null }) {
       layers.splice(k, 1);
       if (activeId === id) activeId = below ? below.id : 0;
       version++;
+      groundVersion++;
       return true;
     },
 
