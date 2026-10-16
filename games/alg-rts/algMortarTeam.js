@@ -22,6 +22,7 @@
 import * as THREE from "three";
 import { buildMortarTube, MORTAR_MUZZLE } from "../../v3/render/objects/rtsEnemyKit.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
+import { assemble, bakeContactAO, buildBox, MAT } from "../../v3/render/objects/rtsParts.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
 import { isHuman } from "../shared-rts/teams.js";
@@ -434,7 +435,11 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
   tubes.visible = false;
   tubes.name = "MortarTeamTubes";
   app.scene.add(tubes);
-  const plates = new THREE.InstancedMesh(new THREE.BoxGeometry(0.38, 0.035, 0.34), rtsObjectMaterialTinted(FR_PAINT_TINT), MAXT);
+  // The baseplate goes through the kit like the tube: the kit material reads matId / tone / ao,
+  // and a bare BoxGeometry has none of them — the GPU read 0 for each, ao 0 drew the plate black.
+  const plateGeo = assemble([{ geo: buildBox(0.38, 0.035, 0.34), mat: MAT.steel, tone: 0.2 }]);
+  bakeContactAO(plateGeo, { cell: 0.06, radius: 1, strength: 0.25, groundFade: 0.2, floor: 0.6 });
+  const plates = new THREE.InstancedMesh(plateGeo, rtsObjectMaterialTinted(FR_PAINT_TINT), MAXT);
   plates.castShadow = true; plates.frustumCulled = false; plates.count = 0; plates.visible = false;
   plates.name = "MortarTeamPlates";
   app.scene.add(plates);
