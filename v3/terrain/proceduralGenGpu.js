@@ -1,6 +1,6 @@
 /**
  * GPU procedural terrain generator — TSL port of
- * v2/core/terrain/proceduralTerrainGen.js + the v3 caldera/boundary-fade logic
+ * v3/terrain/proceduralTerrainGen.js + the v3 caldera/boundary-fade logic
  * from proceduralGen.js.
  *
  * Renders the whole heightmap in one fragment pass via

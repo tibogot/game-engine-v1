@@ -14,7 +14,7 @@ import {
 import {
   createTileMaterial,
   setGridTextureUrl,
-} from "../../v2/core/legacy/tileMaterial.js";
+} from "../render/legacy/tileMaterial.js";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
 // grid.png lives in public/textures/ — served at /textures/ by Vite from any page.

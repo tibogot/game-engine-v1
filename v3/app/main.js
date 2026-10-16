@@ -31,20 +31,20 @@ import { initEditorShell } from "../ui/editorShell.js";
 import { initPanelSplitters, createStatusBar } from "../ui/editorLayout.js";
 import { refreshWidgets } from "../ui/widgets.js";
 import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
-import { createEditorCameraController } from "../../v2/app/editorCameraController.js";
+import { createEditorCameraController } from "./editorCameraController.js";
 import { BRUSH_MASKS, loadMaskPNG } from "../terrain/brushMasks.js";
 import { STAMP_GROUPS, loadStamp } from "../terrain/brushStamps.js";
 import { createPlayMode, LOD_SNAP } from "../play/playMode.js";
 import { createSpawnPointSystem } from "../play/spawnPoint.js";
 import { buildSpawnPanel } from "../ui/buildSpawnPanel.js";
-import { V2_CONFIG } from "../../v2/app/config.js";
-import { createPerfState, tickPerf } from "../../v2/app/state/toolState.js";
+import { V2_CONFIG } from "./config.js";
+import { createPerfState, tickPerf } from "./state/legacyToolState.js";
 import { createWorldToolState } from "./state/worldState.js";
 import { createWorldEnvironment } from "./worldEnvironment.js";
 import { buildWorldPanel } from "../ui/buildWorldPanel.js";
 import { buildFarTerrainPanel } from "../ui/buildFarTerrainPanel.js";
 import { createHumanCharacter } from "../play/humanCharacter.js";
-import { HuskyOnFoot } from "../../v2/play/huskyOnFoot.js";
+import { HuskyOnFoot } from "../play/huskyOnFoot.js";
 import { FoxOnFoot } from "../play/foxOnFoot.js";
 import { SplatMap } from "../terrain/splatMap.js";
 import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
@@ -55,7 +55,7 @@ import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
 import { createProceduralLayerPanel } from "../ui/proceduralLayerPanel.js";
 import { PaintSystem } from "../tools/paintSystem.js";
-import { BrushMask } from "../../v2/core/paint/brushMask.js";
+import { BrushMask } from "../terrain/brushMask.js";
 import {
   encodeSplatmapFile,
   decodeSplatmapFile,
@@ -67,7 +67,7 @@ import { createSnowSystem } from "../terrain/snowSystem.js";
 import { SnowMap, SNOW_MAP_RES } from "../terrain/snowMap.js";
 import { encodeProjectFile, decodeProjectFile, isProjectFile, pickProjectFile } from "../io/projectIO.js";
 import { projectAssets } from "../io/projectAssets.js";
-import { getSharedGltfLoader, initGlbLoaderRenderer, fixFoliageTransparency } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer, fixFoliageTransparency } from "../render/foliage/glbLoader.js";
 import { PropStore } from "../tools/propStore.js";
 import { PropInstancer } from "../tools/propInstancer.js";
 import { PropSystem } from "../tools/propSystem.js";
@@ -78,36 +78,36 @@ import { planRockStamp, ROCK_SET_DEFAULTS } from "../tools/rockSetBrush.js";
 import { PropPlacementPreview } from "../tools/propPlacementPreview.js";
 import { LivePropManager } from "../tools/livePropManager.js";
 import { createFlag } from "../props/liveProps.js";
-import { FLAG_DEFAULTS } from "../../v2/core/props/flagFactory.js";
+import { FLAG_DEFAULTS } from "../props/flagFactory.js";
 import {
   COIN_DEFAULTS, HEART_DEFAULTS, KEY_DEFAULTS,
   registerGlbCollectibleKind, isCollectibleFactoryId, buildCollectibleGhostGroup,
   collectibleUniforms,
 } from "../props/collectibles.js";
 import { createCollectibleRuntime } from "../play/collectibleRuntime.js";
-import { createCollectibleBurst } from "../../v2/effects/collectibleBurst.js";
-import { createCollectibleSfx } from "../../v2/play/collectibleSfx.js";
+import { createCollectibleBurst } from "../render/effects/collectibleBurst.js";
+import { createCollectibleSfx } from "../play/collectibleSfx.js";
 import {
   PROCEDURAL_PROP_DEFS,
   PROCEDURAL_PROP_LABELS,
   proceduralSchemaFor,
   buildProceduralPreviewGroup,
   registerProceduralObjectFactories,
-} from "../../v2/core/props/proceduralObjectProps.js";
+} from "../props/proceduralObjectProps.js";
 import { buildPropsPanel, defaultBakeProceduralThumbnails } from "../ui/buildPropsPanel.js";
 import { registerRtsObjectFactories, RTS_PROP_DEFS, RTS_PROP_LABELS } from "../render/objects/rtsObjectProps.js";
-import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
+import { bakeObjectThumbnails } from "../tools/objectThumbnails.js";
 import { thumbKey, getThumb, putThumb } from "../props/rockThumbnailCache.js";
 import { buildSplinePanel } from "../ui/buildSplinePanel.js";
 import { DEFAULT_SPLINE_STATE } from "./state/splineState.js";
-import { SplineSystem } from "../../v2/tools/spline/splineSystem.js";
-import { PROCEDURAL_OBJECT_OPTIONS } from "../../v2/core/props/proceduralObjectProps.js";
-import { createPropTextureLibrary } from "../../v2/core/textures/propTextureLibrary.js";
-import { createMaterialForLibrary } from "../../v2/render/props/propMaterialFactory.js";
-import { createJumpRampGeometry } from "../../v2/core/props/jumpRampGeometry.js";
+import { SplineSystem } from "../tools/spline/splineSystem.js";
+import { PROCEDURAL_OBJECT_OPTIONS } from "../props/proceduralObjectProps.js";
+import { createPropTextureLibrary } from "../props/propTextureLibrary.js";
+import { createMaterialForLibrary } from "../props/propMaterialFactory.js";
+import { createJumpRampGeometry } from "../props/jumpRampGeometry.js";
 import { downloadProps, importPropsFromFile } from "../io/propsIO.js";
-import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../../v2/render/hybridGrass/hybridGrassSystem.js";
-import { createWindTexture, createSpecNoiseTexture } from "../../v2/core/foliage/windTexture.js";
+import { HybridGrassSystem, syncHybridGrassLod, rebuildHybridGrassGeometries } from "../render/grass/hybridGrassSystem.js";
+import { createWindTexture, createSpecNoiseTexture } from "../render/foliage/windTexture.js";
 import { GrassTerrainData } from "../render/grass/grassTerrainData.js";
 import { buildVegetationHeader, drawFlowerThumb } from "../ui/buildVegetationHeader.js";
 import { FlowerSystem } from "../render/grass/flowerSystem.js";
@@ -133,8 +133,8 @@ import { buildDecalPanel } from "../ui/buildDecalPanel.js";
 import { WaterfallSystem } from "../render/waterfall/waterfallSystem.js";
 import { createWaterfallEditor } from "../tools/waterfallEditor.js";
 import { buildWaterfallPanel } from "../ui/buildWaterfallPanel.js";
-import { CliffStore } from "../../v2/core/cliffs/cliffStore.js";
-import { CliffBvh } from "../../v2/core/cliffs/cliffBvh.js";
+import { CliffStore } from "../terrain/cliffs/cliffStore.js";
+import { CliffBvh } from "../terrain/cliffs/cliffBvh.js";
 import { SolidCollider } from "../physics/solidCollider.js";
 import { createColliderGroup } from "../physics/colliderGroup.js";
 import { createSplineFeatureColliderStore } from "../physics/splineFeatureCollider.js";
@@ -145,10 +145,10 @@ import { simplifierReady } from "../render/instancing/autoLod.js";
 import { GREYBOX_KIT, buildGreyboxGeometry } from "../props/greyboxKit.js";
 import { applyCliffTerrainBlend, createCliffGlbBlendMaterial } from "../props/cliffTerrainBlend.js";
 import { applyRockShading, rockShadeUniforms, ROCK_BASE_COLOR } from "../props/rockShading.js";
-import { CliffPaintMask } from "../../v2/core/cliffs/cliffPaintMask.js";
-import { CliffPaintSystem } from "../../v2/tools/cliffs/cliffPaintSystem.js";
-import { TreeBvh } from "../../v2/core/foliage/treeBvh.js";
-import { createOnFootCollider } from "../../v2/play/onFootCollider.js";
+import { CliffPaintMask } from "../terrain/cliffs/cliffPaintMask.js";
+import { CliffPaintSystem } from "../tools/cliffPaintSystem.js";
+import { TreeBvh } from "../render/foliage/treeBvh.js";
+import { createOnFootCollider } from "../play/onFootCollider.js";
 import { createBvhDebugVisualizer } from "../tools/bvhDebugVisualizer.js";
 import {
   createV3TerrainStoreAdapter,
@@ -180,7 +180,7 @@ import { setWaterSsrEnabled } from "../render/water/lakeMaterial.js";
 import { createWaterSurfaceMap } from "../render/water/waterSurfaceMap.js";
 import { createLakebedShading } from "../render/water/lakebedTsl.js";
 import { createRiverSandShading } from "../render/water/riverSandTsl.js";
-import { SmartRoadLabSystem } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
+import { SmartRoadLabSystem } from "../tools/smartRoad/smartRoadLabSystem.js";
 import { RoadConformSystem } from "../tools/roadConformSystem.js";
 import { mergeRoadDrawCalls } from "../tools/roadDrawCallMerge.js";
 import { DEFAULT_ROAD_STATE } from "./state/roadState.js";

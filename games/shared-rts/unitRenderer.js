@@ -23,7 +23,7 @@ import {
   HEADGEAR, KIT, LOOKS, headgearMaterial, loadout, lookColorNode, markHeadwear, markHelmet, measureCrown, neckPlane,
 } from "./soldierLooks.js";
 import { TOOLS, WEAPONS, weaponMaterial } from "./procWeapons.js";
-import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v3/render/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { rtsObjectMaterial, rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";

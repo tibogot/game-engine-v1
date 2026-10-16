@@ -131,7 +131,7 @@ export async function resolve(specifier, context, nextResolve) {
   // "three" ITSELF is intercepted, because vite.config.js aliases /^three$/ to
   // "three/webgpu" for the real build. So an "import * as THREE from three" in
   // game code means the WebGPU build, and half the codebase relies on that —
-  // v2/objects/shared/ledMatrix.js extends THREE.MRTNode, which under plain
+  // v3/props/objects/shared/ledMatrix.js extends THREE.MRTNode, which under plain
   // node fails as "Class extends value undefined" with nothing to say that
   // three/webgpu was ever involved. Without this the hooks would reproduce a
   // DIFFERENT module graph from the one that ships.

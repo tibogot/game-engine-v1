@@ -45,7 +45,7 @@ import { beadField, createRainLensUniforms } from "./modularRoadRainLens.js";
 import {
   getSharedGltfLoader,
   initGlbLoaderRenderer,
-} from "../../v2/core/foliage/glbLoader.js";
+} from "../../v3/render/foliage/glbLoader.js";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 // Intensities live with the Vehicle because it drives them per frame; only the
 // lamp COLOUR is needed here, to build the lens material. Same direction as
@@ -759,7 +759,7 @@ function makePaintMaterial(src, opts = {}) {
     mat.emissiveNode = glow;
     /*
      * LIT, BUT NEVER BLOOMED. The scene's MRT routes every material's `emissive`
-     * into the selective-bloom buffer (v2/render/post/postFxPipeline.js
+     * into the selective-bloom buffer (v3/render/post/postFxPipeline.js
      * `_applySceneMRT`), so left alone this would halo the entire car — a rim
      * that glows is the exact "cheap outline" tell this is trying to avoid. A
      * material-level mrtNode overrides the scene's, and writing zero to the

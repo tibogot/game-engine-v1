@@ -153,7 +153,7 @@ export function buildFarm(scene, renderer) {
   // ── the herd ──
   let herd = null, status = "loading sheep…";
   async function init() {
-    const [{ getSharedGltfLoader }, morph] = await Promise.all([import("../../v2/core/foliage/glbLoader.js"), import("../props/animalMorph.js")]);
+    const [{ getSharedGltfLoader }, morph] = await Promise.all([import("../render/foliage/glbLoader.js"), import("../props/animalMorph.js")]);
     const gltf = await getSharedGltfLoader().loadAsync("/models/Donkey_compressed.glb");
     await morph.initAnimalMorph(gltf);
     morph.setMorphDiagnostics(false);

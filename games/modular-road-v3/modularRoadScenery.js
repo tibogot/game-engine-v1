@@ -37,17 +37,17 @@ import * as THREE from "three";
 import { materialColor } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { flattenInstanced, mergeByMaterial, markSharedGeometry } from "./modularRoadBatching.js";
-import { buildLedMatrixMesh } from "../../v2/objects/ledMatrix.js";
+import { buildLedMatrixMesh } from "../../v3/props/objects/ledMatrix.js";
 import { buildLedChevronBoxMesh } from "./modularRoadLedBox.js";
 import { LED_DISPLAY_PARAMS, tagLedDisplayFace } from "./modularRoadLedDisplay.js";
 import { buildAdBillboardMesh, buildAdTotemMesh, AD_BILLBOARD, AD_TOTEM } from "./modularRoadAdBillboard.js";
 import { buildAdPrismMesh, uniquifyAdPrismMaterial, AD_PRISM } from "./modularRoadAdPrism.js";
-import { buildBillboardMesh } from "../../v2/objects/billboard.js";
-import { buildStreetLampMesh } from "../../v2/objects/streetLamp.js";
-import { buildRoadLampMesh } from "../../v2/objects/roadLamp.js";
-import { buildFloodlightMesh } from "../../v2/objects/floodlight.js";
-import { buildChainLinkFenceMesh } from "../../v2/objects/chainLinkFence.js";
-import { buildBarbWireMesh } from "../../v2/objects/barbWire.js";
+import { buildBillboardMesh } from "../../v3/props/objects/billboard.js";
+import { buildStreetLampMesh } from "../../v3/props/objects/streetLamp.js";
+import { buildRoadLampMesh } from "../../v3/props/objects/roadLamp.js";
+import { buildFloodlightMesh } from "../../v3/props/objects/floodlight.js";
+import { buildChainLinkFenceMesh } from "../../v3/props/objects/chainLinkFence.js";
+import { buildBarbWireMesh } from "../../v3/props/objects/barbWire.js";
 
 /** Single point at the origin on flat ground — the prop root does the placing. */
 const AT_ORIGIN = { points: [{ x: 0, y: 0, z: 0 }], getWorldHeight: () => 0 };

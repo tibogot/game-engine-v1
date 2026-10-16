@@ -9,7 +9,7 @@
  * the change (git stash) and diff the numbers.
  */
 import { register } from "node:module";
-register("../tools/threeWebgpuHook.mjs", import.meta.url);
+register("./threeWebgpuHook.mjs", import.meta.url);
 const THREE = await import("three/webgpu");
 const TSL = await import("three/tsl");
 const { createCityStreets } = await import("../games/modular-road-v3/modularRoadCityStreets.js");

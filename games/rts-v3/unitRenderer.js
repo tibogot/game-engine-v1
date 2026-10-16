@@ -16,7 +16,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { materialColor } from "three/tsl";
 import { teamTint, isUntinted } from "./teams.js";
 import { createCrowdField } from "./crowdSkinning.js";
-import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../v3/render/foliage/glbLoader.js";
 import { bakeThumbnails } from "./thumbnails.js";
 import { UNIT_TYPES, UNIT_TYPE_KEYS } from "./unitTypes.js";
 

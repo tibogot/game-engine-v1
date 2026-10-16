@@ -25,7 +25,7 @@
  */
 import * as THREE from "three";
 import { Fn, If, uniform, float, vec3, mix, min, max, dot, clamp, sin, smoothstep, length, texture, positionWorld, varying } from "three/tsl";
-import { grassFieldAlbedo } from "../../../v2/render/hybridGrass/grassFieldColor.js";
+import { grassFieldAlbedo } from "./grassFieldColor.js";
 
 export function createGrassFarShading({ worldSize }) {
   // 1×1 "nothing painted" stand-in until the grass density exists.

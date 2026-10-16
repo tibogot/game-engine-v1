@@ -1,4 +1,4 @@
-import { createToolState } from "../../../v2/app/state/toolState.js";
+import { createToolState } from "./legacyToolState.js";
 import { OCEAN2_DEFAULTS } from "../../render/water/oceanSurface.js";
 import { SKY_DEFAULTS as ATMOSPHERE_SKY_DEFAULTS } from "../../render/sky/atmosphereSkyDome.js";
 import { CLOUD_DEFAULTS } from "../../render/clouds/volumetricCloudDeck.js";

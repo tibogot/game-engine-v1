@@ -10,7 +10,7 @@
 // So: a real hoist. A STATIC lattice shaft that stays put and shows the travel,
 // and a MOVING cage that runs up and down inside it, walled in the same
 // chain-link weave as the objects-lab fence (the texture is literally shared —
-// see chainLinkTexture in v2/objects/chainLinkFence.js).
+// see chainLinkTexture in v3/props/objects/chainLinkFence.js).
 //
 // ── WHAT IT COSTS, AND WHY THAT IS THE INTERESTING PART ────────────────────
 // Detail on something that moves is the expensive kind. Three rules keep it
@@ -40,7 +40,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { float, materialColor, materialEmissive, mix, positionView, smoothstep } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
 import { markSharedGeometry } from "./modularRoadBatching.js";
-import { chainLinkTexture } from "../../v2/objects/chainLinkFence.js";
+import { chainLinkTexture } from "../../v3/props/objects/chainLinkFence.js";
 
 /**
  * Deck a touch WIDER than the 16 m road (roadParams.width), on purpose: an

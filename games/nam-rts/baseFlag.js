@@ -1,6 +1,6 @@
 // Base flag — the v3 props Verlet cloth flag, scaled up and planted by the HQ.
 //
-// This is the ENGINE's flag (v2/core/props/flagFactory.js via v3/props/liveProps.js),
+// This is the ENGINE's flag (v3/props/flagFactory.js via v3/props/liveProps.js),
 // not a reimplementation: a real particle/constraint cloth sim with wind. All this
 // file does is size it for RTS scale, plant it beside the base on the camera side,
 // and expose a texture swap for the dev panel.

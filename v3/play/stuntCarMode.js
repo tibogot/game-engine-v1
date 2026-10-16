@@ -1,7 +1,7 @@
 import * as THREE from "three";
-import { Vehicle } from "../../v2/play/modularRoadVehicle.js";
-import { createVehicleGround } from "../../v2/play/modularRoadGround.js";
-import { RoadBvh } from "../../v2/play/modularRoadBvh.js";
+import { Vehicle } from "./stuntVehicle.js";
+import { createVehicleGround } from "./stuntVehicleGround.js";
+import { RoadBvh } from "./stuntRoadBvh.js";
 
 const STUNT_CAM = {
   fov: 60,

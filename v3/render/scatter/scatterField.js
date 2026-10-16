@@ -47,8 +47,8 @@ import {
   length, max, min, renderGroup, sin, smoothstep, step, storage, texture, time, uint, uniform, uniformArray,
   vec2, vec3, vec4, PI2,
 } from "three/tsl";
-import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
-import { createClipmapGroundY } from "../../../v2/core/terrain/clipmapGroundY.js";
+import { wrapTileOffsetXZ } from "../grass/revoGrassTile.js";
+import { createClipmapGroundY } from "../../terrain/clipmapGroundY.js";
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
 import { scatterFrustumVisible } from "./gpuCull.js";
 import { LAYERS } from "../layers.js";

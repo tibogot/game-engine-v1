@@ -412,7 +412,7 @@ export const STREET_DEFAULTS = {
   /** Lamp head height and its inset from the kerb onto the pavement. */
   lampHeight: 9.0,
   /** The arm that reaches over the carriageway, and the lantern on its end.
-   *  Shapes taken from v2/objects/roadLamp.js so the city lamp and the scenery
+   *  Shapes taken from v3/props/objects/roadLamp.js so the city lamp and the scenery
    *  prop are recognisably the same fitting. */
   lampArm: 1.9,
   lampPostTop: 0.09,
@@ -1666,7 +1666,7 @@ export function createCityStreets({
   // InstancedMesh, one draw; the head is emissive into the bloom MRT so the
   // sources read as sources at night.
   /*
-   * THE LAMP, shaped like v2/objects/roadLamp.js — a tapered post, an arm that
+   * THE LAMP, shaped like v3/props/objects/roadLamp.js — a tapered post, an arm that
    * reaches out over the carriageway, and a sodium box on the end of it.
    *
    * What this replaces was two boxes with the "head" sitting 32 cm off the post,

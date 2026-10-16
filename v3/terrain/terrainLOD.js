@@ -40,7 +40,7 @@ import {
   setGridTextureUrl,
   getTileGridTexture,
   tileColorAtWorldXZ,
-} from "../../v2/core/legacy/tileMaterial.js";
+} from "../render/legacy/tileMaterial.js";
 import { gridSurface, flatSurface } from "../render/materials/gridMaterial.js";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 import { applyCliffStreaks } from "./cliffStreaks.js";
@@ -163,7 +163,7 @@ export const TERRAIN_FEATURES = {
    *
    *   "grid"  render/materials/gridMaterial.js — analytic, metric (cells are a
    *           number of METRES), antialiased, no texture, no sampler. Default.
-   *   "tile"  v2/core/legacy/tileMaterial.js — the grid.png sampler. Kept so the
+   *   "tile"  v3/render/legacy/tileMaterial.js — the grid.png sampler. Kept so the
    *           two can be A/B'd back to back through buildVariant/setVariant at
    *           the same GPU clock; the two shaders are otherwise identical.
    *   "flat"  no grid at all, at the shade the grid averages to.

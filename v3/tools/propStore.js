@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { createJumpRampGeometry } from "../../v2/core/props/jumpRampGeometry.js";
+import { createJumpRampGeometry } from "../props/jumpRampGeometry.js";
 
 const DEG    = Math.PI / 180;
 const _dummy = new THREE.Object3D();

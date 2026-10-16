@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { OBJECTS, OBJECT_MAP } from "../../v2/objects/index.js";
-import { updateWindmillRotors, preloadWindmillModel } from "../../v2/objects/windmill.js";
+import { OBJECTS, OBJECT_MAP } from "../props/objects/index.js";
+import { updateWindmillRotors, preloadWindmillModel } from "../props/objects/windmill.js";
 
 export { OBJECTS, OBJECT_MAP };
 

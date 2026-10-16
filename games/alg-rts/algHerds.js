@@ -19,7 +19,7 @@
 // TRAIN on each ravine mule path (algTracks.js): a loaded donkey on the lead,
 // a bare one behind, up to the gully mouth and back.
 import * as THREE from "three";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { initAnimalMorph, createMorphTemplate, setMorphDiagnostics } from "../../v3/props/animalMorph.js";
 import { createWildHerd } from "../shared-rts/wildHerd.js";
 import { LAYOUT, PLAY, sitePoint } from "./layout.js";

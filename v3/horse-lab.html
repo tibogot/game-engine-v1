@@ -180,7 +180,7 @@
       const ARMORED = new URLSearchParams(location.search).get("horse") !== "lowpoly";
       let armorScene = null;
       if (ARMORED) {
-        const { initGlbLoaderRenderer, getSharedGltfLoader } = await import("../v2/core/foliage/glbLoader.js");
+        const { initGlbLoaderRenderer, getSharedGltfLoader } = await import("./render/foliage/glbLoader.js");
         initGlbLoaderRenderer(renderer);                   // its textures are KTX2
         armorScene = (await getSharedGltfLoader().loadAsync("/models/armored_horse_compressed.glb")).scene;
       }

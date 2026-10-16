@@ -22,8 +22,8 @@ const { buildWGSL, buildComputeWGSL, THREE, TSL } = await import("./wgslBuilderS
 const { revoGrassConfig, createRevoGrassState, REVO_GRASS_QUALITY, REVO_GRASS_GEOMETRY_KEYS, REVO_GRASS_DEFAULTS, REVO_GRASS_PRESETS } =
   await import("../v3/app/state/revoGrassState.js");
 const { RevoGrassSystem } = await import("../v3/render/grass/revoGrassSystem.js");
-const { createRevoBladeGeometry } = await import("../v2/core/revoGrass/revoGrassGeometry.js");
-const { createClipmapGroundY } = await import("../v2/core/terrain/clipmapGroundY.js");
+const { createRevoBladeGeometry } = await import("../v3/render/grass/revoGrassGeometry.js");
+const { createClipmapGroundY } = await import("../v3/terrain/clipmapGroundY.js");
 
 let fail = 0;
 const check = (name, ok, detail = "") => {
@@ -193,7 +193,7 @@ if (sys?.mesh) {
     centerXZ: new THREE.Vector2(), baseStep: 1, levels: 6, halfCells: 64,
   }) === "function");
   const src = await import("node:fs").then((fs) =>
-    fs.readFileSync("v2/render/hybridGrass/hybridGrassSystem.js", "utf8"));
+    fs.readFileSync("v3/render/grass/hybridGrassSystem.js", "utf8"));
   check("the hybrid grass uses the SHARED helper, not a second copy",
     /createClipmapGroundY/.test(src) && !/const stepW = base\.mul/.test(src),
     "two copies of the clipmap triangle math drift apart silently");

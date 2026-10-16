@@ -37,10 +37,10 @@ import {
   setTerrainShadowParams,
 } from "../render/lighting/terrainSunShadow.js";
 import { mergeKnownKeys } from "./state/mergeKnownKeys.js";
-import { createLensFlareSystem } from "../../v2/effects/lensFlare.js";
-import { createLensFlare2 } from "../../v2/effects/lensFlare2.js";
+import { createLensFlareSystem } from "../render/effects/lensFlare.js";
+import { createLensFlare2 } from "../render/effects/lensFlare2.js";
 import { applyBloomMRT } from "../render/bloomMRT.js";
-import { PostFxPipeline } from "../../v2/render/post/postFxPipeline.js";
+import { PostFxPipeline } from "../render/post/postFxPipeline.js";
 import { createDayNightSky } from "../render/sky/dayNightSky.js";
 import { createAtmosphereSky, skyBandWeights } from "../render/sky/atmosphereSkyDome.js";
 import { createSkyAtmosphere } from "../render/sky/skyAtmosphere.js";
@@ -55,8 +55,8 @@ import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js
 import { createWorldOcean } from "../render/water/worldOcean.js";
 import { createWorldOceanV2 } from "../render/water/worldOceanV2.js";
 import { HEIGHTMAP_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
-import { InteriorVolumeRegistry } from "../../v2/render/lighting/interiorVolumeRegistry.js";
-import { createInteriorLightingNodes } from "../../v2/render/lighting/interiorLightingTsl.js";
+import { InteriorVolumeRegistry } from "../render/lighting/interiorVolumeRegistry.js";
+import { createInteriorLightingNodes } from "../render/lighting/interiorLightingTsl.js";
 
 const PROC_ENV_IDLE = 3.0;
 const STREAM_QUEUE_PRESSURE = 12;
@@ -1187,7 +1187,7 @@ export async function createWorldEnvironment({
   }
 
   /*
-   * The night look's grade: the post chain's Purkinje node (v2/render/post/purkinjeNode.js), on the
+   * The night look's grade: the post chain's Purkinje node (v3/render/post/purkinjeNode.js), on the
    * linear frame BEFORE exposure, so its thresholds are absolute Sky Pro radiance (Tidewater units:
    * moonlit sand ~0.01, the moon's glitter 0.1+). Enabling rebuilds the display shaders — a
    * MEASURED 1.8 s frame in the editor — so it is enabled the first frame this sky drives (load or
@@ -2130,7 +2130,7 @@ export async function createWorldEnvironment({
   /*
    * TWO FLARES, ONE PARAMS OBJECT.
    *
-   * `lensFlare2` is the analytic rewrite (v2/effects/lensFlare2.js): 4 draw calls instead
+   * `lensFlare2` is the analytic rewrite (v3/render/effects/lensFlare2.js): 4 draw calls instead
    * of 16, every shape computed rather than baked into an 8-bit canvas, and the bright
    * parts routed into the emissive MRT so the flare actually blooms alongside the sun disc
    * it sits on. The original is kept, running off the SAME params object, so the two can be

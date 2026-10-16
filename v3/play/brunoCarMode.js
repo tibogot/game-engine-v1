@@ -1,6 +1,6 @@
 import * as THREE from "three";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
-import { CarPhysics } from "../../v2/play/carPhysics.js";
+import { getSharedGltfLoader } from "../render/foliage/glbLoader.js";
+import { CarPhysics } from "./carPhysics.js";
 
 const CAR_MODEL = "/models/bruno.glb";
 const CAR_MODEL_YAW = Math.PI / 2;

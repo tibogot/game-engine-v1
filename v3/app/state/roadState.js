@@ -1,4 +1,4 @@
-import { SMART_ROAD_DEFAULTS } from "../../../v2/tools/smartRoad/smartRoadLabSystem.js";
+import { SMART_ROAD_DEFAULTS } from "../../tools/smartRoad/smartRoadLabSystem.js";
 
 /**
  * Panel-editable Smart Road params. Geometry/marking keys are assigned into

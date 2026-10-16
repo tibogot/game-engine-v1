@@ -1,4 +1,4 @@
-import { createToolState } from "../../../v2/app/state/toolState.js";
+import { createToolState } from "./legacyToolState.js";
 
 /** Tree-mode toolState slice — same defaults as v2 createToolState(). */
 export function createTreeToolState() {

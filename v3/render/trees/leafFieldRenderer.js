@@ -43,7 +43,7 @@ import {
   createMergedFoliageMaterial,
   setFoliageTexture,
   MAX_MERGED_SLOTS,
-} from "../../../v2/render/foliage/foliageMaterial.js";
+} from "../foliage/foliageMaterial.js";
 import { terrainShade } from "../lighting/terrainSunShadow.js";
 
 /**

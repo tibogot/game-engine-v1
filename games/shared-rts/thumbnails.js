@@ -24,7 +24,7 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
   if (!renderer || !Array.isArray(items)) return out;
 
   // No MSAA — readRenderTargetPixelsAsync on a multi-sample WebGPU target reads
-  // the unresolved buffer and returns garbage (see v2/tools/objectThumbnails.js).
+  // the unresolved buffer and returns garbage (see v3/tools/objectThumbnails.js).
   //
   // ONE TARGET PER PORTRAIT, READ BACK TOGETHER. A readback is a GPU round
   // trip (~115 ms here) almost regardless of size, and this used to render,

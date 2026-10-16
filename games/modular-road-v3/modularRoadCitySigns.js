@@ -68,7 +68,7 @@ import {
   mix, smoothstep, abs, max, min, sin, cos, clamp, oneMinus, step, saturate, fwidth,
 } from "three/tsl";
 import { applyBloomMRT } from "../../v3/render/bloomMRT.js";
-import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v2/objects/shared/ledMatrix.js";
+import { makeLedMatrixMaterial, applyLedMatrixParams } from "../../v3/props/objects/shared/ledMatrix.js";
 import { buildAdTotemMesh, AD_TOTEM } from "./modularRoadAdBillboard.js";
 import { shareInstancePipeline } from "../../v3/render/instancePipeline.js";
 
@@ -254,7 +254,7 @@ export const SIGN_DEFAULTS = {
    * of signage — see the placement block at the end of createCitySigns. Every
    * other hero is a printed wrap, which is why `heroScreenFraction` is 0.
    *
-   * THE MODEL IS v2/objects/shared/ledMatrix.js, ported rather than imported.
+   * THE MODEL IS v3/props/objects/shared/ledMatrix.js, ported rather than imported.
    * That file is the canonical LED shader and it gets this right in a way the
    * first attempt here did not: the previous version drew a subpixel grid OVER
    * a smooth photograph, which is a photo with a screen door in front of it.

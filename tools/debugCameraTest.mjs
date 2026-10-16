@@ -289,7 +289,7 @@ console.log("\n=== ENTERING IS CONTINUOUS, NOT A CUT ===");
 console.log("\n=== ZOOM ACTUALLY MOVES THE CAMERA ===");
 // This shipped BROKEN and the first version of this test did not catch it,
 // because it only asserted the LIMITS were sane and never that a scroll changed
-// anything. It didn't: v2/app/editorCameraController.js binds wheel on the
+// anything. It didn't: v3/app/editorCameraController.js binds wheel on the
 // canvas with capture:true at engine boot and stopPropagation()s every plain
 // scroll, so the rig's own canvas listener was never called. Measured in the
 // live page: 15 wheel events, distance 8.15 m → 8.15 m → 8.15 m.

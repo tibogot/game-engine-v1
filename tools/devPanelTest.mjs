@@ -174,7 +174,7 @@ console.log("\n=== WORLD-LIGHT SLIDERS COVER THE ACTUAL VALUES ===");
 // sets them, and the engine defaults where it doesn't.
 {
   const game = readFileSync(join(ROOT, "games/modular-road-v3/roadGame.js"), "utf8");
-  const cfg = readFileSync(join(ROOT, "v2/app/config.js"), "utf8");
+  const cfg = readFileSync(join(ROOT, "v3/app/config.js"), "utf8");
   const wstate = readFileSync(join(ROOT, "v3/app/state/worldState.js"), "utf8");
 
   const range = (id) => {

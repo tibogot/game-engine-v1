@@ -10,7 +10,7 @@ import {
   buildWindmillMesh,
   isWindmillModelReady,
   preloadWindmillModel,
-} from "../../v2/objects/windmill.js";
+} from "../../v3/props/objects/windmill.js";
 
 /**
  * Placeable moving obstacles — same gizmo workflow as static props, backed by

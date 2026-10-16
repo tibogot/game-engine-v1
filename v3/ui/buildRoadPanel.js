@@ -1,4 +1,4 @@
-import { ROAD_PROFILES } from "../../v2/tools/smartRoad/smartRoadLabSystem.js";
+import { ROAD_PROFILES } from "../tools/smartRoad/smartRoadLabSystem.js";
 import { section as _section, slider as _slider, toggle as _toggle, dropdown as _dropdown, button as _button, hint } from "./widgets.js";
 import { uiById } from "./uiRoot.js";
 const _hint = (parent, html) => hint(parent, html, { html: true });

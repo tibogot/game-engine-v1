@@ -3,7 +3,7 @@
  * v2/play/playMode.js fly physics is unchanged; this module does not import it.
  */
 import * as THREE from "three";
-import { loadTreeGlbFromUrl } from "../../v2/core/foliage/glbLoader.js";
+import { loadTreeGlbFromUrl } from "../render/foliage/glbLoader.js";
 import { createPlaneGun } from "./planeGun.js";
 import { FlightController, DEFAULT_FLIGHT_PARAMS } from "./flightController.js";
 import { createFlightCollider } from "./flightCollider.js";

@@ -1,4 +1,4 @@
-import { terrainGenHeightAtWorld } from "../../v2/core/terrain/proceduralTerrainGen.js";
+import { terrainGenHeightAtWorld } from "./proceduralTerrainGen.js";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 
 export const DEFAULT_GEN = {

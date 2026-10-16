@@ -32,7 +32,7 @@ import * as THREE from "three";
 import {
   getSharedGltfLoader,
   initGlbLoaderRenderer,
-} from "../../v2/core/foliage/glbLoader.js";
+} from "../../v3/render/foliage/glbLoader.js";
 
 export const WHEEL_GLB_URL = "/models/newwheels2_compressed.glb";
 
@@ -61,7 +61,7 @@ export async function loadWheelModel(renderer, url = WHEEL_GLB_URL) {
   object.add(root);
 
   // SHADOW BUDGET. Every caster is re-drawn once per shadow cascade, and v3 runs
-  // 3 (v2/app/config.js: capped at 3, not 4, by the Windows WebGPU 16-sampler
+  // 3 (v3/app/config.js: capped at 3, not 4, by the Windows WebGPU 16-sampler
   // limit). So a caster costs 1 main draw + 3 shadow draws.
   //
   // Only the TYRE casts. The rim, rotor and caliper all sit INSIDE the tyre's

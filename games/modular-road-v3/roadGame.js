@@ -344,7 +344,7 @@ export async function startRoadGame({ container, onStatus = () => {} } = {}) {
      * WHY THE QUALITY HOLDS. `maxFar` is 80 m, so two cascades cover ~40 m each
      * at 2048² — about 50 texels per metre, on a chase camera that never
      * inspects a distant shadow edge. Three cascades was never a quality
-     * decision anyway: the config comment in v2/app/config.js says it is a
+     * decision anyway: the config comment in v3/app/config.js says it is a
      * SAMPLER BUDGET ceiling ("3 cascades (not 4): Windows WebGPU caps
      * samplers/stage at 16"), and each cascade spends one. Dropping to two hands
      * a binding back to the scarcest resource in the engine — the same ceiling

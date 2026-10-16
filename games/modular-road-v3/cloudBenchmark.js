@@ -33,7 +33,7 @@ import { createDayNightCloudLayer } from "../../v3/render/clouds/dayNightCloudLa
 import { LAYERS } from "../../v3/render/layers.js";
 
 /**
- * The editor deck's shipped defaults, copied from v2/app/config.js
+ * The editor deck's shipped defaults, copied from v3/app/config.js
  * (`V2_CONFIG.volumetricCloudDayNight`) rather than imported, so this harness does not drag
  * the whole v2 config graph into the lab bundle. If those defaults change, this drifts —
  * it is a benchmark baseline, so pin it rather than track it.

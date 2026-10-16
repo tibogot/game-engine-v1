@@ -39,7 +39,7 @@
       import * as THREE from "three";
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { initBirdMorph, createBirdTemplate } from "./props/birdMorph.js";
-      import { initGlbLoaderRenderer } from "../v2/core/foliage/glbLoader.js";
+      import { initGlbLoaderRenderer } from "./render/foliage/glbLoader.js";
 
       const $ = (id) => document.getElementById(id);
       addEventListener("error", (e) => { $("err").textContent += e.message + "\n"; });

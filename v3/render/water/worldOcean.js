@@ -17,7 +17,7 @@ import { createOceanShader } from "./oceanShader.js";
 import {
   createOceanFFTGPUSimulation,
   OCEAN_FFT_GPU_DEFAULTS,
-} from "../../../v2/core/legacy/ocean-fft-gpu.js";
+} from "../legacy/ocean-fft-gpu.js";
 
 // ── CDLOD clipmap geometry (identical to v2) ──────────────────────────────────
 function buildRingGeometryXZ(seg, outerHalf, innerHalf) {

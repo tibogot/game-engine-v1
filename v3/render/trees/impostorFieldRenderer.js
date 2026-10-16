@@ -19,7 +19,7 @@ import * as THREE from "three";
 import {
   attribute, cameraPosition, length, step, uniform, vec2,
 } from "three/tsl";
-import { makeFlatAuxTextures, createImpostorMaterials } from "../../../v2/render/foliage/octahedralCore.js";
+import { makeFlatAuxTextures, createImpostorMaterials } from "../foliage/octahedralCore.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
 const INITIAL_CAP     = 4096;

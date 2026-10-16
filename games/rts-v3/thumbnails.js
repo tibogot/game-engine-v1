@@ -14,7 +14,7 @@ export async function bakeThumbnails({ renderer, items, size = 256, fill = 0.9 }
   if (!renderer || !Array.isArray(items)) return out;
 
   // No MSAA — readRenderTargetPixelsAsync on a multi-sample WebGPU target reads
-  // the unresolved buffer and returns garbage (see v2/tools/objectThumbnails.js).
+  // the unresolved buffer and returns garbage (see v3/tools/objectThumbnails.js).
   const rt = new THREE.RenderTarget(size, size, {
     type: THREE.UnsignedByteType,
     format: THREE.RGBAFormat,

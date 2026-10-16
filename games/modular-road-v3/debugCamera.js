@@ -105,7 +105,7 @@ export function createDebugCamera({
 
   // ── MOUSE ──────────────────────────────────────────────────────────────────
   // BOUND ON WINDOW AT CAPTURE, NOT ON THE CANVAS. This is not a style choice —
-  // the canvas is already spoken for. v2/app/editorCameraController.js (which v3
+  // the canvas is already spoken for. v3/app/editorCameraController.js (which v3
   // uses) registers
   //     domElement.addEventListener("wheel", onWheel, { passive:false, capture:true })
   // at engine boot, and its zoom() calls stopPropagation() on EVERY plain scroll.

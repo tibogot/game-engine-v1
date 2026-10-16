@@ -56,7 +56,7 @@ import {
 } from "three/tsl";
 import { WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 import { hexSample } from "./splatOverlayTsl.js";
-import { grassFieldAlbedo } from "../../v2/render/hybridGrass/grassFieldColor.js";
+import { grassFieldAlbedo } from "../render/grass/grassFieldColor.js";
 import { flatSurface, gridSurface } from "../render/materials/gridMaterial.js";
 
 export const GROUND_CACHE_DEFAULTS = {

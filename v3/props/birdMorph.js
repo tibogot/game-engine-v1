@@ -13,8 +13,8 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
 import { clone as cloneSkinned } from "three/addons/utils/SkeletonUtils.js";
-import { setupDraco } from "../../v2/core/dracoLoader.js";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { setupDraco } from "../io/dracoLoader.js";
+import { getSharedGltfLoader } from "../render/foliage/glbLoader.js";
 
 const URL_CHICKEN = "/models/Chicken_001_compressed.glb";
 

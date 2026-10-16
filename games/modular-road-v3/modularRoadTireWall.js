@@ -12,7 +12,7 @@ import { materialColor } from "three/tsl";
 import {
   getSharedGltfLoader,
   initGlbLoaderRenderer,
-} from "../../v2/core/foliage/glbLoader.js";
+} from "../../v3/render/foliage/glbLoader.js";
 import { mergeByMaterial, dequantize, markSharedGeometry } from "./modularRoadBatching.js";
 
 export const TIRE_WALL_URL = "/models/race_track_tire_wall_compressed.glb";

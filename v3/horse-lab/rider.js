@@ -19,7 +19,7 @@
 // Saddle points were measured on the horse in its idle pose at 2.15 m (rig
 // space: back top 1.47 m at z −0.05) and are scaled to its real height.
 import * as THREE from "three";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../render/foliage/glbLoader.js";
 import { rotateWorld, solveTwoBone } from "./horse.js";
 import { Rein } from "./reins.js";
 import { MountSystem } from "./mount.js";

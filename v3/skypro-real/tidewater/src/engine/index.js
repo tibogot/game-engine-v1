@@ -1,5 +1,5 @@
 // CPU-side engine: math, scene graph and geometry with a three.js-compatible
-// API. `import * as THREE from '../engine/index.js'` works as a stopgap for
+// API. `import * as THREE from './index.js'` works as a stopgap for
 // ported files.
 
 export * from './math/index.js';

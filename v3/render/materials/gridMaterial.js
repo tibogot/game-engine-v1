@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS (and why it is not "tileMaterial but prettier")
  * ───────────────────────────────────────────────────────────────
- * `v2/core/legacy/tileMaterial.js` draws its grid by sampling `grid.png` at two
+ * `v3/render/legacy/tileMaterial.js` draws its grid by sampling `grid.png` at two
  * scales. That costs three things a greybox surface should not cost:
  *
  *   1. It is NOT METRIC. The cell period falls out of `textureScale × 0.00125`

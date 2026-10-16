@@ -834,6 +834,26 @@ twice with a pillar whose shadow crosses the view; the shadow was correct.
 Full v2 vs v3 editor comparison, mode by mode and UI. v2 is only deleted once
 this section is empty; what v3 still imports from v2 moves, it is not lost.
 
+**`v2/` IS DELETED (2026-10-16).** The 113 files v3, games, tests and the authoring pages used
+were moved into v3 (map in `/MIGRATION.md` step 1); the rest is in tag `archive-2026-10`. Paths
+below that start with `v2/` are history.
+
+**Re-checked 2026-10-16, before absorbing v2 into v3 and deleting `v2/`** (trace:
+`tools/migrationTrace.mjs`; v3 + games import 104 v2 files, 155 v2 files are used by nothing).
+Agreed with the user:
+- **Kept, now in `v3/authoring/`:** the authoring pages that still make
+  content: `arborist.html` (tree builder; v3 foliage uses its leaf cards and masks),
+  `pine-editor33.html` (tree presets; the 14 in `public/tree-presets/` load in v3),
+  `objects-lab.html` (preview of the ~30 prop builders v3 uses), and `masonry-lab.html` +
+  `objects/masonry/` (bricks + gothic church; v3 has none, see the bricks plan).
+- **Still open below (93-96): build new, the v2 code is reference only** (it stays in the
+  `archive-2026-10` tag): audio (the shared one comes from `games/shared-rts/rtsAudio.js`, the
+  most complete; v2's is 240 lines), gameplay markers + barrier zones (one markers/zones mode),
+  dialogue runner (a kit when a game needs it), moving platforms (Apex Rush's movers are better).
+- 97 Waterfall is done in v3 (`v3/render/waterfall/`).
+- Everything else: v3 is equal or better (list at the end of this section); the other v2 pages
+  are self-contained experiments → archive only.
+
 ### v3's own gaps found in the comparison (do first — games load the level)
 
 84. ~~The .v3proj does not save everything~~ — DONE 2026-09-14. Now saved:

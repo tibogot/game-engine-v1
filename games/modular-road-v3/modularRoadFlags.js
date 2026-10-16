@@ -1,7 +1,7 @@
 // ============================================================================
 // TRACK FLAGS — banner + country flag cloth.
 //
-// LIVE CLOTH is the engine Verlet sim (v2/core/props/flagFactory.js), the same
+// LIVE CLOTH is the engine Verlet sim (v3/props/flagFactory.js), the same
 // one the RTS base flag uses. A shader-displaced plane can be denser and still
 // look cheap: the wave moves verts but lighting keeps (or reconstructs) normals
 // that read as faceted cardboard. Verlet rebuilds smooth vertex normals each

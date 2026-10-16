@@ -2,21 +2,21 @@
  * V2 tree stack wired for V3 — paint, trunk/foliage/impostor LOD, height sync.
  */
 import * as THREE from "three";
-import { TreeStore } from "../../v2/core/foliage/treeStore.js";
-import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
-import { TreeLodRenderer } from "../../v2/render/foliage/treeLodRenderer.js";
-import { FoliageLodRenderer } from "../../v2/render/foliage/foliageLodRenderer.js";
+import { TreeStore } from "../render/foliage/treeStore.js";
+import { bakeObjectThumbnails } from "../tools/objectThumbnails.js";
+import { TreeLodRenderer } from "../render/foliage/treeLodRenderer.js";
+import { FoliageLodRenderer } from "../render/foliage/foliageLodRenderer.js";
 import { ImpostorFieldRenderer as ImpostorRenderer } from "../render/trees/impostorFieldRenderer.js";
 import { terrainShade } from "../render/lighting/terrainSunShadow.js";
 import { LeafFieldRenderer } from "../render/trees/leafFieldRenderer.js";
-import { TreeSystem } from "../../v2/tools/foliage/treeSystem.js";
+import { TreeSystem } from "../tools/treeSystem.js";
 import {
   loadTreeGlbFromFile,
   openGlbPicker,
-} from "../../v2/core/foliage/glbLoader.js";
-import { loadFullPresetFromFile } from "../../v2/core/foliage/presetLoader.js";
+} from "../render/foliage/glbLoader.js";
+import { loadFullPresetFromFile } from "../render/foliage/presetLoader.js";
 import { projectAssets } from "../io/projectAssets.js";
-import { bakeSlotImpostor, IMPOSTOR_BAKE } from "../../v2/render/foliage/impostorBake.js";
+import { bakeSlotImpostor, IMPOSTOR_BAKE } from "../render/foliage/impostorBake.js";
 import { uiById } from "../ui/uiRoot.js";
 
 const MODELS_SEARCH_PATHS = ["../models/", "models/"];

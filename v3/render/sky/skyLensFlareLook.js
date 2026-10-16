@@ -67,6 +67,6 @@ export const SKY_LENS_FLARE_LOOK = {
   /* Take most of the colour from the sky's live sun rather than the constant above,
    * so the flare goes deep orange at sunset instead of staying noon-warm all day. */
   sourceColorMix: 0.85,
-  /** true = run the ORIGINAL v2/effects/lensFlare.js instead. Dev-panel A/B. */
+  /** true = run the ORIGINAL v3/render/effects/lensFlare.js instead. Dev-panel A/B. */
   legacy: false,
 };

@@ -16,7 +16,7 @@
 // stride as the outgoing one, so the crossfade never makes a leg jump.
 import * as THREE from "three";
 import { fitBodyToRig } from "./horseBody.js";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../render/foliage/glbLoader.js";
 
 const V3 = THREE.Vector3;
 export const FEET = ["FFL", "FFR", "FFBL", "FFBR"];

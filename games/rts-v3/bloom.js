@@ -12,7 +12,7 @@ import { output, vec4, float, mul, uv, vec2, smoothstep, materialColor, material
  * MRTNode maps members to attachments BY TEXTURE NAME. With nothing named
  * "emissive", the stock mrt() emits a ZERO-MEMBER WGSL output struct —
  * "structures must have at least one member" → invalid pipeline → the renderer
- * dies. Same trap the LED boards hit (v2/objects/shared/ledMatrix.js).
+ * dies. Same trap the LED boards hit (v3/props/objects/shared/ledMatrix.js).
  *
  * This subclass keeps the stock behaviour whenever an attachment name matches,
  * and otherwise collapses to the material's plain `output` like a normal

@@ -8,7 +8,7 @@
 // for the flock, idle ⇄ walk crossfaded on the GPU. What they DO is
 // chickens.js's henBrain; a failed load falls back to its procedural hen.
 import * as THREE from "three";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { createChickens, henBrain } from "./chickens.js";
 

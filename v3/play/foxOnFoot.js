@@ -1,4 +1,4 @@
-import { QuadrupedOnFoot, QUADRUPED_CAPSULE_DEFAULTS } from "../../v2/play/quadrupedOnFoot.js";
+import { QuadrupedOnFoot, QUADRUPED_CAPSULE_DEFAULTS } from "./quadrupedOnFoot.js";
 
 export const FOX_MODEL = "/models/fox.glb";
 /** Overall model height in metres — the one knob for how big the fox reads. */

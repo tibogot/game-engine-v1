@@ -14,7 +14,7 @@
 // and the whole herd goes through the soldiers' GPU crowd path: ONE draw.
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { createCrowdField } from "./crowdSkinning.js";
 import { RTS_SCALE } from "./unitTypes.js";
 

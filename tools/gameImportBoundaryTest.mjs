@@ -49,7 +49,7 @@ function importsOf(file) {
 const gameViolations = [];
 for (const file of walk(path.join(ROOT, "games"))) {
   for (const { target, line } of importsOf(file)) {
-    if (!/^(v3|v2)\//.test(target)) continue;
+    if (!/^v3\//.test(target)) continue;
     if (target === "v3/engine.js" || PUBLIC.has(target)) continue;
     gameViolations.push(`${rel(file)}:${line} → ${target}`);
   }
@@ -58,11 +58,9 @@ check("games import the engine only through v3/engine.js or a public module",
   gameViolations.length === 0, gameViolations.join("\n      "));
 
 const engineViolations = [];
-for (const dir of ["v3", "v2"]) {
-  for (const file of walk(path.join(ROOT, dir))) {
-    for (const { target, line } of importsOf(file)) {
-      if (target.startsWith("games/")) engineViolations.push(`${rel(file)}:${line} → ${target}`);
-    }
+for (const file of walk(path.join(ROOT, "v3"))) {
+  for (const { target, line } of importsOf(file)) {
+    if (target.startsWith("games/")) engineViolations.push(`${rel(file)}:${line} → ${target}`);
   }
 }
 check("the engine never imports from games/", engineViolations.length === 0, engineViolations.join("\n      "));

@@ -52,7 +52,7 @@ import { createOceanUnderwater } from "./oceanUnderwater.js";
 import {
   createOceanFFTGPUSimulation,
   OCEAN_FFT_GPU_DEFAULTS,
-} from "../../../v2/core/legacy/ocean-fft-gpu.js";
+} from "../legacy/ocean-fft-gpu.js";
 
 export const OCEAN2_LOD_DEFAULTS = {
   /** Rings before the horizon extension kicks in. */

@@ -1,4 +1,4 @@
-/** Default spline tool state — mirrors v2/app/state/toolState.js `spline` block. */
+/** Default spline tool state — mirrors v3/app/state/legacyToolState.js `spline` block. */
 export const DEFAULT_SPLINE_STATE = {
   objectType: "trees",
   objectId: "guardrail",

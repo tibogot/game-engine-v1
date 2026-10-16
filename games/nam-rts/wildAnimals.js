@@ -19,7 +19,7 @@
 // the whole group skinned in one compute pass and drawn in ONE call.
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 
 /** A float copy of an attribute (the GLBs' are quantised). */
 function floatAttr(a) {

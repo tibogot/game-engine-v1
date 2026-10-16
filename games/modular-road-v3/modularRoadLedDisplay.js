@@ -17,7 +17,7 @@ import {
   applyLedMatrixParams,
   makeLedMatrixMaterial,
   makeTextTexture,
-} from "../../v2/objects/shared/ledMatrix.js";
+} from "../../v3/props/objects/shared/ledMatrix.js";
 import { advertFileToDataUrl } from "./modularRoadAdBillboard.js";
 
 /** Physical board — same stamp as the frozen LED board, so the comparison is fair. */

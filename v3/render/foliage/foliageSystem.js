@@ -31,7 +31,7 @@ import { drawLanceLeafTexture, LANCE_TEX_W, LANCE_TEX_H } from "./lanceLeafTextu
 import { drawBanyanLeafTexture, BANYAN_TEX_W, BANYAN_TEX_H } from "./banyanLeafTexture.js";
 import { drawCedarNeedleTexture, NEEDLE_TEX_W, NEEDLE_TEX_H } from "./cedarNeedleTexture.js";
 import { drawLeafSprayCard, loadLeafSprayMasks, LEAF_SPRAY_MASKS, LEAF_SPRAY_TEX } from "./leafSprayCard.js";
-import { bakeObjectThumbnails } from "../../../v2/tools/objectThumbnails.js";
+import { bakeObjectThumbnails } from "../../tools/objectThumbnails.js";
 import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { foliageLeafLift, foliageTopdownLift } from "./foliageLighting.js";

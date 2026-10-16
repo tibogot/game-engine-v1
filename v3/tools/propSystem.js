@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { shouldApplyStroke } from "../../v2/tools/sculpt/brushModel.js";
+import { shouldApplyStroke } from "../terrain/brushModel.js";
 
 /**
  * V2-compatible props tool: Place (click + stamp) and Paint (brush scatter + Alt erase).

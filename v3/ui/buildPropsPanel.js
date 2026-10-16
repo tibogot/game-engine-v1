@@ -1,6 +1,6 @@
-import { bakeObjectThumbnails } from "../../v2/tools/objectThumbnails.js";
+import { bakeObjectThumbnails } from "../tools/objectThumbnails.js";
 import { projectAssets, isAssetRef } from "../io/projectAssets.js";
-import { proceduralThumbnailItems } from "../../v2/core/props/proceduralObjectProps.js";
+import { proceduralThumbnailItems } from "../props/proceduralObjectProps.js";
 import { section as _section, separator as _separator, slider as _slider, color as _color, toggle as _toggle, dropdown as _dropdown, button as _button, CHECK_SVG as _checkSvg } from "./widgets.js";
 import { uiById } from "./uiRoot.js";
 

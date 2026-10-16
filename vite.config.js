@@ -165,8 +165,6 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: "index.html",
-        editor: "v2/editor.html",
-        play: "v2/play.html",
         rtsV3: "games/rts-v3/rts.html",
         namRts: "games/nam-rts/nam.html",
         algRts: "games/alg-rts/alg.html",

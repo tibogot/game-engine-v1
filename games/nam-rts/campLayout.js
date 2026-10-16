@@ -16,7 +16,7 @@ import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { ATLAS_COLS, ATLAS_ROWS, rtsAtlas } from "../../v3/render/objects/rtsTextures.js";
 import { abs, clamp, dot, fract, normalLocal, positionLocal, select, texture, uv, vec2, vec3 } from "three/tsl";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 
 /** Real size x 1.3, like the units (unitTypes.js RTS_SCALE). */
 const S = 1.3;

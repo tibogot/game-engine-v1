@@ -66,14 +66,14 @@ import {
   PI2,
   positionLocal,
 } from "three/tsl";
-import { hash42 } from "../../../v2/core/foliage/tsl-utils.js";
-import { createRevoBladeGeometry } from "../../../v2/core/revoGrass/revoGrassGeometry.js";
-import { wrapTileOffsetXZ } from "../../../v2/core/revoGrass/revoGrassTile.js";
+import { hash42 } from "../foliage/foliageTslUtils.js";
+import { createRevoBladeGeometry } from "./revoGrassGeometry.js";
+import { wrapTileOffsetXZ } from "./revoGrassTile.js";
 import {
   computeStochasticKeep,
   computeFrustumVisibility,
-} from "../../../v2/core/revoGrass/revoGrassSsboUtils.js";
-import { createClipmapGroundY } from "../../../v2/core/terrain/clipmapGroundY.js";
+} from "./revoGrassSsboUtils.js";
+import { createClipmapGroundY } from "../../terrain/clipmapGroundY.js";
 import { worldSizeForPixels } from "../scatter/gpuCull.js";
 import { revoGrassConfig } from "../../app/state/revoGrassState.js";
 import { markGpuOnly } from "../gpuOnlyArrays.js";

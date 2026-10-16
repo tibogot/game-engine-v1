@@ -12,11 +12,11 @@
 // (+5 m) · 2+1 concertina (+9 m). The concertina is a nav BARRIER, split at
 // the gate, so the gate is the only way in or out on foot or wheels.
 import * as THREE from "three";
-import { buildBarbWireMesh } from "../../v2/objects/barbWire.js";
-import { buildChainLinkFenceMesh } from "../../v2/objects/chainLinkFence.js";
+import { buildBarbWireMesh } from "../../v3/props/objects/barbWire.js";
+import { buildChainLinkFenceMesh } from "../../v3/props/objects/chainLinkFence.js";
 import { mayCastShadow } from "../../v3/render/objects/rtsStencils.js";
-import { buildFloodlightMesh } from "../../v2/objects/floodlight.js";
-import { buildPowerLineMesh } from "../../v2/objects/powerLine.js";
+import { buildFloodlightMesh } from "../../v3/props/objects/floodlight.js";
+import { buildPowerLineMesh } from "../../v3/props/objects/powerLine.js";
 import { buildGate, buildGuardTower } from "../../v3/render/objects/rtsFirebaseProps.js";
 import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 

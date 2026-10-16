@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../render/foliage/glbLoader.js";
 
 const CHAR_HEIGHT   = 2.5;
 const WALK_ANIM_REF = 2.0;

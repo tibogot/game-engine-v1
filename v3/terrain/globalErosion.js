@@ -13,7 +13,7 @@
 const GRAVITY = 4;
 const MIN_SLOPE = 0.001;
 
-/** v2 `toolState.erosion` defaults (v2/app/config.js), iterations rescaled for
+/** v2 `toolState.erosion` defaults (v3/app/config.js), iterations rescaled for
  * v3's 1024² grid — v2-era 30k droplets only scratch ~3% of a map this size. */
 export const EROSION_DEFAULTS = {
   iterations: 300000,

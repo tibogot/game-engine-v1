@@ -31,7 +31,7 @@
 // ============================================================================
 import * as THREE from "three";
 import { materialColor } from "three/tsl";
-import { getSharedGltfLoader } from "../../v2/core/foliage/glbLoader.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { mergeByMaterial, dequantize, markSharedGeometry } from "./modularRoadBatching.js";
 
 export const CONTAINER_URL = "/models/container01_compressed.glb";
