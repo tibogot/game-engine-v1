@@ -760,7 +760,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
 export function applyAuresLight(app, L = AURES_LIGHT) {
   // The level's saved look (Atmosphere) is applied by the loader, over the boot mode.
   if (SKY_PRO) app.sky?.setMode?.("skypro");
-  app.sky?.set?.({ latitude: L.latitude, dayOfYear: L.dayOfYear });
+  // (a map's `sunTurn`: the sun's path turned so it lights from behind the camera — maps/coast.js)
+  app.sky?.set?.({ latitude: L.latitude, dayOfYear: L.dayOfYear, sunTurn: L.sunTurn ?? 0 });
   // ?tod=23 starts at that hour (the night: Sky Pro's moon, night look and local lights)
   const tod = Number(params.get("tod"));
   app.sky?.setTimeOfDay?.(Number.isFinite(tod) && params.has("tod") ? tod : L.timeOfDay);

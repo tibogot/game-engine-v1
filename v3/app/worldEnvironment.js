@@ -1649,8 +1649,10 @@ export async function createWorldEnvironment({
     toolState.light.sunElevation = THREE.MathUtils.radToDeg(
       Math.asin(THREE.MathUtils.clamp(_todSunDir.y, -1, 1)),
     );
+    // `sunTurn` (degrees, default 0): the sun's whole path turned about the vertical — a game laying
+    // its map along the camera wants the light from behind it, whatever the hour (the RTS coast).
     toolState.light.sunAzimuth =
-      (THREE.MathUtils.radToDeg(Math.atan2(_todSunDir.z, _todSunDir.x)) + 360) % 360;
+      (THREE.MathUtils.radToDeg(Math.atan2(_todSunDir.z, _todSunDir.x)) + (ps.sunTurn ?? 0) + 720) % 360;
     toolState.proceduralSky.timeOfDay = t;
   }
 

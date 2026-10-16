@@ -55,6 +55,10 @@ const TRACK = [[-40, -62], [5, -52], [22, -10], [24, 45], [14, 100], [22, 150], 
 export const MAP = {
   id: "coast",
   viewYaw: 0,   // the camera looks south: the post at the bottom, the katiba at the top (layout.js)
+  // THE SUN FROM BEHIND THE CAMERA (2026-10-16): looking south, the afternoon sun stood at the
+  // camera's right and a little in front — the shadows fell toward the camera, backlit. Its path
+  // turned 45°: it lights from the back-right (north-west), the shadows fall away up the screen.
+  light: { sunTurn: 45 },
   name: "Côte du Constantinois — août 1955",
   level: "/levels/alg-coast.v3proj",
   tracks: [{ name: "Route de la côte", kind: "piste", from: "gate", to: "Katiba des crêtes", length: 420, points: TRACK }],

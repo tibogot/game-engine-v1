@@ -291,14 +291,20 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
     // (on the cap: the scrub's floor mottled with bare red earth, 35-65% — solid maquis read as a lawn)
     const maquis = smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21)) * 0.85 + smoothstep(4, 10, above - 2) * 0.35 + hk * (0.2 + 0.3 * noise(x / 9, z / 9, 63));
     const wd = wadiAt(x, z, 30).d, bed = wadi ? 1 - smoothstep(wadi.width * 0.45, wadi.width * 0.8, wd) : 0;
-    const trk = 1 - smoothstep(3, 5.5, trackAt(x, z, 30).d);
-    w[6] = trk;
+    // THE PISTE (2026-10-16, you: it read as a fuzzy hedge): painted as wide as its carved running
+    // surface (trackCarve PISTE.half 2.6 m — it was 3-5.5 m, a 10 m band), two darker WHEEL RUTS
+    // (~0.95 m out: the plain's earth, packed) and a patchy WEEDY STRIP down the middle (the maquis)
+    const td = trackAt(x, z, 30).d;
+    const trk = 1 - smoothstep(2.4, 3.6, td);
+    const ruts = trk * Math.exp(-(((td - 0.95) / 0.32) ** 2)) * 0.65;
+    const strip = trk * (1 - smoothstep(0.3, 0.6, td)) * 0.85 * smoothstep(0.3, 0.55, noise(x / 7, z / 7, 66));
+    w[6] = trk - ruts - strip;
     w[4] = (1 - trk) * bed;
     w[5] = (1 - trk) * (1 - bed) * rock;
     w[1] = (1 - trk) * (1 - bed) * (1 - rock) * sand;
     const rest = (1 - trk) * (1 - bed) * (1 - rock) * (1 - sand);
-    w[3] = rest * Math.min(1, maquis);
-    w[0] = rest * (1 - Math.min(1, maquis));
+    w[3] = rest * Math.min(1, maquis) + strip;
+    w[0] = rest * (1 - Math.min(1, maquis)) + ruts;
   }
   const sum = w.reduce((a, b) => a + b, 0) || 1;
   for (let c = 0; c < 7; c++) if (w[c]) put(t, c, Math.round((255 * w[c]) / sum));
@@ -388,6 +394,9 @@ set(2, "Seabed", "/textures/ground/coast_sand_05", "coast_sand_05_", PH, { uvSca
 set(3, "Maquis", "/textures/ground/rocky_terrain_02", "rocky_terrain_02_", PH, { uvScale: W / 10, normalStr: 0.6, aoStr: 0.35, tint: "#c4b48c" });
 // THE CLIFF ROCK: the layered ochre stone the cap's slabs are made of (algSandstone's side photo), greyed
 // toward the Stora capes (the template's rock_boulder_dry, pale beige, read as SAND at the cliff foot)
+// THE PISTE: packed pale ochre earth, a fine grain (dry_mud_field's grey photo and its fibrous normal
+// map drew the road as a brush hedge)
+set(6, "Dirt track", "/textures/ground/desert_road", "desert_road_", PH, { uvScale: W / 6, normalStr: 0.35, aoStr: 0.3, tint: "#e6c4a0" });
 set(5, "Cliff rock", "/textures/ground/cliff_side", "cliff_side_", PH, { uvScale: W / 9, normalStr: 0.8, aoStr: 0.4, tint: "#bfb19c", triplanar: true });   // (side projections: top-down, the photo ran down the cliff in streaks)
 
 const blobs = new Map([["heightmap", Buffer.from(hgt.buffer)], ["splat", splat], ["susukiDensity", tallPaint.out], ["foliagePaint", groundPaint.out]]);
