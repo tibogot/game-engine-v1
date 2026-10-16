@@ -1875,12 +1875,13 @@ export function buildWorldPanel(app) {
          * LABELS now name the implementation. The saved values are untouched — an older
          * project still loads its "physical" or "procedural" mode unchanged.
          */
+        // Sky Pro first: the editor's default since 2026-10-17 (the main sky).
         options: {
-          "Physical (three.js)": "physical",
+          "Sky Pro (Tidewater) — default": "skypro",
           "Import HDR": "hdr",
-          "Procedural (day/night)": "procedural",
           "Atmosphere (scattering)": "atmosphere",
-          "Sky Pro (Tidewater)": "skypro",
+          "Procedural (day/night)": "procedural",
+          "Physical (three.js)": "physical",
         },
         onChange: () => {
           const newMode = ts.skyMode;
@@ -2368,6 +2369,16 @@ export function buildWorldPanel(app) {
           step: 1,
           hint: "Blotch size. Keep it well above the cell size — near it, the "
             + "variation reads as dirt on the grid rather than as the surface.",
+          onChange: live,
+        });
+        _slider(gbBody, gb, "checker", {
+          label: "Checker",
+          min: 0,
+          max: 0.2,
+          step: 0.01,
+          hint: "Alternate cells a little lighter / darker (1 m up close, bigger "
+            + "cells further away), as the Unreal and Unity prototype grids do: it "
+            + "keeps the scale readable once the lines have faded. 0 = off.",
           onChange: live,
         });
         _button(gbBody, {

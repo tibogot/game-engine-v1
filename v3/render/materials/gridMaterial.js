@@ -73,8 +73,10 @@ import {
   floor,
   fract,
   length,
+  log,
   max,
   mix,
+  pow,
   normalLocal,
   normalWorld,
   positionLocal,
@@ -227,6 +229,12 @@ export const GRID_DEFAULTS = {
   breakup: 0.12,
   /** Blotch size in METRES. Must be well above the cell size or it reads as dirt. */
   breakupScale: 8,
+  /**
+   * Checker, ±this fraction of the base colour on alternating cells (the 1 m
+   * cell up close, the distance cells further out). The Unreal / Unity prototype
+   * grids' trick for a floor that still reads once its lines have faded.
+   */
+  checker: 0.05,
 };
 
 /** Style values accepted by the terrain and by createGridMaterial. */
@@ -245,6 +253,17 @@ export const GRID_MODES = ["world", "object", "checker", "flat"];
  * carry this.
  */
 const BREAKUP_ALBEDO = 1.0;
+
+/**
+ * Line fade (gridSurface): a line size fades out while its cells shrink from
+ * LINE_FADE_HI to LINE_FADE_LO pixels apart, per direction, and the distance
+ * levels pick the finest size still LINE_FADE_LO apart. LINE_FADE_HI must stay
+ * below LINE_FADE_LO × majorRatio (20) or the level hand-over shows a step.
+ */
+const LINE_FADE_LO = 4;
+const LINE_FADE_HI = 10;
+/** How strongly a distance-level line takes the major colour (1 = as the 1 m line). */
+const FAR_LINE_INK = 0.85;
 
 // ── Uniforms ──────────────────────────────────────────────────────────────────
 
@@ -287,6 +306,7 @@ export function getGridUniforms() {
     breakupScale: uniform(float(d.breakupScale)),
     roughness: uniform(float(d.roughness)),
     roughLine: uniform(float(d.roughLine)),
+    checker: uniform(float(d.checker)),
   };
   return _shared;
 }
@@ -317,6 +337,7 @@ export function applyGridConfig(cfg = {}) {
   if (cfg.breakupScale !== undefined) u.breakupScale.value = Math.max(0.1, cfg.breakupScale);
   if (cfg.roughness !== undefined) u.roughness.value = cfg.roughness;
   if (cfg.roughLine !== undefined) u.roughLine.value = cfg.roughLine;
+  if (cfg.checker !== undefined) u.checker.value = cfg.checker;
   return u;
 }
 
@@ -340,7 +361,7 @@ export function applyGridConfig(cfg = {}) {
  *   • past one cell per pixel the line is replaced by its own average, which is
  *     the moiré fix: nothing is left to alias.
  */
-const gridLayer = /*@__PURE__*/ Fn(([uvN, deriv, lineW]) => {
+const gridLayer = /*@__PURE__*/ Fn(([uvN, deriv, lineW, weight]) => {
   // A fully degenerate quad (backface, zero-area triangle) gives a zero
   // derivative; dividing by it later yields NaN, which reads as a black pixel.
   const d = max(vec2(deriv), vec2(1e-8)).toVar();
@@ -354,6 +375,9 @@ const gridLayer = /*@__PURE__*/ Fn(([uvN, deriv, lineW]) => {
   const g = vec2(1.0).sub(smoothstep(draw.sub(aa), draw.add(aa), cell)).toVar();
   g.mulAssign(saturate(target.div(draw)));
   g.assign(mix(g, target, saturate(d.mul(2.0).sub(1.0))));
+  // Per-direction fade (lineFade): a family whose lines bunch up on screen goes
+  // before it can turn into a widened grey haze; the other family stays sharp.
+  g.mulAssign(vec2(weight));
   // Lines along X and along Y: union, not sum, so crossings do not double up.
   return mix(g.x, float(1.0), g.y);
 }).setLayout({
@@ -363,6 +387,7 @@ const gridLayer = /*@__PURE__*/ Fn(([uvN, deriv, lineW]) => {
     { name: "uvN", type: "vec2" },
     { name: "deriv", type: "vec2" },
     { name: "lineW", type: "vec2" },
+    { name: "weight", type: "vec2" },
   ],
 });
 
@@ -427,17 +452,31 @@ export function gridSurface(p2, u = getGridUniforms(), minorScale = null) {
   const py = dFdy(p);
   const mPerPx = vec2(length(vec2(px.x, py.x)), length(vec2(px.y, py.y)));
 
+  // LINE FADE (2026-10-17, the user: "why does it appear blurry in some parts").
+  // A line family fades out while its cells shrink from LINE_FADE_HI to
+  // LINE_FADE_LO pixels apart, per direction. Before this, dense lines were
+  // widened to a pixel and dissolved into their grey average — no moiré, but on
+  // slopes and mid distance it read as a soft haze. Now a size simply leaves
+  // before it gets dense, and the next coarser one (below) is already crisp.
+  // ONE fade for both directions, from the larger footprint: fading each family on
+  // its own axis looked sharper on paper, but on rolling ground one line crosses
+  // dense and sparse stretches and came out DASHED (seen live 2026-10-17).
+  const mppIso = max(mPerPx.x, mPerPx.y);
+  const lineFade = (cell) => vec2(smoothstep(float(LINE_FADE_LO), float(LINE_FADE_HI), float(cell).div(mppIso)));
+
   const minorUV = p.div(minorCell);
   const majorUV = p.div(u.majorCell);
   const minor = gridLayer(
     minorUV,
     mPerPx.div(minorCell),
     vec2(u.minorWidth.div(minorCell)),
+    lineFade(minorCell),
   );
   const major = gridLayer(
     majorUV,
     mPerPx.div(u.majorCell),
     vec2(u.majorWidth.div(u.majorCell)),
+    lineFade(u.majorCell),
   );
 
   // Per-TILE brightness break-up, on the MINOR (1 m) cell — that is the square
@@ -470,14 +509,50 @@ export function gridSurface(p2, u = getGridUniforms(), minorScale = null) {
     // reads as the floor getting dimmer, not as variation.
     .sub(blotch.sub(0.5).mul(u.breakup).mul(BREAKUP_ALBEDO));
 
+  // DISTANCE LEVELS (2026-10-17, the user: "from zoom out it reads completely flat
+  // white"). With only 0.2 m and 1 m lines, the map past ~100 m had no line left
+  // at a readable spacing — a flat near-white. Unreal / Unity editor grids go up
+  // in scale with distance, so this does too: cells of 1 m × ratio^k (5, 25,
+  // 125 m…). `kMin` is the finest of those still at least LINE_FADE_LO px apart
+  // (never below 5 m: the 1 m and 0.2 m lines are drawn above); it and the next
+  // one draw, each with the same per-direction fade. When kMin steps up, the
+  // level that leaves had already faded to nothing and the one that becomes
+  // level A was already fully in (LINE_FADE_HI < LINE_FADE_LO × ratio), so the
+  // hand-over has no jump. Up close these levels lie ON the 1 m lines (every 5th
+  // one), thinner and lighter, so the near look is unchanged. Lines are one
+  // pixel of surface wide, in the major colour.
+  const R = float(u.majorRatio);
+  const mpp = max(mPerPx.x, mPerPx.y);
+  const kMin = max(float(1.0), floor(log(mpp.mul(LINE_FADE_LO).div(u.majorCell)).div(log(R))).add(1.0));
+  const farCellA = u.majorCell.mul(pow(R, kMin));
+  const farCellB = farCellA.mul(R);
+  const farA = gridLayer(p.div(farCellA), mPerPx.div(farCellA), mPerPx.div(farCellA), lineFade(farCellA));
+  const farB = gridLayer(p.div(farCellB), mPerPx.div(farCellB), mPerPx.div(farCellB), lineFade(farCellB));
+  const far = max(farA, farB).mul(FAR_LINE_INK);
+  const heavy = max(major, far);
+
+  // CHECKER (2026-10-17, from the Unreal / Unity prototype grids): alternate cells
+  // a few percent lighter / darker. Once the lines are gone into the distance the
+  // checker is what still says "this is a surface, this big" — without it a light
+  // floor averages to one flat value. It follows the same levels as the lines:
+  // the 1 m cell up close, then the distance cells, each fading on its own line
+  // fade, so it never gets small enough to alias.
+  const parity = (cell) => fract(floor(p.x.div(cell)).add(floor(p.y.div(cell))).mul(0.5)).mul(4.0).sub(1.0);
+  const checker = mix(
+    mix(parity(farCellB), parity(farCellA), lineFade(farCellA).x),
+    parity(u.majorCell),
+    lineFade(u.majorCell).x,
+  );
+  const shadeC = shade.mul(float(1.0).add(checker.mul(u.checker)));
+
   // Groove AO. The lines are engraved, so they lose ambient — this is what
   // separates "a surface with lines cut into it" from "a surface with lines
   // printed on it" once an environment map is doing most of the lighting.
-  const lines = max(minor, major);
+  const lines = max(minor, heavy);
   const tinted = mix(
-    mix(vec3(u.baseColor).mul(shade), vec3(u.lineColor), minor),
+    mix(vec3(u.baseColor).mul(shadeC), vec3(u.lineColor), minor),
     vec3(u.majorColor),
-    major,
+    heavy,
   );
 
   return {

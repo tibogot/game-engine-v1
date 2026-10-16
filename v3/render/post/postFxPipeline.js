@@ -333,9 +333,17 @@ export class PostFxPipeline {
     }
     const grade = (n) => purkinje(n, this._purkinjeUniforms);
 
+    // FXAA ONLY WITHOUT MSAA (2026-10-17). The note above says this scene pass is
+    // not multisampled, but `pass()` takes renderer.samples (4 with antialias), so
+    // the frame was MSAA'd AND FXAA'd: thin lines went soft and dotted — the user
+    // saw the grid "blurry" whenever Sky Pro's haze routed the frame through here
+    // (measured: line edge ramps 3x wider than the direct render). FXAA stays
+    // for a renderer created without antialiasing, where it is the only AA.
+    const edgeAA = (n) => (renderer.samples > 0 ? n : fxaa(n));
+
     const pipeline = new THREE.RenderPipeline(renderer);
     pipeline.outputColorTransform = false;
-    pipeline.outputNode = fxaa(renderOutput(grade(color)));
+    pipeline.outputNode = edgeAA(renderOutput(grade(color)));
 
     // Cloud path: solids → linear RT, clouds composite onto it, then display.
     const linearRT = new THREE.RenderTarget(1, 1, {
@@ -350,7 +358,7 @@ export class PostFxPipeline {
     linearPipeline.outputNode = color;
     const displayPipeline = new THREE.RenderPipeline(renderer);
     displayPipeline.outputColorTransform = false;
-    displayPipeline.outputNode = fxaa(renderOutput(grade(texture(linearRT.texture))));
+    displayPipeline.outputNode = edgeAA(renderOutput(grade(texture(linearRT.texture))));
 
     this._minimal = { scenePass, pipeline, linearRT, linearPipeline, displayPipeline };
     this._resizeLinearRT();

@@ -42,7 +42,10 @@ export function createWorldToolState({ editor = false, skyMode } = {}) {
      * this sky asks for it (`startV3App({ skyMode: "atmosphere" })`); a game that does not
      * keeps the old default and pays nothing.
      */
-    skyMode: skyMode ?? (editor ? "atmosphere" : ts.skyMode),
+    // 2026-10-17 (user): the editor now opens under SKY PRO, the main sky (alg-rts
+    // runs it too). The atmosphere above stays one dropdown away; the cost note and
+    // the editor-only rule above apply the same way to Sky Pro.
+    skyMode: skyMode ?? (editor ? "skypro" : ts.skyMode),
     skyExposureByMode: ts.skyExposureByMode,
     physicalSky: ts.physicalSky,
     // V3 optimized sky (lab dayNightSky.js): astronomical arc + sky-view LUT +

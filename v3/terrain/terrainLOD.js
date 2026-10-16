@@ -573,6 +573,10 @@ function createLODMaterial({
       }
     : baseStyle === "flat"
       ? flatSurface()
+      // Top-down only, on purpose: a tri-planar grid was tried 2026-10-17 (square
+      // cells on steep slopes, like the prototype grids) and on real, rough
+      // terrain its lines broke into fragments wherever the normal turned between
+      // projections — for 3x the grid cost. Props keep their tri-planar grid.
       : gridSurface(wxz);
   const SurfaceOut = struct(
     { col: "vec3", rough: "float", emis: "vec3", nrm: "vec3" },
