@@ -37,6 +37,7 @@ import { buildFortPoint, buildMgNest } from "../../v3/render/objects/rtsAlgeria.
 await loadSandbags();
 await loadSandbagWall();
 import { loadZeriba, zeribaMesh } from "./algZeriba.js";
+import { buildPortBlock } from "./algPort.js";
 import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 await loadZeriba();
 await loadZeriba("zeribaFarm");
@@ -178,6 +179,13 @@ const BUILDINGS = {
     tags: ["SACS DE SABLE (LE JEU)", `SACS DE SABLE · NOUVEAU · variante ${SEED + 1}`], note: "le mur du jeu à gauche, le nouveau à droite : sacs en jute, chacun sa forme et sa teinte, posés en quinconce.",
   },
   // THE REST OF THE SANDBAGS (2026-10-14): the kit's LEFT, the cloth-simulated RIGHT (algSandbags.js).
+  // THE PORT (2026-10-16, the coast): the colonial fishing port's kit — row houses, the magasin, the
+  // mole and its lighthouse, lamparo boats (algPort.js). New: nothing on the left.
+  port: {
+    label: "Port (nouveau)", gap: 60, before: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); return g; },
+    after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [buildPortBlock({ seed: 1 + SEED })]; return g; },
+    tags: ["—", `PORT · NOUVEAU · variante ${SEED + 1}`], note: "le port de pêche : maisons coloniales chaulées aux toits de tuiles canal, le magasin, le môle et son phare, les lamparos.",
+  },
   sacsNidMg: {
     label: "Nid de MG (sacs)", gap: 10, before: () => buildMgNest({}), after: () => buildMgNestPiece((o) => buildMgNest(o)),
     tags: ["NID DE MG (LE JEU)", "NID DE MG · SACS SIMULÉS"], note: "le nid du jeu à gauche, ses sacs simulés à droite (la couronne et le toit).",

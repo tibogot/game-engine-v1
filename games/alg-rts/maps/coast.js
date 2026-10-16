@@ -71,6 +71,9 @@ export const MAP = {
   // THE GAME'S OWN SEA (algSea.js) instead of Ocean Pro (2026-10-12): drawn for the RTS camera, at
   // this level (the level file carries no ocean; algGame answers the sea level to every system).
   sea: { level: SEA_LEVEL },
+  // THE PORT (algPort.js, 2026-10-16): its quay front along the top of the bay's beach east of the post
+  // (the magasin west, the houses east, facing the sea), the mole out from the beach into the bay.
+  port: { front: { from: [12, -63], to: [70, -88] }, mole: { root: [40, -97], dir: 0, len: 75 } },   // (east of the road from the gate)
   // THE CAP'S ROCKS (2026-10-16): the slabs in its cliff face and the reef at its foot, placed by the
   // level tool (maps/coastRocks.js), drawn as El Kantara's (algLandmarks / algSandstone), in the
   // Stora capes' ochre-grey. Nothing else of algLandmarks' scenery (a map with `scenery` starts at 0).

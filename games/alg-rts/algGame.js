@@ -40,6 +40,7 @@ import { createAlgStones, prefetchStonePhotos } from "./algStones.js";
 import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { createAlgSea } from "./algSea.js";
+import { createAlgPort } from "./algPort.js";
 import { loadSandbagWall } from "./algSandbags.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
@@ -52,7 +53,7 @@ import { createUiScale } from "./ui/uiScale.js";
 import { createAlgVoices } from "./algVoices.js";
 import { createAlgHerds } from "./algHerds.js";
 import { createAlgCivilians } from "./algCivilians.js";
-import { snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
+import { awaitPipelinesQuiet, snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import { rtsEngineOptions, beginRtsPerfBoot } from "../shared-rts/rtsPerfBoot.js";
 import "../../v3/styles/editor.css";
@@ -531,6 +532,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // map's sea level. ?sea=pro = Ocean Pro instead (switched on above), to compare.
   if (MAP.sea && params.get("sea") !== "pro") {
     try { app.algSea = createAlgSea(app, { level: MAP.sea.level }); } catch (e) { console.warn("[alg sea] failed:", e); }
+    // ITS PORT (algPort.js, maps/coast.js `port`)
+    if (MAP.port) try { app.algPort = createAlgPort(app, { ...MAP.port, sea: MAP.sea.level, navGrid: app.navGrid ?? null }); } catch (e) { console.warn("[alg port] failed:", e); }
   }
   // THE MACRO PHOTO (algMacroGround.js): the ground's large-scale variation. ?macro=0 = without.
   if (params.get("macro") !== "0") {
@@ -748,6 +751,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // snapshot, 2026-10-03). After the bake above. ?gpuonly=0 keeps them.
   perfBoot.releaseMemory();
   for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
+  // THE LAZY PIPELINES (shared-rts/pipelineWarmup.js awaitPipelinesQuiet): what the warm-up could not
+  // see — the foliage builds its tree batches on these last frames — compiled HERE, under the loading
+  // screen, not on the briefing or the first frames of play (1.3 s and 3.7 s frames, measured).
+  if (params.get("warmup") !== "0") {
+    try { const q = await awaitPipelinesQuiet(app); console.log(`[warmup] quiet after ${q.frames} frames, ${q.pipelines} late pipelines, ${q.ms} ms`); } catch (e) { console.warn("[warmup] quiet wait failed:", e); }
+  }
   const hud = document.getElementById("hud");
   if (hud) hud.textContent = `${boot.loaded ? boot.name : "no level"} · WASD pan · wheel zoom · Q/E rotate · C orbit`;
   // The briefing is up already (above); its button is released now. ?brief=0: straight in.

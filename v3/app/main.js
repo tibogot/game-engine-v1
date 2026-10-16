@@ -194,6 +194,7 @@ import { uiById, uiQuery, uiQueryAll, setUiRoot, createHiddenEditorMarkup } from
 import { createShadowTestScene } from "../debug/shadowTestScene.js";
 import { createTerrainShadowMap, terrainShade, terrainSunVisibilityHere, setActiveTerrainShadowMap } from "../render/lighting/terrainSunShadow.js";
 import { installTiledLighting, createLocalLights } from "../render/lighting/localLights.js";
+import { installStableShaderNames } from "../render/stableShaderNames.js";
 import { SKYPRO_NIGHT_STYLES } from "../render/skypro/skyproSky.js";
 // OFF by default — the custom GPU stats panel. Uncomment this line AND its
 // block further down (search "GPU STATS PANEL — OFF") to bring it back.
@@ -375,6 +376,9 @@ export async function startV3App(opts = {}) {
   layoutStatsOverlay();
 
   await renderer.init();
+  // THE SAME SHADER TEXT EVERY LOAD (render/stableShaderNames.js): before anything compiles, so
+  // Chrome's shader disk cache can reuse every shader on the next load.
+  installStableShaderNames(renderer);
   /*
    * LOCAL LIGHTS (opts.localLights, or ?locallights=1): fires, lanterns, muzzle flashes as tiled
    * point lights (render/lighting/localLights.js). The lighting system must be in place before

@@ -104,3 +104,44 @@ export async function warmGamePipelines(app, engineObjects, { frames = 2 } = {})
   for (const [o, m] of original) for (const [key, value] of Object.entries(m)) o[key] = value;
   return { warmed: targets.length, ms: Math.round(performance.now() - t0) };
 }
+
+// ── THE QUIET WAIT (2026-10-16, the alg-rts coast) ──────────────────────────────────────────────
+// The warm-up above draws what EXISTS. Some systems build their meshes lazily, when the camera
+// first sees them — the foliage's tree batches are made on the boot's last frames, after the warm-up
+// — and their pipelines were compiled on the GPU process once the briefing was up: frames of 1.3 s
+// and 3.7 s, measured, 1-5 s after "À vos postes" turned on (the page's main thread idle meanwhile).
+// So: keep the loop rendering under the loading screen until NO new pipeline has been asked for
+// during `quietFrames` frames, then wait for the GPU to have finished its work (the compiles with it).
+
+/** Count the device's pipeline creations (once per device). */
+function countPipelines(device) {
+  if (!device || device.__pipeCount) return device?.__pipeCount ?? null;
+  const c = (device.__pipeCount = { n: 0 });
+  for (const k of ["createRenderPipeline", "createComputePipeline", "createRenderPipelineAsync", "createComputePipelineAsync"]) {
+    const f = device[k]?.bind(device);
+    if (f) device[k] = (desc) => { c.n++; return f(desc); };
+  }
+  return c;
+}
+
+/**
+ * Wait until the scene asks for no new pipeline for `quietFrames` frames (at most `maxMs`), then until
+ * the GPU's queue is done. Call it at the very end of a boot, under the loading screen.
+ * @returns {Promise<{ frames: number, pipelines: number, ms: number }>}
+ */
+export async function awaitPipelinesQuiet(app, { quietFrames = 12, maxMs = 20000 } = {}) {
+  const t0 = performance.now();
+  const device = app.renderer?.backend?.device;
+  const c = countPipelines(device);
+  if (!c) return { frames: 0, pipelines: 0, ms: 0 };
+  const start = c.n;
+  let quiet = 0, frames = 0, last = c.n;
+  while (quiet < quietFrames && performance.now() - t0 < maxMs) {
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    frames++;
+    if (c.n === last) quiet++; else { quiet = 0; last = c.n; }
+  }
+  try { await device.queue.onSubmittedWorkDone(); } catch { /* lost device: nothing to wait for */ }
+  return { frames, pipelines: c.n - start, ms: Math.round(performance.now() - t0) };
+}
+
