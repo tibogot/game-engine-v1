@@ -54,9 +54,13 @@ steamworks.js), then ship a small game to prove the pipeline.
 ## Backlog (one at a time, in this order)
 
 1. ~~Delete `public/levels/alg-aures.v3proj.orig` (identical to a committed version of 2026-10-01) and `dist/` (old build output, gitignored).~~ DONE 2026-10-16 (local only).
-2. **Tests that test nam-rts's copies instead of the code alg-rts runs:** `coverTest`, `simClockTest`,
-   `spatialGridTest` import `games/nam-rts/…`; `games/shared-rts/` has the versions alg-rts uses. Point
-   them at shared-rts (nam-rts keeps its own files). No decision needed.
+2. ~~Tests that test nam-rts's copies~~ NOT AN ISSUE (checked 2026-10-17): `games/nam-rts/cover.js`,
+   `simClock.js`, `spatialGrid.js` are one-line `export * from "../shared-rts/…"` forwards since
+   2026-09-27/28, so those tests already run the code alg-rts uses. Nothing to change.
+2b. ~~alg-rts levels saved the "atmosphere" sky~~ DONE 2026-10-17: `tools/algLevelsSkyPro.mjs` writes the
+   game's Sky Pro values and clock into the 5 alg levels' look (the game ignores a level's look and
+   sets them itself, so the game is unchanged; the editor now opens them as the game draws them).
+   Rerun it after changing AURES_LIGHT or a map's `light`.
 3. **The old "classic" ocean** (`v3/render/water/worldOcean.js`): every level has it off. One yes/no.
    (`worldOceanV2` stays while Apex Rush uses it.)
 4. **Game code out of the engine** (step 3 above): move only, nothing deleted.

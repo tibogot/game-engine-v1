@@ -64,6 +64,10 @@ export function createWorldToolState({ editor = false, skyMode } = {}) {
       daySpeed: 0.4,
       latitude: 45, // observer latitude (°) — tilts the sun/moon arc
       dayOfYear: 172, // 1..365 → solar declination (172 ≈ N summer solstice)
+      // The sun's whole path turned about the vertical, degrees (worldEnvironment reads it;
+      // alg-rts's coast sets 45). A default key so a level that saves it keeps it: the look
+      // loader merges only keys that exist here (2026-10-17).
+      sunTurn: 0,
       moonAge: 0.55, // synodic age 0=new .5=full 1=new → moon position + phase
       useLut: true, // sample the pre-baked sky-view LUT (perf)
       atmoHorizonSoft: 0.05, // soft terminator width — kills twilight banding

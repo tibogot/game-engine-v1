@@ -38,6 +38,12 @@ import { createSkyProExposure } from "./skyproExposure.js";
 
 /** The settings the mode saves with a project (toolState.skyProSky). */
 export const SKYPRO_DEFAULTS = {
+  /**
+   * The sun's strength against the sky, day only (worldEnvironment reads it; alg-rts
+   * sets 0.55 for CoH-like shade). A default key so a level that saves it keeps it:
+   * the look loader merges only keys that exist here (2026-10-17).
+   */
+  sunScale: 1,
   /** cumulus cover (the "Partly cloudy" preset's shell coverage) */
   coverage: 0.49,
   /** m/s at the deck: Tidewater 12; the Sky Pro preset's own drift (a time-lapse) is 89 */
