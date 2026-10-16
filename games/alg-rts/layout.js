@@ -32,7 +32,10 @@ const _aln = LAYOUT.sites.find((s) => s.kind === "aln");
  * looks flat and staged; facing away shows back walls. Each site says its
  * own `turn` (degrees off the camera), so they do not all match.
  */
-export const VIEW_YAW = Math.atan2(_aln.x - _fr.x, _aln.z - _fr.z);
+// A MAP CAN FIX IT (`MAP.viewYaw`, 2026-10-16, you: "in Company of Heroes you always start at the
+// bottom of the map and the enemy is at the top"): the camera straight along one of the map's axes
+// (0 looks south, +Z), the map laid out along it — the post at the bottom, the katiba at the top.
+export const VIEW_YAW = MAP.viewYaw ?? Math.atan2(_aln.x - _fr.x, _aln.z - _fr.z);
 
 /** A site's building yaw: the camera-facing yaw turned by its `turn` degrees. */
 export const siteYaw = (site) => VIEW_YAW + ((site.turn ?? 30) * Math.PI) / 180;

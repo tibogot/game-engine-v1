@@ -123,6 +123,9 @@ export const SANDSTONE_COLOURS = {
   // EL KANTARA (2026-10-13): the CoH red lifted warm and light — on the pale dunes the photos as they
   // are read as dark chocolate lumps; CoH's outcrops are a light warm sandstone.
   kantara: { label: "El Kantara (sable)", tint: [1.3, 1.12, 0.98], saturation: 0.95, topDark: 0.85 },
+  // THE COAST (2026-10-16, the Stora capes: assets-src/refs/coast/): the cliff's own ochre, a little
+  // greyed (0.35 read grey, stuck on the ochre face).
+  coast: { label: "Côte (ocre)", tint: [1.06, 0.98, 0.86], saturation: 0.72, topDark: 0.8 },
 };
 export function setSandstoneColour(key) {
   const c = SANDSTONE_COLOURS[key];

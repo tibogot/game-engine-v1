@@ -750,7 +750,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const armyTabs = createArmyTabs({ units, selection, squads, team: SIDES.human, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // The tactical map from the start: the post has its own radio mast.
   const mapOpts = { app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) };
-  const minimap = createMinimap({ ...mapOpts, mount: hud.left });
+  const minimap = createMinimap({ ...mapOpts, mount: hud.left, dial: true });
   // THE TACTICAL MAP (ui/tacticalMap.js): the same map full screen, Tab.
   // COVER AT THE CURSOR: each man's spot, coloured by its cover, before the order.
   coverCursor = createAlgCoverCursor({ app, selection });

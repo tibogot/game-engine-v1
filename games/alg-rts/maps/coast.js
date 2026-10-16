@@ -11,10 +11,15 @@
 // jutting north in the north-east, a sandy BEACH all along, a flat coastal PLAIN, low RIDGES in the south-east (the FLN's side), hills
 // framing it outside the box. Sea level 30 m (the heightmap can't go below 0: the deep needs room).
 //
-// PROVISIONAL: the starts below only let the map load (the view needs both); the post, the ALN
-// start, the points and the AI are the mission's next step.
+// THE AXIS (2026-10-16, you: "in CoH you start at the bottom of the map, the enemy at the top"): the
+// camera looks SOUTH, from the sea inland — the French hold the coast at the BOTTOM of the screen
+// (the post behind the bay, the port between it and the sea: their rear), the FLN come down from
+// the ridges at the TOP. The cap (north-east) bottom-left, its cliffs facing the camera; the west
+// coast down the right edge. Points and the AI: the mission's next step.
 
 /** THE PLAYABLE AREA: 500 m, the sea along its north and west. */
+import { ROCKS } from "./coastRocks.js";
+
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
 /** The sea level (m) — the level tool's, and the game sea's (algSea.js) through the level. */
@@ -34,21 +39,22 @@ export const SHORE = [
 
 export const LAYOUT = {
   sites: [
-    // ── Starts (PROVISIONAL) ────────────────────────────────────────────────
-    // The post on the plain in the south-west, by the coast road; the ALN on the ridges inland.
-    { kind: "french", name: "Poste de la plage", x: -125, z: 165, r: 34, turn: 35 },
-    { kind: "aln", name: "Katiba des crêtes", x: 175, z: 45, r: 26, turn: -30 },
+    // ── Starts: the post at the bottom (behind the bay), the katiba at the top (the ridges) ──
+    { kind: "french", name: "Poste de la plage", x: -40, z: -20, r: 34, turn: 35 },
+    { kind: "aln", name: "Katiba des crêtes", x: 40, z: 205, r: 26, turn: -30 },
   ],
   // NO WADI (2026-10-13, you: "the carved dry river — I don't think we need it"): it cut the map in two
   // with nothing to fight over. The coast's cover is its villages, walls, vines and tree lines.
   wadis: [],
 };
 
-/** The coast road: the post, north to the bay's little port, east along the shore, up to the ridges. */
-const TRACK = [[-118, 140], [-120, 80], [-100, 10], [-62, -48], [-15, -60], [40, -70], [95, -45], [140, 0], [172, 30]];
+/** The road: from the post's gate (its north side, toward the bay and the port), round its east side
+ *  and south across the plain, up into the ridges to the katiba. */
+const TRACK = [[-40, -62], [5, -52], [22, -10], [24, 45], [14, 100], [22, 150], [36, 186]];
 
 export const MAP = {
   id: "coast",
+  viewYaw: 0,   // the camera looks south: the post at the bottom, the katiba at the top (layout.js)
   name: "Côte du Constantinois — août 1955",
   level: "/levels/alg-coast.v3proj",
   tracks: [{ name: "Route de la côte", kind: "piste", from: "gate", to: "Katiba des crêtes", length: 420, points: TRACK }],
@@ -61,6 +67,11 @@ export const MAP = {
   // THE GAME'S OWN SEA (algSea.js) instead of Ocean Pro (2026-10-12): drawn for the RTS camera, at
   // this level (the level file carries no ocean; algGame answers the sea level to every system).
   sea: { level: SEA_LEVEL },
+  // THE CAP'S ROCKS (2026-10-16): the slabs in its cliff face and the reef at its foot, placed by the
+  // level tool (maps/coastRocks.js), drawn as El Kantara's (algLandmarks / algSandstone), in the
+  // Stora capes' ochre-grey. Nothing else of algLandmarks' scenery (a map with `scenery` starts at 0).
+  sandstone: { colour: "coast", rocks: ROCKS },
+  scenery: { quantities: {}, keepClear: [] },
   // THE MINIMAP's ground (ui/minimap.js), by paint layer (tools/algCoastLevel.mjs): the plain's red
   // earth, the sand, the seabed (under the water's own colour), the maquis, (4 unused), rock, the track.
   minimap: { layers: { 0: [168, 128, 92], 1: [214, 196, 156], 2: [190, 178, 140], 3: [118, 122, 72], 4: [150, 132, 104], 5: [128, 112, 96], 6: [178, 152, 112] } },

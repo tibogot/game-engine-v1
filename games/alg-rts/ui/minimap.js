@@ -28,6 +28,11 @@
 //   • Left click / drag: the camera goes there. RIGHT click: the selection
 //     moves there (selection.orderMove — the same order as on the ground).
 //   • No intel (a game hook — nam's radio station): a dead screen, NO RADIO.
+//   • A DIAL, AS CoH 3's (2026-10-16, your screenshot: the square map turned inside a round bezel,
+//     the view's trapezoid always pointing up): the HUD map (`dial`) SPINS WITH THE CAMERA — a CSS
+//     turn of the drawn layers, nothing re-baked — sized so the square fits turned any way (its
+//     corners reach over the bezel). The names and the N on the rim stay upright (their own layer,
+//     placed through the turn); a click is turned back before it is read.
 import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { TRACK_LINES } from "../algTracks.js";
@@ -56,12 +61,13 @@ const clamp01 = (v) => Math.min(1, Math.max(0, v));
  * turned square fits `px` canvas pixels. `world`: the terrain's edge (the fog
  * of war's image covers all of it).
  */
-function makeFrame(area, upYaw, px, world) {
+function makeFrame(area, upYaw, px, world, dial = false) {
   const fx = Math.sin(upYaw), fz = Math.cos(upYaw), rx = -fz, rz = fx;
   const cx = (area.x0 + area.x1) / 2, cz = (area.z0 + area.z1) / 2;
   const size = Math.max(area.x1 - area.x0, area.z1 - area.z0);
-  // A 4% margin round the play area (the land beyond it, dimmed, frames it).
-  const k = px / (size * (Math.abs(fx) + Math.abs(fz)) * 1.03);   // world m → minimap px
+  // A 4% margin round the play area (the land beyond it, dimmed, frames it). A DIAL: the square
+  // fits turned ANY way (its diagonal the canvas), as it spins with the camera.
+  const k = dial ? (px * 0.7) / size : px / (size * (Math.abs(fx) + Math.abs(fz)) * 1.03);   // world m → minimap px
   const c = px / 2;
   return {
     area, upYaw, k,
@@ -121,7 +127,7 @@ function macroSampler(M) {
 }
 
 /** The terrain, tracks and building plan at `px` × `px`, once. */
-function bakeBase(app, frame, px, world, markS = px / 160) {
+function bakeBase(app, frame, px, world, markS = px / 160, north = true) {
   const half = world / 2;
   const A = frame.area;
   const canvas = document.createElement("canvas");
@@ -348,7 +354,8 @@ function bakeBase(app, frame, px, world, markS = px / 160) {
   ctx.fillRect(0, 0, px, px);
 
   // NORTH: a small arrow in the top-right corner (the map is turned in 90°
-  // steps, so north may not be up).
+  // steps, so north may not be up). (A dial: the N rides its rim instead.)
+  if (!north) return canvas;
   const n0 = frame.toMini(0, 0), n1 = frame.toMini(0, -100);
   const nl = Math.hypot(n1.x - n0.x, n1.y - n0.y) || 1, ux = (n1.x - n0.x) / nl, uy = (n1.y - n0.y) / nl;
   // In the shape's topmost corner, pulled in (the corners outside it are cut away).
@@ -373,6 +380,8 @@ export function createMinimap({
   // THE TACTICAL MAP (ui/tacticalMap.js) is a second one, big: its own id, and its marks and
   // labels `markScale` times the small map's (not px / 160 — on a 700 px map that drew 4x marks).
   id = "rts-minimap", markScale = null, labelPx = 10.5,
+  // THE DIAL (the HUD's map): turns with the camera, in a round bezel. The tactical map stays still.
+  dial = false,
 }) {
   const world = app.worldSize ?? 1000;
   const box = area ?? { x0: -world / 2, x1: world / 2, z0: -world / 2, z1: world / 2 };
@@ -391,23 +400,38 @@ export function createMinimap({
   // start camera — but "a rotated map shouldn't sit inside a non-rotated
   // parent"): the minimap IS the play area's shape, clipped to it, its own
   // border round it. The land beyond the play area is cut away.
-  const frame = makeFrame(box, upYaw, px, world);
+  const frame = makeFrame(box, upYaw, px, world, dial);
   const shape = [[box.x0, box.z0], [box.x1, box.z0], [box.x1, box.z1], [box.x0, box.z1]].map(([x, z]) => frame.toMini(x, z));
   const fpx = Math.round(labelPx * dpr);   // label size, device px
 
-  const layer = (name) => {
+  // The bezel (a dial), the turning layers, then the names: upright, over everything.
+  if (dial) { const bezel = document.createElement("div"); bezel.className = "dial"; root.appendChild(bezel); }
+  const spin = document.createElement("div");
+  spin.className = "spin";
+  root.appendChild(spin);
+  const layer = (name, into = spin) => {
     const c = document.createElement("canvas");
     c.width = c.height = px;
     c.className = name;
-    root.appendChild(c);
+    into.appendChild(c);
     return { c, ctx: c.getContext("2d") };
   };
   const base = layer("base"), terr = layer("territory"), fog = layer("fog"), dyn = layer("units"), cam = layer("camera");
-  base.ctx.drawImage(bakeBase(app, frame, px, world, s), 0, 0);
+  const names = layer("names", root);
+  base.ctx.drawImage(bakeBase(app, frame, px, world, s, !dial), 0, 0);
+  // THE TURN (rad, clockwise on screen): the camera's yaw off the start's, a dial only.
+  let turn = 0, tc = 1, ts = 0;
+  const camTurn = () => {
+    if (!dial) return 0;
+    const y = app.rtsCamera?.getView?.().yaw;
+    return Number.isFinite(y) ? y - upYaw : 0;
+  };
+  /** A map pixel where it shows, turned with the map (the names' layer is not turned). */
+  const shown = (x, y) => ({ x: px / 2 + (x - px / 2) * tc - (y - px / 2) * ts, y: px / 2 + (x - px / 2) * ts + (y - px / 2) * tc });
 
   // The clip and the frame: the play area's outline, in % of the box.
   const pct = (q) => `${((q.x / px) * 100).toFixed(2)}% ${((q.y / px) * 100).toFixed(2)}%`;
-  root.style.clipPath = `polygon(${shape.map(pct).join(", ")})`;
+  spin.style.clipPath = `polygon(${shape.map(pct).join(", ")})`;
   const svgNS = "http://www.w3.org/2000/svg";
   const outline = document.createElementNS(svgNS, "svg");
   outline.setAttribute("viewBox", `0 0 ${px} ${px}`);
@@ -415,13 +439,18 @@ export function createMinimap({
   const pts = shape.map((q) => `${q.x.toFixed(1)},${q.y.toFixed(1)}`).join(" ");
   outline.innerHTML = `<polygon points="${pts}" fill="none" stroke="rgba(0,0,0,0.7)" stroke-width="${(5 * s).toFixed(1)}"/>`
     + `<polygon points="${pts}" fill="none" stroke="#59623f" stroke-width="${(2.4 * s).toFixed(1)}"/>`;
-  root.appendChild(outline);
+  spin.appendChild(outline);
 
   const style = document.createElement("style");
   style.textContent = `
     #${id} { position: relative; width: 100%; height: 100%; cursor: crosshair; }
-    #${id} canvas, #${id} svg.frame { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-    #${id} svg.frame { pointer-events: none; }
+    #${id} canvas, #${id} svg.frame, #${id} .spin, #${id} .dial { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+    #${id} svg.frame, #${id} canvas.names, #${id} .dial { pointer-events: none; }
+    #${id} .spin { transform-origin: 50% 50%; }
+    /* The bezel: a dark face, an olive ring, a brass hairline (CoH 3's dial). */
+    #${id} .dial { border-radius: 50%; inset: 3%; width: 94%; height: 94%;
+      background: radial-gradient(circle closest-side, #1b1d16 0 88%, #2a2e22 88% 90%, #59623f 90% 91.2%, #23261c 91.2% 97.4%, #8a7a45 97.4% 98.4%, #101109 98.4% 100%);
+      box-shadow: 0 3px 12px rgba(0,0,0,0.6), inset 0 0 18px rgba(0,0,0,0.7); }
     #${id}.locked { cursor: default; }
     /* The HUD corner holds a SHAPED map: no square panel behind it, a shadow
        that follows the shape instead. */
@@ -443,7 +472,9 @@ export function createMinimap({
   // ── Input: left = the camera, right = the selection ──────────────────────
   const worldAt = (ev) => {
     const r = root.getBoundingClientRect();
-    const w = frame.toWorld((ev.clientX - r.left) / r.width * px, (ev.clientY - r.top) / r.height * px);
+    // (a dial is turned: the click turned back into the map's own pixels)
+    const mx = (ev.clientX - r.left) / r.width * px - px / 2, my = (ev.clientY - r.top) / r.height * px - px / 2;
+    const w = frame.toWorld(px / 2 + mx * tc + my * ts, px / 2 - mx * ts + my * tc);
     return { x: Math.max(box.x0, Math.min(box.x1, w.x)), z: Math.max(box.z0, Math.min(box.z1, w.z)) };
   };
   let dragging = false;
@@ -600,7 +631,9 @@ export function createMinimap({
   const _labels = [];
   /** Queue a name; drawn last, on top of the units, kept inside the map. */
   function label(c, text, x, y) { _labels.push(text, x, y); }
-  function flushLabels(c) {
+  function flushLabels() {
+    const c = names.ctx;
+    c.clearRect(0, 0, px, px);
     c.font = `600 ${fpx}px 'Segoe UI', system-ui, sans-serif`;
     c.textAlign = "center"; c.textBaseline = "middle";
     c.lineJoin = "round"; c.lineWidth = 3 * dpr; c.strokeStyle = "rgba(10,12,8,0.85)"; c.fillStyle = "#f2ead6";
@@ -612,9 +645,19 @@ export function createMinimap({
       for (let k = 0; k < 20 && !(inside(x - w, y - h) && inside(x + w, y - h) && inside(x - w, y + h) && inside(x + w, y + h)); k++) {
         x += (px / 2 - x) * 0.12; y += (px / 2 - y) * 0.12;
       }
-      c.strokeText(text, x, y); c.fillText(text, x, y);
+      const q = shown(x, y);
+      c.strokeText(text, q.x, q.y); c.fillText(text, q.x, q.y);
     }
     _labels.length = 0;
+    if (dial) {
+      // NORTH on the rim: a brass disc with its N, where north is now.
+      const n0 = frame.toMini(0, 0), n1 = frame.toMini(0, -100), a = Math.atan2(n1.y - n0.y, n1.x - n0.x) + turn;
+      const R = px * 0.455, x = px / 2 + Math.cos(a) * R, y = px / 2 + Math.sin(a) * R, d = 7.5 * s;
+      c.beginPath(); c.arc(x, y, d, 0, Math.PI * 2);
+      c.fillStyle = "#26291f"; c.fill(); c.lineWidth = 1.4 * s; c.strokeStyle = "#c9a54a"; c.stroke();
+      c.font = `bold ${Math.round(8 * s)}px 'Segoe UI', system-ui, sans-serif`;
+      c.fillStyle = "#e9dcb4"; c.fillText("N", x, y + 0.5 * s);
+    }
   }
   const _foot = { enemy: [], player: [], sel: [] }, _veh = { enemy: [], player: [], sel: [] }, _air = { enemy: [], player: [], sel: [] };
   const _squad = { enemy: [], player: [], sel: [] }, _sq = new Map();
@@ -809,7 +852,7 @@ export function createMinimap({
       c.beginPath(); c.arc(m.x, m.y, (6 + 9 * f) * s, 0, Math.PI * 2); c.stroke();
     }
 
-    flushLabels(c);   // names last: on top of the units
+    flushLabels();   // names last: on top of the units (their own, upright layer)
   }
 
   // ── No intel: a dead screen, a few times a second ────────────────────────
@@ -846,6 +889,12 @@ export function createMinimap({
       return;
     }
     if (locked) { locked = false; root.classList.remove("locked"); unitsT = 0; }
+    const want = camTurn();
+    if (Math.abs(want - turn) > 0.002) {
+      turn = want; tc = Math.cos(turn); ts = Math.sin(turn);
+      spin.style.transform = `rotate(${turn}rad)`;
+      unitsT = 0;   // the names follow at once
+    }
     drawFog(now);
     if (now - unitsT >= 1000 / UNITS_HZ) {
       unitsT = now;

@@ -12,7 +12,12 @@
  *   the sea     the seabed on TIDEWATER'S BAY PROFILE by distance out (5% for 70 m, 6% to 260 m,
  *               7% beyond, a longshore bar) — the colour gradient the game sea (algSea.js) draws
  *   the beach   sand rising gently (5%) for ~28 m, a berm; then the PLAIN, near flat, gentle swells
- *   headland    a dome in the north-east, cliffs where it meets the sea
+ *   headland    THE CAP (2026-10-16, you: "that mountain coast looks bad"; the Stora headlands,
+ *               assets-src/refs/coast/): a promontory ~24 m high in the north-east, a rolling top,
+ *               its sea side a CLIFF band 10-18 m wide onto a rock ledge at the water, its land side
+ *               a long ~15° slope (men walk up it). No beach round it; scrub (maquis, cork oak,
+ *               juniper) over it, the cliffs bare; layered rock slabs set in the cliff face and reef
+ *               rocks out of the water at its foot (→ maps/coastRocks.js, placed as El Kantara's).
  *   (no wadi since 2026-10-13: it cut the map in two; the code still carves one a map lists)
  *   ridges      low (≤ ~10 m) in the south-east, the FLN's side; hills framing it outside the box
  * THE PAINT   0 coastal plain (red earth, dry grass) · 1 beach sand · 2 seabed · 3 maquis ·
@@ -29,6 +34,8 @@ import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { PLAY, LAYOUT, MAP, SHORE, SEA_LEVEL } from "../games/alg-rts/maps/coast.js";
 import { trackCarver } from "./lib/trackCarve.mjs";
 import { blankManifest, BASE_LEVEL } from "./lib/algLevelBase.mjs";
+import { buildSandstoneRock, SANDSTONE_GAME } from "../games/alg-rts/algSandstone.js";
+const ROCKS_FILE = "games/alg-rts/maps/coastRocks.js";
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, "")] = process.argv[i + 1];
@@ -108,7 +115,16 @@ function shoreSigned(x, z) {
 // (no wadi on the coast since 2026-10-13 — kept working if a map lists one)
 const wadi = LAYOUT.wadis[0] ?? null, wadiAt = wadi ? polyField(spline(wadi.points, 2)) : () => ({ d: Infinity });
 const trackAt = polyField(spline(MAP.tracks[0].points, 2));
-const HEAD = { x: 196, z: -196, r: 62, h: 16 };   // the headland's dome
+const HEAD = { x: 196, z: -196, r: 72, h: 24 };   // the cap: its centre, radius (seaward), height over the sea
+/** The cap's footprint, 1 inside → 0 out: stretched toward the LAND (all its south side, ×2.2) so
+ *  every land side is a long walkable slope (~12°) and only the sea gets cliffs (stretched to the
+ *  south-west alone, its south-east flank came out 33°, painted rock); its `top` (a plateau that
+ *  rolls off). */
+function headShape(x, z) {
+  const dx = x - HEAD.x, dz = z - HEAD.z;
+  const d = Math.hypot(dx * (dz > 0 ? 0.85 : 1), dz > 0 ? dz / 2.2 : dz) / HEAD.r;
+  return { mask: 1 - smoothstep(0.75, 1.15, d), top: 1 - smoothstep(0.3, 1.05, d) };
+}
 /** Distance outside the play box (0 inside). */
 const outside = (x, z) => Math.hypot(Math.max(PLAY.x0 - x, 0, x - PLAY.x1), Math.max(PLAY.z0 - z, 0, z - PLAY.z1));
 const flats = LAYOUT.sites.map((s) => ({ x: s.x, z: s.z, r: s.r + 16 }));
@@ -132,7 +148,7 @@ function heightAt(x, z) {
 }
 function naturalAt(x, z) {
   const s = (lastS = shoreSigned(x, z));
-  const hm = Math.exp(-((Math.hypot(x - HEAD.x, z - HEAD.z) / (HEAD.r * 1.15)) ** 2));   // the headland
+  const hs = headShape(x, z), hm = hs.mask;   // the cap
   let h;
   if (s < 0) {
     // THE SEA: the seabed; off the headland a steeper drop (rocks, not sand)
@@ -147,9 +163,18 @@ function naturalAt(x, z) {
     // the RIDGES inland, south-east: low and gentle
     const se = smoothstep(-40, 160, x * 0.7 + z * 0.7);
     const ridges = se * smoothstep(120, 260, s) * (5 + 5 * noise(x / 70, z / 70, 11)) * (0.5 + 0.5 * calm);
-    // THE HEADLAND: a dome, and cliffs where it meets the sea (no beach there)
-    const cliff = Math.min(s, 9) * 1.4;
-    const head = hm * (HEAD.h * Math.exp(-((Math.hypot(x - HEAD.x, z - HEAD.z) / HEAD.r) ** 2)) + cliff);
+    // THE CAP: its top (rolling ±2.5 m), up from the sea in a CLIFF band 10-18 m wide (its width
+    // wandering along the coast), a ledge ~1.5 m up at its foot: the rock the sea breaks on
+    // (one smooth band read as a CLAY BOWL from the sea, 2026-10-16: the band now wanders with
+    // GULLIES (a finer noise), and the face is cut in STRATA — ~3 m benches, steep risers — where
+    // the scrub takes hold on the ledges, as on the Stora capes)
+    const band = 24 + 10 * noise(x / 38, z / 38, 61) + 10 * (noise(x / 13, z / 13, 64) - 0.5);   // (12-21 m: too steep for 1 m cells to show a bench)
+    const cliffK = 0.07 * smoothstep(-0.5, 2, s) + 0.93 * smoothstep(1.5, band, s) ** 0.8;
+    const top = HEAD.h * hs.top + (noise(x / 26, z / 26, 62) - 0.5) * 5 * hs.top;
+    let head = hm * Math.max(0, top) * cliffK;
+    const STEP = 3.1 + noise(x / 60, z / 60, 65) * 0.8, tq = head / STEP, fq = tq - Math.floor(tq);
+    const strata = (Math.floor(tq) + smoothstep(0.5, 1, fq)) * STEP;
+    head += (strata - head) * 0.7 * Math.min(1, 4 * cliffK * (1 - cliffK) + 0.15) * (s < band + 4 ? 1 : 0);
     h = SEA + (beach + plain + swell + ridges) * (1 - hm) + head;
     // the framing hills outside the box, land side
     const o = outside(x, z);
@@ -195,6 +220,52 @@ const H = (x, z) => {
 };
 const slopeDeg = (x, z) => { const e = 1.5; return (Math.atan(Math.hypot(H(x + e, z) - H(x - e, z), H(x, z + e) - H(x, z - e)) / (2 * e)) * 180) / Math.PI; };
 
+// ── The cap's rocks (written to maps/coastRocks.js; the game places them as El Kantara's) ─────
+// Their real sizes, from the generator (the game builds exactly these: algSandstone SANDSTONE_GAME).
+const SIZE = SANDSTONE_GAME.map(([sh, sd]) => {
+  const g = buildSandstoneRock(sh, sd);
+  g.computeBoundingBox();
+  const b = g.boundingBox;
+  return { shape: sh, len: b.max.x - b.min.x, deep: b.max.z - b.min.z, tall: b.max.y - b.min.y };
+});
+const ofShape = (sh) => SIZE.map((q, v) => ({ ...q, v })).filter((q) => q.shape === sh);
+const rand = (() => { let q = 1955; return () => ((q = Math.imul(q ^ (q >>> 15), 2246822507) + 1013904223) >>> 0) / 4294967296; })();
+const capRocks = [];
+const r2 = (v) => Math.round(v * 100) / 100;
+const apart = (x, z, m) => capRocks.every((o) => Math.hypot(o.x - x, o.z - z) >= m);
+// THE CLIFF FACE: slabs set into the slope, long side along the coast, half buried — the bare rock
+// bands of the Stora capes. On the cap, 1-13 m up from the shore, steeper than 28°.
+for (let t = 0, n = 0; n < 34 && t < 30000; t++) {
+  const x = HEAD.x + (rand() - 0.5) * HEAD.r * 2.6, z = HEAD.z + (rand() - 0.5) * HEAD.r * 2.6;
+  const sd = Sd(x, z);
+  if (headShape(x, z).mask < 0.6 || sd < 1 || sd > 13 || slopeDeg(x, z) < 28 || !apart(x, z, 8.5)) continue;
+  const S = ofShape(rand() < 0.45 ? "block" : rand() < 0.6 ? "mesa" : "low");
+  const B = S[(rand() * S.length) | 0], k = 0.42 + rand() * 0.34;
+  const gx = H(x + 1.5, z) - H(x - 1.5, z), gz = H(x, z + 1.5) - H(x, z - 1.5);
+  const yaw = Math.atan2(-gx, -gz) + (rand() - 0.5) * 0.4;   // long side (local x) along the contour
+  capRocks.push({ x: r2(x), y: r2(H(x, z) - B.tall * k * (0.55 + rand() * 0.15)), z: r2(z), yaw: r2(yaw), k: r2(k), v: B.v });
+  n++;
+}
+// THE REEF: rocks out of the water at the cap's foot, 1.5-22 m out, their tops 0.2-1.3 m over the sea.
+for (let t = 0, n = 0; n < 18 && t < 30000; t++) {
+  const x = HEAD.x + (rand() - 0.5) * HEAD.r * 2.8, z = HEAD.z + (rand() - 0.5) * HEAD.r * 2.8;
+  const sd = Sd(x, z), bed = H(x, z), depth = SEA - bed;
+  if (headShape(x, z).mask < 0.45 || sd > -1.5 || sd < -22 || depth > 3.2 || !apart(x, z, 6.5)) continue;
+  const S = ofShape(rand() < 0.6 ? "low" : "block"), B = S[(rand() * S.length) | 0];
+  const k = (depth + 0.3 + 0.2 + rand() * 0.9) / B.tall;
+  if (k > 0.55) continue;
+  capRocks.push({ x: r2(x), y: r2(bed - 0.3), z: r2(z), yaw: r2(rand() * Math.PI * 2), k: r2(k), v: B.v });
+  n++;
+}
+fs.writeFileSync(ROCKS_FILE, `// GENERATED by tools/algCoastLevel.mjs — do not edit: the cap's rocks (${capRocks.length}): slabs set in its
+// cliff face and the reef at its foot. { x, y, z, yaw, k, v }: v an index into algSandstone SANDSTONE_GAME,
+// k its scale, y its base.
+export const ROCKS = [
+${capRocks.map((r) => `  { x: ${r.x}, y: ${r.y}, z: ${r.z}, yaw: ${r.yaw}, k: ${r.k}, v: ${r.v} },`).join("\n")}
+];
+`);
+console.log(`${ROCKS_FILE}: ${capRocks.length} rocks`);
+
 // ── Paint ────────────────────────────────────────────────────────────────
 const S = man.terrain.splatSize ?? man.splatRes;
 const splat = Buffer.alloc(S * S * 8);   // two planar RGBA planes: layer c in plane c >> 2, channel c & 3
@@ -206,16 +277,19 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   if (depth > 0) {
     // under the sea: the beach's pale sand running out to ~6 m (the Mediterranean's turquoise band:
     // light seen through the shallows over pale sand — 3 m was too short), then the darker seabed
-    const sand = 1 - smoothstep(3.5, 7.5, depth);
+    const sand = (1 - smoothstep(3.5, 7.5, depth)) * (1 - headShape(x, z).mask);   // (the cap's foot: rock and weed, no sand)
     w[1] = sand; w[2] = 1 - sand;
   } else {
     const above = -depth;
     // the BEACH by DISTANCE from the shore, ~30 m (by height it ran 60-80 m inland: the plain rises
     // so gently that "under 2.3 m" was most of the coast)
-    const sand = 1 - smoothstep(24, 34, Sd(x, z));
+    const hk = headShape(x, z).mask, sd = Sd(x, z);
+    const sand = (1 - smoothstep(24, 34, sd)) * (1 - hk);                    // (no beach round the cap)
     const sl = slopeDeg(x, z);
-    const rock = smoothstep(20, 30, sl);                                      // cliffs
-    const maquis = smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21)) * 0.85 + smoothstep(4, 10, above - 2) * 0.35;
+    // cliffs; the cap's foot ledge — on the cap only its RISERS (> ~30°): its benches keep their scrub
+    const rock = Math.max(smoothstep(20 + 8 * hk, 30 + 6 * hk, sl), hk * (1 - smoothstep(2.5, 4.5, sd)));
+    // (on the cap: the scrub's floor mottled with bare red earth, 35-65% — solid maquis read as a lawn)
+    const maquis = smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21)) * 0.85 + smoothstep(4, 10, above - 2) * 0.35 + hk * (0.2 + 0.3 * noise(x / 9, z / 9, 63));
     const wd = wadiAt(x, z, 30).d, bed = wadi ? 1 - smoothstep(wadi.width * 0.45, wadi.width * 0.8, wd) : 0;
     const trk = 1 - smoothstep(3, 5.5, trackAt(x, z, 30).d);
     w[6] = trk;
@@ -253,12 +327,12 @@ const fordPts = (wadi?.fords ?? []).map((t) => wadiLine[Math.round(t * (wadiLine
 const fordClear = (x, z) => { let k = 1; for (const [fx, fz] of fordPts) k = Math.min(k, smoothstep(10, 16, Math.hypot(x - fx, z - fz))); return k; };
 const post = LAYOUT.sites.find((s) => s.kind === "french");
 const TALL = {
-  1: (x, z, o) => (o > 0 ? 0.55 * patches(x, z, 50, 0.4, 32) : 0.65 * patches(x, z, 40, 0.14, 33) * (0.5 + 0.5 * smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21)))),   // cork / holm oak
+  1: (x, z, o) => Math.max(o > 0 ? 0.55 * patches(x, z, 50, 0.4, 32) : 0.65 * patches(x, z, 40, 0.14, 33) * (0.5 + 0.5 * smoothstep(0.55, 0.7, noise(x / 45, z / 45, 21))), headShape(x, z).mask * 0.75 * patches(x, z, 22, 0.55, 38)),   // cork / holm oak (thick on the cap)
   2: (x, z) => { const d = Math.hypot(x - post.x, z - post.z); return smoothstep(post.r + 6, post.r + 14, d) * (1 - smoothstep(post.r + 30, post.r + 44, d)) * patches(x, z, 14, 0.35, 34) * 0.9; },   // date palms by the post
-  3: (x, z, o) => (o > 0 ? 0.45 * patches(x, z, 40, 0.5, 36) : 0.35 * patches(x, z, 35, 0.12, 37)),   // juniper
+  3: (x, z, o) => Math.max(o > 0 ? 0.45 * patches(x, z, 40, 0.5, 36) : 0.35 * patches(x, z, 35, 0.12, 37), headShape(x, z).mask * 0.6 * patches(x, z, 16, 0.6, 39)),   // juniper (and on the cap)
 };
 const GROUND = {
-  1: (x, z) => 0.25 * patches(x, z, 25, 0.14, 41),                         // doum palm
+  1: (x, z) => Math.max(0.25 * patches(x, z, 25, 0.14, 41), headShape(x, z).mask * 0.35 * patches(x, z, 9, 0.35, 45)),   // doum palm (the cap's undergrowth: the maquis)
   2: (x, z) => wadiK(x, z, 2.5, 5) * 0.5 * (1 - smoothstep(-60, 20, z)) * patches(x, z, 10, 0.5, 51),   // reeds, the lower reach, in beds
   3: (x, z) => wadiK(x, z, 4, 7) * 0.5 * patches(x, z, 14, 0.32, 52),                                   // oleander, clumps on its banks
   4: (x, z) => wadiK(x, z, 5, 10) * 0.32 * patches(x, z, 22, 0.22, 53),                                 // tamarisk, a few groves
@@ -309,7 +383,12 @@ set(0, "Coastal plain", "/textures/ground/dirt_aerial_02", "dirt_aerial_02_", PH
 // brightness, the beach read as the plain's brown; a tint can't brighten past white)
 set(1, "Beach sand", "/textures/ground/coast_sand_light", "coast_sand_light_", PH, { uvScale: W / 12, normalStr: 0.5, aoStr: 0.25, tint: "#ffffff" });
 set(2, "Seabed", "/textures/ground/coast_sand_05", "coast_sand_05_", PH, { uvScale: W / 25, normalStr: 0.5, aoStr: 0.2, tint: "#ffffff" });
-set(3, "Maquis", "/textures/pbr_materials/Grass005", "Grass005_1K-JPG_", CG, { uvScale: W / 4, normalStr: 0.6, aoStr: 0.3, tint: "#b9b080" });
+// (2026-10-16, the cap: Grass005 read as a LAWN even darkened — rough grass with its stones showing,
+// pulled to the Stora scrub's dry olive)
+set(3, "Maquis", "/textures/ground/rocky_terrain_02", "rocky_terrain_02_", PH, { uvScale: W / 10, normalStr: 0.6, aoStr: 0.35, tint: "#c4b48c" });
+// THE CLIFF ROCK: the layered ochre stone the cap's slabs are made of (algSandstone's side photo), greyed
+// toward the Stora capes (the template's rock_boulder_dry, pale beige, read as SAND at the cliff foot)
+set(5, "Cliff rock", "/textures/ground/cliff_side", "cliff_side_", PH, { uvScale: W / 9, normalStr: 0.8, aoStr: 0.4, tint: "#bfb19c", triplanar: true });   // (side projections: top-down, the photo ran down the cliff in streaks)
 
 const blobs = new Map([["heightmap", Buffer.from(hgt.buffer)], ["splat", splat], ["susukiDensity", tallPaint.out], ["foliagePaint", groundPaint.out]]);
 const bytes = await writeProject(args.out, { manifest: man, blobs });
