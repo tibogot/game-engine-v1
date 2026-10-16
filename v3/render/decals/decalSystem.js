@@ -131,6 +131,7 @@ export class DecalSystem {
 
   /** Add a decal. Pass position, quaternion (projection = local −Y) and any DECAL_DEFAULTS. */
   add(params) {
+    this._ensureSlots();
     const d = { px: 0, py: 0, pz: 0, qx: 0, qy: 0, qz: 0, qw: 1, ...DECAL_DEFAULTS, ...params };
     // Keep a given id (undo restores them) unless it is taken.
     if (!Number.isInteger(d.id) || this.get(d.id)) d.id = _nextId;
@@ -159,10 +160,30 @@ export class DecalSystem {
 
   // ── Texture slots ───────────────────────────────────────────────────────
 
-  /** Replace every slot ({ name, albedoUrl, normalUrl }); resolves when the arrays are rebuilt. */
+  /**
+   * Replace every slot ({ name, albedoUrl, normalUrl }); resolves when the arrays are rebuilt.
+   * LAZY WHILE NO DECAL EXISTS (2026-10-16, the alg-rts coast: 16 decal images loaded and decoded on
+   * the main thread at the boot, ~0.6-1.3 s, for a map that places none): the slots are recorded at
+   * once (`textures.slots` — games look them up by name), the images only when the first decal is
+   * added (`add` → `_ensureSlots`). The ground cache re-bakes on the textures' version, so decals
+   * that come later still reach the terrain.
+   */
   async setSlots(slots) {
+    if (this.decals.length === 0) {
+      this.textures.slots = slots.map((t) => ({ name: t.name, albedoUrl: t.albedoUrl, normalUrl: t.normalUrl ?? null }));
+      this._slotsPending = true;
+      return;
+    }
+    this._slotsPending = false;
     await this.textures.setSlots(slots);
     this._onTexturesRebuilt();
+  }
+
+  /** Build the arrays of slots recorded while no decal existed (once, on the first decal). */
+  _ensureSlots() {
+    if (!this._slotsPending) return;
+    this._slotsPending = false;
+    this.ready = this.textures.setSlots(this.textures.slots).then(() => this._onTexturesRebuilt());
   }
 
   addSlot(slot) {
@@ -241,13 +262,19 @@ export class DecalSystem {
    */
   async importData(data) {
     this.decals.length = 0;
+    // The level's slots first (recorded while no decal exists: the first decal below builds THEM,
+    // once — not the defaults), then its decals; the load waits for the arrays as before.
+    const slots = data?.slots?.length ? data.slots : DEFAULT_DECAL_SLOTS;
+    if (JSON.stringify(slots) !== JSON.stringify(this.textures.slots)) {
+      if (this._slotsPending || this.decals.length === 0) { this.textures.slots = slots.map((t) => ({ name: t.name, albedoUrl: t.albedoUrl, normalUrl: t.normalUrl ?? null })); this._slotsPending = true; }
+      else await this.setSlots(slots);
+    }
     for (const d of data?.decals ?? []) {
       const { id: _, ...rest } = d;
       this.add(rest);
     }
     this.markDirty();
-    const slots = data?.slots?.length ? data.slots : DEFAULT_DECAL_SLOTS;
-    if (JSON.stringify(slots) !== JSON.stringify(this.textures.slots)) await this.setSlots(slots);
+    if (this.decals.length) await this.ready;
   }
 
   // ── Rendering ───────────────────────────────────────────────────────────

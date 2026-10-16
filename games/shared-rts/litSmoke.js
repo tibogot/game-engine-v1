@@ -52,10 +52,16 @@ class SmokeMRTNode extends THREE.MRTNode {
 
 export function createLitSmoke({ app, max: MAX = 384, name = "LitSmoke" } = {}) {
   const F = SMOKE6_ATLAS;
+  // (DECODED OFF THE MAIN THREAD, 2026-10-16: three 1536² atlases as <img> were decoded on the main
+  // thread at their first upload, ~0.35 s of the boot; the texture fills when its bitmap is ready —
+  // empty until then, as a TextureLoader texture is while its image loads)
   const load = (url, srgb) => {
-    const t = new THREE.TextureLoader().load(url);
+    const t = new THREE.Texture();
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     t.anisotropy = 4;
+    fetch(url).then((r) => r.blob()).then((b) => createImageBitmap(b, { premultiplyAlpha: "none" }))
+      .then((bmp) => { t.image = bmp; t.needsUpdate = true; })
+      .catch((e) => console.warn(`litSmoke: ${url}`, e));
     return t;
   };
   const texA = load(F.a, true), texB = load(F.b, true), texM = load(F.mv, false);

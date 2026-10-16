@@ -26,14 +26,24 @@ export function bookTextures({ W, H, A, B, M }) {
   return { a: make(A, true), b: make(B, true), mv: make(M, false) };
 }
 
-/** Saved webp atlases, loaded as the game would (TextureLoader, flipY). */
+/**
+ * Saved webp atlases (flipY, as TextureLoader's). DECODED OFF THE MAIN THREAD (createImageBitmap,
+ * 2026-10-16): as <img> elements, each 1536² atlas was decoded on the main thread when three first
+ * uploaded it — 24 of them were ~1.1 s of the coast's boot. `no-cache`: always the latest bake (the
+ * lab re-bakes them), revalidated with the server — a 304, not the whole file (`?v=Date.now()` was).
+ */
 export async function loadBookTextures(base) {
   const meta = await (await fetch(`${base}.json`, { cache: "no-store" })).json();
-  const load = (url, srgb) => new Promise((res, rej) => new THREE.TextureLoader().load(`${url}?v=${Date.now()}`, (t) => {
+  const load = async (url, srgb) => {
+    const res = await fetch(url, { cache: "no-cache" });
+    if (!res.ok) throw new Error(`${url}: ${res.status}`);
+    const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: "none" });
+    const t = new THREE.Texture(bmp);
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
     t.generateMipmaps = false; t.minFilter = THREE.LinearFilter;
-    res(t);
-  }, undefined, rej));
+    t.needsUpdate = true;
+    return t;
+  };
   const [a, b, mv] = await Promise.all([load(`${base}_a.webp`, true), load(`${base}_b.webp`, true), load(`${base}_mv.webp`, false)]);
   return { meta, tex: { a, b, mv } };
 }
