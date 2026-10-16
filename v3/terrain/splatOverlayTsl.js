@@ -262,6 +262,12 @@ export function createSplatOverlay(
   const uSoloLayer      = uniform(-1.0);
   const uHeightBlend    = uniform(0.0);
   const uHeightContrast = uniform(0.5);
+  /**
+   * How much the height blend drives the NORMAL and ROUGHNESS too (1, the
+   * default since 2026-10-17) rather than the colour only (0, the old look).
+   * A uniform so the two can be A/B'd in one frame.
+   */
+  const uHeightBlendChannels = uniform(1.0);
   // Large-scale variation (see blend()). Both 0 = off and branch-skipped.
   const uMacroStrength  = uniform(0.0);  // brightness swing, 0..0.5
   const uMacroWarmth    = uniform(0.0);  // warm/cool tint amount, 0..1
@@ -907,6 +913,16 @@ export function createSplatOverlay(
         }
         const NE = entries.length;
 
+        // THE BLEND WEIGHTS every channel uses (2026-10-17, AUDIT #6): the
+        // painted weights, replaced below by the height-blended ones when the
+        // height blend is on. Colour, roughness AND the normal all read these,
+        // so a stone layer's relief and roughness cut through the sand exactly
+        // where its colour does — before, only the colour was height-blended
+        // and the normal / roughness faded linearly across the same edge.
+        // Vars in unconditional flow, assigned inside the branch.
+        const bw0 = float(w[0]).toVar();
+        const bw = entries.map((e) => float(e.w).toVar());
+
         // Linear weight blend — the one path that is always needed.
         let linSum = baseC.mul(w[0]);
         for (let i = 0; i < NE; i++) linSum = linSum.add(layerColors[i].mul(entries[i].w));
@@ -954,6 +970,10 @@ export function createSplatOverlay(
             for (let i = 0; i < NE; i++) hBlended = hBlended.add(layerColors[i].mul(aw[i + 1].div(totalAW)));
 
             colV.assign(mix(linear, hBlended, uHeightBlend));
+            // The same weights for roughness and the normal (see bw above).
+            const k = uHeightBlend.mul(uHeightBlendChannels);
+            bw0.assign(mix(w[0], aw[0].div(totalAW), k));
+            for (let i = 0; i < NE; i++) bw[i].assign(mix(entries[i].w, aw[i + 1].div(totalAW), k));
           });
         }
 
@@ -999,11 +1019,11 @@ export function createSplatOverlay(
         }
 
         if (wantRough) {
-          let rSum = roughV.mul(w[0]);
-          for (const e of entries) {
+          let rSum = roughV.mul(bw0);
+          entries.forEach((e, i) => {
             const lr = mix(float(0.88), e.orm.r, e.roughStr);
-            rSum = rSum.add(lr.mul(e.w));
-          }
+            rSum = rSum.add(lr.mul(bw[i]));
+          });
           roughV.assign(clamp(rSum, float(0.04), float(1)));
         }
 
@@ -1012,8 +1032,8 @@ export function createSplatOverlay(
         // A turned layer turns its tangent frame with it: +u' runs along world
         // (c, −s) and +v' along (s, c), so the bump still faces the right way.
         if (wantNrm) {
-          let accumN = nrmV.mul(w[0]);
-          for (const e of entries) {
+          let accumN = nrmV.mul(bw0);
+          for (const [i, e] of entries.entries()) {
             const orm = e.orm;
             const nx  = orm.b.mul(float(2.0)).sub(float(1.0));
             const ny  = orm.a.mul(float(2.0)).sub(float(1.0));
@@ -1025,7 +1045,7 @@ export function createSplatOverlay(
             const worldN = normalize(vec3(tx, float(0), tz).add(nrmV.mul(nz)));
             // Lerp between pure geometric normal and normal-mapped based on per-layer strength
             const layerN = mix(nrmV, worldN, e.normalStr);
-            accumN = accumN.add(layerN.mul(e.w));
+            accumN = accumN.add(layerN.mul(bw[i]));
           }
           nrmV.assign(normalize(accumN));
         }
@@ -1082,6 +1102,7 @@ export function createSplatOverlay(
     uHasPaint,
     uSoloLayer,
     uHeightBlend,
+    uHeightBlendChannels,
     uHeightContrast,
     uMacroStrength,
     uMacroWarmth,

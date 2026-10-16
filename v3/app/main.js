@@ -11980,6 +11980,8 @@ export async function startV3App(opts = {}) {
       heightLayers,
       heightLayerUi,
       sculpt,
+      /** The terrain paint shader's uniforms (texturing A/Bs). */
+      splatOverlay,
       /** Pads (padSystem.js) and their editing half, for scripted checks. */
       get padSystem() { return padSystem; },
       get padEditor() { return padEditor; },
