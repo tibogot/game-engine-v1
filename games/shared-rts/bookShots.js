@@ -16,7 +16,7 @@
 //
 // Lit as flameStreamFx (the scene's sun and sky); fades into the real ground (heightmap tap).
 import * as THREE from "three";
-import { createBookCard, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
+import { createBookCards, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
 import { drapeY } from "./terrainDrape.js";
 import { RENDER_ORDER } from "./renderOrder.js";
 
@@ -34,8 +34,8 @@ export async function createBookShots({ app, books }) {
   await Promise.all(Object.entries(books).map(async ([key, opts]) => {
     const b = await loadBookTextures(`${BASE}${key}`).catch((e) => { console.warn(`bookShots: no ${key}`, e); return null; });
     if (!b) return;
-    const cards = Array.from({ length: opts.pool ?? 6 }, () => {
-      const c = createBookCard({ groundAt });
+    // ONE material for the pool (createBookCards: one shader build, not one a card)
+    const cards = createBookCards(opts.pool ?? 6, { groundAt }).map((c) => {
       c.setBook(b.tex, b.meta);
       c.u.uGroundFade.value = 0.5;
       c.u.uBloom.value = opts.bloom ?? 0.12;

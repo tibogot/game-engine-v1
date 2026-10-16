@@ -16,7 +16,7 @@
 // buffer, faded softly into the ground under the nozzle. `onState(key, "start" | "stop")`
 // tells the game (its sounds) when a stream lights or is let go.
 import * as THREE from "three";
-import { createBookCard, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
+import { createBookCards, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
 import { RENDER_ORDER } from "./renderOrder.js";
 import { drapeY } from "./terrainDrape.js";
 
@@ -48,11 +48,13 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
     .catch(() => loadBookTextures(`${P.base}napalmFire`)).catch(() => null);
   const groundAt = app.heightTexNode ? (x, z) => drapeY(app.heightTexNode, x, z) : null;
 
-  // The pool: `max` slots of three cards, handed to streams as they light.
-  const slots = Array.from({ length: P.max }, () => books.map((b) => {
+  // The pool: `max` slots of three cards, handed to streams as they light. Each BOOK's cards share
+  // one material (createBookCards: one shader build a book, not one a card — 2026-10-16).
+  const byBook = books.map(() => createBookCards(P.max, { groundAt }));
+  const slots = Array.from({ length: P.max }, (_, i) => books.map((b, j) => {
     // Into the REAL ground under each pixel (one heightmap tap, as litSmoke): a slope rising
     // through the stream was cut in a hard line at a single fade height (you, 2026-10-09).
-    const c = createBookCard({ groundAt });
+    const c = byBook[j][i];
     c.setBook(b.tex, b.meta);
     c.u.uGroundFade.value = 1.0;
     c.mesh.visible = false;
@@ -65,8 +67,7 @@ export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState 
   const free = [...slots];
 
   // The burning-ground cards: { c, x, z, t0, end, phase } (end < clock: free).
-  const patches = groundBook ? Array.from({ length: P.patches }, () => {
-    const c = createBookCard({ groundAt });
+  const patches = groundBook ? createBookCards(P.patches, { groundAt }).map((c) => {
     c.setBook(groundBook.tex, groundBook.meta);
     c.u.uGroundFade.value = 0.5;
     c.u.uBloom.value = P.bloom;

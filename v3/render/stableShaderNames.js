@@ -32,6 +32,20 @@ export function installStableShaderNames(renderer) {
     }
     return u;
   };
+  // ?buildlog=1 (2026-10-16, the duplicate-build hunt): every node build of the boot recorded —
+  // which object, which material, how long — in window.__v3BuildLog.
+  if (typeof location !== "undefined" && new URLSearchParams(location.search).get("buildlog") === "1" && proto.build) {
+    const build = proto.build, log = (window.__v3BuildLog = []);
+    proto.build = function (...a) {
+      const t = performance.now();
+      const r = build.apply(this, a);
+      const o = this.object, m = this.material;
+      const code = (this.vertexShader || "") + "@@" + (this.fragmentShader || "") + (this.computeShader || "");
+      let hsh = 2166136261; for (let i = 0; i < code.length; i += 3) { hsh ^= code.charCodeAt(i); hsh = Math.imul(hsh, 16777619); }
+      log.push({ code: hsh >>> 0, ms: performance.now() - t, obj: o?.name || o?.type || "?", parent: o?.parent?.name || "", mat: m ? `${m.type}:${m.name || "-"}` : "-", shadow: !!this.context?.isShadowPass || m?.isShadowPassMaterial === true, ref: { o, m } });
+      return r;
+    };
+  }
   _installed = true;
   return true;
 }

@@ -44,29 +44,47 @@ export async function loadBookTextures(base) {
  * fades above one height (uGroundY) — on a slope the ground rose through the card before the
  * fade and the depth test cut it there in a hard line (the flamethrower in the battle lab).
  */
-export function createBookCard({ groundAt = null } = {}) {
-  const uAge = uniform(0);            // 0..1 through the book
-  const uLoop = uniform(0);
-  const uSunL = uniform(new THREE.Vector3(0, 1, 0));   // the sun in the card's frame
-  const uSun = uniform(new THREE.Color(3, 3, 3));
-  const uAmb = uniform(new THREE.Color(0.4, 0.45, 0.5));
-  const uTint = uniform(new THREE.Color(0.2, 0.2, 0.2));
-  const uFireK = uniform(1);
-  const uEmax = uniform(1);
-  const uMvScale = uniform(24);
-  const uMotion = uniform(1);
-  const uFade = uniform(1);
-  // AXIAL cards (a flamethrower's stream): how far along the card the stream has reached
-  // from the nozzle (0..1 of the rest of the card), and where the nozzle sits on it (u).
-  const uReach = uniform(1), uAnchorU = uniform(0);
-  // The left edge's fade: 12% as litSmoke, none on an axial card (its nozzle sits at the edge).
-  const uFadeL = uniform(0.12);
-  // INTO THE GROUND softly (m; 0 = off): a card tilted to face the camera dips under the
-  // ground, and the depth test cut it there in a hard straight line (the flamethrower's belly).
-  const uGroundY = uniform(0), uGroundFade = uniform(0.6);           // the whole card (a one-shot fades out at its end)
-  const uFrames = uniform(64);
-  const uBloom = uniform(0.3);        // share of the flame's light written to the bloom buffer
-  const uCols = uniform(8), uRows = uniform(8), uInset = uniform(0.5 / 192);
+/** A card's own values, as plain holders (their `.value`, as uniforms') — the defaults. */
+function cardValues() {
+  return {
+    uAge: { value: 0 },            // 0..1 through the book
+    uLoop: { value: 0 },
+    uSunL: { value: new THREE.Vector3(0, 1, 0) },   // the sun in the card's frame
+    uSun: { value: new THREE.Color(3, 3, 3) },
+    uAmb: { value: new THREE.Color(0.4, 0.45, 0.5) },
+    uTint: { value: new THREE.Color(0.2, 0.2, 0.2) },
+    uFireK: { value: 1 },
+    uEmax: { value: 1 },
+    uMvScale: { value: 24 },
+    uMotion: { value: 1 },
+    uFade: { value: 1 },
+    // AXIAL cards (a flamethrower's stream): how far along the card the stream has reached
+    // from the nozzle (0..1 of the rest of the card), and where the nozzle sits on it (u).
+    uReach: { value: 1 }, uAnchorU: { value: 0 },
+    // The left edge's fade: 12% as litSmoke, none on an axial card (its nozzle sits at the edge).
+    uFadeL: { value: 0.12 },
+    // INTO THE GROUND softly (m; 0 = off): a card tilted to face the camera dips under the
+    // ground, and the depth test cut it there in a hard straight line (the flamethrower's belly).
+    uGroundY: { value: 0 }, uGroundFade: { value: 0.6 },           // the whole card (a one-shot fades out at its end)
+    uFrames: { value: 64 },
+    uBloom: { value: 0.3 },        // share of the flame's light written to the bloom buffer
+    uCols: { value: 8 }, uRows: { value: 8 }, uInset: { value: 0.5 / 192 },
+  };
+}
+
+/**
+ * The material's nodes. `shared`: each uniform reads the value of the CARD BEING DRAWN
+ * (mesh.userData.bookCard — onObjectUpdate), so one material, ONE shader build, serves every card
+ * of a pool; otherwise the uniforms ARE the card's values (a lone card, the labs).
+ */
+function bookMaterial(V, groundAt, shared) {
+  const U = {};
+  for (const [k, h] of Object.entries(V)) {
+    U[k] = shared
+      ? uniform(h.value.clone ? h.value.clone() : h.value).onObjectUpdate(({ object }) => object.userData.bookCard?.[k].value)
+      : uniform(h.value);
+  }
+  const { uAge, uLoop, uSunL, uSun, uAmb, uTint, uFireK, uEmax, uMvScale, uMotion, uFade, uReach, uAnchorU, uFadeL, uGroundY, uGroundFade, uFrames, uBloom, uCols, uRows, uInset } = U;
 
   // Placeholder textures until the first bake: TSL fixes the texture nodes at build.
   const blank = new THREE.DataTexture(new Uint8Array([0, 0, 0, 0]), 1, 1);
@@ -128,17 +146,49 @@ export function createBookCard({ groundAt = null } = {}) {
   // THE FLAME GLOWS in a game's selective bloom (its emissive MRT buffer, v3/render/bloomMRT.js);
   // on a plain target (the labs) this collapses to the normal output.
   material.mrtNode = new BloomMRTNode({ emissive: bloomOut });
+  // (a lone card: the uniforms are its values — `u` is them)
+  return { material, tA, tB, tM, U };
+}
 
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+/**
+ * ONE CARD (the labs, the flamethrower's streams): its own material — its own shader build.
+ * A pool of cards of one book: createBookCards (one build for all).
+ */
+export function createBookCard({ groundAt = null } = {}) {
+  const V = cardValues();
+  const M = bookMaterial(V, groundAt, false);
+  return cardHandle(M, M.U, M);
+}
+
+/**
+ * A POOL OF CARDS ONE BOOK PLAYS (2026-10-16, the duplicate shader builds: 50 pooled cards were 50
+ * materials, 50 identical builds of this shader at the boot): `count` cards sharing ONE material;
+ * each card's values (its age, fade, tint, sun…) live on its mesh and are read when it is drawn.
+ * Every card shows the same book (set once: `setBook` on any of them sets it for all).
+ */
+export function createBookCards(count, { groundAt = null } = {}) {
+  const M = bookMaterial(cardValues(), groundAt, true);
+  return Array.from({ length: count }, () => {
+    const V = cardValues();
+    return cardHandle(M, V, M, V);
+  });
+}
+
+let _cardGeo = null;
+/** A card's handle: its mesh (on the material `M`), its values `u`, its setters. */
+function cardHandle(M, u, { material, tA, tB, tM }, own = null) {
+  const { uAge, uLoop, uSunL, uSun, uAmb, uFireK, uEmax, uMvScale, uReach, uAnchorU, uFadeL, uFrames, uCols, uRows, uInset } = u;
+  const mesh = new THREE.Mesh(_cardGeo ??= new THREE.PlaneGeometry(1, 1), material);
   mesh.name = "Baked book card";
   mesh.frustumCulled = false;
   mesh.renderOrder = 10;
   mesh.visible = false;
+  if (own) mesh.userData.bookCard = own;
 
   const _r = new THREE.Vector3(), _u = new THREE.Vector3(), _b = new THREE.Vector3(), _m = new THREE.Matrix4(), _y = new THREE.Vector3();
   return {
     mesh,
-    u: { uFireK, uMotion, uTint, uSun, uSunL, uAmb, uFade, uReach, uGroundY, uGroundFade, uBloom },
+    u: { uFireK: u.uFireK, uMotion: u.uMotion, uTint: u.uTint, uSun, uSunL, uAmb, uFade: u.uFade, uReach, uGroundY: u.uGroundY, uGroundFade: u.uGroundFade, uBloom: u.uBloom },
     /** Show a book: textures { a, b, mv } and its meta. */
     setBook(tex, meta) {
       tA.value = tex.a; tB.value = tex.b; tM.value = tex.mv;

@@ -15,6 +15,7 @@ import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, mod, step, texture, varying, vec3 } from "three/tsl";
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
+let _sharedXray = null;   // (the unit types' x-ray: one material, one shader build)
 import { teamTint, isUntinted, isHuman, isHostile } from "./teams.js";
 import { GIB, createCrowdField } from "./crowdSkinning.js";
 import { DEATH_CHEST, MOVES, MOVE_JOIN, deathFrom, fadeFor, postureOf } from "./soldierTransitions.js";
@@ -376,7 +377,10 @@ function buildInstancedType(tpl, scene) {
   // per-instance team flag picks blue or red.
   const team = new THREE.InstancedBufferAttribute(new Float32Array(MAX_PER_TYPE), 1);
   team.setUsage(THREE.DynamicDrawUsage);
-  const xrayMat = createXrayMaterial({ teamNode: attribute("iTeam", "float") });
+  // ONE x-ray material for every unit type (2026-10-16, the duplicate builds: one a type was ~21
+  // identical shader builds at the boot). Safe to share: it reads the mesh's own instance attributes,
+  // not a storage buffer (the crowds' x-ray keeps its own: memory ref_crowd_program_cache_key).
+  const xrayMat = (_sharedXray ??= createXrayMaterial({ teamNode: attribute("iTeam", "float") }));
   for (const part of parts) {
     part.im.geometry.setAttribute("iTeam", team);
     const x = new THREE.InstancedMesh(part.im.geometry, xrayMat, MAX_PER_TYPE);
