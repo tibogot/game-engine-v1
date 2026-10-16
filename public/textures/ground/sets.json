@@ -360,6 +360,45 @@
    "aerial": true,
    "gradedFrom": "aerial_beach_01",
    "mean": "#dcac78"
+  },
+  {
+   "slug": "beach_sand_dry",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 30,
+   "aerial": true,
+   "gradedFrom": "aerial_beach_01",
+   "mean": "#dcc7a0"
+  },
+  {
+   "slug": "beach_sand_wet",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 30,
+   "aerial": true,
+   "gradedFrom": "aerial_beach_01",
+   "mean": "#9c8a6c"
+  },
+  {
+   "slug": "seabed_sand",
+   "maps": [
+    "diff",
+    "nor_gl",
+    "rough",
+    "ao"
+   ],
+   "size": 30,
+   "aerial": true,
+   "gradedFrom": "aerial_beach_01",
+   "mean": "#b8a684"
   }
  ]
 }

@@ -12155,6 +12155,12 @@ export async function startV3App(opts = {}) {
      * the way the object is moving (grass leans along it), 0,0 when still.
      */
     stampGrassPush: (x, z, radius, strength = 1, dirX = 0, dirZ = 0) => grassPush.stamp(x, z, radius, strength, dirX, dirZ),
+    /** The level's grass settings, READ-ONLY: for a game that runs its own grass
+     *  field with the same look (a second RevoGrassSystem on a surface the
+     *  terrain does not have — games/stylized-lab, grass on cliff tops). Getters:
+     *  a level load replaces both objects. */
+    get revoGrassState() { return revoGrassState; },
+    get grassState() { return grassState; },
     /** Pull in the editor's default PBR palette. A game that boots with
      *  `preloadPaintTextures: false` calls this when terrain first turns on,
      *  so the 104 MB belongs to the mode that wants it. */

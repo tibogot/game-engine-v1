@@ -86,6 +86,10 @@ export const PUBLIC_ENGINE_MODULES = [
   // alg-rts algSplats.js)
   "v3/terrain/splatMaterials.js",
   "v3/render/instancing/autoLod.js",
+  // The Revo grass field: a game runs its own instance on a surface the terrain
+  // does not have (games/stylized-lab: grass on cliff tops), with the level's
+  // revo settings (app.revoGrassState / app.grassState)
+  "v3/render/grass/revoGrassSystem.js",
   // Animals reshaped from the pack's donkey (goat, sheep, camel) — the builder
   // v3/sheep-lab.html tunes and the RTS herds place (a game places them)
   "v3/props/animalMorph.js",

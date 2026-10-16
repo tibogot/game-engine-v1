@@ -34,3 +34,6 @@ dist-ssr
 # copy the level next to itself before writing, so a bad patch is one "mv" away.
 # They are 10-25 MB binaries and must never reach a commit.
 *.v3proj.bak
+
+# Raw sound source library (536 MB) — backed up outside git
+assets-src/sounds/
