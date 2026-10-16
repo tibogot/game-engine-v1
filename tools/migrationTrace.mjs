@@ -125,7 +125,8 @@ const GROUPS = {
 };
 // every lab page is its own group
 const labPages = [];
-for (const dir of ["v3", "games/alg-rts", "games/modular-road-v3", "games/shared-rts"]) {
+for (const dir of ["v3", "v3/authoring", "games/alg-rts", "games/modular-road-v3", "games/shared-rts", "games/stylized-lab"]) {
+  if (!isDir(path.join(ROOT, dir))) continue;
   for (const f of fs.readdirSync(path.join(ROOT, dir))) {
     if (!f.endsWith(".html")) continue;
     const p = dir + "/" + f;
@@ -147,7 +148,7 @@ function walk(d, acc = []) {
   }
   return acc;
 }
-const allCode = [...walk(path.join(ROOT, "v2")), ...walk(path.join(ROOT, "v3")), ...walk(path.join(ROOT, "games"))];
+const allCode = ["v2", "v3", "games"].filter((d) => isDir(path.join(ROOT, d))).flatMap((d) => walk(path.join(ROOT, d)));
 const lines = (f) => { try { return fs.readFileSync(f, "utf8").split("\n").length; } catch { return 0; } };
 
 const fileGroups = {};

@@ -23,8 +23,7 @@ the editor and the games still run.
    v2's toolState is `v3/app/state/legacyToolState.js`. Then the 147 dead v2 files went, with the v2
    build entries, `dev:v2` and the home page links. `/v2/static/...` URLs still work: they are served
    from `public/v2/static/`.
-2. **Remove the dead:** archived games (rts-v3, terrarium; nam-rts?), the dropped systems (old
-   `worldOcean`, the sky modes other than Sky Pro + HDR), unused labs. Show the list, user confirms.
+2. **Small clean-ups, one at a time** — the backlog below, between the user's own work.
 3. **Get the game code out of the engine:** `v3/render/objects/rts*.js` (~13k lines, alg-rts and
    nam-rts buildings and vehicles) → the games / shared-rts; `v3/play/` modes → kits or archive;
    `v3/props/animalMorph.js` (alg-rts only).
@@ -43,12 +42,33 @@ Any time alongside: **a tiny new game that becomes the template** (level, camera
 pause, save, FR/EN, shared audio from `games/shared-rts/rtsAudio.js`, Steam wrapper with Electron +
 steamworks.js), then ship a small game to prove the pipeline.
 
+## How the clean-up runs (user, 2026-10-16)
+
+- **Old games stay** — nam-rts, rts-v3, terrarium, every game. They are the yardstick for how far the
+  new games go, and nam-rts may come back. **Labs stay** unless the user names one. Never propose removing a game or a lab.
+- **Step by step, between the user's own work** — one small item at a time, one decision at most each, never a batch of decisions.
+- **Replace, then remove** — a system goes only when its replacement is in use (River v2 when River v3 is done, roads when the new lane roads are done).
+- **"Nothing imports it" does not mean unused**: console tools are loaded by hand
+  (`await import('/v3/horse-lab/jumpCheck.js')`), so a file is never removed on a trace alone.
+
+## Backlog (one at a time, in this order)
+
+1. ~~Delete `public/levels/alg-aures.v3proj.orig` (identical to a committed version of 2026-10-01) and `dist/` (old build output, gitignored).~~ DONE 2026-10-16 (local only).
+2. **Tests that test nam-rts's copies instead of the code alg-rts runs:** `coverTest`, `simClockTest`,
+   `spatialGridTest` import `games/nam-rts/…`; `games/shared-rts/` has the versions alg-rts uses. Point
+   them at shared-rts (nam-rts keeps its own files). No decision needed.
+3. **The old "classic" ocean** (`v3/render/water/worldOcean.js`): every level has it off. One yes/no.
+   (`worldOceanV2` stays while Apex Rush uses it.)
+4. **Game code out of the engine** (step 3 above): move only, nothing deleted.
+5. **Labs into one `labs/` folder** (step 4 above): move only, nothing deleted.
+
 ## Editor systems: decisions (2026-10-16)
 
 | System | Decision |
 |---|---|
-| Sky | **Sky Pro + the HDRI loader** (the HDR sky mode is in `v3/app/worldEnvironment.js`). Other sky modes go. Clouds: what Sky Pro uses. |
-| Ocean | **Ocean Pro = default.** Old `worldOcean`: drop. `worldOceanV2`: undecided. alg-rts has its own ocean (game code). |
+| Sky | **Sky Pro (from the Tidewater repo) + the HDRI loader** = the main sky. **alg-rts already runs Sky Pro** (its code picks it, `games/alg-rts/algGame.js` SKY_PRO, default since 2026-09-29; checked live 2026-10-16: mode `skypro`, `SkyProSkyDome` drawn). The "atmosphere" saved in its 5 map files is overridden at boot; `?sky=atmosphere` brings the old sky back. The **"atmosphere" sky** is a different one (Apex Rush's own, moved into the engine 2026-09-18): it stays because **Apex Rush** draws it as its game sky (`AtmosphereSkyDome`, painted cloud tier by default). The **day-night sky** stays too (the arborist's preview). LESSON: check the running game, not only the level file. |
+| Clouds | painted + volumetric decks and `cloudSkyLight` stay (Apex Rush uses them). |
+| Ocean | **Ocean Pro = default.** Old "classic" `worldOcean`: drop (every level has it off; a level saying "classic" loads with the ocean off). **`worldOceanV2` stays: Apex Rush uses it** (`roadGame.js`, `modularRoadDock.js`). alg-rts's coast has its own sea (`?sea=pro` uses Ocean Pro). |
 | Grass | **keep both** (hybrid + Revo) and flowers. |
 | Roads | **decide later**, when the new lane road system is finished. |
 | River | **drop River v2 as soon as River v3 is done.** |
