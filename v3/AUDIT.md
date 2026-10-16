@@ -205,7 +205,9 @@ the game.
     rotate 90 direction, flips, feather, holes, exact undo patch, off-map).
     Still to do: clone brush (slice 3).
 14. **Non-destructive edit layers** like Unreal's. Large; roads and rivers
-    already do this per tool.
+    already do this per tool. **Sculpt layers DONE 2026-10-17** (Scene list →
+    Terrain, Inspector; see `v3/EDITOR_PLAN.md` item 2). Still open: the
+    operators (rivers, stamps) in that list; roads as an operator.
 15. ~~Modifier keys in the hints~~ — DONE 2026-09-14. The sculpt panel
     already had them; it now also lists Shift/Alt+scroll. The ? overlay was
     sculpt-only and out of date: rewritten by group (camera, sculpt, every

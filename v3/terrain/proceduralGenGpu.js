@@ -35,6 +35,7 @@ import {
   step,
   uniform,
   uv,
+  texture,
   mx_noise_float,
 } from "three/tsl";
 import { MAX_HEIGHT } from "./heightmapTexture.js";
@@ -59,6 +60,16 @@ export function createProceduralGenPass() {
   const uShapeId = uniform(0.0);
   const uCenter  = uniform(new THREE.Vector2(0.5, 0.5)); // falloff center (0.5 + offset)
   const uSeedZ   = uniform(0.0);   // seed as a z-slice through the 3D noise
+
+  // The sculpt layers' sum (heightLayers.layerSum), added on top: the generator
+  // writes BASE, and the layers above it stay where they are. A 1×1 zero
+  // texture when there are none. Sampled at uv() with no flip, like
+  // sculptBrush.uploadHeightRect, so texel (x, z) lands on texel (x, z).
+  const zeroTex = new THREE.DataTexture(new Float32Array([0]), 1, 1, THREE.RedFormat, THREE.FloatType);
+  zeroTex.minFilter = zeroTex.magFilter = THREE.NearestFilter;
+  zeroTex.needsUpdate = true;
+  let sumTex = null;
+  const layerSumNode = texture(zeroTex);
 
   /** Fixed-octave signed FBM (≈ [-1,1]); zBase decorrelates the noise fields. */
   function fbmSigned(px, py, octaves, zBase) {
@@ -160,10 +171,24 @@ export function createProceduralGenPass() {
     const rB = length(vec2(tdx, tdz));
     h = h.mul(clamp(float(1).sub(rB).div(float(0.05)), float(0), float(1)));
 
-    return vec4(max(h.div(float(MAX_HEIGHT)), float(0)), float(0), float(0), float(1));
+    const baseH = max(h.div(float(MAX_HEIGHT)), float(0));
+    return vec4(baseH.add(texture(layerSumNode, uvCoord).r), float(0), float(0), float(1));
   })();
 
   const quad = new QuadMesh(mat);
+
+  /** The layers to keep on top (Float32Array of size², normalized) or null. */
+  function setLayerSum(sum, size) {
+    sumTex?.dispose();
+    sumTex = null;
+    if (sum) {
+      sumTex = new THREE.DataTexture(sum, size, size, THREE.RedFormat, THREE.FloatType);
+      sumTex.minFilter = sumTex.magFilter = THREE.NearestFilter;
+      sumTex.flipY = false;
+      sumTex.needsUpdate = true;
+    }
+    layerSumNode.value = sumTex ?? zeroTex;
+  }
 
   /** Push CPU-side gen params (same object shape as DEFAULT_GEN) into uniforms. */
   function sync(gen) {
@@ -180,5 +205,5 @@ export function createProceduralGenPass() {
     uSeedZ.value = ((gen.seed >>> 0) % 65536) * 1.618;
   }
 
-  return { quad, sync, dispose() { mat.dispose(); } };
+  return { quad, sync, setLayerSum, dispose() { mat.dispose(); sumTex?.dispose(); zeroTex.dispose(); } };
 }

@@ -107,7 +107,8 @@ export function isProjectFile(buffer) {
 /** Async since version 2: the blobs and the manifest are gzipped on the way out. */
 export async function encodeProjectFile({
   terrain,
-  heightmap,            // Float32Array
+  heightmap,            // Float32Array — GROUND: base + the sculpt layers, what games read
+  heightLayers,         // heightLayers.exportLayers(): { meta, data } or null
   splat, splatRes,      // Uint8Array (both slices combined), texels per side
   snow, snowRes,        // Uint8Array, texels per side
   trees, foliage, props, roads, splines, lakes, riversV2, riverNetwork,
@@ -152,6 +153,7 @@ export async function encodeProjectFile({
     pending.push({ name, bytes: new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength) });
   };
   addBlob("heightmap", heightmap);
+  addBlob("heightLayers", heightLayers?.data ?? null);
   addBlob("farHeight", farTerrain?.blob ?? null);
   addBlob("splat", splat);
   addBlob("snow", snow);
@@ -187,6 +189,7 @@ export async function encodeProjectFile({
     version: VERSION,
     terrain,
     blobs,
+    heightLayers: heightLayers?.meta ?? null,
     splatRes: splatRes ?? null,
     snowRes:  snowRes ?? null,
     trees:    trees ?? null,
@@ -272,6 +275,11 @@ export async function decodeProjectFile(buffer) {
     terrain:   manifest.terrain,
     // Float32Array view needs 4-byte alignment — copy via slice to be safe.
     heightmap: hmBytes ? new Float32Array(hmBytes.slice().buffer) : null,
+    // The editor's sculpt layers (heightLayers.exportLayers); the heightmap above
+    // already contains them, so a reader that ignores this loses nothing.
+    heightLayers: manifest.heightLayers
+      ? { meta: manifest.heightLayers, data: blob("heightLayers") ? new Float32Array(blob("heightLayers").slice().buffer) : new Float32Array(0) }
+      : null,
     splat:     blob("splat"),
     splatRes:  manifest.splatRes,
     snow:      blob("snow"),

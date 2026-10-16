@@ -2941,15 +2941,33 @@ export async function startV3App(opts = {}) {
 
   // Live GPU regeneration: a burst of slider changes shares one undo entry
   // (runGeneratorPass opens a stroke; the timer closes it once tweaking stops).
+  // The generator writes BASE: the sculpt layers ride on top of it (the pass
+  // adds their sum), and every readback of the burst lands in BASE.
   let _genBurstTimer = 0;
+  let _genBurst = false;
   function applyProceduralTerrain() {
     readGenFromUI();
     genPass.sync(genParams);
+    if (!_genBurst) {
+      _genBurst = true;
+      heightEditTarget = 0;
+      genPass.setLayerSum(heightLayers.layerSum(), HEIGHTMAP_SIZE);
+    }
     sculpt.runGeneratorPass(genPass.quad);
     clearTimeout(_genBurstTimer);
-    _genBurstTimer = setTimeout(() => { if (!isPainting) sculpt.endStroke(); }, 800);
+    _genBurstTimer = setTimeout(endGenBurst, 800);
     markHeightmapDirty();
     scheduleHeightmapReadback();
+  }
+  async function endGenBurst() {
+    sculpt.endStroke();
+    try {
+      await ensureCpuHeightmapFromGpu();
+    } finally {
+      heightEditTarget = null;
+      _genBurst = false;
+      genPass.setLayerSum(null);
+    }
   }
 
   function pushPresetToUI(p) {
@@ -3176,7 +3194,7 @@ export async function startV3App(opts = {}) {
       location.reload();
       return;
     }
-    sculpt.replaceHeightData(decoded.heights);
+    await replaceBaseHeights(decoded.heights);
     onHistoryChange();
   }
 
@@ -3249,7 +3267,7 @@ export async function startV3App(opts = {}) {
     const top = hmfTopMetres();
     const k = top / MAX_HEIGHT;
     if (k !== 1) for (let i = 0; i < data.length; i++) data[i] *= k;
-    sculpt.replaceHeightData(data);
+    await replaceBaseHeights(data);
     onHistoryChange();
     hmfStatus.textContent = `Imported ${dec.width}×${dec.height} ${dec.bitDepth}-bit ${isPng(buf) ? "PNG" : "RAW"}${note}, white = ${top} m.`
       + (dec.bitDepth === 8 ? " 8-bit has only 256 levels, so slopes will step; use 16-bit if you can." : "");
@@ -4086,6 +4104,62 @@ export async function startV3App(opts = {}) {
   /** A half-float readback cannot reproduce a float mirror: compare like with like. */
   const quantizeHalf = (v) => THREE.DataUtils.fromHalfFloat(THREE.DataUtils.toHalfFloat(v));
 
+  /*
+   * WHICH SCULPT LAYER AN EDIT BELONGS TO (the layer panel, 2026-10-17).
+   * A GPU edit reaches the stack only at the next readback, so every edit read
+   * back together must belong to ONE layer: the active one, unless
+   * `heightEditTarget` says otherwise (Generate / import → BASE, the undo of a
+   * step made in another layer → that layer). Anything that changes the
+   * target goes through `queueHeightLayerWork`, which first lets the pending
+   * edits land where they belong. Each sculpt history step is tagged with its
+   * layer, so its undo goes back to that layer whatever is active by then.
+   */
+  let heightEditTarget = null;
+  /** The pending GPU edit is an undo / redo (heightLayers.absorb's `history`). */
+  let heightEditHistory = false;
+  const heightEditLayer = () => heightEditTarget ?? heightLayers.activeLayer;
+  sculpt.setHistoryTagger(heightEditLayer);
+  let _heightLayerQueue = Promise.resolve();
+  function queueHeightLayerWork(fn) {
+    const p = _heightLayerQueue.then(async () => {
+      await ensureCpuHeightmapFromGpu();
+      await fn();
+    }).catch((err) => console.warn("[V3] height layer step failed:", err));
+    _heightLayerQueue = p;
+    return p;
+  }
+  /** Run a GPU height edit whose readback belongs to `target`, then go back to the active layer. */
+  function editHeightsInLayer(target, fn, { history = false } = {}) {
+    return queueHeightLayerWork(async () => {
+      heightEditTarget = target;
+      heightEditHistory = history;
+      try {
+        await fn();
+        await ensureCpuHeightmapFromGpu();
+      } finally {
+        heightEditTarget = null;
+        heightEditHistory = false;
+      }
+    });
+  }
+  const heightLayerName = (id) => heightLayers.listLayers().find((l) => l.id === id)?.name ?? "that layer";
+  /** Say so when a hidden, locked or deleted layer refused an edit (absorb put it back). */
+  function reportHeightLayerDiscard() {
+    const d = heightLayers.takeDiscard();
+    if (!d) return;
+    statusBar?.setMessage(`“${heightLayerName(d.target)}” is hidden, locked or at 0 % — the terrain edit was not kept.`, { kind: "error" });
+  }
+  /**
+   * New BASE heights (Generate's CPU path, a heightmap import): the sculpt
+   * layers stay on top, so the GPU gets BASE + layers and the change lands in BASE.
+   */
+  function replaceBaseHeights(heights) {
+    const sum = heightLayers.layerSum();
+    const data = Float32Array.from(heights);
+    if (sum) for (let i = 0; i < data.length; i++) data[i] += sum[i];
+    return editHeightsInLayer(0, () => sculpt.replaceHeightData(data));
+  }
+
   /**
    * Widen a texel rect to a 32-texel grid.
    *
@@ -4190,7 +4264,10 @@ export async function startV3App(opts = {}) {
       heightLayers.absorb(
         { x0: rect.x, z0: rect.y, x1: rect.x + rect.w - 1, z1: rect.y + rect.h - 1 },
         isHalf ? quantizeHalf : null,
+        heightEditLayer(),
+        { history: heightEditHistory },
       );
+      reportHeightLayerDiscard();
       // Only the chunks under the edited rect need re-draping — see the note on
       // syncTreeHeights for why the full scan is expensive out of proportion to
       // its arithmetic.
@@ -4226,7 +4303,8 @@ export async function startV3App(opts = {}) {
    * river has its own undo, and a game's pads are regenerated at every boot.
    */
   function pushHeightmapEditsToGpu() {
-    const legacy = heightLayers.absorb();
+    const legacy = heightLayers.absorb(undefined, null, heightEditLayer(), { history: heightEditHistory });
+    reportHeightLayerDiscard();
     const rect = heightLayers.takePending();
     if (legacy) {
       sculpt.replaceHeightData(cpuHeightmap);
@@ -5406,6 +5484,15 @@ export async function startV3App(opts = {}) {
       setPickingHeight(false);
       return;
     }
+
+    // Height layers: no stroke into a layer that would throw it away, and none
+    // while a Generate burst is still landing in BASE (it ends 0.8 s after the
+    // last slider move).
+    if (!heightLayers.editable(heightLayers.activeLayer)) {
+      statusBar?.setMessage(`“${heightLayerName(heightLayers.activeLayer)}” is hidden, locked or at 0 % — pick or show another layer to sculpt.`, { kind: "error" });
+      return;
+    }
+    if (_genBurst) return;
 
     // Mirror has no stroke: clicking the ground does nothing, Apply does the work.
     if (stickyMode === "mirror") return;
@@ -7655,8 +7742,20 @@ export async function startV3App(opts = {}) {
       waterfallSystem?.markDirty();
     };
     sculpt.endStroke = (...a) => { const r = _endStroke(...a); terrainEdited(); return r; };
-    sculpt.undo = (...a) => { const r = _undo(...a); if (r) terrainEdited(); return r; };
-    sculpt.redo = (...a) => { const r = _redo(...a); if (r) terrainEdited(); return r; };
+    /*
+     * Undo / redo go back to the LAYER the step was made in (its history tag),
+     * even when that layer is now hidden or locked: pending edits land first,
+     * then this step is read back into its own layer as history.
+     */
+    const routedStep = (step, canStep, peekTag) => (...a) => {
+      sculpt.endStroke();
+      if (!canStep()) return false;
+      const tag = peekTag() ?? heightEditLayer();
+      editHeightsInLayer(tag, () => { step(...a); waterfallSystem?.markDirty(); }, { history: true });
+      return true;
+    };
+    sculpt.undo = routedStep(_undo, sculpt.canUndo, sculpt.peekUndoTag);
+    sculpt.redo = routedStep(_redo, sculpt.canRedo, sculpt.peekRedoTag);
     sculpt.replaceHeightData = (...a) => {
       const r = _replace(...a);
       terrainEdited(a[0] === cpuHeightmap);
@@ -8879,6 +8978,7 @@ export async function startV3App(opts = {}) {
       assets:    projectAssets.collectFor({ trees: trees.slots, props: { ...props, instances: props.instances.map((i) => i.liveParams).filter(Boolean) }, paintLayers, environment, decalSlots: decals?.slots }),
       terrain:   { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT },
       heightmap: heightLayers.ground,
+      heightLayers: heightLayers.exportLayers(),
       splat:     splatMap.exportCombined(), // painted holes only; tunnels rebuild theirs
       splatRes:  SPLAT_RES,
       splatHoles: true,
@@ -9009,7 +9109,7 @@ export async function startV3App(opts = {}) {
     // stamps, no river until the rivers are imported below) BEFORE the GPU swap,
     // so a flush that runs in between can only upload the new ground.
     if (d.heightmap?.length === HEIGHTMAP_SIZE * HEIGHTMAP_SIZE) {
-      heightLayers.reset(d.heightmap);
+      heightLayers.reset(d.heightmap, d.heightLayers);
       sculpt.replaceHeightData(d.heightmap);
       markHeightmapDirty();
     } else {
@@ -9405,7 +9505,7 @@ export async function startV3App(opts = {}) {
       } else {
         const decoded = decodeHeightmapFile(buf);
         if (decoded.width === HEIGHTMAP_SIZE && decoded.height === HEIGHTMAP_SIZE) {
-          sculpt.replaceHeightData(decoded.heights);
+          await replaceBaseHeights(decoded.heights);
           onHistoryChange();
         }
       }
@@ -10111,7 +10211,23 @@ export async function startV3App(opts = {}) {
         { key: "fog", label: "Fog", icon: "cloud-fog", selected: inspected === "fog" },
       ],
     });
-    groups.push({ key: "terrain", label: "Terrain", icon: "mountain", count: null, inTotal: false, items: [] });
+    // The sculpt layers (heightLayers.js): BASE, then the layers bottom to top.
+    // Click = make it the layer brushes write to (and inspect it); the eye hides it.
+    const activeLayer = heightLayers.activeLayer;
+    groups.push({
+      key: "terrain", label: "Terrain", icon: "mountain", count: null, inTotal: false,
+      items: heightLayers.listLayers().map((l) => ({
+        key: `hlayer:${l.id}`, label: l.name, icon: l.base ? "mountain" : "layers",
+        // Short, or the name gets cut: ● = brushes write here.
+        sub: [
+          l.id === activeLayer ? "●" : "",
+          !l.base && l.strength !== 1 ? `${Math.round(l.strength * 100)}%` : "",
+          l.locked ? "locked" : "",
+        ].filter(Boolean).join(" ") || null,
+        selected: inspected === `hlayer:${l.id}`,
+        canHide: !l.base, hidden: !l.visible,
+      })),
+    });
 
     const byType = new Map();
     for (const p of propStore.instances) {
@@ -10214,6 +10330,7 @@ export async function startV3App(opts = {}) {
   function sceneSignature() {
     return [
       inspector?.key, editorMode, propStore.gen, propInstancer.selectedIds.join(","),
+      heightLayers.listLayers().map((l) => `${l.id}${l.name}${l.visible ? "" : "h"}${l.strength}${l.locked ? "l" : ""}`).join(";"), heightLayers.activeLayer,
       propInstancer.hiddenTypes.size, propInstancer.hiddenIds.size,
       (tunnelSystem?.tunnels ?? []).map((t) => `${t.style}${t.nodes.length}${t.hidden ? "h" : ""}${(t._sampled?.length ?? 0) | 0}`).join(";"), tunnelSystem?.activeIndex,
       (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
@@ -10228,6 +10345,7 @@ export async function startV3App(opts = {}) {
     const i = Number(arg);
     switch (kind) {
       case "terrain": setEditorMode("sculpt"); break;
+      case "hlayer": setEditorMode("sculpt"); setActiveHeightLayer(i); break;
       case "props": setEditorMode("props"); break;
       case "propType": {
         setEditorMode("props");
@@ -10373,9 +10491,69 @@ export async function startV3App(opts = {}) {
       case "river": { const r = riverV2System.rivers[i]; if (r) (_hiddenMeshes.has(r) ? _hiddenMeshes.delete(r) : _hiddenMeshes.add(r)); break; }
       case "lake": { const l = lakeSystem.lakes[i]; if (l) (_hiddenMeshes.has(l) ? _hiddenMeshes.delete(l) : _hiddenMeshes.add(l)); break; }
       case "road": _roadsHidden = !_roadsHidden; break;
+      // Not an editor-only hide: a hidden sculpt layer is out of the terrain.
+      case "hlayer": {
+        const l = heightLayers.listLayers().find((x) => x.id === i);
+        if (l && !l.base) editHeightLayer(i, { visible: !l.visible });
+        break;
+      }
     }
     _applyEditorHidden();
   }
+
+  // ── Sculpt layer operations (Scene list, Inspector) ────────────────────────
+  // All of them wait for pending GPU edits to land in their own layer first.
+  function setActiveHeightLayer(id) {
+    return queueHeightLayerWork(() => { heightLayers.setActiveLayer(id); });
+  }
+  function editHeightLayer(id, props) {
+    return queueHeightLayerWork(() => { heightLayers.setLayer(id, props); });
+  }
+  function addHeightLayer() {
+    return queueHeightLayerWork(() => {
+      const id = heightLayers.addLayer();
+      inspector?.inspect(`hlayer:${id}`);
+      statusBar?.setMessage(`New sculpt layer “${heightLayerName(id)}” — brushes now write into it.`);
+    });
+  }
+  function clearHeightLayer(id) {
+    if (!window.confirm(`Clear everything sculpted in “${heightLayerName(id)}”? This cannot be undone.`)) return;
+    return queueHeightLayerWork(() => { heightLayers.clearLayer(id); });
+  }
+  function removeHeightLayer(id) {
+    const l = heightLayers.listLayers().find((x) => x.id === id);
+    if (!l || l.base) return;
+    if (!l.empty && !window.confirm(`Delete “${l.name}” and everything sculpted in it? This cannot be undone.`)) return;
+    return queueHeightLayerWork(() => {
+      heightLayers.removeLayer(id);
+      if (inspector?.key === `hlayer:${id}`) inspector.inspect("hlayer:0");
+    });
+  }
+  function mergeHeightLayerDown(id) {
+    return queueHeightLayerWork(() => {
+      const below = (() => {
+        const list = heightLayers.listLayers();
+        const k = list.findIndex((x) => x.id === id);
+        return k > 0 ? list[k - 1] : null;
+      })();
+      if (!heightLayers.mergeDown(id)) {
+        statusBar?.setMessage("Merge refused: the layer is hidden or at 0 %, or the one below is hidden, locked or at 0 %.", { kind: "error" });
+        return;
+      }
+      statusBar?.setMessage(`Merged into “${below?.name ?? "Base"}”.`);
+      inspector?.inspect(`hlayer:${below?.id ?? 0}`);
+    });
+  }
+  const heightLayerUi = {
+    list: () => heightLayers.listLayers(),
+    active: () => heightLayers.activeLayer,
+    setActive: setActiveHeightLayer,
+    edit: editHeightLayer,
+    add: addHeightLayer,
+    clear: clearHeightLayer,
+    remove: removeHeightLayer,
+    mergeDown: mergeHeightLayerDown,
+  };
 
   if (isEditor) sceneOutliner = createSceneOutliner({
     container: uiById("hierarchy"),
@@ -10468,8 +10646,29 @@ export async function startV3App(opts = {}) {
         return [inspect, focus, sep, del("Clear", () => { spawnSystem.clear(); spawnUi?.refresh(); afterDelete(); })];
       case "decal":
         return [inspect, focus, sep, del("Delete", () => { decalEditor?.deleteId(i); afterDelete(); })];
-      case "sun": case "sky": case "fog": case "terrain":
-        return [inspect, { label: "Open World tab", onClick: () => openRightTab("world") }].slice(0, kind === "terrain" ? 1 : 2);
+      case "terrain":
+        return [inspect, sep, { label: "Add sculpt layer", onClick: addHeightLayer }];
+      case "hlayer": {
+        const l = heightLayers.listLayers().find((x) => x.id === i);
+        if (!l) return [inspect];
+        const items = [
+          inspect,
+          { label: "Sculpt in this layer", onClick: () => selectAndInspect(key) },
+          { label: "Add sculpt layer", onClick: addHeightLayer },
+        ];
+        if (l.base) return [...items, sep, { label: l.locked ? "Unlock" : "Lock", onClick: () => editHeightLayer(0, { locked: !l.locked }) }];
+        return [
+          ...items,
+          { label: l.visible ? "Hide" : "Show", onClick: () => editHeightLayer(i, { visible: !l.visible }) },
+          { label: l.locked ? "Unlock" : "Lock", onClick: () => editHeightLayer(i, { locked: !l.locked }) },
+          { label: "Merge down", onClick: () => mergeHeightLayerDown(i) },
+          sep,
+          del("Clear", () => clearHeightLayer(i)),
+          del("Delete", () => removeHeightLayer(i)),
+        ];
+      }
+      case "sun": case "sky": case "fog":
+        return [inspect, { label: "Open World tab", onClick: () => openRightTab("world") }];
       default:
         return [inspect, focus];
     }
@@ -10507,6 +10706,7 @@ export async function startV3App(opts = {}) {
     container: uiById("tab-inspector"),
     deps: {
       world: { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, splatSize: SPLAT_RES, maxHeight: MAX_HEIGHT, lodLevels: LOD_LEVELS },
+      heightLayers: heightLayerUi,
       env: {
         light: worldToolState.light,
         proceduralSky: worldToolState.proceduralSky,
@@ -11615,6 +11815,12 @@ export async function startV3App(opts = {}) {
 
   if (import.meta.env?.DEV) {
     window.__V3_DEBUG = {
+      /** The height stack and its layer operations (layer panel checks). */
+      heightLayers,
+      heightLayerUi,
+      sculpt,
+      /** Resolves once every queued layer step and pending GPU edit has landed. */
+      async settleHeights() { await _heightLayerQueue; await ensureCpuHeightmapFromGpu(); await _heightLayerQueue; },
       /**
        * What the ambient field is actually doing this frame — the honest
        * numbers, read off the live objects rather than off the state.

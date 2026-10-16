@@ -665,15 +665,26 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
   )();
   const snapQuad = new QuadMesh(snapMat);
 
-  // Restore: write a small rect RT back into its sub-rect of rtMain (scissored).
-  const restSrcNode = texture(rtMain.texture);
-  const uRestOffset = uniform(new THREE.Vector2(0, 0));
-  const uRestScale  = uniform(new THREE.Vector2(1, 1));
-  const restMat = new THREE.MeshBasicNodeMaterial();
-  restMat.fragmentNode = Fn(() =>
-    vec4(texture(restSrcNode, uv().sub(uRestOffset).div(uRestScale)).r, float(0), float(0), float(1)),
-  )();
-  const restQuad = new QuadMesh(restMat);
+  // Undo / redo as a CHANGE, not a picture (2026-10-17, the height layers):
+  // main = main + sign × (A − B) inside the rect, where A and B are the step's
+  // before / after snapshots. Restoring the old picture instead put back
+  // whatever the rest of the stack looked like at the time — hide a sculpt
+  // layer, undo a stroke, and the hidden layer's shape came back with it (and a
+  // pad a game placed after the stroke was erased). The current heights are
+  // read from rtScratch (the rect copied first), never from the target.
+  const deltaCurNode = texture(rtMain.texture);
+  const deltaANode   = texture(rtMain.texture);
+  const deltaBNode   = texture(rtMain.texture);
+  const uDeltaOffset = uniform(new THREE.Vector2(0, 0));
+  const uDeltaScale  = uniform(new THREE.Vector2(1, 1));
+  const uDeltaSign   = uniform(1);
+  const deltaMat = new THREE.MeshBasicNodeMaterial();
+  deltaMat.fragmentNode = Fn(() => {
+    const r = uv().sub(uDeltaOffset).div(uDeltaScale);
+    const d = texture(deltaANode, r).r.sub(texture(deltaBNode, r).r);
+    return vec4(texture(deltaCurNode, uv()).r.add(d.mul(uDeltaSign)), float(0), float(0), float(1));
+  })();
+  const deltaQuad = new QuadMesh(deltaMat);
 
   // Bumped on every render into rtMain; see _render(). Consumers that cache
   // anything derived from the heightmap poll this instead of guessing.
@@ -759,8 +770,12 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
 
   // ── Stroke + history state ────────────────────────────────────────────────
   const MAX_HISTORY = 25;
-  const undoStack   = []; // entries: { rt, rect }
+  // entries: { pre, post, rect, extra, tag } — pre / post are rect-sized RTs of
+  // the step's area before and after it; tag = what historyTagger said at the
+  // end of the step (the height layer it was made in).
+  const undoStack   = [];
   const redoStack   = [];
+  let historyTagger = null;
   let strokeOpen  = false;
   let strokeRect  = null;
   // Something else the open stroke changed (the ground paint a mirror also
@@ -783,20 +798,31 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     return { rt, rect: { ...rect } };
   }
 
-  function restoreRect(entry) {
+  /** main += sign × (a − b) inside rect (a, b: rect-sized snapshots). */
+  function applyDelta(a, b, rect, sign) {
     const S = HEIGHTMAP_SIZE;
-    restSrcNode.value = entry.rt.texture;
-    uRestOffset.value.set(entry.rect.x / S, entry.rect.y / S);
-    uRestScale.value.set(entry.rect.w / S, entry.rect.h / S);
-    _render(restQuad, rtMain, entry.rect);
+    srcNode.value = rtMain.texture;
+    _render(copyQuad, rtScratch, rect);
+    deltaCurNode.value = rtScratch.texture;
+    deltaANode.value = a.texture;
+    deltaBNode.value = b.texture;
+    uDeltaOffset.value.set(rect.x / S, rect.y / S);
+    uDeltaScale.value.set(rect.w / S, rect.h / S);
+    uDeltaSign.value = sign;
+    _render(deltaQuad, rtMain, rect);
+  }
+
+  function disposeEntry(entry) {
+    entry.pre.dispose();
+    entry.post.dispose();
   }
 
   function trimStack(stack) {
-    while (stack.length >= MAX_HISTORY) stack.shift().rt.dispose();
+    while (stack.length >= MAX_HISTORY) disposeEntry(stack.shift());
   }
 
   function disposeStack(stack) {
-    for (const entry of stack) entry.rt.dispose();
+    for (const entry of stack) disposeEntry(entry);
     stack.length = 0;
   }
 
@@ -1037,10 +1063,13 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (!strokeRect) { strokeExtra = null; return; } // click without stamps — nothing to record
     disposeStack(redoStack);
     trimStack(undoStack);
-    const entry = snapshotRect(rtPreStroke, strokeRect);
-    entry.extra = strokeExtra;
+    const pre = snapshotRect(rtPreStroke, strokeRect);
+    const post = snapshotRect(rtMain, strokeRect);
+    undoStack.push({
+      pre: pre.rt, post: post.rt, rect: pre.rect,
+      extra: strokeExtra, tag: historyTagger?.() ?? null,
+    });
     strokeExtra = null;
-    undoStack.push(entry);
     strokeRect = null;
   }
 
@@ -1049,12 +1078,9 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (undoStack.length === 0) return false;
     trimStack(redoStack);
     const entry = undoStack.pop();
-    const redoEntry = snapshotRect(rtMain, entry.rect);
-    redoEntry.extra = entry.extra;
-    redoStack.push(redoEntry);
-    restoreRect(entry);
+    applyDelta(entry.pre, entry.post, entry.rect, 1);
+    redoStack.push(entry);
     entry.extra?.undo?.();
-    entry.rt.dispose();
     return true;
   }
 
@@ -1063,12 +1089,9 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     if (redoStack.length === 0) return false;
     trimStack(undoStack);
     const entry = redoStack.pop();
-    const undoEntry = snapshotRect(rtMain, entry.rect);
-    undoEntry.extra = entry.extra;
-    undoStack.push(undoEntry);
-    restoreRect(entry);
+    applyDelta(entry.pre, entry.post, entry.rect, -1);
+    undoStack.push(entry);
     entry.extra?.redo?.();
-    entry.rt.dispose();
     return true;
   }
 
@@ -1173,6 +1196,13 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     clone,
     undo,
     redo,
+    /** fn() → the tag each history step stores when it closes (its height layer). */
+    setHistoryTagger: (fn) => { historyTagger = fn; },
+    /** The tag of the step undo / redo would apply next (undefined = none). */
+    peekUndoTag: () => undoStack.at(-1)?.tag,
+    peekRedoTag: () => redoStack.at(-1)?.tag,
+    canUndo: () => strokeOpen ? !!strokeRect || undoStack.length > 0 : undoStack.length > 0,
+    canRedo: () => redoStack.length > 0,
     replaceHeightData,
     uploadHeightRect,
     runGeneratorPass,

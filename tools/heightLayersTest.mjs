@@ -243,5 +243,139 @@ const straight = makeRiver([[[0.1, 0.5], [0.3, 0.5], [0.5, 0.5], [0.7, 0.5], [0.
   ok("no change: nothing to recompose", same === false);
 }
 
+// ── 8. Sculpt layers: GROUND = BASE + Σ visible layers × strength ──────────
+// A "stroke" here is what a GPU edit looks like to the stack: FINAL written
+// behind its back, then absorbed.
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps;
+function stroke(final, L, x0, z0, x1, z1, d, target) {
+  for (let z = z0; z <= z1; z++) for (let x = x0; x <= x1; x++) final[z * S + x] += d;
+  return L.absorb({ x0, z0, x1, z1 }, null, target);
+}
+{
+  const final = new Float32Array(S * S);
+  const L = createHeightLayers({ final, size: S });
+  const g = makeGround();
+  L.reset(g);
+  const i = 20 * S + 20, j = 100 * S + 100;
+
+  stroke(final, L, 10, 10, 30, 30, 0.05);                 // into BASE (active by default)
+  const id = L.addLayer("Details");                         // a new layer becomes active
+  ok("layers: a new layer is active", L.activeLayer === id);
+  stroke(final, L, 15, 15, 25, 25, 0.02);                  // into Details
+  ok("layers: final = base edit + layer edit", near(final[i], g[i] + 0.07));
+
+  L.setLayer(id, { visible: false });
+  ok("layers: hiding a layer removes only its edit", near(final[i], g[i] + 0.05));
+  ok("layers: hiding leaves the rest of the map alone", final[j] === g[j]);
+  L.setLayer(id, { visible: true, strength: 0.5 });
+  ok("layers: strength scales the layer", near(final[i], g[i] + 0.05 + 0.01));
+  L.setLayer(id, { strength: 1 });
+  ok("layers: strength back to 1 is exact", near(final[i], g[i] + 0.07));
+
+  // An edit while a layer is at strength 0.5 is stored unscaled, so the next
+  // strength change still scales it exactly.
+  L.setLayer(id, { strength: 0.5 });
+  stroke(final, L, 15, 15, 25, 25, 0.01);
+  L.setLayer(id, { strength: 1 });
+  ok("layers: an edit at strength 0.5 lands where it was drawn", near(final[i], g[i] + 0.05 + 0.02 + 0.02));
+  stroke(final, L, 15, 15, 25, 25, -0.02);                  // back to +0.02 in Details
+
+  // A refused edit is put back.
+  L.setLayer(id, { locked: true });
+  const before = final[i];
+  stroke(final, L, 15, 15, 25, 25, 0.3);
+  ok("layers: a locked layer refuses the edit", final[i] === before);
+  ok("layers: the refusal is reported", L.takeDiscard()?.target === id);
+  ok("layers: the refused rect goes back to the GPU", !!L.takePending());
+  L.setLayer(id, { locked: false });
+
+  // Undo of an earlier BASE edit while Details is active: routed by target.
+  stroke(final, L, 10, 10, 30, 30, -0.05, 0);
+  ok("layers: an edit routed to BASE leaves the active layer alone", near(final[i], g[i] + 0.02));
+  L.setLayer(id, { visible: false });
+  ok("layers: …so hiding the layer leaves BASE as it was", near(final[i], g[i]));
+  L.setLayer(id, { visible: true });
+
+  // Save / load round trip.
+  const saved = L.exportLayers();
+  ok("layers: export keeps only touched tiles", saved.meta.layers[0].tiles.length === 1, JSON.stringify(saved.meta.layers[0].tiles));
+  const final2 = new Float32Array(S * S);
+  const L2 = createHeightLayers({ final: final2, size: S });
+  L2.reset(Float32Array.from(L.ground), saved);
+  ok("layers: load restores the list", L2.listLayers().length === 2 && L2.activeLayer === id);
+  ok("layers: load gives the same heights", final2.every((v, k) => near(v, final[k])));
+  L2.setLayer(id, { visible: false });
+  ok("layers: after load, hiding still removes exactly the layer", near(final2[i], g[i]));
+
+  // Merge down folds the layer into BASE; heights do not move.
+  const snap = Float32Array.from(final);
+  ok("layers: merge down", L.mergeDown(id));
+  ok("layers: merge keeps the heights", final.every((v, k) => near(v, snap[k])));
+  ok("layers: merged layer is gone, BASE active", L.listLayers().length === 1 && L.activeLayer === 0);
+  ok("layers: nothing left to sum", L.layerSum() === null);
+
+  // Clear and remove.
+  const id2 = L.addLayer();
+  stroke(final, L, 40, 40, 50, 50, 0.04);
+  ok("layers: layerSum is what the layers add", near(L.layerSum()[45 * S + 45], 0.04));
+  L.clearLayer(id2);
+  ok("layers: clear removes the edit", near(final[45 * S + 45], g[45 * S + 45]));
+  ok("layers: remove", L.removeLayer(id2) && L.listLayers().length === 1);
+}
+
+// ── 8b. Undo / redo ("history") into a hidden or locked layer ──────────────
+{
+  const final = new Float32Array(S * S);
+  const L = createHeightLayers({ final, size: S });
+  const g = makeGround();
+  L.reset(g);
+  const i = 20 * S + 20;
+  const id = L.addLayer();
+  stroke(final, L, 15, 15, 25, 25, 0.03);                  // the step, in the layer
+  L.setLayer(id, { visible: false });
+  // Undo as the GPU does it: the step's change taken off whatever is shown now.
+  for (let z = 15; z <= 25; z++) for (let x = 15; x <= 25; x++) final[z * S + x] -= 0.03;
+  L.absorb({ x0: 15, z0: 15, x1: 25, z1: 25 }, null, id, { history: true });
+  ok("history: undo into a hidden layer does not dent the terrain", near(final[i], g[i]));
+  ok("history: …and is not reported as refused", L.takeDiscard() === null);
+  L.setLayer(id, { visible: true });
+  ok("history: …the stroke really left the layer", near(final[i], g[i]));
+  L.setLayer(id, { locked: true });
+  stroke(final, L, 15, 15, 25, 25, 0.03, id);              // a plain edit: refused
+  ok("history: a locked layer refuses a plain edit", near(final[i], g[i]) && L.takeDiscard() !== null);
+  for (let z = 15; z <= 25; z++) for (let x = 15; x <= 25; x++) final[z * S + x] += 0.03;
+  L.absorb({ x0: 15, z0: 15, x1: 25, z1: 25 }, null, id, { history: true });
+  ok("history: …but takes a redo", near(final[i], g[i] + 0.03));
+  L.removeLayer(id);
+  for (let z = 15; z <= 25; z++) for (let x = 15; x <= 25; x++) final[z * S + x] -= 0.03;
+  L.absorb({ x0: 15, z0: 15, x1: 25, z1: 25 }, null, id, { history: true });
+  ok("history: a step of a deleted layer is refused", near(final[i], g[i]) && L.takeDiscard()?.target === id);
+}
+
+// ── 9. Layers under a river: the river works on GROUND = BASE + layers ─────
+{
+  const pts = [[0.1, 0.5], [0.9, 0.5]];
+  const final = new Float32Array(S * S);
+  const L = createHeightLayers({ final, size: S });
+  L.reset(makeGround());
+  L.setRiver(buildRiverTerrainOp(makeRiver([pts])));
+  const id = L.addLayer();
+  const outside = 10 * S + 64;
+  stroke(final, L, 60, 5, 68, 15, 0.03);
+  ok("layers+river: a layer edit away from the river lands", near(final[outside], makeGround()[outside] + 0.03));
+  L.setLayer(id, { visible: false });
+  ok("layers+river: hiding it puts the ground back", near(final[outside], makeGround()[outside]));
+}
+
+// ── 10. Layers saved for another terrain size are dropped, heights kept ─────
+{
+  const final = new Float32Array(S * S);
+  const L = createHeightLayers({ final, size: S });
+  const g = makeGround();
+  L.reset(g, { meta: { size: S * 2, tile: 64, layers: [{ id: 1, tiles: [0] }] }, data: new Float32Array(4096) });
+  ok("layers: wrong-size layers are dropped", L.listLayers().length === 1);
+  ok("layers: …and the heightmap is used as it is", final.every((v, k) => v === g[k]));
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

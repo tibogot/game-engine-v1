@@ -12,7 +12,7 @@
  * Values refresh a few times a second while the tab is visible, so a gizmo
  * drag, an undo or a tool panel edit shows up here without a rebuild.
  */
-import { section, slider, color, toggle, button, info, hint, numbers } from "./widgets.js";
+import { section, slider, color, toggle, button, info, hint, numbers, text } from "./widgets.js";
 
 const REFRESH_MS = 200;
 const RAD = Math.PI / 180;
@@ -64,8 +64,54 @@ export function createInspector({ container, deps }) {
       info(b, "Max height", `${w.maxHeight} m`, { layout: "prop" });
       info(b, "LOD levels", String(w.lodLevels), { layout: "prop" });
       info(b, "Backend", "WebGPU · TSL", { layout: "prop" });
-      _actions(container, [toolAction("sculpt", "Sculpt"), toolAction("paint", "Paint")]);
+      _actions(container, [
+        toolAction("sculpt", "Sculpt"), toolAction("paint", "Paint"),
+        { title: "Add sculpt layer", hint: "A new layer on top; brushes write into it", onClick: () => deps.heightLayers.add() },
+      ]);
       return [];
+    },
+
+    // A sculpt layer (v3/terrain/heightLayers.js). Its edits go through the
+    // same queue as the Scene list, so pending brush work lands first.
+    hlayer(arg) {
+      const H = deps.heightLayers;
+      const id = Number(arg);
+      const find = () => H.list().find((l) => l.id === id);
+      stillExists = () => !!find();
+      const l0 = find();
+      if (!l0) return null;
+      _title(l0.name, l0.base ? "Terrain base" : "Sculpt layer");
+      const view = { ...l0, percent: Math.round(l0.strength * 100), active: H.active() === id };
+      const pull = () => {
+        const l = find();
+        if (l) Object.assign(view, l, { percent: Math.round(l.strength * 100), active: H.active() === id });
+      };
+      const b = section(container, "Layer", true);
+      const hs = [];
+      hs.push(toggle(b, view, "active", {
+        label: "Brushes write here",
+        hint: "Every sculpt brush, erosion and copy/clone writes into the active layer",
+        onChange: (on) => { if (on) H.setActive(id); else view.active = true; },
+      }));
+      if (l0.base) {
+        hint(b, "Generate and heightmap imports write the base. Layers stay on top of it, so you can regenerate the base without losing them.");
+      } else {
+        hs.push(text(b, view, "name", { label: "Name", onChange: () => H.edit(id, { name: view.name }) }));
+        hs.push(toggle(b, view, "visible", { label: "Visible", onChange: (v) => H.edit(id, { visible: v }) }));
+        hs.push(slider(b, view, "percent", {
+          label: "Strength", min: 0, max: 200, step: 1,
+          hint: "Scales everything sculpted in this layer (100 % = as drawn)",
+          onChange: () => H.edit(id, { strength: view.percent / 100 }),
+        }));
+      }
+      hs.push(toggle(b, view, "locked", { label: "Locked", hint: "A locked layer refuses edits", onChange: (v) => H.edit(id, { locked: v }) }));
+      _actions(container, [
+        { title: "Add layer", hint: "A new sculpt layer on top; brushes write into it", onClick: () => H.add() },
+        l0.base ? null : { title: "Merge down", hint: "Fold into the layer below (or the base); the terrain does not move", onClick: () => H.mergeDown(id) },
+        l0.base ? null : { title: "Clear", onClick: () => H.clear(id) },
+        l0.base ? null : { title: "Delete", onClick: () => H.remove(id) },
+      ]);
+      return hs.map((h) => ({ refresh() { pull(); h.refresh(); } }));
     },
 
     sun() {

@@ -2,10 +2,20 @@
  * v3/terrain/heightLayers.js — the terrain height as a STACK, not one buffer.
  *
  *     FINAL = STAMPS( RIVER( GROUND ) )
+ *     GROUND = BASE + Σ visible SCULPT LAYERS × strength
  *
  *   GROUND  the natural terrain. Sculpting, erosion, import, terracing tools and
  *           every editor tool that writes heights end up here. It is what a
  *           project saves (the old "river base" blob was exactly this).
+ *   BASE + SCULPT LAYERS (2026-10-17, the editor's layer panel, Unreal's edit
+ *           layers): GROUND is itself a sum. BASE is what Generate and a
+ *           heightmap import write; each sculpt layer holds the edits made
+ *           while it was active, as offsets, in 64×64 tiles that exist only
+ *           where it was touched. A layer can be hidden, scaled (strength),
+ *           locked, cleared, merged down — and the base regenerated under it
+ *           without losing it. The sum is additive, so the ORDER of the layers
+ *           does not change the heights. A project without layers is BASE only,
+ *           and GROUND is still the one heightmap a project saves and a game reads.
  *   RIVER   an OPERATOR, not a buffer: River v2 shapes GROUND inside its own
  *           footprint and nowhere else (riverV2Terrain.js). It stores no copy
  *           of anything.
@@ -61,10 +71,29 @@ function intersectRect(a, b) {
  * @param {number}       o.size    texels per side
  * @param {(rect:TexelRect)=>void} [o.onComposed]  FINAL changed in `rect`
  */
+/** Sculpt layer tiles: texels per side. */
+export const LAYER_TILE = 64;
+
 export function createHeightLayers({ final, size, onComposed = null }) {
   const N = size * size;
   const FULL = { x0: 0, z0: 0, x1: size - 1, z1: size - 1 };
   const ground = new Float32Array(N);
+  /** GROUND minus the sculpt layers: what Generate and an import write. */
+  const base = new Float32Array(N);
+  const tilesX = Math.ceil(size / LAYER_TILE);
+  /**
+   * The sculpt layers, bottom to top (display order; the sum ignores it):
+   * { id, name, visible, strength, locked, tiles: Map<tileIndex, Float32Array> }.
+   * A tile holds the layer's own offsets (normalized height units) BEFORE its
+   * strength is applied, so a strength change is exact and reversible.
+   */
+  const layers = [];
+  /** id 0 = BASE. */
+  const baseInfo = { id: 0, name: "Base", locked: false };
+  let activeId = 0;
+  let nextLayerId = 1;
+  /** Set by absorb when the edit hit a layer that cannot take it. */
+  let lastDiscard = null;
   /** What FINAL held after the stack last wrote it — the baseline `absorb` diffs. */
   const last = new Float32Array(N);
   /** key → { rect, apply(map, rect) }, in the order they apply. */
@@ -81,6 +110,61 @@ export function createHeightLayers({ final, size, onComposed = null }) {
   let stampSeq = 0;
 
   const clamp = (r) => intersectRect(r, FULL);
+
+  // ── Sculpt layers ──────────────────────────────────────────────────────────
+  const layerById = (id) => layers.find((l) => l.id === id) ?? null;
+  const tileOf = (x, z) => Math.floor(z / LAYER_TILE) * tilesX + Math.floor(x / LAYER_TILE);
+  const inTile = (x, z) => (z % LAYER_TILE) * LAYER_TILE + (x % LAYER_TILE);
+  const contributes = (l) => l.visible && l.strength !== 0 && l.tiles.size > 0;
+
+  /** Can edits land in this layer? A hidden, zero-strength or locked one cannot. */
+  function editable(id) {
+    if (id === 0) return !baseInfo.locked;
+    const l = layerById(id);
+    return !!l && l.visible && l.strength !== 0 && !l.locked;
+  }
+
+  /** The texel rect a layer's tiles cover (null = empty layer). */
+  function layerRect(l) {
+    let r = null;
+    for (const t of l.tiles.keys()) {
+      const tx = t % tilesX, tz = Math.floor(t / tilesX);
+      r = unionRect(r, {
+        x0: tx * LAYER_TILE, z0: tz * LAYER_TILE,
+        x1: Math.min(size - 1, tx * LAYER_TILE + LAYER_TILE - 1),
+        z1: Math.min(size - 1, tz * LAYER_TILE + LAYER_TILE - 1),
+      });
+    }
+    return r;
+  }
+
+  /** GROUND = BASE + the visible layers, inside `r`. */
+  function recomputeGround(r) {
+    r = r && clamp(r);
+    if (!r) return;
+    const live = layers.filter(contributes);
+    for (let z = r.z0; z <= r.z1; z++) {
+      const o = z * size;
+      for (let x = r.x0; x <= r.x1; x++) {
+        let h = base[o + x];
+        if (live.length) {
+          const t = tileOf(x, z), k = inTile(x, z);
+          for (const l of live) {
+            const tile = l.tiles.get(t);
+            if (tile) h += tile[k] * l.strength;
+          }
+        }
+        ground[o + x] = h;
+      }
+    }
+  }
+
+  /** A layer's heights changed (shown, hidden, scaled, cleared…) inside `r`. */
+  function relayer(r) {
+    if (!r) return;
+    recomputeGround(r);
+    compose(r);
+  }
 
   /** Recompose FINAL inside `r` from the layers. */
   function compose(r) {
@@ -102,6 +186,47 @@ export function createHeightLayers({ final, size, onComposed = null }) {
     pending = unionRect(pending, r);
     version++;
     onComposed?.(r);
+  }
+
+  /**
+   * Bring saved layers back (exportLayers' { meta, data }) over a GROUND that
+   * already contains them — the project's heightmap is GROUND — so BASE is
+   * GROUND minus what the visible ones add. Layers saved for another
+   * heightmap size are dropped (GROUND still has their shape, flattened in).
+   */
+  function importLayers(meta, data) {
+    const T = LAYER_TILE * LAYER_TILE;
+    if (meta.size !== size || meta.tile !== LAYER_TILE || !data) {
+      if (meta.layers?.length) console.warn("[heightLayers] saved layers are for another terrain size; kept flattened into the ground.");
+      return;
+    }
+    let at = 0;
+    for (const s of meta.layers ?? []) {
+      const tiles = new Map();
+      for (const t of s.tiles ?? []) {
+        if (at + T > data.length) break;
+        tiles.set(t, data.slice(at, at + T));
+        at += T;
+      }
+      layers.push({
+        id: s.id, name: s.name ?? `Layer ${s.id}`, visible: s.visible !== false,
+        strength: Number.isFinite(s.strength) ? s.strength : 1, locked: !!s.locked, tiles,
+      });
+      nextLayerId = Math.max(nextLayerId, s.id + 1);
+    }
+    baseInfo.locked = !!meta.baseLocked;
+    activeId = layerById(meta.active) ? meta.active : 0;
+    // BASE = GROUND − what the visible layers add.
+    for (const l of layers) {
+      if (!contributes(l)) continue;
+      for (const [t, tile] of l.tiles) {
+        const tx = t % tilesX, tz = Math.floor(t / tilesX);
+        for (let j = 0; j < tile.length; j++) {
+          const x = tx * LAYER_TILE + (j % LAYER_TILE), z = tz * LAYER_TILE + Math.floor(j / LAYER_TILE);
+          if (x < size && z < size) base[z * size + x] -= tile[j] * l.strength;
+        }
+      }
+    }
   }
 
   /** Does anything above GROUND touch `r`? */
@@ -174,23 +299,53 @@ export function createHeightLayers({ final, size, onComposed = null }) {
      *   stored: a half-float readback cannot reproduce a float mirror, so the
      *   baseline is quantized the same way first, or every untouched texel
      *   would read as an edit of a few centimetres
+     * @param {number} [target] the layer the edit belongs to (default: the
+     *   active one; 0 = BASE). A layer that cannot take edits (hidden, zero
+     *   strength, locked) DISCARDS it: FINAL goes back to what the layers make
+     *   and the rect is marked for upload, so the GPU edit is undone too.
+     * @param {{history?: boolean}} [o] history: the edit is an UNDO / REDO of
+     *   a step made in `target`. It goes back into that layer even when the
+     *   layer is now locked or hidden; a hidden layer takes it without it
+     *   showing (FINAL is put back, as for a refusal, but nothing is reported).
      * @returns {TexelRect|null} the rect the external edit changed (null =
      *   nothing). Where a river or stamp covers it FINAL was recomposed, so it
      *   now differs from what was written; that part is in the pending rect.
      */
-    absorb(r = FULL, quantize = null) {
+    absorb(r = FULL, quantize = null, target = activeId, { history = false } = {}) {
       r = clamp(r);
       if (!r) return null;
+      const layer = target === 0 ? null : layerById(target);
+      const exists = target === 0 || !!layer;
+      const keep = history ? exists && (!layer || layer.strength !== 0) : editable(target);
+      // A history step into a hidden layer: into the layer, not onto the terrain.
+      const unseen = keep && history && layer && !layer.visible;
+      const inv = layer ? 1 / layer.strength : 1;
       let hit = null;
       for (let z = r.z0; z <= r.z1; z++) {
         const o = z * size;
         for (let x = r.x0; x <= r.x1; x++) {
           const i = o + x;
-          const base = quantize ? quantize(last[i]) : last[i];
-          const d = final[i] - base;
+          const was = quantize ? quantize(last[i]) : last[i];
+          const d = final[i] - was;
           if (d === 0) { final[i] = last[i]; continue; }
-          ground[i] += d;
-          last[i] = final[i];
+          if (!keep) {
+            final[i] = last[i];
+          } else {
+            if (layer) {
+              const t = tileOf(x, z);
+              let tile = layer.tiles.get(t);
+              if (!tile) layer.tiles.set(t, (tile = new Float32Array(LAYER_TILE * LAYER_TILE)));
+              tile[inTile(x, z)] += d * inv;
+            } else {
+              base[i] += d;
+            }
+            if (unseen) {
+              final[i] = last[i];
+            } else {
+              ground[i] += d;
+              last[i] = final[i];
+            }
+          }
           if (!hit) hit = { x0: x, z0: z, x1: x, z1: z };
           else {
             if (x < hit.x0) hit.x0 = x; if (x > hit.x1) hit.x1 = x;
@@ -200,24 +355,191 @@ export function createHeightLayers({ final, size, onComposed = null }) {
       }
       if (!hit) return null;
       version++;
+      if (!keep || unseen) {
+        // FINAL is back to what the layers make; put that back on the GPU.
+        if (!keep) lastDiscard = { target, rect: hit };
+        pending = unionRect(pending, hit);
+        onComposed?.(hit);
+        return hit;
+      }
       // Under a river or a stamp the new ground has to go back through them.
       // Everywhere else FINAL already is GROUND and there is nothing to redo.
       if (layeredIn(hit)) compose(hit);
       return hit;
     },
 
+    /** The last edit a layer refused ({ target, rect }), once; null = none. */
+    takeDiscard() {
+      const d = lastDiscard;
+      lastDiscard = null;
+      return d;
+    },
+
     /**
      * A whole new GROUND (a project load): no stamps, no river until it is
-     * imported again, FINAL = GROUND.
+     * imported again, FINAL = GROUND. `saved` (from exportLayers) brings the
+     * sculpt layers back; BASE is what is left of GROUND without them.
      */
-    reset(heights) {
+    reset(heights, saved = null) {
       ground.set(heights);
       last.set(heights);
       final.set(heights);
       stamps.clear();
       operators.clear();
+      layers.length = 0;
+      activeId = 0;
+      baseInfo.locked = false;
+      base.set(heights);
+      if (saved?.meta) importLayers(saved.meta, saved.data);
       pending = null;
       version++;
+    },
+
+    // ── Sculpt layers ────────────────────────────────────────────────────────
+    get activeLayer() { return activeId; },
+
+    /** BASE first, then the layers bottom to top — plain data for a panel. */
+    listLayers() {
+      return [
+        { id: 0, name: baseInfo.name, visible: true, strength: 1, locked: baseInfo.locked, base: true, empty: false },
+        ...layers.map((l) => ({
+          id: l.id, name: l.name, visible: l.visible, strength: l.strength,
+          locked: l.locked, base: false, empty: l.tiles.size === 0,
+        })),
+      ];
+    },
+
+    editable,
+
+    /** Make `id` the layer edits go to. False if there is no such layer. */
+    setActiveLayer(id) {
+      if (id !== 0 && !layerById(id)) return false;
+      activeId = id;
+      version++;
+      return true;
+    },
+
+    /** A new empty layer on top; it becomes the active one. Returns its id. */
+    addLayer(name) {
+      const id = nextLayerId++;
+      layers.push({ id, name: name || `Layer ${id}`, visible: true, strength: 1, locked: false, tiles: new Map() });
+      activeId = id;
+      version++;
+      return id;
+    },
+
+    /**
+     * Change a layer's name, visibility, strength (0…2) or lock. Heights are
+     * recomposed where the layer has data. BASE takes only a lock.
+     */
+    setLayer(id, { name, visible, strength, locked } = {}) {
+      if (id === 0) {
+        if (locked !== undefined) baseInfo.locked = !!locked;
+        version++;
+        return true;
+      }
+      const l = layerById(id);
+      if (!l) return false;
+      const s = strength === undefined ? l.strength : Math.max(0, Math.min(2, Number(strength) || 0));
+      const v = visible === undefined ? l.visible : !!visible;
+      const heightsChange = v !== l.visible || s !== l.strength;
+      if (name !== undefined) l.name = String(name);
+      if (locked !== undefined) l.locked = !!locked;
+      l.visible = v;
+      l.strength = s;
+      version++;
+      if (heightsChange) relayer(layerRect(l));
+      return true;
+    },
+
+    /** Empty a layer (it stays in the list). */
+    clearLayer(id) {
+      const l = layerById(id);
+      if (!l) return false;
+      const r = layerRect(l);
+      l.tiles.clear();
+      version++;
+      relayer(r);
+      return true;
+    },
+
+    /** Delete a layer and its heights. The active layer falls back to BASE. */
+    removeLayer(id) {
+      const k = layers.findIndex((l) => l.id === id);
+      if (k < 0) return false;
+      const r = layerRect(layers[k]);
+      layers.splice(k, 1);
+      if (activeId === id) activeId = 0;
+      version++;
+      relayer(r);
+      return true;
+    },
+
+    /**
+     * Fold a layer into the one under it (or BASE), as it looks now, then
+     * delete it. The heights do not move. Refused when it is hidden or at
+     * strength 0 (nothing honest to fold), or the one below cannot take edits.
+     */
+    mergeDown(id) {
+      const k = layers.findIndex((l) => l.id === id);
+      if (k < 0) return false;
+      const l = layers[k];
+      const below = k > 0 ? layers[k - 1] : null;
+      if (!l.visible || l.strength === 0) return false;
+      if (!editable(below ? below.id : 0)) return false;
+      for (const [t, tile] of l.tiles) {
+        const tx = t % tilesX, tz = Math.floor(t / tilesX);
+        if (below) {
+          let dst = below.tiles.get(t);
+          if (!dst) below.tiles.set(t, (dst = new Float32Array(LAYER_TILE * LAYER_TILE)));
+          const s = l.strength / below.strength;
+          for (let j = 0; j < tile.length; j++) dst[j] += tile[j] * s;
+        } else {
+          for (let j = 0; j < tile.length; j++) {
+            const x = tx * LAYER_TILE + (j % LAYER_TILE), z = tz * LAYER_TILE + Math.floor(j / LAYER_TILE);
+            if (x < size && z < size) base[z * size + x] += tile[j] * l.strength;
+          }
+        }
+      }
+      layers.splice(k, 1);
+      if (activeId === id) activeId = below ? below.id : 0;
+      version++;
+      return true;
+    },
+
+    /**
+     * What the visible sculpt layers add to BASE (GROUND − BASE), for a pass
+     * that rewrites BASE on the GPU (Generate) and must keep the layers on top.
+     * Null when no layer adds anything.
+     */
+    layerSum() {
+      if (!layers.some(contributes)) return null;
+      const out = new Float32Array(N);
+      for (let i = 0; i < N; i++) out[i] = ground[i] - base[i];
+      return out;
+    },
+
+    /**
+     * The layers for a project file: { meta, data } — meta is JSON (the list,
+     * which tiles each layer has), data ONE Float32Array of every tile in that
+     * order. Null when there is nothing but BASE.
+     */
+    exportLayers() {
+      if (!layers.length && !baseInfo.locked) return null;
+      const T = LAYER_TILE * LAYER_TILE;
+      let n = 0;
+      for (const l of layers) n += l.tiles.size;
+      const data = new Float32Array(n * T);
+      let at = 0;
+      const meta = {
+        tile: LAYER_TILE, size, active: activeId, baseLocked: baseInfo.locked,
+        layers: layers.map((l) => {
+          const tiles = [...l.tiles.keys()].sort((a, b) => a - b);
+          for (const t of tiles) { data.set(l.tiles.get(t), at); at += T; }
+          return { id: l.id, name: l.name, visible: l.visible, strength: l.strength, locked: l.locked, tiles };
+        }),
+      };
+      return { meta, data };
     },
 
     /** Take the rect FINAL changed in since the last call (null = nothing). */
