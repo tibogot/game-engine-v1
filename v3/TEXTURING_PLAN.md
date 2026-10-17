@@ -111,7 +111,19 @@ look work goes FIRST, on the current system, and the control map after it. Every
      baked 3.6 % of pixels > 8 levels, 0.1 % > 20 (the breakup noise differs CPU/GPU, as before).
      The flow map is computed while wetness OR an active gully rule wants it. Auto-paint settings
      are still per session (not saved with a level) — as before this step.
-4. **Control map + read path:** data, conversion at load, shader read through top-K. Old path kept.
+3b. ~~**Near detail**~~ DONE 2026-10-17 (chosen over 2048² / KTX2, see below): `SPLAT_FEATURES.nearDetail`
+   (compile switch, top-K; editor on, `?neardetail=0` to A/B). Within uDetailEnd (16 m, band 8)
+   each chosen layer is read again at a 4× finer tile: the fine read's HIGH-PASS multiplies the
+   colour, the fine normal is added, roughness/AO mix. nam-valley 2-8 m: edge energy 7.97 → 8.83,
+   brightness unchanged; a plain colour mix LOST detail (7.98 → 7.69). GPU worst case (all pixels
+   near) +0.1..0.3 ms at 0.58 Mpx. Why not 2048²: measured texel density — alg valley 3.1 cm,
+   nam jungle 1.4 cm, wadi 0.8 cm per texel goes soft only closer than ~29 / 13 / 7 m at 1080p,
+   so RTS cameras (60 m+) would see NOTHING from 2048², and close cameras gain more from a finer
+   tile at no memory. Compression (KTX2/BC7) stays for shipping (memory, download), not the look.
+4. **Control map + read path:** POSTPONED 2026-10-17 until a game needs > 7 materials — the
+   inventory (paint shader, holes in slice-1 alpha, ground cache, grass/scatter masks, ~15 game
+   reads by slot index, ~17 offline generators, every brush op) makes it several sessions for no
+   visible change. data, conversion at load, shader read through top-K. Old path kept.
 5. **GPU painting** into the control map + CPU mirror + undo.
 6. **More materials:** arrays sized to what the level uses; then KTX2.
 7. **Biomes / layered paint** on top.

@@ -149,6 +149,21 @@ export const SPLAT_FEATURES = {
    * pixels should not pay the 3 taps. uHexNear 0 = off, live.
    */
   hexNear: false,
+  /**
+   * NEAR DETAIL on the top-K layers (needs topK > 0): within uDetailEnd metres
+   * each chosen layer is read a second time at a tile uDetailRatio× FINER: its
+   * HIGH-PASS (fine read ÷ a blurred fine read) multiplies the colour, the fine
+   * normal is ADDED to the base one, roughness and AO mix. Mixing the two reads'
+   * colours instead averaged the big shapes away (nam-valley, 2-8 m: edge
+   * energy 7.98 → 7.69; high-pass 7.97 → 8.83, mean brightness 64.0 → 63.9).
+   * GPU, every pixel in range: +0.1..0.3 ms at 0.58 Mpx. The texel density a level's tile gives
+   * (nam-valley 1.4 cm, alg valley 3.1 cm) goes soft closer than ~13-29 m at
+   * 1080p; 2048² textures would only move that to ~6-15 m at 4× the memory.
+   * This multiplies it by the ratio for nothing in memory. A distance branch
+   * with gradients taken outside it, like hexNear; compiled in, it costs even
+   * untaken — so close-camera games opt in, RTS games do not.
+   */
+  nearDetail: false,
 };
 
 /**
@@ -392,6 +407,12 @@ export function createSplatOverlay(
   const uHexSharp       = uniform(10.0);  // lattice weight power (higher = narrower blends)
   const uHexContrast    = uniform(0.6);   // how much brightness decides a blend (Mikkelsen)
   const uHexRotate      = uniform(0.0);   // 0..1 of a turn per cell (off: baked light)
+  // Near detail (SPLAT_FEATURES.nearDetail).
+  const uDetailStrength = uniform(0.5);   // 0..1, 0 = off
+  const uDetailRatio    = uniform(4.0);   // fine tile = tile / ratio
+  const uDetailEnd      = uniform(16.0);  // metres where it is fully gone
+  const uDetailBand     = uniform(8.0);   // metres of fade before that
+  const uDetailAlbedo   = uniform(1.0);   // 0 = bumps only, 1 = the fine high-pass on the colour too
   const TOPK = Math.max(0, Math.min(NL, Math.round(F.topK ?? 0)));
 
   // ── Layer texture samples — 2 DataArrayTexture bindings for 7 layers ─────────
@@ -949,6 +970,10 @@ export function createSplatOverlay(
               ? terrainNormals.surfaceAt(splatUV).w.mul(float(MAX_HEIGHT)).toVar()
               : null;
             // Hex near the camera (not in the bake: it passes hex for everything).
+            const detW = F.nearDetail && !hex && farFade === null
+              ? float(1).sub(smoothstep(uDetailEnd.sub(uDetailBand), uDetailEnd, length(P.sub(cameraPosition))))
+                .mul(uDetailStrength).toVar()
+              : null;
             const hexW = F.hexNear && !hex && farFade === null
               ? float(1).sub(smoothstep(uHexEnd.sub(uHexBand), uHexEnd, length(P.sub(cameraPosition))))
                 .mul(uHexNear).toVar()
@@ -979,6 +1004,29 @@ export function createSplatOverlay(
                   const hx = hexSamplePair(albedoArrNode, ormArrNode, uvK, layer, gx, gy, uHexSharp, uHexContrast, uHexRotate);
                   nearA.assign(mix(nearA, hx.albedo, hexW));
                   ormK.assign(mix(ormK, hx.orm, hexW));
+                });
+              }
+              if (detW) {
+                const uvD = uvK.mul(uDetailRatio).toVar();
+                const dgx = dFdx(uvD).toVar(), dgy = dFdy(uvD).toVar();
+                If(detW.greaterThan(0.0), () => {
+                  const fa = albedoArrNode.sample(uvD).grad(dgx, dgy).depth(layer);
+                  const fo = ormArrNode.sample(uvD).grad(dgx, dgy).depth(layer);
+                  // Colour: HIGH-PASS — the fine read's light/dark against a
+                  // blurred fine read (3 mips up), multiplied in. Mixing the two
+                  // reads instead averaged away the big shapes (edge energy
+                  // 7.98 → 7.69 on nam-valley at 2-8 m).
+                  const fb = albedoArrNode.sample(uvD).grad(dgx.mul(8), dgy.mul(8)).depth(layer);
+                  const lumW = vec3(0.299, 0.587, 0.114);
+                  const hp = clamp(fa.rgb.dot(lumW).div(max(fb.rgb.dot(lumW), float(0.02))), 0.4, 2.2);
+                  nearA.assign(vec4(nearA.rgb.mul(mix(float(1), hp, detW.mul(uDetailAlbedo))), nearA.a));
+                  // Normal: the fine bumps ADDED (encoded ±0.5 around 0.5) —
+                  // the base relief stays, the fine one rides on it.
+                  ormK.assign(vec4(
+                    mix(ormK.r, fo.r, detW.mul(0.5)), mix(ormK.g, fo.g, detW.mul(0.5)),
+                    clamp(ormK.b.add(fo.b.sub(0.5).mul(detW)), 0, 1),
+                    clamp(ormK.a.add(fo.a.sub(0.5).mul(detW)), 0, 1),
+                  ));
                 });
               }
               let albedo = nearA;
@@ -1287,8 +1335,14 @@ export function createSplatOverlay(
     uHexSharp,
     uHexContrast,
     uHexRotate,
+    // Near detail (SPLAT_FEATURES.nearDetail); live, no recompile.
+    uDetailStrength,
+    uDetailRatio,
+    uDetailEnd,
+    uDetailBand,
+    uDetailAlbedo,
     /** What this build compiled: top-K count (0 = classic) and near/far. */
-    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend), hexNear: Boolean(TOPK && F.hexNear) },
+    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend), hexNear: Boolean(TOPK && F.hexNear), nearDetail: Boolean(TOPK && F.nearDetail) },
     blend,
     registerMaterial,
     setTriplanarCompiled,

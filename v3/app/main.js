@@ -709,13 +709,15 @@ export async function startV3App(opts = {}) {
   ScatterField.defaultLodFloors = Array.isArray(opts.scatterLodFloors) ? opts.scatterLodFloors : [60, 110];
   // A/B switches for the terrain layer path, per page load (editor or game):
   // ?topk=3 (0 = classic, every layer on every pixel), ?far=1 (near/far
-  // blend on the top-K layers) and ?hex=1 (hex tiling near the camera).
+  // blend on the top-K layers), ?hex=1 (hex tiling near the camera) and
+  // ?neardetail=1 (a finer tile blended in near the camera).
   // See SPLAT_FEATURES in splatOverlayTsl.js.
   {
     const q = new URLSearchParams(location.search);
     if (q.has("topk")) splatFeatureOverrides.topK = Number(q.get("topk")) || 0;
     if (q.has("far")) splatFeatureOverrides.farBlend = q.get("far") === "1";
     if (q.has("hex")) splatFeatureOverrides.hexNear = q.get("hex") === "1";
+    if (q.has("neardetail")) splatFeatureOverrides.nearDetail = q.get("neardetail") === "1";
   }
 
   // The ground past the heightmap (farTerrain.js): off until a project brings
