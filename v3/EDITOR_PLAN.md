@@ -29,9 +29,11 @@ WebGPU techniques. One item at a time, between game work (see `/MIGRATION.md`).
    It does NOT replace "Fluvial (stream power)", which the editor has: stream power is a simulation
    (seconds, written into the terrain) that shapes the big valley network; the filter is a function
    (milliseconds, live sliders, recomputable) that adds the fine gullies and ridges on top, at any scale.
-   Complementary. **The lab is NOT finished (user, 2026-10-17): ugly saw-tooth on edges**, which is why it
-   was never connected. Before it goes anywhere: reproduce the saw-tooth in the lab, find the cause,
-   fix it, and have the user judge the look. Until then it waits; the layer panel (2) comes first.
+   Complementary. ~~The lab's saw-tooth~~ FIXED 2026-10-17: `smoothStart` blended a ~5e9·t² branch with
+   mix() when a rounding was 0 (the ridge default); a GPU mix is a + k·(b − a), which in fp32 returned ~0,
+   so the erosion mask vanished in patches — flat un-eroded sheets with steps around them. Now min() +
+   select(). Reproduced and verified in the lab (slope view: sheets and step lines gone at the default).
+   Next: the operator below.
    As an operator in `heightLayers`: sliders, on/off, saved; also outputs a ridge/gully map for
    texturing, and works for far terrain. Small effort, big look.
    https://blog.runevision.com/2026/03/fast-and-gorgeous-erosion-filter.html
@@ -64,10 +66,14 @@ WebGPU techniques. One item at a time, between game work (see `/MIGRATION.md`).
 5. **Gameplay layers for RTS maps**: painted impassable / out-of-bounds / deploy / capture zones,
    saved in the level, with a "why is this blocked" overlay (slope in red, painted in yellow, like CoH's
    editor). Part of the generic markers/zones foundation.
-6. **Texturing from erosion data** (Gaea 2.2 / World Creator): the erosion sims and the filter output
+6. ~~**Texturing from erosion data**~~ MOSTLY DONE 2026-10-17 (TEXTURING_PLAN step 3): cavity in the
+   surface bake (hollows / ridges), a flow map (wetness), an auto-paint Gully rule. Left: deposition maps
+   from the sims, and the erosion filter's ridge/gully output once it exists (1).
+   Was: **Texturing from erosion data** (Gaea 2.2 / World Creator): the erosion sims and the filter output
    flow, deposition and wetness maps → auto-material rules beyond slope/height (sediment in valleys,
    wet banks, worn ridges); add a curvature rule.
-7. **GPU painting + a packed control map** (Godot Terrain3D): today paint is a CPU per-texel loop with
+7. POSTPONED 2026-10-17 until a game needs > 7 materials (TEXTURING_PLAN step 4: the inventory).
+   **GPU painting + a packed control map** (Godot Terrain3D): today paint is a CPU per-texel loop with
    whole-layer uploads, splat ≤ 2048, 7 layers, and the terrain is at the 16-sampler limit. A
    32-bit-per-texel control map (base id, overlay id, blend…) read with `textureLoad` costs no sampler,
    allows 32 layers and bigger splats, and paints on the GPU. Bigger job; the open-world enabler.
@@ -80,8 +86,8 @@ WebGPU techniques. One item at a time, between game work (see `/MIGRATION.md`).
    (tiled/streamed heightmap), clipmap detail far out (AUDIT #15f: coarse rings lose detail →
    CDLOD-style morphing), far texturing (macro variation, the ground cache far rings), far terrain
    past ±4 km. Done when the first game that needs it starts.
-10. **Polish:** hex tiling on the nearest layer (Mikkelsen 2022, 3 taps), roughness/normal height
-    blending at layer edges (AUDIT #6), a "bake erosion here" region sim that writes flow/deposition masks.
+10. ~~**Polish:**~~ DONE 2026-10-17 except the region sim: hex tiling near the camera, height blending
+    on every channel (AUDIT #6), near detail (TEXTURING_PLAN). Left: a "bake erosion here" region sim.
 
 ## Suggested order
 

@@ -32,7 +32,7 @@
  */
 import {
   float, uniform, vec2, vec3, vec4,
-  abs, clamp, cos, dot, exp, floor, fract, length, max, mix, pow, sign, sin, sqrt, step,
+  abs, clamp, cos, dot, exp, floor, fract, length, max, min, mix, pow, select, sign, sin, sqrt, step,
 } from "three/tsl";
 
 /** Octaves are unrolled at build time; the live count is gated per octave. */
@@ -144,10 +144,19 @@ const powInv = (t, p) => float(1).sub(pow(float(1).sub(sat(t)), p));
  * Identity above `smoothing`, quadratic ease below it. Rounds off the bottom of
  * the mask ramp so gullies start gently instead of with a hard crease.
  * Branchless: the original's `if (t >= smoothing)`.
+ *
+ * THE SAW-TOOTH (found 2026-10-17): this used to be mix(0.5·t²/s, t − s/2,
+ * step(s, t)). With a rounding of 0 (the ridge default) s = EPS, so the unused
+ * quadratic is ~5e9·t², and a GPU mix is a + k·(b − a): in fp32 (b − a) loses b
+ * entirely and the result is ~0. The erosion mask collapsed to 0 wherever the
+ * ridge rounding applied — smooth un-eroded SHEETS with steps around them,
+ * which read as saw-tooth edges. Now the quadratic never sees t > s, and
+ * select() returns one branch instead of blending both.
  */
 const smoothStart = (t, smoothing) => {
   const s = max(smoothing, float(EPS));
-  return mix(float(0.5).mul(t).mul(t).div(s), t.sub(float(0.5).mul(s)), step(s, t));
+  const tc = min(t, s);
+  return select(t.greaterThanEqual(s), t.sub(float(0.5).mul(s)), float(0.5).mul(tc).mul(tc).div(s));
 };
 
 /** Normalize with a zero-length guard (Unity's normalizesafe). */
