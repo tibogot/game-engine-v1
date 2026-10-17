@@ -49,6 +49,8 @@ export const V3_DEFAULTS = {
   stepGrade: 0.04,         // surface grade (1/1) above which a reach steps
   stepSpacing: 2.5,        // metres between steps, × the channel width
   cascadeFrac: 0.25,       // share of each step spent dropping (the cascade)
+  // ── Banks ──────────────────────────────────────────────────────────────
+  bankSmooth: 2,           // texels the carve is softened over (0 = exact)
   // ── Flow depth from Manning (speed follows slope) ───────────────────────
   manningN: 0.04,
   minSlope: 0.0006,

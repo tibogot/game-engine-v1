@@ -79,6 +79,10 @@ export function buildRiverV3Panel(app) {
     _slider(sp, p, "stepSpacing", { label: "Step spacing (× width)", min: 1, max: 6, step: 0.1, onChange: onSp });
     _slider(sp, p, "cascadeFrac", { label: "Cascade share of a step", min: 0.1, max: 0.6, step: 0.01, onChange: onSp });
 
+    // ── Banks ───────────────────────────────────────────────────────────────
+    const bk = _section(panel, "Banks", false);
+    _slider(bk, p, "bankSmooth", { label: "Smoothing (texels)", min: 0, max: 4, step: 1, onChange: () => { sys.refreshConform(); }, hint: "Softens the carve so banks shade as curves, not facets. 0 = the exact cross-section." });
+
     // ── New node defaults ───────────────────────────────────────────────────
     const nn = _section(panel, "New node defaults", false);
     _slider(nn, p, "newWidth", { label: "Width (m)", min: 1, max: 200, step: 0.5 });

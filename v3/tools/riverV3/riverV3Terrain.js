@@ -33,6 +33,13 @@
  */
 
 const CELL = 16;
+
+/** Reused scratch arrays for the smoothed carve (slot → Float32Array). */
+const _scratch = [];
+function scratch(slot, n) {
+  if (!_scratch[slot] || _scratch[slot].length < n) _scratch[slot] = new Float32Array(n);
+  return _scratch[slot];
+}
 const FAR = 1e9;
 
 const smooth01 = (e0, e1, x) => {
@@ -173,9 +180,17 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
     for (let j = 0; j < len; j++) { ks[j] = list[order[j]]; bs[j] = lb[order[j]]; }
     cells[c] = ks; bounds[c] = bs;
   }
-  const rect = {
+  // Where the carve itself is evaluated (the covered cells)…
+  const carveRect = {
     x0: cx0 * CELL, z0: cz0 * CELL,
     x1: Math.min(size - 1, cx1 * CELL + CELL - 1), z1: Math.min(size - 1, cz1 * CELL + CELL - 1),
+  };
+  // …and what it can change: grown by the SMOOTHING width, since the softened
+  // edge spills that far (u.smooth, texels; 0 = the exact section).
+  const B = Math.max(0, Math.min(4, Math.round(u.smooth ?? 0)));
+  const rect = {
+    x0: Math.max(0, carveRect.x0 - B), z0: Math.max(0, carveRect.z0 - B),
+    x1: Math.min(size - 1, carveRect.x1 + B), z1: Math.min(size - 1, carveRect.z1 + B),
   };
   const maxReach2 = margin * margin / (size * size);
 
@@ -225,6 +240,16 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
   // surface draws only where it owns the pixel, so at a junction the surfaces
   // meet on one seam instead of overlapping (overlap drew the water twice,
   // darker, with the tributary's square end poking into the trunk).
+  /**
+   * SMOOTHED CARVE (u.smooth > 0). The exact section has creases sharper than
+   * the terrain grid can shade: the flat-bottomed bed meets the water at ~65°
+   * right where the bank starts out flat, and the lip and the step risers are
+   * kinks — on 1 m texels they render as faceted "low poly" banks (the user,
+   * 2026-10-17). So the river carves into a scratch copy, takes the DIFFERENCE
+   * it makes to the natural ground, blurs that over ±B texels (two box passes
+   * ≈ a tent) and adds it back. Creases become curves; the ground outside the
+   * river and the eroded detail inside it are untouched.
+   */
   function apply(out, ground, r) {
     const owner = op.owner ?? null;
     if (owner) {
@@ -232,8 +257,53 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
         owner.fill(0, z * size + Math.max(0, r.x0), z * size + Math.min(size - 1, r.x1) + 1);
       }
     }
-    const rx0 = Math.max(r.x0, rect.x0), rz0 = Math.max(r.z0, rect.z0);
-    const rx1 = Math.min(r.x1, rect.x1), rz1 = Math.min(r.z1, rect.z1);
+    if (!B) { carve(out, out, r, owner); return; }
+    // The core (what this call writes) and a margin of B texels round it,
+    // whose carve the blur needs. The margin is outside the composed rect, so
+    // its incoming height is not known: GROUND stands in (only the bank flare
+    // and ease read it, and only for those few texels).
+    const c = { x0: Math.max(rect.x0, r.x0), z0: Math.max(rect.z0, r.z0), x1: Math.min(rect.x1, r.x1), z1: Math.min(rect.z1, r.z1) };
+    if (c.x1 < c.x0 || c.z1 < c.z0) return;
+    const R = { x0: Math.max(0, c.x0 - B), z0: Math.max(0, c.z0 - B), x1: Math.min(size - 1, c.x1 + B), z1: Math.min(size - 1, c.z1 + B) };
+    const W = R.x1 - R.x0 + 1, H = R.z1 - R.z0 + 1;
+    const nat = scratch(0, size * size), shaped = scratch(1, size * size);
+    for (let z = R.z0; z <= R.z1; z++) for (let x = R.x0; x <= R.x1; x++) {
+      const i = z * size + x;
+      const inCore = x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
+      nat[i] = shaped[i] = inCore ? out[i] : ground[i];
+    }
+    carve(shaped, nat, R, owner);
+    // Delta, blurred: two separable box passes of radius 1 → a 5-texel tent
+    // per pass pair; repeated B/… times for wider smoothing.
+    const d = scratch(2, W * H), t = scratch(3, W * H);
+    for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+      const i = (R.z0 + z) * size + R.x0 + x;
+      d[z * W + x] = shaped[i] - nat[i];
+    }
+    const box = (src, dst, horiz) => {
+      for (let a = 0; a < (horiz ? H : W); a++) {
+        for (let b = 0; b < (horiz ? W : H); b++) {
+          let s = 0, n = 0;
+          for (let k = -1; k <= 1; k++) {
+            const bb = b + k;
+            if (bb < 0 || bb >= (horiz ? W : H)) continue;
+            s += horiz ? src[a * W + bb] : src[bb * W + a]; n++;
+          }
+          if (horiz) dst[a * W + b] = s / n; else dst[b * W + a] = s / n;
+        }
+      }
+    };
+    for (let pass = 0; pass < B; pass++) { box(d, t, true); box(t, d, false); }
+    for (let z = c.z0; z <= c.z1; z++) for (let x = c.x0; x <= c.x1; x++) {
+      out[z * size + x] += d[(z - R.z0) * W + (x - R.x0)];
+    }
+  }
+
+  /** The exact carve into `dst` inside `r`, reading the natural height from `nat`. */
+  function carve(dst, nat, r, owner) {
+    const out = dst;
+    const rx0 = Math.max(r.x0, carveRect.x0), rz0 = Math.max(r.z0, carveRect.z0);
+    const rx1 = Math.min(r.x1, carveRect.x1), rz1 = Math.min(r.z1, carveRect.z1);
     const inv = 1 / size;
     for (let tz = rz0; tz <= rz1; tz++) {
       const v = (tz + 0.5) * inv;
@@ -282,7 +352,7 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
         // Natural = the height handed in (GROUND plus any operator before this
         // one, e.g. the erosion filter), so operators chain: from bare GROUND
         // the bank stepped back to un-eroded ground at the footprint edge.
-        const i = tz * size + tx, natural = out[i];
+        const i = tz * size + tx, natural = nat[i];
         // Combine: inside any channel → the lowest bed (smooth min, which also
         // digs the confluence scour); otherwise the lowest bank.
         // The OWNER follows the water, not the distance: inside a channel, the
@@ -389,7 +459,8 @@ export function networkDirtyRect(prev, next, size) {
   }
   for (const [id, b] of next.byId) if (!prev.byId.has(id)) all(b);
   if (!r) return false;
-  const m = next.maxReach * size + 2;
+  // + 4 texels: the smoothed carve (u.smooth ≤ 4) spills that far.
+  const m = next.maxReach * size + 6;
   return {
     x0: Math.max(0, Math.floor(r.x0 - m)), z0: Math.max(0, Math.floor(r.z0 - m)),
     x1: Math.min(size - 1, Math.ceil(r.x1 + m)), z1: Math.min(size - 1, Math.ceil(r.z1 + m)),

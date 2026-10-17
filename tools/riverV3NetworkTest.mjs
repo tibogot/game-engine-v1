@@ -304,6 +304,41 @@ const U = { bedCurve: 0.55, freeboardN: 0.6 / MAXH, lipFrac: 0.28, slopeToUv: MA
   ok("step-pools: a gentle reach is untouched", g1.level.every((v, i) => v === g0.level[i]));
 }
 
+// ── 15. SMOOTHED carve: creases soften, nothing else changes ────────────────
+{
+  const US = { ...U, smooth: 2 };
+  const g = toGrid();
+  const full = { x0: 0, z0: 0, x1: SIZE - 1, z1: SIZE - 1 };
+  const sol = solveNetwork({ ...conf, sampleGround: ground });
+  const pk = packReaches([1, 2, 3].map((id) => ({ id, solved: sol.reaches.get(id) })), { worldSize: WORLD, maxHeight: MAXH });
+  const exact = Float32Array.from(g), soft = Float32Array.from(g);
+  buildRiverV3TerrainOp({ packed: pk, size: SIZE, u: U }).apply(exact, g, full);
+  const opS = buildRiverV3TerrainOp({ packed: pk, size: SIZE, u: US });
+  opS.apply(soft, g, full);
+  const steepest = (h) => { let m = 0; for (let z = 1; z < SIZE; z++) for (let x = 1; x < SIZE; x++) { const i = z * SIZE + x; m = Math.max(m, Math.abs(h[i] - h[i - 1]), Math.abs(h[i] - h[i - SIZE])); } return m * MAXH; };
+  const sE = steepest(exact), sS = steepest(soft);
+  ok("smooth: the sharpest texel step drops by a third or more", sS < sE * 0.67, `${sS.toFixed(2)} vs ${sE.toFixed(2)} m`);
+  let outside = 0;
+  for (let i = 0; i < SIZE * SIZE; i++) {
+    const x = i % SIZE, z = (i / SIZE) | 0;
+    if ((x < opS.rect.x0 || x > opS.rect.x1 || z < opS.rect.z0 || z > opS.rect.z1) && soft[i] !== g[i]) outside++;
+  }
+  ok("smooth: nothing outside the (grown) footprint changes", outside === 0, `${outside}`);
+  // Partial == full under smoothing (the dirty margin covers the spill).
+  const moved = structuredClone(conf); moved.reaches[1].nodes[0].x += 20;
+  const pk2 = (net) => { const so = solveNetwork({ ...net, sampleGround: ground }); return packReaches([1, 2, 3].map((id) => ({ id, solved: so.reaches.get(id) })), { worldSize: WORLD, maxHeight: MAXH }); };
+  const pA = pk2(conf), pB = pk2(moved);
+  const oA = buildRiverV3TerrainOp({ packed: pA, size: SIZE, u: US }), oB = buildRiverV3TerrainOp({ packed: pB, size: SIZE, u: US });
+  const dirty = networkDirtyRect(snapshotReaches(pA, oA.maxReach, "s"), snapshotReaches(pB, oB.maxReach, "s"), SIZE);
+  const fP = new Float32Array(SIZE * SIZE), fF = new Float32Array(SIZE * SIZE);
+  const LP = createHeightLayers({ final: fP, size: SIZE }), LF = createHeightLayers({ final: fF, size: SIZE });
+  LP.reset(g); LF.reset(g);
+  LP.setOperator("riverV3", oA); LF.setOperator("riverV3", oA);
+  LP.setOperator("riverV3", oB, dirty); LF.setOperator("riverV3", oB);
+  let worst = 0; for (let i = 0; i < SIZE * SIZE; i++) worst = Math.max(worst, Math.abs(fP[i] - fF[i]));
+  ok("smooth: partial recompose == full", worst * MAXH < 1e-4, `${(worst * MAXH).toFixed(5)} m`);
+}
+
 // ── 10. One reach, no junction: v3's terrain == v2's, texel for texel ──────
 {
   const { buildRiverTerrainOp } = await import("../v3/tools/riverV2Terrain.js");

@@ -169,6 +169,9 @@ export class RiverV3System {
       slopeToUv: MAX_HEIGHT / (slope * WORLD_SIZE),
       flareMax: Math.max(1, p.bankFlareMax ?? 4),
       // Natural levee: held to the surface's overhang + 1 m, eased out by + 4 m.
+      // Soften the carve over this many texels (riverV3Terrain.js apply):
+      // the exact section's creases shaded as faceted "low poly" banks.
+      smooth: Math.max(0, Math.min(4, Math.round(p.bankSmooth ?? 2))),
       overhangUV: RIBBON_OVERHANG / WORLD_SIZE,
       levee0: 1 / WORLD_SIZE,
       levee1: 4 / WORLD_SIZE,
