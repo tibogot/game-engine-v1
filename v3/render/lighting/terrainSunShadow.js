@@ -158,8 +158,16 @@ export function terrainSunVisibility({ heightTexNode, worldX, worldZ, worldY, wo
  * Texel (u, v) is the heightmap's texel (u, v): same world mapping as
  * terrainNormalMap.js, so a bilinear read at a vertex's heightmap UV agrees.
  */
+/**
+ * At most 1024²: every clipmap VERTEX reads this map, and an RGBA32F map at
+ * 4096² (256 MB) made those reads miss the GPU cache — MEASURED on a 2 km /
+ * 4096² heightmap: shade map 4096² 16.1 ms, 2048² 12.8 ms, 1024² 10.0 ms GPU.
+ * Mountain shade is soft anyway (the sun's cascades draw the close shadows),
+ * and every shipped map is 1024² already, so nothing they show changes.
+ */
+export const TERRAIN_SHADE_MAX_RES = 1024;
 export function createTerrainShadowMap({ renderer, heightTexNode, worldSize, maxHeight, heightmapSize, resolution = heightmapSize }) {
-  const RES = resolution;
+  const RES = Math.min(resolution, TERRAIN_SHADE_MAX_RES);
   const rtType = renderer?.backend?.device?.features?.has("float32-filterable")
     ? THREE.FloatType
     : THREE.HalfFloatType;

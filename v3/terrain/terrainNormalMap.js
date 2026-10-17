@@ -118,6 +118,39 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
   })();
   const bakeQuad = new QuadMesh(bakeMat);
 
+  /*
+   * HEIGHT LOD — the heightmap with a MIP CHAIN, for the clipmap's VERTEX reads
+   * (BIG_WORLDS_PLAN step 0, 2026-10-17). A coarse clipmap ring puts a vertex
+   * every 2^k texels; read from the full-resolution map, every one of those
+   * reads lands far from the last and misses the GPU's cache. MEASURED: a 4096²
+   * heightmap made the terrain ~15 ms dearer at ANY world size, independent of
+   * screen resolution, and half the triangles (the near half) cost 2.8 ms of
+   * the 15.6. Each ring now reads the mip whose texel matches its vertex
+   * spacing (CDLOD / clipmap practice) — which is also what those vertices
+   * can represent: the full-resolution read aliased fine detail into them.
+   * Baked with the surface (same gate: the height version), so it is never
+   * stale; three generates the chain after the render.
+   */
+  const lodRT = new THREE.RenderTarget(RES, RES, {
+    format:          THREE.RedFormat,
+    type:            rtType,
+    minFilter:       THREE.LinearMipmapNearestFilter,
+    magFilter:       THREE.LinearFilter,
+    wrapS:           THREE.ClampToEdgeWrapping,
+    wrapT:           THREE.ClampToEdgeWrapping,
+    generateMipmaps: true,
+    depthBuffer:     false,
+    colorSpace:      THREE.NoColorSpace,
+  });
+  lodRT.texture.flipY = false;
+  lodRT.texture.name  = "TerrainHeightLod";
+  const lodMat = new THREE.MeshBasicNodeMaterial();
+  lodMat.toneMapped = lodMat.fog = false;
+  lodMat.depthTest  = lodMat.depthWrite = false;
+  lodMat.fragmentNode = Fn(() => vec4(texture(heightTexNode, uv()).r, 0, 0, 1))();
+  const lodQuad = new QuadMesh(lodMat);
+  const heightLodNode = texture(lodRT.texture);
+
   /** TSL node for the baked texture — sample via normalAt(uv). */
   const normalTexNode = texture(rt.texture);
 
@@ -160,6 +193,8 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
     renderer.autoClear = false;
     renderer.setRenderTarget(rt);
     bakeQuad.render(renderer);
+    renderer.setRenderTarget(lodRT);
+    lodQuad.render(renderer);
     renderer.setRenderTarget(prevRT);
     renderer.autoClear = prevAutoClear;
   }
@@ -188,10 +223,12 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
     surfaceAt,
     normalAt,
     cavityAt,
+    /** Normalized height at a heightmap UV from mip `level` (vertex stages: an explicit level). */
+    heightLodAt(uvNode, level) { return heightLodNode.sample(uvNode).level(level).r; },
     heightAt,
     bake,
     bakeIfNeeded,
     resolution: RES,
-    dispose() { rt.dispose(); bakeMat.dispose(); },
+    dispose() { rt.dispose(); bakeMat.dispose(); lodRT.dispose(); lodMat.dispose(); },
   };
 }

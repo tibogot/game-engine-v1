@@ -45,9 +45,20 @@ features keep their 2 km size (an 8 km map reads flat from altitude); every full
 
 ## Plan (each stage usable on its own; alg-rts / nam-rts checked after each)
 
-0. **Find the 4096² cost** (one session). If it is a sampling mistake (no mips, filtering a float
-   texture in the vertex stage, the surface bake read more often than needed), a fix gives every
-   map a finer heightmap. Measure with the same isolation.
+0. ~~**Find the 4096² cost**~~ DONE 2026-10-17. It was the clipmap's COARSE rings: drawing only
+   the near half of the triangles cost 2.8 of 15.6 ms. Their vertices (one every 2^k texels) read
+   three huge textures at full resolution with no mips — every read a cache miss: (1) the height
+   (64 MB), (2) the mountain-shade map (RGBA32F at heightmap size, 256 MB), (3) the surface bake
+   (256 MB) through the snow slope mask, even on maps with no snow. Fixes: the surface bake also
+   writes a MIPMAPPED height copy and each ring reads the mip matching its vertex spacing (ring
+   from the vertex's own position → crack-free; ring 0 reads mip 0 at the shipped configs); the
+   shade map is capped at 1024²; snow depth only while the map has snow (a uniform branch); the
+   height reaches the fragment stage as a varying (a texture read there made 17 samplers).
+   GPU: 2 km / 4096² 16.1 → 3.4 ms (default 1024² map: 3.1); **8 km / 4096² 22-28 → ~4.1 ms**
+   (60 fps, generate / erosion / wetness no change). nam-valley at the default size: 1.2 % of
+   pixels change, all in the distance (coarse rings now read smoothed heights), none near, no
+   cracks; alg-rts boots clean. Still to do for big worlds: the 1.2-1.7 GB of CPU mirrors and the
+   full-map bakes (erosion 3 s, flow 3 s) — that is what tiles (2) fix.
 1. **GPU painting + the control map** (TEXTURING_PLAN step 4, its inventory is done). Paint at
    4096²+, more than 7 materials, no CPU stroke cost. Helps every map, small ones too.
 2. **World tiles.** A world = a grid of tiles (e.g. 1-2 km, each a heightmap + paint + vegetation

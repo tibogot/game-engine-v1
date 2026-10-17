@@ -26,6 +26,8 @@ import {
   positionLocal,
   cameraViewMatrix,
   varying,
+  ceil,
+  log2,
 } from "three/tsl";
 import { terrainSunVisibility } from "../render/lighting/terrainSunShadow.js";
 
@@ -391,7 +393,21 @@ function createLODMaterial({
   // show terrain lines on the far flat terrain.
   const hmInBounds = step(float(0), hmU).mul(step(hmU, float(1)))
                     .mul(step(float(0), hmV)).mul(step(hmV, float(1)));
-  const h = texture(heightTexNode, hmUV).r.mul(hmInBounds);
+  // The ring this vertex belongs to, from its own position (so a vertex shared
+  // by two rings gets the same answer in both meshes — no cracks): ring 0 is
+  // the full grid out to 128 steps, ring k reaches 128·2^k steps. Its spacing
+  // is BASE_STEP·2^k metres; the mip whose texel matches it is k + log2 of
+  // (BASE_STEP / heightmap texel) — 0 for the shipped configs, so ring 0 reads
+  // exactly the heightmap it always did (grass, props and physics agree).
+  const MIP_BASE = Math.max(0, Math.log2(BASE_STEP * HEIGHTMAP_SIZE / WORLD_SIZE));
+  const ringD = max(abs(positionLocal.x), abs(positionLocal.z)).div(float((GRID_N / 2) * BASE_STEP));
+  const ringK = max(float(0), ceil(log2(max(ringD, float(1e-3)))));
+  // A VARYING: the fragment stage (cliff streaks read the height) gets the
+  // mesh's own interpolated height instead of re-reading a texture — reading
+  // the LOD map there added a 17th sampler and the terrain pipeline failed.
+  const h = varying((terrainNormals?.heightLodAt
+    ? terrainNormals.heightLodAt(hmUV, ringK.add(MIP_BASE))
+    : texture(heightTexNode, hmUV).r).mul(hmInBounds), "vTerrainH");
 
   // Painted snow displaces the terrain itself (snowShared.groundDepth is a
   // pure function of world XZ, so shared ring-boundary vertices across LOD
@@ -422,7 +438,19 @@ function createLODMaterial({
     farNormalV = varying(farN, "vFarNormal");
     farOutV = varying(out, "vFarOut");
   }
-  const displacedY = snowShared ? vertexY.add(snowShared.groundDepth(wxz)) : vertexY;
+  // Snow depth only while the map HAS snow: its slope mask reads the surface
+  // bake per vertex, and on a 4096² heightmap that read (256 MB, no mips) was
+  // most of what the far rings still cost after the height LOD (BIG_WORLDS_PLAN
+  // step 0). A branch on a uniform: a real skip in the vertex stage.
+  let displacedY = vertexY;
+  if (snowShared) {
+    const snowY = Fn(() => {
+      const d = float(0).toVar();
+      If(snowShared.u.uHasSnow.greaterThan(0.0), () => { d.assign(snowShared.groundDepth(wxz)); });
+      return d;
+    })();
+    displacedY = vertexY.add(snowY);
+  }
   mat.positionNode = vec3(positionLocal.x, displacedY, positionLocal.z);
   // Under a GAME's own ground (setHolesEnabled "sink"): the same vertex, pushed
   // HOLE_SINK m down where the hole value passes the cut's 0.5. Built lazily.
