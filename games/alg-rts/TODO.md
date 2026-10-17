@@ -7,7 +7,7 @@ started · **you** = your call or your work.
 Keep this file current: tick things off here, add new asks here.
 
 **THE SHORT VERSION: [REMAINING.md](REMAINING.md)** — what is left, grouped and in plain words
-(2026-10-13, every open box here checked against the code; maps 2 and 3 apart).
+(updated 2026-10-17; maps 2 and 3 apart).
 
 ## ROAD TO STEAM — 2026-10-11 (you: "everything remaining, to make a finished game to place on
 ## Steam, a CoH-like game"). The plan of record; details in the sections below.
@@ -44,7 +44,8 @@ PHASE 1 — finish what is half-built
    packs up (2.2 s) before any move (the order held), drops it to RETREAT; lobs a bomb every 6.5 s on the
    nearest Frenchman its side SEES at 25-110 m (no line of sight needed; right-click picks one); TIR DE
    BARRAGE: five bombs on a point (35, 60 s cooldown); a loader takes the tube if the gunner falls.
-   Reach rings when selected. Its AI doesn't buy it yet. (The team's portrait is the generic 3D one.)
+   Reach rings when selected. Its AI doesn't buy it yet (the FRENCH AI buys its 81 team since 2026-10-16).
+   (The team's portrait is the generic 3D one.)
    THE RECOILLESS RIFLE done 2026-10-13 (algRecoilless.js): a team of two (160, 15 s), the gunner with
    the M18 57 mm (procWeapons sr57, look alnRecoilless), a direct-fire SHELL (armour's shell table):
    90 a shot, one every ~7 s, 55 m, ×0.3 against men (combat footMul); kneels and aims 1.5 s before
@@ -131,7 +132,8 @@ PHASE 3 — a finished product
 14. [ ] RELEASE CLEANUP: the dev panel and stats only with ?dev=1. (Done 2026-10-12: the console
     is clean at boot — the KTX2 warning was the hens' second loader, now a baked face table; and
     the "flaky" cityKitTest was a real traffic bug, fixed and back in the fast lane.)
-15. [ ] PERF + BOOT: boot 44 s → shader cache, preloading, a real loading screen; test on a
+15. [ ] PERF + BOOT: boot ~22 s (2026-10-04, 44 s before; RE-MEASURE: much was added since) → shader
+    cache, preloading, a real loading screen; test on a
     weaker GPU and a desktop GPU; publish a minimum spec.
 16. [ ] ARABIC + right-to-left UI (native speaker) — or during Early Access; launch FR + EN.
 
@@ -150,6 +152,26 @@ PHASE 5 — after launch (the Early Access roadmap)
 23. [ ] MULTIPLAYER: co-op vs AI first, then PvP — needs a DETERMINISTIC sim (seeded rng, nothing
     visual feeding the sim): cheap to prepare early, dear to retrofit.
 24. [ ] Mobile / tablet: last, if ever.
+
+2026-10-14 → 10-17 — DONE (the commits say how; REMAINING.md lists what is left):
+- [x] MORTARS CoH-style: the French 81 team (mortierFr) and the FLN 60 — carried (tube / plate), set up
+  piece by piece, the chef de pièce spotting with binoculars, no small arms, a kneeling rest; the pit's
+  crew works the piece and follows it as it turns; pit = defence (160 m), team = attack (110 m).
+- [x] The FRENCH AI buys mortar teams (~3.5 min, a second at 10), sets them up ~60 m behind its hottest
+  fight, barrages what its men see. Pits and AI teams fire only on what their side SEES.
+- [x] Mortar BALANCE: scatter 0.11 × the distance, damage 34 / 42 (team 60 / 81) and 42 (pit) — a man
+  every ~20 s on a squad in the open (it was a wipe in < 50 s).
+- [x] Mortar LOOK from the fire-bake lab: launch, impact (earth spikes + a ground skirt), a smoke trail
+  with a hot head (shared bookShots.js for one-shot books).
+- [x] The faoudj's BAZOOKA upgrade (M20, needs an arms cache). Helipad CONSTRUCTION. The grenade's arc trail.
+- [x] FLAMETHROWER ground fire: its own book (fp_fuelFire) + burn marks (shared scorchMarks.js).
+- [x] 12 MIXAMO CLIPS: hit flinch, blast death (thrown away from the blast), running death, para hard
+  landing, sappers hauling a crate (carry walk), FLN planting a mine, villagers ducking, the wounded limp.
+  Downloaded, not yet used: Pointing, Pick Fruit, the kneeling Grenade Throw. To download: Running Scared,
+  Surrender, a back flinch, Hammering.
+- [x] Sandbags: the white blotches on the bag tops (a pale "dust" layer) gone.
+- [ ] NEXT (suggested): you play a match on each side → building damage + collapse → the FLN AI using its
+  new units → the other explosions (tank shell, vehicle death, grenade) onto lab books.
 
 ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) building damage +
 collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a short campaign →
