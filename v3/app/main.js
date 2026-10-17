@@ -2433,6 +2433,12 @@ export async function startV3App(opts = {}) {
   const plblMacroWarm  = uiById("plbl-macro-warm");
   const pslMacroScale  = uiById("psl-macro-scale");
   const plblMacroScale = uiById("plbl-macro-scale");
+  const pslCavDark     = uiById("psl-cav-dark");
+  const plblCavDark    = uiById("plbl-cav-dark");
+  const pslRidgeWear   = uiById("psl-ridge-wear");
+  const plblRidgeWear  = uiById("plbl-ridge-wear");
+  const pslCavDepth    = uiById("psl-cav-depth");
+  const plblCavDepth   = uiById("plbl-cav-depth");
   const pslNoise       = uiById("psl-noise");
   const plblNoise      = uiById("plbl-noise");
   const pslNScale      = uiById("psl-nscale");
@@ -6111,6 +6117,21 @@ export async function startV3App(opts = {}) {
     syncMacroUi();
     grassTintDirty = true;
   });
+  function syncWeatherUi() {
+    pslCavDark.value = String(Math.round(splatOverlay.uCavityDark.value * 100));
+    plblCavDark.textContent = splatOverlay.uCavityDark.value.toFixed(2);
+    pslRidgeWear.value = String(Math.round(splatOverlay.uRidgeWear.value * 100));
+    plblRidgeWear.textContent = splatOverlay.uRidgeWear.value.toFixed(2);
+    pslCavDepth.value = String(Math.round(splatOverlay.uCavityDepth.value * 100));
+    plblCavDepth.textContent = splatOverlay.uCavityDepth.value.toFixed(2);
+  }
+  for (const [el, u] of [[pslCavDark, "uCavityDark"], [pslRidgeWear, "uRidgeWear"], [pslCavDepth, "uCavityDepth"]]) {
+    el.addEventListener("input", () => {
+      splatOverlay[u].value = Number(el.value) / 100;
+      syncWeatherUi();
+      grassTintDirty = true;
+    });
+  }
 
   pslHContrast.addEventListener("input", () => {
     splatOverlay.uHeightContrast.value = Number(pslHContrast.value) / 100;
@@ -9075,6 +9096,9 @@ export async function startV3App(opts = {}) {
         macroStrength: splatOverlay.uMacroStrength.value,
         macroWarmth:   splatOverlay.uMacroWarmth.value,
         macroScale:    splatOverlay.uMacroScale.value,
+        cavityDark:    splatOverlay.uCavityDark.value,
+        ridgeWear:     splatOverlay.uRidgeWear.value,
+        cavityDepth:   splatOverlay.uCavityDepth.value,
       },
       /*
        * The world's LOOK, which this format has never carried. Only the ocean so
@@ -9361,6 +9385,12 @@ export async function startV3App(opts = {}) {
       splatOverlay.uMacroWarmth.value   = Number.isFinite(mw) ? Math.min(1, Math.max(0, mw)) : 0;
       if (Number.isFinite(mc)) splatOverlay.uMacroScale.value = Math.min(400, Math.max(10, mc));
       syncMacroUi();
+      // Weathering: a level saved before it existed stays as it was (off).
+      const cd = d.paintBlend.cavityDark, rw = d.paintBlend.ridgeWear, cz = d.paintBlend.cavityDepth;
+      splatOverlay.uCavityDark.value  = Number.isFinite(cd) ? Math.min(1, Math.max(0, cd)) : 0;
+      splatOverlay.uRidgeWear.value   = Number.isFinite(rw) ? Math.min(1, Math.max(0, rw)) : 0;
+      splatOverlay.uCavityDepth.value = Number.isFinite(cz) ? Math.min(3, Math.max(0.1, cz)) : 0.6;
+      syncWeatherUi();
       grassTintDirty = true;
     }
     if (d.paintLayers) {

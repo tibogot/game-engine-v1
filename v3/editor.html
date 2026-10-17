@@ -1106,6 +1106,38 @@
               </div>
             </div>
 
+            <!-- WEATHERING --------------------------------------------------- -->
+            <div class="inspector-section">
+              <div class="section-header" data-toggle>
+                <i data-lucide="chevron-down" class="section-arrow"></i>
+                Weathering
+              </div>
+              <div class="section-body hidden">
+                <p class="mode-hint" style="margin-top:2px">The terrain's shape colours the paint: hollows and gullies collect dirt (darker), crests and ridges wear (paler). Both at 0 = off.</p>
+                <div class="prop-row" title="How much darker hollows and gullies get">
+                  <span class="prop-label">Hollows</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-cav-dark" min="0" max="100" step="1" value="0" />
+                    <span class="prop-num" id="plbl-cav-dark">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row" title="How much paler crests and ridges get">
+                  <span class="prop-label">Ridges</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-ridge-wear" min="0" max="100" step="1" value="0" />
+                    <span class="prop-num" id="plbl-ridge-wear">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row" title="Metres below (or above) the surroundings for the full effect — smaller catches gentler shapes">
+                  <span class="prop-label">Depth (m)</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-cav-depth" min="10" max="300" step="5" value="60" />
+                    <span class="prop-num" id="plbl-cav-depth">0.60</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- NOISE MASK --------------------------------------------- -->
             <div class="inspector-section">
               <div class="section-header" data-toggle>

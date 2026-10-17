@@ -79,6 +79,8 @@ export const SPLAT_FEATURES = {
   biplanar: false,
   /** Large-scale world colour variation (uMacroStrength / uMacroWarmth). */
   macroVariation: true,
+  /** Weathering from the baked cavity (uCavityDark / uRidgeWear). */
+  weathering: true,
   /**
    * HOW MANY PAINT LAYERS THIS BUILD COMPILES. The FIRST n slots, 1..NUM_LAYERS.
    *
@@ -339,6 +341,10 @@ export function createSplatOverlay(
   const uMacroStrength  = uniform(0.0);  // brightness swing, 0..0.5
   const uMacroWarmth    = uniform(0.0);  // warm/cool tint amount, 0..1
   const uMacroScale     = uniform(80.0); // metres per noise cell
+  // Weathering from the terrain's shape (see blend()). Both 0 = off.
+  const uCavityDark     = uniform(0.0);  // 0..1 hollows darker
+  const uRidgeWear      = uniform(0.0);  // 0..1 ridges paler
+  const uCavityDepth    = uniform(0.6);  // metres below the surroundings for the full effect
   // A MACRO PHOTO (2026-10-02, alg-rts's ground pass; every AAA RTS lays a
   // big unique colour variation over its tiling ground — BAR's map diffuse,
   // SupCom's upper stratum): an aerial photo's LUMINANCE RATIO (pixel / its
@@ -665,13 +671,15 @@ export function createSplatOverlay(
    * @param topK      top-K count for THIS call (null = the build's)
    * @param hex       HEX TILING on every layer tap (hexSample) — no repeat grid;
    *   3× the taps, so the bake only
+   * @param weathering false = skip the cavity weathering (the ground cache
+   *   applies its own, tuned for alg-rts, over splats and decals too)
    * @param farFade   0..1 node replacing the camera-distance near/far fade —
    *   the bake has no camera; each cache ring passes the fade its texel size
    *   corresponds to. Given, it turns the near/far blend on for this call.
    */
   function blend({
     baseColor, baseRough = null, geomNormal = null, layerKeep = null,
-    position = null, topK = null, farFade = null, hex = false,
+    position = null, topK = null, farFade = null, hex = false, weathering = true,
   }) {
     const wantRough = baseRough !== null;
     const wantNrm   = geomNormal !== null && F.normalMap;
@@ -1096,6 +1104,27 @@ export function createSplatOverlay(
           });
         }
 
+        // WEATHERING (TEXTURING_PLAN step 3): the terrain's own shape decides
+        // where dirt gathers and where the ground wears. The cavity comes baked
+        // with the surface (terrainNormalMap: metres below the ring around a
+        // texel), so this is the texel the shader already reads. Hollows and
+        // gullies go darker and a touch richer (fines and moisture collect),
+        // crests and ridges paler and duller (wind and feet scour them). A
+        // uniform branch; both strengths 0 = skipped.
+        if (terrainNormals && F.weathering && weathering) {
+          If(uCavityDark.add(uRidgeWear).greaterThan(0.0), () => {
+            const cv = terrainNormals.cavityAt(splatUV).div(max(uCavityDepth, float(0.01))).toVar();
+            const hollow = smoothstep(0.0, 1.0, cv).mul(uCavityDark).mul(inBounds);
+            const ridge = smoothstep(0.0, 1.0, cv.negate()).mul(uRidgeWear).mul(inBounds);
+            const c0 = vec3(colV).toVar();
+            const lum = c0.dot(vec3(0.299, 0.587, 0.114));
+            const dirt = mix(vec3(lum), c0, 1.25).mul(0.55);           // darker, more saturated
+            const dust = mix(vec3(lum), c0, 0.6).mul(1.22);            // paler, duller
+            colV.assign(mix(mix(c0, max(dirt, vec3(0)), hollow), dust, ridge));
+            if (wantRough) roughV.assign(mix(roughV, roughV.mul(0.85), hollow));
+          });
+        }
+
         // Solo mode (greyscale single-layer visualisation) — an EDITOR affordance.
         if (F.solo) {
           If(uSoloLayer.greaterThanEqual(float(0)), () => {
@@ -1198,6 +1227,10 @@ export function createSplatOverlay(
     uMacroScale,
     uMacroTexStrength,
     uMacroTexScale,
+    // Weathering (see blend()); live, no recompile.
+    uCavityDark,
+    uRidgeWear,
+    uCavityDepth,
     /** The macro photo: `bytes` = MACRO_N² luminance ratios (pixel / mean, 0..2 → 0..255). */
     setMacroImage(bytes) { macroTex.image.data.set(bytes.subarray(0, MACRO_N * MACRO_N)); macroTex.needsUpdate = true; },
     macroImageSize: MACRO_N,

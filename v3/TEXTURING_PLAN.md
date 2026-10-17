@@ -82,6 +82,19 @@ look work goes FIRST, on the current system, and the control map after it. Every
    (`?hex=0` to A/B), close-camera games opt in, the RTS games do not (alg-rts: ground cache).
 3. **Weathering rules:** cavity / curvature from the baked surface (darker hollows, worn ridges), then
    flow / wetness masks; rules the auto-material and the bakes use.
+   - ~~Cavity~~ DONE 2026-10-17: terrainNormalMap packs (n.x, CAVITY, n.z, h) — normal Y rebuilt in
+     surfaceAt/normalAt (regression vs the old bake: mean 0.006, max 8 on one pixel). Cavity = metres
+     below the mean of two rings (4 m ×1, 14 m ×0.35), baked per height edit. Shader: hollows darker
+     and richer + a little glossier, ridges paler and duller (uCavityDark, uRidgeWear, uCavityDepth),
+     paint panel "Weathering", saved in paintBlend (old levels load OFF). GPU: frame −0.06 ms (noise
+     0.37), re-bake every frame while sculpting +0.28 ms (noise 0.33) at 1024². No new texture/tap.
+     Levels (2026-10-17): 0.5 / 0.35 / 0.6 m in nam-valley, tidewater-bay and the river (ridges 0) / rock /
+     stylized labs (the last three are flat — no visible change). The alg-* levels stay 0: alg-rts's
+     ground cache has its OWN tuned cavity (groundCache cavityFactor, over splats and decals too), so
+     the cache bake calls blend({ weathering: false }) and the hollows are never darkened twice.
+     Seen: river banks read as ridges → a pale outline along carved channels (wetness should win
+     there — the flow step).
+   - Next: flow / wetness (needs a flow-accumulation bake), and the auto-material reading cavity.
 4. **Control map + read path:** data, conversion at load, shader read through top-K. Old path kept.
 5. **GPU painting** into the control map + CPU mirror + undo.
 6. **More materials:** arrays sized to what the level uses; then KTX2.

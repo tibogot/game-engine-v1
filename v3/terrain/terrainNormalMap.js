@@ -35,9 +35,15 @@
 import * as THREE from "three";
 import { QuadMesh } from "three/webgpu";
 import {
-  Fn, float, vec2, vec3, vec4, normalize, texture, uv,
+  Fn, float, vec2, vec3, vec4, normalize, texture, uv, sqrt, max,
 } from "three/tsl";
 import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
+
+/** Cavity rings [radius m, weight]: a gully-sized one and a basin-sized one. */
+const CAVITY_RADII_M = [[4, 1.0], [14, 0.35]];
+
+/** The packed normal's Y, rebuilt from X and Z (terrain normals point up). */
+const upY = (s) => sqrt(max(float(0), float(1).sub(s.x.mul(s.x)).sub(s.z.mul(s.z))));
 
 /**
  * @param {object}  deps
@@ -91,7 +97,24 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
     const hUp = texture(heightTexNode, vec2(c.x, c.y.add(texel))).r;
     const flatScale = float(2.0 * WORLD_SIZE / (HEIGHTMAP_SIZE * MAX_HEIGHT));
     const hC = texture(heightTexNode, c).r;
-    return vec4(normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp))), hC);
+    const n = normalize(vec3(hL.sub(hR), flatScale, hD.sub(hUp)));
+    // CAVITY (weathering, TEXTURING_PLAN step 3): how far this texel sits
+    // BELOW the mean of a ring around it, in metres — + in a hollow or gully,
+    // − on a ridge or crest. Two rings (CAVITY_RADII_M) so a narrow gully and
+    // a wide basin both read; paid per height EDIT, not per frame.
+    let cav = float(0);
+    for (const [rM, wt] of CAVITY_RADII_M) {
+      const rT = Math.max(1, rM / (WORLD_SIZE / HEIGHTMAP_SIZE)) / HEIGHTMAP_SIZE;
+      let ring = float(0);
+      for (let k = 0; k < 8; k++) {
+        const a = (k / 8) * Math.PI * 2;
+        ring = ring.add(texture(heightTexNode, c.add(vec2(Math.cos(a) * rT, Math.sin(a) * rT))).r);
+      }
+      cav = cav.add(ring.div(8).sub(hC).mul(MAX_HEIGHT * wt));
+    }
+    // Normal Y goes: a heightfield normal always points up, so surfaceAt()
+    // rebuilds it from X and Z and the freed channel carries the cavity.
+    return vec4(n.x, cav, n.z, hC);
   })();
   const bakeQuad = new QuadMesh(bakeMat);
 
@@ -104,7 +127,8 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
    * this and split it, rather than calling normalAt + heightAt.
    */
   function surfaceAt(uvNode) {
-    return normalTexNode.sample(uvNode);
+    const s = normalTexNode.sample(uvNode);
+    return vec4(s.x, upY(s), s.z, s.w);
   }
 
   /**
@@ -112,7 +136,17 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
    * bilinear interpolation between two unit normals is shorter than unit.
    */
   function normalAt(uvNode) {
-    return normalize(normalTexNode.sample(uvNode).xyz);
+    const s = normalTexNode.sample(uvNode);
+    return normalize(vec3(s.x, upY(s), s.z));
+  }
+
+  /**
+   * Cavity in metres at a heightmap UV: + below the ring around it (hollow,
+   * gully), − above it (ridge). Same texel as surfaceAt — sample once and
+   * pass it as `packed` when both are wanted.
+   */
+  function cavityAt(uvNode, packed = null) {
+    return (packed ?? normalTexNode.sample(uvNode)).y;
   }
 
   /** Normalized terrain height (multiply by MAX_HEIGHT for metres). */
@@ -153,6 +187,7 @@ export function createTerrainNormalMap({ heightTexNode, renderer, resolution = H
     normalTexNode,
     surfaceAt,
     normalAt,
+    cavityAt,
     heightAt,
     bake,
     bakeIfNeeded,

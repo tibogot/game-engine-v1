@@ -223,6 +223,9 @@ export function createGroundCache({
       // No repeat grid on any layer (splatOverlayTsl hexSample): 3× the
       // layer taps, affordable only because this runs once per texel.
       hex: O.hexBake !== false,
+      // The cache has its own cavity (cavityFactor, below), over splats and
+      // decals too: the paint's weathering would darken the hollows twice.
+      weathering: false,
     });
     return { sb, G, color: sb.color };
   }
