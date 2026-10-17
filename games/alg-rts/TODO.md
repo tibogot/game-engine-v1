@@ -135,6 +135,16 @@ PHASE 3 — a finished product
 15. [ ] PERF + BOOT: boot ~22 s (2026-10-04, 44 s before; RE-MEASURE: much was added since) → shader
     cache, preloading, a real loading screen; test on a
     weaker GPU and a desktop GPU; publish a minimum spec.
+    [ ] THREE r186 TRIAL (noted 2026-10-17, from the r185 + r186 release notes): when the game is
+    feature-complete, a MEASURE-ONLY trial — r186 installed temporarily, fix only what stops the boot,
+    compare boot s / CPU ms / GPU ms with r184, then undo (nothing committed). Why: r185-186 pool the
+    uniform-buffer updates, optimise submit + pipeline/bind-group caching and cache shader functions —
+    the game is CPU-bound, so maybe a real win. Risks to check: render-target viewports no longer scaled
+    by pixel ratio (renderScale, post passes), shadow maps no longer drawn in precompile (the warm-up),
+    renames (directionToFaceDirection → negateOnBackSide, Source → TextureSource, modInt gone,
+    PCFSoftShadowMap gone, vector not() per component), async renderer.dispose(). Also may fix the
+    instanced-matrix one-frame lag and the ExternalTexture trap. A big gain → upgrade the whole repo
+    before shipping; small → upgrade after shipping.
 16. [ ] ARABIC + right-to-left UI (native speaker) — or during Early Access; launch FR + EN.
 
 PHASE 4 — Steam itself
