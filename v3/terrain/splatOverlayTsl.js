@@ -307,7 +307,7 @@ export function hexSamplePair(albArr, ormArr, uv, layer, gx, gy, sharp = float(1
  */
 export function createSplatOverlay(
   layerSlots, albedoArrayTex, ormArrayTex, splatTex, heightTexNode = null, features = {},
-  terrainNormals = null, farTerrain = null,
+  terrainNormals = null, farTerrain = null, flowMap = null,
 ) {
   if (layerSlots.length !== NUM_LAYERS) {
     throw new Error(`createSplatOverlay: need ${NUM_LAYERS} layer slots, got ${layerSlots.length}`);
@@ -345,6 +345,20 @@ export function createSplatOverlay(
   const uCavityDark     = uniform(0.0);  // 0..1 hollows darker
   const uRidgeWear      = uniform(0.0);  // 0..1 ridges paler
   const uCavityDepth    = uniform(0.6);  // metres below the surroundings for the full effect
+  // Wetness from the flow map (flowMap.js): where rain gathers. 0 = off.
+  const uWetness        = uniform(0.0);  // 0..1 how wet the drainage gets
+  const uWetStart       = uniform(4.0);  // log2(upstream texels) where it starts
+  const uWetRange       = uniform(4.0);  // octaves of catchment from none to full
+  // log2(upstream texels) at a heightmap UV: 4 texel LOADS, bilinear here
+  // (no sampler — the stage is at 16). R8 holds log2 × 16.
+  const FLOW_N = flowMap?.size ?? 1;
+  const flowLog = flowMap ? (q) => {
+    const t = q.mul(FLOW_N).sub(0.5);
+    const i0 = floor(t), fr = t.sub(i0);
+    const cl = (v) => int(clamp(v, 0, FLOW_N - 1));
+    const ld = (dx, dy) => textureLoad(flowMap.texture, ivec2(cl(i0.x.add(dx)), cl(i0.y.add(dy)))).r;
+    return mix(mix(ld(0, 0), ld(1, 0), fr.x), mix(ld(0, 1), ld(1, 1), fr.x), fr.y).mul(255 / 16);
+  } : null;
   // A MACRO PHOTO (2026-10-02, alg-rts's ground pass; every AAA RTS lays a
   // big unique colour variation over its tiling ground — BAR's map diffuse,
   // SupCom's upper stratum): an aerial photo's LUMINANCE RATIO (pixel / its
@@ -1112,7 +1126,9 @@ export function createSplatOverlay(
         // crests and ridges paler and duller (wind and feet scour them). A
         // uniform branch; both strengths 0 = skipped.
         if (terrainNormals && F.weathering && weathering) {
-          If(uCavityDark.add(uRidgeWear).greaterThan(0.0), () => {
+          let gate = uCavityDark.add(uRidgeWear);
+          if (flowLog) gate = gate.add(uWetness);
+          If(gate.greaterThan(0.0), () => {
             const cv = terrainNormals.cavityAt(splatUV).div(max(uCavityDepth, float(0.01))).toVar();
             const hollow = smoothstep(0.0, 1.0, cv).mul(uCavityDark).mul(inBounds);
             const ridge = smoothstep(0.0, 1.0, cv.negate()).mul(uRidgeWear).mul(inBounds);
@@ -1122,6 +1138,17 @@ export function createSplatOverlay(
             const dust = mix(vec3(lum), c0, 0.6).mul(1.22);            // paler, duller
             colV.assign(mix(mix(c0, max(dirt, vec3(0)), hollow), dust, ridge));
             if (wantRough) roughV.assign(mix(roughV, roughV.mul(0.85), hollow));
+            // WETNESS: where the flow map says rain gathers — drainage lines,
+            // gully floors, the foot of a slope. Wet ground is darker, richer
+            // and glossier; the gloss is what reads as damp from a distance.
+            if (flowLog) {
+              const wet = smoothstep(uWetStart, uWetStart.add(max(uWetRange, float(0.5))), flowLog(splatUV))
+                .mul(uWetness).mul(inBounds).toVar();
+              const c1 = vec3(colV).toVar();
+              const l1 = c1.dot(vec3(0.299, 0.587, 0.114));
+              colV.assign(mix(c1, max(mix(vec3(l1), c1, 1.2).mul(0.6), vec3(0)), wet));
+              if (wantRough) roughV.assign(mix(roughV, roughV.mul(0.5), wet));
+            }
           });
         }
 
@@ -1231,6 +1258,9 @@ export function createSplatOverlay(
     uCavityDark,
     uRidgeWear,
     uCavityDepth,
+    uWetness,
+    uWetStart,
+    uWetRange,
     /** The macro photo: `bytes` = MACRO_N² luminance ratios (pixel / mean, 0..2 → 0..255). */
     setMacroImage(bytes) { macroTex.image.data.set(bytes.subarray(0, MACRO_N * MACRO_N)); macroTex.needsUpdate = true; },
     macroImageSize: MACRO_N,

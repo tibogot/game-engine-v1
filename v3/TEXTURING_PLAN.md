@@ -94,7 +94,17 @@ look work goes FIRST, on the current system, and the control map after it. Every
      the cache bake calls blend({ weathering: false }) and the hollows are never darkened twice.
      Seen: river banks read as ridges → a pale outline along carved channels (wetness should win
      there — the flow step).
-   - Next: flow / wetness (needs a flow-accumulation bake), and the auto-material reading cavity.
+   - ~~Flow / wetness~~ DONE 2026-10-17: flowMap.js (+ flowMapCompute.js, flowMapWorker.js) —
+     multiple-flow-direction drainage (Freeman, slope^1.1), log2(upstream texels) in an R8 read
+     with textureLoad (no sampler; the device allows 48 textures, 16 samplers). Computed in a
+     WORKER ~0.7 s after the last height write, only while wetness > 0: 151 ms at 1024² off the
+     main thread (worst frame 21 ms during it). A 3×3 MAX, not a blur: the lines are 1-2 texels
+     and a blur halved them (measured: 8-11 octaves → ~5). Values on nam-valley: most of the map
+     < 6 octaves, drainage 5-11 → defaults start 4, range 4. Shader: darker, richer, roughness ×0.5.
+     GPU −0.01 ms (noise 0.04). Panel: Wetness, Catchment; saved paintBlend.wetness / wetStart.
+     Levels: 0.6 in nam-valley, tidewater-bay and the labs; alg-* untouched (cache skips it).
+     Limit seen: flat ground beside a carved river does not drain into it, so banks stay dry.
+   - Next: the auto-material reading cavity / flow (mud in gullies, gravel in stream beds).
 4. **Control map + read path:** data, conversion at load, shader read through top-K. Old path kept.
 5. **GPU painting** into the control map + CPU mirror + undo.
 6. **More materials:** arrays sized to what the level uses; then KTX2.

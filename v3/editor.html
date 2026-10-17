@@ -1135,6 +1135,20 @@
                     <span class="prop-num" id="plbl-cav-depth">0.60</span>
                   </div>
                 </div>
+                <div class="prop-row" title="Darker, glossier ground where rain runs and gathers: drainage lines, gully floors, the foot of slopes">
+                  <span class="prop-label">Wetness</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-wetness" min="0" max="100" step="1" value="0" />
+                    <span class="prop-num" id="plbl-wetness">0.00</span>
+                  </div>
+                </div>
+                <div class="prop-row" title="How much ground must drain through a spot before it gets wet (log2 of texels upstream) — lower wets more of the slopes, higher keeps it to the main channels">
+                  <span class="prop-label">Catchment</span>
+                  <div class="prop-value">
+                    <input type="range" id="psl-wet-start" min="20" max="140" step="5" value="40" />
+                    <span class="prop-num" id="plbl-wet-start">4.0</span>
+                  </div>
+                </div>
               </div>
             </div>
 

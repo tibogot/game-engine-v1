@@ -49,7 +49,7 @@
  *             A map from /textures is a URL; one imported from disk is an
  *             "asset:<hash>" reference to the assets section.
  *   paintBlend { heightBlend, contrast, macroStrength, macroWarmth, macroScale,
- *                cavityDark, ridgeWear, cavityDepth }
+ *                cavityDark, ridgeWear, cavityDepth, wetness, wetStart }
  *   farTerrain { enabled, n, extent, stand, standStart, standEnd, blend, rule }
  *              + blob "farHeight" (Float32 n×n, map metres): the ground past
  *              the heightmap (v3/terrain/farTerrain.js), or null

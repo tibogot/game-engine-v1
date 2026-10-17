@@ -51,6 +51,7 @@ import { createSplatOverlay } from "../terrain/splatOverlayTsl.js";
 import { createFarTerrain } from "../terrain/farTerrain.js";
 import { createGroundCache } from "../terrain/groundCache.js";
 import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
+import { createFlowMap } from "../terrain/flowMap.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
 import { createProceduralLayerPanel } from "../ui/proceduralLayerPanel.js";
@@ -720,6 +721,9 @@ export async function startV3App(opts = {}) {
   // The ground past the heightmap (farTerrain.js): off until a project brings
   // a far grid. Built first: the paint blend and the clipmap both read it.
   const farTerrain = createFarTerrain();
+  // Where rain gathers (flowMap.js): computed on the CPU after height edits
+  // settle, only while the paint's wetness is on. Read by the paint shader.
+  const flowMap = createFlowMap(HEIGHTMAP_SIZE);
   const splatOverlay = createSplatOverlay(
     textureLib.getLayerUniforms(),
     textureLib.albedoArrayTex,
@@ -731,6 +735,7 @@ export async function startV3App(opts = {}) {
     // instead of five, and it keeps the heightmap out of the fragment stage.
     terrainNormals,
     farTerrain,
+    flowMap,
   );
 
   // ── Procedural Ground / Meadow: retired 2026-09-13 ────────────────────────
@@ -1170,6 +1175,9 @@ export async function startV3App(opts = {}) {
   let splineFeatureStore = null;
   let tunnelColliderStore = null;
   let _tunnelHolesHv = -1, _tunnelHolesDue = 0;
+  // Flow map (wetness): recomputed ~0.7 s after the last height write, never
+  // mid-stroke (every stroke frame bumps the version and pushes it back).
+  let _flowHv = -1, _flowDue = 0, _flowBusy = false, _flowMs = 0;
   let _legacyMeadowPainted = false;
 
   function getTerrainMeshesForWorld() {
@@ -2439,6 +2447,10 @@ export async function startV3App(opts = {}) {
   const plblRidgeWear  = uiById("plbl-ridge-wear");
   const pslCavDepth    = uiById("psl-cav-depth");
   const plblCavDepth   = uiById("plbl-cav-depth");
+  const pslWetness     = uiById("psl-wetness");
+  const plblWetness    = uiById("plbl-wetness");
+  const pslWetStart    = uiById("psl-wet-start");
+  const plblWetStart   = uiById("plbl-wet-start");
   const pslNoise       = uiById("psl-noise");
   const plblNoise      = uiById("plbl-noise");
   const pslNScale      = uiById("psl-nscale");
@@ -4920,6 +4932,16 @@ export async function startV3App(opts = {}) {
           void ensureCpuHeightmapFromGpu().then(() => tunnelSystem.onTerrainChanged());
         }
       }
+      if (splatOverlay.uWetness.value > 0) {
+        if (_hv !== _flowHv) { _flowHv = _hv; _flowDue = now + 700; }
+        if (_flowDue && now >= _flowDue && !_flowBusy && !_rendererSideWork) {
+          _flowDue = 0; _flowBusy = true;
+          void ensureCpuHeightmapFromGpu()
+            .then(() => flowMap.compute(cpuHeightmap))
+            .then((ms) => { _flowMs = ms; })
+            .finally(() => { _flowBusy = false; });
+        }
+      }
       if (_hv !== _lastNormalBakeVersion && !_rendererSideWork) {
         _lastNormalBakeVersion = _hv;
         terrainNormals.bake();
@@ -6124,10 +6146,15 @@ export async function startV3App(opts = {}) {
     plblRidgeWear.textContent = splatOverlay.uRidgeWear.value.toFixed(2);
     pslCavDepth.value = String(Math.round(splatOverlay.uCavityDepth.value * 100));
     plblCavDepth.textContent = splatOverlay.uCavityDepth.value.toFixed(2);
+    pslWetness.value = String(Math.round(splatOverlay.uWetness.value * 100));
+    plblWetness.textContent = splatOverlay.uWetness.value.toFixed(2);
+    pslWetStart.value = String(Math.round(splatOverlay.uWetStart.value * 10));
+    plblWetStart.textContent = splatOverlay.uWetStart.value.toFixed(1);
   }
-  for (const [el, u] of [[pslCavDark, "uCavityDark"], [pslRidgeWear, "uRidgeWear"], [pslCavDepth, "uCavityDepth"]]) {
+  for (const [el, u, div] of [[pslCavDark, "uCavityDark", 100], [pslRidgeWear, "uRidgeWear", 100],
+    [pslCavDepth, "uCavityDepth", 100], [pslWetness, "uWetness", 100], [pslWetStart, "uWetStart", 10]]) {
     el.addEventListener("input", () => {
-      splatOverlay[u].value = Number(el.value) / 100;
+      splatOverlay[u].value = Number(el.value) / div;
       syncWeatherUi();
       grassTintDirty = true;
     });
@@ -9099,6 +9126,8 @@ export async function startV3App(opts = {}) {
         cavityDark:    splatOverlay.uCavityDark.value,
         ridgeWear:     splatOverlay.uRidgeWear.value,
         cavityDepth:   splatOverlay.uCavityDepth.value,
+        wetness:       splatOverlay.uWetness.value,
+        wetStart:      splatOverlay.uWetStart.value,
       },
       /*
        * The world's LOOK, which this format has never carried. Only the ocean so
@@ -9390,6 +9419,9 @@ export async function startV3App(opts = {}) {
       splatOverlay.uCavityDark.value  = Number.isFinite(cd) ? Math.min(1, Math.max(0, cd)) : 0;
       splatOverlay.uRidgeWear.value   = Number.isFinite(rw) ? Math.min(1, Math.max(0, rw)) : 0;
       splatOverlay.uCavityDepth.value = Number.isFinite(cz) ? Math.min(3, Math.max(0.1, cz)) : 0.6;
+      const wt = d.paintBlend.wetness, ws = d.paintBlend.wetStart;
+      splatOverlay.uWetness.value  = Number.isFinite(wt) ? Math.min(1, Math.max(0, wt)) : 0;
+      splatOverlay.uWetStart.value = Number.isFinite(ws) ? Math.min(14, Math.max(2, ws)) : 4;
       syncWeatherUi();
       grassTintDirty = true;
     }
@@ -12014,6 +12046,9 @@ export async function startV3App(opts = {}) {
       sculpt,
       /** The terrain paint shader's uniforms (texturing A/Bs). */
       splatOverlay,
+      /** Where rain gathers (flowMap.js); flowMs = the last compute's cost. */
+      flowMap,
+      get flowMs() { return _flowMs; },
       /** Pads (padSystem.js) and their editing half, for scripted checks. */
       get padSystem() { return padSystem; },
       get padEditor() { return padEditor; },
