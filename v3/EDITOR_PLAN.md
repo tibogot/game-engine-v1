@@ -33,7 +33,17 @@ WebGPU techniques. One item at a time, between game work (see `/MIGRATION.md`).
    mix() when a rounding was 0 (the ridge default); a GPU mix is a + k·(b − a), which in fp32 returned ~0,
    so the erosion mask vanished in patches — flat un-eroded sheets with steps around them. Now min() +
    select(). Reproduced and verified in the lab (slope view: sheets and step lines gone at the default).
-   Next: the operator below.
+   ~~Operator~~ DONE 2026-10-17: `v3/terrain/erosionOperator.js` — the first operator of the height
+   stack (`first`, before the rivers): GROUND → R32F texture → filter on the GPU → one readback →
+   offset added at compose. Sculpt panel "Erosion Filter (live)": on, Size (m), Strength, Gully
+   weight, Detail, Octaves, Onset, Seed; re-bakes ~0.6 s after GROUND changes; saved (`erosionFilter`)
+   and applied on load, awaited (games get it). Three things the lab never met, found on nam-valley:
+   (1) the filter fades peaks up / valleys down by its strength (+18 m) → the offset is HIGH-PASSED
+   (minus a blur at Size/4); (2) octaves finer than ~4 texels fold into needles → band-limited from
+   Size and the texel; (3) a sculpted knife-edge ridge flips the slope direction while still steep →
+   a "picket fence" of fins → the filter reads a SMOOTHED ground (blur Size·3 %), the offset lands on
+   the real one. Ridges rounded 0.1. Warm re-bake 170 ms at 1024². Tests: erosionOperatorTest (10).
+   Not yet: the ridge map output for texturing; the layer list entry (2b).
    As an operator in `heightLayers`: sliders, on/off, saved; also outputs a ridge/gully map for
    texturing, and works for far terrain. Small effort, big look.
    https://blog.runevision.com/2026/03/fast-and-gorgeous-erosion-filter.html

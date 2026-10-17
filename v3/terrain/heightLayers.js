@@ -100,8 +100,10 @@ export function createHeightLayers({ final, size, onComposed = null }) {
   const stamps = new Map();
   /**
    * The operators between GROUND and STAMPS, applied in insertion order:
-   * name → { rect, apply(out, ground, rect) }. River v2 is "river", River v3
-   * "riverV3" — each owns its own slot and never overwrites the other.
+   * name → { rect, apply(out, ground, rect), first? }. River v2 is "river",
+   * River v3 "riverV3" — each owns its own slot and never overwrites the other.
+   * The erosion filter is "erosion" with `first`: it shapes the ground the
+   * rivers then carve (erosionOperator.js).
    */
   const operators = new Map();
   /** Union of rects composed since the last takePending (not yet on the GPU). */
@@ -248,6 +250,8 @@ export function createHeightLayers({ final, size, onComposed = null }) {
     ground,
     get version() { return version; },
     get groundVersion() { return groundVersion; },
+    /** GROUND (read-only by contract): what an operator that bakes from it reads. */
+    get ground() { return ground; },
     /** Remove every stamp whose key starts with `prefix` (a system clearing its own). */
     removeStampsWithPrefix(prefix) {
       let r = null;
@@ -275,7 +279,15 @@ export function createHeightLayers({ final, size, onComposed = null }) {
     /** As setRiver, for any named operator slot (null op = remove it). */
     setOperator(name, op, dirty = null) {
       const old = operators.get(name)?.rect ?? null;
-      if (op) operators.set(name, op); else operators.delete(name);
+      if (op && op.first && !operators.has(name)) {
+        // `first`: applied before every other operator (the erosion filter
+        // shapes the ground the rivers then carve). Map order is insertion
+        // order, so rebuild it with this one at the front.
+        const rest = [...operators];
+        operators.clear();
+        operators.set(name, op);
+        for (const [k, v] of rest) operators.set(k, v);
+      } else if (op) operators.set(name, op); else operators.delete(name);
       if (dirty === false) return;
       compose(dirty ?? unionRect(old, op?.rect ?? null));
     },

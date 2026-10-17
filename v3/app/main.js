@@ -52,6 +52,7 @@ import { createFarTerrain } from "../terrain/farTerrain.js";
 import { createGroundCache } from "../terrain/groundCache.js";
 import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
 import { createFlowMap } from "../terrain/flowMap.js";
+import { createErosionOperator } from "../terrain/erosionOperator.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
 import { createProceduralLayerPanel } from "../ui/proceduralLayerPanel.js";
@@ -1180,6 +1181,8 @@ export async function startV3App(opts = {}) {
   // Flow map (wetness): recomputed ~0.7 s after the last height write, never
   // mid-stroke (every stroke frame bumps the version and pushes it back).
   let _flowHv = -1, _flowDue = 0, _flowBusy = false, _flowMs = 0;
+  // Erosion filter: re-bake ~0.6 s after GROUND stops changing (sculpt, Generate, layers).
+  let _eroGv = -1, _eroDue = 0, _eroBusy = false;
   let _legacyMeadowPainted = false;
 
   function getTerrainMeshesForWorld() {
@@ -3479,6 +3482,7 @@ export async function startV3App(opts = {}) {
   let decalUi = null;
   /** Pads (padSystem.js, games too) and Pads mode's editing half; built after the props store. */
   let padSystem = null;
+  let erosionOp = null;   // erosionOperator.js, created with the pads
   let padEditor = null;
   let padUi = null;
   /** Waterfalls (G): the runtime system (games too) and its editing half. Built after River v2. */
@@ -4934,6 +4938,14 @@ export async function startV3App(opts = {}) {
         if (_tunnelHolesDue && now >= _tunnelHolesDue && !_rendererSideWork && !tunnelSystem.dragging) {
           _tunnelHolesDue = 0;
           void ensureCpuHeightmapFromGpu().then(() => tunnelSystem.onTerrainChanged());
+        }
+      }
+      if (erosionOp?.params.enabled) {
+        const gv = heightLayers.groundVersion;
+        if (gv !== _eroGv) { _eroGv = gv; _eroDue = now + 600; }
+        if (_eroDue && now >= _eroDue && !_eroBusy && !_rendererSideWork && erosionOp.isStale()) {
+          _eroDue = 0; _eroBusy = true;
+          void erosionOp.bake().finally(() => { _eroBusy = false; });
         }
       }
       // Wanted by the paint's wetness and by the auto gully rule.
@@ -7451,6 +7463,46 @@ export async function startV3App(opts = {}) {
   propInstancer = new PropInstancer(scene, propStore);
   const gltfLoader = getSharedGltfLoader();
 
+  // ── Erosion filter (v3/terrain/erosionOperator.js) ──────────────────────────
+  // runevision's analytic erosion as the first operator of the height stack:
+  // baked on the GPU from GROUND, applied as an offset. Saved with the level.
+  erosionOp = createErosionOperator({
+    renderer, heightLayers, size: HEIGHTMAP_SIZE, worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT,
+  });
+  {
+    const ck = uiById("ck-eflt-on"), ms = uiById("lbl-eflt-ms");
+    const S = [
+      ["size", "sl-eflt-size", 1, (v) => String(v)],
+      ["strength", "sl-eflt-strength", 100, (v) => v.toFixed(2)],
+      ["gullyWeight", "sl-eflt-gully", 100, (v) => v.toFixed(2)],
+      ["detail", "sl-eflt-detail", 100, (v) => v.toFixed(2)],
+      ["octaves", "sl-eflt-octaves", 1, (v) => String(v)],
+      ["onset", "sl-eflt-onset", 100, (v) => v.toFixed(2)],
+      ["seed", "sl-eflt-seed", 1, (v) => String(v)],
+    ];
+    const syncUi = () => {
+      if (!ck) return;
+      ck.checked = !!erosionOp.params.enabled;
+      for (const [k, id, div, fmt] of S) {
+        const el = uiById(id), lbl = uiById(id.replace("sl-", "lbl-"));
+        if (el) el.value = String(Math.round(erosionOp.params[k] * div));
+        if (lbl) lbl.textContent = fmt(erosionOp.params[k]);
+      }
+    };
+    erosionOp.syncUi = syncUi;
+    // Sliders re-bake at once; a newer bake supersedes one in flight.
+    const apply = async (next) => {
+      await erosionOp.set(next);
+      syncUi();
+      if (ms) ms.textContent = erosionOp.params.enabled ? `${erosionOp.lastMs.toFixed(0)} ms` : "";
+    };
+    ck?.addEventListener("change", () => void apply({ enabled: ck.checked }));
+    for (const [k, id, div] of S) {
+      uiById(id)?.addEventListener("input", (e) => void apply({ [k]: Number(e.target.value) / div }));
+    }
+    syncUi();
+  }
+
   // ── Pads (v3/terrain/padSystem.js) ───────────────────────────────────────────
   // Flattened zones on the height stack, saved in the level and applied in games.
   // A pad attached to a prop takes the prop's footprint: its type's merged box,
@@ -9131,6 +9183,7 @@ export async function startV3App(opts = {}) {
       riversV2,
       riverNetwork: riverV3System?.exportData() ?? null,
       pads:      padSystem?.exportData() ?? null,
+      erosionFilter: erosionOp?.params.enabled ? erosionOp.exportData() : null,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
       farTerrain: farTerrain.exportData(),
@@ -9405,6 +9458,10 @@ export async function startV3App(opts = {}) {
     // Decals: absent means none (and the default textures).
     await decalSystem.importData(d.decals ?? null);
     decalEditor?.reset();
+    // The erosion filter: the first operator of the stack the load just reset.
+    // Awaited, so a game builds its physics and nav on the eroded ground.
+    await erosionOp?.importData(d.erosionFilter ?? null);
+    erosionOp?.syncUi?.();
     // Pads: stamps on the height stack the load just reset — applied here in
     // games too, so a level's pads need no game code.
     padSystem?.importData(d.pads ?? null);
@@ -12063,6 +12120,8 @@ export async function startV3App(opts = {}) {
       sculpt,
       /** The terrain paint shader's uniforms (texturing A/Bs). */
       splatOverlay,
+      /** The erosion filter operator (erosionOperator.js). */
+      get erosionOp() { return erosionOp; },
       /** Where rain gathers (flowMap.js); flowMs = the last compute's cost. */
       flowMap,
       get flowMs() { return _flowMs; },
