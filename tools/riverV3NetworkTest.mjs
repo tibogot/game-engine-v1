@@ -82,8 +82,11 @@ const conf = {
   ok("confluence: junction reported as a confluence", sol.junctions.get(J).kind === "confluence");
   ok("confluence: trunk Q = sum of tributaries", Math.abs(r3.q - (r1.q + r2.q)) < 1e-9, `${r3.q} vs ${r1.q}+${r2.q}`);
   ok("confluence: Q from width (w = 2.5·√Q): 8 m → 10.24 m³/s", Math.abs(r1.q - 10.24) < 1e-9, `${r1.q}`);
-  const v3 = r3.speed[5], expect = r3.q / (r3.width[5] * r3.depth[5] * (1 - 0.55 / 3));
-  ok("confluence: trunk speed = Q / A", Math.abs(v3 - Math.min(9, expect)) < 1e-4, `${v3} vs ${expect}`);
+  const v3 = r3.speed[5], expect = r3.q / (r3.width[5] * r3.flowDepth[5]);
+  const dN = Math.pow((r3.q * 0.04) / (r3.width[5] * Math.sqrt(Math.max(0.0006, r3.slope[5]))), 0.6);
+  ok("confluence: trunk speed = Q / (w · flow depth)", Math.abs(v3 - Math.min(9, expect)) < 1e-4, `${v3} vs ${expect}`);
+  ok("confluence: flow depth = Manning normal depth, capped by the channel",
+    Math.abs(r3.flowDepth[5] - Math.min(r3.depth[5] * (1 - 0.55 / 3), Math.max(0.03, dN))) < 1e-4);
   let down = true;
   for (const s of [r1, r2, r3]) for (let i = 1; i < s.count; i++) if (s.level[i] > s.level[i - 1] + 1e-6) down = false;
   ok("confluence: every reach runs downhill through the junction", down);
@@ -270,6 +273,35 @@ const U = { bedCurve: 0.55, freeboardN: 0.6 / MAXH, lipFrac: 0.28, slopeToUv: MA
   ok("chain: sampleUnderNormalized('riverV3') = GROUND + erosion",
     Math.abs(L.sampleUnderNormalized("riverV3", u, v) - (g[i] + offset[i])) < 1e-6,
     `${L.sampleUnderNormalized("riverV3", u, v)} vs ${g[i] + offset[i]}`);
+}
+
+// ── 14. STEP-POOLS: a steep reach becomes pools and cascades ────────────────
+{
+  const steepGround = (x, z) => 80 + z * 0.12;            // 12 % down to −z
+  const mk = (on) => solveNetwork({
+    junctions: [], params: { stepPools: on },
+    reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 120), node(4, 40), node(-4, -40), node(0, -120)] }],
+    sampleGround: steepGround,
+  }).reaches.get(1);
+  const s = mk(true), ramp = mk(false);
+  let climbs = 0, flat = 0, casc = 0;
+  for (let i = 1; i < s.count; i++) {
+    if (s.level[i] > s.level[i - 1] + 1e-6) climbs++;
+    if (Math.abs(s.level[i] - s.level[i - 1]) < 1e-6) flat++;
+    if (s.cascade[i]) casc++;
+  }
+  ok("step-pools: never climbs", climbs === 0);
+  ok("step-pools: mostly flat pools, some cascades", flat > s.count * 0.5 && casc > 3, `flat ${flat}/${s.count}, cascade ${casc}`);
+  ok("step-pools: same total drop as the ramp (ends unchanged)",
+    Math.abs(s.level[0] - ramp.level[0]) < 1e-4 && Math.abs(s.level[s.count - 1] - ramp.level[ramp.count - 1]) < 1e-4);
+  let vPool = 0, nPool = 0, vCasc = 0, nCasc = 0;
+  for (let i = 0; i < s.count; i++) { if (s.cascade[i]) { vCasc += s.speed[i]; nCasc++; } else { vPool += s.speed[i]; nPool++; } }
+  ok("step-pools: cascades run faster than pools", vCasc / nCasc > 2 * (vPool / nPool), `${(vCasc / nCasc).toFixed(2)} vs ${(vPool / nPool).toFixed(2)} m/s`);
+  // A gentle reach (1.5 %) is untouched.
+  const gentle = (x, z) => 40 + z * 0.015;
+  const g1 = solveNetwork({ junctions: [], params: { stepPools: true }, reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 120), node(0, -120)] }], sampleGround: gentle }).reaches.get(1);
+  const g0 = solveNetwork({ junctions: [], params: { stepPools: false }, reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 120), node(0, -120)] }], sampleGround: gentle }).reaches.get(1);
+  ok("step-pools: a gentle reach is untouched", g1.level.every((v, i) => v === g0.level[i]));
 }
 
 // ── 10. One reach, no junction: v3's terrain == v2's, texel for texel ──────

@@ -70,6 +70,15 @@ export function buildRiverV3Panel(app) {
       _button(sc, { title: "Follow the ground (un-pin)", onClick: () => { sys.releaseSelectedLevel(); refresh(); } });
     }
 
+    // ── Step-pools ──────────────────────────────────────────────────────────
+    const sp = _section(panel, "Step-pools", false);
+    _hint(sp, "Where a reach is steeper than the threshold, its water becomes flat pools linked by short cascades — how real steep streams spend their drop — instead of one tilted sheet. The bed steps with it.");
+    const onSp = () => { sys.refreshConform(); refresh(); };
+    _toggle(sp, p, "stepPools", { label: "Step-pools", onChange: onSp });
+    _slider(sp, p, "stepGrade", { label: "Steeper than (grade)", min: 0.01, max: 0.2, step: 0.005, onChange: onSp, hint: "0.04 = 4 %: a 1 m drop every 25 m." });
+    _slider(sp, p, "stepSpacing", { label: "Step spacing (× width)", min: 1, max: 6, step: 0.1, onChange: onSp });
+    _slider(sp, p, "cascadeFrac", { label: "Cascade share of a step", min: 0.1, max: 0.6, step: 0.01, onChange: onSp });
+
     // ── New node defaults ───────────────────────────────────────────────────
     const nn = _section(panel, "New node defaults", false);
     _slider(nn, p, "newWidth", { label: "Width (m)", min: 1, max: 200, step: 0.5 });

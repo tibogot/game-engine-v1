@@ -25,9 +25,14 @@
  *             running downhill.
  *   discharge Q is summed at a confluence and split at a split (by the
  *             out-reaches' authored widths), so a trunk carries its tributaries.
- *   velocity  v = Q / A (continuity), so speed is conserved across a junction
- *             instead of each reach inventing its own — River v2's Manning
- *             speed pinned nam-valley's whole upper river to the 9 m/s clamp.
+ *   velocity  v = Q / A with the FLOW depth from Manning (Q, width, slope):
+ *             the same water runs shallow and fast down a cascade and deep and
+ *             slow through a pool, and is conserved across a junction. (Pure
+ *             Q / channel-area made speed blind to slope — 0.8 m/s on a 12 %
+ *             reach; v2's Manning-without-Q pinned nam-valley at 9 m/s.)
+ *   steps     a reach steeper than `stepGrade` becomes STEP-POOLS: flat pools
+ *             and short cascades (applyStepPools), the way real steep streams
+ *             spend their drop, instead of one tilted sheet.
  *   terrain   riverV3Terrain.js: two channels meeting union by the LOWER bed.
  *
  * STATIONS ARE ANCHORED PER SPAN. v2 spaced stations evenly along the whole
@@ -39,6 +44,14 @@
  */
 
 export const V3_DEFAULTS = {
+  // ── Step-pools (see applyStepPools) ──────────────────────────────────────
+  stepPools: true,         // steep reaches become pools + cascades
+  stepGrade: 0.04,         // surface grade (1/1) above which a reach steps
+  stepSpacing: 2.5,        // metres between steps, × the channel width
+  cascadeFrac: 0.25,       // share of each step spent dropping (the cascade)
+  // ── Flow depth from Manning (speed follows slope) ───────────────────────
+  manningN: 0.04,
+  minSlope: 0.0006,
   stationSpacing: 2.5,     // m between stations along a span
   minGradient: 0.0008,     // AUTO levels fall at least this much per metre
   levelSmoothing: 2,       // passes over AUTO node levels
@@ -134,6 +147,81 @@ function hermite(ys, m, h, k, s) {
   const t2 = t * t, t3 = t2 * t;
   return (2 * t3 - 3 * t2 + 1) * ys[k] + (t3 - 2 * t2 + t) * hk * m[k]
     + (-2 * t3 + 3 * t2) * ys[k + 1] + (t3 - t2) * hk * m[k + 1];
+}
+
+/**
+ * STEP-POOLS. Where the water surface is steeper than `p.stepGrade` (measured
+ * over ±5 m), the stretch is retiled as steps `L = stepSpacing × width` long
+ * (4–40 m). Each step holds the level it starts at — a flat POOL — then drops
+ * over its last `cascadeFrac` (≥ 1.2 m) to the level the original profile has
+ * at the step's end: a CASCADE. Every step starts and ends on the original
+ * curve, so the stretch drops exactly as much as before, joins the rest of
+ * the river with no seam, and never climbs.
+ *
+ * Why: nam-valley's upper river fell 95 m at 10–31 % as ONE tilted sheet, at
+ * the 9 m/s clamp, unreadable and white wherever foam was on. Real steep
+ * streams spend their drop in steps (step-pool morphology: spacing ~1–4
+ * channel widths), which is also what reads at an RTS distance.
+ *
+ * @returns {Uint8Array|null} 1 on stations that lie on a cascade
+ */
+export function applyStepPools(S, count, p) {
+  if (!p.stepPools || !(p.stepGrade > 0) || count < 3) return null;
+  const arc = S.arc, lv = S.level;
+  const orig = Float64Array.from(lv);
+  const origAt = (s) => {
+    if (s <= arc[0]) return orig[0];
+    if (s >= arc[count - 1]) return orig[count - 1];
+    let lo = 0, hi = count - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (arc[m] > s) hi = m; else lo = m; }
+    const t = (s - arc[lo]) / Math.max(arc[hi] - arc[lo], 1e-9);
+    return orig[lo] + (orig[hi] - orig[lo]) * t;
+  };
+  // Grade over ±5 m.
+  const steep = new Uint8Array(count);
+  for (let i = 0, a = 0, b = 0; i < count; i++) {
+    while (a < i && arc[a] < arc[i] - 5) a++;
+    while (b < count - 1 && arc[b] < arc[i] + 5) b++;
+    const g = (orig[a] - orig[b]) / Math.max(arc[b] - arc[a], 1e-3);
+    steep[i] = g > p.stepGrade ? 1 : 0;
+  }
+  // Steep zones as arc intervals; gaps shorter than one step are bridged,
+  // zones shorter than one step are left as they are.
+  const zones = [];
+  for (let i = 0; i < count;) {
+    if (!steep[i]) { i++; continue; }
+    let j = i;
+    while (j + 1 < count && steep[j + 1]) j++;
+    zones.push([arc[i], arc[j], i]);
+    i = j + 1;
+  }
+  const stepLen = (i) => Math.min(40, Math.max(4, p.stepSpacing * S.width[i]));
+  const merged = [];
+  for (const z of zones) {
+    const last = merged[merged.length - 1];
+    if (last && z[0] - last[1] < stepLen(last[2])) last[1] = z[1];
+    else merged.push([...z]);
+  }
+  const cascade = new Uint8Array(count);
+  const ease = (t) => t * t * (3 - 2 * t);
+  for (const [s0, s1, i0] of merged) {
+    const L = stepLen(i0);
+    if (s1 - s0 < L) continue;
+    for (let i = 0; i < count; i++) {
+      const s = arc[i];
+      if (s < s0 || s > s1) continue;
+      const k = Math.floor((s - s0) / L);
+      const t0 = s0 + k * L, t1 = Math.min(t0 + L, s1);
+      const len = t1 - t0;
+      if (len <= 1e-6) continue;
+      const c = Math.min(len, Math.max(1.2, p.cascadeFrac * len));
+      const top = origAt(t0), bot = origAt(t1);
+      const local = s - t0, holdEnd = len - c;
+      if (local <= holdEnd) lv[i] = top;
+      else { lv[i] = top + (bot - top) * ease((local - holdEnd) / c); cascade[i] = 1; }
+    }
+  }
+  return cascade;
 }
 
 /** Lowest ground across the channel at (x, z) — River v2's corridor minimum. */
@@ -337,7 +425,16 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
     const lv = nodeLevels.get(r.id);
     const mL = pchipSlopes(lv, G0.h), mW = pchipSlopes(G0.width, G0.h);
     const mD = pchipSlopes(G0.depth, G0.h), mB = pchipSlopes(G0.bank, G0.h);
-    const per = G0.spans.map((sp) => Math.max(1, Math.round(sp.len / spacing)));
+    // A span steep enough to step gets fine stations: a cascade is a few metres
+    // long, and at 2.5 m spacing it was one or two samples — smeared into a
+    // ramp by the ribbon and the terrain. Decided from the node levels, before
+    // sampling, so it stays a per-span (drag-local) choice.
+    const fine = Math.min(spacing, 0.8);
+    const per = G0.spans.map((sp, k) => {
+      const grade = (lv[k] - lv[k + 1]) / Math.max(sp.len, 1e-6);
+      const sp1 = p.stepPools && grade > p.stepGrade * 0.75 ? fine : spacing;
+      return Math.max(1, Math.round(sp.len / sp1));
+    });
     const count = per.reduce((a, b) => a + b, 0) + 1;
     const A = (len) => new Float32Array(len);
     const S = {
@@ -370,6 +467,10 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
     put(n - 2, last.len, arc0, last.xs[SPAN_SUB], last.zs[SPAN_SUB],
       last.xs[SPAN_SUB] - last.xs[SPAN_SUB - 1], last.zs[SPAN_SUB] - last.zs[SPAN_SUB - 1]);
 
+    // Steep stretches become pools and cascades (before the backwater, which
+    // then holds each junction flat over the result).
+    const cascade = applyStepPools(S, count, p);
+
     // BACKWATER: near a junction the surface blends to the junction's level and
     // holds it over the last `Lb` metres (and the first, for a reach leaving a
     // junction) — real confluences do this, the trunk's level backing up the
@@ -393,20 +494,33 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
       }
     }
 
-    // Flow: continuity with this reach's discharge.
+    // Flow. The FLOW depth is Manning's normal depth for this discharge on this
+    // slope (wide channel: d = (Q·n / (w·√S))^(3/5)), capped by the channel's
+    // own mean depth: a cascade runs shallow and fast, a pool (S → minSlope)
+    // fills its channel and runs slow. v = Q / (w · d) — continuity, so the
+    // speed still adds up across a junction.
     const q = reachQ.get(r.id);
     const shape = 1 - p.bedCurve / 3;       // mean depth / centre depth of the section
     const f0 = p.froudeStart, f1 = Math.max(f0 + 0.01, p.froudeFull);
+    const nM = Math.max(0.005, p.manningN), sMin = Math.max(1e-5, p.minSlope);
+    S.flowDepth = new Float32Array(count);
     for (let s = 0; s < count; s++) {
       const a = Math.max(0, s - 1), b = Math.min(count - 1, s + 1);
       const fall = (S.level[a] - S.level[b]) / Math.max(S.arc[b] - S.arc[a], 1e-4);
       S.slope[s] = fall;
       if (fall < -1e-4) S.uphill[s] = 1;
-      const v = q / Math.max(0.05, S.width[s] * S.depth[s] * shape);
-      S.speed[s] = Math.min(p.maxSpeed, Math.max(p.minSpeed, v));
-      S.froude[s] = S.speed[s] / Math.sqrt(G * Math.max(S.depth[s], 1e-3));
+      const w = Math.max(0.5, S.width[s]);
+      const dMean = Math.max(0.05, S.depth[s] * shape);
+      const dN = Math.pow((q * nM) / (w * Math.sqrt(Math.max(sMin, fall))), 0.6);
+      const d = Math.min(dMean, Math.max(0.03, dN));
+      S.flowDepth[s] = d;
+      S.speed[s] = Math.min(p.maxSpeed, Math.max(p.minSpeed, q / (w * d)));
+      S.froude[s] = S.speed[s] / Math.sqrt(G * d);
       S.turb[s] = Math.min(1, Math.max(0, (S.froude[s] - f0) / (f1 - f0)));
+      // A cascade breaks whatever the numbers say about its few metres.
+      if (cascade?.[s]) S.turb[s] = Math.max(S.turb[s], 0.85);
     }
+    S.cascade = cascade ?? new Uint8Array(count);
     const nodeArc = new Float64Array(n);
     for (let k = 1; k < n; k++) nodeArc[k] = nodeArc[k - 1] + G0.h[k - 1];
     out.set(r.id, {
