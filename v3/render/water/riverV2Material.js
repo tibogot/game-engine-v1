@@ -235,6 +235,12 @@ export function createRiverMaterial({
    *  meeting at a junction fade their waves out there, so the two surfaces
    *  are at one height on the seam. null = 1. */
   waveScaleNode = null,
+  /** River v3: a float node, 0 off a cascade, else how far down it (0 brink →
+   *  1 toe). A cascade face gets a glassy tongue over the brink (flattened
+   *  normals) and long streaks down the rest, faster than the pool's ripples —
+   *  the slope-only cascade layer of R.A.M / Waterways / Trümpler's river.
+   *  Pair with a `basis` from the surface's real normal. null = no cascades. */
+  cascadeNode = null,
   grabFree = false, groundYNode = null,
 } = {}) {
   const p = { ...RIVER_MATERIAL_DEFAULTS, ...params };
@@ -481,6 +487,25 @@ export function createRiverMaterial({
     // Tangent frame is (along flow, across, up) — the same basis tsn lives in.
     const waveN = vec3(hW.sub(hA).div(EPS), hW.sub(hB).div(EPS), float(1)).normalize();
     const tsn = blendRNM(waveN, tsnTex).toVar();
+
+    // ── 1b. Cascade faces (River v3; see `cascadeNode`) ─────────────────────
+    if (cascadeNode) {
+      const ph = float(cascadeNode).toVar();
+      const onFace = step(0.0005, ph);
+      const steep = basis ? float(1).sub(basis.n.y) : float(0.2);
+      const m = onFace.mul(smoothstep(0.01, 0.08, steep)).toVar();
+      // Streaks: the same normal map stretched ~8× along the flow, scrolled
+      // with the two advection phases.
+      const sUV = (tr, off) => vec2(arc.sub(tr).mul(0.16), across.mul(1.3)).mul(u.normalTiling).add(off);
+      const sA = texture(normalMap, sUV(travel1, vec2(0.21, 0.47))).rgb.mul(2).sub(1);
+      const sB = texture(normalMap, sUV(travel2, vec2(0.71, 0.97))).rgb.mul(2).sub(1);
+      const sN = mix(sA, sB, blend);
+      const streakN = vec3(sN.x.mul(0.3), sN.y.mul(u.normalStrength).mul(1.8), sN.z).normalize();
+      // Glassy tongue: the first ~third of the face, still unbroken.
+      const glass = onFace.mul(float(1).sub(smoothstep(0.08, 0.45, ph))).toVar();
+      tsn.assign(mix(tsn, streakN, m.mul(float(1).sub(glass))).normalize());
+      tsn.assign(mix(tsn, vec3(0, 0, 1), glass.mul(0.75)).normalize());
+    }
 
     // ── 2. Tangent frame from the flow, not from the world ─────────────────
     // T runs downstream, so wave crests sit ACROSS the current the way they do

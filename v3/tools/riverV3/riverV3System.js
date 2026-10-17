@@ -26,13 +26,13 @@
 
 import * as THREE from "three";
 import { MeshBasicNodeMaterial } from "three/webgpu";
-import { attribute, texture, positionWorld, abs, vec2 } from "three/tsl";
+import { attribute, texture, positionWorld, abs, vec2, vec3, normalize, dot, cross } from "three/tsl";
 import { WORLD_SIZE, MAX_HEIGHT, HEIGHTMAP_SIZE } from "../../terrain/heightmapTexture.js";
 import { createRiverMaterial } from "../../render/water/riverV2Material.js";
 import { riverWaterParams } from "../../app/state/riverV2State.js";
 import { buildFlowIndex, sampleFlow, sampleFlowAt } from "../riverV2Channel.js";
 import { shareInstancePipeline } from "../../render/instancePipeline.js";
-import { solveNetwork } from "./riverV3Network.js";
+import { solveNetwork, crestShift } from "./riverV3Network.js";
 import { packReaches, buildRiverV3TerrainOp, snapshotReaches, networkDirtyRect } from "./riverV3Terrain.js";
 
 const LAYER = "riverV3";
@@ -108,7 +108,7 @@ export class RiverV3System {
     this._ownerTex.minFilter = this._ownerTex.magFilter = THREE.NearestFilter;
     this._ownerTex.flipY = false;
     this._ownerTex.needsUpdate = true;
-    this._water = createRiverMaterial({ normalMap: waterNormalMap, discardNode: this._ownerDiscard(), waveScaleNode: attribute("aWaveFade", "float") });
+    this._water = createRiverMaterial({ normalMap: waterNormalMap, ...this._v3MaterialOpts() });
     this._grabFree = false;
 
     this._geoNode = new THREE.SphereGeometry(1, 12, 8);
@@ -265,6 +265,33 @@ export class RiverV3System {
   // Water surface (River v2's shader, one ribbon per reach)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  /**
+   * What River v3 adds to River v2's shader: the junction discard, the wave
+   * fade, and cascades — the surface's frame from its real normal (aNrm; flat
+   * water gets world up, so nothing changes there) and the cascade layer.
+   */
+  _v3MaterialOpts() {
+    const n = normalize(attribute("aNrm", "vec3"));
+    const f = attribute("aFlow", "vec4");
+    const fd = vec3(f.x, 0, f.y);
+    const t = normalize(fd.sub(n.mul(dot(fd, n))));
+    return {
+      discardNode: this._ownerDiscard(),
+      waveScaleNode: attribute("aWaveFade", "float"),
+      basis: { n, t, b: cross(t, n) },
+      cascadeNode: attribute("aCasc", "float"),
+    };
+  }
+
+  /** Index i of the station span [i, i+1] holding arc `a` (clamped). */
+  _stationAt(s, a) {
+    let lo = 0, hi = s.count - 1;
+    if (a <= s.arc[0]) return 0;
+    if (a >= s.arc[hi]) return hi - 1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (s.arc[m] > a) hi = m; else lo = m; }
+    return lo;
+  }
+
   _buildRibbon(reach, s) {
     const old = this._meshes.get(reach.id);
     if (old?.mesh) { this.group.remove(old.mesh); old.mesh.geometry.dispose(); }
@@ -283,11 +310,81 @@ export class RiverV3System {
     const extS = reach.from != null ? runOn(0) : 0;
     const extE = reach.to != null ? runOn(s.count - 1) : 0;
     const len = s.total + extS + extE;
-    const rows = Math.max(2, Math.min(4096, Math.round(len / step) + 1));
-    const vCount = rows * (cols + 1);
+    // STEPS (riverV3Network applyStepPools). A cascade is a metre or two long
+    // and its crest is tilted / arched / notched across the channel, so the
+    // surface there is a function of (arc, across): rows every 0.3 m through
+    // stepped stretches (one 0.8 m row put a whole drop on two triangles) and
+    // more columns, each vertex taking the level of its crest-shifted arc.
+    const stepped = !!s.crA;
+    const colsN = stepped ? Math.max(cols, 18) : cols;
+    const rowArcs = [];
+    {
+      const zone = (a) => {
+        if (!stepped) return false;
+        const i = Math.min(s.count - 1, Math.max(0, this._stationAt(s, a)));
+        return s.stepZone[i] === 1 || s.cascade[i] === 1;
+      };
+      let a = -extS;
+      const end = s.total + extE;
+      while (a < end - 1e-6 && rowArcs.length < 8191) { rowArcs.push(a); a += zone(a) ? Math.min(step, 0.3) : step; }
+      rowArcs.push(end);
+    }
+    if (rowArcs.length < 2) rowArcs.push(len - extS);
+    const rows = rowArcs.length;
+    // Surface length along the centreline (U runs in it, so the texture is not
+    // smeared down a cascade face: horizontal arc there is a fraction of it).
+    const arc3 = new Float64Array(s.count);
+    for (let i = 1; i < s.count; i++) {
+      const da = s.arc[i] - s.arc[i - 1];
+      arc3[i] = arc3[i - 1] + Math.hypot(da, s.level[i] - s.level[i - 1]);
+    }
+    const at = (arr, a) => {
+      if (a <= 0) return arr[0];
+      if (a >= s.total) return arr[s.count - 1];
+      const i = this._stationAt(s, a), a0 = s.arc[i], a1 = s.arc[i + 1];
+      return arr[i] + (arr[i + 1] - arr[i]) * (a1 > a0 ? (a - a0) / (a1 - a0) : 0);
+    };
+    // The crest-shifted arc a vertex reads its level (and flow) at.
+    const effArc = (a, across, halfW) => {
+      if (!stepped) return a;
+      const sh = crestShift(at(s.crA, a), at(s.crB, a), at(s.crN, a), at(s.crP, a), across / Math.max(halfW, 0.25));
+      return Math.min(s.total, Math.max(0, a + sh));
+    };
+    // AT THE BANKS a drop is as soft as the terrain's. The carve is blurred
+    // over ±(bankSmooth + 1) texels (riverV3Terrain apply), so beside a cascade
+    // the bank ramps down over a few metres while a sharp water drop fell in
+    // one: the shoreline jogged ~1 m at every step — out over the bank, or in
+    // once the bank was held up — a sawtooth along both edges (the user,
+    // 2026-10-17). So the level is tent-smoothed over the same width and the
+    // surface blends to it over the outer 40 % (crestShift's taper band): the
+    // middle still falls sharply, the edges ramp with the bank.
+    let lvSm = s.level;
+    if (stepped) {
+      const R = (Math.max(0, Math.round(p.bankSmooth ?? 2)) + 1) * (WORLD_SIZE / HEIGHTMAP_SIZE);
+      lvSm = new Float64Array(s.count);
+      for (let i = 0, j0 = 0; i < s.count; i++) {
+        while (s.arc[j0] < s.arc[i] - R) j0++;
+        let sw = 0, sv = 0;
+        for (let j = j0; j < s.count && s.arc[j] <= s.arc[i] + R; j++) {
+          const ds = (s.arc[Math.min(s.count - 1, j + 1)] - s.arc[Math.max(0, j - 1)]) * 0.5;
+          const w = (1 - Math.abs(s.arc[j] - s.arc[i]) / R) * ds;
+          sw += w; sv += w * s.level[j];
+        }
+        lvSm[i] = sw > 0 ? sv / sw : s.level[i];
+      }
+    }
+    const surfY = (a, across, halfW) => {
+      const e = effArc(a, across, halfW);
+      if (!stepped) return at(s.level, e);
+      const q = Math.min(1, Math.max(0, (Math.abs(across) / Math.max(halfW, 0.25) - 0.6) / 0.4));
+      const w = q * q * (3 - 2 * q);
+      return at(s.level, e) + (at(lvSm, e) - at(s.level, e)) * w;
+    };
+    const vCount = rows * (colsN + 1);
     const pos = new Float32Array(vCount * 3), uvs = new Float32Array(vCount * 2);
     const flow = new Float32Array(vCount * 4), wave = new Float32Array(vCount * 2);
-    const fade = new Float32Array(vCount);
+    const fade = new Float32Array(vCount), nrm = new Float32Array(vCount * 3);
+    const casc = new Float32Array(vCount);
     // Waves fade to nothing over the last WAVE_FADE m before a junction end and
     // stay flat on the run-on: the neighbour reach's waves have another phase,
     // and a few cm of height step on the seam showed as slivers of riverbed.
@@ -297,7 +394,7 @@ export class RiverV3System {
     );
     let si = 0;
     for (let r = 0; r < rows; r++) {
-      const arc = -extS + (r / (rows - 1)) * len;
+      const arc = rowArcs[r];
       const arcC = Math.min(s.total, Math.max(0, arc));
       while (si < s.count - 2 && s.arc[si + 1] < arcC) si++;
       const a0 = s.arc[si], a1 = s.arc[si + 1];
@@ -310,22 +407,44 @@ export class RiverV3System {
       const px = -tz, pz = tx;
       const halfW = lerp(s.width) * 0.5;
       const span = halfW + Math.min(lerp(s.bank) * 0.5, RIBBON_OVERHANG);
-      const y = lerp(s.level) - drop;
-      const spd = lerp(s.speed), tb = lerp(s.turb), dp = lerp(s.depth);
-      for (let c = 0; c <= cols; c++) {
-        const across = (c / cols - 0.5) * 2 * span;
-        const v = r * (cols + 1) + c;
+      const dp = lerp(s.depth);
+      for (let c = 0; c <= colsN; c++) {
+        const across = (c / colsN - 0.5) * 2 * span;
+        const v = r * (colsN + 1) + c;
+        // Level, flow and surface length at the crest-shifted arc; beyond an
+        // end (run-on) straight on from the end.
+        const e = effArc(arcC, across, halfW);
+        // In a stepped stretch the overhang (past the channel edge, over the
+        // bank) dives under the bank: across a drop the terrain's 1 m texels
+        // and these triangles approximate the step differently, and the
+        // upper pool's overhang stood over the bank in dark wedges at every
+        // crest end. The shoreline stays where the bank meets the level.
+        const dive = stepped ? Math.max(0, Math.abs(across) - halfW) : 0;
+        const y = surfY(arcC, across, halfW) - drop - dive;
         pos[v * 3] = cx + px * across; pos[v * 3 + 1] = y; pos[v * 3 + 2] = cz + pz * across;
-        uvs[v * 2] = arc; uvs[v * 2 + 1] = across;
-        flow[v * 4] = tx; flow[v * 4 + 1] = tz; flow[v * 4 + 2] = spd; flow[v * 4 + 3] = halfW;
-        wave[v * 2] = tb; wave[v * 2 + 1] = dp;
+        uvs[v * 2] = at(arc3, e) + (arc - e); uvs[v * 2 + 1] = across;
+        flow[v * 4] = tx; flow[v * 4 + 1] = tz; flow[v * 4 + 2] = at(s.speed, e); flow[v * 4 + 3] = halfW;
+        wave[v * 2] = at(s.turb, e); wave[v * 2 + 1] = dp;
         fade[v] = fadeAt(arc);
+        casc[v] = s.cascade[this._stationAt(s, e)] ? Math.max(0.001, at(s.cascPhase, e)) : 0;
+        // The surface's own normal (the shader lights a cascade face as tilted,
+        // not as flat water lying on it): slope along and across by differences.
+        let nx = 0, ny = 1, nz = 0;
+        if (stepped) {
+          const H = 0.3;
+          const gL = (surfY(Math.min(s.total, arcC + H), across, halfW)
+            - surfY(Math.max(0, arcC - H), across, halfW)) / (2 * H);
+          const gA = (surfY(arcC, across + H, halfW) - surfY(arcC, across - H, halfW)) / (2 * H);
+          nx = -gL * tx - gA * px; nz = -gL * tz - gA * pz;
+          const nl = Math.hypot(nx, 1, nz); nx /= nl; ny = 1 / nl; nz /= nl;
+        }
+        nrm[v * 3] = nx; nrm[v * 3 + 1] = ny; nrm[v * 3 + 2] = nz;
       }
     }
-    const idx = new Uint32Array((rows - 1) * cols * 6);
+    const idx = new Uint32Array((rows - 1) * colsN * 6);
     let o = 0;
-    for (let r = 0; r < rows - 1; r++) for (let c = 0; c < cols; c++) {
-      const a = r * (cols + 1) + c, b = a + 1, d = a + cols + 1, e = d + 1;
+    for (let r = 0; r < rows - 1; r++) for (let c = 0; c < colsN; c++) {
+      const a = r * (colsN + 1) + c, b = a + 1, d = a + colsN + 1, e = d + 1;
       idx[o++] = a; idx[o++] = b; idx[o++] = d; idx[o++] = b; idx[o++] = e; idx[o++] = d;
     }
     const g = new THREE.BufferGeometry();
@@ -334,6 +453,8 @@ export class RiverV3System {
     g.setAttribute("aFlow", new THREE.BufferAttribute(flow, 4));
     g.setAttribute("aWave", new THREE.BufferAttribute(wave, 2));
     g.setAttribute("aWaveFade", new THREE.BufferAttribute(fade, 1));
+    g.setAttribute("aNrm", new THREE.BufferAttribute(nrm, 3));
+    g.setAttribute("aCasc", new THREE.BufferAttribute(casc, 1));
     // Which reach this surface is, for the junction ownership test (1-based,
     // as the owner map stores it).
     const ri = this._flowIds.indexOf(reach.id) + 1;
@@ -346,7 +467,7 @@ export class RiverV3System {
     mesh.renderOrder = 10;
     mesh.userData.viewCulled = true;          // waterSurfaceMap restores the full range
     this.group.add(mesh);
-    this._meshes.set(reach.id, { mesh, cullChunks: this._chunks(pos, rows, cols) });
+    this._meshes.set(reach.id, { mesh, cullChunks: this._chunks(pos, rows, colsN) });
     this._syncAddPass(mesh);
   }
 
@@ -614,7 +735,7 @@ export class RiverV3System {
     if (on === this._grabFree) return;
     this._grabFree = on;
     const old = this._water;
-    this._water = createRiverMaterial({ normalMap: this._waterNormalMap, grabFree: on, groundYNode: on ? groundYNode : null, discardNode: this._ownerDiscard(), waveScaleNode: attribute("aWaveFade", "float") });
+    this._water = createRiverMaterial({ normalMap: this._waterNormalMap, grabFree: on, groundYNode: on ? groundYNode : null, ...this._v3MaterialOpts() });
     this.syncMaterial();
     if (this._lastSun) this._water.setSunDir(this._lastSun);
     if (this._lastSky) this._water.setSkyColors(...this._lastSky);

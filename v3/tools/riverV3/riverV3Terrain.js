@@ -69,6 +69,13 @@ export function packReaches(list, { worldSize, maxHeight }) {
     // may own the pixels just beyond it. Without that, where a river bends at
     // a junction the two square ribbon ends leave a thin wedge nobody draws.
     ext: new Uint8Array(n),
+    // STEPS (riverV3Network applyStepPools): arc (m) and each station's crest
+    // shape (m) — the bed follows the crest-shifted profile, exactly as the
+    // water surface does — plus the plunge-pool scour (normalized height), and
+    // where the reach's stations start / how many, for the shifted lookup.
+    arc: new Float64Array(n), crA: new Float32Array(n), crB: new Float32Array(n),
+    crN: new Float32Array(n), crP: new Float32Array(n), scour: new Float64Array(n), zone: new Uint8Array(n),
+    base: new Int32Array(n), cnt: new Int32Array(n), maxShift: 0,
     layout: [],
   };
   let o = 0;
@@ -85,7 +92,15 @@ export function packReaches(list, { worldSize, maxHeight }) {
       }
       nx = s.tanX[bi]; nz = s.tanZ[bi];
     }
+    const base = o;
     for (let i = 0; i < s.count; i++, o++) {
+      P.arc[o] = s.arc[i]; P.base[o] = base; P.cnt[o] = s.count;
+      if (s.crA) {
+        P.crA[o] = s.crA[i]; P.crB[o] = s.crB[i]; P.crN[o] = s.crN[i]; P.crP[o] = s.crP[i];
+        P.scour[o] = (s.scour?.[i] ?? 0) / maxHeight;
+        P.zone[o] = s.stepZone?.[i] ?? 0;
+        P.maxShift = Math.max(P.maxShift, (Math.abs(s.crA[i]) + Math.abs(s.crB[i]) + s.crN[i]) / worldSize);
+      }
       if (r.mouth) { P.mnx[o] = nx; P.mnz[o] = nz; }
       if ((i === 0 && r.extStart) || (i === s.count - 1 && r.extEnd)) P.ext[o] = 1;
       P.u[o] = s.x[i] / worldSize + 0.5;
@@ -197,13 +212,36 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
   // The cross-section of segment k at parameter t, distance `dist` (UV), over
   // ground `natural`. Returns NaN where it has eased back to natural ground.
   let secIn = false, secLevel = 0;
-  function section(natural, k, t, dist) {
+  // Level / depth+scour at the crest-shifted arc of a stepped stretch (side =
+  // signed distance across, UV). Elsewhere: the segment's own, as River v2.
+  let shLevel = 0, shDepth = 0;
+  function shifted(k, t, side, halfW) {
     const lerp = (a) => a[k] + (a[k + 1] - a[k]) * t;
-    const level = lerp(P.level), halfW = lerp(P.halfW);
+    if (!P.zone[k] && !P.zone[k + 1]) {
+      shLevel = lerp(P.level); shDepth = lerp(P.depth) + lerp(P.scour);
+      return;
+    }
+    const a = side / Math.max(halfW, 1e-9);
+    const ac = a < -1 ? -1 : a > 1 ? 1 : a, d = (ac - lerp(P.crP)) / 0.22;
+    const te = Math.min(1, Math.max(0, (Math.abs(ac) - 0.6) / 0.4));   // crestShift's taper
+    const sh = (lerp(P.crA) * ac + lerp(P.crB) * (1 - ac * ac) + lerp(P.crN) * Math.exp(-d * d)) * (1 - te * te * (3 - 2 * te));
+    const b0 = P.base[k], b1 = b0 + P.cnt[k] - 1;
+    const s = Math.min(P.arc[b1], Math.max(P.arc[b0], lerp(P.arc) + sh));
+    let lo = b0, hi = b1;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (P.arc[m] > s) hi = m; else lo = m; }
+    const f = (s - P.arc[lo]) / Math.max(P.arc[hi] - P.arc[lo], 1e-9);
+    shLevel = P.level[lo] + (P.level[hi] - P.level[lo]) * f;
+    shDepth = P.depth[lo] + (P.depth[hi] - P.depth[lo]) * f + P.scour[lo] + (P.scour[hi] - P.scour[lo]) * f;
+  }
+  function section(natural, k, t, dist, side = 0) {
+    const lerp = (a) => a[k] + (a[k + 1] - a[k]) * t;
+    const halfW = lerp(P.halfW);
+    shifted(k, t, side, halfW);
+    const level = shLevel;
     secLevel = level;
     if (dist <= halfW) {
       secIn = true;
-      const depth = lerp(P.depth);
+      const depth = shDepth;
       const uc = Math.min(1, dist / Math.max(halfW, 1e-9)), u2 = uc * uc, u4 = u2 * u2;
       const flat = 1 - u4 * u4, para = 1 - u2;
       return level - depth * (flat + (para - flat) * u.bedCurve);
@@ -234,6 +272,7 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
   // trunk's channel (measured +0.44 m in the test before this was 4).
   const K = 4;
   const bd = new Float64Array(K), bk = new Int32Array(K), bt = new Float64Array(K), br = new Int32Array(K);
+  const bs = new Float64Array(K);   // signed distance across (UV), + = the ribbon's +across side
 
   // OWNERSHIP (op.owner, set by the caller): per texel, 1 + the index of the
   // reach whose segment is nearest, 0 where no river reaches. A reach's water
@@ -266,13 +305,14 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
     if (c.x1 < c.x0 || c.z1 < c.z0) return;
     const R = { x0: Math.max(0, c.x0 - B), z0: Math.max(0, c.z0 - B), x1: Math.min(size - 1, c.x1 + B), z1: Math.min(size - 1, c.z1 + B) };
     const W = R.x1 - R.x0 + 1, H = R.z1 - R.z0 + 1;
-    const nat = scratch(0, size * size), shaped = scratch(1, size * size);
+    const nat = scratch(0, size * size), shaped = scratch(1, size * size), floor = scratch(4, size * size);
     for (let z = R.z0; z <= R.z1; z++) for (let x = R.x0; x <= R.x1; x++) {
       const i = z * size + x;
       const inCore = x >= r.x0 && x <= r.x1 && z >= r.z0 && z <= r.z1;
       nat[i] = shaped[i] = inCore ? out[i] : ground[i];
+      floor[i] = -FAR;
     }
-    carve(shaped, nat, R, owner);
+    carve(shaped, nat, R, owner, floor);
     // Delta, blurred: two separable box passes of radius 1 → a 5-texel tent
     // per pass pair; repeated B/… times for wider smoothing.
     const d = scratch(2, W * H), t = scratch(3, W * H);
@@ -294,13 +334,18 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
       }
     };
     for (let pass = 0; pass < B; pass++) { box(d, t, true); box(t, d, false); }
+    // …but a bank never blurs down below the water beside it. Across a step
+    // the blur pulled the bank just above the drop toward the lower pool, and
+    // the upper pool's water stood over it in thin blades at every crest end
+    // (seen on nam-valley, 2026-10-17; worse with tilted crests).
     for (let z = c.z0; z <= c.z1; z++) for (let x = c.x0; x <= c.x1; x++) {
-      out[z * size + x] += d[(z - R.z0) * W + (x - R.x0)];
+      const i = z * size + x;
+      out[i] = Math.max(out[i] + d[(z - R.z0) * W + (x - R.x0)], floor[i]);
     }
   }
 
   /** The exact carve into `dst` inside `r`, reading the natural height from `nat`. */
-  function carve(dst, nat, r, owner) {
+  function carve(dst, nat, r, owner, floor = null) {
     const out = dst;
     const rx0 = Math.max(r.x0, carveRect.x0), rz0 = Math.max(r.z0, carveRect.z0);
     const rx1 = Math.min(r.x1, carveRect.x1), rz1 = Math.min(r.z1, carveRect.z1);
@@ -335,7 +380,7 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
           for (let q = 0; q < nb; q++) if (br[q] === rk) { slot = q; break; }
           if (slot >= 0) {
             if (d >= bd[slot]) continue;
-            for (let q = slot; q < nb - 1; q++) { bd[q] = bd[q + 1]; bk[q] = bk[q + 1]; bt[q] = bt[q + 1]; br[q] = br[q + 1]; }
+            for (let q = slot; q < nb - 1; q++) { bd[q] = bd[q + 1]; bk[q] = bk[q + 1]; bt[q] = bt[q + 1]; br[q] = br[q + 1]; bs[q] = bs[q + 1]; }
             nb--;
           } else if (!many && nb) {
             continue;                  // single-reach cell: only ever one entry
@@ -343,9 +388,10 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
           if (nb === K && d >= bd[K - 1]) continue;
           let at = Math.min(nb, K - 1);
           while (at > 0 && bd[at - 1] > d) {
-            bd[at] = bd[at - 1]; bk[at] = bk[at - 1]; bt[at] = bt[at - 1]; br[at] = br[at - 1]; at--;
+            bd[at] = bd[at - 1]; bk[at] = bk[at - 1]; bt[at] = bt[at - 1]; br[at] = br[at - 1]; bs[at] = bs[at - 1]; at--;
           }
           bd[at] = d; bk[at] = k; bt[at] = t; br[at] = rk;
+          bs[at] = (abx * dz - abz * dx) >= 0 ? Math.sqrt(d) : -Math.sqrt(d);
           if (nb < K) nb++;
         }
         if (!nb) continue;
@@ -369,7 +415,7 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
         let bankHi = NaN, bankLevel = 0, nBanks = 0;
         for (let q = 0; q < nb; q++) {
           const kq = bk[q];
-          const hq = section(natural, kq, bt[q], Math.sqrt(bd[q]));
+          const hq = section(natural, kq, bt[q], Math.sqrt(bd[q]), bs[q]);
           if (secIn) {
             const firstSeg = kq === 0 || P.last[kq - 1] === 1, lastSeg = P.last[kq + 1] === 1;
             // Past an end the surface only exists if that end runs on (a
@@ -401,7 +447,10 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
         if (nBanks > 1) bank = Math.max(bank, Math.min(bankHi, bankLevel + u.freeboardN * 0.25));
         if (owner) owner[i] = P.reach[own] + 1;
         if (bed !== Infinity) out[i] = bed;
-        else if (!Number.isNaN(bank)) out[i] = bank;
+        else if (!Number.isNaN(bank)) {
+          out[i] = bank;
+          if (floor) floor[i] = Math.min(bank, bankLevel + u.freeboardN * 0.5);
+        }
       }
     }
   }
@@ -415,8 +464,9 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
  * on one reach never marks another dirty (v2 compared by path offset, and one
  * reach gaining a station shifted every later one).
  */
-/** Floats per station in a snapshot: u, v, level, halfW, depth, bank, mouth u/v. */
-const F = 8;
+/** Floats per station in a snapshot: u, v, level, halfW, depth, bank, mouth
+ *  u/v, crest shape (one hash of the four) and scour. */
+const F = 10;
 
 export function snapshotReaches(packed, maxReach, paramsKey) {
   const byId = new Map();
@@ -424,11 +474,13 @@ export function snapshotReaches(packed, maxReach, paramsKey) {
     const d = new Float64Array(e.count * F);
     for (let i = 0; i < e.count; i++) {
       const j = e.offset + i;
-      d.set([packed.u[j], packed.v[j], packed.level[j], packed.halfW[j], packed.depth[j], packed.bank[j], packed.mu[j], packed.mv[j]], i * F);
+      d.set([packed.u[j], packed.v[j], packed.level[j], packed.halfW[j], packed.depth[j], packed.bank[j], packed.mu[j], packed.mv[j],
+        packed.crA[j] + 3.1 * packed.crB[j] + 7.3 * packed.crN[j] + 11.7 * packed.crP[j], packed.scour[j]], i * F);
     }
     byId.set(e.id, d);
   }
-  return { byId, maxReach, paramsKey };
+  // A crest-shifted texel reads stations up to maxShift along the reach.
+  return { byId, maxReach, paramsKey, pad: packed.maxShift ?? 0 };
 }
 
 /**
@@ -460,7 +512,7 @@ export function networkDirtyRect(prev, next, size) {
   for (const [id, b] of next.byId) if (!prev.byId.has(id)) all(b);
   if (!r) return false;
   // + 4 texels: the smoothed carve (u.smooth ≤ 4) spills that far.
-  const m = next.maxReach * size + 6;
+  const m = (next.maxReach + Math.max(prev.pad ?? 0, next.pad ?? 0)) * size + 6;
   return {
     x0: Math.max(0, Math.floor(r.x0 - m)), z0: Math.max(0, Math.floor(r.z0 - m)),
     x1: Math.min(size - 1, Math.ceil(r.x1 + m)), z1: Math.min(size - 1, Math.ceil(r.z1 + m)),

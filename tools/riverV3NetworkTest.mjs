@@ -339,6 +339,46 @@ const U = { bedCurve: 0.55, freeboardN: 0.6 / MAXH, lipFrac: 0.28, slopeToUv: MA
   ok("smooth: partial recompose == full", worst * MAXH < 1e-4, `${(worst * MAXH).toFixed(5)} m`);
 }
 
+// ── 16. NOT STAIRS: irregular steps, shaped crests, plunge pools ────────────
+{
+  const steepGround = (x, z) => 80 + z * 0.12;
+  const steepNet = { junctions: [], reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 120), node(4, 40), node(-4, -40), node(0, -120)] }] };
+  const mk = (params, net = steepNet) => solveNetwork({ ...net, params: { stepPools: true, ...params }, sampleGround: steepGround }).reaches.get(1);
+  const s = mk({});
+  const starts = [];
+  for (let i = 1; i < s.count; i++) if (s.cascade[i] && !s.cascade[i - 1]) starts.push(s.arc[i]);
+  const gaps = starts.slice(1).map((a, i) => a - starts[i]);
+  const mean = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+  const cv = Math.sqrt(gaps.reduce((a, b) => a + (b - mean) ** 2, 0) / gaps.length) / mean;
+  ok("steps: spacing is irregular (not stairs)", gaps.length >= 3 && cv > 0.15, `cv ${cv.toFixed(2)} over ${gaps.length} gaps`);
+  const again = mk({});
+  ok("steps: deterministic (same network → same steps)", s.level.every((v, i) => v === again.level[i]));
+  const flat0 = mk({ crestShape: 0 });
+  ok("crest shape 0: every crest straight across", flat0.crA.every((v) => v === 0) && flat0.crN.every((v) => v === 0) && flat0.stepZone.some((v) => v === 1));
+  ok("crest shape 1: crests are tilted / notched", s.crA.some((v) => v !== 0) && s.crN.some((v) => v > 0));
+  const { crestShift } = await import("../v3/tools/riverV3/riverV3Network.js");
+  ok("crest shift: square to both banks (tapered to 0 at |a| = 1)",
+    crestShift(2, 1, 1.5, 0.9, 1) === 0 && crestShift(2, 1, 1.5, -0.9, -1) === 0 && crestShift(2, 1, 1.5, 0, 0.2) !== 0);
+  ok("plunge pools: the bed is scoured below the drops", s.scour.some((v) => v > 0.2), `max ${Math.max(...s.scour).toFixed(2)} m`);
+  // Partial recompose == full on a STEPPED reach (the dirty rect grows by the
+  // crest shift: a texel reads stations up to maxShift along the reach).
+  const US = { ...U, smooth: 2 };
+  const g = new Float32Array(SIZE * SIZE);
+  for (let z = 0; z < SIZE; z++) for (let x = 0; x < SIZE; x++) g[z * SIZE + x] = steepGround(((x + 0.5) / SIZE - 0.5) * WORLD, ((z + 0.5) / SIZE - 0.5) * WORLD) / MAXH;
+  const moved = structuredClone(steepNet); moved.reaches[0].nodes[1].x += 6;
+  const pk = (net) => packReaches([{ id: 1, solved: mk({}, net) }], { worldSize: WORLD, maxHeight: MAXH });
+  const pA = pk(steepNet), pB = pk(moved);
+  const oA = buildRiverV3TerrainOp({ packed: pA, size: SIZE, u: US }), oB = buildRiverV3TerrainOp({ packed: pB, size: SIZE, u: US });
+  const dirty = networkDirtyRect(snapshotReaches(pA, oA.maxReach, "t"), snapshotReaches(pB, oB.maxReach, "t"), SIZE);
+  const fP = new Float32Array(SIZE * SIZE), fF = new Float32Array(SIZE * SIZE);
+  const LP = createHeightLayers({ final: fP, size: SIZE }), LF = createHeightLayers({ final: fF, size: SIZE });
+  LP.reset(g); LF.reset(g);
+  LP.setOperator("riverV3", oA); LF.setOperator("riverV3", oA);
+  LP.setOperator("riverV3", oB, dirty); LF.setOperator("riverV3", oB);
+  let worst = 0; for (let i = 0; i < SIZE * SIZE; i++) worst = Math.max(worst, Math.abs(fP[i] - fF[i]));
+  ok("steps: partial recompose == full", worst * MAXH < 1e-4, `${(worst * MAXH).toFixed(5)} m`);
+}
+
 // ── 10. One reach, no junction: v3's terrain == v2's, texel for texel ──────
 {
   const { buildRiverTerrainOp } = await import("../v3/tools/riverV2Terrain.js");

@@ -49,6 +49,7 @@ export const V3_DEFAULTS = {
   stepGrade: 0.04,         // surface grade (1/1) above which a reach steps
   stepSpacing: 2.5,        // metres between steps, × the channel width
   cascadeFrac: 0.25,       // share of each step spent dropping (the cascade)
+  crestShape: 1,           // 0 = straight crests across; 1 = tilted / arched / notched
   // ── Banks ──────────────────────────────────────────────────────────────
   bankSmooth: 2,           // texels the carve is softened over (0 = exact)
   // ── Flow depth from Manning (speed follows slope) ───────────────────────
@@ -165,9 +166,23 @@ function hermite(ys, m, h, k, s) {
  * streams spend their drop in steps (step-pool morphology: spacing ~1–4
  * channel widths), which is also what reads at an RTS distance.
  *
- * @returns {Uint8Array|null} 1 on stations that lie on a cascade
+ * NOT STAIRS (2026-10-17): equal steps with straight crests read as built
+ * steps (the user). Natural ones are irregular: steps form around keystones,
+ * so their spacing is random and they cluster into runs separated by longer
+ * pools (Grant et al. 1990: "channel units"). Each step's length is jittered
+ * (0.55–1.45 × L), every 2–5 steps a long pool (1.6–2.4 × L) — and since every
+ * step still starts and ends on the original curve, a longer pool ends in a
+ * taller drop (H ∝ L at a fixed slope, as measured streams do). The CREST is
+ * not straight across either: each cascade carries a tilt, an arch and one
+ * notch (a chute where the flow drops first), as an along-flow offset of the
+ * profile by position across the channel — see crestShift(). Below each drop
+ * the bed is scoured into a plunge pool (`scour`, metres).
+ *
+ * @returns {null|{cascade: Uint8Array, phase: Float32Array, crA, crB, crN,
+ *   crP: Float32Array, scour: Float32Array}} per station: 1 on a cascade, how
+ *   far down it (0 brink → 1 toe), the crest shape and the plunge-pool depth
  */
-export function applyStepPools(S, count, p) {
+export function applyStepPools(S, count, p, seed = 1) {
   if (!p.stepPools || !(p.stepGrade > 0) || count < 3) return null;
   const arc = S.arc, lv = S.level;
   const orig = Float64Array.from(lv);
@@ -204,26 +219,89 @@ export function applyStepPools(S, count, p) {
     if (last && z[0] - last[1] < stepLen(last[2])) last[1] = z[1];
     else merged.push([...z]);
   }
-  const cascade = new Uint8Array(count);
+  const cascade = new Uint8Array(count), phase = new Float32Array(count);
+  const crA = new Float32Array(count), crB = new Float32Array(count);
+  const crN = new Float32Array(count), crP = new Float32Array(count);
+  const scour = new Float32Array(count), zone = new Uint8Array(count);
   const ease = (t) => t * t * (3 - 2 * t);
+  // Deterministic per reach (same network → same steps).
+  let st = (seed * 2654435761) >>> 0 || 1;
+  const rnd = () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; };
+  let any = false;
   for (const [s0, s1, i0] of merged) {
-    const L = stepLen(i0);
-    if (s1 - s0 < L) continue;
+    const Lbar = stepLen(i0);
+    if (s1 - s0 < Lbar) continue;
+    any = true;
+    // Step boundaries: jittered, clustered into runs.
+    const b = [s0];
+    let t = s0, run = 0, runLen = 2 + Math.floor(rnd() * 4);
+    for (;;) {
+      let L = Lbar * (0.55 + 0.9 * rnd());
+      if (run >= runLen) { L = Lbar * (1.6 + 0.8 * rnd()); run = 0; runLen = 2 + Math.floor(rnd() * 4); } else run++;
+      if (t + L > s1 - Lbar * 0.5) { b.push(s1); break; }
+      t += L; b.push(t);
+    }
+    const steps = [];
+    for (let k = 0; k + 1 < b.length; k++) {
+      const t0 = b[k], t1 = b[k + 1], len = t1 - t0;
+      const c = Math.min(len, Math.max(1.2, p.cascadeFrac * len));
+      steps.push({ t0, t1, len, c, hold: len - c, top: origAt(t0), bot: origAt(t1) });
+    }
+    // Levels.
     for (let i = 0; i < count; i++) {
       const s = arc[i];
       if (s < s0 || s > s1) continue;
-      const k = Math.floor((s - s0) / L);
-      const t0 = s0 + k * L, t1 = Math.min(t0 + L, s1);
-      const len = t1 - t0;
-      if (len <= 1e-6) continue;
-      const c = Math.min(len, Math.max(1.2, p.cascadeFrac * len));
-      const top = origAt(t0), bot = origAt(t1);
-      const local = s - t0, holdEnd = len - c;
-      if (local <= holdEnd) lv[i] = top;
-      else { lv[i] = top + (bot - top) * ease((local - holdEnd) / c); cascade[i] = 1; }
+      let k = 0;
+      while (k < steps.length - 1 && s > steps[k].t1) k++;
+      const P = steps[k], local = s - P.t0;
+      if (local <= P.hold) lv[i] = P.top;
+      else { const f = (local - P.hold) / P.c; lv[i] = P.top + (P.bot - P.top) * ease(f); cascade[i] = 1; phase[i] = f; }
+    }
+    // Crest shape and plunge pool of each cascade. The shape holds from the
+    // middle of the pool above it to the middle of the pool below, where the
+    // water is flat — so a shifted lookup there finds the same level whichever
+    // step's shape it uses, and the surface stays continuous. The shift is
+    // kept under 0.45 × either pool, or a crest would reach the next drop.
+    for (let k = 0; k < steps.length; k++) {
+      const P = steps[k], N = steps[k + 1];
+      const W = S.width[Math.max(0, Math.min(count - 1, i0))];
+      const room = 0.45 * Math.min(P.hold, N ? N.hold : 2);
+      const cs = Math.max(0, p.crestShape ?? 1);
+      let a = (rnd() * 2 - 1) * 0.3 * W * cs, bw = (rnd() * 2 - 1) * 0.2 * W * cs, nn = (0.3 + 0.7 * rnd()) * 0.25 * W * cs;
+      const tot = Math.abs(a) + Math.abs(bw) + nn;
+      if (tot > room) { const f = room / tot; a *= f; bw *= f; nn *= f; }
+      const pp = (rnd() * 2 - 1) * 0.6;
+      const lo = P.t0 + P.hold * 0.5, hi = N ? N.t0 + N.hold * 0.5 : s1 + 1e-6;
+      // Plunge pool: deeper below a taller drop, over ~2 × its height.
+      const H = Math.max(0, P.top - P.bot);
+      const depth = Math.min(2.5, 0.6 * H), Ls = Math.max(1.5, Math.min(2 * H + 1, N ? 0.6 * N.hold : 2));
+      const toe = P.t1 - 0.25 * P.c;
+      for (let i = 0; i < count; i++) {
+        const s = arc[i];
+        if (s < lo || s >= hi) continue;
+        crA[i] = a; crB[i] = bw; crN[i] = nn; crP[i] = pp; zone[i] = 1;
+        const x = (s - toe) / Ls;
+        if (x > 0 && x < 1) scour[i] = depth * Math.sin(Math.PI * x);
+      }
     }
   }
-  return cascade;
+  return any ? { cascade, phase, crA, crB, crN, crP, scour, zone } : null;
+}
+
+/**
+ * The along-flow shift (m) of a step's profile at `a` ∈ [−1, 1] across the
+ * channel: the water at arc s takes the level of arc s + shift. A tilt, an
+ * arch, and a notch (Gaussian, 0.22 wide) where the drop starts earliest.
+ */
+export function crestShift(A, B, Nn, Pp, a) {
+  const c = a < -1 ? -1 : a > 1 ? 1 : a;
+  const d = (c - Pp) / 0.22;
+  // Tapered to nothing over the outer 40 %: every crest meets both banks
+  // square. A tilted crest reaching the bank at a different arc than the
+  // drop beside it left a flap of falling water and a tooth in the bank at
+  // every step — a sawtooth along both edges (seen on nam-valley).
+  const e = Math.min(1, Math.max(0, (Math.abs(c) - 0.6) / 0.4));
+  return (A * c + B * (1 - c * c) + Nn * Math.exp(-d * d)) * (1 - e * e * (3 - 2 * e));
 }
 
 /** Lowest ground across the channel at (x, z) — River v2's corridor minimum. */
@@ -471,7 +549,8 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
 
     // Steep stretches become pools and cascades (before the backwater, which
     // then holds each junction flat over the result).
-    const cascade = applyStepPools(S, count, p);
+    const steps = applyStepPools(S, count, p, r.id);
+    const cascade = steps?.cascade ?? null;
 
     // BACKWATER: near a junction the surface blends to the junction's level and
     // holds it over the last `Lb` metres (and the first, for a reach leaving a
@@ -519,10 +598,27 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
       S.speed[s] = Math.min(p.maxSpeed, Math.max(p.minSpeed, q / (w * d)));
       S.froude[s] = S.speed[s] / Math.sqrt(G * d);
       S.turb[s] = Math.min(1, Math.max(0, (S.froude[s] - f0) / (f1 - f0)));
-      // A cascade breaks whatever the numbers say about its few metres.
-      if (cascade?.[s]) S.turb[s] = Math.max(S.turb[s], 0.85);
+      // A cascade breaks whatever the numbers say about its few metres — but
+      // not at once: a glassy tongue over the brink, aerated from mid-face to
+      // the toe, the white carried on into the plunge pool (decaying below).
+      if (cascade?.[s]) S.turb[s] = Math.max(S.turb[s], 0.3 + 0.65 * smoothstep(0.2, 0.85, steps.phase[s]));
+    }
+    if (steps) {
+      // Aeration carried past each toe, fading over the plunge pool.
+      let carry = 0, lastArc = 0;
+      for (let s = 0; s < count; s++) {
+        carry *= Math.exp(-(S.arc[s] - lastArc) / 3);
+        lastArc = S.arc[s];
+        if (cascade[s] && steps.phase[s] > 0.6) carry = 0.95;
+        else if (!cascade[s]) S.turb[s] = Math.max(S.turb[s], carry);
+      }
     }
     S.cascade = cascade ?? new Uint8Array(count);
+    S.cascPhase = steps?.phase ?? new Float32Array(count);
+    S.crA = steps?.crA ?? null; S.crB = steps?.crB ?? null;
+    S.crN = steps?.crN ?? null; S.crP = steps?.crP ?? null;
+    S.scour = steps?.scour ?? null;
+    S.stepZone = steps?.zone ?? null;     // 1 from mid-pool above each step to mid-pool below
     const nodeArc = new Float64Array(n);
     for (let k = 1; k < n; k++) nodeArc[k] = nodeArc[k - 1] + G0.h[k - 1];
     out.set(r.id, {

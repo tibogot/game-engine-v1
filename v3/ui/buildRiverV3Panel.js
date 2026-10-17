@@ -78,6 +78,7 @@ export function buildRiverV3Panel(app) {
     _slider(sp, p, "stepGrade", { label: "Steeper than (grade)", min: 0.01, max: 0.2, step: 0.005, onChange: onSp, hint: "0.04 = 4 %: a 1 m drop every 25 m." });
     _slider(sp, p, "stepSpacing", { label: "Step spacing (× width)", min: 1, max: 6, step: 0.1, onChange: onSp });
     _slider(sp, p, "cascadeFrac", { label: "Cascade share of a step", min: 0.1, max: 0.6, step: 0.01, onChange: onSp });
+    _slider(sp, p, "crestShape", { label: "Crest shape", min: 0, max: 1, step: 0.05, onChange: onSp, hint: "0 = every crest straight across the channel; 1 = tilted, arched and notched, so steps read as stone ledges rather than stairs." });
 
     // ── Banks ───────────────────────────────────────────────────────────────
     const bk = _section(panel, "Banks", false);
