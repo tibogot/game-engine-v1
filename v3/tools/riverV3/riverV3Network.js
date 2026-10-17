@@ -50,6 +50,11 @@ export const V3_DEFAULTS = {
   stepSpacing: 2.5,        // metres between steps, × the channel width
   cascadeFrac: 0.25,       // share of each step spent dropping (the cascade)
   crestShape: 1,           // 0 = straight crests across; 1 = tilted / arched / notched
+  // Keystones along each crest, framing boulders, plunge-pool stones. OFF
+  // until a realistic rock set exists: the kit's stylised rocks read as
+  // Genshin in nam's terrain (the user, 2026-10-17).
+  crestRocks: false,
+  rockAmount: 1,           // × how many (0 = none)
   // ── Banks ──────────────────────────────────────────────────────────────
   bankSmooth: 2,           // texels the carve is softened over (0 = exact)
   // ── Flow depth from Manning (speed follows slope) ───────────────────────
@@ -179,8 +184,9 @@ function hermite(ys, m, h, k, s) {
  * the bed is scoured into a plunge pool (`scour`, metres).
  *
  * @returns {null|{cascade: Uint8Array, phase: Float32Array, crA, crB, crN,
- *   crP: Float32Array, scour: Float32Array}} per station: 1 on a cascade, how
- *   far down it (0 brink → 1 toe), the crest shape and the plunge-pool depth
+ *   crP: Float32Array, scour: Float32Array, zone: Uint8Array, list: object[]}}
+ *   per station: 1 on a cascade, how far down it (0 brink → 1 toe), the crest
+ *   shape, the plunge-pool depth, the step zone; and one entry per cascade
  */
 export function applyStepPools(S, count, p, seed = 1) {
   if (!p.stepPools || !(p.stepGrade > 0) || count < 3) return null;
@@ -228,6 +234,7 @@ export function applyStepPools(S, count, p, seed = 1) {
   let st = (seed * 2654435761) >>> 0 || 1;
   const rnd = () => { st ^= st << 13; st >>>= 0; st ^= st >>> 17; st ^= st << 5; st >>>= 0; return st / 4294967296; };
   let any = false;
+  const list = [];   // every cascade: brink / toe arcs and its crest shape
   for (const [s0, s1, i0] of merged) {
     const Lbar = stepLen(i0);
     if (s1 - s0 < Lbar) continue;
@@ -283,9 +290,10 @@ export function applyStepPools(S, count, p, seed = 1) {
         const x = (s - toe) / Ls;
         if (x > 0 && x < 1) scour[i] = depth * Math.sin(Math.PI * x);
       }
+      list.push({ brink: P.t1 - P.c, toe: P.t1, c: P.c, A: a, B: bw, N: nn, P: pp });
     }
   }
-  return any ? { cascade, phase, crA, crB, crN, crP, scour, zone } : null;
+  return any ? { cascade, phase, crA, crB, crN, crP, scour, zone, list } : null;
 }
 
 /**
@@ -619,6 +627,7 @@ export function solveNetwork({ junctions, reaches, sampleGround, params = {} }) 
     S.crN = steps?.crN ?? null; S.crP = steps?.crP ?? null;
     S.scour = steps?.scour ?? null;
     S.stepZone = steps?.zone ?? null;     // 1 from mid-pool above each step to mid-pool below
+    S.steps = steps?.list ?? [];          // per cascade: { brink, toe, c, A, B, N, P } (arcs in m)
     const nodeArc = new Float64Array(n);
     for (let k = 1; k < n; k++) nodeArc[k] = nodeArc[k - 1] + G0.h[k - 1];
     out.set(r.id, {

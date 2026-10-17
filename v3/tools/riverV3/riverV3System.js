@@ -34,6 +34,7 @@ import { buildFlowIndex, sampleFlow, sampleFlowAt } from "../riverV2Channel.js";
 import { shareInstancePipeline } from "../../render/instancePipeline.js";
 import { solveNetwork, crestShift } from "./riverV3Network.js";
 import { packReaches, buildRiverV3TerrainOp, snapshotReaches, networkDirtyRect } from "./riverV3Terrain.js";
+import { RiverRocks } from "./riverV3Rocks.js";
 
 const LAYER = "riverV3";
 const MAX_UNDO = 64;
@@ -97,6 +98,10 @@ export class RiverV3System {
 
     this.group = new THREE.Group(); this.group.name = "RiverV3"; scene.add(this.group);
     this.handleGroup = new THREE.Group(); this.handleGroup.name = "RiverV3Handles"; this.handleGroup.visible = false; scene.add(this.handleGroup);
+    // Keystones, framing boulders and plunge-pool stones at every cascade
+    // (riverV3Rocks.js): rebuilt with the water, seated on the FINAL ground.
+    this._rocks = new RiverRocks(this.group);
+    void this._rocks.ready().then(() => this._rebuildRocks());
     this.arrowGroup = new THREE.Group(); this.arrowGroup.name = "RiverV3Arrows"; this.arrowGroup.visible = false; scene.add(this.arrowGroup);
 
     this._waterNormalMap = waterNormalMap;
@@ -659,9 +664,30 @@ export class RiverV3System {
       }
     }
     if (this.sol) for (const r of this.reaches) if (this.sol.reaches.has(r.id)) this._buildRibbon(r, this.sol.reaches.get(r.id));
+    this._rebuildRocks();
     this.onWaterMeshesChanged?.();
     this._rebuildHandles();
     this._rebuildArrows();
+  }
+
+  /** The cascades' rocks, from the current solve over the composed ground. */
+  _rebuildRocks() {
+    const fin = this.layers?.final, N = HEIGHTMAP_SIZE;
+    // FINAL, bilinear between texel centres (main.js sampleHeightNormalized).
+    const groundAt = (x, z) => {
+      if (!fin) return -Infinity;
+      const fu = (x / WORLD_SIZE + 0.5) * N - 0.5, fv = (z / WORLD_SIZE + 0.5) * N - 0.5;
+      const x0 = Math.min(N - 1, Math.max(0, Math.floor(fu))), z0 = Math.min(N - 1, Math.max(0, Math.floor(fv)));
+      const x1 = Math.min(x0 + 1, N - 1), z1 = Math.min(z0 + 1, N - 1);
+      const tx = Math.min(1, Math.max(0, fu - x0)), tz = Math.min(1, Math.max(0, fv - z0));
+      const a = fin[z0 * N + x0] + (fin[z0 * N + x1] - fin[z0 * N + x0]) * tx;
+      const b = fin[z1 * N + x0] + (fin[z1 * N + x1] - fin[z1 * N + x0]) * tx;
+      return (a + (b - a) * tz) * MAX_HEIGHT;
+    };
+    this._rocks.rebuild(this.sol?.reaches ?? null, {
+      enabled: !!this.params.stepPools && this.params.crestRocks !== false,
+      amount: this.params.rockAmount ?? 1, groundAt,
+    });
   }
 
   setEditActive(on) {

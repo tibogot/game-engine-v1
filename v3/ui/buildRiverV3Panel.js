@@ -79,6 +79,8 @@ export function buildRiverV3Panel(app) {
     _slider(sp, p, "stepSpacing", { label: "Step spacing (× width)", min: 1, max: 6, step: 0.1, onChange: onSp });
     _slider(sp, p, "cascadeFrac", { label: "Cascade share of a step", min: 0.1, max: 0.6, step: 0.01, onChange: onSp });
     _slider(sp, p, "crestShape", { label: "Crest shape", min: 0, max: 1, step: 0.05, onChange: onSp, hint: "0 = every crest straight across the channel; 1 = tilted, arched and notched, so steps read as stone ledges rather than stairs." });
+    _toggle(sp, p, "crestRocks", { label: "Rocks", onChange: () => sys._rebuildRocks(), hint: "Keystones along each crest (the notch stays an open chute), sometimes a big boulder at either end, small stones in the plunge pool." });
+    _slider(sp, p, "rockAmount", { label: "Rock amount", min: 0, max: 2, step: 0.05, onChange: () => sys._rebuildRocks() });
 
     // ── Banks ───────────────────────────────────────────────────────────────
     const bk = _section(panel, "Banks", false);

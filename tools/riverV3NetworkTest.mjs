@@ -379,6 +379,51 @@ const U = { bedCurve: 0.55, freeboardN: 0.6 / MAXH, lipFrac: 0.28, slopeToUv: MA
   ok("steps: partial recompose == full", worst * MAXH < 1e-4, `${(worst * MAXH).toFixed(5)} m`);
 }
 
+// ── 17. ROCKS at the cascades (riverV3Rocks.js placeRiverRocks) ─────────────
+{
+  const { placeRiverRocks, RIVER_ROCK_SHAPES } = await import("../v3/tools/riverV3/riverV3Rocks.js");
+  const { crestShift } = await import("../v3/tools/riverV3/riverV3Network.js");
+  const steepGround = (x, z) => 80 + z * 0.12;
+  const sol = solveNetwork({
+    junctions: [], params: { stepPools: true },
+    reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 120), node(4, 40), node(-4, -40), node(0, -120)] }],
+    sampleGround: steepGround,
+  });
+  const S = sol.reaches.get(1);
+  // A bed 1.5 m under the water everywhere (what the carve gives, roughly).
+  const lvAt = (x, z) => {
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < S.count; i++) { const d = (S.x[i] - x) ** 2 + (S.z[i] - z) ** 2; if (d < bd) { bd = d; bi = i; } }
+    return S.level[bi];
+  };
+  const groundAt = (x, z) => lvAt(x, z) - 1.5;
+  const opts = (amount) => ({ amount, groundAt, shapeHeights: RIVER_ROCK_SHAPES.map(() => 1) });
+  const r1 = placeRiverRocks(sol.reaches, opts(1));
+  ok("rocks: none at amount 0", placeRiverRocks(sol.reaches, opts(0)).length === 0);
+  ok("rocks: some at every few cascades", r1.length >= S.steps.length, `${r1.length} rocks, ${S.steps.length} cascades`);
+  ok("rocks: more with a higher amount", placeRiverRocks(sol.reaches, opts(2)).length > r1.length);
+  ok("rocks: deterministic", JSON.stringify(placeRiverRocks(sol.reaches, opts(1))) === JSON.stringify(r1));
+  ok("rocks: every base is below the bed (none floats)", r1.every((r) => r.y <= groundAt(r.x, r.z) - 0.1));
+  ok("rocks: keystones stand above their upper pool", r1.filter((r) => r.kind === "keystone").every((r) => r.y + r.sy > r.waterY));
+  // The notch stays an open chute: no keystone within 0.25 half-widths of it.
+  let inNotch = 0;
+  for (const st of S.steps) {
+    if (!(st.N > 0.15)) continue;
+    const b = st.brink;
+    let bi = 0; while (bi < S.count - 1 && S.arc[bi] < b) bi++;
+    const hw = S.width[bi] * 0.5, px = -S.tanZ[bi], pz = S.tanX[bi];
+    for (const r of r1) {
+      if (r.kind !== "keystone") continue;
+      const dx = r.x - S.x[bi], dz = r.z - S.z[bi];
+      const along = dx * S.tanX[bi] + dz * S.tanZ[bi];
+      if (Math.abs(along + crestShift(st.A, st.B, st.N, st.P, st.P)) > st.c + 1) continue;
+      const a = (dx * px + dz * pz) / hw;
+      if (Math.abs(a - st.P) < 0.2) inNotch++;
+    }
+  }
+  ok("rocks: the crest notch stays open", inNotch === 0, `${inNotch} in a notch`);
+}
+
 // ── 10. One reach, no junction: v3's terrain == v2's, texel for texel ──────
 {
   const { buildRiverTerrainOp } = await import("../v3/tools/riverV2Terrain.js");

@@ -254,6 +254,8 @@ export function createHeightLayers({ final, size, onComposed = null }) {
     get groundVersion() { return groundVersion; },
     /** GROUND (read-only by contract): what an operator that bakes from it reads. */
     get ground() { return ground; },
+    /** FINAL (read-only by contract): the composed map, e.g. to seat things on a river bed. */
+    get final() { return final; },
     /** Remove every stamp whose key starts with `prefix` (a system clearing its own). */
     removeStampsWithPrefix(prefix) {
       let r = null;
