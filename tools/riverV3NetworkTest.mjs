@@ -224,6 +224,54 @@ const U = { bedCurve: 0.55, freeboardN: 0.6 / MAXH, lipFrac: 0.28, slopeToUv: MA
   ok("open mouth: before the lip the channel is unchanged", open[at(50)] === shut[at(50)]);
 }
 
+// ── 13. Operators CHAIN: a river carves the eroded ground it is handed ──────
+// (the editor's erosion filter runs first). From bare GROUND the bank stepped
+// back to un-eroded ground at the footprint edge.
+{
+  const g = toGrid();
+  const offset = new Float32Array(SIZE * SIZE);
+  for (let z = 0; z < SIZE; z++) for (let x = 0; x < SIZE; x++) offset[z * SIZE + x] = (2 + 1.5 * Math.sin(x * 0.11) * Math.cos(z * 0.07)) / MAXH;
+  const erosion = {
+    rect: { x0: 0, z0: 0, x1: SIZE - 1, z1: SIZE - 1 }, first: true,
+    apply(out, _g, r) { for (let z = r.z0; z <= r.z1; z++) for (let x = r.x0; x <= r.x1; x++) out[z * SIZE + x] += offset[z * SIZE + x]; },
+  };
+  const final = new Float32Array(SIZE * SIZE);
+  const L = createHeightLayers({ final, size: SIZE });
+  L.reset(g);
+  const sol = solveNetwork({ junctions: [], reaches: [{ id: 1, from: null, to: null, nodes: [node(0, 200), node(0, 0), node(0, -150)] }], sampleGround: ground });
+  const op = buildRiverV3TerrainOp({ packed: packReaches([{ id: 1, solved: sol.reaches.get(1) }], { worldSize: WORLD, maxHeight: MAXH }), size: SIZE, u: U });
+  L.setOperator("riverV3", op);
+  L.setOperator("erosion", erosion);          // registered later, but `first`
+  // Away from the river: ground + erosion.
+  let farOk = true;
+  for (let z = 0; z < SIZE; z++) for (let x = 0; x < SIZE; x++) {
+    const i = z * SIZE + x;
+    const inRect = x >= op.rect.x0 && x <= op.rect.x1 && z >= op.rect.z0 && z <= op.rect.z1;
+    if (!inRect && Math.abs(final[i] - (g[i] + offset[i])) > 1e-7) farOk = false;
+  }
+  ok("chain: outside the river, FINAL = GROUND + erosion", farOk);
+  // The exact property: erosion-then-river == the river carving a ground that
+  // already holds the erosion. (Bare-GROUND naturals broke this at the bank.)
+  const pre = Float32Array.from(g, (h, i) => h + offset[i]);
+  const ref = Float32Array.from(pre);
+  op.apply(ref, pre, { x0: 0, z0: 0, x1: SIZE - 1, z1: SIZE - 1 });
+  let worst = 0;
+  for (let i = 0; i < SIZE * SIZE; i++) worst = Math.max(worst, Math.abs(final[i] - ref[i]) * MAXH);
+  ok("chain: erosion → river == river over the eroded ground, everywhere", worst < 1e-4, `worst ${worst.toFixed(4)} m`);
+  // The probe sees GROUND + erosion under the river, not the carved channel.
+  const tx = 128, tz = 128, u = tx / (SIZE - 1), v = tz / (SIZE - 1), i = tz * SIZE + tx;
+  // underKey: moves when what is UNDER the river moves, not when the river does.
+  const k0 = L.underKey("riverV3");
+  L.setOperator("riverV3", op);
+  const k1 = L.underKey("riverV3");
+  erosion.version = 1;
+  const k2 = L.underKey("riverV3");
+  ok("underKey: the river's own re-conform leaves it alone; an erosion re-bake moves it", k0 === k1 && k2 !== k1, `${k0} ${k1} ${k2}`);
+  ok("chain: sampleUnderNormalized('riverV3') = GROUND + erosion",
+    Math.abs(L.sampleUnderNormalized("riverV3", u, v) - (g[i] + offset[i])) < 1e-6,
+    `${L.sampleUnderNormalized("riverV3", u, v)} vs ${g[i] + offset[i]}`);
+}
+
 // ── 10. One reach, no junction: v3's terrain == v2's, texel for texel ──────
 {
   const { buildRiverTerrainOp } = await import("../v3/tools/riverV2Terrain.js");

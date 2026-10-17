@@ -197,6 +197,9 @@ export function createErosionOperator({ renderer, heightLayers, size, worldSize,
     blurInto(offset, tmpA ??= new Float32Array(N), tmpB ??= new Float32Array(N), size, r);
     for (let i = 0; i < N; i++) offset[i] -= tmpB[i];
     haveOffset = true;
+    // Rivers above this operator re-solve their AUTO levels when it changes
+    // (heightLayers.underKey): the eroded valley is what they sit in.
+    op.version = (op.version ?? 0) + 1;
     bakedGroundVersion = gv; bakedParams = pk;
     if (heightLayers.operator("erosion") !== op) heightLayers.setOperator("erosion", op, false);
     heightLayers.compose(FULL);

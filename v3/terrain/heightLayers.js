@@ -106,6 +106,8 @@ export function createHeightLayers({ final, size, onComposed = null }) {
    * rivers then carve (erosionOperator.js).
    */
   const operators = new Map();
+  /** sampleUnderNormalized's scratch (allocated on first use). */
+  let underScratch = null;
   /** Union of rects composed since the last takePending (not yet on the GPU). */
   let pending = null;
   let version = 0;
@@ -594,6 +596,60 @@ export function createHeightLayers({ final, size, onComposed = null }) {
       const h0 = ground[iz0 * size + ix0] * (1 - tx) + ground[iz0 * size + ix1] * tx;
       const h1 = ground[iz1 * size + ix0] * (1 - tx) + ground[iz1 * size + ix1] * tx;
       return h0 * (1 - tz) + h1 * tz;
+    },
+
+    /**
+     * The ground AS OPERATOR `name` SEES IT: GROUND with every operator before
+     * `name` applied (the erosion filter, say), bilinear, same convention as
+     * sampleGroundNormalized. A river picks its AUTO water level from this —
+     * from bare GROUND it sat above the eroded valley it carves, and spilled.
+     * Runs those operators on just the 2×2 texels round the point.
+     */
+    /**
+     * Fingerprint of everything UNDER operator `name`: GROUND's version and,
+     * for each operator before it, its identity and its `version` (an
+     * operator that re-bakes in place — the erosion filter — bumps that). A
+     * river compares this between frames and re-solves its AUTO levels when it
+     * moves, so the water follows a sculpt or an erosion re-bake.
+     */
+    underKey(name) {
+      let k = String(groundVersion);
+      for (const [n, op] of operators) {
+        if (n === name) break;
+        k += `|${n}:${op.version ?? 0}`;
+      }
+      return k;
+    },
+
+    sampleUnderNormalized(name, u, v) {
+      if (u < 0 || u > 1 || v < 0 || v > 1) return 0;
+      const res = size - 1;
+      const fx = u * res, fz = v * res;
+      const ix0 = Math.floor(fx), iz0 = Math.floor(fz);
+      const ix1 = Math.min(ix0 + 1, res), iz1 = Math.min(iz0 + 1, res);
+      const tx = fx - ix0, tz = fz - iz0;
+      const before = [];
+      for (const [k, op] of operators) { if (k === name) break; before.push(op); }
+      let a, b, c, d;
+      if (!before.length) {
+        a = ground[iz0 * size + ix0]; b = ground[iz0 * size + ix1];
+        c = ground[iz1 * size + ix0]; d = ground[iz1 * size + ix1];
+      } else {
+        const sc = underScratch ??= new Float32Array(N);
+        for (const i of [iz0 * size + ix0, iz0 * size + ix1, iz1 * size + ix0, iz1 * size + ix1]) sc[i] = ground[i];
+        const r = { x0: ix0, z0: iz0, x1: ix1, z1: iz1 };
+        for (const op of before) {
+          // An operator's side outputs (River v3's owner map) must not be
+          // touched by a probe: hide them for the call.
+          const owner = op.owner;
+          if (owner) op.owner = null;
+          op.apply(sc, ground, r);
+          if (owner) op.owner = owner;
+        }
+        a = sc[iz0 * size + ix0]; b = sc[iz0 * size + ix1];
+        c = sc[iz1 * size + ix0]; d = sc[iz1 * size + ix1];
+      }
+      return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
     },
   };
 }

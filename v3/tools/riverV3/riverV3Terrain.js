@@ -279,7 +279,10 @@ export function buildRiverV3TerrainOp({ packed: P, size, u: uIn }) {
           if (nb < K) nb++;
         }
         if (!nb) continue;
-        const i = tz * size + tx, natural = ground[i];
+        // Natural = the height handed in (GROUND plus any operator before this
+        // one, e.g. the erosion filter), so operators chain: from bare GROUND
+        // the bank stepped back to un-eroded ground at the footprint edge.
+        const i = tz * size + tx, natural = out[i];
         // Combine: inside any channel → the lowest bed (smooth min, which also
         // digs the confluence scour); otherwise the lowest bank.
         // The OWNER follows the water, not the distance: inside a channel, the

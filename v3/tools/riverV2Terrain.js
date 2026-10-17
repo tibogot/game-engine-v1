@@ -193,7 +193,10 @@ export function buildRiverTerrainOp({ pathData, rowStride, layout, size, u }) {
 
         // ── cross-section (riverV2System resolve) ──────────────────────────
         const i = tz * size + tx;
-        const natural = ground[i];
+        // The height handed in (GROUND plus any operator before this one —
+        // the erosion filter), so the bank eases back into the ERODED slopes
+        // instead of stepping to bare ground at the footprint edge.
+        const natural = out[i];
         const a = bestK * 4, b = a + 4, t = bestT;
         const level = P[a + 2] + (P[b + 2] - P[a + 2]) * t;
         const halfW = P[a + 3] + (P[b + 3] - P[a + 3]) * t;

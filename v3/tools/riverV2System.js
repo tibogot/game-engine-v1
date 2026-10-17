@@ -370,7 +370,9 @@ export class RiverV2System {
     if (this.layers) {
       const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE;
       const v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
-      return this.layers.sampleGroundNormalized(u, v) * MAX_HEIGHT;
+      // As this river SEES it: GROUND plus the operators before it (the
+      // erosion filter), or an AUTO level sits above the valley it carves.
+      return this.layers.sampleUnderNormalized("river", u, v) * MAX_HEIGHT;
     }
     return this.cpuHeightmap ? sampleNormalized(this.cpuHeightmap, wx, wz) : 0;
   }
@@ -585,6 +587,7 @@ export class RiverV2System {
    *   collision, nav) the terrain settled. On mouse-up, not per frame of a drag.
    */
   applyConform({ rebuild = true, commit = true } = {}) {
+    this._underKey = this.layers?.underKey("river") ?? null;
     if (!this._solvable()) {
       this._lastPath = null;
       if (this.layers?.river) this.layers.setRiver(null);
@@ -1612,8 +1615,25 @@ export class RiverV2System {
 
   /** Drives its own clock from main's loop, so it does NOT implement the
    *  worldEnvironment `updateWater` hook — that would advance time twice. */
+  /**
+   * FOLLOW THE GROUND. AUTO water levels are solved from the ground under the
+   * river; when that changes (a sculpt, the erosion filter re-baking —
+   * heightLayers.underKey) the river re-solves, once the change has settled
+   * for 0.4 s, never mid-drag. Without this the levels kept the old valley
+   * until the river itself was next edited.
+   */
+  _followGround(dt) {
+    if (!this.layers || !(this.rivers.length)) return;
+    const k = this.layers.underKey("river");
+    if (k !== this._seenUnderKey) { this._seenUnderKey = k; this._underWait = 0; return; }
+    if (k === this._underKey || this.dragging) return;
+    this._underWait = (this._underWait ?? 0) + dt;
+    if (this._underWait >= 0.4) { this._underWait = 0; this.applyConform({ commit: true }); }
+  }
+
   update(dt) {
     this._time += dt;
+    this._followGround(dt);
     this._water.update(dt, this._time);
     if (this._water !== this._realistic) this._realistic.update(dt, this._time);
     if (this.editActive && this.handleGroup.visible) {

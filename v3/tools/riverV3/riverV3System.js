@@ -137,10 +137,14 @@ export class RiverV3System {
   get activeReach() { return this.reach(this.activeReachId); }
   get meshes() { return [...this._meshes.values()].map((m) => m.mesh).filter(Boolean); }
 
-  /** Ground under the river (GROUND of the height stack), metres. */
+  /**
+   * Ground under the river AS IT SEES IT, metres: GROUND plus the operators
+   * before River v3 (the erosion filter). From bare GROUND an AUTO level sat
+   * above the eroded valley it carves, and the river spilled.
+   */
   sampleBase(wx, wz) {
     const u = (wx + WORLD_SIZE / 2) / WORLD_SIZE, v = (wz + WORLD_SIZE / 2) / WORLD_SIZE;
-    return this.layers.sampleGroundNormalized(u, v) * MAX_HEIGHT;
+    return this.layers.sampleUnderNormalized(LAYER, u, v) * MAX_HEIGHT;
   }
 
   /** What the water is doing at (x, z) — River v2's query, over the network. */
@@ -177,6 +181,7 @@ export class RiverV3System {
    * @param {{rebuild?:boolean, commit?:boolean}} [opts]
    */
   applyConform({ rebuild = true, commit = true } = {}) {
+    this._underKey = this.layers?.underKey("riverV3") ?? null;
     const live = this.reaches.filter((r) => r.nodes.length >= 2);
     if (!live.length) {
       this.sol = null; this._flowIndex = null; this._flowIds = []; this._lastSnap = null;
@@ -572,8 +577,25 @@ export class RiverV3System {
     return otherAt(0, 0).and(otherAt(E, E)).and(otherAt(-E, E)).and(otherAt(E, -E)).and(otherAt(-E, -E));
   }
 
+  /**
+   * FOLLOW THE GROUND. AUTO water levels are solved from the ground under the
+   * river; when that changes (a sculpt, the erosion filter re-baking —
+   * heightLayers.underKey) the river re-solves, once the change has settled
+   * for 0.4 s, never mid-drag. Without this the levels kept the old valley
+   * until the river itself was next edited.
+   */
+  _followGround(dt) {
+    if (!this.layers || !(this.reaches.length)) return;
+    const k = this.layers.underKey("riverV3");
+    if (k !== this._seenUnderKey) { this._seenUnderKey = k; this._underWait = 0; return; }
+    if (k === this._underKey || this.dragging) return;
+    this._underWait = (this._underWait ?? 0) + dt;
+    if (this._underWait >= 0.4) { this._underWait = 0; this.applyConform({ commit: true }); }
+  }
+
   update(dt) {
     this._time += dt;
+    this._followGround(dt);
     this._water.update(dt, this._time);
     if (this.editActive && this.handleGroup.visible) {
       const sc = this._handleScale();
