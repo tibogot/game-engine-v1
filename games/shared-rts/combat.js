@@ -242,7 +242,10 @@ export function createCombat({
       if (amount <= 0) return;
       if (gibChance && onFoot(o) && gibChance(d, radius, o)) o.gibbed = true;
       if (owner) o.lastHitBy = owner;      // the kill's credit (onImpact gets no owner)
+      // What hit him and from where (unitRenderer: a man killed by a blast is thrown back, away from it).
+      o.lastHit = { kind: "blast", x: at.x, z: at.z };
       onImpact(o, amount, at, null);       // null owner: no directional cover
+      if (o.alive) o.lastHit = null;
       if (o.alive) o.gibbed = false;      // he lived: the next death is his own
     };
     for (const o of units.near(at.x, at.z, radius, _splashNear)) hit(o);

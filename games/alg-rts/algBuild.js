@@ -287,6 +287,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
    * shovel in his hands (unitRenderer.js).
    */
   const atWork = new Set();
+  const HAUL_PACE = 0.45;   // × his speed with a crate in his arms (~2.3 m/s: a walk)
   function step(dt) {
     atWork.clear();
     for (const s of sites) {
@@ -306,6 +307,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))) * (s.team === "player" ? app.algBuildSpeed ?? 1 : 1));
       s.mesh.scale.y = 0.06 + 0.94 * s.progress;
       s.hp = s.progress * 100;
+    }
+    // HAULING (2026-10-17, Mixamo "Carrying"): a sapper walking to a site of his side still rising carries
+    // a crate to it, at a walk (loadMul) — the renderer's carry walk, the crate in his arms.
+    for (const u of units.list) {
+      if (!u.alive || !u.type?.foot) continue;
+      const g = u.isMoving ? u.goalPoint : null;
+      const haul = !!g && sites.some((s) => !s.done && s.team === u.team && canBuild(u, s.key) && Math.hypot(g.x - s.x, g.z - s.z) < s.reach + 4);
+      if (haul !== !!u.hauling) { u.hauling = haul; u.loadMul = haul ? HAUL_PACE : 1; }
     }
     for (let i = sites.length - 1; i >= 0; i--) if (sites[i].progress >= 1) finish(sites[i]);
     for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting && !u.repairing) u.working = null;   // a wire-cutter is algWire.js's, a repairer algRepair.js's

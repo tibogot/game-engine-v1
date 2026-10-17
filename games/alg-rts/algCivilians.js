@@ -211,7 +211,7 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
       if (dd < bd) { bd = dd; best = d; }
     }
     if (!best) return;
-    if (f.state !== "run") shout(f);
+    if (f.state !== "run" && f.state !== "duck") shout(f);   // (a duck shouted already)
     f.stuck = 0; f.best = Infinity;
     f.door = best;
     f.state = "run";
@@ -241,8 +241,16 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
         else if (f.state === "run") { f.state = "in"; f.calm = 0; u.inside = true; u.running = false; u.moveMul = 1; u.haltMovement?.(); f.door = { x: u.position.x, z: u.position.z }; }
         continue;
       }
-      // THE FIGHTING
-      if (check && f.state !== "in" && f.state !== "run" && fighting(u.position.x, u.position.z)) goIn(f);
+      // THE FIGHTING: the first shots, he DUCKS where he is (Mixamo "Terrified", 2026-10-17) — a second
+      // or two — then runs for a door.
+      if (f.state === "duck") { if ((f.t -= dt) <= 0) goIn(f); continue; }
+      if (check && f.state !== "in" && f.state !== "run" && fighting(u.position.x, u.position.z)) {
+        f.state = "duck"; f.t = 1.2 + rnd() * 0.8;
+        u.haltMovement?.();
+        u.playOnce = "cower";
+        shout(f);
+        continue;
+      }
       if (f.state === "run") {
         if (near(u, f.door, P.enter) || (!u.isMoving && near(u, f.door, 6))) {
           door(f.door);

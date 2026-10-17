@@ -188,6 +188,22 @@ const ROLES = {
   "sitting idle": "sit",
   "sitting talking": "sit_talk",
   "sitting laughing": "sit_laugh",
+  // The 2026-10-17 batch (alg-rts: being hit, more deaths, pinned, wounded, paras, work, civilians).
+  "falling forward death": "death_running",
+  "shot in the back and fall": "death_back",
+  "terrified": "cower",
+  "injured walking": "injured_walk",
+  "injured walk": "injured_walk",
+  "falling to landing": "para_land",
+  "hard landing": "para_land_hard",
+  "plant a plant": "plant",
+  "planting a plant": "plant",
+  "pointing": "point",
+  "pick fruit": "pick_fruit",
+  "carrying": "carry_walk",
+  "grenade throw": "grenade_throw_alt",
+  "running scared": "flee",
+  "surrender": "surrender",
 };
 
 // Shouldered rifle (firing / aiming clips): the butt sits this far from the
@@ -391,32 +407,47 @@ if (!clips.length) fail("no animation clips found");
 // every frame at 30 Hz — it doubled the bake). Cut at the time inside the window
 // whose pose is NEAREST the first frame (summed bone rotation gap), so it loops
 // without a pop. MEASURED in the pack's report below.
-const CUT = { sit_talk: [8, 16] };
+// cower (Terrified, 20 s) and carry_walk (Carrying, 10 s): 2026-10-17, a loop each is enough.
+// An entry [lo, hi] cuts the END (the loop from 0); { start: [a0, a1], len: [l0, l1] } also drops a
+// START — "Terrified" begins standing and never comes back to that pose (no end gave a loop gap
+// under 2.1): the best (start, end) pair is searched.
+const CUT = { sit_talk: [8, 16], cower: { start: [0.5, 8], len: [3, 8] }, carry_walk: [1.8, 3.6] };
 for (const clip of clips) {
   const win = CUT[clip.name];
-  if (!win || clip.duration <= win[1]) continue;
+  if (!win) continue;
+  const pair = !Array.isArray(win);
+  if (!pair && clip.duration <= win[1]) continue;
   const qs = clip.tracks.filter((t) => t instanceof THREE.QuaternionKeyframeTrack).map((t) => t.createInterpolant());
   const at = (t) => qs.map((ip) => ip.evaluate(t).slice());
-  const q0 = at(0);
-  let best = win[0], bestGap = Infinity;
-  for (let t = win[0]; t <= win[1]; t += 1 / 30) {
-    const q = at(t);
-    let gap = 0;
-    for (let k = 0; k < q.length; k++) gap += 1 - Math.abs(q[k][0] * q0[k][0] + q[k][1] * q0[k][1] + q[k][2] * q0[k][2] + q[k][3] * q0[k][3]);
-    if (gap < bestGap) { bestGap = gap; best = t; }
+  const gapOf = (qa, qb) => { let g = 0; for (let k = 0; k < qa.length; k++) g += 1 - Math.abs(qa[k][0] * qb[k][0] + qa[k][1] * qb[k][1] + qa[k][2] * qb[k][2] + qa[k][3] * qb[k][3]); return g; };
+  let a = 0, best = pair ? 0 : win[0], bestGap = Infinity;
+  if (!pair) {
+    const q0 = at(0);
+    for (let t = win[0]; t <= win[1]; t += 1 / 30) { const g = gapOf(at(t), q0); if (g < bestGap) { bestGap = g; best = t; } }
+  } else {
+    const F = 30, poses = [];
+    for (let k = 0; k * (1 / F) <= clip.duration; k++) poses.push(at(k / F));
+    for (let i0 = Math.round(win.start[0] * F); i0 <= Math.round(win.start[1] * F) && i0 < poses.length; i0 += 3) {
+      for (let i1 = i0 + Math.round(win.len[0] * F); i1 <= i0 + Math.round(win.len[1] * F) && i1 < poses.length; i1++) {
+        const g = gapOf(poses[i1], poses[i0]);
+        if (g < bestGap) { bestGap = g; a = i0 / F; best = i1 / F; }
+      }
+    }
   }
   const was = clip.duration;
   for (const tr of clip.tracks) {
-    const ip = tr.createInterpolant(), end = ip.evaluate(best).slice(), w = tr.getValueSize();
-    const keep = [...tr.times].findIndex((t) => t >= best);
-    const n = keep < 0 ? tr.times.length : keep;
-    const times = new Float32Array(n + 1), values = new Float32Array((n + 1) * w);
-    times.set(tr.times.subarray(0, n)); values.set(tr.values.subarray(0, n * w));
-    times[n] = best; values.set(end, n * w);
+    const ip = tr.createInterpolant(), w = tr.getValueSize();
+    const t0 = [...tr.times].findIndex((t) => t > a), from = t0 < 0 ? tr.times.length : t0;
+    const t1 = [...tr.times].findIndex((t) => t >= best), to = t1 < 0 ? tr.times.length : t1;
+    const mid = Math.max(0, to - from), n = mid + 2;
+    const times = new Float32Array(n), values = new Float32Array(n * w);
+    times[0] = 0; values.set(ip.evaluate(a).slice(), 0);
+    for (let k = 0; k < mid; k++) { times[k + 1] = tr.times[from + k] - a; values.set(tr.values.subarray((from + k) * w, (from + k + 1) * w), (k + 1) * w); }
+    times[n - 1] = best - a; values.set(ip.evaluate(best).slice(), (n - 1) * w);
     tr.times = times; tr.values = values;
   }
-  clip.duration = best;
-  console.log(`  ${clip.name}: cut ${was.toFixed(1)} s → ${best.toFixed(2)} s (loop gap ${bestGap.toFixed(3)})`);
+  clip.duration = best - a;
+  console.log(`  ${clip.name}: cut ${was.toFixed(1)} s → ${a.toFixed(2)}…${best.toFixed(2)} s (${(best - a).toFixed(2)} s, loop gap ${bestGap.toFixed(3)})`);
 }
 
 // ── The hips: in place, and transitions that land where the next clip starts ──
@@ -436,7 +467,8 @@ const TRANSITIONS = {
   rifle_kneel_to_prone: ["rifle_crouch_idle", "rifle_prone_idle"],
   rifle_prone_to_kneel: ["rifle_prone_idle", "rifle_crouch_idle"],
 };
-const LOOPS_IN_PLACE = /^rifle_(walk|run|sprint|crouch_walk|crouch_strafe|crawl)$/;
+// (2026-10-17: the cower, the injured and carry walks loop; the para landings drift 8-14 cm — all pinned)
+const LOOPS_IN_PLACE = /^(rifle_(walk|run|sprint|crouch_walk|crouch_strafe|crawl)|cower|injured_walk|carry_walk|para_land|para_land_hard)$/;
 {
   const hipsOf = (c) => c?.tracks.find((t) => /Hips\.position$/.test(t.name));
   const firstXZ = (c) => { const h = hipsOf(c); return h ? [h.values[0], h.values[2]] : null; };
@@ -706,11 +738,14 @@ function addWeaponBone() {
   );
   for (const sd of soldiers) sd.mesh.bind(skeleton, sd.mesh.bindMatrix);
 
-  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit|mortar_)/.test(c.name);
+  // (2026-10-17: carry_walk, plant, pick_fruit, point, cower, para_land too — both hands busy, or a jumper's strapped rifle)
+  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit|mortar_|carry_walk|plant|pick_fruit|point|cower|para_land)/.test(c.name);
   const usesShovel = (c) => /^dig/.test(c.name);
   // The mortar loader's BOMB (synthMortarClips): on the Tool bone, in his right palm, shown by its keys.
   const usesBomb = (c) => !!c.userData?.bomb;
   const shown = (b, on) => b.scale.clone().multiplyScalar(on ? 1 : 1e-4).toArray();
+  // The CARRY WALK (2026-10-17): a crate between his palms, on the Tool bone — the bomb's two-hand hold.
+  for (const c of clips) if (/^carry_walk$/.test(c.name)) c.userData = { ...c.userData, bomb: { times: [0], shown: [1] } };
   const stowed = new Set(), withTool = new Set();
   for (const clip of clips) {
     const st = isStowed(clip), sh = usesShovel(clip);

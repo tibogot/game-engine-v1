@@ -107,13 +107,15 @@ export function createAlgFlnTricks(app, { units, selection, mines, purse }) {
     for (let i = jobs.length - 1; i >= 0; i--) {
       const j = jobs[i];
       const men = j.kind === "mine" ? [j.u] : j.men.filter((u) => u.alive);
-      const drop = (refund) => { for (const u of men) u.working = false; if (refund && j.paid) purse.earn(j.paid); jobs.splice(i, 1); };
+      const drop = (refund) => { for (const u of men) { u.working = false; u.workClip = null; } if (refund && j.paid) purse.earn(j.paid); jobs.splice(i, 1); };
       if (!men.length || !men[0].alive) { drop(true); continue; }
       // Ordered elsewhere (his goal no longer the job's spot): the job is off.
       const g = men[0].goalPoint;
       if (g && Math.hypot(g.x - j.at.x, g.z - j.at.z) > 4) { drop(true); continue; }
       const there = men.filter((u) => Math.hypot(u.position.x - j.at.x, u.position.z - j.at.z) < (j.kind === "mine" ? 1.6 : 4));
       for (const u of men) u.working = there.includes(u);
+      // A mine is buried by HAND, kneeling (Mixamo "Plant A Plant", 2026-10-17); the wire is cut as before.
+      if (j.kind === "mine") for (const u of men) u.workClip = u.working ? "plant" : null;
       if (!there.length) continue;
       j.t += dt * (j.kind === "cut" ? Math.min(2, 0.6 + 0.4 * there.length) : 1);   // more hands, a faster cut
       if (j.t < (j.kind === "mine" ? P.mine.work : P.cut.work)) continue;

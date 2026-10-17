@@ -106,7 +106,8 @@ export function deathFrom(prevClip, pick, deaths, durationOf, has = () => false)
  * pack's report: each fall's hips travel; the chest ~0.45 m on toward the
  * head) — a game lays his blood there.
  */
-export const DEATH_CHEST = { death_forward: 0.75, death_backward: -1.25, death_kneeling: -1.3, death_prone: 0.45 };
+// (2026-10-17: death_blown travels 1.24 m back, death_running 0.76 m on — the pack's report)
+export const DEATH_CHEST = { death_forward: 0.75, death_backward: -1.25, death_kneeling: -1.3, death_prone: 0.45, death_blown: -1.7, death_running: 1.2 };
 
 /**
  * A holding clip's POSTURE, for MOVES: the clips a man stands, kneels or lies

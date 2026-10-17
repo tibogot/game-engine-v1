@@ -391,7 +391,22 @@ function binos() {
     box(D, [0, 0.012, -0.03], [0.05, 0.03, 0.08]),
   ]);
 }
-export const TOOLS = { shovel: { label: "Shovel", build: shovel }, bomb: { label: "Mortar bomb", build: mortarBomb }, binos: { label: "Binoculars", build: binos } };
+/**
+ * A SAPPER'S CRATE (2026-10-17, the carry walk): an ammunition / tool box held in both hands. In the
+ * two-hand hold's frame (packMixamo holdBomb: +Z up, +Y forward), centred between the palms: the hands
+ * on its sides. Plank faces, a darker lid and end battens, rope handles' dark knots.
+ */
+function crate() {
+  const W = COLORS.wood, D = COLORS.darkWood;
+  return toGeometry([
+    box(W, [0, 0.04, 0], [0.42, 0.3, 0.26]),            // the box: 42 cm across, 30 deep, 26 high
+    box(D, [0, 0.04, 0.135], [0.44, 0.32, 0.025]),      // the lid
+    box(D, [0.205, 0.04, 0], [0.025, 0.31, 0.27]),      // the end battens (where his hands are)
+    box(D, [-0.205, 0.04, 0], [0.025, 0.31, 0.27]),
+    box(D, [0, 0.195, 0.03], [0.3, 0.012, 0.035]),      // a stencilled band on its face
+  ]);
+}
+export const TOOLS = { shovel: { label: "Shovel", build: shovel }, bomb: { label: "Mortar bomb", build: mortarBomb }, binos: { label: "Binoculars", build: binos }, crate: { label: "Crate", build: crate } };
 
 /** The shape helpers, for other low-poly kit (soldierLooks.js headgear). */
 export const prim = { part, tri, quad, block, box, cyl, tiltX, toGeometry };

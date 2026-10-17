@@ -471,6 +471,19 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     mortarSpot: exact("mortar_spot")?.name ?? null,
     mortarRest: exact("mortar_rest")?.name ?? null,
     carryRun: exact("unarmed_run")?.name ?? null,   // (unit.carrying: the mortar's tube or plate on his back)
+    // The 2026-10-17 batch (tools/packMixamo.mjs ROLES): being hit, deaths by cause, and the one-shots a
+    // game asks for (unit.playOnce = "paraLand" …: a para's landing, an order pointed, a mine planted).
+    hit: exact("hit")?.name ?? null,
+    deathBlown: exact("death_blown")?.name ?? null,
+    deathRunning: exact("death_running")?.name ?? null,
+    cower: exact("cower")?.name ?? null,
+    carryWalk: exact("carry_walk")?.name ?? null,
+    injuredWalk: exact("injured_walk")?.name ?? null,
+    paraLand: exact("para_land")?.name ?? null,
+    paraLandHard: exact("para_land_hard")?.name ?? null,
+    plant: exact("plant")?.name ?? null,
+    pickFruit: exact("pick_fruit")?.name ?? null,
+    point: exact("point")?.name ?? null,
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
     // the unarmed set (an `unarmed` renderer only)
@@ -576,6 +589,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
   const walkSpeed = roles.walk ? measureGroundSpeed(root, exact(roles.walk)) || 0 : 0;
   const fleeSpeed = roles.flee ? measureGroundSpeed(root, exact(roles.flee)) || 0 : 0;
   const carrySpeed = roles.carryRun ? measureGroundSpeed(root, exact(roles.carryRun)) || 0 : 0;
+  const haulSpeed = roles.carryWalk ? measureGroundSpeed(root, exact(roles.carryWalk)) || 0 : 0;
 
   // The compute pass emits vertices in the TEMPLATE MESH's local space, which
   // knows nothing about buildTemplate's normalisation (the centring offset and
@@ -613,7 +627,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, carrySpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
+  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, carrySpeed, haulSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
 }
 
 /**
@@ -727,11 +741,12 @@ function withSkinnedKit(source, root, names) {
 }
 
 // Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
-const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_)/;   // (mortar_spot too: rifle slung, binoculars up)
+const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_|carry_walk|plant|pick_fruit|point|cower|para_land)/;   // (mortar_spot too: rifle slung, binoculars up)
 const USES_TOOL = /^dig/;
 // The loader's bomb (on the Tool bone; its scale keys hide it once it is in the tube).
 const USES_BOMB = /^mortar_(wait|load)/;
 const USES_BINOS = /^mortar_spot/;
+const USES_CRATE = /^carry_walk/;   // (the sapper hauling to his site: the crate on the Tool bone)
 
 /**
  * The RIGID pieces a soldier type carries — its look's weapons in the hand
@@ -803,6 +818,7 @@ function buildPieces(field, source, rel, looks, scene, root, cap) {
   if (boneOf("Tool") >= 0) add("shovel", TOOLS.shovel.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
   if (boneOf("Tool") >= 0 && field.has?.("mortar_load")) add("bomb", TOOLS.bomb.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
   if (boneOf("Tool") >= 0 && field.has?.("mortar_spot")) add("binos", TOOLS.binos.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
+  if (boneOf("Tool") >= 0 && field.has?.("carry_walk")) add("crate", TOOLS.crate.build(), weaponMat, boneOf("Tool"), restOf(boneOf("Tool")));
 
   // HATS: every headgear the look's variants can roll, modelled from the crown.
   const hatK = toMesh.clone().multiply(new THREE.Matrix4().makeTranslation(crown));
@@ -898,6 +914,9 @@ function writePieces(crd, v, unitMatrix, holdA = false, holdB = false, gibM = nu
   const na = USES_BINOS.test(a), nb = USES_BINOS.test(b);
   if (na && nb) put("binos");
   else if ((na || nb) && USES_BINOS.test(dom)) putDom("binos");
+  const ca = USES_CRATE.test(a), cb = USES_CRATE.test(b);
+  if (ca && cb) put("crate");
+  else if ((ca || cb) && USES_CRATE.test(dom)) putDom("crate");
   if (v.hat) put(`h:${v.hat}`);
   for (const k of v.kit) put(`k:${k}`);
 }
@@ -990,6 +1009,9 @@ function measureGroundSpeed(root, clip) {
  * A body without a clip falls back to the standing one (the old stand-in:
  * idle + run only).
  */
+/** The flinch's limit (s between two on one man). */
+const FLINCH = { every: 2.5 };
+
 function soldierClip(unit, v, roles) {
   // Hanging in a harness (alg-rts algParadrop.js): the standing idle — his swing is the lean below.
   if (unit.hanging) return roles.idle;
@@ -1000,10 +1022,13 @@ function soldierClip(unit, v, roles) {
   if (unit.mortarClip && roles[unit.mortarClip]) return roles[unit.mortarClip];
   // Repairing (alg-rts `repairing`): the repair clip, else kneeling at it — never the shovel.
   if (unit.repairing && (roles.repair || roles.crouchIdle)) return roles.repair ?? roles.crouchIdle;
+  // A job's own clip (unit.workClip, a roles key: the FLN burying a mine by hand — algFlnTricks.js), else the dig.
+  if (unit.working && unit.workClip && roles[unit.workClip]) return roles[unit.workClip];
   if (unit.working && roles.dig) return roles.dig;
   const low = unit.posture;   // "stand" | "kneel" | "prone"; undefined = stand
   if (unit.isMoving) {
     if (unit.carrying && roles.carryRun) return roles.carryRun;   // a load on his back, rifle slung
+    if (unit.hauling && roles.carryWalk) return roles.carryWalk;  // a crate in his arms (algBuild.js)
     if (low === "prone" && roles.crawl) return roles.crawl;       // pinned, ordered on: he crawls
     return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
   }
@@ -1535,7 +1560,23 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       // From the posture he was in (soldierTransitions.js): a man lying or
       // kneeling does not get up to fall.
       const f = v.crowd.field;
-      const d = deathFrom(v.prev.clip, r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], r.deaths, (c) => f.duration(c), (c) => f.has(c));
+      // BY CAUSE (2026-10-17): killed by a BLAST (combat.js lastHit) he is thrown back, away from it —
+      // turned to face it, the clip falls backward (not when lying: he stays down); shot while RUNNING
+      // he pitches forward on his face; otherwise from his posture as before.
+      const lh = unit.lastHit;
+      const blast = lh?.kind === "blast" && r.deathBlown && f.has(r.deathBlown) && !/prone|crawl/.test(v.prev.clip);
+      const running = !blast && r.deathRunning && f.has(r.deathRunning) && v.prev.clip === r.run;
+      // His BODY to face the blast (the model's facing is heading + facingOffset; heading is read-only:
+      // units turn through faceToward — at a point that gives that heading).
+      if (blast) {
+        const a = Math.atan2(lh.x - unit.position.x, lh.z - unit.position.z) - (unit.type.facingOffset ?? 0);
+        unit.faceToward?.(unit.position.x + Math.sin(a), unit.position.z + Math.cos(a));
+        // (and his body: a corpse is drawn from his last living transform, which never sees this turn)
+        v.xform.quaternion.setFromAxisAngle(_UP, unit.heading + (unit.type.facingOffset ?? 0));
+        v.xform.updateMatrix();
+      }
+      const d = blast ? { clip: r.deathBlown, t: 0, fade: 0.1 } : running ? { clip: r.deathRunning, t: 0, fade: 0.15 }
+        : deathFrom(v.prev.clip, r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], r.deaths, (c) => f.duration(c), (c) => f.has(c));
       v.move = null;
       v.cur = { clip: d.clip, t: d.t };
       v.fade = 0;
@@ -1769,7 +1810,28 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         v.lastX = p.x; v.lastZ = p.z;
         v.speed += (moved - v.speed) * Math.min(1, dt * 6);
 
-        let want = soldierClip(unit, v, r);
+        // A ONE-SHOT a game asks for (unit.playOnce = a roles key: "paraLand", "point", "plant"…): played
+        // once from its start, then back to what he was doing.
+        const fo = v.crowd.field;
+        if (unit.playOnce) {
+          const c = r[unit.playOnce];
+          v.once = c && fo.has(c) ? { clip: c, left: fo.duration(c) } : null;
+          unit.playOnce = null;
+        }
+        // THE FLINCH (2026-10-17, Mixamo "Hit Reaction"): a man standing still who takes a hit and lives
+        // jerks for a moment — not more than once every FLINCH.every s (an MG burst would keep him
+        // twitching), not kneeling or lying (the clip stands: he would pop up), not moving (it is in place:
+        // he would skate), not busy (a throw, the mortar, a job).
+        if (v.lastHp != null && unit.hp < v.lastHp - 0.5 && !v.once && r.hit && !unit.isMoving && (unit.posture ?? "stand") === "stand"
+          && !unit.throwing && !unit.mortarClip && !unit.working && !unit.repairing && !unit.hanging && (v.flinchCd ?? 0) <= 0) {
+          v.once = { clip: r.hit, left: fo.duration(r.hit) };
+          v.flinchCd = FLINCH.every;
+        }
+        v.lastHp = unit.hp;
+        v.flinchCd = Math.max(0, (v.flinchCd ?? 0) - dt);
+        if (v.once && unit.isMoving) v.once = null;   // (one-shots are in place: off he goes, no sliding)
+        if (v.once && (v.once.left -= dt) <= 0) v.once = null;
+        let want = v.once ? v.once.clip : soldierClip(unit, v, r);
         // A MOVE between postures (soldierTransitions MOVES): the real drop to
         // the ground or the rise, clip by clip, instead of one fade between two
         // poses (which squats and slides — the transition lab). Only standing
@@ -1789,7 +1851,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           const joining = !!v.move || !!postureOf(want) && MOVES_CLIPS.has(v.cur.clip);
           v.prev = v.cur;
           // a shot / a throw / a move's clip from its start (a throw from its own offset: algGrenades.js)
-          const t0 = want === r.grenade ? unit.throwing?.start ?? 0
+          const t0 = v.once && want === v.once.clip ? 0
+            : want === r.grenade ? unit.throwing?.start ?? 0
             // kneeling into aim with no shot yet: straight to the held aim, no recoil
             : want === r.crouchFire && v.firing <= 0 ? f.duration(want) * CROUCH_AIM_AT
             : v.move || want === r.fire || want === r.crouchFire || want === r.proneFire ? 0 : Math.random() * f.duration(want);
@@ -1801,7 +1864,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6)
           : v.cur.clip === r.walk && v.crowd.walkSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.walkSpeed, 0.6, 1.6)
           : v.cur.clip === r.flee && v.crowd.fleeSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.fleeSpeed, 0.6, 1.6)
-          : v.cur.clip === r.carryRun && v.crowd.carrySpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.carrySpeed, 0.6, 1.6) : 1;
+          : v.cur.clip === r.carryRun && v.crowd.carrySpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.carrySpeed, 0.6, 1.6)
+          : v.cur.clip === r.carryWalk && v.crowd.haulSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.haulSpeed, 0.6, 1.6) : 1;
         // The crouch-fire clip plays once per shot (a shot restarts it) and
         // then HOLDS its last frame — his aim — instead of looping.
         if (v.cur.clip === r.crouchFire) v.cur.t = Math.min(v.cur.t + dt * rate, f.duration(r.crouchFire) * CROUCH_AIM_AT);

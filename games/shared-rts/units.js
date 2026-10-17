@@ -393,7 +393,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
       if (emerging) {
         const ex = emerging.toX - pos.x, ez = emerging.toZ - pos.z;
         const el = Math.hypot(ex, ez);
-        const step = type.speed * unit.speedScale * (unit.moveMul ?? 1) * dt;
+        const step = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * dt;
         if (el <= step + 0.5) {
           pos.x = emerging.toX; pos.z = emerging.toZ;
           const r = emerging; emerging = null; unit.ghost = false;
@@ -425,7 +425,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
         const ex = open.x - pos.x, ez = open.z - pos.z;
         const el = Math.hypot(ex, ez);
         if (el > 1e-3) {
-          const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * dt, el);
+          const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * dt, el);
           pos.x += (ex / el) * step;
           pos.z += (ez / el) * step;
           heading = turnToward(heading, Math.atan2(ex, ez), (type.turnRate ?? 3) * dt);
@@ -514,7 +514,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
         dirX /= len; dirZ /= len;
 
         // (formMul: a squad's march keeping its shape — alg-rts algSquadMarch.js speed matching)
-        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.formMul ?? 1);
+        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * (unit.formMul ?? 1);
         // DRIVE ALONG THE HULL (opt-in per type: type.drive = { kind: "wheels" | "tracks",
         // turn rad/s, accel m/s²} — alg-rts 2026-10-06, a player: "vehicles slide"). Without it a
         // vehicle went where the path pointed at full speed and the hull turned after (crabbing).

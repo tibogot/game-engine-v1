@@ -188,6 +188,9 @@ export function createAlgParadrop(app, { units, squads, navGrid = null }) {
     u.position.set(J.p.x, groundY(J.p.x, J.p.z), J.p.z);
     u.haltMovement?.();
     u.posture = "kneel";         // the landing crouch (the renderer's own kneel)
+    // The touchdown itself (Mixamo "Hard Landing", 2026-10-17: the impact, a hand down, up again), played
+    // once. ("Falling To Landing" starts in mid-air: played at touchdown it lifted him off the ground.)
+    u.playOnce = "paraLandHard";
     J.phase = "down"; J.t = 0;
     gathered.push({ x: J.p.x, z: J.p.z, yaw: J.yaw + 0.6, t: 0, lean: J.leanNow ?? [0, 0] });
   }
