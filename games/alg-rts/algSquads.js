@@ -180,6 +180,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     s.retreating = true;
     const muster = home(s).muster;
     s.members.forEach((u, k) => {
+      u.squadRetreating = true;   // (he runs, hurt or not: no limp — units.js, unitRenderer.js)
       u.holdFire = true;
       u.target = u.attackTarget = null;
       const a = k * 2.39996 + s.id, r = k === 0 ? 0 : 3;
@@ -188,7 +189,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
   }
   function endRetreat(s) {
     s.retreating = false;
-    for (const u of s.members) u.holdFire = false;
+    for (const u of s.members) { u.holdFire = false; u.squadRetreating = false; }
   }
 
   /** What one more man costs this squad (0 = can't). */

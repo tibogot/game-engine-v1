@@ -39,6 +39,12 @@ const _avoidKept = [];
 const byGridIdx = (a, b) => a._gridIdx - b._gridIdx;
 
 /** Shortest-way angular step from a → b, clamped to maxStep. */
+/** A badly hurt man on FOOT limps (2026-10-17, the injured walk): at this share of his speed, under 35 %
+ *  of his health — not while his squad runs for it (a retreat: he runs, hurt or not). */
+function limpMul(u) {
+  return u.type?.foot && u.hp < (u.maxHp ?? u.hp) * 0.35 && !u.squadRetreating && !u.running ? 0.5 : 1;
+}
+
 function turnToward(a, b, maxStep) {
   let d = b - a;
   while (d > Math.PI) d -= Math.PI * 2;
@@ -393,7 +399,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
       if (emerging) {
         const ex = emerging.toX - pos.x, ez = emerging.toZ - pos.z;
         const el = Math.hypot(ex, ez);
-        const step = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * dt;
+        const step = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * limpMul(unit) * dt;
         if (el <= step + 0.5) {
           pos.x = emerging.toX; pos.z = emerging.toZ;
           const r = emerging; emerging = null; unit.ghost = false;
@@ -425,7 +431,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
         const ex = open.x - pos.x, ez = open.z - pos.z;
         const el = Math.hypot(ex, ez);
         if (el > 1e-3) {
-          const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * dt, el);
+          const step = Math.min(type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * limpMul(unit) * dt, el);
           pos.x += (ex / el) * step;
           pos.z += (ez / el) * step;
           heading = turnToward(heading, Math.atan2(ex, ez), (type.turnRate ?? 3) * dt);
@@ -514,7 +520,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
         dirX /= len; dirZ /= len;
 
         // (formMul: a squad's march keeping its shape — alg-rts algSquadMarch.js speed matching)
-        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * (unit.formMul ?? 1);
+        let speed = type.speed * unit.speedScale * (unit.moveMul ?? 1) * (unit.loadMul ?? 1) * limpMul(unit) * (unit.formMul ?? 1);
         // DRIVE ALONG THE HULL (opt-in per type: type.drive = { kind: "wheels" | "tracks",
         // turn rad/s, accel m/s²} — alg-rts 2026-10-06, a player: "vehicles slide"). Without it a
         // vehicle went where the path pointed at full speed and the hull turned after (crabbing).

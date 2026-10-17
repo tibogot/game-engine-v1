@@ -590,6 +590,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
   const fleeSpeed = roles.flee ? measureGroundSpeed(root, exact(roles.flee)) || 0 : 0;
   const carrySpeed = roles.carryRun ? measureGroundSpeed(root, exact(roles.carryRun)) || 0 : 0;
   const haulSpeed = roles.carryWalk ? measureGroundSpeed(root, exact(roles.carryWalk)) || 0 : 0;
+  const limpSpeed = roles.injuredWalk ? measureGroundSpeed(root, exact(roles.injuredWalk)) || 0 : 0;
 
   // The compute pass emits vertices in the TEMPLATE MESH's local space, which
   // knows nothing about buildTemplate's normalisation (the centring offset and
@@ -627,7 +628,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
 
   const pieces = marked ? buildPieces(field, source, rel, looks.filter(Boolean), scene, root, cap) : null;
 
-  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, carrySpeed, haulSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
+  return { field, gib, rel, scale: root.scale.x, xray, roles, runSpeed, walkSpeed, fleeSpeed, carrySpeed, haulSpeed, limpSpeed, pieces, views, cap, kitSkinned, groundAt: (x, z) => app.getWorldHeight?.(x, z) ?? 0 };
 }
 
 /**
@@ -1011,6 +1012,8 @@ function measureGroundSpeed(root, clip) {
  */
 /** The flinch's limit (s between two on one man). */
 const FLINCH = { every: 2.5 };
+/** Under this share of his health a walking man limps (the injured walk). */
+const WOUNDED = 0.35;
 
 function soldierClip(unit, v, roles) {
   // Hanging in a harness (alg-rts algParadrop.js): the standing idle — his swing is the lean below.
@@ -1029,6 +1032,9 @@ function soldierClip(unit, v, roles) {
   if (unit.isMoving) {
     if (unit.carrying && roles.carryRun) return roles.carryRun;   // a load on his back, rifle slung
     if (unit.hauling && roles.carryWalk) return roles.carryWalk;  // a crate in his arms (algBuild.js)
+    // WOUNDED (Mixamo "Injured Walking", 2026-10-17): a man under WOUNDED of his health limps — not on a
+    // retreat (he runs for it: `running`), not crouched or crawling under fire (those win below).
+    if (roles.injuredWalk && unit.hp < (unit.maxHp ?? unit.hp) * WOUNDED && !unit.running && !unit.squadRetreating && (!low || low === "stand")) return roles.injuredWalk;
     if (low === "prone" && roles.crawl) return roles.crawl;       // pinned, ordered on: he crawls
     return low && low !== "stand" && roles.crouchWalk ? roles.crouchWalk : roles.run;
   }
@@ -1865,7 +1871,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           : v.cur.clip === r.walk && v.crowd.walkSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.walkSpeed, 0.6, 1.6)
           : v.cur.clip === r.flee && v.crowd.fleeSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.fleeSpeed, 0.6, 1.6)
           : v.cur.clip === r.carryRun && v.crowd.carrySpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.carrySpeed, 0.6, 1.6)
-          : v.cur.clip === r.carryWalk && v.crowd.haulSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.haulSpeed, 0.6, 1.6) : 1;
+          : v.cur.clip === r.carryWalk && v.crowd.haulSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.haulSpeed, 0.6, 1.6)
+          : v.cur.clip === r.injuredWalk && v.crowd.limpSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.limpSpeed, 0.6, 1.6) : 1;
         // The crouch-fire clip plays once per shot (a shot restarts it) and
         // then HOLDS its last frame — his aim — instead of looping.
         if (v.cur.clip === r.crouchFire) v.cur.t = Math.min(v.cur.t + dt * rate, f.duration(r.crouchFire) * CROUCH_AIM_AT);
