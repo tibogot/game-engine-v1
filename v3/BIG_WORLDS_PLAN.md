@@ -71,9 +71,27 @@ features keep their 2 km size (an 8 km map reads flat from altitude); every full
      tools/paintStrokeUndoTest (9).
    - **Control map** (TEXTURING_PLAN step 4): still the way to > 7 materials and half the paint
      memory; no longer needed for smooth painting or resolution.
-2. **World tiles.** A world = a grid of tiles (e.g. 1-2 km, each a heightmap + paint + vegetation
-   at today's resolution); the height stack, layers, operators and bakes work per tile and only
-   re-bake dirty tiles; the editor edits across tile borders; saved per tile.
+2. **World regions** (design 2026-10-17, after Godot Terrain3D — regions in texture arrays + a
+   region map; worlds to ~65 km, empty space free;
+   https://terrain3d.readthedocs.io/en/stable/docs/shader_design.html).
+   - **What they are:** a world = a grid of REGIONS, each exactly today's terrain at today's
+     resolution (e.g. 1024² height at 2 m = 2 km, plus its paint, vegetation density, bakes).
+     Only regions that exist cost memory; the space between is flat / far terrain / generated.
+     **A level of today = a world of ONE region** — every existing level and game keeps working.
+   - **GPU:** each per-region map becomes a TEXTURE ARRAY (one layer per resident region) +
+     a small REGION MAP (which layer covers world cell x,z), read with textureLoad (no sampler).
+     The clipmap, the paint shader and the bakes look up (layer, local uv) instead of one world uv.
+     Per-region mips (the step-0 LOD) keep the far rings cheap.
+   - **CPU:** heights, paint and density per region; getWorldHeight / samplePaintWeights look up
+     the region; the height stack (layers, operators, stamps) and every bake run PER REGION and
+     only re-run the regions an edit touched (erosion 3 s → ~0.2 s per 2 km region).
+   - **Editor:** a brush crossing a border writes both regions; a "+ region" grid view; save per
+     region (manifest + one blob set per region).
+   - **Order:** (a) the data model + loader with one-region levels, nothing visible changes;
+     (b) the GPU lookup for heights (clipmap) with 2×2 regions in a test level; (c) paint and
+     bakes per region; (d) the editor across borders; (e) streaming (step 3).
+   - **Cost to expect:** several sessions per letter; every letter ends with all levels and games
+     checked unchanged.
 3. **Streaming.** Games keep only the tiles near the camera resident (CPU + GPU), with coarse
    versions further out; the clipmap rings read from a fixed-size resident window instead of one
    whole-world texture. three.js has nothing built in for this (checked r180-r186) — it is ours.
