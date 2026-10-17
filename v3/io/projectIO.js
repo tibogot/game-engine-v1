@@ -115,6 +115,7 @@ export async function encodeProjectFile({
   trees, foliage, props, roads, splines, lakes, riversV2, riverNetwork,
   pads,                 // padSystem.exportData(): { pads: [...] } or null
   erosionFilter,        // erosionOperator.exportData() when on, else null
+  creaseFilter,         // creaseOperator.exportData() when on, else null
   decals,               // decalSystem.exportData(): { slots, decals } or null
   waterfalls,           // waterfallSystem.exportData(): { look, falls } or null
   paintLayers,         // textureLibrary.exportData() — slot metadata, no pixels
@@ -207,6 +208,7 @@ export async function encodeProjectFile({
     riverNetwork: riverNetwork ?? null,
     pads: pads ?? null,
     erosionFilter: erosionFilter ?? null,
+    creaseFilter: creaseFilter ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
     farTerrain: farTerrain?.manifest ?? null,
@@ -301,6 +303,7 @@ export async function decodeProjectFile(buffer) {
     riverNetwork: manifest.riverNetwork ?? null,
     pads: manifest.pads ?? null,
     erosionFilter: manifest.erosionFilter ?? null,
+    creaseFilter: manifest.creaseFilter ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,
     // The ground past the heightmap: its params and grid (Float32, copied for alignment).

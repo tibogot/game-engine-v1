@@ -53,6 +53,7 @@ import { createGroundCache } from "../terrain/groundCache.js";
 import { createTerrainNormalMap } from "../terrain/terrainNormalMap.js";
 import { createFlowMap } from "../terrain/flowMap.js";
 import { createErosionOperator } from "../terrain/erosionOperator.js";
+import { createCreaseOperator } from "../terrain/creaseOperator.js";
 import { TextureLibrary } from "../terrain/textureLibrary.js";
 import { ProceduralLayerBaker, procParamsFromPreset } from "../terrain/proceduralLayer.js";
 import { createProceduralLayerPanel } from "../ui/proceduralLayerPanel.js";
@@ -1183,6 +1184,7 @@ export async function startV3App(opts = {}) {
   let _flowHv = -1, _flowDue = 0, _flowBusy = false, _flowMs = 0;
   // Erosion filter: re-bake ~0.6 s after GROUND stops changing (sculpt, Generate, layers).
   let _eroGv = -1, _eroDue = 0, _eroBusy = false;
+  let _crsGv = -1, _crsDue = 0;
   let _legacyMeadowPainted = false;
 
   function getTerrainMeshesForWorld() {
@@ -3484,6 +3486,8 @@ export async function startV3App(opts = {}) {
   let padSystem = null;
   let erosionOp = null;   // erosionOperator.js, created with the pads
   let openErosionFilterPanel = () => {};
+  let creaseOp = null;    // creaseOperator.js (Soften creases), created with the erosion filter
+  let openCreaseFilterPanel = () => {};
   let padEditor = null;
   let padUi = null;
   /** Waterfalls (G): the runtime system (games too) and its editing half. Built after River v2. */
@@ -4947,6 +4951,16 @@ export async function startV3App(opts = {}) {
         if (_eroDue && now >= _eroDue && !_eroBusy && !_rendererSideWork && erosionOp.isStale()) {
           _eroDue = 0; _eroBusy = true;
           void erosionOp.bake().finally(() => { _eroBusy = false; });
+        }
+      }
+      // Soften creases: a CPU re-bake once a GROUND edit settles (tens of ms;
+      // only the texels whose offset moved are recomposed).
+      if (creaseOp?.params.enabled) {
+        const gv = heightLayers.groundVersion;
+        if (gv !== _crsGv) { _crsGv = gv; _crsDue = now + 500; }
+        if (_crsDue && now >= _crsDue && !_rendererSideWork && creaseOp.isStale()) {
+          _crsDue = 0;
+          creaseOp.bake();
         }
       }
       // Wanted by the paint's wetness and by the auto gully rule.
@@ -7512,6 +7526,44 @@ export async function startV3App(opts = {}) {
     syncUi();
   }
 
+  // ── Soften creases (v3/terrain/creaseOperator.js) ───────────────────────────
+  // Spreads every bend sharper than the triangle grid can draw (terrace lips
+  // and feet, cuts) over a few texels, so edges stop rendering as teeth.
+  // A CPU offset at the front of the height stack. Saved with the level.
+  creaseOp = createCreaseOperator({ heightLayers, size: HEIGHTMAP_SIZE, worldSize: WORLD_SIZE, maxHeight: MAX_HEIGHT });
+  {
+    const ck = uiById("ck-crease-on"), ms = uiById("lbl-crease-ms");
+    const S = [
+      ["radius", "sl-crease-radius", 10, (v) => v.toFixed(1)],
+      ["strength", "sl-crease-strength", 100, (v) => v.toFixed(2)],
+      ["detail", "sl-crease-detail", 100, (v) => v.toFixed(2)],
+    ];
+    const syncUi = () => {
+      if (!ck) return;
+      ck.checked = !!creaseOp.params.enabled;
+      for (const [k, id, div, fmt] of S) {
+        const el = uiById(id), lbl = uiById(id.replace("sl-", "lbl-"));
+        if (el) el.value = String(Math.round(creaseOp.params[k] * div));
+        if (lbl) lbl.textContent = fmt(creaseOp.params[k]);
+      }
+      if (ms) ms.textContent = creaseOp.params.enabled ? `${creaseOp.lastMs.toFixed(0)} ms` : "";
+    };
+    creaseOp.syncUi = syncUi;
+    openCreaseFilterPanel = () => {
+      openRightTab("tools");
+      const sec = ck?.closest(".inspector-section");
+      const body = sec?.querySelector(".section-body");
+      if (body?.classList.contains("hidden")) sec.querySelector("[data-toggle]")?.click();
+      sec?.scrollIntoView({ block: "start", behavior: "smooth" });
+    };
+    const apply = (next) => { creaseOp.set(next); syncUi(); };
+    ck?.addEventListener("change", () => apply({ enabled: ck.checked }));
+    for (const [k, id, div] of S) {
+      uiById(id)?.addEventListener("input", (e) => apply({ [k]: Number(e.target.value) / div }));
+    }
+    syncUi();
+  }
+
   // ── Pads (v3/terrain/padSystem.js) ───────────────────────────────────────────
   // Flattened zones on the height stack, saved in the level and applied in games.
   // A pad attached to a prop takes the prop's footprint: its type's merged box,
@@ -9193,6 +9245,7 @@ export async function startV3App(opts = {}) {
       riverNetwork: riverV3System?.exportData() ?? null,
       pads:      padSystem?.exportData() ?? null,
       erosionFilter: erosionOp?.params.enabled ? erosionOp.exportData() : null,
+      creaseFilter: creaseOp?.params.enabled ? creaseOp.exportData() : null,
       tunnels:   tunnelSystem?.exportData() ?? null,
       paintLayers,
       farTerrain: farTerrain.exportData(),
@@ -9471,6 +9524,9 @@ export async function startV3App(opts = {}) {
     // Awaited, so a game builds its physics and nav on the eroded ground.
     await erosionOp?.importData(d.erosionFilter ?? null);
     erosionOp?.syncUi?.();
+    // Soften creases: the same, before the pads and rivers that sit above it.
+    creaseOp?.importData(d.creaseFilter ?? null);
+    creaseOp?.syncUi?.();
     // Pads: stamps on the height stack the load just reset — applied here in
     // games too, so a level's pads need no game code.
     padSystem?.importData(d.pads ?? null);
@@ -10471,6 +10527,11 @@ export async function startV3App(opts = {}) {
         key: "terrainOp:erosion", label: "Erosion filter", icon: "waves",
         sub: erosionOp.params.enabled ? `${erosionOp.params.size} m` : "off",
         canHide: true, hidden: !erosionOp.params.enabled,
+      }] : []).concat(creaseOp ? [{
+        // Soften creases (creaseOperator.js): the eye turns it on/off.
+        key: "terrainOp:creases", label: "Soften creases", icon: "spline",
+        sub: creaseOp.params.enabled ? `${creaseOp.params.radius} m` : "off",
+        canHide: true, hidden: !creaseOp.params.enabled,
       }] : []),
     });
 
@@ -10592,6 +10653,7 @@ export async function startV3App(opts = {}) {
       inspector?.key, editorMode, propStore.gen, propInstancer.selectedIds.join(","),
       heightLayers.listLayers().map((l) => `${l.id}${l.name}${l.visible ? "" : "h"}${l.strength}${l.locked ? "l" : ""}`).join(";"), heightLayers.activeLayer,
       padSystem?.version, padEditor?.selectedId, erosionOp?.params.enabled, erosionOp?.params.size,
+      creaseOp?.params.enabled, creaseOp?.params.radius,
       propInstancer.hiddenTypes.size, propInstancer.hiddenIds.size,
       (tunnelSystem?.tunnels ?? []).map((t) => `${t.style}${t.nodes.length}${t.hidden ? "h" : ""}${(t._sampled?.length ?? 0) | 0}`).join(";"), tunnelSystem?.activeIndex,
       (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
@@ -10609,7 +10671,7 @@ export async function startV3App(opts = {}) {
       case "hlayer": setEditorMode("sculpt"); setActiveHeightLayer(i); break;
       // A tick later: the list's own click then shows the Inspector, which has
       // nothing for this row — the filter's controls are in the Sculpt panel.
-      case "terrainOp": setEditorMode("sculpt"); setTimeout(() => openErosionFilterPanel(), 0); break;
+      case "terrainOp": setEditorMode("sculpt"); setTimeout(() => (arg === "creases" ? openCreaseFilterPanel : openErosionFilterPanel)(), 0); break;
       case "props": setEditorMode("props"); break;
       case "propType": {
         setEditorMode("props");
@@ -10775,6 +10837,7 @@ export async function startV3App(opts = {}) {
       }
       // The erosion filter: the eye switches it on and off (a real change, saved).
       case "terrainOp": {
+        if (arg === "creases") { if (creaseOp) { creaseOp.set({ enabled: !creaseOp.params.enabled }); creaseOp.syncUi?.(); } break; }
         if (erosionOp) void erosionOp.set({ enabled: !erosionOp.params.enabled }).then(() => erosionOp.syncUi?.());
         break;
       }
@@ -10948,9 +11011,10 @@ export async function startV3App(opts = {}) {
       case "terrain":
         return [inspect, sep, { label: "Add sculpt layer", onClick: addHeightLayer }];
       case "terrainOp": {
-        const on = !!erosionOp?.params.enabled;
+        const isCrease = key === "terrainOp:creases";
+        const on = !!(isCrease ? creaseOp : erosionOp)?.params.enabled;
         return [
-          { label: "Settings", onClick: () => { setEditorMode("sculpt"); openErosionFilterPanel(); } },
+          { label: "Settings", onClick: () => { setEditorMode("sculpt"); (isCrease ? openCreaseFilterPanel : openErosionFilterPanel)(); } },
           { label: on ? "Turn off" : "Turn on", onClick: () => toggleSceneHidden(key) },
         ];
       }
@@ -12151,6 +12215,8 @@ export async function startV3App(opts = {}) {
       splatOverlay,
       /** The erosion filter operator (erosionOperator.js). */
       get erosionOp() { return erosionOp; },
+      /** The soften-creases operator (creaseOperator.js). */
+      get creaseOp() { return creaseOp; },
       /** Where rain gathers (flowMap.js); flowMs = the last compute's cost. */
       flowMap,
       get flowMs() { return _flowMs; },
@@ -12522,6 +12588,7 @@ export async function startV3App(opts = {}) {
       get riverV2System() { return riverV2System; },
       riverSandShading,
       riverV3System,
+      sampleTerrainHeight,
       /**
        * River flow at a world position, for physics, gameplay and audio:
        * `{ surfaceY, bedY, depth, speed, dirX, dirZ, inChannel, ... }` or null.

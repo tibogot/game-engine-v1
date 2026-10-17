@@ -951,6 +951,47 @@
           <div class="inspector-section">
             <div class="section-header" data-toggle>
               <i data-lucide="chevron-down" class="section-arrow"></i>
+              Soften Creases (live)
+            </div>
+            <div class="section-body">
+              <p class="mode-hint" style="margin-top:2px">Rounds every bend sharper than the terrain mesh can draw — the lip and foot of a cliff or terrace wall, a cut — so edges stop rendering as a saw-tooth. Flat ground and straight slopes are left alone, walls stay walls. A layer: nothing is written into the heightmap. Saved with the level and applied in games.</p>
+              <div class="prop-row">
+                <span class="prop-label">On</span>
+                <div class="prop-value">
+                  <label class="toggle-label" style="margin:0">
+                    <input type="checkbox" id="ck-crease-on" />
+                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                  </label>
+                  <span class="prop-num" id="lbl-crease-ms"></span>
+                </div>
+              </div>
+              <div class="prop-row" title="How far a bend is spread, each side, in metres">
+                <span class="prop-label">Radius (m)</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-crease-radius" min="5" max="60" step="5" value="15" />
+                  <span class="prop-num" id="lbl-crease-radius">1.5</span>
+                </div>
+              </div>
+              <div class="prop-row" title="How far toward the rounded ground">
+                <span class="prop-label">Strength</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-crease-strength" min="0" max="100" step="5" value="100" />
+                  <span class="prop-num" id="lbl-crease-strength">1.00</span>
+                </div>
+              </div>
+              <div class="prop-row" title="Bends that would move the ground less than this (metres) are kept as they are: fine relief, gullies">
+                <span class="prop-label">Keep detail (m)</span>
+                <div class="prop-value">
+                  <input type="range" id="sl-crease-detail" min="5" max="200" step="5" value="25" />
+                  <span class="prop-num" id="lbl-crease-detail">0.25</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="inspector-section">
+            <div class="section-header" data-toggle>
+              <i data-lucide="chevron-down" class="section-arrow"></i>
               Heightmap File
             </div>
             <div class="section-body">
