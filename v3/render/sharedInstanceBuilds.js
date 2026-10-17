@@ -35,6 +35,14 @@ import * as THREE from "three";
  *      the kit's 60 meshes on two materials, all but the first frozen where they
  *      were first drawn — their buffers at version 1 while the matrices were at 539.
  * The builder's own mesh keeps three's path unchanged.
+ *
+ * INSTANCE COLOURS (2026-10-17, alg-rts perf audit: 32 coloured instanced meshes — the vehicles'
+ * tinted kit, the stencils, the cockpit glass — built their 45 k-character shader once EACH, main
+ * pass and shadow: ~44 of the boot's 225 duplicate builds). A mesh with plain (non-storage) instance
+ * colours shares too: its key's class tag says it HAS colours (and their buffer usage), so a plain
+ * mesh and a coloured one never share; it gets its own colour attribute in place of the builder's
+ * (three's InstanceNode wraps the builder's array in `bufferColor`), kept at instanceColor.version
+ * as the matrices are, and a colour change refreshes the draw as a matrix change does.
  */
 
 const OWN = new WeakMap();   // mesh → { im, buf, attrs: Map(offset → attribute) }
@@ -43,7 +51,7 @@ let _warned = false;
 /** A mesh whose build can be shared: its shader text depends on nothing of its own. */
 function shareable(o) {
   return o.isInstancedMesh === true && o.isBatchedMesh !== true
-    && o.instanceColor == null
+    && (o.instanceColor == null || (o.instanceColor.isStorageInstancedBufferAttribute !== true && o.instanceColor.itemSize === 3))
     && !Array.isArray(o.morphTargetInfluences)
     && o.instanceMatrix?.itemSize === 16
     && o.instanceMatrix.isStorageInstancedBufferAttribute !== true
@@ -53,7 +61,11 @@ function shareable(o) {
 // Seen through this, the mesh's uuid is a class tag: the rest of three's key
 // (geometry layout, material, shadows, context) is read as it is.
 const AS_CLASS = {
-  get(t, p) { return p === "uuid" ? "shared-instanced" : Reflect.get(t, p, t); },
+  get(t, p) {
+    if (p !== "uuid") return Reflect.get(t, p, t);
+    const c = t.instanceColor;
+    return c ? `shared-instanced-colour-${c.usage}` : "shared-instanced";
+  },
 };
 
 function ownAttribute(o, shared) {
@@ -75,7 +87,36 @@ function ownAttribute(o, shared) {
   return a;
 }
 
+/** The mesh's own colour attribute, in place of the builder's `bufferColor`. */
+const OWN_COLOUR = new WeakMap();   // mesh → { ic, attr }
+function ownColour(o, shared) {
+  const ic = o.instanceColor;
+  let own = OWN_COLOUR.get(o);
+  if (!own || own.ic !== ic) {
+    const attr = new THREE.InstancedBufferAttribute(ic.array, 3);
+    attr.setUsage(shared.usage);
+    attr.version = ic.version;
+    own = { ic, attr };
+    OWN_COLOUR.set(o, own);
+  }
+  return own.attr;
+}
+function syncColour(o) {
+  const own = OWN_COLOUR.get(o);
+  if (!own) return;
+  const ic = o.instanceColor;
+  if (ic !== own.ic) {
+    if (!_warned) { _warned = true; console.error("[V3] sharedInstanceBuilds: instanceColor replaced after first draw — not followed", o); }
+    return;
+  }
+  if (ic.version === own.attr.version) return;
+  own.attr.clearUpdateRanges();
+  for (const r of ic.updateRanges) own.attr.addUpdateRange(r.start, r.count);
+  own.attr.version = ic.version;
+}
+
 function syncOwn(o) {
+  syncColour(o);
   const own = OWN.get(o);
   if (!own) return;
   const im = o.instanceMatrix;
@@ -121,6 +162,7 @@ function patchPrototype(P) {
     for (let i = 0; i < attrs.length; i++) {
       const a = attrs[i];
       if (a.isInterleavedBufferAttribute && a.data === inode.buffer) { attrs[i] = ownAttribute(o, a); swapped = true; }
+      else if (inode.bufferColor && a === inode.bufferColor && o.instanceColor) { attrs[i] = ownColour(o, a); swapped = true; }
     }
     if (swapped) {
       this.vertexBuffers = [...new Set(attrs.map((a) => (a.isInterleavedBufferAttribute ? a.data : a)))];
@@ -158,7 +200,8 @@ export function installSharedInstanceBuilds(renderer) {
   nodes.needsRefresh = function (renderObject, ...rest) {
     const o = renderObject.object;
     if (o?.isInstancedMesh === true && shareable(o)) {
-      const v = o.instanceMatrix.version;
+      // (matrices and colours: a change of either refreshes the draw)
+      const v = o.instanceMatrix.version * 65536 + (o.instanceColor?.version ?? 0);
       if (seen.get(renderObject) !== v) {
         seen.set(renderObject, v);
         needsRefresh.call(this, renderObject, ...rest);   // keep three's observer bookkeeping

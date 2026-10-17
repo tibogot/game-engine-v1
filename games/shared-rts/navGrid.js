@@ -313,7 +313,16 @@ export function createNavGrid({
    * its wire cut, its wall gone — is walkable again.
    */
   const POCKET_MAX = Math.max(4, Math.ceil(600 / (cell * cell)));   // ~600 m², as blockDryScraps
+  // LAZY (2026-10-17 perf audit: 4.3 ms a call, 525 calls as the boot placed every building's
+  // footprint — 2.2 s of boot; now 42 calls, 0.2 s): a footprint added or cleared only marks the pockets STALE; they are
+  // sealed once, before the grid is next READ or changed any other way (settle(), on every public read
+  // and every other mutator). Every state anything can observe is the one the immediate seal gave
+  // (a wire stamped only on open cells still sees the pockets of the footprints before it).
+  let pocketsStale = false;
+  const settle = () => { if (pocketsStale) sealPockets(); };
+  const settled = (fn) => (...args) => { settle(); return fn(...args); };
   function sealPockets() {
+    pocketsStale = false;
     for (let i = 0; i < blocked.length; i++) if (blocked[i] === 4) blocked[i] = 0;
     const was = footRules;
     footRules = true;
@@ -758,55 +767,61 @@ export function createNavGrid({
 
   return {
     cell, cols, rows,
-    findPath,
+    findPath: settled(findPath),
     /** fn(cellPoints, sx, sz, tx, tz) -> points, some marked {anchor: true} (see reconstruct). */
     setPathAnchors(fn) { pathAnchors = fn; },
     requestPath,
-    pumpPaths,
+    pumpPaths: settled(pumpPaths),
     /** Searches waiting or under way (dev readout). */
     get queuedPaths() { return queue.length + (queued ? 1 : 0); },
-    sameRegion,
+    sameRegion: settled(sameRegion),
     /** CoH's formation spot: the nearest point to (tx, tz) a short search from (ax, az) reaches (see above). */
-    nearestReachable,
+    nearestReachable: settled(nearestReachable),
     /** `foot`: under infantry rules (a footbridge is open). Default: vehicle rules. */
-    isBlockedAtWorld: (wx, wz, foot = false) => { footRules = foot; const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
+    isBlockedAtWorld: (wx, wz, foot = false) => { settle(); footRules = foot; const c = worldToCell(wx, wz); return isBlocked(c.cx, c.cz); },
     /**
      * Nearest walkable world point. Returns the point UNCHANGED when it's
      * already open — snapping to the cell centre would collapse several
      * distinct spawn points onto one spot (cells are metres wide).
      */
     nearestOpenWorld: (wx, wz, foot = false) => {
+      settle();
       footRules = foot;
       const c0 = worldToCell(wx, wz);
       if (!isBlocked(c0.cx, c0.cz)) return { x: wx, z: wz };
       const c = nearestOpen(wx, wz);
       return c ? cellToWorld(c.cx, c.cz) : { x: wx, z: wz };
     },
-    rebuild: dirty(build),
+    rebuild: dirty(settled(build)),
     /** Block a circle (legacy — prefer addStructureObstacle for buildings). */
-    addObstacle: dirty((wx, wz, radius) => { stampCircle(wx, wz, radius); }),
-    addStructureObstacle: dirty(addStructureObstacle),
+    // (settled first: the immediate seal ran BEFORE these, and they never re-sealed — a pending seal
+    // left for after them would also see them)
+    addObstacle: dirty(settled((wx, wz, radius) => { stampCircle(wx, wz, radius); })),
+    addStructureObstacle: dirty(settled(addStructureObstacle)),
     /**
      * A line units cannot cross (world points {x, z}), kept across rebuilds.
      * `halfWidth` defaults to 3/4 of a cell so the band is solid. Returns a
      * handle for removeBarrier.
      */
-    addBarrier: dirty((points, halfWidth = cell * 0.75) => {
+    addBarrier: dirty(settled((points, halfWidth = cell * 0.75) => {
       const b = { points: points.map((p) => ({ x: p.x, z: p.z })), halfWidth };
       barriers.push(b);
       stampBarrier(b);
       return b;
-    }),
+    })),
     removeBarrier: (b) => { const i = barriers.indexOf(b); if (i >= 0) barriers.splice(i, 1); },
     /**
      * An oriented rectangle units cannot enter — a placed building's footprint
      * (centre, half extents, yaw), kept across rebuilds. Returns a handle.
      */
     addFootprint: dirty((x, z, hx, hz, ry = 0, { noFoot = false, vehicleOnly = false } = {}) => {
+      // A full footprint stamps 1 whatever the cell held: back-to-back ones need no seal between them.
+      // Wire / a low wall stamp only on OPEN cells: the pockets before it must be sealed first.
+      if (noFoot || vehicleOnly) settle();
       const f = { x, z, hx, hz, ry, noFoot, vehicleOnly };
       footprints.push(f);
       stampFootprint(f);
-      sealPockets();   // a new wall can close a pocket (a sandbag ring, wire round a yard)
+      pocketsStale = true;   // a new wall can close a pocket (a sandbag ring, wire round a yard)
       return f;
     }),
     removeFootprint: (f) => { const i = footprints.indexOf(f); if (i >= 0) footprints.splice(i, 1); },
@@ -817,21 +832,22 @@ export function createNavGrid({
      * footprint still needs rebuild(): what was under it is not known.)
      */
     clearNoFootFootprint: dirty((f) => {
+      settle();
       const i = footprints.indexOf(f);
       if (i < 0 || !f.noFoot) return false;
       footprints.splice(i, 1);
       eachFootprintCell(f, (c) => { if (blocked[c] === 3) blocked[c] = 0; });
       const r = Math.hypot(f.hx, f.hz);
       for (const o of footprints) if (o.noFoot && Math.hypot(o.x - f.x, o.z - f.z) < r + Math.hypot(o.hx, o.hz)) stampFootprint(o);
-      sealPockets();   // the wire it cut may have opened a pocket again
+      pocketsStale = true;   // the wire it cut may have opened a pocket again
       return true;
     }),
     /** Straight-line walkability between two world points (waypoint lookahead). */
-    hasLOS: (ax, az, bx, bz, { foot = false } = {}) => { footRules = foot; return hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }); },
-    setDebug,
-    toggleDebug,
+    hasLOS: (ax, az, bx, bz, { foot = false } = {}) => { settle(); footRules = foot; return hasLineOfSight({ x: ax, z: az }, { x: bx, z: bz }); },
+    setDebug: settled(setDebug),
+    toggleDebug: settled(toggleDebug),
     /** Cells sealed as pockets at the last build / footprint (sealPockets). */
-    get sealedPockets() { return lastSealed; },
+    get sealedPockets() { settle(); return lastSealed; },
     /** Is the debug overlay showing (the dev panel's checkbox reads it). */
     get debugOn() { return !!debugMesh?.visible; },
   };
