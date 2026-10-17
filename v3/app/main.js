@@ -2480,6 +2480,8 @@ export async function startV3App(opts = {}) {
   const aptHighStart    = uiById("apt-high-start");
   const aptHighEnd      = uiById("apt-high-end");
   const aptNoise        = uiById("apt-noise");
+  const aptGully        = uiById("apt-gully");
+  const aptGullyStart   = uiById("apt-gully-start");
   const aptPreview      = uiById("apt-preview");
   const aptBake         = uiById("apt-bake");
 
@@ -4932,7 +4934,9 @@ export async function startV3App(opts = {}) {
           void ensureCpuHeightmapFromGpu().then(() => tunnelSystem.onTerrainChanged());
         }
       }
-      if (splatOverlay.uWetness.value > 0) {
+      // Wanted by the paint's wetness and by the auto gully rule.
+      if (splatOverlay.uWetness.value > 0
+          || (splatOverlay.auto.uAutoGully.value >= 0 && splatOverlay.auto.uAutoEnabled.value + splatOverlay.auto.uAutoFull.value > 0)) {
         if (_hv !== _flowHv) { _flowHv = _hv; _flowDue = now + 700; }
         if (_flowDue && now >= _flowDue && !_flowBusy && !_rendererSideWork) {
           _flowDue = 0; _flowBusy = true;
@@ -6874,6 +6878,9 @@ export async function startV3App(opts = {}) {
       highStart:     Number(aptHighStart.value),
       highEnd:       Number(aptHighEnd.value),
       noise:         Number(aptNoise.value) / 100,
+      gully:         Number(aptGully.value),
+      gullyStart:    Number(aptGullyStart.value) / 10,
+      gullyRange:    3,
     };
   }
 
@@ -6896,13 +6903,16 @@ export async function startV3App(opts = {}) {
     AUTO.uAutoHighStart.value = p.highStart;
     AUTO.uAutoHighEnd.value   = p.highEnd;
     AUTO.uAutoNoise.value     = p.noise;
+    AUTO.uAutoGully.value     = p.gully;
+    AUTO.uAutoGullyStart.value = p.gullyStart;
+    uiById("apt-lbl-gully-start").textContent = p.gullyStart.toFixed(1);
     uiById("apt-lbl-slope-start").textContent = p.slopeStartDeg + "°";
     uiById("apt-lbl-slope-end").textContent   = p.slopeEndDeg + "°";
     uiById("apt-lbl-high-start").textContent  = p.highStart + "m";
     uiById("apt-lbl-high-end").textContent    = p.highEnd + "m";
     uiById("apt-lbl-noise").textContent       = Math.round(p.noise * 100) + "%";
   }
-  for (const el of [aptEnabled, aptPreview, aptFlat, aptCliff, aptHigh, aptSlopeStart, aptSlopeEnd, aptHighStart, aptHighEnd, aptNoise]) {
+  for (const el of [aptEnabled, aptPreview, aptFlat, aptCliff, aptHigh, aptSlopeStart, aptSlopeEnd, aptHighStart, aptHighEnd, aptNoise, aptGully, aptGullyStart]) {
     el.addEventListener("input", syncAutoPaint);
     el.addEventListener("change", syncAutoPaint);
   }
@@ -6910,7 +6920,12 @@ export async function startV3App(opts = {}) {
 
   aptBake.addEventListener("click", async () => {
     await ensureCpuHeightmapFromGpu(); // bake from fresh heights, not a stale mirror
+    const gullyOn = autoPaintParams().gully >= 0;
+    // The gully rule reads the flow map: bring it up to date with these heights.
+    if (gullyOn) _flowMs = await flowMap.compute(cpuHeightmap);
     paintSys.applyAutoRules({
+      flowBytes:     gullyOn ? flowMap.texture.image.data : null,
+      flowSize:      flowMap.size,
       cpuHeightmap,
       heightmapSize: HEIGHTMAP_SIZE,
       worldSize:     WORLD_SIZE,

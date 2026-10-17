@@ -540,6 +540,10 @@ export function createSplatOverlay(
   const uAutoHighStart = uniform(200.0); // metres
   const uAutoHighEnd   = uniform(280.0);
   const uAutoNoise     = uniform(0.25);  // threshold breakup 0..1
+  // GULLY rule: a layer where rain gathers (the flow map), never on a cliff.
+  const uAutoGully      = uniform(-1.0); // -1 = off
+  const uAutoGullyStart = uniform(6.0);  // log2(upstream texels) where it starts
+  const uAutoGullyRange = uniform(3.0);  // octaves to full
   /**
    * SLOPE LOCK — 0 = off, 1 = past the cliff band the cliff layer OWNS the
    * pixel, hand-painted or not.
@@ -630,19 +634,26 @@ export function createSplatOverlay(
       const cliffW = float(1).sub(
         smoothstep(uAutoSlopeLoY, uAutoSlopeHiY, ny.add(breakup.mul(float(0.15)))),
       );
+      // Gully second (after the cliff, before height and flat): drainage
+      // lines and valley floors on the ground the cliff leaves.
+      const gullyW = flowLog
+        ? smoothstep(uAutoGullyStart, uAutoGullyStart.add(max(uAutoGullyRange, float(0.5))),
+          flowLog(splatUV).add(breakup.mul(float(2))))
+          .mul(float(1).sub(cliffW)).mul(step(float(-0.5), uAutoGully))
+        : float(0);
       const highOn = step(float(-0.5), uAutoHigh);
       const hMet   = hC.mul(float(MAX_HEIGHT)).add(breakup.mul(float(40)));
       const highW  = smoothstep(uAutoHighStart, uAutoHighEnd, hMet)
-        .mul(float(1).sub(cliffW)).mul(highOn);
-      const flatW  = float(1).sub(cliffW).sub(highW);
+        .mul(float(1).sub(cliffW).sub(gullyW)).mul(highOn);
+      const flatW  = float(1).sub(cliffW).sub(gullyW).sub(highW);
 
       const eq = (u, i) => step(abs(u.sub(float(i))), float(0.5));
       const hasFlat   = step(float(-0.5), uAutoFlat);
       const hasCliff  = step(float(-0.5), uAutoCliff);
       // highW is already gated by its own -1 check (highOn) where it's computed.
-      const assignedW = cliffW.mul(hasCliff).add(flatW.mul(hasFlat)).add(highW);
+      const assignedW = cliffW.mul(hasCliff).add(flatW.mul(hasFlat)).add(highW).add(gullyW);
 
-      autoIngredients = { cliffW, highW, flatW, eq, assignedW };
+      autoIngredients = { cliffW, highW, flatW, gullyW, eq, assignedW };
     }
 
     g = { splatUV, splatSlice1, inBounds, nwExpr, autoIngredients };
@@ -827,14 +838,15 @@ export function createSplatOverlay(
         // the common case — skip the 5 heightmap taps + FBM entirely.
         if (autoIngredients) {
           If(uAutoEnabled.add(uAutoFull).add(uSlopeLock).greaterThan(0.0), () => {
-            const { cliffW, highW, flatW, eq, assignedW } = autoIngredients;
+            const { cliffW, highW, flatW, gullyW, eq, assignedW } = autoIngredients;
             // baseShare snapshots w0 BEFORE any weight is reassigned.
             const baseShare = w[0].mul(uAutoEnabled).mul(inBounds).toVar();
             const fullPrev  = uAutoFull.mul(inBounds).toVar();
             for (let i = 0; i < NL; i++) {
               const autoW = cliffW.mul(eq(uAutoCliff, i))
                 .add(flatW.mul(eq(uAutoFlat, i)))
-                .add(highW.mul(eq(uAutoHigh, i)));
+                .add(highW.mul(eq(uAutoHigh, i)))
+                .add(gullyW.mul(eq(uAutoGully, i)));
               w[i + 1].assign(mix(w[i + 1].add(baseShare.mul(autoW)), autoW, fullPrev));
             }
             w[0].assign(mix(
@@ -1286,6 +1298,7 @@ export function createSplatOverlay(
     auto: {
       uAutoEnabled, uAutoFull, uAutoFlat, uAutoCliff, uAutoHigh,
       uAutoSlopeHiY, uAutoSlopeLoY, uAutoHighStart, uAutoHighEnd, uAutoNoise,
+      uAutoGully, uAutoGullyStart, uAutoGullyRange,
       uSlopeLock,
     },
   };

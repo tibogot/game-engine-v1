@@ -104,7 +104,13 @@ look work goes FIRST, on the current system, and the control map after it. Every
      GPU −0.01 ms (noise 0.04). Panel: Wetness, Catchment; saved paintBlend.wetness / wetStart.
      Levels: 0.6 in nam-valley, tidewater-bay and the labs; alg-* untouched (cache skips it).
      Limit seen: flat ground beside a carved river does not drain into it, so banks stay dry.
-   - Next: the auto-material reading cavity / flow (mud in gullies, gravel in stream beds).
+   - ~~Auto-material gully rule~~ DONE 2026-10-17: Auto paint → "Gully layer" + "Gully from"
+     (log2 catchment, range 3): a layer where rain gathers, after the cliff and before height and
+     flat. Shader (live + preview) and the CPU Bake (splatMap.applyAutoRules, flowBytes) share the
+     rule; the Bake brings the flow map up to date first. nam-valley, gully = Dirt road: preview vs
+     baked 3.6 % of pixels > 8 levels, 0.1 % > 20 (the breakup noise differs CPU/GPU, as before).
+     The flow map is computed while wetness OR an active gully rule wants it. Auto-paint settings
+     are still per session (not saved with a level) — as before this step.
 4. **Control map + read path:** data, conversion at load, shader read through top-K. Old path kept.
 5. **GPU painting** into the control map + CPU mirror + undo.
 6. **More materials:** arrays sized to what the level uses; then KTX2.

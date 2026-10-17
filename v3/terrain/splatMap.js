@@ -826,11 +826,15 @@ export class SplatMap {
    *   worldSize: number, maxHeight: number,
    *   params: { flat:number, cliff:number, high:number,
    *             slopeStartDeg:number, slopeEndDeg:number,
-   *             highStart:number, highEnd:number, noise:number }
+   *             highStart:number, highEnd:number, noise:number,
+   *             gully?:number, gullyStart?:number, gullyRange?:number },
+   *   flowBytes?: Uint8Array, flowSize?: number   — flowMap.js (log2 × 16), for the gully rule
    * }} opts
    */
-  applyAutoRules({ cpuHeightmap, heightmapSize, worldSize, maxHeight, params }) {
+  applyAutoRules({ cpuHeightmap, heightmapSize, worldSize, maxHeight, params, flowBytes = null, flowSize = 0 }) {
     const { flat, cliff, high, slopeStartDeg, slopeEndDeg, highStart, highEnd, noise } = params;
+    const gully = flowBytes && params.gully >= 0 ? params.gully : -1;
+    const gStart = params.gullyStart ?? 6, gRange = Math.max(0.5, params.gullyRange ?? 3);
     const d0 = this.data0, d1 = this.data1;
     const half = worldSize * 0.5;
 
@@ -858,12 +862,17 @@ export class SplatMap {
         const br = (_fbmNoise(wx * 0.02, wz * 0.02, 3) - 0.5) * 2 * noise; // ≈ ±noise
 
         const cliffW = _smoothstep(slopeStartDeg, slopeEndDeg, slopeD + br * 12);
-        const highW  = high >= 0
-          ? _smoothstep(highStart, highEnd, hM + br * 40) * (1 - cliffW)
+        // Gully after the cliff, before height and flat — as the shader does.
+        const gullyW = gully >= 0
+          ? _smoothstep(gStart, gStart + gRange, _sampleBytes(flowBytes, flowSize, su, sv) / 16 + br * 2) * (1 - cliffW)
           : 0;
-        const flatW  = 1 - cliffW - highW;
+        const highW  = high >= 0
+          ? _smoothstep(highStart, highEnd, hM + br * 40) * (1 - cliffW - gullyW)
+          : 0;
+        const flatW  = 1 - cliffW - gullyW - highW;
 
         write(idx, cliff, cliffW);
+        write(idx, gully, gullyW);
         write(idx, high, highW);
         write(idx, flat, flatW);
       }
@@ -873,6 +882,18 @@ export class SplatMap {
     this.tex.needsUpdate = true;
     this._hasPaintDirty = true;
   }
+}
+
+/** Bilinear read of a byte grid (texel centres at (i + 0.5) / size), clamped. */
+function _sampleBytes(bytes, size, u, v) {
+  const x = Math.min(size - 1, Math.max(0, u * size - 0.5));
+  const z = Math.min(size - 1, Math.max(0, v * size - 0.5));
+  const x0 = Math.floor(x), z0 = Math.floor(z);
+  const x1 = Math.min(size - 1, x0 + 1), z1 = Math.min(size - 1, z0 + 1);
+  const fx = x - x0, fz = z - z0;
+  const a = bytes[z0 * size + x0] + (bytes[z0 * size + x1] - bytes[z0 * size + x0]) * fx;
+  const b = bytes[z1 * size + x0] + (bytes[z1 * size + x1] - bytes[z1 * size + x0]) * fx;
+  return a + (b - a) * fz;
 }
 
 // ── Resampling ────────────────────────────────────────────────────────────────

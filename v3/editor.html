@@ -1488,6 +1488,25 @@
                     <span class="prop-num" id="apt-lbl-high-end">280m</span>
                   </div>
                 </div>
+                <div class="prop-row" title="A layer that follows where rain gathers — drainage lines, gully floors, valley bottoms (mud, gravel, wet earth). Never on cliffs.">
+                  <span class="prop-label">Gully layer</span>
+                  <div class="prop-value">
+                    <select id="apt-gully" class="prop-dropdown">
+                      <option value="-1" selected>Off</option>
+                      <option value="0">L1</option><option value="1">L2</option>
+                      <option value="2">L3</option><option value="3">L4</option>
+                      <option value="4">L5</option><option value="5">L6</option>
+                      <option value="6">L7</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="prop-row" title="How much ground must drain through a spot for the gully layer (log2 of texels upstream) — lower reaches further up the slopes">
+                  <span class="prop-label">Gully from</span>
+                  <div class="prop-value">
+                    <input type="range" id="apt-gully-start" min="30" max="120" step="5" value="60" />
+                    <span class="prop-num" id="apt-lbl-gully-start">6.0</span>
+                  </div>
+                </div>
                 <div class="prop-row">
                   <span class="prop-label">Breakup</span>
                   <div class="prop-value">
