@@ -106,7 +106,10 @@ function clumpStems(n, rand, lean) {
     const offshoot = i === n - 1 && n >= 3 && rand() < 0.7;
     if (offshoot) {
       // A sucker at the foot: a stub of trunk, a full-sized young crown.
-      out.push({ az, o, h: 0.14 + rand() * 0.1, r: 0.75, theta: shapes.curved(0.35)(), crown: 0.7, crownLen: 0.75, dead: 0.3, fruit: false });
+      // shapes.curved(k) IS the curve: calling it again stored NaN, and the
+      // build threw "thetaAt is not a function" whenever a clump rolled an
+      // offshoot (seed-dependent: a level reloaded after another, 2026-10-17).
+      out.push({ az, o, h: 0.14 + rand() * 0.1, r: 0.75, theta: shapes.curved(0.35), crown: 0.7, crownLen: 0.75, dead: 0.3, fruit: false });
       continue;
     }
     const shape = rest[(i - 1 + Math.floor(rand() * 2)) % rest.length];
