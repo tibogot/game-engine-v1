@@ -69,8 +69,17 @@ look work goes FIRST, on the current system, and the control map after it. Every
    x64 z132, terrain only, in ONE load: noise 0.07 mean, change 10.6 % of pixels > 8 levels (mean 3.3) —
    stones keep their own relief where their colour wins. GPU: same shader both ways (+0.28 ms, under the
    0.62 noise); vs the old code only a few `mix` per pixel, no texture tap.
-2. **Anti-tiling near the camera:** hex tiling (Mikkelsen 2022) on the nearest materials only, faded out
-   with distance where the far blend takes over; it exists in the ground-cache bake already.
+2. ~~**Anti-tiling near the camera**~~ DONE 2026-10-17: `SPLAT_FEATURES.hexNear` (compile switch, top-K
+   only) — `hexSamplePair`: albedo + ORM through the same 3 lattice windows, luminance-weighted
+   (Mikkelsen's contrast fix), weights normalised before the power (a high power underflowed every
+   weight to 0 and showed the sky), gradients taken outside the distance branch, faded out
+   uHexEnd − uHexBand → uHexEnd (20 → 30 m). Cells are OFFSET, NOT TURNED by default (uHexRotate 0):
+   scanned photos carry baked light and turned cells read muddy (edge energy 48.3 plain, 43.1
+   turned, 45.7 offset-only — looks as crisp as plain). Explicit-gradient taps = implicit ones
+   (diff 0.04), so no anisotropy is lost. GPU at 0.58 Mpx, whole view inside 30 m (the worst case),
+   one load: +0.2..0.45 ms (3 runs, noise 0.3-0.5). Compiled in but not taken: +0.5..1.3 ms across
+   loads (throttling laptop, not pinned down) — so it is OFF by default; the editor compiles it
+   (`?hex=0` to A/B), close-camera games opt in, the RTS games do not (alg-rts: ground cache).
 3. **Weathering rules:** cavity / curvature from the baked surface (darker hollows, worn ridges), then
    flow / wetness masks; rules the auto-material and the bakes use.
 4. **Control map + read path:** data, conversion at load, shader read through top-K. Old path kept.

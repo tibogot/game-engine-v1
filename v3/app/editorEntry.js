@@ -12,7 +12,7 @@ import { startV3App } from "./main.js";
 startV3App({
   projectWorldLook: true,
   editor: true,
-  splatFeatures: { topK: 3, farBlend: true },
+  splatFeatures: { topK: 3, farBlend: true, hexNear: true },
 }).then((app) => {
   // Console/debug access to the engine handle (same object games receive).
   window.__v3app = app;

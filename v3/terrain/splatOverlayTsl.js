@@ -137,6 +137,16 @@ export const SPLAT_FEATURES = {
    * and roughness are sub-pixel at distance anyway).
    */
   farBlend: false,
+  /**
+   * HEX TILING NEAR THE CAMERA on the top-K layers (needs topK > 0): within
+   * uHexEnd metres each chosen layer's albedo and ORM are read through
+   * hexSample — no repeat grid where the eye looks hardest — fading back to the
+   * plain tap over uHexBand. Inside a per-pixel distance branch: hexSample
+   * reads with EXPLICIT gradients, which a compiler can keep in a real branch
+   * (the +5.6 ms branch in sampleLayer sampled with implicit ones), so far
+   * pixels should not pay the 3 taps. uHexNear 0 = off, live.
+   */
+  hexNear: false,
 };
 
 /**
@@ -225,6 +235,63 @@ export function hexSample(arrNode, uv, layer, { rotate = true, orm = false } = {
 }
 
 /**
+ * HEX TILING, PER FRAME (SPLAT_FEATURES.hexNear): albedo AND ORM of one layer
+ * through the same three lattice windows, with Mikkelsen's contrast fix — each
+ * window's weight is scaled by its albedo luminance (`contrast`) before
+ * the sharpening power (`sharp`), so a bright pebble wins over the dirt
+ * beside it instead of the two ghosting 50/50. The ORM takes the albedo's
+ * weights, so relief stays on the colour it belongs to.
+ * `gx`/`gy`: the uv's derivatives taken OUTSIDE any per-pixel branch.
+ *
+ * `rotate` (0..1 of a full turn) defaults OFF, unlike the bake's hexSample:
+ * MEASURED 2026-10-17 on alg-aures, scanned ground photos carry their light
+ * baked in, and turned cells point those shadows every which way — the ground
+ * read muddy (edge energy 48.3 plain → 43.1 turned, 45.7 offsets only, which
+ * looked as crisp as plain). Sand or grass without baked light can take it.
+ */
+export function hexSamplePair(albArr, ormArr, uv, layer, gx, gy, sharp = float(10), contrast = float(0.6), rotate = float(0)) {
+  const st = uv.mul(HEX_CELLS);
+  const sk = vec2(st.x.sub(st.y.mul(0.57735027)), st.y.mul(1.15470054));
+  const base = floor(sk);
+  const f = fract(sk);
+  const z = float(1).sub(f.x).sub(f.y);
+  const up = z.greaterThan(0);
+  const w = select(up, vec3(z, f.y, f.x), vec3(z.negate(), float(1).sub(f.y), float(1).sub(f.x)));
+  const verts = [
+    select(up, base, base.add(vec2(1, 1))),
+    select(up, base.add(vec2(0, 1)), base.add(vec2(1, 0))),
+    select(up, base.add(vec2(1, 0)), base.add(vec2(0, 1))),
+  ];
+  // Divided by the largest BEFORE the power: the winner stays 1, so a high
+  // `sharp` narrows the blend instead of underflowing every weight to 0.
+  const wn = max(w, vec3(0)).div(max(max(w.x, w.y), w.z).max(1e-5)).toVar();
+  const alb = [], orm = [], wt = [];
+  for (let i = 0; i < 3; i++) {
+    const v = verts[i];
+    const off = vec2(macroHash(v), macroHash(v.add(vec2(17, 31))));
+    const a = macroHash(v.add(vec2(-41, 73))).mul(6.2831853).mul(rotate);
+    const c = cos(a), s = sin(a);
+    const rot = (p) => vec2(c.mul(p.x).sub(s.mul(p.y)), s.mul(p.x).add(c.mul(p.y)));
+    const uvi = rot(uv).add(off.mul(7.31));
+    const gxi = rot(gx), gyi = rot(gy);
+    const ta = vec4(albArr.sample(uvi).grad(gxi, gyi).depth(layer)).toVar();
+    const to = vec4(ormArr.sample(uvi).grad(gxi, gyi).depth(layer)).toVar();
+    // uv' = R·uv, so a direction t in the photo is Rᵀ·t on the ground.
+    const nx = to.b.mul(2).sub(1), ny = to.a.mul(2).sub(1);
+    const wx = c.mul(nx).add(s.mul(ny)), wy = c.mul(ny).sub(s.mul(nx));
+    orm.push(vec4(to.r, to.g, wx.mul(0.5).add(0.5), wy.mul(0.5).add(0.5)));
+    alb.push(ta);
+    const lum = ta.rgb.dot(vec3(0.299, 0.587, 0.114));
+    wt.push(mix(float(1), lum, contrast).mul(pow([wn.x, wn.y, wn.z][i], sharp)).toVar());
+  }
+  const inv = float(1).div(wt[0].add(wt[1]).add(wt[2]).max(1e-6)).toVar();
+  return {
+    albedo: alb[0].mul(wt[0]).add(alb[1].mul(wt[1])).add(alb[2].mul(wt[2])).mul(inv),
+    orm: orm[0].mul(wt[0]).add(orm[1].mul(wt[1])).add(orm[2].mul(wt[2])).mul(inv),
+  };
+}
+
+/**
  * @param {object[]} layerSlots  — 7 objects, each with TSL uniforms:
  *   { uUVScale, uNormalStr, uAOStr, uRoughStr, uTint?, uUVRot? }
  *   uTint (vec3 albedo multiplier) and uUVRot (vec2 cos/sin of the projection
@@ -298,6 +365,13 @@ export function createSplatOverlay(
   const uFarRatio       = uniform(5.0);
   const uFarStart       = uniform(35.0);
   const uFarEnd         = uniform(90.0);
+  // Hex tiling near the camera (SPLAT_FEATURES.hexNear).
+  const uHexNear        = uniform(1.0);   // 0..1 strength, 0 = plain taps
+  const uHexEnd         = uniform(30.0);  // metres where it is fully gone
+  const uHexBand        = uniform(10.0);  // metres of fade before that
+  const uHexSharp       = uniform(10.0);  // lattice weight power (higher = narrower blends)
+  const uHexContrast    = uniform(0.6);   // how much brightness decides a blend (Mikkelsen)
+  const uHexRotate      = uniform(0.0);   // 0..1 of a turn per cell (off: baked light)
   const TOPK = Math.max(0, Math.min(NL, Math.round(F.topK ?? 0)));
 
   // ── Layer texture samples — 2 DataArrayTexture bindings for 7 layers ─────────
@@ -840,6 +914,11 @@ export function createSplatOverlay(
             const hWorld = terrainNormals
               ? terrainNormals.surfaceAt(splatUV).w.mul(float(MAX_HEIGHT)).toVar()
               : null;
+            // Hex near the camera (not in the bake: it passes hex for everything).
+            const hexW = F.hexNear && !hex && farFade === null
+              ? float(1).sub(smoothstep(uHexEnd.sub(uHexBand), uHexEnd, length(P.sub(cameraPosition))))
+                .mul(uHexNear).toVar()
+              : null;
 
             for (let k = 0; k < K; k++) {
               const id = max(topI[k], float(0)).toVar();
@@ -858,7 +937,17 @@ export function createSplatOverlay(
                 cs.y.mul(p.x).add(cs.x.mul(p.y)),
               ).toVar();
               const tap = (arr, uv, o = {}) => (hex ? hexSample(arr, uv, layer, o) : arr.sample(uv).depth(layer));
-              let albedo = tap(albedoArrNode, uvK);
+              const nearA = vec4(tap(albedoArrNode, uvK)).toVar();
+              const ormK = vec4(tap(ormArrNode, uvK, { orm: true })).toVar();
+              if (hexW) {
+                const gx = dFdx(uvK).toVar(), gy = dFdy(uvK).toVar();
+                If(hexW.greaterThan(0.0), () => {
+                  const hx = hexSamplePair(albedoArrNode, ormArrNode, uvK, layer, gx, gy, uHexSharp, uHexContrast, uHexRotate);
+                  nearA.assign(mix(nearA, hx.albedo, hexW));
+                  ormK.assign(mix(ormK, hx.orm, hexW));
+                });
+              }
+              let albedo = nearA;
               if (fade) {
                 const far = tap(albedoArrNode, uvK.div(max(uFarRatio, float(1))));
                 albedo = mix(albedo, far, fade);
@@ -866,7 +955,7 @@ export function createSplatOverlay(
               entries.push({
                 w: max(topW[k], float(0)).mul(renorm).toVar(),
                 albedo: vec4(albedo).toVar(),
-                orm: vec4(tap(ormArrNode, uvK, { orm: true })).toVar(),
+                orm: ormK,
                 aoStr: pick(id, (s) => s.uAOStr),
                 roughStr: pick(id, (s) => s.uRoughStr),
                 normalStr: pick(id, (s) => s.uNormalStr),
@@ -1116,8 +1205,15 @@ export function createSplatOverlay(
     uFarRatio,
     uFarStart,
     uFarEnd,
+    // Hex tiling near the camera (SPLAT_FEATURES.hexNear); live, no recompile.
+    uHexNear,
+    uHexEnd,
+    uHexBand,
+    uHexSharp,
+    uHexContrast,
+    uHexRotate,
     /** What this build compiled: top-K count (0 = classic) and near/far. */
-    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend) },
+    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend), hexNear: Boolean(TOPK && F.hexNear) },
     blend,
     registerMaterial,
     setTriplanarCompiled,
