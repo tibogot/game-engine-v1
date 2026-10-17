@@ -1,0 +1,13 @@
+{
+  "name": "sandandblood-desktop-test",
+  "private": true,
+  "version": "0.0.1",
+  "description": "Desktop (Electron) test wrapper: does a game run with WebGPU, and does the shader cache survive between launches?",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "44.6.0"
+  }
+}
