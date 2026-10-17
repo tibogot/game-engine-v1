@@ -263,8 +263,11 @@ export function sandbagMaterial() {
   // the wall's shade, and dust settled on what looks up (the top course most)
   c = c.mul(attribute("ao", "float"));
   const upW = tslSmoothstep(0.55, 0.9, normalGeometry.y).mul(bu.w);
-  const dust = upW.mul(tslSmoothstep(0.35, 0.75, mx_noise_float(positionGeometry.mul(2.2)).mul(0.5).add(0.5))).mul(0.45);
-  c = mix(c, vec3(0.42, 0.36, 0.27), dust);
+  // (2026-10-17, you: "those white marks on their texture don't read nice" — the dust was a PALE grey sand,
+  // lighter than the jute: blotchy white patches on every top. Now it is the ground's own dust, a touch
+  // darker than the jute and warm, and half as strong: the tops dusty, not bleached.)
+  const dust = upW.mul(tslSmoothstep(0.35, 0.75, mx_noise_float(positionGeometry.mul(2.2)).mul(0.5).add(0.5))).mul(0.22);
+  c = mix(c, c.mul(vec3(0.86, 0.8, 0.72)), dust);
   // (Physical: its specular switched OFF on the undersides — their grazing sky reflection drew blue
   // lines between the courses)
   _mat = new THREE.MeshPhysicalNodeMaterial({ roughness: 1, metalness: 0 });

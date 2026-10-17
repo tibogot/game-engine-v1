@@ -65,7 +65,8 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
   // THE AMMUNITION at the back: crates (one on another), the rounds' tubes stacked beside.
   for (let k = 0; k < 3; k++) site.planks.push(new THREE.BoxGeometry(0.9, 0.34, 0.52).rotateY((hash01(k + 9, seed) - 0.5) * 0.25).translate(-1.15 + (k % 2) * 0.06, 0.17 + Math.floor(k / 2) * 0.34, 1.6 + (k === 1 ? 0.6 : 0)));
   for (let r = 0; r < 3; r++) for (let i = 0; i < 3 - r; i++) {
-    site.metal.push(new THREE.CylinderGeometry(0.075, 0.075, 0.7, 8).rotateX(Math.PI / 2).translate(1.2 + i * 0.16 + r * 0.08, 0.08 + r * 0.135, 1.5));
+    // (at 1.2 / 1.5 the stack ran into the parapet's bags — 2026-10-17: pulled in, clear of them)
+    site.metal.push(new THREE.CylinderGeometry(0.075, 0.075, 0.7, 8).rotateX(Math.PI / 2).translate(0.85 + i * 0.16 + r * 0.08, 0.08 + r * 0.135, 1.1));
   }
   const { group } = siteGroup(site, "MortarPit");
   // The placement ghost's shape (algBuild): everything merged, positions only.
