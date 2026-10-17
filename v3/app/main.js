@@ -6915,6 +6915,22 @@ export async function startV3App(opts = {}) {
     };
   }
 
+  /** A level's saved auto-paint rules onto the panel and the shader (null = off). */
+  function applyAutoPaintSettings(a) {
+    const set = (el, v) => { if (el && v !== undefined && v !== null && Number.isFinite(Number(v))) el.value = String(v); };
+    aptEnabled.checked = !!a?.enabled;
+    if (a) {
+      set(aptFlat, a.flat); set(aptCliff, a.cliff); set(aptHigh, a.high);
+      set(aptSlopeStart, a.slopeStartDeg); set(aptSlopeEnd, a.slopeEndDeg);
+      set(aptHighStart, a.highStart); set(aptHighEnd, a.highEnd);
+      set(aptNoise, a.noise != null ? Math.round(a.noise * 100) : null);
+      set(aptGully, a.gully);
+      set(aptGullyStart, a.gullyStart != null ? Math.round(a.gullyStart * 10) : null);
+    }
+    aptPreview.checked = false;
+    syncAutoPaint();
+  }
+
   function syncAutoPaint() {
     // Keep the blend bands valid (start < end).
     if (Number(aptSlopeEnd.value) <= Number(aptSlopeStart.value) + 1) {
@@ -9263,6 +9279,10 @@ export async function startV3App(opts = {}) {
         wetness:       splatOverlay.uWetness.value,
         wetStart:      splatOverlay.uWetStart.value,
       },
+      // Auto paint (the live auto-material's rules): saved with the level, so a
+      // map keeps its rules and a game shows the same ground. The preview is
+      // an editor tool and is not saved.
+      autoPaint: { enabled: !!aptEnabled.checked, ...autoPaintParams() },
       /*
        * The world's LOOK, which this format has never carried. Only the ocean so
        * far — light, sky, fog and post are the same gap and the same one-key
@@ -9566,6 +9586,9 @@ export async function startV3App(opts = {}) {
       syncWeatherUi();
       grassTintDirty = true;
     }
+    // Before 2026-10-17 the auto-paint rules were per session, never saved: a
+    // level without them loads with auto paint OFF (what its game always showed).
+    applyAutoPaintSettings(d.autoPaint ?? null);
     if (d.paintLayers) {
       await textureLib.importData(d.paintLayers);
       syncTriplanarCompile();

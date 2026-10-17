@@ -120,6 +120,7 @@ export async function encodeProjectFile({
   waterfalls,           // waterfallSystem.exportData(): { look, falls } or null
   paintLayers,         // textureLibrary.exportData() — slot metadata, no pixels
   paintBlend,           // { heightBlend, contrast } — layer edge blending
+  autoPaint,            // { enabled, flat, cliff, high, slope…, gully… } — the auto-paint rules
   farTerrain,           // farTerrain.exportData(): { manifest, blob } or null
   splatHoles,           // true: slice-1 alpha is terrain holes (see manifest)
   tunnels,              // tunnelSystem.exportData() or null
@@ -211,6 +212,7 @@ export async function encodeProjectFile({
     creaseFilter: creaseFilter ?? null,
     paintLayers: paintLayers ?? null,
     paintBlend: paintBlend ?? null,
+    autoPaint: autoPaint ?? null,
     farTerrain: farTerrain?.manifest ?? null,
     splatHoles: splatHoles ?? false,
     tunnels:  tunnels ?? null,
@@ -306,6 +308,7 @@ export async function decodeProjectFile(buffer) {
     creaseFilter: manifest.creaseFilter ?? null,
     paintLayers: manifest.paintLayers ?? null,
     paintBlend: manifest.paintBlend ?? null,
+    autoPaint: manifest.autoPaint ?? null,
     // The ground past the heightmap: its params and grid (Float32, copied for alignment).
     farTerrain: manifest.farTerrain && blob("farHeight")
       ? { ...manifest.farTerrain, grid: new Float32Array(blob("farHeight").slice().buffer) }
