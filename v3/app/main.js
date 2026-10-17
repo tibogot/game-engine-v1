@@ -3483,6 +3483,7 @@ export async function startV3App(opts = {}) {
   /** Pads (padSystem.js, games too) and Pads mode's editing half; built after the props store. */
   let padSystem = null;
   let erosionOp = null;   // erosionOperator.js, created with the pads
+  let openErosionFilterPanel = () => {};
   let padEditor = null;
   let padUi = null;
   /** Waterfalls (G): the runtime system (games too) and its editing half. Built after River v2. */
@@ -7490,6 +7491,14 @@ export async function startV3App(opts = {}) {
       }
     };
     erosionOp.syncUi = syncUi;
+    // Scene list → "Erosion filter": open its panel section and bring it into view.
+    openErosionFilterPanel = () => {
+      openRightTab("tools");
+      const sec = ck?.closest(".inspector-section");
+      const body = sec?.querySelector(".section-body");
+      if (body?.classList.contains("hidden")) sec.querySelector("[data-toggle]")?.click();
+      sec?.scrollIntoView({ block: "start", behavior: "smooth" });
+    };
     // Sliders re-bake at once; a newer bake supersedes one in flight.
     const apply = async (next) => {
       await erosionOp.set(next);
@@ -10457,7 +10466,12 @@ export async function startV3App(opts = {}) {
         ].filter(Boolean).join(" ") || null,
         selected: inspected === `hlayer:${l.id}`,
         canHide: !l.base, hidden: !l.visible,
-      })),
+      })).concat(erosionOp ? [{
+        // The erosion filter operator (erosionOperator.js): the eye turns it on/off.
+        key: "terrainOp:erosion", label: "Erosion filter", icon: "waves",
+        sub: erosionOp.params.enabled ? `${erosionOp.params.size} m` : "off",
+        canHide: true, hidden: !erosionOp.params.enabled,
+      }] : []),
     });
 
     const byType = new Map();
@@ -10577,7 +10591,7 @@ export async function startV3App(opts = {}) {
     return [
       inspector?.key, editorMode, propStore.gen, propInstancer.selectedIds.join(","),
       heightLayers.listLayers().map((l) => `${l.id}${l.name}${l.visible ? "" : "h"}${l.strength}${l.locked ? "l" : ""}`).join(";"), heightLayers.activeLayer,
-      padSystem?.version, padEditor?.selectedId,
+      padSystem?.version, padEditor?.selectedId, erosionOp?.params.enabled, erosionOp?.params.size,
       propInstancer.hiddenTypes.size, propInstancer.hiddenIds.size,
       (tunnelSystem?.tunnels ?? []).map((t) => `${t.style}${t.nodes.length}${t.hidden ? "h" : ""}${(t._sampled?.length ?? 0) | 0}`).join(";"), tunnelSystem?.activeIndex,
       (riverV2System?.rivers ?? []).map((r) => `${r.nodes.length}${_hiddenMeshes.has(r) ? "h" : ""}`).join(";"), riverV2Slice.riverV2.activeRiverIndex,
@@ -10593,6 +10607,9 @@ export async function startV3App(opts = {}) {
     switch (kind) {
       case "terrain": setEditorMode("sculpt"); break;
       case "hlayer": setEditorMode("sculpt"); setActiveHeightLayer(i); break;
+      // A tick later: the list's own click then shows the Inspector, which has
+      // nothing for this row — the filter's controls are in the Sculpt panel.
+      case "terrainOp": setEditorMode("sculpt"); setTimeout(() => openErosionFilterPanel(), 0); break;
       case "props": setEditorMode("props"); break;
       case "propType": {
         setEditorMode("props");
@@ -10754,6 +10771,11 @@ export async function startV3App(opts = {}) {
       case "pad": {
         const p = padSystem?.get(i);
         if (p && padEditor) { padEditor.select(i); padEditor.edit({ enabled: !p.enabled }); }
+        break;
+      }
+      // The erosion filter: the eye switches it on and off (a real change, saved).
+      case "terrainOp": {
+        if (erosionOp) void erosionOp.set({ enabled: !erosionOp.params.enabled }).then(() => erosionOp.syncUi?.());
         break;
       }
       // Not an editor-only hide: a hidden sculpt layer is out of the terrain.
@@ -10925,6 +10947,13 @@ export async function startV3App(opts = {}) {
         return [{ label: "Open Pads mode", onClick: () => { setEditorMode("pads"); openRightTab("tools"); } }];
       case "terrain":
         return [inspect, sep, { label: "Add sculpt layer", onClick: addHeightLayer }];
+      case "terrainOp": {
+        const on = !!erosionOp?.params.enabled;
+        return [
+          { label: "Settings", onClick: () => { setEditorMode("sculpt"); openErosionFilterPanel(); } },
+          { label: on ? "Turn off" : "Turn on", onClick: () => toggleSceneHidden(key) },
+        ];
+      }
       case "hlayer": {
         const l = heightLayers.listLayers().find((x) => x.id === i);
         if (!l) return [inspect];
