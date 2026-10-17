@@ -587,6 +587,8 @@ export async function startV3App(opts = {}) {
 
   // ── Paint system (splatmap + texture library + overlay) ───────────────────
   const splatMap   = new SplatMap();
+  // Strokes and undo upload only the rect they touched (splatMap._uploadRect).
+  splatMap.renderer = renderer;
   const textureLib = new TextureLibrary();
   // Procedural paint layers bake on the GPU. A factory, so the bake targets are
   // only allocated the first time a slot actually goes procedural.

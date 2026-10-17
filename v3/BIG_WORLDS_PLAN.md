@@ -59,8 +59,18 @@ features keep their 2 km size (an 8 km map reads flat from altitude); every full
    pixels change, all in the distance (coarse rings now read smoothed heights), none near, no
    cracks; alg-rts boots clean. Still to do for big worlds: the 1.2-1.7 GB of CPU mirrors and the
    full-map bakes (erosion 3 s, flow 3 s) — that is what tiles (2) fix.
-1. **GPU painting + the control map** (TEXTURING_PLAN step 4, its inventory is done). Paint at
-   4096²+, more than 7 materials, no CPU stroke cost. Helps every map, small ones too.
+1. **Painting without stutter, then the control map.**
+   - ~~Smooth painting + 4096² paint~~ DONE 2026-10-17, WITHOUT a GPU rewrite: the brush maths was
+     never the cost (it loops over the brush's texels); three re-uploaded BOTH whole paint layers
+     per stamp, and every stroke start copied the whole paint for undo. Now a stamp uploads only
+     its rect (WebGPU writeTexture, splatMap._uploadRect — `tex.version` still moves so the ground
+     cache and grass/plant masks refresh, three's uploaded version moves with it so nothing
+     re-uploads) and undo copies 64² tiles lazily (paintSystem._ensurePre). Drag at 2048² paint:
+     worst frames 455/313/248 → 20/18/18 ms (first stroke of a session ~330 ms, once); 4096²
+     paint: 29/21/18 ms — the paint limit is 4096² now. Format, readers, games, levels unchanged.
+     tools/paintStrokeUndoTest (9).
+   - **Control map** (TEXTURING_PLAN step 4): still the way to > 7 materials and half the paint
+     memory; no longer needed for smooth painting or resolution.
 2. **World tiles.** A world = a grid of tiles (e.g. 1-2 km, each a heightmap + paint + vegetation
    at today's resolution); the height stack, layers, operators and bakes work per tile and only
    re-bake dirty tiles; the editor edits across tile borders; saved per tile.

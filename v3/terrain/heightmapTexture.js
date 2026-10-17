@@ -31,7 +31,10 @@ export const TERRAIN_SIZE_LIMITS = {
   // stamp. Measured 2026-09-14 at 4096: 30 ms per stamp (7 ms at 2048), a
   // 24-70 ms stroke start, ~300 MB of CPU copies. An older 4096 config or
   // project is clamped / resampled to 2048 on load.
-  splatSize:     { min: 256,  max: 2048 },
+  // 4096 since 2026-10-17: strokes and undo now upload only the rect they
+  // touched (splatMap._uploadRect) and undo copies lazily (paintSystem
+  // _ensurePre), so the per-stamp cost above no longer grows with the map.
+  splatSize:     { min: 256,  max: 4096 },
   maxHeight:     { min: 100,  max: 2000 },
 };
 

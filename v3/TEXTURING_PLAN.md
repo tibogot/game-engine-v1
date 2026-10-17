@@ -124,6 +124,8 @@ look work goes FIRST, on the current system, and the control map after it. Every
    inventory (paint shader, holes in slice-1 alpha, ground cache, grass/scatter masks, ~15 game
    reads by slot index, ~17 offline generators, every brush op) makes it several sessions for no
    visible change. data, conversion at load, shader read through top-K. Old path kept.
-5. **GPU painting** into the control map + CPU mirror + undo.
+5. ~~**GPU painting**~~ not needed for smooth painting (2026-10-17, BIG_WORLDS_PLAN 1): the cost was whole-layer
+   uploads + a full undo copy per stroke, now rect uploads + lazy undo tiles; 4096² paint is smooth.
+   GPU stamping can still come with the control map if the CPU loop ever becomes the limit.
 6. **More materials:** arrays sized to what the level uses; then KTX2.
 7. **Biomes / layered paint** on top.

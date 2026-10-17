@@ -35,6 +35,9 @@ const MAX_HISTORY          = 32;
 const ACTION_COALESCE_MS   = 800;
 const MAX_STAMPS_PER_EVENT = 16;
 
+/** Texels per side of the lazily copied undo tiles (see _ensurePre). */
+const PRE_TILE = 64;
+
 export class PaintSystem {
   /**
    * @param {object} [o.heightSource] { data: Float32Array normalized heights,
@@ -69,9 +72,10 @@ export class PaintSystem {
       this._preD1 = new Uint8Array(this.splatMap.data1.length);
       this._preHU = new Uint8Array(this.splatMap.holeUser.length);
     }
-    this._preD0.set(this.splatMap.data0);
-    this._preD1.set(this.splatMap.data1);
-    this._preHU.set(this.splatMap.holeUser);
+    // The pre-stroke state is copied LAZILY, one PRE_TILE² tile at a time, the
+    // first time a stamp reaches it (_ensurePre) — copying the whole paint here
+    // stalled every stroke start (two 16 MB slices + the holes at 2048²).
+    this._preTiles = new Set();
     this.isPainting  = true;
     this.lastPoint   = null;
     this._strokeDir  = 0;
@@ -109,6 +113,9 @@ export class PaintSystem {
     if (!this.isPainting) return;
     this.isPainting = false;
     if (!this._strokeRect) return; // click without effect — nothing to record
+    // Tiles inside the stroke's rect that no stamp reached are unchanged: their
+    // current content IS the pre-stroke state.
+    this._ensurePre(this._strokeRect);
     this._pushUndo(this.splatMap.copyRect(this._strokeRect, this._preD0, this._preD1, this._preHU));
     this._strokeRect = null;
   }
@@ -238,6 +245,7 @@ export class PaintSystem {
       else                         maskRotation = baseRad;
     }
 
+    this._ensurePre(this.splatMap.stampRect(wx, wz, s.brush.radius));
     const rect = this.splatMap.applySplatStroke({
       cx:            wx,
       cz:            wz,
@@ -256,6 +264,31 @@ export class PaintSystem {
       filter:        this._filterFor(s),
     });
     if (rect) this._strokeRect = this._unionRect(this._strokeRect, rect);
+  }
+
+  /**
+   * Copy the pre-stroke state of every PRE_TILE² tile overlapping `rect` that
+   * this stroke has not copied yet (paint slices + the user hole source).
+   */
+  _ensurePre(rect) {
+    if (!rect || !this._preTiles) return;
+    const sm = this.splatMap, N = sm.res;
+    const tx0 = Math.floor(rect.x / PRE_TILE), tx1 = Math.floor((rect.x + rect.w - 1) / PRE_TILE);
+    const ty0 = Math.floor(rect.y / PRE_TILE), ty1 = Math.floor((rect.y + rect.h - 1) / PRE_TILE);
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const key = ty * 65536 + tx;
+        if (this._preTiles.has(key)) continue;
+        this._preTiles.add(key);
+        const x0 = tx * PRE_TILE, x1 = Math.min(N, x0 + PRE_TILE);
+        for (let y = ty * PRE_TILE, y1 = Math.min(N, y + PRE_TILE); y < y1; y++) {
+          const a = (y * N + x0) * 4, b = (y * N + x1) * 4;
+          this._preD0.set(sm.data0.subarray(a, b), a);
+          this._preD1.set(sm.data1.subarray(a, b), a);
+          this._preHU.set(sm.holeUser.subarray(y * N + x0, y * N + x1), y * N + x0);
+        }
+      }
+    }
   }
 
   /** The brush filter for one stamp, or null when no band is on. */

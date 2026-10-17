@@ -275,6 +275,23 @@ export class SplatMap {
     return Math.min(1, w / 255);
   }
 
+  /** Texels per side (the class is sized by SPLAT_RES; exposed for tools). */
+  get res() { return SPLAT_RES; }
+
+  /**
+   * The texel rect a stamp at (cx, cz) with radius r can touch — exactly the
+   * loop bounds of applySplatStroke, so undo copies what a stamp may change.
+   */
+  stampRect(cx, cz, r) {
+    const half = WORLD_SIZE * 0.5;
+    const u0 = Math.max(0,             Math.floor(((cx - r) + half) / WORLD_SIZE * SPLAT_RES));
+    const u1 = Math.min(SPLAT_RES - 1, Math.ceil(((cx + r) + half) / WORLD_SIZE * SPLAT_RES));
+    const v0 = Math.max(0,             Math.floor(((cz - r) + half) / WORLD_SIZE * SPLAT_RES));
+    const v1 = Math.min(SPLAT_RES - 1, Math.ceil(((cz + r) + half) / WORLD_SIZE * SPLAT_RES));
+    if (u1 < u0 || v1 < v0) return null;
+    return { x: u0, y: v0, w: u1 - u0 + 1, h: v1 - v0 + 1 };
+  }
+
   applySplatStroke(stroke) {
     const r         = stroke.radius;
     const invR      = 1 / r;
@@ -436,14 +453,13 @@ export class SplatMap {
 
     if (anyTouched) {
       // Weight painting rescales channels in BOTH slices; holes stay confined
-      // to slice 1.
-      if (isHoleOp) {
-        this.tex.addLayerUpdate(1);
-      } else {
-        this.tex.addLayerUpdate(0);
-        this.tex.addLayerUpdate(1);
+      // to slice 1. Only the touched rect goes up (see _uploadRect); a full
+      // layer upload is the fallback.
+      const layers = isHoleOp ? [1] : [0, 1];
+      if (!this._uploadRect(layers, u0, v0, u1 - u0 + 1, v1 - v0 + 1)) {
+        for (const L of layers) this.tex.addLayerUpdate(L);
+        this.tex.needsUpdate = true;
       }
-      this.tex.needsUpdate = true;
       if (isHoleOp) {
         // Painting a hole adds one; only erasing could remove the last.
         if (activeLayer === HOLE_LAYER) { this._hasHoles = true; this._holesDirty = false; }
@@ -457,6 +473,43 @@ export class SplatMap {
     }
     // Touched rect in splat texel coords — used for rect-based undo entries.
     return anyTouched ? { x: u0, y: v0, w: u1 - u0 + 1, h: v1 - v0 + 1 } : null;
+  }
+
+  /**
+   * Upload ONLY a texel rect of the given slices to the GPU texture (WebGPU
+   * queue.writeTexture), instead of three's whole-layer re-upload.
+   *
+   * MEASURED 2026-10-17 at 2048² paint: a drag re-sent both 16 MB layers per
+   * stamp — frames of 455, 313 and 248 ms while painting. The brush maths was
+   * never the cost (it loops over the brush's texels only); the upload was.
+   *
+   * Returns false when it cannot — no renderer handed in (`this.renderer`), the
+   * GPU texture not created yet, or a full upload already pending (the uploaded
+   * version is behind) — and the caller does the full upload. The texture has
+   * one mip level (generateMipmaps off), so nothing else goes stale.
+   */
+  _uploadRect(layers, x, y, w, h) {
+    const r = this.renderer, tex = this.tex;
+    const backend = r?.backend, device = backend?.device;
+    if (!device?.queue?.writeTexture || typeof backend.get !== "function") return false;
+    const td = r._textures?.get?.(tex);
+    if (!td || td.version !== tex.version) return false;
+    const gpu = backend.get(tex)?.texture;
+    if (!gpu || gpu.mipLevelCount !== 1) return false;
+    for (const L of layers) {
+      device.queue.writeTexture(
+        { texture: gpu, origin: { x, y, z: L } },
+        this._combined,
+        { offset: ((L * SPLAT_RES + y) * SPLAT_RES + x) * 4, bytesPerRow: SPLAT_RES * 4, rowsPerImage: SPLAT_RES },
+        { width: w, height: h, depthOrArrayLayers: 1 },
+      );
+    }
+    // The paint CHANGED, so its version moves — the ground cache, the grass and
+    // the plant density masks watch `tex.version` to refresh — and three's
+    // record of the uploaded version moves with it: nothing is left to upload.
+    tex.version++;
+    td.version = tex.version;
+    return true;
   }
 
   /**
@@ -496,9 +549,11 @@ export class SplatMap {
       else for (let i = 0; i < w; i++) u[base + i] = d1[src + (i << 2) + 3];
     }
     this._composeHoles(x, y, x + w - 1, y + h - 1);
-    this.tex.addLayerUpdate(0);
-    this.tex.addLayerUpdate(1);
-    this.tex.needsUpdate = true;
+    if (!this._uploadRect([0, 1], x, y, w, h)) {
+      this.tex.addLayerUpdate(0);
+      this.tex.addLayerUpdate(1);
+      this.tex.needsUpdate = true;
+    }
     this._markDirty();
   }
 
