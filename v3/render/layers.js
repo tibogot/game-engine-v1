@@ -49,6 +49,12 @@ export const LAYERS = Object.freeze({
   CLOUD_DECK: 18,
   /** SET: modular-road-v3's volumetric cloud dome (volumetricCloudDeck.js). */
   GAME_CLOUDS: 19,
+
+  // A game's own sun shadow (app.shadows.setSunShadowNode; Thunderline's sunShadows.js)
+  /** ENABLE: static casters baked ONCE into the sun-shadow atlas (the track). */
+  SUN_STATIC_CASTER: 20,
+  /** ENABLE: moving casters drawn into the live sun-shadow map each frame (the car). */
+  SUN_DYNAMIC_CASTER: 21,
 });
 
 /** How many cascades have a shadow-list layer reserved (4-7). */

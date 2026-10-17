@@ -640,7 +640,58 @@ export async function createWorldEnvironment({
    * view, and at the RTS's sun the frame with it was all but identical.
    */
 
+  /*
+   * A GAME'S OWN SUN SHADOW (opt-in; nothing changes unless a game calls setSunShadowNode).
+   * The node is the whole sun shadow term (three multiplies the sun's colour by it); the terrain
+   * wrapper still multiplies the terrain's own shadow on top. While it is set, the cascades are
+   * out of the scene and never fitted or drawn. Thunderline uses it for a static atlas of its
+   * track (baked once — the sun is fixed per track) plus a live map around the car: its track is
+   * static, so CSM re-rendering every caster per cascade per frame was both soft past 10 m and
+   * wasted work (games/thunderline/DESIGN.md §7).
+   */
+  let _customSunShadow = null;
+  /*
+   * SWITCHING THE NODE NEEDS ONE FRAME WITH THE SUN'S SHADOW OFF. three r184 caches the sun's shadow
+   * term on its AnalyticLightNode (`shadowColorNode`, built once) and that node outlives material
+   * rebuilds; only a rebuild with `castShadow === false` disposes it. So: frame 1 castShadow off +
+   * rebuild (drops the cached CSM term), frame 2 on + rebuild (builds the new node). Measured
+   * 2026-10-18: without this, the CSM shadow kept rendering under the game's node.
+   */
+  let _sunShadowSwitch = 0;
+  function setSunShadowNode(node) {
+    _customSunShadow = node || null;
+    if (_customSunShadow) setCsmCascadeLightsInScene(false);
+    else setCsmCascadeLightsInScene(!!toolState.csm.enabled);
+    _sunShadowSwitch = 2;
+  }
+  function applySunShadowSwitch() {
+    if (_sunShadowSwitch === 2) {
+      sun.castShadow = false;
+      sun.shadow.shadowNode = null;
+      invalidateSunShadowPipeline();
+      _sunShadowSwitch = 1;
+      return true;
+    }
+    if (_sunShadowSwitch === 1) {
+      sun.castShadow = true;
+      sun.shadow.shadowNode = _customSunShadow
+        ? wrapSunShadow(_customSunShadow)
+        : csm && toolState.csm.enabled ? wrapSunShadow(csm) : null;
+      invalidateSunShadowPipeline();
+      _sunShadowSwitch = 0;
+      return true;
+    }
+    return false;
+  }
+
   function syncCsmFromToolState() {
+    if (applySunShadowSwitch()) { placeSun(); return; }
+    if (_customSunShadow) {
+      // keep the sun where the rest of the frame expects it, but leave the shadow to the game
+      placeSun();
+      sun.shadow.shadowNode = wrapSunShadow(_customSunShadow);
+      return;
+    }
     const cfg = csmCfgNum(toolState.csm);
     // Uniforms only: flipping terrain shadows never recompiles anything.
     setTerrainShadowParams({
@@ -2843,6 +2894,7 @@ export async function createWorldEnvironment({
     },
     /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
     getCsm: () => csm,
+    setSunShadowNode,
     /**
      * MEASUREMENT ONLY: bit i set = cascade i is never redrawn (it keeps its
      * last map), so an A/B against 0 is exactly that cascade's cost. With

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Thunderline piece lab</title>
+    <!-- Prototype P5 (PIECES.md §7): the PATH × SECTION × LEAN kit with road look v0. Throwaway. -->
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <style>
+      :root { --panel: rgba(11, 17, 32, 0.93); --line: #23304d; --text: #e8f0ff; --dim: #8796b5; --bolt: #3fd2ff; --signal: #ff7a1a; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #8fb8e0; color: var(--text); font: 13px/1.4 Inter, system-ui, sans-serif; }
+      #view { position: fixed; inset: 0; }
+      .panel { position: fixed; z-index: 10; background: var(--panel); border-left: 3px solid var(--bolt); padding: 10px 14px; }
+      #stats { left: 16px; top: 16px; min-width: 250px; }
+      #stats h1 { margin: 0 0 6px; font: 800 20px "Barlow Condensed"; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bolt); }
+      #stats .row { display: flex; justify-content: space-between; gap: 16px; color: var(--dim); }
+      #stats .row b { color: var(--text); }
+      #views { right: 16px; top: 16px; display: flex; gap: 4px; border: 0; padding: 6px; }
+      #views button { background: #121a2e; color: var(--text); border: 1px solid var(--line); padding: 7px 14px; font: 700 15px "Barlow Condensed"; letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer; }
+      #views button.on { background: var(--bolt); color: #0a0f1c; border-color: var(--bolt); }
+      #hud { left: 50%; top: 16px; transform: translateX(-50%); font: 800 26px "Barlow Condensed"; letter-spacing: 0.05em; display: none; }
+      .lbl { position: fixed; z-index: 5; transform: translate(-50%, -100%); font: 700 13px "Barlow Condensed"; letter-spacing: 0.05em; text-transform: uppercase; background: var(--panel); padding: 2px 8px; border-bottom: 2px solid var(--signal); white-space: nowrap; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="view"></div>
+    <div id="stats" class="panel"></div>
+    <div id="views" class="panel"><button data-v="showcase">Pieces</button><button data-v="track">Track</button><button data-v="ride">Ride 216 km/h</button><button id="b-edges" class="on">Edges: guarded</button></div>
+    <div id="hud" class="panel"></div>
+    <div id="labels"></div>
+    <script type="module" src="./lab.js"></script>
+  </body>
+</html>

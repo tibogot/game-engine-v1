@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- the engine resolves its assets relative to /v3/ (same as rock-lab) -->
+    <base href="/v3/" />
+    <title>Thunderline drive (P3)</title>
+    <!-- Prototype P3: the real car (old physics, Lotus dev model), Sky Pro, chase camera, on the new pieces. Throwaway. -->
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <style>
+      :root { --panel: rgba(11, 17, 32, 0.9); --line: #23304d; --text: #e8f0ff; --dim: #8796b5; --bolt: #3fd2ff; --signal: #ff7a1a; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font: 13px/1.4 Inter, system-ui, sans-serif; }
+      #game { position: fixed; inset: 0; }
+      .panel { position: fixed; z-index: 30; background: var(--panel); border-left: 3px solid var(--bolt); padding: 8px 14px; }
+      #speed { right: 18px; bottom: 18px; text-align: right; }
+      #speed .v { font: 800 54px/1 "Barlow Condensed"; letter-spacing: 0.02em; }
+      #speed .u { font: 700 14px "Barlow Condensed"; color: var(--dim); letter-spacing: 0.1em; }
+      #time { left: 50%; top: 16px; transform: translateX(-50%); font: 800 26px "Barlow Condensed"; letter-spacing: 0.05em; }
+      #help { left: 16px; bottom: 16px; color: var(--dim); font-size: 12px; max-width: 360px; }
+      #help kbd { color: var(--text); background: #121a2e; border: 1px solid var(--line); padding: 0 4px; font: 11px Consolas, monospace; }
+      #stats { left: 16px; top: 16px; color: var(--dim); font-size: 12px; min-width: 210px; }
+      #stats b { color: var(--text); }
+      #boot { position: fixed; inset: 0; z-index: 99; display: flex; align-items: center; justify-content: center; background: #0a0f1c; color: var(--bolt); font: 700 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; transition: opacity 0.4s; }
+      #boot.gone { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="time" class="panel">0.00</div>
+    <div id="speed" class="panel"><div class="v" id="kmh">0</div><div class="u">KM/H</div></div>
+    <div id="stats" class="panel"></div>
+    <div id="help" class="panel">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake ·
+      in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll ·
+      <kbd>Backspace</kbd> last safe spot · <kbd>R</kbd> restart (keys by position: on AZERTY, W is Z)
+    </div>
+    <div id="boot">Thunderline · starting the engine…</div>
+    <script type="module" src="/games/thunderline/proto/kit/drive.js"></script>
+  </body>
+</html>

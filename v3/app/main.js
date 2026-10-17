@@ -13292,6 +13292,13 @@ export async function startV3App(opts = {}) {
       setEnabled(on) { worldEnv?.setCsmEnabled(!!on); },
       /** The cascaded shadow node (null without an environment). Rebuilt when cascades change — read it live, don't keep it. */
       get csm() { return worldEnv?.getCsm?.() ?? null; },
+      /**
+       * Replace the sun's whole shadow term with a game's own node (a float 0..1 visibility), or
+       * null to give it back to the cascades. While set, the cascades are out of the scene and
+       * never drawn; the terrain's own shadow is still multiplied on top. Opt-in: a game that
+       * never calls this is unaffected. Used by Thunderline (static track atlas + live car map).
+       */
+      setSunShadowNode(node) { worldEnv?.setSunShadowNode?.(node); },
       /** Cascades off: the fitted frustum's half extents (m), m/texel and ground slab this frame. */
       fitInfo() { return worldEnv?.getFittedShadowInfo?.() ?? null; },
       /** MEASUREMENT ONLY: bit i = cascade i is never redrawn (bit 0 = the fitted map with cascades off). */
