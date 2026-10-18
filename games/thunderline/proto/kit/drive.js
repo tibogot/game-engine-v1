@@ -16,7 +16,8 @@ import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
-import { createLandingJudge } from "./landing.js";
+import { createCarRules } from "./carRules.js";
+import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -203,6 +204,14 @@ if (useNewShadows) {
     adoptCar(w.object);
     vehicle.setWheelModel(w.object, { radius: w.radius, thickness: w.width });
     vehicle.setWheelStyle("glb");
+    // the ghost: its own copies of the same models, translucent (WHEEL.radius is the same value)
+    const gm = await loadChassisModel(renderer, CHASSIS_GLB_URL);
+    ghostCar.setChassisModel(gm.object, { brakeLights: gm.brakeLights, headlampLenses: gm.headlampLenses });
+    ghostCar.setChassisStyle("glb");
+    const gw = await loadWheelModel(renderer);
+    ghostCar.setWheelModel(gw.object, { radius: gw.radius, thickness: gw.width });
+    ghostCar.setWheelStyle("glb");
+    ghostify(ghostCar.group);
   } catch (e) {
     console.warn("[P3] car model not loaded, driving the box", e);
   }
@@ -249,30 +258,51 @@ const pilot = createAutopilot(lay.ride); // autopilot.js: shared with the builde
 const autopilotInput = () => pilot.input(vehicle);
 addEventListener("keydown", (e) => { if (e.code === "KeyP") { autopilot = !autopilot; pilot.reset(); } });
 
-// ---------- BOOST PADS: past the top speed, for a while (user: boosts make it "even faster") ----------
-// Touching a boost pad's deck arms a push along the car's nose for BOOST.time; the push is added on
-// top of the engine, so the car goes beyond its normal top speed and the drag/engine curve brings it
-// back afterwards.
-const BOOST = { accel: 14, time: 2.0 };
+// ---------- THE CAR'S RULES (carRules.js): wall cut, landing judge + boost, BOOST PADS ----------
+// Boost pads push past the top speed for a while (user: boosts make it "even faster"). The player and
+// the ghost step through the same rules, so a replay is the same run.
 const boostPads = lay.placements.filter((p) => p.id.startsWith("boost")).map((p) => p.M.clone().invert());
-let boostLeft = 0;
-const _lp = new V();
-const _fwd = new V();
-function boostTick(dt) {
-  const p = vehicle.body.pos;
-  for (const inv of boostPads) {
-    _lp.copy(p).applyMatrix4(inv); // piece frame: x right, y up, -z along the road
-    if (Math.abs(_lp.x) < 8 && _lp.y > -1 && _lp.y < 3 && _lp.z < -4 && _lp.z > -28) boostLeft = BOOST.time;
-  }
-  if (boostLeft > 0 && vehicle.groundedCount > 0) {
-    _fwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat); // the car's nose is +Z
-    vehicle.body.vel.addScaledVector(_fwd, BOOST.accel * dt);
-  }
-  boostLeft = Math.max(0, boostLeft - dt);
+const rules = createCarRules(vehicle, { boostPads });
+
+// ---------- GHOST (ghost.js, DESIGN.md §8): your best run, replayed by a second car ----------
+const GHOST_KEY = `thunderline.ghost.${trackKey}`;
+const recorder = createGhostRecorder();
+let ghostData = null;
+try { ghostData = JSON.parse(localStorage.getItem(GHOST_KEY)); } catch {}
+const ghostCar = new Vehicle({ scene, showArrows: false });
+ghostCar.SUBSTEPS = SUBSTEPS;
+ghostCar.getFloorY = () => NaN;
+ghostCar.setSolidCapsules([]);
+ghostCar.setBvh(ground.ground, ground.solids);
+// no headlights on the ghost: two more spot lights would change the light count and recompile every
+// material (r184), and a ghost does not light the road
+ghostCar.group.traverse((o) => { if (o.isLight) o.visible = false; });
+for (const l of ghostCar.headlights ?? []) l.parent?.remove(l);
+ghostCar.group.visible = false;
+const ghostRules = createCarRules(ghostCar, { boostPads });
+let ghostPlayer = null;
+/** translucent, no shadows, never on the shadow layers */
+function ghostify(root) {
+  root.traverse((o) => {
+    if (!o.isMesh) return;
+    o.castShadow = false;
+    o.receiveShadow = false;
+    const mats = Array.isArray(o.material) ? o.material : [o.material];
+    const out = mats.map((m) => { const c = m.clone(); c.transparent = true; c.opacity = 0.32; c.depthWrite = false; return c; });
+    o.material = Array.isArray(o.material) ? out : out[0];
+  });
 }
+ghostify(ghostCar.group);
+function startGhost() {
+  ghostPlayer = ghostData?.inputs?.length ? createGhostPlayer(ghostCar, ghostRules, ghostData) : null;
+  ghostCar.group.visible = !!ghostPlayer && showGhost;
+  if (ghostPlayer) ghostPlayer.start(spawnPos, startQuat);
+  else ghostCar.setEnabled(false);
+}
+let showGhost = params.get("ghost") !== "off";
+addEventListener("keydown", (e) => { if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!ghostPlayer && showGhost; } });
 
 // ---------- landings: the grade flashes under the timer ----------
-const judge = createLandingJudge(vehicle);
 const landings = []; // every graded landing this run (tests read it)
 let landTimer = null;
 function showLanding(ev) {
@@ -315,6 +345,9 @@ function onRace(e) {
     if (improved) {
       best = { time: e.time, splits: race.s.splits.slice() };
       try { localStorage.setItem(BEST_KEY, JSON.stringify(best)); } catch {}
+      // the new best becomes the ghost (from the next restart)
+      ghostData = recorder.finish(e.time);
+      try { localStorage.setItem(GHOST_KEY, JSON.stringify(ghostData)); } catch (err) { console.warn("[ghost] not saved", err); }
     }
     showFinish(e.time, improved);
   }
@@ -343,11 +376,13 @@ function restart() {
   race.reset();
   $("finish").classList.remove("show");
   vehicle.setEnabled(true); // parked after a finish
-  judge.reset();
+  rules.reset();
+  recorder.start();
   landings.length = 0;
   pilot.reset();
   vehicle.setSpawn(spawnPos, startQuat);
   vehicle.respawn();
+  startGhost();
   chase.reset();
   simAccum = 0;
   runTime = 0;
@@ -370,17 +405,19 @@ function respawnCheckpoint() {
   vehicle.respawnAt(pos, quat);
   if (cp && !standing) vehicle.body.vel.copy(cp.vel);
   race.teleported(vehicle.body.pos);
-  judge.reset();
+  rules.reset();
+  recorder.respawn(vehicle);
   pilot.reset();
   chase.reset();
-  boostLeft = 0;
   simAccum = 0;
   recoveries++;
 }
 function recoverToSafe() {
-  judge.reset();
+  rules.reset();
   recoveries++;
   vehicle.respawnAt(safe.pos.clone().add(new V(0, 0.5, 0)), safe.quat.clone());
+  race.teleported(vehicle.body.pos);
+  recorder.respawn(vehicle);
   chase.reset();
   simAccum = 0;
 }
@@ -407,6 +444,7 @@ function renderStats() {
 }
 
 // ---------- the sim loop (roadGame.js:9904) ----------
+restart(); // the first run: countdown, recording, the saved ghost
 boot.classList.add("gone");
 setTimeout(() => boot.remove(), 600);
 let last = performance.now();
@@ -431,18 +469,24 @@ function tick() {
   for (let i = 0; i < ticks; i++) {
     // NO ENGINE UP A WALL applies to everyone (autopilot.js wallCut), every tick: a car rule.
     // The countdown holds the car on the line.
-    vehicle.tick(race.holding ? HOLD : wallCut(vehicle, input));
+    // CLEAN-LANDING BOOST (landing.js): land flat → the boost pad's push; land crooked → lose speed.
+    // All of it is carRules.step, which the ghost replays too.
+    const used = race.holding ? HOLD : input;
+    const landed = rules.step(used, FIXED_DT);
+    if (race.s.state !== "finished") recorder.tick(used, vehicle);
+    if (landed) showLanding(landed);
     for (const e of race.tick(vehicle, FIXED_DT)) onRace(e);
-    // CLEAN-LANDING BOOST (landing.js): land flat → the boost pad's push; land crooked → lose speed
-    const landed = judge.tick(FIXED_DT);
-    if (landed) { boostLeft = Math.max(boostLeft, landed.boost); showLanding(landed); }
-    boostTick(FIXED_DT);
+    if (ghostPlayer) ghostPlayer.tick(FIXED_DT);
     runTime += FIXED_DT;
     if (vehicle.groundedCount >= 3) { safe.pos.copy(vehicle.body.pos); safe.quat.copy(vehicle.body.quat); safe.ok = true; }
   }
   if (ticks) physMs.push((performance.now() - tPhys) / ticks);
   if (physMs.length > 240) physMs.shift();
   vehicle.syncVisuals(dt, simAccum / FIXED_DT);
+  if (ghostPlayer) {
+    if (ghostPlayer.done) ghostCar.group.visible = false;
+    else if (showGhost) ghostCar.syncVisuals(dt, simAccum / FIXED_DT);
+  }
   if (sunShadows) { adoptCarLayersOnce(); sunShadows.follow(vehicle.renderPos); }
   checkFall();
   chase.update(dt);
@@ -454,7 +498,7 @@ function tick() {
   // countdown: 3 · 2 · 1 over 1.5 s
   $("time").textContent = rs.state === "countdown" ? String(Math.ceil(rs.hold * 2)) : fmt(rs.state === "finished" ? rs.finishTime : rs.time);
   $("cps").textContent = race.cps.length ? `CP ${rs.taken.size}/${race.cps.length}` : "no checkpoints";
-  $("cps").classList.toggle("boost", boostLeft > 0);
+  $("cps").classList.toggle("boost", rules.boostLeft > 0);
   if (++frame % 15 === 0) renderStats();
 }
 requestAnimationFrame(tick);
@@ -462,7 +506,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
-  get boosting() { return boostLeft > 0; }, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  get boosting() { return rules.boostLeft > 0; }, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };

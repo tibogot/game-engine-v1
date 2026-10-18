@@ -7,7 +7,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
-import { createLandingJudge } from "./landing.js";
+import { createCarRules } from "./carRules.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
@@ -344,23 +344,19 @@ async function runPrediction() {
   const lastUid = ride[ride.length - 1].uid;
   const endsOnLip = lips.has(lastUid);
   prediction.openJump = false;
-  let idx = 0, boost = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
-  const lp = new THREE.Vector3(), nose = new THREE.Vector3();
+  let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
+  const nose = new THREE.Vector3();
   const pilot = createAutopilot(ride); // the drive page's autopilot (and its wall cut, air spin)
-  const judge = createLandingJudge(car); // perfect landings boost, as on the drive page
+  const rules = createCarRules(car, { boostPads: boosts }); // the drive page's rules: wall cut, landing boost, pads
   prediction.landings = [];
   let endSpeed = null;
   for (let tick = 0; tick < 120 * 180; tick++) {
     const p = car.body.pos;
-    car.tick(pilot.input(car));
+    const landed = rules.step(pilot.input(car), FIXED_DT);
+    if (landed) prediction.landings.push(landed.grade);
     idx = pilot.idx;
     nose.set(0, 0, 1).applyQuaternion(car.body.quat);
     const v = car.body.vel.length();
-    for (const b of boosts) { lp.copy(car.body.pos).applyMatrix4(b); if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boost = 2.0; }
-    const landed = judge.tick(FIXED_DT);
-    if (landed) { boost = Math.max(boost, landed.boost); prediction.landings.push(landed.grade); }
-    if (boost > 0 && car.groundedCount > 0) car.body.vel.addScaledVector(nose, 14 * FIXED_DT);
-    boost = Math.max(0, boost - FIXED_DT);
     // take-off at a lip: the speed the arc band is built from
     const grounded = car.groundedCount > 0;
     // the LAST time the wheels leave a lip piece is the take-off: a flip ramp's curl can lift them
