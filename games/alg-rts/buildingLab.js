@@ -41,6 +41,8 @@ import { buildPortBlock } from "./algPort.js";
 import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 await loadZeriba();
 await loadZeriba("zeribaFarm");
+import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
+await loadMotorPool();
 
 // THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
 // marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
@@ -201,6 +203,21 @@ const BUILDINGS = {
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
   poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
   parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },
+  // THE MOTOR POOL, NEW (2026-10-18, you: "how far could we make a better looking AAA motor pool?"): the
+  // game's LEFT (detail 1), the lab's kit pass MIDDLE (detail 2, the sheets), the Blender one RIGHT
+  // (algMotorPool.js, tools/blender/motorPool.py) — the evolution, three side by side.
+  parcAutoNeuf: {
+    label: "Parc auto (nouveau)", gap: 34, yaw: Math.PI - 0.6, before: () => buildMotorPool({ detail: 1 }), middle: () => buildMotorPool({ detail: 2 }),
+    after: () => {
+      const m = motorPoolMesh(), g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+      g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
+      g.userData.extra = m ? [m] : [];
+      if (m) console.log("[motorPool]", motorPoolStats(m));
+      return g;
+    },
+    tags: ["PARC AUTO (LE JEU)", "PARC AUTO · KIT, DÉTAIL 2", "PARC AUTO · NOUVEAU (BLENDER)"], note: "le parc auto du jeu à gauche, la passe du kit (détail 2) au milieu, le nouveau à droite : charpente acier, tôle ondulée, atelier enduit à la chaux.",
+  },
   // THE HELIPAD (2026-10-13, you: "add the helipad to the lab to fine-tune it" — the first base building
   // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.
   helisurface: {

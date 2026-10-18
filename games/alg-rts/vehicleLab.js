@@ -222,9 +222,14 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   const afterGeo = V.after ? V.after() : V.build({ detail: 2, crew: false });
   const after = vehicleOf(afterGeo, vKey);
   const GAP = typeof gap === "function" ? gap(vKey) : gap;
+  // A THIRD, in the middle (2026-10-18, you: "the old one, the newer one and the Blender one, to compare the
+  // evolution"): `middle` — then the three stand GAP apart, not 2·GAP.
+  const middle = V.middle ? vehicleOf(V.middle(), vKey) : null;
   before.group.position.x = -GAP;
   after.group.position.x = GAP;
   scene.add(before.group, after.group);
+  if (middle) scene.add(middle.group);
+  const groups = [before, middle, after].filter(Boolean);
   after.paint(PAINTS.brun.tint);   // the closest to the French photos; the panel switches
   const crew = await addCrew(after.group, afterGeo.userData.seats, renderer, after.turretMesh);
 
@@ -237,8 +242,8 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   }
 
   // The turntable starts OFF (you, 2026-10-08: world-projected textures slid as it turned); "Rotation" turns it on.
-  let spin = false, yaw = -0.6;
-  const setYaw = () => { before.group.rotation.y = yaw; after.group.rotation.y = yaw; };
+  let spin = false, yaw = V.yaw ?? -0.6;   // (an entry may turn its pieces to face the camera: `yaw`)
+  const setYaw = () => { for (const v of groups) v.group.rotation.y = yaw; };
   setYaw();
   function close() { controls.target.set(0, 1.2, 0); camera.position.set(4, 5.5, 13); controls.update(); }
   /** The RTS camera: its 40° lens, pitched ~42°, 77 m out (and a nearer play zoom). */
@@ -406,9 +411,9 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
         camera.position.copy(s.pos).add(_fo.set(6.5, 1.6, -2.4));
       }
     }
-    for (const v of [before, after]) for (const r of v.rotors) r.m.rotation[r.axis] += dt * (r.axis === "y" ? 4 : 18);
+    for (const v of groups) for (const r of v.rotors) r.m.rotation[r.axis] += dt * (r.axis === "y" ? 4 : 18);
     controls.update();
-    [[before.group, tags[0]], [after.group, tags[1]]].forEach(([g, t]) => {
+    groups.map((q, i) => [q.group, tags[i]]).forEach(([g, t]) => {
       v.set(g.position.x, 4.2, 0).project(camera);
       t.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
       t.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
@@ -416,5 +421,5 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
     });
     renderer.render(scene, camera);
   });
-  return { renderer, scene, camera, controls, before, after, crew, paints: PAINTS, slow: (k) => { timeScale = k; }, fire: (on) => { firing = on; if (on) { spin = false; yaw = 0; setYaw(); } }, close, play, night, setYaw: (y) => { yaw = y; setYaw(); }, spin: (on) => { spin = on; } };
+  return { renderer, scene, camera, controls, before, middle, after, crew, paints: PAINTS, slow: (k) => { timeScale = k; }, fire: (on) => { firing = on; if (on) { spin = false; yaw = 0; setYaw(); } }, close, play, night, setYaw: (y) => { yaw = y; setYaw(); }, spin: (on) => { spin = on; } };
 }
