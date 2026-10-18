@@ -87,6 +87,10 @@ const P = {
   // THE MORTAR HARASS (step 4): from 80-100 m of French the FLN KNOWS, a barrage, ~45 s of rounds,
   // gone before they close in; then it rests at home.
   harass: { ring: [80, 100], fireFor: [38, 52], rest: [60, 90], danger: 45, minKnown: 2, lostAt: 0.34, setupWait: 25 },
+  // THE 12.7 GUARD (step 5): set up in cover by the FLN-held village nearest where French aircraft were
+  // last seen (helicopters land men and supplies by the points), else at home. Re-looked every
+  // `every` s; it moves only for a spot `moveOver` m away. Hurt with French close: home, a rest.
+  hmg: { ring: [12, 26], every: 30, moveOver: 40, danger: 30, rest: [45, 70] },
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -433,7 +437,39 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     }
   }
 
+  // ── THE 12.7'S WORK (P.hmg) ──────────────────────────────────────────────
+  let lastAir = null;   // where French aircraft were last seen (they are loud: no eyes needed)
+  function stepHmg(q, dt) {
+    const H = P.hmg, men = teamAlive(q);
+    if (!men.length) return;
+    q.t = (q.t ?? 0) + dt;
+    q.state ??= "guard";
+    for (const u of men) u.holdFire = false;   // (algMgTeam packs a gun that holds fire)
+    const c = centre(men);
+    if (q.state === "rest") {
+      if (q.t > (q.rest ?? 0)) { q.state = "guard"; q.t = 0; q.look = 0; }
+      return;
+    }
+    // Hurt, French infantry close: home.
+    const hurt = men.length < q.men.length && french().some((f) => f.type?.foot && dist(f.position, c) < H.danger);
+    if (hurt) { q.state = "rest"; q.t = 0; q.rest = rand(...H.rest); q.at = null; orderTeam(q, homeFor(c)); return; }
+    if ((q.look = (q.look ?? 0) - dt) > 0) return;
+    q.look = H.every;
+    // Where to guard: the held village nearest the last aircraft seen; none held, or no aircraft yet: home.
+    const held = (app.algEconomy?.points ?? []).filter((v) => v.owner === "enemy");
+    const ref = lastAir ?? c;
+    const v = held.sort((a, b) => dist(a.position, ref) - dist(b.position, ref))[0];
+    const at = v ? v.position : homeFor(c);
+    if (q.at && dist(q.at, at) < H.moveOver) return;   // already guarding there
+    const spot = v ? spotAround(at, rand(0, 6.283), Math.PI, H.ring, { from: c }) : at;
+    if (!spot) return;
+    q.at = { x: at.x, z: at.z };
+    orderTeam(q, spot);
+  }
+
   function stepTeams(dt) {
+    for (const f of french()) if (f.isAir) { lastAir = { x: f.position.x, z: f.position.z }; break; }
+    for (const q of teams) if (q.key === "mitrailleuse") stepHmg(q, dt);
     for (let i = teams.length - 1; i >= 0; i--) if (!teams[i].men.some((u) => u.alive)) teams.splice(i, 1);
     for (const q of teams) if (q.key === "mortier") stepMortar(q, dt);
     if ((teamT -= dt) > 0) return;
