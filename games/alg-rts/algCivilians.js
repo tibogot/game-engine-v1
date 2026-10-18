@@ -43,6 +43,12 @@ const P = {
   check: 0.5,           // s between danger checks
   stuck: 3,             // s without getting anywhere (caught on a wall corner): another door, then in where he is
   shepherdBehind: 7,    // m behind the flock's home
+  // GATHERING (2026-10-19, Mixamo "Pick Fruit" — MEASURED: a stoop to the ground, a basket in the left
+  // hand, 7.1 s, ends where it starts): a villager now and then goes out under one of the village's
+  // ORCHARD trees (algFields) and gathers what fell — the olive harvest was picked up off the ground.
+  // (At the crown's EDGE, on the camera's side: under the crown, 2 m from the trunk, the RTS camera saw
+  // only leaves — measured in the game.)
+  gather: 0.3, treesReach: 70, gatherAt: [2.6, 3.4], gatherFor: [15, 30], pickLen: 7.1,
   // the moussebel (step 2)
   farms: 2,             // farmsteads with a "shepherd" who is the FLN's (drawn each game)
   revealAt: 22,         // m: French this near (on foot or in a vehicle) — he takes up his rifle
@@ -98,7 +104,9 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
     const doors = houseDoors.filter((h) => Math.hypot(h.x - v.position.x, h.z - v.position.z) < r).map((h) => h.door);
     if (!doors.length) continue;
     const well = wells.find((w) => Math.hypot(w.x - v.position.x, w.z - v.position.z) < r + 25);
-    villages.push({ point: v, r, doors, well: well ? open(well.x + 3, well.z + 3) : null, people: [] });
+    // Its orchards' trees (algFields): where its people go to gather.
+    const trees = (app.algFields?.trees ?? []).filter((t) => Math.hypot(t.x - v.position.x, t.z - v.position.z) < r + P.treesReach);
+    villages.push({ point: v, r, doors, well: well ? open(well.x + 3, well.z + 3) : null, people: [], trees });
   }
   /** A place to stand in village `vg`: by a door, at the well, or out in its ground. */
   function spot(vg) {
@@ -245,7 +253,7 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
       // or two — then runs for a door.
       if (f.state === "duck") { if ((f.t -= dt) <= 0) goIn(f); continue; }
       if (check && f.state !== "in" && f.state !== "run" && fighting(u.position.x, u.position.z)) {
-        f.state = "duck"; f.t = 1.2 + rnd() * 0.8;
+        f.state = "duck"; f.t = 1.2 + rnd() * 0.8; f.gathering = false; f.tree = null;
         u.haltMovement?.();
         u.playOnce = "cower";
         shout(f);
@@ -270,10 +278,20 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
       }
       // THEIR DAY
       if (f.state === "walk") {
-        if (!u.isMoving) { f.state = "wait"; f.t = P.wait[0] + rnd() * (P.wait[1] - P.wait[0]); if (f.face) u.faceToward?.(f.face.x, f.face.z); }
+        if (!u.isMoving) {
+          f.state = "wait"; f.t = P.wait[0] + rnd() * (P.wait[1] - P.wait[0]);
+          if (f.face) u.faceToward?.(f.face.x, f.face.z);
+          // Under his tree: gathering, a while (only if he got there — a blocked way: he just waits).
+          if (f.tree && Math.hypot(u.position.x - f.goal.x, u.position.z - f.goal.z) < 2) { f.gathering = true; f.pickT = 0; f.t = P.gatherFor[0] + rnd() * (P.gatherFor[1] - P.gatherFor[0]); }
+          f.tree = null;
+        }
         continue;
       }
+      if (f.gathering) {
+        if ((f.pickT -= dt) <= 0) { f.pickT = P.pickLen; u.playOnce = "pickFruit"; }   // stoop, pick, into the basket — again
+      }
       if ((f.t -= dt) > 0) continue;
+      f.gathering = false;
       // Next: alone somewhere, or to stand with another villager (talking).
       const other = rnd() < P.pairChance ? f.vg.people.find((o) => o !== f && o.state === "wait" && o.t > 6) : null;
       if (other) {
@@ -281,6 +299,16 @@ export async function createAlgCivilians(app, { economy, garrison, herds = null,
         f.face = other.u.position;
         other.t = Math.max(other.t, 10);
         other.u.faceToward?.(p.x, p.z);
+        u.orderTo(p.x, p.z);
+        f.goal = p;
+      } else if (f.vg.trees.length && rnd() < P.gather) {
+        // Out to an orchard tree: under its crown, facing the trunk.
+        const tr = f.vg.trees[Math.floor(rnd() * f.vg.trees.length)];
+        const cam = app.camera?.position, toCam = cam ? Math.atan2(cam.z - tr.z, cam.x - tr.x) : rnd() * Math.PI * 2;
+        const a = toCam + (rnd() - 0.5) * 2, d = P.gatherAt[0] + rnd() * (P.gatherAt[1] - P.gatherAt[0]);
+        const p = open(tr.x + Math.cos(a) * d, tr.z + Math.sin(a) * d);
+        f.face = { x: tr.x, z: tr.z };
+        f.tree = tr;
         u.orderTo(p.x, p.z);
         f.goal = p;
       } else {

@@ -316,6 +316,7 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
   // Their own random stream: the walls and hedges above keep theirs.
   const RO = rng(41961);
   let orchardTrees = 0;
+  const trees = [];   // { x, z, kind }: where villagers go to gather under them (algCivilians)
   for (const b of plots) {
     if (b.kind !== "orchard" || !plants) continue;
     let u = RO(), sp = ORCHARD.species[0][0];
@@ -332,6 +333,7 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
       if ((app.getWaterLevelAt?.(x, z) ?? -Infinity) > H(x, z) - 0.3) continue;
       const f = RO();
       plants.add(sp, x, H(x, z) - 0.05, z, { rotY: f * 6.28, scale: ORCHARD.scale[0] + RO() * (ORCHARD.scale[1] - ORCHARD.scale[0]), seed: f });
+      trees.push({ x, z, kind: sp });
       orchardTrees++;
     }
   }
@@ -374,6 +376,8 @@ export function createAlgFields(app, { economy, navGrid = null, showroom = {}, p
 
   return {
     params: P, plots, walls, surface, hedge,
+    /** The orchards' trees, { x, z, kind } (villagers gather under them: algCivilians). */
+    trees,
     concealAt,
     /** A building put down here clears the field under it (algBuild.js). */
     cutHole: (x, z, hx, hz, yaw) => surface?.userData?.cutHole?.(x, z, hx, hz, yaw) ?? false,

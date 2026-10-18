@@ -108,6 +108,7 @@ const P = {
   retreatDamage: 0.6,
   reinforceTime: 4,      // s for a replacement to come out of the gate
   fieldRadius: 30,       // m: a squad this near a still half-track reinforces there
+  pointEvery: [25, 50],  // s between a resting squad leader's pointing (pointNow)
 };
 
 /**
@@ -268,6 +269,21 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
   }
 
   /** FIXED STEP, after posture (it overrides a retreating man's posture). */
+  /**
+   * THE LEADER POINTS (2026-10-19, Mixamo "Pointing", 2.8 s — ambient, CoH's squads are never statues):
+   * a squad at rest — nobody moving, no target, no fire on them, the leader standing in the open, out
+   * of houses — and now and then its leader points out the ground ahead. Never on an order (that was
+   * tried: the squad runs off at once).
+   */
+  function pointNow(s, dt) {
+    const L = s.leader;
+    if (!L?.alive || s.members.length < 2) return;
+    if ((s._pointT = (s._pointT ?? P.pointEvery[0] * Math.random()) - dt) > 0) return;
+    s._pointT = P.pointEvery[0] + Math.random() * (P.pointEvery[1] - P.pointEvery[0]);
+    const atRest = !s.retreating && s.members.every((u) => !u.isMoving && !u.target?.alive && !u.attackTarget && (u.suppression ?? 0) < 0.05 && !u.inside && !u.carrier);
+    if (atRest && (L.posture ?? "stand") === "stand" && !L.throwing && !L.carrying && !L.working && !L.mortarClip) L.playOnce = "point";
+  }
+
   function step(dt) {
     for (const s of [...list]) {
       for (const u of s.slots) if (u && !u.alive) leave(u);
@@ -286,6 +302,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
       for (const u of s.members) {
         if (u.hp < u.maxHp && inBase(u.position.x, u.position.z, s) && !u.target && (u.suppression ?? 0) < 0.1) u.hp = Math.min(u.maxHp, u.hp + P.heal * dt);
       }
+      pointNow(s, dt);
     }
     // Replacements coming out of the gate.
     for (let i = pending.length - 1; i >= 0; i--) {

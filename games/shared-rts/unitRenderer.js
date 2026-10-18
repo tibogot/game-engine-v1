@@ -466,6 +466,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     // repairing a vehicle (alg-rts algRepair.js): its own clip when the pack has one
     repair: (exact("repair") ?? exact("hammer"))?.name ?? null,
     grenade: exact("grenade_throw")?.name ?? null,
+    grenadeKneel: exact("grenade_throw_alt")?.name ?? null,   // (a throw from his knee: unit.throwing.kneel, alg-rts algGrenades)
     // The MORTAR CREW (tools/packMixamo synthMortarClips; alg-rts algMortarTeam.js sets unit.mortarClip).
     mortarSetup: exact("mortar_setup")?.name ?? null,
     mortarLay: exact("mortar_lay")?.name ?? null,
@@ -1023,7 +1024,7 @@ function soldierClip(unit, v, roles) {
   if (unit.hanging) return roles.idle;
   // An UNARMED type (civilians): idle, walk, or run when `unit.running`.
   if (unit.type?.unarmed && roles.calm) return unit.isMoving ? (unit.running ? roles.flee : roles.walk) ?? roles.run : roles.calm;
-  if (unit.throwing && roles.grenade) return roles.grenade;   // algGrenades.js
+  if (unit.throwing && roles.grenade) return unit.throwing.kneel && roles.grenadeKneel ? roles.grenadeKneel : roles.grenade;   // algGrenades.js
   // A mortar crewman's part (alg-rts algMortarTeam.js): set up, lay the gun, wait with a bomb, load it.
   if (unit.mortarClip && roles[unit.mortarClip]) return roles[unit.mortarClip];
   // Repairing (alg-rts `repairing`): the repair clip, else kneeling at it — never the shovel.
@@ -1875,7 +1876,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           v.prev = v.cur;
           // a shot / a throw / a move's clip from its start (a throw from its own offset: algGrenades.js)
           const t0 = v.once && want === v.once.clip ? 0
-            : want === r.grenade ? unit.throwing?.start ?? 0
+            : want === r.grenade || want === r.grenadeKneel ? unit.throwing?.start ?? 0
             // kneeling into aim with no shot yet: straight to the held aim, no recoil
             : want === r.crouchFire && v.firing <= 0 ? f.duration(want) * CROUCH_AIM_AT
             : v.move || want === r.fire || want === r.crouchFire || want === r.proneFire ? 0 : Math.random() * f.duration(want);
@@ -2022,7 +2023,15 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             const tp = seat.turret ? cr.v.inst.parts.find((q) => q.kind === "turret") : null;
             if (tp) {
               _mzE.copy(tp.baseEuler); _mzE.y = tp.baseEuler.y + cr.v.turretAngle;
-              _mzLocal.compose(tp.basePos, _mzQ.setFromEuler(_mzE), tp.baseScale);
+              // …and RIDES its kick (2026-10-19, CoH: the gunner shakes with his gun — he sat still while
+              // the mount juddered): the turret part's own recoil / MG judder, above.
+              const vv = cr.v, kick = (vv.recoil ?? 0) ** 2;
+              const back = kick > 0 ? 0.45 * kick / vv.inst.scale
+                : vv.mgKick > 0 ? 0.06 * vv.mgKick * (0.6 + 0.4 * Math.sin(vv.mgKick * 40)) / vv.inst.scale : 0;
+              _kickPos.copy(tp.basePos);
+              _kickPos.x -= Math.sin(vv.turretAngle) * back;
+              _kickPos.z -= Math.cos(vv.turretAngle) * back;
+              _mzLocal.compose(_kickPos, _mzQ.setFromEuler(_mzE), tp.baseScale);
               _mat.multiplyMatrices(cr.x.matrix, tp.parentRel).multiply(_mzLocal).multiply(_crewSeat).multiply(g.rel);
             } else _mat.multiplyMatrices(cr.m, _crewSeat).multiply(g.rel);
             const tt = cr.t + si * 1.7;

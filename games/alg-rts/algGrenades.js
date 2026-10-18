@@ -37,6 +37,10 @@ export const GRENADE = {
   clipStart: 0.6,   // s into grenade_throw where the throw starts
   release: 1.25,    // s after that the grenade leaves the hand
   done: 2.0,        // s after that he is back to his rifle
+  // FROM HIS KNEE (2026-10-19, CoH: a man in cover throws from cover): kneeling (in cover, suppressed) or
+  // prone, he throws with the kneeling clip (grenade_throw_alt, 8.2 s — MEASURED on the clip: the hand
+  // goes back by 3.1 s, peaks 1.38 m swinging forward at 3.5 s, is down again by 4.5 s).
+  kneel: { start: 2.3, release: 1.2, done: 2.2, height: 1.8 },
 };
 
 /** The two kinds a man carries: what the button, the ring and the landing are. */
@@ -187,9 +191,11 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
           end(job, i);
           continue;
         }
+        // Kneeling (in cover, suppressed) or down: he throws from his knee.
+        job.kneel = u.posture === "kneel" || u.posture === "prone";
         u.stop();
         u.faceToward(job.x, job.z);
-        u.throwing = { start: P.clipStart };
+        u.throwing = job.kneel ? { start: P.kneel.start, kneel: true } : { start: P.clipStart };
         u[K.cd] = K.cooldown;
         job.t = 0;
         onChange();
@@ -198,18 +204,18 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
       // A NEW move order mid-throw: he drops it (nothing thrown yet) or goes after. (A nudge does not.)
       if (u.isMoving && u.goalPoint && Math.hypot(u.goalPoint.x - u.position.x, u.goalPoint.z - u.position.z) > 1.5) { end(job, i); continue; }
       job.t += dt;
-      if (!job.thrown && job.t >= P.release) {
+      if (!job.thrown && job.t >= (job.kneel ? P.kneel.release : P.release)) {
         job.thrown = true;
         thrownCount[job.kind] = (thrownCount[job.kind] ?? 0) + 1;
         const h = app.getWorldHeight?.(job.x, job.z) ?? 0;
-        const from = u.position.clone(); from.y += 1.9;
+        const from = u.position.clone(); from.y += job.kneel ? P.kneel.height : 1.9;
         const to = from.clone().set(job.x, h + 0.2, job.z);
         const flight = 0.7 + from.distanceTo(to) / 30;
         // A smoke canister: no damage, no warning ring (splash 0) — it lands as a cloud.
         if (job.kind === "smoke") projectiles.spawnArc(from, to, { damage: 0, splash: 0, owner: u, flight, kind: "smoke" });
         else projectiles.spawnArc(from, to, { damage: P.damage, splash: P.blast, owner: u, flight, kind: "grenade" });
       }
-      if (job.t >= P.done) end(job, i);
+      if (job.t >= (job.kneel ? P.kneel.done : P.done)) end(job, i);
     }
   }
 

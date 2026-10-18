@@ -52,10 +52,14 @@ import { RENDER_ORDER } from "./renderOrder.js";
 export const XRAY_ORDER = RENDER_ORDER.XRAY;
 export const UNIT_ORDER = RENDER_ORDER.UNITS;
 
+// OPAQUE (2026-10-19, CoH's flat silhouette): at 0.42 the blend STACKED — two men overlapping, or one
+// man's arm across his own chest, drew darker blotches inside the silhouette. Fully covered, an overlap
+// cannot stack: one even team colour, the rim still brighter. (A stencil would allow see-through
+// without stacking, but the post chain samples the scene depth — see the header.)
 export const XRAY = {
   player: new THREE.Color(0.32, 0.62, 1.0),
   enemy: new THREE.Color(1.0, 0.32, 0.26),
-  opacity: 0.42,
+  opacity: 1,
   rim: 0.45,
 };
 
@@ -112,7 +116,7 @@ export function createXrayMaterial({ teamNode, lift = uLift, positionNode = null
   const team = mix(vec3(uPlayer), vec3(uEnemy), teamNode);
   // Not over 1: unlit and not tone mapped, a brighter blue clips to white.
   mat.colorNode = team.mul(mix(float(0.7), float(1.0), rim.mul(uRim.mul(2)).min(1)));
-  let alpha = max(uOpacity, float(0)).add(rim.mul(uRim)).min(0.9);
+  let alpha = max(uOpacity, float(0)).add(rim.mul(uRim)).min(1);
   const htex = xrayParams.heightTexNode;
   if (htex) {
     // A hill between the unit and the camera: walk the line of sight from 2 m
