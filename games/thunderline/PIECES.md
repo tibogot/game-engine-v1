@@ -252,6 +252,24 @@ size matters, the autopilot can drive it, and the drive page shows it.
 Order: the race layer first (gates, checkpoints, ghosts, medals: without them nothing is a race),
 then the tube family, then the rest by fun per hour of work.
 
+## 7d. What a real Apex Rush track is made of (user's top-down screenshot, 2026-10-19)
+
+A full track seen from above (no tubes in it). What it shows, and what we still lack:
+
+| In their track | What it means for our kit | We have |
+|---|---|---|
+| Curves of every size: hairpins, long sweepers, S-bends, a wavy "snake" run | a TURN SET — angles 15/30/45/90/180°, radii from tight to very wide, both hands; an S-bend; a wave | 2 turns (R128 fast, R32 brake) |
+| Ribbons rolling a full 360° round themselves (striped undersides) | **TWIST**: the road rolls 360° along a straight — upside down mid-way, held by speed | — (needs the car's road hold; measure first) |
+| Hoops standing in the air (one edge-on, one face-on) | **LOOP** (have, R28) and free hoops to fly through (our air rings) | loop_28, air ring |
+| A "C" wall at a road end | **HALF-PIPE U-TURN**: a curved wall that turns you round (our bowl's cousin, sideways) | fitted bowl (vertical) |
+| Road just stopping and starting again further on | plain **GAPS**: road → air → road, no kicker (our drop, level) | drop_16 + fitted landing |
+| Roads crossing over and under each other, a central tower | **STACKING**: crossovers at several heights, a climb up a tower and a drop off it | slopes, the corridor check |
+| Narrow roads, no guardrails, light edges | the **OPEN** edge as a normal look, not only "hard mode" | guarded / open toggle |
+| Stripes on the stunt pieces' undersides | a visual code: stunt pieces marked so you read them from far | — |
+
+Priority from this: the TURN SET (every track is mostly curves), then TWIST and the HALF-PIPE U-turn,
+then crossovers/stacking helpers in the builder.
+
 ## 8. What's next
 
 **P5 — piece lab** (grey-to-first-look, no car yet): the PATH × SECTION × LEAN sweep with the road
