@@ -4,9 +4,10 @@
 // occlusion) → public/models/alg/motorPool.glb. Front at -Z, as buildMotorPool. In the BUILDINGS LAB first.
 //
 // OPTIMIZED (you: "any asset we create should be very optimized, with LOD"): TWO LEVELS, each ONE draw —
-//   StaticNear  the whole building, one 4096 atlas (zoomed in)
-//   StaticFar   the RTS-zoom version (flat sheets with the ribs baked in, box sections, no small parts),
-//               one 1024 atlas baked from the near one
+//   StaticFar   the GAME's level (motorPool.glb): zig-zag ribbed sheets, box sections, no small parts,
+//               one 2048 atlas baked from the near one
+//   StaticNear  the whole building, one 4096 atlas (motorPoolNear.glb) — the LAB's close look only, loaded
+//               on request: it cost 2 ms at the game's closest zoom (tiny-triangle shading), far 0.84
 //   DoorL/DoorR the garage bay's doors (origin on the hinge: a game swings them) — near; far a meshopt-
 //               simplified copy of each (the same names: whoever swings them, swings both)
 // The game's cloth-simulated sandbags ride along: the full mesh near, a meshopt-simplified one far.
@@ -21,14 +22,16 @@ const S = 1.3;          // (built in real metres; the game draws its buildings a
 /** The camera distance (world m) where the far level takes over; the RTS camera sits 50-130 m out. */
 export const MOTOR_POOL_FAR = 45;
 
-/** Load the GLB once (`file`: another build of it, the lab's ?glb= — comparing compressions). Null if missing. */
-export function loadMotorPool(file = "motorPool") {
+/** Load the GLB once (`file`: another build of it, the lab's ?glb= — comparing compressions; `near`: also the
+ *  close-up level, the lab's). Null if missing. */
+export function loadMotorPool(file = "motorPool", { near: withNear = false } = {}) {
   return (_p ??= (async () => {
-    const [gltf] = await Promise.all([getSharedGltfLoader().loadAsync(`/models/alg/${file}.glb`).catch((e) => { console.warn("[motorPool]", e); return null; }), loadSandbags(), simplifierReady]);
+    const load = (f) => getSharedGltfLoader().loadAsync(`/models/alg/${f}.glb`).catch((e) => { console.warn("[motorPool]", e); return null; });
+    const [gltf, gNear] = await Promise.all([load(file), withNear ? load(`${file}Near`) : null, loadSandbags(), simplifierReady]);
     if (!gltf) return null;
     const get = (n) => gltf.scene.getObjectByName(n);
-    const near = get("StaticNear"), far = get("StaticFar");
-    if (!near || !far) return null;
+    const near = gNear?.scene.getObjectByName("StaticNear") ?? null, far = get("StaticFar");
+    if (!far) return null;
     // THE SANDBAGS (you: "we have already made some — I have several realistic ones"): the game's cloth-
     // simulated bags (algSandbags.js), a low wall shielding the drums at the shed's left gable, on the apron.
     // (built in the game's units, then ÷S: the bags the size of the game's walls, not ×1.3 again)
@@ -42,6 +45,9 @@ export function loadMotorPool(file = "motorPool") {
       if (!o?.isMesh) continue;
       o.castShadow = o.receiveShadow = true;
       if (o.material?.map) o.material.map.anisotropy = 8;
+      // (Blender exports DOUBLE-sided: every back face shaded too — measured ~0.45 ms at the closest zoom. Every
+      // surface here is closed or has its own back: the sheets are thickened, or a flat underside in the far)
+      if (o.material) o.material.side = THREE.FrontSide;
     }
     const doors = [get("DoorL"), get("DoorR")].filter(Boolean);
     // (the GLB's geometry is meshopt-QUANTIZED — 16-bit attributes, the node's scale undoes it — and the
@@ -68,7 +74,8 @@ function toFloat(src) {
   return g;
 }
 
-/** A motor pool (meshes and materials shared): an LOD near / far and the two doors. Null if not loaded. */
+/** A motor pool (meshes and materials shared): the far level and the two doors, an LOD with the near one
+ *  when it was loaded. Null if not loaded. */
 export function motorPoolMesh() {
   if (!_parts) return null;
   const P = _parts, g = new THREE.Group();
@@ -77,8 +84,8 @@ export function motorPoolMesh() {
   const level = (...ms) => { const q = new THREE.Group(); for (const m of ms) q.add(m.clone()); return q; };
   const lod = new THREE.LOD();
   lod.name = "MotorPoolLOD";
-  lod.addLevel(level(P.near, P.bags, ...P.doors), 0, 0.1);
-  lod.addLevel(level(P.far, P.bagsFar, ...P.doorsFar), MOTOR_POOL_FAR, 0.1);
+  if (P.near) lod.addLevel(level(P.near, P.bags, ...P.doors), 0, 0.1);
+  lod.addLevel(level(P.far, P.bagsFar, ...P.doorsFar), P.near ? MOTOR_POOL_FAR : 0, 0.1);
   g.add(lod);
   return g;
 }
@@ -98,5 +105,6 @@ export function motorPoolStats(root) {
     return { tris, draws, mpx: +(px / 1e6).toFixed(2) };
   };
   const lod = root.getObjectByName("MotorPoolLOD");
-  return { near: count([lod.levels[0].object]), far: count([lod.levels[1].object]) };
+  const L = lod.levels;
+  return { near: L.length > 1 ? count([L[0].object]) : null, far: count([L[L.length - 1].object]) };
 }

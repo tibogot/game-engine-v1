@@ -206,7 +206,7 @@ const BUILDINGS = {
   // game's LEFT (detail 1), the lab's kit pass MIDDLE (detail 2, the sheets), the Blender one RIGHT
   // (algMotorPool.js, tools/blender/motorPool.py) — the evolution, three side by side.
   parcAutoNeuf: {
-    label: "Parc auto (nouveau)", gap: 34, yaw: Math.PI - 0.6, prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined), before: () => buildMotorPool({ detail: 1 }), middle: () => buildMotorPool({ detail: 2 }),
+    label: "Parc auto (nouveau)", gap: 34, yaw: Math.PI - 0.6, prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined, { near: true }), before: () => buildMotorPool({ detail: 1 }), middle: () => buildMotorPool({ detail: 2 }),
     after: () => {
       const m = motorPoolMesh(), g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));

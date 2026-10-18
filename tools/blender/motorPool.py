@@ -22,7 +22,8 @@ auto" of the late 1950s: a three-bay steel shed and the workshop block, built as
   BAKE      colour (procedural + the repo's photo textures, box-projected) × ambient occlusion — the CoH read,
             no normal map; ONE atlas per level (one draw), the far one baked from the near (see LOW below)
 Game coordinates: x along the shed, y up, FRONT at -Z (the open bays, the doors), metres as the game.
-Writes <out>/motorPool.glb (both levels); previews in assets-src/refs/motorpool/. Then compress it (KTX2, meshopt).
+Writes <out>/motorPool.glb (the far level + the doors: the game's) and motorPoolNear.glb (the lab's close look);
+previews in assets-src/refs/motorpool/. Then compress both (tools/optimizeGlb.mjs: KTX2, meshopt).
 """
 import bpy, bmesh, sys, os, math, random
 from mathutils import Vector
@@ -36,10 +37,10 @@ QUICK = "--quick" in sys.argv          # (low bake sizes and samples: for checki
 # THE TWO VERSIONS (2026-10-18, you: "any asset we create should be very optimized, with LOD"): run TWICE —
 #   --near   the full building, its parts joined into ONE object (Static) + the two doors, ONE 4096 atlas
 #            (colour × AO) → assets-src/refs/motorpool/motorPool_near.blend
-#   --far    the RTS-zoom version built from the same code with every detail switch down — flat sheets
-#            (their ribs painted in by the bake), box sections, no purlins / girts / gussets / bolts / small
-#            clutter, fewer sides — its 1024 atlas baked FROM the near one (selected → active), then ONE GLB
-#            with both: StaticNear, StaticFar, DoorL, DoorR (the doors shared by both levels)
+#   --far    the RTS-zoom version built from the same code with every detail switch down — zig-zag sheets
+#            (two segments a wave), box sections, no purlins / girts / gussets / bolts / small clutter, fewer
+#            sides — its 2048 atlas baked FROM the near one (selected → active), then the two GLBs: StaticFar
+#            + DoorL + DoorR (the game's), StaticNear (the lab's)
 LOW = "--far" in sys.argv
 random.seed(1958)
 bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete()
@@ -250,12 +251,13 @@ def P_R(wu, hv): return [(-wu / 2, -hv / 2), (wu / 2, -hv / 2), (wu / 2, hv / 2)
 def P_O(r, n=12): return [(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n)) for i in range(n)]
 def rod(name, a, b, r, mat, group, n=10, up=(0, 1, 0)):
     return member(name, a, b, P_O(r, n), mat, group, up, 0, smooth=True)
-def sheet(name, o, aw, al, an, width, length, mat, group, pitch=0.1, depth=0.028, segs=4, thick=0.0035, ribs_far=False):
+def sheet(name, o, aw, al, an, width, length, mat, group, pitch=0.1, depth=0.028, segs=4, thick=0.0035, ribs_far=True):
     """A corrugated sheet: `o` its corner, waves across `aw`, `length` (a number or f(w)) along `al`,
     its face toward `an`; thickened behind it (toward -an)."""
     o, aw, al, an = gv(*o), gv(*aw).normalized(), gv(*al).normalized(), gv(*an).normalized()
-    # (far: flat, the bake paints the ribs — but the ROOF keeps them as a cheap zig-zag, two segments a wave:
-    # at the RTS zoom a 1024 atlas has ~one texel a rib, and the roof is most of what the camera sees)
+    # (far: the ribs kept as a cheap zig-zag, two segments a wave, a flat underside behind — the roof AND
+    # the walls since 2026-10-19: far is the game's only level now, and baked-in wall ribs read blurred at
+    # the closest zoom; ribs_far=False flattens a sheet, the bake painting its ribs)
     phase = 0.0
     under = LOW and ribs_far and depth > 0
     if under: segs, phase, thick = 2, math.pi / 2, 0.0   # (no shell: a flat underside under it instead, 2 triangles)
@@ -805,7 +807,7 @@ if not LOW:
 # the flat sheets and the box sections
 far = OBJS["Static"]
 unwrap(far, 0.004)
-S_ = 1024 // (4 if QUICK else 1)
+S_ = 2048 // (4 if QUICK else 1)                      # (1024 blurred the rust and the sheets' laps at the closest zoom)
 img = target(far, S_, "far_col")
 with bpy.data.libraries.load(NEAR_BLEND, link=False) as (src, dst):
     dst.objects = [n for n in src.objects if n in ("Static", "DoorL", "DoorR")]
@@ -816,12 +818,16 @@ scn.cycles.samples = 8; colour_pass()
 bpy.ops.object.bake(type="DIFFUSE", use_selected_to_active=True, cage_extrusion=0.08, max_ray_distance=0.3)
 finish(far, np.array(img.pixels[:]).reshape(-1, 4), S_, "Far", 0.85)
 
-bpy.ops.object.select_all(action="DESELECT")
-for n in ("StaticNear", "StaticFar", "DoorL", "DoorR"): bpy.data.objects[n].select_set(True)
-kw = dict(filepath=os.path.join(out, "motorPool.glb"), use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format="JPEG")
-try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
-except TypeError: bpy.ops.export_scene.gltf(**kw)
-print("GLB", os.path.join(out, "motorPool.glb"))
+# TWO FILES (2026-10-19): the game draws the far level only (the near cost 2 ms at the closest zoom), so it
+# never downloads the near's 4096 atlas — motorPool.glb = StaticFar + the doors, motorPoolNear.glb = StaticNear
+# (the buildings lab's close look)
+for fn, names in (("motorPool", ("StaticFar", "DoorL", "DoorR")), ("motorPoolNear", ("StaticNear",))):
+    bpy.ops.object.select_all(action="DESELECT")
+    for n in names: bpy.data.objects[n].select_set(True)
+    kw = dict(filepath=os.path.join(out, f"{fn}.glb"), use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format="JPEG")
+    try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
+    except TypeError: bpy.ops.export_scene.gltf(**kw)
+    print("GLB", os.path.join(out, f"{fn}.glb"))
 
 # ── Previews (workbench, the baked textures): the near, then the far ─────────
 scn.render.engine = "BLENDER_WORKBENCH"
