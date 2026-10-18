@@ -85,8 +85,9 @@ export function createAutopilot(ride) {
   return {
     get idx() { return idx; },
     get airAim() { return airAim; },
-    reset() { idx = 0; },
-    input(car) {
+    reset() { idx = 0; touchCache = null; },
+    /** Where along the ride the car is (also while a player drives: the fall camera needs it). */
+    locate(car) {
       const p = car.body.pos;
       // nearest ride point, searched forward from the last one (the track crosses itself), running the
       // way the car moves (coming back down a bowl, the climbing lane right under it points up)
@@ -98,6 +99,13 @@ export function createAutopilot(ride) {
         if (d < bd) { bd = d; best = i; }
       }
       idx = best;
+      return idx;
+    },
+    /** In the air: the ride point the car will touch down on (its flight projected), or null. */
+    touchdown(car) { return car.groundedCount > 0 ? null : touchdown(car, idx); },
+    input(car) {
+      const p = car.body.pos;
+      const best = this.locate(car);
       _inv.copy(car.body.quat).invert();
       _local.copy(aim(best, 25).P).sub(p).applyQuaternion(_inv); // car local: +Z forward, +X left
       const steer = THREE.MathUtils.clamp((_local.x / Math.max(_local.z, 4)) * 2.5, -1, 1);
