@@ -883,9 +883,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   mortarTeams = createAlgMortarTeams(app, { units, squads, projectiles: combat.projectiles, selection, fogOfWar, purses: { player: economy.french, enemy: economy.aln } }); app.algMortarTeams = mortarTeams;
   if (SIDES.human === "enemy") {
     flnTricks = createAlgFlnTricks(app, { units, selection, mines, purse: economy.aln }); app.algFlnTricks = flnTricks;
-    recoilless = createAlgRecoilless(app, { squads }); app.algRecoilless = recoilless;
-    mules = createAlgMules(app, { units, squads, selection }); app.algMules = mules;
   }
+  // The recoilless and the mules: in EVERY game (2026-10-18 — the FLN's AI buys them too; their orders
+  // by mouse act on the human's units only).
+  recoilless = createAlgRecoilless(app, { squads }); app.algRecoilless = recoilless;
+  mules = createAlgMules(app, { units, squads, selection }); app.algMules = mules;
   patrols = createAlgPatrols(app, { units, economy, onDelivery: (n, v) => resourceHud.flash(t("+{fuel} C +{mun} M · convoi {name}", { fuel: n.fuel, mun: n.mun, name: v.name })) });
   app.algPatrols = patrols;
 

@@ -110,6 +110,8 @@ export function createAlgMules(app, { units, squads, selection }) {
     /** A man within a mule's reach (a grenade at half price — algGrenades). */
     supplied: (u) => mules().some((m) => m.team === u.team && near(m, u)),
     following: (m) => follows.get(m) ?? null,
+    /** An AI's order (the human's is the right-click): mule `m` follows squad `s` (null: stops following). */
+    follow(m, s) { if (s) { follows.set(m, s); m._muleRe = 0; } else follows.delete(m); },
     dispose() { dom.removeEventListener("contextmenu", onContext, true); },
   };
 }
