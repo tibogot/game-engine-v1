@@ -148,7 +148,7 @@ function piece(id, open = false) {
 function meshesFor(id, open) {
   const { look } = piece(id, open);
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(look.deck, mats.road));
+  g.add(new THREE.Mesh(look.deck, TILES[id]?.tube ? mats.tube : mats.road));
   if (look.rail) g.add(new THREE.Mesh(look.rail, mats.rail));
   if (look.posts?.template && look.posts.matrices.length) {
     const im = new THREE.InstancedMesh(look.posts.template, mats.rail, look.posts.matrices.length);
@@ -998,9 +998,11 @@ renderer.setAnimationLoop(() => {
   updateNext();
   renderer.render(scene, camera);
 });
+// test hooks: aiming updates the ghost/snap at once (a hidden or minimised window runs no frames)
+const hookAim = (f) => (...a) => { controls.update(); camera.updateMatrixWorld(); const r = f(...a); updateGhost(); return r; };
 window.__b3 = {
   get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls,
-  pickTile, place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
+  pickTile: hookAim(pickTile), place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },
   aimFast(k) { const a = arcs.at(-1); if (!a) return null; const p = a.fast.pts[Math.min(k, a.fast.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.fast.pts.length, p }; },
   aimArc(k) { const a = arcs.at(-1); if (!a) return null; const p = a.pts[Math.min(k, a.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.pts.length }; },
@@ -1010,3 +1012,5 @@ window.__b3 = {
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
+for (const k of ["aimEnd", "aimArc", "aimFast", "setMouse", "frameAll"]) window.__b3[k] = hookAim(window.__b3[k]);
+

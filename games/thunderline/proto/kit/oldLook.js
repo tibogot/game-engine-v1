@@ -16,7 +16,20 @@ export function createOldLookMaterials() {
   // band across the near cascade even at normal bias 0.12 (user's screenshot, 2026-10-18; A/B:
   // decks not casting → band gone; back-face casting → band gone AND lower decks still shadowed).
   road.shadowSide = THREE.BackSide;
-  return { road, rail: createGuardrailMaterial() };
+  // TUBES: the same road material in its tube mode (aZone 3 = bore, 4 = shell, lit rings in the bore),
+  // in Thunderline's colours — graphite bore, light steel shell, bolt-blue rings — never the old red
+  // (zones 3/4 fell through to the kerb colour on the plain road material)
+  const tube = createRoadMaterial({
+    tubeZones: true,
+    tubeInner: 0x2a3242,
+    tubeOuter: 0xc9d1dd,
+    neonColor: 0x3fd2ff,
+    neonIntensity: 2.4,
+    neonSpacing: 8,
+    neonWidth: 0.4,
+  });
+  tube.shadowSide = THREE.BackSide;
+  return { road, tube, rail: createGuardrailMaterial() };
 }
 
 /** Old-kit frames ({pos, tangent, up, right}) along a new piece, every ≤2 m, no duplicate stations. */
