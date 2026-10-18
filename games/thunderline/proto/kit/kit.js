@@ -276,6 +276,21 @@ export const TILES = {
     marks: [{ kind: "landing", from: 0, to: 40 }],
   },
   boost_32: { label: "Boost 32", segs: [{ L: 32 }], marks: [{ kind: "boost", from: 4, to: 28 }] },
+  // ---- THE TUBE FAMILY (tubeLook.js: one section, closure 0 = road … 1 = pipe r 8 m) ----
+  // Sized for ~60 m/s: in a turn the car rides the wall at atan(v²/gR) — R64 ≈ 80° at full speed.
+  tube_in: { label: "Tube in", segs: [{ L: 32 }], tube: { from: 0, to: 1 } },
+  tube_out: { label: "Tube out", segs: [{ L: 32 }], tube: { from: 1, to: 0 } },
+  tube_32: { label: "Tube 32", segs: [{ L: 32 }], tube: { from: 1, to: 1 } },
+  tube_64: { label: "Tube 64", segs: [{ L: 64 }], tube: { from: 1, to: 1 } },
+  // TIGHT: about twice what the tyres hold at full speed, so the car has to ride the wall round it
+  tube_turn_32: { label: "Tube turn R32", segs: [{ L: turnLen(32, Math.PI / 2, 20), turn: Math.PI / 2, ramp: 20 }], tube: { from: 1, to: 1 } },
+  tube_turn_64: { label: "Tube turn R64", segs: [{ L: turnLen(64, Math.PI / 2, 30), turn: Math.PI / 2, ramp: 30 }], tube: { from: 1, to: 1 } },
+  // ROOF DROP: an eased half loop inside the pipe, open at the top — the car comes out on the roof,
+  // upside down, heading back: roll upright in the air and land (a fitted landing below). Staying on
+  // the roof at the top needs v²/R ≥ g there, i.e. ≥ ~160 km/h at the entry for R 30.
+  tube_roof_drop: { label: "Roof drop", segs: [{ L: Math.PI * 30 + 36, pitch: Math.PI, ramp: 36 }], tube: { from: 1, to: 1 }, drop: true },
+  // CANNON: the pipe kicks up 25° and ends open — a lip, with arcs and fitted landings like a kicker
+  tube_cannon: { label: "Tube cannon", segs: [{ L: 48, pitch: 25 * DEG, ramp: 24 }], tube: { from: 1, to: 1 }, marks: [{ kind: "lip", from: -8, to: -0 }] },
   // DROP (user, 2026-10-18: "it jumps but it should also fall down and land on the road under"): the
   // road just ends. The builder draws its fall arcs like a kicker's; land on a road below, any depth.
   drop_16: { label: "Drop", segs: [{ L: 16 }], marks: [{ kind: "lip", from: -6, to: -0 }], drop: true },

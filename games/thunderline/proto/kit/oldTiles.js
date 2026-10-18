@@ -87,6 +87,15 @@ export function oldLookOf(t, edges) {
 
 TILE_RESOLVERS.push((id) => {
   const m = /^bowl_(\d+)(_L)?$/.exec(id);
+  // a left-hand old piece: "<preset>_L" = the same preset with curveDir −1
+  const lh = !m && /_L$/.test(id) && PRESETS[id.slice(0, -2)]?.hand ? PRESETS[id.slice(0, -2)] : null;
+  if (lh) {
+    const def = lh;
+    return {
+      label: `${def.label} L`, old: { base: def.base, params: { ...def.params, curveDir: -1 } },
+      roadHold: isFollowRoad(def.base), freeCarve: isFreeCarve(def.base), customIntegrate: oldIntegrate, customLook: oldLookOf,
+    };
+  }
   // the bowl is WIDE (two lanes: up one, back down the other)
   const def = m ? { label: `Bowl R${m[1]}`, base: "quarterpipe", params: { qpRadius: Number(m[1]), qpAngle: 90 }, road: { ...ROAD_PARAM_DEFAULTS, width: SECTIONS.wide.hw * 2 } } : PRESETS[id];
   if (!def) return undefined;

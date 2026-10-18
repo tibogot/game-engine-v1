@@ -12,6 +12,7 @@ const _vdir = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const WALL_SIN = Math.sin((30 * Math.PI) / 180);
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass
+const TUBE_R = 8; // tubeLook.js TUBE.R
 
 /**
  * NO ENGINE UP A WALL (Thunderline rule): while the wheels are on a surface and the nose points more
@@ -83,6 +84,41 @@ export function createAutopilot(ride) {
     }
     return (touchCache = null);
   };
+  // IN A TUBE, ride the wall like a player: hold the angle the turn asks for — atan(lateral accel / g)
+  // up the OUTSIDE wall — within what the pipe has closed there. Steering round the floor line held
+  // the car flat on the bottom (16°); not steering at all let it swing over the roof (126°) and fly
+  // out of the exit on the wall.
+  const _c = new THREE.Vector3(), _rr = new THREE.Vector3(), _dd = new THREE.Vector3(), _left = new THREE.Vector3(), _tphi = new THREE.Vector3();
+  let lastPhi = 0;
+  function tubeSteer(car, i) {
+    const r = ride[i], ahead = ride[Math.min(ride.length - 1, i + 2)];
+    _rr.crossVectors(r.T, r.U).normalize(); // the tube's right
+    _c.copy(r.P).addScaledVector(r.U, TUBE_R); // the pipe's axis here
+    _dd.copy(car.body.pos).sub(_c);
+    const phi = Math.atan2(_dd.dot(_rr), -_dd.dot(r.U)); // 0 = bottom, + = up the right wall
+    // curvature of the path here → the lateral acceleration the turn asks for
+    const ds = Math.max(1e-3, ahead.P.distanceTo(r.P));
+    const aSide = car.body.vel.lengthSq() * _dd.copy(ahead.T).sub(r.T).divideScalar(ds).dot(_rr); // + = turning right
+    const reach = Math.max(0, Math.PI * r.tube - 0.35); // how far up the wall there still is wall
+    const want = THREE.MathUtils.clamp(-Math.atan2(aSide, 9.81), -Math.min(reach, 1.35), Math.min(reach, 1.35));
+    // which way does steering LEFT move the car around the pipe?
+    _left.set(1, 0, 0).applyQuaternion(car.body.quat); // car local +X is left
+    _tphi.copy(_rr).multiplyScalar(Math.cos(phi)).addScaledVector(r.U, Math.sin(phi)); // +φ direction
+    const sense = Math.sign(_left.dot(_tphi)) || 1;
+    const rate = phi - lastPhi;
+    lastPhi = phi;
+    return THREE.MathUtils.clamp(((want - phi) * 2.2 - rate * 25) * sense, -1, 1);
+  }
+  // the other way: only keep the nose pointing down the pipe (the ride's direction a little ahead),
+  // and let the car's height on the wall settle where the turn puts it
+  const _fw = new THREE.Vector3();
+  function tubeHeading(car, i) {
+    const T = ride[Math.min(ride.length - 1, i + 3)].T;
+    _fw.set(0, 0, 1).applyQuaternion(car.body.quat);
+    _left.set(1, 0, 0).applyQuaternion(car.body.quat);
+    const err = Math.atan2(T.dot(_left), T.dot(_fw)); // + = the pipe goes to the car's left
+    return THREE.MathUtils.clamp(err * 4, -1, 1);
+  }
   return {
     get idx() { return idx; },
     get airAim() { return airAim; },
@@ -109,14 +145,16 @@ export function createAutopilot(ride) {
       const best = this.locate(car);
       _inv.copy(car.body.quat).invert();
       _local.copy(aim(best, 25).P).sub(p).applyQuaternion(_inv); // car local: +Z forward, +X left
-      const steer = THREE.MathUtils.clamp((_local.x / Math.max(_local.z, 4)) * 2.5, -1, 1);
-      const far = aim(best, 90).T;
+      let steer = THREE.MathUtils.clamp((_local.x / Math.max(_local.z, 4)) * 2.5, -1, 1);
+      if (ride[idx].tube > 0.3 && car.groundedCount > 0) steer = globalThis.__TUBE_MODE === "angle" ? tubeSteer(car, idx) : tubeHeading(car, idx);
+      const farR = aim(best, 90), far = farR.T;
       _nose.set(0, 0, 1).applyQuaternion(car.body.quat);
       const bend = Math.acos(THREE.MathUtils.clamp(far.dot(_nose), -1, 1));
       const v = car.body.vel.length();
       const grounded = car.groundedCount > 0;
       // brake for flat brake turns only: not banked sweepers, not loops (their far point is above/behind)
-      const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > 26 && grounded ? -1 : 1;
+      // (never in a tube: its wall holds the car, nobody brakes in there — it braked every tube to 93 km/h)
+      const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > 26 && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
       // IN THE AIR, line up with the road across the gap (the landing): yaw the nose onto its
       // direction, pitch onto its slope, roll onto its up — proportional, in the car's own frame
       // (measured: +yaw turns the nose to the car's +X, +pitch raises it, +roll drops the +X side).

@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { integrate, deckFrame, SECTIONS } from "./kit.js";
 import "./oldTiles.js"; // registers the old kit's bowl and flip ramp as tiles
+import { buildTubeLook } from "./tubeLook.js";
 import { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS, NO_CHECKER } from "../../../modular-road-v3/modularRoadKit.js";
 import { buildRailGeometry, buildRailCollision } from "../../../modular-road-v3/modularRoadRail.js";
 import { createRoadMaterial, createGuardrailMaterial } from "../../../modular-road-v3/modularRoadMaterial.js";
@@ -40,6 +41,20 @@ export function oldFrames(tile) {
  */
 export function buildOldLook(tile, edges = true) {
   if (tile.customLook) return tile.customLook(tile, edges); // the old kit's own pieces (oldTiles.js)
+  if (tile.tube) {
+    // a tube piece: the tube section, its closure eased along the piece (tubeLook.js); no rails
+    const b = integrate(tile, { maxGap: 2 });
+    const frames = [], sAt = [];
+    let lastS = -1;
+    for (const r of b.rings) {
+      if (r.s - lastS < 0.05) continue;
+      lastS = r.s;
+      const f = deckFrame(r, SECTIONS.road.hw);
+      frames.push({ pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R });
+      sAt.push(r.s);
+    }
+    return buildTubeLook(tile, frames, sAt, b.L, { buildSweepGeometry, NO_CHECKER, THREE });
+  }
   const { frames } = oldFrames(tile);
   const rp = tile.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS.wide.hw * 2 } : ROAD_PARAM_DEFAULTS;
   const deck = buildSweepGeometry(frames, buildProfile(rp, edges), {});

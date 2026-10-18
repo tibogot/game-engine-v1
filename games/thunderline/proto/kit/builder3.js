@@ -9,6 +9,7 @@ import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
+import { closureAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
 import { library, driveUrl, PAGES } from "../../app/library.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
@@ -41,6 +42,7 @@ const CATS = [
   { id: "turns", label: "Turns", tiles: ["fast_turn_128", "brake_turn_32"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
   { id: "air", label: "Air", tiles: ["kicker_20", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "tubes", label: "Tubes", tiles: ["tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "stunts", label: "Stunts", tiles: ["fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
 ];
 const catOf = new Map();
@@ -395,7 +397,7 @@ async function runPrediction() {
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of b.rings) {
       const f = deckFrame(r, hw);
-      ride.push({ P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid });
+      ride.push({ P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : 0 });
     }
   }
   const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();

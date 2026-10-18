@@ -2,6 +2,7 @@
 // Shared by the lab (look) and the drive page (the real car), so both use the same track.
 import * as THREE from "three";
 import { TILES, deckFrame, socketMatrix, leanIn, SECTIONS, DEG } from "./kit.js";
+import { closureAt } from "./tubeLook.js";
 
 const V = THREE.Vector3;
 const Y = new V(0, 1, 0);
@@ -161,7 +162,7 @@ export function layoutFromPlacements({ built, pieces }) {
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of built[pl.id].b.rings) {
       const f = deckFrame(r, hw);
-      ride.push({ P: f.P.clone().addScaledVector(f.U, 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id });
+      ride.push({ P: f.P.clone().addScaledVector(f.U, 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id, tube: TILES[pl.id]?.tube ? closureAt(TILES[pl.id], r.s, built[pl.id].b.L) : 0 });
     }
     length += built[pl.id].b.L;
   });
