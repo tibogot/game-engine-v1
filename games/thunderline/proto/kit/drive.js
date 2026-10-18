@@ -13,7 +13,7 @@ import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../mo
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
 import { TILES, integrate } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
-import { layoutTestTrack, buildTrackMeshes } from "./testTrack.js";
+import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 
 const $ = (id) => document.getElementById(id);
@@ -79,7 +79,14 @@ const JUMP_SPEED = Number(params.get("jump")) || TOP * 0.91;
 // ?jumps=a,b,c = measured take-off speed (m/s) of each flight; defaults measured with the autopilot at
 // top 63 / 3 substeps (jump 1: 201 km/h, jump 2: 175 km/h after the brake turn, jump 3: 182 km/h)
 const JUMPS = (params.get("jumps") ?? "55.8,48.6,50.6").split(",").map(Number).filter((v) => v > 0);
-const lay = layoutTestTrack({ built, speed: JUMP_SPEED, jumpSpeeds: JUMPS, airDrag: AERO.drag / CHASSIS.mass });
+// ?track=local → the track saved by the builder (builder3.html), otherwise the test track
+let builtTrack = null;
+if (params.get("track") === "local") {
+  try { builtTrack = JSON.parse(localStorage.getItem("thunderline.track.v1")); } catch {}
+}
+const lay = builtTrack?.pieces?.length
+  ? layoutFromPlacements({ built, pieces: builtTrack.pieces })
+  : layoutTestTrack({ built, speed: JUMP_SPEED, jumpSpeeds: JUMPS, airDrag: AERO.drag / CHASSIS.mass });
 const meshes = buildTrackMeshes(lay.placements, built, mats);
 meshes.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.layers.enable(STATIC_LAYER); } });
 scene.add(meshes.group);

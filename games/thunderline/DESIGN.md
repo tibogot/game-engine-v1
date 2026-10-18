@@ -304,6 +304,24 @@ turn 155, banked landing 158, catch pad 153 km/h). 61 fps, ~3.3 ms CPU, ~3 ms GP
   real rule is the checkpoint respawn that keeps your speed (§8).
 - To check: a darker diagonal band across a deck (cloud shadow or a shadow-cascade edge?).
 
+**B1 — the builder on the new pieces (2026-10-18), `proto/builder3.html` + `proto/kit/builder3.js`.**
+P1b's snapping ghost, dock and next-piece chips, now on the NEW pieces (kit paths, old look):
+- ends carry their lean (the lean rule warns: a leaning piece on a flat end, or the reverse);
+- **flight arcs are a SPEED BAND** (slow 93% .. fast 100% of the lip speed, `[ ]` to change),
+  computed with the car's drag; a landing snaps to the SLOW arc and slides to its own angle;
+- a landing placed on an arc remembers its lip (`flightFrom`): the lip is no longer an open end,
+  and the corridor check skips the flight's own landing (that was a false alarm);
+- **live checks:** road overlapping road (red boxes) and flights passing under a road, in the status;
+- Edges (guarded / open, `T`), Hand (L / R), thumbnails baked from the real pieces (sRGB target —
+  a linear one read dark);
+- **Drive ▶** saves to `localStorage["thunderline.track.v1"]` and opens `drive.html?track=local`.
+- Verified: an 11-piece, 1 km track built by script (straights, bank in, fast turn, bank out,
+  kicker, left banked landing on the arc band, left fast turn…) — the real car drove it: take-off
+  203 km/h, landed on the banked landing at 193, reached the end. A deliberate crossing straight
+  was flagged at once.
+- Next (B2): per-end speed PREDICTION (so the band comes from the track, not a global number) and
+  FITTED landings generated from the band (PIECES.md §7b).
+
 **P5 — ghosts / determinism (2026-10-18), `proto/kit/ghostTest.mjs`.** The real car (top 63, 3
 substeps, boost pads) runs the test track in Node under the autopilot, recording every tick's input;
 a fresh car then replays ONLY the inputs:

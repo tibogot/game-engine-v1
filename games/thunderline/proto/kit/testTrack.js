@@ -147,6 +147,27 @@ export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, ju
   return { placements, ride, arcPts, length, warnings, start };
 }
 
+/**
+ * A BUILT track (from the builder): placements with their own world matrices, no flights computed.
+ * Returns the same shape as layoutTestTrack so the drive page can run either.
+ * @param {{id: string, open: boolean, M: number[]}[]} pieces
+ */
+export function layoutFromPlacements({ built, pieces }) {
+  const placements = pieces.map((p) => ({ id: p.id, open: !!p.open, M: new THREE.Matrix4().fromArray(p.M) }));
+  const ride = [];
+  let length = 0;
+  placements.forEach((pl, k) => {
+    const t = TILES[pl.id];
+    const hw = SECTIONS[t.section ?? "road"].hw;
+    for (const r of built[pl.id].b.rings) {
+      const f = deckFrame(r, hw);
+      ride.push({ P: f.P.clone().addScaledVector(f.U, 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id });
+    }
+    length += built[pl.id].b.L;
+  });
+  return { placements, ride, arcPts: [], length, warnings: [], start: placements[0]?.M.clone() ?? new THREE.Matrix4() };
+}
+
 /** Instanced meshes for the placements: one draw per tile kind for deck, rail and posts. */
 export function buildTrackMeshes(placements, built, mats) {
   const group = new THREE.Group();
