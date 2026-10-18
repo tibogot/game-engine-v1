@@ -39,7 +39,8 @@ const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
   { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12"] },
-  { id: "turns", label: "Turns", tiles: ["fast_turn_128", "brake_turn_32"] },
+  // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
+  { id: "turns", label: "Turns", tiles: ["sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
   { id: "air", label: "Air", tiles: ["kicker_20", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },

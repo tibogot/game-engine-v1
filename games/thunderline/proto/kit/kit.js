@@ -223,14 +223,29 @@ export const TILES = {
   bank_in_22: { label: "Bank in 22°", segs: [{ L: 48, leanIn: 0, leanOut: 22 * DEG }] },
   bank_out_22: { label: "Bank out 22°", segs: [{ L: 48, leanIn: 22 * DEG, leanOut: 0 }] },
   fast_turn_128: {
-    label: "Fast turn R128 90°",
+    label: "Banked 90°",
     segs: [{ L: turnLen(128, Math.PI / 2, 40), turn: Math.PI / 2, ramp: 40, leanIn: 22 * DEG, leanOut: 22 * DEG }],
   },
   brake_turn_32: {
-    label: "Brake turn R32 90°",
+    label: "Brake 90°",
     segs: [{ L: turnLen(32, Math.PI / 2, 12), turn: Math.PI / 2, ramp: 12 }],
     marks: [{ kind: "chevron", from: 0, to: -0 }],
   },
+  // ---- THE TURN SET (PIECES.md §7d: "curves of every size" — an Apex Rush track is mostly curves).
+  // Flat (no lean) so any of them meets any road end; eased in and out (curvature ramps) so none jerks
+  // the car; R is the tightest point. Every one gets its left-hand mirror (…_L) below.
+  sweep_160_15: { label: "Sweep 15°", segs: [{ L: turnLen(160, 15 * DEG, 30), turn: 15 * DEG, ramp: 30 }] },
+  sweep_160_30: { label: "Sweep 30°", segs: [{ L: turnLen(160, 30 * DEG, 40), turn: 30 * DEG, ramp: 40 }] },
+  sweep_160_45: { label: "Sweep 45°", segs: [{ L: turnLen(160, 45 * DEG, 40), turn: 45 * DEG, ramp: 40 }] },
+  turn_96_45: { label: "Fast 45°", segs: [{ L: turnLen(96, 45 * DEG, 30), turn: 45 * DEG, ramp: 30 }] },
+  turn_96_90: { label: "Fast 90°", segs: [{ L: turnLen(96, 90 * DEG, 30), turn: 90 * DEG, ramp: 30 }] },
+  turn_48_90: { label: "Turn 90°", segs: [{ L: turnLen(48, 90 * DEG, 20), turn: 90 * DEG, ramp: 20 }] },
+  turn_48_180: { label: "U-turn 180°", segs: [{ L: turnLen(48, Math.PI, 24), turn: Math.PI, ramp: 24 }], marks: [{ kind: "chevron", from: 0, to: -0 }] },
+  hairpin_24: { label: "Hairpin 180°", segs: [{ L: turnLen(24, Math.PI, 12), turn: Math.PI, ramp: 12 }], marks: [{ kind: "chevron", from: 0, to: -0 }] },
+  // an S at speed: right then back left — the road steps sideways, the heading comes back
+  s_bend_96: { label: "S-bend", segs: [{ L: turnLen(96, 30 * DEG, 20), turn: 30 * DEG, ramp: 20 }, { L: turnLen(96, 30 * DEG, 20), turn: -30 * DEG, ramp: 20 }] },
+  // the SNAKE: three linked bends, left-right-left (net heading 0) — the wavy run in their track
+  snake_60: { label: "Snake", segs: [{ L: turnLen(60, 25 * DEG, 14), turn: 25 * DEG, ramp: 14 }, { L: turnLen(60, 50 * DEG, 18), turn: -50 * DEG, ramp: 18 }, { L: turnLen(60, 25 * DEG, 14), turn: 25 * DEG, ramp: 14 }] },
   kicker_20: {
     label: "Kicker 20°",
     segs: [{ L: 28, pitch: 20 * DEG, ramp: 14 }],
