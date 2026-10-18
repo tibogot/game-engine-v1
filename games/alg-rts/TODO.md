@@ -198,8 +198,15 @@ PHASE 5 — after launch (the Early Access roadmap)
     from outside, border arms → tier 2;
   - the INFIRMARY, raised by a cell with wounded (tested: built in 22 s, 24 → 60 hp).
   - An AI's doctrine instance builds its aircraft and paradrop on first use (was ~75 ms at boot, now 0.2).
-- [ ] NEXT (suggested): a bot-vs-bot balance run (the FLN now spends far more) → you play a match on each
-  side → building damage + collapse → the other explosions (tank shell, vehicle death, grenade) onto lab books.
+- [~] BOT-v-BOT BALANCE (2026-10-18, Normal, score integrated by hand): the French AI wins at 14-18 min
+  (the 10-10 target: past 25 with the FLN holding 1-2). A/B: the FLN's new units are NOT the cause (the
+  control, them off: 14.3 min); the French AI got much stronger since 10-13 (sappers, mortar teams,
+  lifts, doctrine) — 4-0 by ~3 min. FIXED on the FLN side: bands spread over villages, prefer the cave's
+  side, re-target on the way if the French got there first and outnumber them (algAI pickVillage); its
+  Normal base income 45 → 70 (algDifficulty) — measured 19.2 min, a village held 4 → 15 min, losses
+  still ~1:2. OPEN: **you** play a match as the FLN — is the French AI now too strong for a human? If so,
+  slow its first expansion (3 villages in ~2 min), not its fighting.
+- [ ] NEXT (suggested): you play a match on each side → building damage + collapse → the other explosions (tank shell, vehicle death, grenade) onto lab books.
 
 ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) building damage +
 collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a short campaign →

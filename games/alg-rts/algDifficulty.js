@@ -18,7 +18,9 @@ const LEVELS = {
     blurb: t("Petites bandes, lentes à venir."), blurbFln: t("Une compagnie d'appelés, lente à réagir."),
   },
   normal: {
-    label: t("Normal"), alnStart: 480, alnBase: 45, moudjahid: 30, headStart: 8,
+    // (alnBase 45 → 70, 2026-10-18 — the bot runs: pushed out of every village, the FLN AI could never
+    // pay its way back against the stronger French AI; the FLN taxed the whole countryside.)
+    label: t("Normal"), alnStart: 480, alnBase: 70, moudjahid: 30, headStart: 8,
     firstBandAt: 18, bandEvery: [50, 85], maxLive: 26, frStart: 600, snipers: 2,
     flnStart: 420, flnBase: 45, frAiStart: 600, frSquads: 6, frAssaultAt: 5,
     blurb: t("Une katiba qui se bat pour chaque village."), blurbFln: t("Une compagnie qui reprend chaque village."),

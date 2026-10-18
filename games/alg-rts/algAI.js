@@ -145,6 +145,9 @@ const P = {
   // clock runs faster with money in hand, and a rich katiba sends bigger bands.
   richAt: [250, 400], richClock: [1.4, 2], richSize: 500, richExtra: 2, richHire: 400, richHireMax: 6,
   villageTrigger: 35,         // French this close to an occupying band: open fire
+  villageClaimed: 1.2,        // pickVillage: a village another band is already working, less
+  villageSide: 400,           // pickVillage: + (from the post − from the cave) / this
+  retargetOver: 1,            // a village band on its way: more French there than its men + this → another village
   mineShare: 0.3,             // of the bands (while the map has room for a mine)
   mineWork: 8,                // seconds at the spot to lay it
   cutShare: 0.2,              // of the bands: cut the telegraph line (algTelegraph.js), while it stands
@@ -1232,6 +1235,16 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         if (underFire(b, m)) { if (b.mission === "assault") goIn(b); else strike(b); break; }
         // Caught under a flare: out of the light first.
         if (dodgeFlare(b, m)) break;
+        // A VILLAGE BAND ON ITS WAY (2026-10-18): the French got there first, more of them than it —
+        // another village, one it can take (not a retake or a defence: those it goes for anyway).
+        if (b.mission === "village" && !b.retake && b.village && (b.reT = (b.reT ?? 0) - dt) <= 0) {
+          b.reT = 3;
+          const c0 = centre(m), at = (v) => french().filter((u) => !u.isAir && dist(u.position, v.position) < 50).length;
+          if (dist(c0, b.village.position) > 45 && at(b.village) > m.length + P.retargetOver) {
+            const v2 = pickVillage(c0, b, b.village);
+            if (v2 && at(v2) <= m.length && planVillage(b, v2)) { b.retargeted = (b.retargeted ?? 0) + 1; break; }
+          }
+        }
         // Round the guns: at the via point (most of the band), on to the spot.
         if (b.via) {
           const past = m.filter((u) => dist(u.position, b.via) < 15 || !u.isMoving);
@@ -1620,13 +1633,19 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
    * A village to work: one the ALN does not hold. French-held counts most,
    * then neutral; nearer the band better; French troops round it worse.
    */
-  function pickVillage(from) {
+  // (2026-10-18, the bot runs: the French AI held 4-0 by ~3 min — the FLN's first bands all walked to
+  // the ONE village nearest the cave, where the French were already going, one after the other.)
+  // Now: a village another band is already working counts less (spread out), the cave's side of the
+  // map counts more (the French reach their side first), and `not` is skipped (a band re-targeting).
+  function pickVillage(from, b = null, not = null) {
     const pts = app.algEconomy?.points ?? [];
     let best = null, bestS = -Infinity;
     for (const v of pts) {
-      if (v.owner === "enemy") continue;
+      if (v.owner === "enemy" || v === not) continue;
       const guards = french().filter((u) => !u.isAir && dist(u.position, v.position) < 60).length;
-      const s = (v.owner === "player" ? 2 : 1) - dist(from, v.position) / 600 - guards * 0.6;
+      const claimed = bands.filter((o) => o !== b && o.village === v && (o.state === "approach" || o.state === "occupy") && alive(o).length).length;
+      const side = (dist(v.position, post) - dist(v.position, caveMouth)) / P.villageSide;
+      const s = (v.owner === "player" ? 2 : 1) - dist(from, v.position) / 600 - guards * 0.6 - claimed * P.villageClaimed + side;
       if (s > bestS) { bestS = s; best = v; }
     }
     return best;
@@ -1911,7 +1930,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     // THE OPENING: villages first (a mine or a raid while the French take the valley loses it).
     const opening = t < P.opening || !(app.algEconomy?.points ?? []).some((v) => v.owner === "enemy");
     if (opening && (!b.mission || b.mission === "mine" || b.mission === "cut" || b.mission === "raid")) {
-      const v = pickVillage(c);
+      const v = pickVillage(c, b);
       if (v && planVillage(b, v)) { b.mission = "village"; b.village = v; return; }
     }
     // A SUPPLY RAID, about 45% of the time one is worth it (or still on: re-planned on the way).
@@ -1937,12 +1956,12 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     }
     // Political work, about half the time a village is worth it.
     if (!b.mission) {
-      const v = pickVillage(c);
+      const v = pickVillage(c, b);
       if (v && Math.random() < P.villageShare && planVillage(b, v)) return;
       b.mission = "ambush";
     }
     if (b.mission === "village") {
-      const v = b.village && b.village.owner !== "enemy" ? b.village : pickVillage(c);
+      const v = b.village && b.village.owner !== "enemy" ? b.village : pickVillage(c, b);
       if (v && planVillage(b, v)) return;
       b.mission = "ambush";
     }
@@ -1952,7 +1971,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     // a PISTE, 150-380 m from the post — where the French patrols must come.
     let tgt = tg;
     if (!tgt) {
-      const v = pickVillage(c);
+      const v = pickVillage(c, b);
       if (v && planVillage(b, v)) return;
       const pts = TRACK_LINES.filter((t) => t.kind === "piste").flatMap((t) => t.line).filter((p) => { const d = dist(p, post); return d > 150 && d < 380; });
       if (!pts.length) { setState(b, "gather"); b.t = 0; return; }
