@@ -15,7 +15,7 @@ import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
 import { TILES, integrate, ensureTile, SECTIONS } from "./kit.js";
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
-import { library, contentKey, settings, builderUrl, PAGES } from "../../app/library.js";
+import { library, campaign, contentKey, settings, builderUrl, campaignUrl, PAGES } from "../../app/library.js";
 import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
 import { createCarRules, magnetZones } from "./carRules.js";
@@ -96,7 +96,10 @@ let ringGates = [];
 // ?track=<library id> (menu, builder), ?track=local = the track the builder last worked on
 const trackParam = params.get("track");
 const trackId = trackParam === "local" ? library.current : trackParam;
-const trackRec = trackId ? library.get(trackId) : null;
+// ?campaign=<white-1…> a campaign track (a read-only file in the repo; its bests are kept apart)
+const campaignRec = params.get("campaign") ? await campaign.get(params.get("campaign")) : null;
+const trackRec = campaignRec ?? (trackId ? library.get(trackId) : null);
+const nextCampaign = campaignRec ? await campaign.get(campaignRec.id.replace(/\d+$/, (n) => +n + 1)) : null;
 const cameFrom = params.get("from"); // "builder" → Back goes there
 const prefs = settings.get();
 if (trackRec) {
@@ -423,7 +426,8 @@ function onRace(e) {
       ghostData = recorder.finish(e.time);
       try { localStorage.setItem(GHOST_KEY, JSON.stringify(ghostData)); } catch (err) { console.warn("[ghost] not saved", err); }
     }
-    if (trackId) library.recordFinish(trackId, e.time, medalFor(e.time, medals));
+    if (campaignRec) campaign.recordFinish(campaignRec, e.time, medalFor(e.time, medals));
+    else if (trackId) library.recordFinish(trackId, e.time, medalFor(e.time, medals));
     showFinish(e.time, improved);
   }
 }
@@ -440,8 +444,10 @@ function showFinish(time, improved) {
     rows +
     `<div class="fbtns"><button id="f-again">Again <kbd>R</kbd></button>` +
     (cameFrom === "builder" ? `<button id="f-build">Back to builder <kbd>B</kbd></button>` : "") +
+    (nextCampaign ? `<button id="f-next">Next: ${nextCampaign.name} <kbd>N</kbd></button>` : "") +
     `<button id="f-menu">Menu <kbd>Esc</kbd></button></div>`;
   $("f-again").onclick = () => restart();
+  if ($("f-next")) $("f-next").onclick = goNext;
   if ($("f-build")) $("f-build").onclick = goBuilder;
   $("f-menu").onclick = goMenu;
   $("finish").classList.add("show");
@@ -449,10 +455,12 @@ function showFinish(time, improved) {
 
 // ---------- leaving: back to the builder (a test drive) or the menu ----------
 function goBuilder() { if (trackId) location.href = builderUrl(trackId); }
+function goNext() { if (nextCampaign) location.href = campaignUrl(nextCampaign.id); }
 function goMenu() { location.href = `${PAGES.menu}${cameFrom === "builder" ? "#build" : "#play"}`; }
 addEventListener("keydown", (e) => {
   if (e.code === "Escape") (cameFrom === "builder" ? goBuilder : goMenu)();
   if (e.code === "KeyB" && cameFrom === "builder") goBuilder();
+  if (e.code === "KeyN" && $("finish").classList.contains("show")) goNext();
 });
 
 // ---------- respawn: restart, checkpoints, last safe spot, falls ----------

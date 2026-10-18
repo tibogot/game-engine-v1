@@ -1,7 +1,7 @@
 // THE MENU (DESIGN.md: the four modes). One page, screens by hash so the other pages can send the
 // player back to the right one: #home, #play (Stunt tracks: campaign + my tracks), #build (the
 // library: new, open, drive, rename, duplicate, delete), #settings.
-import { library, settings, currentBest, builderUrl, driveUrl } from "./library.js";
+import { library, campaign, settings, currentBest, builderUrl, driveUrl, campaignUrl } from "./library.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -47,12 +47,11 @@ function home() {
 }
 
 // ---------- a track card ----------
-function trackCard(rec, { actions }) {
-  const best = currentBest(rec);
+function trackCard(rec, { actions, best = currentBest(rec), badge: tag }) {
   const author = rec.track?.authorTime;
   const pieces = rec.track?.pieces?.length ?? 0;
   const pic = rec.thumb ? `<div class="pic" style="background-image:url(${rec.thumb})">` : `<div class="pic none">${pieces ? "no picture yet" : "empty"}`;
-  const badge = author ? `<span class="badge ok">Validated</span>` : `<span class="badge">${pieces ? "Not validated" : "Empty"}</span>`;
+  const badge = tag ? `<span class="badge ok">${tag}</span>` : author ? `<span class="badge ok">Validated</span>` : `<span class="badge">${pieces ? "Not validated" : "Empty"}</span>`;
   return `<div class="card cut" data-id="${rec.id}">
     ${pic}${badge}</div>
     <div class="body">
@@ -67,20 +66,29 @@ function trackCard(rec, { actions }) {
 }
 
 // ---------- Stunt tracks: campaign + my tracks ----------
+let tiers = null; // campaign files, loaded once (campaign/<tier>.json)
 function play() {
   crumbs([["Stunt tracks", null]]);
+  if (playTab === "campaign" && !tiers) { campaign.tiers().then((t) => { tiers = t; if ((location.hash || "#home") === "#play") play(); }); }
   const mine = library.list().filter((r) => r.track?.authorTime);
+  const tierBlock = ([name, col], i) => {
+    const tracks = tiers?.[i]?.tracks ?? [];
+    const medals = tracks.filter((t) => campaign.best(t)?.medal).length;
+    return `<div class="tier"><h3><i style="background:${col}"></i>${name}${tracks.length ? ` <span style="color:var(--dim);font-size:14px">${medals}/${tracks.length} medals</span>` : ""}</h3><div class="grid">${
+      Array.from({ length: 5 }, (_, k) => tracks[k]
+        ? trackCard(tracks[k], { actions: null, best: campaign.best(tracks[k]), badge: `${name} ${k + 1}` })
+        : `<div class="card slot cut"><div class="pic none">${name} ${k + 1}</div><div class="body"><div class="name">Coming soon</div><div class="meta"><span>—</span></div></div></div>`).join("")
+    }</div></div>`;
+  };
   const body = playTab === "campaign"
-    ? `<p class="note">The campaign: five tiers of five tracks, White to Black. Its tracks are built in the builder and validated with an author time; the slots fill as they are made.</p>` +
-      TIERS.map(([name, col]) => `<div class="tier"><h3><i style="background:${col}"></i>${name}</h3><div class="grid">${
-        Array.from({ length: 5 }, (_, i) => `<div class="card slot cut"><div class="pic none">${name} ${i + 1}</div><div class="body"><div class="name">Coming soon</div><div class="meta"><span>—</span></div></div></div>`).join("")
-      }</div></div>`).join("")
+    ? `<p class="note">The campaign: five tiers of five tracks, White to Black. Beat the author time for the author medal; gold ×1.06, silver ×1.2, bronze ×1.5.</p>` +
+      (tiers ? TIERS.map(tierBlock).join("") : `<p class="note">Loading…</p>`)
     : (mine.length
       ? `<p class="note">Your validated tracks (driven to the finish in the builder). Medals: author, gold ×1.06, silver ×1.2, bronze ×1.5.</p><div class="grid">${mine.map((r) => trackCard(r, { actions: null })).join("")}</div>`
       : `<p class="note">No validated track yet. Build one, and let the builder's test lap finish: its time becomes the author time.</p><div class="grid"><a class="card new cut" href="#build">Build a track ▶</a></div>`);
   $("screen").innerHTML = `<div class="tabs"><button data-tab="campaign" class="${playTab === "campaign" ? "on" : ""}">Campaign</button><button data-tab="mine" class="${playTab === "mine" ? "on" : ""}">My tracks <span style="color:var(--dim);font-size:14px">${mine.length}</span></button></div>${body}`;
   for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => { playTab = b.dataset.tab; play(); };
-  for (const c of document.querySelectorAll(".card[data-id]")) c.onclick = () => { location.href = driveUrl(c.dataset.id); };
+  for (const c of document.querySelectorAll(".card[data-id]")) c.onclick = () => { location.href = playTab === "campaign" ? campaignUrl(c.dataset.id) : driveUrl(c.dataset.id); };
   foot(`<span><kbd>Esc</kbd> back</span>`);
 }
 

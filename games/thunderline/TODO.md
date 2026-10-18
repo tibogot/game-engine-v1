@@ -16,7 +16,14 @@ this is just the list. Newest decisions at the top of each section. Last updated
       through the floor), half-pipe channel, helix (PIECES.md §7c).
 
 ## Game
-- [ ] First campaign tier (White, 5 tracks), saved as FILES in the repo, playable from the menu.
+- [x] **First campaign tier (White, 5 tracks)** — campaign/white.json, built in the REAL builder (each
+      track's recipe placed piece by piece, landings on the real car's arcs) and validated by its test
+      lap: First Light 32.5 s (jumps), Drop Zone 32.1 (drops, banked turn), Halfpipe 42.7 (the bowl),
+      Pipeline 30.2 (tubes), Ring Line 36.1 (air rings, loop). Menu → Stunt tracks → Campaign plays
+      them (drive.html?campaign=white-1), bests kept apart from the library, finish screen "Next" (N).
+      THE USER PLAYS AND JUDGES THEM. Seen while building: a fitted landing after a boost was 188 m of
+      20° slope (the band is wide at speed) — every jump loses 40 m of height; the track's end is a
+      cliff (the car drives off after the finish).
 - [ ] Campaign tiers Green → Black.
 - [ ] One always-loaded page (no reload between menu / builder / drive).
 - [ ] Garage + more cars (a generic car body before any release: the Lotus is dev-only, trademark).

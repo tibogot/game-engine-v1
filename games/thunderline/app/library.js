@@ -100,6 +100,45 @@ export const library = {
   set current(id) { if (id) localStorage.setItem(CURRENT, id); },
 };
 
+/**
+ * THE CAMPAIGN (DESIGN.md §8): read-only track files in the repo, campaign/<tier>.json
+ * ({ tier, name, tracks: [{ id, name, tier, track, thumb }] }), built and validated in the builder like
+ * any player track. A tier with no file yet shows "coming soon". Bests are kept per track id and, like
+ * the library's, only count for the content they were set on.
+ */
+export const CAMPAIGN_TIERS = ["white", "green", "blue", "red", "black"];
+const campaignFiles = new Map();
+async function campaignTier(tier) {
+  if (!campaignFiles.has(tier)) {
+    campaignFiles.set(tier, fetch(`/games/thunderline/campaign/${tier}.json`).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+  }
+  return campaignFiles.get(tier);
+}
+const CAMPAIGN_BEST = "thunderline.campaign.v1";
+const readCampaignBests = () => { try { return JSON.parse(localStorage.getItem(CAMPAIGN_BEST)) ?? {}; } catch { return {}; } };
+export const campaign = {
+  /** every tier: { tier, tracks } (tracks [] when the tier has no file yet) */
+  async tiers() {
+    return Promise.all(CAMPAIGN_TIERS.map(async (tier) => ({ tier, tracks: (await campaignTier(tier))?.tracks ?? [] })));
+  },
+  async get(id) {
+    const tier = CAMPAIGN_TIERS.find((t) => id?.startsWith(`${t}-`));
+    return tier ? (await campaignTier(tier))?.tracks.find((t) => t.id === id) ?? null : null;
+  },
+  /** the best run on this campaign track as it is now, or null */
+  best(rec) {
+    const b = readCampaignBests()[rec.id];
+    return b && b.key === contentKey(rec.track) ? b : null;
+  },
+  recordFinish(rec, time, medal) {
+    const all = readCampaignBests();
+    const key = contentKey(rec.track), b = all[rec.id];
+    if (!b || b.key !== key || time < b.time) all[rec.id] = { time, medal, key };
+    try { localStorage.setItem(CAMPAIGN_BEST, JSON.stringify(all)); } catch {}
+    return all[rec.id];
+  },
+};
+
 /** Settings shared by every page (menu → Settings). */
 const SETTINGS_KEY = "thunderline.settings.v1";
 // sound OFF by default (user, 2026-10-19: it disturbs work on the game) — Settings or M turns it on
@@ -123,3 +162,4 @@ export const PAGES = {
 };
 export const builderUrl = (id) => `${PAGES.builder}?track=${encodeURIComponent(id)}`;
 export const driveUrl = (id, from) => `${PAGES.drive}?track=${encodeURIComponent(id)}${from ? `&from=${from}` : ""}`;
+export const campaignUrl = (id) => `${PAGES.drive}?campaign=${encodeURIComponent(id)}`;

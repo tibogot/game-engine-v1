@@ -20,6 +20,8 @@
       }
       html, body { margin: 0; height: 100%; overflow: hidden; background: #a7c6e2; color: var(--text); font: 13px/1.35 Inter, system-ui, sans-serif; }
       #view { position: fixed; inset: 0; }
+      /* the engine's perf graph: above the dock, not over the piece cards */
+      #perf-stats { top: auto !important; bottom: 190px !important; left: 16px !important; right: auto !important; }
       .cond { font-family: "Barlow Condensed", Inter, sans-serif; text-transform: uppercase; letter-spacing: 0.06em; }
       /* angled "speed cut" corners: the shape that says Thunderline */
       .cut { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }

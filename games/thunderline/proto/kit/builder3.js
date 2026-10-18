@@ -4,6 +4,7 @@
 // Throwaway prototype (DESIGN.md §4–§5, §9).
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
@@ -61,6 +62,12 @@ let gridStep = 8;
 let buildY = 120;
 const rot = { yaw: 0, pitch: 0, roll: 0 };
 let arcSpeed = 57; // m/s at a lip (≈ 0.91 × top 63, P3); [ ] change it
+// THE SLOW EDGE of a jump's speed band, as a share of the real car's take-off speed: landings catch every
+// car from here to full speed. Was 0.93 (the autopilot's spread); a player who lands crooked keeps 85%
+// and loses the perfect-landing boost, and arrived at a kicker at 0.74 × and fell short (user, 2026-10-19:
+// "I cannot land on this track at all"). 0.75 made every landing 200-300 m long (100 m of height each);
+// 0.85 is the middle: one crooked landing before a jump still lands it.
+const BAND_SLOW = 0.85;
 let undo = [], redo = [];
 const recent = [];
 function load() { const t = library.get(trackId)?.track; return t ? JSON.parse(JSON.stringify(t)) : null; }
@@ -108,19 +115,31 @@ const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
 const DOCK_H = 175;
-const renderer = new THREE.WebGPURenderer({ antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
-renderer.toneMapping = THREE.ACESFilmicToneMapping;
-$("view").appendChild(renderer.domElement);
-await renderer.init();
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x9fc6e6);
-scene.add(new THREE.HemisphereLight(0xdfeeff, 0x5d5a52, 1.5));
-const sun = new THREE.DirectionalLight(0xfff1dc, 2.6);
-sun.position.set(-300, 500, 200);
-scene.add(sun);
-const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.5, 9000);
+// THE SAME WORLD AS THE DRIVE PAGE (user, 2026-10-19: "the track editor should have the nice sky… really
+// the same as the track when pressing play"): the engine app with drive.js's sky, time of day, light,
+// bloom and default floor. The builder keeps its own orbit (its mouse buttons) and its frame work runs
+// in the engine's pre-update hook; the engine renders.
+const app = await startV3App({
+  container: $("view"),
+  skyMode: "skypro",
+  cloudShadows: true,
+  light: { envIntensity: 0.45, hemiIntensity: 0.6, dirIntensity: 2.6, exposure: 1.0, shadowNormalBias: 0.12 },
+  terrainFeatures: { cursor: false },
+  splatFeatures: { solo: false },
+  preloadPaintTextures: false,
+  csm: { cascades: 2 },
+});
+app.sky?.setMode?.("skypro");
+app.sky?.setTimeOfDay?.(15.5);
+app.fog?.setHeight?.({ enabled: false });
+app.fog?.setDistance?.({ enabled: false });
+app.postFx?.setEnabled?.(true);
+app.postFx?.setBloomSelective?.(true);
+app.postFx?.setBloom?.({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
+const { scene, camera, renderer } = app;
+app.controls.update = () => {}; // the builder's orbit below owns the camera
+app.controls.enabled = false;
+camera.far = Math.max(camera.far, 9000);
 function fitView() { camera.aspect = innerWidth / innerHeight; camera.setViewOffset(innerWidth, innerHeight, 0, DOCK_H / 2, innerWidth, innerHeight); camera.updateProjectionMatrix(); }
 fitView();
 camera.position.set(120, buildY + 110, 160);
@@ -311,7 +330,7 @@ function pickTile(base, h = null) {
 const trackGroup = new THREE.Group();
 scene.add(trackGroup);
 let built = new Map(); // uid → { exit: Matrix4, group, M }
-let problems = { overlap: new Set(), messages: [] };
+let problems = { overlap: new Set(), messages: [], loose: [], misses: [] };
 
 function rebuild() {
   for (const c of trackGroup.children.slice()) trackGroup.remove(c);
@@ -482,10 +501,12 @@ async function runPrediction() {
   prediction.endSpeed = endSpeed; // the speed the car arrives at the track's end (a fitted bowl is sized to it)
   prediction.rings = ringRace ? { taken: ringRace.s.taken.size, of: ringGates.length } : null;
   // AUTHOR TIME (DESIGN.md §8, medals): the prediction's lap, when it reaches the end of a track with
-  // nothing wrong (no fall, no loose pieces, no overlap). The drive page reads it from the saved track.
+  // nothing wrong (no fall, no loose pieces, no overlap, every landing catches its band). The drive page
+  // reads it from the saved track. The arcs first: the landing check needs THIS run's take-offs.
+  refreshArcs();
   runChecks();
   const ringsOk = !prediction.rings || prediction.rings.taken === prediction.rings.of;
-  const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size && ringsOk;
+  const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size && !problems.misses.length && ringsOk;
   const author = clean ? Math.round(prediction.lapS * 100) / 100 : null;
   if (track.authorTime !== author) { if (author) track.authorTime = author; else delete track.authorTime; save(); }
   if (failBox) { scene.remove(failBox); failBox = null; }
@@ -546,7 +567,7 @@ function refreshArcs() {
     // car go in another direction than its exit socket says (the socket's arc fell 35 m short)
     const launch = prediction.launch?.get(p.uid) ?? null;
     const v = prediction.lipSpeed.get(p.uid) ?? arcSpeed;
-    const slow = flight(m, v * 0.93, launch, 0.93), fast = flight(m, v, launch, 1);
+    const slow = flight(m, v * BAND_SLOW, launch, BAND_SLOW), fast = flight(m, v, launch, 1);
     arcs.push({ ...slow, fast, from: p.uid, landing });
     for (const [a, color] of [[slow, 0xff9a3d], [fast, 0xffd27a]]) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(a.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
@@ -568,7 +589,7 @@ function roadSamples() {
   return out;
 }
 function runChecks() {
-  problems = { overlap: new Set(), loose: [], messages: [] };
+  problems = { overlap: new Set(), loose: [], misses: [], messages: [] };
   const neighbours = new Map();
   for (const p of track.pieces) { neighbours.set(p.uid, new Set([p.uid])); }
   for (const p of track.pieces) if (p.parent != null) { neighbours.get(p.uid).add(p.parent); neighbours.get(p.parent)?.add(p.uid); }
@@ -614,9 +635,45 @@ function runChecks() {
     }
   }
   if (blocked) problems.messages.push(`a flight passes under a road (${blocked} points) — the car would hit it`);
+  // DOES THE LANDING CATCH THE WHOLE BAND? Both arcs (the slow edge and full speed) must come down ON
+  // its deck. A catch pad laid 23 m above its kicker caught only the full-speed car, and the player
+  // could not land it at all (user, 2026-10-19) — the builder said nothing.
+  problems.misses = [];
+  for (const a of arcs) {
+    if (a.landing == null) continue;
+    const pc = track.pieces.find((q) => q.uid === a.landing);
+    const { b, t } = piece(pc.id, pc.open);
+    const M = built.get(pc.uid).M, hw = SECTIONS[t.section ?? "road"].hw;
+    const deck = b.rings.map((r) => { const f = deckFrame(r, hw); return { P: f.P.applyMatrix4(M), U: f.U.transformDirection(M) }; });
+    const lowest = Math.min(...deck.map((s) => s.P.y));
+    const lands = (pts) => {
+      let apex = 0;
+      pts.forEach((p, i) => { if (p.y > pts[apex].y) apex = i; });
+      let above = false; // the arc has been over the deck: coming down through it from there = landed
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i];
+        for (const s of deck) {
+          const d = p.clone().sub(s.P);
+          if (Math.hypot(d.x, d.z) >= Math.max(hw, 6)) continue;
+          const h = d.dot(s.U);
+          if (h >= -0.5) above = true; // over it, or ON it (a fitted landing starts exactly on the slow arc)
+          else if (above) return true; // came down onto the deck
+          else if (h < -2) return false; // under the deck: it hits the landing from below
+        }
+        if (i > apex && p.y < lowest - 4) return false; // came down past it (rising below it is fine)
+      }
+      return false;
+    };
+    const slowOk = lands(a.pts), fastOk = lands(a.fast.pts);
+    if (!slowOk || !fastOk) problems.misses.push({ uid: pc.uid, slowOk, fastOk });
+  }
+  for (const m of problems.misses) {
+    const name = TILES[track.pieces.find((q) => q.uid === m.uid).id]?.label ?? "a landing";
+    problems.messages.push(`"${name}": ${!m.slowOk && !m.fastOk ? "the car misses it" : !m.slowOk ? "a slower car falls short of it" : "a fast car flies past it"} — move it on the arc or use a Fitted landing`);
+  }
   // tint overlapping pieces: a red box around each
   for (const c of overlapBoxes.splice(0)) scene.remove(c);
-  for (const [uid, color] of [...[...problems.overlap].map((u) => [u, 0xff4d5e]), ...problems.loose.map((u) => [u, 0xff9a3d])]) {
+  for (const [uid, color] of [...[...problems.overlap].map((u) => [u, 0xff4d5e]), ...problems.loose.map((u) => [u, 0xff9a3d]), ...problems.misses.map((m) => [m.uid, 0xff9a3d])]) {
     const b = built.get(uid);
     if (!b) continue;
     const box = new THREE.Box3Helper(new THREE.Box3().setFromObject(b.group), color);
@@ -660,7 +717,15 @@ function computeSnap() {
   const id = tileId(tileBase);
   const t = TILES[id];
   let best = null;
-  for (const e of openEnds()) {
+  // A LANDING in hand goes on a flight arc first: next to its lip, a short drop's whole arc sat inside
+  // the open end's 60 px and the landing could only snap to the end (seen building, 2026-10-19)
+  const landingInHand = !!t?.landAngle || tileBase === FITTED;
+  const onArc = landingInHand && arcs.some((a) => a.pts.some((p, k) => {
+    if (k < 3 || a.tan[k].y > -0.02) return false;
+    const s = toScreen(p);
+    return s && Math.hypot(s.x - mouse.x, s.y - mouse.y) < 30;
+  }));
+  if (!onArc) for (const e of openEnds()) {
     const s = toScreen(new THREE.Vector3().setFromMatrixPosition(e.m));
     if (!s) continue;
     const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
@@ -903,8 +968,8 @@ function renderStatus() {
     `<div class="row"><span>height</span><b>${buildY} m</b></div>` +
     `<div class="row"><span>turn / pitch / bank</span><b>${rot.yaw}° / ${rot.pitch}° / ${rot.roll}°</b></div>` +
     (prediction.lipSpeed.size
-      ? `<div class="row"><span>band (real car)</span><b>${[...prediction.lipSpeed.values()].map((v) => `${Math.round(v * 0.93 * 3.6)}–${Math.round(v * 3.6)}`).join(" · ")} km/h</b></div>`
-      : `<div class="row"><span>arc band (guess)</span><b>${Math.round(arcSpeed * 0.93 * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
+      ? `<div class="row"><span>band (real car)</span><b>${[...prediction.lipSpeed.values()].map((v) => `${Math.round(v * BAND_SLOW * 3.6)}–${Math.round(v * 3.6)}`).join(" · ")} km/h</b></div>`
+      : `<div class="row"><span>arc band (guess)</span><b>${Math.round(arcSpeed * BAND_SLOW * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
     `<div class="row"><span>checkpoints (select + C)</span><b>${track.pieces.filter((p) => p.cp).length}</b></div>` +
     `<div class="row"><span>author time</span><b>${track.authorTime ? `${track.authorTime.toFixed(2)} s` : "—"}</b></div>` +
     `<div class="row"><span>pieces</span><b>${track.pieces.length}</b></div>`;
@@ -969,7 +1034,7 @@ addEventListener("keydown", (e) => {
   ghostDirty = true;
   e.preventDefault();
 });
-addEventListener("resize", () => { fitView(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener("resize", () => setTimeout(fitView)); // after the engine's own resize
 $("b-undo").onclick = () => restore(undo, redo);
 $("b-redo").onclick = () => restore(redo, undo);
 $("b-frame").onclick = frameAll;
@@ -990,7 +1055,7 @@ renderDock();
 rebuild();
 if (track.pieces.length) { frameAll(); controls.update(); } // an opened track starts in view
 let last = performance.now();
-renderer.setAnimationLoop(() => {
+app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
@@ -999,7 +1064,6 @@ renderer.setAnimationLoop(() => {
   updateGhost();
   updateGrid();
   updateNext();
-  renderer.render(scene, camera);
 });
 // test hooks: aiming updates the ghost/snap at once (a hidden or minimised window runs no frames)
 const hookAim = (f) => (...a) => { controls.update(); camera.updateMatrixWorld(); const r = f(...a); updateGhost(); return r; };
