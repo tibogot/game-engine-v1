@@ -21,15 +21,18 @@ export function createOldLookMaterials() {
   // (zones 3/4 fell through to the kerb colour on the plain road material)
   const tube = createRoadMaterial({
     tubeZones: true,
-    tubeInner: 0x2a3242,
-    tubeOuter: 0xc9d1dd,
+    tubeInner: 0x161c28, // dark bore: the lit rings carry it
+    tubeOuter: 0x1f56c9, // a deep Thunderline blue shell (a strong colour reads as an object — the
+    //                      Apex Rush reference; ours, not their orange)
     neonColor: 0x3fd2ff,
     neonIntensity: 2.4,
     neonSpacing: 8,
     neonWidth: 0.4,
   });
   tube.shadowSide = THREE.BackSide;
-  return { road, tube, rail: createGuardrailMaterial() };
+  // the tubes' white trim: rims at the ends and joints, seams along the shell
+  const trim = new THREE.MeshStandardNodeMaterial({ color: 0xf1f4f9, roughness: 0.32, metalness: 0.05 });
+  return { road, tube, trim, rail: createGuardrailMaterial() };
 }
 
 /** Old-kit frames ({pos, tangent, up, right}) along a new piece, every ≤2 m, no duplicate stations. */
