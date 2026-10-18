@@ -3,6 +3,7 @@
 // The wiring follows roadGame.js (boot :291, collision bake :4876-5030, readControls :7663, sim loop
 // :9904-10040), minus everything a sky track doesn't need. Throwaway: it answers DESIGN.md §9 P3.
 import * as THREE from "three";
+import { float, abs, dot, vec3, normalView, positionViewDirection } from "three/tsl";
 import { startV3App } from "../../../../v3/engine.js";
 import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -21,6 +22,7 @@ import { createCarRules } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
 import { createEngineModel } from "./engineModel.js";
 import { createEngineSound } from "./engineSound.js";
+import { createSfx } from "./sfx.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -216,7 +218,12 @@ if (useNewShadows) {
     adoptCar(w.object);
     vehicle.setWheelModel(w.object, { radius: w.radius, thickness: w.width });
     vehicle.setWheelStyle("glb");
-    // the ghost: its own copies of the same models, translucent (WHEEL.radius is the same value)
+  } catch (e) {
+    console.warn("[P3] car model not loaded, driving the box", e);
+  }
+  try {
+    // the ghost: its own copies of the same models (WHEEL.radius is the same value), THEN the hologram
+    // look — styled before the models arrive, the car's own setup choked on the hologram material
     const gm = await loadChassisModel(renderer, CHASSIS_GLB_URL);
     ghostCar.setChassisModel(gm.object, { brakeLights: gm.brakeLights, headlampLenses: gm.headlampLenses });
     ghostCar.setChassisStyle("glb");
@@ -224,8 +231,10 @@ if (useNewShadows) {
     ghostCar.setWheelModel(gw.object, { radius: gw.radius, thickness: gw.width });
     ghostCar.setWheelStyle("glb");
     ghostify(ghostCar.group);
+    ghostStyled = true;
+    if (ghostPlayer && showGhost) ghostCar.group.visible = true;
   } catch (e) {
-    console.warn("[P3] car model not loaded, driving the box", e);
+    console.warn("[ghost] model not loaded: no ghost shown", e);
   }
 })();
 
@@ -293,26 +302,33 @@ for (const l of ghostCar.headlights ?? []) l.parent?.remove(l);
 ghostCar.group.visible = false;
 const ghostRules = createCarRules(ghostCar, { boostPads });
 let ghostPlayer = null;
-/** translucent, no shadows, never on the shadow layers */
+/**
+ * THE GHOST'S LOOK: a bolt-blue HOLOGRAM, one shared material — glowing (additive), bright at its
+ * outline (fresnel: surfaces turning away from you), faint in the middle, so it reads at once as
+ * "not a real car" and never hides the road. The old way cloned the car's materials translucent and
+ * came out flat grey (user: "the ghost looks bad, it looks grey"): a cloned NodeMaterial drops its map.
+ */
+const ghostFresnel = float(1).sub(abs(dot(normalView, positionViewDirection))).pow(2.2);
+const ghostMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false });
+ghostMat.colorNode = vec3(0.25, 0.82, 1.0).mul(ghostFresnel.mul(1.7).add(0.1));
+ghostMat.opacityNode = ghostFresnel.mul(0.75).add(0.15);
 function ghostify(root) {
   root.traverse((o) => {
     if (!o.isMesh) return;
     o.castShadow = false;
     o.receiveShadow = false;
-    const mats = Array.isArray(o.material) ? o.material : [o.material];
-    const out = mats.map((m) => { const c = m.clone(); c.transparent = true; c.opacity = 0.32; c.depthWrite = false; return c; });
-    o.material = Array.isArray(o.material) ? out : out[0];
+    o.material = Array.isArray(o.material) ? o.material.map(() => ghostMat) : ghostMat;
   });
 }
-ghostify(ghostCar.group);
+let ghostStyled = false; // the ghost is only shown once it wears its hologram (models loaded)
 function startGhost() {
   ghostPlayer = ghostData?.inputs?.length ? createGhostPlayer(ghostCar, ghostRules, ghostData) : null;
-  ghostCar.group.visible = !!ghostPlayer && showGhost;
+  ghostCar.group.visible = !!ghostPlayer && showGhost && ghostStyled;
   if (ghostPlayer) ghostPlayer.start(spawnPos, startQuat);
   else ghostCar.setEnabled(false);
 }
 let showGhost = params.get("ghost") !== "off" && prefs.ghost;
-addEventListener("keydown", (e) => { if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!ghostPlayer && showGhost; } });
+addEventListener("keydown", (e) => { if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!ghostPlayer && showGhost && ghostStyled; } });
 
 // ---------- landings: the grade flashes under the timer ----------
 const landings = []; // every graded landing this run (tests read it)
@@ -334,12 +350,15 @@ function showLanding(ev) {
 // the line during the countdown, and in the air, it revs freely. M mutes; the tab hidden = paused.
 const engine = createEngineModel();
 const engineSound = createEngineSound({ type: prefs.engine ?? "v8", volume: prefs.volume ?? 0.7 });
-let engineMuted = !(prefs.sound ?? true);
+let engineMuted = !(prefs.sound ?? false);
 engineSound.setMuted(engineMuted);
+// the other sounds (sfx.js: tyres, wind, landings, boost, race beeps), on the engine's audio context
+const sfx = createSfx(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7 });
+sfx.setMuted(engineMuted);
 const unlockAudio = () => { if (!engineMuted) engineSound.unlock(); };
 addEventListener("keydown", (e) => {
   unlockAudio();
-  if (e.code === "KeyM") { engineMuted = !engineMuted; engineSound.setMuted(engineMuted); if (!engineMuted) engineSound.unlock(); }
+  if (e.code === "KeyM") { engineMuted = !engineMuted; engineSound.setMuted(engineMuted); sfx.setMuted(engineMuted); if (!engineMuted) engineSound.unlock(); }
 });
 addEventListener("pointerdown", unlockAudio);
 document.addEventListener("visibilitychange", () => (document.hidden ? engineSound.suspend() : engineSound.resume()));
@@ -352,7 +371,19 @@ function engineTick(dt, input) {
   // held on the line, the wheels don't turn: the engine revs freely, as in the air
   const free = race.holding || vehicle.groundedCount === 0;
   engineSound.update(engine.update(dt, kmh, throttle, !free));
+  // tyres slide when the car moves SIDEWAYS (car-local x); braking = the brake held at speed
+  _side.set(1, 0, 0).applyQuaternion(vehicle.body.quat);
+  const boosting = rules.boostLeft > 0;
+  if (boosting && !wasBoosting) sfx.boost();
+  wasBoosting = boosting;
+  sfx.update(dt, { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting });
+  // the countdown: a beep on 3, 2, 1
+  const n = race.s.state === "countdown" ? Math.ceil(race.s.hold * 2) : 0;
+  if (n && n !== lastCount && n <= 3) sfx.beep("count");
+  lastCount = n;
 }
+const _side = new V();
+let wasBoosting = false, lastCount = 0, fallSpeed = 0;
 
 // ---------- race events + HUD ----------
 const HOLD = { steerTarget: 0, rollTarget: 0, throttle: 0, handbrake: true, yaw: 0, pitch: 0, analog: false };
@@ -370,6 +401,10 @@ function flashSplit(html, cls) {
   splitTimer = setTimeout(() => el.classList.remove("show"), 1800);
 }
 function onRace(e) {
+  if (e.type === "go") sfx.beep("go");
+  if (e.type === "cp") sfx.beep("cp");
+  if (e.type === "finish") sfx.beep("finish");
+  if (e.type === "missing") sfx.beep("miss");
   if (e.type === "cp") {
     // split against the best run's time at the same checkpoint
     const b = best?.splits?.find((s) => s.gate === e.gate);
@@ -527,7 +562,8 @@ function tick() {
     const used = race.holding ? HOLD : input;
     const landed = rules.step(used, FIXED_DT);
     if (race.s.state !== "finished") recorder.tick(used, vehicle);
-    if (landed) showLanding(landed);
+    if (landed) { showLanding(landed); sfx.landing(landed, fallSpeed); }
+    if (vehicle.groundedCount === 0) fallSpeed = Math.max(0, -vehicle.body.vel.y); // how hard the next landing hits
     for (const e of race.tick(vehicle, FIXED_DT)) onRace(e);
     if (ghostPlayer) ghostPlayer.tick(FIXED_DT);
     runTime += FIXED_DT;
@@ -560,7 +596,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
-  get boosting() { return rules.boostLeft > 0; }, engine, engineSound, camera, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  get boosting() { return rules.boostLeft > 0; }, engine, engineSound, sfx, camera, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };
