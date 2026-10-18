@@ -86,7 +86,13 @@ const P = {
   teamEvery: 5,          // s between two looks at what to buy
   // THE MORTAR HARASS (step 4): from 80-100 m of French the FLN KNOWS, a barrage, ~45 s of rounds,
   // gone before they close in; then it rests at home.
-  harass: { ring: [80, 100], fireFor: [38, 52], rest: [60, 90], danger: 45, minKnown: 2, lostAt: 0.34, setupWait: 25 },
+  harass: { ring: [80, 100], fireFor: [38, 52], rest: [60, 90], danger: 45, minKnown: 2, lostAt: 0.34, setupWait: 25,
+    // HARCÈLEMENT DES POSTES (2026-10-18, the FLN's constant war on the French outposts): no troops known
+    // to hit — it shells an OUTPOST (a mirador, a nest, a forward post…), one every `outpostEvery` s; at
+    // NIGHT (app.sky.night ≥ `night`) the outposts come round and its rests end `nightK` sooner. Any
+    // harass fires from out of every French mortar pit's reach (`pitClear` m: no counter-battery).
+    outposts: ["mirador", "mgNest", "forwardPost", "fortPoint", "searchlight", "aidStation"],
+    pitClear: 175, outpostEvery: 240, night: 0.3, nightK: 0.5 },
   // THE 12.7 GUARD (step 5): set up in cover by the FLN-held village nearest where French aircraft were
   // last seen (helicopters land men and supplies by the points), else at home. Re-looked every
   // `every` s; it moves only for a spot `moveOver` m away. Hurt with French close: home, a rest.
@@ -427,6 +433,25 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     }
     return best;
   }
+  /** An OUTPOST to harass (P.harass.outposts), out of the French pits' reach, nearest the team first:
+   *  { at, struct }, or null. (Buildings stand still: the FLN knows where they are.) */
+  let outpostNext = 0;
+  const tried = new Map();   // outpost → no spot to fire from until (t)
+  const isNight = () => (app.sky?.night ?? 0) >= P.harass.night;
+  /** The French mortar pits' reaches (+ a margin): no firing spot inside them (counter-battery). */
+  const pitReaches = () => (app.algStructures?.list ?? []).filter((s) => s.alive && s.team === "player" && s.typeKey === "mortarPit").map((s) => ({ x: s.position.x, z: s.position.z, r: P.harass.pitClear }));
+  function outpostTarget(from) {
+    const H = P.harass;
+    if (t < outpostNext) return null;
+    let best = null, bd = Infinity;
+    for (const s of app.algStructures?.list ?? []) {
+      if (!s.alive || s.team !== "player" || !H.outposts.includes(s.typeKey) || s.constructing) continue;
+      if (tried.get(s) > t) continue;   // no firing spot out of the pits' reach last time
+      const d = dist(s.position, from);
+      if (d < bd) { bd = d; best = { at: { x: s.position.x, z: s.position.z }, struct: s }; }
+    }
+    return best;
+  }
   function stepMortar(q, dt) {
     const H = P.harass, M = app.algMortarTeams, men = teamAlive(q);
     if (!q.s || !M || !men.length) return;
@@ -438,15 +463,17 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     switch (q.state) {
       case "home": {
         q.s.mortarHold = false;   // at home it defends what comes in reach
-        if (q.t < (q.rest ?? 0)) break;
+        if (q.t < (q.rest ?? 0) * (isNight() ? H.nightK : 1)) break;
         if ((q.look = (q.look ?? 0) - dt) > 0) break;
         q.look = 3;
-        const tg = harassTarget(c);
+        const tg = harassTarget(c) ?? outpostTarget(c);
         if (!tg) break;
         const a0 = Math.atan2(c.z - tg.at.z, c.x - tg.at.x);   // its own side of the target
-        const spot = spotAround(tg.at, a0, 1.0, H.ring, { from: c });
-        if (!spot) break;
-        q.target = tg.at; q.spot = spot; q.state = "move"; q.t = 0;
+        // (Its whole side first, then all round — and never inside a French pit's reach.)
+        const spot = spotAround(tg.at, a0, 1.0, H.ring, { from: c, avoid: pitReaches() }) ?? spotAround(tg.at, a0, Math.PI, H.ring, { from: c, avoid: pitReaches() });
+        if (!spot) { if (tg.struct) tried.set(tg.struct, t + 120); break; }
+        q.target = tg.at; q.struct = tg.struct ?? null; q.spot = spot; q.state = "move"; q.t = 0;
+        if (q.struct) outpostNext = t + H.outpostEvery * (isNight() ? H.nightK : 1);
         q.s.mortarHold = true;
         orderTeam(q, spot);
         break;
@@ -463,8 +490,8 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         const set = M.stateOf(q.s) === "set";
         if (!set && q.t > H.setupWait) { q.state = "leave"; q.t = 0; break; }
         if (set && !q.barraged) {
-          // THE BARRAGE on the French it knows nearest its aim (they may have moved).
-          const tg = harassTarget(c);
+          // THE BARRAGE on the French it knows nearest its aim (they may have moved) — or its outpost.
+          const tg = q.struct ? (q.struct.alive ? { at: q.struct.position } : null) : harassTarget(c);
           if (tg && M.fireBarrage(q.s, tg.at.x, tg.at.z)) q.barraged = true;
           else if (q.t > H.setupWait) q.barraged = true;   // none it can afford or reach: its rounds only
         }
@@ -473,6 +500,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
       }
       case "leave":
         q.s.mortarHold = true;
+        q.struct = null;
         if (q.t < 0.2) orderTeam(q, homeFor(c));
         if (dist(c, homeFor(c)) < 12 || q.t > 120) { q.state = "home"; q.t = 0; q.rest = rand(...H.rest); }
         else if (q.t > 10 && !men.some((u) => u.isMoving)) orderTeam(q, homeFor(c));
@@ -2145,12 +2173,13 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     return !S.blocker(a, b2);
   };
   /** A spot round `at`, `ring` m out, around angle `a0` ± `spread`: open, out of the MGs, scored. */
-  function spotAround(at, a0, spread, ring, { needSight = false, mgs = frenchMGs(), from = null } = {}) {
+  function spotAround(at, a0, spread, ring, { needSight = false, mgs = frenchMGs(), from = null, avoid = null } = {}) {
     let best = null, bestS = -Infinity;
     for (let i = 0; i < 32; i++) {
       const a = a0 + rand(-spread, spread), r = rand(...ring);
       const x = at.x + Math.cos(a) * r, z = at.z + Math.sin(a) * r;
       if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+      if (avoid?.some((o) => (o.x - x) ** 2 + (o.z - z) ** 2 < o.r * o.r)) continue;   // (out of these reaches: a French pit's)
       // REACHABLE from the band (open but cut off, the flank stood 163 m away for 90 s).
       if (from && app.navGrid?.sameRegion && !app.navGrid.sameRegion(from.x, from.z, x, z)) continue;
       if (dist({ x, z }, post) < P.postKeepOff) continue;
@@ -2407,7 +2436,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     /** Dev: a team of `key` now (pays, ignores the clock and the tiers). */
     teamNow(key) { return spawnTeam(key); },
     /** Dev: the teams out ({ key, alive }). */
-    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null, t: Math.round(q.t ?? 0), rest: Math.round(q.rest ?? 0), given: q.given ?? 0 })); },
+    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null, t: Math.round(q.t ?? 0), rest: Math.round(q.rest ?? 0), given: q.given ?? 0, struct: q.struct?.typeKey ?? null })); },
     /** Dev: what each band is doing. */
     describe() {
       return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "cut" ? " (cut the line)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";

@@ -619,6 +619,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "disembark") { transports?.disembark(sel); commandCard.render(sel); }
       if (key === "heliLand") { heliLift?.land(sel); commandCard.render(sel); }
       if (key === "flnMine") flnTricks?.begin(sel);
+      if (key === "flnWire") flnTricks?.begin(sel, "wire");
+      if (key === "flnDetonate") { flnTricks?.detonate(sel); commandCard.render(sel); }
       if (key === "mortarBarrage") mortarTeams?.begin(sel);
       if (key === "flnCut") { flnTricks?.cut(sel); commandCard.render(sel); }
       if (key === "attackMove") attackMove?.begin(sel);

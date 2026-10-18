@@ -22,9 +22,9 @@ export const ICON = {
   vet1: "vet1", vet2: "vet2", vet3: "vet3",
   alertAttack: "alertAttack", alertSeen: "alertSeen", alertCut: "alertCut", alertFlag: "alertFlag", alertMine: "alertMine",
   // PLAYING THE FLN (2026-10-13): its sabotage (algFlnTricks.js) and its pieces (algBuild.js), existing silhouettes
-  flnMine: "alertMine", flnCut: "alertCut", armsCache: "lmg", refuge: "garrison", infirmary: "repair", mortarBarrage: "barrage",
+  flnMine: "alertMine", flnWire: "alertMine", flnDetonate: "barrage", flnCut: "alertCut", armsCache: "lmg", refuge: "garrison", infirmary: "repair", mortarBarrage: "barrage",
 };
-export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", bazooka: "U", radio: "I", radioBarrage: "M", radioAir: "L", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O", attackMove: "N", flnMine: "X", flnCut: "J", mortarBarrage: "M" };   // (flnMine / flnCut: the FLN's, on the keys only the French use)
+export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", bazooka: "U", radio: "I", radioBarrage: "M", radioAir: "L", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O", attackMove: "N", flnMine: "X", flnCut: "J", mortarBarrage: "M", flnWire: "I", flnDetonate: "L" };   // (flnMine / flnCut / flnWire / flnDetonate: the FLN's, on the keys only the French use — C is the camera, the rest the camera's WASD-QE)
 
 const BASE = "/textures/ui/icons/";
 /** An icon element's inline style (a mask in the current colour). */

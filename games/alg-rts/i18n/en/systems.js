@@ -179,6 +179,13 @@ export default {
   // algDroppedWeapons.js
   "Un <b>FM</b> est resté au sol : un groupe sans FM qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a squad without one that passes within 6 m picks it up.",
   "Un <b>FM</b> est resté au sol : un combattant qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a fighter who passes within 6 m picks it up.",
+  // algFlnTricks.js — the command mine (2026-10-18)
+  "Mine commandée": "Command mine",
+  "Un homme enterre une charge sous la piste, reliée à un fil : restez à moins de 45 m, à couvert, et faites-la sauter au passage du camion ou du half-track. Elle ne part pas seule.": "A man buries a charge under the piste, on a wire: stay within 45 m, in cover, and set it off as the truck or the half-track passes. It never goes off by itself.",
+  "Faire sauter": "Detonate",
+  "Le fil est tiré : la charge saute maintenant, sous ce qui roule dessus.": "The wire is pulled: the charge goes off now, under whatever is driving over it.",
+  "<b>Le fil est perdu</b> : la charge est désormais une mine ordinaire.": "<b>The wire is lost</b>: the charge is now an ordinary mine.",
+  "<b>Mine commandée posée.</b> Mettez l'homme à couvert à moins de 45 m, puis « Faire sauter » au passage du convoi.": "<b>Command mine laid.</b> Put the man in cover within 45 m, then \"Detonate\" as the convoy passes.",
   // algSalvage.js
   "<b>Véhicule abandonné</b> : l'équipage a sauté. Un homme à côté le reprend — sinon le FLN s'en emparera.": "<b>Vehicle abandoned</b>: the crew bailed out. A man beside it takes it back — or the FLN will seize it.",
   "<b>Un véhicule français abandonné</b> : un homme à côté s'en empare.": "<b>An abandoned French vehicle</b>: a man beside it seizes it.",

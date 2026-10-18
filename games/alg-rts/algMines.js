@@ -78,12 +78,24 @@ export function createAlgMines(app, { units, combat }) {
       return m;
     },
     /** A COMMAND mine at (x, z), its wire held by `man`; `onDone(why)`: "boom" | "flee" | "wait" | "gone" —
-     *  he lets go (his side sends him home). */
-    layCommand(x, z, man, onDone = null) {
+     *  he lets go (his side sends him home). `manual` (a human's, CoH's demolition charge): it never
+     *  goes off by itself and he never lets go by himself — `detonate(m)` is the player's button. */
+    layCommand(x, z, man, onDone = null, { manual = false } = {}) {
       const m = this.lay(x, z);
-      if (m) { m.command = man; m.waitT = 0; m.onDone = onDone; }
+      if (m) { m.command = man; m.waitT = 0; m.onDone = onDone; m.manual = manual; }
       return m;
     },
+    /** The wire pulled: a held command mine goes off now (false: no longer held). */
+    detonate(m) {
+      const w = m?.command, C = P.command;
+      if (!w?.alive || !mines.includes(m) || m.arm > 0 || Math.hypot(w.position.x - m.x, w.position.z - m.z) > C.wire) return false;
+      combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul });
+      m.onDone?.("boom");
+      remove(m);
+      return true;
+    },
+    /** The command mines whose wire `u` holds. */
+    heldBy: (u) => mines.filter((m) => m.command === u),
     /** On the fixed sim clock. */
     step(dt) {
       const C = P.command;
@@ -97,7 +109,7 @@ export function createAlgMines(app, { units, combat }) {
           m.waitT += dt;
           if (!w.isMoving) w.posture = "prone";   // (after infantryPosture: lying in the scrub, holding the wire)
           const pressed = units.near(w.position.x, w.position.z, C.keepOff, near).some((u) => u.alive && u.team === "player" && u.type?.foot && Math.hypot(u.position.x - w.position.x, u.position.z - w.position.z) < C.keepOff);
-          if (pressed || m.waitT > C.wait) { m.command = null; m.onDone?.(pressed ? "flee" : "wait"); w = null; }
+          if (!m.manual && (pressed || m.waitT > C.wait)) { m.command = null; m.onDone?.(pressed ? "flee" : "wait"); w = null; }
         }
         units.near(m.x, m.z, P.spotRange, near);
         let seen = false, clearing = false, boom = false;
@@ -110,6 +122,7 @@ export function createAlgMines(app, { units, combat }) {
             // (When it is OVER the charge: well inside its radius, or at its closest — a GMC set off at the
             // first 4.5 m walked away on 40 of 160, measured.)
             if (w) {
+              if (m.manual) continue;   // (the player's own button: detonate)
               const r = (u.type?.radius ?? 3);
               if (d < r * C.wheelMul && (u.typeKey !== "willys" || m.waitT > C.jeepAfter)) {
                 if (d < r * 0.6 || (m.track?.u === u && d > m.track.d)) { boom = true; break; }

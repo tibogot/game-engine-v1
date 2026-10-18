@@ -206,6 +206,38 @@ PHASE 5 — after launch (the Early Access roadmap)
   Normal base income 45 → 70 (algDifficulty) — measured 19.2 min, a village held 4 → 15 min, losses
   still ~1:2. OPEN: **you** play a match as the FLN — is the French AI now too strong for a human? If so,
   slow its first expansion (3 villages in ~2 min), not its fighting.
+- [x] MORE DANGEROUS FLN (2026-10-18, you: "anything that would make them more dangerous?"):
+  - SALVAGE (algSalvage.js): a French jeep / GMC can be left ABANDONED (60% of deaths short of a big
+    blast); a man beside it 3 s takes it — the FLN's in French paint, moudjahidin aboard, the FLN flag
+    PAINTED on (unitRenderer per-unit decals: bonnet, a truck's roof); fuel 2-2.5 min then burnt; a truck
+    unloaded at the cave / a refuge (+80). The FLN AI seizes them. (A cloth flag tried first: unreadable
+    from the RTS camera and a cloth sim per vehicle — replaced by the paint, one draw.)
+  - The closed GMC's cab seats real men (its baked French driver stayed with the FLN).
+  - COMMAND MINE (algMines): a wired charge, fired under the first lorry / armour (jeeps let by); the AI's
+    CONVOY HUNTERS wire one where French vehicles were last seen; a HUMAN FLN lays it ("Mine commandée", I)
+    and fires it himself ("Faire sauter", L — CoH's demolition charge).
+  - HARCÈLEMENT DES POSTES: the FLN's 60 mm shells French OUTPOSTS (mirador, nest, forward post…) when it
+    knows no troops to hit, one every 4 min (twice as often at night); every harass now fires from out
+    of the French pits' reach (no counter-battery).
+- [ ] NIGHT IN THE GAME (you, 2026-10-18: "there will be some night"): no map or match has night yet — the
+  hour is fixed per map (?tod= is dev only), though flares, searchlights, night lamps and the moon all
+  work. The FLN AI already harasses more at night.
+  DECIDED (2026-10-18): NO day–night cycle (CoH's way: a fixed hour per match — the look is tuned to one
+  hour, the terrain has baked light, and a cycle makes balance a lottery). Instead:
+  1. SKIRMISH: an "Heure" choice on the briefing (jour / crépuscule / nuit) beside the difficulty. Night =
+     shorter sight for all, more FLN concealment; the French have flares, searchlights, the mirador.
+  2. CAMPAIGN: missions built round the dark (the night defence of the post + the dawn counter-attack,
+     the raid on a cave before first light) — a SCRIPTED dusk→night at a set moment where it matters.
+  3. Maybe a map variant (El Kantara at dusk).
+  First: measure night's cost (searchlights, lamps) and the 16:00-tuned look at night on each map.
+- [ ] BLENDER BUILDINGS (talked 2026-10-18, for later): Blender 4.2 / 5.0 are installed; driven headless by
+  Python (bpy), checked by rendered stills and the buildings lab. PILOT = the MOTOR POOL, same footprint,
+  gate and 3/4 facing: bevelled edges, real openings and thickness, baked AO / edge wear / grime + normal
+  maps, LODs — and its DAMAGE STATES from the start (intact / damaged / ruin + Cell-Fracture pieces: the
+  groundwork of building damage & collapse). Shown beside the current one at the RTS camera; measured
+  (tris, draws, texture MB, load). Risks: style next to the code kit (same Poly Haven textures, light,
+  tint), texture memory. Wins → the post, then the village houses (split per house for destruction).
+  Refs wanted: assets-src/refs/coh3 garages / workshops, period photos of French motor pools in Algeria.
 - [ ] NEXT (suggested): you play a match on each side → building damage + collapse → the other explosions (tank shell, vehicle death, grenade) onto lab books.
 
 ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) building damage +
