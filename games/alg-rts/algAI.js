@@ -153,6 +153,13 @@ const P = {
   retargetOver: 1,            // a village band on its way: more French there than its men + this → another village
   mineShare: 0.3,             // of the bands (while the map has room for a mine)
   mineWork: 8,                // seconds at the spot to lay it
+  wireShare: 0.6,             // of the piste mines once French vehicles are known: a command mine (algMines)
+  wireRing: [18, 32],         // m from it: where its man lies in cover on the wire
+  // THE CONVOY HUNTERS (2026-10-18 — a bot game laid one mine in 15 min: the bands go for the villages):
+  // once French vehicles are known, every `wireEvery` s a team of three goes out to wire a charge on
+  // the stretch of piste they were last seen on — at most `wireMax` wired at once.
+  wireFirst: 240, wireEvery: 150, wireMax: 2,
+  huntKeepOff: 120,           // m: no French this near the stretch it picks (their teams were caught on the way)
   cutShare: 0.2,              // of the bands: cut the telegraph line (algTelegraph.js), while it stands
   cutWork: 10,                // seconds at the pole to bring it down
   mineKeepOff: 90,            // no French within this of the spot
@@ -1434,7 +1441,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         const c = centre(m);
         if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.trigger)) { strike(b); break; }
         if (b.mission === "cut") { if (b.t > P.cutWork) { app.algTelegraph?.fell(b.cutPole.i); withdraw(b); } }
-        else if (b.t > P.mineWork) { app.algMines?.lay(b.minePt.x, b.minePt.z); withdraw(b); }
+        else if (b.t > P.mineWork) { layMine(b); withdraw(b); }
         break;
       }
       case "strike": {
@@ -1727,6 +1734,47 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     setState(b, "approach");
     return true;
   }
+  /** The band's mine goes in: a pressure mine, or a COMMAND mine with one of its men left on the
+   *  wire, lying in the best cover `wireRing` m off it (he goes home when he lets go). */
+  function layMine(b) {
+    const M = app.algMines, p = b.minePt;
+    if (!M) return;
+    if (b.wire) {
+      const man = alive(b).find((u) => u.typeKey === "moudjahid" && !bearers.has(u));
+      let spot = null, bs = -Infinity;
+      for (let i = 0; man && i < 20; i++) {
+        const a = (i / 20) * Math.PI * 2, r = rand(...P.wireRing);
+        const x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+        if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
+        const tr = nearestTrack(x, z);
+        if (tr && tr.d < 10) continue;   // not on a road
+        const s = cover(x, z) + rand(0, 0.1);
+        if (s > bs) { bs = s; spot = { x, z }; }
+      }
+      if (man && spot) {
+        // Out of the band, but kept in `inBand` (busy: a gathering band must not take him off the wire).
+        b.members.splice(b.members.indexOf(man), 1);
+        man.holdFire = true;
+        man.orderTo(spot.x, spot.z);
+        M.layCommand(p.x, p.z, man, () => { inBand.delete(man); if (man.alive) { man.holdFire = true; homebound.add(man); sendHome(man); } });
+        wired++;
+        return;
+      }
+    }
+    M.lay(p.x, p.z);
+  }
+  let wired = 0;
+  /** THE CONVOY HUNTERS (P.wireEvery): a team of three out to wire a charge on the vehicles' piste. */
+  let huntT = P.wireFirst;
+  function stepHunt(dt) {
+    if ((huntT -= dt) > 0) return;
+    huntT = P.wireEvery;
+    const M = app.algMines;
+    if (!seenVehicles || !M || M.count >= M.params.max) return;
+    const live = M.list.filter((m) => m.command).length + bands.filter((b) => b.hunt && b.state !== "done" && b.state !== "withdraw").length;
+    if (live >= P.wireMax) return;
+    if (newBand({ size: 3, mission: "mine" })) bands[bands.length - 1].hunt = true;
+  }
   function planMine(b) {
     const mines = app.algMines;
     if (!mines || mines.count >= mines.params.max) return false;
@@ -1738,17 +1786,22 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     // little preferred.
     for (const t of TRACK_LINES) {
       if (t.kind !== "piste" && t.kind !== "mule") continue;
+      if (b.hunt && t.kind !== "piste") continue;   // a convoy hunt: the vehicles' road
       for (let i = 2; i < t.line.length - 2; i += 3) {
         const p = t.line[i];
         if (dist(p, post) < P.mineKeepOff) continue;
-        if (fr.some((u) => dist(u.position, p) < P.mineKeepOff)) continue;
+        if (fr.some((u) => dist(u.position, p) < (b.hunt ? P.huntKeepOff : P.mineKeepOff))) continue;
         if (mines.list.some((q) => dist(q, p) < P.mineApart)) continue;
-        const s = -dist(p, c) / 400 + Math.random() * 0.4 + (t.kind === "piste" ? 0.1 : 0);
+        const s = -dist(p, c) / 400 + Math.random() * 0.4 + (t.kind === "piste" ? 0.1 : 0)
+          - (b.hunt && lastVehicle ? dist(p, lastVehicle) / 600 : 0);   // where the French vehicles were last seen (a pull, not a march into them)
         if (s > bestS) { bestS = s; best = p; }
       }
     }
     if (!best) return false;
     b.mission = "mine"; b.minePt = { x: best.x, z: best.z }; b.target = null;
+    // A COMMAND mine (algMines) on the PISTE once the French have shown their vehicles: a man stays on
+    // the wire for the lorry or the half-track (a mule path's walkers get the pressure mine).
+    b.wire = seenVehicles && TRACK_LINES.some((t) => t.kind === "piste" && t.line.includes(best)) && (b.hunt || Math.random() < P.wireShare);
     // The band stands beside the road, the mine goes in the wheel track.
     b.spot = { x: best.x, z: best.z };
     holdFire(b, true);
@@ -1971,7 +2024,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     }
     // THE OPENING: villages first (a mine or a raid while the French take the valley loses it).
     const opening = t < P.opening || !(app.algEconomy?.points ?? []).some((v) => v.owner === "enemy");
-    if (opening && (!b.mission || b.mission === "mine" || b.mission === "cut" || b.mission === "raid")) {
+    if (opening && (!b.mission || (b.mission === "mine" && !b.hunt) || b.mission === "cut" || b.mission === "raid")) {
       const v = pickVillage(c, b);
       if (v && planVillage(b, v)) { b.mission = "village"; b.village = v; return; }
     }
@@ -2273,6 +2326,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
       stepCaches(dt);
       stepRefuges(dt);
       stepInfirmary(dt);
+      stepHunt(dt);
       command(dt);
       // Twice a second: villages to defend, assaults to launch.
       defT -= dt;
@@ -2288,6 +2342,12 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     },
     /** Dev: a band now. */
     bandNow() { newBand(); },
+    /** Dev: command mines laid (a man left on the wire). */
+    get wired() { return wired; },
+    /** Dev: a convoy-hunting team now (if the FLN has seen French vehicles and has the men). */
+    huntNow() { huntT = 0; stepHunt(0); return bands.filter((b) => b.hunt).length; },
+    /** Dev: what the FLN has seen of the French (it buys its teams, hunts convoys, on it). */
+    get seen() { return { air: seenAir, vehicles: seenVehicles, lastVehicle }; },
     /** Dev: an assault band now. */
     assaultNow() { return newBand({ size: Math.round(rand(...P.assaultSize)), mission: "assault" }); },
     /** The next band in `s` seconds (algDifficulty.js, at the start). */

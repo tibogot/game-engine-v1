@@ -17,6 +17,13 @@
 //
 // So the tracks ask for the old routine: sweep the piste with infantry before
 // the convoy drives it.
+//
+// THE COMMAND MINE (2026-10-18, you: "make the FLN more dangerous"): a charge in a culvert under the
+// piste and a WIRE to a man lying hidden `wire` m off. Nobody's boot sets it off; HE does — under the
+// first lorry or armour (a jeep only after he has waited `jeepAfter` s: the scout goes by, the
+// half-track behind it goes up), and harder than a pressure mine. He slips away when French on foot
+// come within `keepOff` m of him, after `wait` s, or when the charge has gone; then (him gone, dead or
+// out of reach) it is a pressure mine like any other. Spotted and lifted as any mine.
 import * as THREE from "three";
 
 const P = {
@@ -27,6 +34,8 @@ const P = {
   clearR: 4.0, clearTime: 5,   // a man sent to it stops 3-5 m short (measured)
   damage: 240, radius: 6, vehicleMul: 1.2,   // a GMC 3 m off it: 186 of its 160 (at 200 it limped away on 29, measured)
   max: 4,               // live mines on the map (the AI stops laying past it)
+  // The command mine (a half-track's 240 hp: 340 at 7 m kills it; a pressure mine's 240 lamed it).
+  command: { wire: 45, damage: 340, radius: 7, jeepAfter: 150, keepOff: 22, wait: 300, wheelMul: 1.3 },
 };
 
 export function createAlgMines(app, { units, combat }) {
@@ -68,11 +77,28 @@ export function createAlgMines(app, { units, combat }) {
       mines.push(m);
       return m;
     },
+    /** A COMMAND mine at (x, z), its wire held by `man`; `onDone(why)`: "boom" | "flee" | "wait" | "gone" —
+     *  he lets go (his side sends him home). */
+    layCommand(x, z, man, onDone = null) {
+      const m = this.lay(x, z);
+      if (m) { m.command = man; m.waitT = 0; m.onDone = onDone; }
+      return m;
+    },
     /** On the fixed sim clock. */
     step(dt) {
+      const C = P.command;
       for (let i = mines.length - 1; i >= 0; i--) {
         const m = mines[i];
         if (m.arm > 0) { m.arm -= dt; continue; }
+        // The WIRE: its man gone (dead, or out of its reach) — a pressure mine from now on.
+        let w = m.command;
+        if (w && (!w.alive || Math.hypot(w.position.x - m.x, w.position.z - m.z) > C.wire)) { m.command = w = null; m.onDone?.("gone"); }
+        if (w) {
+          m.waitT += dt;
+          if (!w.isMoving) w.posture = "prone";   // (after infantryPosture: lying in the scrub, holding the wire)
+          const pressed = units.near(w.position.x, w.position.z, C.keepOff, near).some((u) => u.alive && u.team === "player" && u.type?.foot && Math.hypot(u.position.x - w.position.x, u.position.z - w.position.z) < C.keepOff);
+          if (pressed || m.waitT > C.wait) { m.command = null; m.onDone?.(pressed ? "flee" : "wait"); w = null; }
+        }
         units.near(m.x, m.z, P.spotRange, near);
         let seen = false, clearing = false, boom = false;
         for (const u of near) {
@@ -80,15 +106,29 @@ export function createAlgMines(app, { units, combat }) {
           const d = Math.hypot(u.position.x - m.x, u.position.z - m.z);
           const foot = !!u.type?.foot;
           if (!foot) {
+            // Held by its man: under the first lorry or armour (a jeep only once he has waited long).
+            // (When it is OVER the charge: well inside its radius, or at its closest — a GMC set off at the
+            // first 4.5 m walked away on 40 of 160, measured.)
+            if (w) {
+              const r = (u.type?.radius ?? 3);
+              if (d < r * C.wheelMul && (u.typeKey !== "willys" || m.waitT > C.jeepAfter)) {
+                if (d < r * 0.6 || (m.track?.u === u && d > m.track.d)) { boom = true; break; }
+                if (m.track?.u !== u || d < m.track.d) m.track = { u, d };
+              }
+              continue;
+            }
             if (d < (u.type?.radius ?? 3) * P.wheelMul) { boom = true; break; }
             continue;
           }
-          if (!m.spotted && d < P.footR) { boom = true; break; }
+          if (!w && !m.spotted && d < P.footR) { boom = true; break; }   // (no boot sets off a wired charge)
           seen = true;
           if (m.spotted && d < P.clearR) clearing = true;
         }
         if (boom) {
-          combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, P.damage, P.radius, ALN, { vehicleMul: P.vehicleMul });
+          if (w) {
+            combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul });
+            m.onDone?.("boom");
+          } else combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, P.damage, P.radius, ALN, { vehicleMul: P.vehicleMul });
           remove(m);
           continue;
         }
