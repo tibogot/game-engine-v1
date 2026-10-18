@@ -60,6 +60,8 @@ import { ARMOUR, faceHit } from "./algArmour.js";
 import { TRACK_LINES, nearestTrack } from "./algTracks.js";
 import { PLAY } from "./layout.js";
 import { t } from "./i18n/i18n.js";
+import { COSTS } from "./algEconomy.js";
+import { SQUADS } from "./algSquads.js";
 
 // What the player reads (the assault alert), built out here: inside createAlgAI `t` is the clock.
 const TXT = {
@@ -70,6 +72,19 @@ const TXT = {
 };
 
 const P = {
+  // THE TEAMS (2026-10-18, FLN AI step 3 — the heavy weapons a human FLN buys): real SQUADS bought from
+  // the purse at the cave, kept OUT of the bands (never gathered, never gone to ground — a crew of 170
+  // used to come back as three free riflemen). Each key: its tier (the human's tiers: 2 = a village
+  // held + 120 once, 3 = two villages + 180 once), how many at most, and from when (s).
+  teams: {
+    mulet:        { tier: 1, max: 1, from: 240 },
+    mortier:      { tier: 2, max: 1, from: 300, max2: 2, from2: 900 },
+    mitrailleuse: { tier: 2, max: 1, from: 300, needs: "air" },      // only once French aircraft have been seen
+    sansRecul:    { tier: 3, max: 1, from: 420, needs: "vehicles" }, // only once French vehicles have been seen
+  },
+  teamTiers: { 2: { cost: 120, villages: 1 }, 3: { cost: 180, villages: 2 } },
+  teamEvery: 5,          // s between two looks at what to buy
+  teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
   bandSize: [4, 7],
@@ -315,6 +330,54 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
    * crest can see. It used to know every French unit on the map; now the
    * lookouts are its eyes — destroy them and its ambushes go blind.
    */
+  // ── THE TEAMS (P.teams) ───────────────────────────────────────────────────
+  const teams = [];                 // { key, men, s (its squad, null for a mule), t0 }
+  const tiersPaid = new Set([1]);
+  let teamT = P.teamEvery, seenAir = false, seenVehicles = false;
+  const aln = () => app.algEconomy?.aln ?? null;
+  /** A tier opened for the teams: its villages held and its price paid, once. */
+  function tierOpen(n) {
+    if (tiersPaid.has(n)) return true;
+    const T = P.teamTiers[n];
+    if (!T || (app.algEconomy?.heldByEnemy ?? 0) < T.villages || !aln()?.spend(T.cost)) return false;
+    tiersPaid.add(n);
+    return true;
+  }
+  /** Buy and send out a team of `key` at the cave (its men a squad of the game's own). */
+  function spawnTeam(key) {
+    const cost = COSTS[key] ?? 0, size = SQUADS[key]?.size ?? 1;
+    if (!aln()?.spend(cost)) return null;
+    const at = cave.structure.rally ?? caveMouth;
+    const men = [];
+    for (let i = 0; i < size; i++) {
+      const a = (i / size) * Math.PI * 2;
+      men.push(units.spawn(key, at.x + Math.cos(a) * 2, at.z + Math.sin(a) * 2, { team: "enemy" }));
+    }
+    if (size > 1) app.algSquads?.adopt?.(men, key);
+    const s = size > 1 ? app.algSquads?.list.find((q) => q.members.includes(men[0])) ?? null : null;
+    const team = { key, men, s, t0: t };
+    teams.push(team);
+    return team;
+  }
+  function stepTeams(dt) {
+    for (let i = teams.length - 1; i >= 0; i--) if (!teams[i].men.some((u) => u.alive)) teams.splice(i, 1);
+    if ((teamT -= dt) > 0) return;
+    teamT = P.teamEvery;
+    // What the FLN has SEEN of the French (its own eyes: knownFrench leaves aircraft out — they are loud).
+    if (!seenAir) seenAir = french().some((f) => f.isAir);
+    if (!seenVehicles) seenVehicles = knownFrench().some((f) => !f.type?.foot);
+    const stock = aln()?.stock ?? 0;
+    for (const [key, T] of Object.entries(P.teams)) {
+      const max = T.max2 && t >= T.from2 ? T.max2 : T.max;
+      if (t < T.from || teams.filter((q) => q.key === key).length >= max) continue;
+      if ((T.needs === "air" && !seenAir) || (T.needs === "vehicles" && !seenVehicles)) continue;
+      const tierCost = tiersPaid.has(T.tier) ? 0 : P.teamTiers[T.tier]?.cost ?? 0;
+      if (stock < (COSTS[key] ?? 0) + tierCost + P.teamReserve) continue;
+      if (!tierOpen(T.tier)) continue;
+      if (spawnTeam(key)) return;   // one a look
+    }
+  }
+
   let sightOn = false, knownAt = -1, knownNow = [];
   function knownFrench() {
     const eyes = [];
@@ -1697,6 +1760,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       watchVillages();
       watchLookouts();
       stepConvoy(dt);
+      stepTeams(dt);
       stepCaches(dt);
       stepRefuges(dt);
       // Twice a second: villages to defend, assaults to launch.
@@ -1755,6 +1819,10 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     get cacheWhy() { return cacheWhy; },
     /** Dev: try to hide a new cache now (ignores the clock). */
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
+    /** Dev: a team of `key` now (pays, ignores the clock and the tiers). */
+    teamNow(key) { return spawnTeam(key); },
+    /** Dev: the teams out ({ key, alive }). */
+    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s })); },
     /** Dev: what each band is doing. */
     describe() {
       return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "cut" ? " (cut the line)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
