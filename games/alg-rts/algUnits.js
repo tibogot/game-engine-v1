@@ -824,7 +824,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algDroppedWeapons = dropped;
   const combat = await createAlgCombat(app, {
     units, structures, cover: coverSys.cover, blocksSight: sight?.blocksSight ?? null,
-    onDeath: (e) => { dropped.onDeath(e); veterancy.onDeath(e); app.algDoctrines?.onKill(e); app.algFrenchDoctrines?.onKill(e); selection.remove?.(e); controlGroups?.render(); transports?.onDeath(e); if (!e.isStructure && !e.type?.foot && !e.isAir) { wrecks.add(e); crews.bail(e); } },
+    onDeath: (e) => { dropped.onDeath(e); veterancy.onDeath(e); app.algDoctrines?.onKill(e); app.algFrenchDoctrines?.onKill(e); app.algFlnDoctrines?.onKill(e); selection.remove?.(e); controlGroups?.render(); transports?.onDeath(e); if (!e.isStructure && !e.type?.foot && !e.isAir) { wrecks.add(e); crews.bail(e); } },
     onShot: (e, tgt) => { posture.onShot(e, tgt); app.algSnipers?.onShot(e, tgt); app.algRecoilless?.onShot(e); }, onSplash: (at, r, owner) => { posture.onSplash(at, r, owner); garrison?.onSplash(at, r); },
     // The walls take some of a blast (algGarrison.js) — two grenades on a house of six: at full,
     // 4 dead; at 0.6, 0.1 (and every squad bailed out); 0.8 between, as CoH.
@@ -868,7 +868,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const postP = producers.find((p) => p.structure.typeKey === "post");
   // (Not when YOU are the FLN — ?side=fln: its men are yours to command.)
   const ai = cave && SIDES.human !== "enemy" && new URLSearchParams(location.search).get("ai") !== "0"
-    ? createAlgAI(app, { units, cave, post: postP?.centre ?? muster, caveMouth: cave.outside })
+    ? createAlgAI(app, { units, squads, cave, post: postP?.centre ?? muster, caveMouth: cave.outside,
+      // ITS DOCTRINE (2026-10-18, FLN AI step 9 — no strip): its own instance of the doctrine module, for the FLN.
+      doctrine: MAP.tutorial ? null : (app.algFlnDoctrines = createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar, side: "enemy", ui: false })) })
     : null;
   app.algAI = ai;
   // THE SNIPERS (algSniper.js): the FLN's tireurs, out of the cave, on perches above the French.
@@ -924,7 +926,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       doctrine: MAP.tutorial ? null : (app.algFrenchDoctrines = createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar, side: "player", ui: false })) })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); app.algFrenchDoctrines?.step(d); fieldWorks.step(d); };
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); app.algFrenchDoctrines?.step(d); app.algFlnDoctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them
@@ -946,6 +948,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     unitMarks?.frame();
     doctrines?.frame(dt);
     app.algFrenchDoctrines?.frame(dt);
+    app.algFlnDoctrines?.frame(dt);
     fogOfWar.update(dt);
     // An inspected enemy that slipped back into the fog is let go (dead: onDeath does it).
     const ins = selection.inspected;

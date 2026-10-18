@@ -164,10 +164,12 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
 
   // ── Flights: helicopters in and out, the observation plane circling ──────
   const flights = [];
-  const heliProto = buildAlouette({ detail: 1 });
-  const planeProto = buildT6();
-  const mat = rtsObjectMaterialTinted(FR_PAINT_TINT);
+  // (Built on first use, 2026-10-18: an AI's instance — the FLN's has no aircraft — paid ~75 ms at boot for them.)
+  let heliProto = null, planeProto = null, mat = null;
+  const matOf = () => (mat ??= rtsObjectMaterialTinted(FR_PAINT_TINT));
   function heliMesh() {
+    heliProto ??= buildAlouette({ detail: 1 });
+    const mat = matOf();
     const g = new THREE.Group();
     const body = new THREE.Mesh(heliProto, mat);
     body.castShadow = true;
@@ -181,6 +183,8 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     return g;
   }
   function planeMesh() {
+    planeProto ??= buildT6();
+    const mat = matOf();
     const g = new THREE.Group();
     const body = new THREE.Mesh(planeProto, mat);
     body.castShadow = true;
@@ -244,7 +248,9 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   if (ui) fogOfWar?.addSourceProvider?.(() => recons.filter((f) => f.t < f.end).map((f) => ({ x: f.x, z: f.z, r: P.recon.vision, eye: 60 })));
 
   // THE PARADROP (algParadrop.js): the Noratlas, the stick, the canopies.
-  const paradrop = createAlgParadrop(app, { units, squads, navGrid: app.navGrid });
+  // (An AI's: made on its first drop — the human's at once, app.algParadrop is read elsewhere.)
+  let paradrop = ui ? createAlgParadrop(app, { units, squads, navGrid: app.navGrid }) : null;
+  const drops = () => (paradrop ??= createAlgParadrop(app, { units, squads, navGrid: app.navGrid }));
   if (ui) app.algParadrop = paradrop;
 
   // ── Squads out of nowhere (a drop) or out of the post ─────────────────────
@@ -287,7 +293,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       case "paraDrop": {
         if (popRoom() < 5) { say(t("<b>Effectifs au plafond</b> : pas de place pour un groupe de plus."), at.x, at.z, "bad"); return false; }
         const from = p ? { x: p.structure.position.x, z: p.structure.position.z } : null;
-        paradrop.drop(at.x, at.z, { key: "para", count: 5, from, elite: unlocked.has("eliteParas") });
+        drops().drop(at.x, at.z, { key: "para", count: 5, from, elite: unlocked.has("eliteParas") });
         say(t("<b>Parachutage</b> : le Nord 2501 est en route."), at.x, at.z);
         app.algSounds?.radio?.();
         return true;
@@ -533,7 +539,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       combat?.onImpact?.(best, G.damage, at, post()?.structure ?? null, { bullet: true });
     }
     if (unlocked.has("eliteParas") || unlocked.has("advisers")) elite();
-    paradrop.step(dt);
+    paradrop?.step(dt);
     for (let i = flights.length - 1; i >= 0; i--) {
       const f = flights[i];
       f.t += dt;
@@ -563,7 +569,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       if (_q.distanceToSquared(_p) > 1e-4) { _q.y = _p.y; f.mesh.lookAt(_q); }
       f.mesh.userData.spin?.(now);
     }
-    paradrop.frame();
+    paradrop?.frame();
     rings.begin();
     if (targeting?.at) rings.add(targeting.at.x, targeting.at.z, targeting.ab.radius ?? 8, targeting.ok ? 0x58e070 : 0xe0574a);
     for (const s of salvos) rings.add(s.x, s.z, P.mortar.spread, 0xffb020);
@@ -626,7 +632,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("keydown", onKey);
       for (const f of flights) app.scene.remove(f.mesh);
-      paradrop.dispose();
+      paradrop?.dispose();
       el.remove(); if (ui) style.remove();
     },
   };

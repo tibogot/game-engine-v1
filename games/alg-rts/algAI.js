@@ -110,6 +110,17 @@ const P = {
   // spare one to a rifleman. A tube comes back when its man goes to ground, and is lost with him.
   // He aims at French VEHICLES in his reach, and a band with one does not break off from armour.
   baz: { from: 360, perCache: 1, look: 0.5 },
+  // ITS DOCTRINE (step 9, algDoctrines.js — the human FLN's two, no strip): the wilaya or the army of
+  // the frontiers, at random; the cheapest ability still locked as soon as the points allow; used
+  // where it pays (command()). Paid calls keep `reserve` in the purse for the bands.
+  doc: { every: 1, reserve: 120, knot: 3, knotClear: 25, threat: 2 },
+  // THE CAPTURED JEEP (the wilaya's): it backs the held village the French come at (else the one
+  // nearest the post), parked 15-30 m off it; hurt: home, a rest.
+  jeep: { every: 20, ring: [15, 30], hurt: 0.4, rest: [60, 90] },
+  // THE INFIRMARY (algBuild "infirmary", its men within 20 m heal): raised by a village's CELL that
+  // has wounded men, near where it sits; at most `max` standing.
+  // (A ksar's walls leave few free spots — measured: 1 in 24 at 12-14 m — so 32 spots, 4 turns each.)
+  infirmary: { first: 240, every: 40, max: 2, apart: 60, hurt: 0.7, ring: [4, 16] },
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -229,7 +240,7 @@ const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
  * @param {{x:number,z:number}} o.post   the French post's centre
  * @param {{x:number,z:number}} o.caveMouth  where fighters go to ground (world)
  */
-export function createAlgAI(app, { units, cave, post, caveMouth }) {
+export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, doctrine = null }) {
   const bands = [];
   let t = 0, nextBand = P.firstBandAt, enabled = true, pool = 0;
   const inBand = new Set();
@@ -636,8 +647,154 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     }
   }
 
+  // ── ITS DOCTRINE (P.doc) ─────────────────────────────────────────────────
+  if (doctrine && !doctrine.doctrine) doctrine.choose(["wilaya", "frontieres"][Math.floor(Math.random() * 2)]);
+  let docT = 0;
+  const spare = (n) => (aln()?.stock ?? 0) >= n + P.doc.reserve;
+  /** Men a call put in a SQUAD of the game's (the douar's faoudj, the section from outside): loose
+   *  again, for the bands (the AI fights in bands, not squads). */
+  function loosen(before) {
+    const out = [];
+    for (const s of [...(squads?.list ?? [])]) {
+      if (before.has(s) || s.team !== "enemy") continue;
+      for (const u of [...s.members]) { squads.leave(u); out.push(u); }
+    }
+    return out;
+  }
+  /** A knot of n+ French it knows, no man of its own within `clear` m: its centre, or null. */
+  function knotOf(known, n, clear) {
+    for (const f of known) {
+      if (!f.type?.foot || known.filter((o) => dist(o.position, f.position) < 14).length < n) continue;
+      if (units.list.some((u) => u.alive && u.team === "enemy" && !u.isStructure && dist(u.position, f.position) < clear)) continue;
+      return { x: f.position.x, z: f.position.z };
+    }
+    return null;
+  }
+  function command(dt) {
+    if (!doctrine?.doctrine || (docT -= dt) > 0) return;
+    docT = P.doc.every;
+    const abs = doctrine.abilities;
+    const next = abs.filter((a) => !doctrine.unlocked.has(a.key)).sort((a, b) => a.cp - b.cp)[0];
+    if (next) doctrine.unlock(next.key);
+    if (doctrine.unlocked.has("borderArms")) tiersPaid.add(2);   // the heavy weapons' tier at once
+    for (const a of abs) {
+      if (a.passive || !doctrine.ready(a.key)) continue;
+      const before = new Set(squads?.list ?? []);
+      switch (a.key) {
+        case "douar": {
+          // A held village the French come at, harder than its cell: a faoudj from the douar joins the cell.
+          const v = (app.algEconomy?.points ?? []).find((p) => {
+            if (p.owner !== "enemy") return false;
+            const fr = french().filter((u) => !u.isAir && dist(u.position, p.position) < P.defendRadius).length;
+            return fr && fr >= (garrisonOf(p) ? alive(garrisonOf(p)).length : 0) + P.doc.threat;
+          });
+          if (!v || !spare(a.cost) || !doctrine.use(a.key, { x: v.position.x, z: v.position.z })) break;
+          const men = loosen(before);
+          let g = garrisonOf(v);
+          if (!g) { g = { state: "garrison", village: v, members: [], size: 0, start: 0, t: 0, mission: "garrison" }; bands.push(g); }
+          for (const u of men) { g.members.push(u); inBand.add(u); }
+          g.start = Math.max(g.start, alive(g).length);
+          holdFire(g, false);
+          placeCell(v, men);
+          break;
+        }
+        case "outsideSection":
+          // Men at the cave: the next band forms of them (newBand takes the idle men first).
+          if (!spare(a.cost) || liveFighters() + 9 > cap() + 6 || !doctrine.use(a.key)) break;
+          loosen(before);
+          nextBand = Math.min(nextBand, 6);
+          break;
+        case "jeep":
+          if (teams.some((q) => q.key === "jeep") || !spare(a.cost) || !doctrine.use(a.key)) break;
+          {
+            const j = units.list.filter((u) => u.alive && u.team === "enemy" && u.typeKey === "willys").pop();
+            if (j) teams.push({ key: "jeep", men: [j], s: null, t0: t });
+          }
+          break;
+        case "mortar81": {
+          const at = knotOf(knownFrench(), P.doc.knot, P.doc.knotClear);
+          if (at && spare(a.cost)) doctrine.use(a.key, at);
+          break;
+        }
+        case "informers": {
+          // Where it means to go next: the French-held village nearest the cave, else round the post.
+          const v = (app.algEconomy?.points ?? []).filter((p) => p.owner === "player").sort((p, q) => dist(p.position, caveMouth) - dist(q.position, caveMouth))[0];
+          const at = v ? { x: v.position.x, z: v.position.z } : { x: post.x, z: post.z };
+          if (spare(a.cost) && doctrine.use(a.key, at)) informed.push({ x: at.x, z: at.z, r: a.radius ?? 80, until: t + 25 });
+          break;
+        }
+      }
+    }
+    for (let i = informed.length - 1; i >= 0; i--) if (informed[i].until <= t) informed.splice(i, 1);
+  }
+  function stepJeep(q, dt) {
+    const J = P.jeep, v = q.men[0];
+    if (!v?.alive) return;
+    q.t = (q.t ?? 0) + dt;
+    v.holdFire = false;
+    if (q.state === "rest") { if (q.t > q.rest) { q.state = "guard"; q.look = 0; } return; }
+    if (v.hp < v.maxHp * J.hurt) { const h = homeFor(v.position); q.state = "rest"; q.t = 0; q.rest = rand(...J.rest); q.at = null; v.orderTo(h.x, h.z); return; }
+    q.state = "guard";
+    if ((q.look = (q.look ?? 0) - dt) > 0) return;
+    q.look = J.every;
+    const held = (app.algEconomy?.points ?? []).filter((p) => p.owner === "enemy");
+    const threat = held.find((p) => french().some((u) => !u.isAir && dist(u.position, p.position) < P.defendRadius));
+    const at = (threat ?? held.sort((a, b) => dist(a.position, post) - dist(b.position, post))[0])?.position ?? homeFor(v.position);
+    if (q.at && dist(q.at, at) < 20) return;
+    const spot = held.length ? spotAround(at, rand(0, 6.283), Math.PI, J.ring, { from: v.position }) : at;
+    if (!spot) return;
+    q.at = { x: at.x, z: at.z };
+    v.orderTo(spot.x, spot.z);
+  }
+
+  // ── THE INFIRMARY (P.infirmary) ──────────────────────────────────────────
+  let infT = P.infirmary.first, infSite = null;
+  function stepInfirmary(dt) {
+    const I = P.infirmary;
+    if (infSite) {
+      if (!infSite.done && infSite.alive) {
+        // Hidden until the French have seen it (as its refuges).
+        const fog = app.fogOfWar, seen = !fog?.enabled || fog.canSeeEntity?.(infSite);
+        if (seen) infSite.wasSeen = true;
+        infSite.mesh.visible = seen || !!infSite.wasSeen;
+        return;
+      }
+      infSite = null;
+    }
+    if ((infT -= dt) > 0) return;
+    infT = I.every;
+    const build = app.algBuild;
+    if (!build || !aln()?.canAfford(build.costOf("infirmary"))) return;
+    const have = [...(app.algStructures?.list ?? []).filter((s) => s.typeKey === "infirmary" && s.alive && s.team === "enemy"),
+      ...(build.sites ?? []).filter((s) => s.key === "infirmary" && !s.done && s.alive)];
+    if (have.length >= I.max) return;
+    for (const g of bands) {
+      if (g.state !== "garrison") continue;
+      const men = alive(g);
+      if (!men.some((u) => u.hp < u.maxHp * I.hurt) || have.some((s) => dist(s.position, g.village.position) < I.apart)) continue;
+      const c = centre(men);
+      const spots = [];
+      for (let i = 0; i < 32; i++) {
+        const a = (i / 32) * Math.PI * 2 + rand(-0.08, 0.08), r = rand(...I.ring);
+        spots.push({ x: c.x + Math.cos(a) * r, z: c.z + Math.sin(a) * r });
+      }
+      for (const p of spots.sort((p, q) => cover(q.x, q.z) - cover(p.x, p.z))) {
+        const y0 = rand(0, Math.PI / 2);
+        const yaw = [0, 1, 2, 3].map((k) => y0 + (k * Math.PI) / 2).find((y) => build.survey("infirmary", p.x, p.z, y).ok);
+        if (yaw == null) continue;
+        build.place("infirmary", p.x, p.z, yaw, men.filter((u) => u.typeKey === "moudjahid")).then((site) => {
+          if (!site) return;
+          infSite = site;
+          site.mesh.visible = false;
+        });
+        return;
+      }
+    }
+  }
+
   function stepTeams(dt) {
     stepBazookas(dt);
+    for (const q of teams) if (q.key === "jeep") stepJeep(q, dt);
     for (const f of french()) if (f.isAir) { lastAir = { x: f.position.x, z: f.position.z }; break; }
     for (const q of teams) if (q.key === "mulet") stepMule(q, dt);
     if ((vehLook = (vehLook ?? 0) - dt) <= 0) {
@@ -667,11 +824,13 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
   }
 
   let sightOn = false, knownAt = -1, knownNow = [];
+  const informed = [];   // { x, z, r, until }: where the informers talk (the wilaya's ability)
   function knownFrench() {
     const eyes = [];
     for (const u of units.list) if (u.alive && u.team === "enemy" && !u.ghost) eyes.push({ x: u.position.x, z: u.position.z, r: P.seeMen });
     for (const s of app.algStructures?.list ?? []) if (s.alive && s.typeKey === "lookout") eyes.push({ x: s.position.x, z: s.position.z, r: P.seeLookout });
     for (const v of app.algEconomy?.points ?? []) if (v.owner === "enemy") eyes.push({ x: v.position.x, z: v.position.z, r: P.seeVillage });
+    for (const e of informed) if (e.until > t) eyes.push(e);   // its doctrine's informers
     return french().filter((f) => !f.isAir && eyes.some((e) => (f.position.x - e.x) ** 2 + (f.position.z - e.z) ** 2 < e.r * e.r));
   }
 
@@ -2052,6 +2211,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       stepTeams(dt);
       stepCaches(dt);
       stepRefuges(dt);
+      stepInfirmary(dt);
+      command(dt);
       // Twice a second: villages to defend, assaults to launch.
       defT -= dt;
       if (defT <= 0) { defT = 0.5; sendDefence(); }
@@ -2108,6 +2269,12 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     get cacheWhy() { return cacheWhy; },
     /** Dev: try to hide a new cache now (ignores the clock). */
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
+    /** Dev: its doctrine — which, points, what is unlocked, what each ability waits on. */
+    get doctrine() { return doctrine && { key: doctrine.doctrine, cp: doctrine.cp, xp: Math.round(doctrine.xp), unlocked: [...doctrine.unlocked], ready: doctrine.abilities.filter((a) => doctrine.ready(a.key)).map((a) => a.key) }; },
+    /** Dev: its doctrine module (give points, choose). */
+    get doctrineModule() { return doctrine; },
+    /** Dev: an infirmary now, if a cell needs one (no clock). */
+    infirmaryNow() { infT = 0; infSite = null; stepInfirmary(0); },
     /** Dev: the bazookas — tubes owned, men carrying one. */
     get bazookas() { return { tubes, carried: bearers.size, caches: cachesUp() }; },
     /** Dev: every mortar team at home starts a harass now (if it knows a target). */

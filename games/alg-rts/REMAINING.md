@@ -48,8 +48,9 @@ details are in TODO.md.*
    - Walls go, the garrison is forced out, rubble is left behind.
    - Large: every building goes through the lab, and the village meshes are merged, so each
      house needs its own id first.
-2. **The FLN AI doesn't use its new units** (60 mm mortar, recoilless, 12.7, mule). The French AI
-   now uses its mortars; the FLN AI is behind.
+2. ~~The FLN AI doesn't use its new units~~ — **done 2026-10-18**: it buys and uses the 60 mm
+   mortar, the 12.7, the recoilless, the mule and bazookas, has its own doctrine and builds
+   infirmaries. Its balance against the French AI is being re-measured.
 3. **FLN-side training** on its own maquis map.
 4. **Destruction extras**
    - Real craters in the ground that men can use as cover.
@@ -142,7 +143,7 @@ details are in TODO.md.*
 
 1. You play a full match on each side.
 2. Building damage and collapse.
-3. The FLN AI using its new units; FLN-side training.
+3. FLN-side training.
 4. The explosions onto lab books.
 5. The campaign.
 6. Options, cleanup, boot time.

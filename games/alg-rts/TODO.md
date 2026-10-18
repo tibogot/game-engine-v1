@@ -65,8 +65,8 @@ PHASE 1 — finish what is half-built
    fieldPoints) and the wounded heal slowly. \`animal\`: it captures nothing, boards nothing, enters no
    house. Gaps: no health bar over it in the field (the renderer draws those); a blast can't hurt the
    herd's donkey apart from the unit (fine: the unit is what dies); its AI doesn't use mules.
-   STILL OPEN for A2: the FLN AI buying the new teams; portraits for them; the recoilless tube on the
-   shoulder; a real DShK model.
+   STILL OPEN for A2: portraits for the new teams; the recoilless tube on the shoulder; a real DShK
+   model. (The FLN AI buying and using them: DONE 2026-10-18, see "THE FLN AI" below.)
    A3 [x] 2026-10-13 — A BASE FOR THE FLN (a human playing it): (a) FLN TIERS (algTiers TIERS_FLN,
    createAlgTiers side "enemy"), bought on the cave's card in supplies: 1 Katiba (moudjahid, FM, sniper,
    mule) · 2 Armes lourdes (mortar, 12.7 — 120, 1 village) · 3 Armée des frontières (recoilless — 180,
@@ -180,8 +180,26 @@ PHASE 5 — after launch (the Early Access roadmap)
   Downloaded, not yet used: Pointing, Pick Fruit, the kneeling Grenade Throw. To download: Running Scared,
   Surrender, a back flinch, Hammering.
 - [x] Sandbags: the white blotches on the bag tops (a pale "dust" layer) gone.
-- [ ] NEXT (suggested): you play a match on each side → building damage + collapse → the FLN AI using its
-  new units → the other explosions (tank shell, vehicle death, grenade) onto lab books.
+- [x] THE FLN AI USES ITS NEW UNITS (2026-10-18, algAI.js, 9 steps, one commit each):
+  - its mortars fire only on French it KNOWS (its men 50 m, lookouts 110, its villages 90);
+  - it BUYS teams as real squads at the cave with the human's tier gates (mule 240 s; 60 mm 300 s, a
+    second at 900; 12.7 once aircraft are seen; recoilless once vehicles are seen), never into bands;
+  - the 60 mm HARASS: 80-100 m from a knot of known French, a barrage and ~45 s of rounds, gone before
+    they close, rests at home;
+  - the 12.7 GUARDS the held village nearest where aircraft were last seen;
+  - the recoilless AMBUSH: lies 15-45 m off a piste, holding fire, takes the first known French vehicle
+    within 55 m (tested: a half-track killed), then home and rests;
+  - the MULE follows the band that stays somewhere (a cell, a village being taken, an assault), and gives
+    it a man every 6 s while short (from the men gone to ground, else 35); a cell grows to 4;
+  - BAZOOKAS: one tube per arms cache, a band's rifleman carries it, goes for vehicles within 70 m; a band
+    with one doesn't run from armour;
+  - ITS OWN DOCTRINE (app.algFlnDoctrines, wilaya or frontières): douar men into a threatened cell, 81 mm
+    on known knots, informers ahead of its next village, the jeep backing a held village, the section
+    from outside, border arms → tier 2;
+  - the INFIRMARY, raised by a cell with wounded (tested: built in 22 s, 24 → 60 hp).
+  - An AI's doctrine instance builds its aircraft and paradrop on first use (was ~75 ms at boot, now 0.2).
+- [ ] NEXT (suggested): a bot-vs-bot balance run (the FLN now spends far more) → you play a match on each
+  side → building damage + collapse → the other explosions (tank shell, vehicle death, grenade) onto lab books.
 
 ORDER FROM HERE: (1) you play — the village look, Normal balance → (2) building damage +
 collapse → (3) skirmish + the coast → (4) options, music, cleanup → (5) a short campaign →
