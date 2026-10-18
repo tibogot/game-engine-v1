@@ -50,8 +50,9 @@ const app = await startV3App({
   csm: { cascades: 2 },
 });
 // No level: the engine's DEFAULT floor stays as the backdrop (user, 2026-10-18 — terrain comes later,
-// as decoration). The track floats above it; the car never drives on it (getTerrainHeight → NaN) and
-// a fall resets long before the ground.
+// as decoration). THE FLOOR IS SOLID (user, 2026-10-18: "when the floor terrain is enabled it should
+// be a solid, car shouldn't go through it"): the wheels drive on it and the body can't pass it, read
+// from the engine's own height (app.getWorldHeight, as the old game did) so real terrain works too.
 app.sky?.setMode?.("skypro");
 const tod = Number(params.get("tod"));
 app.sky?.setTimeOfDay?.(params.has("tod") && Number.isFinite(tod) ? tod : 15.5);
@@ -137,7 +138,8 @@ for (const p of lay.placements) {
 }
 const deckBvh = new RoadBvh();
 const solidsBvh = new RoadBvh();
-const ground = createVehicleGround({ getTerrainHeight: () => NaN });
+const floorH = (x, z) => app.getWorldHeight(x, z);
+const ground = createVehicleGround({ getTerrainHeight: floorH });
 const t0 = performance.now();
 deckBvh.bakeFromMeshes(decks);
 ground.setRoadBvh(deckBvh.baked ? deckBvh : null);
@@ -151,7 +153,7 @@ const KILL_Y = lowestY - 50;
 // ---------- the car ----------
 const vehicle = new Vehicle({ scene, showArrows: false });
 vehicle.SUBSTEPS = SUBSTEPS; // per-car: 3 → 1/360 s, keeps travel per substep ≤ the verified 0.25 m up to 90 m/s
-vehicle.getFloorY = () => NaN; // sky mode: no chassis floor at y = 0
+vehicle.getFloorY = floorH; // the floor is solid for the body too
 vehicle.setSolidCapsules([]);
 vehicle.setBvh(ground.ground, ground.solids);
 const startPos = new V().setFromMatrixPosition(lay.start);
@@ -272,7 +274,7 @@ let ghostData = null;
 try { ghostData = JSON.parse(localStorage.getItem(GHOST_KEY)); } catch {}
 const ghostCar = new Vehicle({ scene, showArrows: false });
 ghostCar.SUBSTEPS = SUBSTEPS;
-ghostCar.getFloorY = () => NaN;
+ghostCar.getFloorY = floorH;
 ghostCar.setSolidCapsules([]);
 ghostCar.setBvh(ground.ground, ground.solids);
 // no headlights on the ghost: two more spot lights would change the light count and recompile every
@@ -315,40 +317,6 @@ function showLanding(ev) {
   el.className = `panel show ${ev.grade}`;
   clearTimeout(landTimer);
   landTimer = setTimeout(() => el.classList.remove("show"), 1400);
-}
-
-// ---------- FALL CAMERA: on a long fall, show where you will land ----------
-// The chase camera stays level behind the car, so on a drop the road below was out of view until the
-// last moment (screenshot, 2026-10-18): you cannot line up a landing you cannot see. After ~0.5 s of
-// air while falling, blend to a view from higher and further back that looks between the car and its
-// predicted touchdown (autopilot.js: the flight projected onto the road); blend back on landing. The
-// old chase camera is untouched: this runs after it and mixes the two poses.
-const FALL_CAM = { after: 0.5, minFall: 6, back: 18, up: 11, lookAt: 0.55, rateIn: 2.2, rateOut: 4 };
-let fallBlend = 0, airClock = 0;
-const _camA = new V(), _qA = new THREE.Quaternion(), _look = new V(), _touch = new V(), _hdir = new V();
-const _camObj = new THREE.PerspectiveCamera(); // a CAMERA: its lookAt points −Z at the target (an Object3D points +Z)
-function fallCamera(dt) {
-  const car = vehicle.body;
-  airClock = vehicle.groundedCount > 0 ? 0 : airClock + dt;
-  if (!autopilot) pilot.locate(vehicle); // the autopilot already tracks it in input()
-  const td = airClock > FALL_CAM.after && car.vel.y < -FALL_CAM.minFall ? pilot.touchdown(vehicle) : null;
-  if (td) _touch.copy(td.P);
-  const want = td && prefs.fallCamera ? 1 : 0;
-  fallBlend += (want - fallBlend) * (1 - Math.exp(-dt * (want ? FALL_CAM.rateIn : FALL_CAM.rateOut)));
-  if (fallBlend < 0.002) return;
-  // the fall pose: behind the car along its horizontal travel, raised, looking toward the touchdown
-  _hdir.set(car.vel.x, 0, car.vel.z);
-  if (_hdir.lengthSq() < 1) _hdir.set(0, 0, 1).applyQuaternion(car.quat).setY(0);
-  _hdir.normalize();
-  const pos = vehicle.renderPos ?? car.pos;
-  _camObj.position.copy(pos).addScaledVector(_hdir, -FALL_CAM.back).add(_look.set(0, FALL_CAM.up, 0));
-  _look.copy(pos).lerp(_touch, FALL_CAM.lookAt);
-  _camObj.lookAt(_look);
-  // mix: chase pose (already on the camera) → fall pose
-  _camA.copy(camera.position);
-  _qA.copy(camera.quaternion);
-  camera.position.lerpVectors(_camA, _camObj.position, fallBlend);
-  camera.quaternion.slerpQuaternions(_qA, _camObj.quaternion, fallBlend);
 }
 
 // ---------- race events + HUD ----------
@@ -539,7 +507,6 @@ function tick() {
   if (sunShadows) { adoptCarLayersOnce(); sunShadows.follow(vehicle.renderPos); }
   checkFall();
   chase.update(dt);
-  fallCamera(dt);
   controls.target.copy(vehicle.renderPos);
   const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);
   topKmh = Math.max(topKmh, kmh);
@@ -556,7 +523,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
-  get boosting() { return rules.boostLeft > 0; }, get fallCam() { return { blend: fallBlend, touch: _touch.toArray(), air: airClock }; }, camera, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  get boosting() { return rules.boostLeft > 0; }, camera, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };

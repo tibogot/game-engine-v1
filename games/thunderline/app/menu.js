@@ -116,7 +116,6 @@ function settingsScreen() {
   const row = (key, title, desc) => `<div class="set cut"><div><div class="t">${title}</div><div class="d">${desc}</div></div><div class="toggle ${s[key] ? "on" : ""}" data-key="${key}"></div></div>`;
   $("screen").innerHTML = `<div class="settings">
     ${row("ghost", "Ghost", "Race your best run on every track (G toggles it while driving).")}
-    ${row("fallCamera", "Fall camera", "On long falls the camera shows where you will land.")}
     <div class="keys">
       <span><kbd>W</kbd><kbd>S</kbd> / <kbd>↑</kbd><kbd>↓</kbd></span><span>throttle / brake</span>
       <span><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd></span><span>steer</span>

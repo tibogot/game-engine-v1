@@ -28,6 +28,8 @@ if (!trackId || !library.get(trackId)) trackId = (library.current && library.get
 library.current = trackId;
 history.replaceState(null, "", `${location.pathname}?track=${trackId}`);
 const UP = new THREE.Vector3(0, 1, 0);
+// THE FLOOR (the drive page's default floor, solid): pieces must stay above it, flights end on it
+const FLOOR_Y = 0;
 const G = 9.81;
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass (P3: arcs must use it)
 const SNAP_COLORS = { end: 0x45e08a, arc: 0xff9a3d, local: 0xc78bff, world: 0x3fd2ff };
@@ -377,13 +379,13 @@ async function runPrediction() {
   const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
   deckBvh.bakeFromMeshes(decks);
   solidsBvh.bakeFromMeshes(solids);
-  const ground = createVehicleGround({ getTerrainHeight: () => NaN });
+  const ground = createVehicleGround({ getTerrainHeight: () => FLOOR_Y });
   ground.setRoadBvh(deckBvh.baked ? deckBvh : null);
   ground.setRoadSolidsBvh(solidsBvh.baked ? solidsBvh : null);
   const car = new Vehicle({ scene: predScene, showArrows: false });
   car.SUBSTEPS = 3;
   car.setBvh(ground.ground, ground.solids);
-  car.getFloorY = () => NaN;
+  car.getFloorY = () => FLOOR_Y;
   car.setSolidCapsules([]);
   const M0 = built.get(order[0].uid).M;
   const fwd0 = new THREE.Vector3(0, 0, -1).transformDirection(M0);
@@ -432,6 +434,8 @@ async function runPrediction() {
     prediction.topKmh = Math.max(prediction.topKmh, v * 3.6);
     prediction.ticks = tick;
     if (p.y < lowY - 60) { prediction.fail = { uid: ride[idx].uid, why: "falls off" }; break; }
+    // down on the floor, away from the road: it fell
+    if (p.y < FLOOR_Y + 2 && ride[idx].P.distanceTo(p) > 12) { prediction.fail = { uid: ride[idx].uid, why: "falls to the floor" }; break; }
     slow = v < 2 ? slow + FIXED_DT : 0;
     if (slow > 3) { prediction.fail = { uid: ride[idx].uid, why: "stops" }; break; }
     if (idx >= ride.length - 5 && !endsOnLip) { prediction.lapS = tick * FIXED_DT; endSpeed = v; break; }
@@ -488,7 +492,7 @@ function flight(m, speed, launch = null, scale = 1) {
     vel.y -= G * dt;
     P.addScaledVector(vel, dt);
     if (i % 4 === 0) { pts.push(P.clone()); tan.push(vel.clone().normalize()); }
-    if (P.y < buildY - 400) break;
+    if (P.y < FLOOR_Y) break; // a flight ends on the floor
   }
   return { pts, tan };
 }
@@ -546,6 +550,10 @@ function runChecks() {
     }
   }
   if (problems.overlap.size) problems.messages.push(`${problems.overlap.size} pieces overlap another road (red)`);
+  // UNDER THE FLOOR: the floor is solid, so road under it can't be driven
+  const under = new Set(roads.filter((r) => r.P.y < FLOOR_Y + 1).map((r) => r.uid));
+  for (const u of under) problems.overlap.add(u);
+  if (under.size) problems.messages.push(`${under.size} piece${under.size > 1 ? "s go" : " goes"} under the floor (red) — build higher`);
   // LOOSE PIECES: not reachable from the first piece by road or flight (placed on a grid, not snapped
   // to an end). The car falls off where the connected road stops; the prediction used to stop there
   // too and call it a lap (user, 2026-10-18: "the last pieces … are not aligned and make the car fall")
