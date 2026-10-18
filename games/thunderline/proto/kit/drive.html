@@ -45,7 +45,12 @@
       #finish .mrow i { width: 12px; height: 12px; border-radius: 50%; background: #5b6787; }
       #finish .mrow.author i { background: #3fd2ff; } #finish .mrow.gold i { background: #f2c14e; } #finish .mrow.silver i { background: #c9d1de; } #finish .mrow.bronze i { background: #c98a5b; }
       #finish .mrow.got { color: var(--text); } #finish .mrow.got b { color: var(--bolt); }
-      #finish .fk { margin-top: 12px; color: var(--dim); font-size: 12px; }
+      #finish { pointer-events: none; }
+      #finish.show { pointer-events: auto; }
+      #finish .fbtns { display: flex; gap: 6px; margin-top: 14px; }
+      #finish .fbtns button { flex: 1; background: #121a2e; color: var(--text); border: 1px solid var(--line); padding: 8px 10px; cursor: pointer; font: 700 14px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.06em; }
+      #finish .fbtns button:hover { border-color: var(--bolt); color: var(--bolt); }
+      #finish .fbtns button:first-child { border-color: var(--bolt); color: var(--bolt); }
       #finish kbd { color: var(--text); background: #121a2e; border: 1px solid var(--line); padding: 0 4px; font: 11px Consolas, monospace; }
       #boot { position: fixed; inset: 0; z-index: 99; display: flex; align-items: center; justify-content: center; background: #0a0f1c; color: var(--bolt); font: 700 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; transition: opacity 0.4s; }
       #boot.gone { opacity: 0; pointer-events: none; }

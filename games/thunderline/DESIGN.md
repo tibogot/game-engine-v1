@@ -10,6 +10,19 @@ Status marks used below:
 - **PROTO** — the direction is chosen, but a grey-box prototype must confirm it before the real build (§9).
 - **LATER** — out of scope for the first playable version.
 
+**THE MODES (user, 2026-10-18)** — one game, one car physics, several ways to play:
+1. **Stunt tracks — THE MAIN MODE.** Air parkour tracks: jumps, drops, bowls, flips, landings; the
+   campaign (tiers, medals, author time), ghosts, instant restart. What the prototypes build.
+2. **Track builder.** Players make their own stunt tracks (the same builder the campaign is made with)
+   and race them with the same medals and ghosts.
+3. **City mode — LATER.** Driving a city with stunts built into it (the old game's city is in the
+   parts bin).
+4. **Drift mode — LATER.** Small maps made for drifting, with a drift-tuned car (the per-car tune +
+   garage make that a car, not a new physics).
+
+The shell (menu, track library, settings) is built around these four from the start, even while 3
+and 4 are greyed out.
+
 Timing: alg-rts ships first, then the repo moves to three.js r186, then real code. Before that, only
 this page and the small prototypes in §9 (once the user says go).
 

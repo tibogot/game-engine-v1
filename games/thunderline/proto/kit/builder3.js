@@ -9,6 +9,7 @@ import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules } from "./carRules.js";
 import { makeGateMesh } from "./gateMesh.js";
+import { library, driveUrl, PAGES } from "../../app/library.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -19,7 +20,13 @@ applyCarTune({ TIRE, WHEEL });
 const ROAD_HOLD = new Set(["bank_in_22", "bank_out_22", "fast_turn_128"]);
 
 const $ = (id) => document.getElementById(id);
-const STORE = "thunderline.track.v1"; // drive.html?track=local reads the same key
+// THE TRACK: one record of the library (app/library.js), ?track=<id>; without one, the track last
+// worked on, else a new one
+const params = new URLSearchParams(location.search);
+let trackId = params.get("track");
+if (!trackId || !library.get(trackId)) trackId = (library.current && library.get(library.current) ? library.current : null) ?? library.list()[0]?.id ?? library.create().id;
+library.current = trackId;
+history.replaceState(null, "", `${location.pathname}?track=${trackId}`);
 const UP = new THREE.Vector3(0, 1, 0);
 const G = 9.81;
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass (P3: arcs must use it)
@@ -38,6 +45,7 @@ for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
 
 // ---------- state ----------
 let track = load() ?? { pieces: [], nextUid: 1 };
+let trackName = library.get(trackId)?.name ?? "Track";
 let hand = 1; // +1 right, −1 left (picks the "_L" mirror)
 let edges = true; // guarded / open
 let tileBase = null; // base id in hand
@@ -49,8 +57,14 @@ const rot = { yaw: 0, pitch: 0, roll: 0 };
 let arcSpeed = 57; // m/s at a lip (≈ 0.91 × top 63, P3); [ ] change it
 let undo = [], redo = [];
 const recent = [];
-function load() { try { return JSON.parse(localStorage.getItem(STORE)); } catch { return null; } }
-function save() { try { localStorage.setItem(STORE, JSON.stringify(track)); } catch {} }
+function load() { const t = library.get(trackId)?.track; return t ? JSON.parse(JSON.stringify(t)) : null; }
+// every edit saves the track; its thumbnail is re-rendered a moment after the edits stop
+let thumbTimer = null;
+function save() {
+  library.saveTrack(trackId, track);
+  clearTimeout(thumbTimer);
+  thumbTimer = setTimeout(() => trackThumb().then((url) => url && library.saveTrack(trackId, track, url)), 1200);
+}
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
 function restore(from, to) { if (!from.length) return; to.push(JSON.stringify(track)); track = JSON.parse(from.pop()); sel = null; rebuild(); }
 // "fitted_landing" is not a fixed tile: the builder generates one per jump, sized to its speed band
@@ -168,6 +182,49 @@ async function bakeThumbs() {
     ts.remove(g);
   }
   rt.dispose();
+}
+
+// ---------- the track's thumbnail (library cards): the track alone, 3/4 view ----------
+const thumbScene = new THREE.Scene();
+thumbScene.background = new THREE.Color(0x3a4a6b);
+thumbScene.add(new THREE.HemisphereLight(0xeaf3ff, 0x6a6a72, 3.2));
+{ const d = new THREE.DirectionalLight(0xfff2e0, 3.6); d.position.set(-300, 500, 200); thumbScene.add(d); }
+async function trackThumb() {
+  if (!trackGroup.children.length) return null;
+  const W = 320, H = 180;
+  const rt = new THREE.RenderTarget(W, H, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace });
+  const cam = new THREE.PerspectiveCamera(35, W / H, 1, 20000);
+  // fit the track's box (not its bounding sphere: a long thin track would sit tiny in the middle) seen
+  // from a steep 3/4 view: project the 8 corners and pull the camera in until they just fit
+  const box = new THREE.Box3().setFromObject(trackGroup);
+  const c = box.getCenter(new THREE.Vector3());
+  const dir = new THREE.Vector3(0.55, 1.0, 0.75).normalize();
+  const corners = [];
+  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
+  let dist = box.getSize(new THREE.Vector3()).length();
+  for (let i = 0; i < 24; i++) {
+    cam.position.copy(c).addScaledVector(dir, dist);
+    cam.lookAt(c);
+    cam.updateMatrixWorld();
+    let ext = 0;
+    for (const p of corners) { const q = p.clone().project(cam); ext = Math.max(ext, Math.abs(q.x), Math.abs(q.y)); }
+    dist *= ext > 0.92 ? 1.08 : 0.94; // settle where the widest corner is ~0.9 of the frame
+  }
+  // the track borrowed into the thumbnail scene for one render, then given back
+  thumbScene.add(trackGroup);
+  renderer.setRenderTarget(rt);
+  renderer.render(thumbScene, cam);
+  renderer.setRenderTarget(null);
+  scene.add(trackGroup);
+  const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
+  rt.dispose();
+  const cvs = document.createElement("canvas"); cvs.width = W; cvs.height = H;
+  const ctx = cvs.getContext("2d");
+  const img = ctx.createImageData(W, H);
+  const stride = px.length / H;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W * 4; x++) img.data[y * W * 4 + x] = px[y * stride + x];
+  ctx.putImageData(img, 0, 0);
+  return cvs.toDataURL("image/jpeg", 0.82);
 }
 
 // ---------- dock ----------
@@ -851,14 +908,21 @@ $("b-undo").onclick = () => restore(undo, redo);
 $("b-redo").onclick = () => restore(redo, undo);
 $("b-frame").onclick = frameAll;
 $("b-keys").onclick = () => $("keys").classList.toggle("hidden");
-$("b-new").onclick = () => { snapshot(); track = { pieces: [], nextUid: 1 }; sel = null; rebuild(); };
-$("b-drive").onclick = () => { save(); window.open("/games/thunderline/proto/kit/drive.html?track=local", "_blank"); };
+// New = a new track in the library (the current one stays, saved)
+$("b-new").onclick = () => { save(); location.href = `${PAGES.builder}?track=${library.create().id}`; };
+$("b-menu").onclick = () => { save(); location.href = `${PAGES.menu}#build`; };
+$("b-name").value = trackName;
+$("b-name").onchange = () => { library.rename(trackId, $("b-name").value); trackName = library.get(trackId).name; $("b-name").value = trackName; };
+$("b-name").onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") e.target.blur(); };
+// test drive in the same tab; the drive page's finish screen (and Esc) comes back here
+$("b-drive").onclick = () => { save(); location.href = driveUrl(trackId, "builder"); };
 
 // ---------- go ----------
 await bakeThumbs();
 $("boot").classList.add("gone");
 renderDock();
 rebuild();
+if (track.pieces.length) { frameAll(); controls.update(); } // an opened track starts in view
 let last = performance.now();
 renderer.setAnimationLoop(() => {
   const now = performance.now();

@@ -14,6 +14,7 @@ import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
 import { TILES, integrate, ensureTile, SECTIONS } from "./kit.js";
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
+import { library, contentKey, settings, builderUrl, PAGES } from "../../app/library.js";
 import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
 import { createCarRules } from "./carRules.js";
@@ -84,10 +85,15 @@ const JUMP_SPEED = Number(params.get("jump")) || TOP * 0.91;
 // ?jumps=a,b,c = measured take-off speed (m/s) of each flight; defaults measured with the autopilot at
 // top 63 / 3 substeps (jump 1: 201 km/h, jump 2: 175 km/h after the brake turn, jump 3: 182 km/h)
 const JUMPS = (params.get("jumps") ?? "55.8,48.6,50.6").split(",").map(Number).filter((v) => v > 0);
-// ?track=local → the track saved by the builder (builder3.html), otherwise the test track
 let builtTrack = null;
-if (params.get("track") === "local") {
-  try { builtTrack = JSON.parse(localStorage.getItem("thunderline.track.v1")); } catch {}
+// ?track=<library id> (menu, builder), ?track=local = the track the builder last worked on
+const trackParam = params.get("track");
+const trackId = trackParam === "local" ? library.current : trackParam;
+const trackRec = trackId ? library.get(trackId) : null;
+const cameFrom = params.get("from"); // "builder" → Back goes there
+const prefs = settings.get();
+if (trackRec) {
+  builtTrack = trackRec.track;
   // generated pieces (fitted landings) are rebuilt from their id, exactly as the builder made them
   for (const p of builtTrack?.pieces ?? []) {
     const t = ensureTile(p.id);
@@ -112,12 +118,7 @@ const r0 = lay.ride[0];
 for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) scene.add(makeGateMesh(g));
 const race = createRace({ gates });
 // the track's identity for records: its pieces, links and flags (DESIGN.md §8 keys records by content)
-const trackKey = (() => {
-  const src = JSON.stringify((builtTrack?.pieces ?? []).map((p) => [p.id, !!p.open, p.M.map((x) => +x.toFixed(3)), p.parent, p.flightFrom, !!p.cp]));
-  let h = 0x811c9dc5;
-  for (let i = 0; i < src.length; i++) h = Math.imul(h ^ src.charCodeAt(i), 0x01000193);
-  return builtTrack?.pieces?.length ? (h >>> 0).toString(36) : "test";
-})();
+const trackKey = builtTrack?.pieces?.length ? contentKey(builtTrack) : "test";
 const medals = medalTimes(builtTrack?.authorTime);
 const BEST_KEY = `thunderline.best.${trackKey}`;
 const loadBest = () => { try { return JSON.parse(localStorage.getItem(BEST_KEY)); } catch { return null; } };
@@ -299,7 +300,7 @@ function startGhost() {
   if (ghostPlayer) ghostPlayer.start(spawnPos, startQuat);
   else ghostCar.setEnabled(false);
 }
-let showGhost = params.get("ghost") !== "off";
+let showGhost = params.get("ghost") !== "off" && prefs.ghost;
 addEventListener("keydown", (e) => { if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!ghostPlayer && showGhost; } });
 
 // ---------- landings: the grade flashes under the timer ----------
@@ -332,7 +333,7 @@ function fallCamera(dt) {
   if (!autopilot) pilot.locate(vehicle); // the autopilot already tracks it in input()
   const td = airClock > FALL_CAM.after && car.vel.y < -FALL_CAM.minFall ? pilot.touchdown(vehicle) : null;
   if (td) _touch.copy(td.P);
-  const want = td ? 1 : 0;
+  const want = td && prefs.fallCamera ? 1 : 0;
   fallBlend += (want - fallBlend) * (1 - Math.exp(-dt * (want ? FALL_CAM.rateIn : FALL_CAM.rateOut)));
   if (fallBlend < 0.002) return;
   // the fall pose: behind the car along its horizontal travel, raised, looking toward the touchdown
@@ -383,6 +384,7 @@ function onRace(e) {
       ghostData = recorder.finish(e.time);
       try { localStorage.setItem(GHOST_KEY, JSON.stringify(ghostData)); } catch (err) { console.warn("[ghost] not saved", err); }
     }
+    if (trackId) library.recordFinish(trackId, e.time, medalFor(e.time, medals));
     showFinish(e.time, improved);
   }
 }
@@ -397,9 +399,22 @@ function showFinish(time, improved) {
     `<div class="ft">${fmt(time)}</div>` +
     `<div class="fm">${head}${improved ? " · new best" : ` · best ${fmt(best?.time)}`}</div>` +
     rows +
-    `<div class="fk"><kbd>R</kbd> again · <kbd>Backspace</kbd> keeps driving</div>`;
+    `<div class="fbtns"><button id="f-again">Again <kbd>R</kbd></button>` +
+    (cameFrom === "builder" ? `<button id="f-build">Back to builder <kbd>B</kbd></button>` : "") +
+    `<button id="f-menu">Menu <kbd>Esc</kbd></button></div>`;
+  $("f-again").onclick = () => restart();
+  if ($("f-build")) $("f-build").onclick = goBuilder;
+  $("f-menu").onclick = goMenu;
   $("finish").classList.add("show");
 }
+
+// ---------- leaving: back to the builder (a test drive) or the menu ----------
+function goBuilder() { if (trackId) location.href = builderUrl(trackId); }
+function goMenu() { location.href = `${PAGES.menu}${cameFrom === "builder" ? "#build" : "#play"}`; }
+addEventListener("keydown", (e) => {
+  if (e.code === "Escape") (cameFrom === "builder" ? goBuilder : goMenu)();
+  if (e.code === "KeyB" && cameFrom === "builder") goBuilder();
+});
 
 // ---------- respawn: restart, checkpoints, last safe spot, falls ----------
 let simAccum = 0;
