@@ -97,6 +97,14 @@ const P = {
   // Gone when the vehicle is (killed or out of reach `lose` s), when French men come within `danger`
   // m or it has lost a man. Nothing in `wait` s: another stretch.
   sr: { engage: 55, lose: 12, danger: 25, wait: 120, rest: [50, 80] },
+  // THE MULE (step 7, "a moving supply point"): it follows the band out with the most at stake that
+  // STAYS somewhere (a village's cell, a band taking a village, an assault — `score`; at a donkey's
+  // pace it is no use to a raid or an ambush), `back` m behind it, `backFight` while that band
+  // fights. A band within its reach short of men gets one every `every` s, up to the men it set out
+  // with (a cell: up to a full cell, P.cellSize): out of the men gone to ground (free), else bought
+  // (the human's reinforce price). Hurt under `hurt`: home, where it heals, then out again.
+  mule: { look: 3, score: { garrison: 4, occupy: 3, deploy: 2, assault: 2 }, goingTo: ["village", "defend", "assault"],
+    back: 6, backFight: 18, every: 6, hurt: 0.4, heal: 1.5, healed: 0.8 },
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -535,8 +543,63 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     }
   }
 
+  // ── THE MULE'S WORK (P.mule) ─────────────────────────────────────────────
+  const FIGHTING = new Set(["strike", "deploy", "assault"]);
+  /** A band as algMules follows it: its living men, the first its leader. */
+  const bandView = (b) => (b._view ??= { get members() { return alive(b); }, get leader() { return alive(b)[0] ?? null; } });
+  function stepMule(q, dt) {
+    const B = P.mule, M = app.algMules, mule = q.men[0];
+    if (!M || !mule?.alive) return;
+    const home = homeFor(mule.position);
+    // HURT: home, heals there, then out again.
+    if (q.state !== "hurt" && mule.hp < mule.maxHp * B.hurt) { q.state = "hurt"; q.band = null; M.follow(mule, null); mule.orderTo(home.x, home.z); }
+    if (q.state === "hurt") {
+      if (dist(mule.position, home) < 12) mule.hp = Math.min(mule.maxHp, mule.hp + B.heal * dt);
+      else if (!mule.isMoving) mule.orderTo(home.x, home.z);
+      if (mule.hp < mule.maxHp * B.healed) return;
+      q.state = "home"; q.look = 0;
+    }
+    if ((q.look = (q.look ?? 0) - dt) <= 0) {
+      q.look = B.look;
+      // The band with the most at stake (the one it is with wins a tie: no flitting between two).
+      let pick = null, ps = 0;
+      for (const b of bands) {
+        const s = B.score[b.state] ?? (b.state === "approach" && B.goingTo.includes(b.mission) ? 1 : FIGHTING.has(b.state) && b === q.band ? 1 : 0);
+        if (!s || !alive(b).length) continue;
+        const sc = s + (b === q.band ? 0.5 : 0) - dist(centre(alive(b)), mule.position) / 1000;
+        if (sc > ps) { ps = sc; pick = b; }
+      }
+      const back = pick && FIGHTING.has(pick.state) ? B.backFight : B.back;
+      if (pick !== q.band || back !== mule._muleBack) {
+        if (pick) M.follow(mule, bandView(pick), back);
+        else { M.follow(mule, null); if (dist(mule.position, home) > 12) mule.orderTo(home.x, home.z); }
+        q.band = pick;
+      }
+      q.state = pick ? pick.state : "home";
+    }
+    // A MAN for the band, out of the mule's packs.
+    const b = q.band;
+    if (!b || (q.re = (q.re ?? B.every) - dt) > 0) return;
+    q.re = B.every;
+    const m = alive(b);
+    const full = b.state === "garrison" ? Math.max(b.start, P.cellSize[1]) : b.start;
+    if (!m.length || m.length >= full || dist(centre(m), mule.position) > M.params.radius || liveFighters() >= cap()) return;
+    const free = pool > 0;
+    if (!free && !aln()?.spend(SQUADS.moudjahid?.reinforce ?? 35)) return;
+    if (free) pool--;
+    const at = app.navGrid?.nearestOpenWorld?.(mule.position.x + rand(-1.5, 1.5), mule.position.z + rand(-1.5, 1.5), true) ?? mule.position;
+    const u = units.spawn("moudjahid", at.x, at.z, { team: "enemy" });
+    b.members.push(u); inBand.add(u);
+    u.holdFire = m[0].holdFire;
+    if (b.state === "garrison") { b.start = Math.max(b.start, m.length + 1); placeCell(b.village, [u]); }   // a bigger cell: its break counted on what it is now
+    if (b.state === "deploy" && b.base) { b.base.push(u); u.orderTo(b.baseSpot.x + rand(-3, 3), b.baseSpot.z + rand(-3, 3)); }
+    else if (b.state !== "garrison") { const c = centre(m); u.orderTo(c.x + rand(-3, 3), c.z + rand(-3, 3)); }
+    q.given = (q.given ?? 0) + 1;
+  }
+
   function stepTeams(dt) {
     for (const f of french()) if (f.isAir) { lastAir = { x: f.position.x, z: f.position.z }; break; }
+    for (const q of teams) if (q.key === "mulet") stepMule(q, dt);
     if ((vehLook = (vehLook ?? 0) - dt) <= 0) {
       vehLook = 2;
       const v = knownFrench().find((f) => !f.type?.foot);
@@ -2009,7 +2072,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** Dev: a team of `key` now (pays, ignores the clock and the tiers). */
     teamNow(key) { return spawnTeam(key); },
     /** Dev: the teams out ({ key, alive }). */
-    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null, t: Math.round(q.t ?? 0), rest: Math.round(q.rest ?? 0) })); },
+    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null, t: Math.round(q.t ?? 0), rest: Math.round(q.rest ?? 0), given: q.given ?? 0 })); },
     /** Dev: what each band is doing. */
     describe() {
       return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "cut" ? " (cut the line)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";

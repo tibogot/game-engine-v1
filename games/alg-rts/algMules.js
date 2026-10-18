@@ -68,7 +68,7 @@ export function createAlgMules(app, { units, squads, selection }) {
     for (const m of ms) follows.delete(m);   // any right-click: a new order (the move goes on as usual)
     if (!s) return;
     e.preventDefault(); e.stopImmediatePropagation();
-    for (const m of ms) { follows.set(m, s); m._muleRe = 0; }
+    for (const m of ms) { follows.set(m, s); m._muleRe = 0; m._muleBack = P.follow; }
     app.algOrderMarks?.order?.(s.leader?.position.x ?? 0, s.leader?.position.y ?? 0, s.leader?.position.z ?? 0, ms, "move");
   }
   dom.addEventListener("contextmenu", onContext, true);
@@ -79,8 +79,8 @@ export function createAlgMules(app, { units, squads, selection }) {
       if ((m._muleRe -= dt) > 0) continue;
       m._muleRe = P.repath;
       const ms = s.members, cx = ms.reduce((a, u) => a + u.position.x, 0) / ms.length, cz = ms.reduce((a, u) => a + u.position.z, 0) / ms.length;
-      const h = s.leader?.heading ?? 0;
-      const tx = cx - Math.sin(h) * P.follow, tz = cz - Math.cos(h) * P.follow;
+      const h = s.leader?.heading ?? 0, back = m._muleBack ?? P.follow;
+      const tx = cx - Math.sin(h) * back, tz = cz - Math.cos(h) * back;
       if (Math.hypot(tx - m.position.x, tz - m.position.z) > 3) m.orderTo(tx, tz);
     }
     // The wounded heal slowly by a mule (its medical pannier), out of the fight.
@@ -110,8 +110,9 @@ export function createAlgMules(app, { units, squads, selection }) {
     /** A man within a mule's reach (a grenade at half price — algGrenades). */
     supplied: (u) => mules().some((m) => m.team === u.team && near(m, u)),
     following: (m) => follows.get(m) ?? null,
-    /** An AI's order (the human's is the right-click): mule `m` follows squad `s` (null: stops following). */
-    follow(m, s) { if (s) { follows.set(m, s); m._muleRe = 0; } else follows.delete(m); },
+    /** An AI's order (the human's is the right-click): mule `m` follows squad `s` (null: stops following),
+     *  `back` m behind it (any { members, leader }: the FLN AI's bands). */
+    follow(m, s, back = P.follow) { m._muleBack = back; if (s) { follows.set(m, s); m._muleRe = 0; } else follows.delete(m); },
     dispose() { dom.removeEventListener("contextmenu", onContext, true); },
   };
 }
