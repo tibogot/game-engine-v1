@@ -341,6 +341,10 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
             break;
           }
           if (m.cd > 0 || loading) break;
+          // HOLDING (s.mortarHold — an AI waiting hidden, 2026-10-18): set up, it fires nothing by itself
+          // (a salvo ordered is fired above); its crew's holdFire can't say it — setCrew holds every
+          // crewman's small arms anyway.
+          if (s.mortarHold) { m.cd = 0.5; break; }
           const tg = pick(s, g);
           if (!tg) { m.cd = 1; break; }
           m.facing = Math.atan2(tg.position.x - g.position.x, tg.position.z - g.position.z);

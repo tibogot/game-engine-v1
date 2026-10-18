@@ -315,6 +315,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
    * crest can see. It used to know every French unit on the map; now the
    * lookouts are its eyes — destroy them and its ambushes go blind.
    */
+  let sightOn = false, knownAt = -1, knownNow = [];
   function knownFrench() {
     const eyes = [];
     for (const u of units.list) if (u.alive && u.team === "enemy" && !u.ghost) eyes.push({ x: u.position.x, z: u.position.z, r: P.seeMen });
@@ -1677,6 +1678,16 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** On the fixed sim clock. */
     step(dt) {
       t += dt;
+      // ITS MORTARS' EYES (2026-10-18): an FLN team fires only on French its side KNOWS (knownFrench —
+      // its men, its lookouts, the villages that back it), not on all it could reach. Known French
+      // cached twice a second (the test is men x French).
+      if (!sightOn && app.algMortarTeams?.setSight) {
+        sightOn = true;
+        app.algMortarTeams.setSight("enemy", (x, z) => {
+          if (t - knownAt > 0.5) { knownAt = t; knownNow = knownFrench(); }
+          return knownNow.some((f) => Math.abs(f.position.x - x) < 6 && Math.abs(f.position.z - z) < 6);
+        });
+      }
       for (const u of homebound) { if (!u.alive) homebound.delete(u); else if (atHome(u)) goToGround(u); }
       for (let i = bands.length - 1; i >= 0; i--) {
         stepBand(bands[i], dt);
