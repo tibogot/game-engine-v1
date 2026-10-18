@@ -15,8 +15,34 @@ function checkerTexture() {
   return checker;
 }
 
+/** An AIR RING (race.js ring gate): a glowing hoop of radius g.hw, facing along the flight (g.T). */
+export function makeRingMesh(g, { material = null } = {}) {
+  const glow = material ?? new THREE.MeshStandardMaterial({ color: 0x3fd2ff, emissive: 0x3fd2ff, emissiveIntensity: 1.6, roughness: 0.4 });
+  const hoop = new THREE.Mesh(new THREE.TorusGeometry(g.hw, 0.42, 10, 56), glow);
+  const group = new THREE.Group();
+  group.add(hoop);
+  if (!material) {
+    // four dark clamps so the hoop reads as an object, not a line
+    const clamp = new THREE.MeshStandardMaterial({ color: 0x1a2236, roughness: 0.6, metalness: 0.3 });
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+      const m = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.1, 1.1), clamp);
+      m.position.set(Math.cos(a) * g.hw, Math.sin(a) * g.hw, 0);
+      group.add(m);
+    }
+  }
+  // the torus lies in its XY plane (axis Z): X across, Y up, Z along the flight
+  const R = new THREE.Vector3().crossVectors(g.T, g.U).normalize();
+  const U = new THREE.Vector3().crossVectors(R, g.T).normalize();
+  group.matrixAutoUpdate = false;
+  group.matrix.makeBasis(R, U, g.T.clone().normalize()).setPosition(g.P);
+  group.userData.gate = g;
+  return group;
+}
+
 /** @param g {kind, P, T, U, hw} — P is on (or 0.7 m above) the deck centre */
 export function makeGateMesh(g, { height = 7.5, lift = 0.7 } = {}) {
+  if (g.ring) return makeRingMesh(g);
   const group = new THREE.Group();
   const color = g.kind === "cp" ? 0x3fd2ff : 0xf2f4f8;
   const post = new THREE.MeshStandardMaterial({ color: 0x1a2236, roughness: 0.6, metalness: 0.3 });

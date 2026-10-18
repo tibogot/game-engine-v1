@@ -87,6 +87,8 @@ const JUMP_SPEED = Number(params.get("jump")) || TOP * 0.91;
 // top 63 / 3 substeps (jump 1: 201 km/h, jump 2: 175 km/h after the brake turn, jump 3: 182 km/h)
 const JUMPS = (params.get("jumps") ?? "55.8,48.6,50.6").split(",").map(Number).filter((v) => v > 0);
 let builtTrack = null;
+let roadPieces = []; // the track's road; its AIR RINGS (builder: on a flight arc) are gates, not road
+let ringGates = [];
 // ?track=<library id> (menu, builder), ?track=local = the track the builder last worked on
 const trackParam = params.get("track");
 const trackId = trackParam === "local" ? library.current : trackParam;
@@ -95,6 +97,11 @@ const cameFrom = params.get("from"); // "builder" → Back goes there
 const prefs = settings.get();
 if (trackRec) {
   builtTrack = trackRec.track;
+  roadPieces = (builtTrack?.pieces ?? []).filter((p) => !p.ring);
+  ringGates = (builtTrack?.pieces ?? []).filter((p) => p.ring).map((p) => {
+    const M = new THREE.Matrix4().fromArray(p.M);
+    return { P: new V().setFromMatrixPosition(M), T: new V(0, 0, -1).transformDirection(M), U: new V(0, 1, 0).transformDirection(M), r: 5.5 };
+  });
   // generated pieces (fitted landings) are rebuilt from their id, exactly as the builder made them
   for (const p of builtTrack?.pieces ?? []) {
     const t = ensureTile(p.id);
@@ -102,7 +109,7 @@ if (trackRec) {
   }
 }
 const lay = builtTrack?.pieces?.length
-  ? layoutFromPlacements({ built, pieces: builtTrack.pieces })
+  ? layoutFromPlacements({ built, pieces: roadPieces })
   : layoutTestTrack({ built, speed: JUMP_SPEED, jumpSpeeds: JUMPS, airDrag: AERO.drag / CHASSIS.mass });
 const meshes = buildTrackMeshes(lay.placements, built, mats);
 meshes.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.layers.enable(STATIC_LAYER); } });
@@ -111,10 +118,10 @@ scene.add(meshes.group);
 // ---------- THE RACE (race.js, DESIGN.md §8): gates, checkpoints in any order, finish, medals ----------
 // A checkpoint is a flag on a piece (builder: select it, C). The built-in test track has one at each landing.
 const flagged = builtTrack?.pieces?.length
-  ? builtTrack.pieces.map((p, k) => (p.cp ? k : -1)).filter((k) => k >= 0)
+  ? roadPieces.map((p, k) => (p.cp ? k : -1)).filter((k) => k >= 0)
   : lay.placements.map((p, k) => (/landing|catch_pad/.test(p.id) ? k : -1)).filter((k) => k >= 0);
 const hwOf = (k) => SECTIONS[TILES[lay.placements[k]?.id]?.section ?? "road"].hw;
-const gates = gatesFor(lay.ride, flagged, hwOf);
+const gates = gatesFor(lay.ride, flagged, hwOf, ringGates);
 const r0 = lay.ride[0];
 for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) scene.add(makeGateMesh(g));
 const race = createRace({ gates });

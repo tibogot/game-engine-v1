@@ -24,8 +24,10 @@ export function medalFor(time, medals) {
  * @param ride  [{P, T, U, piece}] in driving order
  * @param flagged  piece indices that carry a checkpoint flag
  */
-export function gatesFor(ride, flagged, hwOf = () => 8) {
+export function gatesFor(ride, flagged, hwOf = () => 8, rings = []) {
   const gates = [];
+  // AIR RINGS: checkpoints in the air (a piece placed on a flight arc), gone through within radius r
+  for (const r of rings) gates.push({ kind: "cp", ring: true, piece: -1, P: r.P.clone(), T: r.T.clone().normalize(), U: r.U.clone(), hw: r.r });
   for (const k of flagged) {
     const mine = ride.filter((r) => r.piece === k && !r.air);
     if (!mine.length) continue;
@@ -68,6 +70,7 @@ export function createRace({ gates, countdown = 1.5 }) {
     const t = a / (a - b);
     d0.lerp(d1, t); // the crossing point, relative to the gate
     const side = d0.clone().sub(g.T.clone().multiplyScalar(d0.dot(g.T)));
+    if (g.ring) return side.length() < g.hw; // a ring: through its hoop
     const up = side.dot(g.U);
     const across = side.addScaledVector(g.U, -up).length();
     return across < g.hw + 2 && up > -3 && up < 9;

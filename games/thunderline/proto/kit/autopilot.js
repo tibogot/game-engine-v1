@@ -8,6 +8,7 @@ const _nose = new THREE.Vector3();
 const _local = new THREE.Vector3();
 const _t = new THREE.Vector3();
 const _u = new THREE.Vector3();
+const _vdir = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
 const WALL_SIN = Math.sin((30 * Math.PI) / 180);
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass
@@ -77,7 +78,7 @@ export function createAutopilot(ride) {
         if (r.air) continue;
         _d.copy(_p).sub(r.P);
         if (_d.lengthSq() > 900) continue; // 30 m
-        if (_d.dot(r.U ?? UP) < 0.5 && Math.abs(_d.dot(r.T)) < 4 && r.T.dot(_v) > 0) return (touchCache = r);
+        if (_d.dot(r.U ?? UP) < 0.5 && Math.abs(_d.dot(r.T)) < 4 && r.T.dot(_v) > 0) return (touchCache = { r, t: (step + 1) * dt });
       }
     }
     return (touchCache = null);
@@ -102,7 +103,7 @@ export function createAutopilot(ride) {
       return idx;
     },
     /** In the air: the ride point the car will touch down on (its flight projected), or null. */
-    touchdown(car) { return car.groundedCount > 0 ? null : touchdown(car, idx); },
+    touchdown(car) { return car.groundedCount > 0 ? null : touchdown(car, idx)?.r ?? null; },
     input(car) {
       const p = car.body.pos;
       const best = this.locate(car);
@@ -124,13 +125,20 @@ export function createAutopilot(ride) {
       let yaw = 0, roll = 0, pitch = 0;
       if (grounded) touchCache = null;
       if (!grounded) {
-        const n = touchdown(car, best) ?? across(best);
+        const td = touchdown(car, best);
+        const n = td?.r ?? across(best);
         _t.copy(n.T).applyQuaternion(_inv);
         _u.copy(n.U ?? UP).applyQuaternion(_inv);
-        const yawE = Math.atan2(_t.x, _t.z), pitchE = Math.asin(THREE.MathUtils.clamp(_t.y, -1, 1)), rollE = Math.atan2(_u.x, _u.y);
-        const k = (e) => (Math.abs(e) < 0.04 ? 0 : THREE.MathUtils.clamp(e * 2, -1, 1));
-        if (Math.abs(yawE) > 1.6) yaw = Math.sign(yawE);
-        else if (Math.abs(rollE) > 1.6) roll = Math.sign(rollE);
+        const yawE = Math.atan2(_t.x, _t.z), rollE = Math.atan2(_u.x, _u.y);
+        // PITCH: a smooth jump (user, 2026-10-18: "the car is pointing down very quick in the air,
+        // doesn't look like a smooth jump"). The nose FOLLOWS THE FLIGHT PATH, and only in the last
+        // ~1.2 s before the predicted touchdown blends onto the landing's slope (done 0.3 s before).
+        const w = td ? THREE.MathUtils.clamp(1 - (td.t - 0.3) / 0.9, 0, 1) : 1;
+        _vdir.copy(car.body.vel).normalize().lerp(n.T, w).normalize().applyQuaternion(_inv);
+        const pitchE = Math.asin(THREE.MathUtils.clamp(_vdir.y, -1, 1));
+        const k = (e) => (Math.abs(e) < 0.03 ? 0 : THREE.MathUtils.clamp(e * 1.5, -1, 1));
+        if (Math.abs(yawE) > 1.6) yaw = Math.sign(yawE); // big turns (a bowl's 180) start at once
+        else if (Math.abs(rollE) > 1.6) roll = Math.sign(rollE); // a flip ramp's half roll too
         else { yaw = k(yawE); pitch = k(pitchE); roll = k(rollE); }
         airAim = { at: ride.indexOf(n), yawE, pitchE, rollE }; // what it is lining up with (tests read it)
       }

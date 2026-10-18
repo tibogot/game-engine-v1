@@ -8,7 +8,8 @@ import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, D
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules } from "./carRules.js";
-import { makeGateMesh } from "./gateMesh.js";
+import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
+import { createRace } from "./race.js";
 import { library, driveUrl, PAGES } from "../../app/library.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
@@ -39,7 +40,7 @@ const CATS = [
   { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12"] },
   { id: "turns", label: "Turns", tiles: ["fast_turn_128", "brake_turn_32"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
-  { id: "air", label: "Air", tiles: ["kicker_20", "drop_16", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "air", label: "Air", tiles: ["kicker_20", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "stunts", label: "Stunts", tiles: ["fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
 ];
 const catOf = new Map();
@@ -82,13 +83,24 @@ const FITTED_BOWL = "fitted_bowl";
 const bowlRadius = (v) => THREE.MathUtils.clamp(Math.round((95 + 2.2 * (v - 44)) / 5) * 5, 80, 160);
 let bowlR = bowlRadius(arcSpeed);
 for (const id of ["flip_ramp_std", "flip_ramp_s"]) ensureTile(id);
+// "air_ring": a CHECKPOINT IN THE AIR, placed on a flight arc (never on road). Its centre sits on the
+// FAST edge of the band — the line of a full-speed take-off — so it tests the take-off: hit the lip at
+// speed, on the right line (in the air the car only rotates; nothing there changes where it flies).
+const RING = "air_ring";
+const RING_R = 5.5;
+const ringGateOf = (pc) => {
+  const M = new THREE.Matrix4().fromArray(pc.M);
+  return { kind: "cp", ring: true, P: new THREE.Vector3().setFromMatrixPosition(M), T: new THREE.Vector3(0, 0, -1).transformDirection(M), U: new THREE.Vector3(0, 1, 0).transformDirection(M), hw: RING_R };
+};
+const isRing = (p) => !!p?.ring;
 const tileId = (base, h = hand) => {
+  if (base === RING) return RING;
   if (base === FITTED) return fittedId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
-const thumbOf = (id) => (id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
+const tileLabel = (base) => (base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const thumbOf = (id) => (id === RING ? RING : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
@@ -162,9 +174,11 @@ async function bakeThumbs() {
   for (const c of CATS) for (const id of c.tiles) {
     if (id === FITTED) continue; // drawn with the landing's picture (see pic)
     const pid = id === FITTED_BOWL ? "bowl_110" : id; // a typical one
-    const g = meshesFor(pid, false);
-    const t = ensureTile(pid);
-    g.rotation.x = -(t.landAngle ?? 0) * DEG;
+    const g = id === RING
+      ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
+      : meshesFor(pid, false);
+    const t = id === RING ? {} : ensureTile(pid);
+    if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
     ts.add(g);
     g.updateMatrixWorld(true);
     const box = new THREE.Box3().setFromObject(g);
@@ -300,6 +314,14 @@ function rebuild() {
   for (const c of trackGroup.children.slice()) trackGroup.remove(c);
   built = new Map();
   for (const pc of track.pieces) {
+    if (isRing(pc)) {
+      const g = makeRingMesh(ringGateOf(pc));
+      g.userData.uid = pc.uid;
+      trackGroup.add(g);
+      const M = new THREE.Matrix4().fromArray(pc.M);
+      built.set(pc.uid, { exit: M.clone(), group: g, M });
+      continue;
+    }
     const M = pc.parent != null && built.has(pc.parent) ? built.get(pc.parent).exit.clone() : new THREE.Matrix4().fromArray(pc.M);
     pc.M = M.toArray();
     ensureTile(pc.id); // generated pieces (fitted landings) are rebuilt from their id
@@ -329,7 +351,7 @@ function checkpointGate(pc, M) {
 }
 function toggleCheckpoint(uid) {
   const pc = track.pieces.find((p) => p.uid === uid);
-  if (!pc) return;
+  if (!pc || isRing(pc)) return; // an air ring IS a checkpoint
   snapshot();
   pc.cp = !pc.cp;
   if (!pc.cp) delete pc.cp;
@@ -352,7 +374,7 @@ function orderedPieces() {
   while (cur && !seen.has(cur.uid)) {
     seen.add(cur.uid);
     out.push(cur);
-    cur = track.pieces.find((q) => q.parent === cur.uid) ?? track.pieces.find((q) => q.flightFrom === cur.uid);
+    cur = track.pieces.find((q) => q.parent === cur.uid) ?? track.pieces.find((q) => q.flightFrom === cur.uid && !isRing(q));
   }
   return out;
 }
@@ -407,12 +429,16 @@ async function runPrediction() {
   const nose = new THREE.Vector3();
   const pilot = createAutopilot(ride); // the drive page's autopilot (and its wall cut, air spin)
   const rules = createCarRules(car, { boostPads: boosts }); // the drive page's rules: wall cut, landing boost, pads
+  // the air rings, judged by the race's own rule (race.js): through the hoop or missed
+  const ringGates = track.pieces.filter(isRing).map(ringGateOf);
+  const ringRace = ringGates.length ? createRace({ gates: [...ringGates, { kind: "finish", P: new THREE.Vector3(1e9, 1e9, 1e9), T: UP.clone(), U: new THREE.Vector3(1, 0, 0), hw: 0 }], countdown: 0 }) : null;
   prediction.landings = [];
   let endSpeed = null;
   for (let tick = 0; tick < 120 * 180; tick++) {
     const p = car.body.pos;
     const landed = rules.step(pilot.input(car), FIXED_DT);
     if (landed) prediction.landings.push(landed.grade);
+    ringRace?.tick(car, FIXED_DT);
     idx = pilot.idx;
     nose.set(0, 0, 1).applyQuaternion(car.body.quat);
     const v = car.body.vel.length();
@@ -449,10 +475,12 @@ async function runPrediction() {
   prediction.lipSpeed = lipSpeed;
   prediction.launch = launch;
   prediction.endSpeed = endSpeed; // the speed the car arrives at the track's end (a fitted bowl is sized to it)
+  prediction.rings = ringRace ? { taken: ringRace.s.taken.size, of: ringGates.length } : null;
   // AUTHOR TIME (DESIGN.md §8, medals): the prediction's lap, when it reaches the end of a track with
   // nothing wrong (no fall, no loose pieces, no overlap). The drive page reads it from the saved track.
   runChecks();
-  const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size;
+  const ringsOk = !prediction.rings || prediction.rings.taken === prediction.rings.of;
+  const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size && ringsOk;
   const author = clean ? Math.round(prediction.lapS * 100) / 100 : null;
   if (track.authorTime !== author) { if (author) track.authorTime = author; else delete track.authorTime; save(); }
   if (failBox) { scene.remove(failBox); failBox = null; }
@@ -468,8 +496,8 @@ async function runPrediction() {
 
 /** Ends with no road after them. A lip whose flight has a landing (`flightFrom`) is not open. */
 function openEnds() {
-  const hasChild = new Set(track.pieces.flatMap((p) => [p.parent, p.flightFrom]).filter((u) => u != null));
-  return track.pieces.filter((p) => !hasChild.has(p.uid)).map((p) => {
+  const hasChild = new Set(track.pieces.filter((p) => !isRing(p)).flatMap((p) => [p.parent, p.flightFrom]).filter((u) => u != null));
+  return track.pieces.filter((p) => !isRing(p) && !hasChild.has(p.uid)).map((p) => {
     const m = built.get(p.uid).exit;
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
     return { uid: p.uid, m, lean: leanOut(TILES[p.id]), pitch: Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) };
@@ -502,12 +530,12 @@ function refreshArcs() {
   // every lip (a road end pointing up with no road after it): open, or flown to a landing
   const roadChild = new Set(track.pieces.map((p) => p.parent).filter((u) => u != null));
   for (const p of track.pieces) {
-    if (roadChild.has(p.uid)) continue;
+    if (roadChild.has(p.uid) || isRing(p)) continue;
     const m = built.get(p.uid).exit;
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
     // level ends are not lips — except a DROP piece, whose whole point is the fall
     if (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG && !TILES[p.id]?.drop) continue;
-    const landing = track.pieces.find((q) => q.flightFrom === p.uid)?.uid ?? null;
+    const landing = track.pieces.find((q) => q.flightFrom === p.uid && !isRing(q))?.uid ?? null;
     // the REAL car's take-off speed at this lip (background prediction), else the global guess
     // where and how the REAL car left this lip (background prediction): a flip ramp's curl lets the
     // car go in another direction than its exit socket says (the socket's arc fell 35 m short)
@@ -526,6 +554,7 @@ function refreshArcs() {
 function roadSamples() {
   const out = [];
   for (const pc of track.pieces) {
+    if (isRing(pc)) continue;
     const { b, t } = piece(pc.id, pc.open);
     const M = built.get(pc.uid).M;
     const hw = SECTIONS[t.section ?? "road"].hw;
@@ -558,7 +587,7 @@ function runChecks() {
   // to an end). The car falls off where the connected road stops; the prediction used to stop there
   // too and call it a lap (user, 2026-10-18: "the last pieces … are not aligned and make the car fall")
   const chain = new Set(orderedPieces().map((p) => p.uid));
-  problems.loose = track.pieces.filter((p) => !chain.has(p.uid)).map((p) => p.uid);
+  problems.loose = track.pieces.filter((p) => !(isRing(p) ? chain.has(p.flightFrom) : chain.has(p.uid))).map((p) => p.uid);
   if (problems.loose.length) problems.messages.push(`${problems.loose.length} piece${problems.loose.length > 1 ? "s are" : " is"} not connected to the road (orange) — the car falls where the road stops`);
   let blocked = 0;
   for (const a of arcs) {
@@ -607,7 +636,22 @@ function localRef() {
   const fwd = new THREE.Vector3(0, 0, -1).transformDirection(b.exit);
   return { pos, yaw: Math.atan2(-fwd.x, -fwd.z) };
 }
+function ringSnap() {
+  let best = null;
+  for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
+    const s = toScreen(a.fast.pts[k]);
+    if (!s) continue;
+    const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
+    if (d < 40 && (!best || d < best.d)) best = { a, k, d };
+  }
+  if (!best) return null;
+  const T = best.a.fast.tan[best.k];
+  const R = new THREE.Vector3().crossVectors(T, UP).normalize();
+  const U = new THREE.Vector3().crossVectors(R, T);
+  return { type: "arc", m: socketMatrix({ p: best.a.fast.pts[best.k], T, U, R }), from: best.a.from, note: "Air ring: on the full-speed line — take off fast and straight to go through" };
+}
 function computeSnap() {
+  if (tileBase === RING) return ringSnap();
   const id = tileId(tileBase);
   const t = TILES[id];
   let best = null;
@@ -705,7 +749,7 @@ function updateGhost() {
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
-    ghost = new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
+    ghost = id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -727,6 +771,7 @@ function suggestionsFor(end) {
   const out = [];
   if (Math.abs(deg(end.lean)) > 3) {
     for (const c of CATS) for (const base of c.tiles) for (const h of [1, -1]) {
+      if (base === RING) continue; // not road
       const id = tileId(base, h);
       if (h < 0 && id === base) continue;
       if (Math.abs(deg(leanIn(TILES[id])) - deg(end.lean)) < 3 && !out.some((o) => o.id === id)) out.push({ base, h, id });
@@ -758,7 +803,7 @@ function updateNext() {
   for (const it of sug.items) {
     const b = document.createElement("button");
     b.appendChild(pic(it.id));
-    b.appendChild(document.createTextNode(TILES[it.id].label));
+    b.appendChild(document.createTextNode(it.id === RING ? "Air ring" : TILES[it.id].label));
     b.onclick = () => pickTile(it.base, it.h);
     row.appendChild(b);
   }
@@ -771,6 +816,11 @@ function place() {
   snapshot();
   const uid = track.nextUid++;
   const id = tileId(tileBase);
+  if (id === RING) {
+    track.pieces.push({ uid, id, ring: true, cp: true, M: snap.m.toArray(), parent: null, flightFrom: snap.from });
+    rebuild();
+    return;
+  }
   track.pieces.push({ uid, id, open: !edges, M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
   const ri = recent.findIndex((r) => r.id === id);
   if (ri >= 0) recent.splice(ri, 1);
@@ -821,12 +871,15 @@ function predictionLine() {
   const P = prediction;
   if (P.state === "running") return `<div class="row"><span>the car drives your track…</span><b>${(P.ticks / 120).toFixed(1)} s</b></div>`;
   if (P.state !== "done") return "";
-  const name = (uid) => { const pc = track.pieces.find((q) => q.uid === uid); return pc ? TILES[pc.id].label : "?"; };
+  const name = (uid) => { const pc = track.pieces.find((q) => q.uid === uid); return pc ? (isRing(pc) ? "Air ring" : TILES[pc.id].label) : "?"; };
   const lips = [...P.lipSpeed.values()].map((v) => Math.round(v * 3.6)).join(", ");
   if (P.fail) return `<div class="warn">⚠ the car ${P.fail.why} at "${name(P.fail.uid)}" (orange box)</div>`;
   if (P.openJump) return `<div class="row"><span>real car takes off at</span><b>${lips} km/h — land it on the band</b></div>`;
   return `<div class="row"><span>${problems.loose?.length ? "real car: to the road's end" : "real car: lap"}</span><b>${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
     (lips ? `<div class="row"><span>take-offs</span><b>${lips} km/h</b></div>` : "") +
+    (P.rings ? (P.rings.taken === P.rings.of
+      ? `<div class="row"><span>air rings</span><b>${P.rings.taken}/${P.rings.of} flown through</b></div>`
+      : `<div class="warn">⚠ the car misses ${P.rings.of - P.rings.taken} air ring${P.rings.of - P.rings.taken > 1 ? "s" : ""} — no author time</div>`) : "") +
     (P.landings?.length ? `<div class="row"><span>landings (lined up)</span><b>${P.landings.filter((g) => g === "perfect").length}/${P.landings.length} perfect</b></div>` : "");
 }
 function renderStatus() {
@@ -836,7 +889,7 @@ function renderStatus() {
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
-    `<div class="mode" style="color:${col}">${tileBase ? `${TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : sel != null ? "Piece selected" : "Pick a piece"}</div>` +
+    `<div class="mode" style="color:${col}">${tileBase ? `${tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : sel != null ? "Piece selected" : "Pick a piece"}</div>` +
     (snap?.bad ? `<div class="warn">${snap.bad}</div>` : "") +
     (snap?.note ? `<div class="row"><span>${snap.note}</span></div>` : "") +
     problems.messages.map((m) => `<div class="warn">⚠ ${m}</div>`).join("") +
@@ -947,6 +1000,7 @@ window.__b3 = {
   get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls,
   pickTile, place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },
+  aimFast(k) { const a = arcs.at(-1); if (!a) return null; const p = a.fast.pts[Math.min(k, a.fast.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.fast.pts.length, p }; },
   aimArc(k) { const a = arcs.at(-1); if (!a) return null; const p = a.pts[Math.min(k, a.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.pts.length }; },
   setHand(h) { hand = h; renderDock(); }, setEdges(v) { edges = v; renderDock(); }, setBuildY(y) { buildY = y; },
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
