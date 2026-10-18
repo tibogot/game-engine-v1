@@ -10,7 +10,7 @@ import { q5 } from "./kit.js";
 export const TUBE = {
   R: 8, // bore radius (m)
   hw: 8, // the road's half width (the flat section at c = 0)
-  wall: 0.6, // shell thickness
+  wall: 1.5, // shell thickness (user: 0.6 "looks too thin")
   floor: 12, // the asphalt band down the middle of the bore (m), the road carried through
   NF: 16, // points across the floor band
   NS: 18, // points up each wall
