@@ -19,6 +19,8 @@ import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
 import { createCarRules } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
+import { createEngineModel } from "./engineModel.js";
+import { createEngineSound } from "./engineSound.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -326,6 +328,32 @@ function showLanding(ev) {
   landTimer = setTimeout(() => el.classList.remove("show"), 1400);
 }
 
+// ---------- ENGINE SOUND (engineModel.js + engineSound.js, synthesised) ----------
+// Starts on the first key press / click (browsers allow audio only after a gesture). The engine reads
+// the car's speed along its nose, the throttle (the player's or the autopilot's) and the wheels: on
+// the line during the countdown, and in the air, it revs freely. M mutes; the tab hidden = paused.
+const engine = createEngineModel();
+const engineSound = createEngineSound({ type: prefs.engine ?? "v8", volume: prefs.volume ?? 0.7 });
+let engineMuted = !(prefs.sound ?? true);
+engineSound.setMuted(engineMuted);
+const unlockAudio = () => { if (!engineMuted) engineSound.unlock(); };
+addEventListener("keydown", (e) => {
+  unlockAudio();
+  if (e.code === "KeyM") { engineMuted = !engineMuted; engineSound.setMuted(engineMuted); if (!engineMuted) engineSound.unlock(); }
+});
+addEventListener("pointerdown", unlockAudio);
+document.addEventListener("visibilitychange", () => (document.hidden ? engineSound.suspend() : engineSound.resume()));
+const _nose = new V();
+function engineTick(dt, input) {
+  _nose.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
+  const kmh = Math.max(0, vehicle.body.vel.dot(_nose)) * 3.6;
+  const parked = race.s.state === "finished" && !vehicle.enabled;
+  const throttle = parked ? 0 : Math.max(0, input.throttle ?? 0);
+  // held on the line, the wheels don't turn: the engine revs freely, as in the air
+  const free = race.holding || vehicle.groundedCount === 0;
+  engineSound.update(engine.update(dt, kmh, throttle, !free));
+}
+
 // ---------- race events + HUD ----------
 const HOLD = { steerTarget: 0, rollTarget: 0, throttle: 0, handbrake: true, yaw: 0, pitch: 0, analog: false };
 const fmt = (t) => {
@@ -397,6 +425,7 @@ let runTime = 0;
 let topKmh = 0;
 const safe = { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false };
 function restart() {
+  engine.reset();
   race.reset();
   $("finish").classList.remove("show");
   vehicle.setEnabled(true); // parked after a finish
@@ -507,6 +536,7 @@ function tick() {
   if (ticks) physMs.push((performance.now() - tPhys) / ticks);
   if (physMs.length > 240) physMs.shift();
   vehicle.syncVisuals(dt, simAccum / FIXED_DT);
+  engineTick(dt, input);
   if (ghostPlayer) {
     if (ghostPlayer.done) ghostCar.group.visible = false;
     else if (showGhost) ghostCar.syncVisuals(dt, simAccum / FIXED_DT);
@@ -530,7 +560,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
-  get boosting() { return rules.boostLeft > 0; }, camera, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  get boosting() { return rules.boostLeft > 0; }, engine, engineSound, camera, ghostCar, get ghostPlayer() { return ghostPlayer; }, get ghostData() { return ghostData; }, recorder, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };

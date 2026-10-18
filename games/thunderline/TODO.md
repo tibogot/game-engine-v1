@@ -23,8 +23,16 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] City mode, Drift mode (DESIGN.md: the four modes) — later.
 
 ## Feel: sound, impacts, smoke (user, 2026-10-19: "sounds, impacts, smoke…")
-- [ ] **Engine sound** — RPM + load from the car, layered recorded loops (on/off throttle at several
-      RPMs) cross-faded and pitched, intake/whine, lift-off pops; needs CC0 engine recordings.
+- [x] **Engine sound, synthesised** (user, 2026-10-19: "start with the synthesised engine"):
+      engineModel.js (6-speed gearbox from the car's real speed: shifts with a throttle cut, launch
+      wheelspin, free revving in the air and on the line, limiter, lift-off pops) + engineWorklet.js
+      (each firing kicks exhaust resonators; V8 / inline-6 / V10) + engineSound.js; proto/engine-lab.html
+      to listen; Settings: sound, volume, engine; M mutes. THE USER JUDGES THE SOUND.
+- [ ] **Recorded engine pack** — the user is looking (want: on-load AND off-load loops every ~500 RPM
+      + idle). Candidates: BOOM Library (cars, the game-audio reference), Effectsense "Loopable Motors",
+      Sonniss GDC bundles (free yearly), Pro Sound Effects / A Sound Effect (search "car engine loops
+      RPM"). Free CC0 sets found were one sound re-pitched (OpenGameArt) — not better. If one is chosen,
+      it replaces only engineWorklet.js; the model stays.
 - [ ] Tyre sounds (roll, skid, drift squeal by slip), wind by speed, wall scrape.
 - [ ] Landing sounds (thump by impact speed; a distinct sound for a PERFECT landing), boost, checkpoint,
       finish, UI clicks, countdown.

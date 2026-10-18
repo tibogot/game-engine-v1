@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Engine Lab</title>
+    <!-- Thunderline's synthesised engine (proto/kit/engineWorklet.js + engineModel.js): listen, compare
+         engine types, run a launch through the gears. The user judges the sound. -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../app/shell.css" />
+    <style>
+      main { max-width: 860px; margin: 0 auto; padding: 8px 28px 60px; }
+      .row { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
+      .btn { background: var(--panel); border: 1px solid var(--line); color: var(--text); padding: 12px 18px; cursor: pointer; font: 700 17px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.06em; }
+      .btn:hover, .btn.on { border-color: var(--bolt); color: var(--bolt); }
+      .btn.big { font-size: 22px; padding: 16px 26px; border-color: var(--bolt); color: var(--bolt); }
+      .gauges { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 18px 0; }
+      .g { background: var(--panel); border: 1px solid var(--line); padding: 12px 16px; }
+      .g .v { font: 800 44px/1 "Barlow Condensed"; }
+      .g .u { color: var(--dim); font: 700 13px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; }
+      .bar { height: 10px; background: var(--panel2); border: 1px solid var(--line); margin-top: 8px; position: relative; overflow: hidden; }
+      .bar i { position: absolute; inset: 0 auto 0 0; background: var(--bolt); }
+      .bar i.red { background: var(--bad); }
+      label { display: grid; grid-template-columns: 140px 1fr 70px; align-items: center; gap: 12px; margin: 10px 0; color: var(--dim); }
+      label b { color: var(--text); font-weight: 600; text-align: right; }
+      input[type=range] { width: 100%; accent-color: #3fd2ff; }
+      .note { color: var(--dim); max-width: 720px; }
+      h3 { font: 800 20px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; margin: 26px 0 6px; }
+    </style>
+  </head>
+  <body>
+    <header id="top"><a class="brand cond" href="../index.html"><svg viewBox="0 0 16 16"><path fill="currentColor" d="M9.5 0 2 9h5l-1.5 7L14 6.5H9z" /></svg>Thunderline</a><nav id="crumbs" class="cond"><span>Engine lab</span></nav></header>
+    <main>
+      <p class="note">The synthesised engine: every cylinder firing kicks the exhaust's resonances. Press <b>Start sound</b>, then <b>Launch run</b> to hear it pull through the six gears and lift off. Pick the engine type you like.</p>
+      <div class="row"><button class="btn big" id="start">▶ Start sound</button></div>
+      <div class="row" id="types"></div>
+      <div class="row">
+        <button class="btn" id="launch">Launch run</button>
+        <button class="btn" id="jump">Jump (1.5 s)</button>
+        <button class="btn" id="lift">Lift off</button>
+        <button class="btn" id="manual">Manual</button>
+      </div>
+      <div class="gauges">
+        <div class="g"><div class="v" id="rpm">0</div><div class="u">RPM</div><div class="bar"><i id="rpmbar"></i></div></div>
+        <div class="g"><div class="v" id="gear">1</div><div class="u">Gear</div></div>
+        <div class="g"><div class="v" id="kmh">0</div><div class="u">km/h</div></div>
+        <div class="g"><div class="v" id="load">0</div><div class="u">Load %</div></div>
+      </div>
+      <h3>Manual</h3>
+      <label>RPM <input type="range" id="m-rpm" min="900" max="8300" value="3000" /><b id="m-rpm-v">3000</b></label>
+      <label>Throttle <input type="range" id="m-thr" min="0" max="100" value="60" /><b id="m-thr-v">60</b></label>
+      <label>Volume <input type="range" id="vol" min="0" max="100" value="70" /><b id="vol-v">70</b></label>
+    </main>
+    <script type="module">
+      import { createEngineSound } from "./kit/engineSound.js";
+      import { createEngineModel, ENGINE } from "./kit/engineModel.js";
+      const $ = (id) => document.getElementById(id);
+      const sound = createEngineSound({ type: "v8", volume: 0.7 });
+      const model = createEngineModel();
+      let mode = "idle"; // idle | launch | manual
+      let kmh = 0, throttle = 0, grounded = true, airLeft = 0;
+      const TYPES = [["v8", "V8"], ["i6", "Inline 6"], ["v10", "V10"]];
+      let type = "v8";
+      function renderTypes() {
+        $("types").innerHTML = TYPES.map(([k, n]) => `<button class="btn${k === type ? " on" : ""}" data-t="${k}">${n}</button>`).join("");
+        for (const b of $("types").children) b.onclick = () => { type = b.dataset.t; sound.setType(type); renderTypes(); };
+      }
+      renderTypes();
+      $("start").onclick = async () => { await sound.unlock(); $("start").textContent = "Sound on"; };
+      $("launch").onclick = () => { sound.unlock(); model.reset(); kmh = 0; mode = "launch"; throttle = 1; };
+      $("jump").onclick = () => { sound.unlock(); airLeft = 1.5; };
+      $("lift").onclick = () => { throttle = 0; mode = mode === "manual" ? "manual" : "launch"; };
+      $("manual").onclick = () => { sound.unlock(); mode = "manual"; };
+      for (const id of ["m-rpm", "m-thr", "vol"]) $(id).oninput = () => { $(id + "-v").textContent = $(id).value; if (id === "vol") sound.setVolume($("vol").value / 100); };
+      // a stand-in car for the launch run: drag-limited acceleration, ~270 km/h top with the boost
+      function carStep(dt) {
+        const v = kmh / 3.6;
+        const a = throttle * Math.max(0, 11 - v * 0.14) - 0.0004 * v * v - (throttle ? 0 : 1.2);
+        kmh = Math.max(0, (v + a * dt) * 3.6);
+        if (mode === "launch" && kmh > 255) throttle = 0; // lift at the end of the run
+      }
+      let last = performance.now();
+      function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        airLeft = Math.max(0, airLeft - dt); grounded = airLeft === 0;
+        let s;
+        if (mode === "manual") {
+          // drive the engine state directly
+          s = model.s; s.rpm += ($("m-rpm").value - s.rpm) * (1 - Math.exp(-dt * 12)); s.load = $("m-thr").value / 100;
+          s.limiter = s.rpm > ENGINE.redline - 30 && s.load > 0.2; s.pop = Math.max(0, s.pop - dt * 1.6);
+        } else {
+          if (mode === "launch") carStep(dt);
+          s = model.update(dt, kmh, mode === "launch" ? throttle : 0, grounded);
+        }
+        sound.update(s);
+        $("rpm").textContent = Math.round(s.rpm); $("gear").textContent = s.gear; $("kmh").textContent = Math.round(kmh); $("load").textContent = Math.round(s.load * 100);
+        $("rpmbar").style.width = `${Math.min(100, (s.rpm / ENGINE.redline) * 100)}%`;
+        $("rpmbar").className = s.rpm > ENGINE.shiftUp ? "red" : "";
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+      window.__engine = { sound, model, get kmh() { return kmh; } };
+    </script>
+  </body>
+</html>
