@@ -36,6 +36,8 @@ Vehicle.prototype._updateTaillights = function () {};
 applyCarTune({ TIRE, WHEEL });
 const ts = process.argv.find((a) => a.startsWith("--tubesteer="));
 if (ts) globalThis.__TUBE_STEER = Number(ts.slice(12));
+const sp = process.argv.find((a) => a.startsWith("--spiral="));
+if (sp) globalThis.__SPIRAL = Number(sp.slice(9));
 
 const ROAD_HOLD = new Set(["bank_in_22", "bank_out_22", "fast_turn_128"]);
 
@@ -106,7 +108,7 @@ export function run(ids, speed, { trace = false } = {}) {
     up.set(0, 1, 0).applyQuaternion(car.body.quat);
     s.tilt = Math.max(s.tilt, (Math.acos(THREE.MathUtils.clamp(up.y, -1, 1)) * 180) / Math.PI);
     if (car.groundedCount === 0) s.air += FIXED_DT;
-    if (trace && tick % 12 === 0) console.log(`t ${(tick * FIXED_DT).toFixed(2)} ${spans[k].id} v ${(v * 3.6).toFixed(0)} up.y ${up.y.toFixed(2)} g ${car.groundedCount}`);
+    if (trace && tick % 12 === 0) console.log(`t ${(tick * FIXED_DT).toFixed(2)} ${spans[k].id} v ${(v * 3.6).toFixed(0)} up.y ${up.y.toFixed(2)} up.x ${up.x.toFixed(2)} g ${car.groundedCount}`);
     if (car.body.pos.y < lowY - 40) { result = `FELL in ${spans[k].id}`; break; }
     slow = v < 3 ? slow + FIXED_DT : 0;
     if (slow > 2) { result = `STOPPED in ${spans[k].id}`; break; }

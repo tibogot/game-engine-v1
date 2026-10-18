@@ -11,7 +11,7 @@ export const TUBE = {
   R: 8, // bore radius (m)
   hw: 8, // the road's half width (the flat section at c = 0)
   wall: 1.5, // shell thickness (user: 0.6 "looks too thin")
-  floor: 12, // the asphalt band down the middle of the bore (m), the road carried through
+  floor: 12, // the middle run of points at the bottom of the bore (m) — same surface as the walls
   NF: 16, // points across the floor band
   NS: 18, // points up each wall
   NL: 6, // steps round each rounded lip (even: the crest gets a doubled point)
@@ -19,7 +19,8 @@ export const TUBE = {
 
 /**
  * The section at closure c, as the old sweep wants it (a closed outline of {x, y, zone, smooth}):
- *   inner surface: left lip → left wall → FLOOR band (zone 1, asphalt + markings) → right wall → right lip
+ *   inner surface: left lip → left wall → bottom → right wall → right lip, ALL bore (zone 3): a tube is
+ *   round inside, no road down its floor (user, 2026-10-19)
  *   right lip: a half round from the inner surface to the shell (rounded, not a cut end)
  *   outer shell back to the left, then the left lip's half round home.
  * Points are spread by ARC LENGTH, so the count never changes (the sweep morphs point by point) and
@@ -42,7 +43,8 @@ export function tubeSection(c) {
   const fb = Math.min(floor / 2, half - 0.05); // the floor band's half width (a flat road can't be narrower)
   const us = [];
   for (let k = 0; k <= NS; k++) us.push({ u: -half + ((half - fb) * k) / NS, zone: 3 }); // left wall, lip → floor edge
-  for (let k = 0; k <= NF; k++) us.push({ u: -fb + (2 * fb * k) / NF, zone: 1 }); // the floor (its edges doubled with the walls')
+  // the bottom: the SAME surface as the walls (user, 2026-10-19: "tubes should be tubes, no flat road")
+  for (let k = 0; k <= NF; k++) us.push({ u: -fb + (2 * fb * k) / NF, zone: 3 });
   for (let k = 0; k <= NS; k++) us.push({ u: fb + ((half - fb) * k) / NS, zone: 3 }); // right wall, floor edge → lip
   const inner = us.map(({ u, zone }) => ({ ...at(u), zone }));
   const pts = [];

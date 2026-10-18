@@ -7,8 +7,11 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] **Tube entrance / exit shape** — the user finds the curl "cheap" ("I don't like the way it does
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.
 - [x] Tube wall thicker: 0.6 → 1.5 m (user: "looks too thin").
-- [ ] **Wall riding in tubes** — the car's grip holds it near the floor even in the R32 tube turn at
-      215 km/h (13–22°). Decision pending: less sideways grip on tube surfaces only (recommended), or not.
+- [x] Tubes are ROUND inside, no flat road (user, 2026-10-19).
+- [x] **Loops inside the pipe** (user: "that's the funny thing of tubes") work with today's grip —
+      measured (trackRun --spiral): a held gentle steer rides the car up the wall, over the roof and
+      round, 2½ loops in one long pipe, ~30–40 km/h lost per loop; too slow and it drops off the roof.
+      So NO grip change in the car (the shared engine file stays untouched).
 - [ ] Rest of the tube family: corkscrew, loop tube, skylight (pop out the top), trapdoor (drop
       through the floor), half-pipe channel, helix (PIECES.md §7c).
 

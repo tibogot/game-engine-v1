@@ -147,6 +147,7 @@ export function createAutopilot(ride) {
       _local.copy(aim(best, 25).P).sub(p).applyQuaternion(_inv); // car local: +Z forward, +X left
       let steer = THREE.MathUtils.clamp((_local.x / Math.max(_local.z, 4)) * 2.5, -1, 1);
       if (ride[idx].tube > 0.3 && car.groundedCount > 0) steer = globalThis.__TUBE_MODE === "angle" ? tubeSteer(car, idx) : tubeHeading(car, idx);
+      if (ride[idx].tube > 0.9 && globalThis.__SPIRAL != null) steer = globalThis.__SPIRAL; // tests: a held steer up the wall
       const farR = aim(best, 90), far = farR.T;
       _nose.set(0, 0, 1).applyQuaternion(car.body.quat);
       const bend = Math.acos(THREE.MathUtils.clamp(far.dot(_nose), -1, 1));
