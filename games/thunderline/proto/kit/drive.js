@@ -14,6 +14,7 @@ import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
 import { TILES, integrate, ensureTile } from "./kit.js";
 import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
+import { createLandingJudge } from "./landing.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -246,12 +247,29 @@ function boostTick(dt) {
   boostLeft = Math.max(0, boostLeft - dt);
 }
 
+// ---------- landings: the grade flashes under the timer ----------
+const judge = createLandingJudge(vehicle);
+const landings = []; // every graded landing this run (tests read it)
+let landTimer = null;
+function showLanding(ev) {
+  landings.push({ grade: ev.grade, err: Math.round(ev.err), air: +ev.air.toFixed(1), t: +runTime.toFixed(2) });
+  const el = $("land");
+  const label = { perfect: "Perfect landing", ok: "Landed", rough: "Rough landing" }[ev.grade];
+  const tail = ev.grade === "perfect" ? "boost" : ev.grade === "rough" ? "−15% speed" : "land flat for a boost";
+  el.innerHTML = `${label}<small>${Math.round(ev.err)}° · ${ev.air.toFixed(1)} s air · ${tail}</small>`;
+  el.className = `panel show ${ev.grade}`;
+  clearTimeout(landTimer);
+  landTimer = setTimeout(() => el.classList.remove("show"), 1400);
+}
+
 // ---------- respawn: restart, last safe spot, falls ----------
 let simAccum = 0;
 let runTime = 0;
 let topKmh = 0;
 const safe = { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false };
 function restart() {
+  judge.reset();
+  landings.length = 0;
   pilot.reset();
   vehicle.setSpawn(spawnPos, startQuat);
   vehicle.respawn();
@@ -264,6 +282,7 @@ function restart() {
 }
 let recoveries = 0;
 function recoverToSafe() {
+  judge.reset();
   recoveries++;
   vehicle.respawnAt(safe.pos.clone().add(new V(0, 0.5, 0)), safe.quat.clone());
   chase.reset();
@@ -312,6 +331,9 @@ function tick() {
   for (let i = 0; i < ticks; i++) {
     // NO ENGINE UP A WALL applies to everyone (autopilot.js wallCut), every tick: a car rule
     vehicle.tick(wallCut(vehicle, input));
+    // CLEAN-LANDING BOOST (landing.js): land flat → the boost pad's push; land crooked → lose speed
+    const landed = judge.tick(FIXED_DT);
+    if (landed) { boostLeft = Math.max(boostLeft, landed.boost); showLanding(landed); }
     boostTick(FIXED_DT);
     runTime += FIXED_DT;
     if (vehicle.groundedCount >= 3) { safe.pos.copy(vehicle.body.pos); safe.quat.copy(vehicle.body.quat); safe.ok = true; }
@@ -334,7 +356,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
-  get boosting() { return boostLeft > 0; }, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  get boosting() { return boostLeft > 0; }, landings, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };

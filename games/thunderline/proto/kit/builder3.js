@@ -7,6 +7,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
+import { createLandingJudge } from "./landing.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -327,6 +328,8 @@ async function runPrediction() {
   let idx = 0, boost = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
   const lp = new THREE.Vector3(), nose = new THREE.Vector3();
   const pilot = createAutopilot(ride); // the drive page's autopilot (and its wall cut, air spin)
+  const judge = createLandingJudge(car); // perfect landings boost, as on the drive page
+  prediction.landings = [];
   let endSpeed = null;
   for (let tick = 0; tick < 120 * 180; tick++) {
     const p = car.body.pos;
@@ -335,6 +338,8 @@ async function runPrediction() {
     nose.set(0, 0, 1).applyQuaternion(car.body.quat);
     const v = car.body.vel.length();
     for (const b of boosts) { lp.copy(car.body.pos).applyMatrix4(b); if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boost = 2.0; }
+    const landed = judge.tick(FIXED_DT);
+    if (landed) { boost = Math.max(boost, landed.boost); prediction.landings.push(landed.grade); }
     if (boost > 0 && car.groundedCount > 0) car.body.vel.addScaledVector(nose, 14 * FIXED_DT);
     boost = Math.max(0, boost - FIXED_DT);
     // take-off at a lip: the speed the arc band is built from
@@ -446,7 +451,7 @@ function roadSamples() {
   return out;
 }
 function runChecks() {
-  problems = { overlap: new Set(), messages: [] };
+  problems = { overlap: new Set(), loose: [], messages: [] };
   const neighbours = new Map();
   for (const p of track.pieces) { neighbours.set(p.uid, new Set([p.uid])); }
   for (const p of track.pieces) if (p.parent != null) { neighbours.get(p.uid).add(p.parent); neighbours.get(p.parent)?.add(p.uid); }
@@ -462,6 +467,12 @@ function runChecks() {
     }
   }
   if (problems.overlap.size) problems.messages.push(`${problems.overlap.size} pieces overlap another road (red)`);
+  // LOOSE PIECES: not reachable from the first piece by road or flight (placed on a grid, not snapped
+  // to an end). The car falls off where the connected road stops; the prediction used to stop there
+  // too and call it a lap (user, 2026-10-18: "the last pieces … are not aligned and make the car fall")
+  const chain = new Set(orderedPieces().map((p) => p.uid));
+  problems.loose = track.pieces.filter((p) => !chain.has(p.uid)).map((p) => p.uid);
+  if (problems.loose.length) problems.messages.push(`${problems.loose.length} piece${problems.loose.length > 1 ? "s are" : " is"} not connected to the road (orange) — the car falls where the road stops`);
   let blocked = 0;
   for (const a of arcs) {
     // a flight that has its landing ends there: the arc beyond it never happens (it ran on under the
@@ -484,10 +495,10 @@ function runChecks() {
   if (blocked) problems.messages.push(`a flight passes under a road (${blocked} points) — the car would hit it`);
   // tint overlapping pieces: a red box around each
   for (const c of overlapBoxes.splice(0)) scene.remove(c);
-  for (const uid of problems.overlap) {
+  for (const [uid, color] of [...[...problems.overlap].map((u) => [u, 0xff4d5e]), ...problems.loose.map((u) => [u, 0xff9a3d])]) {
     const b = built.get(uid);
     if (!b) continue;
-    const box = new THREE.Box3Helper(new THREE.Box3().setFromObject(b.group), 0xff4d5e);
+    const box = new THREE.Box3Helper(new THREE.Box3().setFromObject(b.group), color);
     scene.add(box);
     overlapBoxes.push(box);
   }
@@ -717,8 +728,9 @@ function predictionLine() {
   const lips = [...P.lipSpeed.values()].map((v) => Math.round(v * 3.6)).join(", ");
   if (P.fail) return `<div class="warn">⚠ the car ${P.fail.why} at "${name(P.fail.uid)}" (orange box)</div>`;
   if (P.openJump) return `<div class="row"><span>real car takes off at</span><b>${lips} km/h — land it on the band</b></div>`;
-  return `<div class="row"><span>real car: lap</span><b>${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
-    (lips ? `<div class="row"><span>take-offs</span><b>${lips} km/h</b></div>` : "");
+  return `<div class="row"><span>${problems.loose?.length ? "real car: to the road's end" : "real car: lap"}</span><b>${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
+    (lips ? `<div class="row"><span>take-offs</span><b>${lips} km/h</b></div>` : "") +
+    (P.landings?.length ? `<div class="row"><span>landings (lined up)</span><b>${P.landings.filter((g) => g === "perfect").length}/${P.landings.length} perfect</b></div>` : "");
 }
 function renderStatus() {
   const names = { end: "open end", arc: "flight arc", local: "local grid", world: "world grid" };
@@ -833,5 +845,5 @@ window.__b3 = {
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
   setTrack(t) { track = t; rebuild(); },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
-  get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
+  get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };

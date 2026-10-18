@@ -194,8 +194,13 @@ landings, roof contact). Nothing I could write fresh would beat it before the r1
 **Full 3-axis air control stays: pitch, roll and spin.** I first planned to drop spin. Apex Rush's
 reviews changed that: its in-air control is the single most praised thing in the game. The old car
 already has the model Apex Rush had to patch in later: rate-based (hold = rotate at a set rate),
-damped the moment you let go. The rule for using it well is one sentence: "land flat, keep your
-speed". The physics reward it alone (a crooked landing loses speed). Rates stay modest (the old
+damped the moment you let go. The rule for using it well is one sentence: **"land with your wheels
+flat on the road and you get a boost"** (Excite Truck's rule). The physics do NOT reward it alone —
+measured (proto/kit/landingTest.mjs): the old car's landing assist forgives nearly everything; hands
+off landed 7–13° off at the same speed as a lined-up car, and an 89° crooked landing kept 99% at
+0.25 s. So, after ≥ 0.8 s of air (proto/kit/landing.js): ≤ 6° = PERFECT, 1 s of the boost-pad push
+(~+50 km/h); 6–30° = nothing; > 30° = ROUGH, −15% speed. Hands-off never earns it (7–13°), lining up
+does (2–3°): ~2 s a lap on the test track. The grade flashes under the timer. Rates stay modest (the old
 "too brutal" verdict lowered pitch to 3.0 rad/s), and roll must not feel slow (an Apex Rush
 complaint).
 
