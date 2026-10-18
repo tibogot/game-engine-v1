@@ -480,6 +480,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     hit: exact("hit")?.name ?? null,
     deathBlown: exact("death_blown")?.name ?? null,
     deathRunning: exact("death_running")?.name ?? null,
+    deathBack: exact("death_back")?.name ?? null,   // (Mixamo "Death From Back Headshot": shot from behind, standing)
     cower: exact("cower")?.name ?? null,
     carryWalk: exact("carry_walk")?.name ?? null,
     injuredWalk: exact("injured_walk")?.name ?? null,
@@ -1585,6 +1586,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       const lh = unit.lastHit;
       const blast = lh?.kind === "blast" && r.deathBlown && f.has(r.deathBlown) && !/prone|crawl/.test(v.prev.clip);
       const running = !blast && r.deathRunning && f.has(r.deathRunning) && v.prev.clip === r.run;
+      // SHOT FROM BEHIND (2026-10-19): standing (not kneeling, lying, running), his killer more than ~115°
+      // off his facing (combat's lastHitBy) — he pitches forward, the back-headshot death.
+      const by = unit.lastHitBy;
+      let behind = false;
+      if (!blast && !running && by?.position && r.deathBack && f.has(r.deathBack) && !/crouch|kneel|prone|crawl|sit/.test(v.prev.clip)) {
+        const a = Math.atan2(by.position.x - unit.position.x, by.position.z - unit.position.z) - (unit.heading ?? 0);
+        behind = Math.abs(Math.atan2(Math.sin(a), Math.cos(a))) > 2.0;
+      }
       // His BODY to face the blast (the model's facing is heading + facingOffset; heading is read-only:
       // units turn through faceToward — at a point that gives that heading).
       if (blast) {
@@ -1595,6 +1604,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         v.xform.updateMatrix();
       }
       const d = blast ? { clip: r.deathBlown, t: 0, fade: 0.1 } : running ? { clip: r.deathRunning, t: 0, fade: 0.15 }
+        : behind ? { clip: r.deathBack, t: 0, fade: 0.12 }
         : deathFrom(v.prev.clip, r.deaths[Math.floor(v.seed[0] * 97) % r.deaths.length], r.deaths, (c) => f.duration(c), (c) => f.has(c));
       v.move = null;
       v.cur = { clip: d.clip, t: d.t };

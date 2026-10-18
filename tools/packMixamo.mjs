@@ -191,6 +191,7 @@ const ROLES = {
   // The 2026-10-17 batch (alg-rts: being hit, more deaths, pinned, wounded, paras, work, civilians).
   "falling forward death": "death_running",
   "shot in the back and fall": "death_back",
+  "death from back headshot": "death_back",   // (2026-10-19: the one Mixamo has — killed from behind, unitRenderer)
   "terrified": "cower",
   "injured walking": "injured_walk",
   "injured walk": "injured_walk",

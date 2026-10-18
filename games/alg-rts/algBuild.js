@@ -287,6 +287,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
    * shovel in his hands (unitRenderer.js).
    */
   const atWork = new Set();
+  // Dug, not built: their men only shovel (the rest: hands at the frame, half of them).
+  const EARTHWORKS = new Set(["sandbags", "mgNest", "mortarPit", "fortPoint", "sangar", "armsCache", "refuge", "ambushScreen"]);
   const HAUL_PACE = 0.45;   // × his speed with a crate in his arms (~2.3 m/s: a walk)
   function step(dt) {
     atWork.clear();
@@ -298,7 +300,12 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
         if (Math.hypot(u.position.x - s.x, u.position.z - s.z) < s.reach) {
           workers++;
           atWork.add(u);
-          if (u.working !== s) { u.working = s; u.faceToward?.(s.x, s.z); }
+          if (u.working !== s) {
+            u.working = s; u.faceToward?.(s.x, s.z);
+            // HANDS OR SHOVEL (2026-10-19, Mixamo "Working On Device"): earthworks are dug; on a
+            // structure the men alternate — one at the frame with his hands, the next with the shovel.
+            u.workClip = EARTHWORKS.has(s.key) || workers % 2 === 0 ? null : "repair";
+          }
         }
       }
       if (!workers) continue;
@@ -317,7 +324,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       if (haul !== !!u.hauling) { u.hauling = haul; u.loadMul = haul ? HAUL_PACE : 1; }
     }
     for (let i = sites.length - 1; i >= 0; i--) if (sites[i].progress >= 1) finish(sites[i]);
-    for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting && !u.repairing) u.working = null;   // a wire-cutter is algWire.js's, a repairer algRepair.js's
+    for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting && !u.repairing) { u.working = null; u.workClip = null; }   // a wire-cutter is algWire.js's, a repairer algRepair.js's
   }
   /** A site stops being a site (finished or cancelled): out of the list and the selection. */
   function retire(s) {
