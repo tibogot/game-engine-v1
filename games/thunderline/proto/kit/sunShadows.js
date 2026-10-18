@@ -36,7 +36,7 @@ const LIVE_TEX = 2048;
  * @param {THREE.Vector3[]} o.casterPoints world points sampling every static caster (deck + rail vertices)
  * @param {number} [o.atlasSize] 8192 (1024 cells) or 4096 (256 cells)
  */
-export function createSunShadows({ renderer, scene, sunDir, casterPoints, atlasSize = 8192 }) {
+export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoints, atlasSize = 8192 }) {
   // ---- light frame: x/y across the sun's view, z towards the sun ----
   const zL = sunDir.clone().normalize();
   const xL = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), zL);
@@ -104,6 +104,7 @@ export function createSunShadows({ renderer, scene, sunDir, casterPoints, atlasS
   };
 
   function renderInto(rt, viewport, layers) {
+    const scene = mainScene;
     const prev = { target: renderer.getRenderTarget(), override: scene.overrideMaterial, bg: scene.background, env: scene.environment, autoClear: renderer.autoClear };
     scene.overrideMaterial = depthMat;
     scene.background = null;
@@ -134,6 +135,9 @@ export function createSunShadows({ renderer, scene, sunDir, casterPoints, atlasS
 
   // ---- A. bake the atlas once ----
   const texel = CELL / INNER;
+  // ~4.6–4.8 s for 632 cells, i.e. ~7.6 ms of FIXED overhead per render call. Rendering only the
+  // track (a bare scene) measured the same, so the fix is fewer calls (several cells per pass /
+  // bigger cells) or a progressive bake over the first frames — see DESIGN.md §7.
   function bake() {
     const t0 = performance.now();
     clearRT(atlasRT);

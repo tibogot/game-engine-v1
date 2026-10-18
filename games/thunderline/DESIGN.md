@@ -55,6 +55,9 @@ UNVERIFIED there.
 
 ## 3. Speed — DECIDED (number confirmed in PROTO P3)
 
+- **Boosts go BEYOND the design speed (user, 2026-10-18: "we will add some boost at some places in
+  the track that make it even faster").** So the car must stay solid (collision, landings, loops,
+  tubes) at BOOST speed, not just at 216 km/h. That is the real speed requirement of P3.
 - **Design speed 60 m/s (216 km/h) on a fast straight, boosts up to 70 m/s.** One constant,
   `DESIGN_SPEED`, drives every number the old game copied by hand: steering reduction, camera FOV
   reference, gap and landing previews, piece "held speed" labels.
@@ -269,8 +272,9 @@ shallow hit keeps most of the speed; a head-on hit is a crash. P3 tests it.
 - **Respawn — DECIDED:** Backspace = back to the last checkpoint at the speed you had there; press
   again = standing respawn (this fixes the "carried speed replays a bad line" softlock); Delete/R =
   instant restart from the start. The stuck detector from Apex Rush is kept as a safety net.
-- **Ghosts — DECIDED design, PROTO P5:** a ghost is the run's **inputs** on the fixed tick (tiny,
-  and it proves the time), plus a light pose track for display in case replay drifts. Records are
+- **Ghosts — DECIDED (P5 measured):** a ghost is the run's **inputs** on the fixed tick (~28 KB per
+  80 s lap, bit-exact in the same environment) plus a **pose keyframe every second** (Node vs Chrome
+  drift from 1e-14 to ~1 cm over a lap, so playback snaps to keyframes). Records are
   keyed by track id + content hash, never by gate positions.
 - **Track file — DECIDED:** id, version, author, sun, medals, author time, content hash, and the
   piece list as **tile id + version + full parameters + exact world pose** (no sparse "same as
@@ -299,6 +303,50 @@ turn 155, banked landing 158, catch pad 153 km/h). 61 fps, ~3.3 ms CPU, ~3 ms GP
 - **Respawn:** "last safe spot" can be a kicker lip (respawning there at 0 km/h falls again); the
   real rule is the checkpoint respawn that keeps your speed (§8).
 - To check: a darker diagonal band across a deck (cloud shadow or a shadow-cascade edge?).
+
+**P5 — ghosts / determinism (2026-10-18), `proto/kit/ghostTest.mjs`.** The real car (top 63, 3
+substeps, boost pads) runs the test track in Node under the autopilot, recording every tick's input;
+a fresh car then replays ONLY the inputs:
+- **Same environment: bit-exact.** All 9,516 ticks of a 79.3 s lap matched, max difference 0. A ghost
+  can be just the inputs: ~28 KB per lap (steer, throttle, flags per tick).
+- **Node vs Chrome: identical for the first 5 s (599 ticks), then a 2.5e-14 difference appears
+  between ticks 600 and 1199** — one rounding step in one math function, which differs between the two
+  V8 versions — and grows (a car is chaotic) to ~1.4 cm by the end of the lap. Same lap, same ticks.
+- **Decided:** ghosts = inputs + a pose keyframe every second (playback snaps to them, so a ghost
+  never drifts visibly, a few KB more). Online record checking (LATER) needs cross-engine bit
+  exactness: find the math function that differs and use our own pure-JS version (PolyTrack gets the
+  same guarantee from WebAssembly).
+- Rule found on the way: **inputs must be stored exactly as the physics used them** (quantise before
+  the physics, never after).
+- Bug found on the way: **picking the car's LOOK changes its physics.** `setWheelStyle` writes the
+  module-wide `WHEEL.radius`, which the tyre probes use. In the build each car's tune owns its wheel
+  radius; a cosmetic swap must never touch physics (ghosts and records must stay comparable).
+- Test track: the user saw it overlap itself (all turns were right-handed). Pieces now have mirrors
+  (`…_L`); `layoutCheck.mjs --search` tried all 256 left/right assignments, 128 are clean (no road
+  overlap, clear flight corridors); the track uses an alternating one. The road-overlap check is
+  part of the layout now — the builder needs the same.
+
+**P3 step 2 — design speed + boosts (2026-10-18).** The drive page sets, at load and on this page
+only (the old car's code is untouched): `TIRE.topSpeed` 63 (terminal ≈ 60 m/s), `steerSpeedRef` and
+the camera's `fovSpeedRef` from it, **3 physics substeps** (per-car field). Boost pads: touching one
+pushes along the nose (14 m/s², 2 s) on top of the engine. Measured with the autopilot:
+- **Full lap, no falls, 80.2 s** (was 87 at the old speed). Take-offs 203 / 175 / 181 km/h, landings
+  186 / 163 / 166. **Boost 205 → 265 km/h, top 279 km/h (77.5 m/s)** into the loop — loop held.
+- **Substeps, clean A/B** (same start, 600 ticks, alternated): 2 → 0.32–0.33 ms/tick, 3 → 0.45–0.51
+  ms/tick (+~0.3 ms per frame), identical driving on the straight. At 279 km/h, 3 substeps = 0.22 m
+  per substep (inside the 0.25 m the old collision was verified for); 2 would be 0.32. **Decided: 3.**
+- **Flights must use the car's air model:** gravity + its drag (AERO.drag·v²/mass; downforce is off
+  in the air). A gravity-only arc overshot by ~5% (~9 m).
+- **Each kicker has its own take-off speed** (175 km/h after a brake turn vs 202 on a long run-up):
+  landings are fitted per kicker, from the predicted speed there (PIECES.md §7b).
+- **Flight corridors must be checked for clearance.** The self-crossing test track put an overpass
+  ~5 m above the first kicker's lip: the car hit its underside (a one-tick vy +18 → −7 m/s). Later
+  the 48 m wide catch pad overhung the end of flight 1. The layout now names the blocking piece.
+- **Walls still stop the car dead:** at the higher speed the autopilot ran wide out of a brake turn
+  into the rail and stopped (nose in, tipped on the kerb). That's the old "kerb strike kills all
+  speed" gap and Apex Rush's top wall complaint → a real car item for the build (glance off).
+- Still open: the shadow bake (4.6–4.8 s = ~7.6 ms fixed cost per render call → batch or bake
+  progressively), the shader warm-up, the camera feel at speed (the user's verdict).
 
 **P1b, built 2026-10-18:** `games/thunderline/proto/builder2.html`. The old kit's 163 tiles, the
 old palette (same markup, `palette.css` as it is, thumbnails baked with the real materials), and a

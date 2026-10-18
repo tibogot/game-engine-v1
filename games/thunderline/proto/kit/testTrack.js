@@ -10,15 +10,25 @@ const G = 9.81;
 // Guarded by default; "!" = OPEN: the run-ups to the kickers, the landings and the catch pad are
 // open (that's where falling off is the risk you take), the fast turns, loop and wallride guarded.
 const S = "straight_64";
+// "@x" = the piece's HAND comes from variable x (R or L): a bank-in, its turn and its bank-out share
+// one variable so they lean the same way. "!" = placed open. layoutCheck.mjs searches the hands for
+// a layout with no road overlap and clear flight corridors; TEST_HANDS is the one it found.
 export const TEST_TRACK = [
-  [S, S, "bank_in_22", "fast_turn_128", "bank_out_22", "straight_64!", "kicker_20!"],
-  ["fly", "landing_turn_20!", 20],
-  ["fast_turn_128", "bank_out_22", "boost_32", S, "loop_28", S, "brake_turn_32", S, "straight_64!", "kicker_20!"],
-  ["fly", "banked_landing_20!", 20],
-  ["fast_turn_128", "bank_out_22", S, "wallride_90", S, "kicker_20!"],
+  [S, S, "bank_in_22@a", "fast_turn_128@a", "bank_out_22@a", "straight_64!", "kicker_20!"],
+  ["fly", "landing_turn_20@b!", 20],
+  ["fast_turn_128@b", "bank_out_22@b", "boost_32", S, "loop_28@c", S, "brake_turn_32@d", S, "straight_64!", "kicker_20!"],
+  ["fly", "banked_landing_20@e!", 20],
+  // the extra straight moves jump 3: its wide catch pad overhung the end of flight 1
+  ["fast_turn_128@e", "bank_out_22@e", S, "wallride_90@f", S, S, "kicker_20!"],
   ["fly", "catch_pad!", 8],
-  ["straight_64!", "brake_turn_32", S, "bank_in_22", "fast_turn_128", "fast_turn_128", "bank_out_22", S],
+  // slope_down_12: the last section used to pass ~5 m over the first kicker's lip, and the car leaving
+  // the lip hit its underside (a one-tick vy 18 → −7 m/s, P3 2026-10-18). The builder must check
+  // FLIGHT CORRIDORS for clearance, not only road against road.
+  ["slope_down_12", "straight_64!", "brake_turn_32@g", S, "bank_in_22@h", "fast_turn_128@h", "fast_turn_128@h", "bank_out_22@h", S],
 ];
+// alternating right/left: one of the 128 clean layouts of 256 (layoutCheck --search), chosen so the
+// car meets left- and right-hand versions of every turning piece
+export const TEST_HANDS = { a: "R", b: "L", c: "R", d: "L", e: "R", f: "L", g: "R", h: "L" };
 
 /**
  * @param {object} o
@@ -32,7 +42,11 @@ export const TEST_TRACK = [
  * where the SLOWEST car of the band lands (`speedMin`, default 93% of `speed`); a faster one lands
  * further along the same landing ramp.
  */
-export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, origin = new V(0, 120, 600), plan = TEST_TRACK }) {
+export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, jumpSpeeds = null, airDrag = 0.45 / 1400, origin = new V(0, 120, 600), plan = TEST_TRACK, hands = TEST_HANDS }) {
+  // EACH FLIGHT HAS ITS OWN take-off speed (P3, 2026-10-18): a kicker after a brake turn and a short
+  // run-up was reached at 174 km/h when the global "0.91 × top" said 206, and the car fell short.
+  // `jumpSpeeds[i]` = measured take-off speed of flight i (m/s); the band floor is 93% of it.
+  let flightIndex = 0;
   const placements = [];
   const ride = [];
   const arcPts = [];
@@ -43,7 +57,8 @@ export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, or
 
   const place = (spec) => {
     const open = spec.endsWith("!");
-    const id = open ? spec.slice(0, -1) : spec;
+    const [base, handVar] = (open ? spec.slice(0, -1) : spec).split("@");
+    const id = handVar && hands[handVar] === "L" ? `${base}_L` : base;
     const t = TILES[id];
     if (Math.abs(leanIn(t) - cur.lean) > 1e-6) warnings.push(`${id}: lean ${(leanIn(t) / DEG).toFixed(0)}° on a ${(cur.lean / DEG).toFixed(0)}° end`);
     const M = socketMatrix(cur);
@@ -52,7 +67,7 @@ export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, or
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of b.rings) {
       const f = deckFrame(r, hw);
-      ride.push({ P: f.P.clone().addScaledVector(f.U, 0.7).applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M) });
+      ride.push({ P: f.P.clone().addScaledVector(f.U, 0.7).applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: placements.length - 1, id });
     }
     const e = b.exit;
     cur = { p: e.p.clone().applyMatrix4(M), T: e.T.clone().transformDirection(M), U: e.U.clone().transformDirection(M), R: e.R.clone().transformDirection(M), lean: e.lean };
@@ -62,24 +77,33 @@ export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, or
   // Fly off the current end and put `spec` where the SLOWEST car of the band (speedMin) comes down
   // at `angleDeg`; the arc drawn and ridden is that one, the faster cars land further on.
   const fly = (spec, angleDeg) => {
-    const speed = speedMin;
-    const d = cur.T.clone();
-    const h = new V(d.x, 0, d.z);
-    const vh = speed * h.length();
-    h.normalize();
-    const t = (d.y * speed + Math.tan(angleDeg * DEG) * vh) / G;
-    const p0 = cur.p.clone();
-    for (let k = 1; k <= 40; k++) {
-      const tt = (t * k) / 40;
-      const P = p0.clone().addScaledVector(h, vh * tt);
-      P.y += d.y * speed * tt - 0.5 * G * tt * tt;
-      const T = h.clone().multiplyScalar(vh).add(new V(0, d.y * speed - G * tt, 0)).normalize();
-      ride.push({ P: P.clone().add(new V(0, 0.7, 0)), T, U: Y.clone(), air: true });
-      arcPts.push(P);
+    const own = jumpSpeeds?.[flightIndex++];
+    // 97% of the MEASURED take-off: at 200 km/h a 7% band is ~15% of range (~28 m on a 180 m jump),
+    // more than a 52 m landing can catch — see PIECES.md "fitted landings"
+    const speed = own ? own * 0.97 : speedMin;
+    // THE CAR'S AIR MODEL, not a parabola: gravity + its aero drag (AERO.drag·v² / mass; downforce is
+    // off in the air). Drag costs ~1 m/s² at 55 m/s: a gravity-only arc overshot by ~5% (~9 m).
+    const vel = cur.T.clone().multiplyScalar(speed);
+    const P = cur.p.clone();
+    const dt = 1 / 120;
+    const target = Math.tan(angleDeg * DEG);
+    let steps = 0;
+    for (let i = 0; i < 120 * 20; i++) {
+      const sp = vel.length();
+      vel.addScaledVector(vel, -airDrag * sp * dt);
+      vel.y -= G * dt;
+      P.addScaledVector(vel, dt);
+      if (++steps % 6 === 0) {
+        ride.push({ P: P.clone().add(new V(0, 0.7, 0)), T: vel.clone().normalize(), U: Y.clone(), air: true });
+        arcPts.push(P.clone());
+      }
+      const vh = Math.hypot(vel.x, vel.z);
+      if (vel.y < 0 && -vel.y / vh >= target) break; // falling at the landing's angle
     }
-    const T = h.clone().multiplyScalar(vh).add(new V(0, d.y * speed - G * t, 0)).normalize();
+    arcPts.push(P.clone());
+    const T = vel.clone().normalize();
     const R = new V().crossVectors(T, Y).normalize();
-    cur = { p: arcPts[arcPts.length - 1].clone(), T, U: new V().crossVectors(R, T), R, lean: 0 };
+    cur = { p: P.clone(), T, U: new V().crossVectors(R, T), R, lean: 0 };
     arcPts.push(null);
     place(spec);
   };
@@ -88,6 +112,38 @@ export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, or
     if (step[0] === "fly") fly(step[1], step[2]);
     else step.forEach(place);
   }
+  // FLIGHT CORRIDOR CLEARANCE: no road may pass within 6 m above (or 9 m beside) a flight path —
+  // a car leaving a lip under an overpass hits its underside (found in P3).
+  const roads = ride.filter((r) => !r.air);
+  let hits = 0;
+  const culprits = new Set();
+  for (const a of ride) {
+    if (!a.air) continue;
+    for (const r of roads) {
+      const dy = r.P.y - a.P.y;
+      if (dy > 0.5 && dy < 6 && Math.hypot(r.P.x - a.P.x, r.P.z - a.P.z) < 9) { hits++; culprits.add(`#${r.piece} ${r.id}`); break; }
+    }
+  }
+  if (hits) warnings.push(`flight corridor blocked: ${hits} flight points have road < 6 m above them (${[...culprits].join(", ")})`);
+  // ROAD OVERLAP: two pieces that are not neighbours may not come within a road width sideways and
+  // 6 m vertically (the user saw the test track run through itself). Grid-hashed: O(n).
+  const cellOf = (P) => `${Math.floor(P.x / 16)},${Math.floor(P.z / 16)}`;
+  const grid = new Map();
+  for (const r of roads) { const k = cellOf(r.P); (grid.get(k) ?? grid.set(k, []).get(k)).push(r); }
+  const pairs = new Set();
+  for (const r of roads) {
+    const cx = Math.floor(r.P.x / 16), cz = Math.floor(r.P.z / 16);
+    for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+      for (const o of grid.get(`${cx + dx},${cz + dz}`) ?? []) {
+        if (Math.abs(o.piece - r.piece) <= 1) continue;
+        if (Math.abs(o.P.y - r.P.y) < 6 && Math.hypot(o.P.x - r.P.x, o.P.z - r.P.z) < 16) {
+          const a = Math.min(o.piece, r.piece), b = Math.max(o.piece, r.piece);
+          pairs.add(`#${a} ${placements[a].id} × #${b} ${placements[b].id}`);
+        }
+      }
+    }
+  }
+  if (pairs.size) warnings.push(`road overlap: ${[...pairs].join("; ")}`);
   return { placements, ride, arcPts, length, warnings, start };
 }
 

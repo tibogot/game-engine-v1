@@ -275,13 +275,36 @@ export const TILES = {
     marks: [{ kind: "landing", from: 0, to: 40 }],
   },
   boost_32: { label: "Boost 32", segs: [{ L: 32 }], marks: [{ kind: "boost", from: 4, to: 28 }] },
+  slope_down_12: {
+    label: "Slope down ~12 m",
+    // an S in the vertical: tip down 15°, then back to level — exits level, ~12.5 m lower
+    segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }],
+  },
 };
+// LEFT-HAND VERSIONS: every piece that turns, leans or steps sideways gets a mirror, `<id>_L`
+// (turn, lean and the loop's sideways step negated). A test track of only right turns spiralled into
+// itself (the user saw it overlap).
+for (const [id, t] of Object.entries({ ...TILES })) {
+  const handed = t.segs.some((s) => s.turn || s.leanIn || s.leanOut || s.offset);
+  if (!handed) continue;
+  TILES[`${id}_L`] = {
+    ...t,
+    label: `${t.label} (L)`,
+    segs: t.segs.map((s) => ({
+      ...s,
+      ...(s.turn ? { turn: -s.turn } : {}),
+      ...(s.leanIn !== undefined ? { leanIn: -s.leanIn } : {}),
+      ...(s.leanOut !== undefined ? { leanOut: -s.leanOut } : {}),
+      ...(s.offset ? { offset: -s.offset } : {}),
+    })),
+  };
+}
 for (const [id, t] of Object.entries(TILES)) t.id = id;
 // Landings are met tipped DOWN along the flight arc by this angle (deg); their exit is then level.
-TILES.landing_20.landAngle = 20;
-TILES.banked_landing_20.landAngle = 20;
-TILES.landing_turn_20.landAngle = 20;
-TILES.catch_pad.landAngle = 8;
+for (const [id, a] of [["landing_20", 20], ["banked_landing_20", 20], ["landing_turn_20", 20], ["catch_pad", 8]]) {
+  TILES[id].landAngle = a;
+  if (TILES[`${id}_L`]) TILES[`${id}_L`].landAngle = a;
+}
 
 /** Lean at the entry / exit of a tile (radians). */
 export const leanIn = (t) => t.segs[0].leanIn ?? 0;

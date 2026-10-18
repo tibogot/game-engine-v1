@@ -211,6 +211,18 @@ Learned while building it:
 - Not checked yet: whether the car actually drives these shapes well (the eased-curvature loop, the
   80° wallride, landing angles) — that's P3 with the real car.
 
+## 7b. Fitted landings (finding from P3 at design speed, 2026-10-18)
+
+Range grows with v², so a landing placed for one speed fails for any other: at ~200 km/h a ±4%
+take-off speed spread moves the touchdown by ~15 m, a 7% band by ~28 m on a 180 m jump. Seen twice
+on the test track (one landing short, one long). And each kicker's take-off speed depends on what is
+before it (174 km/h after a brake turn vs 202 on a long run-up), so one global speed is wrong too.
+**Decision:** a landing is FITTED to the arc band of ITS kicker: the builder predicts the take-off
+speed at that kicker (§ speed prediction), takes a band around it (slow..fast), and generates a
+landing ramp that starts where the slowest arc comes down and is long enough for the fastest, its
+slope following the arcs (each arc meets it at a shallow angle). Big jumps get long landings, small
+hops short ones. The author's validation run checks it for real.
+
 ## 8. What's next
 
 **P5 — piece lab** (grey-to-first-look, no car yet): the PATH × SECTION × LEAN sweep with the road

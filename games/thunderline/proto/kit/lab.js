@@ -62,6 +62,7 @@ const labels = [];
 {
   let x = 0;
   for (const [id, t] of Object.entries(TILES)) {
+    if (id.endsWith("_L")) continue; // mirrors: same shape, other hand
     const mesh = new THREE.Group();
     mesh.add(pieceGroup(built[id].guarded));
     mesh.userData.id = id;

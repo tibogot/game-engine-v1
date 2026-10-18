@@ -4,10 +4,10 @@
 // :9904-10040), minus everything a sky track doesn't need. Throwaway: it answers DESIGN.md §9 P3.
 import * as THREE from "three";
 import { startV3App } from "../../../../v3/engine.js";
-import { Vehicle, FIXED_DT, STUCK } from "../../../../v3/play/modularRoadVehicle.js";
+import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS } from "../../../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
-import { createChaseCamera } from "../../../modular-road-v3/chaseCamera.js";
+import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
 import { createGamepadInput } from "../../../modular-road-v3/gamepadInput.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
@@ -65,10 +65,21 @@ boot.textContent = "Thunderline · building the track…";
 const mats = createOldLookMaterials();
 const built = {};
 for (const [id, t] of Object.entries(TILES)) built[id] = { b: integrate(t), guarded: buildOldLook(t, true), open: buildOldLook(t, false) };
-// Flights are placed for the speed the car REALLY has at the kicker lip (measured 164 km/h with the
-// old car on this run-up — its 48 m/s top speed is never reached there). ?jump=<m/s> overrides.
-const JUMP_SPEED = Number(params.get("jump")) || 45.5;
-const lay = layoutTestTrack({ built, speed: JUMP_SPEED });
+// ---------- SPEED (P3 step 2): one design speed drives every number that used to copy it ----------
+// Set here, at load, on this page only — the old car's code is untouched (TIRE is a module object,
+// SUBSTEPS a per-car field). ?top=<m/s> (terminal ≈ 0.96 × top), ?substeps=<n>.
+const TOP = Number(params.get("top")) || 63;
+const SUBSTEPS = Number(params.get("substeps")) || 3;
+TIRE.topSpeed = TOP;
+TIRE.steerSpeedRef = TOP * 0.9; // "full reduction should land AT top speed" (old: 45 for 50)
+CHASE_CAM.fovSpeedRef = TOP; // "keep matching TIRE.topSpeed"
+// Flights are placed for the speed the car REALLY has at the kicker lip: 0.91 × top measured on this
+// run-up at top 50 (164 km/h). ?jump=<m/s> overrides.
+const JUMP_SPEED = Number(params.get("jump")) || TOP * 0.91;
+// ?jumps=a,b,c = measured take-off speed (m/s) of each flight; defaults measured with the autopilot at
+// top 63 / 3 substeps (jump 1: 201 km/h, jump 2: 175 km/h after the brake turn, jump 3: 182 km/h)
+const JUMPS = (params.get("jumps") ?? "55.8,48.6,50.6").split(",").map(Number).filter((v) => v > 0);
+const lay = layoutTestTrack({ built, speed: JUMP_SPEED, jumpSpeeds: JUMPS, airDrag: AERO.drag / CHASSIS.mass });
 const meshes = buildTrackMeshes(lay.placements, built, mats);
 meshes.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.layers.enable(STATIC_LAYER); } });
 scene.add(meshes.group);
@@ -79,7 +90,8 @@ const decks = [];
 const solids = [];
 for (const p of lay.placements) {
   const look = p.open ? built[p.id].open : built[p.id].guarded;
-  decks.push(asCollider(look.deck, p.M, { roadHold: ROAD_HOLD.has(p.id) }));
+  // the left-hand mirrors ("…_L") are the same pieces: they need the same tags
+  decks.push(asCollider(look.deck, p.M, { roadHold: ROAD_HOLD.has(p.id.replace(/_L$/, "")) }));
   if (look.railCollision) solids.push(asCollider(look.railCollision, p.M));
 }
 const deckBvh = new RoadBvh();
@@ -97,6 +109,7 @@ const KILL_Y = lowestY - 50;
 
 // ---------- the car ----------
 const vehicle = new Vehicle({ scene, showArrows: false });
+vehicle.SUBSTEPS = SUBSTEPS; // per-car: 3 → 1/360 s, keeps travel per substep ≤ the verified 0.25 m up to 90 m/s
 vehicle.getFloorY = () => NaN; // sky mode: no chassis floor at y = 0
 vehicle.setSolidCapsules([]);
 vehicle.setBvh(ground.ground, ground.solids);
@@ -222,6 +235,28 @@ function autopilotInput() {
 }
 addEventListener("keydown", (e) => { if (e.code === "KeyP") { autopilot = !autopilot; rideIdx = 0; } });
 
+// ---------- BOOST PADS: past the top speed, for a while (user: boosts make it "even faster") ----------
+// Touching a boost pad's deck arms a push along the car's nose for BOOST.time; the push is added on
+// top of the engine, so the car goes beyond its normal top speed and the drag/engine curve brings it
+// back afterwards.
+const BOOST = { accel: 14, time: 2.0 };
+const boostPads = lay.placements.filter((p) => p.id.startsWith("boost")).map((p) => p.M.clone().invert());
+let boostLeft = 0;
+const _lp = new V();
+const _fwd = new V();
+function boostTick(dt) {
+  const p = vehicle.body.pos;
+  for (const inv of boostPads) {
+    _lp.copy(p).applyMatrix4(inv); // piece frame: x right, y up, -z along the road
+    if (Math.abs(_lp.x) < 8 && _lp.y > -1 && _lp.y < 3 && _lp.z < -4 && _lp.z > -28) boostLeft = BOOST.time;
+  }
+  if (boostLeft > 0 && vehicle.groundedCount > 0) {
+    _fwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat); // the car's nose is +Z
+    vehicle.body.vel.addScaledVector(_fwd, BOOST.accel * dt);
+  }
+  boostLeft = Math.max(0, boostLeft - dt);
+}
+
 // ---------- respawn: restart, last safe spot, falls ----------
 let simAccum = 0;
 let runTime = 0;
@@ -271,6 +306,7 @@ let frame = 0;
 // the car's model and wheels are attached after load (setChassisModel / setWheelModel re-parent them);
 // re-adopt the car group a few times so late children land on the DYNAMIC layer too
 let adoptCount = 0;
+const physMs = []; // physics ms per 1/120 s tick, last ~4 s
 function adoptCarLayersOnce() { if (adoptCount++ % 60 === 0 && adoptCount < 1200) adoptCar(vehicle.group); }
 function tick() {
   requestAnimationFrame(tick);
@@ -283,11 +319,15 @@ function tick() {
   let ticks = Math.floor(simAccum / FIXED_DT);
   if (ticks > MAX_SIM_TICKS) { ticks = MAX_SIM_TICKS; simAccum = ticks * FIXED_DT; }
   simAccum -= ticks * FIXED_DT;
+  const tPhys = performance.now();
   for (let i = 0; i < ticks; i++) {
     vehicle.tick(input);
+    boostTick(FIXED_DT);
     runTime += FIXED_DT;
     if (vehicle.groundedCount >= 3) { safe.pos.copy(vehicle.body.pos); safe.quat.copy(vehicle.body.quat); safe.ok = true; }
   }
+  if (ticks) physMs.push((performance.now() - tPhys) / ticks);
+  if (physMs.length > 240) physMs.shift();
   vehicle.syncVisuals(dt, simAccum / FIXED_DT);
   if (sunShadows) { adoptCarLayersOnce(); sunShadows.follow(vehicle.renderPos); }
   checkFall();
@@ -296,7 +336,7 @@ function tick() {
   const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);
   topKmh = Math.max(topKmh, kmh);
   $("kmh").textContent = Math.round(kmh);
-  $("time").textContent = runTime.toFixed(2);
+  $("time").textContent = runTime.toFixed(2) + (boostLeft > 0 ? "  ·  BOOST" : "");
   if (++frame % 15 === 0) renderStats();
 }
 requestAnimationFrame(tick);
@@ -304,5 +344,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return rideIdx; }, get recoveries() { return recoveries; },
+  get boosting() { return boostLeft > 0; }, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; rideIdx = 0; recoveries = 0; },
 };
