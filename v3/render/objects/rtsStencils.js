@@ -89,6 +89,9 @@ export const STENCILS = {
   // icicles on grey rubble — on stone, water leaves DARK stains and the dust is the ground's earth.
   stoneStreak:   { x: 896, y: 1632, w: 128, h: 320 },
   stoneFootDust: { x: 256, y: 1760, w: 640, h: 128 },
+  // The FLN's flag (green and white, the red crescent and star), 3:2, painted on a vehicle the
+  // FLN took from the French (alg-rts algSalvage — the builders' `decals.fln`, 2026-10-18).
+  flnFlag:      { x: 256, y: 1888, w: 240, h: 160 },
 };
 for (const s of Object.values(STENCILS)) s.aspect = s.w / s.h;
 
@@ -242,6 +245,25 @@ function drawFrench(g, text, wear) {
   c = STENCILS.frArmeeWhite; text("ARMÉE DE TERRE", c.x, c.y, c.w, c.h, "#e9e6dc", 76); wear(c.x, c.y, c.w, c.h);
   c = STENCILS.frArmeeBlack; text("ARMÉE DE TERRE", c.x, c.y, c.w, c.h, "#1d1d1a", 76); wear(c.x, c.y, c.w, c.h);
   c = STENCILS.frUnitCode; text("9e R.C.P.   3", c.x, c.y, c.w, c.h, "#e9e6dc", 70); wear(c.x, c.y, c.w, c.h, 140);
+  c = STENCILS.flnFlag;
+  {
+    // As the villages' cloth (alg-rts algFlag.js): green hoist, white fly, the crescent at the join
+    // (a red disc, an off-centre disc of the field over it), the star in its opening — a little larger
+    // than the cloth's, so it still reads on a bonnet. Fresh paint: no wear (it ate the star).
+    const GREEN = "#1f6b3a", WHITE = "#ece8dc", RED = "#c8202a";
+    const field = () => { g.fillStyle = GREEN; g.fillRect(c.x, c.y, c.w / 2 + 1, c.h); g.fillStyle = WHITE; g.fillRect(c.x + c.w / 2, c.y, c.w / 2, c.h); };
+    field();
+    const cx = c.x + c.w / 2, cy = c.y + c.h / 2, R = c.h * 0.25;
+    g.fillStyle = RED; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    g.save(); g.beginPath(); g.arc(cx + R * 0.26, cy, R * 0.8, 0, Math.PI * 2); g.clip(); field(); g.restore();
+    const sx = cx + R * 0.44, r = R * 0.42;
+    g.fillStyle = RED; g.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5 + Math.PI / 10, rr = k % 2 === 0 ? r : r * 0.42;
+      g.lineTo(sx + Math.cos(a) * rr, cy + Math.sin(a) * rr);
+    }
+    g.closePath(); g.fill();
+  }
   c = STENCILS.frTailSerial; text("F-MBJK", c.x, c.y, c.w, c.h, "#1d1d1a", 74); wear(c.x, c.y, c.w, c.h, 60);
   c = STENCILS.frSerialWhite; text("MBJ", c.x, c.y, c.w, c.h, "#ece8dc", 86); wear(c.x, c.y, c.w, c.h, 60);
   c = STENCILS.frMarineWhite; text("MARINE", c.x, c.y, c.w, c.h, "#ece8dc", 58); wear(c.x, c.y, c.w, c.h, 60);

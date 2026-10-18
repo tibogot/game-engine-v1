@@ -341,6 +341,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
         if (!o) return false;
         const u = units.spawn("willys", o.x, o.z, { team: SIDE });
         if (!u) return false;
+        u.tintAs = "player"; u.crewLook = "moudjahid"; u.decal = "fln";   // a French jeep still in its paint, FLN men in it, the FLN's flag painted on (unitRenderer decals)
         const r = p.structure.rally ?? o;
         u.orderTo(r.x + 6, r.z + 6);
         say(t("<b>Une jeep capturée</b> sort de la grotte."), o.x, o.z);

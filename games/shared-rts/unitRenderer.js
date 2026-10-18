@@ -351,6 +351,9 @@ function buildInstancedType(tpl, scene) {
     scene.add(im);
 
     const part = { im, kind };
+    // A DECAL part (a builder's userData.decals): only the units whose `decal` is its key — the others
+    // write a collapsed matrix, and the part is hidden while none carries it (no draw for nothing).
+    if (o.name.startsWith("Decal:")) { part.decal = o.name.slice(6); part.hits = 0; }
     // Where this part's guns fire (the builders' userData.muzzles; the weapons pass, 2026-10-07).
     const mz = o.geometry.userData?.muzzles;
     if (mz?.length) part.muzzles = mz.map((m) => ({ p: new THREE.Vector3(...m.p), turret: !!m.turret }));
@@ -1096,7 +1099,7 @@ function canopyGlass() {
   return _canopyGlass;
 }
 
-export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, crewFar = CREW_FAR, troopsAboard = null, troopLook = null, variants = null, unarmed = false, noXray = false }) {
+export async function createUnitRenderer({ app, units, healthBars, selectionRings, barFor = null, fogOfWar = null, types, typeKeys = null, procedural = {}, paint = null, onCorpse = null, gibs = false, onGib = null, thumbnailFor = null, crew = null, crewFar = CREW_FAR, troopsAboard = null, troopLook = null, crewLook = null, variants = null, unarmed = false, noXray = false }) {
   // VARIANTS (opt-in, `variants`: { typeKey: { variantKey: typeDef } } — alg-rts, 2026-10-07: "the
   // GMC: use a mix", closed and open): extra LOOKS of a unit type, each its own template and
   // instanced draw; a unit of that type takes one of them (or the type's own) at random when it
@@ -1120,6 +1123,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     const body = new THREE.Mesh(geo, kitMat);
     const st = stencilMesh(geo.userData.stencil);
     if (st) body.add(st);
+    // DECALS painted on SOME units only (the builders' userData.decals; a unit's `decal` key picks
+    // one): parts named "Decal:<key>", drawn for the units that carry it (see buildInstancedType).
+    for (const [key, dg] of Object.entries(geo.userData.decals ?? {})) {
+      const dm = stencilMesh(dg);
+      if (dm) { dm.name = `Decal:${key}`; body.add(dm); }
+    }
     const scene = new THREE.Group();
     scene.add(body);
     // A turret that turns to its target (instanced as kind "turret", like a
@@ -1283,11 +1292,14 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   const crewNow = [];   // this frame's manned vehicles: { m, c, t, seeds }
   /** The look the bench men of `unit` are drawn in: the squad aboard's (`troopLook`) when it has a
    *  crowd that can SIT; otherwise null (the vehicle's crew look — never a man standing on a bench). */
-  const troopLookOf = (unit) => {
-    const key = troopLook?.(unit);
-    if (!key) return null;
+  /** `key` if its look can SIT in a seat (a crowd with the "sit" clip), else null. */
+  const sitLook = (key) => {
     for (const g of groups) if (g.views.has(key)) return g.field.has("sit") ? key : null;
     return null;
+  };
+  const troopLookOf = (unit) => {
+    const key = troopLook?.(unit);
+    return key ? sitLook(key) : null;
   };
   const _crewSeat = new THREE.Matrix4(), _crewQ = new THREE.Quaternion(), _crewS = new THREE.Vector3(), _crewP = new THREE.Vector3(), _crewY = new THREE.Vector3(0, 1, 0);
 
@@ -1754,7 +1766,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           x.updateMatrix(); // off-scene: nothing else will do this for us
           const kick = (v.recoil ?? 0) ** 2;   // snaps back at once, returns slowly
           if (kick > 0) x.matrix.multiply(_rock.makeRotationX(-0.035 * kick));
-          const tint = teamTint(unit.team, unit.type);
+          const tint = teamTint(unit.tintAs ?? unit.team, unit.type);   // (`tintAs`: a vehicle taken from the other side keeps its paint)
           for (const part of inst.parts) {
             if (part.kind) {
               _euler.copy(part.baseEuler);
@@ -1775,8 +1787,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
               }
               _local.compose(_kickPos, _quat.setFromEuler(_euler), part.baseScale);
               _mat.multiplyMatrices(part.parentRel, _local).premultiply(x.matrix);
+            } else if (part.decal && unit.decal !== part.decal) {
+              _mat.makeScale(0, 0, 0);   // not this unit's paint: no triangle
             } else {
               _mat.multiplyMatrices(x.matrix, part.rel);
+              if (part.decal) part.hits++;
             }
             part.im.setMatrixAt(i, _mat);
             part.im.setColorAt(i, tint); // same material, different side
@@ -1786,14 +1801,16 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           inst.unitAt[i] = unit; // so a raycast on instanceId finds this unit
           inst.n = i + 1;
           const c = crewOf[v.vkey ?? t.typeKey];
+          // A unit's OWN crew (`crewLook`, alg-rts: a vehicle the FLN took) — a look key, or "" = nobody aboard.
+          const cl = crewLook ? crewLook(unit) : null;
           // Not when the camera is far out (a seated man ~3 px, 3k triangles skinned each frame).
-          if (c && v.onScreen && (!camera || camera.position.distanceToSquared(p) < crewFar * crewFar)) {
+          if (c && cl !== "" && v.onScreen && (!camera || camera.position.distanceToSquared(p) < crewFar * crewFar)) {
             if (!v.crew) v.crew = { t: Math.random() * 20, seeds: c.seats.map(() => [Math.random(), Math.random(), Math.random(), 0]), m: new THREE.Matrix4() };
             v.crew.t += dt;
             v.crew.m.multiplyMatrices(x.matrix, c.rel);
             // TROOP seats (a seat's `troop`): only as many as men really aboard (`troopsAboard`, the game's
             // transports) — without it, every seat is drawn (nam).
-            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale, v, x, troops: troopsAboard ? troopsAboard(unit) : Infinity, troopLook: troopLookOf(unit) });
+            crewNow.push({ m: v.crew.m, c, t: v.crew.t, seeds: v.crew.seeds, scale: inst.scale, v, x, troops: troopsAboard ? troopsAboard(unit) : Infinity, troopLook: troopLookOf(unit), look: cl ? sitLook(cl) : null });
           }
         }
       }
@@ -1943,7 +1960,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           // A count-0 InstancedMesh still costs a draw in every pass it's in
           // (beauty + each shadow cascade) — hide the field when the type has
           // no live units (builders at boot, or a type wiped out).
-          part.im.visible = inst.n > 0;
+          part.im.visible = inst.n > 0 && (!part.decal || part.hits > 0);
           // The pick bounds go stale as the vehicles move: three computes an
           // InstancedMesh's bounding sphere ONCE (the first raycast) and tests
           // every ray against it first — a vehicle that had driven out of the
@@ -1953,7 +1970,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           part.im.instanceMatrix.needsUpdate = true;
           part.im.instanceColor.needsUpdate = true;
           part.xray.count = inst.n;
-          part.xray.visible = inst.n > 0 && xrayOn();
+          part.xray.visible = inst.n > 0 && xrayOn() && !part.decal;   // (the hull's silhouette is enough)
+          if (part.decal) part.hits = 0;
         }
         if (inst.n) {
           inst.team.clearUpdateRanges();
@@ -1989,7 +2007,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         // The BENCH men in the look of the squad aboard (`troopLook`: legionnaires as legionnaires),
         // in THIS look's pass; the driver and gunner in the vehicle's own crew look.
         for (const cr of crewNow) {
-          const crewHere = cr.c.look === view.key, troopsHere = (cr.troopLook ?? cr.c.look) === view.key;
+          const look = cr.look ?? cr.c.look;
+          const crewHere = look === view.key, troopsHere = (cr.troopLook ?? look) === view.key;
           if (!crewHere && !troopsHere) continue;
           let troops = cr.troops;
           cr.c.seats.forEach((seat, si) => {
@@ -2108,6 +2127,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
     thumbnails,
     /** The manned vehicle types (crew): { typeKey: { look, seats, rel } } — for the dev panel and tests. */
     crewOf,
+    /** Dev: whether `key`'s crowd can sit in a seat (a `crewLook`), and the clips it has. */
+    crowdOf: (key) => { const g = groups.find((q) => q.views.has(key)); return g ? { sit: g.field.has("sit"), views: [...g.views.keys()] } : null; },
     roots,          // raycast targets for selection (instanced meshes + skinned groups)
     unitByMesh,
     unitFromHit,    // resolves a raycast hit, instanced or not

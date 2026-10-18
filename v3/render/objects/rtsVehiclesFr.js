@@ -584,11 +584,15 @@ export function buildWillys({ seed = 44, detail = 1, crew = true } = {}) {
   for (const sx of [-1, 1]) st.push(stencilPatch("frTricolore", flatSurface([sx * 0.42, 0.88, 1.1], [sx, 0, 0], [0, 0, -sx], 0.22, "frTricolore"), { lift: 0.004 }));
   st.push(stencilPatch("frUnitCode", flatSurface([-0.4, 0.46, 1.715], [0, 0, 1], [1, 0, 0], 0.5, "frUnitCode"), { lift: 0.004 }));
   const stencil = mergeStencils(st);
+  // DECALS a game paints on SOME units only (unitRenderer `unit.decal`): the FLN's flag on the bonnet
+  // of a jeep it took (alg-rts algSalvage), the hoist forward — in front of the folded windscreen.
+  const fln = mergeStencils([stencilPatch("flnFlag", flatSurface([0, 1.06, 1.15], [0, 1, 0], [0, 0, -1], 0.62, "flnFlag"), { lift: 0.004 })]);
 
-  for (const g of [geo, gearGeo, stencil]) g?.scale(S, S, S);
+  for (const g of [geo, gearGeo, stencil, fln]) g?.scale(S, S, S);
   packGear(gearGeo, spins);
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
+  geo.userData.decals = { fln };
   geo.userData.gear = gearGeo;
   geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   // WHERE ITS GUN FIRES (the weapons pass): the pedestal MG's muzzle.
@@ -701,9 +705,10 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
     roof.rotateX(-Math.PI / 2).scale(CW / 2 + 0.02, 0.22, 1);   // -90: the arc on TOP (+90 hangs it below the axis)
     P(roof, [0, 2.48, CZ], MAT.paint, VA * 1.05);
   }
-  // Driver behind the glass (left-hand drive: +X). Closed (tilt on) at detail 2: the cheap
-  // figure — behind the cab's glass a real man adds 3k triangles nobody sees.
-  if (crew || (D2 && tilt)) {
+  // Driver behind the glass (left-hand drive: +X): `crew` — the cheap baked figure; `crew: false` — the
+  // SEATS, for real (animated) men (2026-10-18: alg-rts' closed truck too — a truck the FLN takes must
+  // show its men at the wheel, not a French driver baked into the cab).
+  if (crew) {
     P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [0.45, 2.3, CZ + 0.05], MAT.paint, VA * 1.1);
     P(buildBox(0.4, 0.4, 0.24), [0.45, 2.02, CZ], MAT.canvas, 0.5);
   } else {
@@ -877,11 +882,31 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
   st.push(stencilPatch("frPlate", flatSurface([0.6, 1.1, BZ1 - 0.02], [0, 0, -1], [-1, 0, 0], 0.5, "frPlate"), { lift: 0.004 }));
   for (const sx of [-1, 1]) st.push(stencilPatch("frTricolore", flatSurface([sx * 0.46, 1.36, 2.6], [sx, 0, 0], [0, 0, -sx], 0.3, "frTricolore"), { lift: 0.004 }));
   const stencil = mergeStencils(st);
+  // DECALS a game paints on SOME units only (unitRenderer `unit.decal`): the FLN's flag on a truck it
+  // took (alg-rts algSalvage) — on the bonnet, and big across a closed tilt's roof (what the RTS camera
+  // sees of it). The roof patch follows the canvas: its crown and its sag between the bows (the skin's
+  // own formula above), lifted clear of the skin's straight segments.
+  const flnPatches = [stencilPatch("flnFlag", flatSurface([0, 1.65, 2.2], [0, 1, 0], [0, 0, -1], 0.9, "flnFlag"), { lift: 0.004 })];
+  if (D2 && tilt) {
+    const Z0 = BZ0 - 0.06, Z1 = BZ1 + 0.04, FW = 1.95, FH = FW / 1.5, ZC = (Z0 + Z1) / 2;
+    const roofY = (x, z) => {
+      const tt = (z - Z0) / (Z1 - Z0), sag = Math.abs(Math.sin(tt * 4 * Math.PI)) * 0.045;
+      const y = TTOP + 0.05 * (1 - Math.min(1, Math.abs(x) / (TW - SH)));
+      return y - sag * ((y - (TTOP - SH)) / SH);
+    };
+    const up = new THREE.Vector3(0, 1, 0);
+    flnPatches.push(stencilPatch("flnFlag", (s, t) => {
+      const z = ZC - (s - 0.5) * FW, x = -(t - 0.5) * FH;   // the hoist forward, as on the bonnet
+      return { p: new THREE.Vector3(x, roofY(x, z), z), n: up };
+    }, { segS: 32, segT: 6, lift: 0.012 }));
+  }
+  const fln = mergeStencils(flnPatches);
 
-  for (const g of [geo, gearGeo, stencil]) g?.scale(S, S, S);
+  for (const g of [geo, gearGeo, stencil, fln]) g?.scale(S, S, S);
   packGear(gearGeo, spins);
   geo.computeBoundingBox();
   geo.userData.stencil = stencil;
+  geo.userData.decals = { fln };
   geo.userData.gear = gearGeo;
   geo.userData.seats = seats.map((q) => ({ ...q, p: q.p.map((v) => v * S) }));
   geo.userData.length = geo.boundingBox.max.z - geo.boundingBox.min.z;

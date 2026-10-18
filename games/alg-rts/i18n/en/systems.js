@@ -179,4 +179,12 @@ export default {
   // algDroppedWeapons.js
   "Un <b>FM</b> est resté au sol : un groupe sans FM qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a squad without one that passes within 6 m picks it up.",
   "Un <b>FM</b> est resté au sol : un combattant qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a fighter who passes within 6 m picks it up.",
+  // algSalvage.js
+  "<b>Véhicule abandonné</b> : l'équipage a sauté. Un homme à côté le reprend — sinon le FLN s'en emparera.": "<b>Vehicle abandoned</b>: the crew bailed out. A man beside it takes it back — or the FLN will seize it.",
+  "<b>Un véhicule français abandonné</b> : un homme à côté s'en empare.": "<b>An abandoned French vehicle</b>: a man beside it seizes it.",
+  "<b>Véhicule pris</b> : du carburant pour {n} s, puis il faudra l'incendier.": "<b>Vehicle seized</b>: fuel for {n} s, then it must be burned.",
+  "<b>Le FLN s'est emparé</b> d'un véhicule abandonné.": "<b>The FLN has seized</b> an abandoned vehicle.",
+  "<b>Véhicule repris</b>.": "<b>Vehicle recovered</b>.",
+  "<b>Le camion est vidé</b> : +{n} ravitaillement. Il est incendié.": "<b>The truck is unloaded</b>: +{n} supplies. It is set alight.",
+  "<b>Plus de carburant</b> : le véhicule pris est incendié.": "<b>Out of fuel</b>: the seized vehicle is set alight.",
 };

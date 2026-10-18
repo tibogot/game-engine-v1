@@ -121,6 +121,9 @@ const P = {
   // has wounded men, near where it sits; at most `max` standing.
   // (A ksar's walls leave few free spots — measured: 1 in 24 at 12-14 m — so 32 spots, 4 turns each.)
   infirmary: { first: 240, every: 40, max: 2, apart: 60, hurt: 0.7, ring: [4, 16] },
+  // SALVAGE (algSalvage.js): a band's man goes for an abandoned French vehicle within `salvSeek` m,
+  // no French within `salvClear` m of it.
+  salvSeek: 60, salvClear: 25,
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -736,7 +739,8 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     q.t = (q.t ?? 0) + dt;
     v.holdFire = false;
     if (q.state === "rest") { if (q.t > q.rest) { q.state = "guard"; q.look = 0; } return; }
-    if (v.hp < v.maxHp * J.hurt) { const h = homeFor(v.position); q.state = "rest"; q.t = 0; q.rest = rand(...J.rest); q.at = null; v.orderTo(h.x, h.z); return; }
+    // (a jeep taken from the French: no rest — its fuel runs out first)
+    if (v.fuelLeft == null && v.hp < v.maxHp * J.hurt) { const h = homeFor(v.position); q.state = "rest"; q.t = 0; q.rest = rand(...J.rest); q.at = null; v.orderTo(h.x, h.z); return; }
     q.state = "guard";
     if ((q.look = (q.look ?? 0) - dt) > 0) return;
     q.look = J.every;
@@ -795,8 +799,46 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     }
   }
 
+  // ── SALVAGE (algSalvage.js): a French vehicle left abandoned near a band — a man goes and takes it;
+  // a taken jeep joins the teams (stepJeep), a taken truck drives home to be unloaded. ──
+  let seizeT = 0;
+  function stepSeize(dt) {
+    const S = app.algSalvage;
+    if (!S || (seizeT -= dt) > 0) return;
+    seizeT = 1;
+    for (const v of S.abandoned) {
+      if (v._claim?.alive && t - v._claimT < 30 && (v._claim.isMoving || t - v._claimT < 3 || dist(v._claim.position, v.position) < 9)) continue;
+      if (v._claim?.alive) v._claim._noSalv = true;   // he never set off (stuck, held): another man
+      if (french().some((u) => !u.isAir && dist(u.position, v.position) < P.salvClear)) continue;
+      let best = null, bd = P.salvSeek;
+      for (const b of bands) {
+        if (b.state === "gather" || b.state === "withdraw" || b.state === "done") continue;
+        for (const u of alive(b)) {
+          if (u.typeKey !== "moudjahid" || bearers.has(u) || u.inside || u._noSalv) continue;
+          const d = dist(u.position, v.position);
+          if (d < bd) { bd = d; best = { u, b }; }
+        }
+      }
+      if (!best) continue;
+      // Out of his band (its orders would pull him back): he goes for the vehicle.
+      best.b.members.splice(best.b.members.indexOf(best.u), 1); inBand.delete(best.u);
+      best.u.holdFire = true;
+      best.u.orderTo(v.position.x, v.position.z);
+      v._claim = best.u; v._claimT = t;
+    }
+  }
+  function stepTruck(q) {
+    const v = q.men[0], S = app.algSalvage;
+    if (!v?.alive || !S) return;
+    v.holdFire = false;
+    const h = S.homeFor(v);
+    if (h && !v.isMoving && dist(v.position, h) > 10) v.orderTo(h.x, h.z);
+  }
+
   function stepTeams(dt) {
     stepBazookas(dt);
+    stepSeize(dt);
+    for (const q of teams) if (q.key === "truck") stepTruck(q);
     for (const q of teams) if (q.key === "jeep") stepJeep(q, dt);
     for (const f of french()) if (f.isAir) { lastAir = { x: f.position.x, z: f.position.z }; break; }
     for (const q of teams) if (q.key === "mulet") stepMule(q, dt);
@@ -2288,6 +2330,10 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     get cacheWhy() { return cacheWhy; },
     /** Dev: try to hide a new cache now (ignores the clock). */
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
+    /** algSalvage: a vehicle it took — a jeep joins its teams (stepJeep), a truck drives home. */
+    adoptVehicle(v) { teams.push({ key: v.typeKey === "willys" ? "jeep" : "truck", men: [v], s: null, t0: t }); },
+    /** algSalvage: men who went to ground with a truck unloaded at home (the next bands). */
+    toGround(n) { pool += n; },
     /** Dev: its doctrine — which, points, what is unlocked, what each ability waits on. */
     get doctrine() { return doctrine && { key: doctrine.doctrine, cp: doctrine.cp, xp: Math.round(doctrine.xp), unlocked: [...doctrine.unlocked], ready: doctrine.abilities.filter((a) => doctrine.ready(a.key)).map((a) => a.key) }; },
     /** Dev: its doctrine module (give points, choose). */
