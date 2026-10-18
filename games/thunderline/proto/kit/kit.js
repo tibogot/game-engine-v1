@@ -306,6 +306,27 @@ for (const [id, a] of [["landing_20", 20], ["banked_landing_20", 20], ["landing_
   if (TILES[`${id}_L`]) TILES[`${id}_L`].landAngle = a;
 }
 
+/**
+ * GENERATED TILES (B2): a FITTED LANDING sized to one jump's speed band (PIECES.md §7b). Its id
+ * carries its size, `fitted_landing_<angle>_<D>`: a down-slope at <angle>° for D m (the catch zone:
+ * from where the slowest arc lands to where the fastest does, plus a margin), then a curve back to
+ * level. Any page rebuilds the exact same piece from the id — a saved track needs nothing else.
+ */
+export function ensureTile(id) {
+  if (TILES[id]) return TILES[id];
+  const m = /^fitted_landing_(\d+)_(\d+)$/.exec(id);
+  if (!m) return undefined;
+  const angle = Number(m[1]), D = Number(m[2]);
+  TILES[id] = {
+    id,
+    label: `Fitted landing ${angle}° · ${D} m`,
+    landAngle: angle,
+    segs: [{ L: D }, { L: 44, pitch: angle * DEG, ramp: 22 }],
+    marks: [{ kind: "landing", from: 0, to: D }],
+  };
+  return TILES[id];
+}
+
 /** Lean at the entry / exit of a tile (radians). */
 export const leanIn = (t) => t.segs[0].leanIn ?? 0;
 export function leanOut(t) {

@@ -11,7 +11,7 @@ import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCame
 import { createGamepadInput } from "../../../modular-road-v3/gamepadInput.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
-import { TILES, integrate } from "./kit.js";
+import { TILES, integrate, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -83,6 +83,11 @@ const JUMPS = (params.get("jumps") ?? "55.8,48.6,50.6").split(",").map(Number).f
 let builtTrack = null;
 if (params.get("track") === "local") {
   try { builtTrack = JSON.parse(localStorage.getItem("thunderline.track.v1")); } catch {}
+  // generated pieces (fitted landings) are rebuilt from their id, exactly as the builder made them
+  for (const p of builtTrack?.pieces ?? []) {
+    const t = ensureTile(p.id);
+    if (t && !built[p.id]) built[p.id] = { b: integrate(t), guarded: buildOldLook(t, true), open: buildOldLook(t, false) };
+  }
 }
 const lay = builtTrack?.pieces?.length
   ? layoutFromPlacements({ built, pieces: builtTrack.pieces })

@@ -152,7 +152,9 @@ export default defineConfig({
   plugins: [trunkManifestPlugin(), horseLabAnimsPlugin(), fireBakePlugin()],
   // The fire-bake lab writes its books there: a watched write reloaded the lab between
   // the atlases and their .json (the json went stale against the new images).
-  server: { watch: { ignored: ["**/public/textures/fx/firepro/**"] } },
+  // games/thunderline: worked on in parallel from its OWN dev server (hot reload off, port 5187, its
+  // scratch config re-enables the watch there), so its edits never reload this server's pages.
+  server: { watch: { ignored: ["**/public/textures/fx/firepro/**", "**/games/thunderline/**"] } },
   resolve: {
     alias: [
       {

@@ -304,6 +304,22 @@ turn 155, banked landing 158, catch pad 153 km/h). 61 fps, ~3.3 ms CPU, ~3 ms GP
   real rule is the checkpoint respawn that keeps your speed (§8).
 - To check: a darker diagonal band across a deck (cloud shadow or a shadow-cascade edge?).
 
+**B2 — prediction + fitted landings (2026-10-18), in `proto/kit/builder3.js`.**
+- **The builder drives your track with the REAL car** after every edit (a fresh car, the autopilot,
+  in 240-tick slices so the page stays responsive; deterministic physics, ~0.45 ms per tick). It
+  reports the lap time, top speed, **every lip's take-off speed**, and where the car falls or stops
+  (orange box). A track ending on a lip runs until the take-off is measured ("open jump").
+- **The arc band comes from the real take-off speed** (band = 93–100% of it), not a global guess.
+- **Fitted landing** (Air → "Fitted landing"): held near a band, the builder generates a landing
+  for THAT jump — a 20° down-slope starting where the slow arc falls at 20°, long enough for the
+  fast arc to land on it too (+12 m), then a curve to level. Its size is in its id
+  (`fitted_landing_20_<D>`, `kit.js ensureTile`), so any page rebuilds it from a saved track.
+- Verified in my own headless Chrome: kicker → take-off measured 203 km/h → fitted landing 116 m →
+  rest of the track; the real car laps it (25.4 s, top 212, no fall); the drive page loads it.
+- To improve: the straight 20° slope is long (116 m) because the fast arc has to come down to it;
+  a ski-jump profile that STEEPENS along the band would be shorter. And the prediction drives the
+  autopilot's line — a human can be slower or faster; the band covers 7% below it.
+
 **B1 — the builder on the new pieces (2026-10-18), `proto/builder3.html` + `proto/kit/builder3.js`.**
 P1b's snapping ghost, dock and next-piece chips, now on the NEW pieces (kit paths, old look):
 - ends carry their lean (the lean rule warns: a leaning piece on a flat end, or the reverse);

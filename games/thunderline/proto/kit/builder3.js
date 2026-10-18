@@ -4,8 +4,17 @@
 // Throwaway prototype (DESIGN.md §4–§5, §9).
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG } from "./kit.js";
+import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
+import { Vehicle, FIXED_DT, TIRE } from "../../../../v3/play/modularRoadVehicle.js";
+import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
+import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
+
+// the drive page's tune (P3): the prediction drives the SAME car
+const TOP = 63;
+TIRE.topSpeed = TOP;
+TIRE.steerSpeedRef = TOP * 0.9;
+const ROAD_HOLD = new Set(["bank_in_22", "bank_out_22", "fast_turn_128"]);
 
 const $ = (id) => document.getElementById(id);
 const STORE = "thunderline.track.v1"; // drive.html?track=local reads the same key
@@ -19,7 +28,7 @@ const CATS = [
   { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12"] },
   { id: "turns", label: "Turns", tiles: ["fast_turn_128", "brake_turn_32"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
-  { id: "air", label: "Air", tiles: ["kicker_20", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "air", label: "Air", tiles: ["kicker_20", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "stunts", label: "Stunts", tiles: ["loop_28", "wallride_90"] },
 ];
 const catOf = new Map();
@@ -42,7 +51,13 @@ function load() { try { return JSON.parse(localStorage.getItem(STORE)); } catch 
 function save() { try { localStorage.setItem(STORE, JSON.stringify(track)); } catch {} }
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
 function restore(from, to) { if (!from.length) return; to.push(JSON.stringify(track)); track = JSON.parse(from.pop()); sel = null; rebuild(); }
-const tileId = (base, h = hand) => (h < 0 && TILES[`${base}_L`] ? `${base}_L` : base);
+// "fitted_landing" is not a fixed tile: the builder generates one per jump, sized to its speed band
+// (kit.js ensureTile). Until the ghost is on an arc it shows a default size.
+const FITTED = "fitted_landing";
+const FITTED_ANGLE = 20;
+let fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_32`).id;
+const tileId = (base, h = hand) => (base === FITTED ? fittedId : h < 0 && TILES[`${base}_L`] ? `${base}_L` : base);
+const tileLabel = (base) => (base === FITTED ? "Fitted landing" : TILES[base].label);
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
@@ -114,6 +129,7 @@ async function bakeThumbs() {
   const cvs = document.createElement("canvas"); cvs.width = W; cvs.height = H;
   const ctx = cvs.getContext("2d");
   for (const c of CATS) for (const id of c.tiles) {
+    if (id === FITTED) continue; // drawn with the landing's picture (see pic)
     const g = meshesFor(id, false);
     const t = TILES[id];
     g.rotation.x = -(t.landAngle ?? 0) * DEG;
@@ -144,7 +160,7 @@ const BOLT = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M9.5 0 2 9h5
 function pic(id, cls = "pic") {
   const el = document.createElement("div");
   el.className = cls;
-  const url = thumbs.get(id.replace(/_L$/, ""));
+  const url = thumbs.get(id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id.replace(/_L$/, ""));
   if (url) { el.style.backgroundImage = `url(${url})`; el.style.backgroundSize = "cover"; el.style.backgroundPosition = "center"; if (id.endsWith("_L")) el.style.transform = "scaleX(-1)"; }
   return el;
 }
@@ -183,7 +199,7 @@ function renderDock() {
     b.appendChild(pic(tileId(base)));
     const nm = document.createElement("span");
     nm.className = "nm";
-    nm.textContent = TILES[base].label;
+    nm.textContent = tileLabel(base);
     b.appendChild(nm);
     b.onclick = () => pickTile(base);
     cards.appendChild(b);
@@ -211,6 +227,7 @@ function rebuild() {
   for (const pc of track.pieces) {
     const M = pc.parent != null && built.has(pc.parent) ? built.get(pc.parent).exit.clone() : new THREE.Matrix4().fromArray(pc.M);
     pc.M = M.toArray();
+    ensureTile(pc.id); // generated pieces (fitted landings) are rebuilt from their id
     const g = meshesFor(pc.id, pc.open);
     g.matrixAutoUpdate = false;
     g.matrix.copy(M);
@@ -223,6 +240,127 @@ function rebuild() {
   runChecks();
   refreshSelection();
   ghostDirty = true;
+  schedulePrediction();
+}
+
+// ---------- PREDICTION: the real car drives your track in the background (B2) ----------
+// Deterministic physics (P5) at ~0.45 ms per tick makes this affordable: after each edit a fresh car
+// runs the autopilot over the track in slices, and reports every lip's TAKE-OFF speed (the arc band
+// comes from it), the lap time, and where the car falls or stops.
+let prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 };
+let predTimer = null, predToken = 0, failBox = null;
+const predScene = new THREE.Scene(); // the car's meshes live here; never rendered
+function schedulePrediction() { clearTimeout(predTimer); predTimer = setTimeout(runPrediction, 250); }
+/** Pieces in driving order: from the first piece, follow the road child, else the flight's landing. */
+function orderedPieces() {
+  const out = [];
+  let cur = track.pieces[0];
+  const seen = new Set();
+  while (cur && !seen.has(cur.uid)) {
+    seen.add(cur.uid);
+    out.push(cur);
+    cur = track.pieces.find((q) => q.parent === cur.uid) ?? track.pieces.find((q) => q.flightFrom === cur.uid);
+  }
+  return out;
+}
+async function runPrediction() {
+  const token = ++predToken;
+  const order = orderedPieces();
+  if (order.length < 2) { prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 }; return; }
+  prediction = { state: "running", lipSpeed: prediction.lipSpeed, fail: null, lapS: null, topKmh: 0, ticks: 0 };
+  renderStatus();
+  // collision, as drive.js: decks (road hold on banked pieces) + rail collision proxies
+  const col = (geometry, M, userData = {}) => ({ geometry, matrixWorld: M, userData, updateMatrixWorld() {} });
+  const decks = [], solids = [], ride = [];
+  for (const pc of order) {
+    const { look, b, t } = piece(pc.id, pc.open);
+    const M = built.get(pc.uid).M;
+    decks.push(col(look.deck, M, { roadHold: ROAD_HOLD.has(pc.id.replace(/_L$/, "")) }));
+    if (look.railCollision) solids.push(col(look.railCollision, M));
+    const hw = SECTIONS[t.section ?? "road"].hw;
+    for (const r of b.rings) {
+      const f = deckFrame(r, hw);
+      ride.push({ P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), uid: pc.uid });
+    }
+  }
+  const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
+  deckBvh.bakeFromMeshes(decks);
+  solidsBvh.bakeFromMeshes(solids);
+  const ground = createVehicleGround({ getTerrainHeight: () => NaN });
+  ground.setRoadBvh(deckBvh.baked ? deckBvh : null);
+  ground.setRoadSolidsBvh(solidsBvh.baked ? solidsBvh : null);
+  const car = new Vehicle({ scene: predScene, showArrows: false });
+  car.SUBSTEPS = 3;
+  car.setBvh(ground.ground, ground.solids);
+  car.getFloorY = () => NaN;
+  car.setSolidCapsules([]);
+  const M0 = built.get(order[0].uid).M;
+  const fwd0 = new THREE.Vector3(0, 0, -1).transformDirection(M0);
+  car.setSpawn(new THREE.Vector3().setFromMatrixPosition(M0).addScaledVector(fwd0, 12).add(new THREE.Vector3(0, 0.6, 0)),
+    new THREE.Quaternion().setFromAxisAngle(UP, Math.atan2(fwd0.x, fwd0.z)));
+  car.enabled = true;
+  car.respawn();
+  const lips = new Set(arcs.map((a) => a.from));
+  const boosts = order.filter((p) => p.id.startsWith("boost")).map((p) => built.get(p.uid).M.clone().invert());
+  let lowY = Infinity;
+  for (const r of ride) lowY = Math.min(lowY, r.P.y);
+  const lipSpeed = new Map();
+  // a track that ENDS on a lip (the jump you are building): run until the take-off is measured —
+  // that number is the whole point — and call it an open jump, not a failure
+  const lastUid = ride[ride.length - 1].uid;
+  const endsOnLip = lips.has(lastUid);
+  prediction.openJump = false;
+  let idx = 0, boost = 0, slow = 0, wasGrounded = true;
+  const inv = new THREE.Quaternion(), lp = new THREE.Vector3(), nose = new THREE.Vector3();
+  for (let tick = 0; tick < 120 * 180; tick++) {
+    // autopilot (drive.js): steer at the centreline 25 m ahead, brake only for flat brake turns
+    const p = car.body.pos;
+    let best = idx, bd = Infinity;
+    for (let i = Math.max(0, idx - 20); i < Math.min(ride.length, idx + 400); i++) { const d = ride[i].P.distanceToSquared(p); if (d < bd) { bd = d; best = i; } }
+    idx = best;
+    const aim = (dist) => { let i = best, acc = 0; while (i + 1 < ride.length && acc < dist) { acc += ride[i].P.distanceTo(ride[i + 1].P); i++; } return ride[i]; };
+    inv.copy(car.body.quat).invert();
+    const local = aim(25).P.clone().sub(p).applyQuaternion(inv);
+    const steer = THREE.MathUtils.clamp((local.x / Math.max(local.z, 4)) * 2.5, -1, 1);
+    const far = aim(90).T;
+    nose.set(0, 0, 1).applyQuaternion(car.body.quat);
+    const bend = Math.acos(THREE.MathUtils.clamp(far.dot(nose), -1, 1));
+    const v = car.body.vel.length();
+    const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(nose.y) < 0.4 && v > 26 && car.groundedCount > 0 ? -1 : 1;
+    car.tick({ steerTarget: steer, rollTarget: 0, throttle, handbrake: false, yaw: 0, pitch: 0, analog: true });
+    for (const b of boosts) { lp.copy(car.body.pos).applyMatrix4(b); if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boost = 2.0; }
+    if (boost > 0 && car.groundedCount > 0) car.body.vel.addScaledVector(nose, 14 * FIXED_DT);
+    boost = Math.max(0, boost - FIXED_DT);
+    // take-off at a lip: the speed the arc band is built from
+    const grounded = car.groundedCount > 0;
+    if (wasGrounded && !grounded && lips.has(ride[idx].uid) && !lipSpeed.has(ride[idx].uid)) {
+      lipSpeed.set(ride[idx].uid, car.body.vel.length());
+      if (ride[idx].uid === lastUid) { prediction.openJump = true; break; }
+    }
+    wasGrounded = grounded;
+    prediction.topKmh = Math.max(prediction.topKmh, v * 3.6);
+    prediction.ticks = tick;
+    if (p.y < lowY - 60) { prediction.fail = { uid: ride[idx].uid, why: "falls off" }; break; }
+    slow = v < 2 ? slow + FIXED_DT : 0;
+    if (slow > 3) { prediction.fail = { uid: ride[idx].uid, why: "stops" }; break; }
+    if (idx >= ride.length - 5 && !endsOnLip) { prediction.lapS = tick * FIXED_DT; break; }
+    if (tick % 240 === 239) {
+      await new Promise((r) => setTimeout(r, 0)); // let the page breathe between slices
+      if (token !== predToken) return; // a newer edit started another prediction
+    }
+  }
+  if (token !== predToken) return;
+  prediction.state = "done";
+  prediction.lipSpeed = lipSpeed;
+  if (failBox) { scene.remove(failBox); failBox = null; }
+  if (prediction.fail && built.get(prediction.fail.uid)) {
+    failBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(built.get(prediction.fail.uid).group), 0xff9a3d);
+    scene.add(failBox);
+  }
+  refreshArcs();
+  runChecks();
+  statusKey = "";
+  renderStatus();
 }
 
 /** Ends with no road after them. A lip whose flight has a landing (`flightFrom`) is not open. */
@@ -264,8 +402,10 @@ function refreshArcs() {
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
     if (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG) continue; // level ends just drop
     const landing = track.pieces.find((q) => q.flightFrom === p.uid)?.uid ?? null;
-    const slow = flight(m, arcSpeed * 0.93), fast = flight(m, arcSpeed);
-    arcs.push({ ...slow, from: p.uid, landing });
+    // the REAL car's take-off speed at this lip (background prediction), else the global guess
+    const v = prediction.lipSpeed.get(p.uid) ?? arcSpeed;
+    const slow = flight(m, v * 0.93), fast = flight(m, v);
+    arcs.push({ ...slow, fast, from: p.uid, landing });
     for (const [a, color] of [[slow, 0xff9a3d], [fast, 0xffd27a]]) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(a.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
       arcGroup.add(line);
@@ -376,7 +516,21 @@ function computeSnap() {
     }
     const T = best.a.tan[best.k];
     const R = new THREE.Vector3().crossVectors(T, UP).normalize();
-    const m = socketMatrix({ p: best.a.pts[best.k], T, U: new THREE.Vector3().crossVectors(R, T), R });
+    const U = new THREE.Vector3().crossVectors(R, T);
+    const P0 = best.a.pts[best.k];
+    if (tileBase === FITTED) {
+      // FITTED LANDING: the down-slope starts where the SLOW arc falls at 20° and runs until the FAST
+      // arc meets it too (+12 m margin): every speed in the band lands on the slope, not past it
+      let D = 24;
+      for (const q of best.a.fast.pts) {
+        const rel = q.clone().sub(P0);
+        const along = rel.dot(T);
+        if (along > 0 && rel.dot(U) <= 0) { D = along + 12; break; } // crossed the slope surface
+      }
+      D = Math.max(24, Math.ceil(D / 4) * 4);
+      fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_${D}`).id;
+    }
+    const m = socketMatrix({ p: P0, T, U, R });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
     return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null };
   }
@@ -433,7 +587,7 @@ function suggestionsFor(end) {
     const back = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) <= 3), keep = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) > 3);
     return { label: `Leans ${Math.abs(deg(end.lean))}° · fits`, items: [...back.slice(0, 2), ...keep.slice(0, 4)] };
   }
-  if (end.pitch > 3 * DEG) return { label: "Lip · land it on the arc", items: ["landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"].map((b) => ({ base: b, h: hand, id: tileId(b) })) };
+  if (end.pitch > 3 * DEG) return { label: "Lip · land it on the arc", items: [FITTED, "banked_landing_20", "landing_turn_20", "catch_pad"].map((b) => ({ base: b, h: hand, id: tileId(b) })) };
   return recent.length ? { label: "Again", items: recent.slice(0, 4) } : null;
 }
 let nextKey = "";
@@ -516,9 +670,20 @@ function frameAll() {
 
 // ---------- status ----------
 let statusKey = "";
+function predictionLine() {
+  const P = prediction;
+  if (P.state === "running") return `<div class="row"><span>the car drives your track…</span><b>${(P.ticks / 120).toFixed(1)} s</b></div>`;
+  if (P.state !== "done") return "";
+  const name = (uid) => { const pc = track.pieces.find((q) => q.uid === uid); return pc ? TILES[pc.id].label : "?"; };
+  const lips = [...P.lipSpeed.values()].map((v) => Math.round(v * 3.6)).join(", ");
+  if (P.fail) return `<div class="warn">⚠ the car ${P.fail.why} at "${name(P.fail.uid)}" (orange box)</div>`;
+  if (P.openJump) return `<div class="row"><span>real car takes off at</span><b>${lips} km/h — land it on the band</b></div>`;
+  return `<div class="row"><span>real car: lap</span><b>${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
+    (lips ? `<div class="row"><span>take-offs</span><b>${lips} km/h</b></div>` : "");
+}
 function renderStatus() {
   const names = { end: "open end", arc: "flight arc", local: "local grid", world: "world grid" };
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join()].join("|");
+  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -526,10 +691,13 @@ function renderStatus() {
     `<div class="mode" style="color:${col}">${tileBase ? `${TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : sel != null ? "Piece selected" : "Pick a piece"}</div>` +
     (snap?.bad ? `<div class="warn">${snap.bad}</div>` : "") +
     problems.messages.map((m) => `<div class="warn">⚠ ${m}</div>`).join("") +
+    predictionLine() +
     `<div class="row"><span>grid</span><b>${gridMode} · ${gridStep} m</b></div>` +
     `<div class="row"><span>height</span><b>${buildY} m</b></div>` +
     `<div class="row"><span>turn / pitch / bank</span><b>${rot.yaw}° / ${rot.pitch}° / ${rot.roll}°</b></div>` +
-    `<div class="row"><span>arc band at the lip</span><b>${Math.round(arcSpeed * 0.93 * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>` +
+    (prediction.lipSpeed.size
+      ? `<div class="row"><span>band (real car)</span><b>${[...prediction.lipSpeed.values()].map((v) => `${Math.round(v * 0.93 * 3.6)}–${Math.round(v * 3.6)}`).join(" · ")} km/h</b></div>`
+      : `<div class="row"><span>arc band (guess)</span><b>${Math.round(arcSpeed * 0.93 * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
     `<div class="row"><span>pieces</span><b>${track.pieces.length}</b></div>`;
 }
 
@@ -624,4 +792,5 @@ window.__b3 = {
   setHand(h) { hand = h; renderDock(); }, setEdges(v) { edges = v; renderDock(); }, setBuildY(y) { buildY = y; },
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
   setTrack(t) { track = t; rebuild(); },
+  get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
