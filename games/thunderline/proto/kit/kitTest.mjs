@@ -25,7 +25,9 @@ for (const [id, t] of Object.entries(TILES)) {
   const last = b.rings[b.rings.length - 1];
   if (last.p.distanceTo(b.exit.p) > 1e-9) fail(`${id}: last ring is not at the exit`);
   if (Math.abs(last.lean - b.exit.lean) > 1e-9) fail(`${id}: last ring lean ≠ exit lean`);
-  if (Math.abs(b.exit.lean - leanOut(t)) > 1e-6) fail(`${id}: exit lean ${b.exit.lean / DEG} ≠ declared ${leanOut(t) / DEG}`);
+  // modulo a full turn: a twist leaves at 360°, the same road as 0°
+  const dl = b.exit.lean - leanOut(t), wrap = dl - 2 * Math.PI * Math.round(dl / (2 * Math.PI));
+  if (Math.abs(wrap) > 1e-6) fail(`${id}: exit lean ${b.exit.lean / DEG} ≠ declared ${leanOut(t) / DEG}`);
   if (Math.abs(b.rings[0].lean - leanIn(t)) > 1e-9) fail(`${id}: entry lean wrong`);
   // frame stays orthonormal
   const e = b.exit;
