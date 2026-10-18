@@ -84,6 +84,9 @@ const P = {
   },
   teamTiers: { 2: { cost: 120, villages: 1 }, 3: { cost: 180, villages: 2 } },
   teamEvery: 5,          // s between two looks at what to buy
+  // THE MORTAR HARASS (step 4): from 80-100 m of French the FLN KNOWS, a barrage, ~45 s of rounds,
+  // gone before they close in; then it rests at home.
+  harass: { ring: [80, 100], fireFor: [38, 52], rest: [60, 90], danger: 45, minKnown: 2, lostAt: 0.34, setupWait: 25 },
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -359,8 +362,80 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     teams.push(team);
     return team;
   }
+  // ── THE MORTAR'S WORK (P.harass) ─────────────────────────────────────────
+  // home → move (packed, holding) → fire (set: a barrage, then its rounds) → leave → home (rests).
+  const teamAlive = (q) => q.men.filter((u) => u.alive);
+  function orderTeam(q, to) {
+    teamAlive(q).forEach((u, i) => u.orderTo(to.x + (i - 1) * 1.6, to.z + (i % 2) * 1.2));
+  }
+  /** A group of French the FLN knows, worth a mortar's time: { at, n }, or null. */
+  function harassTarget(from) {
+    const known = knownFrench().filter((f) => f.type?.foot && dist(f.position, post) > P.postKeepOff);
+    let best = null, bestS = -Infinity;
+    for (const f of known) {
+      const n = known.filter((o) => dist(o.position, f.position) < 15).length;
+      if (n < P.harass.minKnown) continue;
+      const sc = n * 10 - dist(f.position, from) / 20;
+      if (sc > bestS) { bestS = sc; best = { at: { x: f.position.x, z: f.position.z }, n }; }
+    }
+    return best;
+  }
+  function stepMortar(q, dt) {
+    const H = P.harass, M = app.algMortarTeams, men = teamAlive(q);
+    if (!q.s || !M || !men.length) return;
+    q.t = (q.t ?? 0) + dt;
+    q.state ??= "home";
+    const c = centre(men);
+    const near = french().some((f) => !f.isAir && dist(f.position, c) < H.danger);
+    const lost = 1 - men.length / q.men.length >= H.lostAt;
+    switch (q.state) {
+      case "home": {
+        q.s.mortarHold = false;   // at home it defends what comes in reach
+        if (q.t < (q.rest ?? 0)) break;
+        if ((q.look = (q.look ?? 0) - dt) > 0) break;
+        q.look = 3;
+        const tg = harassTarget(c);
+        if (!tg) break;
+        const a0 = Math.atan2(c.z - tg.at.z, c.x - tg.at.x);   // its own side of the target
+        const spot = spotAround(tg.at, a0, 1.0, H.ring, { from: c });
+        if (!spot) break;
+        q.target = tg.at; q.spot = spot; q.state = "move"; q.t = 0;
+        q.s.mortarHold = true;
+        orderTeam(q, spot);
+        break;
+      }
+      case "move":
+        q.s.mortarHold = true;
+        if (near || lost) { q.state = "leave"; q.t = 0; break; }
+        if (dist(c, q.spot) < 6 && !men.some((u) => u.isMoving)) { q.state = "fire"; q.t = 0; q.fireFor = rand(...H.fireFor); q.barraged = false; break; }
+        if (q.t > 90) { q.state = "leave"; q.t = 0; break; }   // it never got there
+        if (q.t > 8 && !men.some((u) => u.isMoving)) orderTeam(q, q.spot);   // stopped short: on again
+        break;
+      case "fire": {
+        q.s.mortarHold = false;
+        const set = M.stateOf(q.s) === "set";
+        if (!set && q.t > H.setupWait) { q.state = "leave"; q.t = 0; break; }
+        if (set && !q.barraged) {
+          // THE BARRAGE on the French it knows nearest its aim (they may have moved).
+          const tg = harassTarget(c);
+          if (tg && M.fireBarrage(q.s, tg.at.x, tg.at.z)) q.barraged = true;
+          else if (q.t > H.setupWait) q.barraged = true;   // none it can afford or reach: its rounds only
+        }
+        if (near || lost || q.t > q.fireFor) { q.state = "leave"; q.t = 0; }
+        break;
+      }
+      case "leave":
+        q.s.mortarHold = true;
+        if (q.t < 0.2) orderTeam(q, homeFor(c));
+        if (dist(c, homeFor(c)) < 12 || q.t > 120) { q.state = "home"; q.t = 0; q.rest = rand(...H.rest); }
+        else if (q.t > 10 && !men.some((u) => u.isMoving)) orderTeam(q, homeFor(c));
+        break;
+    }
+  }
+
   function stepTeams(dt) {
     for (let i = teams.length - 1; i >= 0; i--) if (!teams[i].men.some((u) => u.alive)) teams.splice(i, 1);
+    for (const q of teams) if (q.key === "mortier") stepMortar(q, dt);
     if ((teamT -= dt) > 0) return;
     teamT = P.teamEvery;
     // What the FLN has SEEN of the French (its own eyes: knownFrench leaves aircraft out — they are loud).
@@ -1819,10 +1894,12 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     get cacheWhy() { return cacheWhy; },
     /** Dev: try to hide a new cache now (ignores the clock). */
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
+    /** Dev: every mortar team at home starts a harass now (if it knows a target). */
+    mortarNow() { for (const q of teams) if (q.key === "mortier" && q.state !== "fire") { q.state = "home"; q.t = 1e9; q.look = 0; q.rest = 0; } },
     /** Dev: a team of `key` now (pays, ignores the clock and the tiers). */
     teamNow(key) { return spawnTeam(key); },
     /** Dev: the teams out ({ key, alive }). */
-    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s })); },
+    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null })); },
     /** Dev: what each band is doing. */
     describe() {
       return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "cut" ? " (cut the line)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";

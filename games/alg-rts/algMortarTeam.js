@@ -457,6 +457,10 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     for (const s of teams()) {
       const m = stateOf(s), g = gunnerOf(s), K = kindOf(s);
       if (!g) continue;
+      // UNDER THE FOG (2026-10-18): an enemy team the player cannot see draws no tube or plate — the
+      // tube stood alone in the scrub where its hidden crew was (its launch smoke still shows: a mortar
+      // firing gives itself away). The units' own rule (unitRenderer).
+      if (fogOfWar?.enabled && !isHuman(s.team) && !s.members.some((u) => u.alive && fogOfWar.canSeeEntity?.(u))) continue;
       // The plate, then the tube, on the ground once set down (carried before: CARRIED above).
       const down = m.base ? onGround(m) : { plate: false, tube: false };
       if (down.plate && np < MAXT) {
