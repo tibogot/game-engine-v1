@@ -3,6 +3,7 @@
 // game must beat, never something to trade for triangle counts (user, 2026-10-18).
 import * as THREE from "three";
 import { integrate, deckFrame, SECTIONS } from "./kit.js";
+import "./oldTiles.js"; // registers the old kit's bowl and flip ramp as tiles
 import { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS, NO_CHECKER } from "../../../modular-road-v3/modularRoadKit.js";
 import { buildRailGeometry, buildRailCollision } from "../../../modular-road-v3/modularRoadRail.js";
 import { createRoadMaterial, createGuardrailMaterial } from "../../../modular-road-v3/modularRoadMaterial.js";
@@ -38,6 +39,7 @@ export function oldFrames(tile) {
  * @returns {{deck: THREE.BufferGeometry, rail: THREE.BufferGeometry|null, railCollision: THREE.BufferGeometry|null, posts: {template, matrices}|null}}
  */
 export function buildOldLook(tile, edges = true) {
+  if (tile.customLook) return tile.customLook(tile, edges); // the old kit's own pieces (oldTiles.js)
   const { frames } = oldFrames(tile);
   const rp = tile.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS.wide.hw * 2 } : ROAD_PARAM_DEFAULTS;
   const deck = buildSweepGeometry(frames, buildProfile(rp, edges), {});

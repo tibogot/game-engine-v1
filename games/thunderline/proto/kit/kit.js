@@ -37,6 +37,7 @@ const MAX_RING_GAP = 16; // or after this many metres
  * @param {{segs: object[], section?: string}} tile
  */
 export function integrate(tile, opts = {}) {
+  if (tile.customIntegrate) return tile.customIntegrate(tile, opts);
   const maxGap = opts.maxGap ?? MAX_RING_GAP;
   const maxAngle = opts.maxAngle ?? MAX_RING_ANGLE;
   const p = new THREE.Vector3();
@@ -312,8 +313,19 @@ for (const [id, a] of [["landing_20", 20], ["banked_landing_20", 20], ["landing_
  * from where the slowest arc lands to where the fastest does, plus a margin), then a curve back to
  * level. Any page rebuilds the exact same piece from the id — a saved track needs nothing else.
  */
+/**
+ * Other modules can add tiles (oldTiles.js brings the old kit's bowl and flip ramp). A resolver
+ * returns a tile for an id it knows, or undefined. A tile may carry `customIntegrate(tile, opts)`
+ * instead of `segs` — then `integrate` hands it the job.
+ */
+export const TILE_RESOLVERS = [];
+
 export function ensureTile(id) {
   if (TILES[id]) return TILES[id];
+  for (const resolve of TILE_RESOLVERS) {
+    const t = resolve(id);
+    if (t) { TILES[id] = { ...t, id }; return TILES[id]; }
+  }
   const m = /^fitted_landing_(\d+)_(\d+)$/.exec(id);
   if (!m) return undefined;
   const angle = Number(m[1]), D = Number(m[2]);
@@ -328,9 +340,9 @@ export function ensureTile(id) {
 }
 
 /** Lean at the entry / exit of a tile (radians). */
-export const leanIn = (t) => t.segs[0].leanIn ?? 0;
+export const leanIn = (t) => t.segs?.[0].leanIn ?? 0;
 export function leanOut(t) {
   let l = 0;
-  for (const s of t.segs) l = s.leanOut ?? s.leanIn ?? l;
+  for (const s of t.segs ?? []) l = s.leanOut ?? s.leanIn ?? l;
   return l;
 }

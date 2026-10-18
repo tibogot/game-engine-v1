@@ -4,7 +4,7 @@
 // :9904-10040), minus everything a sky track doesn't need. Throwaway: it answers DESIGN.md §9 P3.
 import * as THREE from "three";
 import { startV3App } from "../../../../v3/engine.js";
-import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS } from "../../../../v3/play/modularRoadVehicle.js";
+import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
 import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
@@ -12,6 +12,8 @@ import { createGamepadInput } from "../../../modular-road-v3/gamepadInput.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
 import { TILES, integrate, ensureTile } from "./kit.js";
+import { createAutopilot, wallCut } from "./autopilot.js";
+import { applyCarTune } from "./carTune.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -70,8 +72,7 @@ for (const [id, t] of Object.entries(TILES)) built[id] = { b: integrate(t), guar
 // SUBSTEPS a per-car field). ?top=<m/s> (terminal ≈ 0.96 × top), ?substeps=<n>.
 const TOP = Number(params.get("top")) || 63;
 const SUBSTEPS = Number(params.get("substeps")) || 3;
-TIRE.topSpeed = TOP;
-TIRE.steerSpeedRef = TOP * 0.9; // "full reduction should land AT top speed" (old: 45 for 50)
+applyCarTune({ TIRE, WHEEL }, TOP); // carTune.js: the builder's prediction drives this same car
 CHASE_CAM.fovSpeedRef = TOP; // "keep matching TIRE.topSpeed"
 // Flights are placed for the speed the car REALLY has at the kicker lip: 0.91 × top measured on this
 // run-up at top 50 (164 km/h). ?jump=<m/s> overrides.
@@ -103,7 +104,8 @@ const solids = [];
 for (const p of lay.placements) {
   const look = p.open ? built[p.id].open : built[p.id].guarded;
   // the left-hand mirrors ("…_L") are the same pieces: they need the same tags
-  decks.push(asCollider(look.deck, p.M, { roadHold: ROAD_HOLD.has(p.id.replace(/_L$/, "")) }));
+  const t = TILES[p.id];
+  decks.push(asCollider(look.deck, p.M, { roadHold: ROAD_HOLD.has(p.id.replace(/_L$/, "")) || !!t?.roadHold, freeCarve: !!t?.freeCarve }));
   if (look.railCollision) solids.push(asCollider(look.railCollision, p.M));
 }
 const deckBvh = new RoadBvh();
@@ -218,34 +220,9 @@ function readControls() {
 // ---------- test autopilot (debug, P toggles): steer at the centreline 25 m ahead ----------
 // Not gameplay — an objective check that the old car can drive every new piece.
 let autopilot = params.has("auto");
-let rideIdx = 0; // furthest ride point reached
-const _inv = new THREE.Quaternion();
-function autopilotInput() {
-  const p = vehicle.body.pos;
-  // nearest ride point, searched forward from the last one (the track crosses itself)
-  let best = rideIdx, bd = Infinity;
-  for (let i = Math.max(0, rideIdx - 20); i < Math.min(lay.ride.length, rideIdx + 400); i++) {
-    const d = lay.ride[i].P.distanceToSquared(p);
-    if (d < bd) { bd = d; best = i; }
-  }
-  rideIdx = best;
-  const aim = (dist) => {
-    let i = best, acc = 0;
-    while (i + 1 < lay.ride.length && acc < dist) { acc += lay.ride[i].P.distanceTo(lay.ride[i + 1].P); i++; }
-    return lay.ride[i];
-  };
-  _inv.copy(vehicle.body.quat).invert();
-  const local = aim(25).P.clone().sub(p).applyQuaternion(_inv); // car local: +Z forward, +X left
-  const steer = THREE.MathUtils.clamp((local.x / Math.max(local.z, 4)) * 2.5, -1, 1);
-  const far = aim(90).T;
-  const fwd = new V(0, 0, 1).applyQuaternion(vehicle.body.quat);
-  const bend = Math.acos(THREE.MathUtils.clamp(far.dot(fwd), -1, 1));
-  const v = vehicle.body.vel.length();
-  // brake for flat brake turns only: not banked sweepers, not loops (their far point is above/behind)
-  const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(fwd.y) < 0.4 && v > 26 && !lay.ride[best].air ? -1 : 1;
-  return { steerTarget: steer, rollTarget: 0, throttle, handbrake: false, yaw: 0, pitch: 0, analog: true };
-}
-addEventListener("keydown", (e) => { if (e.code === "KeyP") { autopilot = !autopilot; rideIdx = 0; } });
+const pilot = createAutopilot(lay.ride); // autopilot.js: shared with the builder's prediction and the tests
+const autopilotInput = () => pilot.input(vehicle);
+addEventListener("keydown", (e) => { if (e.code === "KeyP") { autopilot = !autopilot; pilot.reset(); } });
 
 // ---------- BOOST PADS: past the top speed, for a while (user: boosts make it "even faster") ----------
 // Touching a boost pad's deck arms a push along the car's nose for BOOST.time; the push is added on
@@ -275,7 +252,7 @@ let runTime = 0;
 let topKmh = 0;
 const safe = { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false };
 function restart() {
-  rideIdx = 0;
+  pilot.reset();
   vehicle.setSpawn(spawnPos, startQuat);
   vehicle.respawn();
   chase.reset();
@@ -333,7 +310,8 @@ function tick() {
   simAccum -= ticks * FIXED_DT;
   const tPhys = performance.now();
   for (let i = 0; i < ticks; i++) {
-    vehicle.tick(input);
+    // NO ENGINE UP A WALL applies to everyone (autopilot.js wallCut), every tick: a car rule
+    vehicle.tick(wallCut(vehicle, input));
     boostTick(FIXED_DT);
     runTime += FIXED_DT;
     if (vehicle.groundedCount >= 3) { safe.pos.copy(vehicle.body.pos); safe.quat.copy(vehicle.body.quat); safe.ok = true; }
@@ -355,8 +333,8 @@ requestAnimationFrame(tick);
 
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
-  get topKmh() { return topKmh; }, get rideIdx() { return rideIdx; }, get recoveries() { return recoveries; },
+  get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
   get boosting() { return boostLeft > 0; }, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
-  setAuto(on) { autopilot = on; rideIdx = 0; recoveries = 0; },
+  setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };
