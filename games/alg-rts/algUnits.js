@@ -368,10 +368,15 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     producers.push(createAlgProducer({
       mesh: m, units, typeKey: "caveEntrance", name: t("Grotte"), maxHp: 1600, team: "enemy",
       // (Playing the FLN, a faoudj of four takes 12 s, not one man's 4 — its AI keeps the 4.)
-      builds: SIDES.human === "enemy" ? { ...PRODUCTION.caveEntrance, moudjahid: 12 } : PRODUCTION.caveEntrance,
+      // (and an FM team of two 9 s, not the lone gunner's 7)
+      builds: SIDES.human === "enemy" ? { ...PRODUCTION.caveEntrance, moudjahid: 12, fmTeam: 9 } : PRODUCTION.caveEntrance,
       // A human playing the FLN buys a SQUAD per click (algSquads.js); its AI, single men (algAI.js).
       countOf: (key) => squadSize(key, "enemy"),
-      onSpawned: (u, key, slot) => app.algSquads?.bought(u, key, slot),
+      onSpawned: (u, key, slot) => {
+        // (its AI's lone FM gunner wears the gunner's look: a look role 1 is the team's loader, with a rifle)
+        if (key === "fmTeam" && squadSize(key, "enemy") === 1) u.lookRole = 0;
+        app.algSquads?.bought(u, key, slot);
+      },
       inside: [0.15 * S, 2.2 * S], outside: [0.4 * S, -6 * S],
       // They gather 22 m out TOWARD THE VALLEY (the French post), not
       // straight out of the mouth: the camp is in a corner of the map, and
@@ -393,7 +398,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     if (o) for (let i = 0; i < 10; i++) {
       const a = (i / 10) * Math.PI * 2, r = 4 + (i % 3) * 2.5;
       const p = navGrid.nearestOpenWorld(o.x + Math.cos(a) * r, o.z + Math.sin(a) * r, true) ?? o;
-      const u = units.spawn(i < 8 ? "moudjahid" : "fmTeam", p.x, p.z, { team: "enemy", lookRole: i % 4 });
+      const u = units.spawn(i < 8 ? "moudjahid" : "fmTeam", p.x, p.z, { team: "enemy", lookRole: i < 8 ? i % 4 : 0 });
       if (u) startMen.fln.push(u);
     }
   }
@@ -815,7 +820,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // MACHINE-GUN TEAMS (algMgTeam.js): the pièce FM's gunner and the FLN's FM gunners set up, fire
   // in an arc, pack up to move.
   mgTeams = createAlgMgTeams({ app, units, selection, fogOfWar,
-    isGunner: (u) => u.typeKey === "fmTeam" || (u.typeKey === "mitrailleuse" && u.weapon === "mg") || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u),
+    isGunner: (u) => (u.typeKey === "fmTeam" && u.weapon === "mg") ||(u.typeKey === "mitrailleuse" && u.weapon === "mg") || (u.squad?.typeKey === "piece" && u.squad.slots[0] === u),
     emplacements: () => structures.list });
   app.algMgTeams = mgTeams;
   app.algPosture = posture;

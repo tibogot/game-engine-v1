@@ -44,9 +44,10 @@ export const SQUADS = {
   sapeur: { size: 3, name: t("Équipe du génie"), reinforce: 45 },
   // The machine-gun team (algMgTeam.js): slot 0 carries the gun (`kit`, as an upgrade's weapon).
   piece: { size: 3, name: t("Pièce FM"), reinforce: 40, kit: { 0: { weapon: "mg", range: 48, damage: 6, fireRate: 5 } } },
-  // The flamethrower team (algFlamethrower.js): slot 0 the operator (his type's lance), slot 1 the
-  // loader with a rifle.
-  lanceFlammes: { size: 2, name: t("Lance-flammes"), reinforce: 45, kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
+  // The flamethrower team (algFlamethrower.js): slot 0 the operator (his type's lance), slots 1-3 riflemen —
+  // FOUR since 2026-10-19 (you, playing: "two in the squad … they need to come close and get killed way too
+  // easily"; CoH: the flamer is one weapon in a full squad — the escort soaks the fire and shoots back).
+  lanceFlammes: { size: 4, name: t("Lance-flammes"), reinforce: 45, kit: Object.fromEntries([1, 2, 3].map((i) => [i, { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 }])) },
   // The 81 mm mortar team (algMortarTeam.js): slot 0 the tube (range 0: the module aims and fires it).
   mortierFr: { size: 3, name: t("Groupe de mortier"), reinforce: 40, kit: { 0: { weapon: "mortar", range: 0, damage: 0, fireRate: 1 } } },
   para: { size: 5, name: t("Stick para"), reinforce: 60 },
@@ -55,9 +56,10 @@ export const SQUADS = {
   // reinforced (reinforce 0: no price, no button).
   equipage: { size: 3, name: t("Équipage"), reinforce: 0, kit: Object.fromEntries([0, 1, 2].map((i) => [i, { weapon: "rifle", range: 24, damage: 5, fireRate: 3.2 }])) },
   // THE FLN's, for a human playing it: a faoudj of four moudjahidine (the ALN's smallest unit);
-  // the FM gunner and the marksman each a squad of one (retreat, a badge — no reinforcing).
+  // the marksman a squad of one (retreat, a badge — no reinforcing, as CoH's sniper). The FM TEAM two since
+  // 2026-10-19 (you: the lone men confused): slot 0 the gunner (his type's FM), slot 1 the loader's rifle.
   moudjahid: { size: 4, name: t("Faoudj"), reinforce: 35, side: "enemy" },
-  fmTeam: { size: 1, name: t("Tireur FM"), reinforce: 0, side: "enemy" },
+  fmTeam: { size: 2, name: t("Équipe FM"), reinforce: 35, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
   tireur: { size: 1, name: t("Tireur d'élite"), reinforce: 0, side: "enemy" },
   // The mortar team (algMortarTeam.js): slot 0 the tube (range 0: the module aims and fires it).
   mortier: { size: 3, name: t("Mortier"), reinforce: 40, side: "enemy", kit: { 0: { weapon: "mortar", range: 0, damage: 0, fireRate: 1 } } },

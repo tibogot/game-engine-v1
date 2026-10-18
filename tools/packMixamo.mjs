@@ -201,7 +201,10 @@ const ROLES = {
   "planting a plant": "plant",
   "pointing": "point",
   "pick fruit": "pick_fruit",
-  "carrying": "carry_walk",
+  // (2026-10-19: Mixamo's "Walking" of the box set; "Carrying" was a STANDING sway, the legs never stepped —
+  // the haulers slid. Moved to assets-src/soldiers/unused/)
+  "walking(box)": "carry_walk",
+  "walking (box)": "carry_walk",
   "grenade throw": "grenade_throw_alt",
   "running scared": "flee",
   "surrender": "surrender",
@@ -408,11 +411,11 @@ if (!clips.length) fail("no animation clips found");
 // every frame at 30 Hz — it doubled the bake). Cut at the time inside the window
 // whose pose is NEAREST the first frame (summed bone rotation gap), so it loops
 // without a pop. MEASURED in the pack's report below.
-// cower (Terrified, 20 s) and carry_walk (Carrying, 10 s): 2026-10-17, a loop each is enough.
+// cower (Terrified, 20 s): 2026-10-17, a loop is enough. (carry_walk is a real walk cycle since 2026-10-19: uncut.)
 // An entry [lo, hi] cuts the END (the loop from 0); { start: [a0, a1], len: [l0, l1] } also drops a
 // START — "Terrified" begins standing and never comes back to that pose (no end gave a loop gap
 // under 2.1): the best (start, end) pair is searched.
-const CUT = { sit_talk: [8, 16], cower: { start: [0.5, 8], len: [3, 8] }, carry_walk: [1.8, 3.6] };
+const CUT = { sit_talk: [8, 16], cower: { start: [0.5, 8], len: [3, 8] } };
 for (const clip of clips) {
   const win = CUT[clip.name];
   if (!win) continue;

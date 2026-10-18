@@ -87,13 +87,13 @@ export const ALG_UNIT_TYPES = {
 
   // THE LANCE-FLAMMES (2026-10-09, CoH's flamethrower team, French only): the operator with the
   // Mle 1950 — his weapon "flamer" fires its own way (algFlamethrower.js: a stream that burns
-  // everyone in it, pins, routs, clears houses) — and his loader (slot 1: a rifle, algSquads
+  // everyone in it, pins, routs, clears houses) — and three riflemen (slots 1-3, algSquads
   // SQUADS.lanceFlammes.kit). Short reach (the stream's), fragile: the tanks can go up.
-  // Built at the post (algUnits PRODUCTION, tier 1; 200 effectifs + 45 munitions, algEconomy).
+  // Built at the post (algUnits PRODUCTION, tier 1; 260 effectifs + 45 munitions, algEconomy).
   lanceFlammes: {
     typeKey: "lanceFlammes",
     name: t("Lance-flammes"),
-    buildLabel: t("Lance-flammes (2)"),
+    buildLabel: t("Lance-flammes (4)"),
     weapon: "flamer",
     isAir: false,
     foot: true,

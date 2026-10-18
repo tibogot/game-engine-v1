@@ -69,6 +69,10 @@ export function buildMortarPitV2({ seed = 31 } = {}) {
     site.metal.push(new THREE.CylinderGeometry(0.075, 0.075, 0.7, 8).rotateX(Math.PI / 2).translate(0.85 + i * 0.16 + r * 0.08, 0.08 + r * 0.135, 1.1));
   }
   const { group } = siteGroup(site, "MortarPit");
+  // THE BERM at every distance (you, 2026-10-19: zoomed out, the ring of bags floated): "spoil" is in
+  // siteGroup's DETAIL level (gone past 70 m — meant for small heaps), but here it is the pit itself.
+  const bermMesh = group.getObjectByName("MortarPit:spoil");
+  if (bermMesh) group.add(bermMesh);
   // The placement ghost's shape (algBuild): everything merged, positions only.
   const all = [];
   group.traverse((o) => { if (o.isMesh) { const g = new THREE.BufferGeometry(); g.setAttribute("position", o.geometry.attributes.position); g.setIndex(o.geometry.index); all.push(g); } });

@@ -38,8 +38,9 @@ import { t } from "./i18n/i18n.js";
 /** What each unit costs: French { mp, fuel, mun } (per SQUAD for infantry), the ALN's a number. */
 export const COSTS = {
   appele: { mp: 270 }, sapeur: { mp: 170 }, piece: { mp: 240, mun: 20 },
-  // The lance-flammes (algFlamethrower.js): munitions-heavy, as CoH's flamethrowers.
-  lanceFlammes: { mp: 200, mun: 45 },
+  // The lance-flammes (algFlamethrower.js): munitions-heavy, as CoH's flamethrowers. Four men since
+  // 2026-10-19 (200 for two → 260 for the operator and three riflemen).
+  lanceFlammes: { mp: 260, mun: 45 },
   // The 81 mm team (algMortarTeam.js): CoH's early mortar, a munitions price for its rounds.
   mortierFr: { mp: 250, mun: 30 },
   para: { mp: 320, fuel: 25 }, legion: { mp: 380, mun: 45 },
@@ -56,7 +57,7 @@ export const COSTS = {
  * PLAYING THE FLN (?side=fln, 2026-10-13): the human buys a faoudj of four at the cave (algSquads.js),
  * a little under four single men (its AI still buys them one by one at COSTS).
  */
-export const ALN_SQUAD_COSTS = { moudjahid: 150 };
+export const ALN_SQUAD_COSTS = { moudjahid: 150, fmTeam: 110 };   // (the FM team of two: gunner + loader)
 /** A unit's price at a producer of `team`: a human FLN's squads their own price. */
 export const unitCost = (key, team) => (team === "enemy" && SIDES.human === "enemy" && ALN_SQUAD_COSTS[key]) || (COSTS[key] ?? 0);
 

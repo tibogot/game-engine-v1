@@ -260,7 +260,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
 
   // ── Squads out of nowhere (a drop) or out of the post ─────────────────────
   function squadAt(key, x, z, { elite = false } = {}) {
-    const size = { para: 5, legion: 5, moudjahid: 4, fmTeam: 1 }[key] ?? 5;
+    const size = { para: 5, legion: 5, moudjahid: 4, fmTeam: 2 }[key] ?? 5;
     if (popRoom() < size) { say(t("<b>Effectifs au plafond</b> : pas de place pour un groupe de plus."), x, z, "bad"); return null; }
     const men = [];
     for (let i = 0; i < size; i++) {

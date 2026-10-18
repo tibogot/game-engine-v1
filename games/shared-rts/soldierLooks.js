@@ -139,7 +139,7 @@ export const LOOKS = {
   // The LANCE-FLAMMES team (alg-rts, 2026-10-09: French only, two men, CoH-style): the operator
   // (0) with the lance and the tanks on his back (no pack), the loader (1) with his rifle and pack.
   appeleLanceFlammes: {
-    label: "Lance-flammes", note: "two men: the operator (lance + tanks), the loader (rifle, pack)",
+    label: "Lance-flammes", note: "four men: the operator (lance + tanks), three riflemen (rifle, pack)",
     green: 0x6f6d4b, khaki: 0x838059, helmet: true, helmetColor: 0x5a5a40, hatColor: 0x77744f, weapon: "mas49_56",
     variants: [{ w: 0.8 }, { w: 0.2, helmet: false, headgear: "bushHat" }],
     kit: ["pack", "belt"],
@@ -207,11 +207,13 @@ export const LOOKS = {
     spare: ["m20"],
     extras: { beard: 0.45, mustache: 0.5, bandolier: 0.4, bandoliers: 0.25, cigarette: 0.1, kachabia: 0.2 },
   },
-  // The ALN's FM gunners (alg-rts fmTeam): the section's look, every man with
-  // the FM 24/29 (no mix, no roles), bandoliers for its magazines more often.
+  // The ALN's FM gunners (alg-rts fmTeam): the section's look with the FM 24/29,
+  // bandoliers for its magazines more often. A human's FM TEAM is two (2026-10-19):
+  // role 1 the loader with his rifle (the AI's lone gunners are given role 0).
   alnGunners: {
-    label: "ALN FM gunners", note: "the section's look, all with the FM 24/29",
+    label: "ALN FM gunners", note: "the section's look, the FM 24/29; role 1 the team's loader",
     green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, weapon: "fm2429",
+    roles: { 1: { name: "loader", weapon: "mas36" } },
     skinTan: ALN_SKIN, clothRef: 0.045,
     variants: [
       { w: 0.35, headgear: "cheche", hatColor: 0xdcd5c3 },
