@@ -11,7 +11,9 @@ import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCame
 import { createGamepadInput } from "../../../modular-road-v3/gamepadInput.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
-import { TILES, integrate, ensureTile } from "./kit.js";
+import { TILES, integrate, ensureTile, SECTIONS } from "./kit.js";
+import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
+import { makeGateMesh } from "./gateMesh.js";
 import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
 import { createLandingJudge } from "./landing.js";
@@ -97,6 +99,28 @@ const lay = builtTrack?.pieces?.length
 const meshes = buildTrackMeshes(lay.placements, built, mats);
 meshes.group.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; o.layers.enable(STATIC_LAYER); } });
 scene.add(meshes.group);
+
+// ---------- THE RACE (race.js, DESIGN.md §8): gates, checkpoints in any order, finish, medals ----------
+// A checkpoint is a flag on a piece (builder: select it, C). The built-in test track has one at each landing.
+const flagged = builtTrack?.pieces?.length
+  ? builtTrack.pieces.map((p, k) => (p.cp ? k : -1)).filter((k) => k >= 0)
+  : lay.placements.map((p, k) => (/landing|catch_pad/.test(p.id) ? k : -1)).filter((k) => k >= 0);
+const hwOf = (k) => SECTIONS[TILES[lay.placements[k]?.id]?.section ?? "road"].hw;
+const gates = gatesFor(lay.ride, flagged, hwOf);
+const r0 = lay.ride[0];
+for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) scene.add(makeGateMesh(g));
+const race = createRace({ gates });
+// the track's identity for records: its pieces, links and flags (DESIGN.md §8 keys records by content)
+const trackKey = (() => {
+  const src = JSON.stringify((builtTrack?.pieces ?? []).map((p) => [p.id, !!p.open, p.M.map((x) => +x.toFixed(3)), p.parent, p.flightFrom, !!p.cp]));
+  let h = 0x811c9dc5;
+  for (let i = 0; i < src.length; i++) h = Math.imul(h ^ src.charCodeAt(i), 0x01000193);
+  return builtTrack?.pieces?.length ? (h >>> 0).toString(36) : "test";
+})();
+const medals = medalTimes(builtTrack?.authorTime);
+const BEST_KEY = `thunderline.best.${trackKey}`;
+const loadBest = () => { try { return JSON.parse(localStorage.getItem(BEST_KEY)); } catch { return null; } };
+let best = loadBest();
 
 // ---------- collision: deck BVH (wheels) + solids BVH (chassis vs rails) ----------
 const asCollider = (geometry, M, userData = {}) => ({ geometry, matrixWorld: M, userData, updateMatrixWorld() {} });
@@ -188,8 +212,8 @@ if (useNewShadows) {
 const keys = {};
 addEventListener("keydown", (e) => {
   keys[e.code.toLowerCase()] = true;
-  if (e.code === "Backspace") { recoverToSafe(); e.preventDefault(); }
-  if (e.code === "KeyR") restart();
+  if (e.code === "Backspace") { respawnCheckpoint(); e.preventDefault(); }
+  if (e.code === "KeyR" || e.code === "Delete") restart();
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code)) e.preventDefault();
 });
 addEventListener("keyup", (e) => { keys[e.code.toLowerCase()] = false; });
@@ -262,12 +286,63 @@ function showLanding(ev) {
   landTimer = setTimeout(() => el.classList.remove("show"), 1400);
 }
 
-// ---------- respawn: restart, last safe spot, falls ----------
+// ---------- race events + HUD ----------
+const HOLD = { steerTarget: 0, rollTarget: 0, throttle: 0, handbrake: true, yaw: 0, pitch: 0, analog: false };
+const fmt = (t) => {
+  if (t == null) return "—";
+  const m = Math.floor(t / 60), sec = (t % 60).toFixed(2);
+  return m ? `${m}:${sec.padStart(5, "0")}` : sec;
+};
+let splitTimer = null;
+function flashSplit(html, cls) {
+  const el = $("split");
+  el.innerHTML = html;
+  el.className = `panel show ${cls}`;
+  clearTimeout(splitTimer);
+  splitTimer = setTimeout(() => el.classList.remove("show"), 1800);
+}
+function onRace(e) {
+  if (e.type === "cp") {
+    // split against the best run's time at the same checkpoint
+    const b = best?.splits?.find((s) => s.gate === e.gate);
+    const diff = b ? e.time - b.time : null;
+    const tail = diff != null ? ` <small class="${diff <= 0 ? "ahead" : "behind"}">${diff <= 0 ? "−" : "+"}${Math.abs(diff).toFixed(2)}</small>` : "";
+    flashSplit(`CP ${e.n}/${e.of} · ${fmt(e.time)}${tail}`, "cp");
+  } else if (e.type === "missing") {
+    flashSplit(`${e.n} checkpoint${e.n > 1 ? "s" : ""} missed — take them all`, "miss");
+  } else if (e.type === "finish") {
+    const improved = !best || e.time < best.time;
+    if (improved) {
+      best = { time: e.time, splits: race.s.splits.slice() };
+      try { localStorage.setItem(BEST_KEY, JSON.stringify(best)); } catch {}
+    }
+    showFinish(e.time, improved);
+  }
+}
+const MEDAL_NAMES = { author: "Author", gold: "Gold", silver: "Silver", bronze: "Bronze" };
+function showFinish(time, improved) {
+  const m = medalFor(time, medals);
+  const rows = medals
+    ? ["author", "gold", "silver", "bronze"].map((k) => `<div class="mrow ${k}${m === k ? " got" : ""}"><i></i>${MEDAL_NAMES[k]}<b>${fmt(medals[k])}</b></div>`).join("")
+    : `<div class="mrow">No author time yet: open the track in the builder and let its prediction finish</div>`;
+  const head = m ? `${MEDAL_NAMES[m]} medal` : medals ? "No medal" : "Finished";
+  $("finish").innerHTML =
+    `<div class="ft">${fmt(time)}</div>` +
+    `<div class="fm">${head}${improved ? " · new best" : ` · best ${fmt(best?.time)}`}</div>` +
+    rows +
+    `<div class="fk"><kbd>R</kbd> again · <kbd>Backspace</kbd> keeps driving</div>`;
+  $("finish").classList.add("show");
+}
+
+// ---------- respawn: restart, checkpoints, last safe spot, falls ----------
 let simAccum = 0;
 let runTime = 0;
 let topKmh = 0;
 const safe = { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false };
 function restart() {
+  race.reset();
+  $("finish").classList.remove("show");
+  vehicle.setEnabled(true); // parked after a finish
   judge.reset();
   landings.length = 0;
   pilot.reset();
@@ -281,6 +356,27 @@ function restart() {
   safe.quat.copy(startQuat);
 }
 let recoveries = 0;
+// CHECKPOINT RESPAWN (DESIGN.md §8): Backspace = back to the last checkpoint at the speed you had
+// there; again within 1.5 s = the same spot standing (a carried speed can replay a bad line); no
+// checkpoint yet = the start, standing. The clock keeps running.
+let lastBackspace = -1e9;
+function respawnCheckpoint() {
+  const now = performance.now();
+  const standing = now - lastBackspace < 1500;
+  lastBackspace = now;
+  const cp = race.s.last;
+  const pos = cp ? cp.pos.clone() : spawnPos.clone();
+  const quat = cp ? cp.quat.clone() : startQuat.clone();
+  vehicle.respawnAt(pos, quat);
+  if (cp && !standing) vehicle.body.vel.copy(cp.vel);
+  race.teleported(vehicle.body.pos);
+  judge.reset();
+  pilot.reset();
+  chase.reset();
+  boostLeft = 0;
+  simAccum = 0;
+  recoveries++;
+}
 function recoverToSafe() {
   judge.reset();
   recoveries++;
@@ -293,7 +389,11 @@ function checkFall() {
   if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) return restart();
   // a fall restarts the run (the last safe spot can be a kicker lip: respawning there at 0 km/h just
   // falls again). Checkpoint respawn that keeps your speed is the real game's rule (DESIGN.md §8).
-  if (p.y < KILL_Y) { recoveries++; return restart(); }
+  if (p.y < KILL_Y) {
+    // after the finish the road ends: park the car under the finish screen instead of restarting
+    if (race.s.state === "finished") { vehicle.setEnabled(false); return; }
+    return race.s.state === "running" ? respawnCheckpoint() : restart();
+  }
   if (STUCK?.enabled && vehicle.isBeached && vehicle.stuckTime >= STUCK.respawnAfter) return recoverToSafe();
 }
 
@@ -322,15 +422,17 @@ function tick() {
   const dt = Math.min((now - last) / 1000, 0.05);
   last = now;
   const input = autopilot ? autopilotInput() : readControls();
-  if (padRespawn) recoverToSafe();
+  if (padRespawn) respawnCheckpoint();
   simAccum += dt;
   let ticks = Math.floor(simAccum / FIXED_DT);
   if (ticks > MAX_SIM_TICKS) { ticks = MAX_SIM_TICKS; simAccum = ticks * FIXED_DT; }
   simAccum -= ticks * FIXED_DT;
   const tPhys = performance.now();
   for (let i = 0; i < ticks; i++) {
-    // NO ENGINE UP A WALL applies to everyone (autopilot.js wallCut), every tick: a car rule
-    vehicle.tick(wallCut(vehicle, input));
+    // NO ENGINE UP A WALL applies to everyone (autopilot.js wallCut), every tick: a car rule.
+    // The countdown holds the car on the line.
+    vehicle.tick(race.holding ? HOLD : wallCut(vehicle, input));
+    for (const e of race.tick(vehicle, FIXED_DT)) onRace(e);
     // CLEAN-LANDING BOOST (landing.js): land flat → the boost pad's push; land crooked → lose speed
     const landed = judge.tick(FIXED_DT);
     if (landed) { boostLeft = Math.max(boostLeft, landed.boost); showLanding(landed); }
@@ -348,7 +450,11 @@ function tick() {
   const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);
   topKmh = Math.max(topKmh, kmh);
   $("kmh").textContent = Math.round(kmh);
-  $("time").textContent = runTime.toFixed(2) + (boostLeft > 0 ? "  ·  BOOST" : "");
+  const rs = race.s;
+  // countdown: 3 · 2 · 1 over 1.5 s
+  $("time").textContent = rs.state === "countdown" ? String(Math.ceil(rs.hold * 2)) : fmt(rs.state === "finished" ? rs.finishTime : rs.time);
+  $("cps").textContent = race.cps.length ? `CP ${rs.taken.size}/${race.cps.length}` : "no checkpoints";
+  $("cps").classList.toggle("boost", boostLeft > 0);
   if (++frame % 15 === 0) renderStats();
 }
 requestAnimationFrame(tick);
@@ -356,7 +462,7 @@ requestAnimationFrame(tick);
 window.__drive = {
   app, vehicle, lay, restart, recoverToSafe, keys, chase, get sunShadows() { return sunShadows; },
   get topKmh() { return topKmh; }, get rideIdx() { return pilot.idx; }, get recoveries() { return recoveries; },
-  get boosting() { return boostLeft > 0; }, landings, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
+  get boosting() { return boostLeft > 0; }, landings, race, gates, respawnCheckpoint, get best() { return best; }, medals, trackKey, physMs: () => { const s = [...physMs].sort((a, b) => a - b); return s.length ? { median: s[s.length >> 1], p95: s[Math.floor(s.length * 0.95)] } : null; },
   config: { TOP, SUBSTEPS, JUMP_SPEED },
   setAuto(on) { autopilot = on; pilot.reset(); recoveries = 0; },
 };

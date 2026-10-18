@@ -223,6 +223,35 @@ landing ramp that starts where the slowest arc comes down and is long enough for
 slope following the arcs (each arc meets it at a shallow angle). Big jumps get long landings, small
 hops short ones. The author's validation run checks it for real.
 
+## 7c. MORE SHAPES — the fun ones (user, 2026-10-18: "we will need way more shapes, tubes and many funny things")
+
+The game is AIR (DESIGN.md): every new shape is judged by "what does the car do in the air, and what
+must the player do with air control?". Each one gets the same treatment as the bowl: the real car
+calibrates it (a Node test like bowlTest.mjs), the builder sizes it to the predicted speed when the
+size matters, the autopilot can drive it, and the drive page shows it.
+
+| Shape | What the car does | State |
+|---|---|---|
+| Fitted bowl (U-turn) | climb, pop, spin 180° in the air, roll out in the return lane | **built** (bowl_<R>) |
+| Flip ramp / Flip ramp S | thrown back over its run-up upside down, roll out, land on a fitted landing | **built** (old presets) |
+| Fitted landing | catches the whole speed band of one jump | **built** |
+| Tube in / straight / turn / out | a closed pipe: drive the walls and roof at speed | next shape family |
+| Half-pipe (U-channel) | carve from wall to wall, pop off a lip, land back in | next |
+| Spiral tube / corkscrew | a 360° roll along the road | next |
+| Wallride in / wall / out | drive a vertical wall | tile exists (wallride_90), needs calibrating |
+| Loop variants: double loop, loop with a gap at the top | the gap = a jump upside down | loop_28 exists |
+| Barrel-roll kicker | a side-tilted kicker: one roll in the air | new |
+| Spine / transfer | two quarter-pipes back to back: jump from one face to the other | new |
+| Helix up / down | a spiral climb or drop | new |
+| Mega ramp + drop-in | a huge drop, then a big gap | new |
+| Whoops (camel humps) | rhythm of small hops: time the landings | new |
+| Gap over a road (crossover) | jump across another part of the track | layout, needs the corridor check |
+| Funnel | gathers a messy landing back onto the road | in the v1 list |
+| Bounce pad, launch pad, elevator | vertical kicks | LATER list |
+
+Order: the race layer first (gates, checkpoints, ghosts, medals: without them nothing is a race),
+then the tube family, then the rest by fun per hour of work.
+
 ## 8. What's next
 
 **P5 — piece lab** (grey-to-first-look, no car yet): the PATH × SECTION × LEAN sweep with the road

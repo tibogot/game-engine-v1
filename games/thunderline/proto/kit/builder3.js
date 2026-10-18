@@ -8,6 +8,7 @@ import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, D
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createLandingJudge } from "./landing.js";
+import { makeGateMesh } from "./gateMesh.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -248,6 +249,7 @@ function rebuild() {
     g.matrix.copy(M);
     g.userData.uid = pc.uid;
     trackGroup.add(g);
+    if (pc.cp) trackGroup.add(checkpointGate(pc, M));
     built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pc.open).exitLocal), group: g, M });
   }
   save();
@@ -256,6 +258,23 @@ function rebuild() {
   refreshSelection();
   ghostDirty = true;
   schedulePrediction();
+}
+
+// ---------- CHECKPOINTS (race.js): a flag on any piece; select it and press C ----------
+function checkpointGate(pc, M) {
+  const { b, t } = piece(pc.id, pc.open);
+  const hw = SECTIONS[t.section ?? "road"].hw;
+  const r = b.rings[Math.floor(b.rings.length / 2)];
+  const f = deckFrame(r, hw);
+  return makeGateMesh({ kind: "cp", P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), hw }, { lift: 0 });
+}
+function toggleCheckpoint(uid) {
+  const pc = track.pieces.find((p) => p.uid === uid);
+  if (!pc) return;
+  snapshot();
+  pc.cp = !pc.cp;
+  if (!pc.cp) delete pc.cp;
+  rebuild();
 }
 
 // ---------- PREDICTION: the real car drives your track in the background (B2) ----------
@@ -373,6 +392,12 @@ async function runPrediction() {
   prediction.lipSpeed = lipSpeed;
   prediction.launch = launch;
   prediction.endSpeed = endSpeed; // the speed the car arrives at the track's end (a fitted bowl is sized to it)
+  // AUTHOR TIME (DESIGN.md §8, medals): the prediction's lap, when it reaches the end of a track with
+  // nothing wrong (no fall, no loose pieces, no overlap). The drive page reads it from the saved track.
+  runChecks();
+  const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size;
+  const author = clean ? Math.round(prediction.lapS * 100) / 100 : null;
+  if (track.authorTime !== author) { if (author) track.authorTime = author; else delete track.authorTime; save(); }
   if (failBox) { scene.remove(failBox); failBox = null; }
   if (prediction.fail && built.get(prediction.fail.uid)) {
     failBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(built.get(prediction.fail.uid).group), 0xff9a3d);
@@ -734,7 +759,7 @@ function predictionLine() {
 }
 function renderStatus() {
   const names = { end: "open end", arc: "flight arc", local: "local grid", world: "world grid" };
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note].join("|");
+  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -750,6 +775,8 @@ function renderStatus() {
     (prediction.lipSpeed.size
       ? `<div class="row"><span>band (real car)</span><b>${[...prediction.lipSpeed.values()].map((v) => `${Math.round(v * 0.93 * 3.6)}–${Math.round(v * 3.6)}`).join(" · ")} km/h</b></div>`
       : `<div class="row"><span>arc band (guess)</span><b>${Math.round(arcSpeed * 0.93 * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
+    `<div class="row"><span>checkpoints (select + C)</span><b>${track.pieces.filter((p) => p.cp).length}</b></div>` +
+    `<div class="row"><span>author time</span><b>${track.authorTime ? `${track.authorTime.toFixed(2)} s` : "—"}</b></div>` +
     `<div class="row"><span>pieces</span><b>${track.pieces.length}</b></div>`;
 }
 
@@ -805,6 +832,7 @@ addEventListener("keydown", (e) => {
       else if (k === "g") gridMode = gridMode === "world" ? "local" : "world";
       else if (k === "t") { edges = !edges; renderDock(); }
       else if (k === "f") frameAll();
+      else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
       else return;
   }
   rot.yaw = ((rot.yaw % 360) + 360) % 360;
@@ -838,7 +866,7 @@ renderer.setAnimationLoop(() => {
 });
 window.__b3 = {
   get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls,
-  pickTile, place, removePiece, frameAll, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
+  pickTile, place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },
   aimArc(k) { const a = arcs.at(-1); if (!a) return null; const p = a.pts[Math.min(k, a.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.pts.length }; },
   setHand(h) { hand = h; renderDock(); }, setEdges(v) { edges = v; renderDock(); }, setBuildY(y) { buildY = y; },

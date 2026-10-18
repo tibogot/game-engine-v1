@@ -28,6 +28,25 @@
       #land.rough { color: #ff4d5e; border-left-color: #ff4d5e; }
       #land.ok { color: var(--dim); border-left-color: var(--line); }
       #land small { font: 700 14px "Barlow Condensed"; color: var(--dim); margin-left: 8px; letter-spacing: 0.04em; }
+      #cps { left: 50%; top: 16px; transform: translateX(calc(-50% - 120px)); font: 700 15px "Barlow Condensed"; letter-spacing: 0.08em; color: var(--dim); padding: 13px 12px; }
+      #cps.boost { color: var(--bolt); }
+      #cps.boost::after { content: " · BOOST"; }
+      #split { left: 50%; top: 130px; transform: translateX(-50%); font: 800 24px "Barlow Condensed"; letter-spacing: 0.06em; opacity: 0; transition: opacity 0.35s; pointer-events: none; }
+      #split.show { opacity: 1; transition: none; }
+      #split.miss { color: #ff4d5e; border-left-color: #ff4d5e; }
+      #split small { font: 800 22px "Barlow Condensed"; margin-left: 10px; }
+      #split .ahead { color: #45e08a; } #split .behind { color: #ff4d5e; }
+      #finish { left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0.96); min-width: 320px; padding: 18px 24px; opacity: 0; pointer-events: none; transition: opacity 0.25s, transform 0.25s; }
+      #finish.show { opacity: 1; transform: translate(-50%, -50%); }
+      #finish .ft { font: 800 64px/1 "Barlow Condensed"; letter-spacing: 0.02em; }
+      #finish .fm { font: 700 18px "Barlow Condensed"; color: var(--bolt); letter-spacing: 0.08em; text-transform: uppercase; margin: 6px 0 12px; }
+      #finish .mrow { display: flex; align-items: center; gap: 10px; font: 600 15px "Barlow Condensed"; color: var(--dim); padding: 3px 0; letter-spacing: 0.04em; }
+      #finish .mrow b { margin-left: auto; color: var(--text); }
+      #finish .mrow i { width: 12px; height: 12px; border-radius: 50%; background: #5b6787; }
+      #finish .mrow.author i { background: #3fd2ff; } #finish .mrow.gold i { background: #f2c14e; } #finish .mrow.silver i { background: #c9d1de; } #finish .mrow.bronze i { background: #c98a5b; }
+      #finish .mrow.got { color: var(--text); } #finish .mrow.got b { color: var(--bolt); }
+      #finish .fk { margin-top: 12px; color: var(--dim); font-size: 12px; }
+      #finish kbd { color: var(--text); background: #121a2e; border: 1px solid var(--line); padding: 0 4px; font: 11px Consolas, monospace; }
       #boot { position: fixed; inset: 0; z-index: 99; display: flex; align-items: center; justify-content: center; background: #0a0f1c; color: var(--bolt); font: 700 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; transition: opacity 0.4s; }
       #boot.gone { opacity: 0; pointer-events: none; }
     </style>
@@ -36,6 +55,9 @@
     <div id="game"></div>
     <div id="time" class="panel">0.00</div>
     <div id="land" class="panel"></div>
+    <div id="cps" class="panel"></div>
+    <div id="split" class="panel"></div>
+    <div id="finish" class="panel"></div>
     <div id="speed" class="panel"><div class="v" id="kmh">0</div><div class="u">KM/H</div></div>
     <div id="stats" class="panel"></div>
     <div id="help" class="panel">
