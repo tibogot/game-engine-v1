@@ -7,7 +7,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
-import { createCarRules } from "./carRules.js";
+import { createCarRules, magnetZones } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
@@ -44,7 +44,7 @@ const CATS = [
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
   { id: "air", label: "Air", tiles: ["kicker_20", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
-  { id: "stunts", label: "Stunts", tiles: ["fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
+  { id: "stunts", label: "Stunts", tiles: ["twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -398,7 +398,8 @@ async function runPrediction() {
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of b.rings) {
       const f = deckFrame(r, hw);
-      ride.push({ P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : 0 });
+      const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; // a twist: its roll axis
+      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : 0 });
     }
   }
   const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
@@ -431,7 +432,8 @@ async function runPrediction() {
   let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
   const nose = new THREE.Vector3();
   const pilot = createAutopilot(ride); // the drive page's autopilot (and its wall cut, air spin)
-  const rules = createCarRules(car, { boostPads: boosts }); // the drive page's rules: wall cut, landing boost, pads
+  const magnets = magnetZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), TILES, integrate);
+  const rules = createCarRules(car, { boostPads: boosts, magnets }); // the drive page's rules: wall cut, landing boost, pads, magnets
   // the air rings, judged by the race's own rule (race.js): through the hoop or missed
   const ringGates = track.pieces.filter(isRing).map(ringGateOf);
   const ringRace = ringGates.length ? createRace({ gates: [...ringGates, { kind: "finish", P: new THREE.Vector3(1e9, 1e9, 1e9), T: UP.clone(), U: new THREE.Vector3(1, 0, 0), hw: 0 }], countdown: 0 }) : null;

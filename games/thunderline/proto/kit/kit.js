@@ -51,7 +51,7 @@ export function integrate(tile, opts = {}) {
   const last = { T: T.clone(), U: U.clone(), lean, s: 0 };
 
   const emit = (segIdx, mark) => {
-    rings.push({ p: p.clone(), T: T.clone(), U: U.clone(), R: R.clone(), lean, s, seg: segIdx, mark });
+    rings.push({ p: p.clone(), T: T.clone(), U: U.clone(), R: R.clone(), lean, s, seg: segIdx, mark, pivot: tile.twistPivot });
     last.T.copy(T); last.U.copy(U); last.lean = lean; last.s = s;
   };
   emit(0, markAt(tile, 0, 0));
@@ -127,7 +127,11 @@ export function deckFrame(ring, hw) {
   const sn = Math.sin(ring.lean);
   const U = ring.U.clone().multiplyScalar(c).addScaledVector(ring.R, sn);
   const R = ring.R.clone().multiplyScalar(c).addScaledVector(ring.U, -sn);
-  const P = ring.p.clone().addScaledVector(ring.U, hw * Math.abs(sn));
+  // a TWIST rolls round an axis `pivot` m above the road's centre (about the car's body, so the car
+  // barrel-rolls in place); a bank keeps its low edge on the path plane
+  const P = ring.pivot != null
+    ? ring.p.clone().addScaledVector(ring.U, ring.pivot).addScaledVector(U, -ring.pivot)
+    : ring.p.clone().addScaledVector(ring.U, hw * Math.abs(sn));
   return { P, U, R };
 }
 
@@ -306,6 +310,15 @@ export const TILES = {
   tube_roof_drop: { label: "Roof drop", segs: [{ L: Math.PI * 30 + 36, pitch: Math.PI, ramp: 36 }], tube: { from: 1, to: 1 }, drop: true },
   // CANNON: the pipe kicks up 25° and ends open — a lip, with arcs and fitted landings like a kicker
   tube_cannon: { label: "Tube cannon", segs: [{ L: 48, pitch: 25 * DEG, ramp: 24 }], tube: { from: 1, to: 1 }, marks: [{ kind: "lip", from: -8, to: -0 }] },
+  // TWIST (PIECES.md §7d, the striped ribbons in the user's Apex Rush track): a straight that rolls a
+  // full 360° round itself, the car barrel-rolling with it, upside down half-way. twistPivot: the roll
+  // axis, m above the road's centre (about the car's body). twistTest via trackRun measures it.
+  // roadHold: the car follows the road's roll (measured, trackRun --open, 2026-10-19: without it the
+  // car's upright-keeping assist fought the roll and it left the road at 106–135°, even on longer
+  // twists; with it a full roll at every entry speed from 90 to 225 km/h, no air, out at ~180).
+  // The pivot at the car's body height: rolling round the road's centre threw the car off.
+  // (A magnet — carRules MAGNET — was not needed once the car followed the road.)
+  twist_120: { label: "Twist 360°", segs: [{ L: 160, leanIn: 0, leanOut: 2 * Math.PI }], twistPivot: 0.9, roadHold: true },
   // DROP (user, 2026-10-18: "it jumps but it should also fall down and land on the road under"): the
   // road just ends. The builder draws its fall arcs like a kicker's; land on a road below, any depth.
   drop_16: { label: "Drop", segs: [{ L: 16 }], marks: [{ kind: "lip", from: -6, to: -0 }], drop: true },
@@ -377,5 +390,8 @@ export const leanIn = (t) => t.segs?.[0].leanIn ?? 0;
 export function leanOut(t) {
   let l = 0;
   for (const s of t.segs ?? []) l = s.leanOut ?? s.leanIn ?? l;
-  return l;
+  // a full twist ends at 360°: the same road as 0° — compare leans modulo a turn
+  const TAU = 2 * Math.PI;
+  l = ((l % TAU) + TAU) % TAU;
+  return l > Math.PI ? l - TAU : l;
 }

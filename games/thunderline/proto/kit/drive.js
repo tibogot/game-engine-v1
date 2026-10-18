@@ -18,7 +18,7 @@ import { makeGateMesh } from "./gateMesh.js";
 import { library, contentKey, settings, builderUrl, PAGES } from "../../app/library.js";
 import { createAutopilot, wallCut } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
-import { createCarRules } from "./carRules.js";
+import { createCarRules, magnetZones } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
 import { createEngineModel } from "./engineModel.js";
 import { createEngineSound } from "./engineSound.js";
@@ -283,7 +283,8 @@ addEventListener("keydown", (e) => { if (e.code === "KeyP") { autopilot = !autop
 // Boost pads push past the top speed for a while (user: boosts make it "even faster"). The player and
 // the ghost step through the same rules, so a replay is the same run.
 const boostPads = lay.placements.filter((p) => p.id.startsWith("boost")).map((p) => p.M.clone().invert());
-const rules = createCarRules(vehicle, { boostPads });
+const magnets = magnetZones(lay.placements, TILES, integrate); // twist pieces hold the car (carRules MAGNET)
+const rules = createCarRules(vehicle, { boostPads, magnets });
 
 // ---------- GHOST (ghost.js, DESIGN.md §8): your best run, replayed by a second car ----------
 const GHOST_KEY = `thunderline.ghost.${trackKey}`;
@@ -300,7 +301,7 @@ ghostCar.setBvh(ground.ground, ground.solids);
 ghostCar.group.traverse((o) => { if (o.isLight) o.visible = false; });
 for (const l of ghostCar.headlights ?? []) l.parent?.remove(l);
 ghostCar.group.visible = false;
-const ghostRules = createCarRules(ghostCar, { boostPads });
+const ghostRules = createCarRules(ghostCar, { boostPads, magnets });
 let ghostPlayer = null;
 /**
  * THE GHOST'S LOOK: a bolt-blue HOLOGRAM, one shared material — glowing (additive), bright at its

@@ -11,7 +11,7 @@ import { TILES, integrate, ensureTile, socketMatrix, deckFrame, SECTIONS } from 
 import { oldLookOf } from "./oldTiles.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
-import { createCarRules } from "./carRules.js";
+import { createCarRules, magnetZones } from "./carRules.js";
 import { buildTubeLook, closureAt } from "./tubeLook.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
@@ -36,6 +36,9 @@ Vehicle.prototype._updateTaillights = function () {};
 applyCarTune({ TIRE, WHEEL });
 const ts = process.argv.find((a) => a.startsWith("--tubesteer="));
 if (ts) globalThis.__TUBE_STEER = Number(ts.slice(12));
+const OPEN = process.argv.includes("--open"); // open edges: no rails
+const mm = process.argv.find((a) => a.startsWith("--mag=")); if (mm) globalThis.__MAG_MODE = mm.slice(6);
+const pv = process.argv.find((a) => a.startsWith("--pivot=")); if (pv) TILES.twist_120.twistPivot = TILES.twist_120_L.twistPivot = Number(pv.slice(8));
 const sp = process.argv.find((a) => a.startsWith("--spiral="));
 if (sp) globalThis.__SPIRAL = Number(sp.slice(9));
 
@@ -63,8 +66,8 @@ export function layout(ids) {
     } else {
       const frames = integrate(t, { maxGap: 2 }).rings.map((r) => { const f = deckFrame(r, hw); return { pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R }; });
       const rp = t.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: hw * 2 } : ROAD_PARAM_DEFAULTS;
-      deck = buildSweepGeometry(frames, buildProfile(rp, true), {});
-      rail = buildRailCollision(frames, rp);
+      deck = buildSweepGeometry(frames, buildProfile(rp, !OPEN), {});
+      rail = OPEN ? null : buildRailCollision(frames, rp);
     }
     const mesh = new THREE.Mesh(deck.clone().applyMatrix4(M), new THREE.MeshBasicMaterial());
     mesh.userData.roadHold = ROAD_HOLD.has(id.replace(/_L$/, "")) || !!t.roadHold;
@@ -72,19 +75,19 @@ export function layout(ids) {
     decks.push(mesh);
     if (rail) solids.push(new THREE.Mesh(rail.clone().applyMatrix4(M), new THREE.MeshBasicMaterial()));
     const from = ride.length;
-    for (const r of b.rings) { const f = deckFrame(r, hw); ride.push({ P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: k, tube: t.tube ? closureAt(t, r.s, b.L) : 0 }); }
-    spans.push({ id, from, to: ride.length - 1 });
+    for (const r of b.rings) { const f = deckFrame(r, hw); const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; ride.push({ P: Pr.applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: k, tube: t.tube ? closureAt(t, r.s, b.L) : 0 }); }
+    spans.push({ id, from, to: ride.length - 1, M: M.clone() });
     M = M.clone().multiply(socketMatrix(b.exit));
   });
   const bake = (ms) => { for (const m of ms) m.updateMatrixWorld(true); const v = new RoadBvh(); v.bakeFromMeshes(ms); return v.baked ? v : null; };
   const ground = createVehicleGround({ getTerrainHeight: () => NaN });
   ground.setRoadBvh(bake(decks));
   ground.setRoadSolidsBvh(bake(solids));
-  return { ground, ride, spans };
+  return { ground, ride, spans, magnets: magnetZones(spans.map((s) => ({ id: s.id, M: s.M })), TILES, integrate) };
 }
 
 export function run(ids, speed, { trace = false } = {}) {
-  const { ground, ride, spans } = layout(ids);
+  const { ground, ride, spans, magnets } = layout(ids);
   const car = new Vehicle({ scene: new THREE.Scene(), showArrows: false });
   car.SUBSTEPS = 3;
   car.setBvh(ground.ground, ground.solids);
@@ -95,12 +98,15 @@ export function run(ids, speed, { trace = false } = {}) {
   car.enabled = true; car.respawn();
   car.body.vel.copy(r0.T).multiplyScalar(speed);
   const pilot = createAutopilot(ride);
-  const rules = createCarRules(car);
+  const rules = createCarRules(car, { magnets });
   const per = spans.map((s) => ({ id: s.id, vin: null, vmin: Infinity, vout: null, tilt: 0, air: 0 }));
   const up = new THREE.Vector3();
+  let lastSteer = 0;
   let result = "through", lowY = Math.min(...ride.map((r) => r.P.y)), slow = 0;
   for (let tick = 0; tick < 120 * 60; tick++) {
-    rules.step(pilot.input(car), FIXED_DT);
+    const inp = pilot.input(car);
+    lastSteer = inp.steerTarget;
+    rules.step(inp, FIXED_DT);
     const k = ride[pilot.idx].piece, s = per[k], v = car.body.vel.length();
     if (s.vin == null) s.vin = v;
     s.vmin = Math.min(s.vmin, v);
@@ -108,7 +114,7 @@ export function run(ids, speed, { trace = false } = {}) {
     up.set(0, 1, 0).applyQuaternion(car.body.quat);
     s.tilt = Math.max(s.tilt, (Math.acos(THREE.MathUtils.clamp(up.y, -1, 1)) * 180) / Math.PI);
     if (car.groundedCount === 0) s.air += FIXED_DT;
-    if (trace && tick % 12 === 0) console.log(`t ${(tick * FIXED_DT).toFixed(2)} ${spans[k].id} v ${(v * 3.6).toFixed(0)} up.y ${up.y.toFixed(2)} up.x ${up.x.toFixed(2)} g ${car.groundedCount}`);
+    if (trace && tick % 12 === 0) { const r = ride[pilot.idx], R = new THREE.Vector3().crossVectors(r.T, r.U).normalize(); console.log(`t ${(tick * FIXED_DT).toFixed(2)} ${spans[k].id} v ${(v * 3.6).toFixed(0)} up.y ${up.y.toFixed(2)} g ${car.groundedCount} off-centre ${car.body.pos.clone().sub(r.P).dot(R).toFixed(1)} m steer ${lastSteer.toFixed(2)} heading ${((Math.atan2(car.body.vel.clone().dot(R), car.body.vel.dot(r.T)) * 180) / Math.PI).toFixed(1)}°`); }
     if (car.body.pos.y < lowY - 40) { result = `FELL in ${spans[k].id}`; break; }
     slow = v < 3 ? slow + FIXED_DT : 0;
     if (slow > 2) { result = `STOPPED in ${spans[k].id}`; break; }
