@@ -61,7 +61,7 @@ import { TRACK_LINES, nearestTrack } from "./algTracks.js";
 import { PLAY } from "./layout.js";
 import { t } from "./i18n/i18n.js";
 import { COSTS } from "./algEconomy.js";
-import { SQUADS } from "./algSquads.js";
+import { SQUADS, UPGRADES } from "./algSquads.js";
 
 // What the player reads (the assault alert), built out here: inside createAlgAI `t` is the clock.
 const TXT = {
@@ -105,6 +105,11 @@ const P = {
   // (the human's reinforce price). Hurt under `hurt`: home, where it heals, then out again.
   mule: { look: 3, score: { garrison: 4, occupy: 3, deploy: 2, assault: 2 }, goingTo: ["village", "defend", "assault"],
     back: 6, backFight: 18, every: 6, hurt: 0.4, heal: 1.5, healed: 0.8 },
+  // THE BAZOOKA (step 8, the human's faoudj upgrade — UPGRADES.bazooka): M20 tubes, one per standing
+  // ARMS CACHE, bought (its price) once the FLN has seen French vehicles; a band setting out hands a
+  // spare one to a rifleman. A tube comes back when its man goes to ground, and is lost with him.
+  // He aims at French VEHICLES in his reach, and a band with one does not break off from armour.
+  baz: { from: 360, perCache: 1, look: 0.5 },
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -597,7 +602,42 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     q.given = (q.given ?? 0) + 1;
   }
 
+  // ── THE BAZOOKAS (P.baz) ─────────────────────────────────────────────────
+  const bearers = new Set();   // men carrying a tube
+  let tubes = 0, bazLook = 0;
+  const cachesUp = () => (app.algStructures?.list ?? []).filter((s) => s.typeKey === "armsCache" && s.alive && s.team === "enemy").length;
+  /** A band setting out: a spare tube (or one bought) to a rifleman of it. */
+  function armBand(b) {
+    const G = UPGRADES.bazooka, m = alive(b);
+    if (m.some((u) => bearers.has(u))) return;
+    const man = m.find((u) => u.typeKey === "moudjahid" && u.weapon !== "cannon");
+    if (!man) return;
+    if (tubes <= bearers.size) {
+      if (t < P.baz.from || !seenVehicles || tubes >= cachesUp() * P.baz.perCache) return;
+      if ((aln()?.stock ?? 0) < G.cost + P.teamReserve || !aln().spend(G.cost)) return;
+      tubes++;
+    }
+    const w = G.weapon;
+    man.weapon = w.weapon; man.range = w.range; man.damage = w.damage; man.fireRate = w.fireRate; man.footMul = w.footMul;
+    app.algUnitRenderer?.setWeapon?.(man, G.prop);
+    bearers.add(man);
+  }
+  function stepBazookas(dt) {
+    for (const u of bearers) if (!u.alive) { if (!u.vanished) tubes--; bearers.delete(u); }   // gone to ground: the tube is back
+    if ((bazLook -= dt) > 0) return;
+    bazLook = P.baz.look;
+    // A French vehicle near (his band firing): THAT is what he is for (not the men: footMul) — he
+    // closes to his reach (combat's attack-order chase).
+    for (const u of bearers) {
+      if (u.holdFire || (u.attackTarget?.alive && !u.attackTarget.type?.foot)) continue;
+      let best = null, bd = u.range + 30;
+      for (const f of french()) { if (f.type?.foot || f.isAir) continue; const d = dist(f.position, u.position); if (d < bd) { bd = d; best = f; } }
+      if (best) { u.attackTarget = best; u.target = best; }
+    }
+  }
+
   function stepTeams(dt) {
+    stepBazookas(dt);
     for (const f of french()) if (f.isAir) { lastAir = { x: f.position.x, z: f.position.z }; break; }
     for (const q of teams) if (q.key === "mulet") stepMule(q, dt);
     if ((vehLook = (vehLook ?? 0) - dt) <= 0) {
@@ -1020,6 +1060,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
         }
         if (b.members.length >= b.size || (b.t > 40 && b.members.length >= 3)) {
           b.start = b.members.length;
+          armBand(b);
           holdFire(b, true);
           plan(b);
         }
@@ -1185,7 +1226,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
       case "strike": {
         const lost = 1 - m.length / Math.max(1, b.start);
         const c = centre(m);
-        const armour = french().some((u) => !u.type?.foot && !u.isAir && dist(u.position, c) < P.armourNear);
+        const armour = !m.some((u) => bearers.has(u)) && french().some((u) => !u.type?.foot && !u.isAir && dist(u.position, c) < P.armourNear);   // (a band with a bazooka stands)
         if (!m.length) return setState(b, "done");
         const pinned = m.filter((u) => u.pinned).length / m.length;
         // Still winning (few lost, French still there): fight on, up to strikeMax.
@@ -2067,6 +2108,8 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     get cacheWhy() { return cacheWhy; },
     /** Dev: try to hide a new cache now (ignores the clock). */
     cacheNow() { cacheT = 0; stepCaches(0, true); return cacheWhy; },
+    /** Dev: the bazookas — tubes owned, men carrying one. */
+    get bazookas() { return { tubes, carried: bearers.size, caches: cachesUp() }; },
     /** Dev: every mortar team at home starts a harass now (if it knows a target). */
     mortarNow() { for (const q of teams) if (q.key === "mortier" && q.state !== "fire") { q.state = "home"; q.t = 1e9; q.look = 0; q.rest = 0; } },
     /** Dev: a team of `key` now (pays, ignores the clock and the tiers). */
