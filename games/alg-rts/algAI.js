@@ -91,6 +91,12 @@ const P = {
   // last seen (helicopters land men and supplies by the points), else at home. Re-looked every
   // `every` s; it moves only for a spot `moveOver` m away. Hurt with French close: home, a rest.
   hmg: { ring: [12, 26], every: 30, moveOver: 40, danger: 30, rest: [45, 70] },
+  // THE RECOILLESS AMBUSH (step 6): lying 15-45 m off a PISTE out in the country (150-380 m from the
+  // post) — the one nearest where French vehicles were last seen — holding fire (aimed: it does not
+  // give itself away to men walking by); a French VEHICLE it knows within `engage` m: it fires on THAT.
+  // Gone when the vehicle is (killed or out of reach `lose` s), when French men come within `danger`
+  // m or it has lost a man. Nothing in `wait` s: another stretch.
+  sr: { engage: 55, lose: 12, danger: 25, wait: 120, rest: [50, 80] },
   teamReserve: 120,      // supplies kept for the bands (three men) after a team is bought
   firstBandAt: 45,
   bandEvery: [80, 140],
@@ -439,6 +445,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
 
   // ── THE 12.7'S WORK (P.hmg) ──────────────────────────────────────────────
   let lastAir = null;   // where French aircraft were last seen (they are loud: no eyes needed)
+  let vehLook = 0;
   function stepHmg(q, dt) {
     const H = P.hmg, men = teamAlive(q);
     if (!men.length) return;
@@ -467,8 +474,75 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     orderTeam(q, spot);
   }
 
+  // ── THE RECOILLESS'S WORK (P.sr) ─────────────────────────────────────────
+  let lastVehicle = null;   // where a French vehicle was last KNOWN
+  function piste(near) {
+    const pts = TRACK_LINES.filter((tr) => tr.kind === "piste").flatMap((tr) => tr.line).filter((p) => { const d = dist(p, post); return d > 150 && d < 380; });
+    if (!pts.length) return null;
+    return pts.sort((a, b) => dist(a, near) - dist(b, near))[Math.floor(Math.random() * Math.min(6, pts.length))];
+  }
+  function stepRecoilless(q, dt) {
+    const S = P.sr, men = teamAlive(q);
+    if (!men.length) return;
+    q.t = (q.t ?? 0) + dt;
+    q.state ??= "home";
+    const c = centre(men), gun = men.find((u) => u.weapon === "cannon") ?? men[0];
+    const close = french().some((f) => f.type?.foot && dist(f.position, c) < S.danger);
+    const lost = men.length < q.men.length;
+    const leave = () => { q.state = "leave"; q.t = 0; for (const u of men) { u.holdFire = true; u.attackTarget = null; } orderTeam(q, homeFor(c)); };
+    switch (q.state) {
+      case "home":
+        for (const u of men) u.holdFire = false;   // at home it defends itself
+        if (q.t < (q.rest ?? 0)) break;
+        if ((q.look = (q.look ?? 0) - dt) > 0) break;
+        q.look = 5;
+        {
+          const p = piste(lastVehicle ?? c);
+          const spot = p && ambushSpot(c, p);
+          if (!spot) break;
+          q.spot = spot; q.state = "move"; q.t = 0;
+          for (const u of men) u.holdFire = true;
+          orderTeam(q, spot);
+        }
+        break;
+      case "move":
+        if (close || lost) { leave(); break; }
+        if (dist(c, q.spot) < 6 && !men.some((u) => u.isMoving)) { q.state = "lie"; q.t = 0; break; }
+        if (q.t > 120) { leave(); break; }
+        if (q.t > 8 && !men.some((u) => u.isMoving)) orderTeam(q, q.spot);
+        break;
+      case "lie": {
+        for (const u of men) u.holdFire = true;
+        if (close || lost) { leave(); break; }
+        const v = knownFrench().find((f) => !f.type?.foot && dist(f.position, gun.position) < S.engage);
+        if (v) { q.state = "fire"; q.t = 0; q.prey = v; q.lastSeen = 0; for (const u of men) u.holdFire = false; gun.attackTarget = v; gun.target = v; break; }
+        if (q.t > S.wait) { q.state = "home"; q.t = 0; q.rest = 0; q.look = 0; }   // nothing came: another stretch
+        break;
+      }
+      case "fire": {
+        const v = q.prey;
+        if (close || lost || !v?.alive) { leave(); break; }
+        const inReach = dist(v.position, gun.position) < S.engage * 1.1;
+        q.lastSeen = inReach ? 0 : q.lastSeen + dt;
+        if (q.lastSeen > S.lose) { leave(); break; }
+        if (gun.attackTarget !== v) { gun.attackTarget = v; gun.target = v; }
+        break;
+      }
+      case "leave":
+        if (dist(c, homeFor(c)) < 12 || q.t > 120) { q.state = "home"; q.t = 0; q.rest = rand(...S.rest); }
+        else if (q.t > 10 && !men.some((u) => u.isMoving)) orderTeam(q, homeFor(c));
+        break;
+    }
+  }
+
   function stepTeams(dt) {
     for (const f of french()) if (f.isAir) { lastAir = { x: f.position.x, z: f.position.z }; break; }
+    if ((vehLook = (vehLook ?? 0) - dt) <= 0) {
+      vehLook = 2;
+      const v = knownFrench().find((f) => !f.type?.foot);
+      if (v) lastVehicle = { x: v.position.x, z: v.position.z };
+    }
+    for (const q of teams) if (q.key === "sansRecul") stepRecoilless(q, dt);
     for (const q of teams) if (q.key === "mitrailleuse") stepHmg(q, dt);
     for (let i = teams.length - 1; i >= 0; i--) if (!teams[i].men.some((u) => u.alive)) teams.splice(i, 1);
     for (const q of teams) if (q.key === "mortier") stepMortar(q, dt);
@@ -1935,7 +2009,7 @@ export function createAlgAI(app, { units, cave, post, caveMouth }) {
     /** Dev: a team of `key` now (pays, ignores the clock and the tiers). */
     teamNow(key) { return spawnTeam(key); },
     /** Dev: the teams out ({ key, alive }). */
-    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null })); },
+    get teams() { return teams.map((q) => ({ key: q.key, alive: q.men.filter((u) => u.alive).length, squad: !!q.s, state: q.state ?? null, t: Math.round(q.t ?? 0), rest: Math.round(q.rest ?? 0) })); },
     /** Dev: what each band is doing. */
     describe() {
       return bands.map((b) => `${b.state}${b.via ? ` (route: ${b.route?.length ?? 0} legs)` : ""}${(b.mission === "village" || b.mission === "defend" || b.mission === "raid") && b.village ? ` (${b.mission === "defend" ? "defend " : b.mission === "raid" ? "raid " : ""}${b.village.name})` : b.mission === "mine" ? " (mine)" : b.mission === "cut" ? " (cut the line)" : b.mission === "assault" ? ` (assault${b.assault ? ` ${b.assault.name}` : ""})` : ""} ${alive(b).length}/${b.state === "gather" ? b.size : b.start}`).join(" · ") || "no band out";
