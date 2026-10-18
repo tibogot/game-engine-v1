@@ -385,16 +385,11 @@ export function createBattleHud({ camera, canvas, onJump }) {
      * The briefing, with the difficulty: `levels` [{ key, label, blurb }],
      * `current` the remembered one; onStart(key) when the player goes.
      */
-    briefing(html, onStart, { levels = [], current = "normal", ready = null, doctrines = [], doctrine = null } = {}) {
-      let pick = current, docPick = doctrine;
-      // THE DOCTRINE (algDoctrines.js, 2026-10-10): a second choice, the same buttons; onStart(level, doctrine).
-      const docs = doctrines.length ? `<div class="kicker">${t("Doctrine")}</div><div class="levels">${doctrines.map((l) => `<button data-doc="${l.key}" class="${l.key === doctrine ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : "";
-      const back = modal(`${html}${levels.length ? `<div class="kicker">${t("Difficulté")}</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}${docs}`,
-        [{ label: t("À vos postes"), go: true, onClick: () => onStart(pick, docPick) }]);
-      back.querySelectorAll("[data-doc]").forEach((b) => b.addEventListener("click", () => {
-        docPick = b.dataset.doc;
-        back.querySelectorAll("[data-doc]").forEach((o) => o.classList.toggle("sel", o === b));
-      }));
+    briefing(html, onStart, { levels = [], current = "normal", ready = null } = {}) {
+      let pick = current;
+      // (The doctrine is no longer chosen here: in the match, on its strip — CoH 3, algDoctrines.js offer.)
+      const back = modal(`${html}${levels.length ? `<div class="kicker">${t("Difficulté")}</div><div class="levels">${levels.map((l) => `<button data-lv="${l.key}" class="${l.key === current ? "sel" : ""}"><b>${l.label}</b><span>${l.blurb}</span></button>`).join("")}</div>` : ""}`,
+        [{ label: t("À vos postes"), go: true, onClick: () => onStart(pick) }]);
       // SHOWN DURING THE BOOT (2026-10-08: the last ~8 s of the boot — the herds, the shaders —
       // are spent reading): above the loading screen, its button "Préparation…" and off until
       // `ready` resolves.

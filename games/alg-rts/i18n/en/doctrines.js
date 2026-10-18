@@ -1,4 +1,4 @@
-// English for the doctrines (algDoctrines.js, the briefing's choice) — French key -> English. See ../i18n.js.
+// English for the doctrines (algDoctrines.js, chosen in the match) — French key -> English. See ../i18n.js.
 export default {
   "Doctrine": "Doctrine",
   // Paras
@@ -82,4 +82,10 @@ export default {
   "Points de commandement : gagnés en tuant des combattants du FLN et en tenant des villages.": "Command points: earned by killing FLN fighters and by holding villages.",
   "actif": "active",
   "<b>Point de commandement</b> : {n} à dépenser (doctrine, à droite).": "<b>Command point</b>: {n} to spend (doctrine, on the right).",
+  // The choice in the match (2026-10-19, CoH 3's battlegroups)
+  "à choisir": "to choose",
+  "Choisir cette doctrine pour toute la bataille.": "Choose this doctrine for the whole battle.",
+  "<b>{name}</b> : votre doctrine pour cette bataille.": "<b>{name}</b>: your doctrine for this battle.",
+  "<b>Choisissez votre doctrine</b> quand vous le voulez (à droite) : elle vaut pour toute la bataille.": "<b>Choose your doctrine</b> whenever you like (on the right): it holds for the whole battle.",
+  "<b>Point de commandement</b> : choisissez votre doctrine (à droite) pour le dépenser.": "<b>Command point</b>: choose your doctrine (on the right) to spend it.",
 };

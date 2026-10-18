@@ -23,7 +23,7 @@
 // frame): no hooks into combat, the AI or the units. ?battle=0 = without.
 import { LAYOUT, MAP } from "./layout.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
-import { doctrineList, storedDoctrine } from "./algDoctrines.js";
+import { startDoctrine } from "./algDoctrines.js";
 import { createBattleHud } from "./ui/battleHud.js";
 import { DIFFICULTIES, applyDifficulty, storedDifficulty } from "./algDifficulty.js";
 import { t, LANGS, LANG, setLang } from "./i18n/i18n.js";
@@ -433,11 +433,19 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     get over() { return over; },
     get clock() { return clock; },
     /** Start without the briefing (?brief=0): the remembered difficulty. */
-    start(key = storedDifficulty(), doctrine = storedDoctrine()) { applyDifficulty(app, key); app.algDoctrines?.choose(doctrine); started = true; startAt = clock; },
+    // The doctrine is chosen IN the match (CoH 3: algDoctrines offer); ?doctrine= starts with one, =none with none.
+    start(key = storedDifficulty()) {
+      applyDifficulty(app, key);
+      const d = startDoctrine();
+      if (d === "none") app.algDoctrines?.choose(null);
+      else if (d) app.algDoctrines?.choose(d);
+      else app.algDoctrines?.offer?.();
+      started = true; startAt = clock;
+    },
     /** The briefing: what the fight is about, and how hard. Shown once the loading screen lifts. */
     brief({ ready = null } = {}) {
       const n = economy.points.length;
-      const go = (key, doctrine) => this.start(key, doctrine);
+      const go = (key) => this.start(key);
       // The language switch (top right): setLang remembers it and reloads the page.
       const langs = `<div class="langs">${LANGS.map((l) => `<button type="button" data-lang="${l.key}" class="${l.key === LANG ? "on" : ""}">${l.label}</button>`).join("")}</div>`;
       const back = hud.briefing(`${langs}${FLN ? `
@@ -461,7 +469,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           <li>${t("Le <b>FLN</b> ne vous affrontera pas à découvert. Il travaille les villages en silence, tend des embuscades aux hommes isolés, mine les pistes, raide vos dépôts et regagne sa grotte. Tenez garnison, patrouillez, fortifiez.")}</li>
         </ul>`}
         <div class="keys">${t("<kbd>Espace</kbd> aller à la dernière alerte · cliquez une alerte pour y aller · maintenez <kbd>V</kbd> pour voir la couverture · <kbd>R</kbd> tourne un bâtiment · survolez un village pour ses détails · <kbd>Échap</kbd> pause et options")}</div>`,
-      go, { levels: DIFFICULTIES, current: storedDifficulty(), ready, doctrines: app.algDoctrines ? doctrineList() : [], doctrine: storedDoctrine() });
+      go, { levels: DIFFICULTIES, current: storedDifficulty(), ready });
       back.querySelectorAll("[data-lang]").forEach((b) => b.addEventListener("click", () => { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); }));
       return back;
     },

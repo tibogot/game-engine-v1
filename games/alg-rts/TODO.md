@@ -117,7 +117,9 @@ PHASE 2 — content for a launch
 8. [~] A THIRD MAP: "LA PORTE DU DÉSERT", El Kantara 1958 — planned 2026-10-13, see MAP 3 below
    (waiting for your go).
 9. [~] SKIRMISH from the menu: map, side, difficulty, doctrine. MAP + SIDE done 2026-10-11 (menu.html
-   "Batailles" → alg.html?map=…&side=fln); difficulty stays on the side's briefing; doctrine to do.
+   "Batailles" → alg.html?map=…&side=fln); difficulty stays on the side's briefing; the DOCTRINE is
+   chosen IN THE MATCH since 2026-10-19 (CoH 3's battlegroups: the panel's cards, any time, kept for the
+   battle, points earned before kept; ?doctrine=key / none for dev and tests — algDoctrines offer/pick).
    [x] CARDS (2026-10-12, Sudden Strike 5 style): Battles → choose your SIDE (two cards, drawn
    distressed flags) → choose the BATTLEFIELD (a card per map, its art; the coast "coming soon").
    The coast card wants its art (the ChatGPT list, sheet 5a).

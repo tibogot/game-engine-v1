@@ -65,8 +65,9 @@ details are in TODO.md.*
    - The H-21 door gun.
    - The French AI: smoke, the Alouette, repairs, wire-cutting.
    - The FLN: train units at a refuge; retreat to the nearest refuge.
-6. **Skirmish menu:** let the player pick the doctrine before the briefing (map, side and
-   difficulty already work).
+6. ~~Skirmish menu: pick the doctrine before the briefing~~ — **done the CoH 3 way, 2026-10-19:**
+   the doctrine is chosen IN the match, on its panel (cards), any time, kept for the battle; the
+   points earned before are kept. The briefing has the difficulty only.
 
 ---
 

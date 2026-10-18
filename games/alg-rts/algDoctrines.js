@@ -2,7 +2,10 @@
 // Company of Heroes' biggest lever: a choice at the start that shapes the whole battle, and
 // COMMAND POINTS earned in combat that unlock its abilities as the fight goes on.
 //
-//   THE CHOICE   in the briefing, beside the difficulty (stored; ?doctrine=paras|legion|air).
+//   THE CHOICE   IN THE MATCH (2026-10-19, CoH 3's battlegroups — it was on the briefing): the strip
+//                offers the side's doctrines as cards; pick one when you like (after scouting), it holds
+//                for the whole battle; the points earned before are kept. Not remembered between battles.
+//                ?doctrine=paras|legion|air (dev, tests) starts with one; ?doctrine=none: none.
 //   THE POINTS   every FLN killed by your men (their veterancy value: a man 10, a gunner 14, a
 //                vehicle 30, a structure 25) and every village you hold (a trickle) fill a bar;
 //                P.xpPerCp of it = one command point.
@@ -51,7 +54,6 @@ export const DOCTRINE_PARAMS = {
   espritCorps: 0.5,
 };
 const P = DOCTRINE_PARAMS;
-const STORE = "algrts.doctrine";
 
 /** The doctrines and their abilities (`cp`: points to unlock; `cost`: resources per use). */
 export const DOCTRINES = {
@@ -127,19 +129,20 @@ export const DOCTRINES = {
     ],
   },
 };
-/** The doctrines of the side you play (the briefing's choice). */
+/** The doctrines of the side you play (chosen in the match: the strip's cards). */
 export const doctrineList = () => Object.entries(DOCTRINES).filter(([, d]) => (d.side ?? "player") === SIDES.human).map(([key, d]) => ({ key, label: d.name, blurb: d.blurb }));
 
-/** The doctrine to start with: ?doctrine=, then the last one chosen (per side), then the paras (the FLN: the wilaya). */
-export function storedDoctrine() {
+/**
+ * How the match starts (2026-10-19, CoH 3's battlegroups: chosen IN the match, not before it): null —
+ * the strip offers the side's doctrines, the player picks one when he likes; a key (?doctrine=paras,
+ * dev / tests) — that one from the start; "none" (?doctrine=none) — no doctrine at all.
+ */
+export function startDoctrine() {
   const mine = (k) => DOCTRINES[k] && (DOCTRINES[k].side ?? "player") === SIDES.human;
   const q = new URLSearchParams(location.search).get("doctrine");
-  if (q === "none") return null;
-  if (mine(q)) return q;
-  try { const s = localStorage.getItem(storeKey()); if (mine(s)) return s; } catch { /* */ }
-  return SIDES.human === "enemy" ? "wilaya" : "paras";
+  if (q === "none") return "none";
+  return mine(q) ? q : null;
 }
-const storeKey = () => (SIDES.human === "enemy" ? STORE + ".fln" : STORE);
 
 /**
  * `side`: whose doctrine (default: the human's). `ui: false` — an AI's (algFrenchAI.js, 2026-10-13): no
@@ -157,6 +160,8 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   const popRoom = () => (SIDES.human === "enemy" ? Infinity : economy.popRoom?.() ?? Infinity);   // (the pop cap is the French's)
 
   let doctrine = null;
+  // OFFERING (CoH 3): no doctrine yet — the strip shows the side's doctrines; the points come in already.
+  let offering = false;
   let xp = 0, cp = 0;
   const unlocked = new Set();
   const cd = new Map();          // ability key → seconds left
@@ -452,21 +457,54 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
 #alg-doc .ab.locked.can { opacity: 1; border-color: #f1dfa6; box-shadow: 0 0 6px rgba(241,223,166,0.35); }
 #alg-doc .ab.cool .ic, #alg-doc .ab.short .ic { color: #6f6553; }
 #alg-doc .ab .sw { position: absolute; left: 0; bottom: 0; height: 2px; background: #c9a54a; }
-#alg-doc .ab.aiming { border-color: #58e070; }`;
+#alg-doc .ab.aiming { border-color: #58e070; }
+#alg-doc .pick { display: block; width: 100%; margin-top: 5px; padding: 6px 7px; font: 12px var(--hud-sans, sans-serif); color: inherit;
+  text-align: left; background: rgba(40,33,22,0.7); border: 1px solid rgba(201,165,74,0.45); border-radius: 2px; cursor: pointer; }
+#alg-doc .pick:hover { border-color: #f1dfa6; box-shadow: 0 0 6px rgba(241,223,166,0.35); }
+#alg-doc .pick b { display: block; color: #f1dfa6; font-weight: 600; }
+#alg-doc .pick .bl { display: block; margin-top: 2px; font-size: 11px; line-height: 1.3; color: var(--hud-dim, #a8987a); }
+#alg-doc .pick .ics { display: flex; gap: 4px; margin-top: 5px; }
+#alg-doc .pick .ics i { width: 14px; height: 14px; background: currentColor; color: #c9a54a; -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }`;
   if (ui) document.head.appendChild(style);
   const el = document.createElement("div");
   el.id = "alg-doc";
   el.hidden = true;
   if (ui) document.body.appendChild(el);   // (an AI's strip stays off the page: drawn into nothing)
   el.addEventListener("pointerdown", (e) => e.stopPropagation());
-  el.addEventListener("click", (e) => { const b = e.target.closest("[data-ab]"); if (b) press(b.dataset.ab); });
+  el.addEventListener("click", (e) => {
+    const p = e.target.closest("[data-pick]");
+    if (p) { pick(p.dataset.pick); return; }
+    const b = e.target.closest("[data-ab]"); if (b) press(b.dataset.ab);
+  });
+  /** The doctrine for this battle, chosen in the match (CoH 3): the points earned so far are kept. */
+  function pick(key) {
+    if (!offering || !DOCTRINES[key] || (DOCTRINES[key].side ?? "player") !== SIDE) return false;
+    offering = false;
+    doctrine = key;
+    app.algBuildSpeed = 1;
+    say(t("<b>{name}</b> : votre doctrine pour cette bataille.", { name: DOCTRINES[key].name }));
+    render();
+    return true;
+  }
 
   const fmtCost = (c) => { if (FLN) return c ? t("{n} ravitaillement", { n: c }) : t("gratuit"); const k = costOf(c); return RES.filter((r) => k[r.key] > 0).map((r) => `${k[r.key]}${r.short ? " " + r.short : ""}`).join(" · ") || t("gratuit"); };
+  const cpTitle = () => (FLN ? t("Points de commandement : gagnés en tuant des soldats français et en tenant des villages.") : t("Points de commandement : gagnés en tuant des combattants du FLN et en tenant des villages."));
   function render() {
+    // OFFERING: the side's doctrines as cards — name, what it is, its four abilities' icons.
+    if (offering) {
+      el.hidden = false;
+      const mine = Object.entries(DOCTRINES).filter(([, d]) => (d.side ?? "player") === SIDE);
+      el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${t("à choisir")}</span><span class="cp" title="${cpTitle()}">★ ${cp}</span></div>
+        <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
+        ${mine.map(([key, d]) => `<button type="button" class="pick" data-pick="${key}" title="${d.blurb} — ${t("Choisir cette doctrine pour toute la bataille.")}"><b>${d.name}</b>
+          <span class="ics">${d.abilities.map((a) => `<i style="${iconStyle(a.icon)}" title="${a.name}"></i>`).join("")}</span></button>`).join("")}`;
+      return;
+    }
     const d = DOCTRINES[doctrine];
     el.hidden = !d;
     if (!d) return;
-    el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${d.short}</span><span class="cp" title="${FLN ? t("Points de commandement : gagnés en tuant des soldats français et en tenant des villages.") : t("Points de commandement : gagnés en tuant des combattants du FLN et en tenant des villages.")}">★ ${cp}</span></div>
+    el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${d.short}</span><span class="cp" title="${cpTitle()}">★ ${cp}</span></div>
       <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
       ${d.abilities.map((a) => `<button type="button" class="ab" data-ab="${a.key}" title="${a.hint}"><span class="ic" style="${iconStyle(a.icon)}"></span>
         <span class="nm">${a.name}</span><span class="pr"></span><span class="sw"></span></button>`).join("")}`;
@@ -474,6 +512,12 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   }
   let lastSig = "";
   function refresh() {
+    if (offering) {
+      const c = el.querySelector(".cp"), bar = el.querySelector(".bar i");
+      if (c) c.textContent = `★ ${cp}`;
+      if (bar) bar.style.width = `${Math.round((100 * xp) / P.xpPerCp)}%`;
+      return;
+    }
     const d = DOCTRINES[doctrine];
     if (!d) return;
     el.querySelector(".cp").textContent = `★ ${cp}`;
@@ -495,16 +539,17 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   // ── The clock ─────────────────────────────────────────────────────────────
   let uiT = 0;
   function gain(n) {
-    if (!doctrine) return;
+    if (!doctrine && !offering) return;
     xp += n;
     while (xp >= P.xpPerCp) {
       xp -= P.xpPerCp;
       cp++;
-      say(t("<b>Point de commandement</b> : {n} à dépenser (doctrine, à droite).", { n: cp }));
+      say(offering ? t("<b>Point de commandement</b> : choisissez votre doctrine (à droite) pour le dépenser.")
+        : t("<b>Point de commandement</b> : {n} à dépenser (doctrine, à droite).", { n: cp }));
     }
   }
   function step(dt) {
-    if (!doctrine) return;
+    if (!doctrine && !offering) return;
     gain((((FLN ? economy.heldByEnemy : economy.held) ?? 0) * P.villageXpPerMin * dt) / 60);
     for (const [k, v] of cd) if (v > 0) cd.set(k, Math.max(0, v - dt));
     for (let i = later.length - 1; i >= 0; i--) if ((later[i].t -= dt) <= 0) { later[i].fn(); later.splice(i, 1); }
@@ -562,6 +607,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   const _g = new THREE.Vector3();
   const _p = new THREE.Vector3(), _q = new THREE.Vector3();
   function frame(dt) {
+    if (offering) { if ((uiT -= dt) <= 0) { uiT = 0.25; refresh(); } return; }
     if (!doctrine) return;
     const now = performance.now() / 1000;
     for (const f of flights) {
@@ -587,18 +633,32 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     get xp() { return xp; },
     unlocked,
     /** The choice (the briefing's, or none). */
+    /** A doctrine from the start (an AI; ?doctrine= for dev and tests), or none (null). Points reset. */
     choose(key) {
       doctrine = DOCTRINES[key] ? key : null;
-      try { if (doctrine && ui) localStorage.setItem(storeKey(), doctrine); } catch { /* */ }
+      offering = false;
       unlocked.clear(); cd.clear(); cp = 0; xp = 0;
       app.algBuildSpeed = 1;
       render();
     },
+    /** The match starts with the CHOICE open (CoH 3): the strip offers the side's doctrines; the points
+     *  come in meanwhile and are kept when one is picked. */
+    offer() {
+      doctrine = null;
+      offering = ui;
+      unlocked.clear(); cd.clear(); cp = 0; xp = 0;
+      app.algBuildSpeed = 1;
+      render();
+      if (offering) say(t("<b>Choisissez votre doctrine</b> quand vous le voulez (à droite) : elle vaut pour toute la bataille."));
+    },
+    /** Pick the doctrine while it is offered (the strip's cards; tests). */
+    pick,
+    get offering() { return offering; },
     /** A kill (combat's onDeath): the FLN killed by your men fill the bar. */
     onKill(e) {
       const k = e.lastHitBy;
       const foe = FLN ? "player" : "enemy";
-      if (!doctrine || e.team !== foe || k?.team !== SIDE) return;
+      if ((!doctrine && !offering) || e.team !== foe || k?.team !== SIDE) return;
       const v = VET.value;
       gain(e.isStructure ? v.structure : !e.type?.foot ? v.vehicle : e.typeKey === "fmTeam" ? v.fmTeam : e.typeKey === "tireur" ? v.tireur : v.man);
     },
