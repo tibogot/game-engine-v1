@@ -217,6 +217,9 @@ export async function startVehicleLab(container, { catalog = VEHICLES, title = "
   // BEFORE / AFTER, 5 m apart either side of the middle, each on a turntable.
   const vKey = catalog[new URLSearchParams(location.search).get("v")] ? new URLSearchParams(location.search).get("v") : def;
   const V = catalog[vKey];
+  // An entry may load what it needs first, once the renderer exists (`prepare`: a GLB with KTX2 textures
+  // needs the loader told the GPU's formats — initGlbLoaderRenderer).
+  if (V.prepare) { initGlbLoaderRenderer(renderer); await V.prepare(renderer); }
   // An entry may give its own pair (`before` / `after`, the buildings lab's new pieces beside a reference).
   const before = vehicleOf(V.before ? V.before() : V.build(), vKey);
   const afterGeo = V.after ? V.after() : V.build({ detail: 2, crew: false });

@@ -42,7 +42,6 @@ import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVilla
 await loadZeriba();
 await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
-await loadMotorPool();
 
 // THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
 // marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
@@ -207,7 +206,7 @@ const BUILDINGS = {
   // game's LEFT (detail 1), the lab's kit pass MIDDLE (detail 2, the sheets), the Blender one RIGHT
   // (algMotorPool.js, tools/blender/motorPool.py) — the evolution, three side by side.
   parcAutoNeuf: {
-    label: "Parc auto (nouveau)", gap: 34, yaw: Math.PI - 0.6, before: () => buildMotorPool({ detail: 1 }), middle: () => buildMotorPool({ detail: 2 }),
+    label: "Parc auto (nouveau)", gap: 34, yaw: Math.PI - 0.6, prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined), before: () => buildMotorPool({ detail: 1 }), middle: () => buildMotorPool({ detail: 2 }),
     after: () => {
       const m = motorPoolMesh(), g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));

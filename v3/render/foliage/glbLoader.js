@@ -7,12 +7,16 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { setupDraco } from "../../io/dracoLoader.js";
 
 // Draco comes from ../dracoLoader.js — see the note there. This file used to
 // configure its own, pointed at a different CDN and a different build from the
 // two other places that do the same thing.
 const _loader = setupDraco(new GLTFLoader());
+// meshopt-compressed geometry (EXT_meshopt_compression: `gltf-transform meshopt`, 2026-10-18 — the Blender
+// buildings ship that way; the decoder is a small WASM inlined in the module, nothing to host)
+_loader.setMeshoptDecoder(MeshoptDecoder);
 
 export function getSharedGltfLoader() { return _loader; }
 

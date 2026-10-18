@@ -3,7 +3,7 @@
 auto" of the late 1950s: a three-bay steel shed and the workshop block, built as the real things are. Run:
 
   "C:/Program Files/Blender Foundation/Blender 5.0/blender.exe" -b --factory-startup \
-      --python tools/blender/motorPool.py -- public/models/alg
+      --python tools/blender/motorPool.py -- public/models/alg --near     (then the same with --far)
 
   SHED      I-section columns on base plates and anchor bolts; a Howe truss on every column line (back-to-
             back angle chords, angle webs, gusset plates), knee braces; C purlins; the roof of real
@@ -19,10 +19,10 @@ auto" of the late 1950s: a three-bay steel shed and the workshop block, built as
             inspection pit (steps, angle lips, a few planks over its end)
   PROPS     the chain-hoist gantry over an engine on its stand, the bench and vice and tool board, oil
             drums (one on a cradle, one with a hand pump), jerrycans, a tyre stack, crates, the fire point
-  BAKE      one texture per object: colour (procedural + the repo's photo textures, box-projected) ×
-            ambient occlusion — the CoH read, no normal map
+  BAKE      colour (procedural + the repo's photo textures, box-projected) × ambient occlusion — the CoH read,
+            no normal map; ONE atlas per level (one draw), the far one baked from the near (see LOW below)
 Game coordinates: x along the shed, y up, FRONT at -Z (the open bays, the doors), metres as the game.
-Writes <out>/motorPool.glb; previews in assets-src/refs/motorpool/.
+Writes <out>/motorPool.glb (both levels); previews in assets-src/refs/motorpool/. Then compress it (KTX2, meshopt).
 """
 import bpy, bmesh, sys, os, math, random
 from mathutils import Vector
@@ -33,6 +33,14 @@ os.makedirs(out, exist_ok=True)
 REFS = os.path.join(ROOT, "assets-src", "refs", "motorpool"); os.makedirs(REFS, exist_ok=True)
 TEX = os.path.join(ROOT, "public", "textures")
 QUICK = "--quick" in sys.argv          # (low bake sizes and samples: for checking the shapes)
+# THE TWO VERSIONS (2026-10-18, you: "any asset we create should be very optimized, with LOD"): run TWICE —
+#   --near   the full building, its parts joined into ONE object (Static) + the two doors, ONE 4096 atlas
+#            (colour × AO) → assets-src/refs/motorpool/motorPool_near.blend
+#   --far    the RTS-zoom version built from the same code with every detail switch down — flat sheets
+#            (their ribs painted in by the bake), box sections, no purlins / girts / gussets / bolts / small
+#            clutter, fewer sides — its 1024 atlas baked FROM the near one (selected → active), then ONE GLB
+#            with both: StaticNear, StaticFar, DoorL, DoorR (the doors shared by both levels)
+LOW = "--far" in sys.argv
 random.seed(1958)
 bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete()
 
@@ -201,7 +209,7 @@ def obj(name, bm, mat, group, smooth=False):
     GROUPS[group].append(o)
     return o
 def bevel(o, w=0.01, seg=2, angle=40):
-    if w <= 0: return o
+    if w < 0.005 or LOW: return o                    # (a bevel under 5 mm never shows, even close: 2026-10-18, measured)
     b = o.modifiers.new("B", "BEVEL"); b.width = w; b.segments = seg; b.limit_method = "ANGLE"; b.angle_limit = math.radians(angle)
     return o
 def box(name, x0, x1, y0, y1, z0, z1, mat, group, w=0.01):
@@ -217,6 +225,9 @@ def frame_of(a, b, up):
 def member(name, a, b, prof, mat, group, up=gv(0, 1, 0), w=0.004, smooth=False, off=(0.0, 0.0)):
     """Extrude a cross-section (u, v points: u across, v toward `up`) from a to b."""
     a, b = gv(*a), gv(*b); d, u, v = frame_of(a, b, gv(*up))
+    if LOW:                                           # (far: the section's bounding box, flat-shaded)
+        us_ = [q[0] for q in prof]; vs_ = [q[1] for q in prof]
+        prof = [(min(us_), min(vs_)), (max(us_), min(vs_)), (max(us_), max(vs_)), (min(us_), max(vs_))]; smooth = False
     bm = bmesh.new()
     ring = lambda p: [bm.verts.new(B(*(p + u * (pu + off[0]) + v * (pv + off[1])))) for pu, pv in prof]
     r0, r1 = ring(a), ring(b); n = len(prof)
@@ -239,15 +250,21 @@ def P_R(wu, hv): return [(-wu / 2, -hv / 2), (wu / 2, -hv / 2), (wu / 2, hv / 2)
 def P_O(r, n=12): return [(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n)) for i in range(n)]
 def rod(name, a, b, r, mat, group, n=10, up=(0, 1, 0)):
     return member(name, a, b, P_O(r, n), mat, group, up, 0, smooth=True)
-def sheet(name, o, aw, al, an, width, length, mat, group, pitch=0.1, depth=0.028, segs=6, thick=0.0035):
+def sheet(name, o, aw, al, an, width, length, mat, group, pitch=0.1, depth=0.028, segs=4, thick=0.0035, ribs_far=False):
     """A corrugated sheet: `o` its corner, waves across `aw`, `length` (a number or f(w)) along `al`,
     its face toward `an`; thickened behind it (toward -an)."""
     o, aw, al, an = gv(*o), gv(*aw).normalized(), gv(*al).normalized(), gv(*an).normalized()
-    N_ = max(2, round(width / pitch * segs)) if depth > 0 else 1
+    # (far: flat, the bake paints the ribs — but the ROOF keeps them as a cheap zig-zag, two segments a wave:
+    # at the RTS zoom a 1024 atlas has ~one texel a rib, and the roof is most of what the camera sees)
+    phase = 0.0
+    under = LOW and ribs_far and depth > 0
+    if under: segs, phase, thick = 2, math.pi / 2, 0.0   # (no shell: a flat underside under it instead, 2 triangles)
+    elif LOW: depth = 0
+    N_ = max(2, round(width / pitch * segs)) if depth > 0 else (max(1, math.ceil(width / 0.9)) if callable(length) else 1)
     bm = bmesh.new(); rows = []
     for i in range(N_ + 1):
         w = width * i / N_
-        off = depth / 2 * math.sin(2 * math.pi * w / pitch) if depth > 0 else 0.0
+        off = depth / 2 * math.sin(2 * math.pi * w / pitch + phase) if depth > 0 else 0.0
         L = length(w) if callable(length) else length
         p = o + aw * w + an * off
         rows.append((bm.verts.new(B(*p)), bm.verts.new(B(*(p + al * L)))))
@@ -258,7 +275,10 @@ def sheet(name, o, aw, al, an, width, length, mat, group, pitch=0.1, depth=0.028
     if bm.faces[0].normal.dot(want) < 0:
         for f in bm.faces: f.normal_flip()
     ob = obj(name, bm, mat, group, smooth=depth > 0)
-    so = ob.modifiers.new("S", "SOLIDIFY"); so.thickness = thick; so.offset = -1.0; so.use_even_offset = True
+    if thick > 0:
+        so = ob.modifiers.new("S", "SOLIDIFY"); so.thickness = thick; so.offset = -1.0; so.use_even_offset = True
+    if under:
+        sheet(name + "Under", tuple(o - an * (depth / 2 + 0.006)), tuple(aw), tuple(al), tuple(-an), width, length, mat, group, depth=0, thick=0.0)
     return ob
 def text(name, body, at, size, mat, group, facing="-z", depth=0.004):
     cu = bpy.data.curves.new(name, "FONT"); cu.body = body; cu.size = size; cu.extrude = depth / 2
@@ -270,6 +290,7 @@ def text(name, body, at, size, mat, group, facing="-z", depth=0.004):
     return o
 def cyl(name, c, r, h, mat, group, n=24, axis="y", w=0.006, r2=None):
     """A capped cylinder (cone with r2) standing on its base centre c along a game axis."""
+    if LOW: n = max(6, n // 3)
     a = gv(*c); d = {"y": gv(0, 1, 0), "x": gv(1, 0, 0), "z": gv(0, 0, 1)}[axis] if isinstance(axis, str) else gv(*axis).normalized()
     bm = bmesh.new(); _, u, v = frame_of(a, a + d, gv(0, 0, 1) if abs(d.y) > 0.9 else gv(0, 1, 0))
     rb = [bm.verts.new(B(*(a + u * r * math.cos(t) + v * r * math.sin(t)))) for t in (2 * math.pi * i / n for i in range(n))]
@@ -282,6 +303,7 @@ def cyl(name, c, r, h, mat, group, n=24, axis="y", w=0.006, r2=None):
     o = obj(name, bm, mat, group, smooth=True)
     return bevel(o, w, 2, 50)
 def torus(name, c, R, r, mat, group, axis="y", n=28, m=10, sq=1.0):
+    if LOW: n, m = max(8, n // 3), max(4, m // 2)
     bm = bmesh.new(); a = gv(*c); d = {"y": gv(0, 1, 0), "x": gv(1, 0, 0), "z": gv(0, 0, 1)}[axis]
     _, u, v = frame_of(a, a + d, gv(0, 0, 1) if abs(d.y) > 0.9 else gv(0, 1, 0))
     grid = []
@@ -332,7 +354,7 @@ H_SHEET = 0.04 + 0.14 + 0.0155    # the sheets' mid-plane over the chord line
 # ── THE APRON ────────────────────────────────────────────────────────────────
 PIT = (-0.45, 0.45, -3.0, 2.6)    # x0, x1, z0, z1
 slab = box("Slab", -9.2, 14.8, F - 0.25, F, -8.2, 5.6, "concrete", "apron", 0.035)
-slab.modifiers.remove(slab.modifiers["B"])
+if slab.modifiers.get("B"): slab.modifiers.remove(slab.modifiers["B"])
 boolean(slab, cutter(PIT[0], PIT[1], F - 1.5, F + 0.2, PIT[2], PIT[3]))
 bevel(slab, 0.035, 2, 40)
 pw = box("PitWalls", PIT[0] - 0.2, PIT[1] + 0.2, F - 1.35, F - 0.25, PIT[2] - 0.2, PIT[3] + 0.2, "concrete", "apron", 0)
@@ -402,6 +424,8 @@ x = X0 - 0.42
 while x + SW < X1 + 0.42 + 0.05:
     xs.append(x); x += COVER
 xs.append(X1 + 0.42 - SW)
+SWR = SW
+if LOW: xs, SWR = [X0 - 0.42], X1 - X0 + 0.84
 T0 = -0.42 * LL                                       # the overhang at the eave
 ROWS = [(T0, 2.75), (T0 + 2.6, T_RIDGE - 0.06 - (T0 + 2.6))]
 for sz in (-1, 1):
@@ -410,7 +434,7 @@ for sz in (-1, 1):
         for k, x0 in enumerate(xs):
             h = H_SHEET + (k % 2) * 0.005 + r * 0.011
             o = on_slope(sz, x0, t0, h)
-            sheet(f"Roof{sz}{r}{k}", o, (1, 0, 0), tuple(l), tuple(n), SW, L, roof_mat(), "shed")
+            sheet(f"Roof{sz}{r}{k}", o, (1, 0, 0), tuple(l), tuple(n), SWR, L, roof_mat(), "shed", ribs_far=True)
     # verge flashings over the gables' edges
     for xv in (X0 - 0.43, X1 + 0.43):
         a = on_slope(sz, xv, T0 - 0.02, H_SHEET + 0.03); b = on_slope(sz, xv, T_RIDGE - 0.01, H_SHEET + 0.03)
@@ -443,9 +467,9 @@ for y in (F + 1.1, F + 2.6, YB - 0.2):
     member(f"GirtB{y:.2f}", (X0 - 0.1, y, Z1 + 0.12), (X1 + 0.1, y, Z1 + 0.12), P_C(0.15, 0.06, 0.005), "frame", "shed", (0, 1, 0), 0.002, off=(0, 0))
 x = X0 - 0.27; k = 0
 while x < X1 + 0.27 - 0.05:
-    w_ = min(SW, X1 + 0.27 - x)
+    w_ = min(99 if LOW else SW, X1 + 0.27 - x)
     sheet(f"WallB{k}", (x, F + 0.36, ZB + (k % 2) * 0.005), (1, 0, 0), (0, 1, 0), (0, 0, 1), w_, YB + TD + 0.12 - (F + 0.36), wall_mat(), "shed")
-    x += COVER; k += 1
+    x += w_ if LOW else COVER; k += 1
 # the gables (and the garage bay's partition): sheets cut along the roof line
 def gable(name, xp, sgn, z0, z1, top, upstand=True, girts=True):
     xs_ = xp + sgn * (0.1 + 0.15 + 0.016)
@@ -456,10 +480,10 @@ def gable(name, xp, sgn, z0, z1, top, upstand=True, girts=True):
     z = z0; k = 0
     y0 = F + (0.36 if upstand else 0.06)
     while z < z1 - 0.05:
-        w_ = min(SW, z1 - z); xk = xs_ + sgn * (k % 2) * 0.005
+        w_ = min(99 if LOW else SW, z1 - z); xk = xs_ + sgn * (k % 2) * 0.005
         if sgn > 0: sheet(f"Wall{name}{k}", (xk, y0, z + w_), (0, 0, -1), (0, 1, 0), (sgn, 0, 0), w_, lambda w, z=z + w_: top(z - w) - y0, wall_mat(), "shed")
         else: sheet(f"Wall{name}{k}", (xk, y0, z), (0, 0, 1), (0, 1, 0), (sgn, 0, 0), w_, lambda w, z=z: top(z + w) - y0, wall_mat(), "shed")
-        z += COVER; k += 1
+        z += w_ if LOW else COVER; k += 1
 gable_top = lambda z: min(ytc(z) + 0.02, YB + TD + 4.5 * T15) if abs(z) < 4.62 else ytc(4.62) + 0.02
 gable("L", X0, -1, -4.62, ZB, gable_top)
 gable("R", X1, 1, -4.62, ZB, gable_top)
@@ -470,9 +494,9 @@ DH = 3.9                                              # door height
 member("Header", (COLS[2] - 0.12, F + DH + 0.12, Z0 - 0.2), (COLS[3] + 0.12, F + DH + 0.12, Z0 - 0.2), P_C(0.2, 0.07, 0.007), "frame", "shed", (0, 1, 0), 0.002)
 x = COLS[2] - 0.1; k = 0
 while x < COLS[3] + 0.1 - 0.05:
-    w_ = min(SW, COLS[3] + 0.1 - x)
+    w_ = min(99 if LOW else SW, COLS[3] + 0.1 - x)
     sheet(f"Fascia{k}", (x, F + DH + 0.02, Z0 - 0.3 - (k % 2) * 0.005), (1, 0, 0), (0, 1, 0), (0, 0, -1), w_, YB + TD - 0.02 - (F + DH + 0.02), wall_mat(), "shed")
-    x += COVER; k += 1
+    x += w_ if LOW else COVER; k += 1
 LW = (COLS[3] - COLS[2] - 0.24 - 0.04) / 2
 HINGE = {"doorL": (COLS[2] + 0.12, Z0 - 0.36), "doorR": (COLS[3] - 0.12, Z0 - 0.36)}
 for key, sx in (("doorL", 1), ("doorR", -1)):
@@ -487,9 +511,9 @@ for key, sx in (("doorL", 1), ("doorR", -1)):
         member(f"{key}{nm}", a, b, P_R(T, T), "doorPaint", key, (0, 0, 1), 0.004)
     x = lo; k = 0
     while x < hi - 0.05:
-        w_ = min(0.84, hi - x)
+        w_ = min(99 if LOW else 0.84, hi - x)
         sheet(f"{key}Sheet{k}", (x, F + 0.08, hz - 0.045 - (k % 2) * 0.005), (1, 0, 0), (0, 1, 0), (0, 0, -1), w_, DH - 0.12, "doorPaint", key)
-        x += 0.76; k += 1
+        x += w_ if LOW else 0.76; k += 1
     for y in (F + 0.5, F + DH - 0.5):                   # the hinges and the handle
         box(f"{key}Hinge{y:.1f}", hx - 0.05, hx + 0.05, y - 0.06, y + 0.06, hz - 0.1, hz - 0.02, "darkSteel", key, 0.008)
         box(f"{key}Strap{y:.1f}", min(hx, hx + sx * 0.55), max(hx, hx + sx * 0.55), y - 0.025, y + 0.025, hz - 0.085, hz - 0.07, "darkSteel", key, 0.003)
@@ -570,8 +594,8 @@ def drum(nm, c, mat, lying=False, rot=0.0):
     x, y, z = c
     if not lying:
         cyl(f"{nm}", (x, y + 0.01, z), 0.29, 0.86, mat, "props", 24, w=0.01)
-        for h in (0.0, 0.875): torus(f"{nm}Rim{h}", (x, y + 0.01 + h, z), 0.287, 0.012, mat, "props", "y", 24, 6)
-        for h in (0.29, 0.58): torus(f"{nm}Hoop{h}", (x, y + h, z), 0.29, 0.016, mat, "props", "y", 24, 6)
+        for h in (0.0, 0.875): torus(f"{nm}Rim{h}", (x, y + 0.01 + h, z), 0.287, 0.012, mat, "props", "y", 16, 4)
+        for h in (0.29, 0.58): torus(f"{nm}Hoop{h}", (x, y + h, z), 0.29, 0.016, mat, "props", "y", 16, 4)
         cyl(f"{nm}Bung", (x + 0.17, y + 0.87, z + 0.05), 0.03, 0.015, "darkSteel", "props", 8, w=0.002)
     else:
         ax = (math.cos(rot), 0, math.sin(rot)); a = gv(x, y + 0.3, z) - gv(*ax) * 0.43
@@ -676,7 +700,7 @@ box("SandIn", FP[0] - 0.46, FP[0] + 0.46, F + 0.3, F + 0.4, FP[1] - 0.66, FP[1] 
 box("Shovel", FP[0] + 0.15, FP[0] + 0.19, F + 0.38, F + 1.25, FP[1] - 0.45, FP[1] - 0.42, "woodDark", "props", 0.004).rotation_euler.x = 0.25
 # (the sandbags round the drums' corner: the game's cloth-simulated bags, added by algMotorPool.js)
 
-# ── Join each group, apply modifiers, smooth by angle ────────────────────────
+# ── Join: the building into ONE object (one draw), the doors their own (they swing) ─
 def join(name, objs):
     bpy.ops.object.select_all(action="DESELECT")
     for o in objs:
@@ -691,8 +715,29 @@ def join(name, objs):
     j = bpy.context.view_layer.objects.active; j.name = name
     bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     return j
-NAMES = {"shed": "Shed", "workshop": "Workshop", "apron": "Apron", "props": "Props", "doorL": "DoorL", "doorR": "DoorR"}
-OBJS = {k: join(NAMES[k], v) for k, v in GROUPS.items()}
+if LOW:
+    # (far: the hidden structure — purlins and girts behind the sheets, gussets, braces — and every part
+    # too small to read from the RTS camera, 50-130 m out: bolts, chains, tools, hinges, rims)
+    SKIP = ("Purlin", "Girt", "Gusset", "Brace", "Knee", "Nut", "Base", "Chain", "Tool", "EngPlug", "StoveLeg", "Sling", "Hook", "BucketPeg", "OilCan", "Vice", "PitLip")
+    for g in GROUPS.values():
+        for o in list(g):
+            if o.name.startswith(SKIP) or any(t in o.name for t in ("Rim", "Hoop", "Bung")) or o.dimensions.length < 0.3:
+                g.remove(o); bpy.data.objects.remove(o, do_unlink=True)
+    for k in ("doorL", "doorR"):                           # (the doors: the near ones serve both levels)
+        for o in GROUPS[k]: bpy.data.objects.remove(o, do_unlink=True)
+        GROUPS[k] = []
+if "--stats" in sys.argv:                              # (where the triangles go, by part kind)
+    import re, collections
+    dg = bpy.context.evaluated_depsgraph_get(); per = collections.Counter()
+    for g in GROUPS.values():
+        for o in g:
+            if o.type != "MESH": continue
+            me = o.evaluated_get(dg).to_mesh(); per[re.sub(r"[-\d.]+.*$", "", o.name) or o.name] += sum(len(p.vertices) - 2 for p in me.polygons); o.evaluated_get(dg).to_mesh_clear()
+    for k, v in per.most_common(25): print("PART", k, v)
+    sys.exit(0)
+OBJS = {"Static": join("StaticFar" if LOW else "Static", [o for k in ("shed", "workshop", "apron", "props") for o in GROUPS[k]])}
+if not LOW:
+    OBJS["DoorL"] = join("DoorL", GROUPS["doorL"]); OBJS["DoorR"] = join("DoorR", GROUPS["doorR"])
 for c in CUTTERS: bpy.data.objects.remove(c, do_unlink=True)
 def tris(o): return sum(len(p.vertices) - 2 for p in o.data.polygons)
 print("TRIS", {o.name: tris(o) for o in OBJS.values()}, "TOTAL", sum(tris(o) for o in OBJS.values()))
@@ -700,65 +745,85 @@ for o in OBJS.values():
     bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
     bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
 
-# ── THE BAKE: colour × ambient occlusion, one texture per object ─────────────
+# ── THE BAKE ─────────────────────────────────────────────────────────────────
 import numpy as np
 scn = bpy.context.scene
-scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.cycles.samples = 16 if QUICK else 96
+scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"
 scn.render.bake.margin = 8
 scn.world.light_settings.distance = 2.2
-SIZE = {"Shed": 2048, "Workshop": 2048, "Apron": 2048, "Props": 2048, "DoorL": 512, "DoorR": 512}
-if QUICK: SIZE = {k: v // 4 for k, v in SIZE.items()}
-BAKED = []
-for o in OBJS.values():
+NEAR_BLEND = os.path.join(REFS, "motorPool_near.blend")
+def unwrap(o, margin):
     bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
     bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
-    bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.003)
+    bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=margin)
     bpy.ops.object.mode_set(mode="OBJECT")
-    S_ = SIZE[o.name]; imgs = {}
-    for kind in ("col", "ao"):
-        img = bpy.data.images.new(f"{o.name}_{kind}", S_, S_, alpha=False)
-        for m in o.data.materials:
-            tn = m.node_tree.nodes.get("BakeTarget") or m.node_tree.nodes.new("ShaderNodeTexImage")
-            tn.name = "BakeTarget"; tn.image = img; m.node_tree.nodes.active = tn
-        if kind == "col":
-            scn.cycles.samples = 4
-            scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
-            bpy.ops.object.bake(type="DIFFUSE")
-        else:
-            scn.cycles.samples = 16 if QUICK else 96
-            bpy.ops.object.bake(type="AO")
-        imgs[kind] = img
-    c = np.array(imgs["col"].pixels[:]).reshape(-1, 4); a = np.array(imgs["ao"].pixels[:]).reshape(-1, 4)
-    c[:, :3] *= 0.3 + 0.7 * a[:, :1]                      # (softened: the game lights it too)
-    out_img = bpy.data.images.new(f"motorPool_{o.name}", S_, S_, alpha=False)
-    out_img.pixels = c.ravel().tolist()
-    out_img.filepath_raw = os.path.join(REFS, f"motorPool_{o.name}.png"); out_img.file_format = "PNG"; out_img.save()
-    rough = {"Shed": 0.7, "Workshop": 0.95, "Apron": 0.92, "Props": 0.8, "DoorL": 0.7, "DoorR": 0.7}[o.name]
-    bm_ = bpy.data.materials.new(f"MotorPool_{o.name}"); bm_.use_nodes = True
-    tn = bm_.node_tree.nodes.new("ShaderNodeTexImage"); tn.image = out_img
-    pb = bm_.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = rough
-    bm_.node_tree.links.new(tn.outputs["Color"], pb.inputs["Base Color"])
-    o.data.materials.clear(); o.data.materials.append(bm_)
-    # the many material slots are gone: one per object
+def target(o, size, name):
+    img = bpy.data.images.new(name, size, size, alpha=False)
+    for m in o.data.materials:
+        tn = m.node_tree.nodes.get("BakeTarget") or m.node_tree.nodes.new("ShaderNodeTexImage")
+        tn.name = "BakeTarget"; tn.image = img; m.node_tree.nodes.active = tn
+    return img
+def colour_pass():
+    scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
+def finish(o, px, size, name, rough):
+    """The baked pixels → a PNG beside the refs and ONE plain material on the object."""
+    out_img = bpy.data.images.new(f"motorPool_{name}", size, size, alpha=False)
+    out_img.pixels = px.ravel().tolist()
+    out_img.filepath_raw = os.path.join(REFS, f"motorPool_{name}.png"); out_img.file_format = "PNG"; out_img.save()
+    m = bpy.data.materials.new(f"MotorPool_{name}"); m.use_nodes = True
+    tn = m.node_tree.nodes.new("ShaderNodeTexImage"); tn.image = out_img
+    pb = m.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = rough
+    m.node_tree.links.new(tn.outputs["Color"], pb.inputs["Base Color"])
+    o.data.materials.clear(); o.data.materials.append(m)
     for p in o.data.polygons: p.material_index = 0
-    print("BAKED", o.name, S_)
+    print("BAKED", name, size)
 
-# the doors' origin on their hinges (a game swings them open, outward)
-for key in ("doorL", "doorR"):
-    o = OBJS[key]; hx, hz = HINGE[key]
-    scn.cursor.location = B(hx, F, hz)
-    bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
-    bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
-scn.cursor.location = (0, 0, 0)
+if not LOW:
+    # NEAR: colour × ambient occlusion, the building in one 4096 atlas, each door in a 512
+    for key, o in OBJS.items():
+        S_ = (4096 if key == "Static" else 512) // (4 if QUICK else 1)
+        unwrap(o, 0.0015 if key == "Static" else 0.003)
+        imgs = {}
+        img = target(o, S_, f"{key}_col"); scn.cycles.samples = 4; colour_pass(); bpy.ops.object.bake(type="DIFFUSE"); imgs["col"] = img
+        img = target(o, S_, f"{key}_ao"); scn.cycles.samples = 16 if QUICK else 96; bpy.ops.object.bake(type="AO"); imgs["ao"] = img
+        c = np.array(imgs["col"].pixels[:]).reshape(-1, 4); a = np.array(imgs["ao"].pixels[:]).reshape(-1, 4)
+        c[:, :3] *= 0.3 + 0.7 * a[:, :1]                      # (softened: the game lights it too)
+        finish(o, c, S_, "Near" if key == "Static" else key, 0.85 if key == "Static" else 0.7)
+    # the doors' origin on their hinges (a game swings them open, outward)
+    for key, gk in (("DoorL", "doorL"), ("DoorR", "doorR")):
+        o = OBJS[key]; hx, hz = HINGE[gk]
+        scn.cursor.location = B(hx, F, hz)
+        bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
+        bpy.ops.object.origin_set(type="ORIGIN_CURSOR")
+    scn.cursor.location = (0, 0, 0)
+    bpy.ops.wm.save_as_mainfile(filepath=NEAR_BLEND)
+    print("NEAR", NEAR_BLEND)
+    print("DONE")
+    sys.exit(0)
+
+# FAR: its atlas baked FROM the near building (selected → active): the near's colour, AO and ribs land on
+# the flat sheets and the box sections
+far = OBJS["Static"]
+unwrap(far, 0.004)
+S_ = 1024 // (4 if QUICK else 1)
+img = target(far, S_, "far_col")
+with bpy.data.libraries.load(NEAR_BLEND, link=False) as (src, dst):
+    dst.objects = [n for n in src.objects if n in ("Static", "DoorL", "DoorR")]
+for o in dst.objects: scn.collection.objects.link(o)
+near = bpy.data.objects["Static"]; near.name = "StaticNear"
+bpy.ops.object.select_all(action="DESELECT"); near.select_set(True); far.select_set(True); bpy.context.view_layer.objects.active = far
+scn.cycles.samples = 8; colour_pass()
+bpy.ops.object.bake(type="DIFFUSE", use_selected_to_active=True, cage_extrusion=0.08, max_ray_distance=0.3)
+finish(far, np.array(img.pixels[:]).reshape(-1, 4), S_, "Far", 0.85)
 
 bpy.ops.object.select_all(action="DESELECT")
-for o in OBJS.values(): o.select_set(True)
+for n in ("StaticNear", "StaticFar", "DoorL", "DoorR"): bpy.data.objects[n].select_set(True)
 kw = dict(filepath=os.path.join(out, "motorPool.glb"), use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format="JPEG")
-try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=88)
+try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
 except TypeError: bpy.ops.export_scene.gltf(**kw)
 print("GLB", os.path.join(out, "motorPool.glb"))
 
-# ── Previews (workbench, the baked textures) ─────────────────────────────────
+# ── Previews (workbench, the baked textures): the near, then the far ─────────
 scn.render.engine = "BLENDER_WORKBENCH"
 sh = scn.display.shading; sh.light = "STUDIO"; sh.color_type = "TEXTURE"
 scn.render.resolution_x, scn.render.resolution_y = 1400, 850
@@ -766,8 +831,11 @@ cd = bpy.data.cameras.new("C"); cam = bpy.data.objects.new("C", cd); scn.collect
 def shot(name, frm, tgt, lens=35):
     cd.lens = lens; cam.location = B(*frm); cam.rotation_euler = (B(*tgt) - cam.location).to_track_quat("-Z", "Y").to_euler()
     scn.render.filepath = os.path.join(REFS, f"blender_{name}.png"); bpy.ops.render.render(write_still=True)
+far.hide_render = True
 shot("front34", (-14, 9, -20), (2, 2, 0))
-shot("rts", (-20, 30, -30), (2.5, 0, 0), 45)
 shot("inside", (-3, 2.2, -9), (-4.5, 1.6, 2))
+far.hide_render = False; near.hide_render = True
+shot("far_front34", (-14, 9, -20), (2, 2, 0))
+shot("far_rts", (-20, 30, -30), (2.5, 0, 0), 45)
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "motorPool.blend"))
 print("DONE")
