@@ -466,6 +466,7 @@ ALG_UNIT_TYPES.sansRecul = {
 // A team of two: the gunner (his type's gun), the loader a rifle. Bought by a human FLN.
 ALG_UNIT_TYPES.mitrailleuse = {
   ...ALG_UNIT_TYPES.fmTeam, typeKey: "mitrailleuse", name: t("Mitrailleuse lourde"), buildLabel: t("Mitrailleuse de 12,7"),
+  look: "alnHmg",   // (2026-10-19: the DShK carried, then on its tripod — algMgTeam; it wore the FM gunners' look)
   weapon: "mg", range: 58, damage: 6, fireRate: 3, canHitAir: true, prefersAir: true, airMul: 1.5,   // (7 × 4/s × 2.2 felled an Alouette in 2 s: the lab)
   speed: 4.2, maxHp: 70, vision: 52,
 };

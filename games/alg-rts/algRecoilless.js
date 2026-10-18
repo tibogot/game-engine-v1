@@ -7,8 +7,12 @@
 //             his fire until 1); moving resets it — it is fired from a halt, never on the run.
 //   KNEELS    the gunner (and his loader beside him) while set.
 //   BACK-BLAST every shot throws dust and smoke out BEHIND the tube — the team's giveaway.
+//   CARRIED   (2026-10-19, CoH: a team weapon reads at a glance) on the move the tube rides slung on his
+//             back (soldierLooks KIT sr57Back) and he runs with it, hands free; stopped, it comes into
+//             his hands to kneel and fire. (It was held as a rifle at a run: a 1.56 m pipe.)
 
-export const RECOILLESS = { key: "sansRecul", aim: 1.5, blastBack: 2.4 };
+export const RECOILLESS = { key: "sansRecul", aim: 1.5, blastBack: 2.4,
+  sling: 0.3, unsling: 0.35 };   // s moving before it goes on his back / still before it comes off (no flicker at every halt)
 const P = RECOILLESS;
 
 export function createAlgRecoilless(app, { squads }) {
@@ -21,6 +25,12 @@ export function createAlgRecoilless(app, { squads }) {
       if (!g) continue;
       if (g.isMoving || s.retreating) g.deploy = 0;
       else g.deploy = Math.min(1, (g.deploy ?? 0) + dt / P.aim);
+      // The tube: on his back on the move, in his hands at a halt (recorded once the renderer took it).
+      if (g.isMoving) { g._stillT = 0; g._moveT = (g._moveT ?? 0) + dt; } else { g._moveT = 0; g._stillT = (g._stillT ?? 0) + dt; }
+      const slung = g._slung ? !(g._stillT > P.unsling) : g._moveT > P.sling;
+      const R = app.algUnitRenderer;
+      if (slung !== g._slung && R?.setKit(g, "sr57Back", slung)) { R.setWeapon(g, slung ? null : "sr57"); g._slung = slung; }
+      g.carrying = !!g._slung;
       // On his knee to aim (after the posture system's step: it rewrites postures each tick).
       if (!g.isMoving && !s.retreating && g.posture !== "prone") {
         g.posture = "kneel";

@@ -14,10 +14,49 @@
 // Who: the French "pièce FM" team's gunner (algSquads `piece`, slot 0) and the FLN's FM gunners
 // (fmTeam). The arc shows on the ground (a draped wedge): your guns when selected or setting up,
 // the enemy's set-up guns when you can see them.
+//
+// THE 12.7 (the FLN's DShK, `mitrailleuse` — 2026-10-19, CoH: a team weapon reads at a glance): packed,
+// the gun rides on the gunner's back and its tripod on the loader's (soldierLooks KIT dshkBack /
+// dshkTripod), both with their rifles; set up, the gun stands on its TRIPOD on the ground before the
+// gunner, prone on its spade grips, his hands empty (one instanced draw for every team, below).
 import * as THREE from "three";
+import { assemble, bakeContactAO, buildBox, MAT, wirePart } from "../../v3/render/objects/rtsParts.js";
+import { rtsObjectMaterial } from "../../v3/render/objects/rtsObjectProps.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
+import { RTS_SCALE } from "./algUnitTypes.js";
 import { t } from "./i18n/i18n.js";
+
+/**
+ * The DShK on its low tripod, origin on the ground under the tripod's head, +Z the way it fires: the
+ * finned barrel and its muzzle brake, the box receiver, the anti-aircraft ring sight, the spade grips
+ * behind (where the gunner's hands are), the belt box on its left. ~1.6 m, the axis 0.56 m up.
+ */
+function buildDshkMount() {
+  const S = MAT.steel, axisY = 0.56, alongZ = [Math.PI / 2, 0, 0];
+  const parts = [
+    wirePart([0, 0.37, 0.03], [-0.36, 0.0, 0.42], 0.02, { tone: 0.3 }),   // the front legs
+    wirePart([0, 0.37, 0.03], [0.36, 0.0, 0.42], 0.02, { tone: 0.3 }),
+    wirePart([0, 0.37, -0.03], [0, 0.0, -0.64], 0.02, { tone: 0.3 }),     // the trail leg
+    { geo: buildBox(0.08, 0.1, 0.08), pos: [0, 0.41, 0], mat: S, tone: 0.22 },          // the pintle
+    { geo: buildBox(0.1, 0.05, 0.42), pos: [0, 0.47, 0.03], mat: S, tone: 0.24 },       // the cradle
+    { geo: buildBox(0.13, 0.15, 0.5), pos: [0, axisY, -0.06], mat: S, tone: 0.18 },     // the receiver
+    { geo: buildBox(0.11, 0.03, 0.21), pos: [0, axisY + 0.088, 0.0], mat: S, tone: 0.28 },   // the feed cover
+    { geo: buildBox(0.15, 0.06, 0.02), pos: [0, axisY, -0.322], mat: S, tone: 0.16 },   // the back plate
+    { geo: buildBox(0.03, 0.11, 0.03), pos: [0.062, axisY - 0.01, -0.36], mat: S, tone: 0.12 },   // the spade grips
+    { geo: buildBox(0.03, 0.11, 0.03), pos: [-0.062, axisY - 0.01, -0.36], mat: S, tone: 0.12 },
+    { geo: new THREE.CylinderGeometry(0.024, 0.024, 0.96, 8), pos: [0, axisY, 0.67], rot: alongZ, mat: S, tone: 0.2 },   // the barrel
+    { geo: new THREE.CylinderGeometry(0.04, 0.037, 0.11, 10), pos: [0, axisY, 1.17], rot: alongZ, mat: S, tone: 0.14 },  // the muzzle brake
+    { geo: new THREE.TorusGeometry(0.085, 0.007, 4, 18), pos: [0, axisY + 0.21, 0.2], mat: S, tone: 0.2 },   // the AA ring sight
+    { geo: buildBox(0.012, 0.13, 0.012), pos: [0, axisY + 0.13, 0.2], mat: S, tone: 0.2 },                    // its post
+    { geo: buildBox(0.12, 0.17, 0.27), pos: [-0.16, axisY - 0.06, -0.05], mat: MAT.paint, tone: 0.3 },        // the belt box
+    { geo: buildBox(0.06, 0.014, 0.1), pos: [-0.085, axisY + 0.035, -0.03], mat: S, tone: 0.45, rot: [0, 0, -0.5] },   // the belt
+  ];
+  for (let k = 0; k < 8; k++) parts.push({ geo: new THREE.CylinderGeometry(0.049, 0.049, 0.016, 10), pos: [0, axisY, 0.25 + k * 0.044], rot: alongZ, mat: S, tone: 0.1 });   // the radiator's fins
+  const geo = assemble(parts);
+  bakeContactAO(geo, { cell: 0.05, radius: 1, strength: 0.3, groundFade: 0.15, floor: 0.6 });
+  return geo;
+}
 
 export const MG_TEAM = {
   setup: 2.5,          // s to set up once stopped
@@ -33,6 +72,9 @@ export const MG_TEAM = {
   // as a whole, not one man at a time (the round's own 6 m area pinned 2 of 5; the rest walked up).
   sweepR: 12, sweepRate: 0.85, suppressMax: 1.6,
   wedgeSegs: 18,
+  // The 12.7 set up: its tripod this far before the prone gunner's origin (m, before the unit scale) —
+  // the spade grips at his hands; the gun down at this share of the set-up, up at this of the pack-up.
+  dshk: { ahead: 1.15, downAt: 0.5, upAt: 0.5, max: 16, loaderSide: 1.1, loaderAhead: 0.5 },
 };
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -70,10 +112,44 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
     u.arc = null; u.noChase = false; u.suppressOut = 1; u.deploy = 0;
   }
 
+  /** THE 12.7's GUN: on the gunner's back (and the tripod on his loader's) or down on its tripod. */
+  const isHmg = (u) => u.typeKey === "mitrailleuse";
+  const gunDown = (st) => st.state === "set" || (st.state === "setting" && st.t >= P.setup * P.dshk.downAt) || (st.state === "packing" && st.t < P.packUp * P.dshk.upAt);
+  function hmgKit(u, st) {
+    const R = app.algUnitRenderer;
+    if (!R) return;
+    const down = gunDown(st), ld = u.squad?.members.find((m) => m !== u && m.alive) ?? null;
+    // (Recorded only once the renderer took it: a man spawned this tick has no view to dress yet.)
+    if (u._dshkDown !== down && R.setKit(u, "dshkBack", !down)) {
+      R.setWeapon(u, down ? null : "mas36");   // his hands on the grips / his rifle back
+      u._dshkDown = down;
+    }
+    if (u._dshkLoader !== ld || u._dshkLoaderDown !== down) {
+      if (u._dshkLoader && u._dshkLoader !== ld) R.setKit(u._dshkLoader, "dshkTripod", false);
+      if (!ld || R.setKit(ld, "dshkTripod", !down)) { u._dshkLoader = ld; u._dshkLoaderDown = down; }
+    }
+    // A load on their backs: they run with it, rifles slung (unitRenderer carryRun).
+    u.carrying = !down;
+    if (ld) ld.carrying = !down;
+    // THE LOADER'S PLACE (CoH's crew slots): the gun down, he lies by its belt box, beside the gunner —
+    // not across him (both were sent to one point: he lay over the gun).
+    if (down && ld && !ld.isMoving && !ld.inside && st.state === "set") {
+      const f = st.facing, k = RTS_SCALE;
+      const sx = u.position.x - Math.cos(f) * P.dshk.loaderSide * k + Math.sin(f) * P.dshk.loaderAhead * k;
+      const sz = u.position.z + Math.sin(f) * P.dshk.loaderSide * k + Math.cos(f) * P.dshk.loaderAhead * k;
+      if ((ld._slotTries ?? 0) < 3 && Math.hypot(ld.position.x - u.position.x, ld.position.z - u.position.z) < 8 && Math.hypot(ld.position.x - sx, ld.position.z - sz) > 0.7) {
+        ld.orderTo(sx, sz);
+        ld._slotTries = (ld._slotTries ?? 0) + 1;   // (three goes: a blocked spot is not chased every tick)
+      }
+    }
+    if (!down && ld) ld._slotTries = 0;
+  }
+
   /** FIXED STEP, after posture and squads (it overrides posture and movement). */
   function step(dt) {
     for (const u of gunners()) {
       const st = (u._mg ??= { state: "packed", t: 0, still: 0, facing: u.heading, want: null, scanT: 0, held: null });
+      if (isHmg(u)) hmgKit(u, st);
       // Retreating, in a house, holding fire to withdraw: packed, no ceremony.
       if (u.squad?.retreating || u.inside || u.holdFire) {
         if (st.state !== "packed") packedNow(u, st);
@@ -267,8 +343,32 @@ export function createAlgMgTeams({ app, units, selection, isGunner, fogOfWar = n
     w.fill.visible = w.edge.visible = true;
   }
 
-  /** Every frame (render side): the arcs. */
+  // THE 12.7s DOWN on their tripods: one instanced draw for them all.
+  const dshks = new THREE.InstancedMesh(buildDshkMount(), rtsObjectMaterial(), P.dshk.max);
+  dshks.castShadow = true; dshks.receiveShadow = true;
+  dshks.frustumCulled = false; dshks.count = 0; dshks.visible = false;
+  dshks.name = "DShKMounts";
+  app.scene.add(dshks);
+  const _dm = new THREE.Matrix4(), _dq = new THREE.Quaternion(), _dp = new THREE.Vector3(), _ds = new THREE.Vector3(), _dy = new THREE.Vector3(0, 1, 0);
+  function drawDshks() {
+    let n = 0;
+    for (const u of units.list) {
+      if (!u.alive || !isHmg(u) || !u._dshkDown || !u._mg || n >= P.dshk.max) continue;
+      // Under the fog: the enemy's gun no more than its crew (algMortarTeam's rule).
+      if (fogOfWar?.enabled && !isHuman(u.team) && !fogOfWar.canSeeEntity?.(u)) continue;
+      const f = u._mg.facing, ahead = P.dshk.ahead * RTS_SCALE;
+      _dp.set(u.position.x + Math.sin(f) * ahead, 0, u.position.z + Math.cos(f) * ahead);
+      _dp.y = app.getWorldHeight(_dp.x, _dp.z) - 0.02;
+      dshks.setMatrixAt(n++, _dm.compose(_dp, _dq.setFromAxisAngle(_dy, f), _ds.setScalar(RTS_SCALE)));
+    }
+    dshks.count = n;
+    dshks.visible = n > 0;
+    if (n) dshks.instanceMatrix.needsUpdate = true;
+  }
+
+  /** Every frame (render side): the arcs, the 12.7s on their tripods. */
   function frame() {
+    drawDshks();
     const sel = new Set(selection.selected ?? []);
     let k = 0;
     for (const u of gunners()) {

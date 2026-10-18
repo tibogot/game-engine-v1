@@ -223,6 +223,23 @@ export const LOOKS = {
     kit: ["musette"],
     extras: { beard: 0.5, mustache: 0.45, bandolier: 0.5, bandoliers: 0.35, cigarette: 0.1 },
   },
+  // The ALN's 12.7 TEAM (alg-rts mitrailleuse, 2026-10-19 — it wore the FM gunners' look, an FM 24/29 in
+  // hand): rifles in hand; packed, the DShK on the gunner's back and its tripod on the loader's; set up,
+  // the gun stands on its tripod on the ground, the gunner prone on its grips (algMgTeam.js).
+  alnHmg: {
+    label: "ALN 12.7 team", note: "the section's look, rifles; the DShK and its tripod carried (algMgTeam)",
+    green: 0x86775a, greenAlt: 0x5e4b37, khaki: 0xa08f6d, helmet: false, weapon: "mas36",
+    skinTan: ALN_SKIN, clothRef: 0.045,
+    variants: [
+      { w: 0.4, headgear: "cheche", hatColor: 0xdcd5c3 },
+      { w: 0.3, headgear: "fieldCap", hatColor: 0x857953 },
+      { w: 0.3, headgear: null, helmet: true },
+    ],
+    bodies: ["aln1", "aln2"],
+    kit: ["musette"],
+    spareKit: ["dshkBack", "dshkTripod"],
+    extras: { beard: 0.5, mustache: 0.45, bandolier: 0.45, cigarette: 0.1 },
+  },
   // The ALN's RECOILLESS-RIFLE team (alg-rts sansRecul, 2026-10-13): the gunner with the 57 mm SR,
   // his loader a bolt rifle (role 1) and the spare rounds on his back (the musette).
   alnRecoilless: {
@@ -237,6 +254,7 @@ export const LOOKS = {
     bodies: ["aln1", "aln2"],
     kit: ["musette"],
     roles: { 1: { name: "loader", weapon: "mas36" } },
+    spareKit: ["sr57Back"],   // (the tube on his back on the move: algRecoilless.js)
     extras: { beard: 0.5, mustache: 0.45, bandolier: 0.3, cigarette: 0.1 },
   },
   // ── CIVILIANS (2026-10-08): no weapon (the unarmed clips: tools/packMixamo --unarmed), the
@@ -1051,6 +1069,58 @@ function mortarPlate() {
     prim.box(DARKS, [0, 1.3, -0.175], [0.3, 0.02, 0.035]),             // the carrying strap's bar
   ]);
 }
+/**
+ * THE 12.7 CARRIED (2026-10-19, alg-rts mitrailleuse — CoH: a team weapon reads at a glance): the DShK's
+ * body slung across the gunner's back, the finned barrel up over his right shoulder, the muzzle brake at
+ * its end, the box receiver and the spade grips low behind his left hip (~1.25 m shown of its 1.6 m).
+ * Modelled along its own length (y), turned 35°, set on his back as the mortar tube.
+ */
+function dshkBack() {
+  const STEEL = 0x34362f, DARKS = 0x24251f;
+  const a = (35 * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+  const place = ([x, y, z]) => [x * ca - y * sa, 1.08 + x * sa + y * ca, -0.215 + z];
+  const fins = [];
+  for (let k = 0; k < 7; k++) {   // the radiator's fins on the barrel's rear half
+    const y = 0.02 + k * 0.045;
+    fins.push(...band(DARKS, [{ y, rx: 0.046, rz: 0.046 }, { y: y + 0.018, rx: 0.046, rz: 0.046 }], { segs: 10 }));
+  }
+  return toGeometry([
+    prim.box(STEEL, [0, -0.28, 0], [0.11, 0.42, 0.12]),                                                     // the receiver
+    prim.box(DARKS, [0, -0.52, 0], [0.13, 0.06, 0.05]),                                                     // the spade grips' bar
+    ...band(STEEL, [{ y: -0.07, rx: 0.026, rz: 0.026 }, { y: 0.72, rx: 0.024, rz: 0.024 }], { segs: 8 }),  // the barrel
+    ...fins,
+    ...band(DARKS, [{ y: 0.7, rx: 0.042, rz: 0.042 }, { y: 0.8, rx: 0.04, rz: 0.04 }], { segs: 10 }),      // the muzzle brake
+    prim.box(DARKS, [0.075, -0.2, 0], [0.04, 0.16, 0.1]),                                                    // the belt-feed cover
+  ].map((p) => mapPart(p, place)));
+}
+/**
+ * THE 57 mm RECOILLESS CARRIED (2026-10-19, alg-rts sansRecul): the M18's 1.56 m tube slung across the
+ * gunner's back on the move, the flared venturi low behind his hip, the muzzle up over his shoulder —
+ * he takes it in his hands only to kneel and fire (algRecoilless.js). As procWeapons' sr57, simplified.
+ */
+function sr57Back() {
+  const M = 0x3a3d33, D = 0x2c2d27;
+  const a = (-38 * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+  const place = ([x, y, z]) => [x * ca - y * sa, 1.08 + x * sa + y * ca, -0.2 + z];
+  return toGeometry([
+    ...band(M, [{ y: -0.6, rx: 0.045, rz: 0.045 }, { y: 0.85, rx: 0.045, rz: 0.045 }], { segs: 10 }),   // the tube
+    ...band(D, [{ y: -0.8, rx: 0.075, rz: 0.075 }, { y: -0.6, rx: 0.05, rz: 0.05 }], { segs: 10 }),      // the venturi, flared
+    ...band(D, [{ y: 0.83, rx: 0.05, rz: 0.05 }, { y: 0.87, rx: 0.05, rz: 0.05 }], { segs: 10 }),        // the muzzle band
+    prim.box(D, [-0.06, 0.05, -0.03], [0.03, 0.05, 0.09]),                                                // the sight
+  ].map((p) => mapPart(p, place)));
+}
+/** The DShK's TRIPOD carried on the loader's back, its three legs folded together (~0.8 m). */
+function dshkTripod() {
+  const STEEL = 0x3a3c33, DARKS = 0x26271f;
+  const a = (-20 * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+  const place = ([x, y, z]) => [x * ca - y * sa, 1.1 + x * sa + y * ca, -0.2 + z];
+  const leg = (xc, zo) => band(STEEL, [{ y: -0.42, rx: 0.016, rz: 0.016, xc, zo }, { y: 0.34, rx: 0.016, rz: 0.016, xc: xc * 0.4, zo: zo * 0.4 }], { segs: 6 });
+  return toGeometry([
+    ...leg(-0.05, 0), ...leg(0.05, 0), ...leg(0, -0.04),
+    prim.box(DARKS, [0, 0.36, -0.01], [0.12, 0.08, 0.08]),   // the head, the pintle socket
+    prim.box(DARKS, [0, -0.05, -0.01], [0.14, 0.025, 0.03]), // the strap's bar
+  ].map((p) => mapPart(p, place)));
+}
 function mapPart(p, fn) {
   for (let i = 0; i < p.pos.length; i += 3) {
     const [x, y, z] = fn([p.pos[i], p.pos[i + 1], p.pos[i + 2]]);
@@ -1543,6 +1613,10 @@ export const KIT = {
   // The MORTAR carried (alg-rts algMortarTeam.js hands them out: unitRenderer setKit) — never rolled.
   mortarTube: { bone: "Spine2", build: mortarTube },
   mortarPlate: { bone: "Spine2", build: mortarPlate },
+  // The 12.7 carried (alg-rts algMgTeam.js hands them out while packed: unitRenderer setKit).
+  dshkBack: { bone: "Spine2", build: dshkBack },
+  dshkTripod: { bone: "Spine2", build: dshkTripod },
+  sr57Back: { bone: "Spine2", build: sr57Back },   // (the recoilless on the move: algRecoilless.js)
   // skinned: built at rest in metres, weighted per vertex by `weights`
   kachabia: { skinned: true, build: kachabia, weights: kachabiaWeights },
   // the women's robes (civilians): skinned the same way

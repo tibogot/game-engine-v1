@@ -2140,8 +2140,10 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
      *  his look builds (its weapons, roles or `spare`); false if he has no such piece. */
     setWeapon(unit, key) {
       const v = views.get(unit);
-      if (!v?.crowd || !key) return false;
-      if (!v.crowd.pieces?.registry?.has(`w:${key}`)) return false;
+      if (!v?.crowd) return false;
+      // null: nothing in his hands (alg-rts: the 12.7's gunner on its spade grips, the gun on its tripod).
+      if (key === null) { v.weapon = null; return true; }
+      if (!key || !v.crowd.pieces?.registry?.has(`w:${key}`)) return false;
       v.weapon = key;
       return true;
     },
