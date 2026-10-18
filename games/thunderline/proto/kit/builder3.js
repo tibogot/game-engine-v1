@@ -30,7 +30,7 @@ const CATS = [
   { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12"] },
   { id: "turns", label: "Turns", tiles: ["fast_turn_128", "brake_turn_32"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
-  { id: "air", label: "Air", tiles: ["kicker_20", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "air", label: "Air", tiles: ["kicker_20", "drop_16", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "stunts", label: "Stunts", tiles: ["fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
 ];
 const catOf = new Map();
@@ -444,7 +444,8 @@ function refreshArcs() {
     if (roadChild.has(p.uid)) continue;
     const m = built.get(p.uid).exit;
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
-    if (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG) continue; // level ends just drop
+    // level ends are not lips — except a DROP piece, whose whole point is the fall
+    if (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG && !TILES[p.id]?.drop) continue;
     const landing = track.pieces.find((q) => q.flightFrom === p.uid)?.uid ?? null;
     // the REAL car's take-off speed at this lip (background prediction), else the global guess
     // where and how the REAL car left this lip (background prediction): a flip ramp's curl lets the
@@ -576,7 +577,8 @@ function computeSnap() {
   }
   if (best) {
     // a landing slides along the arc to where the fall angle equals its own → its exit comes out level
-    if (t.landAngle) {
+    // (not the FITTED landing: it takes the angle of the arc where you point — land at any depth)
+    if (t.landAngle && tileBase !== FITTED) {
       const want = t.landAngle * DEG;
       let kBest = best.k, err = Infinity;
       for (let k = 3; k < best.a.pts.length; k++) {
@@ -585,13 +587,22 @@ function computeSnap() {
       }
       best.k = kBest;
     }
-    const T = best.a.tan[best.k];
+    let T = best.a.tan[best.k];
+    let fittedAngle = FITTED_ANGLE;
+    if (tileBase === FITTED) {
+      // the slope at the arc's own fall angle where you point, in 5° steps (10–45°), and the landing
+      // laid exactly at that angle so its exit comes out level
+      const fall = Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG;
+      fittedAngle = THREE.MathUtils.clamp(Math.round(fall / 5) * 5, 10, 45);
+      const h = new THREE.Vector3(T.x, 0, T.z).normalize();
+      T = h.multiplyScalar(Math.cos(fittedAngle * DEG)).setY(-Math.sin(fittedAngle * DEG));
+    }
     const R = new THREE.Vector3().crossVectors(T, UP).normalize();
     const U = new THREE.Vector3().crossVectors(R, T);
     const P0 = best.a.pts[best.k];
     if (tileBase === FITTED) {
-      // FITTED LANDING: the down-slope starts where the SLOW arc falls at 20° and runs until the FAST
-      // arc meets it too (+12 m margin): every speed in the band lands on the slope, not past it
+      // FITTED LANDING: the down-slope starts here on the SLOW arc and runs until the FAST arc meets
+      // it too (+12 m margin): every speed in the band lands on the slope, not past it
       let D = 24;
       for (const q of best.a.fast.pts) {
         const rel = q.clone().sub(P0);
@@ -599,7 +610,7 @@ function computeSnap() {
         if (along > 0 && rel.dot(U) <= 0) { D = along + 12; break; } // crossed the slope surface
       }
       D = Math.max(24, Math.ceil(D / 4) * 4);
-      fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_${D}`).id;
+      fittedId = ensureTile(`fitted_landing_${fittedAngle}_${D}`).id;
     }
     const m = socketMatrix({ p: P0, T, U, R });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
@@ -658,7 +669,7 @@ function suggestionsFor(end) {
     const back = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) <= 3), keep = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) > 3);
     return { label: `Leans ${Math.abs(deg(end.lean))}° · fits`, items: [...back.slice(0, 2), ...keep.slice(0, 4)] };
   }
-  if (end.pitch > 3 * DEG) return { label: "Lip · land it on the arc", items: [FITTED, "banked_landing_20", "landing_turn_20", "catch_pad"].map((b) => ({ base: b, h: hand, id: tileId(b) })) };
+  if (end.pitch > 3 * DEG || TILES[track.pieces.find((p) => p.uid === end.uid)?.id]?.drop) return { label: "Lip · land it on the arc", items: [FITTED, "banked_landing_20", "landing_turn_20", "catch_pad"].map((b) => ({ base: b, h: hand, id: tileId(b) })) };
   return recent.length ? { label: "Again", items: recent.slice(0, 4) } : null;
 }
 let nextKey = "";

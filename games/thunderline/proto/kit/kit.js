@@ -276,6 +276,9 @@ export const TILES = {
     marks: [{ kind: "landing", from: 0, to: 40 }],
   },
   boost_32: { label: "Boost 32", segs: [{ L: 32 }], marks: [{ kind: "boost", from: 4, to: 28 }] },
+  // DROP (user, 2026-10-18: "it jumps but it should also fall down and land on the road under"): the
+  // road just ends. The builder draws its fall arcs like a kicker's; land on a road below, any depth.
+  drop_16: { label: "Drop", segs: [{ L: 16 }], marks: [{ kind: "lip", from: -6, to: -0 }], drop: true },
   slope_down_12: {
     label: "Slope down ~12 m",
     // an S in the vertical: tip down 15°, then back to level — exits level, ~12.5 m lower
@@ -333,7 +336,7 @@ export function ensureTile(id) {
     id,
     label: `Fitted landing ${angle}° · ${D} m`,
     landAngle: angle,
-    segs: [{ L: D }, { L: 44, pitch: angle * DEG, ramp: 22 }],
+    segs: [{ L: D }, { L: Math.max(44, Math.round(angle * 2.2)), pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1)) }],
     marks: [{ kind: "landing", from: 0, to: D }],
   };
   return TILES[id];
