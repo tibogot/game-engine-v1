@@ -13684,11 +13684,9 @@ export async function startV3App(opts = {}) {
      * foliage, flowers all read the shared grass wind. For a game with its
      * own wind (flags, smoke) to keep them in agreement. { angleDeg (world
      * XZ = cos, sin — the flag's convention), strength (the grass's
-     * windStrength), gust, speed, flutter (0..1: the leaves' own swish, which
-     * runs whatever the wind's strength — 0 stills every leaf) }. Runtime, not saved.
+     * windStrength — it drives the leaves' flutter too), gust, speed }. Runtime, not saved.
      */
-    setWind({ angleDeg, strength, gust, speed, flutter } = {}) {
-      if (Number.isFinite(flutter)) grassState.windFlutter = flutter;
+    setWind({ angleDeg, strength, gust, speed } = {}) {
       if (Number.isFinite(angleDeg)) grassState.windAngle = angleDeg;
       if (Number.isFinite(strength)) grassState.windStrength = strength;
       if (Number.isFinite(gust)) grassState.windGust = gust;

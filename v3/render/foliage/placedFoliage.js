@@ -176,11 +176,15 @@ export class PlacedFoliage {
 
   get count() { return this.plants.length; }
 
-  /** The wind: `dirX, dirZ` where it blows to (normalised here), `strength` the bow in radians at a full gust (~0.16). */
-  setWind(dirX, dirZ, strength) {
+  /** The wind: `dirX, dirZ` where it blows to (normalised here), `strength` the bow in radians at a full gust (~0.16).
+   *  It drives the leaves' FLUTTER too (`flutter` how fluttery they are, × strength / the default 0.16 — as the
+   *  scatter plants: still in no wind). */
+  setWind(dirX, dirZ, strength, flutter = this._flutter ?? 0.7) {
     const l = Math.hypot(dirX, dirZ) || 1;
     this.u.uWindDir.value.set(dirX / l, dirZ / l);
     if (strength != null) this.u.uWindStrength.value = strength;
+    this._flutter = flutter;
+    this.u.uFlutter.value = flutter * Math.min(1.5, Math.max(0, this.u.uWindStrength.value / 0.16));
   }
 
   /** Toward the sun, for the see-through light. */

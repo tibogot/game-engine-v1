@@ -1014,8 +1014,11 @@ export class FoliageScatterSystem {
       fadeEnd: fs.fadeEnd,
       slopeMinY: fs.slopeMinY,
     });
-    // (× the world wind's flutter share — app.setWind({ flutter }): a game may still every leaf; 1 by default)
-    this.u.uFlutter.value = fs.flutter * (gp?.windFlutter ?? 1);
+    // THE WIND DRIVES THE FLUTTER (2026-10-19): leaves flutter because the air moves — `fs.flutter` is how
+    // fluttery the plants are, the wind's strength how much they do it (× strength / the default 1.4: as before
+    // at the default wind, still in none, up to 1.5× in a gale). It ran on its own clock: "wind 0" kept every
+    // leaf moving.
+    this.u.uFlutter.value = fs.flutter * Math.min(1.5, Math.max(0, (gp?.windStrength ?? 1.4) / 1.4));
     this.u.uGlowLight.value = fs.glowLight;
     this.u.uTransMul.value = fs.translucencyMul;
     if (sunDir) this.u.uSunDir.value.copy(sunDir).normalize();
