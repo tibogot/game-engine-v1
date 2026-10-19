@@ -10,7 +10,7 @@ import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules, magnetZones } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
-import { closureAt } from "./tubeLook.js";
+import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
 import { library, settings, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
@@ -42,12 +42,12 @@ const SNAP_COLORS = { end: 0x45e08a, arc: 0xff9a3d, local: 0xc78bff, world: 0x3f
 const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
-  { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12"] },
+  { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12", "rollers_64"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
   { id: "air", label: "Air", tiles: ["kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
-  { id: "tubes", label: "Tubes", tiles: ["tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
+  { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
 ];
 const catOf = new Map();
@@ -179,7 +179,7 @@ function piece(id, open = false) {
 function meshesFor(id, open) {
   const { look } = piece(id, open);
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(look.deck, TILES[id]?.tube ? mats.tube : mats.road));
+  g.add(new THREE.Mesh(look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road));
   if (look.rail) g.add(new THREE.Mesh(look.rail, look.trim ? mats.trim : mats.rail));
   if (look.posts?.template && look.posts.matrices.length) {
     const im = new THREE.InstancedMesh(look.posts.template, mats.rail, look.posts.matrices.length);
@@ -429,7 +429,7 @@ async function runPrediction() {
     for (const r of b.rings) {
       const f = deckFrame(r, hw);
       const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; // a twist: its roll axis
-      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : 0, air: !!r.air });
+      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
     }
   }
   const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();

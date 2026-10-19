@@ -13,7 +13,7 @@ import { oldLookOf } from "./oldTiles.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune } from "./carTune.js";
 import { createCarRules, magnetZones } from "./carRules.js";
-import { buildTubeLook, closureAt } from "./tubeLook.js";
+import { buildTubeLook, buildHalfpipeLook, closureAt, wallAt } from "./tubeLook.js";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const TMP = join(ROOT, `.trackRun.${process.pid}.mjs`);
@@ -55,12 +55,12 @@ export function layout(ids) {
     const b = integrate(t);
     const hw = SECTIONS[t.section ?? "road"].hw;
     let deck, rail;
-    if (t.tube) {
+    if (t.tube || t.halfpipe) {
       const bb = integrate(t, { maxGap: 2 });
       const frames = [], sAt = [];
       let lastS = -1;
       for (const r of bb.rings) { if (r.s - lastS < 0.05) continue; lastS = r.s; const f = deckFrame(r, hw); frames.push({ pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R }); sAt.push(r.s); }
-      ({ deck, rail } = { deck: buildTubeLook(t, frames, sAt, bb.L, { buildSweepGeometry, NO_CHECKER, THREE }).deck, rail: null });
+      ({ deck, rail } = { deck: (t.halfpipe ? buildHalfpipeLook : buildTubeLook)(t, frames, sAt, bb.L, { buildSweepGeometry, NO_CHECKER, THREE }).deck, rail: null });
     } else if (t.customLook) {
       const look = oldLookOf(t, true);
       deck = look.deckCollision; rail = look.railCollision;
@@ -84,7 +84,7 @@ export function layout(ids) {
     decks.push(mesh);
     if (rail) solids.push(new THREE.Mesh(rail.clone().applyMatrix4(M), new THREE.MeshBasicMaterial()));
     const from = ride.length;
-    for (const r of b.rings) { const f = deckFrame(r, hw); const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; ride.push({ P: Pr.applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: k, tube: t.tube ? closureAt(t, r.s, b.L) : 0, air: !!r.air }); }
+    for (const r of b.rings) { const f = deckFrame(r, hw); const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; ride.push({ P: Pr.applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: k, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air }); }
     spans.push({ id, from, to: ride.length - 1, M: M.clone() });
     M = M.clone().multiply(socketMatrix(b.exit));
   });

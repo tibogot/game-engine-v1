@@ -2,7 +2,7 @@
 // Shared by the lab (look) and the drive page (the real car), so both use the same track.
 import * as THREE from "three";
 import { TILES, deckFrame, socketMatrix, leanIn, SECTIONS, DEG } from "./kit.js";
-import { closureAt } from "./tubeLook.js";
+import { closureAt, wallAt } from "./tubeLook.js";
 
 const V = THREE.Vector3;
 const Y = new V(0, 1, 0);
@@ -163,7 +163,7 @@ export function layoutFromPlacements({ built, pieces }) {
     for (const r of built[pl.id].b.rings) {
       const f = deckFrame(r, hw);
       // the line 0.7 m above the deck — on a twist, its roll axis (r.pivot)
-      ride.push({ P: f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id, tube: TILES[pl.id]?.tube ? closureAt(TILES[pl.id], r.s, built[pl.id].b.L) : 0, air: !!r.air });
+      ride.push({ P: f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id, tube: TILES[pl.id]?.tube ? closureAt(TILES[pl.id], r.s, built[pl.id].b.L) : TILES[pl.id]?.halfpipe ? 0.5 * wallAt(TILES[pl.id], r.s, built[pl.id].b.L) : 0, air: !!r.air });
     }
     length += built[pl.id].b.L;
   });
@@ -180,7 +180,7 @@ export function buildTrackMeshes(placements, built, mats) {
   for (const [key, list] of Object.entries(byKey)) {
     const [id, kind] = key.split("|");
     const look = kind === "open" ? built[id].open : built[id].guarded;
-    for (const [geo, m] of [[look.deck, TILES[id]?.tube ? mats.tube : mats.road], [look.rail, look.trim ? mats.trim : mats.rail]]) {
+    for (const [geo, m] of [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road], [look.rail, look.trim ? mats.trim : mats.rail]]) {
       if (!geo) continue;
       const im = new THREE.InstancedMesh(geo, m, list.length);
       list.forEach((M, i) => im.setMatrixAt(i, M));

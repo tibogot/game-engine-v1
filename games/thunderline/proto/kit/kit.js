@@ -274,6 +274,14 @@ export const TILES = {
     ],
     marks: [{ kind: "lip", from: 12, to: 20 }, { kind: "landing", from: 44, to: 114 }],
   },
+  // ROLLERS: two smooth bumps (~1 m) in 64 m — the car hops; level in, level out
+  rollers_64: {
+    label: "Rollers",
+    segs: [
+      { L: 8, pitch: 8 * DEG, ramp: 4 }, { L: 16, pitch: -16 * DEG, ramp: 8 }, { L: 8, pitch: 8 * DEG, ramp: 4 },
+      { L: 8, pitch: 8 * DEG, ramp: 4 }, { L: 16, pitch: -16 * DEG, ramp: 8 }, { L: 8, pitch: 8 * DEG, ramp: 4 },
+    ],
+  },
   landing_20: {
     label: "Landing 20°",
     // the SAME path as a kicker (pitch up by 20°), longer and gentler: it starts tipped down on the arc
@@ -316,6 +324,13 @@ export const TILES = {
   boost_32: { label: "Boost 32", segs: [{ L: 32 }], marks: [{ kind: "boost", from: 4, to: 28 }] },
   // ---- THE TUBE FAMILY (tubeLook.js: one section, closure 0 = road … 1 = pipe r 8 m) ----
   // Sized for ~60 m/s: in a turn the car rides the wall at atan(v²/gR) — R64 ≈ 80° at full speed.
+  // THE HALF-PIPE (PIECES 7d): an OPEN U-channel — the road's floor between two rounded 8 m walls
+  // (tubeLook.js halfpipeSection; `halfpipe` = the wall height 0..1 along the piece), so a turn rides
+  // the car up its outside wall and the sky stays open above
+  halfpipe_in: { label: "Half-pipe in", segs: [{ L: 32 }], halfpipe: { from: 0, to: 1 } },
+  halfpipe_64: { label: "Half-pipe 64", segs: [{ L: 64 }], halfpipe: { from: 1, to: 1 } },
+  halfpipe_turn_64: { label: "Half-pipe turn", segs: [{ L: turnLen(64, Math.PI / 2, 30), turn: Math.PI / 2, ramp: 30 }], halfpipe: { from: 1, to: 1 } },
+  halfpipe_out: { label: "Half-pipe out", segs: [{ L: 32 }], halfpipe: { from: 1, to: 0 } },
   tube_in: { label: "Tube in", segs: [{ L: 32 }], tube: { from: 0, to: 1 } },
   tube_out: { label: "Tube out", segs: [{ L: 32 }], tube: { from: 1, to: 0 } },
   tube_32: { label: "Tube 32", segs: [{ L: 32 }], tube: { from: 1, to: 1 } },

@@ -64,6 +64,70 @@ export function tubeSection(c) {
   return { pts, hw: TUBE.hw };
 }
 
+/**
+ * THE HALF-PIPE: an OPEN U — the road's flat floor (16 m) between two rounded walls (radius TUBE.R,
+ * tangent to the floor) that rise to height k × R: k = 0 is the plain road, k = 1 two vertical 8 m
+ * walls. From the LEFT LIP down, along the floor, up to the RIGHT LIP, by arc length (the point
+ * count never changes, so a Half-pipe in can grow its walls along the piece).
+ * Returns [{x, y, nx, ny}] (n = outward: away from the channel, into the shell).
+ */
+export function halfpipeOutline(k, N = TUBE.N) {
+  const { R, hw } = TUBE;
+  const phi = Math.acos(1 - Math.min(1, Math.max(0, k))); // the wall's arc (0 = no wall, π/2 = vertical)
+  const arc = R * phi, P = 2 * arc + 2 * hw;
+  const out = [];
+  for (let i = 0; i <= N; i++) {
+    let u = (P * i) / N;
+    let p;
+    if (u < arc) { // the left wall, lip → floor
+      const a = phi - u / R;
+      p = { x: -hw - Math.sin(a) * R, y: R - Math.cos(a) * R, nx: -Math.sin(a), ny: -Math.cos(a) };
+    } else if ((u -= arc) < 2 * hw) p = { x: -hw + u, y: 0, nx: 0, ny: -1 }; // the floor
+    else { // the right wall, floor → lip
+      const a = Math.min(phi, (u - 2 * hw) / R);
+      p = { x: hw + Math.sin(a) * R, y: R - Math.cos(a) * R, nx: Math.sin(a), ny: -Math.cos(a) };
+    }
+    out.push(p);
+  }
+  return out;
+}
+
+/** The half-pipe's sweep section: the channel (zone 3), then the shell (zone 4) back under it; the
+ *  two lip faces close the loop (mixed zones: plain sides). */
+export function halfpipeSection(k) {
+  const inner = halfpipeOutline(k);
+  const pts = inner.map((p) => ({ x: p.x, y: p.y, zone: 3, smooth: true }));
+  for (let i = inner.length - 1; i >= 0; i--) {
+    const p = inner[i];
+    pts.push({ x: p.x + p.nx * TUBE.wall, y: p.y + p.ny * TUBE.wall, zone: 4, smooth: true });
+  }
+  return { pts, hw: TUBE.hw };
+}
+
+/** Wall height (0..1) along a half-pipe piece at s ∈ [0, L]: eased from `from` to `to`. */
+export function wallAt(tile, s, L) {
+  const { from = 1, to = 1 } = tile.halfpipe;
+  return from + (to - from) * q5(Math.min(1, Math.max(0, s / L)));
+}
+
+/** Deck (channel + shell) and TRIM (a white rim along each lip) for a half-pipe piece. */
+export function buildHalfpipeLook(tile, frames, sAt, L, { buildSweepGeometry, NO_CHECKER, THREE }) {
+  const deck = buildSweepGeometry(frames, halfpipeSection(1), { profileAt: (_t, i) => halfpipeSection(wallAt(tile, sAt[i], L)) });
+  const n = deck.getAttribute("position").count;
+  const a = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
+  deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
+  const place = (f, x, y) => f.pos.clone().addScaledVector(f.right, x).addScaledVector(f.up, y);
+  // the lips: centred on the wall's cut edge, so the rim caps it
+  const lip = (side) => frames.map((f, i) => {
+    const o = halfpipeOutline(wallAt(tile, sAt[i], L));
+    const p = side < 0 ? o[0] : o[o.length - 1];
+    return place(f, p.x + p.nx * TUBE.wall / 2, p.y + p.ny * TUBE.wall / 2);
+  });
+  const rail = mergeGeos([sweepRound(THREE, lip(-1), TUBE.rim * 0.9, false, 10), sweepRound(THREE, lip(1), TUBE.rim * 0.9, false, 10)], THREE);
+  return { deck, rail, railCollision: null, posts: null, trim: true };
+}
+
 /** Closure along a tube piece at s ∈ [0, L]: eased from `from` to `to`. */
 export function closureAt(tile, s, L) {
   const { from = 1, to = 1 } = tile.tube;
