@@ -25,3 +25,6 @@
 *.wav    binary
 *.woff   binary
 *.woff2  binary
+# Bundled decoders: byte-identical copies of three's files (textureLoadTest compares them) — no EOL conversion.
+public/basis/** binary
+public/draco/** binary
