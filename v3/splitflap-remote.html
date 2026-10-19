@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#111317" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<title>Split-Flap Remote</title>
+<style>
+  :root { --bg: #0d0f12; --card: #171a1f; --line: #262b33; --text: #eceef1; --muted: #8d96a1; --accent: #4da3ff; --go: #2fbf62; --stop: #e5484d; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, -apple-system, sans-serif; }
+  body { padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 16px); }
+  header { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px; padding: 12px 16px; background: rgba(13,15,18,.92);
+           backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header b { flex: 1; font-size: 16px; }
+  #dot { width: 10px; height: 10px; border-radius: 50%; background: #555; flex: 0 0 auto; transition: background .3s; }
+  #dot.on { background: var(--go); box-shadow: 0 0 8px var(--go); }
+  #dot.wait { background: #e3a43a; }
+  #roomLbl { color: var(--muted); font-size: 13px; font-variant-numeric: tabular-nums; }
+  main { padding: 12px 16px; max-width: 560px; margin: 0 auto; }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 22px 0 8px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+  button { font: inherit; color: var(--text); background: #20242b; border: 1px solid #2f353e; border-radius: 12px; padding: 12px 14px; cursor: pointer; }
+  button:active { transform: scale(.97); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  #status { color: var(--muted); font-size: 13px; text-align: center; padding: 6px 0 0; min-height: 20px; }
+  /* now showing */
+  #now img { width: 100%; border-radius: 8px; display: block; background: #000; min-height: 60px; }
+  #nowTitle { font-weight: 600; margin-top: 10px; display: flex; justify-content: space-between; gap: 8px; }
+  #nowTitle span:last-child { color: var(--muted); font-weight: 400; white-space: nowrap; }
+  .bar { height: 4px; background: #23272e; border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--go); }
+  /* transport */
+  .transport { display: grid; grid-template-columns: 1fr 1.6fr 1fr; gap: 10px; margin-top: 12px; }
+  .transport button { font-size: 22px; padding: 16px 0; }
+  #playBtn { font-size: 18px; font-weight: 700; background: var(--go); border-color: var(--go); color: #fff; }
+  #playBtn.stop { background: var(--stop); border-color: var(--stop); }
+  .toggles { display: flex; gap: 10px; margin-top: 10px; }
+  .toggles button { flex: 1; font-size: 14px; padding: 10px; }
+  .toggles button.on { border-color: var(--accent); background: #13263c; }
+  /* message */
+  textarea { width: 100%; min-height: 96px; resize: vertical; background: #0f1114; color: var(--text); border: 1px solid #2f353e; border-radius: 10px;
+             padding: 10px; font: 600 17px/1.3 ui-monospace, monospace; text-transform: uppercase; letter-spacing: .06em; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+  .chip { width: 34px; height: 34px; border-radius: 8px; border: 2px solid rgba(255,255,255,.12); padding: 0; }
+  select { width: 100%; font: inherit; color: var(--text); background: #0f1114; border: 1px solid #2f353e; border-radius: 10px; padding: 10px; }
+  .actions { display: grid; grid-template-columns: 1.4fr 1fr; gap: 10px; margin-top: 10px; }
+  .recent { display: flex; gap: 8px; overflow-x: auto; margin-top: 10px; padding-bottom: 4px; }
+  .recent button { white-space: nowrap; font-size: 12px; padding: 6px 10px; border-radius: 16px; color: var(--muted); }
+  #count { color: var(--muted); font-size: 12px; text-align: right; margin-top: 4px; }
+  /* steps */
+  #steps { display: grid; gap: 10px; }
+  .step { display: grid; grid-template-columns: 112px 1fr; gap: 12px; align-items: center; padding: 8px; text-align: left; border-radius: 12px; }
+  .step img { width: 112px; border-radius: 6px; display: block; background: #000; }
+  .step .t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .step .m { color: var(--muted); font-size: 12px; }
+  .step.live { border-color: var(--go); box-shadow: 0 0 0 1px var(--go) inset; }
+  .step.sel { border-color: var(--accent); }
+  /* join */
+  #join { padding: 40px 24px; text-align: center; max-width: 420px; margin: 0 auto; }
+  #join input { width: 100%; font: 700 32px ui-monospace, monospace; text-align: center; letter-spacing: .3em; background: #0f1114; color: var(--text);
+                border: 1px solid #2f353e; border-radius: 12px; padding: 14px; margin: 16px 0; }
+  #join p { color: var(--muted); }
+  #toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 20px); transform: translateX(-50%) translateY(20px); opacity: 0;
+           background: #222831; border: 1px solid #333a45; padding: 10px 16px; border-radius: 22px; transition: all .25s; pointer-events: none; z-index: 9; white-space: nowrap; }
+  #toast.show { opacity: 1; transform: translateX(-50%); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header><span id="dot"></span><b>Split-flap remote</b><span id="roomLbl"></span></header>
+
+<section id="join" hidden>
+  <h1 style="font-size:22px">Connect to a board</h1>
+  <p>Enter the 4-digit code shown in the lab's 📱 Remote panel, or scan its QR code.</p>
+  <input id="code" inputmode="numeric" maxlength="8" placeholder="0000" autocomplete="off" />
+  <button class="primary" id="joinBtn" style="width:100%">Connect</button>
+</section>
+
+<main id="app" hidden>
+  <div id="status"></div>
+  <div class="card" id="now">
+    <img id="nowImg" alt="" />
+    <div id="nowTitle"><span id="nowName">Waiting for the board…</span><span id="nowMeta"></span></div>
+    <div class="bar"><i id="nowBar"></i></div>
+  </div>
+  <div class="transport">
+    <button id="prevBtn" aria-label="Previous step">⏮</button>
+    <button id="playBtn">▶ Play</button>
+    <button id="nextBtn" aria-label="Next step">⏭</button>
+  </div>
+  <div class="toggles">
+    <button id="loopBtn">⟲ Loop</button>
+    <button id="clearBtn">Clear board</button>
+  </div>
+
+  <h2>Quick message</h2>
+  <div class="card">
+    <textarea id="msg" placeholder="Type a message…" spellcheck="false" autocapitalize="characters"></textarea>
+    <div id="count"></div>
+    <div class="chips" id="chips"></div>
+    <select id="trans">
+      <option value="wave">Diagonal wave</option>
+      <option value="cascade">Left → right</option>
+      <option value="rtl">Right → left</option>
+      <option value="rows">Top → bottom</option>
+      <option value="center">Centre out</option>
+      <option value="random">Random</option>
+      <option value="instant">All at once</option>
+    </select>
+    <div class="actions">
+      <button class="primary" id="sendBtn">Flip it now</button>
+      <button id="addBtn">Add to show</button>
+    </div>
+    <div class="recent" id="recent"></div>
+  </div>
+
+  <h2>Steps <span id="stepCount"></span></h2>
+  <div id="steps"></div>
+</main>
+<div id="toast"></div>
+
+<script>
+// Phone remote for the split-flap lab. Served by tools/splitflapRemote.mjs; talks to the lab through
+// it: server-sent events in (the show + playback), POST /send out (commands).
+const $ = (id) => document.getElementById(id);
+const COLORS = [["w", "#f1f0ea"], ["r", "#d7262e"], ["o", "#f27a1a"], ["y", "#f5c218"], ["g", "#1ea84b"], ["b", "#1c8fd8"], ["p", "#f08db8"], ["v", "#7b4bc6"]];
+let room = (new URLSearchParams(location.search).get("room") || localStorage.getItem("sf-room") || "").replace(/\D/g, "");
+let es = null, state = null, status = null, statusAt = 0, displays = 0;
+const buzz = () => navigator.vibrate?.(12);
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.tm); toast.tm = setTimeout(() => t.classList.remove("show"), 1800);
+}
+function setDot() {
+  $("dot").className = es && es.readyState === 1 ? (displays ? "on" : "wait") : "";
+  $("status").textContent = !es || es.readyState !== 1 ? "Connecting…" : displays ? "" : "Connected: waiting for the board (is the lab open and connected?)";
+}
+function join(code) {
+  room = code.replace(/\D/g, "");
+  if (room.length < 4) return toast("The code has 4 digits");
+  localStorage.setItem("sf-room", room);
+  history.replaceState(null, "", `?room=${room}`);
+  $("join").hidden = true; $("app").hidden = false;
+  $("roomLbl").textContent = `#${room}`;
+  es?.close();
+  es = new EventSource(`/events?room=${room}&role=phone`);
+  es.onopen = setDot;
+  es.onerror = setDot;
+  es.addEventListener("presence", (e) => { displays = JSON.parse(e.data).displays; setDot(); });
+  es.addEventListener("state", (e) => { state = JSON.parse(e.data); renderSteps(); renderNow(); });
+  es.addEventListener("status", (e) => { status = JSON.parse(e.data); statusAt = performance.now(); renderNow(); renderSteps(); });
+  setDot();
+}
+async function send(cmd, label) {
+  buzz();
+  try {
+    const r = await fetch(`/send?room=${room}&role=phone`, { method: "POST", body: JSON.stringify(cmd) });
+    const p = await r.json();
+    if (!p.displays) toast("The board is not connected");
+    else if (label) toast(label);
+  } catch { toast("No connection to the relay"); }
+}
+
+// ── now showing + steps ──
+function currentIndex() { return status ? (status.playing ? status.pi : status.sel) : 0; }
+function renderNow() {
+  const st = state?.steps?.[currentIndex()];
+  $("nowImg").src = st?.thumb || "";
+  $("nowName").textContent = st ? `${currentIndex() + 1}. ${st.title}` : state ? "No steps in this show" : "Waiting for the board…";
+  $("nowMeta").textContent = status ? (status.playing ? (status.phase === "hold" ? "showing" : "flipping…") : "stopped") : "";
+  $("playBtn").textContent = status?.playing ? "■ Stop" : "▶ Play";
+  $("playBtn").classList.toggle("stop", !!status?.playing);
+  $("loopBtn").classList.toggle("on", !!status?.loop);
+}
+function renderSteps() {
+  const box = $("steps"); box.replaceChildren();
+  const steps = state?.steps ?? [];
+  $("stepCount").textContent = steps.length ? `· ${steps.length}` : "";
+  steps.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.className = "step" + (status?.playing && status.pi === i ? " live" : !status?.playing && status?.sel === i ? " sel" : "");
+    const img = document.createElement("img"); img.src = s.thumb || ""; img.alt = "";
+    const txt = document.createElement("div");
+    txt.innerHTML = `<div class="t"></div><div class="m"></div>`;
+    txt.firstChild.textContent = `${i + 1}. ${s.title}`;
+    txt.lastChild.textContent = `${s.kind} · ${s.hold}s`;
+    b.append(img, txt);
+    b.onclick = () => send({ type: "goto", i }, `Step ${i + 1}`);
+    box.append(b);
+  });
+}
+function animate() {
+  let w = 0;
+  if (status?.playing && status.phase === "hold" && status.holdLen) {
+    const left = status.holdLeft - (performance.now() - statusAt) / 1000;
+    w = Math.max(0, Math.min(1, 1 - left / status.holdLen));
+  }
+  $("nowBar").style.width = `${w * 100}%`;
+  requestAnimationFrame(animate);
+}
+
+// ── message ──
+const recent = () => { try { return JSON.parse(localStorage.getItem("sf-recent") || "[]"); } catch { return []; } };
+function remember(text) {
+  const r = [text, ...recent().filter((x) => x !== text)].slice(0, 6);
+  try { localStorage.setItem("sf-recent", JSON.stringify(r)); } catch { /* private mode */ }
+  renderRecent();
+}
+function renderRecent() {
+  const box = $("recent"); box.replaceChildren();
+  for (const t of recent()) {
+    const b = document.createElement("button"); b.textContent = t.replace(/\n/g, " / ").slice(0, 28);
+    b.onclick = () => { $("msg").value = t; updCount(); };
+    box.append(b);
+  }
+}
+function updCount() {
+  const lines = $("msg").value.split("\n"), cols = state?.cols, rows = state?.rows;
+  const longest = Math.max(...lines.map((l) => l.replace(/\[.\]/g, "#").length));
+  $("count").textContent = cols ? `${lines.length}/${rows} lines · longest ${longest}/${cols}` : "";
+  $("count").style.color = cols && (lines.length > rows || longest > cols) ? "#f0b25a" : "";
+}
+for (const [c, hex] of COLORS) {
+  const b = document.createElement("button"); b.className = "chip"; b.style.background = hex; b.title = `[${c}]`;
+  b.onclick = () => {
+    const ta = $("msg"), a = ta.selectionStart, z = ta.selectionEnd;
+    ta.value = ta.value.slice(0, a) + `[${c}]` + ta.value.slice(z);
+    ta.selectionStart = ta.selectionEnd = a + 3; ta.focus(); updCount(); buzz();
+  };
+  $("chips").append(b);
+}
+$("msg").oninput = updCount;
+$("sendBtn").onclick = () => {
+  const text = $("msg").value.trim(); if (!text) return toast("Type a message first");
+  send({ type: "message", text, transition: $("trans").value }, "Flipping…"); remember(text);
+};
+$("addBtn").onclick = () => {
+  const text = $("msg").value.trim(); if (!text) return toast("Type a message first");
+  send({ type: "addText", text }, "Added to the show"); remember(text);
+};
+$("playBtn").onclick = () => send({ type: status?.playing ? "stop" : "play" });
+$("prevBtn").onclick = () => send({ type: "prev" });
+$("nextBtn").onclick = () => send({ type: "next" });
+$("loopBtn").onclick = () => send({ type: "loop", on: !status?.loop });
+$("clearBtn").onclick = () => send({ type: "clear" }, "Clearing the board");
+$("joinBtn").onclick = () => join($("code").value);
+$("code").onkeydown = (e) => { if (e.key === "Enter") join($("code").value); };
+$("roomLbl").onclick = () => { es?.close(); es = null; $("app").hidden = true; $("join").hidden = false; setDot(); };
+
+renderRecent();
+animate();
+if (room.length >= 4) join(room); else { $("join").hidden = false; }
+</script>
+</body>
+</html>

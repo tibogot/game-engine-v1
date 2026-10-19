@@ -67,6 +67,16 @@
   #addMenu button { text-align: left; border: 0; background: none; padding: 6px 8px; display: flex; flex-direction: column; }
   #addMenu button small { color: var(--muted); }
   #addMenu button:hover { background: #12263d; }
+  #remotePop { position: fixed; display: none; width: 300px; background: #1b1f26; border: 1px solid #353b45; border-radius: 8px; padding: 12px;
+               z-index: 5; box-shadow: 0 8px 24px rgba(0,0,0,.5); }
+  #remotePop.open { display: block; }
+  #remotePop ol { margin: 6px 0; padding-left: 18px; color: var(--muted); }
+  #remotePop ol li { margin: 3px 0; }
+  #qrBox { text-align: center; margin-top: 8px; }
+  #qrBox img { width: 168px; height: 168px; image-rendering: pixelated; background: #fff; border-radius: 6px; padding: 6px; }
+  #roomCode { font: 700 22px ui-monospace, monospace; letter-spacing: .25em; margin-top: 4px; }
+  #remoteUrl { word-break: break-all; color: var(--muted); font-size: 11px; user-select: all; }
+  #remoteBtn.live { border-color: #3ecf6e; }
   #toast { position: fixed; left: 50%; top: 14px; transform: translateX(-50%); background: #1b1f26; border: 1px solid #353b45; border-radius: 6px;
            padding: 6px 12px; z-index: 6; opacity: 0; transition: opacity .25s; pointer-events: none; }
   #toast.show { opacity: 1; }
@@ -193,12 +203,29 @@ ANIMATIONS
     <button id="newBtn" title="Start a new show from the sample">New</button>
     <button id="importBtn" title="Open a show file">Import</button>
     <button id="exportBtn" title="Save the show (steps + images) to a file">Export</button>
+    <button id="remoteBtn" title="Control the board from a phone">📱 Remote</button>
     <button id="presentBtn" title="Full screen, no UI, play the show (Esc to leave)">⛶ Present</button>
     <input type="file" id="importFile" accept=".json,application/json" hidden />
   </div>
   <div id="strip"></div>
 </div>
 <div id="addMenu"></div>
+<div id="remotePop">
+  <b>Phone remote</b>
+  <ol>
+    <li>On this computer, run <span class="kbd">node tools/splitflapRemote.mjs</span></li>
+    <li>Connect, then scan the code with a phone on the same Wi-Fi.</li>
+  </ol>
+  <div class="row"><label style="flex:0 0 44px">Relay</label><input type="text" id="relayUrl" spellcheck="false" /></div>
+  <div class="row"><button id="remoteConnect" class="primary">Connect</button><span id="remoteStatus" class="hint" style="flex:1"></span></div>
+  <div id="qrBox" hidden>
+    <img id="qrImg" alt="QR code for the phone remote" />
+    <div class="hint">or open the address below and enter the code</div>
+    <div id="roomCode"></div>
+    <div id="remoteUrl"></div>
+    <div class="row" style="justify-content:center"><button id="newCode" title="Phones with the old code lose access">New code</button></div>
+  </div>
+</div>
 <div id="toast"></div>
 
 <script type="module">
@@ -1130,7 +1157,7 @@ function showTick(t) {
   }
   if (!ed.playing) return;
   if (!s) return stopShowPlayback();
-  if (ed.phase === "flip" && t > busyUntil() + 0.1) { ed.phase = "hold"; ed.holdLen = s.hold; ed.holdUntil = t + s.hold; }
+  if (ed.phase === "flip" && t > busyUntil() + 0.1) { ed.phase = "hold"; ed.holdLen = s.hold; ed.holdUntil = t + s.hold; publishStatus(); }
   else if (ed.phase === "hold" && t >= ed.holdUntil) {
     if (ed.pi + 1 < doc.steps.length) ed.pi++;
     else if (doc.loop) ed.pi = 0;
@@ -1159,7 +1186,7 @@ document.addEventListener("fullscreenchange", () => { if (!document.fullscreenEl
 // ── selection, edits, undo, save ──
 function selectStep(i, { show: doShow = true } = {}) {
   ed.sel = Math.max(0, Math.min(i, doc.steps.length - 1));
-  renderInspector(); markCards(); renderInfo();
+  renderInspector(); markCards(); renderInfo(); publishStatus();
   const s = selStep();
   if (doShow && !ed.playing && s) { ed.previewNext = null; showStep(s, false); }
   cardEls[ed.sel]?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
@@ -1337,7 +1364,7 @@ function renderDock() {
   });
   strip.append(h("div", { class: "card add", title: "Add a step after the selected one", onclick: (e) => openAddMenu(e.currentTarget) }, "＋ Add step"));
   strip.scrollLeft = scroll;
-  markCards(); renderInfo();
+  markCards(); renderInfo(); publishState();
 }
 function refreshCard(s) {
   const card = cardEls[doc.steps.indexOf(s)];
@@ -1345,6 +1372,7 @@ function refreshCard(s) {
   drawThumb(card.querySelector(".thumb"), s);
   card.querySelector(".title").textContent = stepTitle(s);
   card.querySelector(".badges").replaceChildren(...badges(s));
+  publishState();
 }
 function markCards() {
   cardEls.forEach((c, i) => {
@@ -1360,7 +1388,7 @@ function renderInfo() {
 }
 function renderPlayState() {
   $("playBtn").textContent = ed.playing ? "■ Stop" : "▶ Play";
-  markCards(); renderInfo();
+  markCards(); renderInfo(); publishStatus();
 }
 function openAddMenu(anchor) {
   const menu = $("addMenu");
@@ -1586,7 +1614,7 @@ function onBoardRebuilt() {
 
 // ── dock buttons, tabs, keys ──
 $("playBtn").onclick = () => (ed.playing ? stopShowPlayback() : play());
-$("loopBtn").onclick = () => { doc.loop = !doc.loop; $("loopBtn").classList.toggle("on", doc.loop); renderInfo(); scheduleSave(); };
+$("loopBtn").onclick = () => { doc.loop = !doc.loop; $("loopBtn").classList.toggle("on", doc.loop); renderInfo(); scheduleSave(); publishStatus(); };
 $("undoBtn").onclick = undo;
 $("redoBtn").onclick = redo;
 $("newBtn").onclick = () => {
@@ -1649,6 +1677,127 @@ addEventListener("keydown", (e) => {
   }
 });
 
+// ── phone remote ────────────────────────────────────────────────────────────────────────────────
+// Through tools/splitflapRemote.mjs (a relay on this computer): commands arrive as server-sent
+// events, the show (steps + thumbnails) and playback go out by POST. Room = a 4-digit code kept
+// across reloads, so a phone's bookmark keeps working.
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* private mode */ } };
+const RM = {
+  relay: lsGet("sf-relay") || "http://localhost:8787",
+  room: lsGet("sf-room") || String(1000 + Math.floor(Math.random() * 9000)),
+  es: null, phones: 0, url: "", stateTimer: 0, qr: null,
+};
+lsSet("sf-room", RM.room);
+function remoteSend(type, data) {
+  if (!RM.es) return;
+  fetch(`${RM.relay}/send?room=${RM.room}&role=display`, { method: "POST", body: JSON.stringify({ type, data }) }).catch(() => {});
+}
+function publishState() {
+  if (!RM.es) return;
+  clearTimeout(RM.stateTimer);
+  RM.stateTimer = setTimeout(() => remoteSend("state", {
+    cols: P.cols, rows: P.rows,
+    steps: doc.steps.map((s, i) => ({ id: s.id, title: stepTitle(s), kind: KINDS[s.kind][0], hold: s.hold,
+      thumb: cardEls[i]?.querySelector(".thumb")?.toDataURL("image/png") ?? "" })),
+  }), 500);
+}
+function publishStatus() {
+  remoteSend("status", { playing: ed.playing, pi: ed.pi, sel: stepIndex(), phase: ed.phase, loop: doc.loop,
+    holdLen: ed.holdLen, holdLeft: ed.phase === "hold" ? Math.max(0, (ed.holdUntil - simNow) / P.speed) : 0 });
+}
+function remoteCmd(c) {
+  const n = doc.steps.length;
+  const say = (m) => toast(`📱 ${m}`);
+  switch (c.type) {
+    case "play": play(ed.playing ? ed.pi : stepIndex()); say("Play"); break;
+    case "stop": stopShowPlayback(); say("Stop"); break;
+    case "next": case "prev": {
+      if (!n) break;
+      const d = c.type === "next" ? 1 : -1;
+      if (ed.playing) { ed.pi = (ed.pi + d + n) % n; startPlayStep(); } else selectStep((stepIndex() + d + n) % n);
+      say(c.type === "next" ? "Next" : "Previous"); break;
+    }
+    case "goto":
+      if (!Number.isInteger(c.i) || !doc.steps[c.i]) break;
+      if (ed.playing) { ed.pi = c.i; startPlayStep(); } else selectStep(c.i);
+      say(`Step ${c.i + 1}`); break;
+    case "loop":
+      doc.loop = !!c.on; $("loopBtn").classList.toggle("on", doc.loop); renderInfo(); scheduleSave(); publishStatus();
+      say(doc.loop ? "Loop on" : "Loop off"); break;
+    case "message": {
+      stopShowPlayback();
+      const lines = String(c.text ?? "").slice(0, 2000).toUpperCase().split("\n");
+      show(textBlock(lines, "center", "middle", emptyGrid()), TRANSITIONS[c.transition] ? c.transition : "wave");
+      say("Message"); break;
+    }
+    case "addText": {
+      pushUndo();
+      doc.steps.push(newStep("text", { text: String(c.text ?? "").slice(0, 2000).toUpperCase() }));
+      renderDock(); scheduleSave();
+      say("Message added as the last step"); break;
+    }
+    case "clear": stopShowPlayback(); show(emptyGrid(), "wave"); say("Clear"); break;
+  }
+  publishStatus();
+}
+async function remoteConnect() {
+  remoteDisconnect(false);
+  RM.relay = $("relayUrl").value.trim().replace(/\/+$/, "") || "http://localhost:8787";
+  lsSet("sf-relay", RM.relay);
+  $("remoteStatus").textContent = "Connecting…";
+  let info;
+  try { info = await (await fetch(`${RM.relay}/info`)).json(); }
+  catch { $("remoteStatus").textContent = "Relay not found: run node tools/splitflapRemote.mjs"; return; }
+  const ip = info.ips.find((a) => /^(192\.168|10\.|172\.(1[6-9]|2\d|3[01]))/.test(a)) ?? info.ips[0] ?? location.hostname;
+  RM.url = `http://${ip}:${info.port}/?room=${RM.room}`;
+  RM.es = new EventSource(`${RM.relay}/events?room=${RM.room}&role=display`);
+  RM.es.addEventListener("cmd", (e) => { try { remoteCmd(JSON.parse(e.data)); } catch { /* ignore a bad command */ } });
+  RM.es.addEventListener("presence", (e) => { RM.phones = JSON.parse(e.data).phones; renderRemote(); });
+  RM.es.onopen = () => { publishState(); publishStatus(); renderRemote(); };
+  RM.es.onerror = () => renderRemote();
+  lsSet("sf-remote-on", "1");
+  renderRemote();
+  drawQR();
+}
+function remoteDisconnect(forget = true) {
+  RM.es?.close(); RM.es = null; RM.phones = 0;
+  if (forget) lsSet("sf-remote-on", "");
+  renderRemote();
+}
+function renderRemote() {
+  const live = RM.es && RM.es.readyState === 1;
+  $("remoteBtn").textContent = live ? `📱 Remote · ${RM.phones}` : "📱 Remote";
+  $("remoteBtn").classList.toggle("live", !!live);
+  $("remoteConnect").textContent = RM.es ? "Disconnect" : "Connect";
+  $("remoteConnect").classList.toggle("primary", !RM.es);
+  $("qrBox").hidden = !RM.es;
+  if (RM.es) $("remoteStatus").textContent = live ? `${RM.phones} phone${RM.phones === 1 ? "" : "s"} connected` : "Relay lost: retrying…";
+  else if ($("remoteStatus").textContent === "Connecting…") $("remoteStatus").textContent = "";
+  $("roomCode").textContent = RM.room;
+  $("remoteUrl").textContent = RM.url;
+}
+async function drawQR() {
+  try {
+    RM.qr ??= (await import("https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/+esm")).default;
+    const q = RM.qr(0, "M"); q.addData(RM.url); q.make();
+    $("qrImg").src = q.createDataURL(5, 2);
+  } catch { $("qrImg").alt = "QR code unavailable offline: open the address below on the phone"; }
+}
+$("relayUrl").value = RM.relay;
+$("remoteConnect").onclick = () => (RM.es ? remoteDisconnect() : remoteConnect());
+$("newCode").onclick = () => { RM.room = String(1000 + Math.floor(Math.random() * 9000)); lsSet("sf-room", RM.room); remoteConnect(); };
+$("remoteBtn").onclick = () => {
+  const pop = $("remotePop"), open = !pop.classList.contains("open");
+  pop.classList.toggle("open", open);
+  if (open) {
+    const r = $("remoteBtn").getBoundingClientRect();
+    pop.style.left = `${Math.max(8, Math.min(r.left, innerWidth - pop.offsetWidth - 8))}px`;
+    pop.style.bottom = `${innerHeight - r.top + 8}px`; // grows upward when the QR code appears
+  }
+};
+document.addEventListener("pointerdown", (e) => { if (!e.target.closest("#remotePop") && !e.target.closest("#remoteBtn")) $("remotePop").classList.remove("open"); });
+
 // ── boot + loop ─────────────────────────────────────────────────────────────────────────────────
 buildFall();
 await drawAtlas();
@@ -1657,6 +1806,8 @@ buildBoard();
 await drawImages();
 updateViewOffset();
 await loadShow(readSaved() ?? sampleShow());
+renderRemote();
+if (lsGet("sf-remote-on")) remoteConnect(); // reconnect quietly after a reload
 
 // sim clock: pausable and slowable (Space = pause), the shutter follows the sim time
 let simClock = simNow, lastWall = performance.now() / 1000, paused = false;
