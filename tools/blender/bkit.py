@@ -161,6 +161,15 @@ class Kit:
         vs = [bm.verts.new(B(x, y, z)) for x in (x0, x1) for y in (y0, y1) for z in (z0, z1)]
         bmesh.ops.convex_hull(bm, input=vs)
         return s._cut(bm, mat)
+    def arch(s, a0, a1, y0, ys, d0, d1, mat=None, across="z", n=12):
+        """A ROUND ARCH's cutter: the opening a0..a1 wide, straight from y0 up to its springing ys, a half circle
+        above; through the wall from d0 to d1 (along z for a front / back wall, along x for a side one)."""
+        r, m = (a1 - a0) / 2, (a0 + a1) / 2
+        prof = [(a0, y0), (a1, y0)] + [(m + r * math.cos(math.pi * i / n), ys + r * math.sin(math.pi * i / n)) for i in range(n + 1)]
+        bm = bmesh.new()
+        vs = [bm.verts.new(B(u, y, d) if across == "z" else B(d, y, u)) for u, y in prof for d in (d0, d1)]
+        bmesh.ops.convex_hull(bm, input=vs)
+        return s._cut(bm, mat)
     def breach(s, c, size, seed=0, mat=None, rough=0.45):
         """A ragged hole's cutter: a lumpy blob at c, half-extents `size`."""
         bm = bmesh.new(); bmesh.ops.create_icosphere(bm, subdivisions=3, radius=1.0)
@@ -210,6 +219,7 @@ class Kit:
         j = bpy.context.view_layer.objects.active; j.name = name
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
+        weighted(j)
         return j
     def drop_cutters(s):
         for c in s.cutters: bpy.data.objects.remove(c, do_unlink=True)
@@ -273,6 +283,7 @@ class Kit:
         # long collapsed triangles — dark diagonal streaks on flat whitewash that read as SHADOWS from the RTS
         # zoom and "vanished" up close when the near level took over; you, 2026-10-19. Split by angle again.)
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
+        weighted(f)
         return f
     def export(s, path, objs):
         bpy.ops.object.select_all(action="DESELECT")
@@ -281,5 +292,16 @@ class Kit:
         try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
         except TypeError: bpy.ops.export_scene.gltf(**kw)
         print("GLB", path)
+
+def weighted(o):
+    """FLAT WALLS SHADE FLAT (2026-10-19, you, on the M'zab houses' diagonal bands: "bad normals and bad
+    topology"). A wall is one big face with its windows cut out by booleans: triangulated into long slivers from
+    corner to corner; its bevel's steps (~22 deg) are under the 35 deg smooth limit, so the corner vertices'
+    normals averaged with the bevel and TILTED, and every sliver smeared them across the wall — light and dark
+    bands, baked into the AO too. Weighted normals (by face area, sharp edges kept): the big faces win their
+    vertices' normals, the bevels still catch the light at the edges."""
+    bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
+    md = o.modifiers.new("WN", "WEIGHTED_NORMAL"); md.mode = "FACE_AREA"; md.keep_sharp = True; md.weight = 100
+    bpy.ops.object.modifier_apply(modifier=md.name)
 
 def tris(o): return sum(len(p.vertices) - 2 for p in o.data.polygons)

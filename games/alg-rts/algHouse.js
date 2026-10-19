@@ -15,18 +15,25 @@ import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 
 const S = 1.3;   // (built in real metres; the game draws its buildings x1.3)
 export const HOUSE_TYPES = ["maison", "cour", "haute", "boutique"];
+// THE M'ZAB TOWN HOUSES (tools/blender/mzab.py, the same builder): the Oued Abdi's ochre town — a two-storey
+// house with its roof gallery, a tall one, a low one behind its yard, a stepped pale-blue one, the souk's arcade
+export const MZAB_TYPES = ["dar", "tour", "bas", "terrasse", "souk"];
 export const HOUSE_STATES = ["intact", "damaged", "ruin"];
+// the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
-let _p = null, _parts = null;
+const _p = {};
+let _parts = null;
 
-/** Load the kit once. Null if missing. */
-export function loadHouses(file = "houses") {
-  return (_p ??= getSharedGltfLoader().loadAsync(`/models/alg/${file}.glb`).then((gltf) => {
-    _parts = {};
-    for (const ty of HOUSE_TYPES) for (const st of HOUSE_STATES) {
-      const nm = `House${cap(ty)}_${cap(st)}`;
+/** Load a kit once ("houses": whitewashed, "mzab": the ochre town). Null if missing. */
+export function loadHouses(kit = "houses") {
+  const K = KITS[kit];
+  return (_p[kit] ??= getSharedGltfLoader().loadAsync(`/models/alg/${kit}.glb`).then((gltf) => {
+    _parts ??= {};
+    for (const ty of K.types) for (const st of HOUSE_STATES) {
+      const nm = `${K.prefix}${cap(ty)}_${cap(st)}`;
       const near = gltf.scene.getObjectByName(nm), far = gltf.scene.getObjectByName(`${nm}_Far`);
       if (!near?.isMesh) continue;
       for (const m of [near, far]) {

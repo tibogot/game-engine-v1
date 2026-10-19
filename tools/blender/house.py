@@ -21,7 +21,7 @@ is far — algHouse.js).
 Writes <out>/houses.glb (House<Type>_<State> + _Far) — then tools/optimizeGlb.mjs. Previews in
 assets-src/refs/house/. Game coordinates (x along the front, y up, FRONT at -Z), real metres (the game x1.3).
 """
-import bpy, sys, os, math, random
+import bpy, bmesh, sys, os, math, random
 sys.path.insert(0, os.path.dirname(__file__))
 import bkit
 from bkit import B, srgb, dust, flat, wood, paintedWood, Kit, tris
@@ -175,8 +175,59 @@ def build(K, name, spec, state, seed):
         K.box("CourtCoping", cx0 - 0.03, cx1 + 0.03, ch, ch + 0.08, cz0 - 0.03, cz0 + 0.43, "sill", G, 0.015)
         K.box("Gate", g0 + 0.03, g1 - 0.03, 0.02, 1.95, cz0 + 0.15, cz0 + 0.2, dmat, G, 0.006)
         K.box("CourtFloor", cx0 + 0.4, cx1 - 0.4, 0.0, 0.04, cz0 + 0.4, cz1, "earth", G, 0)
+    if "arcade" in spec:                                   # a PORTICO before the front: arches, its roof
+        depth, n = spec["arcade"]
+        za = Z0 - depth
+        arc = K.box("Arcade", X0, X1, 0.0, PAR, za, za + T, REND, G, 0)
+        span = (X1 - X0) / n
+        for k in range(n):
+            m = X0 + span * (k + 0.5); hw = span * 0.5 - 0.32
+            K.boolean(arc, K.arch(m - hw, m + hw, -0.1, 2.0, za - 0.2, za + T + 0.2, REND))
+        K.bevel(arc, 0.035, 2, 30); shells.append(arc)
+        # one terrace over shop and portico (the front parapet between them read as a trench), an ARCH at each end
+        K.boolean(shells[0], K.cutter(X0 + T, X1 - T, ROOF, PAR + 1, Z0 - 0.2, Z0 + T + 0.2, REND))
+        for xs, (x0, x1) in (("l", (X0, X0 + T)), ("r", (X1 - T, X1))):
+            end = K.box(f"ArcadeEnd{xs}", x0, x1, 0.0, ROOF + 0.24, za + T, Z0, REND, G, 0)
+            K.boolean(end, K.arch(za + T + 0.35, Z0 - 0.35, -0.1, 1.9, x0 - 0.2, x1 + 0.2, REND, across="x"))
+            K.bevel(end, 0.03, 2, 30); shells.append(end)
+        K.box("ArcadeRoof", X0 + T - 0.02, X1 - T + 0.02, ROOF, ROOF + 0.24, za + T - 0.02, Z0 + T - 0.02, REND, G, 0)   # (over the cut wall, abutting the main roof: no coplanar tops)
+        for xs, (x0, x1) in (("l", (X0, X0 + T)), ("r", (X1 - T, X1))):
+            K.box(f"ArcadePar{xs}", x0, x1, ROOF + 0.24, PAR, za + T, Z0, REND, G, 0.02)
+        K.box("ArcadeFloor", X0, X1, 0.0, 0.08, za, Z0, "sill", G, 0)
+    loggiaRect = None
+    if "loggia" in spec:                                   # the M'zab's ROOF GALLERY: arches on the terrace
+        lx0, lx1, lz0, lz1, lh, n = spec["loggia"]
+        y0 = ROOF + 0.24
+        lg = K.box("Loggia", lx0, lx1, y0, y0 + lh, lz0, lz1, REND, G, 0)
+        K.boolean(lg, K.cutter(lx0 + 0.3, lx1 - 0.3, y0 + 0.02, y0 + lh - 0.3, lz0 + 0.3, lz1 - 0.3, REND))
+        span = (lx1 - lx0) / n
+        for k in range(n):
+            m = lx0 + span * (k + 0.5); hw = span * 0.5 - 0.25
+            K.boolean(lg, K.arch(m - hw, m + hw, y0 + 0.02, y0 + lh - 0.35 - hw, lz0 - 0.2, lz0 + 0.5, REND))
+        K.bevel(lg, 0.03, 2, 30); shells.append(lg)
+        K.box("LoggiaFloor", lx0 + 0.3, lx1 - 0.3, y0, y0 + 0.04, lz0 + 0.3, lz1 - 0.3, "earth", G, 0)
+        loggiaRect = (lx0, lx1, lz0, lz1)
+    MZAB = spec.get("parapet") == "mzab"
+    if MZAB:                                               # the M'zab's parapets: plain, a HORN at each corner
+        def horn(nm, x, z, y):
+            bm = bmesh.new(); w, t = (T + 0.12) / 2, 0.05
+            vs = [bm.verts.new(bkit.B(x + sx * w, y, z + sz * w)) for sx in (-1, 1) for sz in (-1, 1)]
+            vs += [bm.verts.new(bkit.B(x + sx * t, y + 0.6, z + sz * t)) for sx in (-1, 1) for sz in (-1, 1)]
+            bmesh.ops.convex_hull(bm, input=vs)
+            K.bevel(K.obj(nm, bm, REND, G), 0.02, 2, 30)
+        for ri, (x0, x1, z0, z1, top, isAnnex) in enumerate(rects):
+            for cx, cz in ((x0 + T / 2, z0 + T / 2), (x1 - T / 2, z0 + T / 2), (x0 + T / 2, z1 - T / 2), (x1 - T / 2, z1 - T / 2)):
+                if isAnnex and cx < x0 + T: continue
+                horn(f"Horn{ri}{cx:.1f}{cz:.1f}", cx, cz, top)
+        if "arcade" in spec:
+            za = Z0 - spec["arcade"][0]
+            for cx in (X0 + T / 2, X1 - T / 2): horn(f"HornA{cx:.1f}", cx, za + T / 2, PAR)
+        # the WATER SPOUTS: a split palm trunk out of the parapet at roof level, two a front, one behind
+        for k, (x, zf, s) in enumerate(((X0 + (X1 - X0) * 0.3, Z0, -1), (X0 + (X1 - X0) * 0.72, Z0, -1), ((X0 + X1) / 2, Z1, 1))):
+            if s < 0 and "arcade" in spec: zf = Z0 - spec["arcade"][0]
+            K.rod(f"Spout{k}", (x, ROOF + 0.3, zf - s * 0.1), (x, ROOF + 0.22, zf + s * 0.6), 0.075, "woodDark", G, 6)
     # COPING + CRENELS on every parapet (not on an annex's side against the main block)
-    for ri, (x0, x1, z0, z1, top, isAnnex) in enumerate(rects):
+    for ri, (x0, x1, z0, z1, top, isAnnex) in enumerate([] if MZAB else rects):
         for fa, (a0, a1, fixed, along) in (("f", (x0, x1, z0, "x")), ("b", (x0, x1, z1, "x")), ("l", (z0, z1, x0, "z")), ("r", (z0, z1, x1, "z"))):
             if isAnnex and fa == "l": continue
             n = max(2, int((a1 - a0) / 0.95))
@@ -186,7 +237,7 @@ def build(K, name, spec, state, seed):
                 else: K.box(f"Crenel{ri}{fa}{k}", fixed - 0.01 if fa == "l" else fixed - T + 0.01, fixed + T - 0.01 if fa == "l" else fixed + 0.01, top, top + 0.34, u0, u1, REND, G, 0.02)
     # the JOISTS' ENDS through the front and back walls
     nj = max(4, int((X1 - X0) / 0.85))
-    for zf, s in ((Z0, -1), (Z1, 1)):
+    for zf, s in (() if MZAB else ((Z0, -1), (Z1, 1))):
         for k in range(nj + 1):
             x = X0 + 0.55 + k * (X1 - X0 - 1.1) / nj
             K.box(f"Joist{s}{k}", x - 0.07, x + 0.07, ROOF - 0.18, ROOF - 0.04, zf + 0.02 if s > 0 else zf - 0.3, zf + 0.3 if s > 0 else zf + 0.02, "woodDark", G, 0.01)
@@ -263,12 +314,12 @@ def build(K, name, spec, state, seed):
         for x in (a0 + 0.08, a1 - 0.08): K.rod(f"AwnPole{x}", (x, 0.0, Z0 - 1.45), (x, 2.55, Z0 - 1.45), 0.035, "woodDark", G, 6)
     # LIFE on the roof and at the door
     if not ruin:
-        roofLife(K, R, X0 + T + 0.3, X1 - T - 0.3, Z0 + T + 0.3, Z1 - T - 0.3, ROOF + 0.24, spec["life"], spec.get("hut"), PAR, Z0)
+        roofLife(K, R, X0 + T + 0.3, X1 - T - 0.3, Z0 + T + 0.3, Z1 - T - 0.3, ROOF + 0.24, spec["life"], spec.get("hut") or loggiaRect, PAR, Z0)
         groundLife(K, R, spec, Z0)
     if dmg:
         for k, (c, sz) in enumerate(spec["dmg"]):
             cut = K.breach(c, sz, seed=seed * 7 + k, mat="stone")
-            for o in shells + [o for o in K.groups[G] if o.name.startswith(("Crenel", "Joist", "Floor", "Roof", "Hut", "Balcony", "BalPost", "BalRail"))]: K.boolean(o, cut)
+            for o in shells + [o for o in K.groups[G] if o.name.startswith(("Crenel", "Joist", "Floor", "Roof", "Hut", "Balcony", "BalPost", "BalRail", "Horn", "Spout", "Arcade"))]: K.boolean(o, cut)
         for k in range(12):
             x = R.uniform(X0 + 0.4, X1 - 0.4); y = R.uniform(0.8, min(PAR - 1.0, 5.6))
             K.boolean(shells[0], K.breach((x, y, Z0), (0.07, 0.07, 0.12), seed=seed * 13 + k, mat="stone", rough=0.3))
@@ -377,43 +428,51 @@ def groundLife(K, R, spec, Z0):
                 else: K.lump(f"Ware{k}", (x, 0.0, Z0 - 0.9), (0.2, 0.24, 0.2), m, G, seed=k, rough=0.05)
 
 # ── Build, bake (three states, one atlas a type), far levels, export ──────────
+# (a function: tools/blender/mzab.py imports this builder with its own types and materials)
 STATES = ("intact", "damaged", "ruin")
-K = Kit(MATDEF, ("h",))
-exported = []
-S_ = 512 if QUICK else 2048
-for ti, (tname, spec) in enumerate(TYPES.items()):
-    if ONLY and tname != ONLY: continue
-    objs = []
-    for si, state in enumerate(STATES):
-        K.groups["h"] = []
-        build(K, tname, spec, state, 1958 + ti * 10 + si)
-        o = K.join(f"House{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
-        K.drop_cutters()
-        objs.append(o)
-    K.bake(objs, S_, f"House{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80)
-    for o in objs:
-        f = K.far(o, 0.3)
-        print("TRIS", o.name, tris(o), "far", tris(f))
-        exported += [o, f]
-K.export(os.path.join(out, "houses.glb"), exported)
+def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
+    K = Kit(MATDEF, ("h",))
+    exported = []
+    S_ = 512 if QUICK else 2048
+    for ti, (tname, spec) in enumerate(TYPES.items()):
+        if ONLY and tname != ONLY: continue
+        objs = []
+        for si, state in enumerate(STATES):
+            K.groups["h"] = []
+            build(K, tname, spec, state, seed0 + ti * 10 + si)
+            o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
+            K.drop_cutters()
+            objs.append(o)
+        K.bake(objs, S_, f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80)
+        for o in objs:
+            f = K.far(o, 0.3)
+            print("TRIS", o.name, tris(o), "far", tris(f))
+            exported += [o, f]
+    K.export(os.path.join(out, glb), exported)
+    return exported
 
-# ── Previews (workbench, the baked textures): each type's states side by side ──
-scn = bpy.context.scene
-scn.render.engine = "BLENDER_WORKBENCH"
-sh = scn.display.shading; sh.light = "STUDIO"; sh.color_type = "TEXTURE"
-scn.render.resolution_x, scn.render.resolution_y = 1500, 700
-cd = bpy.data.cameras.new("C"); cam = bpy.data.objects.new("C", cd); scn.collection.objects.link(cam); scn.camera = cam
-for o in scn.objects:
-    if o.type == "MESH": o.hide_render = True
-names = [o.name for o in exported if not o.name.endswith("_Far")]
-for tname in TYPES:
-    row = [n for n in names if n.startswith(f"House{tname.capitalize()}_")]
-    if not row: continue
-    for i, n in enumerate(row):
-        o = bpy.data.objects[n]; o.hide_render = False; o.location.x = i * 16
-    cd.lens = 40; cam.location = B(-6, 22, -28); cam.rotation_euler = (B(16, 2, 0) - cam.location).to_track_quat("-Z", "Y").to_euler()
-    scn.render.filepath = os.path.join(REFS, f"preview_{tname}.png"); bpy.ops.render.render(write_still=True)
-    for n in row:
-        o = bpy.data.objects[n]; o.hide_render = True; o.location.x = 0
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "houses.blend"))
-print("DONE")
+def previews(TYPES, exported, prefix="House", tag=""):
+    """Workbench renders of the baked textures: each type's states side by side."""
+    scn = bpy.context.scene
+    scn.render.engine = "BLENDER_WORKBENCH"
+    sh = scn.display.shading; sh.light = "STUDIO"; sh.color_type = "TEXTURE"
+    scn.render.resolution_x, scn.render.resolution_y = 1500, 700
+    cd = bpy.data.cameras.new("C"); cam = bpy.data.objects.new("C", cd); scn.collection.objects.link(cam); scn.camera = cam
+    for o in scn.objects:
+        if o.type == "MESH": o.hide_render = True
+    names = [o.name for o in exported if not o.name.endswith("_Far")]
+    for tname in TYPES:
+        row = [n for n in names if n.startswith(f"{prefix}{tname.capitalize()}_")]
+        if not row: continue
+        for i, n in enumerate(row):
+            o = bpy.data.objects[n]; o.hide_render = False; o.location.x = i * 16
+        cd.lens = 40; cam.location = B(-6, 22, -28); cam.rotation_euler = (B(16, 2, 0) - cam.location).to_track_quat("-Z", "Y").to_euler()
+        scn.render.filepath = os.path.join(REFS, f"preview_{tag}{tname}.png"); bpy.ops.render.render(write_still=True)
+        for n in row:
+            o = bpy.data.objects[n]; o.hide_render = True; o.location.x = 0
+
+if __name__ == "__main__":
+    exported = buildKit(TYPES, MATDEF, "houses.glb")
+    previews(TYPES, exported)
+    bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "houses.blend"))
+    print("DONE")

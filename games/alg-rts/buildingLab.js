@@ -67,6 +67,34 @@ function whiteVillage() {
   }
   return g;
 }
+/** THE M'ZAB TOWN TEST: the souk square (its arcades facing in), the town PACKED behind it — ochre houses,
+ *  a few of the whitewashed kit's mixed in (the Casbah's), one damaged, one in ruins. Flat here: in the game
+ *  the knoll steps them up. */
+function mzabTown() {
+  const g = new THREE.Group();
+  g.name = "MzabTown";
+  const put = (type, state, x, z, yaw) => {
+    const h = houseMesh(type, state);
+    if (!h) return;
+    h.position.set(x, 0, z); h.rotation.y = yaw;
+    g.add(h);
+  };
+  // the square, 32 x 24 m: two souks along its north side, one on the west, houses south and east
+  put("souk", "intact", -8.5, -18.5, Math.PI); put("souk", "damaged", 8.5, -18.5, Math.PI);
+  put("souk", "intact", -22.5, 0, -Math.PI / 2);
+  put("dar", "intact", -9, 18, 0); put("terrasse", "intact", 3, 17, 0); put("maison", "intact", 15, 18, 0);
+  put("tour", "intact", 20.5, -3, Math.PI / 2); put("dar", "ruin", 21, 8, Math.PI / 2);
+  // the packed town behind the souks (north: up the knoll in the game)
+  const types = ["dar", "tour", "dar", "bas", "terrasse", "tour", "haute", "dar"];
+  let k = 0;
+  for (const z of [-34, -45, -56]) for (let x = -34; x <= 30; x += 10.5) {
+    const ty = types[(k * 5 + (z & 3)) % types.length];
+    const st = k === 9 ? "damaged" : k === 15 ? "ruin" : "intact";
+    put(ty, st, x + ((k * 13) % 5) * 0.4, z + ((k * 7) % 3) * 0.8, Math.PI + ((k * 37) % 5 - 2) * 0.04);
+    k++;
+  }
+  return g;
+}
 /** A ready mesh / group as a lab piece: an empty geometry carrying it as its `extra`. */
 function labPiece(obj) {
   const g = new THREE.BufferGeometry();
@@ -258,6 +286,19 @@ export const BUILDINGS = {
     before: () => { console.log("[houses]", houseStats()); return labPiece(houseMesh(ty, "intact")); }, middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
     tags: [`${ty.toUpperCase()} · INTACTE`, `${ty.toUpperCase()} · ENDOMMAGÉE`, `${ty.toUpperCase()} · RUINE`], note: "une maison du kit blanchi (Blender) dans ses trois états : intacte, endommagée, en ruine.",
   }])),
+  // THE M'ZAB TOWN HOUSES (2026-10-19, the Oued Abdi's town — tools/blender/mzab.py, algHouse.js MZAB_TYPES):
+  // each type in its three states, intact LEFT, damaged MIDDLE, ruin RIGHT.
+  ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk"].map((ty) => [`mzab_${ty}`, {
+    label: `Maison du M'zab : ${ty}`, gap: ty === "souk" ? 20 : 15, yaw: Math.PI - 0.5, prepare: () => loadHouses("mzab"),
+    before: () => { console.log("[mzab]", houseStats()); return labPiece(houseMesh(ty, "intact")); }, middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
+    tags: [`${ty.toUpperCase()} · INTACTE`, `${ty.toUpperCase()} · ENDOMMAGÉE`, `${ty.toUpperCase()} · RUINE`], note: "une maison du kit du M'zab (Blender) dans ses trois états : intacte, endommagée, en ruine.",
+  }])),
+  villeMzab: {
+    label: "Ville du M'zab", gap: 90, yaw: 0, prepare: () => Promise.all([loadHouses("mzab"), loadHouses()]),
+    before: () => { const g = whiteVillage(); return labPiece(g); },
+    after: () => { const g = mzabTown(); console.log("[mzab town]", houseStats()); return labPiece(g); },
+    tags: ["VILLAGE BLANCHI", "VILLE DU M'ZAB"], note: "le village blanchi à gauche, la ville du M'zab à droite : la place du souk et ses arcades, la ville serrée derrière (en jeu, la butte l'étage).",
+  },
   // THE VILLAGE (2026-10-19, you: "then I guess we should see how it looks for a village"): a lane of the
   // whitewashed kit, one house damaged and one in ruins, the brown houses (the game's) on the outskirts as the
   // farmers' and shepherds' homes — the game's village beside it, LEFT.
