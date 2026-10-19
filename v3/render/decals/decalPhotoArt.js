@@ -443,17 +443,93 @@ function charred({ xm, vm, W, L, n }) {
   const soot = smoothstep(0.35, 0.6, wedge) * (1 - smoothstep(len * 0.7, len, r));   // (crisp streaks)
   const ragged = (fbm(n, xm * 1.1, vm * 1.1, 4) - 0.5) * 0.28;
   // (edges TIGHT — 2026-10-19: wide smoothsteps read as a smudge at the RTS zoom; CoH's burns end sharp and ragged)
-  const core = 1 - smoothstep(0.16, 0.24, r + ragged * 0.7);
+  // (the core NOT one flat black — 2026-10-19 pass 3: a uniform 0.88 read as a HOLE in the ground; it is
+  // charcoal and grey ash in patches, its edge torn into the burn)
+  const core = 1 - smoothstep(0.1, 0.28, r + ragged * 1.2 + (fbm(n, xm * 2.3, vm * 2.3, 3) - 0.5) * 0.12);
   const burn = 1 - smoothstep(0.44, 0.5, r + ragged * 1.3);
   const halo = 1 - smoothstep(0.62, 0.9, r + ragged * 1.4);
   const unburnt = smoothstep(0.58, 0.68, fbm(n, xm * 0.9 + 7, vm * 0.9 + 3, 3)) * (1 - core);   // the burn skipped a patch
-  const dark = Math.max(core, burn * 0.75, soot * 0.6) * (1 - 0.8 * unburnt);
+  const ash = smoothstep(0.5, 0.75, fbm(n, xm * 3.1 + 2, vm * 3.1 + 9, 3)) * core;                 // grey ash on the charcoal
+  const dark = Math.max(core * (0.72 + 0.16 * fbm(n, xm * 1.7 + 4, vm * 1.7, 2)), burn * 0.75, soot * 0.6) * (1 - 0.8 * unburnt);
   return {
     a: Math.max(halo * 0.75, dark),
     h: -0.06 * core + 0.025 * (smoothstep(0.25, 0.36, r) * (1 - smoothstep(0.36, 0.5, r))),
-    mul: (1 - 0.88 * dark) * (1 - 0.18 * halo * (1 - dark)),
-    sat: 1 - 0.75 * dark + 0.25 * halo * (1 - dark),
+    mul: (1 - 0.88 * dark) * (1 - 0.18 * halo * (1 - dark)) * (1 + 1.6 * ash),
+    sat: (1 - 0.75 * dark + 0.25 * halo * (1 - dark)) * (1 - 0.8 * ash),
     nW: 1 - 0.5 * core,
+  };
+}
+
+/**
+ * SHELL CRATER (2026-10-19, the Oued Abdi — CoH's battlefields are pitted with them): a BOWL ~35 cm deep with
+ * a RAISED RIM of thrown earth (a ragged lip, higher on the side the shell came from), its floor darkened and
+ * fresh, a soot fan, and CLODS strewn out past the rim — a hash per clod, never a pattern.
+ */
+function crater({ xm, vm, W, L, n, seed }) {
+  const x = xm - W / 2, z = vm - L / 2, R = Math.min(W, L) * 0.5;
+  const ragged = (fbm(n, xm * 0.9, vm * 0.9, 4) - 0.5) * 0.18;
+  const r = Math.hypot(x, z) / R + ragged, th = Math.atan2(z, x);
+  const bowlR = 0.34, rimR = 0.46;
+  const bowl = 1 - smoothstep(0, bowlR, r);
+  const lean = 0.7 + 0.3 * Math.cos(th - 0.9);
+  const rim = Math.exp(-Math.pow((r - rimR) / 0.07, 2)) * lean;
+  let h = -0.35 * bowl * bowl + 0.14 * rim;
+  // the ejecta: clods in cells, likelier near the rim, thinning outward
+  const cell = 0.28, gx = Math.floor(xm / cell), gz = Math.floor(vm / cell);
+  let clod = 0;
+  for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
+    const cx = gx + ox, cz = gz + oz, hsh = (k) => n(cx * 3.17 + k * 91.7 + seed, cz * 5.31 + k * 13.1);
+    const px = (cx + hsh(1)) * cell, pz = (cz + hsh(2)) * cell;
+    const pr = Math.hypot(px - W / 2, pz - L / 2) / R;
+    if (pr < rimR || hsh(4) > 1.1 - pr * 1.2 || pr > 1) continue;
+    const rad = 0.04 + 0.08 * hsh(3), d = Math.hypot(xm - px, vm - pz);
+    if (d < rad) clod = Math.max(clod, Math.sqrt(1 - (d / rad) ** 2) * rad);
+  }
+  h += clod * 0.9;
+  const thrown = 1 - smoothstep(rimR, 0.95, r);
+  const soot = smoothstep(0.55, 0.75, fbm(n, xm * 1.4, vm * 1.4, 3)) * (1 - smoothstep(0.2, 0.8, r));
+  const dark = Math.max(bowl * 0.75, soot * 0.6);
+  return {
+    a: Math.max(thrown * 0.9, smoothstep(0.001, 0.02, clod)),
+    h,
+    mul: (1 - 0.7 * dark) * (clod > 0 ? 0.8 : 1) * (1 + 0.12 * rim),
+    sat: 1 - 0.5 * dark + 0.15 * thrown * (1 - dark),
+    nW: 1 - 0.6 * bowl,
+  };
+}
+
+/**
+ * TRAMPLED — the ground a squad stood on, holding a point (CoH's points are always worn): churned dust, the
+ * grain broken up, BOOT PRINTS (pairs of soles, a hash per step, walking every way), scuffs, the edge frayed
+ * into patches.
+ */
+function trampled({ xm, vm, W, L, n, seed }) {
+  const x = (xm - W / 2) / (W * 0.45), z = (vm - L / 2) / (L * 0.45);
+  // (the edge FRAYED into scuffed patches — pass 3: a soft oval read as a stain with a clean rim)
+  const edge = Math.hypot(x, z) + (fbm(n, xm * 0.6, vm * 0.6, 4) - 0.5) * 0.9 + (fbm(n, xm * 2.2 + 3, vm * 2.2, 3) - 0.5) * 0.35;
+  const inside = 1 - smoothstep(0.35, 0.95, edge);
+  const patchy = smoothstep(0.45, 0.62, fbm(n, xm * 0.5 + 5, vm * 0.5, 4) + inside * 0.3);
+  // boot prints: in cells of 0.36 m, a PAIR of soles (0.28 x 0.1 m, a stride apart) at its own heading, 2 cm
+  // deep (0.55 m cells and one sole: 2 % of the patch, invisible — measured)
+  const cell = 0.36, gx = Math.floor(xm / cell), gz = Math.floor(vm / cell);
+  let print = 0;
+  for (let oz = -1; oz <= 1; oz++) for (let ox = -1; ox <= 1; ox++) {
+    const cx = gx + ox, cz = gz + oz, hsh = (k) => n(cx * 7.13 + k * 31.7 + seed, cz * 3.71 + k * 17.9);
+    if (hsh(5) > 0.95 * inside + 0.05) continue;
+    const px = (cx + hsh(1)) * cell, pz = (cz + hsh(2)) * cell, a = hsh(3) * Math.PI * 7;
+    for (const side of [-0.07, 0.07]) {
+      const dx = xm - px - Math.sin(a) * side, dz = vm - pz + Math.cos(a) * side, u = dx * Math.cos(a) + dz * Math.sin(a) - side * 2.2, w = -dx * Math.sin(a) + dz * Math.cos(a);
+      const sole = Math.pow(u / 0.14, 2) + Math.pow(w / (0.05 + 0.012 * Math.sign(u)), 2);
+      if (sole < 1) print = Math.max(print, Math.sqrt(1 - sole));
+    }
+  }
+  const churn = fbm(n, xm * 5, vm * 5, 3);
+  return {
+    a: inside * patchy * (0.85 + 0.15 * churn),
+    h: -0.02 * Math.min(1, print * 2.5) + 0.006 * (churn - 0.5),
+    mul: 1.06 - 0.28 * Math.min(1, print * 2.5) - 0.08 * churn,
+    sat: 0.88,
+    nW: 0.35,
   };
 }
 
@@ -521,6 +597,8 @@ export const PHOTO_RECIPES = {
   sweptYard:  { fn: sweptYard,  photo: "lowland",  size: [12, 12],   tileM: 7 },
   scorch:     { fn: scorch,     photo: "burned",   size: [10, 10],   tileM: 6 },
   charred:    { fn: charred,    photo: "abdiSoil", size: [10, 10],   tileM: 2.6 },
+  crater:     { fn: crater,     photo: "abdiSoil", size: [7, 7],     tileM: 2.6 },
+  trampled:   { fn: trampled,   photo: "abdiSoil", size: [14, 14],   tileM: 2.6 },
   debris:     { fn: debris,     photo: "stones",   size: [16, 16],   tileM: 6 },
 };
 

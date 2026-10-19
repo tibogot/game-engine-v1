@@ -69,15 +69,16 @@ for (const f of files.filter((f) => !f.includes("_n.")).sort()) {
   slots.push({ name: `abdi ${key}`, albedoUrl: `/textures/decals/abdi/${f}`, normalUrl: `/textures/decals/abdi/${key}_n.webp` });
 }
 // MATCH to the ground's tone (groundCache): the wear takes the ground's colour; a scorch keeps its own black.
-const MATCH = { ruts: 1, tankTracks: 1, footPath: 1, apron: 1, sweptYard: 1, debris: 0.6, charred: 1 };
+const MATCH = { ruts: 1, tankTracks: 1, footPath: 1, apron: 1, sweptYard: 1, debris: 0.6, charred: 1, crater: 1, trampled: 1 };
 // (a charred mark matched on the UNBURNT earth it was baked on — the soil photo's own mean, linear — or its black
 // core, dragging the art's mean down, lifted the halo into a pale ring)
-const MEAN_OVERRIDE = { charred: [0.624, 0.397, 0.219] };
+const SOIL = [0.624, 0.397, 0.219];
+const MEAN_OVERRIDE = { charred: SOIL, crater: SOIL, trampled: SOIL };   // (the crater's soot and the trampled prints too)
 // …then each WEAR its own shift on that (matched alone, the paths and aprons vanished — the nam-rts lesson: "within
 // a stop of the ground" at 100 m is absent): packed paths and tracks darker and warmer (no cracks, trodden),
 // a swept yard lighter (fine dust)
-const TINT = { ruts: "#c9b8a8", tankTracks: "#bba796", footPath: "#c4ad99", apron: "#e8ddd0", sweptYard: "#fff2e2", debris: "#ffffff", charred: "#ffffff" };
-const SIZE = { ruts: [3.2, 10], tankTracks: [4.4, 10], footPath: [2.4, 10], apron: [12, 12], sweptYard: [12, 12], charred: [10, 10], debris: [16, 16] };
+const TINT = { ruts: "#c9b8a8", tankTracks: "#bba796", footPath: "#c4ad99", apron: "#e8ddd0", sweptYard: "#fff2e2", debris: "#ffffff", charred: "#ffffff", crater: "#ffffff", trampled: "#e6d8c8" };   // (trampled: dust, barely darker — #d2c0ae read as a stain)
+const SIZE = { ruts: [3.2, 10], tankTracks: [4.4, 10], footPath: [2.4, 10], apron: [12, 12], sweptYard: [12, 12], charred: [10, 10], debris: [16, 16], crater: [7, 7], trampled: [14, 14] };
 const decals = [];
 const pick = (kind, x, z) => V[kind][Math.floor(hash(x, z, 5) * V[kind].length) % V[kind].length];
 function box(kind, x, z, yaw, o) {
@@ -180,6 +181,32 @@ for (const [x, z, n] of [[pass.x, pass.z, 3], [souk.x + 30, souk.z + 30, 2], [ke
     box("debris", px + 1, pz - 1, hash(px, pz, 6) * 6.28, { opacity: 0.8, k: 0.5 + hash(px, pz, 7) * 0.4, priority: 2 });
     stats.scorch++;
   }
+}
+// CRATERS: shell holes in clusters where the fighting was (the mortars on the pass, the town's edge, the lookout,
+// the middle ford) — CoH's ground reads as FOUGHT OVER by its craters more than by anything else
+stats.craters = 0;
+for (const [x, z, n] of [[pass.x, pass.z, 5], [souk.x + 30, souk.z + 30, 4], [kef.x, kef.z, 4], [40, 58, 3], [-120, -20, 3], [100, -30, 3], [souk.x - 35, souk.z - 20, 3]]) {
+  for (let k = 0; k < n; k++) {
+    const a = hash(x, z, 60 + k) * 6.28, r = 4 + hash(x, z, 70 + k) * 22, px = x + Math.cos(a) * r, pz = z + Math.sin(a) * r;
+    if (slope(px, pz) > 22) continue;
+    box("crater", px, pz, hash(px, pz, 8) * 6.28, { opacity: 1, k: 0.7 + hash(px, pz, 9) * 0.6, priority: 4 });
+    stats.craters++;
+  }
+}
+// TRAMPLED earth: boot-printed, scuffed ground at every capture point (where the squads stand to take it) and
+// where the paths fray into the villages
+stats.trampled = 0;
+for (const s of LAYOUT.sites.filter((s) => s.point)) {
+  const n = Math.max(1, Math.round(s.r / 16));
+  for (let k = 0; k < n; k++) {
+    const a = hash(s.x, s.z, 80 + k) * 6.28, r = k ? s.r * 0.5 : s.r * 0.15, px = s.x + Math.cos(a) * r, pz = s.z + Math.sin(a) * r;
+    box("trampled", px, pz, hash(px, pz, 11) * 6.28, { opacity: 0.85, k: 0.8 + hash(px, pz, 12) * 0.4, priority: 1, edgeFade: 0.45 });
+    stats.trampled++;
+  }
+}
+for (const p of paths) for (const [x, z] of [p[0], p[p.length - 1]]) {
+  box("trampled", x + (hash(x, z, 13) - 0.5) * 8, z + (hash(x, z, 14) - 0.5) * 8, hash(x, z, 15) * 6.28, { opacity: 0.7, k: 0.6 + hash(x, z, 16) * 0.3, priority: 1, edgeFade: 0.45 });
+  stats.trampled++;
 }
 // THE LOOKS tuned in the game (Dev → Decals, algDecalPanel.js → kinds.json): per kind, over what the rules laid
 const LOOKS = JSON.parse(fs.readFileSync(path.join(DIR, "kinds.json"), "utf8"));
