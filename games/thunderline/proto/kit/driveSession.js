@@ -166,7 +166,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (car === "thunder") {
       // the car file is not in git until it is optimised: without it, the Lotus
       let tc;
-      try { tc = await loadThunderCar(); } catch (e) { console.warn("[drive] Thunderline car not found, using the Lotus", e); return false; }
+      try { tc = await loadThunderCar(renderer); } catch (e) { console.warn("[drive] Thunderline car not found, using the Lotus", e); return false; }
       if (adopt) adoptCar(tc.chassis.object);
       if (tc.chassis.headlampMounts && adopt) v.setHeadlampMounts(tc.chassis.headlampMounts);
       v.setChassisModel(tc.chassis.object, { brakeLights: tc.chassis.brakeLights, headlampLenses: tc.chassis.headlampLenses });

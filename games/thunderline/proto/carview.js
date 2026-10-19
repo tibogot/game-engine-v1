@@ -2,7 +2,7 @@
 // world — Sky Pro, the drive page's light, the flat world — so the user judges it as it will look in the
 // game before it replaces the Lotus (user, 2026-10-19). Not part of the game.
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../v3/render/foliage/glbLoader.js";
 import { startV3App } from "../../../v3/engine.js";
 import { Vehicle } from "../../../v3/play/modularRoadVehicle.js";
 import { createVehicleGround } from "../../../v3/play/modularRoadGround.js";
@@ -52,7 +52,8 @@ try {
 
 
 // ---------- the new car: the exported glTF as it is (Blender +Y forward → three −Z: turned to face +Z like the Lotus) ----------
-const gltf = await new GLTFLoader().loadAsync("/games/thunderline/assets-src/car/thunder_car.glb");
+initGlbLoaderRenderer(renderer); // the shared loader: KTX2 textures + meshopt geometry (v3/TEXTURE_COMPRESSION.md)
+const gltf = await getSharedGltfLoader().loadAsync("/games/thunderline/assets-src/car/thunder_car.glb");
 const car = gltf.scene;
 car.rotation.y = Math.PI;
 car.position.set(NEW_X, 0, 0);

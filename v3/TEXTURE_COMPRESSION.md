@@ -24,7 +24,7 @@ Without step 2, the loader falls back to the original images, so nothing breaks.
 
 | Game | When | Status |
 |---|---|---|
-| Thunderline | now: every new texture through `loadTexture` | to start |
+| Thunderline | now: every new texture through `loadTexture` | started 2026-10-19: no image textures yet (road / rail materials are procedural); the car GLB loads through the shared glTF loader (KTX2 + meshopt ready) and goes through `tools/optimizeGlb.mjs` when its optimisation lands; the worlds' ground / mountain textures will use `loadTexture` |
 | Apocalypse (Vietnam RTS) | from day one | not started |
 | alg-rts | at content freeze, with item 15 (perf + boot) in games/alg-rts/TODO.md: switch its TextureLoader calls, run the tool, measure boot and GPU MB before / after | waiting for the freeze |
 | Terrain ground textures (all games) | later: a per-level "bake for the game" step (the 7-slot arrays are about 78 MB uncompressed) | not built |

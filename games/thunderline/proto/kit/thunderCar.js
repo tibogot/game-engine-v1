@@ -8,16 +8,20 @@
 //     DRL_L, DRL_R), and the headlamp spot mounts in chassis space
 // Unoptimised for now (10.7 MB, ~72k tris): the user drives it first, then it gets LODs / KTX2.
 import * as THREE from "three";
-import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../../v3/render/foliage/glbLoader.js";
 import { WHEEL_LOCAL } from "../../../../v3/play/modularRoadVehicle.js";
 
 export const THUNDER_CAR_URL = "/games/thunderline/assets-src/car/thunder_car.glb";
 const FILE_WHEEL_Y = 0.374; // the file's wheel centre height (its ground is y = 0)
 
 let cached = null;
-/** @returns {Promise<{ chassis: {object, brakeLights, headlampLenses, headlampMounts}, wheel: {object, radius, width} }>} */
-export function loadThunderCar(url = THUNDER_CAR_URL) {
-  cached ??= new GLTFLoader().loadAsync(url);
+/**
+ * Through the engine's SHARED glTF loader (KTX2 textures + meshopt geometry: v3/TEXTURE_COMPRESSION.md).
+ * @returns {Promise<{ chassis: {object, brakeLights, headlampLenses, headlampMounts}, wheel: {object, radius, width} }>}
+ */
+export function loadThunderCar(renderer, url = THUNDER_CAR_URL) {
+  initGlbLoaderRenderer(renderer);
+  cached ??= getSharedGltfLoader().loadAsync(url);
   return cached.then((gltf) => build(gltf.scene.clone(true)));
 }
 

@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio lab</title>
+    <!-- The engine's sound core (v3/audio/mixer.js, AUDIO_PLAN.md) on test slots: one-shots placed round
+         the listener, loops, buses, mute / pause, and a meter of what comes OUT (nobody can listen for us). -->
+    <style>
+      body { margin: 0; background: #0b0f17; color: #dce6f5; font: 14px/1.4 Inter, system-ui, sans-serif; }
+      main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+      h1 { font-size: 20px; margin: 0 0 4px; } p { color: #8796b5; margin: 0 0 14px; }
+      section { background: #121a2b; border: 1px solid #23304d; padding: 12px 14px; margin-bottom: 12px; }
+      h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #8796b5; margin: 0 0 8px; }
+      button { background: #18233a; color: #dce6f5; border: 1px solid #2c3b5e; padding: 6px 10px; margin: 2px; cursor: pointer; }
+      button:hover { border-color: #3fd2ff; } button.on { border-color: #3fd2ff; color: #3fd2ff; }
+      label { display: inline-flex; align-items: center; gap: 6px; margin-right: 14px; }
+      #meter { font: 13px Consolas, monospace; white-space: pre; }
+      .bar { height: 8px; background: #3fd2ff; width: 0; transition: width 0.08s; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Audio lab</h1>
+      <p>The engine's sound core (v3/audio/mixer.js) on the NAM test sounds. Click anywhere first: browsers start audio after a gesture.</p>
+      <section><h2>Mix</h2><div id="mix"></div></section>
+      <section><h2>One-shots (the listener faces −Z: left is −X)</h2><div id="shots"></div></section>
+      <section><h2>Loops</h2><div id="loops"></div></section>
+      <section><h2>Meter (after the compressor)</h2><div class="bar" id="bar"></div><div id="meter">—</div></section>
+    </main>
+    <script type="module" src="/v3/audio/lab.js"></script>
+  </body>
+</html>

@@ -4,6 +4,17 @@ Kept here so nothing gets lost between sessions. Design reasons live in DESIGN.m
 this is just the list. Newest decisions at the top of each section. Last updated 2026-10-19.
 
 ## Now
+- [ ] **THE NEW CAR — optimise hard** (user, 2026-10-19: "as optimized as possible"). In the game today
+      (thunderCar.js, Settings → Car), unoptimised: 69 draws, 57 shadow casters, 71.6k tris, 26 materials,
+      24 Mpx raw textures (the Lotus: 18 / 4 / 87.7k / 18 / 5.1 Mpx KTX2). Plan: body merged by material
+      (~6–8 draws), wheels 10 parts → 2–3 + tread normal map (~3–4k tris), one shadow proxy + tyres
+      (~3 casters), trims/lights atlas + KTX2 (~3 Mpx, file ~2–3 MB), simple interior, LOD1 ~8k for the
+      ghost, calipers that steer, the beige tyres (missing uv). Then measure in game, the user checks the
+      look, commit assets-src/car/thunder_car.glb. First: the side-vent shading fix (a subagent's result
+      in scratchpad/car/saba3/) — show the user before / after.
+- [ ] Credit in the game (CC BY): "Saba V12 '95 - Low poly model" by DanielZhabotinsky.
+- [ ] Next pieces on small maps (Green tier): gap jump, half-pipe, rollers, skylight tube.
+- [ ] Editor: insert / replace a piece mid-track, a height cue under the piece in hand, close a circuit.
 - [ ] **Tube entrance / exit shape** — the user finds the curl "cheap" ("I don't like the way it does
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.
 - [x] Tube wall thicker: 0.6 → 1.5 m (user: "looks too thin").
