@@ -1,6 +1,6 @@
 // AURÈS — OUED ABDI (map 4, planned 2026-10-19: games/alg-rts/AURES2_PLAN.md). THE LAYOUT, FIRST SKETCH —
 // plain data, argued over on a plan image (tools/algLayoutSketch.mjs) before any ground exists. NOT in the
-// game's map list yet (layout.js MAPS): it has no level file.
+// game's MENU yet: ?map=abdi loads it (its ground: tools/algAbdiLevel.mjs → public/levels/alg-abdi.v3proj).
 //
 // A valley of the Aurès south of Arris: the djebel steep north and west, the valley floor open south and
 // east, the oued across it. CoH 3-sized: a ~500 m PLAYABLE box, the starts ~410 m apart on the diagonal.
@@ -9,6 +9,7 @@
 //   · between: the ALGERIAN TOWN on a knoll (its souk the big point), the oasis, a hamlet and farms (the
 //     brown houses: farmers, shepherds), the stone DECHRA at the mountain's foot, a lookout on a spur.
 // World metres, north up = -Z (as every map).
+import { t } from "../i18n/i18n.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -66,4 +67,18 @@ export const LAYOUT = {
     // the west lane's middle, between the farm and the dechra
     { name: "Moulin de l'oued", x: -205, z: 5, res: "fuel" },
   ],
+};
+
+/** THE MAP: its level, its pistes as tracks, its supply — the ground only for now (no town, no AI). */
+export const MAP = {
+  id: "abdi",
+  name: t("Aurès — Oued Abdi"),
+  level: "/levels/alg-abdi.v3proj",
+  tracks: LAYOUT.pistes.map((p, i) => ({ name: t("Piste de l'oued"), kind: "piste", from: "gate", to: "", length: Math.round(p.slice(1).reduce((a, q, k) => a + Math.hypot(q[0] - p[k][0], q[1] - p[k][1]), 0)), points: p, id: i })),
+  supply: LAYOUT.supply,
+  handPlaced: false,
+  // WHAT THIS MAP SHOWS (mapSystems.js): the ground under review — no AI yet.
+  systems: { fow: true, birds: true, splats: true, stones: true },
+  // algLandmarks' own scenery: none (its Aurès places are on the old map's ground).
+  scenery: { quantities: {}, keepClear: [] },
 };

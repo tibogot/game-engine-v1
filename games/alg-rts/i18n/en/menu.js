@@ -87,6 +87,9 @@ export default {
   "Bordj d'El Kantara": "Bordj of El Kantara",
   "Katiba du ravin": "The gully katiba",
   "Route de Biskra": "Biskra road",
+  // maps/abdi.js — map 4, the new Aurès (2026-10-19)
+  "Aurès — Oued Abdi": "Aurès — Oued Abdi",
+  "Piste de l'oued": "Oued track",
   // menu.html — the battle setup: the map and the side (2026-10-11)
   "Batailles": "Battles",
   "Choisir la carte et le camp": "Choose the map and the side",
