@@ -64,9 +64,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
       finish, UI clicks, countdown.
 - [ ] Impacts: sparks on wall scrapes and hard landings, debris on crashes (no camera tricks: the
       camera stays behind the car).
-- [ ] **Smoke**: drift / tyre smoke, exhaust, landing dust. Try Fire Pro baked six-way books
-      (v3/fire-bake-lab.html) against the old game's drift smoke (modularRoadDriftSmoke.js); keep the
-      better, measured in GPU ms.
+- [ ] **Smoke**: drift / tyre smoke, exhaust, landing dust. THE FX LAB (proto/fx-lab.html, 3ea8c280)
+      shows every effect on our car in the game's light via kit/carFx.js (Apex Rush's smoke, exhaust,
+      sparks, tyre marks). WAITING for the user's verdict per effect. Seen: at 190 km/h the trail breaks
+      into separate blobs; a drift fills the chase view; sparks small in daylight. Then: a Fire Pro
+      six-way PUFF as the sprite, A/B in the lab; Fire Pro books for landing dust / boost flame; then
+      carFx into the drive page.
 - [ ] Boost visuals (exhaust flame, speed lines), tube light rings reacting to speed.
 
 ## Car
