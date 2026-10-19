@@ -93,6 +93,11 @@ export function integrate(tile, opts = {}) {
     }
   });
   const exit = { p: p.clone(), T: T.clone(), U: U.clone(), R: R.clone(), lean };
+  // A GAP segment (gap jumps): the path goes on (the exit, the snapping, the ride line) but there is no
+  // road over it. Its rings are AIR, except the one at its end, where the road starts again.
+  let segEnd = 0;
+  const ends = tile.segs.map((g) => (segEnd += g.L));
+  for (const r of rings) if (tile.segs[r.seg]?.gap && r.s < ends[r.seg] - 1e-6) r.air = true;
   return { rings, exit, L: s };
 }
 
@@ -254,6 +259,20 @@ export const TILES = {
     label: "Kicker 20°",
     segs: [{ L: 28, pitch: 20 * DEG, ramp: 14 }],
     marks: [{ kind: "lip", from: -8, to: -0 }],
+  },
+  // GAP JUMP (PIECES 7d): one piece, nothing to aim — a small take-off, a 24 m hole over empty space,
+  // and a receiving ramp that catches the whole speed band: it starts below and as steep as a slow
+  // car's fall (the hole's path drops ~2 m) and eases back to level, then a flat run-out for the
+  // fastest. Speeds measured with the real car (trackRun.mjs).
+  gap_jump: {
+    label: "Gap jump",
+    segs: [
+      { L: 20, pitch: 5 * DEG, ramp: 10 },
+      { L: 24, pitch: -19 * DEG, ramp: 12, gap: true },
+      { L: 70, pitch: 14 * DEG, ramp: 35 },
+      { L: 30 },
+    ],
+    marks: [{ kind: "lip", from: 12, to: 20 }, { kind: "landing", from: 44, to: 114 }],
   },
   landing_20: {
     label: "Landing 20°",

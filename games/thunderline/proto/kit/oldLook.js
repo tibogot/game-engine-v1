@@ -2,6 +2,7 @@
 // kerbs, W-beam guardrail and instanced posts, and its materials. The old look is the floor the new
 // game must beat, never something to trade for triangle counts (user, 2026-10-18).
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { integrate, deckFrame, SECTIONS } from "./kit.js";
 import "./oldTiles.js"; // registers the old kit's bowl and flip ramp as tiles
 import { buildTubeLook } from "./tubeLook.js";
@@ -45,7 +46,7 @@ export function oldFrames(tile) {
     if (r.s - lastS < 0.05) continue; // the mark-edge double rings would make zero-length segments
     lastS = r.s;
     const f = deckFrame(r, hw);
-    frames.push({ pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R });
+    frames.push({ pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R, air: !!r.air });
   }
   return { b, frames };
 }
@@ -71,9 +72,14 @@ export function buildOldLook(tile, edges = true) {
     }
     return buildTubeLook(tile, frames, sAt, b.L, { buildSweepGeometry, NO_CHECKER, THREE });
   }
-  const { frames } = oldFrames(tile);
+  const { frames: all } = oldFrames(tile);
   const rp = tile.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS.wide.hw * 2 } : ROAD_PARAM_DEFAULTS;
-  const deck = buildSweepGeometry(frames, buildProfile(rp, edges), {});
+  // RUNS of road: a gap's air frames cut the piece in two (gap jumps); one run for the others
+  const runs = [[]];
+  for (const f of all) { if (f.air) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(f); }
+  const parts = runs.filter((r) => r.length >= 2);
+  const merge = (gs) => (gs.length === 1 ? gs[0] : mergeGeometries(gs));
+  const deck = merge(parts.map((r) => buildSweepGeometry(r, buildProfile(rp, edges), {})));
   // the road material reads aPiece = (noise phase, line distance); one phase per tile is enough here
   const n = deck.getAttribute("position").count;
   const a = new Float32Array(n * 2);
@@ -81,7 +87,7 @@ export function buildOldLook(tile, edges = true) {
   deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
   if (!edges) return { deck, rail: null, railCollision: null, posts: null };
   const posts = { key: "", template: null, matrices: [] };
-  const rail = buildRailGeometry(frames, rp, undefined, { postSink: posts });
-  const railCollision = buildRailCollision(frames, rp);
+  const rail = merge(parts.map((r) => buildRailGeometry(r, rp, undefined, { postSink: posts })));
+  const railCollision = merge(parts.map((r) => buildRailCollision(r, rp)));
   return { deck, rail, railCollision, posts };
 }

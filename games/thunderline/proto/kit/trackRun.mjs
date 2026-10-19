@@ -4,6 +4,7 @@
 // leaned off vertical (a tube wall), air time — and where it failed (fell, stopped, came out wrong).
 // For calibrating new shapes at Thunderline's speed before they go in the builder (tubes first).
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join } from "node:path";
@@ -64,10 +65,18 @@ export function layout(ids) {
       const look = oldLookOf(t, true);
       deck = look.deckCollision; rail = look.railCollision;
     } else {
-      const frames = integrate(t, { maxGap: 2 }).rings.map((r) => { const f = deckFrame(r, hw); return { pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R }; });
+      // runs of road between gaps (a gap jump's hole has no road), as oldLook.js builds them
+      const runs = [[]];
+      for (const r of integrate(t, { maxGap: 2 }).rings) {
+        if (r.air) { if (runs.at(-1).length) runs.push([]); continue; }
+        const f = deckFrame(r, hw);
+        runs.at(-1).push({ pos: f.P, tangent: r.T.clone(), up: f.U, right: f.R });
+      }
+      const parts = runs.filter((r) => r.length >= 2);
+      const merge = (gs) => (gs.length === 1 ? gs[0] : mergeGeometries(gs));
       const rp = t.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: hw * 2 } : ROAD_PARAM_DEFAULTS;
-      deck = buildSweepGeometry(frames, buildProfile(rp, !OPEN), {});
-      rail = OPEN ? null : buildRailCollision(frames, rp);
+      deck = merge(parts.map((r) => buildSweepGeometry(r, buildProfile(rp, !OPEN), {})));
+      rail = OPEN ? null : merge(parts.map((r) => buildRailCollision(r, rp)));
     }
     const mesh = new THREE.Mesh(deck.clone().applyMatrix4(M), new THREE.MeshBasicMaterial());
     mesh.userData.roadHold = ROAD_HOLD.has(id.replace(/_L$/, "")) || !!t.roadHold;
@@ -75,7 +84,7 @@ export function layout(ids) {
     decks.push(mesh);
     if (rail) solids.push(new THREE.Mesh(rail.clone().applyMatrix4(M), new THREE.MeshBasicMaterial()));
     const from = ride.length;
-    for (const r of b.rings) { const f = deckFrame(r, hw); const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; ride.push({ P: Pr.applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: k, tube: t.tube ? closureAt(t, r.s, b.L) : 0 }); }
+    for (const r of b.rings) { const f = deckFrame(r, hw); const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; ride.push({ P: Pr.applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), piece: k, tube: t.tube ? closureAt(t, r.s, b.L) : 0, air: !!r.air }); }
     spans.push({ id, from, to: ride.length - 1, M: M.clone() });
     M = M.clone().multiply(socketMatrix(b.exit));
   });
