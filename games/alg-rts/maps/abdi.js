@@ -10,6 +10,7 @@
 //     brown houses: farmers, shepherds), the stone DECHRA at the mountain's foot, a lookout on a spur.
 // World metres, north up = -Z (as every map).
 import { t } from "../i18n/i18n.js";
+import { ROCKS } from "./abdiRocks.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -95,6 +96,9 @@ export const MAP = {
     wadi:  { slot: 4, id: "rocky_trail", tint: "#f4ece0", per100: 4.0, shapes: [["cobble", 0.7], ["pebble", 0.3]] },
     gravel:{ slot: 6, id: "rock_boulder_cracked", tint: "#ead2b8", per100: 6.0, shapes: [["pebble", 0.85], ["rock", 0.15]], edge: [0.08, 0.55] },
   },
+  // THE SANDSTONE (algSandstone, the building lab's rock): outcrops on the djebel's crests (cover, landmarks) and
+  // the frame's cliffs — placed by tools/algAbdiLevel.mjs. The Aurès' ochre colour.
+  sandstone: { colour: "aures", rocks: ROCKS },
   // algLandmarks' own scenery: none (its Aurès places are on the old map's ground).
   scenery: { quantities: {}, keepClear: [] },
 };

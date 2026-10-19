@@ -523,6 +523,10 @@ export async function placeShowroom(app, list = SHOWROOM) {
     // 2026-10-19, you: "in CoH there is no wind on foliage"; the flags keep the full wind). ?plantwind=0..1 = A/B.
     const k = Number(new URLSearchParams(location.search).get("plantwind") ?? MAP.foliageWind ?? 1);
     app.setWind?.({ angleDeg: w.dirDeg, strength: (0.3 + 2.2 * w.strength) * k, gust: (0.15 + 0.6 * w.gust) * Math.min(1, k * 2) });
+    // …and the PLACED trees and bushes (the oaks, the oleanders — PlacedFoliage), which kept their own
+    // default sway (0.16 rad) whatever the map asked: you saw them still moving at 0.
+    const r = (w.dirDeg * Math.PI) / 180;
+    app.algPlacedFoliage?.setWind(Math.cos(r), Math.sin(r), 0.16 * k);
   });
   const socks = [];
   for (const e of list) {

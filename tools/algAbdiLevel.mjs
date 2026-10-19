@@ -22,7 +22,11 @@ import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { blankManifest, BASE_LEVEL } from "./lib/algLevelBase.mjs";
 import { measureRtsMap, printRtsMetrics } from "./lib/rtsMapMetrics.mjs";
 import { trackCarver, PISTE } from "./lib/trackCarve.mjs";
+import fs from "node:fs";
 import { PLAY, LAYOUT } from "../games/alg-rts/maps/abdi.js";
+import { buildSandstoneRock, SANDSTONE_GAME } from "../games/alg-rts/algSandstone.js";
+import { STREAM_POWER_DEFAULTS, createStreamPowerScratch, streamPowerErode } from "../v3/terrain/streamPowerErosion.js";
+import { EROSION_DEFAULTS, buildErosionKernel, erodeDroplets, smoothHeights } from "../v3/terrain/globalErosion.js";
 
 const args = {};
 for (let i = 2; i < process.argv.length; i += 2) args[process.argv[i].replace(/^--/, "")] = process.argv[i + 1];
@@ -125,12 +129,27 @@ function naturalAt(x, z) {
   const swell = (noise(x / 90, z / 90, 3) - 0.5) * 2 * 1.4 + (noise(x / 34, z / 34, 7) - 0.5) * 2 * 0.45;
   h += swell * calm;
   // THE DJEBEL: terraced inside the box (at most ~4 steps), then the skyline outside it
-  const d = djebelD(x, z);
+  // (the CRESTS RAGGED — you, 2026-10-19: "everything seems too smooth": straight terrace edges read as a
+  // mathematical ramp; the step's position wanders at two scales, so a crest juts out and bites in)
+  const d = djebelD(x, z) + 9 * (noise(x / 28, z / 28, 71) - 0.5) + 3.5 * (noise(x / 9, z / 9, 72) - 0.5);
   if (d > 0) {
     const inBox = Math.min(terraces(d), 4 * STEP_H);
     h += inBox * (0.85 + 0.3 * noise(x / 60, z / 60, 11));
     h += smoothstep(0, 160, o) * smoothstep(0, 60, d) * 75 * (0.7 + 0.5 * noise(x / 90, z / 90, 13));
   }
+  // THE FACES ERODED: on a terrace's ramp only (the flats stay flat), RILLS cut down the fall line (ridged
+  // noise stretched across the djebel's foot line), small LEDGES of harder strata, a rough skin
+  if (d > 0) {
+    const ph = (d / STEP_L) % 1, face = smoothstep(0.58, 0.7, ph) * (1 - smoothstep(0.93, 1.0, ph)) * (d / STEP_L < 4 ? 1 : 0.6);
+    if (face > 0) {
+      const u = x * 0.96 + z * 0.27;   // along the foot line (the faces run roughly along it)
+      const rill = 1 - Math.abs(noise(u / 5.5, d / 14, 73) * 2 - 1);   // ridged: sharp-bottomed channels
+      h -= face * (1.1 * Math.pow(rill, 3) + 0.35 * (noise(x / 3, z / 3, 74) - 0.5));
+      h += face * 0.45 * smoothstep(0.55, 0.62, noise(u / 20, d / 4, 75));   // a harder ledge, here and there
+    }
+  }
+  // a fine roughness on the valley floor too (±0.25 m at ~6 m): ground, not a table — calmed on the sites
+  h += (noise(x / 6, z / 6, 76) - 0.5) * 0.5 * calm;
   // the frame south and east: low hills rising past the box
   if (o > 0 && d <= 0) h += smoothstep(0, 140, o) * 22 * (0.5 + noise(x / 80, z / 80, 17));
   // THE KNOLL (the town): flat-topped, a soft shoulder
@@ -173,12 +192,50 @@ const FORDS = (() => {
     return 0;
   });
 })();
+// ── FLUVIAL EROSION (you, 2026-10-19: "what makes the old Aurès look cool is the fluvial erosion"): the natural
+// shape on the level's grid, eroded by the engine's own stream power (dendritic gullies, sharp ridges) and a
+// droplet pass (debris fans, fine rills) — kept only on the DJEBEL and the FRAME (the slopes nobody fights
+// on); the valley, the sites, the oued's fords and the pistes are laid AFTER, so the fighting ground stays
+// exact. ?no erosion: --erosion 0.
+const ERODE = args.erosion !== "0";
+const RAW = new Float32Array(N * N), ERO = new Float32Array(N * N), MASK = new Float32Array(N * N);
+for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+  const x = -W / 2 + j * cell, z = -W / 2 + i * cell, k = i * N + j;
+  RAW[k] = naturalAt(x, z);
+  // where erosion may change the ground: up in the djebel (past its first step), and the frame; never near a
+  // site, the oued, a piste or a gully's floor
+  let m = Math.max(smoothstep(12, 40, djebelD(x, z)), smoothstep(10, 60, outside(x, z)));
+  for (const f of flats) m = Math.min(m, smoothstep(f.r, f.r + 20, Math.hypot(x - f.x, z - f.z)));
+  if (m > 0) {
+    m *= smoothstep(wadi.width + 6, wadi.width + 24, wadiAt(x, z, 50).d);
+    for (const p of pisteAt) m *= smoothstep(6, 16, p(x, z, 20).d);
+  }
+  MASK[k] = m;
+}
+ERO.set(RAW);
+if (ERODE) {
+  const t0 = Date.now();
+  streamPowerErode(ERO, N, 140, { ...STREAM_POWER_DEFAULTS, strength: 0.012, smoothing: 0.04 }, createStreamPowerScratch(N));
+  erodeDroplets(ERO, N, 250000, { ...EROSION_DEFAULTS, erosionRate: 0.35, depositionRate: 0.25 }, buildErosionKernel(3));
+  smoothHeights(ERO, N, 2, 0.15);
+  console.log(`erosion: ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+}
+/** The natural ground with the erosion blended in where the mask allows (bilinear on the grid). */
+function erodedAt(x, z) {
+  const fu = Math.max(0, Math.min(N - 1.001, (x + W / 2) / cell)), fv = Math.max(0, Math.min(N - 1.001, (z + W / 2) / cell));
+  const j0 = fu | 0, i0 = fv | 0, tx = fu - j0, tz = fv - i0;
+  const at = (A, i, j) => A[i * N + j];
+  const lerp = (A) => (at(A, i0, j0) * (1 - tx) + at(A, i0, j0 + 1) * tx) * (1 - tz) + (at(A, i0 + 1, j0) * (1 - tx) + at(A, i0 + 1, j0 + 1) * tx) * tz;
+  const m = lerp(MASK);
+  return m > 0 ? naturalAt(x, z) + (lerp(ERO) - lerp(RAW)) * m : naturalAt(x, z);
+}
+
 /** EVERY SITE LEVELLED: the ground under a place blended to its own height (its centre's, before
  *  levelling), a soft rim beyond — a camp on a terrace step or a souk on the knoll's shoulder stood on 4-10 m
  *  of relief (measured, the first build). */
 const LEVEL = LAYOUT.sites.map((s) => ({ x: s.x, z: s.z, r: s.r * 0.9, rim: s.r * 0.6 + 8, h: naturalAt(s.x, s.z) }));
 function levelledAt(x, z) {
-  let h = naturalAt(x, z);
+  let h = erodedAt(x, z);
   for (const L of LEVEL) {
     const d = Math.hypot(x - L.x, z - L.z);
     if (d < L.r + L.rim) h = L.h + (h - L.h) * smoothstep(L.r, L.r + L.rim, d);
@@ -213,11 +270,80 @@ function hollow(x, z, r = 9) {
   return s / 8 - H(x, z);
 }
 
+const pisteD = (x, z, r) => Math.min(...pisteAt.map((p) => p(x, z, r).d));
+// ── THE ROCK: the building lab's sandstone (algSandstone — layered, jointed, undercut) as CLIFFS and OUTCROPS
+// (you, 2026-10-19: "with the rock system we built we should be able to make more realistic cliffs") ──────────
+//   CRESTS   in the box, on the djebel's terrace crests (convex, the top of a face): an outcrop — a big block,
+//            one or two smaller along the crest — cover and landmarks, as CoH's
+//   CLIFFS   outside the box, on the frame's steep faces: rows of big slabs along the contour, sunk deep
+const SIZE = SANDSTONE_GAME.map(([sh, sd]) => {
+  const g = buildSandstoneRock(sh, sd);
+  g.computeBoundingBox();
+  const b = g.boundingBox;
+  return { shape: sh, len: b.max.x - b.min.x, deep: b.max.z - b.min.z, tall: b.max.y - b.min.y };
+});
+const ofShape = (sh) => SIZE.map((q, v) => ({ ...q, v })).filter((q) => q.shape === sh);
+const rand = (() => { let r = 1958; return () => ((r = Math.imul(r ^ (r >>> 15), 2246822507) + 1013904223) >>> 0) / 4294967296; })();
+const rocks = [];
+function slab(x, z, yaw, Sz, k, sink) {
+  const c = Math.cos(yaw), sn = Math.sin(yaw), hl = (Sz.len * k) / 2, hd = (Sz.deep * k) / 2;
+  let lo = Infinity;
+  for (const a of [-1, 0, 1]) for (const e of [-1, 0, 1]) lo = Math.min(lo, H(x + a * hl * c + e * hd * sn, z - a * hl * sn + e * hd * c));
+  rocks.push({ x, y: lo - sink * Sz.tall * k, z, yaw, k, v: Sz.v });
+}
+const contourYaw = (x, z) => { const [gx, gz] = grad(x, z, 3); return Math.atan2(gx, -gz) + Math.PI / 2; };
+const taken = [];
+const clearOf = (x, z, pad) =>
+  !LAYOUT.sites.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + pad) && pisteD(x, z, 40) > 12 && wadiAt(x, z, 40).d > wadi.width + 12
+  && gullyAt.every((g) => g(x, z, 30).d > 12);
+// CRESTS (in the box)
+for (let i = 0, tries = 0; i < 26 && tries < 30000; tries++) {
+  const x = PLAY.x0 + 12 + rand() * (PLAY.x1 - PLAY.x0 - 24), z = PLAY.z0 + 12 + rand() * (PLAY.z1 - PLAY.z0 - 24);
+  if (djebelD(x, z) < 8) continue;
+  const sl = slopeDeg(x, z);
+  if (sl < 8 || sl > 30 || hollow(x, z, 7) > -0.3) continue;      // a convex crest, the top of a face
+  if (!clearOf(x, z, 18) || taken.some((t) => Math.hypot(t.x - x, t.z - z) < 34)) continue;
+  const yaw = contourYaw(x, z) + (rand() - 0.5) * 0.35, c = Math.cos(yaw), sn = Math.sin(yaw);
+  const big = ofShape(rand() < 0.55 ? "block" : "mesa"), Bg = big[(rand() * big.length) | 0], kb = 0.55 + rand() * 0.35;
+  slab(x, z, yaw, Bg, kb, 0.35 + rand() * 0.15);
+  for (let j = 0, n = 1 + ((rand() * 2) | 0); j < n; j++) {
+    const side = rand() < 0.5 ? -1 : 1, pool = ofShape(rand() < 0.6 ? "low" : "block"), Sz = pool[(rand() * pool.length) | 0], k = 0.4 + rand() * 0.3;
+    const off = side * ((Bg.len * kb) / 2 + (Sz.len * k) / 2 * 0.75 + rand() * 2.5), across = (rand() - 0.5) * 3;
+    slab(x + off * c + across * sn, z - off * sn + across * c, yaw + (rand() - 0.5) * 0.6, Sz, k, 0.35 + rand() * 0.15);
+  }
+  taken.push({ x, z });
+  i++;
+}
+const crestSlabs = rocks.length;
+// CLIFFS (the frame's steep faces, seen from the box's edge)
+for (let i = 0, tries = 0; i < 40 && tries < 40000; tries++) {
+  const x = -W / 2 + 60 + rand() * (W - 120), z = -W / 2 + 60 + rand() * (W - 120), o = outside(x, z);
+  if (o < 12 || o > 150 || slopeDeg(x, z) < 22 || taken.some((t) => Math.hypot(t.x - x, t.z - z) < 30)) continue;
+  let cx = x, cz = z;
+  for (let j = 0, n = 3 + ((rand() * 3) | 0); j < n; j++) {
+    const yaw = contourYaw(cx, cz), pool = ofShape(rand() < 0.7 ? "mesa" : "block"), Sz = pool[(rand() * pool.length) | 0], k = 0.9 + rand() * 0.5;
+    slab(cx, cz, yaw + (rand() - 0.5) * 0.2, Sz, k, 0.45);
+    const step = Sz.len * k * 0.8;
+    cx += Math.cos(yaw) * step; cz -= Math.sin(yaw) * step;
+    if (slopeDeg(cx, cz) < 16) break;
+  }
+  taken.push({ x, z });
+  i++;
+}
+const r2 = (v) => Math.round(v * 100) / 100;
+fs.writeFileSync("games/alg-rts/maps/abdiRocks.js", `// GENERATED by tools/algAbdiLevel.mjs — do not edit: the sandstone outcrops on the djebel's crests (${crestSlabs}
+// slabs, in the box) and the frame's cliffs (${rocks.length - crestSlabs}). { x, y, z, yaw, k, v }: v an index into
+// algSandstone SANDSTONE_GAME, k its scale, y its base (sunk into the ground).
+export const ROCKS = [
+${rocks.map((r) => `  { x: ${r2(r.x)}, y: ${r2(r.y)}, z: ${r2(r.z)}, yaw: ${r2(r.yaw)}, k: ${r2(r.k)}, v: ${r.v} },`).join("\n")}
+];
+`);
+console.log(`rocks: ${crestSlabs} crest slabs in the box, ${rocks.length - crestSlabs} cliff slabs on the frame`);
+
 // ── Paint, by the relief — calm in the box, rock only on the frame ──────────
 const S = man.terrain.splatSize ?? man.splatRes;
 const splat = Buffer.alloc(S * S * 8);
 const put = (t, c, v) => { splat[(c >> 2) * S * S * 4 + t * 4 + (c & 3)] = v; };
-const pisteD = (x, z, r) => Math.min(...pisteAt.map((p) => p(x, z, r).d));
 for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const x = -W / 2 + ((j + 0.5) * W) / S, z = -W / 2 + ((i + 0.5) * W) / S, t = i * S + j;
   const w = new Float32Array(7), sl = slopeDeg(x, z), o = outside(x, z), frame = smoothstep(10, 50, o);
