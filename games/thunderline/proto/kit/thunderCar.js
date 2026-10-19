@@ -12,6 +12,7 @@
 import * as THREE from "three";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../../v3/render/foliage/glbLoader.js";
 import { WHEEL_LOCAL } from "../../../../v3/play/modularRoadVehicle.js";
+import { CAR_TUNE } from "./carTune.js";
 
 export const THUNDER_CAR_URL = "/models/thunderline/thunder_car.glb";
 export const THUNDER_CAR_LOD1_URL = "/models/thunderline/thunder_car_lod1.glb";
@@ -52,7 +53,16 @@ function build(root) {
   wheel.name = "ThunderWheel";
   wheel.add(wheelRoot);
   wheel.updateMatrixWorld(true);
-  const wb = new THREE.Box3().setFromObject(wheel), ws = wb.getSize(new THREE.Vector3());
+  // SIZED TO THE PHYSICS WHEEL (carTune.js): loading a wheel model also sets the car's physics radius, a
+  // shared global — this file's own wheel made the builder's prediction, the drive page and the tests
+  // roll on a different wheel from the one they were tuned on (the White tier's Halfpipe fell off, its
+  // laps drifted; bisected to 6131488f, 2026-10-20). The model is scaled to the tuned radius instead.
+  let ws = new THREE.Box3().setFromObject(wheel).getSize(new THREE.Vector3());
+  const fit = CAR_TUNE.wheel.radius / (ws.y / 2);
+  wheel.scale.setScalar(fit);
+  wheel.updateMatrixWorld(true);
+  ws = new THREE.Box3().setFromObject(wheel).getSize(new THREE.Vector3());
+  wheel.userData.fit = fit;
   wheel.traverse((o) => { if (o.isMesh) { o.castShadow = /tyre|tire|rim/i.test(`${o.material?.name} ${o.name}`); o.receiveShadow = false; } });
   // THE TYRE IS INSIDE-OUT in the file (864 of its 1008 triangles and their normals face inward). On a
   // DoubleSide node material that still draws, but faceDirection turns the shading normal INTO the rubber,

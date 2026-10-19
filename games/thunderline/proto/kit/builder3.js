@@ -16,13 +16,13 @@ import { library, settings, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD } from "./worlds.js";
-import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
+import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
 
 // the drive page's tune (carTune.js): the prediction drives the SAME car
-applyCarTune({ TIRE, WHEEL });
+applyCarTune({ TIRE, WHEEL, SOLID, CRASH });
 const ROAD_HOLD = new Set(["bank_in_22", "bank_out_22", "fast_turn_128"]);
 
 const $ = (id) => document.getElementById(id);

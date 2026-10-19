@@ -10,6 +10,15 @@ const _t = new THREE.Vector3();
 const _u = new THREE.Vector3();
 const _vdir = new THREE.Vector3();
 const UP = new THREE.Vector3(0, 1, 0);
+const _bankR = new THREE.Vector3();
+/** tan of a ride point's BANK: its up vector's tilt along the road's horizontal right (a slope is 0). */
+function bankTan(r) {
+  if (!r?.U) return 0;
+  _bankR.crossVectors(r.T, UP);
+  if (_bankR.lengthSq() < 1e-6) return 0; // the road points straight up or down (a loop's side)
+  const s = Math.min(0.999, Math.abs(r.U.dot(_bankR.normalize())));
+  return s / Math.sqrt(1 - s * s);
+}
 const WALL_SIN = Math.sin((30 * Math.PI) / 180);
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass
 const TUBE_R = 8; // tubeLook.js TUBE.R
@@ -158,7 +167,10 @@ export function createAutopilot(ride) {
       // A BANK raises that 26 m/s by the banked-curve rule (grip ~1: v² ∝ (tanθ + 1) / (1 − tanθ)); a
       // helix banked 20° held at 93 km/h otherwise. Steep banks (wall rides) keep the flat rule.
       // (the steeper of here and there: leaving a helix, the far point is already on the flat exit)
-      const tb = Math.tan(Math.acos(THREE.MathUtils.clamp(Math.min(farR.U?.y ?? 1, ride[best].U?.y ?? 1), -1, 1)));
+      // BANK ONLY, not slope: the road's up along its horizontal right. Read from U.y, a kicker's or a
+      // landing's 20° PITCH counted as a bank — the brake after a jump went, and the White tier's
+      // Halfpipe test lap fell off (2026-10-20)
+      const tb = Math.max(bankTan(farR), bankTan(ride[best]));
       const vCap = tb < 0.85 ? 26 * Math.sqrt((tb + 1) / (1 - tb)) : 26;
       const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > vCap && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
       // IN THE AIR, line up with the road across the gap (the landing): yaw the nose onto its

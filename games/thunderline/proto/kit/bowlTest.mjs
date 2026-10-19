@@ -18,7 +18,7 @@ const TMP = join(ROOT, `.bowlTest.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(SRC, "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, TIRE, WHEEL } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
+const { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const { createVehicleGround } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadGround.js")).href);
 const { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
@@ -32,7 +32,7 @@ Vehicle.prototype._buildMeshes = function () {
   this._wheelInstances = []; this._wheelParts = [];
 };
 Vehicle.prototype._updateTaillights = function () {};
-applyCarTune({ TIRE, WHEEL }); // the drive page's car (carTune.js)
+applyCarTune({ TIRE, WHEEL, SOLID, CRASH }); // the drive page's car (carTune.js)
 
 /** A run-up of new-kit straights, then the bowl. Returns the ground adapter + the lip height. */
 function buildRun(R, hand = "") {

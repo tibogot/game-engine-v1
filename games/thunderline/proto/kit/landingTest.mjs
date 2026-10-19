@@ -27,7 +27,7 @@ const TMP = join(ROOT, `.landingTest.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(SRC, "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, TIRE, AERO, CHASSIS, WHEEL } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
+const { Vehicle, FIXED_DT, TIRE, AERO, CHASSIS, WHEEL, SOLID, CRASH } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const { createVehicleGround } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadGround.js")).href);
 const { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
@@ -48,7 +48,7 @@ Vehicle.prototype._updateTaillights = function () {};
 
 // ---- the same tune and track as drive.html ----
 const TOP = 63;
-applyCarTune({ TIRE, WHEEL });
+applyCarTune({ TIRE, WHEEL, SOLID, CRASH });
 const built = {};
 for (const [id, t] of Object.entries(TILES)) built[id] = { b: integrate(t) };
 const lay = layoutTestTrack({ built, speed: TOP * 0.91, jumpSpeeds: [55.8, 48.6, 50.6], airDrag: AERO.drag / CHASSIS.mass });

@@ -20,7 +20,8 @@ const TMP = join(ROOT, `.trackRun.${process.pid}.mjs`);
 writeFileSync(TMP, readFileSync(join(ROOT, "v3/play/modularRoadVehicle.js"), "utf8")
   .replace(/^import \{ materialEmissive \}.*$/m, "const materialEmissive = null;")
   .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};"));
-const { Vehicle, FIXED_DT, TIRE, WHEEL } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
+const { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } = await import(pathToFileURL(TMP).href).finally(() => unlinkSync(TMP));
+export { Vehicle, FIXED_DT, SOLID, CRASH }; // wallTest.mjs drives this same module copy
 const { RoadBvh } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadBvh.js")).href);
 const { createVehicleGround } = await import(pathToFileURL(join(ROOT, "v3/play/modularRoadGround.js")).href);
 const { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS, NO_CHECKER } = await import(pathToFileURL(join(ROOT, "games/modular-road-v3/modularRoadKit.js")).href);
@@ -34,7 +35,7 @@ Vehicle.prototype._buildMeshes = function () {
   this._wheelInstances = []; this._wheelParts = [];
 };
 Vehicle.prototype._updateTaillights = function () {};
-applyCarTune({ TIRE, WHEEL });
+applyCarTune({ TIRE, WHEEL, SOLID, CRASH });
 const ts = process.argv.find((a) => a.startsWith("--tubesteer="));
 if (ts) globalThis.__TUBE_STEER = Number(ts.slice(12));
 const OPEN = process.argv.includes("--open"); // open edges: no rails

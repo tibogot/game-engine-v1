@@ -6,7 +6,7 @@
 // :9904-10040), minus everything a sky track doesn't need.
 import * as THREE from "three";
 import { float, abs, dot, vec3, normalView, positionViewDirection } from "three/tsl";
-import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
+import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
 import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
@@ -18,7 +18,7 @@ import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { library, campaign, contentKey } from "../../app/library.js";
 import { createAutopilot } from "./autopilot.js";
-import { applyCarTune } from "./carTune.js";
+import { applyCarTune, CAR_TUNE } from "./carTune.js";
 import { createCarRules, magnetZones } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
 import { createEngineModel } from "./engineModel.js";
@@ -98,7 +98,7 @@ const HUD_HTML = `
 export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunShadows: useSunShadows = false, ghost = true, car = "thunder" } = {}) {
   const { scene, camera, renderer } = app;
   const $ = (id) => document.getElementById(id);
-  applyCarTune({ TIRE, WHEEL }, top); // carTune.js: the builder's prediction drives this same car
+  applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top); // carTune.js: the builder's prediction drives this same car
   CHASE_CAM.fovSpeedRef = top; // "keep matching TIRE.topSpeed"
 
   // ---------- HUD ----------
@@ -173,7 +173,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       v.setChassisModel(tc.chassis.object, { brakeLights: tc.chassis.brakeLights, headlampLenses: tc.chassis.headlampLenses });
       v.setChassisStyle("glb");
       if (adopt) adoptCar(tc.wheel.object);
-      v.setWheelModel(tc.wheel.object, { radius: tc.wheel.radius, thickness: tc.wheel.width });
+      v.setWheelModel(tc.wheel.object, CAR_TUNE.wheel); // the PHYSICS wheel is the tuned one, whatever the model (thunderCar.js scales its wheel to it)
       v.setWheelStyle("glb");
       return true;
     }
@@ -189,7 +189,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
         vehicle.setChassisStyle("glb");
         const w = await loadWheelModel(renderer);
         adoptCar(w.object);
-        vehicle.setWheelModel(w.object, { radius: w.radius, thickness: w.width });
+        vehicle.setWheelModel(w.object, CAR_TUNE.wheel);
         vehicle.setWheelStyle("glb");
       }
     } catch (e) {
@@ -204,7 +204,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       ghostCar.setChassisModel(gm.object, { brakeLights: gm.brakeLights, headlampLenses: gm.headlampLenses });
       ghostCar.setChassisStyle("glb");
       const gw = await loadWheelModel(renderer);
-      ghostCar.setWheelModel(gw.object, { radius: gw.radius, thickness: gw.width });
+      ghostCar.setWheelModel(gw.object, CAR_TUNE.wheel);
       ghostCar.setWheelStyle("glb");
       ghostify(ghostCar.group);
       ghostStyled = true;
