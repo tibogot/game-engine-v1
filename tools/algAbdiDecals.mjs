@@ -126,11 +126,25 @@ const S = Object.fromEntries(LAYOUT.sites.map((s) => [s.kind + ":" + s.name, s])
 const stats = {};
 // RUTS on every piste
 stats.ruts = LAYOUT.pistes.reduce((a, p) => a + strip("ruts", p, { opacity: 0.7, skip: 0.12, wander: 0.4 }), 0);
+// (a trail WANDERS: every ~12 m a bend of ±3 m — 2026-10-19: straight 10 m strips read as a ruled pencil line)
+const meander = (pts) => {
+  const out = [pts[0]];
+  for (let k = 1; k < pts.length; k++) {
+    const [ax, az] = pts[k - 1], [bx, bz] = pts[k], len = Math.hypot(bx - ax, bz - az), n = Math.max(1, Math.round(len / 12));
+    const nx = -(bz - az) / len, nz = (bx - ax) / len;
+    for (let i = 1; i <= n; i++) {
+      const t = i / n, j = i < n ? (hash(ax + i, az - i, 9) - 0.5) * 6 : 0;
+      out.push([ax + (bx - ax) * t + nx * j, az + (bz - az) * t + nz * j]);
+    }
+  }
+  return out;
+};
 // TANK TRACKS: out of the post, over the middle ford to the souk; and east to the hamlet (off the piste, the
 // armour cuts the corner)
 const post = site("Poste"), souk = site("Abdi"), hamlet = site("Mechta"), farm = site("Ferme"), oasis = site("Aïn"), dechra = site("Dechra"), camp = site("Katiba"), cave = site("Grotte"), koubba = site("Sidi"), sheep = site("Bergerie"), pass = site("Débouché"), kef = site("Kef");
-stats.tank = strip("tankTracks", [[post.x - 10, post.z - 25], [80, 110], [45, 58], [25, 25]], { opacity: 0.75, skip: 0.2, wander: 1.2, priority: 2 })
-  + strip("tankTracks", [[post.x + 15, post.z - 25], [150, 110], [168, 60], [hamlet.x - 8, hamlet.z + 20]], { opacity: 0.7, skip: 0.25, wander: 1.2, priority: 2 });
+// (continuous and wandering: with gaps and straight runs they read as a dashed road marking — 2026-10-19)
+stats.tank = strip("tankTracks", meander([[post.x - 10, post.z - 25], [80, 110], [45, 58], [25, 25]]), { opacity: 0.75, skip: 0, wander: 0.3, priority: 2 })
+  + strip("tankTracks", meander([[post.x + 15, post.z - 25], [150, 110], [168, 60], [hamlet.x - 8, hamlet.z + 20]]), { opacity: 0.7, skip: 0, wander: 0.3, priority: 2 });
 // FOOT PATHS between the places people walk
 const paths = [
   [[oasis.x, oasis.z], [-120, 75], [farm.x, farm.z]],
@@ -142,7 +156,7 @@ const paths = [
   [[oasis.x, oasis.z], [-30, 60], [souk.x - 10, souk.z + 35]],
   [[kef.x, kef.z], [150, -140], [pass.x + 15, pass.z - 5]],
 ];
-stats.paths = paths.reduce((a, p) => a + strip("footPath", p, { opacity: 0.8, skip: 0.1, wander: 0.5 }), 0);
+stats.paths = paths.reduce((a, p) => a + strip("footPath", meander(p), { opacity: 0.8, skip: 0.1, wander: 0.3 }), 0);
 // APRONS and SWEPT YARDS at the places
 stats.aprons = 0;
 for (const s of LAYOUT.sites) {
@@ -166,6 +180,21 @@ for (const [x, z, n] of [[pass.x, pass.z, 3], [souk.x + 30, souk.z + 30, 2], [ke
     box("debris", px + 1, pz - 1, hash(px, pz, 6) * 6.28, { opacity: 0.8, k: 0.5 + hash(px, pz, 7) * 0.4, priority: 2 });
     stats.scorch++;
   }
+}
+// THE LOOKS tuned in the game (Dev → Decals, algDecalPanel.js → kinds.json): per kind, over what the rules laid
+const LOOKS = JSON.parse(fs.readFileSync(path.join(DIR, "kinds.json"), "utf8"));
+const slotKind = (i) => slotKey[i].replace(/_\d+$/, "");
+for (const d of decals) {
+  const lk = LOOKS[slotKind(d.slot)];
+  if (!lk) continue;
+  const t = [1, 3, 5].map((i) => parseInt(d.tint.slice(i, i + 2), 16) / 255), w = lk.warmth ?? 0, k = lk.darkness ?? 1;
+  const c = [t[0] * k * (1 + 0.25 * w), t[1] * k * (1 + 0.04 * w), t[2] * k * (1 - 0.3 * w)];
+  d.tint = "#" + c.map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, "0")).join("");
+  d.opacity = Math.min(1, d.opacity * (lk.strength ?? 1));
+  d.sx *= lk.size ?? 1; d.sz *= lk.size ?? 1;
+  d.normalStrength *= lk.relief ?? 1;
+  if (lk.match != null) d.match = lk.match;
+  if (lk.edge != null) d.edgeFade = lk.edge;
 }
 man.decals = { ...(man.decals ?? {}), slots, decals };
 const bytes = await writeProject(FILE, { manifest: man, blobs: project.blobs });

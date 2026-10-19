@@ -467,7 +467,9 @@ export function createGroundCache({
     m.blendSrc = THREE.SrcAlphaFactor;
     m.blendDst = THREE.OneMinusSrcAlphaFactor;
     m.blendSrcAlpha = THREE.ZeroFactor;
-    m.blendDstAlpha = THREE.OneFactor;
+    // Colour: a decal takes the texel from the paint under it, as a splat does (dst alpha = "how much bare
+    // paint": DETAIL and CALM read it — calm smoothed the decals into smudges, 2026-10-19); normal: kept.
+    m.blendDstAlpha = which === "colour" ? THREE.OneMinusSrcAlphaFactor : THREE.OneFactor;
     // The quad's winding flips once it is laid on world XZ and seen from
     // above: both sides, or every splat and decal is culled as a back face.
     m.side = THREE.DoubleSide;
@@ -1252,7 +1254,8 @@ export function createGroundCache({
     let col = c.rgb.mul(c.rgb);
     let calmK = float(0);
     if (O.calm) {
-      calmK = smoothstep(uCalm.y, uCalm.z, foot).toVar();
+      // (only the BARE paint: a splat or a decal laid over it keeps its own crisp detail — c.a, the paint's share)
+      calmK = smoothstep(uCalm.y, uCalm.z, foot).mul(c.a).toVar();
       const ic = min(ia.add(O.calmRing), N - 1);
       const cc = colNode.sample(pv.div(float(extentOf(0)).mul(exp2(ic)))).depth(int(ic));
       col = mix(col, cc.rgb.mul(cc.rgb), calmK.mul(uCalm.x));

@@ -9,6 +9,8 @@ import { buildFogBanksPanel } from "../shared-rts/fogBanksPanel.js";
 import { WEATHER } from "./algFog.js";
 import { buildAlgSoundPanel } from "./algSounds.js";
 import { GIBS } from "./algCombat.js";
+import { buildDecalPanel } from "./algDecalPanel.js";
+import { MAP } from "./layout.js";
 
 const DEG = Math.PI / 180;
 
@@ -295,6 +297,14 @@ export function createAlgDevPanel({ app, rtsCamera, light: AURES_LIGHT, applyLig
     if (soar) bs.button("Go to the vultures", () => { rtsCamera.focusOn(soar.circle.x, soar.circle.z); rtsCamera.setZoom?.(0.6); });
     bs.toggle("Birds on", { get: () => birds.params.enabled, set: (v) => birds.setEnabled(v) });
     bs.hint("Storks cross and land in the open, crows straggle, vultures circle the heights for good; a pair on the minaret's nest. Men, jeeps and helicopters put a stand up.");
+  }
+
+  // ── Decals (algDecalPanel.js): each kind of ground mark tuned live, on the real ground ──
+  if (app.decals?.decals?.length) {
+    const dsec = panel.section("Decals", { open: true });
+    const dp = buildDecalPanel(dsec, { app, rtsCamera, mapId: MAP.id });
+    dp?.setRefresh(() => panel.refresh());
+    app.decalPanel = dp;   // (the console: app.decalPanel.looks(), .apply())
   }
 
   // ── Performance ─────────────────────────────────────────────────────────

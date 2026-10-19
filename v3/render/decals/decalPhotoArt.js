@@ -440,11 +440,12 @@ function charred({ xm, vm, W, L, n }) {
   const spokes = 13, s = ((th / (Math.PI * 2)) + 1) * spokes, i = Math.floor(s), f = s - i;
   const len = 0.45 + 0.5 * Math.pow(n(i * 7.7 + 0.5, 3.1), 0.8);
   const wedge = 1 - smoothstep(0.15, 0.9, Math.abs(f - 0.5) * 2 + (fbm(n, xm * 1.6, vm * 1.6, 3) - 0.5) * 0.5);
-  const soot = wedge * (1 - smoothstep(len * 0.45, len, r));
+  const soot = smoothstep(0.35, 0.6, wedge) * (1 - smoothstep(len * 0.7, len, r));   // (crisp streaks)
   const ragged = (fbm(n, xm * 1.1, vm * 1.1, 4) - 0.5) * 0.28;
-  const core = 1 - smoothstep(0.1, 0.34, r + ragged * 0.6);
-  const burn = 1 - smoothstep(0.3, 0.62, r + ragged);
-  const halo = 1 - smoothstep(0.55, 0.95, r + ragged * 1.2);
+  // (edges TIGHT — 2026-10-19: wide smoothsteps read as a smudge at the RTS zoom; CoH's burns end sharp and ragged)
+  const core = 1 - smoothstep(0.16, 0.24, r + ragged * 0.7);
+  const burn = 1 - smoothstep(0.44, 0.5, r + ragged * 1.3);
+  const halo = 1 - smoothstep(0.62, 0.9, r + ragged * 1.4);
   const unburnt = smoothstep(0.58, 0.68, fbm(n, xm * 0.9 + 7, vm * 0.9 + 3, 3)) * (1 - core);   // the burn skipped a patch
   const dark = Math.max(core, burn * 0.75, soot * 0.6) * (1 - 0.8 * unburnt);
   return {
