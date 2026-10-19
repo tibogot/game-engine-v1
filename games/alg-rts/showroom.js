@@ -522,11 +522,14 @@ export async function placeShowroom(app, list = SHOWROOM) {
     // The plants too (grass, trees, reeds, oleander): one wind on screen — scaled per map (MAP.foliageWind,
     // 2026-10-19, you: "in CoH there is no wind on foliage"; the flags keep the full wind). ?plantwind=0..1 = A/B.
     const k = Number(new URLSearchParams(location.search).get("plantwind") ?? MAP.foliageWind ?? 1);
-    app.setWind?.({ angleDeg: w.dirDeg, strength: (0.3 + 2.2 * w.strength) * k, gust: (0.15 + 0.6 * w.gust) * Math.min(1, k * 2) });
+    app.setWind?.({ angleDeg: w.dirDeg, strength: (0.3 + 2.2 * w.strength) * k, gust: (0.15 + 0.6 * w.gust) * Math.min(1, k * 2), flutter: Math.min(1, k * 2) });
     // …and the PLACED trees and bushes (the oaks, the oleanders — PlacedFoliage), which kept their own
     // default sway (0.16 rad) whatever the map asked: you saw them still moving at 0.
     const r = (w.dirDeg * Math.PI) / 180;
     app.algPlacedFoliage?.setWind(Math.cos(r), Math.sin(r), 0.16 * k);
+    // the leaves' own FLUTTER too (it runs whatever the wind: you, 2026-10-19, "every foliage and every tree
+    // still moves" — measured: the leaves changed in 0.7 s with the strength AND the speed at 0)
+    if (app.algPlacedFoliage?.u?.uFlutter) app.algPlacedFoliage.u.uFlutter.value = 0.7 * Math.min(1, k * 2);
   });
   const socks = [];
   for (const e of list) {

@@ -1014,7 +1014,8 @@ export class FoliageScatterSystem {
       fadeEnd: fs.fadeEnd,
       slopeMinY: fs.slopeMinY,
     });
-    this.u.uFlutter.value = fs.flutter;
+    // (× the world wind's flutter share — app.setWind({ flutter }): a game may still every leaf; 1 by default)
+    this.u.uFlutter.value = fs.flutter * (gp?.windFlutter ?? 1);
     this.u.uGlowLight.value = fs.glowLight;
     this.u.uTransMul.value = fs.translucencyMul;
     if (sunDir) this.u.uSunDir.value.copy(sunDir).normalize();
