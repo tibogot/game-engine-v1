@@ -42,7 +42,7 @@ const SNAP_COLORS = { end: 0x45e08a, arc: 0xff9a3d, local: 0xc78bff, world: 0x3f
 const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
-  { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_down_12", "rollers_64"] },
+  { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },

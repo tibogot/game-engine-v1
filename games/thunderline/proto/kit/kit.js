@@ -49,6 +49,11 @@ export function integrate(tile, opts = {}) {
   let s = 0;
   let lean = tile.segs[0].leanIn ?? 0;
   const last = { T: T.clone(), U: U.clone(), lean, s: 0 };
+  // RISE (helices): the whole piece lifts by `tile.rise` m along world up, eased over its full length
+  // (level at both ends, so it meets any flat road), the frames staying level (≤ ~6° of slope)
+  const rise = tile.rise ?? 0;
+  const Ltot = tile.segs.reduce((a, g) => a + g.L, 0);
+  let risen = 0;
 
   const emit = (segIdx, mark) => {
     rings.push({ p: p.clone(), T: T.clone(), U: U.clone(), R: R.clone(), lean, s, seg: segIdx, mark, pivot: tile.twistPivot });
@@ -80,8 +85,15 @@ export function integrate(tile, opts = {}) {
         p.addScaledVector(R0, want - shifted);
         shifted = want;
       }
+      if (rise) {
+        const want = rise * q5(Math.min(1, (s + ds) / Ltot));
+        p.y += want - risen;
+        risen = want;
+      }
       s += ds;
       lean = leanIn + (leanOut - leanIn) * q5((x0 + ds) / L);
+      // BANK: extra lean shaped like the curvature (0 at both ends) — a banked turn that meets flat road
+      if (seg.bank) lean += seg.bank * weight(x0 + ds) / norm;
       const turned = Math.max(Math.acos(Math.min(1, last.T.dot(T))), Math.acos(Math.min(1, last.U.dot(U))), Math.abs(lean - last.lean));
       const end = i === n - 1;
       if (markEdge(tile, last.s, s)) {
@@ -361,6 +373,12 @@ export const TILES = {
     // an S in the vertical: tip down 15°, then back to level — exits level, ~12.5 m lower
     segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }],
   },
+  slope_up_12: { label: "Slope up ~12 m", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
+  // HELIX (PIECES §7c, "use height" on small maps): a full circle (R 56) that climbs or drops 20 m over
+  // itself — the exit runs on, in the entry's heading, 20 m above / below it. Banked with the curvature
+  // (level at both ends, so it meets any flat road).
+  helix_up_360: { label: "Helix up 360°", segs: [{ L: turnLen(56, 2 * Math.PI, 40), turn: 2 * Math.PI, ramp: 40, bank: 20 * DEG }], rise: 20 },
+  helix_down_360: { label: "Helix down 360°", segs: [{ L: turnLen(56, 2 * Math.PI, 40), turn: 2 * Math.PI, ramp: 40, bank: 20 * DEG }], rise: -20 },
 };
 // LEFT-HAND VERSIONS: every piece that turns, leans or steps sideways gets a mirror, `<id>_L`
 // (turn, lean and the loop's sideways step negated). A test track of only right turns spiralled into
@@ -377,6 +395,7 @@ for (const [id, t] of Object.entries({ ...TILES })) {
       ...(s.leanIn !== undefined ? { leanIn: -s.leanIn } : {}),
       ...(s.leanOut !== undefined ? { leanOut: -s.leanOut } : {}),
       ...(s.offset ? { offset: -s.offset } : {}),
+      ...(s.bank ? { bank: -s.bank } : {}),
     })),
   };
 }

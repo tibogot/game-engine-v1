@@ -155,7 +155,12 @@ export function createAutopilot(ride) {
       const grounded = car.groundedCount > 0;
       // brake for flat brake turns only: not banked sweepers, not loops (their far point is above/behind)
       // (never in a tube: its wall holds the car, nobody brakes in there — it braked every tube to 93 km/h)
-      const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > 26 && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
+      // A BANK raises that 26 m/s by the banked-curve rule (grip ~1: v² ∝ (tanθ + 1) / (1 − tanθ)); a
+      // helix banked 20° held at 93 km/h otherwise. Steep banks (wall rides) keep the flat rule.
+      // (the steeper of here and there: leaving a helix, the far point is already on the flat exit)
+      const tb = Math.tan(Math.acos(THREE.MathUtils.clamp(Math.min(farR.U?.y ?? 1, ride[best].U?.y ?? 1), -1, 1)));
+      const vCap = tb < 0.85 ? 26 * Math.sqrt((tb + 1) / (1 - tb)) : 26;
+      const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > vCap && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
       // IN THE AIR, line up with the road across the gap (the landing): yaw the nose onto its
       // direction, pitch onto its slope, roll onto its up — proportional, in the car's own frame
       // (measured: +yaw turns the nose to the car's +X, +pitch raises it, +roll drops the +X side).

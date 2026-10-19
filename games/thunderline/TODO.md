@@ -4,16 +4,18 @@ Kept here so nothing gets lost between sessions. Design reasons live in DESIGN.m
 this is just the list. Newest decisions at the top of each section. Last updated 2026-10-19.
 
 ## Now
-- [ ] **THE NEW CAR — optimise hard** (user, 2026-10-19: "as optimized as possible"). In the game today
-      (thunderCar.js, Settings → Car), unoptimised: 69 draws, 57 shadow casters, 71.6k tris, 26 materials,
-      24 Mpx raw textures (the Lotus: 18 / 4 / 87.7k / 18 / 5.1 Mpx KTX2). Plan: body merged by material
-      (~6–8 draws), wheels 10 parts → 2–3 + tread normal map (~3–4k tris), one shadow proxy + tyres
-      (~3 casters), trims/lights atlas + KTX2 (~3 Mpx, file ~2–3 MB), simple interior, LOD1 ~8k for the
-      ghost, calipers that steer, the beige tyres (missing uv). Then measure in game, the user checks the
-      look, commit assets-src/car/thunder_car.glb. First: the side-vent shading fix (a subagent's result
-      in scratchpad/car/saba3/) — show the user before / after.
+- [ ] **THE NEW CAR — PAUSED** (user, 2026-10-19: "make a pause on the car", the game first). Done, not
+      committed: optimised LOD0 + LOD1 + ShadowProxy in public/models/thunderline/ (KTX2 + meshopt):
+      measured 17 draws (was 69), 2 casters (was 57), 29.6k tris, 11 materials, 6.5 Mpx; the ghost uses
+      LOD1. OPEN: the tyres read TAN in the drive page (dark in carview). Ruled out: the KTX2 copy (raw PNG
+      the same), the metal/rough map, the inside-out tyre (fixed anyway: thunderCar.js turnOutward). A
+      black tint does darken it, so it is the albedo × light. Next guess: compare the Lotus tire's
+      texture level and the drive page's light; screenshot only after a few seconds (the first frames are
+      stale). Also: calipers that steer; the user checks the look; commit.
 - [ ] Credit in the game (CC BY): "Saba V12 '95 - Low poly model" by DanielZhabotinsky.
-- [ ] Next pieces on small maps (Green tier): gap jump, half-pipe, rollers, skylight tube.
+- [ ] Next pieces on small maps (Green tier): gap jump, half-pipe, rollers, HELIX up / down (banked
+      20°, R 56, ±20 m over itself; the real car holds 136 km/h round it) and slope up — done; skylight
+      tube next. (The PIECES.md §7d turn set was already built: sweeps, S-bend, snake, hairpin.)
 - [ ] Editor: insert / replace a piece mid-track, a height cue under the piece in hand, close a circuit.
 - [ ] **Tube entrance / exit shape** — the user finds the curl "cheap" ("I don't like the way it does
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.

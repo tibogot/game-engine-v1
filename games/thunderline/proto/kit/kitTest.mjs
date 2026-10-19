@@ -37,7 +37,8 @@ for (const [id, t] of Object.entries(TILES)) {
   const wantPitch = t.segs.reduce((a, s) => a + (s.pitch ?? 0), 0);
   const heading = Math.atan2(e.T.x, -e.T.z); // + = turned right
   const pitch = Math.asin(e.T.y);
-  if (!t.segs.some((s) => s.pitch) && Math.abs(heading - wantTurn) > 1e-4) fail(`${id}: turned ${heading / DEG}° want ${wantTurn / DEG}°`);
+  const turnErr = Math.atan2(Math.sin(heading - wantTurn), Math.cos(heading - wantTurn)); // a helix turns a full 360°
+  if (!t.segs.some((s) => s.pitch) && Math.abs(turnErr) > 1e-4) fail(`${id}: turned ${heading / DEG}° want ${wantTurn / DEG}°`);
   if (!t.segs.some((s) => s.turn) && Math.abs(wantPitch) < Math.PI && Math.abs(pitch - wantPitch) > 1e-4) fail(`${id}: pitched ${pitch / DEG}° want ${wantPitch / DEG}°`);
   if (Math.abs(wantPitch - 2 * Math.PI) < 1e-9 && (Math.abs(e.T.z + 1) > 1e-4 || Math.abs(e.p.y) > 1e-3)) fail(`${id}: loop doesn't come out level and forward (T ${e.T.toArray()}, y ${e.p.y})`);
   const tpm = tris / b.L;
