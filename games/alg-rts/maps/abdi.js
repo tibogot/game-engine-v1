@@ -25,7 +25,7 @@ export const LAYOUT = {
     { kind: "town", name: "Abdi (souk)", x: 15, z: -10, r: 40, knoll: [5, -55, 60], point: true },
     { kind: "oasis", name: "Aïn Abdi", x: -75, z: 95, r: 24, point: true },
     { kind: "hamlet", name: "Mechta el Djorf", x: 175, z: 25, r: 30, point: true },
-    { kind: "farm", name: "Ferme Ouled Saïd", x: -185, z: 45, r: 20, point: true },
+    { kind: "farm", name: "Ferme Ouled Saïd", x: -160, z: 55, r: 20, point: true },   // (pulled toward the middle: the west lane)
     { kind: "dechra", name: "Dechra Taghit", x: -195, z: -55, r: 30, point: true },
     { kind: "koubba", name: "Sidi Ali", x: -230, z: -95, r: 10 },
     { kind: "pass", name: "Débouché du ravin", x: 85, z: -110, r: 16, point: true },
@@ -42,7 +42,8 @@ export const LAYOUT = {
   ],
   pistes: [
     [[110, 165], [70, 110], [40, 55], [20, 10]],                // the post to the souk, over the middle ford
-    [[70, 110], [-20, 100], [-75, 95], [-150, 60], [-185, 45]],  // west: the oasis, the farm
+    [[70, 110], [-20, 100], [-75, 95], [-160, 55]],              // west: the oasis, the farm
+    [[-160, 55], [-175, 0], [-195, -55]],                        // the WEST LANE: the farm up to the dechra (the French way west)
     [[110, 165], [150, 90], [175, 25], [200, -80]],               // east: the hamlet, the sheepfold
   ],
   // supply (munitions / fuel), placed in the gaps the sketch measures
@@ -54,10 +55,15 @@ export const LAYOUT = {
     { name: "Source du ravin", x: -120, z: -40, res: "mun" },
     { name: "Col du ravin est", x: -20, z: -150, res: "fuel" },
     { name: "Terrasses", x: -110, z: 10, res: "mun" },
-    { name: "Gué de l'ouest", x: -165, z: 120, res: "fuel" },
+    { name: "Gué de l'ouest", x: -140, z: 135, res: "fuel" },
     { name: "Piste de la bergerie", x: 200, z: -20, res: "mun" },
     { name: "Hauteurs du souk", x: 70, z: -60, res: "fuel" },
     { name: "Vergers du sud", x: 0, z: 180, res: "mun" },
     { name: "Crête nord", x: 60, z: -200, res: "mun" },
+    // the FLN's own pair by its start (CoH: a fuel and a munitions point near each base)
+    { name: "Cache du camp", x: -95, z: -205, res: "mun" },
+    { name: "Bergerie du djebel", x: -205, z: -130, res: "fuel" },
+    // the west lane's middle, between the farm and the dechra
+    { name: "Moulin de l'oued", x: -205, z: 5, res: "fuel" },
   ],
 };
