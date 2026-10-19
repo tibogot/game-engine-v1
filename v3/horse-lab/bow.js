@@ -360,6 +360,7 @@ function makeBow() {
 // ── the arrow ────────────────────────────────────────────────────────────────
 // +z from the nock throat (0) to the point (0.76 m: the robot draws ~64 cm); shared geometry and materials
 const ARROW_LEN = 0.84;   // (longer than the draw, ~0.77 m at full draw with the bow arm straight)
+const WALK_LEGS = new Set(["pelvis", "thigh_l", "thigh_r", "calf_l", "calf_r", "foot_l", "foot_r", "ball_l", "ball_r"]);
 const TWIST_R0 = -165, TWIST_R1 = 5, TWIST_R = [TWIST_R0, TWIST_R1];   // the right forearm's roll range (forearmTwist), relaxed −90
 let ARROW = null;
 function arrowParts() {
@@ -601,6 +602,28 @@ export class Archer {
     l.x *= k; l.z *= k; l.y = cy + dy * k;
     return hl.localToWorld(l);
   }
+  // WALKING WHILE AIMING: the legs and pelvis from Mixamo's "Standing Aim Walk" clips
+  // (Forward / Back / Left / Right — in place, the arrow straight ahead, the hips side-on),
+  // over the shot's upper body. The movement's direction in the aim's frame picks the clips
+  // (a diagonal blends two); one shared phase, advanced by the distance walked over each
+  // clip's stride, so the feet keep pace with the ground.
+  walkLegs(dt, aw) {
+    const W = this.aimWalk, v = this.rd.mountSys.aimVel;
+    if (!W || !v) return;
+    const speed = v.length(), a = this.aimYawLast ?? 0;
+    const f = v.x * Math.sin(a) + v.z * Math.cos(a), l = v.x * Math.cos(a) - v.z * Math.sin(a);
+    const want = smooth(clamp(speed / 0.35, 0, 1));
+    this.walkW = (this.walkW ?? 0) + (want - (this.walkW ?? 0)) * lerpK(10, dt);
+    if (this.walkW < 0.01) return;
+    const ws = [["Forward", Math.max(0, f)], ["Back", Math.max(0, -f)], ["Left", Math.max(0, l)], ["Right", Math.max(0, -l)]].filter(([n, x]) => x > 1e-4 && W[n]);
+    if (speed > 0.02 && ws.length) this.walkDir = ws;               // (the last direction holds while it stops)
+    const use = (this.walkDir ?? []).sort((x, y) => y[1] - x[1]).slice(0, 2), tot = use.reduce((s2, [, x]) => s2 + x, 0) || 1;
+    // the phase: the distance walked over the blended stride (a clip's speed × its length)
+    const stride = use.reduce((s2, [n, x]) => s2 + (x / tot) * W[n].speed * W[n].duration, 0) || 1;
+    this.walkU = ((this.walkU ?? 0) + (dt * speed) / stride) % 1;
+    let acc = 0;
+    use.forEach(([n, x], i) => { acc += x; W[n].apply(this.walkU * W[n].duration, aw * this.walkW * (i === 0 ? 1 : x / acc), { only: WALK_LEGS, loop: true }); });
+  }
   // the clip's time for this moment of the shot (Mixamo "Shooting Arrow": fetch 0–1.95,
   // draw 1.95–2.8, hold, release 3.85, arms down by 4.8)
   baseTime() {
@@ -789,6 +812,7 @@ export class Archer {
       // draw elbow 18 cm over the arrow line; archers keep the shoulders down and level)
       const down = smooth(this.ext ?? 0) * 0.85 * aw;
       if (down > 0) for (const c of this.clavBind) c.bone.quaternion.slerp(c.clip, down);   // (toward the idle's shoulders: the bind's sat higher, the draw elbow 10 cm over the arrow)
+      this.walkLegs(dt, aw);
       // what the clip's own arms do this frame (the corrections start from them)
       const aR = B.arms[1], aL = B.arms[0];
       this.baseArm = {
@@ -804,10 +828,16 @@ export class Archer {
     const { P, d: dAim } = this.edit?.aim ?? this.aimFrom(camera, from);
     this.aimPoint = P;
     const aimYaw = Math.atan2(dAim.x, dAim.z), aimPitch = Math.asin(clamp(dAim.y, -1, 1));
+    this.aimYawLast = aimYaw;                                       // (the feet walk in the aim's frame — next frame's movement reads it)
     // ── stance: side-on to the target (the feet turn; next frame's walk/idle
     // follows, the rig is turned now)
     if (aw > 0) {
-      const want = base ? aimYaw - this.base.arrowYaw : aimYaw - Math.PI / 2 + BP.hipOpen;   // (mocap: turned so ITS arrow line points at the target)
+      // (mocap: turned so ITS arrow line points at the target — walking, the walk clips' own
+      // stance: they hold the hips ~14° squarer to the arrow than the shot, and stood at the
+      // shot's the legs stepped 14° off the way the body went: the feet skidded)
+      const wa = base && this.walkW > 0.01 && this.walkDir?.length ? this.walkDir.reduce((s2, [n, x]) => s2 + x * (this.aimWalk[n].arrowYaw ?? this.base.arrowYaw), 0) / (this.walkDir.reduce((s2, [, x]) => s2 + x, 0) || 1) : null;
+      const arrowRel = base ? (wa == null ? this.base.arrowYaw : this.base.arrowYaw + (wa - this.base.arrowYaw) * this.walkW) : 0;
+      const want = base ? aimYaw - arrowRel : aimYaw - Math.PI / 2 + BP.hipOpen;
       const dy = Math.atan2(Math.sin(want - ms.gyaw), Math.cos(want - ms.gyaw));
       ms.gyaw += dy * lerpK(9 * aw, dt);
       rig.quaternion.setFromAxisAngle(UP, ms.gyaw); rig.updateMatrixWorld(true);

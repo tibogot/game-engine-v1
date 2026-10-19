@@ -557,7 +557,7 @@ export class RiderController {
 
   update(dt, { lookYaw = 0, input = {} } = {}) {
     if (!this.r.rig.visible) return;
-    if (this.mountSys.update(dt, { fwd: input.fwd ?? 0, turn: input.turn ?? 0, run: !!input.run, hold: !!input.hold })) return;   // on foot / mounting
+    if (this.mountSys.update(dt, { fwd: input.fwd ?? 0, turn: input.turn ?? 0, run: !!input.run, hold: !!input.hold, aimYaw: input.aimYaw })) return;   // on foot / mounting
     const hc = this.hc, B = this.B, rig = this.r.rig;
     // Restore what the ANIMATION wrote last frame (not the rest pose): the
     // mixer skips a bone whose animated value did not change since its last

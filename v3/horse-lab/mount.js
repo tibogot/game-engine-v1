@@ -39,6 +39,7 @@ export const MP = {
   walkSpeed: 1.35,        // m/s on foot
   jogSpeed: 3.2,
   turnRate: 2.6,          // rad/s on foot
+  aimFwd: 1.08, aimBack: 0.88, aimSide: 1.38,   // m/s walking while aiming (the Mixamo aim walks' own speeds)
   reach: 3.2,             // m: how close to the horse F mounts
   stand: 0.66,            // m (× k) out from the saddle centre: an arm's length from the horse — room for the left knee to come up
   standZ: -0.02,          // m (× k) forward of the saddle centre: beside the saddle, just behind the stirrup (reference)
@@ -509,7 +510,19 @@ export class MountSystem {
   updateFoot(dt, input) {
     const rd = this.rd, r = rd.r, rig = r.rig, hc = this.hc;
     let fwd = input.fwd, turn = input.turn, run = input.run;
-    if (input.hold) { fwd = 0; turn = 0; run = false; }        // aiming the bow: stand (the bow turns the body)
+    // AIMING the bow: walk in the AIM's frame — W/S toward / away from the target, A/D step
+    // sideways (the body stays side-on, the bow on the aim) — at the Mixamo aim walks' own
+    // speeds (forward 1.08, back 0.88, sideways 1.4 m/s: the legs' clips match, no sliding)
+    if (input.hold) {
+      const a = input.aimYaw ?? this.gyaw, af = new V3(Math.sin(a), 0, Math.cos(a)), al = new V3(Math.cos(a), 0, -Math.sin(a));
+      const f = clamp(fwd, -1, 1), l = clamp(turn, -1, 1);
+      const want = af.multiplyScalar(f * (f >= 0 ? MP.aimFwd : MP.aimBack)).addScaledVector(al, l * MP.aimSide);
+      if (want.lengthSq() > 1e-6 && Math.hypot(f, l) > 1) want.multiplyScalar(1 / Math.hypot(f, l));
+      this.aimVel ??= new V3();
+      this.aimVel.lerp(want, 1 - Math.exp(-8 * dt));
+      fwd = 0; turn = 0; run = false; this.gv = 0;
+      this.gpos.addScaledVector(this.aimVel, dt);
+    } else if (this.aimVel) this.aimVel.set(0, 0, 0);
     if (this.mode === "approach") {
       // walk to the mounting spot, then turn to face the horse, then mount
       const { toW, q } = this.frame(), k = rd.k, s = this.side;

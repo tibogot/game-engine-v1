@@ -77,7 +77,11 @@ function basis(a, b) {
 export function bakeMixamoOnto(ref, robot, fps = 30) {
   // (ref.ue: the SOURCE is UE-named — the robot's own clips onto another figure; its bones
   // are then read under their Mixamo names, ref.bone takes Mixamo names too)
-  const S = restOf(skinOf(ref.root), !!ref.ue), D = restOf(skinOf(robot));
+  // (a clip downloaded "Without Skin" has no rest pose of its own: every Mixamo clip shares
+  // Y Bot's skeleton and T-pose, so it reads the rest from a skinned Mixamo file — ref.restFrom)
+  const sSkin = skinOf(ref.root) ?? (ref.restFrom && skinOf(ref.restFrom));
+  if (!sSkin) throw new Error("no rest pose: a clip without skin needs ref.restFrom (a skinned Mixamo file)");
+  const S = restOf(sSkin, !!ref.ue), D = restOf(skinOf(robot));
   const maps = MAP.filter((m) => D[m.dst] && S[m.src]);
   // the body's side axis in each rest (left minus right), and up (pelvis → neck)
   const sideOf = (R, l, r) => R[l].p.clone().sub(R[r].p).normalize();
@@ -178,18 +182,40 @@ function makePlayer(robot, data) {
       return new THREE.AnimationClip(name, duration, tracks);
     },
     /** pose the robot at clip time t, blended over its current pose by w (0..1) */
-    apply(t, w = 1, { hips: moveHips = true } = {}) {
+    apply(t, w = 1, { hips: moveHips = true, only = null, loop = false } = {}) {
       if (w <= 0) return;
-      const x = THREE.MathUtils.clamp(t, 0, duration) * fps, i0 = Math.min(n - 1, Math.floor(x)), i1 = Math.min(n - 1, i0 + 1), a = x - i0;
+      // (loop: t wraps round the clip; only: a Set of bone names — a layer, e.g. the legs)
+      const tt = loop ? ((t % duration) + duration) % duration : THREE.MathUtils.clamp(t, 0, duration);
+      const x = tt * fps, i0 = Math.min(n - 1, Math.floor(x)), i1 = loop ? (i0 + 1) % n : Math.min(n - 1, i0 + 1), a = x - i0;
       bones.forEach((b, j) => {
+        if (only && !only.has(names[j])) return;
         qa.fromArray(frames[j], i0 * 4); qb.fromArray(frames[j], i1 * 4); qa.slerp(qb, a);
         b.quaternion.slerp(qa, w);
       });
-      if (moveHips) {
+      if (moveHips && (!only || only.has("pelvis"))) {
         pa.fromArray(hips, i0 * 3); pb.fromArray(hips, i1 * 3); pa.lerp(pb, a);
         pelvis.position.lerp(pelvisRestLocal.clone().add(pa.applyQuaternion(rqInv)), w);   // (the offset is in the robot's model space: into the pelvis' parent's)
       }
       robot.updateMatrixWorld(true);
+    },
+    /** an in-place walk's speed ON THIS FIGURE (m/s): how fast its planted foot (the lower
+     *  one) slides back under it — its own legs set the stride, not the clip's source */
+    stepSpeed() {
+      const fl = D.foot_l?.bone, fr = D.foot_r?.bone;
+      if (!fl || !fr) return null;
+      const keep = bones.map((b) => b.quaternion.clone()), keepP = pelvis.position.clone();
+      const at = (b) => b.getWorldPosition(new V3());                 // (world: metres whatever the figure's own scale)
+      const v = [];
+      let prev = null;
+      for (let i = 0; i < n; i++) {
+        this.apply(i / fps, 1);
+        const f = [at(fl), at(fr)], k = f[0].y < f[1].y ? 0 : 1;
+        if (prev && prev.k === k) v.push(Math.hypot(f[k].x - prev.f[k].x, f[k].z - prev.f[k].z) * fps);
+        prev = { f, k };
+      }
+      bones.forEach((b, j) => b.quaternion.copy(keep[j])); pelvis.position.copy(keepP); robot.updateMatrixWorld(true);
+      v.sort((x, y) => x - y);
+      return v.length ? v[Math.floor(v.length / 2)] : null;
     },
   };
 }

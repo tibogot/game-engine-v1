@@ -242,7 +242,21 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   0 cm, neck 76°, head 0°, bow elbow 173°, abduction 92°, anchor 6.8 cm, draw elbow 5.8 cm
   over the line (ref 0–5); accuracy gold at 10–60 m.
 - NEXT: the editor still edits the old keyed channels — make it key OFFSETS over the
-  clip; more clips (Standing Aim Walk → walking while aiming).
+  clip.
+
+## ▶ Walking while aiming — 2026-10-19 (Mixamo "Standing Aim Walk" F/B/L/R, refs/, without skin)
+- WASD while aiming moves in the AIM's frame (mount.js aimFwd/aimBack/aimSide); the legs +
+  pelvis are the walk clips (bow.js walkLegs: the top two by direction, one phase advanced
+  by distance over each clip's stride on THIS rider — retarget stepSpeed), the shot's upper
+  body on top. The stance blends to the walk clips' own arrow-vs-hips angle (they hold the
+  hips ~15° squarer than the shot — at the shot's the feet skidded).
+- Baked by Bow editor → Bake base (rest pose from Shooting Arrow.fbx: ref.restFrom) →
+  anims/bow-aimwalk(-ybot).json.
+- Measured (2 s each way, nocked; slower foot's ground speed): Y Bot W 3.7 / S 4.3 / A 8.3 /
+  D 12 cm/s, robot 4.5 / 3.8 / 8.2 / 10.9; robot feet ≤1.1 cm under the ground. Full draw
+  and shot in every direction; the arrow leaves on its aim point as standing (1.6–1.75° loft).
+- [ ] A/D slide 8–12 cm/s (small): the side clips' foot path vs the strafe.
+- [ ] Diagonals blend two clips — not measured yet.
 
 ## ▶ Shadows — 2026-10-11 (user: "the robot has so bad shadows… self shadow low quality")
 
@@ -358,7 +372,7 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
   front, fingers down to the nocks); minimum-jerk curves, 3.15 s; quiver 0.48 m
   (arrows stand 30 cm out). Result: hand ≤2.3 m/s, misses 0–0.2 cm, roll −100…−43,
   elbow 43–134°, wrist ≤34°, 14 minor flags.
-- [ ] Walk while aiming (no strafe clips: slow walk facing the aim? lower-body turn?).
+- [x] Walk while aiming — Mixamo Standing Aim Walk clips (see ▶ Walking while aiming).
 - [ ] The hand passes through the cowboy hat's brim reaching the quiver.
 - [ ] Second and later arrows: the fetch starts from the release pose (not tested frame by frame yet).
 - [ ] Draw cost: bow normals analytic instead of computeVertexNormals.

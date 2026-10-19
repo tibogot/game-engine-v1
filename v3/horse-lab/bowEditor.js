@@ -548,6 +548,21 @@ export class BowEditor {
     M.root.position.copy(was.p); M.root.rotation.y = was.r; M.at(this.t);
     const json = bakedToJSON(b, { source: "mixamo:Shooting Arrow", arrowYaw });
     this.archer.base = bakedFromJSON(json, this.rider.r.model); this.archer.calibrateBase();
+    // the aim walks too (refs/Standing Aim Walk *.fbx, when there): the legs while aiming
+    const AW = { Forward: 1.08, Back: 0.88, Left: 1.4, Right: 1.37 }, walks = {};   // (m/s: the clips' own, on Y Bot — a fallback; each rider's is measured)
+    for (const [n, speed] of Object.entries(AW)) {
+      try {
+        const R = await loadMixamoRef(`/v3/horse-lab/refs/${encodeURIComponent("Standing Aim Walk " + n)}.fbx`);
+        R.restFrom = M.root;                                     // (downloaded without skin: the rest from the Shooting Arrow file)
+        const bw = bakeMixamoOnto(R, this.rider.r.model), ad = bw.dirAt(0.3, "Head", "LeftHand");
+        walks[n] = { ...bakedToJSON(bw), speed: +(bw.stepSpeed() ?? speed).toFixed(3), arrowYaw: Math.atan2(ad.x, ad.z) };   // (its stride on THIS rider; its arrow vs its hips: the stance it walks in)
+        R.mixer.uncacheRoot(R.root);
+      } catch (e) { console.warn("[bow] aim walk", n, e.message); }
+    }
+    if (Object.keys(walks).length) {
+      this.archer.aimWalk = Object.fromEntries(Object.entries(walks).map(([n, c]) => [n, Object.assign(bakedFromJSON(c, this.rider.r.model), { speed: c.speed, arrowYaw: c.arrowYaw })]));
+      try { await fetch(`/__horse-lab/anims?name=bow-aimwalk${this.rider.r.kind === "ybot" ? "-ybot" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ version: 1, source: "mixamo:Standing Aim Walk", clips: walks }) }); } catch { /* the page keeps them */ }
+    }
     this.dirty = true; this.runChecksSoon();
     try {
       const r = await fetch(`/__horse-lab/anims?name=bow-shot-mocap${this.rider.r.kind === "ybot" ? "-ybot" : ""}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(json) });   // (per rider)

@@ -264,6 +264,9 @@
       try {                                                 // the shot's whole body from Mixamo, retargeted (editor: "bake Mixamo body")
         const r = await fetch(`/v3/horse-lab/anims/bow-shot-mocap${riderData.kind === "ybot" ? "-ybot" : ""}.json?` + Date.now());   // (per rider: baked onto ITS skeleton)
         if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) { archer.base = bakedFromJSON(await r.json(), rider.r.model); archer.calibrateBase(); }
+        // walking while aiming: the Mixamo aim walks, baked onto this rider (legs layer)
+        const rw = await fetch(`/v3/horse-lab/anims/bow-aimwalk${riderData.kind === "ybot" ? "-ybot" : ""}.json?` + Date.now());
+        if (rw.ok && (rw.headers.get("content-type") ?? "").includes("json")) { const j = await rw.json(); archer.aimWalk = Object.fromEntries(Object.entries(j.clips).map(([n, c]) => [n, Object.assign(bakedFromJSON(c, rider.r.model), { speed: c.speed, arrowYaw: c.arrowYaw })])); }
       } catch { /* keyed arms only */ }
       const cross = document.createElement("div");
       cross.style.cssText = "position:fixed;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;z-index:15;pointer-events:none;display:none;background:radial-gradient(circle,#fff 0 1.5px,transparent 2px),linear-gradient(#fff,#fff) 50% 0/1.5px 6px no-repeat,linear-gradient(#fff,#fff) 50% 100%/1.5px 6px no-repeat,linear-gradient(#fff,#fff) 0 50%/6px 1.5px no-repeat,linear-gradient(#fff,#fff) 100% 50%/6px 1.5px no-repeat;filter:drop-shadow(0 0 1px #000)";
@@ -563,7 +566,7 @@
           poseEd.applyHorse();                                  // the pose layer on the horse (before the rider follows it)
           if (bowEd.isOpen) bowEd.update(rawDt);                // (the bow editor replays the fetch to its playhead itself)
           else {
-            rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming } });
+            rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming, aimYaw: archer.aimYawLast } });
             archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot): over the clip's upper body
           }
           D.afterPose?.();                                      // (debug / tools: a pose over the frame's, before it renders)
