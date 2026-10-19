@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- THE LAB (lab.js, 2026-10-19): every building of the game in one catalogue — search, filters, its
+         versions side by side, the game's views, the numbers. The old one stays: building-lab.html. -->
+    <base href="/v3/" />
+    <title>Lab — Sand &amp; Blood</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        --bg: #0b0906; --panel: #0f0c08; --panel2: #1d1710; --line: rgba(240, 200, 120, 0.42);
+        --text: #fbf6ea; --dim: #d6c8ab; --gold: #f2c45a; --gold2: #ffe3a3; --green: #a6e37f; --amber: #ffb547; --grey: #c2b9a8;
+        --r: 8px; font: 14px/1.4 "Segoe UI", system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg); color: var(--text); }
+      #view { position: fixed; inset: 0 300px 0 330px; }
+      #side { position: fixed; left: 0; top: 0; bottom: 0; width: 330px; background: var(--panel); border-right: 1px solid var(--line);
+        display: flex; flex-direction: column; z-index: 10; }
+      #side header { padding: 14px 14px 8px; }
+      #side h1 { margin: 0 0 2px; font-size: 15px; letter-spacing: 0.12em; color: var(--gold2); text-transform: uppercase; }
+      #side .sub { color: var(--dim); font-size: 12.5px; }
+      #search { width: 100%; margin-top: 10px; padding: 8px 10px; border-radius: var(--r); border: 1px solid var(--line); background: #000;
+        color: var(--text); font: inherit; outline: none; }
+      #search:focus { border-color: var(--gold); }
+      .filters { padding: 4px 14px 8px; border-bottom: 1px solid var(--line); }
+      .frow { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; align-items: center; }
+      .frow > span { width: 54px; color: var(--gold2); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+      .chip { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 999px; padding: 3px 9px; cursor: pointer;
+        font: inherit; font-size: 13px; }
+      .chip:hover { border-color: var(--gold); }
+      .chip.on { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 600; }
+      #count { padding: 8px 14px; color: var(--text); font-size: 13px; display: flex; justify-content: space-between; }
+      #count button { background: none; border: none; color: var(--gold2); cursor: pointer; font: inherit; font-size: 13px; padding: 0; text-decoration: underline; }
+      #list { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 10px 14px; display: grid; grid-template-columns: 1fr 1fr; grid-auto-rows: max-content; gap: 8px; align-content: start; }
+      .card { background: var(--panel2); border: 1px solid rgba(255,255,255,0.08); border-radius: var(--r); cursor: pointer; overflow: hidden; text-align: left;
+        color: var(--text); padding: 0; font: inherit; }
+      .card:hover { border-color: var(--gold); }
+      .card.on { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold) inset; background: #2c2213; }
+      .thumb { height: 74px; background: #0c0905 center / cover no-repeat; display: grid; place-items: center; color: #8a7a5c; font-size: 24px; }
+      .card .t { padding: 7px 8px 8px; font-size: 13px; line-height: 1.3; font-weight: 600; }
+      .badge { display: inline-block; margin-top: 5px; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid; font-weight: 600; background: rgba(0,0,0,0.45); }
+      .b-jeu { color: var(--green); } .b-verdict { color: var(--amber); } .b-ancien { color: var(--grey); }
+      /* the piece's bar (top) and the tools (right) */
+      #bar { position: fixed; left: 346px; right: 312px; top: 12px; z-index: 9; background: var(--panel); border: 1px solid var(--line);
+        border-radius: var(--r); padding: 10px 14px; }
+      #bar h2 { margin: 0; font-size: 18px; color: var(--gold2); font-weight: 700; }
+      #bar .note { color: var(--text); margin-top: 4px; font-size: 13px; }
+      #tabs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+      #tools { position: fixed; right: 12px; top: 12px; bottom: 12px; width: 276px; z-index: 9; display: flex; flex-direction: column; gap: 10px;
+        overflow-y: auto; }
+      .box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+      .box h3 { margin: 0 0 8px; font-size: 12px; color: var(--gold2); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+      .btns { display: flex; flex-wrap: wrap; gap: 5px; }
+      .btn { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; padding: 5px 9px; cursor: pointer;
+        font: inherit; font-size: 13px; }
+      .btn:hover { border-color: var(--gold); } .btn.on { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 600; }
+      table.stats { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+      table.stats td { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.1); }
+      table.stats td:last-child { text-align: right; color: var(--gold2); }
+      table.stats tr.h td { color: var(--gold); font-size: 12px; font-weight: 700; text-transform: uppercase; padding-top: 8px; }
+      input[type=range] { width: 100%; accent-color: var(--gold); }
+      .keys { color: var(--dim); font-size: 12px; }
+      #loading { position: fixed; left: 50%; top: 50%; transform: translate(calc(-50% + 165px), -50%); z-index: 20; background: var(--panel);
+        border: 1px solid var(--line); border-radius: var(--r); padding: 10px 16px; color: var(--gold2); display: none; }
+      #err { position: fixed; left: 346px; bottom: 12px; z-index: 30; max-width: 680px; white-space: pre-wrap; color: #ff9a8c;
+        font: 12px ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="view"></div>
+    <aside id="side">
+      <header>
+        <h1>Lab</h1>
+        <div class="sub">Every building in the game · the old lab: building-lab.html</div>
+        <input id="search" type="search" placeholder="Search… (/)" autocomplete="off" />
+      </header>
+      <div class="filters" id="filters"></div>
+      <div id="count"></div>
+      <div id="list"></div>
+    </aside>
+    <div id="bar"><h2 id="title">—</h2><div class="note" id="note"></div><div id="tabs"></div></div>
+    <div id="tools"></div>
+    <div id="loading">Loading…</div>
+    <pre id="err"></pre>
+    <script type="module">
+      try {
+        const { startLab } = await import("/games/alg-rts/lab.js");
+        window.__LAB = await startLab();
+      } catch (e) {
+        console.error("[lab] failed to start", e);
+        document.getElementById("err").textContent = e?.stack || e?.message || String(e);
+      }
+    </script>
+  </body>
+</html>

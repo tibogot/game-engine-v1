@@ -190,7 +190,7 @@ function labWindsock(g) {
   return grp;
 }
 
-const BUILDINGS = {
+export const BUILDINGS = {
   // THE ZERIBA (2026-10-14, you: "what are these things near the villager house?"): the kit's pen LEFT, the
   // Blender one RIGHT (algZeriba.js, tools/blender/zeribaSim.py).
   // THE FARMSTEAD'S THORN PEN (2026-10-14, your screenshot: the ring of round lumps by the farm): the farm as
@@ -369,6 +369,19 @@ const STONES = {
   actuelle: { label: "Pierre actuelle", make: makeRubbleTexture },
   aures: { label: "Pierre des Aurès", make: makeAuresStoneTexture },
 };
+
+/** For the NEW lab (lab.js, 2026-10-19): the stone drawn into the kit's atlas (the old lab's default: the
+ *  Aurès stone), and the helipad's construction site once its entry was built. */
+export async function applyLabStone(key = "aures") {
+  await rtsAtlasReady();
+  const atlas = rtsAtlas(), cell = atlas.image.width / ATLAS_COLS;
+  const t = STONES[key].make({ size: cell });
+  const i = MAT.rubble, col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;
+  atlas.image.getContext("2d").drawImage(t.image, col * cell, row * cell);
+  t.dispose();
+  atlas.needsUpdate = true;
+}
+export const labSite = () => SITE;
 
 export async function startBuildingLab(container) {
   const lab = await startVehicleLab(container, { catalog: BUILDINGS, title: "Buildings Lab", kind: "Bâtiment", def: "mechtaHouse", gap: (k) => BUILDINGS[k].gap });

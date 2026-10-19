@@ -23,10 +23,10 @@ import { ALG_UNIT_TYPES } from "./algUnitTypes.js";
 import { aluminiumMaterial } from "./algAluminium.js";
 
 /** The game's sun (alg-rts, Partly cloudy, 15:12) and a moonlit night. */
-const SUN = { dir: new THREE.Vector3(-0.739, 0.65, 0.175).normalize(), intensity: 10, color: 0xfff2dd };
-const NIGHT = { intensity: 0.9, color: 0x8ea6d8, exposure: 1.4 };
+export const SUN = { dir: new THREE.Vector3(-0.739, 0.65, 0.175).normalize(), intensity: 10, color: 0xfff2dd };
+export const NIGHT = { intensity: 0.9, color: 0x8ea6d8, exposure: 1.4 };
 
-function gradientSky(k = 1) {
+export function gradientSky(k = 1) {
   const W = 64, H = 32, d = new Float32Array(W * H * 4);
   const zen = [0.18, 0.36, 0.75], hor = [0.95, 0.98, 1.0], gnd = [0.32, 0.24, 0.16];
   for (let y = 0; y < H; y++) {
@@ -76,7 +76,7 @@ const glassMaterial = () => _glass ??= Object.assign(new THREE.MeshStandardNodeM
 }), { name: "CockpitGlass" });
 
 /** A vehicle as the game draws it: the body, its decals, its running gear (a helicopter: its glass, its rotors). */
-function vehicleOf(geo, key) {
+export function vehicleOf(geo, key) {
   const g = new THREE.Group();
   // `labMaterial`: a piece with its own material (the buildings lab's rocks), not the kit's atlas.
   const own0 = geo.userData.labMaterial ?? null;
