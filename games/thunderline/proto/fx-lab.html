@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- the engine resolves its assets relative to /v3/ -->
+    <base href="/v3/" />
+    <title>Thunderline FX lab</title>
+    <!-- Every car effect in Thunderline's own world, light and camera, on our car (kit/carFx.js — the same
+         module the drive page uses): scenes that replay the same moments, a switch per effect, slow motion. -->
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <style>
+      :root { --panel: rgba(11, 17, 32, 0.92); --panel2: #121a2e; --line: #23304d; --text: #e8f0ff; --dim: #8796b5; --bolt: #3fd2ff; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: var(--text); font: 13px/1.4 Inter, system-ui, sans-serif; }
+      #game { position: fixed; inset: 0; }
+      #lab { position: fixed; right: 14px; top: 14px; bottom: 112px; z-index: 40; width: 280px; overflow-y: auto; background: var(--panel); border-left: 3px solid var(--bolt); padding: 10px 14px 14px; }
+      #lab h1 { font: 800 20px "Barlow Condensed"; letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 2px; }
+      #lab p { color: var(--dim); font-size: 12px; margin: 0 0 8px; }
+      #lab h2 { font: 700 13px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; color: var(--dim); margin: 12px 0 5px; }
+      .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+      .btns button, .fx button { background: var(--panel2); color: var(--text); border: 1px solid var(--line); padding: 5px 9px; cursor: pointer; font: 600 13px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.05em; }
+      .btns button:hover, .fx button:hover { border-color: var(--bolt); }
+      .btns button.on { border-color: var(--bolt); color: var(--bolt); }
+      .fx { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
+      .fx label { flex: 1; display: flex; align-items: center; gap: 7px; cursor: pointer; }
+      .fx small { color: var(--dim); }
+      .soon { color: var(--dim); font-size: 12px; padding: 2px 0; }
+      .soon b { color: var(--text); font-weight: 600; }
+      #read { font: 12px Consolas, monospace; color: var(--dim); white-space: pre; }
+      #note { color: var(--dim); font-size: 12px; }
+      #boot { position: fixed; inset: 0; z-index: 99; display: flex; align-items: center; justify-content: center; background: #0a0f1c; color: var(--bolt); font: 700 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; transition: opacity 0.4s; }
+      #boot.gone { opacity: 0; pointer-events: none; }
+      /* the drive HUD's own panels stay, the finish card is not needed here */
+      #finish { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="lab">
+      <h1>FX lab</h1>
+      <p>Every car effect, on our car, in the game's light. Pick a scene, switch effects on and off, slow it down.</p>
+      <h2>Scene</h2>
+      <div class="btns" id="scenes"></div>
+      <div id="note"></div>
+      <h2>Camera</h2>
+      <div class="btns" id="cams"></div>
+      <h2>Speed</h2>
+      <div class="btns" id="speeds"></div>
+      <h2>Effects</h2>
+      <div id="fxs"></div>
+      <h2>Smoke look</h2>
+      <div class="btns" id="looks"></div>
+      <h2>Light</h2>
+      <div class="btns" id="tods"></div>
+      <h2>Next in this lab</h2>
+      <div class="soon"><b>Fire Pro puff</b> · six-way lit tyre smoke, A/B with the wispy one</div>
+      <div class="soon"><b>Landing dust</b> · a burst on hard landings</div>
+      <div class="soon"><b>Boost flame</b> · from the exhausts</div>
+      <div class="soon"><b>Speed effect</b> · lines and a wider view at speed</div>
+      <h2>Live</h2>
+      <div id="read">—</div>
+    </div>
+    <div id="boot">Thunderline · FX lab…</div>
+    <script type="module" src="/games/thunderline/proto/kit/fxLab.js"></script>
+  </body>
+</html>

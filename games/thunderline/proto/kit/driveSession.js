@@ -241,6 +241,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   addEventListener("blur", clearKeys);
   document.addEventListener("visibilitychange", clearKeys);
   let autopilot = false;
+  // THE FX LAB's hooks: its own driver (drift circles, a wall scrape), slow motion, and the input used
+  let inputSource = null, timeScale = 1, lastInput = null;
   let showGhost = ghost && prefs.ghost !== false;
 
   // ---------- ENGINE SOUND (engineModel.js + engineSound.js, synthesised) + sfx ----------
@@ -417,7 +419,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S = {
       o, lay, group, race, gates, trackKey, medals, BEST_KEY, GHOST_KEY, best, bakeMs, rules, ghostRules, pilot, ghostData,
       ghostPlayer: null, recorder: createGhostRecorder(), landings: [], startQuat, spawnPos,
-      KILL_Y: lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false },
+      KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
     };
     $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart`;
@@ -613,11 +615,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   }
   app.addPreUpdateHook(function driveFrame() {
     const now = performance.now();
-    const dt = Math.min((now - last) / 1000, 0.05);
+    const dt = Math.min((now - last) / 1000, 0.05) * timeScale;
     last = now;
     if (!S) return;
     const { race, rules, recorder } = S;
-    const input = autopilot ? S.pilot.input(vehicle) : readControls();
+    const input = (lastInput = inputSource ? inputSource(vehicle, S) : autopilot ? S.pilot.input(vehicle) : readControls());
     if (padRespawn) respawnCheckpoint();
     S.simAccum += dt;
     let ticks = Math.floor(S.simAccum / FIXED_DT);
@@ -671,6 +673,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     vehicle, ghostCar, chase, keys, engine, engineSound, sfx, camera,
     get sunShadows() { return sunShadows; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
+    /** fn(vehicle, session) → input, or null for the player / autopilot again */
+    setInputSource(fn) { inputSource = fn; },
+    setTimeScale(k) { timeScale = k; },
+    get timeScale() { return timeScale; },
+    get lastInput() { return lastInput; },
     config: { TOP: top, SUBSTEPS: substeps },
   };
 }
