@@ -1,0 +1,944 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Split-Flap Lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Bebas+Neue&family=Oswald:wght@500&family=Roboto+Mono:wght@500&family=Pacifico&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg: #15171b; --panel: rgba(24,27,32,0.92); --text: #e6e8eb; --muted: #9aa3ad; --accent: #4da3ff; --line: #2c313a; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 12px/1.4 system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #panel { position: fixed; top: 8px; right: 8px; bottom: 8px; width: 290px; overflow-y: auto; background: var(--panel);
+           border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; z-index: 2; }
+  #panel.hidden { display: none; }
+  #toggle { position: fixed; top: 8px; right: 306px; z-index: 3; }
+  #panel.hidden + #toggle, body.nopanel #toggle { right: 8px; }
+  h1 { font-size: 14px; margin: 0 0 6px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 12px 0 6px; border-top: 1px solid var(--line); padding-top: 8px; }
+  .row { display: flex; align-items: center; gap: 6px; margin: 4px 0; }
+  .row label { flex: 0 0 92px; color: var(--muted); }
+  .row input[type=range] { flex: 1; }
+  .row .v { flex: 0 0 44px; text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+  button, select, input[type=number], textarea { background: #0f1114; color: var(--text); border: 1px solid #353b45; border-radius: 4px; font: inherit; }
+  button { padding: 4px 8px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.on { border-color: var(--accent); background: #12263d; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; }
+  textarea { width: 100%; box-sizing: border-box; height: 74px; padding: 4px; font-family: ui-monospace, monospace; text-transform: uppercase; }
+  select { padding: 3px; flex: 1; }
+  input[type=number] { width: 54px; padding: 3px; }
+  input[type=color] { width: 36px; height: 22px; border: 0; background: none; padding: 0; }
+  #stats { position: fixed; left: 8px; bottom: 8px; color: var(--muted); font: 11px ui-monospace, monospace; z-index: 2;
+           background: rgba(0,0,0,.45); padding: 3px 6px; border-radius: 4px; }
+  .hint { color: var(--muted); font-size: 11px; }
+</style>
+</head>
+<body>
+<div id="panel">
+  <h1>Split-flap lab</h1>
+  <div class="hint">Click once anywhere to enable sound. Drag to orbit, wheel to zoom.</div>
+
+  <h2>Program</h2>
+  <div class="grid" id="programs"></div>
+  <div class="row"><button id="pause">Pause</button><label style="flex:0 0 auto">Speed</label><input type="range" id="speed" min="0.05" max="1" step="0.05" value="1" /><span class="v" id="speedV"></span></div>
+  <div class="row"><label>Autoplay</label><input type="checkbox" id="autoplay" /><span class="hint">every</span><input type="number" id="autoSec" value="12" min="4" max="60" /><span class="hint">s</span></div>
+
+  <h2>Message</h2>
+  <textarea id="msg">SPLIT FLAP
+ANIMATIONS
+[r][o][y][g][b][p][v][w]</textarea>
+  <div class="row"><button id="show">Show message</button><span class="hint">[r] [o] [y] [g] [b] [p] [v] [w] colour · [1] [2] image</span></div>
+  <div class="row"><label>Transition</label><select id="transition">
+    <option value="cascade">Left → right</option>
+    <option value="wave" selected>Diagonal wave</option>
+    <option value="center">Centre out</option>
+    <option value="random">Random</option>
+    <option value="instant">All at once</option>
+  </select></div>
+
+  <h2>Mechanics</h2>
+  <div class="row"><label>Flap interval</label><input type="range" id="period" min="20" max="160" value="55" /><span class="v" id="periodV"></span></div>
+  <div class="row"><label>Gravity</label><input type="range" id="gravity" min="0.4" max="2.5" step="0.05" value="1" /><span class="v" id="gravityV"></span></div>
+  <div class="row"><label>Bounce</label><input type="range" id="bounce" min="0" max="0.6" step="0.01" value="0.28" /><span class="v" id="bounceV"></span></div>
+  <div class="row"><label>Fall time</label><span class="hint" id="fallInfo"></span></div>
+
+  <h2>Look</h2>
+  <div class="row"><label>Theme</label><select id="theme">
+    <option value="black">Black flaps</option>
+    <option value="white">White flaps</option>
+    <option value="custom">Custom</option>
+  </select></div>
+  <div class="row"><label>Flap / ink</label><input type="color" id="flapColor" value="#141416" /><input type="color" id="inkColor" value="#f2f1ec" /></div>
+  <div class="row"><label>Font</label><select id="font">
+    <option value="600|Barlow Condensed">Barlow Condensed</option>
+    <option value="500|Oswald">Oswald</option>
+    <option value="400|Bebas Neue">Bebas Neue</option>
+    <option value="500|Roboto Mono">Roboto Mono</option>
+    <option value="700|Arial Narrow">Arial Narrow</option>
+  </select></div>
+  <div class="row"><label>Wall</label><select id="wall">
+    <option value="wood">Light wood</option>
+    <option value="dark">Dark studio</option>
+    <option value="concrete">Concrete</option>
+  </select></div>
+  <div class="row"><label>Image 1</label><input type="file" id="img1" accept="image/*" /></div>
+  <div class="row"><label>Image 2</label><input type="file" id="img2" accept="image/*" /></div>
+
+  <h2>Board</h2>
+  <div class="row"><label>Columns × rows</label><input type="number" id="cols" value="32" min="4" max="96" /><input type="number" id="rows" value="10" min="1" max="40" /><button id="rebuild">Apply</button></div>
+
+  <h2>Camera</h2>
+  <div class="grid">
+    <button data-cam="board">Board</button>
+    <button data-cam="close">Close-up</button>
+    <button data-cam="side">Side</button>
+  </div>
+
+  <h2>Render</h2>
+  <div class="row"><label>Motion blur</label><input type="range" id="samples" min="1" max="12" step="1" value="6" /><span class="v" id="samplesV"></span></div>
+  <div class="row"><label>Shutter</label><input type="range" id="shutter" min="0" max="1" step="0.05" value="0.6" /><span class="v" id="shutterV"></span></div>
+  <div class="row"><label>Light angle</label><input type="range" id="lightAz" min="-1" max="1" step="0.05" value="-0.35" /><span class="v" id="lightAzV"></span></div>
+
+  <h2>Sound</h2>
+  <div class="row"><label>Volume</label><input type="range" id="volume" min="0" max="1" step="0.01" value="0.5" /><span class="v" id="volumeV"></span></div>
+</div>
+<button id="toggle">Panel</button>
+<div id="stats"></div>
+
+<script type="module">
+// Split-flap lab: a modern split-flap wall (Oat Foundry style) in WebGPU.
+//
+// MECHANISM. Each module is a drum of F flaps on a spool. Flap k carries the TOP half of face k on
+// its front and the BOTTOM half of face k+1 on its back. Showing face c: the upright front flap is
+// flap c (top half of c), the last fallen flap is flap c-1 (its back = bottom half of c). A flip
+// releases the front flap, it falls 180° under gravity, hits the lower stack, bounces, settles.
+// Faces come in a fixed drum order, so A → Z passes every face between (the cascades).
+//
+// SIM. A module is a list of release times, one per flap, scheduled at the flap interval. Every
+// pose is a pure function of time (fall angle from a pre-integrated ODE table), so the frame is
+// rendered at several sub-frame times and averaged: real shutter motion blur (the ghosting of
+// filmed boards), shadows included.
+//
+// RENDER. One instanced mesh of flaps (SLOTS per module: 3 upright, the falling ones, the top of
+// the lower stack), a face atlas (characters + colour flaps drawn on a canvas) and two board-wide
+// images sliced per module (image flaps). Board frame merged into one mesh.
+import * as THREE from "three/webgpu";
+import {
+  Fn, uniform, texture, vec2, vec3, vec4, float, positionGeometry, normalGeometry, instancedBufferAttribute,
+  mix, step, clamp, abs, floor, mod, dot, max, min, smoothstep, hash, mx_noise_float,
+} from "three/tsl";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { installInstanceMatrixSync } from "./render/instanceMatrixSync.js";
+
+// ── dimensions (metres) ─────────────────────────────────────────────────────────────────────────
+const W = 0.050;          // flap width
+const H = 0.036;          // flap height (one half of a character)
+const G = 0.0012;         // hinge gap between the two halves
+const T = 0.0007;         // flap thickness
+const PX = W + 0.0036;    // module pitch x (divider + clearance)
+const PY = 2 * H + G + 0.014; // module pitch y (rail between rows)
+const SLOTS = 10;         // flaps drawn per module
+const UP = 3;             // upright flaps drawn (front + the stack behind)
+const LEAN0 = 0.045;      // the front upright flap leans back on its stop (rad)
+const LEAN = 0.05;        // each flap deeper in a stack leans this much more
+const STEP = 0.0012;      // and sits this much further back
+const CARRY = 0.035;      // s for the next upright flap to come forward onto the stop
+
+// ── faces ───────────────────────────────────────────────────────────────────────────────────────
+const CHARS = " ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.,:;!?-+/#@&$%'()=*";
+const COLORS = [["w", "#f1f0ea"], ["r", "#d7262e"], ["o", "#f27a1a"], ["y", "#f5c218"], ["g", "#1ea84b"], ["b", "#1c8fd8"], ["p", "#f08db8"], ["v", "#7b4bc6"]];
+const COL0 = CHARS.length, IMG0 = COL0 + COLORS.length, F = IMG0 + 2;
+const AC = 10, AR = Math.ceil(F / AC);
+const TW = 320, TH = Math.round(TW * (2 * H) / W);
+
+const P = {
+  speed: 1, period: 0.055, gravity: 1, bounce: 0.28, transition: "wave",
+  samples: 6, shutter: 0.6, volume: 0.5,
+  flapColor: "#141416", inkColor: "#f2f1ec", fontWeight: "600", font: "Barlow Condensed",
+  cols: 32, rows: 10, wall: "wood", lightAz: -0.35,
+};
+const $ = (id) => document.getElementById(id);
+
+// ── renderer ────────────────────────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGPURenderer({ antialias: false });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.toneMapping = THREE.NeutralToneMapping;
+renderer.toneMappingExposure = 1.0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFShadowMap; // the soft filter is noise-dithered: averaged over sub-frames it reads as grain
+document.body.prepend(renderer.domElement);
+await renderer.init();
+installInstanceMatrixSync(renderer); // the flap matrices change between sub-frame renders
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(30, innerWidth / innerHeight, 0.03, 30);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+// Render on demand: nothing moving and a still camera → no frame at all; a moving camera over a
+// still board → one sub-frame; the shadow map is redrawn only while flaps move or the light changes.
+let needsRender = true;
+const invalidate = (shadow = false) => { needsRender = true; if (shadow) key.shadow.needsUpdate = true; };
+controls.addEventListener("change", () => invalidate());
+
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
+
+const key = new THREE.DirectionalLight(0xfff3e4, 2.6);
+key.castShadow = true;
+key.shadow.mapSize.set(4096, 4096);
+key.shadow.bias = -0.0004;
+key.shadow.normalBias = 0.0012; // the stacked flaps sit 1.2 mm apart: less and they speckle each other
+scene.add(key, key.target);
+const fill = new THREE.DirectionalLight(0xdfe8ff, 0.35);
+scene.add(fill, fill.target);
+
+// ── fall dynamics: a plate pivoting on its hinge, gravity + air drag, hard stop on the lower stack ─
+const FALL = { tab: null, dt: 0.001, tHit: 0.1, settle: 0.4 };
+function buildFall() {
+  const A = (3 * 9.81) / (2 * H) * P.gravity;   // α = 3g/(2L)·sinθ for a uniform plate on its edge
+  const drag = 0.03, ks = 2600 * P.gravity, cd = 26;
+  const PUSH = 0.010, PUSH_TO = 0.12;            // the spool step tips the flap past its catch
+  const h = 0.00005, n = 800, tab = new Float32Array(n);
+  let th = -LEAN0, w = 0, t = 0, hit = -1, next = 0;
+  while (next < n) {
+    if (t < PUSH) { th = -LEAN0 + (PUSH_TO + LEAN0) * (t / PUSH); w = (PUSH_TO + LEAN0) / PUSH; }
+    else {
+      let a = A * Math.sin(th) - drag * w * Math.abs(w);
+      if (hit >= 0) a += ks * (Math.PI - th) - cd * w; // resting on the springy lower stack
+      w += a * h; th += w * h;
+      if (th >= Math.PI && w > 0) { th = 2 * Math.PI - th; w = -w * P.bounce; if (hit < 0) hit = t; }
+    }
+    t += h;
+    while (next < n && next * FALL.dt <= t) tab[next++] = th;
+  }
+  let settle = n - 1;
+  while (settle > 0 && Math.abs(tab[settle] - Math.PI) < 0.004) settle--;
+  FALL.tab = tab; FALL.tHit = hit; FALL.settle = (settle + 1) * FALL.dt;
+  $("fallInfo").textContent = `hit ${(hit * 1000).toFixed(0)} ms · settled ${(FALL.settle * 1000).toFixed(0)} ms`;
+}
+function fallAngle(tau) {
+  if (tau <= 0) return -LEAN0;
+  const x = tau / FALL.dt, i = Math.floor(x);
+  if (i >= FALL.tab.length - 1) return Math.PI;
+  return FALL.tab[i] + (FALL.tab[i + 1] - FALL.tab[i]) * (x - i);
+}
+const landP = (tau) => { // 0 → 1 as a falling flap reaches the stack (pushes the older ones back)
+  const a = FALL.tHit * 0.8, b = FALL.tHit;
+  const x = Math.min(1, Math.max(0, (tau - a) / (b - a)));
+  return x * x * (3 - 2 * x);
+};
+
+// ── face atlas ──────────────────────────────────────────────────────────────────────────────────
+const atlasCanvas = document.createElement("canvas");
+atlasCanvas.width = AC * TW; atlasCanvas.height = AR * TH;
+const atlasTex = new THREE.CanvasTexture(atlasCanvas);
+atlasTex.colorSpace = THREE.SRGBColorSpace;
+atlasTex.anisotropy = 8;
+async function drawAtlas() {
+  try { await document.fonts.load(`${P.fontWeight} 100px "${P.font}"`); } catch { /* falls back */ }
+  const g = atlasCanvas.getContext("2d");
+  g.fillStyle = P.flapColor;
+  g.fillRect(0, 0, atlasCanvas.width, atlasCanvas.height);
+  g.font = `${P.fontWeight} 100px "${P.font}"`;
+  const cap = g.measureText("H").actualBoundingBoxAscent || 70;
+  const px = (TH * 0.66) / (cap / 100);
+  g.font = `${P.fontWeight} ${px}px "${P.font}"`;
+  g.textAlign = "center"; g.textBaseline = "alphabetic";
+  const capPx = g.measureText("H").actualBoundingBoxAscent;
+  g.fillStyle = P.inkColor;
+  for (let i = 1; i < CHARS.length; i++) {
+    const x = (i % AC) * TW, y = Math.floor(i / AC) * TH, ch = CHARS[i];
+    const wch = g.measureText(ch).width, sx = Math.min(1, (TW * 0.84) / wch);
+    g.save();
+    g.translate(x + TW / 2, y + TH / 2 + capPx / 2);
+    g.scale(sx, 1);
+    g.fillText(ch, 0, 0);
+    g.restore();
+  }
+  COLORS.forEach(([, hex], j) => {
+    const i = COL0 + j;
+    g.fillStyle = hex;
+    g.fillRect((i % AC) * TW, Math.floor(i / AC) * TH, TW, TH);
+  });
+  atlasTex.needsUpdate = true;
+  invalidate();
+}
+
+// ── board images (two, sliced per module onto the image flaps) ──────────────────────────────────
+const imgCanvas = [document.createElement("canvas"), document.createElement("canvas")];
+const imgTex = imgCanvas.map((c) => { const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; return t; });
+const imgSrc = [null, null]; // uploaded HTMLImageElement, or null = the built-in poster
+function boardSize() { return { w: P.cols * PX, h: P.rows * PY }; }
+function drawPosterA(g, w, h) { // sunset poster
+  const sky = g.createLinearGradient(0, 0, 0, h * 0.62);
+  sky.addColorStop(0, "#1d1f52"); sky.addColorStop(0.55, "#d9465e"); sky.addColorStop(1, "#f9b54c");
+  g.fillStyle = sky; g.fillRect(0, 0, w, h);
+  const cx = w * 0.5, cy = h * 0.6, r = h * 0.3;
+  g.save(); g.beginPath(); g.arc(cx, cy, r, 0, Math.PI * 2); g.clip();
+  const sun = g.createLinearGradient(0, cy - r, 0, cy + r);
+  sun.addColorStop(0, "#fff1a8"); sun.addColorStop(1, "#ff6f3c");
+  g.fillStyle = sun; g.fillRect(cx - r, cy - r, 2 * r, 2 * r);
+  g.fillStyle = "#d9465e";
+  for (let i = 0; i < 6; i++) { const y = cy + i * r * 0.16; g.fillRect(cx - r, y, 2 * r, r * 0.035 * (i + 1)); }
+  g.restore();
+  g.fillStyle = "#2a1638";
+  g.beginPath(); g.moveTo(0, h * 0.62);
+  for (let i = 0; i <= 12; i++) g.lineTo((w * i) / 12, h * (0.5 + 0.12 * Math.abs(Math.sin(i * 1.7))));
+  g.lineTo(w, h * 0.62); g.closePath(); g.fill();
+  const sea = g.createLinearGradient(0, h * 0.62, 0, h);
+  sea.addColorStop(0, "#3a2350"); sea.addColorStop(1, "#0d0f2a");
+  g.fillStyle = sea; g.fillRect(0, h * 0.62, w, h);
+  g.fillStyle = "rgba(255,190,110,0.8)";
+  for (let i = 0; i < 9; i++) { const y = h * (0.65 + i * 0.035), ww = r * (1.2 - i * 0.11); g.fillRect(cx - ww / 2, y, ww, h * 0.008); }
+}
+function drawPosterB(g, w, h) { // shop promo: red badge + bold type on cream
+  g.fillStyle = "#f2ede1"; g.fillRect(0, 0, w, h);
+  g.fillStyle = "#16161a"; g.fillRect(w * 0.5, 0, w * 0.5, h);
+  g.save(); g.translate(w * 0.26, h * 0.5); g.rotate(-0.05);
+  g.fillStyle = "#d8242c";
+  const bw = w * 0.38, bh = h * 0.62, rr = h * 0.08;
+  g.beginPath(); g.roundRect(-bw / 2, -bh / 2, bw, bh, rr); g.fill();
+  g.strokeStyle = "#f2ede1"; g.lineWidth = h * 0.012;
+  g.beginPath(); g.roundRect(-bw / 2 + h * 0.03, -bh / 2 + h * 0.03, bw - h * 0.06, bh - h * 0.06, rr * 0.7); g.stroke();
+  g.fillStyle = "#f2ede1"; g.textAlign = "center"; g.textBaseline = "middle";
+  g.font = `${h * 0.2}px "Pacifico", Georgia, serif`; g.fillText("Bonjour", 0, 0);
+  g.restore();
+  g.fillStyle = "#f2ede1"; g.textAlign = "left"; g.textBaseline = "alphabetic";
+  g.font = `600 ${h * 0.24}px "Barlow Condensed", sans-serif`;
+  ["FRESH", "EVERY", "DAY."].forEach((s, i) => g.fillText(s, w * 0.56, h * (0.3 + i * 0.27)));
+  g.fillStyle = "#d8242c"; g.fillRect(w * 0.56, h * 0.86, w * 0.3, h * 0.03);
+}
+async function drawImages() {
+  try { await document.fonts.load(`20px "Pacifico"`); } catch { /* fallback */ }
+  const { w: bw, h: bh } = boardSize();
+  const w = 2048, h = Math.max(64, Math.round((2048 * bh) / bw));
+  imgCanvas.forEach((c, i) => {
+    c.width = w; c.height = h;
+    const g = c.getContext("2d");
+    const src = imgSrc[i];
+    if (src) { // cover-fit
+      const s = Math.max(w / src.width, h / src.height);
+      g.fillStyle = "#000"; g.fillRect(0, 0, w, h);
+      g.drawImage(src, (w - src.width * s) / 2, (h - src.height * s) / 2, src.width * s, src.height * s);
+    } else (i === 0 ? drawPosterA : drawPosterB)(g, w, h);
+    imgTex[i].dispose(); // size may change
+    imgTex[i].needsUpdate = true;
+  });
+  invalidate();
+}
+
+// ── flap material ───────────────────────────────────────────────────────────────────────────────
+const uFlap = uniform(new THREE.Color(P.flapColor));
+const uInk = uniform(new THREE.Color(P.inkColor));
+const uCols = uniform(P.cols), uRows = uniform(P.rows);
+let flapData = new THREE.InstancedBufferAttribute(new Float32Array(4), 4);
+function makeFlapMaterial(attr) {
+  const m = new THREE.MeshStandardNodeMaterial({ metalness: 0 });
+  const fd = instancedBufferAttribute(attr);
+  const nz = normalGeometry.z;
+  const u = positionGeometry.x.div(W).add(0.5).clamp(0, 1);
+  const ly = positionGeometry.y.sub(G / 2).div(H).clamp(0, 1); // 0 at the hinge, 1 at the free edge
+  const isFront = step(0.0, nz);
+  const isEdge = step(abs(nz), 0.5);
+  // the indices reach the fragment as interpolated floats (20 → 19.99999): round them, or floor/mod
+  // flip to the neighbouring atlas tile pixel by pixel (a speckle)
+  const face = floor(mix(fd.y, fd.x, isFront).add(0.5));
+  const mc = floor(fd.z.add(0.5)), mr = floor(fd.w.add(0.5));
+  // front = top half of the tile (v 0.5 → 1 from the hinge up); back = bottom half, read after the fall
+  const tv = mix(ly.mul(-0.5).add(0.5), ly.mul(0.5).add(0.5), isFront);
+  const col = mod(face, AC), row = floor(face.div(AC));
+  const auv = vec2(col.add(u.mul(0.96).add(0.02)).div(AC), float(1).sub(row.add(1).sub(tv.mul(0.96).add(0.02)).div(AR)));
+  const atlas = texture(atlasTex, auv).rgb;
+  const iuv = vec2(mc.add(u).div(uCols), float(1).sub(mr.add(1).sub(tv).div(uRows)));
+  const img = mix(texture(imgTex[0], iuv).rgb, texture(imgTex[1], iuv).rgb, step(IMG0 + 0.5, face));
+  const isImg = step(IMG0 - 0.5, face);
+  const isCol = step(COL0 - 0.5, face).mul(float(1).sub(isImg));
+  const d = vec3(uInk).sub(vec3(uFlap));
+  const ink = clamp(dot(atlas.sub(vec3(uFlap)), d).div(max(dot(d, d), 1e-4)), 0, 1).mul(float(1).sub(isCol)).mul(float(1).sub(isImg));
+  const seed = hash(face.add(mc.mul(13.1)).add(mr.mul(71.7)));
+  const grain = mx_noise_float(vec3(u.mul(38), ly.mul(26), face.mul(3.7).add(mc)));
+  // occlusion: deep in the hinge gap, near the side walls and under the rails
+  const ao = smoothstep(0.0, 0.25, ly).mul(0.6).add(0.4).mul(smoothstep(0.0, 0.06, ly).mul(0.75).add(0.25))
+    .mul(smoothstep(0.0, 0.06, min(u, float(1).sub(u))).mul(0.25).add(0.75))
+    .mul(float(1).sub(smoothstep(0.82, 1.0, ly)).mul(0.18).add(0.82)); // edge0 < edge1: reversed is undefined in WGSL
+  m.colorNode = Fn(() => {
+    let c = mix(atlas, img, isImg);
+    c = c.mul(seed.sub(0.5).mul(0.06).add(1)).mul(grain.mul(0.025).add(1));
+    c = mix(c, vec3(uFlap).mul(0.5).add(0.004), isEdge);
+    return vec4(c.mul(ao.mul(0.3).add(0.7)), 1);
+  })();
+  m.roughnessNode = mix(mix(mix(0.6, 0.33, ink), 0.42, isImg), 0.85, isEdge).add(grain.mul(0.04));
+  m.aoNode = ao;
+  return m;
+}
+
+// flap shape: notched at the hinge corners (the pins), rounded free corners
+function makeFlapGeometry() {
+  const y0 = G / 2, y1 = G / 2 + H, x0 = -W / 2, x1 = W / 2, nW = 0.0022, nH = 0.0026, r = 0.0018;
+  const s = new THREE.Shape();
+  s.moveTo(x0 + nW, y0); s.lineTo(x1 - nW, y0); s.lineTo(x1 - nW, y0 + nH); s.lineTo(x1, y0 + nH);
+  s.lineTo(x1, y1 - r); s.quadraticCurveTo(x1, y1, x1 - r, y1); s.lineTo(x0 + r, y1); s.quadraticCurveTo(x0, y1, x0, y1 - r);
+  s.lineTo(x0, y0 + nH); s.lineTo(x0 + nW, y0 + nH); s.lineTo(x0 + nW, y0);
+  const g = new THREE.ExtrudeGeometry(s, { depth: T, bevelEnabled: false, curveSegments: 3 });
+  g.translate(0, 0, -T / 2);
+  return g;
+}
+const flapGeo = makeFlapGeometry();
+
+// ── board ───────────────────────────────────────────────────────────────────────────────────────
+const frameMat = new THREE.MeshStandardNodeMaterial({ color: 0x0e0f11, roughness: 0.55, metalness: 0 });
+const railMat = new THREE.MeshStandardNodeMaterial({ color: 0x0b0b0d, roughness: 0.7, metalness: 0 });
+const spoolMat = new THREE.MeshStandardNodeMaterial({ color: 0x08080a, roughness: 0.9, metalness: 0 }); // seen through the hinge gap: deep and matte
+const board = { group: null, flaps: null, modules: [], material: null };
+
+function box(w, h, d, x, y, z) { const g = new THREE.BoxGeometry(w, h, d); g.translate(x, y, z); return g; }
+function buildBoard() {
+  if (board.group) {
+    scene.remove(board.group);
+    board.group.traverse((o) => { if (o.geometry && o.geometry !== flapGeo) o.geometry.dispose(); });
+    board.material?.dispose();
+  }
+  const cols = P.cols, rows = P.rows, n = cols * rows;
+  const { w: bw, h: bh } = boardSize();
+  const group = new THREE.Group();
+  // housing: back panel, dividers between columns, rails between rows, outer frame
+  const rails = [box(bw, bh, 0.004, 0, 0, -0.032)];
+  for (let c = 0; c <= cols; c++) rails.push(box(0.0022, bh, 0.062, -bw / 2 + c * PX, 0, -0.001));
+  for (let r = 0; r <= rows; r++) rails.push(box(bw, PY - 2 * H - G, 0.036, 0, bh / 2 - r * PY, -0.014));
+  const inner = new THREE.Mesh(mergeGeometries(rails), railMat);
+  const fr = 0.03, top = 0.055, bot = 0.035;
+  const frame = new THREE.Mesh(mergeGeometries([
+    box(fr, bh + top + bot, 0.08, -bw / 2 - fr / 2, (top - bot) / 2, -0.0, ),
+    box(fr, bh + top + bot, 0.08, bw / 2 + fr / 2, (top - bot) / 2, 0),
+    box(bw, top, 0.08, 0, bh / 2 + top / 2, 0),
+    box(bw, bot, 0.08, 0, -bh / 2 - bot / 2, 0),
+  ]), frameMat);
+  for (const m of [inner, frame]) { m.castShadow = true; m.receiveShadow = true; group.add(m); }
+
+  const spoolGeo = new THREE.CylinderGeometry(0.005, 0.005, W * 0.92, 16).rotateZ(Math.PI / 2);
+  const spools = new THREE.InstancedMesh(spoolGeo, spoolMat, n);
+  spools.receiveShadow = true;
+
+  flapData = new THREE.InstancedBufferAttribute(new Float32Array(n * SLOTS * 4), 4);
+  flapData.setUsage(THREE.DynamicDrawUsage);
+  const geo = flapGeo.clone();
+  geo.setAttribute("flapData", flapData);
+  board.material = makeFlapMaterial(flapData);
+  const flaps = new THREE.InstancedMesh(geo, board.material, n * SLOTS);
+  flaps.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  flaps.castShadow = true; flaps.receiveShadow = true; flaps.frustumCulled = false;
+
+  const prev = board.modules;
+  board.modules = [];
+  const mtx = new THREE.Matrix4();
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const i = r * cols + c, x = (c - (cols - 1) / 2) * PX, y = ((rows - 1) / 2 - r) * PY;
+    const old = prev.find((m) => m.c === c && m.r === r);
+    board.modules.push({ i, c, r, x, y, entries: [], nextK: old ? old.nextK : 0, target: 0, activeUntil: 0, dirty: true });
+    spools.setMatrixAt(i, mtx.makeTranslation(x, y, -0.011));
+  }
+  group.add(spools, flaps);
+  scene.add(group);
+  board.group = group; board.flaps = flaps;
+  initSlots();
+  uCols.value = cols; uRows.value = rows;
+  placeLights();
+}
+
+// ── wall ────────────────────────────────────────────────────────────────────────────────────────
+const wallCanvas = document.createElement("canvas");
+wallCanvas.width = 1024; wallCanvas.height = 1024;
+const wallTex = new THREE.CanvasTexture(wallCanvas);
+wallTex.colorSpace = THREE.SRGBColorSpace; wallTex.wrapS = wallTex.wrapT = THREE.RepeatWrapping; wallTex.anisotropy = 8;
+const wallMat = new THREE.MeshStandardNodeMaterial({ map: wallTex, roughness: 0.82 });
+const wall = new THREE.Mesh(new THREE.PlaneGeometry(10, 6), wallMat);
+wall.position.z = -0.045; wall.receiveShadow = true;
+scene.add(wall);
+function drawWall() {
+  const g = wallCanvas.getContext("2d"), S = 1024;
+  let rnd = 1; const rand = () => ((rnd = (rnd * 16807) % 2147483647) / 2147483647);
+  if (P.wall === "wood") {
+    const plank = 128;
+    for (let y = 0; y < S; y += plank) {
+      const l = 52 + rand() * 10;
+      g.fillStyle = `hsl(32, 30%, ${l + 6}%)`; g.fillRect(0, y, S, plank);
+      for (let k = 0; k < 70; k++) {
+        const yy = y + rand() * plank, a = 0.04 + rand() * 0.08, amp = 1 + rand() * 4, f = 0.002 + rand() * 0.01, ph = rand() * 9;
+        g.strokeStyle = rand() < 0.5 ? `rgba(90,50,20,${a})` : `rgba(255,230,190,${a * 0.7})`;
+        g.lineWidth = 0.6 + rand() * 1.6;
+        g.beginPath();
+        for (let x = 0; x <= S; x += 16) g.lineTo(x, yy + Math.sin(x * f + ph) * amp + Math.sin(x * f * 3.1) * amp * 0.3);
+        g.stroke();
+      }
+      g.fillStyle = "rgba(40,20,5,0.55)"; g.fillRect(0, y, S, 2);
+    }
+    wallTex.repeat.set(4, 6); wallMat.color.set(0xffffff);
+  } else {
+    const base = P.wall === "dark" ? [34, 35, 38] : [150, 148, 142];
+    g.fillStyle = `rgb(${base})`; g.fillRect(0, 0, S, S);
+    for (let k = 0; k < 9000; k++) {
+      const v = (rand() - 0.5) * (P.wall === "dark" ? 10 : 30);
+      g.fillStyle = `rgba(${base.map((b) => Math.round(b + v))},0.5)`;
+      const s = 1 + rand() * 4; g.fillRect(rand() * S, rand() * S, s, s);
+    }
+    wallTex.repeat.set(3, 2);
+  }
+  wallTex.needsUpdate = true;
+  invalidate();
+}
+
+function placeLights() {
+  const { w: bw, h: bh } = boardSize();
+  const dir = new THREE.Vector3(P.lightAz, 1.1, 0.9).normalize();
+  key.position.copy(dir).multiplyScalar(4); key.target.position.set(0, 0, 0);
+  const sc = key.shadow.camera, e = Math.max(bw, bh) / 2 + 0.25;
+  sc.left = -e; sc.right = e; sc.top = e; sc.bottom = -e; sc.near = 1; sc.far = 8; sc.updateProjectionMatrix();
+  fill.position.set(0.3, -0.2, 3);
+  invalidate(true);
+}
+
+// ── simulation ──────────────────────────────────────────────────────────────────────────────────
+let simNow = performance.now() / 1000;
+function setTarget(m, face, start) {
+  const E = m.entries;
+  const i = E.findIndex((e) => e.r > simNow); // cancel what has not been released yet
+  if (i >= 0) { m.nextK = E[i].k; E.length = i; }
+  const n = (face - m.nextK + F) % F;
+  let r = Math.max(start, E.length ? E[E.length - 1].r + P.period : start);
+  for (let j = 0; j < n; j++) {
+    E.push({ k: m.nextK, r });
+    m.nextK = (m.nextK + 1) % F;
+    r += P.period * (0.92 + 0.16 * Math.random());
+  }
+  m.target = face;
+  m.activeUntil = (E.length ? E[E.length - 1].r : 0) + FALL.settle + CARRY + 0.05;
+  m.dirty = true;
+}
+function prune(t) {
+  for (const m of board.modules) {
+    const E = m.entries;
+    let k = 0;
+    while (k < E.length && E[k].r + FALL.settle + 0.25 < t) k++;
+    if (k) E.splice(0, k);
+  }
+}
+
+// one module's flaps at time t → instance matrices + face data
+function poseModule(m, t, ME, FD) {
+  const E = m.entries;
+  let u = E.length;
+  for (let i = 0; i < E.length; i++) if (E[i].r > t) { u = i; break; }
+  const kU = u < E.length ? E[u].k : m.nextK;
+  const carry = u > 0 ? Math.max(0, 1 - (t - E[u - 1].r) / CARRY) : 0;
+  let slot = m.i * SLOTS;
+  const end = slot + SLOTS;
+  // only the rotation about X and the z offset move; the rest was written by initSlots()
+  const write = (k, ang, pz) => {
+    const c = Math.cos(ang), s = Math.sin(ang), o = slot * 16, f = slot * 4;
+    ME[o] = 1; ME[o + 5] = c; ME[o + 6] = s; ME[o + 9] = -s; ME[o + 10] = c; ME[o + 14] = pz;
+    FD[f] = k; FD[f + 1] = (k + 1) % F;
+    slot++;
+  };
+  for (let j = 0; j < UP; j++) { const jc = j + carry; write((kU + j) % F, -(LEAN0 + jc * LEAN), -jc * STEP); }
+  let lean = 0;
+  for (let i = u - 1; i >= 0 && slot < end && lean < 3.5; i--) {
+    const tau = t - E[i].r;
+    write(E[i].k, fallAngle(tau) + lean * LEAN, -lean * STEP);
+    lean += landP(tau);
+  }
+  let k = (u > 0 ? E[0].k : kU) - 1; // the older flaps of the lower stack
+  while (slot < end && lean < 3.5) { write(((k % F) + F) % F, Math.PI + lean * LEAN, -lean * STEP); lean += 1; k--; }
+  for (; slot < end; slot++) { const o = slot * 16; ME[o] = 0; ME[o + 5] = 0; ME[o + 6] = 0; ME[o + 9] = 0; ME[o + 10] = 0; } // degenerate = not drawn
+}
+function initSlots() {
+  const ME = board.flaps.instanceMatrix.array, FD = flapData.array;
+  ME.fill(0);
+  for (const m of board.modules) for (let s = 0; s < SLOTS; s++) {
+    const i = m.i * SLOTS + s, o = i * 16, f = i * 4;
+    ME[o + 12] = m.x; ME[o + 13] = m.y; ME[o + 15] = 1;
+    FD[f + 2] = m.c; FD[f + 3] = m.r;
+  }
+}
+function poseAll(t) {
+  const ME = board.flaps.instanceMatrix.array, FD = flapData.array;
+  let any = false;
+  for (const m of board.modules) {
+    if (!m.dirty && t > m.activeUntil) continue;
+    poseModule(m, t, ME, FD);
+    m.dirty = t <= m.activeUntil;
+    any = true;
+  }
+  if (any) { board.flaps.instanceMatrix.needsUpdate = true; flapData.needsUpdate = true; }
+}
+
+// ── content ─────────────────────────────────────────────────────────────────────────────────────
+const COLOR_CODES = Object.fromEntries(COLORS.map(([c], j) => [c, COL0 + j]));
+function parseLine(s) {
+  const out = [];
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] === "[" && s[i + 2] === "]") {
+      const c = s[i + 1].toLowerCase();
+      if (c in COLOR_CODES) { out.push(COLOR_CODES[c]); i += 2; continue; }
+      if (c === "1" || c === "2") { out.push(IMG0 + (+c - 1)); i += 2; continue; }
+    }
+    out.push(Math.max(0, CHARS.indexOf(s[i].toUpperCase())));
+  }
+  return out;
+}
+function emptyGrid(face = 0) { return Array.from({ length: P.rows }, () => new Array(P.cols).fill(face)); }
+function textGrid(lines, { align = "center", grid = emptyGrid(), top = null } = {}) {
+  const parsed = lines.map(parseLine);
+  const r0 = top ?? Math.max(0, Math.floor((P.rows - parsed.length) / 2));
+  parsed.forEach((faces, j) => {
+    const r = r0 + j; if (r >= P.rows) return;
+    const f = faces.slice(0, P.cols);
+    const c0 = align === "left" ? 0 : align === "right" ? P.cols - f.length : Math.floor((P.cols - f.length) / 2);
+    f.forEach((v, i) => { grid[r][c0 + i] = v; });
+  });
+  return grid;
+}
+function delayFor(mode, c, r) {
+  switch (mode) {
+    case "cascade": return c * 0.035 + r * 0.012;
+    case "wave": return (c + r) * 0.03;
+    case "center": return Math.hypot(c - (P.cols - 1) / 2, (r - (P.rows - 1) / 2) * 1.6) * 0.05;
+    case "random": return Math.random() * 1.4;
+    default: return Math.random() * 0.03;
+  }
+}
+function show(grid, mode = P.transition) {
+  const t0 = simNow + 0.03;
+  for (const m of board.modules) {
+    const face = grid[m.r]?.[m.c] ?? 0;
+    if (face === m.target && m.entries.every((e) => e.r <= simNow)) continue;
+    setTarget(m, face, t0 + delayFor(mode, m.c, m.r));
+  }
+}
+
+// programs: start() once, tick(t, elapsed) every frame
+const pad = (n) => String(n).padStart(2, "0");
+const DESTS = ["PARIS", "TOKYO", "NEW YORK", "LONDON", "DUBAI", "ROME", "MONTREAL", "SYDNEY", "BERLIN", "LISBON", "ALGIERS", "OSLO", "MADRID", "SEOUL"];
+const STATUS = [["[g]", 5], ["[y]", 2], ["[b]", 2], ["[r]", 1]];
+let depRows = [];
+function depLine(d) {
+  const dw = Math.max(4, P.cols - 19);
+  return `${d.time} ${d.fl} ${d.dest.padEnd(dw).slice(0, dw)} ${d.gate.padStart(3)} ${d.st}`;
+}
+function depGrid() {
+  const now = new Date();
+  const g = textGrid([`DEPARTURES`], { align: "left", top: 0 });
+  textGrid([`${pad(now.getHours())}:${pad(now.getMinutes())}`], { align: "right", top: 0, grid: g });
+  return textGrid(depRows.map(depLine), { align: "left", top: 1, grid: g });
+}
+function pickStatus() { const tot = STATUS.reduce((a, s) => a + s[1], 0); let x = Math.random() * tot; for (const s of STATUS) if ((x -= s[1]) < 0) return s[0]; return "[g]"; }
+function newDep(i) {
+  const h = (8 + i + Math.floor(Math.random() * 2)) % 24;
+  return { time: `${pad(h)}:${pad(Math.floor(Math.random() * 12) * 5)}`, fl: `AF${String(100 + Math.floor(Math.random() * 899))}`.padEnd(6),
+    dest: DESTS[Math.floor(Math.random() * DESTS.length)], gate: `${"ABCD"[Math.floor(Math.random() * 4)]}${1 + Math.floor(Math.random() * 40)}`, st: pickStatus() };
+}
+function pixelGrid() {
+  const c = document.createElement("canvas"); c.width = P.cols; c.height = P.rows;
+  const g = c.getContext("2d"); g.drawImage(imgCanvas[0], 0, 0, P.cols, P.rows);
+  const px = g.getImageData(0, 0, P.cols, P.rows).data;
+  const pal = [[0, new THREE.Color(P.flapColor)], ...COLORS.map(([, hex], j) => [COL0 + j, new THREE.Color(hex)])]
+    .map(([f, col]) => [f, col.r * 255, col.g * 255, col.b * 255]);
+  // the palette Colors are linear; compare in linear too
+  const lin = (v) => { v /= 255; return 255 * (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4); };
+  const grid = emptyGrid();
+  for (let r = 0; r < P.rows; r++) for (let cc = 0; cc < P.cols; cc++) {
+    const o = (r * P.cols + cc) * 4, R = lin(px[o]), Gg = lin(px[o + 1]), B = lin(px[o + 2]);
+    let best = 0, bd = 1e9;
+    for (const [f, pr, pg, pb] of pal) { const d = (R - pr) ** 2 * 0.3 + (Gg - pg) ** 2 * 0.59 + (B - pb) ** 2 * 0.11; if (d < bd) { bd = d; best = f; } }
+    grid[r][cc] = best;
+  }
+  return grid;
+}
+const msgLines = () => $("msg").value.split("\n");
+const PROGRAMS = {
+  Message: { start() { show(textGrid(msgLines())); } },
+  Departures: {
+    start() { depRows = Array.from({ length: Math.max(0, P.rows - 1) }, (_, i) => newDep(i)); this.next = 4; show(depGrid(), "cascade"); },
+    tick(t, el) {
+      if (el < this.next) return;
+      this.next = el + 2.5 + Math.random() * 2;
+      const i = Math.floor(Math.random() * depRows.length);
+      if (depRows[i]) { Math.random() < 0.3 ? (depRows[i] = newDep(i)) : (depRows[i].st = pickStatus()); }
+      show(depGrid(), "cascade");
+    },
+  },
+  Rainbow: {
+    start() { this.phase = 0; this.next = 0; },
+    tick(t, el) {
+      if (el < this.next) return;
+      this.next = el + 2.2;
+      const g = emptyGrid();
+      for (let r = 0; r < P.rows; r++) for (let c = 0; c < P.cols; c++) g[r][c] = COL0 + 1 + ((Math.floor((c + r * 1.5) / 2) + this.phase) % 7);
+      show(g, this.phase === 0 ? "wave" : "instant");
+      this.phase++;
+    },
+  },
+  Images: {
+    start() { this.which = 0; this.next = 0; },
+    tick(t, el) { if (el < this.next) return; this.next = el + 9; show(emptyGrid(IMG0 + this.which), "wave"); this.which ^= 1; },
+  },
+  Promo: {
+    start() {
+      const g = emptyGrid(), split = Math.round(P.cols * 0.45);
+      for (let r = 0; r < P.rows; r++) for (let c = 0; c < split; c++) g[r][c] = IMG0;
+      const right = emptyGrid();
+      textGrid(["OPEN", "DAILY", "", "7AM - 9PM", "[y][y][y][y][y][y]"], { grid: right });
+      for (let r = 0; r < P.rows; r++) for (let c = split; c < P.cols; c++) g[r][c] = right[r][Math.min(P.cols - 1, c - Math.floor(split / 2))];
+      show(g, "cascade");
+    },
+  },
+  "Pixel art": { start() { show(pixelGrid(), "random"); } },
+  Scramble: {
+    start() { const g = emptyGrid().map((row) => row.map(() => Math.floor(Math.random() * COL0))); show(g, "random"); this.done = false; },
+    tick(t, el) { if (!this.done && el > 3) { this.done = true; show(textGrid(msgLines()), "random"); } },
+  },
+  Fill: {
+    start() { show(emptyGrid(CHARS.indexOf("$")), "wave"); this.done = false; },
+    tick(t, el) { if (!this.done && el > 4.5) { this.done = true; const g = textGrid(msgLines(), { grid: emptyGrid(CHARS.indexOf("$")) }); show(g, "center"); } },
+  },
+  Clock: {
+    start() { this.last = ""; },
+    tick() {
+      const d = new Date(), s = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+      if (s === this.last) return;
+      this.last = s;
+      const day = d.toLocaleDateString("en-GB", { weekday: "short", day: "2-digit", month: "short" }).toUpperCase().replace(",", "");
+      show(textGrid([day, "", s]), "instant");
+    },
+  },
+};
+let program = null, programName = "", programT0 = 0, autoT0 = 0;
+function runProgram(name) {
+  programName = name; program = PROGRAMS[name]; programT0 = simNow; autoT0 = simNow;
+  program.start?.();
+  document.querySelectorAll("#programs button").forEach((b) => b.classList.toggle("on", b.textContent === name));
+}
+
+// ── sound: synthesised plastic clacks, voices capped, loudness grows with the flap count ─────────
+const audio = { ctx: null, out: null, clicks: [] };
+function initAudio() {
+  if (audio.ctx) return;
+  const ctx = new AudioContext();
+  const comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  const out = ctx.createGain(); out.gain.value = P.volume;
+  out.connect(comp).connect(ctx.destination);
+  const sr = ctx.sampleRate;
+  for (let v = 0; v < 8; v++) {
+    const n = Math.floor(sr * 0.07), buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
+    const modes = [[1500 + Math.random() * 700, 0.006, 0.5], [2800 + Math.random() * 900, 0.004, 0.35], [4500 + Math.random() * 1200, 0.003, 0.25], [7000 + Math.random() * 2000, 0.0018, 0.18]]
+      .map(([f, dcy, a]) => [f, dcy, a, Math.random() * 6.28]);
+    let peak = 0;
+    for (let i = 0; i < n; i++) {
+      const t = i / sr;
+      let s = 0;
+      for (const [f, dcy, a, ph] of modes) s += a * Math.sin(6.2832 * f * t + ph) * Math.exp(-t / dcy);
+      s += (Math.random() * 2 - 1) * 0.6 * Math.exp(-t / 0.0012);
+      s += 0.35 * Math.sin(6.2832 * 165 * t) * Math.exp(-t / 0.011) * (1 - Math.exp(-t / 0.0008));
+      d[i] = s; peak = Math.max(peak, Math.abs(s));
+    }
+    for (let i = 0; i < n; i++) d[i] *= 0.9 / peak;
+    audio.clicks.push(buf);
+  }
+  Object.assign(audio, { ctx, out });
+}
+function playClicks(count, panSum, dt, gain, rate) {
+  if (!audio.ctx || count === 0 || P.volume === 0) return;
+  const voices = Math.min(count, 10), g = (gain * Math.sqrt(count)) / voices, pan = Math.max(-1, Math.min(1, panSum / count));
+  const t0 = audio.ctx.currentTime + 0.01;
+  for (let v = 0; v < voices; v++) {
+    const src = audio.ctx.createBufferSource();
+    src.buffer = audio.clicks[Math.floor(Math.random() * audio.clicks.length)];
+    src.playbackRate.value = rate * (0.9 + Math.random() * 0.2);
+    const gn = audio.ctx.createGain(); gn.gain.value = g * (0.7 + Math.random() * 0.6);
+    const pn = audio.ctx.createStereoPanner(); pn.pan.value = pan * 0.8 + (Math.random() - 0.5) * 0.3;
+    src.connect(gn).connect(pn).connect(audio.out);
+    src.start(t0 + Math.random() * dt);
+  }
+}
+function sound(prevT, t) {
+  if (!audio.ctx) return;
+  const half = boardSize().w / 2;
+  let land = 0, landPan = 0, rel = 0, relPan = 0;
+  for (const m of board.modules) {
+    if (t > m.activeUntil + 0.1) continue;
+    for (const e of m.entries) {
+      const th = e.r + FALL.tHit;
+      if (th > prevT && th <= t) { land++; landPan += m.x / half; }
+      if (e.r > prevT && e.r <= t) { rel++; relPan += m.x / half; }
+    }
+  }
+  const dt = t - prevT;
+  playClicks(land, landPan, dt, 0.45, 1);
+  playClicks(rel, relPan, dt, 0.12, 1.5);
+}
+
+// ── motion-blur accumulation ────────────────────────────────────────────────────────────────────
+const size = new THREE.Vector2();
+renderer.getDrawingBufferSize(size);
+const rtSub = new THREE.RenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: 4 });
+// 32-bit depth: the stacked flaps are 0.5 mm apart, a 16-bit buffer speckles them past ~30 cm
+rtSub.depthTexture = new THREE.DepthTexture(size.x, size.y, THREE.FloatType);
+const rtAcc = new THREE.RenderTarget(size.x, size.y, { type: THREE.HalfFloatType });
+const uWeight = uniform(1);
+const accMat = new THREE.MeshBasicNodeMaterial({ blending: THREE.AdditiveBlending, transparent: true, depthTest: false, depthWrite: false });
+accMat.colorNode = vec4(texture(rtSub.texture).rgb.mul(uWeight), 1);
+const accQuad = new THREE.QuadMesh(accMat);
+const outMat = new THREE.MeshBasicNodeMaterial({ depthTest: false, depthWrite: false });
+outMat.colorNode = vec4(texture(rtAcc.texture).rgb, 1);
+const outQuad = new THREE.QuadMesh(outMat);
+const clearCol = new THREE.Color(0x101113);
+
+function resize() {
+  camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.getDrawingBufferSize(size);
+  rtSub.setSize(size.x, size.y); rtAcc.setSize(size.x, size.y);
+  invalidate();
+}
+addEventListener("resize", resize);
+
+// ── camera presets ──────────────────────────────────────────────────────────────────────────────
+function camPreset(name) {
+  const { w: bw, h: bh } = boardSize();
+  const fit = Math.max((bw / 2 + 0.08) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / camera.aspect, (bh / 2 + 0.1) / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)));
+  if (name === "board") { controls.target.set(0, 0, 0); camera.position.set(0, 0, fit * 1.08); }
+  else {
+    const m = board.modules[Math.min(board.modules.length - 1, Math.floor(P.rows / 3) * P.cols + Math.floor(P.cols * 0.3))];
+    controls.target.set(m.x, m.y, 0);
+    if (name === "close") camera.position.set(m.x + 0.09, m.y + 0.05, 0.3);
+    else camera.position.set(m.x + 0.55, m.y + 0.12, 0.42);
+  }
+  controls.update();
+}
+
+// ── UI ──────────────────────────────────────────────────────────────────────────────────────────
+for (const name of Object.keys(PROGRAMS)) {
+  const b = document.createElement("button"); b.textContent = name;
+  b.onclick = () => runProgram(name);
+  $("programs").append(b);
+}
+$("show").onclick = () => runProgram("Message");
+$("transition").onchange = (e) => { P.transition = e.target.value; };
+const slider = (id, fmt, apply) => {
+  const el = $(id), upd = () => { const v = +el.value; $(id + "V").textContent = fmt(v); apply(v); };
+  el.oninput = upd; upd();
+};
+slider("speed", (v) => `${v.toFixed(2)}×`, (v) => { P.speed = v; });
+slider("period",(v) => `${v} ms`, (v) => { P.period = v / 1000; });
+slider("gravity", (v) => v.toFixed(2), (v) => { P.gravity = v; buildFall(); });
+slider("bounce", (v) => v.toFixed(2), (v) => { P.bounce = v; buildFall(); });
+slider("samples", (v) => `${v}`, (v) => { P.samples = v; });
+slider("shutter", (v) => `${Math.round(v * 360)}°`, (v) => { P.shutter = v; });
+slider("lightAz", (v) => v.toFixed(2), (v) => { P.lightAz = v; placeLights(); });
+slider("volume", (v) => `${Math.round(v * 100)}%`, (v) => { P.volume = v; if (audio.out) audio.out.gain.value = v; });
+const THEMES = { black: ["#141416", "#f2f1ec"], white: ["#eeede8", "#141416"] };
+function applyColors() { uFlap.value.set(P.flapColor); uInk.value.set(P.inkColor); drawAtlas(); }
+$("theme").onchange = (e) => {
+  const t = THEMES[e.target.value]; if (!t) return;
+  [P.flapColor, P.inkColor] = t; $("flapColor").value = t[0]; $("inkColor").value = t[1]; applyColors();
+};
+$("flapColor").oninput = (e) => { P.flapColor = e.target.value; $("theme").value = "custom"; applyColors(); };
+$("inkColor").oninput = (e) => { P.inkColor = e.target.value; $("theme").value = "custom"; applyColors(); };
+$("font").onchange = (e) => { [P.fontWeight, P.font] = e.target.value.split("|"); drawAtlas(); };
+$("wall").onchange = (e) => { P.wall = e.target.value; drawWall(); };
+[0, 1].forEach((i) => {
+  $("img" + (i + 1)).onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const im = new Image();
+    im.onload = () => { imgSrc[i] = im; drawImages(); if (programName === "Pixel art") runProgram("Pixel art"); };
+    im.src = URL.createObjectURL(f);
+  };
+});
+$("rebuild").onclick = async () => {
+  P.cols = Math.max(4, Math.min(96, +$("cols").value)); P.rows = Math.max(1, Math.min(40, +$("rows").value));
+  buildBoard(); await drawImages(); camPreset("board"); runProgram(programName || "Message");
+};
+document.querySelectorAll("[data-cam]").forEach((b) => { b.onclick = () => camPreset(b.dataset.cam); });
+$("panel").addEventListener("input", () => invalidate(true));
+$("panel").addEventListener("change", () => invalidate(true));
+$("toggle").onclick = () => { $("panel").classList.toggle("hidden"); document.body.classList.toggle("nopanel"); };
+addEventListener("pointerdown", initAudio, { once: true });
+addEventListener("keydown", initAudio, { once: true });
+
+// ── boot + loop ─────────────────────────────────────────────────────────────────────────────────
+buildFall();
+await drawAtlas();
+drawWall();
+buildBoard();
+await drawImages();
+camPreset("board");
+runProgram("Message");
+
+// sim clock: pausable and slowable (Space = pause), the shutter follows the sim time
+let simClock = simNow, lastWall = performance.now() / 1000, paused = false;
+let last = simClock, fpsN = 0, fpsT = lastWall, fps = 0, cpuMs = 0;
+function setPaused(p) { paused = p; $("pause").classList.toggle("on", p); $("pause").textContent = p ? "Resume" : "Pause"; invalidate(true); }
+$("pause").onclick = () => setPaused(!paused);
+addEventListener("keydown", (e) => { if (e.key === " " && e.target.tagName !== "TEXTAREA") { e.preventDefault(); setPaused(!paused); } });
+function frame() {
+  const t0 = performance.now(), wall = t0 / 1000, dtw = Math.min(0.05, wall - lastWall);
+  lastWall = wall;
+  if (paused && !needsRender) return;
+  const dt = paused ? 0 : dtw * P.speed;
+  simClock += dt;
+  const t = simClock;
+  simNow = t;
+  if ($("autoplay").checked && t - autoT0 > +$("autoSec").value) {
+    const names = Object.keys(PROGRAMS);
+    runProgram(names[(names.indexOf(programName) + 1) % names.length]);
+  }
+  program?.tick?.(t, t - programT0);
+  sound(last, t);
+  prune(t);
+  controls.update();
+
+  const spanMax = P.shutter * Math.max(dt, 1 / 120);
+  const active = board.modules.some((m) => m.dirty || t - spanMax <= m.activeUntil);
+  if (!active && !needsRender) {
+    last = t;
+    $("stats").textContent = `idle (no frame rendered) · ${board.modules.length} modules · ${programName}`;
+    return;
+  }
+  needsRender = false;
+  key.shadow.autoUpdate = active;
+  const N = active ? P.samples : 1, span = N > 1 ? spanMax : 0;
+  renderer.autoClear = false;
+  renderer.setClearColor(0x000000, 0);
+  renderer.setRenderTarget(rtAcc); renderer.clear();
+  uWeight.value = 1 / N;
+  for (let i = 0; i < N; i++) {
+    poseAll(t - span * (1 - (i + 0.5) / N));
+    renderer.setClearColor(clearCol, 1);
+    renderer.setRenderTarget(rtSub); renderer.clear();
+    renderer.render(scene, camera);
+    renderer.setRenderTarget(rtAcc);
+    accQuad.render(renderer);
+  }
+  renderer.setRenderTarget(null);
+  renderer.setClearColor(clearCol, 1); renderer.clear();
+  outQuad.render(renderer);
+
+  last = t;
+  cpuMs = cpuMs * 0.9 + (performance.now() - t0) * 0.1;
+  fpsN++;
+  if (wall - fpsT > 0.5) { fps = fpsN / (wall - fpsT); fpsN = 0; fpsT = wall; }
+  $("stats").textContent = `${paused ? "PAUSED · " : ""}${fps.toFixed(0)} fps · cpu ${cpuMs.toFixed(1)} ms · ${board.modules.length} modules · ${board.modules.length * SLOTS} flaps · ${N} sub-frames · ${programName}`;
+}
+renderer.setAnimationLoop(frame);
+
+window.__flap = { setPaused: (p) => setPaused(p), invalidate, key, renderer, scene, camera, controls, board, P, runProgram, show, textGrid, camPreset, FALL, poseAll };
+</script>
+</body>
+</html>
