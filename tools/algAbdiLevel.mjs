@@ -204,7 +204,8 @@ for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
   RAW[k] = naturalAt(x, z);
   // where erosion may change the ground: up in the djebel (past its first step), and the frame; never near a
   // site, the oued, a piste or a gully's floor
-  let m = Math.max(smoothstep(12, 40, djebelD(x, z)), smoothstep(10, 60, outside(x, z)));
+  // (from the djebel's FIRST step now, full by its second — 2026-10-19: in the box it read mild)
+  let m = Math.max(smoothstep(4, 26, djebelD(x, z)), smoothstep(10, 60, outside(x, z)));
   for (const f of flats) m = Math.min(m, smoothstep(f.r, f.r + 20, Math.hypot(x - f.x, z - f.z)));
   if (m > 0) {
     m *= smoothstep(wadi.width + 6, wadi.width + 24, wadiAt(x, z, 50).d);
@@ -215,7 +216,7 @@ for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
 ERO.set(RAW);
 if (ERODE) {
   const t0 = Date.now();
-  streamPowerErode(ERO, N, 140, { ...STREAM_POWER_DEFAULTS, strength: 0.012, smoothing: 0.04 }, createStreamPowerScratch(N));
+  streamPowerErode(ERO, N, 200, { ...STREAM_POWER_DEFAULTS, strength: 0.02, smoothing: 0.035 }, createStreamPowerScratch(N));
   erodeDroplets(ERO, N, 250000, { ...EROSION_DEFAULTS, erosionRate: 0.35, depositionRate: 0.25 }, buildErosionKernel(3));
   smoothHeights(ERO, N, 2, 0.15);
   console.log(`erosion: ${((Date.now() - t0) / 1000).toFixed(1)} s`);
@@ -367,8 +368,11 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const [gx, gz] = grad(x, z, 1.5), gl = Math.hypot(gx, gz) || 1;
   const along = (x * gz - z * gx) / gl;   // across the fall line: streaks run DOWN the face
   const streak = smoothstep(0.4, 0.7, noise(along / 5, (x * gx + z * gz) / gl / 30, 61) * 0.7 + noise(x / 9, z / 9, 62) * 0.3);
+  // (the foot's weight halved and NOTHING dark on a gully's floor: the channels read as black slits — 2026-10-19)
   const foot = smoothstep(0.3, 1.2, hollow(x, z, 6));
-  const darkRed = smoothstep(14, 26, sl) * Math.min(1, 0.25 + 0.6 * streak + 0.5 * foot);
+  const gullyD = Math.min(...gullyAt.map((g) => g(x, z, 24).d));
+  const gullyFloor = 1 - smoothstep(4, 9, gullyD), gullyWall = 1 - smoothstep(9, 18, gullyD);
+  const darkRed = smoothstep(14, 26, sl) * Math.min(1, 0.25 + 0.6 * streak + 0.25 * foot) * (1 - gullyFloor) * (1 - 0.65 * gullyWall);
   w[6] = road;
   let rest = 1 - road;
   w[4] = rest * bed; rest -= w[4];

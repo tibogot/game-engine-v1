@@ -98,7 +98,7 @@ export const MAP = {
   },
   // THE SANDSTONE (algSandstone, the building lab's rock): outcrops on the djebel's crests (cover, landmarks) and
   // the frame's cliffs — placed by tools/algAbdiLevel.mjs. The Aurès' ochre colour.
-  sandstone: { colour: "aures", rocks: ROCKS },
+  sandstone: { colour: "abdi", rocks: ROCKS },
   // algLandmarks' own scenery: none (its Aurès places are on the old map's ground).
   scenery: { quantities: {}, keepClear: [] },
 };

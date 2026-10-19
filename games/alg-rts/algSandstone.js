@@ -125,6 +125,9 @@ export const SANDSTONE_COLOURS = {
   kantara: { label: "El Kantara (sable)", tint: [1.3, 1.12, 0.98], saturation: 0.95, topDark: 0.85 },
   // THE COAST (2026-10-16, the Stora capes: assets-src/refs/coast/): the cliff's own ochre, a little
   // greyed (0.35 read grey, stuck on the ochre face).
+  // THE OUED ABDI (2026-10-19): on its pale ochre earth the Aurès' colour read as dark chocolate lumps — a
+  // light, warm limestone-sandstone, less red than El Kantara's.
+  abdi: { label: "Oued Abdi (calcaire)", tint: [1.32, 1.16, 0.98], saturation: 0.6, topDark: 0.88 },
   coast: { label: "Côte (ocre)", tint: [1.06, 0.98, 0.86], saturation: 0.72, topDark: 0.8 },
 };
 export function setSandstoneColour(key) {
