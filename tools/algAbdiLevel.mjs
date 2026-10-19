@@ -228,8 +228,13 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const scree = frame * smoothstep(14, 26, sl);
   const grove = 1 - smoothstep(OASIS.r + 6, OASIS.r + 26, Math.hypot(x - OASIS.x, z - OASIS.z) + 10 * (noise(x / 14, z / 14, 46) - 0.5));
   const d = djebelD(x, z);
-  const red = Math.min(1, smoothstep(0.08, 0.6, hollow(x, z) + (noise(x / 18, z / 18, 41) - 0.5) * 0.5) * 0.7
-    + smoothstep(18, 30, sl) * 0.6 + smoothstep(0, 40, d) * 0.35 * smoothstep(0.45, 0.65, noise(x / 40, z / 40, 43)));
+  // RED EARTH in BIG ZONES (CoH's frames: pale ochre crests and open ground, red-orange hollows and slopes —
+  // broad areas, not speckle; measured 2026-10-19): the hollows at two scales, the slopes and the terrace
+  // faces, large patches (90-150 m) with ragged edges; more of it up on the djebel
+  // (the first pass, zone 0.7: luma 108, saturation 0.62 — too red; CoH 133-159, 0.45-0.51)
+  const zone = smoothstep(0.58, 0.7, noise(x / 120, z / 120, 43) * 0.75 + noise(x / 35, z / 35, 44) * 0.25);
+  const red = Math.min(1, smoothstep(0.2, 0.8, hollow(x, z, 14) + (noise(x / 22, z / 22, 41) - 0.5) * 0.35) * 0.55
+    + smoothstep(10, 24, sl) * 0.8 + zone * 0.45 + smoothstep(0, 40, d) * 0.2);
   w[6] = road;
   let rest = 1 - road;
   w[4] = rest * bed; rest -= w[4];
@@ -296,8 +301,21 @@ function plantPaint(res, pages, fns) {
 const tallPaint = plantPaint(512, 1, TALL);
 const groundPaint = plantPaint(1024, 2, GROUND);
 
-// ── Manifest: the base's look and its Aurès slots (kept: the game's splats / stones / minimap read them) ──
+// ── Manifest: the base's look; its slots' MEANINGS kept (the game's splats / stones / minimap read them),
+// THREE PHOTOS changed for the CoH read (2026-10-19, measured: the Aurès' brown_mud_dry is among the darkest,
+// speckiest ground photos — the valley measured luma 98, R/G 1.18 against CoH's 133-159 and 1.4) ──
 blankManifest(man);
+const photo = (dir, file) => ({ name: file, url: `${dir}/${file}` });
+const PH = { diff: "diff_1k.jpg", nor: "nor_gl_1k.jpg", rough: "rough_1k.jpg", ao: "ao_1k.jpg" };
+const set = (slot, name, id, look) => {
+  const dir = `/textures/ground/${id}`;
+  man.paintLayers[slot] = { ...man.paintLayers[slot], name,
+    albedo: photo(dir, `${id}_${PH.diff}`), normal: photo(dir, `${id}_${PH.nor}`), rough: photo(dir, `${id}_${PH.rough}`), ao: photo(dir, `${id}_${PH.ao}`),
+    ...look };
+};
+set(0, "Valley soil", "mud_cracked_dry_03", { uvScale: W / 2.6, normalStr: 0.45, aoStr: 0.3, tint: "#f6e2cc" });   // pale dry earth (luma 174) — small, soft cracks: a grain, not a salt-flat pattern
+set(1, "Red earth", "desert_hollow", { uvScale: W / 16, normalStr: 0.7, aoStr: 0.35, tint: "#ecd2c0" });        // the CoH red-orange, toned
+set(6, "Dirt track", "desert_road", { uvScale: W / 6.4, normalStr: 0.6, aoStr: 0.3, tint: "#f0e0cc" });        // pale, as CoH's tracks
 const blobs = new Map([["heightmap", Buffer.from(hgt.buffer)], ["splat", splat], ["susukiDensity", tallPaint.out], ["foliagePaint", groundPaint.out]]);
 const bytes = await writeProject(args.out, { manifest: man, blobs });
 console.log(`${args.out}: ${(bytes / 1e6).toFixed(1)} MB — the ground ${lo.toFixed(1)}..${hi.toFixed(1)} m`);

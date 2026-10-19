@@ -519,8 +519,10 @@ export async function placeShowroom(app, list = SHOWROOM) {
   const wind = createWind();
   wind.onChange((w) => {
     for (const f of flags) f.setWind(w.dirDeg, w.strength);
-    // The plants too (grass, trees, reeds, oleander): one wind on screen.
-    app.setWind?.({ angleDeg: w.dirDeg, strength: 0.3 + 2.2 * w.strength, gust: 0.15 + 0.6 * w.gust });
+    // The plants too (grass, trees, reeds, oleander): one wind on screen — scaled per map (MAP.foliageWind,
+    // 2026-10-19, you: "in CoH there is no wind on foliage"; the flags keep the full wind). ?plantwind=0..1 = A/B.
+    const k = Number(new URLSearchParams(location.search).get("plantwind") ?? MAP.foliageWind ?? 1);
+    app.setWind?.({ angleDeg: w.dirDeg, strength: (0.3 + 2.2 * w.strength) * k, gust: (0.15 + 0.6 * w.gust) * Math.min(1, k * 2) });
   });
   const socks = [];
   for (const e of list) {

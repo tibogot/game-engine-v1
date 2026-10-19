@@ -79,6 +79,22 @@ export const MAP = {
   handPlaced: false,
   // WHAT THIS MAP SHOWS (mapSystems.js): the ground under review — no AI yet.
   systems: { fow: true, birds: true, splats: true, stones: true },
+  // THE PLANTS BARELY MOVE (you, 2026-10-19: "in CoH there is no wind on foliage"): a slight breath, 1/4 of
+  // the Aurès' sway; the flags and the windsock keep the full wind. ?plantwind=0..1 to compare.
+  foliageWind: 0.25,
+  // ITS LIGHT (algGame MAP_LIGHT, over the Aurès'): the Aurès' grade is tuned for its dark brown ground — on
+  // this pale ochre one it read too dark and too saturated (measured 2026-10-19 at the RTS zoom: luma 118,
+  // saturation 0.60; CoH's frames 133-159, 0.45-0.51). A little more exposure, the grade less warm, less
+  // saturated.
+  light: { skyProExposure: 0.52, polish: { saturation: 0.8, temperature: 0.08 } },   // (the Aurès: 0.42; 1.12 read luma 197)
+  // ITS STONES (algStones, by paint slot — the Aurès' meanings): warm limestone and sandstone that sit on
+  // the pale ochre ground (the Aurès' grey ones read as foreign on it — the first look, 2026-10-19).
+  stones: {
+    soil:  { slot: 0, id: "rock_boulder_cracked", tint: "#f0d2b4", per100: 0.5, shapes: [["pebble", 0.6], ["rock", 0.4]] },
+    red:   { slot: 1, id: "rock_boulder_cracked", tint: "#e0aa86", per100: 1.6, shapes: [["pebble", 0.5], ["rock", 0.42], ["lump", 0.08]] },
+    wadi:  { slot: 4, id: "rocky_trail", tint: "#f4ece0", per100: 4.0, shapes: [["cobble", 0.7], ["pebble", 0.3]] },
+    gravel:{ slot: 6, id: "rock_boulder_cracked", tint: "#ead2b8", per100: 6.0, shapes: [["pebble", 0.85], ["rock", 0.15]], edge: [0.08, 0.55] },
+  },
   // algLandmarks' own scenery: none (its Aurès places are on the old map's ground).
   scenery: { quantities: {}, keepClear: [] },
 };
