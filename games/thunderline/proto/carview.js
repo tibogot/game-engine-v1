@@ -1,4 +1,4 @@
-// THE CAR VIEW: the new car (assets-src/car/thunder_car.glb) parked next to the Lotus in the game's own
+// THE CAR VIEW: the new car (public/models/thunderline/thunder_car.glb) parked next to the Lotus in the game's own
 // world — Sky Pro, the drive page's light, the flat world — so the user judges it as it will look in the
 // game before it replaces the Lotus (user, 2026-10-19). Not part of the game.
 import * as THREE from "three";
@@ -9,6 +9,7 @@ import { createVehicleGround } from "../../../v3/play/modularRoadGround.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../modular-road-v3/wheelModel.js";
 import { applyWorld } from "./kit/worlds.js";
+import { THUNDER_CAR_URL } from "./kit/thunderCar.js";
 
 const $ = (id) => document.getElementById(id);
 const app = await startV3App({
@@ -53,11 +54,12 @@ try {
 
 // ---------- the new car: the exported glTF as it is (Blender +Y forward → three −Z: turned to face +Z like the Lotus) ----------
 initGlbLoaderRenderer(renderer); // the shared loader: KTX2 textures + meshopt geometry (v3/TEXTURE_COMPRESSION.md)
-const gltf = await getSharedGltfLoader().loadAsync("/games/thunderline/assets-src/car/thunder_car.glb");
+const gltf = await getSharedGltfLoader().loadAsync(THUNDER_CAR_URL);
 const car = gltf.scene;
 car.rotation.y = Math.PI;
 car.position.set(NEW_X, 0, 0);
-car.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+// as the game: only the ShadowProxy hull casts, and it is never drawn in the view
+car.traverse((o) => { if (o.isMesh) { const proxy = /^ShadowProxy/.test(o.name) || /^ShadowProxy/.test(o.parent?.name ?? ""); o.castShadow = proxy; o.receiveShadow = !proxy; if (proxy) o.material = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }); } });
 scene.add(car);
 const wheels = [];
 car.traverse((o) => { if (/^Wheel_/.test(o.name)) wheels.push(o); });

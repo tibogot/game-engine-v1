@@ -27,7 +27,7 @@ import { createSfx } from "./sfx.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
-import { loadThunderCar } from "./thunderCar.js";
+import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -166,7 +166,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (car === "thunder") {
       // the car file is not in git until it is optimised: without it, the Lotus
       let tc;
-      try { tc = await loadThunderCar(renderer); } catch (e) { console.warn("[drive] Thunderline car not found, using the Lotus", e); return false; }
+      // the ghost wears the light version (thunderCar.js LOD1)
+      try { tc = await loadThunderCar(renderer, adopt ? THUNDER_CAR_URL : THUNDER_CAR_LOD1_URL); } catch (e) { console.warn("[drive] Thunderline car not found, using the Lotus", e); return false; }
       if (adopt) adoptCar(tc.chassis.object);
       if (tc.chassis.headlampMounts && adopt) v.setHeadlampMounts(tc.chassis.headlampMounts);
       v.setChassisModel(tc.chassis.object, { brakeLights: tc.chassis.brakeLights, headlampLenses: tc.chassis.headlampLenses });

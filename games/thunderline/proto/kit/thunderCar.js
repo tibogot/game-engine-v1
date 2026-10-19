@@ -6,23 +6,26 @@
 //   - one wheel template (the file's front-left wheel, turned to face +X like the right side)
 //   - the lamps the car drives: brake lights (Brakelights, TailBar) and headlamp lenses (Headlights,
 //     DRL_L, DRL_R), and the headlamp spot mounts in chassis space
-// Unoptimised for now (10.7 MB, ~72k tris): the user drives it first, then it gets LODs / KTX2.
+// Optimised (scratchpad optimise_car.py, then tools/optimizeGlb.mjs: KTX2 + meshopt): LOD0 ~29k tris,
+// ~16 draws; LOD1 ~8k for the ghost; a ShadowProxy hull that alone (with the tyres) casts shadows.
+// Sources: assets-src/car/thunder_car.glb, thunder_car_lod1.glb (the uncompressed exports).
 import * as THREE from "three";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../../v3/render/foliage/glbLoader.js";
 import { WHEEL_LOCAL } from "../../../../v3/play/modularRoadVehicle.js";
 
-export const THUNDER_CAR_URL = "/games/thunderline/assets-src/car/thunder_car.glb";
+export const THUNDER_CAR_URL = "/models/thunderline/thunder_car.glb";
+export const THUNDER_CAR_LOD1_URL = "/models/thunderline/thunder_car_lod1.glb";
 const FILE_WHEEL_Y = 0.374; // the file's wheel centre height (its ground is y = 0)
 
-let cached = null;
+const cache = new Map(); // url -> Promise<gltf>
 /**
  * Through the engine's SHARED glTF loader (KTX2 textures + meshopt geometry: v3/TEXTURE_COMPRESSION.md).
  * @returns {Promise<{ chassis: {object, brakeLights, headlampLenses, headlampMounts}, wheel: {object, radius, width} }>}
  */
 export function loadThunderCar(renderer, url = THUNDER_CAR_URL) {
   initGlbLoaderRenderer(renderer);
-  cached ??= getSharedGltfLoader().loadAsync(url);
-  return cached.then((gltf) => build(gltf.scene.clone(true)));
+  if (!cache.has(url)) cache.set(url, getSharedGltfLoader().loadAsync(url));
+  return cache.get(url).then((gltf) => build(gltf.scene.clone(true)));
 }
 
 function build(root) {
@@ -51,12 +54,29 @@ function build(root) {
   wheel.updateMatrixWorld(true);
   const wb = new THREE.Box3().setFromObject(wheel), ws = wb.getSize(new THREE.Vector3());
   wheel.traverse((o) => { if (o.isMesh) { o.castShadow = /tyre|tire|rim/i.test(`${o.material?.name} ${o.name}`); o.receiveShadow = false; } });
+  // THE TYRE IS INSIDE-OUT in the file (864 of its 1008 triangles and their normals face inward). On a
+  // DoubleSide node material that still draws, but faceDirection turns the shading normal INTO the rubber,
+  // so it caught only the light from behind and read tan. Turned right side out once per loaded geometry
+  // (clones share it): winding reversed, normals negated.
+  // OPEN (TODO.md): the tyre still reads tan in the drive page's light, not yet explained — neither the
+  // KTX2 copy, the metal/rough map nor the winding is the cause.
+  wheel.traverse((o) => {
+    if (!o.isMesh || !/tyre|tire/i.test(o.material?.name ?? "")) return;
+    turnOutward(o.geometry);
+    o.material.metalness = 0;
+    o.material.roughness = 0.85;
+  });
 
   // lamps and shadows
   const brakeLights = [], headlampLenses = [];
+  // SHADOWS: only the ShadowProxy hull casts (with the tyres, set on the wheel template above) — every
+  // body part casting cost one draw per part per shadow cascade (57 casters). The proxy draws nothing
+  // in the view: no colour, no depth.
+  const hidden = new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false });
   root.traverse((o) => {
     if (!o.isMesh) return;
-    o.castShadow = !/glass|windshield|interior/i.test(o.name);
+    if (/^ShadowProxy/.test(o.name) || /^ShadowProxy/.test(o.parent?.name ?? "")) { o.material = hidden; o.castShadow = true; o.receiveShadow = false; return; }
+    o.castShadow = false;
     o.receiveShadow = true;
     if (/^(Brakelights|TailBar)/.test(o.name)) brakeLights.push(o);
     if (/^(Headlights|DRL_)/.test(o.name)) headlampLenses.push(o);
@@ -74,4 +94,16 @@ function build(root) {
     chassis: { object, brakeLights, headlampLenses, headlampMounts },
     wheel: { object: wheel, radius: ws.y / 2, width: ws.x },
   };
+}
+
+/** Reverse a geometry's winding and negate its normals, once (the flag survives the clones sharing it). */
+function turnOutward(geo) {
+  if (geo.userData.turnedOutward) return;
+  geo.userData.turnedOutward = true;
+  const ix = geo.index;
+  for (let t = 0; t < ix.count; t += 3) { const b = ix.getX(t + 1); ix.setX(t + 1, ix.getX(t + 2)); ix.setX(t + 2, b); }
+  ix.needsUpdate = true;
+  const n = geo.attributes.normal;
+  for (let i = 0; i < n.array.length; i++) n.array[i] = -n.array[i]; // quantized int16: -32767..32767 negates exactly
+  n.needsUpdate = true;
 }
