@@ -37,7 +37,8 @@ export function createAlgSalvage(app, { units }) {
   const taken = new Set();      // the FLN's, with fuel left
   const foot = (u) => u.alive && u.type?.foot && !u.type?.animal && !u.inside && !u.carrier && !u.isStructure;
   const near = (a, b, r) => Math.hypot(a.position.x - b.position.x, a.position.z - b.position.z) < r;
-  const say = (text, v, kind = "good") => app.algBattle?.say?.(text, v.position.x, v.position.z, kind);
+  // (`radio`: the HQ line said with it — algVoices; 2026-10-19, you: "the radio sound on vehicle-capture alerts, of course")
+  const say = (text, v, kind = "good", radio = null) => app.algBattle?.say?.(text, v.position.x, v.position.z, kind, radio);
   const combat = () => app.algCombat?.combat ?? app.algCombat;
 
   /** Its orders off while it stands empty (a patrol, a lift, the French AI would drive it). */
@@ -75,8 +76,8 @@ export function createAlgSalvage(app, { units }) {
     app.selection?.remove?.(v);
     app.algCombat?.fx?.dirt?.(v.position.x, v.position.y, v.position.z, 2);
     abandoned.add(v);
-    if (isHuman("player")) say(t("<b>Véhicule abandonné</b> : l'équipage a sauté. Un homme à côté le reprend — sinon le FLN s'en emparera."), v, "bad");
-    else say(t("<b>Un véhicule français abandonné</b> : un homme à côté s'en empare."), v);
+    if (isHuman("player")) say(t("<b>Véhicule abandonné</b> : l'équipage a sauté. Un homme à côté le reprend — sinon le FLN s'en emparera."), v, "bad", "hq_vehicleLost");
+    else say(t("<b>Un véhicule français abandonné</b> : un homme à côté s'en empare."), v, "good", "hq_enemySeen");
   }
 
   /** Taken by `side`: `man` climbs in (he is its crew now). */
@@ -92,8 +93,8 @@ export function createAlgSalvage(app, { units }) {
       v.fuelLeft = P.types[v.typeKey]?.fuel ?? 120;
       v.lootCrew = 1 + (v.typeKey === "willys" ? 1 : 0);   // the man who took it, and one to man the gun
       taken.add(v);
-      if (isHuman("enemy")) say(t("<b>Véhicule pris</b> : du carburant pour {n} s, puis il faudra l'incendier.", { n: Math.round(v.fuelLeft) }), v);
-      else say(t("<b>Le FLN s'est emparé</b> d'un véhicule abandonné."), v, "bad");
+      if (isHuman("enemy")) say(t("<b>Véhicule pris</b> : du carburant pour {n} s, puis il faudra l'incendier.", { n: Math.round(v.fuelLeft) }), v, "good", "hq_cacheFound");
+      else say(t("<b>Le FLN s'est emparé</b> d'un véhicule abandonné."), v, "bad", "hq_enemySeen");
       if (!isHuman("enemy")) app.algAI?.adoptVehicle?.(v);
     } else {
       v.crewLook = null; v.tintAs = null; v.decal = null;

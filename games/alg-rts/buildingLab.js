@@ -42,6 +42,15 @@ import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVilla
 await loadZeriba();
 await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
+import { houseMesh, houseStats, loadHouse } from "./algHouse.js";
+/** A ready mesh / group as a lab piece: an empty geometry carrying it as its `extra`. */
+function labPiece(obj) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+  g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
+  g.userData.extra = obj ? [obj] : [];
+  return g;
+}
 
 // THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
 // marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
@@ -216,6 +225,19 @@ const BUILDINGS = {
       return g;
     },
     tags: ["PARC AUTO (LE JEU)", "PARC AUTO · KIT, DÉTAIL 2", "PARC AUTO · NOUVEAU (BLENDER)"], note: "le parc auto du jeu à gauche, la passe du kit (détail 2) au milieu, le nouveau à droite : charpente acier, tôle ondulée, atelier enduit à la chaux.",
+  },
+  // THE WHITEWASHED HOUSE, PILOT (2026-10-19, you, after CoH 3's North Africa — algHouse.js,
+  // tools/blender/house.py): the village house the game builds today LEFT, the new one intact in the
+  // MIDDLE, damaged RIGHT; « Maison blanchie : ruine » shows the third state.
+  maisonBlanche: {
+    label: "Maison blanchie", gap: 15, yaw: Math.PI - 0.5, prepare: () => loadHouse(),
+    before: () => labPiece(buildMechtaHouseV2({ seed: 7 }).group), middle: () => labPiece(houseMesh("intact")), after: () => { console.log("[house]", houseStats()); return labPiece(houseMesh("damaged")); },
+    tags: ["MAISON (LE JEU)", "MAISON BLANCHIE · INTACTE", "MAISON BLANCHIE · ENDOMMAGÉE"], note: "la maison de village du jeu à gauche, la nouvelle (Blender) au milieu, endommagée à droite : enduit à la chaux sur moellons, bandeau bleu, parapet crénelé, solives, volets, escalier extérieur.",
+  },
+  maisonBlancheRuine: {
+    label: "Maison blanchie : ruine", gap: 15, yaw: Math.PI - 0.5, prepare: () => loadHouse(),
+    before: () => labPiece(houseMesh("intact")), after: () => labPiece(houseMesh("ruin")),
+    tags: ["MAISON BLANCHIE · INTACTE", "MAISON BLANCHIE · RUINE"], note: "la maison intacte à gauche, en ruine à droite : l'étage arraché, les planchers effondrés, les gravats.",
   },
   // THE HELIPAD (2026-10-13, you: "add the helipad to the lab to fine-tune it" — the first base building
   // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.
