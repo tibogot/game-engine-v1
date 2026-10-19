@@ -328,6 +328,12 @@ function renderDock() {
   }
 }
 function pickTile(base, h = null) {
+  if (editMode && sel != null) {
+    editWith(base === RING || base === FITTED || base === FITTED_BOWL ? base : tileId(base, h ?? hand));
+    renderDock();
+    renderStatus();
+    return;
+  }
   tileBase = base;
   if (h != null) hand = h;
   activeCat = catOf.get(base) ?? activeCat;
@@ -697,6 +703,32 @@ const overlapBoxes = [];
 // ---------- ghost + snapping (P1b order: open ends → flight arcs → local grid → world grid) ----------
 const ghostMat = new THREE.MeshBasicMaterial({ color: SNAP_COLORS.world, transparent: true, opacity: 0.5, depthWrite: false });
 let ghost = null, ghostDirty = true, snap = null, lastKey = "";
+// HEIGHT CUE: a ghost floating in the sky gives no height to someone new to 3D — a line from the piece in
+// hand down to the floor, a ring where it meets it, and the height in metres beside the line
+const cueLine = new THREE.Line(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(new Float32Array(6), 3)), new THREE.LineBasicMaterial({ color: 0x3fd2ff, transparent: true, opacity: 0.85, depthTest: false }));
+const cueRing = new THREE.Mesh(new THREE.RingGeometry(7, 8.5, 48).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x3fd2ff, transparent: true, opacity: 0.7, depthTest: false, depthWrite: false }));
+for (const o of [cueLine, cueRing]) { o.renderOrder = 11; o.frustumCulled = false; o.visible = false; scene.add(o); }
+const cueLabel = document.createElement("div");
+cueLabel.style.cssText = "position:fixed;z-index:15;pointer-events:none;display:none;color:#3fd2ff;background:rgba(11,15,23,.8);padding:1px 6px;font:700 13px 'Barlow Condensed';letter-spacing:.04em";
+document.body.appendChild(cueLabel);
+function updateHeightCue() {
+  const P = tileBase && snap ? new THREE.Vector3().setFromMatrixPosition(snap.m) : null;
+  const h = P ? P.y - FLOOR_Y : 0;
+  const show = !!P && h > 1 && !driving;
+  cueLine.visible = cueRing.visible = show;
+  if (!show) { cueLabel.style.display = "none"; return; }
+  const a = cueLine.geometry.attributes.position;
+  a.setXYZ(0, P.x, P.y, P.z);
+  a.setXYZ(1, P.x, FLOOR_Y, P.z);
+  a.needsUpdate = true;
+  cueRing.position.set(P.x, FLOOR_Y, P.z);
+  const s = toScreen(new THREE.Vector3(P.x, FLOOR_Y + h / 2, P.z));
+  if (!s) { cueLabel.style.display = "none"; return; }
+  cueLabel.style.display = "block";
+  cueLabel.style.left = `${s.x + 8}px`;
+  cueLabel.style.top = `${s.y - 10}px`;
+  cueLabel.textContent = `↑ ${Math.round(h)} m`;
+}
 const mouse = { x: 0, y: 0, inside: false };
 const ray = new THREE.Raycaster();
 const toScreen = (v) => { const p = v.clone().project(camera); return p.z > 1 ? null : { x: (p.x * 0.5 + 0.5) * innerWidth, y: (-p.y * 0.5 + 0.5) * innerHeight }; };
@@ -871,7 +903,8 @@ function updateNext() {
   const head = ends.find((e) => e.uid === lastUid) ?? ends[ends.length - 1];
   const sug = head ? suggestionsFor(head) : null;
   const s = head ? toScreen(new THREE.Vector3().setFromMatrixPosition(head.m)) : null;
-  if (!sug || !s || s.y > innerHeight - DOCK_H - 40) { el.style.display = "none"; nextKey = ""; return; }
+  // (not while a piece is selected: the chips are about the open end, and they covered the edit panel)
+  if (!sug || !s || s.y > innerHeight - DOCK_H - 40 || (sel != null && !tileBase)) { el.style.display = "none"; nextKey = ""; return; }
   el.style.display = "flex";
   el.style.left = `${Math.min(innerWidth - 420, s.x + 34)}px`;
   el.style.top = `${Math.max(60, s.y - 52)}px`;
@@ -921,6 +954,75 @@ function removePiece(uid) {
   sel = null;
   rebuild();
 }
+// ---------- EDIT MID-TRACK: insert after / replace the selected piece ----------
+// The road downstream follows by itself (rebuild() lays each road child on its parent's exit); what
+// hangs off a lip by its FLIGHT (landings, air rings) has its own matrix, so it is carried rigidly by
+// however much its lip moved — the jump stays the same jump.
+let editMode = null; // "insert" | "replace" while the dock picks the piece
+let editMsg = null; // why the last edit was refused
+const IDENT = new THREE.Matrix4().elements;
+function reflow(mutate) {
+  const old = new Map([...built].map(([u, b]) => [u, b.exit.clone()]));
+  snapshot();
+  mutate(old);
+  rebuild();
+  for (let pass = 0; pass < 8; pass++) {
+    const moved = [];
+    for (const pc of track.pieces) {
+      const src = pc.flightFrom;
+      if (src == null || !old.has(src) || !built.has(src)) continue;
+      const d = built.get(src).exit.clone().multiply(old.get(src).clone().invert());
+      if (d.elements.every((v, i) => Math.abs(v - IDENT[i]) < 1e-6)) continue;
+      pc.M = d.multiply(new THREE.Matrix4().fromArray(pc.M)).toArray();
+      moved.push(src);
+    }
+    if (!moved.length) break;
+    for (const src of moved) old.set(src, built.get(src).exit.clone());
+    rebuild(); // pieces after a carried landing follow it, and their own lips move in the next pass
+  }
+}
+/** Why `id` can't sit between the lean it meets and the lean it hands on, or null. */
+function leanClash(id, inLean, nextPc) {
+  const t = TILES[id];
+  if (Math.abs(deg(leanIn(t)) - deg(inLean)) > 3) return `${t.label} starts ${leanIn(t) ? `leaning ${Math.abs(deg(leanIn(t)))}°` : "flat"}, but the road there ${inLean ? `leans ${Math.abs(deg(inLean))}°` : "is flat"}.`;
+  if (nextPc && Math.abs(deg(leanOut(t)) - deg(leanIn(TILES[nextPc.id]))) > 3) return `${t.label} ends ${leanOut(t) ? `leaning ${Math.abs(deg(leanOut(t)))}°` : "flat"}, but the next piece starts ${leanIn(TILES[nextPc.id]) ? `leaning ${Math.abs(deg(leanIn(TILES[nextPc.id])))}°` : "flat"}.`;
+  return null;
+}
+function editWith(id) {
+  const pc = track.pieces.find((p) => p.uid === sel);
+  const mode = editMode;
+  editMode = null;
+  if (!pc || isRing(pc)) return;
+  if (id === RING || id === FITTED || id === FITTED_BOWL) { editMsg = "Landings, bowls and air rings go on a flight arc: pick them with nothing selected."; return; }
+  const child = track.pieces.find((q) => q.parent === pc.uid);
+  if (mode === "insert") {
+    editMsg = leanClash(id, leanOut(TILES[pc.id]), child);
+    if (editMsg) return;
+    reflow((old) => {
+      const uid = track.nextUid++;
+      for (const c of track.pieces) {
+        if (c.parent === pc.uid) c.parent = uid;
+        if (c.flightFrom === pc.uid) c.flightFrom = uid; // the jump now leaves from the new end
+      }
+      old.set(uid, old.get(pc.uid)); // …and is carried from where it left before
+      track.pieces.splice(track.pieces.indexOf(pc) + 1, 0, { uid, id, open: pc.open, M: pc.M, parent: pc.uid, flightFrom: null });
+      sel = uid;
+    });
+  } else {
+    const parent = track.pieces.find((q) => q.uid === pc.parent);
+    editMsg = leanClash(id, parent ? leanOut(TILES[parent.id]) : 0, child);
+    if (editMsg) return;
+    reflow(() => { pc.id = id; });
+  }
+}
+function startEdit(mode) {
+  const pc = track.pieces.find((p) => p.uid === sel);
+  if (!pc || isRing(pc)) return;
+  editMode = editMode === mode ? null : mode;
+  editMsg = null;
+  renderStatus();
+}
+
 let selBox = null;
 function refreshSelection() {
   if (selBox) { scene.remove(selBox); selBox = null; }
@@ -965,19 +1067,33 @@ function predictionLine() {
 }
 function renderStatus() {
   const names = { end: "open end", arc: "flight arc", local: "local grid", world: "world grid" };
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const selPc = sel != null && !tileBase ? track.pieces.find((p) => p.uid === sel) : null;
+  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, editMode, editMsg, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
-    `<div class="mode" style="color:${col}">${tileBase ? `${tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : sel != null ? "Piece selected" : "Pick a piece"}</div>` +
+    `<div class="mode" style="color:${col}">${tileBase ? `${tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : selPc ? (isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
+    (selPc && !isRing(selPc)
+      ? (editMode
+          ? `<div class="edit-ask">${editMode === "insert" ? "Insert after it" : "Replace it"}: pick a piece in the dock below · <kbd>Esc</kbd> cancel</div>`
+          : "") +
+        `<div class="acts">` +
+        `<button data-act="insert" class="${editMode === "insert" ? "on" : ""}">Insert after <kbd>I</kbd></button>` +
+        `<button data-act="replace" class="${editMode === "replace" ? "on" : ""}">Replace <kbd>P</kbd></button>` +
+        `<button data-act="delete">Delete <kbd>Del</kbd></button>` +
+        `<button data-act="cp">${selPc.cp ? "No checkpoint" : "Checkpoint"} <kbd>C</kbd></button></div>`
+      : selPc ? `<div class="acts"><button data-act="delete">Delete <kbd>Del</kbd></button></div>` : "") +
+    (editMsg ? `<div class="warn">${editMsg}</div>` : "") +
     (snap?.bad ? `<div class="warn">${snap.bad}</div>` : "") +
     (snap?.note ? `<div class="row"><span>${snap.note}</span></div>` : "") +
     problems.messages.map((m) => `<div class="warn">⚠ ${m}</div>`).join("") +
     predictionLine() +
-    `<div class="row"><span>grid</span><b>${gridMode} · ${gridStep} m</b></div>` +
-    `<div class="row"><span>height</span><b>${buildY} m</b></div>` +
-    `<div class="row"><span>turn / pitch / bank</span><b>${rot.yaw}° / ${rot.pitch}° / ${rot.roll}°</b></div>` +
+    (tileBase // how the piece in hand is placed: nothing to say without one
+      ? `<div class="row"><span>grid</span><b>${gridMode} · ${gridStep} m</b></div>` +
+        `<div class="row"><span>height</span><b>${buildY} m</b></div>` +
+        `<div class="row"><span>turn / pitch / bank</span><b>${rot.yaw}° / ${rot.pitch}° / ${rot.roll}°</b></div>`
+      : "") +
     (prediction.lipSpeed.size
       ? `<div class="row"><span>band (real car)</span><b>${[...prediction.lipSpeed.values()].map((v) => `${Math.round(v * BAND_SLOW * 3.6)}–${Math.round(v * 3.6)}`).join(" · ")} km/h</b></div>`
       : `<div class="row"><span>arc band (guess)</span><b>${Math.round(arcSpeed * BAND_SLOW * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
@@ -985,6 +1101,14 @@ function renderStatus() {
     `<div class="row"><span>author time</span><b>${track.authorTime ? `${track.authorTime.toFixed(2)} s` : "—"}</b></div>` +
     `<div class="row"><span>pieces</span><b>${track.pieces.length}</b></div>`;
 }
+
+$("status").addEventListener("click", (e) => {
+  const act = e.target.closest?.("button")?.dataset.act;
+  if (!act || sel == null) return;
+  if (act === "insert" || act === "replace") startEdit(act);
+  else if (act === "delete") { editMode = null; removePiece(sel); }
+  else if (act === "cp") toggleCheckpoint(sel);
+});
 
 // ---------- input ----------
 const canvas = renderer.domElement;
@@ -1004,7 +1128,9 @@ canvas.addEventListener("pointerup", (e) => {
   let o = ray.intersectObjects(trackGroup.children, true)[0]?.object;
   while (o && o.userData.uid == null) o = o.parent;
   sel = o?.userData.uid ?? null;
+  editMode = editMsg = null;
   refreshSelection();
+  renderStatus();
 });
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 canvas.addEventListener("wheel", (e) => {
@@ -1031,7 +1157,7 @@ addEventListener("keydown", (e) => {
     case "PageUp": buildY += 2; break;
     case "PageDown": buildY -= 2; break;
     case "Enter": place(); break;
-    case "Escape": if (tileBase) { tileBase = null; renderDock(); } else { sel = null; refreshSelection(); } break;
+    case "Escape": if (editMode) editMode = null; else if (tileBase) { tileBase = null; renderDock(); } else { sel = null; editMsg = null; refreshSelection(); } break;
     case "Delete": case "Backspace": if (!tileBase && sel != null) removePiece(sel); break;
     case "[": arcSpeed = Math.max(20, arcSpeed - 1); refreshArcs(); runChecks(); break;
     case "]": arcSpeed = Math.min(80, arcSpeed + 1); refreshArcs(); runChecks(); break;
@@ -1044,6 +1170,8 @@ addEventListener("keydown", (e) => {
       else if (k === "t") { edges = !edges; renderDock(); }
       else if (k === "f") nav.frame();
       else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
+      else if (k === "i" && !tileBase && sel != null) startEdit("insert");
+      else if (k === "p" && !tileBase && sel != null) startEdit("replace");
       else return;
   }
   rot.yaw = ((rot.yaw % 360) + 360) % 360;
@@ -1185,11 +1313,12 @@ app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
-  if (driving) return;
+  if (driving) { if (cueLine.visible) updateHeightCue(); return; } // hides it
   nav.update(dt);
   stepGlide(dt);
   controls.update();
   updateGhost();
+  updateHeightCue();
   renderHand();
   updateGrid();
   updateNext();
@@ -1206,6 +1335,7 @@ window.__b3 = {
   setHand(h) { hand = h; renderDock(); }, setEdges(v) { edges = v; renderDock(); }, setBuildY(y) { buildY = y; },
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
   setTrack(t) { track = t; rebuild(); },
+  startEdit, get editMsg() { return editMsg; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };

@@ -16,7 +16,13 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] Next pieces on small maps (Green tier): gap jump, half-pipe, rollers, HELIX up / down (banked
       20°, R 56, ±20 m over itself; the real car holds 136 km/h round it) and slope up — done; skylight
       tube next. (The PIECES.md §7d turn set was already built: sweeps, S-bend, snake, hairpin.)
-- [ ] Editor: insert / replace a piece mid-track, a height cue under the piece in hand, close a circuit.
+- [x] Editor: insert after / replace a selected piece (buttons in the panel, I / P; the road after it
+      follows, landings and rings hung off a lip are carried with it; lean clashes refused with the
+      reason) and a height cue under the piece in hand (a line to the floor + "↑ 120 m").
+- [ ] Editor: after an edit makes a lip faster or slower, offer to re-fit its fitted landing (today the
+      check warns "a fast car flies past it").
+- [ ] Circuits: needs LAPS in the race first (timing, ghost, medals), then an auto-close connector that
+      says why it can't connect (Planet Coaster's lesson, DESIGN.md). Every track is A → B today.
 - [ ] **Tube entrance / exit shape** — the user finds the curl "cheap" ("I don't like the way it does
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.
 - [x] Tube wall thicker: 0.6 → 1.5 m (user: "looks too thin").
