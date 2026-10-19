@@ -42,7 +42,31 @@ import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVilla
 await loadZeriba();
 await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
-import { houseMesh, houseStats, loadHouse } from "./algHouse.js";
+import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
+/** The village test: a lane (along x) of the kit, both sides facing it; the brown houses beyond. */
+function whiteVillage() {
+  const g = new THREE.Group();
+  g.name = "WhiteVillage";
+  const types = ["maison", "cour", "haute", "boutique"];
+  const north = [-44, -28, -12, 4, 20, 36], south = [-36, -20, -4, 12, 28];
+  let k = 0;
+  for (const [xs, z, yaw] of [[north, 14, 0], [south, -14, Math.PI]]) for (const x of xs) {
+    const st = k === 4 ? "damaged" : k === 8 ? "ruin" : "intact";
+    const h = houseMesh(types[(k * 3 + 1) % 4], st);
+    k++;
+    if (!h) continue;
+    h.position.set(x, 0, z + (k % 3) * 1.2);
+    h.rotation.y = yaw + ((k * 37) % 7 - 3) * 0.03;
+    g.add(h);
+  }
+  // the farmers' and shepherds' homes: the brown houses, set apart
+  for (const [x, z, yaw, seed] of [[-66, 30, 0.6, 3], [58, -34, 2.8, 11], [66, 26, -0.4, 19]]) {
+    const { group } = buildMechtaHouseV2({ seed });
+    group.position.set(x, 0, z); group.rotation.y = yaw;
+    g.add(group);
+  }
+  return g;
+}
 /** A ready mesh / group as a lab piece: an empty geometry carrying it as its `extra`. */
 function labPiece(obj) {
   const g = new THREE.BufferGeometry();
@@ -229,15 +253,19 @@ const BUILDINGS = {
   // THE WHITEWASHED HOUSE, PILOT (2026-10-19, you, after CoH 3's North Africa — algHouse.js,
   // tools/blender/house.py): the village house the game builds today LEFT, the new one intact in the
   // MIDDLE, damaged RIGHT; « Maison blanchie : ruine » shows the third state.
-  maisonBlanche: {
-    label: "Maison blanchie", gap: 15, yaw: Math.PI - 0.5, prepare: () => loadHouse(),
-    before: () => labPiece(buildMechtaHouseV2({ seed: 7 }).group), middle: () => labPiece(houseMesh("intact")), after: () => { console.log("[house]", houseStats()); return labPiece(houseMesh("damaged")); },
-    tags: ["MAISON (LE JEU)", "MAISON BLANCHIE · INTACTE", "MAISON BLANCHIE · ENDOMMAGÉE"], note: "la maison de village du jeu à gauche, la nouvelle (Blender) au milieu, endommagée à droite : enduit à la chaux sur moellons, bandeau bleu, parapet crénelé, solives, volets, escalier extérieur.",
-  },
-  maisonBlancheRuine: {
-    label: "Maison blanchie : ruine", gap: 15, yaw: Math.PI - 0.5, prepare: () => loadHouse(),
-    before: () => labPiece(houseMesh("intact")), after: () => labPiece(houseMesh("ruin")),
-    tags: ["MAISON BLANCHIE · INTACTE", "MAISON BLANCHIE · RUINE"], note: "la maison intacte à gauche, en ruine à droite : l'étage arraché, les planchers effondrés, les gravats.",
+  ...Object.fromEntries(["maison", "cour", "haute", "boutique"].map((ty) => [`blanche_${ty}`, {
+    label: `Maison blanchie : ${ty}`, gap: 15, yaw: Math.PI - 0.5, prepare: () => loadHouses(),
+    before: () => { console.log("[houses]", houseStats()); return labPiece(houseMesh(ty, "intact")); }, middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
+    tags: [`${ty.toUpperCase()} · INTACTE`, `${ty.toUpperCase()} · ENDOMMAGÉE`, `${ty.toUpperCase()} · RUINE`], note: "une maison du kit blanchi (Blender) dans ses trois états : intacte, endommagée, en ruine.",
+  }])),
+  // THE VILLAGE (2026-10-19, you: "then I guess we should see how it looks for a village"): a lane of the
+  // whitewashed kit, one house damaged and one in ruins, the brown houses (the game's) on the outskirts as the
+  // farmers' and shepherds' homes — the game's village beside it, LEFT.
+  villageBlanc: {
+    label: "Village blanchi", gap: 70, yaw: 0, prepare: () => loadHouses(),
+    before: () => buildMechtaV2(),
+    after: () => { const g = whiteVillage(); console.log("[village]", houseStats()); return labPiece(g); },
+    tags: ["HAMEAU (LE JEU)", "VILLAGE BLANCHI"], note: "le hameau du jeu à gauche, un village du kit blanchi à droite : une rue, une maison endommagée, une en ruine, les maisons brunes à l'écart (fermiers, bergers).",
   },
   // THE HELIPAD (2026-10-13, you: "add the helipad to the lab to fine-tune it" — the first base building
   // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.

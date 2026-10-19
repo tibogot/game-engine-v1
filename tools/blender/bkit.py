@@ -214,20 +214,32 @@ class Kit:
     def drop_cutters(s):
         for c in s.cutters: bpy.data.objects.remove(c, do_unlink=True)
         s.cutters = []
-    def bake(s, o, size, name, out_dir, samples_ao=96, rough=0.9):
-        """Colour × ambient occlusion into ONE atlas, then a plain material with it."""
+    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9):
+        """Colour × ambient occlusion into ONE atlas, then a plain material with it — for one object or
+        SEVERAL sharing the atlas (a house's three states: their UVs packed together, one texture). They are
+        spread apart while they bake (at one origin each would occlude the others: black AO) and every other
+        mesh is hidden from the bake."""
+        objs = list(objs) if isinstance(objs, (list, tuple)) else [objs]
+        o = objs[0]
         scn = bpy.context.scene
         scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.render.bake.margin = 8
         scn.world.light_settings.distance = 2.2
-        bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
+        hidden = [q for q in scn.objects if q.type == "MESH" and q not in objs and not q.hide_render]
+        for q in hidden: q.hide_render = True
+        home = [q.location.copy() for q in objs]
+        for i, q in enumerate(objs): q.location.x += i * 60
+        bpy.ops.object.select_all(action="DESELECT")
+        for q in objs: q.select_set(True)
+        bpy.context.view_layer.objects.active = o
         bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.002)
         bpy.ops.object.mode_set(mode="OBJECT")
         def target(nm):
             img = bpy.data.images.new(nm, size, size, alpha=False)
-            for m in o.data.materials:
-                tn = m.node_tree.nodes.get("BakeTarget") or m.node_tree.nodes.new("ShaderNodeTexImage")
-                tn.name = "BakeTarget"; tn.image = img; m.node_tree.nodes.active = tn
+            for q in objs:
+                for m in q.data.materials:
+                    tn = m.node_tree.nodes.get("BakeTarget") or m.node_tree.nodes.new("ShaderNodeTexImage")
+                    tn.name = "BakeTarget"; tn.image = img; m.node_tree.nodes.active = tn
             return img
         col = target(f"{name}_col"); scn.cycles.samples = 4
         scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
@@ -244,9 +256,20 @@ class Kit:
         tn = m.node_tree.nodes.new("ShaderNodeTexImage"); tn.image = out
         pb = m.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = rough
         m.node_tree.links.new(tn.outputs["Color"], pb.inputs["Base Color"])
-        o.data.materials.clear(); o.data.materials.append(m)
-        for p in o.data.polygons: p.material_index = 0
-        print("BAKED", name, size)
+        for q, at in zip(objs, home):
+            q.data.materials.clear(); q.data.materials.append(m)
+            for p in q.data.polygons: p.material_index = 0
+            q.location = at
+        for q in hidden: q.hide_render = False
+        print("BAKED", name, size, len(objs))
+    def far(s, o, ratio=0.3, name=None):
+        """A FAR level of a baked object: a copy decimated (its UVs kept: the SAME atlas, no new texture)."""
+        f = o.copy(); f.data = o.data.copy(); f.name = name or f"{o.name}_Far"
+        bpy.context.scene.collection.objects.link(f)
+        d = f.modifiers.new("D", "DECIMATE"); d.decimate_type = "COLLAPSE"; d.ratio = ratio; d.use_collapse_triangulate = True
+        bpy.ops.object.select_all(action="DESELECT"); f.select_set(True); bpy.context.view_layer.objects.active = f
+        bpy.ops.object.modifier_apply(modifier="D")
+        return f
     def export(s, path, objs):
         bpy.ops.object.select_all(action="DESELECT")
         for o in objs: o.select_set(True)
