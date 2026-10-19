@@ -134,7 +134,7 @@ export const GROUND_CACHE_DEFAULTS = {
   farGrassSize: 90,
 };
 
-const DECAL_STRIDE = 36;
+const DECAL_STRIDE = 40;   // (+ aF: the art's mean colour and its MATCH to the ground's tone, 2026-10-19)
 
 export function createGroundCache({
   renderer, splatOverlay, terrainNormals, heightTexNode = null, farTerrain = null,
@@ -449,7 +449,7 @@ export function createGroundCache({
     geo.setIndex([0, 1, 2, 0, 2, 3]);
     const buf = new THREE.InstancedInterleavedBuffer(new Float32Array(capacity * DECAL_STRIDE), DECAL_STRIDE, 1);
     buf.setUsage(THREE.DynamicDrawUsage);
-    ["aM0", "aM1", "aM2", "aI0", "aI1", "aI2", "aP", "aC", "aE"].forEach((name, k) => {
+    ["aM0", "aM1", "aM2", "aI0", "aI1", "aI2", "aP", "aC", "aE", "aF"].forEach((name, k) => {
       geo.setAttribute(name, new THREE.InterleavedBufferAttribute(buf, 4, k * 4));
     });
     geo.instanceCount = 0;
@@ -488,7 +488,7 @@ export function createGroundCache({
     m.positionNode = vec3(worldXZ.x, 0, worldXZ.y);
 
     const i0 = attribute("aI0", "vec4"), i1 = attribute("aI1", "vec4"), i2 = attribute("aI2", "vec4");
-    const P = attribute("aP", "vec4"), C = attribute("aC", "vec4"), E = attribute("aE", "vec4");
+    const P = attribute("aP", "vec4"), C = attribute("aC", "vec4"), E = attribute("aE", "vec4"), F = attribute("aF", "vec4");
     const albedoNode = texture(albedoTex);
     const normalNode = texture(normalTex);
     m.userData.albedoNode = albedoNode;
@@ -513,7 +513,14 @@ export function createGroundCache({
       const depthFade = float(1).sub(smoothstep(0.35, 0.5, abs(local.y)));
       const angle = smoothstep(P.w, P.w.add(0.15), dot(G, axisY));
       const a = alb.a.mul(P.y).mul(inside).mul(edgeFade).mul(depthFade).mul(angle);
-      if (which === "colour") return vec4(sqrt(max(alb.rgb.mul(C.xyz), vec3(0))), a);
+      // MATCH (as the splats': a decal painting a raw photo never matched the graded ground round it — the
+      // Oued Abdi's paths read as white lines, its aprons as pale squares, 2026-10-19): the art × the ground's
+      // own tone ÷ the art's mean colour (F.xyz, linear), by F.w — the relief and grain kept, the colour the
+      // ground's. 0 = the photo's own colour (a scorch: a darker material, really).
+      if (which === "colour") {
+        const ratio = mix(vec3(1), groundToneAt(x, z).div(max(F.xyz, vec3(1e-3))), F.w);
+        return vec4(sqrt(max(alb.rgb.mul(C.xyz).mul(ratio), vec3(0))), a);
+      }
       const nTex = normalNode.sample(uvD).depth(layer).xyz.mul(2).sub(1);
       const Tn = normalize(axisX.sub(G.mul(dot(axisX, G))));
       const Bn = cross(G, Tn);
@@ -561,6 +568,7 @@ export function createGroundCache({
         slot, d.opacity, d.normalStrength, Math.cos((d.angleFade * Math.PI) / 180),
         _c.r, _c.g, _c.b, d.roughness,
         d.edgeFade, 0, 0, 0,
+        ...(d.mean ?? [1, 1, 1]), d.match ?? 0,
       ], i * DECAL_STRIDE);
       let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
       for (let c = 0; c < 8; c++) {

@@ -61,6 +61,11 @@ export const PHOTO_SOURCES = {
     diff: "/textures/ground/dry_mud_field_001/dry_mud_field_001_diff_1k.jpg",
     nor: "/textures/ground/dry_mud_field_001/dry_mud_field_001_nor_gl_1k.jpg",
   },
+  // THE OUED ABDI's own grounds (alg-abdi: tools/algAbdiLevel.mjs slots 0 / 1 / 6) — its decals baked from
+  // them, so a rut has the very grain of the earth round it (tools/algAbdiDecals.mjs).
+  abdiSoil: { diff: "/textures/ground/mud_cracked_dry_03/mud_cracked_dry_03_diff_1k.jpg", nor: "/textures/ground/mud_cracked_dry_03/mud_cracked_dry_03_nor_gl_1k.jpg" },
+  abdiRed: { diff: "/textures/ground/desert_hollow/desert_hollow_diff_1k.jpg", nor: "/textures/ground/desert_hollow/desert_hollow_nor_gl_1k.jpg" },
+  abdiRoad: { diff: "/textures/ground/desert_road/desert_road_diff_1k.jpg", nor: "/textures/ground/desert_road/desert_road_nor_gl_1k.jpg" },
   // The Aurès valley soil (alg-aures slot 0): wet at an oasis's edge (tools/algOasisLook.mjs).
   soil: {
     diff: "/textures/ground/brown_mud_dry/brown_mud_dry_diff_1k.jpg",
@@ -424,6 +429,34 @@ function scorch({ xm, vm, W, L, n }) {
 }
 
 /**
+ * CHARRED (2026-10-19, the Oued Abdi — you: "make them look like AAA Company of Heroes decals"; `scorch`, a soft
+ * radial grey burn on an ash photo, read as a grey blob): a shell's or a burnt vehicle's mark, on the GROUND's
+ * own photo — a charcoal CORE in a shallow dip with a raised lip, SOOT thrown out in streaks of uneven length
+ * (a hash per spoke, never a wave), UNBURNT patches left inside the burn, a BROWNED halo fading into the earth.
+ */
+function charred({ xm, vm, W, L, n }) {
+  const x = xm - W / 2, z = vm - L / 2, R = Math.min(W, L) * 0.5;
+  const r = Math.hypot(x, z) / R, th = Math.atan2(z, x);
+  const spokes = 13, s = ((th / (Math.PI * 2)) + 1) * spokes, i = Math.floor(s), f = s - i;
+  const len = 0.45 + 0.5 * Math.pow(n(i * 7.7 + 0.5, 3.1), 0.8);
+  const wedge = 1 - smoothstep(0.15, 0.9, Math.abs(f - 0.5) * 2 + (fbm(n, xm * 1.6, vm * 1.6, 3) - 0.5) * 0.5);
+  const soot = wedge * (1 - smoothstep(len * 0.45, len, r));
+  const ragged = (fbm(n, xm * 1.1, vm * 1.1, 4) - 0.5) * 0.28;
+  const core = 1 - smoothstep(0.1, 0.34, r + ragged * 0.6);
+  const burn = 1 - smoothstep(0.3, 0.62, r + ragged);
+  const halo = 1 - smoothstep(0.55, 0.95, r + ragged * 1.2);
+  const unburnt = smoothstep(0.58, 0.68, fbm(n, xm * 0.9 + 7, vm * 0.9 + 3, 3)) * (1 - core);   // the burn skipped a patch
+  const dark = Math.max(core, burn * 0.75, soot * 0.6) * (1 - 0.8 * unburnt);
+  return {
+    a: Math.max(halo * 0.75, dark),
+    h: -0.06 * core + 0.025 * (smoothstep(0.25, 0.36, r) * (1 - smoothstep(0.36, 0.5, r))),
+    mul: (1 - 0.88 * dark) * (1 - 0.18 * halo * (1 - dark)),
+    sat: 1 - 0.75 * dark + 0.25 * halo * (1 - dark),
+    nW: 1 - 0.5 * core,
+  };
+}
+
+/**
  * DEBRIS — earth a shell threw out: spokes of different lengths (a hash per
  * spoke, never a wave), and in them real CLODS — little heaps of fresh, darker
  * earth from a cellular field, each one catching the sun on one side.
@@ -486,6 +519,7 @@ export const PHOTO_RECIPES = {
   apron:      { fn: apron,      photo: "laterite", size: [12, 12],   tileM: 5 },
   sweptYard:  { fn: sweptYard,  photo: "lowland",  size: [12, 12],   tileM: 7 },
   scorch:     { fn: scorch,     photo: "burned",   size: [10, 10],   tileM: 6 },
+  charred:    { fn: charred,    photo: "abdiSoil", size: [10, 10],   tileM: 2.6 },
   debris:     { fn: debris,     photo: "stones",   size: [16, 16],   tileM: 6 },
 };
 
