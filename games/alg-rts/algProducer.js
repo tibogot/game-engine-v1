@@ -29,8 +29,10 @@ const OPEN_AHEAD = 0.8;               // start opening at 80% of a unit's build
  *   aircraft appears on the deck (`deckY` above the pad's origin), its rotor
  *   spools up for `hold` s, it rises over `rise` s, then flies to the rally.
  *   No `outside` then: nothing walks out.
+ * @param {(key: string, count: number) => boolean} [o.deliver]  takes a finished purchase over (true:
+ *   it brings the unit in itself, nothing spawns here) — the helipad's fly-ins, algHeliDelivery.js
  */
-export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null, team = "player", countOf = null, onSpawned = null }) {
+export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, inside: inL, outside: outL = inL, rally, launch = null, team = "player", countOf = null, onSpawned = null, deliver = null }) {
   // `countOf(key)`: men per purchase (a SQUAD, algSquads.js; default 1), each
   // spawned with his slot as his look role; `onSpawned(u, key, slot)` after.
   const leaves = mesh.children.filter((c) => c.userData.gateLeaf);
@@ -92,7 +94,10 @@ export function createAlgProducer({ mesh, units, typeKey, name, maxHp, builds, i
         structure.progress = 0;
         structure.queue.shift();
         const count = countOf?.(key) ?? 1;
-        for (let k = 0; k < count; k++) {
+        // `deliver(key, count)`: the producer hands the unit to someone else who brings it in (the
+        // helipad's helicopters and paras fly in from the map edge — algHeliDelivery.js).
+        const handed = !!deliver?.(key, count);
+        for (let k = 0; !handed && k < count; k++) {
         // A squad comes out in file: each man a little further back inside.
         const back = k * 1.1;
         const u = units.spawn(key, inside.x - (outside.x - inside.x) * back * 0.12, inside.z - (outside.z - inside.z) * back * 0.12, { snap: false, team, lookRole: count > 1 ? k : null });

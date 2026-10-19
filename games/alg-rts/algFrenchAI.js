@@ -70,7 +70,7 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
   const lastValue = new Map(); // point → its needle a second ago
   let clock = 0, acc = 0, built = 0, lastAir = -1e9, postHp = post?.structure.hp ?? 0, postHitAt = -1e9;
 
-  const mine = (u) => u.alive && u.team === "player";
+  const mine = (u) => u.alive && u.team === "player" && !u.delivery;   // (not the base's delivery H-21)
   const strength = (s) => s.members.length / ((SQUADS[s.typeKey]?.size ?? s.members.length) || 1);
   const centreOf = (s) => {
     let x = 0, z = 0;

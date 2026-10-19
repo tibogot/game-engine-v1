@@ -241,6 +241,8 @@ export function createAlgTransports(app, { units, navGrid = null, heli = null })
     params: P, order, exitAll, unloadAll, onDeath, step, frame, pickAt,
     /** Men aboard `v`. */
     menOf,
+    /** Put `men` aboard `v` at once, wherever they are (a stick flown in — algHeliDelivery.js). */
+    load(men, v) { for (const u of men) if (u?.alive && !u.inside) board(u, v); },
     /**
      * DÉBARQUER on the command card: a selected vehicle with men aboard, or selected men aboard.
      */

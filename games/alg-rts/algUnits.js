@@ -54,6 +54,7 @@ import { createAlgRepair } from "./algRepair.js";
 import { createAlgGarrison } from "./algGarrison.js";
 import { createAlgTransports } from "./algTransports.js";
 import { createAlgHeliLift } from "./algHeliLift.js";
+import { createAlgHeliDelivery } from "./algHeliDelivery.js";
 import { createAlgFlnTricks } from "./algFlnTricks.js";
 import { createAlgMortarTeams } from "./algMortarTeam.js";
 import { createAlgRecoilless } from "./algRecoilless.js";
@@ -339,10 +340,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       rally: navGrid.nearestOpenWorld(rw.x, rw.z, false) ?? rw,
     }));
   }
+  let helipadAt = null;   // { pad, rally } — the fly-ins (algHeliDelivery.js, made with the transports below)
   if (showroom?.helipad) {
-    // The pad: an Alouette appears on the H, spools up, lifts off (units.js
-    // launch), and holds off to the side of the pad — not over it, where the
-    // next one takes off.
+    // The pad: what it builds FLIES IN from the map edge (algHeliDelivery.js — the `deliver` hook);
+    // aircraft hold off to the side of the pad, not over it, where the next stick lands. (?flyin=0: the
+    // old way — it appears on the H, spools up, lifts off: units.js launch.)
     const m = showroom.helipad, c = Math.cos(m.rotation.y), s = Math.sin(m.rotation.y);
     const [px, pz] = [-24, -26];
     const rally = { x: m.position.x + px * c + pz * s, z: m.position.z - px * s + pz * c };
@@ -354,7 +356,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       launch: { hold: 2.2, rise: 2.4, deckY: m.geometry.userData.deckY ?? 0 },
       countOf: (key) => SQUADS[key]?.size ?? 1,
       onSpawned: (u, key, slot) => app.algSquads?.bought(u, key, slot),
+      // FLOWN IN (algHeliDelivery.js, 2026-10-19): helicopters and paras come from the map edge, not
+      // out of the pad. ?flyin=0 = the old way (appear on the deck), to compare.
+      deliver: new URLSearchParams(location.search).get("flyin") === "0" ? null : (key, count) => app.algHeliDelivery?.deliver(key, count) ?? false,
     }));
+    helipadAt = { pad: { x: m.position.x, z: m.position.z }, rally };
     // The Alouette parked on the pad at the start (a unit now, hovering) moves
     // to that holding point, off the pad.
     for (const u of units.list) if (u.typeKey === "alouette") u.orderTo(rally.x, rally.z);
@@ -437,7 +443,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const popOf = (key) => POP[key] ?? SQUADS[key]?.size ?? 1;
   function popNow() {
     let n = 0;
-    for (const u of units.list) if (u.alive && u.team === "player" && !u.isStructure) n += u.type?.foot ? 1 : POP[u.typeKey] ?? 2;
+    // (not the base's delivery H-21: it only brings a stick in — algHeliDelivery.js)
+    for (const u of units.list) if (u.alive && u.team === "player" && !u.isStructure && !u.delivery) n +=u.type?.foot ? 1 : POP[u.typeKey] ?? 2;
     for (const p of producers) if (p.structure.team === "player") for (const k of p.structure.queue) n += popOf(k);
     return n;
   }
@@ -799,6 +806,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algHeliLift = heliLift;
   transports = createAlgTransports(app, { units, navGrid, heli: heliLift });
   app.algTransports = transports;
+  // THE HELIPAD'S FLY-INS (algHeliDelivery.js): what it builds comes in from the map edge.
+  if (helipadAt) app.algHeliDelivery = createAlgHeliDelivery(app, { units, heli: heliLift, transports, ...helipadAt, onSpawned: (u, key, slot) => app.algSquads?.bought(u, key, slot) });
   // THE SEARCHLIGHTS (algSearchlight.js): sweep, lock on, reveal who is lit.
   const searchlights = createAlgSearchlights(app, { structures, units, cover: coverSys.cover });
   app.algSearchlights = searchlights;
@@ -939,7 +948,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       doctrine: MAP.tutorial ? null : (app.algFrenchDoctrines = createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar, side: "player", ui: false })) })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); app.algSalvage?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); app.algFrenchDoctrines?.step(d); app.algFlnDoctrines?.step(d); fieldWorks.step(d); };
+  const simStep = (d) => { ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); app.algSalvage?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); app.algHeliDelivery?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); app.algFrenchDoctrines?.step(d); app.algFlnDoctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

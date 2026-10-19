@@ -74,10 +74,21 @@ export function createAlgHeliLift(app, { units, navGrid = null }) {
       if (isHuman(v.team)) app.algBattle?.say?.(t("<b>Pas de zone d'atterrissage</b> ici : il faut un terrain plat et dégagé."), v.position.x, v.position.z, "bad");
       return false;
     }
+    return goDown(v, spot, then);
+  }
+  function goDown(v, spot, then) {
+    const s = st(v);
     s.spot = spot; s.then = then; s.goal = null;
     s.mode = "toSpot";
     v.orderTo(spot.x, spot.z);
     return true;
+  }
+  /** Bring `v` down EXACTLY at (x, z) — the helipad's H (algHeliDelivery.js), which the nav grid marks
+   *  blocked, so findSpot would never pick it. */
+  function landAt(v, x, z, then = null) {
+    if (!handles(v) || !v.alive) return false;
+    if (st(v).mode === "landed") { then?.(); return true; }
+    return goDown(v, { x, z }, then);
   }
 
   function step(dt) {
@@ -122,7 +133,7 @@ export function createAlgHeliLift(app, { units, navGrid = null }) {
   }
 
   return {
-    params: P, handles, landNear, step, findSpot,
+    params: P, handles, landNear, landAt, step, findSpot,
     /** On the ground now (men may board or leave). */
     landed: (v) => state.get(v)?.mode === "landed",
     /** Coming down (or flying to its spot to). */

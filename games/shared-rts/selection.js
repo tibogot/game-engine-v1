@@ -56,6 +56,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
   const uninspect = () => { if (inspected) { inspected.setSelected(false); inspected = null; onInspect?.(null); } };
   const notify = () => { expandSquads(); onChange([...selected]); };
   const setSelected = (unit, on) => {
+    // (`unselectable`: a unit the game flies itself — alg-rts's delivery H-21, algHeliDelivery.js)
+    if (on && unit.unselectable) return;
     if (on) selected.add(unit); else selected.delete(unit);
     unit.setSelected(on);
   };
