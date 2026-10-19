@@ -14,6 +14,7 @@ import { closureAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
 import { library, settings, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
+import { applyWorld, WORLDS, DEFAULT_WORLD } from "./worlds.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -80,7 +81,15 @@ function save() {
   thumbTimer = setTimeout(() => trackThumb().then((url) => url && library.saveTrack(trackId, track, url)), 1200);
 }
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
-function restore(from, to) { if (!from.length) return; to.push(JSON.stringify(track)); track = JSON.parse(from.pop()); sel = null; rebuild(); }
+function restore(from, to) {
+  if (!from.length) return;
+  to.push(JSON.stringify(track));
+  const world = track.world;
+  track = JSON.parse(from.pop());
+  sel = null;
+  rebuild();
+  if (track.world !== world) { applyWorld(app, track.world); $("b-world").value = WORLDS[track.world] ? track.world : DEFAULT_WORLD; } // an undone world switch
+}
 // "fitted_landing" is not a fixed tile: the builder generates one per jump, sized to its speed band
 // (kit.js ensureTile). Until the ghost is on an arc it shows a default size.
 const FITTED = "fitted_landing";
@@ -133,7 +142,7 @@ const app = await startV3App({
 app.sky?.setMode?.("skypro");
 app.sky?.setTimeOfDay?.(15.5);
 app.fog?.setHeight?.({ enabled: false });
-app.fog?.setDistance?.({ enabled: false });
+applyWorld(app, track.world); // worlds.js: the track's world (the haze too), before any material is built
 app.postFx?.setEnabled?.(true);
 app.postFx?.setBloomSelective?.(true);
 app.postFx?.setBloom?.({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
@@ -1088,6 +1097,16 @@ function stopDrive() {
   last = performance.now();
 }
 $("b-drive").onclick = startDrive;
+// THE WORLD (worlds.js), saved with the track: flat to the horizon, or the mountain valley
+$("b-world").innerHTML = Object.entries(WORLDS).map(([k, w]) => `<option value="${k}">World: ${w.label}</option>`).join("");
+$("b-world").value = WORLDS[track.world] ? track.world : DEFAULT_WORLD;
+$("b-world").onchange = () => {
+  snapshot(); // undoable like any edit
+  track.world = $("b-world").value;
+  applyWorld(app, track.world);
+  save();
+  $("b-world").blur(); // the builder's keys again
+};
 
 // ---------- go ----------
 await bakeThumbs();

@@ -8,6 +8,7 @@
 import { startV3App } from "../../../../v3/engine.js";
 import { library, campaign, settings, builderUrl, campaignUrl, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
+import { applyWorld } from "./worlds.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -34,7 +35,6 @@ app.sky?.setMode?.("skypro");
 const tod = Number(params.get("tod"));
 app.sky?.setTimeOfDay?.(params.has("tod") && Number.isFinite(tod) ? tod : 15.5);
 app.fog?.setHeight?.({ enabled: false });
-app.fog?.setDistance?.({ enabled: false });
 app.postFx?.setEnabled?.(true);
 app.postFx?.setBloomSelective?.(true);
 app.postFx?.setBloom?.({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
@@ -53,6 +53,8 @@ const campaignRec = params.get("campaign") ? await campaign.get(params.get("camp
 const trackRec = campaignRec ?? (trackId ? library.get(trackId) : null);
 const nextCampaign = campaignRec ? await campaign.get(campaignRec.id.replace(/\d+$/, (n) => +n + 1)) : null;
 const cameFrom = params.get("from"); // "builder" → Back goes there
+// the track's WORLD (worlds.js: flat to the horizon, or the mountain valley), before any material is built
+applyWorld(app, params.get("world") ?? trackRec?.track?.world);
 
 const rig = createDriveRig(app, {
   prefs: settings.get(),
