@@ -12,7 +12,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "node tools/runAll.mjs --fast",
-    "test:all": "node tools/runAll.mjs"
+    "test:all": "node tools/runAll.mjs",
+    "textures": "node tools/compressTextures.mjs"
   },
   "devDependencies": {
     "eslint": "^10.9.1",

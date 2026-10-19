@@ -6,7 +6,7 @@
  */
 import * as THREE from "three";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js";
+import { getKTX2Loader } from "../textureLoad.js";
 import { MeshoptDecoder } from "three/addons/libs/meshopt_decoder.module.js";
 import { setupDraco } from "../../io/dracoLoader.js";
 
@@ -22,13 +22,14 @@ export function getSharedGltfLoader() { return _loader; }
 
 let _ktx2Ready = false;
 
-/** Must be called once with the WebGPU renderer before loading KTX2-textured GLBs. */
+/**
+ * Must be called once with the WebGPU renderer before loading KTX2-textured GLBs. The KTX2 loader is the
+ * page's shared one (textureLoad.js): the decoder is bundled in public/basis/ — it used to come from a
+ * Google CDN, which a shipped (offline) game can't reach.
+ */
 export function initGlbLoaderRenderer(renderer) {
   if (_ktx2Ready) return;
-  const ktx2 = new KTX2Loader();
-  ktx2.setTranscoderPath("https://www.gstatic.com/basis-universal/versioned/2021-04-15-ba1c3e4/");
-  ktx2.detectSupport(renderer);
-  _loader.setKTX2Loader(ktx2);
+  _loader.setKTX2Loader(getKTX2Loader(renderer));
   _ktx2Ready = true;
 }
 

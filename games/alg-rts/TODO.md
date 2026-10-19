@@ -147,6 +147,9 @@ PHASE 3 — a finished product
     PCFSoftShadowMap gone, vector not() per component), async renderer.dispose(). Also may fix the
     instanced-matrix one-frame lag and the ExternalTexture trap. A big gain → upgrade the whole repo
     before shipping; small → upgrade after shipping.
+    [ ] TEXTURE COMPRESSION (noted 2026-10-19; how: v3/TEXTURE_COMPRESSION.md): at content freeze, switch
+    the game's TextureLoader calls to loadTexture (v3/render/textureLoad.js), run `npm run textures`,
+    compare the look with ?ktx2=0, measure boot s and GPU MB before / after.
 16. [ ] ARABIC + right-to-left UI (native speaker) — or during Early Access; launch FR + EN.
 
 PHASE 4 — Steam itself

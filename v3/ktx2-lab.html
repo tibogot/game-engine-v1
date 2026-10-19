@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KTX2 Lab</title>
+<style>
+  :root { --bg: #15171b; --panel: #1f232a; --text: #e6e8eb; --muted: #9aa3ad; --accent: #4da3ff; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
+  #bar { position: fixed; top: 0; left: 0; right: 0; display: flex; gap: 10px; align-items: center; padding: 8px 12px;
+         background: var(--panel); z-index: 2; flex-wrap: wrap; }
+  #bar select { background: #111; color: var(--text); border: 1px solid #333; padding: 4px; max-width: 60vw; }
+  #bar label { color: var(--muted); }
+  #labels { position: fixed; top: 46px; left: 0; right: 0; display: flex; z-index: 2; pointer-events: none; }
+  #labels div { flex: 1; text-align: center; color: var(--muted); padding: 4px; }
+  #info { color: var(--muted); }
+  canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <strong>KTX2 lab</strong>
+  <select id="pick"></select>
+  <label><input type="checkbox" id="zoom" /> zoom ×4</label>
+  <span id="info"></span>
+</div>
+<div id="labels"><div>IMAGE (as before)</div><div>KTX2 (compressed)</div></div>
+<script type="module">
+// Side by side: the original image (TextureLoader) and its compressed copy (textureLoad.js) on two
+// quads, same UVs. They must look the same way up — the compressed copy is stored flipped for that —
+// and the differences are the compression's, to judge by eye. `__lab.check(key)` measures the
+// difference on the GPU; `__lab.glb(url)` loads a KTX2-textured GLB through the shared loader.
+import * as THREE from "three/webgpu";
+import { texture, uv, vec2 } from "three/tsl";
+import { initTextureLoader, loadTexture, getKTX2Loader } from "./render/textureLoad.js";
+import { getSharedGltfLoader, initGlbLoaderRenderer } from "./render/foliage/glbLoader.js";
+
+const renderer = new THREE.WebGPURenderer({ antialias: false });
+renderer.setPixelRatio(1);
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+await renderer.init();
+initTextureLoader(renderer);
+initGlbLoaderRenderer(renderer);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x15171b);
+const cam = new THREE.OrthographicCamera(-1, 1, 0.5, -0.5, 0.1, 10);
+cam.position.z = 1;
+const zoomU = { v: 1 };
+const quad = (x) => {
+  const m = new THREE.MeshBasicNodeMaterial();
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(0.96, 0.96), m);
+  mesh.position.x = x;
+  scene.add(mesh);
+  return mesh;
+};
+const left = quad(-0.5), right = quad(0.5);
+const setMap = (mesh, tex) => {
+  const z = zoomU.v;
+  mesh.material.colorNode = texture(tex, uv().sub(0.5).div(z).add(vec2(0.5, 0.5)));
+  mesh.material.needsUpdate = true;
+};
+
+const resize = () => {
+  renderer.setSize(innerWidth, innerHeight);
+  const a = innerWidth / innerHeight;
+  cam.left = -a / 2 > -1 ? -1 : -a / 2; cam.right = -cam.left;
+  cam.top = cam.right / a; cam.bottom = -cam.top;
+  cam.updateProjectionMatrix();
+};
+addEventListener("resize", resize); resize();
+renderer.setAnimationLoop(() => renderer.render(scene, cam));
+
+const manifest = await fetch("/ktx2/manifest.json").then((r) => (r.ok ? r.json() : { textures: {} })).catch(() => ({ textures: {} }));
+const keys = Object.keys(manifest.textures).sort();
+const pick = document.getElementById("pick"), info = document.getElementById("info");
+for (const k of keys) pick.add(new Option(k, k));
+if (!keys.length) info.textContent = "no manifest — run: node tools/compressTextures.mjs";
+
+let cur = { img: null, ktx: null };
+async function show(key) {
+  const e = manifest.textures[key];
+  const url = "/" + key;
+  const img = await new THREE.TextureLoader().loadAsync(url);
+  img.colorSpace = e.srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  const ktx = await loadTexture(url);
+  cur.img?.dispose(); cur.ktx?.dispose();
+  cur = { img, ktx };
+  setMap(left, img); setMap(right, ktx);
+  const mb = (w, h, bpp) => ((w * h * bpp * 4) / 3 / 1048576).toFixed(1);
+  info.textContent = `${e.srcW}×${e.srcH} ${e.srgb ? "sRGB" : "linear"} · GPU ${mb(e.srcW, e.srcH, 4)} MB → ${mb(e.w, e.h, 1)} MB` +
+    (ktx.userData.ktx2 ? "" : " · (KTX2 NOT used: fallback image)");
+  return { key, ktx2: ktx.userData.ktx2, format: ktx.format, isCompressed: !!ktx.isCompressedTexture };
+}
+pick.onchange = () => show(pick.value);
+document.getElementById("zoom").onchange = (ev) => { zoomU.v = ev.target.checked ? 4 : 1; if (cur.img) { setMap(left, cur.img); setMap(right, cur.ktx); } };
+if (keys.length) await show(keys[0]);
+
+// Render each texture alone into a target and compare the pixels: a flipped copy gives a big
+// difference, compression a small one. Also compares against the image flipped, to be sure.
+async function check(key) {
+  const r = await show(key);
+  const W = 256, H = 256;
+  const rt = new THREE.RenderTarget(W, H, { colorSpace: THREE.SRGBColorSpace });
+  const s = new THREE.Scene(), q = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.MeshBasicNodeMaterial());
+  s.add(q);
+  const c = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10); c.position.z = 1;
+  const grab = async (tex, flip = false) => {
+    const u = flip ? vec2(uv().x, uv().y.oneMinus()) : uv();
+    q.material.colorNode = texture(tex, u); q.material.needsUpdate = true;
+    renderer.setRenderTarget(rt); renderer.render(s, c); renderer.setRenderTarget(null);
+    return await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
+  };
+  const a = await grab(cur.img), b = await grab(cur.ktx), bf = await grab(cur.ktx, true);
+  const diff = (x, y) => { let d = 0; for (let i = 0; i < x.length; i += 4) d += Math.abs(x[i] - y[i]) + Math.abs(x[i + 1] - y[i + 1]) + Math.abs(x[i + 2] - y[i + 2]); return d / (x.length / 4) / 3; };
+  rt.dispose();
+  return { ...r, meanDiff: +diff(a, b).toFixed(2), meanDiffIfFlipped: +diff(a, bf).toFixed(2) };
+}
+
+async function glb(url) {
+  const g = await getSharedGltfLoader().loadAsync(url);
+  const maps = [];
+  g.scene.traverse((o) => { const m = o.material; if (m?.map && maps.length < 4) maps.push({ name: m.name, compressed: !!m.map.isCompressedTexture, format: m.map.format, w: m.map.image?.width }); });
+  return { url, meshes: g.scene.children.length, maps };
+}
+
+window.__lab = { show, check, glb, keys, loader: getKTX2Loader() };
+</script>
+</body>
+</html>

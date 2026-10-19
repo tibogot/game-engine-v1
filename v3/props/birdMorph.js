@@ -121,7 +121,7 @@ export async function bakeBirdFaces() {
 /** Load the chicken with an RGBA-only transcoder and read each triangle's colour off the texture. */
 async function sampleFacesLive(url) {
   const ktx2 = new KTX2Loader();
-  ktx2.setTranscoderPath("https://www.gstatic.com/basis-universal/versioned/2021-04-15-ba1c3e4/");
+  ktx2.setTranscoderPath("/basis/");   // the bundled decoder (textureLoad.js)
   // no compressed format supported → the transcoder writes plain RGBA
   ktx2.workerConfig = { astcSupported: false, astcHDRSupported: false, etc1Supported: false, etc2Supported: false, dxtSupported: false, bptcSupported: false, pvrtcSupported: false };
   const loader = setupDraco(new GLTFLoader());

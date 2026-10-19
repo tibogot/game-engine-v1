@@ -14,6 +14,8 @@ Started 2026-10-17 from the r185 + r186 release notes.
   4. Open every game and the main labs; the console must stay clean.
   5. Compare boot s, CPU ms and GPU ms with the old version (`__V3_DEBUG.gpuAB`, same scene, same camera).
   6. Retest every workaround below, delete the ones the upgrade made unnecessary, and update this file.
+  7. Recopy the bundled decoders from three's examples: `node_modules/three/examples/jsm/libs/basis/*`
+     → `public/basis/` (KTX2; `textureLoadTest` fails until done) and the Draco files → `public/draco/`.
 - Next: a MEASURE-ONLY r186 trial for alg-rts (games/alg-rts/TODO.md, item 15), then the real
   upgrade of the whole repo after alg-rts ships, before the Apocalypse game's code starts.
 
