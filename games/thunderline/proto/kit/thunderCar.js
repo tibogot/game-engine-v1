@@ -32,8 +32,10 @@ function build(root) {
   object.add(body);
 
   // the wheels leave the body: the car spins and steers its own copies of one template
+  // the TOP-LEVEL wheel nodes only: a multi-material wheel loads as a group "Wheel_FL" whose meshes are
+  // named "Wheel_FL_1"… too — taking those emptied the template (the wheels were invisible)
   const wheels = [];
-  root.traverse((o) => { if (/^Wheel_/.test(o.name)) wheels.push(o); });
+  root.traverse((o) => { if (/^Wheel_/.test(o.name) && !/^Wheel_/.test(o.parent?.name ?? "")) wheels.push(o); });
   const src = wheels.find((w) => w.name === "Wheel_FL") ?? wheels[0];
   for (const w of wheels) w.removeFromParent();
   const wheelRoot = src.clone(true);
