@@ -69,6 +69,15 @@ export const GROUND_CACHE_DEFAULTS = {
   /** Metres per texel of the finest ring. */
   texel0: 0.02,
   /**
+   * CALM (2026-10-19, alg-rts — you: "the Aurès map is hard to see units"): zoomed out, the paint's fine
+   * light/dark specks are a soldier's size on screen and camouflage him. When on, the terrain's read mixes
+   * each pixel toward the ring `calmRing` steps coarser (the same ground, blurred) and flattens the normal,
+   * by how much ground a screen pixel covers — the close zoom keeps every detail. Compiled in only when
+   * true (one more tap); strengths live in `uCalm` (0 = no change).
+   */
+  calm: false,
+  calmRing: 3,
+  /**
    * Tiles baked per frame while catching up (each: the paint twice, the
    * splats and decals twice, the cavity once — ~65k texels a pass). Kept low:
    * a pan only exposes a row of fine tiles at a time, and a fine ring that
@@ -1182,6 +1191,9 @@ export function createGroundCache({
     return acc;
   };
   const uDebug = uniform(0);
+  /** CALM (O.calm): x colour toward the coarse ring, y-z metres a pixel covers where it starts / is full,
+   *  w the normal's flattening. */
+  const uCalm = uniform(new THREE.Vector4(0, 0.02, 0.05, 0));
 
   /**
    * The cached surface at world XZ `p` over geometric normal `G` (TSL, call at
@@ -1230,6 +1242,13 @@ export function createGroundCache({
     const n = mix(nA, nB, tB).toVar();
 
     let col = c.rgb.mul(c.rgb);
+    let calmK = float(0);
+    if (O.calm) {
+      calmK = smoothstep(uCalm.y, uCalm.z, foot).toVar();
+      const ic = min(ia.add(O.calmRing), N - 1);
+      const cc = colNode.sample(pv.div(float(extentOf(0)).mul(exp2(ic)))).depth(int(ic));
+      col = mix(col, cc.rgb.mul(cc.rgb), calmK.mul(uCalm.x));
+    }
     if (O.detail > 0 && detailArr) {
       // DETAIL (see the option): ring A's layer and paint fraction (a blend of
       // two rings' layer ids would be a third, wrong layer).
@@ -1259,7 +1278,8 @@ export function createGroundCache({
     col = mix(col, col.mul(vec3(tintOf(0), tintOf(1), tintOf(2))), uDebug);
 
     const G3 = vec3(G);
-    const dx = n.r.mul(2).sub(1), dz = n.g.mul(2).sub(1);
+    const flat = float(1).sub(calmK.mul(uCalm.w));
+    const dx = n.r.mul(2).sub(1).mul(flat), dz = n.g.mul(2).sub(1).mul(flat);
     const dy = dx.mul(G3.x).add(dz.mul(G3.z)).negate().div(max(G3.y, 0.2));
     const d = vec3(dx, dy, dz);
     const nrm = normalize(d.add(G3.mul(sqrt(max(float(0), float(1).sub(dot(d, d)))))));
@@ -1277,6 +1297,7 @@ export function createGroundCache({
     uLodBias,
     uDetail,
     uDebug,
+    uCalm,
     colourTexture: colRT.texture,
     normalTexture: nrmRT.texture,
     /** Decals are drawn into the cache from here on (the system's own draw is the caller's to switch off). */

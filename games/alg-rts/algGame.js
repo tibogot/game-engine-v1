@@ -56,6 +56,7 @@ import { createAlgCivilians } from "./algCivilians.js";
 import { awaitPipelinesQuiet, snapshotEngineScene, warmGamePipelines } from "../shared-rts/pipelineWarmup.js";
 import { xrayParams } from "../shared-rts/xraySilhouette.js";
 import { rtsEngineOptions, beginRtsPerfBoot } from "../shared-rts/rtsPerfBoot.js";
+import { unitPop } from "../shared-rts/unitRenderer.js";
 import "../../v3/styles/editor.css";
 import { t } from "./i18n/i18n.js";
 
@@ -238,7 +239,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // over a cache baked hex-tiled, so the two never line up and the ratio
     // printed a regular diagonal hatch over all the ground (A/B at the oasis
     // village: on = the hatch, off = gone). ?detail=1 = with, to compare.
-    groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0) },
+    // calm: zoomed out, the ground's fine specks calmed (the units read — groundCache CALM, set below).
+    groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0), calm: params.get("calm") !== "0" },
   });
   // Boot loop, parallel pipelines, stats-gl off, the perf line
   // (shared-rts/rtsPerfBoot.js). ONE engine frame a second behind the loading
@@ -535,6 +537,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     // ITS PORT (algPort.js, maps/coast.js `port`)
     if (MAP.port) try { app.algPort = createAlgPort(app, { ...MAP.port, sea: MAP.sea.level, navGrid: app.navGrid ?? null }); } catch (e) { console.warn("[alg port] failed:", e); }
   }
+  // THE GROUND CALMED AT PLAY ZOOM (2026-10-19, you: "the Aurès map is hard to see units … even less in
+  // the mountain in the north"): the rocky paint's light/dark specks are a soldier's size on screen at
+  // the RTS camera and hid him. Toward the coarser cache ring + a flatter normal, from 2 cm of ground a
+  // pixel (close zoom: untouched) to 5 cm. ?calm=0 = without (A/B).
+  app.groundCache?.uCalm?.value.set(0.55, 0.02, 0.05, 0.6);
+  // …and the soldiers' colour kept in the shade (unitPop: a man under a tree stays a man). ?pop=0 = without.
+  if (params.get("pop") !== "0") unitPop.lift.value = 0.18;
+  app.unitPop = unitPop;   // (live: Dev / the console)
   // THE MACRO PHOTO (algMacroGround.js): the ground's large-scale variation. ?macro=0 = without.
   if (params.get("macro") !== "0") {
     try { await applyMacroGround(app); } catch (e) { console.warn("[alg macro] failed:", e); }

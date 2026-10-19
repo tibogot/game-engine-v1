@@ -13,7 +13,7 @@
 import * as THREE from "three";
 import * as SkeletonUtils from "three/addons/utils/SkeletonUtils.js";
 import { mergeGeometries, mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
-import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, mod, step, texture, varying, vec3 } from "three/tsl";
+import { abs, attribute, floor, float, instanceIndex, materialColor, max, mix, mod, step, texture, uniform, varying, vec3 } from "three/tsl";
 import { UNIT_ORDER, XRAY_ORDER, createXrayMaterial, xrayOn } from "./xraySilhouette.js";
 let _sharedXray = null;   // (the unit types' x-ray: one material, one shader build)
 import { teamTint, isUntinted, isHuman, isHostile } from "./teams.js";
@@ -37,6 +37,13 @@ import { RENDER_ORDER } from "./renderOrder.js";
 // keeps the link OUT of userData, which THREE deep-clones via JSON — a unit
 // back-ref there would be circular and break clone(true) (thumbnail baking).
 export const unitByMesh = new WeakMap();
+/**
+ * SOLDIERS READ ON THE GROUND (2026-10-19, alg-rts — you: "hard to see units"): live, shared by every soldier
+ * view. `lift` their own colour added back as light (a man in a tree's shade stays a man, not a hole).
+ * 0 = as before (nam-rts). (A warm edge light was tried the same day — "doesn't look right, CoH doesn't
+ * do this": removed.)
+ */
+export const unitPop = { lift: uniform(0) };
 
 const _UP = new THREE.Vector3(0, 1, 0);
 const _n = new THREE.Vector3();
@@ -548,6 +555,7 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
       // the skinned kit in its own (vertex) colours
       if (crowdGeometry) material.colorNode = mix(material.colorNode, attribute("kitColor", "vec3"), step(0.5, attribute("kitPiece", "float")));
     }
+    material.emissiveNode = vec3((material.colorNode ?? materialColor).xyz).mul(unitPop.lift);
     if (look) {
       // HEADWEAR OFF PER SOLDIER: one geometry for the whole crowd, so a man in a
       // beret or a chèche collapses the body's own headwear (helmet, straps, a
