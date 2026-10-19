@@ -1,0 +1,63 @@
+// AURÈS — OUED ABDI (map 4, planned 2026-10-19: games/alg-rts/AURES2_PLAN.md). THE LAYOUT, FIRST SKETCH —
+// plain data, argued over on a plan image (tools/algLayoutSketch.mjs) before any ground exists. NOT in the
+// game's map list yet (layout.js MAPS): it has no level file.
+//
+// A valley of the Aurès south of Arris: the djebel steep north and west, the valley floor open south and
+// east, the oued across it. CoH 3-sized: a ~500 m PLAYABLE box, the starts ~410 m apart on the diagonal.
+//   · the FRENCH hold the valley: the post south-east, its motor pool and helipad, the piste north;
+//   · the FLN start hidden in the djebel (north-west): the maquis camp and the cave, two GULLIES down;
+//   · between: the ALGERIAN TOWN on a knoll (its souk the big point), the oasis, a hamlet and farms (the
+//     brown houses: farmers, shepherds), the stone DECHRA at the mountain's foot, a lookout on a spur.
+// World metres, north up = -Z (as every map).
+
+export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
+
+export const LAYOUT = {
+  sites: [
+    // ── Starts ──
+    { kind: "french", name: "Poste d'Oued Abdi", x: 110, z: 165, r: 34, turn: 35 },
+    { kind: "aln", name: "Katiba camp", x: -150, z: -160, r: 26, turn: -30 },
+    { kind: "cave", name: "Grotte", x: -190, z: -205, r: 10 },
+    // ── The French base's other pieces (not points) ──
+    { kind: "motorPool", name: "Parc auto", x: 160, z: 200, r: 18 },
+    { kind: "helipad", name: "Hélisurface", x: 60, z: 205, r: 14 },
+    // ── Objectives ──
+    { kind: "town", name: "Abdi (souk)", x: 15, z: -10, r: 40, knoll: [5, -55, 60], point: true },
+    { kind: "oasis", name: "Aïn Abdi", x: -75, z: 95, r: 24, point: true },
+    { kind: "hamlet", name: "Mechta el Djorf", x: 175, z: 25, r: 30, point: true },
+    { kind: "farm", name: "Ferme Ouled Saïd", x: -185, z: 45, r: 20, point: true },
+    { kind: "dechra", name: "Dechra Taghit", x: -195, z: -55, r: 30, point: true },
+    { kind: "koubba", name: "Sidi Ali", x: -230, z: -95, r: 10 },
+    { kind: "pass", name: "Débouché du ravin", x: 85, z: -110, r: 16, point: true },
+    { kind: "point", name: "Kef (guet)", x: 175, z: -170, r: 16, point: true },
+    { kind: "farm", name: "Bergerie", x: 200, z: -80, r: 16 },
+  ],
+  // the oued across the valley (3 fords) and the two gullies down from the djebel
+  wadis: [
+    { name: "Oued Abdi", points: [[-260, 0], [-170, 25], [-110, 60], [-30, 50], [40, 55], [120, 80], [200, 60], [260, 35]], width: 12, depth: 3, fords: [0.3, 0.55, 0.78] },
+  ],
+  gullies: [
+    { name: "Ravin ouest", points: [[-140, -150], [-150, -90], [-120, -40], [-110, 10]] },
+    { name: "Ravin est", points: [[-110, -175], [-30, -150], [40, -125], [85, -110]] },
+  ],
+  pistes: [
+    [[110, 165], [70, 110], [40, 55], [20, 10]],                // the post to the souk, over the middle ford
+    [[70, 110], [-20, 100], [-75, 95], [-150, 60], [-185, 45]],  // west: the oasis, the farm
+    [[110, 165], [150, 90], [175, 25], [200, -80]],               // east: the hamlet, the sheepfold
+  ],
+  // supply (munitions / fuel), placed in the gaps the sketch measures
+  supply: [
+    { name: "Gué du milieu", x: 40, z: 60, res: "fuel" },
+    { name: "Puits de l'oasis", x: -40, z: 120, res: "mun" },
+    { name: "Carrefour de la piste", x: 75, z: 110, res: "mun" },
+    { name: "Pont de l'est", x: 130, z: 80, res: "fuel" },
+    { name: "Source du ravin", x: -120, z: -40, res: "mun" },
+    { name: "Col du ravin est", x: -20, z: -150, res: "fuel" },
+    { name: "Terrasses", x: -110, z: 10, res: "mun" },
+    { name: "Gué de l'ouest", x: -165, z: 120, res: "fuel" },
+    { name: "Piste de la bergerie", x: 200, z: -20, res: "mun" },
+    { name: "Hauteurs du souk", x: 70, z: -60, res: "fuel" },
+    { name: "Vergers du sud", x: 0, z: 180, res: "mun" },
+    { name: "Crête nord", x: 60, z: -200, res: "mun" },
+  ],
+};

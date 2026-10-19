@@ -106,8 +106,15 @@ repeated, damage states (intact / damaged / ruin) built in.
 - **A NEW VALLEY: the Oued Abdi** (a real Aurès valley, south of Arris — terraced villages of stone, the river
   green in its bed, the djebel steep on both sides; FLN country from November 1954). A new map, a new name: no
   confusion with the old Tighanimine. Map id `abdi`, name "Aurès — Oued Abdi".
-- **The town: an ALGERIAN town** — whitewashed houses packed up a knoll, its mosque and minaret on top, the souk
-  square at its foot (the point), narrow lanes, the café, the well. (The colonial village: another map.)
+- **The town: an ALGERIAN town** — houses PACKED up a knoll, stepped one above the other, its mosque and
+  MINARET on top, the souk square at its foot (the point) under an ARCADE, narrow lanes, the café, the well.
+  (The colonial village: another map.) THE LOOK (you, 2026-10-19, with photos — assets-src/refs/algeria_town/:
+  the M'zab's Ghardaïa, the Casbah of Algiers, a Moorish arcade): the old Ksar el Hamra's EARTH-and-ochre
+  read was right — authentic, not the problem; what it lacked was VARIETY and finish. So: the old ksar's spirit,
+  built to the new standard (Blender, instanced, damage states) — a mixed palette (ochre, sand, pink earth,
+  some lime-white, a pale blue house here and there), coloured woodwork (blue / green doors and shutters),
+  stepped flat roofs with their clutter, horseshoe arches on the souk, the minaret tapering (the M'zab's).
+  The whitewashed kit = the Casbah's houses mixed in, not the whole town.
 - **Size: closer to CoH 3** — a PLAYABLE box of ~500 m (the old one 610 m); the starts ~400 m apart; denser,
   every place nearer the next. The terrain outside stays as scenery.
 - **Night variant: later.**

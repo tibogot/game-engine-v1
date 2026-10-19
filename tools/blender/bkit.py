@@ -269,6 +269,10 @@ class Kit:
         d = f.modifiers.new("D", "DECIMATE"); d.decimate_type = "COLLAPSE"; d.ratio = ratio; d.use_collapse_triangulate = True
         bpy.ops.object.select_all(action="DESELECT"); f.select_set(True); bpy.context.view_layer.objects.active = f
         bpy.ops.object.modifier_apply(modifier="D")
+        # (the collapse loses the sharp edges: smooth shading then ran across the walls' corners and the
+        # long collapsed triangles — dark diagonal streaks on flat whitewash that read as SHADOWS from the RTS
+        # zoom and "vanished" up close when the near level took over; you, 2026-10-19. Split by angle again.)
+        bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
         return f
     def export(s, path, objs):
         bpy.ops.object.select_all(action="DESELECT")
