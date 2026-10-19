@@ -17,6 +17,7 @@
 import * as THREE from "three";
 import { abs, atan, attribute, cross, dot, exp, float, mix, mx_noise_float, normalGeometry, normalize, positionGeometry, positionView, pow, select, sin, smoothstep as tslSmoothstep, texture, transformNormalToView, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { simplifierReady, simplifyGeometry } from "../../v3/render/instancing/autoLod.js";
 
 /** The bag (m: a filled French army jute bag ~ 62 × 34 × 17 cm). */
 export const BAG = { L: 0.7, W: 0.42, H: 0.21 };
@@ -427,6 +428,37 @@ export function buildFrenchPostPiece(kitPost) {
   geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), ...extra] };
   return geo;
 }
+
+/** The helipad (showroom, the buildings lab — 2026-10-19, you: "you are still using the old sandbags, I
+ *  have way better ones"): its fuel point's and radio corner's walls laid from the cloth-simulated bags in
+ *  the kit's slots (rtsAlgeria `bagSlots`, kit scale), all four ONE mesh. The kit's walls if not loaded. */
+export function buildHelipadPiece(kitPad) {
+  if (!_sim) return kitPad({});
+  const geo = kitPad({ noBags: true });
+  const list = [];
+  for (const b of geo.userData.bagSlots ?? []) {
+    const bags = sandbagWallBags({ length: b.length, courses: b.courses, thick: 2, seed: b.seed, x0: b.x, z0: b.z, yaw: b.yaw });
+    for (const g of bags) g.translate(0, b.y, 0);
+    list.push(...bags);
+  }
+  if (!list.length) return geo;
+  // NEAR / FAR, as the simulated walls (WALL_FAR): ~35k triangles of bags were drawn whole from the RTS
+  // camera (50-130 m out) and into the shadow map; past WALL_FAR a meshopt-simplified copy (~15 %) —
+  // the shadow camera picks it too.
+  const near = sandbagMesh(list, "HelipadBags");
+  if (!_simplerOk) { geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), near] }; return geo; }
+  const far = new THREE.Mesh(simplifyGeometry(near.geometry, { ratio: 0.15, error: 0.03 }), near.material);
+  far.name = "HelipadBagsFar";
+  far.castShadow = far.receiveShadow = true;
+  const lod = new THREE.LOD();
+  lod.name = "HelipadBags";
+  lod.addLevel(near, 0);
+  lod.addLevel(far, WALL_FAR);
+  geo.userData = { ...geo.userData, extra: [...(geo.userData.extra ?? []), lod] };
+  return geo;
+}
+let _simplerOk = false;
+simplifierReady.then(() => { _simplerOk = true; });
 
 export function buildSandbagWallPiece(kitWall) {
   const geo = kitWall();

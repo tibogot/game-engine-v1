@@ -31,7 +31,7 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildFortPointPiece, buildFrenchPostPiece, buildMgNestPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 import { buildFortPoint, buildMgNest } from "../../v3/render/objects/rtsAlgeria.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
@@ -223,15 +223,15 @@ const BUILDINGS = {
     label: "Hélisurface", gap: 24, before: () => buildHelipad(),
     // (2026-10-13: the CONSTRUCTION too — algConstruction.js: the panel's « Construction » plays it.)
     after: () => {
-      const g = buildHelipad({ detail: 2 });
+      const g = buildHelipadPiece((o) => buildHelipad({ detail: 2, ...o }));
       SITE = createConstruction(g, { paintTint: FR_PAINT_TINT });
       SITE.sock = labWindsock(g);
       g.userData.labMaterial = SITE.material;
-      g.userData.extra = [SITE.sock, SITE.dressing];
+      g.userData.extra = [...(g.userData.extra ?? []), SITE.sock, SITE.dressing];
       SITE.set(1);
       return g;
     },
-    tags: ["HÉLISURFACE (LE JEU)", "HÉLISURFACE · NOUVELLE"], note: "l'hélisurface du jeu à gauche, la nouvelle à droite : terre battue, H en pierres blanchies, panneaux de signalisation, point carburant.",
+    tags: ["HÉLISURFACE (LE JEU)", "HÉLISURFACE · NOUVELLE"], note: "l'hélisurface du jeu à gauche, la nouvelle à droite : terre battue, H et cercle peints à la chaux, panneaux de signalisation, point carburant, coin radio.",
   },
   ruineRomaine: { build: (o) => buildRomanRuin({ ...o }), label: "Ruine romaine", gap: 15 },
   colonne: roman("Colonne seule", buildRomanColumn, 17),

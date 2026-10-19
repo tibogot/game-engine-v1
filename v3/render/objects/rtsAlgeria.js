@@ -14,6 +14,9 @@ import * as THREE from "three";
 import { ConvexGeometry } from "three/addons/geometries/ConvexGeometry.js";
 import { MAT, assemble, bakeContactAO, buildBox, buildCorrugatedPanel, buildOilDrum, buildSandbagWall, rng, wirePart } from "./rtsParts.js";
 import { flatSurface, mergeStencils, stencilPatch, stencilsOf } from "./rtsStencils.js";
+import { paintStrokes } from "./rtsPaint.js";
+import { createRockGeometry } from "../../props/proceduralRock.js";
+import { simplifierReady } from "../instancing/autoLod.js";
 import { mergeVertices } from "three/addons/utils/BufferGeometryUtils.js";
 
 const S = 1.3;
@@ -327,10 +330,63 @@ export function earthBerm(prof, { seed = 1, segs = 44, rJit = 0.35, yJit = 0.12,
   return g;
 }
 
-/** A whitewashed field stone — the French post's marker for every edge. */
+/*
+ * WHITEWASHED FIELD STONES (2026-10-19, you: "those stones look cheap … we made way better stones"): the
+ * French post's marker for every edge — a field stone picked up and limed. They were 20-face icosahedra in
+ * flat white (plastic sweets); now the engine's chipped-egg rocks (v3/props/proceduralRock.js — the terrain's
+ * own stones, algStones.js), a few shapes simplified to ~90 triangles and shared, each split along its facets:
+ * the LIMED top (the lime ran down the sides) and the bare, earth-dirty BASE where it sits in the ground —
+ * two kit parts, still the kit's one merged draw (and its construction order).
+ */
+let _simplerOk = false;
+simplifierReady.then(() => { _simplerOk = true; });
+let _limed = null;
+function limedStones() {
+  if (_limed) return _limed;
+  const out = [];
+  for (const [k, seed] of [11, 23, 37, 41, 59, 67].entries()) {
+    const g = createRockGeometry({
+      seed, sizeX: 1, sizeY: 0.62, sizeZ: 0.82, egg: 0.06, chips: 16, chipMin: 0.04, chipMax: 0.2, chipJitter: 0.7,
+      bigCuts: 1, baseCut: 0.18, detail: _simplerOk ? 16 : 4, targetTriangles: 64, simplifyError: 0.15,
+    }).toNonIndexed();
+    const p = g.attributes.position, n = p.count / 3;
+    g.computeBoundingBox();
+    const y0 = g.boundingBox.min.y, h = g.boundingBox.max.y - y0;
+    const cut = 0.34 + (k % 3) * 0.08;                      // how far down the lime ran, per shape
+    const lime = [], base = [];
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), C = new THREE.Vector3();
+    for (let t = 0; t < n; t++) {
+      A.fromBufferAttribute(p, t * 3); B.fromBufferAttribute(p, t * 3 + 1); C.fromBufferAttribute(p, t * 3 + 2);
+      const cy = (A.y + B.y + C.y) / 3, ny = B.clone().sub(A).cross(C.clone().sub(A)).normalize().y;
+      // (an underside never got the brush; a facet's own wobble keeps the line from reading as a ruler)
+      const wob = 0.08 * Math.sin(A.x * 9 + A.z * 7 + seed);
+      ((cy - y0) / h > cut + wob && ny > -0.35 ? lime : base).push(A.x, A.y, A.z, B.x, B.y, B.z, C.x, C.y, C.z);
+    }
+    const part = (arr) => {
+      const q = new THREE.BufferGeometry();
+      q.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3));
+      const uv = new Float32Array((arr.length / 3) * 2);
+      for (let i = 0; i < arr.length / 3; i++) { uv[i * 2] = arr[i * 3] * 0.5; uv[i * 2 + 1] = arr[i * 3 + 2] * 0.5 + arr[i * 3 + 1] * 0.5; }
+      q.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
+      q.setIndex([...Array(arr.length / 3).keys()]);   // (indexed, as every kit part: assemble merges like with like)
+      q.computeVertexNormals();
+      return q;
+    };
+    out.push({ lime: part(lime), base: part(base), h });
+  }
+  if (_simplerOk) _limed = out;   // (only the simplified set is kept: a boot before the simplifier makes do)
+  return out;
+}
+/** A whitewashed field stone, `size` ~ its half-width (m), set down at ground height `y` — two kit parts. */
 function whiteStone(R, x, y, z, size = 0.2) {
-  const g = faceted(new THREE.IcosahedronGeometry(size, 0));
-  return { geo: g, pos: [x, y, z], rot: [R() * 0.5, R() * 3, R() * 0.5], scale: [1.2 + R() * 0.5, 0.7 + R() * 0.2, 1 + R() * 0.4], mat: MAT.white, tone: 0.72 + R() * 0.12 };
+  const set = limedStones(), s = set[Math.floor(R() * set.length)];
+  const scale = [size * (0.95 + R() * 0.4), size * (0.85 + R() * 0.3), size * (0.9 + R() * 0.3)];
+  const pos = [x, y - size * 0.25 - s.h * scale[1] * 0.12, z];          // (sunk a little: laid, not placed)
+  const rot = [(R() - 0.5) * 0.25, R() * 6.28, (R() - 0.5) * 0.25];
+  return [
+    { geo: s.lime, pos, rot, scale, mat: MAT.white, tone: 0.52 + R() * 0.18 },
+    { geo: s.base, pos, rot, scale, mat: MAT.limestone, tone: 0.25 + R() * 0.12 },
+  ];
 }
 
 /** Finish, plus the markings scaled with the piece. */
@@ -355,8 +411,8 @@ function finishWithStencils(parts, st, opts) {
  *
  * userData.deckY: the height a helicopter stands at (scaled).
  */
-export function buildHelipad({ seed = 23, detail = 1 } = {}) {
-  if (detail >= 2) return buildHelipadV2({ seed });
+export function buildHelipad({ seed = 23, detail = 1, noBags = false } = {}) {
+  if (detail >= 2) return buildHelipadV2({ seed, noBags });
   const R = rng(seed);
   const parts = [];
   const D = 7.5;                                   // deck half-side: 15 m, an H-34's rotor with room
@@ -373,7 +429,7 @@ export function buildHelipad({ seed = 23, detail = 1 } = {}) {
     const u = -D + 0.35 + (k * (2 * D - 0.7)) / n;
     for (const [x, z] of [[u, -D + 0.35], [u, D - 0.35], [-D + 0.35, u], [D - 0.35, u]]) {
       if (k === 0 || k === n) { if (x !== u) continue; }                   // corners once
-      parts.push(whiteStone(R, x, bedTop + 0.03, z, 0.19));
+      parts.push(...whiteStone(R, x, bedTop + 0.03, z, 0.19));
     }
   }
 
@@ -433,15 +489,24 @@ export function buildHelipad({ seed = 23, detail = 1 } = {}) {
  * HELIPAD, DETAIL 2 (2026-10-13, the buildings lab — you: "as nice as possible"). What an Aurès post's
  * hélisurface was (the archive's: a levelled patch of earth, marked with whitewashed stones — the
  * 1950s had no ring round the H, that is today's heliport): RAMMED EARTH graded into a low platform,
- * its edges rolling down into the ground, its centre scoured paler by the rotors' wash; the H laid in
- * WHITEWASHED STONES, two abreast; the edge stones uneven, a few knocked out of line; two red-and-white
+ * its edges rolling down into the ground, its centre scoured paler by the rotors' wash; the H and its
+ * circle PAINTED in lime (rtsPaint.js — 2026-10-19, they were stones); the edge stones uneven, a few knocked
+ * out of line; a RADIO CORNER behind sandbags; two red-and-white
  * SIGNAL PANELS pegged out for the pilots; the windsock's mast; the FUEL POINT — drums on pallets, a
  * hand pump and its hose, jerrycans, a tarp over spares, behind sandbags. The same
  * deck (15 m) and footprint as detail 1: the game lands on it unchanged.
  */
-function buildHelipadV2({ seed = 23 } = {}) {
+function buildHelipadV2({ seed = 23, noBags = false } = {}) {
   const R = rng(seed);
   const parts = [];
+  // SANDBAG WALLS (the fuel point's, the radio corner's): the kit's — or, `noBags`, only their SLOTS
+  // (userData.bagSlots, the kit's scale) for a game to lay its own (alg-rts: the cloth-simulated bags,
+  // algSandbags buildHelipadPiece).
+  const bagSlots = [];
+  const bagWall = (length, courses, sd, x, y, z, yaw = 0) => {
+    if (noBags) { bagSlots.push({ length: length * S, courses, seed: sd, x: x * S, y: y * S, z: z * S, yaw }); return; }
+    parts.push({ geo: buildSandbagWall({ length, courses, seed: sd, bag: { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 } }), pos: [x, y, z], rot: [0, yaw, 0], mat: null });
+  };
   const D = 7.5, top = 0.16, fall = 2.2;
   // The platform: a grid, flat inside, rolling down past the deck's edge; a little unevenness. Split by
   // radius into the scoured centre (paler, smoother) and the rest — one surface, no overlap.
@@ -481,22 +546,21 @@ function buildHelipadV2({ seed = 23 } = {}) {
   parts.push({ geo: gridGeo(outer), mat: MAT.spoil, tone: 0.4, build: 0.12, drop: -0.3 });
   parts.push({ geo: gridGeo(centre), mat: MAT.spoil, tone: 0.62, build: 0.22, drop: -0.25 });
   const M = {};   // where each stage's parts start (their build order is set at the end)
-  // THE H in whitewashed stones: its strokes 0.85 m wide, 6 m long, its uprights along z (it reads
-  // upright from the RTS camera — along x it read as an I-beam, the lab).
   const stone = (x, z, s) => {
     const y = hAt(x, z) + s * 0.25;
-    parts.push(whiteStone(R, x, y, z, s));
+    parts.push(...whiteStone(R, x, y, z, s));
   };
-  const fill = (x0, x1, z0, z1, pitch = 0.3) => {
-    for (let x = x0; x <= x1 + 1e-6; x += pitch) for (let z = z0; z <= z1 + 1e-6; z += pitch) {
-      if (R() < 0.04) continue;                                         // a stone gone
-      stone(x + (R() - 0.5) * 0.09, z + (R() - 0.5) * 0.09, 0.15 + R() * 0.05);
-    }
-  };
-  M.h = parts.length;
-  fill(-2.15, -1.3, -3.0, 3.0);                                         // the two uprights
-  fill(1.3, 2.15, -3.0, 3.0);
-  fill(-1.0, 1.0, -0.42, 0.42);                                         // the bar
+  // THE H AND ITS CIRCLE, PAINTED (2026-10-19, you: "for the H mark on the ground we should use a simple
+  // decal — maybe the animation is the way it sprays it on the ground"; it was ~230 whitewashed stones):
+  // lime ribbons laid on the deck (rtsPaint.js), each point carrying its place in the PAINTING ORDER
+  // (`paintS` 0..1: the left upright, the bar, the right upright, then the circle) — the construction
+  // reveals them along the stroke. Uprights along z (it reads upright from the RTS camera).
+  const paint = paintStrokes([
+    { pts: [[-1.72, -3.0], [-1.72, 3.0]], w: 0.85 },
+    { pts: [[-1.3, 0], [1.3, 0]], w: 0.82 },
+    { pts: [[1.72, 3.0], [1.72, -3.0]], w: 0.85 },
+    { pts: Array.from({ length: 49 }, (_, k) => { const a = -Math.PI / 2 - (k / 48) * Math.PI * 2; return [Math.cos(a) * 4.9, Math.sin(a) * 4.9]; }), w: 0.4 },
+  ], { height: (x, z) => hAt(x, z) + 0.016, seed });
   M.edge = parts.length;
   // The EDGE: whitewashed stones a pace apart, uneven, a few out of line.
   const pitch = 1.1, n = Math.round((2 * D) / pitch);
@@ -574,7 +638,7 @@ function buildHelipadV2({ seed = 23 } = {}) {
   // Corner cairns: three stones piled, a stake.
   for (const [sx, sz] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
     const cx = sx * (D + 0.5), cz = sz * (D + 0.5), y0 = hAt(cx, cz);
-    for (let k = 0; k < 3; k++) parts.push(whiteStone(R, cx + (R() - 0.5) * 0.3, y0 + 0.1 + (k === 2 ? 0.18 : 0), cz + (R() - 0.5) * 0.3, 0.2));
+    for (let k = 0; k < 3; k++) parts.push(...whiteStone(R, cx + (R() - 0.5) * 0.3, y0 + 0.1 + (k === 2 ? 0.18 : 0), cz + (R() - 0.5) * 0.3, 0.2));
     parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.035, 1.0, 5), pos: [cx, y0 + 0.5, cz], rot: [(R() - 0.5) * 0.1, 0, (R() - 0.5) * 0.1], mat: MAT.timber, tone: 0.3 });
   }
 
@@ -621,19 +685,27 @@ function buildHelipadV2({ seed = 23 } = {}) {
   // Spares under a tarp: crates, the canvas drooping over them, pegged.
   parts.push({ geo: buildBox(1.6, 0.7, 1.0), pos: [fx + 0.4, 0.35, fz - 2.4], mat: MAT.timber, tone: 0.3 });
   parts.push({ geo: earthBerm([[0.95, -0.02], [0.92, 0.6], [0.7, 0.78], [0.001, 0.82]], { seed: seed + 11, segs: 16, rJit: 0.08, yJit: 0.04 }), pos: [fx + 0.4, 0, fz - 2.4], scale: [1.0, 1, 0.65], mat: MAT.canvas, tone: 0.32 });
-  const bag = { length: 0.55, width: 0.32, height: 0.2, segU: 6, segV: 4 };
-  parts.push({ geo: buildSandbagWall({ length: 3.4, courses: 3, seed: seed + 3, bag }), pos: [fx + 0.3, 0, fz - 3.25], mat: null });
-  parts.push({ geo: buildSandbagWall({ length: 3.0, courses: 3, seed: seed + 4, bag }), pos: [fx - 1.7, 0, fz - 1.9], rot: [0, Math.PI / 2, 0], mat: null });
+  bagWall(3.4, 3, seed + 3, fx + 0.3, 0, fz - 3.25);
+  bagWall(3.0, 3, seed + 4, fx - 1.7, 0, fz - 1.9, Math.PI / 2);
   // A stretcher leaning on the bags, a fire extinguisher on its stake.
   for (const sx of [-1, 1]) parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.03, 2.1, 5), pos: [fx - 1.55 + sx * 0.27, 0.62, fz - 0.2], rot: [0, 0, 1.1], mat: MAT.timber, tone: 0.3 });
   parts.push({ geo: buildBox(0.5, 1.6, 0.02), pos: [fx - 1.5, 0.63, fz - 0.2], rot: [0, 0, 1.1], mat: MAT.canvas, tone: 0.55 });
   parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.035, 1.2, 5), pos: [D + 0.9, 0.6, -D + 0.6], mat: MAT.timber, tone: 0.28 });
   parts.push({ geo: new THREE.CylinderGeometry(0.09, 0.09, 0.42, 10), pos: [D + 0.9, 0.85, -D + 0.48], mat: MAT.paint, tone: 0.05 });
+  // THE RADIO CORNER (2026-10-19), off the deck's back-left corner, clear of the rotors: an L of
+  // sandbags, the set (an ANGRC-9's olive case) on a crate, its whip antenna, a jerrycan.
+  const rx = -D - 1.4, rz = -D + 1.2, ry = hAt(rx, rz);
+  bagWall(2.2, 3, seed + 7, rx + 0.2, ry, rz - 0.95);
+  bagWall(1.7, 3, seed + 8, rx - 0.95, ry, rz - 0.1, Math.PI / 2);
+  parts.push({ geo: buildBox(0.62, 0.44, 0.46), pos: [rx + 0.15, ry + 0.22, rz - 0.3], rot: [0, 0.12, 0], mat: MAT.timber, tone: 0.3 });
+  parts.push({ geo: buildBox(0.44, 0.3, 0.26), pos: [rx + 0.15, ry + 0.59, rz - 0.32], rot: [0, 0.12, 0], mat: MAT.paint, tone: 0.28 });
+  parts.push(wirePart([rx + 0.32, ry + 0.74, rz - 0.38], [rx + 0.36, ry + 3.1, rz - 0.4], 0.008, { tone: 0.25 }));
+  parts.push({ geo: buildBox(0.17, 0.46, 0.34), pos: [rx - 0.4, ry + 0.23, rz + 0.25], rot: [0, 0.5, 0], mat: MAT.paint, tone: 0.32 });
 
   M.end = parts.length;
   // THE BUILD ORDER of the rest (0..1 of the site's progress; drop: metres it falls into place, <0 rises):
   const order = (i0, i1, b0, b1, drop) => { for (let i = i0; i < i1; i++) { parts[i].build = b0 + ((b1 - b0) * (i - i0)) / Math.max(1, i1 - i0 - 1); parts[i].drop = drop; } };
-  order(M.h, M.edge, 0.64, 0.88, 0.45);          // the H, stone by stone
+  // (the H and its circle: PAINTED 0.64 → 0.88 — userData.paint.window, not a part)
   order(M.edge, M.marks, 0.36, 0.62, 0.45);      // the edge, round all four sides at once
   order(M.marks, M.grit, 0.99, 0.99, 0);         // the tyre marks: the first landing's
   order(M.grit, M.tufts, 0.18, 0.3, 0);          // the grit, with the grading
@@ -644,10 +716,11 @@ function buildHelipadV2({ seed = 23 } = {}) {
   order(M.mast, M.mast + 2, 0.89, 0.9, -5.0);    // the mast's footing and mast: raised out of the ground
   order(M.mast + 2, M.fuel, 0.91, 0.92, 0.2);    // its guys and pegs
   order(M.fuel, M.end, 0.9, 0.99, 0.35);         // the fuel point, piece by piece
-  // Markings: two SIGNAL PANELS pegged out off the H's ends (red and white, the windsock's cloth).
+  // Markings: two SIGNAL PANELS pegged out off the H's ends (red and white, the windsock's cloth) —
+  // outside the painted circle (r 4.9).
   const st = [];
   for (const sz of [-1, 1]) {
-    const px = 0, pz = sz * 4.7;
+    const px = 0, pz = sz * 6.2;
     const y = hAt(px, pz) + 0.02;
     st.push(stencilPatch("sockBands", flatSurface([px, y, pz], [0, 1, 0], [0, 0, 1], 0.72, "sockBands"), { lift: 0.008 }));
   }
@@ -658,6 +731,11 @@ function buildHelipadV2({ seed = 23 } = {}) {
     mouth: arm * S, mouthR: mouthR * S, tailR: tailR * S, length: sockL * S,
   };
   geo.userData.parts = { swivel };
+  // The paint (rtsPaint.js paintMesh — kitView draws it): at the kit's scale, painted over 0.64 → 0.88.
+  paint.geo.scale(S, S, S);
+  for (const p of paint.path) { p[0] *= S; p[1] *= S; p[2] *= S; }
+  geo.userData.paint = { ...paint, window: [0.64, 0.88] };
+  if (noBags) geo.userData.bagSlots = bagSlots;
   // The construction: the marking stencils go down with the H's end; the site's own dressing (stakes,
   // string, the stone heap) is algConstruction's.
   geo.userData.construction = { stencilAt: 0.86, heap: [D + 0.8, -D + 1.6], stakes: D + 0.4 };

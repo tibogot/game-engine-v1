@@ -41,7 +41,7 @@ import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { createAlgSea } from "./algSea.js";
 import { createAlgPort } from "./algPort.js";
-import { loadSandbagWall } from "./algSandbags.js";
+import { loadSandbagWall, loadSandbags } from "./algSandbags.js";
 import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
@@ -164,7 +164,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   prefetchStonePhotos();
   prefetchAlgSplats();   // and the ground splats' (algSplats.js)
   // The cloth-simulated sandbag wall (algSandbags.js: Blender, near + far), loaded behind the engine's start.
-  const sandbagsReady = loadSandbagWall();
+  // (and the single cloth-simulated bags: the helipad's walls are laid from them — buildHelipadPiece)
+  const sandbagsReady = Promise.all([loadSandbagWall(), loadSandbags()]);
   // The sandstone rocks' shapes, in worker threads (algSandstone.js; ~1-1.7 s each on one thread).
   if (SCENERY) prefetchSandstone();
   prefetchCave();   // the cave's rocks too (algCave.js): in workers from the top of the boot

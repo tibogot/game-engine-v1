@@ -14,6 +14,7 @@ import { FR_PAINT_TINT, FR_PAINT_TINT_OLD, buildAMX13, buildAlouette, buildH21, 
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { paintMesh } from "../../v3/render/objects/rtsPaint.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { createCombatFx } from "../shared-rts/combatFx.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
@@ -83,6 +84,8 @@ function vehicleOf(geo, key) {
   body.castShadow = body.receiveShadow = true;
   const st = stencilMesh(geo.userData.stencil);
   if (st) body.add(st);
+  const pm = paintMesh(geo.userData.paint);   // (painted markings: the helipad's H — rtsPaint.js)
+  if (pm) body.add(pm);
   g.add(body);
   // Meshes of their own beside the kit's (the buildings lab's sandstone cave: algCave.js).
   for (const x of geo.userData.extra ?? []) g.add(x);

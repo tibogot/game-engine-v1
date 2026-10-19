@@ -9,6 +9,7 @@ import * as THREE from "three";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
+import { paintMesh } from "../../v3/render/objects/rtsPaint.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
 import { FR_PAINT_TINT, buildAMX13, buildAlouette, buildEBR, buildGMC, buildHalfTrack, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
@@ -26,7 +27,7 @@ import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
-import { buildFrenchPostPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
+import { buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { buildDechraV2, buildKsarV2, buildMechtaV2 } from "./algMasonry.js";
 
 // Fronts toward the player's camera at three-quarters (layout.js siteYaw).
@@ -69,8 +70,9 @@ export const BASE_BUILDABLES = [
   // Out in front, over the wire: the searchlight sweeps the approach.
   { key: "searchlight", build: buildSearchlightTower, lx: 26, lz: 46, yaw: 0.2 },
   // The post's left flank: the pad, the mortars behind the mirador.
-  // Detail 2 (the buildings lab, 2026-10-13): rammed earth, the H in whitewashed stones; ?helipad=old for the old.
-  { key: "helipad", build: () => buildHelipad({ detail: typeof location !== "undefined" && new URLSearchParams(location.search).get("helipad") === "old" ? 1 : 2 }), lx: 56, lz: 2, yaw: 0 },
+  // Detail 2 (the buildings lab, 2026-10-13): rammed earth, the H and its circle painted in lime, the
+  // cloth-simulated sandbags (buildHelipadPiece, 2026-10-19); ?helipad=old for the old.
+  { key: "helipad", build: () => typeof location !== "undefined" && new URLSearchParams(location.search).get("helipad") === "old" ? buildHelipad({ detail: 1 }) : buildHelipadPiece((o) => buildHelipad({ detail: 2, ...o })), lx: 56, lz: 2, yaw: 0 },
   { key: "mortarPit", build: () => buildMortarPitV2(), lx: 36, lz: -24, yaw: 0.1 },
   // Behind the vehicle park, toward the valley.
   // Detail 2 (the buildings lab, 2026-10-07): the roof in lapped sheets, no rust grid.
@@ -228,6 +230,9 @@ export function kitView(geo) {
   m.castShadow = m.receiveShadow = true;
   const st = stencilMesh(geo.userData.stencil);
   if (st) m.add(st);
+  // Its painted markings (the helipad's lime H and circle — rtsPaint.js).
+  const pm = paintMesh(geo.userData.paint);
+  if (pm) m.add(pm);
   // Meshes of their own beside the kit's (the sandstone cave's rock and its dark: algCave.js).
   // (A piece built many times — a mortar pit — shares its cached geometry: each copy its own clone.)
   for (const x of geo.userData.extra ?? []) m.add(x.parent ? x.clone() : x);
