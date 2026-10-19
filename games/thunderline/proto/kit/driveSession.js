@@ -13,7 +13,7 @@ import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCame
 import { createGamepadInput } from "../../../modular-road-v3/gamepadInput.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
-import { TILES, integrate, ensureTile, SECTIONS } from "./kit.js";
+import { TILES, integrate, ensureTile, SECTIONS, socketMatrix, leanOut } from "./kit.js";
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { library, campaign, contentKey } from "../../app/library.js";
@@ -27,6 +27,7 @@ import { createSfx } from "./sfx.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
+import { loadThunderCar } from "./thunderCar.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -94,7 +95,7 @@ const HUD_HTML = `
  * @param opts.sunShadows  the static-atlas sun shadows (drive page: one track, baked once). Off in the
  *   builder: the track changes between drives, the engine's cascades follow it for free.
  */
-export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunShadows: useSunShadows = false, ghost = true } = {}) {
+export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunShadows: useSunShadows = false, ghost = true, car = "thunder" } = {}) {
   const { scene, camera, renderer } = app;
   const $ = (id) => document.getElementById(id);
   applyCarTune({ TIRE, WHEEL }, top); // carTune.js: the builder's prediction drives this same car
@@ -160,17 +161,36 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   });
   let ghostStyled = false; // the ghost is only shown once it wears its hologram (models loaded)
   // the Lotus is a DEV model only (trademark); it loads in the background, the car drives meanwhile
+  // THE CAR: "thunder" = our car (thunderCar.js), "lotus" = the dev Lotus. Same slots, same physics.
+  async function dress(v, adopt) {
+    if (car === "thunder") {
+      // the car file is not in git until it is optimised: without it, the Lotus
+      let tc;
+      try { tc = await loadThunderCar(); } catch (e) { console.warn("[drive] Thunderline car not found, using the Lotus", e); return false; }
+      if (adopt) adoptCar(tc.chassis.object);
+      if (tc.chassis.headlampMounts && adopt) v.setHeadlampMounts(tc.chassis.headlampMounts);
+      v.setChassisModel(tc.chassis.object, { brakeLights: tc.chassis.brakeLights, headlampLenses: tc.chassis.headlampLenses });
+      v.setChassisStyle("glb");
+      if (adopt) adoptCar(tc.wheel.object);
+      v.setWheelModel(tc.wheel.object, { radius: tc.wheel.radius, thickness: tc.wheel.width });
+      v.setWheelStyle("glb");
+      return true;
+    }
+    return false;
+  }
   const modelsReady = (async () => {
     try {
-      const m = await loadChassisModel(renderer, CHASSIS_GLB_URL);
-      adoptCar(m.object);
-      vehicle.setHeadlampMounts(chassisGlbMounts(m.headlampMountsLocal));
-      vehicle.setChassisModel(m.object, { brakeLights: m.brakeLights, headlampLenses: m.headlampLenses });
-      vehicle.setChassisStyle("glb");
-      const w = await loadWheelModel(renderer);
-      adoptCar(w.object);
-      vehicle.setWheelModel(w.object, { radius: w.radius, thickness: w.width });
-      vehicle.setWheelStyle("glb");
+      if (!(await dress(vehicle, true))) {
+        const m = await loadChassisModel(renderer, CHASSIS_GLB_URL);
+        adoptCar(m.object);
+        vehicle.setHeadlampMounts(chassisGlbMounts(m.headlampMountsLocal));
+        vehicle.setChassisModel(m.object, { brakeLights: m.brakeLights, headlampLenses: m.headlampLenses });
+        vehicle.setChassisStyle("glb");
+        const w = await loadWheelModel(renderer);
+        adoptCar(w.object);
+        vehicle.setWheelModel(w.object, { radius: w.radius, thickness: w.width });
+        vehicle.setWheelStyle("glb");
+      }
     } catch (e) {
       console.warn("[drive] car model not loaded, driving the box", e);
     }
@@ -178,6 +198,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     try {
       // the ghost: its own copies of the same models, THEN the hologram look (styled before the models
       // arrive, the car's own setup choked on the hologram material)
+      if (await dress(ghostCar, false)) { ghostify(ghostCar.group); ghostStyled = true; if (S?.ghostPlayer && showGhost) ghostCar.group.visible = true; return; }
       const gm = await loadChassisModel(renderer, CHASSIS_GLB_URL);
       ghostCar.setChassisModel(gm.object, { brakeLights: gm.brakeLights, headlampLenses: gm.headlampLenses });
       ghostCar.setChassisStyle("glb");
@@ -258,6 +279,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
 
   // ---------- HUD helpers ----------
   const HOLD = { steerTarget: 0, rollTarget: 0, throttle: 0, handbrake: true, yaw: 0, pitch: 0, analog: false };
+  const COAST = { ...HOLD, handbrake: false };
   const fmt = (t) => {
     if (t == null) return "—";
     const m = Math.floor(t / 60), sec = (t % 60).toFixed(2);
@@ -310,7 +332,22 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       ? layoutFromPlacements({ built, pieces: roadPieces })
       : layoutTestTrack({ built, speed: jumpSpeed, jumpSpeeds: o.jumpSpeeds ?? [55.8, 48.6, 50.6], airDrag: AERO.drag / CHASSIS.mass });
     const group = new THREE.Group();
-    const meshes = buildTrackMeshes(lay.placements, built, mats);
+    // THE RUN-OUT: past the finish the road goes on for 3 straights (drawn and solid, not part of the
+    // race), and the car brakes by itself (driveFrame): it used to fly off the track's end after the line
+    const runout = [];
+    const lastP = lay.placements.at(-1);
+    if (track && lastP && !o.from) {
+      const t = TILES[lastP.id], b = built[lastP.id].b;
+      const exit = lastP.M.clone().multiply(socketMatrix(b.exit));
+      const dir = new V(0, 0, -1).transformDirection(exit);
+      // only after a level, unbanked end (a lip flies on; a banked end would need a bank-out)
+      if (Math.abs(dir.y) < 0.05 && Math.abs(leanOut(t)) < 0.01 && !t.drop) {
+        const L = built.straight_64.b.L;
+        for (let i = 0; i < 3; i++) runout.push({ id: "straight_64", open: lastP.open, M: exit.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, -L * i)) });
+      }
+    }
+    const solidPlacements = [...lay.placements, ...runout];
+    const meshes = buildTrackMeshes(solidPlacements, built, mats);
     meshes.group.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.layers.enable(STATIC_LAYER); } });
     group.add(meshes.group);
 
@@ -335,7 +372,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // ---------- collision: deck BVH (wheels) + solids BVH (chassis vs rails) ----------
     const asCollider = (geometry, M, userData = {}) => ({ geometry, matrixWorld: M, userData, updateMatrixWorld() {} });
     const decks = [], solids = [];
-    for (const p of lay.placements) {
+    for (const p of solidPlacements) {
       const look = p.open ? built[p.id].open : built[p.id].guarded;
       const t = TILES[p.id];
       // the left-hand mirrors ("…_L") are the same pieces: they need the same tags
@@ -589,7 +626,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     for (let i = 0; i < ticks; i++) {
       // NO ENGINE UP A WALL, the clean-landing boost, boost pads, magnets: carRules.step, which the
       // ghost replays too. The countdown holds the car on the line.
-      const used = race.holding ? HOLD : input;
+      // after the finish the car brakes by itself on the run-out (no input: not part of the run)
+      const used = race.holding ? HOLD : race.s.state === "finished" ? COAST : input;
+      if (race.s.state === "finished" && vehicle.groundedCount > 0) vehicle.body.vel.multiplyScalar(Math.exp(-1.1 * FIXED_DT));
       const landed = rules.step(used, FIXED_DT);
       if (race.s.state !== "finished") recorder.tick(used, vehicle);
       if (landed) { showLanding(landed); sfx.landing(landed, fallSpeed); }

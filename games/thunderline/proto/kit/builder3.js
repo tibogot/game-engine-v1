@@ -14,6 +14,7 @@ import { closureAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
 import { library, settings, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
+import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD } from "./worlds.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
@@ -154,7 +155,7 @@ function fitView() { camera.aspect = innerWidth / innerHeight; camera.setViewOff
 fitView();
 camera.position.set(120, buildY + 110, 160);
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.mouseButtons = { LEFT: null, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+// the mouse buttons, limits and keys of the orbit: editorNav.js (made below, once the builder is up)
 controls.zoomToCursor = true;
 controls.enableDamping = true;
 controls.target.set(0, buildY, 0);
@@ -988,7 +989,8 @@ function renderStatus() {
 // ---------- input ----------
 const canvas = renderer.domElement;
 canvas.addEventListener("pointermove", (e) => { mouse.x = e.clientX; mouse.y = e.clientY; mouse.inside = true; });
-canvas.addEventListener("pointerleave", () => { mouse.inside = false; });
+// onto the piece-in-hand bar the ghost stays where it was (its buttons turn / raise it in place)
+canvas.addEventListener("pointerleave", (e) => { if (!e.relatedTarget?.closest?.("#hand")) mouse.inside = false; });
 let down = null;
 canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, b: e.button }; });
 canvas.addEventListener("pointerup", (e) => {
@@ -1034,12 +1036,13 @@ addEventListener("keydown", (e) => {
     case "[": arcSpeed = Math.max(20, arcSpeed - 1); refreshArcs(); runChecks(); break;
     case "]": arcSpeed = Math.min(80, arcSpeed + 1); refreshArcs(); runChecks(); break;
     default:
-      if (k === "q") rot.yaw += step;
-      else if (k === "e") rot.yaw -= step;
+      // by key POSITION (e.code): on AZERTY the letter Q is where A is — W A S D move the camera
+      if (e.code === "KeyQ") rot.yaw += step;
+      else if (e.code === "KeyE") rot.yaw -= step;
       else if (k === "r") { hand = -hand; renderDock(); }
       else if (k === "g") gridMode = gridMode === "world" ? "local" : "world";
       else if (k === "t") { edges = !edges; renderDock(); }
-      else if (k === "f") frameAll();
+      else if (k === "f") nav.frame();
       else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
       else return;
   }
@@ -1050,8 +1053,18 @@ addEventListener("keydown", (e) => {
 addEventListener("resize", () => setTimeout(fitView)); // after the engine's own resize
 $("b-undo").onclick = () => restore(undo, redo);
 $("b-redo").onclick = () => restore(redo, undo);
-$("b-frame").onclick = frameAll;
-$("b-keys").onclick = () => $("keys").classList.toggle("hidden");
+$("b-frame").onclick = () => nav.frame();
+// FIRST STEPS (three lines) or the full key list, in the same corner; ✕ hides the steps for good
+const STEPS_OFF = "thunderline.builder.stepsOff";
+const stepsOff = () => { try { return localStorage.getItem(STEPS_OFF) === "1"; } catch { return false; } };
+$("steps").classList.toggle("hidden", stepsOff());
+const toggleKeys = () => {
+  const show = $("keys").classList.toggle("hidden") === false;
+  $("steps").classList.toggle("hidden", show || stepsOff());
+};
+$("b-keys").onclick = toggleKeys;
+$("steps-keys").onclick = toggleKeys;
+$("steps-x").onclick = () => { try { localStorage.setItem(STEPS_OFF, "1"); } catch {} $("steps").classList.add("hidden"); };
 // New = a new track in the library (the current one stays, saved)
 $("b-new").onclick = () => { save(); location.href = `${PAGES.builder}?track=${library.create().id}`; };
 $("b-menu").onclick = () => { save(); location.href = `${PAGES.menu}#build`; };
@@ -1059,12 +1072,60 @@ $("b-name").value = trackName;
 $("b-name").onchange = () => { library.rename(trackId, $("b-name").value); trackName = library.get(trackId).name; $("b-name").value = trackName; };
 $("b-name").onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") e.target.blur(); };
 // test drive in the same tab; the drive page's finish screen (and Esc) comes back here
+// THE PIECE IN HAND, with the mouse (user, 2026-10-19: players are not used to 3D software): a fixed
+// bar over the dock — turn, height, tilt, bank, mirror, put down. Not a 3D gizmo on the ghost: the
+// ghost follows the mouse, so reaching for handles on it moved it. While the pointer is on the bar the
+// ghost stays where it was (canvas pointerleave below), and each click turns / raises it in place.
+let handKey = "";
+function renderHand() {
+  const el = $("hand");
+  const on = !!tileBase && !driving;
+  el.classList.toggle("on", on);
+  if (!on) { handKey = ""; return; }
+  const id = tileId(tileBase);
+  const free = snap?.type === "world" || snap?.type === "local";
+  const mirror = !!(TILES[`${tileBase}_L`] || TILES[tileBase]?.hand);
+  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, buildY].join("|");
+  if (k === handKey) return;
+  handKey = k;
+  const off = free ? "" : " off";
+  el.innerHTML =
+    `<span class="nm">${TILES[id]?.label ?? id}</span>` +
+    `<div class="gp${off}" title="${free ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
+    `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
+    `<div class="gp${off}"><span>Tilt</span><button data-a="pd" title="Nose down (↓)">⤓</button><b>${rot.pitch}°</b><button data-a="pu" title="Nose up (↑)">⤒</button></div>` +
+    `<div class="gp${off}"><span>Bank</span><button data-a="rl" title="Bank left (←)">↶</button><b>${rot.roll}°</b><button data-a="rr" title="Bank right (→)">↷</button></div>` +
+    (mirror ? `<div class="gp"><span>Side</span><button data-a="L" class="${hand < 0 ? "on" : ""}" title="Left-hand version (R)">L</button><button data-a="R" class="${hand > 0 ? "on" : ""}" title="Right-hand version (R)">R</button></div>` : "") +
+    (free && (rot.yaw || rot.pitch || rot.roll) ? `<button data-a="z" title="Straighten">Reset</button>` : "") +
+    `<button class="x" data-a="x" title="Put the piece down (Esc)">✕</button>`;
+  for (const b of el.querySelectorAll("button")) b.onclick = (e) => {
+    const big = e.shiftKey;
+    switch (b.dataset.a) {
+      case "yl": rot.yaw += big ? 5 : 15; break;
+      case "yr": rot.yaw -= big ? 5 : 15; break;
+      case "hu": buildY += big ? 8 : 2; break;
+      case "hd": buildY -= big ? 8 : 2; break;
+      case "pu": rot.pitch = Math.min(45, rot.pitch + 5); break;
+      case "pd": rot.pitch = Math.max(-45, rot.pitch - 5); break;
+      case "rl": rot.roll = Math.max(-45, rot.roll - 5); break;
+      case "rr": rot.roll = Math.min(45, rot.roll + 5); break;
+      case "L": hand = -1; renderDock(); break;
+      case "R": hand = 1; renderDock(); break;
+      case "z": rot.yaw = rot.pitch = rot.roll = 0; break;
+      case "x": tileBase = null; renderDock(); break;
+    }
+    rot.yaw = ((rot.yaw % 360) + 360) % 360;
+    ghostDirty = true;
+    updateGhost();
+    renderHand();
+  };
+}
 // TEST DRIVE IN PLACE (user, 2026-10-19): the same page, the same world — Drive (or Tab) puts the car on
 // the start in a second; Esc / B brings you back to building, the camera where you left it. The page
 // reload each way cost ~30 s since the builder runs on the engine.
-const rig = createDriveRig(app, { prefs: settings.get() });
+const rig = createDriveRig(app, { prefs: settings.get(), car: settings.get().car });
 let driving = false;
-const builderUi = ["toolbar", "keys", "status", "next", "dock"];
+const builderUi = ["toolbar", "keys", "steps", "status", "next", "dock", "nav"];
 let saved = null;
 const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <b style="color:#3fd2ff"><kbd>Esc</kbd> back to building</b>`;
 async function startDrive() {
@@ -1097,6 +1158,11 @@ function stopDrive() {
   last = performance.now();
 }
 $("b-drive").onclick = startDrive;
+// THE CAMERA for people who don't use 3D software (editorNav.js)
+const nav = createEditorNav({
+  camera, controls, dom: renderer.domElement, frameAll, floorY: FLOOR_Y, enabled: () => !driving,
+  home: () => { const e = openEnds().at(-1); return e ? new THREE.Vector3().setFromMatrixPosition(e.m) : null; },
+});
 // THE WORLD (worlds.js), saved with the track: flat to the horizon, or the mountain valley
 $("b-world").innerHTML = Object.entries(WORLDS).map(([k, w]) => `<option value="${k}">World: ${w.label}</option>`).join("");
 $("b-world").value = WORLDS[track.world] ? track.world : DEFAULT_WORLD;
@@ -1120,16 +1186,18 @@ app.addPreUpdateHook(function builderFrame() {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
   if (driving) return;
+  nav.update(dt);
   stepGlide(dt);
   controls.update();
   updateGhost();
+  renderHand();
   updateGrid();
   updateNext();
 });
 // test hooks: aiming updates the ghost/snap at once (a hidden or minimised window runs no frames)
 const hookAim = (f) => (...a) => { controls.update(); camera.updateMatrixWorld(); const r = f(...a); updateGhost(); return r; };
 window.__b3 = {
-  get rig() { return rig; }, startDrive, stopDrive, get driving() { return driving; },
+  app, get rig() { return rig; }, startDrive, stopDrive, get driving() { return driving; },
   get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls,
   pickTile: hookAim(pickTile), place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },

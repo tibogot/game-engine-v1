@@ -142,7 +142,7 @@ export const campaign = {
 /** Settings shared by every page (menu → Settings). */
 const SETTINGS_KEY = "thunderline.settings.v1";
 // sound OFF by default (user, 2026-10-19: it disturbs work on the game) — Settings or M turns it on
-export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "v8" };
+export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "v8", car: "thunder" };
 export const settings = {
   get() {
     try { return { ...SETTINGS_DEFAULTS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {}) }; } catch { return { ...SETTINGS_DEFAULTS }; }

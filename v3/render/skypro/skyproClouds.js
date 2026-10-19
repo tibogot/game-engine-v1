@@ -1008,14 +1008,22 @@ fn scCloudsShadow( worldXZ: vec2f, center: vec2f, size: f32, strength: f32, sT: 
 
     // ---- shadow map: a quarter of the rows per frame around a snapped centre
     const phase = state.frameIndex % 4;
+    // A MOVED CENTRE REDRAWS THE WHOLE MAP that frame. The map redraws one row in four per frame, so after
+    // a move three rows in four still held the shadows of the OLD centre for up to 4 frames: the ground,
+    // reading them at the new centre, showed the shadows as interleaved, shifted strips while the camera
+    // moved (Thunderline builder, 2026-10-19; worldEnvironment.driveSkyProSky re-reads the centre too).
+    let recentred = false;
     if (phase === 0 || !state.shadowInit) {
       const cell = uShadowSize.value / SHADOW_RES * 4;
-      uShadowCenter.value.set(Math.round(cp.x / cell) * cell, Math.round(cp.z / cell) * cell);
+      const cx = Math.round(cp.x / cell) * cell, cz = Math.round(cp.z / cell) * cell;
+      recentred = cx !== uShadowCenter.value.x || cz !== uShadowCenter.value.y;
+      uShadowCenter.value.set(cx, cz);
     }
     u[F.shadow].set(uShadowCenter.value.x, uShadowCenter.value.y, uShadowSize.value, phase);
 
     // ---- dispatches
-    if (!state.shadowInit) {
+    if (!state.shadowInit || recentred) {
+      // the whole map: once, and whenever the centre moved
       u[F.shadow].w = -1;
       uShadowPhase.value = -1;
       renderer.compute(shadowPass, [SHADOW_RES / 8, SHADOW_RES / 8, 1]);

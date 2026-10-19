@@ -126,6 +126,8 @@ function settingsScreen() {
     ${row("ghost", "Ghost", "Race your best run on every track (G toggles it while driving).")}
     ${row("sound", "Sound", "The engine (synthesised for now). M mutes while driving.")}
     <div class="set cut"><div><div class="t">Volume</div><div class="d">The engine's loudness.</div></div><input type="range" id="s-vol" min="0" max="100" value="${Math.round(s.volume * 100)}" style="width:220px;accent-color:#3fd2ff" /></div>
+    <div class="set cut"><div><div class="t">Car</div><div class="d">The new Thunderline car, or the Lotus (the dev car). <a href="./proto/carview.html" style="color:var(--bolt)">See them side by side ▶</a></div></div>
+      <div style="display:flex;gap:4px">${[["thunder", "New car"], ["lotus", "Lotus"]].map(([k, n]) => `<button class="carb" data-c="${k}" style="background:var(--panel2);border:1px solid ${s.car === k ? "var(--bolt)" : "var(--line)"};color:${s.car === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
     <div class="set cut"><div><div class="t">Engine</div><div class="d">Which engine you hear. <a href="./proto/engine-lab.html" style="color:var(--bolt)">Listen in the engine lab ▶</a></div></div>
       <div style="display:flex;gap:4px">${[["v8", "V8"], ["i6", "Inline 6"], ["v10", "V10"]].map(([k, n]) => `<button class="eng" data-e="${k}" style="background:var(--panel2);border:1px solid ${s.engine === k ? "var(--bolt)" : "var(--line)"};color:${s.engine === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
     <div class="keys">
@@ -143,6 +145,7 @@ function settingsScreen() {
   for (const t of document.querySelectorAll(".toggle")) t.onclick = () => { settings.set({ [t.dataset.key]: !settings.get()[t.dataset.key] }); settingsScreen(); };
   $("s-vol").onchange = () => settings.set({ volume: $("s-vol").value / 100 });
   for (const b of document.querySelectorAll(".eng")) b.onclick = () => { settings.set({ engine: b.dataset.e }); settingsScreen(); };
+  for (const b of document.querySelectorAll(".carb")) b.onclick = () => { settings.set({ car: b.dataset.c }); settingsScreen(); };
   foot(`<span><kbd>Esc</kbd> back</span>`);
 }
 

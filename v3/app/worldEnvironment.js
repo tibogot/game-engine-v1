@@ -1202,6 +1202,10 @@ export async function createWorldEnvironment({
     if (scene.environment !== skyPro.environment) scene.environment = skyPro.environment;
     // Its cumulus shade the world: the sun's cloud-shadow slot reads their shadow map.
     cloudShadowsLite.setMap(skyPro.cloudShadow);
+    // …and reads its placement NOW: cloudShadowsLite.update ran at the top of the frame, BEFORE
+    // skyPro.update moved the map's centre — the ground read the map at last frame's centre (shifted
+    // shadow strips while the camera moved, 2026-10-19). dt 0: no extra wind drift.
+    cloudShadowsLite.update(0);
 
     // The world in the sky's light (Tidewater's lighting.js: direct = sunColor N.L albedo / PI, which
     // is three's Lambert with intensity = sunColor; ambient = the environment alone).

@@ -62,6 +62,7 @@ const rig = createDriveRig(app, {
   substeps: Number(params.get("substeps")) || 3,
   sunShadows: params.get("shadows") !== "csm",
   ghost: params.get("ghost") !== "off",
+  car: params.get("car") ?? settings.get().car, // ?car=lotus: the dev Lotus
 });
 
 // ---------- leaving: back to the builder (a test drive), the next campaign track, or the menu ----------

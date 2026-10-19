@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- the engine resolves its assets relative to /v3/ (as drive.html) -->
+    <base href="/v3/" />
+    <title>Thunderline car view</title>
+    <!-- The new car next to the Lotus, in the game's own world (sky, light, ground): to judge it before it replaces the Lotus. -->
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Inter:wght@400;600&display=swap" rel="stylesheet" />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; color: #e8f0ff; font: 13px/1.4 Inter, system-ui, sans-serif; }
+      #game { position: fixed; inset: 0; }
+      #info { position: fixed; left: 16px; top: 16px; z-index: 30; background: rgba(11, 17, 32, 0.9); border-left: 3px solid #3fd2ff; padding: 10px 14px; max-width: 360px; }
+      #info b { font: 800 18px "Barlow Condensed"; letter-spacing: 0.04em; text-transform: uppercase; }
+      #info button { background: #121a2e; color: #e8f0ff; border: 1px solid #23304d; padding: 5px 10px; margin: 6px 4px 0 0; cursor: pointer; font: 700 13px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.05em; }
+      #info button:hover { border-color: #3fd2ff; color: #3fd2ff; }
+      #info small { color: #8796b5; display: block; margin-top: 6px; }
+      #boot { position: fixed; inset: 0; z-index: 99; display: flex; align-items: center; justify-content: center; background: #0a0f1c; color: #3fd2ff; font: 700 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; transition: opacity 0.4s; }
+      #boot.gone { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="info">
+      <b>New car · Lotus</b><br />
+      Left: the new car. Right: the Lotus (today's dev car). Right-drag to turn, wheel to zoom.
+      <div><button data-v="front34">Front ¾</button><button data-v="side">Side</button><button data-v="rear34">Rear ¾</button><button data-v="chase">Chase cam</button><button data-v="spin">Turntable</button></div>
+      <div><button data-t="9">Morning</button><button data-t="15.5">Afternoon</button><button data-t="19">Sunset</button></div>
+      <small>Body: "Saba V12 '95 - Low poly model" by DanielZhabotinsky (CC BY), reworked.</small>
+    </div>
+    <div id="boot">Thunderline · starting the engine…</div>
+    <script type="module" src="/games/thunderline/proto/carview.js"></script>
+  </body>
+</html>
