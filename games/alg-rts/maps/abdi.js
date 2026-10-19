@@ -81,7 +81,7 @@ export const MAP = {
   systems: { fow: true, birds: true, splats: true, stones: true },
   // THE PLANTS BARELY MOVE (you, 2026-10-19: "in CoH there is no wind on foliage"): a slight breath, 1/4 of
   // the Aurès' sway; the flags and the windsock keep the full wind. ?plantwind=0..1 to compare.
-  foliageWind: 0.25,
+  foliageWind: 0,   // (you, 2026-10-19: "make wind 0 for foliage" on this map — 0.25 was the first try)
   // ITS LIGHT (algGame MAP_LIGHT, over the Aurès'): the Aurès' grade is tuned for its dark brown ground — on
   // this pale ochre one it read too dark and too saturated (measured 2026-10-19 at the RTS zoom: luma 118,
   // saturation 0.60; CoH's frames 133-159, 0.45-0.51). A little more exposure, the grade less warm, less

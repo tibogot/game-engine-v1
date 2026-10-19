@@ -235,11 +235,19 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const zone = smoothstep(0.58, 0.7, noise(x / 120, z / 120, 43) * 0.75 + noise(x / 35, z / 35, 44) * 0.25);
   const red = Math.min(1, smoothstep(0.2, 0.8, hollow(x, z, 14) + (noise(x / 22, z / 22, 41) - 0.5) * 0.35) * 0.55
     + smoothstep(10, 24, sl) * 0.8 + zone * 0.45 + smoothstep(0, 40, d) * 0.2);
+  // THE FACES DARKER AND VARIED (you, 2026-10-19: "the terrace faces are uniformly bright red"): on the steep,
+  // part of the red goes to slot 2 — a DARK red stony earth — in streaks down the slope (noise stretched
+  // along the fall line) and deeper at the foot of each face; CoH's red slopes are dark and light in bands.
+  const [gx, gz] = grad(x, z, 1.5), gl = Math.hypot(gx, gz) || 1;
+  const along = (x * gz - z * gx) / gl;   // across the fall line: streaks run DOWN the face
+  const streak = smoothstep(0.4, 0.7, noise(along / 5, (x * gx + z * gz) / gl / 30, 61) * 0.7 + noise(x / 9, z / 9, 62) * 0.3);
+  const foot = smoothstep(0.3, 1.2, hollow(x, z, 6));
+  const darkRed = smoothstep(14, 26, sl) * Math.min(1, 0.25 + 0.6 * streak + 0.5 * foot);
   w[6] = road;
   let rest = 1 - road;
   w[4] = rest * bed; rest -= w[4];
   w[5] = rest * cliff; rest -= w[5];
-  w[2] = rest * scree; rest -= w[2];
+  w[2] = rest * Math.max(scree, darkRed * red); rest -= w[2];
   w[3] = rest * grove; rest -= w[3];
   w[1] = rest * red; rest -= w[1];
   w[0] = rest;
@@ -315,6 +323,7 @@ const set = (slot, name, id, look) => {
 };
 set(0, "Valley soil", "mud_cracked_dry_03", { uvScale: W / 2.6, normalStr: 0.45, aoStr: 0.3, tint: "#f6e2cc" });   // pale dry earth (luma 174) — small, soft cracks: a grain, not a salt-flat pattern
 set(1, "Red earth", "desert_hollow", { uvScale: W / 16, normalStr: 0.7, aoStr: 0.35, tint: "#ecd2c0" });        // the CoH red-orange, toned
+set(2, "Dark red earth", "red_mud_stones", { uvScale: W / 10, normalStr: 0.8, aoStr: 0.4, tint: "#d9bca8" });   // (the scree slot: the frame's slopes AND the faces' dark streaks)
 set(6, "Dirt track", "desert_road", { uvScale: W / 6.4, normalStr: 0.6, aoStr: 0.3, tint: "#f0e0cc" });        // pale, as CoH's tracks
 const blobs = new Map([["heightmap", Buffer.from(hgt.buffer)], ["splat", splat], ["susukiDensity", tallPaint.out], ["foliagePaint", groundPaint.out]]);
 const bytes = await writeProject(args.out, { manifest: man, blobs });
