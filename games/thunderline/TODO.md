@@ -73,7 +73,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] Boost visuals (exhaust flame, speed lines), tube light rings reacting to speed.
 
 ## Car
-- [ ] Walls stop the car dead (Apex Rush's biggest complaint) → glance off.
+- [x] Walls glance off (bbcfc5a1, wallTest.mjs): rail mu 0.15, rail hits never crash; at 216 km/h a
+      20° clip keeps 93%, 45° 74% upright. Trade-off: the builder's Halfpipe test lap clips the bowl's
+      side wall coming down (48.8 s + a landing warning there; the drive page's lap is 41.2 s).
+- [ ] The campaign has no regression test: a change to the car or the autopilot broke White's Halfpipe
+      test lap for a day unseen (the wheel model set the physics radius). Check every campaign track's
+      test lap against its author time in the suite.
 - [ ] Analog throttle (the old car reads it as on/off); per-car tune; look split from physics (the
       wheel MODEL sets the physics radius today — carTune.js pins it).
 - [ ] "No engine up a wall" into the car itself (today an input cut, autopilot.js wallCut).
