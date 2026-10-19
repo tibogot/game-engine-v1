@@ -3,6 +3,8 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- the engine resolves its assets relative to /v3/ (as drive.html): page URLs below are absolute -->
+    <base href="/v3/" />
     <title>Thunderline builder (B1)</title>
     <!--
       Prototype P1b (throwaway): the old kit's real pieces, placed with a GHOST that snaps to
@@ -83,7 +85,7 @@
       Snaps to: <b style="color:#45e08a">open ends</b> · <b style="color:#ff9a3d">flight arcs</b> · <b style="color:#c78bff">local grid</b> · <b style="color:#3fd2ff">world grid</b><br />
       <kbd>Q</kbd>/<kbd>E</kbd> turn 15° (<kbd>Shift</kbd> 5°) · <kbd>↑</kbd>/<kbd>↓</kbd> pitch · <kbd>←</kbd>/<kbd>→</kbd> bank · <kbd>PgUp</kbd>/<kbd>PgDn</kbd> or <kbd>Shift</kbd>+wheel height<br />
       <kbd>G</kbd> world/local grid · <kbd>1</kbd>–<kbd>4</kbd> grid step · <kbd>R</kbd> left/right · <kbd>T</kbd> guarded/open · <kbd>[</kbd> <kbd>]</kbd> arc speed band<br />
-      <b style="color:#ff4d5e">Red box</b> = road overlapping road · the warning panel names blocked flights · <kbd>Drive ▶</kbd> drives your track<br />
+      <b style="color:#ff4d5e">Red box</b> = road overlapping road · the warning panel names blocked flights · <kbd>Tab</kbd> / <kbd>Drive ▶</kbd> drives your track here (<kbd>Esc</kbd> back) · a piece selected: practice from it<br />
       No piece in hand: click a piece to select, <kbd>Del</kbd> remove (the road closes up) · <kbd>Ctrl+Z</kbd> undo<br />
       Right-drag orbit · middle-drag pan · wheel zoom · <kbd>F</kbd> frame
     </div>
@@ -94,6 +96,6 @@
       <div id="cards"></div>
     </div>
     <div id="boot">Thunderline · building the garage…</div>
-    <script type="module" src="./kit/builder3.js"></script>
+    <script type="module" src="/games/thunderline/proto/kit/builder3.js"></script>
   </body>
 </html>

@@ -12,7 +12,8 @@ import { createCarRules, magnetZones } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
-import { library, driveUrl, PAGES } from "../../app/library.js";
+import { library, settings, PAGES } from "../../app/library.js";
+import { createDriveRig } from "./driveSession.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -983,6 +984,7 @@ let down = null;
 canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, b: e.button }; });
 canvas.addEventListener("pointerup", (e) => {
   const d = down; down = null;
+  if (driving) return;
   if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
   if (d.b === 2 && tileBase) { tileBase = null; renderDock(); return; }
   if (d.b !== 0) return;
@@ -1001,6 +1003,8 @@ canvas.addEventListener("wheel", (e) => {
   ghostDirty = true;
 }, { capture: true, passive: false });
 addEventListener("keydown", (e) => {
+  if (driving) return; // the drive session owns the keys
+  if (e.code === "Tab") { e.preventDefault(); startDrive(); return; }
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); restore(e.shiftKey ? redo : undo, e.shiftKey ? undo : redo); return; }
   if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); restore(redo, undo); return; }
@@ -1046,7 +1050,44 @@ $("b-name").value = trackName;
 $("b-name").onchange = () => { library.rename(trackId, $("b-name").value); trackName = library.get(trackId).name; $("b-name").value = trackName; };
 $("b-name").onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") e.target.blur(); };
 // test drive in the same tab; the drive page's finish screen (and Esc) comes back here
-$("b-drive").onclick = () => { save(); location.href = driveUrl(trackId, "builder"); };
+// TEST DRIVE IN PLACE (user, 2026-10-19): the same page, the same world — Drive (or Tab) puts the car on
+// the start in a second; Esc / B brings you back to building, the camera where you left it. The page
+// reload each way cost ~30 s since the builder runs on the engine.
+const rig = createDriveRig(app, { prefs: settings.get() });
+let driving = false;
+const builderUi = ["toolbar", "keys", "status", "next", "dock"];
+let saved = null;
+const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <b style="color:#3fd2ff"><kbd>Esc</kbd> back to building</b>`;
+async function startDrive() {
+  if (driving || !orderedPieces().length) return;
+  save();
+  driving = true;
+  // the builder's own scene objects and panels leave; the camera is kept to come back to
+  const objs = [grid, trackGroup, arcGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
+  saved = { vis: objs.map((o) => [o, o.visible]), ui: builderUi.map((id) => [id, $(id).style.display]), pos: camera.position.clone(), quat: camera.quaternion.clone(), fov: camera.fov, target: controls.target.clone() };
+  for (const o of objs) o.visible = false;
+  for (const id of builderUi) $(id).style.display = "none";
+  controls.enabled = false;
+  camera.clearViewOffset();
+  camera.updateProjectionMatrix();
+  // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
+  const from = sel != null && !isRing(track.pieces.find((p) => p.uid === sel)) ? built.get(sel)?.M ?? null : null;
+  await rig.start({ track, trackId, from, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, help: DRIVE_HELP });
+}
+function stopDrive() {
+  if (!driving) return;
+  rig.stop();
+  for (const [o, v] of saved.vis) o.visible = v;
+  for (const [id, d] of saved.ui) $(id).style.display = d;
+  camera.position.copy(saved.pos);
+  controls.target.copy(saved.target);
+  controls.enabled = true;
+  fitView();
+  controls.update();
+  driving = false;
+  last = performance.now();
+}
+$("b-drive").onclick = startDrive;
 
 // ---------- go ----------
 await bakeThumbs();
@@ -1059,6 +1100,7 @@ app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  if (driving) return;
   stepGlide(dt);
   controls.update();
   updateGhost();
@@ -1068,6 +1110,7 @@ app.addPreUpdateHook(function builderFrame() {
 // test hooks: aiming updates the ghost/snap at once (a hidden or minimised window runs no frames)
 const hookAim = (f) => (...a) => { controls.update(); camera.updateMatrixWorld(); const r = f(...a); updateGhost(); return r; };
 window.__b3 = {
+  get rig() { return rig; }, startDrive, stopDrive, get driving() { return driving; },
   get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls,
   pickTile: hookAim(pickTile), place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },
