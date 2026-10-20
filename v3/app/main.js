@@ -13581,6 +13581,40 @@ export async function startV3App(opts = {}) {
       return true;
     },
     /**
+     * THE GROUND'S AUTO-PAINT, for a game with no level (Thunderline's worlds): the shader's slope /
+     * height rule fills every UNPAINTED pixel of the map with paint layers — `flat` everywhere, `cliff`
+     * past the slope band, `high` above the height band, edges broken by `noise`. The same uniforms the
+     * editor's Auto paint panel drives (a level load resets them). `enabled: false` = the bare base again
+     * (the grid), no recompile. Layers come from setTerrainLayerTextures; their size from
+     * setTerrainLayerTile.
+     * @param o.flat / o.cliff / o.high  paint layer index (0..6), -1 = none
+     */
+    setAutoPaint({
+      enabled = true, flat = 0, cliff = -1, high = -1,
+      slopeStartDeg = 25, slopeEndDeg = 35, highStart = 200, highEnd = 300, noise = 0.3,
+    } = {}) {
+      const A = splatOverlay?.auto;
+      if (!A) return false;
+      A.uAutoEnabled.value = enabled ? 1 : 0;
+      A.uAutoFull.value = 0;
+      A.uAutoFlat.value = flat;
+      A.uAutoCliff.value = cliff;
+      A.uAutoHigh.value = high;
+      A.uAutoSlopeHiY.value = Math.cos(slopeStartDeg * Math.PI / 180);
+      A.uAutoSlopeLoY.value = Math.cos(slopeEndDeg * Math.PI / 180);
+      A.uAutoHighStart.value = highStart;
+      A.uAutoHighEnd.value = highEnd;
+      A.uAutoNoise.value = noise;
+      return true;
+    },
+    /** A paint layer's tile size in METRES — one repeat of its texture on the ground (the same
+     *  conversion as the dev paintTile: uv scale = world size / metres). */
+    setTerrainLayerTile(slot, metres) {
+      if (!(metres > 0)) return false;
+      textureLib.setUVScale(slot, Math.max(1, Math.round(WORLD_SIZE / metres)));
+      return true;
+    },
+    /**
      * How dense the painted GROUND FOLIAGE is at a world X/Z, 0..1.
      *
      * The companion to getWorldHeight for anything that needs to know what the
