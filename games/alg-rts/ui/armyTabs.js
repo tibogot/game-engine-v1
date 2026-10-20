@@ -67,6 +67,7 @@ function stateOf(g) {
   if (g.squad?.retreating) return ["retreat", t("REPLI"), t("en repli")];
   if (g.some((u) => u.pinned)) return ["pinned", t("CLOUÉ"), t("cloués au sol")];
   if (g.some((u) => u.suppressed)) return ["supp", t("FEU!"), t("sous le feu")];
+  if (g.squad?.holdFire) return ["idle", t("HALTE"), t("halte au feu")];
   if (g.some((u) => u.target?.alive || u.attackTarget?.alive)) return ["fight", t("FEU"), t("font feu")];
   if (g.some((u) => u.isMoving)) return ["move", "»", t("en mouvement")];
   if (g.some((u) => u.inCover)) return ["cover", t("ABRI"), t("à couvert")];

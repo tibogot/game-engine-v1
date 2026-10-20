@@ -221,13 +221,15 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   const fx = -Math.sin(muster.yaw), fz = -Math.cos(muster.yaw);   // out of the gate
   const rx = Math.cos(muster.yaw), rz = -Math.sin(muster.yaw);
   const startMen = { appele: [], sapeur: [], fln: [] };
-  for (let i = 0; i < 12; i++) {
+  // (a map can do without it: the FLN training's French are its lessons' own — maps/maquis.js noStartArmy)
+  const frenchStart = !MAP.noStartArmy?.player;
+  for (let i = 0; frenchStart && i < 12; i++) {
     const col = (i % 6 % 3) - 1 + (i < 6 ? -2.2 : 2.2), row = Math.floor((i % 6) / 3);
     const p = navGrid.nearestOpenWorld(muster.x + fx * row * 3.2 + rx * col * 3.2, muster.z + fz * row * 3.2 + rz * col * 3.2, true) ?? { x: muster.x, z: muster.z };
     startMen.appele.push(units.spawn("appele", p.x, p.z, { lookRole: i % 6 }));
   }
   // …and a sapeur team beside them (the lean start: they dig the post's defences).
-  for (let i = 0; i < SQUADS.sapeur.size; i++) {
+  for (let i = 0; frenchStart && i < SQUADS.sapeur.size; i++) {
     const p = navGrid.nearestOpenWorld(muster.x + rx * (12 + i * 2.5), muster.z + rz * (12 + i * 2.5), true) ?? { x: muster.x, z: muster.z };
     startMen.sapeur.push(units.spawn("sapeur", p.x, p.z, { lookRole: i }));
   }
@@ -480,8 +482,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   // VETERANCY (algVeterancy.js): a squad's kills earn it stars.
   const veterancy = createAlgVeterancy({ app, squads });
   app.algVeterancy = veterancy;
-  squads.adopt(startMen.appele.filter(Boolean), "appele");
-  squads.adopt(startMen.sapeur.filter(Boolean), "sapeur");
+  if (startMen.appele.length) squads.adopt(startMen.appele.filter(Boolean), "appele");
+  if (startMen.sapeur.length) squads.adopt(startMen.sapeur.filter(Boolean), "sapeur");
   // A faint ring round each village in its holder's colour (the shared ring
   // field: a thin band on a big circle).
   const villageRings = createSelectionRingField({ app, max: 16, inner: 0.975, segments: 96, opacity: 0.55 });
@@ -612,7 +614,19 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
             hint: sq.some((s) => s.team === "enemy")
               ? (sq.every((s) => !SQUADS[s.typeKey]?.reinforce) ? t("Un tireur seul ne se renforce pas : ramenez-le à la grotte, ses blessures s'y soignent.") : !short ? t("Groupe au complet.") : cost ? t("Un homme par faoudj incomplet, par la grotte.") : t("Ramenez le faoudj à la grotte (Retraite) pour le renforcer."))
               : sq.every((s) => !SQUADS[s.typeKey]?.reinforce) ? t("Un équipage ne se renforce pas : ramenez-le au poste, ses blessés s'y soignent.") : !short ? t("Groupe au complet.") : cost ? t("Un homme par groupe incomplet : par la porte du poste, ou par l'arrière d'un half-track à l'arrêt si le groupe se tient près de lui.") : t("Ramenez le groupe au poste (Retraite), ou près d'un half-track à l'arrêt (30 m), pour le renforcer."),
-            ready: cost > 0 && economy.french.canAfford(cost) };
+            // (the HUMAN's purse — an FLN player's reinforcement was checked against the French one's, 2026-10-20)
+            ready: cost > 0 && (sq.some((s) => s.team === "enemy") ? economy.aln : economy.french).canAfford(cost) };
+        })(),
+        // HALTE AU FEU (2026-10-20, CoH 3's Hold Fire — the FLN's ambushes): the squad picks no target until
+        // you open fire, order an attack, or it is HIT (then it fires back: CoH's rule).
+        (() => {
+          const sq = squads.squadsIn(sel).filter((s) => isHuman(s.team));
+          if (!sq.length) return null;
+          const held = sq.every((s) => s.holdFire);
+          return { key: "holdFire", label: held ? t("Ouvrir le feu") : t("Halte au feu"),
+            hint: held ? t("Ouvrir le feu : ils tirent de nouveau sur tout ce qu'ils voient.")
+              : t("Halte au feu : ils ne tirent pas, même sur un ennemi tout proche — l'embuscade. Ils ripostent si on leur tire dessus ; un ordre d'attaque ou « Ouvrir le feu » les libère."),
+            ready: true };   // (`ready` = usable; the label says which way it goes)
         })(),
       ].filter(Boolean)
       // A sappers' site (algBuild.js): cancel it, the price back.
@@ -646,6 +660,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "radioAir") { const r = radioOf(sel); if (r?.post) airStrike?.begin([r.post], { sight: seen }); }
       if (key === "airStrike") airStrike?.begin(sel);
       if (key === "flare") flares?.begin(sel);
+      if (key === "holdFire") { holdFireToggle(squads.squadsIn(sel).filter((s) => isHuman(s.team))); commandCard.render(sel); }
       if (key === "retreat") { for (const s of squads.squadsIn(sel)) squads.retreat(s); app.algSounds?.order?.("move", sel); commandCard.render(sel); }
       if (key === "reinforce") { for (const s of squads.squadsIn(sel)) squads.reinforce(s); commandCard.render(sel); }
     },
@@ -658,6 +673,33 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     },
     mount: hud.right,
   });
+  // HALTE AU FEU: the squad's flag (its badge, its tab) and every man's `holdFire` (combat.js picks no target).
+  function holdFireToggle(sq) {
+    const on = !sq.every((s) => s.holdFire);
+    for (const s of sq) {
+      s.holdFire = on;
+      s._holdHp = s.members.reduce((n, u) => n + (u.alive ? u.hp : 0), 0);
+      for (const u of s.members) { u.holdFire = on; if (on) { u.target = null; u.attackTarget = null; } }
+    }
+    app.algSounds?.order?.("move", sq.flatMap((s) => s.members));
+  }
+  /** Each frame: a held squad that is HIT fires back (CoH); an attack order frees it; new men join the hold. */
+  function holdFireStep() {
+    for (const s of squads.list) {
+      if (!s.holdFire) continue;
+      const men = s.members.filter((u) => u.alive);
+      const hp = men.reduce((n, u) => n + u.hp, 0);
+      const ordered = men.some((u) => !u.holdFire && u.attackTarget?.alive);
+      if (!men.length || hp < (s._holdHp ?? hp) - 0.5 || ordered || s.retreating) {
+        s.holdFire = false;
+        for (const u of men) u.holdFire = false;
+        if (men.length && !ordered && !s.retreating && isHuman(s.team)) app.algBattle?.say?.(t("<b>{name}</b> riposte !", { name: s.name ?? t("Le groupe") }), men[0].position.x, men[0].position.z, "bad");
+        continue;
+      }
+      s._holdHp = hp;
+      for (const u of men) if (!u.holdFire && !u.attackTarget) u.holdFire = true;   // (a reinforcement joins the hold)
+    }
+  }
   // THE RADIO's calls (algSquads UPGRADES.radio): the squads with one, the nearest pit, the post.
   const seen = (x, z) => !fogOfWar.enabled || fogOfWar.isVisible(x, z);
   function radioOf(sel) {
@@ -957,6 +999,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     let dt = frameDt * app.timeScale;
     if (app.timeStep) { dt = app.timeStep; app.timeStep = 0; }
     sim.advance(dt, simStep);
+    holdFireStep();
     searchlights.frame();
     dropped.frame();
     combat.frame(dt);

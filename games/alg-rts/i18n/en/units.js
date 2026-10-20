@@ -128,6 +128,13 @@ export default {
   "Couper": "Cut",
   "Couper les barbelés les plus proches (40 m) : ~8 s pour un sapeur, moins à plusieurs.": "Cut the nearest barbed wire (40 m): ~8 s for one engineer, less with more.",
   "En retraite": "Retreating",
+  "Halte au feu": "Hold Fire",
+  "Ouvrir le feu": "Open Fire",
+  "Halte au feu : ils ne tirent pas, même sur un ennemi tout proche — l'embuscade. Ils ripostent si on leur tire dessus ; un ordre d'attaque ou « Ouvrir le feu » les libère.": "Hold fire: they don't shoot, even at an enemy close by — the ambush. They fire back if they are shot at; an attack order or \"Open Fire\" frees them.",
+  "Ouvrir le feu : ils tirent de nouveau sur tout ce qu'ils voient.": "Open fire: they shoot at everything they see again.",
+  "<b>{name}</b> riposte !": "<b>{name}</b> fires back!",
+  "HALTE": "HOLD",
+  "halte au feu": "holding fire",
   "Retraite": "Retreat",
   "Repli sur le poste : sans tirer, impossible à clouer au sol, plus vite, moins touchés. Les blessés se soignent au poste.":
     "Fall back to the post: no firing, can't be pinned, faster, harder to hit. The wounded heal at the post.",

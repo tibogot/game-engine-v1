@@ -343,7 +343,8 @@ export function createCommandCard({
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target?.matches?.("input, textarea, select")) return;
     const k = e.key === "Delete" ? "Del" : e.key?.length === 1 ? e.key.toUpperCase() : null;
     if (!k || k === "G" || k === "B") return;   // G, B: algGrenades.js has its own (it targets)
-    const b = buttons.find((x) => HOTKEY[x.key] === k);
+    // (Shift + a letter: "⇧H" — Halte au feu; a Shift-key that is nobody's falls back to the plain letter)
+    const b = (e.shiftKey && k.length === 1 && buttons.find((x) => HOTKEY[x.key] === `⇧${k}`)) || buttons.find((x) => HOTKEY[x.key] === k);
     if (b) { b.el.click(); e.preventDefault(); }
   });
 

@@ -68,7 +68,8 @@ const OLD_CAM = params.get("cam") === "old";
 // THE HUMAN'S SIDE (2026-10-10, "play the FLN", step 1): ?side=fln — you command the FLN (the team
 // "enemy"), see through ITS eyes; the FLN's AI is off then (and no French AI yet: step 2). The team
 // strings stay the factions; shared-rts/teams.js SIDES.human says which one is yours.
-setHumanSide(params.get("side") === "fln" ? "enemy" : "player");
+// (a map can FIX it: the FLN training, maps/maquis.js MAP.side)
+setHumanSide((MAP.side ?? params.get("side")) === "fln" ? "enemy" : "player");
 // WHAT THIS MAP SHOWS (mapSystems.js): each map lists its systems (maps/*.js `systems`); the
 // others OFF unless the URL says otherwise. Written into the address so every module that reads
 // its switch sees it. (The Aurès lists them all: nothing written. The training: the same eight
@@ -490,7 +491,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // THE TRAINING (algTutorial.js): its own briefing, its lessons instead of the battle's rules.
   if (MAP.tutorial && app.algBattle) {
     try {
-      const { createAlgTutorial } = await import("./algTutorial.js");
+      // (the FLN's own on its maquis map: algTutorialFln.js — FLN_TRAINING_PLAN.md)
+      const { createAlgTutorial } = await import(SIDES.human === "enemy" ? "./algTutorialFln.js" : "./algTutorial.js");
       app.algTutorial = createAlgTutorial(app);
     } catch (e) { console.warn("[alg tutorial] failed:", e); }
   }

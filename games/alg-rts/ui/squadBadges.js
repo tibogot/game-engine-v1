@@ -47,6 +47,10 @@ const CSS = `
 .alg-sqb svg.shield .ic { color: #dfe9f2; stroke: currentColor; fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .alg-sqb.sel svg.shield .rim { stroke: #ffffff; stroke-width: 2; }
 .alg-sqb.ret svg.shield .rim { stroke: #e0a040; }
+/* HALTE AU FEU: a dashed rim and a "no" sign beside the shield (algUnits holdFire). */
+.alg-sqb.hold svg.shield .rim { stroke-dasharray: 3 2; }
+.alg-sqb.hold::after { content: ""; position: absolute; left: -15px; top: 6px; width: 11px; height: 11px; border: 2px solid #f2c94c; border-radius: 50%;
+  background: linear-gradient(45deg, transparent 42%, #f2c94c 42%, #f2c94c 58%, transparent 58%); filter: drop-shadow(0 1px 1px #000); }
 .alg-sqb.enemy svg.shield .rim { stroke: #ff5f4e; } .alg-sqb.enemy svg.shield { pointer-events: none; cursor: default; }
 .alg-sqb.enemy .n { border-color: rgba(255,120,100,0.7); }
 .alg-sqb .bar { grid-row: 2; grid-column: 2; width: 38px; height: 5px; background: rgba(10,12,14,0.9); border: 1px solid rgba(0,0,0,0.7);
@@ -125,7 +129,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
       const pos = `${sx},${sy}`;
       if (pos !== b.pos) { b.pos = pos; b.el.style.transform = `translate(${sx}px, ${sy}px) translate(-60%, -100%)`; }
       const f = max > 0 ? hp / max : 0;
-      const key = `${men.length}|${Math.round(f * 50)}|${sel}|${s.retreating}|${s.stars ?? 0}|${!!(s.upgrades?.lmg || s.upgrades?.bazooka)}`;
+      const key = `${men.length}|${Math.round(f * 50)}|${sel}|${s.retreating}|${s.stars ?? 0}|${!!(s.upgrades?.lmg || s.upgrades?.bazooka)}|${!!s.holdFire}`;
       if (key === b.last) continue;
       b.last = key;
       b.n.textContent = men.length;
@@ -133,6 +137,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
       b.fill.style.background = f > 0.6 ? "#3ddc60" : f > 0.3 ? "#f5c542" : "#e4483a";
       b.el.classList.toggle("sel", sel);
       b.el.classList.toggle("ret", !!s.retreating);
+      b.el.classList.toggle("hold", !!s.holdFire);
       const vet = Math.min(3, s.stars ?? 0);
       b.st.hidden = !vet;
       if (vet) b.st.style.cssText = iconStyle(`vet${vet}`);

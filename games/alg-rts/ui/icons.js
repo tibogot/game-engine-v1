@@ -15,7 +15,7 @@ export const ICON = {
   smoke: "smoke", barrage: "barrage", airStrike: "barrage", flare: "flare", lmg: "lmg", bazooka: "lmg", radio: "alertSeen", radioBarrage: "barrage", radioAir: "barrage", aimArc: "mgNest", retreat: "retreat", reinforce: "reinforce", repair: "repair", garrison: "garrison", unload: "unload",
   // 2026-10-08: the transports (algTransports.js) — the badge's truck (drawn here, ours), DÉBARQUER as SORTIR
   transport: "transport", disembark: "unload",
-  attackMove: "alertAttack",
+  attackMove: "alertAttack", holdFire: "stop",   // (its own painted icon: ICON_PROMPTS.md)
   // field works (algFieldWorks.js): existing silhouettes
   forwardPost: "reinforce", aidStation: "repair", fortPoint: "alertFlag",
   // veterancy chevrons (1-3) and the alert feed's pictures
@@ -24,7 +24,7 @@ export const ICON = {
   // PLAYING THE FLN (2026-10-13): its sabotage (algFlnTricks.js) and its pieces (algBuild.js), existing silhouettes
   flnMine: "alertMine", flnWire: "alertMine", flnDetonate: "barrage", flnCut: "alertCut", armsCache: "lmg", refuge: "garrison", infirmary: "repair", mortarBarrage: "barrage",
 };
-export const HOTKEY = { patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", bazooka: "U", radio: "I", radioBarrage: "M", radioAir: "L", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O", attackMove: "N", flnMine: "X", flnCut: "J", mortarBarrage: "M", flnWire: "I", flnDetonate: "L" };   // (flnMine / flnCut / flnWire / flnDetonate: the FLN's, on the keys only the French use — C is the camera, the rest the camera's WASD-QE)
+export const HOTKEY = { holdFire: "⇧H", patrol: "P", grenade: "G", smoke: "B", stop: "H", focus: "F", cutWire: "X", cancelSite: "Del", retreat: "T", reinforce: "Y", lmg: "U", bazooka: "U", radio: "I", radioBarrage: "M", radioAir: "L", barrage: "M", airStrike: "L", repair: "J", unload: "K", disembark: "K", aimArc: "O", attackMove: "N", flnMine: "X", flnCut: "J", mortarBarrage: "M", flnWire: "I", flnDetonate: "L" };   // (flnMine / flnCut / flnWire / flnDetonate: the FLN's, on the keys only the French use — C is the camera, the rest the camera's WASD-QE)
 
 const BASE = "/textures/ui/icons/";
 /** An icon element's inline style (a mask in the current colour). */
