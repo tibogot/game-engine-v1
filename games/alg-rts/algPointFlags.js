@@ -19,6 +19,32 @@ import { buildAmmoDump, buildFuelDepot } from "../../v3/render/objects/rtsAlgeri
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { kitView } from "./showroom.js";
 import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
+import { createHouseField, loadHouses, registerHouseParts } from "./algHouse.js";
+import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
+
+/**
+ * THE POINT'S SANDBAGS (2026-10-20, you: "the sandbags don't look at all like the ones I created in Blender"):
+ * not in the Blender point — YOUR simulated walls (algSandbags.js, tools/blender/sandbagWall.py), their own
+ * material: the straight single-thickness "chicane" (4.8 m) behind the depot, BREACHED once the point is damaged.
+ * In the point's own frame (the depot on +x, at supplyPoint.py's DX): [part, x, z, yaw].
+ */
+const DEPOT_X = { fuel: 4.5, mun: 4.8 };
+export function pointWalls(kind, state) {
+  return [[state === "intact" ? "sbChicane" : "sbBreach", DEPOT_X[kind] - 2.05, 0.05, Math.PI / 2]];
+}
+/** Load the simulated walls and make them house-field parts (sbChicane, sbBreach). Resolves false if missing. */
+export function loadPointWalls() {
+  return loadSandbagWall().then(() => {
+    let ok = false;
+    for (const [type, kind] of [["sbChicane", "chicane"], ["sbBreach", "breach"]]) {
+      const m = simulatedWallMesh(type, kind);
+      if (!m) continue;
+      registerHouseParts(type, "intact", m.isLOD ? m.levels[0].object : m, m.isLOD ? m.levels[1].object : m);
+      ok = true;
+    }
+    return ok;
+  });
+}
 import { VIEW_YAW } from "./layout.js";
 
 const P = {
@@ -81,7 +107,11 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
     flags.push({ pt, flag, cloth, top: K.pole - K.cloth[1], side: null, sphere: new THREE.Sphere(flag.group.position.clone().setY(flag.group.position.y + K.pole / 2), K.pole) });
   }
 
+  // THE OLD DEPOTS AND MASTS — only if the Blender point (below) does not load. (2026-10-21, you: "the old and the
+  // new overlapping": they were built at once and removed when the new one loaded — but algGame's STATIC BATCH
+  // had copied the depots into its indirect draw by then; removing the originals left the copies standing.)
   const meshes = [];
+  const buildOld = () => {
   for (const [res, list] of Object.entries(depotAt)) {
     if (!list.length) continue;
     const geo = depotGeo[res];
@@ -105,6 +135,53 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
     mesh.computeBoundingSphere();
     app.scene.add(mesh);
     meshes.push(mesh);
+  }
+  };
+
+  // THE BLENDER POINT (tools/blender/supplyPoint.py, 2026-10-20 — you: "the requisition point doesn't look AAA
+  // at all"): the mast and its depot as ONE piece, the cloth-simulated sandbags, three states — an instanced
+  // field (near / far). The old masts and depots above are built only if it is missing. `ready` resolves once
+  // the points stand (algGame awaits it before the static batch).
+  const pointField = { field: null, ready: null };
+  const supplyPts = economy.allPoints.filter((p) => p.kind === "supply");
+  if (supplyPts.length) {
+    pointField.ready = Promise.all([loadHouses("points"), loadPointWalls()]).then(async ([parts]) => {
+      if (!parts?.["fuel:intact"]) { buildOld(); return; }
+      // ITS PAD (2026-10-21, you: "it's going inside the ground — are you not flattening it?"): the point is one
+      // rigid piece ~11 m across (the guys' anchors to the board), seated at its mast's height it sank into the
+      // slope on one side. The ground under it levelled first — the mean height under the rect (the cut and the
+      // fill balance, as the showroom's pads), a 6 m rim — then the point and its flag seated on it.
+      const PAD = { lx: 1.6, hx: 5.6, hz: 3.6, rim: 6 };
+      for (const pt of supplyPts) {
+        const px = pt.position.x, pz = pt.position.z;
+        let sum = 0, n = 0;
+        for (let u = -1; u <= 1.001; u += 0.25) for (let v = -1; v <= 1.001; v += 0.25) {
+          const [x, z] = local(px, pz, PAD.lx + u * PAD.hx, v * PAD.hz);
+          sum += H(x, z); n++;
+        }
+        const [cx, cz] = local(px, pz, PAD.lx, 0);
+        await app.flattenRect?.(cx, cz, PAD.hx + 1, PAD.hz + 1, sum / n, { rim: PAD.rim, rotY: yaw });
+      }
+      for (const fl of flags) {   // (the flags were stood on the ground before it was levelled)
+        if (fl.pt.kind !== "supply") continue;
+        const g = fl.flag.group.position;
+        g.y = H(g.x, g.z) - 0.1;
+        fl.sphere.center.y = g.y + P.supply.pole / 2;
+      }
+      app.fogOfWar?.rebuildHeights?.();
+      const f = createHouseField();
+      for (const pt of supplyPts) {
+        const kind = pt.res === "fuel" ? "fuel" : "mun", px = pt.position.x, pz = pt.position.z;
+        f.add(kind, "intact", px, H(px, pz) - 0.05, pz, yaw, 1);
+        for (const [part, lx, lz, ly] of pointWalls(kind, "intact")) {
+          const [wx, wz] = local(px, pz, lx, lz);
+          f.add(part, "intact", wx, H(wx, wz) - 0.03, wz, yaw + ly, 1);
+        }
+      }
+      app.scene.add(f.root);
+      app.addPreRenderHook?.(() => f.update(app.camera));
+      pointField.field = f;
+    }).catch((e) => { console.warn("[points] the Blender point did not load:", e); buildOld(); });
   }
 
   // ── Every frame ───────────────────────────────────────────────────────────
@@ -138,6 +215,7 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
   }
 
   return {
+    pointField,   // (the Blender points: .field once loaded)
     params: P, flags, meshes, frame,
     get simulated() { return simulated; },
     stats: { flags: flags.length, depots: depotAt.fuel.length + depotAt.mun.length },

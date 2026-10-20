@@ -43,6 +43,7 @@ await loadZeriba();
 await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
+import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 /** The village test: a lane (along x) of the kit, both sides facing it; the brown houses beyond. */
 function whiteVillage() {
   const g = new THREE.Group();
@@ -101,6 +102,19 @@ function labPiece(obj) {
   g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
   g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
   g.userData.extra = obj ? [obj] : [];
+  return g;
+}
+
+/** The Blender point and its sandbag walls (algPointFlags.pointWalls), as the game lays them. */
+function pointWithWalls(kind, state) {
+  const g = new THREE.Group();
+  g.add(houseMesh(kind, state, 1));
+  for (const [part, lx, lz, ly] of pointWalls(kind, state)) {
+    const w = houseMesh(part, "intact", 1);
+    if (!w) continue;
+    w.position.set(lx, -0.03, lz); w.rotation.y = ly;
+    g.add(w);
+  }
   return g;
 }
 
@@ -396,6 +410,14 @@ export const BUILDINGS = {
     label: "Point : munitions", gap: POINT_KINDS.mun.R + 3, before: () => supplyPoint("game", "mun"), after: () => supplyPoint("new", "mun"),
     tags: ["MUNITIONS (LE JEU)", "MUNITIONS · NOUVEAU"], note: "les marques du jeu à gauche, les nouvelles à droite — « Point » : l'état, la capture, le rayon.",
   },
+  // THE REQUISITION POINT IN BLENDER (2026-10-20, tools/blender/supplyPoint.py — you: "it doesn't look AAA at all,
+  // and still my old sandbags"): the mast and the depot as one piece, the cloth-simulated bags; intact LEFT,
+  // damaged MIDDLE, ruin RIGHT (the game's old point: « Point : carburant / munitions » below).
+  ...Object.fromEntries([["fuel", "carburant"], ["mun", "munitions"]].map(([ty, fr]) => [`pointBlender_${ty}`, {
+    label: `Point (Blender) : ${fr}`, gap: 16, yaw: 1.5 * Math.PI - 0.5,   /* (its front is +x: turned to the camera as the houses' -z) */ prepare: () => Promise.all([loadHouses("points"), loadPointWalls()]),
+    before: () => { console.log("[points]", houseStats()); return labPiece(pointWithWalls(ty, "intact")); }, middle: () => labPiece(pointWithWalls(ty, "damaged")), after: () => labPiece(pointWithWalls(ty, "ruin")),
+    tags: [`${fr.toUpperCase()} · INTACT`, `${fr.toUpperCase()} · ENDOMMAGÉ`, `${fr.toUpperCase()} · DÉTRUIT`], note: "le point de ravitaillement refait dans Blender (mât, dépôt, sacs simulés) dans ses trois états.",
+  }])),
   pointCarbu: {
     label: "Point : carburant", gap: POINT_KINDS.fuel.R + 3, before: () => supplyPoint("game", "fuel"), after: () => supplyPoint("new", "fuel"),
     tags: ["CARBURANT (LE JEU)", "CARBURANT · NOUVEAU"], note: "le dépôt de fûts — les marques du jeu à gauche, les nouvelles à droite.",

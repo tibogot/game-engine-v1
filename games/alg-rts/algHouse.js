@@ -22,7 +22,10 @@ export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
 // THE FIELD WALLS (tools/blender/fieldwall.py): a dry-stone module, three variants (a b c), the same states
 export const FIELD_WALL_TYPES = ["a", "b", "c"];
-const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES } };
+// THE REQUISITION POINTS (tools/blender/supplyPoint.py): the mast and its depot as one piece, fuel or munitions —
+// built in GAME metres (add it at scale 1)
+export const POINT_TYPES = ["fuel", "mun"];
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
@@ -51,13 +54,20 @@ export function loadHouses(kit = "houses") {
   }).catch((e) => { console.warn("[houses]", e); return null; }));
 }
 
+/** A piece from outside the kits (its own near / far meshes — e.g. the simulated sandbag walls, algSandbags.js)
+ *  made addable to a house field as `type` in `state`. */
+export function registerHouseParts(type, state, near, far = near) {
+  _parts ??= {};
+  _parts[`${type}:${state}`] = { near, far: far ?? near };
+}
+
 /** One house of `type` in `state` — a LOD (near / far), at the game's scale. Null if not loaded. */
-export function houseMesh(type = "maison", state = "intact") {
+export function houseMesh(type = "maison", state = "intact", scale = S) {
   const P = _parts?.[`${type}:${state}`];
   if (!P) return null;
   const g = new THREE.Group();
   g.name = `House:${type}:${state}`;
-  g.scale.setScalar(S);
+  g.scale.setScalar(scale);
   const lod = new THREE.LOD();
   lod.name = "HouseLOD";
   lod.addLevel(P.near.clone(), 0, 0.1);
@@ -110,8 +120,8 @@ export function createHouseField() {
   return {
     root,
     /** A house; its id (for setState). */
-    add(type, state, x, y, z, yaw = 0) {
-      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(S, S, S));
+    add(type, state, x, y, z, yaw = 0, scale = S) {
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(scale, scale, scale));
       items.push({ key: `${type}:${state}`, m, p: new THREE.Vector3(x, y, z) });
       built = false;
       return items.length - 1;

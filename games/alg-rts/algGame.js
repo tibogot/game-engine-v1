@@ -856,6 +856,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // walls, outcrops, village props, poles and depots (one kit material) and the loose stones
   // (theirs) drew as ~26 instanced meshes in every pass; one indirect-drawing mesh per material
   // now. Only what never changes after the boot. ?staticbatch=0 = without.
+  // (the supply points first: their old depots are the fallback, built only if the Blender point fails)
+  await app.algPointFlags?.pointField?.ready;
   if (params.get("staticbatch") !== "0") {
     const STATIC = /^(FieldWalls|Outcrops|VillageLife:|TelegraphPoles|SupplyDepot:|Stones:)/;
     const list = [];
