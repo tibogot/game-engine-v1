@@ -632,6 +632,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       await Promise.all([loadHouses("mzab"), loadHouses()]);
       const field = createHouseField();
       for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
+      // the TERRACE WALLS (the kit's "mur" round the risers): in the same field
+      for (const [st, x, y, z, yaw] of MAP.town.walls ?? []) field.add("mur", st, x, y, z, yaw);
       // SOLID: each house's footprint blocks the nav grid (a little in: its steps, its yard walls' ends), and its
       // walls are HARD cover, as the dechra's and the post's (algCover: circles along the walls, not inside)
       for (const [, , , , , yaw, fx, fz, hx, hz] of MAP.town.houses) app.navGrid?.addFootprint?.(fx, fz, hx * 0.92, hz * 0.92, yaw);
@@ -641,6 +643,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           const put = (lx, lz) => ({ x: fx + lx * c + lz * s, z: fz - lx * s + lz * c, radius: r, size: 1, hard: true });
           for (let lx = -hx + r; lx <= hx - r + 0.01; lx += 2.2) { yield put(lx, -hz + r * 0.6); yield put(lx, hz - r * 0.6); }
           for (let lz = -hz + r; lz <= hz - r + 0.01; lz += 2.2) { yield put(-hx + r * 0.6, lz); yield put(hx - r * 0.6, lz); }
+        }
+        // a terrace wall's parapet: cover for the men on the terrace ABOVE it (behind its face, uphill)
+        for (const [st, x, , z, yaw] of MAP.town.walls ?? []) {
+          if (st === "ruin") continue;
+          const c = Math.cos(yaw), s = Math.sin(yaw);
+          for (const lx of [-1.4, 1.4]) yield { x: x + lx * c + 1.4 * s, z: z - lx * s + 1.4 * c, radius: 1.3, size: 1, hard: true };
         }
       };
       // SIGHT: each house a tall box to its parapet (the kits' heights, real metres x1.3; the minaret its own column)

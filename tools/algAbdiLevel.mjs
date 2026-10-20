@@ -374,6 +374,38 @@ KNOLL_RINGS.forEach((R, ri) => {
     if (++tries < 6) pending = type; else { pending = null; tries = 0; }
   }
 });
+// THE TERRACE WALLS (2026-10-20: the bare risers between the rings read as sand dunes): the kit's "mur" module
+// (mzab.py: rubble and mud brick, a chest-high parapet over the upper terrace — cover for the men holding it) end
+// to end round every riser, its face at the riser's foot; not where a house stands against the riser, not across
+// a lane, the square or the djebel (where the riser is not there, its ground says so).
+const walls = [];
+{
+  const MUR_L = 3.44 * HS, FACE = 0.3 * HS;   // (the module's length; its face 0.3 m out from its origin)
+  KNOLL_RINGS.forEach((R, ri) => {
+    const upper = ri ? KNOLL_RINGS[ri - 1].h : KNOLL_TOP;
+    for (let phi = 0, k = 0; phi < Math.PI * 2; k++) {
+      const ux = Math.cos(phi), uz = Math.sin(phi), warp = knollD(KNOLL.x + ux * 30, KNOLL.z + uz * 30) / 30;
+      const rf = (R.r0 + RISER + 0.05) / warp, r = rf - FACE;      // the face at the riser's foot; the origin behind it
+      phi += (MUR_L - 0.15) / r;
+      const tx = -uz, tz = ux, x = KNOLL.x + ux * r, z = KNOLL.z + uz * r;
+      const pts = [-0.5, 0, 0.5].map((f) => [x + tx * MUR_L * f, z + tz * MUR_L * f]);
+      const fl = floorAt(x, z);
+      const ok = pts.every(([px, pz]) => {
+        if (laneDist(px, pz) < LANE_W / 2 + 0.6 || squareK(px, pz) > 0) return false;
+        // (a house backing onto the riser from below hides it; one on the terrace above stands ON the wall — the M'zab look)
+        if (town.some((o) => inBox(o, px, pz, 0.3) || inBox(o, px + ux * 1.0, pz + uz * 1.0, 0.2))) return false;
+        const below = ground(px + ux * 1.2, pz + uz * 1.2) - fl, above = ground(px - ux * 1.6, pz - uz * 1.6) - fl;
+        return Math.abs(below - R.h) < 0.35 && Math.abs(above - upper) < 0.35;
+      });
+      if (!ok) continue;
+      const q = hash(ri, k, 21);
+      walls.push({ x, z, yaw: yawFacing(ux, uz), y: fl + R.h, state: q < 0.04 ? "ruin" : q < 0.14 ? "damaged" : "intact", ri, k });
+    }
+  });
+  // (runs of two or more: a lone module squeezed between two houses read as a dark slab)
+  const has = new Set(walls.map((w) => w.ri + ":" + w.k));
+  for (let i = walls.length - 1; i >= 0; i--) { const w = walls[i]; if (!has.has(w.ri + ":" + (w.k - 1)) && !has.has(w.ri + ":" + (w.k + 1))) walls.splice(i, 1); }
+}
 // THE TOWN'S EDGE: low houses behind their yards on the shoulder, each on its own levelled PAD
 const pads = [];
 {
@@ -510,9 +542,13 @@ export const TOWN_HOUSES = [
 ${town.map((o) => `  ["${o.type}", "${o.state}", ${r2(o.x)}, ${r2(o.y)}, ${r2(o.z)}, ${r2(o.yaw)}, ${r2(o.corners.reduce((a, c) => a + c[0], 0) / 4)}, ${r2(o.corners.reduce((a, c) => a + c[1], 0) / 4)}, ${r2(o.w / 2)}, ${r2(o.d / 2)}],`).join("\n")}
 ];
 export const TOWN_SQUARE = { x: ${r2(SQ.x)}, z: ${r2(SQ.z)}, y: ${r2(H(SQ.x, SQ.z))}, ux: ${r2(SQ.ux)}, uz: ${r2(SQ.uz)}, hw: ${SQ.hw}, hd: ${SQ.hd} };
+// the TERRACE WALLS (the kit's "mur", at the risers' foot, facing down the hill): [state, x, y, z, yaw]
+export const TOWN_WALLS = [
+${walls.map((w) => `  ["${w.state}", ${r2(w.x)}, ${r2(w.y)}, ${r2(w.z)}, ${r2(w.yaw)}],`).join("\n")}
+];
 `);
 const byType = {}; for (const o of town) byType[o.type] = (byType[o.type] ?? 0) + 1;
-console.log(`town: ${town.length} houses ${JSON.stringify(byType)}`);
+console.log(`town: ${town.length} houses ${JSON.stringify(byType)}, ${walls.length} terrace walls`);
 
 // ── Paint, by the relief — calm in the box, rock only on the frame ──────────
 const S = man.terrain.splatSize ?? man.splatRes;

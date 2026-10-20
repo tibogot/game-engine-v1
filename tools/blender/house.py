@@ -474,11 +474,11 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
         objs = []
         for si, state in enumerate(STATES):
             K.groups["h"] = []
-            build(K, tname, spec, state, seed0 + ti * 10 + si)
+            (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
             objs.append(o)
-        K.bake(objs, S_, f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80)
+        K.bake(objs, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80)
         for o in objs:
             f = K.far(o, 0.3)
             print("TRIS", o.name, tris(o), "far", tris(f))

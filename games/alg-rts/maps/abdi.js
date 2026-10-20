@@ -11,7 +11,7 @@
 // World metres, north up = -Z (as every map).
 import { t } from "../i18n/i18n.js";
 import { ROCKS } from "./abdiRocks.js";
-import { TOWN_HOUSES, TOWN_SQUARE } from "./abdiTown.js";
+import { TOWN_HOUSES, TOWN_SQUARE, TOWN_WALLS } from "./abdiTown.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -102,7 +102,7 @@ export const MAP = {
   sandstone: { colour: "abdi", rocks: ROCKS },
   // ITS TOWN (algGame: an instanced house field): placed by tools/algAbdiLevel.mjs on the knoll's ring terraces,
   // the souk square at the town's point
-  town: { houses: TOWN_HOUSES, square: TOWN_SQUARE },
+  town: { houses: TOWN_HOUSES, square: TOWN_SQUARE, walls: TOWN_WALLS },
   // algLandmarks' own scenery: none (its Aurès places are on the old map's ground).
   scenery: { quantities: {}, keepClear: [] },
 };

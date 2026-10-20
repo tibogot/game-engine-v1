@@ -115,6 +115,43 @@ TYPES = {
         ruin=(3.2, 1.4), life=["prayer", "prayer", "mats"], ground=[]),
 }
 
+# ── THE TERRACE WALL (2026-10-20): the town's ring terraces held up where no house stands against the riser ──
+# One module, 3.4 m long (4.4 in the game), laid end to end round each riser by tools/algAbdiLevel.mjs: rubble and
+# mud brick with patches of the old render, its foot sunk, a chest-high PARAPET (0.7 m) over the upper terrace
+# (cover for the men holding it). Origin: the lower ground, the wall's face at z = -0.3 (its front, -Z, downhill).
+import math, random
+def buildWall(K, name, spec, state, seed):
+    R = random.Random(seed)
+    G, L, H, P = "h", 1.72, spec["drop"], spec["parapet"]
+    w = K.box("Wall", -L, L, -0.4, H + P, -0.3, 0.45, "terraceWall", G, 0)
+    # a slight BATTER (the face leans back as it rises) and a rounded render coping on the parapet
+    K.bevel(w, 0.05, 2, 30)
+    K.box("Coping", -L - 0.02, L + 0.02, H + P, H + P + 0.1, -0.34, 0.1, spec["coping"], G, 0.04)
+    # fallen stones at its foot, a drain hole or two
+    for k in range(R.randint(2, 4)):
+        K.lump(f"Stone{k}", (R.uniform(-L + 0.3, L - 0.3), 0.0, R.uniform(-0.9, -0.45)), (R.uniform(0.12, 0.25), R.uniform(0.08, 0.16), R.uniform(0.1, 0.2)), "rubble", G, seed=seed + k, sub=1)
+    for k in range(2):
+        x = R.uniform(-L + 0.4, L - 0.4)
+        K.boolean(w, K.cutter(x - 0.09, x + 0.09, 0.35, 0.53, -0.5, -0.05, "dark"))
+    if state != "intact":
+        K.boolean(w, K.breach((R.uniform(-0.8, 0.8), H + P * 0.6, -0.3), (0.7, 0.45, 0.6), seed=seed, mat="stone"))
+    if state == "ruin":
+        top = K.skyline(-L - 1, L + 1, -1.5, 1.5, H * 0.75, 0.5, seed=seed, mat="stone")
+        for o in list(K.groups[G]): K.boolean(o, top)
+        K.lump("Heap", (0.0, 0.0, -0.9), (1.3, 0.4, 0.6), "rubble", G, seed=seed + 3, rough=0.45)
+
+def terraceWall(nb):
+    """Rubble and mud brick, patches of the old earth render still on it, darker toward the foot."""
+    s = nb.img("build/rabdentse_ruins_wall/rabdentse_ruins_wall_diff_1k.jpg", 0.55)
+    s = nb.mix(0.5, s, srgb(0xb48a64))
+    r = nb.mix(0.7, nb.img("build/clay_plaster/clay_plaster_diff_1k.jpg", 0.4), srgb(0xd29a5c))
+    # (mostly RENDER, the rubble in patches, a light foot — 2026-10-20: half bare rubble read dark grey by the ochre houses)
+    c = nb.mix(nb.mr(nb.noise(0.8, 5, 0.62, (1, 1, 1), (2.2, 0, 7.1)), 0.36, 0.4), s, r)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.gy, 0.9, 0.0), 0.22), c, srgb(0x7d6146))
+    return dust(nb, c, 1.4, 0.9)
+MATDEF["terraceWall"] = (0.95, terraceWall)
+TYPES["mur"] = dict(builder=buildWall, drop=2.0, parapet=0.7, coping="earthOchre", atlas=1024)
+
 exported = buildKit(TYPES, MATDEF, "mzab.glb", prefix="Mzab", seed0=1830)
 previews(TYPES, exported, prefix="Mzab", tag="mzab_")
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "mzab.blend"))

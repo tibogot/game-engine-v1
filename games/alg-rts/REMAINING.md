@@ -1,11 +1,31 @@
 # Sand & Blood — what remains
 
-*Updated 2026-10-17. Maps 2 (the coast) and 3 (El Kantara) are not here; they come after. The
-details are in TODO.md.*
+*Updated 2026-10-20. Maps 2 (the coast) and 3 (El Kantara) are not here; they come after. The
+details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ---
 
-## Done since the last list (2026-10-13 → 10-17)
+## Done since the last list (2026-10-17 → 10-20)
+
+- **A new map, Aurès — Oued Abdi** (`?map=abdi`; the old Aurès untouched): a CoH 3-sized valley
+  (~500 m box), the djebel terraced and eroded, sandstone outcrops, calm pale ground, its own light,
+  no wind in its plants (the flags keep theirs).
+- **Ground marks at CoH quality:** ruts, tank tracks, foot paths, packed earth, charred ground, shell
+  craters, trampled points — matched to the ground's own colour, crisp at play zoom. **Dev → Decals**
+  tunes every kind live.
+- **The M'zab town** on its knoll: a Blender kit (five houses, the souk's arcades, the mosque and its
+  minaret, the terrace wall — each intact / damaged / ruin, LODs, one draw per kind), the hill
+  stepped in ring terraces, the souk square at its foot, three lanes up to the mosque. The houses
+  block movement, give hard cover, block sight (combat and the fog of war) and take garrisons.
+- **The French base pieces:** the motor pool (Blender), the new helipad (painted H, simulated
+  sandbags), the whitewashed house kit (four types).
+- **Units:** the flamethrower squad of 4, the FLN FM team of 2, the carry walk, a radio call when a
+  vehicle is captured, readable units on the pale ground; aircraft fly in from the map edge, the
+  paras come by H-21.
+- **The new lab** (`lab.html`): one catalogue for every building, filters, English.
+- **The HUD icons, started:** 56 painted icons planned (ICON_PROMPTS.md), the first three made.
+
+## Done 2026-10-13 → 10-17
 
 - **Mortars, CoH-style.** A French 81 mm team and an FLN 60 mm team of three: the tube and plate
   carried, set up piece by piece, a spotter with binoculars, no small arms, a kneeling rest. The
@@ -32,6 +52,12 @@ details are in TODO.md.*
 
 ## 1. Waiting on you: play and judge
 
+- **Oued Abdi's town:** its look at the play zoom (colours, density, the terrace walls), the lanes,
+  a fight in the houses.
+- **The decals:** tune them with Dev → Decals if any kind reads wrong.
+- **The helipad's construction animation** (committed 10-12, never judged).
+- **A quiet moment, the laptop cool:** to measure the GPU cost of the motor pool, the helipad and
+  the town.
 - **A full match as the FLN** against the French AI, and one as the French. Fair? Fun at
   25–30 min? The prices of the FLN units, tiers and doctrines.
 - **The H-21 and the paradrop** (landing time, price, one or two squads; the drop's height and sway).
@@ -42,12 +68,30 @@ details are in TODO.md.*
 
 ---
 
-## 2. Gameplay still missing (biggest first)
+## 2. Oued Abdi — to make it playable (the map in progress)
+
+1. **The other places' buildings:** the oasis (whitewashed kit), the hamlet, the farms and the
+   sheepfold (the brown houses), the DECHRA in stone (a stone kit, still to make in Blender), the
+   koubba.
+2. **Capture points and supply** live: the game told the new site kinds (town, oasis, farm, pass,
+   lookout); the souk the big point.
+3. **The AI on:** the FLN down its two gullies, its cells in the villages and the town's houses; the
+   French AI's routes over the fords.
+4. **Your first full match on it**, then the fixes from it.
+5. **The FLN side in Blender:** the maquis camp and the cave mouth.
+6. **The new French post** in Blender (replaces the old one on this map only).
+7. **The town's finish** (after the playtest, where the fighting really is): its edge toward the
+   valley (gardens, palms, low walls), the sand ridges at the lanes' edges, patchier render on the
+   walls, more roof clutter.
+8. **Its menu card** — the old Aurès stays in the list. A night variant later.
+
+## 3. Gameplay still missing (biggest first)
 
 1. **Building damage and collapse** — CoH's signature, our biggest gap.
    - Walls go, the garrison is forced out, rubble is left behind.
-   - Large: every building goes through the lab, and the village meshes are merged, so each
-     house needs its own id first.
+   - The new kits are ready for it: every house (whitewashed, M'zab) has its intact / damaged /
+     ruin states and the town is one instanced field with a per-house state — the swap is the next
+     step there. The old villages' meshes are merged: each house needs its own id first.
 2. ~~The FLN AI doesn't use its new units~~ — **done 2026-10-18**: it buys and uses the 60 mm
    mortar, the 12.7, the recoilless, the mule and bazookas, has its own doctrine and builds
    infirmaries. Its balance against the French AI is being re-measured.
@@ -71,7 +115,12 @@ details are in TODO.md.*
 
 ---
 
-## 3. Content for launch
+## 4. Content for launch
+
+- **The HUD icons:** 56 painted icons (ICON_PROMPTS.md, ChatGPT; the grenade is the style
+  reference). Made: grenade, sandbags, radio (to redo: reads as a backpack at 48 px). Next: the
+  mirador, then the rest; a packer into one atlas; the command card in colour (greyed when
+  unavailable, a cooldown sweep).
 
 - **A short campaign**
   - 3–5 missions with Colonel Delorme.
@@ -84,7 +133,7 @@ details are in TODO.md.*
 
 ---
 
-## 4. Polish
+## 5. Polish
 
 - **Effects**
   - The other explosions onto fire-bake-lab books, as the mortar: the tank shell, vehicle deaths,
@@ -104,7 +153,7 @@ details are in TODO.md.*
     buildings; a health bar over the mule.
   - See-through silhouettes that darken where they overlap.
 - **World**
-  - The souk still uses the old kit.
+  - The old Aurès' souk still uses the old kit (Oued Abdi has the M'zab one).
   - Graded tracks and terrace steps.
 - **Optional extras**
   - More animals and birds: camels, caravans, storks.
@@ -113,7 +162,7 @@ details are in TODO.md.*
 
 ---
 
-## 5. A finished product
+## 6. A finished product
 
 - **Release cleanup:** the dev panel still shows unless `?dev=0`; it should only show with `?dev=1`.
 - **Options:** graphics presets, resolution, volume sliders, key rebinding (AZERTY).
@@ -130,7 +179,7 @@ details are in TODO.md.*
 
 ---
 
-## 6. Steam
+## 7. Steam
 
 - An **Electron build:** a persistent shader cache, saves on disk.
 - **Steamworks:** achievements, cloud saves.
@@ -142,10 +191,12 @@ details are in TODO.md.*
 
 ## Suggested order
 
-1. You play a full match on each side.
-2. Building damage and collapse.
-3. FLN-side training.
-4. The explosions onto lab books.
-5. The campaign.
-6. Options, cleanup, boot time.
-7. Steam.
+1. Oued Abdi playable: its places, points and AI (section 2) — then you play it.
+2. You play a full match on each side.
+3. Building damage and collapse (the new kits first: their states exist).
+4. The HUD icons, as you make them.
+5. FLN-side training.
+6. The explosions onto lab books.
+7. The campaign.
+8. Options, cleanup, boot time.
+9. Steam.
