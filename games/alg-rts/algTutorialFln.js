@@ -13,7 +13,12 @@
 //   6 the cave          train a faoudj, then an FM team              → both out
 //   7 build             a SANGAR on the knoll, an AMBUSH SCREEN      → both standing
 //   8 the arms cache    a cache in the scrub, then the BAZOOKA (U)   → a faoudj with a bazooka
-//   (9-13 next: forward, sabotage, the command mine, armour, the convoy)
+//   9 forward           a REFUGE near the road, or the MULE: reinforce far from the cave → a man in, out there
+//  10 sabotage          cut the LINE (J), then a MINE (X) on the road: a jeep comes  → a pole down, the jeep dead
+//  11 the command mine  a mine on its wire (I), FIRE (L) with the truck on it        → the truck dead
+//  12 armour            a half-track: the bazooka from cover, or let it pass         → dead, or gone and nobody lost
+//  13 the convoy        two trucks and their half-track down the road: the whole ambush → THREE STARS (CoH):
+//                       the convoy stopped · no squad lost · nothing got away
 import { t } from "./i18n/i18n.js";
 import { LAYOUT, MAP } from "./layout.js";
 import { createSelectionRingField } from "../shared-rts/selectionRingField.js";
@@ -59,9 +64,19 @@ export function createAlgTutorial(app) {
     if (!leg) return true;
     const live = men.filter((u) => u.alive && !u.target);
     if (live.every((u) => Math.hypot(u.position.x - leg[0], u.position.z - leg[1]) < 6)) { s.leg = (s.leg ?? 0) + 1; s.sent = false; }
-    if (!s.sent && path[s.leg ?? 0]) { const [x, z] = path[s.leg ?? 0]; live.forEach((u, k) => u.orderTo(x + (k % 2) * 2, z + Math.floor(k / 2) * 2)); s.sent = true; }
+    if ((!s.sent || live.every((u) => !u.isMoving)) && path[s.leg ?? 0]) { const [x, z] = path[s.leg ?? 0]; live.forEach((u, k) => u.orderTo(x + (k % 2) * 2, z + Math.floor(k / 2) * 2)); s.sent = true; }
     return false;
   }
+  /** The road west to east inside the box (the French drive it). */
+  const ROAD = MAP.tracks.find((tr) => tr.kind === "piste").points.filter(([x]) => x > SP.roadWest.x && x < SP.roadEast.x);
+  const roadPath = [...ROAD, [SP.roadEast.x, SP.roadEast.z]];
+  /** A French vehicle on the road's west end. */
+  const vehicle = (type, dx = 0) => units.spawn(type, SP.roadWest.x + dx, SP.roadWest.z, { team: "player" });
+  /** A vehicle that reached the east end GOT AWAY: off the map, quietly (not a kill). */
+  function escape(u) { u.position.set(0, -500, 0); u.alive = false; }
+  const escaped = (u) => u.alive && Math.hypot(u.position.x - SP.roadEast.x, u.position.z - SP.roadEast.z) < 14;
+  /** Men of the FLN alive (the final's losses). */
+  const squadCount = () => squads().length;
   const allDead = (list) => list.length > 0 && list.every((u) => !u.alive);
   const alive = (list) => (list ?? []).filter((u) => u.alive).map((u) => u.position);
   const fund = (n) => E.aln.earn(n);
@@ -176,6 +191,94 @@ export function createAlgTutorial(app) {
     sub: (s) => `${s.cache ? "✓" : "·"} ${t("une cache d'armes")} · ${s.baz ? "✓" : "·"} ${t("un bazooka")}`,
   });
 
+  // 9. forward: the refuge or the mule
+  L.push({
+    title: t("En avant"),
+    text: t("La grotte est loin de la route. Bâtissez un <b>refuge</b> près d'elle (cercle jaune), ou formez un <b>mulet de bât</b> et faites-le suivre un faoudj (clic droit du mulet sur le faoudj) : à côté de l'un ou de l'autre, un faoudj <b>se renforce sur place</b> (<kbd>Y</kbd>), loin de la grotte."),
+    start(s) {
+      s.m = { ...SP.refuge, r: 10 }; markers.push(s.m);
+      fund(260);
+      // a wounded faoudj near the road: the point is to fill it up out there
+      const q = faoudjs()[0];
+      if (q) { const m = q.members.filter((u) => u.alive); if (m.length > 2) m[m.length - 1].takeDamage(1e6); }
+      s.count = new Map(faoudjs().map((x) => [x, x.members.filter((u) => u.alive).length]));
+      app.rtsCamera?.focusOn(SP.refuge.x, SP.refuge.z);
+    },
+    tick(s) {
+      for (const q of faoudjs()) {
+        const n = q.members.filter((u) => u.alive).length, was = s.count.get(q) ?? n, lead = q.members.find((u) => u.alive);
+        if (n > was && lead && !near(lead, caveAt(), 60)) s.done = true;
+        s.count.set(q, n);
+      }
+    },
+    done: (s) => !!s.done,
+    sub: (s) => (s.done ? `✓ ${t("renforcé sur place")}` : t("un refuge ou le mulet, puis Renforcer loin de la grotte")),
+    end(s) { markers.splice(markers.indexOf(s.m), 1); },
+  });
+  // 10. sabotage: the line, then a mine under a jeep
+  L.push({
+    title: t("Le sabotage"),
+    text: t("Le poste appelle ses avions par le <b>télégraphe</b>. Un faoudj près d'un poteau : <b>Couper la ligne</b> (<kbd>J</kbd>) — tant qu'elle est coupée, pas d'appui aérien français. Puis posez une <b>mine</b> (<kbd>X</kbd>, clic sur la route, au cercle) : une jeep va passer."),
+    start(s) { fund(120); s.m = { ...SP.mine, r: 6 }; markers.push(s.m); app.rtsCamera?.focusOn(SP.mine.x, SP.mine.z); },
+    tick(s) {
+      if (app.algTelegraph?.cut) s.cut = true;
+      // the jeep sets off once a mine is down (or the line cut and some time spent)
+      s.wait = (s.wait ?? 0) + P.tick;
+      if (!s.jeep && (s.wait > 45 || (app.algMines?.count ?? 0) > 0 || s.cut && s.wait > 25)) { s.jeep = vehicle("willys"); s.f = [s.jeep].filter(Boolean); s.c = {}; say(t("<b>Jeep</b> sur la route."), SP.roadWest.x, SP.roadWest.z, "bad"); }
+      if (s.jeep?.alive) { if (escaped(s.jeep)) { escape(s.jeep); s.missed = true; } else walk(s.c, [s.jeep], roadPath); }
+      if (s.missed && !s.jeep2 && s.cut) { s.jeep2 = true; s.jeep = vehicle("willys"); s.f = [s.jeep].filter(Boolean); s.c = {}; s.missed = false; say(t("Une autre jeep arrive : la mine sur la route, au cercle."), SP.roadWest.x, SP.roadWest.z, ""); }
+    },
+    where: (s) => [s.jeep?.alive ? s.jeep.position : s.m],
+    done: (s) => s.cut && s.jeep && !s.jeep.alive && !s.missed,
+    sub: (s) => `${s.cut ? "✓" : "·"} ${t("la ligne coupée")} · ${s.jeep && !s.jeep.alive && !s.missed ? "✓" : "·"} ${t("la jeep sautée")}`,
+    end(s) { markers.splice(markers.indexOf(s.m), 1); },
+  });
+  // 11. the command mine
+  L.push({
+    title: t("La mine commandée"),
+    text: t("Une mine ordinaire saute sous le premier venu. Une <b>mine commandée</b> (<kbd>I</kbd>) attend votre ordre : posez-la sur la route, un homme garde le fil. Un camion arrive — quand il est <b>dessus</b>, <b>Faire sauter</b> (<kbd>L</kbd>)."),
+    start(s) { fund(120); s.wait = 0; },
+    tick(s) {
+      s.wait += P.tick;
+      if (!s.truck && (s.wait > 40 || units.list.some((u) => u.alive && u.team === "enemy" && app.algMines?.heldBy?.(u)?.length))) { s.truck = vehicle("gmc"); s.f = [s.truck].filter(Boolean); s.c = {}; say(t("<b>Camion</b> sur la route."), SP.roadWest.x, SP.roadWest.z, "bad"); }
+      if (s.truck?.alive) { if (escaped(s.truck)) { escape(s.truck); s.truck = null; s.wait = 20; say(t("Il est passé. Un autre camion arrive."), SP.roadEast.x, SP.roadEast.z, ""); } else walk(s.c, [s.truck], roadPath); }
+    },
+    where: (s) => [s.truck?.alive ? s.truck.position : SP.mine],
+    done: (s) => s.truck && !s.truck.alive,
+  });
+  // 12. armour
+  L.push({
+    title: t("Les blindés"),
+    text: t("Un <b>half-track</b> sur la route, mitrailleuse en batterie. Avec des fusils, ne l'attaquez pas : <b>Halte au feu</b> dans les broussailles et laissez-le passer — ou frappez-le au <b>bazooka</b> depuis un couvert, de flanc, avant qu'il ne vous voie."),
+    start(s) { s.ht = vehicle("halftrack"); s.f = [s.ht].filter(Boolean); s.c = {}; s.n0 = squadCount(); fund(80); say(t("<b>Blindé !</b> Un half-track sur la route."), SP.roadWest.x, SP.roadWest.z, "bad"); },
+    tick(s) { if (s.ht?.alive) { if (escaped(s.ht)) { escape(s.ht); s.passed = true; } else walk(s.c, [s.ht], roadPath); } },
+    where: (s) => [s.ht?.alive ? s.ht.position : null],
+    done: (s) => (s.ht && !s.ht.alive && !s.passed) || (s.passed && squadCount() >= s.n0),
+    sub: (s) => (s.passed ? (squadCount() >= s.n0 ? `✓ ${t("passé sans pertes")}` : t("passé — mais il vous a coûté un groupe")) : t("le détruire, ou le laisser passer sans pertes")),
+  });
+  // 13. THE CONVOY
+  L.push({
+    title: t("Le convoi"),
+    text: t("<b>L'épreuve finale.</b> Un convoi descend la route : deux camions et leur half-track d'escorte. Préparez l'embuscade : des mines sur la route, vos hommes dans les broussailles et sur le piton, <b>Halte au feu</b>… et tout en même temps. Arrêtez-le avant qu'il ne quitte la vallée."),
+    start(s) {
+      fund(400);
+      s.n0 = squadCount();
+      s.prep = 60;   // a minute to set the ambush
+      say(t("Le convoi passe dans <b>une minute</b>. Préparez l'embuscade."), SP.ambush.x, SP.ambush.z, "");
+    },
+    tick(s) {
+      if (s.prep > 0) { s.prep -= P.tick; if (s.prep <= 0) { s.f = [vehicle("halftrack"), vehicle("gmc", -14), vehicle("gmc", -28)].filter(Boolean); s.c = {}; s.got = []; say(t("<b>Le convoi !</b> Deux camions et un half-track sur la route."), SP.roadWest.x, SP.roadWest.z, "bad"); } return; }
+      for (const u of s.f) if (u.alive && escaped(u)) { escape(u); s.got.push(u); }
+      const live = s.f.filter((u) => u.alive);
+      if (live.length) walk(s.c, live, roadPath);
+    },
+    where: (s) => (s.f ? alive(s.f) : [SP.ambush]),
+    done: (s) => !!s.f && s.f.every((u) => !u.alive),
+    sub: (s) => (s.prep > 0 ? t("le convoi dans {n} s", { n: Math.ceil(s.prep) }) : t("{n} véhicules restants", { n: s.f.filter((u) => u.alive).length })),
+    end(s) { result = { stopped: s.f ? s.f.length - s.got.length : 0, total: s.f?.length ?? 3, lost: Math.max(0, (s.n0 ?? 0) - squadCount()), got: s.got?.length ?? 0 }; },
+  });
+  let result = null;
+
   // ── The panel (the French training's) ─────────────────────────────────────
   const style = document.createElement("style");
   style.textContent = `
@@ -240,12 +343,19 @@ body #alg-score, #alg-obj { display: none !important; }
     finished = true;
     showWhere([]);
     el.hidden = true;
-    const back = hud.end(`
+    // THREE STARS (CoH): the convoy stopped (both trucks at least) · no squad lost · nothing got away
+    const r = result ?? { stopped: 0, total: 3, lost: 0, got: 3 };
+    const stars = [r.stopped >= 2, r.lost === 0, r.got === 0];
+    const star = (on, label) => `<div style="display:flex;gap:10px;align-items:center;margin:4px 0;opacity:${on ? 1 : 0.45}"><span style="font-size:22px;color:${on ? "#f2c94c" : "#6b6255"}">★</span><span>${label}</span></div>`;
+    hud.end(`
       <div class="kicker">${t("Le maquis")}</div>
-      <h2 class="win">${t("Première instruction terminée")}</h2>
-      <p>${t("Vous savez vous cacher, tendre une embuscade, frapper et disparaître, tenir un douar, former vos combattants, bâtir et armer un faoudj d'un bazooka.")}</p>
-      <p>${t("<b>La suite arrive :</b> le refuge et le mulet, le sabotage de la ligne, les mines, les blindés — et l'embuscade d'un convoi.")}</p>`, { onReplay: () => location.reload() });
-    void back;
+      ${stars[0] ? `<h2 class="win">${t("Instruction terminée")}</h2>` : `<h2>${t("Le convoi est passé")}</h2><p>${t("L'embuscade a échoué : le convoi a quitté la vallée. Des mines sur la route, tout le monde caché, halte au feu — puis tout ensemble. <b>Rejouer</b> pour réessayer.")}</p>`}
+      ${star(stars[0], t("Le convoi arrêté ({n} / {m} véhicules)", { n: r.stopped, m: r.total }))}
+      ${star(stars[1], r.lost ? t("{n} groupes perdus", { n: r.lost }) : t("Aucun groupe perdu"))}
+      ${star(stars[2], r.got ? t("{n} véhicules ont échappé", { n: r.got }) : t("Rien n'a échappé"))}
+      <p>${t("Vous savez vous cacher, tendre une embuscade, frapper et disparaître, tenir un douar, former, bâtir, armer, saboter, miner — et arrêter un convoi. La suite : les Aurès, côté FLN.")}</p>
+      <p><button type="button" class="go" data-a="aures">${t("Les Aurès — côté FLN ›")}</button></p>`, { onReplay: () => location.reload() })
+      ?.querySelector?.('[data-a="aures"]')?.addEventListener("click", () => { location.href = "./alg.html?side=fln"; });
   }
   app.addPreRenderHook((dt) => {
     if (!running || finished || i < 0 || !state.ready) return;
@@ -282,7 +392,7 @@ body #alg-score, #alg-obj { display: none !important; }
       return hud.briefing(`
         <div class="kicker">${t("Algérie, 1956 · Le maquis")}</div>
         <h2>${t("Instruction FLN")}</h2>
-        <p>${t("Vous n'avez ni blindés, ni avions, ni artillerie. Vous avez le djebel, les broussailles, les douars — et la surprise. Huit leçons courtes : se cacher, tendre une embuscade, frapper et disparaître, tenir un village, former, bâtir, armer.")}</p>
+        <p>${t("Vous n'avez ni blindés, ni avions, ni artillerie. Vous avez le djebel, les broussailles, les douars — et la surprise. Treize leçons courtes : se cacher, tendre une embuscade, frapper et disparaître, tenir un village, former, bâtir, armer, saboter, miner — puis un vrai convoi à arrêter.")}</p>
         <p>${t("Chaque leçon s'affiche en haut de l'écran et passe d'elle-même une fois faite. <b>Passer</b> saute celle que vous connaissez. <kbd>Échap</kbd> : pause, options, manuel.")}</p>`,
         () => this.start(), { ready });
     },
