@@ -28,6 +28,7 @@ import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
+import { buildObstacleSet, avoidObstacles } from "./obstacles.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -382,6 +383,14 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       decks.push(asCollider(look.deck, p.M, { roadHold: ROAD_HOLD.has(p.id.replace(/_L$/, "")) || !!t?.roadHold, freeCarve: !!t?.freeCarve }));
       if (look.railCollision) solids.push(asCollider(look.railCollision, p.M));
     }
+    // OBSTACLES (obstacles.js): fixed ones join the trees; movers are posed from the race clock each tick
+    const obstacles = buildObstacleSet(track?.props ?? []);
+    group.add(obstacles.group);
+    obstacles.group.traverse((m) => { if (m.isMesh) m.layers.enable(DYNAMIC_LAYER); });
+    for (const d of obstacles.decks) decks.push(asCollider(d.geometry, d.M));
+    for (const s of obstacles.solids) solids.push(asCollider(s.geometry, s.M));
+    vehicle.setDynamicMovers(obstacles.movers);
+    ghostCar.setDynamicMovers(obstacles.movers);
     const t0 = performance.now();
     const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
     const ground = createVehicleGround({ getTerrainHeight: floorH });
@@ -411,7 +420,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const magnets = magnetZones(lay.placements, TILES, integrate);
     const rules = createCarRules(vehicle, { boostPads, magnets });
     const ghostRules = createCarRules(ghostCar, { boostPads, magnets });
-    const pilot = createAutopilot(lay.ride); // autopilot.js: shared with the builder's prediction and the tests
+    const pilot = createAutopilot(avoidObstacles(lay.ride, track?.props)); // autopilot.js (shared with the builder's prediction and the tests), its line round the obstacles
     const GHOST_KEY = `thunderline.ghost.${trackKey}`;
     let ghostData = null;
     try { ghostData = JSON.parse(localStorage.getItem(GHOST_KEY)); } catch {}
@@ -421,6 +430,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       ghostPlayer: null, recorder: createGhostRecorder(), landings: [], startQuat, spawnPos,
       KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
+      obstacles, moverT: 0, // the movers' RACE clock: 0 at the green light, held through the countdown
     };
     $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart`;
     hud.classList.add("on");
@@ -452,6 +462,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   function stop() {
     if (!S) return;
     scene.remove(S.group); // its geometries are the shared tile cache: kept for the next drive
+    vehicle.setDynamicMovers([]);
+    ghostCar.setDynamicMovers([]);
     clearTimeout(splitTimer);
     clearTimeout(landTimer);
     $("finish").classList.remove("show");
@@ -491,6 +503,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     chase.reset();
     S.simAccum = 0;
     S.runTime = 0;
+    S.moverT = 0;
+    S.obstacles.setTime(0);
     S.topKmh = 0;
     S.safe.pos.copy(S.spawnPos);
     S.safe.quat.copy(S.startQuat);
@@ -630,6 +644,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       // NO ENGINE UP A WALL, the clean-landing boost, boost pads, magnets: carRules.step, which the
       // ghost replays too. The countdown holds the car on the line.
       // after the finish the car brakes by itself on the run-out (no input: not part of the run)
+      // the movers first: the car meets them where the race clock says they are (the ghost, the same)
+      if (!race.holding) S.moverT += FIXED_DT;
+      S.obstacles.setTime(S.moverT);
       const used = race.holding ? HOLD : race.s.state === "finished" ? COAST : input;
       if (race.s.state === "finished" && vehicle.groundedCount > 0) vehicle.body.vel.multiplyScalar(Math.exp(-1.1 * FIXED_DT));
       const landed = rules.step(used, FIXED_DT);

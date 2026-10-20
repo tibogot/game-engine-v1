@@ -16,6 +16,7 @@ import { library, settings, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD } from "./worlds.js";
+import { OBSTACLES, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -38,7 +39,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 const FLOOR_Y = 0;
 const G = 9.81;
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass (P3: arcs must use it)
-const SNAP_COLORS = { end: 0x45e08a, arc: 0xff9a3d, local: 0xc78bff, world: 0x3fd2ff };
+const SNAP_COLORS = { end: 0x45e08a, road: 0x45e08a, arc: 0xff9a3d, local: 0xc78bff, world: 0x3fd2ff };
 const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
@@ -49,6 +50,8 @@ const CATS = [
   { id: "air", label: "Air", tiles: ["kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
+  // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_block", "ob_sweeper"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -115,13 +118,13 @@ const ringGateOf = (pc) => {
 };
 const isRing = (p) => !!p?.ring;
 const tileId = (base, h = hand) => {
-  if (base === RING) return RING;
+  if (base === RING || isObstacle(base)) return base;
   if (base === FITTED) return fittedId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
-const thumbOf = (id) => (id === RING ? RING : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
+const tileLabel = (base) => (isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const thumbOf = (id) => (id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
@@ -209,8 +212,8 @@ async function bakeThumbs() {
     const pid = id === FITTED_BOWL ? "bowl_110" : id; // a typical one
     const g = id === RING
       ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
-      : meshesFor(pid, false);
-    const t = id === RING ? {} : ensureTile(pid);
+      : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, false);
+    const t = id === RING || isObstacle(id) ? {} : ensureTile(pid);
     if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
     ts.add(g);
     g.updateMatrixWorld(true);
@@ -347,6 +350,7 @@ function pickTile(base, h = null) {
 const trackGroup = new THREE.Group();
 scene.add(trackGroup);
 let built = new Map(); // uid → { exit: Matrix4, group, M }
+let obstacleSet = null; // the track's obstacles as drawn (obstacles.js); the sweepers turn on the page's clock
 let problems = { overlap: new Set(), messages: [], loose: [], misses: [] };
 
 function rebuild() {
@@ -371,6 +375,13 @@ function rebuild() {
     trackGroup.add(g);
     if (pc.cp) trackGroup.add(checkpointGate(pc, M));
     built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pc.open).exitLocal), group: g, M });
+  }
+  // OBSTACLES (track.props): drawn here, selectable like pieces; the sweepers turn on the page's clock
+  obstacleSet = buildObstacleSet(track.props ?? []);
+  for (const vis of obstacleSet.group.children.slice()) {
+    trackGroup.add(vis);
+    const M = vis.matrix.clone();
+    built.set(vis.userData.uid, { exit: M, group: vis, M, prop: true });
   }
   save();
   refreshArcs();
@@ -438,6 +449,10 @@ async function runPrediction() {
       ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
     }
   }
+  // the obstacles, as the drive page has them (the movers on the run's clock, tick by tick)
+  const obs = buildObstacleSet(track.props ?? [], { look: false });
+  for (const d of obs.decks) decks.push(col(d.geometry, d.M));
+  for (const s of obs.solids) solids.push(col(s.geometry, s.M));
   const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
   deckBvh.bakeFromMeshes(decks);
   solidsBvh.bakeFromMeshes(solids);
@@ -449,6 +464,7 @@ async function runPrediction() {
   car.setBvh(ground.ground, ground.solids);
   car.getFloorY = () => FLOOR_Y;
   car.setSolidCapsules([]);
+  car.setDynamicMovers(obs.movers);
   const M0 = built.get(order[0].uid).M;
   const fwd0 = new THREE.Vector3(0, 0, -1).transformDirection(M0);
   car.setSpawn(new THREE.Vector3().setFromMatrixPosition(M0).addScaledVector(fwd0, 12).add(new THREE.Vector3(0, 0.6, 0)),
@@ -467,7 +483,7 @@ async function runPrediction() {
   prediction.openJump = false;
   let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
   const nose = new THREE.Vector3();
-  const pilot = createAutopilot(ride); // the drive page's autopilot (and its wall cut, air spin)
+  const pilot = createAutopilot(avoidObstacles(ride, track.props)); // the drive page's autopilot (wall cut, air spin), its line round the obstacles
   const magnets = magnetZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), TILES, integrate);
   const rules = createCarRules(car, { boostPads: boosts, magnets }); // the drive page's rules: wall cut, landing boost, pads, magnets
   // the air rings, judged by the race's own rule (race.js): through the hoop or missed
@@ -477,6 +493,7 @@ async function runPrediction() {
   let endSpeed = null;
   for (let tick = 0; tick < 120 * 180; tick++) {
     const p = car.body.pos;
+    obs.setTime(tick * FIXED_DT); // the drive page's race clock: 0 at the green light
     const landed = rules.step(pilot.input(car), FIXED_DT);
     if (landed) prediction.landings.push(landed.grade);
     ringRace?.tick(car, FIXED_DT);
@@ -741,6 +758,38 @@ function localRef() {
   const fwd = new THREE.Vector3(0, 0, -1).transformDirection(b.exit);
   return { pos, yaw: Math.atan2(-fwd.x, -fwd.z) };
 }
+/**
+ * OBSTACLES snap ON A ROAD (the deck under the mouse): standing on the deck, along the road's direction
+ * and bank, across it in 2 m steps (kept inside the kerbs), Q/E turning it from there. Off the road
+ * they stand on the FLOOR, on the world grid.
+ */
+function obstacleSnap() {
+  ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
+  for (const h of ray.intersectObjects(trackGroup.children, true)) {
+    let o = h.object;
+    while (o && o.userData.uid == null) o = o.parent;
+    const pc = o && track.pieces.find((p) => p.uid === o.userData.uid && !isRing(p));
+    if (!pc) continue;
+    const { b, t } = piece(pc.id, pc.open);
+    const hw = SECTIONS[t.section ?? "road"].hw;
+    const M = built.get(pc.uid).M;
+    const local = h.point.clone().applyMatrix4(M.clone().invert());
+    let best = null, bd = Infinity;
+    for (const r of b.rings) { if (r.air) continue; const d = r.p.distanceToSquared(local); if (d < bd) { bd = d; best = r; } }
+    if (!best) continue;
+    const f = deckFrame(best, hw);
+    const lat = THREE.MathUtils.clamp(Math.round(local.clone().sub(f.P).dot(f.R) / 2) * 2, -(hw - 2), hw - 2);
+    const along = local.clone().sub(f.P).dot(best.T);
+    const P = f.P.clone().addScaledVector(f.R, lat).addScaledVector(best.T, along);
+    const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(P);
+    m.multiply(new THREE.Matrix4().makeRotationY(rot.yaw * DEG));
+    return { type: "road", m: M.clone().multiply(m) };
+  }
+  const hit = new THREE.Vector3();
+  if (!ray.ray.intersectPlane(new THREE.Plane(UP, -FLOOR_Y), hit)) return null;
+  const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
+  return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
+}
 function ringSnap() {
   let best = null;
   for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
@@ -757,6 +806,7 @@ function ringSnap() {
 }
 function computeSnap() {
   if (tileBase === RING) return ringSnap();
+  if (isObstacle(tileBase)) return obstacleSnap();
   const id = tileId(tileBase);
   const t = TILES[id];
   let best = null;
@@ -862,7 +912,7 @@ function updateGhost() {
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
-    ghost = id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
+    ghost = isObstacle(id) ? new THREE.Mesh(OBSTACLES[id].ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -935,6 +985,11 @@ function place() {
     rebuild();
     return;
   }
+  if (isObstacle(id)) {
+    (track.props ??= []).push({ uid, kind: id, M: snap.m.toArray() });
+    rebuild();
+    return;
+  }
   track.pieces.push({ uid, id, open: !edges, M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
   const ri = recent.findIndex((r) => r.id === id);
   if (ri >= 0) recent.splice(ri, 1);
@@ -945,6 +1000,8 @@ function place() {
   glide = exit;
 }
 function removePiece(uid) {
+  const k = (track.props ?? []).findIndex((p) => p.uid === uid);
+  if (k >= 0) { snapshot(); track.props.splice(k, 1); sel = null; rebuild(); return; }
   const i = track.pieces.findIndex((p) => p.uid === uid);
   if (i < 0) return;
   snapshot();
@@ -1066,15 +1123,16 @@ function predictionLine() {
     (P.landings?.length ? `<div class="row"><span>landings (lined up)</span><b>${P.landings.filter((g) => g === "perfect").length}/${P.landings.length} perfect</b></div>` : "");
 }
 function renderStatus() {
-  const names = { end: "open end", arc: "flight arc", local: "local grid", world: "world grid" };
-  const selPc = sel != null && !tileBase ? track.pieces.find((p) => p.uid === sel) : null;
+  const names = { end: "open end", road: "on the road", arc: "flight arc", local: "local grid", world: "world grid" };
+  const selPc = sel != null && !tileBase ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
   const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, editMode, editMsg, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
-    `<div class="mode" style="color:${col}">${tileBase ? `${tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : selPc ? (isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
-    (selPc && !isRing(selPc)
+    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
+    (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · on a road or the floor · Q/E turn</span></div>` : "") +
+    (selPc && !isRing(selPc) && !selPc.kind
       ? (editMode
           ? `<div class="edit-ask">${editMode === "insert" ? "Insert after it" : "Replace it"}: pick a piece in the dock below · <kbd>Esc</kbd> cancel</div>`
           : "") +
@@ -1319,6 +1377,7 @@ app.addPreUpdateHook(function builderFrame() {
   controls.update();
   updateGhost();
   updateHeightCue();
+  obstacleSet?.setTime(now / 1000); // the sweepers turn while you build (the test lap has its own clock)
   renderHand();
   updateGrid();
   updateNext();
