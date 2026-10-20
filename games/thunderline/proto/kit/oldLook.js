@@ -33,7 +33,42 @@ export function createOldLookMaterials() {
   tube.shadowSide = THREE.BackSide;
   // the tubes' white trim: rims at the ends and joints, seams along the shell
   const trim = new THREE.MeshStandardNodeMaterial({ color: 0xf1f4f9, roughness: 0.32, metalness: 0.05 });
-  return { road, tube, trim, rail: createGuardrailMaterial() };
+  // STUNT STRIPES (stripedUnder below): flat bands, vertex coloured
+  const stripe = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45, metalness: 0.1, side: THREE.DoubleSide });
+  // THE RAIL, SATIN (user, 2026-10-20: the left rail "fades a few metres ahead"): not a shadow — with the
+  // shadows off it did the same. The old rail is half metal at roughness 0.2, a mirror: its face turned
+  // away from the sun showed only reflections, dark blue under the car and bright at a grazing angle
+  // further on. Satin (0.5 / 0.25) is one even sky-lit tone along its length. The old game keeps its own.
+  return { road, tube, trim, rail: createGuardrailMaterial({ roughness: 0.5, metalness: 0.25 }), stripe };
+}
+
+/**
+ * STUNT PIECES WEAR STRIPES (user's Apex Rush top view, 2026-10-20: every stunt piece has a striped
+ * underside, so from anywhere you read "this is a stunt"). Bands under the slab and along both its sides,
+ * in Thunderline's colours (navy, bolt blue, white, signal orange — never their orange-black livery),
+ * following the deck through every roll. Only these pieces (and their _L):
+ */
+export const STRIPED = new Set(["twist_120", "half_loop_28", "loop_28", "wallride_90", "uturn_wall_32"]);
+const NAVY = [0.06, 0.09, 0.2], BOLT = [0.25, 0.82, 1.0], WHITE = [0.93, 0.95, 0.98], SIGNAL = [1.0, 0.48, 0.1];
+// across the underside (x from −1 to 1 of the slab's half width) and down each side (0 top … 1 bottom)
+const UNDER_BANDS = [[-1, -0.62, NAVY], [-0.62, -0.38, BOLT], [-0.38, -0.2, WHITE], [-0.2, 0.2, SIGNAL], [0.2, 0.38, WHITE], [0.38, 0.62, BOLT], [0.62, 1, NAVY]];
+const SIDE_BANDS = [[0, 0.34, BOLT], [0.34, 0.6, WHITE], [0.6, 1, SIGNAL]];
+function stripedUnder(frames, hw, slab) {
+  const pos = [], col = [], idx = [];
+  const strip = (at, color) => { // at(frame, t) → point; t = 0 / 1 across the band
+    const base = pos.length / 3;
+    for (const f of frames) for (const t of [0, 1]) { pos.push(...at(f, t).toArray()); col.push(...color); }
+    for (let i = 0; i < frames.length - 1; i++) { const k = base + i * 2; idx.push(k, k + 2, k + 1, k + 1, k + 2, k + 3); }
+  };
+  const under = -slab - 0.03, w = hw + 0.02;
+  for (const [a, b, c] of UNDER_BANDS) strip((f, t) => f.pos.clone().addScaledVector(f.right, w * (t ? b : a)).addScaledVector(f.up, under), c);
+  for (const s of [-1, 1]) for (const [a, b, c] of SIDE_BANDS) strip((f, t) => f.pos.clone().addScaledVector(f.right, s * (hw + 0.04)).addScaledVector(f.up, -slab * (t ? b : a)), c);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
 }
 
 /** Old-kit frames ({pos, tangent, up, right}) along a new piece, every ≤2 m, no duplicate stations. */
@@ -86,9 +121,10 @@ export function buildOldLook(tile, edges = true) {
   const a = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
   deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
-  if (!edges) return { deck, rail: null, railCollision: null, posts: null };
+  const under = STRIPED.has(String(tile.id ?? "").replace(/_L$/, "")) ? merge(parts.map((r) => stripedUnder(r, rp.width / 2, rp.thickness ?? 0.9))) : null;
+  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under };
   const posts = { key: "", template: null, matrices: [] };
   const rail = merge(parts.map((r) => buildRailGeometry(r, rp, undefined, { postSink: posts })));
   const railCollision = merge(parts.map((r) => buildRailCollision(r, rp)));
-  return { deck, rail, railCollision, posts };
+  return { deck, rail, railCollision, posts, under };
 }

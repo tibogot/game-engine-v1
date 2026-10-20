@@ -180,7 +180,7 @@ export function buildTrackMeshes(placements, built, mats) {
   for (const [key, list] of Object.entries(byKey)) {
     const [id, kind] = key.split("|");
     const look = kind === "open" ? built[id].open : built[id].guarded;
-    for (const [geo, m] of [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road], [look.rail, look.trim ? mats.trim : mats.rail]]) {
+    for (const [geo, m] of [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road], [look.rail, look.trim ? mats.trim : mats.rail], [look.under, mats.stripe]]) {
       if (!geo) continue;
       const im = new THREE.InstancedMesh(geo, m, list.length);
       list.forEach((M, i) => im.setMatrixAt(i, M));

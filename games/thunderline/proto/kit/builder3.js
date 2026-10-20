@@ -208,6 +208,7 @@ function meshesFor(id, open) {
   const g = new THREE.Group();
   g.add(new THREE.Mesh(look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road));
   if (look.rail) g.add(new THREE.Mesh(look.rail, look.trim ? mats.trim : mats.rail));
+  if (look.under) g.add(new THREE.Mesh(look.under, mats.stripe)); // stunt stripes (oldLook.js STRIPED)
   if (look.posts?.template && look.posts.matrices.length) {
     const im = new THREE.InstancedMesh(look.posts.template, mats.rail, look.posts.matrices.length);
     look.posts.matrices.forEach((m, i) => im.setMatrixAt(i, m));
