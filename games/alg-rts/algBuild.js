@@ -21,7 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
-import { loadSangar, sangarGeometry } from "./algSangar.js";
+import { armsCacheGeometry, loadArmsCache, loadSangar, sangarGeometry, swapPlaced } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -52,7 +52,7 @@ export const BUILDS = {
   // A NEW ARMS CACHE (2026-10-02): the FLN hides one in a village it holds
   // when the French have found theirs (algAI.js) — each standing cache arms
   // two FM teams. Hidden from the French until seen, built or not.
-  armsCache: { label: t("Cache d'armes"), tip: t("Cache d'armes : chaque cache debout arme deux équipes FM. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 120, time: 40, build: () => buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }), follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
+  armsCache: { label: t("Cache d'armes"), tip: t("Cache d'armes : chaque cache debout arme deux équipes FM. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 120, time: 40, build: () => armsCacheGeometry() ?? buildArmsCache({ seed: 1958 + Math.floor(Math.random() * 99) }) /* (the Blender piece once loaded — algSangar.js) */, follow: true, structure: "armsCache", team: "enemy", by: ["moudjahid"] },
   // A NEW REFUGE (2026-10-07, the tunnels): the FLN digs one near a village it holds, the
   // nearest the post first (algAI.js stepRefuges) — its bands go to ground and come back out of
   // it. Hidden from the French until seen.
@@ -111,6 +111,13 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const geoCache = new Map();
   // The Blender pieces load in the background: their builder's old geometry until then (the cache forgets it).
   loadSangar().then((ok) => { if (ok) geoCache.delete("sangar"); });
+  loadArmsCache().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("armsCache");
+    // the caches already standing (the showroom's, the landmarks' in the hills): the new piece too
+    const n = swapPlaced(showroom, /^armsCache\d*$/, armsCacheGeometry());
+    if (n) onCover();
+  });
   const geoOf = (key) => { if (!geoCache.has(key)) geoCache.set(key, BUILDS[key].build()); return geoCache.get(key); };
 
   // ── The site: footprint samples, validity, the height (and tilt) it stands at ──

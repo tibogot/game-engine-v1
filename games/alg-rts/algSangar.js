@@ -19,7 +19,7 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildArmsCache, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 
 /** The detail's look: its tile (m), the scan normal's strength, the cavity's depth. ?stonedetail=0 = without. */
 export const STONE_DETAIL = { tile: 0.5, normal: 1.6, cavity: 0.3 };
@@ -59,32 +59,65 @@ function stoneMaterial(src, T) {
 }
 
 const S = 1.3;   // the kit's scale (the Blender piece is in real metres)
-let _geo = null, _mat = null, _p = null, _detail = null;
+let _detail = null;
+const _pieces = new Map();   // "kit:type" → { p: Promise<boolean>, geo }
 
 /** The sangar's stone material for a kit mesh (the lab's houseMesh copies): the same detail. Null until loaded. */
 export function sangarStoneMaterial(src) { return _detail ? stoneMaterial(src, _detail) : null; }
 
-/** Load the Blender sangar once. Resolves true when sangarGeometry() has it. */
-export function loadSangar() {
-  return (_p ??= Promise.all([loadHouses("sangar"), detailTextures().catch(() => null)]).then(([parts, T]) => {
-    if (!parts?.["sangar:intact"]) return false;
-    const near = houseMesh("sangar", "intact", 1)?.children[0]?.levels?.[0]?.object;
+/**
+ * Load a BLENDER STONE PIECE once (a kit of algHouse.js: the sangar, the arms cache): its intact near level as a
+ * game geometry — plain floats, the kit's scale, the OLD piece's data (`old()`: its footprint, gun… the game's
+ * systems read them), the stone material, the construction material. Resolves true when pieceGeometry() has it.
+ */
+function loadBlenderPiece(kit, type, old) {
+  const key = `${kit}:${type}`;
+  if (_pieces.has(key)) return _pieces.get(key).p;
+  const rec = { geo: null, p: null };
+  _pieces.set(key, rec);
+  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null)]).then(([parts, T]) => {
+    if (!parts?.[`${type}:intact`]) return false;
+    const near = houseMesh(type, "intact", 1)?.children[0]?.levels?.[0]?.object;
     if (!near) return false;
     const g = plainGeometry(near);
     g.scale(S, S, S);
     g.computeBoundingBox(); g.computeBoundingSphere();
-    // The old piece's data: the game's systems read these.
-    const old = buildSangar();
-    g.userData = { ...old.userData };
-    _mat = stoneMaterial(near.material, T);
+    const o = old();
+    g.userData = { ...o.userData };
+    o.dispose();
     _detail = T;
-    g.userData.labMaterial = _mat;
+    g.userData.labMaterial = stoneMaterial(near.material, T);
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4");
     g.userData.blender = true;
-    old.dispose();
-    _geo = g;
+    rec.geo = g;
     return true;
-  }).catch((e) => { console.warn("[sangar] the Blender piece did not load:", e); return false; }));
+  }).catch((e) => { console.warn(`[${kit}] the Blender piece did not load:`, e); return false; });
+  return rec.p;
+}
+const pieceGeometry = (kit, type) => _pieces.get(`${kit}:${type}`)?.geo ?? null;
+
+/** The sangar (tools/blender/sangar.py). */
+export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar());
+/** The arms cache (tools/blender/armsCache.py). */
+export const loadArmsCache = () => loadBlenderPiece("armscache", "arms", () => buildArmsCache());
+export const armsCacheGeometry = () => pieceGeometry("armscache", "arms");
+
+/**
+ * The pre-placed copies of a piece (the showroom's, the landmarks' — built with the old geometry before the Blender
+ * one loaded): their geometry and material swapped, each keeping its own data (footprint, name).
+ */
+export function swapPlaced(showroom, re, geo) {
+  if (!geo) return 0;
+  let n = 0;
+  for (const [name, mesh] of Object.entries(showroom ?? {})) {
+    if (!re.test(name) || !mesh?.isMesh) continue;
+    const g = geo.clone();
+    g.userData = { ...geo.userData, ...mesh.geometry.userData, labMaterial: geo.userData.labMaterial };
+    mesh.geometry = g;
+    mesh.material = geo.userData.labMaterial;
+    n++;
+  }
+  return n;
 }
 
 /**
@@ -108,7 +141,7 @@ export function plainGeometry(mesh) {
 }
 
 /** The Blender sangar's geometry (shared: clone it per copy), or null until loaded. */
-export function sangarGeometry() { return _geo; }
+export function sangarGeometry() { return pieceGeometry("sangar", "sangar"); }
 
 /** A construction site's material: { material, set(progress 0..1) }. */
 export function siteMaterial(src, colorType = "vec4") {

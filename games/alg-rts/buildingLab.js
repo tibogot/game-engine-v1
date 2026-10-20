@@ -15,7 +15,7 @@ import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildArmsCache, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { loadSangar, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { armsCacheGeometry, loadArmsCache, loadSangar, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 /** The village test: a lane (along x) of the kit, both sides facing it; the brown houses beyond. */
 function whiteVillage() {
   const g = new THREE.Group();
@@ -447,6 +447,26 @@ export const BUILDINGS = {
     },
     after: () => labPiece(sangarDetailed(houseMesh("sangar", "damaged"))),
     tags: ["SANGAR (LE JEU)", "SANGAR · NOUVEAU", "SANGAR · ENDOMMAGÉ"], note: "le sangar du jeu à gauche, le nouveau en pierres sèches (Blender) au milieu — « Construction » : pierre par pierre, comme en jeu — endommagé à droite.",
+  },
+  // THE ARMS CACHE IN BLENDER (2026-10-21, tools/blender/armsCache.py): the game's old one LEFT, the new one MIDDLE
+  // (its construction in the panel), damaged RIGHT; « Cache d'armes (Blender) : états » the three states.
+  cacheBlender: {
+    label: "Cache d'armes (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadArmsCache(),
+    before: () => buildArmsCache(),
+    middle: () => {
+      const g = armsCacheGeometry().clone(), site = g.userData.siteMaterial();
+      g.userData = { ...g.userData, labMaterial: site.material };
+      SITE = { set: site.set, stencilShown: () => false, sock: null };
+      site.set(1);
+      return g;
+    },
+    after: () => labPiece(sangarDetailed(houseMesh("arms", "damaged"))),
+    tags: ["CACHE (LE JEU)", "CACHE · NOUVELLE", "CACHE · ENDOMMAGÉE"], note: "la cache d'armes du jeu à gauche, la nouvelle (matmora et gourbi en pierres sèches, Blender) au milieu — « Construction » — endommagée à droite.",
+  },
+  cacheEtats: {
+    label: "Cache d'armes (Blender) : états", gap: 11, yaw: Math.PI - 0.5, prepare: () => loadArmsCache(),
+    before: () => labPiece(sangarDetailed(houseMesh("arms", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("arms", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("arms", "ruin"))),
+    tags: ["CACHE · INTACTE", "CACHE · ENDOMMAGÉE", "CACHE · DÉTRUITE"], note: "la cache d'armes en pierres sèches dans ses trois états.",
   },
   sangarEtats: {
     label: "Sangar (Blender) : états", gap: 7, yaw: Math.PI - 0.5, prepare: () => loadSangar(),

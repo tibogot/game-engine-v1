@@ -60,6 +60,8 @@ export const META = {
   pointBlender_mun: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
   sangarBlender: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   sangarEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
+  cacheBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
+  cacheEtats: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
 };
 export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps: [], status: "jeu" };
 
@@ -80,6 +82,7 @@ export const NAMES = {
   pointRavit: "Point: munitions (old depot) + capture marks", pointCarbu: "Point: fuel (old depot) + capture marks",
   pointBlender_fuel: "Requisition point: fuel (Blender)", pointBlender_mun: "Requisition point: munitions (Blender)",
   sangarBlender: "Sangar (Blender) + construction", sangarEtats: "Sangar (Blender): states",
+  cacheBlender: "Arms cache (Blender) + construction", cacheEtats: "Arms cache (Blender): states",
 };
 const WORDS = [
   ["(LE JEU)", "(THE GAME)"], ["(KIT DU JEU)", "(GAME KIT)"], ["NOUVEAU STANDARD", "NEW STANDARD"], ["NOUVELLE", "NEW"], ["NOUVEAU", "NEW"],

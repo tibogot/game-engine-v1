@@ -27,7 +27,9 @@ export const FIELD_WALL_TYPES = ["a", "b", "c"];
 export const POINT_TYPES = ["fuel", "mun"];
 // THE SANGAR (tools/blender/sangar.py — algSangar.js makes it the sappers' buildable)
 export const SANGAR_TYPES = ["sangar"];
-const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES } };
+// THE ARMS CACHE (tools/blender/armsCache.py — algSangar.js loadArmsCache)
+export const CACHE_TYPES = ["arms"];
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);

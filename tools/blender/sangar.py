@@ -26,77 +26,19 @@ from mathutils import Vector
 import house
 from house import buildKit
 from bkit import B, srgb, dust, flat, wood
+import drystone
 
 RAD, A0, A1 = 1.8, math.pi * 0.72, math.pi * 2.28    # the wall's centre line, the arc (open toward +z)
 HGT, DEPTH, COURSES = 1.05, 0.62, 5
 FRONT = math.pi * 1.5                                  # -z: the gun's side
 LOW = False
 
-SCAN = os.path.join(house.bkit.ROOT, "assets-src", "scans", "polyhaven", "rock_boulder_dry")
-def scanImg(nb, file, sc, data=False):
-    im = bpy.data.images.load(os.path.join(SCAN, file), check_existing=True)
-    if data: im.colorspace_settings.name = "Non-Color"
-    mp = nb.N.new("ShaderNodeMapping"); nb.L.new(nb.tc.outputs["Object"], mp.inputs["Vector"]); mp.inputs["Scale"].default_value = (sc, sc, sc)
-    n = nb.N.new("ShaderNodeTexImage"); n.image = im; n.projection = "BOX"; n.projection_blend = 0.25
-    nb.L.new(mp.outputs["Vector"], n.inputs["Vector"]); return n.outputs["Color"]
-def stoneMat(tint, sc=1.6):
-    """The scanned weathered limestone (Poly Haven CC0 rock_boulder_dry, 2k): its photo, every stone its own shade,
-    lichen; its NORMAL map on the BSDF — what the normal bake reads."""
-    def f(nb):
-        c = scanImg(nb, "rock_boulder_dry_diff_2k.jpg", sc)
-        c = nb.mix(1.0, c, srgb(tint), "MULTIPLY")
-        c = nb.scale(c, nb.mr(nb.island(), 0, 1, 0.8, 1.15))
-        c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(3.0, 5), 0.62, 0.72), 0.35), c, srgb(0x6f6a58))
-        pb = next(n for n in nb.N if n.type == "BSDF_PRINCIPLED")
-        nm = nb.N.new("ShaderNodeNormalMap"); nm.inputs["Strength"].default_value = 1.3
-        nb.L.new(scanImg(nb, "rock_boulder_dry_nor_gl_2k.jpg", sc, data=True), nm.inputs["Color"])
-        nb.L.new(nm.outputs["Normal"], pb.inputs["Normal"])
-        return dust(nb, c, 0.6, 0.8)
-    return f
-def brushMat(nb):
-    c = nb.mix(nb.noise(8.0, 4), srgb(0x6b5a44), srgb(0x55604a))              # dry juniper: brown wood, grey-green needles
-    return nb.scale(c, nb.mr(nb.island(), 0, 1, 0.75, 1.2))
+# (the stone, its material and the build order: shared with the other stone pieces — drystone.py)
 MATDEF = dict(house.MATDEF)
-MATDEF.update({
-    "sgStone": (0.95, stoneMat(0xe0d6c2)), "sgCap": (0.95, stoneMat(0xeae2d0)),   # (a light hand on the scan's own pale limestone)
-    "sgBrush": (0.95, brushMat), "sgJar": (0.9, flat(srgb(0xa8644a), 0.3)), "sgBox": (0.9, wood(0x7d7558)),
-})
-
-def tag(o, t):
-    """The moment this part is laid (0..1), for the colour attribute written at the end."""
-    if o is not None: o["t"] = float(t)
-    return o
-
-# THE STONES (2026-10-21, you: "the stones look very cheap, not AAA"). Tried first: whole scanned stones (Poly Haven
-# CC0, tools/blender/scanStones.py) stacked in courses — their colours a patchwork (white quartz, pink, brown) and
-# the stack a rubble pile, not a built wall. What reads: the TIDY courses, each stone a BLOCK of split limestone —
-# a hull pushed toward a box (flat faces, chipped corners), its surface the scanned weathered limestone
-# (rock_boulder_dry: colour, and its NORMAL map — the bake carries the relief into the game's normal atlas).
-def stone(K, nm, c, size, R, t, mat="sgStone", yaw=None):
-    """A split block: c its centre (game), size its half extents (along, up, across — `yaw` its long axis's turn,
-    three.js rotation.y; random without one). The same random numbers at either level (far: fewer points)."""
-    ry, tx, tz = R.uniform(0, 6.283), R.uniform(-0.08, 0.08), R.uniform(-0.08, 0.08)
-    th = yaw if yaw is not None else ry
-    ca, sa = math.cos(th), math.sin(th)
-    N = 26
-    pts = []
-    for i in range(N):
-        u = 1 - 2 * (i + 0.5) / N; v = i * 2.399963 + R.uniform(-0.25, 0.25)
-        r = math.sqrt(max(0.0, 1 - u * u))
-        q = [r * math.cos(v), u, r * math.sin(v)]
-        q = [math.copysign(abs(x) ** 0.45, x) for x in q]                 # toward a box: flat faces, edges
-        chip = R.random()
-        k = R.uniform(0.86, 1.0) * (0.78 if chip < 0.18 else 1.0)          # a corner knocked off
-        pts.append((q[0] * size[0] * k, q[1] * size[1] * R.uniform(0.9, 1.0), q[2] * size[2] * k))
-    if LOW: pts = pts[::2]
-    bm = bmesh.new()
-    vs = []
-    for lx, ly, lz in pts:
-        ly += lx * tx + lz * tz
-        # (local along / across turned by the yaw — three.js rotation.y)
-        vs.append(bm.verts.new(B(c[0] + lx * ca + lz * sa, c[1] + ly, c[2] - lx * sa + lz * ca)))
-    bmesh.ops.convex_hull(bm, input=vs)
-    return tag(K.obj(nm, bm, mat, "h"), t)
+MATDEF.update(drystone.STONE_MATS)
+MATDEF.update({"sgJar": (0.9, flat(srgb(0xa8644a), 0.3)), "sgBox": (0.9, wood(0x7d7558))})
+tag, writeBuildOrder = drystone.tag, drystone.writeBuildOrder
+def stone(*a, **k): return drystone.stone(*a, **k)
 
 def arcPt(a, r): return (math.cos(a) * r, math.sin(a) * r)
 
@@ -203,25 +145,15 @@ def props(K, R, state):
         x, z = arcPt(a, r)
         stone(K, f"F{i}", (x, s * 0.5, z), (s * 1.3, s * 0.7, s), R, 0.0)
 
-def writeBuildOrder(K):
-    """Each part's moment into a 'build' colour attribute (.r), the ACTIVE one — exported as COLOR_0."""
-    for o in K.groups["h"]:
-        if o.type != "MESH": continue
-        m = o.data
-        a = m.color_attributes.get("build") or m.color_attributes.new("build", "FLOAT_COLOR", "POINT")
-        t = float(o.get("t", 0.0))
-        for d in a.data: d.color = (t, 0.0, 0.0, 1.0)
-        m.color_attributes.active_color = a
-
 def buildSangar(K, name, spec, state, seed, far=False):
     global LOW
-    LOW = far; K.low = far
+    LOW = far; drystone.setLow(K, far)
     wall(K, random.Random(seed), state)
     apron(K, random.Random(seed + 7), state)
     brush(K, random.Random(seed + 1), state)
     props(K, random.Random(seed + 2), state)
     writeBuildOrder(K)
-    LOW = False; K.low = False
+    LOW = False; drystone.setLow(K, False)
 
 farSangar = lambda K, name, spec, state, seed: buildSangar(K, name, spec, state, seed, far=True)
 # (smoothAngle 45, no weighted normals: the split blocks' faces flat, their edges crisp — 80 made them pillows, the
