@@ -373,6 +373,14 @@ export const TILES = {
     // an S in the vertical: tip down 15°, then back to level — exits level, ~12.5 m lower
     segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }],
   },
+  // PLATFORMS (user, 2026-10-20: "we need some platform shapes, at least a straight one"): the WIDE section
+  // (48 m) as plain road — freestyle and landing areas; a 16 m road runs onto their open ends and off again
+  platform_32: { label: "Platform 32", section: "wide", segs: [{ L: 32 }] },
+  platform_64: { label: "Platform 64", section: "wide", segs: [{ L: 64 }] },
+  platform_128: { label: "Platform 128", section: "wide", segs: [{ L: 128 }] },
+  platform_turn_90: { label: "Platform turn 90°", section: "wide", segs: [{ L: turnLen(64, Math.PI / 2, 24), turn: Math.PI / 2, ramp: 24 }] },
+  platform_up_12: { label: "Platform up ~12 m", section: "wide", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
+  platform_down_12: { label: "Platform down ~12 m", section: "wide", segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }] },
   slope_up_12: { label: "Slope up ~12 m", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
   // HELIX (PIECES §7c, "use height" on small maps): a full circle (R 56) that climbs or drops 20 m over
   // itself — the exit runs on, in the entry's heading, 20 m above / below it. Banked with the curvature
