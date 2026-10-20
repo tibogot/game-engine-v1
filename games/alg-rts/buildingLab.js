@@ -15,7 +15,7 @@ import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { buildAmbushScreen, buildArmsCache, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildMirador, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, loadAmbushScreen, loadArmsCache, loadSangar, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, loadAmbushScreen, loadArmsCache, loadMirador, loadSangar, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -493,6 +493,29 @@ export const BUILDINGS = {
   // THE AMBUSH SCREEN IN BLENDER (2026-10-21, tools/blender/ambushScreen.py): the game's old one LEFT, the new one
   // MIDDLE — the dry-stone footing, the scrub the engine's plants (its construction in the panel: the footing, then the
   // scrub stood up) — damaged RIGHT.
+  // THE MIRADOR IN BLENDER (2026-10-21, tools/blender/mirador.py): the game's old one LEFT, the new one MIDDLE —
+  // timber and corrugated iron, YOUR simulated sandbags on the deck (its construction in the panel) — damaged RIGHT.
+  miradorBlender: {
+    label: "Mirador (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMirador(),
+    before: () => buildMirador(),
+    middle: () => {
+      const geo = miradorGeometry(), site = geo.userData.siteMaterial();
+      const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
+      const bags = (geo.userData.extra ?? []).map((x) => x.clone());
+      for (const b of bags) m.add(b);
+      SITE = { set: (p) => { site.set(p); for (const b of bags) b.visible = p >= (b.userData.late ?? 0); }, stencilShown: () => false, sock: null };
+      site.set(1);
+      return labPiece(m);
+    },
+    after: () => labPiece(houseMesh("mirador", "damaged")),
+    tags: ["MIRADOR (LE JEU)", "MIRADOR · NOUVEAU", "MIRADOR · ENDOMMAGÉ"], note: "le mirador du jeu à gauche, le nouveau (bois, tôle ondulée, vos sacs simulés sur le plancher) au milieu — « Construction » — endommagé à droite.",
+  },
+  miradorEtats: {
+    label: "Mirador (Blender) : états", gap: 10, yaw: Math.PI - 0.5, prepare: () => loadMirador(),
+    before: () => { const g = houseMesh("mirador", "intact"); const b = (miradorGeometry()?.userData.extra ?? [])[0]?.clone(); if (b) { b.position.y /= 1.3; b.scale.setScalar(1 / 1.3); g.add(b); } return labPiece(g); },
+    middle: () => labPiece(houseMesh("mirador", "damaged")), after: () => labPiece(houseMesh("mirador", "ruin")),
+    tags: ["MIRADOR · INTACT", "MIRADOR · ENDOMMAGÉ", "MIRADOR · DÉTRUIT"], note: "le mirador dans ses trois états (les sacs du plancher : l'intact).",
+  },
   ecranBlender: {
     label: "Écran d'embuscade (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAmbushScreen(),
     before: () => buildAmbushScreen(),

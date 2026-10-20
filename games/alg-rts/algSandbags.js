@@ -335,7 +335,8 @@ let _wallP = null;
  *  breached wall, the MG nest's ring. */
 const SIM = {};
 const SIM_FILES = { wall: "sandbagWall", breach: "sandbagBreach", ring: "sandbagRing", fort: "sandbagFort", pit: "sandbagPit",
-  chicane: "sandbagChicane", tower: "sandbagTower", lookout: "sandbagLookout", postpit: "sandbagPostPit" };
+  chicane: "sandbagChicane", tower: "sandbagTower", lookout: "sandbagLookout", postpit: "sandbagPostPit",
+  mirador: "sandbagMirador" };   // (the Blender mirador's cabin parapet, 2026-10-21 — algSangar.js loadMirador)
 /** A glb's one mesh → the bag material's attributes (shade from COLOR_0, foot, top/underside, the wall's shade). */
 function prepWall(gltf) {
   let src = null;

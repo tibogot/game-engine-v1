@@ -280,6 +280,14 @@ elif LAYOUT == "lookout":
     # the barracks' look-out (rtsFrenchPost block "barracks"): a horseshoe r 1.2 x KS open 90° at -Z
     for c in range(4):
         ring(1.2 * KS - c * 0.05, c, 0.0, -math.pi / 2, 90.0)
+elif LAYOUT == "mirador":
+    # the mirador's cabin parapet (tools/blender/mirador.py, 2026-10-21): bags inside the plank wall on the deck —
+    # the front and both sides of the cabin (3.0 m real = 3.9 game, the bags' line 1.56 game in from its centre),
+    # four courses; the back open (the ladder's hatch). The game sets it on the deck (algSangar.js).
+    for c in range(4):
+        wall_course(3.1 - c * 0.06, 1, 0.0, -1.5, 0.0, c)
+        for sx in (-1, 1):
+            wall_course(2.7 - c * 0.06, 1, sx * 1.5, 0.15, math.pi / 2, c)
 elif LAYOUT == "postpit":
     # the post's own mortar pit: a ring r 1.5 x KS open 70° at -Z
     for c in range(4):

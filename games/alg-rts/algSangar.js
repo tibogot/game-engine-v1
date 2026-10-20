@@ -8,7 +8,8 @@
 //   CONSTRUCTION   STONE BY STONE, not stretched out of the ground: every part carries the moment it is laid
 //                  (COLOR_0.r, written by the Blender script — the props first, the courses one by one along
 //                  the arc, the capstones, the lip, the brush). A site's own material (siteMaterial(): one
-//                  uniform) sinks the parts not yet laid 8 m under the ground and DROPS each one into place
+//                  uniform) sinks the parts not yet laid 200 m under the ground (8 m left a tall piece's cabin
+//                  showing at its foot — the mirador) and DROPS each one into place
 //                  over the last 6 % before its moment. GPU only. Done: the shared material back.
 //   CLOSE UP       (2026-10-21, you: "the stones look a bit too smooth from close"): the baked atlas spreads one
 //                  2048 texture over every stone of three states — soft. The SCAN'S OWN relief is tiled over the
@@ -19,7 +20,8 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 /** The detail's look: its tile (m), the scan normal's strength, the cavity's depth. ?stonedetail=0 = without. */
@@ -71,7 +73,7 @@ export function sangarStoneMaterial(src) { return _detail ? stoneMaterial(src, _
  * game geometry — plain floats, the kit's scale, the OLD piece's data (`old()`: its footprint, gun… the game's
  * systems read them), the stone material, the construction material. Resolves true when pieceGeometry() has it.
  */
-function loadBlenderPiece(kit, type, old, extra = null) {
+function loadBlenderPiece(kit, type, old, extra = null, { stone = true } = {}) {
   const key = `${kit}:${type}`;
   if (_pieces.has(key)) return _pieces.get(key).p;
   const rec = { geo: null, p: null };
@@ -92,8 +94,9 @@ function loadBlenderPiece(kit, type, old, extra = null) {
     g.userData = { ...o.userData };
     o.dispose();
     _detail = T;
-    g.userData.labMaterial = stoneMaterial(near.material, T);
-    g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4");
+    // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
+    g.userData.labMaterial = stone ? stoneMaterial(near.material, T) : plainMaterial(near.material);
+    g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
     g.userData.farGeometry = far;
     if (far) far.userData = g.userData;   // (the same data at either level: footprint, gun, materials)
@@ -104,6 +107,33 @@ function loadBlenderPiece(kit, type, old, extra = null) {
   return rec.p;
 }
 const pieceGeometry = (kit, type) => _pieces.get(`${kit}:${type}`)?.geo ?? null;
+
+/** A non-stone piece's material: its baked atlas (colour, and its relief if baked), front faces. */
+function plainMaterial(src) {
+  return new THREE.MeshStandardNodeMaterial({ map: src.map, normalMap: src.normalMap ?? null, color: src.color, roughness: src.roughness, metalness: src.metalness, side: THREE.FrontSide });
+}
+
+/**
+ * THE MIRADOR (tools/blender/mirador.py — timber, corrugated iron): its cabin's sandbags the user's cloth-simulated
+ * parapet (sandbagMirador.glb — algSandbags), on the deck: an `extra` of the piece (kitView adds it), shown LATE in
+ * the construction (`late`: algBuild hides it until then) — the bags go in once the plank walls stand.
+ */
+const MIRADOR_DECK = (6.2 + 0.13) * S;
+export const loadMirador = () => loadBlenderPiece("mirador", "mirador", () => buildMirador(), null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("mirador", "mirador");
+  if (g.userData.miradorBags) return ok;
+  await loadSandbagWall();
+  const bags = simulatedWallMesh("MiradorBags", "mirador");
+  if (bags) {
+    bags.position.set(0, MIRADOR_DECK, 0);
+    bags.userData.late = 0.74;
+    g.userData.extra = [...(g.userData.extra ?? []), bags];
+    g.userData.miradorBags = true;
+  }
+  return ok;
+});
+export const miradorGeometry = () => pieceGeometry("mirador", "mirador");
 
 /** The sangar (tools/blender/sangar.py). */
 export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar());
@@ -176,6 +206,7 @@ export function swapPlaced(showroom, re, geo, app = null) {
     g.userData = { ...geo.userData, ...mesh.geometry.userData, labMaterial: geo.userData.labMaterial };
     mesh.geometry = g;
     mesh.material = geo.userData.labMaterial;
+    for (const x of geo.userData.extra ?? []) mesh.add(x.clone());   // (the piece's own extras: the mirador's bags)
     if (geo.userData.farGeometry) {
       // (its far level carries this copy's data too)
       const f = geo.userData.farGeometry.clone(); f.userData = g.userData; g.userData.farGeometry = f;
@@ -245,14 +276,14 @@ export function untrackLod(mesh) {
 }
 
 /** A construction site's material: { material, set(progress 0..1) }. */
-export function siteMaterial(src, colorType = "vec4") {
+export function siteMaterial(src, colorType = "vec4", stone = true) {
   const progress = uniform(0);
   const t = attribute("color", colorType).x;                      // the part's moment
   const dt = progress.sub(t);
   const hidden = float(1).sub(step(t, progress));                 // not laid yet
   const fall = clamp(float(1).sub(dt.div(0.06)), 0, 1).mul(step(0.001, t));   // over its last 6 %
   // (the finished material itself — its colour, relief and detail: a different one shifted the tone the moment it was done)
-  const m = stoneMaterial(src, _detail);
-  m.positionNode = positionLocal.add(vec3(0, fall.mul(fall).mul(0.7).sub(hidden.mul(8)), 0));
+  const m = stone ? stoneMaterial(src, _detail) : plainMaterial(src);
+  m.positionNode = positionLocal.add(vec3(0, fall.mul(fall).mul(0.7).sub(hidden.mul(200)), 0));
   return { material: m, set(p) { progress.value = p; } };
 }
