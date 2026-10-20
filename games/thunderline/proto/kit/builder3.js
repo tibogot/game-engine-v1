@@ -4,6 +4,7 @@
 // Throwaway prototype (DESIGN.md §4–§5, §9).
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
@@ -977,7 +978,7 @@ function suggestionsFor(end) {
   const out = [];
   if (Math.abs(deg(end.lean)) > 3) {
     for (const c of CATS) for (const base of c.tiles) for (const h of [1, -1]) {
-      if (base === RING) continue; // not road
+      if (base === RING || isObstacle(base)) continue; // not road
       const id = tileId(base, h);
       if (h < 0 && id === base) continue;
       if (Math.abs(deg(leanIn(TILES[id])) - deg(end.lean)) < 3 && !out.some((o) => o.id === id)) out.push({ base, h, id });
@@ -1133,6 +1134,102 @@ function refreshSelection() {
   if (selBox) { scene.remove(selBox); selBox = null; }
   const b = sel != null ? built.get(sel) : null;
   if (b) { selBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(b.group), 0x3fd2ff); scene.add(selBox); }
+  attachGizmo();
+}
+
+// ---------- THE GIZMO (user, 2026-10-20: "don't you think we should have a gizmo?") ----------
+// Arrows to MOVE (grid-snapped) or a ring to TURN (about the vertical, 15° steps) what can move freely:
+// a road's FIRST piece (the whole road behind it comes along, with the landings, rings and obstacles on
+// it), an obstacle (dropped onto the road under it), an air ring. A piece in the middle of a road is
+// held by the road: Replace / Insert instead.
+const gizmoProxy = new THREE.Object3D();
+scene.add(gizmoProxy);
+const gizmo = new TransformControls(camera, renderer.domElement);
+gizmo.setSpace("world");
+gizmo.setSize(0.9);
+scene.add(gizmo.getHelper());
+let gizmoMode = "translate";
+let gizmoDrag = null;
+/** What the selection is, for the gizmo: "root" | "prop" | "ring" | null (held by the road). */
+function movableKind(uid) {
+  if (uid == null) return null;
+  if ((track.props ?? []).some((p) => p.uid === uid)) return "prop";
+  const pc = track.pieces.find((p) => p.uid === uid);
+  if (!pc) return null;
+  if (isRing(pc)) return "ring";
+  return pc.parent == null && pc.flightFrom == null ? "root" : null;
+}
+function attachGizmo() {
+  const kind = !tileBase && !driving ? movableKind(sel) : null;
+  if (!kind) { gizmo.detach(); return; }
+  built.get(sel).M.decompose(gizmoProxy.position, gizmoProxy.quaternion, gizmoProxy.scale);
+  gizmoProxy.updateMatrixWorld(true);
+  gizmo.setMode(gizmoMode);
+  gizmo.showX = gizmo.showZ = gizmoMode === "translate";
+  gizmo.translationSnap = gridStep;
+  gizmo.rotationSnap = 15 * DEG;
+  gizmo.attach(gizmoProxy);
+}
+function setGizmoMode(m) { gizmoMode = m; attachGizmo(); statusKey = ""; renderStatus(); }
+/** Everything that moves with `uid`: a root carries its road, what flies off it, and what stands on it. */
+function carried(uid) {
+  const kind = movableKind(uid);
+  if (kind !== "root") return { pieces: [uid], props: kind === "prop" ? [uid] : [] };
+  const S = new Set([uid]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const p of track.pieces) if (!S.has(p.uid) && (S.has(p.parent) || S.has(p.flightFrom))) { S.add(p.uid); grew = true; }
+  }
+  const pts = [];
+  for (const u of S) { const pc = track.pieces.find((p) => p.uid === u); if (pc && !isRing(pc)) for (const r of piece(pc.id, pc.open).b.rings) pts.push(r.p.clone().applyMatrix4(built.get(u).M)); }
+  const props = (track.props ?? []).filter((o) => { const c = new THREE.Vector3(o.M[12], o.M[13], o.M[14]); return pts.some((q) => Math.hypot(q.x - c.x, q.z - c.z) < 12 && Math.abs(q.y - c.y) < 5); }).map((o) => o.uid);
+  return { pieces: [...S], props };
+}
+gizmo.addEventListener("dragging-changed", (e) => {
+  controls.enabled = !e.value;
+  if (e.value) {
+    const what = carried(sel);
+    gizmoDrag = { start: gizmoProxy.matrixWorld.clone(), what, groups: [...what.pieces, ...what.props].map((u) => built.get(u)).filter(Boolean).map((b) => ({ g: b.group, M0: b.group.matrix.clone() })) };
+    for (const { g } of gizmoDrag.groups) g.matrixAutoUpdate = false;
+    return;
+  }
+  if (!gizmoDrag) return;
+  // COMMIT: the absolute frames move (a root, what flies off it, rings, obstacles); the rest of the road
+  // is laid on its parents again by rebuild()
+  const delta = gizmoProxy.matrixWorld.clone().multiply(gizmoDrag.start.clone().invert());
+  const moved = gizmoDrag;
+  gizmoDrag = null;
+  if (delta.equals(new THREE.Matrix4())) return;
+  snapshot();
+  for (const u of moved.what.pieces) {
+    const pc = track.pieces.find((p) => p.uid === u);
+    if (pc && (pc.parent == null)) pc.M = delta.clone().multiply(new THREE.Matrix4().fromArray(pc.M)).toArray();
+  }
+  for (const u of moved.what.props) {
+    const o = track.props.find((p) => p.uid === u);
+    let M = delta.clone().multiply(new THREE.Matrix4().fromArray(o.M));
+    if (movableKind(sel) === "prop") M = settleOnRoad(M); // an obstacle dropped on a road stands on its deck
+    o.M = M.toArray();
+  }
+  rebuild();
+});
+gizmo.addEventListener("objectChange", () => {
+  if (!gizmoDrag) return;
+  const delta = gizmoProxy.matrixWorld.clone().multiply(gizmoDrag.start.clone().invert());
+  for (const { g, M0 } of gizmoDrag.groups) { g.matrix.multiplyMatrices(delta, M0); g.matrixWorldNeedsUpdate = true; }
+  if (selBox) selBox.box.setFromObject(built.get(sel).group);
+});
+/** An obstacle's frame moved onto the road under it (within 6 m up or down): stood on that deck. */
+function settleOnRoad(M) {
+  const p = new THREE.Vector3().setFromMatrixPosition(M);
+  const r = new THREE.Raycaster(p.clone().add(new THREE.Vector3(0, 6, 0)), new THREE.Vector3(0, -1, 0), 0, 12);
+  for (const h of r.intersectObjects(trackGroup.children, true)) {
+    let o = h.object;
+    while (o && o.userData.uid == null) o = o.parent;
+    if (!o || !track.pieces.some((q) => q.uid === o.userData.uid && !isRing(q))) continue;
+    return M.clone().setPosition(h.point);
+  }
+  return M;
 }
 let glide = null;
 function stepGlide(dt) {
@@ -1173,7 +1270,7 @@ function predictionLine() {
 function renderStatus() {
   const names = { end: "open end", road: "on the road", arc: "flight arc", local: "local grid", world: "world grid" };
   const selPc = sel != null && !tileBase ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, editMode, editMsg, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -1190,6 +1287,11 @@ function renderStatus() {
         `<button data-act="delete">Delete <kbd>Del</kbd></button>` +
         `<button data-act="cp">${selPc.cp ? "No checkpoint" : "Checkpoint"} <kbd>C</kbd></button></div>`
       : selPc ? `<div class="acts"><button data-act="delete">Delete <kbd>Del</kbd></button></div>` : "") +
+    // the gizmo's two modes, or why this piece can't move on its own
+    (selPc ? (movableKind(sel)
+      ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div>` +
+        (movableKind(sel) === "root" ? `<div class="row"><span>The whole road behind it moves too</span></div>` : "")
+      : `<div class="row"><span>Held by the road: Replace or Insert</span></div>`) : "") +
     (editMsg ? `<div class="warn">${editMsg}</div>` : "") +
     (snap?.bad ? `<div class="warn">${snap.bad}</div>` : "") +
     (snap?.note ? `<div class="row"><span>${snap.note}</span></div>` : "") +
@@ -1211,7 +1313,8 @@ function renderStatus() {
 $("status").addEventListener("click", (e) => {
   const act = e.target.closest?.("button")?.dataset.act;
   if (!act || sel == null) return;
-  if (act === "insert" || act === "replace") startEdit(act);
+  if (act === "move" || act === "turn") setGizmoMode(act === "move" ? "translate" : "rotate");
+  else if (act === "insert" || act === "replace") startEdit(act);
   else if (act === "delete") { editMode = null; removePiece(sel); }
   else if (act === "cp") toggleCheckpoint(sel);
 });
@@ -1222,10 +1325,11 @@ canvas.addEventListener("pointermove", (e) => { mouse.x = e.clientX; mouse.y = e
 // onto the piece-in-hand bar the ghost stays where it was (its buttons turn / raise it in place)
 canvas.addEventListener("pointerleave", (e) => { if (!e.relatedTarget?.closest?.("#hand")) mouse.inside = false; });
 let down = null;
-canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, b: e.button }; });
+// (a press on the gizmo is the gizmo's: no selecting, placing or panning under it)
+canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, b: e.button, gizmo: gizmo.axis != null }; });
 canvas.addEventListener("pointerup", (e) => {
   const d = down; down = null;
-  if (driving) return;
+  if (driving || d?.gizmo) return;
   if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 5) return;
   if (d.b === 2 && tileBase) { tileBase = null; renderDock(); return; }
   if (d.b !== 0) return;
@@ -1277,6 +1381,7 @@ addEventListener("keydown", (e) => {
       else if (k === "f") nav.frame();
       else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
       else if (k === "i" && !tileBase && sel != null) startEdit("insert");
+      else if (k === "m" && !tileBase && movableKind(sel)) setGizmoMode(gizmoMode === "translate" ? "rotate" : "translate");
       else if (k === "p" && !tileBase && sel != null) startEdit("replace");
       else return;
   }
@@ -1366,6 +1471,7 @@ async function startDrive() {
   if (driving || !orderedPieces().length) return;
   save();
   driving = true;
+  gizmo.detach();
   // the builder's own scene objects and panels leave; the camera is kept to come back to
   const objs = [grid, trackGroup, arcGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
   saved = { vis: objs.map((o) => [o, o.visible]), ui: builderUi.map((id) => [id, $(id).style.display]), pos: camera.position.clone(), quat: camera.quaternion.clone(), fov: camera.fov, target: controls.target.clone() };
@@ -1375,7 +1481,8 @@ async function startDrive() {
   camera.clearViewOffset();
   camera.updateProjectionMatrix();
   // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
-  const from = sel != null && !isRing(track.pieces.find((p) => p.uid === sel)) ? built.get(sel)?.M ?? null : null;
+  const selRoad = track.pieces.find((p) => p.uid === sel && !isRing(p)); // (not an obstacle or a ring)
+  const from = selRoad ? built.get(sel)?.M ?? null : null;
   await rig.start({ track, trackId, from, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, help: DRIVE_HELP });
 }
 function stopDrive() {
@@ -1389,6 +1496,7 @@ function stopDrive() {
   fitView();
   controls.update();
   driving = false;
+  attachGizmo(); // the selection's gizmo again
   last = performance.now();
 }
 $("b-drive").onclick = startDrive;
@@ -1442,7 +1550,7 @@ window.__b3 = {
   setHand(h) { hand = h; renderDock(); }, setEdges(v) { edges = v; renderDock(); }, setBuildY(y) { buildY = y; },
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
   setTrack(t) { track = t; rebuild(); },
-  startEdit, get editMsg() { return editMsg; },
+  startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
