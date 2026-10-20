@@ -17,6 +17,15 @@ export const ENGINE = {
   freeRevUp: 9000, // rpm/s revving in the air / in neutral
   freeRevDown: 5200, // rpm/s falling off the throttle
   follow: 18, // 1/s: how fast RPM follows the wheels (drivetrain lash)
+  // IN THE AIR (user, 2026-10-20: "the engine doesn't sound good, especially in the air"): the wheels keep
+  // turning, so the engine stays near its take-off RPM — the throttle flares it AIR_FLARE rpm at most, slowly,
+  // never into the limiter (every held-throttle jump used to scream on it the whole flight), and it is
+  // light: AIR_LOAD of the load. Landing drops LAND_DIP rpm as the tyres bite.
+  airFlare: 900,
+  airRise: 2600, // rpm/s
+  airFall: 3200,
+  airLoad: 0.35,
+  landDip: 450,
 };
 
 export function createEngineModel(cfg = ENGINE) {
@@ -38,9 +47,10 @@ export function createEngineModel(cfg = ENGINE) {
      * @param dt  s
      * @param kmh  the car's speed along its nose (km/h, ≥ 0)
      * @param throttle  0..1 (the player's accelerator; brakes are 0)
-     * @param grounded  wheels on the ground (in the air the engine revs freely)
+     * @param grounded  wheels on the ground (false in the air AND held on the start line)
+     * @param air  in the air (the wheels still turn): near the take-off RPM, light, never on the limiter
      */
-    update(dt, kmh, throttle, grounded) {
+    update(dt, kmh, throttle, grounded, air = false) {
       const thr = Math.max(0, Math.min(1, throttle));
       // GEAR: shift on RPM, only with the wheels down (no shifts mid-air)
       if (grounded && s.shifting <= 0) {
@@ -52,12 +62,20 @@ export function createEngineModel(cfg = ENGINE) {
       s.shifting = Math.max(0, s.shifting - dt);
       // TARGET RPM
       let target;
-      if (!grounded) {
+      if (air) {
+        // wheels turning in the air: the RPM they hold, flared a little by the throttle, light
+        const base = Math.max(cfg.idle, wheelRpmAt(kmh) * ratio[s.gear - 1]);
+        target = Math.min(base + thr * cfg.airFlare, cfg.shiftUp - 150);
+        const rate = target > s.rpm ? cfg.airRise : cfg.airFall;
+        s.rpm += Math.max(-rate * dt, Math.min(rate * dt, target - s.rpm));
+        s.wasAir = true;
+      } else if (!grounded) {
         // in the air the wheels spin free: the throttle revs the engine up to the limiter
         target = thr > 0.2 ? cfg.redline + 200 : Math.max(cfg.idle, s.rpm - cfg.freeRevDown * dt);
         const rate = thr > 0.2 ? cfg.freeRevUp : cfg.freeRevDown;
         s.rpm += Math.max(-rate * dt, Math.min(rate * dt, target - s.rpm));
       } else {
+        if (s.wasAir) { s.rpm = Math.max(cfg.idle, s.rpm - cfg.landDip); s.wasAir = false; } // the tyres bite
         target = wheelRpmAt(kmh) * ratio[s.gear - 1];
         if (s.gear === 1 && thr > 0.5) target = Math.max(target, cfg.launchRpm); // launch wheelspin
         target = Math.max(cfg.idle, target);
@@ -68,7 +86,7 @@ export function createEngineModel(cfg = ENGINE) {
       s.limiter = s.rpm >= cfg.redline - 20 && thr > 0.2;
       s.rpm = Math.min(s.rpm, cfg.redline + 60);
       // LOAD: pulling with the throttle (cut during a shift)
-      const wantLoad = s.shifting > 0 ? 0 : thr;
+      const wantLoad = s.shifting > 0 ? 0 : air ? thr * cfg.airLoad : thr;
       s.load += (wantLoad - s.load) * (1 - Math.exp(-dt * 14));
       // LIFT-OFF POPS: lifting the throttle at high revs (and right after a shift up)
       if (s.lastThrottle > 0.6 && thr < 0.2 && s.rpm > 4800) s.pop = 1;
@@ -76,6 +94,6 @@ export function createEngineModel(cfg = ENGINE) {
       s.lastThrottle = thr;
       return s;
     },
-    reset() { s.rpm = cfg.idle; s.gear = 1; s.load = 0; s.shifting = 0; s.limiter = false; s.pop = 0; },
+    reset() { s.rpm = cfg.idle; s.gear = 1; s.load = 0; s.shifting = 0; s.limiter = false; s.pop = 0; s.wasAir = false; },
   };
 }

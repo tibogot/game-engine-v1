@@ -16,7 +16,7 @@ import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
 import { TILES, integrate, ensureTile, SECTIONS, socketMatrix, leanOut } from "./kit.js";
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
-import { library, campaign, contentKey } from "../../app/library.js";
+import { library, campaign, contentKey, settings } from "../../app/library.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune, CAR_TUNE } from "./carTune.js";
 import { createCarRules, magnetZones } from "./carRules.js";
@@ -79,6 +79,10 @@ const HUD_CSS = `
   #drive-hud #finish .fbtns button { flex: 1; background: #121a2e; color: #e8f0ff; border: 1px solid #23304d; padding: 8px 10px; cursor: pointer; font: 700 14px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.06em; }
   #drive-hud #finish .fbtns button:hover { border-color: #3fd2ff; color: #3fd2ff; }
   #drive-hud #finish .fbtns button:first-child { border-color: #3fd2ff; color: #3fd2ff; }
+  #drive-hud #snd { right: 18px; top: 16px; padding: 7px 9px; cursor: pointer; border-left-color: #23304d; line-height: 0; }
+  #drive-hud #snd svg { width: 22px; height: 22px; color: #8796b5; }
+  #drive-hud #snd.on { border-left-color: #3fd2ff; } #drive-hud #snd.on svg { color: #3fd2ff; }
+  #drive-hud #snd:hover svg { color: #e8f0ff; }
 `;
 const HUD_HTML = `
   <div id="time" class="panel">0.00</div>
@@ -88,7 +92,10 @@ const HUD_HTML = `
   <div id="finish" class="panel"></div>
   <div id="speed" class="panel"><div class="v" id="kmh">0</div><div class="u">KM/H</div></div>
   <div id="stats" class="panel"></div>
-  <div id="help" class="panel"></div>`;
+  <div id="help" class="panel"></div>
+  <div id="snd" class="panel" title="Sound on / off (M)"></div>`;
+// the sound button's icon: a speaker, with waves (on) or a cross (off)
+const SND_ICON = (on) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/>${on ? '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>' : '<path d="M17 9l5 6M22 9l-5 6"/>'}</svg>`;
 
 /**
  * The rig: one car (+ ghost car), input, sound, HUD, the frame hook. Made once per page.
@@ -260,6 +267,20 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   const sfx = createSfx(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7 });
   sfx.setMuted(engineMuted);
   const unlockAudio = () => { if (S && !engineMuted) engineSound.unlock(); };
+  // SOUND ON / OFF (user, 2026-10-20: "an icon top right for quick access"): the button, M, and the menu's
+  // Settings are one switch, remembered
+  function setSound(on) {
+    engineMuted = !on;
+    engineSound.setMuted(engineMuted);
+    sfx.setMuted(engineMuted);
+    if (on) { engineSound.unlock(); if (S) engineSound.resume(); }
+    settings.set({ sound: on });
+    $("snd").innerHTML = SND_ICON(on);
+    $("snd").classList.toggle("on", on);
+  }
+  $("snd").innerHTML = SND_ICON(!engineMuted);
+  $("snd").classList.toggle("on", !engineMuted);
+  $("snd").onclick = () => setSound(engineMuted);
   addEventListener("pointerdown", unlockAudio);
   document.addEventListener("visibilitychange", () => (document.hidden || !S ? engineSound.suspend() : engineSound.resume()));
   const _nose = new V(), _side = new V();
@@ -272,7 +293,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const throttle = parked ? 0 : Math.max(0, input.throttle ?? 0);
     // held on the line, the wheels don't turn: the engine revs freely, as in the air
     const free = race.holding || vehicle.groundedCount === 0;
-    engineSound.update(engine.update(dt, kmh, throttle, !free));
+    engineSound.update(engine.update(dt, kmh, throttle, !free, !race.holding && vehicle.groundedCount === 0));
     // tyres slide when the car moves SIDEWAYS (car-local x); braking = the brake held at speed
     _side.set(1, 0, 0).applyQuaternion(vehicle.body.quat);
     const boosting = rules.boostLeft > 0;
@@ -630,7 +651,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (e.code === "KeyR" || e.code === "Delete") restart();
     if (e.code === "KeyP") { autopilot = !autopilot; S.pilot.reset(); }
     if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!S.ghostPlayer && showGhost && ghostStyled; }
-    if (e.code === "KeyM") { engineMuted = !engineMuted; engineSound.setMuted(engineMuted); sfx.setMuted(engineMuted); if (!engineMuted) engineSound.unlock(); }
+    if (e.code === "KeyM") setSound(engineMuted);
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
     // these may end the session (back to the builder, the menu, the next track): last
     const o = S.o;
