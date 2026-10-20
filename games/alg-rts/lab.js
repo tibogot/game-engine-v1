@@ -12,7 +12,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { initGlbLoaderRenderer } from "../../v3/render/foliage/glbLoader.js";
-import { BUILDINGS, applyLabStone, labSite } from "./buildingLab.js";
+import { BUILDINGS, applyLabStone, labSite, labTick } from "./buildingLab.js";
 import { NIGHT, SUN, gradientSky, vehicleOf } from "./vehicleLab.js";
 import { KINDS, MAPS, NAMES, SIDES, STATUS, enTag, metaOf } from "./labCatalog.js";
 const nameOf = (k) => NAMES[k] ?? BUILDINGS[k]?.label ?? k;
@@ -329,6 +329,7 @@ export async function startLab() {
     const dt = clock.getDelta();
     if (playT != null) { playT += dt; const p = Math.min(1, playT / 22); $("buildP").value = p * 100; setBuild(p); if (p >= 1) playT = null; }
     controls.update();
+    labTick(camera);   // (the pieces' own per-frame work: the screen's plants)
     renderer.render(scene, camera);
     renderLive(dt);
   });

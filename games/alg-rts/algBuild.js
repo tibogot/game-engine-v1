@@ -21,7 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
-import { armsCacheGeometry, loadArmsCache, loadSangar, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, dropScreenPlants, growScreenPlants, loadAmbushScreen, loadArmsCache, loadSangar, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -60,7 +60,7 @@ export const BUILDS = {
   // THE FLN'S FIELD HOSPITAL (2026-10-13, A3 — algFieldWorks.js): a brush shade, pallets, a stretcher: its
   // wounded within 20 m heal, out of the fight (the French aid station's rule).
   infirmary: { label: t("Infirmerie"), tip: t("Abri de l'infirmier sous les broussailles : vos blessés à 20 m guérissent, hors du combat."), cost: 90, time: 22, build: () => buildFlnInfirmary({ seed: 1999 + Math.floor(Math.random() * 9) }), pad: true, structure: "infirmary", team: "enemy", by: ["moudjahid"] },
-  ambushScreen: { label: t("Écran d'embuscade"), tip: t("Broussailles coupées sur un pied de pierres : les hommes derrière restent cachés jusqu'à ce qu'ils tirent."), cost: 25, time: 8, build: () => buildAmbushScreen(), follow: true, team: "enemy", by: ["moudjahid"] },
+  ambushScreen: { label: t("Écran d'embuscade"), tip: t("Broussailles coupées sur un pied de pierres : les hommes derrière restent cachés jusqu'à ce qu'ils tirent."), cost: 25, time: 8, build: () => ambushScreenGeometry() ?? buildAmbushScreen() /* (the Blender piece once loaded — algSangar.js) */, follow: true, team: "enemy", by: ["moudjahid"] },
 };
 /** The medic's tent (nam's kit, the medic variant), with the footprint the build needs. */
 function fieldTent() {
@@ -111,6 +111,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const geoCache = new Map();
   // The Blender pieces load in the background: their builder's old geometry until then (the cache forgets it).
   loadSangar().then((ok) => { if (ok) geoCache.delete("sangar"); });
+  // the plants (the screen's scrub): the showroom's PlacedFoliage
+  const plants = () => app.showroom?.plants ?? showroom?.plants ?? null;
+  loadAmbushScreen().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("ambushScreen");
+    swapPlaced(showroom, /^ambushScreen\d*$/, ambushScreenGeometry(), app);
+    for (const [name, mesh] of Object.entries(showroom ?? {})) if (/^ambushScreen\d*$/.test(name)) growScreenPlants(plants(), mesh, 1);
+  });
   loadArmsCache().then((ok) => {
     if (!ok) return;
     geoCache.delete("armsCache");
@@ -376,6 +384,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       // (`app.algBuildSpeed`: a doctrine's faster engineers — algDoctrines.js, the Légion.)
       s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))) * (s.team === "player" ? app.algBuildSpeed ?? 1 : 1));
       if (s.build) s.build.set(s.progress); else s.mesh.scale.y = 0.06 + 0.94 * s.progress;
+      growScreenPlants(plants(), s.mesh, s.progress);   // (a screen's scrub, stood up in its turn)
       s.hp = s.progress * 100;
     }
     // HAULING (2026-10-17, Mixamo "Carrying"): a sapper walking to a site of his side still rising carries
@@ -401,7 +410,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   function finish(s) {
     s.done = true;
     s.mesh.scale.y = 1;
-    if (s.build) { s.mesh.material.dispose(); s.mesh.material = s.mesh.geometry.userData.labMaterial; s.build = null; }   // (the shared material: a finished piece costs what it always did)
+    if (s.build) { s.mesh.material.dispose(); s.mesh.material = s.mesh.geometry.userData.labMaterial; s.build = null; }
+    growScreenPlants(plants(), s.mesh, 1);            // (a screen: all its scrub stands)   // (the shared material: a finished piece costs what it always did)
     retire(s);
     const B = BUILDS[s.key];
     if (B.structure) structures.addBuilt(B.structure, s.mesh);
@@ -431,6 +441,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     retire(s);
     purseOf(s.key)?.earn?.(BUILDS[s.key].cost);
     app.scene.remove(s.mesh);
+    dropScreenPlants(plants(), s.mesh);
     untrackLod(s.mesh);
     s.mesh.geometry?.dispose?.();
     if (s.fp?.noFoot) navGrid?.clearNoFootFootprint?.(s.fp);

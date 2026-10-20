@@ -483,6 +483,14 @@ export const FOLIAGE_PRESETS = {
     spread: 1, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
     colorBase: "#4c5b3a", colorTip: "#7e8c59", colorHead: "#e2b52a", size: 2.0, translucency: 0.3,
   },
+  // CUT BROOM (alg-rts, 2026-10-21 — the ambush screen's scrub): the broom cut and stood up — no flowers, the green
+  // gone olive and dry, denser.
+  broomCut: {
+    kind: "broom", flowers: 0,
+    fronds: 150, frondLength: 1.0, leaflets: 1, leafletWidth: 1, leafletAngle: 0,
+    spread: 0.9, arch: 0, droop: 0.1, stemWidth: 1, bareStalk: 0,
+    colorBase: "#57533a", colorTip: "#86804f", colorHead: "#86804f", size: 2.0, translucency: 0.2,
+  },
   // DWARF FAN PALM (Chamaerops humilis, the "doum") — the knee-to-chest-high
   // clump of stiff grey-green fans that covers the Maghreb's dry hillsides.
   doumPalm: {

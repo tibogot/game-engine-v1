@@ -19,7 +19,8 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildArmsCache, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 /** The detail's look: its tile (m), the scan normal's strength, the cavity's depth. ?stonedetail=0 = without. */
 export const STONE_DETAIL = { tile: 0.5, normal: 1.6, cavity: 0.3 };
@@ -70,7 +71,7 @@ export function sangarStoneMaterial(src) { return _detail ? stoneMaterial(src, _
  * game geometry — plain floats, the kit's scale, the OLD piece's data (`old()`: its footprint, gun… the game's
  * systems read them), the stone material, the construction material. Resolves true when pieceGeometry() has it.
  */
-function loadBlenderPiece(kit, type, old) {
+function loadBlenderPiece(kit, type, old, extra = null) {
   const key = `${kit}:${type}`;
   if (_pieces.has(key)) return _pieces.get(key).p;
   const rec = { geo: null, p: null };
@@ -96,6 +97,7 @@ function loadBlenderPiece(kit, type, old) {
     g.userData.blender = true;
     g.userData.farGeometry = far;
     if (far) far.userData = g.userData;   // (the same data at either level: footprint, gun, materials)
+    extra?.(g);
     rec.geo = g;
     return true;
   }).catch((e) => { console.warn(`[${kit}] the Blender piece did not load:`, e); return false; });
@@ -108,6 +110,58 @@ export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => build
 /** The arms cache (tools/blender/armsCache.py). */
 export const loadArmsCache = () => loadBlenderPiece("armscache", "arms", () => buildArmsCache());
 export const armsCacheGeometry = () => pieceGeometry("armscache", "arms");
+/** The ambush screen (tools/blender/ambushScreen.py): its stone; its SCRUB the engine's plants (screenPlantSpots). */
+export const loadAmbushScreen = () => loadBlenderPiece("ambushscreen", "ambush", () => buildAmbushScreen(), (g) => { g.userData.screenPlants = screenPlantSpots(); });
+export const ambushScreenGeometry = () => pieceGeometry("ambushscreen", "ambush");
+
+/**
+ * THE SCREEN'S SCRUB (2026-10-21 — the hedges' lesson: Blender sticks read cheap, the plant generator's shrubs
+ * don't): CUT broom (retama — what was cut and stood up: no flowers, dry; FOLIAGE_PRESETS.broomCut) and JUNIPER stood in the footing along its line
+ * (ambushScreen.py SCREEN_LINE — the same formula), a firing gap every 2.1 m; each its moment `t` in the build
+ * (after the footing). Piece-local, game metres. A seeded hash: every screen the same scrub.
+ */
+const SCREEN = { L: 3.5, FH: 0.5 };
+const screenLine = (x) => 0.22 * Math.sin(0.9 * x + 0.7);
+function screenPlantSpots() {
+  const h = (i, s) => { let v = Math.imul(i * 977 + s * 131, 2654435761) >>> 0; v ^= v >>> 15; v = Math.imul(v, 2246822519) >>> 0; return (v >>> 0) / 4294967296; };
+  const out = [];
+  let i = 0;
+  for (let x = -SCREEN.L + 0.25; x < SCREEN.L - 0.2; x += 0.36 + h(i, 1) * 0.14, i++) {
+    if (Math.abs(((x + SCREEN.L) % 2.1) - 1.05) < 0.24) continue;          // the firing gaps
+    const juniper = h(i, 2) < 0.3;
+    const sz = FOLIAGE_PRESETS[juniper ? "juniperScrub" : "broomCut"].size;
+    // ~1.5 m (real) above the footing: the men crouched behind it are hidden
+    out.push({ kind: juniper ? "juniperScrub" : "broomCut", x: x * S, y: (SCREEN.FH - 0.12) * S, z: (screenLine(x) + (h(i, 3) - 0.5) * 0.24) * S,
+      scale: ((juniper ? 1.9 : 2.2) / sz) * (0.85 + h(i, 4) * 0.3), rot: h(i, 5) * 6.283, seed: h(i, 6), t: 0.7 + 0.27 * (x + SCREEN.L) / (2 * SCREEN.L) });
+  }
+  return out;
+}
+/**
+ * Stand a screen's scrub up to `progress` (0..1): the plants whose moment has come, each tagged with the mesh's
+ * owner id (dropScreenPlants takes them out). `plants`: the game's PlacedFoliage (the showroom's).
+ */
+export function growScreenPlants(plants, mesh, progress = 1) {
+  const spots = mesh?.geometry?.userData?.screenPlants;
+  if (!plants || !spots) return;
+  for (const k of ["broomCut", "juniperScrub"]) if (!plants.types.has(k)) plants.setType(k, structuredClone(FOLIAGE_PRESETS[k]));
+  const done = (mesh.userData.screenPlanted ??= new Set());
+  const v = new THREE.Vector3();
+  mesh.updateMatrixWorld(true);
+  spots.forEach((p, i) => {
+    if (done.has(i) || p.t > progress) return;
+    v.set(p.x, p.y, p.z);
+    mesh.localToWorld(v);
+    plants.add(p.kind, v.x, v.y, v.z, { rotY: p.rot, scale: p.scale, seed: p.seed });
+    plants.plants[plants.plants.length - 1].owner = mesh.uuid;
+    done.add(i);
+  });
+}
+/** Take a screen's scrub out (a cancelled site, a destroyed screen). */
+export function dropScreenPlants(plants, mesh) {
+  if (!plants || !mesh) return;
+  plants.removeWhere((p) => p.owner === mesh.uuid);
+  mesh.userData.screenPlanted?.clear();
+}
 
 /**
  * The pre-placed copies of a piece (the showroom's, the landmarks' — built with the old geometry before the Blender

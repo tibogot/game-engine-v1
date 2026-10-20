@@ -52,9 +52,10 @@ def tag(o, t):
     if o is not None: o["t"] = float(t)
     return o
 
-def stone(K, nm, c, size, R, t, mat="sgStone", yaw=None):
+def stone(K, nm, c, size, R, t, mat="sgStone", yaw=None, box=0.45):
     """A split block: c its centre (game), size its half extents (along, up, across — `yaw` its long axis's turn,
-    three.js rotation.y; random without one)."""
+    three.js rotation.y; random without one). `box`: how far toward a box (0.45 a split block; ~0.85 a weathered
+    boulder, rounded)."""
     ry, tx, tz = R.uniform(0, 6.283), R.uniform(-0.08, 0.08), R.uniform(-0.08, 0.08)
     th = yaw if yaw is not None else ry
     ca, sa = math.cos(th), math.sin(th)
@@ -64,7 +65,7 @@ def stone(K, nm, c, size, R, t, mat="sgStone", yaw=None):
         u = 1 - 2 * (i + 0.5) / N; v = i * 2.399963 + R.uniform(-0.25, 0.25)
         r = math.sqrt(max(0.0, 1 - u * u))
         q = [r * math.cos(v), u, r * math.sin(v)]
-        q = [math.copysign(abs(x) ** 0.45, x) for x in q]                 # toward a box: flat faces, edges
+        q = [math.copysign(abs(x) ** box, x) for x in q]                  # toward a box: flat faces, edges
         chip = R.random()
         k = R.uniform(0.86, 1.0) * (0.78 if chip < 0.18 else 1.0)          # a corner knocked off
         pts.append((q[0] * size[0] * k, q[1] * size[1] * R.uniform(0.9, 1.0), q[2] * size[2] * k))

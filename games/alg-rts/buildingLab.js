@@ -15,7 +15,7 @@ import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { buildArmsCache, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
@@ -44,7 +44,29 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { armsCacheGeometry, loadArmsCache, loadSangar, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, loadAmbushScreen, loadArmsCache, loadSangar, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
+import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
+
+/** Per-frame work of the lab's pieces (the screen's plants): the new lab's loop calls labTick(camera). */
+const LAB_TICK = new Set();
+export const labTick = (camera) => { for (const f of LAB_TICK) f(camera); };
+/**
+ * A piece with the ambush screen's SCRUB (the game's procedural broom and juniper — algSangar.js screenPlantSpots):
+ * its own little PlacedFoliage, a child of the piece so it moves with it (spots in game metres, piece-local).
+ * `keep(spot)`: which stand (the damaged screen loses its middle). Returns { group, fill(progress) }.
+ */
+function withScreenPlants(obj, keep = () => true) {
+  const g = new THREE.Group();
+  g.add(obj);
+  const spots = (ambushScreenGeometry()?.userData.screenPlants ?? []).filter(keep);
+  const pf = new PlacedFoliage({ scene: g, lodDistances: [70, 140], shadowLods: 2 });
+  for (const k of ["broomCut", "juniperScrub"]) pf.setType(k, structuredClone(FOLIAGE_PRESETS[k]));
+  const fill = (p) => { pf.removeWhere(() => true); for (const s of spots) if (s.t <= p) pf.add(s.kind, s.x, s.y, s.z, { rotY: s.rot, scale: s.scale, seed: s.seed }); };
+  fill(1);
+  LAB_TICK.add((cam) => { if (g.parent) pf.update(cam); });
+  return { group: g, fill };
+}
 /** The village test: a lane (along x) of the kit, both sides facing it; the brown houses beyond. */
 function whiteVillage() {
   const g = new THREE.Group();
@@ -467,6 +489,30 @@ export const BUILDINGS = {
     label: "Cache d'armes (Blender) : états", gap: 11, yaw: Math.PI - 0.5, prepare: () => loadArmsCache(),
     before: () => labPiece(sangarDetailed(houseMesh("arms", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("arms", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("arms", "ruin"))),
     tags: ["CACHE · INTACTE", "CACHE · ENDOMMAGÉE", "CACHE · DÉTRUITE"], note: "la cache d'armes en pierres sèches dans ses trois états.",
+  },
+  // THE AMBUSH SCREEN IN BLENDER (2026-10-21, tools/blender/ambushScreen.py): the game's old one LEFT, the new one
+  // MIDDLE — the dry-stone footing, the scrub the engine's plants (its construction in the panel: the footing, then the
+  // scrub stood up) — damaged RIGHT.
+  ecranBlender: {
+    label: "Écran d'embuscade (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAmbushScreen(),
+    before: () => buildAmbushScreen(),
+    middle: () => {
+      const geo = ambushScreenGeometry(), site = geo.userData.siteMaterial();
+      const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
+      const sp = withScreenPlants(m);
+      SITE = { set: (p) => { site.set(p); sp.fill(p); }, stencilShown: () => false, sock: null };
+      site.set(1);
+      return labPiece(sp.group);
+    },
+    after: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "damaged")), (s) => Math.abs(s.x) > 1.2 * 1.3).group),
+    tags: ["ÉCRAN (LE JEU)", "ÉCRAN · NOUVEAU", "ÉCRAN · ENDOMMAGÉ"], note: "l'écran d'embuscade du jeu à gauche, le nouveau au milieu (pied en pierres sèches, broussailles : les plantes du jeu) — « Construction » — endommagé à droite.",
+  },
+  ecranEtats: {
+    label: "Écran d'embuscade (Blender) : états", gap: 12, yaw: Math.PI - 0.5, prepare: () => loadAmbushScreen(),
+    before: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "intact"))).group),
+    middle: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "damaged")), (s) => Math.abs(s.x) > 1.2 * 1.3).group),
+    after: () => labPiece(sangarDetailed(houseMesh("ambush", "ruin"))),
+    tags: ["ÉCRAN · INTACT", "ÉCRAN · ENDOMMAGÉ", "ÉCRAN · DÉTRUIT"], note: "l'écran d'embuscade dans ses trois états (détruit : les broussailles brûlées, parties).",
   },
   sangarEtats: {
     label: "Sangar (Blender) : états", gap: 7, yaw: Math.PI - 0.5, prepare: () => loadSangar(),
