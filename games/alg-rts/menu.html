@@ -157,11 +157,15 @@
       //   MAP     a card per map, its art; a click starts → alg.html?map=…&side=fln
       // The difficulty stays on the side's own briefing (algDifficulty.js), not asked twice here.
       const GAME = "./alg.html";
-      const TRAINING = { map: "training", title: t("Camp d'instruction"), sub: t("Instruction — 10 minutes"),
-        d: t("Les bases, une à une : la caméra, les ordres, la couverture, les points, le combat, la retraite, le poste. À faire en premier.") };
-      // THE FLN's (2026-10-20, algTutorialFln.js on maps/maquis.js — the map makes you the FLN)
-      const TRAINING_FLN = { map: "maquis", title: t("Le maquis"), sub: t("Instruction FLN — 15 minutes"),
-        d: t("La guerre du FLN : se cacher, l'embuscade, frapper et disparaître, les douars, le sabotage, les mines — et un convoi à arrêter.") };
+      // THE TRAINING, one per side (2026-10-20, you: "two training camps — the same page as the battles"): the
+      // main menu's "Instruction" opens the SIDE screen, each card its side's training; a click starts it.
+      const TRAINING = {
+        fr: { map: "training", title: t("Camp d'instruction"), sub: t("10 minutes"),
+          d: t("Les bases, une à une : la caméra, les ordres, la couverture, les points, le combat, la retraite, le poste. À faire en premier.") },
+        // (algTutorialFln.js on maps/maquis.js — the map makes you the FLN)
+        fln: { map: "maquis", title: t("Le maquis"), sub: t("15 minutes"),
+          d: t("La guerre du FLN : se cacher, l'embuscade, frapper et disparaître, les douars, le sabotage, les mines — et un convoi à arrêter.") },
+      };
       // The battle maps (layout.js ?map=; the Aurès: none). `ready: false` shows it, greyed, with its tag.
       const MAPS = [
         { map: null, ready: true, title: t("Les Aurès — 1956"), sub: t("Bataille"), art: "/games/alg-rts/loading/aures-descente.webp",
@@ -227,16 +231,17 @@
           <span><b>${e.title}${e.tag && !e.ready ? `<span class="tag">${e.tag}</span>` : ""}</b>${e.sub ? `<span class="sub">${e.sub}</span>` : ""}</span>
         </button>`;
       const menu = document.getElementById("menu");
-      let view = "main";
+      let view = "main", mode = "battle";   // (the side screen serves both: the training, the battles)
       const head = (title, sub = "") => `<h1 class="ttl">${title}</h1>${sub ? `<div class="ttl-sub">${sub}</div>` : ""}<div class="rule"></div>`;
       const backBtn = `<button class="small back" data-a="back">‹ ${t("Retour")}</button>`;
       function render() {
         document.body.dataset.view = view;
         document.body.classList.toggle("cards", view !== "main");
         if (view === "side") {
-          menu.innerHTML = head(t("Choisissez votre camp"), t("Algérie, 1954-1962"))
+          const tr = mode === "training";
+          menu.innerHTML = head(tr ? t("Instruction : choisissez votre camp") : t("Choisissez votre camp"), t("Algérie, 1954-1962"))
             + `<div class="deck">${SIDES.map((s) => `<button class="card${s.side === pick.side ? " sel" : ""}" data-side="${s.side}">
-                <div class="pic">${FLAG[s.side]}</div><h3>${s.title}</h3><div class="kind">${s.kind}</div><hr><p>${s.d}</p></button>`).join("")}</div>`
+                <div class="pic">${FLAG[s.side]}</div><h3>${s.title}</h3><div class="kind">${tr ? `${TRAINING[s.side].title} · ${TRAINING[s.side].sub}` : s.kind}</div><hr><p>${tr ? TRAINING[s.side].d : s.d}</p></button>`).join("")}</div>`
             + backBtn;
           return;
         }
@@ -251,8 +256,7 @@
         }
         if (view === "main") {
           menu.innerHTML = `<div class="kicker">${t("Algérie, 1954-1962")}</div>`
-            + entry(`data-a="training"`, TRAINING)
-            + entry(`data-a="trainingFln"`, TRAINING_FLN)
+            + entry(`data-a="training"`, { title: t("Instruction"), sub: t("Le camp français ou le maquis FLN") })
             + entry(`data-a="battle"`, { title: t("Batailles"), sub: t("Choisir la carte et le camp") })
             + `<div class="row">${LANGS.map((l) => `<button class="small${l.key === LANG ? " on" : ""}" data-lang="${l.key}">${l.label}</button>`).join("")}
                  <button class="small" data-a="credits">${t("Crédits")}</button></div>`;
@@ -273,13 +277,12 @@
         if (b.dataset.lang) { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); return; }
         const a = b.dataset.a;
         if (a === "credits") { document.getElementById("credits").hidden = false; return; }
-        if (a === "training") return start(TRAINING.map, "fr");   // the training teaches the French side
-        if (a === "trainingFln") return start(TRAINING_FLN.map, "fln");
-        if (a === "battle") { view = "side"; render(); return; }
+        if (a === "training") { mode = "training"; view = "side"; render(); return; }
+        if (a === "battle") { mode = "battle"; view = "side"; render(); return; }
         if (a === "back") return goBack();
         const save = () => { try { localStorage.setItem("alg-menu-pick", JSON.stringify(pick)); } catch { /* private window */ } };
         // A card chooses: the side → on to the maps; a map → the battle.
-        if (b.dataset.side) { pick.side = b.dataset.side; save(); view = "map"; render(); return; }
+        if (b.dataset.side) { pick.side = b.dataset.side; save(); if (mode === "training") return start(TRAINING[pick.side].map, pick.side); view = "map"; render(); return; }
         if (b.dataset.map) { pick.map = +b.dataset.map; save(); return start(MAPS[pick.map].map, pick.side); }
       });
       function goBack() { view = view === "map" ? "side" : "main"; render(); }
@@ -297,7 +300,7 @@
         // you on load — Chrome draws a focused one as chosen; you, 2026-10-11: "why is training
         // camp already selected".)
         if (ev.key === "Enter" && view !== "main" && document.activeElement === document.body) {
-          if (view === "side") { view = "map"; render(); return; }
+          if (view === "side") { if (mode === "training") return start(TRAINING[pick.side].map, pick.side); view = "map"; render(); return; }
           return start(MAPS[pick.map].map, pick.side);
         }
         if (ev.key !== "Escape") return;
