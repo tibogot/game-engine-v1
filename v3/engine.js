@@ -40,6 +40,8 @@ export { WORLD_SIZE, HEIGHTMAP_SIZE, MAX_HEIGHT } from "./terrain/heightmapTextu
 export const PUBLIC_ENGINE_MODULES = [
   // The editor stylesheet — game dev panels reuse its look
   "v3/styles/editor.css",
+  // The ONE texture loader (KTX2 when compressed, the image otherwise) — every game loads its textures through it
+  "v3/render/textureLoad.js",
   // Rendering helpers
   "v3/render/layers.js",
   "v3/render/bloomMRT.js",

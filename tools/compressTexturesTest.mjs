@@ -45,6 +45,8 @@ try {
 
   check(isLinearName("Grass005_1K-JPG_NormalGL.jpg") && isLinearName("x_Roughness.jpg") && isLinearName("Rock_AmbientOcclusion.png"),
     "normal / roughness / AO names are linear");
+  check(isLinearName("rock_boulder_dry_nor_gl_1k.jpg") && isLinearName("broken_wall_arm_2k.jpg") && isLinearName("x_ao_1k.jpg") && !isLinearName("x_diff_1k.jpg") && !isLinearName("aorta.png"),
+    "Poly Haven names with a resolution after (_nor_gl_1k, _arm_2k, _ao_1k) are linear (2026-10-21)");
   check(!isLinearName("Grass005_1K-JPG_Color.jpg") && !isLinearName("betoum_clusters.png"), "colour names are sRGB");
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });

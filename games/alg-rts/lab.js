@@ -6,7 +6,7 @@
 //   VIEWS       the game's RTS camera (its 26° lens, 38 / 102 / 134 m), a close-up, an orbit; day / dusk / night
 //   NUMBERS     triangles (near / far for an LOD), draws, textures, the LOD distance — and the frame's draws and
 //               triangles live (renderer.info)
-//   PLAYERS     the helipad's construction (0-100 %, play)
+//   PLAYERS     a piece's construction (0-100 %, play — the helipad, the sangar: entries with `construction`)
 //   KEYS        ← → the previous / next piece of the list, / search, 1-4 the views, Esc clears the search
 // The old lab stays (building-lab.html: its special panels — stones, rock colours, points, the fire button).
 import * as THREE from "three";
@@ -248,7 +248,7 @@ export async function startLab() {
       setView(viewMode === "orbit" ? "rts" : viewMode);
       renderStats();
       // the helipad's construction
-      const site = key === "helisurface" ? labSite() : null;
+      const site = BUILDINGS[key]?.construction ? labSite() : null;   // (an entry that plays its construction: the helipad, the sangar)
       $("buildBox").style.display = site ? "" : "none";
       if (site) { $("buildP").value = 100; setBuild(1); }
       history.replaceState(null, "", `${location.pathname}?p=${key}`);   // (not "?p=": the page's <base href="/v3/"> would take it)

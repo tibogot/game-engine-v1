@@ -21,6 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
+import { loadSangar, sangarGeometry } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -47,7 +48,7 @@ export const BUILDS = {
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
   // them — the AI places them through place()). Both lie on the slope, as
   // the showroom's do.
-  sangar: { label: t("Sangar"), tip: t("Position de tir en pierres sèches : un FM tire par-dessus son rebord, les hommes derrière sont à couvert."), cost: 60, time: 16, build: () => buildSangar(), follow: true, structure: "sangar", team: "enemy", by: ["moudjahid"] },
+  sangar: { label: t("Sangar"), tip: t("Position de tir en pierres sèches : un FM tire par-dessus son rebord, les hommes derrière sont à couvert."), cost: 60, time: 16, build: () => sangarGeometry() ?? buildSangar() /* (the Blender piece once loaded — algSangar.js) */, follow: true, structure: "sangar", team: "enemy", by: ["moudjahid"] },
   // A NEW ARMS CACHE (2026-10-02): the FLN hides one in a village it holds
   // when the French have found theirs (algAI.js) — each standing cache arms
   // two FM teams. Hidden from the French until seen, built or not.
@@ -108,6 +109,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const purseOf = (key) => (teamOf(key) === "enemy" ? enemyPurse : purse);
   const dom = app.renderer.domElement;
   const geoCache = new Map();
+  // The Blender pieces load in the background: their builder's old geometry until then (the cache forgets it).
+  loadSangar().then((ok) => { if (ok) geoCache.delete("sangar"); });
   const geoOf = (key) => { if (!geoCache.has(key)) geoCache.set(key, BUILDS[key].build()); return geoCache.get(key); };
 
   // ── The site: footprint samples, validity, the height (and tilt) it stands at ──
@@ -269,10 +272,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     mesh.userData.kitKey = key;
     mesh.userData.navFootprint = fp;                  // algWire.js takes it off when the wire goes
     seat(mesh, x, y, z, yaw, sv.tilt);
-    mesh.scale.y = 0.06;                              // the foundation, until work starts
+    // CONSTRUCTION: a piece with a build order (the Blender sangar — algSangar.js) shows its parts laid one by
+    // one (its site material); the rest are stretched out of the ground as before.
+    const build = mesh.geometry.userData.siteMaterial?.() ?? null;
+    if (build) { mesh.material = build.material; build.set(0); }
+    else mesh.scale.y = 0.06;                         // the foundation, until work starts
     app.scene.add(mesh);
     const site = {
-      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp,
+      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build,
       // Picked like a structure (the shared selection's buildingRenderer):
       // the command card shows it under construction, with Annuler.
       site: true, isStructure: true, alive: true, team: teamOf(key), constructing: true,
@@ -360,7 +367,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       // Two sappers 1.5x as fast, three 1.8x: they get in each other's way.
       // (`app.algBuildSpeed`: a doctrine's faster engineers — algDoctrines.js, the Légion.)
       s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))) * (s.team === "player" ? app.algBuildSpeed ?? 1 : 1));
-      s.mesh.scale.y = 0.06 + 0.94 * s.progress;
+      if (s.build) s.build.set(s.progress); else s.mesh.scale.y = 0.06 + 0.94 * s.progress;
       s.hp = s.progress * 100;
     }
     // HAULING (2026-10-17, Mixamo "Carrying"): a sapper walking to a site of his side still rising carries
@@ -386,6 +393,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   function finish(s) {
     s.done = true;
     s.mesh.scale.y = 1;
+    if (s.build) { s.mesh.material.dispose(); s.mesh.material = s.mesh.geometry.userData.labMaterial; s.build = null; }   // (the shared material: a finished piece costs what it always did)
     retire(s);
     const B = BUILDS[s.key];
     if (B.structure) structures.addBuilt(B.structure, s.mesh);

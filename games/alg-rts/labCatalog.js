@@ -52,6 +52,14 @@ export const META = {
   rocheBanc: { side: "nature", kind: "nature", maps: ["kantara"], status: "jeu" },
   rocheBloc: { side: "nature", kind: "nature", maps: ["kantara"], status: "jeu" },
   rocheDalle: { side: "nature", kind: "nature", maps: ["kantara"], status: "jeu" },
+  // (2026-10-21: the Blender requisition points — in the game — and the Blender sangar)
+  // (the old depots: only a fallback in the game since the Blender points — their entries keep the capture panel)
+  pointRavit: { side: "fr", kind: "point", maps: ALL, status: "ancien" },
+  pointCarbu: { side: "fr", kind: "point", maps: ALL, status: "ancien" },
+  pointBlender_fuel: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
+  pointBlender_mun: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
+  sangarBlender: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
+  sangarEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
 };
 export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps: [], status: "jeu" };
 
@@ -69,7 +77,9 @@ export const NAMES = {
   pressoir: "Oil press", rocheBanc: "Rock: big shelf", rocheBloc: "Rock: block", rocheDalle: "Rock: low slab", grotte: "FLN cave",
   maisonPierre: "Stone house (HQ)", mechtaPierre: "Mechta (new)", hameau: "Hamlet (new)", dechraNouveau: "Dechra (new)",
   ksarNouveau: "Ksar (new)", postePhoto: "Post (photo detail)", mortier: "Mortar pit", campFln: "FLN camp",
-  pointRavit: "Point: munitions", pointCarbu: "Point: fuel",
+  pointRavit: "Point: munitions (old depot) + capture marks", pointCarbu: "Point: fuel (old depot) + capture marks",
+  pointBlender_fuel: "Requisition point: fuel (Blender)", pointBlender_mun: "Requisition point: munitions (Blender)",
+  sangarBlender: "Sangar (Blender) + construction", sangarEtats: "Sangar (Blender): states",
 };
 const WORDS = [
   ["(LE JEU)", "(THE GAME)"], ["(KIT DU JEU)", "(GAME KIT)"], ["NOUVEAU STANDARD", "NEW STANDARD"], ["NOUVELLE", "NEW"], ["NOUVEAU", "NEW"],

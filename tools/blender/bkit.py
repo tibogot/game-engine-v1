@@ -218,13 +218,15 @@ class Kit:
         bpy.ops.object.join()
         j = bpy.context.view_layer.objects.active; j.name = name
         bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
-        bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
-        weighted(j)
+        # (a piece may round its shading — a dry-stone sangar's stones: 80 deg, no weighted normals — flat walls
+        # keep 35 and the weighted normals, the M'zab houses' banding fix)
+        bpy.ops.object.shade_smooth_by_angle(angle=math.radians(getattr(s, "smooth_angle", 35)))
+        if getattr(s, "weighted_on", True): weighted(j)
         return j
     def drop_cutters(s):
         for c in s.cutters: bpy.data.objects.remove(c, do_unlink=True)
         s.cutters = []
-    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9, ao_dist=2.2):
+    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9, ao_dist=2.2, normals=False):
         """Colour × ambient occlusion into ONE atlas, then a plain material with it — for one object or
         SEVERAL sharing the atlas (a house's three states: their UVs packed together, one texture). They are
         spread apart while they bake (at one origin each would occlude the others: black AO) and every other
@@ -241,6 +243,14 @@ class Kit:
         bpy.ops.object.select_all(action="DESELECT")
         for q in objs: q.select_set(True)
         bpy.context.view_layer.objects.active = o
+        # THE ATLAS ON ITS OWN UV LAYER (2026-10-21, the scanned stones): a piece's source textures (a scan's colour
+        # and normal maps) read the mesh's own UVs — they stay the RENDER layer while the atlas is unwrapped on a
+        # new one (the active layer: the unwrap and the bake's target); after the bake only the atlas is kept.
+        for q in objs:
+            src = q.data.uv_layers.active
+            at = q.data.uv_layers.new(name="Atlas")
+            q.data.uv_layers.active = at
+            if src is not None: src.active_render = True
         bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
         bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.002)
         bpy.ops.object.mode_set(mode="OBJECT")
@@ -255,6 +265,13 @@ class Kit:
         scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
         bpy.ops.object.bake(type="DIFFUSE")
         ao = target(f"{name}_ao"); scn.cycles.samples = samples_ao; bpy.ops.object.bake(type="AO")
+        # NORMALS (opt-in): the materials' own normal maps (a scan's) and the shapes, tangent space, into an atlas
+        # the game's material reads — the relief a colour bake alone flattens
+        nrm = None
+        if normals:
+            nrm = target(f"{name}_nrm"); nrm.colorspace_settings.name = "Non-Color"; scn.cycles.samples = 4
+            bpy.ops.object.bake(type="NORMAL", normal_space="TANGENT")
+            nrm.filepath_raw = os.path.join(out_dir, f"{name}_nrm.png"); nrm.file_format = "PNG"; nrm.save()
         if os.environ.get("BKIT_DEBUG"):                     # (the two layers on their own, to look at)
             for im, nm in ((col, "col"), (ao, "ao")):
                 im.filepath_raw = os.path.join(out_dir, f"_{name}_{nm}.png"); im.file_format = "PNG"; im.save()
@@ -270,7 +287,13 @@ class Kit:
         tn = m.node_tree.nodes.new("ShaderNodeTexImage"); tn.image = out
         pb = m.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = rough
         m.node_tree.links.new(tn.outputs["Color"], pb.inputs["Base Color"])
+        if nrm is not None:
+            nt = m.node_tree.nodes.new("ShaderNodeTexImage"); nt.image = nrm; nt.interpolation = "Linear"
+            nm = m.node_tree.nodes.new("ShaderNodeNormalMap")
+            m.node_tree.links.new(nt.outputs["Color"], nm.inputs["Color"]); m.node_tree.links.new(nm.outputs["Normal"], pb.inputs["Normal"])
         for q, at in zip(objs, home):
+            for l in [l for l in q.data.uv_layers if l.name != "Atlas"]: q.data.uv_layers.remove(l)
+            if "Atlas" in q.data.uv_layers: q.data.uv_layers["Atlas"].active_render = True
             q.data.materials.clear(); q.data.materials.append(m)
             for p in q.data.polygons: p.material_index = 0
             q.location = at
@@ -289,10 +312,13 @@ class Kit:
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
         weighted(f)
         return f
-    def export(s, path, objs):
+    def export(s, path, objs, colors=False):
+        """`colors`: the ACTIVE colour attribute exported too (COLOR_0) — data a piece carries for the game (the
+        sangar's build order, tools/blender/sangar.py), not a colour the baked material uses."""
         bpy.ops.object.select_all(action="DESELECT")
         for o in objs: o.select_set(True)
         kw = dict(filepath=path, use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format="JPEG")
+        if colors: kw["export_vertex_color"] = "ACTIVE"
         try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
         except TypeError: bpy.ops.export_scene.gltf(**kw)
         print("GLB", path)

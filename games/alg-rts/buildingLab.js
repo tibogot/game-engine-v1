@@ -15,7 +15,7 @@ import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { buildMortarPit } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
@@ -44,6 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
+import { loadSangar, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 /** The village test: a lane (along x) of the kit, both sides facing it; the brown houses beyond. */
 function whiteVillage() {
   const g = new THREE.Group();
@@ -102,6 +103,19 @@ function labPiece(obj) {
   g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
   g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
   g.userData.extra = obj ? [obj] : [];
+  return g;
+}
+
+/** A kit sangar with the game's stone material (the scan's relief tiled close up — algSangar.js). */
+function sangarDetailed(g) {
+  g?.traverse((o) => {
+    if (!o.isMesh) return;
+    const m = sangarStoneMaterial(o.material);
+    if (!m) return;
+    o.geometry = plainGeometry(o);                   // (plain floats, real metres: the detail tiles in them)
+    o.position.set(0, 0, 0); o.quaternion.identity(); o.scale.set(1, 1, 1);
+    o.material = m;
+  });
   return g;
 }
 
@@ -325,7 +339,7 @@ export const BUILDINGS = {
   // THE HELIPAD (2026-10-13, you: "add the helipad to the lab to fine-tune it" — the first base building
   // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.
   helisurface: {
-    label: "Hélisurface", gap: 24, before: () => buildHelipad(),
+    label: "Hélisurface", gap: 24, construction: true, before: () => buildHelipad(),
     // (2026-10-13: the CONSTRUCTION too — algConstruction.js: the panel's « Construction » plays it.)
     after: () => {
       const g = buildHelipadPiece((o) => buildHelipad({ detail: 2, ...o }));
@@ -418,6 +432,27 @@ export const BUILDINGS = {
     before: () => { console.log("[points]", houseStats()); return labPiece(pointWithWalls(ty, "intact")); }, middle: () => labPiece(pointWithWalls(ty, "damaged")), after: () => labPiece(pointWithWalls(ty, "ruin")),
     tags: [`${fr.toUpperCase()} · INTACT`, `${fr.toUpperCase()} · ENDOMMAGÉ`, `${fr.toUpperCase()} · DÉTRUIT`], note: "le point de ravitaillement refait dans Blender (mât, dépôt, sacs simulés) dans ses trois états.",
   }])),
+  // THE SANGAR IN BLENDER (2026-10-21, tools/blender/sangar.py, algSangar.js): the game's old one LEFT, the new one
+  // MIDDLE — its CONSTRUCTION in the panel (stone by stone, the game's own site material) — damaged RIGHT;
+  // « Sangar (Blender) : états » shows intact / damaged / ruin.
+  sangarBlender: {
+    label: "Sangar (Blender)", gap: 7, yaw: Math.PI - 0.5, construction: true, prepare: () => Promise.all([loadSangar(), loadHouses("sangar")]),
+    before: () => buildSangar(),
+    middle: () => {
+      const g = sangarGeometry().clone(), site = g.userData.siteMaterial();
+      g.userData = { ...g.userData, labMaterial: site.material };
+      SITE = { set: site.set, stencilShown: () => false, sock: null };
+      site.set(1);
+      return g;
+    },
+    after: () => labPiece(sangarDetailed(houseMesh("sangar", "damaged"))),
+    tags: ["SANGAR (LE JEU)", "SANGAR · NOUVEAU", "SANGAR · ENDOMMAGÉ"], note: "le sangar du jeu à gauche, le nouveau en pierres sèches (Blender) au milieu — « Construction » : pierre par pierre, comme en jeu — endommagé à droite.",
+  },
+  sangarEtats: {
+    label: "Sangar (Blender) : états", gap: 7, yaw: Math.PI - 0.5, prepare: () => loadSangar(),
+    before: () => labPiece(sangarDetailed(houseMesh("sangar", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("sangar", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("sangar", "ruin"))),
+    tags: ["SANGAR · INTACT", "SANGAR · ENDOMMAGÉ", "SANGAR · RUINE"], note: "le sangar en pierres sèches dans ses trois états.",
+  },
   pointCarbu: {
     label: "Point : carburant", gap: POINT_KINDS.fuel.R + 3, before: () => supplyPoint("game", "fuel"), after: () => supplyPoint("new", "fuel"),
     tags: ["CARBURANT (LE JEU)", "CARBURANT · NOUVEAU"], note: "le dépôt de fûts — les marques du jeu à gauche, les nouvelles à droite.",

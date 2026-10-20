@@ -25,7 +25,9 @@ export const FIELD_WALL_TYPES = ["a", "b", "c"];
 // THE REQUISITION POINTS (tools/blender/supplyPoint.py): the mast and its depot as one piece, fuel or munitions —
 // built in GAME metres (add it at scale 1)
 export const POINT_TYPES = ["fuel", "mun"];
-const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES } };
+// THE SANGAR (tools/blender/sangar.py — algSangar.js makes it the sappers' buildable)
+export const SANGAR_TYPES = ["sangar"];
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
@@ -47,6 +49,9 @@ export function loadHouses(kit = "houses") {
         if (m.material?.map) m.material.map.anisotropy = 8;
         // (Blender exports double-sided: closed shells and slabs here — every back face would be shaded too)
         if (m.material) m.material.side = THREE.FrontSide;
+        // (a kit's colour is its baked atlas: a COLOR_0 it carries is DATA — the sangar's build order — and the
+        // loader multiplied it in: the damaged sangar drew red, 2026-10-21)
+        if (m.material) m.material.vertexColors = false;
       }
       _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near };
     }

@@ -32,7 +32,9 @@ function step(cmd, ...extra) {
 }
 const max = flag("--max", null);
 if (max) step("resize", "--width", max, "--height", max);
-if (args.includes("--etc1s")) step("etc1s", "--quality", "200");
+// (normal maps NEVER in ETC1S — its blocks smear the relief: the colour in ETC1S, the normals in UASTC — the
+// scanned stones' baked normals, 2026-10-21)
+if (args.includes("--etc1s")) { step("etc1s", "--quality", "200", "--slots", "baseColorTexture"); step("uastc", "--level", "2", "--rdo", "--rdo-lambda", "2", "--zstd", "18", "--slots", "normalTexture"); }
 else step("uastc", "--level", flag("--level", "2"), "--rdo", "--rdo-lambda", "2", "--zstd", "18");
 step("meshopt", "--level", "medium");
 copyFileSync(cur, path.resolve(dst));

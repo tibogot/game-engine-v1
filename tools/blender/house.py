@@ -465,12 +465,13 @@ def groundLife(K, R, spec, Z0):
 # ── Build, bake (three states, one atlas a type), far levels, export ──────────
 # (a function: tools/blender/mzab.py imports this builder with its own types and materials)
 STATES = ("intact", "damaged", "ruin")
-def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
+def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
     K = Kit(MATDEF, ("h",))
     exported = []
     S_ = 512 if QUICK else 2048
     for ti, (tname, spec) in enumerate(TYPES.items()):
         if ONLY and tname != ONLY: continue
+        K.smooth_angle, K.weighted_on = spec.get("smoothAngle", 35), spec.get("weighted", True)
         objs, fars = [], []
         for si, state in enumerate(STATES):
             K.groups["h"] = []
@@ -486,12 +487,12 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
                 K.drop_cutters()
-        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2))
+        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False))
         for i, o in enumerate(objs):
             f = fars[i] if fars else K.far(o, 0.3)
             print("TRIS", o.name, tris(o), "far", tris(f))
             exported += [o, f]
-    K.export(os.path.join(out, glb), exported)
+    K.export(os.path.join(out, glb), exported, colors=colors)
     return exported
 
 def previews(TYPES, exported, prefix="House", tag="", spacing=16, frame=1.0):
