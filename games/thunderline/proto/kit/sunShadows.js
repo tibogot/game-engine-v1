@@ -63,9 +63,13 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     const cx = Math.floor((x - gx0) / CELL), cy = Math.floor((y - gy0) / CELL);
     for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) used.add((cy + dy) * nx + (cx + dx)); // dilate one cell
   }
-  const perRow = atlasSize / CELL_TEX;
+  // THE ATLAS FITS THE TRACK (performance pass, 2026-10-20): the smallest square of cell slots that holds
+  // its cells (White 1: 346 cells -> 19 x 19 slots, 4864², not 8192²); `atlasSize` is the most it may take
+  const inGridCells = [...used].filter((k) => k >= 0 && k < nx * ny);
+  const perRow = Math.min(atlasSize / CELL_TEX, Math.max(1, Math.ceil(Math.sqrt(inGridCells.length))));
   const capacity = perRow * perRow;
-  const cells = [...used].filter((k) => k >= 0 && k < nx * ny).slice(0, capacity);
+  const cells = inGridCells.slice(0, capacity);
+  const atlasPx = perRow * CELL_TEX;
   const table = new Float32Array(nx * ny * 4); // (slotCol, slotRow, present, 0)
   cells.forEach((k, slot) => {
     table[k * 4] = slot % perRow;
@@ -77,13 +81,15 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   tableTex.needsUpdate = true;
 
   // ---- render targets: "distance from the sun" (0 = at zMax, 1 = at zMin) in R32F, plus a depth buffer ----
-  const makeRT = (size) => {
-    const rt = new THREE.RenderTarget(size, size, { type: THREE.FloatType, format: THREE.RedFormat, depthBuffer: true });
+  const makeRT = (size, depthBuffer = true) => {
+    const rt = new THREE.RenderTarget(size, size, { type: THREE.FloatType, format: THREE.RedFormat, depthBuffer });
     rt.texture.minFilter = rt.texture.magFilter = THREE.NearestFilter;
     rt.texture.generateMipmaps = false;
     return rt;
   };
-  const atlasRT = makeRT(atlasSize);
+  // NO DEPTH BUFFER on the atlas: each cell is drawn into a small target that has one and copied in (bake) —
+  // a depth buffer the atlas's size, used only while baking, doubled its memory
+  const atlasRT = makeRT(atlasPx, globalThis.__BAKE_DIRECT === true);
   const liveRT = makeRT(LIVE_TEX);
 
   const uZ = [uniform(zL), uniform(zMax), uniform(range)];
@@ -143,14 +149,24 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     clearRT(atlasRT);
     const prevCC = renderer.getClearColor(new THREE.Color());
     const vp = new THREE.Vector4();
-    for (const k of cells) {
+    const direct = globalThis.__BAKE_DIRECT === true;
+    const cellRT = direct ? null : makeRT(CELL_TEX);
+    const at = new THREE.Vector2();
+    cells.forEach((k, slot) => {
       const cx = k % nx, cy = Math.floor(k / nx);
-      const slot = cells.indexOf(k);
       const sc = slot % perRow, sr = Math.floor(slot / perRow);
       aimCam(gx0 + (cx + 0.5) * CELL, gy0 + (cy + 0.5) * CELL, CELL / 2 + BORDER * texel);
-      vp.set(sc * CELL_TEX, sr * CELL_TEX, CELL_TEX, CELL_TEX);
-      renderInto(atlasRT, vp, [STATIC_LAYER]);
-    }
+      if (direct) {
+        vp.set(sc * CELL_TEX, sr * CELL_TEX, CELL_TEX, CELL_TEX);
+        renderInto(atlasRT, vp, [STATIC_LAYER]);
+        return;
+      }
+      clearRT(cellRT);
+      vp.set(0, 0, CELL_TEX, CELL_TEX);
+      renderInto(cellRT, vp, [STATIC_LAYER]);
+      renderer.copyTextureToTexture(cellRT.texture, atlasRT.texture, null, at.set(sc * CELL_TEX, sr * CELL_TEX));
+    });
+    cellRT?.dispose();
     renderer.setClearColor(prevCC);
     return performance.now() - t0;
   }
@@ -239,7 +255,7 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       return { lo, hi, mean: sum / n, n, below1 };
     },
     lightSpace: (p) => toL(p), zMax, range,
-    stats: { cells: cells.length, capacity, grid: `${nx}×${ny}`, texelsPerMetre: INNER / CELL, liveTexelsPerMetre: LIVE_TEX / LIVE_SIZE, atlasSize },
+    stats: { cells: cells.length, capacity, grid: `${nx}×${ny}`, texelsPerMetre: INNER / CELL, liveTexelsPerMetre: LIVE_TEX / LIVE_SIZE, atlasSize: atlasPx, atlasMB: Math.round((atlasPx * atlasPx * 4) / 1048576) },
     dispose() { atlasRT.dispose(); liveRT.dispose(); tableTex.dispose(); depthMat.dispose(); },
   };
 }
