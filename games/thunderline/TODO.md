@@ -97,13 +97,17 @@ Track triangles: POSTS = 1023 instances, 119k of the track's 171k (70%); deck + 
 Physics 0.65 ms per tick median (two ticks a 60 fps frame); a ghost re-simulates (doubles it).
 Shadow atlas: 8192² R32F + a same-size depth buffer (~0.5 GB VRAM) for 346 cells; first bake 5-8 s on a
 big track (shader compile included), a re-bake 0.7 s.
-- [ ] Terrain: far fewer triangles for a flat floor (engine terrain LOD settings for Thunderline)
-- [ ] Posts: LOD (plain bar past ~150 m, none past ~400 m) or merged into the rail
-- [ ] Track merged into ~128 m chunks per material (cullable; live pass draws only nearby chunks)
-- [ ] Live shadow layer: only the ShadowProxy + tyres of the car
-- [ ] Shadow atlas: 16-bit, depth freed after the bake, cached per track + time
-- [ ] Ghost: replay recorded poses, not physics
-- [ ] Terrain paint: layerBudget 4
+- [x] Terrain: KEPT (user: worlds will have mountains / islands / ocean; the engine's own note: 132k -> 427k tris cost 0.28 -> 0.33 ms). The sky world will switch it off.
+- [x] Posts: chunks with distance detail (real 54 tris / box 12 from 150 m / none from 420 m) — 228f491b
+- [x] Track merged into 256 m chunks per material, rails with distance detail (walls from 200 m, none from 700 m) — d104a6ab; the builder draws the same chunks (pieces hidden, still picked)
+- [x] Live shadow layer: only the casters (ShadowProxy + tyres) — d104a6ab. White 1: 106 / 923k -> 101 / 768k, live pass 117k -> 11k
+- [x] Shadow atlas: fitted to the track, no depth buffer (White 1: ~512 -> 90 MB) — 139af635. Not 16-bit (0.5 m steps: acne); no cross-load cache needed (the bake is 0.1-0.7 s)
+- [x] Ghost: replays recorded poses (30/s), not physics — 9c4701af. Pack the saved inputs (~220 KB a 34 s lap)
+- [x] Terrain paint: layerBudget 3 (the ground uses slots 0-2)
+GPU, a quiet moment (2026-10-20, drive page, White 1 start view, gpuAB means, old/new alternated twice):
+BEFORE the pass 8.30 / 8.36 ms -> AFTER 3.97 / 3.80 ms (3.59 a third time). Without the terrain layer budget
+the new code is 5.30 ms: the shadow / chunk / caster work ~3 ms, the 3-layer ground shader ~1.7 ms. In-page
+toggles at that view: rails + posts at full detail +0.11 ms, the whole car in the shadow map -0.05 (noise 0.3).
 
 ## Look & tech
 - [ ] Performance check: the tube run showed 37–49 fps in my window — measure GPU ms before adding more.

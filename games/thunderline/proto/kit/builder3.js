@@ -19,6 +19,7 @@ import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
+import { buildTrackMeshes } from "./testTrack.js";
 import { OBSTACLES, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
@@ -148,7 +149,7 @@ const app = await startV3App({
   cloudShadows: true,
   light: { envIntensity: 0.45, hemiIntensity: 0.6, dirIntensity: 2.6, exposure: 1.0, shadowNormalBias: 0.12 },
   terrainFeatures: { cursor: false },
-  splatFeatures: { solo: false },
+  splatFeatures: { solo: false, layerBudget: 3 }, // the ground uses paint slots 0-2 only (worlds.js): the shader loops over 3 layers, not 7
   preloadPaintTextures: false,
   csm: { cascades: 2 },
 });
@@ -409,6 +410,26 @@ let built = new Map(); // uid → { exit: Matrix4, group, M }
 let obstacleSet = null; // the track's obstacles as drawn (obstacles.js); the sweepers turn on the page's clock
 let problems = { overlap: new Set(), messages: [], loose: [], misses: [] };
 
+let chunkMeshes = null;
+const pieceLooks = {}; // buildTrackMeshes' `built`: id -> { guarded, open } (the builder's piece cache)
+function drawChunks() {
+  const placements = [];
+  for (const pc of track.pieces) {
+    if (isRing(pc) || !built.has(pc.uid)) continue;
+    pieceLooks[pc.id] ??= { guarded: piece(pc.id, false).look, open: piece(pc.id, true).look };
+    placements.push({ id: pc.id, open: !!pc.open, M: built.get(pc.uid).M });
+    built.get(pc.uid).group.traverse((o) => { if (o.isMesh) o.visible = false; });
+  }
+  chunkMeshes = buildTrackMeshes(placements, pieceLooks, mats);
+  chunkMeshes.group.name = "trackChunks";
+  chunkMeshes.group.traverse((o) => { o.raycast = () => {}; }); // the mouse picks the pieces, never the chunks
+  trackGroup.add(chunkMeshes.group);
+}
+/** While the gizmo drags: the pieces themselves are drawn (they move), the chunks hidden; rebuilt after. */
+function showPieceMeshes(on) {
+  if (chunkMeshes) chunkMeshes.group.visible = !on;
+  for (const [uid, b] of built) if (!b.prop && track.pieces.some((p) => p.uid === uid && !isRing(p))) b.group.traverse((o) => { if (o.isMesh) o.visible = on; });
+}
 function rebuild() {
   for (const c of trackGroup.children.slice()) trackGroup.remove(c);
   built = new Map();
@@ -432,6 +453,10 @@ function rebuild() {
     if (pc.cp) trackGroup.add(checkpointGate(pc, M));
     built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pc.open).exitLocal), group: g, M });
   }
+  // THE ROAD IS DRAWN IN CHUNKS (testTrack.buildTrackMeshes, as the drive page: performance pass,
+  // 2026-10-20 — every piece its own mesh was ~220 draws on a big track). The pieces' own groups stay for
+  // the mouse (picking, selection boxes, the gizmo), HIDDEN: three's ray hits hidden meshes, the camera skips them.
+  drawChunks();
   // OBSTACLES (track.props): drawn here, selectable like pieces; the sweepers turn on the page's clock
   obstacleSet = buildObstacleSet(track.props ?? []);
   for (const vis of obstacleSet.group.children.slice()) {
@@ -1479,6 +1504,7 @@ gizmo.addEventListener("dragging-changed", (e) => {
   controls.enabled = !e.value;
   if (e.value) {
     const what = carried(sel);
+    showPieceMeshes(true);
     gizmoDrag = { start: gizmoProxy.matrixWorld.clone(), what, groups: [...what.pieces, ...what.props].map((u) => built.get(u)).filter(Boolean).map((b) => ({ g: b.group, M0: b.group.matrix.clone() })) };
     for (const { g } of gizmoDrag.groups) g.matrixAutoUpdate = false;
     return;
@@ -1489,7 +1515,7 @@ gizmo.addEventListener("dragging-changed", (e) => {
   const delta = gizmoProxy.matrixWorld.clone().multiply(gizmoDrag.start.clone().invert());
   const moved = gizmoDrag;
   gizmoDrag = null;
-  if (delta.equals(new THREE.Matrix4())) return;
+  if (delta.equals(new THREE.Matrix4())) { showPieceMeshes(false); return; }
   snapshot();
   for (const u of moved.what.pieces) {
     const pc = track.pieces.find((p) => p.uid === u);
@@ -1893,6 +1919,7 @@ app.addPreUpdateHook(function builderFrame() {
   controls.update();
   updateGhost();
   updateHeightCue();
+  chunkMeshes?.updateLod(camera); // the posts' / rails' detail (testTrack.js)
   obstacleSet?.setTime(now / 1000); // the sweepers turn while you build (the test lap has its own clock)
   renderHand();
   updateGrid();

@@ -19,7 +19,7 @@ const app = await startV3App({
   cloudShadows: true,
   light: { envIntensity: 0.45, hemiIntensity: 0.6, dirIntensity: 2.6, exposure: 1.0, shadowNormalBias: 0.12 },
   terrainFeatures: { cursor: false },
-  splatFeatures: { solo: false },
+  splatFeatures: { solo: false, layerBudget: 3 }, // the ground uses paint slots 0-2 only (worlds.js): the shader loops over 3 layers, not 7
   preloadPaintTextures: false,
   csm: { cascades: 2 },
 });
