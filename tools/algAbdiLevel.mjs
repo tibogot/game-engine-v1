@@ -114,6 +114,48 @@ const PLAIN = 22;
 const floorAt = (x, z) => PLAIN - z * 0.01 - x * 0.006;
 /** How far INTO the djebel (m, north-west of its foot; the foot a line from (-250, 20) to (250, -120), wobbling). */
 const djebelD = (x, z) => (20 - (x + 250) * 0.28 + 14 * (noise(x / 70, 3.3, 5) - 0.5)) - z;
+// THE TOWN'S HILL: the top platform's height, then each ring terrace (radii from the knoll's centre, height over
+// the valley floor); risers 1.5 m wide between them; the shoulder down to the floor by KNOLL_SHOULDER
+const KNOLL_TOP = 12.6, KNOLL_SHOULDER = 62, RISER = 0.55;
+const KNOLL_RINGS = [{ r0: 12.5, r1: 23, h: 10 }, { r0: 23, r1: 36, h: 7.4 }, { r0: 36, r1: 49, h: 4.8 }];
+/** Distance from the knoll's centre, WARPED with the angle (2026-10-20: perfect circles read as a target from the
+ *  RTS camera; Ghardaïa's streets follow the hill's own wobbly contours). The rings, the houses and the paint use it. */
+function knollD(x, z) {
+  const dx = x - KNOLL.x, dz = z - KNOLL.z, r = Math.hypot(dx, dz) || 1e-6;
+  return r * (1 + 0.13 * (noise(1.3 * dx / r + 5, 1.3 * dz / r + 5, 31) - 0.5) + 0.05 * (noise(3.1 * dx / r + 9, 3.1 * dz / r + 2, 32) - 0.5));
+}
+function knollStep(kd, riser = RISER) {
+  let v = KNOLL_TOP, prev = KNOLL_TOP;
+  for (const R of KNOLL_RINGS) { v += (R.h - prev) * smoothstep(R.r0 - riser, R.r0 + riser, kd); prev = R.h; }
+  return v;
+}
+// THE TOWN'S LANES (2026-10-20: packed wall to wall, the town was one block to the pathfinder and its risers 2.6 m
+// cliffs): three streets up the hill, LANE_W wide — from the square straight up to the mosque's gate, and one up
+// each flank; in them the risers become RAMPS (stretched over 7 m: ~20 deg, under the nav grid's 34) and no
+// house stands. Straight rays from the knoll's centre.
+const LANE_W = 5;
+// (in a lane the steps are ONE even slope, through the rings' middles: two smooth risers squeezed by the warp
+// merged into 39 deg — measured; this is ~13 deg, ~16 where the warp squeezes it)
+function knollLane(kd, end) {
+  const lo = KNOLL_RINGS[KNOLL_RINGS.length - 1].h;
+  return kd <= 6 ? KNOLL_TOP : kd >= end ? lo : KNOLL_TOP + (lo - KNOLL_TOP) * (kd - 6) / (end - 6);
+}
+// [cos, sin, the ring distance where its slope ends]: the middle lane at the SQUARE's back edge (the square's
+// height there — 2026-10-20: the square's notch dragged it into a 40 deg drop and sealed the hilltop off), the
+// flanks at the last ring
+const LANES = (() => {
+  const a0 = Math.atan2(TOWN.z - KNOLL.z, TOWN.x - KNOLL.x), toSq = Math.hypot(TOWN.x - KNOLL.x, TOWN.z - KNOLL.z) - 11;
+  return [a0, a0 + 2.1, a0 - 2.1].map((a, i) => [Math.cos(a), Math.sin(a), i === 0 ? knollD(KNOLL.x + Math.cos(a) * toSq, KNOLL.z + Math.sin(a) * toSq) : KNOLL_RINGS[KNOLL_RINGS.length - 1].r1]);
+})();
+/** The nearest lane: its distance across, its slope's end, whether it is the middle one. */
+function laneAt(x, z) {
+  const px = x - KNOLL.x, pz = z - KNOLL.z;
+  let best = { d: Infinity, end: 0, mid: false };
+  LANES.forEach(([c, sn, end], i) => { if (px * c + pz * sn > 5) { const d = Math.abs(-px * sn + pz * c); if (d < best.d) best = { d, end, mid: i === 0 }; } });
+  return best;
+}
+const laneDist = (x, z) => laneAt(x, z).d;
+const laneK = (x, z) => 1 - smoothstep(LANE_W / 2, LANE_W / 2 + 0.8, laneDist(x, z));   // (sharp edges: the houses line the street, their walls hide the step)
 /** The terraces: levels STEP_H high, each a walkable plateau with a short ramp up to the next. */
 const STEP_H = 5, STEP_L = 32;
 function terraces(d) {
@@ -124,6 +166,7 @@ function terraces(d) {
 
 function naturalAt(x, z) {
   const calm = calmK(x, z), o = outside(x, z);
+  let djRise = 0;
   let h = floorAt(x, z);
   // low swells on the valley floor (two scales), calmed on the sites
   const swell = (noise(x / 90, z / 90, 3) - 0.5) * 2 * 1.4 + (noise(x / 34, z / 34, 7) - 0.5) * 2 * 0.45;
@@ -134,8 +177,8 @@ function naturalAt(x, z) {
   const d = djebelD(x, z) + 9 * (noise(x / 28, z / 28, 71) - 0.5) + 3.5 * (noise(x / 9, z / 9, 72) - 0.5);
   if (d > 0) {
     const inBox = Math.min(terraces(d), 4 * STEP_H);
-    h += inBox * (0.85 + 0.3 * noise(x / 60, z / 60, 11));
-    h += smoothstep(0, 160, o) * smoothstep(0, 60, d) * 75 * (0.7 + 0.5 * noise(x / 90, z / 90, 13));
+    djRise = inBox * (0.85 + 0.3 * noise(x / 60, z / 60, 11)) + smoothstep(0, 160, o) * smoothstep(0, 60, d) * 75 * (0.7 + 0.5 * noise(x / 90, z / 90, 13));
+    h += djRise;
   }
   // THE FACES ERODED: on a terrace's ramp only (the flats stay flat), RILLS cut down the fall line (ridged
   // noise stretched across the djebel's foot line), small LEDGES of harder strata, a rough skin
@@ -152,9 +195,16 @@ function naturalAt(x, z) {
   h += (noise(x / 6, z / 6, 76) - 0.5) * 0.5 * calm;
   // the frame south and east: low hills rising past the box
   if (o > 0 && d <= 0) h += smoothstep(0, 140, o) * 22 * (0.5 + noise(x / 80, z / 80, 17));
-  // THE KNOLL (the town): flat-topped, a soft shoulder
-  const kd = Math.hypot(x - KNOLL.x, z - KNOLL.z);
-  h += 9 * (1 - smoothstep(KNOLL.r * 0.55, KNOLL.r * 1.15, kd + 6 * (noise(x / 20, z / 20, 19) - 0.5)));
+  // THE KNOLL (the town, 2026-10-20): STEPPED like Ghardaia's hill — a top platform (the mosque) and three
+  // RING TERRACES (the town's rows of houses, each row's fronts over the roofs of the row below), short risers
+  // between them; a soft shoulder below the last. Exact (flat) on the valley side; the djebel wins where it is
+  // higher (north: the town's back stays bare terraces).
+  const kd = knollD(x, z);
+  if (kd < KNOLL_SHOULDER + 6) {
+    const fl = floorAt(x, z), last = KNOLL_RINGS[KNOLL_RINGS.length - 1];
+    if (kd < last.r1) { const L = laneAt(x, z), lk = 1 - smoothstep(LANE_W / 2, LANE_W / 2 + 0.8, L.d), hk = fl + knollStep(kd) * (1 - lk) + knollLane(kd, L.end) * lk; h = Math.max(hk, fl + djRise); }
+    else h = Math.max(h, fl + last.h * (1 - smoothstep(last.r1, KNOLL_SHOULDER, kd + 4 * (noise(x / 20, z / 20, 19) - 0.5))));
+  }
   // THE GULLIES: ravines down the djebel — a flat floor 10 m wide, banks steep, depth with the terraces
   for (const g of gullyAt) {
     const q = g(x, z, 40);
@@ -207,6 +257,7 @@ for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
   // (from the djebel's FIRST step now, full by its second — 2026-10-19: in the box it read mild)
   let m = Math.max(smoothstep(4, 26, djebelD(x, z)), smoothstep(10, 60, outside(x, z)));
   for (const f of flats) m = Math.min(m, smoothstep(f.r, f.r + 20, Math.hypot(x - f.x, z - f.z)));
+  m = Math.min(m, smoothstep(KNOLL_SHOULDER, KNOLL_SHOULDER + 20, Math.hypot(x - KNOLL.x, z - KNOLL.z)));   // (the town's hill: its rings stay flat)
   if (m > 0) {
     m *= smoothstep(wadi.width + 6, wadi.width + 24, wadiAt(x, z, 50).d);
     for (const p of pisteAt) m *= smoothstep(6, 16, p(x, z, 20).d);
@@ -234,7 +285,8 @@ function erodedAt(x, z) {
 /** EVERY SITE LEVELLED: the ground under a place blended to its own height (its centre's, before
  *  levelling), a soft rim beyond — a camp on a terrace step or a souk on the knoll's shoulder stood on 4-10 m
  *  of relief (measured, the first build). */
-const LEVEL = LAYOUT.sites.map((s) => ({ x: s.x, z: s.z, r: s.r * 0.9, rim: s.r * 0.6 + 8, h: naturalAt(s.x, s.z) }));
+// (not the town: its hill's rings and its square's pad)
+const LEVEL = LAYOUT.sites.filter((s) => s.kind !== "town").map((s) => ({ x: s.x, z: s.z, r: s.r * 0.9, rim: s.r * 0.6 + 8, h: naturalAt(s.x, s.z) }));
 function levelledAt(x, z) {
   let h = erodedAt(x, z);
   for (const L of LEVEL) {
@@ -243,8 +295,116 @@ function levelledAt(x, z) {
   }
   return h;
 }
-/** The ground with every piste CARVED in. */
+// ── THE TOWN (2026-10-20): the M'zab kit (algHouse.js) on the knoll's rings, the souk SQUARE at the site ──
+// Footprints in the kit's local real metres (x0 x1 z0 z1, front at -Z, steps / stairs / yards in); the game x1.3.
+const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8], bas: [-3.2, 3.2, -4.0, 4.6], terrasse: [-3.0, 7.45, -3.5, 3.0],
+  souk: [-6.0, 6.0, -5.0, 2.4], mosquee: [-6.0, 6.0, -6.5, 6.5], maison: [-3.8, 8.45, -3.5, 3.0], haute: [-2.6, 2.6, -3.7, 2.8], cour: [-3.4, 3.4, -4.2, 5.0] };
+const HS = 1.3;
+const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];   // (three.js rotation.y)
+const yawFacing = (fx, fz) => Math.atan2(-fx, -fz);                                                          // front (local -Z) toward (fx, fz)
+/** A house whose footprint's centre is at (cx, cz), facing (fx, fz): its position, yaw, 4 corners, size. */
+function houseAt(type, cx, cz, fx, fz) {
+  const [x0, x1, z0, z1] = FOOT[type].map((v) => v * HS), th = yawFacing(fx, fz);
+  const [ox, oz] = rotY(th, (x0 + x1) / 2, (z0 + z1) / 2);
+  const corners = [[x0, z0], [x1, z0], [x1, z1], [x0, z1]].map(([a, b]) => { const [u, v] = rotY(th, a, b); return [cx - ox + u, cz - oz + v]; });
+  return { type, x: cx - ox, z: cz - oz, yaw: th, corners, w: x1 - x0, d: z1 - z0 };
+}
+function inBox(o, x, z, pad) {
+  const [a, b] = rotY(-o.yaw, x - o.x, z - o.z), [x0, x1, z0, z1] = FOOT[o.type].map((v) => v * HS);
+  return a > x0 - pad && a < x1 + pad && b > z0 - pad && b < z1 + pad;
+}
+// the SQUARE: at the souk site, its long side across the slope; held up at the last ring's height (a platform, the
+// piste climbing to it), dug into the ring above for its souks
+const SQ = (() => { const ux = TOWN.x - KNOLL.x, uz = TOWN.z - KNOLL.z, L = Math.hypot(ux, uz); return { x: TOWN.x, z: TOWN.z, ux: ux / L, uz: uz / L, tx: -uz / L, tz: ux / L, hw: 16, hd: 11, h: KNOLL_RINGS[2].h }; })();
+const sqLocal = (x, z) => [(x - SQ.x) * SQ.tx + (z - SQ.z) * SQ.tz, (x - SQ.x) * SQ.ux + (z - SQ.z) * SQ.uz];   // (along, outward)
+const SQ_PAD = { a: SQ.hw + 10.5, b0: -(SQ.hd + 10.6), b1: SQ.hd, blend: 3 };
+function squareK(x, z) {
+  const [a, b] = sqLocal(x, z);
+  const da = Math.max(0, Math.abs(a) - SQ_PAD.a), db = Math.max(0, SQ_PAD.b0 - b, b - SQ_PAD.b1);
+  const k = 1 - smoothstep(0, SQ_PAD.blend, Math.hypot(da, db));
+  return b < -SQ.hd && k > 0 ? k * (1 - laneK(x, z)) : k;
+}
 let ground = (x, z) => levelledAt(x, z);
+{ const base = ground; ground = (x, z) => { const k = squareK(x, z), h = base(x, z); return k > 0 ? h + (floorAt(x, z) + SQ.h - h) * k : h; }; }
+const town = [];
+// THE MOSQUE on the hilltop, its court toward the square (its minaret then rises at the back, over the town)
+town.push({ ...houseAt("mosquee", KNOLL.x, KNOLL.z, SQ.ux, SQ.uz), state: "intact" });
+// the SOUKS round the square: two along its back (the hill side), one each end, all facing in
+for (const a of [-10.4, 10.4]) town.push({ ...houseAt("souk", SQ.x + SQ.tx * a - SQ.ux * (SQ.hd + 5.1), SQ.z + SQ.tz * a - SQ.uz * (SQ.hd + 5.1), SQ.ux, SQ.uz), state: a < 0 ? "intact" : "damaged" });
+for (const sd of [-1, 1]) town.push({ ...houseAt("souk", SQ.x + SQ.tx * sd * (SQ.hw + 5.1) - SQ.ux * 2, SQ.z + SQ.tz * sd * (SQ.hw + 5.1) - SQ.uz * 2, -SQ.tx * sd, -SQ.tz * sd), state: "intact" });
+// the RINGS: walk round each, a house a step (its width, wall to wall — a LANE every few), facing down the hill;
+// a house stays only where its whole box stands flat on its ring (off the risers, the square, the djebel)
+// (the white ones — the whitewashed kit, the pale blue terrasse — about one in eight: the town is ochre; a
+// quarter white read as a whitewashed town, 2026-10-20)
+const RING_MIX = [["dar", "tour", "dar", "dar", "haute", "dar", "tour", "dar"], ["dar", "tour", "dar", "terrasse", "dar", "bas", "dar", "dar"], ["dar", "dar", "bas", "dar", "tour", "dar", "bas", "dar"]];
+const onRing = (R, cs) => cs.every(([x, z]) => { const kd = knollD(x, z); if (squareK(x, z) > 0) return false; return kd > R.r0 + RISER + 0.1 && kd < R.r1 - RISER - 0.1 && Math.abs(ground(x, z) - floorAt(x, z) - R.h) < 0.15; });
+/** A house's box clear of every lane (its corners' spread across the lane's line misses the strip). */
+const offLanes = (cs) => LANES.every(([c, sn]) => {
+  const ps = cs.map(([x, z]) => [(x - KNOLL.x) * c + (z - KNOLL.z) * sn, -(x - KNOLL.x) * sn + (z - KNOLL.z) * c]);
+  if (ps.every(([al]) => al < 4)) return true;
+  const lo = Math.min(...ps.map((q) => q[1])), hi = Math.max(...ps.map((q) => q[1]));
+  return lo > LANE_W / 2 + 0.9 || hi < -(LANE_W / 2 + 0.9);
+});
+const clearOfTown = (cs, pad = 0.3) => cs.every(([x, z]) => town.every((o) => !inBox(o, x, z, pad)));
+KNOLL_RINGS.forEach((R, ri) => {
+  const rm = (R.r0 + R.r1) / 2;
+  let phi = Math.atan2(SQ.uz, SQ.ux) + 0.4, k = 0, pending = null, tries = 0;
+  const end = phi + Math.PI * 2 - 0.2;
+  while (phi < end) {
+    // (a miss keeps its TYPE for a few slides along: a fresh pick each miss favoured the small towers — 19 of 46)
+    const type = pending ?? RING_MIX[ri][Math.floor(hash(ri, k, 3) * RING_MIX[ri].length)], [x0, x1, z0, z1] = FOOT[type];
+    const w = (x1 - x0) * HS, dd = (z1 - z0) * HS, slack = R.r1 - R.r0 - 2 * RISER - 0.6 - dd;
+    const pc = phi + (w / 2) / rm;
+    if (slack >= -0.1) {
+      // (the ring's radius here: knollD = r x its warp at this angle; a few radii across the band tried, the
+      // first whose box stands flat wins — a straight box on a wobbly curve)
+      const ux = Math.cos(pc), uz = Math.sin(pc), warp = knollD(KNOLL.x + ux * 30, KNOLL.z + uz * 30) / 30, jit = (hash(ri, k, 9) - 0.5) * 0.16;
+      const h = [hash(ri, k, 4), 0.5, 0.15, 0.85, 0, 1].map((t) => {
+        const r = (R.r0 + RISER + 0.15 + dd / 2 + Math.max(0, slack) * t) / warp;
+        return houseAt(type, KNOLL.x + ux * r, KNOLL.z + uz * r, Math.cos(pc + jit), Math.sin(pc + jit));
+      }).find((c) => onRing(R, c.corners) && offLanes(c.corners) && clearOfTown(c.corners));
+      if (h) {
+        const q = hash(ri, k, 5);
+        town.push({ ...h, state: q < 0.07 ? "ruin" : q < 0.17 ? "damaged" : "intact" });
+        phi += (w + (hash(ri, k, 6) < 0.22 ? 2.8 : 0.3)) / rm; k++; pending = null; tries = 0;
+        continue;
+      }
+    }
+    phi += 1.2 / rm; k++;
+    if (++tries < 6) pending = type; else { pending = null; tries = 0; }
+  }
+});
+// THE TOWN'S EDGE: low houses behind their yards on the shoulder, each on its own levelled PAD
+const pads = [];
+{
+  const rm = 57, a0 = Math.atan2(SQ.uz, SQ.ux);
+  let phi = a0 - Math.PI, k = 0;
+  for (; phi < a0 + Math.PI; k++) {
+    const pc = phi + 5.2 / rm, ux = Math.cos(pc), uz = Math.sin(pc);
+    const h = houseAt("bas", KNOLL.x + ux * rm, KNOLL.z + uz * rm, ux, uz);
+    const hs = h.corners.map(([x, z]) => ground(x, z)), lo = Math.min(...hs), hi = Math.max(...hs);
+    const ok = hash(9, k, 7) < 0.55 && hi - lo < 3.6 && offLanes(h.corners) && clearOfTown(h.corners, 2)
+      && h.corners.every(([x, z]) => squareK(x, z) === 0 && djebelD(x, z) < -6 && Math.min(...pisteAt.map((q) => q(x, z, 20).d)) > 7 && wadiAt(x, z, 40).d > wadi.width + 6);
+    if (ok) {
+      town.push({ ...h, state: hash(9, k, 8) < 0.15 ? "damaged" : "intact" });
+      pads.push({ o: town[town.length - 1], h: (lo + hi) / 2 });
+      phi += (h.w + 3) / rm;
+    } else phi += 3 / rm;
+  }
+}
+{
+  const base = ground, [x0, x1, z0, z1] = FOOT.bas.map((v) => v * HS);
+  ground = (x, z) => {
+    let h = base(x, z);
+    for (const P of pads) {
+      const [a, b] = rotY(-P.o.yaw, x - P.o.x, z - P.o.z);
+      const dd = Math.hypot(Math.max(0, x0 - 1 - a, a - x1 - 1), Math.max(0, z0 - 1 - b, b - z1 - 1));
+      if (dd < 4) h += (P.h - h) * (1 - smoothstep(0, 4, dd));
+    }
+    return h;
+  };
+}
+/** The ground with every piste CARVED in. */
 for (const p of pisteAt) { const base = ground, carve = trackCarver(base, p, PISTE); ground = (x, z) => carve(x, z, base(x, z)); }
 const heightAt = ground;
 
@@ -296,7 +456,8 @@ const contourYaw = (x, z) => { const [gx, gz] = grad(x, z, 3); return Math.atan2
 const taken = [];
 const clearOf = (x, z, pad) =>
   !LAYOUT.sites.some((q) => Math.hypot(q.x - x, q.z - z) < q.r + pad) && pisteD(x, z, 40) > 12 && wadiAt(x, z, 40).d > wadi.width + 12
-  && gullyAt.every((g) => g(x, z, 30).d > 12);
+  && gullyAt.every((g) => g(x, z, 30).d > 12)
+  && Math.hypot(x - KNOLL.x, z - KNOLL.z) > KNOLL_SHOULDER + pad;   // (the town's hill: an outcrop stood in its west lane)
 // CRESTS (in the box)
 for (let i = 0, tries = 0; i < 26 && tries < 30000; tries++) {
   const x = PLAY.x0 + 12 + rand() * (PLAY.x1 - PLAY.x0 - 24), z = PLAY.z0 + 12 + rand() * (PLAY.z1 - PLAY.z0 - 24);
@@ -340,6 +501,18 @@ ${rocks.map((r) => `  { x: ${r2(r.x)}, y: ${r2(r.y)}, z: ${r2(r.z)}, yaw: ${r2(r
 ];
 `);
 console.log(`rocks: ${crestSlabs} crest slabs in the box, ${rocks.length - crestSlabs} cliff slabs on the frame`);
+// THE TOWN's houses (the game: an instanced house field, algHouse.js) — y the lowest corner's ground (no house floats)
+for (const o of town) o.y = Math.min(...o.corners.map(([x, z]) => H(x, z)));
+fs.writeFileSync("games/alg-rts/maps/abdiTown.js", `// GENERATED by tools/algAbdiLevel.mjs — do not edit: the town on the knoll (${town.length} houses: the M'zab kit
+// and a few whitewashed, algHouse.js) — [type, state, x, y, z, yaw, fx, fz, hx, hz]: fx fz hx hz its footprint's centre and
+// half sizes (world metres, turned by yaw: the nav grid, the cover); the souk square's centre, its outward axis, size, height.
+export const TOWN_HOUSES = [
+${town.map((o) => `  ["${o.type}", "${o.state}", ${r2(o.x)}, ${r2(o.y)}, ${r2(o.z)}, ${r2(o.yaw)}, ${r2(o.corners.reduce((a, c) => a + c[0], 0) / 4)}, ${r2(o.corners.reduce((a, c) => a + c[1], 0) / 4)}, ${r2(o.w / 2)}, ${r2(o.d / 2)}],`).join("\n")}
+];
+export const TOWN_SQUARE = { x: ${r2(SQ.x)}, z: ${r2(SQ.z)}, y: ${r2(H(SQ.x, SQ.z))}, ux: ${r2(SQ.ux)}, uz: ${r2(SQ.uz)}, hw: ${SQ.hw}, hd: ${SQ.hd} };
+`);
+const byType = {}; for (const o of town) byType[o.type] = (byType[o.type] ?? 0) + 1;
+console.log(`town: ${town.length} houses ${JSON.stringify(byType)}`);
 
 // ── Paint, by the relief — calm in the box, rock only on the frame ──────────
 const S = man.terrain.splatSize ?? man.splatRes;
@@ -372,14 +545,17 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
   const foot = smoothstep(0.3, 1.2, hollow(x, z, 6));
   const gullyD = Math.min(...gullyAt.map((g) => g(x, z, 24).d));
   const gullyFloor = 1 - smoothstep(4, 9, gullyD), gullyWall = 1 - smoothstep(9, 18, gullyD);
-  const darkRed = smoothstep(14, 26, sl) * Math.min(1, 0.25 + 0.6 * streak + 0.25 * foot) * (1 - gullyFloor) * (1 - 0.65 * gullyWall);
-  w[6] = road;
+  // THE TOWN's ground (2026-10-20): packed earth on its terraces, lanes and risers — the red faces read as a
+  // bullseye round the knoll
+  const townK = 1 - smoothstep(KNOLL_RINGS[KNOLL_RINGS.length - 1].r1, KNOLL_SHOULDER - 4, knollD(x, z));
+  const darkRed = smoothstep(14, 26, sl) * Math.min(1, 0.25 + 0.6 * streak + 0.25 * foot) * (1 - gullyFloor) * (1 - 0.65 * gullyWall) * (1 - townK);
+  w[6] = Math.max(road, townK * (0.45 + 0.3 * noise(x / 7, z / 7, 47)));
   let rest = 1 - road;
   w[4] = rest * bed; rest -= w[4];
   w[5] = rest * cliff; rest -= w[5];
   w[2] = rest * Math.max(scree, darkRed * red); rest -= w[2];
   w[3] = rest * grove; rest -= w[3];
-  w[1] = rest * red; rest -= w[1];
+  w[1] = rest * red * (1 - townK); rest -= w[1];
   w[0] = rest;
   const sum = w.reduce((a, b) => a + b, 0) || 1;
   for (let c = 0; c < 7; c++) if (w[c]) put(t, c, Math.round((255 * w[c]) / sum));
@@ -390,7 +566,7 @@ const patches = (x, z, scale, cover, s) => {
   const n = noise(x / scale, z / scale, s) * 0.7 + noise(x / (scale * 0.35), z / (scale * 0.35), s + 7) * 0.3;
   return smooth01((n - (1 - cover)) / 0.12);
 };
-const clear = LAYOUT.sites.map((s) => ({ x: s.x, z: s.z, r: s.r + 8 }));
+const clear = [...LAYOUT.sites.map((s) => ({ x: s.x, z: s.z, r: s.r + 8 })), { x: KNOLL.x, z: KNOLL.z, r: 50 }, ...town.map((o) => ({ x: o.x, z: o.z, r: Math.hypot(o.w, o.d) / 2 + 2 }))];   // (the town: its hill and every house)
 const fordPts = FORDS;
 function growK(x, z, bedOk = false) {
   let k = smooth01((pisteD(x, z, 20) - 5) / 4) * (1 - smoothstep(26, 34, slopeDeg(x, z)));

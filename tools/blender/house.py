@@ -207,6 +207,41 @@ def build(K, name, spec, state, seed):
         K.bevel(lg, 0.03, 2, 30); shells.append(lg)
         K.box("LoggiaFloor", lx0 + 0.3, lx1 - 0.3, y0, y0 + 0.04, lz0 + 0.3, lz1 - 0.3, "earth", G, 0)
         loggiaRect = (lx0, lx1, lz0, lz1)
+    minaretRect = None
+    if "minaret" in spec:                                  # the M'zab MINARET: a tapering square tower
+        mx, mz, mb, mt, mh = spec["minaret"]
+        def frustum(nm, y0, y1, b0, b1, mat):
+            bm = bmesh.new()
+            vs = [bm.verts.new(bkit.B(mx + sx * b0, y0, mz + sz * b0)) for sx in (-1, 1) for sz in (-1, 1)]
+            vs += [bm.verts.new(bkit.B(mx + sx * b1, y1, mz + sz * b1)) for sx in (-1, 1) for sz in (-1, 1)]
+            bmesh.ops.convex_hull(bm, input=vs)
+            return K.obj(nm, bm, mat, G)
+        mn = frustum("Minaret", 0.0, mh, mb, mt, REND)
+        half = lambda y: mb + (mt - mb) * y / mh
+        # its SLOTS: small dark openings up each face, staggered (the stair's lights)
+        for k, y in enumerate([2.8 + 2.6 * i for i in range(int((mh - 5.0) / 2.6))]):
+            hw = half(y + 0.3)
+            for f, (fx, fz) in enumerate(((0, -1), (1, 0), (0, 1), (-1, 0))):
+                if (k + f) % 2: continue
+                if fx == 0: K.boolean(mn, K.cutter(mx - 0.15, mx + 0.15, y, y + 0.6, mz + fz * hw - 0.35, mz + fz * hw + 0.35, "dark"))
+                else: K.boolean(mn, K.cutter(mx + fx * hw - 0.35, mx + fx * hw + 0.35, y, y + 0.6, mz - 0.15, mz + 0.15, "dark"))
+        # the LANTERN: an arch open on each face near the top
+        hw = half(mh - 1.5)
+        for fx, fz in ((0, -1), (1, 0), (0, 1), (-1, 0)):
+            if fx == 0: K.boolean(mn, K.arch(mx - 0.42, mx + 0.42, mh - 2.7, mh - 1.75, mz + fz * hw - 0.5, mz + fz * hw + 0.5, "dark"))
+            else: K.boolean(mn, K.arch(mz - 0.42, mz + 0.42, mh - 2.7, mh - 1.75, mx + fx * hw - 0.5, mx + fx * hw + 0.5, "dark", across="x"))
+        K.bevel(mn, 0.04, 2, 30); shells.append(mn)
+        # the TOP: a low parapet and the four corner FINGERS, tall and pointed
+        K.box("MinaretCap", mx - mt + 0.12, mx + mt - 0.12, mh, mh + 0.12, mz - mt + 0.12, mz + mt - 0.12, REND, G, 0.02)
+        for sx in (-1, 1):
+            for sz in (-1, 1):
+                bm = bmesh.new()
+                cx, cz = mx + sx * (mt - 0.25), mz + sz * (mt - 0.25)
+                vs = [bm.verts.new(bkit.B(cx + ax * 0.25, mh - 0.02, cz + az * 0.25)) for ax in (-1, 1) for az in (-1, 1)]
+                vs += [bm.verts.new(bkit.B(cx + ax * 0.04, mh + 1.5, cz + az * 0.04)) for ax in (-1, 1) for az in (-1, 1)]
+                bmesh.ops.convex_hull(bm, input=vs)
+                K.bevel(K.obj(f"Finger{sx}{sz}", bm, REND, G), 0.015, 2, 30)
+        minaretRect = (mx - mb - 0.3, mx + mb + 0.3, mz - mb - 0.3, mz + mb + 0.3)
     MZAB = spec.get("parapet") == "mzab"
     if MZAB:                                               # the M'zab's parapets: plain, a HORN at each corner
         def horn(nm, x, z, y):
@@ -314,12 +349,12 @@ def build(K, name, spec, state, seed):
         for x in (a0 + 0.08, a1 - 0.08): K.rod(f"AwnPole{x}", (x, 0.0, Z0 - 1.45), (x, 2.55, Z0 - 1.45), 0.035, "woodDark", G, 6)
     # LIFE on the roof and at the door
     if not ruin:
-        roofLife(K, R, X0 + T + 0.3, X1 - T - 0.3, Z0 + T + 0.3, Z1 - T - 0.3, ROOF + 0.24, spec["life"], spec.get("hut") or loggiaRect, PAR, Z0)
+        roofLife(K, R, X0 + T + 0.3, X1 - T - 0.3, Z0 + T + 0.3, Z1 - T - 0.3, ROOF + 0.24, spec["life"], spec.get("hut") or loggiaRect or minaretRect, PAR, Z0)
         groundLife(K, R, spec, Z0)
     if dmg:
         for k, (c, sz) in enumerate(spec["dmg"]):
             cut = K.breach(c, sz, seed=seed * 7 + k, mat="stone")
-            for o in shells + [o for o in K.groups[G] if o.name.startswith(("Crenel", "Joist", "Floor", "Roof", "Hut", "Balcony", "BalPost", "BalRail", "Horn", "Spout", "Arcade"))]: K.boolean(o, cut)
+            for o in shells + [o for o in K.groups[G] if o.name.startswith(("Crenel", "Joist", "Floor", "Roof", "Hut", "Balcony", "BalPost", "BalRail", "Horn", "Spout", "Arcade", "Minaret", "Finger"))]: K.boolean(o, cut)
         for k in range(12):
             x = R.uniform(X0 + 0.4, X1 - 0.4); y = R.uniform(0.8, min(PAR - 1.0, 5.6))
             K.boolean(shells[0], K.breach((x, y, Z0), (0.07, 0.07, 0.12), seed=seed * 13 + k, mat="stone", rough=0.3))

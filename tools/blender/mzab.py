@@ -105,6 +105,14 @@ TYPES = {
         wins=[("f", -1.6, -0.9, 1.2, 2.0, "grille"), ("f", 4.0, 4.8, 1.1, 2.1, "shut"), ("l", -0.4, 0.4, 1.2, 1.9, "void"), ("b", -3.0, -2.3, 1.2, 1.9, "shut")],
         dmg=[((-3.0, 1.6, -5.0), (0.9, 0.9, 0.7)), ((6.0, 1.4, 0.5), (0.6, 0.9, 1.0)), ((2.0, 3.9, -5.0), (1.3, 0.5, 0.7))],
         ruin=(2.2, 1.0), life=["rug2", "mats", "pottery"], ground=["sacks", "bench"]),
+    # the MOSQUE on the hilltop: its prayer hall, an arcade on a walled court, the tapering MINARET at the back
+    # corner (the M'zab's: square, ~18 m, slots up its faces, open arches and four pointed fingers at the top)
+    "mosquee": dict(render="earthSand", shutter="shutterWood", door=(-0.7, 0.7, "wood"), parapet="mzab",
+        main=(-6.0, 6.0, -0.5, 6.5), floors=[], roof=4.4, par=5.1, court=(-5.95, 5.95, -6.5, -0.5, 2.6, (-0.8, 0.8)), arcade=(2.4, 4),
+        minaret=(-4.25, 4.75, 1.9, 1.25, 18.0),
+        wins=[("l", 1.0, 1.6, 2.2, 3.0, "void"), ("r", 1.0, 1.6, 2.2, 3.0, "void"), ("b", 2.0, 2.6, 2.2, 3.0, "void"), ("b", -1.0, -0.4, 2.2, 3.0, "void")],
+        dmg=[((3.0, 2.0, 6.5), (1.0, 0.9, 0.7)), ((-4.25, 11.0, 3.2), (0.8, 0.9, 0.7)), ((6.0, 2.0, 3.0), (0.6, 0.9, 1.0)), ((-4.25, 16.5, 6.3), (0.9, 0.7, 0.6))],
+        ruin=(3.2, 1.4), life=["prayer", "prayer", "mats"], ground=[]),
 }
 
 exported = buildKit(TYPES, MATDEF, "mzab.glb", prefix="Mzab", seed0=1830)

@@ -17,7 +17,7 @@ const S = 1.3;   // (built in real metres; the game draws its buildings x1.3)
 export const HOUSE_TYPES = ["maison", "cour", "haute", "boutique"];
 // THE M'ZAB TOWN HOUSES (tools/blender/mzab.py, the same builder): the Oued Abdi's ochre town — a two-storey
 // house with its roof gallery, a tall one, a low one behind its yard, a stepped pale-blue one, the souk's arcade
-export const MZAB_TYPES = ["dar", "tour", "bas", "terrasse", "souk"];
+export const MZAB_TYPES = ["dar", "tour", "bas", "terrasse", "souk", "mosquee"];   // (+ the hilltop mosque and its minaret)
 export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
 const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES } };

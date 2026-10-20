@@ -46,6 +46,7 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
+import { createHouseField, loadHouses } from "./algHouse.js";
 import { createAlgTelegraph } from "./algTelegraph.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu, loadOptions } from "./ui/gameMenu.js";
@@ -623,6 +624,31 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[sandstone] ${app.algLandmarks.sandstone.length} rocks, ${field ? field.geometry.index.count / 3 : 0} tris, waited ${Math.round(performance.now() - t1)} ms`);
     } catch (e) { console.warn("[alg landmarks] failed:", e); }
   }
+  // THE TOWN (2026-10-20, MAP.town — tools/algAbdiLevel.mjs places it on the knoll's rings): the M'zab kit and the
+  // whitewashed one as ONE instanced field (algHouse.js: draws per kind of house, near / far by the camera).
+  if (MAP.town?.houses?.length) {
+    try {
+      const t0 = performance.now();
+      await Promise.all([loadHouses("mzab"), loadHouses()]);
+      const field = createHouseField();
+      for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
+      // SOLID: each house's footprint blocks the nav grid (a little in: its steps, its yard walls' ends), and its
+      // walls are HARD cover, as the dechra's and the post's (algCover: circles along the walls, not inside)
+      for (const [, , , , , yaw, fx, fz, hx, hz] of MAP.town.houses) app.navGrid?.addFootprint?.(fx, fz, hx * 0.92, hz * 0.92, yaw);
+      field.coverCircles = function* () {
+        for (const [, , , , , yaw, fx, fz, hx, hz] of MAP.town.houses) {
+          const c = Math.cos(yaw), s = Math.sin(yaw), r = 1.6;
+          const put = (lx, lz) => ({ x: fx + lx * c + lz * s, z: fz - lx * s + lz * c, radius: r, size: 1, hard: true });
+          for (let lx = -hx + r; lx <= hx - r + 0.01; lx += 2.2) { yield put(lx, -hz + r * 0.6); yield put(lx, hz - r * 0.6); }
+          for (let lz = -hz + r; lz <= hz - r + 0.01; lz += 2.2) { yield put(-hx + r * 0.6, lz); yield put(hx - r * 0.6, lz); }
+        }
+      };
+      app.scene.add(field.root);
+      app.addPreRenderHook(() => field.update(app.camera));
+      app.algTown = field;
+      console.log(`[town] ${field.size} houses in ${Math.round(performance.now() - t0)} ms`);
+    } catch (e) { console.warn("[alg town] failed:", e); }
+  }
   // VILLAGE LIFE (algVillageLife.js): haystacks, firewood, bread ovens, beehives
   // just outside each village — after the fields and landmarks, off both. ?life=0 = without.
   if (params.get("life") !== "0") {
@@ -651,7 +677,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[point rings] ${JSON.stringify(app.algPointRings.stats)}`);
     } catch (e) { console.warn("[alg point rings] failed:", e); }
   }
-  if (app.algFields || app.algLandmarks) app.algCover?.bake();
+  if (app.algFields || app.algLandmarks || app.algTown) app.algCover?.bake();
   // GROUND CONTACT SHADE (algGroundContact.js): the ground darkened round every building, wall
   // and rock, baked into the ground once — the image pass's AO at no cost a frame. ?contact=0 = off.
   if (app.algSplats && params.get("contact") !== "0") {

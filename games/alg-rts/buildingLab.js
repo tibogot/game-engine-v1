@@ -288,8 +288,8 @@ export const BUILDINGS = {
   }])),
   // THE M'ZAB TOWN HOUSES (2026-10-19, the Oued Abdi's town — tools/blender/mzab.py, algHouse.js MZAB_TYPES):
   // each type in its three states, intact LEFT, damaged MIDDLE, ruin RIGHT.
-  ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk"].map((ty) => [`mzab_${ty}`, {
-    label: `Maison du M'zab : ${ty}`, gap: ty === "souk" ? 20 : 15, yaw: Math.PI - 0.5, prepare: () => loadHouses("mzab"),
+  ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee"].map((ty) => [`mzab_${ty}`, {
+    label: `Maison du M'zab : ${ty}`, gap: ty === "souk" || ty === "mosquee" ? 20 : 15, yaw: Math.PI - 0.5, prepare: () => loadHouses("mzab"),
     before: () => { console.log("[mzab]", houseStats()); return labPiece(houseMesh(ty, "intact")); }, middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
     tags: [`${ty.toUpperCase()} · INTACTE`, `${ty.toUpperCase()} · ENDOMMAGÉE`, `${ty.toUpperCase()} · RUINE`], note: "une maison du kit du M'zab (Blender) dans ses trois états : intacte, endommagée, en ruine.",
   }])),
