@@ -19,6 +19,10 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [x] Editor: insert after / replace a selected piece (buttons in the panel, I / P; the road after it
       follows, landings and rings hung off a lip are carried with it; lean clashes refused with the
       reason) and a height cue under the piece in hand (a line to the floor + "↑ 120 m").
+- [x] Obstacles (882988ff): Block, Sweeper, the Obstacles tab, movers on the race clock, the autopilot's
+      line round them. NEXT: more, designed from the user's Apex Rush screenshots (WAITING for them);
+      the autopilot does not time a sweeper's arm.
+- [x] Start / Finish pieces with rounded guardrails (1745969a). Circuits (laps) later.
 - [ ] Editor: after an edit makes a lip faster or slower, offer to re-fit its fitted landing (today the
       check warns "a fast car flies past it").
 - [ ] Circuits: needs LAPS in the race first (timing, ghost, medals), then an auto-close connector that
