@@ -114,6 +114,8 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
       if (app.algWrecks) yield* app.algWrecks.coverCircles();
       // A map's town (algGame: MAP.town): its houses' walls.
       if (app.algTown?.coverCircles) yield* app.algTown.coverCircles();
+      // Its field walls (algGame: MAP.fields).
+      if (app.algFieldWalls?.coverCircles) yield* app.algFieldWalls.coverCircles();
       for (const [name, mesh] of Object.entries(showroom)) {
         // A sapper's piece is listed as "built:<kind>:<n>"; its kind decides.
         const key = mesh?.userData?.kitKey ?? name;

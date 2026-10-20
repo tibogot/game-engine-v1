@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { PLAY, LAYOUT } from "../games/alg-rts/maps/abdi.js";
+import { TOWN_HOUSES } from "../games/alg-rts/maps/abdiTown.js";
 
 const FILE = "public/levels/alg-abdi.v3proj";
 const DIR = "public/textures/decals/abdi";
@@ -69,23 +70,24 @@ for (const f of files.filter((f) => !f.includes("_n.")).sort()) {
   slots.push({ name: `abdi ${key}`, albedoUrl: `/textures/decals/abdi/${f}`, normalUrl: `/textures/decals/abdi/${key}_n.webp` });
 }
 // MATCH to the ground's tone (groundCache): the wear takes the ground's colour; a scorch keeps its own black.
-const MATCH = { ruts: 1, tankTracks: 1, footPath: 1, apron: 1, sweptYard: 1, debris: 0.6, charred: 1, crater: 1, trampled: 1 };
+const MATCH = { ploughed: 0.65, stubble: 0.6,   // (ploughed 0: a near-black square on the pale valley — measured: its art 0.10/0.06/0.03, the soil 0.62/0.40/0.22)
+   ruts: 1, tankTracks: 1, footPath: 1, apron: 1, sweptYard: 1, debris: 0.6, charred: 1, crater: 1, trampled: 1 };
 // (a charred mark matched on the UNBURNT earth it was baked on — the soil photo's own mean, linear — or its black
 // core, dragging the art's mean down, lifted the halo into a pale ring)
 const SOIL = [0.624, 0.397, 0.219];
-const MEAN_OVERRIDE = { charred: SOIL, crater: SOIL, trampled: SOIL };   // (the crater's soot and the trampled prints too)
+const MEAN_OVERRIDE = { ploughed: [0.102, 0.061, 0.028], stubble: SOIL, charred: SOIL, crater: SOIL, trampled: SOIL };   // (the crater's soot and the trampled prints too)
 // …then each WEAR its own shift on that (matched alone, the paths and aprons vanished — the nam-rts lesson: "within
 // a stop of the ground" at 100 m is absent): packed paths and tracks darker and warmer (no cracks, trodden),
 // a swept yard lighter (fine dust)
-const TINT = { ruts: "#c9b8a8", tankTracks: "#bba796", footPath: "#c4ad99", apron: "#e8ddd0", sweptYard: "#fff2e2", debris: "#ffffff", charred: "#ffffff", crater: "#ffffff", trampled: "#e6d8c8" };   // (trampled: dust, barely darker — #d2c0ae read as a stain)
-const SIZE = { ruts: [3.2, 10], tankTracks: [4.4, 10], footPath: [2.4, 10], apron: [12, 12], sweptYard: [12, 12], charred: [10, 10], debris: [16, 16], crater: [7, 7], trampled: [14, 14] };
+const TINT = { ploughed: "#f2e6da", stubble: "#fff4dc", ruts: "#c9b8a8", tankTracks: "#bba796", footPath: "#c4ad99", apron: "#e8ddd0", sweptYard: "#fff2e2", debris: "#ffffff", charred: "#ffffff", crater: "#ffffff", trampled: "#e6d8c8" };   // (trampled: dust, barely darker — #d2c0ae read as a stain)
+const SIZE = { ploughed: [20, 14], stubble: [20, 14], ruts: [3.2, 10], tankTracks: [4.4, 10], footPath: [2.4, 10], apron: [12, 12], sweptYard: [12, 12], charred: [10, 10], debris: [16, 16], crater: [7, 7], trampled: [14, 14] };
 const decals = [];
 const pick = (kind, x, z) => V[kind][Math.floor(hash(x, z, 5) * V[kind].length) % V[kind].length];
 function box(kind, x, z, yaw, o) {
   const [sx, sz] = SIZE[kind], slot = pick(kind, x, z);
   decals.push({
     px: x, py: H(x, z), pz: z, qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2),
-    slot, sx: sx * (o.k ?? 1), sy: 5, sz: sz * (o.k ?? 1), mean: MEAN_OVERRIDE[kind] ?? MEANS[slotKey[slot]], match: MATCH[kind],
+    slot, sx: o.sx ?? sx * (o.k ?? 1), sy: 5, sz: o.sz ?? sz * (o.k ?? 1), mean: MEAN_OVERRIDE[kind] ?? MEANS[slotKey[slot]], match: MATCH[kind],
     opacity: o.opacity, tint: TINT[kind], roughness: o.roughness ?? 0.92, normalStrength: o.normal ?? 1,
     angleFade: 60, edgeFade: o.edgeFade ?? 0.16, priority: o.priority ?? 1,
   });
@@ -208,6 +210,93 @@ for (const p of paths) for (const [x, z] of [p[0], p[p.length - 1]]) {
   box("trampled", x + (hash(x, z, 13) - 0.5) * 8, z + (hash(x, z, 14) - 0.5) * 8, hash(x, z, 15) * 6.28, { opacity: 0.7, k: 0.6 + hash(x, z, 16) * 0.3, priority: 1, edgeFade: 0.45 });
   stats.trampled++;
 }
+// THE FIELDS (2026-10-20 — PIECES_INVENTORY.md: "the fields look cheap in the old Aurès"): plots round the
+// places that farm — the farm, the sheepfold, the hamlet, the oasis, the dechra — on gentle ground, their furrows
+// along the contour (contour ploughing), off the pistes, the oued, the town and each other (4 m lanes). Their
+// soil a decal each (decalPhotoArt: ploughed — the mule's furrows, the headlands — or stubble); the plots are
+// written for the game (maps/abdiFields.js: their walls and crops next).
+const lineD = (pts, x, z) => {
+  let best = Infinity;
+  for (let k = 0; k < pts.length - 1; k++) {
+    const [ax, az] = pts[k], [bx, bz] = pts[k + 1], dx = bx - ax, dz = bz - az, L = dx * dx + dz * dz || 1;
+    const u = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / L));
+    best = Math.min(best, Math.hypot(x - ax - dx * u, z - az - dz * u));
+  }
+  return best;
+};
+const pisteDist = (x, z) => Math.min(...LAYOUT.pistes.map((q) => lineD(q, x, z)));
+const OUED = LAYOUT.wadis[0];
+const TOWN = LAYOUT.sites.find((q) => q.kind === "town"), KNOLL = { x: TOWN.knoll[0], z: TOWN.knoll[1] };
+// the SAS post beside the first hamlet (showroom.js SAS_POST: 66, 25 in the hamlet's frame, its yaw the camera's
+// three-quarter turn — layout.js VIEW_YAW / siteYaw): a plot ran under its wall
+const SAS = (() => {
+  const fr = LAYOUT.sites.find((q) => q.kind === "french"), al = LAYOUT.sites.find((q) => q.kind === "aln"), hm = LAYOUT.sites.find((q) => q.kind === "hamlet");
+  const yaw = Math.atan2(al.x - fr.x, al.z - fr.z) + ((hm.turn ?? 30) * Math.PI) / 180, c = Math.cos(yaw), sn = Math.sin(yaw);
+  return { x: hm.x + 66 * c + 25 * sn, z: hm.z - 66 * sn + 25 * c, r: 16 };
+})();
+const plots = [];
+stats.fields = 0;
+for (const [name, n] of [["Ferme", 6], ["Bergerie", 4], ["Mechta", 6], ["Aïn", 4], ["Dechra", 4]]) {
+  const st = site(name);
+  if (!st) continue;
+  let made = 0;
+  for (let t = 0; t < 400 && made < n; t++) {
+    const a = hash(st.x + t, st.z, 61) * 6.283, r = st.r + 10 + hash(st.x, st.z + t, 62) * 55;
+    const x = st.x + Math.cos(a) * r, z = st.z + Math.sin(a) * r;
+    const w = 16 + hash(x, z, 63) * 10, d = 11 + hash(x, z, 64) * 6, rad = Math.hypot(w, d) / 2;
+    if (Math.abs(x) > 240 || Math.abs(z) > 240 || slope(x, z) > 10) continue;
+    if (pisteDist(x, z) < rad + 6 || lineD(OUED.points, x, z) < rad + OUED.width + 6 || Math.hypot(x - KNOLL.x, z - KNOLL.z) < 66 + rad) continue;
+    if (LAYOUT.sites.some((q) => Math.hypot(x - q.x, z - q.z) < q.r + rad + 2) || Math.hypot(x - SAS.x, z - SAS.z) < SAS.r + rad) continue;
+    if (TOWN_HOUSES.some((hh) => Math.hypot(x - hh[2], z - hh[4]) < rad + 8)) continue;
+    if (plots.some((q) => Math.hypot(x - q.x, z - q.z) < rad + q.rad + 4)) continue;
+    // the long side ALONG the contour (the furrows follow the slope's level, as a plough on a hillside)
+    const gx = H(x + 2, z) - H(x - 2, z), gz = H(x, z + 2) - H(x, z - 2);
+    const yaw = Math.hypot(gx, gz) > 1e-3 ? Math.atan2(-gz, gx) : hash(x, z, 65) * 6.283;
+    const cs = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => H(x + (u * w / 2) * Math.cos(yaw) + (v * d / 2) * Math.sin(yaw), z - (u * w / 2) * Math.sin(yaw) + (v * d / 2) * Math.cos(yaw)));
+    if (Math.max(...cs) - Math.min(...cs) > 2.6) continue;
+    const kind = hash(x, z, 66) < 0.6 ? "ploughed" : "stubble";
+    plots.push({ x, z, yaw, w, d, rad, kind, of: st.name });
+    // (the box's local z ALONG the contour — the furrows run along it, the recipe's length: w; d across)
+    box(kind, x, z, yaw, { opacity: 0.95, sx: d, sz: w, priority: 0, edgeFade: 0.2 });   // (0.08: a square tile)
+    made++; stats.fields++;
+  }
+}
+// THEIR WALLS (tools/blender/fieldwall.py, a 2.4 m dry-stone module x1.3): along most sides, a gap for the gate,
+// a few breached or tumbled; the three variants mixed. [type a|b|c, state, x, y, z, yaw]
+const MOD = 2.4 * 1.3, walls = [];
+plots.forEach((q, pi) => {
+  const c = Math.cos(q.yaw), sn = Math.sin(q.yaw), at = (lx, lz) => [q.x + lx * c + lz * sn, q.z - lx * sn + lz * c];
+  const gateSide = Math.floor(hash(q.x, q.z, 70) * 4);
+  // the four sides: along the contour (local z) at x = +-d/2, across it (local x) at z = +-w/2
+  const sides = [[-1, "z"], [1, "z"], [-1, "x"], [1, "x"]];
+  sides.forEach(([sd, along], si) => {
+    if (hash(q.x + si, q.z, 71) > 0.72) return;                       // not every side walled
+    const len = along === "z" ? q.w : q.d, off = (along === "z" ? q.d : q.w) / 2 + 0.6;
+    const n = Math.max(1, Math.round(len / MOD)), step = len / n;
+    const gate = si === gateSide ? Math.floor(hash(q.x, q.z + si, 72) * n) : -1;
+    for (let k = 0; k < n; k++) {
+      if (k === gate) continue;                                        // the gate
+      const t = -len / 2 + step * (k + 0.5);
+      const [x, z] = along === "z" ? at(sd * off, t) : at(t, sd * off);
+      const yaw = along === "z" ? q.yaw + Math.PI / 2 : q.yaw;         // (the module runs along its local X)
+      const r = hash(x, z, 73);
+      walls.push([["a", "b", "c"][Math.floor(hash(x, z, 74) * 3)], r < 0.05 ? "ruin" : r < 0.13 ? "damaged" : "intact", x, H(x, z) - 0.05, z, yaw]);
+    }
+  });
+});
+stats.fieldWalls = walls.length;
+const r2 = (v) => Math.round(v * 100) / 100;
+fs.writeFileSync("games/alg-rts/maps/abdiFields.js", `// GENERATED by tools/algAbdiDecals.mjs — do not edit: the Oued Abdi's FIELD PLOTS (${plots.length}), their soil laid
+// as decals — { x, z, yaw, w, d, kind, of }: the plot's centre, its yaw (three.js rotation.y; local z ALONG the contour), its width along
+// and depth across the slope (m), "ploughed" | "stubble", the place that works it. Their walls and crops: next.
+export const FIELD_PLOTS = [
+${plots.map((q) => `  { x: ${r2(q.x)}, z: ${r2(q.z)}, yaw: ${r2(q.yaw)}, w: ${r2(q.w)}, d: ${r2(q.d)}, kind: "${q.kind}", of: ${JSON.stringify(q.of)} },`).join("\n")}
+];
+// their DRY-STONE WALLS (tools/blender/fieldwall.py): [type, state, x, y, z, yaw]
+export const FIELD_WALLS = [
+${walls.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4])}, ${r2(w[5])}],`).join("\n")}
+];
+`);
 // THE LOOKS tuned in the game (Dev → Decals, algDecalPanel.js → kinds.json): per kind, over what the rules laid
 const LOOKS = JSON.parse(fs.readFileSync(path.join(DIR, "kinds.json"), "utf8"));
 const slotKind = (i) => slotKey[i].replace(/_\d+$/, "");

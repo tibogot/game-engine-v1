@@ -583,7 +583,53 @@ function debris({ xm, vm, W, L, n, seed }) {
  * is baked FOR — placement must use the same, or the grain stretches. `tileM`
  * matches the terrain layers (5-8 m) so the grain agrees with the ground.
  */
+/**
+ * A PLOUGHED FIELD (2026-10-20, alg-rts — PIECES_INVENTORY.md: "the fields look cheap"): a mule's plough, by
+ * hand — FURROWS ~0.38 m apart along the plot's length, wandering a little (no row is ruled), the trough damp
+ * and dark, the crest dry and pale, CLODS on the crests; a HEADLAND at each end where the plough turned (the
+ * rows give way to churned earth); a ragged edge into the grass.
+ */
+function ploughed({ xm, vm, W, L, n, seed }) {
+  const P = 0.38;
+  const wander = (fbm(n, vm * 0.06, 3.1 + seed, 3) - 0.5) * 1.6 + (fbm(n, vm * 0.4, 7.7, 2) - 0.5) * 0.12;
+  const ph = (xm + wander) / P, row = Math.floor(ph), f = ph - row;
+  const ridge = Math.pow(0.5 + 0.5 * Math.cos((f - 0.5) * Math.PI * 2 + Math.PI), 1.4);   // 1 on the crest
+  const depth = 0.75 + 0.5 * n(row * 3.7, 1.9);                                            // each furrow its own
+  // the headland: the plough's turn at both ends, rows churned away
+  const head = 1 - smoothstep(1.4, 3.0, Math.min(vm, L - vm) + (fbm(n, xm * 0.5, 2.2, 2) - 0.5) * 1.2);
+  const churn = fbm(n, xm * 2.2, vm * 2.2, 3);
+  const clod = smoothstep(0.62, 0.8, fbm(n, xm * 6.5 + 11, vm * 6.5, 3)) * (0.4 + 0.6 * ridge);
+  const rows = (1 - head) * depth;
+  const h = 0.07 * (ridge - 0.5) * rows + 0.035 * clod + 0.02 * (churn - 0.5) * (0.4 + head);
+  // (a RAGGED edge, ~2 m: a ploughed plot is never a ruled rectangle — 0.9 m read as a tile laid on the ground)
+  const edge = Math.min(xm, W - xm, vm, L - vm) + (fbm(n, xm * 0.35, vm * 0.35, 3) - 0.5) * 2.4 + (fbm(n, xm * 1.3, vm * 1.3, 2) - 0.5) * 0.6;
+  const a = smoothstep(0.2, 2.2, edge);
+  const wet = (1 - ridge) * rows;   // the trough: damp
+  return { a, h, mul: 0.78 - 0.22 * wet + 0.12 * ridge * rows + 0.08 * clod - 0.06 * head * churn, sat: 1.12 + 0.12 * wet, nW: 0.55 };
+}
+
+/**
+ * STUBBLE — the barley cut: the ground drier and paler, ROWS of short cut stalks (golden, a straw dot every few
+ * centimetres along the old drill rows), loose straw between, a ragged edge.
+ */
+function stubble({ xm, vm, W, L, n, seed }) {
+  const P = 0.24;
+  const wander = (fbm(n, vm * 0.05, 5.3 + seed, 3) - 0.5) * 1.2;
+  const ph = (xm + wander) / P, f = ph - Math.floor(ph);
+  // (the ROWS read — 2026-10-20: dots alone read as a pale smudge at play zoom): a straw band along each drill
+  // row, darker bare soil between, the cut stalks bright in the band
+  const inRow = 1 - smoothstep(0.1, 0.24, Math.abs(f - 0.5));
+  const stalk = inRow * smoothstep(0.4, 0.58, n(xm * 21 + seed, vm * 23));                 // a cut stalk
+  const straw = smoothstep(0.62, 0.74, fbm(n, xm * 3.5 + 4, vm * 0.9, 3)) * 0.7;           // loose straw, lying along
+  const edge = Math.min(xm, W - xm, vm, L - vm) + (fbm(n, xm * 0.35, vm * 0.35, 3) - 0.5) * 2.4 + (fbm(n, xm * 1.3, vm * 1.3, 2) - 0.5) * 0.6;
+  const s = Math.max(stalk, straw);
+  return { a: smoothstep(0.2, 2.2, edge), h: 0.018 * stalk + 0.006 * straw - 0.01 * (1 - inRow), mul: 0.86 + 0.18 * inRow + 0.5 * s, sat: 0.85 + 0.35 * s, nW: 0.7 };
+}
+
 export const PHOTO_RECIPES = {
+  // THE FIELDS (alg-rts, 2026-10-20): the Aurès' soil (brown, damp-dark when turned)
+  ploughed:   { fn: ploughed,   photo: "soil",     size: [20, 14],   tileM: 3 },
+  stubble:    { fn: stubble,    photo: "abdiSoil", size: [20, 14],   tileM: 2.6 },
   ruts:       { fn: ruts,       photo: "road",     size: [3.2, 10],  tileM: 5 },
   tankTracks: { fn: tankTracks, photo: "road",     size: [4.4, 10],  tileM: 5 },
   // Mud and puddles from the ROAD's own red soil: the grey-brown mud photo

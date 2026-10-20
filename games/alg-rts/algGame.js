@@ -675,6 +675,26 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[town] ${field.size} houses in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg town] failed:", e); }
   }
+  // A MAP'S FIELD PLOTS (MAP.fields — the Oued Abdi's, tools/algAbdiDecals.mjs): worked land, its plants cleared
+  // (the scrub and alfa painted over the valley grew in the furrows).
+  for (const q of MAP.fields?.plots ?? []) {
+    const c = Math.cos(q.yaw), s = Math.sin(q.yaw);
+    for (let lx = -q.d / 2; lx <= q.d / 2 + 0.01; lx += 3) for (let lz = -q.w / 2; lz <= q.w / 2 + 0.01; lz += 3)
+      app.clearVegetation?.(q.x + lx * c + lz * s, q.z - lx * s + lz * c, 2.6, { grass: 2.6, edge: 0.6 });
+  }
+  // THEIR DRY-STONE WALLS (tools/blender/fieldwall.py): one instanced field (a draw per variant and state); knee-high
+  // — men step over them, they block no sight — HARD cover both sides (algCover: a circle on each segment)
+  if (MAP.fields?.walls?.length) {
+    try {
+      await loadHouses("fieldwalls");
+      const fw = createHouseField();
+      for (const [ty, st, x, y, z, yaw] of MAP.fields.walls) fw.add(ty, st, x, y, z, yaw);
+      fw.coverCircles = function* () { for (const [, st, x, , z] of MAP.fields.walls) if (st !== "ruin") yield { x, z, radius: 1.4, size: 1, hard: true }; };
+      app.scene.add(fw.root);
+      app.addPreRenderHook(() => fw.update(app.camera));
+      app.algFieldWalls = fw;
+    } catch (e) { console.warn("[alg field walls] failed:", e); }
+  }
   // VILLAGE LIFE (algVillageLife.js): haystacks, firewood, bread ovens, beehives
   // just outside each village — after the fields and landmarks, off both. ?life=0 = without.
   if (params.get("life") !== "0") {
@@ -703,7 +723,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[point rings] ${JSON.stringify(app.algPointRings.stats)}`);
     } catch (e) { console.warn("[alg point rings] failed:", e); }
   }
-  if (app.algFields || app.algLandmarks || app.algTown) app.algCover?.bake();
+  if (app.algFields || app.algLandmarks || app.algTown || app.algFieldWalls) app.algCover?.bake();
   // GROUND CONTACT SHADE (algGroundContact.js): the ground darkened round every building, wall
   // and rock, baked into the ground once — the image pass's AO at no cost a frame. ?contact=0 = off.
   if (app.algSplats && params.get("contact") !== "0") {

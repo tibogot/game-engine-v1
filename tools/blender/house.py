@@ -478,7 +478,7 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
             objs.append(o)
-        K.bake(objs, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80)
+        K.bake(objs, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2))
         for o in objs:
             f = K.far(o, 0.3)
             print("TRIS", o.name, tris(o), "far", tris(f))
@@ -486,8 +486,9 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
     K.export(os.path.join(out, glb), exported)
     return exported
 
-def previews(TYPES, exported, prefix="House", tag=""):
-    """Workbench renders of the baked textures: each type's states side by side."""
+def previews(TYPES, exported, prefix="House", tag="", spacing=16, frame=1.0):
+    """Workbench renders of the baked textures: each type's states side by side. (`spacing` between the states,
+    `frame` the camera's distance — a 2.4 m wall is not a house.)"""
     scn = bpy.context.scene
     scn.render.engine = "BLENDER_WORKBENCH"
     sh = scn.display.shading; sh.light = "STUDIO"; sh.color_type = "TEXTURE"
@@ -500,8 +501,8 @@ def previews(TYPES, exported, prefix="House", tag=""):
         row = [n for n in names if n.startswith(f"{prefix}{tname.capitalize()}_")]
         if not row: continue
         for i, n in enumerate(row):
-            o = bpy.data.objects[n]; o.hide_render = False; o.location.x = i * 16
-        cd.lens = 40; cam.location = B(-6, 22, -28); cam.rotation_euler = (B(16, 2, 0) - cam.location).to_track_quat("-Z", "Y").to_euler()
+            o = bpy.data.objects[n]; o.hide_render = False; o.location.x = i * spacing
+        cd.lens = 40; cam.location = B(-6 * frame, 22 * frame, -28 * frame); cam.rotation_euler = (B(spacing, 2 * frame, 0) - cam.location).to_track_quat("-Z", "Y").to_euler()
         scn.render.filepath = os.path.join(REFS, f"preview_{tag}{tname}.png"); bpy.ops.render.render(write_still=True)
         for n in row:
             o = bpy.data.objects[n]; o.hide_render = True; o.location.x = 0

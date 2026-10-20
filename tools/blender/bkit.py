@@ -224,7 +224,7 @@ class Kit:
     def drop_cutters(s):
         for c in s.cutters: bpy.data.objects.remove(c, do_unlink=True)
         s.cutters = []
-    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9):
+    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9, ao_dist=2.2):
         """Colour × ambient occlusion into ONE atlas, then a plain material with it — for one object or
         SEVERAL sharing the atlas (a house's three states: their UVs packed together, one texture). They are
         spread apart while they bake (at one origin each would occlude the others: black AO) and every other
@@ -233,7 +233,7 @@ class Kit:
         o = objs[0]
         scn = bpy.context.scene
         scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.render.bake.margin = 8
-        scn.world.light_settings.distance = 2.2
+        scn.world.light_settings.distance = ao_dist   # (a house's 2.2 m; small packed pieces less — 2.2 blackened a dry-stone wall)
         hidden = [q for q in scn.objects if q.type == "MESH" and q not in objs and not q.hide_render]
         for q in hidden: q.hide_render = True
         home = [q.location.copy() for q in objs]
@@ -259,7 +259,11 @@ class Kit:
             for im, nm in ((col, "col"), (ao, "ao")):
                 im.filepath_raw = os.path.join(out_dir, f"_{name}_{nm}.png"); im.file_format = "PNG"; im.save()
         c = np.array(col.pixels[:]).reshape(-1, 4); a = np.array(ao.pixels[:]).reshape(-1, 4)
+        unbaked = c[:, :3].sum(1) == 0                         # (the atlas's empty background, round the islands)
         c[:, :3] *= 0.3 + 0.7 * a[:, :1]                      # (softened: the game lights it too)
+        # THE BACKGROUND the islands' mean, not black (2026-10-20: a dry-stone wall's hundreds of tiny islands —
+        # its mip levels averaged stone and black gaps, the wall drew near-black from the RTS camera)
+        if unbaked.any() and (~unbaked).any(): c[unbaked, :3] = c[~unbaked, :3].mean(0)
         out = bpy.data.images.new(name, size, size, alpha=False); out.pixels = c.ravel().tolist()
         out.filepath_raw = os.path.join(out_dir, f"{name}.png"); out.file_format = "PNG"; out.save()
         m = bpy.data.materials.new(f"M_{name}"); m.use_nodes = True
