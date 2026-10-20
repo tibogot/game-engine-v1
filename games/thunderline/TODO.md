@@ -87,6 +87,24 @@ this is just the list. Newest decisions at the top of each section. Last updated
       wheel MODEL sets the physics radius today — carTune.js pins it).
 - [ ] "No engine up a wall" into the car itself (today an input cut, autopilot.js wallCut).
 
+## Performance pass (user, 2026-10-20: "be sure the pieces and the scene are as optimized as possible")
+BASELINE, drive page, White 1 (1.53 km), counts per frame (draws / k-triangles drawn), by subtraction:
+total 106 / 923 · terrain 9 / 628 (the FLAT floor + far rings: 68% of all triangles) · track main pass
+27 / 148 · live shadow pass 36 / 117 (it redraws the WHOLE track's instanced posts/rails each frame: an
+instanced mesh spanning the track is never culled) · car main 17 / 29, car total 52 (all its meshes are on
+the live-shadow layer, not only the ShadowProxy) · ghost 17 / 9 · sky 18 / 11 · post etc. 22.
+Track triangles: POSTS = 1023 instances, 119k of the track's 171k (70%); deck + rails 51k.
+Physics 0.65 ms per tick median (two ticks a 60 fps frame); a ghost re-simulates (doubles it).
+Shadow atlas: 8192² R32F + a same-size depth buffer (~0.5 GB VRAM) for 346 cells; first bake 5-8 s on a
+big track (shader compile included), a re-bake 0.7 s.
+- [ ] Terrain: far fewer triangles for a flat floor (engine terrain LOD settings for Thunderline)
+- [ ] Posts: LOD (plain bar past ~150 m, none past ~400 m) or merged into the rail
+- [ ] Track merged into ~128 m chunks per material (cullable; live pass draws only nearby chunks)
+- [ ] Live shadow layer: only the ShadowProxy + tyres of the car
+- [ ] Shadow atlas: 16-bit, depth freed after the bake, cached per track + time
+- [ ] Ghost: replay recorded poses, not physics
+- [ ] Terrain paint: layerBudget 4
+
 ## Look & tech
 - [ ] Performance check: the tube run showed 37–49 fps in my window — measure GPU ms before adding more.
 - [ ] Horizon fix (engine, opt-in): ground to the horizon + haze coloured by Sky Pro. Warn the user

@@ -438,7 +438,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       ghostPlayer: null, recorder: createGhostRecorder(), landings: [], startQuat, spawnPos,
       KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
-      obstacles, moverT: 0, // the movers' RACE clock: 0 at the green light, held through the countdown
+      obstacles, moverT: 0, meshes, // the movers' RACE clock: 0 at the green light, held through the countdown
     };
     $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart`;
     hud.classList.add("on");
@@ -466,8 +466,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     }
     scene.updateMatrixWorld(true);
     const old = sunShadows;
+    S?.meshes?.fullDetail(true); // the bake sees every post, whatever the camera picked
     sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts });
     sunShadows.stats.bakeMs = Math.round(sunShadows.bake());
+    S?.meshes?.fullDetail(false);
     // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
     app.shadows.setSunShadowNode(sunShadows.visibility);
     old?.atlasRT?.dispose?.();
@@ -690,6 +692,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     }
     checkFall();
     chase.update(dt);
+    S.meshes.updateLod(camera); // the posts' detail, from the game camera (testTrack.js)
     app.controls.target.copy(vehicle.renderPos);
     const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);
     S.topKmh = Math.max(S.topKmh, kmh);

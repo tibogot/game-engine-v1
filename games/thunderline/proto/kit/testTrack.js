@@ -177,6 +177,7 @@ export function buildTrackMeshes(placements, built, mats) {
   for (const p of placements) (byKey[`${p.id}|${p.open ? "open" : "edges"}`] ??= []).push(p.M);
   const trisOf = (g) => (g ? (g.index ? g.index.count : g.getAttribute("position").count) / 3 : 0);
   let tris = 0;
+  const posts = [];
   for (const [key, list] of Object.entries(byKey)) {
     const [id, kind] = key.split("|");
     const look = kind === "open" ? built[id].open : built[id].guarded;
@@ -188,16 +189,60 @@ export function buildTrackMeshes(placements, built, mats) {
       group.add(im);
       tris += trisOf(geo) * list.length;
     }
+    // the posts are gathered for all pieces, then laid out in chunks (below)
     const P = look.posts;
-    if (P?.template && P.matrices.length) {
-      const im = new THREE.InstancedMesh(P.template, mats.rail, P.matrices.length * list.length);
-      let k = 0;
-      const tmp = new THREE.Matrix4();
-      for (const M of list) for (const pm of P.matrices) im.setMatrixAt(k++, tmp.multiplyMatrices(M, pm));
-      im.computeBoundingSphere();
-      group.add(im);
-      tris += trisOf(P.template) * P.matrices.length * list.length;
-    }
+    if (P?.template && P.matrices.length) for (const M of list) for (const pm of P.matrices) posts.push({ template: P.template, W: new THREE.Matrix4().multiplyMatrices(M, pm) });
   }
-  return { group, tris };
+  // POSTS IN CHUNKS WITH DISTANCE DETAIL (user, 2026-10-20: "as optimized as possible"). Per 128 m cell of
+  // the ground, one LOD: the real post (54 tris) up close, a box (12) from POST_BOX m, nothing from POST_NONE
+  // m. A whole track's posts used to be one instanced mesh: never culled, drawn complete into the live
+  // shadow map every frame too. The level is picked from the GAME camera (updateLod) — the shadow passes
+  // look from the sun, far away, and would pick "no posts"; a bake asks for full detail (fullDetail).
+  const POST_BOX = 150, POST_NONE = 420;
+  const cells = new Map(), c = new THREE.Vector3();
+  for (const q of posts) {
+    c.setFromMatrixPosition(q.W);
+    const key = `${Math.floor(c.x / 128)},${Math.floor(c.z / 128)},${q.template.uuid}`;
+    (cells.get(key) ?? cells.set(key, []).get(key)).push(q);
+  }
+  const boxOf = new Map();
+  const box = (tpl) => {
+    if (!boxOf.has(tpl.uuid)) {
+      tpl.computeBoundingBox();
+      const b = tpl.boundingBox, size = b.getSize(new THREE.Vector3()), mid = b.getCenter(new THREE.Vector3());
+      boxOf.set(tpl.uuid, new THREE.BoxGeometry(size.x, size.y, size.z).translate(mid.x, mid.y, mid.z));
+    }
+    return boxOf.get(tpl.uuid);
+  };
+  const lods = [];
+  for (const list of cells.values()) {
+    const mid = new THREE.Vector3();
+    for (const q of list) mid.add(c.setFromMatrixPosition(q.W));
+    mid.divideScalar(list.length);
+    const lod = new THREE.LOD();
+    lod.position.copy(mid);
+    lod.autoUpdate = false; // updateLod: the game camera picks the level, every pass uses it
+    const toLocal = new THREE.Matrix4().makeTranslation(-mid.x, -mid.y, -mid.z), tmp = new THREE.Matrix4();
+    const inst = (geo) => {
+      const im = new THREE.InstancedMesh(geo, mats.rail, list.length);
+      list.forEach((q, i) => im.setMatrixAt(i, tmp.multiplyMatrices(toLocal, q.W)));
+      im.computeBoundingSphere();
+      return im;
+    };
+    lod.addLevel(inst(list[0].template), 0);
+    lod.addLevel(inst(box(list[0].template)), POST_BOX);
+    lod.addLevel(new THREE.Object3D(), POST_NONE);
+    lod.levels.forEach((v, i) => (v.object.visible = i === 0)); // full detail until a camera picks (lab.js never does)
+    group.add(lod);
+    lods.push(lod);
+    tris += trisOf(list[0].template) * list.length;
+  }
+  let forced = false;
+  return {
+    group, tris, postChunks: lods.length,
+    /** the game camera picks each chunk's detail (every pass this frame then uses it) */
+    updateLod(camera) { if (!forced) for (const l of lods) l.update(camera); },
+    /** full detail on every chunk (the shadow bake), or back to the camera's pick */
+    fullDetail(on) { forced = on; if (on) for (const l of lods) { l.levels.forEach((v, i) => (v.object.visible = i === 0)); } },
+  };
 }
