@@ -824,7 +824,8 @@ function runChecks() {
   }
   for (const m of problems.misses) {
     const name = TILES[track.pieces.find((q) => q.uid === m.uid).id]?.label ?? "a landing";
-    problems.messages.push(`"${name}": ${!m.slowOk && !m.fastOk ? "the car misses it" : !m.slowOk ? "a slower car falls short of it" : "a fast car flies past it"} — move it on the arc or use a Fitted landing`);
+    const fitted = track.pieces.find((q) => q.uid === m.uid).id.startsWith("fitted_landing_");
+    problems.messages.push(`"${name}": ${!m.slowOk && !m.fastOk ? "the car misses it" : !m.slowOk ? "a slower car falls short of it" : "a fast car flies past it"} — ${fitted ? "Re-fit it to the jump" : "move it on the arc or use a Fitted landing"}`);
   }
   // tint overlapping pieces: a red box around each
   for (const c of overlapBoxes.splice(0)) scene.remove(c);
@@ -1217,6 +1218,45 @@ function editWith(id) {
     reflow(() => { pc.id = id; });
   }
 }
+// ---------- RE-FIT A LANDING (user, 2026-10-20): an edit that changes the speed into a jump left its
+// fitted landing sized for the old band ("a slower car falls short of it"). The same sizing as placing a
+// Fitted landing (computeSnap), redone on the jump's arcs as they fly NOW, at the height the landing
+// stands at: its start where the slow arc comes down to that height, its angle that fall's, its length
+// until the fast arc lands on it too. The road after it follows (reflow).
+function fittedOnArc(a, k) {
+  let T = a.tan[k];
+  const fall = Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG;
+  const angle = THREE.MathUtils.clamp(Math.round(fall / 5) * 5, 10, 45);
+  const h = new THREE.Vector3(T.x, 0, T.z).normalize();
+  T = h.multiplyScalar(Math.cos(angle * DEG)).setY(-Math.sin(angle * DEG));
+  const R = new THREE.Vector3().crossVectors(T, UP).normalize();
+  const U = new THREE.Vector3().crossVectors(R, T);
+  const P0 = a.pts[k];
+  let D = 24;
+  for (const q of a.fast.pts) {
+    const rel = q.clone().sub(P0);
+    const along = rel.dot(T);
+    if (along > 0 && rel.dot(U) <= 0) { D = along + 12; break; }
+  }
+  D = Math.max(24, Math.ceil(D / 4) * 4);
+  return { id: ensureTile(`fitted_landing_${angle}_${D}`).id, m: socketMatrix({ p: P0, T, U, R }) };
+}
+const refittable = () => problems.misses.filter((m) => track.pieces.find((q) => q.uid === m.uid)?.id.startsWith("fitted_landing_")).map((m) => m.uid);
+function refitLandings(uids = refittable()) {
+  const fits = [];
+  for (const uid of uids) {
+    const a = arcs.find((x) => x.landing === uid);
+    if (!a) continue;
+    const y = new THREE.Vector3().setFromMatrixPosition(built.get(uid).M).y;
+    let k = -1;
+    for (let i = 3; i < a.pts.length; i++) if (a.tan[i].y < -0.02 && a.pts[i].y <= y) { k = i; break; }
+    if (k < 0) continue; // the slow arc never comes down to it: move it on the arc by hand
+    fits.push({ uid, ...fittedOnArc(a, k) });
+  }
+  if (!fits.length) { editMsg = "Couldn't re-fit: the jump's slow arc doesn't come down to that landing's height — place it again on the arc."; renderStatus(); return; }
+  reflow(() => { for (const f of fits) { const pc = track.pieces.find((q) => q.uid === f.uid); pc.id = f.id; pc.M = f.m.toArray(); } });
+}
+
 function startEdit(mode) {
   const pc = track.pieces.find((p) => p.uid === sel);
   if (!pc || isRing(pc)) return;
@@ -1532,6 +1572,7 @@ function renderStatus() {
     (snap?.bad ? `<div class="warn">${snap.bad}</div>` : "") +
     (snap?.note ? `<div class="row"><span>${snap.note}</span></div>` : "") +
     problems.messages.map((m) => `<div class="warn">⚠ ${m}</div>`).join("") +
+    (refittable().length ? `<div class="acts"><button data-act="refit">Re-fit ${refittable().length > 1 ? `${refittable().length} landings` : "the landing"} to the jump</button></div>` : "") +
     predictionLine() +
     (tileBase // how the piece in hand is placed: nothing to say without one
       ? `<div class="row"><span>grid</span><b>${gridMode} · ${gridStep} m</b></div>` +
@@ -1549,6 +1590,7 @@ function renderStatus() {
 $("status").addEventListener("click", (e) => {
   const act = e.target.closest?.("button")?.dataset.act;
   if (act === "lapline") { setLapLine(!lapLineOn); return; }
+  if (act === "refit") { refitLandings(); return; }
   if (!act || sel == null) return;
   if (act === "copy") copySelection();
   else if (act === "mirror") mirrorSelection();
@@ -1799,6 +1841,7 @@ window.__b3 = {
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
   setTrack(t) { track = t; rebuild(); },
   startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
+  refitLandings, get problems2() { return problems; },
   selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
