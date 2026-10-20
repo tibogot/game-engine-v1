@@ -6,13 +6,41 @@
 // Both use the engine's FAR TERRAIN (terrainLOD's extra rings to ±8 km round the camera, drawn with the
 // terrain's own material — no backdrop mesh, no seam) and its distance fog. Game code only: no engine
 // change. The far ground is NOT solid (app.getWorldHeight reads the map only): the play area is flat.
-// Texturing the ground and the mountains comes later.
+// The ground is TEXTURED (below); each world has a "· grid" twin with the engine's grid ground.
 
+// GROUND (user, 2026-10-20: "texturize the terrain so it's not the default grid, but keep the possibility
+// to use the default terrain grid"): the worlds are TEXTURED — grass on the flat, rocky ground on slopes,
+// cliff rock on steep faces, bare rock high up (the engine's slope / height paint: setAutoPaint on the
+// play area, the far rule on the mountains) — and each has a "· grid" twin with the engine's grid ground.
 export const WORLDS = {
-  flat: { label: "Flat" },
-  valley: { label: "Valley" },
+  valley: { label: "Valley", shape: "valley" },
+  flat: { label: "Flat", shape: "flat" },
+  valley_grid: { label: "Valley · grid", shape: "valley", grid: true },
+  flat_grid: { label: "Flat · grid", shape: "flat", grid: true },
 };
 export const DEFAULT_WORLD = "flat";
+
+// the paint layers (slots 0-2; Grass005 + two public/textures/ground sets, ~13 MB in all) and their tile sizes
+const GROUND_SETS = [
+  // a green lawn on the flat (grass_ground, the dry one, read brown from the builder's height)
+  { files: (m) => `/textures/pbr_materials/Grass005/Grass005_1K-JPG_${{ diff: "Color", nor_gl: "NormalGL", rough: "Roughness", ao: "AmbientOcclusion" }[m]}.jpg`, tile: 6 }, // 0 flat
+  { slug: "rocky_terrain_02", tile: 40 }, // 1 slopes: grass with stones (only on the far mountains: big tiles, no repeat pattern from km away)
+  // 2 cliffs AND the tops: a grey-beige rock (cliff_side was orange strata: salmon stripes on every slope)
+  { slug: "rock_boulder_dry", tile: 90 },
+];
+const PAINT = { flatSlot: 0, screeSlot: 1, cliffSlot: 2, highSlot: 2, screeLo: 10, screeHi: 20, cliffLo: 24, cliffHi: 34, highLo: 650, highHi: 900 };
+let groundLoad = null;
+/** The ground sets into paint slots 0-2, once (the engine keeps them for the session). */
+function loadGround(app) {
+  return (groundLoad ??= (async () => {
+    for (let i = 0; i < GROUND_SETS.length; i++) {
+      const { slug, files, tile } = GROUND_SETS[i];
+      const f = files ?? ((m) => `/textures/ground/${slug}/${slug}_${m}_1k.jpg`);
+      await app.setTerrainLayerTextures(i, { albedo: f("diff"), normal: f("nor_gl"), rough: f("rough"), ao: f("ao") });
+      app.setTerrainLayerTile?.(i, tile);
+    }
+  })());
+}
 
 const EXTENT = 8000; // the far grid covers ±8 km round the world origin
 const HAZE = { color: "#a9c2db", density: 0.00018 }; // exp²: ~4% at 1 km, ~47% at 4 km, ~92% at 8 km
@@ -70,6 +98,7 @@ function valleyGrid(n) {
   return g;
 }
 let valleyCache = null;
+let current = null; // the world applied last (a late texture load must not paint a grid world)
 
 /**
  * Put `app` in a world. Safe to call again to switch.
@@ -78,11 +107,22 @@ let valleyCache = null;
  */
 export function applyWorld(app, name = DEFAULT_WORLD) {
   const world = WORLDS[name] ? name : DEFAULT_WORLD;
-  const n = world === "valley" ? 513 : 2;
-  const grid = world === "valley" ? (valleyCache ??= valleyGrid(513)) : new Float32Array(4);
+  const { shape, grid: gridLook } = WORLDS[world];
+  const n = shape === "valley" ? 513 : 2;
+  const grid = shape === "valley" ? (valleyCache ??= valleyGrid(513)) : new Float32Array(4);
   // stand 1: the heights as authored (the engine scales far relief up by default); blend: the map's
   // edge (flat, 0) fades into the grid over 250 m
   app.setFarTerrain({ grid, n, extent: EXTENT, stand: 1, standStart: 0, standEnd: 1, blend: 250, rule: NO_PAINT, enabled: true });
+  // the GROUND: the grid at once, the paint when its textures are in (a switch back to a grid world wins)
+  app.setAutoPaint?.({ enabled: false });
+  if (!gridLook && app.setAutoPaint) {
+    loadGround(app).then(() => {
+      if (current !== world) return;
+      app.setFarTerrain({ rule: PAINT });
+      app.setAutoPaint({ enabled: true, flat: 0, cliff: 2, high: -1, slopeStartDeg: 24, slopeEndDeg: 34, noise: 0.3 });
+    }).catch((e) => console.warn("[worlds] ground textures not loaded: the grid stays", e));
+  }
+  current = world;
   // the far rings reach ±8.2 km round the camera: the far plane must see their corners
   app.camera.far = Math.max(app.camera.far, 12000);
   app.camera.updateProjectionMatrix();

@@ -5,6 +5,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
+import { uniform, positionLocal, abs, fract, fwidth, float, min, max, smoothstep, length, vec3 } from "three/tsl";
 import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
@@ -164,9 +165,24 @@ const controls = new OrbitControls(camera, renderer.domElement);
 controls.zoomToCursor = true;
 controls.enableDamping = true;
 controls.target.set(0, buildY, 0);
-const grid = new THREE.GridHelper(512, 64, 0x3a7f97, 0x5f97aa);
-grid.material.transparent = true;
-grid.material.opacity = 0.45;
+// THE BUILD GRID (user, 2026-10-20: the editor's grid over the ground's own grid was confusing): bolt
+// blue, at the grid step in use (a brighter line every 4), and only ROUND the cursor / the piece in hand,
+// fading out by ~140 m — not a sheet over the whole ground
+const gridStepU = uniform(8);
+// (pushed back in depth: at the build height it is coplanar with the road there — the road must win, never flicker)
+const gridMat = new THREE.MeshBasicNodeMaterial({ transparent: true, depthWrite: false, fog: false, polygonOffset: true, polygonOffsetFactor: 2, polygonOffsetUnits: 8 });
+{
+  const lineAt = (scale) => {
+    const q = positionLocal.xz.div(gridStepU.mul(scale));
+    const d = abs(fract(q.sub(0.5)).sub(0.5)).div(fwidth(q));
+    return float(1).sub(min(min(d.x, d.y), 1));
+  };
+  const fade = float(1).sub(smoothstep(50, 140, length(positionLocal.xz)));
+  gridMat.colorNode = vec3(0.25, 0.82, 1.0);
+  gridMat.opacityNode = max(lineAt(1).mul(0.28), lineAt(4).mul(0.55)).mul(fade);
+}
+const grid = new THREE.Mesh(new THREE.PlaneGeometry(300, 300).rotateX(-Math.PI / 2), gridMat);
+grid.renderOrder = 5;
 scene.add(grid);
 
 // ---------- pieces (geometry cache) ----------
@@ -971,6 +987,7 @@ function updateGhost() {
 function updateGrid() {
   const ref = gridMode === "local" ? localRef() : null;
   const f = snap?.m ? new THREE.Vector3().setFromMatrixPosition(snap.m) : controls.target;
+  gridStepU.value = gridStep;
   if (ref) { grid.rotation.y = ref.yaw; grid.position.set(ref.pos.x, buildY, ref.pos.z); }
   else { grid.rotation.y = 0; grid.position.set(Math.round(f.x / 8) * 8, buildY, Math.round(f.z / 8) * 8); }
 }
