@@ -244,6 +244,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   let autopilot = false;
   // THE FX LAB's hooks: its own driver (drift circles, a wall scrape), slow motion, and the input used
   let inputSource = null, timeScale = 1, lastInput = null;
+  let headlightsOn = null; // set from the sun's height (driveFrame)
   let showGhost = ghost && prefs.ghost !== false;
 
   // ---------- ENGINE SOUND (engineModel.js + engineSound.js, synthesised) + sfx ----------
@@ -698,6 +699,12 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     $("cps").textContent = race.cps.length ? `CP ${rs.taken.size}/${race.cps.length}` : "no checkpoints";
     $("cps").classList.toggle("boost", rules.boostLeft > 0);
     if (++S.frame % 15 === 0) renderStats();
+    // HEADLIGHTS ON when the sun is low (user, 2026-10-20: "we don't have the car lights" at dusk) — a
+    // uniform write in the car (setHeadlights), so checking twice a second costs nothing
+    if (S.frame % 30 === 1) {
+      const on = app.light.getDirection().y < Math.sin(12 * Math.PI / 180);
+      if (on !== headlightsOn) { headlightsOn = on; vehicle.setHeadlights(on); }
+    }
   });
 
   return {

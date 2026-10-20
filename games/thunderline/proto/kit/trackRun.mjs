@@ -39,6 +39,7 @@ applyCarTune({ TIRE, WHEEL, SOLID, CRASH });
 const ts = process.argv.find((a) => a.startsWith("--tubesteer="));
 if (ts) globalThis.__TUBE_STEER = Number(ts.slice(12));
 const OPEN = process.argv.includes("--open"); // open edges: no rails
+const NO_BRAKE = process.argv.includes("--nobrake");
 const mm = process.argv.find((a) => a.startsWith("--mag=")); if (mm) globalThis.__MAG_MODE = mm.slice(6);
 const pv = process.argv.find((a) => a.startsWith("--pivot=")); if (pv) TILES.twist_120.twistPivot = TILES.twist_120_L.twistPivot = Number(pv.slice(8));
 const sp = process.argv.find((a) => a.startsWith("--spiral="));
@@ -115,6 +116,7 @@ export function run(ids, speed, { trace = false } = {}) {
   let result = "through", lowY = Math.min(...ride.map((r) => r.P.y)), slow = 0;
   for (let tick = 0; tick < 120 * 60; tick++) {
     const inp = pilot.input(car);
+    if (NO_BRAKE) inp.throttle = 1; // --nobrake: a player who never lifts
     lastSteer = inp.steerTarget;
     rules.step(inp, FIXED_DT);
     const k = ride[pilot.idx].piece, s = per[k], v = car.body.vel.length();

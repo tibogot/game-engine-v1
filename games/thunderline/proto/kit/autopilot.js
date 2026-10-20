@@ -171,7 +171,9 @@ export function createAutopilot(ride) {
       // landing's 20° PITCH counted as a bank — the brake after a jump went, and the White tier's
       // Halfpipe test lap fell off (2026-10-20)
       const tb = Math.max(bankTan(farR), bankTan(ride[best]));
-      const vCap = tb < 0.85 ? 26 * Math.sqrt((tb + 1) / (1 - tb)) : 26;
+      // past ~40° the wall itself holds the car (the U-turn wall, measured flat out 161-223 km/h: through,
+      // 146-169 out): no brake at all
+      const vCap = tb < 0.85 ? 26 * Math.sqrt((tb + 1) / (1 - tb)) : Infinity;
       const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > vCap && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
       // IN THE AIR, line up with the road across the gap (the landing): yaw the nose onto its
       // direction, pitch onto its slope, roll onto its up — proportional, in the car's own frame

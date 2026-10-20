@@ -77,9 +77,9 @@ export function integrate(tile, opts = {}) {
       const x0 = i * ds;
       const w = weight(x0 + ds / 2) * ds;
       // half rotation, move, half rotation (midpoint rule)
-      rotate(T, U, R, q, -(seg.turn ?? 0) * w * 0.5, (seg.pitch ?? 0) * w * 0.5);
+      rotate(T, U, R, q, -(seg.turn ?? 0) * w * 0.5, (seg.pitch ?? 0) * w * 0.5, (seg.roll ?? 0) * w * 0.5);
       p.addScaledVector(T, ds);
-      rotate(T, U, R, q, -(seg.turn ?? 0) * w * 0.5, (seg.pitch ?? 0) * w * 0.5);
+      rotate(T, U, R, q, -(seg.turn ?? 0) * w * 0.5, (seg.pitch ?? 0) * w * 0.5, (seg.roll ?? 0) * w * 0.5);
       if (off) {
         const want = off * q5((x0 + ds) / L);
         p.addScaledVector(R0, want - shifted);
@@ -113,9 +113,12 @@ export function integrate(tile, opts = {}) {
   return { rings, exit, L: s };
 }
 
-function rotate(T, U, R, q, yaw, pitch) {
+function rotate(T, U, R, q, yaw, pitch, roll = 0) {
   if (yaw) { q.setFromAxisAngle(U, yaw); T.applyQuaternion(q); R.applyQuaternion(q); }
   if (pitch) { q.setFromAxisAngle(R, pitch); T.applyQuaternion(q); U.applyQuaternion(q); }
+  // ROLL: the PATH turns round its own direction (not a lean on the deck): after a half loop the road
+  // rolls back upright and the next piece meets it the right way up
+  if (roll) { q.setFromAxisAngle(T, roll); U.applyQuaternion(q); R.applyQuaternion(q); }
   T.normalize();
   R.crossVectors(T, U).normalize();
   U.crossVectors(R, T).normalize();
@@ -381,6 +384,13 @@ export const TILES = {
   platform_turn_90: { label: "Platform turn 90°", section: "wide", segs: [{ L: turnLen(64, Math.PI / 2, 24), turn: Math.PI / 2, ramp: 24 }] },
   platform_up_12: { label: "Platform up ~12 m", section: "wide", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
   platform_down_12: { label: "Platform down ~12 m", section: "wide", segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }] },
+  // ---- VERTICAL + TURN-AROUND pieces (user's Apex Rush top view, 2026-10-20: the tower climbs, the "C") ----
+  // HALF LOOP + ROLL (an Immelmann): up the wall, over the top upside down, and the road rolls you upright
+  // again — heading BACK, ~2R higher. Road hold holds the car through the roll (as the twist).
+  half_loop_28: { label: "Half loop + roll", segs: [{ L: Math.PI * 28 + 50, pitch: Math.PI, ramp: 25 }, { L: 96, roll: Math.PI, ramp: 48 }], roadHold: true, twistPivot: 0.9 },
+  // U-TURN WALL (the "C" at a road's end): a tight 180° banked up to 65° — the car rides up the wall
+  // and comes round onto a road beside the way in
+  uturn_wall_32: { label: "U-turn wall", segs: [{ L: turnLen(32, Math.PI, 30), turn: Math.PI, ramp: 30, bank: 65 * DEG }] },
   slope_up_12: { label: "Slope up ~12 m", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
   // HELIX (PIECES §7c, "use height" on small maps): a full circle (R 56) that climbs or drops 20 m over
   // itself — the exit runs on, in the entry's heading, 20 m above / below it. Banked with the curvature
@@ -392,7 +402,7 @@ export const TILES = {
 // (turn, lean and the loop's sideways step negated). A test track of only right turns spiralled into
 // itself (the user saw it overlap).
 for (const [id, t] of Object.entries({ ...TILES })) {
-  const handed = t.segs.some((s) => s.turn || s.leanIn || s.leanOut || s.offset);
+  const handed = t.segs.some((s) => s.turn || s.leanIn || s.leanOut || s.offset || s.roll);
   if (!handed) continue;
   TILES[`${id}_L`] = {
     ...t,
@@ -404,6 +414,7 @@ for (const [id, t] of Object.entries({ ...TILES })) {
       ...(s.leanOut !== undefined ? { leanOut: -s.leanOut } : {}),
       ...(s.offset ? { offset: -s.offset } : {}),
       ...(s.bank ? { bank: -s.bank } : {}),
+      ...(s.roll ? { roll: -s.roll } : {}),
     })),
   };
 }

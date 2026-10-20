@@ -53,7 +53,7 @@ const CATS = [
   { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12"] },
-  { id: "stunts", label: "Stunts", tiles: ["twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
+  { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
   { id: "obstacles", label: "Obstacles", tiles: ["ob_block", "ob_sweeper"] },
 ];
