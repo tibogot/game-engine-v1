@@ -7,7 +7,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { uniform, positionLocal, abs, fract, fwidth, float, min, max, smoothstep, length, vec3 } from "three/tsl";
 import { startV3App } from "../../../../v3/engine.js";
-import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile } from "./kit.js";
+import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile, ADJUSTABLE, adjustableId, parseAdjustable } from "./kit.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules, magnetZones } from "./carRules.js";
@@ -45,11 +45,11 @@ const SNAP_COLORS = { end: 0x45e08a, road: 0x45e08a, arc: 0xff9a3d, local: 0xc78
 const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
-  { id: "road", label: "Road", tiles: ["start_line", "finish_line", "straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
+  { id: "road", label: "Road", tiles: ["start_line", "finish_line", "adj_straight", "adj_slope", "straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
-  { id: "turns", label: "Turns", tiles: ["sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
+  { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
-  { id: "air", label: "Air", tiles: ["kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
@@ -120,14 +120,18 @@ const ringGateOf = (pc) => {
   return { kind: "cp", ring: true, P: new THREE.Vector3().setFromMatrixPosition(M), T: new THREE.Vector3(0, 0, -1).transformDirection(M), U: new THREE.Vector3(0, 1, 0).transformDirection(M), hw: RING_R };
 };
 const isRing = (p) => !!p?.ring;
+// ADJUSTABLE pieces (kit.js ADJUSTABLE): the card's settings in hand, one set per kind
+const adjDefaults = (base) => Object.fromEntries(Object.entries(ADJUSTABLE[base].params).map(([k, q]) => [k, q.def]));
+const adjParams = Object.fromEntries(Object.keys(ADJUSTABLE).map((b) => [b, adjDefaults(b)]));
 const tileId = (base, h = hand) => {
+  if (ADJUSTABLE[base]) return ensureTile(adjustableId(base, adjParams[base], ADJUSTABLE[base].hand ? h : 1)).id;
   if (base === RING || isObstacle(base) || base === STAMP) return base;
   if (base === FITTED) return fittedId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
-const thumbOf = (id) => (id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
+const tileLabel = (base) => (ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const thumbOf = (id) => (parseAdjustable(id) ? parseAdjustable(id).base : id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
@@ -227,7 +231,7 @@ async function bakeThumbs() {
   const ctx = cvs.getContext("2d");
   for (const c of CATS) for (const id of c.tiles) {
     if (id === FITTED) continue; // drawn with the landing's picture (see pic)
-    const pid = id === FITTED_BOWL ? "bowl_110" : id; // a typical one
+    const pid = id === FITTED_BOWL ? "bowl_110" : ADJUSTABLE[id] ? ensureTile(adjustableId(id, adjDefaults(id))).id : id; // a typical one
     const g = id === RING
       ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
       : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, false);
@@ -1257,6 +1261,23 @@ function refitLandings(uids = refittable()) {
   reflow(() => { for (const f of fits) { const pc = track.pieces.find((q) => q.uid === f.uid); pc.id = f.id; pc.M = f.m.toArray(); } });
 }
 
+/** One setting of an adjustable piece moved by `steps` (clamped; a signed height skips 0 — a flat slope is a straight). */
+function stepAdjust(base, params, key, steps) {
+  const q = ADJUSTABLE[base].params[key];
+  let v = params[key] + steps * q.step;
+  if (q.signed && v === 0) v += Math.sign(steps) * q.step;
+  return { ...params, [key]: Math.min(q.max, Math.max(q.min, v)) };
+}
+/** A PLACED adjustable piece's setting changed: the piece is rebuilt, the road after it follows. */
+function adjustPlaced(uid, key, steps) {
+  const pc = track.pieces.find((q) => q.uid === uid);
+  const a = pc && parseAdjustable(pc.id);
+  if (!a) return;
+  const id = ensureTile(adjustableId(a.base, stepAdjust(a.base, a.p, key, steps), a.hand)).id;
+  if (id === pc.id) return;
+  reflow(() => { pc.id = id; });
+}
+
 function startEdit(mode) {
   const pc = track.pieces.find((p) => p.uid === sel);
   if (!pc || isRing(pc)) return;
@@ -1546,8 +1567,8 @@ function renderStatus() {
     `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
     (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` : "") +
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
-    (!tileBase && !multi ? `<div class="legend">Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</div>` : "") +
-    (!tileBase && track.pieces.length > 1
+    (!tileBase && !multi && !selPc ? `<div class="legend">Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</div>` : "") +
+    (!tileBase && !multi && !selPc && track.pieces.length > 1
       ? `<div class="acts"><button data-act="lapline" class="${lapLineOn ? "on" : ""}">Test lap line ${lapLineOn ? "on" : "off"} <kbd>L</kbd></button></div>` +
         (lapLineOn ? `<div class="legend">The test car: blue slow → white fast, dashed in the air · red: hits, falls · orange: hard braking, rough landing</div>` : "")
       : "") +
@@ -1563,6 +1584,11 @@ function renderStatus() {
         `<button data-act="delete">Delete <kbd>Del</kbd></button>` +
         `<button data-act="cp">${selPc.cp ? "No checkpoint" : "Checkpoint"} <kbd>C</kbd></button></div>`
       : selPc ? `<div class="acts"><button data-act="delete">Delete <kbd>Del</kbd></button></div>` : "") +
+    // a placed ADJUSTABLE piece: its settings, right here (the road after it follows)
+    (selPc && !selPc.kind && !isRing(selPc) && parseAdjustable(selPc.id)
+      ? (() => { const a = parseAdjustable(selPc.id), d = ADJUSTABLE[a.base];
+          return `<div class="acts">${Object.entries(d.params).map(([pk, q]) => `<button data-act="adj:${pk}:-1" title="Shift: ×4">◀</button><span class="adjv">${q.label} ${a.p[pk]}${q.unit}</span><button data-act="adj:${pk}:1" title="Shift: ×4">▶</button>`).join("")}</div>`; })()
+      : "") +
     // the gizmo's two modes, or why this piece can't move on its own
     (selPc ? (movableKind(sel)
       ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div>` +
@@ -1592,6 +1618,8 @@ $("status").addEventListener("click", (e) => {
   if (act === "lapline") { setLapLine(!lapLineOn); return; }
   if (act === "refit") { refitLandings(); return; }
   if (!act || sel == null) return;
+  const adjA = /^adj:(\w+):(-?1)$/.exec(act);
+  if (adjA) { adjustPlaced(sel, adjA[1], Number(adjA[2]) * (e.shiftKey ? 4 : 1)); return; }
   if (act === "copy") copySelection();
   else if (act === "mirror") mirrorSelection();
   else if (act === "delmany") removeMany(selection());
@@ -1713,13 +1741,16 @@ function renderHand() {
   if (!on) { handKey = ""; return; }
   const id = tileId(tileBase);
   const free = snap?.type === "world" || snap?.type === "local";
-  const mirror = !!(TILES[`${tileBase}_L`] || TILES[tileBase]?.hand);
-  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, buildY].join("|");
+  const mirror = !!(TILES[`${tileBase}_L`] || TILES[tileBase]?.hand || ADJUSTABLE[tileBase]?.hand);
+  const adj = ADJUSTABLE[tileBase];
+  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, buildY, adj ? JSON.stringify(adjParams[tileBase]) : ""].join("|");
   if (k === handKey) return;
   handKey = k;
   const off = free ? "" : " off";
   el.innerHTML =
     `<span class="nm">${TILES[id]?.label ?? id}</span>` +
+    // an ADJUSTABLE piece's own settings first (the ghost follows them)
+    (adj ? Object.entries(adj.params).map(([pk, q]) => `<div class="gp"><span>${q.label}</span><button data-a="p-${pk}" title="Less (Shift: ×4)">◀</button><b>${adjParams[tileBase][pk]}${q.unit}</b><button data-a="p+${pk}" title="More (Shift: ×4)">▶</button></div>`).join("") : "") +
     `<div class="gp${off}" title="${free ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
     `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
     `<div class="gp${off}"><span>Tilt</span><button data-a="pd" title="Nose down (↓)">⤓</button><b>${rot.pitch}°</b><button data-a="pu" title="Nose up (↑)">⤒</button></div>` +
@@ -1729,6 +1760,11 @@ function renderHand() {
     `<button class="x" data-a="x" title="Put the piece down (Esc)">✕</button>`;
   for (const b of el.querySelectorAll("button")) b.onclick = (e) => {
     const big = e.shiftKey;
+    const pa = /^p([+-])(\w+)$/.exec(b.dataset.a);
+    if (pa) {
+      adjParams[tileBase] = stepAdjust(tileBase, adjParams[tileBase], pa[2], (pa[1] === "+" ? 1 : -1) * (big ? 4 : 1));
+      renderDock();
+    }
     switch (b.dataset.a) {
       case "yl": rot.yaw += big ? 5 : 15; break;
       case "yr": rot.yaw -= big ? 5 : 15; break;

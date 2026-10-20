@@ -427,6 +427,60 @@ for (const [id, a] of [["landing_20", 20], ["banked_landing_20", 20], ["landing_
  */
 export const TILE_RESOLVERS = [];
 
+/**
+ * ADJUSTABLE PIECES (user, 2026-10-20): one card with settings instead of a dozen presets. The settings
+ * are in the id, so any page rebuilds the same piece from the saved track:
+ *   adj_straight_<L>           a straight, L m
+ *   adj_turn_<R>_<A>[_L]       a flat turn of A° at core radius R m (eased in and out, like the turn set)
+ *   adj_slope_<u|d><H>         an S in the vertical: level in, level out, H m up / down
+ *   adj_kicker_<A>             a kicker at A° (its last 8 m a lip)
+ */
+export const ADJUSTABLE = {
+  adj_straight: { label: "Straight", params: { L: { label: "Length", min: 8, max: 256, step: 8, unit: " m", def: 64 } } },
+  adj_turn: { label: "Turn", hand: true, params: { A: { label: "Angle", min: 15, max: 180, step: 15, unit: "°", def: 90 }, R: { label: "Radius", min: 24, max: 256, step: 8, unit: " m", def: 96 } } },
+  adj_slope: { label: "Slope", params: { H: { label: "Height", min: -40, max: 40, step: 2, unit: " m", def: 12, signed: true } } },
+  adj_kicker: { label: "Kicker", params: { A: { label: "Angle", min: 5, max: 35, step: 5, unit: "°", def: 20 } } },
+};
+/** The id of an adjustable piece with these settings (`hand` −1 = left). */
+export function adjustableId(base, p, hand = 1) {
+  if (base === "adj_straight") return `adj_straight_${p.L}`;
+  if (base === "adj_turn") return `adj_turn_${p.R}_${p.A}${hand < 0 ? "_L" : ""}`;
+  if (base === "adj_slope") return `adj_slope_${p.H < 0 ? "d" : "u"}${Math.abs(p.H)}`;
+  if (base === "adj_kicker") return `adj_kicker_${p.A}`;
+  return null;
+}
+/** An adjustable piece's base and settings from its id, or null. */
+export function parseAdjustable(id) {
+  let m;
+  if ((m = /^adj_straight_(\d+)$/.exec(id))) return { base: "adj_straight", p: { L: +m[1] }, hand: 1 };
+  if ((m = /^adj_turn_(\d+)_(\d+)(_L)?$/.exec(id))) return { base: "adj_turn", p: { R: +m[1], A: +m[2] }, hand: m[3] ? -1 : 1 };
+  if ((m = /^adj_slope_([ud])(\d+)$/.exec(id))) return { base: "adj_slope", p: { H: (m[1] === "d" ? -1 : 1) * +m[2] }, hand: 1 };
+  if ((m = /^adj_kicker_(\d+)$/.exec(id))) return { base: "adj_kicker", p: { A: +m[1] }, hand: 1 };
+  return null;
+}
+TILE_RESOLVERS.push((id) => {
+  const a = parseAdjustable(id);
+  if (!a) return undefined;
+  const { base, p, hand } = a;
+  if (base === "adj_straight") return { label: `Straight ${p.L}`, segs: [{ L: p.L }] };
+  if (base === "adj_turn") {
+    // the turn set's easing: ~0.3 R of curvature ramp at each end (R24 → 12 m … R128+ → 40 m)
+    const ramp = Math.min(40, Math.max(12, Math.round(p.R * 0.31)));
+    const turn = hand * p.A * DEG;
+    return { label: `Turn ${p.A}° · R${p.R}${hand < 0 ? " (L)" : ""}`, segs: [{ L: turnLen(p.R, p.A * DEG, ramp), turn, ramp }], ...(p.R <= 48 ? { marks: [{ kind: "chevron", from: 0, to: -0 }] } : {}) };
+  }
+  if (base === "adj_slope") {
+    // slope_up_12's S (two 48 m halves at 15°) rises 12.47 m: longer for more height, flatter (never
+    // shorter than 32 m a half) for less
+    const H = Math.abs(p.H), s = Math.sign(p.H) || 1;
+    let L = (48 * H) / 12.47, pitch = 15;
+    if (L < 32) { pitch = (15 * L) / 32; L = 32; }
+    return { label: `Slope ${p.H >= 0 ? "up" : "down"} ${H} m`, segs: [{ L, pitch: s * pitch * DEG, ramp: L / 2 }, { L, pitch: -s * pitch * DEG, ramp: L / 2 }] };
+  }
+  const L = Math.max(16, Math.round((28 * p.A) / 20)); // kicker_20 is 28 m
+  return { label: `Kicker ${p.A}°`, segs: [{ L, pitch: p.A * DEG, ramp: L / 2 }], marks: [{ kind: "lip", from: -8, to: -0 }] };
+});
+
 export function ensureTile(id) {
   if (TILES[id]) return TILES[id];
   for (const resolve of TILE_RESOLVERS) {
