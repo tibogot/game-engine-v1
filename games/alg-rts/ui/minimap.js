@@ -840,6 +840,20 @@ export function createMinimap({
         c.fillStyle = key === "sel" ? COL.sel : key === "player" ? COL.air : COL.enemy; c.stroke(); c.fill();
       }
     }
+    // MINES (2026-10-20, algMines.js): a small red × — for the French, the ones SPOTTED (staked in the world;
+    // the trucks can go round them); for the FLN, every one it laid (it knows where). Never an unspotted one
+    // to the French: the map stays fair.
+    const flnHuman = SIDES.human === "enemy";
+    for (const mn of app.algMines?.list ?? []) {
+      if (!flnHuman && !mn.spotted) continue;
+      const m = frame.toMini(mn.x, mn.z), d = 2.6 * s;
+      c.lineCap = "round";
+      c.strokeStyle = "rgba(10, 8, 4, 0.9)"; c.lineWidth = 3.2 * s;
+      c.beginPath(); c.moveTo(m.x - d, m.y - d); c.lineTo(m.x + d, m.y + d); c.moveTo(m.x + d, m.y - d); c.lineTo(m.x - d, m.y + d); c.stroke();
+      c.strokeStyle = mn.spotted || !flnHuman ? "#e4483a" : "#f08a5d"; c.lineWidth = 1.6 * s;   // (the FLN's own: lighter until the French find it)
+      c.stroke();
+      c.lineCap = "butt";
+    }
     // OBJECTIVES (the training's lesson, algTutorial.js): a gold diamond, a dark edge, a slow ring
     // going out, OVER the units (under them, the half-track to board hid it) — there while the
     // lesson lasts (the ground's ring is the same gold).
