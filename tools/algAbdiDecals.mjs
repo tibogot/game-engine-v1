@@ -288,7 +288,7 @@ plots.forEach((q, pi) => {
   });
 });
 stats.fieldWalls = walls.length;
-// THE PRICKLY-PEAR HEDGES (tools/blender/hedge.py, a 3 m opuntia module x1.3): outside most of the plots' UNWALLED
+// THE PRICKLY-PEAR HEDGES (3.9 m modules — algGame lays the procedural prickly pear along each): outside most of the plots' UNWALLED
 // sides, and in runs along the pistes near the farmed places (the Maghreb's hedge of figuiers de Barbarie), with
 // gaps; a few crushed or dried. Concealment beside them (the game), no cover (a cactus stops no bullet).
 // [type a|b|c, state, x, y, z, yaw]
@@ -384,7 +384,7 @@ ${plots.map((q) => `  { x: ${r2(q.x)}, z: ${r2(q.z)}, yaw: ${r2(q.yaw)}, w: ${r2
 export const FIELD_WALLS = [
 ${walls.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4])}, ${r2(w[5])}],`).join("\n")}
 ];
-// the PRICKLY-PEAR HEDGES (tools/blender/hedge.py): [type, state, x, y, z, yaw]
+// the PRICKLY-PEAR HEDGES (3.9 m modules, algGame lays procedural prickly pears along each): [type, state, x, y, z, yaw]
 export const FIELD_HEDGES = [
 ${hedges.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4])}, ${r2(w[5])}],`).join("\n")}
 ];

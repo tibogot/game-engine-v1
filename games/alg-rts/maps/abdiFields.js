@@ -405,7 +405,7 @@ export const FIELD_WALLS = [
   ["b", "intact", -167.38, 36.36, -95, 1.34],
   ["b", "intact", -166.63, 35.15, -98.23, 1.34],
 ];
-// the PRICKLY-PEAR HEDGES (tools/blender/hedge.py): [type, state, x, y, z, yaw]
+// the PRICKLY-PEAR HEDGES (3.9 m modules, algGame lays procedural prickly pears along each): [type, state, x, y, z, yaw]
 export const FIELD_HEDGES = [
   ["b", "intact", -87.91, 21.54, 16.52, -3.09],
   ["c", "intact", -92.44, 21.67, 16.94, -3.07],

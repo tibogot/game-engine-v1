@@ -60,6 +60,7 @@ import { rtsEngineOptions, beginRtsPerfBoot } from "../shared-rts/rtsPerfBoot.js
 import { unitPop } from "../shared-rts/unitRenderer.js";
 import "../../v3/styles/editor.css";
 import { t } from "./i18n/i18n.js";
+import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 const params = new URLSearchParams(location.search);
 // ?cam=old: the 40° camera of before CoH 3's was matched (2026-10-11) — the camera, its plant floors,
@@ -688,18 +689,39 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.algFieldWalls = fw;
     } catch (e) { console.warn("[alg field walls] failed:", e); }
   }
-  // THE PRICKLY-PEAR HEDGES (tools/blender/hedge.py): the same instanced field. Head-high and dense: an INTACT one
-  // blocks sight (combat and the fog of war — the CoH hedgerow) and CONCEALS a man beside it (algCover's
-  // concealExtra); no cover (a cactus stops no bullet), no nav block (men push through, vehicles crush it).
-  if (MAP.fields?.hedges?.length) {
+  // THE PRICKLY-PEAR HEDGES: each 3.9 m module of MAP.fields.hedges a row of the engine's procedural prickly pear
+  // (the showroom's PlacedFoliage "pricklyPear", as the old Aurès hedges) — a plant every 1.05 m, a second staggered
+  // row half the time. (A Blender hedge, tools/blender/hedge.py, was tried 2026-10-20 and dropped: its 16-triangle
+  // lens pads read as flat cut-outs beside the generator's round 128-triangle pads, spots and fruit drawn by the
+  // plant shader — you: "they look worse and flat".) CRUSHED: the middle plants down to stumps; DRIED: low, dry.
+  // Head-high and dense: an INTACT one blocks sight (combat and the fog of war — the CoH hedgerow) and CONCEALS a
+  // man beside it (algCover's concealExtra); no cover (a cactus stops no bullet), no nav block.
+  const plants = app.showroom?.plants;
+  if (MAP.fields?.hedges?.length && plants) {
     try {
-      await loadHouses("hedges");
-      const hf = createHouseField();
-      const half = 1.5 * 1.3;
-      for (const [ty, st, x, y, z, yaw] of MAP.fields.hedges) {
-        hf.add(ty, st, x, y, z, yaw);
+      if (!plants.types.has("pricklyPear")) plants.setType("pricklyPear", structuredClone(FOLIAGE_PRESETS.pricklyPear));
+      if (!plants.types.has("pricklyPearDry")) plants.setType("pricklyPearDry", { ...structuredClone(FOLIAGE_PRESETS.pricklyPear), colorHead: "#94804f", colorTip: "#8a7a52", fruit: 0 });
+      const hf = { size: MAP.fields.hedges.length };
+      const half = 1.5 * 1.3, hh = (a, b, s) => { let h = Math.imul(Math.round(a * 10) + s * 977, 73856093) ^ Math.imul(Math.round(b * 10), 19349663); h = Math.imul(h ^ (h >>> 13), 1274126177); return (h >>> 0) / 4294967296; };
+      let n = 0;
+      for (const [, st, x, y, z, yaw] of MAP.fields.hedges) {
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        const put = (lx, lz, kind, k) => {
+          const wx = x + lx * c + lz * s, wz = z - lx * s + lz * c, f = hh(wx, wz, 91);
+          plants.add(kind, wx, app.getWorldHeight(wx, wz) - 0.05, wz, { rotY: f * 7, scale: k * (0.75 + f * 0.5), seed: (f + 0.29) % 1 });
+          n++;
+        };
+        for (let i = 0; i < 4; i++) {
+          const lx = -half + 1.05 * (i + 0.5) - 0.15 + hh(x + i, z, 92) * 0.3, lz = (hh(x, z + i, 93) - 0.5) * 0.3;
+          const middle = i === 1 || i === 2;
+          if (st === "ruin") { if (i % 2 === 0) put(lx, lz, "pricklyPearDry", 0.45); continue; }
+          if (st === "damaged" && middle) { put(lx, lz, "pricklyPearDry", 0.3); continue; }   // (a stump)
+          put(lx, lz, "pricklyPear", 1);
+          if (hh(x + i, z + i, 94) < 0.5) put(lx + 0.5, lz + 0.8, "pricklyPear", 0.9);    // the second row
+        }
         if (st === "intact") app.algSight?.addBox(x, z, half, 0.7, yaw, y + 2.1);
       }
+      hf.plants = n;
       // concealment: within 2 m of a standing hedge (its length, either side); a crushed one half
       const cells = new Map(), key = (x, z) => `${Math.floor(x / 8)},${Math.floor(z / 8)}`;
       for (const h of MAP.fields.hedges) {
@@ -719,8 +741,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         return best;
       };
       app.fogOfWar?.rebuildHeights();   // (its sight grid read the boxes when the town was added)
-      app.scene.add(hf.root);
-      app.addPreRenderHook(() => hf.update(app.camera));
       app.algHedges = hf;
     } catch (e) { console.warn("[alg hedges] failed:", e); }
   }

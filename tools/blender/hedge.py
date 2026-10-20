@@ -1,4 +1,8 @@
-"""THE PRICKLY-PEAR HEDGES (2026-10-20, PIECES_INVENTORY.md "prickly-pear hedges: real cactus models"): the opuntia
+"""NOT USED (dropped 2026-10-20, the same day: its 16-triangle lens pads read flat beside the engine's procedural
+prickly pear — the game lays that one along MAP.fields.hedges, algGame.js. Kept for its far-level-from-the-same-seed
+idea, house.py farBuilder.)
+
+THE PRICKLY-PEAR HEDGES (2026-10-20, PIECES_INVENTORY.md "prickly-pear hedges: real cactus models"): the opuntia
 hedge of every Maghreb village and field — a 3 m MODULE laid end to end along a plot's side or a piste (the game
 instances it, like the field walls). Four plants a module, each a woody grey trunk and pads branching up to
 five tiers: every pad an oval LENS (a ring of 8 points and a bulged centre each face, 16 triangles), the next
