@@ -18,6 +18,14 @@ const PRESETS = {
   // the old palette's numbers (modularRoadBuilder.js CATEGORY_PRESETS)
   flip_ramp_std: { label: "Flip ramp", base: "flip_ramp", params: { flipRampRadius: 21, flipRampAngle: 70, flipRampFace: 7.5, flipRampTopRadius: 16.5, flipRampExit: 135 } },
   flip_ramp_s: { label: "Flip ramp S", base: "flip_ramp", params: { flipRampRadius: 11, flipRampAngle: 70, flipRampFace: 3, flipRampTopRadius: 9, flipRampExit: 132 } },
+  // START and FINISH (user, 2026-10-20: "start and finish pieces that have rounded guardrails like I did
+  // in the old game"): the old rounded terminus, its guardrail one U round the nose.
+  // START: the nose BEHIND you (the piece's entry is the nose's tip), a 24 m stub to wait on. `start` =
+  // how far in the car waits (past the 8 m nose) and the line is drawn.
+  start_line: { label: "Start", base: "rounded_start", params: { roundEndLength: 24 }, start: { spawn: 14, line: 22 } },
+  // FINISH: the line at its entry, then a 72 m stub where the car brakes by itself (≈ 50 m from
+  // 200 km/h: driveSession's coast after the finish), then the nose. Nothing builds on past it.
+  finish_line: { label: "Finish", base: "rounded_end", params: { roundEndLength: 72 }, finish: { line: 2 } },
 };
 
 /** Centre-to-centre spacing of the bowl's entry and return lanes (two 16 m roads, 4 m apart). */
@@ -103,6 +111,7 @@ TILE_RESOLVERS.push((id) => {
     label: def.label,
     bowl: !!m,
     old: { base: def.base, params: def.params, road: def.road },
+    start: def.start, finish: def.finish,
     roadHold: isFollowRoad(def.base), // the flip ramp needs it (its launch logic reads it)
     freeCarve: isFreeCarve(def.base), // park shapes: free pivot steering
     customIntegrate: oldIntegrate,

@@ -43,7 +43,7 @@ const SNAP_COLORS = { end: 0x45e08a, road: 0x45e08a, arc: 0xff9a3d, local: 0xc78
 const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
-  { id: "road", label: "Road", tiles: ["straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
+  { id: "road", label: "Road", tiles: ["start_line", "finish_line", "straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
@@ -106,7 +106,7 @@ let fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_32`).id;
 const FITTED_BOWL = "fitted_bowl";
 const bowlRadius = (v) => THREE.MathUtils.clamp(Math.round((95 + 2.2 * (v - 44)) / 5) * 5, 80, 160);
 let bowlR = bowlRadius(arcSpeed);
-for (const id of ["flip_ramp_std", "flip_ramp_s"]) ensureTile(id);
+for (const id of ["flip_ramp_std", "flip_ramp_s", "start_line", "finish_line"]) ensureTile(id);
 // "air_ring": a CHECKPOINT IN THE AIR, placed on a flight arc (never on road). Its centre sits on the
 // FAST edge of the band — the line of a full-speed take-off — so it tests the take-off: hit the lip at
 // speed, on the right line (in the air the car only rotates; nothing there changes where it flies).
@@ -467,7 +467,7 @@ async function runPrediction() {
   car.setDynamicMovers(obs.movers);
   const M0 = built.get(order[0].uid).M;
   const fwd0 = new THREE.Vector3(0, 0, -1).transformDirection(M0);
-  car.setSpawn(new THREE.Vector3().setFromMatrixPosition(M0).addScaledVector(fwd0, 12).add(new THREE.Vector3(0, 0.6, 0)),
+  car.setSpawn(new THREE.Vector3().setFromMatrixPosition(M0).addScaledVector(fwd0, TILES[order[0].id]?.start?.spawn ?? 12).add(new THREE.Vector3(0, 0.6, 0)),
     new THREE.Quaternion().setFromAxisAngle(UP, Math.atan2(fwd0.x, fwd0.z)));
   car.enabled = true;
   car.respawn();
@@ -479,6 +479,9 @@ async function runPrediction() {
   // a track that ENDS on a lip (the jump you are building): run until the take-off is measured —
   // that number is the whole point — and call it an open jump, not a failure
   const lastUid = ride[ride.length - 1].uid;
+  // a FINISH piece: the lap ends on its line (its entry), as the drive page times it
+  const finPc = order.at(-1);
+  const finishIdx = TILES[finPc.id]?.finish ? ride.findIndex((r) => r.uid === finPc.uid) : -1;
   const endsOnLip = lips.has(lastUid);
   prediction.openJump = false;
   let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
@@ -522,7 +525,7 @@ async function runPrediction() {
     if (p.y < FLOOR_Y + 2 && ride[idx].P.distanceTo(p) > 12) { prediction.fail = { uid: ride[idx].uid, why: "falls to the floor" }; break; }
     slow = v < 2 ? slow + FIXED_DT : 0;
     if (slow > 3) { prediction.fail = { uid: ride[idx].uid, why: "stops" }; break; }
-    if (idx >= ride.length - 5 && !endsOnLip) { prediction.lapS = tick * FIXED_DT; endSpeed = v; break; }
+    if ((finishIdx >= 0 ? idx >= finishIdx : idx >= ride.length - 5) && !endsOnLip) { prediction.lapS = tick * FIXED_DT; endSpeed = v; break; }
     if (tick % 240 === 239) {
       await new Promise((r) => setTimeout(r, 0)); // let the page breathe between slices
       if (token !== predToken) return; // a newer edit started another prediction
@@ -557,7 +560,7 @@ async function runPrediction() {
 /** Ends with no road after them. A lip whose flight has a landing (`flightFrom`) is not open. */
 function openEnds() {
   const hasChild = new Set(track.pieces.filter((p) => !isRing(p)).flatMap((p) => [p.parent, p.flightFrom]).filter((u) => u != null));
-  return track.pieces.filter((p) => !isRing(p) && !hasChild.has(p.uid)).map((p) => {
+  return track.pieces.filter((p) => !isRing(p) && !hasChild.has(p.uid) && !TILES[p.id]?.finish).map((p) => {
     const m = built.get(p.uid).exit;
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
     return { uid: p.uid, m, lean: leanOut(TILES[p.id]), pitch: Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) };
@@ -818,7 +821,16 @@ function computeSnap() {
     const s = toScreen(p);
     return s && Math.hypot(s.x - mouse.x, s.y - mouse.y) < 30;
   }));
-  if (!onArc) for (const e of openEnds()) {
+  // a START goes on the HEAD of the road (its end on the first piece's start), or anywhere on an empty track
+  if (TILES[id]?.start) {
+    const first = track.pieces.find((p) => !isRing(p));
+    if (first && first.parent == null && !TILES[first.id]?.start) {
+      const m = built.get(first.uid).M.clone().multiply(piece(id).exitLocal.clone().invert());
+      const s = toScreen(new THREE.Vector3().setFromMatrixPosition(built.get(first.uid).M));
+      if (s && Math.hypot(s.x - mouse.x, s.y - mouse.y) < 160) return { type: "end", m, prepend: first.uid, note: "Start · on the head of your road" };
+    }
+  }
+  if (!onArc && !TILES[id]?.start) for (const e of openEnds()) {
     const s = toScreen(new THREE.Vector3().setFromMatrixPosition(e.m));
     if (!s) continue;
     const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
@@ -990,7 +1002,12 @@ function place() {
     rebuild();
     return;
   }
-  track.pieces.push({ uid, id, open: !edges, M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
+  if (snap.prepend != null) {
+    // a START on the head of the road: first in the list (rebuild lays each piece on its parent), the
+    // old first piece now hangs off it
+    track.pieces.unshift({ uid, id, open: !edges, M: snap.m.toArray(), parent: null, flightFrom: null });
+    track.pieces.find((p) => p.uid === snap.prepend).parent = uid;
+  } else track.pieces.push({ uid, id, open: !edges, M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
   const ri = recent.findIndex((r) => r.id === id);
   if (ri >= 0) recent.splice(ri, 1);
   recent.unshift({ base: tileBase, h: hand, id });

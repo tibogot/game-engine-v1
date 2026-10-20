@@ -340,7 +340,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // race), and the car brakes by itself (driveFrame): it used to fly off the track's end after the line
     const runout = [];
     const lastP = lay.placements.at(-1);
-    if (track && lastP && !o.from) {
+    // (not after a FINISH piece: its own 72 m stub is the run-out, and its nose ends it)
+    if (track && lastP && !o.from && !TILES[lastP.id]?.finish) {
       const t = TILES[lastP.id], b = built[lastP.id].b;
       const exit = lastP.M.clone().multiply(socketMatrix(b.exit));
       const dir = new V(0, 0, -1).transformDirection(exit);
@@ -361,9 +362,15 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       : track ? roadPieces.map((p, k) => (p.cp ? k : -1)).filter((k) => k >= 0)
       : lay.placements.map((p, k) => (/landing|catch_pad/.test(p.id) ? k : -1)).filter((k) => k >= 0);
     const hwOf = (k) => SECTIONS[TILES[lay.placements[k]?.id]?.section ?? "road"].hw;
-    const gates = gatesFor(lay.ride, flagged, hwOf, o.from ? [] : ringGates);
+    // START / FINISH pieces (oldTiles.js): the start line past the Start's nose, the finish line at the
+    // Finish's entry (its stub is where the car brakes); without them, as before
+    const startT = TILES[lay.placements[0]?.id]?.start ?? null;
+    const finK = lay.placements.length - 1, finT = TILES[lay.placements[finK]?.id]?.finish ?? null;
+    const finR = finT ? lay.ride.find((r) => r.piece === finK && !r.air) : null;
+    const finishAt = finR ? { P: finR.P.clone().addScaledVector(finR.T, finT.line), T: finR.T.clone(), U: finR.U ?? new V(0, 1, 0), piece: finK } : null;
+    const gates = gatesFor(lay.ride, flagged, hwOf, o.from ? [] : ringGates, finishAt);
     const r0 = lay.ride[0];
-    for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) group.add(makeGateMesh(g));
+    for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, startT ? startT.line : 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) group.add(makeGateMesh(g));
     scene.add(group);
     const race = createRace({ gates, countdown: o.from ? 0.3 : 1.5 });
     // the track's identity for records: its pieces, links and flags (DESIGN.md §8 keys records by content)
@@ -406,7 +413,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const startPos = new V().setFromMatrixPosition(lay.start);
     const startFwd = new V(0, 0, -1).transformDirection(lay.start);
     let startQuat = new THREE.Quaternion().setFromAxisAngle(new V(0, 1, 0), Math.atan2(startFwd.x, startFwd.z)); // car forward = +Z
-    let spawnPos = startPos.clone().addScaledVector(startFwd, 12).add(new V(0, SPAWN_LIFT, 0));
+    let spawnPos = startPos.clone().addScaledVector(startFwd, startT ? startT.spawn : 12).add(new V(0, SPAWN_LIFT, 0));
     if (o.from) {
       // PRACTICE FROM A PIECE (Trackmania's "test from here"): standing on that piece's start, its slope
       // and bank included (piece frame: −Z along the road; the car's nose is +Z)
