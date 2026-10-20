@@ -1,6 +1,7 @@
 // The P5/P3 test track: tiles chained end to end, flights placed on the arc at a given speed.
 // Shared by the lab (look) and the drive page (the real car), so both use the same track.
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { TILES, deckFrame, socketMatrix, leanIn, SECTIONS, DEG } from "./kit.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 
@@ -177,32 +178,86 @@ export function buildTrackMeshes(placements, built, mats) {
   for (const p of placements) (byKey[`${p.id}|${p.open ? "open" : "edges"}`] ??= []).push(p.M);
   const trisOf = (g) => (g ? (g.index ? g.index.count : g.getAttribute("position").count) / 3 : 0);
   let tris = 0;
-  const posts = [];
+  const posts = [], chunkParts = [], c = new THREE.Vector3();
+  for (const look of Object.values(built)) for (const l of [look?.guarded, look?.open]) if (l?.deck && !l.deckBox) { l.deck.computeBoundingBox(); l.deckBox = l.deck.boundingBox.clone(); }
   for (const [key, list] of Object.entries(byKey)) {
     const [id, kind] = key.split("|");
     const look = kind === "open" ? built[id].open : built[id].guarded;
-    for (const [geo, m] of [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road], [look.rail, look.trim ? mats.trim : mats.rail], [look.under, mats.stripe]]) {
-      if (!geo) continue;
-      const im = new THREE.InstancedMesh(geo, m, list.length);
-      list.forEach((M, i) => im.setMatrixAt(i, M));
-      im.computeBoundingSphere();
-      group.add(im);
-      tris += trisOf(geo) * list.length;
+    // every placed piece's parts go to its CHUNK (merged below): deck / stripes always, the rail with a
+    // far version (its collision walls) for distance detail
+    for (const M of list) {
+      const at = c.setFromMatrixPosition(M).clone();
+      if (look.deckBox) at.copy(look.deckBox.getCenter(new THREE.Vector3()).applyMatrix4(M)); // the piece's middle, not its entry
+      const parts = [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road, "near"], [look.under, mats.stripe, "near"], [look.rail, look.trim ? mats.trim : mats.rail, look.trim ? "near" : "rail"]];
+      for (const [geo, m, band] of parts) {
+        if (!geo) continue;
+        chunkParts.push({ geo, m, band, M, at, far: band === "rail" ? look.railCollision : null });
+        tris += trisOf(geo);
+      }
     }
     // the posts are gathered for all pieces, then laid out in chunks (below)
     const P = look.posts;
     if (P?.template && P.matrices.length) for (const M of list) for (const pm of P.matrices) posts.push({ template: P.template, W: new THREE.Matrix4().multiplyMatrices(M, pm) });
   }
-  // POSTS IN CHUNKS WITH DISTANCE DETAIL (user, 2026-10-20: "as optimized as possible"). Per 128 m cell of
+  // POSTS IN CHUNKS WITH DISTANCE DETAIL (user, 2026-10-20: "as optimized as possible"). Per CHUNK cell of
   // the ground, one LOD: the real post (54 tris) up close, a box (12) from POST_BOX m, nothing from POST_NONE
   // m. A whole track's posts used to be one instanced mesh: never culled, drawn complete into the live
   // shadow map every frame too. The level is picked from the GAME camera (updateLod) — the shadow passes
   // look from the sun, far away, and would pick "no posts"; a bake asks for full detail (fullDetail).
+  // THE TRACK IN CHUNKS (user, 2026-10-20: performance). One mesh per material per CHUNK cell, 256 m (a piece goes
+  // to the cell its middle is in): a few draws per chunk, chunks out of view (or out of the live shadow map)
+  // skipped. Per piece TYPE, instancing drew whole tracks that could never be culled. RAILS with distance
+  // detail: the W-beam near, its collision walls from RAIL_FAR m, none from RAIL_NONE m. Parts that won't
+  // merge (other attribute sets: the old kit's pieces) stay one mesh each, still in their chunk.
+  const RAIL_FAR = 200, RAIL_NONE = 700, CHUNK = globalThis.__CHUNK ?? 256;
+  const lods = [];
+  const chunkCells = new Map();
+  for (const q of chunkParts) {
+    const key = `${Math.floor(q.at.x / CHUNK)},${Math.floor(q.at.z / CHUNK)}`;
+    (chunkCells.get(key) ?? chunkCells.set(key, []).get(key)).push(q);
+  }
+  const mergeIn = (list, pick) => {
+    const geos = list.map((q) => pick(q)?.clone().applyMatrix4(q.M)).filter(Boolean);
+    if (!geos.length) return null;
+    let g = null;
+    try { g = geos.length === 1 ? geos[0] : mergeGeometries(geos, false); } catch { g = null; }
+    if (!g) return geos; // not mergeable: separate meshes
+    g.computeBoundingSphere();
+    return [g];
+  };
+  for (const list of chunkCells.values()) {
+    const byMat = new Map();
+    for (const q of list) { const k = `${q.m.uuid}|${q.band}`; (byMat.get(k) ?? byMat.set(k, []).get(k)).push(q); }
+    for (const qs of byMat.values()) {
+      const { m, band } = qs[0];
+      const near = mergeIn(qs, (q) => q.geo);
+      if (!near) continue;
+      if (band !== "rail") { for (const g of near) group.add(new THREE.Mesh(g, m)); continue; }
+      const far = mergeIn(qs, (q) => q.far);
+      const lod = new THREE.LOD();
+      lod.autoUpdate = false;
+      const level = (gs) => { const o = new THREE.Group(); for (const g of gs ?? []) o.add(new THREE.Mesh(g, m)); return o; };
+      // the LOD's distance is measured from its position: the chunk's middle; its children stay in world space
+      const mid = new THREE.Vector3();
+      for (const q of qs) mid.add(q.at);
+      mid.divideScalar(qs.length);
+      lod.position.copy(mid);
+      const back = new THREE.Matrix4().makeTranslation(-mid.x, -mid.y, -mid.z);
+      const l0 = level(near), l1 = level(far ?? near);
+      for (const o of [l0, l1]) o.applyMatrix4(back);
+      lod.addLevel(l0, 0);
+      lod.addLevel(l1, RAIL_FAR);
+      lod.addLevel(new THREE.Object3D(), RAIL_NONE);
+      lod.levels.forEach((v, i) => (v.object.visible = i === 0));
+      group.add(lod);
+      lods.push(lod);
+    }
+  }
   const POST_BOX = 150, POST_NONE = 420;
-  const cells = new Map(), c = new THREE.Vector3();
+  const cells = new Map();
   for (const q of posts) {
     c.setFromMatrixPosition(q.W);
-    const key = `${Math.floor(c.x / 128)},${Math.floor(c.z / 128)},${q.template.uuid}`;
+    const key = `${Math.floor(c.x / CHUNK)},${Math.floor(c.z / CHUNK)},${q.template.uuid}`;
     (cells.get(key) ?? cells.set(key, []).get(key)).push(q);
   }
   const boxOf = new Map();
@@ -214,7 +269,6 @@ export function buildTrackMeshes(placements, built, mats) {
     }
     return boxOf.get(tpl.uuid);
   };
-  const lods = [];
   for (const list of cells.values()) {
     const mid = new THREE.Vector3();
     for (const q of list) mid.add(c.setFromMatrixPosition(q.W));
@@ -239,7 +293,7 @@ export function buildTrackMeshes(placements, built, mats) {
   }
   let forced = false;
   return {
-    group, tris, postChunks: lods.length,
+    group, tris, chunks: chunkCells.size, lodCount: lods.length,
     /** the game camera picks each chunk's detail (every pass this frame then uses it) */
     updateLod(camera) { if (!forced) for (const l of lods) l.update(camera); },
     /** full detail on every chunk (the shadow bake), or back to the camera's pick */

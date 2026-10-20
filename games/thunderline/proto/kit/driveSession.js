@@ -143,7 +143,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   ghostCar.group.visible = false;
   ghostCar.setEnabled(false);
   /** Car meshes cast into the live sun-shadow map (DYNAMIC layer). */
-  const adoptCar = (root) => root.traverse((o) => { if (o.isMesh) o.layers.enable(DYNAMIC_LAYER); });
+  // ONLY THE CASTERS (performance pass, 2026-10-20): every car mesh was on this layer, so the live shadow map
+  // drew the whole car (35 draws) — the Thunderline car casts with its ShadowProxy + tyres only
+  // (thunderCar.js castShadow); the Lotus casts as it did
+  const adoptCar = (root) => root.traverse((o) => { if (o.isMesh) { if (o.castShadow) o.layers.enable(DYNAMIC_LAYER); else o.layers.disable(DYNAMIC_LAYER); } });
   /**
    * THE GHOST'S LOOK: a bolt-blue HOLOGRAM, one shared material — glowing (additive), bright at its
    * outline (fresnel), faint in the middle, so it reads at once as "not a real car" and never hides
