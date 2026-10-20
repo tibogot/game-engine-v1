@@ -238,7 +238,7 @@ async function bakeThumbs() {
 
 // ---------- the track's thumbnail (library cards): the track alone, 3/4 view ----------
 const thumbScene = new THREE.Scene();
-thumbScene.background = new THREE.Color(0x3a4a6b);
+thumbScene.background = new THREE.Color(0x4a4a51); // a neutral grey behind the dark road (the menu is black: user, 2026-10-20)
 thumbScene.add(new THREE.HemisphereLight(0xeaf3ff, 0x6a6a72, 3.2));
 { const d = new THREE.DirectionalLight(0xfff2e0, 3.6); d.position.set(-300, 500, 200); thumbScene.add(d); }
 async function trackThumb() {

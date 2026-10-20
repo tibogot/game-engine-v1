@@ -1,7 +1,8 @@
-/* Thunderline's own UI look (feedback: never like Apex Rush): navy panels, bolt blue, cut corners. */
+/* Thunderline's own UI look (feedback: never like Apex Rush): BLACK panels on a black gradient (user,
+   2026-10-20: "black instead of blue"), bolt blue only as the accent, cut corners. */
 :root {
-  --ink: #0a0f1c; --panel: rgba(13, 20, 38, 0.92); --panel2: #121a2e; --line: #23304d; --line2: #2f3f63;
-  --text: #e8f0ff; --dim: #8796b5; --bolt: #3fd2ff; --signal: #ff7a1a; --bad: #ff4d5e; --ok: #45e08a;
+  --ink: #060607; --panel: rgba(16, 16, 18, 0.92); --panel2: #18181b; --line: #2a2a2f; --line2: #3a3a41;
+  --text: #ededf0; --dim: #8b8b95; --bolt: #3fd2ff; --signal: #ff7a1a; --bad: #ff4d5e; --ok: #45e08a;
   --cut: 16px;
   --white: #e9edf5; --green: #45e08a; --blue: #3fa2ff; --red: #ff4d5e; --black: #6b7489;
   --gold: #f2c14e; --silver: #c9d1de; --bronze: #c98a5b;
@@ -10,9 +11,9 @@
 html, body { margin: 0; min-height: 100%; color: var(--text); font: 14px/1.4 Inter, system-ui, sans-serif; }
 body {
   background:
-    linear-gradient(115deg, transparent 0 62%, rgba(63, 210, 255, 0.06) 62% 63%, transparent 63% 70%, rgba(63, 210, 255, 0.04) 70% 71%, transparent 71%),
-    radial-gradient(1200px 700px at 80% -10%, #1d3566 0%, transparent 60%),
-    linear-gradient(180deg, #0c1428 0%, #070b16 100%);
+    linear-gradient(115deg, transparent 0 62%, rgba(255, 255, 255, 0.035) 62% 63%, transparent 63% 70%, rgba(255, 255, 255, 0.025) 70% 71%, transparent 71%),
+    radial-gradient(1200px 700px at 80% -10%, #26262b 0%, transparent 60%),
+    linear-gradient(180deg, #141416 0%, #050506 100%);
   background-attachment: fixed;
   min-height: 100vh;
 }
@@ -29,7 +30,7 @@ button { font: inherit; color: inherit; }
 #crumbs a:hover { color: var(--bolt); }
 #crumbs .sep { color: var(--line2); }
 #screen { padding: 8px 28px 90px; max-width: 1280px; margin: 0 auto; }
-#foot { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 22px; padding: 14px 28px; color: var(--dim); font-size: 14px; background: linear-gradient(0deg, rgba(7, 11, 22, 0.95), transparent); }
+#foot { position: fixed; left: 0; right: 0; bottom: 0; display: flex; gap: 22px; padding: 14px 28px; color: var(--dim); font-size: 14px; background: linear-gradient(0deg, rgba(5, 5, 6, 0.95), transparent); }
 #foot kbd { color: var(--text); background: var(--panel2); border: 1px solid var(--line); padding: 0 5px; font: 12px Consolas, monospace; }
 
 /* ---- home: the four modes ---- */
@@ -44,8 +45,8 @@ button { font: inherit; color: inherit; }
 /* the art is positioned, so it would paint over plain text: lift the card's text above it */
 .mode > h2, .mode > p { position: relative; z-index: 1; }
 .mode .art { position: absolute; inset: 0; opacity: 0.55; pointer-events: none; background-size: cover; background-position: center; }
-.mode.main .art { background: radial-gradient(circle at 70% 30%, rgba(63, 210, 255, 0.35), transparent 55%), repeating-linear-gradient(160deg, transparent 0 46px, rgba(63, 210, 255, 0.07) 46px 48px); }
-.mode .art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(10, 15, 28, 0.95) 10%, transparent 70%); }
+.mode.main .art { background: radial-gradient(circle at 70% 30%, rgba(255, 255, 255, 0.12), transparent 55%), repeating-linear-gradient(160deg, transparent 0 46px, rgba(255, 255, 255, 0.04) 46px 48px); }
+.mode .art::after { content: ""; position: absolute; inset: 0; background: linear-gradient(0deg, rgba(10, 10, 12, 0.95) 10%, transparent 70%); }
 .mode.later { cursor: default; }
 .mode.later h2, .mode.later p { opacity: 0.45; }
 .mode.later .tag { color: var(--dim); }
@@ -62,7 +63,7 @@ button { font: inherit; color: inherit; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .card { background: var(--panel); border: 1px solid var(--line); cursor: pointer; display: flex; flex-direction: column; transition: border-color 0.15s, transform 0.15s; }
 .card:hover { border-color: var(--bolt); transform: translateY(-2px); }
-.card .pic { aspect-ratio: 16 / 9; background: #18223a center / cover no-repeat; position: relative; }
+.card .pic { aspect-ratio: 16 / 9; background: #18181b center / cover no-repeat; position: relative; }
 .card .pic.none { display: flex; align-items: center; justify-content: center; color: var(--line2); font: 700 15px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; }
 .card .body { padding: 10px 12px 12px; }
 .card .name { font: 700 19px "Barlow Condensed"; letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -77,7 +78,7 @@ button { font: inherit; color: inherit; }
 .card.slot:hover { transform: none; border-color: var(--line); }
 .medal { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; background: var(--line2); }
 .medal.author { background: var(--bolt); } .medal.gold { background: var(--gold); } .medal.silver { background: var(--silver); } .medal.bronze { background: var(--bronze); }
-.badge { position: absolute; left: 8px; top: 8px; background: rgba(10, 15, 28, 0.85); padding: 2px 8px; font: 700 12px "Barlow Condensed"; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
+.badge { position: absolute; left: 8px; top: 8px; background: rgba(8, 8, 10, 0.85); padding: 2px 8px; font: 700 12px "Barlow Condensed"; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); }
 .badge.ok { color: var(--ok); }
 
 /* ---- campaign tiers ---- */
