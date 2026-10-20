@@ -477,6 +477,61 @@ function orderedPieces() {
   }
   return out;
 }
+// ---------- THE TEST LAP, DRAWN ON THE TRACK (user, 2026-10-20) ----------
+// The prediction's car, every few ticks: a ribbon just above the road coloured by its SPEED (deep blue
+// slow → bolt blue → white fast), dashed where it flies; marks where it hits something or falls (red)
+// and where it brakes hard or lands rough (orange). You see WHY a jump falls short or where a track
+// kills the speed, not just a number.
+let lapLineOn = true;
+const lapGroup = new THREE.Group();
+scene.add(lapGroup);
+const lapRibbonMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+const lapMarkMats = { hit: new THREE.MeshBasicMaterial({ color: 0xff4d5e }), fall: new THREE.MeshBasicMaterial({ color: 0xff4d5e }), brake: new THREE.MeshBasicMaterial({ color: 0xff9a3d }), rough: new THREE.MeshBasicMaterial({ color: 0xff9a3d }) };
+const lapMarkGeo = new THREE.OctahedronGeometry(1.6);
+const speedTone = (v, top) => {
+  const t = Math.min(1, v / Math.max(1, top));
+  const c0 = [0.12, 0.36, 0.79], c1 = [0.25, 0.82, 1.0], c2 = [0.95, 0.98, 1.0];
+  const [A, B, f] = t < 0.6 ? [c0, c1, t / 0.6] : [c1, c2, (t - 0.6) / 0.4];
+  return A.map((x, i) => x + (B[i] - x) * f);
+};
+function drawLapLine(samples, events) {
+  for (const c of lapGroup.children.slice()) { lapGroup.remove(c); c.geometry?.dispose?.(); }
+  lapGroup.visible = lapLineOn && !driving;
+  if (samples.length < 2) return;
+  const top = Math.max(...samples.map((q) => q.v));
+  const pos = [], col = [], idx = [];
+  const dir = new THREE.Vector3(), right = new THREE.Vector3();
+  for (let i = 0; i < samples.length; i++) {
+    const q = samples[i], n = samples[Math.min(samples.length - 1, i + 1)], b = samples[Math.max(0, i - 1)];
+    dir.subVectors(n.p, b.p);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    right.crossVectors(dir.normalize(), q.up).normalize();
+    const base = q.p.clone().addScaledVector(q.up, -0.42); // just above the deck under the car
+    const w = 0.9;
+    pos.push(...base.clone().addScaledVector(right, -w).toArray(), ...base.clone().addScaledVector(right, w).toArray());
+    const c = speedTone(q.v, top);
+    col.push(...c, ...c);
+    // in the AIR: dashed (every other step left out)
+    if (i < samples.length - 1 && !(q.air && n.air && i % 2)) { const k = i * 2; idx.push(k, k + 1, k + 2, k + 1, k + 3, k + 2); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.setIndex(idx);
+  const ribbon = new THREE.Mesh(g, lapRibbonMat);
+  ribbon.renderOrder = 6;
+  ribbon.frustumCulled = false;
+  lapGroup.add(ribbon);
+  for (const e of events) {
+    const m = new THREE.Mesh(lapMarkGeo, lapMarkMats[e.kind]);
+    m.position.copy(e.p).addScaledVector(e.up ?? UP, 1.8);
+    m.scale.setScalar(e.kind === "fall" ? 1.6 : 1);
+    m.renderOrder = 7;
+    lapGroup.add(m);
+  }
+}
+function setLapLine(on) { lapLineOn = on; lapGroup.visible = on && !driving; statusKey = ""; renderStatus(); }
+
 async function runPrediction() {
   const token = ++predToken;
   const order = orderedPieces();
@@ -543,11 +598,23 @@ async function runPrediction() {
   const ringRace = ringGates.length ? createRace({ gates: [...ringGates, { kind: "finish", P: new THREE.Vector3(1e9, 1e9, 1e9), T: UP.clone(), U: new THREE.Vector3(1, 0, 0), hw: 0 }], countdown: 0 }) : null;
   prediction.landings = [];
   let endSpeed = null;
+  const lapSamples = [], lapEvents = [];
+  let vPrev = 0, hitCool = 0, brakeCool = 0;
   for (let tick = 0; tick < 120 * 180; tick++) {
     const p = car.body.pos;
     obs.setTime(tick * FIXED_DT); // the drive page's race clock: 0 at the green light
     const landed = rules.step(pilot.input(car), FIXED_DT);
     if (landed) prediction.landings.push(landed.grade);
+    // THE LAP LINE (drawLapLine): a sample every 3 ticks, and the moments worth a mark
+    {
+      const vNow = car.body.vel.length(), upNow = new THREE.Vector3(0, 1, 0).applyQuaternion(car.body.quat);
+      if (tick % 3 === 0) lapSamples.push({ p: car.body.pos.clone(), up: upNow, v: vNow, air: car.groundedCount === 0 });
+      hitCool -= FIXED_DT; brakeCool -= FIXED_DT;
+      if ((car._solidImpactSpeed ?? 0) > 5 && hitCool <= 0) { lapEvents.push({ kind: "hit", p: car.body.pos.clone(), up: upNow }); hitCool = 0.6; }
+      else if (car.groundedCount > 0 && (vPrev - vNow) / FIXED_DT > 14 && brakeCool <= 0) { lapEvents.push({ kind: "brake", p: car.body.pos.clone(), up: upNow }); brakeCool = 1.2; }
+      if (landed && /rough/i.test(landed.grade ?? "")) lapEvents.push({ kind: "rough", p: car.body.pos.clone(), up: upNow });
+      vPrev = vNow;
+    }
     ringRace?.tick(car, FIXED_DT);
     idx = pilot.idx;
     nose.set(0, 0, 1).applyQuaternion(car.body.quat);
@@ -581,6 +648,8 @@ async function runPrediction() {
     }
   }
   if (token !== predToken) return;
+  if (prediction.fail) lapEvents.push({ kind: "fall", p: car.body.pos.clone() });
+  drawLapLine(lapSamples, lapEvents);
   prediction.state = "done";
   prediction.lipSpeed = lipSpeed;
   prediction.launch = launch;
@@ -1429,7 +1498,7 @@ function renderStatus() {
   const many = !tileBase ? selection() : [];
   const multi = many.length > 1;
   const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -1437,7 +1506,11 @@ function renderStatus() {
     `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
     (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` : "") +
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
-    (!tileBase && !multi ? `<div class="row"><span>Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</span></div>` : "") +
+    (!tileBase && !multi ? `<div class="legend">Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</div>` : "") +
+    (!tileBase && track.pieces.length > 1
+      ? `<div class="acts"><button data-act="lapline" class="${lapLineOn ? "on" : ""}">Test lap line ${lapLineOn ? "on" : "off"} <kbd>L</kbd></button></div>` +
+        (lapLineOn ? `<div class="legend">The test car: blue slow → white fast, dashed in the air · red: hits, falls · orange: hard braking, rough landing</div>` : "")
+      : "") +
     (tileBase === STAMP ? `<div class="row"><span>Snaps like its first piece · R mirrors it · it stays in hand</span></div>` : "") +
     (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · on a road or the floor · Q/E turn</span></div>` : "") +
     (selPc && !isRing(selPc) && !selPc.kind
@@ -1475,6 +1548,7 @@ function renderStatus() {
 
 $("status").addEventListener("click", (e) => {
   const act = e.target.closest?.("button")?.dataset.act;
+  if (act === "lapline") { setLapLine(!lapLineOn); return; }
   if (!act || sel == null) return;
   if (act === "copy") copySelection();
   else if (act === "mirror") mirrorSelection();
@@ -1555,6 +1629,7 @@ addEventListener("keydown", (e) => {
       else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
       else if (k === "i" && !tileBase && sel != null) startEdit("insert");
       else if (k === "m" && !tileBase && movableKind(sel)) setGizmoMode(gizmoMode === "translate" ? "rotate" : "translate");
+      else if (k === "l") setLapLine(!lapLineOn);
       else if (k === "p" && !tileBase && sel != null) startEdit("replace");
       else return;
   }
@@ -1646,7 +1721,7 @@ async function startDrive() {
   driving = true;
   gizmo.detach();
   // the builder's own scene objects and panels leave; the camera is kept to come back to
-  const objs = [grid, trackGroup, arcGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
+  const objs = [grid, trackGroup, arcGroup, lapGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
   saved = { vis: objs.map((o) => [o, o.visible]), ui: builderUi.map((id) => [id, $(id).style.display]), pos: camera.position.clone(), quat: camera.quaternion.clone(), fov: camera.fov, target: controls.target.clone() };
   for (const o of objs) o.visible = false;
   for (const id of builderUi) $(id).style.display = "none";
