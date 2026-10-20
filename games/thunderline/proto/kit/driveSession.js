@@ -443,26 +443,35 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     hud.classList.add("on");
 
     // ---------- sun shadows (drive page only): static atlas of this track + live map around the car ----------
-    if (useSunShadows && !sunShadows) {
-      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // let the sun settle for the time of day
-      const pts = [], tmp = new V();
-      for (const p of lay.placements) {
-        const look = p.open ? built[p.id].open : built[p.id].guarded;
-        for (const g of [look.deck, look.rail]) {
-          if (!g) continue;
-          const a = g.getAttribute("position");
-          for (let i = 0; i < a.count; i += 6) pts.push(tmp.fromBufferAttribute(a, i).applyMatrix4(p.M).clone());
-        }
-      }
-      scene.updateMatrixWorld(true);
-      sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts });
-      sunShadows.stats.bakeMs = Math.round(sunShadows.bake());
-      // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
-      app.shadows.setSunShadowNode(sunShadows.visibility);
-      console.info("[drive] sun shadows", sunShadows.stats);
-    }
+    if (useSunShadows && !sunShadows) await bakeSunShadows(lay);
     restart();
     return S;
+  }
+
+  /**
+   * The track's SUN SHADOWS, baked for the sun as it is now (its direction lays the atlas out). Again
+   * whenever the sun moves (the FX lab's light buttons): the old maps are freed once the new one is in.
+   */
+  async function bakeSunShadows(lay) {
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // let the sun settle for the time of day
+    const pts = [], tmp = new V();
+    for (const p of lay.placements) {
+      const look = p.open ? built[p.id].open : built[p.id].guarded;
+      for (const g of [look.deck, look.rail]) {
+        if (!g) continue;
+        const a = g.getAttribute("position");
+        for (let i = 0; i < a.count; i += 6) pts.push(tmp.fromBufferAttribute(a, i).applyMatrix4(p.M).clone());
+      }
+    }
+    scene.updateMatrixWorld(true);
+    const old = sunShadows;
+    sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts });
+    sunShadows.stats.bakeMs = Math.round(sunShadows.bake());
+    // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
+    app.shadows.setSunShadowNode(sunShadows.visibility);
+    old?.atlasRT?.dispose?.();
+    old?.liveRT?.dispose?.();
+    console.info("[drive] sun shadows", sunShadows.stats);
   }
 
   /** Stop driving: the track's meshes leave, the car parks, the HUD hides. */
@@ -700,6 +709,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     /** fn(vehicle, session) → input, or null for the player / autopilot again */
     setInputSource(fn) { inputSource = fn; },
     setTimeScale(k) { timeScale = k; },
+    /** Re-bake the sun shadows for the sun as it is now (after a time-of-day change). */
+    async rebakeSunShadows() { if (useSunShadows && S) await bakeSunShadows(S.lay); },
     get timeScale() { return timeScale; },
     get lastInput() { return lastInput; },
     config: { TOP: top, SUBSTEPS: substeps },

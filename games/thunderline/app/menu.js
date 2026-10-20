@@ -2,6 +2,7 @@
 // player back to the right one: #home, #play (Stunt tracks: campaign + my tracks), #build (the
 // library: new, open, drive, rename, duplicate, delete), #settings.
 import { library, campaign, settings, currentBest, builderUrl, driveUrl, campaignUrl } from "./library.js";
+import { decodeTrack } from "./trackCode.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -56,6 +57,7 @@ function trackCard(rec, { actions, best = currentBest(rec), badge: tag }) {
     ${pic}${badge}</div>
     <div class="body">
       <div class="name">${esc(rec.name)}</div>
+      ${rec.track?.description ? `<div class="desc">${esc(rec.track.description)}</div>` : ""}
       <div class="meta">
         <span>Author <b>${fmt(author)}</b></span>
         <span>${best ? `<i class="medal ${best.medal ?? ""}"></i>Best <b>${fmt(best.time)}</b>` : "No run yet"}</span>
@@ -100,8 +102,19 @@ function build() {
     actions: `<button data-act="open">Edit</button><button data-act="drive"${r.track?.pieces?.length ? "" : " disabled"}>Drive</button><button data-act="rename">Rename</button><button data-act="dup">Copy</button><button data-act="del" class="danger">Delete</button>`,
   })).join("");
   $("screen").innerHTML = `<p class="note">Your tracks. Edit one, or start a new one. A track is validated when the builder's test lap reaches the finish: that time is its author time and sets the medals.</p>
-    <div class="grid"><div class="card new cut" id="new">+ New track</div>${cards}</div>`;
+    <div class="grid"><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${cards}</div>`;
   $("new").onclick = () => { location.href = builderUrl(library.create().id); };
+  // SHARE CODES (trackCode.js): a pasted code becomes one of your tracks
+  $("paste").onclick = async () => {
+    const code = prompt("Paste a Thunderline track code (it starts with TL1.)");
+    if (!code) return;
+    try {
+      const { name, track } = await decodeTrack(code);
+      const rec = library.create(name);
+      library.saveTrack(rec.id, track);
+      build();
+    } catch (e) { alert(e.message); }
+  };
   for (const c of document.querySelectorAll(".card[data-id]")) {
     const id = c.dataset.id;
     c.onclick = (e) => {

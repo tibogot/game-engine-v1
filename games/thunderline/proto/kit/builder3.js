@@ -17,7 +17,8 @@ import { createRace } from "./race.js";
 import { library, settings, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
-import { applyWorld, WORLDS, DEFAULT_WORLD } from "./worlds.js";
+import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD } from "./worlds.js";
+import { encodeTrack } from "../../app/trackCode.js";
 import { OBSTACLES, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
@@ -91,11 +92,12 @@ function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) u
 function restore(from, to) {
   if (!from.length) return;
   to.push(JSON.stringify(track));
-  const world = track.world;
+  const world = track.world, tod = track.tod ?? DEFAULT_TOD;
   track = JSON.parse(from.pop());
   sel = null;
   rebuild();
   if (track.world !== world) { applyWorld(app, track.world); $("b-world").value = WORLDS[track.world] ? track.world : DEFAULT_WORLD; } // an undone world switch
+  if ((track.tod ?? DEFAULT_TOD) !== tod) { app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD); $("b-tod").value = String(track.tod ?? DEFAULT_TOD); } // … or time
 }
 // "fitted_landing" is not a fixed tile: the builder generates one per jump, sized to its speed band
 // (kit.js ensureTile). Until the ghost is on an arc it shows a default size.
@@ -151,7 +153,7 @@ const app = await startV3App({
   csm: { cascades: 2 },
 });
 app.sky?.setMode?.("skypro");
-app.sky?.setTimeOfDay?.(15.5);
+app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD); // the track's own time of day (worlds.js TIMES)
 app.fog?.setHeight?.({ enabled: false });
 applyWorld(app, track.world); // worlds.js: the track's world (the haze too), before any material is built
 app.postFx?.setEnabled?.(true);
@@ -1840,6 +1842,37 @@ $("b-world").onchange = () => {
   applyWorld(app, track.world);
   save();
   $("b-world").blur(); // the builder's keys again
+};
+// TIME OF DAY: the track's own (undoable); the builder's shadows are live, the drive page bakes its own
+$("b-tod").innerHTML = TIMES.map(([h, n]) => `<option value="${h}">Time: ${n}</option>`).join("");
+$("b-tod").value = String(track.tod ?? DEFAULT_TOD);
+$("b-tod").onchange = () => {
+  snapshot();
+  track.tod = Number($("b-tod").value);
+  app.sky?.setTimeOfDay?.(track.tod);
+  save();
+  $("b-tod").blur();
+};
+// TRACK INFO: the description (on the track's card) and the SHARE CODE (app/trackCode.js)
+async function refreshShareCode() {
+  try { $("info-code").value = await encodeTrack(trackName, track); } catch (e) { $("info-code").value = `(no code: ${e.message})`; }
+}
+let descTimer = null;
+$("b-info").onclick = () => {
+  const show = $("info").classList.toggle("hidden") === false;
+  if (show) { $("info-desc").value = track.description ?? ""; $("info-note").textContent = ""; refreshShareCode(); }
+  $("b-info").blur();
+};
+$("info-desc").oninput = () => {
+  track.description = $("info-desc").value.trim() || undefined;
+  clearTimeout(descTimer);
+  descTimer = setTimeout(() => { save(); refreshShareCode(); }, 400);
+};
+$("info-desc").onkeydown = $("info-code").onkeydown = (e) => e.stopPropagation(); // typing is not building
+$("info-copy").onclick = async () => {
+  await refreshShareCode();
+  try { await navigator.clipboard.writeText($("info-code").value); $("info-note").textContent = `Copied · ${$("info-code").value.length} characters`; }
+  catch { $("info-code").select(); $("info-note").textContent = "Select it and copy (Ctrl+C)"; }
 };
 
 // ---------- go ----------

@@ -8,7 +8,7 @@
 import { startV3App } from "../../../../v3/engine.js";
 import { library, campaign, settings, builderUrl, campaignUrl, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
-import { applyWorld } from "./worlds.js";
+import { applyWorld, DEFAULT_TOD } from "./worlds.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -55,6 +55,8 @@ const nextCampaign = campaignRec ? await campaign.get(campaignRec.id.replace(/\d
 const cameFrom = params.get("from"); // "builder" → Back goes there
 // the track's WORLD (worlds.js: flat to the horizon, or the mountain valley), before any material is built
 applyWorld(app, params.get("world") ?? trackRec?.track?.world);
+// the track's TIME OF DAY (?tod= wins), set before the drive starts: its sun-shadow bake uses this sun
+if (!(params.has("tod") && Number.isFinite(tod))) app.sky?.setTimeOfDay?.(trackRec?.track?.tod ?? DEFAULT_TOD);
 
 const rig = createDriveRig(app, {
   prefs: settings.get(),

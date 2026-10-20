@@ -6,7 +6,7 @@
 import * as THREE from "three";
 import { startV3App } from "../../../../v3/engine.js";
 import { createDriveRig } from "./driveSession.js";
-import { applyWorld } from "./worlds.js";
+import { applyWorld, TIMES } from "./worlds.js";
 import { createCarFx } from "./carFx.js";
 
 const $ = (id) => document.getElementById(id);
@@ -94,7 +94,7 @@ function placeCamera() {
 
 // ---------- the panel ----------
 const SPEEDS = [["1", "1×"], ["0.5", "½×"], ["0.25", "¼×"], ["0", "Pause"]]; // arrays: numeric keys would sort first
-const TODS = [["8", "Morning"], ["15.5", "Afternoon"], ["19", "Sunset"], ["22", "Night"]];
+const TODS = TIMES.map(([h, n]) => [String(h), n]); // the tracks' own times (worlds.js)
 const EFFECTS = { smoke: "Tyre smoke", exhaust: "Exhaust", sparks: "Sparks", marks: "Tyre marks" };
 function buttons(el, items, isOn, onPick) {
   el.innerHTML = "";
@@ -112,7 +112,7 @@ function renderButtons() {
   buttons($("cams"), CAMS, (k) => k === cam, (k) => { cam = k; trackside = null; });
   buttons($("speeds"), SPEEDS, (k) => Number(k) === rig.timeScale, (k) => rig.setTimeScale(Number(k)));
   buttons($("looks"), { flipbook: "Wispy flipbook", procedural: "Procedural" }, (k) => k === fx.look, (k) => fx.setLook(k));
-  buttons($("tods"), TODS, (k) => Number(k) === tod, (k) => { tod = Number(k); app.sky?.setTimeOfDay?.(tod); });
+  buttons($("tods"), TODS, (k) => Number(k) === tod, (k) => { tod = Number(k); app.sky?.setTimeOfDay?.(tod); rig.rebakeSunShadows(); }); // the baked shadows follow the sun
   const box = $("fxs");
   box.innerHTML = "";
   for (const [k, label] of Object.entries(EFFECTS)) {
