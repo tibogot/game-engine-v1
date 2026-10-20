@@ -246,21 +246,52 @@ async function trackThumb() {
   const W = 320, H = 180;
   const rt = new THREE.RenderTarget(W, H, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace });
   const cam = new THREE.PerspectiveCamera(35, W / H, 1, 20000);
-  // fit the track's box (not its bounding sphere: a long thin track would sit tiny in the middle) seen
-  // from a steep 3/4 view: project the 8 corners and pull the camera in until they just fit
-  const box = new THREE.Box3().setFromObject(trackGroup);
+  // ZOOMED ON THE ROAD (user, 2026-10-20: "it needs to be zoomed in more to see something"): fit the
+  // road's own points (a box's empty corners kept a long track small in the middle), looking ACROSS the
+  // track's long side so its length runs along the picture's width, from a steep 3/4 view
+  const pts = [];
+  for (const pc of track.pieces) {
+    const b = built.get(pc.uid);
+    if (!b || isRing(pc)) continue;
+    for (const r of piece(pc.id, pc.open).b.rings) pts.push(r.p.clone().applyMatrix4(b.M));
+  }
+  if (!pts.length) { rt.dispose(); return null; }
+  // ...and not the WHOLE track (user: "zoomed in way more"): a 1 km track whole is a hairline whatever
+  // the framing. The picture is the BUSIEST spot — where the most road sits within 70 m (a loop, a
+  // helix, a run of jumps) — framed close, like a screenshot of it
+  const R = 70;
+  let focus = pts[0], bestN = -1;
+  for (let i = 0; i < pts.length; i += 2) {
+    let n = 0;
+    for (const q of pts) if (q.distanceToSquared(pts[i]) < R * R) n++;
+    if (n > bestN) { bestN = n; focus = pts[i]; }
+  }
+  const near = pts.filter((q) => q.distanceToSquared(focus) < R * R);
+  pts.length = 0;
+  pts.push(...near);
+  let mx = 0, mz = 0;
+  for (const p of pts) { mx += p.x; mz += p.z; }
+  mx /= pts.length; mz /= pts.length;
+  let sxx = 0, szz = 0, sxz = 0;
+  for (const p of pts) { const dx = p.x - mx, dz = p.z - mz; sxx += dx * dx; szz += dz * dz; sxz += dx * dz; }
+  const ang = 0.5 * Math.atan2(2 * sxz, sxx - szz); // the long axis
+  const across = new THREE.Vector3(-Math.sin(ang), 0, Math.cos(ang)); // perpendicular to it
+  const dir = across.multiplyScalar(Math.cos(40 * DEG)).add(new THREE.Vector3(0, Math.sin(40 * DEG), 0)).normalize();
+  const box = new THREE.Box3().setFromPoints(pts);
   const c = box.getCenter(new THREE.Vector3());
-  const dir = new THREE.Vector3(0.55, 1.0, 0.75).normalize();
-  const corners = [];
-  for (const x of [box.min.x, box.max.x]) for (const y of [box.min.y, box.max.y]) for (const z of [box.min.z, box.max.z]) corners.push(new THREE.Vector3(x, y, z));
   let dist = box.getSize(new THREE.Vector3()).length();
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 30; i++) {
     cam.position.copy(c).addScaledVector(dir, dist);
     cam.lookAt(c);
     cam.updateMatrixWorld();
-    let ext = 0;
-    for (const p of corners) { const q = p.clone().project(cam); ext = Math.max(ext, Math.abs(q.x), Math.abs(q.y)); }
-    dist *= ext > 0.92 ? 1.08 : 0.94; // settle where the widest corner is ~0.9 of the frame
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const p of pts) { const q = p.clone().project(cam); x0 = Math.min(x0, q.x); x1 = Math.max(x1, q.x); y0 = Math.min(y0, q.y); y1 = Math.max(y1, q.y); }
+    // re-centre on what the camera sees, then settle where the road just fills ~90% of the frame
+    const off = new THREE.Vector3((x0 + x1) / 2, (y0 + y1) / 2, 0.5).unproject(cam).sub(cam.position).normalize();
+    const along = new THREE.Vector3().subVectors(c, cam.position).length();
+    c.copy(cam.position).addScaledVector(off, along);
+    const ext = Math.max((x1 - x0) / 2, (y1 - y0) / 2);
+    dist *= ext > 0.9 ? 1.05 : 0.96;
   }
   // the track borrowed into the thumbnail scene for one render, then given back
   thumbScene.add(trackGroup);

@@ -6,6 +6,8 @@
 const KEY = "thunderline.library.v1";
 const OLD_SINGLE = "thunderline.track.v1"; // the builder's one-slot save before the library
 const CURRENT = "thunderline.library.current"; // the track the builder last worked on
+/** A new track's world (worlds.js; user, 2026-10-20: the mountain valley by default). */
+const NEW_TRACK_WORLD = "valley";
 
 function readAll() {
   try { return JSON.parse(localStorage.getItem(KEY)) ?? {}; } catch { return {}; }
@@ -40,17 +42,38 @@ function migrate(all) {
   return all;
 }
 
+/**
+ * ONE-TIME CLEAN-UP (user, 2026-10-20: "delete the ones we don't need"): the working copies left from
+ * building the campaign (it plays from its own files: campaign/*.json) and the builder's test tracks.
+ * Exactly these names, once (a flag says it ran), never anything else.
+ */
+const CLEANUP_FLAG = "thunderline.library.cleanup.2026-10-20";
+const CLEANUP_NAMES = [/^White [1-5] · /, /^W[1-5]b? · /, /^Gap test$/, /^Small pieces test( 2)?$/, /^Track 2$/, /^Track 24$/];
+function cleanupOnce(all) {
+  try { if (localStorage.getItem(CLEANUP_FLAG)) return false; localStorage.setItem(CLEANUP_FLAG, "1"); } catch { return false; }
+  let removed = false;
+  for (const [id, r] of Object.entries(all)) if (CLEANUP_NAMES.some((re) => re.test(r.name ?? ""))) { delete all[id]; removed = true; }
+  return removed;
+}
+
 export const library = {
   /** all tracks, most recently edited first */
   list() {
-    return Object.values(migrate(readAll())).sort((a, b) => b.updated - a.updated);
+    // EMPTY TRACKS DON'T STAY: "New track" makes a record at once, so every unused one left an "Empty"
+    // card behind. An empty track goes, except the one the builder is working on.
+    const all = migrate(readAll());
+    const cur = localStorage.getItem(CURRENT);
+    let pruned = cleanupOnce(all);
+    for (const [id, r] of Object.entries(all)) if (!r.track?.pieces?.length && id !== cur) { delete all[id]; pruned = true; }
+    if (pruned) writeAll(all);
+    return Object.values(all).sort((a, b) => b.updated - a.updated);
   },
   get(id) { return migrate(readAll())[id] ?? null; },
   create(name) {
     const all = migrate(readAll());
     const n = Object.keys(all).length + 1;
     const id = newId();
-    all[id] = { id, name: name ?? `Track ${n}`, created: Date.now(), updated: Date.now(), track: { pieces: [], nextUid: 1 }, thumb: null, best: null };
+    all[id] = { id, name: name ?? `Track ${n}`, created: Date.now(), updated: Date.now(), track: { pieces: [], nextUid: 1, world: NEW_TRACK_WORLD }, thumb: null, best: null };
     writeAll(all);
     return all[id];
   },
