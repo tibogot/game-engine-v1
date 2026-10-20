@@ -159,7 +159,7 @@ farSangar = lambda K, name, spec, state, seed: buildSangar(K, name, spec, state,
 # (smoothAngle 45, no weighted normals: the split blocks' faces flat, their edges crisp — 80 made them pillows, the
 # kit's 35 + weighted cut the old hulls into facets)
 # (the scans' NORMALS baked too — normals=True — into a 2048 atlas: the relief the colour bake alone flattened)
-TYPES = {"sangar": dict(builder=buildSangar, farBuilder=farSangar, atlas=2048, aoDist=0.25, smoothAngle=45, weighted=False, normals=True)}
+TYPES = {"sangar": dict(builder=buildSangar, farBuilder=farSangar, atlas=2048, normalAtlas=1024, aoDist=0.25, smoothAngle=45, weighted=False, normals=True)}
 
 exported = buildKit(TYPES, MATDEF, "sangar.glb", prefix="Sangar", seed0=1956, colors=True)
 

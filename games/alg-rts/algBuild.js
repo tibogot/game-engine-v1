@@ -21,7 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
-import { armsCacheGeometry, loadArmsCache, loadSangar, sangarGeometry, swapPlaced } from "./algSangar.js";
+import { armsCacheGeometry, loadArmsCache, loadSangar, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -115,7 +115,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     if (!ok) return;
     geoCache.delete("armsCache");
     // the caches already standing (the showroom's, the landmarks' in the hills): the new piece too
-    const n = swapPlaced(showroom, /^armsCache\d*$/, armsCacheGeometry());
+    const n = swapPlaced(showroom, /^armsCache\d*$/, armsCacheGeometry(), app);
     if (n) onCover();
   });
   const geoOf = (key) => { if (!geoCache.has(key)) geoCache.set(key, BUILDS[key].build()); return geoCache.get(key); };
@@ -284,6 +284,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const build = mesh.geometry.userData.siteMaterial?.() ?? null;
     if (build) { mesh.material = build.material; build.set(0); }
     else mesh.scale.y = 0.06;                         // the foundation, until work starts
+    trackLod(app, mesh);                              // (a Blender piece: its far level past HOUSE_FAR — algSangar.js)
     app.scene.add(mesh);
     const site = {
       key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build,
@@ -430,6 +431,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     retire(s);
     purseOf(s.key)?.earn?.(BUILDS[s.key].cost);
     app.scene.remove(s.mesh);
+    untrackLod(s.mesh);
     s.mesh.geometry?.dispose?.();
     if (s.fp?.noFoot) navGrid?.clearNoFootFootprint?.(s.fp);
     else if (s.fp) { navGrid?.removeFootprint?.(s.fp); navGrid?.rebuild?.(); }

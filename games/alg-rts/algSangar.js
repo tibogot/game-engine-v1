@@ -17,7 +17,7 @@
 //                  6 texture taps, no new mesh.
 import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
-import { houseMesh, loadHouses } from "./algHouse.js";
+import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
 import { buildArmsCache, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 
@@ -77,11 +77,16 @@ function loadBlenderPiece(kit, type, old) {
   _pieces.set(key, rec);
   rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null)]).then(([parts, T]) => {
     if (!parts?.[`${type}:intact`]) return false;
-    const near = houseMesh(type, "intact", 1)?.children[0]?.levels?.[0]?.object;
+    const lod = houseMesh(type, "intact", 1)?.children[0];
+    const near = lod?.levels?.[0]?.object, farM = lod?.levels?.[1]?.object;
     if (!near) return false;
     const g = plainGeometry(near);
     g.scale(S, S, S);
     g.computeBoundingBox(); g.computeBoundingSphere();
+    // ITS FAR LEVEL (2026-10-21 — you: "are you optimising every asset?"): built pieces drew the near level at every
+    // distance, shadows too. One far geometry shared by every copy; trackLod() swaps it in past HOUSE_FAR.
+    const far = farM && farM !== near ? plainGeometry(farM) : null;
+    if (far) { far.scale(S, S, S); far.computeBoundingBox(); far.computeBoundingSphere(); }
     const o = old();
     g.userData = { ...o.userData };
     o.dispose();
@@ -89,6 +94,8 @@ function loadBlenderPiece(kit, type, old) {
     g.userData.labMaterial = stoneMaterial(near.material, T);
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4");
     g.userData.blender = true;
+    g.userData.farGeometry = far;
+    if (far) far.userData = g.userData;   // (the same data at either level: footprint, gun, materials)
     rec.geo = g;
     return true;
   }).catch((e) => { console.warn(`[${kit}] the Blender piece did not load:`, e); return false; });
@@ -106,7 +113,7 @@ export const armsCacheGeometry = () => pieceGeometry("armscache", "arms");
  * The pre-placed copies of a piece (the showroom's, the landmarks' — built with the old geometry before the Blender
  * one loaded): their geometry and material swapped, each keeping its own data (footprint, name).
  */
-export function swapPlaced(showroom, re, geo) {
+export function swapPlaced(showroom, re, geo, app = null) {
   if (!geo) return 0;
   let n = 0;
   for (const [name, mesh] of Object.entries(showroom ?? {})) {
@@ -115,6 +122,11 @@ export function swapPlaced(showroom, re, geo) {
     g.userData = { ...geo.userData, ...mesh.geometry.userData, labMaterial: geo.userData.labMaterial };
     mesh.geometry = g;
     mesh.material = geo.userData.labMaterial;
+    if (geo.userData.farGeometry) {
+      // (its far level carries this copy's data too)
+      const f = geo.userData.farGeometry.clone(); f.userData = g.userData; g.userData.farGeometry = f;
+      trackLod(app, mesh);
+    }
     n++;
   }
   return n;
@@ -142,6 +154,41 @@ export function plainGeometry(mesh) {
 
 /** The Blender sangar's geometry (shared: clone it per copy), or null until loaded. */
 export function sangarGeometry() { return pieceGeometry("sangar", "sangar"); }
+
+/**
+ * NEAR / FAR for a placed Blender piece (a built sangar or cache, a swapped pre-placed one): it stays ONE Mesh — the
+ * site, the structures, the cover and the picking hold it — and its GEOMETRY is swapped each frame by the camera's
+ * distance (near within HOUSE_FAR, the shared far beyond; the shadow pass draws the same). No program change: the
+ * two levels have the same attributes. One hook for every tracked mesh.
+ */
+const _tracked = new Set();
+let _hooked = false;
+export function trackLod(app, mesh) {
+  const far = mesh?.geometry?.userData?.farGeometry;
+  if (!far) return;
+  mesh.userData.lod = { near: mesh.geometry, far };
+  _tracked.add(mesh);
+  if (_hooked || !app?.addPreRenderHook) return;
+  _hooked = true;
+  const p = new THREE.Vector3();
+  app.addPreRenderHook(() => {
+    const cam = app.camera;
+    for (const m of _tracked) {
+      if (!m.parent) { _tracked.delete(m); continue; }
+      const L = m.userData.lod;
+      m.getWorldPosition(p);
+      const want = p.distanceTo(cam.position) < HOUSE_FAR ? L.near : L.far;
+      if (m.geometry !== want) m.geometry = want;
+    }
+  });
+}
+/** Stop tracking (a cancelled site): its own near geometry back, so disposing it never frees the shared far one. */
+export function untrackLod(mesh) {
+  if (!mesh?.userData?.lod) return;
+  mesh.geometry = mesh.userData.lod.near;
+  _tracked.delete(mesh);
+  delete mesh.userData.lod;
+}
 
 /** A construction site's material: { material, set(progress 0..1) }. */
 export function siteMaterial(src, colorType = "vec4") {

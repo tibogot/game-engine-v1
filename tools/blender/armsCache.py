@@ -204,7 +204,7 @@ def buildCache(K, name, spec, state, seed, far=False):
     drystone.setLow(K, False)
 
 farCache = lambda K, name, spec, state, seed: buildCache(K, name, spec, state, seed, far=True)
-TYPES = {"arms": dict(builder=buildCache, farBuilder=farCache, atlas=2048, aoDist=0.35, smoothAngle=45, weighted=False, normals=True)}
+TYPES = {"arms": dict(builder=buildCache, farBuilder=farCache, atlas=2048, normalAtlas=1024, aoDist=0.35, smoothAngle=45, weighted=False, normals=True)}
 
 exported = buildKit(TYPES, MATDEF, "armscache.glb", prefix="Cache", seed0=1959, colors=True)
 
