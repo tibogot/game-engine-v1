@@ -99,8 +99,8 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
       const lx = q.c * dx - q.s * dz, lz = q.s * dx + q.c * dz;
       if (Math.abs(lx - q.fp.cx) <= q.fp.hx * 0.72 && lz >= q.fp.cz - 0.6 && lz <= q.fp.cz + q.fp.hz + 2.4) return 1;
     }
-    // Beside a prickly-pear hedge (algFields.js).
-    return app.algFields?.concealAt(x, z) ?? 0;
+    // Beside a prickly-pear hedge (algFields.js; a map's own: algGame MAP.fields.hedges).
+    return Math.max(app.algFields?.concealAt(x, z) ?? 0, app.algHedges?.concealAt?.(x, z) ?? 0);
   };
   const cover = createCover({
     app, worldSize: app.worldSize ?? 1024, params: ALG_COVER, concealExtra,

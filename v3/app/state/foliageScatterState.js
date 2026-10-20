@@ -504,6 +504,21 @@ export const FOLIAGE_PRESETS = {
   // (2026-10-10, alg-rts plant lab "Steppe": at play zoom those 60 wiry blades were two wisps on
   // the brown — 150 wider blades, more upright: a knee-high hummock with its own shadow, that
   // reads from the RTS camera. 2.5x the triangles: 1500 / 904 / 240.)
+  // BARLEY (alg-rts, 2026-10-20 — the Oued Abdi's fields): a PATCH of sown crop filling its 1.33 m slot (the
+  // barley builder, foliageGeometry.js) — stalks thigh-high, a nodding ear and awns on each. Ripe (golden) and
+  // green (spring).
+  barley: {
+    kind: "barley",
+    fronds: 24, frondLength: 0.95, leaflets: 96, leafletWidth: 1.2, patch: 0.85,
+    droop: 0.45, stemWidth: 1,
+    colorBase: "#7d6128", colorTip: "#b88c3a", colorHead: "#cfa24a", size: 0.9, translucency: 0.8,
+  },
+  barleyGreen: {
+    kind: "barley",
+    fronds: 40, frondLength: 0.9, leaflets: 96, leafletWidth: 1.2, patch: 0.85,
+    droop: 0.2, stemWidth: 1,
+    colorBase: "#34521e", colorTip: "#5c8430", colorHead: "#86a446", size: 0.85, translucency: 0.9,
+  },
   alfa: {
     kind: "blades",
     // (110 blades, wider: as full as 150. A tussock's cost is the screen it covers, not its

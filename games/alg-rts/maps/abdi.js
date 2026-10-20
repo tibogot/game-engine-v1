@@ -12,7 +12,7 @@
 import { t } from "../i18n/i18n.js";
 import { ROCKS } from "./abdiRocks.js";
 import { TOWN_HOUSES, TOWN_SQUARE, TOWN_WALLS } from "./abdiTown.js";
-import { FIELD_PLOTS, FIELD_WALLS } from "./abdiFields.js";
+import { FIELD_PLOTS, FIELD_WALLS, FIELD_HEDGES } from "./abdiFields.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -106,7 +106,7 @@ export const MAP = {
   town: { houses: TOWN_HOUSES, square: TOWN_SQUARE, walls: TOWN_WALLS },
   // ITS FIELDS (tools/algAbdiDecals.mjs: the plots round the farms, their soil laid as decals; algGame clears
   // their plants — worked land). Their walls and crops next.
-  fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS },
+  fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
   // algLandmarks' own scenery: none (its Aurès places are on the old map's ground).
   scenery: { quantities: {}, keepClear: [] },
 };

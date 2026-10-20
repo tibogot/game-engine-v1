@@ -675,13 +675,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[town] ${field.size} houses in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg town] failed:", e); }
   }
-  // A MAP'S FIELD PLOTS (MAP.fields — the Oued Abdi's, tools/algAbdiDecals.mjs): worked land, its plants cleared
-  // (the scrub and alfa painted over the valley grew in the furrows).
-  for (const q of MAP.fields?.plots ?? []) {
-    const c = Math.cos(q.yaw), s = Math.sin(q.yaw);
-    for (let lx = -q.d / 2; lx <= q.d / 2 + 0.01; lx += 3) for (let lz = -q.w / 2; lz <= q.w / 2 + 0.01; lz += 3)
-      app.clearVegetation?.(q.x + lx * c + lz * s, q.z - lx * s + lz * c, 2.6, { grass: 2.6, edge: 0.6 });
-  }
   // THEIR DRY-STONE WALLS (tools/blender/fieldwall.py): one instanced field (a draw per variant and state); knee-high
   // — men step over them, they block no sight — HARD cover both sides (algCover: a circle on each segment)
   if (MAP.fields?.walls?.length) {
@@ -694,6 +687,42 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.addPreRenderHook(() => fw.update(app.camera));
       app.algFieldWalls = fw;
     } catch (e) { console.warn("[alg field walls] failed:", e); }
+  }
+  // THE PRICKLY-PEAR HEDGES (tools/blender/hedge.py): the same instanced field. Head-high and dense: an INTACT one
+  // blocks sight (combat and the fog of war — the CoH hedgerow) and CONCEALS a man beside it (algCover's
+  // concealExtra); no cover (a cactus stops no bullet), no nav block (men push through, vehicles crush it).
+  if (MAP.fields?.hedges?.length) {
+    try {
+      await loadHouses("hedges");
+      const hf = createHouseField();
+      const half = 1.5 * 1.3;
+      for (const [ty, st, x, y, z, yaw] of MAP.fields.hedges) {
+        hf.add(ty, st, x, y, z, yaw);
+        if (st === "intact") app.algSight?.addBox(x, z, half, 0.7, yaw, y + 2.1);
+      }
+      // concealment: within 2 m of a standing hedge (its length, either side); a crushed one half
+      const cells = new Map(), key = (x, z) => `${Math.floor(x / 8)},${Math.floor(z / 8)}`;
+      for (const h of MAP.fields.hedges) {
+        if (h[1] === "ruin") continue;
+        for (const dx of [-8, 0, 8]) for (const dz of [-8, 0, 8]) {
+          const k = key(h[2] + dx, h[4] + dz);
+          if (!cells.has(k)) cells.set(k, []);
+          cells.get(k).push(h);
+        }
+      }
+      hf.concealAt = (x, z) => {
+        let best = 0;
+        for (const [, st, hx, , hz, yaw] of cells.get(key(x, z)) ?? []) {
+          const c = Math.cos(yaw), s = Math.sin(yaw), dx = x - hx, dz = z - hz;
+          if (Math.abs(dx * c - dz * s) < half + 0.4 && Math.abs(dx * s + dz * c) < 2) best = Math.max(best, st === "intact" ? 1 : 0.5);
+        }
+        return best;
+      };
+      app.fogOfWar?.rebuildHeights();   // (its sight grid read the boxes when the town was added)
+      app.scene.add(hf.root);
+      app.addPreRenderHook(() => hf.update(app.camera));
+      app.algHedges = hf;
+    } catch (e) { console.warn("[alg hedges] failed:", e); }
   }
   // VILLAGE LIFE (algVillageLife.js): haystacks, firewood, bread ovens, beehives
   // just outside each village — after the fields and landmarks, off both. ?life=0 = without.
@@ -723,7 +752,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[point rings] ${JSON.stringify(app.algPointRings.stats)}`);
     } catch (e) { console.warn("[alg point rings] failed:", e); }
   }
-  if (app.algFields || app.algLandmarks || app.algTown || app.algFieldWalls) app.algCover?.bake();
+  if (app.algFields || app.algLandmarks || app.algTown || app.algFieldWalls || app.algHedges) app.algCover?.bake();
   // GROUND CONTACT SHADE (algGroundContact.js): the ground darkened round every building, wall
   // and rock, baked into the ground once — the image pass's AO at no cost a frame. ?contact=0 = off.
   if (app.algSplats && params.get("contact") !== "0") {

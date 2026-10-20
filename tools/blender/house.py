@@ -471,16 +471,24 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958):
     S_ = 512 if QUICK else 2048
     for ti, (tname, spec) in enumerate(TYPES.items()):
         if ONLY and tname != ONLY: continue
-        objs = []
+        objs, fars = [], []
         for si, state in enumerate(STATES):
             K.groups["h"] = []
             (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
             objs.append(o)
-        K.bake(objs, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2))
-        for o in objs:
-            f = K.far(o, 0.3)
+            # A piece's OWN far level (`farBuilder`: the same seed, built coarser — 2026-10-20, the hedges: a
+            # decimated cactus pad collapsed to a sliver, the far hedge was another shape and POPPED); baked into
+            # the same atlas. Without one, the near level decimated (K.far).
+            if spec.get("farBuilder"):
+                K.groups["h"] = []
+                spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
+                fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
+                K.drop_cutters()
+        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2))
+        for i, o in enumerate(objs):
+            f = fars[i] if fars else K.far(o, 0.3)
             print("TRIS", o.name, tris(o), "far", tris(f))
             exported += [o, f]
     K.export(os.path.join(out, glb), exported)

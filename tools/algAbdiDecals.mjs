@@ -21,6 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readProject, writeProject } from "./lib/v3proj.mjs";
+import { FOLIAGE_PRESETS } from "../v3/app/state/foliageScatterState.js";
 import { PLAY, LAYOUT } from "../games/alg-rts/maps/abdi.js";
 import { TOWN_HOUSES } from "../games/alg-rts/maps/abdiTown.js";
 
@@ -88,7 +89,7 @@ function box(kind, x, z, yaw, o) {
   decals.push({
     px: x, py: H(x, z), pz: z, qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2),
     slot, sx: o.sx ?? sx * (o.k ?? 1), sy: 5, sz: o.sz ?? sz * (o.k ?? 1), mean: MEAN_OVERRIDE[kind] ?? MEANS[slotKey[slot]], match: MATCH[kind],
-    opacity: o.opacity, tint: TINT[kind], roughness: o.roughness ?? 0.92, normalStrength: o.normal ?? 1,
+    opacity: o.opacity, tint: o.tint ?? TINT[kind], roughness: o.roughness ?? 0.92, normalStrength: o.normal ?? 1,
     angleFade: 60, edgeFade: o.edgeFade ?? 0.16, priority: o.priority ?? 1,
   });
 }
@@ -254,10 +255,12 @@ for (const [name, n] of [["Ferme", 6], ["Bergerie", 4], ["Mechta", 6], ["Aïn", 
     const yaw = Math.hypot(gx, gz) > 1e-3 ? Math.atan2(-gz, gx) : hash(x, z, 65) * 6.283;
     const cs = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, v]) => H(x + (u * w / 2) * Math.cos(yaw) + (v * d / 2) * Math.sin(yaw), z - (u * w / 2) * Math.sin(yaw) + (v * d / 2) * Math.cos(yaw)));
     if (Math.max(...cs) - Math.min(...cs) > 2.6) continue;
-    const kind = hash(x, z, 66) < 0.6 ? "ploughed" : "stubble";
+    // a third of the plots CROPPED (barley, ripe or green: the ground plants, below), the rest worked earth
+    const rk = hash(x, z, 66), kind = rk < 0.35 ? "ploughed" : rk < 0.6 ? "stubble" : rk < 0.85 ? "barley" : "barleyGreen";
     plots.push({ x, z, yaw, w, d, rad, kind, of: st.name });
-    // (the box's local z ALONG the contour — the furrows run along it, the recipe's length: w; d across)
-    box(kind, x, z, yaw, { opacity: 0.95, sx: d, sz: w, priority: 0, edgeFade: 0.2 });   // (0.08: a square tile)
+    // (the box's local z ALONG the contour — the furrows run along it, the recipe's length: w; d across;
+    // a crop: the stubble rows tinted its colour, the ground between its stalks)
+    box(kind === "ploughed" ? "ploughed" : "stubble", x, z, yaw, { opacity: 0.95, sx: d, sz: w, priority: 0, edgeFade: 0.2, tint: { barley: "#ffe9b0", barleyGreen: "#a9c47a" }[kind] });   // (0.08: a square tile)
     made++; stats.fields++;
   }
 }
@@ -285,16 +288,105 @@ plots.forEach((q, pi) => {
   });
 });
 stats.fieldWalls = walls.length;
+// THE PRICKLY-PEAR HEDGES (tools/blender/hedge.py, a 3 m opuntia module x1.3): outside most of the plots' UNWALLED
+// sides, and in runs along the pistes near the farmed places (the Maghreb's hedge of figuiers de Barbarie), with
+// gaps; a few crushed or dried. Concealment beside them (the game), no cover (a cactus stops no bullet).
+// [type a|b|c, state, x, y, z, yaw]
+const HMOD = 3.0 * 1.3, hedges = [];
+const hedgeFree = (x, z) => {
+  if (Math.abs(x) > 245 || Math.abs(z) > 245 || slope(x, z) > 18) return false;
+  if (lineD(OUED.points, x, z) < OUED.width + 4 || Math.hypot(x - KNOLL.x, z - KNOLL.z) < 70 || Math.hypot(x - SAS.x, z - SAS.z) < SAS.r + 4) return false;
+  if (LAYOUT.sites.some((q) => Math.hypot(x - q.x, z - q.z) < q.r + 3)) return false;
+  if (TOWN_HOUSES.some((hh) => Math.hypot(x - hh[2], z - hh[4]) < 8)) return false;
+  if (plots.some((q) => {
+    const c = Math.cos(q.yaw), sn = Math.sin(q.yaw), dx = x - q.x, dz = z - q.z;
+    return Math.abs(dx * c - dz * sn) < q.d / 2 + 0.5 && Math.abs(dx * sn + dz * c) < q.w / 2 + 0.5;
+  })) return false;
+  return !walls.some((w) => Math.hypot(x - w[2], z - w[4]) < 1.6) && !hedges.some((h) => Math.hypot(x - h[2], z - h[4]) < HMOD * 0.8);
+};
+const hedgeAt = (x, z, yaw) => {
+  if (!hedgeFree(x, z)) return;
+  const r = hash(x, z, 83);
+  hedges.push([["a", "b", "c"][Math.floor(hash(x, z, 84) * 3)], r < 0.05 ? "ruin" : r < 0.13 ? "damaged" : "intact", x, H(x, z) - 0.08, z, yaw + (hash(x, z, 85) - 0.5) * 0.1]);
+};
+plots.forEach((q) => {
+  const c = Math.cos(q.yaw), sn = Math.sin(q.yaw), at = (lx, lz) => [q.x + lx * c + lz * sn, q.z - lx * sn + lz * c];
+  [[-1, "z"], [1, "z"], [-1, "x"], [1, "x"]].forEach(([sd, along], si) => {
+    if (hash(q.x + si, q.z, 71) <= 0.72 || hash(q.x, q.z + si, 80) > 0.6) return;   // (walled, or left open)
+    const len = along === "z" ? q.w : q.d, off = (along === "z" ? q.d : q.w) / 2 + 1.4;
+    const n = Math.max(1, Math.round(len / HMOD)), step = len / n;
+    for (let k = 0; k < n; k++) {
+      if (hash(q.x + k, q.z + si, 81) < 0.12) continue;                // a gap
+      const t = -len / 2 + step * (k + 0.5);
+      const [x, z] = along === "z" ? at(sd * off, t) : at(t, sd * off);
+      hedgeAt(x, z, along === "z" ? q.yaw + Math.PI / 2 : q.yaw);
+    }
+  });
+});
+// along the pistes within 90 m of a farmed place: one side, 7 m off the centre line, in runs of 3-7 with gaps
+const farmed = [farm, sheep, hamlet, oasis, dechra].filter(Boolean);
+LAYOUT.pistes.forEach((p, pi) => {
+  for (let k = 0; k < p.length - 1; k++) {
+    const [ax, az] = p[k], [bx, bz] = p[k + 1], L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L;
+    const yaw = Math.atan2(-uz, ux);                                     // (the module's local X along the piste)
+    for (let s = 0; s < L; s += HMOD) {
+      const cx = ax + ux * s, cz = az + uz * s;
+      if (!farmed.some((q) => Math.hypot(cx - q.x, cz - q.z) < q.r + 90)) continue;
+      const run = Math.floor(s / (HMOD * 5) + pi * 7 + k * 3);
+      if (hash(run, pi, 86) < 0.45) continue;                          // runs and gaps
+      const side = hash(run, k, 87) < 0.5 ? -1 : 1;
+      hedgeAt(cx - uz * 7 * side, cz + ux * 7 * side, yaw);
+    }
+  }
+});
+stats.hedges = hedges.length;
+// THE CROPS AND THE CLEARING, in the level's plant paint (2026-10-20): the ground-foliage slots 2 and 6 (the old
+// Aurès' reed-mace and thistle — painted nowhere on this map) become RIPE and GREEN BARLEY; inside every plot
+// all the other plants are wiped (worked land: no alfa, no scrub, no tree) and a cropped plot is painted full of
+// its barley. (Concealment comes with it: the crop's density — algCover reads the ground paint.)
+{
+  const slot = (name, preset) => ({ name, preset, castShadow: true, ...structuredClone(FOLIAGE_PRESETS[preset]), heightMin: -200, heightMax: 900, onLayer: -2, nearRiver: 0 });   // (-2: sown — even, no clumps)
+  man.foliagePlants[2] = slot("Barley", "barley");
+  man.foliagePlants[6] = slot("Green barley", "barleyGreen");
+  const inPlot = (x, z, pad) => plots.find((q) => {
+    const c = Math.cos(q.yaw), sn = Math.sin(q.yaw), dx = x - q.x, dz = z - q.z;
+    const lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+    return Math.abs(lx) < q.d / 2 + pad && Math.abs(lz) < q.w / 2 + pad;
+  });
+  const paint = (key, res, pages, chans, crop) => {
+    const b = project.blobs.get(key);
+    if (!b) return 0;
+    let n = 0;
+    for (let pz = 0; pz < res; pz++) for (let px = 0; px < res; px++) {
+      const x = ((px + 0.5) / res) * W - W / 2, z = ((pz + 0.5) / res) * W - W / 2;
+      const q = inPlot(x, z, 0.8);
+      if (!q) continue;
+      for (let ch = 0; ch < chans; ch++) b[((ch / 4) | 0) * res * res * 4 + (pz * res + px) * 4 + (ch % 4)] = 0;
+      if (crop && q.kind.startsWith("barley") && inPlot(x, z, -0.6)) {
+        const ch = q.kind === "barley" ? 2 : 6;
+        b[((ch / 4) | 0) * res * res * 4 + (pz * res + px) * 4 + (ch % 4)] = 235;
+      }
+      n++;
+    }
+    return n;
+  };
+  stats.cropTexels = paint("foliagePaint", 1024, 2, 8, true);
+  paint("susukiDensity", 512, 1, 4, false);
+}
 const r2 = (v) => Math.round(v * 100) / 100;
 fs.writeFileSync("games/alg-rts/maps/abdiFields.js", `// GENERATED by tools/algAbdiDecals.mjs — do not edit: the Oued Abdi's FIELD PLOTS (${plots.length}), their soil laid
 // as decals — { x, z, yaw, w, d, kind, of }: the plot's centre, its yaw (three.js rotation.y; local z ALONG the contour), its width along
-// and depth across the slope (m), "ploughed" | "stubble", the place that works it. Their walls and crops: next.
+// and depth across the slope (m), "ploughed" | "stubble" | "barley" | "barleyGreen", the place that works it. Their walls and crops: next.
 export const FIELD_PLOTS = [
 ${plots.map((q) => `  { x: ${r2(q.x)}, z: ${r2(q.z)}, yaw: ${r2(q.yaw)}, w: ${r2(q.w)}, d: ${r2(q.d)}, kind: "${q.kind}", of: ${JSON.stringify(q.of)} },`).join("\n")}
 ];
 // their DRY-STONE WALLS (tools/blender/fieldwall.py): [type, state, x, y, z, yaw]
 export const FIELD_WALLS = [
 ${walls.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4])}, ${r2(w[5])}],`).join("\n")}
+];
+// the PRICKLY-PEAR HEDGES (tools/blender/hedge.py): [type, state, x, y, z, yaw]
+export const FIELD_HEDGES = [
+${hedges.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4])}, ${r2(w[5])}],`).join("\n")}
 ];
 `);
 // THE LOOKS tuned in the game (Dev → Decals, algDecalPanel.js → kinds.json): per kind, over what the rules laid

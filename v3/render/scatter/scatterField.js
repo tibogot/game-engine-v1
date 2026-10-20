@@ -44,7 +44,7 @@
 import * as THREE from "three";
 import {
   Fn, If, abs, atomicAdd, atomicStore, float, floor, hash, instanceIndex, instancedArray, int,
-  length, max, min, renderGroup, sin, smoothstep, step, storage, texture, time, uint, uniform, uniformArray,
+  length, max, min, mix, renderGroup, sin, smoothstep, step, storage, texture, time, uint, uniform, uniformArray,
   vec2, vec3, vec4, PI2,
 } from "three/tsl";
 import { wrapTileOffsetXZ } from "../grass/revoGrassTile.js";
@@ -281,9 +281,6 @@ export class ScatterField {
       }
       const used = weights.slice(0, typeCount);
       const total = used.reduce((a, w) => a.add(w)).toVar();
-      const clump = scatterClump(vec2(worldX, worldZ), u.uClumpFreq, u.uClumping);
-      const densityKeep = step(hash(instanceIndex.add(7919)), u.uDensity.mul(min(total, 1)).mul(clump))
-        .mul(smoothstep(0.0, 0.005, total));
       // Walk the running sum: the pick lands in exactly one type's share.
       const pick = hash(instanceIndex.add(2711)).mul(total);
       let running = used[0];
@@ -293,6 +290,15 @@ export class ScatterField {
         idx = idx.add(step(running, pick));
       }
       const typeIdx = idx.toVar();
+      // A SOWN type (its rule's paint layer -2: "any layer, sown", 2026-10-20 — a field's barley) grows
+      // EVEN where painted: the field's clumping left a crop in tufts with bare earth between.
+      let clump = scatterClump(vec2(worldX, worldZ), u.uClumpFreq, u.uClumping);
+      if (ruleRow !== null) {
+        const sown = step(u.uTypes.element(int(floor(typeIdx.add(0.5))).mul(rows).add(ruleRow)).z, -1.5);
+        clump = mix(clump, float(1), sown);
+      }
+      const densityKeep = step(hash(instanceIndex.add(7919)), u.uDensity.mul(min(total, 1)).mul(clump))
+        .mul(smoothstep(0.0, 0.005, total));
       // Which shape variant (a mesh of its own): its own hash, fixed per plant.
       const subIdx = V > 1
         ? typeIdx.mul(V).add(min(floor(hash(instanceIndex.add(4441)).mul(V)), float(V - 1))).toVar()

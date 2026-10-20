@@ -2,6 +2,8 @@
 
 We ship three **r184** (`package.json` `"three": "^0.184.0"`, one version for the whole repo).
 Started 2026-10-17 from the r185 + r186 release notes.
+What WebGPU offers that three does not expose (render bundles, device limits, f16, subgroups…):
+[WEBGPU_BEYOND_THREE.md](WEBGPU_BEYOND_THREE.md).
 
 ## The habit
 

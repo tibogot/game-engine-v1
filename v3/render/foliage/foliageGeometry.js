@@ -80,6 +80,8 @@ const LEAF_ROUNDING = {
   blades:    [0.1, 0.6],
   typha:     [0.2, 0.55],
   plume:     [0.2, 0.55],
+  // a crop patch: a low dome over the whole disc, its centre under the ground
+  barley:    [-0.6, 0.5],
   pampas:    [0.2, 0.55],
   susuki:    [0.2, 0.55],
   broadleaf: [0.05, 0.75],
@@ -357,6 +359,7 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   if (type.kind === "broom") return buildBroom(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "oleander") return buildOleander(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "blades") return buildBlades(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "barley") return buildBarley(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "typha" || type.kind === "plume" || type.kind === "pampas" || type.kind === "susuki") {
     const head = type.kind === "typha" ? "capsule" : type.kind === "plume" ? "hairs" : type.kind === "susuki" ? "fan" : "plume";
     return buildStalked(type, { near, far, rand, push, vcount, I, finish }, head);
@@ -863,6 +866,77 @@ function buildStalked(type, ctx, head) {
       const tip = push(p, [0, 1, 0], 0.5, 1, [1, 1, sr, 1]);
       const last = base + rings * sides;
       for (let s = 0; s < sides; s++) I.push(last + s, last + ((s + 1) % sides), tip);
+    }
+  }
+  return finish();
+}
+
+/**
+ * BARLEY (alg-rts, 2026-10-20) — not one plant but a PATCH of a sown crop: the ground-foliage field puts
+ * one plant per 1.33 m slot, so a lone tuft there (the plume kind, every stalk out of one point) read as
+ * a few sprigs on bare earth. This fills its slot: `leaflets` stalks over a disc `patch` across (unit
+ * frame), a few short leaves low down, each stalk carrying an EAR (two crossed strips, part 2) with its
+ * AWNS (a thin strip on), nodding by `droop`. Coarse levels keep a golden-ratio subset of the same stalks
+ * (wider, so the mass holds), as the blade fans do.
+ *   frondLength  stalk height · leaflets  stalks · fronds  leaves · patch  the disc's radius · droop  the nod
+ */
+function buildBarley(type, { near, far, rand, push, vcount, I, finish }) {
+  const height = type.frondLength ?? 1.0;
+  const R = type.patch ?? 0.8;
+  const stalks = Math.max(4, Math.round(type.leaflets ?? 60));
+  const keep = near ? 1 : far ? 0.25 : 0.55;
+  const fat = 1 / Math.sqrt(keep);
+  const strip = (pts, side, w, n, attr) => {
+    const base = vcount();
+    pts.forEach((p, q) => { for (const s of [-1, 1]) push(add(p, side, s * w(q / (pts.length - 1))), n(q), s * 0.5 + 0.5, q / (pts.length - 1), attr(q / (pts.length - 1))); });
+    for (let q = 0; q < pts.length - 1; q++) { const i0 = base + q * 2; I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3); }
+  };
+  // ── The leaves, low: short blades round the patch ──
+  const leaves = Math.round(type.fronds ?? 24);
+  for (let b = 0; b < leaves; b++) {
+    const r = Math.sqrt(rand()) * R, a0 = rand() * Math.PI * 2, a = rand() * Math.PI * 2, br = rand();
+    if (((b * 0.6180339887) % 1) >= keep) continue;
+    const o = [Math.cos(a0) * r, 0, Math.sin(a0) * r], dir = [Math.cos(a), 0, Math.sin(a)], side = [-Math.sin(a), 0, Math.cos(a)];
+    const line = archCurve(near ? 3 : 2, height * (0.35 + br * 0.25), 0.5, 1.1);
+    strip(line.map((L) => [o[0] + dir[0] * L.r, L.y, o[2] + dir[2] * L.r]), side,
+      (v) => 0.018 * height * fat * (1 - v * 0.85), () => [0, 1, 0], (v) => [0, v, br, 1]);
+  }
+  // ── The stalks and their ears ──
+  const segs = near ? 3 : 2;
+  for (let k = 0; k < stalks; k++) {
+    const r = Math.sqrt(rand()) * R, a0 = rand() * Math.PI * 2, sr = rand(), a = rand() * Math.PI * 2;
+    if (((k * 0.6180339887) % 1) >= keep) continue;
+    const o = [Math.cos(a0) * r, 0, Math.sin(a0) * r];
+    const dir = [Math.cos(a), 0, Math.sin(a)], side = [-Math.sin(a), 0, Math.cos(a)];
+    const len = height * (0.85 + sr * 0.3);
+    const line = archCurve(6, len, 0.04 + sr * 0.08, (type.droop ?? 0.3) * (0.6 + sr * 0.8));
+    const at = (t) => {
+      const jf = t * (line.length - 1), j0 = Math.min(line.length - 2, Math.floor(jf)), f = jf - j0;
+      const L0 = line[j0], L1 = line[j0 + 1];
+      const rr = L0.r + (L1.r - L0.r) * f, y = L0.y + (L1.y - L0.y) * f, th = L0.th + (L1.th - L0.th) * f;
+      return { p: [o[0] + dir[0] * rr, y, o[2] + dir[2] * rr], fwd: norm([Math.sin(th) * dir[0], Math.cos(th), Math.sin(th) * dir[2]]) };
+    };
+    const h0 = 0.86;
+    // the stalk (part 1)
+    const sp = [];
+    for (let q = 0; q <= segs; q++) sp.push(at((q / segs) * h0).p);
+    strip(sp, side, () => 0.005 * (type.stemWidth ?? 1) * height * fat, (q) => norm(cross(at((q / segs) * h0).fwd, side)), (t) => [1, t, sr, 0]);
+    // the ear (part 2): two crossed strips, then the awns on from its tip
+    const eW = 0.016 * (type.leafletWidth ?? 1) * height * fat;
+    const ep = [at(h0), at(h0 + (1 - h0) * 0.5), at(1)];
+    const crossings = far ? [0] : [0, Math.PI / 2];
+    for (const ca of crossings) {
+      const wide = (q) => norm(add(add([0, 0, 0], norm(cross(ep[q].fwd, side)), Math.cos(ca)), side, Math.sin(ca)));
+      const base = vcount();
+      ep.forEach((e, q) => { const wd = wide(q), n = norm(cross(e.fwd, wd)), w = eW * (q === 1 ? 1 : 0.7); for (const s of [-1, 1]) push(add(e.p, wd, s * w), n, s * 0.5 + 0.5, q / 2, [2, q / 2, sr, q / 2]); });
+      for (let q = 0; q < 2; q++) { const i0 = base + q * 2; I.push(i0, i0 + 2, i0 + 1, i0 + 1, i0 + 2, i0 + 3); }
+      if (far) continue;
+      // awns: a pale fan as long again, straight on from the tip
+      const tip = ep[2], awn = add(tip.p, tip.fwd, height * 0.13), wd = wide(2), n = norm(cross(tip.fwd, wd));
+      const b2 = vcount();
+      for (const s of [-1, 1]) push(add(tip.p, wd, s * eW * 0.8), n, s * 0.5 + 0.5, 0.9, [2, 1, sr, 1]);
+      push(add(awn, wd, -eW * 1.1), n, 0, 1, [2, 1, sr, 1]); push(add(awn, wd, eW * 1.1), n, 1, 1, [2, 1, sr, 1]);
+      I.push(b2, b2 + 2, b2 + 1, b2 + 1, b2 + 2, b2 + 3);
     }
   }
   return finish();
