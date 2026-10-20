@@ -12,6 +12,8 @@
 //             second within BAIL_WINDOW s throws the squad out — CoH's counter to a garrison.
 //   LEAVE     any move order, RETRAITE, or SORTIR (K): out by the door.
 // The badge over a held house: its holder's colour and the men in it (n / places).
+// A MAP'S TOWN (2026-10-20, the Oued Abdi's — algGame: an instanced field, not placed pieces) adds its houses with
+// addHouse(): each a box (footprint, its floor and roof heights), picked by the ray against that box.
 import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { iconStyle } from "./ui/icons.js";
@@ -266,12 +268,32 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
   // ── The player's order: right-click a house; the cursor over a free one ──
   const ray = new THREE.Raycaster(), ndc = new THREE.Vector2();
   const pieces = [...new Set(houses.map((h) => h.piece))];
+  /** The ray's entry into a BOX house (addHouse) — its distance, or Infinity (a slab test in the house's frame). */
+  function boxHit(h, o, d) {
+    const c = Math.cos(h.yaw), s = Math.sin(h.yaw);
+    const ox = o.x - h.x, oz = o.z - h.z;
+    const lo = [ox * c - oz * s, o.y, ox * s + oz * c], ld = [d.x * c - d.z * s, d.y, d.x * s + d.z * c];
+    const mn = [-h.hw, h.y0, -h.hd], mx = [h.hw, h.y1, h.hd];
+    let t0 = 0, t1 = Infinity;
+    for (let k = 0; k < 3; k++) {
+      if (Math.abs(ld[k]) < 1e-9) { if (lo[k] < mn[k] || lo[k] > mx[k]) return Infinity; continue; }
+      let a = (mn[k] - lo[k]) / ld[k], b = (mx[k] - lo[k]) / ld[k];
+      if (a > b) [a, b] = [b, a];
+      t0 = Math.max(t0, a); t1 = Math.min(t1, b);
+      if (t0 > t1) return Infinity;
+    }
+    return t0;
+  }
   /** The house under the cursor (its roof or walls, or the ground inside it). */
   function pickAt(clientX, clientY) {
     const r = dom.getBoundingClientRect();
     ndc.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ndc, app.camera);
-    const hits = ray.intersectObjects(pieces, false);
+    // the box houses first: the nearest one the ray enters
+    let boxBest = null, bt = Infinity;
+    for (const h of houses) if (h.y1 != null) { const tt = boxHit(h, ray.ray.origin, ray.ray.direction); if (tt < bt) { bt = tt; boxBest = h; } }
+    if (boxBest) return boxBest;
+    const hits = pieces.length ? ray.intersectObjects(pieces, false) : [];
     const pts = hits.slice(0, 2).map((x) => x.point);
     const g = app.pickWorldAtClient?.(clientX, clientY)?.point;
     if (g) pts.push(g);
@@ -341,7 +363,7 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
         document.body.appendChild(el);
         h.badge = { el, txt: el.querySelector("span"), last: "" };
       }
-      v.set(h.x, app.getWorldHeight(h.x, h.z) + 6.5, h.z).project(camera);
+      v.set(h.x, h.y1 != null ? h.y1 + 1 : app.getWorldHeight(h.x, h.z) + 6.5, h.z).project(camera);
       const on = v.z < 1 && Math.abs(v.x) < 1.05 && Math.abs(v.y) < 1.05;
       h.badge.el.style.display = on ? "" : "none";
       if (!on) continue;
@@ -358,6 +380,18 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
 
   return {
     params: P, houses, pending,
+    /**
+     * A house that is not a placed piece (a map's town): its footprint's centre, yaw (three.js rotation.y), half
+     * sizes, its floor and roof heights (world y: the cursor's box), its door (world x, z), places, a mosque.
+     */
+    addHouse({ x, z, yaw, hw, hd, y0, y1, door, cap = P.cap, mosque = false, key = "town" }) {
+      const house = { key, piece: null, x, z, yaw, hw, hd, y0, y1,
+        door: navGrid?.nearestOpenWorld?.(door.x, door.z, true) ?? door,
+        cap: mosque ? P.mosqueCap : cap, mosque, men: [], team: null, blasts: [], slots: [], badge: null };
+      house.slots = windowSlots(house);
+      houses.push(house);
+      return house;
+    },
     order, enter, exit, exitAll, onSplash, step, frame, pickAt,
     /** A free (or own) house near (x, z) within r m, for `team` (the AI's cells). */
     houseNear(x, z, r, team, need = 1) {

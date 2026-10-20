@@ -651,6 +651,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         if (ty === "mosquee") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = -4.25 * 1.3, mz = 4.75 * 1.3; app.algSight?.addBox(fx + mx * c + mz * s, fz - mx * s + mz * c, 2.4, 2.4, yaw, y + 18 * 1.3); }
       }
       app.fogOfWar?.rebuildHeights();
+      // GARRISONS (algGarrison.js, CoH's): every house that still stands takes a squad (the mosque 8); the door a
+      // pace out from the middle of its front (the souks': before the arcade)
+      for (const [ty, st, , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
+        if (st === "ruin") continue;
+        const c = Math.cos(yaw), s = Math.sin(yaw), out = hz + 1.2;
+        app.algGarrison?.addHouse({ x: fx, z: fz, yaw, hw: hx * 0.9, hd: hz * 0.9, y0: y, y1: y + (PAR[ty] ?? 5) * 1.3,
+          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" });
+      }
       app.scene.add(field.root);
       app.addPreRenderHook(() => field.update(app.camera));
       app.algTown = field;
