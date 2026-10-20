@@ -21,6 +21,7 @@ import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebas
 import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
+import { siteBags } from "./algSandbags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMirador, loadSangar, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
@@ -286,6 +287,16 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       const [wx, wz] = toWorld(x, z, yaw, f.cx + lx, f.cz + lz);
       app.clearVegetation?.(wx, wz, 2.4, { grass: 2, edge: 0.5 });
     }
+    // …and the PLACED plants on it (the hedges' prickly pears, a lone tree — PlacedFoliage; clearVegetation only
+    // clears the painted ones: a mortar pit dug into a hedge kept its cacti inside, 2026-10-21)
+    {
+      const c = Math.cos(yaw), sn = Math.sin(yaw);
+      plants()?.removeWhere((p) => {
+        if (p.owner) return false;                    // (a screen's own scrub)
+        const dx = p.x - cx, dz = p.z - cz;
+        return Math.abs(dx * c - dz * sn) < f.hx + 0.6 && Math.abs(dx * sn + dz * c) < f.hz + 0.6;
+      });
+    }
     // A field under it is cleared (algFields cutHole): worked soil drawn over
     // the ground hid the foundation (2026-10-03). Wire lies in the crop.
     if (!B.noFoot) app.algFields?.cutHole?.(cx, cz, f.hx, f.hz, yaw);
@@ -302,10 +313,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const build = mesh.geometry.userData.siteMaterial?.() ?? null;
     if (build) { mesh.material = build.material; build.set(0); }
     else mesh.scale.y = 0.06;                         // the foundation, until work starts
+    // ITS SIMULATED BAGS (the sandbag wall, the MG nest's ring, the fortified point, the mortar pit — 2026-10-21):
+    // laid course by course (a site version of the bag material, `bagT`) on its earth and timbers (algSandbags siteBags).
+    const bagSite = siteBags(mesh);
+    if (bagSite) { mesh.scale.y = 1; bagSite.set(0); }   // (not stretched: its earth stands, its bags go on — siteBags)
     trackLod(app, mesh);                              // (a Blender piece: its far level past HOUSE_FAR — algSangar.js)
     app.scene.add(mesh);
     const site = {
-      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build,
+      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build, bagSite,
       // Picked like a structure (the shared selection's buildingRenderer):
       // the command card shows it under construction, with Annuler.
       site: true, isStructure: true, alive: true, team: teamOf(key), constructing: true,
@@ -393,7 +408,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       // Two sappers 1.5x as fast, three 1.8x: they get in each other's way.
       // (`app.algBuildSpeed`: a doctrine's faster engineers — algDoctrines.js, the Légion.)
       s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))) * (s.team === "player" ? app.algBuildSpeed ?? 1 : 1));
-      if (s.build) s.build.set(s.progress); else s.mesh.scale.y = 0.06 + 0.94 * s.progress;
+      if (s.build) s.build.set(s.progress); else if (s.bagSite) s.bagSite.set(s.progress); else s.mesh.scale.y = 0.06 + 0.94 * s.progress;
       growScreenPlants(plants(), s.mesh, s.progress);   // (a screen's scrub, stood up in its turn)
       for (const c of s.mesh.children) if (c.userData.late != null) c.visible = s.progress >= c.userData.late;   // (the mirador's bags)
       s.hp = s.progress * 100;
@@ -421,6 +436,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   function finish(s) {
     s.done = true;
     s.mesh.scale.y = 1;
+    s.bagSite?.finish();
     if (s.build) { s.mesh.material.dispose(); s.mesh.material = s.mesh.geometry.userData.labMaterial; s.build = null; }
     growScreenPlants(plants(), s.mesh, 1);            // (a screen: all its scrub stands)
     for (const c of s.mesh.children) if (c.userData.late != null) c.visible = true;   // (the shared material: a finished piece costs what it always did)

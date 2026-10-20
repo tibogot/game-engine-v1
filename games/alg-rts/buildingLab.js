@@ -31,7 +31,7 @@ import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 import { buildFortPoint, buildMgNest } from "../../v3/render/objects/rtsAlgeria.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
@@ -46,6 +46,8 @@ import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMirador, loadSangar, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
+import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
+import { kitView } from "./showroom.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 /** Per-frame work of the lab's pieces (the screen's plants): the new lab's loop calls labTick(camera). */
@@ -139,6 +141,21 @@ function sangarDetailed(g) {
     o.material = m;
   });
   return g;
+}
+
+/**
+ * A sandbag piece as the game's construction site shows it (algBuild): the kit mesh (kitView, its bags as extras)
+ * standing, its bags laid course by course on it (siteBags), the gun last. One lab slider drives every such piece (SAND_SITES).
+ */
+const SAND_SITES = [];
+function sandbagSite(build) {
+  const mesh = kitView(build());
+  const site = siteBags(mesh);
+  const set = (p) => { if (site) site.set(p); else mesh.scale.y = 0.06 + 0.94 * p; };
+  SAND_SITES.push(set);
+  SITE = { set: (p) => { for (const f of SAND_SITES) f(p); }, stencilShown: () => false, sock: null };
+  set(1);
+  return labPiece(mesh);
 }
 
 /** The Blender point and its sandbag walls (algPointFlags.pointWalls), as the game lays them. */
@@ -497,6 +514,15 @@ export const BUILDINGS = {
   // timber and corrugated iron, YOUR simulated sandbags on the deck (its construction in the panel) — damaged RIGHT.
   // THE BARBED WIRE IN BLENDER (2026-10-21, tools/blender/barbedWire.py): the game's old one LEFT, the new one MIDDLE
   // (barbed strands, the double apron, one concertina coil; its construction in the panel), cut RIGHT.
+  // THE SANDBAG PIECES' CONSTRUCTION (2026-10-21): the game's own site — the kit parts rising, YOUR simulated bags laid
+  // course by course (algSandbags siteBags) — the wall LEFT, the MG nest MIDDLE, the mortar pit RIGHT, one slider.
+  sacsConstruction: {
+    label: "Sacs de sable : construction", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSimBags(),
+    before: () => sandbagSite(() => buildSandbagWallPiece(() => buildFrSandbagWall())),
+    middle: () => sandbagSite(() => buildMgNestPiece((o) => buildMgNest(o))),
+    after: () => sandbagSite(() => buildMortarPitV2()),
+    tags: ["MUR DE SACS", "NID DE MG", "FOSSE DE MORTIER"], note: "la construction en jeu des pièces en sacs : la terre et les bois montent, vos sacs simulés posés rang par rang — le curseur « Construction » pilote les trois.",
+  },
   barbelesBlender: {
     label: "Barbelés (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadBarbedWire(),
     before: () => buildBarbedWire(),

@@ -288,5 +288,6 @@ export function siteMaterial(src, colorType = "vec4", stone = true) {
   // (the finished material itself — its colour, relief and detail: a different one shifted the tone the moment it was done)
   const m = stone ? stoneMaterial(src, _detail) : plainMaterial(src);
   m.positionNode = positionLocal.add(vec3(0, fall.mul(fall).mul(0.7).sub(hidden.mul(200)), 0));
+  m.castShadowPositionNode = m.positionNode;   // (the parts to come cast no shadow — the kit's construction learnt it)
   return { material: m, set(p) { progress.value = p; } };
 }

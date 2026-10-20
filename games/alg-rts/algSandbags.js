@@ -15,7 +15,7 @@
 //                 darker (sand-soaked, dusty)
 //   the COST      a whole wall merged into ONE mesh, ONE material shared by every bag in the game
 import * as THREE from "three";
-import { abs, atan, attribute, cross, dot, exp, float, mix, mx_noise_float, normalGeometry, normalize, positionGeometry, positionView, pow, select, sin, smoothstep as tslSmoothstep, texture, transformNormalToView, vec2, vec3 } from "three/tsl";
+import { abs, atan, attribute, clamp as tslClamp, cross, dot, exp, float, mix, mx_noise_float, normalGeometry, normalize, positionGeometry, positionLocal, positionView, pow, select, sin, smoothstep as tslSmoothstep, step as tslStep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { simplifierReady, simplifyGeometry } from "../../v3/render/instancing/autoLod.js";
 
@@ -220,8 +220,8 @@ function photo(url, srgb) {
 }
 /** ONE material for every bag: the burlap photo in the piece's space (the face's dominant axis), its
  *  weave's gaps filled (sand behind the jute, not holes), × the bag's shade, its foot darker. */
-export function sandbagMaterial() {
-  if (_mat) return _mat;
+export function sandbagMaterial(build = null) {
+  if (_mat && !build) return _mat;
   const D = photo("/textures/build/hessian_230/hessian_230_diff_1k.jpg", true), N = photo("/textures/build/hessian_230/hessian_230_nor_gl_1k.jpg");
   const n = normalGeometry.normalize();
   const wx = pow(abs(n.x), float(4)), wy = pow(abs(n.y), float(4)), wz = pow(abs(n.z), float(4));
@@ -271,13 +271,27 @@ export function sandbagMaterial() {
   c = mix(c, c.mul(vec3(0.86, 0.8, 0.72)), dust);
   // (Physical: its specular switched OFF on the undersides — their grazing sky reflection drew blue
   // lines between the courses)
-  _mat = new THREE.MeshPhysicalNodeMaterial({ roughness: 1, metalness: 0 });
-  _mat.name = "Sandbags";
-  _mat.colorNode = c;
-  _mat.normalNode = bumped;
-  _mat.roughnessNode = float(1.0);
-  _mat.specularIntensityNode = bu.w.mul(0.6);
-  return _mat;
+  const m = new THREE.MeshPhysicalNodeMaterial({ roughness: 1, metalness: 0 });
+  m.name = "Sandbags";
+  m.colorNode = c;
+  m.normalNode = bumped;
+  m.roughnessNode = float(1.0);
+  m.specularIntensityNode = bu.w.mul(0.6);
+  if (build) {
+    // A SITE's bags (algBuild): each hidden until its moment (`bagT` — bagOrder), then dropped into place over the
+    // last 4 %; hidden ones sunk far below, the shadow pass too.
+    const t = attribute("bagT", "float");
+    const shown = tslStep(t, build);
+    // (a short settle, 12 cm over 2 %: a 45 cm drop over 4 % left bags hanging in the air whenever the work paused —
+    // the lab's slider, 2026-10-21)
+    const k = tslClamp(build.sub(t).div(0.02), 0, 1);
+    m.positionNode = positionLocal.add(vec3(0, float(1).sub(k).mul(float(1).sub(k)).mul(0.12).sub(float(1).sub(shown).mul(200)), 0));
+    m.castShadowPositionNode = m.positionNode;
+    m.name = "SandbagsSite";
+    return m;
+  }
+  _mat = m;
+  return m;
 }
 
 /** Bags' geometries → ONE mesh (casting and receiving shadows). */
@@ -361,8 +375,67 @@ function prepWall(gltf) {
   g.setAttribute("dirt", new THREE.BufferAttribute(dirt, 1));
   g.setAttribute("bagUV", new THREE.BufferAttribute(buv, 4));
   g.setAttribute("ao", new THREE.BufferAttribute(ao, 1));
+  g.setAttribute("bagT", new THREE.BufferAttribute(bagOrder(g), 1));
   g.computeBoundingSphere();
   return g;
+}
+/**
+ * EACH BAG'S MOMENT in the construction (2026-10-21 — the walls were stretched out of the ground): the merged wall's
+ * bags are its separate islands (union-find over the triangles); laid course by course — by the bag's centre height,
+ * then along the wall — each its 0..1 rank. One float a vertex (`bagT`); sandbagMaterial(build) reads it.
+ */
+function bagOrder(g) {
+  const P = g.getAttribute("position"), n = P.count, idx = g.index?.array;
+  const par = new Int32Array(n).map((_, i) => i);
+  const find = (i) => { while (par[i] !== i) { par[i] = par[par[i]]; i = par[i]; } return i; };
+  if (idx) for (let t = 0; t < idx.length; t += 3) { const a = find(idx[t]); for (const v of [idx[t + 1], idx[t + 2]]) { const b = find(v); if (a !== b) par[b] = a; } }
+  const sums = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = find(i);
+    let s = sums.get(r); if (!s) sums.set(r, (s = [0, 0, 0, 0]));
+    s[0] += P.getX(i); s[1] += P.getY(i); s[2] += P.getZ(i); s[3]++;
+  }
+  const bags = [...sums.entries()].map(([r, s]) => ({ r, x: s[0] / s[3], y: s[1] / s[3], z: s[2] / s[3] }));
+  // (courses: the centre heights in 0.13 m bands; along the wall: its long axis)
+  let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (const b of bags) { x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x); z0 = Math.min(z0, b.z); z1 = Math.max(z1, b.z); }
+  const alongX = x1 - x0 >= z1 - z0;
+  bags.sort((a, b) => Math.floor(a.y / 0.13) - Math.floor(b.y / 0.13) || (alongX ? a.x - b.x : a.z - b.z));
+  const rank = new Map(bags.map((b, k) => [b.r, bags.length > 1 ? k / (bags.length - 1) : 0]));
+  const out = new Float32Array(n);
+  for (let i = 0; i < n; i++) out[i] = rank.get(find(i));
+  return out;
+}
+/**
+ * A CONSTRUCTION SITE's simulated bags (algBuild, the lab — 2026-10-21): every bag mesh under `mesh` (material
+ * "Sandbags…") gets ONE site material (a uniform: bagT, laid course by course). The piece is NOT stretched (the
+ * caller leaves its scale at 1): its earth and timbers stand from the start — dug and set first — the bags go on
+ * them, and its other parts (the gun, a crew's things) come last. (Stretching the kit while keeping the bags whole left
+ * the MG nest's roof bags and gun floating over a half-risen berm — you, 2026-10-21.) Null when it has none.
+ *   set(progress): the bags in [0.1, 0.9] of the work, the rest at 0.94 · finish(): the shared material back
+ */
+export function siteBags(mesh) {
+  const bagMeshes = [];
+  // (either name: a copy made while another site held the cached bags carries their site material)
+  mesh.traverse((o) => { if (o.isMesh && /^Sandbags/.test(o.material?.name ?? "")) bagMeshes.push(o); });
+  if (!bagMeshes.length) return null;
+  const u = uniform(0), mat = sandbagMaterial(u);
+  for (const o of bagMeshes) o.material = mat;
+  // the parts that come last: the piece's own children holding no bags (the gun…); inside a group that holds bags
+  // (the mortar pit's), its non-bag children are its earth and crates — they stand from the start
+  const holds = (o) => { let b = false; o.traverse((q) => { if (bagMeshes.includes(q)) b = true; }); return b; };
+  const last = mesh.children.filter((c) => !holds(c) && c.userData.late == null);
+  return {
+    set(p) {
+      u.value = Math.min(1, Math.max(0, (p - 0.1) / 0.8));
+      for (const c of last) c.visible = p >= 0.94;
+    },
+    finish() {
+      for (const o of bagMeshes) o.material = sandbagMaterial();
+      for (const c of last) c.visible = true;
+      mat.dispose();
+    },
+  };
 }
 /** Load the simulated wall, near and far (tools/blender/sandbagWall.py), once. Null if missing. */
 export function loadSandbagWall() {
