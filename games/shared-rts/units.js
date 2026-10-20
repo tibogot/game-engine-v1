@@ -33,6 +33,8 @@ import { createSpatialGrid } from "./spatialGrid.js";
  * the cell it was filed under; this keeps it inside the searched square.
  */
 const GRID_PAD = 1;
+/** A driven vehicle backs up to a spot behind it within this many metres (CoH's auto-reverse; orderTo). */
+const REVERSE_MAX = 40;
 /** Scratch for avoidance's neighbour query — units update one at a time. */
 const _avoidNear = [];
 const _avoidKept = [];
@@ -281,7 +283,11 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
       unit.attackTarget = null;
       unit.target = null;
       unit.faceAngle = null;   // (a new move: no old facing — selection.js sets this order's after)
+      // (the REVERSE button armed this vehicle's next move: driven backward whatever the distance)
+      const forced = !!unit.armReverse;
+      unit.armReverse = false;
       unit.orderTo(tx, tz, shared);
+      if (forced && type.drive) unit.backing = true;
     },
 
     /** Point the unit at a world direction immediately (no turn). Used at spawn so
@@ -319,6 +325,18 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
       const fresh = !hasGoal || arrived || Math.hypot(goal.x - tx, goal.z - tz) > 3;
       goal.set(tx, 0, tz); hasGoal = true;
       const path = shared ?? navGrid.findPath(pos.x, pos.z, tx, tz, { foot });
+      // REVERSE, CoH's rule (alg-rts 2026-10-20 — CoH 2's Dec. 2015 update, CoH 3's auto-reverse): a vehicle
+      // ordered to a spot BEHIND it and CLOSE backs up instead of turning round — its front (its armour, its
+      // gun) stays on the enemy. Behind = over ~115 deg off its nose; close = under REVERSE_MAX m; the path
+      // near straight (a long detour is driven forward).
+      if (type.drive && fresh) {
+        const d = Math.hypot(tx - pos.x, tz - pos.z);
+        let off = Math.atan2(tx - pos.x, tz - pos.z) - heading;
+        off = Math.abs(Math.atan2(Math.sin(off), Math.cos(off)));
+        let len = 0, px = pos.x, pz = pos.z;
+        for (const w of path ?? []) { len += Math.hypot(w.x - px, w.z - pz); px = w.x; pz = w.z; }
+        unit.backing = d > 2 && d < REVERSE_MAX && off > 2.0 && len < d * 1.35 + 2;
+      }
       if (path?.length) {
         waypoints.length = 0; waypoints.push(...path);
         arrived = false; repathCd = 0; bestTgtDist = Infinity;   // (progress is measured to the NEW path)
@@ -529,9 +547,11 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
         // last couple of metres are plain (no orbiting a parking spot).
         const D = type.drive;
         turningHard = false;
+        const back = !!unit.backing && !!D;
+        if (back) speed *= D.reverseMul ?? 0.5;   // (backing up: about half its speed)
         if (D && !type.isAir && reverseT <= 0) {
           const last = waypoints.length <= 1;
-          const want = Math.atan2(dirX, dirZ);
+          const want = back ? Math.atan2(-dirX, -dirZ) : Math.atan2(dirX, dirZ);
           let off = want - heading;
           while (off > Math.PI) off -= Math.PI * 2;
           while (off < -Math.PI) off += Math.PI * 2;
@@ -543,7 +563,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
               heading = turnToward(heading, want, D.turn * dt);
               k = Math.max(D.kind === "tracks" ? 0.15 : 0.3, Math.cos(Math.min(off, Math.PI / 2)));
             }
-            dirX = Math.sin(heading); dirZ = Math.cos(heading);
+            dirX = back ? -Math.sin(heading) : Math.sin(heading); dirZ = back ? -Math.cos(heading) : Math.cos(heading);
             turningHard = off > 0.35;
           }
           // Brake for the last waypoint: no faster than it can stop in.
@@ -559,6 +579,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
       } else if (!waypoints.length) {
         arrived = true;
         driveV = 0;
+        unit.backing = false;
         stuckT = 0; escapeT = 0; reverseT = 0; unit.ghost = false; escalation = 0;
       }
 

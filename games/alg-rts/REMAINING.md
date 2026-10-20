@@ -102,14 +102,26 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
    - Trees that fall.
 5. **Smaller rules**
    - Low walls and brush slow infantry.
-   - Spotted mines show on the minimap.
+   - ~~Spotted mines show on the minimap~~ — **done 2026-10-20** (the FLN sees its own).
    - Wire snags men.
    - A "can't go there" cursor.
    - A smoke barrage from the mortar.
    - The H-21 door gun.
    - The French AI: smoke, the Alouette, repairs, wire-cutting.
    - The FLN: train units at a refuge; retreat to the nearest refuge.
-6. ~~Skirmish menu: pick the doctrine before the briefing~~ — **done the CoH 3 way, 2026-10-19:**
+6. **From the CoH 3 comparison (2026-10-20), biggest first:**
+   - **Vehicle critical hits** — a hit can damage the ENGINE (slow), IMMOBILISE, knock out the GUN,
+     stun the CREW; SIDE armour (the tracks, the wheels) as CoH 3: the bazooka's ambush (immobilise,
+     then finish it).
+   - **Shift-queued orders** — chain several orders for a unit (here, then there, then the house).
+   - **Tactical pause** (single player, vs AI) — pause, queue orders for several units, resume.
+   - **Breach** — rush a garrisoned house to take it (at a risk), CoH 3's.
+   - **Attack ground** — mortars and MGs on a spot (a suspected position, a wood's edge, a house).
+   - **Height** — a bonus firing from above (CoH 3's vertical play): the town's hill, the djebel.
+   - **Towing** guns with a vehicle (the mortar, the 12.7, the 57).
+   - Done 2026-10-20: **hold fire** (⇧H, both sides) and **reverse** (vehicles back up to a spot close
+     behind them; ⇧R forces it).
+7. ~~Skirmish menu: pick the doctrine before the briefing~~ — **done the CoH 3 way, 2026-10-19:**
    the doctrine is chosen IN the match, on its panel (cards), any time, kept for the battle; the
    points earned before are kept. The briefing has the difficulty only.
 
@@ -166,6 +178,7 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 - **Release cleanup:** the dev panel still shows unless `?dev=0`; it should only show with `?dev=1`.
 - **Options:** graphics presets, resolution, volume sliders, key rebinding (AZERTY).
+- **Saving a game** (the campaign needs it) and **replays** (to check what the code has).
 - **Performance** (PERF_AUDIT.md)
   - Boot: cut from 44 s to ~22 s on 2026-10-04, not re-measured since (the game has grown a lot).
     Re-measure, then a shader cache, preloading, a real loading screen.

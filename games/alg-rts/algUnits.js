@@ -617,6 +617,11 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
             // (the HUMAN's purse — an FLN player's reinforcement was checked against the French one's, 2026-10-20)
             ready: cost > 0 && (sq.some((s) => s.team === "enemy") ? economy.aln : economy.french).canAfford(cost) };
         })(),
+        // MARCHE ARRIÈRE (2026-10-20, CoH 3's Reverse): the next move order of these vehicles is driven backward,
+        // whatever the distance (close and behind, they back up by themselves — shared units.js REVERSE_MAX)
+        sel.some((u) => u.alive && u.type?.drive && isHuman(u.team)) && {
+          key: "reverse", label: sel.some((u) => u.armReverse) ? t("Arrière : où ?") : t("Marche arrière"),
+          hint: t("Marche arrière : le prochain ordre de mouvement se fait en reculant, le blindage et l'arme face à l'ennemi. (Vers un point proche derrière lui, un véhicule recule de lui-même.)"), ready: true },
         // HALTE AU FEU (2026-10-20, CoH 3's Hold Fire — the FLN's ambushes): the squad picks no target until
         // you open fire, order an attack, or it is HIT (then it fires back: CoH's rule).
         (() => {
@@ -660,6 +665,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (key === "radioAir") { const r = radioOf(sel); if (r?.post) airStrike?.begin([r.post], { sight: seen }); }
       if (key === "airStrike") airStrike?.begin(sel);
       if (key === "flare") flares?.begin(sel);
+      if (key === "reverse") { for (const u of sel) if (u.alive && u.type?.drive && isHuman(u.team)) u.armReverse = true; commandCard.render(sel); }
       if (key === "holdFire") { holdFireToggle(squads.squadsIn(sel).filter((s) => isHuman(s.team))); commandCard.render(sel); }
       if (key === "retreat") { for (const s of squads.squadsIn(sel)) squads.retreat(s); app.algSounds?.order?.("move", sel); commandCard.render(sel); }
       if (key === "reinforce") { for (const s of squads.squadsIn(sel)) squads.reinforce(s); commandCard.render(sel); }
