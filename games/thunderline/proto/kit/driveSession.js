@@ -23,6 +23,7 @@ import { createCarRules, magnetZones } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
 import { createEngineModel } from "./engineModel.js";
 import { createEngineSound } from "./engineSound.js";
+import { createEngineLoops, isLoopEngine } from "./engineLoops.js";
 import { createSfx } from "./sfx.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
@@ -83,6 +84,9 @@ const HUD_CSS = `
   #drive-hud #snd svg { width: 22px; height: 22px; color: #8796b5; }
   #drive-hud #snd.on { border-left-color: #3fd2ff; } #drive-hud #snd.on svg { color: #3fd2ff; }
   #drive-hud #snd:hover svg { color: #e8f0ff; }
+  #drive-hud #freecam { left: 50%; bottom: 18px; transform: translateX(-50%); display: none; color: #8796b5; font-size: 12px; }
+  #drive-hud #freecam.show { display: block; }
+  #drive-hud #freecam b { color: #3fd2ff; font: 800 14px "Barlow Condensed"; letter-spacing: 0.08em; margin-right: 8px; }
 `;
 const HUD_HTML = `
   <div id="time" class="panel">0.00</div>
@@ -93,7 +97,8 @@ const HUD_HTML = `
   <div id="speed" class="panel"><div class="v" id="kmh">0</div><div class="u">KM/H</div></div>
   <div id="stats" class="panel"></div>
   <div id="help" class="panel"></div>
-  <div id="snd" class="panel" title="Sound on / off (M)"></div>`;
+  <div id="snd" class="panel" title="Sound on / off (M)"></div>
+  <div id="freecam" class="panel"></div>`;
 // the sound button's icon: a speaker, with waves (on) or a cross (off)
 const SND_ICON = (on) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9v6h4l5 4V5L8 9z" fill="currentColor"/>${on ? '<path d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/>' : '<path d="M17 9l5 6M22 9l-5 6"/>'}</svg>`;
 
@@ -257,11 +262,13 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   let headlightsOn = null; // set from the sun's height (driveFrame)
   let showGhost = ghost && prefs.ghost !== false;
 
-  // ---------- ENGINE SOUND (engineModel.js + engineSound.js, synthesised) + sfx ----------
+  // ---------- ENGINE SOUND (engineModel.js + engineLoops.js — the loops the user picked, 2026-10-20 — or
+  // the synth, engineSound.js) + sfx ----------
   // Starts on the first key press / click (browsers allow audio only after a gesture). M mutes; the
   // tab hidden = paused. Sound is OFF unless the settings turned it on (user, 2026-10-19).
   const engine = createEngineModel();
-  const engineSound = createEngineSound({ type: prefs.engine ?? "v8", volume: prefs.volume ?? 0.7 });
+  const engineType = prefs.engine ?? "gen6";
+  const engineSound = (isLoopEngine(engineType) ? createEngineLoops : createEngineSound)({ type: engineType, volume: prefs.volume ?? 0.7 });
   let engineMuted = !(prefs.sound ?? false);
   engineSound.setMuted(engineMuted);
   const sfx = createSfx(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7 });
@@ -464,7 +471,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
       obstacles, moverT: 0, meshes, // the movers' RACE clock: 0 at the green light, held through the countdown
     };
-    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart`;
+    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>F</kbd> free camera`;
     hud.classList.add("on");
 
     // ---------- sun shadows (drive page only): static atlas of this track + live map around the car ----------
@@ -504,6 +511,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   /** Stop driving: the track's meshes leave, the car parks, the HUD hides. */
   function stop() {
     if (!S) return;
+    if (freeCam) toggleFreeCam(); // back to the chase (and full speed) for the next drive
     scene.remove(S.group); // its geometries are the shared tile cache: kept for the next drive
     vehicle.setDynamicMovers([]);
     ghostCar.setDynamicMovers([]);
@@ -652,6 +660,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (e.code === "KeyP") { autopilot = !autopilot; S.pilot.reset(); }
     if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!S.ghostPlayer && showGhost && ghostStyled; }
     if (e.code === "KeyM") setSound(engineMuted);
+    if (e.code === "KeyF") toggleFreeCam();
+    if (e.code === "KeyT" && freeCam) { freeCam.slow = (freeCam.slow + 1) % FREE_SLOW.length; timeScale = FREE_SLOW[freeCam.slow]; showFreeCam(); }
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
     // these may end the session (back to the builder, the menu, the next track): last
     const o = S.o;
@@ -659,6 +669,42 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if ($("finish").classList.contains("show")) for (const b of o.buttons ?? []) if (e.code === (b.code ?? `Key${b.key}`)) return b.run();
   });
   addEventListener("keyup", (e) => { keys[e.code.toLowerCase()] = false; });
+
+  // ---------- FREE CAMERA (user, 2026-10-20: "see the car from every angle and debug while driving") ----------
+  // F: the camera leaves the chase and orbits the car, still following it; the car keeps driving (keys,
+  // autopilot). Drag to turn round it (below the deck too), wheel to zoom, T slow motion / pause. F again
+  // = the chase camera.
+  const FREE_SLOW = [1, 0.25, 0];
+  let freeCam = null; // { yaw, pitch, dist, slow }
+  const _orbit = new V();
+  function showFreeCam() {
+    $("freecam").classList.toggle("show", !!freeCam);
+    if (freeCam) $("freecam").innerHTML = `<b>FREE CAMERA</b>drag: orbit · wheel: zoom · <kbd>T</kbd> ${["1×", "¼×", "paused"][freeCam.slow]} · <kbd>F</kbd> back to the chase`;
+  }
+  function toggleFreeCam() {
+    if (freeCam) {
+      if (freeCam.slow) timeScale = 1;
+      freeCam = null;
+      chase.reset();
+    } else {
+      // start where the chase camera is
+      _orbit.copy(camera.position).sub(vehicle.renderPos);
+      const d = Math.max(2, _orbit.length());
+      freeCam = { yaw: Math.atan2(_orbit.x, _orbit.z), pitch: Math.asin(THREE.MathUtils.clamp(_orbit.y / d, -1, 1)), dist: d, slow: 0 };
+    }
+    showFreeCam();
+  }
+  addEventListener("pointermove", (e) => {
+    if (!freeCam || !(e.buttons & 1)) return;
+    freeCam.yaw -= e.movementX * 0.006;
+    freeCam.pitch = THREE.MathUtils.clamp(freeCam.pitch + e.movementY * 0.006, -1.45, 1.45);
+  });
+  addEventListener("wheel", (e) => { if (freeCam) freeCam.dist = THREE.MathUtils.clamp(freeCam.dist * Math.exp(e.deltaY * 0.001), 1.5, 250); }, { passive: true });
+  function placeFreeCam() {
+    const p = vehicle.renderPos, c = Math.cos(freeCam.pitch);
+    camera.position.set(p.x + Math.sin(freeCam.yaw) * c * freeCam.dist, p.y + 0.5 + Math.sin(freeCam.pitch) * freeCam.dist, p.z + Math.cos(freeCam.yaw) * c * freeCam.dist);
+    camera.lookAt(p.x, p.y + 0.5, p.z);
+  }
 
   // ---------- the sim loop (roadGame.js:9904), in the engine's frame: before it reads the camera ----------
   let last = performance.now();
@@ -716,6 +762,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     }
     checkFall();
     chase.update(dt);
+    if (freeCam) placeFreeCam();
     S.meshes.updateLod(camera); // the posts' detail, from the game camera (testTrack.js)
     app.controls.target.copy(vehicle.renderPos);
     const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);

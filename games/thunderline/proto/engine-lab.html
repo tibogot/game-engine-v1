@@ -32,7 +32,7 @@
   <body>
     <header id="top"><a class="brand cond" href="../index.html"><svg viewBox="0 0 16 16"><path fill="currentColor" d="M9.5 0 2 9h5l-1.5 7L14 6.5H9z" /></svg>Thunderline</a><nav id="crumbs" class="cond"><span>Engine lab</span></nav></header>
     <main>
-      <p class="note">The synthesised engine: every cylinder firing kicks the exhaust's resonances. Press <b>Start sound</b>, then <b>Launch run</b> to hear it pull through the six gears and lift off. Pick the engine type you like.</p>
+      <p class="note">The synthesised engine: every cylinder firing kicks the exhaust's resonances. Press <b>Start sound</b>, then <b>Launch run</b> to hear it pull through the six gears and lift off. Pick the engine type you like. <b>Gen 6</b> (the one picked, of six rendered) is not synthesised live: it is nine steady loops (idle to redline) rendered offline by the open-source enginesound, crossfaded and pitched by the RPM, the way racing games play recordings.</p>
       <div class="row"><button class="btn big" id="start">▶ Start sound</button></div>
       <div class="row" id="types"></div>
       <div class="row">
@@ -55,24 +55,45 @@
     <script type="module">
       import { createEngineSound } from "./kit/engineSound.js";
       import { createEngineModel, ENGINE } from "./kit/engineModel.js";
+      import { createEngineLoops, LOOP_ENGINES, isLoopEngine } from "./kit/engineLoops.js";
       const $ = (id) => document.getElementById(id);
-      const sound = createEngineSound({ type: "v8", volume: 0.7 });
+      // two players: the synth (V8 / I6 / V10) and the generated loops (Gen 1-6); the one not picked is muted
+      const synth = createEngineSound({ type: "v8", volume: 0.7 });
+      const loops = createEngineLoops({ type: "gen6", volume: 0.7 });
+      synth.setMuted(true);
+      loops.setMuted(true); // both silent until "Start sound"
+      let sound = synth;
       const model = createEngineModel();
       let mode = "idle"; // idle | launch | manual
       let kmh = 0, throttle = 0, grounded = true, airLeft = 0;
-      const TYPES = [["v8", "V8"], ["i6", "Inline 6"], ["v10", "V10"]];
+      const TYPES = [["v8", "Synth V8"], ["i6", "Synth I6"], ["v10", "Synth V10"], ...Object.entries(LOOP_ENGINES).map(([k, e]) => [k, e.label])];
       let type = "v8";
       function renderTypes() {
         $("types").innerHTML = TYPES.map(([k, n]) => `<button class="btn${k === type ? " on" : ""}" data-t="${k}">${n}</button>`).join("");
-        for (const b of $("types").children) b.onclick = () => { type = b.dataset.t; sound.setType(type); renderTypes(); };
+        for (const b of $("types").children) b.onclick = () => {
+          type = b.dataset.t;
+          sound = isLoopEngine(type) ? loops : synth;
+          sound.setType(type);
+          synth.setMuted(!on || sound !== synth);
+          loops.setMuted(!on || sound !== loops);
+          renderTypes();
+        };
       }
       renderTypes();
-      $("start").onclick = async () => { await sound.unlock(); $("start").textContent = "Sound on"; };
+      // the big button switches the sound on AND off (user, 2026-10-20: it stayed on)
+      let on = false;
+      $("start").onclick = async () => {
+        on = !on;
+        if (on) await Promise.all([synth.unlock(), loops.unlock()]);
+        synth.setMuted(!on || sound !== synth);
+        loops.setMuted(!on || sound !== loops);
+        $("start").textContent = on ? "■ Sound off" : "▶ Start sound";
+      };
       $("launch").onclick = () => { sound.unlock(); model.reset(); kmh = 0; mode = "launch"; throttle = 1; };
       $("jump").onclick = () => { sound.unlock(); airLeft = 1.5; };
       $("lift").onclick = () => { throttle = 0; mode = mode === "manual" ? "manual" : "launch"; };
       $("manual").onclick = () => { sound.unlock(); mode = "manual"; };
-      for (const id of ["m-rpm", "m-thr", "vol"]) $(id).oninput = () => { $(id + "-v").textContent = $(id).value; if (id === "vol") sound.setVolume($("vol").value / 100); };
+      for (const id of ["m-rpm", "m-thr", "vol"]) $(id).oninput = () => { $(id + "-v").textContent = $(id).value; if (id === "vol") for (const p of [synth, loops]) p.setVolume($("vol").value / 100); };
       // a stand-in car for the launch run: drag-limited acceleration, ~270 km/h top with the boost
       function carStep(dt) {
         const v = kmh / 3.6;
@@ -100,7 +121,7 @@
         requestAnimationFrame(frame);
       }
       requestAnimationFrame(frame);
-      window.__engine = { sound, model, get kmh() { return kmh; } };
+      window.__engine = { synth, loops, get sound() { return sound; }, model, get kmh() { return kmh; } };
     </script>
   </body>
 </html>

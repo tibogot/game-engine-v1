@@ -165,10 +165,16 @@ export const campaign = {
 /** Settings shared by every page (menu → Settings). */
 const SETTINGS_KEY = "thunderline.settings.v1";
 // sound OFF by default (user, 2026-10-19: it disturbs work on the game) — Settings or M turns it on
-export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "v8", car: "thunder" };
+// engine "gen6": the recorded-style loops the user picked (2026-10-20, engineLoops.js) over the synth
+export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "gen6", car: "thunder" };
 export const settings = {
   get() {
-    try { return { ...SETTINGS_DEFAULTS, ...(JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {}) }; } catch { return { ...SETTINGS_DEFAULTS }; }
+    try {
+      const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {};
+      // once: settings saved before the loops kept the synth's "v8" default — move them to gen6
+      if (!saved.engineV) { saved.engine = SETTINGS_DEFAULTS.engine; saved.engineV = 2; }
+      return { ...SETTINGS_DEFAULTS, ...saved };
+    } catch { return { ...SETTINGS_DEFAULTS }; }
   },
   set(patch) {
     const s = { ...settings.get(), ...patch };

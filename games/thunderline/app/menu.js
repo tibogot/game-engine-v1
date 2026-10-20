@@ -137,12 +137,12 @@ function settingsScreen() {
   const row = (key, title, desc) => `<div class="set cut"><div><div class="t">${title}</div><div class="d">${desc}</div></div><div class="toggle ${s[key] ? "on" : ""}" data-key="${key}"></div></div>`;
   $("screen").innerHTML = `<div class="settings">
     ${row("ghost", "Ghost", "Race your best run on every track (G toggles it while driving).")}
-    ${row("sound", "Sound", "The engine (synthesised for now). M mutes while driving.")}
+    ${row("sound", "Sound", "The engine, the tyres, the wind. M or the speaker button mutes while driving.")}
     <div class="set cut"><div><div class="t">Volume</div><div class="d">The engine's loudness.</div></div><input type="range" id="s-vol" min="0" max="100" value="${Math.round(s.volume * 100)}" style="width:220px;accent-color:#3fd2ff" /></div>
     <div class="set cut"><div><div class="t">Car</div><div class="d">The new Thunderline car, or the Lotus (the dev car). <a href="./proto/carview.html" style="color:var(--bolt)">See them side by side ▶</a></div></div>
       <div style="display:flex;gap:4px">${[["thunder", "New car"], ["lotus", "Lotus"]].map(([k, n]) => `<button class="carb" data-c="${k}" style="background:var(--panel2);border:1px solid ${s.car === k ? "var(--bolt)" : "var(--line)"};color:${s.car === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
     <div class="set cut"><div><div class="t">Engine</div><div class="d">Which engine you hear. <a href="./proto/engine-lab.html" style="color:var(--bolt)">Listen in the engine lab ▶</a></div></div>
-      <div style="display:flex;gap:4px">${[["v8", "V8"], ["i6", "Inline 6"], ["v10", "V10"]].map(([k, n]) => `<button class="eng" data-e="${k}" style="background:var(--panel2);border:1px solid ${s.engine === k ? "var(--bolt)" : "var(--line)"};color:${s.engine === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
+      <div style="display:flex;gap:4px">${[["gen6", "Four (loops)"], ["v8", "Synth V8"], ["i6", "Synth I6"], ["v10", "Synth V10"]].map(([k, n]) => `<button class="eng" data-e="${k}" style="background:var(--panel2);border:1px solid ${s.engine === k ? "var(--bolt)" : "var(--line)"};color:${s.engine === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
     <div class="keys">
       <span><kbd>W</kbd><kbd>S</kbd> / <kbd>↑</kbd><kbd>↓</kbd></span><span>throttle / brake</span>
       <span><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd></span><span>steer</span>
@@ -152,7 +152,8 @@ function settingsScreen() {
       <span><kbd>Space</kbd></span><span>handbrake</span>
       <span><kbd>Backspace</kbd></span><span>last checkpoint, keeping your speed (twice: standing)</span>
       <span><kbd>R</kbd> <kbd>Delete</kbd></span><span>restart</span>
-      <span><kbd>M</kbd></span><span>mute the engine</span>
+      <span><kbd>M</kbd></span><span>sound on / off</span>
+      <span><kbd>F</kbd></span><span>free camera: drag to orbit the car, wheel to zoom, <kbd>T</kbd> slow motion / pause</span>
       <span><kbd>Esc</kbd></span><span>back</span>
     </div></div>`;
   for (const t of document.querySelectorAll(".toggle")) t.onclick = () => { settings.set({ [t.dataset.key]: !settings.get()[t.dataset.key] }); settingsScreen(); };

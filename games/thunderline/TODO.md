@@ -58,6 +58,18 @@ this is just the list. Newest decisions at the top of each section. Last updated
       wheelspin, free revving in the air and on the line, limiter, lift-off pops) + engineWorklet.js
       (each firing kicks exhaust resonators; V8 / inline-6 / V10) + engineSound.js; proto/engine-lab.html
       to listen; Settings: sound, volume, engine; M mutes. THE USER JUDGES THE SOUND.
+- [x] **Engine LOOPS** (user, 2026-10-20: the synth "better, but still synthetic"): engineLoops.js plays 9
+      steady loops (1000-8200 RPM), the two nearest crossfaded and pitched; rendered offline by the MIT
+      enginesound (github.com/DasEtwas/enginesound, v1.5.0 cli, its example6.esc: a four). Six rendered,
+      the user picked GEN 6 — now the default (Settings keeps the synth). public/sounds/thunderline/engines/gen6.
+      Fine-tuning: DONE a COASTING set (gen6_off.esc: weak ignition, intake shut, more mechanics; off/rpm_*.wav)
+      crossfaded by load. Lift-off POPS (bright noise cracks) tried and turned OFF (user: "very annoying to
+      the ears") — if ever: a few soft low "bups", not a crackle.
+      NEXT: a shift "dip" + bark, tone sliders in the lab (engineLoops.js LOOP_MIX), re-render if the
+      character is wrong. Configs + recipe: assets-src/engines/README.md.
+- [x] Ghost wheels sat ~10 cm in the road (pose playback has no probes: full droop) — each pose now
+      records the 4 wheels' ground distance; older ghosts rest their wheels at 0.5 m.
+- [x] Free camera while driving: F orbits the car (drag, wheel), T slow motion / pause.
 - [ ] **Recorded engine pack** — the user is looking (want: on-load AND off-load loops every ~500 RPM
       + idle). Candidates: BOOM Library (cars, the game-audio reference), Effectsense "Loopable Motors",
       Sonniss GDC bundles (free yearly), Pro Sound Effects / A Sound Effect (search "car engine loops

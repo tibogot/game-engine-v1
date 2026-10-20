@@ -24,14 +24,19 @@ function setPose(car, p) {
 export function createGhostRecorder() {
   let rec = null;
   return {
-    start() { rec = { v: 2, inputs: [], keys: {}, respawns: [], poses: [], poseEvery: POSE_EVERY }; },
+    start() { rec = { v: 2, inputs: [], keys: {}, respawns: [], poses: [], wheels: [], poseEvery: POSE_EVERY }; },
     /** after each tick: the input that tick used, and the car after it */
     tick(input, car) {
       if (!rec) return;
       rec.inputs.push(packInput(input));
       const n = rec.inputs.length;
       if (n % KEY_EVERY === 0) rec.keys[n] = pose(car.body);
-      if (n % POSE_EVERY === 0) { const b = car.body; rec.poses.push(r2(b.pos.x), r2(b.pos.y), r2(b.pos.z), r4(b.quat.x), r4(b.quat.y), r4(b.quat.z), r4(b.quat.w)); }
+      if (n % POSE_EVERY === 0) {
+        const b = car.body;
+        rec.poses.push(r2(b.pos.x), r2(b.pos.y), r2(b.pos.z), r4(b.quat.x), r4(b.quat.y), r4(b.quat.z), r4(b.quat.w));
+        // each wheel's hub-to-ground distance (−1 = in the air): the replay draws the wheels on the road
+        for (const t of car.tires) rec.wheels.push(t.grounded ? r2(t.hitDistance) : -1);
+      }
     },
     /** a respawn between ticks: the replay applies the same teleport before the next tick */
     respawn(car) { if (rec) rec.respawns.push({ at: rec.inputs.length, pose: pose(car.body) }); },
@@ -80,9 +85,20 @@ export function createGhostPlayer(car, rules, ghost) {
   };
 }
 
-/** A ghost played back from its recorded POSES: the car's body set each tick, its own interpolation draws it. */
+// a wheel resting on a flat deck: hub 0.50 m above the road (measured, the real car held on the line)
+const REST_HIT = 0.5;
+
+/**
+ * A ghost played back from its recorded POSES: the car's body set each tick, its own interpolation draws it.
+ * THE WHEELS (user, 2026-10-20: "the ghost doesn't sit on the ground, it's a bit under"): no physics runs, so
+ * no probe finds the road and the drawn wheels hung at full droop, ~10 cm into the deck. Each pose carries the
+ * wheels' ground distances (ghost.wheels) and they are handed to the car's tyres; a ghost saved before that
+ * rests its wheels on the road.
+ */
 function createPosePlayer(car, ghost) {
   const P = ghost.poses, every = ghost.poseEvery ?? POSE_EVERY, count = P.length / 7, ticks = count * every;
+  const W = ghost.wheels?.length === count * 4 ? ghost.wheels : null;
+  const wheel = (k, i) => (W ? W[Math.min(count - 1, Math.max(0, k)) * 4 + i] : REST_HIT);
   let n = 0;
   const a = new THREE.Vector3(), b = new THREE.Vector3(), qa = new THREE.Quaternion(), qb = new THREE.Quaternion();
   const at = (k, v, q) => { const i = Math.min(count - 1, Math.max(0, k)) * 7; v.set(P[i], P[i + 1], P[i + 2]); q.set(P[i + 3], P[i + 4], P[i + 5], P[i + 6]).normalize(); };
@@ -110,6 +126,12 @@ function createPosePlayer(car, ghost) {
       else { body.pos.lerpVectors(a, b, t); body.quat.slerpQuaternions(qa, qb, t); }
       body.vel.subVectors(body.pos, car._prevPos).divideScalar(dt); // for the body lean, the lights
       if (k < 0) car._prevPos.copy(body.pos);
+      car.tires.forEach((tire, i) => {
+        const da = wheel(k, i), db = wheel(k + 1, i);
+        const d = da >= 0 && db >= 0 ? da + (db - da) * t : t < 0.5 ? da : db;
+        tire.grounded = d >= 0;
+        if (d >= 0) tire.hitDistance = d;
+      });
     },
   };
 }
