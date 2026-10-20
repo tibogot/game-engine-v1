@@ -125,16 +125,25 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   // ground is read from a height grid at the fog's own resolution, built once
   // (rebuildHeights() after the terrain changes) — array lookups, not
   // heightmap samples: ~20 sources × ~250 cells × ~8 steps a frame.
-  let hgrid = null;
+  // BUILDINGS block it too (opt-in `ridgeLOS.blockerAt(x, z)`: a tall obstacle's top, alg-rts 2026-10-20 — a town's
+  // houses): in their own grid, read only BETWEEN the eye and the cell — the ground grid alone gives the eye's and
+  // the target's heights (a man by a house would otherwise see from its roof).
+  let hgrid = null, bgrid = null;
   function rebuildHeights() {
     hgrid = new Float32Array(cols * rows);
-    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) { const w = cellToWorld(c, r); hgrid[idx(c, r)] = app.getWorldHeight(w.x, w.z); }
+    bgrid = ridge?.blockerAt ? new Float32Array(cols * rows).fill(-Infinity) : null;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const w = cellToWorld(c, r);
+      hgrid[idx(c, r)] = app.getWorldHeight(w.x, w.z);
+      if (bgrid) bgrid[idx(c, r)] = ridge.blockerAt(w.x, w.z);
+    }
   }
   function lineClear(cc, cr, c, r, eyeY, tgtY) {
     const dc = c - cc, dr = r - cr, n = Math.max(Math.abs(dc), Math.abs(dr));
     for (let k = 1; k < n; k++) {
       const f = k / n;
-      const h = hgrid[idx(Math.round(cc + dc * f), Math.round(cr + dr * f))];
+      const j = idx(Math.round(cc + dc * f), Math.round(cr + dr * f));
+      const h = bgrid ? Math.max(hgrid[j], bgrid[j]) : hgrid[j];
       if (h > eyeY + (tgtY - eyeY) * f) return false;
     }
     return true;

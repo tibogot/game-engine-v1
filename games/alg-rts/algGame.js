@@ -643,6 +643,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           for (let lz = -hz + r; lz <= hz - r + 0.01; lz += 2.2) { yield put(-hx + r * 0.6, lz); yield put(hx - r * 0.6, lz); }
         }
       };
+      // SIGHT: each house a tall box to its parapet (the kits' heights, real metres x1.3; the minaret its own column)
+      // — combat's line of sight and the fog of war (algSight.addBox / topAt): no shot, no view THROUGH the town
+      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0 };
+      for (const [ty, , , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
+        app.algSight?.addBox(fx, fz, hx, hz, yaw, y + (PAR[ty] ?? 5) * 1.3);
+        if (ty === "mosquee") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = -4.25 * 1.3, mz = 4.75 * 1.3; app.algSight?.addBox(fx + mx * c + mz * s, fz - mx * s + mz * c, 2.4, 2.4, yaw, y + 18 * 1.3); }
+      }
+      app.fogOfWar?.rebuildHeights();
       app.scene.add(field.root);
       app.addPreRenderHook(() => field.update(app.camera));
       app.algTown = field;

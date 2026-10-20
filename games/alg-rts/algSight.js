@@ -28,6 +28,8 @@ export function createAlgSight(app, { showroom = {}, worldSize = 1024 } = {}) {
   const n = Math.round(worldSize / CELL), half = worldSize / 2;
   /** Top of a tall obstacle per cell (world y), or -Infinity. */
   const tops = new Float32Array(n * n).fill(-Infinity);
+  /** The same, of the ADDED boxes only (addBox: a map's town) — what the fog of war reads (the old maps' fog unchanged). */
+  let boxTops = null;
   const toCell = (v) => Math.max(0, Math.min(n - 1, Math.floor((v + half) / CELL)));
   const H = app.getWorldHeight;
 
@@ -92,6 +94,23 @@ export function createAlgSight(app, { showroom = {}, worldSize = 1024 } = {}) {
     blocker,
     /** combat.js: true when the line from a to b is blocked. */
     blocksSight: (a, b) => blocker(a, b) !== null,
+    /**
+     * A tall BOX of a piece that is not in the showroom (a map's town, algGame: an instanced field) — its
+     * footprint (centre, half sizes, yaw as three.js rotation.y) standing to world height `top`.
+     */
+    addBox(cx, cz, hx, hz, yaw, top) {
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      for (let lx = -hx; lx <= hx + 1e-6; lx += CELL / 2) {
+        for (let lz = -hz; lz <= hz + 1e-6; lz += CELL / 2) {
+          const i = toCell(cz - lx * s + lz * c) * n + toCell(cx + lx * c + lz * s);
+          if (top > tops[i]) { if (tops[i] === -Infinity) cells++; tops[i] = top; }
+          boxTops ??= new Float32Array(n * n).fill(-Infinity);
+          if (top > boxTops[i]) boxTops[i] = top;
+        }
+      }
+    },
+    /** The tallest ADDED box's top over (x, z), or -Infinity (the fog of war's ridge sight reads it). */
+    topAt: (x, z) => (boxTops ? boxTops[toCell(z) * n + toCell(x)] : -Infinity),
     stats: { pieces, cells, bakeMs: Math.round(bakeMs) },
   };
 }
