@@ -120,12 +120,12 @@ const ringGateOf = (pc) => {
 };
 const isRing = (p) => !!p?.ring;
 const tileId = (base, h = hand) => {
-  if (base === RING || isObstacle(base)) return base;
+  if (base === RING || isObstacle(base) || base === STAMP) return base;
   if (base === FITTED) return fittedId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const tileLabel = (base) => (base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
 const thumbOf = (id) => (id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
@@ -843,7 +843,8 @@ function ringSnap() {
 function computeSnap() {
   if (tileBase === RING) return ringSnap();
   if (isObstacle(tileBase)) return obstacleSnap();
-  const id = tileId(tileBase);
+  // a pasted SECTION snaps like its first piece
+  const id = tileBase === STAMP ? stampItems()[0]?.id : tileId(tileBase);
   const t = TILES[id];
   let best = null;
   // A LANDING in hand goes on a flight arc first: next to its lip, a short drop's whole arc sat inside
@@ -953,11 +954,11 @@ function updateGhost() {
   snap = computeSnap();
   if (!snap) { if (ghost) ghost.visible = false; renderStatus(); return; }
   const id = tileId(tileBase);
-  const key = `${id}|${edges}|${snap.type}|${!!snap.bad}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
+  const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
-    ghost = isObstacle(id) ? new THREE.Mesh(OBSTACLES[id].ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
+    ghost = id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(OBSTACLES[id].ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -1035,6 +1036,15 @@ function place() {
     rebuild();
     return;
   }
+  if (id === STAMP) {
+    track.nextUid--; // the stamp numbers its own pieces
+    const uids = placeStamp();
+    rebuild();
+    const exit = new THREE.Vector3().setFromMatrixPosition(built.get(uids.filter((u) => roadPc(u)).at(-1)).exit);
+    buildY = Math.round(exit.y / 2) * 2;
+    glide = exit;
+    return;
+  }
   if (snap.prepend != null) {
     // a START on the head of the road: first in the list (rebuild lays each piece on its parent), the
     // old first piece now hangs off it
@@ -1049,17 +1059,16 @@ function place() {
   buildY = Math.round(exit.y / 2) * 2;
   glide = exit;
 }
-function removePiece(uid) {
+function removePiece(uid) { removeMany([uid]); }
+/** Take one piece (or obstacle) out of the track's data; its road closes up. */
+function cutOut(uid) {
   const k = (track.props ?? []).findIndex((p) => p.uid === uid);
-  if (k >= 0) { snapshot(); track.props.splice(k, 1); sel = null; rebuild(); return; }
+  if (k >= 0) { track.props.splice(k, 1); return; }
   const i = track.pieces.findIndex((p) => p.uid === uid);
   if (i < 0) return;
-  snapshot();
   const pc = track.pieces[i];
   for (const c of track.pieces) if (c.parent === uid) { c.parent = pc.parent; if (pc.parent == null) c.M = pc.M; }
   track.pieces.splice(i, 1);
-  sel = null;
-  rebuild();
 }
 // ---------- EDIT MID-TRACK: insert after / replace the selected piece ----------
 // The road downstream follows by itself (rebuild() lays each road child on its parent's exit); what
@@ -1130,11 +1139,141 @@ function startEdit(mode) {
   renderStatus();
 }
 
+// ---------- SEVERAL PIECES (user, 2026-10-20): select a run, COPY it, PASTE it as one stamp (R mirrors it),
+// MIRROR it in place, DELETE it. Shift-click = the road between the selected piece and the clicked one;
+// Ctrl-click = add / remove one. `sel` stays the last one clicked.
+let selSet = new Set();
+const STAMP = "__section";
+let clipboard = null; // { items: [{ id, open, cp, link: "head"|"parent"|"flight"|"ring", from, rel }], n }
+let copiedNote = null;
+const roadPc = (uid) => track.pieces.find((p) => p.uid === uid && !isRing(p));
+const selection = () => [...selSet].filter((u) => built.has(u));
+/** The road from `a` to `b` along their chain (either way round), or null if they are not on one road. */
+function runBetween(a, b) {
+  const walk = (from, to) => {
+    const out = [], seen = new Set();
+    for (let p = roadPc(from); p && !seen.has(p.uid); p = roadPc(p.parent ?? p.flightFrom)) {
+      seen.add(p.uid);
+      out.unshift(p.uid);
+      if (p.uid === to) return out;
+    }
+    return null;
+  };
+  return walk(b, a) ?? walk(a, b);
+}
+/** The selected road pieces in driving order, if they are ONE run (each the next of the one before). */
+function selectedRun() {
+  const set = new Set(selection().filter((u) => roadPc(u)));
+  if (!set.size) return null;
+  const head = [...set].find((u) => { const p = roadPc(u); return !set.has(p.parent) && !set.has(p.flightFrom); });
+  const order = [head];
+  for (let cur = head; ;) {
+    const next = track.pieces.find((q) => set.has(q.uid) && !order.includes(q.uid) && (q.parent === cur || q.flightFrom === cur));
+    if (!next) break;
+    order.push(next.uid);
+    cur = next.uid;
+  }
+  return order.length === set.size ? order : null;
+}
+function copySelection() {
+  const order = selectedRun();
+  if (!order) { editMsg = "Copy a run of road: pieces one after another (Shift-click the last one)."; renderStatus(); return; }
+  const Hi = built.get(order[0]).M.clone().invert();
+  const items = order.map((u, i) => {
+    const p = roadPc(u);
+    const link = i === 0 ? "head" : p.parent != null ? "parent" : "flight";
+    return { id: p.id, open: !!p.open, cp: !!p.cp, link, from: i === 0 ? -1 : order.indexOf(link === "parent" ? p.parent : p.flightFrom), rel: Hi.clone().multiply(built.get(u).M).toArray() };
+  });
+  for (const q of track.pieces) if (isRing(q) && order.includes(q.flightFrom)) items.push({ id: RING, link: "ring", from: order.indexOf(q.flightFrom), rel: Hi.clone().multiply(new THREE.Matrix4().fromArray(q.M)).toArray() });
+  clipboard = { items, n: order.length };
+  editMsg = null;
+  copiedNote = `Copied ${order.length} piece${order.length > 1 ? "s" : ""} · Ctrl+V to paste`;
+  statusKey = "";
+  renderStatus();
+}
+const MIRROR_X = new THREE.Matrix4().makeScale(-1, 1, 1);
+const mirrorId = (id) => (id.endsWith("_L") ? id.slice(0, -2) : TILES[`${id}_L`] ? `${id}_L` : id);
+/** The stamp in hand: the clipboard, mirrored when the hand is left (R). */
+function stampItems() {
+  if (!clipboard) return [];
+  if (hand > 0) return clipboard.items;
+  return clipboard.items.map((it) => ({ ...it, id: it.link === "ring" ? it.id : mirrorId(it.id), rel: MIRROR_X.clone().multiply(new THREE.Matrix4().fromArray(it.rel)).multiply(MIRROR_X).toArray() }));
+}
+/** Each stamp item's frame when its head stands on `m` (a road piece follows its parent's exit). */
+function stampMatrices(m, items) {
+  const Ms = [];
+  items.forEach((it, i) => {
+    if (i === 0) Ms.push(m.clone());
+    else if (it.link === "parent") Ms.push(Ms[it.from].clone().multiply(piece(items[it.from].id).exitLocal));
+    else Ms.push(m.clone().multiply(new THREE.Matrix4().fromArray(it.rel)));
+  });
+  return Ms;
+}
+/** The stamp's ghost: every piece's deck (and its rings), laid out from an identity head. */
+function stampGhost() {
+  const g = new THREE.Group();
+  const items = stampItems(), Ms = stampMatrices(new THREE.Matrix4(), items);
+  items.forEach((it, i) => {
+    const m = it.link === "ring"
+      ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0]
+      : new THREE.Mesh(piece(it.id, it.open).look.deck, ghostMat);
+    m.matrixAutoUpdate = false;
+    m.matrix.copy(Ms[i]);
+    g.add(m);
+  });
+  return g;
+}
+function pasteSection() {
+  if (!clipboard) { editMsg = "Nothing copied yet: select pieces and Ctrl+C."; renderStatus(); return; }
+  copiedNote = null;
+  pickTile(STAMP);
+}
+function placeStamp() {
+  const items = stampItems(), Ms = stampMatrices(snap.m, items);
+  const uids = items.map(() => track.nextUid++);
+  items.forEach((it, i) => {
+    if (it.link === "ring") { track.pieces.push({ uid: uids[i], id: RING, ring: true, cp: true, M: Ms[i].toArray(), parent: null, flightFrom: uids[it.from] }); return; }
+    const head = i === 0;
+    track.pieces.push({
+      uid: uids[i], id: it.id, open: it.open, ...(it.cp ? { cp: true } : {}), M: Ms[i].toArray(),
+      parent: head ? (snap.type === "end" ? snap.parent : null) : it.link === "parent" ? uids[it.from] : null,
+      flightFrom: head ? (snap.type === "arc" ? snap.from : null) : it.link === "flight" ? uids[it.from] : null,
+    });
+  });
+  return uids;
+}
+/** Mirror the selected run in place: every turn and bank its other hand; the road after it follows. */
+function mirrorSelection() {
+  const order = selectedRun();
+  if (!order) { editMsg = "Mirror a run of road: pieces one after another."; renderStatus(); return; }
+  const first = roadPc(order[0]), last = roadPc(order.at(-1));
+  const parent = roadPc(first.parent), next = track.pieces.find((q) => q.parent === last.uid);
+  const ids = order.map((u) => mirrorId(roadPc(u).id));
+  editMsg = leanClash(ids[0], parent ? leanOut(TILES[parent.id]) : 0, null) ?? leanClash(ids.at(-1), leanIn(TILES[ids.at(-1)]), next);
+  if (editMsg) { renderStatus(); return; }
+  reflow(() => order.forEach((u, i) => { roadPc(u).id = ids[i]; }));
+}
+/**
+ * Delete one or several (one undo step): each road closes up, and what hangs off a jump further on
+ * (landings, air rings) is carried with its lip (reflow) — deleting the straight before a kicker used
+ * to pull the kicker back and leave its landing behind (the test lap then missed it, 2026-10-20).
+ */
+function removeMany(uids) {
+  sel = null;
+  selSet.clear();
+  reflow(() => { for (const uid of uids) cutOut(uid); });
+}
+
 let selBox = null;
 function refreshSelection() {
+  if (sel == null || !selSet.has(sel)) selSet = new Set(sel != null ? [sel] : []);
   if (selBox) { scene.remove(selBox); selBox = null; }
-  const b = sel != null ? built.get(sel) : null;
-  if (b) { selBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(b.group), 0x3fd2ff); scene.add(selBox); }
+  const many = selection();
+  if (many.length) {
+    selBox = new THREE.Group();
+    for (const u of many) selBox.add(new THREE.Box3Helper(new THREE.Box3().setFromObject(built.get(u).group), 0x3fd2ff));
+    scene.add(selBox);
+  }
   attachGizmo();
 }
 
@@ -1161,7 +1300,7 @@ function movableKind(uid) {
   return pc.parent == null && pc.flightFrom == null ? "root" : null;
 }
 function attachGizmo() {
-  const kind = !tileBase && !driving ? movableKind(sel) : null;
+  const kind = !tileBase && !driving && selection().length <= 1 ? movableKind(sel) : null;
   if (!kind) { gizmo.detach(); return; }
   built.get(sel).M.decompose(gizmoProxy.position, gizmoProxy.quaternion, gizmoProxy.scale);
   gizmoProxy.updateMatrixWorld(true);
@@ -1218,7 +1357,7 @@ gizmo.addEventListener("objectChange", () => {
   if (!gizmoDrag) return;
   const delta = gizmoProxy.matrixWorld.clone().multiply(gizmoDrag.start.clone().invert());
   for (const { g, M0 } of gizmoDrag.groups) { g.matrix.multiplyMatrices(delta, M0); g.matrixWorldNeedsUpdate = true; }
-  if (selBox) selBox.box.setFromObject(built.get(sel).group);
+  if (selBox?.children[0]) selBox.children[0].box.setFromObject(built.get(sel).group);
 });
 /** An obstacle's frame moved onto the road under it (within 6 m up or down): stood on that deck. */
 function settleOnRoad(M) {
@@ -1270,13 +1409,19 @@ function predictionLine() {
 }
 function renderStatus() {
   const names = { end: "open end", road: "on the road", arc: "flight arc", local: "local grid", world: "world grid" };
-  const selPc = sel != null && !tileBase ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const many = !tileBase ? selection() : [];
+  const multi = many.length > 1;
+  const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
+  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
-    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
+    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
+    (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` : "") +
+    (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
+    (!tileBase && !multi ? `<div class="row"><span>Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</span></div>` : "") +
+    (tileBase === STAMP ? `<div class="row"><span>Snaps like its first piece · R mirrors it · it stays in hand</span></div>` : "") +
     (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · on a road or the floor · Q/E turn</span></div>` : "") +
     (selPc && !isRing(selPc) && !selPc.kind
       ? (editMode
@@ -1314,7 +1459,10 @@ function renderStatus() {
 $("status").addEventListener("click", (e) => {
   const act = e.target.closest?.("button")?.dataset.act;
   if (!act || sel == null) return;
-  if (act === "move" || act === "turn") setGizmoMode(act === "move" ? "translate" : "rotate");
+  if (act === "copy") copySelection();
+  else if (act === "mirror") mirrorSelection();
+  else if (act === "delmany") removeMany(selection());
+  else if (act === "move" || act === "turn") setGizmoMode(act === "move" ? "translate" : "rotate");
   else if (act === "insert" || act === "replace") startEdit(act);
   else if (act === "delete") { editMode = null; removePiece(sel); }
   else if (act === "cp") toggleCheckpoint(sel);
@@ -1338,8 +1486,13 @@ canvas.addEventListener("pointerup", (e) => {
   ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
   let o = ray.intersectObjects(trackGroup.children, true)[0]?.object;
   while (o && o.userData.uid == null) o = o.parent;
-  sel = o?.userData.uid ?? null;
+  const hit = o?.userData.uid ?? null;
+  const run = e.shiftKey && sel != null && hit != null ? runBetween(sel, hit) : null;
+  if (run) { selSet = new Set(run); sel = hit; } // the road between the two
+  else if ((e.ctrlKey || e.metaKey) && hit != null) { if (selSet.has(hit)) selSet.delete(hit); else selSet.add(hit); sel = selSet.size ? (selSet.has(hit) ? hit : [...selSet].at(-1)) : null; }
+  else { sel = hit; selSet = new Set(hit != null ? [hit] : []); }
   editMode = editMsg = null;
+  copiedNote = null;
   refreshSelection();
   renderStatus();
 });
@@ -1356,6 +1509,8 @@ addEventListener("keydown", (e) => {
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); restore(e.shiftKey ? redo : undo, e.shiftKey ? undo : redo); return; }
   if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); restore(redo, undo); return; }
+  if ((e.ctrlKey || e.metaKey) && k === "c" && !tileBase && selection().length) { e.preventDefault(); copySelection(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === "v") { e.preventDefault(); pasteSection(); return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const digit = /^Digit([1-4])$/.exec(e.code);
   if (digit) { gridStep = GRID_STEPS[+digit[1] - 1]; ghostDirty = true; return; }
@@ -1369,7 +1524,7 @@ addEventListener("keydown", (e) => {
     case "PageDown": buildY -= 2; break;
     case "Enter": place(); break;
     case "Escape": if (editMode) editMode = null; else if (tileBase) { tileBase = null; renderDock(); } else { sel = null; editMsg = null; refreshSelection(); } break;
-    case "Delete": case "Backspace": if (!tileBase && sel != null) removePiece(sel); break;
+    case "Delete": case "Backspace": if (!tileBase && selection().length > 1) removeMany(selection()); else if (!tileBase && sel != null) removePiece(sel); break;
     case "[": arcSpeed = Math.max(20, arcSpeed - 1); refreshArcs(); runChecks(); break;
     case "]": arcSpeed = Math.min(80, arcSpeed + 1); refreshArcs(); runChecks(); break;
     default:
@@ -1552,6 +1707,7 @@ window.__b3 = {
   reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
   setTrack(t) { track = t; rebuild(); },
   startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
+  selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
