@@ -184,6 +184,21 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     dom.addEventListener("contextmenu", onContext, true);  // capture: before the move order
     window.addEventListener("keydown", onKey);
   }
+  // RIGHT-CLICK AN UNFINISHED SITE with builders selected (CoH): they go back to work on it.
+  function onSiteClick(e) {
+    if (placing) return;
+    const men = (app.selection?.selected ?? []).filter((u) => u.alive && isHuman(u.team) && !u.isStructure);
+    if (!men.length) return;
+    const g = app.pickWorldAtClient?.(e.clientX, e.clientY)?.point;
+    if (!g) return;
+    const s = sites.find((q) => !q.done && q.alive && isHuman(q.team) && Math.hypot(g.x - q.x, g.z - q.z) < Math.max(3, q.reach - 4) && men.some((u) => canBuild(u, q.key)));
+    if (!s) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    sendTo(s, men.filter((u) => canBuild(u, s.key)));
+    app.algOrderMarks?.order?.(s.x, app.getWorldHeight(s.x, s.z), s.z, men, "move");
+  }
+  dom.addEventListener("contextmenu", onSiteClick, true);
   function cancel() {
     if (!placing) return;
     app.scene.remove(placing.ghost);
@@ -268,17 +283,28 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       barY: Math.min(14, (geoOf(key).boundingBox ?? (geoOf(key).computeBoundingBox(), geoOf(key).boundingBox)).max.y + 1.5),
     };
     sites.push(site);
-    // Each sapper to the nearest open ground at the site's edge, on his side.
     // `stay`: builders already within reach work where they stand (an ambush
     // band raising its screen must not walk off its spot — algAI.js).
-    for (const u of stay ? [] : builders) {
-      if (!u.alive) continue;
-      const dx = u.position.x - cx, dz = u.position.z - cz, d = Math.hypot(dx, dz) || 1;
-      const ex = cx + (dx / d) * (site.reach - 3.5), ez = cz + (dz / d) * (site.reach - 3.5);
+    if (stay) { for (const u of builders) if (u.alive) u.buildSite = site; }
+    else sendTo(site, builders);
+    return site;
+  }
+  /**
+   * Send builders to a site: each to the nearest open ground at its edge, on his side, ASSIGNED to it
+   * (2026-10-20, CoH's rule — you: "are you sure that's how it should behave?"): only the men sent to a
+   * site work on it; one ordered elsewhere drops it, one passing by does not pick it up; a right-click on
+   * the site sends them back (onSiteClick).
+   */
+  function sendTo(site, builders) {
+    for (const u of builders) {
+      if (!u.alive || !canBuild(u, site.key)) continue;
+      u.buildSite = site;
+      u.buildOrder = (u.moveOrders ?? 0) + 1;   // (this moveOrder's count: a later one sends him away)
+      const dx = u.position.x - site.x, dz = u.position.z - site.z, d = Math.hypot(dx, dz) || 1;
+      const ex = site.x + (dx / d) * (site.reach - 3.5), ez = site.z + (dz / d) * (site.reach - 3.5);
       const p = navGrid?.nearestOpenWorld?.(ex, ez, true) ?? { x: ex, z: ez };
       u.moveOrder?.(p.x, p.z);
     }
-    return site;
   }
 
   /**
@@ -292,19 +318,41 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const HAUL_PACE = 0.45;   // × his speed with a crate in his arms (~2.3 m/s: a walk)
   function step(dt) {
     atWork.clear();
+    // A builder ordered AWAY from his site drops it (his goal far from it): CoH's — he does not come back.
+    // (the PLAYER's men only: the AI's bands move about and finish their caches by being near — algAI.js)
+    for (const u of units.list) if (u.buildSite && isHuman(u.team) && (!u.alive || u.buildSite.done || !u.buildSite.alive || (u.buildOrder != null && (u.moveOrders ?? 0) > u.buildOrder))) u.buildSite = null;   // (a NEW move order of yours — not combat's chase)
+    // A builder that chased a target off his site walks back to it, once the fight is over (CoH's engineers).
+    for (const u of units.list) {
+      const s = u.buildSite;
+      if (!s || !isHuman(u.team) || u.isMoving || u.target?.alive || u.attackTarget?.alive) continue;
+      if (Math.hypot(u.position.x - s.x, u.position.z - s.z) < s.reach) continue;
+      const now = performance.now();
+      if ((u._siteBackT ?? 0) > now) continue;   // (a route asked at most every 2 s: none found, no A* each tick)
+      u._siteBackT = now + 2000;
+      const dx = u.position.x - s.x, dz = u.position.z - s.z, d = Math.hypot(dx, dz) || 1;
+      const p = navGrid?.nearestOpenWorld?.(s.x + (dx / d) * (s.reach - 3.5), s.z + (dz / d) * (s.reach - 3.5), true);
+      if (p) u.orderTo(p.x, p.z);
+    }
     for (const s of sites) {
       if (s.done) continue;
       let workers = 0;
       for (const u of units.list) {
-        if (!u.alive || u.team !== s.team || u.isMoving || !canBuild(u, s.key)) continue;
+        if (!u.alive || u.team !== s.team || u.isMoving || !canBuild(u, s.key) || (isHuman(u.team) && u.buildSite !== s)) continue;
+        // (under fire he FIGHTS — he dug and shot at once, 2026-10-20 — and goes back to it after)
+        if (u.target?.alive || u.attackTarget?.alive) continue;
         if (Math.hypot(u.position.x - s.x, u.position.z - s.z) < s.reach) {
           workers++;
           atWork.add(u);
           if (u.working !== s) {
-            u.working = s; u.faceToward?.(s.x, s.z);
+            u.working = s;
+            // FACING THE WORK, turned smoothly (the formation's facing: shared units.js) — a facing left
+            // over from a right-drag had them dig with their backs to the site (measured, 2026-10-20)
+            u.faceAngle = Math.atan2(s.x - u.position.x, s.z - u.position.z);
             // HANDS OR SHOVEL (2026-10-19, Mixamo "Working On Device"): earthworks are dug; on a
             // structure the men alternate — one at the frame with his hands, the next with the shovel.
-            u.workClip = EARTHWORKS.has(s.key) || workers % 2 === 0 ? null : "repair";
+            // (counted per site: the order they were met in gave every man the same clip — measured)
+            s.crew = (s.crew ?? 0) + 1;
+            u.workClip = EARTHWORKS.has(s.key) || s.crew % 2 === 0 ? null : "repair";
           }
         }
       }

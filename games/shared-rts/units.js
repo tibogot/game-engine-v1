@@ -284,6 +284,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
       unit.target = null;
       unit.faceAngle = null;   // (a new move: no old facing — selection.js sets this order's after)
       // (the REVERSE button armed this vehicle's next move: driven backward whatever the distance)
+      unit.moveOrders = (unit.moveOrders ?? 0) + 1;   // (a count of the PLAYER's move orders: algBuild tells a builder sent away from one chasing a target)
       const forced = !!unit.armReverse;
       unit.armReverse = false;
       unit.orderTo(tx, tz, shared);
