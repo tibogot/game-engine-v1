@@ -66,6 +66,8 @@ export const META = {
   ecranEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   miradorBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   miradorEtats: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
+  barbelesBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
+  barbelesEtats: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
 };
 export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps: [], status: "jeu" };
 
@@ -89,6 +91,7 @@ export const NAMES = {
   cacheBlender: "Arms cache (Blender) + construction", cacheEtats: "Arms cache (Blender): states",
   ecranBlender: "Ambush screen (Blender) + construction", ecranEtats: "Ambush screen (Blender): states",
   miradorBlender: "Mirador (Blender) + construction", miradorEtats: "Mirador (Blender): states",
+  barbelesBlender: "Barbed wire (Blender) + construction", barbelesEtats: "Barbed wire (Blender): states",
 };
 const WORDS = [
   ["(LE JEU)", "(THE GAME)"], ["(KIT DU JEU)", "(GAME KIT)"], ["NOUVEAU STANDARD", "NEW STANDARD"], ["NOUVELLE", "NEW"], ["NOUVEAU", "NEW"],

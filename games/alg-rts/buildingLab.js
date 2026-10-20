@@ -15,7 +15,7 @@ import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { buildAmbushScreen, buildArmsCache, buildMirador, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMirador, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, loadAmbushScreen, loadArmsCache, loadMirador, loadSangar, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMirador, loadSangar, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -495,6 +495,26 @@ export const BUILDINGS = {
   // scrub stood up) — damaged RIGHT.
   // THE MIRADOR IN BLENDER (2026-10-21, tools/blender/mirador.py): the game's old one LEFT, the new one MIDDLE —
   // timber and corrugated iron, YOUR simulated sandbags on the deck (its construction in the panel) — damaged RIGHT.
+  // THE BARBED WIRE IN BLENDER (2026-10-21, tools/blender/barbedWire.py): the game's old one LEFT, the new one MIDDLE
+  // (barbed strands, the double apron, one concertina coil; its construction in the panel), cut RIGHT.
+  barbelesBlender: {
+    label: "Barbelés (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadBarbedWire(),
+    before: () => buildBarbedWire(),
+    middle: () => {
+      const g = barbedWireGeometry().clone(), site = g.userData.siteMaterial();
+      g.userData = { ...g.userData, labMaterial: site.material };
+      SITE = { set: site.set, stencilShown: () => false, sock: null };
+      site.set(1);
+      return g;
+    },
+    after: () => labPiece(houseMesh("barbed", "damaged")),
+    tags: ["BARBELÉS (LE JEU)", "BARBELÉS · NOUVEAUX", "BARBELÉS · COUPÉS"], note: "les barbelés du jeu à gauche, les nouveaux (Blender) au milieu — « Construction » — coupés à droite.",
+  },
+  barbelesEtats: {
+    label: "Barbelés (Blender) : états", gap: 9, yaw: Math.PI - 0.5, prepare: () => loadBarbedWire(),
+    before: () => labPiece(houseMesh("barbed", "intact")), middle: () => labPiece(houseMesh("barbed", "damaged")), after: () => labPiece(houseMesh("barbed", "ruin")),
+    tags: ["BARBELÉS · INTACTS", "BARBELÉS · COUPÉS", "BARBELÉS · ÉCRASÉS"], note: "les barbelés dans leurs trois états (coupés : un passage ; écrasés : un véhicule est passé).",
+  },
   miradorBlender: {
     label: "Mirador (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMirador(),
     before: () => buildMirador(),

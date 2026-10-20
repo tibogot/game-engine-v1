@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -134,6 +134,9 @@ export const loadMirador = () => loadBlenderPiece("mirador", "mirador", () => bu
   return ok;
 });
 export const miradorGeometry = () => pieceGeometry("mirador", "mirador");
+/** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
+export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });
+export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");
 
 /** The sangar (tools/blender/sangar.py). */
 export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar());
