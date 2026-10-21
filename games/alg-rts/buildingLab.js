@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -535,6 +535,23 @@ export const BUILDINGS = {
     },
     after: () => labPiece(houseMesh("mortar", "damaged")),
     tags: ["MORTIER (LE JEU)", "MORTIER · NOUVEAU", "MORTIER · ENDOMMAGÉ"], note: "la fosse de mortier du jeu à gauche, la nouvelle (Blender : berme, munitions, piquets, le mortier de 81 ; vos sacs simulés) au milieu — « Construction » — endommagée à droite.",
+  },
+  // THE FORTIFIED POINT IN BLENDER (2026-10-21, tools/blender/fortPoint.py): the game's LEFT, the new one MIDDLE (the
+  // spoil banked outside YOUR simulated walls, the stores inside; its construction in the panel), damaged RIGHT.
+  fortBlender: {
+    label: "Point fortifié (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadFortPoint(),
+    before: () => buildFortPointPiece((o) => buildFortPoint(o)),
+    middle: () => {
+      const geo = fortPointGeometry(), site = geo.userData.siteMaterial();
+      const mesh = kitView(geo);
+      mesh.material = site.material;
+      const bags = siteBags(mesh);
+      SITE = { set: (p) => { site.set(p); bags?.set(p); }, stencilShown: () => false, sock: null };
+      SITE.set(1);
+      return labPiece(mesh);
+    },
+    after: () => labPiece(houseMesh("point", "damaged")),
+    tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · NOUVEAU", "POINT FORTIFIÉ · ENDOMMAGÉ"], note: "le point fortifié du jeu à gauche, le nouveau (Blender : la terre rejetée contre vos murs simulés, caisses, jerricans, téléphone de campagne et son dérouleur, pelle et pioche, bâche) au milieu — « Construction » — endommagé à droite.",
   },
   nidBlender: {
     label: "Nid de MG (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMgNest(),

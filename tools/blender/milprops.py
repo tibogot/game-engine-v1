@@ -244,3 +244,32 @@ def bomb81(K, nm, F, c, d, t, mat="mpGunOlive"):
         for k, e in enumerate((q, r, -q, -r)):
             s0 = c + d * 0.34
             _rod(K, f"{nm}Fin{k}", F(*s0), F(*(s0 + d * 0.06 + e * 0.035)), 0.006, mat, t, 3)
+
+# ── SHARED EARTH (2026-10-21: the MG nest, the mortar pit, the fortified point) ─────────────────────────────────────
+import os as _os
+import bpy as _bpy
+_GROUND = _os.path.join(_os.path.dirname(__file__), "..", "..", "public", "textures", "ground")
+def groundPhoto(nb, folder, file, sc, data=False):
+    im = _bpy.data.images.load(_os.path.abspath(_os.path.join(_GROUND, folder, file)), check_existing=True)
+    if data: im.colorspace_settings.name = "Non-Color"
+    mp = nb.N.new("ShaderNodeMapping"); nb.L.new(nb.tc.outputs["Object"], mp.inputs["Vector"]); mp.inputs["Scale"].default_value = (sc, sc, sc)
+    n = nb.N.new("ShaderNodeTexImage"); n.image = im; n.projection = "BOX"; n.projection_blend = 0.3
+    nb.L.new(mp.outputs["Vector"], n.inputs["Vector"]); return n.outputs["Color"]
+def earthMat(tint=0xb09070, sc=0.45):
+    """Dug spoil: the photographed dry mud (half strength over a brown) with its RELIEF on the BSDF (normals=True)."""
+    def f(nb):
+        c = groundPhoto(nb, "brown_mud_dry", "brown_mud_dry_diff_1k.jpg", sc)
+        c = nb.mix(0.5, c, srgb(tint))
+        c = nb.mix(1.0, c, (0.62, 0.52, 0.4), "MULTIPLY")
+        c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(1.2, 4), 0.45, 0.7), 0.5), c, tuple(v * 0.8 for v in srgb(tint)))
+        pb = next(n for n in nb.N if n.type == "BSDF_PRINCIPLED")
+        nm = nb.N.new("ShaderNodeNormalMap"); nm.inputs["Strength"].default_value = 1.4
+        nb.L.new(groundPhoto(nb, "brown_mud_dry", "brown_mud_dry_nor_gl_1k.jpg", sc, True), nm.inputs["Color"])
+        nb.L.new(nm.outputs["Normal"], pb.inputs["Normal"])
+        return c
+    return f
+def timberMat(tint):
+    def f(nb):
+        c = nb.mix(1.0, nb.img("build/raw_plank_wall/raw_plank_wall_diff_1k.jpg", 0.9), srgb(tint), "MULTIPLY")
+        return dust(nb, nb.scale(c, nb.mr(nb.island(), 0, 1, 0.78, 1.15)), 0.9)
+    return f

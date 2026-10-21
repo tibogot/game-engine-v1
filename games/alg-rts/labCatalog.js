@@ -70,6 +70,7 @@ export const META = {
   sacsConstruction: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   nidBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   mortierBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
+  fortBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   barbelesEtats: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
 };
 export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps: [], status: "jeu" };
@@ -96,7 +97,7 @@ export const NAMES = {
   miradorBlender: "Mirador (Blender) + construction", miradorEtats: "Mirador (Blender): states",
   sacsConstruction: "Sandbag pieces: construction (wall, MG nest, mortar pit)",
   nidBlender: "MG nest (Blender) + construction",
-  mortierBlender: "Mortar pit (Blender) + construction",
+  mortierBlender: "Mortar pit (Blender) + construction", fortBlender: "Fortified point (Blender) + construction",
   barbelesBlender: "Barbed wire (Blender) + construction", barbelesEtats: "Barbed wire (Blender): states",
 };
 const WORDS = [

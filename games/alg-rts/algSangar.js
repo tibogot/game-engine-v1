@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMgNest, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildMgNest, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -199,6 +199,23 @@ export const loadMortarPit = () => loadBlenderPiece("mortarpit", "mortar", () =>
   return ok;
 });
 export const mortarPitGeometry = () => (pieceGeometry("mortarpit", "mortar")?.userData.pitReady ? pieceGeometry("mortarpit", "mortar") : null);
+
+/**
+ * THE FORTIFIED POINT (tools/blender/fortPoint.py, 2026-10-21): the spoil banked outside the three walls, the stores
+ * inside (crates, jerrycans, the field telephone and its reel, tools, a tarp) — the user's simulated walls (sandbagFort,
+ * kit frame) an extra, laid course by course on the site. The old piece's data (footprint, cover) kept.
+ */
+export const loadFortPoint = () => loadBlenderPiece("fortpoint", "point", () => buildFortPoint({ noBags: true }), null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("fortpoint", "point");
+  if (g.userData.fortReady) return ok;
+  await loadSandbagWall();
+  const walls = simulatedWallMesh("SandbagFort", "fort");
+  g.userData.extra = walls ? [walls] : [];
+  g.userData.fortReady = true;
+  return ok;
+});
+export const fortPointGeometry = () => (pieceGeometry("fortpoint", "point")?.userData.fortReady ? pieceGeometry("fortpoint", "point") : null);
 
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
 export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });
