@@ -2071,16 +2071,35 @@ function rootOf(uid) {
   }
   return null;
 }
+// SEVERAL PIECES (user, 2026-10-22: "move several selected pieces with the gizmo"): the gizmo at their
+// middle, level; every road they belong to moves / turns together (carriedMany).
+const multiRoads = () => { const sl = selection(); return !tileBase && !driving && sl.length > 1 && sl.every((u) => ["root", "road", "ring"].includes(movableKind(u))); };
 function attachGizmo() {
+  const multi = multiRoads();
   const kind = !tileBase && !driving && selection().length <= 1 ? movableKind(sel) : null;
-  if (!kind || (kind === "prop" && propOf(sel)?.on != null)) { gizmo.detach(); return; }
-  built.get(sel).M.decompose(gizmoProxy.position, gizmoProxy.quaternion, gizmoProxy.scale);
+  if (!multi && (!kind || (kind === "prop" && propOf(sel)?.on != null))) { gizmo.detach(); return; }
+  if (multi) {
+    const c = new THREE.Vector3();
+    for (const u of selection()) c.add(new THREE.Vector3().setFromMatrixPosition(built.get(u).M));
+    gizmoProxy.position.copy(c.divideScalar(selection().length));
+    gizmoProxy.quaternion.identity();
+    gizmoProxy.scale.set(1, 1, 1);
+  } else built.get(sel).M.decompose(gizmoProxy.position, gizmoProxy.quaternion, gizmoProxy.scale);
   gizmoProxy.updateMatrixWorld(true);
   gizmo.setMode(gizmoMode);
-  gizmo.showX = gizmo.showZ = gizmoMode === "translate";
+  // TURN: round the vertical, and (user, 2026-10-22: "tilt a placed road with the gizmo") PITCH and BANK —
+  // the piece's own axes, 5° steps; MOVE: on the world grid
+  gizmo.setSpace(gizmoMode === "rotate" && !multi ? "local" : "world");
+  gizmo.showX = gizmo.showZ = true;
   gizmo.translationSnap = gridStep;
-  gizmo.rotationSnap = 15 * DEG;
+  gizmo.rotationSnap = 5 * DEG;
   gizmo.attach(gizmoProxy);
+}
+/** What moves with several selected pieces: every road they are part of (and what flies off / stands loose on them). */
+function carriedMany(uids) {
+  const pieces = new Set(), props = new Set();
+  for (const u of uids) { const w = carried(u); for (const x of w.pieces) pieces.add(x); for (const x of w.props) props.add(x); }
+  return { pieces: [...pieces], props: [...props] };
 }
 function setGizmoMode(m) { gizmoMode = m; attachGizmo(); statusKey = ""; renderStatus(); }
 /** Everything that moves with `uid`: a root carries its road, what flies off it, and what stands on it. */
@@ -2101,7 +2120,7 @@ function carried(uid) {
 gizmo.addEventListener("dragging-changed", (e) => {
   controls.enabled = !e.value;
   if (e.value) {
-    const what = carried(sel);
+    const what = multiRoads() ? carriedMany(selection()) : carried(sel);
     showPieceMeshes(true);
     gizmoDrag = { start: gizmoProxy.matrixWorld.clone(), what, groups: [...what.pieces, ...what.props].map((u) => built.get(u)).filter(Boolean).map((b) => ({ g: b.group, M0: b.group.matrix.clone() })) };
     for (const { g } of gizmoDrag.groups) g.matrixAutoUpdate = false;
@@ -2134,7 +2153,7 @@ gizmo.addEventListener("dragging-changed", (e) => {
   rebuild();
   // DROPPED NEAR AN END: a road's head let go within 4 m of an open end, heading its way (20°), joins it
   const kind = movableKind(sel);
-  if (kind === "root" || kind === "road") joinRoad(kind === "root" ? sel : rootOf(sel), 4, 20);
+  if (!multiRoads() && (kind === "root" || kind === "road")) joinRoad(kind === "root" ? sel : rootOf(sel), 4, 20);
 });
 gizmo.addEventListener("objectChange", () => {
   if (!gizmoDrag) return;
@@ -2201,7 +2220,8 @@ function renderStatus() {
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
     `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
-    (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` : "") +
+    (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` +
+      (multiRoads() ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div><div class="row"><span>The roads they are part of move and turn together</span></div>` : "") : "") +
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
     (!tileBase && !multi && !selPc ? `<div class="legend">Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</div>` : "") +
     (!tileBase && !multi && !selPc && track.pieces.length > 1
@@ -2525,7 +2545,7 @@ async function startDrive() {
   // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
   const selRoad = track.pieces.find((p) => p.uid === sel && !isRing(p)); // (not an obstacle or a ring)
   const from = selRoad ? built.get(sel)?.M ?? null : null;
-  await rig.start({ track, trackId, from, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  await rig.start({ track, trackId, from, noTimer: !timerOn, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
 }
 function stopDrive() {
   if (!driving) return;
@@ -2547,6 +2567,13 @@ function stopDrive() {
   last = performance.now();
 }
 $("b-drive").onclick = startDrive;
+// THE TIMER SWITCH (user, 2026-10-22): building and debugging, Drive starts at once — no countdown, no clock,
+// no medals; on, it is the real race. Off by default, remembered.
+let timerOn = false;
+try { timerOn = localStorage.getItem("thunderline.builder.timer") === "1"; } catch {}
+function showTimer() { $("b-timer").textContent = `Timer: ${timerOn ? "on" : "off"}`; $("b-timer").classList.toggle("on", timerOn); }
+$("b-timer").onclick = () => { timerOn = !timerOn; try { localStorage.setItem("thunderline.builder.timer", timerOn ? "1" : "0"); } catch {} showTimer(); };
+showTimer();
 // THE CAMERA for people who don't use 3D software (editorNav.js)
 const nav = createEditorNav({
   camera, controls, dom: renderer.domElement, frameAll, floorY: FLOOR_Y, enabled: () => !driving,
@@ -2631,7 +2658,8 @@ window.__b3 = {
   setTrack(t) { track = t; rebuild(); },
   startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
   refitLandings, get problems2() { return problems; },
-  selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
+  selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); },
+  selectMany(uids) { sel = uids.at(-1); selSet = new Set(uids); refreshSelection(); renderStatus(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };

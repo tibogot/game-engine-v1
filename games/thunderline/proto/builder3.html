@@ -97,6 +97,7 @@
       #toolbar { position: fixed; left: 16px; top: 14px; z-index: 20; display: flex; gap: 4px; }
       #toolbar button { background: var(--panel); color: var(--text); border: 1px solid var(--line); padding: 7px 12px; cursor: pointer; font: 600 14px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.06em; }
       #toolbar button:hover { border-color: var(--bolt); color: var(--bolt); }
+      #toolbar button.on { border-color: var(--bolt); color: var(--bolt); }
       #b-name { background: var(--panel); color: var(--text); border: 1px solid var(--line); padding: 0 10px; width: 190px; font: 700 15px "Barlow Condensed"; letter-spacing: 0.04em; outline: none; }
       #b-name:focus { border-color: var(--bolt); }
       #b-world, #b-tod { background: var(--panel); color: var(--text); border: 1px solid var(--line); padding: 0 8px; font: 600 14px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.06em; outline: none; cursor: pointer; }
@@ -117,7 +118,7 @@
   </head>
   <body>
     <div id="view"></div>
-    <div id="toolbar"><button id="b-menu">☰ Menu</button><input id="b-name" spellcheck="false" maxlength="40" title="Track name" /><button id="b-undo">Undo</button><button id="b-redo">Redo</button><button id="b-frame">Frame</button><button id="b-keys">Keys</button><button id="b-new">New</button><select id="b-world" title="The world this track is in"></select><select id="b-tod" title="The time of day this track is driven at"></select><button id="b-info" title="Description and share code">Info</button><button id="b-drive" style="border-color:#3fd2ff;color:#3fd2ff">Drive ▶</button></div>
+    <div id="toolbar"><button id="b-menu">☰ Menu</button><input id="b-name" spellcheck="false" maxlength="40" title="Track name" /><button id="b-undo">Undo</button><button id="b-redo">Redo</button><button id="b-frame">Frame</button><button id="b-keys">Keys</button><button id="b-new">New</button><select id="b-world" title="The world this track is in"></select><select id="b-tod" title="The time of day this track is driven at"></select><button id="b-info" title="Description and share code">Info</button><button id="b-timer" title="Countdown, lap clock and medals when you Drive (off: drive at once, nothing recorded)">Timer: off</button><button id="b-drive" style="border-color:#3fd2ff;color:#3fd2ff">Drive ▶</button></div>
     <!-- FIRST STEPS: three lines, not a wall of keys (the full list is behind the Keys button) -->
     <div id="steps" class="cut"><button id="steps-x" title="Hide">✕</button><b>Build a track</b><ol><li>Pick a piece in the dock below.</li><li>Click to place it. It <b style="color:#45e08a">snaps to the end</b> of your road; keep clicking to add more.</li><li>Press <kbd>Tab</kbd> to drive it, <kbd>Esc</kbd> to come back.</li></ol><span class="more">Move the view with <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or by dragging the ground · all keys: <a id="steps-keys">Keys</a></span></div>
     <div id="keys" class="cut hidden">
@@ -128,7 +129,7 @@
       <kbd>G</kbd> world/local grid · <kbd>1</kbd>–<kbd>4</kbd> grid step · <kbd>R</kbd> left/right · <kbd>T</kbd> rails both / left / right / none · <kbd>[</kbd> <kbd>]</kbd> arc speed band<br />
       <b style="color:#ff4d5e">Red box</b> = road overlapping road · the warning panel names blocked flights · <kbd>Tab</kbd> / <kbd>Drive ▶</kbd> drives your track here (<kbd>Esc</kbd> back) · a piece selected: practice from it<br />
       No piece in hand: click a piece to select, <kbd>Del</kbd> remove (the road closes up) · <kbd>I</kbd> insert after it · <kbd>P</kbd> replace it (then pick from the dock; the road after it follows) · <kbd>Ctrl+Z</kbd> undo<br />
-      <b>Gizmo:</b> select any road piece or an air ring: drag the arrows to move it (grid steps; the whole joined road comes along, turning round the piece you picked), <kbd>M</kbd> switches to turning it · obstacles: <b>drag them</b> along or across the road, <kbd>Q</kbd>/<kbd>E</kbd> turn<br />
+      <b>Gizmo:</b> select any road piece or an air ring: drag the arrows to move it (grid steps; the whole joined road comes along, turning round the piece you picked), <kbd>M</kbd> switches to turning it (round the vertical, and tilting: pitch and bank, 5° steps) · several selected pieces: their roads move together · obstacles: <b>drag them</b> along or across the road, <kbd>Q</kbd>/<kbd>E</kbd> turn<br />
       <b>Split / join:</b> <kbd>K</kbd> splits the road at the selected piece (it starts a road of its own) · drop a road's first piece near an open end to join it, or press <b>Join to the end nearby</b><br />
       <b>Camera:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move (<kbd>Shift</kbd> faster) · drag the ground to move · right-drag turn · wheel zoom · <kbd>V</kbd> top view · <kbd>Home</kbd> go to end · <kbd>F</kbd> frame all · or the panel on the right
     </div>

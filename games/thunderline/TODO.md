@@ -108,8 +108,14 @@ this is just the list. Newest decisions at the top of each section. Last updated
       nearest end, K m higher". KEYS list updated. Tests: 4 straights split at the 3rd, moved 20 m (the
       first half stayed), Join button → joined, nothing loose, lap runs; split + 3 m drop → auto-joined;
       readouts "140 m above the floor …", "20 m above the road under it …" (Alt over the road).
-      Still open from that list: move SEVERAL selected pieces with the gizmo, snap onto another piece's
-      SURFACE (stacking), tilt a placed road with the gizmo.
+      TILT with the gizmo: Turn mode (M) shows all three rings in the piece's own axes, 5° steps — the
+      joined road pitches / banks round the picked piece (test: 10° pitch, 4 pieces, still joined).
+      SEVERAL PIECES: a selection of pieces from one or more roads (Shift / Ctrl-click) gets the gizmo at
+      their middle; their roads move / turn together (carriedMany; test: two roads moved 15 m).
+      TIMER SWITCH (user, 2026-10-22: "no timer and countdown all the time when creating and debugging"):
+      "Timer: off" in the toolbar (default, remembered): Drive starts at once (no countdown), no clock /
+      checkpoint counter, a finish records nothing; on = the real race (driveSession o.noTimer).
+      Still open: snap onto another piece's SURFACE (stacking).
 - **MORE OBSTACLES** (user, 2026-10-21: "poles, boost decals … many others"; agreed order):
       1. [x] BOOST PAD (Obstacles tab): a decal on ANY piece, 8 × 12 m, the Boost 32 chevrons and push
          (carRules BOOST 2 s; pads are { inv, hx, hz } boxes — obstacles.js boostZones, in the drive page

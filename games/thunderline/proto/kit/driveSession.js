@@ -428,7 +428,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const r0 = lay.ride[0];
     for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, startT ? startT.line : 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) group.add(makeGateMesh(g));
     scene.add(group);
-    const race = createRace({ gates, countdown: o.from ? 0.3 : 1.5 });
+    // o.noTimer (the builder's Timer switch, off by default — user, 2026-10-22: "we shouldn't need the timer
+    // and the countdown all the time when creating and debugging"): no countdown, no clock on screen, a
+    // finish records nothing (as practice from a piece)
+    const race = createRace({ gates, countdown: o.noTimer ? 0 : o.from ? 0.3 : 1.5 });
     // the track's identity for records: its pieces, links and flags (DESIGN.md §8 keys records by content)
     const trackKey = track ? contentKey(track) : "test";
     const medals = medalTimes(track?.authorTime);
@@ -502,6 +505,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     $("back").onclick = () => { $("back").blur(); o.onEscape?.(); };
     $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>C</kbd> free camera`;
     hud.classList.add("on");
+    $("time").style.display = $("cps").style.display = o.noTimer ? "none" : "";
 
     // ---------- sun shadows (drive page only): static atlas of this track + live map around the car ----------
     if (useSunShadows && !sunShadows) await bakeSunShadows(lay);
@@ -647,7 +651,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       flashSplit(`CP ${e.n}/${e.of} · ${fmt(e.time)}${tail}`, "cp");
     } else if (e.type === "missing") {
       flashSplit(`${e.n} checkpoint${e.n > 1 ? "s" : ""} missed — take them all`, "miss");
-    } else if (e.type === "finish" && S.o.from) {
+    } else if (e.type === "finish" && (S.o.from || S.o.noTimer)) {
       showFinish(e.time, false, true); // practice: nothing is recorded
     } else if (e.type === "finish") {
       const improved = !S.best || e.time < S.best.time;
