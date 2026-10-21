@@ -51,8 +51,8 @@ const CATS = [
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
-  { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
-  { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
+  { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "catch_tube", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "catch_tube", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
@@ -105,6 +105,12 @@ function restore(from, to) {
 const FITTED = "fitted_landing";
 const FITTED_ANGLE = 20;
 let fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_32`).id;
+// "catch_tube": the same idea as a TUBE whose wide portal is laid on the jump's arc (kit.js ensureTile):
+// the car flies into it and comes out level in a pipe (user, 2026-10-21: "jump to enter inside a tube in air")
+const CATCH = "catch_tube";
+let catchId = ensureTile(`catch_tube_${FITTED_ANGLE}_32`).id;
+const TUBE_ROOF = 16; // m, floor to roof inside a tube (portal and pipe alike: tubeLook.js)
+const ROOF_CLEAR = 3; // m: the car's height plus a margin under the roof
 // "fitted_bowl": a U-turn bowl (oldTiles.js) whose radius fits the speed the car ARRIVES at that end
 // (the background prediction measures it). bowlTest.mjs, real car, wall cut, air 180: at the speed it
 // is fitted to, R = 95 + 2.2·(v − 44) gives ~4.5 s of air and a 26–30 m apex over the lip, and 7%
@@ -130,11 +136,12 @@ const tileId = (base, h = hand) => {
   if (ADJUSTABLE[base]) return ensureTile(adjustableId(base, adjParams[base], ADJUSTABLE[base].hand ? h : 1)).id;
   if (base === RING || isObstacle(base) || base === STAMP) return base;
   if (base === FITTED) return fittedId;
+  if (base === CATCH) return catchId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
-const thumbOf = (id) => (parseAdjustable(id) ? parseAdjustable(id).base : id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
+const tileLabel = (base) => (ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === CATCH ? "Catch tube" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const thumbOf = (id) => (parseAdjustable(id) ? parseAdjustable(id).base : id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === CATCH || id.startsWith("catch_tube_") ? "tube_in" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
@@ -234,7 +241,7 @@ async function bakeThumbs() {
   const cvs = document.createElement("canvas"); cvs.width = W; cvs.height = H;
   const ctx = cvs.getContext("2d");
   for (const c of CATS) for (const id of c.tiles) {
-    if (id === FITTED) continue; // drawn with the landing's picture (see pic)
+    if (id === FITTED || id === CATCH) continue; // drawn with the landing's / tube's picture (see pic)
     const pid = id === FITTED_BOWL ? "bowl_110" : ADJUSTABLE[id] ? ensureTile(adjustableId(id, adjDefaults(id))).id : id; // a typical one
     const g = id === RING
       ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
@@ -389,7 +396,7 @@ function renderDock() {
 }
 function pickTile(base, h = null) {
   if (editMode && sel != null) {
-    editWith(base === RING || base === FITTED || base === FITTED_BOWL ? base : tileId(base, h ?? hand));
+    editWith(base === RING || base === FITTED || base === CATCH || base === FITTED_BOWL ? base : tileId(base, h ?? hand));
     renderDock();
     renderStatus();
     return;
@@ -612,6 +619,9 @@ async function runPrediction() {
   let lowY = Infinity;
   for (const r of ride) lowY = Math.min(lowY, r.P.y);
   const lipSpeed = new Map(), launch = new Map();
+  // each piece's exit frame AS THIS RUN STARTED: the run yields between slices, and an edit meanwhile
+  // rebuilds `built` (a launch read a piece that was gone: "Cannot read … 'exit'")
+  const exits = new Map(order.map((pc) => [pc.uid, built.get(pc.uid).exit.clone()]));
   // a track that ENDS on a lip (the jump you are building): run until the take-off is measured —
   // that number is the whole point — and call it an open jump, not a failure
   const lastUid = ride[ride.length - 1].uid;
@@ -659,7 +669,10 @@ async function runPrediction() {
       lipSpeed.set(ride[idx].uid, car.body.vel.length());
       // the take-off itself: deck point under the car (≈ 0.55 m below its centre) + its velocity
       const carUp = new THREE.Vector3(0, 1, 0).applyQuaternion(car.body.quat);
-      launch.set(ride[idx].uid, { P: car.body.pos.clone().addScaledVector(carUp, -0.55), V: car.body.vel.clone() });
+      // stored in the LIP's frame (2026-10-21): a world position went stale when the lip moved, or when
+      // a new track reused its uid — a catch tube was aimed 32 m to the side of the real flight
+      const inv = exits.get(ride[idx].uid).clone().invert();
+      launch.set(ride[idx].uid, { id: track.pieces.find((q) => q.uid === ride[idx].uid)?.id, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(inv), V: car.body.vel.clone().applyMatrix4(new THREE.Matrix4().extractRotation(inv)) });
       flying = ride[idx].uid;
       airT = 0;
     }
@@ -752,10 +765,12 @@ function refreshArcs() {
     // the REAL car's take-off speed at this lip (background prediction), else the global guess
     // where and how the REAL car left this lip (background prediction): a flip ramp's curl lets the
     // car go in another direction than its exit socket says (the socket's arc fell 35 m short)
-    const launch = prediction.launch?.get(p.uid) ?? null;
+    // the measured take-off, back into the world from this lip's CURRENT frame (if it is still that piece)
+    const L = prediction.launch?.get(p.uid);
+    const launch = L && L.id === p.id ? { P: L.P.clone().applyMatrix4(m), V: L.V.clone().applyMatrix4(new THREE.Matrix4().extractRotation(m)) } : null;
     const v = prediction.lipSpeed.get(p.uid) ?? arcSpeed;
     const slow = flight(m, v * BAND_SLOW, launch, BAND_SLOW), fast = flight(m, v, launch, 1);
-    arcs.push({ ...slow, fast, from: p.uid, landing });
+    arcs.push({ ...slow, fast, from: p.uid, landing, lip: { m, launch, v } }); // lip: to fly any speed in the band (catch tube)
     for (const [a, color] of [[slow, 0xff9a3d], [fast, 0xffd27a]]) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(a.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
       arcGroup.add(line);
@@ -832,6 +847,18 @@ function runChecks() {
     const { b, t } = piece(pc.id, pc.open);
     const M = built.get(pc.uid).M, hw = SECTIONS[t.section ?? "road"].hw;
     const deck = b.rings.map((r) => { const f = deckFrame(r, hw); return { P: f.P.applyMatrix4(M), U: f.U.transformDirection(M) }; });
+    // THE DECK AS SEGMENTS between its rings: an arc point counts only if it is OVER the deck's footprint
+    // — along a segment (its length, ± 3 m) and across it within its width. (A radius of hw round each
+    // ring reached 24 m in FRONT of a wide platform's start: the car still rising before it read as "hits
+    // it from below" — a level platform on an arc, 2026-10-21.)
+    const segs = [];
+    for (let i = 0; i + 1 < deck.length; i++) {
+      const s0 = deck[i], s1 = deck[i + 1];
+      const D = s1.P.clone().sub(s0.P), len = D.length();
+      if (len < 1e-6) continue;
+      const T = D.divideScalar(len), U = s0.U.clone().add(s1.U).normalize();
+      segs.push({ P: s0.P, T, U, R: new THREE.Vector3().crossVectors(T, U).normalize(), len });
+    }
     const lowest = Math.min(...deck.map((s) => s.P.y));
     const lands = (pts) => {
       let apex = 0;
@@ -839,9 +866,12 @@ function runChecks() {
       let above = false; // the arc has been over the deck: coming down through it from there = landed
       for (let i = 0; i < pts.length; i++) {
         const p = pts[i];
-        for (const s of deck) {
+        for (const s of segs) {
           const d = p.clone().sub(s.P);
-          if (Math.hypot(d.x, d.z) >= Math.max(hw, 6)) continue;
+          const along = d.dot(s.T);
+          // (3 m of margin at the ends: a fitted landing starts exactly ON the slow arc — the point just
+          // before its start is where the arc arrives over it; 0.5 m flagged White 3's fitted landing)
+          if (along < -3 || along > s.len + 3 || Math.abs(d.dot(s.R)) > Math.max(hw, 6)) continue;
           const h = d.dot(s.U);
           if (h >= -0.5) above = true; // over it, or ON it (a fitted landing starts exactly on the slow arc)
           else if (above) return true; // came down onto the deck
@@ -851,12 +881,14 @@ function runChecks() {
       }
       return false;
     };
-    const slowOk = lands(a.pts), fastOk = lands(a.fast.pts);
+    // a CATCH TUBE is a precision target: only the full-speed flight has to get in (catchSnap)
+    const slowOk = pc.id.startsWith("catch_tube_") ? true : lands(a.pts), fastOk = lands(a.fast.pts);
     if (!slowOk || !fastOk) problems.misses.push({ uid: pc.uid, slowOk, fastOk });
   }
   for (const m of problems.misses) {
     const name = TILES[track.pieces.find((q) => q.uid === m.uid).id]?.label ?? "a landing";
     const fitted = track.pieces.find((q) => q.uid === m.uid).id.startsWith("fitted_landing_");
+    if (track.pieces.find((q) => q.uid === m.uid).id.startsWith("catch_tube_")) { problems.messages.push(`"${name}": the full-speed car misses its mouth — Re-fit it to the jump`); continue; }
     problems.messages.push(`"${name}": ${!m.slowOk && !m.fastOk ? "the car misses it" : !m.slowOk ? "a slower car falls short of it" : "a fast car flies past it"} — ${fitted ? "Re-fit it to the jump" : "move it on the arc or use a Fitted landing"}`);
   }
   // tint overlapping pieces: a red box around each
@@ -958,6 +990,66 @@ function ringSnap() {
   const U = new THREE.Vector3().crossVectors(R, T);
   return { type: "arc", m: socketMatrix({ p: best.a.fast.pts[best.k], T, U, R }), from: best.a.from, note: "Air ring: on the full-speed line — take off fast and straight to go through" };
 }
+/**
+ * THE CATCH TUBE ON A JUMP. A tube in the air is a PRECISION target: the band (85–100% of the take-off
+ * speed) spreads 20 m+ apart vertically by then — no 16 m mouth catches it all (measured: every spot on a
+ * kicker's arc had the fast car 23–37 m over a floor laid on the slow one). So the mouth aims at the
+ * FULL-SPEED flight (the real car's measured take-off), its floor CATCH_BELOW under it, at the height you
+ * point at; the builder reports which take-off speeds get in (flown exactly, 1% steps), and the slope
+ * runs until the full-speed car is down on it (+12 m), like a fitted landing.
+ */
+const CATCH_BELOW = 5; // m: the full-speed car crosses the mouth this far above its floor
+function catchSnap(a, y) {
+  const fast = a.fast;
+  let k = -1;
+  for (let i = 3; i < fast.pts.length; i++) if (fast.tan[i].y < -0.02 && fast.pts[i].y <= y) { k = i; break; }
+  if (k < 0) return { type: "arc", m: new THREE.Matrix4(), from: a.from, bad: "The full-speed car never comes down to this height" };
+  const Pf = fast.pts[k], Tf = fast.tan[k];
+  const fall = Math.asin(THREE.MathUtils.clamp(-Tf.y, -1, 1)) / DEG;
+  const angle = THREE.MathUtils.clamp(Math.round(fall / 5) * 5, 10, 45);
+  const h = new THREE.Vector3(Tf.x, 0, Tf.z).normalize();
+  const T = h.clone().multiplyScalar(Math.cos(angle * DEG)).setY(-Math.sin(angle * DEG));
+  const R = new THREE.Vector3().crossVectors(T, UP).normalize();
+  const U = new THREE.Vector3().crossVectors(R, T);
+  const P0 = Pf.clone().addScaledVector(U, -CATCH_BELOW);
+  // where a flight crosses the mouth (the plane through P0 across T), and how high over the floor
+  const atMouth = (pts) => {
+    for (let i = 1; i < pts.length; i++) {
+      const a0 = pts[i - 1].clone().sub(P0).dot(T), a1 = pts[i].clone().sub(P0).dot(T);
+      if (a0 < 0 && a1 >= 0) {
+        const q = pts[i - 1].clone().lerp(pts[i], -a0 / (a1 - a0)).sub(P0);
+        return { h: q.dot(U), side: q.dot(R) };
+      }
+    }
+    return null;
+  };
+  const inside = (c) => c && c.h >= 0.5 && c.h <= TUBE_ROOF - ROOF_CLEAR && Math.abs(c.side) <= 12;
+  let sMin = 1;
+  for (let s = 1; s >= BAND_SLOW - 1e-9; s -= 0.01) {
+    if (!inside(atMouth(flight(a.lip.m, a.lip.v * s, a.lip.launch, s).pts))) break;
+    sMin = s;
+  }
+  // the slope: until the full-speed car is down on it, + 12 m; and never over the roof on the way
+  let D = 24, over = 0;
+  for (const q of fast.pts) {
+    const rel = q.clone().sub(P0), along = rel.dot(T);
+    if (along < 0) continue;
+    over = Math.max(over, rel.dot(U));
+    if (rel.dot(U) <= 0) { D = along + 12; break; }
+  }
+  D = Math.max(24, Math.ceil(D / 4) * 4);
+  catchId = ensureTile(`catch_tube_${angle}_${D}`).id;
+  const m = socketMatrix({ p: P0, T, U, R });
+  const kmh = (s) => Math.round(a.lip.v * s * 3.6);
+  const bad = over > TUBE_ROOF - ROOF_CLEAR ? `The full-speed car rises ${Math.round(over)} m over the floor inside: it hits the roof — point lower` : null;
+  const guess = !prediction.lipSpeed.has(a.from);
+  const note = guess
+    ? "Catch tube · the take-off isn't measured yet (the test lap is running): place it, then Re-fit it to the jump"
+    : `Catch tube · gets in from ${kmh(sMin)} to ${kmh(1)} km/h${sMin > 0.97 ? " (a near-perfect take-off)" : ""} · ends level in a pipe: a Tube piece next`;
+  return { type: "arc", m, from: a.from, bad, note };
+}
+const LAND_LEAD = 6; // m: a level landing starts this far before the slow car touches down
+const ROUGH_FALL = 22; // °: steeper than this onto flat needs the player to level the car (else rough)
 function computeSnap() {
   if (tileBase === RING) return ringSnap();
   if (isObstacle(tileBase)) return obstacleSnap();
@@ -967,7 +1059,7 @@ function computeSnap() {
   let best = null;
   // A LANDING in hand goes on a flight arc first: next to its lip, a short drop's whole arc sat inside
   // the open end's 60 px and the landing could only snap to the end (seen building, 2026-10-19)
-  const landingInHand = !!t?.landAngle || tileBase === FITTED;
+  const landingInHand = !!t?.landAngle || tileBase === FITTED || tileBase === CATCH;
   const onArc = landingInHand && arcs.some((a) => a.pts.some((p, k) => {
     if (k < 3 || a.tan[k].y > -0.02) return false;
     const s = toScreen(p);
@@ -1011,10 +1103,47 @@ function computeSnap() {
     const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
     if (d < 30 && (!best || d < best.d)) best = { a, k, d };
   }
+  // LAND ON ANY PIECE (user, 2026-10-21: "this game is about jumps … large platforms to land"): a road
+  // piece that isn't a landing — a platform, a straight, a turn… — goes LEVEL at the height you point at
+  // on the arc, heading the way the car flies, its start a few metres before the SLOW car touches down;
+  // linked to the jump like a landing (flightFrom: the test lap flies onto it). It warns when the FAST
+  // car lands past its end, and when the touchdown is steep on flat (rough: a landing slope keeps speed).
+  // Tubes and halfpipes don't: the car would fall onto their roof or rim (a catch tube is its own piece).
+  if (best && !t.landAngle && tileBase !== FITTED && tileBase !== CATCH && !t.tube && !t.halfpipe) {
+    const a = best.a, y0 = a.pts[best.k].y;
+    // where an arc comes down through height y0 (on its falling part)
+    const cross = (pts) => {
+      for (let k = 1; k < pts.length; k++) {
+        if (pts[k - 1].y >= y0 && pts[k].y < y0) {
+          const f = (pts[k - 1].y - y0) / (pts[k - 1].y - pts[k].y);
+          const p = pts[k - 1].clone().lerp(pts[k], f), d = pts[k].clone().sub(pts[k - 1]).normalize();
+          return { p, fall: Math.asin(THREE.MathUtils.clamp(-d.y, -1, 1)) / DEG };
+        }
+      }
+      return null;
+    };
+    const slow = cross(a.pts) ?? { p: a.pts[best.k].clone(), fall: Math.asin(THREE.MathUtils.clamp(-a.tan[best.k].y, -1, 1)) / DEG };
+    const fast = cross(a.fast.pts);
+    const h = new THREE.Vector3(a.tan[best.k].x, 0, a.tan[best.k].z).normalize();
+    const start = slow.p.clone().addScaledVector(h, -LAND_LEAD);
+    start.y = y0;
+    const m = socketMatrix({ p: start, T: h, U: UP.clone(), R: new THREE.Vector3().crossVectors(h, UP).normalize() });
+    if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
+    // how far the piece reaches (start to exit, flat) vs where the fast car comes down
+    const ex = new THREE.Vector3().setFromMatrixPosition(piece(id).exitLocal);
+    const reach = Math.hypot(ex.x, ex.z);
+    const fastAt = fast ? fast.p.clone().sub(start).dot(h) : Infinity;
+    const notes = [];
+    if (fastAt > reach - 4) notes.push(fast ? `the fast car lands ${Math.round(fastAt)} m on, past this ${Math.round(reach)} m piece — use a longer one` : `the fast car flies over this height — point lower on the arc`);
+    const worst = Math.max(slow.fall, fast?.fall ?? 0);
+    // (the game grades by the car's angle to the surface — landing.js — and the player can level it in the air)
+    if (worst > ROUGH_FALL) notes.push(`steep onto flat (${Math.round(worst)}°): level the car in the air, or use a landing slope`);
+    return { type: "arc", m, from: a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: notes.length ? notes.join(" · ") : `level landing · touchdown ${Math.round(slow.fall)}–${Math.round(fast?.fall ?? slow.fall)}°` };
+  }
   if (best) {
     // a landing slides along the arc to where the fall angle equals its own → its exit comes out level
     // (not the FITTED landing: it takes the angle of the arc where you point — land at any depth)
-    if (t.landAngle && tileBase !== FITTED) {
+    if (t.landAngle && tileBase !== FITTED && tileBase !== CATCH) {
       const want = t.landAngle * DEG;
       let kBest = best.k, err = Infinity;
       for (let k = 3; k < best.a.pts.length; k++) {
@@ -1025,7 +1154,9 @@ function computeSnap() {
     }
     let T = best.a.tan[best.k];
     let fittedAngle = FITTED_ANGLE;
-    if (tileBase === FITTED) {
+    if (tileBase === CATCH) return catchSnap(best.a, best.a.pts[best.k].y);
+    const fitted = tileBase === FITTED;
+    if (fitted) {
       // the slope at the arc's own fall angle where you point, in 5° steps (10–45°), and the landing
       // laid exactly at that angle so its exit comes out level
       const fall = Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG;
@@ -1036,7 +1167,8 @@ function computeSnap() {
     const R = new THREE.Vector3().crossVectors(T, UP).normalize();
     const U = new THREE.Vector3().crossVectors(R, T);
     const P0 = best.a.pts[best.k];
-    if (tileBase === FITTED) {
+    let roofBad = null;
+    if (fitted) {
       // FITTED LANDING: the down-slope starts here on the SLOW arc and runs until the FAST arc meets
       // it too (+12 m margin): every speed in the band lands on the slope, not past it
       let D = 24;
@@ -1050,7 +1182,7 @@ function computeSnap() {
     }
     const m = socketMatrix({ p: P0, T, U, R });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
-    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null };
+    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : roofBad };
   }
   ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
   const hit = new THREE.Vector3();
@@ -1107,7 +1239,7 @@ function suggestionsFor(end) {
     const back = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) <= 3), keep = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) > 3);
     return { label: `Leans ${Math.abs(deg(end.lean))}° · fits`, items: [...back.slice(0, 2), ...keep.slice(0, 4)] };
   }
-  if (end.pitch > 3 * DEG || TILES[track.pieces.find((p) => p.uid === end.uid)?.id]?.drop) return { label: "Lip · land it on the arc", items: [FITTED, "banked_landing_20", "landing_turn_20", "catch_pad"].map((b) => ({ base: b, h: hand, id: tileId(b) })) };
+  if (end.pitch > 3 * DEG || TILES[track.pieces.find((p) => p.uid === end.uid)?.id]?.drop) return { label: "Lip · land it on the arc", items: [FITTED, CATCH, "banked_landing_20", "landing_turn_20", "catch_pad", "platform_64"].map((b) => ({ base: b, h: hand, id: tileId(b) })) };
   return recent.length ? { label: "Again", items: recent.slice(0, 4) } : null;
 }
 let nextKey = "";
@@ -1228,7 +1360,7 @@ function editWith(id) {
   const mode = editMode;
   editMode = null;
   if (!pc || isRing(pc)) return;
-  if (id === RING || id === FITTED || id === FITTED_BOWL) { editMsg = "Landings, bowls and air rings go on a flight arc: pick them with nothing selected."; return; }
+  if (id === RING || id === FITTED || id === CATCH || id === FITTED_BOWL) { editMsg = "Landings, bowls and air rings go on a flight arc: pick them with nothing selected."; return; }
   const child = track.pieces.find((q) => q.parent === pc.uid);
   if (mode === "insert") {
     editMsg = leanClash(id, leanOut(TILES[pc.id]), child);
@@ -1273,13 +1405,19 @@ function fittedOnArc(a, k) {
   D = Math.max(24, Math.ceil(D / 4) * 4);
   return { id: ensureTile(`fitted_landing_${angle}_${D}`).id, m: socketMatrix({ p: P0, T, U, R }) };
 }
-const refittable = () => problems.misses.filter((m) => track.pieces.find((q) => q.uid === m.uid)?.id.startsWith("fitted_landing_")).map((m) => m.uid);
+const refittable = () => problems.misses.filter((m) => /^(fitted_landing|catch_tube)_/.test(track.pieces.find((q) => q.uid === m.uid)?.id ?? "")).map((m) => m.uid);
 function refitLandings(uids = refittable()) {
   const fits = [];
   for (const uid of uids) {
     const a = arcs.find((x) => x.landing === uid);
     if (!a) continue;
     const y = new THREE.Vector3().setFromMatrixPosition(built.get(uid).M).y;
+    // a CATCH TUBE: aimed again at the full-speed flight, its floor at the same height (catchSnap)
+    if (track.pieces.find((q) => q.uid === uid).id.startsWith("catch_tube_")) {
+      const c = catchSnap(a, y + CATCH_BELOW);
+      if (!c.bad || !/never comes down/.test(c.bad)) fits.push({ uid, id: catchId, m: c.m });
+      continue;
+    }
     let k = -1;
     for (let i = 3; i < a.pts.length; i++) if (a.tan[i].y < -0.02 && a.pts[i].y <= y) { k = i; break; }
     if (k < 0) continue; // the slow arc never comes down to it: move it on the arc by hand
@@ -1935,7 +2073,7 @@ window.__b3 = {
   aimFast(k) { const a = arcs.at(-1); if (!a) return null; const p = a.fast.pts[Math.min(k, a.fast.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.fast.pts.length, p }; },
   aimArc(k) { const a = arcs.at(-1); if (!a) return null; const p = a.pts[Math.min(k, a.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.pts.length }; },
   setHand(h) { hand = h; renderDock(); }, setEdges(v) { edges = v; renderDock(); }, setBuildY(y) { buildY = y; },
-  reset() { track = { pieces: [], nextUid: 1 }; rebuild(); },
+  reset() { track = { pieces: [], nextUid: 1 }; prediction.launch = new Map(); prediction.lipSpeed = new Map(); rebuild(); },
   setTrack(t) { track = t; rebuild(); },
   startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
   refitLandings, get problems2() { return problems; },

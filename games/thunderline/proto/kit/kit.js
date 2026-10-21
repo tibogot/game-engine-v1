@@ -498,6 +498,24 @@ export function ensureTile(id) {
     const t = resolve(id);
     if (t) { TILES[id] = { ...t, id }; return TILES[id]; }
   }
+  // THE CATCH TUBE, `catch_tube_<angle>_<D>` (user, 2026-10-21: "some jump to enter inside a tube in
+  // air"): a fitted landing's shape — a down-slope at <angle>° for D m, then a level-out — built as a TUBE
+  // that starts as the wide oval PORTAL (closure 0: 32 m wide, 16 m floor to roof) and closes into the
+  // pipe by its end. The builder lays its mouth on the jump's arc (the slow car on its floor, the fast one
+  // under its roof); it ends level, in a full pipe: a Tube piece goes next.
+  const ct = /^catch_tube_(\d+)_(\d+)$/.exec(id);
+  if (ct) {
+    const angle = Number(ct[1]), D = Number(ct[2]);
+    TILES[id] = {
+      id,
+      label: `Catch tube ${angle}° · ${D} m`,
+      landAngle: angle,
+      segs: [{ L: D }, { L: Math.max(44, Math.round(angle * 2.2)), pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1)) }],
+      tube: { from: 0, to: 1 },
+      marks: [{ kind: "landing", from: 0, to: D }],
+    };
+    return TILES[id];
+  }
   const m = /^fitted_landing_(\d+)_(\d+)$/.exec(id);
   if (!m) return undefined;
   const angle = Number(m[1]), D = Number(m[2]);

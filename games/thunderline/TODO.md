@@ -4,6 +4,27 @@ Kept here so nothing gets lost between sessions. Design reasons live in DESIGN.m
 this is just the list. Newest decisions at the top of each section. Last updated 2026-10-19.
 
 ## Now
+- [x] **Land on ANY piece** (user, 2026-10-21: "this game is about jumps … large platforms to land"): a
+      road piece that isn't a landing (platform, straight, turn…) snaps onto a jump's arc LEVEL at the
+      height pointed at, its start 6 m before the slow car touches down, linked to the jump (flightFrom:
+      not loose, the test lap flies onto it). Notes: the fast car lands past its end; steep onto flat
+      (> 22°: level the car in the air). Tubes / halfpipes excluded (→ catch tube). A platform is in the
+      lip's suggestions. The landing CHECK now tests the deck's real footprint (segments, ± 3 m) — the old
+      24 m radius counted points in front of a landing as over it: it now flags White 3's fitted landing
+      (the slow band passes ~2.5 m under its front edge). NOT re-fitted (user asked; checked first): the
+      BUILDER's test lap clips White 3's bowl wall (48.8 s vs the game's ~42 s, known — see Car), so it
+      reaches that kicker slow and the band comes up short; a re-fit would size the landing for that slow
+      car. Fix the builder test lap's bowl clip instead, then the warning goes.
+- [x] **CATCH TUBE** (kit.js `catch_tube_<angle>_<D>`; builder Air + Tubes tabs, lip suggestions): a
+      fitted landing's shape built as a tube from the wide portal (closure 0) to the pipe; its mouth aims
+      at the FULL-SPEED flight (floor 5 m under it) — a tube in the air is a precision target: the band
+      (85–100%) is 20 m+ apart vertically there, no 16 m mouth catches it all. The note gives the take-off
+      speeds that get in (flown exactly, 1% steps: e.g. 155–159 km/h); red if the car would hit the roof;
+      Re-fit re-aims it. Test: kicker → catch tube → tube → out: test lap 13.5 s, landing PERFECT, mouth
+      crossed 0 m off-centre, 5.0 m up. FIXED on the way: the measured take-off was stored as a WORLD
+      position — stale after a move or a reused uid (the user saw the tube 32 m beside the road); now in
+      the lip's frame. While the take-off is still the guess (57 m/s) the note says so — Re-fit after.
+- [ ] NEXT: a WIDE → ROAD funnel (a 48 m platform back to the 16 m road).
 - [ ] **THE NEW CAR — PAUSED** (user, 2026-10-19: "make a pause on the car", the game first). Done, not
       committed: optimised LOD0 + LOD1 + ShadowProxy in public/models/thunderline/ (KTX2 + meshopt):
       measured 17 draws (was 69), 2 casters (was 57), 29.6k tris, 11 materials, 6.5 Mpx; the ghost uses
