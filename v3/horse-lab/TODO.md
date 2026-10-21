@@ -258,6 +258,17 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 - [ ] A/D slide 8–12 cm/s (small): the side clips' foot path vs the strafe.
 - [ ] Diagonals blend two clips — not measured yet.
 
+## ▶ STEPPE RIDER — the game direction (2026-10-21, a SIDE PROJECT alongside alg-rts / r186 / Apocalypse / Thunderline)
+A Mongol / Scythian-style horse archer in open country (hunting, raids, herds, camps) — start
+SMALL, keep building in the lab first, prove the feel before a big world.
+- [x] 1 Camera-relative riding (6583ada8) · [x] 2 lance follows the look + ring sight + lock-on
+- [ ] 3 A SMALL steppe test map in the lab (~1 km valley): rolling grass hills, a river ford,
+  a few yurts / a camp, targets scattered in open country, maybe a small herd (sheep / donkey lab)
+- [ ] 4 Then choose the game loop (hunting, races, raids, tournaments)
+- Ideas kept: a tournament (joust vs an AI knight, ring tilt, archery course) as a stepping
+  stone; the jousting opponent = animated reactions + ragdoll only for the unhorsing; the
+  rings with lock-on not measured yet.
+
 ## ▶ Riding controls — 2026-10-21 (you: "how does those games work… the mouse makes the direction… think Zelda, Genshin")
 - CAMERA-RELATIVE (RIDE.mode "camera", the default; "classic" in the Rider panel): the mouse is
   ALWAYS the camera; W A S D = a direction relative to the camera, the horse turns toward it at
