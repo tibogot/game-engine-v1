@@ -183,6 +183,7 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
     /** An explosion at (x, z) of combat-fx `size` (algCombat.js calls this). */
     blast(x, z, size = 10) {
       app.algWire?.blast(x, z, size);
+      app.algTown?.damage?.blast(x, z, size);   // (the town's houses break and collapse: algTownDamage.js)
       breachWalls(x, z, size);
       hitHouses(x, z, size);
     },

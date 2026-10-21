@@ -109,6 +109,17 @@ export function createAlgSight(app, { showroom = {}, worldSize = 1024 } = {}) {
         }
       }
     },
+    /** A town house COLLAPSED (algTownDamage): its box lowered to its rubble's height (the cells under it set, not raised). */
+    setBox(cx, cz, hx, hz, yaw, top) {
+      const c = Math.cos(yaw), s = Math.sin(yaw);
+      for (let lx = -hx; lx <= hx + 1e-6; lx += CELL / 2) {
+        for (let lz = -hz; lz <= hz + 1e-6; lz += CELL / 2) {
+          const i = toCell(cz - lx * s + lz * c) * n + toCell(cx + lx * c + lz * s);
+          tops[i] = top;
+          if (boxTops) boxTops[i] = top;
+        }
+      }
+    },
     /** The tallest ADDED box's top over (x, z), or -Infinity (the fog of war's ridge sight reads it). */
     topAt: (x, z) => (boxTops ? boxTops[toCell(z) * n + toCell(x)] : -Infinity),
     stats: { pieces, cells, bakeMs: Math.round(bakeMs) },

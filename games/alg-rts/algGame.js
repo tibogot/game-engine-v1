@@ -47,6 +47,7 @@ import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
 import { createHouseField, loadHouses } from "./algHouse.js";
+import { createTownDamage } from "./algTownDamage.js";
 import { createAlgTelegraph } from "./algTelegraph.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu, loadOptions } from "./ui/gameMenu.js";
@@ -639,11 +640,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       for (const [st, x, y, z, yaw] of MAP.town.walls ?? []) field.add("mur", st, x, y, z, yaw);
       // SOLID: each house's footprint blocks the nav grid (a little in: its steps, its yard walls' ends), and its
       // walls are HARD cover, as the dechra's and the post's (algCover: circles along the walls, not inside)
-      for (const [, , , , , yaw, fx, fz, hx, hz] of MAP.town.houses) app.navGrid?.addFootprint?.(fx, fz, hx * 0.92, hz * 0.92, yaw);
+      const townFoot = MAP.town.houses.map(([, , , , , yaw, fx, fz, hx, hz]) => app.navGrid?.addFootprint?.(fx, fz, hx * 0.92, hz * 0.92, yaw) ?? null);
       field.coverCircles = function* () {
-        for (const [, , , , , yaw, fx, fz, hx, hz] of MAP.town.houses) {
+        for (const [k, [, , , , , yaw, fx, fz, hx, hz]] of MAP.town.houses.entries()) {
           const c = Math.cos(yaw), s = Math.sin(yaw), r = 1.6;
-          const put = (lx, lz) => ({ x: fx + lx * c + lz * s, z: fz - lx * s + lz * c, radius: r, size: 1, hard: true });
+          // a COLLAPSED house (algTownDamage): its broken walls only SOFT cover
+          const hard = field.damage?.state(k) !== "ruin";
+          const put = (lx, lz) => ({ x: fx + lx * c + lz * s, z: fz - lx * s + lz * c, radius: r, size: 1, hard });
           for (let lx = -hx + r; lx <= hx - r + 0.01; lx += 2.2) { yield put(lx, -hz + r * 0.6); yield put(lx, hz - r * 0.6); }
           for (let lz = -hz + r; lz <= hz - r + 0.01; lz += 2.2) { yield put(-hx + r * 0.6, lz); yield put(hx - r * 0.6, lz); }
         }
@@ -664,12 +667,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.fogOfWar?.rebuildHeights();
       // GARRISONS (algGarrison.js, CoH's): every house that still stands takes a squad (the mosque 8); the door a
       // pace out from the middle of its front (the souks': before the arcade)
-      for (const [ty, st, , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
-        if (st === "ruin") continue;
+      const townGarrisons = MAP.town.houses.map(([ty, st, , y, , yaw, fx, fz, hx, hz]) => {
+        if (st === "ruin") return null;
         const c = Math.cos(yaw), s = Math.sin(yaw), out = hz + 1.2;
-        app.algGarrison?.addHouse({ x: fx, z: fz, yaw, hw: hx * 0.9, hd: hz * 0.9, y0: y, y1: y + (PAR[ty] ?? 5) * 1.3,
-          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" });
-      }
+        return app.algGarrison?.addHouse({ x: fx, z: fz, yaw, hw: hx * 0.9, hd: hz * 0.9, y0: y, y1: y + (PAR[ty] ?? 5) * 1.3,
+          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" }) ?? null;
+      });
+      // THEY BREAK AND COLLAPSE (algTownDamage.js): health, the damaged and ruin models, the garrison thrown out
+      field.damage = createTownDamage(app, { field, houses: MAP.town.houses, footprints: townFoot, garrisons: townGarrisons, par: PAR });
       app.scene.add(field.root);
       app.addPreRenderHook(() => field.update(app.camera));
       app.algTown = field;

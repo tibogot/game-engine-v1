@@ -156,7 +156,9 @@ export function createAlgGarrison(app, { units, squads, navGrid, showroom, fogOf
   function onSplash(at, radius) {
     for (const h of houses) {
       if (!h.men.length || !contains(h, at.x, at.z, radius * 0.5 + 0.5)) continue;
-      for (const u of [...h.men]) u.takeDamage?.(P.blastDamage * (0.7 + Math.random() * 0.6));
+      // (a DAMAGED house — algTownDamage blastMul — its walls holed: what bursts on it hurts the men inside more)
+      const extra = P.blastDamage + ((h.blastMul ?? 1) - 1) * 14;
+      if (extra > 0) for (const u of [...h.men]) u.takeDamage?.(extra * (0.7 + Math.random() * 0.6));
       h.blasts.push(clock);
     }
   }
