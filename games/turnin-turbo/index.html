@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turnin' Turbo</title>
+<link rel="icon" href="/favicon.svg">
+<style>
+	html, body { margin: 0; height: 100%; overflow: hidden; background: #d9d4cc; color: #2a2724; font: 12px/1.4 system-ui, sans-serif; }
+	#app, #app canvas { position: absolute; inset: 0; display: block; touch-action: none; }
+	#help { position: absolute; left: 12px; bottom: 12px; padding: 8px 11px; background: rgba(255, 252, 246, 0.82); border-radius: 7px; pointer-events: none; }
+	#help b { font-weight: 600; }
+	#msg { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); padding: 6px 12px; background: rgba(30, 28, 26, 0.8); color: #fff; border-radius: 6px; display: none; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="msg"></div>
+<div id="help">
+	<b>Key</b> click / Space &nbsp; <b>Steer</b> drag the wheel / ← → Q D &nbsp; <b>Shift</b> drag the lever / ↑ ↓ Z S / 0–4<br>
+	<b>Counter reset</b> click / R &nbsp; <b>Camera</b> right-drag, wheel zoom, C = views
+</div>
+<script type="module" src="./main.js"></script>
+</body>
+</html>
