@@ -88,6 +88,20 @@ this is just the list. Newest decisions at the top of each section. Last updated
          c. [ ] floating-island scenery (shots 1, 3) — the same; a design pass with the user first
          d. [ ] (maybe) a real CEILING run: a flat upside-down straight between two roof curves; needs
             magnets along a curved path (carRules magnetZones are straight-axis, for twists)
+- **MORE OBSTACLES** (user, 2026-10-21: "poles, boost decals … many others"; agreed order):
+      1. [x] BOOST PAD (Obstacles tab): a decal on ANY piece, 8 × 12 m, the Boost 32 chevrons and push
+         (carRules BOOST 2 s; pads are { inv, hx, hz } boxes — obstacles.js boostZones, in the drive page
+         and the builder's test lap). It FOLLOWS the deck: decalSnap samples the host piece's surface
+         every metre (ringAt + deckFrame, bank and curl included), 4 cm proud, the strip kept in the
+         prop; 1 m steps across inside the kerbs; not over a gap. Test: 3 straights → kicker 20 →
+         fitted landing: take-off 178 → 257 km/h with a pad on the 2nd straight and one up the kicker,
+         lap 12.42 → 10.53 s, the landing flagged "misses it — Re-fit"; seen in the drive page (BOOST
+         lights). Trap: the strip was wound face-DOWN — invisible from above, fine in the thumbnail.
+      2. [ ] POLES: single, a slalom row, a gate of two (static, solid; the autopilot goes round)
+      3. [ ] JUMP PAD: a plate that throws the car up a few metres
+      4. [ ] PISTON PILLAR, SLIDING BLOCK (race-clock movers, like the Sweeper)
+      later: slow pad, air boost ring, low bar, ramp-block, rotating gate, pendulum, moving ring,
+      breakable panel, arrow boards
 - [x] **Land on ANY piece** (user, 2026-10-21: "this game is about jumps … large platforms to land"): a
       road piece that isn't a landing (platform, straight, turn…) snaps onto a jump's arc LEVEL at the
       height pointed at, its start 6 m before the slow car touches down, linked to the jump (flightFrom:

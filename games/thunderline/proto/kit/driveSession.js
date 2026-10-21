@@ -31,7 +31,7 @@ import { buildOldLook, createOldLookMaterials, edgesOf, lookKey } from "./oldLoo
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
-import { buildObstacleSet, avoidObstacles } from "./obstacles.js";
+import { buildObstacleSet, avoidObstacles, boostZones } from "./obstacles.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -479,7 +479,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     }
 
     // ---------- THE CAR'S RULES (carRules.js): wall cut, landing judge + boost, boost pads, magnets ----------
-    const boostPads = lay.placements.filter((p) => p.id.startsWith("boost")).map((p) => p.M.clone().invert());
+    const boostPads = [...lay.placements.filter((p) => p.id.startsWith("boost")).map((p) => p.M.clone().invert()), ...boostZones(track?.props)];
     const magnets = magnetZones(lay.placements, TILES, integrate);
     const rules = createCarRules(vehicle, { boostPads, magnets });
     const ghostRules = createCarRules(ghostCar, { boostPads, magnets });

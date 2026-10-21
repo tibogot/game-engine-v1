@@ -20,7 +20,7 @@ import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
 import { buildTrackMeshes } from "./testTrack.js";
-import { OBSTACLES, HOLE, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf } from "./obstacles.js";
+import { OBSTACLES, HOLE, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -57,7 +57,7 @@ const CATS = [
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "sky_loop", "wallride_90"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_boost", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -656,7 +656,7 @@ async function runPrediction() {
   car.enabled = true;
   car.respawn();
   const lips = new Set(arcs.map((a) => a.from));
-  const boosts = order.filter((p) => p.id.startsWith("boost")).map((p) => built.get(p.uid).M.clone().invert());
+  const boosts = [...order.filter((p) => p.id.startsWith("boost")).map((p) => built.get(p.uid).M.clone().invert()), ...boostZones(track.props)];
   let lowY = Infinity;
   for (const r of ride) lowY = Math.min(lowY, r.P.y);
   const lipSpeed = new Map(), launch = new Map();
@@ -1035,9 +1035,10 @@ function obstacleSnap() {
     const f = deckFrame(best, hw);
     const raw = local.clone().sub(f.P).dot(f.R);
     const along = local.clone().sub(f.P).dot(best.T);
+    if (OBSTACLES[tileBase]?.decal) return decalSnap(pc, b, t, M, best.s + along, raw);
     // a WALL · DOOR stays square across the road, its middle on the road's: only the door slides (1 m
     // steps, inside the kerbs)
-    if (OBSTACLES[tileBase]?.shape) {
+    if (OBSTACLES[tileBase]?.aimAt) {
       const dx = THREE.MathUtils.clamp(Math.round(raw), -(hw - 5), hw - 5);
       const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(f.P.clone().addScaledVector(best.T, along));
       return { type: "road", m: M.clone().multiply(m), dx, hw, note: `Door ${dx ? `${Math.abs(dx)} m ${dx > 0 ? "right" : "left"}` : "in the middle"}` };
@@ -1052,6 +1053,50 @@ function obstacleSnap() {
   if (!ray.ray.intersectPlane(new THREE.Plane(UP, -FLOOR_Y), hit)) return null;
   const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
   return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
+}
+/** A piece's path frame at distance s (rings interpolated): what deckFrame needs. */
+function ringAt(rings, s) {
+  let i = 0;
+  while (i < rings.length - 2 && rings[i + 1].s < s) i++;
+  const a = rings[i], b = rings[i + 1] ?? a, f = b.s > a.s ? THREE.MathUtils.clamp((s - a.s) / (b.s - a.s), 0, 1) : 0;
+  return {
+    p: a.p.clone().lerp(b.p, f), T: a.T.clone().lerp(b.T, f).normalize(), U: a.U.clone().lerp(b.U, f).normalize(),
+    R: a.R.clone().lerp(b.R, f).normalize(), lean: a.lean + (b.lean - a.lean) * f, pivot: a.pivot, air: a.air || b.air, s,
+  };
+}
+/**
+ * A BOOST PAD on the road (obstacles.js BOOST_PAD): its middle where you point (1 m steps across, inside
+ * the kerbs; along, kept on the piece), and its STRIP — the deck's left and right edge under it every
+ * metre, lifted, in the pad's frame — so it lies on a curl or a bank instead of cutting through it.
+ */
+function decalSnap(pc, b, t, M, s0, raw) {
+  const { w, L, lift } = BOOST_PAD;
+  const sec = SECTIONS[t.section ?? "road"], hw = sec.hw;
+  const total = b.rings.at(-1).s;
+  if (total < L) return { type: "road", m: M.clone(), bad: "This piece is shorter than a pad" };
+  s0 = THREE.MathUtils.clamp(Math.round(s0), L / 2, total - L / 2);
+  const room = Math.max(0, hw - sec.kerbW - w / 2 - 0.3);
+  const lat = THREE.MathUtils.clamp(Math.round(raw), -Math.floor(room), Math.floor(room));
+  const rc = ringAt(b.rings, s0), fc = deckFrame(rc, hw);
+  const local = new THREE.Matrix4().makeBasis(fc.R, fc.U, rc.T.clone().negate()).setPosition(fc.P.clone().addScaledVector(fc.R, lat));
+  const inv = local.clone().invert();
+  const strip = [];
+  let air = false;
+  for (let k = 0; k <= L; k++) {
+    const rk = ringAt(b.rings, s0 - L / 2 + k), fk = deckFrame(rk, hw);
+    air ||= rk.air;
+    const row = [];
+    for (const side of [-1, 1]) {
+      const q = fk.P.clone().addScaledVector(fk.R, lat + side * w / 2).addScaledVector(fk.U, lift).applyMatrix4(inv);
+      row.push(+q.x.toFixed(3), +q.y.toFixed(3), +q.z.toFixed(3));
+    }
+    strip.push(row);
+  }
+  return {
+    type: "road", m: M.clone().multiply(local), extra: { strip }, strip,
+    bad: air ? "Not over a gap" : null,
+    note: `Boost pad · ${lat ? `${Math.abs(lat)} m ${lat > 0 ? "right" : "left"}` : "in the middle"}`,
+  };
 }
 function ringSnap() {
   let best = null;
@@ -1376,7 +1421,7 @@ function updateGhost() {
   snap = computeSnap();
   if (!snap) { if (ghost) ghost.visible = false; renderStatus(); return; }
   const id = tileId(tileBase);
-  const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.dx}|${snap.hw}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
+  const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.dx}|${snap.hw}|${snap.strip ? JSON.stringify(snap.strip[0]) + JSON.stringify(snap.strip.at(-1)) : ""}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
@@ -1455,7 +1500,7 @@ function place() {
     return;
   }
   if (isObstacle(id)) {
-    (track.props ??= []).push({ uid, kind: id, M: snap.m.toArray(), ...(snap.from != null ? { from: snap.from } : {}), ...(snap.dx != null ? { dx: snap.dx, hw: snap.hw } : {}) });
+    (track.props ??= []).push({ uid, kind: id, M: snap.m.toArray(), ...(snap.from != null ? { from: snap.from } : {}), ...(snap.dx != null ? { dx: snap.dx, hw: snap.hw } : {}), ...(snap.extra ?? {}) });
     rebuild();
     return;
   }

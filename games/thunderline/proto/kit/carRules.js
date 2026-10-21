@@ -18,7 +18,8 @@ export function magnetZones(placements, TILES, integrate) {
 
 /**
  * @param car  the old Vehicle
- * @param boostPads  inverse world matrices of the boost pieces (piece frame: x right, y up, −z along)
+ * @param boostPads  inverse world matrices of the boost pieces (piece frame: x right, y up, −z along), or
+ *   BOOST PADS (obstacles.js boostZones): { inv, hx, hz } — a box round the pad's own frame
  */
 export function createCarRules(car, { boostPads = [], magnets = [] } = {}) {
   const judge = createLandingJudge(car);
@@ -34,9 +35,14 @@ export function createCarRules(car, { boostPads = [], magnets = [] } = {}) {
       car.tick(wallCut(car, input));
       const landed = judge.tick(dt);
       if (landed) boostLeft = Math.max(boostLeft, landed.boost);
-      for (const inv of boostPads) {
-        lp.copy(car.body.pos).applyMatrix4(inv);
-        if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boostLeft = BOOST.time;
+      for (const pad of boostPads) {
+        if (pad.isMatrix4) {
+          lp.copy(car.body.pos).applyMatrix4(pad);
+          if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boostLeft = BOOST.time;
+        } else {
+          lp.copy(car.body.pos).applyMatrix4(pad.inv);
+          if (Math.abs(lp.x) < pad.hx && Math.abs(lp.z) < pad.hz && lp.y > -1 && lp.y < 3) boostLeft = BOOST.time;
+        }
       }
       if (boostLeft > 0 && car.groundedCount > 0) {
         fwd.set(0, 0, 1).applyQuaternion(car.body.quat); // the car's nose is +Z

@@ -134,13 +134,86 @@ const HOLE_BOXES = wallBoxes([-HOLE.w / 2, HOLE.w / 2, -HOLE.h / 2, HOLE.h / 2],
 const doorParts = () => wallParts(DOOR_BOXES, DOOR.hole, { sill: false });
 const holeParts = () => wallParts(HOLE_BOXES, HOLE.hole);
 
+// ---------------------------------------------------------------- BOOST PAD
+// (user, 2026-10-21: "some boost decals"): a decal dropped on ANY piece (a straight, a lip, a platform, a
+// tube's floor) instead of a whole Boost piece. The same glowing chevrons as Boost 32 (roadLook.js mark 4)
+// and the same push (carRules BOOST). It FOLLOWS the deck: the builder samples the host piece's surface
+// when it is placed and the prop keeps that strip (`strip`: per metre along, its left and right edge in
+// the pad's own frame, 4 cm proud of the road — never z-fighting), so a pad on a curl or a bank lies on
+// it. The car's rule is a box in the pad's frame (`boost`).
+export const BOOST_PAD = { w: 8, L: 12, lift: 0.04 };
+let boostTex = null;
+/** The chevrons, as roadLook.js draws boost marks: step(0.6, fract(v + |u − 0.5| · 1.2)), one tile per 4 m. */
+function boostTexture() {
+  if (boostTex) return boostTex;
+  const W = 128, H = 64, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d"), img = g.createImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const u = (x + 0.5) / W, v = 1 - (y + 0.5) / H;
+    const on = (v + Math.abs(u - 0.5) * 1.2) % 1 >= 0.6 && Math.abs(u - 0.5) < 0.46;
+    const i = (y * W + x) * 4;
+    img.data[i] = 0x3f; img.data[i + 1] = 0xd2; img.data[i + 2] = 0xff; img.data[i + 3] = on ? 255 : 0;
+  }
+  g.putImageData(img, 0, 0);
+  boostTex = new THREE.CanvasTexture(c);
+  boostTex.colorSpace = THREE.SRGBColorSpace;
+  boostTex.wrapS = THREE.ClampToEdgeWrapping;
+  boostTex.wrapT = THREE.RepeatWrapping;
+  boostTex.anisotropy = 8;
+  return boostTex;
+}
+let boostMat = null;
+const boostMaterial = () => (boostMat ??= new THREE.MeshStandardMaterial({
+  map: boostTexture(), emissiveMap: boostTexture(), emissive: BOLT, emissiveIntensity: 1.4, roughness: 0.4,
+  transparent: true, alphaTest: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+}));
+/** The pad's surface from its strip ([xL, yL, zL, xR, yR, zR] per sample, pad frame); a flat plate without one. */
+function boostGeometry(strip) {
+  const { w, L, lift } = BOOST_PAD;
+  const rows = strip ?? [-L / 2, L / 2].map((z) => [-w / 2, lift, z, w / 2, lift, z]);
+  const pos = [], uv = [], idx = [];
+  rows.forEach((r, i) => {
+    const along = (i / (rows.length - 1)) * L;
+    pos.push(r[0], r[1], r[2], r[3], r[4], r[5]);
+    uv.push(0, along / 4, 1, along / 4);
+    if (i) { const a = 2 * (i - 1); idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); } // wound so the face points UP (seen from above)
+  });
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("uv", new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  g.computeVertexNormals();
+  return g;
+}
+const BOOST_FLAT = boostGeometry(null);
+function boostShape(p = {}) {
+  const geo = p.strip ? boostGeometry(p.strip) : BOOST_FLAT;
+  return {
+    ghost: geo,
+    parts: () => {
+      const g = new THREE.Group();
+      const m = new THREE.Mesh(geo, boostMaterial());
+      m.castShadow = false;
+      g.add(m);
+      return g;
+    },
+  };
+}
+
 export const OBSTACLES = {
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
   ob_wall_door: { label: "Wall · door", parts: doorParts, solids: DOOR_BOXES, decks: [], ghost: mergeGeometries(DOOR_BOXES), shape: doorShape, hint: "A wall across the road: drive through its door" },
   // `air`: placed on a jump's flight, not on the road (the builder's arc snap)
   ob_wall_hole: { label: "Wall · hole", parts: holeParts, solids: HOLE_BOXES, decks: [], ghost: mergeGeometries(HOLE_BOXES), air: true, hint: "A wall in the air: fly through its hole" },
+  // `decal`: lies on the road, conformed to it (the builder fills `strip`); nothing solid
+  ob_boost: { label: "Boost pad", parts: boostShape().parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: boostShape, decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2 }, hint: "Drive over it: a push for 2 s" },
 };
+/** The boost zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }. */
+export function boostZones(props = []) {
+  return props.filter((p) => OBSTACLES[p.kind]?.boost).map((p) => ({ inv: new THREE.Matrix4().fromArray(p.M).invert(), ...OBSTACLES[p.kind].boost }));
+}
 export const isObstacle = (id) => !!OBSTACLES[id];
 /** A placed obstacle's definition: its kind's, with the parts / solids / ghost of ITS shape (a door's offset). */
 export const shapeOf = (kind, p = {}) => (OBSTACLES[kind].shape ? { ...OBSTACLES[kind], ...OBSTACLES[kind].shape(p) } : OBSTACLES[kind]);
@@ -202,7 +275,7 @@ const UP = new THREE.Vector3(0, 1, 0);
 /** One obstacle's look (a fresh group; geometry and materials shared). */
 export function obstacleLook(kind, p) {
   const g = shapeOf(kind, p).parts();
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = !OBSTACLES[kind].decal; o.receiveShadow = true; } });
   return g;
 }
 
