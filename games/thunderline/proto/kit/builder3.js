@@ -65,6 +65,7 @@ for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
 let track = load() ?? { pieces: [], nextUid: 1 };
 let trackName = library.get(trackId)?.name ?? "Track";
 let hand = 1; // +1 right, −1 left (picks the "_L" mirror)
+let freeHold = false; // Alt held: free placement, no snapping
 let edges = true; // rails: true both, "L" left only, "R" right only, false none (oldLook.js edgesOf)
 /** A placed piece's fields for those rails (old tracks keep `open`; one side adds `rail`). */
 const railFields = (e) => ({ open: e === false, ...(e === "L" || e === "R" ? { rail: e } : {}) });
@@ -1094,6 +1095,7 @@ function computeSnap() {
   // A LANDING in hand goes on a flight arc first: next to its lip, a short drop's whole arc sat inside
   // the open end's 60 px and the landing could only snap to the end (seen building, 2026-10-19)
   const landingInHand = !!t?.landAngle || tileBase === FITTED || tileBase === CATCH;
+  if (freeHold && !landingInHand && tileBase !== STAMP) return gridSnap(t); // Alt: exactly where you point
   const onArc = landingInHand && arcs.some((a) => a.pts.some((p, k) => {
     if (k < 3 || a.tan[k].y > -0.02) return false;
     const s = toScreen(p);
@@ -1242,6 +1244,10 @@ function computeSnap() {
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
     return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : roofBad };
   }
+  return gridSnap(t);
+}
+/** On the build plane (the height you set), on the world or the local grid. */
+function gridSnap(t) {
   ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
   const hit = new THREE.Vector3();
   if (!ray.ray.intersectPlane(new THREE.Plane(UP, -buildY), hit)) return null;
@@ -1806,7 +1812,7 @@ function renderStatus() {
   const many = !tileBase ? selection() : [];
   const multi = many.length > 1;
   const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const k = [freeHold, snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -1821,6 +1827,7 @@ function renderStatus() {
       : "") +
     (tileBase === STAMP ? `<div class="row"><span>Snaps like its first piece · R mirrors it · it stays in hand</span></div>` : "") +
     (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · on a road or the floor · Q/E turn</span></div>` : "") +
+    (tileBase && !isObstacle(tileBase) && tileBase !== RING ? `<div class="row"><span>${freeHold ? "<b>FREE</b> · " : ""}<kbd>Alt</kbd> free · <kbd>Ctrl</kbd>+wheel turn · <kbd>Shift</kbd>+wheel height · <kbd>H</kbd> match height · arrows tilt · <kbd>0</kbd> level</span></div>` : "") +
     (selPc && !isRing(selPc) && !selPc.kind
       ? (editMode
           ? `<div class="edit-ask">${editMode === "insert" ? "Insert after it" : "Replace it"}: pick a piece in the dock below · <kbd>Esc</kbd> cancel</div>`
@@ -1911,6 +1918,30 @@ canvas.addEventListener("wheel", (e) => {
   buildY += (e.deltaY || e.deltaX) < 0 ? 2 : -2;
   ghostDirty = true;
 }, { capture: true, passive: false });
+// ---------- FREE PLACEMENT, FAST (user, 2026-10-21, Apex Rush: "he can place easily any piece and rotate
+// it quick") ----------
+// Alt held: no snapping; Ctrl + wheel: turn the piece in hand (15°, with Alt 5°); Shift + wheel: raise /
+// lower it (the handler above, 2 m — kept as it was); H: the height of the piece under the cursor; arrows
+// tilt (±90°), 0 / ` levels it.
+// (`freeHold` is declared with the other settings at the top: the panel reads it while the page starts)
+addEventListener("keyup", (e) => { if (e.key === "Alt" && freeHold) { freeHold = false; ghostDirty = true; e.preventDefault(); } });
+addEventListener("blur", () => { freeHold = false; });
+addEventListener("wheel", (e) => {
+  if (driving || !tileBase || !e.ctrlKey) return;
+  const v = e.deltaY || e.deltaX; // Shift + wheel scrolls sideways on Windows: the delta comes in deltaX
+  if (!v) return;
+  e.preventDefault();
+  e.stopImmediatePropagation(); // before the camera's wheel (zoom) and the browser's (Ctrl = page zoom)
+  rot.yaw = ((rot.yaw + Math.sign(-v) * (freeHold || e.altKey ? 5 : 15)) % 360 + 360) % 360;
+  ghostDirty = true;
+  renderStatus();
+}, { capture: true, passive: false });
+/** The deck height of the placed piece under the mouse, or null. */
+function heightUnderCursor() {
+  ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
+  const h = ray.intersectObjects(trackGroup.children, true)[0];
+  return h ? h.point.y : null;
+}
 addEventListener("keydown", (e) => {
   if (driving) return; // the drive session owns the keys
   if (e.code === "Tab") { e.preventDefault(); startDrive(); return; }
@@ -1919,15 +1950,18 @@ addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); restore(redo, undo); return; }
   if ((e.ctrlKey || e.metaKey) && k === "c" && !tileBase && selection().length) { e.preventDefault(); copySelection(); return; }
   if ((e.ctrlKey || e.metaKey) && k === "v") { e.preventDefault(); pasteSection(); return; }
+  // ALT HELD: free placement — no snapping to an end, a side or an arc (FREE PLACEMENT, 2026-10-21)
+  if (e.key === "Alt") { e.preventDefault(); if (!freeHold) { freeHold = true; ghostDirty = true; } return; }
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const digit = /^Digit([1-4])$/.exec(e.code);
   if (digit) { gridStep = GRID_STEPS[+digit[1] - 1]; ghostDirty = true; return; }
   const step = e.shiftKey ? 5 : 15;
   switch (e.key) {
-    case "ArrowUp": rot.pitch = Math.min(45, rot.pitch + 5); break;
-    case "ArrowDown": rot.pitch = Math.max(-45, rot.pitch - 5); break;
-    case "ArrowLeft": rot.roll = Math.max(-45, rot.roll - 5); break;
-    case "ArrowRight": rot.roll = Math.min(45, rot.roll + 5); break;
+    // tilt: 5° steps (Shift: 15°), up to ±90° (was ±45: Apex Rush floats pieces at any angle)
+    case "ArrowUp": rot.pitch = Math.min(90, rot.pitch + (e.shiftKey ? 15 : 5)); break;
+    case "ArrowDown": rot.pitch = Math.max(-90, rot.pitch - (e.shiftKey ? 15 : 5)); break;
+    case "ArrowLeft": rot.roll = Math.max(-90, rot.roll - (e.shiftKey ? 15 : 5)); break;
+    case "ArrowRight": rot.roll = Math.min(90, rot.roll + (e.shiftKey ? 15 : 5)); break;
     case "PageUp": buildY += 2; break;
     case "PageDown": buildY -= 2; break;
     case "Enter": place(); break;
@@ -1948,6 +1982,8 @@ addEventListener("keydown", (e) => {
       else if (k === "m" && !tileBase && movableKind(sel)) setGizmoMode(gizmoMode === "translate" ? "rotate" : "translate");
       else if (k === "l") setLapLine(!lapLineOn);
       else if (k === "p" && !tileBase && sel != null) startEdit("replace");
+      else if (k === "h") { const y = heightUnderCursor(); if (y != null) buildY = Math.round(y * 2) / 2; }
+      else if (k === "0" || e.code === "Backquote") { rot.pitch = 0; rot.roll = 0; }
       else return;
   }
   rot.yaw = ((rot.yaw % 360) + 360) % 360;

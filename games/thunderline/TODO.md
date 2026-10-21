@@ -17,8 +17,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
          mirrored sections swap L/R. Tests: 2 straights side by side (32 m road, rails outer only, flush);
          jump → platform 64 + platform beside it (96 m landing) → funnel from the side one → road: test lap
          13.0 s, no warnings; seen from above in the drive page.
-      2. FREE PLACEMENT made fast: any piece floating anywhere, any pitch / roll / heading, quick rotate
-         (keys / wheel), snap to an end, a side, or nothing (shots 1, 5).
+      2. [x] FREE PLACEMENT made fast (shots 1, 5): hold ALT = no snapping (exactly where you point, on
+         the build height's grid); CTRL + wheel turns the piece in hand (15°, with Alt 5°); Shift + wheel
+         height stays as it was (2 m); H = the height of the placed piece under the mouse; arrows tilt up
+         to ±90° (Shift 15° steps, was ±45), 0 / ` levels it. Panel hint while a piece is in hand; KEYS
+         list updated. All checked with real key / wheel events. NOT yet: snapping a piece onto ANOTHER
+         piece's surface at an angle (stacking), and Alt's browser-menu side effect untested by hand.
       3. THE RAMP FAMILY: quarter pipes (vertical launch, shot 4), curls of a few heights, roll ramps,
          narrow planks without rails for precision landings (shots 1, 5, 6: their palette has ~18 ramps).
       4. TILTED LANDINGS for the air roll (W / X): "roll 30° to land" shown by the builder (shot 1).
