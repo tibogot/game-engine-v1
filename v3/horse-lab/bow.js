@@ -50,8 +50,13 @@ function launchAngle(x, y, v) {
 }
 
 export const BP = {
-  on: false,            // the bow, on foot (V)
+  on: false,            // the bow, on foot and in the saddle (V)
+  mountArc: [-0.6, 2.95], // rad of the horse's heading (+ = left) a right-handed rider can shoot to: ~35° right of the ears (over the neck) round the left to straight back (the Parthian shot); further right is out of reach — the bow is in the LEFT hand (the right side asks the chest ~175° round)
+  mountHips: 0.3,       // share of the torso's turn the hips take in the saddle (the legs re-solved: the feet stay in the irons)…
+  mountHipsMax: 0.45,   // …up to this (rad, ~25°)
+  mountOpen: 0.6,       // rad the chest squares up toward a forward / forward-right target (the bow arm reaches across the body) — from 30° left of the ears to the arc's right end
   drawTime: 0.8,        // s from brace to full draw (Mixamo "Shooting Arrow": 1.95 → 2.75 s)
+  tapDraw: 0.7,         // a quick click (or one while the arrow is still coming): drawn to this, then loosed by itself
   minSpeed: 20, maxSpeed: 62,   // m/s off the string: a light draw … a full draw
   hipOpen: 0.32,        // rad the feet stay turned toward the target from side-on
   chestOpen: 0.25,      // rad the chest stays turned toward the target from side-on
@@ -640,7 +645,10 @@ export class Archer {
   editReset(fromHold) {
     Object.assign(this, { phase: fromHold ? "fetch" : "empty", t: 0, fetchStart: null, fetchFree: 0, arrowTaken: false, elbowDir: null, twistPrev: undefined, fetchFromHold: fromHold, ext: fromHold ? 1 : 0, aimW: fromHold ? 1 : 0, draw: 0 });
   }
-  get active() { return BP.on && this.rd.mode === "ground"; }
+  get active() { return BP.on && (this.rd.mode === "ground" || this.rd.mode === "riding"); }
+  // in the saddle: the riding clip keeps the pelvis and legs; the shot is the upper body,
+  // turned toward the target round the seated hips (the horse can't turn the stance)
+  get mounted() { return this.rd.mode === "riding"; }
 
   // the chest's frame from the bones: S (spine_03), u up the back, L to the left, f forward
   chest() {
@@ -769,11 +777,16 @@ export class Archer {
 
   // the aim point under the crosshair (camera centre ray), and the launch
   // direction from the anchor that drops onto it at full draw
-  aimFrom(camera, C) {
+  // (dt: the game's aim — the distance along the ray EASES (in log: near and far alike). The
+  // crosshair crossing an edge — a wall's top, the horizon into the sky — moved the aim point
+  // 44 m → 150 m in a frame: the loft and the body's pitch jumped 9.6° — the head snapped)
+  aimFrom(camera, C, dt = 0) {
     const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0, 0), camera); ray.far = 220;
     const objs = [...(this.world.ground ?? []), ...(this.world.blockers ?? []), ...(this.range ? [this.range.root] : [])];
     const hit = ray.intersectObjects(objs, true).find((h) => h.distance > 1.5);
-    const P = hit ? hit.point : ray.ray.origin.clone().addScaledVector(ray.ray.direction, 150);
+    let dist = hit ? hit.distance : 150;
+    if (dt > 0) { const l = Math.log(dist); this.aimLogD = this.aimLogD == null ? l : this.aimLogD + (l - this.aimLogD) * lerpK(10, dt); dist = Math.exp(this.aimLogD); }
+    const P = ray.ray.origin.clone().addScaledVector(ray.ray.direction, dist);
     const dx = P.x - C.x, dz = P.z - C.z, x = Math.hypot(dx, dz), y = P.y - C.y;
     // (the solve is ~10k flight steps: kept while the target moves < 1 cm)
     const c = this.aimCache;
@@ -786,13 +799,15 @@ export class Archer {
     const rd = this.rd, on = this.active;
     if (this.edit) { aim = true; fire = false; }
     this.bow.group.visible = this.quiver.group.visible = on;
+    rd.bowOn = on;                                                  // (the rider: no lance / banner then)
     this.updateArrows(dt);
     this.range?.update(dt);
-    if (!on) { this.nocked.visible = false; this.phase = "empty"; this.aimW = 0; this.draw = 0; this.debug.update(dt, null); return; }
+    if (!on) { this.nocked.visible = false; this.phase = "empty"; this.aimW = 0; this.draw = 0; rd.handsFree = false; this.debug.update(dt, null); return; }
     const B = rd.B, ms = rd.mountSys, rig = rd.r.rig;
     this.aimHeld = aim;
     this.aimW = clamp(this.aimW + (aim ? 1 : -1) * dt / BP.aimTime, 0, 1);
-    const aw = smooth(this.aimW);
+    const aw = smooth(this.aimW), mounted = this.mounted;
+    rd.handsFree = mounted && aw > 0.02;                            // (the reins dropped on the neck while the bow is up)
     const base = this.useBase();
     const KF = this.phase === "fetch" && this.useKeys() && !base ? fetchKeysAt(this.anim, this.t, this.fetchFromHold) : null;
     if (base) {
@@ -805,14 +820,15 @@ export class Archer {
       const mt = this.baseTime();
       if (this.phase !== this.basePhase) { this.baseFrom = this.baseMt ?? mt; this.baseBlend = 0; this.basePhase = this.phase; }
       this.baseBlend = (this.baseBlend ?? 1) + dt;
-      if (this.baseBlend < 0.15) { this.base.apply(this.baseFrom, aw); this.base.apply(mt, aw * smooth(this.baseBlend / 0.15)); }
-      else this.base.apply(mt, aw);
+      const bo = mounted ? { hips: false, only: (this._upper ??= new Set(this.base.names.filter((n) => !WALK_LEGS.has(n)))) } : undefined;
+      if (this.baseBlend < 0.15) { this.base.apply(this.baseFrom, aw, bo); this.base.apply(mt, aw * smooth(this.baseBlend / 0.15), bo); }
+      else this.base.apply(mt, aw, bo);
       this.baseMt = mt;
       // (Mixamo shrugs the draw shoulder up at full draw — 7 cm above the bow shoulder, the
       // draw elbow 18 cm over the arrow line; archers keep the shoulders down and level)
       const down = smooth(this.ext ?? 0) * 0.85 * aw;
       if (down > 0) for (const c of this.clavBind) c.bone.quaternion.slerp(c.clip, down);   // (toward the idle's shoulders: the bind's sat higher, the draw elbow 10 cm over the arrow)
-      this.walkLegs(dt, aw);
+      if (!mounted) this.walkLegs(dt, aw);
       // what the clip's own arms do this frame (the corrections start from them)
       const aR = B.arms[1], aL = B.arms[0];
       this.baseArm = {
@@ -825,13 +841,24 @@ export class Archer {
     // ── where to shoot: the camera's crosshair ─────────────────────────────
     // solved from where the arrow will leave: its nock in the fingers (last frame), else the head
     const from = this.lastHook && this.aimW > 0.5 ? this.lastHook : wpos(B.head);
-    const { P, d: dAim } = this.edit?.aim ?? this.aimFrom(camera, from);
+    let { P, d: dAim } = this.edit?.aim ?? this.aimFrom(camera, from, dt);
+    // in the saddle: only the arc the rider can turn to (the pose turns to its nearest edge;
+    // past it, no draw)
+    this.outOfArc = false;
+    if (mounted && !this.edit) {
+      const hy = rd.hc.yaw, rel = Math.atan2(Math.sin(Math.atan2(dAim.x, dAim.z) - hy), Math.cos(Math.atan2(dAim.x, dAim.z) - hy));
+      const [a0, a1] = BP.mountArc, mid = (a0 + a1) / 2;
+      const relW = rel < mid - Math.PI ? rel + 2 * Math.PI : rel;   // (round from the arc's middle: straight right goes to the nearer end)
+      const c = clamp(relW, a0, a1);
+      this.mountRel = c;
+      if (Math.abs(c - relW) > 1e-4) { this.outOfArc = Math.abs(c - relW) > 0.08; dAim = dAim.clone().applyAxisAngle(UP, c - relW); }
+    }
     this.aimPoint = P;
     const aimYaw = Math.atan2(dAim.x, dAim.z), aimPitch = Math.asin(clamp(dAim.y, -1, 1));
     this.aimYawLast = aimYaw;                                       // (the feet walk in the aim's frame — next frame's movement reads it)
     // ── stance: side-on to the target (the feet turn; next frame's walk/idle
     // follows, the rig is turned now)
-    if (aw > 0) {
+    if (aw > 0 && !mounted) {
       // (mocap: turned so ITS arrow line points at the target — walking, the walk clips' own
       // stance: they hold the hips ~14° squarer to the arrow than the shot, and stood at the
       // shot's the legs stepped 14° off the way the body went: the feet skidded)
@@ -846,11 +873,27 @@ export class Archer {
     // ── spine: twist the chest side-on (+ chestOpen), bend at the waist with the pitch
     if (aw > 0) {
       const ch = this.chest();
-      const want = new V3().copy(dh).applyAxisAngle(UP, -(Math.PI / 2 - BP.chestOpen));
+      const open = BP.chestOpen + (mounted ? BP.mountOpen * smooth(clamp((0.5 - (this.mountRel ?? 1.5)) / (0.5 - BP.mountArc[0]), 0, 1)) : 0);
+      const want = new V3().copy(dh).applyAxisAngle(UP, -(Math.PI / 2 - open));
       // (mocap: the clip's own turn while fetching; the archer's chest-open as the bow comes up —
       // the clip's chest stayed fully side-on, the neck turned 94°)
-      const tw = Math.atan2(new V3().crossVectors(ch.f.clone().setY(0).normalize(), want).y, ch.f.clone().setY(0).normalize().dot(want)) * aw * (base ? smooth(this.ext ?? 0) : 1);
+      let tw = Math.atan2(new V3().crossVectors(ch.f.clone().setY(0).normalize(), want).y, ch.f.clone().setY(0).normalize().dot(want)) * aw * (base ? smooth(this.ext ?? 0) : 1);
       const q = new Q();
+      // in the saddle the HIPS take a share of the turn (a rider swivels on the seat); the legs
+      // are solved again onto the same ankles and the feet keep their angle: still in the irons
+      if (mounted) {
+        const pt = clamp(tw * BP.mountHips, -BP.mountHipsMax, BP.mountHipsMax);
+        if (Math.abs(pt) > 1e-4) {
+          const keep = B.legs.map((g) => ({ g, ank: wpos(g.tip), knee: wpos(g.l), fq: g.tip.getWorldQuaternion(new Q()) }));
+          rotateWorld(B.pelvis, q.setFromAxisAngle(UP, pt));
+          for (const k of keep) {
+            const hip = wpos(k.g.u), pole = k.knee.clone().sub(hip.clone().lerp(k.ank, 0.5)).normalize();
+            solveTwoBone(k.g.u, k.g.l, wpos(k.g.tip), k.ank, pole, new V3(), true);
+            k.g.tip.quaternion.copy(k.g.tip.parent.getWorldQuaternion(new Q()).invert().multiply(k.fq)); k.g.tip.updateMatrixWorld(true);
+          }
+          tw -= pt;
+        }
+      }
       [[B.spine1, 0.3], [B.spine2, 0.35], [B.spine3, 0.35]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(UP, tw * k)));
       const bend = aimPitch * BP.bend * aw;
       [[B.spine1, 0.35], [B.spine2, 0.35], [B.spine3, 0.3]].forEach(([bn, k]) => rotateWorld(bn, q.setFromAxisAngle(h, bend * k)));
@@ -900,12 +943,23 @@ export class Archer {
     const fire0 = this.fireHeld; this.fireHeld = fire;
     if (this.edit) this.t = Math.min(this.t, this.fetchLen());   // (the editor: the fetch only)
     if (this.phase === "empty" && this.aimW > 0.55 && !this.edit?.fromHold) { this.phase = "fetch"; this.t = 0; this.fetchStart = null; this.fetchFree = 0; this.arrowTaken = false; this.elbowDir = null; this.twistPrev = undefined; this.fetchFromHold = false; }
-    if ((this.phase === "fetch" || this.phase === "nocked") && this.aimW < 0.3) { this.phase = "empty"; this.draw = 0; }   // lowered: the arrow back in the quiver
+    if ((this.phase === "fetch" || this.phase === "nocked") && this.aimW < 0.3) { this.phase = "empty"; this.draw = 0; this.fireQueued = this.tapDraw = false; }   // lowered: the arrow back in the quiver
     if (this.phase === "fetch" && this.t >= this.fetchLen() && !this.edit) { this.phase = "nocked"; this.t = 0; }
+    // NO LOST CLICK: a click while the arrow is still coming (the fetch, the follow-through) is
+    // kept for when it is on the string; a quick click (let go before 22 % of the draw) draws a
+    // short shot and looses it. (Both did nothing — the next arrow takes ~4 s: "sometimes the
+    // click doesn't do anything")
+    if (fire && !fire0 && this.phase !== "nocked" && this.aimW > 0.3) this.fireQueued = true;
     if (this.phase === "nocked") {
-      if (fire && this.aimW > 0.9) this.draw = Math.min(1, this.draw + dt / BP.drawTime);
+      if (this.fireQueued) { if (!fire) this.tapDraw = true; this.fireQueued = false; }
+      if (!fire && fire0 && this.draw <= 0.22) this.tapDraw = true;
+      if (this.outOfArc) { this.tapDraw = false; this.draw = Math.max(0, this.draw - dt / 0.35); }   // let down gently (out of the arc)
+      else if ((fire || this.tapDraw) && this.aimW > 0.9) {
+        this.draw = Math.min(1, this.draw + dt / BP.drawTime);
+        if (this.tapDraw && !fire && this.draw >= BP.tapDraw) { this.tapDraw = false; this.shoot(); }
+      }
       else if (!fire && fire0 && this.draw > 0.22) this.shoot();
-      else if (!fire) this.draw = Math.max(0, this.draw - dt / 0.35);   // let down gently
+      else if (!fire && !this.tapDraw) this.draw = Math.max(0, this.draw - dt / 0.35);   // let down gently
     }
     // FOLLOW-THROUGH: the bow arm stays up and the string hand stays back by the neck
     // for ~0.9 s after the shot (coaching: "hold the follow-through"); the next arrow

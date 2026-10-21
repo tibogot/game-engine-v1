@@ -567,10 +567,11 @@
           if (bowEd.isOpen) bowEd.update(rawDt);                // (the bow editor replays the fetch to its playhead itself)
           else {
             rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming, aimYaw: archer.aimYawLast } });
-            archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot): over the clip's upper body
+            archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot or in the saddle): over the clip's upper body
           }
           D.afterPose?.();                                      // (debug / tools: a pose over the frame's, before it renders)
           cross.style.display = archer.active && archer.aimW > 0.6 && !bowEd.isOpen ? "block" : "none";
+          cross.style.opacity = archer.outOfArc ? 0.3 : 1;            // (in the saddle, past the arc the rider can turn to: no draw)
           poseEd.applyRider();
           poseEd.afterFrame();
           arena.update?.(dt, { ctrl, rider });                    // the farm's herd

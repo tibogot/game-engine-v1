@@ -258,6 +258,37 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 - [ ] A/D slide 8–12 cm/s (small): the side clips' foot path vs the strafe.
 - [ ] Diagonals blend two clips — not measured yet.
 
+## ▶ Horseback archery — 2026-10-19 (you: "lets work on horseback archery")
+- V in the saddle: the bow works mounted. The riding clip keeps the pelvis + legs (stirrups,
+  seat); the Mixamo shot is the upper body only (bow.js `mounted`: base.apply only = not
+  WALK_LEGS, no hips); no stance turn — the spine's twist turns the chest to the target.
+- The ARC (BP.mountArc −0.6…2.95 rad, + = left of the heading): ~35° right of the ears round
+  the left to straight back (the Parthian shot) — you: "open the right side as far as a real
+  body can". Further right is out of reach (the bow is in the LEFT hand: the chest would turn
+  ~175°) — the pose turns to the arc's edge, no draw, the crosshair dims (outOfArc).
+- The HIPS swivel on the seat: 30 % of the torso's turn, ≤ 25° (mountHips); the legs are
+  re-solved onto the same ankles, feet keep their angle — 0 cm off the irons. Forward /
+  forward-right the chest squares up toward the target (mountOpen 0.6 rad), the bow arm
+  across the body. Measured: −35° hips −26° chest −76°; 0° −22° / −62°; 170° +24° / +92°.
+- Aiming drops the reins on the neck (rider.handsFree → restReins); no lance / banner with
+  the bow (rider.bowOn).
+- Measured, horse standing (robot | Y Bot): full draw at 15° / 45° / 90° / 135° / 170°;
+  chest vs the horse −61° … +92°; bow elbow 7°; the arrow leaves on its aim point (1.9–2.4°
+  loft, as on foot); −90° blocked. Moving, target 90° left: walk / canter / gallop full draw,
+  the hook moves ≤ 1.2 cm on the anchor through the bounce, shots go.
+- [ ] The arrow does not take the horse's speed (at a gallop real arrows would drift ~5°
+  sideways) — a game choice for now.
+- AIM EDGE FIX (on foot too): the crosshair crossing an edge (a wall's top, the horizon) moved
+  the aim point 44 → 150 m in a frame — the aim pitch jumped 9.4°, the head 4° (your "neck
+  blocky two-state jump"). aimFrom eases the distance along the ray (log, rate 10): worst
+  step now 1.6° / 0.8°.
+- NO LOST CLICK (on foot too; you: "sometimes clicking to shoot doesn't work"): a click while
+  the next arrow was still coming (~4 s after a shot) or a tap shorter than 22 % of the draw
+  did nothing. Now a click during the fetch / follow-through is kept and loosed once on the
+  string; a quick tap draws to BP.tapDraw 0.7 and looses itself. Measured stepped: all four
+  click kinds shoot, saddle and foot.
+- [ ] Transition: the reins jump to the neck as the bow comes up (rope settles in ~0.3 s).
+
 ## ▶ Shadows — 2026-10-11 (user: "the robot has so bad shadows… self shadow low quality")
 
 - Was: ONE 2048 sun map over a ±24 m box = 2.3 cm a texel + normalBias 3 cm → the

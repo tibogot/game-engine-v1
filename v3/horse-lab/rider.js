@@ -686,8 +686,8 @@ export class RiderController {
       const g = B.arms[i], hd = this.hands[i];
       const inside = steer * g.side > 0 ? Math.abs(steer) : 0;               // the hand on the turn's side
       const outside = steer * g.side < 0 ? Math.abs(steer) : 0;
-      const bannerOn = RP.banner && this.mode === "riding";
-      const lanceOn = RP.lance && !RP.banner && this.mode === "riding";
+      const bannerOn = RP.banner && this.mode === "riding" && !this.bowOn;
+      const lanceOn = RP.lance && !RP.banner && this.mode === "riding" && !this.bowOn;
       const local = new V3(
         // turning: the hand on the turn side lifts and opens out to the side
         // (his screenshot); the other stays low and gives a little forward
@@ -737,6 +737,8 @@ export class RiderController {
     if (this.pendingBlend) { this.mountSys.blend = { snap: this.pendingBlend, t: 0, dur: 0.35 }; this.pendingBlend = null; }
     this.mountSys.applyBlend(dt);
 
+    // the bow up (bow.js handsFree): the reins dropped on the neck — mounted archers steer with the legs
+    if (this.handsFree) { this.restReins(dt); return; }
     // Reins (rope physics), fist → bit ring, the inside rein shortened
     // Through each fist: the strap enters on the little-finger side (from the
     // bit) and leaves on the thumb side (into the loop), through the middle of
@@ -774,7 +776,7 @@ export class RiderController {
     // on the target. Built from the saddle's axes it rocked with the horse's back:
     // the tip bobbed 55 cm every gallop stride
     if (hc) { fwd = new V3(Math.sin(hc.yaw), 0, Math.cos(hc.yaw)); up = new V3(0, 1, 0); lft = new V3(Math.cos(hc.yaw), 0, -Math.sin(hc.yaw)); }
-    const on = RP.lance && !RP.banner && this.mode === "riding" && this.r.rig.visible;
+    const on = RP.lance && !RP.banner && this.mode === "riding" && this.r.rig.visible && !this.bowOn;
     this.lance.visible = on;
     if (!on) return;
     const hd = this.hands[1], grip = wpos(hd.middle).lerp(wpos(hd.tipM), 0.5);
@@ -852,7 +854,7 @@ export class RiderController {
   // little forward and out); the flag on its upper end droops when still and
   // streams back with speed, fluttering (its vertices set each frame)
   placeBanner(hc, dt = 1 / 60) {
-    const B = this.banner, on = RP.banner && this.mode === "riding" && this.r.rig.visible;
+    const B = this.banner, on = RP.banner && this.mode === "riding" && this.r.rig.visible && !this.bowOn;
     B.pole.visible = B.cloth.visible = on;
     if (!on || !hc) return;
     const fwd = new V3(Math.sin(hc.yaw), 0, Math.cos(hc.yaw)), lft = new V3(Math.cos(hc.yaw), 0, -Math.sin(hc.yaw)), up = new V3(0, 1, 0);
