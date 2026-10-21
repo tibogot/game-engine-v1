@@ -22,6 +22,7 @@ import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
 import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMgNest, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
+import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 /** The detail's look: its tile (m), the scan normal's strength, the cavity's depth. ?stonedetail=0 = without. */
@@ -173,6 +174,31 @@ export const loadMgNest = () => loadBlenderPiece("mgnest", "mg", () => buildMgNe
   return ok;
 });
 export const mgNestGeometry = () => (pieceGeometry("mgnest", "mg")?.userData.nestReady ? pieceGeometry("mgnest", "mg") : null);
+
+/**
+ * THE MORTAR PIT (tools/blender/mortarPit.py, 2026-10-21): the berm, the ammunition, the aiming stakes — the user's
+ * simulated ring (sandbagPit) on its crest — and the 81 mm mortar (milprops: the old piece's frame, so its pivot,
+ * muzzle and axis — the crew, the shot — stay the old piece's; at the mortar teams' size, 0.82).
+ */
+export const loadMortarPit = () => loadBlenderPiece("mortarpit", "mortar", () => { const o = buildMortarPitV2(); o.userData.extra = []; return o; }, null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("mortarpit", "mortar");
+  if (g.userData.pitReady) return ok;
+  await loadSandbagWall();
+  const ring = simulatedWallMesh("SandbagPit", "pit");
+  g.userData.extra = ring ? [ring] : [];
+  const gl = houseMesh("m81", "intact", 1)?.children[0];
+  const gn = gl?.levels?.[0]?.object;
+  if (gn && g.userData.gun) {
+    const gg = plainGeometry(gn);
+    gg.scale(S * 0.82, S * 0.82, S * 0.82);
+    g.userData.gun = { ...g.userData.gun, geo: gg, material: plainMaterial(gn.material) };
+    g.userData.parts = { ...(g.userData.parts ?? {}), gun: gg };
+  }
+  g.userData.pitReady = true;
+  return ok;
+});
+export const mortarPitGeometry = () => (pieceGeometry("mortarpit", "mortar")?.userData.pitReady ? pieceGeometry("mortarpit", "mortar") : null);
 
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
 export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });

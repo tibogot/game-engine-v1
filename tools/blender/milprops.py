@@ -185,3 +185,62 @@ def searchlight(K, nm, at, yaw, t, pedestal=0.9):
         # the power cable from the cap down the post
         pts = [F(0.05, y - 0.05, L0 / 2 + 0.1), F(0.12, y - 0.3, 0.3), F(0.1, 0.3, 0.12), F(0.18, 0.02, 0.2)]
         for i in range(3): _rod(K, f"{nm}Cable{i}", pts[i], pts[i + 1], 0.012, "mpCable", t, 6)
+
+# ── THE 81 mm MORTAR (Brandt mle 27/31, 2026-10-21 — the mortar pit) ───────────────────────────────────────────────
+# Its frame is the OLD piece's (rtsAlgeria buildMortarPit): the baseplate at the origin, the tube from (0, 0.05, 0)
+# 1.28 m at 55° toward -z (the game reads its muzzle there — algMortarPit pitMouth), the bipod's head 0.78 up the tube.
+MORTAR_TILT, MORTAR_L = math.radians(35), 1.28
+def mortarAlong(t): return (0, 0.05 + math.cos(MORTAR_TILT) * t, -math.sin(MORTAR_TILT) * t)
+
+def mortar81(K, nm, t, at=(0, 0, 0), yaw=0.0):
+    F = Frame(at, yaw)
+    A = mortarAlong
+    # the baseplate: a ribbed steel plate, its socket and the ball the tube's foot sits in
+    _box(K, nm + "Plate", F, (0, 0.03, 0.05), (0.27, 0.025, 0.24), "mpGunOlive", t, 0.01)
+    if not LOW():
+        for k in (-1, 0, 1):
+            _box(K, f"{nm}Rib{k}", F, (k * 0.16, 0.065, 0.05), (0.012, 0.02, 0.22), "mpGunOlive", t, 0)
+        _box(K, nm + "RibX", F, (0, 0.065, 0.05), (0.25, 0.02, 0.012), "mpGunOlive", t, 0)
+    _tube(K, nm + "Socket", F, (0, 0.05, 0), (0, 0.11, 0), 0.07, 0.06, "mpGun", t, 12)
+    # the tube: the breech cap, the barrel (a little slimmer to the mouth), the muzzle ring
+    _tube(K, nm + "Breech", F, A(-0.02), A(0.12), 0.06, 0.058, "mpGun", t, 14)
+    _tube(K, nm + "Tube", F, A(0.12), A(MORTAR_L - 0.03), 0.045, 0.043, "mpGunOlive", t, 14)
+    _tube(K, nm + "Mouth", F, A(MORTAR_L - 0.03), A(MORTAR_L), 0.05, 0.05, "mpGun", t, 14, caps=False)
+    # the collar round the tube at the bipod's head, its two shock absorbers along the tube
+    hx, hy, hz = A(0.78)
+    _tube(K, nm + "Collar", F, A(0.74), A(0.84), 0.07, 0.07, "mpGun", t, 12)
+    for sx in (-1, 1):
+        a0, a1 = A(0.6), A(0.86)
+        _tube(K, f"{nm}Shock{sx}", F, (sx * 0.08, a0[1], a0[2]), (sx * 0.08, a1[1], a1[2]), 0.024, 0.024, "mpGun", t, 8)
+    # the bipod: two legs from the head to their spades, the chain between, the elevating column with its crank,
+    # the traversing screw across the head
+    feet = [(sx * 0.36, 0.0, hz - 0.4) for sx in (-1, 1)]
+    for k, (fx, fy, fz) in enumerate(feet):
+        _rod(K, f"{nm}Leg{k}", F(0, hy - 0.08, hz), F(fx, fy + 0.04, fz), 0.019, "mpGunOlive", t, 7)
+        _box(K, f"{nm}Spade{k}", F, (fx, 0.02, fz), (0.05, 0.02, 0.035), "mpGun", t, 0)
+    if not LOW():
+        _rod(K, nm + "Chain", F(feet[0][0] * 0.55, 0.3, hz - 0.22), F(feet[1][0] * 0.55, 0.3, hz - 0.22), 0.006, "mpGun", t, 4)
+    _tube(K, nm + "Column", F, (0, hy - 0.08, hz), (0, 0.32, hz - 0.18), 0.026, 0.022, "mpGun", t, 8)
+    _rod(K, nm + "Crank", F(0, 0.32, hz - 0.18), F(0.1, 0.3, hz - 0.22), 0.008, "mpGun", t, 5)
+    _tube(K, nm + "Traverse", F, (-0.12, hy - 0.08, hz), (0.12, hy - 0.08, hz), 0.022, 0.022, "mpGun", t, 8)
+    if not LOW():
+        _rod(K, nm + "TravHandle", F(0.12, hy - 0.08, hz), F(0.2, hy - 0.16, hz), 0.007, "mpGun", t, 5)
+    # the sight on the left of the collar
+    _box(K, nm + "Sight", F, (-0.13, hy + 0.04, hz), (0.03, 0.06, 0.05), "mpGunOlive", t)
+    if not LOW():
+        _tube(K, nm + "SightGlass", F, (-0.13, hy + 0.12, hz), (-0.13, hy + 0.12, hz + 0.08), 0.016, 0.016, "mpGun", t, 8)
+
+def bomb81(K, nm, F, c, d, t, mat="mpGunOlive"):
+    """An 81 mm bomb lying from c along direction d (local): the teardrop body, the fuze, the tail and its fins."""
+    c, d = Vector(c), Vector(d).normalized()
+    p = lambda s: tuple(c + d * s)
+    _tube(K, nm + "Fuze", F, p(0.0), p(0.05), 0.012, 0.025, "mpBrass", t, 8)
+    _tube(K, nm + "Nose", F, p(0.05), p(0.14), 0.025, 0.04, mat, t, 10)
+    _tube(K, nm + "Body", F, p(0.14), p(0.26), 0.04, 0.036, mat, t, 10)
+    _tube(K, nm + "Tail", F, p(0.26), p(0.4), 0.014, 0.014, mat, t, 6)
+    if not LOW():
+        q = d.cross(Vector((0, 1, 0))).normalized() if abs(d.y) < 0.9 else Vector((1, 0, 0))
+        r = d.cross(q).normalized()
+        for k, e in enumerate((q, r, -q, -r)):
+            s0 = c + d * 0.34
+            _rod(K, f"{nm}Fin{k}", F(*s0), F(*(s0 + d * 0.06 + e * 0.035)), 0.006, mat, t, 3)

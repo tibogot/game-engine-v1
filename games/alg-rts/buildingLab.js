@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadSangar, mgNestGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -519,6 +519,23 @@ export const BUILDINGS = {
   // THE MG NEST IN BLENDER (2026-10-21, tools/blender/mgNest.py): the game's old one LEFT, the new one MIDDLE — the spoil
   // platform, the roof on posts, the AA-52, YOUR simulated ring (its construction in the panel: the earth, the posts,
   // the bags course by course, the timbers, the roof bags, the gun) — damaged RIGHT.
+  // THE MORTAR PIT IN BLENDER (2026-10-21, tools/blender/mortarPit.py): the game's LEFT, the new one MIDDLE (its
+  // construction in the panel: the berm, YOUR ring course by course, the stores, the mortar last), damaged RIGHT.
+  mortierBlender: {
+    label: "Fosse de mortier (Blender)", gap: 10, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMortarPit(),
+    before: () => buildMortarPitV2(),
+    middle: () => {
+      const geo = mortarPitGeometry(), site = geo.userData.siteMaterial();
+      const mesh = kitView(geo);
+      mesh.material = site.material;
+      const bags = siteBags(mesh);
+      SITE = { set: (p) => { site.set(p); bags?.set(p); }, stencilShown: () => false, sock: null };
+      SITE.set(1);
+      return labPiece(mesh);
+    },
+    after: () => labPiece(houseMesh("mortar", "damaged")),
+    tags: ["MORTIER (LE JEU)", "MORTIER · NOUVEAU", "MORTIER · ENDOMMAGÉ"], note: "la fosse de mortier du jeu à gauche, la nouvelle (Blender : berme, munitions, piquets, le mortier de 81 ; vos sacs simulés) au milieu — « Construction » — endommagée à droite.",
+  },
   nidBlender: {
     label: "Nid de MG (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMgNest(),
     before: () => buildMgNestPiece((o) => buildMgNest(o)),

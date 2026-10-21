@@ -22,7 +22,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadSangar, mgNestGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -37,7 +37,7 @@ export const BUILDS = {
   sandbags: { label: t("Sacs de sable"), tip: t("Mur de sacs de sable : une couverture solide pour les hommes derrière."), cost: 20, time: 6, build: () => buildSandbagWallPiece(() => buildFrSandbagWall()), follow: true },
   wire: { label: t("Barbelés"), tip: t("Barbelés : il faut les contourner ou les couper ; un véhicule les écrase."), cost: 15, time: 5, build: () => barbedWireGeometry() ?? buildBarbedWire() /* (the Blender piece once loaded — algSangar.js) */, follow: true, noFoot: true },
   mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => mgNestGeometry() ?? buildMgNestPiece((o) => buildMgNest(o)) /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mgNest" },
-  mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 160 m, par-dessus les abris. Plus loin que l'équipe de mortier, mais fixe."), cost: 130, time: 18, build: () => buildMortarPitV2(), pad: true, structure: "mortarPit" },
+  mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 160 m, par-dessus les abris. Plus loin que l'équipe de mortier, mais fixe."), cost: 130, time: 18, build: () => mortarPitGeometry() ?? buildMortarPitV2() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: t("Mirador : voit à 110 m, une mitrailleuse dans la cabine."), cost: 110, time: 20, build: () => miradorGeometry() ?? buildMirador() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mirador" },
   searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
   // FIELD WORKS (2026-10-10, the CoH comparison: what engineers raise OUT on the map — algFieldWorks.js).
@@ -119,6 +119,11 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     geoCache.delete("ambushScreen");
     swapPlaced(showroom, /^ambushScreen\d*$/, ambushScreenGeometry(), app);
     for (const [name, mesh] of Object.entries(showroom ?? {})) if (/^ambushScreen\d*$/.test(name)) growScreenPlants(plants(), mesh, 1);
+  });
+  loadMortarPit().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("mortarPit");
+    swapPlaced(showroom, /^mortarPit\d*$/, mortarPitGeometry(), app);   // (?defences=1: the post's own)
   });
   loadMgNest().then((ok) => {
     if (!ok) return;
