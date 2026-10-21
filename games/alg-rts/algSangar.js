@@ -143,6 +143,7 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
       : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
+    g.userData.kitType = [kit, type];   // (its damaged / ruin states: pieceState)
     g.userData.farGeometry = far;
     if (far) far.userData = g.userData;   // (the same data at either level: footprint, gun, materials)
     extra?.(g);
@@ -516,6 +517,84 @@ export function trackLod(app, mesh) {
     }
   });
 }
+/**
+ * THE DAMAGE STATES IN THE GAME (2026-10-22 — every Blender piece has its damaged and ruin models: the game now shows
+ * them). A placed piece is swapped to `state` ("intact" | "damaged" | "ruin"): its near and far geometry (built once
+ * per kit:type:state, shared by every copy), and its extras — the guns and the searchlight's head go with the ruin,
+ * the mirador's gear takes its own state, the simulated sandbags slump in the ruin. The copy's own data (footprint,
+ * name) is kept. False for a piece that is not a Blender one.
+ */
+const _states = new Map();   // "kit:type:state" → { near, far }
+function stateGeometry(kitType, state) {
+  const [kit, type] = kitType, key = `${kit}:${type}:${state}`;
+  if (_states.has(key)) return _states.get(key);
+  const lod = houseMesh(type, state, 1)?.children[0];
+  const n = lod?.levels?.[0]?.object, f = lod?.levels?.[1]?.object;
+  let rec = null;
+  if (n) {
+    const mk = (src) => { const g = plainGeometry(src); g.scale(S, S, S); g.computeBoundingBox(); g.computeBoundingSphere(); return g; };
+    rec = { near: mk(n), far: f && f !== n ? mk(f) : null };
+  }
+  _states.set(key, rec);
+  return rec;
+}
+export function setPieceState(mesh, state) {
+  const L = mesh?.userData?.lod;
+  const base = mesh.userData.intactGeo ?? L?.near ?? mesh.geometry;
+  const ud = base?.userData;
+  if (!ud?.blender || !ud.kitType) return false;
+  if ((mesh.userData.pieceState ?? "intact") === state) return true;
+  mesh.userData.intactGeo = base;
+  mesh.userData.intactFar ??= L?.far ?? null;
+  let near = base, far = mesh.userData.intactFar;
+  if (state !== "intact") {
+    const g = stateGeometry(ud.kitType, state);
+    if (!g) return false;
+    near = g.near.clone(); near.userData = ud;          // (the copy's own data on its own clone — the cover reads it)
+    far = g.far ?? null;
+  }
+  if (L) { L.near = near; L.far = far ?? near; mesh.geometry = near; } else mesh.geometry = near;
+  mesh.userData.pieceState = state;
+  const ruin = state === "ruin";
+  for (const c of mesh.children) {
+    if (c.name === "Gun" || c.name === "Lamp") c.visible = !ruin;
+    else if (c.name === "MiradorGear") {
+      // the gear's own state (the searchlight knocked down on the deck, thrown beside the wreck)
+      const gg = state === "intact" ? null : stateGeometry(["mirador", "gear"], state);
+      c.userData.intact ??= c.levels.map((l) => l.object.geometry);
+      c.levels.forEach((l, i) => { l.object.geometry = gg ? (i === 0 ? gg.near : gg.far ?? gg.near) : c.userData.intact[i]; });
+    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags)/.test(c.name)) {
+      // the bags slumped in the ruin (thrown down, burst); the mirador's fell with its cabin
+      c.userData.scale0 ??= c.scale.clone();
+      if (c.name === "MiradorBags") {
+        // fell with its cabin in the ruin; in the damaged state they LEAN with it (mirador.py leanAll: −6.5° about
+        // the game axis (1, 0, −1) through the opposite foot (LS, 0, LS) — Blender's frame is a proper rotation of
+        // the game's, the angle carries over as it is)
+        c.visible = !ruin;
+        c.userData.pos0 ??= c.position.clone();
+        if (state === "damaged") {
+          const piv = new THREE.Vector3(2.6 * S, 0, 2.6 * S), q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, -1).normalize(), -6.5 * Math.PI / 180);
+          c.position.copy(c.userData.pos0).sub(piv).applyQuaternion(q).add(piv);
+          c.quaternion.copy(q);
+        } else { c.position.copy(c.userData.pos0); c.quaternion.identity(); }
+      } else {
+        // squashed from the bags' OWN foot, not the ground's (a ring on a berm 0.6 m up sank into it)
+        c.userData.pos0 ??= c.position.clone();
+        if (c.userData.foot == null) {
+          let lo = Infinity;
+          c.traverse((o) => { if (o.geometry) { o.geometry.computeBoundingBox?.(); lo = Math.min(lo, o.geometry.boundingBox?.min.y ?? 0); } });
+          c.userData.foot = Number.isFinite(lo) ? lo : 0;
+        }
+        const k = ruin ? 0.45 : 1, s0 = c.userData.scale0;
+        c.scale.set(s0.x * (ruin ? 1.06 : 1), s0.y * k, s0.z * (ruin ? 1.06 : 1));
+        c.position.copy(c.userData.pos0);
+        c.position.y += c.userData.foot * s0.y * (1 - k);
+      }
+    }
+  }
+  return true;
+}
+
 /** Stop tracking (a cancelled site): its own near geometry back, so disposing it never frees the shared far one. */
 export function untrackLod(mesh) {
   if (!mesh?.userData?.lod) return;

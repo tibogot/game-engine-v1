@@ -18,7 +18,8 @@ import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { vec3 } from "three/tsl";
 import { t } from "./i18n/i18n.js";
-import { pitCrewPlace, pitCrewShot, pitMouth } from "./algMortarPit.js";
+import { pitCrewPlace, pitCrewShot, pitMouth } from "./algMortarPit.js";
+import { setPieceState } from "./algSangar.js";
 
 const S = 1.3;
 
@@ -168,7 +169,12 @@ export function createAlgStructures({ app, showroom, producers, units }) {
   function wreck(s) {
     const rec = list.find((r) => r.s === s);
     if (!rec) return;
-    rec.mesh.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.material = charMaterial(o.material); });
+    // A Blender piece falls to its RUIN model (algSangar setPieceState: burnt, broken, down) — dust thrown up as it
+    // goes; the old procedural pieces are charred in place as before.
+    if (setPieceState(rec.mesh, "ruin")) {
+      app.algCombat?.fx?.explosion?.(s.position.x, s.position.y + 0.5, s.position.z, { size: 9 + Math.min(10, rec.fp.hx), dust: true });
+      app.algDamage?.coverChanged?.();
+    } else rec.mesh.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.material = charMaterial(o.material); });
     // Its crew (a mortar pit's: algBuild.js) gone with it.
     if (rec.mesh.userData.crewFigures) { app.algUnitRenderer?.removeStaticFigures?.(rec.mesh.userData.crewFigures); rec.mesh.userData.crewFigures = null; }
     if (rec.gun) rec.gun.rotation.x = 0.5;           // the barrel down

@@ -29,8 +29,8 @@ ones throughout.
      props; the field walls want their LOD and lab entries; the old mechta houses (kept, "ancien").
    - The old Aurès' Roman ruins (procedural, in the game as they are).
 2. **For the new pieces:**
-   - The damaged / ruin states exist but the game never switches to them — waits on **building damage
-     + collapse** (section 3).
+   - ~~The damaged / ruin states unused~~ — **done 2026-10-22**: below half health a piece breaks to its damaged
+     model (dust), destroyed it stays as its ruin, repaired past 80 % it stands whole (algSangar setPieceState).
    - The **construction animation the CoH way** — you were gathering CoH references.
    - Their **GPU cost**, measured in a quiet moment (the laptop cool, nothing else running).
    - Your verdict in the lab on each ("To judge"): the lab's status → "In the game" once you've seen it.

@@ -26,6 +26,7 @@ import * as THREE from "three";
 import { buildFrSandbagWallBreached, buildRubbleHeap } from "../../v3/render/objects/rtsAlgeria.js";
 import { kitView } from "./showroom.js";
 import { simulatedWallMesh } from "./algSandbags.js";
+import { setPieceState } from "./algSangar.js";
 
 const P = {
   wallReach: 1.2,        // m past the wall's footprint a blast still breaches it
@@ -157,7 +158,17 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
         if (!h && !r._wreckSmoke) { r._wreckSmoke = true; smoking.set(s, ambience.smoulder(s.position.x, s.position.y + Math.min(r.height, 10) * 0.5, s.position.z, 90, { strength: 0.9, r: 2 })); }
         continue;
       }
-      if (f >= 0.5) continue;
+      // THE DAMAGED MODEL (a Blender piece, algSangar setPieceState): below half its health it breaks — a burst of
+      // dust as it does; repaired past 80 % it stands whole again. The cover follows the model.
+      const st = r.mesh.userData.pieceState ?? "intact";
+      if (f < 0.5 && st === "intact" && setPieceState(r.mesh, "damaged")) {
+        app.algCombat?.fx?.explosion?.(s.position.x, s.position.y + 1, s.position.z, { size: 7 + Math.min(8, r.fp.hx * 0.6), dust: true });
+        scheduleRebake();
+      } else if (f >= 0.8 && st === "damaged" && setPieceState(r.mesh, "intact")) scheduleRebake();
+      if (f >= 0.5) {
+        if (h && !r._wreckSmoke) { h.left = 0; smoking.delete(s); }   // (repaired: its smoke dies down)
+        continue;
+      }
       const strength = 0.35 + (0.5 - f) * 1.3;
       if (!h) smoking.set(s, ambience.smoulder(s.position.x, s.position.y + Math.min(r.height, 10) * 0.75, s.position.z, 1e6, { strength, r: 1.6 }));
       else h.strength = strength;
@@ -167,6 +178,8 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
 
   return {
     params: P, houses, rubble,
+    /** A building's model changed (its ruin): the cover map re-baked once the dust settles. */
+    coverChanged: scheduleRebake,
     /** An explosion at (x, z) of combat-fx `size` (algCombat.js calls this). */
     blast(x, z, size = 10) {
       app.algWire?.blast(x, z, size);
