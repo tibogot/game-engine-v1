@@ -21,6 +21,7 @@ const { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } = P;
 import { kitView } from "./showroom.js";
 import { houseMesh, loadHouses } from "./algHouse.js";
 import { ICON } from "./ui/icons.js";
+import { CATEGORY, PALETTE } from "./ui/iconAtlas.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -182,7 +183,8 @@ export async function startIconStudio() {
     const x = c.getContext("2d");
     // the backdrop: dark warm, a soft glow behind the object, a vignette at the corners
     const g = x.createRadialGradient(R * 0.5, R * 0.42, R * 0.05, R * 0.5, R * 0.5, R * 0.75);
-    g.addColorStop(0, ic.glow ? "#6a5a40" : "#3a2e1f"); g.addColorStop(0.55, "#1d1610"); g.addColorStop(1, "#0a0806");
+    const pal = PALETTE[ic.cat ?? "ability"];
+    g.addColorStop(0, ic.glow && !ic.cat ? "#6a5a40" : pal[0]); g.addColorStop(0.6, mixHex(pal[0], pal[1], 0.55)); g.addColorStop(1, pal[1]);
     x.fillStyle = g; x.fillRect(0, 0, R, R);
     if (shot) {
       // the OUTLINE: the object's alpha dilated (a ring of offset copies), filled near-black
@@ -199,7 +201,9 @@ export async function startIconStudio() {
     return down(c, OUT);
   }
   /** A symbol on the same tile: the glyph in brass, a dark outline. */
-  async function symbolTile(svg) {
+  /** Two hex colours mixed. */
+  function mixHex(a, b, t) { const p = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16)); const A = p(a), B = p(b); return `rgb(${A.map((v, i) => Math.round(v + (B[i] - v) * t)).join(",")})`; }
+  async function symbolTile(svg, cat = "ability") {
     const img = new Image();
     img.src = `/textures/ui/icons/${svg}.svg`;
     await img.decode();
@@ -208,9 +212,9 @@ export async function startIconStudio() {
     const m = R * 0.18;
     gx.drawImage(img, m, m, R - 2 * m, R - 2 * m);
     gx.globalCompositeOperation = "source-in";
-    const gg = gx.createLinearGradient(0, m, 0, R - m); gg.addColorStop(0, "#ffe3a3"); gg.addColorStop(1, "#d9a43c");
+    const gg = gx.createLinearGradient(0, m, 0, R - m); gg.addColorStop(0, PALETTE[cat][2]); gg.addColorStop(1, PALETTE[cat][3]);
     gx.fillStyle = gg; gx.fillRect(0, 0, R, R);
-    return tile(glyph);
+    return tile(glyph, { cat });
   }
   /** Step-down resampling (halving): crisp at small sizes, no shimmer. */
   function down(src, size) {
@@ -225,13 +229,13 @@ export async function startIconStudio() {
   }
 
   const grid = document.getElementById("grid"), status = document.getElementById("status");
-  const out = {}, made = {};
+  const out = {}, made = {}, shots = {};
   for (const ic of ICONS) {
     status.textContent = `Rendering ${ic.title}…`;
     let t;
     try {
       if (ic.symbol) t = await symbolTile(ic.svg);
-      else { const o = await ic.make(); made[ic.name] = o.children.map((c) => c.name + ":" + c.type); t = tile(await renderObject(o, ic), ic); }
+      else { const o = await ic.make(); made[ic.name] = o.children.map((c) => c.name + ":" + c.type); const shot = await renderObject(o, ic); shots[ic.name] = shot; t = tile(shot, ic); }
     } catch (e) { console.warn("[icons]", ic.name, e); continue; }
     out[ic.name] = t;
     const small = down(t, 48);
@@ -259,7 +263,9 @@ export async function startIconStudio() {
     const tiles = [];
     for (const k of keys) {
       const r = out[RENDER_FOR[k] ?? k];
-      tiles.push(down(r && !ICONS.find((i) => i.name === (RENDER_FOR[k] ?? k))?.symbol ? r : await symbolTile(ICON[k]), size));
+      const src = RENDER_FOR[k] ?? k, ic = ICONS.find((i) => i.name === src), cat = CATEGORY[k] ?? "ability";
+      // (a render on its category's tile — the shot re-composed; else the symbol)
+      tiles.push(down(r && shots[src] ? tile(shots[src], { ...ic, cat }) : await symbolTile(ICON[k], cat), size));
     }
     const rows = Math.ceil(tiles.length / cols);
     const c = document.createElement("canvas"); c.width = cols * size; c.height = rows * size;

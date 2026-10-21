@@ -7,6 +7,25 @@ const KEYS = ["patrol", "grenade", "stop", "focus", "cutWire", "cancelSite", "ti
   "radioBarrage", "radioAir", "aimArc", "retreat", "reinforce", "repair", "garrison", "unload", "transport", "disembark",
   "attackMove", "holdFire", "reverse", "forwardPost", "aidStation", "fortPoint", "flnMine", "flnWire", "flnDetonate", "flnCut",
   "armsCache", "refuge", "infirmary", "mortarBarrage"];
+/**
+ * THE COLOUR CODE (2026-10-22, you: "do the full colour coding for the orders" — Company of Heroes' card): each key's
+ * CATEGORY, its tile's backdrop baked into the atlas (iconStudio): orders blue-grey, attack orders and call-ins orange,
+ * retreat red, abilities dark, construction olive, upgrades brass. The glyphs: cream on a coloured tile, brass on a dark.
+ */
+export const CATEGORY = {
+  stop: "order", focus: "order", patrol: "order", holdFire: "order", reverse: "order", garrison: "order", unload: "order", disembark: "order", transport: "order", cancelSite: "order",
+  attackMove: "attack", aimArc: "attack", barrage: "attack", airStrike: "attack", radioBarrage: "attack", radioAir: "attack", mortarBarrage: "attack", flnDetonate: "attack",
+  retreat: "retreat",
+  reinforce: "upgrade", tier: "upgrade",
+  sandbags: "build", wire: "build", mgNest: "build", mortarPit: "build", mirador: "build", searchlight: "build", forwardPost: "build", aidStation: "build", fortPoint: "build",
+  sangar: "build", ambushScreen: "build", armsCache: "build", refuge: "build", infirmary: "build",
+};
+/** Each category's tile: its glow (centre), its edge, the glyph's two tones. */
+export const PALETTE = {
+  order: ["#3e5468", "#121a22", "#f4ecd8", "#c9d4dc"], attack: ["#a35a1a", "#2a1407", "#fff0d0", "#f2c27a"],
+  retreat: ["#a82a1c", "#2c0806", "#fff0e4", "#f3b8a8"], upgrade: ["#8a6a24", "#251a07", "#fff4d0", "#f1d58a"],
+  build: ["#4a5030", "#14160d", "#ffe3a3", "#d9a43c"], ability: ["#3a2e1f", "#0a0806", "#ffe3a3", "#d9a43c"],
+};
 const COLS = 8, ROWS = Math.ceil(KEYS.length / COLS);
 const URL_ = "/textures/ui/icons/rendered.webp";
 const AT = new Map(KEYS.map((k, i) => [k, i]));

@@ -58,11 +58,8 @@ const CSS = `
 #rts-cmd-card .cc-b.sq { border: 1px solid #5d5440; box-shadow: inset 0 1px 0 rgba(255,235,190,0.18), inset 0 -2px 3px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.7); }
 #rts-cmd-card .cc-b.sq:hover { border-color: var(--hud-brass); }
 #rts-cmd-card .cc-b.sq .ri { inset: 2px; border-radius: 2px; }
-/* colour-coded orders: retreat on red, the attack orders warm */
+/* the colour code is baked into the tiles (iconAtlas CATEGORY); retreat's frame red too */
 #rts-cmd-card .cc-b.c-red { border-color: #9a3a2c; }
-#rts-cmd-card .cc-b.c-red .ri { background-color: #6e2018; background-blend-mode: luminosity; }
-#rts-cmd-card .cc-b.c-red::before { content: ""; position: absolute; inset: 2px; background: rgba(170,40,24,0.55); mix-blend-mode: color; z-index: 0; pointer-events: none; }
-#rts-cmd-card .cc-b.c-warm::before { content: ""; position: absolute; inset: 2px; background: rgba(190,110,30,0.35); mix-blend-mode: overlay; pointer-events: none; }
 #rts-cmd-card .cc-b .ri { position: absolute; inset: 0; background-repeat: no-repeat; }
 #rts-cmd-card .cc-b.sq .lb { display: none; }
 #rts-cmd-card .cc-b.sq .hk, #rts-cmd-card .cc-b.sq .co { z-index: 1; background: rgba(10,9,6,0.72); border-radius: 3px; padding: 0 3px; }
@@ -173,7 +170,6 @@ export function createCommandCard({
     el.dataset.key = key;
     const b = { el, kind, key, cost, label, info, locked, run };
     if (key === "retreat") el.classList.add("c-red");
-    else if (key === "attackMove" || key === "radioBarrage" || key === "mortarBarrage") el.classList.add("c-warm");
     if (!pic && icon && hasRendered(icon)) el.classList.add("sq");
     el.addEventListener("click", () => {
       // A LOCKED unit: to where it is unlocked (the game's `onLocked`: the post).
