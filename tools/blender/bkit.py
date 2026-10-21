@@ -226,7 +226,7 @@ class Kit:
     def drop_cutters(s):
         for c in s.cutters: bpy.data.objects.remove(c, do_unlink=True)
         s.cutters = []
-    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9, ao_dist=2.2, normals=False, normal_size=None):
+    def bake(s, objs, size, name, out_dir, samples_ao=96, rough=0.9, ao_dist=2.2, normals=False, normal_size=None, island_margin=0.002):
         """Colour × ambient occlusion into ONE atlas, then a plain material with it — for one object or
         SEVERAL sharing the atlas (a house's three states: their UVs packed together, one texture). They are
         spread apart while they bake (at one origin each would occlude the others: black AO) and every other
@@ -252,7 +252,9 @@ class Kit:
             q.data.uv_layers.active = at
             if src is not None: src.active_render = True
         bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
-        bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=0.002)
+        # (`island_margin`: a piece of sharp colour edges — the red cross on white — wants its islands further apart, or
+        # one colour bleeds into the next island at the mips)
+        bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=island_margin)
         bpy.ops.object.mode_set(mode="OBJECT")
         def target(nm, sz=None):
             img = bpy.data.images.new(nm, sz or size, sz or size, alpha=False)

@@ -53,10 +53,14 @@ HES = "build/hessian_230/hessian_230_diff_1k.jpg"
 MATDEF.update({
     "flEarth": (1.0, milprops.earthMat(0xc8ae88)), "flLog": (0.9, photo("build/bark_willow_02/bark_willow_02_diff_1k.jpg", 0x9a8a70, 0.8, 2.0)),
     "flWood": (0.85, milprops.timberMat(0x8e7c60)), "flCanvas": (0.95, photo(HES, 0x7c8460)), "flBlanketRed": (0.95, photo(HES, 0x8a4a38, 0.35)),
-    "flBlanketGrey": (0.95, photo(HES, 0x7a766c, 0.35)), "flSacking": (0.95, photo(HES, 0xa08a68, 0.8, 2.2)), "flStraw": (0.95, photo(HES, 0xe0c88a, 0.9, 1.4)),
+    "flBlanketGrey": (0.95, photo(HES, 0x7a766c, 0.35)), "flSacking": (0.95, photo(HES, 0xa08a68, 0.8, 2.2)), "flSeam": (0.95, photo(HES, 0x585c42, 0.6)), "flGrime": (0.95, photo(HES, 0x4a4234, 0.5, 3.0, 0.0)), "flStraw": (0.95, photo(HES, 0xe0c88a, 0.9, 1.4)),
     "flClay": (0.9, flat(srgb(0xa8644a), 0.3)), "flPot": (0.6, milprops._steel(0x2a2622, 0.1)), "flChar": (0.95, charred), "flAsh": (0.95, ash),
     "flWhite": (0.9, flat(srgb(0xd4cfc2), 0.3)), "flSkin": (0.8, flat(srgb(0x6a4a32), 0.3)), "flRope": (0.9, flat(srgb(0x9a8e70), 0.0)),
 })
+# THE CLOTH'S FOLDS AND STITCHES, baked (2026-10-22): curvature shading on every canvas / blanket, stitch rows on the seams
+for _n in ['flCanvas','flBlanketRed','flBlanketGrey','flSacking','flGrime']:
+    _r, _f = MATDEF[_n]; MATDEF[_n] = (_r, (lambda f: lambda nb: milprops.foldShade(nb, f(nb)))(_f))
+MATDEF["flSeam"] = (MATDEF["flSeam"][0], milprops.stitched(MATDEF["flSeam"][1]))
 def LOW(): return drystone.LOW
 
 def rod(K, nm, a, b, r, mat, t, n=8):
@@ -240,8 +244,16 @@ def tarp(K, state):
     x0, x1, z0, z1 = -IW / 2 - 0.45, IW / 2 + 0.45, -ID / 2 - 0.35, ID / 2 + 0.35
     def rest(u, v):
         x, z = x0 + (x1 - x0) * u, z0 + (z1 - z0) * v
-        y = 2.2 + (1.55 - 2.2) * v - 0.25 * math.sin(math.pi * u * 2) ** 2 * math.sin(math.pi * v)   # (over the beams: tied on top of them)
+        y = 2.2 + (1.55 - 2.2) * v - 0.32 * math.sin(math.pi * u * 2) ** 2 * math.sin(math.pi * v)   # (over the beams: tied on top of them)
+        # its corners corded down (to stones on the ground), a little ripple to start the wrinkles from
+        cu, cv = min(u, 1 - u), min(v, 1 - v)
+        y -= 0.45 * max(0.0, 1 - math.hypot(cu, cv) / 0.12)
+        y += 0.025 * mnoise.noise(Vector((u * 9.0, v * 7.0, 0.4)))
+        # SLACK along the beams: ripples in its rest shape make it LONGER than the span between the ties — the extra
+        # hangs as folds running down the slope (a sheet cut to the span settles smooth as a board)
+        y += 0.06 * math.sin(u * math.pi * 13 + 2.0 * mnoise.noise(Vector((u * 2, v * 2, 0.9)))) * math.sin(math.pi * v) ** 0.5
         return (x, y, z)
+    corner = lambda u, v: (u < 0.02 or u > 0.98) and (v < 0.025 or v > 0.975)
     def mats(u, v):
         if u < 0.36 and v > 0.45: return "flBlanketGrey"
         if 0.62 < u and v < 0.5: return "flBlanketRed"
@@ -252,7 +264,7 @@ def tarp(K, state):
         atPole = any(abs(x - px) < 0.14 for px in (-IW / 2, 0.0, IW / 2))
         edge = (v < 0.12 and v > 0.06) or (v > 0.88 and v < 0.94)    # tied at the beams, its hem hanging free beyond
         if state == "damaged" and x < -0.5 and v < 0.5: return False
-        return atPole and edge
+        return (atPole and edge) or corner(u, v)
     beams = [("rod", (-IW / 2 - 0.3, 2.0, -ID / 2), (IW / 2 + 0.3, 2.0, -ID / 2), 0.08), ("rod", (-IW / 2 - 0.3, 1.35, ID / 2), (IW / 2 + 0.3, 1.35, ID / 2), 0.08)]
     if state == "damaged":
         beams[0] = ("rod", (-IW / 2 - 0.2, 0.15, -ID / 2 - 0.2), (IW / 2 + 0.3, 2.02, -ID / 2), 0.08)
@@ -263,7 +275,32 @@ def tarp(K, state):
         return
     cols = beams + [("box", (x - 0.75, x + 0.75, 0.0, 0.3, z - 1.0, z + 1.0)) for x, z in PALLETS]   # (the pallets and their blankets)
     cols += [("rod", (x, 0, z), (x, h, z), 0.07) for i, (x, z, h) in enumerate(POLES) if not (state == "damaged" and i == 0)]
-    clothKit.drape(K, "Tarp", rest, 40, 30, mats, 0.45, pins=pins, colliders=cols, frames=60, stiff=25.0, key=f"InfTarp{state}")
+    # THE CLOTH'S DETAIL (2026-10-22, you: "the cloth roof looks a bit flat … it should have more details, like the
+    # sandbags"): a finer grid, soft in compression — it BUCKLES into wrinkles between its ties, tension folds run
+    # from each tie; the seams where its patches are sewn, the grime where it lies on the beams, its rolled hem — and
+    # in the game the burlap weave close up (the cloth flag, algSangar clothMaterial).
+    NU, NV = 60, 44
+    key = f"InfTarp{state}"
+    clothKit.drape(K, "Tarp", rest, NU, NV, mats, 0.45, pins=pins, colliders=cols, frames=80, stiff=18.0, compress=2.0, bend=0.15, key=key)
+    du, dv = 1.0 / NU, 1.0 / NV
+    def seam(u, v, side=None):
+        if side is not None: return (0.0, 0.0)
+        m = mats(u, v)
+        return (0.0, 0.0) if mats(u + du, v) != m or mats(u, v + dv) != m else None
+    clothKit.decal(K, "Seams", key, NU, NV, seam, "flSeam", 0.46, lift=0.012, uv=False)
+    def grime(u, v, side=None):
+        if side is not None: return (0.0, 0.0)
+        return (0.0, 0.0) if 0.07 < v < 0.13 or 0.87 < v < 0.93 else None
+    clothKit.decal(K, "Grime", key, NU, NV, grime, "flGrime", 0.46, lift=0.014, uv=False)
+    clothKit.rim(K, "Hem", key, NU, NV, 0.014, "flSeam", 0.46)
+    # the corner cords down to stones
+    for cu in (0, 1):
+        for cv in (0, 1):
+            if state == "damaged" and cu == 0 and cv == 0: continue
+            cx, cy, cz = rest(cu, cv)
+            ox, oz = (1 if cu else -1) * 0.55, (1 if cv else -1) * 0.5
+            rod(K, f"Cord{cu}{cv}", (cx, cy, cz), (cx + ox, 0.18, cz + oz), 0.008, "flRope", 0.47, 4)
+            stone(K, f"CordStone{cu}{cv}", (cx + ox, 0.1, cz + oz), (0.16, 0.11, 0.13), random.Random(cu * 2 + cv), 0.47, box=0.7)
 
 def pallets(K, R, state):
     for k, (x, z) in enumerate(PALLETS):

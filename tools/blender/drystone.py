@@ -79,13 +79,19 @@ def stone(K, nm, c, size, R, t, mat="sgStone", yaw=None, box=0.45):
     return tag(K.obj(nm, bm, mat, "h"), t)
 
 def writeBuildOrder(K):
-    """Each part's moment into a 'build' colour attribute (.r), the ACTIVE one — exported as COLOR_0."""
+    """Each part's moment into a 'build' colour attribute (.r), the ACTIVE one — exported as COLOR_0. (.g: 1 on CLOTH
+    — a part tagged o["cloth"] (clothKit): the game lays the burlap weave over it, nowhere else — 2026-10-22.)"""
     for o in K.groups["h"]:
         if o.type != "MESH": continue
         m = o.data
         a = m.color_attributes.get("build") or m.color_attributes.new("build", "FLOAT_COLOR", "POINT")
-        t = float(o.get("t", 0.0))
-        for d in a.data: d.color = (t, 0.0, 0.0, 1.0)
+        t, c = float(o.get("t", 0.0)), float(o.get("cloth", 0.0))
+        for d in a.data: d.color = (t, c, 0.0, 1.0)
+        if c > 0:   # the WEAVE per face material: wool (a blanket) 0.5, canvas / linen 1 — the game picks the photo
+            for p in m.polygons:
+                nm = m.materials[p.material_index].name if m.materials else ""
+                g = 0.5 if "Blanket" in nm else 1.0
+                for vi in p.vertices: a.data[vi].color = (t, g, 0.0, 1.0)
         m.color_attributes.active_color = a
 
 def setLow(K, far):

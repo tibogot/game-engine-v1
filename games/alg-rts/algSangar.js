@@ -17,7 +17,7 @@
 //                  ~0.45 m a tile): its normal added to the baked one, its height darkening the pits (cavity).
 //                  6 texture taps, no new mesh.
 import * as THREE from "three";
-import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
+import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, select, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
 import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, buildFortPoint, buildMgNest, buildMirador, buildRefuge, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
@@ -62,6 +62,49 @@ function stoneMaterial(src, T) {
   return m;
 }
 
+/**
+ * CLOTH, CLOSE UP (2026-10-22, you: "the cloth roof looks flat" … "a fabric material texture would read more
+ * immediately"): a Blender piece's cloth (COLOR_0.g — drystone.writeBuildOrder: 1 canvas, 0.5 a wool blanket) gets a
+ * real FABRIC photo (Poly Haven, CC0): the plain weave of LINEN for canvas and tarps, a HERRINGBONE wool for the
+ * blankets — its normal and its threads' light and dark, in the piece's space; nothing else of the piece is touched.
+ * CHEAP: the face's dominant axis picks ONE tap per map (the sandbags' way, not triplanar's three) — four taps.
+ * ?clothdetail=0 = without.
+ */
+export const CLOTH_DETAIL = { linen: { tile: 1.1, normal: 1.4, mean: 0.7 }, wool: { tile: 0.9, normal: 1.3, mean: 0.45 }, contrast: 1.2 };   // (tiles: a HEAVY duck canvas, coarser than the photo's linen — at its real 0.27 m the threads were under a pixel from 4 m)
+const CLOTH_OFF = typeof location !== "undefined" && new URLSearchParams(location.search).get("clothdetail") === "0";
+let _clothTex = null;
+const clothTextures = () => (_clothTex ??= Promise.all(["rough_linen/rough_linen", "poly_wool_herringbone/poly_wool_herringbone"].flatMap((p) => ["nor_gl", "diff"].map((k) => loadTexture(`/textures/build/${p}_${k}_1k.jpg`))))
+  .then((ts) => { for (const t of ts) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.needsUpdate = true; } return { linen: { nor: ts[0], diff: ts[1] }, wool: { nor: ts[2], diff: ts[3] } }; }));
+function clothMaterial(src, T, colorType) {
+  const m = new THREE.MeshStandardNodeMaterial({ map: src.map, normalMap: src.normalMap ?? null, color: src.color, roughness: src.roughness, metalness: src.metalness, side: THREE.FrontSide });
+  if (!T || CLOTH_OFF) return m;
+  const g = attribute("color", colorType).y;
+  const on = smoothstep(0.15, 0.35, g);                             // cloth at all
+  const wool = smoothstep(0.85, 0.6, g);                            // 0.5 → the wool, 1 → the linen
+  const n = normalGeometry.normalize();
+  const ax = abs(n);
+  const isX = ax.x.greaterThan(ax.y).and(ax.x.greaterThan(ax.z)), isY = ax.y.greaterThan(ax.z);
+  const weave = (W, D) => {
+    const p = positionGeometry.div(D.tile);
+    const uvv = select(isX, p.zy, select(isY, p.xz, p.xy));
+    const t = texture(W.nor, uvv).xyz.mul(2).sub(1).mul(vec3(D.normal, D.normal, 1));
+    const nn = select(isX, vec3(t.xy.add(n.zy), abs(t.z).mul(n.x)).zyx, select(isY, vec3(t.xy.add(n.xz), abs(t.z).mul(n.y)).xzy, vec3(t.xy.add(n.xy), abs(t.z).mul(n.z))));
+    const c = texture(W.diff, uvv).rgb;
+    const lum = c.x.mul(0.2126).add(c.y.mul(0.7152)).add(c.z.mul(0.0722)).div(D.mean);   // ~1: the thread's light against the cloth's mean
+    return { nn: normalize(nn), lum };
+  };
+  const a = weave(T.linen, CLOTH_DETAIL.linen), b = weave(T.wool, CLOTH_DETAIL.wool);
+  const detail = normalize(mix(a.nn, b.nn, wool));
+  const baked = src.normalMap ? normalMap(texture(src.normalMap)) : transformNormalToView(n);
+  // (the detail's turn added AFTER the transform — transformNormalToView normalises; see stoneMaterial)
+  m.normalNode = normalize(baked.add(transformNormalToView(detail).sub(transformNormalToView(n)).mul(on)));
+  const lum = mix(a.lum, b.lum, wool);
+  const shade = mix(float(1), clamp(float(1).add(lum.sub(1).mul(CLOTH_DETAIL.contrast)), 0.55, 1.35), on);
+  m.colorNode = texture(src.map).rgb.mul(shade);
+  m.normalMap = null;
+  return m;
+}
+
 const S = 1.3;   // the kit's scale (the Blender piece is in real metres)
 let _detail = null;
 const _pieces = new Map();   // "kit:type" → { p: Promise<boolean>, geo }
@@ -74,12 +117,12 @@ export function sangarStoneMaterial(src) { return _detail ? stoneMaterial(src, _
  * game geometry — plain floats, the kit's scale, the OLD piece's data (`old()`: its footprint, gun… the game's
  * systems read them), the stone material, the construction material. Resolves true when pieceGeometry() has it.
  */
-function loadBlenderPiece(kit, type, old, extra = null, { stone = true } = {}) {
+function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = false } = {}) {
   const key = `${kit}:${type}`;
   if (_pieces.has(key)) return _pieces.get(key).p;
   const rec = { geo: null, p: null };
   _pieces.set(key, rec);
-  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null)]).then(([parts, T]) => {
+  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null), cloth ? clothTextures().catch(() => null) : null]).then(([parts, T, CT]) => {
     if (!parts?.[`${type}:intact`]) return false;
     const lod = houseMesh(type, "intact", 1)?.children[0];
     const near = lod?.levels?.[0]?.object, farM = lod?.levels?.[1]?.object;
@@ -96,7 +139,8 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true } = {}) {
     o.dispose();
     _detail = T;
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
-    g.userData.labMaterial = stone ? stoneMaterial(near.material, T) : plainMaterial(near.material);
+    g.userData.labMaterial = stone ? stoneMaterial(near.material, T)
+      : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
     g.userData.farGeometry = far;
@@ -251,7 +295,7 @@ export const searchlightGeometry = () => (pieceGeometry("sltower", "sltower")?.u
  * (the army's ridge tent, the red cross). No old data worth keeping: their own footprints (game metres).
  */
 const ownData = (footprint) => () => { const g = new THREE.BufferGeometry(); g.userData = { footprint }; return g; };
-export const loadForwardPost = () => loadBlenderPiece("fieldposts", "fwdradio", ownData({ cx: -0.75, cz: 0, hx: 3.95, hz: 3.2, height: 3 }), null, { stone: false }).then(async (ok) => {
+export const loadForwardPost = () => loadBlenderPiece("fieldposts", "fwdradio", ownData({ cx: -0.75, cz: 0, hx: 3.95, hz: 3.2, height: 3 }), null, { stone: false, cloth: true }).then(async (ok) => {
   if (!ok) return ok;
   const g = pieceGeometry("fieldposts", "fwdradio");
   if (g.userData.postReady) return ok;
@@ -262,7 +306,7 @@ export const loadForwardPost = () => loadBlenderPiece("fieldposts", "fwdradio", 
   return ok;
 });
 export const forwardPostGeometry = () => (pieceGeometry("fieldposts", "fwdradio")?.userData.postReady ? pieceGeometry("fieldposts", "fwdradio") : null);
-export const loadAidStation = () => loadBlenderPiece("fieldposts", "aidtent", ownData({ cx: -0.26, cz: -1.3, hx: 4.0, hz: 3.65, height: 3.4 }), null, { stone: false }).then((ok) => {
+export const loadAidStation = () => loadBlenderPiece("fieldposts", "aidtent", ownData({ cx: -0.26, cz: -1.3, hx: 4.0, hz: 3.65, height: 3.4 }), null, { stone: false, cloth: true }).then((ok) => {
   if (!ok) return ok;
   const g = pieceGeometry("fieldposts", "aidtent");
   if (g.userData.markReady) return ok;
@@ -297,9 +341,9 @@ export function markDecal(state) {
  * formula as the Blender piece), so from the air it is one more scrubby hummock; the INFIRMARY (crooked poles, a
  * patchwork tarp, straw pallets and blankets — cloth), a little scrub at its back. The old pieces' data kept.
  */
-export const loadRefuge = () => loadBlenderPiece("flnposts", "refuge", () => buildRefuge(), (g) => { g.userData.screenPlants = refugePlantSpots(); }, { stone: false });
+export const loadRefuge = () => loadBlenderPiece("flnposts", "refuge", () => buildRefuge(), (g) => { g.userData.screenPlants = refugePlantSpots(); }, { stone: false, cloth: true });
 export const refugeGeometry = () => pieceGeometry("flnposts", "refuge");
-export const loadInfirmary = () => loadBlenderPiece("flnposts", "infirm", () => buildFlnInfirmary(), (g) => { g.userData.screenPlants = infirmaryPlantSpots(); }, { stone: false });
+export const loadInfirmary = () => loadBlenderPiece("flnposts", "infirm", () => buildFlnInfirmary(), (g) => { g.userData.screenPlants = infirmaryPlantSpots(); }, { stone: false, cloth: true });
 export const infirmaryGeometry = () => pieceGeometry("flnposts", "infirm");
 const hash01 = (i, s) => { let v = Math.imul(i * 977 + s * 131, 2654435761) >>> 0; v ^= v >>> 15; v = Math.imul(v, 2246822519) >>> 0; return (v >>> 0) / 4294967296; };
 /** The refuge's mound (flnPosts.py moundBase): kit metres. */

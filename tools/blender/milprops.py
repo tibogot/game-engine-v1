@@ -278,3 +278,35 @@ def timberMat(tint):
         c = nb.mix(1.0, nb.img("build/raw_plank_wall/raw_plank_wall_diff_1k.jpg", 0.9), srgb(tint), "MULTIPLY")
         return dust(nb, nb.scale(c, nb.mr(nb.island(), 0, 1, 0.78, 1.15)), 0.9)
     return f
+
+# ── CLOTH SHADING, BAKED (2026-10-22, you: "push the fold shading and stitching") ───────────────────────────────────
+def foldShade(nb, c, k=1.0):
+    """The cloth's own curvature (Cycles' pointiness, baked into the atlas: free in the game): the creases darker, the
+    ridges of its folds lighter — the shading a canvas has between its ties."""
+    # (NOT Cycles' pointiness: with it the bakes crashed in ccl::create_mesh, every time — the curvature is computed in
+    # Python, clothKit.writeFold, into a "fold" attribute: R the curvature round 0.5, G 1 where it was written)
+    at = nb.N.new("ShaderNodeAttribute"); at.attribute_name = "fold"
+    sep = nb.N.new("ShaderNodeSeparateColor"); nb.L.new(at.outputs["Color"], sep.inputs[0])
+    p, has = sep.outputs["Red"], sep.outputs["Green"]
+    crease = nb.mr(p, 0.3, 0.5, 1.0 - 0.45 * k, 1.0)
+    ridge = nb.mr(p, 0.5, 0.7, 1.0, 1.0 + 0.2 * k)
+    shaded = nb.scale(nb.scale(c, crease), ridge)
+    return nb.mix(has, c, shaded)
+
+def stitched(base, thread=0x9a8e70, pitch=0.032):   # (a dirty thread: a bright one read as zip tape)
+    """A SEAM's strip: its own canvas `base` (a material function), rows of stitches over it — short light dashes of
+    thread every `pitch` m (a grid of them in space: on a seam a hand's width across, two or three rows of running
+    stitch), each a little dark where it pulls the cloth."""
+    def f(nb):
+        c = base(nb)
+        sep = nb.N.new("ShaderNodeSeparateXYZ"); nb.L.new(nb.geo.outputs["Position"], sep.inputs[0])
+        k = 2 * math.pi / pitch
+        sx = nb.math("SINE", nb.math("MULTIPLY", sep.outputs["X"], k))
+        sy = nb.math("SINE", nb.math("MULTIPLY", sep.outputs["Y"], k * 0.5))
+        sz = nb.math("SINE", nb.math("MULTIPLY", sep.outputs["Z"], k))
+        d = nb.math("MULTIPLY", nb.math("MULTIPLY", sx, sz), sy)
+        st = nb.mr(nb.math("ABSOLUTE", d), 0.42, 0.55, 0.0, 0.75)                     # the thread (sparse, half-seen)
+        pull = nb.mr(nb.math("ABSOLUTE", d), 0.2, 0.4, 0.0, 1.0)                      # its shadow round it
+        c = nb.mix(nb.math("MULTIPLY", pull, 0.25), c, nb.scale(c, 0.7))
+        return nb.mix(st, c, srgb(thread))
+    return f

@@ -487,7 +487,7 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
                 K.drop_cutters()
-        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"))
+        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.002))
         for i, o in enumerate(objs):
             f = fars[i] if fars else K.far(o, 0.3)
             print("TRIS", o.name, tris(o), "far", tris(f))

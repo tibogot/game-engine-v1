@@ -5,6 +5,40 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ---
 
+## Done 2026-10-21 — the buildables redone in Blender (CoH standard)
+
+Every buildable on both sides now has a Blender model: intact / damaged / ruin, a build order the site
+shows piece by piece, far levels, compressed textures, a lab entry. The sandbags are your cloth-simulated
+ones throughout.
+- **French:** sandbag wall, MG nest (with its AA-52), mortar pit (its 81), barbed wire, mirador (its
+  searchlight and gun redone), fortified point, searchlight tower (its head turns), forward post (a
+  French radio post — the old one was the Vietnam kit's US shelter), aid station (army ridge tent; the
+  red crosses as sharp mesh decals).
+- **FLN:** sangar, arms cache, ambush screen, refuge (a hummock with the engine's scrub on it),
+  infirmary (patchwork tarp).
+- **Cloth simulation** for canvas (tools/blender/clothKit.py): tarps, blankets, collapsed tents — baked
+  once in Blender, no cost in the game but triangles.
+
+## Assets still to do (the Blender pass) — 2026-10-21
+
+1. **Still the old look in the game:**
+   - French: the **French post** itself (the base) and the **SAS post**.
+   - FLN: the **lookout** (guetteur's post), the **maquis camp**, the **cave mouth**, the mine
+     marker cairn.
+   - Villages: the **stone dechra kit**, the **koubba**, **wells**, the farms and sheepfold, the oasis
+     props; the field walls want their LOD and lab entries; the old mechta houses (kept, "ancien").
+   - The old Aurès' Roman ruins (procedural, in the game as they are).
+2. **For the new pieces:**
+   - The damaged / ruin states exist but the game never switches to them — waits on **building damage
+     + collapse** (section 3).
+   - The **construction animation the CoH way** — you were gathering CoH references.
+   - Their **GPU cost**, measured in a quiet moment (the laptop cool, nothing else running).
+   - Your verdict in the lab on each ("To judge"): the lab's status → "In the game" once you've seen it.
+   - **The infirmary's cloth roof reads FLAT** (you, 2026-10-21): it wants the detail the sandbags have —
+     real cloth relief (seams, sewn patch edges, sagging folds, weave in the normal map, wear and dirt
+     where it rests on the beams). Next session.
+3. **Housekeeping:** the unused scanned stones in assets-src/scans (delete or keep — your call).
+
 ## Done since the last list (2026-10-17 → 10-20)
 
 - **A new map, Aurès — Oued Abdi** (`?map=abdi`; the old Aurès untouched): a CoH 3-sized valley

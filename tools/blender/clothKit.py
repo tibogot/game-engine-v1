@@ -51,7 +51,7 @@ def _rod(col, a, b, r, n=8):
     _collider(col, o)
     return o
 
-def _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass):
+def _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass, compress=None, bend=0.6):
     scn = bpy.context.scene
     col = bpy.data.collections.new("_clothcol"); scn.collection.children.link(col)
     tmp = [_box(col, -30, 30, -0.2, 0.0, -30, 30)]   # the ground
@@ -74,9 +74,10 @@ def _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass):
     s.quality = 10
     s.mass = mass
     s.air_damping = 1.5
-    s.tension_stiffness = s.compression_stiffness = stiff
+    s.tension_stiffness = stiff
+    s.compression_stiffness = stiff if compress is None else compress
     s.shear_stiffness = stiff * 0.5
-    s.bending_stiffness = 0.6                       # (canvas: soft folds, not paper)
+    s.bending_stiffness = bend                      # (canvas: soft folds, not paper)
     s.vertex_group_mass = "pin"
     m.collision_settings.collection = col
     m.collision_settings.distance_min = 0.015
@@ -99,12 +100,14 @@ def _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass):
     return verts
 
 def drape(K, nm, fn, nu, nv, mats, t, pins=lambda u, v: False, colliders=(), frames=50, stiff=40.0, mass=0.3,
-          key=None, thick=0.006):
+          key=None, thick=0.006, compress=None, bend=0.6, keep=0.5):
+    # (`compress`: its compression stiffness — low, the cloth BUCKLES into wrinkles where it is pushed together, as
+    # canvas does between its ties; the tension stays `stiff`. `bend`: soft folds low, stiff panels high)
     """The settled sheet as a kit object (its faces' materials from `mats(u, v)` at their centres)."""
     if K.low: nu, nv = max(4, nu // 2), max(3, nv // 2)
     ck = (key or nm, nu, nv)
     if ck not in _CACHE:
-        _CACHE[ck] = _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass)
+        _CACHE[ck] = _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass, compress, bend)
         print(f"[cloth] {nm} {nu}x{nv} settled", flush=True)
     verts = _CACHE[ck]
     bm = bmesh.new()
@@ -118,8 +121,31 @@ def drape(K, nm, fn, nu, nv, mats, t, pins=lambda u, v: False, colliders=(), fra
             f.material_index = names.index(mn)
     o = K.obj(nm, bm, names[0], "h", smooth=True)
     for mn in names[1:]: o.data.materials.append(K.mat(mn))
+    writeFold(o)
+    # OPTIMISED (2026-10-22, you: "optimise as much as possible"): the sim grid is fine to make the folds; the mesh
+    # kept is decimated (`keep`: its share of the triangles) — the folds' shape stays, the flat runs lose theirs
+    if keep < 1.0:
+        dm = o.modifiers.new("D", "DECIMATE"); dm.decimate_type = "COLLAPSE"; dm.ratio = keep; dm.use_collapse_triangulate = True
     so = o.modifiers.new("S", "SOLIDIFY"); so.thickness = thick; so.offset = 0.0
+    o["cloth"] = 1.0
     return tag(o, t)
+
+def writeFold(o, gain=6.0):
+    """THE CLOTH'S CURVATURE per vertex into a "fold" colour attribute (milprops.foldShade bakes it): how far a vertex
+    sits below (a crease) or above (a ridge) its neighbours' mean, along its normal, over the local edge length."""
+    bm = bmesh.new(); bm.from_mesh(o.data); bm.verts.ensure_lookup_table(); bm.normal_update()
+    vals = []
+    for v in bm.verts:
+        nb_ = [e.other_vert(v).co for e in v.link_edges]
+        if not nb_: vals.append(0.5); continue
+        avg = sum(nb_, Vector()) / len(nb_)
+        L = sum((q - v.co).length for q in nb_) / len(nb_) or 1.0
+        n = v.normal if v.normal.z >= 0 else -v.normal
+        c = (avg - v.co).dot(n) / L                    # > 0: the neighbours above it — a crease
+        vals.append(max(0.0, min(1.0, 0.5 - c * gain)))
+    bm.free()
+    a = o.data.color_attributes.new("fold", "FLOAT_COLOR", "POINT")
+    for d, val in zip(a.data, vals): d.color = (val, 1.0, 0.0, 1.0)
 
 def decal(K, nm, key, nu, nv, region, mat, t, lift=0.012, uv=True):
     """A MESH DECAL cut from a settled sheet (you, 2026-10-21: "the red cross looks bad, why don't you use decals"):
@@ -136,7 +162,9 @@ def decal(K, nm, key, nu, nv, region, mat, t, lift=0.012, uv=True):
     full.normal_update()
     # (`uv`: False for a strip of the piece's own canvas — a "Panel" layer on only some of a joined mesh's parts
     # crashed Cycles' bake)
-    bm = bmesh.new(); uvl = bm.loops.layers.uv.new("Panel") if uv else None; made = {}
+    # (the panel coordinates as a POINT colour attribute "panel", NOT a UV layer: a second UV layer on these crashed
+    # Cycles' bake — ccl::create_mesh — nearly every run, 2026-10-22)
+    bm = bmesh.new(); made = {}; coords = []
     for i in range(nu):
         for j in range(nv):
             c = region((i + 0.5) / nu, (j + 0.5) / nv)
@@ -149,23 +177,30 @@ def decal(K, nm, key, nu, nv, region, mat, t, lift=0.012, uv=True):
                     v = g[a][b]; n = v.normal.copy()
                     if n.z < 0: n = -n
                     made[k] = (bm.verts.new(v.co + n * lift), region(a / nu, b / nv, side))
+                    coords.append(made[k][1])
                 quad.append(made[k])
-            f = bm.faces.new([q[0] for q in quad])
-            if uvl is not None:
-                for loop, q in zip(f.loops, quad): loop[uvl].uv = (q[1][0], q[1][1])
+            bm.faces.new([q[0] for q in quad])
     full.free()
     # (single-sided in the game: every face turned to face UP, out of the cloth — wound down, the roof's were culled)
     bm.normal_update()
     down = [f for f in bm.faces if f.normal.z < 0]
     if down: bmesh.ops.reverse_faces(bm, faces=down)
-    return tag(K.obj(nm, bm, mat, "h", smooth=True), t)
+    o = K.obj(nm, bm, mat, "h", smooth=True)
+    if uv: _panel(o, [(c[0], c[1]) for c in coords])
+    if not uv: o["cloth"] = 1.0                        # (a strip of the canvas itself — a seam, grime: woven too)
+    return tag(o, t)
+
+def _panel(o, uvs):
+    a = o.data.color_attributes.new("panel", "FLOAT_COLOR", "POINT")
+    for d, (pu, pv) in zip(a.data, uvs): d.color = (pu, pv, 1.0, 1.0)
 
 def quad(K, nm, corners, mat, t):
     """A flat decal quad: four game points (counter-clockwise seen from its front), the Panel UV 0..1 over it."""
-    bm = bmesh.new(); uvl = bm.loops.layers.uv.new("Panel")
-    f = bm.faces.new([bm.verts.new(B(*p)) for p in corners])
-    for loop, uv in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))): loop[uvl].uv = uv
-    return tag(K.obj(nm, bm, mat, "h"), t)
+    bm = bmesh.new()
+    bm.faces.new([bm.verts.new(B(*p)) for p in corners])
+    o = K.obj(nm, bm, mat, "h")
+    _panel(o, ((0, 0), (1, 0), (1, 1), (0, 1)))
+    return tag(o, t)
 
 def hem(K, nm, key, nu, nv, j, drop, out, mat, t, thick=0.006):
     """A flap hanging from a settled sheet's edge row `j` (0 or nv): `drop` m down, flared `out` (a game vector) at its
@@ -181,4 +216,27 @@ def hem(K, nm, key, nu, nv, j, drop, out, mat, t, thick=0.006):
         bm.faces.new((top[i], top[i + 1], bot[i + 1], bot[i]))
     o = K.obj(nm, bm, mat, "h", smooth=True)
     so = o.modifiers.new("S", "SOLIDIFY"); so.thickness = thick; so.offset = 0.0
+    o["cloth"] = 1.0
+    return tag(o, t)
+
+def rim(K, nm, key, nu, nv, r, mat, t, n=6):
+    """THE ROLLED HEM round a settled sheet's border: a thin tube through its edge vertices (a cut sheet's edge
+    reads as paper; a sewn hem as cloth)."""
+    if K.low: return None
+    verts = _CACHE[(key, nu, nv)]
+    at = lambda i, j: verts[i * (nv + 1) + j]
+    loop = [at(i, 0) for i in range(nu + 1)] + [at(nu, j) for j in range(1, nv + 1)] + [at(i, nv) for i in range(nu - 1, -1, -1)] + [at(0, j) for j in range(nv - 1, 0, -1)]
+    bm = bmesh.new(); rings = []
+    m = len(loop)
+    for k in range(m):
+        p, q = loop[k], loop[(k + 1) % m]
+        d = (q - p).normalized(); u = d.cross(Vector((0, 0, 1))); u = u.normalized() if u.length > 1e-4 else Vector((1, 0, 0)); w = d.cross(u)
+        rings.append([bm.verts.new(p + (u * math.cos(2 * math.pi * i / n) + w * math.sin(2 * math.pi * i / n)) * r) for i in range(n)])
+    for k in range(m):
+        a, b = rings[k], rings[(k + 1) % m]
+        for i in range(n):
+            j = (i + 1) % n; bm.faces.new((a[i], a[j], b[j], b[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    o = K.obj(nm, bm, mat, "h", smooth=True)
+    o["cloth"] = 1.0
     return tag(o, t)

@@ -20,7 +20,10 @@ export const PICKS = ["rabdentse_ruins_wall", "clay_plaster", "raw_plank_wall", 
   // the coast's port (2026-10-16): canal tiles, the colonial houses' lime plaster, the quay's dressed blocks
   "clay_roof_tiles_02", "white_plaster_rough_01", "large_sandstone_blocks",
   // the mole's top and the church square: sea-worn stone flags
-  "seaworn_stone_tiles"];
+  "seaworn_stone_tiles",
+  // CLOTH (2026-10-22, you: "a fabric material texture would read more immediately"): canvas / tarps a plain linen
+  // weave, the blankets a heavy wool (the burlap stays the sandbags' and the sacking's)
+  "rough_linen", "poly_wool_herringbone"];
 // (no roughness: the materials take a constant one — tools/packBuildingTextures.py also packs these)
 const MAPS = [["Diffuse", "diff"], ["nor_gl", "nor_gl"]];
 

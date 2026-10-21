@@ -56,8 +56,8 @@ def canvasPhoto(tint, stains=True):
     return f
 def crossPanel(nb):
     """THE RED CROSS ON WHITE, from the decal's own "Panel" UVs (0..1): sharp in its own atlas; a little grime."""
-    uvn = nb.N.new("ShaderNodeUVMap"); uvn.uv_map = "Panel"
-    sep = nb.N.new("ShaderNodeSeparateXYZ"); nb.L.new(uvn.outputs["UV"], sep.inputs[0])
+    uvn = nb.N.new("ShaderNodeAttribute"); uvn.attribute_name = "panel"     # (clothKit._panel: not a UV layer — see there)
+    sep = nb.N.new("ShaderNodeSeparateXYZ"); nb.L.new(uvn.outputs["Vector"], sep.inputs[0])
     dx = nb.math("ABSOLUTE", nb.math("SUBTRACT", sep.outputs["X"], 0.5))
     dy = nb.math("ABSOLUTE", nb.math("SUBTRACT", sep.outputs["Y"], 0.5))
     arm = lambda a, b: nb.math("MULTIPLY", nb.math("LESS_THAN", a, 0.36), nb.math("LESS_THAN", b, 0.115))
@@ -79,6 +79,10 @@ MATDEF.update({
     "fpRope": (0.9, flat(srgb(0x9a8e70), 0.0)), "fpCable": (0.8, flat(srgb(0x161614), 0.0)), "fpChar": (0.95, charred),
     "fpEnamel": (0.4, flat(srgb(0xd8d8d0), 0.0)),
 })
+# THE CLOTH'S FOLDS AND STITCHES, baked (2026-10-22): curvature shading on every canvas / blanket, stitch rows on the seams
+for _n in ['fpCanvas','fpTarp','fpCanvasLight']:
+    _r, _f = MATDEF[_n]; MATDEF[_n] = (_r, (lambda f: lambda nb: milprops.foldShade(nb, f(nb)))(_f))
+MATDEF["fpSeam"] = (MATDEF["fpSeam"][0], milprops.stitched(MATDEF["fpSeam"][1]))
 LOW = lambda: drystone.LOW
 
 def rod(K, nm, a, b, r, mat, t, n=8):
@@ -326,7 +330,7 @@ def tent(K, R, state, t):
         if side is not None: return (0.0, 0.0)                                # (a vertex: no panel UV wanted)
         x = -hl - 0.1 + (TL + 0.2) * u
         return (0.0, 0.0) if any(abs(x - q) < 0.045 for q in seamX) or abs(v - 0.5) < 0.03 else None
-    clothKit.decal(K, "Seams", f"Roof{state}", 48, 36, seams, "fpSeam", t, lift=0.005, uv=False)
+    clothKit.decal(K, "Seams", f"Roof{state}", 48, 36, seams, "fpSeam", t, lift=0.012, uv=False)
     for j, s in ((0, -1), (36, 1)):
         clothKit.hem(K, f"Valance{s}", f"Roof{state}", 48, 36, j, 0.24, (0, 0, s * 0.05), mat, t)
     # the back wall down to the ground; the front rolled up under the eave (both just under the roof's line)
@@ -418,7 +422,7 @@ def buildMark(K, name, spec, state, seed, far=False):
             w = 2 * v if side == 0 else 2 * (1 - v)
             pu = (x + 0.6) / 1.2
             return (pu if side == 0 else 1 - pu, (w - 0.18) / 0.64, side)
-        clothKit.decal(K, "RoofCross", f"Roof{state}", 48, 36, panel, "fpCross", 0.9, lift=0.012)
+        clothKit.decal(K, "RoofCross", f"Roof{state}", 48, 36, panel, "fpCross", 0.9, lift=0.02)
         # the flag (flat, its panels x 0.04..0.64 off the pole, 0.08..0.68 under its top), both faces
         x0, x1, y0, y1, z = 2.7 + 0.04, 2.7 + 0.64, 3.0 - 0.68, 3.0 - 0.08, -1.8
         clothKit.quad(K, "FlagFront", [(x0, y0, z + 0.01), (x1, y0, z + 0.01), (x1, y1, z + 0.01), (x0, y1, z + 0.01)], "fpCross", 0.95)
@@ -435,7 +439,7 @@ farMark = lambda K, n, s, st, sd: buildMark(K, n, s, st, sd, far=True)
 farAid = lambda K, n, s, st, sd: buildAid(K, n, s, st, sd, far=True)
 TYPES = {"fwdradio": dict(builder=buildRadio, farBuilder=farRadio, atlas=2048, normalAtlas=1024, aoDist=0.4, smoothAngle=40, weighted=False, normals=True),
          "aidtent": dict(builder=buildAid, farBuilder=farAid, atlas=2048, normalAtlas=1024, aoDist=0.4, smoothAngle=40, weighted=False, normals=True),
-         "aidmark": dict(builder=buildMark, farBuilder=farMark, atlas=512, aoDist=0.05, smoothAngle=60, weighted=False)}
+         "aidmark": dict(builder=buildMark, farBuilder=farMark, atlas=1024, islandMargin=0.02, aoDist=0.05, smoothAngle=60, weighted=False)}
 exported = buildKit(TYPES, MATDEF, "fieldposts.glb", prefix="Field", seed0=1956, colors=True)
 
 scn = bpy.context.scene

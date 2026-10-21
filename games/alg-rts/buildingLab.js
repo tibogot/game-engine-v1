@@ -675,8 +675,8 @@ export const BUILDINGS = {
       const geo = refugeGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const sp = withScreenPlants(m, () => true, geo);
-      SITE = { set: (p) => { site.set(p); sp.fill(p); }, stencilShown: () => false, sock: null };
-      site.set(1);
+      SITE = { set: (p) => { site.set(p); sp.fill(p); m.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — the cloth's weave) */ }, stencilShown: () => false, sock: null };
+      SITE.set(1);
       return labPiece(sp.group);
     },
     after: () => labPiece(withScreenPlants(houseMesh("refuge", "damaged"), () => true, refugeGeometry()).group),
@@ -689,8 +689,8 @@ export const BUILDINGS = {
       const geo = infirmaryGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const sp = withScreenPlants(m, () => true, geo);
-      SITE = { set: (p) => { site.set(p); sp.fill(p); }, stencilShown: () => false, sock: null };
-      site.set(1);
+      SITE = { set: (p) => { site.set(p); sp.fill(p); m.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — the cloth's weave) */ }, stencilShown: () => false, sock: null };
+      SITE.set(1);
       return labPiece(sp.group);
     },
     after: () => labPiece(withScreenPlants(houseMesh("infirm", "damaged"), () => true, infirmaryGeometry()).group),
@@ -703,8 +703,8 @@ export const BUILDINGS = {
       const geo = ambushScreenGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const sp = withScreenPlants(m);
-      SITE = { set: (p) => { site.set(p); sp.fill(p); }, stencilShown: () => false, sock: null };
-      site.set(1);
+      SITE = { set: (p) => { site.set(p); sp.fill(p); m.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — the cloth's weave) */ }, stencilShown: () => false, sock: null };
+      SITE.set(1);
       return labPiece(sp.group);
     },
     after: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "damaged")), (s) => Math.abs(s.x) > 1.2 * 1.3).group),
