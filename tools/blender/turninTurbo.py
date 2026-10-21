@@ -196,8 +196,8 @@ ZF = 0.02
 # upright sides and a crisp rounded shoulder; the top runs level back from the bezel, then rolls down into a car nose;
 # fender bulges either side carry the round grey headlights low on the nose; a slate bumper band wraps the back and
 # the rear of the sides, a red skirt under it. Built as cross-sections (x, y) stepped along z and lofted — no subdivision.
-B_ZF, B_ZB = 0.016, -0.245        # the shell's front (the red apron under the bezel) and back
-B_W, B_RC = 0.2, 0.025            # half width, plan radius of the back corners
+B_ZF, B_ZB = 0.016, -0.232        # the shell's front (the red apron under the bezel) and back
+B_W, B_RC = 0.2, 0.04             # half width, plan radius of the back corners
 B_TOP, B_NOSE = 0.166, 0.062      # top height (below both frames: they stand out of it); the nose at the back
 B_NOSE_Z = -0.088                 # where the top starts to roll down
 B_FENDER = 0.042                  # the fenders: barely raised (rear 3/4 photos), creases do the work
@@ -222,15 +222,20 @@ B_BUMP = 0.107                    # the bumper's top
 # The back is a 911 nose (straight back photo, back_straight.png): FENDERS either side stay high and end in a face
 # sloping ~55 deg that carries each lamp nearly flush; the BONNET between the creases (x +-9 cm) is lower and rolls
 # gently down to the bumper.
-F_TOP, F_FACE = 0.152, 0.045      # the fenders' height; how far forward of the back their face reaches
+F_TOP, F_FACE = 0.158, 0.05      # the fenders' height; how far forward of the back their face reaches
 def fender_h(z):
     u = (z - B_ZB) / F_FACE                       # 0 at the back, 1 at the top of the sloped face
     if u <= 0: return B_BUMP
-    g = u if u <= 0.75 else (1.0 if u >= 1.25 else 0.75 + (u - 0.75) - (u - 0.75) ** 2)   # straight face, rounded over
+    g = math.sqrt(max(1 - (1 - min(u, 1.0)) ** 2, 0.0))   # a quarter round: the fender's nose rolls over (photos)
     return B_BUMP + (F_TOP - B_BUMP) * g
 def bonnet_h(z):
     u = min(max((-0.098 - z) / (-0.098 - B_ZB), 0.0), 1.0)
-    return B_BUMP + (0.17 - B_BUMP) * (1 - u ** 1.4)   # drops away soon behind the frames (front photo)
+    h = B_BUMP + (0.165 - B_BUMP) * math.sqrt(max(1 - u ** 2.6, 0.0))   # broad and high, rolling down at the bumper (rear photos)
+    # ...but kept under the sight line of the camera fitted to the front photo (that view shows only a narrow red band
+    # over the frames): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
+    ray = 0.167 + 0.72 * (z + 0.12)
+    k = 0.008
+    return max(0.5 * (h + ray - math.sqrt((h - ray) ** 2 + k * k)), B_BUMP)
 def b_height(z, x):
     ax = abs(x)
     wf = min(max((ax - 0.06) / 0.07, 0.0), 1.0); wf = wf * wf * (3 - 2 * wf)   # a broad, rounded rise
@@ -243,7 +248,7 @@ def b_height(z, x):
 def b_ring(z):
     w = b_halfwidth(z)
     t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
-    B_SH = 0.012 + 0.008 * t           # the shoulder stays tight: the fenders carry the lamps right out to the corners
+    B_SH = 0.012 + 0.03 * t * t        # the shoulder rounds out towards the back: the fenders roll into the sides
     pts = []
     N_TOP, N_SIDE, N_ARC, N_BOT = 48, 8, 5, 10
     hl, hr = b_height(z, -w + B_SH), b_height(z, w - B_SH)
@@ -290,10 +295,12 @@ POD_PROF = [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122),
             (0.0385, 0.007), (0.0385, -0.035)]
 for sx in (-1, 1):
     x = sx * 0.156
-    zc = B_ZB + F_FACE * 0.62
-    n = Vector((0, F_FACE, -(F_TOP - B_BUMP))).normalized()      # the face's normal: back and up
+    # the lamp faces BACK, 18 deg up (photos), its centre where the fender's rounded corner is 127 mm high
+    zc = min((B_ZB + i * 0.0005 for i in range(120)), key=lambda zz: abs(fender_h(zz) - 0.13))
+    up = math.radians(18)
+    n = Vector((0, math.sin(up), -math.cos(up)))
     ex = Vector((1, 0, 0)); ey = n.cross(ex).normalized()
-    z_l, y_l = zc + n.z * 0.001, fender_h(zc) + n.y * 0.001
+    z_l, y_l = zc + n.z * 0.004, fender_h(zc) + n.y * 0.004   # the ring stands just proud, its bucket behind
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
     # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
     lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.02, 0.0092), (0.0272, 0.009), (0.0272, 0.008)],
