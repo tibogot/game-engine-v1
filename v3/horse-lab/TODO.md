@@ -258,6 +258,28 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 - [ ] A/D slide 8–12 cm/s (small): the side clips' foot path vs the strafe.
 - [ ] Diagonals blend two clips — not measured yet.
 
+## ▶ Lance aiming — 2026-10-21 (you: "very hard to touch objects with it… can we make it easier")
+- WHY it was hard: the couched lance was FIXED to the horse (lanceAcross / lanceDip) — the only
+  aim was steering the whole horse; from the camera straight behind, the rider hid the lance,
+  its tip and the crosshair, and a tip 3 m out left of the neck gave no sense of where it passes.
+- THE RING IS THE CURSOR (you: "the lance has nothing to do with the cursor"): steered by the
+  crosshair's point it aimed the tip's FUTURE path, stopped at the cone's edge and jumped when
+  the crosshair met the ground. Now, couched: no crosshair; the MOUSE moves the tip itself
+  round the couched line (page LA.off → rider.lanceAimOff; ±15° / ±10°: lanceAimYaw / Pitch;
+  100 px = 8°), the camera follows the horse by itself. HOLD RIGHT MOUSE = LOCK ON the next
+  target (rider.lanceOffFor: the tip's path through its centre; let go: no jump). ASSIST
+  (RP.lanceAssist): within 40 cm of a target (measured from YOUR aim, so it lets go) the tip
+  eases onto it. Controls line in the page.
+- LANCE CAMERA: couched, the camera eases out 1.1 m LEFT, 0.35 m lower, 30 % closer.
+- SIGHT (lanceContact.createLanceSight): a ring where the tip will pass the next target (≤ 15 m
+  ahead, ≤ 3 m across), GOLD = will hit (the same contact shapes the hits use), white = will
+  pass by; a faint line from the tip.
+- Measured (contact lane, canter, mouse untouched): rider's line on / 40 cm in / 40 cm out →
+  no help 6, 8, 0 of 8 · LOCK-ON 8, 8, 8 of 8.
+- [ ] The tilt (rings + quintains) not measured with the aim yet.
+- [ ] Your look: the camera offset, the ring's size / colours; aim assist (the tip eases onto a
+  target within ~40 cm) only if still too hard.
+
 ## ▶ Horseback archery — 2026-10-19 (you: "lets work on horseback archery")
 - V in the saddle: the bow works mounted. The riding clip keeps the pelvis + legs (stirrups,
   seat); the Mixamo shot is the upper body only (bow.js `mounted`: base.apply only = not

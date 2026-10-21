@@ -37,7 +37,8 @@
       <div>Get off / on the horse — <b>F</b> (standing still / next to it)</div>
       <div>Head toss — <b>H</b> · Eat — <b>E</b> · Rear — <b>R</b> · Buck — <b>B</b></div>
       <div>Bow timeline editor (the arrow fetch) — <b>U</b></div>
-      <div>Bow (on foot) — <b>V</b> on/off · hold <b>right mouse</b> (G) aim · hold <b>left mouse</b> (T) draw, let go to shoot</div>
+      <div>Bow (on foot or riding) — <b>V</b> on/off · hold <b>right mouse</b> (G) aim · hold <b>left mouse</b> (T) draw, let go to shoot</div>
+      <div>Lance (riding) — <b>L</b> lower / raise · the <b>mouse</b> moves the tip (the ring: gold = will hit) · hold <b>right mouse</b> = lock on the next target</div>
       <div>Enable/Disable hoof IK — <b>C</b></div>
       <div>Pause — <b>P</b> · next frame (paused) — <b>N</b></div>
       <div>Look around — <b>click</b>, then mouse (Esc to free it)</div>
@@ -74,7 +75,7 @@
       import { buildArena, zoneAt as yardZoneAt } from "./horse-lab/arena.js";
       import { buildParkour } from "./horse-lab/parkour.js";
       import { buildJoust } from "./horse-lab/joust.js";
-      import { buildContactLane, createLanceDebug } from "./horse-lab/lanceContact.js";
+      import { buildContactLane, createLanceDebug, createLanceSight, shapeTest, shapeCentre } from "./horse-lab/lanceContact.js";
       import { createCavalry } from "./horse-lab/cavalry.js";
       import { Archer, BP, buildRange } from "./horse-lab/bow.js";
       import { BowEditor } from "./horse-lab/bowEditor.js";
@@ -167,6 +168,37 @@
       const joust = LEVEL === "parkour" ? buildJoust(scene, lanceDebug) : null;
       // a second lane of physical targets (sandbags, crates, jars, straw men) to test lance contacts
       const contactLane = LEVEL === "parkour" ? buildContactLane(scene, lanceDebug) : null;
+      // the couched lance: a sight ring on where its tip will pass (the player moves it: LA below)
+      const lanceSight = createLanceSight(scene);
+      const lanceTargets = () => [joust?.root, contactLane?.root].filter(Boolean);
+      const lanceAims = () => [
+        ...(contactLane?.targets ?? []).map((t) => {
+          const live = t.shapes.filter((x) => !x.shape.live || x.shape.live());
+          return live.length ? { p: live.map((x) => shapeCentre(x.obj, x.shape)).reduce((a, b) => a.add(b)).multiplyScalar(1 / live.length), test: (q) => live.some((x) => shapeTest(x.obj, x.shape, q)) } : null;
+        }).filter(Boolean),
+        ...(joust?.quintains ?? []).map((q) => ({ p: q.shield.getWorldPosition(new THREE.Vector3()), obj: q.shield })),
+        ...(joust?.rings ?? []).filter((r) => !r.taken).map((r) => ({ p: r.ring.getWorldPosition(new THREE.Vector3()), obj: r.ring })),
+      ];
+      // the player's lance aim: the RING is the cursor. The mouse moves the tip round the couched
+      // line (LA.off, rad: + across = left, + dip = down); the camera follows the horse by itself;
+      // hold RIGHT mouse = lock on the next target; the ASSIST eases the tip onto a target the ring
+      // is within 40 cm of. (Steered by the crosshair's point, the lance seemed to ignore the cursor:
+      // it aimed the tip's FUTURE path, stopped at the cone's edge, jumped when the crosshair met the ground)
+      const LA = { off: [0, 0], lock: false, mode: false };
+      const lanceAimUpdate = () => {
+        const lt = RP.lanceLen - RP.lanceBack, cone = [RP.lanceAimYaw, RP.lanceAimPitch];
+        LA.off = LA.off.map((x, i) => THREE.MathUtils.clamp(x, -cone[i], cone[i]));
+        const tgt = lanceSight.best, need = tgt ? rider.lanceOffFor(tgt.p) : null;
+        let want = LA.off;
+        if (LA.lock && need) { want = need; LA.off = need.slice(); }                     // (let go: no jump)
+        else if (RP.lanceAssist && need) {
+          // (weighed from the PLAYER's own aim, not the assisted one: it lets go when you move away)
+          const d = Math.hypot(need[0] - LA.off[0], need[1] - LA.off[1]) * lt, w = THREE.MathUtils.smoothstep(1 - d / 0.4, 0, 1) * 0.85;
+          want = LA.off.map((x, i) => x + (need[i] - x) * w);
+        }
+        lanceSight.locked = LA.lock && !!need;
+        rider.lanceAimOff = want;
+      };
       // an archery range (butts at 10–60 m + the lance lane's targets) for the bow on foot — parkour field only
       const range = LEVEL === "parkour" ? buildRange(scene) : null;
       const zoneAt = arena.zoneAt ?? yardZoneAt;
@@ -319,10 +351,10 @@
       });
       // the bow: right mouse = aim, left mouse = draw (G / T on the keyboard)
       const btn = { aim: false, fire: false };
-      renderer.domElement.addEventListener("mousedown", (e) => { if (!archer.active) return; if (e.button === 2) btn.aim = true; if (e.button === 0) btn.fire = true; });
-      addEventListener("mouseup", (e) => { if (e.button === 2) btn.aim = false; if (e.button === 0) btn.fire = false; });
-      renderer.domElement.addEventListener("contextmenu", (e) => { if (archer.active) e.preventDefault(); });
-      addEventListener("blur", () => { btn.aim = btn.fire = false; });
+      renderer.domElement.addEventListener("mousedown", (e) => { if (e.button === 2 && LA.mode) LA.lock = true; if (!archer.active) return; if (e.button === 2) btn.aim = true; if (e.button === 0) btn.fire = true; });
+      addEventListener("mouseup", (e) => { if (e.button === 2) { btn.aim = false; LA.lock = false; } if (e.button === 0) btn.fire = false; });
+      renderer.domElement.addEventListener("contextmenu", (e) => { if (archer.active || LA.mode) e.preventDefault(); });
+      addEventListener("blur", () => { btn.aim = btn.fire = false; LA.lock = false; });
       addEventListener("keyup", (e) => {
         down.delete(e.code);
         if (e.key === "Shift") {
@@ -343,7 +375,7 @@
       };
 
       // ── Third-person camera ──────────────────────────────────────────────────
-      let camYaw = ctrl.yaw, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9;
+      let camYaw = ctrl.yaw, camPitch = 0.28, camDist = 7.5, lastMouse = -1e9, lanceCamW = 0;
       const camPan = new THREE.Vector3();                   // animation editor: right-drag pans the view
       const camTarget = new THREE.Vector3(0, 1.8, 2);
       const canvas = renderer.domElement;
@@ -358,6 +390,7 @@
         const locked = document.pointerLockElement === canvas;
         if (!locked && !(e.buttons & 1)) return;
         if (!locked && e.target !== canvas) return;
+        if (LA.mode && !D.editing) { LA.off[0] -= e.movementX * 0.0014; LA.off[1] += e.movementY * 0.0011; return; }   // the couched lance: the mouse moves the tip (the ring), not the camera
         camYaw -= e.movementX * 0.0028;
         camPitch = THREE.MathUtils.clamp(camPitch + e.movementY * 0.0022, D.editing ? -0.5 : archer.aiming ? -0.6 : -0.1, D.editing ? 1.5 : 1.25);   // aiming the bow: may look up
         lastMouse = performance.now();
@@ -378,8 +411,12 @@
         // aiming the bow: in close over the right shoulder (the crosshair is the camera's centre)
         const aw = archer.active && !archer.edit ? archer.aimW * archer.aimW * (3 - 2 * archer.aimW) : 0;
         if (aw > 0) { const hp = rider.B.head.getWorldPosition(new THREE.Vector3()); want.lerp(hp.add(new THREE.Vector3(-Math.cos(camYaw), 0, Math.sin(camYaw)).multiplyScalar(0.62)).add(new THREE.Vector3(0, 0.12, 0)), aw); }
+        // the couched lance: the camera moves out LEFT and in, over the lance's side — straight behind,
+        // the rider's body hid the lance, its tip and the crosshair
+        lanceCamW += ((LA.mode && side === undefined ? 1 : 0) - lanceCamW) * lerpK(4, dt);
+        if (lanceCamW > 0.001) want.add(new THREE.Vector3(Math.cos(camYaw), 0, -Math.sin(camYaw)).multiplyScalar(1.1 * lanceCamW)).add(new THREE.Vector3(0, -0.35 * lanceCamW, 0));
         camTarget.lerp(want, lerpK(aw > 0 ? 18 : 10, dt));
-        const pitch = side !== undefined ? 0.06 : camPitch, dist = camDist + (2.3 - camDist) * aw;
+        const pitch = side !== undefined ? 0.06 : camPitch, dist = (camDist + (2.3 - camDist) * aw) * (1 - 0.3 * lanceCamW);
         const cp = Math.cos(pitch), sp = Math.sin(pitch);
         camera.position.set(
           camTarget.x - Math.sin(camYaw) * cp * dist,
@@ -566,7 +603,11 @@
           poseEd.applyHorse();                                  // the pose layer on the horse (before the rider follows it)
           if (bowEd.isOpen) bowEd.update(rawDt);                // (the bow editor replays the fetch to its playhead itself)
           else {
+            const couched = onHorse && RP.lance && !RP.banner && !BP.on && (rider.lanceA ?? 0) > 0.5;
+            LA.mode = couched && RP.lanceAim;
+            if (LA.mode) lanceAimUpdate(); else { rider.lanceAimOff = null; if (!couched) LA.off = [0, 0]; }
             rider.update(rdt, { lookYaw: camYaw, input: onHorse ? {} : { ...inp, hold: archer.active && archer.aiming, aimYaw: archer.aimYawLast } });
+            lanceSight.update(couched ? rider.lance : null, ctrl.yaw, couched ? lanceAims() : [], camera);
             archer.update(rdt, { camera, aim: btn.aim || down.has("KeyG"), fire: btn.fire || down.has("KeyT") });   // the bow (on foot or in the saddle): over the clip's upper body
           }
           D.afterPose?.();                                      // (debug / tools: a pose over the frame's, before it renders)
@@ -655,7 +696,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { setHeadgear, riderKind: riderData.kind, SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { setHeadgear, riderKind: riderData.kind, SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, lanceSight, LA, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

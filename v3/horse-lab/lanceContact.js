@@ -134,7 +134,7 @@ export function shapeTest(obj, shape, p, r = CONTACT.radius) {
   const l = obj.worldToLocal(p.clone()); if (shape.offset) l.sub(shape.offset);
   return Math.abs(l.x) < shape.half.x + r && Math.abs(l.y) < shape.half.y + r && Math.abs(l.z) < shape.half.z + r;
 }
-const shapeCentre = (obj, shape) => { const c = obj.getWorldPosition(new V3()); if (shape.offset) c.add(shape.offset.clone().applyQuaternion(obj.getWorldQuaternion(new THREE.Quaternion()))); return c; };
+export const shapeCentre = (obj, shape) => { const c = obj.getWorldPosition(new V3()); if (shape.offset) c.add(shape.offset.clone().applyQuaternion(obj.getWorldQuaternion(new THREE.Quaternion()))); return c; };
 
 // ── the targets ──────────────────────────────────────────────────────────────
 export function gallows(M, H) {
@@ -330,4 +330,62 @@ export function buildContactLane(scene, debug) {
   function reset() { for (const t of targets) { t.reset(); t.hits = 0; t.best = null; t.near = false; } }
   const start = { x: x0 - 14, z: Z, yaw: Math.PI / 2 };
   return { root, update, reset, start, targets };
+}
+
+// ── the lance SIGHT: where the tip will pass the next target if the horse rides on straight ──
+// (from behind and above, a tip 3 m out to the left of the neck gave no sense of where it
+// would pass — the hits were luck). The next target ahead (its centre within 15 m along the
+// heading, 3 m across); the tip's line along the heading, where it comes level with it: a
+// ring there (GOLD when that line meets the target's own geometry — it will hit; white when it
+// will pass by), a faint line from the tip to it. Drawn over everything, facing the camera.
+export function createLanceSight(scene) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.9, toneMapped: false });   // (tone-mapped, the gold read as pale grey)
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.08, 0.105, 32), mat);
+  const dot = new THREE.Mesh(new THREE.CircleGeometry(0.02, 12), mat);
+  const lineMat = new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.35, toneMapped: false });
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new V3(), new V3(0, 0, 1)]), lineMat);
+  const g = new THREE.Group(); g.add(ring, dot); scene.add(g, line);
+  for (const o of [g, ring, dot, line]) o.renderOrder = 999;
+  g.visible = line.visible = false; line.frustumCulled = false;
+  const ray = new THREE.Raycaster();
+  const hide = () => { g.visible = line.visible = false; return null; };
+  return {
+    group: g,
+    state: null,
+    best: null,                                          // the next target ahead (its { p, ... }), for the lock-on / assist
+    locked: false,                                       // (the page: the ring drawn bigger while locked on)
+    // aims: [{ p: Vector3 (the target's centre), test?: (point) => bool (its CONTACT shapes — the
+    // same test the hits use), obj?: Object3D (else its geometry is ray-tested) }]; yaw: the heading
+    update(lance, yaw, aims, camera, range = 15) {
+      this.state = null; this.best = null;
+      if (!lance?.visible) return hide();
+      const tip = lanceSegment(lance).b, fwd = new V3(Math.sin(yaw), 0, Math.cos(yaw)), lft = new V3(fwd.z, 0, -fwd.x);
+      let best = null;
+      for (const a of aims) {
+        const d = a.p.clone().sub(tip), along = d.dot(fwd);
+        if (along < 0.3 || along > range || Math.abs(d.dot(lft)) > 3) continue;
+        if (!best || along < best.along) best = { ...a, along };
+      }
+      // no target ahead: the ring still shows where the tip runs, 8 m on (it IS the cursor), faint
+      if (!best) {
+        const Q0 = tip.clone().addScaledVector(fwd, 8);
+        g.visible = true; line.visible = false; g.position.copy(Q0); g.quaternion.copy(camera.quaternion);
+        g.scale.setScalar(Math.max(0.6, Math.min(1.8, camera.position.distanceTo(Q0) / 6)));
+        mat.color.set(0xffffff); mat.opacity = 0.4;
+        return null;
+      }
+      this.best = best;
+      const Q = tip.clone().addScaledVector(fwd, best.along);
+      let hit;
+      if (best.test) hit = [-0.3, -0.15, 0, 0.15, 0.3].some((k) => best.test(Q.clone().addScaledVector(fwd, k)));
+      else { ray.set(tip, fwd); ray.far = best.along + 0.8; hit = ray.intersectObject(best.obj, true).some((x) => x.object.visible !== false); }
+      g.visible = line.visible = true;
+      g.position.copy(Q); g.quaternion.copy(camera.quaternion);
+      g.scale.setScalar(Math.max(0.6, Math.min(1.8, camera.position.distanceTo(Q) / 6)) * (this.locked ? 1.35 : 1));   // (about the same size on screen; bigger locked on)
+      mat.color.set(hit ? 0xffb400 : 0xffffff); mat.opacity = hit ? 1 : 0.6; lineMat.color.copy(mat.color); lineMat.opacity = hit ? 0.6 : 0.3;
+      line.geometry.setFromPoints([tip, Q]);
+      this.state = { hit, along: best.along, miss: Q.distanceTo(best.p) };
+      return this.state;
+    },
+  };
 }

@@ -44,6 +44,9 @@ export const RP = {
   lanceHand: [-0.15, 0.52, 0.18],  // right fist in the saddle frame (x: − = right, y up, z forward): in front of the chest, the lance under the armpit — lower, it could not clear the armoured crest
   lanceAcross: 0.2,    // rad the lance points LEFT of straight ahead (over the horse's neck, as in a joust)
   lanceDip: -0.03,     // rad the tip points down (− = a touch up: it rides over the neck)
+  lanceAim: true,      // couched, the PLAYER aims the tip (the page: the mouse moves the sight ring -> rider.lanceAimOff) within a cone:
+  lanceAimYaw: 0.26, lanceAimPitch: 0.17,   // rad each side / up and down of the couched line (~15° / 10°)
+  lanceAssist: true,   // the tip eases onto a target the ring is within ~40 cm of (the page)
   lanceDown: false,    // couched for the charge (L key); raised: carried upright, the butt on the thigh
   lanceUpHand: [-0.24, 0.24, 0.14], lanceUpGrip: 0.95, lanceUpTilt: 0.22,   // raised: the fist by the thigh, m of pole below it, rad leaning forward
   lanceTime: 0.7,      // s to lower or raise it
@@ -769,6 +772,18 @@ export class RiderController {
     this.rein.step(dt, [[0, ringL], [iLp, fist[0].pinky], [iLt, fist[0].thumb], [iRt, fist[1].thumb], [iRp, fist[1].pinky], [n - 1, ringR]], seg, neck);
   }
 
+  // the aim offsets [across, dip] (rad round the couched line, in the cone) that put the tip's
+  // path through point p: the tip as far across and up from the fist as p is (last frame's fist)
+  lanceOffFor(p) {
+    const F = this._lanceFrame;
+    if (!F) return [0, 0];
+    const rel = p.clone().sub(F.grip), Lt = RP.lanceLen - RP.lanceBack;
+    return [
+      clamp(Math.asin(clamp(rel.dot(F.lft) / Lt, -0.95, 0.95)) - RP.lanceAcross, -RP.lanceAimYaw, RP.lanceAimYaw),
+      clamp(Math.asin(clamp(-rel.dot(F.up) / Lt, -0.95, 0.95)) - RP.lanceDip, -RP.lanceAimPitch, RP.lanceAimPitch),
+    ];
+  }
+
   // The lance through the right fist: over the horse's neck to the left, the
   // tip a little down, the butt under the armpit
   placeLance(fwd, up, lft, hc, dtL = 1 / 60) {
@@ -784,7 +799,20 @@ export class RiderController {
     // capsules, inflated by the lance's thickness); touching, it angles further
     // across (it then crosses close to the saddle, where the neck is low) and a
     // little up — the least that clears, eased so it does not twitch
-    const aim = (ac, dp) => fwd.clone().multiplyScalar(Math.cos(ac)).addScaledVector(lft, Math.sin(ac)).addScaledVector(up, -Math.sin(dp)).normalize();
+    // the PLAYER's aim (lanceAimAt: the crosshair's point, set by the page): the lance is turned so
+    // its TIP's path — straight on with the horse — runs through that point: the tip as far
+    // across and up from the fist as the point is. (Pointed AT the point, the tip passed ~20 cm
+    // beside it.) Within a cone round the couched line, eased; the horse's clearance below still
+    // has the last word. (Fixed to the horse, the only aim was steering the whole horse — luck)
+    // (lanceAimOff: [across, dip] rad round the couched line, straight from the player's mouse;
+    // lanceAimAt: a point, through lanceOffFor)
+    this._lanceFrame = { grip: grip.clone(), lft: lft.clone(), up: up.clone() };
+    let oA = 0, oP = 0;
+    if (RP.lanceAim && this.lanceAimOff) [oA, oP] = this.lanceAimOff.map((x, i) => clamp(x, -(i ? RP.lanceAimPitch : RP.lanceAimYaw), i ? RP.lanceAimPitch : RP.lanceAimYaw));
+    else if (RP.lanceAim && this.lanceAimAt) [oA, oP] = this.lanceOffFor(this.lanceAimAt);
+    this.lanceOff ??= [0, 0];
+    { const k = 1 - Math.exp(-6 * Math.min(dtL, 0.05)); this.lanceOff[0] += (oA - this.lanceOff[0]) * k; this.lanceOff[1] += (oP - this.lanceOff[1]) * k; }
+    const aim = (ac, dp) => { ac += this.lanceOff[0]; dp += this.lanceOff[1]; return fwd.clone().multiplyScalar(Math.cos(ac)).addScaledVector(lft, Math.sin(ac)).addScaledVector(up, -Math.sin(dp)).normalize(); };
     // (against the horse's REAL skin — neck, head and the armour plates on the
     // crest, which stand well out of the reins' simple neck capsules)
     const pts = this.horseSkinPoints(hc), clear2 = (0.045 + 0.03) ** 2, L = RP.lanceLen - RP.lanceBack;
