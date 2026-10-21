@@ -108,6 +108,14 @@ gameplay layout is hand-typed JS (`games/alg-rts/layout.js`, `maps/*.js`).
 - **A5:** the frame update runs in 5 named sections.
 - **Games still run:** alg-rts and Thunderline drive at 60 fps, with a clean console.
 
+**C15 done 2026-10-21:** `npm run levels` (tools/levelCheck.mjs) checks each level for missing
+files, missing embedded assets, NaN heights, instances on missing slots and unrestorable prop
+slots (errors), plus out-of-world objects, clipped peaks and retired keys (warnings).
+`levelCheckTest` plants each fault in a copy of a level and requires every level in
+public/levels to have 0 errors.
+- First run: 13 levels, 0 errors.
+- One warning: nam-valley has 16 props outside its 1024 m world.
+
 ## Suggested order
 
 - **Now (small, safe; they help alg-rts too):** A1, A2, A3 + A4, A5.

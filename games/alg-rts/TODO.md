@@ -131,7 +131,9 @@ PHASE 3 — a finished product
 12. [ ] OPTIONS: graphics presets (low / medium / high), resolution and render scale, volumes
     (master / music / effects / voices), KEY REBINDING (AZERTY), UI scale (exists), gore toggle.
 13. [ ] MUSIC: a main theme, battle and calm layers (licensed or commissioned) — none yet.
-14. [ ] RELEASE CLEANUP: the dev panel and stats only with ?dev=1. (Done 2026-10-12: the console
+14. [ ] RELEASE CLEANUP: `npm run levels` (tools/levelCheck.mjs, 2026-10-21) reports every level's missing
+    files, broken slots, NaN heights and out-of-world objects — 0 errors required (levelCheckTest guards it).
+    The dev panel and stats only with ?dev=1. (Done 2026-10-12: the console
     is clean at boot — the KTX2 warning was the hens' second loader, now a baked face table; and
     the "flaky" cityKitTest was a real traffic bug, fixed and back in the fast lane.)
 15. [ ] PERF + BOOT: boot ~22 s (2026-10-04, 44 s before; RE-MEASURE: much was added since) → shader
