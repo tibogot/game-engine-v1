@@ -24,7 +24,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
       crossed 0 m off-centre, 5.0 m up. FIXED on the way: the measured take-off was stored as a WORLD
       position — stale after a move or a reused uid (the user saw the tube 32 m beside the road); now in
       the lip's frame. While the take-off is still the guess (57 m/s) the note says so — Re-fit after.
-- [ ] NEXT: a WIDE → ROAD funnel (a 48 m platform back to the 16 m road).
+- [x] **FUNNEL 48 → 16 and FLARE 16 → 48** (Platforms tab; kit.js `taper`, oldLook.js buildTaperLook):
+      the deck eases (smoothstep) between the wide platform and the road over 64 m, kerbs at its edges;
+      each side's rail built from frames shifted to the edge (rails converge, their collision too). Tests:
+      kicker → platform 128 on the arc → funnel → road: lap 14.1 s, landing perfect; road → flare →
+      platform → funnel → road: 8.2 s; both no warnings. Seen close in the drive page: smooth S, rails and
+      kerbs follow, seamless join.
 - [ ] **THE NEW CAR — PAUSED** (user, 2026-10-19: "make a pause on the car", the game first). Done, not
       committed: optimised LOD0 + LOD1 + ShadowProxy in public/models/thunderline/ (KTX2 + meshopt):
       measured 17 draws (was 69), 2 casters (was 57), 29.6k tris, 11 materials, 6.5 Mpx; the ghost uses

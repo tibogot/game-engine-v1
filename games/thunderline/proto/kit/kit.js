@@ -384,6 +384,10 @@ export const TILES = {
   platform_turn_90: { label: "Platform turn 90°", section: "wide", segs: [{ L: turnLen(64, Math.PI / 2, 24), turn: Math.PI / 2, ramp: 24 }] },
   platform_up_12: { label: "Platform up ~12 m", section: "wide", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
   platform_down_12: { label: "Platform down ~12 m", section: "wide", segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }] },
+  // FUNNEL / FLARE (user, 2026-10-21: big landing platforms need a way back to the road): the deck eases
+  // from the wide platform (48 m) to the road (16 m), or back; the rails converge (oldLook.js taper)
+  funnel_64: { label: "Funnel 48 → 16", section: "wide", taper: { from: 24, to: 8 }, segs: [{ L: 64 }] },
+  flare_64: { label: "Flare 16 → 48", section: "wide", taper: { from: 8, to: 24 }, segs: [{ L: 64 }] },
   // ---- VERTICAL + TURN-AROUND pieces (user's Apex Rush top view, 2026-10-20: the tower climbs, the "C") ----
   // HALF LOOP + ROLL (an Immelmann): up the wall, over the top upside down, and the road rolls you upright
   // again — heading BACK, ~2R higher. Road hold holds the car through the roll (as the twist).

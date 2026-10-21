@@ -89,6 +89,53 @@ export function oldFrames(tile) {
 }
 
 /**
+ * A FUNNEL / FLARE (`tile.taper: { from, to }`, half widths in m — user, 2026-10-21: large platforms to
+ * land on need a way back to the road): the deck narrows (or widens) smoothly along the piece, kerbs at
+ * its edges; each side's rail is built from frames SHIFTED out to the edge at that point (the rail
+ * builder keeps a fixed offset), so the rails converge and guide the car in — their collision too.
+ */
+function buildTaperLook(tile, edges) {
+  const { frames } = oldFrames(tile);
+  const { from, to } = tile.taper;
+  // arc length along the frames → an eased half width (smoothstep: no kink at either end)
+  const sAt = [0];
+  for (let i = 1; i < frames.length; i++) sAt.push(sAt[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos));
+  const L = sAt.at(-1) || 1;
+  const hwAt = (i) => { const t = sAt[i] / L, e = t * t * (3 - 2 * t); return from + (to - from) * e; };
+  const narrow = Math.min(from, to);
+  const deck = buildSweepGeometry(frames, buildProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * from }, edges), {
+    profileAt: (_t, i) => buildProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(i) }, edges),
+  });
+  const n = deck.getAttribute("position").count;
+  const a = new Float32Array(n * 2);
+  for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
+  deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
+  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under: null };
+  // each side: the frames moved sideways by (half width here − the narrow half width), tangents along
+  // the moved edge (a converging rail faces along ITS line, not the road's centre line)
+  const rp = { ...ROAD_PARAM_DEFAULTS, width: 2 * narrow };
+  const sideFrames = (side) => {
+    const moved = frames.map((f, i) => ({ ...f, pos: f.pos.clone().addScaledVector(f.right, side * (hwAt(i) - narrow)) }));
+    moved.forEach((f, i) => {
+      const p = moved[Math.max(0, i - 1)].pos, q = moved[Math.min(moved.length - 1, i + 1)].pos;
+      const T = q.clone().sub(p).normalize();
+      f.tangent = T;
+      f.right = T.clone().cross(f.up).normalize().multiplyScalar(f.right.dot(T.clone().cross(f.up)) >= 0 ? 1 : -1);
+    });
+    return moved;
+  };
+  const posts = { key: "", template: null, matrices: [] };
+  const rails = [], cols = [];
+  for (const side of [-1, 1]) {
+    const fr = sideFrames(side);
+    rails.push(buildRailGeometry(fr, rp, RAIL, { postSink: posts, sides: [side] }));
+    cols.push(buildRailCollision(fr, rp, RAIL, { sides: [side] }));
+  }
+  const merge = (gs) => mergeGeometries(gs.filter(Boolean));
+  return { deck, rail: merge(rails), railCollision: merge(cols), posts, under: null };
+}
+
+/**
  * railCollision is what the CAR hits (two walls with depth, the shape the old car's contact is tuned
  * to); the visible rail and its posts are render-only, as in the old game.
  * @returns {{deck: THREE.BufferGeometry, rail: THREE.BufferGeometry|null, railCollision: THREE.BufferGeometry|null, posts: {template, matrices}|null}}
@@ -110,6 +157,7 @@ export function buildOldLook(tile, edges = true) {
     }
     return (tile.halfpipe ? buildHalfpipeLook : buildTubeLook)(tile, frames, sAt, b.L, { buildSweepGeometry, NO_CHECKER, THREE });
   }
+  if (tile.taper) return buildTaperLook(tile, edges);
   const { frames: all } = oldFrames(tile);
   const rp = tile.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS.wide.hw * 2 } : ROAD_PARAM_DEFAULTS;
   // RUNS of road: a gap's air frames cut the piece in two (gap jumps); one run for the others
