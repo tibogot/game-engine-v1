@@ -153,7 +153,7 @@ function settingsScreen() {
       <span><kbd>Backspace</kbd></span><span>last checkpoint, keeping your speed (twice: standing)</span>
       <span><kbd>R</kbd> <kbd>Delete</kbd></span><span>restart</span>
       <span><kbd>M</kbd></span><span>sound on / off</span>
-      <span><kbd>F</kbd></span><span>free camera: drag to orbit the car, wheel to zoom, <kbd>T</kbd> slow motion / pause</span>
+      <span><kbd>C</kbd></span><span>free camera: drag to orbit the car, wheel to zoom, <kbd>T</kbd> slow motion / pause</span>
       <span><kbd>Esc</kbd></span><span>back</span>
     </div></div>`;
   for (const t of document.querySelectorAll(".toggle")) t.onclick = () => { settings.set({ [t.dataset.key]: !settings.get()[t.dataset.key] }); settingsScreen(); };

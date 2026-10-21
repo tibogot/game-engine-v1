@@ -18,9 +18,19 @@ export const isLoopEngine = (type) => !!LOOP_ENGINES[type];
 // THE MIX (by ear in the engine lab; the user tunes these)
 export const LOOP_MIX = {
   offGain: 2.2, // the coasting loops are rendered ~12 dB under the throttle ones: lift them to ~-5 dB
-  toneMin: 1500, // lowpass (Hz) coasting …
-  toneLoad: 5500, // … + this much at full load
-  toneRpm: 1500, // … + this much at 8000 RPM
+  // the TOP END (user, 2026-10-20: "a bit muffled, no high frequency at all"): was 1500 + 5500 load + 1500
+  // rpm (coasting 1.5 kHz, flat out 8.5 kHz) — now coasting ~3.5-7 kHz, flat out 12.5-16 kHz, plus presence
+  toneMin: 3500, // lowpass (Hz) coasting …
+  toneLoad: 9000, // … + this much at full load
+  toneRpm: 3500, // … + this much at 8000 RPM
+  presence: 4, // dB, a high shelf from presenceHz (the loops themselves are dark: centroid ~2.2 kHz)
+  presenceHz: 2500,
+  filterOff: false, // the sound lab's A/B: no lowpass at all
+  // GRIT: the loops have almost nothing above 2 kHz (measured: 0.0-0.1% of their energy), so no filter or
+  // shelf can brighten them. An EXCITER makes the top end: a copy, high-passed, saturated (new harmonics
+  // that follow the engine), high-passed again, mixed in under the loops.
+  grit: 1, // 0 = none … 3 = a lot (1: ~3% of the energy above 3 kHz, simulated on rpm_5000; was 0.0%)
+  gritHz: 3000, // the harmonics kept above this
   // POPS OFF (user, 2026-10-20: the lift-off crackle was "very annoying to the ears, impossible to use") —
   // the cracks below are kept but silent: popGain 0
   popGain: 0, // a crack's peak, against the loops' ~0.12 RMS (was 0.55)
@@ -29,7 +39,7 @@ export const LOOP_MIX = {
 };
 
 export function createEngineLoops({ type = "gen6", volume = 0.7 } = {}) {
-  let ctx = null, master = null, tone = null, chop = null, popBus = null, noise = null, ready = false, starting = null;
+  let ctx = null, master = null, tone = null, shelf = null, gritHp = null, gritGain = null, chop = null, popBus = null, noise = null, ready = false, starting = null;
   let vol = volume, muted = false, engine = LOOP_ENGINES[type] ? type : "gen6";
   let voices = []; // { rpm, src, gain, off }
   const buffers = new Map(); // engine -> { on: AudioBuffer[], off: AudioBuffer[] } (one per LOOP_RPMS)
@@ -63,10 +73,27 @@ export function createEngineLoops({ type = "gen6", volume = 0.7 } = {}) {
     tone = ctx.createBiquadFilter();
     tone.type = "lowpass";
     tone.Q.value = 0.6;
+    shelf = ctx.createBiquadFilter();
+    shelf.type = "highshelf";
+    shelf.frequency.value = 2500;
+    shelf.gain.value = LOOP_MIX.presence;
     chop = ctx.createGain(); // the limiter's stutter
     master = ctx.createGain();
     master.gain.value = muted ? 0 : vol;
-    tone.connect(chop).connect(master).connect(ctx.destination);
+    tone.connect(shelf).connect(chop).connect(master).connect(ctx.destination);
+    // the exciter (LOOP_MIX.grit), in parallel after the tone filter: so coasting stays duller
+    const pre = ctx.createBiquadFilter();
+    pre.type = "highpass"; pre.frequency.value = 700;
+    const sat = ctx.createWaveShaper();
+    const curve = new Float32Array(2048);
+    for (let i = 0; i < curve.length; i++) { const x = (i / (curve.length - 1)) * 2 - 1; curve[i] = Math.tanh(x * 6); }
+    sat.curve = curve;
+    sat.oversample = "4x";
+    const drive = ctx.createGain(); drive.gain.value = 4; // the loops are ~0.12 RMS: push them into the curve
+    gritHp = ctx.createBiquadFilter();
+    gritHp.type = "highpass"; gritHp.frequency.value = LOOP_MIX.gritHz; gritHp.Q.value = 0.7;
+    gritGain = ctx.createGain(); gritGain.gain.value = 0;
+    tone.connect(pre).connect(drive).connect(sat).connect(gritHp).connect(gritGain).connect(chop);
     popBus = ctx.createGain(); // the cracks: bright, so not through the tone filter
     popBus.connect(master);
     noise = ctx.createBuffer(1, ctx.sampleRate / 2, ctx.sampleRate);
@@ -128,7 +155,12 @@ export function createEngineLoops({ type = "gen6", volume = 0.7 } = {}) {
         set(v.gain.gain, w * (v.off ? offMix : onMix), 0.03);
         set(v.src.playbackRate, rpm / v.rpm, 0.015);
       });
-      set(tone.frequency, LOOP_MIX.toneMin + LOOP_MIX.toneLoad * load + LOOP_MIX.toneRpm * Math.min(1, rpm / 8000), 0.04);
+      set(tone.frequency, LOOP_MIX.filterOff ? 20000 : Math.min(20000, LOOP_MIX.toneMin + LOOP_MIX.toneLoad * load + LOOP_MIX.toneRpm * Math.min(1, rpm / 8000)), 0.04);
+      set(shelf.gain, LOOP_MIX.presence, 0.05);
+      set(shelf.frequency, LOOP_MIX.presenceHz, 0.05);
+      // the grit grows with load (pulling barks, coasting is softer)
+      set(gritGain.gain, LOOP_MIX.grit * 0.5 * (0.35 + 0.65 * load), 0.05);
+      set(gritHp.frequency, LOOP_MIX.gritHz, 0.05);
       // LIMITER: the ignition cuts in bursts (~18 a second)
       const now = ctx.currentTime, dt = Math.min(0.05, now - lastT);
       lastT = now;

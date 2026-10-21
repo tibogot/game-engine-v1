@@ -82,6 +82,7 @@ await rig.start({
   trackId: campaignRec ? null : trackId,
   buttons,
   onEscape: cameFrom === "builder" ? goBuilder : goMenu,
+  backLabel: cameFrom === "builder" ? "Builder" : "Menu",
 });
 addEventListener("keydown", (e) => { if (e.code === "KeyB" && cameFrom === "builder") goBuilder(); });
 if (params.has("auto")) rig.setAuto(true);
@@ -92,7 +93,7 @@ setTimeout(() => boot.remove(), 600);
 window.__drive = {
   app, rig, restart: rig.restart, recoverToSafe: rig.recoverToSafe, respawnCheckpoint: rig.respawnCheckpoint,
   vehicle: rig.vehicle, ghostCar: rig.ghostCar, chase: rig.chase, keys: rig.keys, engine: rig.engine,
-  engineSound: rig.engineSound, sfx: rig.sfx, camera, config: rig.config, setAuto: rig.setAuto,
+  engineSound: rig.engineSound, sfx: rig.sfx, sfxRec: rig.sfxRec, camera, config: rig.config, setAuto: rig.setAuto,
   get sunShadows() { return rig.sunShadows; },
   get lay() { return rig.session.lay; }, get race() { return rig.session.race; }, get gates() { return rig.session.gates; },
   get landings() { return rig.session.landings; }, get recorder() { return rig.session.recorder; },

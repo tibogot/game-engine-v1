@@ -2,7 +2,7 @@
 // track, so:
 //   A. a STATIC ATLAS, rendered ONCE: the sun's ortho view split into 16 m cells, only the cells the
 //      track touches, each at ~15.5 texels/m, packed in one float texture. Sharp at any distance.
-//   B. a LIVE MAP, every frame: 48 × 48 m around the CAR (not the camera), ~43 texels/m, texel-snapped,
+//   B. a LIVE MAP, every frame: 32 × 32 m around the CAR (not the camera), ~96 texels/m, texel-snapped,
 //      fixed size (no shimmer, independent of the FOV). The car + the track right around it.
 //   C. a RECEIVER node: inside the live box → live map; elsewhere → the atlas cell; blended at the edge.
 // No depth textures, no comparison samplers: both maps store "distance from the sun" in R32F and are
@@ -11,7 +11,7 @@
 // radius 4 smeared it); why not TileShadowNode: every fragment samples every tile. See the study.
 import * as THREE from "three";
 import {
-  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, dot, floor, clamp, min, max, abs, mix, select, smoothstep,
+  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, dot, floor, clamp, min, max, abs, mix, select, smoothstep, cos, sin, fwidth, dFdx, dFdy, length, If,
   positionWorld, normalWorld, textureLoad, texture,
 } from "three/tsl";
 
@@ -25,8 +25,15 @@ const CELL = 16; // m
 const CELL_TEX = 256; // texels per atlas cell, border included
 const BORDER = 4; // texels each side, so filter taps never read a neighbour cell
 const INNER = CELL_TEX - 2 * BORDER;
-const LIVE_SIZE = 48; // m
-const LIVE_TEX = 2048;
+const LIVE_SIZE = Number(new URLSearchParams(globalThis.location?.search ?? "").get("liveSize")) || 32; // m (was 48; ?liveSize= for the study)
+const Q = new URLSearchParams(globalThis.location?.search ?? ""); // A/B switches for the shadow study
+// THE LIVE MAP near the car (user, 2026-10-21: the rail's and the car's shadows "saw-tooth" right by the
+// car, at the chase camera — 2.3 cm texels were several pixels there). Compared at the chase view: 2048
+// + a tent filter still stepped; 4096 over 48 m + tent and 3072 over 32 m + tent were both clean — the
+// second kept (~1 cm texels, 36 MB + its depth buffer; was 16 + 16). Beyond 16 m the turned atlas takes
+// over. ?liveTex= / ?liveSize= / ?liveTent=0 for the study.
+const LIVE_TEX = Number(Q.get("liveTex")) || 3072;
+const LIVE_TENT = Q.get("liveTent") !== "0";
 
 /**
  * @param {object} o
@@ -36,7 +43,7 @@ const LIVE_TEX = 2048;
  * @param {THREE.Vector3[]} o.casterPoints world points sampling every static caster (deck + rail vertices)
  * @param {number} [o.atlasSize] 8192 (1024 cells) or 4096 (256 cells)
  */
-export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoints, atlasSize = 8192 }) {
+export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoints, trackLine = null, atlasSize = 8192 }) {
   // ---- light frame: x/y across the sun's view, z towards the sun ----
   const zL = sunDir.clone().normalize();
   const xL = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), zL);
@@ -70,11 +77,76 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   const capacity = perRow * perRow;
   const cells = inGridCells.slice(0, capacity);
   const atlasPx = perRow * CELL_TEX;
-  const table = new Float32Array(nx * ny * 4); // (slotCol, slotRow, present, 0)
+  // EACH CELL TURNED TO THE TRACK (user, 2026-10-21: the shadows "do a saw-tooth shape"). A rail's shadow
+  // runs diagonally across the texel grid and its edge came out as stair steps (6.5 cm texels); a wider
+  // filter only made them a wave, 2× resolution does not fit one texture. So each cell's bake camera is
+  // turned so the track there runs along a texel row: the main direction of the casters around the cell
+  // (their light-space points over the 3 × 3 cells around it, principal axis). A turned square must still
+  // cover the whole cell, so its capture grows by |cos| + |sin| (up to √2 at 45°: ~11 texels/m across,
+  // still no steps along). ?shadowAlign=0 bakes them square as before (an A/B).
+  const align = new URLSearchParams(globalThis.location?.search ?? "").get("shadowAlign") !== "0";
+  // THE ROAD'S DIRECTION, from its centre line (trackLine): each segment's light-space direction as a
+  // DOUBLED angle (a line has no front: θ and θ + 180° are the same), summed by length per cell. The
+  // casters' own points were tried first (their principal axis): the posts, seen from the sun, smear
+  // sideways, so cells along one straight picked −1.6° … −12.8° for a −6.5° road and the edge kinked at
+  // every seam.
+  const roadDir = new Map(); // cell -> [Σ len·cos2θ, Σ len·sin2θ]
+  if (trackLine) for (let i = 1; i < trackLine.length; i++) {
+    const [ax, ay] = toL(trackLine[i - 1]), [bx, by] = toL(trackLine[i]);
+    const dx = bx - ax, dy = by - ay, len = Math.hypot(dx, dy);
+    if (len < 1e-3 || len > CELL) continue; // a jump's gap or a respawn seam
+    const th = Math.atan2(dy, dx);
+    const k = Math.floor(((ay + by) / 2 - gy0) / CELL) * nx + Math.floor(((ax + bx) / 2 - gx0) / CELL);
+    let r = roadDir.get(k);
+    if (!r) roadDir.set(k, (r = [0, 0]));
+    r[0] += len * Math.cos(2 * th); r[1] += len * Math.sin(2 * th);
+  }
+  const roadAngle = (k) => {
+    // the cell's own road, else the 3 × 3 around it (a cell the road only shades)
+    let r = roadDir.get(k);
+    if (!r) {
+      r = [0, 0];
+      const cx = k % nx, cy = Math.floor(k / nx);
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        const q = roadDir.get((cy + dy) * nx + cx + dx);
+        if (q) { r[0] += q[0]; r[1] += q[1]; }
+      }
+    }
+    return Math.hypot(r[0], r[1]) > 1e-6 ? 0.5 * Math.atan2(r[1], r[0]) : null;
+  };
+  const stats = new Map(); // cell -> [n, Σx, Σy, Σxx, Σyy, Σxy] (no trackLine: the casters' principal axis)
+  for (const [x, y] of L) {
+    const k = Math.floor((y - gy0) / CELL) * nx + Math.floor((x - gx0) / CELL);
+    let s = stats.get(k);
+    if (!s) stats.set(k, (s = [0, 0, 0, 0, 0, 0]));
+    s[0]++; s[1] += x; s[2] += y; s[3] += x * x; s[4] += y * y; s[5] += x * y;
+  }
+  const fold = (a) => (a > Math.PI / 4 ? a - Math.PI / 2 : a < -Math.PI / 4 ? a + Math.PI / 2 : a);
+  const cellAngle = (k) => {
+    if (!align) return 0;
+    const road = trackLine ? roadAngle(k) : null;
+    if (road !== null) return fold(road);
+    const t = [0, 0, 0, 0, 0, 0];
+    const cx = k % nx, cy = Math.floor(k / nx);
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const s = stats.get((cy + dy) * nx + cx + dx);
+      if (s) for (let i = 0; i < 6; i++) t[i] += s[i];
+    }
+    if (t[0] < 3) return 0;
+    const mx = t[1] / t[0], my = t[2] / t[0];
+    const sxx = t[3] / t[0] - mx * mx, syy = t[4] / t[0] - my * my, sxy = t[5] / t[0] - mx * my;
+    let a = 0.5 * Math.atan2(2 * sxy, sxx - syy); // the principal axis
+    // a square turned by a or a ± 90° lines up the same: keep it within ±45° (the smallest turn)
+    if (a > Math.PI / 4) a -= Math.PI / 2;
+    if (a < -Math.PI / 4) a += Math.PI / 2;
+    return a;
+  };
+  const table = new Float32Array(nx * ny * 4); // (slotCol, slotRow, present, angle)
   cells.forEach((k, slot) => {
     table[k * 4] = slot % perRow;
     table[k * 4 + 1] = Math.floor(slot / perRow);
     table[k * 4 + 2] = 1;
+    table[k * 4 + 3] = cellAngle(k);
   });
   const tableTex = new THREE.DataTexture(table, nx, ny, THREE.RGBAFormat, THREE.FloatType);
   tableTex.minFilter = tableTex.magFilter = THREE.NearestFilter;
@@ -96,11 +168,13 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   const depthMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
   depthMat.colorNode = vec4(uZ[1].sub(dot(positionWorld, uZ[0])).div(uZ[2]), 0, 0, 1);
 
-  // an ortho camera looking down the sun, at light-space centre (cx, cy), covering `half` m each side
+  // an ortho camera looking down the sun, at light-space centre (cx, cy), covering `half` m each side,
+  // turned by `angle` about the sun (its right = cos·xL + sin·yL, its up = −sin·xL + cos·yL)
   const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, range + 50);
   cam.up.copy(yL);
-  const aimCam = (cx, cy, half) => {
+  const aimCam = (cx, cy, half, angle = 0) => {
     const c = xL.clone().multiplyScalar(cx).addScaledVector(yL, cy).addScaledVector(zL, zMax + 5);
+    cam.up.copy(xL).multiplyScalar(-Math.sin(angle)).addScaledVector(yL, Math.cos(angle));
     cam.position.copy(c);
     cam.lookAt(c.clone().sub(zL));
     cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half;
@@ -140,7 +214,6 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   }
 
   // ---- A. bake the atlas once ----
-  const texel = CELL / INNER;
   // ~4.6–4.8 s for 632 cells, i.e. ~7.6 ms of FIXED overhead per render call. Rendering only the
   // track (a bare scene) measured the same, so the fix is fewer calls (several cells per pass /
   // bigger cells) or a progressive bake over the first frames — see DESIGN.md §7.
@@ -155,7 +228,16 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     cells.forEach((k, slot) => {
       const cx = k % nx, cy = Math.floor(k / nx);
       const sc = slot % perRow, sr = Math.floor(slot / perRow);
-      aimCam(gx0 + (cx + 0.5) * CELL, gy0 + (cy + 0.5) * CELL, CELL / 2 + BORDER * texel);
+      // the turned square covers the cell: half side (CELL/2)(|cos|+|sin|), plus the border texels
+      const a = table[k * 4 + 3], c = Math.cos(a), s = Math.sin(a);
+      const R = (CELL / 2) * (Math.abs(c) + Math.abs(s));
+      // ONE TEXEL LATTICE per angle: the centre snapped to whole texels in the turned frame, so two
+      // cells at the same angle (a straight) share their grid — else the edge jumps a fraction of a
+      // texel at every cell seam (seen: a notch every 16 m). The receiver snaps the same way.
+      const t = (2 * R) / INNER;
+      const ccx = gx0 + (cx + 0.5) * CELL, ccy = gy0 + (cy + 0.5) * CELL;
+      const us = Math.round((c * ccx + s * ccy) / t) * t, vs = Math.round((-s * ccx + c * ccy) / t) * t;
+      aimCam(c * us - s * vs, s * us + c * vs, (R * CELL_TEX) / INNER, a);
       if (direct) {
         vp.set(sc * CELL_TEX, sr * CELL_TEX, CELL_TEX, CELL_TEX);
         renderInto(atlasRT, vp, [STATIC_LAYER]);
@@ -172,16 +254,29 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   }
 
   // ---- B. the live map around the car, texel-snapped ----
-  const live = { cx: uniform(0), cy: uniform(0) };
-  const liveTexel = LIVE_SIZE / LIVE_TEX;
-  function follow(carPos) {
+  // THE BOX FOLLOWS THE CAMERA'S DISTANCE (2026-10-21): its texel steps can only be hidden by making them
+  // small ON SCREEN. A car edge almost parallel to the texel rows steps once every ~11 texels, and a filter
+  // only smooths steps about as long as itself (measured on the CPU from the real map: radius 2.5 → 3.4 mm
+  // of wobble, 6 → 1.6 mm). So close to the car (the free camera) the box shrinks — same texture, finer
+  // texels: LIVE_SIZE at the chase camera (~8 m away), shrinking with the SQUARE of the distance (seen: at
+  // 5 m a 24 m box still stepped, a 12 m one was clean), down to LIVE_MIN; in steps, so zooming doesn't
+  // shimmer.
+  const LIVE_MIN = 8; // m
+  const CHASE_DIST = 8; // m, the chase camera's distance to the car (measured 7.9)
+  const LIVE_STEPS = [LIVE_MIN, 10, 12, 14, 16, 20, 24, 28, LIVE_SIZE].filter((v) => v <= LIVE_SIZE);
+  const live = { cx: uniform(0), cy: uniform(0), size: uniform(LIVE_SIZE) };
+  function follow(carPos, camDist = Infinity) {
+    const want = Math.min(LIVE_SIZE, LIVE_SIZE * (camDist / CHASE_DIST) ** 2);
+    const size = LIVE_STEPS.find((v) => v >= want) ?? LIVE_SIZE;
+    const liveTexel = size / LIVE_TEX;
     const [x, y] = toL(carPos);
     const sx = Math.round(x / liveTexel) * liveTexel;
     const sy = Math.round(y / liveTexel) * liveTexel;
     live.cx.value = sx;
     live.cy.value = sy;
+    live.size.value = size;
     clearRT(liveRT);
-    aimCam(sx, sy, LIVE_SIZE / 2);
+    aimCam(sx, sy, size / 2);
     renderInto(liveRT, new THREE.Vector4(0, 0, LIVE_TEX, LIVE_TEX), [STATIC_LAYER, DYNAMIC_LAYER]);
   }
 
@@ -192,9 +287,14 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // 16 loads, smooth edges instead of the stair steps single-texel compares gave.
   const TAPS = [[-0.6, -0.2], [0.2, -0.6], [0.6, 0.2], [-0.2, 0.6]];
   const lit = (tex, x, y, d, bias) => select(textureLoad(tex, ivec2(int(x), int(y))).x.add(bias).greaterThanEqual(d), float(1), float(0));
-  const pcf = (tex, px, py, d, bias, lo, hi) => {
+  // THE ATLAS'S TAPS, spread ALONG the road (its cells are turned so the road runs along x): on a curve
+  // the road turns inside a cell and a rail's edge drifts across the rows — long flat runs, then a
+  // one-texel jump. Spread along x, the jump becomes a ramp; across (y) the edge stays as sharp as before.
+  const ALONG = Number(new URLSearchParams(globalThis.location?.search ?? "").get("shadowAlong")) || 2.4; // ±texels, ?shadowAlong= to compare
+  const TAPS_ALONG = [[-ALONG, -0.2], [-ALONG / 3, 0.2], [ALONG / 3, -0.2], [ALONG, 0.2]];
+  const pcf = (tex, px, py, d, bias, lo, hi, taps = TAPS) => {
     let sum = float(0);
-    for (const [ox, oy] of TAPS) {
+    for (const [ox, oy] of taps) {
       const sx = px.add(ox).sub(0.5), sy = py.add(oy).sub(0.5);
       const x0 = clamp(floor(sx), lo.x, hi.x), y0 = clamp(floor(sy), lo.y, hi.y);
       const x1 = min(x0.add(1), hi.x), y1 = min(y0.add(1), hi.y);
@@ -203,8 +303,96 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       const bot = mix(lit(tex, x0, y1, d, bias), lit(tex, x1, y1, d, bias), fx);
       sum = sum.add(mix(top, bot, fy));
     }
-    return sum.div(TAPS.length);
+    return sum.div(taps.length);
   };
+  // a 3×3 grid of bilinear compares one texel apart, tent-weighted (1 2 1 × 1 2 1): ~3 texels of soft edge
+  // THE WIDE TENT, same 36 loads: the 6 × 6 texels around the point, each compared once and weighted by a
+  // smooth 2-D tent of radius TENT_R texels centred on the exact point. A 3 × 3 grid of BILINEAR compares
+  // (below) read 36 texels too, but overlapping, for a ±2-texel footprint — too small to hide 1 cm steps
+  // up close; this one's footprint is ±2.5 texels and has no visible tap copies (a 3 × 3 spread wider
+  // showed three shifted edges).
+  const TENT_R = Number(Q.get("tentR")) || 3; // the tent reaches just past the outer taps (2.5 · spread)
+  const SPREAD_K = Number(Q.get("spreadK")) || 1.0; // ?spreadK= (study): screen pixels per tap spacing
+  // never more than this many texels between taps (2026-10-21: uncapped, the far road's grazing pixels
+  // spread the rail shadows into a dark wash across the road)
+  const SPREAD_CAP = Number(Q.get("spCap")) || 2;
+  // RECEIVER-PLANE DEPTH (gpx, gpy: the receiver's depth change per texel in x / y): a tap 2.5 texels away
+  // compares against the surface's depth THERE, not at the centre — else a wide footprint on a sloped deck
+  // (a banked turn, a ramp) shadows the deck itself (the streaks a wide filter drew before).
+  // AT LEAST ~2.5 SCREEN PIXELS OF SOFT EDGE (user, 2026-10-21, his screenshots after every fix: the edge
+  // still a saw-tooth). Seen in his window, 3× enlarged: the edge had become ~1 screen pixel sharp — the
+  // teeth were the SCREEN's own pixel steps (a shadow edge is shading, MSAA never smooths it), not the
+  // map's. So the samples SPREAD with the screen footprint: `s` texels apart, s = max(1, texels per screen
+  // pixel), measured by the derivatives of the lookup itself — the edge is ≥ ~2.5 px wide at any zoom.
+  // fp: texels per screen pixel, measured on the smooth light-space position by the caller (the atlas's
+  // own texel coordinates jump at its cell seams)
+  const pcfWideTent = (tex, px, py, d, bias, lo, hi, gpx = null, gpy = null, fp = float(1)) => {
+    const sp = clamp(fp.mul(SPREAD_K), float(1), float(SPREAD_CAP));
+    let sum = float(0), wsum = float(0);
+    for (let j = 0; j < 6; j++) for (let i = 0; i < 6; i++) {
+      // 6 × 6 taps `sp` texels apart around the point, each the texel under it
+      const tx = floor(px.add(sp.mul(i - 2.5))), ty = floor(py.add(sp.mul(j - 2.5)));
+      // the texel's centre to the point, in texels
+      const ox = tx.add(0.5).sub(px), oy = ty.add(0.5).sub(py);
+      const wx = max(float(0), float(1).sub(abs(ox).div(sp.mul(TENT_R))));
+      const wy = max(float(0), float(1).sub(abs(oy).div(sp.mul(TENT_R))));
+      const w = wx.mul(wy);
+      const dt = gpx ? d.add(gpx.mul(ox)).add(gpy.mul(oy)) : d;
+      sum = sum.add(lit(tex, clamp(tx, lo.x, hi.x), clamp(ty, lo.y, hi.y), dt, bias).mul(w));
+      wsum = wsum.add(w);
+    }
+    return sum.div(wsum);
+  };
+  const TS = Number(Q.get("tentScale")) || 1; // ?tentScale= (study)
+  const TENT = [[-TS, 1], [0, 2], [TS, 1]];
+  // EDGE-ONLY WIDE FILTER for the live map (2026-10-21, the user's close-ups still stepped): the car's side
+  // edge steps once every ~11 texels, and a filter only erases steps about as wide as itself (CPU test on
+  // the real map: radius 2.5 → 3.4 mm of wobble, 6 → 1.6 mm). 6 × 6 taps spread wider drew visible layers.
+  // So: 9 coarse taps first — fully lit or fully dark (almost every pixel) stops there; only pixels ON an
+  // edge pay the 10 × 10 tent (radius ADAPT_R texels, spread with the screen footprint like the 6 × 6).
+  const ADAPT_N = 10, ADAPT_R = Number(Q.get("adaptR")) || 5;
+  const pcfAdaptive = (tex, px, py, d, bias, lo, hi, gpx, gpy, fp) => {
+    const sp = clamp(fp.mul(SPREAD_K), float(1), float(SPREAD_CAP));
+    const at = (ox, oy) => {
+      const tx = floor(px.add(ox)), ty = floor(py.add(oy));
+      const dt = d.add(gpx.mul(tx.add(0.5).sub(px))).add(gpy.mul(ty.add(0.5).sub(py)));
+      return { tx, ty, v: lit(tex, clamp(tx, lo.x, hi.x), clamp(ty, lo.y, hi.y), dt, bias) };
+    };
+    let coarse = float(0);
+    const c = (ADAPT_R - 0.5);
+    for (const oy of [-c, 0, c]) for (const ox of [-c, 0, c]) coarse = coarse.add(at(sp.mul(ox), sp.mul(oy)).v);
+    const res = coarse.div(9).toVar();
+    If(coarse.greaterThan(0.5).and(coarse.lessThan(8.5)), () => {
+      let sum = float(0), wsum = float(0);
+      for (let j = 0; j < ADAPT_N; j++) for (let i = 0; i < ADAPT_N; i++) {
+        const o = at(sp.mul(i - (ADAPT_N - 1) / 2), sp.mul(j - (ADAPT_N - 1) / 2));
+        const ox = o.tx.add(0.5).sub(px), oy = o.ty.add(0.5).sub(py);
+        const w = max(float(0), float(1).sub(abs(ox).div(sp.mul(ADAPT_R)))).mul(max(float(0), float(1).sub(abs(oy).div(sp.mul(ADAPT_R)))));
+        sum = sum.add(o.v.mul(w));
+        wsum = wsum.add(w);
+      }
+      res.assign(sum.div(wsum));
+    });
+    return res;
+  };
+  const pcfTent = (tex, px, py, d, bias, lo, hi) => {
+    let sum = float(0);
+    for (const [ox, wx] of TENT) for (const [oy, wy] of TENT) {
+      const sx = px.add(ox).sub(0.5), sy = py.add(oy).sub(0.5);
+      const x0 = clamp(floor(sx), lo.x, hi.x), y0 = clamp(floor(sy), lo.y, hi.y);
+      const x1 = min(x0.add(1), hi.x), y1 = min(y0.add(1), hi.y);
+      const fx = clamp(sx.sub(floor(sx)), 0, 1), fy = clamp(sy.sub(floor(sy)), 0, 1);
+      const top = mix(lit(tex, x0, y0, d, bias), lit(tex, x1, y0, d, bias), fx);
+      const bot = mix(lit(tex, x0, y1, d, bias), lit(tex, x1, y1, d, bias), fx);
+      sum = sum.add(mix(top, bot, fy).mul(wx * wy));
+    }
+    return sum.div(16);
+  };
+  // THE ATLAS'S SAW-TOOTH (user, 2026-10-21): a rail's shadow along the road is a diagonal edge across the
+  // atlas's 6.5 cm texels, and it shows their stair steps. A WIDER FILTER was tried and does not fix it
+  // (3×3 tent-weighted bilinear taps, 36 loads, spread 1 / 1.6 / 2.2 texels): the teeth turn into a wave,
+  // and at 2.2 the road and kerbs self-shadow in streaks — the steps are IN the map. Doubling the atlas
+  // resolution does not fit one texture (White 1: 9728² > 8192). See TODO.md for the fix proposed.
 
   // debug: 0 normal, 1 force lit (tests the engine hook), 2 live map only, 3 atlas only
   const dbg = uniform(0);
@@ -212,34 +400,86 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     const p = positionWorld.add(normalWorld.mul(0.06));
     const lx = dot(p, uX), ly = dot(p, uY);
     const d = uZ[1].sub(dot(p, uZ[0])).div(uZ[2]);
+    // the receiver's plane in light space: normalised depth per metre along xL / yL (dz/dx = −nx/nz;
+    // d = (zMax − z) / range). nz floored: at grazing angles the plane term would explode (and N·L ~ 0
+    // shades it dark anyway)
+    const nz = max(dot(normalWorld, uZ[0]), float(0.25));
+    const ddx = dot(normalWorld, uX).div(nz.mul(uZ[2])), ddy = dot(normalWorld, uY).div(nz.mul(uZ[2]));
+    // metres of light space per screen pixel here (continuous: no seams)
+    // the pixel's NARROW width (2026-10-21): looking along the road a screen pixel is a long thin strip
+    // of road; its long side (fwidth's max) smeared distant shadows sideways. Narrow width = |a × b| /
+    // longest of a, b (a, b: the pixel's two edges in light space)
+    const ex = dFdx(lx), ey = dFdx(ly), fx2 = dFdy(lx), fy2 = dFdy(ly);
+    const longest = max(length(vec2(ex, ey)), length(vec2(fx2, fy2)));
+    const mpp = Q.get("fp") === "max" ? max(fwidth(lx), fwidth(ly)) : abs(ex.mul(fy2).sub(ey.mul(fx2))).div(max(longest, float(1e-6)));
 
     // live box
-    const lu = lx.sub(live.cx).div(LIVE_SIZE).add(0.5);
-    const lv = ly.sub(live.cy).div(LIVE_SIZE).add(0.5);
+    const lu = lx.sub(live.cx).div(live.size).add(0.5);
+    const lv = ly.sub(live.cy).div(live.size).add(0.5);
     // texel rows run DOWN the image while the camera's up (+y) is at row 0: read v flipped
-    const liveVis = pcf(liveTex, lu.mul(LIVE_TEX), float(1).sub(lv).mul(LIVE_TEX), d, float(0.02 / range), vec2(0, 0), vec2(LIVE_TEX - 1, LIVE_TEX - 1));
+    // live texels: +x along xL, +y DOWN the image = −yL
+    const lt = live.size.div(LIVE_TEX);
+    const liveVis = (Q.get("liveFilter") === "tent3" ? pcfTent : Q.get("liveFilter") === "tent6" ? pcfWideTent : LIVE_TENT ? pcfAdaptive : pcfWideTent)(liveTex, lu.mul(LIVE_TEX), float(1).sub(lv).mul(LIVE_TEX), d, float(0.02 / range), vec2(0, 0), vec2(LIVE_TEX - 1, LIVE_TEX - 1), ddx.mul(lt), ddy.mul(lt).negate(), mpp.div(lt));
     const edge = min(min(lu, float(1).sub(lu)), min(lv, float(1).sub(lv))); // 0 at the box edge, 0.5 at the centre
-    const liveW = smoothstep(0.0, 0.06, edge); // last ~3 m blend into the atlas
+    const liveW = smoothstep(0.0, 0.06, edge); // last ~2 m blend into the atlas
 
-    // static atlas cell
+    // static atlas: the point looked up in one cell's bake ({ vis, here: the cell exists and was baked })
     const fx = lx.sub(gx0).div(CELL), fy = ly.sub(gy0).div(CELL);
-    const cx = clamp(floor(fx), 0, nx - 1), cy = clamp(floor(fy), 0, ny - 1);
-    const entry = textureLoad(tableTex, ivec2(int(cx), int(cy)));
-    const inGrid = fx.greaterThanEqual(0).and(fy.greaterThanEqual(0)).and(fx.lessThan(nx)).and(fy.lessThan(ny));
-    const ox = entry.x.mul(CELL_TEX).add(BORDER), oy = entry.y.mul(CELL_TEX).add(BORDER);
-    // same flip as the live map inside the cell (camera up = row 0); FLIP_SLOT_ROWS covers the
-    // viewport origin convention for which slot row a cell landed in
-    const px = ox.add(fx.sub(cx).mul(INNER));
-    const py = oy.add(float(1).sub(fy.sub(cy)).mul(INNER));
-    const staticVis = pcf(atlasTex, px, py, d, float(0.05 / range), vec2(ox.sub(BORDER), oy.sub(BORDER)), vec2(ox.add(INNER + BORDER - 1), oy.add(INNER + BORDER - 1)));
-    const staticOrLit = select(inGrid.and(entry.z.greaterThan(0.5)), staticVis, float(1));
+    const cellVis = (cxi, cyi) => {
+      const cx = clamp(cxi, 0, nx - 1), cy = clamp(cyi, 0, ny - 1);
+      const entry = textureLoad(tableTex, ivec2(int(cx), int(cy)));
+      const here = cxi.greaterThanEqual(0).and(cyi.greaterThanEqual(0)).and(cxi.lessThan(nx)).and(cyi.lessThan(ny)).and(entry.z.greaterThan(0.5));
+      const ox = entry.x.mul(CELL_TEX).add(BORDER), oy = entry.y.mul(CELL_TEX).add(BORDER);
+      // the cell's bake was turned by entry.w (cellAngle): turn the point back into the camera's frame;
+      // the turned square spans ±R (R = CELL/2 · (|cos| + |sin|)) over INNER texels
+      const ca = cos(entry.w), sa = sin(entry.w);
+      const R = abs(ca).add(abs(sa)).mul(CELL / 2);
+      // the bake's centre, snapped to whole texels in the turned frame (see bake: one lattice per angle)
+      const t = R.mul(2 / INNER);
+      const ccx = cx.add(0.5).mul(CELL).add(gx0), ccy = cy.add(0.5).mul(CELL).add(gy0);
+      const us = floor(ca.mul(ccx).add(sa.mul(ccy)).div(t).add(0.5)).mul(t);
+      const vs = floor(ca.mul(ccy).sub(sa.mul(ccx)).div(t).add(0.5)).mul(t);
+      const u = ca.mul(lx).add(sa.mul(ly)).sub(us).div(R.mul(2)).add(0.5);
+      const v = ca.mul(ly).sub(sa.mul(lx)).sub(vs).div(R.mul(2)).add(0.5);
+      // same flip as the live map inside the cell (camera up = row 0); FLIP_SLOT_ROWS covers the
+      // viewport origin convention for which slot row a cell landed in
+      const px = ox.add(u.mul(INNER));
+      const py = oy.add(float(1).sub(v).mul(INNER));
+      // SOFT EDGES (user, 2026-10-21: "softer edges" chosen over bigger maps): the wide tent here too,
+      // ~±16 cm of soft edge at 6.5 cm texels, in the turned frame (+x along its right, +y = −its up)
+      const lo = vec2(ox.sub(BORDER), oy.sub(BORDER)), hi = vec2(ox.add(INNER + BORDER - 1), oy.add(INNER + BORDER - 1));
+      const gpx = ca.mul(ddx).add(sa.mul(ddy)).mul(t), gpy = ca.mul(ddy).sub(sa.mul(ddx)).mul(t).negate();
+      const vis = Q.get("atlasFilter") === "along" ? pcf(atlasTex, px, py, d, float(0.05 / range), lo, hi, align ? TAPS_ALONG : TAPS) : pcfWideTent(atlasTex, px, py, d, float(0.05 / range), lo, hi, gpx, gpy, mpp.div(t));
+      return { vis, here };
+    };
+    const cx = floor(fx), cy = floor(fy);
+    const own = cellVis(cx, cy);
+    // ACROSS A SEAM two cells turned by different angles (a curve) put the edge a fraction of a texel
+    // apart: a jog every 16 m. Within SEAM_BLEND of the nearer seam the neighbour's bake (it covers its
+    // border texels, ~0.26 m, into this cell) is faded in, half and half on the seam.
+    const SEAM_BLEND = 0.15; // m
+    const ax = fx.sub(cx), ay = fy.sub(cy);
+    const dX = min(ax, float(1).sub(ax)).mul(CELL), dY = min(ay, float(1).sub(ay)).mul(CELL);
+    const alongX = dX.lessThan(dY);
+    const ncx = select(alongX, cx.add(select(ax.lessThan(0.5), float(-1), float(1))), cx);
+    const ncy = select(alongX, cy, cy.add(select(ay.lessThan(0.5), float(-1), float(1))));
+    const nb = cellVis(ncx, ncy);
+    const seamW = float(0.5).mul(float(1).sub(smoothstep(0.0, SEAM_BLEND, min(dX, dY))));
+    const ownVis = select(own.here, own.vis, float(1));
+    const staticOrLit = select(own.here.and(nb.here), mix(own.vis, nb.vis, seamW), ownVis);
 
     const normal = mix(staticOrLit, liveVis, select(edge.greaterThan(0), liveW, float(0)));
-    return select(dbg.equal(1), float(1), select(dbg.equal(2), liveVis, select(dbg.equal(3), staticOrLit, normal)));
+    // dbg 4: the live map's texels as a checkerboard (are the teeth the map's texels?)
+    const checker = floor(lu.mul(LIVE_TEX)).add(floor(float(1).sub(lv).mul(LIVE_TEX))).mod(2);
+    return select(dbg.equal(4), checker.mul(0.7).add(0.3), select(dbg.equal(1), float(1), select(dbg.equal(2), liveVis, select(dbg.equal(3), staticOrLit, normal))));
   })();
 
   return {
     bake, follow, visibility, atlasRT, liveRT, setDebug(m) { dbg.value = m; },
+    /** the live box's size this frame (m) — it follows the camera's distance */
+    get liveSize() { return live.size.value; },
+    /** Debug: each baked cell's grid position and turn (degrees) */
+    cellAngles: () => cells.map((k) => [k % nx, Math.floor(k / nx), +((table[k * 4 + 3] * 180) / Math.PI).toFixed(2)]),
     /** Debug: min/max/mean of a w×h block of a map (reads back from the GPU). */
     async probe(which = "live", x = 0, y = 0, w = 64, h = 64) {
       const rt = which === "live" ? liveRT : atlasRT;

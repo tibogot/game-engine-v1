@@ -10,6 +10,7 @@ import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL, SOLID, CRASH } fr
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
 import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
+import { createDebugCamera } from "../../../modular-road-v3/debugCamera.js";
 import { createGamepadInput } from "../../../modular-road-v3/gamepadInput.js";
 import { loadChassisModel, CHASSIS_GLB_URL, chassisGlbMounts } from "../../../modular-road-v3/chassisModel.js";
 import { loadWheelModel } from "../../../modular-road-v3/wheelModel.js";
@@ -25,6 +26,7 @@ import { createEngineModel } from "./engineModel.js";
 import { createEngineSound } from "./engineSound.js";
 import { createEngineLoops, isLoopEngine } from "./engineLoops.js";
 import { createSfx } from "./sfx.js";
+import { createSfxSamples, GAME_PICK } from "./sfxSamples.js";
 import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
@@ -84,7 +86,10 @@ const HUD_CSS = `
   #drive-hud #snd svg { width: 22px; height: 22px; color: #8796b5; }
   #drive-hud #snd.on { border-left-color: #3fd2ff; } #drive-hud #snd.on svg { color: #3fd2ff; }
   #drive-hud #snd:hover svg { color: #e8f0ff; }
-  #drive-hud #freecam { left: 50%; bottom: 18px; transform: translateX(-50%); display: none; color: #8796b5; font-size: 12px; }
+  #drive-hud #back { right: 66px; top: 16px; padding: 9px 12px; cursor: pointer; border-left-color: #23304d; color: #8796b5; font: 700 14px/18px "Barlow Condensed"; letter-spacing: 0.08em; text-transform: uppercase; }
+  #drive-hud #back:hover { color: #e8f0ff; border-left-color: #3fd2ff; }
+  #drive-hud #back kbd { margin-left: 6px; }
+  #drive-hud #freecam { left: 50%; top: 70px; transform: translateX(-50%); text-align: center; display: none; color: #8796b5; font-size: 12px; }
   #drive-hud #freecam.show { display: block; }
   #drive-hud #freecam b { color: #3fd2ff; font: 800 14px "Barlow Condensed"; letter-spacing: 0.08em; margin-right: 8px; }
 `;
@@ -97,6 +102,7 @@ const HUD_HTML = `
   <div id="speed" class="panel"><div class="v" id="kmh">0</div><div class="u">KM/H</div></div>
   <div id="stats" class="panel"></div>
   <div id="help" class="panel"></div>
+  <div id="back" class="panel"></div>
   <div id="snd" class="panel" title="Sound on / off (M)"></div>
   <div id="freecam" class="panel"></div>`;
 // the sound button's icon: a speaker, with waves (on) or a cross (off)
@@ -273,6 +279,15 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   engineSound.setMuted(engineMuted);
   const sfx = createSfx(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7 });
   sfx.setMuted(engineMuted);
+  // RECORDED sounds over the synthesised ones, one part at a time (the user's picks in the sound lab,
+  // 2026-10-20: the drift squeal is a recording, the long screech)
+  const sfxRec = createSfxSamples(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7, pick: GAME_PICK });
+  sfxRec.setMuted(engineMuted);
+  for (const part of Object.keys(GAME_PICK)) sfx.setPart(part, false);
+  // OFF for now (user, 2026-10-20: the wind "really annoying too"; the tyre roll off with it, for a test
+  // of the engine and the drift squeal alone)
+  sfx.setPart("wind", false);
+  sfx.setPart("roll", false);
   const unlockAudio = () => { if (S && !engineMuted) engineSound.unlock(); };
   // SOUND ON / OFF (user, 2026-10-20: "an icon top right for quick access"): the button, M, and the menu's
   // Settings are one switch, remembered
@@ -280,6 +295,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     engineMuted = !on;
     engineSound.setMuted(engineMuted);
     sfx.setMuted(engineMuted);
+    sfxRec.setMuted(engineMuted);
     if (on) { engineSound.unlock(); if (S) engineSound.resume(); }
     settings.set({ sound: on });
     $("snd").innerHTML = SND_ICON(on);
@@ -306,7 +322,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const boosting = rules.boostLeft > 0;
     if (boosting && !wasBoosting) sfx.boost();
     wasBoosting = boosting;
-    sfx.update(dt, { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting });
+    const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting };
+    sfx.update(dt, car);
+    sfxRec.update(dt, car);
     // the countdown: a beep on 3, 2, 1
     const n = race.s.state === "countdown" ? Math.ceil(race.s.hold * 2) : 0;
     if (n && n !== lastCount && n <= 3) sfx.beep("count");
@@ -350,7 +368,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
    * @param o.track  { pieces, authorTime } (a library / campaign record's track), or null = the built-in test track
    * @param o.campaignRec / o.trackId  where a finish is recorded
    * @param o.buttons  finish-screen buttons after "Again": [{ label, key (shown), code? (KeyboardEvent.code, default Key<key>), run }]
-   * @param o.onEscape  Esc while driving
+   * @param o.onEscape  Esc while driving (also the BACK button top right)
+   * @param o.backLabel  that button's word ("Menu", "Builder"…; default "Back")
    * @param o.help  the help line (HTML)
    */
   async function start(o = {}) {
@@ -471,7 +490,12 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
       obstacles, moverT: 0, meshes, // the movers' RACE clock: 0 at the green light, held through the countdown
     };
-    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>F</kbd> free camera`;
+    // BACK, on screen (user, 2026-10-21: "why don't we have a back button to go back to the menu?") — the
+    // same as Esc
+    $("back").innerHTML = `← ${o.backLabel ?? "Back"}<kbd>Esc</kbd>`;
+    $("back").style.display = o.onEscape ? "" : "none";
+    $("back").onclick = () => { $("back").blur(); o.onEscape?.(); };
+    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>C</kbd> free camera`;
     hud.classList.add("on");
 
     // ---------- sun shadows (drive page only): static atlas of this track + live map around the car ----------
@@ -498,7 +522,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     scene.updateMatrixWorld(true);
     const old = sunShadows;
     S?.meshes?.fullDetail(true); // the bake sees every post, whatever the camera picked
-    sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts });
+    // trackLine: the road's centre, so each atlas cell is turned to the road's direction (no saw-tooth)
+    sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts, trackLine: lay.ride.map((r) => r.P) });
     sunShadows.stats.bakeMs = Math.round(sunShadows.bake());
     S?.meshes?.fullDetail(false);
     // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
@@ -660,8 +685,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (e.code === "KeyP") { autopilot = !autopilot; S.pilot.reset(); }
     if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!S.ghostPlayer && showGhost && ghostStyled; }
     if (e.code === "KeyM") setSound(engineMuted);
-    if (e.code === "KeyF") toggleFreeCam();
+    if (e.code === "KeyC") toggleFreeCam(); // C (user, 2026-10-20: was F)
     if (e.code === "KeyT" && freeCam) { freeCam.slow = (freeCam.slow + 1) % FREE_SLOW.length; timeScale = FREE_SLOW[freeCam.slow]; showFreeCam(); }
+    if (freeCam) freeCamKey(e.code);
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
     // these may end the session (back to the builder, the menu, the next track): last
     const o = S.o;
@@ -670,16 +696,29 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   });
   addEventListener("keyup", (e) => { keys[e.code.toLowerCase()] = false; });
 
-  // ---------- FREE CAMERA (user, 2026-10-20: "see the car from every angle and debug while driving") ----------
-  // F: the camera leaves the chase and orbits the car, still following it; the car keeps driving (keys,
-  // autopilot). Drag to turn round it (below the deck too), wheel to zoom, T slow motion / pause. F again
-  // = the chase camera.
+  // ---------- FREE CAMERA = THE OLD GAME'S DEBUG ORBIT CAMERA (modular-road-v3/debugCamera.js) ----------
+  // (user, 2026-10-21: "look at the free camera I use in my old car game: it lets me drive the car and orbit
+  // around to see everything while driving"). Mine orbited too, but read the mouse after the engine's
+  // editor camera had taken the wheel / drags; that rig binds them on window at capture (see its notes),
+  // smooths only the input, pans, and has the presets. C on / off; while on: left-drag orbit, right-drag
+  // pan, wheel or + / − zoom, V world ↔ car frame, 1-4 behind / front / left / right, 0 recentre; T 1× /
+  // ¼× / paused (Thunderline's). The car keeps driving (keys, autopilot).
   const FREE_SLOW = [1, 0.25, 0];
-  let freeCam = null; // { yaw, pitch, dist, slow }
-  const _orbit = new V();
-  function showFreeCam() {
+  let freeCam = null; // { slow } while on
+  const debugCam = createDebugCamera({ camera, vehicle, domElement: renderer.domElement, isActive: () => !!freeCam && !!S });
+  const _dQ = new THREE.Quaternion(), _dF = new V(), _dR = new V(), _dU = new V();
+  let airT = 0;
+  function showFreeCam(dt = 0) {
     $("freecam").classList.toggle("show", !!freeCam);
-    if (freeCam) $("freecam").innerHTML = `<b>FREE CAMERA</b>drag: orbit · wheel: zoom · <kbd>T</kbd> ${["1×", "¼×", "paused"][freeCam.slow]} · <kbd>F</kbd> back to the chase`;
+    if (!freeCam) return;
+    // the old rig's readout: the car's attitude, wheels down, time in the air
+    _dQ.copy(vehicle.renderQuat ?? vehicle.body.quat);
+    _dF.set(0, 0, 1).applyQuaternion(_dQ); _dR.set(1, 0, 0).applyQuaternion(_dQ); _dU.set(0, 1, 0).applyQuaternion(_dQ);
+    const D = 180 / Math.PI, g = vehicle.groundedCount;
+    airT = g === 0 ? airT + dt : 0;
+    $("freecam").innerHTML =
+      `<b>FREE CAMERA</b>${debugCam.frame} frame · ${debugCam.distance.toFixed(1)} m · pitch ${(Math.asin(THREE.MathUtils.clamp(_dF.y, -1, 1)) * D).toFixed(1)}° · roll ${(Math.atan2(_dR.y, _dU.y) * D).toFixed(1)}° · wheels ${g}/4${g === 0 ? ` · air ${airT.toFixed(2)} s` : ""}<br>` +
+      `drag orbit · right-drag pan · wheel / <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> frame · <kbd>1</kbd>-<kbd>4</kbd> views · <kbd>0</kbd> recentre · <kbd>T</kbd> ${["1×", "¼×", "paused"][freeCam.slow]} · <kbd>C</kbd> back`;
   }
   function toggleFreeCam() {
     if (freeCam) {
@@ -687,23 +726,20 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       freeCam = null;
       chase.reset();
     } else {
-      // start where the chase camera is
-      _orbit.copy(camera.position).sub(vehicle.renderPos);
-      const d = Math.max(2, _orbit.length());
-      freeCam = { yaw: Math.atan2(_orbit.x, _orbit.z), pitch: Math.asin(THREE.MathUtils.clamp(_orbit.y / d, -1, 1)), dist: d, slow: 0 };
+      freeCam = { slow: 0 };
+      debugCam.enter(); // from wherever the chase camera is: no cut
     }
     showFreeCam();
   }
-  addEventListener("pointermove", (e) => {
-    if (!freeCam || !(e.buttons & 1)) return;
-    freeCam.yaw -= e.movementX * 0.006;
-    freeCam.pitch = THREE.MathUtils.clamp(freeCam.pitch + e.movementY * 0.006, -1.45, 1.45);
-  });
-  addEventListener("wheel", (e) => { if (freeCam) freeCam.dist = THREE.MathUtils.clamp(freeCam.dist * Math.exp(e.deltaY * 0.001), 1.5, 250); }, { passive: true });
-  function placeFreeCam() {
-    const p = vehicle.renderPos, c = Math.cos(freeCam.pitch);
-    camera.position.set(p.x + Math.sin(freeCam.yaw) * c * freeCam.dist, p.y + 0.5 + Math.sin(freeCam.pitch) * freeCam.dist, p.z + Math.cos(freeCam.yaw) * c * freeCam.dist);
-    camera.lookAt(p.x, p.y + 0.5, p.z);
+  function freeCamKey(code) {
+    if (code === "KeyV") debugCam.toggleFrame();
+    else if (code === "Digit0") debugCam.recenter();
+    else if (code === "Digit1") debugCam.preset("behind");
+    else if (code === "Digit2") debugCam.preset("front");
+    else if (code === "Digit3") debugCam.preset("left");
+    else if (code === "Digit4") debugCam.preset("right");
+    else if (code === "Equal" || code === "NumpadAdd") debugCam.zoomBy(-1);
+    else if (code === "Minus" || code === "NumpadSubtract") debugCam.zoomBy(1);
   }
 
   // ---------- the sim loop (roadGame.js:9904), in the engine's frame: before it reads the camera ----------
@@ -714,6 +750,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       `track <b>${(lay.length / 1000).toFixed(2)} km</b> · <b>${lay.placements.length}</b> pieces<br>` +
       `collision bake <b>${S.bakeMs.toFixed(0)} ms</b> · wheels down <b>${vehicle.groundedCount}/4</b><br>` +
       `top speed this run <b>${Math.round(S.topKmh)} km/h</b>` +
+      // WHICH SHADOWS drew this frame (user, 2026-10-21: screenshots from pages that weren't running what I
+      // had changed) — the baked + live maps (with the live box's size now) or the engine's cascades
+      `<br>shadows <b>${sunShadows ? `baked + live ${sunShadows.liveSize ?? "?"} m · soft v3` : "engine cascades (builder)"}</b> · dpr <b>${devicePixelRatio}</b>` +
       (lay.warnings.length ? `<br><span style="color:#ff4d5e">${lay.warnings.join("<br>")}</span>` : "");
   }
   app.addPreUpdateHook(function driveFrame() {
@@ -758,11 +797,12 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (sunShadows) {
       // the car's model arrives late: re-adopt its group a few times so late children cast too
       if (S.adoptCount++ % 60 === 0 && S.adoptCount < 1200) adoptCar(vehicle.group);
-      sunShadows.follow(vehicle.renderPos);
+      sunShadows.follow(vehicle.renderPos, camera.position.distanceTo(vehicle.renderPos)); // the box shrinks when the camera is close (free camera)
     }
     checkFall();
     chase.update(dt);
-    if (freeCam) placeFreeCam();
+    // the camera runs on REAL time (the mouse must still work in slow motion and when paused)
+    if (freeCam) { const rdt = timeScale > 0 ? dt / timeScale : 1 / 60; debugCam.update(rdt); if (S.frame % 6 === 0) showFreeCam(rdt * 6); }
     S.meshes.updateLod(camera); // the posts' detail, from the game camera (testTrack.js)
     app.controls.target.copy(vehicle.renderPos);
     const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);
@@ -784,7 +824,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   return {
     start, stop, restart, respawnCheckpoint, recoverToSafe, modelsReady,
     get active() { return !!S; }, get session() { return S; },
-    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, camera,
+    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera,
     get sunShadows() { return sunShadows; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
     /** fn(vehicle, session) → input, or null for the player / autopilot again */

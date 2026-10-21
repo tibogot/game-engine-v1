@@ -1838,7 +1838,7 @@ async function startDrive() {
   // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
   const selRoad = track.pieces.find((p) => p.uid === sel && !isRing(p)); // (not an obstacle or a ring)
   const from = selRoad ? built.get(sel)?.M ?? null : null;
-  await rig.start({ track, trackId, from, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, help: DRIVE_HELP });
+  await rig.start({ track, trackId, from, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
 }
 function stopDrive() {
   if (!driving) return;

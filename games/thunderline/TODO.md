@@ -75,7 +75,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
       Sonniss GDC bundles (free yearly), Pro Sound Effects / A Sound Effect (search "car engine loops
       RPM"). Free CC0 sets found were one sound re-pitched (OpenGameArt) — not better. If one is chosen,
       it replaces only engineWorklet.js; the model stays.
-- [ ] Tyre sounds (roll, skid, drift squeal by slip), wind by speed, wall scrape.
+- [x] SOUND LAB (proto/sound-lab.html: click = hear it alone; a 16 s drive demo): free CC0 recordings
+      (BigSoundBank, Kenney) against the synth. User's picks 2026-10-20: DRIFT SQUEAL = B, the long screech
+      (sfxSamples.js, in the game, braking too); wind + rolling recordings KEPT, not used yet ("not sure");
+      rail scrape + landing recordings REJECTED (landings "sound like Mario Bros") and deleted.
+- [ ] Still synthesised: tyre roll, wind, landings; NO wall scrape sound. Need better sources for a car
+      landing (suspension thud + body) and a rail scrape (car on metal), not generic impacts.
 - [ ] Landing sounds (thump by impact speed; a distinct sound for a PERFECT landing), boost, checkpoint,
       finish, UI clicks, countdown.
 - [ ] Impacts: sparks on wall scrapes and hard landings, debris on crashes (no camera tricks: the
@@ -122,6 +127,44 @@ the new code is 5.30 ms: the shadow / chunk / caster work ~3 ms, the 3-layer gro
 toggles at that view: rails + posts at full detail +0.11 ms, the whole car in the shadow map -0.05 (noise 0.3).
 
 ## Look & tech
+- [x] **Shadow SAW-TOOTH** (user, 2026-10-21, screenshot): rail shadows along the road showed stair
+      steps past ~24 m from the car (the baked atlas, 6.5 cm texels; the live map near the car is 2.3 cm).
+      Tried, NOT a fix: a wider 3×3 filter (a wave instead of steps; streaks at spread 2.2); 2× resolution
+      does not fit one texture (White 1 needs 9728² > 8192). FIXED in sunShadows.js: each atlas cell's
+      bake is TURNED to the road's direction there (from the ride line, doubled-angle sum per cell; the
+      casters' own points disagreed by ±6° — posts smear sideways from the sun), its centre snapped to one
+      texel lattice per angle, the neighbour cell faded in across 0.15 m of each seam, and the atlas taps
+      spread ±2.4 texels ALONG the road (curves: a ramp instead of a one-texel jump). Straights: a straight
+      edge; curves: smooth. ?shadowAlign=0 = the old bake, ?shadowAlong= the spread.
+      THEN the user's chase-view screenshot: the LIVE map near the car stepped too (rail + car shadows,
+      2.3 cm texels). Compared: 2048 + tent still stepped; 4096/48 m + tent and 3072/32 m + tent clean →
+      LIVE 32 m, 3072², 3×3 tent (~1 cm texels; 36 MB + depth, was 16 + 16).
+      THEN still teeth in the user's free-camera close-up. Checked NOT a conflict (force-lit removes every
+      shadow; only our node draws them), not the asphalt (plain grey: same), not post-FX. Redone on the CPU
+      from the real map: a car edge almost parallel to the texel rows steps once every ~11 texels and a
+      filter only smooths steps about its own length (radius 2.5 → 3.4 mm wobble, 6 → 1.6 mm). User chose
+      SOFT EDGES: a wide 6×6 tent (36 loads, radius 2.5) on both maps with a RECEIVER-PLANE depth per tap
+      (no self-shadow streaks on slopes); and the live box FOLLOWS THE CAMERA DISTANCE (32 m at the chase's
+      ~8 m, × (dist/8)², down to 8 m — at 5 m a 12 m box was clean).
+      THEN the user, in MY window: "EXACTLY the same saw-tooth". Enlarged 3× his view: the edge had become
+      ~1 SCREEN pixel sharp — the teeth were the screen's own pixel steps (a shadow edge is shading; MSAA
+      never smooths it; the engine drops FXAA when MSAA is on). FIX: the 36 taps spread with the screen
+      footprint (fwidth of the light-space position / texel size, ≥ 1 texel), so the edge is ≥ ~2.5 px
+      wide at any zoom. 3× crops: chase rail shadow and close-up car shadow smooth. The stats panel now
+      says which shadows drew the frame ("baked + live N m · soft v3" vs "engine cascades (builder)").
+      The BUILDER's Play still uses the engine's cascades (soft, untouched).
+      THEN the user: dark smears on the far road. The footprint used the pixel's LONG side (looking along
+      the road a pixel is a long strip): distant rail shadows spread across the road. FIX: the pixel's
+      NARROW width (|a × b| / longest edge, from dFdx / dFdy) and a cap of 2 texels between taps. The near
+      map's edges: a 9-tap coarse check, then a 10 × 10 tent ONLY on edge pixels. Checked as WHOLE frames
+      (darkening map vs shadows-off), while the autopilot drives, and the user's two views at 1:1.
+      Lessons: a syntax error (a reused name) silently left the page on old code — check the console
+      before any image; and judge whole frames, not crops. OPEN: GPU cost (atlas 2 × 36 loads
+      with the seam blend, live 36, the live map redrawn each frame at 3072²) — measure in a quiet moment;
+      tidy the study switches (?liveFilter ?atlasFilter ?shadowAlong ?tentScale) once settled.
+- [x] Free camera = the old game's debug orbit camera (modular-road-v3/debugCamera.js): C, drag orbit,
+      right-drag pan, wheel / + − zoom, V world/car frame, 1-4 views, 0 recentre, T slow-mo; readout.
+- [x] Guardrail posts 7.2 m apart, not 3.6 (user: "too close from each other") — oldLook.js RAIL.
 - [ ] Performance check: the tube run showed 37–49 fps in my window — measure GPU ms before adding more.
 - [ ] Horizon fix (engine, opt-in): ground to the horizon + haze coloured by Sky Pro. Warn the user
       first (engine edits reload the alg pages).

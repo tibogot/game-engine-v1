@@ -6,6 +6,8 @@
 //   landing(ev), boost(), beep(kind) one-shots
 export function createSfx(getCtx, { volume = 0.7 } = {}) {
   let ctx = null, master = null, noise = null, built = false, muted = false, vol = volume;
+  // which synthesised parts play (setPart): a recorded sound replaces one at a time (sound lab, 2026-10-20)
+  const on = { roll: true, squeal: true, wind: true, landing: true };
   let roll, rollF, squeal, squealF, wind, windF, whine;
   function noiseBuffer(c) {
     // 2 s of white noise, looped (shared by every noise voice)
@@ -70,26 +72,29 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
   }
   return {
     setMuted(m) { muted = m; if (built) ramp(master.gain, m ? 0 : vol, 0.05); },
+    /** switch one synthesised part (roll, squeal, wind, landing) off when a recording plays it instead */
+    setPart(name, v) { if (name in on) on[name] = v; },
     setVolume(v) { vol = v; if (built) ramp(master.gain, muted ? 0 : vol, 0.05); },
     update(dt, car) {
       if (!built && !build()) return;
       const sp = Math.min(1, car.kmh / 260);
       const g = car.grounded;
-      ramp(roll.gain, g ? 0.05 + 0.32 * sp : 0, 0.05);
+      ramp(roll.gain, g && on.roll ? 0.05 + 0.32 * sp : 0, 0.05);
       ramp(rollF.frequency, 160 + 900 * sp, 0.08);
       // squeal from sliding sideways (m/s) or locking the brakes at speed
       const slide = Math.max(0, Math.min(1, (Math.abs(car.slip) - 3) / 9));
       const brake = car.braking && car.kmh > 40 ? 0.55 : 0;
       wobble += dt * 9;
-      ramp(squeal.gain, g ? Math.max(slide, brake) * 0.22 : 0, 0.03);
+      ramp(squeal.gain, g && on.squeal ? Math.max(slide, brake) * 0.22 : 0, 0.03);
       ramp(squealF.frequency, 1250 + 450 * Math.sin(wobble) * 0.3 + 700 * slide, 0.03);
-      ramp(wind.gain, (g ? 0.03 : 0.08) + 0.3 * sp * sp + (g ? 0 : 0.12 * sp), 0.15);
+      ramp(wind.gain, on.wind ? (g ? 0.03 : 0.08) + 0.3 * sp * sp + (g ? 0 : 0.12 * sp) : 0, 0.15);
       ramp(windF.frequency, 350 + 1800 * sp, 0.2);
       ramp(whine.g.gain, car.boosting ? 0.05 : 0, 0.08);
       ramp(whine.frequency, 700 + 900 * sp, 0.1);
     },
     /** a landing: a thump by how hard; a PERFECT landing rings */
     landing(ev, impact = 6) {
+      if (!on.landing) return;
       const k = Math.min(1, impact / 18);
       burst({ dur: 0.18 + 0.25 * k, gain: 0.25 + 0.6 * k, f0: 260, f1: 60 });
       tone([55, 82], { dur: 0.25, gain: 0.2 + 0.3 * k, type: "sine" });

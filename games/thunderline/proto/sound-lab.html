@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Sound Lab</title>
+    <!-- Thunderline's car sounds, recorded (kit/sfxSamples.js: CC0 recordings) against the current synthesised
+         ones (kit/sfx.js): pick one per sound, hear them together in a scripted drive with the Gen 6 engine.
+         The user judges by ear (2026-10-20). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="../app/shell.css" />
+    <style>
+      main { max-width: 900px; margin: 0 auto; padding: 8px 28px 60px; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; align-items: center; }
+      .btn { background: var(--panel); border: 1px solid var(--line); color: var(--text); padding: 10px 14px; cursor: pointer; font: 700 15px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.06em; }
+      .btn:hover, .btn.on { border-color: var(--bolt); color: var(--bolt); }
+      .btn.big { font-size: 22px; padding: 16px 26px; border-color: var(--bolt); color: var(--bolt); }
+      .part { background: var(--panel); border: 1px solid var(--line); padding: 12px 16px; margin: 12px 0; }
+      .part h3 { font: 800 19px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; margin: 0 0 4px; }
+      .part .d { color: var(--dim); font-size: 13px; margin-bottom: 6px; }
+      label { display: grid; grid-template-columns: 120px 1fr 70px; align-items: center; gap: 12px; margin: 6px 0; color: var(--dim); }
+      label b { color: var(--text); font-weight: 600; text-align: right; }
+      input[type=range] { width: 100%; accent-color: #3fd2ff; }
+      .note { color: var(--dim); max-width: 760px; }
+      #state { font: 600 15px "Barlow Condensed"; letter-spacing: 0.06em; color: var(--dim); min-height: 20px; }
+      #state b { color: var(--bolt); }
+    </style>
+  </head>
+  <body>
+    <header id="top"><a class="brand cond" href="../index.html"><svg viewBox="0 0 16 16"><path fill="currentColor" d="M9.5 0 2 9h5l-1.5 7L14 6.5H9z" /></svg>Thunderline</a><nav id="crumbs" class="cond"><span>Sound lab</span></nav></header>
+    <main>
+      <p class="note"><b>Click any button to hear that sound alone</b> for 2.5 s (it also becomes your pick for that row). Pick one sound per row: <b>Current</b> is today's made-in-code sound, the letters are free (CC0) recordings. <b>Drive demo</b> plays 16 s of a run with all your picks and the Gen 6 engine: pull away, a drift, a jump and its landing (the current landing sound), a rail scrape (no sound yet). Or use the sliders.</p>
+      <div class="row"><button class="btn big" id="start">▶ Start sound</button><button class="btn big" id="demo">Drive demo</button></div>
+      <div id="state"></div>
+      <div class="part" id="tone-part">
+        <h3>Engine tone</h3>
+        <div class="d">The Gen 6 engine held steady. Its recordings have almost nothing above 2 kHz, so the filter and the treble lift change little: <b>Grit</b> adds the top end (new harmonics made from the engine itself). Try Grit at 0, then 1, then 2. Set the sliders by ear and tell me the numbers.</div>
+        <div class="row"><button class="btn" id="hold">▶ Hold the engine</button><button class="btn" id="filt">Filter: on</button><button class="btn" id="tone-reset">Reset</button></div>
+        <label>RPM <input type="range" id="t-rpm" min="1000" max="8200" step="50" value="5000" /><b id="t-rpm-v">5000</b></label>
+        <label>Throttle % <input type="range" id="t-thr" min="0" max="100" value="100" /><b id="t-thr-v">100</b></label>
+        <label>Coasting cut Hz <input type="range" id="t-min" min="500" max="20000" step="100" value="3500" /><b id="t-min-v">3500</b></label>
+        <label>+ at full throttle <input type="range" id="t-load" min="0" max="16000" step="100" value="9000" /><b id="t-load-v">9000</b></label>
+        <label>Grit (exciter) <input type="range" id="t-grit" min="0" max="3" step="0.05" value="1" /><b id="t-grit-v">1</b></label>
+        <label>Grit from Hz <input type="range" id="t-gritHz" min="1000" max="8000" step="100" value="3000" /><b id="t-gritHz-v">3000</b></label>
+        <label>Treble lift dB <input type="range" id="t-pres" min="0" max="15" step="0.5" value="4" /><b id="t-pres-v">4</b></label>
+        <label>Treble from Hz <input type="range" id="t-presHz" min="800" max="6000" step="100" value="2500" /><b id="t-presHz-v">2500</b></label>
+        <div class="d" id="t-now"></div>
+      </div>
+      <div id="parts"></div>
+      <h3 style="font:800 19px 'Barlow Condensed';letter-spacing:.1em;text-transform:uppercase;margin:24px 0 4px">By hand</h3>
+      <label>Speed <input type="range" id="m-kmh" min="0" max="260" value="0" /><b id="m-kmh-v">0</b></label>
+      <label>Sideways slide <input type="range" id="m-slide" min="0" max="100" value="0" /><b id="m-slide-v">0</b></label>
+      <label>Rail scrape <input type="range" id="m-scrape" min="0" max="100" value="0" /><b id="m-scrape-v">0</b></label>
+      <div class="row"><button class="btn" id="air">In the air: off</button><button class="btn" id="engine">Engine: off</button><button class="btn" data-land="4">Land light</button><button class="btn" data-land="10">Land medium</button><button class="btn" data-land="18">Land hard</button></div>
+      <label>Volume <input type="range" id="vol" min="0" max="100" value="70" /><b id="vol-v">70</b></label>
+    </main>
+    <script type="module">
+      import { createSfx } from "./kit/sfx.js";
+      import { createSfxSamples } from "./kit/sfxSamples.js";
+      import { createEngineLoops, LOOP_MIX } from "./kit/engineLoops.js";
+      import { createEngineModel } from "./kit/engineModel.js";
+      const $ = (id) => document.getElementById(id);
+      let ctx = null;
+      const synth = createSfx(() => ctx, { volume: 0.7 });
+      const rec = createSfxSamples(() => ctx, { volume: 0.7 });
+      const engine = createEngineLoops({ type: "gen6", volume: 0.5 });
+      const model = createEngineModel();
+      for (const p of [synth, rec, engine]) p.setMuted(true);
+      // the rows: [part, title, what it is, [[key, label], …]] — "synth" = the current sound, null = none
+      const PARTS = [
+        // the user's picks (2026-10-20): squeal B in the game; wind and rolling kept for later; the scrape
+        // and landing recordings rejected and deleted
+        ["squeal", "Drift squeal", "Sliding sideways, or braking hard. In the game: B, the long screech.", [["synth", "Old synth"], ["b", "B · long screech (in the game)"]]],
+        ["roll", "Tyres rolling", "The road under the tyres, louder and higher with speed. The game keeps Current for now.", [["synth", "Current"], ["a", "A · car on a road"], ["b", "B · inside a car, 80 km/h"]]],
+        ["wind", "Wind", "Grows with speed², more in the air. Kept for later; the game keeps Current.", [["synth", "Current"], ["a", "A · strong wind"], ["b", "B · whistling wind"], ["c", "C · soft wind"]]],
+      ];
+      const picked = { squeal: "b", roll: "synth", wind: "synth", scrape: null, landing: "synth" };
+      function choose(part, key) {
+        picked[part] = key;
+        if (part !== "scrape") synth.setPart(part, key === "synth");
+        rec.pick(part, key === "synth" ? null : key);
+        if (ctx && key && key !== "synth") rec.preload(part, key);
+        render();
+      }
+      function render() {
+        $("parts").innerHTML = PARTS.map(([p, t, d, items]) => `<div class="part"><h3>${t}</h3><div class="d">${d}</div><div class="row">${items.map(([k, n]) => `<button class="btn${picked[p] === k ? " on" : ""}" data-p="${p}" data-k="${k}">${n}</button>`).join("")}</div></div>`).join("");
+        for (const b of $("parts").querySelectorAll("button")) b.onclick = async () => {
+          choose(b.dataset.p, b.dataset.k === "null" ? null : b.dataset.k);
+          if (!on) await $("start").onclick();
+          audition(b.dataset.p);
+        };
+      }
+      render();
+
+      // ---------- AUDITION: a click plays that sound ALONE for 2.5 s, in a moment that suits it ----------
+      // (user, 2026-10-20: "how can I hear them one by one by clicking on them?")
+      const SOLO_LEN = 2.5;
+      const SOLO = {
+        squeal: (t) => ({ label: "Sliding", kmh: 120, slide: 0.85, air: false, scrape: 0 }),
+        roll: (t) => ({ label: "Rolling, speeding up", kmh: 40 + 180 * (t / SOLO_LEN), slide: 0, air: false, scrape: 0 }),
+        wind: (t) => ({ label: "Wind, speeding up", kmh: 60 + 180 * (t / SOLO_LEN), slide: 0, air: false, scrape: 0 }),
+        scrape: (t) => ({ label: "Scraping the rail", kmh: 170, slide: 0, air: false, scrape: 0.9 }),
+        landing: (t) => ({ label: "Landing hard, then light", kmh: 0, slide: 0, air: true, scrape: 0 }),
+      };
+      let solo = null; // { part, t, landed }
+      function audition(part) {
+        solo = { part, t: 0, landed: 0 };
+        demo = null;
+        rec.solo(part);
+        for (const p of ["roll", "squeal", "wind", "landing"]) synth.setPart(p, p === part && picked[p] === "synth");
+        engine.setMuted(true);
+      }
+      function endAudition() {
+        solo = null;
+        rec.solo(null);
+        for (const p of ["roll", "squeal", "wind", "landing"]) synth.setPart(p, picked[p] === "synth");
+        engine.setMuted(!on || !engineOn);
+      }
+
+      // ---------- sound on / off ----------
+      let on = false, engineOn = false; // the engine: in the demo, or when switched on
+      $("start").onclick = async () => {
+        on = !on;
+        if (on && !ctx) {
+          ctx = new AudioContext({ latencyHint: "interactive" });
+          await engine.unlock();
+          for (const [p] of PARTS) if (picked[p] && picked[p] !== "synth") choose(p, picked[p]);
+        }
+        if (on) ctx.resume();
+        synth.setMuted(!on); rec.setMuted(!on); engine.setMuted(!on || !engineOn);
+        $("start").textContent = on ? "■ Sound off" : "▶ Start sound";
+      };
+      $("engine").onclick = () => { engineOn = !engineOn; engine.setMuted(!on || !engineOn); $("engine").textContent = `Engine: ${engineOn ? "on" : "off"}`; };
+      let air = false;
+      $("air").onclick = () => { air = !air; $("air").textContent = `In the air: ${air ? "on" : "off"}`; $("air").classList.toggle("on", air); };
+      const land = (impact) => { synth.landing({ grade: "ok" }, impact); rec.landing(impact); };
+      for (const b of document.querySelectorAll("[data-land]")) b.onclick = () => land(+b.dataset.land);
+      for (const id of ["m-kmh", "m-slide", "m-scrape", "vol"]) $(id).oninput = () => {
+        $(id + "-v").textContent = $(id).value;
+        if (id === "vol") for (const p of [synth, rec]) p.setVolume($("vol").value / 100);
+      };
+
+      // ---------- ENGINE TONE (user, 2026-10-20: "still muffled, show me in the sound lab") ----------
+      // the engine held at an RPM / throttle; the sliders write engineLoops' LOOP_MIX live
+      const TONE = { "t-min": "toneMin", "t-load": "toneLoad", "t-grit": "grit", "t-gritHz": "gritHz", "t-pres": "presence", "t-presHz": "presenceHz" };
+      const TONE0 = Object.fromEntries(Object.values(TONE).map((k) => [k, LOOP_MIX[k]]));
+      let hold = false;
+      function toneRead() {
+        for (const [id, k] of Object.entries(TONE)) { LOOP_MIX[k] = +$(id).value; $(id + "-v").textContent = $(id).value; }
+        for (const id of ["t-rpm", "t-thr"]) $(id + "-v").textContent = $(id).value;
+      }
+      for (const id of [...Object.keys(TONE), "t-rpm", "t-thr"]) $(id).oninput = toneRead;
+      $("hold").onclick = async () => {
+        if (!on) await $("start").onclick();
+        hold = !hold; demo = null; if (solo) endAudition();
+        $("hold").textContent = hold ? "■ Stop the engine" : "▶ Hold the engine";
+        $("hold").classList.toggle("on", hold);
+      };
+      $("filt").onclick = () => { LOOP_MIX.filterOff = !LOOP_MIX.filterOff; $("filt").textContent = `Filter: ${LOOP_MIX.filterOff ? "OFF" : "on"}`; $("filt").classList.toggle("on", LOOP_MIX.filterOff); };
+      $("tone-reset").onclick = () => { for (const [id, k] of Object.entries(TONE)) $(id).value = TONE0[k]; toneRead(); };
+      toneRead();
+
+      // ---------- the drive demo: a scripted 16 s run ----------
+      // [from s, what]: the car's state over time (speed, slide, air, scrape, throttle) + the landing
+      let demo = null;
+      $("demo").onclick = async () => { if (!on) await $("start").onclick(); if (solo) endAudition(); demo = { t: 0, landed: false }; };
+      function demoState(t) {
+        const ease = (a, b, x) => a + (b - a) * Math.min(1, Math.max(0, x));
+        if (t < 5) return { label: "Pulling away", kmh: ease(0, 190, t / 5), slide: 0, air: false, scrape: 0, thr: 1 };
+        if (t < 7.5) return { label: "Drift", kmh: ease(190, 150, (t - 5) / 2.5), slide: Math.sin(((t - 5) / 2.5) * Math.PI), air: false, scrape: 0, thr: 0.7 };
+        if (t < 9) return { label: "Off the kicker", kmh: ease(150, 200, (t - 7.5) / 1.5), slide: 0, air: false, scrape: 0, thr: 1 };
+        if (t < 10.8) return { label: "In the air", kmh: 200, slide: 0, air: true, scrape: 0, thr: 1 };
+        if (t < 12.5) return { label: "Landed", kmh: 195, slide: 0, air: false, scrape: 0, thr: 1, land: true };
+        if (t < 14.5) return { label: "Rail scrape", kmh: 180, slide: 0.15, air: false, scrape: 0.9, thr: 1 };
+        if (t < 16) return { label: "Lift off", kmh: ease(180, 120, (t - 14.5) / 1.5), slide: 0, air: false, scrape: 0, thr: 0 };
+        return null;
+      }
+
+      let last = performance.now();
+      function frame(now) {
+        const dt = Math.min(0.05, (now - last) / 1000); last = now;
+        let s;
+        if (solo) {
+          solo.t += dt;
+          s = SOLO[solo.part](solo.t);
+          if (solo.part === "landing") {
+            if (solo.t > 0.15 && solo.landed === 0) { solo.landed = 1; land(16); }
+            if (solo.t > 1.3 && solo.landed === 1) { solo.landed = 2; land(5); }
+          }
+          if (solo.t > SOLO_LEN) { endAudition(); s = null; }
+        } else if (demo) {
+          demo.t += dt;
+          s = demoState(demo.t);
+          if (s?.land && !demo.landed) { demo.landed = true; land(16); }
+          if (!s) demo = null;
+        }
+        if (!s) s = { label: "", kmh: +$("m-kmh").value, slide: $("m-slide").value / 100, air, scrape: $("m-scrape").value / 100, thr: 0.6 };
+        const car = { kmh: s.kmh, slip: s.slide > 0 ? 3 + 9 * s.slide : 0, grounded: !s.air, braking: false, boosting: false, scrape: s.scrape };
+        synth.update(dt, car);
+        rec.update(dt, car);
+        engine.setMuted(!on || !!solo || !(demo || engineOn || hold));
+        if (hold && !demo) {
+          // the engine held: the RPM and throttle straight from the sliders
+          const st = { rpm: +$("t-rpm").value, load: $("t-thr").value / 100, limiter: false, pop: 0 };
+          engine.update(st);
+          $("t-now").textContent = `Low-pass now: ${LOOP_MIX.filterOff ? "OFF" : Math.round(Math.min(20000, LOOP_MIX.toneMin + LOOP_MIX.toneLoad * st.load + LOOP_MIX.toneRpm * Math.min(1, st.rpm / 8000))) + " Hz"} · treble +${LOOP_MIX.presence} dB from ${LOOP_MIX.presenceHz} Hz`;
+        } else engine.update(model.update(dt, s.kmh, s.thr ?? 0.6, !s.air, s.air));
+        $("state").innerHTML = s.label ? `<b>${s.label}</b> · ${Math.round(s.kmh)} km/h${s.slide > 0.05 ? " · sliding" : ""}${s.scrape ? " · scraping" : ""}` : "";
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+      window.__sound = { synth, rec, engine, picked, choose, get ctx() { return ctx; } };
+    </script>
+  </body>
+</html>

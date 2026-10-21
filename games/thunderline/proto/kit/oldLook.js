@@ -7,7 +7,9 @@ import { integrate, deckFrame, SECTIONS } from "./kit.js";
 import "./oldTiles.js"; // registers the old kit's bowl and flip ramp as tiles
 import { buildTubeLook, buildHalfpipeLook } from "./tubeLook.js";
 import { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS, NO_CHECKER } from "../../../modular-road-v3/modularRoadKit.js";
-import { buildRailGeometry, buildRailCollision } from "../../../modular-road-v3/modularRoadRail.js";
+import { buildRailGeometry, buildRailCollision, railParams } from "../../../modular-road-v3/modularRoadRail.js";
+// HALF THE POSTS (user, 2026-10-21: "they are too close from each other"): 7.2 m apart, not the old game's 3.6
+const RAIL = { ...railParams, postSpacing: 7.2 };
 import { createRoadMaterial, createGuardrailMaterial } from "../../../modular-road-v3/modularRoadMaterial.js";
 
 export function createOldLookMaterials() {
@@ -124,7 +126,7 @@ export function buildOldLook(tile, edges = true) {
   const under = STRIPED.has(String(tile.id ?? "").replace(/_L$/, "")) ? merge(parts.map((r) => stripedUnder(r, rp.width / 2, rp.thickness ?? 0.9))) : null;
   if (!edges) return { deck, rail: null, railCollision: null, posts: null, under };
   const posts = { key: "", template: null, matrices: [] };
-  const rail = merge(parts.map((r) => buildRailGeometry(r, rp, undefined, { postSink: posts })));
+  const rail = merge(parts.map((r) => buildRailGeometry(r, rp, RAIL, { postSink: posts })));
   const railCollision = merge(parts.map((r) => buildRailCollision(r, rp)));
   return { deck, rail, railCollision, posts, under };
 }
