@@ -16,6 +16,8 @@ export const q5 = (t) => t * t * t * (10 + t * (-15 + 6 * t));
 export const SECTIONS = {
   road: { hw: 8, kerbW: 0.7, kerbH: 0.16, slab: 0.9 },
   wide: { hw: 24, kerbW: 0.9, kerbH: 0.16, slab: 1.1 },
+  // NARROW (user, 2026-10-21, Apex Rush: narrow planks floating for precision landings): 8 m wide
+  narrow: { hw: 4, kerbW: 0.5, kerbH: 0.14, slab: 0.7 },
 };
 
 /**
@@ -281,6 +283,17 @@ export const TILES = {
     segs: [{ L: 28, pitch: 20 * DEG, ramp: 14 }],
     marks: [{ kind: "lip", from: -8, to: -0 }],
   },
+  // THE RAMP FAMILY (user, 2026-10-21, Apex Rush's ~18-ramp palette; the adjustable kicker covers 5–35°):
+  // LAUNCH 45° / 60° — steep curls for big air; the QUARTER PIPE — up to vertical (R 16): the car goes
+  // straight up and comes back down (a stunt at a platform's edge); the ROLL KICKER — up 20° and rolled
+  // 30° as it leaves: the car takes off tilted (land it with the air roll)
+  launch_45: { label: "Launch 45°", segs: [{ L: 44, pitch: 45 * DEG, ramp: 30 }], marks: [{ kind: "lip", from: -8, to: -0 }] },
+  launch_60: { label: "Launch 60°", segs: [{ L: 52, pitch: 60 * DEG, ramp: 38 }], marks: [{ kind: "lip", from: -8, to: -0 }] },
+  // (curls 94°, a little past vertical: at 90° the car drifted forward and came down BEHIND the pipe)
+  quarter_pipe: { label: "Quarter pipe", segs: [{ L: Math.round(16 * Math.PI / 2 + 18), pitch: 94 * DEG, ramp: 16 }], marks: [{ kind: "lip", from: -6, to: -0 }] },
+  roll_kicker: { label: "Roll kicker 20° · 30°", segs: [{ L: 36, pitch: 20 * DEG, ramp: 18, leanIn: 0, leanOut: 30 * DEG }], marks: [{ kind: "lip", from: -8, to: -0 }] },
+  plank_32: { label: "Plank 32", section: "narrow", segs: [{ L: 32 }] },
+  plank_64: { label: "Plank 64", section: "narrow", segs: [{ L: 64 }] },
   // GAP JUMP (PIECES 7d): one piece, nothing to aim — a small take-off, a 24 m hole over empty space,
   // and a receiving ramp that catches the whole speed band: it starts below and as steep as a slow
   // car's fall (the hole's path drops ~2 m) and eases back to level, then a flat run-out for the

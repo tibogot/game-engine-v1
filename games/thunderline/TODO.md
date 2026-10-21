@@ -23,8 +23,13 @@ this is just the list. Newest decisions at the top of each section. Last updated
          to ±90° (Shift 15° steps, was ±45), 0 / ` levels it. Panel hint while a piece is in hand; KEYS
          list updated. All checked with real key / wheel events. NOT yet: snapping a piece onto ANOTHER
          piece's surface at an angle (stacking), and Alt's browser-menu side effect untested by hand.
-      3. THE RAMP FAMILY: quarter pipes (vertical launch, shot 4), curls of a few heights, roll ramps,
-         narrow planks without rails for precision landings (shots 1, 5, 6: their palette has ~18 ramps).
+      3. [x] THE RAMP FAMILY (shots 1, 4, 5, 6), new RAMPS tab: Launch 45° and 60°, a Quarter pipe
+         (curls to 94°: the car goes ~51 m up and falls back into the curve; at 90° it drifted forward
+         and came down behind), a Roll kicker (20° lip banked 30° to start the air roll), Plank 32 / 64
+         (new `narrow` section, 8 m; rails follow the Rails switch, None = bare plank). Builder test at
+         the end of 128 m: 45° 142 km/h, apex 39 m, back to lip height at 152 m; 60° 131 km/h, 50 m,
+         112 m; roll kicker 152 km/h, 12 m, 121 m. No warnings. NOT yet: a landing that fits the roll
+         kicker's banked flight (step 4), more curl heights.
       4. TILTED LANDINGS for the air roll (W / X): "roll 30° to land" shown by the builder (shot 1).
       5. A WALL WITH A HOLE to jump / drive through (shot 2).
       6. Later: vertical launch pipes and ceilings to drive upside down (shot 3), checkpoint arches

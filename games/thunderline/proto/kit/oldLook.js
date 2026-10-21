@@ -188,7 +188,8 @@ export function buildOldLook(tile, edges = true) {
   }
   if (tile.taper) return buildTaperLook(tile, edges);
   const { frames: all } = oldFrames(tile);
-  const rp = tile.section === "wide" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS.wide.hw * 2 } : ROAD_PARAM_DEFAULTS;
+  // the road look at this section's width (road 16 m, wide 48, narrow 8)
+  const rp = tile.section && tile.section !== "road" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS[tile.section].hw * 2 } : ROAD_PARAM_DEFAULTS;
   // RUNS of road: a gap's air frames cut the piece in two (gap jumps); one run for the others
   const runs = [[]];
   for (const f of all) { if (f.air) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(f); }

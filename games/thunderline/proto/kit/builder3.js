@@ -51,6 +51,7 @@ const CATS = [
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
   { id: "lean", label: "Lean", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22"] },
+  { id: "ramps", label: "Ramps", tiles: ["adj_kicker", "kicker_20", "launch_45", "launch_60", "quarter_pipe", "roll_kicker", "plank_32", "plank_64"] },
   { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "catch_tube", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "catch_tube", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
