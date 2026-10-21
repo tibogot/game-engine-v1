@@ -116,6 +116,20 @@ public/levels to have 0 errors.
 - First run: 13 levels, 0 errors.
 - One warning: nam-valley has 16 props outside its 1024 m world.
 
+**B8 + B10 MEASURED 2026-10-21, no fix needed** (alg-aures, my own Chrome window visible):
+
+- **B8 interior fog: free when off.** It is OFF in all 13 levels and by default, and its loops sit
+  behind a runtime `If(uEnabled)`, so they never run. The question left was whether merely compiling
+  the code in costs anything. A/B in the alg-rts match at 2× resolution: with the code compiled in
+  4.45 ms, without it 4.50 ms (+0.05, noise 0.22).
+  - The switch was verified real: the terrain fragment shader goes 95,243 → 91,789 chars.
+  - The temporary switch was removed again.
+- **B10 terrain texture re-uploads: small.** `_uploadAll` only flags the texture, so loads that land
+  in the same frame share one upload.
+  - alg-rts boot: 2 uploads in all, 11.6 ms.
+  - Editor opening alg-abdi: 11 uploads over 2.6 s, 41 ms in all, never more than 7 ms in one frame.
+  - Not worth changing.
+
 ## Suggested order
 
 - **Now (small, safe; they help alg-rts too):** A1, A2, A3 + A4, A5.
