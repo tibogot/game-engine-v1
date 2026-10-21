@@ -65,6 +65,8 @@ RED = mat("Red", (0.62, 0.03, 0.02), 0.3)
 SLATE = mat("Slate", (0.035, 0.042, 0.05), 0.55)
 BLACK = mat("Black", (0.012, 0.012, 0.013), 0.35)
 GREY = mat("Grey", (0.33, 0.34, 0.35), 0.45)
+CHROME = mat("Chrome", (0.55, 0.56, 0.57), 0.25)
+CREASE = mat("Crease", (0.16, 0.012, 0.008), 0.5)   # the bonnet's pressed-in lines: dark red, not black
 FACE = mat("Face", (0.5, 0.5, 0.5), 0.6)       # the UV planes: the page puts its own textures / shaders on them
 
 # --- 2D outlines -----------------------------------------------------------------------------------------------
@@ -197,8 +199,8 @@ ZF = 0.02
 B_ZF, B_ZB = 0.016, -0.215        # the shell's front (the red apron under the bezel) and back
 B_W, B_RC = 0.2, 0.045            # half width, plan radius of the back corners
 B_TOP, B_NOSE = 0.166, 0.062      # top height (below both frames: they stand out of it); the nose at the back
-B_NOSE_Z = -0.1                   # where the top starts to roll down
-B_FENDER = 0.026                  # how much higher the fenders stay over the nose
+B_NOSE_Z = -0.088                 # where the top starts to roll down
+B_FENDER = 0.007                  # the fenders: barely raised (rear 3/4 photos), creases do the work
 B_SH = 0.012                      # the shoulder radius
 
 def b_halfwidth(z):
@@ -209,12 +211,14 @@ def b_halfwidth(z):
 
 # the top's centre line (z, y): level, then the nose rolls over and drops steeply — every point just under the rays
 # from the camera fitted to the front photo through the red body's top edge (that view shows only a narrow red band)
-NOSE_PROFILE = [(0.1, B_TOP), (0.11, 0.164), (0.12, 0.158), (0.13, 0.15), (0.14, 0.14), (0.15, 0.128), (0.16, 0.116),
-                (0.17, 0.104), (0.18, 0.093), (0.19, 0.083), (0.2, 0.074), (0.215, B_NOSE)]
+# The rear 3/4 photos (assets-src/refs/turnin-turbo/rear34_*.jpg): ONE long, gently crowned slope from the slate top
+# band down to the bumper — no level part. Still under the front camera's rays (y <= 0.15 at z -0.128, 0.14 at -0.142).
+# A short level strip first (~1 cm behind the frames, at their height): the front photo shows the sticker there.
+NOSE_PROFILE = [(0.06, 0.17), (0.098, 0.17)] + [(0.1 + 0.115 * k / 16, 0.072 + 0.098 * (1 - (k / 16) ** 1.6)) for k in range(17)]
 def b_height(z, x):
     t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
     hc = float(np.interp(-z, *zip(*NOSE_PROFILE)))   # the nose, kept under the photo camera's rays
-    f = math.exp(-((abs(x) - 0.148) / 0.06) ** 2)
+    f = math.exp(-((abs(x) - 0.15) / 0.05) ** 2)
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
     return max(min(hc + B_FENDER * f * (t ** 0.9), y_face), 0.026)
@@ -256,21 +260,25 @@ def b_normal(z, x, e=0.001):
     hx = (b_height(z, x + e) - b_height(z, x - e)) / (2 * e)
     hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
     return Vector((-hx, 1.0, -hz)).normalized()
-POD_PROF = [(0.0, 0.0105), (0.027, 0.0103), (0.031, 0.0095), (0.0325, 0.008), (0.034, 0.0075), (0.0392, 0.007),
-            (0.0408, 0.0058), (0.0412, 0.004), (0.0412, -0.035)]
+POD_PROF = [(0.0, 0.0105), (0.022, 0.0106), (0.026, 0.0101), (0.0275, 0.009), (0.0288, 0.0084), (0.0318, 0.008),
+            (0.0332, 0.0068), (0.0336, 0.0048), (0.0336, -0.03)]
 for sx in (-1, 1):
     x = sx * 0.138
-    z = min((B_ZB + 0.003 + i * 0.0005 for i in range(240)), key=lambda zz: abs(b_height(zz, x) - 0.122))
-    n = b_normal(z, x)
+    z = min((B_ZB + 0.003 + i * 0.0005 for i in range(240)), key=lambda zz: abs(b_height(zz, x) - 0.092))
+    up = math.radians(14)                         # the lamps face back, 14° up (flatter than the slope: the photos)
+    n = Vector((0, math.sin(up), -math.cos(up)))
     ex = Vector((1, 0, 0)); ey = n.cross(ex).cross(n).normalized() * -1 if False else n.cross(ex).normalized()
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, b_height(z, x), z), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
+    # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
+    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0128), (0.012, 0.0124), (0.019, 0.0114), (0.0225, 0.0104), (0.0225, 0.009)],
+          CHROME, gmat((x, b_height(z, x), z), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
 
 # the bumper: a slate band round the back and the rear half of the sides, a groove along it
 def bumper():
     z_start = -0.085
     path = rpoly([(-B_W, z_start), (-B_W, B_ZB), (B_W, B_ZB), (B_W, z_start)], [0, B_RC, B_RC, 0], 12)
-    prof = [(-0.006, 0.018), (0.006, 0.018), (0.0095, 0.0195), (0.011, 0.023), (0.011, 0.033), (0.0095, 0.0345),
-            (0.011, 0.036), (0.011, 0.047), (0.0095, 0.0505), (0.006, 0.052), (-0.006, 0.052)]
+    prof = [(-0.006, 0.024), (0.008, 0.024), (0.0115, 0.0255), (0.013, 0.029), (0.013, 0.042), (0.0115, 0.0435),
+            (0.013, 0.045), (0.013, 0.058), (0.0115, 0.0615), (0.008, 0.063), (-0.006, 0.063)]
     rings = []
     for i, (x, z) in enumerate(path):
         p = Vector((x, z))
@@ -287,21 +295,31 @@ def panel_line(name, pts):
     ring_a, ring_b = [], []
     for i, (x, z) in enumerate(pts):
         a = Vector(pts[max(i - 1, 0)]); b = Vector(pts[min(i + 1, len(pts) - 1)])
-        t = (b - a).normalized(); side = Vector((-t.y, t.x)) * 0.0006
+        t = (b - a).normalized(); side = Vector((-t.y, t.x)) * 0.00035
         for ring, s in ((ring_a, 1), (ring_b, -1)):
             xx, zz = x + side.x * s, z + side.y * s
             ring.append((xx, b_height(zz, xx) + 0.00025, zz))
     me = bpy.data.meshes.new(name)
     v = ring_a + ring_b; n = len(ring_a)
     me.from_pydata([tuple(q) for q in v], [], [(i, i + 1, n + i + 1, n + i) for i in range(n - 1)])
-    to_blender(me); link(name, me, BLACK)
-zl = B_NOSE_Z - 0.012
-panel_line("BonnetLineTop", [(-0.075 + 0.15 * k / 20, zl) for k in range(21)])
+    to_blender(me); link(name, me, CREASE)
+# the creases from the top band down to the bumper, inboard of the lamps, opening out a little; the embossed panel
+# outline under the band (centre, the rear 3/4 photos)
+zt = B_NOSE_Z - 0.004
 for sx in (-1, 1):
-    panel_line(f"BonnetLine{sx}", [(sx * (0.075 + 0.02 * k / 30), zl - (B_ZB + 0.012 - zl) * -k / 30) for k in range(31)])
+    panel_line(f"BonnetLine{sx}", [(sx * (0.088 + 0.012 * k / 30), zt + (B_ZB + 0.016 - zt) * k / 30) for k in range(31)])
+r0, r1, rz0, rz1 = -0.055, 0.04, B_NOSE_Z - 0.026, B_NOSE_Z - 0.07
+panel_line("BonnetRect", [(r0 + (r1 - r0) * k / 20, rz0) for k in range(21)] + [(r1, rz0 + (rz1 - rz0) * k / 12) for k in range(1, 13)]
+           + [(r1 - (r1 - r0) * k / 20, rz1) for k in range(1, 21)] + [(r0, rz1 - (rz1 - rz0) * k / 12) for k in range(1, 13)])
+
+# the black ribbed pads on each side, just ahead of the bumper's ends (the side photo)
+for sx in (-1, 1):
+    PAD = gmat((sx * (B_W + 0.002), 0.076, -0.072), (0, 0, -sx), (0, 1, 0))
+    slab(f"SidePad{sx}", [rrect(0, 0, 0.036, 0.058, 0.004)], -0.002, 0.007, 0.0015, BLACK, PAD)
+    for k in range(5):
+        slab(f"SidePadRib{sx}{k}", [rrect(0, -0.02 + k * 0.01, 0.03, 0.0035, 0.0012, 2)], 0.007, 0.0095, 0.0008, BLACK, PAD)
 
 
-CHROME = mat("Chrome", (0.55, 0.56, 0.57), 0.25)
 
 # =================================================================================================================
 # THE FRONT FACE — every outline measured on the straight front photo (Turbo_Dashboard.png, 1600 × 1192):
@@ -552,7 +570,7 @@ def top_sticker(x0, x1, zc, depth, nx=48, nz=4):
         for li in poly.loop_indices: uvl.data[li].uv = uvs[me.loops[li].vertex_index]
     smooth(me, 80)
     return link("TopSticker", me, FACE)
-top_sticker(X(230), X(815), -0.1, 0.019)
+top_sticker(X(230), X(815), -0.11, 0.02)
 
 # =================================================================================================================
 # lean the face back (everything built on the upright front plane)
@@ -577,7 +595,8 @@ join("Wheel", ["WheelRim"] + starts("WheelSpoke", "WheelHub"))
 join("WheelChromeLines", starts("WheelChrome"))
 join("Lever", ["LeverStick", "LeverBlock", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum"])
 join("ConsoleRight", starts("ConsoleFin", "ConsoleGate"))
-join("BonnetLines", starts("BonnetLine"))
+join("BonnetLines", starts("BonnetLine", "BonnetRect"))
+join("SidePads", starts("SidePad"))
 join("LeverGrooves", starts("LeverGroove"))
 join("ResetButton", ["ResetButton", "ResetChevron"] + starts("ResetRib"))
 join("KeyHead", ["KeyHead", "KeyBow"] + starts("KeyGroove"))
