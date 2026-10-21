@@ -196,11 +196,11 @@ ZF = 0.02
 # upright sides and a crisp rounded shoulder; the top runs level back from the bezel, then rolls down into a car nose;
 # fender bulges either side carry the round grey headlights low on the nose; a slate bumper band wraps the back and
 # the rear of the sides, a red skirt under it. Built as cross-sections (x, y) stepped along z and lofted — no subdivision.
-B_ZF, B_ZB = 0.016, -0.215        # the shell's front (the red apron under the bezel) and back
-B_W, B_RC = 0.2, 0.045            # half width, plan radius of the back corners
+B_ZF, B_ZB = 0.016, -0.245        # the shell's front (the red apron under the bezel) and back
+B_W, B_RC = 0.2, 0.025            # half width, plan radius of the back corners
 B_TOP, B_NOSE = 0.166, 0.062      # top height (below both frames: they stand out of it); the nose at the back
 B_NOSE_Z = -0.088                 # where the top starts to roll down
-B_FENDER = 0.007                  # the fenders: barely raised (rear 3/4 photos), creases do the work
+B_FENDER = 0.042                  # the fenders: barely raised (rear 3/4 photos), creases do the work
 B_SH = 0.012                      # the shoulder radius
 
 def b_halfwidth(z):
@@ -214,19 +214,36 @@ def b_halfwidth(z):
 # The rear 3/4 photos (assets-src/refs/turnin-turbo/rear34_*.jpg): ONE long, gently crowned slope from the slate top
 # band down to the bumper — no level part. Still under the front camera's rays (y <= 0.15 at z -0.128, 0.14 at -0.142).
 # A short level strip first (~1 cm behind the frames, at their height): the front photo shows the sticker there.
-NOSE_PROFILE = [(0.06, 0.17), (0.098, 0.17)] + [(0.1 + 0.115 * k / 16, 0.072 + 0.098 * (1 - (k / 16) ** 1.6)) for k in range(17)]
+# convex: a gentle bonnet near the top, rolling over to nearly vertical where the lamps sit (straight back photo)
+NOSE_PROFILE = [(0.06, 0.17), (0.098, 0.17)] + [(0.1 + 0.142 * k / 24, 0.094 + 0.076 * max(1 - (k / 24) ** 2.2, 0) ** 0.6)
+                                               for k in range(25)]
+B_SKIRT = 0.05                    # the red chin under the bumper (as tall as the bumper: straight back photo)
+B_BUMP = 0.107                    # the bumper's top
+# The back is a 911 nose (straight back photo, back_straight.png): FENDERS either side stay high and end in a face
+# sloping ~55 deg that carries each lamp nearly flush; the BONNET between the creases (x +-9 cm) is lower and rolls
+# gently down to the bumper.
+F_TOP, F_FACE = 0.152, 0.045      # the fenders' height; how far forward of the back their face reaches
+def fender_h(z):
+    u = (z - B_ZB) / F_FACE                       # 0 at the back, 1 at the top of the sloped face
+    if u <= 0: return B_BUMP
+    g = u if u <= 0.75 else (1.0 if u >= 1.25 else 0.75 + (u - 0.75) - (u - 0.75) ** 2)   # straight face, rounded over
+    return B_BUMP + (F_TOP - B_BUMP) * g
+def bonnet_h(z):
+    u = min(max((-0.098 - z) / (-0.098 - B_ZB), 0.0), 1.0)
+    return B_BUMP + (0.17 - B_BUMP) * (1 - u ** 1.4)   # drops away soon behind the frames (front photo)
 def b_height(z, x):
-    t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
-    hc = float(np.interp(-z, *zip(*NOSE_PROFILE)))   # the nose, kept under the photo camera's rays
-    f = math.exp(-((abs(x) - 0.15) / 0.05) ** 2)
+    ax = abs(x)
+    wf = min(max((ax - 0.06) / 0.07, 0.0), 1.0); wf = wf * wf * (3 - 2 * wf)   # a broad, rounded rise
+    bon = bonnet_h(z)
+    hc = bon * (1 - wf) + max(fender_h(z), bon) * wf
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
-    return max(min(hc + B_FENDER * f * (t ** 0.9), y_face), 0.026)
+    return max(min(hc, y_face), 0.026)
 
 def b_ring(z):
     w = b_halfwidth(z)
     t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
-    B_SH = 0.012 + 0.03 * t * t        # the shoulder rounds out towards the nose (the back photo: a car's rounded wings)
+    B_SH = 0.012 + 0.008 * t           # the shoulder stays tight: the fenders carry the lamps right out to the corners
     pts = []
     N_TOP, N_SIDE, N_ARC, N_BOT = 48, 8, 5, 10
     hl, hr = b_height(z, -w + B_SH), b_height(z, w - B_SH)
@@ -245,9 +262,18 @@ def b_ring(z):
         pts.append((w - B_SH + B_SH * math.cos(a), hr - B_SH + B_SH * math.sin(a)))
     for k in range(1, N_SIDE):                    # right side down
         pts.append((w, (hr - B_SH) * (1 - k / N_SIDE)))
-    return [(x, y, z) for x, y in pts]
+    out = []
+    for x, y, in pts:
+        if y < B_SKIRT:                           # the chin: inset in x, and tucked forward at the back
+            tk = (1 - y / B_SKIRT) ** 2
+            tk = 1 - math.sqrt(max(1 - (1 - y / B_SKIRT) ** 2, 0.0))   # a quarter round: the chin's corners
+            x = math.copysign(min(abs(x), w - 0.06 * tk), x)
+            out.append((x, y, max(z, B_ZB + 0.05 * tk)))
+        else:
+            out.append((x, y, z))
+    return out
 
-ZS = [B_ZF + (B_ZB - B_ZF) * (i / 60) for i in range(61)]
+ZS = [B_ZF + (B_ZB - B_ZF) * (1 - (1 - i / 90) ** 1.7) for i in range(91)]   # denser towards the back (the fender faces)
 # the back end: the last rings shrink in to a rounded rear edge (2 mm) before the cap
 rings = [b_ring(z) for z in ZS]
 last = rings[-1]
@@ -260,25 +286,26 @@ def b_normal(z, x, e=0.001):
     hx = (b_height(z, x + e) - b_height(z, x - e)) / (2 * e)
     hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
     return Vector((-hx, 1.0, -hz)).normalized()
-POD_PROF = [(0.0, 0.0105), (0.022, 0.0106), (0.026, 0.0101), (0.0275, 0.009), (0.0288, 0.0084), (0.0318, 0.008),
-            (0.0332, 0.0068), (0.0336, 0.0048), (0.0336, -0.03)]
+POD_PROF = [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122), (0.035, 0.0118), (0.0375, 0.0102),
+            (0.0385, 0.007), (0.0385, -0.035)]
 for sx in (-1, 1):
-    x = sx * 0.138
-    z = min((B_ZB + 0.003 + i * 0.0005 for i in range(240)), key=lambda zz: abs(b_height(zz, x) - 0.092))
-    up = math.radians(14)                         # the lamps face back, 14° up (flatter than the slope: the photos)
-    n = Vector((0, math.sin(up), -math.cos(up)))
-    ex = Vector((1, 0, 0)); ey = n.cross(ex).cross(n).normalized() * -1 if False else n.cross(ex).normalized()
-    lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, b_height(z, x), z), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
+    x = sx * 0.156
+    zc = B_ZB + F_FACE * 0.62
+    n = Vector((0, F_FACE, -(F_TOP - B_BUMP))).normalized()      # the face's normal: back and up
+    ex = Vector((1, 0, 0)); ey = n.cross(ex).normalized()
+    z_l, y_l = zc + n.z * 0.001, fender_h(zc) + n.y * 0.001
+    lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
     # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
-    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0128), (0.012, 0.0124), (0.019, 0.0114), (0.0225, 0.0104), (0.0225, 0.009)],
-          CHROME, gmat((x, b_height(z, x), z), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
+    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.02, 0.0092), (0.0272, 0.009), (0.0272, 0.008)],
+          CHROME, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
 
 # the bumper: a slate band round the back and the rear half of the sides, a groove along it
 def bumper():
     z_start = -0.085
     path = rpoly([(-B_W, z_start), (-B_W, B_ZB), (B_W, B_ZB), (B_W, z_start)], [0, B_RC, B_RC, 0], 12)
-    prof = [(-0.006, 0.024), (0.008, 0.024), (0.0115, 0.0255), (0.013, 0.029), (0.013, 0.042), (0.0115, 0.0435),
-            (0.013, 0.045), (0.013, 0.058), (0.0115, 0.0615), (0.008, 0.063), (-0.006, 0.063)]
+    prof = [(-0.006, 0.05), (0.009, 0.05), (0.0125, 0.052), (0.014, 0.056), (0.014, 0.066), (0.0125, 0.0675),
+            (0.014, 0.069), (0.014, 0.085), (0.0125, 0.0865), (0.014, 0.088), (0.014, 0.1), (0.0125, 0.1045),
+            (0.009, 0.107), (-0.006, 0.107)]
     rings = []
     for i, (x, z) in enumerate(path):
         p = Vector((x, z))
@@ -307,14 +334,14 @@ def panel_line(name, pts):
 # outline under the band (centre, the rear 3/4 photos)
 zt = B_NOSE_Z - 0.004
 for sx in (-1, 1):
-    panel_line(f"BonnetLine{sx}", [(sx * (0.088 + 0.012 * k / 30), zt + (B_ZB + 0.016 - zt) * k / 30) for k in range(31)])
-r0, r1, rz0, rz1 = -0.055, 0.04, B_NOSE_Z - 0.026, B_NOSE_Z - 0.07
+    panel_line(f"BonnetLine{sx}", [(sx * 0.079, zt + (B_ZB + 0.004 - zt) * k / 30) for k in range(31)])
+r0, r1, rz0, rz1 = -0.068, 0.078, B_NOSE_Z - 0.014, B_NOSE_Z - 0.05
 panel_line("BonnetRect", [(r0 + (r1 - r0) * k / 20, rz0) for k in range(21)] + [(r1, rz0 + (rz1 - rz0) * k / 12) for k in range(1, 13)]
            + [(r1 - (r1 - r0) * k / 20, rz1) for k in range(1, 21)] + [(r0, rz1 - (rz1 - rz0) * k / 12) for k in range(1, 13)])
 
 # the black ribbed pads on each side, just ahead of the bumper's ends (the side photo)
 for sx in (-1, 1):
-    PAD = gmat((sx * (B_W + 0.002), 0.076, -0.072), (0, 0, -sx), (0, 1, 0))
+    PAD = gmat((sx * (B_W + 0.002), 0.105, -0.06), (0, 0, -sx), (0, 1, 0))
     slab(f"SidePad{sx}", [rrect(0, 0, 0.036, 0.058, 0.004)], -0.002, 0.007, 0.0015, BLACK, PAD)
     for k in range(5):
         slab(f"SidePadRib{sx}{k}", [rrect(0, -0.02 + k * 0.01, 0.03, 0.0035, 0.0012, 2)], 0.007, 0.0095, 0.0008, BLACK, PAD)
@@ -457,15 +484,17 @@ uvplane("StripPrint", X(1000) - X(730), Y(668) - Y(705), gmat(((X(730) + X(1000)
 CX0, CX1 = X(1106), X(1436)
 CX1_F = 0.189
 CZ0, CZ1 = 0.0, 0.116
-Y_RED_F, Y_TOP_F, Y_TOP_B = 0.014, 0.035, 0.05
+Y_RED_F, Y_TOP_F, Y_TOP_B = 0.02, 0.037, 0.051
 def ytop(z): return Y_TOP_F + (CZ1 - z) / (CZ1 - CZ0) * (Y_TOP_B - Y_TOP_F)
 def yred(z): return ytop(z) - (Y_TOP_F - Y_RED_F)
 
 plan = rpoly([(CX0, CZ1), (CX1_F, CZ1), (CX1, CZ0), (CX0, CZ0)], [0.006, 0.006, 0, 0], 6)   # (x, z)
 def ring_at(fy, ins=0.0):
     return [(x, fy(z), z) for x, z in offset2d(plan, -ins)]
-loft("Console", [ring_at(lambda z: 0.0, 0.002), ring_at(lambda z: 0.002), ring_at(lambda z: yred(z) - 0.001),
-                 ring_at(lambda z: yred(z), 0.0008)], RED, cap0=True, cap1=True, angle=50)
+# the red base is a tapered tray (the user's corner photo): its front and side lean in towards the table — 12 mm
+# narrower at the bottom than under the black housing (7 mm) — with a crisp crease where they meet
+loft("Console", [ring_at(lambda z: 0.0, -0.007), ring_at(lambda z: 0.0012, -0.0064), ring_at(lambda z: yred(z) - 0.0015, 0.0),
+                 ring_at(lambda z: yred(z), 0.0008)], RED, cap0=True, cap1=True, angle=25)
 loft("ConsoleHousing", [ring_at(lambda z: yred(z) - 0.0005, 0.0005), ring_at(lambda z: ytop(z) - 0.0012),
                         ring_at(lambda z: ytop(z), 0.0012)], BLACK, cap0=True, cap1=True, angle=45)
 
@@ -477,8 +506,10 @@ W = CX1 - CX0
 uvplane("ShifterLabel", X(1300) - X(1150), tlen - 0.012, TOP @ Matrix.Translation(((X(1150) + X(1300)) / 2 - (CX0 + CX1) / 2, -0.002, 0.0003)))
 SLOT_U = (X(1300) + X(1392)) / 2 - (CX0 + CX1) / 2
 slab("ConsoleSlot", [rrect(SLOT_U, 0.0, X(1392) - X(1300), tlen - 0.01, 0.002),
-                     rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.006, tlen - 0.016, 0.0015)], -0.014, 0.0002, 0.0005, BLACK, TOP)
-slab("ConsoleSlotFloor", [rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.004, tlen - 0.014, 0.0015)], -0.015, -0.013, 0.0004, BLACK, TOP)
+                     rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.006, tlen - 0.016, 0.0015)], -0.004, 0.005, 0.0008, BLACK, TOP)
+# the channel's dark inside, under the drum (the housing is cut by the drum: its top would z-fight a flush drum)
+slab("ConsoleChannel", [rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.0065, tlen - 0.0165, 0.0012)], -0.0006, 0.0004, 0.0003, BLACK, TOP)
+_unused = ("ConsoleSlotFloor", [rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.004, tlen - 0.014, 0.0015)])
 for k, fx in enumerate((W / 2 - 0.0035, W / 2 - 0.0105)):
     slab(f"ConsoleFin{k}", [rrect(fx, 0.006, 0.0032, tlen - 0.018, 0.0012)], 0.0, 0.015 - 0.003 * k, 0.0009, BLACK, TOP)
 SLOT_W = X(1392) - X(1300)
@@ -488,22 +519,25 @@ for k in range(5):
 
 # the lever: a stick in the slot, the grey grip lying across it, reaching out to the right; three grooves along its
 # face, a collar round the stick. Origin in the slot (the page slides it along the slot's axis, local y).
-LEVER = TOP @ Matrix.Translation((SLOT_U - 0.004, 0.0, 0.0))
-slab("LeverStick", [rrect(0.0, 0.0, 0.007, 0.009, 0.0008)], -0.013, 0.009, 0.0006, GREY, LEVER)
-slab("LeverBlock", [rrect(0.0, 0.0, 0.011, 0.013, 0.001)], 0.004, 0.0145, 0.0008, GREY, LEVER)
-lathe("LeverDrum", [(0.0001, -0.0065), (0.008, -0.0065), (0.0105, -0.005), (0.0115, -0.0025), (0.0115, 0.0025),
-                     (0.0105, 0.005), (0.008, 0.0065), (0.0001, 0.0065)], GREY, LEVER @ Matrix.Translation((0, 0, -0.0105))
-      @ gmat((0, 0, 0), (0, 1, 0), (0, 0, 1)), n=40)
-G_Y0, G_Y1, G_D = 0.0135, 0.0305, 0.02             # the grip (front photo: ~60 mm with its cap, ~17 tall)
-G0 = LEVER @ gmat((0, 0, 0), (1, 0, 0), (0, 0, 1))  # outline in (x, up), extruded along the slot; +z = the front
-slab("LeverGrip", [rrect(0.0215, (G_Y0 + G_Y1) / 2, 0.052, G_Y1 - G_Y0, 0.0014, 4)], -G_D / 2, G_D / 2, 0.001, GREY, G0)
-CAP = G0 @ gmat((-0.0045, (G_Y0 + G_Y1) / 2, 0), (0, 0, 1), (0, 1, 0))   # outline in (depth, up), extruded to -x
-slab("LeverCap", [rrect(0, 0, G_D - 0.003, G_Y1 - G_Y0 - 0.003, 0.0009, 3), rrect(0, 0, G_D - 0.008, G_Y1 - G_Y0 - 0.008, 0.0005, 2)],
-     0.0, 0.01, 0.0005, GREY, CAP)
-slab("LeverCapPlug", [rrect(0, 0, G_D - 0.007, G_Y1 - G_Y0 - 0.007, 0.0005, 2)], 0.0, 0.0055, 0.0003, GREY, CAP)
-for k in range(3):   # three grooves along the grip's front face, on its right part
-    slab(f"LeverGroove{k}", [rrect(0.029, G_Y0 + 0.0045 + k * 0.004, 0.034, 0.0009, 0.0004, 2)], G_D / 2 - 0.0003,
-         G_D / 2 + 0.00025, 0.0001, BLACK, G0)
+# The lever turns on a grey DRUM in the slot (axis across, x): changing gear rotates it, the lever tilts fore / aft.
+# Its origin is the drum's axis (the page rotates it about local x). Pivot 16 mm under the top, mid-travel along the slot.
+LEVER_PIVOT_Y, LEVER_R = -0.019, 0.016
+LEVER = TOP @ Matrix.Translation((SLOT_U - 0.004, LEVER_PIVOT_Y, -LEVER_R + 0.0035))   # the crown shows 3.5 mm
+slab("LeverStick", [rrect(0.0, 0.0, 0.012, 0.0065, 0.0012)], 0.0, 0.034, 0.0008, GREY, LEVER)   # the blade post
+lathe("LeverDrum", [(0.0001, -0.011), (0.013, -0.011), (0.0155, -0.0095), (LEVER_R, -0.006), (LEVER_R, 0.006),
+                    (0.0155, 0.0095), (0.013, 0.011), (0.0001, 0.011)], GREY, LEVER @ gmat((0, 0, 0), (0, 1, 0), (0, 0, 1)), n=48)
+G0 = LEVER @ gmat((0, 0, 0), (1, 0, 0), (0, 0, 1))  # outline in (x, up), extruded along the slot
+# the grip: a wedge, tallest at the left (the hollow square end), tapering to the right
+grip = rpoly([(-0.007, 0.03), (0.022, 0.03), (0.04, 0.034), (0.04, 0.047), (-0.007, 0.053)], [0.0015, 0.004, 0.002, 0.002, 0.0015], 4)
+slab("LeverGrip", [grip], -0.0095, 0.0095, 0.001, GREY, G0)
+CAP = G0 @ gmat((-0.006, 0.0415, 0), (0, 0, 1), (0, 1, 0))   # outline in (depth, up), extruded to -x
+slab("LeverCap", [rrect(0, 0, 0.0215, 0.0245, 0.0012, 3), rrect(0, 0, 0.0135, 0.0165, 0.0006, 2)], 0.0, 0.007, 0.0006, GREY, CAP)
+slab("LeverCapPlug", [rrect(0, 0, 0.015, 0.018, 0.0006, 2)], 0.0, 0.0035, 0.0003, GREY, CAP)
+# three grooves along the grip's top face
+TOPF = G0 @ gmat((0.019, 0.0503, 0), (1, -0.13, 0), (0, 0, 1))
+for k in range(3):
+    slab(f"LeverGroove{k}", [rrect(0.004, -0.0045 + k * 0.0045, 0.028, 0.0008, 0.0003, 2)], -0.0002, 0.0004, 0.0001, BLACK,
+         TOPF @ gmat((0, 0, 0), (1, 0, 0), (0, 0, -1)))
 
 # =================================================================================================================
 # THE STEERING WHEEL — round its own centre, facing local +Z. 194 mm across, a 9.5 mm rim; four flat spokes at
@@ -576,7 +610,8 @@ top_sticker(X(230), X(815), -0.11, 0.02)
 # lean the face back (everything built on the upright front plane)
 FACE_PARTS = ("Bezel", "ClusterFrame", "ScreenFrame", "ClusterWalls", "ScreenWalls", "CheekPill", "CheekPillSplit", "CheekButton",
               "ColumnShroud", "VentSlat", "VentBack", "ResetButton", "ResetChevron", "ResetRib", "KeyLock", "KeyBarrel",
-              "KeyHead", "StripPrint", "ClusterFace", "ClusterGlass", "ClusterBack", "ScreenFilm", "ScreenGlass")
+              # the bow and its grooves lean with the lock (they were left upright: a bent key)
+              "KeyHead", "KeyBow", "KeyGroove", "StripPrint", "ClusterFace", "ClusterGlass", "ClusterBack", "ScreenFilm", "ScreenGlass")
 TILT = (Matrix.Translation((0, FACE_PIVOT_Y, ZF)) @ Matrix.Rotation(math.radians(-FACE_TILT), 4, "X")
         @ Matrix.Translation((0, -FACE_PIVOT_Y, -ZF)))
 for ob in list(bpy.data.objects):
@@ -593,8 +628,8 @@ def starts(*pre): return [n for n in bpy.data.objects.keys() if n.startswith(pre
 
 join("Wheel", ["WheelRim"] + starts("WheelSpoke", "WheelHub"))
 join("WheelChromeLines", starts("WheelChrome"))
-join("Lever", ["LeverStick", "LeverBlock", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum"])
-join("ConsoleRight", starts("ConsoleFin", "ConsoleGate"))
+join("Lever", ["LeverStick", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum"])
+join("ConsoleRight", starts("ConsoleFin", "ConsoleGate", "ConsoleChannel"))
 join("BonnetLines", starts("BonnetLine", "BonnetRect"))
 join("SidePads", starts("SidePad"))
 join("LeverGrooves", starts("LeverGroove"))

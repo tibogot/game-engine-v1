@@ -1,30 +1,30 @@
 // THE SCREEN — the toy's lit road film, drawn by one TSL shader on a plane.
 //
-// The real toy shows a printed road scene, lit from behind through a frosted panel: orange
-// dashed lane lines, a green grid and green pines on the sides, a yellow car ahead. The road
-// wanders left and right; the player's red car (a sticker on its own plane, in front of the
-// film) is steered to stay on it.
+// The real film (front photo, close crop): a pale frosted grey, brighter in the middle, the red shell bleeding in
+// from the right; NO road surface — just cream dashed lines (two edges, a centre line) curving gently; a sparse green
+// ladder grid beside the road; soft blob trees; a big yellow sports car ahead, painted from behind and a little above.
+// The player's red car (the same painting, on a clear sticker in front of the film) is steered to stay on the road.
 //
-// The film is a pseudo-3D strip: a screen row v (0 = bottom, 1 = top) looks d(v) metres down
-// the road, at a lateral scale sc(v). The same maths runs here in JS (off-road test, the rival
-// car's position) and in the shader, so what you see is what the game tests.
+// The film is a pseudo-3D strip: a screen row v (0 = bottom, 1 = top) looks d(v) metres down the road, at a lateral
+// scale sc(v). The same maths runs here in JS (off-road test, the rival car's place) and in the shader.
 import * as THREE from "three";
-import { Fn, Loop, abs, exp, float, floor, fract, max, min, mix, sin, smoothstep, sqrt, step, uniform, uv, vec2, vec3 } from "three/tsl";
+import { Fn, Loop, abs, exp, float, floor, fract, max, min, mix, sin, smoothstep, step, texture, uniform, uv, vec2, vec3 } from "three/tsl";
 
 export const ROAD = {
-  L: 6, M: 8,       // d(v) = L v + M v²: 0 at the bottom, 14 at the top
-  A: 1.9,           // sc(v) = 1 / (1 + A v): the road narrows to a third at the top
-  K: 0.24,          // screen widths per road unit at the bottom
-  W: 1,             // road half width (3 lanes)
+  VH: 1.22,         // a true perspective: the horizon just above the top (v = VH), so the road narrows nearly to a
+  D0: 2.6,          //   point there (photos); a row v looks d = D0 v / (VH - v) down the road, scaled sc = (VH - v) / VH
+  K: 0.2,           // screen widths per road unit at the bottom: the road is 40 % of the screen wide there
+  W: 1,             // road half width (3 lanes: four lines)
   CAM: 0.5,         // the view follows half the road's wander: the bottom drifts, the car must follow
   CAR_V: 0.12,      // the player car's row
   ASPECT: 0.13 / 0.09,
+  CAR_W: 0.16,      // the cars' width on screen at the bottom row (photo: the red car ~16 % of the screen)
 };
 
-export const curve = (s) => 0.85 * Math.sin(0.21 * s) + 0.45 * Math.sin(0.47 * s + 1.3);
-export const depthAt = (v) => ROAD.L * v + ROAD.M * v * v;
-export const rowAt = (d) => (Math.sqrt(Math.max(ROAD.L * ROAD.L + 4 * ROAD.M * d, 0)) - ROAD.L) / (2 * ROAD.M);
-export const scaleAt = (v) => 1 / (1 + ROAD.A * v);
+export const curve = (s) => 0.55 * Math.sin(0.21 * s) + 0.3 * Math.sin(0.47 * s + 1.3);
+export const depthAt = (v) => (ROAD.D0 * v) / (ROAD.VH - v);
+export const rowAt = (d) => (ROAD.VH * d) / (d + ROAD.D0);
+export const scaleAt = (v) => (ROAD.VH - v) / ROAD.VH;
 
 // screen x (0..1) of a lateral road position X at row v, with the film scrolled to s
 export const screenX = (X, v, s) => 0.5 + (X - ROAD.CAM * curve(s)) * ROAD.K * scaleAt(v);
@@ -34,90 +34,146 @@ export function roadAtCar(s) {
   return { x: screenX(curve(s + depthAt(v)), v, s), half: ROAD.W * ROAD.K * scaleAt(v) };
 }
 
+// --- the cars on the film, from behind and a little above (the user's close photo of the screen): a soft bell — a
+// rounded cabin on a wider rounded base — with two darker bands (rear window, tail), blurred by the frosted panel.
+export function createCarSprite(body, band, light, blur = 5, long = false) {
+  const S = 256;
+  const src = document.createElement("canvas"); src.width = src.height = S;
+  const c = src.getContext("2d");
+  const R = (x, y, w, h, r, fill) => { c.fillStyle = fill; c.beginPath(); c.roundRect(x * S, y * S, w * S, h * S, r * S); c.fill(); };
+  c.shadowColor = body; c.shadowBlur = 18;   // the glow through the frost
+  if (long) {                               // the car ahead (front photo): seen more from above — a long rounded body,
+    R(0.14, 0.04, 0.72, 0.92, 0.28, body);  // the roof and rear window in its upper half, the tail lights at the bottom
+    c.shadowBlur = 0;
+    R(0.26, 0.14, 0.48, 0.18, 0.08, light); R(0.24, 0.36, 0.52, 0.16, 0.06, band);
+    R(0.2, 0.62, 0.6, 0.06, 0.03, light); R(0.18, 0.78, 0.64, 0.08, 0.04, band);
+  } else {
+  c.beginPath(); c.ellipse(0.5 * S, 0.7 * S, 0.47 * S, 0.27 * S, 0, 0, Math.PI * 2); c.fillStyle = body; c.fill();   // the wide rear
+  c.beginPath(); c.ellipse(0.5 * S, 0.36 * S, 0.3 * S, 0.3 * S, 0, 0, Math.PI * 2); c.fill();                              // the cabin / roof
+  R(0.12, 0.5, 0.76, 0.3, 0.1, body);       // flanks joining them
+  c.shadowBlur = 0;
+  R(0.32, 0.12, 0.36, 0.1, 0.05, light);    // roof light
+  R(0.28, 0.33, 0.44, 0.13, 0.06, band);    // rear window
+  R(0.14, 0.72, 0.72, 0.09, 0.045, band);   // tail band
+  R(0.12, 0.55, 0.76, 0.05, 0.025, light);  // deck light
+  }
+  const out = document.createElement("canvas"); out.width = out.height = S;
+  const o = out.getContext("2d");
+  o.filter = `blur(${blur}px)`; o.drawImage(src, 0, 0);
+  const tex = new THREE.CanvasTexture(out);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+// --- the trees on the film (photos): a painted pine — a ragged, layered silhouette, wider low down, a short trunk
+export function createTreeSprite() {
+  const W = 192, H = 256;
+  const src = document.createElement("canvas"); src.width = W; src.height = H;
+  const c = src.getContext("2d");
+  let seed = 7; const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+  c.fillStyle = "#48f0b4";
+  c.fillRect(W * 0.46, H * 0.82, W * 0.08, H * 0.16);                 // trunk
+  for (let k = 0; k < 5; k++) {                                        // five layers, wide at the bottom
+    const y0 = H * (0.88 - k * 0.15), y1 = y0 - H * 0.32, half = W * (0.5 - k * 0.07);
+    c.beginPath(); c.moveTo(W / 2 - half, y0);
+    for (let i = 1; i <= 8; i++) {                                     // ragged edge, up the left side to the tip
+      const t = i / 8; c.lineTo(W / 2 - half * (1 - t) * (0.8 + rnd() * 0.4), y0 - (y0 - y1) * t + (rnd() - 0.5) * H * 0.05);
+    }
+    for (let i = 7; i >= 0; i--) {                                     // and down the right
+      const t = i / 8; c.lineTo(W / 2 + half * (1 - t) * (0.8 + rnd() * 0.4), y0 - (y0 - y1) * t + (rnd() - 0.5) * H * 0.05);
+    }
+    c.closePath(); c.fill();
+  }
+  const out = document.createElement("canvas"); out.width = W; out.height = H;
+  const o = out.getContext("2d"); o.filter = "blur(5px)"; o.drawImage(src, 0, 0);
+  const tex = new THREE.CanvasTexture(out);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
 export function createScreen() {
   const uS = uniform(0);          // film scroll (road units)
   const uOn = uniform(0);         // backlight 0..1
-  const uFlash = uniform(0);      // off-road flash 0..1
-  const uRival = uniform(new THREE.Vector4(0.5, 2, 0.05, 0)); // x, v, size, visible
+  const uFlash = uniform(0);      // off-road: the bulb blinks (0..1)
+  const uRival = uniform(new THREE.Vector4(0.5, 2, 0.05, 0)); // x, v, width, visible
+  const treeTex = createTreeSprite();
+  const rivalTex = createCarSprite("#f4cf52", "#c08a1c", "#fff0b0", 4, true);
 
-  const { L, M, A, K, W, CAM, ASPECT } = ROAD;
-  const curveT = (s) => sin(s.mul(0.21)).mul(0.85).add(sin(s.mul(0.47).add(1.3)).mul(0.45));
+  const { VH, D0, K, W, CAM, ASPECT } = ROAD;
+  const curveT = (s) => sin(s.mul(0.21)).mul(0.55).add(sin(s.mul(0.47).add(1.3)).mul(0.3));
   const hash = (x) => fract(sin(x.mul(12.9898)).mul(43758.5453));
   // a bright core and a soft halo: light through film and a frosted panel
-  const glow = (dist, w) => exp(dist.div(w).pow2().negate()).add(exp(abs(dist).div(w.mul(5)).negate()).mul(0.22));
+  const glow = (dist, w) => exp(dist.div(w).pow2().negate()).add(exp(abs(dist).div(w.mul(4)).negate()).mul(0.15));
 
   const color = Fn(() => {
     const p = vec2(uv().x, uv().y.oneMinus());
     const v = p.y;
-    const sc = float(1).div(v.mul(A).add(1));
-    const d = v.mul(L).add(v.mul(v).mul(M));
+    const sc = float(VH).sub(v).div(VH);
+    const d = v.mul(D0).div(float(VH).sub(v));
     const s = uS;
     const camX = curveT(s).mul(CAM);
     const u = p.x.sub(0.5).div(sc.mul(K)).add(camX).sub(curveT(s.add(d))); // lateral, road units, 0 = centre
     const au = abs(u);
     const col = vec3(0).toVar();
 
-    // lane dividers and edges: orange dashes. The glow is measured on SCREEN (height units), across
-    // the line and along it to the dash, so a dash glows round its ends and the halo never bands.
-    const latS = sc.mul(K * ASPECT);                  // screen per road unit, across
-    const alongS = float(1).div(v.mul(2 * M).add(L)); // screen per road unit, along
+    // cream dashed lines: two edges and the centre. Glow measured on SCREEN, so a dash glows round its ends.
+    const latS = sc.mul(K * ASPECT);
+    const alongS = float(VH * D0).div(d.add(D0).pow2());   // screen height per road unit, along
     const dashGlow = (lat, phase, len, w) => {
-      const f = fract(s.add(d).mul(0.9).add(phase));
-      const along = max(abs(f.sub(len / 2)).sub(len / 2), 0).div(0.9).mul(alongS);
+      const f = fract(s.add(d).mul(0.8).add(phase));
+      const along = max(abs(f.sub(len / 2)).sub(len / 2), 0).div(0.8).mul(alongS);
       const r = vec2(lat.mul(latS), along).length();
       const ww = sc.mul(w);
-      return exp(r.div(ww).pow2().negate()).add(exp(r.div(ww.mul(4)).negate()).mul(0.2));
+      return exp(r.div(ww).pow2().negate()).add(exp(r.div(ww.mul(3)).negate()).mul(0.1));
     };
-    const lanes = dashGlow(abs(au.sub(W / 3)), 0, 0.5, 0.012);
-    const edges = dashGlow(abs(au.sub(W)), 0.3, 0.62, 0.012);
-    col.addAssign(vec3(1.0, 0.6, 0.12).mul(lanes.add(edges.mul(0.9))));
+    const lines = dashGlow(abs(au.sub(W / 3)), 0, 0.5, 0.013).add(dashGlow(abs(au.sub(W)), 0.25, 0.5, 0.014));
+    col.addAssign(vec3(1.0, 0.82, 0.5).mul(lines));
 
-    // green grid beside the road, fading outwards
-    const off = au.sub(W + 0.18);
-    const outside = smoothstep(0.0, 0.12, off).mul(smoothstep(4.5, 1.5, off));
-    const gz = fract(s.add(d).mul(0.3));
-    const gridH = glow(min(gz, gz.oneMinus()).div(0.3), float(0.05));
-    const gx = fract(off.div(1.1));
-    const gridV = glow(min(gx, gx.oneMinus()).mul(1.1), float(0.04));
-    col.addAssign(vec3(0.15, 0.95, 0.45).mul(gridH.add(gridV)).mul(outside).mul(0.38));
+    // the green ladder grid: two rails beside the road (left), rungs between; a few rungs on the right
+    // the green grid: a faint perspective grid filling both sides beyond the road (photos), fading outwards
+    const off = au.sub(W + 0.25);
+    const side = smoothstep(0.0, 0.15, off).mul(smoothstep(3.2, 0.8, off));
+    const gz = fract(s.add(d).mul(0.5));
+    const rungs = exp(min(gz, gz.oneMinus()).div(0.5).mul(alongS).div(sc.mul(0.006).max(0.0015)).pow2().negate());
+    const gx = fract(off.div(0.7));
+    const rails = exp(min(gx, gx.oneMinus()).mul(0.7).mul(latS).div(sc.mul(0.006)).pow2().negate());
+    col.addAssign(vec3(0.2, 0.9, 0.6).mul(rungs.add(rails).min(1.0)).mul(side).mul(0.26));
 
-    // pines, one every few metres, either side
-    const sp = 2.4;
+    // trees: soft green blobs (three overlapping circles), either side
+    const sp = 2.6;
     const base = floor(s.div(sp));
-    Loop(9, ({ i }) => {
+    Loop(7, ({ i }) => {
       const idx = base.add(float(i));
-      const t = idx.mul(sp).add(hash(idx).mul(0.9));
+      const t = idx.mul(sp).add(hash(idx).mul(1.2));
       const dT = t.sub(s);
-      const vT = sqrt(max(dT.mul(4 * M).add(L * L), 0)).sub(L).div(2 * M);
-      const scT = float(1).div(vT.mul(A).add(1));
-      const side = step(0.5, hash(idx.add(7.3))).mul(2).sub(1);
-      const X = curveT(t).add(side.mul(hash(idx.add(2.1)).mul(0.8).add(W + 0.75)));
+      const vT = float(VH).mul(dT).div(dT.add(D0));
+      const scT = float(VH).sub(vT).div(VH);
+      const tside = step(0.5, hash(idx.add(7.3))).mul(2).sub(1);
+      const X = curveT(t).add(tside.mul(hash(idx.add(2.1)).mul(1.2).add(W + 0.7)));
       const xs = X.sub(camX).mul(K).mul(scT).add(0.5);
-      const size = scT.mul(0.12);
-      const q = vec2(p.x.sub(xs).mul(ASPECT), v.sub(vT)).div(size);
-      const tri = max(abs(q.x).sub(q.y.oneMinus().add(0.6).mul(0.42)), max(q.y.negate().add(0.25), q.y.sub(1.6)));
-      const trunk = max(abs(q.x).sub(0.08), max(q.y.negate(), q.y.sub(0.3)));
-      const dd = min(tri, trunk);
-      const lit = smoothstep(0.1, 0.0, dd).add(exp(max(dd, 0).mul(-3)).mul(0.18));
-      col.addAssign(vec3(0.2, 1.0, 0.5).mul(lit).mul(step(-1.0, dT)));
+      const tw = scT.mul(0.22), th = tw.mul(ASPECT * 1.33);          // the sprite: 192 x 256
+      const tuv = vec2(p.x.sub(xs).div(tw).mul(tside).add(0.5), v.sub(vT).div(th));   // mirrored on one side
+      const tin = step(0, tuv.x).mul(step(tuv.x, 1)).mul(step(0, tuv.y)).mul(step(tuv.y, 1));
+      const lit = texture(treeTex, tuv).a.mul(tin).mul(0.85);
+      col.addAssign(vec3(0.15, 0.85, 0.55).mul(lit).mul(step(-1.0, dT)));
     });
 
-    // the yellow car ahead (placed by the game, uRival)
-    const rq = vec2(p.x.sub(uRival.x).mul(ASPECT), v.sub(uRival.y)).div(uRival.z);
-    const body = max(abs(rq.x).sub(0.5), abs(rq.y.sub(0.7)).sub(0.7));
-    const glass = max(abs(rq.x).sub(0.32), abs(rq.y.sub(0.95)).sub(0.18));
-    const rd = max(body, glass.negate());
-    const rlit = smoothstep(0.12, 0.0, rd).add(exp(max(body, 0).mul(-3)).mul(0.25));
-    col.addAssign(vec3(1.0, 0.82, 0.2).mul(rlit).mul(uRival.w));
+    // the frosted backlight: pale grey, brighter up the middle, the red shell bleeding in from the right
+    const c = p.sub(vec2(0.45, 0.6)).mul(vec2(1.0, 1.1));
+    const vig = float(1).sub(c.dot(c).mul(1.3)).clamp(0.35, 1);
+    const back = mix(vec3(0.5, 0.49, 0.47), vec3(0.6, 0.2, 0.19), smoothstep(0.62, 1.0, p.x).mul(0.6));   // warm pale grey (photos)
+    const film = back.mul(vig).add(col.mul(1.05)).toVar();
 
-    // the frosted backlight: a pale grey film, brighter in the middle
-    const c = p.sub(0.5).mul(vec2(1.0, 1.25));
-    const vig = float(1).sub(c.dot(c).mul(1.6)).clamp(0.25, 1);
-    // the film is lit from inside the red shell: pale pink-grey, the red bleeding in from the right
-    const back = mix(vec3(0.33, 0.3, 0.3), vec3(0.42, 0.1, 0.08), smoothstep(0.55, 1.0, p.x).mul(0.55));
-    const lit = back.mul(vig).add(col.mul(1.35));
-    const on = mix(vec3(0.025, 0.028, 0.027), lit, uOn);
-    return mix(on, vec3(1.5, 1.45, 1.32), uFlash);
+    // the yellow car ahead (placed by the game, uRival: x centre, v bottom, width): painted on the film
+    const rw = uRival.z.mul(1.05), rh = uRival.z.mul(ASPECT * 1.4);   // seen more from above: a little longer
+    const ruv = vec2(p.x.sub(uRival.x).div(rw).add(0.5), v.sub(uRival.y).div(rh));
+    const inside = step(0, ruv.x).mul(step(ruv.x, 1)).mul(step(0, ruv.y)).mul(step(ruv.y, 1)).mul(uRival.w);
+    const car = texture(rivalTex, ruv);
+    const a = car.a.mul(inside);
+    film.assign(mix(film, car.rgb.mul(vig.mul(0.3).add(0.85)), a.mul(0.9)));
+
+    const on = mix(vec3(0.025, 0.028, 0.027), film, uOn.mul(float(1).sub(uFlash.mul(0.65))));
+    return on;
   });
 
   const material = new THREE.MeshBasicNodeMaterial();
