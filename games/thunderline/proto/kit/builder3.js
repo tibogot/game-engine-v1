@@ -633,7 +633,10 @@ async function runPrediction() {
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of b.rings) {
       const f = deckFrame(r, hw);
-      const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; // a twist: its roll axis
+      // the line 0.7 m above the deck, AS THE DRIVE PAGE'S (testTrack.layoutFromPlacements) — on a twist its
+      // roll axis. (On the deck itself, the autopilot's touchdown on White 3's bowl came out wrong: the test
+      // lap fell there while the drive page's autopilot landed it perfect, 2026-10-22.)
+      const Pr = f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7);
       ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
     }
   }
@@ -2691,7 +2694,7 @@ window.__b3 = {
   startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
   refitLandings, get problems2() { return problems; },
   selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); },
-  get tutorial() { return tutorial; },
+  get tutorial() { return tutorial; }, trackThumb,
   selectMany(uids) { sel = uids.at(-1); selSet = new Set(uids); refreshSelection(); renderStatus(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },

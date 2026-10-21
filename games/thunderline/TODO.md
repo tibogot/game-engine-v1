@@ -125,9 +125,26 @@ this is just the list. Newest decisions at the top of each section. Last updated
       finish); it lights the tab / card / button to use (data-cat / data-base on the dock) and advances by
       itself when the track shows the step done. "Tutorial" in the toolbar (on a NEW track: yours is
       untouched); offered by itself the first time the builder opens on an empty track. Played through
-      by a script: all 10 steps advanced, "That's the builder", no console errors. NEXT: the stunt
-      lessons (short tracks in the menu, one trick each: land flat, air roll onto a tilted landing, the
-      bowl / flip ramp, catch tube, wall hole, sky loop).
+      by a script: all 10 steps advanced, "That's the builder", no console errors.
+- [x] **WHITE TIER RE-CHECKED** (2026-10-22, after precision landings + "perfect needs 4 wheels"): 1, 2,
+      4, 5 fine (perfect landings, laps within 0.2 s of their author times). White 3 FELL in the
+      builder's test lap at the bowl (the drive page's autopilot finished it, 41.38 s, perfect): the
+      builder's ride line lay ON the deck, the drive page's 0.7 m above it — the autopilot's touchdown
+      on the bowl's curved face came out wrong. builder3 ride now = the drive page's (P + U·(pivot ??
+      0.7)). White 3: 39.32 s, both landings perfect (author time 42.08 kept).
+- [x] **STUNT LESSONS** (user, 2026-10-22): campaign/lessons.json (built in the builder by script, each
+      with a real author time), a "Lessons" tab in the menu (first), passed ✓ remembered
+      (library.lessons). The drive page shows the lesson's CARD first (paused; Enter / Go, I shows it
+      again) and judges the goal at the finish (perfect landings needed + the finish): "Lesson passed ✓
+      · Next" or "Not yet" with why. 1 Land flat, 2 Air roll (roll kicker → tilted landing), 3 Upside
+      down (half loop + roll), 4 The bowl (spin 180°), 5 Precision (wall · hole + fitted landing), 6
+      Pads and loops (boost, jump pad → landing, sky loop). All six PASSED by the drive page's
+      autopilot. NOT DONE: a FLIP RAMP lesson — the builder can't make a working jump off the flip
+      ramp yet (the test car falls off it, its landing lands on the run-up; needs a hand-made layout and
+      a look at the piece). Lesson thumbnails are weak (jumps read flat; lesson 3's shows the lap line).
+- [x] **EVERY PAGE OPENS SILENT** (user, 2026-10-22): the drive's speaker / M turns sound on for that
+      page only (not remembered — it came back on in every later page and test run); the menu's dead
+      Sound setting removed (a note under Volume).
 - **MORE OBSTACLES** (user, 2026-10-21: "poles, boost decals … many others"; agreed order):
       1. [x] BOOST PAD (Obstacles tab): a decal on ANY piece, 8 × 12 m, the Boost 32 chevrons and push
          (carRules BOOST 2 s; pads are { inv, hx, hz } boxes — obstacles.js boostZones, in the drive page

@@ -280,7 +280,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   const engine = createEngineModel();
   const engineType = prefs.engine ?? "gen6";
   const engineSound = (isLoopEngine(engineType) ? createEngineLoops : createEngineSound)({ type: engineType, volume: prefs.volume ?? 0.7 });
-  let engineMuted = !(prefs.sound ?? false);
+  // EVERY PAGE OPENS SILENT (user, 2026-10-22: "disable the sound by default"; 2026-10-21: "when we open a
+  // page the sound should be disabled, any time we click the icon it should work"): the icon turns it on
+  // for this page only — remembered, it came back on in every later page (and every test run)
+  let engineMuted = true;
   engineSound.setMuted(engineMuted);
   const sfx = createSfx(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7 });
   sfx.setMuted(engineMuted);
@@ -302,7 +305,6 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     sfx.setMuted(engineMuted);
     sfxRec.setMuted(engineMuted);
     if (on) { engineSound.unlock(); if (S) engineSound.resume(); }
-    settings.set({ sound: on });
     $("snd").innerHTML = SND_ICON(on);
     $("snd").classList.toggle("on", on);
   }

@@ -139,6 +139,18 @@ async function campaignTier(tier) {
   return campaignFiles.get(tier);
 }
 const CAMPAIGN_BEST = "thunderline.campaign.v1";
+/**
+ * THE STUNT LESSONS (user, 2026-10-22): campaign/lessons.json, the same record shape as a tier plus a
+ * `lesson` ({ how: the card's text, goal: { perfect: n } — perfect landings needed — and the finish }).
+ * Passed lessons are remembered per id.
+ */
+const LESSONS_PASSED = "thunderline.lessons.v1";
+const readPassed = () => { try { return JSON.parse(localStorage.getItem(LESSONS_PASSED)) ?? {}; } catch { return {}; } };
+export const lessons = {
+  async list() { return (await campaignTier("lessons"))?.tracks ?? []; },
+  passed(id) { return !!readPassed()[id]; },
+  markPassed(id) { const all = readPassed(); all[id] = true; try { localStorage.setItem(LESSONS_PASSED, JSON.stringify(all)); } catch {} },
+};
 const readCampaignBests = () => { try { return JSON.parse(localStorage.getItem(CAMPAIGN_BEST)) ?? {}; } catch { return {}; } };
 export const campaign = {
   /** every tier: { tier, tracks } (tracks [] when the tier has no file yet) */
@@ -146,7 +158,7 @@ export const campaign = {
     return Promise.all(CAMPAIGN_TIERS.map(async (tier) => ({ tier, tracks: (await campaignTier(tier))?.tracks ?? [] })));
   },
   async get(id) {
-    const tier = CAMPAIGN_TIERS.find((t) => id?.startsWith(`${t}-`));
+    const tier = [...CAMPAIGN_TIERS, "lessons"].find((t) => id?.startsWith(`${t}-`));
     return tier ? (await campaignTier(tier))?.tracks.find((t) => t.id === id) ?? null : null;
   },
   /** the best run on this campaign track as it is now, or null */

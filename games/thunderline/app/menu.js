@@ -1,7 +1,7 @@
 // THE MENU (DESIGN.md: the four modes). One page, screens by hash so the other pages can send the
 // player back to the right one: #home, #play (Stunt tracks: campaign + my tracks), #build (the
 // library: new, open, drive, rename, duplicate, delete), #settings.
-import { library, campaign, settings, currentBest, builderUrl, driveUrl, campaignUrl } from "./library.js";
+import { library, campaign, lessons, settings, currentBest, builderUrl, driveUrl, campaignUrl } from "./library.js";
 import { decodeTrack } from "./trackCode.js";
 
 const $ = (id) => document.getElementById(id);
@@ -14,7 +14,8 @@ const fmt = (t) => {
 const MEDAL = { author: "Author", gold: "Gold", silver: "Silver", bronze: "Bronze" };
 const TIERS = [["White", "var(--white)"], ["Green", "var(--green)"], ["Blue", "var(--blue)"], ["Red", "var(--red)"], ["Black", "var(--black)"]];
 
-let playTab = "campaign";
+// (the tab you were on: a lesson sends you back to the lessons)
+let playTab = (() => { try { return sessionStorage.getItem("thunderline.playTab") ?? "campaign"; } catch { return "campaign"; } })();
 
 function crumbs(list) {
   $("crumbs").innerHTML = list.map(([label, href]) => (href ? `<a href="${href}">${label}</a>` : `<span>${label}</span>`)).join(`<span class="sep">/</span>`);
@@ -69,9 +70,11 @@ function trackCard(rec, { actions, best = currentBest(rec), badge: tag }) {
 
 // ---------- Stunt tracks: campaign + my tracks ----------
 let tiers = null; // campaign files, loaded once (campaign/<tier>.json)
+let lessonList = null; // the stunt lessons (campaign/lessons.json), loaded once
 function play() {
   crumbs([["Stunt tracks", null]]);
   if (playTab === "campaign" && !tiers) { campaign.tiers().then((t) => { tiers = t; if ((location.hash || "#home") === "#play") play(); }); }
+  if (playTab === "lessons" && !lessonList) { lessons.list().then((l) => { lessonList = l; if ((location.hash || "#home") === "#play") play(); }); }
   const mine = library.list().filter((r) => r.track?.authorTime);
   const tierBlock = ([name, col], i) => {
     const tracks = tiers?.[i]?.tracks ?? [];
@@ -82,15 +85,18 @@ function play() {
         : `<div class="card slot cut"><div class="pic none">${name} ${k + 1}</div><div class="body"><div class="name">Coming soon</div><div class="meta"><span>—</span></div></div></div>`).join("")
     }</div></div>`;
   };
-  const body = playTab === "campaign"
+  const body = playTab === "lessons"
+    ? `<p class="note">Stunt lessons: one trick each, a short track. Read the card, drive it, pass the goal — then the campaign.</p>` +
+      (lessonList ? `<div class="grid">${lessonList.map((r, k) => trackCard(r, { actions: null, best: campaign.best(r), badge: lessons.passed(r.id) ? "Passed ✓" : `Lesson ${k + 1}` })).join("")}</div>` : `<p class="note">Loading…</p>`)
+    : playTab === "campaign"
     ? `<p class="note">The campaign: five tiers of five tracks, White to Black. Beat the author time for the author medal; gold ×1.06, silver ×1.2, bronze ×1.5.</p>` +
       (tiers ? TIERS.map(tierBlock).join("") : `<p class="note">Loading…</p>`)
     : (mine.length
       ? `<p class="note">Your validated tracks (driven to the finish in the builder). Medals: author, gold ×1.06, silver ×1.2, bronze ×1.5.</p><div class="grid">${mine.map((r) => trackCard(r, { actions: null })).join("")}</div>`
       : `<p class="note">No validated track yet. Build one, and let the builder's test lap finish: its time becomes the author time.</p><div class="grid"><a class="card new cut" href="#build">Build a track ▶</a></div>`);
-  $("screen").innerHTML = `<div class="tabs"><button data-tab="campaign" class="${playTab === "campaign" ? "on" : ""}">Campaign</button><button data-tab="mine" class="${playTab === "mine" ? "on" : ""}">My tracks <span style="color:var(--dim);font-size:14px">${mine.length}</span></button></div>${body}`;
-  for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => { playTab = b.dataset.tab; play(); };
-  for (const c of document.querySelectorAll(".card[data-id]")) c.onclick = () => { location.href = playTab === "campaign" ? campaignUrl(c.dataset.id) : driveUrl(c.dataset.id); };
+  $("screen").innerHTML = `<div class="tabs"><button data-tab="lessons" class="${playTab === "lessons" ? "on" : ""}">Lessons</button><button data-tab="campaign" class="${playTab === "campaign" ? "on" : ""}">Campaign</button><button data-tab="mine" class="${playTab === "mine" ? "on" : ""}">My tracks <span style="color:var(--dim);font-size:14px">${mine.length}</span></button></div>${body}`;
+  for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => { playTab = b.dataset.tab; try { sessionStorage.setItem("thunderline.playTab", playTab); } catch {} play(); };
+  for (const c of document.querySelectorAll(".card[data-id]")) c.onclick = () => { location.href = playTab === "mine" ? driveUrl(c.dataset.id) : campaignUrl(c.dataset.id); };
   foot(`<span><kbd>Esc</kbd> back</span>`);
 }
 
@@ -137,8 +143,7 @@ function settingsScreen() {
   const row = (key, title, desc) => `<div class="set cut"><div><div class="t">${title}</div><div class="d">${desc}</div></div><div class="toggle ${s[key] ? "on" : ""}" data-key="${key}"></div></div>`;
   $("screen").innerHTML = `<div class="settings">
     ${row("ghost", "Ghost", "Race your best run on every track (G toggles it while driving).")}
-    ${row("sound", "Sound", "The engine, the tyres, the wind. M or the speaker button mutes while driving.")}
-    <div class="set cut"><div><div class="t">Volume</div><div class="d">The engine's loudness.</div></div><input type="range" id="s-vol" min="0" max="100" value="${Math.round(s.volume * 100)}" style="width:220px;accent-color:#3fd2ff" /></div>
+    <div class="set cut"><div><div class="t">Volume</div><div class="d">The engine's loudness. Every drive starts silent: <b>M</b> or the speaker button turns the sound on.</div></div><input type="range" id="s-vol" min="0" max="100" value="${Math.round(s.volume * 100)}" style="width:220px;accent-color:#3fd2ff" /></div>
     <div class="set cut"><div><div class="t">Car</div><div class="d">The new Thunderline car, or the Lotus (the dev car). <a href="./proto/carview.html" style="color:var(--bolt)">See them side by side ▶</a></div></div>
       <div style="display:flex;gap:4px">${[["thunder", "New car"], ["lotus", "Lotus"]].map(([k, n]) => `<button class="carb" data-c="${k}" style="background:var(--panel2);border:1px solid ${s.car === k ? "var(--bolt)" : "var(--line)"};color:${s.car === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
     <div class="set cut"><div><div class="t">Engine</div><div class="d">Which engine you hear. <a href="./proto/engine-lab.html" style="color:var(--bolt)">Listen in the engine lab ▶</a></div></div>
