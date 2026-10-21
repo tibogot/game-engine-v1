@@ -14,6 +14,7 @@
 // Who the selection is (portrait, men, state, cover) is the selection card's
 // (unitBar.js). Per frame: only classes, a CSS variable and text on change.
 import { HOTKEY, hasIcon, iconStyle } from "./icons.js";
+import { hasRendered, renderedStyle } from "./iconAtlas.js";
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { costOf, hasCost } from "../algEconomy.js";
 import { iconSvg } from "./resourceIcons.js";
@@ -36,7 +37,12 @@ function costText(c) {
 
 const CSS = `
 #rts-cmd-card { height: 100%; display: flex; flex-direction: column; gap: 6px; font-family: var(--hud-sans); color: var(--hud-text); }
-#rts-cmd-card .cc-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+/* COMPANY OF HEROES' CARD (2026-10-22, you: "look how company of heroes does it"): a FIXED 5 × 3 grid always drawn —
+   the empty slots dark recessed cells — retreat always top-right on red, the build page bottom-right; framed tiles,
+   the hotkey small at the bottom-right. */
+#rts-cmd-card .cc-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+#rts-cmd-card .cc-empty { aspect-ratio: 1; border-radius: 3px; background: repeating-linear-gradient(135deg, #14150f 0 3px, #191a13 3px 6px);
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.85), inset 0 0 0 1px #262820; }
 #rts-cmd-card .cc-b {
   position: relative; height: 46px; cursor: pointer; overflow: hidden; padding: 0;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
@@ -46,6 +52,24 @@ const CSS = `
 #rts-cmd-card .cc-b:hover { border-color: var(--hud-brass); background: linear-gradient(#343929, #262a20); }
 #rts-cmd-card .cc-b .ic { position: absolute; left: 50%; top: 4px; width: 24px; height: 24px; transform: translateX(-50%);
   background: #d9c58f; -webkit-mask: center/contain no-repeat; mask: center/contain no-repeat; }
+/* SQUARE BUTTONS, PICTURES ONLY (2026-10-22, you: "make them squares, the image fills it, no text — the name in the
+   hover info"): a RENDERED icon (iconAtlas.js) fills its button; the hotkey and the cost stay, on a dark backing. */
+#rts-cmd-card .cc-b { height: auto; aspect-ratio: 1; }
+#rts-cmd-card .cc-b.sq { border: 1px solid #5d5440; box-shadow: inset 0 1px 0 rgba(255,235,190,0.18), inset 0 -2px 3px rgba(0,0,0,0.6), 0 1px 2px rgba(0,0,0,0.7); }
+#rts-cmd-card .cc-b.sq:hover { border-color: var(--hud-brass); }
+#rts-cmd-card .cc-b.sq .ri { inset: 2px; border-radius: 2px; }
+/* colour-coded orders: retreat on red, the attack orders warm */
+#rts-cmd-card .cc-b.c-red { border-color: #9a3a2c; }
+#rts-cmd-card .cc-b.c-red .ri { background-color: #6e2018; background-blend-mode: luminosity; }
+#rts-cmd-card .cc-b.c-red::before { content: ""; position: absolute; inset: 2px; background: rgba(170,40,24,0.55); mix-blend-mode: color; z-index: 0; pointer-events: none; }
+#rts-cmd-card .cc-b.c-warm::before { content: ""; position: absolute; inset: 2px; background: rgba(190,110,30,0.35); mix-blend-mode: overlay; pointer-events: none; }
+#rts-cmd-card .cc-b .ri { position: absolute; inset: 0; background-repeat: no-repeat; }
+#rts-cmd-card .cc-b.sq .lb { display: none; }
+#rts-cmd-card .cc-b.sq .hk, #rts-cmd-card .cc-b.sq .co { z-index: 1; background: rgba(10,9,6,0.72); border-radius: 3px; padding: 0 3px; }
+#rts-cmd-card .cc-b.sq .hk { left: auto; top: auto; right: 2px; bottom: 2px; color: #e8d9ae; font-size: 9px; }
+#rts-cmd-card .cc-b.sq .co { right: 2px; top: 2px; }
+#rts-cmd-card .cc-b .pic { inset: 0 0 15px 0; }
+#rts-cmd-card .cc-b.poor .ri { opacity: 0.45; }
 #rts-cmd-card .cc-b .pic { position: absolute; inset: 0 0 13px 0; background: center 22%/cover no-repeat; }
 #rts-cmd-card .cc-b .lb { position: relative; padding: 0 2px 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 #rts-cmd-card .cc-b .hk { position: absolute; left: 3px; top: 2px; font: 700 9px var(--hud-mono); color: var(--hud-dim); }
@@ -120,6 +144,8 @@ export function createCommandCard({
   const root = document.createElement("div");
   root.id = "rts-cmd-card";
   mount.appendChild(root);
+  // the bottom HUD's height for what sits over it (the doctrine panel): the square buttons made it taller
+  { const box = mount.closest?.(".block") ?? mount; new ResizeObserver(() => document.documentElement.style.setProperty("--alg-hud-h", `${Math.round(window.innerHeight - box.getBoundingClientRect().top)}px`)).observe(box); }
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -142,9 +168,13 @@ export function createCommandCard({
     const el = document.createElement("button");
     el.className = `cc-b${verb ? " verb" : ""}${tier ? " tier" : ""}${locked ? " locked" : ""}${ready ? " ready" : ""}`;
     const hk = HOTKEY[key];
-    el.innerHTML = `${pic ? `<span class="pic" style="background-image:url(${pic})"></span>` : icon && hasIcon(icon) ? `<span class="ic" style="${iconStyle(icon)}"></span>` : ""}`
+    el.innerHTML = `${pic ? `<span class="pic" style="background-image:url(${pic})"></span>` : icon && hasRendered(icon) ? `<span class="ri" style="${renderedStyle(icon)}"></span>` : icon && hasIcon(icon) ? `<span class="ic" style="${iconStyle(icon)}"></span>` : ""}`
       + `${hk ? `<span class="hk">${hk}</span>` : ""}${costTag(cost)}<span class="lb">${esc(label)}</span>`;
+    el.dataset.key = key;
     const b = { el, kind, key, cost, label, info, locked, run };
+    if (key === "retreat") el.classList.add("c-red");
+    else if (key === "attackMove" || key === "radioBarrage" || key === "mortarBarrage") el.classList.add("c-warm");
+    if (!pic && icon && hasRendered(icon)) el.classList.add("sq");
     el.addEventListener("click", () => {
       // A LOCKED unit: to where it is unlocked (the game's `onLocked`: the post).
       if (b.locked) { onLocked?.(b); return; }
@@ -169,6 +199,14 @@ export function createCommandCard({
     tip.style.top = `${panel.top - 10 - tip.offsetHeight - 6}px`;
   }
   function hideTip() { tip.style.display = "none"; }
+
+  /** CoH's fixed card: retreat top-right, the build page / back bottom-right, the empty slots drawn to 5 × 3. */
+  const FIXED = { retreat: [5, 1], buildMenu: [5, 3], buildBack: [5, 3] };
+  function layout(grid) {
+    for (const el of grid.children) { const p = FIXED[el.dataset.key]; if (p) { el.style.gridColumn = p[0]; el.style.gridRow = p[1]; } }
+    const n = grid.children.length, total = Math.max(15, Math.ceil(n / 5) * 5);
+    for (let i = n; i < total; i++) { const e = document.createElement("div"); e.className = "cc-empty"; grid.appendChild(e); }
+  }
 
   // ── Faces ──────────────────────────────────────────────────────────────────
   function abilityButtons(selected, into) {
@@ -211,6 +249,7 @@ export function createCommandCard({
         info: builds.some((b) => b.key === "sangar") ? t("Les ouvrages que ce groupe peut bâtir : sangars, écrans d'embuscade, caches d'armes, refuges.") : t("Les ouvrages que ce groupe peut bâtir : sacs de sable, barbelés, nids, fosses…"),
         run: () => { buildPage = true; render(selRef); } }));
     }
+    layout(grid);
     root.appendChild(grid);
     refresh();
   }
@@ -236,6 +275,7 @@ export function createCommandCard({
     }
     // A producer's own ABILITIES after its production (the post: the air strike call-in).
     abilityButtons([s], grid);
+    layout(grid);
     root.appendChild(grid);
     queueSig = "";
     refresh();
@@ -248,6 +288,7 @@ export function createCommandCard({
     grid.className = "cc-grid";
     grid.appendChild(button({ kind: "act", key: "focus", label: t("Caméra"), icon: "focus", info: t("Centrer la caméra dessus."), run: onFocus }));
     abilityButtons([s], grid);
+    layout(grid);
     root.appendChild(grid);
     const st = s.constructing ? t("En construction") : (s.deploy ?? 1) < 1 ? t("Réglage") : s.range ? t("Défensif · {m} m", { m: Math.round(s.range) }) : "";
     if (st) { const h = document.createElement("div"); h.className = "cc-hint"; h.textContent = st; root.appendChild(h); }

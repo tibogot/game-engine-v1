@@ -436,7 +436,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   // ── The strip ─────────────────────────────────────────────────────────────
   const style = document.createElement("style");
   style.textContent = `
-#alg-doc { position: fixed; right: calc(var(--alg-dev-w, 0px) + 8px); bottom: 190px; z-index: 55; width: 214px;
+#alg-doc { position: fixed; right: calc(var(--alg-dev-w, 0px) + 8px); bottom: calc(var(--alg-hud-h, 182px) + 8px); z-index: 55; width: 214px;   /* (over the bottom HUD, its height measured: commandCard --alg-hud-h) */
   padding: 8px 8px 9px; background: var(--hud-bg, rgba(16,14,10,0.9)); border: 1px solid rgba(201,165,74,0.55);
   border-radius: var(--hud-radius, 3px); font-family: var(--hud-sans, sans-serif); color: var(--hud-text, #e8dcc4); }
 #alg-doc[hidden] { display: none; }

@@ -20,6 +20,7 @@ import * as P from "./algSangar.js";
 const { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } = P;
 import { kitView } from "./showroom.js";
 import { houseMesh, loadHouses } from "./algHouse.js";
+import { ICON } from "./ui/icons.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -245,6 +246,32 @@ export async function startIconStudio() {
     row.append(sizes);
     grid.append(card);
   }
-  status.textContent = "Five icons — the style test.";
-  return { renderer, made, png: (name) => out[name]?.toDataURL("image/png") ?? null, names: Object.keys(out) };
+  status.textContent = `${Object.keys(out).length} icons rendered.`;
+
+  /**
+   * THE ATLAS (the game's command card: ui/iconAtlas.js): every key the HUD has (ui/icons.js ICON, not the veterancy
+   * chevrons and alert marks) as a 96 px tile — its RENDER where one is made (RENDER_FOR: the game key → the render),
+   * else its silhouette as a brass SYMBOL on the same tile (the orders; the abilities still without a model).
+   */
+  const RENDER_FOR = { cutWire: "cutters", flnMine: "mine", flnWire: "mine", flnDetonate: "detonator", reinforce: "helmet", tier: "kepi", sweepMines: "detector" };
+  async function atlas(size = 96, cols = 8) {
+    const keys = Object.keys(ICON).filter((k) => !/^(vet\d|alert)/.test(k));
+    const tiles = [];
+    for (const k of keys) {
+      const r = out[RENDER_FOR[k] ?? k];
+      tiles.push(down(r && !ICONS.find((i) => i.name === (RENDER_FOR[k] ?? k))?.symbol ? r : await symbolTile(ICON[k]), size));
+    }
+    const rows = Math.ceil(tiles.length / cols);
+    const c = document.createElement("canvas"); c.width = cols * size; c.height = rows * size;
+    const x = c.getContext("2d");
+    tiles.forEach((t, i) => x.drawImage(t, (i % cols) * size, Math.floor(i / cols) * size));
+    return { keys, cols, rows, size, canvas: c };
+  }
+  /** Save the atlas (a download: alg-icons.webp) and give its index. */
+  async function saveAtlas() {
+    const A = await atlas();
+    const a = document.createElement("a"); a.download = "alg-icons.webp"; a.href = A.canvas.toDataURL("image/webp", 0.92); a.click();
+    return { keys: A.keys, cols: A.cols, rows: A.rows, size: A.size };
+  }
+  return { renderer, made, saveAtlas, png: (name) => out[name]?.toDataURL("image/png") ?? null, names: Object.keys(out) };
 }
