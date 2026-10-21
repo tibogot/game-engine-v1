@@ -186,7 +186,7 @@ export function createScreen() {
     const inside = step(0, ruv.x).mul(step(ruv.x, 1)).mul(step(0, ruv.y)).mul(step(ruv.y, 1)).mul(uRival.w);
     const car = texture(rivalTex, ruv);
     const a = car.a.mul(inside);
-    film.assign(mix(film, car.rgb.mul(vig.mul(0.3).add(0.85)), a.mul(0.9)));
+    film.assign(mix(film, car.rgb.mul(vig.mul(0.3).add(0.85)), a));   // solid paint: the road lines do not show through
 
     const unlit = film.mul(0.1).add(vec3(0.08, 0.08, 0.082));   // off: room light on the frosted panel, the film faint
     const on = mix(unlit, film, uOn.mul(float(1).sub(uFlash.mul(0.65))));
