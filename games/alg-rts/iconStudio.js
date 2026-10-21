@@ -16,9 +16,12 @@
 import * as THREE from "three";
 import { initGlbLoaderRenderer } from "../../v3/render/foliage/glbLoader.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
-import { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } from "./algSangar.js";
+import * as P from "./algSangar.js";
+const { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } = P;
 import { kitView } from "./showroom.js";
 import { houseMesh, loadHouses } from "./algHouse.js";
+import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
+import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
 const R = 512, OUT = 256;          // the render, the tile
 
@@ -79,12 +82,43 @@ const ICONS = [
     make: async () => { await loadMirador(); return kitView(miradorGeometry()); }, view: [-35, 12], crop: [0.62, 1.0], zoom: 0.72 },   // (the cabin and the top of its legs)
   { name: "mgNest", title: "MG nest", svg: "mgNest",
     // (FRAMED ON ITS GUN — the berm read as a pale disc at 48 px: the AA-52 over its ring of bags, the roof's edge behind)
-    make: async () => { await loadMgNest(); return kitView(mgNestGeometry()); }, view: [150, 14], focus: "Gun", focusR: 1.25 },   // (from the FRONT: the gun toward us over the bags — from behind the roof hid it)   // (low and close: the gun over its ring, the berm cut by the frame)
+    make: async () => { await loadMgNest(); return kitView(mgNestGeometry()); }, view: [150, 12], focus: "Gun", focusR: 0.85 },   // (from the FRONT: the gun toward us over the bags — from behind the roof hid it)   // (low and close: the gun over its ring, the berm cut by the frame)
   { name: "grenade", title: "Grenade", key: "G", svg: "grenade", view: [-24, 10], zoom: 0.82,
     // the Blender F1 (tools/blender/smallProps.py), baked like the buildings — the set's look
     make: async () => { await loadHouses("smallprops"); const m = houseMesh("grenade", "intact", 1); const o = m.children[0].levels[0].object.clone(); o.rotation.z = -0.3; return o; } },
   { name: "stop", title: "Stop (an order: a symbol)", key: "H", svg: "stop", symbol: true },
+  // ── THE ABILITIES' KIT (tools/blender/smallProps.py) ──
+  ...[["smoke", "Smoke", [-25, 14]], ["flare", "Flare", [-70, 10]], ["cutters", "Cut wire", [-20, 55]], ["mine", "Mine (FLN)", [-25, 32]],
+    ["helmet", "Reinforce (helmet)", [-25, 20]], ["kepi", "Tier (kepi)", [-30, 18]], ["jerrycan", "Fuel", [-35, 16]], ["ammobox", "Munitions", [-25, 40]],
+    ["detonator", "Detonate (FLN)", [-30, 20]], ["detector", "Sweep mines", [-60, 14]]]
+    .map(([p, title, view]) => ({ name: p, title, svg: p, view, zoom: 0.85,
+      make: async () => { await loadHouses("smallprops"); return houseMesh(p, "intact", 1).children[0].levels[0].object.clone(); } })),
+  // ── THE REST OF THE BUILDINGS (2026-10-22): the Blender pieces, each framed on what says what it is ──
+  ...[
+    ["wire", "Barbed wire", "BarbedWire", "barbedWire", { view: [-20, 14], zoom: 0.26, light: 3.2, glow: 1 }],   // (thin strands: close on the coil, more light, a brighter backdrop behind it)
+    ["mortarPit", "Mortar pit", "MortarPit", "mortarPit", { view: [120, 16], focus: "Gun", focusR: 1.0 }],   // (close on the tube: the weapon first)
+    ["searchlight", "Searchlight tower", "Searchlight", "searchlight", { view: [150, 8], focus: "Lamp", focusR: 2.6 }],
+    ["fortPoint", "Fortified point", "FortPoint", "fortPoint", { view: [-20, 34], focus: "SandbagFort", focusR: 3.6 }],   // (from behind, inside: the bags and the stores)
+    ["forwardPost", "Forward post", "ForwardPost", "forwardPost", { view: [-35, 30], focus: "RadioBags", focusR: 3.4 }],   // (the post under its tarp, not its 10 m mast)
+    ["aidStation", "Aid station", "AidStation", "aidStation", { view: [-40, 24], zoom: 0.7 }],
+    ["sangar", "Sangar (FLN)", "Sangar", "sangar", { view: [150, 22], zoom: 0.72 }],
+    ["armsCache", "Arms cache (FLN)", "ArmsCache", "armsCache", { view: [-35, 26], zoom: 0.72 }],
+    ["ambushScreen", "Ambush screen (FLN)", "AmbushScreen", "ambushScreen", { view: [150, 20], zoom: 0.6, plants: true }],
+    ["refuge", "Refuge (FLN)", "Refuge", "refuge", { view: [160, 18], zoom: 0.7, plants: true }],
+    ["infirmary", "Infirmary (FLN)", "Infirmary", "infirmary", { view: [-30, 26], zoom: 0.68 }],
+  ].map(([name, title, L, G, o]) => ({ name, title, svg: name, ...o,
+    make: async () => { await P[`load${L}`](); const g = P[`${G}Geometry`](); const m = kitView(g); if (g.userData.labMaterial) m.material = g.userData.labMaterial; return o.plants ? withPlants(m, g) : m; } })),
 ];
+
+/** A piece with its SCRUB (the game's plants — algSangar screenPlantSpots / refugePlantSpots), as the lab draws it. */
+function withPlants(m, g) {
+  const grp = new THREE.Group(); grp.add(m);
+  const pf = new PlacedFoliage({ scene: grp, lodDistances: [70, 140], shadowLods: 2 });
+  for (const k of ["broomCut", "juniperScrub"]) pf.setType(k, structuredClone(FOLIAGE_PRESETS[k]));
+  for (const p of g.userData.screenPlants ?? []) pf.add(p.kind, p.x, p.y, p.z, { rotY: p.rot, scale: p.scale, seed: p.seed });
+  grp.userData.pf = pf;
+  return grp;
+}
 
 export async function startIconStudio() {
   const renderer = new THREE.WebGPURenderer({ antialias: true, alpha: true });
@@ -131,6 +165,8 @@ export async function startIconStudio() {
     key.intensity = 3.2 * k; fill.intensity = 0.8 * k; rim.intensity = 2.4 * Math.sqrt(k);
     key.position.copy(at(-0.8, 1.0, 0.7)); fill.position.copy(at(1.0, 0.2, 0.5)); rim.position.copy(at(0.3, 0.8, -1.0));
     for (const l of [key, fill, rim]) l.target.position.copy(sph.center);
+    // (the plants: their foliage built and placed for this camera over a few frames)
+    if (obj.userData.pf) for (let k = 0; k < 30; k++) { obj.userData.pf.update(camera); await renderer.renderAsync(scene, camera); await new Promise((r) => setTimeout(r, 60)); }
     await renderer.renderAsync(scene, camera);
     const shot = document.createElement("canvas");
     shot.width = shot.height = R;
@@ -140,12 +176,12 @@ export async function startIconStudio() {
   }
 
   /** The house style: backdrop, shadow, outline, the object, contrast — at OUT px. */
-  function tile(shot) {
+  function tile(shot, ic = {}) {
     const c = document.createElement("canvas"); c.width = c.height = R;
     const x = c.getContext("2d");
     // the backdrop: dark warm, a soft glow behind the object, a vignette at the corners
     const g = x.createRadialGradient(R * 0.5, R * 0.42, R * 0.05, R * 0.5, R * 0.5, R * 0.75);
-    g.addColorStop(0, "#3a2e1f"); g.addColorStop(0.55, "#1d1610"); g.addColorStop(1, "#0a0806");
+    g.addColorStop(0, ic.glow ? "#6a5a40" : "#3a2e1f"); g.addColorStop(0.55, "#1d1610"); g.addColorStop(1, "#0a0806");
     x.fillStyle = g; x.fillRect(0, 0, R, R);
     if (shot) {
       // the OUTLINE: the object's alpha dilated (a ring of offset copies), filled near-black
@@ -188,12 +224,13 @@ export async function startIconStudio() {
   }
 
   const grid = document.getElementById("grid"), status = document.getElementById("status");
-  const out = {};
+  const out = {}, made = {};
   for (const ic of ICONS) {
     status.textContent = `Rendering ${ic.title}…`;
     let t;
     try {
-      t = ic.symbol ? await symbolTile(ic.svg) : tile(await renderObject(await ic.make(), ic));
+      if (ic.symbol) t = await symbolTile(ic.svg);
+      else { const o = await ic.make(); made[ic.name] = o.children.map((c) => c.name + ":" + c.type); t = tile(await renderObject(o, ic), ic); }
     } catch (e) { console.warn("[icons]", ic.name, e); continue; }
     out[ic.name] = t;
     const small = down(t, 48);
@@ -209,5 +246,5 @@ export async function startIconStudio() {
     grid.append(card);
   }
   status.textContent = "Five icons — the style test.";
-  return { renderer, png: (name) => out[name]?.toDataURL("image/png") ?? null, names: Object.keys(out) };
+  return { renderer, made, png: (name) => out[name]?.toDataURL("image/png") ?? null, names: Object.keys(out) };
 }

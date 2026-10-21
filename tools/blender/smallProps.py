@@ -23,6 +23,7 @@ from house import buildKit
 from bkit import B, srgb
 import drystone
 from drystone import tag
+import milprops
 
 def paintWorn(base, metal):
     """Olive paint over iron: worn through where the "wear" attribute is high (the blocks' edges), a little rust in
@@ -89,7 +90,7 @@ def rod(K, nm, a, b, r, mat, n=12):
 def cyl(K, nm, y0, y1, r0, r1, mat, n=24):
     return tag(K.cyl(nm, (0, y0, 0), r0, y1 - y0, mat, "h", n if not LOW() else max(8, n // 3), r2=r1, w=0.0006), 0.5)
 
-def buildGrenade(K, name, spec, state, seed, far=False):
+def buildGrenade(K, *a, far=False):
     drystone.setLow(K, far)
     body(K)
     # the fuze: its collar on the body's neck, the brass body, the striker's cap
@@ -118,8 +119,167 @@ def buildGrenade(K, name, spec, state, seed, far=False):
     drystone.writeBuildOrder(K)
     drystone.setLow(K, False)
 
-farGrenade = lambda K, n, s, st, sd: buildGrenade(K, n, s, st, sd, far=True)
-TYPES = {"grenade": dict(builder=buildGrenade, farBuilder=farGrenade, atlas=1024, aoDist=0.01, smoothAngle=60, weighted=False, normals=True, normalAtlas=1024)}
+# ── THE ABILITIES' KIT (2026-10-22): each a few dozen parts, baked like the grenade ────────────────────────────────────
+def T(o, t=0.5): return tag(o, t)
+def box(K, nm, x0, x1, y0, y1, z0, z1, mat, w=0.002): return T(K.box(nm, x0, x1, y0, y1, z0, z1, mat, "h", w if not LOW() else 0))
+def lathe(K, nm, prof, mat, n=32, at=(0, 0, 0), smooth=True):
+    """A turned part: prof [(radius, height)…] from the foot up, closed at both ends."""
+    if LOW(): n = max(8, n // 3)
+    bm = bmesh.new()
+    rings = [[bm.verts.new(B(at[0] + r * math.cos(2 * math.pi * i / n), at[1] + h, at[2] + r * math.sin(2 * math.pi * i / n))) for i in range(n)] for r, h in prof]
+    for a, b in zip(rings, rings[1:]):
+        for i in range(n):
+            j = (i + 1) % n; bm.faces.new((a[i], a[j], b[j], b[i]))
+    bm.faces.new(list(reversed(rings[0]))); bm.faces.new(rings[-1])
+    bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-7)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return T(K.obj(nm, bm, mat, "h", smooth=smooth))
+def rod(K, nm, a, b, r, mat, n=8): return T(K.rod(nm, a, b, r, mat, "h", n=n if not LOW() else max(4, n // 2)))
+
+def buildSmoke(K, *a, far=False):
+    """The smoke grenade: an olive canister, its pale band, the lever and ring on top."""
+    drystone.setLow(K, far)
+    lathe(K, "Can", [(0.0, 0.0), (0.029, 0.0), (0.031, 0.004), (0.031, 0.118), (0.029, 0.122), (0.0, 0.122)], "spOlive", 40)
+    lathe(K, "Band", [(0.0315, 0.074), (0.0315, 0.096)], "spPale", 40)
+    lathe(K, "Fuze", [(0.0, 0.122), (0.011, 0.122), (0.011, 0.142), (0.008, 0.146), (0.0, 0.146)], "spSteel", 24)
+    for k in range(10):
+        y0, y1 = 0.142 - k * 0.011, 0.142 - (k + 1) * 0.011
+        x0 = 0.013 if y0 > 0.122 else 0.0345; x1 = 0.013 if y1 > 0.122 else 0.0345
+        rod(K, f"Lever{k}", (x0, y0, 0), (x1, y1, 0), 0.0028, "spSteel", 6)
+    n = 20 if not LOW() else 8
+    pts = [(-0.004 + 0.009 * math.cos(2 * math.pi * k / n) * 0.3, 0.134 + 0.009 * math.sin(2 * math.pi * k / n), -0.016 - 0.009 * (1 + math.cos(2 * math.pi * k / n)) * 0.5) for k in range(n)]
+    for k in range(n): rod(K, f"Ring{k}", pts[k], pts[(k + 1) % n], 0.0009, "spSteel", 5)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildFlare(K, *a, far=False):
+    """The flare pistol (the 25 mm signal pistol): a fat short barrel on its frame, the hammer, the trigger in its
+    guard, the wooden grip raked back, a lanyard ring."""
+    drystone.setLow(K, far)
+    rod(K, "Barrel", (0, 0.105, -0.17), (0, 0.105, 0.04), 0.017, "spDark", 24)
+    rod(K, "Bore", (0, 0.105, -0.172), (0, 0.105, -0.16), 0.013, "spBlack", 24)
+    box(K, "Frame", -0.012, 0.012, 0.08, 0.124, 0.02, 0.09, "spDark")
+    box(K, "Hammer", -0.004, 0.004, 0.118, 0.14, 0.075, 0.095, "spSteel")
+    bm = bmesh.new(); vs = []
+    for (zz, yy) in [(0.03, 0.095), (0.09, 0.095), (0.12, 0.0), (0.075, -0.005)]:
+        for xx in (-0.016, 0.016): vs.append(bm.verts.new(B(xx, yy, zz)))
+    bmesh.ops.convex_hull(bm, input=vs)
+    T(K.bevel(K.obj("Grip", bm, "spWood", "h"), 0.004 if not LOW() else 0, 2, 40))
+    n = 14 if not LOW() else 6
+    gp = [(0, 0.08 - 0.03 * math.sin(math.pi * k / n), 0.02 + 0.055 * k / n) for k in range(n + 1)]
+    for k in range(n): rod(K, f"Guard{k}", gp[k], gp[k + 1], 0.0022, "spDark", 5)
+    rod(K, "Trigger", (0, 0.08, 0.045), (0, 0.06, 0.052), 0.003, "spSteel", 6)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildCutters(K, *a, far=False):
+    """The wire cutters: two long handles in red-brown grips, the heavy jaws, the pivot bolt."""
+    drystone.setLow(K, far)
+    for s in (-1, 1):
+        rod(K, f"Handle{s}", (s * 0.012, 0.0, 0.06), (s * 0.05, 0.0, 0.42), 0.0085, "spSteel", 12)
+        rod(K, f"Grip{s}", (s * 0.03, 0.0, 0.24), (s * 0.052, 0.0, 0.43), 0.0125, "spRed", 14)
+        box(K, f"Jaw{s}", min(0, s * 0.02), max(0, s * 0.02), -0.008, 0.008, -0.07, 0.06, "spSteel", 0.003)
+    rod(K, "Bolt", (0, -0.012, 0.03), (0, 0.012, 0.03), 0.009, "spDark", 16)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildMine(K, *a, far=False):
+    """An anti-personnel pressure mine: a squat cast body, its fuze and three prongs."""
+    drystone.setLow(K, far)
+    lathe(K, "Body", [(0.0, 0.0), (0.05, 0.0), (0.055, 0.008), (0.055, 0.042), (0.048, 0.05), (0.0, 0.05)], "spOlive", 40)
+    lathe(K, "Fuze", [(0.0, 0.05), (0.012, 0.05), (0.012, 0.072), (0.0, 0.072)], "spBrass", 20)
+    for k in range(3):
+        a = k / 3 * 2 * math.pi
+        rod(K, f"Prong{k}", (0.004 * math.cos(a), 0.072, 0.004 * math.sin(a)), (0.012 * math.cos(a), 0.092, 0.012 * math.sin(a)), 0.0018, "spSteel", 5)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildHelmet(K, *a, far=False):
+    """The French M51 helmet: a rounded shell over a flared brim, olive, its chin strap hanging."""
+    drystone.setLow(K, far)
+    prof = [(0.0, 0.17)] + [(0.13 * math.sin(math.radians(t)), 0.035 + 0.135 * math.cos(math.radians(t))) for t in range(10, 91, 8)] + [(0.142, 0.022), (0.152, 0.012), (0.148, 0.004)]
+    lathe(K, "Shell", prof, "spOlive", 48)
+    n = 16 if not LOW() else 6
+    ang = [math.pi * 0.85 + (math.pi * 0.3) * k / n for k in range(n + 1)]
+    pts = [(0.13 * math.cos(a), 0.03 - 0.05 * math.sin(math.pi * k / n), 0.13 * math.sin(a)) for k, a in enumerate(ang)]
+    for k in range(n): rod(K, f"Strap{k}", pts[k], pts[k + 1], 0.004, "spLeather", 5)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildKepi(K, *a, far=False):
+    """The officer's kepi (the HQ's rank): the crown, the black visor, the gold braid and the chin cord."""
+    drystone.setLow(K, far)
+    lathe(K, "Crown", [(0.0, 0.0), (0.095, 0.0), (0.095, 0.04), (0.087, 0.11), (0.084, 0.12), (0.0, 0.12)], "spKepi", 40)
+    lathe(K, "Band", [(0.0965, 0.0), (0.0965, 0.042)], "spBlueBlack", 40)
+    for k in range(3): lathe(K, f"Braid{k}", [(0.097 - k * 0.003, 0.05 + k * 0.022), (0.095 - k * 0.003, 0.056 + k * 0.022)], "spGold", 40)
+    bm = bmesh.new(); n = 16; vs = []
+    for i in range(n + 1):
+        a = math.pi * 1.15 + (math.pi * 0.7) * i / n
+        vs.append((bm.verts.new(B(0.095 * math.cos(a), 0.005, 0.095 * math.sin(a))), bm.verts.new(B(0.15 * math.cos(a), -0.012, 0.15 * math.sin(a)))))
+    for i in range(n): bm.faces.new((vs[i][0], vs[i + 1][0], vs[i + 1][1], vs[i][1]))
+    v = K.obj("Visor", bm, "spBlack", "h", smooth=True); so = v.modifiers.new("S", "SOLIDIFY"); so.thickness = 0.004; T(v)
+    rod(K, "Cord", (-0.096, 0.02, -0.01), (0.096, 0.02, -0.01), 0.0025, "spGold", 6)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildJerrycan(K, *a, far=False):
+    """The 20 l jerrycan: its pressed X on each flank, the three handles, the spout's cap."""
+    drystone.setLow(K, far)
+    box(K, "Can", -0.085, 0.085, 0.0, 0.47, -0.17, 0.17, "spOlive", 0.012)
+    for s in (-1, 1):
+        for d in (-1, 1):
+            rod(K, f"X{s}{d}", (s * 0.087, 0.06, d * 0.14), (s * 0.087, 0.38, -d * 0.14), 0.006, "spOlive", 6)
+    for k, z in enumerate((-0.07, 0.0, 0.07)):
+        rod(K, f"Handle{k}", (-0.04, 0.47, z), (-0.04, 0.52, z), 0.007, "spOlive", 8)
+        rod(K, f"HandleT{k}", (-0.04, 0.52, z), (0.04, 0.52, z), 0.007, "spOlive", 8)
+    lathe(K, "Cap", [(0.0, 0.47), (0.022, 0.47), (0.022, 0.5), (0.0, 0.5)], "spSteel", 20, at=(0.045, 0, -0.12))
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildAmmoBox(K, *a, far=False):
+    """An open ammunition crate full of brass: planks, rows of rounds."""
+    drystone.setLow(K, far)
+    W, D, H = 0.42, 0.26, 0.16
+    box(K, "Bottom", -W / 2, W / 2, 0.0, 0.015, -D / 2, D / 2, "spCrate")
+    for s in (-1, 1):
+        box(K, f"Side{s}", -W / 2, W / 2, 0.0, H, s * D / 2 - 0.009, s * D / 2 + 0.009, "spCrate")
+        box(K, f"End{s}", s * W / 2 - 0.012, s * W / 2 + 0.012, 0.0, H, -D / 2, D / 2, "spCrate")
+    nx, nz = (9, 5) if not LOW() else (5, 3)
+    for i in range(nx):
+        for j in range(nz):
+            x, z = -W / 2 + 0.03 + (W - 0.06) * i / (nx - 1), -D / 2 + 0.03 + (D - 0.06) * j / (nz - 1)
+            T(K.cyl(f"Case{i}_{j}", (x, 0.09, z), 0.011, 0.055, "spBrass", "h", 10 if not LOW() else 6, w=0))
+            T(K.cyl(f"Ball{i}_{j}", (x, 0.145, z), 0.0075, 0.02, "spCopper", "h", 10 if not LOW() else 6, r2=0.002, w=0))
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildDetonator(K, *a, far=False):
+    """The plunger detonator: a wooden box, its T-handle up on the rod, two brass terminals, the wires out."""
+    drystone.setLow(K, far)
+    box(K, "Box", -0.08, 0.08, 0.0, 0.16, -0.06, 0.06, "spCrate", 0.004)
+    rod(K, "Rod", (0, 0.16, 0), (0, 0.27, 0), 0.006, "spSteel", 10)
+    rod(K, "Handle", (-0.08, 0.27, 0), (0.08, 0.27, 0), 0.012, "spWood", 12)
+    for s in (-1, 1):
+        lathe(K, f"Term{s}", [(0.0, 0.16), (0.009, 0.16), (0.009, 0.178), (0.0, 0.178)], "spBrass", 14, at=(s * 0.05, 0, 0.035))
+        pts = [(s * 0.05, 0.172, 0.035), (s * 0.06, 0.13, 0.11), (s * 0.03, 0.01, 0.2), (s * -0.02, 0.005, 0.32)]
+        for k in range(3): rod(K, f"Wire{s}{k}", pts[k], pts[k + 1], 0.003, "spRed" if s > 0 else "spBlack", 5)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildDetector(K, *a, far=False):
+    """The mine detector: the round search head on its arm, the pole, the grip, the amplifier box."""
+    drystone.setLow(K, far)
+    lathe(K, "Head", [(0.0, 0.0), (0.14, 0.0), (0.145, 0.012), (0.14, 0.024), (0.0, 0.024)], "spOlive", 40)
+    rod(K, "Arm", (0, 0.024, 0.0), (0, 0.06, 0.06), 0.008, "spSteel", 8)
+    rod(K, "Pole", (0, 0.06, 0.06), (0, 0.55, 0.62), 0.011, "spSteel", 10)
+    rod(K, "Grip", (0, 0.5, 0.56), (0, 0.6, 0.68), 0.016, "spBlack", 12)
+    box(K, "Amp", -0.04, 0.04, 0.3, 0.38, 0.33, 0.43, "spOlive", 0.004)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+PROPS = {"grenade": buildGrenade, "smoke": buildSmoke, "flare": buildFlare, "cutters": buildCutters, "mine": buildMine,
+         "helmet": buildHelmet, "kepi": buildKepi, "jerrycan": buildJerrycan, "ammobox": buildAmmoBox,
+         "detonator": buildDetonator, "detector": buildDetector}
+MATDEF.update({
+    "spOlive": (0.55, paintWorn(0x4d5536, 0x6e6c66)), "spPale": (0.7, flatC(0xc9c2a4)), "spBlack": (0.5, flatC(0x161614)),
+    "spRed": (0.6, flatC(0x7a2a1e)), "spWood": (0.7, flatC(0x6a4628, 0.75)), "spCrate": (0.8, milprops.timberMat(0x6a6a4c)),
+    "spLeather": (0.7, flatC(0x4a3424)), "spKepi": (0.75, flatC(0x6b6a50)), "spBlueBlack": (0.6, flatC(0x1c2230)),
+    "spGold": (0.3, flatC(0xc9a24a, 0.75)), "spCopper": (0.3, flatC(0xa8643a, 0.8)),
+})
+def _near(f): return lambda K, n, s, st, sd: f(K, far=False)
+def _far(f): return lambda K, n, s, st, sd: f(K, far=True)
+TYPES = {k: dict(builder=_near(f), farBuilder=_far(f), atlas=1024 if k == "grenade" else 512, aoDist=0.01, smoothAngle=60,
+                 weighted=False, normals=True, normalAtlas=1024 if k == "grenade" else 512, states=["intact"]) for k, f in PROPS.items()}
 exported = buildKit(TYPES, MATDEF, "smallprops.glb", prefix="Prop", seed0=1940, colors=True)
 
 scn = bpy.context.scene
@@ -132,7 +292,7 @@ for o in scn.objects:
 for o in exported:
     if o.name.endswith("_Far") or not o.name.endswith("_Intact"): continue
     o.hide_render = False
-    cd.lens = 50; cam.location = B(0.12, 0.06, -0.24)
+    cd.lens = 50; cam.location = B(0.5, 0.35, -0.9)
     cam.rotation_euler = (B(0, 0.005, 0) - cam.location).to_track_quat("-Z", "Y").to_euler()
     scn.render.filepath = os.path.join(house.REFS, f"preview_{o.name}.png"); bpy.ops.render.render(write_still=True)
     o.hide_render = True

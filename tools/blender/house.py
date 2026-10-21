@@ -473,7 +473,7 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
         if ONLY and tname != ONLY: continue
         K.smooth_angle, K.weighted_on = spec.get("smoothAngle", 35), spec.get("weighted", True)
         objs, fars = [], []
-        for si, state in enumerate(STATES):
+        for si, state in enumerate(spec.get("states", STATES)):   # (a prop: "intact" only)
             K.groups["h"] = []
             (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
