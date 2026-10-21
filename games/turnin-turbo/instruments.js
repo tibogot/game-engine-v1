@@ -195,3 +195,18 @@ export function createTopSticker() {
   tex.needsUpdate = true;
   return tex;
 }
+
+// --- the warning label under the toy (bottom photo): white, small black print in a few blocks ------------------
+export function createUnderLabel() {
+  const { ctx, tex } = canvasTexture(512, 284);
+  ctx.fillStyle = "#f2f0ea"; ctx.fillRect(0, 0, 512, 284);
+  ctx.fillStyle = "#222"; ctx.font = "700 20px Arial"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+  ctx.fillText("CAUTION:", 18, 14); ctx.fillText("ATTENTION:", 270, 14);
+  ctx.font = "13px Arial";
+  const lines = ["Use 4 \"D\" size batteries only.", "Do not mix old and new batteries.", "Remove batteries when not in use.",
+    "Insert batteries with correct polarity.", "Do not short-circuit the terminals.", "Adult supervision recommended."];
+  lines.forEach((l, i) => { ctx.fillText(l, 18, 44 + i * 19); ctx.fillText(l.split("").reverse().join("").slice(0, 26), 270, 44 + i * 19); });
+  ctx.font = "700 14px Arial"; ctx.fillText("TOMY  No. 7057  MADE IN JAPAN", 18, 252);
+  tex.needsUpdate = true;
+  return tex;
+}

@@ -222,7 +222,7 @@ B_BUMP = 0.107                    # the bumper's top
 # The back is a 911 nose (straight back photo, back_straight.png): FENDERS either side stay high and end in a face
 # sloping ~55 deg that carries each lamp nearly flush; the BONNET between the creases (x +-9 cm) is lower and rolls
 # gently down to the bumper.
-F_TOP, F_FACE = 0.158, 0.05      # the fenders' height; how far forward of the back their face reaches
+F_TOP, F_FACE = 0.168, 0.034      # the fenders' height; how far forward of the back their face reaches
 def fender_h(z):
     u = (z - B_ZB) / F_FACE                       # 0 at the back, 1 at the top of the sloped face
     if u <= 0: return B_BUMP
@@ -233,14 +233,18 @@ def bonnet_h(z):
     h = B_BUMP + (0.165 - B_BUMP) * math.sqrt(max(1 - u ** 2.6, 0.0))   # broad and high, rolling down at the bumper (rear photos)
     # ...but kept under the sight line of the camera fitted to the front photo (that view shows only a narrow red band
     # over the frames): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
-    ray = 0.167 + 0.72 * (z + 0.12)
-    k = 0.008
-    return max(0.5 * (h + ray - math.sqrt((h - ray) ** 2 + k * k)), B_BUMP)
+    return h
 def b_height(z, x):
     ax = abs(x)
     wf = min(max((ax - 0.06) / 0.07, 0.0), 1.0); wf = wf * wf * (3 - 2 * wf)   # a broad, rounded rise
     bon = bonnet_h(z)
     hc = bon * (1 - wf) + max(fender_h(z), bon) * wf
+    # kept under the sight line of the camera fitted to the front photo (it shows only a narrow red band over the
+    # frames): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
+    corner = min(max((ax - 0.095) / 0.06, 0.0), 1.0); corner = corner * corner * (3 - 2 * corner)
+    # ...except at the corners: the front photo shows the red rising there round the lamps (fender humps)
+    ray, k = 0.167 + 0.72 * (z + 0.12) + 0.05 * corner, 0.008
+    hc = max(0.5 * (hc + ray - math.sqrt((hc - ray) ** 2 + k * k)), B_BUMP)
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
     return max(min(hc, y_face), 0.026)
@@ -291,19 +295,20 @@ def b_normal(z, x, e=0.001):
     hx = (b_height(z, x + e) - b_height(z, x - e)) / (2 * e)
     hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
     return Vector((-hx, 1.0, -hz)).normalized()
-POD_PROF = [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122), (0.035, 0.0118), (0.0375, 0.0102),
-            (0.0385, 0.007), (0.0385, -0.035)]
+POD_PROF = [(r * 0.82, h) for r, h in [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122), (0.035, 0.0118),
+                                        (0.0375, 0.0102), (0.0385, 0.007), (0.0385, -0.035)]]
 for sx in (-1, 1):
     x = sx * 0.156
     # the lamp faces BACK, 18 deg up (photos), its centre where the fender's rounded corner is 127 mm high
-    zc = min((B_ZB + i * 0.0005 for i in range(120)), key=lambda zz: abs(fender_h(zz) - 0.13))
-    up = math.radians(18)
+    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.127))   # on the real (capped) surface
+    up = math.radians(22)
     n = Vector((0, math.sin(up), -math.cos(up)))
+    n = (n + b_normal(zc, x)).normalized()   # halfway to the steep nose's own normal: the lamp sits on it
     ex = Vector((1, 0, 0)); ey = n.cross(ex).normalized()
-    z_l, y_l = zc + n.z * 0.004, fender_h(zc) + n.y * 0.004   # the ring stands just proud, its bucket behind
+    z_l, y_l = zc + n.z * 0.004, b_height(zc, x) + n.y * 0.004   # the ring stands just proud, its bucket behind
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
     # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
-    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.02, 0.0092), (0.0272, 0.009), (0.0272, 0.008)],
+    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.016, 0.0092), (0.0223, 0.009), (0.0223, 0.008)],
           CHROME, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
 
 # the bumper: a slate band round the back and the rear half of the sides, a groove along it
@@ -346,9 +351,24 @@ r0, r1, rz0, rz1 = -0.068, 0.078, B_NOSE_Z - 0.014, B_NOSE_Z - 0.05
 panel_line("BonnetRect", [(r0 + (r1 - r0) * k / 20, rz0) for k in range(21)] + [(r1, rz0 + (rz1 - rz0) * k / 12) for k in range(1, 13)]
            + [(r1 - (r1 - r0) * k / 20, rz1) for k in range(1, 21)] + [(r0, rz1 - (rz1 - rz0) * k / 12) for k in range(1, 13)])
 
+# THE UNDERSIDE (bottom.jpg): flat red; a black battery door (4 D cells) with ribs, a white warning label, screw
+# heads, four low feet. Built facing down, a hair under y = 0 (the feet lift the toy 2 mm off the table).
+DOWN = lambda x, z, y=0.0: gmat((x, y, z), (1, 0, 0), (0, 0, 1))      # local +z = down
+slab("BatteryDoor", [rrect(0, 0, 0.17, 0.12, 0.012)], 0.0, 0.0018, 0.0008, BLACK, DOWN(-0.02, -0.12, -0.0004))
+for k in range(6):
+    slab(f"BatteryRib{k}", [rrect(0, -0.045 + k * 0.018, 0.15, 0.003, 0.0012, 2)], 0.0018, 0.003, 0.0004, BLACK,
+         DOWN(-0.02, -0.12, -0.0004))
+slab("BatteryTab", [rrect(0, 0.068, 0.03, 0.012, 0.003)], 0.0, 0.0028, 0.0008, BLACK, DOWN(-0.02, -0.12, -0.0004))
+uvplane("UnderLabel", 0.09, 0.05, DOWN(0.12, -0.05, -0.0006))
+for fx, fz in ((-0.17, 0.0), (0.17, 0.0), (-0.17, -0.2), (0.17, -0.2)):
+    lathe(f"Foot{fx}{fz}", [(0.0, -0.002), (0.009, -0.002), (0.011, -0.001), (0.011, 0.002), (0.0, 0.002)], BLACK,
+          gmat((fx, 0.0, fz), (1, 0, 0), (0, 0, -1)), n=24)
+for sx_, sz_ in ((-0.15, -0.03), (0.15, -0.03), (-0.15, -0.19), (0.15, -0.19), (0.0, -0.06)):
+    lathe(f"Screw{sx_}{sz_}", [(0.0, 0.0), (0.004, 0.0), (0.0035, -0.0012), (0.0, -0.0012)], GREY, gmat((sx_, -0.0002, sz_), (1, 0, 0), (0, 0, -1)), n=16)
+
 # the black ribbed pads on each side, just ahead of the bumper's ends (the side photo)
 for sx in (-1, 1):
-    PAD = gmat((sx * (B_W + 0.002), 0.105, -0.06), (0, 0, -sx), (0, 1, 0))
+    PAD = gmat((sx * (B_W + 0.002), 0.1, -0.118), (0, 0, -sx), (0, 1, 0))   # on the red, just behind the slate (side photo)
     slab(f"SidePad{sx}", [rrect(0, 0, 0.036, 0.058, 0.004)], -0.002, 0.007, 0.0015, BLACK, PAD)
     for k in range(5):
         slab(f"SidePadRib{sx}{k}", [rrect(0, -0.02 + k * 0.01, 0.03, 0.0035, 0.0012, 2)], 0.007, 0.0095, 0.0008, BLACK, PAD)
@@ -408,7 +428,8 @@ def _lean(x, y, z):
     dy, dz = y - FACE_PIVOT_Y, z - ZF
     return (x, FACE_PIVOT_Y + dy * _ca + dz * _sa, ZF - dy * _sa + dz * _ca)
 RIM_BACK = -0.088
-_front = [_lean(x, y, ZF - 0.0015) for x, y in outer]
+# 2.5 mm outside the outline: the red shell's sides are at x +-0.2 too (coplanar = z-fighting teeth)
+_front = [_lean(x, y, ZF - 0.0015) for x, y in offset2d(outer, 0.0025)]
 loft("BezelRim", [_front, [(x, y, RIM_BACK) for x, y, z in _front]], SLATE, cap1=True, angle=50, recalc=False)
 _rim = bpy.data.objects["BezelRim"].data      # (the outline runs CCW seen from the front: flip to face outwards)
 for p in _rim.polygons: p.flip()
@@ -639,6 +660,7 @@ join("Lever", ["LeverStick", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum
 join("ConsoleRight", starts("ConsoleFin", "ConsoleGate", "ConsoleChannel"))
 join("BonnetLines", starts("BonnetLine", "BonnetRect"))
 join("SidePads", starts("SidePad"))
+join("Underside", ["BatteryDoor", "BatteryTab"] + starts("BatteryRib", "Foot", "Screw"))
 join("LeverGrooves", starts("LeverGroove"))
 join("ResetButton", ["ResetButton", "ResetChevron"] + starts("ResetRib"))
 join("KeyHead", ["KeyHead", "KeyBow"] + starts("KeyGroove"))

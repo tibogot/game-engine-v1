@@ -8,7 +8,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 import { createCarSprite, createScreen, curve, depthAt, roadAtCar, rowAt, scaleAt, screenX, ROAD } from "./road.js";
 import { oakMaterial, plastic, roomEnvironment } from "./looks.js";
-import { createCluster, createHubBadge, createShifterPlate, createStripPrint, createTopSticker, SHIFTER_ROWS } from "./instruments.js";
+import { createCluster, createHubBadge, createShifterPlate, createStripPrint, createTopSticker, createUnderLabel, SHIFTER_ROWS } from "./instruments.js";
 
 // --- tuning (guesses: the real values are unknown, PLAN.md) --------------------------------
 const GEAR_SPEED = [0, 1.2, 2.0, 2.8, 3.8];   // film scroll, road units / s
@@ -80,6 +80,7 @@ scene.add(table);
 
 // --- the toy: the Blender shell (tools/blender/turninTurbo.py), materials given here by part name -----
 const toy = (await new GLTFLoader().loadAsync("/models/turnin-turbo/turbo.glb")).scene;
+toy.position.y = 0.002;   // on its four feet
 scene.add(toy);
 const MATS = {
   Red: plastic(0xd8261c, 0.26, { clearcoat: 0.3, breakup: 0.1 }),
@@ -102,6 +103,7 @@ const FACES = {
   ShifterLabel: new THREE.MeshStandardMaterial({ map: createShifterPlate(), roughness: 0.5 }),
   HubBadge: new THREE.MeshPhysicalMaterial({ map: createHubBadge(), roughness: 0.2, clearcoat: 0.8, transparent: true, alphaTest: 0.5 }),
   TopSticker: new THREE.MeshStandardMaterial({ map: createTopSticker(), roughness: 0.4 }),
+  UnderLabel: new THREE.MeshStandardMaterial({ map: createUnderLabel(), roughness: 0.7 }),
   StripPrint: new THREE.MeshStandardMaterial({ map: createStripPrint(), roughness: 0.6, transparent: true, depthWrite: false }),
 };
 // the glTF's UVs run top-down (glTF flips V on export): the canvases must not be flipped again
