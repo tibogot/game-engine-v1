@@ -276,6 +276,7 @@ def b_ring(z):
         if y < B_SKIRT:                           # the chin: inset in x, and tucked forward at the back
             tk = (1 - y / B_SKIRT) ** 2
             tk = 1 - math.sqrt(max(1 - (1 - y / B_SKIRT) ** 2, 0.0))   # a quarter round: the chin's corners
+            tk *= min(max((B_ZB + 0.11 - z) / 0.06, 0.0), 1.0)   # only at the back: the front apron is full width to the table
             x = math.copysign(min(abs(x), w - 0.06 * tk), x)
             out.append((x, y, max(z, B_ZB + 0.05 * tk)))
         else:
