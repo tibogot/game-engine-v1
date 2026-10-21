@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMgNest, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -134,6 +134,33 @@ export const loadMirador = () => loadBlenderPiece("mirador", "mirador", () => bu
   return ok;
 });
 export const miradorGeometry = () => pieceGeometry("mirador", "mirador");
+/**
+ * THE MG NEST (tools/blender/mgNest.py, 2026-10-21 — you: "except the sandbags everything looks too cheap"): the spoil
+ * platform, the roof on squared posts, the stores — and the user's simulated RING (sandbagRing: an extra, laid course
+ * by course on the site — algSandbags siteBags), the AA-52 its own turning mesh (userData.gun, its own material).
+ */
+export const loadMgNest = () => loadBlenderPiece("mgnest", "mg", () => buildMgNest({ noBags: true }), null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("mgnest", "mg");
+  if (g.userData.nestReady) return ok;
+  await loadSandbagWall();
+  const ring = simulatedWallMesh("SandbagRing", "ring");
+  if (ring) g.userData.extra = [...(g.userData.extra ?? []), ring];
+  const gunLod = houseMesh("gun", "intact", 1)?.children[0];
+  const gunNear = gunLod?.levels?.[0]?.object;
+  if (gunNear) {
+    const gg = plainGeometry(gunNear);
+    gg.scale(S, S, S);
+    // (its pivot 1.2 m up, its tripod on the nest's floor (0.45) — the old piece's 1.5 m hung the new tripod in the air;
+    // the barrel clears the ring's top, 0.95)
+    g.userData.gun = { geo: gg, pivot: [0, 1.2 * S, -1.6 * S], material: plainMaterial(gunNear.material) };
+    g.userData.parts = { ...(g.userData.parts ?? {}), gun: gg };
+  }
+  g.userData.nestReady = true;
+  return ok;
+});
+export const mgNestGeometry = () => (pieceGeometry("mgnest", "mg")?.userData.nestReady ? pieceGeometry("mgnest", "mg") : null);
+
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
 export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });
 export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");

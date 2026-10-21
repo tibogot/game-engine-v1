@@ -22,7 +22,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMirador, loadSangar, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadSangar, mgNestGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -36,7 +36,7 @@ import { t } from "./i18n/i18n.js";
 export const BUILDS = {
   sandbags: { label: t("Sacs de sable"), tip: t("Mur de sacs de sable : une couverture solide pour les hommes derrière."), cost: 20, time: 6, build: () => buildSandbagWallPiece(() => buildFrSandbagWall()), follow: true },
   wire: { label: t("Barbelés"), tip: t("Barbelés : il faut les contourner ou les couper ; un véhicule les écrase."), cost: 15, time: 5, build: () => barbedWireGeometry() ?? buildBarbedWire() /* (the Blender piece once loaded — algSangar.js) */, follow: true, noFoot: true },
-  mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => buildMgNestPiece((o) => buildMgNest(o)), pad: true, structure: "mgNest" },
+  mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => mgNestGeometry() ?? buildMgNestPiece((o) => buildMgNest(o)) /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mgNest" },
   mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 160 m, par-dessus les abris. Plus loin que l'équipe de mortier, mais fixe."), cost: 130, time: 18, build: () => buildMortarPitV2(), pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: t("Mirador : voit à 110 m, une mitrailleuse dans la cabine."), cost: 110, time: 20, build: () => miradorGeometry() ?? buildMirador() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mirador" },
   searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
@@ -119,6 +119,11 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     geoCache.delete("ambushScreen");
     swapPlaced(showroom, /^ambushScreen\d*$/, ambushScreenGeometry(), app);
     for (const [name, mesh] of Object.entries(showroom ?? {})) if (/^ambushScreen\d*$/.test(name)) growScreenPlants(plants(), mesh, 1);
+  });
+  loadMgNest().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("mgNest");
+    swapPlaced(showroom, /^mgNest\d*$/, mgNestGeometry(), app);   // (?defences=1: the post's own)
   });
   loadBarbedWire().then((ok) => {
     if (!ok) return;
@@ -408,7 +413,10 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       // Two sappers 1.5x as fast, three 1.8x: they get in each other's way.
       // (`app.algBuildSpeed`: a doctrine's faster engineers — algDoctrines.js, the Légion.)
       s.progress = Math.min(1, s.progress + (dt / BUILDS[s.key].time) * (1 + 0.8 * (1 - 0.5 ** (workers - 1))) * (s.team === "player" ? app.algBuildSpeed ?? 1 : 1));
-      if (s.build) s.build.set(s.progress); else if (s.bagSite) s.bagSite.set(s.progress); else s.mesh.scale.y = 0.06 + 0.94 * s.progress;
+      // (a Blender piece with simulated bags — the MG nest — has both: its parts in order AND its bags course by course)
+      if (s.build) s.build.set(s.progress);
+      if (s.bagSite) s.bagSite.set(s.progress);
+      if (!s.build && !s.bagSite) s.mesh.scale.y = 0.06 + 0.94 * s.progress;
       growScreenPlants(plants(), s.mesh, s.progress);   // (a screen's scrub, stood up in its turn)
       for (const c of s.mesh.children) if (c.userData.late != null) c.visible = s.progress >= c.userData.late;   // (the mirador's bags)
       s.hp = s.progress * 100;

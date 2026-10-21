@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMirador, loadSangar, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadSangar, mgNestGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -516,6 +516,24 @@ export const BUILDINGS = {
   // (barbed strands, the double apron, one concertina coil; its construction in the panel), cut RIGHT.
   // THE SANDBAG PIECES' CONSTRUCTION (2026-10-21): the game's own site — the kit parts rising, YOUR simulated bags laid
   // course by course (algSandbags siteBags) — the wall LEFT, the MG nest MIDDLE, the mortar pit RIGHT, one slider.
+  // THE MG NEST IN BLENDER (2026-10-21, tools/blender/mgNest.py): the game's old one LEFT, the new one MIDDLE — the spoil
+  // platform, the roof on posts, the AA-52, YOUR simulated ring (its construction in the panel: the earth, the posts,
+  // the bags course by course, the timbers, the roof bags, the gun) — damaged RIGHT.
+  nidBlender: {
+    label: "Nid de MG (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMgNest(),
+    before: () => buildMgNestPiece((o) => buildMgNest(o)),
+    middle: () => {
+      const geo = mgNestGeometry(), site = geo.userData.siteMaterial();
+      const mesh = kitView(geo);
+      mesh.material = site.material;
+      const bags = siteBags(mesh);
+      SITE = { set: (p) => { site.set(p); bags?.set(p); }, stencilShown: () => false, sock: null };
+      SITE.set(1);
+      return labPiece(mesh);
+    },
+    after: () => labPiece(houseMesh("mg", "damaged")),
+    tags: ["NID DE MG (LE JEU)", "NID DE MG · NOUVEAU", "NID DE MG · ENDOMMAGÉ"], note: "le nid de MG du jeu à gauche, le nouveau (Blender, vos sacs simulés) au milieu — « Construction » — endommagé à droite (sans ses sacs : leurs états viendront avec les dégâts).",
+  },
   sacsConstruction: {
     label: "Sacs de sable : construction", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSimBags(),
     before: () => sandbagSite(() => buildSandbagWallPiece(() => buildFrSandbagWall())),

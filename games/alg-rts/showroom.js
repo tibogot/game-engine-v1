@@ -270,7 +270,8 @@ export function kitView(geo) {
   // A turret: its own mesh on the ring (the unit renderer turns it about Y).
   // An emplacement's gun (MG nest): its own mesh on its pivot, to traverse.
   if (geo.userData.gun) {
-    const gm = new THREE.Mesh(geo.userData.gun.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    // (a Blender piece's gun brings its own material — the MG nest's AA-52, algSangar.js)
+    const gm = new THREE.Mesh(geo.userData.gun.geo, geo.userData.gun.material ?? rtsObjectMaterialTinted(FR_PAINT_TINT));
     gm.name = "Gun";
     gm.position.set(...geo.userData.gun.pivot);
     gm.castShadow = true;

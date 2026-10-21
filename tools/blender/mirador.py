@@ -181,11 +181,11 @@ def cabin(K, R, state, M):
         keep(corrugated(K, f"Sheet{k}", (x0, y + 2.56 + lift, -W / 2 - 0.45), (1, 0, 0), (0, -0.2 / (W + 0.9), 1), wd, W + 0.92, "mrRoof" if k % 2 == 0 else "mrRoofRust", 0.84 + 0.02 * k))
     # the searchlight and the gun on the front rail
     if state == "intact":
-        keep(tag(K.cyl("Lamp", (0.8, y + 1.25, -W / 2 + 0.12), 0.25, 0.4, "mrSteel", "h", 14 if not LOW() else 8), 0.95))
-        keep(tag(K.cyl("Lens", (0.8, y + 1.25, -W / 2 - 0.02), 0.21, 0.03, "mrGlass", "h", 14 if not LOW() else 8, w=0), 0.95))
-        for o in made[-2:]:
-            o.rotation_mode = "XYZ"; o.rotation_euler.x += math.pi / 2
-            o.location = B(0.8, y + 1.45, -W / 2 + (0.12 if o.name == "Lamp" else -0.02))
+        # (built lying along z where it stands: a K.cyl bakes its place into the mesh — turned afterwards, it swung away
+        # round the origin; the MG nest's brass did the same, 2026-10-21)
+        keep(pole(K, "Lamp", (0.8, y + 1.25, -W / 2 + 0.32), (0.8, y + 1.25, -W / 2 - 0.08), 0.25, "mrSteel", 0.95))
+        keep(pole(K, "Lens", (0.8, y + 1.25, -W / 2 - 0.08), (0.8, y + 1.25, -W / 2 - 0.1), 0.21, "mrGlass", 0.95))
+        keep(beam(K, "LampPost", (0.8, y + 0.13, -W / 2 + 0.12), (0.8, y + 1.0, -W / 2 + 0.12), 0.06, 0.06, "mrSteel", 0.95))
         keep(beam(K, "GunBarrel", (-0.6, y + 1.32, -W / 2 + 0.3), (-0.6, y + 1.3, -W / 2 - 0.55), 0.045, 0.045, "mrSteel", 0.96))
         keep(beam(K, "GunBody", (-0.6, y + 1.32, -W / 2 + 0.3), (-0.6, y + 1.32, -W / 2 + 0.75), 0.1, 0.13, "mrSteel", 0.96))
     elif state == "damaged":
