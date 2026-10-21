@@ -18,6 +18,7 @@ import { initGlbLoaderRenderer } from "../../v3/render/foliage/glbLoader.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } from "./algSangar.js";
 import { kitView } from "./showroom.js";
+import { houseMesh, loadHouses } from "./algHouse.js";
 
 const R = 512, OUT = 256;          // the render, the tile
 
@@ -77,8 +78,11 @@ const ICONS = [
   { name: "mirador", title: "Mirador", svg: "mirador",
     make: async () => { await loadMirador(); return kitView(miradorGeometry()); }, view: [-35, 12], crop: [0.62, 1.0], zoom: 0.72 },   // (the cabin and the top of its legs)
   { name: "mgNest", title: "MG nest", svg: "mgNest",
-    make: async () => { await loadMgNest(); return kitView(mgNestGeometry()); }, view: [-20, 11], zoom: 0.5 },   // (low and close: the gun over its ring, the berm cut by the frame)
-  { name: "grenade", title: "Grenade", key: "G", svg: "grenade", make: async () => grenade(), view: [-20, 12], zoom: 0.82 },
+    // (FRAMED ON ITS GUN — the berm read as a pale disc at 48 px: the AA-52 over its ring of bags, the roof's edge behind)
+    make: async () => { await loadMgNest(); return kitView(mgNestGeometry()); }, view: [150, 14], focus: "Gun", focusR: 1.25 },   // (from the FRONT: the gun toward us over the bags — from behind the roof hid it)   // (low and close: the gun over its ring, the berm cut by the frame)
+  { name: "grenade", title: "Grenade", key: "G", svg: "grenade", view: [-24, 10], zoom: 0.82,
+    // the Blender F1 (tools/blender/smallProps.py), baked like the buildings — the set's look
+    make: async () => { await loadHouses("smallprops"); const m = houseMesh("grenade", "intact", 1); const o = m.children[0].levels[0].object.clone(); o.rotation.z = -0.3; return o; } },
   { name: "stop", title: "Stop (an order: a symbol)", key: "H", svg: "stop", symbol: true },
 ];
 
@@ -107,7 +111,11 @@ export async function startIconStudio() {
     const [c0, c1] = ic.crop ?? [0, 1];
     const h = box.max.y - box.min.y;
     const fit = box.clone(); fit.min.y = box.min.y + h * c0; fit.max.y = box.min.y + h * c1;
-    const sph = fit.getBoundingSphere(new THREE.Sphere());
+    let sph = fit.getBoundingSphere(new THREE.Sphere());
+    if (ic.focus) {   // a part of it in the frame (its world box's centre, a radius round it)
+      const part = obj.getObjectByName(ic.focus);
+      if (part) { const c = new THREE.Box3().setFromObject(part).getCenter(new THREE.Vector3()); sph = new THREE.Sphere(c, ic.focusR ?? 2); }
+    }
     const yaw = THREE.MathUtils.degToRad(ic.view[0]), pitch = THREE.MathUtils.degToRad(ic.view[1]);
     const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
     const dist = (sph.radius / Math.sin(THREE.MathUtils.degToRad(camera.fov / 2))) * (ic.zoom ?? 1);

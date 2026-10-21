@@ -37,7 +37,11 @@ const CREWS = {
   sangar: { look: "moudjahid", gun: [{ back: 0.95, side: 0, rest: "crouchIdle", fire: "crouchFire", bare: true }, { back: 0.9, side: 1.05, rest: "crouchIdle" }] },
   // the post's tower guns (rtsFrenchPost userData.towerGuns: each AA-52's muzzle, the towers on the diagonal): a
   // gunner kneeling behind each, `back` m in from the muzzle toward the post's centre, facing out
-  post: { look: "appele", muzzles: { key: "towerGuns", back: 1.5 * S, rest: "crouchIdle", fire: "crouchFire", bare: true } },
+  post: { look: "appele", muzzles: { key: "towerGuns", back: 1.5 * S, rest: "crouchIdle", fire: "crouchFire", bare: true },
+    // and its MORTAR (rtsFrenchPost: the tube at (-2.6, 1.4) on its baseplate, firing toward +z): the mortar team's
+    // rest — the gunner behind the plate, the loader beside the mouth (y: null — the floor under them)
+    at: [{ x: -2.6 * S, y: null, z: (1.4 - 0.6) * S, yaw: 0, rest: "mortarRest", bare: true },
+      { x: (-2.6 + 0.7) * S, y: null, z: (1.4 + 0.45) * S, yaw: -Math.PI / 2, rest: "mortarRest" }] },
   mirador: { look: "appele", intactOnly: true, at: [{ x: -0.6 * S, y: (6.2 + 0.13) * S, z: (-1.5 + 0.3 + 0.8) * S, yaw: Math.PI, rest: "aim", fire: "fire", bare: true }] },
 };
 const STATS = {
@@ -181,6 +185,14 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     const g = app.getWorldHeight?.(x, z) ?? rec.mesh.position.y;
     return hit ? Math.max(hit.point.y, g) : g;
   }
+  /** Fixed figures in the piece's frame (`at`; y null: the floor under them). */
+  function atFigures(rec, C) {
+    return app.algUnitRenderer.addStaticFigures(C.look, C.at.map((m, i) => {
+      rec.mesh.localToWorld(_p.set(m.x, m.y ?? 0, m.z));
+      const y = m.y == null ? floorAt(rec, _p.x, _p.z, _p.y + 6) : _p.y;
+      return { x: _p.x, y, z: _p.z, yaw: rec.mesh.rotation.y + m.yaw, role: m.rest, slot: 4 + i, bare: m.bare };
+    }));
+  }
   function dropCrew(rec) {
     if (rec.crew) app.algUnitRenderer?.removeStaticFigures?.(rec.crew);
     rec.crew = null;
@@ -217,16 +229,13 @@ export function createAlgStructures({ app, showroom, producers, units }) {
           rec.mesh.localToWorld(_p.set(q[0] - dx * M.back, q[1], q[2] - dz * M.back));
           return { x: _p.x, y: floorAt(rec, _p.x, _p.z, _p.y + 1), z: _p.z, yaw: rec.mesh.rotation.y + Math.atan2(dx, dz), role: M.rest, slot: i, bare: M.bare };
         }));
+        rec.gunCrewN = rec.crew.length;
+        if (C.at) rec.crew.push(...atFigures(rec, C));
       }
       const want = firing ? C.muzzles.fire : C.muzzles.rest;
-      for (const f of rec.crew) if (f.role !== want) R.setStaticClip(f, want);
+      for (let i = 0; i < rec.gunCrewN; i++) if (rec.crew[i].role !== want) R.setStaticClip(rec.crew[i], want);
     } else if (C.at) {
-      if (!rec.crew) {
-        rec.crew = R.addStaticFigures(C.look, C.at.map((m, i) => {
-          rec.mesh.localToWorld(_p.set(m.x, m.y, m.z));
-          return { x: _p.x, y: _p.y, z: _p.z, yaw: rec.mesh.rotation.y + m.yaw, role: m.rest, slot: i, bare: m.bare };
-        }));
-      }
+      if (!rec.crew) rec.crew = atFigures(rec, C);
       C.at.forEach((m, i) => { const want = firing && m.fire ? m.fire : m.rest; if (rec.crew[i].role !== want) R.setStaticClip(rec.crew[i], want); });
     }
   }
