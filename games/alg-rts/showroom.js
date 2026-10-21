@@ -194,7 +194,8 @@ export const SHOWROOM = [
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
   // (The new standard, 2026-10-11: algMasonry buildMechtaV2 — ?village=old = the kit's, A/B.)
-  at(HAMLET_SITE, (s) => ({ key: "mechta", build: VILLAGE_OLD ? buildMechta : () => buildMechtaV2(), x: s.x, z: s.z, yaw: s.yaw })),
+  // (not where the map's TOWN replaces it: the training's practice hamlet in the new houses — maps/training.js)
+  at(MAP.town?.replacesHamlet ? null : HAMLET_SITE, (s) => ({ key: "mechta", build: VILLAGE_OLD ? buildMechta : () => buildMechtaV2(), x: s.x, z: s.z, yaw: s.yaw })),
   at(H2, (s) => ({ key: "mechta2", build: () => (VILLAGE_OLD ? buildMechta : buildMechtaV2)({ seed: 1957, count: 7 }), x: s.x, z: s.z, yaw: s.yaw })),
   at(HAMLET_SITE, (s) => { const [x, z] = fromBase(SAS_POST.lx, SAS_POST.lz, s); return { key: SAS_POST.key, build: SAS_POST.build, x, z, yaw: s.yaw + SAS_POST.yaw, rim: 6 }; }),
   // THE DECHRA, its koubba and cemetery on the crest, wells and zeribas at

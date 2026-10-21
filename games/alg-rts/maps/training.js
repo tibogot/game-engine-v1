@@ -26,6 +26,25 @@ export const LAYOUT = {
 /** The track: the post's gate north to the hamlet and on toward the FLN's ground (algTracks resamples it). */
 const TRACK = [[2, 98], [6, 70], [-4, 40], [-20, 14], [-26, -6], [-14, -46], [2, -86], [8, -120]];
 
+// THE PRACTICE HAMLET IN THE NEW HOUSES (2026-10-22, TRAINING_CAMP_PLAN.md step 1): five whitewashed houses (the
+// kit's four types, algHouse) round a small square at the hamlet's site — the town field, as Oued Abdi's: the
+// garrison lesson's houses DAMAGE AND COLLAPSE (algTownDamage); one already damaged (what a shell does). Rows as
+// abdiTown.js — [type, state, x, y, z, yaw, fx, fz, hx, hz]; y null: the ground under it (algGame levels a pad).
+const HS = 1.3;
+const FOOT = { maison: [-3.8, 8.45, -3.5, 3.0], haute: [-2.6, 2.6, -3.7, 2.8], cour: [-3.4, 3.4, -4.2, 5.0], boutique: [-4.6, 4.6, -3.6, 2.6] };
+const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
+function houseRow(type, state, cx, cz, towardX, towardZ) {
+  const [x0, x1, z0, z1] = FOOT[type].map((v) => v * HS), th = Math.atan2(-(towardX - cx), -(towardZ - cz));
+  const [ox, oz] = rotY(th, (x0 + x1) / 2, (z0 + z1) / 2);
+  return [type, state, cx - ox, null, cz - oz, th, cx, cz, (x1 - x0) / 2, (z1 - z0) / 2];
+}
+// An ARC on the north side of a small square that opens SOUTH (toward the camera): every front faces the player at
+// three-quarters (you: buildings face the camera), a gap between each (a full ring crowded them; a north–south lane
+// showed their sides). [type, state, angle (deg, from the square's centre; -90 = north)]
+const SQ = { x: -42, z: -4 }, R = 22;
+const HAMLET_HOUSES = [["haute", "damaged", -165], ["cour", "intact", -128], ["maison", "intact", -91], ["boutique", "intact", -52], ["haute", "intact", -15]]
+  .map(([ty, st, a]) => houseRow(ty, st, SQ.x + R * Math.cos((a * Math.PI) / 180), SQ.z + R * Math.sin((a * Math.PI) / 180), SQ.x, SQ.z));
+
 export const MAP = {
   id: "training",
   name: t("Camp d'instruction — 1956"),
@@ -36,6 +55,8 @@ export const MAP = {
   handPlaced: false,
   // THE TRAINING (algTutorial.js): the lessons run instead of the FLN's AI and the win rules.
   tutorial: true,
+  // the practice hamlet's houses (the old merged mechta not placed on this map: showroom.js replacesHamlet)
+  town: { houses: HAMLET_HOUSES, replacesHamlet: true },
   // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off): the birds, the
   // villagers (the mechta's people, the shepherd's lesson), the ground's splats, stones and macro
   // photo. Not the Aurès' farmsteads, fields, herds, hens, village life or telegraph; no FLN AI

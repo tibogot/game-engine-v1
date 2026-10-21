@@ -635,6 +635,16 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const t0 = performance.now();
       await Promise.all([loadHouses("mzab"), loadHouses()]);
       const field = createHouseField();
+      // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
+      // footprint's mean ground (as a built piece's), its y that
+      for (const row of MAP.town.houses) {
+        if (row[3] != null) continue;
+        const [, , , , , yaw, fx, fz, hx, hz] = row, c = Math.cos(yaw), s = Math.sin(yaw);
+        let sum = 0, n = 0;
+        for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) { const lx = a * hx, lz = b * hz; sum += app.getWorldHeight(fx + lx * c + lz * s, fz - lx * s + lz * c); n++; }
+        row[3] = sum / n;
+        await app.flattenRect?.(fx, fz, hx + 1.2, hz + 1.2, row[3], { rim: 4, rotY: yaw });
+      }
       for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
       // the TERRACE WALLS (the kit's "mur" round the risers): in the same field
       for (const [st, x, y, z, yaw] of MAP.town.walls ?? []) field.add("mur", st, x, y, z, yaw);
