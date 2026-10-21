@@ -201,12 +201,47 @@ function boostShape(p = {}) {
   };
 }
 
+// ---------------------------------------------------------------- POLES
+// (user, 2026-10-21: "we need some poles"): thin columns standing on the road — cheap, readable, best on
+// wide platforms. One build, three layouts: a POLE; a SLALOM (4 poles 18 m apart, ±3 m across, the line
+// weaves between them); a GATE (2 poles 8 m apart: drive between, the line aims at its middle).
+const POLE = { r: 0.45, h: 6 };
+const SLALOM = [-27, -9, 9, 27].map((z, i) => [i % 2 ? -3 : 3, z]);
+const GATE = [[-4, 0], [4, 0]];
+const POLE_SOLID = new THREE.CylinderGeometry(POLE.r, POLE.r, POLE.h, 10).translate(0, POLE.h / 2, 0);
+/** Poles at [x, z] (obstacle frame): one merged mesh per material. */
+function polesParts(at) {
+  const m = mats();
+  const body = [], orange = [], white = [], cap = [];
+  for (const [x, z] of at) {
+    body.push(new THREE.CylinderGeometry(POLE.r, POLE.r, POLE.h, 20).translate(x, POLE.h / 2, z));
+    body.push(new THREE.CylinderGeometry(0.9, 1.0, 0.16, 24).translate(x, 0.08, z)); // its foot plate
+    // hazard bands near the top, at the driver's eye: orange glowing / white
+    for (let k = 0; k < 4; k++) (k % 2 ? white : orange).push(new THREE.CylinderGeometry(POLE.r + 0.03, POLE.r + 0.03, 0.5, 20).translate(x, POLE.h - 2.4 + k * 0.5, z));
+    cap.push(new THREE.CylinderGeometry(POLE.r + 0.05, POLE.r + 0.05, 0.18, 20).translate(x, POLE.h + 0.09, z));
+  }
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(mergeGeometries(body), m.body));
+  g.add(new THREE.Mesh(mergeGeometries(orange), m.signal));
+  g.add(new THREE.Mesh(mergeGeometries(white), m.white));
+  g.add(new THREE.Mesh(mergeGeometries(cap), m.bolt));
+  return g;
+}
+const polesSolids = (at) => at.map(([x, z]) => POLE_SOLID.clone().translate(x, 0, z));
+// (a pole dead ahead: the line starts moving 70 m before it, not 35 — at 130 km/h the autopilot had moved
+// only 1.3 m across when it got there and clipped it — passes 2.5 m clear of it, and eases back over 30 m
+// (15: its tail swung back in 1.9 m from the pole)
+const poleFoot = ([x, z]) => ({ x, z, hx: POLE.r + 0.3, hz: POLE.r + 0.3, lead: 70, tail: 30, clear: 2.5 });
+
 export const OBSTACLES = {
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
   ob_wall_door: { label: "Wall · door", parts: doorParts, solids: DOOR_BOXES, decks: [], ghost: mergeGeometries(DOOR_BOXES), shape: doorShape, hint: "A wall across the road: drive through its door" },
   // `air`: placed on a jump's flight, not on the road (the builder's arc snap)
   ob_wall_hole: { label: "Wall · hole", parts: holeParts, solids: HOLE_BOXES, decks: [], ghost: mergeGeometries(HOLE_BOXES), air: true, hint: "A wall in the air: fly through its hole" },
+  ob_pole: { label: "Pole", parts: () => polesParts([[0, 0]]), solids: polesSolids([[0, 0]]), decks: [], ghost: mergeGeometries(polesSolids([[0, 0]])), footprints: [poleFoot([0, 0])], hint: "A pole on the road: go round it" },
+  ob_slalom: { label: "Slalom", halfW: 3.5, parts: () => polesParts(SLALOM), solids: polesSolids(SLALOM), decks: [], ghost: mergeGeometries(polesSolids(SLALOM)), footprints: SLALOM.map(poleFoot), hint: "Four poles, left and right: weave through" },
+  ob_gate: { label: "Pole gate", halfW: 4.5, parts: () => polesParts(GATE), solids: polesSolids(GATE), decks: [], ghost: mergeGeometries(polesSolids(GATE)), aimAt: { hz: POLE.r }, hint: "Two poles 8 m apart: drive between them" },
   // `decal`: lies on the road, conformed to it (the builder fills `strip`); nothing solid
   ob_boost: { label: "Boost pad", parts: boostShape().parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: boostShape, decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2 }, hint: "Drive over it: a push for 2 s" },
 };
@@ -220,6 +255,7 @@ export const shapeOf = (kind, p = {}) => (OBSTACLES[kind].shape ? { ...OBSTACLES
 // what stands IN THE WAY, in the obstacle's frame (half across x, half along z; m): the autopilot's line
 // goes round it (avoidObstacles)
 OBSTACLES.ob_block.footprint = { hx: BW / 2, hz: BD / 2 };
+// (the poles carry `footprints`, one per pole, in the table)
 OBSTACLES.ob_sweeper.footprint = { hx: POST_R + 0.3, hz: POST_R + 0.3 };
 // a DOOR is the other way round: the line goes THROUGH it (its centre), not round it
 OBSTACLES.ob_wall_door.aimAt = { hz: WALL_T / 2 };
@@ -235,14 +271,16 @@ export function avoidObstacles(ride, props = [], hw = 8) {
   const C = new THREE.Vector3(), ax = new THREE.Vector3(), az = new THREE.Vector3(), R = new THREE.Vector3(), d = new THREE.Vector3();
   const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
   for (const p of props) {
-    const f = OBSTACLES[p.kind]?.footprint ?? OBSTACLES[p.kind]?.aimAt;
-    if (!f) continue;
-    const aim = !OBSTACLES[p.kind].footprint;
+    const def = OBSTACLES[p.kind];
+    if (!def) continue;
+    // what to steer ROUND (one footprint, or one per pole) or THROUGH (aimAt: a door, a gate)
+    const feet = def.footprints ?? (def.footprint ? [def.footprint] : def.aimAt ? [def.aimAt] : []);
+    const aim = !def.footprint && !def.footprints;
     const M = new THREE.Matrix4().fromArray(p.M);
-    C.setFromMatrixPosition(M);
     ax.set(1, 0, 0).transformDirection(M);
-    if (aim && p.dx) C.addScaledVector(ax, p.dx); // the door's middle
     az.set(0, 0, 1).transformDirection(M);
+    for (const f of feet) {
+    C.setFromMatrixPosition(M).addScaledVector(ax, (f.x ?? 0) + (aim && p.dx ? p.dx : 0)).addScaledVector(az, f.z ?? 0); // (the door's middle)
     ride.forEach((r, i) => {
       if (r.tube || r.air) return;
       R.crossVectors(r.T, r.U ?? UP).normalize();
@@ -253,16 +291,18 @@ export function avoidObstacles(ride, props = [], hw = 8) {
       const along = Math.abs((f.hx ?? 0) * ax.dot(r.T)) + Math.abs(f.hz * az.dot(r.T));
       if (Math.abs(lat) > hw + across) return; // beside the road
       // weight: 0 → 1 over the 35 m before it, 1 alongside, back to 0 over 15 m after
-      const w = lon > along ? smooth(1 - (lon - along) / 35) : lon < -along ? smooth(1 - (-along - lon) / 15) : 1;
+      const w = lon > along ? smooth(1 - (lon - along) / (f.lead ?? 35)) : lon < -along ? smooth(1 - (-along - lon) / (f.tail ?? 15)) : 1;
       if (w <= 0) return;
       if (aim) { if (Math.abs(lat * w) > Math.abs(shift[i])) shift[i] = lat * w; return; }
       const room = hw - 1.6;
-      let target = lat > 0 ? lat - across - 2 : lat + across + 2; // pass on the side away from its centre
-      if (Math.abs(target) > room) target = lat > 0 ? lat + across + 2 : lat - across - 2; // no room: the other side
+      const c = f.clear ?? 2;
+      let target = lat > 0 ? lat - across - c : lat + across + c; // pass on the side away from its centre
+      if (Math.abs(target) > room) target = lat > 0 ? lat + across + c : lat - across - c; // no room: the other side
       if (Math.abs(target) > room) return; // it blocks the road: nothing to steer round
       const s = target * w;
       if (Math.abs(s) > Math.abs(shift[i])) shift[i] = s;
     });
+    }
   }
   return ride.map((r, i) => {
     if (!shift[i]) return r;

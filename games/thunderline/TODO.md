@@ -97,7 +97,14 @@ this is just the list. Newest decisions at the top of each section. Last updated
          fitted landing: take-off 178 → 257 km/h with a pad on the 2nd straight and one up the kicker,
          lap 12.42 → 10.53 s, the landing flagged "misses it — Re-fit"; seen in the drive page (BOOST
          lights). Trap: the strip was wound face-DOWN — invisible from above, fine in the thumbnail.
-      2. [ ] POLES: single, a slalom row, a gate of two (static, solid; the autopilot goes round)
+      2. [x] POLES (Obstacles tab): POLE (r 0.45, 6 m, hazard bands at eye height, glowing cap, foot
+         plate), SLALOM (4 poles 18 m apart, ±3 m across), POLE GATE (2 poles 8 m apart). Solid
+         cylinders; slalom / gate slide across only as far as keeps their poles on the road (halfW).
+         Autopilot: avoidObstacles takes `footprints` (one per pole, its own offset), the gate is an
+         `aimAt` (through its middle); poles get lead 70 m / tail 30 m / clear 2.5 m (with the default
+         35 / 15 / 2 the test car clipped a centred pole at 130 km/h, 130 → 36 km/h). Test (5 straights,
+         pole / slalom / gate 1.5 m right): drive page on autopilot, no hits, closest 2.3 m (pole),
+         2.9–3.4 (slalom), 3.3 (gate); test lap 8.22 s (11.22 with the hit).
       3. [ ] JUMP PAD: a plate that throws the car up a few metres
       4. [ ] PISTON PILLAR, SLIDING BLOCK (race-clock movers, like the Sweeper)
       later: slow pad, air boost ring, low bar, ramp-block, rotating gate, pendulum, moving ring,

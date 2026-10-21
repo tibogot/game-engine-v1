@@ -57,7 +57,7 @@ const CATS = [
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "sky_loop", "wallride_90"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_boost", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_boost", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -1038,12 +1038,13 @@ function obstacleSnap() {
     if (OBSTACLES[tileBase]?.decal) return decalSnap(pc, b, t, M, best.s + along, raw);
     // a WALL · DOOR stays square across the road, its middle on the road's: only the door slides (1 m
     // steps, inside the kerbs)
-    if (OBSTACLES[tileBase]?.aimAt) {
+    if (tileBase === "ob_wall_door") {
       const dx = THREE.MathUtils.clamp(Math.round(raw), -(hw - 5), hw - 5);
       const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(f.P.clone().addScaledVector(best.T, along));
       return { type: "road", m: M.clone().multiply(m), dx, hw, note: `Door ${dx ? `${Math.abs(dx)} m ${dx > 0 ? "right" : "left"}` : "in the middle"}` };
     }
-    const lat = THREE.MathUtils.clamp(Math.round(raw / 2) * 2, -(hw - 2), hw - 2);
+    const ext = Math.max(0, hw - 2 - (OBSTACLES[tileBase]?.halfW ?? 0)); // a slalom / gate keeps its poles on the road
+    const lat = THREE.MathUtils.clamp(Math.round(raw / 2) * 2, -ext, ext);
     const P = f.P.clone().addScaledVector(f.R, lat).addScaledVector(best.T, along);
     const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(P);
     m.multiply(new THREE.Matrix4().makeRotationY(rot.yaw * DEG));
