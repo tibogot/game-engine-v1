@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildMgNest, buildMirador, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildMgNest, buildMirador, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -217,6 +217,34 @@ export const loadFortPoint = () => loadBlenderPiece("fortpoint", "point", () => 
 });
 export const fortPointGeometry = () => (pieceGeometry("fortpoint", "point")?.userData.fortReady ? pieceGeometry("fortpoint", "point") : null);
 
+/**
+ * THE SEARCHLIGHT TOWER (tools/blender/searchlightTower.py, 2026-10-21): the steel lattice, the deck, the caged ladder,
+ * the pedestal, the generator shed — its HEAD (type "lamp": the yoke and the drum) the mesh algSearchlight sweeps, its
+ * origin on the trunnions; the user's simulated wall (sandbagSlShed) in front of the shed. The old piece's data kept.
+ */
+const SL = { deck: 9.08, ped: 0.95, lampZ: -0.35, wall: [3.5, -1.85] };   // (searchlightTower.py DECK, PED, LAMP, the shed's front)
+export const loadSearchlight = () => loadBlenderPiece("sltower", "sltower", () => buildSearchlightTower(), null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("sltower", "sltower");
+  if (g.userData.slReady) return ok;
+  await loadSandbagWall();
+  const bags = simulatedWallMesh("SearchlightBags", "slshed");
+  if (bags) bags.position.set(SL.wall[0] * S, 0, SL.wall[1] * S);
+  g.userData.extra = bags ? [bags] : [];
+  const hl = houseMesh("lamp", "intact", 1)?.children[0];
+  const hn = hl?.levels?.[0]?.object;
+  if (hn) {
+    const hg = plainGeometry(hn);
+    hg.scale(S, S, S);
+    const y = (SL.deck + SL.ped) * S;
+    g.userData.lamp = { geo: hg, pivot: [0, y, SL.lampZ * S], beam: [0, y, (SL.lampZ - 0.36) * S], material: plainMaterial(hn.material) };
+    g.userData.parts = { ...(g.userData.parts ?? {}), lamp: hg };
+  }
+  g.userData.slReady = true;
+  return ok;
+});
+export const searchlightGeometry = () => (pieceGeometry("sltower", "sltower")?.userData.slReady ? pieceGeometry("sltower", "sltower") : null);
+
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
 export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });
 export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");
@@ -292,6 +320,15 @@ export function swapPlaced(showroom, re, geo, app = null) {
     g.userData = { ...geo.userData, ...mesh.geometry.userData, labMaterial: geo.userData.labMaterial };
     mesh.geometry = g;
     mesh.material = geo.userData.labMaterial;
+    // (a Blender searchlight's HEAD: its own data and mesh — the old piece's lamp would win the merge and stay)
+    if (geo.userData.lamp) {
+      g.userData.lamp = geo.userData.lamp;
+      const old = mesh.getObjectByName("Lamp");
+      if (old) mesh.remove(old);
+      const lm = new THREE.Mesh(geo.userData.lamp.geo, geo.userData.lamp.material);
+      lm.name = "Lamp"; lm.position.set(...geo.userData.lamp.pivot); lm.castShadow = true;
+      mesh.add(lm);
+    }
     for (const x of geo.userData.extra ?? []) mesh.add(x.clone());   // (the piece's own extras: the mirador's bags)
     if (geo.userData.farGeometry) {
       // (its far level carries this copy's data too)

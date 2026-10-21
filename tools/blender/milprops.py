@@ -139,14 +139,18 @@ def _annulus(K, nm, F, y, z0, z1, r0, r1, mat, t, n=24):
         if f.normal.dot(front) < 0: f.normal_flip()
     return tag(K.obj(nm, bm, mat, "h", smooth=True), t)
 
-def searchlight(K, nm, at, yaw, t, pedestal=0.9):
-    """The 60 cm searchlight: its pedestal's foot at `at`, the drum's axis `pedestal` m up, the lens toward -z."""
+def searchlight(K, nm, at, yaw, t, pedestal=0.9, part="all"):
+    """The 60 cm searchlight: its pedestal's foot at `at`, the drum's axis `pedestal` m up, the lens toward -z.
+    `part`: "base" the fixed pedestal only, "head" the turning yoke and drum only (the searchlight tower's lamp: its
+    own mesh the game sweeps; no cable), "all" both."""
     F = Frame(at, yaw)
     R0, L0, y = 0.33, 0.55, pedestal
     # the pedestal: a tapered post and a round base; the fork's turntable
-    _tube(K, nm + "Base", F, (0, 0, 0), (0, 0.06, 0), 0.22, 0.2, "mpLampDark", t, 14)
-    _tube(K, nm + "Post", F, (0, 0.06, 0), (0, y - 0.42, 0), 0.06, 0.05, "mpLamp", t, 10)
-    _tube(K, nm + "Turntable", F, (0, y - 0.44, 0), (0, y - 0.38, 0), 0.14, 0.14, "mpLampDark", t, 14)
+    if part != "head":
+        _tube(K, nm + "Base", F, (0, 0, 0), (0, 0.06, 0), 0.22, 0.2, "mpLampDark", t, 14)
+        _tube(K, nm + "Post", F, (0, 0.06, 0), (0, y - 0.42, 0), 0.06, 0.05, "mpLamp", t, 10)
+        _tube(K, nm + "Turntable", F, (0, y - 0.44, 0), (0, y - 0.38, 0), 0.14, 0.14, "mpLampDark", t, 14)
+    if part == "base": return
     # the U-yoke: two arms up to the trunnions
     for sx in (-1, 1):
         _box(K, f"{nm}Arm{sx}", F, (sx * (R0 + 0.04), y - 0.2, 0), (0.018, 0.2, 0.04), "mpLamp", t)
@@ -184,7 +188,8 @@ def searchlight(K, nm, at, yaw, t, pedestal=0.9):
             _rod(K, f"{nm}Handle{sx}", F(sx * 0.12, y + 0.18, L0 / 2 + 0.05), F(sx * 0.12, y + 0.18, L0 / 2 + 0.2), 0.012, "mpLampDark", t, 6)
         # the power cable from the cap down the post
         pts = [F(0.05, y - 0.05, L0 / 2 + 0.1), F(0.12, y - 0.3, 0.3), F(0.1, 0.3, 0.12), F(0.18, 0.02, 0.2)]
-        for i in range(3): _rod(K, f"{nm}Cable{i}", pts[i], pts[i + 1], 0.012, "mpCable", t, 6)
+        if part == "all":
+            for i in range(3): _rod(K, f"{nm}Cable{i}", pts[i], pts[i + 1], 0.012, "mpCable", t, 6)
 
 # ── THE 81 mm MORTAR (Brandt mle 27/31, 2026-10-21 — the mortar pit) ───────────────────────────────────────────────
 # Its frame is the OLD piece's (rtsAlgeria buildMortarPit): the baseplate at the origin, the tube from (0, 0.05, 0)

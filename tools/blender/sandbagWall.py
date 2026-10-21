@@ -288,6 +288,11 @@ elif LAYOUT == "mirador":
         wall_course(3.1 - c * 0.06, 1, 0.0, -1.5, 0.0, c)
         for sx in (-1, 1):
             wall_course(2.7 - c * 0.06, 1, sx * 1.5, 0.15, math.pi / 2, c)
+elif LAYOUT == "slshed":
+    # the searchlight tower's generator shed (tools/blender/searchlightTower.py, 2026-10-21): a straight wall in front
+    # of it, 3.4 m (game), one bag thick, three courses — laid along x at the origin; the game sets it there.
+    for c in range(3):
+        wall_course(2.6 * KS - c * 0.1, 1, 0.0, 0.0, 0.0, c)
 elif LAYOUT == "postpit":
     # the post's own mortar pit: a ring r 1.5 x KS open 70° at -Z
     for c in range(4):

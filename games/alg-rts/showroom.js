@@ -279,7 +279,7 @@ export function kitView(geo) {
   }
   // A searchlight's lamp: its own mesh on the yoke, to sweep.
   if (geo.userData.lamp) {
-    const lm = new THREE.Mesh(geo.userData.lamp.geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    const lm = new THREE.Mesh(geo.userData.lamp.geo, geo.userData.lamp.material ?? rtsObjectMaterialTinted(FR_PAINT_TINT));   // (the Blender head brings its own)
     lm.name = "Lamp";
     lm.position.set(...geo.userData.lamp.pivot);
     lm.castShadow = true;

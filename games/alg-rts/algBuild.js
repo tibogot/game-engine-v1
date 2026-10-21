@@ -22,7 +22,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, fortPointGeometry, loadFortPoint, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -39,7 +39,7 @@ export const BUILDS = {
   mgNest: { label: t("Nid de MG"), tip: t("Nid de mitrailleuse : une AA-52 derrière des sacs de sable."), cost: 90, time: 14, build: () => mgNestGeometry() ?? buildMgNestPiece((o) => buildMgNest(o)) /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mgNest" },
   mortarPit: { label: t("Mortier"), tip: t("Fosse de mortier de 81 : tire de 25 à 160 m, par-dessus les abris. Plus loin que l'équipe de mortier, mais fixe."), cost: 130, time: 18, build: () => mortarPitGeometry() ?? buildMortarPitV2() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mortarPit" },
   mirador: { label: "Mirador", tip: t("Mirador : voit à 110 m, une mitrailleuse dans la cabine."), cost: 110, time: 20, build: () => miradorGeometry() ?? buildMirador() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "mirador" },
-  searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => buildSearchlightTower(), pad: true, structure: "searchlight" },
+  searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => searchlightGeometry() ?? buildSearchlightTower() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "searchlight" },
   // FIELD WORKS (2026-10-10, the CoH comparison: what engineers raise OUT on the map — algFieldWorks.js).
   // `near: "point"`: only inside the ring of a point you hold. `one`: one per point.
   forwardPost: { label: t("Poste avancé"), tip: t("Poste radio près d'un point que vous tenez : vos groupes à 30 m s'y renforcent, comme au poste."), cost: 150, time: 25, build: () => buildRadioStation({ seed: 41 + Math.floor(Math.random() * 9) }), pad: true, structure: "forwardPost", near: "point", one: true },
@@ -126,6 +126,11 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     swapPlaced(showroom, /^mortarPit\d*$/, mortarPitGeometry(), app);   // (?defences=1: the post's own)
   });
   loadFortPoint().then((ok) => { if (ok) geoCache.delete("fortPoint"); });
+  loadSearchlight().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("searchlight");
+    swapPlaced(showroom, /^searchlight\d*$/, searchlightGeometry(), app);   // (the post's own)
+  });
   loadMgNest().then((ok) => {
     if (!ok) return;
     geoCache.delete("mgNest");

@@ -32,7 +32,7 @@ import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
-import { buildFortPoint, buildMgNest } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildFortPoint, buildMgNest, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
 await loadSandbagWall();
@@ -44,7 +44,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -552,6 +552,24 @@ export const BUILDINGS = {
     },
     after: () => labPiece(houseMesh("point", "damaged")),
     tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · NOUVEAU", "POINT FORTIFIÉ · ENDOMMAGÉ"], note: "le point fortifié du jeu à gauche, le nouveau (Blender : la terre rejetée contre vos murs simulés, caisses, jerricans, téléphone de campagne et son dérouleur, pelle et pioche, bâche) au milieu — « Construction » — endommagé à droite.",
+  },
+  // THE SEARCHLIGHT TOWER IN BLENDER (2026-10-21, tools/blender/searchlightTower.py): the game's LEFT, the new one
+  // MIDDLE (the lattice, the deck, the caged ladder, the searchlight's head on its own; the generator shed and YOUR
+  // simulated wall; its construction in the panel), damaged RIGHT.
+  projBlender: {
+    label: "Tour de projecteur (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSearchlight(),
+    before: () => buildSearchlightTower(),
+    middle: () => {
+      const geo = searchlightGeometry(), site = geo.userData.siteMaterial();
+      const mesh = kitView(geo);
+      mesh.material = site.material;
+      const bags = siteBags(mesh);
+      SITE = { set: (p) => { site.set(p); bags?.set(p); }, stencilShown: () => false, sock: null };
+      SITE.set(1);
+      return labPiece(mesh);
+    },
+    after: () => labPiece(houseMesh("sltower", "damaged")),
+    tags: ["PROJECTEUR (LE JEU)", "PROJECTEUR · NOUVEAU", "PROJECTEUR · ENDOMMAGÉ"], note: "la tour de projecteur du jeu à gauche, la nouvelle (Blender : treillis d'acier, plateforme, échelle à crinoline, la tête du projecteur qui pivote ; le groupe électrogène sous son appentis, vos sacs simulés) au milieu — « Construction » — endommagée à droite.",
   },
   nidBlender: {
     label: "Nid de MG (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMgNest(),
