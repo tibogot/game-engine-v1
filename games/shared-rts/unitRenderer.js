@@ -2085,7 +2085,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
             const load = view.look ? loadout(view.look, st.slot ?? 0, () => Math.random()) : null;
             const c0 = g.roles[st.role] ?? g.roles.idle;
             st.v = { cur: { clip: c0, t: st.t }, prev: { clip: c0, t: st.t }, fade: 1, deadT: -1, gib: null,
-              weapon: load?.weapon ?? null, hat: load?.look.headgear ? hatKey(load.look) : null,
+              weapon: st.bare ? null : load?.weapon ?? null, hat: load?.look.headgear ? hatKey(load.look) : null,
               kit: (load?.kit ?? []).filter((k) => KIT[k] && !KIT[k].skinned) };
           }
           const sv = st.v, want = g.roles[st.role] ?? g.roles.idle;
@@ -2137,7 +2137,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
   return {
     /** People who are not units: [{ x, y, z, yaw }] drawn idle in `typeKey`'s crowd, every frame. */
     addStaticFigures(typeKey, list) {
-      const added = list.map((f) => ({ typeKey, x: f.x, y: f.y, z: f.z, yaw: f.yaw, t: Math.random() * 10 }));
+      const added = list.map((f) => ({ typeKey, x: f.x, y: f.y, z: f.z, yaw: f.yaw, t: Math.random() * 10, role: f.role ?? null, slot: f.slot, bare: !!f.bare }));   // (`bare`: no rifle — a gun crew's gunner holds the gun)
       statics.push(...added);
       return added;
     },

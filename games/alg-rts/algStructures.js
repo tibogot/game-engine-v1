@@ -24,6 +24,19 @@ import { setPieceState } from "./algSangar.js";
 const S = 1.3;
 
 /** Per building: who owns it and how it fights. Producers keep their own hp. */
+/**
+ * THE GUN CREWS (2026-10-22, you: "in the mg nest there is no soldiers firing … is it how it should be?"): an
+ * emplacement's gun is worked by its men — figures of the side's crowd (the unit renderer's static figures, no draw
+ * of their own), placed behind the gun and turning with it (`gun`: offsets from its pivot along the barrel, `back` m
+ * behind it, `side` m to its right), or fixed in the piece's frame (`at`: local game metres); their clip at rest,
+ * their firing clip while it has a target. `bare`: no rifle (the gunner holds the gun). Gone when it falls; the
+ * mirador's (`intactOnly`) when its cabin is hit (the gun knocked off the rail).
+ */
+const CREWS = {
+  mgNest: { look: "appele", gun: [{ back: 1.05, side: 0, rest: "crouchIdle", fire: "crouchFire", bare: true }, { back: 0.75, side: 0.95, rest: "crouchIdle" }] },
+  sangar: { look: "moudjahid", gun: [{ back: 0.95, side: 0, rest: "crouchIdle", fire: "crouchFire", bare: true }, { back: 0.9, side: 1.05, rest: "crouchIdle" }] },
+  mirador: { look: "appele", intactOnly: true, at: [{ x: -0.6 * S, y: (6.2 + 0.13) * S, z: (-1.5 + 0.3 + 0.8) * S, yaw: Math.PI, rest: "aim", fire: "fire", bare: true }] },
+};
 const STATS = {
   // `vision`: how far it sees for the fog of war (the towers and the
   // watchtower furthest, over the valley).
@@ -93,7 +106,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     }
     const muzzles = st.muzzles ? (mesh.geometry.userData[st.muzzles] ?? []).map((p) => toW(...p))
       : st.muzzleAt ? [toW(...st.muzzleAt)] : [];
-    const rec = { s, mesh, gun, muzzles, fp, height: mesh.geometry.userData.height ?? 5, mortar: st.mortar ?? null, mortarT: Math.random() * 3 };
+    const rec = { s, mesh, gun, muzzles, fp, height: mesh.geometry.userData.height ?? 5, mortar: st.mortar ?? null, mortarT: Math.random() * 3, crewSpec: CREWS[key] ?? null, crew: null };
     list.push(rec);
     pub.push(s);
     roots.push(mesh);
@@ -156,6 +169,54 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     pitCrewShot(app, rec.mesh);
   }
 
+  // ── The gun crews (CREWS) ────────────────────────────────────────────────────────────────────────────────────
+  const _ray = new THREE.Raycaster(), _down = new THREE.Vector3(0, -1, 0), _o = new THREE.Vector3(), _p = new THREE.Vector3();
+  /** The floor under (x, z) in the piece (a nest's raised platform): a ray down onto its own mesh, the ground if none. */
+  function floorAt(rec, x, z, top) {
+    _ray.set(_o.set(x, top, z), _down);
+    const hit = _ray.intersectObject(rec.mesh, false)[0];
+    const g = app.getWorldHeight?.(x, z) ?? rec.mesh.position.y;
+    return hit ? Math.max(hit.point.y, g) : g;
+  }
+  function dropCrew(rec) {
+    if (rec.crew) app.algUnitRenderer?.removeStaticFigures?.(rec.crew);
+    rec.crew = null;
+  }
+  function stepCrew(rec) {
+    const s = rec.s, C = rec.crewSpec, R = app.algUnitRenderer;
+    if (!R?.addStaticFigures) return;
+    const gone = !s.alive || !rec.mesh.parent || (C.intactOnly && (rec.mesh.userData.pieceState ?? "intact") !== "intact")
+      || (rec.mesh.userData.pieceState === "ruin");
+    if (gone) { if (rec.crew) dropCrew(rec); rec.crewGone = rec.crewGone || !s.alive; return; }
+    if (rec.crewGone) return;
+    rec.mesh.updateMatrixWorld(true);
+    const firing = !!(s.target?.alive && s.range > 0 && Math.hypot(s.target.position.x - s.position.x, s.target.position.z - s.position.z) <= s.range + 2);
+    if (C.gun && rec.gun) {
+      // behind the gun along its barrel (local −Z), turning with it
+      rec.gun.getWorldPosition(_p);
+      const Y = rec.mesh.rotation.y + rec.gun.rotation.y, fx = -Math.sin(Y), fz = -Math.cos(Y), rx = -fz, rz = fx;
+      if (!rec.crew) {
+        rec.crew = R.addStaticFigures(C.look, C.gun.map((m, i) => ({ x: _p.x, y: _p.y, z: _p.z, yaw: 0, role: m.rest, slot: i, bare: m.bare })));
+        rec.crewFloor = C.gun.map((m) => floorAt(rec, _p.x - fx * m.back + rx * m.side, _p.z - fz * m.back + rz * m.side, _p.y + 1));
+      }
+      C.gun.forEach((m, i) => {
+        const f = rec.crew[i];
+        f.x = _p.x - fx * m.back + rx * m.side; f.z = _p.z - fz * m.back + rz * m.side; f.y = rec.crewFloor[i];
+        f.yaw = Math.atan2(fx, fz);
+        const want = firing && m.fire ? m.fire : m.rest;
+        if (f.role !== want) R.setStaticClip(f, want);
+      });
+    } else if (C.at) {
+      if (!rec.crew) {
+        rec.crew = R.addStaticFigures(C.look, C.at.map((m, i) => {
+          rec.mesh.localToWorld(_p.set(m.x, m.y, m.z));
+          return { x: _p.x, y: _p.y, z: _p.z, yaw: rec.mesh.rotation.y + m.yaw, role: m.rest, slot: i, bare: m.bare };
+        }));
+      }
+      C.at.forEach((m, i) => { const want = firing && m.fire ? m.fire : m.rest; if (rec.crew[i].role !== want) R.setStaticClip(rec.crew[i], want); });
+    }
+  }
+
   /** Charred and still: the building is a wreck (its own darkened material). */
   const charred = new Map();
   function charMaterial(src) {
@@ -176,6 +237,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
       app.algDamage?.coverChanged?.();
     } else rec.mesh.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.material = charMaterial(o.material); });
     // Its crew (a mortar pit's: algBuild.js) gone with it.
+    dropCrew(rec); rec.crewGone = true;
     if (rec.mesh.userData.crewFigures) { app.algUnitRenderer?.removeStaticFigures?.(rec.mesh.userData.crewFigures); rec.mesh.userData.crewFigures = null; }
     if (rec.gun) rec.gun.rotation.x = 0.5;           // the barrel down
     s.range = 0; s.target = null;
@@ -234,6 +296,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
         }
         // A mortar pit's crew kneel where the turned piece needs them (algMortarPit.js).
         if (s.alive && r.mortar && r.gun) pitCrewPlace(app, r.mesh, r.gun, turning);
+        if (r.crewSpec) stepCrew(r);
         if (s.alive && (s.hp < s.maxHp || s.selected)) {
           healthBars.add(s.position.x, s.position.y + Math.min(r.height, 12) + 2, s.position.z, Math.min(12, 4 + r.fp.hx * 0.3), s.hp / s.maxHp, isHostile(s.team), camera);
         }
