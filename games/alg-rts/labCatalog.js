@@ -61,6 +61,8 @@ export const META = {
   sangarBlender: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   sangarEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   cacheBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
+  refugeBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
+  infirmBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
   cacheEtats: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
   ecranBlender: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   ecranEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
@@ -100,7 +102,7 @@ export const NAMES = {
   miradorBlender: "Mirador (Blender) + construction", miradorEtats: "Mirador (Blender): states",
   sacsConstruction: "Sandbag pieces: construction (wall, MG nest, mortar pit)",
   nidBlender: "MG nest (Blender) + construction",
-  mortierBlender: "Mortar pit (Blender) + construction", fortBlender: "Fortified point (Blender) + construction", projBlender: "Searchlight tower (Blender) + construction", posteAvanceBlender: "Forward post (Blender) + construction", secoursBlender: "Aid station (Blender) + construction",
+  mortierBlender: "Mortar pit (Blender) + construction", fortBlender: "Fortified point (Blender) + construction", projBlender: "Searchlight tower (Blender) + construction", posteAvanceBlender: "Forward post (Blender) + construction", refugeBlender: "FLN refuge (Blender) + construction", infirmBlender: "FLN infirmary (Blender) + construction", secoursBlender: "Aid station (Blender) + construction",
   barbelesBlender: "Barbed wire (Blender) + construction", barbelesEtats: "Barbed wire (Blender): states",
 };
 const WORDS = [

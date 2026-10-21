@@ -20,7 +20,7 @@ import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFortPoint, buildMgNest, buildMirador, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, buildFortPoint, buildMgNest, buildMirador, buildRefuge, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -289,6 +289,42 @@ export function markDecal(state) {
   lod.addLevel(mk(n), 0);
   if (f && f !== n) lod.addLevel(mk(f), HOUSE_FAR);
   return lod;
+}
+
+/**
+ * THE FLN'S FIELD WORKS (tools/blender/flnPosts.py, 2026-10-21): the REFUGE (a hummock dug into, a stone-lined trench
+ * to a log door, a blanket across it) — its scrub the engine's plants on the mound (refugePlantSpots: the same mound
+ * formula as the Blender piece), so from the air it is one more scrubby hummock; the INFIRMARY (crooked poles, a
+ * patchwork tarp, straw pallets and blankets — cloth), a little scrub at its back. The old pieces' data kept.
+ */
+export const loadRefuge = () => loadBlenderPiece("flnposts", "refuge", () => buildRefuge(), (g) => { g.userData.screenPlants = refugePlantSpots(); }, { stone: false });
+export const refugeGeometry = () => pieceGeometry("flnposts", "refuge");
+export const loadInfirmary = () => loadBlenderPiece("flnposts", "infirm", () => buildFlnInfirmary(), (g) => { g.userData.screenPlants = infirmaryPlantSpots(); }, { stone: false });
+export const infirmaryGeometry = () => pieceGeometry("flnposts", "infirm");
+const hash01 = (i, s) => { let v = Math.imul(i * 977 + s * 131, 2654435761) >>> 0; v ^= v >>> 15; v = Math.imul(v, 2246822519) >>> 0; return (v >>> 0) / 4294967296; };
+/** The refuge's mound (flnPosts.py moundBase): kit metres. */
+const MOUND = { cz: 0.6, hx: 3.4, hz: 3.2, h: 1.75 };
+const moundBase = (x, z) => MOUND.h * Math.max(0, 1 - (x / MOUND.hx) ** 2 - ((z - MOUND.cz) / MOUND.hz) ** 2) ** 1.6;
+function refugePlantSpots() {
+  const out = [];
+  for (let i = 0; out.length < 13 && i < 200; i++) {
+    const x = (hash01(i, 1) * 2 - 1) * 2.9, z = MOUND.cz + (hash01(i, 2) * 2 - 1) * 2.8;
+    const h = moundBase(x, z);
+    if (h < 0.25 || (Math.abs(x) < 1.5 && z < 0.1)) continue;          // (off the mound; clear of the door and its trench)
+    if (out.some((p) => Math.hypot(p.x / S - x, p.z / S - z) < 0.9)) continue;
+    // (sunk a little: the mound's noise is ±0.07 — never a shrub over a hollow)
+    out.push({ kind: hash01(i, 3) < 0.6 ? "broomCut" : "juniperScrub", x: x * S, y: (h - 0.1) * S, z: z * S, rot: hash01(i, 4) * 6.28, scale: 0.75 + hash01(i, 5) * 0.45, seed: i, t: 0.8 + 0.15 * hash01(i, 6) });
+  }
+  return out;
+}
+/** The infirmary's scrub: along its back and its weather side, behind the dry-stone screen (kit z > 2.2). */
+function infirmaryPlantSpots() {
+  const out = [];
+  for (let i = 0; i < 7; i++) {
+    const x = -2.6 + i * 0.85 + (hash01(i, 7) - 0.5) * 0.3, z = 2.35 + hash01(i, 8) * 0.6;
+    out.push({ kind: i % 3 ? "broomCut" : "juniperScrub", x: x * S, y: 0, z: z * S, rot: hash01(i, 9) * 6.28, scale: 0.7 + hash01(i, 10) * 0.4, seed: 50 + i, t: 0.9 });
+  }
+  return out;
 }
 
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */

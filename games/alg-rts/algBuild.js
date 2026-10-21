@@ -22,7 +22,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -57,10 +57,10 @@ export const BUILDS = {
   // A NEW REFUGE (2026-10-07, the tunnels): the FLN digs one near a village it holds, the
   // nearest the post first (algAI.js stepRefuges) — its bands go to ground and come back out of
   // it. Hidden from the French until seen.
-  refuge: { label: t("Refuge"), tip: t("Casemate cachée, une seconde base : vos groupes à 30 m s'y renforcent comme à la grotte. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 100, time: 45, build: () => buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }), follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
+  refuge: { label: t("Refuge"), tip: t("Casemate cachée, une seconde base : vos groupes à 30 m s'y renforcent comme à la grotte. Cachée aux Français tant qu'ils ne l'ont pas vue."), cost: 100, time: 45, build: () => refugeGeometry() ?? buildRefuge({ seed: 2001 + Math.floor(Math.random() * 99) }) /* (the Blender piece once loaded — algSangar.js) */, follow: true, structure: "refuge", team: "enemy", by: ["moudjahid"] },
   // THE FLN'S FIELD HOSPITAL (2026-10-13, A3 — algFieldWorks.js): a brush shade, pallets, a stretcher: its
   // wounded within 20 m heal, out of the fight (the French aid station's rule).
-  infirmary: { label: t("Infirmerie"), tip: t("Abri de l'infirmier sous les broussailles : vos blessés à 20 m guérissent, hors du combat."), cost: 90, time: 22, build: () => buildFlnInfirmary({ seed: 1999 + Math.floor(Math.random() * 9) }), pad: true, structure: "infirmary", team: "enemy", by: ["moudjahid"] },
+  infirmary: { label: t("Infirmerie"), tip: t("Abri de l'infirmier sous les broussailles : vos blessés à 20 m guérissent, hors du combat."), cost: 90, time: 22, build: () => infirmaryGeometry() ?? buildFlnInfirmary({ seed: 1999 + Math.floor(Math.random() * 9) }) /* (the Blender piece once loaded) */, pad: true, structure: "infirmary", team: "enemy", by: ["moudjahid"] },
   ambushScreen: { label: t("Écran d'embuscade"), tip: t("Broussailles coupées sur un pied de pierres : les hommes derrière restent cachés jusqu'à ce qu'ils tirent."), cost: 25, time: 8, build: () => ambushScreenGeometry() ?? buildAmbushScreen() /* (the Blender piece once loaded — algSangar.js) */, follow: true, team: "enemy", by: ["moudjahid"] },
 };
 /** The medic's tent (nam's kit, the medic variant), with the footprint the build needs. */
@@ -127,6 +127,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   });
   loadFortPoint().then((ok) => { if (ok) geoCache.delete("fortPoint"); });
   loadForwardPost().then((ok) => { if (ok) geoCache.delete("forwardPost"); });
+  // (the FLN's: the map's own refuges — algLandmarks refuge1 … — swapped, their scrub grown on the mound)
+  loadRefuge().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("refuge");
+    swapPlaced(showroom, /^refuge\d*$/, refugeGeometry(), app);
+    for (const [name, mesh] of Object.entries(showroom ?? {})) if (/^refuge\d*$/.test(name)) growScreenPlants(plants(), mesh, 1);
+  });
+  loadInfirmary().then((ok) => { if (ok) geoCache.delete("infirmary"); });
   loadAidStation().then((ok) => { if (ok) geoCache.delete("aidStation"); });
   loadSearchlight().then((ok) => {
     if (!ok) return;

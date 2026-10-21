@@ -32,7 +32,7 @@ import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
-import { buildFortPoint, buildMgNest, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildFlnInfirmary, buildFortPoint, buildMgNest, buildRefuge, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
@@ -45,7 +45,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -59,10 +59,10 @@ export const labTick = (camera) => { for (const f of LAB_TICK) f(camera); };
  * its own little PlacedFoliage, a child of the piece so it moves with it (spots in game metres, piece-local).
  * `keep(spot)`: which stand (the damaged screen loses its middle). Returns { group, fill(progress) }.
  */
-function withScreenPlants(obj, keep = () => true) {
+function withScreenPlants(obj, keep = () => true, from = ambushScreenGeometry()) {   // (`from`: whose spots — the refuge's mound too)
   const g = new THREE.Group();
   g.add(obj);
-  const spots = (ambushScreenGeometry()?.userData.screenPlants ?? []).filter(keep);
+  const spots = (from?.userData.screenPlants ?? []).filter(keep);
   const pf = new PlacedFoliage({ scene: g, lodDistances: [70, 140], shadowLods: 2 });
   for (const k of ["broomCut", "juniperScrub"]) pf.setType(k, structuredClone(FOLIAGE_PRESETS[k]));
   const fill = (p) => { pf.removeWhere(() => true); for (const s of spots) if (s.t <= p) pf.add(s.kind, s.x, s.y, s.z, { rotY: s.rot, scale: s.scale, seed: s.seed }); };
@@ -665,6 +665,36 @@ export const BUILDINGS = {
     middle: () => { const g = houseMesh("mirador", "damaged"); g.add(houseMesh("gear", "damaged", 1)); return labPiece(g); },
     after: () => { const g = houseMesh("mirador", "ruin"); g.add(houseMesh("gear", "ruin", 1)); return labPiece(g); },
     tags: ["MIRADOR · INTACT", "MIRADOR · ENDOMMAGÉ", "MIRADOR · DÉTRUIT"], note: "le mirador dans ses trois états (les sacs du plancher : l'intact).",
+  },
+  // THE FLN'S FIELD WORKS IN BLENDER (2026-10-21, tools/blender/flnPosts.py): the game's LEFT, the new one MIDDLE (its
+  // construction in the panel; the scrub the game's plants), damaged RIGHT.
+  refugeBlender: {
+    label: "Refuge FLN (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadRefuge(),
+    before: () => buildRefuge(),
+    middle: () => {
+      const geo = refugeGeometry(), site = geo.userData.siteMaterial();
+      const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
+      const sp = withScreenPlants(m, () => true, geo);
+      SITE = { set: (p) => { site.set(p); sp.fill(p); }, stencilShown: () => false, sock: null };
+      site.set(1);
+      return labPiece(sp.group);
+    },
+    after: () => labPiece(withScreenPlants(houseMesh("refuge", "damaged"), () => true, refugeGeometry()).group),
+    tags: ["FLN REFUGE (THE GAME)", "FLN REFUGE · NEW", "FLN REFUGE · DAMAGED"], note: "le refuge du jeu à gauche, le nouveau au milieu (Blender : la butte, la tranchée en pierres sèches, la porte de rondins, la couverture ; les broussailles du jeu sur la butte) — « Construction » — endommagé à droite.",
+  },
+  infirmBlender: {
+    label: "Infirmerie FLN (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadInfirmary(),
+    before: () => buildFlnInfirmary(),
+    middle: () => {
+      const geo = infirmaryGeometry(), site = geo.userData.siteMaterial();
+      const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
+      const sp = withScreenPlants(m, () => true, geo);
+      SITE = { set: (p) => { site.set(p); sp.fill(p); }, stencilShown: () => false, sock: null };
+      site.set(1);
+      return labPiece(sp.group);
+    },
+    after: () => labPiece(withScreenPlants(houseMesh("infirm", "damaged"), () => true, infirmaryGeometry()).group),
+    tags: ["FLN INFIRMARY (THE GAME)", "FLN INFIRMARY · NEW", "FLN INFIRMARY · DAMAGED"], note: "l'infirmerie du jeu à gauche, la nouvelle au milieu (Blender : perches fourchues, bâche rapiécée, paillasses et couvertures — tissu simulé) — « Construction » — endommagée à droite.",
   },
   ecranBlender: {
     label: "Écran d'embuscade (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAmbushScreen(),
