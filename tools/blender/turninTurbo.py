@@ -317,7 +317,7 @@ def bumper():
     path = rpoly([(-B_W, z_start), (-B_W, B_ZB), (B_W, B_ZB), (B_W, z_start)], [0, B_RC, B_RC, 0], 12)
     prof = [(-0.006, 0.05), (0.009, 0.05), (0.0125, 0.052), (0.014, 0.056), (0.014, 0.066), (0.0125, 0.0675),
             (0.014, 0.069), (0.014, 0.085), (0.0125, 0.0865), (0.014, 0.088), (0.014, 0.1), (0.0125, 0.1045),
-            (0.009, 0.107), (-0.006, 0.107)]
+            (0.009, 0.1085), (-0.006, 0.1085)]   # 1.5 mm over the shell's lowest top (it met it exactly: z-fight)
     rings = []
     for i, (x, z) in enumerate(path):
         p = Vector((x, z))
@@ -459,8 +459,6 @@ for k, (x0, y0, x1, y1) in enumerate([(97, 462, 145, 507), (107, 520, 155, 560),
     slab(f"CheekButton{k}", [prect(x0, y0, x1, y1, 4)], ZF + FR - 0.002, ZF + FR + 0.0016, 0.0007, SLATE)
 
 # the column boss: a big slate wedge out of the bezel under the cluster, behind the hub; the column goes into it
-shroud = ppoly([(282, 738), (522, 738), (556, 630), (248, 630)], [8, 8, 6, 6])
-slab("ColumnShroud", [shroud], ZF - 0.004, ZF + 0.034, 0.0015, SLATE)
 
 # vent: three slats in the slot, a dark box behind
 for k in range(3):
@@ -598,7 +596,12 @@ hub = rrect(0, -0.002, 0.086, 0.046, 0.017, 10)
 slab("WheelHub", [hub], -0.022, 0.003 - DISH, 0.0016, BLACK, WHEEL)
 slab("WheelHubLip", [rrect(0, 0.0155, 0.074, 0.008, 0.004, 6)], 0.001 - DISH, 0.0048 - DISH, 0.0012, BLACK, WHEEL)
 uvplane("HubBadge", 0.052, 0.032, WHEEL @ Matrix.Translation((0, -0.0045, 0.0032 - DISH)))
-lathe("WheelColumn", [(0.011, -0.1), (0.011, -0.02), (0.014, -0.018)], BLACK, WHEEL)
+# the column boss: a slate block ON the wheel's axis (the wheel hides it in the photo: placed by the measured wheel),
+# wider at the bottom, from deep in the bezel out to 60 mm behind the hub
+slab("ColumnBoss", [rpoly([(-0.04, -0.03), (0.04, -0.03), (0.032, 0.026), (-0.032, 0.026)], [0.006, 0.006, 0.008, 0.008], 6)],
+     -0.16, -0.06, 0.003, SLATE, WHEEL)
+# a short thick stub from the hub straight into the column boss (73 mm back along the wheel axis: the boss front)
+lathe("WheelColumn", [(0.0165, -0.062), (0.0165, -0.02), (0.019, -0.017)], BLACK, WHEEL)
 
 # =================================================================================================================
 # the faces the page textures: the cluster panel, the film (curved like the frosted screen), the glass, the sticker
