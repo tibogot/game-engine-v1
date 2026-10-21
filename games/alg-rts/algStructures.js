@@ -18,7 +18,7 @@ import * as THREE from "three";
 import { isHuman, isHostile, SIDES, hostileSide } from "../shared-rts/teams.js";
 import { vec3 } from "three/tsl";
 import { t } from "./i18n/i18n.js";
-import { pitCrewPlace, pitCrewShot, pitMouth } from "./algMortarPit.js";
+import { pitCrewPlace, pitCrewShot, pitMouth } from "./algMortarPit.js";
 import { setPieceState } from "./algSangar.js";
 
 const S = 1.3;
@@ -35,6 +35,9 @@ const S = 1.3;
 const CREWS = {
   mgNest: { look: "appele", gun: [{ back: 1.05, side: 0, rest: "crouchIdle", fire: "crouchFire", bare: true }, { back: 0.75, side: 0.95, rest: "crouchIdle" }] },
   sangar: { look: "moudjahid", gun: [{ back: 0.95, side: 0, rest: "crouchIdle", fire: "crouchFire", bare: true }, { back: 0.9, side: 1.05, rest: "crouchIdle" }] },
+  // the post's tower guns (rtsFrenchPost userData.towerGuns: each AA-52's muzzle, the towers on the diagonal): a
+  // gunner kneeling behind each, `back` m in from the muzzle toward the post's centre, facing out
+  post: { look: "appele", muzzles: { key: "towerGuns", back: 1.5 * S, rest: "crouchIdle", fire: "crouchFire", bare: true } },
   mirador: { look: "appele", intactOnly: true, at: [{ x: -0.6 * S, y: (6.2 + 0.13) * S, z: (-1.5 + 0.3 + 0.8) * S, yaw: Math.PI, rest: "aim", fire: "fire", bare: true }] },
 };
 const STATS = {
@@ -206,6 +209,17 @@ export function createAlgStructures({ app, showroom, producers, units }) {
         const want = firing && m.fire ? m.fire : m.rest;
         if (f.role !== want) R.setStaticClip(f, want);
       });
+    } else if (C.muzzles) {
+      if (!rec.crew) {
+        const M = C.muzzles, pts = rec.mesh.geometry.userData[M.key] ?? [];
+        rec.crew = R.addStaticFigures(C.look, pts.map((q, i) => {
+          const L = Math.hypot(q[0], q[2]) || 1, dx = q[0] / L, dz = q[2] / L;
+          rec.mesh.localToWorld(_p.set(q[0] - dx * M.back, q[1], q[2] - dz * M.back));
+          return { x: _p.x, y: floorAt(rec, _p.x, _p.z, _p.y + 1), z: _p.z, yaw: rec.mesh.rotation.y + Math.atan2(dx, dz), role: M.rest, slot: i, bare: M.bare };
+        }));
+      }
+      const want = firing ? C.muzzles.fire : C.muzzles.rest;
+      for (const f of rec.crew) if (f.role !== want) R.setStaticClip(f, want);
     } else if (C.at) {
       if (!rec.crew) {
         rec.crew = R.addStaticFigures(C.look, C.at.map((m, i) => {
