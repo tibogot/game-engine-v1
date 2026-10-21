@@ -20,6 +20,7 @@ Parts, each its own object (the page gives them their materials by name):
 """
 import sys, os, math
 import bpy, bmesh
+import numpy as np
 from mathutils import Vector, Matrix
 
 for _o in list(bpy.data.objects): bpy.data.objects.remove(_o)   # factory scene: cube, camera, light
@@ -186,48 +187,117 @@ def uvplane(name, w, h, m_game, nx=1, ny=1, bulge=0.0):
     return link(name, me, FACE, m_game)
 
 # =================================================================================================================
-# THE BODY — a red shell, a car nose at the back: lofted side profiles across x, then subdivided
-SX = [-0.2, -0.197, -0.19, -0.165, -0.14, -0.1, -0.05, 0.0, 0.05, 0.1, 0.14, 0.165, 0.19, 0.197, 0.2]
+# (the face lean, used by the body too)
+FACE_TILT, FACE_PIVOT_Y = 28.0, 0.025
+ZF = 0.02
+# THE BODY (back + 3/4 photos: assets-src/refs/turnin-turbo/back.jpg, threequarter_right.jpg): a red box with flat
+# upright sides and a crisp rounded shoulder; the top runs level back from the bezel, then rolls down into a car nose;
+# fender bulges either side carry the round grey headlights low on the nose; a slate bumper band wraps the back and
+# the rear of the sides, a red skirt under it. Built as cross-sections (x, y) stepped along z and lofted — no subdivision.
+B_ZF, B_ZB = 0.016, -0.215        # the shell's front (the red apron under the bezel) and back
+B_W, B_RC = 0.2, 0.045            # half width, plan radius of the back corners
+B_TOP, B_NOSE = 0.166, 0.062      # top height (below both frames: they stand out of it); the nose at the back
+B_NOSE_Z = -0.1                   # where the top starts to roll down
+B_FENDER = 0.042                  # how much higher the fenders stay over the nose
+B_SH = 0.012                      # the shoulder radius
 
-def body_profile(ax):
-    f = math.exp(-((ax - 0.137) / 0.035) ** 2)       # the fender bulge round each headlight
-    hr = 0.1 + 0.035 * f                              # top of the nose, at the back
-    hm = 0.138 + 0.03 * f
-    # the front stays BEHIND the bezel (its windows look into the shell), except the red apron under it
-    return [(0.016, 0.0), (0.006, 0.0), (-0.06, 0.0), (-0.13, 0.0), (-0.166, 0.001), (-0.18, 0.016), (-0.187, 0.05),
-            (-0.19, 0.08), (-0.188, hr - 0.03), (-0.181, hr - 0.004), (-0.166, hr + 0.01), (-0.137, hm),
-            (-0.115, 0.163 + 0.012 * f), (-0.095, 0.162), (-0.072, 0.12), (-0.022, 0.03), (0.008, 0.028), (0.016, 0.024), (0.016, 0.004)]   # the apron: flat
+def b_halfwidth(z):
+    zc = B_ZB + B_RC
+    if z >= zc: return B_W
+    d = zc - z
+    return B_W - B_RC + math.sqrt(max(B_RC * B_RC - d * d, 0.0))
 
-rings = []
-for x in SX:
-    ax = abs(x)
-    shrink = {0.2: 0.72, 0.197: 0.9, 0.19: 0.975}.get(round(ax, 3), 1.0)
-    prof = body_profile(ax)
-    cz, cy = -0.09, 0.09
-    rings.append([(x, cy + (y - cy) * shrink, cz + (z - cz) * shrink) for z, y in prof])
-loft("Shell", rings, RED, cap0=True, cap1=True, subsurf=2, angle=60)
+# the top's centre line (z, y): level, then the nose rolls over and drops steeply — every point just under the rays
+# from the camera fitted to the front photo through the red body's top edge (that view shows only a narrow red band)
+NOSE_PROFILE = [(0.1, B_TOP), (0.11, 0.164), (0.12, 0.158), (0.13, 0.15), (0.14, 0.14), (0.15, 0.128), (0.16, 0.116),
+                (0.17, 0.104), (0.18, 0.093), (0.19, 0.083), (0.2, 0.074), (0.215, B_NOSE)]
+def b_height(z, x):
+    t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
+    hc = float(np.interp(-z, *zip(*NOSE_PROFILE)))   # the nose, kept under the photo camera's rays
+    f = math.exp(-((abs(x) - 0.14) / 0.042) ** 2)
+    # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
+    y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
+    return max(min(hc + B_FENDER * f * (t ** 0.7), y_face), 0.026)
 
-# the headlight pods: grey caps set into the fenders, looking back and a little up
-POD_PROF = [(0.0, 0.007), (0.013, 0.0066), (0.022, 0.0054), (0.027, 0.0034), (0.03, 0.0004), (0.031, -0.0045), (0.0305, -0.025)]
+def b_ring(z):
+    w = b_halfwidth(z)
+    pts = []
+    N_TOP, N_SIDE, N_ARC, N_BOT = 48, 8, 5, 10
+    hl, hr = b_height(z, -w + B_SH), b_height(z, w - B_SH)
+    for k in range(N_BOT + 1):                    # bottom, right to left
+        pts.append((w - 2 * w * k / N_BOT, 0.0))
+    for k in range(1, N_SIDE):                    # left side up
+        pts.append((-w, (hl - B_SH) * k / N_SIDE))
+    for k in range(N_ARC + 1):                    # left shoulder
+        a = math.pi - (math.pi / 2) * k / N_ARC
+        pts.append((-w + B_SH + B_SH * math.cos(a), hl - B_SH + B_SH * math.sin(a)))
+    for k in range(1, N_TOP):                     # the top, left to right
+        x = -w + B_SH + (2 * w - 2 * B_SH) * k / N_TOP
+        pts.append((x, b_height(z, x)))
+    for k in range(N_ARC + 1):                    # right shoulder
+        a = math.pi / 2 - (math.pi / 2) * k / N_ARC
+        pts.append((w - B_SH + B_SH * math.cos(a), hr - B_SH + B_SH * math.sin(a)))
+    for k in range(1, N_SIDE):                    # right side down
+        pts.append((w, (hr - B_SH) * (1 - k / N_SIDE)))
+    return [(x, y, z) for x, y in pts]
+
+ZS = [B_ZF + (B_ZB - B_ZF) * (i / 60) for i in range(61)]
+# the back end: the last rings shrink in to a rounded rear edge (2 mm) before the cap
+rings = [b_ring(z) for z in ZS]
+last = rings[-1]
+cx_, cy_ = 0.0, B_NOSE * 0.5
+rings.append([(cx_ + (x - cx_) * 0.985, cy_ + (y - cy_) * 0.97 if y > 0 else 0.0, B_ZB - 0.0025) for x, y, z in last])
+loft("Shell", rings, RED, cap0=True, cap1=True, angle=35)
+
+# the headlights: grey discs set into the fenders, square to the surface — a rim ring and a raised inner disc
+def b_normal(z, x, e=0.001):
+    hx = (b_height(z, x + e) - b_height(z, x - e)) / (2 * e)
+    hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
+    return Vector((-hx, 1.0, -hz)).normalized()
+POD_PROF = [(0.0, 0.0085), (0.025, 0.0083), (0.029, 0.0075), (0.0303, 0.006), (0.0315, 0.0055), (0.0365, 0.005),
+            (0.038, 0.004), (0.0384, 0.002), (0.0384, -0.035)]
 for sx in (-1, 1):
-    up = math.radians(26)
-    axis = Vector((0, math.sin(up), -math.cos(up)))
-    lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((sx * 0.134, 0.13, -0.178), (1, 0, 0), axis.cross(Vector((1, 0, 0)))))
+    x = sx * 0.132
+    z = min((B_ZB + 0.003 + i * 0.0005 for i in range(240)), key=lambda zz: abs(b_height(zz, x) - 0.128))
+    n = b_normal(z, x)
+    ex = Vector((1, 0, 0)); ey = n.cross(ex).cross(n).normalized() * -1 if False else n.cross(ex).normalized()
+    lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, b_height(z, x), z), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
 
-# the bumper: a black band round the back, a rounded profile swept along a plan path
+# the bumper: a slate band round the back and the rear half of the sides, a groove along it
 def bumper():
-    path = rpoly([(-0.203, -0.05), (-0.203, -0.195), (0.203, -0.195), (0.203, -0.05)], [0, 0.05, 0.05, 0], 10)
-    prof = [(-0.006, 0.046), (0.006, 0.046), (0.0095, 0.0475), (0.011, 0.051), (0.011, 0.064), (0.0095, 0.0655),
-            (0.011, 0.067), (0.011, 0.08), (0.0095, 0.0835), (0.006, 0.085), (-0.006, 0.085)]
+    z_start = -0.085
+    path = rpoly([(-B_W, z_start), (-B_W, B_ZB), (B_W, B_ZB), (B_W, z_start)], [0, B_RC, B_RC, 0], 12)
+    prof = [(-0.006, 0.018), (0.006, 0.018), (0.0095, 0.0195), (0.011, 0.023), (0.011, 0.033), (0.0095, 0.0345),
+            (0.011, 0.036), (0.011, 0.047), (0.0095, 0.0505), (0.006, 0.052), (-0.006, 0.052)]
     rings = []
     for i, (x, z) in enumerate(path):
         p = Vector((x, z))
         a = Vector(path[max(i - 1, 0)]); b = Vector(path[min(i + 1, len(path) - 1)])
-        t = (b - a).normalized(); nrm = Vector((-t.y, t.x))   # outward (path runs clockwise seen from above)
-        if nrm.dot(p - Vector((0, -0.09))) < 0: nrm = -nrm
+        t = (b - a).normalized(); nrm = Vector((-t.y, t.x))
+        if nrm.dot(p - Vector((0, (z_start + B_ZB) / 2))) < 0: nrm = -nrm
         rings.append([(x + nrm.x * o, y, z + nrm.y * o) for o, y in prof])
-    loft("Bumper", rings, BLACK, cap0=True, cap1=True, angle=50)
+    loft("Bumper", rings, SLATE, cap0=True, cap1=True, angle=50)
 bumper()
+
+# the bonnet's panel lines (back photo): a line across under the sticker, two running down to the bumper, pressed in
+def panel_line(name, pts):
+    """pts: (x, z) along the surface; a 1.2 mm dark groove strip following b_height."""
+    ring_a, ring_b = [], []
+    for i, (x, z) in enumerate(pts):
+        a = Vector(pts[max(i - 1, 0)]); b = Vector(pts[min(i + 1, len(pts) - 1)])
+        t = (b - a).normalized(); side = Vector((-t.y, t.x)) * 0.0006
+        for ring, s in ((ring_a, 1), (ring_b, -1)):
+            xx, zz = x + side.x * s, z + side.y * s
+            ring.append((xx, b_height(zz, xx) + 0.00025, zz))
+    me = bpy.data.meshes.new(name)
+    v = ring_a + ring_b; n = len(ring_a)
+    me.from_pydata([tuple(q) for q in v], [], [(i, i + 1, n + i + 1, n + i) for i in range(n - 1)])
+    to_blender(me); link(name, me, BLACK)
+zl = B_NOSE_Z - 0.012
+panel_line("BonnetLineTop", [(-0.075 + 0.15 * k / 20, zl) for k in range(21)])
+for sx in (-1, 1):
+    panel_line(f"BonnetLine{sx}", [(sx * (0.075 + 0.02 * k / 30), zl - (B_ZB + 0.012 - zl) * -k / 30) for k in range(31)])
+
 
 CHROME = mat("Chrome", (0.55, 0.56, 0.57), 0.25)
 
@@ -276,9 +346,17 @@ holes = [prect(*CL_OPEN), prect(*SC_OPEN), prect(*VENT), prect(*RESET), circle(*
 slab("Bezel", [ppoly(BEZEL_PTS, BEZEL_R)] + holes, ZF - 0.006, ZF, EDGE, SLATE)
 # its sides wrap back 45 mm into the red shell (the top surface you see from above)
 outer = ppoly(BEZEL_MAIN, BEZEL_MAIN_R)
-loft("BezelRim", [[(x, y, ZF - 0.0015) for x, y in outer], [(x, y, ZF - 0.04) for x, y in outer]], SLATE, angle=50, recalc=False)
-# (outer CCW, front -> back: these faces look inwards; flip them)
-_rim = bpy.data.objects["BezelRim"].data
+# The frames' top and side surfaces run straight back, LEVEL (the front photo shows them as slate bands above the
+# windows), to a closed back end standing over the red body (the back photo's slate band). Built in world space: the
+# outline is leaned like the face, then swept horizontally back.
+_ca, _sa = math.cos(math.radians(FACE_TILT)), math.sin(math.radians(FACE_TILT))
+def _lean(x, y, z):
+    dy, dz = y - FACE_PIVOT_Y, z - ZF
+    return (x, FACE_PIVOT_Y + dy * _ca + dz * _sa, ZF - dy * _sa + dz * _ca)
+RIM_BACK = -0.088
+_front = [_lean(x, y, ZF - 0.0015) for x, y in outer]
+loft("BezelRim", [_front, [(x, y, RIM_BACK) for x, y, z in _front]], SLATE, cap1=True, angle=50, recalc=False)
+_rim = bpy.data.objects["BezelRim"].data      # (the outline runs CCW seen from the front: flip to face outwards)
 for p in _rim.polygons: p.flip()
 _rim.update()
 
@@ -381,13 +459,21 @@ SLOT_U = (X(1300) + X(1392)) / 2 - (CX0 + CX1) / 2
 slab("ConsoleSlot", [rrect(SLOT_U, 0.0, X(1392) - X(1300), tlen - 0.01, 0.002),
                      rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.006, tlen - 0.016, 0.0015)], -0.014, 0.0002, 0.0005, BLACK, TOP)
 slab("ConsoleSlotFloor", [rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.004, tlen - 0.014, 0.0015)], -0.015, -0.013, 0.0004, BLACK, TOP)
-slab("ConsoleRail", [rrect(W / 2 - 0.0085, 0.004, 0.016, tlen - 0.01, 0.0025)], 0.0, 0.016, 0.0014, BLACK, TOP)
+for k, fx in enumerate((W / 2 - 0.0035, W / 2 - 0.0105)):
+    slab(f"ConsoleFin{k}", [rrect(fx, 0.006, 0.0032, tlen - 0.018, 0.0012)], 0.0, 0.015 - 0.003 * k, 0.0009, BLACK, TOP)
+SLOT_W = X(1392) - X(1300)
+for k in range(5):
+    slab(f"ConsoleGate{k}", [rrect(SLOT_U - SLOT_W / 2 + 0.0035, -0.032 + k * 0.0165, 0.004, 0.009, 0.0008)], -0.009, -0.0005,
+         0.0005, BLACK, TOP)
 
 # the lever: a stick in the slot, the grey grip lying across it, reaching out to the right; three grooves along its
 # face, a collar round the stick. Origin in the slot (the page slides it along the slot's axis, local y).
 LEVER = TOP @ Matrix.Translation((SLOT_U - 0.004, 0.0, 0.0))
 slab("LeverStick", [rrect(0.0, 0.0, 0.007, 0.009, 0.0008)], -0.013, 0.009, 0.0006, GREY, LEVER)
 slab("LeverBlock", [rrect(0.0, 0.0, 0.011, 0.013, 0.001)], 0.004, 0.0145, 0.0008, GREY, LEVER)
+lathe("LeverDrum", [(0.0001, -0.0065), (0.008, -0.0065), (0.0105, -0.005), (0.0115, -0.0025), (0.0115, 0.0025),
+                     (0.0105, 0.005), (0.008, 0.0065), (0.0001, 0.0065)], GREY, LEVER @ Matrix.Translation((0, 0, -0.0105))
+      @ gmat((0, 0, 0), (0, 1, 0), (0, 0, 1)), n=40)
 G_Y0, G_Y1, G_D = 0.0135, 0.0305, 0.02             # the grip (front photo: ~60 mm with its cap, ~17 tall)
 G0 = LEVER @ gmat((0, 0, 0), (1, 0, 0), (0, 0, 1))  # outline in (x, up), extruded along the slot; +z = the front
 slab("LeverGrip", [rrect(0.0215, (G_Y0 + G_Y1) / 2, 0.052, G_Y1 - G_Y0, 0.0014, 4)], -G_D / 2, G_D / 2, 0.001, GREY, G0)
@@ -406,9 +492,9 @@ for k in range(3):   # three grooves along the grip's front face, on its right p
 # bottom just clear of the table: centre 87 mm up, 117 mm out, 92 mm radius, tilted back 24.5° — its column then runs
 # back and down straight into the column boss
 WHEEL_C = (-0.0934, 0.0873, 0.1175)
-WHEEL_TILT = 24.5
+WHEEL_TILT = 30.0
 WHEEL = gmat(WHEEL_C, (1, 0, 0), (0, math.cos(math.radians(WHEEL_TILT)), -math.sin(math.radians(WHEEL_TILT))))
-RR, TR, TD = 0.0839, 0.0078, 0.0088
+RR, TR, TD = 0.0812, 0.0105, 0.0135
 rim_rings = []
 for i in range(96):
     a = 2 * math.pi * i / 96
@@ -416,16 +502,20 @@ for i in range(96):
     rim_rings.append([(c * (RR + TR * math.cos(b)), s * (RR + TR * math.cos(b)), TD * math.sin(b))
                       for b in (2 * math.pi * k / 16 for k in range(16))])
 loft("WheelRim", rim_rings, BLACK, WHEEL, wrap=True, angle=70)
-for a_deg, edge in ((154, 1), (26, 1), (218, -1), (322, -1)):
-    a = math.radians(a_deg); c, s = math.cos(a), math.sin(a)
-    rot = lambda pts: [(x * c - y * s, x * s + y * c) for x, y in pts]
-    pts = rot([(0.03, -0.0088), (RR - 0.003, -0.0074), (RR - 0.003, 0.0074), (0.03, 0.0088)])
-    slab(f"WheelSpoke{a_deg}", [rpoly(pts, [0.001, 0.001, 0.001, 0.001], 2)], -0.0075, -0.0015, 0.0012, BLACK, WHEEL)
-    line = rot([(0.036, edge * 0.0078), (RR - 0.008, edge * 0.0066), (RR - 0.008, edge * 0.0074), (0.036, edge * 0.0086)])
-    slab(f"WheelChrome{a_deg}", [line if edge > 0 else line[::-1]], -0.0016, -0.0013, 0.0001, CHROME, WHEEL)
-hub = rrect(0, 0, 0.08, 0.057, 0.016, 8)
-slab("WheelHub", [hub], -0.014, 0.003, 0.0022, BLACK, WHEEL)
-uvplane("HubBadge", 0.05, 0.03, WHEEL @ Matrix.Translation((0, 0, 0.0032)))
+# DISHED (the photo shows the spokes' sides): each spoke runs from the hub, 9 mm back, out to the rim, tilted ~10°
+DISH = 0.009
+for a_deg, edge in ((160, 1), (20, 1), (206, -1), (334, -1)):
+    tilt = -math.atan2(DISH, RR - 0.03)
+    F = WHEEL @ Matrix.Rotation(math.radians(a_deg), 4, "Z") @ Matrix.Translation((0.03, 0, -DISH)) @ Matrix.Rotation(tilt, 4, "Y")
+    L = math.hypot(RR - 0.03, DISH)
+    pts = [(0.0, -0.0118), (L - 0.002, -0.0098), (L - 0.002, 0.0098), (0.0, 0.0118)]
+    slab(f"WheelSpoke{a_deg}", [rpoly(pts, [0.001, 0.001, 0.001, 0.001], 2)], -0.0035, 0.0025, 0.0012, BLACK, F)
+    line = [(0.008, edge * 0.0105), (L - 0.008, edge * 0.0088), (L - 0.008, edge * 0.0096), (0.008, edge * 0.0113)]
+    slab(f"WheelChrome{a_deg}", [line if edge > 0 else line[::-1]], 0.0024, 0.0027, 0.0001, CHROME, F)
+hub = rrect(0, -0.002, 0.086, 0.046, 0.017, 10)
+slab("WheelHub", [hub], -0.022, 0.003 - DISH, 0.0016, BLACK, WHEEL)
+slab("WheelHubLip", [rrect(0, 0.0155, 0.074, 0.008, 0.004, 6)], 0.001 - DISH, 0.0048 - DISH, 0.0012, BLACK, WHEEL)
+uvplane("HubBadge", 0.052, 0.032, WHEEL @ Matrix.Translation((0, -0.0045, 0.0032 - DISH)))
 lathe("WheelColumn", [(0.011, -0.1), (0.011, -0.02), (0.014, -0.018)], BLACK, WHEEL)
 
 # =================================================================================================================
@@ -442,17 +532,35 @@ cx, cy, w, h = rect_c(SC_GLASS)
 uvplane("ScreenFilm", w + 0.004, h + 0.004, gmat((cx, cy, ZF - 0.0185)), 24, 16, 0.0035)
 uvplane("ScreenGlass", w + 0.001, h + 0.001, gmat((cx, cy, ZF - 0.0128)), 24, 16, 0.003)
 # the TURNIN' TURBO DASHBOARD sticker on the red top, just behind the bezel (left of centre)
-uvplane("TopSticker", X(815) - X(230), 0.02, gmat(((X(230) + X(815)) / 2, 0.1655, -0.102), (-1, 0, 0), (0, 0, 1)))
+# the sticker follows the curved top (a flat plane sank into the fender bulge): a grid laid on b_height, 0.4 mm over
+def top_sticker(x0, x1, zc, depth, nx=48, nz=4):
+    verts, uvs, faces = [], [], []
+    for j in range(nz + 1):
+        for i in range(nx + 1):
+            x = x1 - (x1 - x0) * i / nx            # u runs to -x: it reads from the back
+            z = zc + depth / 2 - depth * j / nz    # v: front -> back = sticker top -> bottom seen from the back
+            verts.append(R3 @ Vector((x, b_height(z, x) + 0.0004, z))); uvs.append((i / nx, 1 - j / nz))
+    for j in range(nz):
+        for i in range(nx):
+            q = j * (nx + 1) + i
+            faces.append((q, q + nx + 1, q + nx + 2, q + 1))
+    me = bpy.data.meshes.new("TopSticker"); me.from_pydata(verts, [], faces); me.update()
+    uvl = me.uv_layers.new(name="UVMap")
+    for poly in me.polygons:
+        for li in poly.loop_indices: uvl.data[li].uv = uvs[me.loops[li].vertex_index]
+    smooth(me, 80)
+    return link("TopSticker", me, FACE)
+top_sticker(X(230), X(815), -0.1, 0.019)
 
 # =================================================================================================================
 # lean the face back (everything built on the upright front plane)
-FACE_PARTS = ("Bezel", "BezelRim", "ClusterFrame", "ScreenFrame", "ClusterWalls", "ScreenWalls", "CheekPill", "CheekPillSplit", "CheekButton",
+FACE_PARTS = ("Bezel", "ClusterFrame", "ScreenFrame", "ClusterWalls", "ScreenWalls", "CheekPill", "CheekPillSplit", "CheekButton",
               "ColumnShroud", "VentSlat", "VentBack", "ResetButton", "ResetChevron", "ResetRib", "KeyLock", "KeyBarrel",
               "KeyHead", "StripPrint", "ClusterFace", "ClusterGlass", "ClusterBack", "ScreenFilm", "ScreenGlass")
 TILT = (Matrix.Translation((0, FACE_PIVOT_Y, ZF)) @ Matrix.Rotation(math.radians(-FACE_TILT), 4, "X")
         @ Matrix.Translation((0, -FACE_PIVOT_Y, -ZF)))
 for ob in list(bpy.data.objects):
-    if ob.name.startswith(FACE_PARTS):
+    if ob.name.startswith(FACE_PARTS) and ob.name != "BezelRim":   # the rim is built leaned already
         ob.matrix_world = R4 @ TILT @ R4.inverted() @ ob.matrix_world
 
 def join(name, names):
@@ -465,7 +573,9 @@ def starts(*pre): return [n for n in bpy.data.objects.keys() if n.startswith(pre
 
 join("Wheel", ["WheelRim"] + starts("WheelSpoke", "WheelHub"))
 join("WheelChromeLines", starts("WheelChrome"))
-join("Lever", ["LeverStick", "LeverBlock", "LeverGrip", "LeverCap", "LeverCapPlug"])
+join("Lever", ["LeverStick", "LeverBlock", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum"])
+join("ConsoleRight", starts("ConsoleFin", "ConsoleGate"))
+join("BonnetLines", starts("BonnetLine"))
 join("LeverGrooves", starts("LeverGroove"))
 join("ResetButton", ["ResetButton", "ResetChevron"] + starts("ResetRib"))
 join("KeyHead", ["KeyHead", "KeyBow"] + starts("KeyGroove"))

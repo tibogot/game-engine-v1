@@ -117,25 +117,28 @@ export function createShifterPlate() {
 }
 
 // --- the wheel hub badge: an elongated octagon, silver frame, black inside, TOMY in light grey ----------
+// (front photo: an elongated octagon — straight top and bottom, the corners cut at ~40°, round-ish; a silver rim,
+// glossy black inside, TOMY in round heavy silver letters a little below centre)
 export function createHubBadge() {
-  const { ctx, tex } = canvasTexture(512, 308);
-  ctx.clearRect(0, 0, 512, 308);   // only the badge itself: the hub shows round it
-  const oct = (inset) => {
-    const pts = [[70, 30], [442, 30], [490, 154], [442, 278], [70, 278], [22, 154]];
-    const c = [256, 154];
+  const { ctx, tex } = canvasTexture(512, 316);
+  ctx.clearRect(0, 0, 512, 316);   // only the badge itself: the hub shows round it
+  const oct = (m) => {
+    const x0 = 12 + m, x1 = 500 - m, y0 = 12 + m, y1 = 304 - m, c = 88 - m * 0.6;
     ctx.beginPath();
-    pts.forEach(([x, y], i) => {
-      const k = 1 - inset / 230, px = c[0] + (x - c[0]) * k, py = c[1] + (y - c[1]) * (1 - inset / 125);
-      i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
-    });
-    ctx.closePath();
+    ctx.moveTo(x0 + c, y0); ctx.lineTo(x1 - c, y0); ctx.quadraticCurveTo(x1 - c * 0.2, y0 + c * 0.1, x1, y0 + c);
+    ctx.lineTo(x1, y1 - c); ctx.quadraticCurveTo(x1 - c * 0.2, y1 - c * 0.1, x1 - c, y1); ctx.lineTo(x0 + c, y1);
+    ctx.quadraticCurveTo(x0 + c * 0.2, y1 - c * 0.1, x0, y1 - c); ctx.lineTo(x0, y0 + c);
+    ctx.quadraticCurveTo(x0 + c * 0.2, y0 + c * 0.1, x0 + c, y0); ctx.closePath();
   };
-  const g = ctx.createLinearGradient(0, 30, 0, 278);
-  g.addColorStop(0, "#e4e5e7"); g.addColorStop(0.5, "#9da0a4"); g.addColorStop(1, "#d6d8da");
+  const g = ctx.createLinearGradient(0, 12, 0, 304);
+  g.addColorStop(0, "#eceef0"); g.addColorStop(0.45, "#a6a9ad"); g.addColorStop(1, "#dcdee0");
   ctx.fillStyle = g; oct(0); ctx.fill();
-  ctx.fillStyle = "#0d0d0e"; oct(13); ctx.fill();
-  ctx.fillStyle = "#c4c6c9"; ctx.font = "900 96px Arial Black, Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText("TOMY", 256, 160);
+  ctx.fillStyle = "#070708"; oct(11); ctx.fill();
+  ctx.save();
+  ctx.translate(256, 178); ctx.transform(1, 0, -0.12, 1, 0, 0); ctx.scale(1.08, 1);
+  ctx.fillStyle = "#c9cbce"; ctx.font = "900 104px Arial Black, Arial"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("TOMY", 0, 0);
+  ctx.restore();
   tex.needsUpdate = true;
   return tex;
 }
@@ -173,17 +176,22 @@ export function createCarSticker() {
   return tex;
 }
 
-// --- the TURNIN' TURBO DASHBOARD strip on top (black, red / orange pinstripes) -------------------------
+// --- the TURNIN' TURBO DASHBOARD sticker on top (back photo): black, a small italic TURNIN' with orange / red
+// pinstripes running right from it, TURBO DASHBOARD™ in bold italic filling the width under it
 export function createTopSticker() {
-  const { ctx, tex } = canvasTexture(1024, 192);
-  ctx.fillStyle = "#121214"; ctx.fillRect(0, 0, 1024, 192);
-  ctx.fillStyle = "#d8281e"; ctx.fillRect(0, 128, 1024, 10);
-  ctx.fillStyle = "#f08a1e"; ctx.fillRect(0, 146, 1024, 6);
-  ctx.fillStyle = "#e9e6df";
-  ctx.font = "italic 800 30px Arial"; ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
-  ctx.fillText("TURNIN'", 330, 52);
-  ctx.font = "italic 900 64px Arial Black, Arial"; ctx.fillText("TURBO DASHBOARD", 330, 112);
-  ctx.font = "700 20px Arial"; ctx.fillText("TM", 940, 70);
+  const { ctx, tex } = canvasTexture(1400, 200);
+  ctx.fillStyle = "#0e0e10"; ctx.fillRect(0, 0, 1400, 200);
+  const slanted = (text, x, y, size, weight, sx = 1) => {
+    ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.22, 1, 0, 0); ctx.scale(sx, 1);
+    ctx.font = `${weight} ${size}px "Arial Black", Arial, sans-serif`; ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
+    ctx.fillText(text, 0, 0); const w = ctx.measureText(text).width * sx; ctx.restore(); return w;
+  };
+  ctx.fillStyle = "#e8e6e0";
+  const w1 = slanted("TURNIN'", 40, 72, 46, 800, 1.0);
+  [["#f0901e", 30], ["#e2301c", 44], ["#f0901e", 58]].forEach(([c, y]) => { ctx.fillStyle = c; ctx.fillRect(60 + w1, y, 1290 - w1, 7); });
+  ctx.fillStyle = "#e8e6e0";
+  const w2 = slanted("TURBO DASHBOARD", 40, 168, 96, 900, 1.0);
+  ctx.font = "700 26px Arial"; ctx.fillText("TM", 52 + w2, 112);
   tex.needsUpdate = true;
   return tex;
 }
