@@ -6,9 +6,8 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { createScreen, curve, depthAt, roadAtCar, rowAt, scaleAt, screenX, ROAD } from "./road.js";
-import { oakMaterial, plastic } from "./looks.js";
+import { oakMaterial, plastic, roomEnvironment } from "./looks.js";
 import { createCarSticker, createCluster, createHubBadge, createShifterPlate, createStripPrint, createTopSticker, SHIFTER_ROWS } from "./instruments.js";
 
 // --- tuning (guesses: the real values are unknown, PLAN.md) --------------------------------
@@ -37,8 +36,8 @@ await renderer.init();
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0xcfc8bd);
 const pmrem = new THREE.PMREMGenerator(renderer);
-scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
-scene.environmentIntensity = 0.4;
+scene.environment = pmrem.fromScene(roomEnvironment(), 0.04).texture;
+scene.environmentIntensity = 0.55;
 
 const camera = new THREE.PerspectiveCamera(32, innerWidth / innerHeight, 0.02, 20);
 const VIEWS = [
@@ -84,15 +83,16 @@ const toy = (await new GLTFLoader().loadAsync("/models/turnin-turbo/turbo.glb"))
 scene.add(toy);
 const MATS = {
   Red: plastic(0xd8261c, 0.26, { clearcoat: 0.3, breakup: 0.1 }),
-  Slate: plastic(0x0e1720, 0.74, { breakup: 0.08, scale: 30 }),
+  Slate: plastic(0x26303b, 0.74, { breakup: 0.08, scale: 30 }),
   Black: plastic(0x0a0a0b, 0.38, { breakup: 0.14 }),
-  Grey: plastic(0x8d9093, 0.45, { breakup: 0.08 }),
+  Grey: plastic(0xb4b6b8, 0.45, { breakup: 0.08 }),
   Chrome: new THREE.MeshPhysicalMaterial({ color: 0xb9bcbf, metalness: 1, roughness: 0.22 }),
 };
+const LEVER_GREY = plastic(0x8e9194, 0.42, { breakup: 0.08 });
 const WHEEL_BLACK = plastic(0x070708, 0.16, { clearcoat: 0.8, breakup: 0.06 });   // the wheel: glossy
 // the clear covers: a faint sheen only (a full room reflection greyed the panel out)
 const glass = new THREE.MeshPhysicalMaterial({ color: 0xffffff, roughness: 0.12, transparent: true, opacity: 0.02, depthWrite: false, envMapIntensity: 0.12, specularIntensity: 0.3 });
-const cluster = createCluster();
+const cluster = await createCluster();
 const screen = createScreen();
 const FACES = {
   ClusterFace: new THREE.MeshStandardMaterial({ map: cluster.texture, roughness: 0.95 }),
@@ -110,7 +110,7 @@ const PICK = { Wheel: "wheel", HubBadge: "wheel", Lever: "lever", KeyHead: "key"
 toy.traverse((o) => {
   if (!o.isMesh) return;
   const face = FACES[o.name];
-  o.material = face ?? (o.name === "Wheel" ? WHEEL_BLACK : MATS[o.material.name]) ?? o.material;
+  o.material = face ?? (o.name === "Wheel" ? WHEEL_BLACK : o.name === "Lever" ? LEVER_GREY : MATS[o.material.name]) ?? o.material;
   o.castShadow = !face;
   o.receiveShadow = !face || o.name === "ClusterFace";
   if (face === glass) o.renderOrder = 2;
@@ -124,7 +124,7 @@ const wheelBase = base(wheel), keyBase = base(keyHead), leverBase = base(lever),
 // the gate: the lever stops level with the label's rows (the label plane sits 2 mm towards the front of the slot's origin)
 const labelSize = new THREE.Box3().setFromBufferAttribute(node("ShifterLabel").geometry.attributes.position).getSize(new THREE.Vector3());
 const labelLen = Math.max(labelSize.x, labelSize.y, labelSize.z);
-const LEVER_Y = [0, 1, 2, 3, 4].map((g) => (0.5 - SHIFTER_ROWS[g] / 1024) * labelLen - 0.002);   // N (nearest the player) .. 4
+const LEVER_Y = [0, 1, 2, 3, 4].map((g) => (0.5 - SHIFTER_ROWS[g] / 1024) * labelLen - 0.009);   // the grip sits ahead of its gate row (photo)   // N (nearest the player) .. 4
 const leverAxis = new THREE.Vector3(0, 1, 0).applyQuaternion(leverBase.q);
 const resetAxis = new THREE.Vector3(0, 0, 1).applyQuaternion(resetBase.q);
 const zAxis = new THREE.Vector3(0, 0, 1), spin = new THREE.Quaternion();
@@ -225,9 +225,7 @@ function present() {
     turbo: Math.min(5, Math.floor(st.turboT * 2)),
     speed: st.on ? Math.round((st.speed / GEAR_SPEED[4]) * GEAR_MPH[4] / 10) * 10 : 0,
     trip: Math.floor(st.trip),
-    check: st.check > 0,
-    blinkL: running && st.steer < -1.2 && performance.now() % 600 < 300,
-    blinkR: running && st.steer > 1.2 && performance.now() % 600 < 300,
+    on: st.on,
   });
 }
 

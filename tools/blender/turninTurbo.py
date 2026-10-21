@@ -190,13 +190,13 @@ def uvplane(name, w, h, m_game, nx=1, ny=1, bulge=0.0):
 SX = [-0.2, -0.197, -0.19, -0.165, -0.14, -0.1, -0.05, 0.0, 0.05, 0.1, 0.14, 0.165, 0.19, 0.197, 0.2]
 
 def body_profile(ax):
-    f = math.exp(-((ax - 0.155) / 0.04) ** 2)        # the fender bulge round each headlight
+    f = math.exp(-((ax - 0.137) / 0.035) ** 2)       # the fender bulge round each headlight
     hr = 0.1 + 0.035 * f                              # top of the nose, at the back
     hm = 0.138 + 0.03 * f
     # the front stays BEHIND the bezel (its windows look into the shell), except the red apron under it
-    return [(0.016, 0.0), (-0.06, 0.0), (-0.13, 0.0), (-0.166, 0.001), (-0.18, 0.016), (-0.187, 0.05),
+    return [(0.016, 0.0), (0.006, 0.0), (-0.06, 0.0), (-0.13, 0.0), (-0.166, 0.001), (-0.18, 0.016), (-0.187, 0.05),
             (-0.19, 0.08), (-0.188, hr - 0.03), (-0.181, hr - 0.004), (-0.166, hr + 0.01), (-0.137, hm),
-            (-0.115, 0.163 + 0.012 * f), (-0.095, 0.162), (-0.072, 0.12), (-0.022, 0.03), (0.016, 0.026)]
+            (-0.115, 0.163 + 0.012 * f), (-0.095, 0.162), (-0.072, 0.12), (-0.022, 0.03), (0.008, 0.028), (0.016, 0.024), (0.016, 0.004)]   # the apron: flat
 
 rings = []
 for x in SX:
@@ -208,11 +208,11 @@ for x in SX:
 loft("Shell", rings, RED, cap0=True, cap1=True, subsurf=2, angle=60)
 
 # the headlight pods: grey caps set into the fenders, looking back and a little up
-POD_PROF = [(0.0, 0.009), (0.018, 0.0085), (0.03, 0.007), (0.037, 0.0045), (0.041, 0.0005), (0.0425, -0.006), (0.042, -0.03)]
+POD_PROF = [(0.0, 0.007), (0.013, 0.0066), (0.022, 0.0054), (0.027, 0.0034), (0.03, 0.0004), (0.031, -0.0045), (0.0305, -0.025)]
 for sx in (-1, 1):
     up = math.radians(26)
     axis = Vector((0, math.sin(up), -math.cos(up)))
-    lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((sx * 0.152, 0.12, -0.18), (1, 0, 0), axis.cross(Vector((1, 0, 0)))))
+    lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((sx * 0.134, 0.13, -0.178), (1, 0, 0), axis.cross(Vector((1, 0, 0)))))
 
 # the bumper: a black band round the back, a rounded profile swept along a plan path
 def bumper():
@@ -259,11 +259,11 @@ FACE_TILT, FACE_PIVOT_Y = 28.0, 0.025
 # 865 px, the bottom strip; two tabs drop over the red apron round the reset button and the key
 # front-face top edges: the cluster frame at 200 px, the screen frame stepped down at 262 px (above them, the top
 # surfaces running back ~38 mm); the cheek's front face 80..150 px, its inner wall angling back to the panel at 205
-BEZEL_MAIN = [(80, 740), (1105, 740), (1105, 668), (1440, 668), (1440, 262), (865, 262), (865, 200), (80, 200)]
-BEZEL_MAIN_R = [10, 4, 0, 12, 70, 4, 8, 48]
+BEZEL_MAIN = [(80, 740), (1105, 740), (1105, 668), (1440, 668), (1440, 262), (865, 262), (865, 200), (165, 200), (80, 290)]
+BEZEL_MAIN_R = [10, 4, 0, 12, 70, 4, 8, 14, 14]
 BEZEL_PTS = [(80, 740), (742, 740), (742, 812), (820, 812), (820, 740), (845, 740), (845, 806), (968, 806), (968, 740),
-             (1105, 740), (1105, 668), (1440, 668), (1440, 262), (865, 262), (865, 200), (80, 200)]
-BEZEL_R = [10, 0, 6, 6, 0, 0, 40, 40, 0, 4, 0, 12, 70, 4, 8, 48]
+             (1105, 740), (1105, 668), (1440, 668), (1440, 262), (865, 262), (865, 200), (165, 200), (80, 290)]
+BEZEL_R = [10, 0, 6, 6, 0, 0, 40, 40, 0, 4, 0, 12, 70, 4, 8, 14, 14]
 CL_OPEN = (150, 232, 848, 640, 6)          # cluster opening in the frame
 CL_PANEL = (205, 232, 845, 625, 3)         # the printed panel, 2 cm back: the cheek's inner wall angles back 16 mm
 SC_OPEN = (905, 310, 1360, 625, 22)        # screen opening
@@ -282,20 +282,28 @@ _rim = bpy.data.objects["BezelRim"].data
 for p in _rim.polygons: p.flip()
 _rim.update()
 
+FR = 0.009     # how far the cluster frame (with the cheek) and the screen frame stand out of the strip
+cl_frame = ppoly([(80, 700), (150, 700), (150, 232), (848, 232), (848, 655), (865, 655), (865, 200), (165, 200), (80, 290)],
+                 [8, 0, 6, 6, 0, 0, 8, 14, 14])
+slab("ClusterFrame", [cl_frame], ZF - 0.001, ZF + FR, EDGE, SLATE)
+FR_S = 0.014   # the screen's frame is a deeper box (the photo shows its top surface well)
+slab("ScreenFrame", [ppoly([(865, 648), (1440, 648), (1440, 262), (865, 262)], [0, 12, 70, 4]), prect(*SC_OPEN)],
+     ZF - 0.001, ZF + FR_S, EDGE, SLATE)
+
 def flare(name, a, za, b, zb):
     """The inner walls of a window: from the opening (a, at za) to the face behind (b, at zb)."""
     ra, rb = prect(*a), prect(*b)
     assert len(ra) == len(rb)
     loft(name, [[(x, y, za) for x, y in ra], [(x, y, zb) for x, y in rb]], SLATE, angle=50, recalc=False)
-flare("ClusterWalls", CL_OPEN, ZF - 0.003, CL_PANEL, ZF - 0.0262)
-flare("ScreenWalls", SC_OPEN, ZF - 0.003, SC_GLASS, ZF - 0.0195)
+flare("ClusterWalls", CL_OPEN, ZF + FR - 0.002, CL_PANEL, ZF - 0.0262)
+flare("ScreenWalls", SC_OPEN, ZF + FR_S - 0.002, SC_GLASS, ZF - 0.0195)
 
 # the left cheek: a rocker (a pill in a groove, split across) and three square push buttons
 pill = prect(94, 366, 137, 432, 21, 8)
-slab("CheekPill", [pill, offset2d(pill, -0.0011)], ZF - 0.001, ZF + 0.0007, 0.0003, SLATE)
-slab("CheekPillSplit", [prect(96, 398, 135, 401, 0, 1)], ZF - 0.001, ZF + 0.0005, 0.0002, SLATE)
+slab("CheekPill", [pill, offset2d(pill, -0.0011)], ZF + FR - 0.001, ZF + FR + 0.0007, 0.0003, SLATE)
+slab("CheekPillSplit", [prect(96, 398, 135, 401, 0, 1)], ZF + FR - 0.001, ZF + FR + 0.0005, 0.0002, SLATE)
 for k, (x0, y0, x1, y1) in enumerate([(97, 462, 145, 507), (107, 520, 155, 560), (112, 578, 158, 620)]):
-    slab(f"CheekButton{k}", [prect(x0, y0, x1, y1, 4)], ZF - 0.002, ZF + 0.0016, 0.0007, SLATE)
+    slab(f"CheekButton{k}", [prect(x0, y0, x1, y1, 4)], ZF + FR - 0.002, ZF + FR + 0.0016, 0.0007, SLATE)
 
 # the column boss: a big slate wedge out of the bezel under the cluster, behind the hub; the column goes into it
 shroud = ppoly([(282, 738), (522, 738), (556, 630), (248, 630)], [8, 8, 6, 6])
@@ -309,24 +317,36 @@ slab("VentBack", [prect(990, 670, 1095, 727, 2)], ZF - 0.03, ZF - 0.008, 0.001, 
 
 # counter reset: a grey button (a chevron above, four ribs below) in its slate pocket
 cx, cy = P((RESET[0] + RESET[2]) / 2, (RESET[1] + RESET[3]) / 2)
-bw, bh = X(RESET[2]) - X(RESET[0]) - 0.0012, Y(RESET[1]) - Y(RESET[3]) - 0.0012
-RB = gmat((cx, cy, ZF))
-slab("ResetButton", [rrect(0, 0, bw, bh, 0.0012)], -0.012, 0.0025, 0.0008, GREY, RB)
-chev = [(-0.004, 0.0035), (0.0, 0.0072), (0.004, 0.0035), (0.0033, 0.0029), (0.0, 0.0059), (-0.0033, 0.0029)]
-slab("ResetChevron", [chev], 0.0025, 0.0031, 0.0002, GREY, RB)
+bw, bh = 0.0118, 0.0128
+RB = gmat((cx, cy - 0.001, ZF))
+slab("ResetButton", [rrect(0, 0, bw, bh, 0.0009)], -0.012, 0.0095, 0.0007, GREY, RB)
+chev = [(-0.0028, 0.0018), (0.0, 0.0044), (0.0028, 0.0018), (0.0023, 0.0013), (0.0, 0.0034), (-0.0023, 0.0013)]
+slab("ResetChevron", [chev], 0.0095, 0.0099, 0.0001, GREY, RB)
 for k in range(4):
-    slab(f"ResetRib{k}", [rrect(0, -0.0105 + k * 0.0022, bw - 0.004, 0.0009, 0.0004, 2)], 0.0025, 0.0032, 0.0002, GREY, RB)
+    slab(f"ResetRib{k}", [rrect(0, -0.0052 + k * 0.0014, bw - 0.004, 0.0006, 0.0002, 2)], 0.0095, 0.01, 0.0001, GREY, RB)
 
 # the ignition: a silver ring round a black barrel, the black key in it (origin on the lock axis; OFF as photographed)
 KC = P(*KEY_C)
 lathe("KeyLock", [(KEY_R, -0.01), (KEY_R, 0.0012), (KEY_R - 0.0008, 0.0026), (KEY_R - 0.0035, 0.0028), (0.0118, 0.0018),
                   (0.0112, 0.0005)], CHROME, gmat((KC[0], KC[1], ZF)), n=64)
 lathe("KeyBarrel", [(0.0112, -0.01), (0.0112, -0.0004), (0.0, -0.0004)], BLACK, gmat((KC[0], KC[1], ZF)), n=48)
-key_bow = rpoly([(-0.0035, 0.003), (0.0035, 0.003), (0.0035, -0.008), (0.0078, -0.011), (0.0078, -0.027),
-                 (-0.0078, -0.027), (-0.0078, -0.011), (-0.0035, -0.008)], [0.0006, 0.0006, 0.002, 0.002, 0.003,
-                 0.003, 0.002, 0.002], 4)
-KEYM = gmat((KC[0], KC[1], ZF - 0.0004)) @ Matrix.Rotation(math.radians(-22), 4, "Z")
-slab("KeyHead", [key_bow], 0.0, 0.0055, 0.0012, BLACK, KEYM)
+# the key (after the user's spare-part model): a round collar on the barrel, and the flat bow standing out of the
+# lock along its axis — wider than tall, the top corners chamfered, a hole near the top with five grooves either side
+# of it on both faces; small edges (~0.5 mm). It turns about the lock axis (the page: KeyHead's local z).
+KEYM = gmat((KC[0], KC[1], ZF - 0.0004)) @ Matrix.Rotation(math.radians(-38), 4, "Z")   # OFF, as on the photo
+lathe("KeyHead", [(0.0068, 0.0), (0.0068, 0.0016), (0.0062, 0.0024), (0.0036, 0.0027), (0.0, 0.0027)], BLACK, KEYM, n=48)
+# outline in (width, out along the axis), thickness across; drawn at 20 mm, scaled to the photo's ~26 × 24 mm
+BOW = KEYM @ gmat((0, 0, 0), (1, 0, 0), (0, 0, 1)) @ Matrix.Diagonal((1.1, 1.3, 1.0, 1.0))
+bow = rpoly([(-0.0052, 0.0022), (0.0052, 0.0022), (0.0052, 0.0058), (0.0108, 0.0068), (0.0108, 0.0158), (0.0074, 0.0204),
+             (-0.0074, 0.0204), (-0.0108, 0.0158), (-0.0108, 0.0068), (-0.0052, 0.0058)],
+            [0.0005, 0.0005, 0.0012, 0.0016, 0.0012, 0.0012, 0.0012, 0.0012, 0.0016, 0.0012], 3)
+slab("KeyBow", [bow, circle(0.0, 0.0153, 0.0021, 24)], -0.002, 0.002, 0.0005, BLACK, BOW)
+for side in (-1, 1):
+    for k in range(5):
+        for face in (-1, 1):
+            z0 = 0.002 if face > 0 else -0.0023
+            slab(f"KeyGroove{side}{k}{face}", [rrect(side * 0.0068, 0.0093 + k * 0.0021, 0.0058, 0.0007, 0.0003, 2)],
+                 z0, z0 + 0.0003, 0.0001, BLACK, BOW)
 
 # printing on the strip: COUNTER RESET, OFF / ON (a transparent decal the page draws)
 uvplane("StripPrint", X(1000) - X(730), Y(668) - Y(705), gmat(((X(730) + X(1000)) / 2, (Y(668) + Y(705)) / 2, ZF + 0.00025)))
@@ -358,25 +378,26 @@ W = CX1 - CX0
 # the label (left), the slot and its grey slide (middle), the raised right rail
 uvplane("ShifterLabel", X(1300) - X(1150), tlen - 0.012, TOP @ Matrix.Translation(((X(1150) + X(1300)) / 2 - (CX0 + CX1) / 2, -0.002, 0.0003)))
 SLOT_U = (X(1300) + X(1392)) / 2 - (CX0 + CX1) / 2
-slab("ConsoleSlot", [rrect(SLOT_U, 0.0, X(1392) - X(1300), tlen - 0.01, 0.002)], -0.006, 0.0002, 0.0005, BLACK, TOP)
-slab("ConsoleSlide", [rrect(SLOT_U + 0.006, 0.0, 0.012, tlen - 0.016, 0.0015)], -0.004, -0.0015, 0.0004, GREY, TOP)
+slab("ConsoleSlot", [rrect(SLOT_U, 0.0, X(1392) - X(1300), tlen - 0.01, 0.002),
+                     rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.006, tlen - 0.016, 0.0015)], -0.014, 0.0002, 0.0005, BLACK, TOP)
+slab("ConsoleSlotFloor", [rrect(SLOT_U, 0.0, X(1392) - X(1300) - 0.004, tlen - 0.014, 0.0015)], -0.015, -0.013, 0.0004, BLACK, TOP)
 slab("ConsoleRail", [rrect(W / 2 - 0.0085, 0.004, 0.016, tlen - 0.01, 0.0025)], 0.0, 0.016, 0.0014, BLACK, TOP)
 
 # the lever: a stick in the slot, the grey grip lying across it, reaching out to the right; three grooves along its
 # face, a collar round the stick. Origin in the slot (the page slides it along the slot's axis, local y).
 LEVER = TOP @ Matrix.Translation((SLOT_U - 0.004, 0.0, 0.0))
-lathe("LeverStick", [(0.0032, -0.004), (0.0032, 0.009), (0.0, 0.0095)], BLACK, LEVER)
-grip_len, grip_h, grip_d = 0.062, 0.022, 0.026
-GRIP = LEVER @ gmat((0.0, 0.0, 0.006), (1, 0, 0), (0, 0, 1))        # grip outline in (x, up), extruded along the slot
-grip_side = rpoly([(-0.006, 0.0), (grip_len - 0.006, 0.0015), (grip_len - 0.003, 0.012), (grip_len - 0.006, grip_h),
-                   (-0.004, grip_h), (-0.008, grip_h * 0.5)], [0.002, 0.004, 0.006, 0.004, 0.003, 0.004], 5)
-slab("LeverGrip", [grip_side], -grip_d / 2, grip_d / 2, 0.0022, GREY, GRIP)
-for k in range(3):
-    # grooves = thin dark-ish ridges on the front (local +z of GRIP is the slot axis... the front is -y of the slot)
-    slab(f"LeverGroove{k}", [rrect(0.03, 0.0065 + k * 0.0045, 0.042, 0.0009, 0.0004, 2)], grip_d / 2 - 0.0004,
-         grip_d / 2 + 0.0004, 0.0002, BLACK, GRIP @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)))
-slab("LeverCollar", [rrect(0.0, grip_h / 2, 0.012, grip_h + 0.003, 0.003)], -grip_d / 2 - 0.0015, grip_d / 2 + 0.0015,
-     0.0015, GREY, GRIP)
+slab("LeverStick", [rrect(0.0, 0.0, 0.007, 0.009, 0.0008)], -0.013, 0.009, 0.0006, GREY, LEVER)
+slab("LeverBlock", [rrect(0.0, 0.0, 0.011, 0.013, 0.001)], 0.004, 0.0145, 0.0008, GREY, LEVER)
+G_Y0, G_Y1, G_D = 0.0135, 0.0305, 0.02             # the grip (front photo: ~60 mm with its cap, ~17 tall)
+G0 = LEVER @ gmat((0, 0, 0), (1, 0, 0), (0, 0, 1))  # outline in (x, up), extruded along the slot; +z = the front
+slab("LeverGrip", [rrect(0.0215, (G_Y0 + G_Y1) / 2, 0.052, G_Y1 - G_Y0, 0.0014, 4)], -G_D / 2, G_D / 2, 0.001, GREY, G0)
+CAP = G0 @ gmat((-0.0045, (G_Y0 + G_Y1) / 2, 0), (0, 0, 1), (0, 1, 0))   # outline in (depth, up), extruded to -x
+slab("LeverCap", [rrect(0, 0, G_D - 0.003, G_Y1 - G_Y0 - 0.003, 0.0009, 3), rrect(0, 0, G_D - 0.008, G_Y1 - G_Y0 - 0.008, 0.0005, 2)],
+     0.0, 0.01, 0.0005, GREY, CAP)
+slab("LeverCapPlug", [rrect(0, 0, G_D - 0.007, G_Y1 - G_Y0 - 0.007, 0.0005, 2)], 0.0, 0.0055, 0.0003, GREY, CAP)
+for k in range(3):   # three grooves along the grip's front face, on its right part
+    slab(f"LeverGroove{k}", [rrect(0.029, G_Y0 + 0.0045 + k * 0.004, 0.034, 0.0009, 0.0004, 2)], G_D / 2 - 0.0003,
+         G_D / 2 + 0.00025, 0.0001, BLACK, G0)
 
 # =================================================================================================================
 # THE STEERING WHEEL — round its own centre, facing local +Z. 194 mm across, a 9.5 mm rim; four flat spokes at
@@ -425,7 +446,7 @@ uvplane("TopSticker", X(815) - X(230), 0.02, gmat(((X(230) + X(815)) / 2, 0.1655
 
 # =================================================================================================================
 # lean the face back (everything built on the upright front plane)
-FACE_PARTS = ("Bezel", "BezelRim", "ClusterWalls", "ScreenWalls", "CheekPill", "CheekPillSplit", "CheekButton",
+FACE_PARTS = ("Bezel", "BezelRim", "ClusterFrame", "ScreenFrame", "ClusterWalls", "ScreenWalls", "CheekPill", "CheekPillSplit", "CheekButton",
               "ColumnShroud", "VentSlat", "VentBack", "ResetButton", "ResetChevron", "ResetRib", "KeyLock", "KeyBarrel",
               "KeyHead", "StripPrint", "ClusterFace", "ClusterGlass", "ClusterBack", "ScreenFilm", "ScreenGlass")
 TILT = (Matrix.Translation((0, FACE_PIVOT_Y, ZF)) @ Matrix.Rotation(math.radians(-FACE_TILT), 4, "X")
@@ -444,9 +465,10 @@ def starts(*pre): return [n for n in bpy.data.objects.keys() if n.startswith(pre
 
 join("Wheel", ["WheelRim"] + starts("WheelSpoke", "WheelHub"))
 join("WheelChromeLines", starts("WheelChrome"))
-join("Lever", ["LeverStick", "LeverGrip", "LeverCollar"])
+join("Lever", ["LeverStick", "LeverBlock", "LeverGrip", "LeverCap", "LeverCapPlug"])
 join("LeverGrooves", starts("LeverGroove"))
 join("ResetButton", ["ResetButton", "ResetChevron"] + starts("ResetRib"))
+join("KeyHead", ["KeyHead", "KeyBow"] + starts("KeyGroove"))
 join("BezelDetail", ["CheekPill", "CheekPillSplit"] + starts("CheekButton", "VentSlat"))
 for child, parent in (("HubBadge", "Wheel"), ("WheelChromeLines", "Wheel"), ("LeverGrooves", "Lever")):
     c, p = bpy.data.objects[child], bpy.data.objects[parent]

@@ -29,3 +29,25 @@ export function plastic(color, roughness, { breakup = 0.08, clearcoat = 0, scale
   m.roughnessNode = float(roughness).add(n.mul(breakup)).clamp(0.04, 1.0);
   return m;
 }
+
+// the room the plastics reflect: dim walls, a big window on the left, ceiling panels. Built here (not three's
+// RoomEnvironment addon): the dev server's pre-bundler can give that addon its own copy of three, whose PointLight
+// the WebGPU renderer does not know ("Multiple instances of Three.js"). Unlit materials only: no light needed.
+export function roomEnvironment() {
+  const room = new THREE.Scene();
+  const panel = (k) => new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(k), side: THREE.BackSide });
+  const walls = new THREE.Mesh(new THREE.BoxGeometry(10, 5, 10), panel(0.75));
+  walls.position.y = 2;
+  room.add(walls);
+  const light = (w, h, d, x, y, z, k) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshBasicMaterial({ color: new THREE.Color().setScalar(k) }));
+    m.position.set(x, y, z);
+    room.add(m);
+  };
+  light(0.1, 2.4, 4.0, -4.9, 2.2, 0.5, 9);     // the window, left
+  light(3.0, 0.1, 2.0, 0.0, 4.4, 0.0, 5);      // ceiling panels
+  light(1.5, 0.1, 1.5, 2.5, 4.4, -2.5, 3);
+  light(4.0, 1.2, 0.1, 0.5, 1.6, 4.9, 1.6);    // a pale wall behind the viewer
+  light(10, 0.1, 10, 0, -0.45, 0, 0.5);        // the floor, warm-ish grey
+  return room;
+}

@@ -2,9 +2,7 @@
 // hub, the player car sticker.
 //
 // The cluster has no real LEDs: holes in a printed panel with coloured flaps that slide in
-// behind them. Here (step 1) the flaps are painted into the canvas, which is redrawn only
-// when a shown value changes. Layout measured from a front photo of the toy (1024 × 614 =
-// the cluster window).
+// behind them. It is the real panel, from a photo, with its flaps switched (see createCluster).
 import * as THREE from "three";
 
 const WHITE = "#e9e6df", DARK = "#0d0e10", UNLIT = "#1b1c1f";
@@ -17,29 +15,6 @@ function canvasTexture(w, h) {
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.anisotropy = 8;
   return { canvas, ctx: canvas.getContext("2d"), tex };
-}
-
-// seven segments: a b c d e f g
-const SEGS = { " ": "", 0: "abcdef", 1: "bc", 2: "abdeg", 3: "abcdg", 4: "bcfg", 5: "acdfg", 6: "acdefg", 7: "abc", 8: "abcdefg", 9: "abcdfg" };
-function sevenSeg(ctx, x, y, w, h, ch, on, off) {
-  const t = w * 0.2, sk = w * 0.12;
-  const seg = {
-    a: [[x + t, y], [x + w - t, y], [x + w - t * 1.5, y + t], [x + t * 1.5, y + t]],
-    b: [[x + w, y + t * 0.6], [x + w, y + h / 2 - t * 0.3], [x + w - t, y + h / 2 - t * 0.8], [x + w - t, y + t * 1.2]],
-    c: [[x + w, y + h / 2 + t * 0.3], [x + w, y + h - t * 0.6], [x + w - t, y + h - t * 1.2], [x + w - t, y + h / 2 + t * 0.8]],
-    d: [[x + t * 1.5, y + h - t], [x + w - t * 1.5, y + h - t], [x + w - t, y + h], [x + t, y + h]],
-    e: [[x, y + h / 2 + t * 0.3], [x + t, y + h / 2 + t * 0.8], [x + t, y + h - t * 1.2], [x, y + h - t * 0.6]],
-    f: [[x, y + t * 0.6], [x + t, y + t * 1.2], [x + t, y + h / 2 - t * 0.8], [x, y + h / 2 - t * 0.3]],
-    g: [[x + t, y + h / 2 - t / 2], [x + w - t, y + h / 2 - t / 2], [x + w - t * 0.6, y + h / 2], [x + w - t, y + h / 2 + t / 2], [x + t, y + h / 2 + t / 2], [x + t * 0.6, y + h / 2]],
-  };
-  const lit = SEGS[ch] ?? "";
-  for (const k of "abcdefg") {
-    ctx.fillStyle = lit.includes(k) ? on : off;
-    ctx.beginPath();
-    seg[k].forEach(([px, py], i) => { const sx = px + sk * (1 - (py - y) / h); i ? ctx.lineTo(sx, py) : ctx.moveTo(sx, py); });
-    ctx.closePath();
-    ctx.fill();
-  }
 }
 
 function label(ctx, text, x, y, size, align = "left") {
@@ -60,134 +35,45 @@ function frame(ctx, pts, width = 5) {
 }
 
 // --- the cluster ---------------------------------------------------------------------------
-// Drawn in the FRONT PHOTO's pixel coordinates: the panel plane covers photo px 205..845 × 232..625 (see
-// turninTurbo.py CL_PANEL), the canvas is that × 2. Every mark below is measured on the photo (and, where the wheel
-// hides it, on the bezel photographed out of its shell). The flap windows: dark grey unlit, colour lit.
-const PANEL = { x0: 205, y0: 232, x1: 845, y1: 625, k: 2 };
-const Q = (x, y) => [(x - PANEL.x0) * PANEL.k, (y - PANEL.y0) * PANEL.k];
-const FLAP_OFF = "#202124";
-const PRINT = "#dcdad3";
+// The real panel: the gauge close-up (assets-src/refs/turnin-turbo/cluster.png) warped onto the front photo's panel
+// (SIFT + homography, 0.6 px) — front px 205..845 × 232..625, ×2 — with every flap window cut out of it
+// (scratchpad flaps.py → public/textures/turnin-turbo/): cluster_base.png = all flaps OFF, cluster_flaps.png = each
+// flap ON, cluster_flaps.json = where each goes. A frame of the panel = the base + the lit flaps (redrawn only when a
+// shown value changes). TRIP's two flap wheels are drawn as text.
+const TEX = "/textures/turnin-turbo/";
+const SPEED_SEGS = { 0: "abcdef", 1: "bc", 2: "abdeg", 3: "abcdg", 4: "bcfg", 5: "acdfg", 6: "acdefg", 7: "abc", 8: "abcdefg", 9: "abcdfg" };
+const loadImage = (src) => new Promise((ok, fail) => Object.assign(new Image(), { onload() { ok(this); }, onerror: fail, src }));
 
-function poly(ctx, pts, fill) {
-  ctx.beginPath();
-  pts.forEach(([x, y], i) => { const [u, v] = Q(x, y); i ? ctx.lineTo(u, v) : ctx.moveTo(u, v); });
-  ctx.closePath();
-  ctx.fillStyle = fill; ctx.fill();
-}
-function lines(ctx, pts, w = 2.6) {
-  ctx.strokeStyle = PRINT; ctx.lineWidth = w * PANEL.k; ctx.lineJoin = "miter"; ctx.lineCap = "butt";
-  ctx.beginPath();
-  pts.forEach(([x, y], i) => { const [u, v] = Q(x, y); i ? ctx.lineTo(u, v) : ctx.moveTo(u, v); });
-  ctx.stroke();
-}
-// wide, heavy lettering (the panel's extended sans): Arial Black stretched to the measured box
-function text(ctx, str, x0, y0, x1, y1, color = PRINT) {
-  const [u0, v0] = Q(x0, y0), [u1, v1] = Q(x1, y1);
-  const h = v1 - v0;
-  ctx.save();
-  ctx.font = `900 ${h * 1.32}px "Arial Black", Arial, sans-serif`;
-  ctx.textBaseline = "alphabetic"; ctx.textAlign = "left";
-  const w = ctx.measureText(str).width;
-  ctx.translate(u0, v1);
-  ctx.scale((u1 - u0) / w, 1);
-  ctx.fillStyle = color;
-  ctx.fillText(str, 0, 0);
-  ctx.restore();
-}
-function box(ctx, x0, y0, x1, y1, fill) {
-  const [u0, v0] = Q(x0, y0), [u1, v1] = Q(x1, y1);
-  ctx.fillStyle = fill; ctx.fillRect(u0, v0, u1 - u0, v1 - v0);
-}
-
-// the tacho's 8 blocks: four up the arc (tilted), four along the top
-const TACHO = [
-  { c: [265, 372], w: 34, h: 18, a: -0.72 }, { c: [295, 341], w: 34, h: 18, a: -0.6 },
-  { c: [323, 311], w: 36, h: 18, a: -0.42 }, { c: [364, 287], w: 38, h: 18, a: -0.2 },
-  { c: [410, 277], w: 38, h: 17, a: 0 }, { c: [457, 277], w: 38, h: 17, a: 0 },
-  { c: [505, 277], w: 38, h: 17, a: 0 }, { c: [552, 277], w: 38, h: 17, a: 0 },
-];
-
-export function createCluster() {
-  const { canvas, ctx, tex } = canvasTexture((PANEL.x1 - PANEL.x0) * PANEL.k, (PANEL.y1 - PANEL.y0) * PANEL.k);
+export async function createCluster() {
+  const [baseImg, flapsImg, layout] = await Promise.all([
+    loadImage(TEX + "cluster_base.png"), loadImage(TEX + "cluster_flaps.png"), fetch(TEX + "cluster_flaps.json").then((r) => r.json()),
+  ]);
+  const [W, H] = layout.size;
+  const { canvas, ctx, tex } = canvasTexture(W, H);
   let last = "";
+  const flap = (name) => {
+    const f = layout.flaps[name];
+    if (f) ctx.drawImage(flapsImg, f[4], f[5], f[2], f[3], f[0], f[1], f[2], f[3]);
+  };
 
   function draw(st) {
-    ctx.fillStyle = "#060a10";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    // turn arrows (printed grey; they light green when steering hard — a guess)
-    poly(ctx, [[252, 270], [266, 258], [310, 258], [310, 283], [266, 283]], st.blinkL ? "#86ff6c" : "#a9aaa6");
-    poly(ctx, [[667, 275], [652, 264], [610, 264], [610, 287], [652, 287]], st.blinkR ? "#86ff6c" : "#a9aaa6");
-
-    // tacho flaps + scale
-    TACHO.forEach((b, i) => {
-      const [u, v] = Q(...b.c);
-      ctx.save(); ctx.translate(u, v); ctx.rotate(b.a);
-      ctx.fillStyle = i < st.tacho ? YELLOW : FLAP_OFF;
-      ctx.fillRect((-b.w / 2) * PANEL.k, (-b.h / 2) * PANEL.k, b.w * PANEL.k, b.h * PANEL.k);
-      ctx.restore();
-    });
-    text(ctx, "0", 252, 397, 275, 413); text(ctx, "1", 293, 364, 309, 380); text(ctx, "2", 347, 308, 370, 325);
-    text(ctx, "4", 422, 291, 443, 306); text(ctx, "6", 517, 291, 537, 306); text(ctx, "8", 567, 291, 588, 306);
-    text(ctx, "TACHO", 354, 346, 427, 361); text(ctx, "X1000R/MIN", 342, 369, 457, 381);
-
-    // fuel: the stepped box, the scale, five bars (pink = fuel left)
-    lines(ctx, [[707, 258], [806, 258], [806, 371], [736, 371], [726, 357], [707, 357], [707, 258]]);
-    text(ctx, "FUEL", 680, 310, 729, 325);
-    for (let i = 0; i < 6; i++) box(ctx, 733, 268 + i * 17, 744, 270.5 + i * 17, PRINT);
-    text(ctx, "F", 748, 263, 755, 273); text(ctx, "E", 748, 353, 755, 363);
-    for (let i = 0; i < 5; i++) box(ctx, 758, 265 + i * 19.5, 797, 276 + i * 19.5, 4 - i < st.fuelBars ? PINK : FLAP_OFF);
-
-    // the warning column: door, seat belt, battery (lit red for a moment by the key)
-    const warn = st.check ? "#ff4636" : PRINT;
-    lines(ctx, [[252, 425], [335, 425], [335, 560], [252, 560], [252, 425]]);
-    lines(ctx, [[252, 470], [335, 470]]); lines(ctx, [[252, 515], [335, 515]]);
-    // door: a car from the front with a door open
-    poly(ctx, [[278, 432], [308, 432], [314, 446], [318, 460], [268, 460], [272, 446]], warn);
-    poly(ctx, [[283, 437], [303, 437], [307, 446], [279, 446]], "#0c0d0f");
-    poly(ctx, [[318, 446], [330, 440], [331, 444], [320, 450]], warn);
-    // seat belt: a seated figure, a strap across
-    poly(ctx, [[288, 477], [298, 477], [298, 486], [288, 486]], warn);
-    poly(ctx, [[282, 489], [304, 489], [306, 507], [280, 507]], warn);
-    poly(ctx, [[272, 504], [316, 480], [318, 484], [274, 508]], warn);
-    // battery: a box with + and -
-    lines(ctx, [[270, 527], [318, 527], [318, 552], [270, 552], [270, 527]], 2.4);
-    box(ctx, 277, 522, 285, 527, warn); box(ctx, 303, 522, 311, 527, warn);
-    box(ctx, 276, 538, 286, 541, warn); box(ctx, 303, 538, 313, 541, warn); box(ctx, 306.5, 534.5, 309.5, 544.5, warn);
-
-    // turbo: its box, five cells (pink in 4th at full revs)
-    lines(ctx, [[412, 418], [412, 397], [487, 397], [487, 500]]);
-    lines(ctx, [[412, 446], [412, 500]]);
-    text(ctx, "TURBO", 377, 422, 450, 439);
-    for (let i = 0; i < 5; i++) box(ctx, 460, 416 + i * 15, 475, 428 + i * 15, 4 - i < st.turbo ? PINK : FLAP_OFF);
-
-    // speed: the bracket box, three 7-segment windows, MPH, SPEED
-    lines(ctx, [[528, 400], [500, 400], [500, 470], [588, 470]]);
-    lines(ctx, [[666, 470], [810, 470], [810, 403], [742, 403]]);
-    text(ctx, "SPEED", 592, 463, 662, 477); text(ctx, "MPH", 735, 431, 797, 450);
-    const txt = String(st.speed).padStart(3, " ");
-    for (let i = 0; i < 3; i++) {
-      const [u, v] = Q(522 + i * 80, 389);
-      sevenSeg(ctx, u, v, 48 * PANEL.k, 63 * PANEL.k, txt[i], GREEN, FLAP_OFF);
+    ctx.drawImage(baseImg, 0, 0);
+    for (let i = 0; i < st.tacho; i++) flap(`tacho${i}`);
+    for (let i = 0; i < st.fuelBars; i++) flap(`fuel${i}`);
+    for (let i = 0; i < st.turbo; i++) flap(`turbo${i}`);
+    if (st.on) {
+      const v = Math.min(199, Math.max(0, Math.round(st.speed)));
+      if (v >= 100) { flap("spd0b"); flap("spd0c"); }
+      if (v >= 10) for (const s of SPEED_SEGS[Math.floor(v / 10) % 10]) flap(`spd1${s}`);
+      for (const s of SPEED_SEGS[v % 10]) flap(`spd2${s}`);
     }
-
-    // the odometer box (printed 00009), the lamp icons, TRIP (the score: two flap wheels)
-    lines(ctx, [[502, 540], [502, 490], [827, 490], [827, 576], [800, 576]]);
-    lines(ctx, [[580, 535], [710, 535], [732, 576], [748, 576]]);
-    text(ctx, "00009", 525, 505, 607, 522);
-    text(ctx, "TRIP", 750, 570, 795, 585);
-    ctx.strokeStyle = PRINT; ctx.lineWidth = 2.4 * PANEL.k;
-    { const [u, v] = Q(672, 562); ctx.beginPath(); ctx.arc(u, v, 13 * PANEL.k, 0, Math.PI * 2); ctx.stroke(); }
-    text(ctx, "P", 665, 553, 680, 571);
-    { const [u, v] = Q(622, 562); ctx.beginPath(); ctx.arc(u, v, 10 * PANEL.k, Math.PI * 0.5, Math.PI * 1.5); ctx.closePath(); ctx.stroke(); }
-    for (let i = 0; i < 4; i++) box(ctx, 632, 553 + i * 5.5, 646, 555 + i * 5.5, PRINT);
+    // TRIP: two flap wheels, green figures
     const trip = String(st.trip).padStart(2, "0");
-    for (let i = 0; i < 2; i++) {
-      const x0 = 740 + i * 40;
-      box(ctx, x0, 522, x0 + 32, 550, "#050506");
-      box(ctx, x0, 545, x0 + 32, 550, "#3a3c40");
-      text(ctx, trip[i], x0 + 9, 527, x0 + 23, 543, GREEN);
-    }
+    ctx.fillStyle = "#86d86a"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    layout.trip.forEach(([x, y, w, h], i) => {
+      ctx.font = `900 ${Math.round(h * 1.25)}px "Arial Black", Arial, sans-serif`;
+      ctx.save(); ctx.translate(x + w / 2, y + h / 2 + 1); ctx.scale(0.82, 1); ctx.fillText(trip[i], 0, 0); ctx.restore();
+    });
     tex.needsUpdate = true;
   }
 
