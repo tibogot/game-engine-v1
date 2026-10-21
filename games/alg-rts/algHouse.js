@@ -43,7 +43,9 @@ export const PIT_TYPES = ["mortar", "m81"];
 export const FORT_TYPES = ["point"];
 // THE SEARCHLIGHT TOWER (tools/blender/searchlightTower.py — algSangar.js loadSearchlight): the tower and its turning head
 export const SLTOWER_TYPES = ["sltower", "lamp"];
-const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES } };
+// THE FIELD POSTS (tools/blender/fieldPosts.py — algSangar.js loadForwardPost / loadAidStation)
+export const FIELD_POST_TYPES = ["fwdradio", "aidtent", "aidmark"];   // (aidmark: the tent's red crosses, a decal piece)
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES }, fieldposts: { prefix: "Field", types: FIELD_POST_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);

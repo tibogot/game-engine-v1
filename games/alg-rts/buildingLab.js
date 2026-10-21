@@ -33,6 +33,7 @@ import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 import { buildFortPoint, buildMgNest, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
 await loadSandbagWall();
@@ -44,7 +45,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -556,6 +557,38 @@ export const BUILDINGS = {
   // THE SEARCHLIGHT TOWER IN BLENDER (2026-10-21, tools/blender/searchlightTower.py): the game's LEFT, the new one
   // MIDDLE (the lattice, the deck, the caged ladder, the searchlight's head on its own; the generator shed and YOUR
   // simulated wall; its construction in the panel), damaged RIGHT.
+  // THE FIELD POSTS IN BLENDER (2026-10-21, tools/blender/fieldPosts.py): the game's LEFT, the new one MIDDLE (its
+  // construction in the panel), damaged RIGHT. The forward post: a French radio post in YOUR simulated horseshoe (the
+  // old one was the US shelter of the Vietnam kit); the aid station: the army's ridge tent, the red cross.
+  posteAvanceBlender: {
+    label: "Poste avancé (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadForwardPost(),
+    before: () => buildRadioStation({}),
+    middle: () => {
+      const geo = forwardPostGeometry(), site = geo.userData.siteMaterial();
+      const mesh = kitView(geo);
+      mesh.material = site.material;
+      const bags = siteBags(mesh);
+      SITE = { set: (p) => { site.set(p); bags?.set(p); }, stencilShown: () => false, sock: null };
+      SITE.set(1);
+      return labPiece(mesh);
+    },
+    after: () => labPiece(houseMesh("fwdradio", "damaged")),
+    tags: ["POSTE AVANCÉ (LE JEU)", "POSTE AVANCÉ · NOUVEAU", "POSTE AVANCÉ · ENDOMMAGÉ"], note: "le poste avancé du jeu à gauche (l'abri américain du kit Vietnam), le nouveau (Blender : poste radio français, bâche, groupe à manivelle, mât haubané, le drapeau ; vos sacs simulés) au milieu — « Construction » — endommagé à droite.",
+  },
+  secoursBlender: {
+    label: "Poste de secours (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAidStation(),
+    before: () => buildTent({ medic: true, blastWall: false }),
+    middle: () => {
+      const geo = aidStationGeometry(), site = geo.userData.siteMaterial();
+      const mesh = kitView(geo);
+      mesh.material = site.material;
+      SITE = { set: (p) => { site.set(p); for (const c of mesh.children) if (c.userData.late != null) c.visible = p >= c.userData.late; }, stencilShown: () => false, sock: null };   // (the crosses go on last)
+      SITE.set(1);
+      return labPiece(mesh);
+    },
+    after: () => { const g = new THREE.Group(); g.add(houseMesh("aidtent", "damaged"), markDecal("damaged")); return labPiece(g); },
+    tags: ["AID STATION (THE GAME)", "AID STATION · NEW", "AID STATION · DAMAGED"], note: "le poste de secours du jeu à gauche, le nouveau (Blender : la tente de l'armée, la croix rouge, brancards, caisse médicale, lavabo) au milieu — « Construction » — endommagé à droite.",
+  },
   projBlender: {
     label: "Tour de projecteur (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSearchlight(),
     before: () => buildSearchlightTower(),

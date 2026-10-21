@@ -245,6 +245,52 @@ export const loadSearchlight = () => loadBlenderPiece("sltower", "sltower", () =
 });
 export const searchlightGeometry = () => (pieceGeometry("sltower", "sltower")?.userData.slReady ? pieceGeometry("sltower", "sltower") : null);
 
+/**
+ * THE FIELD POSTS (tools/blender/fieldPosts.py, 2026-10-21): the FORWARD POST (a French radio post dug in — the old
+ * piece was the Vietnam kit's US shelter) with the user's simulated horseshoe (sandbagRadio), and the AID STATION
+ * (the army's ridge tent, the red cross). No old data worth keeping: their own footprints (game metres).
+ */
+const ownData = (footprint) => () => { const g = new THREE.BufferGeometry(); g.userData = { footprint }; return g; };
+export const loadForwardPost = () => loadBlenderPiece("fieldposts", "fwdradio", ownData({ cx: -0.75, cz: 0, hx: 3.95, hz: 3.2, height: 3 }), null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("fieldposts", "fwdradio");
+  if (g.userData.postReady) return ok;
+  await loadSandbagWall();
+  const bags = simulatedWallMesh("RadioBags", "radio");
+  g.userData.extra = bags ? [bags] : [];
+  g.userData.postReady = true;
+  return ok;
+});
+export const forwardPostGeometry = () => (pieceGeometry("fieldposts", "fwdradio")?.userData.postReady ? pieceGeometry("fieldposts", "fwdradio") : null);
+export const loadAidStation = () => loadBlenderPiece("fieldposts", "aidtent", ownData({ cx: -0.26, cz: -1.3, hx: 4.0, hz: 3.65, height: 3.4 }), null, { stone: false }).then((ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("fieldposts", "aidtent");
+  if (g.userData.markReady) return ok;
+  const m = markDecal("intact");
+  if (m) { m.userData.late = 0.95; g.userData.extra = [m]; }
+  g.userData.markReady = true;
+  return ok;
+});
+export const aidStationGeometry = () => (pieceGeometry("fieldposts", "aidtent")?.userData.markReady ? pieceGeometry("fieldposts", "aidtent") : null);
+/**
+ * THE RED CROSSES as a MESH DECAL (fieldPosts.py "aidmark", 2026-10-21 — you: "the red cross looks bad, why don't you
+ * use decals"): cut from the tent's settled canvas a centimetre proud, its own small atlas (sharp); drawn with a depth
+ * offset over the canvas, no shadow of its own. An LOD (near / far at HOUSE_FAR). `state`: the tent's.
+ */
+export function markDecal(state) {
+  const l = houseMesh("aidmark", state, 1)?.children[0];
+  const n = l?.levels?.[0]?.object, f = l?.levels?.[1]?.object;
+  if (!n) return null;
+  const mat = plainMaterial(n.material);
+  mat.polygonOffset = true; mat.polygonOffsetFactor = -2; mat.polygonOffsetUnits = -2;
+  const mk = (src) => { const pg = plainGeometry(src); pg.scale(S, S, S); const m = new THREE.Mesh(pg, mat); m.castShadow = false; m.receiveShadow = true; return m; };
+  const lod = new THREE.LOD();
+  lod.name = "AidMark";
+  lod.addLevel(mk(n), 0);
+  if (f && f !== n) lod.addLevel(mk(f), HOUSE_FAR);
+  return lod;
+}
+
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
 export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });
 export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");

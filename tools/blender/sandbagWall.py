@@ -293,6 +293,11 @@ elif LAYOUT == "slshed":
     # of it, 3.4 m (game), one bag thick, three courses — laid along x at the origin; the game sets it there.
     for c in range(3):
         wall_course(2.6 * KS - c * 0.1, 1, 0.0, 0.0, 0.0, c)
+elif LAYOUT == "radio":
+    # the forward post (tools/blender/fieldPosts.py "fwdradio", 2026-10-21): a horseshoe r 2.2 x KS round the table
+    # and the tarp, open 70° at the back (+Z, the entrance by the flag), three courses
+    for c in range(3):
+        ring(2.2 * KS - c * 0.05, c, 0.0, math.pi / 2, 70.0)
 elif LAYOUT == "postpit":
     # the post's own mortar pit: a ring r 1.5 x KS open 70° at -Z
     for c in range(4):

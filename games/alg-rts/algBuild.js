@@ -22,7 +22,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -42,8 +42,8 @@ export const BUILDS = {
   searchlight: { label: t("Projecteur"), tip: t("Tour de projecteur : voit à 100 m."), cost: 60, time: 10, build: () => searchlightGeometry() ?? buildSearchlightTower() /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "searchlight" },
   // FIELD WORKS (2026-10-10, the CoH comparison: what engineers raise OUT on the map — algFieldWorks.js).
   // `near: "point"`: only inside the ring of a point you hold. `one`: one per point.
-  forwardPost: { label: t("Poste avancé"), tip: t("Poste radio près d'un point que vous tenez : vos groupes à 30 m s'y renforcent, comme au poste."), cost: 150, time: 25, build: () => buildRadioStation({ seed: 41 + Math.floor(Math.random() * 9) }), pad: true, structure: "forwardPost", near: "point", one: true },
-  aidStation: { label: t("Poste de secours"), tip: t("Tente de l'infirmier : vos blessés à 20 m guérissent, hors du combat."), cost: 100, time: 18, build: () => fieldTent(), pad: true, structure: "aidStation" },
+  forwardPost: { label: t("Poste avancé"), tip: t("Poste radio près d'un point que vous tenez : vos groupes à 30 m s'y renforcent, comme au poste."), cost: 150, time: 25, build: () => forwardPostGeometry() ?? buildRadioStation({ seed: 41 + Math.floor(Math.random() * 9) }) /* (the Blender piece once loaded — algSangar.js) */, pad: true, structure: "forwardPost", near: "point", one: true },
+  aidStation: { label: t("Poste de secours"), tip: t("Tente de l'infirmier : vos blessés à 20 m guérissent, hors du combat."), cost: 100, time: 18, build: () => aidStationGeometry() ?? fieldTent() /* (the Blender piece once loaded) */, pad: true, structure: "aidStation" },
   fortPoint: { label: t("Point fortifié"), tip: t("Sacs de sable dans le cercle d'un point que vous tenez : il rapporte 25 % de plus et le FLN met deux fois plus de temps à le prendre."), cost: 120, time: 20, build: () => fortPointGeometry() ?? buildFortPointPiece((o) => buildFortPoint({ seed: 51 + Math.floor(Math.random() * 9), ...o })) /* (the Blender piece once loaded — algSangar.js) */, follow: true, structure: "fortPoint", near: "point", one: true },
   // THE ALN BUILDS TOO (you, 2026-09-30): the same sites, paid from the ALN's
   // purse, raised by moudjahidine (`by`: no command card of theirs to list
@@ -126,6 +126,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     swapPlaced(showroom, /^mortarPit\d*$/, mortarPitGeometry(), app);   // (?defences=1: the post's own)
   });
   loadFortPoint().then((ok) => { if (ok) geoCache.delete("fortPoint"); });
+  loadForwardPost().then((ok) => { if (ok) geoCache.delete("forwardPost"); });
+  loadAidStation().then((ok) => { if (ok) geoCache.delete("aidStation"); });
   loadSearchlight().then((ok) => {
     if (!ok) return;
     geoCache.delete("searchlight");
