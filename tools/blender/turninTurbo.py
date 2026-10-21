@@ -242,11 +242,18 @@ def b_height(z, x):
     # kept under the sight line of the camera fitted to the front photo (it shows only a narrow red band over the
     # frames): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
     corner = min(max((ax - 0.095) / 0.06, 0.0), 1.0); corner = corner * corner * (3 - 2 * corner)
+    corner *= min(max((-0.105 - z) / 0.03, 0.0), 1.0)   # only behind the frames (it lifted the red over the screen frame)
     # ...except at the corners: the front photo shows the red rising there round the lamps (fender humps)
     ray, k = 0.167 + 0.72 * (z + 0.12) + 0.05 * corner, 0.008
     hc = max(0.5 * (hc + ray - math.sqrt((hc - ray) ** 2 + k * k)), B_BUMP)
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
+    if z > -0.1:   # under the slate rim's top (stepped: lower over the screen) — the red poked through it as a line
+        ca = math.cos(math.radians(FACE_TILT))
+        st = min(max((x - (865 - 760) * 0.000294) / 0.004, 0.0), 1.0)
+        _Y = lambda py: 0.205 - (py - 165) * 0.000304   # (= Y(), defined further down)
+        rim_top = FACE_PIVOT_Y + ((_Y(200) * (1 - st) + _Y(262) * st) - FACE_PIVOT_Y) * ca - 0.004
+        hc = min(hc, rim_top)
     return max(min(hc, y_face), 0.026)
 
 def b_ring(z):
@@ -276,9 +283,11 @@ def b_ring(z):
         if y < B_SKIRT:                           # the chin: inset in x, and tucked forward at the back
             tk = (1 - y / B_SKIRT) ** 2
             tk = 1 - math.sqrt(max(1 - (1 - y / B_SKIRT) ** 2, 0.0))   # a quarter round: the chin's corners
-            tk *= min(max((B_ZB + 0.11 - z) / 0.06, 0.0), 1.0)   # only at the back: the front apron is full width to the table
-            x = math.copysign(min(abs(x), w - 0.06 * tk), x)
-            out.append((x, y, max(z, B_ZB + 0.05 * tk)))
+            g = min(max((B_ZB + 0.11 - z) / 0.06, 0.0), 1.0)   # the side inset only at the back: the front apron is full width
+            x = math.copysign(min(abs(x), w - 0.06 * tk * g), x)
+            # the tuck: this row's back moves forward, the row STRETCHED evenly (a clamp folded the rings: a lumpy chin)
+            zb = B_ZB + 0.05 * tk
+            out.append((x, y, zb + (z - B_ZB) * (B_ZF - zb) / (B_ZF - B_ZB)))
         else:
             out.append((x, y, z))
     return out
@@ -288,7 +297,7 @@ ZS = [B_ZF + (B_ZB - B_ZF) * (1 - (1 - i / 90) ** 1.7) for i in range(91)]   # d
 rings = [b_ring(z) for z in ZS]
 last = rings[-1]
 cx_, cy_ = 0.0, B_NOSE * 0.5
-rings.append([(cx_ + (x - cx_) * 0.985, cy_ + (y - cy_) * 0.97 if y > 0 else 0.0, B_ZB - 0.0025) for x, y, z in last])
+rings.append([(cx_ + (x - cx_) * 0.985, cy_ + (y - cy_) * 0.97 if y > 0 else 0.0, z - 0.0025) for x, y, z in last])
 loft("Shell", rings, RED, cap0=True, cap1=True, angle=35)
 
 # the headlights: grey discs set into the fenders, square to the surface — a rim ring and a raised inner disc
@@ -345,7 +354,7 @@ def panel_line(name, pts):
     to_blender(me); link(name, me, CREASE)
 # the creases from the top band down to the bumper, inboard of the lamps, opening out a little; the embossed panel
 # outline under the band (centre, the rear 3/4 photos)
-zt = B_NOSE_Z - 0.004
+zt = B_NOSE_Z - 0.018   # start clear of the slate frames (it ran under them)
 for sx in (-1, 1):
     panel_line(f"BonnetLine{sx}", [(sx * 0.079, zt + (B_ZB + 0.004 - zt) * k / 30) for k in range(31)])
 r0, r1, rz0, rz1 = -0.068, 0.078, B_NOSE_Z - 0.014, B_NOSE_Z - 0.05
@@ -361,10 +370,10 @@ for k in range(6):
          DOWN(-0.02, -0.12, -0.0004))
 slab("BatteryTab", [rrect(0, 0.068, 0.03, 0.012, 0.003)], 0.0, 0.0028, 0.0008, BLACK, DOWN(-0.02, -0.12, -0.0004))
 uvplane("UnderLabel", 0.09, 0.05, DOWN(0.12, -0.05, -0.0006))
-for fx, fz in ((-0.17, 0.0), (0.17, 0.0), (-0.17, -0.2), (0.17, -0.2)):
+for fx, fz in ((-0.17, 0.0), (0.17, 0.0), (-0.13, -0.165), (0.13, -0.165)):   # under the body, inside the chin
     lathe(f"Foot{fx}{fz}", [(0.0, -0.002), (0.009, -0.002), (0.011, -0.001), (0.011, 0.002), (0.0, 0.002)], BLACK,
           gmat((fx, 0.0, fz), (1, 0, 0), (0, 0, -1)), n=24)
-for sx_, sz_ in ((-0.15, -0.03), (0.15, -0.03), (-0.15, -0.19), (0.15, -0.19), (0.0, -0.06)):
+for sx_, sz_ in ((-0.15, -0.03), (0.15, -0.03), (-0.11, -0.16), (0.11, -0.16), (0.0, -0.06)):
     lathe(f"Screw{sx_}{sz_}", [(0.0, 0.0), (0.004, 0.0), (0.0035, -0.0012), (0.0, -0.0012)], GREY, gmat((sx_, -0.0002, sz_), (1, 0, 0), (0, 0, -1)), n=16)
 
 # the black ribbed pads on each side, just ahead of the bumper's ends (the side photo)
@@ -430,11 +439,18 @@ def _lean(x, y, z):
     return (x, FACE_PIVOT_Y + dy * _ca + dz * _sa, ZF - dy * _sa + dz * _ca)
 RIM_BACK = -0.088
 # 2.5 mm outside the outline: the red shell's sides are at x +-0.2 too (coplanar = z-fighting teeth)
-_front = [_lean(x, y, ZF - 0.0015) for x, y in offset2d(outer, 0.0025)]
-loft("BezelRim", [_front, [(x, y, RIM_BACK) for x, y, z in _front]], SLATE, cap1=True, angle=50, recalc=False)
-_rim = bpy.data.objects["BezelRim"].data      # (the outline runs CCW seen from the front: flip to face outwards)
-for p in _rim.polygons: p.flip()
-_rim.update()
+_front = [_lean(x * 1.0125, y, ZF - 0.0015) for x, y in outer]   # 2.5 mm wider (scaled: an offset folded at the steps)
+# its back end dips into the red (a vertical back face stood up as a dark wedge where the red is lower)
+_mid = [(x, y, RIM_BACK + 0.012) for x, y, z in _front]
+_back = [(x, min(y, b_height(RIM_BACK, x) - 0.003), RIM_BACK) for x, y, z in _front]
+loft("BezelRim", [_front, _mid, _back], SLATE, cap1=True, angle=50, recalc=False)
+for _p in bpy.data.objects["BezelRim"].data.polygons: _p.flip()   # the outline runs CCW from the front: flip outwards
+bpy.data.objects["BezelRim"].data.update()
+# the lip closing the 2.5 mm slot between the face's outline and the rim's front edge (you saw down into the rim: red)
+_inner = [_lean(x * 0.995, y, ZF - 0.0015) for x, y in outer]
+loft("BezelLip", [_inner, _front], SLATE, angle=50, recalc=False)
+loft("BezelLipB", [_front, _inner], SLATE, angle=50, recalc=False)   # both windings: an open strip, seen from either side
+
 
 FR = 0.009     # how far the cluster frame (with the cheek) and the screen frame stand out of the strip
 cl_frame = ppoly([(80, 700), (150, 700), (150, 232), (848, 232), (848, 655), (865, 655), (865, 200), (165, 200), (80, 290)],
@@ -561,10 +577,11 @@ CAP = G0 @ gmat((-0.006, 0.0415, 0), (0, 0, 1), (0, 1, 0))   # outline in (depth
 slab("LeverCap", [rrect(0, 0, 0.0215, 0.0245, 0.0012, 3), rrect(0, 0, 0.0135, 0.0165, 0.0006, 2)], 0.0, 0.007, 0.0006, GREY, CAP)
 slab("LeverCapPlug", [rrect(0, 0, 0.015, 0.018, 0.0006, 2)], 0.0, 0.0035, 0.0003, GREY, CAP)
 # three grooves along the grip's top face
-TOPF = G0 @ gmat((0.019, 0.0503, 0), (1, -0.13, 0), (0, 0, 1))
+# ON the top edge (-0.007, 0.053) -> (0.04, 0.047): local x along it, local y across (the slot axis), local z = its normal
+_d = Vector((0.047, -0.006, 0)).normalized()
+TOPF = G0 @ gmat((0.0165, 0.05, 0), tuple(_d), (0, 0, -1))
 for k in range(3):
-    slab(f"LeverGroove{k}", [rrect(0.004, -0.0045 + k * 0.0045, 0.028, 0.0008, 0.0003, 2)], -0.0002, 0.0004, 0.0001, BLACK,
-         TOPF @ gmat((0, 0, 0), (1, 0, 0), (0, 0, -1)))
+    slab(f"LeverGroove{k}", [rrect(0.0, -0.0045 + k * 0.0045, 0.03, 0.0008, 0.0003, 2)], -0.0003, 0.00015, 0.0001, BLACK, TOPF)
 
 # =================================================================================================================
 # THE STEERING WHEEL — round its own centre, facing local +Z. 194 mm across, a 9.5 mm rim; four flat spokes at
@@ -666,6 +683,7 @@ join("Lever", ["LeverStick", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum
 join("ConsoleRight", starts("ConsoleFin", "ConsoleGate", "ConsoleChannel"))
 join("BonnetLines", starts("BonnetLine", "BonnetRect"))
 join("SidePads", starts("SidePad"))
+join("BezelLip", ["BezelLip", "BezelLipB"])
 join("Underside", ["BatteryDoor", "BatteryTab"] + starts("BatteryRib", "Foot", "Screw"))
 join("LeverGrooves", starts("LeverGroove"))
 join("ResetButton", ["ResetButton", "ResetChevron"] + starts("ResetRib"))

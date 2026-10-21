@@ -139,7 +139,7 @@ const SCREEN = { w: filmSize.x, h: Math.max(filmSize.y, filmSize.z), z: 0.0042 }
 // the same painting as the film's yellow car, in red, soft and a little see-through (photo)
 const CAR_W = ROAD.CAR_W * SCREEN.w;
 const carSticker = new THREE.Mesh(new THREE.PlaneGeometry(CAR_W, CAR_W), new THREE.MeshBasicMaterial({
-  map: createCarSprite("#f07868", "#d4594c", "#ffa494", 8), transparent: true, opacity: 0.92, depthWrite: false, toneMapped: false }));
+  map: createCarSprite("#e8463a", "#7a1610", "#ff9a88", 2.5), transparent: true, opacity: 0.92, depthWrite: false, toneMapped: false }));
 carSticker.position.z = SCREEN.z;
 film.add(carSticker);
 
@@ -218,7 +218,7 @@ function present() {
   const cx = carScreenX();
   carSticker.position.x = (cx - 0.5) * SCREEN.w;
   carSticker.position.y = -SCREEN.h / 2 + ROAD.CAR_V * SCREEN.h + CAR_W * 0.35;
-  carSticker.visible = screen.uOn.value > 0.05;
+  carSticker.material.opacity = 0.45 + 0.47 * screen.uOn.value;   // a sticker: always there, brighter when lit
 
   // controls
   wheel.quaternion.copy(wheelBase.q).multiply(spin.setFromAxisAngle(zAxis, -st.steer));

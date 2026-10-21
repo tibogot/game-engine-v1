@@ -18,7 +18,7 @@ export const ROAD = {
   CAM: 0.5,         // the view follows half the road's wander: the bottom drifts, the car must follow
   CAR_V: 0.12,      // the player car's row
   ASPECT: 0.13 / 0.09,
-  CAR_W: 0.16,      // the cars' width on screen at the bottom row (photo: the red car ~16 % of the screen)
+  CAR_W: 0.2,       // the cars' width on screen at the bottom row (photo: the red car ~16 % of the screen)
 };
 
 export const curve = (s) => 0.55 * Math.sin(0.21 * s) + 0.3 * Math.sin(0.47 * s + 1.3);
@@ -34,29 +34,45 @@ export function roadAtCar(s) {
   return { x: screenX(curve(s + depthAt(v)), v, s), half: ROAD.W * ROAD.K * scaleAt(v) };
 }
 
-// --- the cars on the film, from behind and a little above (the user's close photo of the screen): a soft bell — a
-// rounded cabin on a wider rounded base — with two darker bands (rear window, tail), blurred by the frosted panel.
-export function createCarSprite(body, band, light, blur = 5, long = false) {
+// --- the cars on the film (screen photos): a rear-engined sports car from behind and above — wide rear wings, a
+// narrower rounded cabin, the rear window, the engine lid with its grille, a tail-light band, the tyres at the corners —
+// soft, as painted on film behind frosted plastic. `long`: the car ahead, seen more from above (longer).
+export function createCarSprite(body, band, light, blur = 3, long = false) {
   const S = 256;
   const src = document.createElement("canvas"); src.width = src.height = S;
   const c = src.getContext("2d");
-  const R = (x, y, w, h, r, fill) => { c.fillStyle = fill; c.beginPath(); c.roundRect(x * S, y * S, w * S, h * S, r * S); c.fill(); };
-  c.shadowColor = body; c.shadowBlur = 18;   // the glow through the frost
-  if (long) {                               // the car ahead (front photo): seen more from above — a long rounded body,
-    R(0.14, 0.04, 0.72, 0.92, 0.28, body);  // the roof and rear window in its upper half, the tail lights at the bottom
-    c.shadowBlur = 0;
-    R(0.26, 0.14, 0.48, 0.18, 0.08, light); R(0.24, 0.36, 0.52, 0.16, 0.06, band);
-    R(0.2, 0.62, 0.6, 0.06, 0.03, light); R(0.18, 0.78, 0.64, 0.08, 0.04, band);
-  } else {
-  c.beginPath(); c.ellipse(0.5 * S, 0.7 * S, 0.47 * S, 0.27 * S, 0, 0, Math.PI * 2); c.fillStyle = body; c.fill();   // the wide rear
-  c.beginPath(); c.ellipse(0.5 * S, 0.36 * S, 0.3 * S, 0.3 * S, 0, 0, Math.PI * 2); c.fill();                              // the cabin / roof
-  R(0.12, 0.5, 0.76, 0.3, 0.1, body);       // flanks joining them
-  c.shadowBlur = 0;
-  R(0.32, 0.12, 0.36, 0.1, 0.05, light);    // roof light
-  R(0.28, 0.33, 0.44, 0.13, 0.06, band);    // rear window
-  R(0.14, 0.72, 0.72, 0.09, 0.045, band);   // tail band
-  R(0.12, 0.55, 0.76, 0.05, 0.025, light);  // deck light
-  }
+  c.save(); c.scale(S, S);
+  const k = long ? 1.25 : 1;            // vertical stretch for the car ahead
+  const Y = (y) => 0.98 - (0.98 - y) * k;
+  // tyres
+  c.fillStyle = band;
+  for (const x of [0.07, 0.79]) { c.beginPath(); c.roundRect(x, Y(0.74), 0.14, 0.22 * k, 0.03); c.fill(); }
+  // body: wide hips, waist in at the cabin
+  c.fillStyle = body;
+  c.beginPath();
+  c.moveTo(0.1, Y(0.9));
+  c.bezierCurveTo(0.03, Y(0.86), 0.02, Y(0.62), 0.07, Y(0.52));     // left rear wing
+  c.bezierCurveTo(0.1, Y(0.46), 0.18, Y(0.44), 0.22, Y(0.42));
+  c.bezierCurveTo(0.24, Y(0.26), 0.3, Y(0.14), 0.5, Y(0.13));       // cabin up to the roof
+  c.bezierCurveTo(0.7, Y(0.14), 0.76, Y(0.26), 0.78, Y(0.42));
+  c.bezierCurveTo(0.82, Y(0.44), 0.9, Y(0.46), 0.93, Y(0.52));
+  c.bezierCurveTo(0.98, Y(0.62), 0.97, Y(0.86), 0.9, Y(0.9));
+  c.closePath(); c.fill();
+  // roof highlight, rear window
+  c.fillStyle = light; c.beginPath(); c.ellipse(0.5, Y(0.2), 0.16, 0.045 * k, 0, 0, Math.PI * 2); c.fill();
+  c.fillStyle = band; c.beginPath();
+  c.moveTo(0.3, Y(0.42)); c.bezierCurveTo(0.31, Y(0.3), 0.38, Y(0.25), 0.5, Y(0.25));
+  c.bezierCurveTo(0.62, Y(0.25), 0.69, Y(0.3), 0.7, Y(0.42)); c.closePath(); c.fill();
+  // engine lid + grille slats
+  c.fillStyle = light; c.globalAlpha = 0.5;
+  c.beginPath(); c.roundRect(0.33, Y(0.47), 0.34, 0.12 * k, 0.04); c.fill();
+  c.globalAlpha = 1; c.fillStyle = band;
+  for (let i = 0; i < 4; i++) c.fillRect(0.38, Y(0.495 + i * 0.025), 0.24, 0.009 * k);
+  // tail-light band, bumper
+  c.fillStyle = "#ff3a26"; c.beginPath(); c.roundRect(0.12, Y(0.64), 0.76, 0.07 * k, 0.02); c.fill();
+  c.fillStyle = band; c.beginPath(); c.roundRect(0.4, Y(0.65), 0.2, 0.05 * k, 0.01); c.fill();
+  c.beginPath(); c.roundRect(0.1, Y(0.76), 0.8, 0.06 * k, 0.03); c.fill();
+  c.restore();
   const out = document.createElement("canvas"); out.width = out.height = S;
   const o = out.getContext("2d");
   o.filter = `blur(${blur}px)`; o.drawImage(src, 0, 0);
@@ -97,7 +113,7 @@ export function createScreen() {
   const uFlash = uniform(0);      // off-road: the bulb blinks (0..1)
   const uRival = uniform(new THREE.Vector4(0.5, 2, 0.05, 0)); // x, v, width, visible
   const treeTex = createTreeSprite();
-  const rivalTex = createCarSprite("#f4cf52", "#c08a1c", "#fff0b0", 4, true);
+  const rivalTex = createCarSprite("#f4cf52", "#9a6a14", "#fff0b0", 2.5, true);
 
   const { VH, D0, K, W, CAM, ASPECT } = ROAD;
   const curveT = (s) => sin(s.mul(0.21)).mul(0.55).add(sin(s.mul(0.47).add(1.3)).mul(0.3));
@@ -165,14 +181,15 @@ export function createScreen() {
     const film = back.mul(vig).add(col.mul(1.05)).toVar();
 
     // the yellow car ahead (placed by the game, uRival: x centre, v bottom, width): painted on the film
-    const rw = uRival.z.mul(1.05), rh = uRival.z.mul(ASPECT * 1.4);   // seen more from above: a little longer
+    const rw = uRival.z.mul(1.0), rh = uRival.z.mul(ASPECT);   // seen more from above: a little longer
     const ruv = vec2(p.x.sub(uRival.x).div(rw).add(0.5), v.sub(uRival.y).div(rh));
     const inside = step(0, ruv.x).mul(step(ruv.x, 1)).mul(step(0, ruv.y)).mul(step(ruv.y, 1)).mul(uRival.w);
     const car = texture(rivalTex, ruv);
     const a = car.a.mul(inside);
     film.assign(mix(film, car.rgb.mul(vig.mul(0.3).add(0.85)), a.mul(0.9)));
 
-    const on = mix(vec3(0.025, 0.028, 0.027), film, uOn.mul(float(1).sub(uFlash.mul(0.65))));
+    const unlit = film.mul(0.1).add(vec3(0.08, 0.08, 0.082));   // off: room light on the frosted panel, the film faint
+    const on = mix(unlit, film, uOn.mul(float(1).sub(uFlash.mul(0.65))));
     return on;
   });
 
