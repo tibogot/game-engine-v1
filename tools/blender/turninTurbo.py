@@ -572,8 +572,10 @@ for k in range(3):
 # solved on the fitted camera: the hub at photo (415, 830), the rim's left / right / top / bottom on the photo's, its
 # bottom just clear of the table: centre 87 mm up, 117 mm out, 92 mm radius, tilted back 24.5° — its column then runs
 # back and down straight into the column boss
-WHEEL_C = (-0.0934, 0.0873, 0.1175)
-WHEEL_TILT = 30.0
+# solved on BOTH the front and the side 3/4 photo (cameras fitted to each; the rim's extremes + the badge in each):
+# the front photo alone allows two tilts (~23 or ~57 deg give the same oval) — the side photo settles it
+WHEEL_C = (-0.1032, 0.0727, 0.0929)
+WHEEL_TILT = 39.6
 WHEEL = gmat(WHEEL_C, (1, 0, 0), (0, math.cos(math.radians(WHEEL_TILT)), -math.sin(math.radians(WHEEL_TILT))))
 RR, TR, TD = 0.0812, 0.0105, 0.0135
 rim_rings = []
