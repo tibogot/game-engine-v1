@@ -88,6 +88,28 @@ this is just the list. Newest decisions at the top of each section. Last updated
          c. [ ] floating-island scenery (shots 1, 3) — the same; a design pass with the user first
          d. [ ] (maybe) a real CEILING run: a flat upside-down straight between two roof curves; needs
             magnets along a curved path (carRules magnetZones are straight-axis, for twists)
+- [x] **USER'S FIRST BUILD, 3 FIXES** (2026-10-21): (1) back from a drive the editor camera came back
+      ROLLED — the chase camera tilts camera.up and widens the fov; stopDrive restores up (0,1,0) and the
+      fov. (2) "I click a piece to move and rotate it but see no gizmo" — only a road's FIRST piece had
+      one; now any road piece does (movableKind "road", rootOf): the gizmo moves / turns the WHOLE joined
+      road round the piece you picked (its landings, the jump pads' landings too). (3) "after a platform
+      landing I cannot snap other pieces to it" — an end only snapped within 60 px of its MIDDLE: a 48 m
+      platform's end pointed at its side half was missed; now the distance is to the end's whole edge
+      (taper ends use their own width). Tests: platform 128 landed on an arc, a straight aimed 18 m right
+      of its end's middle → snaps, not loose; gizmo on a middle piece: +20 m, 15° → all 5 pieces moved,
+      still joined; camera up / fov restored after a drive.
+- [x] **FREE PLACEMENT, items 1 + 2** (user, 2026-10-22, from "what's missing to place pieces freely"):
+      SPLIT (K / "Split here"): a piece in a road starts a road of its own (parent / flightFrom cut, kept
+      where it is) — the gizmo then moves that half alone. JOIN: a road's first piece dropped with the
+      gizmo within 4 m of an open end, heading its way (20°), joins it; "Join to the end nearby" (an end
+      within 30 m) lays it on exactly; its landings and loose obstacles come along; a bank mismatch is
+      refused with why. DROP LINE: a floating piece in hand (grid / Alt / arc) has a dashed line down to
+      the road under it or the floor, a ring there, and "N m above the road under it · M m from the
+      nearest end, K m higher". KEYS list updated. Tests: 4 straights split at the 3rd, moved 20 m (the
+      first half stayed), Join button → joined, nothing loose, lap runs; split + 3 m drop → auto-joined;
+      readouts "140 m above the floor …", "20 m above the road under it …" (Alt over the road).
+      Still open from that list: move SEVERAL selected pieces with the gizmo, snap onto another piece's
+      SURFACE (stacking), tilt a placed road with the gizmo.
 - **MORE OBSTACLES** (user, 2026-10-21: "poles, boost decals … many others"; agreed order):
       1. [x] BOOST PAD (Obstacles tab): a decal on ANY piece, 8 × 12 m, the Boost 32 chevrons and push
          (carRules BOOST 2 s; pads are { inv, hx, hz } boxes — obstacles.js boostZones, in the drive page

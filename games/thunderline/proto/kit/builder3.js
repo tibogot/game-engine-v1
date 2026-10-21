@@ -1389,10 +1389,15 @@ function computeSnap() {
       if (s && Math.hypot(s.x - mouse.x, s.y - mouse.y) < 160) return { type: "end", m, prepend: first.uid, note: "Start · on the head of your road" };
     }
   }
+  // the mouse near an end's EDGE, all across it — not only its middle: a 48 m platform's end was missed
+  // pointing at its side half ("after a platform landing I cannot snap other pieces to it", 2026-10-21)
   if (!onArc && !TILES[id]?.start) for (const e of openEnds()) {
-    const s = toScreen(new THREE.Vector3().setFromMatrixPosition(e.m));
-    if (!s) continue;
-    const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
+    const et = TILES[track.pieces.find((q) => q.uid === e.uid)?.id] ?? {};
+    const ehw = et.taper ? et.taper.to : SECTIONS[et.section ?? "road"].hw;
+    const a = toScreen(new THREE.Vector3(-ehw, 0, 0).applyMatrix4(e.m)), c = toScreen(new THREE.Vector3(ehw, 0, 0).applyMatrix4(e.m));
+    if (!a || !c) continue;
+    const ab = { x: c.x - a.x, y: c.y - a.y }, t = THREE.MathUtils.clamp(((mouse.x - a.x) * ab.x + (mouse.y - a.y) * ab.y) / Math.max(1e-6, ab.x * ab.x + ab.y * ab.y), 0, 1);
+    const d = Math.hypot(a.x + ab.x * t - mouse.x, a.y + ab.y * t - mouse.y);
     if (d < 60 && (!best || d < best.d)) best = { type: "end", m: e.m.clone(), parent: e.uid, d, end: e };
   }
   if (best) {
@@ -1533,9 +1538,36 @@ function gridSnap(t) {
   }
   return { type: "world", bad, m: freeMatrix(new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, buildY, Math.round(hit.z / gridStep) * gridStep), rot.yaw) };
 }
+// WHERE A FLOATING PIECE IS (user, 2026-10-21: "what's missing to place pieces freely"): a piece in hand
+// that floats (on the grid, Alt free, on a jump's arc) gets a thin line down to what is under it — a road
+// or the floor — and a ring where it lands; the panel says how high and how far from the nearest end.
+const dropMat = new THREE.LineDashedMaterial({ color: 0xffffff, dashSize: 1.2, gapSize: 0.8, transparent: true, opacity: 0.7, depthTest: false });
+const dropLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, -1, 0)]), dropMat);
+const dropRing = new THREE.Mesh(new THREE.RingGeometry(1.6, 2.1, 32).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7, depthTest: false, side: THREE.DoubleSide }));
+dropLine.renderOrder = dropRing.renderOrder = 11;
+dropLine.visible = dropRing.visible = false;
+scene.add(dropLine, dropRing);
+function updateDrop() {
+  const floating = snap && !snap.bad && ["world", "local", "arc"].includes(snap.type);
+  dropLine.visible = dropRing.visible = !!floating;
+  if (!floating) { if (snap) snap.where = null; return; }
+  const P = new THREE.Vector3().setFromMatrixPosition(snap.m);
+  // what is under it: the first road piece (not the ghost: it is not in trackGroup), else the floor
+  const hit = new THREE.Raycaster(P.clone().add(new THREE.Vector3(0, 0.5, 0)), new THREE.Vector3(0, -1, 0), 0, 5000).intersectObjects(trackGroup.children, true)[0];
+  const G = hit ? hit.point : new THREE.Vector3(P.x, FLOOR_Y, P.z);
+  dropLine.geometry.setFromPoints([P, G]);
+  dropLine.computeLineDistances();
+  dropRing.position.copy(G).add(new THREE.Vector3(0, 0.05, 0));
+  const ends = openEnds().map((e) => new THREE.Vector3().setFromMatrixPosition(e.m));
+  const near = ends.sort((a, b) => a.distanceTo(P) - b.distanceTo(P))[0];
+  const dh = near ? Math.round(P.y - near.y) : 0;
+  snap.where = `${Math.round(P.y - G.y)} m above ${hit ? "the road under it" : "the floor"}` +
+    (near ? ` · ${Math.round(Math.hypot(P.x - near.x, P.z - near.z))} m from the nearest end${dh ? `, ${Math.abs(dh)} m ${dh > 0 ? "higher" : "lower"}` : ", same height"}` : "");
+}
 function updateGhost() {
-  if (!tileBase || !mouse.inside) { if (ghost) ghost.visible = false; snap = null; renderStatus(); return; }
+  if (!tileBase || !mouse.inside) { if (ghost) ghost.visible = false; snap = null; updateDrop(); renderStatus(); return; }
   snap = computeSnap();
+  updateDrop();
   if (!snap) { if (ghost) ghost.visible = false; renderStatus(); return; }
   const id = tileId(tileBase);
   const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.dx}|${snap.hw}|${snap.strip ? JSON.stringify(snap.strip[0]) + JSON.stringify(snap.strip.at(-1)) : ""}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
@@ -1656,6 +1688,56 @@ function place() {
   glide = exit;
 }
 function removePiece(uid) { removeMany([uid]); }
+// ---------- SPLIT AND JOIN ROADS (user, 2026-10-21: "what's missing to place pieces freely") ----------
+// SPLIT (K): the selected piece starts a road of its own — its link to the piece before (or to the jump it
+// lands from) is cut, it stays where it is, and the gizmo then moves / turns it and what follows it alone.
+function splitAt(uid) {
+  const pc = track.pieces.find((p) => p.uid === uid);
+  if (!pc || isRing(pc)) return;
+  if (pc.parent == null && pc.flightFrom == null) { editMsg = "This piece already starts a road."; renderStatus(); return; }
+  snapshot();
+  pc.M = built.get(uid).M.toArray();
+  pc.parent = null;
+  pc.flightFrom = null;
+  editMsg = "Split: this piece now starts its own road — move or turn it with the gizmo, or join it to an end.";
+  rebuild();
+}
+/** The open end (not of its own road) nearest the START of the road beginning at `uid`, within maxD m. */
+function nearestEndFor(uid, maxD) {
+  const own = new Set(carried(uid).pieces);
+  const M = built.get(uid)?.M;
+  if (!M) return null;
+  const P = new THREE.Vector3().setFromMatrixPosition(M), F = new THREE.Vector3(0, 0, -1).transformDirection(M);
+  let best = null;
+  for (const e of openEnds()) {
+    if (own.has(e.uid)) continue;
+    const d = P.distanceTo(new THREE.Vector3().setFromMatrixPosition(e.m));
+    const ang = Math.acos(THREE.MathUtils.clamp(F.dot(new THREE.Vector3(0, 0, -1).transformDirection(e.m)), -1, 1)) / DEG;
+    if (d < maxD && (!best || d < best.d)) best = { e, d, ang };
+  }
+  return best;
+}
+/** JOIN: the road starting at `uid` is laid on the nearest open end (exactly, linked) — what flies off it
+ * (its landings) and what stands loose on it come along. Within maxD m, its heading within maxAng°. */
+function joinRoad(uid, maxD = 30, maxAng = 180) {
+  const pc = track.pieces.find((p) => p.uid === uid);
+  const n = nearestEndFor(uid, maxD);
+  if (!pc || !n || n.ang > maxAng) return false;
+  if (Math.abs(deg(leanIn(TILES[pc.id])) - deg(n.e.lean)) > 3) { editMsg = `That end ${n.e.lean ? `leans ${Math.abs(deg(n.e.lean))}°` : "is flat"}: this road starts ${leanIn(TILES[pc.id]) ? `leaning ${Math.abs(deg(leanIn(TILES[pc.id])))}°` : "flat"}.`; renderStatus(); return false; }
+  snapshot();
+  const delta = n.e.m.clone().multiply(built.get(uid).M.clone().invert());
+  const what = carried(uid);
+  for (const u of what.pieces) {
+    const q = track.pieces.find((p) => p.uid === u);
+    if (q && q.uid !== uid && q.parent == null) q.M = delta.clone().multiply(new THREE.Matrix4().fromArray(q.M)).toArray();
+  }
+  for (const u of what.props) { const o = track.props.find((p) => p.uid === u); if (o && o.on == null) o.M = delta.clone().multiply(new THREE.Matrix4().fromArray(o.M)).toArray(); }
+  pc.parent = n.e.uid;
+  pc.flightFrom = null;
+  editMsg = `Joined to the end of ${TILES[track.pieces.find((p) => p.uid === n.e.uid)?.id]?.label ?? "the road"}.`;
+  rebuild();
+  return true;
+}
 /** Take one piece (or obstacle) out of the track's data; its road closes up. */
 function cutOut(uid) {
   const k = (track.props ?? []).findIndex((p) => p.uid === uid);
@@ -1970,7 +2052,24 @@ function movableKind(uid) {
   const pc = track.pieces.find((p) => p.uid === uid);
   if (!pc) return null;
   if (isRing(pc)) return "ring";
-  return pc.parent == null && pc.flightFrom == null ? "root" : null;
+  if (pc.parent == null && pc.flightFrom == null) return "root";
+  // a piece in the middle of a road (user, 2026-10-21: "I click a piece to move and rotate it but see no
+  // gizmo"): its pieces are joined, so the gizmo moves the WHOLE road, turning round the piece you picked
+  return rootOf(uid) != null ? "road" : null;
+}
+/** The first piece of the road a piece belongs to (back along parent, the jump it lands from — a lip or a
+ * jump pad's piece — or the piece it lies beside), or null. */
+function rootOf(uid) {
+  const seen = new Set();
+  let pc = track.pieces.find((p) => p.uid === uid);
+  while (pc && !seen.has(pc.uid)) {
+    seen.add(pc.uid);
+    const up = pc.parent ?? pc.flightFrom ?? pc.sideOf;
+    if (up == null) return pc.uid;
+    const host = (track.props ?? []).find((o) => o.uid === up)?.on; // flightFrom a jump pad: its piece
+    pc = track.pieces.find((p) => p.uid === (host ?? up));
+  }
+  return null;
 }
 function attachGizmo() {
   const kind = !tileBase && !driving && selection().length <= 1 ? movableKind(sel) : null;
@@ -1986,6 +2085,7 @@ function attachGizmo() {
 function setGizmoMode(m) { gizmoMode = m; attachGizmo(); statusKey = ""; renderStatus(); }
 /** Everything that moves with `uid`: a root carries its road, what flies off it, and what stands on it. */
 function carried(uid) {
+  if (movableKind(uid) === "road") uid = rootOf(uid); // the whole road it is part of
   const kind = movableKind(uid);
   if (kind !== "root") return { pieces: [uid], props: kind === "prop" ? [uid] : [] };
   const S = new Set([uid]);
@@ -2032,6 +2132,9 @@ gizmo.addEventListener("dragging-changed", (e) => {
     o.M = M.toArray();
   }
   rebuild();
+  // DROPPED NEAR AN END: a road's head let go within 4 m of an open end, heading its way (20°), joins it
+  const kind = movableKind(sel);
+  if (kind === "root" || kind === "road") joinRoad(kind === "root" ? sel : rootOf(sel), 4, 20);
 });
 gizmo.addEventListener("objectChange", () => {
   if (!gizmoDrag) return;
@@ -2092,7 +2195,7 @@ function renderStatus() {
   const many = !tileBase ? selection() : [];
   const multi = many.length > 1;
   const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [freeHold, snap?.type, snap?.bad, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const k = [freeHold, snap?.type, snap?.bad, snap?.where, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -2116,7 +2219,10 @@ function renderStatus() {
         `<button data-act="insert" class="${editMode === "insert" ? "on" : ""}">Insert after <kbd>I</kbd></button>` +
         `<button data-act="replace" class="${editMode === "replace" ? "on" : ""}">Replace <kbd>P</kbd></button>` +
         `<button data-act="delete">Delete <kbd>Del</kbd></button>` +
-        `<button data-act="cp">${selPc.cp ? "No checkpoint" : "Checkpoint"} <kbd>C</kbd></button></div>`
+        `<button data-act="cp">${selPc.cp ? "No checkpoint" : "Checkpoint"} <kbd>C</kbd></button>` +
+        (selPc.parent != null || selPc.flightFrom != null ? `<button data-act="split" title="This piece starts a road of its own: move it and what follows alone">Split here <kbd>K</kbd></button>` : "") +
+        (selPc.parent == null && selPc.flightFrom == null && nearestEndFor(selPc.uid, 30) ? `<button data-act="join" title="Lay this road on the open end nearby">Join to the end nearby</button>` : "") +
+        `</div>`
       : selPc ? `<div class="acts"><button data-act="delete">Delete <kbd>Del</kbd></button></div>` : "") +
     // a placed ADJUSTABLE piece: its settings, right here (the road after it follows)
     (selPc && !selPc.kind && !isRing(selPc) && parseAdjustable(selPc.id)
@@ -2128,11 +2234,13 @@ function renderStatus() {
       ? `<div class="row"><span><b>Drag it</b> along or across the road${canTurn(selPc.kind) ? ` · <kbd>Q</kbd>/<kbd>E</kbd> turn` : ""} · <kbd>Del</kbd> delete</span></div>`
       : selPc ? (movableKind(sel)
       ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div>` +
-        (movableKind(sel) === "root" ? `<div class="row"><span>The whole road behind it moves too</span></div>` : "")
+        (movableKind(sel) === "root" ? `<div class="row"><span>The whole road behind it moves too</span></div>`
+          : movableKind(sel) === "road" ? `<div class="row"><span>Its pieces are joined: the whole road moves and turns with it</span></div>` : "")
       : `<div class="row"><span>Held by the road: Replace or Insert</span></div>`) : "") +
     (editMsg ? `<div class="warn">${editMsg}</div>` : "") +
     (snap?.bad ? `<div class="warn">${snap.bad}</div>` : "") +
     (snap?.note ? `<div class="row"><span>${snap.note}</span></div>` : "") +
+    (snap?.where ? `<div class="row"><span>↧ ${snap.where}</span></div>` : "") +
     problems.messages.map((m) => `<div class="warn">⚠ ${m}</div>`).join("") +
     (refittable().length ? `<div class="acts"><button data-act="refit">Re-fit ${refittable().length > 1 ? `${refittable().length} landings` : "the landing"} to the jump</button></div>` : "") +
     predictionLine() +
@@ -2163,6 +2271,8 @@ $("status").addEventListener("click", (e) => {
   else if (act === "insert" || act === "replace") startEdit(act);
   else if (act === "delete") { editMode = null; removePiece(sel); }
   else if (act === "cp") toggleCheckpoint(sel);
+  else if (act === "split") splitAt(sel);
+  else if (act === "join") { if (!joinRoad(sel)) { editMsg ??= "No open end within 30 m."; renderStatus(); } }
 });
 
 // ---------- input ----------
@@ -2297,6 +2407,7 @@ addEventListener("keydown", (e) => {
       else if (k === "t") { const order = [true, "L", "R", false]; edges = order[(order.indexOf(edges) + 1) % order.length]; ghostDirty = true; renderDock(); }
       else if (k === "f") nav.frame();
       else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
+      else if (k === "k" && !tileBase && sel != null) splitAt(sel);
       else if (k === "i" && !tileBase && sel != null) startEdit("insert");
       else if (k === "m" && !tileBase && movableKind(sel)) setGizmoMode(gizmoMode === "translate" ? "rotate" : "translate");
       else if (k === "l") setLapLine(!lapLineOn);
@@ -2423,6 +2534,11 @@ function stopDrive() {
   for (const [id, d] of saved.ui) $(id).style.display = d;
   camera.position.copy(saved.pos);
   controls.target.copy(saved.target);
+  // the chase camera tilts camera.up (loops, banks) and widens the lens with speed: back to the editor's,
+  // or the orbit comes back ROLLED (user, 2026-10-21: "the camera has rotated … a weird rotated camera")
+  camera.up.set(0, 1, 0);
+  camera.fov = saved.fov;
+  camera.updateProjectionMatrix();
   controls.enabled = true;
   fitView();
   controls.update();
@@ -2505,7 +2621,7 @@ app.addPreUpdateHook(function builderFrame() {
 const hookAim = (f) => (...a) => { controls.update(); camera.updateMatrixWorld(); const r = f(...a); updateGhost(); return r; };
 window.__b3 = {
   app, get rig() { return rig; }, startDrive, stopDrive, get driving() { return driving; },
-  get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls,
+  get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls, gizmo, gizmoProxy,
   pickTile: hookAim(pickTile), place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },
   aimFast(k) { const a = arcs.at(-1); if (!a) return null; const p = a.fast.pts[Math.min(k, a.fast.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.fast.pts.length, p }; },
