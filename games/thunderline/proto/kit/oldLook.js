@@ -89,6 +89,34 @@ export function oldFrames(tile) {
 }
 
 /**
+ * RAILS PER SIDE (user, 2026-10-21, Apex Rush: pieces with a guardrail on ONE side, or none, laid side by
+ * side make wide roads and jump areas). `edges` everywhere in this file: true = both rails (guarded),
+ * false = none (open), "L" / "R" = that side only. The other side has no kerb either: its deck edge is
+ * flush, so a neighbour laid against it joins without a lip.
+ */
+export const railSides = (edges) => (edges === "L" ? [-1] : edges === "R" ? [1] : edges ? [-1, 1] : []);
+/** A placed piece's edges: { open, rail } → true / false / "L" / "R" (old tracks: open only). */
+export const edgesOf = (p) => (p.open ? false : p.rail === "L" || p.rail === "R" ? p.rail : true);
+/** The look-cache key for those edges. */
+export const lookKey = (edges) => (edges === true ? "guarded" : edges === false ? "open" : `rail${edges}`);
+/** The road cross-section with a kerb on each side in `sides` (−1 left, +1 right) and a flush edge elsewhere. */
+function sideProfile(rp, sides) {
+  const both = buildProfile(rp, true), none = buildProfile(rp, false);
+  if (sides.length === 2) return both;
+  if (!sides.length) return none;
+  const hw = rp.width / 2;
+  const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45), rh = Math.max(0, rp.railHeight);
+  const t = Math.max(0.05, rp.thickness), N = 24;
+  const left = sides.includes(-1), xl = left ? -hw + rw : -hw, xr = left ? hw : hw - rw;
+  const pts = [];
+  if (left) pts.push({ x: -hw, y: rh, zone: 2 }, { x: -hw + rw, y: rh, zone: 2 });
+  for (let k = 0; k <= N; k++) pts.push({ x: xl + ((xr - xl) * k) / N, y: 0, zone: 1, smooth: k > 0 && k < N });
+  if (!left) pts.push({ x: hw - rw, y: rh, zone: 2 }, { x: hw, y: rh, zone: 2 });
+  for (let k = N; k >= 0; k--) pts.push({ x: -hw + (2 * hw * k) / N, y: -t, zone: 0, smooth: k > 0 && k < N });
+  return { pts, hw };
+}
+
+/**
  * A FUNNEL / FLARE (`tile.taper: { from, to }`, half widths in m — user, 2026-10-21: large platforms to
  * land on need a way back to the road): the deck narrows (or widens) smoothly along the piece, kerbs at
  * its edges; each side's rail is built from frames SHIFTED out to the edge at that point (the rail
@@ -103,8 +131,9 @@ function buildTaperLook(tile, edges) {
   const L = sAt.at(-1) || 1;
   const hwAt = (i) => { const t = sAt[i] / L, e = t * t * (3 - 2 * t); return from + (to - from) * e; };
   const narrow = Math.min(from, to);
-  const deck = buildSweepGeometry(frames, buildProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * from }, edges), {
-    profileAt: (_t, i) => buildProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(i) }, edges),
+  const sides = railSides(edges);
+  const deck = buildSweepGeometry(frames, sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * from }, sides), {
+    profileAt: (_t, i) => sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(i) }, sides),
   });
   const n = deck.getAttribute("position").count;
   const a = new Float32Array(n * 2);
@@ -126,7 +155,7 @@ function buildTaperLook(tile, edges) {
   };
   const posts = { key: "", template: null, matrices: [] };
   const rails = [], cols = [];
-  for (const side of [-1, 1]) {
+  for (const side of sides) {
     const fr = sideFrames(side);
     rails.push(buildRailGeometry(fr, rp, RAIL, { postSink: posts, sides: [side] }));
     cols.push(buildRailCollision(fr, rp, RAIL, { sides: [side] }));
@@ -165,7 +194,8 @@ export function buildOldLook(tile, edges = true) {
   for (const f of all) { if (f.air) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(f); }
   const parts = runs.filter((r) => r.length >= 2);
   const merge = (gs) => (gs.length === 1 ? gs[0] : mergeGeometries(gs));
-  const deck = merge(parts.map((r) => buildSweepGeometry(r, buildProfile(rp, edges), {})));
+  const sides = railSides(edges);
+  const deck = merge(parts.map((r) => buildSweepGeometry(r, sideProfile(rp, sides), {})));
   // the road material reads aPiece = (noise phase, line distance); one phase per tile is enough here
   const n = deck.getAttribute("position").count;
   const a = new Float32Array(n * 2);
@@ -174,7 +204,7 @@ export function buildOldLook(tile, edges = true) {
   const under = STRIPED.has(String(tile.id ?? "").replace(/_L$/, "")) ? merge(parts.map((r) => stripedUnder(r, rp.width / 2, rp.thickness ?? 0.9))) : null;
   if (!edges) return { deck, rail: null, railCollision: null, posts: null, under };
   const posts = { key: "", template: null, matrices: [] };
-  const rail = merge(parts.map((r) => buildRailGeometry(r, rp, RAIL, { postSink: posts })));
-  const railCollision = merge(parts.map((r) => buildRailCollision(r, rp)));
+  const rail = merge(parts.map((r) => buildRailGeometry(r, rp, RAIL, { postSink: posts, sides })));
+  const railCollision = merge(parts.map((r) => buildRailCollision(r, rp, undefined, { sides })));
   return { deck, rail, railCollision, posts, under };
 }

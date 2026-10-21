@@ -27,7 +27,7 @@ import { createEngineSound } from "./engineSound.js";
 import { createEngineLoops, isLoopEngine } from "./engineLoops.js";
 import { createSfx } from "./sfx.js";
 import { createSfxSamples, GAME_PICK } from "./sfxSamples.js";
-import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
+import { buildOldLook, createOldLookMaterials, edgesOf, lookKey } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
@@ -138,6 +138,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     return (built[id] = t ? { b: integrate(t), guarded: buildOldLook(t, true), open: buildOldLook(t, false) } : null);
   };
   for (const id of Object.keys(TILES)) ensureBuilt(id);
+  // a placement's look by its edges (both rails, none, one side — the one-sided ones built on first use)
+  const lookFor = (p) => {
+    const e = edgesOf(p), k = lookKey(e), B = ensureBuilt(p.id);
+    return (B[k] ??= buildOldLook(TILES[p.id], e));
+  };
 
   // ---------- the car (+ the ghost), loaded once ----------
   const floorH = (x, z) => app.getWorldHeight(x, z);
@@ -390,7 +395,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // THE RUN-OUT: past the finish the road goes on for 3 straights (drawn and solid, not part of the
     // race), and the car brakes by itself (driveFrame): it used to fly off the track's end after the line
     const runout = [];
-    const lastP = lay.placements.at(-1);
+    const lastP = lay.placements.filter((p) => !p.side).at(-1); // the road's end, not a piece beside it
     // (not after a FINISH piece: its own 72 m stub is the run-out, and its nose ends it)
     if (track && lastP && !o.from && !TILES[lastP.id]?.finish) {
       const t = TILES[lastP.id], b = built[lastP.id].b;
@@ -435,7 +440,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const asCollider = (geometry, M, userData = {}) => ({ geometry, matrixWorld: M, userData, updateMatrixWorld() {} });
     const decks = [], solids = [];
     for (const p of solidPlacements) {
-      const look = p.open ? built[p.id].open : built[p.id].guarded;
+      const look = lookFor(p);
       const t = TILES[p.id];
       // the left-hand mirrors ("…_L") are the same pieces: they need the same tags
       decks.push(asCollider(look.deck, p.M, { roadHold: ROAD_HOLD.has(p.id.replace(/_L$/, "")) || !!t?.roadHold, freeCarve: !!t?.freeCarve }));
@@ -512,7 +517,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); // let the sun settle for the time of day
     const pts = [], tmp = new V();
     for (const p of lay.placements) {
-      const look = p.open ? built[p.id].open : built[p.id].guarded;
+      const look = lookFor(p);
       for (const g of [look.deck, look.rail]) {
         if (!g) continue;
         const a = g.getAttribute("position");

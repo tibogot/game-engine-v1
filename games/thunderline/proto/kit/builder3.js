@@ -8,7 +8,7 @@ import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { uniform, positionLocal, abs, fract, fwidth, float, min, max, smoothstep, length, vec3 } from "three/tsl";
 import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile, ADJUSTABLE, adjustableId, parseAdjustable } from "./kit.js";
-import { buildOldLook, createOldLookMaterials } from "./oldLook.js";
+import { buildOldLook, createOldLookMaterials, edgesOf } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules, magnetZones } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
@@ -43,14 +43,14 @@ const UP = new THREE.Vector3(0, 1, 0);
 const FLOOR_Y = 0;
 const G = 9.81;
 const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass (P3: arcs must use it)
-const SNAP_COLORS = { end: 0x45e08a, road: 0x45e08a, arc: 0xff9a3d, local: 0xc78bff, world: 0x3fd2ff };
+const SNAP_COLORS = { end: 0x45e08a, road: 0x45e08a, side: 0x7dffc8, arc: 0xff9a3d, local: 0xc78bff, world: 0x3fd2ff };
 const GRID_STEPS = [1, 2, 4, 8];
 
 const CATS = [
   { id: "road", label: "Road", tiles: ["start_line", "finish_line", "adj_straight", "adj_slope", "straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
-  { id: "lean", label: "Lean", tiles: ["bank_in_22", "bank_out_22"] },
+  { id: "lean", label: "Lean", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22"] },
   { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "catch_tube", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "catch_tube", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
@@ -65,7 +65,9 @@ for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
 let track = load() ?? { pieces: [], nextUid: 1 };
 let trackName = library.get(trackId)?.name ?? "Track";
 let hand = 1; // +1 right, −1 left (picks the "_L" mirror)
-let edges = true; // guarded / open
+let edges = true; // rails: true both, "L" left only, "R" right only, false none (oldLook.js edgesOf)
+/** A placed piece's fields for those rails (old tracks keep `open`; one side adds `rail`). */
+const railFields = (e) => ({ open: e === false, ...(e === "L" || e === "R" ? { rail: e } : {}) });
 let tileBase = null; // base id in hand
 let sel = null;
 let gridMode = "world";
@@ -202,12 +204,16 @@ scene.add(grid);
 // ---------- pieces (geometry cache) ----------
 const mats = createOldLookMaterials();
 const cache = new Map();
+// `open` here: true = no rails, false = both, "L" / "R" = one side (RAILS PER SIDE, 2026-10-21) —
+// pcOE(pc) turns a placed piece into it, oeOf(edges) the dock's switch
+const oeOf = (e) => (e === false ? true : e === "L" || e === "R" ? e : false);
+const pcOE = (pc) => oeOf(edgesOf(pc));
 function piece(id, open = false) {
   const key = `${id}|${open}`;
   if (!cache.has(key)) {
     const t = ensureTile(id);
     const b = integrate(t);
-    cache.set(key, { t, b, look: buildOldLook(t, !open), exitLocal: socketMatrix(b.exit) });
+    cache.set(key, { t, b, look: buildOldLook(t, open === true ? false : open === false ? true : open), exitLocal: socketMatrix(b.exit) });
   }
   return cache.get(key);
 }
@@ -286,7 +292,7 @@ async function trackThumb() {
   for (const pc of track.pieces) {
     const b = built.get(pc.uid);
     if (!b || isRing(pc)) continue;
-    for (const r of piece(pc.id, pc.open).b.rings) pts.push(r.p.clone().applyMatrix4(b.M));
+    for (const r of piece(pc.id, pcOE(pc)).b.rings) pts.push(r.p.clone().applyMatrix4(b.M));
   }
   if (!pts.length) { rt.dispose(); return null; }
   // ...and not the WHOLE track (user: "zoomed in way more"): a 1 km track whole is a hairline whatever
@@ -378,7 +384,7 @@ function renderDock() {
     tabs.appendChild(b);
   }
   const sp = document.createElement("div"); sp.className = "spacer"; tabs.appendChild(sp);
-  tabs.appendChild(toggleBtns("Edges", [[true, "Guarded"], [false, "Open"]], edges, (v) => { edges = v; ghostDirty = true; renderDock(); }));
+  tabs.appendChild(toggleBtns("Rails", [[true, "Both"], ["L", "Left"], ["R", "Right"], [false, "None"]], edges, (v) => { edges = v; ghostDirty = true; renderDock(); }));
   tabs.appendChild(toggleBtns("Hand", [[-1, "L"], [1, "R"]], hand, (v) => { hand = v; ghostDirty = true; renderDock(); }));
   const cards = $("cards");
   cards.innerHTML = "";
@@ -424,7 +430,7 @@ function drawChunks() {
   for (const pc of track.pieces) {
     if (isRing(pc) || !built.has(pc.uid)) continue;
     pieceLooks[pc.id] ??= { guarded: piece(pc.id, false).look, open: piece(pc.id, true).look };
-    placements.push({ id: pc.id, open: !!pc.open, M: built.get(pc.uid).M });
+    placements.push({ id: pc.id, open: !!pc.open, rail: pc.rail, M: built.get(pc.uid).M });
     built.get(pc.uid).group.traverse((o) => { if (o.isMesh) o.visible = false; });
   }
   chunkMeshes = buildTrackMeshes(placements, pieceLooks, mats);
@@ -452,13 +458,13 @@ function rebuild() {
     const M = pc.parent != null && built.has(pc.parent) ? built.get(pc.parent).exit.clone() : new THREE.Matrix4().fromArray(pc.M);
     pc.M = M.toArray();
     ensureTile(pc.id); // generated pieces (fitted landings) are rebuilt from their id
-    const g = meshesFor(pc.id, pc.open);
+    const g = meshesFor(pc.id, pcOE(pc));
     g.matrixAutoUpdate = false;
     g.matrix.copy(M);
     g.userData.uid = pc.uid;
     trackGroup.add(g);
     if (pc.cp) trackGroup.add(checkpointGate(pc, M));
-    built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pc.open).exitLocal), group: g, M });
+    built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pcOE(pc)).exitLocal), group: g, M });
   }
   // THE ROAD IS DRAWN IN CHUNKS (testTrack.buildTrackMeshes, as the drive page: performance pass,
   // 2026-10-20 — every piece its own mesh was ~220 draws on a big track). The pieces' own groups stay for
@@ -481,7 +487,7 @@ function rebuild() {
 
 // ---------- CHECKPOINTS (race.js): a flag on any piece; select it and press C ----------
 function checkpointGate(pc, M) {
-  const { b, t } = piece(pc.id, pc.open);
+  const { b, t } = piece(pc.id, pcOE(pc));
   const hw = SECTIONS[t.section ?? "road"].hw;
   const r = b.rings[Math.floor(b.rings.length / 2)];
   const f = deckFrame(r, hw);
@@ -504,6 +510,16 @@ let prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, t
 let predTimer = null, predToken = 0, failBox = null;
 const predScene = new THREE.Scene(); // the car's meshes live here; never rendered
 function schedulePrediction() { clearTimeout(predTimer); predTimer = setTimeout(runPrediction, 250); }
+/** Every piece the road reaches: the driving order, plus pieces laid BESIDE them (`sideOf`) and the road
+ * that goes on from those — they are deck to land on and drive across, not part of the test lap's line. */
+function connectedUids() {
+  const set = new Set(orderedPieces().map((p) => p.uid));
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const p of track.pieces) if (!set.has(p.uid) && !isRing(p) && (set.has(p.sideOf) || set.has(p.parent) || set.has(p.flightFrom))) { set.add(p.uid); grew = true; }
+  }
+  return set;
+}
 /** Pieces in driving order: from the first piece, follow the road child, else the flight's landing. */
 function orderedPieces() {
   const out = [];
@@ -512,7 +528,16 @@ function orderedPieces() {
   while (cur && !seen.has(cur.uid)) {
     seen.add(cur.uid);
     out.push(cur);
-    cur = track.pieces.find((q) => q.parent === cur.uid) ?? track.pieces.find((q) => q.flightFrom === cur.uid && !isRing(q));
+    const at = cur;
+    cur = track.pieces.find((q) => q.parent === at.uid) ?? track.pieces.find((q) => q.flightFrom === at.uid && !isRing(q));
+    // nothing after it: the road may go on from a piece laid BESIDE it (a wide landing whose way out
+    // leaves from its other half) — the car drives across the joined decks to it, as the drive page does
+    if (!cur) {
+      for (const sp of track.pieces.filter((q) => q.sideOf === at.uid || q.uid === at.sideOf)) {
+        cur = track.pieces.find((q) => q.parent === sp.uid && !seen.has(q.uid));
+        if (cur) break;
+      }
+    }
   }
   return out;
 }
@@ -581,7 +606,7 @@ async function runPrediction() {
   const col = (geometry, M, userData = {}) => ({ geometry, matrixWorld: M, userData, updateMatrixWorld() {} });
   const decks = [], solids = [], ride = [];
   for (const pc of order) {
-    const { look, b, t } = piece(pc.id, pc.open);
+    const { look, b, t } = piece(pc.id, pcOE(pc));
     const M = built.get(pc.uid).M;
     decks.push(col(look.deck, M, { roadHold: ROAD_HOLD.has(pc.id.replace(/_L$/, "")) || !!t.roadHold, freeCarve: !!t.freeCarve }));
     if (look.railCollision) solids.push(col(look.railCollision, M));
@@ -591,6 +616,15 @@ async function runPrediction() {
       const Pr = r.pivot != null ? f.P.clone().addScaledVector(f.U, r.pivot) : f.P; // a twist: its roll axis
       ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
     }
+  }
+  // the pieces BESIDE the road (and their own road): solid deck and rails, not on the line
+  const inOrder = new Set(order.map((p) => p.uid)), conn = connectedUids();
+  for (const pc of track.pieces) {
+    if (inOrder.has(pc.uid) || !conn.has(pc.uid) || isRing(pc)) continue;
+    const { look, t } = piece(pc.id, pcOE(pc));
+    const M = built.get(pc.uid).M;
+    decks.push(col(look.deck, M, { roadHold: !!t.roadHold, freeCarve: !!t.freeCarve }));
+    if (look.railCollision) solids.push(col(look.railCollision, M));
   }
   // the obstacles, as the drive page has them (the movers on the run's clock, tick by tick)
   const obs = buildObstacleSet(track.props ?? [], { look: false });
@@ -783,7 +817,7 @@ function roadSamples() {
   const out = [];
   for (const pc of track.pieces) {
     if (isRing(pc)) continue;
-    const { b, t } = piece(pc.id, pc.open);
+    const { b, t } = piece(pc.id, pcOE(pc));
     const M = built.get(pc.uid).M;
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of b.rings) out.push({ P: deckFrame(r, hw).P.applyMatrix4(M), uid: pc.uid });
@@ -794,7 +828,7 @@ function runChecks() {
   problems = { overlap: new Set(), loose: [], misses: [], messages: [] };
   const neighbours = new Map();
   for (const p of track.pieces) { neighbours.set(p.uid, new Set([p.uid])); }
-  for (const p of track.pieces) if (p.parent != null) { neighbours.get(p.uid).add(p.parent); neighbours.get(p.parent)?.add(p.uid); }
+  for (const p of track.pieces) for (const o of [p.parent, p.sideOf]) if (o != null) { neighbours.get(p.uid).add(o); neighbours.get(o)?.add(p.uid); }
   const roads = roadSamples();
   const gridMap = new Map();
   const key = (x, z) => `${Math.floor(x / 16)},${Math.floor(z / 16)}`;
@@ -814,7 +848,7 @@ function runChecks() {
   // LOOSE PIECES: not reachable from the first piece by road or flight (placed on a grid, not snapped
   // to an end). The car falls off where the connected road stops; the prediction used to stop there
   // too and call it a lap (user, 2026-10-18: "the last pieces … are not aligned and make the car fall")
-  const chain = new Set(orderedPieces().map((p) => p.uid));
+  const chain = connectedUids();
   problems.loose = track.pieces.filter((p) => !(isRing(p) ? chain.has(p.flightFrom) : chain.has(p.uid))).map((p) => p.uid);
   if (problems.loose.length) problems.messages.push(`${problems.loose.length} piece${problems.loose.length > 1 ? "s are" : " is"} not connected to the road (orange) — the car falls where the road stops`);
   let blocked = 0;
@@ -844,7 +878,7 @@ function runChecks() {
   for (const a of arcs) {
     if (a.landing == null) continue;
     const pc = track.pieces.find((q) => q.uid === a.landing);
-    const { b, t } = piece(pc.id, pc.open);
+    const { b, t } = piece(pc.id, pcOE(pc));
     const M = built.get(pc.uid).M, hw = SECTIONS[t.section ?? "road"].hw;
     const deck = b.rings.map((r) => { const f = deckFrame(r, hw); return { P: f.P.applyMatrix4(M), U: f.U.transformDirection(M) }; });
     // THE DECK AS SEGMENTS between its rings: an arc point counts only if it is OVER the deck's footprint
@@ -956,7 +990,7 @@ function obstacleSnap() {
     while (o && o.userData.uid == null) o = o.parent;
     const pc = o && track.pieces.find((p) => p.uid === o.userData.uid && !isRing(p));
     if (!pc) continue;
-    const { b, t } = piece(pc.id, pc.open);
+    const { b, t } = piece(pc.id, pcOE(pc));
     const hw = SECTIONS[t.section ?? "road"].hw;
     const M = built.get(pc.uid).M;
     const local = h.point.clone().applyMatrix4(M.clone().invert());
@@ -1096,6 +1130,30 @@ function computeSnap() {
     }
     return best;
   }
+  // BESIDE A PIECE (user, 2026-10-21, Apex Rush: pieces side by side make wide roads, 2×2 platforms, wide
+  // jump areas): held near the left or right side of a placed piece, the piece in hand lies FLUSH against
+  // it — the same start, the same height, offset by both half widths. Flat-starting pieces only (a bank
+  // would need the offset along its tilted deck); not tubes / half-pipes (round, nothing to lay against).
+  const sideOk = (tt) => tt && !tt.tube && !tt.halfpipe && !tt.landAngle && Math.abs(leanIn(tt)) < 1e-3;
+  if (sideOk(t) && tileBase !== STAMP) {
+    const hwB = SECTIONS[t.section ?? "road"].hw;
+    const box = piece(id, oeOf(edges)).look.deck;
+    if (!box.boundingBox) box.computeBoundingBox();
+    const mid = box.boundingBox.getCenter(new THREE.Vector3());
+    let sb = null;
+    for (const pc of track.pieces) {
+      if (isRing(pc) || !built.has(pc.uid) || !sideOk(TILES[pc.id])) continue;
+      const hwA = SECTIONS[TILES[pc.id].section ?? "road"].hw;
+      for (const side of [-1, 1]) {
+        const m = built.get(pc.uid).M.clone().multiply(new THREE.Matrix4().makeTranslation(side * (hwA + hwB), 0, 0));
+        const s = toScreen(mid.clone().applyMatrix4(m));
+        if (!s) continue;
+        const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
+        if (d < 50 && (!sb || d < sb.d)) sb = { type: "side", m, sideOf: pc.uid, side, d, note: `Beside ${TILES[pc.id].label} (${side > 0 ? "right" : "left"}) · the rails between them come off` };
+      }
+    }
+    if (sb) return sb;
+  }
   for (const a of arcs) for (let k = 3; k < a.pts.length; k++) {
     if (a.tan[k].y > -0.02) continue; // only the falling part
     const s = toScreen(a.pts[k]);
@@ -1208,7 +1266,7 @@ function updateGhost() {
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
-    ghost = id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(OBSTACLES[id].ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, !edges).look.deck, ghostMat);
+    ghost = id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(OBSTACLES[id].ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -1299,9 +1357,20 @@ function place() {
   if (snap.prepend != null) {
     // a START on the head of the road: first in the list (rebuild lays each piece on its parent), the
     // old first piece now hangs off it
-    track.pieces.unshift({ uid, id, open: !edges, M: snap.m.toArray(), parent: null, flightFrom: null });
+    track.pieces.unshift({ uid, id, ...railFields(edges), M: snap.m.toArray(), parent: null, flightFrom: null });
     track.pieces.find((p) => p.uid === snap.prepend).parent = uid;
-  } else track.pieces.push({ uid, id, open: !edges, M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
+  } else if (snap.type === "side") {
+    // laid beside: no rail BETWEEN the two decks — the new piece keeps its outer side, the neighbour loses
+    // its rail on the joined side (Rails: None stays none)
+    const outer = snap.side > 0 ? "R" : "L", joined = snap.side > 0 ? "R" : "L", other = snap.side > 0 ? "L" : "R";
+    const mine = edges === true ? outer : edges === outer ? outer : false;
+    track.pieces.push({ uid, id, ...railFields(mine), M: snap.m.toArray(), parent: null, flightFrom: null, sideOf: snap.sideOf });
+    const nb = track.pieces.find((q) => q.uid === snap.sideOf);
+    const ne = edgesOf(nb);
+    const keep = ne === true ? other : ne === joined ? false : ne;
+    delete nb.rail;
+    Object.assign(nb, railFields(keep));
+  } else track.pieces.push({ uid, id, ...railFields(edges), M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
   const ri = recent.findIndex((r) => r.id === id);
   if (ri >= 0) recent.splice(ri, 1);
   recent.unshift({ base: tileBase, h: hand, id });
@@ -1330,6 +1399,7 @@ let editMsg = null; // why the last edit was refused
 const IDENT = new THREE.Matrix4().elements;
 function reflow(mutate) {
   const old = new Map([...built].map(([u, b]) => [u, b.exit.clone()]));
+  const oldM = new Map([...built].map(([u, b]) => [u, b.M.clone()])); // pieces laid BESIDE follow their neighbour's start
   snapshot();
   mutate(old);
   rebuild();
@@ -1342,6 +1412,15 @@ function reflow(mutate) {
       if (d.elements.every((v, i) => Math.abs(v - IDENT[i]) < 1e-6)) continue;
       pc.M = d.multiply(new THREE.Matrix4().fromArray(pc.M)).toArray();
       moved.push(src);
+    }
+    for (const pc of track.pieces) {
+      const a = pc.sideOf;
+      if (a == null || !oldM.has(a) || !built.has(a)) continue;
+      const d = built.get(a).M.clone().multiply(oldM.get(a).clone().invert());
+      if (d.elements.every((v, i) => Math.abs(v - IDENT[i]) < 1e-6)) continue;
+      pc.M = d.multiply(new THREE.Matrix4().fromArray(pc.M)).toArray();
+      moved.push(a);
+      oldM.set(a, built.get(a).M.clone());
     }
     if (!moved.length) break;
     for (const src of moved) old.set(src, built.get(src).exit.clone());
@@ -1372,7 +1451,7 @@ function editWith(id) {
         if (c.flightFrom === pc.uid) c.flightFrom = uid; // the jump now leaves from the new end
       }
       old.set(uid, old.get(pc.uid)); // …and is carried from where it left before
-      track.pieces.splice(track.pieces.indexOf(pc) + 1, 0, { uid, id, open: pc.open, M: pc.M, parent: pc.uid, flightFrom: null });
+      track.pieces.splice(track.pieces.indexOf(pc) + 1, 0, { uid, id, open: pc.open, ...(pc.rail ? { rail: pc.rail } : {}), M: pc.M, parent: pc.uid, flightFrom: null });
       sel = uid;
     });
   } else {
@@ -1495,7 +1574,7 @@ function copySelection() {
   const items = order.map((u, i) => {
     const p = roadPc(u);
     const link = i === 0 ? "head" : p.parent != null ? "parent" : "flight";
-    return { id: p.id, open: !!p.open, cp: !!p.cp, link, from: i === 0 ? -1 : order.indexOf(link === "parent" ? p.parent : p.flightFrom), rel: Hi.clone().multiply(built.get(u).M).toArray() };
+    return { id: p.id, open: !!p.open, rail: p.rail, cp: !!p.cp, link, from: i === 0 ? -1 : order.indexOf(link === "parent" ? p.parent : p.flightFrom), rel: Hi.clone().multiply(built.get(u).M).toArray() };
   });
   for (const q of track.pieces) if (isRing(q) && order.includes(q.flightFrom)) items.push({ id: RING, link: "ring", from: order.indexOf(q.flightFrom), rel: Hi.clone().multiply(new THREE.Matrix4().fromArray(q.M)).toArray() });
   clipboard = { items, n: order.length };
@@ -1510,7 +1589,7 @@ const mirrorId = (id) => (id.endsWith("_L") ? id.slice(0, -2) : TILES[`${id}_L`]
 function stampItems() {
   if (!clipboard) return [];
   if (hand > 0) return clipboard.items;
-  return clipboard.items.map((it) => ({ ...it, id: it.link === "ring" ? it.id : mirrorId(it.id), rel: MIRROR_X.clone().multiply(new THREE.Matrix4().fromArray(it.rel)).multiply(MIRROR_X).toArray() }));
+  return clipboard.items.map((it) => ({ ...it, rail: it.rail ? (it.rail === "L" ? "R" : "L") : it.rail, id: it.link === "ring" ? it.id : mirrorId(it.id), rel: MIRROR_X.clone().multiply(new THREE.Matrix4().fromArray(it.rel)).multiply(MIRROR_X).toArray() }));
 }
 /** Each stamp item's frame when its head stands on `m` (a road piece follows its parent's exit). */
 function stampMatrices(m, items) {
@@ -1529,7 +1608,7 @@ function stampGhost() {
   items.forEach((it, i) => {
     const m = it.link === "ring"
       ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0]
-      : new THREE.Mesh(piece(it.id, it.open).look.deck, ghostMat);
+      : new THREE.Mesh(piece(it.id, pcOE(it)).look.deck, ghostMat);
     m.matrixAutoUpdate = false;
     m.matrix.copy(Ms[i]);
     g.add(m);
@@ -1548,7 +1627,7 @@ function placeStamp() {
     if (it.link === "ring") { track.pieces.push({ uid: uids[i], id: RING, ring: true, cp: true, M: Ms[i].toArray(), parent: null, flightFrom: uids[it.from] }); return; }
     const head = i === 0;
     track.pieces.push({
-      uid: uids[i], id: it.id, open: it.open, ...(it.cp ? { cp: true } : {}), M: Ms[i].toArray(),
+      uid: uids[i], id: it.id, open: it.open, ...(it.rail ? { rail: it.rail } : {}), ...(it.cp ? { cp: true } : {}), M: Ms[i].toArray(),
       parent: head ? (snap.type === "end" ? snap.parent : null) : it.link === "parent" ? uids[it.from] : null,
       flightFrom: head ? (snap.type === "arc" ? snap.from : null) : it.link === "flight" ? uids[it.from] : null,
     });
@@ -1564,7 +1643,8 @@ function mirrorSelection() {
   const ids = order.map((u) => mirrorId(roadPc(u).id));
   editMsg = leanClash(ids[0], parent ? leanOut(TILES[parent.id]) : 0, null) ?? leanClash(ids.at(-1), leanIn(TILES[ids.at(-1)]), next);
   if (editMsg) { renderStatus(); return; }
-  reflow(() => order.forEach((u, i) => { roadPc(u).id = ids[i]; }));
+  // a rail on one side swaps side with the turn (RAILS PER SIDE)
+  reflow(() => order.forEach((u, i) => { const pc = roadPc(u); pc.id = ids[i]; if (pc.rail) pc.rail = pc.rail === "L" ? "R" : "L"; }));
 }
 /**
  * Delete one or several (one undo step): each road closes up, and what hangs off a jump further on
@@ -1634,7 +1714,7 @@ function carried(uid) {
     for (const p of track.pieces) if (!S.has(p.uid) && (S.has(p.parent) || S.has(p.flightFrom))) { S.add(p.uid); grew = true; }
   }
   const pts = [];
-  for (const u of S) { const pc = track.pieces.find((p) => p.uid === u); if (pc && !isRing(pc)) for (const r of piece(pc.id, pc.open).b.rings) pts.push(r.p.clone().applyMatrix4(built.get(u).M)); }
+  for (const u of S) { const pc = track.pieces.find((p) => p.uid === u); if (pc && !isRing(pc)) for (const r of piece(pc.id, pcOE(pc)).b.rings) pts.push(r.p.clone().applyMatrix4(built.get(u).M)); }
   const props = (track.props ?? []).filter((o) => { const c = new THREE.Vector3(o.M[12], o.M[13], o.M[14]); return pts.some((q) => Math.hypot(q.x - c.x, q.z - c.z) < 12 && Math.abs(q.y - c.y) < 5); }).map((o) => o.uid);
   return { pieces: [...S], props };
 }
@@ -1722,7 +1802,7 @@ function predictionLine() {
     (P.landings?.length ? `<div class="row"><span>landings (lined up)</span><b>${P.landings.filter((g) => g === "perfect").length}/${P.landings.length} perfect</b></div>` : "");
 }
 function renderStatus() {
-  const names = { end: "open end", road: "on the road", arc: "flight arc", local: "local grid", world: "world grid" };
+  const names = { end: "open end", road: "on the road", side: "beside it", arc: "flight arc", local: "local grid", world: "world grid" };
   const many = !tileBase ? selection() : [];
   const multi = many.length > 1;
   const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
@@ -1861,7 +1941,7 @@ addEventListener("keydown", (e) => {
       else if (e.code === "KeyE") rot.yaw -= step;
       else if (k === "r") { hand = -hand; renderDock(); }
       else if (k === "g") gridMode = gridMode === "world" ? "local" : "world";
-      else if (k === "t") { edges = !edges; renderDock(); }
+      else if (k === "t") { const order = [true, "L", "R", false]; edges = order[(order.indexOf(edges) + 1) % order.length]; ghostDirty = true; renderDock(); }
       else if (k === "f") nav.frame();
       else if (k === "c" && !tileBase && sel != null) toggleCheckpoint(sel);
       else if (k === "i" && !tileBase && sel != null) startEdit("insert");

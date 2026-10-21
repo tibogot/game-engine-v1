@@ -4,6 +4,7 @@ import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { TILES, deckFrame, socketMatrix, leanIn, SECTIONS, DEG } from "./kit.js";
 import { closureAt, wallAt } from "./tubeLook.js";
+import { buildOldLook, edgesOf, lookKey } from "./oldLook.js";
 
 const V = THREE.Vector3;
 const Y = new V(0, 1, 0);
@@ -155,10 +156,12 @@ export function layoutTestTrack({ built, speed = 60, speedMin = speed * 0.93, ju
  * @param {{id: string, open: boolean, M: number[]}[]} pieces
  */
 export function layoutFromPlacements({ built, pieces }) {
-  const placements = pieces.map((p) => ({ id: p.id, open: !!p.open, M: new THREE.Matrix4().fromArray(p.M) }));
+  // (a piece laid BESIDE the road — `sideOf` — is deck and rails, not part of the line the car rides)
+  const placements = pieces.map((p) => ({ id: p.id, open: !!p.open, rail: p.rail, side: p.sideOf != null, M: new THREE.Matrix4().fromArray(p.M) }));
   const ride = [];
   let length = 0;
   placements.forEach((pl, k) => {
+    if (pl.side) return;
     const t = TILES[pl.id];
     const hw = SECTIONS[t.section ?? "road"].hw;
     for (const r of built[pl.id].b.rings) {
@@ -175,14 +178,20 @@ export function layoutFromPlacements({ built, pieces }) {
 export function buildTrackMeshes(placements, built, mats) {
   const group = new THREE.Group();
   const byKey = {};
-  for (const p of placements) (byKey[`${p.id}|${p.open ? "open" : "edges"}`] ??= []).push(p.M);
+  // the look per placement's edges: both rails, none, or one side (oldLook.js edgesOf / lookKey), built
+  // on first use for the one-sided ones
+  for (const p of placements) {
+    const e = edgesOf(p), k = lookKey(e);
+    if (built[p.id] && !built[p.id][k]) built[p.id][k] = buildOldLook(TILES[p.id], e);
+    (byKey[`${p.id}|${k}`] ??= []).push(p.M);
+  }
   const trisOf = (g) => (g ? (g.index ? g.index.count : g.getAttribute("position").count) / 3 : 0);
   let tris = 0;
   const posts = [], chunkParts = [], c = new THREE.Vector3();
-  for (const look of Object.values(built)) for (const l of [look?.guarded, look?.open]) if (l?.deck && !l.deckBox) { l.deck.computeBoundingBox(); l.deckBox = l.deck.boundingBox.clone(); }
+  for (const look of Object.values(built)) for (const l of [look?.guarded, look?.open, look?.railL, look?.railR]) if (l?.deck && !l.deckBox) { l.deck.computeBoundingBox(); l.deckBox = l.deck.boundingBox.clone(); }
   for (const [key, list] of Object.entries(byKey)) {
     const [id, kind] = key.split("|");
-    const look = kind === "open" ? built[id].open : built[id].guarded;
+    const look = built[id][kind];
     // every placed piece's parts go to its CHUNK (merged below): deck / stripes always, the rail with a
     // far version (its collision walls) for distance detail
     for (const M of list) {

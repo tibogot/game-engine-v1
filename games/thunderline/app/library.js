@@ -20,7 +20,8 @@ function writeAll(all) {
  * never by name). Edit the track and its best times and ghost start over.
  */
 export function contentKey(track) {
-  const src = JSON.stringify((track?.pieces ?? []).map((p) => [p.id, !!p.open, p.M.map((x) => +x.toFixed(3)), p.parent, p.flightFrom, !!p.cp]));
+  // (a one-sided rail / a piece laid beside: appended only when present, so older tracks keep their key — their bests)
+  const src = JSON.stringify((track?.pieces ?? []).map((p) => [p.id, !!p.open, p.M.map((x) => +x.toFixed(3)), p.parent, p.flightFrom, !!p.cp, ...(p.rail || p.sideOf != null ? [p.rail ?? null, p.sideOf ?? null] : [])]));
   let h = 0x811c9dc5;
   for (let i = 0; i < src.length; i++) h = Math.imul(h ^ src.charCodeAt(i), 0x01000193);
   return (h >>> 0).toString(36);

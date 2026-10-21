@@ -250,6 +250,12 @@ export const TILES = {
     label: "Banked 90°",
     segs: [{ L: turnLen(128, Math.PI / 2, 40), turn: Math.PI / 2, ramp: 40, leanIn: 22 * DEG, leanOut: 22 * DEG }],
   },
+  // MORE OF THE BANKED SET (user, 2026-10-21: after a Bank in only the Banked 90° and Bank out fitted):
+  // a straight that HOLDS the lean, a 45° and a 180° (a banked U-turn, tighter: R 80, not 128 — a 128 m
+  // half circle runs 400 m). All lean 22° in and out, road hold on (the car follows the bank).
+  banked_straight_64: { label: "Banked straight 64", roadHold: true, segs: [{ L: 64, leanIn: 22 * DEG, leanOut: 22 * DEG }] },
+  banked_turn_45: { label: "Banked 45°", roadHold: true, segs: [{ L: turnLen(128, Math.PI / 4, 30), turn: Math.PI / 4, ramp: 30, leanIn: 22 * DEG, leanOut: 22 * DEG }] },
+  banked_turn_180: { label: "Banked 180°", roadHold: true, segs: [{ L: turnLen(80, Math.PI, 40), turn: Math.PI, ramp: 40, leanIn: 22 * DEG, leanOut: 22 * DEG }] },
   brake_turn_32: {
     label: "Brake 90°",
     segs: [{ L: turnLen(32, Math.PI / 2, 12), turn: Math.PI / 2, ramp: 12 }],

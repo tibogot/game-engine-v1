@@ -4,6 +4,27 @@ Kept here so nothing gets lost between sessions. Design reasons live in DESIGN.m
 this is just the list. Newest decisions at the top of each section. Last updated 2026-10-19.
 
 ## Now
+- [ ] **APEX RUSH SCREENSHOTS (user, 2026-10-21, 8 shots): the game is AIR — jumps, falls, landings at
+      all angles.** What they show vs us, the order agreed:
+      1. [x] RAILS PER SIDE + SIDE-BY-SIDE SNAPPING (shots 5, 6, 8; the user's main point). The dock's
+         RAILS switch: Both / Left / Right / None (T cycles); a placed piece keeps `open` (old tracks) +
+         `rail: "L"|"R"`; oldLook.js sideProfile / railSides (kerb + rail on that side, the other edge
+         flush). A piece held near a placed piece's side snaps FLUSH beside it (same start, offset by both
+         half widths; flat-starting, not tubes / half-pipes / landings), linked `sideOf` (not loose,
+         carried by reflow), and the rails BETWEEN come off (new piece: outer rail; neighbour: loses its
+         joined side). Side pieces: solid + drawn in the drive page, not on the car's line; in the
+         builder's test lap too; the line goes on from the road that leaves a piece beside. Mirror / pasted
+         mirrored sections swap L/R. Tests: 2 straights side by side (32 m road, rails outer only, flush);
+         jump → platform 64 + platform beside it (96 m landing) → funnel from the side one → road: test lap
+         13.0 s, no warnings; seen from above in the drive page.
+      2. FREE PLACEMENT made fast: any piece floating anywhere, any pitch / roll / heading, quick rotate
+         (keys / wheel), snap to an end, a side, or nothing (shots 1, 5).
+      3. THE RAMP FAMILY: quarter pipes (vertical launch, shot 4), curls of a few heights, roll ramps,
+         narrow planks without rails for precision landings (shots 1, 5, 6: their palette has ~18 ramps).
+      4. TILTED LANDINGS for the air roll (W / X): "roll 30° to land" shown by the builder (shot 1).
+      5. A WALL WITH A HOLE to jump / drive through (shot 2).
+      6. Later: vertical launch pipes and ceilings to drive upside down (shot 3), checkpoint arches
+         (shot 7), floating-island scenery (shots 1, 3).
 - [x] **Land on ANY piece** (user, 2026-10-21: "this game is about jumps … large platforms to land"): a
       road piece that isn't a landing (platform, straight, turn…) snaps onto a jump's arc LEVEL at the
       height pointed at, its start 6 m before the slow car touches down, linked to the jump (flightFrom:
