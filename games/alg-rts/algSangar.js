@@ -131,6 +131,19 @@ export const loadMirador = () => loadBlenderPiece("mirador", "mirador", () => bu
     g.userData.extra = [...(g.userData.extra ?? []), bags];
     g.userData.miradorBags = true;
   }
+  // ITS GEAR (the searchlight and the AA-52 — their own atlas, mirador.py buildGear): an LOD extra (near / far at
+  // HOUSE_FAR), shown at the very end of the build
+  const gl = houseMesh("gear", "intact", 1)?.children[0];
+  const gn = gl?.levels?.[0]?.object, gf = gl?.levels?.[1]?.object;
+  if (gn) {
+    const mk = (src) => { const pg = plainGeometry(src); pg.scale(S, S, S); const m = new THREE.Mesh(pg, plainMaterial(src.material)); m.castShadow = m.receiveShadow = true; return m; };
+    const lod = new THREE.LOD();
+    lod.name = "MiradorGear";
+    lod.addLevel(mk(gn), 0);
+    if (gf && gf !== gn) lod.addLevel(mk(gf), HOUSE_FAR);
+    lod.userData.late = 0.97;
+    g.userData.extra = [...(g.userData.extra ?? []), lod];
+  }
   return ok;
 });
 export const miradorGeometry = () => pieceGeometry("mirador", "mirador");

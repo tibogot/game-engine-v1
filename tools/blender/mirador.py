@@ -29,6 +29,7 @@ from house import buildKit
 from bkit import B, gv, srgb, dust, flat, wood
 import drystone
 from drystone import tag
+import milprops
 
 LS, HD, W = 2.6, 6.2, 3.0          # the legs' half spread at the foot, the deck's height, the cabin's width
 TOP = W / 2 - 0.25                 # the legs' half spread at the deck
@@ -63,6 +64,7 @@ MATDEF.update({
     "mrRoof": (0.6, galv(0.45)), "mrRoofRust": (0.8, galv(0.9)), "mrConcrete": (0.95, flat(srgb(0xa59c8c), 0.4)),
     "mrSteel": (0.55, steel(0x34372f)), "mrGlass": (0.2, flat(srgb(0xe8e4c8), 0.0)), "mrCharred": (0.95, charred),
 })
+MATDEF.update(milprops.MILPROP_MATS)   # (the shared searchlight and AA-52 — milprops.py)
 
 LOW = lambda: drystone.LOW
 
@@ -108,6 +110,13 @@ def tower(K, R, state, frame):
     broken = {"damaged": {(0, "a")}, "ruin": set()}.get(state, set())
     for i, (sx, sz) in enumerate(LEGS):
         tag(K.box(f"Foot{i}", sx * LS - 0.3, sx * LS + 0.3, -0.25, 0.25, sz * LS - 0.3, sz * LS + 0.3, "mrConcrete", "h", 0.02), 0.01)
+        if state == "damaged" and i == 0:
+            # the front-left leg SNAPPED by a shell near the foot: a splintered stump, the leg above hanging off it
+            # (the tower leans onto that corner — leanAll)
+            beam(K, f"Leg{i}", legAt(sx, sz, 0), legAt(sx, sz, 0.1), 0.2, 0.2, "mrCharred", 0.04)
+            a, b = Vector(legAt(sx, sz, 0.14)), Vector(legAt(sx, sz, 1.0))
+            beam(K, f"LegUp{i}", tuple(a + Vector((0.25, 0, 0.18))), tuple(b), 0.2, 0.2, "mrTimber", 0.05)
+            continue
         if state == "ruin":
             # snapped: a stump standing (the rest lies about — ruinPile)
             beam(K, f"Leg{i}", legAt(sx, sz, 0), legAt(sx, sz, R.uniform(0.06, 0.2)), 0.2, 0.2, "mrTimber" if i % 2 else "mrCharred", 0.05)
@@ -164,7 +173,9 @@ def cabin(K, R, state, M):
         while hh < h1 - 0.02:
             bh = R.uniform(0.17, 0.22)
             if k not in gone:
-                keep(beam(K, f"{nm}{k}", tuple(a + gv(0, hh + bh / 2, 0)), tuple(b + gv(0, hh + bh / 2, 0)), 0.035, bh - 0.012, "mrPlank" if R.random() < 0.7 else "mrPlankDark", t + 0.01 * k))
+                m_ = "mrPlank" if R.random() < 0.7 else "mrPlankDark"
+                if state == "damaged" and R.random() < 0.3: m_ = "mrCharred"   # scorched by the hit
+                keep(beam(K, f"{nm}{k}", tuple(a + gv(0, hh + bh / 2, 0)), tuple(b + gv(0, hh + bh / 2, 0)), 0.035, bh - 0.012, m_, t + 0.01 * k))
             hh += bh; k += 1
     g = W / 2 + 0.02
     wall("Front", (-g, y, -g), (g, y, -g), 0.13, 1.15, 0.64, gone=(2, 3) if state == "damaged" else ())
@@ -176,20 +187,20 @@ def cabin(K, R, state, M):
         keep(beam(K, f"Purlin{sx}", (sx * W / 2, y + 2.5, -W / 2 - 0.4), (sx * W / 2, y + 2.3, W / 2 + 0.4), 0.1, 0.1, "mrTimber", 0.8))
     sheets = [(-W / 2 - 0.45, 1.05), (-W / 2 + 0.55, 1.05), (-W / 2 + 1.55, 1.05), (-W / 2 + 2.55, 0.9)]
     for k, (x0, wd) in enumerate(sheets):
+        if state == "damaged" and k == 2:
+            # torn loose: hanging down off the front edge
+            keep(corrugated(K, f"Sheet{k}", (x0, y + 2.5, -W / 2 - 0.45), (1, 0, 0), (0.05, -1, -0.35), wd, 1.9, "mrRoofRust", 0.84 + 0.02 * k))
+            continue
         if state == "damaged" and k != 1: continue
         lift = 0.005 * k
         keep(corrugated(K, f"Sheet{k}", (x0, y + 2.56 + lift, -W / 2 - 0.45), (1, 0, 0), (0, -0.2 / (W + 0.9), 1), wd, W + 0.92, "mrRoof" if k % 2 == 0 else "mrRoofRust", 0.84 + 0.02 * k))
     # the searchlight and the gun on the front rail
     if state == "intact":
-        # (built lying along z where it stands: a K.cyl bakes its place into the mesh — turned afterwards, it swung away
-        # round the origin; the MG nest's brass did the same, 2026-10-21)
-        keep(pole(K, "Lamp", (0.8, y + 1.25, -W / 2 + 0.32), (0.8, y + 1.25, -W / 2 - 0.08), 0.25, "mrSteel", 0.95))
-        keep(pole(K, "Lens", (0.8, y + 1.25, -W / 2 - 0.08), (0.8, y + 1.25, -W / 2 - 0.1), 0.21, "mrGlass", 0.95))
-        keep(beam(K, "LampPost", (0.8, y + 0.13, -W / 2 + 0.12), (0.8, y + 1.0, -W / 2 + 0.12), 0.06, 0.06, "mrSteel", 0.95))
-        keep(beam(K, "GunBarrel", (-0.6, y + 1.32, -W / 2 + 0.3), (-0.6, y + 1.3, -W / 2 - 0.55), 0.045, 0.045, "mrSteel", 0.96))
-        keep(beam(K, "GunBody", (-0.6, y + 1.32, -W / 2 + 0.3), (-0.6, y + 1.32, -W / 2 + 0.75), 0.1, 0.13, "mrSteel", 0.96))
-    elif state == "damaged":
-        keep(tag(K.cyl("Lamp", (0.4, y + 0.13, 0.2), 0.25, 0.4, "mrSteel", "h", 14 if not LOW() else 8), 0.95))
+        # THE SEARCHLIGHT and THE AA-52 (2026-10-21 — you: "the gun and the projector look very cheap"): the shared
+        # detailed props (milprops.py) — the light on its pedestal behind the front wall, its drum over the planks;
+        # the gun on a pintle at the rail
+        # (the searchlight and the gun are the separate "gear" piece — their own atlas: gear() below)
+        beam(K, "Pintle", (-0.6, y + 0.13, -W / 2 + 0.3), (-0.6, y + 1.2, -W / 2 + 0.3), 0.06, 0.06, "mrSteel", 0.96)
     # placed by M
     for o in made:
         o.matrix_world = M @ o.matrix_world
@@ -204,17 +215,49 @@ def ruinPile(K, R):
     for k in range(3):
         corrugated(K, f"DownSheet{k}", (R.uniform(-4, 3), 0.04 + 0.01 * k, R.uniform(-4, 3)), (math.cos(k * 2.1), 0.02, math.sin(k * 2.1)), (-math.sin(k * 2.1), 0, math.cos(k * 2.1)), 1.0, 2.2, "mrRoofRust", 0.1)
 
+LEAN = math.radians(6.5)
+def leanAll(K):
+    """The damaged tower LEANS onto its snapped leg (game corner -x -z): every part turned about the horizontal line
+    through the OPPOSITE foot, square to the diagonal — that foot stays, the snapped corner drops onto its stump. The
+    feet and the stump (in the ground) stay where they are."""
+    piv = B(LS, 0, LS)                        # the opposite foot (game +x +z)
+    axis = (B(1, 0, -1) - B(0, 0, 0)).normalized()
+    M = Matrix.Translation(piv) @ Matrix.Rotation(-LEAN, 4, axis) @ Matrix.Translation(-piv)
+    for o in K.groups["h"]:
+        if o.name.startswith("Foot") or o.name == "Leg0": continue
+        o.matrix_world = M @ o.matrix_world
+
+def buildGear(K, name, spec, state, seed, far=False):
+    """THE GEAR (2026-10-21 — you: "the gun and the projector look very cheap"): the searchlight and the AA-52, the shared
+    detailed props (milprops.py), their OWN piece with their own 1024 atlas — on the tower's 2048 they had a few texels
+    each and read as blurred grey drums. In the tower's frame (the game adds it there); the mirador's last moment."""
+    drystone.setLow(K, far)
+    y = HD
+    if state == "intact":
+        milprops.searchlight(K, "Light", (0.75, y + 0.13, -W / 2 + 0.55), 0.0, 0.95, pedestal=1.45)
+        milprops.aa52(K, "Gun", (-0.6, y + 1.26, -W / 2 + 0.3), 0.0, 0.96)
+    elif state == "damaged":   # the searchlight knocked off its post, down on the deck (leaning with the tower)
+        milprops.searchlight(K, "Light", (0.3, y + 0.13, 0.4), 2.3, 0.95, pedestal=0.42)
+        leanAll(K)
+    else:                      # thrown down beside the wreck
+        milprops.searchlight(K, "Light", (2.6, 0.0, -2.8), 1.1, 0.95, pedestal=0.42)
+    drystone.writeBuildOrder(K)
+    drystone.setLow(K, False)
+
 def buildMirador(K, name, spec, state, seed, far=False):
     drystone.setLow(K, far)
     R = random.Random(seed)
     tower(K, random.Random(seed + 1), state, None)
     if state == "ruin": ruinPile(K, random.Random(seed + 2))
     else: cabin(K, random.Random(seed + 2), state, Matrix.Identity(4))
+    if state == "damaged": leanAll(K)
     drystone.writeBuildOrder(K)
     drystone.setLow(K, False)
 
 farMirador = lambda K, name, spec, state, seed: buildMirador(K, name, spec, state, seed, far=True)
-TYPES = {"mirador": dict(builder=buildMirador, farBuilder=farMirador, atlas=2048, aoDist=0.6, smoothAngle=40)}
+farGear = lambda K, name, spec, state, seed: buildGear(K, name, spec, state, seed, far=True)
+TYPES = {"mirador": dict(builder=buildMirador, farBuilder=farMirador, atlas=2048, aoDist=0.6, smoothAngle=40),
+         "gear": dict(builder=buildGear, farBuilder=farGear, atlas=1024, aoDist=0.15, smoothAngle=40)}
 
 exported = buildKit(TYPES, MATDEF, "mirador.glb", prefix="Tower", seed0=1958, colors=True)
 

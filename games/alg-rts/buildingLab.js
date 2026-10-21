@@ -571,13 +571,14 @@ export const BUILDINGS = {
       site.set(1);
       return labPiece(m);
     },
-    after: () => labPiece(houseMesh("mirador", "damaged")),
+    after: () => { const g = houseMesh("mirador", "damaged"); g.add(houseMesh("gear", "damaged", 1)); return labPiece(g); },
     tags: ["MIRADOR (LE JEU)", "MIRADOR · NOUVEAU", "MIRADOR · ENDOMMAGÉ"], note: "le mirador du jeu à gauche, le nouveau (bois, tôle ondulée, vos sacs simulés sur le plancher) au milieu — « Construction » — endommagé à droite.",
   },
   miradorEtats: {
     label: "Mirador (Blender) : états", gap: 10, yaw: Math.PI - 0.5, prepare: () => loadMirador(),
-    before: () => { const g = houseMesh("mirador", "intact"); const b = (miradorGeometry()?.userData.extra ?? [])[0]?.clone(); if (b) { b.position.y /= 1.3; b.scale.setScalar(1 / 1.3); g.add(b); } return labPiece(g); },
-    middle: () => labPiece(houseMesh("mirador", "damaged")), after: () => labPiece(houseMesh("mirador", "ruin")),
+    before: () => { const g = houseMesh("mirador", "intact"); const b = (miradorGeometry()?.userData.extra ?? [])[0]?.clone(); if (b) { b.position.y /= 1.3; b.scale.setScalar(1 / 1.3); g.add(b); } g.add(houseMesh("gear", "intact", 1)); return labPiece(g); },
+    middle: () => { const g = houseMesh("mirador", "damaged"); g.add(houseMesh("gear", "damaged", 1)); return labPiece(g); },
+    after: () => { const g = houseMesh("mirador", "ruin"); g.add(houseMesh("gear", "ruin", 1)); return labPiece(g); },
     tags: ["MIRADOR · INTACT", "MIRADOR · ENDOMMAGÉ", "MIRADOR · DÉTRUIT"], note: "le mirador dans ses trois états (les sacs du plancher : l'intact).",
   },
   ecranBlender: {

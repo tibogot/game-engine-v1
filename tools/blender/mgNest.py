@@ -33,6 +33,7 @@ from house import buildKit
 from bkit import B, gv, srgb, dust, flat, wood
 import drystone
 from drystone import tag
+import milprops
 
 TOP, R_TOP, R_OUT, FOOT = 0.45, 3.1, 3.9, -0.14
 GROUND = os.path.join(house.bkit.ROOT, "public", "textures", "ground")
@@ -81,6 +82,7 @@ MATDEF.update({
     "mnBrass": (0.35, steel(0xb39048, 0.2)), "mnGun": (0.45, steel(0x2b2d2a, 0.15, False)), "mnGunPaint": (0.6, steel(0x45503a, 0.2, False)), "mnRound": (0.35, steel(0xb39048, 0.1, False)),
     "mnCharred": (0.95, charred),
 })
+MATDEF.update(milprops.MILPROP_MATS)   # (the shared AA-52 — milprops.py)
 LOW = lambda: drystone.LOW
 
 def beam(K, nm, a, b, w, h, mat, t):
@@ -204,27 +206,10 @@ def buildNest(K, name, spec, state, seed, far=False):
     drystone.setLow(K, False)
 
 def buildGun(K, name, spec, state, seed, far=False):
-    """The AA-52 on its tripod — origin at the cradle's pivot, the barrel toward -Z (the same in every state)."""
+    """The AA-52 on its tripod — origin at the cradle's pivot, the barrel toward -Z (the same in every state): the shared
+    detailed gun (milprops.py), its tripod on the nest's floor 0.75 m down."""
     drystone.setLow(K, far)
-    for k in range(3):
-        a = k / 3 * 2 * math.pi + math.pi / 2
-        foot = (math.cos(a) * 0.55, -0.75, math.sin(a) * 0.55 + 0.1)   # (on the floor: the pivot 1.2 m up, the floor 0.45)
-        tag(K.rod(f"Leg{k}", (0, -0.06, 0.05), foot, 0.016, "mnGunPaint", "h", n=6 if not LOW() else 4), 0.95)
-        tag(K.cyl(f"Shoe{k}", (foot[0], foot[1] - 0.01, foot[2]), 0.03, 0.02, "mnGunPaint", "h", 6, w=0), 0.95)
-    beam(K, "Cradle", (0, -0.06, 0.1), (0, -0.06, -0.1), 0.08, 0.06, "mnGunPaint", 0.95)
-    beam(K, "Receiver", (0, 0.02, 0.32), (0, 0.02, -0.18), 0.075, 0.1, "mnGun", 0.95)
-    beam(K, "Cover", (0, 0.085, 0.25), (0, 0.085, -0.1), 0.06, 0.03, "mnGun", 0.95)
-    beam(K, "Stock", (0, 0.0, 0.32), (0, -0.04, 0.62), 0.05, 0.09, "mnGun", 0.95)
-    beam(K, "Grip", (0, -0.03, 0.27), (0, -0.14, 0.31), 0.03, 0.04, "mnGun", 0.95)
-    tag(K.rod("Barrel", (0, 0.03, -0.18), (0, 0.03, -0.82), 0.014, "mnGun", "h", n=8 if not LOW() else 5), 0.95)
-    tag(K.rod("Jacket", (0, 0.03, -0.18), (0, 0.03, -0.42), 0.024, "mnGun", "h", n=8 if not LOW() else 5), 0.95)
-    tag(K.rod("Flash", (0, 0.03, -0.82), (0, 0.03, -0.9), 0.022, "mnGun", "h", n=8 if not LOW() else 5), 0.95)
-    tag(K.rod("Handle", (0, 0.03, -0.3), (0, 0.13, -0.3), 0.008, "mnGun", "h", n=5), 0.95)
-    # the belt box on the left, a short belt into the feed
-    beam(K, "BeltBox", (-0.13, -0.03, 0.12), (-0.13, -0.03, -0.08), 0.12, 0.16, "mnGunPaint", 0.95)
-    if not LOW():
-        for k in range(6):
-            tag(K.cyl(f"Round{k}", (-0.075 + k * 0.012, 0.0, 0.05 - k * 0.012), 0.006, 0.05, "mnRound", "h", 5, w=0), 0.95)
+    milprops.aa52(K, "G", (0, 0, 0), 0.0, 0.95, tripod=True, tripodDrop=0.75)
     drystone.writeBuildOrder(K)
     drystone.setLow(K, False)
 
@@ -232,7 +217,7 @@ farNest = lambda K, n, s, st, sd: buildNest(K, n, s, st, sd, far=True)
 farGun = lambda K, n, s, st, sd: buildGun(K, n, s, st, sd, far=True)
 TYPES = {
     "mg": dict(builder=buildNest, farBuilder=farNest, atlas=2048, normalAtlas=1024, aoDist=0.5, smoothAngle=40, weighted=False, normals=True),
-    "gun": dict(builder=buildGun, farBuilder=farGun, atlas=512, aoDist=0.1, smoothAngle=40, weighted=False),
+    "gun": dict(builder=buildGun, farBuilder=farGun, atlas=1024, aoDist=0.1, smoothAngle=40, weighted=False),
 }
 exported = buildKit(TYPES, MATDEF, "mgnest.glb", prefix="Nest", seed0=1962, colors=True)
 

@@ -32,7 +32,7 @@ export const CACHE_TYPES = ["arms"];
 // THE AMBUSH SCREEN (tools/blender/ambushScreen.py — its stone; its scrub the engine's plants, algSangar.js)
 export const SCREEN_TYPES = ["ambush"];
 // THE MIRADOR (tools/blender/mirador.py — algSangar.js loadMirador)
-export const MIRADOR_TYPES = ["mirador"];
+export const MIRADOR_TYPES = ["mirador", "gear"];   // (gear: its searchlight and gun, their own atlas)
 // THE BARBED WIRE (tools/blender/barbedWire.py — algSangar.js loadBarbedWire)
 export const WIRE_TYPES = ["barbed"];
 // THE MG NEST (tools/blender/mgNest.py — algSangar.js loadMgNest): the nest and its AA-52
