@@ -477,7 +477,9 @@ function rebuild() {
   // 2026-10-20 — every piece its own mesh was ~220 draws on a big track). The pieces' own groups stay for
   // the mouse (picking, selection boxes, the gizmo), HIDDEN: three's ray hits hidden meshes, the camera skips them.
   drawChunks();
-  // OBSTACLES (track.props): drawn here, selectable like pieces; the sweepers turn on the page's clock
+  // OBSTACLES (track.props): drawn here, selectable like pieces; the sweepers turn on the page's clock.
+  // Those on a piece are laid on it again first (it may have moved or changed: roadSnapAt)
+  relayProps();
   obstacleSet = buildObstacleSet(track.props ?? []);
   for (const vis of obstacleSet.group.children.slice()) {
     trackGroup.add(vis);
@@ -1020,40 +1022,90 @@ function localRef() {
  */
 function obstacleSnap() {
   ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
-  for (const h of ray.intersectObjects(trackGroup.children, true)) {
+  const on = roadUnder(ray.intersectObjects(trackGroup.children, true));
+  if (on) return roadSnapAt(on.pc, tileBase, on.s, on.raw, rot.yaw);
+  const hit = new THREE.Vector3();
+  if (!ray.ray.intersectPlane(new THREE.Plane(UP, -FLOOR_Y), hit)) return null;
+  const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
+  return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
+}
+/** The first road piece among ray hits, and where on it: distance along its path, offset across its deck. */
+function roadUnder(hits) {
+  for (const h of hits) {
     let o = h.object;
     while (o && o.userData.uid == null) o = o.parent;
     const pc = o && track.pieces.find((p) => p.uid === o.userData.uid && !isRing(p));
     if (!pc) continue;
     const { b, t } = piece(pc.id, pcOE(pc));
     const hw = SECTIONS[t.section ?? "road"].hw;
-    const M = built.get(pc.uid).M;
-    const local = h.point.clone().applyMatrix4(M.clone().invert());
+    const local = h.point.clone().applyMatrix4(built.get(pc.uid).M.clone().invert());
     let best = null, bd = Infinity;
     for (const r of b.rings) { if (r.air) continue; const d = r.p.distanceToSquared(local); if (d < bd) { bd = d; best = r; } }
     if (!best) continue;
     const f = deckFrame(best, hw);
-    const raw = local.clone().sub(f.P).dot(f.R);
-    const along = local.clone().sub(f.P).dot(best.T);
-    if (OBSTACLES[tileBase]?.decal) return decalSnap(pc, b, t, M, best.s + along, raw);
-    // a WALL · DOOR stays square across the road, its middle on the road's: only the door slides (1 m
-    // steps, inside the kerbs)
-    if (tileBase === "ob_wall_door") {
-      const dx = THREE.MathUtils.clamp(Math.round(raw), -(hw - 5), hw - 5);
-      const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(f.P.clone().addScaledVector(best.T, along));
-      return { type: "road", m: M.clone().multiply(m), dx, hw, note: `Door ${dx ? `${Math.abs(dx)} m ${dx > 0 ? "right" : "left"}` : "in the middle"}` };
-    }
-    const ext = Math.max(0, hw - 2 - (OBSTACLES[tileBase]?.halfW ?? 0)); // a slalom / gate keeps its poles on the road
-    const lat = THREE.MathUtils.clamp(Math.round(raw / 2) * 2, -ext, ext);
-    const P = f.P.clone().addScaledVector(f.R, lat).addScaledVector(best.T, along);
-    const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(P);
-    m.multiply(new THREE.Matrix4().makeRotationY(rot.yaw * DEG));
-    return { type: "road", m: M.clone().multiply(m) };
+    return { pc, s: best.s + local.clone().sub(f.P).dot(best.T), raw: local.clone().sub(f.P).dot(f.R) };
   }
-  const hit = new THREE.Vector3();
-  if (!ray.ray.intersectPlane(new THREE.Plane(UP, -FLOOR_Y), hit)) return null;
-  const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
-  return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
+  return null;
+}
+/**
+ * AN OBSTACLE ON A PIECE (user, 2026-10-21: "everything easy to place … the builder is for the user"):
+ * where it stands is the PIECE it is on, the distance ALONG that piece and the offset ACROSS — kept in the
+ * prop (`on`, `s`, `lat`, `yaw`), and its frame re-laid from them at every rebuild, so an obstacle goes
+ * where its piece goes (a road moved, a piece replaced or inserted before it, a landing re-fitted), a boost
+ * pad takes the new shape under it, and deleting the piece deletes it. Placing and re-laying are this
+ * one function: `raw` is the offset asked for, snapped here.
+ */
+function roadSnapAt(pc, kind, s, raw, yaw = 0) {
+  const { b, t } = piece(pc.id, pcOE(pc));
+  const M = built.get(pc.uid).M;
+  const sec = SECTIONS[t.section ?? "road"], hw = sec.hw;
+  const total = b.rings.at(-1).s;
+  s = THREE.MathUtils.clamp(s, 0, total);
+  const at = { on: pc.uid, s: +s.toFixed(2) };
+  if (OBSTACLES[kind]?.decal) {
+    const d = decalSnap(pc, b, t, M, s, raw);
+    return { ...d, extra: { ...d.extra, ...at, s: d.s, lat: d.lat } };
+  }
+  const rc = ringAt(b.rings, s), f = deckFrame(rc, hw);
+  // a WALL · DOOR stays square across the road, its middle on the road's: only the door slides (1 m
+  // steps, inside the kerbs)
+  if (kind === "ob_wall_door") {
+    const dx = THREE.MathUtils.clamp(Math.round(raw), -(hw - 5), hw - 5);
+    const m = new THREE.Matrix4().makeBasis(f.R, f.U, rc.T.clone().negate()).setPosition(f.P);
+    return { type: "road", m: M.clone().multiply(m), dx, hw, extra: { ...at, lat: dx }, note: `Door ${dx ? `${Math.abs(dx)} m ${dx > 0 ? "right" : "left"}` : "in the middle"}` };
+  }
+  const ext = Math.max(0, hw - 2 - (OBSTACLES[kind]?.halfW ?? 0)); // a slalom / gate keeps its poles on the road
+  const lat = THREE.MathUtils.clamp(Math.round(raw / 2) * 2, -ext, ext);
+  const m = new THREE.Matrix4().makeBasis(f.R, f.U, rc.T.clone().negate()).setPosition(f.P.clone().addScaledVector(f.R, lat));
+  m.multiply(new THREE.Matrix4().makeRotationY(yaw * DEG));
+  const side = lat ? `${Math.abs(lat)} m ${lat > 0 ? "right" : "left"}` : "in the middle";
+  return { type: "road", m: M.clone().multiply(m), extra: { ...at, lat, ...(yaw ? { yaw } : {}) }, note: `${OBSTACLES[kind]?.label ?? "Obstacle"} · ${side} · ${Math.round(s)} m along the piece${yaw ? ` · turned ${yaw}°` : ""}` };
+}
+/** Whether an obstacle of this kind can be turned (Q/E): not a pad, a door or a gate — they lie square
+ * to the road — nor a wall in the air (it faces its flight). */
+const canTurn = (kind) => { const d = OBSTACLES[kind]; return !!d && !d.decal && !d.aimAt && !d.air; };
+/** How an obstacle in hand is placed, in one line (the panel). */
+function obstacleHow(kind) {
+  const d = OBSTACLES[kind];
+  if (d.air) return "on a jump's yellow arc";
+  if (d.decal) return "on any road piece · slides across in 1 m steps";
+  if (kind === "ob_wall_door") return "across a road · the door slides across in 1 m steps";
+  if (d.aimAt) return "on a road · slides across in 2 m steps";
+  return "on a road (2 m steps across) or the floor · <kbd>Q</kbd>/<kbd>E</kbd> turn";
+}
+const propOf = (uid) => (track.props ?? []).find((p) => p.uid === uid);
+/** Re-lay every obstacle that stands on a piece (see roadSnapAt); one whose piece is gone goes too. */
+function relayProps() {
+  if (!track.props?.length) return;
+  track.props = track.props.filter((p) => p.on == null || track.pieces.some((q) => q.uid === p.on && !isRing(q)));
+  for (const p of track.props) {
+    if (p.on == null) continue;
+    const sn = roadSnapAt(track.pieces.find((q) => q.uid === p.on), p.kind, p.s, p.lat, p.yaw ?? 0);
+    p.M = sn.m.toArray();
+    if (sn.dx != null) { p.dx = sn.dx; p.hw = sn.hw; }
+    if (sn.extra?.strip) p.strip = sn.extra.strip;
+    p.lat = sn.extra.lat;
+  }
 }
 /** A piece's path frame at distance s (rings interpolated): what deckFrame needs. */
 function ringAt(rings, s) {
@@ -1094,7 +1146,7 @@ function decalSnap(pc, b, t, M, s0, raw) {
     strip.push(row);
   }
   return {
-    type: "road", m: M.clone().multiply(local), extra: { strip }, strip,
+    type: "road", m: M.clone().multiply(local), extra: { strip }, strip, s: s0, lat,
     bad: air ? "Not over a gap" : null,
     note: `Boost pad · ${lat ? `${Math.abs(lat)} m ${lat > 0 ? "right" : "left"}` : "in the middle"}`,
   };
@@ -1858,7 +1910,7 @@ function movableKind(uid) {
 }
 function attachGizmo() {
   const kind = !tileBase && !driving && selection().length <= 1 ? movableKind(sel) : null;
-  if (!kind) { gizmo.detach(); return; }
+  if (!kind || (kind === "prop" && propOf(sel)?.on != null)) { gizmo.detach(); return; }
   built.get(sel).M.decompose(gizmoProxy.position, gizmoProxy.quaternion, gizmoProxy.scale);
   gizmoProxy.updateMatrixWorld(true);
   gizmo.setMode(gizmoMode);
@@ -1906,7 +1958,13 @@ gizmo.addEventListener("dragging-changed", (e) => {
   for (const u of moved.what.props) {
     const o = track.props.find((p) => p.uid === u);
     let M = delta.clone().multiply(new THREE.Matrix4().fromArray(o.M));
-    if (movableKind(sel) === "prop") M = settleOnRoad(M); // an obstacle dropped on a road stands on its deck
+    if (movableKind(sel) === "prop") {
+      // dropped on a road: it stands on the piece under it, at that distance along and offset across
+      const p = new THREE.Vector3().setFromMatrixPosition(M);
+      const on = roadUnder(new THREE.Raycaster(p.clone().add(new THREE.Vector3(0, 6, 0)), new THREE.Vector3(0, -1, 0), 0, 12).intersectObjects(trackGroup.children, true));
+      if (on && !OBSTACLES[o.kind]?.air) { Object.assign(o, { on: on.pc.uid, s: +on.s.toFixed(2), lat: on.raw }); }
+      else { delete o.on; M = settleOnRoad(M); }
+    } else if (o.on != null) continue; // a road moved: what stands on it follows it (relayProps)
     o.M = M.toArray();
   }
   rebuild();
@@ -1984,7 +2042,7 @@ function renderStatus() {
         (lapLineOn ? `<div class="legend">The test car: blue slow → white fast, dashed in the air · red: hits, falls · orange: hard braking, rough landing</div>` : "")
       : "") +
     (tileBase === STAMP ? `<div class="row"><span>Snaps like its first piece · R mirrors it · it stays in hand</span></div>` : "") +
-    (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · on a road or the floor · Q/E turn</span></div>` : "") +
+    (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · ${obstacleHow(tileBase)}</span></div>` : "") +
     (tileBase && !isObstacle(tileBase) && tileBase !== RING ? `<div class="row"><span>${freeHold ? "<b>FREE</b> · " : ""}<kbd>Alt</kbd> free · <kbd>Ctrl</kbd>+wheel turn · <kbd>Shift</kbd>+wheel height · <kbd>H</kbd> match height · arrows tilt · <kbd>0</kbd> level</span></div>` : "") +
     (selPc && !isRing(selPc) && !selPc.kind
       ? (editMode
@@ -2002,7 +2060,9 @@ function renderStatus() {
           return `<div class="acts">${Object.entries(d.params).map(([pk, q]) => `<button data-act="adj:${pk}:-1" title="Shift: ×4">◀</button><span class="adjv">${q.label} ${a.p[pk]}${q.unit}</span><button data-act="adj:${pk}:1" title="Shift: ×4">▶</button>`).join("")}</div>`; })()
       : "") +
     // the gizmo's two modes, or why this piece can't move on its own
-    (selPc ? (movableKind(sel)
+    (selPc?.kind && selPc.on != null
+      ? `<div class="row"><span><b>Drag it</b> along or across the road${canTurn(selPc.kind) ? ` · <kbd>Q</kbd>/<kbd>E</kbd> turn` : ""} · <kbd>Del</kbd> delete</span></div>`
+      : selPc ? (movableKind(sel)
       ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div>` +
         (movableKind(sel) === "root" ? `<div class="row"><span>The whole road behind it moves too</span></div>` : "")
       : `<div class="row"><span>Held by the road: Replace or Insert</span></div>`) : "") +
@@ -2049,6 +2109,40 @@ canvas.addEventListener("pointerleave", (e) => { if (!e.relatedTarget?.closest?.
 let down = null;
 // (a press on the gizmo is the gizmo's: no selecting, placing or panning under it)
 canvas.addEventListener("pointerdown", (e) => { down = { x: e.clientX, y: e.clientY, b: e.button, gizmo: gizmo.axis != null }; });
+// DRAG AN OBSTACLE (user, 2026-10-21: "everything easy to place … very UX friendly"): press on one that
+// stands on a road and move: it slides along and across the road — any road — snapped as when placing it
+// (roadSnapAt), a pad taking the shape under it. Capture phase: the camera must not orbit meanwhile.
+let propDrag = null;
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0 || tileBase || driving || gizmo.axis != null) return;
+  ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
+  let o = ray.intersectObjects(trackGroup.children, true)[0]?.object;
+  while (o && o.userData.uid == null) o = o.parent;
+  const prop = o && propOf(o.userData.uid);
+  if (!prop || prop.on == null) return;
+  propDrag = { uid: prop.uid, x: e.clientX, y: e.clientY, moving: false };
+  controls.enabled = false;
+}, { capture: true });
+canvas.addEventListener("pointermove", (e) => {
+  if (!propDrag) return;
+  if (!propDrag.moving && Math.hypot(e.clientX - propDrag.x, e.clientY - propDrag.y) < 5) return;
+  const prop = propOf(propDrag.uid);
+  if (!propDrag.moving) { propDrag.moving = true; snapshot(); sel = prop.uid; selSet = new Set([prop.uid]); }
+  ray.setFromCamera(new THREE.Vector2((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
+  const on = roadUnder(ray.intersectObjects(trackGroup.children, true));
+  if (!on) return;
+  const sn = roadSnapAt(on.pc, prop.kind, on.s, on.raw, prop.yaw ?? 0);
+  Object.assign(prop, { on: sn.extra.on, s: sn.extra.s, lat: sn.extra.lat });
+  const b = built.get(prop.uid);
+  if (b) { b.group.matrix.copy(sn.m); b.group.matrixWorldNeedsUpdate = true; b.M = sn.m.clone(); }
+});
+addEventListener("pointerup", () => {
+  if (!propDrag) return;
+  const was = propDrag;
+  propDrag = null;
+  controls.enabled = true;
+  if (was.moving) { rebuild(); renderStatus(); }
+});
 canvas.addEventListener("pointerup", (e) => {
   const d = down; down = null;
   if (driving || d?.gizmo) return;
@@ -2129,7 +2223,10 @@ addEventListener("keydown", (e) => {
     case "]": arcSpeed = Math.min(80, arcSpeed + 1); refreshArcs(); runChecks(); break;
     default:
       // by key POSITION (e.code): on AZERTY the letter Q is where A is — W A S D move the camera
-      if (e.code === "KeyQ") rot.yaw += step;
+      if ((e.code === "KeyQ" || e.code === "KeyE") && !tileBase && propOf(sel)?.on != null) {
+        const o = propOf(sel);
+        if (canTurn(o.kind)) { snapshot(); o.yaw = ((((o.yaw ?? 0) + (e.code === "KeyQ" ? step : -step)) % 360) + 360) % 360; rebuild(); }
+      } else if (e.code === "KeyQ") rot.yaw += step;
       else if (e.code === "KeyE") rot.yaw -= step;
       else if (k === "r") { hand = -hand; renderDock(); }
       else if (k === "g") gridMode = gridMode === "world" ? "local" : "world";

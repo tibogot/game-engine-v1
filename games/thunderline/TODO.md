@@ -105,7 +105,19 @@ this is just the list. Newest decisions at the top of each section. Last updated
          35 / 15 / 2 the test car clipped a centred pole at 130 km/h, 130 → 36 km/h). Test (5 straights,
          pole / slalom / gate 1.5 m right): drive page on autopilot, no hits, closest 2.3 m (pole),
          2.9–3.4 (slalom), 3.3 (gate); test lap 8.22 s (11.22 with the hit).
-      3. [ ] JUMP PAD: a plate that throws the car up a few metres
+      2b. [x] PLACING UX (user, 2026-10-21: "everything easy to place … the track builder is for the user
+         also"): an obstacle on a road is ATTACHED to its piece — the prop keeps `on` (piece uid), `s`
+         (along), `lat` (across, snapped), `yaw`; roadSnapAt lays it (placing and every rebuild:
+         relayProps), so it follows its piece (insert / replace / move a road / re-fit), a pad takes the
+         new shape under it, deleting the piece deletes it (undo brings both back). DRAG it to move it
+         (any road, snapped as when placing; the camera holds; no gizmo arrows for these); Q/E turn a
+         placed one (not pads, doors, gates, air walls); every obstacle in hand says where it sits
+         ("Pole · 4 m right · 40 m along the piece"); the hint per kind (no "Q/E turn" where it doesn't).
+         Tested with real mouse drags (pole onto the next piece 4 m right, pad 2 m left), insert /
+         replace (pad reshaped 0.45 → 0.62 m on Launch 45°) / delete + undo. Old tracks' obstacles
+         (no `on`) stay where they are. NOT yet: the slalom's dock picture is tiny (54 m long);
+         Wall · hole still not carried with its jump.
+      3. [ ] JUMP DECAL (agreed over a raised pad: flush like the boost pad, orange, up arrows)
       4. [ ] PISTON PILLAR, SLIDING BLOCK (race-clock movers, like the Sweeper)
       later: slow pad, air boost ring, low bar, ramp-block, rotating gate, pendulum, moving ring,
       breakable panel, arrow boards

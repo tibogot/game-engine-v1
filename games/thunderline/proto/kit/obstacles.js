@@ -171,7 +171,7 @@ const boostMaterial = () => (boostMat ??= new THREE.MeshStandardMaterial({
 /** The pad's surface from its strip ([xL, yL, zL, xR, yR, zR] per sample, pad frame); a flat plate without one. */
 function boostGeometry(strip) {
   const { w, L, lift } = BOOST_PAD;
-  const rows = strip ?? [-L / 2, L / 2].map((z) => [-w / 2, lift, z, w / 2, lift, z]);
+  const rows = strip ?? [L / 2, -L / 2].map((z) => [-w / 2, lift, z, w / 2, lift, z]); // back to front, as a strip
   const pos = [], uv = [], idx = [];
   rows.forEach((r, i) => {
     const along = (i / (rows.length - 1)) * L;
