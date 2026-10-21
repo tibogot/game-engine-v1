@@ -198,7 +198,7 @@ B_ZF, B_ZB = 0.016, -0.215        # the shell's front (the red apron under the b
 B_W, B_RC = 0.2, 0.045            # half width, plan radius of the back corners
 B_TOP, B_NOSE = 0.166, 0.062      # top height (below both frames: they stand out of it); the nose at the back
 B_NOSE_Z = -0.1                   # where the top starts to roll down
-B_FENDER = 0.042                  # how much higher the fenders stay over the nose
+B_FENDER = 0.026                  # how much higher the fenders stay over the nose
 B_SH = 0.012                      # the shoulder radius
 
 def b_halfwidth(z):
@@ -214,13 +214,15 @@ NOSE_PROFILE = [(0.1, B_TOP), (0.11, 0.164), (0.12, 0.158), (0.13, 0.15), (0.14,
 def b_height(z, x):
     t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
     hc = float(np.interp(-z, *zip(*NOSE_PROFILE)))   # the nose, kept under the photo camera's rays
-    f = math.exp(-((abs(x) - 0.14) / 0.042) ** 2)
+    f = math.exp(-((abs(x) - 0.148) / 0.06) ** 2)
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
-    return max(min(hc + B_FENDER * f * (t ** 0.7), y_face), 0.026)
+    return max(min(hc + B_FENDER * f * (t ** 0.9), y_face), 0.026)
 
 def b_ring(z):
     w = b_halfwidth(z)
+    t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
+    B_SH = 0.012 + 0.03 * t * t        # the shoulder rounds out towards the nose (the back photo: a car's rounded wings)
     pts = []
     N_TOP, N_SIDE, N_ARC, N_BOT = 48, 8, 5, 10
     hl, hr = b_height(z, -w + B_SH), b_height(z, w - B_SH)
@@ -254,11 +256,11 @@ def b_normal(z, x, e=0.001):
     hx = (b_height(z, x + e) - b_height(z, x - e)) / (2 * e)
     hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
     return Vector((-hx, 1.0, -hz)).normalized()
-POD_PROF = [(0.0, 0.0085), (0.025, 0.0083), (0.029, 0.0075), (0.0303, 0.006), (0.0315, 0.0055), (0.0365, 0.005),
-            (0.038, 0.004), (0.0384, 0.002), (0.0384, -0.035)]
+POD_PROF = [(0.0, 0.0105), (0.027, 0.0103), (0.031, 0.0095), (0.0325, 0.008), (0.034, 0.0075), (0.0392, 0.007),
+            (0.0408, 0.0058), (0.0412, 0.004), (0.0412, -0.035)]
 for sx in (-1, 1):
-    x = sx * 0.132
-    z = min((B_ZB + 0.003 + i * 0.0005 for i in range(240)), key=lambda zz: abs(b_height(zz, x) - 0.128))
+    x = sx * 0.138
+    z = min((B_ZB + 0.003 + i * 0.0005 for i in range(240)), key=lambda zz: abs(b_height(zz, x) - 0.122))
     n = b_normal(z, x)
     ex = Vector((1, 0, 0)); ey = n.cross(ex).cross(n).normalized() * -1 if False else n.cross(ex).normalized()
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, b_height(z, x), z), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
