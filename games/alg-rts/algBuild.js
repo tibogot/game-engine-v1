@@ -111,7 +111,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const dom = app.renderer.domElement;
   const geoCache = new Map();
   // The Blender pieces load in the background: their builder's old geometry until then (the cache forgets it).
-  loadSangar().then((ok) => { if (ok) geoCache.delete("sangar"); });
+  // (the map's own sangars too — the training's FLN ground kept the old one, 2026-10-22)
+  loadSangar().then((ok) => { if (ok) { geoCache.delete("sangar"); swapPlaced(showroom, /^sangar\d*$/, sangarGeometry(), app); } });
   // the plants (the screen's scrub): the showroom's PlacedFoliage
   const plants = () => app.showroom?.plants ?? showroom?.plants ?? null;
   loadAmbushScreen().then((ok) => {
