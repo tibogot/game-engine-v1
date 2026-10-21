@@ -8,6 +8,8 @@ import { createLandingJudge } from "./landing.js";
 
 /** Boost pads (user: "boosts make it even faster"): a push along the nose on top of the engine. */
 export const BOOST = { accel: 14, time: 2.0 };
+/** Jump pads: the car's speed along the pad's up is raised to this (m/s) — 8: ~3.3 m up, ~1.6 s of air. */
+export const JUMP = { v: 8 };
 /** The twist pieces' magnet (m/s² into the road surface): one g, so the car holds at any roll. */
 export const MAGNET = 9.81;
 const GRAVITY_ACC = 9.81; // the old car's world gravity (modularRoadVehicle GRAVITY)
@@ -41,7 +43,11 @@ export function createCarRules(car, { boostPads = [], magnets = [] } = {}) {
           if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boostLeft = BOOST.time;
         } else {
           lp.copy(car.body.pos).applyMatrix4(pad.inv);
-          if (Math.abs(lp.x) < pad.hx && Math.abs(lp.z) < pad.hz && lp.y > -1 && lp.y < 3) boostLeft = BOOST.time;
+          if (!(Math.abs(lp.x) < pad.hx && Math.abs(lp.z) < pad.hz && lp.y > -1 && lp.y < 3)) continue;
+          if (!pad.jump) { boostLeft = BOOST.time; continue; }
+          // a JUMP PAD: wheels on it, up to JUMP.v along its up (raised, not added: no stacking)
+          const vu = car.body.vel.dot(pad.up);
+          if (car.groundedCount > 0 && vu < JUMP.v) car.body.vel.addScaledVector(pad.up, JUMP.v - vu);
         }
       }
       if (boostLeft > 0 && car.groundedCount > 0) {

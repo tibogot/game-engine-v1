@@ -187,13 +187,40 @@ function boostGeometry(strip) {
   return g;
 }
 const BOOST_FLAT = boostGeometry(null);
-function boostShape(p = {}) {
+// ---------------------------------------------------------------- JUMP PAD
+// (user, 2026-10-21, chosen over a raised plate: "jump decals"): the same decal as the boost pad, ORANGE,
+// one big up-arrow in a frame; rolled over with the wheels down it throws the car UP (carRules JUMP: its
+// speed along the pad's up is raised to JUMP.v, never added to — two pads in a row don't stack).
+let jumpTex = null;
+function jumpTexture() {
+  if (jumpTex) return jumpTex;
+  const W = 128, H = 192, c = document.createElement("canvas");
+  c.width = W; c.height = H;
+  const g = c.getContext("2d");
+  g.fillStyle = g.strokeStyle = "#ff7a1a";
+  g.lineWidth = 8;
+  g.strokeRect(10, 10, W - 20, H - 20); // the frame (canvas top = the pad's FRONT, the way the car drives)
+  g.beginPath(); // the arrow: a head and a shaft, pointing forward / up
+  g.moveTo(W / 2, 30); g.lineTo(W - 26, 92); g.lineTo(W / 2 + 18, 92); g.lineTo(W / 2 + 18, H - 30);
+  g.lineTo(W / 2 - 18, H - 30); g.lineTo(W / 2 - 18, 92); g.lineTo(26, 92); g.closePath(); g.fill();
+  jumpTex = new THREE.CanvasTexture(c);
+  jumpTex.colorSpace = THREE.SRGBColorSpace;
+  jumpTex.repeat.set(1, 4 / BOOST_PAD.L); // the strip's uv runs a metre per ¼: one picture over the pad
+  jumpTex.anisotropy = 8;
+  return jumpTex;
+}
+let jumpMat = null;
+const jumpMaterial = () => (jumpMat ??= new THREE.MeshStandardMaterial({
+  map: jumpTexture(), emissiveMap: jumpTexture(), emissive: SIGNAL, emissiveIntensity: 1.2, roughness: 0.4,
+  transparent: true, alphaTest: 0.5, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+}));
+function boostShape(p = {}, material = boostMaterial) {
   const geo = p.strip ? boostGeometry(p.strip) : BOOST_FLAT;
   return {
     ghost: geo,
     parts: () => {
       const g = new THREE.Group();
-      const m = new THREE.Mesh(geo, boostMaterial());
+      const m = new THREE.Mesh(geo, material());
       m.castShadow = false;
       g.add(m);
       return g;
@@ -244,10 +271,17 @@ export const OBSTACLES = {
   ob_gate: { label: "Pole gate", halfW: 4.5, parts: () => polesParts(GATE), solids: polesSolids(GATE), decks: [], ghost: mergeGeometries(polesSolids(GATE)), aimAt: { hz: POLE.r }, hint: "Two poles 8 m apart: drive between them" },
   // `decal`: lies on the road, conformed to it (the builder fills `strip`); nothing solid
   ob_boost: { label: "Boost pad", parts: boostShape().parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: boostShape, decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2 }, hint: "Drive over it: a push for 2 s" },
+  ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
-/** The boost zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }. */
+/** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
+ * `jump` and `up` (the pad's up in the world: the direction it throws). */
 export function boostZones(props = []) {
-  return props.filter((p) => OBSTACLES[p.kind]?.boost).map((p) => ({ inv: new THREE.Matrix4().fromArray(p.M).invert(), ...OBSTACLES[p.kind].boost }));
+  return props.filter((p) => OBSTACLES[p.kind]?.boost).map((p) => {
+    const M = new THREE.Matrix4().fromArray(p.M);
+    const z = { inv: M.clone().invert(), ...OBSTACLES[p.kind].boost };
+    if (z.jump) z.up = new THREE.Vector3(0, 1, 0).transformDirection(M);
+    return z;
+  });
 }
 export const isObstacle = (id) => !!OBSTACLES[id];
 /** A placed obstacle's definition: its kind's, with the parts / solids / ghost of ITS shape (a door's offset). */

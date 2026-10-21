@@ -117,7 +117,20 @@ this is just the list. Newest decisions at the top of each section. Last updated
          replace (pad reshaped 0.45 → 0.62 m on Launch 45°) / delete + undo. Old tracks' obstacles
          (no `on`) stay where they are. NOT yet: the slalom's dock picture is tiny (54 m long);
          Wall · hole still not carried with its jump.
-      3. [ ] JUMP DECAL (agreed over a raised pad: flush like the boost pad, orange, up arrows)
+      3. [x] JUMP PAD (a decal, agreed over a raised plate): the boost pad's decal (follows the deck,
+         attached, dragged), ORANGE, a framed up-arrow; wheels on it → the car's speed along the pad's
+         up is RAISED to carRules JUMP.v 8 m/s (never added: no stacking). Test (4 straights, pad mid
+         piece 1): drive page at 136 km/h, the car's centre 4.7 m over the road (~3.7 m hop), 1.6 s of
+         air, landing perfect; test lap 7.22 s.
+         FLIGHT ARCS FROM JUMP PADS: every jump pad on a road is a take-off like a lip — its speed band
+         drawn (the road speed scales with the band, the pad's up-kick doesn't), from the test lap's
+         MEASURED take-off (stored in the pad's frame) else a guess; landings / rings / walls / tubes
+         snap to it (flightFrom = the pad's uid; the road order and "connected" follow it; a track
+         ending on a pad's piece runs until the take-off, an open jump). A pad mid-road: the arc ends
+         where it comes back down on a road (not its own landing), so no "flight under a road". arcs
+         carry `fly(scale)` (reach / hole / catch notes). Test: pad mid-road — arc 4.1 m up, 63 m long,
+         no warnings; pad at the end of 2 straights — take-off 147 km/h measured, Fitted landing
+         "lands from 137 km/h", test lap 8.75 s perfect, author time; drive page: perfect, 2.1 s air.
       4. [ ] PISTON PILLAR, SLIDING BLOCK (race-clock movers, like the Sweeper)
       later: slow pad, air boost ring, low bar, ramp-block, rotating gate, pendulum, moving ring,
       breakable panel, arrow boards

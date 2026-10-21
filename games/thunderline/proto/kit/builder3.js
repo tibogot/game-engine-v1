@@ -10,7 +10,7 @@ import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile, ADJUSTABLE, adjustableId, parseAdjustable } from "./kit.js";
 import { buildOldLook, createOldLookMaterials, edgesOf } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
-import { createCarRules, magnetZones } from "./carRules.js";
+import { createCarRules, magnetZones, JUMP } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
@@ -57,7 +57,7 @@ const CATS = [
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "sky_loop", "wallride_90"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_boost", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_boost", "ob_jump", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -521,11 +521,16 @@ const predScene = new THREE.Scene(); // the car's meshes live here; never render
 function schedulePrediction() { clearTimeout(predTimer); predTimer = setTimeout(runPrediction, 250); }
 /** Every piece the road reaches: the driving order, plus pieces laid BESIDE them (`sideOf`) and the road
  * that goes on from those — they are deck to land on and drive across, not part of the test lap's line. */
+/** The jump pads standing on a piece (obstacles.js ob_jump): each one a take-off, like a lip. */
+const jumpPadsOn = (uid) => (track.props ?? []).filter((p) => p.on === uid && OBSTACLES[p.kind]?.boost?.jump);
+const isJumpPad = (uid) => (track.props ?? []).some((p) => p.uid === uid && OBSTACLES[p.kind]?.boost?.jump);
 function connectedUids() {
   const set = new Set(orderedPieces().map((p) => p.uid));
+  // a jump pad is as connected as the piece it stands on (a landing hangs off it by `flightFrom`)
+  const padHost = new Map((track.props ?? []).filter((p) => p.on != null).map((p) => [p.uid, p.on]));
   for (let grew = true; grew;) {
     grew = false;
-    for (const p of track.pieces) if (!set.has(p.uid) && !isRing(p) && (set.has(p.sideOf) || set.has(p.parent) || set.has(p.flightFrom))) { set.add(p.uid); grew = true; }
+    for (const p of track.pieces) if (!set.has(p.uid) && !isRing(p) && (set.has(p.sideOf) || set.has(p.parent) || set.has(p.flightFrom) || set.has(padHost.get(p.flightFrom)))) { set.add(p.uid); grew = true; }
   }
   return set;
 }
@@ -538,7 +543,9 @@ function orderedPieces() {
     seen.add(cur.uid);
     out.push(cur);
     const at = cur;
-    cur = track.pieces.find((q) => q.parent === at.uid) ?? track.pieces.find((q) => q.flightFrom === at.uid && !isRing(q));
+    cur = track.pieces.find((q) => q.parent === at.uid) ?? track.pieces.find((q) => q.flightFrom === at.uid && !isRing(q))
+      // …or the landing of a JUMP PAD on it (the road ends; the pad throws the car onto the next piece)
+      ?? jumpPadsOn(at.uid).map((pad) => track.pieces.find((q) => q.flightFrom === pad.uid && !isRing(q))).find(Boolean);
     // nothing after it: the road may go on from a piece laid BESIDE it (a wide landing whose way out
     // leaves from its other half) — the car drives across the joined decks to it, as the drive page does
     if (!cur) {
@@ -671,7 +678,13 @@ async function runPrediction() {
   // a FINISH piece: the lap ends on its line (its entry), as the drive page times it
   const finPc = order.at(-1);
   const finishIdx = TILES[finPc.id]?.finish ? ride.findIndex((r) => r.uid === finPc.uid) : -1;
-  const endsOnLip = lips.has(lastUid);
+  // JUMP PADS: their zones (the car on one, wheels down, then airborne within 0.1 s = its take-off)
+  const padZones = (track.props ?? []).filter((q) => q.on != null && OBSTACLES[q.kind]?.boost?.jump).map((q) => {
+    const M = new THREE.Matrix4().fromArray(q.M);
+    return { uid: q.uid, kind: q.kind, host: q.on, inv: M.clone().invert(), ...OBSTACLES[q.kind].boost };
+  });
+  let onPad = null, onPadTick = -1e9;
+  const endsOnLip = lips.has(lastUid) || padZones.some((z) => z.host === lastUid);
   prediction.openJump = false;
   let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
   const nose = new THREE.Vector3();
@@ -719,6 +732,19 @@ async function runPrediction() {
       launch.set(ride[idx].uid, { id: track.pieces.find((q) => q.uid === ride[idx].uid)?.id, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(inv), V: car.body.vel.clone().applyMatrix4(rInv), U: carUp.clone().applyMatrix4(rInv), F: new THREE.Vector3(0, 0, 1).applyQuaternion(car.body.quat).applyMatrix4(rInv) });
       flying = ride[idx].uid;
       airT = 0;
+    }
+    if (grounded) for (const z of padZones) {
+      const lp = car.body.pos.clone().applyMatrix4(z.inv);
+      if (Math.abs(lp.x) < z.hx && Math.abs(lp.z) < z.hz && lp.y > -1 && lp.y < 3) { onPad = z; onPadTick = tick; }
+    }
+    if (wasGrounded && !grounded && onPad && tick - onPadTick < 12) {
+      lipSpeed.set(onPad.uid, car.body.vel.length());
+      const carUp = new THREE.Vector3(0, 1, 0).applyQuaternion(car.body.quat);
+      const rInv = new THREE.Matrix4().extractRotation(onPad.inv);
+      launch.set(onPad.uid, { id: onPad.kind, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(onPad.inv), V: car.body.vel.clone().applyMatrix4(rInv), U: carUp.clone().applyMatrix4(rInv), F: new THREE.Vector3(0, 0, 1).applyQuaternion(car.body.quat).applyMatrix4(rInv) });
+      flying = onPad.host; // (a pad on the last piece: the open jump, as off a lip)
+      airT = 0;
+      onPad = null;
     }
     if (grounded) flying = null; else airT += FIXED_DT;
     if (flying === lastUid && airT > 0.5) { prediction.openJump = true; break; }
@@ -778,6 +804,7 @@ function openEnds() {
 const arcGroup = new THREE.Group();
 scene.add(arcGroup);
 let arcs = []; // { pts, tan, from, landing } — the SLOW edge of the band (landings fit there, P3)
+let roadCache = null; // cutAtRoad: the road's points, kept per refreshArcs
 /** From the lip socket `m` at `speed` along it — or from a MEASURED take-off ({P, V}, the real car's)
  * with its velocity scaled by `scale`. */
 function flight(m, speed, launch = null, scale = 1) {
@@ -821,6 +848,7 @@ function rollNote(a, m, lean) {
 function refreshArcs() {
   for (const c of arcGroup.children.slice()) { arcGroup.remove(c); c.geometry.dispose(); }
   arcs = [];
+  roadCache = null; // (cutAtRoad's road points: this track as it is now)
   // every lip (a road end pointing up with no road after it): open, or flown to a landing
   const roadChild = new Set(track.pieces.map((p) => p.parent).filter((u) => u != null));
   for (const p of track.pieces) {
@@ -838,16 +866,52 @@ function refreshArcs() {
     const rm = new THREE.Matrix4().extractRotation(m);
     const launch = L && L.id === p.id ? { P: L.P.clone().applyMatrix4(m), V: L.V.clone().applyMatrix4(rm), U: L.U?.clone().applyMatrix4(rm), F: L.F?.clone().applyMatrix4(rm) } : null;
     const v = prediction.lipSpeed.get(p.uid) ?? arcSpeed;
-    const slow = flight(m, v * BAND_SLOW, launch, BAND_SLOW), fast = flight(m, v, launch, 1), near = flight(m, v * NEAR, launch, NEAR);
+    const fly = (sc) => flight(m, v * sc, launch, sc);
+    const slow = fly(BAND_SLOW), fast = fly(1), near = fly(NEAR);
     // the car's UP as it leaves (the roll kicker throws it tilted): measured, else the lip's leaned deck
     const up = launch?.U ?? surfaceUp(m, leanOut(TILES[p.id])), fwd = launch?.F ?? new THREE.Vector3(0, 0, -1).transformDirection(m);
-    arcs.push({ ...slow, fast, near, from: p.uid, landing, lip: { m, launch, v }, up, fwd }); // lip: to fly any speed in the band (catch tube)
-    for (const [a, color] of [[slow, 0xff9a3d], [fast, 0xffd27a]]) {
-      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(a.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
-      arcGroup.add(line);
-    }
+    arcs.push({ ...slow, fast, near, from: p.uid, landing, lip: { m, launch, v }, up, fwd, fly }); // fly: any speed in the band (catch tube, reach)
+  }
+  // JUMP PADS (2026-10-21): a take-off like a lip — the car's speed along the road carries on, its speed
+  // along the pad's up is the pad's (carRules JUMP: raised to it, so it does NOT scale with the band).
+  // From the measured take-off (prediction) else a guess. A pad mid-road: the arc ends where it comes
+  // back down on a road (no "flight passes under a road" for the road it lands back on).
+  for (const pad of track.props ?? []) {
+    if (pad.on == null || !OBSTACLES[pad.kind]?.boost?.jump) continue;
+    const m = new THREE.Matrix4().fromArray(pad.M);
+    const rm = new THREE.Matrix4().extractRotation(m);
+    const padUp = new THREE.Vector3(0, 1, 0).transformDirection(m);
+    const L = prediction.launch?.get(pad.uid);
+    const P = L && L.id === pad.kind ? L.P.clone().applyMatrix4(m) : new THREE.Vector3(0, 0.55, -OBSTACLES[pad.kind].boost.hz).applyMatrix4(m);
+    const V = L && L.id === pad.kind ? L.V.clone().applyMatrix4(rm) : new THREE.Vector3(0, 0, -1).transformDirection(m).multiplyScalar(prediction.lipSpeed.get(pad.uid) ?? arcSpeed).addScaledVector(padUp, JUMP.v);
+    const vu = V.dot(padUp), rest = V.clone().addScaledVector(padUp, -vu);
+    const v = V.length();
+    const landing = track.pieces.find((q) => q.flightFrom === pad.uid && !isRing(q))?.uid ?? null;
+    const fly = (sc) => cutAtRoad(flight(m, 0, { P: P.clone(), V: rest.clone().multiplyScalar(sc).addScaledVector(padUp, vu) }, 1), landing);
+    const slow = fly(BAND_SLOW), fast = fly(1), near = fly(NEAR);
+    const up = L?.U ? L.U.clone().applyMatrix4(rm) : padUp.clone(), fwd = L?.F ? L.F.clone().applyMatrix4(rm) : new THREE.Vector3(0, 0, -1).transformDirection(m);
+    arcs.push({ ...slow, fast, near, from: pad.uid, host: pad.on, landing, lip: { m, launch: { P, V }, v }, up, fwd, fly });
+  }
+  for (const a of arcs) for (const [f, color] of [[a, 0xff9a3d], [a.fast, 0xffd27a]]) {
+    if (f.pts.length < 2) continue;
+    arcGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(f.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })));
   }
 }
+/** A jump pad's flight, ended where it comes back DOWN onto a road (the one it left, or any). The road's
+ * points are kept per refresh: the notes fly the arc again at up to 40 speeds per mouse move. */
+
+function cutAtRoad(fl, landing = null) {
+  const road = (roadCache ??= roadSamples());
+  let apex = 0;
+  fl.pts.forEach((q, i) => { if (q.y > fl.pts[apex].y) apex = i; });
+  for (let i = apex + 1; i < fl.pts.length; i++) {
+    const q = fl.pts[i];
+    // (not on its own landing: the check that it catches the flight needs the arc to go through it)
+    if (road.some((r) => r.uid !== landing && Math.abs(r.P.x - q.x) < 8 && Math.abs(r.P.z - q.z) < 8 && q.y - r.P.y < 0.3 && q.y - r.P.y > -3)) return { pts: fl.pts.slice(0, i + 1), tan: fl.tan.slice(0, i + 1) };
+  }
+  return fl;
+}
+
 
 // ---------- live checks: road overlap + flight corridors ----------
 function roadSamples() {
@@ -901,7 +965,7 @@ function runChecks() {
     }
     for (const p of a.pts.slice(0, end)) {
     for (const r of gridMap.get(key(p.x, p.z)) ?? []) {
-      if (r.uid === a.landing || r.uid === a.from) continue; // the flight's own lip and landing
+      if (r.uid === a.landing || r.uid === a.from || r.uid === a.host) continue; // the flight's own lip (or pad's piece) and landing
       const dy = r.P.y - p.y;
       if (dy > 0.5 && dy < 6 && Math.hypot(r.P.x - p.x, r.P.z - p.z) < 9) { blocked++; break; }
     }
@@ -1063,7 +1127,7 @@ function roadSnapAt(pc, kind, s, raw, yaw = 0) {
   s = THREE.MathUtils.clamp(s, 0, total);
   const at = { on: pc.uid, s: +s.toFixed(2) };
   if (OBSTACLES[kind]?.decal) {
-    const d = decalSnap(pc, b, t, M, s, raw);
+    const d = decalSnap(pc, b, t, M, s, raw, kind);
     return { ...d, extra: { ...d.extra, ...at, s: d.s, lat: d.lat } };
   }
   const rc = ringAt(b.rings, s), f = deckFrame(rc, hw);
@@ -1122,7 +1186,7 @@ function ringAt(rings, s) {
  * the kerbs; along, kept on the piece), and its STRIP — the deck's left and right edge under it every
  * metre, lifted, in the pad's frame — so it lies on a curl or a bank instead of cutting through it.
  */
-function decalSnap(pc, b, t, M, s0, raw) {
+function decalSnap(pc, b, t, M, s0, raw, kind) {
   const { w, L, lift } = BOOST_PAD;
   const sec = SECTIONS[t.section ?? "road"], hw = sec.hw;
   const total = b.rings.at(-1).s;
@@ -1148,7 +1212,7 @@ function decalSnap(pc, b, t, M, s0, raw) {
   return {
     type: "road", m: M.clone().multiply(local), extra: { strip }, strip, s: s0, lat,
     bad: air ? "Not over a gap" : null,
-    note: `Boost pad · ${lat ? `${Math.abs(lat)} m ${lat > 0 ? "right" : "left"}` : "in the middle"}`,
+    note: `${OBSTACLES[kind]?.label ?? "Pad"} · ${lat ? `${Math.abs(lat)} m ${lat > 0 ? "right" : "left"}` : "in the middle"} · ${Math.round(s0)} m along the piece`,
   };
 }
 function ringSnap() {
@@ -1186,7 +1250,7 @@ function wallHoleSnap() {
   const m = socketMatrix({ p: P, T: h, U: UP.clone(), R });
   const [hx0, hx1, hy0, hy1] = HOLE.hole;
   const through = (sc) => {
-    const { pts } = flight(a.lip.m, a.lip.v * sc, a.lip.launch, sc);
+    const { pts } = a.fly(sc);
     for (let i = 1; i < pts.length; i++) {
       const d0 = pts[i - 1].clone().sub(P).dot(h), d1 = pts[i].clone().sub(P).dot(h);
       if (d0 < 0 && d1 >= 0) {
@@ -1239,7 +1303,7 @@ function catchSnap(a, y) {
   const inside = (c) => c && c.h >= 0.5 && c.h <= TUBE_ROOF - ROOF_CLEAR && Math.abs(c.side) <= 12;
   let sMin = 1;
   for (let s = 1; s >= BAND_SLOW - 1e-9; s -= 0.01) {
-    if (!inside(atMouth(flight(a.lip.m, a.lip.v * s, a.lip.launch, s).pts))) break;
+    if (!inside(atMouth(a.fly(s).pts))) break;
     sMin = s;
   }
   // the slope: until the full-speed car is down on it, + 12 m; and never over the roof on the way
@@ -1274,7 +1338,7 @@ function reachScale(a, P0, T) {
   const h = new THREE.Vector3(T.x, 0, T.z).normalize();
   let sMin = 1;
   for (let sc = 1; sc >= 0.6 - 1e-9; sc -= 0.01) {
-    const { pts } = flight(a.lip.m, a.lip.v * sc, a.lip.launch, sc);
+    const { pts } = a.fly(sc);
     let y = -Infinity;
     for (let i = 1; i < pts.length; i++) {
       const d0 = pts[i - 1].clone().sub(P0).dot(h), d1 = pts[i].clone().sub(P0).dot(h);
