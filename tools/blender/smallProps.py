@@ -155,8 +155,8 @@ def buildFlare(K, *a, far=False):
     """The flare pistol (the 25 mm signal pistol): a fat short barrel on its frame, the hammer, the trigger in its
     guard, the wooden grip raked back, a lanyard ring."""
     drystone.setLow(K, far)
-    rod(K, "Barrel", (0, 0.105, -0.17), (0, 0.105, 0.04), 0.017, "spDark", 24)
-    rod(K, "Bore", (0, 0.105, -0.172), (0, 0.105, -0.16), 0.013, "spBlack", 24)
+    rod(K, "Barrel", (0, 0.105, -0.09), (0, 0.105, 0.04), 0.022, "spDark", 24)   # (short and fat: a 25 mm signal pistol)
+    rod(K, "Bore", (0, 0.105, -0.092), (0, 0.105, -0.08), 0.017, "spBlack", 24)
     box(K, "Frame", -0.012, 0.012, 0.08, 0.124, 0.02, 0.09, "spDark")
     box(K, "Hammer", -0.004, 0.004, 0.118, 0.14, 0.075, 0.095, "spSteel")
     bm = bmesh.new(); vs = []
@@ -270,6 +270,113 @@ def buildDetector(K, *a, far=False):
 PROPS = {"grenade": buildGrenade, "smoke": buildSmoke, "flare": buildFlare, "cutters": buildCutters, "mine": buildMine,
          "helmet": buildHelmet, "kepi": buildKepi, "jerrycan": buildJerrycan, "ammobox": buildAmmoBox,
          "detonator": buildDetonator, "detector": buildDetector}
+
+# ── THE REST OF THE ABILITIES (2026-10-22): the radio, the FM, the bazooka, the flamethrower, the sniper's rifle, the
+# repair tools, an artillery shell (the barrages) ──────────────────────────────────────────────────────────────────
+def buildRadio(K, *a, far=False):
+    """The SCR-300 kind of backpack set: a tall olive case on its frame, the whip antenna, the handset on its cord."""
+    drystone.setLow(K, far)
+    box(K, "Case", -0.17, 0.17, 0.0, 0.42, -0.06, 0.06, "spOlive", 0.01)
+    box(K, "Panel", -0.14, 0.14, 0.33, 0.4, 0.06, 0.07, "spDark", 0.003)
+    for k in range(3): lathe(K, f"Knob{k}", [(0.0, 0.0), (0.012, 0.0), (0.012, 0.012), (0.0, 0.012)], "spBlack", 12, at=(-0.09 + k * 0.07, 0.355, -0.0)) if False else rod(K, f"Knob{k}", (-0.09 + k * 0.07, 0.365, 0.07), (-0.09 + k * 0.07, 0.365, 0.085), 0.012, "spBlack", 10)
+    for s in (-1, 1): rod(K, f"Frame{s}", (s * 0.15, 0.02, -0.075), (s * 0.15, 0.44, -0.075), 0.008, "spSteel", 6)
+    rod(K, "AntBase", (0.12, 0.42, 0.0), (0.12, 0.46, 0.0), 0.012, "spBlack", 8)
+    rod(K, "Antenna", (0.12, 0.46, 0.0), (0.16, 1.15, 0.0), 0.003, "spSteel", 5)
+    # the handset: earpiece, grip, mouthpiece; its cord down to the case
+    rod(K, "Handset", (-0.24, 0.2, 0.08), (-0.24, 0.38, 0.12), 0.014, "spBlack", 10)
+    rod(K, "Ear", (-0.24, 0.38, 0.12), (-0.24, 0.395, 0.105), 0.024, "spBlack", 12)
+    rod(K, "Mouth", (-0.24, 0.2, 0.08), (-0.24, 0.185, 0.095), 0.022, "spBlack", 12)
+    pts = [(-0.24, 0.19, 0.09), (-0.22, 0.08, 0.1), (-0.17, 0.1, 0.06)]
+    for k in range(2): rod(K, f"Cord{k}", pts[k], pts[k + 1], 0.003, "spBlack", 5)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildLmg(K, *a, far=False):
+    """The FM 24/29: the slim barrel with its flash hider, the box magazine on TOP, the receiver, the wooden stock and
+    pistol grip, the bipod folded forward under the barrel."""
+    drystone.setLow(K, far)
+    rod(K, "Barrel", (0, 0.1, -0.78), (0, 0.1, -0.15), 0.011, "spDark", 12)
+    rod(K, "Hider", (0, 0.1, -0.84), (0, 0.1, -0.78), 0.016, "spDark", 12)
+    rod(K, "Gas", (0, 0.075, -0.6), (0, 0.075, -0.15), 0.009, "spDark", 10)
+    box(K, "Receiver", -0.025, 0.025, 0.05, 0.14, -0.18, 0.12, "spDark", 0.004)
+    box(K, "Magazine", -0.022, 0.022, 0.14, 0.27, -0.1, -0.01, "spDark", 0.003)
+    box(K, "Handguard", -0.028, 0.028, 0.05, 0.11, -0.42, -0.18, "spWood", 0.006)
+    bm = bmesh.new(); vs = []
+    for (z, y) in [(0.12, 0.13), (0.12, 0.06), (0.52, 0.03), (0.52, 0.12)]:
+        for x in (-0.024, 0.024): vs.append(bm.verts.new(B(x, y, z)))
+    bmesh.ops.convex_hull(bm, input=vs); T(K.bevel(K.obj("Stock", bm, "spWood", "h"), 0.006 if not LOW() else 0, 2, 40))
+    rod(K, "Grip", (0, 0.06, 0.1), (0, -0.04, 0.14), 0.016, "spWood", 10)
+    for s in (-1, 1): rod(K, f"Bipod{s}", (0, 0.085, -0.62), (s * 0.06, -0.12, -0.5), 0.006, "spSteel", 6)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildBazooka(K, *a, far=False):
+    """The M20 rocket launcher: the long tube in two halves joined at the coupling, the flared rear, the shoulder rest,
+    the grip and trigger, the sight; a rocket's nose showing at the back."""
+    drystone.setLow(K, far)
+    rod(K, "Tube", (0, 0.1, -0.78), (0, 0.1, 0.72), 0.044, "spOlive", 24)
+    lathe(K, "Coupling", [(0.05, -0.035), (0.05, 0.035)], "spDark", 24, at=(0, 0.1, 0)) if False else rod(K, "Coupling", (0, 0.1, -0.04), (0, 0.1, 0.04), 0.051, "spDark", 24)
+    rod(K, "Flare", (0, 0.1, 0.72), (0, 0.1, 0.8), 0.058, "spDark", 24)
+    rod(K, "Muzzle", (0, 0.1, -0.8), (0, 0.1, -0.76), 0.05, "spDark", 24)
+    box(K, "Rest", -0.035, 0.035, -0.01, 0.06, 0.12, 0.3, "spWood", 0.008)
+    rod(K, "Grip", (0, 0.06, -0.15), (0, -0.06, -0.12), 0.016, "spWood", 10)
+    box(K, "Sight", -0.008, 0.008, 0.144, 0.185, -0.35, -0.3, "spDark", 0.002)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildFlamer(K, *a, far=False):
+    """The flamethrower: two fuel tanks and the pressure bottle between them on a back frame, the hose, the gun."""
+    drystone.setLow(K, far)
+    for s in (-1, 1): lathe(K, f"Tank{s}", [(0.0, 0.0), (0.06, 0.0), (0.065, 0.02), (0.065, 0.46), (0.05, 0.5), (0.0, 0.5)], "spOlive", 28, at=(s * 0.08, 0, 0))
+    lathe(K, "Bottle", [(0.0, 0.05), (0.04, 0.05), (0.042, 0.07), (0.042, 0.42), (0.03, 0.45), (0.0, 0.45)], "spSteel", 24, at=(0, 0, -0.07))
+    rod(K, "Valve", (0, 0.45, -0.07), (0, 0.5, -0.07), 0.012, "spBrass", 10)
+    pts = [(0.08, 0.02, 0.0), (0.12, -0.08, -0.12), (0.18, 0.02, -0.32), (0.22, 0.18, -0.48)]
+    for k in range(3): rod(K, f"Hose{k}", pts[k], pts[k + 1], 0.014, "spBlack", 10)
+    rod(K, "Gun", (0.22, 0.18, -0.48), (0.24, 0.24, -0.98), 0.018, "spDark", 12)
+    rod(K, "Nozzle", (0.24, 0.24, -0.98), (0.243, 0.245, -1.02), 0.024, "spBrass", 12)
+    rod(K, "GunGrip", (0.22, 0.17, -0.6), (0.22, 0.06, -0.58), 0.014, "spWood", 8)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildSniper(K, *a, far=False):
+    """The MAS 36 with its APX scope: the long barrel, the wooden stock in two pieces, the bolt's bent handle, the
+    scope on its mount offset to the left."""
+    drystone.setLow(K, far)
+    rod(K, "Barrel", (0, 0.1, -0.85), (0, 0.1, -0.2), 0.009, "spDark", 10)
+    box(K, "Fore", -0.022, 0.022, 0.06, 0.11, -0.6, -0.12, "spWood", 0.008)
+    box(K, "Action", -0.02, 0.02, 0.07, 0.13, -0.16, 0.08, "spDark", 0.004)
+    bm = bmesh.new(); vs = []
+    for (z, y) in [(0.06, 0.12), (0.06, 0.04), (0.48, -0.02), (0.48, 0.1)]:
+        for x in (-0.022, 0.022): vs.append(bm.verts.new(B(x, y, z)))
+    bmesh.ops.convex_hull(bm, input=vs); T(K.bevel(K.obj("Stock", bm, "spWood", "h"), 0.006 if not LOW() else 0, 2, 40))
+    rod(K, "Bolt", (0.02, 0.12, 0.02), (0.07, 0.08, 0.04), 0.005, "spSteel", 6)
+    rod(K, "BoltKnob", (0.07, 0.08, 0.04), (0.08, 0.075, 0.042), 0.011, "spSteel", 8)
+    rod(K, "Scope", (-0.035, 0.2, -0.2), (-0.035, 0.2, 0.08), 0.016, "spBlack", 14)
+    rod(K, "ScopeObj", (-0.035, 0.2, -0.24), (-0.035, 0.2, -0.2), 0.022, "spBlack", 14)
+    rod(K, "ScopeEye", (-0.035, 0.2, 0.08), (-0.035, 0.2, 0.12), 0.02, "spBlack", 14)
+    for z in (-0.12, 0.0): box(K, f"Mount{z}", -0.04, 0.0, 0.12, 0.19, z - 0.01, z + 0.01, "spDark", 0.002)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildTools(K, *a, far=False):
+    """Repair: a big adjustable spanner and a hammer crossed."""
+    drystone.setLow(K, far)
+    c, s = math.cos(0.5), math.sin(0.5)
+    rod(K, "Spanner", (-0.2 * c, 0.02, -0.2 * s), (0.17 * c, 0.02, 0.17 * s), 0.014, "spSteel", 10)
+    box(K, "Jaw", -0.03, 0.03, 0.0, 0.035, -0.035, 0.035, "spSteel", 0.004)
+    K.groups["h"][-1].location = B(-0.22 * c, 0.0, -0.22 * s)
+    rod(K, "Haft", (0.2 * c, 0.03, -0.2 * s), (-0.18 * c, 0.03, 0.18 * s), 0.014, "spWood", 10)
+    rod(K, "Head", (0.2 * c - 0.06 * s, 0.03, -0.2 * s - 0.06 * c), (0.2 * c + 0.06 * s, 0.03, -0.2 * s + 0.06 * c), 0.025, "spDark", 12)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildShell(K, *a, far=False):
+    """An artillery shell (the barrages): the brass case, the olive projectile, the copper band, the fuze's point."""
+    drystone.setLow(K, far)
+    lathe(K, "Case", [(0.0, 0.0), (0.06, 0.0), (0.058, 0.01), (0.056, 0.24), (0.0, 0.24)], "spBrass", 32)
+    lathe(K, "Band", [(0.0582, 0.245), (0.0582, 0.262)], "spCopper", 32)
+    prof = [(0.0, 0.24), (0.055, 0.24), (0.055, 0.36)] + [(0.055 * math.cos(math.radians(t)) ** 1.2, 0.36 + 0.13 * math.sin(math.radians(t))) for t in range(10, 81, 10)] + [(0.0, 0.5)]
+    lathe(K, "Projectile", prof, "spOlive", 32)
+    lathe(K, "Fuze", [(0.0, 0.47), (0.018, 0.47), (0.004, 0.54), (0.0, 0.54)], "spBrass", 20)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+PROPS.update({"radio": buildRadio, "lmg": buildLmg, "bazooka": buildBazooka, "flamer": buildFlamer, "sniper": buildSniper,
+              "tools": buildTools, "shell": buildShell})
+
 MATDEF.update({
     "spOlive": (0.55, paintWorn(0x4d5536, 0x6e6c66)), "spPale": (0.7, flatC(0xc9c2a4)), "spBlack": (0.5, flatC(0x161614)),
     "spRed": (0.6, flatC(0x7a2a1e)), "spWood": (0.7, flatC(0x6a4628, 0.75)), "spCrate": (0.8, milprops.timberMat(0x6a6a4c)),

@@ -21,6 +21,8 @@ const { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } = P;
 import { kitView } from "./showroom.js";
 import { houseMesh, loadHouses } from "./algHouse.js";
 import { ICON } from "./ui/icons.js";
+import { buildH21, buildT6 } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { vehicleOf } from "./vehicleLab.js";
 import { CATEGORY, PALETTE } from "./ui/iconAtlas.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -91,10 +93,15 @@ const ICONS = [
   { name: "stop", title: "Stop (an order: a symbol)", key: "H", svg: "stop", symbol: true },
   // ── THE ABILITIES' KIT (tools/blender/smallProps.py) ──
   ...[["smoke", "Smoke", [-25, 14]], ["flare", "Flare", [-70, 10]], ["cutters", "Cut wire", [-20, 55]], ["mine", "Mine (FLN)", [-25, 32]],
-    ["helmet", "Reinforce (helmet)", [-25, 20]], ["kepi", "Tier (kepi)", [-30, 18]], ["jerrycan", "Fuel", [-35, 16]], ["ammobox", "Munitions", [-25, 40]],
-    ["detonator", "Detonate (FLN)", [-30, 20]], ["detector", "Sweep mines", [-60, 14]]]
-    .map(([p, title, view]) => ({ name: p, title, svg: p, view, zoom: 0.85,
+    ["helmet", "Reinforce (helmet)", [-25, 20]], ["kepi", "Tier (kepi)", [-170, 14]], ["jerrycan", "Fuel", [-35, 16]], ["ammobox", "Munitions", [-25, 40]],
+    ["detonator", "Detonate (FLN)", [-30, 20]], ["detector", "Sweep mines", [-60, 14]],
+    ["radio", "Radio", [-30, 14], { crop: [0, 0.48], zoom: 0.8 }], ["lmg", "FM 24/29", [-35, 38], { zoom: 0.62 }], ["bazooka", "Bazooka", [-35, 38], { zoom: 0.62 }], ["flamer", "Flamethrower", [-50, 18], { zoom: 0.68 }],
+    ["sniper", "Sniper", [-35, 38], { zoom: 0.62 }], ["tools", "Repair", [-10, 70]], ["shell", "Barrage (shell)", [-25, 12]]]
+    .map(([p, title, view, o = {}]) => ({ name: p, title, svg: p, view, zoom: 0.85, ...o,
       make: async () => { await loadHouses("smallprops"); return houseMesh(p, "intact", 1).children[0].levels[0].object.clone(); } })),
+  // the aircraft, the game's own models (rtsVehiclesFr): the T-6 (the air strikes), the H-21 (the paradrop)
+  { name: "t6", title: "Air strike (T-6)", view: [-40, 26], zoom: 0.5, make: async () => vehicleOf(buildT6(), "t6").group ?? vehicleOf(buildT6(), "t6") },
+  { name: "h21", title: "Paradrop (H-21)", view: [-55, 18], zoom: 0.5, make: async () => { const v = vehicleOf(buildH21(), "h21"); return v.group ?? v; } },
   // ── THE REST OF THE BUILDINGS (2026-10-22): the Blender pieces, each framed on what says what it is ──
   ...[
     ["wire", "Barbed wire", "BarbedWire", "barbedWire", { view: [-20, 14], zoom: 0.26, light: 3.2, glow: 1 }],   // (thin strands: close on the coil, more light, a brighter backdrop behind it)
@@ -257,7 +264,8 @@ export async function startIconStudio() {
    * chevrons and alert marks) as a 96 px tile — its RENDER where one is made (RENDER_FOR: the game key → the render),
    * else its silhouette as a brass SYMBOL on the same tile (the orders; the abilities still without a model).
    */
-  const RENDER_FOR = { cutWire: "cutters", flnMine: "mine", flnWire: "mine", flnDetonate: "detonator", reinforce: "helmet", tier: "kepi", sweepMines: "detector" };
+  const RENDER_FOR = { cutWire: "cutters", flnMine: "mine", flnWire: "mine", flnDetonate: "detonator", reinforce: "helmet", tier: "kepi", sweepMines: "detector", radio: "radio", lmg: "lmg", bazooka: "bazooka", repair: "tools",
+    barrage: "shell", radioBarrage: "shell", mortarBarrage: "shell", airStrike: "t6", radioAir: "t6" };
   async function atlas(size = 96, cols = 8) {
     const keys = Object.keys(ICON).filter((k) => !/^(vet\d|alert)/.test(k));
     const tiles = [];
