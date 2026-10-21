@@ -333,4 +333,14 @@ export class PropSystem {
 
   get canUndo() { return this._undoStack.length > 0; }
   get canRedo() { return this._redoStack.length > 0; }
+
+  /**
+   * Forget the history — for a project load (EDITOR_REVIEW_2026_10 A3): its snapshots hold the
+   * previous scene's instances by TYPE INDEX, so an undo after a load wrote them into the new
+   * scene's types.
+   */
+  clearHistory() {
+    this._undoStack.length = 0;
+    this._redoStack.length = 0;
+  }
 }

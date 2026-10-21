@@ -29,9 +29,9 @@ import { HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "./heightmapTexture.js";
 // Upgraded to full float in createSculptBrush when the GPU can filter it.
 let heightRTType = THREE.HalfFloatType;
 
-function makeHeightRT(w = HEIGHTMAP_SIZE, h = HEIGHTMAP_SIZE) {
+function makeHeightRT(w = HEIGHTMAP_SIZE, h = HEIGHTMAP_SIZE, format = THREE.RGBAFormat) {
   const rt = new THREE.RenderTarget(w, h, {
-    format:          THREE.RGBAFormat,
+    format,
     type:            heightRTType,
     minFilter:       THREE.LinearFilter,
     magFilter:       THREE.LinearFilter,
@@ -788,9 +788,12 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     _render(copyQuad, dstRT, null);
   }
 
+  // Undo snapshots keep ONE channel (the height is .r; the shaders here read only .r) in the
+  // heightmap's own type — R32F where it is filterable, else R16F — instead of RGBA: 4× less
+  // VRAM per step (EDITOR_REVIEW_2026_10 A4; a whole-map step at 2048² was 128 MB).
   function snapshotRect(srcRT, rect) {
     const S  = HEIGHTMAP_SIZE;
-    const rt = makeHeightRT(rect.w, rect.h);
+    const rt = makeHeightRT(rect.w, rect.h, THREE.RedFormat);
     snapSrcNode.value = srcRT.texture;
     uSnapOffset.value.set(rect.x / S, rect.y / S);
     uSnapScale.value.set(rect.w / S, rect.h / S);
@@ -817,8 +820,19 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     entry.post.dispose();
   }
 
-  function trimStack(stack) {
+  // Also capped by MEMORY: 25 whole-map steps at 4096² were 25 × 128 MB even after the
+  // single-channel snapshots. The oldest steps go first; the newest always stays.
+  const HISTORY_BUDGET_BYTES = 256 * 1024 * 1024;
+  const entryBytes = (e) => e.rect.w * e.rect.h * (heightRTType === THREE.FloatType ? 4 : 2) * 2;
+  function trimStack(stack, incomingBytes = 0) {
     while (stack.length >= MAX_HISTORY) disposeEntry(stack.shift());
+    let total = incomingBytes;
+    for (const e of stack) total += entryBytes(e);
+    while (stack.length && total > HISTORY_BUDGET_BYTES) {
+      const e = stack.shift();
+      total -= entryBytes(e);
+      disposeEntry(e);
+    }
   }
 
   function disposeStack(stack) {
@@ -1062,7 +1076,7 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     strokeOpen = false;
     if (!strokeRect) { strokeExtra = null; return; } // click without stamps — nothing to record
     disposeStack(redoStack);
-    trimStack(undoStack);
+    trimStack(undoStack, entryBytes({ rect: strokeRect }));
     const pre = snapshotRect(rtPreStroke, strokeRect);
     const post = snapshotRect(rtMain, strokeRect);
     undoStack.push({
@@ -1196,6 +1210,17 @@ export function createSculptBrush(renderer, initialDataTex, heightTexNode, initi
     clone,
     undo,
     redo,
+    /**
+     * Forget every undo / redo step and free their render targets — for a project load
+     * (EDITOR_REVIEW_2026_10 A3). The load itself was recorded as a whole-map stroke, so Ctrl+Z
+     * after opening a level brought back the PREVIOUS level's ground, and every game kept that
+     * unused full-map pair (32 MB at 1024²) for its whole session.
+     */
+    clearHistory() {
+      if (strokeOpen) endStroke();
+      disposeStack(undoStack);
+      disposeStack(redoStack);
+    },
     /** fn() → the tag each history step stores when it closes (its height layer). */
     setHistoryTagger: (fn) => { historyTagger = fn; },
     /** The tag of the step undo / redo would apply next (undefined = none). */

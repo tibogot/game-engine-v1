@@ -5,6 +5,7 @@ import Stats from "stats-gl";
 import { texture, uniform, float, mix, positionWorld, vec2, vec3, length, smoothstep, mx_noise_float } from "three/tsl";
 import { createHeightmapTexture, saveTerrainConfig, legacySplatSize, TERRAIN_SIZE_LIMITS, HEIGHTMAP_SIZE, WORLD_SIZE, MAX_HEIGHT } from "../terrain/heightmapTexture.js";
 import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.js";
+import { putAutosave, getAutosave, clearAutosave } from "../io/autosave.js";
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
 import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
@@ -275,6 +276,10 @@ export async function startV3App(opts = {}) {
   // Before the renderer's first size, so the viewport starts at the remembered panel widths.
   if (isEditor && uiById("app")) initPanelSplitters(uiById("app"));
   const statusBar = isEditor && uiById("status-bar") ? createStatusBar(uiById("status-bar")) : null;
+  // Save safety (EDITOR_REVIEW_2026_10 A1, the block by "Save safety" below): declared up here because
+  // the load paths that reset it can run before that block.
+  let editsUnsaved = false;
+  let lastEditAt = 0;
   // A game page that injected editor.html itself (no container) must not show it.
   if (!isEditor && !container) uiById("status-bar")?.remove();
 
@@ -4814,6 +4819,17 @@ export async function startV3App(opts = {}) {
   const _lodSnapVec = new THREE.Vector3();
   let _lastFrameMs = performance.now();
   let _loopErrors = 0;
+  // The frame update runs as five sections, each in its own try (EDITOR_REVIEW_2026_10 A5): one
+  // try round the whole update meant a system that threw skipped EVERY system after it each frame
+  // (props, decals, rivers, the environment…), and only the session's first error was logged.
+  // Now a failing section is named once, with its stack, and the others keep running.
+  const _loopSectionErred = new Set();
+  function _loopFail(section, err) {
+    _loopErrors++;
+    if (_loopSectionErred.has(section)) return;
+    _loopSectionErred.add(section);
+    console.error(`[V3] Frame update error in "${section}":`, err, "\n", err?.stack ?? "");
+  }
   let _lastWidgetRefresh = 0;
   let _noEnvTimeSec = 0;
   const _preRenderHooks = [];
@@ -4915,7 +4931,9 @@ export async function startV3App(opts = {}) {
         // Sculpting under the marker must not bury it — re-drape every frame.
         spawnSystem.refreshHeight();
       }
+    } catch (err) { _loopFail("camera / play", err); }
 
+    try {
       // Pads re-level when the ground under them changed or their prop moved
       // (two comparisons when nothing did) — before the upload, so it is this frame's.
       padSystem?.update();
@@ -4990,7 +5008,9 @@ export async function startV3App(opts = {}) {
         flowerDensity.updateMask(blocksGrass);
         foliageDensity.updateMask(blocksGrass);
       }
+    } catch (err) { _loopFail("heights / terrain bakes", err); }
 
+    try {
       bakeGrassTintIfNeeded();
       waterSurfaceMap.bakeIfNeeded(renderer);
       // Which grass system the world runs. Only the chosen one is built, and
@@ -5139,7 +5159,9 @@ export async function startV3App(opts = {}) {
           );
         }
       }
+    } catch (err) { _loopFail("grass / plants / ambient", err); }
 
+    try {
       // The shadow map only reaches CSM maxFar; props past it need not cast.
       if (worldToolState.csm.maxFar !== _lastCsmShadowFar) {
         _lastCsmShadowFar = worldToolState.csm.maxFar;
@@ -5179,7 +5201,9 @@ export async function startV3App(opts = {}) {
       // Tunnel collision: cheap poll, rebuilds a BVH only when a tunnel mesh changed.
       tunnelColliderStore?.refresh();
       roadSystem?.update();
+    } catch (err) { _loopFail("props / decals / water / roads", err); }
 
+    try {
       tickPerf(perf, now, dt * 1000);
       // The clipmap rings are merged into one mesh, so children.length is always
       // 1 now; report the ring count, which is what this readout meant.
@@ -5210,9 +5234,7 @@ export async function startV3App(opts = {}) {
       // After updateFrame moved the sun, before anything renders with it.
       if (!_rendererSideWork) terrainShadowMap.bakeIfNeeded(sculpt.getHeightVersion());
       bvhDebug?.update();
-    } catch (err) {
-      if (++_loopErrors === 1) console.error("[V3] Frame update error:", err);
-    }
+    } catch (err) { _loopFail("environment / trees / shadows", err); }
 
     try {
       renderer.setRenderTarget(null);
@@ -9218,8 +9240,40 @@ export async function startV3App(opts = {}) {
     uiById("props-panel")?._rebuildPropUi?.();
   }
 
+  /**
+   * Wait until the CPU mirror (and so GROUND) holds every height write, including a stroke
+   * whose readback is still in flight. syncHeightmapToCPU() alone returns at once while a
+   * read is running, so Ctrl+S right after a stroke used to save the ground from BEFORE it
+   * (EDITOR_REVIEW_2026_10 A2).
+   */
+  async function settleHeightsForSave() {
+    for (let i = 0; i < 8; i++) {
+      await ensureCpuHeightmapFromGpu();
+      if (!readbackInFlight && !readbackPending && !cpuAhead && !sculpt.getDirtyRect()) return;
+    }
+  }
+
+  let projectSaving = false;
   async function saveProject() {
-    await syncHeightmapToCPU();
+    if (projectSaving) { statusBar?.setMessage("Already saving…"); return; }
+    projectSaving = true;
+    try {
+      const buf = await buildProjectBuffer();
+      const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+      downloadBuffer(buf, `project-${ts}.v3proj`);
+      statusBar?.setMessage(`Project saved — project-${ts}.v3proj (${(buf.byteLength / 1048576).toFixed(1)} MB)`);
+      markProjectSaved();
+    } catch (err) {
+      console.error("[V3] Save failed:", err);
+      statusBar?.setMessage(`Save FAILED: ${err?.message ?? err}`, { kind: "error", holdMs: 0 });
+    } finally {
+      projectSaving = false;
+    }
+  }
+
+  /** The whole world as .v3proj bytes (the toolbar save and the autosave). */
+  async function buildProjectBuffer() {
+    await settleHeightsForSave();
     // The project stores GROUND — the height stack's bottom layer — plus the
     // rivers; the load re-applies the river over it. Saving the composed result
     // instead would cut every channel twice. (This is the same data the old
@@ -9328,9 +9382,7 @@ export async function startV3App(opts = {}) {
       revoGrass: { ...revoGrassState },
       snowParams: Object.fromEntries(SNOW_LOOK_KEYS.map((k) => [k, snowSystem.params[k]])),
     });
-    const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    downloadBuffer(buf, `project-${ts}.v3proj`);
-    statusBar?.setMessage(`Project saved — project-${ts}.v3proj (${(buf.byteLength / 1048576).toFixed(1)} MB)`);
+    return buf;
   }
 
   /** Best-effort reload of tree slot assets (presets/GLBs) from /models. */
@@ -9719,6 +9771,13 @@ export async function startV3App(opts = {}) {
     spawnSystem.setVisible(!playMode.active);
     spawnUi?.refresh();
 
+    // Sculpt and props history belong to the previous scene too (EDITOR_REVIEW_2026_10 A3): the
+    // load's own height write was a whole-map undo step back to the OLD ground, and the props'
+    // snapshots name the old types. Pending CPU height edits go up first, so the clear covers them.
+    if (cpuAhead) flushCpuHeightEdits();
+    sculpt.clearHistory();
+    propSys.clearHistory();
+
     onHistoryChange();
     console.log("[V3] Project loaded.");
     statusBar?.setMessage("Project loaded");
@@ -9756,6 +9815,7 @@ export async function startV3App(opts = {}) {
   async function loadAnyFile() {
     const file = await pickProjectFile();
     if (!file) return;
+    if (editsUnsaved && !window.confirm("You have unsaved changes. Open this file anyway and lose them?")) return;
     try {
       const buf = await file.arrayBuffer();
       // PNG / RAW heightmaps from other tools (the Heightmap File section's path).
@@ -9784,10 +9844,12 @@ export async function startV3App(opts = {}) {
         // back down to the legacy value — keep the current setting in that case.
         saveTerrainConfig({ ...t, splatSize: t.splatSize ?? SPLAT_RES });
         await stashPendingHeightmap(buf); // stash is format-agnostic — sniffed on boot
+        markProjectLoaded();              // already confirmed above: no second "leave page?" prompt
         location.reload();
         return;
       }
       await applyProjectData(d);
+      markProjectLoaded();
     } catch (err) {
       console.error(err);
       const message = err instanceof Error ? err.message : "Failed to load file.";
@@ -9800,8 +9862,10 @@ export async function startV3App(opts = {}) {
   // The promise is exposed on the app handle (pendingWorldImport) so a game can
   // AWAIT the import before placing anything on the terrain — a fixed sleep
   // races it and seats gameplay objects on the pre-import ground.
+  let bootImportedFile = false;   // this boot opened a file carried across a reload (save safety skips its offer)
   const pendingWorldImport = takePendingHeightmap().then(async (buf) => {
     if (!buf) return;
+    bootImportedFile = true;
     try {
       if (isProjectFile(buf)) {
         await applyProjectData(await decodeProjectFile(buf));
@@ -9843,11 +9907,119 @@ export async function startV3App(opts = {}) {
         }
         try { sessionStorage.removeItem(`v3.projectUrlReload:${projectUrl}`); } catch { /* storage blocked */ }
         await applyProjectData(d);
+        markProjectLoaded();
         statusBar?.setMessage(`Opened ${projectUrl}`);
       } catch (err) {
         console.error(err);
         statusBar?.setMessage(`Open failed: ${err.message ?? err}`, { kind: "error", holdMs: 0 });
       }
+    });
+  }
+
+  // ── Save safety (2026-10-21, EDITOR_REVIEW_2026_10 A1) ─────────────────────
+  // Nothing used to protect unsaved work: F5, closing the tab, a dev-server reload or a
+  // Load over an edited scene lost the session silently. Now, in the EDITOR only (a game
+  // never saves, so none of this runs there):
+  //   · "unsaved" is set by any edit gesture — a click/drag in the viewport outside View
+  //     mode, a panel input, undo / redo — and cleared by a save or a load;
+  //   · leaving the page with unsaved edits asks first (beforeunload);
+  //   · while unsaved and idle (4 s without input), the project is autosaved into
+  //     IndexedDB at most every 30 s; a real save clears it;
+  //   · at start-up, an autosave left behind offers itself: Restore / Discard.
+  function markProjectEdited() { editsUnsaved = true; lastEditAt = performance.now(); }
+  function markProjectSaved() { editsUnsaved = false; if (isEditor) clearAutosave(); }
+  // a load replaces the scene but is not a save: the crash backup stays until a save or Discard
+  function markProjectLoaded() { editsUnsaved = false; }
+  if (isEditor) {
+    const canvas = renderer.domElement;
+    let pointerDown = false;
+    canvas.addEventListener("pointerdown", () => { pointerDown = true; }, true);
+    window.addEventListener("pointerup", (e) => {
+      if (pointerDown && e.target === canvas && editorMode !== "view") markProjectEdited();
+      pointerDown = false;
+    }, true);
+    for (const type of ["input", "change"]) {
+      document.addEventListener(type, (e) => {
+        // the toolbar's hidden file pickers are not edits
+        if (e.target instanceof HTMLInputElement && e.target.type === "file") return;
+        markProjectEdited();
+      }, true);
+    }
+    window.addEventListener("keydown", (e) => {
+      if ((e.ctrlKey || e.metaKey) && /^[zy]$/i.test(e.key)) markProjectEdited();
+    }, true);
+    window.addEventListener("beforeunload", (e) => {
+      if (!editsUnsaved) return;
+      e.preventDefault();
+      e.returnValue = "";
+    });
+
+    let autosaving = false, autosavedAt = 0;
+    setInterval(async () => {
+      if (!editsUnsaved || autosaving || projectSaving || pointerDown) return;
+      if (lastEditAt <= autosavedAt || performance.now() - lastEditAt < 4000) return;
+      autosaving = true;
+      const t0 = performance.now();
+      try {
+        const buf = await buildProjectBuffer();
+        await putAutosave({
+          buf, savedAt: Date.now(),
+          terrain: { worldSize: WORLD_SIZE, heightmapSize: HEIGHTMAP_SIZE, maxHeight: MAX_HEIGHT },
+        });
+        autosavedAt = t0;
+        statusBar?.setMessage(`Autosaved for recovery (${(buf.byteLength / 1048576).toFixed(1)} MB, ${Math.round(performance.now() - t0)} ms) — Ctrl+S still saves the file`, { holdMs: 2500 });
+      } catch (err) {
+        console.warn("[V3] Autosave failed:", err);
+      } finally {
+        autosaving = false;
+      }
+    }, 30000);
+
+    // Offer an autosave left by a closed tab / crash — not when this boot is itself opening
+    // something (?project=, or a file carried across a terrain-size reload).
+    const RESTORED_KEY = "v3.restoredAutosave";
+    pendingWorldImport.then(async () => {
+      let restoredAcrossReload = false;
+      try { restoredAcrossReload = sessionStorage.getItem(RESTORED_KEY) === "1"; sessionStorage.removeItem(RESTORED_KEY); } catch { /* storage blocked */ }
+      if (restoredAcrossReload) {
+        markProjectEdited();   // restored work is still not in a file
+        statusBar?.setMessage("Unsaved work restored — save it with Ctrl+S", { holdMs: 0 });
+        return;
+      }
+      if (bootImportedFile || new URLSearchParams(location.search).get("project")) return;
+      const rec = await getAutosave();
+      if (!rec?.buf) return;
+      const bar = document.createElement("div");
+      bar.style.cssText = "position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:9999;"
+        + "background:#1f232a;color:#e6e8eb;border:1px solid #4da3ff;border-radius:6px;padding:10px 14px;"
+        + "font:13px system-ui,sans-serif;display:flex;gap:10px;align-items:center;box-shadow:0 4px 16px #0008";
+      const when = new Date(rec.savedAt).toLocaleString();
+      const t = rec.terrain ?? {};
+      bar.innerHTML = `<span>Unsaved work from <b>${when}</b> (${Math.round(t.worldSize)} m world, ${(rec.buf.byteLength / 1048576).toFixed(1)} MB)</span>`;
+      const btn = (label, fn) => { const b = document.createElement("button"); b.textContent = label; b.style.cssText = "padding:4px 10px;cursor:pointer"; b.onclick = fn; bar.appendChild(b); return b; };
+      btn("Restore", async () => {
+        bar.remove();
+        try {
+          const d = await decodeProjectFile(rec.buf);
+          const dt = d.terrain ?? {};
+          if (dt.heightmapSize !== HEIGHTMAP_SIZE || Math.round(dt.worldSize) !== WORLD_SIZE || Math.round(dt.maxHeight) !== MAX_HEIGHT) {
+            // another terrain size: the same reload path as the toolbar Load
+            saveTerrainConfig({ ...dt, splatSize: dt.splatSize ?? SPLAT_RES });
+            await stashPendingHeightmap(rec.buf);
+            try { sessionStorage.setItem(RESTORED_KEY, "1"); } catch { /* storage blocked */ }
+            location.reload();
+            return;
+          }
+          await applyProjectData(d);
+          markProjectEdited();
+          statusBar?.setMessage("Unsaved work restored — save it with Ctrl+S", { holdMs: 0 });
+        } catch (err) {
+          console.error("[V3] Restore failed:", err);
+          statusBar?.setMessage(`Restore failed: ${err?.message ?? err}`, { kind: "error", holdMs: 0 });
+        }
+      });
+      btn("Discard", () => { bar.remove(); clearAutosave(); });
+      document.body.appendChild(bar);
     });
   }
 

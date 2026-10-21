@@ -98,6 +98,16 @@ gameplay layout is hand-typed JS (`games/alg-rts/layout.js`, `maps/*.js`).
     Dead save keys `groundTsl` / `meadowTsl` / `foliage` are read but never written.
     Lane road has no save at all. Spline mode is the old racing game's kit.
 
+## Done
+
+**A1–A5 fixed 2026-10-21**, checked in a browser on alg-aures:
+- **A1:** an autosave of 12.1 MB took 0.64 s after 4 s idle. Leaving the page asks first. The
+  restore bar brought the work back.
+- **A2:** a save right after a stroke now equals the live ground, with 0 texels different.
+- **A3 + A4:** nothing to undo after a load. Undo / redo with the one-channel snapshots are exact.
+- **A5:** the frame update runs in 5 named sections.
+- **Games still run:** alg-rts and Thunderline drive at 60 fps, with a clean console.
+
 ## Suggested order
 
 - **Now (small, safe; they help alg-rts too):** A1, A2, A3 + A4, A5.
