@@ -258,6 +258,21 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 - [ ] A/D slide 8–12 cm/s (small): the side clips' foot path vs the strafe.
 - [ ] Diagonals blend two clips — not measured yet.
 
+## ▶ Riding controls — 2026-10-21 (you: "how does those games work… the mouse makes the direction… think Zelda, Genshin")
+- CAMERA-RELATIVE (RIDE.mode "camera", the default; "classic" in the Rider panel): the mouse is
+  ALWAYS the camera; W A S D = a direction relative to the camera, the horse turns toward it at
+  its own rate (behind it and slow: on the spot first); nothing held = it slows. The camera
+  recentres behind only when riding straight (holding A / D / S it chased the horse in circles).
+- AIMING (bow up / lance couched) the horse HOLDS ITS LINE: A / D nudge it, W / S speed.
+- THE LANCE FOLLOWS THE LOOK (Mount & Blade): the tip's path through the crosshair at the next
+  target's distance, in the arm's cone; lock-on (right mouse) + assist kept. The mouse-moves-
+  the-ring version (0369cb5e) took the camera away — replaced.
+- Measured: W with the camera 90° left / right / behind → the horse turns 86–90° / 177° and
+  rides that way; A → 90° left of the look, held; S → back toward the camera; W+A → 45°; bow
+  aimed + W, camera 90° left → line held (7°). Lance looking at each target, no lock: line on /
+  40 cm in / 40 cm out → 8, 8, 8 of 8 (fixed lance 6, 8, 0).
+- [ ] Your feel: the turn speed, the camera recentring, S = turn back (or brake?).
+
 ## ▶ Lance aiming — 2026-10-21 (you: "very hard to touch objects with it… can we make it easier")
 - WHY it was hard: the couched lance was FIXED to the horse (lanceAcross / lanceDip) — the only
   aim was steering the whole horse; from the camera straight behind, the rider hid the lance,
