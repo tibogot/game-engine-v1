@@ -112,7 +112,7 @@ const PICK = { Wheel: "wheel", HubBadge: "wheel", Lever: "lever", KeyHead: "key"
 toy.traverse((o) => {
   if (!o.isMesh) return;
   const face = FACES[o.name];
-  o.material = face ?? (o.name === "Wheel" ? WHEEL_BLACK : o.name === "Lever" ? LEVER_GREY : MATS[o.material.name]) ?? o.material;
+  o.material = face ?? (o.name === "Wheel" ? WHEEL_BLACK : (o.name === "Lever" || o.parent?.name === "Lever") && o.material.name === "Grey" ? LEVER_GREY : MATS[o.material.name]) ?? o.material;
   o.castShadow = !face;
   o.receiveShadow = !face || o.name === "ClusterFace";
   if (face === glass) o.renderOrder = 2;

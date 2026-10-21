@@ -196,7 +196,7 @@ ZF = 0.02
 # upright sides and a crisp rounded shoulder; the top runs level back from the bezel, then rolls down into a car nose;
 # fender bulges either side carry the round grey headlights low on the nose; a slate bumper band wraps the back and
 # the rear of the sides, a red skirt under it. Built as cross-sections (x, y) stepped along z and lofted — no subdivision.
-B_ZF, B_ZB = 0.016, -0.232        # the shell's front (the red apron under the bezel) and back
+B_ZF, B_ZB = 0.016, -0.252        # the shell's front (the red apron under the bezel) and back
 B_W, B_RC = 0.2, 0.04             # half width, plan radius of the back corners
 B_TOP, B_NOSE = 0.166, 0.062      # top height (below both frames: they stand out of it); the nose at the back
 B_NOSE_Z = -0.088                 # where the top starts to roll down
@@ -217,7 +217,7 @@ def b_halfwidth(z):
 # convex: a gentle bonnet near the top, rolling over to nearly vertical where the lamps sit (straight back photo)
 NOSE_PROFILE = [(0.06, 0.17), (0.098, 0.17)] + [(0.1 + 0.142 * k / 24, 0.094 + 0.076 * max(1 - (k / 24) ** 2.2, 0) ** 0.6)
                                                for k in range(25)]
-B_SKIRT = 0.05                    # the red chin under the bumper (as tall as the bumper: straight back photo)
+B_SKIRT = 0.032                   # the red chin under the bumper (straight back photo: ~32 mm)
 B_BUMP = 0.107                    # the bumper's top
 # The back is a 911 nose (straight back photo, back_straight.png): FENDERS either side stay high and end in a face
 # sloping ~55 deg that carries each lamp nearly flush; the BONNET between the creases (x +-9 cm) is lower and rolls
@@ -298,19 +298,24 @@ rings = [b_ring(z) for z in ZS]
 last = rings[-1]
 cx_, cy_ = 0.0, B_NOSE * 0.5
 rings.append([(cx_ + (x - cx_) * 0.985, cy_ + (y - cy_) * 0.97 if y > 0 else 0.0, z - 0.0025) for x, y, z in last])
-loft("Shell", rings, RED, cap0=True, cap1=True, angle=35)
+# the back face: swept in to the centre line (each point keeps its height and depth) — a real surface, smooth; a flat cap
+# over this non-planar ring (the tucked chin) triangulated into soft lumps
+end = rings[-1]
+rings += [[(x * k, y, z) for x, y, z in end] for k in (0.75, 0.5, 0.25, 0.0)]
+loft("Shell", rings, RED, cap0=True, angle=35)
 
 # the headlights: grey discs set into the fenders, square to the surface — a rim ring and a raised inner disc
 def b_normal(z, x, e=0.001):
     hx = (b_height(z, x + e) - b_height(z, x - e)) / (2 * e)
     hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
     return Vector((-hx, 1.0, -hz)).normalized()
-POD_PROF = [(r * 0.82, h) for r, h in [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122), (0.035, 0.0118),
+POD_PROF = [(r * 0.95, h)   # outer ring ~73 mm across (straight back photo)
+            for r, h in [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122), (0.035, 0.0118),
                                         (0.0375, 0.0102), (0.0385, 0.007), (0.0385, -0.035)]]
 for sx in (-1, 1):
-    x = sx * 0.156
+    x = sx * 0.148   # (straight back photo)
     # the lamp faces BACK, 18 deg up (photos), its centre where the fender's rounded corner is 127 mm high
-    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.127))   # on the real (capped) surface
+    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.145))   # on the real (capped) surface
     up = math.radians(22)
     n = Vector((0, math.sin(up), -math.cos(up)))
     n = (n + b_normal(zc, x)).normalized()   # halfway to the steep nose's own normal: the lamp sits on it
@@ -318,16 +323,17 @@ for sx in (-1, 1):
     z_l, y_l = zc + n.z * 0.004, b_height(zc, x) + n.y * 0.004   # the ring stands just proud, its bucket behind
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
     # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
-    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.016, 0.0092), (0.0223, 0.009), (0.0223, 0.008)],
+    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.019, 0.0092), (0.0258, 0.009), (0.0258, 0.008)],
           CHROME, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
 
 # the bumper: a slate band round the back and the rear half of the sides, a groove along it
 def bumper():
     z_start = -0.085
     path = rpoly([(-B_W, z_start), (-B_W, B_ZB), (B_W, B_ZB), (B_W, z_start)], [0, B_RC, B_RC, 0], 12)
-    prof = [(-0.006, 0.05), (0.009, 0.05), (0.0125, 0.052), (0.014, 0.056), (0.014, 0.066), (0.0125, 0.0675),
-            (0.014, 0.069), (0.014, 0.085), (0.0125, 0.0865), (0.014, 0.088), (0.014, 0.1), (0.0125, 0.1045),
-            (0.009, 0.1085), (-0.006, 0.1085)]   # 1.5 mm over the shell's lowest top (it met it exactly: z-fight)
+    # 32 -> 108 mm (straight back photo): a thin top lip, a wide band, a groove, a lower band; 1 cm proud
+    prof = [(-0.006, 0.032), (0.006, 0.032), (0.0092, 0.0335), (0.0105, 0.037), (0.0105, 0.058), (0.009, 0.0595),
+            (0.0105, 0.061), (0.0105, 0.088), (0.009, 0.0895), (0.0105, 0.091), (0.0105, 0.1), (0.009, 0.1045),
+            (0.006, 0.1085), (-0.006, 0.1085)]   # 1.5 mm over the shell's lowest top (it met it exactly: z-fight)
     rings = []
     for i, (x, z) in enumerate(path):
         p = Vector((x, z))
@@ -581,7 +587,7 @@ slab("LeverCapPlug", [rrect(0, 0, 0.015, 0.018, 0.0006, 2)], 0.0, 0.0035, 0.0003
 _d = Vector((0.047, -0.006, 0)).normalized()
 TOPF = G0 @ gmat((0.0165, 0.05, 0), tuple(_d), (0, 0, -1))
 for k in range(3):
-    slab(f"LeverGroove{k}", [rrect(0.0, -0.0045 + k * 0.0045, 0.03, 0.0008, 0.0003, 2)], -0.0003, 0.00015, 0.0001, BLACK, TOPF)
+    slab(f"LeverGroove{k}", [rrect(0.0, -0.0045 + k * 0.0045, 0.03, 0.0011, 0.0004, 2)], 0.0008, 0.0014, 0.0001, BLACK, TOPF)   # the grip's bevel puts its surface 1 mm out
 
 # =================================================================================================================
 # THE STEERING WHEEL — round its own centre, facing local +Z. 194 mm across, a 9.5 mm rim; four flat spokes at
@@ -679,17 +685,16 @@ def starts(*pre): return [n for n in bpy.data.objects.keys() if n.startswith(pre
 
 join("Wheel", ["WheelRim"] + starts("WheelSpoke", "WheelHub"))
 join("WheelChromeLines", starts("WheelChrome"))
-join("Lever", ["LeverStick", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum"])
+join("Lever", ["LeverStick", "LeverGrip", "LeverCap", "LeverCapPlug", "LeverDrum"] + starts("LeverGroove"))   # grooves IN the lever mesh (a parented groove part never showed)
 join("ConsoleRight", starts("ConsoleFin", "ConsoleGate", "ConsoleChannel"))
 join("BonnetLines", starts("BonnetLine", "BonnetRect"))
 join("SidePads", starts("SidePad"))
 join("BezelLip", ["BezelLip", "BezelLipB"])
 join("Underside", ["BatteryDoor", "BatteryTab"] + starts("BatteryRib", "Foot", "Screw"))
-join("LeverGrooves", starts("LeverGroove"))
 join("ResetButton", ["ResetButton", "ResetChevron"] + starts("ResetRib"))
 join("KeyHead", ["KeyHead", "KeyBow"] + starts("KeyGroove"))
 join("BezelDetail", ["CheekPill", "CheekPillSplit"] + starts("CheekButton", "VentSlat"))
-for child, parent in (("HubBadge", "Wheel"), ("WheelChromeLines", "Wheel"), ("LeverGrooves", "Lever")):
+for child, parent in (("HubBadge", "Wheel"), ("WheelChromeLines", "Wheel")):
     c, p = bpy.data.objects[child], bpy.data.objects[parent]
     c.parent = p
     c.matrix_parent_inverse = p.matrix_world.inverted()
