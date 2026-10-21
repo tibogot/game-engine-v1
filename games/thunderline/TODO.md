@@ -115,7 +115,19 @@ this is just the list. Newest decisions at the top of each section. Last updated
       TIMER SWITCH (user, 2026-10-22: "no timer and countdown all the time when creating and debugging"):
       "Timer: off" in the toolbar (default, remembered): Drive starts at once (no countdown), no clock /
       checkpoint counter, a finish records nothing; on = the real race (driveSession o.noTimer).
-      Still open: snap onto another piece's SURFACE (stacking).
+      OFF-CENTRE ON A WIDER END (instead of full stacking — the user agreed it is not needed now):
+      a piece snapped to an end wider than itself goes where you point along it, in 2 m steps (`off` on
+      the piece, applied when it is laid on its parent's exit). Test: platform 64 → a straight 12 m right
+      of its end's middle → road on, test lap 8.3 s, nothing loose. Full stacking: parked.
+- [x] **THE BUILDER TUTORIAL** (user, 2026-10-22: "so people are not lost, and me neither … show really
+      how the builder works"): builderTutorial.js, a coach panel in 10 steps (camera, start, straights,
+      a turn, a kicker, a fitted landing on its arc, drive and back, a boost pad, editing a piece, the
+      finish); it lights the tab / card / button to use (data-cat / data-base on the dock) and advances by
+      itself when the track shows the step done. "Tutorial" in the toolbar (on a NEW track: yours is
+      untouched); offered by itself the first time the builder opens on an empty track. Played through
+      by a script: all 10 steps advanced, "That's the builder", no console errors. NEXT: the stunt
+      lessons (short tracks in the menu, one trick each: land flat, air roll onto a tilted landing, the
+      bowl / flip ramp, catch tube, wall hole, sky loop).
 - **MORE OBSTACLES** (user, 2026-10-21: "poles, boost decals … many others"; agreed order):
       1. [x] BOOST PAD (Obstacles tab): a decal on ANY piece, 8 × 12 m, the Boost 32 chevrons and push
          (carRules BOOST 2 s; pads are { inv, hx, hz } boxes — obstacles.js boostZones, in the drive page

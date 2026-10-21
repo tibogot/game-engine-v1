@@ -20,6 +20,7 @@ import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
 import { buildTrackMeshes } from "./testTrack.js";
+import { createBuilderTutorial } from "./builderTutorial.js";
 import { OBSTACLES, HOLE, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
@@ -386,6 +387,7 @@ function renderDock() {
   for (const c of CATS) {
     const b = document.createElement("button");
     b.className = "tab" + (c.id === activeCat ? " on" : "");
+    b.dataset.cat = c.id; // (the tutorial points at it)
     b.innerHTML = `${c.label}<span class="n">${c.tiles.length}</span>`;
     b.onclick = () => { activeCat = c.id; renderDock(); };
     tabs.appendChild(b);
@@ -398,6 +400,7 @@ function renderDock() {
   for (const base of CATS.find((c) => c.id === activeCat).tiles) {
     const b = document.createElement("button");
     b.className = "card cut" + (tileBase === base ? " on" : "");
+    b.dataset.base = base;
     b.appendChild(pic(tileId(base)));
     const nm = document.createElement("span");
     nm.className = "nm";
@@ -462,7 +465,8 @@ function rebuild() {
       built.set(pc.uid, { exit: M.clone(), group: g, M });
       continue;
     }
-    const M = pc.parent != null && built.has(pc.parent) ? built.get(pc.parent).exit.clone() : new THREE.Matrix4().fromArray(pc.M);
+    // (`off`: laid OFF-CENTRE across a wider end — a road leaving a platform from its side half)
+    const M = pc.parent != null && built.has(pc.parent) ? built.get(pc.parent).exit.clone().multiply(new THREE.Matrix4().makeTranslation(pc.off ?? 0, 0, 0)) : new THREE.Matrix4().fromArray(pc.M);
     pc.M = M.toArray();
     ensureTile(pc.id); // generated pieces (fitted landings) are rebuilt from their id
     const g = meshesFor(pc.id, pcOE(pc));
@@ -1396,9 +1400,18 @@ function computeSnap() {
     const ehw = et.taper ? et.taper.to : SECTIONS[et.section ?? "road"].hw;
     const a = toScreen(new THREE.Vector3(-ehw, 0, 0).applyMatrix4(e.m)), c = toScreen(new THREE.Vector3(ehw, 0, 0).applyMatrix4(e.m));
     if (!a || !c) continue;
-    const ab = { x: c.x - a.x, y: c.y - a.y }, t = THREE.MathUtils.clamp(((mouse.x - a.x) * ab.x + (mouse.y - a.y) * ab.y) / Math.max(1e-6, ab.x * ab.x + ab.y * ab.y), 0, 1);
-    const d = Math.hypot(a.x + ab.x * t - mouse.x, a.y + ab.y * t - mouse.y);
-    if (d < 60 && (!best || d < best.d)) best = { type: "end", m: e.m.clone(), parent: e.uid, d, end: e };
+    const ab = { x: c.x - a.x, y: c.y - a.y }, tA = THREE.MathUtils.clamp(((mouse.x - a.x) * ab.x + (mouse.y - a.y) * ab.y) / Math.max(1e-6, ab.x * ab.x + ab.y * ab.y), 0, 1);
+    const d = Math.hypot(a.x + ab.x * tA - mouse.x, a.y + ab.y * tA - mouse.y);
+    if (d < 60 && (!best || d < best.d)) {
+      best = { type: "end", m: e.m.clone(), parent: e.uid, d, end: e };
+      // OFF-CENTRE ON A WIDER END (user, 2026-10-22, Apex Rush shot 4: a quarter pipe off to one side of a
+      // platform): the piece goes where you point along the end, in 2 m steps, its edge inside the end's
+      const room = ehw - SECTIONS[t?.section ?? "road"].hw;
+      if (t && tileBase !== STAMP && room >= 2) {
+        const off = THREE.MathUtils.clamp(Math.round((-ehw + 2 * ehw * tA) / 2) * 2, -Math.floor(room), Math.floor(room));
+        if (off) { best.off = off; best.m.multiply(new THREE.Matrix4().makeTranslation(off, 0, 0)); best.note = `${Math.abs(off)} m ${off > 0 ? "right" : "left"} of the end's middle`; }
+      }
+    }
   }
   if (best) {
     if (tileBase === FITTED_BOWL) {
@@ -1678,7 +1691,7 @@ function place() {
     const keep = ne === true ? other : ne === joined ? false : ne;
     delete nb.rail;
     Object.assign(nb, railFields(keep));
-  } else track.pieces.push({ uid, id, ...railFields(edges), M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null });
+  } else track.pieces.push({ uid, id, ...railFields(edges), M: snap.m.toArray(), parent: snap.type === "end" ? snap.parent : null, flightFrom: snap.type === "arc" ? snap.from : null, ...(snap.type === "end" && snap.off ? { off: snap.off } : {}) });
   const ri = recent.findIndex((r) => r.id === id);
   if (ri >= 0) recent.splice(ri, 1);
   recent.unshift({ base: tileBase, h: hand, id });
@@ -2574,6 +2587,25 @@ try { timerOn = localStorage.getItem("thunderline.builder.timer") === "1"; } cat
 function showTimer() { $("b-timer").textContent = `Timer: ${timerOn ? "on" : "off"}`; $("b-timer").classList.toggle("on", timerOn); }
 $("b-timer").onclick = () => { timerOn = !timerOn; try { localStorage.setItem("thunderline.builder.timer", timerOn ? "1" : "0"); } catch {} showTimer(); };
 showTimer();
+// THE TUTORIAL (builderTutorial.js): on a NEW track (yours stays as it is); offered by itself the first time
+// the builder opens on an empty track
+const tutorial = createBuilderTutorial({
+  get track() { return track; }, get arcs() { return arcs; }, get driving() { return driving; }, get sel() { return sel; },
+  camera, tiles: TILES,
+}, { onEnd: () => { try { localStorage.setItem("thunderline.builder.tutorialSeen", "1"); } catch {} } });
+$("b-tut").onclick = () => {
+  if (!track.pieces.length && !(track.props ?? []).length) { tutorial.start(); return; }
+  save();
+  location.href = `${PAGES.builder}?track=${library.create().id}&tutorial=1`;
+};
+{
+  let seen = false;
+  try { seen = localStorage.getItem("thunderline.builder.tutorialSeen") === "1"; } catch {}
+  if (params.get("tutorial") === "1" || (!seen && !track.pieces.length)) {
+    try { localStorage.setItem("thunderline.builder.tutorialSeen", "1"); } catch {}
+    setTimeout(() => tutorial.start(), 600);
+  }
+}
 // THE CAMERA for people who don't use 3D software (editorNav.js)
 const nav = createEditorNav({
   camera, controls, dom: renderer.domElement, frameAll, floorY: FLOOR_Y, enabled: () => !driving,
@@ -2659,6 +2691,7 @@ window.__b3 = {
   startEdit, get editMsg() { return editMsg; }, gizmo, gizmoProxy, setGizmoMode, movableKind,
   refitLandings, get problems2() { return problems; },
   selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); },
+  get tutorial() { return tutorial; },
   selectMany(uids) { sel = uids.at(-1); selSet = new Set(uids); refreshSelection(); renderStatus(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
   get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
