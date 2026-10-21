@@ -78,15 +78,78 @@ function sweeperParts() {
 const SWEEP_POST = new THREE.CylinderGeometry(POST_R, POST_R, POST_H, 10).translate(0, POST_H / 2, 0);
 const SWEEP_ARM = box(ARM + 0.4, ARM_T, ARM_T, 0, ARM_Y, 0);
 
+// ---------------------------------------------------------------- WALLS WITH A HOLE
+// (user, 2026-10-21, Apex Rush shot 2: a wall across the way with one hole to get through). Solid all
+// round the hole: miss it and the car hits the wall. Two kinds, one build:
+//   - DOOR: across the road, the hole at road level (8 × 5.5 m: half the road — aim for it). The wall is
+//     CENTRED on the road (origin on its surface, its middle) and as wide as the road + 5 m each side; the
+//     DOOR slides across it (prop `dx`, m right; `hw` the road's half width). A whole wall slid sideways
+//     overhung one side by 9 m — "not centred, looks bad" (user, 2026-10-21).
+//   - HOLE: standing in the air on a jump's flight (the builder lays it on the full-speed arc, upright,
+//     facing the flight). 10 × 8 m, its origin the hole's centre: take off fast and straight.
+const WALL_T = 1.2; // thick
+/** The wall as boxes round a hole: [x0, x1, y0, y1] wall, [hx0, hx1, hy0, hy1] hole (the hole may touch the bottom). */
+function wallBoxes([x0, x1, y0, y1], [hx0, hx1, hy0, hy1]) {
+  const b = (a0, a1, b0, b1) => (a1 - a0 > 1e-3 && b1 - b0 > 1e-3 ? [box(a1 - a0, b1 - b0, WALL_T, (a0 + a1) / 2, (b0 + b1) / 2, 0)] : []);
+  return [...b(x0, hx0, y0, y1), ...b(hx1, x1, y0, y1), ...b(hx0, hx1, hy1, y1), ...b(hx0, hx1, y0, hy0)];
+}
+function wallParts(boxes, [hx0, hx1, hy0, hy1], { sill = true } = {}) {
+  const m = mats();
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(mergeGeometries(boxes), m.body));
+  // a glowing frame round the hole, on both faces (reads from far, and in the dark)
+  const f = 0.35, z = WALL_T / 2 + 0.03, frame = [];
+  for (const s of [1, -1]) {
+    frame.push(box(hx1 - hx0 + 2 * f, f, 0.06, (hx0 + hx1) / 2, hy1 + f / 2, s * z));
+    if (sill) frame.push(box(hx1 - hx0 + 2 * f, f, 0.06, (hx0 + hx1) / 2, hy0 - f / 2, s * z));
+    frame.push(box(f, hy1 - hy0, 0.06, hx0 - f / 2, (hy0 + hy1) / 2, s * z), box(f, hy1 - hy0, 0.06, hx1 + f / 2, (hy0 + hy1) / 2, s * z));
+  }
+  g.add(new THREE.Mesh(mergeGeometries(frame), m.bolt));
+  // orange chevrons over the hole on the face the car comes at (+Z), pointing down at it
+  const chev = [];
+  for (let i = -2; i <= 2; i++) {
+    const c = new THREE.Shape();
+    c.moveTo(-0.6, 0.6); c.lineTo(0, -0.1); c.lineTo(0.6, 0.6); c.lineTo(0.6, 0.1); c.lineTo(0, -0.65); c.lineTo(-0.6, 0.1); c.closePath();
+    chev.push(new THREE.ShapeGeometry(c).translate((hx0 + hx1) / 2 + i * 1.6, hy1 + 1.6, z + 0.01));
+  }
+  g.add(new THREE.Mesh(mergeGeometries(chev), m.signal));
+  return g;
+}
+export const DOOR = { w: 26, h: 12, hole: [-4, 4, 0, 5.5] };
+export const HOLE = { w: 30, h: 26, hole: [-5, 5, -4, 4] };
+const DOOR_BOXES = wallBoxes([-DOOR.w / 2, DOOR.w / 2, 0, DOOR.h], DOOR.hole);
+const doorShapes = new Map();
+/** One door wall's shape (cached per road width and door offset). */
+function doorShape({ hw = 8, dx = 0 } = {}) {
+  const key = `${hw}|${dx}`;
+  if (!doorShapes.has(key)) {
+    const w = 2 * hw + 10, hole = [dx + DOOR.hole[0], dx + DOOR.hole[1], DOOR.hole[2], DOOR.hole[3]];
+    const boxes = wallBoxes([-w / 2, w / 2, 0, DOOR.h], hole);
+    doorShapes.set(key, { solids: boxes, ghost: mergeGeometries(boxes), parts: () => wallParts(boxes, hole, { sill: false }) });
+  }
+  return doorShapes.get(key);
+}
+const HOLE_BOXES = wallBoxes([-HOLE.w / 2, HOLE.w / 2, -HOLE.h / 2, HOLE.h / 2], HOLE.hole);
+// (the door's hole sits on the road: no frame under it)
+const doorParts = () => wallParts(DOOR_BOXES, DOOR.hole, { sill: false });
+const holeParts = () => wallParts(HOLE_BOXES, HOLE.hole);
+
 export const OBSTACLES = {
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
+  ob_wall_door: { label: "Wall · door", parts: doorParts, solids: DOOR_BOXES, decks: [], ghost: mergeGeometries(DOOR_BOXES), shape: doorShape, hint: "A wall across the road: drive through its door" },
+  // `air`: placed on a jump's flight, not on the road (the builder's arc snap)
+  ob_wall_hole: { label: "Wall · hole", parts: holeParts, solids: HOLE_BOXES, decks: [], ghost: mergeGeometries(HOLE_BOXES), air: true, hint: "A wall in the air: fly through its hole" },
 };
 export const isObstacle = (id) => !!OBSTACLES[id];
+/** A placed obstacle's definition: its kind's, with the parts / solids / ghost of ITS shape (a door's offset). */
+export const shapeOf = (kind, p = {}) => (OBSTACLES[kind].shape ? { ...OBSTACLES[kind], ...OBSTACLES[kind].shape(p) } : OBSTACLES[kind]);
 // what stands IN THE WAY, in the obstacle's frame (half across x, half along z; m): the autopilot's line
 // goes round it (avoidObstacles)
 OBSTACLES.ob_block.footprint = { hx: BW / 2, hz: BD / 2 };
 OBSTACLES.ob_sweeper.footprint = { hx: POST_R + 0.3, hz: POST_R + 0.3 };
+// a DOOR is the other way round: the line goes THROUGH it (its centre), not round it
+OBSTACLES.ob_wall_door.aimAt = { hz: WALL_T / 2 };
 
 /**
  * THE AUTOPILOT'S LINE ROUND THE OBSTACLES (builder test lap, drive page autopilot): a copy of the ride
@@ -99,11 +162,13 @@ export function avoidObstacles(ride, props = [], hw = 8) {
   const C = new THREE.Vector3(), ax = new THREE.Vector3(), az = new THREE.Vector3(), R = new THREE.Vector3(), d = new THREE.Vector3();
   const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
   for (const p of props) {
-    const f = OBSTACLES[p.kind]?.footprint;
+    const f = OBSTACLES[p.kind]?.footprint ?? OBSTACLES[p.kind]?.aimAt;
     if (!f) continue;
+    const aim = !OBSTACLES[p.kind].footprint;
     const M = new THREE.Matrix4().fromArray(p.M);
     C.setFromMatrixPosition(M);
     ax.set(1, 0, 0).transformDirection(M);
+    if (aim && p.dx) C.addScaledVector(ax, p.dx); // the door's middle
     az.set(0, 0, 1).transformDirection(M);
     ride.forEach((r, i) => {
       if (r.tube || r.air) return;
@@ -111,12 +176,13 @@ export function avoidObstacles(ride, props = [], hw = 8) {
       d.subVectors(C, r.P);
       if (Math.abs(d.dot(r.U ?? UP)) > 4) return; // another level (a crossover)
       const lat = d.dot(R), lon = d.dot(r.T);
-      const across = Math.abs(f.hx * ax.dot(R)) + Math.abs(f.hz * az.dot(R));
-      const along = Math.abs(f.hx * ax.dot(r.T)) + Math.abs(f.hz * az.dot(r.T));
+      const across = Math.abs((f.hx ?? 0) * ax.dot(R)) + Math.abs(f.hz * az.dot(R));
+      const along = Math.abs((f.hx ?? 0) * ax.dot(r.T)) + Math.abs(f.hz * az.dot(r.T));
       if (Math.abs(lat) > hw + across) return; // beside the road
       // weight: 0 → 1 over the 35 m before it, 1 alongside, back to 0 over 15 m after
       const w = lon > along ? smooth(1 - (lon - along) / 35) : lon < -along ? smooth(1 - (-along - lon) / 15) : 1;
       if (w <= 0) return;
+      if (aim) { if (Math.abs(lat * w) > Math.abs(shift[i])) shift[i] = lat * w; return; }
       const room = hw - 1.6;
       let target = lat > 0 ? lat - across - 2 : lat + across + 2; // pass on the side away from its centre
       if (Math.abs(target) > room) target = lat > 0 ? lat + across + 2 : lat - across - 2; // no room: the other side
@@ -134,8 +200,8 @@ export function avoidObstacles(ride, props = [], hw = 8) {
 const UP = new THREE.Vector3(0, 1, 0);
 
 /** One obstacle's look (a fresh group; geometry and materials shared). */
-export function obstacleLook(kind) {
-  const g = OBSTACLES[kind].parts();
+export function obstacleLook(kind, p) {
+  const g = shapeOf(kind, p).parts();
   g.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   return g;
 }
@@ -152,14 +218,14 @@ export function buildObstacleSet(props = [], { look = true } = {}) {
   const decks = [], solids = [], movers = [];
   const up = new THREE.Vector3();
   for (const p of props) {
-    const def = OBSTACLES[p.kind];
-    if (!def) continue;
+    if (!OBSTACLES[p.kind]) continue;
+    const def = shapeOf(p.kind, p);
     const M = new THREE.Matrix4().fromArray(p.M);
     for (const g of def.solids) solids.push({ geometry: g, M });
     for (const g of def.decks) decks.push({ geometry: g, M });
     let vis = null, armVis = null;
     if (look) {
-      vis = obstacleLook(p.kind);
+      vis = obstacleLook(p.kind, p);
       vis.matrixAutoUpdate = false;
       vis.matrix.copy(M);
       vis.userData.uid = p.uid;

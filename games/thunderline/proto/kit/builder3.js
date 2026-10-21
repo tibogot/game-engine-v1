@@ -20,7 +20,7 @@ import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
 import { buildTrackMeshes } from "./testTrack.js";
-import { OBSTACLES, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles } from "./obstacles.js";
+import { OBSTACLES, HOLE, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -57,7 +57,7 @@ const CATS = [
   { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
   { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "wallride_90"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_block", "ob_sweeper"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -1033,8 +1033,16 @@ function obstacleSnap() {
     for (const r of b.rings) { if (r.air) continue; const d = r.p.distanceToSquared(local); if (d < bd) { bd = d; best = r; } }
     if (!best) continue;
     const f = deckFrame(best, hw);
-    const lat = THREE.MathUtils.clamp(Math.round(local.clone().sub(f.P).dot(f.R) / 2) * 2, -(hw - 2), hw - 2);
+    const raw = local.clone().sub(f.P).dot(f.R);
     const along = local.clone().sub(f.P).dot(best.T);
+    // a WALL · DOOR stays square across the road, its middle on the road's: only the door slides (1 m
+    // steps, inside the kerbs)
+    if (OBSTACLES[tileBase]?.shape) {
+      const dx = THREE.MathUtils.clamp(Math.round(raw), -(hw - 5), hw - 5);
+      const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(f.P.clone().addScaledVector(best.T, along));
+      return { type: "road", m: M.clone().multiply(m), dx, hw, note: `Door ${dx ? `${Math.abs(dx)} m ${dx > 0 ? "right" : "left"}` : "in the middle"}` };
+    }
+    const lat = THREE.MathUtils.clamp(Math.round(raw / 2) * 2, -(hw - 2), hw - 2);
     const P = f.P.clone().addScaledVector(f.R, lat).addScaledVector(best.T, along);
     const m = new THREE.Matrix4().makeBasis(f.R, f.U, best.T.clone().negate()).setPosition(P);
     m.multiply(new THREE.Matrix4().makeRotationY(rot.yaw * DEG));
@@ -1058,6 +1066,44 @@ function ringSnap() {
   const R = new THREE.Vector3().crossVectors(T, UP).normalize();
   const U = new THREE.Vector3().crossVectors(R, T);
   return { type: "arc", m: socketMatrix({ p: best.a.fast.pts[best.k], T, U, R }), from: best.a.from, note: "Air ring: on the full-speed line — take off fast and straight to go through" };
+}
+/**
+ * THE WALL WITH A HOLE IN THE AIR (Apex Rush plan step 5): upright, facing the flight (its horizontal
+ * heading), the hole's centre on the FULL-SPEED arc where you point. The note says which take-off speeds
+ * fly through (each flown, 1% steps): the car's half size inside the hole's edges.
+ */
+function wallHoleSnap() {
+  let best = null;
+  for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
+    const sp = toScreen(a.fast.pts[k]);
+    if (!sp) continue;
+    const d = Math.hypot(sp.x - mouse.x, sp.y - mouse.y);
+    if (d < 40 && (!best || d < best.d)) best = { a, k, d };
+  }
+  if (!best) return null;
+  const { a, k } = best;
+  const h = new THREE.Vector3(a.fast.tan[k].x, 0, a.fast.tan[k].z).normalize();
+  const R = new THREE.Vector3().crossVectors(h, UP).normalize();
+  const P = a.fast.pts[k];
+  const m = socketMatrix({ p: P, T: h, U: UP.clone(), R });
+  const [hx0, hx1, hy0, hy1] = HOLE.hole;
+  const through = (sc) => {
+    const { pts } = flight(a.lip.m, a.lip.v * sc, a.lip.launch, sc);
+    for (let i = 1; i < pts.length; i++) {
+      const d0 = pts[i - 1].clone().sub(P).dot(h), d1 = pts[i].clone().sub(P).dot(h);
+      if (d0 < 0 && d1 >= 0) {
+        const q = pts[i - 1].clone().lerp(pts[i], -d0 / (d1 - d0)).sub(P);
+        const x = q.dot(R), y = q.y;
+        return x > hx0 + 1.2 && x < hx1 - 1.2 && y > hy0 + 0.8 && y < hy1 - 0.8;
+      }
+    }
+    return false;
+  };
+  let sMin = 1;
+  for (let sc = 0.99; sc >= 0.8 - 1e-9 && through(sc); sc -= 0.01) sMin = sc;
+  const kmh = (sc) => Math.round(a.lip.v * sc * 3.6);
+  const guess = !prediction.lipSpeed.has(a.from);
+  return { type: "arc", m, from: a.from, note: guess ? "Wall · hole: on the full-speed line (the take-off isn't measured yet)" : `Wall · hole: flies through from ${kmh(sMin)} to ${kmh(1)} km/h — slower hits the wall under the hole` };
 }
 /**
  * THE CATCH TUBE ON A JUMP. A tube in the air is a PRECISION target: the band (85–100% of the take-off
@@ -1157,6 +1203,7 @@ const reachNote = (a, sMin) => `lands from ${Math.round(a.lip.v * sMin * 3.6)} k
 const ROUGH_FALL = 22; // °: steeper than this onto flat needs the player to level the car (else rough)
 function computeSnap() {
   if (tileBase === RING) return ringSnap();
+  if (OBSTACLES[tileBase]?.air) return wallHoleSnap();
   if (isObstacle(tileBase)) return obstacleSnap();
   // a pasted SECTION snaps like its first piece
   const id = tileBase === STAMP ? stampItems()[0]?.id : tileId(tileBase);
@@ -1329,11 +1376,11 @@ function updateGhost() {
   snap = computeSnap();
   if (!snap) { if (ghost) ghost.visible = false; renderStatus(); return; }
   const id = tileId(tileBase);
-  const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
+  const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.dx}|${snap.hw}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
-    ghost = id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(OBSTACLES[id].ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
+    ghost = id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(shapeOf(id, snap).ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -1408,7 +1455,7 @@ function place() {
     return;
   }
   if (isObstacle(id)) {
-    (track.props ??= []).push({ uid, kind: id, M: snap.m.toArray() });
+    (track.props ??= []).push({ uid, kind: id, M: snap.m.toArray(), ...(snap.from != null ? { from: snap.from } : {}), ...(snap.dx != null ? { dx: snap.dx, hw: snap.hw } : {}) });
     rebuild();
     return;
   }

@@ -53,7 +53,27 @@ this is just the list. Newest decisions at the top of each section. Last updated
          km/h land, 147 / 139 / 130 fall (the builder said 151). RISK (the 2026-10-19 problem): a rough
          landing keeps 85% of the speed, so a rough landing just before a jump now means falling short —
          intended, but watch the White tier.
-      5. A WALL WITH A HOLE to jump / drive through (shot 2).
+      5. [x] A WALL WITH A HOLE (shot 2), two obstacles (obstacles.js, Obstacles tab), solid all round the
+         hole (the test lap and the game collide with the same boxes): WALL · DOOR across the road
+         (26 × 12 m, an 8 × 5.5 m door at road level; snaps on the road like a block, 2 m steps across;
+         the autopilot's line goes THROUGH it — avoidObstacles `aimAt`); WALL · HOLE in the air (30 × 26
+         m, hole 10 × 8 m) laid upright on a jump's full-speed arc, facing the flight; its note says
+         which take-off speeds fly through ("from 142 to 159 km/h"). Glowing frame round the hole,
+         orange chevrons over it. Tests: door centred / 4 m right: test laps 6.97 / 7.05 s; hole at a
+         kicker's apex + fitted landing: test lap 12.63 s, perfect; drive page: straight at the
+         off-centre door hits the wall (132 → 29 km/h); take-off 123 km/h hits under the hole (→ 17
+         km/h, falls). NOT yet: the hole wall is not carried when its jump moves (a prop, like the
+         others — `from` is stored for that), no Re-fit for it; walls that move / close (later).
+         Also fixed: leaving a drive within 1.4 s of a landing left its banner up on the next drive.
+         DOOR CENTRED (user, 2026-10-21: "the wall is not centred and it looks bad"): the wall stays square
+         across the road (road width + 5 m each side), only the DOOR slides (prop dx, 1 m steps, ±(hw−5));
+         obstacles.js shapeOf(kind, prop). Test: door 3 m right, test lap 6.98 s.
+- [x] **PERFECT needs ALL FOUR WHEELS** (user, 2026-10-21: "only two wheels front touch the road, you
+      almost fell and it still said perfect"): landing.js waits up to 0.25 s after the first touch for the
+      other wheels; if they don't come down (the rear hanging off a landing's start edge) or the car
+      bounces off, the grade is "ok" at best (no boost), the banner says "not on all four wheels". Drive
+      page, fitted landing (lands from 151): take-off 149 km/h → "ok, partial" (err 0°); 150 → perfect.
+      NOTE: a rules change — old ghosts replayed through carRules may drift where they landed partially.
       6. Later: vertical launch pipes and ceilings to drive upside down (shot 3), checkpoint arches
          (shot 7), floating-island scenery (shots 1, 3).
 - [x] **Land on ANY piece** (user, 2026-10-21: "this game is about jumps … large platforms to land"): a

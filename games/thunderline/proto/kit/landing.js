@@ -9,16 +9,36 @@ export const LANDING = {
   rough: 30, // ° above this = ROUGH
   boostTime: 1.0, // s of the boost-pad push for a PERFECT landing
   roughKeep: 0.85, // a ROUGH landing keeps this much of its speed
+  // ALL FOUR WHEELS (user, 2026-10-21: "only two wheels front touch the road, you almost fell and it
+  // still said perfect"): after the first touch the other wheels have this long to come down; if they
+  // don't (the rear hanging off a landing's start edge, a bounce back into the air) it is not PERFECT
+  settle: 0.25, // s
 };
 
-/** Watches one car; call tick() after every physics tick. Returns a landing event or null. */
+/** Watches one car; call tick() after every physics tick. Returns a landing event or null — the
+ * event comes when all the wheels are down, or LANDING.settle s after the first touch (`partial`). */
 export function createLandingJudge(car) {
   let air = 0;
+  let pending = null; // { err, air, t }: touched down, waiting for the other wheels
   const n = { x: 0, y: 0, z: 0 };
+  const wheels = () => Math.min(4, car.tires.length);
+  function finish(p, partial) {
+    pending = null;
+    let grade = p.err <= LANDING.perfect ? "perfect" : p.err > LANDING.rough ? "rough" : "ok";
+    if (partial && grade === "perfect") grade = "ok";
+    if (grade === "rough") car.body.vel.multiplyScalar(LANDING.roughKeep);
+    return { grade, err: p.err, air: p.air, partial, boost: grade === "perfect" ? LANDING.boostTime : 0 };
+  }
   return {
     get air() { return air; },
-    reset() { air = 0; },
+    reset() { air = 0; pending = null; },
     tick(dt) {
+      if (pending) {
+        if (car.groundedCount === 0) { const ev = finish(pending, true); air = dt; return ev; } // bounced off
+        pending.t += dt;
+        if (car.groundedCount >= wheels()) return finish(pending, false);
+        return pending.t >= LANDING.settle ? finish(pending, true) : null;
+      }
       if (car.groundedCount === 0) { air += dt; return null; }
       const flew = air;
       air = 0;
@@ -30,9 +50,8 @@ export function createLandingJudge(car) {
       const ux = 2 * (q.x * q.y - q.w * q.z), uy = 1 - 2 * (q.x * q.x + q.z * q.z), uz = 2 * (q.y * q.z + q.w * q.x);
       const len = Math.hypot(n.x, n.y, n.z) || 1;
       const err = (Math.acos(Math.max(-1, Math.min(1, (ux * n.x + uy * n.y + uz * n.z) / len))) * 180) / Math.PI;
-      const grade = err <= LANDING.perfect ? "perfect" : err > LANDING.rough ? "rough" : "ok";
-      if (grade === "rough") car.body.vel.multiplyScalar(LANDING.roughKeep);
-      return { grade, err, air: flew, boost: grade === "perfect" ? LANDING.boostTime : 0 };
+      pending = { err, air: flew, t: 0 };
+      return car.groundedCount >= wheels() ? finish(pending, false) : null;
     },
   };
 }

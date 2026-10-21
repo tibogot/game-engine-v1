@@ -353,10 +353,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     splitTimer = setTimeout(() => el.classList.remove("show"), 1800);
   }
   function showLanding(ev) {
-    S.landings.push({ grade: ev.grade, err: Math.round(ev.err), air: +ev.air.toFixed(1), t: +S.runTime.toFixed(2) });
+    S.landings.push({ grade: ev.grade, err: Math.round(ev.err), air: +ev.air.toFixed(1), t: +S.runTime.toFixed(2), ...(ev.partial ? { partial: true } : {}) });
     const el = $("land");
     const label = { perfect: "Perfect landing", ok: "Landed", rough: "Rough landing" }[ev.grade];
-    const tail = ev.grade === "perfect" ? "boost" : ev.grade === "rough" ? "−15% speed" : "land flat for a boost";
+    const tail = ev.grade === "perfect" ? "boost" : ev.grade === "rough" ? "−15% speed" : ev.partial ? "not on all four wheels: no boost" : "land flat for a boost";
     el.innerHTML = `${label}<small>${Math.round(ev.err)}° · ${ev.air.toFixed(1)} s air · ${tail}</small>`;
     el.className = `panel show ${ev.grade}`;
     clearTimeout(landTimer);
@@ -547,6 +547,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     ghostCar.setDynamicMovers([]);
     clearTimeout(splitTimer);
     clearTimeout(landTimer);
+    // (their timers are gone: hide them now, or a banner from the last second came back on the next drive)
+    $("split").classList.remove("show");
+    $("land").classList.remove("show");
     $("finish").classList.remove("show");
     hud.classList.remove("on");
     vehicle.setEnabled(true);
