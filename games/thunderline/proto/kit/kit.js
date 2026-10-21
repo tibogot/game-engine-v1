@@ -453,6 +453,9 @@ for (const [id, a] of [["landing_20", 20], ["banked_landing_20", 20], ["landing_
  * carries its size, `fitted_landing_<angle>_<D>`: a down-slope at <angle>° for D m (the catch zone:
  * from where the slowest arc lands to where the fastest does, plus a margin), then a curve back to
  * level. Any page rebuilds the exact same piece from the id — a saved track needs nothing else.
+ * TILTED (user, 2026-10-21, Apex Rush: land with the air roll), `fitted_landing_<angle>_<D>_t<tilt>`:
+ * the catch zone leans <tilt>° (signed, + = the right side low) and the curve rolls it back to flat, so
+ * the exit is level and flat — the player rolls the car in the air to match (landing.js grades it).
  */
 /**
  * Other modules can add tiles (oldTiles.js brings the old kit's bowl and flip ramp). A resolver
@@ -539,14 +542,16 @@ export function ensureTile(id) {
     };
     return TILES[id];
   }
-  const m = /^fitted_landing_(\d+)_(\d+)$/.exec(id);
+  const m = /^fitted_landing_(\d+)_(\d+)(?:_t(-?\d+))?$/.exec(id);
   if (!m) return undefined;
-  const angle = Number(m[1]), D = Number(m[2]);
+  const angle = Number(m[1]), D = Number(m[2]), tilt = Number(m[3] ?? 0) * DEG;
+  const lean = tilt ? [{ leanIn: tilt, leanOut: tilt }, { leanIn: tilt, leanOut: 0 }] : [{}, {}];
   TILES[id] = {
     id,
-    label: `Fitted landing ${angle}° · ${D} m`,
+    label: `${tilt ? "Tilted" : "Fitted"} landing ${angle}° · ${D} m${tilt ? ` · ${Math.abs(m[3])}° ${tilt > 0 ? "right" : "left"} low` : ""}`,
     landAngle: angle,
-    segs: [{ L: D }, { L: Math.max(44, Math.round(angle * 2.2)), pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1)) }],
+    ...(tilt ? { tilt } : {}),
+    segs: [{ L: D, ...lean[0] }, { L: Math.max(44, Math.round(angle * 2.2)), pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1)), ...lean[1] }],
     marks: [{ kind: "landing", from: 0, to: D }],
   };
   return TILES[id];

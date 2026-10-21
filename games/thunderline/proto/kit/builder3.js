@@ -82,6 +82,8 @@ let arcSpeed = 57; // m/s at a lip (≈ 0.91 × top 63, P3); [ ] change it
 // and loses the perfect-landing boost, and arrived at a kicker at 0.74 × and fell short (user, 2026-10-19:
 // "I cannot land on this track at all"). 0.75 made every landing 200-300 m long (100 m of height each);
 // 0.85 is the middle: one crooked landing before a jump still lands it.
+// Since PRECISION LANDINGS (2026-10-21) landings no longer catch this whole band — they start at NEAR ×
+// (0.95) and slower falls short; the orange arc stays as a picture of what a slow car does.
 const BAND_SLOW = 0.85;
 let undo = [], redo = [];
 const recent = [];
@@ -109,6 +111,9 @@ function restore(from, to) {
 const FITTED = "fitted_landing";
 const FITTED_ANGLE = 20;
 let fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_32`).id;
+// TILTED LANDINGS (user, 2026-10-21, Apex Rush: the air roll must matter): with the Fitted landing in
+// hand, ← / → lean its catch zone (5° steps, ±45; + = the right side low); it rolls back to flat by its exit
+let landTilt = 0;
 // "catch_tube": the same idea as a TUBE whose wide portal is laid on the jump's arc (kit.js ensureTile):
 // the car flies into it and comes out level in a pipe (user, 2026-10-21: "jump to enter inside a tube in air")
 const CATCH = "catch_tube";
@@ -708,7 +713,8 @@ async function runPrediction() {
       // stored in the LIP's frame (2026-10-21): a world position went stale when the lip moved, or when
       // a new track reused its uid — a catch tube was aimed 32 m to the side of the real flight
       const inv = exits.get(ride[idx].uid).clone().invert();
-      launch.set(ride[idx].uid, { id: track.pieces.find((q) => q.uid === ride[idx].uid)?.id, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(inv), V: car.body.vel.clone().applyMatrix4(new THREE.Matrix4().extractRotation(inv)) });
+      const rInv = new THREE.Matrix4().extractRotation(inv);
+      launch.set(ride[idx].uid, { id: track.pieces.find((q) => q.uid === ride[idx].uid)?.id, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(inv), V: car.body.vel.clone().applyMatrix4(rInv), U: carUp.clone().applyMatrix4(rInv), F: new THREE.Vector3(0, 0, 1).applyQuaternion(car.body.quat).applyMatrix4(rInv) });
       flying = ride[idx].uid;
       airT = 0;
     }
@@ -786,6 +792,30 @@ function flight(m, speed, launch = null, scale = 1) {
   }
   return { pts, tan };
 }
+/** The deck's up at a socket `m` leaned by `lean` (rad; kit.js deckFrame: + tips the up to the right). */
+function surfaceUp(m, lean) {
+  const U = new THREE.Vector3(0, 1, 0).transformDirection(m), R = new THREE.Vector3(1, 0, 0).transformDirection(m);
+  return U.multiplyScalar(Math.cos(lean)).addScaledVector(R, Math.sin(lean)).normalize();
+}
+/** A frame's roll round its OWN forward `f` (rad, + = the up tipped right = the right side low): pitch
+ * drops out — the player pitches onto the slope anyway; measured across the flight instead, a car
+ * leaving a 20° lip rolled 30° read 45° onto a 35° landing. */
+function rollRound(f, u) {
+  const level = UP.clone().addScaledVector(f, -UP.dot(f)).normalize();
+  const uu = u.clone().addScaledVector(f, -u.dot(f)).normalize();
+  return Math.atan2(uu.dot(new THREE.Vector3().crossVectors(f, level)), uu.dot(level));
+}
+/** THE AIR ROLL a landing asks for: from the car's roll at take-off (it keeps it in the air unless the
+ * player rolls) to the landing surface's, each round its own forward. Signed (°): + = roll right. */
+function rollToLand(a, m, lean) {
+  const r = rollRound(new THREE.Vector3(0, 0, -1).transformDirection(m), surfaceUp(m, lean)) - rollRound(a.fwd, a.up);
+  return THREE.MathUtils.euclideanModulo(r + Math.PI, 2 * Math.PI) / DEG - 180;
+}
+/** The builder's line about it, or "" when the car lands as it flies (the PERFECT window, landing.js). */
+function rollNote(a, m, lean) {
+  const r = rollToLand(a, m, lean);
+  return Math.abs(r) <= 6 ? "" : `roll ${Math.round(Math.abs(r) / 5) * 5}° ${r > 0 ? "right" : "left"} in the air to land`;
+}
 function refreshArcs() {
   for (const c of arcGroup.children.slice()) { arcGroup.remove(c); c.geometry.dispose(); }
   arcs = [];
@@ -803,10 +833,13 @@ function refreshArcs() {
     // car go in another direction than its exit socket says (the socket's arc fell 35 m short)
     // the measured take-off, back into the world from this lip's CURRENT frame (if it is still that piece)
     const L = prediction.launch?.get(p.uid);
-    const launch = L && L.id === p.id ? { P: L.P.clone().applyMatrix4(m), V: L.V.clone().applyMatrix4(new THREE.Matrix4().extractRotation(m)) } : null;
+    const rm = new THREE.Matrix4().extractRotation(m);
+    const launch = L && L.id === p.id ? { P: L.P.clone().applyMatrix4(m), V: L.V.clone().applyMatrix4(rm), U: L.U?.clone().applyMatrix4(rm), F: L.F?.clone().applyMatrix4(rm) } : null;
     const v = prediction.lipSpeed.get(p.uid) ?? arcSpeed;
-    const slow = flight(m, v * BAND_SLOW, launch, BAND_SLOW), fast = flight(m, v, launch, 1);
-    arcs.push({ ...slow, fast, from: p.uid, landing, lip: { m, launch, v } }); // lip: to fly any speed in the band (catch tube)
+    const slow = flight(m, v * BAND_SLOW, launch, BAND_SLOW), fast = flight(m, v, launch, 1), near = flight(m, v * NEAR, launch, NEAR);
+    // the car's UP as it leaves (the roll kicker throws it tilted): measured, else the lip's leaned deck
+    const up = launch?.U ?? surfaceUp(m, leanOut(TILES[p.id])), fwd = launch?.F ?? new THREE.Vector3(0, 0, -1).transformDirection(m);
+    arcs.push({ ...slow, fast, near, from: p.uid, landing, lip: { m, launch, v }, up, fwd }); // lip: to fly any speed in the band (catch tube)
     for (const [a, color] of [[slow, 0xff9a3d], [fast, 0xffd27a]]) {
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(a.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
       arcGroup.add(line);
@@ -905,11 +938,11 @@ function runChecks() {
         for (const s of segs) {
           const d = p.clone().sub(s.P);
           const along = d.dot(s.T);
-          // (3 m of margin at the ends: a fitted landing starts exactly ON the slow arc — the point just
+          // (3 m of margin at the ends: a fitted landing starts exactly ON the near arc — the point just
           // before its start is where the arc arrives over it; 0.5 m flagged White 3's fitted landing)
           if (along < -3 || along > s.len + 3 || Math.abs(d.dot(s.R)) > Math.max(hw, 6)) continue;
           const h = d.dot(s.U);
-          if (h >= -0.5) above = true; // over it, or ON it (a fitted landing starts exactly on the slow arc)
+          if (h >= -0.5) above = true; // over it, or ON it (a fitted landing starts exactly on the near arc)
           else if (above) return true; // came down onto the deck
           else if (h < -2) return false; // under the deck: it hits the landing from below
         }
@@ -917,15 +950,15 @@ function runChecks() {
       }
       return false;
     };
-    // a CATCH TUBE is a precision target: only the full-speed flight has to get in (catchSnap)
-    const slowOk = pc.id.startsWith("catch_tube_") ? true : lands(a.pts), fastOk = lands(a.fast.pts);
-    if (!slowOk || !fastOk) problems.misses.push({ uid: pc.uid, slowOk, fastOk });
+    // every landing is a PRECISION target (2026-10-21): the full-speed flight has to come down on it;
+    // a slower car falling short is the jump's challenge, not a fault
+    if (!lands(a.fast.pts)) problems.misses.push({ uid: pc.uid });
   }
   for (const m of problems.misses) {
     const name = TILES[track.pieces.find((q) => q.uid === m.uid).id]?.label ?? "a landing";
     const fitted = track.pieces.find((q) => q.uid === m.uid).id.startsWith("fitted_landing_");
     if (track.pieces.find((q) => q.uid === m.uid).id.startsWith("catch_tube_")) { problems.messages.push(`"${name}": the full-speed car misses its mouth — Re-fit it to the jump`); continue; }
-    problems.messages.push(`"${name}": ${!m.slowOk && !m.fastOk ? "the car misses it" : !m.slowOk ? "a slower car falls short of it" : "a fast car flies past it"} — ${fitted ? "Re-fit it to the jump" : "move it on the arc or use a Fitted landing"}`);
+    problems.messages.push(`"${name}": the full-speed car misses it — ${fitted ? "Re-fit it to the jump" : "move it on the yellow arc or use a Fitted landing"}`);
   }
   // tint overlapping pieces: a red box around each
   for (const c of overlapBoxes.splice(0)) scene.remove(c);
@@ -1084,7 +1117,43 @@ function catchSnap(a, y) {
     : `Catch tube · gets in from ${kmh(sMin)} to ${kmh(1)} km/h${sMin > 0.97 ? " (a near-perfect take-off)" : ""} · ends level in a pipe: a Tube piece next`;
   return { type: "arc", m, from: a.from, bad, note };
 }
-const LAND_LEAD = 6; // m: a level landing starts this far before the slow car touches down
+// PRECISION LANDINGS (user, 2026-10-21: "the car after a jump lands at the BEGINNING of the track in the
+// air … if not enough speed he falls"; a landing that started long before was "too easy, not cool"):
+// every landing starts where a car at NEAR × full speed comes down (a slope laid on the full-speed arc
+// itself left 0 margin: 1% slower arrived under its start) — slower than that falls short
+const NEAR = 0.95;
+const LAND_LEAD = 4; // m: a level piece starts this far before that touchdown
+/** The lowest take-off speed (× the measured one) whose flight still CLEARS the start edge of a deck
+ * starting at P0 heading T: over P0's spot (along the horizontal heading) it is no lower than P0 — then
+ * it comes down on the deck; lower, it hits the edge or passes under it and falls short. */
+function reachScale(a, P0, T) {
+  const h = new THREE.Vector3(T.x, 0, T.z).normalize();
+  let sMin = 1;
+  for (let sc = 1; sc >= 0.6 - 1e-9; sc -= 0.01) {
+    const { pts } = flight(a.lip.m, a.lip.v * sc, a.lip.launch, sc);
+    let y = -Infinity;
+    for (let i = 1; i < pts.length; i++) {
+      const d0 = pts[i - 1].clone().sub(P0).dot(h), d1 = pts[i].clone().sub(P0).dot(h);
+      if (d0 < 0 && d1 >= 0) { y = THREE.MathUtils.lerp(pts[i - 1].y, pts[i].y, -d0 / (d1 - d0)); break; }
+    }
+    if (y < P0.y - 0.5) break;
+    sMin = sc;
+  }
+  return sMin;
+}
+/** Where `arc` ({pts, tan}) comes down through height y on its falling part: { p, T, fall (°) } or null. */
+function downAt(arc, y) {
+  for (let k = 1; k < arc.pts.length; k++) {
+    if (arc.pts[k - 1].y >= y && arc.pts[k].y < y && arc.tan[k].y < 0) {
+      const f = (arc.pts[k - 1].y - y) / (arc.pts[k - 1].y - arc.pts[k].y);
+      const T = arc.tan[k - 1].clone().lerp(arc.tan[k], f).normalize();
+      return { p: arc.pts[k - 1].clone().lerp(arc.pts[k], f), T, fall: Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG };
+    }
+  }
+  return null;
+}
+/** The builder's line about it. */
+const reachNote = (a, sMin) => `lands from ${Math.round(a.lip.v * sMin * 3.6)} km/h (full speed ${Math.round(a.lip.v * 3.6)}) — slower falls short`;
 const ROUGH_FALL = 22; // °: steeper than this onto flat needs the player to level the car (else rough)
 function computeSnap() {
   if (tileBase === RING) return ringSnap();
@@ -1097,8 +1166,8 @@ function computeSnap() {
   // the open end's 60 px and the landing could only snap to the end (seen building, 2026-10-19)
   const landingInHand = !!t?.landAngle || tileBase === FITTED || tileBase === CATCH;
   if (freeHold && !landingInHand && tileBase !== STAMP) return gridSnap(t); // Alt: exactly where you point
-  const onArc = landingInHand && arcs.some((a) => a.pts.some((p, k) => {
-    if (k < 3 || a.tan[k].y > -0.02) return false;
+  const onArc = landingInHand && arcs.some((a) => a.fast.pts.some((p, k) => {
+    if (k < 3 || a.fast.tan[k].y > -0.02) return false;
     const s = toScreen(p);
     return s && Math.hypot(s.x - mouse.x, s.y - mouse.y) < 30;
   }));
@@ -1157,9 +1226,10 @@ function computeSnap() {
     }
     if (sb) return sb;
   }
-  for (const a of arcs) for (let k = 3; k < a.pts.length; k++) {
-    if (a.tan[k].y > -0.02) continue; // only the falling part
-    const s = toScreen(a.pts[k]);
+  // (on the FULL-SPEED arc, the yellow one: a landing starts where the fast car comes down)
+  for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
+    if (a.fast.tan[k].y > -0.02) continue; // only the falling part
+    const s = toScreen(a.fast.pts[k]);
     if (!s) continue;
     const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
     if (d < 30 && (!best || d < best.d)) best = { a, k, d };
@@ -1171,7 +1241,7 @@ function computeSnap() {
   // car lands past its end, and when the touchdown is steep on flat (rough: a landing slope keeps speed).
   // Tubes and halfpipes don't: the car would fall onto their roof or rim (a catch tube is its own piece).
   if (best && !t.landAngle && tileBase !== FITTED && tileBase !== CATCH && !t.tube && !t.halfpipe) {
-    const a = best.a, y0 = a.pts[best.k].y;
+    const a = best.a, y0 = a.fast.pts[best.k].y;
     // where an arc comes down through height y0 (on its falling part)
     const cross = (pts) => {
       for (let k = 1; k < pts.length; k++) {
@@ -1183,23 +1253,23 @@ function computeSnap() {
       }
       return null;
     };
-    const slow = cross(a.pts) ?? { p: a.pts[best.k].clone(), fall: Math.asin(THREE.MathUtils.clamp(-a.tan[best.k].y, -1, 1)) / DEG };
-    const fast = cross(a.fast.pts);
-    const h = new THREE.Vector3(a.tan[best.k].x, 0, a.tan[best.k].z).normalize();
-    const start = slow.p.clone().addScaledVector(h, -LAND_LEAD);
+    const fast = cross(a.fast.pts) ?? { p: a.fast.pts[best.k].clone(), fall: Math.asin(THREE.MathUtils.clamp(-a.fast.tan[best.k].y, -1, 1)) / DEG };
+    const near = cross(a.near.pts) ?? fast;
+    const h = new THREE.Vector3(a.fast.tan[best.k].x, 0, a.fast.tan[best.k].z).normalize();
+    const start = near.p.clone().addScaledVector(h, -LAND_LEAD);
     start.y = y0;
     const m = socketMatrix({ p: start, T: h, U: UP.clone(), R: new THREE.Vector3().crossVectors(h, UP).normalize() });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
-    // how far the piece reaches (start to exit, flat) vs where the fast car comes down
+    // (the full-speed car must come down on it too: a short piece under a long jump)
     const ex = new THREE.Vector3().setFromMatrixPosition(piece(id).exitLocal);
-    const reach = Math.hypot(ex.x, ex.z);
-    const fastAt = fast ? fast.p.clone().sub(start).dot(h) : Infinity;
-    const notes = [];
-    if (fastAt > reach - 4) notes.push(fast ? `the fast car lands ${Math.round(fastAt)} m on, past this ${Math.round(reach)} m piece — use a longer one` : `the fast car flies over this height — point lower on the arc`);
-    const worst = Math.max(slow.fall, fast?.fall ?? 0);
+    const fastAt = fast.p.clone().sub(start).dot(h);
+    const notes = [`level landing · touchdown ${Math.round(fast.fall)}°`, reachNote(a, reachScale(a, start, h))];
+    if (fastAt > Math.hypot(ex.x, ex.z) - 4) notes.push(`the full-speed car lands ${Math.round(fastAt)} m on, past this piece — use a longer one`);
     // (the game grades by the car's angle to the surface — landing.js — and the player can level it in the air)
-    if (worst > ROUGH_FALL) notes.push(`steep onto flat (${Math.round(worst)}°): level the car in the air, or use a landing slope`);
-    return { type: "arc", m, from: a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: notes.length ? notes.join(" · ") : `level landing · touchdown ${Math.round(slow.fall)}–${Math.round(fast?.fall ?? slow.fall)}°` };
+    if (fast.fall > ROUGH_FALL) notes.push(`steep onto flat (${Math.round(fast.fall)}°): level the car in the air, or use a landing slope`);
+    const roll = rollNote(a, m, leanIn(t));
+    if (roll) notes.push(roll);
+    return { type: "arc", m, from: a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: notes.join(" · ") };
   }
   if (best) {
     // a landing slides along the arc to where the fall angle equals its own → its exit comes out level
@@ -1207,43 +1277,33 @@ function computeSnap() {
     if (t.landAngle && tileBase !== FITTED && tileBase !== CATCH) {
       const want = t.landAngle * DEG;
       let kBest = best.k, err = Infinity;
-      for (let k = 3; k < best.a.pts.length; k++) {
-        const fall = Math.asin(THREE.MathUtils.clamp(-best.a.tan[k].y, -1, 1));
+      for (let k = 3; k < best.a.near.pts.length; k++) {
+        const fall = Math.asin(THREE.MathUtils.clamp(-best.a.near.tan[k].y, -1, 1));
         if (fall > 0 && Math.abs(fall - want) < err) { err = Math.abs(fall - want); kBest = k; }
       }
       best.k = kBest;
     }
-    let T = best.a.tan[best.k];
-    let fittedAngle = FITTED_ANGLE;
-    if (tileBase === CATCH) return catchSnap(best.a, best.a.pts[best.k].y);
-    const fitted = tileBase === FITTED;
-    if (fitted) {
-      // the slope at the arc's own fall angle where you point, in 5° steps (10–45°), and the landing
-      // laid exactly at that angle so its exit comes out level
-      const fall = Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG;
-      fittedAngle = THREE.MathUtils.clamp(Math.round(fall / 5) * 5, 10, 45);
-      const h = new THREE.Vector3(T.x, 0, T.z).normalize();
-      T = h.multiplyScalar(Math.cos(fittedAngle * DEG)).setY(-Math.sin(fittedAngle * DEG));
+    if (tileBase === CATCH) return catchSnap(best.a, best.a.fast.pts[best.k].y);
+    if (tileBase === FITTED) {
+      // FITTED LANDING (fittedOnArc): the slope at the arc's own fall angle where you point (5° steps,
+      // 10–45°), from where the NEAR-speed car comes down at that height until the FAST one is down too.
+      // Leaned by the land tilt (not the Bank: that would leave its exit banked too)
+      const f = fittedOnArc(best.a, best.k, landTilt);
+      fittedId = f.id;
+      const ft = TILES[f.id];
+      const roll = rollNote(best.a, f.m, ft.tilt ?? 0);
+      return { type: "arc", m: f.m, from: best.a.from, note: `${ft.label} · ${reachNote(best.a, reachScale(best.a, f.P0, f.T))}${roll ? ` · ${roll}` : landTilt ? " · the car already flies at that tilt" : ""}${landTilt ? "" : " · ← / → tilt it"}` };
     }
+    // (a landing piece: best.k now on the NEAR arc, slid to its own angle; anything else at the pointed height)
+    const nn = t.landAngle ? { p: best.a.near.pts[best.k], T: best.a.near.tan[best.k] } : downAt(best.a.near, best.a.fast.pts[best.k].y) ?? { p: best.a.fast.pts[best.k], T: best.a.fast.tan[best.k] };
+    const T = nn.T.clone();
     const R = new THREE.Vector3().crossVectors(T, UP).normalize();
     const U = new THREE.Vector3().crossVectors(R, T);
-    const P0 = best.a.pts[best.k];
-    let roofBad = null;
-    if (fitted) {
-      // FITTED LANDING: the down-slope starts here on the SLOW arc and runs until the FAST arc meets
-      // it too (+12 m margin): every speed in the band lands on the slope, not past it
-      let D = 24;
-      for (const q of best.a.fast.pts) {
-        const rel = q.clone().sub(P0);
-        const along = rel.dot(T);
-        if (along > 0 && rel.dot(U) <= 0) { D = along + 12; break; } // crossed the slope surface
-      }
-      D = Math.max(24, Math.ceil(D / 4) * 4);
-      fittedId = ensureTile(`fitted_landing_${fittedAngle}_${D}`).id;
-    }
+    const P0 = nn.p.clone();
     const m = socketMatrix({ p: P0, T, U, R });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
-    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : roofBad };
+    const roll = rollNote(best.a, m, leanIn(t));
+    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: [reachNote(best.a, reachScale(best.a, P0, T)), roll].filter(Boolean).join(" · ") };
   }
   return gridSnap(t);
 }
@@ -1471,25 +1531,29 @@ function editWith(id) {
 // ---------- RE-FIT A LANDING (user, 2026-10-20): an edit that changes the speed into a jump left its
 // fitted landing sized for the old band ("a slower car falls short of it"). The same sizing as placing a
 // Fitted landing (computeSnap), redone on the jump's arcs as they fly NOW, at the height the landing
-// stands at: its start where the slow arc comes down to that height, its angle that fall's, its length
+// stands at: its start where the near arc comes down to that height, its angle that fall's, its length
 // until the fast arc lands on it too. The road after it follows (reflow).
-function fittedOnArc(a, k) {
-  let T = a.tan[k];
+function fittedOnArc(a, k, tilt = 0) {
+  const n = downAt(a.near, a.fast.pts[k].y) ?? { p: a.fast.pts[k].clone(), T: a.fast.tan[k].clone() };
+  let T = n.T;
   const fall = Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG;
   const angle = THREE.MathUtils.clamp(Math.round(fall / 5) * 5, 10, 45);
   const h = new THREE.Vector3(T.x, 0, T.z).normalize();
   T = h.multiplyScalar(Math.cos(angle * DEG)).setY(-Math.sin(angle * DEG));
   const R = new THREE.Vector3().crossVectors(T, UP).normalize();
   const U = new THREE.Vector3().crossVectors(R, T);
-  const P0 = a.pts[k];
+  // the near-speed car touches down at its start; the slope runs until the full-speed one is down too (+12 m)
+  const P0 = n.p;
   let D = 24;
   for (const q of a.fast.pts) {
     const rel = q.clone().sub(P0);
-    const along = rel.dot(T);
-    if (along > 0 && rel.dot(U) <= 0) { D = along + 12; break; }
+    if (rel.dot(T) > 0 && rel.dot(U) <= 0) { D = rel.dot(T) + 12; break; }
   }
   D = Math.max(24, Math.ceil(D / 4) * 4);
-  return { id: ensureTile(`fitted_landing_${angle}_${D}`).id, m: socketMatrix({ p: P0, T, U, R }) };
+  // a TILTED one keeps its low edge on the path plane (kit.js deckFrame raises the centre hw·sin): laid
+  // that much lower, the car meets the deck's middle where the flat one would be
+  const p = P0.clone().addScaledVector(U, -SECTIONS.road.hw * Math.abs(Math.sin(tilt * DEG)));
+  return { id: ensureTile(`fitted_landing_${angle}_${D}${tilt ? `_t${tilt}` : ""}`).id, m: socketMatrix({ p, T, U, R }), P0, T, U };
 }
 const refittable = () => problems.misses.filter((m) => /^(fitted_landing|catch_tube)_/.test(track.pieces.find((q) => q.uid === m.uid)?.id ?? "")).map((m) => m.uid);
 function refitLandings(uids = refittable()) {
@@ -1505,11 +1569,11 @@ function refitLandings(uids = refittable()) {
       continue;
     }
     let k = -1;
-    for (let i = 3; i < a.pts.length; i++) if (a.tan[i].y < -0.02 && a.pts[i].y <= y) { k = i; break; }
-    if (k < 0) continue; // the slow arc never comes down to it: move it on the arc by hand
-    fits.push({ uid, ...fittedOnArc(a, k) });
+    for (let i = 3; i < a.fast.pts.length; i++) if (a.fast.tan[i].y < -0.02 && a.fast.pts[i].y <= y) { k = i; break; }
+    if (k < 0) continue; // the full-speed arc never comes down to it: move it on the arc by hand
+    fits.push({ uid, ...fittedOnArc(a, k, Math.round((TILES[track.pieces.find((q) => q.uid === uid).id].tilt ?? 0) / DEG)) });
   }
-  if (!fits.length) { editMsg = "Couldn't re-fit: the jump's slow arc doesn't come down to that landing's height — place it again on the arc."; renderStatus(); return; }
+  if (!fits.length) { editMsg = "Couldn't re-fit: the jump's full-speed arc doesn't come down to that landing's height — place it again on the arc."; renderStatus(); return; }
   reflow(() => { for (const f of fits) { const pc = track.pieces.find((q) => q.uid === f.uid); pc.id = f.id; pc.M = f.m.toArray(); } });
 }
 
@@ -1961,8 +2025,8 @@ addEventListener("keydown", (e) => {
     // tilt: 5° steps (Shift: 15°), up to ±90° (was ±45: Apex Rush floats pieces at any angle)
     case "ArrowUp": rot.pitch = Math.min(90, rot.pitch + (e.shiftKey ? 15 : 5)); break;
     case "ArrowDown": rot.pitch = Math.max(-90, rot.pitch - (e.shiftKey ? 15 : 5)); break;
-    case "ArrowLeft": rot.roll = Math.max(-90, rot.roll - (e.shiftKey ? 15 : 5)); break;
-    case "ArrowRight": rot.roll = Math.min(90, rot.roll + (e.shiftKey ? 15 : 5)); break;
+    case "ArrowLeft": if (tileBase === FITTED) landTilt = Math.max(-45, landTilt - 5); else rot.roll = Math.max(-90, rot.roll - (e.shiftKey ? 15 : 5)); break;
+    case "ArrowRight": if (tileBase === FITTED) landTilt = Math.min(45, landTilt + 5); else rot.roll = Math.min(90, rot.roll + (e.shiftKey ? 15 : 5)); break;
     case "PageUp": buildY += 2; break;
     case "PageDown": buildY -= 2; break;
     case "Enter": place(); break;
@@ -2027,13 +2091,14 @@ function renderHand() {
   const free = snap?.type === "world" || snap?.type === "local";
   const mirror = !!(TILES[`${tileBase}_L`] || TILES[tileBase]?.hand || ADJUSTABLE[tileBase]?.hand);
   const adj = ADJUSTABLE[tileBase];
-  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, buildY, adj ? JSON.stringify(adjParams[tileBase]) : ""].join("|");
+  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, landTilt, buildY, adj ? JSON.stringify(adjParams[tileBase]) : ""].join("|");
   if (k === handKey) return;
   handKey = k;
   const off = free ? "" : " off";
   el.innerHTML =
     `<span class="nm">${TILES[id]?.label ?? id}</span>` +
     // an ADJUSTABLE piece's own settings first (the ghost follows them)
+    (tileBase === FITTED ? `<div class="gp"><span>Land tilt</span><button data-a="tl" title="Left side low (←)">↶</button><b>${landTilt ? `${Math.abs(landTilt)}° ${landTilt > 0 ? "R" : "L"}` : "flat"}</b><button data-a="tr" title="Right side low (→)">↷</button></div>` : "") +
     (adj ? Object.entries(adj.params).map(([pk, q]) => `<div class="gp"><span>${q.label}</span><button data-a="p-${pk}" title="Less (Shift: ×4)">◀</button><b>${adjParams[tileBase][pk]}${q.unit}</b><button data-a="p+${pk}" title="More (Shift: ×4)">▶</button></div>`).join("") : "") +
     `<div class="gp${off}" title="${free ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
     `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
@@ -2058,6 +2123,8 @@ function renderHand() {
       case "pd": rot.pitch = Math.max(-45, rot.pitch - 5); break;
       case "rl": rot.roll = Math.max(-45, rot.roll - 5); break;
       case "rr": rot.roll = Math.min(45, rot.roll + 5); break;
+      case "tl": landTilt = Math.max(-45, landTilt - 5); renderDock(); break;
+      case "tr": landTilt = Math.min(45, landTilt + 5); renderDock(); break;
       case "L": hand = -1; renderDock(); break;
       case "R": hand = 1; renderDock(); break;
       case "z": rot.yaw = rot.pitch = rot.roll = 0; break;

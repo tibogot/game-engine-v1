@@ -30,7 +30,29 @@ this is just the list. Newest decisions at the top of each section. Last updated
          the end of 128 m: 45° 142 km/h, apex 39 m, back to lip height at 152 m; 60° 131 km/h, 50 m,
          112 m; roll kicker 152 km/h, 12 m, 121 m. No warnings. NOT yet: a landing that fits the roll
          kicker's banked flight (step 4), more curl heights.
-      4. TILTED LANDINGS for the air roll (W / X): "roll 30° to land" shown by the builder (shot 1).
+      4. [x] TILTED LANDINGS for the air roll (shot 1): with the Fitted landing in hand, ← / → (or the
+         dock's "Land tilt") lean its catch zone 5–45° (`fitted_landing_<a>_<D>_t<tilt>`, + = right side
+         low); it rolls back to flat by its exit, laid lower by hw·sin so the car meets the deck's middle.
+         Every landing on an arc notes the roll it asks for ("roll 30° left in the air to land"), from the
+         car's MEASURED up at take-off (stored with the launch) to the deck's, each round its own forward
+         (pitch drops out). Re-fit keeps the tilt. Tests: roll kicker → flat: "roll 30° left"; → tilted
+         30° right: no roll, test lap 13.0 s, perfect; kicker 20° → tilted 30°: "roll 30° right", the
+         test car rolls, perfect. In the drive page on autopilot: "Perfect landing 2°". NOTE: a deck
+         tilted away from the sun gets only ambient light (afternoon: tilted right reads near-black
+         navy) — normals checked, it is the light; the user to judge.
+      4b. [x] PRECISION LANDINGS (user, 2026-10-21: "the car after a jump lands at the beginning of the
+         track in the air or tube and if not enough speed he falls"; a landing that started long before
+         was "too easy, not cool"). Landings snap to the FULL-SPEED (yellow) arc and START where a car at
+         0.95 × full speed comes down (NEAR): Fitted / tilted (slope from there until the full-speed car
+         is down, +12 m), the landing pieces (slid to their angle on the near arc), level pieces (4 m
+         before). Every note says "lands from N km/h (full speed M) — slower falls short"
+         (reachScale: the flight must clear the deck's start edge). The miss check asks only the
+         full-speed car to land. (0.95, not on the full-speed arc itself: that left 0 margin, 1% slower
+         arrived under the start.) Tested: kicker 20° → Fitted / Landing 20° / platform, roll kicker →
+         tilted: all "lands from ~95%", test laps perfect; in the drive page, take-off 159 / 156 / 153
+         km/h land, 147 / 139 / 130 fall (the builder said 151). RISK (the 2026-10-19 problem): a rough
+         landing keeps 85% of the speed, so a rough landing just before a jump now means falling short —
+         intended, but watch the White tier.
       5. A WALL WITH A HOLE to jump / drive through (shot 2).
       6. Later: vertical launch pipes and ceilings to drive upside down (shot 3), checkpoint arches
          (shot 7), floating-island scenery (shots 1, 3).
