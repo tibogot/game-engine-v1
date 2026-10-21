@@ -349,6 +349,27 @@ export const TILES = {
     // eased (clothoid-like) loop: tighter at the top, gentler at the bottom, like a real coaster
     segs: [{ L: 2 * Math.PI * 28 + 70, pitch: 2 * Math.PI, ramp: 35, offset: 18 }],
   },
+  // THE SKY LOOP (Apex Rush plan step 6, shot 3: "the car upside down under a huge curved roof, a short
+  // open pipe pointing straight up below it"): a loop with its two vertical sides OPEN — the road curls
+  // up to vertical, the car flies straight up through a gap onto the roof, rides it upside down (held by
+  // its own speed, as in a loop), falls straight down through the second gap into a curl that brings it
+  // back level, heading on, stepped sideways. No new physics: a loop's path with `gap` segments.
+  // SIZE (measured in the drive page, 2026-10-21): R 24 roof + 30 m gaps (98 m tall) — the car came in
+  // at 178 km/h and crawled over the top at 17 km/h, then fell off; and in 1 s of air the chase camera
+  // turned back to world up and ended up beyond the roof. R 16 + 12 m gaps: 60 m tall, ~0.35 s of air.
+  sky_loop: {
+    label: "Sky loop",
+    segs: [
+      { L: Math.round(16 * Math.PI / 2 + 16), pitch: 90 * DEG, ramp: 16 },
+      { L: 12, gap: true },
+      { L: Math.round(16 * Math.PI + 20), pitch: Math.PI, ramp: 18, offset: 18 },
+      { L: 12, gap: true },
+      { L: Math.round(16 * Math.PI / 2 + 16), pitch: 90 * DEG, ramp: 16 },
+    ],
+    // NO road hold, like the Loop R28: a road-held climb past 20° is the chase camera's FLIP-RAMP shot
+    // (chaseCamera.js onWall: it swings round to the side and freezes for the flight) — it ended beyond
+    // the roof, looking at its underside
+  },
   catch_pad: {
     label: "Catch pad",
     section: "wide",

@@ -74,8 +74,20 @@ this is just the list. Newest decisions at the top of each section. Last updated
       bounces off, the grade is "ok" at best (no boost), the banner says "not on all four wheels". Drive
       page, fitted landing (lands from 151): take-off 149 km/h → "ok, partial" (err 0°); 150 → perfect.
       NOTE: a rules change — old ghosts replayed through carRules may drift where they landed partially.
-      6. Later: vertical launch pipes and ceilings to drive upside down (shot 3), checkpoint arches
-         (shot 7), floating-island scenery (shots 1, 3).
+      6. Vertical launch pipes and ceilings to drive upside down (shot 3), checkpoint arches
+         (shot 7), floating-island scenery (shots 1, 3):
+         a. [x] SKY LOOP (Stunts tab): a loop with its two vertical sides OPEN — curl up (R16), 12 m gap
+            up, the roof (R16, 180°, stepped 18 m sideways), 12 m gap down, curl back level. No new
+            physics (`gap` segments). Sized by measurement: R24 + 30 m gaps (98 m tall) crawled over at
+            17 km/h and fell off. NO road hold: a road-held climb past 20° is the chase camera's
+            flip-ramp shot (it froze beyond the roof, a wall of red); without it the frames read like the
+            Loop R28's (behind / under the car rising, inside under it on the roof, above it falling).
+            Drive page: through from 123 km/h at the curl's start at full throttle; lifting off through
+            the climb fell at 138. Test lap with 3 straights before it: 16.0 s.
+         b. [ ] checkpoint ARCHES' look (shot 7) — need the screenshot again (agents can't see old ones)
+         c. [ ] floating-island scenery (shots 1, 3) — the same; a design pass with the user first
+         d. [ ] (maybe) a real CEILING run: a flat upside-down straight between two roof curves; needs
+            magnets along a curved path (carRules magnetZones are straight-axis, for twists)
 - [x] **Land on ANY piece** (user, 2026-10-21: "this game is about jumps … large platforms to land"): a
       road piece that isn't a landing (platform, straight, turn…) snaps onto a jump's arc LEVEL at the
       height pointed at, its start 6 m before the slow car touches down, linked to the jump (flightFrom:
