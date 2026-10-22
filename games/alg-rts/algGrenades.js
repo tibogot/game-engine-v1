@@ -195,6 +195,10 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
         job.kneel = u.posture === "kneel" || u.posture === "prone";
         u.stop();
         u.faceToward(job.x, job.z);
+        // ...and HELD that way (2026-10-22, you: "I clicked behind them and they didn't turn at all"): a move gives a
+        // man a held facing (selection.js faceAngle — the way he walked, or the drag's), and units.js turned him back to
+        // it the next tick: he threw over his shoulder. The throw's direction is his facing now.
+        u.faceAngle = Math.atan2(job.x - u.position.x, job.z - u.position.z);
         u.throwing = job.kneel ? { start: P.kneel.start, kneel: true } : { start: P.clipStart };
         u[K.cd] = K.cooldown;
         job.t = 0;

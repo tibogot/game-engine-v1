@@ -182,7 +182,12 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
       }
       // At work: facing it, the build clip (algBuild's `working`), unless under fire.
       if ((u.suppression ?? 0) > P.underFire) { if (u.working?.repair) u.working = null; continue; }
-      if (!u.working?.repair) { u.working = { x: t.position.x, z: t.position.z, repair: t }; u.faceToward?.(j.close?.contact.x ?? t.position.x, j.close?.contact.z ?? t.position.z); }
+      if (!u.working?.repair) {
+        u.working = { x: t.position.x, z: t.position.z, repair: t };
+        const cx = j.close?.contact.x ?? t.position.x, cz = j.close?.contact.z ?? t.position.z;
+        u.faceToward?.(cx, cz);
+        u.faceAngle = Math.atan2(cx - u.position.x, cz - u.position.z);   // (held: a move's facing turned him away — algGrenades)
+      }
       u.repairing = t;
       working.add(t);
       if (!t.isStructure) weld(u, t, dt, j.close?.contact);

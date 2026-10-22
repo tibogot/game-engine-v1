@@ -122,9 +122,7 @@ ones throughout.
 
 ## 3. Gameplay still missing (biggest first)
 
-0. **BUG (you, 2026-10-22): a grenade thrown BEHIND the squad** — the men did not turn toward where you clicked: they
-   stayed facing the same way and the grenade flew backward over them. The thrower must turn to face the throw
-   (algGrenades.js) before the throw clip plays, and the throw clip must play facing it.
+0. ~~**BUG: a grenade thrown BEHIND the squad**~~ — **fixed 2026-10-22**: the throw's direction is the man's held facing (a move's faceAngle turned him back); the same for wire cutting and repairs.
 0. **From 2026-10-22 (your questions, CoH compared):**
    - **A held village shows who it backs** (left for later): FLN-held, hand-painted "FLN" and the green-and-white flag
      on two or three walls and a small flag on a roof; French-held, a tricolour on the house by the square. Needs

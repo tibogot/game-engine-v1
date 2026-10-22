@@ -81,7 +81,11 @@ export function createAlgWire(app, { units, showroom = {}, navGrid = null, ambie
         if (u.cutting !== w.m) continue;
         if (u.isMoving || outside(w.m, u.position.x, u.position.z) > P.cutReach) { u.working = null; continue; }
         cutters++;
-        if (!u.working) { u.working = { x: w.m.position.x, z: w.m.position.z }; u.faceToward?.(w.m.position.x, w.m.position.z); }
+        if (!u.working) {
+          u.working = { x: w.m.position.x, z: w.m.position.z };
+          u.faceToward?.(w.m.position.x, w.m.position.z);
+          u.faceAngle = Math.atan2(w.m.position.x - u.position.x, w.m.position.z - u.position.z);   // (held: a move's facing turned him away — algGrenades)
+        }
       }
       if (gone) { remove(w, "crushed"); continue; }
       if (!cutters) continue;
