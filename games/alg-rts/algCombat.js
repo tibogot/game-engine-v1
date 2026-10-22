@@ -96,8 +96,10 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // downwind) and the IMPACT ("Mortar in earth": a blink of fire, a fountain of earth spikes, the
   // dome slumping). Pooled cards (bookShots.js); the flash, the clods and a dust that lingers after
   // the book are the old pieces. Without the books: the old blast, no launch smoke.
-  const shots = await createBookShots({ app, books: { mortarImpact: { pool: 10, fireK: 4 }, mortarLaunch: { pool: 8, fireK: 8 } } });
+  // (+ the CONSTRUCTION DUST, 2026-10-22: a loop book played once per card, slowed — algBuild.js lays them round a site)
+  const shots = await createBookShots({ app, books: { mortarImpact: { pool: 10, fireK: 4 }, mortarLaunch: { pool: 8, fireK: 8 }, constructionDust: { pool: 24, fireK: 0, speed: 0.6 } } });
   app.algBookShots = shots;
+  app.algWind = wind;
   const MORTAR_SIZE = { mortar60: 0.78, mortar81: 1, mortar120: 1.3 };
   const later = [];   // [time left, fn]: the crater, once the blast hides where it lands
   if (shots.has("mortarImpact")) fx.mortar = (x, y, z, kind, { crater = null } = {}) => {

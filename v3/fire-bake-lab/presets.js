@@ -304,6 +304,31 @@ export const PRESETS = {
     forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.12 }, { type: "turbulence", strength: 1.6, scale: 1.8 }],
     bake: { center: [0, 1.3, 0], size: 3.0, pitch: 40, start: 3, duration: 64 / 24, loop: true, blend: 16 },
   },
+  // A BUILDING GOING UP (2026-10-22, you, CoH 3's Nissen hut: "any building animation has a ground smoke"): the
+  // dust the work kicks up — low, heavy, brown, ROLLING out along the ground from a few spots (spades, bags, boots),
+  // lifting a little as it billows, dying inside the card (no square edge). The game lays a few of these round a
+  // site's footprint while it builds, the ground's colour as its tint.
+  constructionDust: {
+    label: "Construction dust",
+    note: "loop: the dust a building site kicks up — low brown billows rolling out along the ground (tinted in the game)",
+    sim: {
+      voxelSize: 0.04, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 51,
+      grid: { maxVoxels: 8_000_000, cutoff: 0.03, ground: true },
+      flame: { cooling: 0.6, opacity: 1, brightness: 1 },
+      smoke: { dissipation: 1.15, color: "#b09a78", density: 4, scattering: 0.42, shadowDensity: 2.5 },
+      // Dust is heavy and barely buoyant: it rolls, then hangs.
+      motion: { buoyancy: 0.7, smokeWeight: 0.9, damping: 0.3, vorticity: 4 },
+    },
+    // Four spots, each pushing dust out low (a little up) in its own direction: the billows meet and roll.
+    fires: [[-0.9, -0.4, 200], [0.6, -0.6, 320], [-0.3, 0.7, 110], [1.1, 0.4, 20]].map(([x, z, az], i) => {
+      const a = (az * Math.PI) / 180;
+      return { kind: "smoke", at: [x, 0.15, z], radius: 0.28, emission: { flame: 0, heatRate: 0.5, smokeRate: 22 + i * 4 }, velocity: { direction: [Math.cos(a), 0.35, Math.sin(a)], speed: 1.8 } };
+    }),
+    blasts: [],
+    // (dissipation 0.75 + wind 0.4 rolled it out of a 6 m box: a square edge on the card)
+    forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.15 }, { type: "turbulence", strength: 2.5, scale: 1.6 }],
+    bake: { center: [0.2, 1.6, 0], size: 7, pitch: 40, start: 4, duration: 64 / 24, loop: true, blend: 16 },
+  },
   campfire: {
     label: "Campfire",
     note: "loop: clean small flames (Fire Pro's Campfire preset)",

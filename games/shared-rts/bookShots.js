@@ -13,6 +13,8 @@
 //             when the wind blows to the screen's left, so it drifts the right way
 //     lift    m: the book raised off the ground (a tube on a rise of its own: a pit's parapet)
 //     opacity 0..1: the whole card thinner (a pale column the book bakes too dense)
+//     fadeIn  0..1 of its life: faded in (a LOOP book played once starts on a full cloud — the
+//             construction dust, algBuild.js — and would pop in)
 //
 // Lit as flameStreamFx (the scene's sun and sky); fades into the real ground (heightmap tap).
 import * as THREE from "three";
@@ -51,12 +53,12 @@ export async function createBookShots({ app, books }) {
   const _cam = new THREE.Vector3(), _right = new THREE.Vector3(), _ctr = new THREE.Vector3();
   const _sun = new THREE.Vector3(0.3, 0.8, 0.4), _col = new THREE.Color(), _sky = new THREE.Color();
 
-  function play(key, x, z, { size = null, tint = null, fireK = null, wind = null, lift = 0, opacity = 1 } = {}) {
+  function play(key, x, z, { size = null, tint = null, fireK = null, wind = null, lift = 0, opacity = 1, fadeIn = 0 } = {}) {
     const s = sets.get(key);
     if (!s) return false;
     const card = s.cards.reduce((a, b) => (a.t0 + a.life < b.t0 + b.life ? a : b));   // free, else the oldest
     const speed = s.opts.speed ?? 1;
-    Object.assign(card, { t0: clock, life: s.meta.duration / speed, x, z, size: size ?? s.meta.size, tint, fireK: fireK ?? s.opts.fireK ?? 0.5, wind, lift, opacity });
+    Object.assign(card, { t0: clock, life: s.meta.duration / speed, x, z, size: size ?? s.meta.size, tint, fireK: fireK ?? s.opts.fireK ?? 0.5, wind, lift, opacity, fadeIn });
     card.c.mesh.visible = true;
     return true;
   }
@@ -81,7 +83,7 @@ export async function createBookShots({ app, books }) {
         // The wind on the screen: blowing left, the book (drifting to its +X) is mirrored.
         const mirror = k.wind && (k.wind[0] * _right.x + k.wind[1] * _right.z) < 0 ? -1 : 1;
         k.c.u.uFireK.value = k.fireK;
-        k.c.u.uFade.value = (k.opacity ?? 1) * (1 - THREE.MathUtils.smoothstep(age, 0.85, 1));
+        k.c.u.uFade.value = (k.opacity ?? 1) * (1 - THREE.MathUtils.smoothstep(age, 0.85, 1)) * (k.fadeIn > 0 ? THREE.MathUtils.smoothstep(age, 0, k.fadeIn) : 1);
         k.c.u.uTint.value.fromArray(k.tint ?? m.tint ?? [0.2, 0.2, 0.2]);
         // The book's point of origin (its emitter at x 0) on the ground at (x, z): the card's
         // centre sits the box's offset away along the screen's right (mirrored with the card).

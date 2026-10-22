@@ -356,7 +356,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     trackLod(app, mesh);                              // (a Blender piece: its far level past HOUSE_FAR — algSangar.js)
     app.scene.add(mesh);
     const site = {
-      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build, bagSite,
+      key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build, bagSite, hx: f.hx, hz: f.hz, yaw,
       // Picked like a structure (the shared selection's buildingRenderer):
       // the command card shows it under construction, with Annuler.
       site: true, isStructure: true, alive: true, team: teamOf(key), constructing: true,
@@ -399,6 +399,21 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   const atWork = new Set();
   // Dug, not built: their men only shovel (the rest: hands at the frame, half of them).
   const EARTHWORKS = new Set(["sandbags", "mgNest", "mortarPit", "fortPoint", "sangar", "armsCache", "refuge", "ambushScreen"]);
+  /**
+   * THE DUST OF THE WORK (2026-10-22, you, CoH 3: "any building animation has a ground smoke"): while men work a
+   * site, a card of the baked construction dust (v3/fire-bake-lab "Construction dust" — pooled, algCombat.js) every
+   * second or so at a spot over its footprint, faded in, drifting with the wind; three or four overlap into one
+   * billowing cloud. A bigger site: more often, bigger cards. Cosmetic — no sim state.
+   */
+  function dust(s, dt) {
+    const shots = app.algBookShots;
+    if (!shots?.has("constructionDust") || (s.dustT = (s.dustT ?? 0) - dt) > 0) return;
+    const r = Math.max(s.hx, s.hz);
+    // (first try: a card every ~1 s, 4.5 m, 0.85 — a thin puff at one corner beside CoH's site-wide cloud)
+    s.dustT = Math.min(0.9, Math.max(0.4, 1 - r * 0.06)) * (0.8 + 0.4 * Math.random());
+    const [x, z] = toWorld(s.x, s.z, s.yaw ?? 0, (Math.random() * 2 - 1) * s.hx, (Math.random() * 2 - 1) * s.hz);
+    shots.play("constructionDust", x, z, { size: Math.min(10, Math.max(6, 5 + r * 0.7)), fadeIn: 0.2, wind: app.algWind?.() });
+  }
   const HAUL_PACE = 0.45;   // × his speed with a crate in his arms (~2.3 m/s: a walk)
   function step(dt) {
     atWork.clear();
@@ -451,6 +466,7 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       growScreenPlants(plants(), s.mesh, s.progress);   // (a screen's scrub, stood up in its turn)
       for (const c of s.mesh.children) if (c.userData.late != null) c.visible = s.progress >= c.userData.late;   // (the mirador's bags)
       s.hp = s.progress * 100;
+      dust(s, dt);
     }
     // HAULING (2026-10-17, Mixamo "Carrying"): a sapper walking to a site of his side still rising carries
     // a crate to it, at a walk (loadMul) — the renderer's carry walk, the crate in his arms.
