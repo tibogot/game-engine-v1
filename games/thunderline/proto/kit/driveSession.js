@@ -854,6 +854,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       `<br>shadows <b>${sunShadows ? `baked + live ${sunShadows.liveSize ?? "?"} m · soft v3` : "engine cascades (builder)"}</b> · dpr <b>${devicePixelRatio}</b>` +
       (lay.warnings.length ? `<br><span style="color:#ff4d5e">${lay.warnings.join("<br>")}</span>` : "");
   }
+  const HUD = { kmh: $("kmh"), time: $("time"), cps: $("cps"), boost: null };
+  const hudText = (el, t) => { if (el && el._t !== t) { el._t = t; el.textContent = t; } };
   app.addPreUpdateHook(function driveFrame() {
     const now = performance.now();
     const dt = Math.min((now - last) / 1000, 0.05) * timeScale;
@@ -888,7 +890,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (vehicle.groundedCount >= 3) { S.safe.pos.copy(vehicle.body.pos); S.safe.quat.copy(vehicle.body.quat); S.safe.ok = true; }
     }
     if (ticks) S.physMs.push((performance.now() - tPhys) / ticks);
-    if (S.physMs.length > 240) S.physMs.shift();
+    if (S.physMs.length > 480) S.physMs.splice(0, 240); // trimmed in batches, not shifted every frame (the debug readout's last 240+)
     vehicle.syncVisuals(dt, S.simAccum / FIXED_DT);
     if (dt > 0) tyreMarks?.update(vehicle, dt);
     engineTick(dt, input);
@@ -911,11 +913,16 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     app.controls.target.copy(vehicle.renderPos);
     const kmh = Math.abs(vehicle.speedKmh ?? vehicle.body.vel.length() * 3.6);
     S.topKmh = Math.max(S.topKmh, kmh);
-    $("kmh").textContent = Math.round(kmh);
+    // the HUD written only when its text changes (performance pass, 2026-10-22: 4 lookups and 3 writes a
+    // frame, the clock and the CP counter even while hidden — Timer off)
+    hudText(HUD.kmh, String(Math.round(kmh)));
     const rs = race.s;
-    $("time").textContent = rs.state === "countdown" ? String(Math.ceil(rs.hold * 2)) : fmt(rs.state === "finished" ? rs.finishTime : rs.time);
-    $("cps").textContent = race.cps.length ? `CP ${rs.taken.size}/${race.cps.length}` : "no checkpoints";
-    $("cps").classList.toggle("boost", rules.boostLeft > 0);
+    if (!S.o.noTimer) {
+      hudText(HUD.time, rs.state === "countdown" ? String(Math.ceil(rs.hold * 2)) : fmt(rs.state === "finished" ? rs.finishTime : rs.time));
+      hudText(HUD.cps, race.cps.length ? `CP ${rs.taken.size}/${race.cps.length}` : "no checkpoints");
+      const boost = rules.boostLeft > 0;
+      if (boost !== HUD.boost) { HUD.boost = boost; HUD.cps.classList.toggle("boost", boost); }
+    }
     if (++S.frame % 15 === 0) renderStats();
     // HEADLIGHTS ON when the sun is low (user, 2026-10-20: "we don't have the car lights" at dusk) — a
     // uniform write in the car (setHeadlights), so checking twice a second costs nothing

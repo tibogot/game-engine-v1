@@ -121,6 +121,9 @@ export function createEngineLoops({ type = "gen6", volume = 0.7 } = {}) {
     if (Math.random() < 0.4) burst("bandpass", 160 + Math.random() * 120, 1.2, k * 1.4, 0.07 + Math.random() * 0.05);
   }
   const set = (param, v, tc = 0.02) => param.setTargetAtTime(v, ctx.currentTime, tc);
+  // only when the value moved (performance pass, 2026-10-22: ~42 automation events a frame, most of them the
+  // same value again — 14 silent loops re-ramped to 0, the constant filter settings re-sent)
+  const setIf = (param, v, tc, eps = 1e-4) => { if (param._v !== undefined && Math.abs(param._v - v) <= eps) return; param._v = v; set(param, v, tc); };
   let chopPhase = 0, lastT = 0;
   return {
     get ready() { return ready; },
@@ -137,10 +140,17 @@ export function createEngineLoops({ type = "gen6", volume = 0.7 } = {}) {
       if (ready) startVoices(await loadEngine(t));
     },
     setVolume(v) { vol = v; if (ready) set(master.gain, muted ? 0 : vol, 0.05); },
-    setMuted(m) { muted = m; if (ready) set(master.gain, muted ? 0 : vol, 0.05); },
+    // muted: the whole context sleeps (the engine, and the sfx sharing it, do no audio work at all)
+    setMuted(m) {
+      muted = m;
+      if (!ready) return;
+      set(master.gain, muted ? 0 : vol, 0.05);
+      if (muted) setTimeout(() => { if (muted && ctx.state === "running") ctx.suspend(); }, 150);
+      else if (ctx.state === "suspended") ctx.resume();
+    },
     /** each frame: the engine model's state ({ rpm, load, limiter, pop }) */
     update(s) {
-      if (!ready || !voices.length) return;
+      if (!ready || !voices.length || muted) return;
       const rpm = Math.max(LOOP_RPMS[0] * 0.8, s.rpm);
       const load = Math.min(1, Math.max(0, s.load));
       // the two loops around this RPM, equal-power crossfade; each pitched to the RPM
@@ -152,21 +162,22 @@ export function createEngineLoops({ type = "gen6", volume = 0.7 } = {}) {
       voices.forEach((v, i) => {
         const j = i % LOOP_RPMS.length;
         const w = j === k ? Math.cos((t * Math.PI) / 2) : j === k + 1 ? Math.sin((t * Math.PI) / 2) : 0;
-        set(v.gain.gain, w * (v.off ? offMix : onMix), 0.03);
-        set(v.src.playbackRate, rpm / v.rpm, 0.015);
+        const g = w * (v.off ? offMix : onMix);
+        setIf(v.gain.gain, g, 0.03, 1e-3);
+        if (g > 0) setIf(v.src.playbackRate, rpm / v.rpm, 0.015); // the pitch matters only while it is heard
       });
-      set(tone.frequency, LOOP_MIX.filterOff ? 20000 : Math.min(20000, LOOP_MIX.toneMin + LOOP_MIX.toneLoad * load + LOOP_MIX.toneRpm * Math.min(1, rpm / 8000)), 0.04);
-      set(shelf.gain, LOOP_MIX.presence, 0.05);
-      set(shelf.frequency, LOOP_MIX.presenceHz, 0.05);
+      setIf(tone.frequency, LOOP_MIX.filterOff ? 20000 : Math.min(20000, LOOP_MIX.toneMin + LOOP_MIX.toneLoad * load + LOOP_MIX.toneRpm * Math.min(1, rpm / 8000)), 0.04, 1);
+      setIf(shelf.gain, LOOP_MIX.presence, 0.05);
+      setIf(shelf.frequency, LOOP_MIX.presenceHz, 0.05);
       // the grit grows with load (pulling barks, coasting is softer)
-      set(gritGain.gain, LOOP_MIX.grit * 0.5 * (0.35 + 0.65 * load), 0.05);
-      set(gritHp.frequency, LOOP_MIX.gritHz, 0.05);
+      setIf(gritGain.gain, LOOP_MIX.grit * 0.5 * (0.35 + 0.65 * load), 0.05);
+      setIf(gritHp.frequency, LOOP_MIX.gritHz, 0.05);
       // LIMITER: the ignition cuts in bursts (~18 a second)
       const now = ctx.currentTime, dt = Math.min(0.05, now - lastT);
       lastT = now;
       chopPhase = (chopPhase + dt * 18) % 1;
       const cut = s.limiter && chopPhase < 0.45;
-      set(chop.gain, cut ? 0.35 : 1, 0.004);
+      setIf(chop.gain, cut ? 0.35 : 1, 0.004);
       // POPS: per firing in this frame, a chance of a crack (lift-off, and the limiter's cut firings)
       const chance = (s.pop > 0.05 ? s.pop * LOOP_MIX.popRate : 0) + (cut ? LOOP_MIX.limiterCrack : 0);
       if (chance > 0 && LOOP_MIX.popGain > 0) {

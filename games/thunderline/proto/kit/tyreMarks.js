@@ -31,11 +31,13 @@ const MAX_SEGMENTS = 6144;
 const VERTS = 6;
 const POS_F = VERTS * 3, A_F = VERTS, UV_F = VERTS * 2;
 const MIN_SEGMENT = 0.035;
+const ATTRS = [["position", POS_F], ["aAlpha", A_F], ["uv", UV_F]];
 const PREV_VERTS = [0, 1, 3]; // (pL, pR, cL, pR, cR, cL): the previous edge's vertices
 
 const _dir = new THREE.Vector3(), _side = new THREE.Vector3(), _v = new THREE.Vector3();
 const _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _p = new THREE.Vector3();
 const _pL = new THREE.Vector3(), _pR = new THREE.Vector3(), _cL = new THREE.Vector3(), _cR = new THREE.Vector3();
+const QUAD = [_pL, _pR, _cL, _pR, _cR, _cL];
 
 export function createTyreMarks(scene, settings = TYRE_MARKS) {
   const s = settings;
@@ -72,7 +74,18 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
   mesh.receiveShadow = false;
   scene.add(mesh);
 
-  let seg = 0, drawn = 0;
+  let seg = 0, drawn = 0, dirtyLo = -1, dirtyHi = -1;
+  /** Upload the segments written this frame: one range per attribute (two if the ring wrapped). */
+  function flush() {
+    if (dirtyLo < 0) return;
+    const ranges = dirtyHi >= dirtyLo ? [[dirtyLo, dirtyHi]] : [[dirtyLo, MAX_SEGMENTS - 1], [0, dirtyHi]];
+    for (const [name, per] of ATTRS) {
+      const a = geometry.attributes[name];
+      for (const [lo, hi] of ranges) a.addUpdateRange(lo * per, (hi - lo + 1) * per);
+      a.needsUpdate = true;
+    }
+    dirtyLo = dirtyHi = -1;
+  }
   const states = [0, 1, 2, 3].map(() => ({ prev: new THREE.Vector3(), prevN: new THREE.Vector3(), active: false, dist: 0, prevAlpha: 0, wasGrounded: true, touch: 0, touchK: 0 }));
 
   function addSegment(st, curr, n, alpha) {
@@ -87,8 +100,7 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
     _pL.copy(st.prev).add(_side); _pR.copy(st.prev).sub(_side);
     _cL.copy(curr).add(_side); _cR.copy(curr).sub(_side);
     const o = seg * POS_F;
-    const pts = [_pL, _pR, _cL, _pR, _cR, _cL];
-    for (let i = 0; i < VERTS; i++) { positions[o + i * 3] = pts[i].x; positions[o + i * 3 + 1] = pts[i].y; positions[o + i * 3 + 2] = pts[i].z; }
+    for (let i = 0; i < VERTS; i++) { const q = QUAD[i]; positions[o + i * 3] = q.x; positions[o + i * 3 + 1] = q.y; positions[o + i * 3 + 2] = q.z; }
     // the alpha ramps across the segment (no step at the joins: a ladder of patches otherwise)
     const ao = seg * A_F;
     for (let i = 0; i < VERTS; i++) alphas[ao + i] = PREV_VERTS.includes(i) ? st.prevAlpha : alpha;
@@ -98,12 +110,11 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
     st.dist += len;
     const u1 = st.dist / s.tile;
     const uo = seg * UV_F;
-    uvs.set([u0, 0, u0, 1, u1, 0, u0, 1, u1, 1, u1, 0], uo);
-    for (const [name, off, n] of [["position", o, POS_F], ["aAlpha", ao, A_F], ["uv", uo, UV_F]]) {
-      const a = geometry.attributes[name];
-      a.addUpdateRange(off, n);
-      a.needsUpdate = true;
-    }
+    uvs[uo] = u0; uvs[uo + 1] = 0; uvs[uo + 2] = u0; uvs[uo + 3] = 1; uvs[uo + 4] = u1; uvs[uo + 5] = 0;
+    uvs[uo + 6] = u0; uvs[uo + 7] = 1; uvs[uo + 8] = u1; uvs[uo + 9] = 1; uvs[uo + 10] = u1; uvs[uo + 11] = 0;
+    // the segments written this frame, uploaded together at its end (flush): one range per attribute
+    if (dirtyLo < 0) dirtyLo = seg;
+    dirtyHi = seg;
     seg = (seg + 1) % MAX_SEGMENTS;
     if (drawn < MAX_SEGMENTS * VERTS) { drawn += VERTS; geometry.setDrawRange(0, drawn); }
     mesh.visible = true;
@@ -120,7 +131,7 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
   return {
     mesh, settings: s,
     reset() {
-      seg = 0; drawn = 0;
+      seg = 0; drawn = 0; dirtyLo = dirtyHi = -1;
       geometry.setDrawRange(0, 0);
       mesh.visible = false;
       for (const st of states) { st.active = false; st.dist = 0; st.touch = 0; st.wasGrounded = true; }
@@ -132,10 +143,9 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
       _fwd.set(0, 0, 1).applyQuaternion(body.quat);
       _right.set(1, 0, 0).applyQuaternion(body.quat);
       const handbrake = !!vehicle.input?.handbrake;
-      vehicle.tires.forEach((tire, i) => {
-        const st = states[i];
-        if (!st) return;
-        if (!tire.grounded) { st.active = false; st.wasGrounded = false; return; }
+      for (let i = 0; i < vehicle.tires.length && i < states.length; i++) {
+        const tire = vehicle.tires[i], st = states[i];
+        if (!tire.grounded) { st.active = false; st.wasGrounded = false; continue; }
         body.getVelocityAtPoint(tire.worldPos, _v);
         // TOUCHDOWN: the wheel was in the air, it meets the road fast → a short dark scuff
         if (!st.wasGrounded) {
@@ -155,7 +165,8 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
         if (st.touch > 0) { k = Math.max(k, st.touchK); st.touch -= dt; }
         _p.copy(tire.hitPoint).addScaledVector(tire.hitNormal, s.lift);
         track(st, k > 0.02 ? _p : null, tire.hitNormal, k);
-      });
+      }
+      flush();
     },
   };
 }

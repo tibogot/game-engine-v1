@@ -50,6 +50,8 @@ export function gatesFor(ride, flagged, hwOf = () => 8, rings = [], finishAt = n
  * One run. tick(car, dt) after every physics tick; it returns the events of that tick
  * ({type: "cp"|"finish"|"missing", ...}). Countdown: the car is held for `countdown` s, then the clock runs.
  */
+const NONE = Object.freeze([]);
+const add = (ev, e) => { if (ev === NONE) ev = []; ev.push(e); return ev; };
 export function createRace({ gates, countdown = 1.5 }) {
   const cps = gates.filter((g) => g.kind === "cp");
   const finish = gates.find((g) => g.kind === "finish");
@@ -91,31 +93,32 @@ export function createRace({ gates, countdown = 1.5 }) {
     },
     /** The car is held still during the countdown (the page feeds this to the car's input). */
     get holding() { return s.state === "countdown"; },
+    // (no array per tick when nothing happens — the common case: the shared, frozen NONE)
     tick(car, dt) {
-      const ev = [];
+      let ev = NONE;
       const p = car.body.pos;
       if (s.state === "countdown") {
         s.hold -= dt;
-        if (s.hold <= 0) { s.state = "running"; ev.push({ type: "go" }); }
+        if (s.hold <= 0) { s.state = "running"; ev = add(ev, { type: "go" }); }
         prevPos.copy(p); havePrev = true;
         return ev;
       }
       if (s.state !== "running") return ev;
       s.time += dt;
       if (havePrev) {
-        cps.forEach((g, i) => {
-          if (s.taken.has(i) || !crossed(g, p)) return;
+        for (let i = 0; i < cps.length; i++) {
+          if (s.taken.has(i) || !crossed(cps[i], p)) continue;
           s.taken.add(i);
           s.splits.push({ gate: i, time: s.time });
           s.last = { pos: p.clone(), quat: car.body.quat.clone(), vel: car.body.vel.clone(), time: s.time };
-          ev.push({ type: "cp", gate: i, time: s.time, n: s.taken.size, of: cps.length });
-        });
+          ev = add(ev, { type: "cp", gate: i, time: s.time, n: s.taken.size, of: cps.length });
+        }
         if (finish && crossed(finish, p)) {
           if (s.taken.size === cps.length) {
             s.state = "finished";
             s.finishTime = s.time;
-            ev.push({ type: "finish", time: s.time });
-          } else ev.push({ type: "missing", n: cps.length - s.taken.size });
+            ev = add(ev, { type: "finish", time: s.time });
+          } else ev = add(ev, { type: "missing", n: cps.length - s.taken.size });
         }
       }
       prevPos.copy(p); havePrev = true;

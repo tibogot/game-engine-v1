@@ -172,34 +172,42 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // turned by `angle` about the sun (its right = cos·xL + sin·yL, its up = −sin·xL + cos·yL)
   const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, range + 50);
   cam.up.copy(yL);
+  const _c = new THREE.Vector3(), _at = new THREE.Vector3(); // (reused: aimCam runs every frame for the live map)
   const aimCam = (cx, cy, half, angle = 0) => {
-    const c = xL.clone().multiplyScalar(cx).addScaledVector(yL, cy).addScaledVector(zL, zMax + 5);
+    const c = _c.copy(xL).multiplyScalar(cx).addScaledVector(yL, cy).addScaledVector(zL, zMax + 5);
     cam.up.copy(xL).multiplyScalar(-Math.sin(angle)).addScaledVector(yL, Math.cos(angle));
     cam.position.copy(c);
-    cam.lookAt(c.clone().sub(zL));
+    cam.lookAt(_at.copy(c).sub(zL));
     cam.left = -half; cam.right = half; cam.top = half; cam.bottom = -half;
     cam.near = 0.1; cam.far = range + 50;
     cam.updateProjectionMatrix();
     cam.updateMatrixWorld();
   };
 
-  function renderInto(rt, viewport, layers) {
+  // clearWhite: the WHOLE target cleared to "nothing towards the sun" IN the render pass (WebGPU's load op) —
+  // the live map, every frame, did a separate clear first: its own pass and queue submit (performance pass,
+  // 2026-10-22)
+  const _cc = new THREE.Color();
+  function renderInto(rt, viewport, layers, clearWhite = false) {
     const scene = mainScene;
-    const prev = { target: renderer.getRenderTarget(), override: scene.overrideMaterial, bg: scene.background, env: scene.environment, autoClear: renderer.autoClear };
+    const prevTarget = renderer.getRenderTarget(), prevOverride = scene.overrideMaterial, prevBg = scene.background, prevAuto = renderer.autoClear;
+    let ca = 0;
+    if (clearWhite) { renderer.getClearColor(_cc); ca = renderer.getClearAlpha(); renderer.setClearColor(0xffffff, 1); }
     scene.overrideMaterial = depthMat;
     scene.background = null;
-    renderer.autoClear = false;
+    renderer.autoClear = clearWhite;
     cam.layers.disableAll();
     for (const l of layers) cam.layers.enable(l);
     rt.viewport.copy(viewport);
     rt.scissor.copy(viewport);
-    rt.scissorTest = true;
+    rt.scissorTest = !clearWhite;
     renderer.setRenderTarget(rt);
     renderer.render(scene, cam);
-    renderer.setRenderTarget(prev.target);
-    scene.overrideMaterial = prev.override;
-    scene.background = prev.bg;
-    renderer.autoClear = prev.autoClear;
+    renderer.setRenderTarget(prevTarget);
+    scene.overrideMaterial = prevOverride;
+    scene.background = prevBg;
+    renderer.autoClear = prevAuto;
+    if (clearWhite) renderer.setClearColor(_cc, ca);
   }
   function clearRT(rt) {
     const prev = renderer.getRenderTarget();
@@ -263,21 +271,22 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // shimmer.
   const LIVE_MIN = 8; // m
   const CHASE_DIST = 8; // m, the chase camera's distance to the car (measured 7.9)
+  const LIVE_VP = new THREE.Vector4(0, 0, LIVE_TEX, LIVE_TEX), LIVE_LAYERS = [STATIC_LAYER, DYNAMIC_LAYER];
   const LIVE_STEPS = [LIVE_MIN, 10, 12, 14, 16, 20, 24, 28, LIVE_SIZE].filter((v) => v <= LIVE_SIZE);
   const live = { cx: uniform(0), cy: uniform(0), size: uniform(LIVE_SIZE) };
   function follow(carPos, camDist = Infinity) {
     const want = Math.min(LIVE_SIZE, LIVE_SIZE * (camDist / CHASE_DIST) ** 2);
-    const size = LIVE_STEPS.find((v) => v >= want) ?? LIVE_SIZE;
+    let size = LIVE_SIZE;
+    for (const v of LIVE_STEPS) if (v >= want) { size = v; break; }
     const liveTexel = size / LIVE_TEX;
-    const [x, y] = toL(carPos);
+    const x = carPos.dot(xL), y = carPos.dot(yL);
     const sx = Math.round(x / liveTexel) * liveTexel;
     const sy = Math.round(y / liveTexel) * liveTexel;
     live.cx.value = sx;
     live.cy.value = sy;
     live.size.value = size;
-    clearRT(liveRT);
     aimCam(sx, sy, size / 2);
-    renderInto(liveRT, new THREE.Vector4(0, 0, LIVE_TEX, LIVE_TEX), [STATIC_LAYER, DYNAMIC_LAYER]);
+    renderInto(liveRT, LIVE_VP, LIVE_LAYERS, true);
   }
 
   // ---- C. the receiver ----

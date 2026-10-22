@@ -33,12 +33,8 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
     master = ctx.createGain(); master.gain.value = muted ? 0 : vol;
     master.connect(ctx.destination);
     noise = noiseBuffer(ctx);
-    // TYRES ROLLING: a low roar, rising with speed
-    ({ g: roll, filt: rollF } = loopVoice("lowpass", 300, 0.7));
-    // SQUEAL: a resonant band, wavering — sliding sideways, braking hard
-    ({ g: squeal, filt: squealF } = loopVoice("bandpass", 1500, 9));
-    // WIND: a swept band, louder and higher with speed, louder in the air
-    ({ g: wind, filt: windF } = loopVoice("bandpass", 600, 0.6));
+    // (TYRES ROLLING, SQUEAL, WIND: built on first use — ensureVoices — a part switched off never runs on
+    // the audio thread; they did, silent, the whole session: performance pass 2026-10-22)
     // BOOST WHINE: a soft turbine tone while boosting
     whine = ctx.createOscillator(); whine.type = "sawtooth"; whine.frequency.value = 900;
     const wf = ctx.createBiquadFilter(); wf.type = "bandpass"; wf.frequency.value = 2400; wf.Q.value = 6;
@@ -52,6 +48,16 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
     return true;
   }
   const ramp = (param, v, tc) => param.setTargetAtTime(v, ctx.currentTime, tc);
+  // only when the value moved (most frames: the same value again)
+  const rampIf = (param, v, tc, eps = 1e-3) => { if (param._v !== undefined && Math.abs(param._v - v) <= eps) return; param._v = v; ramp(param, v, tc); };
+  function ensureVoices() {
+    // TYRES ROLLING: a low roar, rising with speed
+    if (on.roll && !roll) ({ g: roll, filt: rollF } = loopVoice("lowpass", 300, 0.7));
+    // SQUEAL: a resonant band, wavering — sliding sideways, braking hard
+    if (on.squeal && !squeal) ({ g: squeal, filt: squealF } = loopVoice("bandpass", 1500, 9));
+    // WIND: a swept band, louder and higher with speed, louder in the air
+    if (on.wind && !wind) ({ g: wind, filt: windF } = loopVoice("bandpass", 600, 0.6));
+  }
   let wobble = 0;
   /** a short tone: a few partials with an envelope */
   function tone(freqs, { dur = 0.18, gain = 0.25, type = "sine", attack = 0.005, delay = 0 } = {}) {
@@ -82,20 +88,28 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
     setVolume(v) { vol = v; if (built) ramp(master.gain, muted ? 0 : vol, 0.05); },
     update(dt, car) {
       if (!built && !build()) return;
+      if (muted) return; // nothing to hear: no automation
+      ensureVoices();
       const sp = Math.min(1, car.kmh / 260);
       const g = car.grounded;
-      ramp(roll.gain, g && on.roll ? 0.05 + 0.32 * sp : 0, 0.05);
-      ramp(rollF.frequency, 160 + 900 * sp, 0.08);
+      if (roll) {
+        rampIf(roll.gain, g && on.roll ? 0.05 + 0.32 * sp : 0, 0.05);
+        if (on.roll) rampIf(rollF.frequency, 160 + 900 * sp, 0.08, 1);
+      }
       // squeal from sliding sideways (m/s) or locking the brakes at speed
       const slide = Math.max(0, Math.min(1, (Math.abs(car.slip) - 3) / 9));
       const brake = car.braking && car.kmh > 40 ? 0.55 : 0;
       wobble += dt * 9;
-      ramp(squeal.gain, g && on.squeal ? Math.max(slide, brake) * 0.22 : 0, 0.03);
-      ramp(squealF.frequency, 1250 + 450 * Math.sin(wobble) * 0.3 + 700 * slide, 0.03);
-      ramp(wind.gain, on.wind ? (g ? 0.03 : 0.08) + 0.3 * sp * sp + (g ? 0 : 0.12 * sp) : 0, 0.15);
-      ramp(windF.frequency, 350 + 1800 * sp, 0.2);
-      ramp(whine.g.gain, car.boosting ? 0.05 : 0, 0.08);
-      ramp(whine.frequency, 700 + 900 * sp, 0.1);
+      if (squeal) {
+        rampIf(squeal.gain, g && on.squeal ? Math.max(slide, brake) * 0.22 : 0, 0.03);
+        if (on.squeal) rampIf(squealF.frequency, 1250 + 450 * Math.sin(wobble) * 0.3 + 700 * slide, 0.03, 1);
+      }
+      if (wind) {
+        rampIf(wind.gain, on.wind ? (g ? 0.03 : 0.08) + 0.3 * sp * sp + (g ? 0 : 0.12 * sp) : 0, 0.15);
+        if (on.wind) rampIf(windF.frequency, 350 + 1800 * sp, 0.2, 1);
+      }
+      rampIf(whine.g.gain, car.boosting ? 0.05 : 0, 0.08);
+      if (car.boosting) rampIf(whine.frequency, 700 + 900 * sp, 0.1, 1);
       // the scrape: car.scrape 0..1 (how fast along the rail); a clang as it starts, the grind while it lasts
       const k = on.scrape ? car.scrape ?? 0 : 0;
       if (k > 0.05 && lastScrape <= 0.05) {
@@ -105,9 +119,9 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
       lastScrape = k;
       flutter += dt * 31;
       const shake = 0.75 + 0.25 * Math.sin(flutter) * Math.sin(flutter * 0.37 + 1.3); // grinding is never steady
-      ramp(grind.gain, k * 0.2 * shake, 0.02);
-      ramp(grindF.frequency, 1100 + 700 * k, 0.05);
-      ramp(rumble.gain, k * 0.3, 0.04);
+      rampIf(grind.gain, k * 0.2 * shake, 0.02);
+      if (k > 0) rampIf(grindF.frequency, 1100 + 700 * k, 0.05, 1);
+      rampIf(rumble.gain, k * 0.3, 0.04);
     },
     /** a landing: a thump by how hard; a PERFECT landing rings */
     landing(ev, impact = 6) {

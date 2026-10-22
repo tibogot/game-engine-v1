@@ -40,6 +40,12 @@ const VERTS = 6;
 const POS_F = VERTS * 3, COL_F = VERTS * 4;
 const FAN = 10; // flare: a fan of 10 triangles
 const _CORNERS = [[-1, -1], [1, -1], [-1, 1], [1, -1], [1, 1], [-1, 1]];
+// the flare's fan, once: per triangle (centre, rim a0, rim a1) as (x, y, isCentre)
+const FAN_PTS = new Float32Array(10 * 9);
+for (let t = 0; t < 10; t++) {
+  const a0 = (t / 10) * Math.PI * 2, a1 = ((t + 1) / 10) * Math.PI * 2;
+  FAN_PTS.set([0, 0, 1, Math.cos(a0), Math.sin(a0), 0, Math.cos(a1), Math.sin(a1), 0], t * 9);
+}
 const _hot = new THREE.Color(), _cool = new THREE.Color(), _tint = new THREE.Color(), _flare = new THREE.Color();
 const _dir = new THREE.Vector3(), _tan = new THREE.Vector3(), _bit = new THREE.Vector3(), _side = new THREE.Vector3();
 const _cam = new THREE.Vector3(), _a = new THREE.Vector3(), _b = new THREE.Vector3(), _along = new THREE.Vector3();
@@ -77,7 +83,7 @@ export function createSparks(scene, settings = SPARKS) {
   scene.add(flare);
   const positions = geometry.attributes.position.array, colors = geometry.attributes.color.array;
   const particles = Array.from({ length: POOL }, () => ({ life: 0, maxLife: 1, pos: new THREE.Vector3(), vel: new THREE.Vector3(), groundY: -1e9, bounced: false }));
-  let next = 0, accum = 0, flareK = 0, enabled = true;
+  let next = 0, accum = 0, flareK = 0, enabled = true, alive = 0, colours = "";
 
   function emit(point, normal, carVel, k, groundY) {
     const p = particles[next];
@@ -135,10 +141,8 @@ export function createSparks(scene, settings = SPARKS) {
     _a.copy(point).addScaledVector(normal, 0.08);
     const a = s.flare.intensity * (0.6 + 0.4 * k);
     for (let t = 0; t < FAN; t++) {
-      const a0 = (t / FAN) * Math.PI * 2, a1 = ((t + 1) / FAN) * Math.PI * 2;
-      const pts = [[0, 0, 1], [Math.cos(a0), Math.sin(a0), 0], [Math.cos(a1), Math.sin(a1), 0]];
       for (let j = 0; j < 3; j++) {
-        const [x, y, centre] = pts[j];
+        const q = (t * 3 + j) * 3, x = FAN_PTS[q], y = FAN_PTS[q + 1], centre = FAN_PTS[q + 2];
         const o = (t * 3 + j) * 3, c = (t * 3 + j) * 4;
         pa[o] = _a.x + (_cr.x * x + _cu.x * y) * r;
         pa[o + 1] = _a.y + (_cr.y * x + _cu.y * y) * r;
@@ -155,7 +159,7 @@ export function createSparks(scene, settings = SPARKS) {
   let hasLastCam = false;
   function reset() {
     for (const p of particles) p.life = 0;
-    accum = 0; flareK = 0;
+    accum = 0; flareK = 0; alive = 0;
     geometry.setDrawRange(0, 0);
     mesh.visible = flare.visible = false;
   }
@@ -176,7 +180,9 @@ export function createSparks(scene, settings = SPARKS) {
         lastCam.copy(_cam);
         hasLastCam = true;
       }
-      _hot.set(s.colorHot); _cool.set(s.colorCool); _flare.set(s.flare.color);
+      // the colours parsed when they change (the lab tunes them), not three string parses a frame
+      const key = s.colorHot + s.colorCool + s.flare.color;
+      if (key !== colours) { colours = key; _hot.set(s.colorHot); _cool.set(s.colorCool); _flare.set(s.flare.color); }
       let k = 0;
       // the vehicle's LATCHED scrape (it holds across the tick-rate flicker of the contact)
       if (enabled && dt > 0 && vehicle?.enabled && vehicle.scraping && vehicle.scrapeSpeed > s.minSpeed) {
@@ -194,7 +200,8 @@ export function createSparks(scene, settings = SPARKS) {
         if (flare.visible) writeFlare(vehicle.scrapePoint, vehicle.scrapeNormal, flareK);
       }
 
-      let alive = 0;
+      if (alive === 0 && k === 0) return; // nothing flying, nothing new: no walk over the pool
+      alive = 0;
       for (const p of particles) {
         if (p.life <= 0) continue;
         p.life -= dt;

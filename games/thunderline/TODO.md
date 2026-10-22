@@ -291,9 +291,15 @@ this is just the list. Newest decisions at the top of each section. Last updated
       7. Gates merged per material (gateMesh mergeParts; the header's 6-material box → a box + 2 sign faces):
          start + finish fully in view 30 → 16 draws, 24 → 14 meshes. (From the chase camera at the start the
          count can read HIGHER: the merged pylons are one mesh spanning the road, never culled.)
-      OPEN from the audit: bloom 14 of 23 passes, terrain 626k triangles (both need GPU timing); per-frame CPU:
-      engine-sound 42 audio ramps/frame (18 loops, 4 audible), silent synth voices running, the live shadow's
-      separate clear pass, allocations in sparks / tyre marks, hidden HUD rewritten each frame.
+      CPU clean-ups DONE (same day): engine loops send a parameter only when it moved, the pitch only while
+      a loop is heard, and SLEEP when muted (the AudioContext suspends: engine + sfx do no audio work); synth
+      voices switched off (roll, wind, squeal) are never built; the live sun-shadow clears IN its render pass
+      (no separate clear + submit) and allocates nothing per frame; sparks parse colours on change, the
+      flare's fan is a table, no pool walk when nothing flies; tyre marks allocate nothing and upload one
+      range per attribute per frame; the HUD writes only changed text (none while the Timer is off); race
+      ticks return a shared empty list. Checked: sound on/mute/on (running/suspended/running), clock and
+      speed live, sparks + marks + shadow as before, console clean.
+      OPEN (need GPU timing): bloom 14 of 23 passes, terrain 626k triangles.
 - [x] **NO REPEATING TILES on the grass and the mountains** (user, 2026-10-22: "fix both the repeating
       tiling of the grass and the mountain, the best solution"): worlds.js GROUND_FEATURES + ANTI_TILING —
       hex tiling to 45 m, a ×5 tile 30-110 m, the engine's new FAR TONE (a ×20 read of the same texture
