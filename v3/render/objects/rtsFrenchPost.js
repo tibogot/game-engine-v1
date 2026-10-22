@@ -299,7 +299,9 @@ let FOOT = MAT.rubble;
 // noBags (2026-10-14, alg-rts algSandbags): the post's sandbags left out, WHERE they go recorded instead
 // (userData.bagSlots, scaled: { kind, pos, yaw }) — the game sets its cloth-simulated ones there.
 let SLOTS = null;
-export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubble, noBags = false } = {}) {
+// signsOnly (2026-10-22, alg-rts's Blender post — tools/blender/postKit.py — on this very layout): its markings only the
+// boards and the tricolour; the weathering (plaster fallen, dust, streaks) is in the Blender walls' own render.
+export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubble, noBags = false, signsOnly = false } = {}) {
   FOOT = footStone;
   SLOTS = noBags ? [] : null;
   const R = rng(seed);
@@ -533,7 +535,7 @@ export function buildFrenchPost({ seed = 1957, detail = 1, footStone = MAT.rubbl
   st.push(stencilPatch("frSasSign", flatSurface([-hl + T + 3.3, 2.7, -0.4 + 4.02], [0, 0, 1], [1, 0, 0], 1.3, "frSasSign"), { lift: 0.01 }));
   // Whitewash fallen off the outer walls and the towers, low down, where damp
   // and knocks take it first: the stone behind shows through.
-  {
+  if (!signsOnly) {
     const faces = [
       { n: [0, 0, -1], r: [-1, 0, 0], at: (t) => [t, -hl], avoid: (t) => Math.abs(t) < gW / 2 + 0.6 },
       { n: [0, 0, 1], r: [1, 0, 0], at: (t) => [t, hl] },

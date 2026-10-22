@@ -24,6 +24,9 @@ import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, 
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
+import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
+import { MAT } from "../../v3/render/objects/rtsParts.js";
+import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
 /** The detail's look: its tile (m), the scan normal's strength, the cavity's depth. ?stonedetail=0 = without. */
 export const STONE_DETAIL = { tile: 0.5, normal: 1.6, cavity: 0.3 };
@@ -105,6 +108,34 @@ function clothMaterial(src, T, colorType) {
   return m;
 }
 
+/**
+ * LIME RENDER, CLOSE UP (2026-10-22, the Blender post — a 22 m piece's atlas is soft up close): the render's and the
+ * rubble's photo detail tiled in the piece's space — the plaster's relief and its light and dark, ONE tap per map
+ * (the face's dominant axis), over the baked atlas. ?plasterdetail=0 = without.
+ */
+export const PLASTER_DETAIL = { tile: 1.6, normal: 1.2, contrast: 0.55, mean: 0.72 };
+const PLASTER_OFF = typeof location !== "undefined" && new URLSearchParams(location.search).get("plasterdetail") === "0";
+let _plasterTex = null;
+const plasterTextures = () => (_plasterTex ??= Promise.all(["nor_gl", "diff"].map((k) => loadTexture(`/textures/build/white_plaster_rough_01/white_plaster_rough_01_${k}_1k.jpg`)))
+  .then((ts) => { for (const t of ts) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.needsUpdate = true; } return { nor: ts[0], diff: ts[1] }; }));
+function plasterMaterial(src, T) {
+  const m = new THREE.MeshStandardNodeMaterial({ map: src.map, normalMap: src.normalMap ?? null, color: src.color, roughness: src.roughness, metalness: src.metalness, side: THREE.FrontSide });
+  if (!T || PLASTER_OFF) return m;
+  const n = normalGeometry.normalize(), ax = abs(n);
+  const isX = ax.x.greaterThan(ax.y).and(ax.x.greaterThan(ax.z)), isY = ax.y.greaterThan(ax.z);
+  const p = positionGeometry.div(PLASTER_DETAIL.tile);
+  const uvv = select(isX, p.zy, select(isY, p.xz, p.xy));
+  const k = float(PLASTER_DETAIL.normal);
+  const t = texture(T.nor, uvv).xyz.mul(2).sub(1).mul(vec3(k, k, 1));
+  const nn = normalize(select(isX, vec3(t.xy.add(n.zy), abs(t.z).mul(n.x)).zyx, select(isY, vec3(t.xy.add(n.xz), abs(t.z).mul(n.y)).xzy, vec3(t.xy.add(n.xy), abs(t.z).mul(n.z)))));
+  const baked = src.normalMap ? normalMap(texture(src.normalMap)) : transformNormalToView(n);
+  m.normalNode = normalize(baked.add(transformNormalToView(nn).sub(transformNormalToView(n))));
+  const c = texture(T.diff, uvv).rgb, lum = c.x.mul(0.2126).add(c.y.mul(0.7152)).add(c.z.mul(0.0722)).div(PLASTER_DETAIL.mean);
+  m.colorNode = texture(src.map).rgb.mul(clamp(float(1).add(lum.sub(1).mul(PLASTER_DETAIL.contrast)), 0.6, 1.25));
+  m.normalMap = null;
+  return m;
+}
+
 const S = 1.3;   // the kit's scale (the Blender piece is in real metres)
 let _detail = null;
 const _pieces = new Map();   // "kit:type" → { p: Promise<boolean>, geo }
@@ -117,12 +148,12 @@ export function sangarStoneMaterial(src) { return _detail ? stoneMaterial(src, _
  * game geometry — plain floats, the kit's scale, the OLD piece's data (`old()`: its footprint, gun… the game's
  * systems read them), the stone material, the construction material. Resolves true when pieceGeometry() has it.
  */
-function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = false } = {}) {
+function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = false, plaster = false } = {}) {
   const key = `${kit}:${type}`;
   if (_pieces.has(key)) return _pieces.get(key).p;
   const rec = { geo: null, p: null };
   _pieces.set(key, rec);
-  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null), cloth ? clothTextures().catch(() => null) : null]).then(([parts, T, CT]) => {
+  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null), cloth ? clothTextures().catch(() => null) : null, plaster ? plasterTextures().catch(() => null) : null]).then(([parts, T, CT, PT]) => {
     if (!parts?.[`${type}:intact`]) return false;
     const lod = houseMesh(type, "intact", 1)?.children[0];
     const near = lod?.levels?.[0]?.object, farM = lod?.levels?.[1]?.object;
@@ -140,7 +171,7 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     _detail = T;
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
     g.userData.labMaterial = stone ? stoneMaterial(near.material, T)
-      : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
+      : plaster ? plasterMaterial(near.material, PT) : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
     g.userData.kitType = [kit, type];   // (its damaged / ruin states: pieceState)
@@ -372,6 +403,39 @@ function infirmaryPlantSpots() {
   return out;
 }
 
+/**
+ * THE FRENCH POST IN BLENDER (tools/blender/postKit.py, 2026-10-22): the bordj at the whitewashed houses' standard,
+ * on the old piece's exact layout — so ITS data stays the game's: the gate and its leaves, the tower guns' muzzles,
+ * the sandbag slots (the user's simulated bags, children of the placed post), the flag's mount, the footprint, the
+ * cover lines; its markings the boards and the tricolour only (the walls carry their own weathering).
+ */
+export const loadFrenchPost = () => loadBlenderPiece("postkit", "post", () => buildFrenchPost({ detail: 2, noBags: true, signsOnly: true, footStone: MAT.limestone }), null, { stone: false, plaster: true });
+export const frenchPostGeometry = () => { const g = pieceGeometry("postkit", "post"); if (g) g.userData.farFrom = 150; return g; };   // (its far level only past the widest RTS zoom)
+/**
+ * The placed post (the showroom's, the producer's mesh) to the Blender one: its geometry and material swapped, its
+ * children kept (the gate's leaves, the flag, the simulated bags), its markings re-made (signs only), its far level.
+ */
+export function swapPost(mesh, app) {
+  const geo = frenchPostGeometry();
+  if (!geo || !mesh?.isMesh || mesh.geometry.userData.blender) return false;
+  const oldGeo = mesh.geometry;
+  swapPlaced({ frenchPost: mesh }, /^frenchPost$/, geo, app);
+  // (the OLD geometry's extra attributes kept on the new, zero-filled — matId, tone, ao: three's SHADOW pass kept the
+  // post's render state with the old attribute list and its next draw read an attribute the new geometry has not —
+  // "reading 'id'", the render loop stopped, 2026-10-22; disposing the old geometry did not clear it. Both levels.)
+  const L = mesh.userData.lod;
+  for (const g of new Set([mesh.geometry, L?.near, L?.far].filter(Boolean))) {
+    const n = g.attributes.position.count;
+    for (const [k, a] of Object.entries(oldGeo.attributes)) if (!g.attributes[k]) g.setAttribute(k, new THREE.BufferAttribute(new Float32Array(n * a.itemSize), a.itemSize));
+  }
+  mesh.geometry.userData.stencil = geo.userData.stencil;
+  const old = mesh.getObjectByName("Stencils");
+  if (old) mesh.remove(old);
+  const st = stencilMesh(geo.userData.stencil);
+  if (st) mesh.add(st);
+  return true;
+}
+
 /** The barbed wire (tools/blender/barbedWire.py — rusted steel: no stone detail). */
 export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () => buildBarbedWire(), null, { stone: false });
 export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");
@@ -512,7 +576,9 @@ export function trackLod(app, mesh) {
       if (!m.parent) { _tracked.delete(m); continue; }
       const L = m.userData.lod;
       m.getWorldPosition(p);
-      const want = p.distanceTo(cam.position) < HOUSE_FAR ? L.near : L.far;
+      // (a piece's own switch distance — userData.farFrom: the post, 30 m across, read its far level from the default RTS
+      // zoom and lost its wire, ladders, parade stones — 2026-10-22)
+      const want = p.distanceTo(cam.position) < (m.geometry.userData.farFrom ?? HOUSE_FAR) ? L.near : L.far;
       if (m.geometry !== want) m.geometry = want;
     }
   });

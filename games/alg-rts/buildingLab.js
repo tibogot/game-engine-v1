@@ -45,7 +45,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -447,6 +447,14 @@ export const BUILDINGS = {
   },
   // OPTION B (2026-10-11, your go): the post as the kit builds it, its colours kept, the photos'
   // grain and relief on top (algKitPhoto.js) — the game's post on the LEFT.
+  // THE POST IN BLENDER (2026-10-22, tools/blender/postKit.py): the game's LEFT, the Blender one RIGHT — the same
+  // layout, its gate, flag and YOUR simulated bags on both
+  posteBlender: {
+    label: "Poste français (Blender)", gap: 46, yaw: Math.PI - 0.55, prepare: () => Promise.all([loadFrenchPost(), loadSandbagWall()]),
+    before: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
+    after: () => buildFrenchPostPiece(() => { const g0 = frenchPostGeometry(), g = g0.clone(); g.userData = { ...g0.userData }; return g; }),
+    tags: ["POST (THE GAME)", "POST · BLENDER"], note: "the game's post on the left, the Blender one on the right (the same layout: the gate, the flag, the simulated sandbags).",
+  },
   postePhoto: {
     label: "Poste (photo)", gap: 42, before: () => buildFrenchPost({ detail: 2 }),
     after: () => { const g = buildFrenchPost({ detail: 2, footStone: MAT.limestone }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); return g; },
