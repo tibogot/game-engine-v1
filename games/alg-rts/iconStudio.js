@@ -97,7 +97,8 @@ const ICONS = [
     ["detonator", "Detonate (FLN)", [-30, 20]], ["detector", "Sweep mines", [-60, 14]],
     ["radio", "Radio", [-30, 14], { crop: [0, 0.48], zoom: 0.8 }], ["lmg", "FM 24/29", [-35, 38], { zoom: 0.62 }], ["bazooka", "Bazooka", [-35, 38], { zoom: 0.62 }], ["flamer", "Flamethrower", [-50, 18], { zoom: 0.68 }],
     ["sniper", "Sniper", [-35, 38], { zoom: 0.62 }], ["tools", "Repair", [-10, 70]], ["shell", "Barrage (shell)", [-25, 12]],
-    ["shotgun", "Douar reinforcements (FLN)", [-35, 34], { zoom: 0.62, svg: "reinforce" }], ["mapcase", "Advisers (FLN)", [-20, 50], { zoom: 0.78, svg: "vet1" }]]
+    ["shotgun", "Douar reinforcements (FLN)", [-35, 34], { zoom: 0.62, svg: "reinforce" }], ["mapcase", "Advisers (FLN)", [-20, 50], { zoom: 0.78, svg: "vet1" }],
+    ["spade", "Build (the build menu)", [-10, 70], { svg: "sandbags", light: 1.7, zoom: 0.78 }]]
     .map(([p, title, view, o = {}]) => ({ name: p, title, svg: p, view, zoom: 0.85, ...o,
       make: async () => { await loadHouses("smallprops"); return houseMesh(p, "intact", 1).children[0].levels[0].object.clone(); } })),
   // the aircraft, the game's own models (rtsVehiclesFr): the T-6 (the air strikes), the H-21 (the paradrop)
@@ -277,7 +278,7 @@ export async function startIconStudio() {
     espritCorps: "kepi", douar: "shotgun", informers: "radio", saboteurs: "detonator", jeep: "jeep", mortar81: "shell", borderArms: "bazooka",
     outsideSection: "lmg", advisers: "mapcase", recon: "t6", t6Pair: "t6", medevac: "alouette", gunship: "alouette",
     resMp: "helmet", resMun: "ammobox", resFuel: "jerrycan",
-    badgeLmg: "lmg", badgeBazooka: "bazooka", badgeRadio: "radio", badgeFlamer: "flamer", badgeSniper: "sniper", alertMine: "mine", alertCut: "cutters" };
+    badgeLmg: "lmg", badgeBazooka: "bazooka", badgeRadio: "radio", badgeFlamer: "flamer", badgeSniper: "sniper", alertMine: "mine", alertCut: "cutters", buildMenu: "spade" };
   async function atlas(size = 96, cols = 8) {
     const keys = [...KEYS];
     const tiles = [];

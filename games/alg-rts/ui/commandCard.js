@@ -241,7 +241,7 @@ export function createCommandCard({
       }
     } else {
       abilityButtons(selected, grid);
-      if (builds.length) grid.appendChild(button({ kind: "act", key: "buildMenu", label: t("Construire"), icon: "sandbags",
+      if (builds.length) grid.appendChild(button({ kind: "act", key: "buildMenu", label: t("Construire"), icon: "buildMenu",
         info: builds.some((b) => b.key === "sangar") ? t("Les ouvrages que ce groupe peut bâtir : sangars, écrans d'embuscade, caches d'armes, refuges.") : t("Les ouvrages que ce groupe peut bâtir : sacs de sable, barbelés, nids, fosses…"),
         run: () => { buildPage = true; render(selRef); } }));
     }

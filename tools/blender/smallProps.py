@@ -458,8 +458,35 @@ def buildMapCase(K, *a, far=False):
     rod(K, "Lead", (-0.02, yAt(-0.02) + 0.006, 0.13), (-0.005, yAt(-0.005) + 0.006, 0.134), 0.003, "spBlack", 6)
     drystone.writeBuildOrder(K); drystone.setLow(K, False)
 
+def buildSpade(K, *a, far=False):
+    """BUILD (the command card's build menu — the sandbag icon there read as the sandbag wall): the génie's tools
+    crossed — a long-handled shovel (its D-grip, the steel blade with its turned-up shoulders) over a pickaxe."""
+    drystone.setLow(K, far)
+    c, s = math.cos(0.62), math.sin(0.62)
+    at = lambda t, sg: (sg * t * c, 0.03, t * s)   # along one diagonal of the X (sg ±1)
+    # the shovel: haft along +diagonal, the blade at its low end
+    rod(K, "Haft", at(-0.2, 1), at(0.36, 1), 0.013, "spWood", 10)
+    gx, gz = 0.36 * c, 0.36 * s   # the T-grip across the haft's end
+    rod(K, "GripT", (gx - 0.06 * s, 0.03, gz + 0.06 * c), (gx + 0.06 * s, 0.03, gz - 0.06 * c), 0.011, "spWood", 8)
+    bm = bmesh.new(); vs = []
+    for (t, w) in [(-0.2, 0.05), (-0.24, 0.085), (-0.38, 0.085), (-0.44, 0.0)]:
+        for sd in (-1, 1):
+            vs.append(bm.verts.new(B(t * c + sd * w * s, 0.03 + (0.008 if abs(sd * w) > 0.06 else 0), t * s - sd * w * c)))
+    for i in range(0, len(vs) - 2, 2): bm.faces.new((vs[i], vs[i + 1], vs[i + 3], vs[i + 2]))
+    bl = K.obj("Blade", bm, "spSteel", "h", smooth=True); so = bl.modifiers.new("S", "SOLIDIFY"); so.thickness = 0.004; T(bl)
+    rod(K, "Socket", at(-0.14, 1), at(-0.22, 1), 0.017, "spSteel", 10)
+    # the pickaxe: its haft along the other diagonal, the head across it at the top
+    rod(K, "PickHaft", at(-0.34, -1), at(0.3, -1), 0.015, "spWood", 10)
+    hx, hz = 0.3 * -c, 0.3 * s
+    # the head: two arms out of the eye, each curving down toward the haft (point one way, adze the other)
+    for nm, sg, L, r0 in (("PickPoint", -1, 0.26, 0.013), ("PickAdze", 1, 0.2, 0.015)):
+        pts = [(hx + sg * L * (k / 4) * s, 0.045, hz + sg * L * (k / 4) * c - 0.09 * (k / 4) ** 2) for k in range(5)]
+        for k in range(4): rod(K, f"{nm}{k}", pts[k], pts[k + 1], r0 * (1 - 0.18 * k), "spDark", 8)
+    rod(K, "PickEye", (hx, 0.02, hz), (hx, 0.07, hz), 0.022, "spDark", 10)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
 PROPS.update({"radio": buildRadio, "lmg": buildLmg, "bazooka": buildBazooka, "flamer": buildFlamer, "sniper": buildSniper,
-              "tools": buildTools, "shell": buildShell, "shotgun": buildShotgun, "mapcase": buildMapCase})
+              "tools": buildTools, "shell": buildShell, "shotgun": buildShotgun, "mapcase": buildMapCase, "spade": buildSpade})
 
 MATDEF.update({
     "spOlive": (0.55, paintWorn(0x4d5536, 0x6e6c66)), "spPale": (0.7, flatC(0xc9c2a4)), "spBlack": (0.5, flatC(0x161614)),

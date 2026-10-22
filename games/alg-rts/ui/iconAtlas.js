@@ -13,7 +13,9 @@ export const KEYS = ["patrol", "grenade", "stop", "focus", "cutWire", "cancelSit
   // the squads' weapon badges (ui/armyTabs.js — CoH's upgrade marks on the unit card), no tile
   "badgeLmg", "badgeBazooka", "badgeRadio", "badgeFlamer", "badgeSniper",
   // the veterancy chevrons (brass symbols, no tile) and the alert feed's pictures (ui/battleHud.js)
-  "vet1", "vet2", "vet3", "alertMine", "alertCut", "alertAttack", "alertSeen", "alertFlag"];
+  "vet1", "vet2", "vet3", "alertMine", "alertCut", "alertAttack", "alertSeen", "alertFlag",
+  // the build menu's own button (the sandbag wall's picture there read as the wall — you, 2026-10-22)
+  "buildMenu"];
 /**
  * THE COLOUR CODE (2026-10-22, you: "do the full colour coding for the orders" — Company of Heroes' card): each key's
  * CATEGORY, its tile's backdrop baked into the atlas (iconStudio): orders blue-grey, attack orders and call-ins orange,
@@ -31,7 +33,7 @@ export const CATEGORY = {
   badgeLmg: "bare", badgeBazooka: "bare", badgeRadio: "bare", badgeFlamer: "bare", badgeSniper: "bare",
   vet1: "bare", vet2: "bare", vet3: "bare", alertAttack: "attack", alertFlag: "order",
   sandbags: "build", wire: "build", mgNest: "build", mortarPit: "build", mirador: "build", searchlight: "build", forwardPost: "build", aidStation: "build", fortPoint: "build",
-  sangar: "build", ambushScreen: "build", armsCache: "build", refuge: "build", infirmary: "build",
+  buildMenu: "build", sangar: "build", ambushScreen: "build", armsCache: "build", refuge: "build", infirmary: "build",
 };
 /** Each category's tile: its glow (centre), its edge, the glyph's two tones. */
 export const PALETTE = {
