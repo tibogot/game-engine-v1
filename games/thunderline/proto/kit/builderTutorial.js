@@ -41,15 +41,15 @@ const STEPS = [
   },
   {
     k: "Piece 1", title: "Place the start",
-    text: "Open the <b>Road</b> tab, pick <b>Start</b>, and click on the grid. A blue ghost shows where it goes; <kbd>Q</kbd> / <kbd>E</kbd> turn it first.",
-    hi: ['[data-cat="road"]', '[data-base="start_line"]'],
+    text: "Open the <b>Game</b> tab, pick <b>Start</b>, and click on the grid. A blue ghost shows where it goes; <kbd>Q</kbd> / <kbd>E</kbd> turn it first.",
+    hi: ['[data-cat="game"]', '[data-base="start_line"]'],
     done: (api) => roadPieces(api).some((p) => p.id === "start_line"),
   },
   {
     k: "Road", title: "Add straights",
-    text: "Pick <b>Straight 64</b> and point at the <b>open end</b> of your road: the ghost snaps onto it. Click to place. Add <b>two</b>.",
+    text: "Open <b>Straight</b>, pick <b>Straight 64</b> and point at the <b>open end</b> of your road: the ghost snaps onto it. Click to place. Add <b>two</b>.",
     tip: "The piece stays in your hand: click again for the next one. Right-click or <kbd>Esc</kbd> puts it down.",
-    hi: ['[data-cat="road"]', '[data-base="straight_64"]'],
+    hi: ['[data-cat="straight"]', '[data-base="straight_64"]'],
     done: (api) => roadPieces(api).filter((p) => p.parent != null && /straight/.test(p.id)).length >= 2,
   },
   {
@@ -67,9 +67,9 @@ const STEPS = [
   },
   {
     k: "Jumps", title: "Land it",
-    text: "Open <b>Air</b>, pick <b>Fitted landing</b> and point at the <b>yellow arc</b>, where the car comes down. The panel says from what speed the car makes it.",
+    text: "Still in <b>Ramps</b>, pick <b>Fitted landing</b> and point at the <b>yellow arc</b>, where the car comes down. The panel says from what speed the car makes it.",
     tip: "Any road piece can go on the arc too — a platform, a straight. ← / → tilt a fitted landing for the air roll.",
-    hi: ['[data-cat="air"]', '[data-base="fitted_landing"]'],
+    hi: ['[data-cat="ramps"]', '[data-base="fitted_landing"]'],
     done: (api) => roadPieces(api).some((p) => p.flightFrom != null),
   },
   {
@@ -81,9 +81,9 @@ const STEPS = [
   },
   {
     k: "Obstacles", title: "A boost pad",
-    text: "Open <b>Obstacles</b>, pick <b>Boost pad</b> and drop it on a straight. Then <b>drag it</b> with the mouse: it slides along and across the road.",
+    text: "Open <b>Game</b>, pick <b>Boost pad</b> and drop it on a straight. Then <b>drag it</b> with the mouse: it slides along and across the road.",
     tip: "Obstacles stay on their piece: move or replace the road and they follow.",
-    hi: ['[data-cat="obstacles"]', '[data-base="ob_boost"]'],
+    hi: ['[data-cat="game"]', '[data-base="ob_boost"]'],
     done: (api) => (api.track.props ?? []).some((p) => p.kind === "ob_boost"),
   },
   {
@@ -94,9 +94,9 @@ const STEPS = [
   },
   {
     k: "Finish", title: "Finish it",
-    text: "Open <b>Road</b> and put a <b>Finish</b> at the end. When the test car drives it cleanly, the track gets an <b>author time</b>: the medals are set from it.",
+    text: "Open <b>Game</b> and put a <b>Finish</b> at the end. When the test car drives it cleanly, the track gets an <b>author time</b>: the medals are set from it.",
     tip: "The track saves by itself. Play it from the menu — there the shadows are baked for it.",
-    hi: ['[data-cat="road"]', '[data-base="finish_line"]'],
+    hi: ['[data-cat="game"]', '[data-base="finish_line"]'],
     done: (api) => roadPieces(api).some((p) => p.id === "finish_line"),
   },
 ];

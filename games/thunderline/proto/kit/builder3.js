@@ -47,18 +47,22 @@ const AIR_DRAG = 0.45 / 1400; // the car's AERO.drag / mass (P3: arcs must use i
 const SNAP_COLORS = { end: 0x45e08a, road: 0x45e08a, side: 0x7dffc8, arc: 0xff9a3d, local: 0xc78bff, world: 0x3fd2ff };
 const GRID_STEPS = [1, 2, 4, 8];
 
+// THE DOCK'S TABS (user, 2026-10-22, from Apex Rush's palette: "game, straight, turns, banked, slope,
+// ramps, loop, obstacles"): one home per piece, by what kind of road it is — our own dock and look
 const CATS = [
-  { id: "road", label: "Road", tiles: ["start_line", "finish_line", "adj_straight", "adj_slope", "straight_64", "boost_32", "slope_up_12", "slope_down_12", "helix_up_360", "helix_down_360", "rollers_64"] },
+  // the race's own things: where it starts and ends, what it hands the car
+  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "air_ring", "ob_boost", "ob_jump", "boost_32"] },
+  { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
-  { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "fast_turn_128", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24"] },
-  { id: "lean", label: "Lean", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22"] },
-  { id: "ramps", label: "Ramps", tiles: ["adj_kicker", "kicker_20", "launch_45", "launch_60", "quarter_pipe", "roll_kicker", "plank_32", "plank_64"] },
-  { id: "air", label: "Air", tiles: ["adj_kicker", "kicker_20", "gap_jump", "drop_16", "air_ring", "fitted_landing", "catch_tube", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
-  { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "catch_tube", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out"] },
-  { id: "platforms", label: "Platforms", tiles: ["platform_32", "platform_64", "platform_128", "platform_turn_90", "platform_up_12", "platform_down_12", "funnel_64", "flare_64"] },
-  { id: "stunts", label: "Stunts", tiles: ["twist_120", "half_loop_28", "uturn_wall_32", "fitted_bowl", "flip_ramp_std", "flip_ramp_s", "loop_28", "sky_loop", "wallride_90"] },
+  { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
+  { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "uturn_wall_32"] },
+  { id: "slope", label: "Slope", tiles: ["adj_slope", "slope_up_12", "slope_down_12", "platform_up_12", "platform_down_12", "helix_up_360", "helix_down_360", "rollers_64", "drop_16"] },
+  // the take-offs, then what you land on
+  { id: "ramps", label: "Ramps", tiles: ["adj_kicker", "kicker_20", "launch_45", "launch_60", "quarter_pipe", "roll_kicker", "gap_jump", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
+  { id: "loop", label: "Loop", tiles: ["loop_28", "sky_loop", "half_loop_28", "twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s"] },
+  { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out", "catch_tube"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_boost", "ob_jump", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -241,8 +245,13 @@ function meshesFor(id, open) {
 }
 
 // ---------- thumbnails: each tile rendered once, 3/4 view ----------
+// THE DOCK'S PICTURES, per RAILS setting (user, 2026-10-22: in Apex Rush "the thumbnails change when we
+// choose edges or no edges"): key `${piece}|${rails}` (rails = oeOf(edges): false both, true none, "L", "R").
+// All pieces with both rails at start; another setting's pictures are drawn when first shown, one by one.
 const thumbs = new Map();
-async function bakeThumbs() {
+let thumbKit = null;
+function thumbSetup() {
+  if (thumbKit) return thumbKit;
   const W = 192, H = 128;
   // sRGB, like the old thumbnail baker: a linear target copied straight to a canvas comes out dark
   const rt = new THREE.RenderTarget(W, H, { type: THREE.UnsignedByteType, colorSpace: THREE.SRGBColorSpace });
@@ -253,34 +262,55 @@ async function bakeThumbs() {
   const d = new THREE.DirectionalLight(0xfff2e0, 4.2); d.position.set(5, 9, 6); ts.add(d);
   const cam = new THREE.PerspectiveCamera(30, W / H, 0.5, 5000);
   const cvs = document.createElement("canvas"); cvs.width = W; cvs.height = H;
-  const ctx = cvs.getContext("2d");
+  return (thumbKit = { W, H, rt, ts, cam, cvs, ctx: cvs.getContext("2d") });
+}
+/** Whether a dock piece's picture depends on the rails (not obstacles, rings, tubes, half-pipes). */
+const railsMatter = (id) => id !== RING && !isObstacle(id) && id !== CATCH && !TILES[id]?.tube && !TILES[id]?.halfpipe;
+async function renderThumb(id, open) {
+  const { W, H, rt, ts, cam, ctx, cvs } = thumbSetup();
+  const pid = id === FITTED_BOWL ? "bowl_110" : ADJUSTABLE[id] ? ensureTile(adjustableId(id, adjDefaults(id))).id : id; // a typical one
+  const g = id === RING
+    ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
+    : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, open);
+  const t = id === RING || isObstacle(id) ? {} : ensureTile(pid);
+  if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
+  ts.add(g);
+  g.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(g);
+  const sph = box.getBoundingSphere(new THREE.Sphere());
+  const dir = new THREE.Vector3(0.75, 0.6, 0.9).normalize();
+  cam.position.copy(sph.center).addScaledVector(dir, sph.radius / Math.sin((cam.fov * DEG) / 2) * 0.62);
+  cam.lookAt(sph.center);
+  renderer.setRenderTarget(rt);
+  renderer.render(ts, cam);
+  renderer.setRenderTarget(null);
+  const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
+  const img = ctx.createImageData(W, H);
+  const stride = px.length / H;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W * 4; x++) img.data[y * W * 4 + x] = px[y * stride + x];
+  ctx.putImageData(img, 0, 0);
+  thumbs.set(`${id}|${open}`, cvs.toDataURL());
+  ts.remove(g);
+}
+async function bakeThumbs() {
   for (const c of CATS) for (const id of c.tiles) {
     if (id === FITTED || id === CATCH) continue; // drawn with the landing's / tube's picture (see pic)
-    const pid = id === FITTED_BOWL ? "bowl_110" : ADJUSTABLE[id] ? ensureTile(adjustableId(id, adjDefaults(id))).id : id; // a typical one
-    const g = id === RING
-      ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
-      : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, false);
-    const t = id === RING || isObstacle(id) ? {} : ensureTile(pid);
-    if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
-    ts.add(g);
-    g.updateMatrixWorld(true);
-    const box = new THREE.Box3().setFromObject(g);
-    const sph = box.getBoundingSphere(new THREE.Sphere());
-    const dir = new THREE.Vector3(0.75, 0.6, 0.9).normalize();
-    cam.position.copy(sph.center).addScaledVector(dir, sph.radius / Math.sin((cam.fov * DEG) / 2) * 0.62);
-    cam.lookAt(sph.center);
-    renderer.setRenderTarget(rt);
-    renderer.render(ts, cam);
-    renderer.setRenderTarget(null);
-    const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
-    const img = ctx.createImageData(W, H);
-    const stride = px.length / H;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W * 4; x++) img.data[y * W * 4 + x] = px[y * stride + x];
-    ctx.putImageData(img, 0, 0);
-    thumbs.set(id, cvs.toDataURL());
-    ts.remove(g);
+    await renderThumb(id, false);
   }
-  rt.dispose();
+}
+const thumbQueue = [];
+let thumbBusy = false;
+function wantThumb(id, open) {
+  const k = `${id}|${open}`;
+  if (thumbs.has(k) || thumbQueue.some((q) => q.k === k)) return;
+  thumbQueue.push({ id, open, k });
+  if (!thumbBusy) runThumbQueue();
+}
+async function runThumbQueue() {
+  thumbBusy = true;
+  while (thumbQueue.length) { const q = thumbQueue.shift(); await renderThumb(q.id, q.open); }
+  thumbBusy = false;
+  renderDock();
 }
 
 // ---------- the track's thumbnail (library cards): the track alone, 3/4 view ----------
@@ -363,7 +393,12 @@ const BOLT = `<svg viewBox="0 0 16 16"><path fill="currentColor" d="M9.5 0 2 9h5
 function pic(id, cls = "pic") {
   const el = document.createElement("div");
   el.className = cls;
-  const url = thumbs.get(thumbOf(id));
+  const base = thumbOf(id);
+  // the rails as the dock's switch sets them — on a mirrored (_L) piece, drawn flipped: its sides swap
+  let open = railsMatter(base) ? oeOf(edges) : false;
+  if (id.endsWith("_L") && (open === "L" || open === "R")) open = open === "L" ? "R" : "L";
+  if (open !== false) wantThumb(base, open);
+  const url = thumbs.get(`${base}|${open}`) ?? thumbs.get(`${base}|false`);
   if (url) { el.style.backgroundImage = `url(${url})`; el.style.backgroundSize = "cover"; el.style.backgroundPosition = "center"; if (id.endsWith("_L")) el.style.transform = "scaleX(-1)"; }
   return el;
 }

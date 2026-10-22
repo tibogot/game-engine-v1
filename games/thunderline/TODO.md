@@ -142,6 +142,19 @@ this is just the list. Newest decisions at the top of each section. Last updated
       autopilot. NOT DONE: a FLIP RAMP lesson — the builder can't make a working jump off the flip
       ramp yet (the test car falls off it, its landing lands on the run-up; needs a hand-made layout and
       a look at the piece). Lesson thumbnails are weak (jumps read flat; lesson 3's shows the lap line).
+- [x] **THE DOCK REORGANISED** (user, 2026-10-22, from Apex Rush's palette screenshots): tabs by kind of
+      road — Game (start, finish, air ring, boost / jump pads, Boost 32) · Straight (straights, planks,
+      platforms, funnel / flare) · Turns · Banked (bank in / out, banked set, wallride, U-turn wall) ·
+      Slope (slopes, platform slopes, helixes, rollers, drop) · Ramps (take-offs, then every landing) ·
+      Loop (loops, sky loop, half loop, twist, bowl, flip ramps) · Tubes · Obstacles — one home per
+      piece (Air / Stunts / Lean / Platforms / Road gone). Our own dock and look (no left rail).
+      PICTURES FOLLOW THE RAILS switch (Both / Left / Right / None): keyed per setting, the others drawn
+      when first shown (wantThumb queue); not for obstacles, rings, tubes. Tutorial re-pointed (Game,
+      Straight, Ramps); replayed: 10/10 steps.
+      FROM THE SAME SCREENSHOTS, NOT YET: a rounded dead-end cap; wedges (straight / curved triangle
+      platform pieces); planks / platforms with a hole to drop through; a cone ("volcano") ramp; side
+      wall-ramps; more turn shapes (wide platform corners, rounded corners, varied radii); turn kerb
+      posts; camera zones ("Follow" / "Bumper"); a ring tube with boost arrows; ramps in more sizes.
 - [x] **EVERY PAGE OPENS SILENT** (user, 2026-10-22): the drive's speaker / M turns sound on for that
       page only (not remembered — it came back on in every later page and test run); the menu's dead
       Sound setting removed (a note under Volume).
