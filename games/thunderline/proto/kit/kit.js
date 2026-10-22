@@ -428,6 +428,16 @@ export const TILES = {
   // from the wide platform (48 m) to the road (16 m), or back; the rails converge (oldLook.js taper)
   funnel_64: { label: "Funnel 48 → 16", section: "wide", taper: { from: 24, to: 8 }, segs: [{ L: 64 }] },
   flare_64: { label: "Flare 16 → 48", section: "wide", taper: { from: 8, to: 24 }, segs: [{ L: 64 }] },
+  // PLATFORM SHAPES (user, 2026-10-22, Apex Rush's straight palette: wedges and a rounded end): the taper's
+  // two edges each their own way (oldLook.js buildTaperLook `shape`). A WEDGE: one edge straight on, the
+  // other cutting across to meet it — a right-angle triangle 48 × 48; CURVED, that edge a quarter circle;
+  // a ROUND END, a half circle closing a platform. They end in a point or a curve: `closed`, nothing
+  // snaps after them (side by side does).
+  wedge_48: { label: "Wedge", section: "wide", closed: true, taper: { shape: "wedge", side: 1, hw: 24 }, segs: [{ L: 48 }] },
+  wedge_48_L: { label: "Wedge (L)", section: "wide", closed: true, taper: { shape: "wedge", side: -1, hw: 24 }, segs: [{ L: 48 }] },
+  curved_wedge_48: { label: "Curved wedge", section: "wide", closed: true, taper: { shape: "cwedge", side: 1, hw: 24 }, segs: [{ L: 48 }] },
+  curved_wedge_48_L: { label: "Curved wedge (L)", section: "wide", closed: true, taper: { shape: "cwedge", side: -1, hw: 24 }, segs: [{ L: 48 }] },
+  round_end_24: { label: "Round end", section: "wide", closed: true, taper: { shape: "cap", hw: 24 }, segs: [{ L: 24 }] },
   // ---- VERTICAL + TURN-AROUND pieces (user's Apex Rush top view, 2026-10-20: the tower climbs, the "C") ----
   // HALF LOOP + ROLL (an Immelmann): up the wall, over the top upside down, and the road rolls you upright
   // again — heading BACK, ~2R higher. Road hold holds the car through the roll (as the twist).

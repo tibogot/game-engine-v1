@@ -158,8 +158,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
       buttons: road 20°/28 m 170 km/h, 13 m up, back to lip height at 142 m; wide 20°/40 m off a
       platform 172 km/h, 14 m, 147 m; narrow 30°/24 m off a plank 164 km/h, 25 m, 174 m; 95°/44 m a
       quarter pipe 127 km/h, 61 m up, falls back on its run-up (flagged, rightly).
-      FROM THE SAME SCREENSHOTS, NOT YET: a rounded dead-end cap; wedges (straight / curved triangle
-      platform pieces); planks / platforms with a hole to drop through; a cone ("volcano") ramp; side
+      PLATFORM SHAPES (2026-10-22, Straight tab): Wedge (right-angle triangle 48 × 48), Curved wedge
+      (a quarter circle), both with an L version (Hand); Round end (a half circle, 24 m). The taper look
+      grew `shape` (oldLook buildTaperLook: each edge its own way, the deck centred between them, rails
+      along both). `closed`: no open end after them (openEnds skips them; side by side still works).
+      Tested on a platform's end: snapped, nothing snaps after, test lap runs; looked at in the builder.
+      FROM THE SAME SCREENSHOTS, NOT YET: planks / platforms with a hole to drop through; a cone ("volcano") ramp; side
       wall-ramps; more turn shapes (wide platform corners, rounded corners, varied radii); turn kerb
       posts; camera zones ("Follow" / "Bumper"); a ring tube with boost arrows; ramps in more sizes.
 - [x] **EVERY PAGE OPENS SILENT** (user, 2026-10-22): the drive's speaker / M turns sound on for that

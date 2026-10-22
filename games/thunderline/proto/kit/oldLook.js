@@ -124,15 +124,31 @@ function sideProfile(rp, sides) {
  */
 function buildTaperLook(tile, edges) {
   const { frames } = oldFrames(tile);
-  const { from, to } = tile.taper;
-  // arc length along the frames → an eased half width (smoothstep: no kink at either end)
+  const { from, to, shape, side: sd = 1, hw = 24 } = tile.taper;
+  // arc length along the frames → each edge's offset across: the deck is centred between them (cAt) and
+  // `hwAt` wide each side. A funnel / flare: both edges, eased (smoothstep: no kink at either end). A
+  // SHAPE (platform wedges and ends): one edge fixed, the other cutting across — straight (wedge), a
+  // quarter circle (cwedge) — or both closing on a half circle (cap); never under 0.3 m (a point)
   const sAt = [0];
   for (let i = 1; i < frames.length; i++) sAt.push(sAt[i - 1] + frames[i].pos.distanceTo(frames[i - 1].pos));
   const L = sAt.at(-1) || 1;
-  const hwAt = (i) => { const t = sAt[i] / L, e = t * t * (3 - 2 * t); return from + (to - from) * e; };
-  const narrow = Math.min(from, to);
+  const edgesAt = (i) => {
+    const t = Math.min(1, sAt[i] / L);
+    if (shape === "cap") return [-hw * Math.sqrt(1 - t * t), hw * Math.sqrt(1 - t * t)];
+    if (shape === "wedge" || shape === "cwedge") {
+      const fixed = -sd * hw, moving = shape === "wedge" ? sd * hw * (1 - 2 * t) : -sd * hw + sd * 2 * hw * Math.sqrt(1 - t * t);
+      return [Math.min(fixed, moving), Math.max(fixed, moving)];
+    }
+    const e = t * t * (3 - 2 * t), h = from + (to - from) * e;
+    return [-h, h];
+  };
+  const hwAt = (i) => { const [a, b] = edgesAt(i); return Math.max(0.3, (b - a) / 2); };
+  const cAt = (i) => { const [a, b] = edgesAt(i); return (a + b) / 2; };
+  if (shape) frames.forEach((f, i) => f.pos.addScaledVector(f.right, cAt(i)));
+  let narrow = Infinity;
+  for (let i = 0; i < frames.length; i++) narrow = Math.min(narrow, hwAt(i));
   const sides = railSides(edges);
-  const deck = buildSweepGeometry(frames, sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * from }, sides), {
+  const deck = buildSweepGeometry(frames, sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(0) }, sides), {
     profileAt: (_t, i) => sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(i) }, sides),
   });
   const n = deck.getAttribute("position").count;

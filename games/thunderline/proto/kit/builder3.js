@@ -52,7 +52,7 @@ const GRID_STEPS = [1, 2, 4, 8];
 const CATS = [
   // the race's own things: where it starts and ends, what it hands the car
   { id: "game", label: "Game", tiles: ["start_line", "finish_line", "air_ring", "ob_boost", "ob_jump", "boost_32"] },
-  { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64"] },
+  { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
   { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "uturn_wall_32"] },
@@ -837,7 +837,8 @@ async function runPrediction() {
 /** Ends with no road after them. A lip whose flight has a landing (`flightFrom`) is not open. */
 function openEnds() {
   const hasChild = new Set(track.pieces.filter((p) => !isRing(p)).flatMap((p) => [p.parent, p.flightFrom]).filter((u) => u != null));
-  return track.pieces.filter((p) => !isRing(p) && !hasChild.has(p.uid) && !TILES[p.id]?.finish).map((p) => {
+  // (a finish, and a CLOSED platform shape — a wedge's point, a round end — have no end to go on from)
+  return track.pieces.filter((p) => !isRing(p) && !hasChild.has(p.uid) && !TILES[p.id]?.finish && !TILES[p.id]?.closed).map((p) => {
     const m = built.get(p.uid).exit;
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
     return { uid: p.uid, m, lean: leanOut(TILES[p.id]), pitch: Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) };
