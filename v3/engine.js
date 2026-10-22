@@ -128,6 +128,9 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/play/modularRoadBvh.js",
   "v3/play/modularRoadRigidBvh.js",
   "v3/play/modularRoadGround.js",
+  // The horse lab's RIDING KIT (createRidingKit): the horse, the rider, the bow / lance and the riding
+  // controls + camera, for a game on a level's terrain (games/steppe-rider)
+  "v3/horse-lab/kit.js",
   // Still in v2 — to move into v3 (AUDIT #104)
   "v3/render/foliage/glbLoader.js",
   "v3/props/objects/shared/ledMatrix.js",

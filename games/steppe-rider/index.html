@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      STEPPE RIDER — the horse game (side project, 2026-10-21). For now: the horse and the rider on
+      REAL TERRAIN — a test course on the editor's grid ground (public/levels/steppe.v3proj, made by
+      tools/steppeLevel.mjs; open it in the editor to reshape it), far mountains on the horizon.
+      The riding is the horse lab's (v3/horse-lab/kit.js).
+
+      Click: capture the mouse (Esc frees it) · the mouse is the camera · W A S D relative to it ·
+      tap Shift faster, X slower, hold Shift gallop · Space jump · F off / on · V bow · L lance ·
+      C free camera (the mouse orbits, the horse keeps its line) · , slow motion · P pause ·
+      keys 1-9 / buttons: teleport to a piece of the course.
+      ?world=/path/to/level.v3proj loads another level · ?rider=ybot · ?tod=<hour>
+    -->
+    <base href="/v3/" />
+    <title>Steppe rider</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+      #game { position: fixed; inset: 0; }
+      #boot {
+        position: fixed; inset: 0; z-index: 9999; display: flex; align-items: center; justify-content: center;
+        background: #0a0a0a; color: #cfcfcf; font: 14px system-ui, sans-serif; transition: opacity 0.4s;
+      }
+      #boot.hidden { opacity: 0; pointer-events: none; }
+      #hud {
+        position: fixed; left: 10px; top: 10px; z-index: 50; padding: 8px 10px; border-radius: 6px;
+        background: rgba(0, 0, 0, 0.55); color: #ddd; font: 12px system-ui, sans-serif;
+        display: flex; flex-direction: column; gap: 3px; max-width: 300px;
+      }
+      #hud button {
+        font: 12px system-ui, sans-serif; text-align: left; padding: 3px 8px; border-radius: 4px; cursor: pointer;
+        border: 1px solid #555; background: #222; color: #ddd;
+      }
+      #hud .note { color: #999; margin-top: 4px; }
+      #hud .stat { color: #fff; font-variant-numeric: tabular-nums; }
+    </style>
+    <link rel="icon" href="/favicon.svg" />
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="boot">Loading…</div>
+    <div id="hud"></div>
+
+    <script type="module">
+      const boot = document.getElementById("boot");
+      try {
+        const { startSteppeRider } = await import("/games/steppe-rider/game.js");
+        window.__STEPPE = await startSteppeRider({
+          container: document.getElementById("game"),
+          hud: document.getElementById("hud"),
+          onStatus: (s) => (boot.textContent = s),
+        });
+        boot.classList.add("hidden");
+        setTimeout(() => boot.remove(), 500);
+      } catch (e) {
+        console.error("[steppe-rider] failed to start", e);
+        boot.textContent = `Failed to start: ${e?.message ?? e}`;
+      }
+    </script>
+  </body>
+</html>

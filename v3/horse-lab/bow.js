@@ -780,11 +780,33 @@ export class Archer {
   // (dt: the game's aim — the distance along the ray EASES (in log: near and far alike). The
   // crosshair crossing an edge — a wall's top, the horizon into the sky — moved the aim point
   // 44 m → 150 m in a frame: the loft and the body's pitch jumped 9.6° — the head snapped)
+  // where the segment a → b goes under the TERRAIN (world.heightAt), or null — bisected to ~1 cm
+  terrainCross(a, b) {
+    const hAt = this.world.heightAt;
+    if (!hAt) return null;
+    const below = (p) => p.y < hAt(p.x, p.z);
+    if (below(a) || !below(b)) return null;
+    let lo = 0, hi = 1; const p = new V3();
+    for (let i = 0; i < 12; i++) { const m = (lo + hi) / 2; p.lerpVectors(a, b, m); if (below(p)) hi = m; else lo = m; }
+    return p.lerpVectors(a, b, hi).clone();
+  }
+  // the distance along a ray to the TERRAIN (marched in 2 m steps, then bisected), or null
+  terrainRay(o, d, far) {
+    if (!this.world.heightAt) return null;
+    const a = new V3(), b = new V3();
+    for (let t = 0; t < far; t += 2) {
+      a.copy(o).addScaledVector(d, t); b.copy(o).addScaledVector(d, Math.min(far, t + 2));
+      const c = this.terrainCross(a, b);
+      if (c) return c.distanceTo(o);
+    }
+    return null;
+  }
   aimFrom(camera, C, dt = 0) {
     const ray = new THREE.Raycaster(); ray.setFromCamera(new THREE.Vector2(0, 0), camera); ray.far = 220;
     const objs = [...(this.world.ground ?? []), ...(this.world.blockers ?? []), ...(this.range ? [this.range.root] : [])];
     const hit = ray.intersectObjects(objs, true).find((h) => h.distance > 1.5);
     let dist = hit ? hit.distance : 150;
+    { const td = this.terrainRay(ray.ray.origin, ray.ray.direction, Math.min(dist, 220)); if (td != null) dist = td; }   // (a terrain level: its ground)
     if (dt > 0) { const l = Math.log(dist); this.aimLogD = this.aimLogD == null ? l : this.aimLogD + (l - this.aimLogD) * lerpK(10, dt); dist = Math.exp(this.aimLogD); }
     const P = ray.ray.origin.clone().addScaledVector(ray.ray.direction, dist);
     const dx = P.x - C.x, dz = P.z - C.z, x = Math.hypot(dx, dz), y = P.y - C.y;
@@ -1364,7 +1386,10 @@ export class Archer {
       } else {
         const seg = tip.clone().sub(tip0), L = seg.length();
         ray.set(tip0, seg.divideScalar(L || 1)); ray.far = L;
-        const h = ray.intersectObjects(solids, true)[0];
+        let h = ray.intersectObjects(solids, true)[0];
+        // a TERRAIN level (world.heightAt): the ground is a height function, not a mesh
+        const tc = this.terrainCross(tip0, tip);
+        if (tc && (!h || tc.distanceTo(tip0) < h.distance)) h = { point: tc, object: this.world.ground?.[0] ?? null };
         if (h) { stop = { p: h.point, obj: null, depth: 0.12 }; this.debug.note(`arrow: in the ${h.object === this.world.ground?.[0] ? "ground" : "wood"} at ${Math.hypot(h.point.x - f.path[0].x, h.point.z - f.path[0].z).toFixed(1)} m (${f.v.toFixed(0)} m/s)`); }
       }
       if (stop) {

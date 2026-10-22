@@ -54,6 +54,18 @@ export const HP = {               // tunables (the lab GUI edits these)
   stepRise: 14,                   // 1/s: how fast a hoof rises onto higher ground ahead (eased, never a snap)
   stepReach: 0.6,                 // m forward per m a front hoof is lifted onto a step
   hoofSlope: 1,                   // planted hooves lie on the slope under them (0 = kept at their flat-ground angle)
+  coffinMax: 0.52,                // rad the hoof may turn against the pastern laying itself on the ground (the coffin joint: ~30°)
+  soleClear: 0.01,                // m a SWINGING hoof's whole sole stays over the ground under where it goes (toe, middle, heel)
+  endsApart: 1,                   // the FRONT and the HIND end sink separately (withers from the front hooves, hips from the hind), the difference as pitch round the hips (0 = the whole body by the lowest hoof: up 15° the body sank 7 cm for the hind legs and the front knees folded 50° to fit) — LEG_IK_PLAN stage 2
+  endsPitchMax: 0.3,              // rad that extra pitch at most (out of the wide ditch the hind sank 33 cm: 0.2 left the forelegs 15 cm short)
+  kneeLock: 1,                    // a PLANTED foreleg keeps its knee (the clip's): turned at the elbow, the fetlock takes up the length
+  fetlockGive: 0.5,               // rad the pastern may turn from the clip's for that (more: the plain 2-bone solve)
+  slopeGate: 1,                   // the gait capped and the horse refusing by the slope ahead (terrain levels: world.heightAt)
+  slopeLimits: { Walk: [22, 20, 20], Trot: [20, 16, 18], Canter: [18, 12, 15], Gallop: [12, 8, 8] },   // degrees each gait may take [uphill, downhill, sideways] (fast gaits give way early: research in LEG_IK_PLAN.md)
+  endsAhead: 0.06,                // m: a hoof coming down within this of the ground already counts for its end (the body rises AS it lands, not after)
+  endsByHigher: 1,                // an end follows its HIGHER planted hoof (1) or its lower (0)
+  endsRise: 0.15,                 // m an end may RISE for its hooves (the lower of its two: a planted hoof is never lifted off) — only sinking, climbing out of a ditch the forelegs stayed 13–16 cm short                // rad the hoof may turn against the pastern laying itself on the ground (the coffin joint: ~30°)
+  legUpright: 1,                  // on a slope the legs swing as on the flat, UPRIGHT (relative to gravity), not tilted with the body (0 = with the body: on 15° the forelegs reached into the hill) — LEG_IK_PLAN stage 1
   hillFull: 0.21,                 // rad (12°): the slope where the hill posture is full
   hillHead: 0.25,                 // rad the neck lowers uphill (raises downhill) at a full hill
   hillSlowUp: 0.15, hillSlowDown: 0.1,   // speed lost uphill / downhill at a full hill
@@ -557,9 +569,78 @@ export class HorseController {
     // the tail rope (tailSway) and the ears (calmEars) — restored every frame like the IK bones
     this.tailB = [2, 3, 4, 5, 6, 7].map((i) => h.bone(`Tail${i}`)).filter(Boolean);
     this.ears = ["L", "R"].flatMap((s) => [1, 2, 3, 4].map((i) => h.bone(`Ear${i}${s}`))).filter(Boolean).map((b) => ({ b, q0: b.quaternion.clone() }));   // q0: the rest pose, ears up
-    this.touched = [...this.legs.flatMap((g) => [g.u, g.l, g.cannon, g.ik].filter(Boolean)), ...this.necks, this.headB, ...this.tailB, ...this.ears.map((e) => e.b)].map((b) => ({ b, p: b.position.clone(), q: b.quaternion.clone() }));
+    this.touched = [...this.legs.flatMap((g) => [g.u, g.l, g.cannon, g.ik, g.ff].filter(Boolean)), ...this.necks, this.headB, ...this.tailB, ...this.ears.map((e) => e.b)].map((b) => ({ b, p: b.position.clone(), q: b.quaternion.clone() }));
     this.bodyOff = 0;
     this.switchTo("Idle", 0, true);
+  }
+
+  // A planted foreleg with its knee kept: the fetlock F one leg-length (elbow → fetlock, as the clip has the
+  // knee) from the elbow E and one pastern-length from where the hoof joint J must be — two circles; F is
+  // the meeting point BEHIND the elbow → hoof line (the pastern slants forward-down to the hoof). The leg
+  // turns at the elbow onto F, the pastern onto J. null when out of reach or when the pastern would turn
+  // more than HP.fetlockGive from the clip's (then the plain 2-bone solve)
+  frontStance(g, C, T, fwd) {
+    const E = g.u.getWorldPosition(new V3()), J0 = g.ff.getWorldPosition(new V3()), pv = J0.clone().sub(C), p = pv.length(), L = E.distanceTo(C);
+    const Jt = T.clone().add(pv), d = Jt.clone().sub(E), dl = d.length();
+    if (dl > L + p - 1e-3 || dl < Math.abs(L - p) + 1e-3) return null;
+    const a = (L * L - p * p + dl * dl) / (2 * dl), h = Math.sqrt(Math.max(0, L * L - a * a)), dn = d.clone().divideScalar(dl);
+    const back = fwd.clone().negate(); back.addScaledVector(dn, -back.dot(dn));
+    if (back.lengthSq() < 1e-8) return null;
+    back.normalize();
+    const F = E.clone().addScaledVector(dn, a).addScaledVector(back, h), pNew = Jt.clone().sub(F);
+    if (pv.angleTo(pNew) > HP.fetlockGive) return null;
+    rotateWorld(g.u, new THREE.Quaternion().setFromUnitVectors(C.clone().sub(E).normalize(), F.clone().sub(E).normalize()));
+    rotateWorld(g.ik, new THREE.Quaternion().setFromUnitVectors(pv.clone().normalize(), pNew.normalize()));
+    return F;
+  }
+
+  // the slope (degrees) along the heading: the steepest climb and the steepest drop under the body and up to
+  // ~3 m ahead (more at speed), and the cross-slope a metre ahead — for the slope gate
+  slopeAhead() {
+    const H = this.world.heightAt, f = new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), l = new V3(f.z, 0, -f.x);
+    const at = (a, b = 0) => H(this.pos.x + f.x * a + l.x * b, this.pos.z + f.z * a + l.z * b);
+    const reach = clamp(2.5 + Math.abs(this.v) * 0.4, 2.5, 5), D = (r) => Math.atan(r) * 180 / Math.PI;
+    let up = 0, down = 0;
+    for (let a = -1; a < reach; a += 0.5) { const g = (at(a + 1) - at(a)) / 1; up = Math.max(up, D(g)); down = Math.max(down, D(-g)); }
+    const side = Math.abs(D((at(1, 0.6) - at(1, -0.6)) / 1.2));
+    return { up, down, side };
+  }
+
+  // the hoof's SOLE in its hoof bone's own frame — toe, middle, heel — read once from the skin (the vertices
+  // the hoof bone owns, their lowest 1.2 cm). null without a hoof bone that owns skin (the low-poly horse)
+  solePoints(g) {
+    if (g.soleL !== undefined) return g.soleL;
+    g.soleL = null;
+    const pts = [];
+    let bi = -1, inv = null;
+    this.h.model.traverse((m) => {
+      if (!m.isSkinnedMesh || !m.visible || !m.skeleton) return;
+      const k = m.skeleton.bones.indexOf(g.ff);
+      if (k < 0) return;
+      bi = k; inv = m.skeleton.boneInverses[k];
+      const a = m.geometry.attributes.position, si = m.geometry.attributes.skinIndex, sw = m.geometry.attributes.skinWeight;
+      for (let i = 0; i < a.count; i++) {
+        let w = 0; for (let c = 0; c < 4; c++) if (si.getComponent(i, c) === k) w += sw.getComponent(i, c);
+        if (w > 0.9) pts.push(new V3().fromBufferAttribute(a, i).applyMatrix4(m.bindMatrix));   // (bind pose, world: y up, z forward)
+      }
+    });
+    if (bi < 0 || pts.length < 3) return null;
+    const lo = Math.min(...pts.map((p) => p.y)), sole = pts.filter((p) => p.y < lo + 0.012);
+    const toe = sole.reduce((a, p) => (p.z > a.z ? p : a)), heel = sole.reduce((a, p) => (p.z < a.z ? p : a));
+    const mid = sole.reduce((a, p) => a.add(p), new V3()).multiplyScalar(1 / sole.length);
+    g.soleL = [toe, mid, heel].map((p) => p.clone().applyMatrix4(inv));   // (into the hoof bone's frame)
+    return g.soleL;
+  }
+
+  // put the horse somewhere else, standing: its memory of the ground it left is cleared (the
+  // hooves' IK offsets, the body's drop, a landing spot, the tilt, the near-objects cache). Moved
+  // by pos alone off a 25° slope onto a cross slope, the hooves kept the slope's offsets: 56 cm
+  // into the ground for the first frames
+  teleport(x, z, yaw, y = this.world.heightAt?.(x, z) ?? this.y) {
+    this.pos.set(x, 0, z); this.yaw = yaw; this.y = y;
+    this.v = 0; this.turnRate = 0; this.bodyOff = 0; this.pitch = 0; this.roll = 0;
+    for (const g of this.legs) { g.delta = 0; g.land = null; g.inSwing = false; g.landShift = 0; g.jumpShift = 0; g.nrm = null; }
+    this._near = null;
   }
 
   applyIK(dt) {
@@ -568,11 +649,34 @@ export class HorseController {
     const up = _t.set(0, 1, 0).applyQuaternion(r.quaternion);
     const px = r.position.x, py = r.position.y, pz = r.position.z;
     const fwdX = Math.sin(this.yaw), fwdZ = Math.cos(this.yaw);
+    // 0. LEGS RELATIVE TO GRAVITY (LEG_IK_PLAN.md stage 1): the body tilts with the slope, but each
+    // leg is turned back by that tilt round its own shoulder / hip — its whole swing stays as on the
+    // flat (the clip's joint angles untouched), the hoof target with it. Tilted with the body, every
+    // stride on a 15° ramp was rotated 15°: uphill the forelegs reached into the hill and the hind
+    // folded under the belly; downhill the forelegs tucked back and the hind flung out flat.
+    // (the clip's lift of each hoof is read BEFORE the turn: its own ground is the tilted body's)
+    this.slopeUndo = null;
+    const upW = HP.legUpright * (this.rearT < 0 && !(this.oneShot && this.oneShotName === "Gallop_Jump") && !this.airborne ? 1 : 0) * (1 - (this.rearA ?? 0));
+    if (upW > 0.001 && (Math.abs(this.pitch) > 1e-4 || Math.abs(this.roll) > 1e-4)) {
+      const tilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw, this.roll, r.rotation.order));
+      const undo = new THREE.Quaternion().setFromAxisAngle(_u.set(0, 1, 0), this.yaw).multiply(tilt.invert());
+      this.slopeUndo = new THREE.Quaternion().slerp(undo, upW);
+      for (const g of this.legs) {
+        g.ff.getWorldPosition(_c);
+        g.hA0 = Math.max(0, _c.y - (py - (up.x * (_c.x - px) + up.z * (_c.z - pz)) / up.y) - this.h.foot.sole);
+        const top = g.u.getWorldPosition(new V3());
+        rotateWorld(g.u, this.slopeUndo);
+        g.ik.position.copy(g.ik.parent.worldToLocal(g.ik.getWorldPosition(new V3()).sub(top).applyQuaternion(this.slopeUndo).add(top)));
+        rotateWorld(g.ik, this.slopeUndo);
+      }
+      r.updateMatrixWorld(true);
+    }
     // 1. how far the real ground under each hoof is from the clip's flat ground
-    let minD = 0;
+    let minD = 0, minF = Infinity, minH = Infinity, maxF = -Infinity, maxH = -Infinity;
     this.legs.forEach((g, li) => {
       g.ff.getWorldPosition(_c);                           // the hoof itself, not its IK parent
-      const planeY = py - (up.x * (_c.x - px) + up.z * (_c.z - pz)) / up.y;
+      // (legs turned upright: the clip's ground under THIS hoof is its lift below it, read before the turn)
+      const planeY = this.slopeUndo ? _c.y - this.h.foot.sole - g.hA0 : py - (up.x * (_c.x - px) + up.z * (_c.z - pz)) / up.y;
       // heel, centre, toe — the highest wins, so a hoof half over a step
       // edge stands ON the edge instead of sinking past it
       const y0 = Math.max(_c.y, planeY);
@@ -597,12 +701,22 @@ export class HorseController {
         g.hPeak = Math.max(g.hPeak, g.hA);
         if (Math.abs(this.v) > 0.1) {
           const L = clamp(Math.abs(this.v) * HP.stepLook, 0.12, 0.7) * Math.sign(this.v);
+          // ON A SLOPE the ground ahead is judged against the SLOPE carried on from under the hoof,
+          // not against the height under it: on a 15° ramp every frame read "a step ahead" — each
+          // hoof moved 17–38 cm forward onto it and lifted 20–25 cm, the legs reached out in front
+          // up the hill. Only what stands above the slope (a step, a bump) is stepped onto.
+          const n0 = this.groundNormal(_c.x, _c.z, y0), grade = n0 ? -(n0.x * fwdX + n0.z * fwdZ) / n0.y : 0;   // (the rise per metre along the heading, here)
           for (let k = 1; k <= 6; k++) {
-            const s = L * k / 6, h1 = this.sampleGround(_c.x + fwdX * s, _c.z + fwdZ * s, y0, 0.9);
+            const s = L * k / 6, h1raw = this.sampleGround(_c.x + fwdX * s, _c.z + fwdZ * s, y0, 0.9);
+            const h1 = h1raw === null ? null : h1raw - grade * s;   // (relative to the slope through here)
             if (h1 !== null && (hy === null || h1 > hy)) hy = h1;
-            if (h1 !== null && hyUnder !== null && h1 > hyUnder + 0.08 && (!g.land || g.land.down || h1 > g.land.y + 0.04)) g.land = { y: h1, x: _c.x + fwdX * (s + 0.05), z: _c.z + fwdZ * (s + 0.05) };   // a world point just past the edge
+            // (a step UP must also be really higher than here, a step DOWN really lower: on the steep
+            // wall down into a ditch the flat bottom ahead stood "above the slope carried on" — it was
+            // taken as a step up at the BOTTOM's height, and the hoof planted on the wall held it,
+            // 40–50 cm under the ground)
+            if (h1 !== null && hyUnder !== null && h1 > hyUnder + 0.08 && h1raw > hyUnder + 0.04 && (!g.land || g.land.down || h1raw > g.land.y + 0.04)) g.land = { y: h1raw, x: _c.x + fwdX * (s + 0.05), z: _c.z + fwdZ * (s + 0.05) };   // a world point just past the edge
             // the ground DROPS away ahead (stepping down): land past the edge, on the lower ground
-            else if (h1 !== null && hyUnder !== null && h1 < hyUnder - 0.08 && !g.land) g.land = { y: h1, top: hyUnder, down: true, x: _c.x + fwdX * (s + 0.08), z: _c.z + fwdZ * (s + 0.08) };
+            else if (h1 !== null && hyUnder !== null && h1 < hyUnder - 0.08 && h1raw < hyUnder - 0.04 && !g.land) g.land = { y: h1raw, top: hyUnder + grade * s, down: true, x: _c.x + fwdX * (s + 0.08), z: _c.z + fwdZ * (s + 0.08) };
           }
         }
         if (g.land) {                                          // reach toward the landing spot as the hoof comes down
@@ -618,7 +732,9 @@ export class HorseController {
         }
       } else {
         g.inSwing = false;
-        if (g.land) hy = g.land.y;                            // planted on the step: its height and spot, held
+        if (g.land) hy = g.land.down ? g.land.y : Math.max(g.land.y, hyUnder ?? -1e9);   // planted on the step: its height and spot, held
+        // (a step UP never holds the hoof under the ground it actually stands on: in a ditch a step
+        // found from its floor was held as the hoof planted higher up the wall — 47 cm under)
       }
       // TAKE-OFF PLANT: a horse plants both hind feet together, forward under the
       // belly (Muybridge 638 F7: both ~25° ahead of the hip). The clip lands the
@@ -643,12 +759,38 @@ export class HorseController {
       g.w = (g.cannon ? 1 : 1 - smooth01((this.rearA - 0.09) / 0.3)) * this.ikW;   // front hooves: contact follows the BODY (a leg cannot stay down once the body is up); the legs differ in how they fold
       // how far this hoof is UNDER the ground (> 0): a front hoof is never
       // left there, whatever its IK weight (rear landing, tilted body)
-      g.under = g.on ? hy + this.h.foot.sole - _c.y : 0;
-      if (g.w > 0.5) minD = Math.min(minD, g.delta);
+      g.under = g.on ? Math.max(hy, hyUnder ?? -1e9) + this.h.foot.sole - _c.y : 0;   // (against the REAL ground under it, whatever a held landing says)
+      if (g.w > 0.5) { minD = Math.min(minD, g.delta); if ((g.hA ?? 1) < (HP.endsAhead ?? 0.03)) { if (g.cannon) { minH = Math.min(minH, g.delta); maxH = Math.max(maxH, g.delta); } else { minF = Math.min(minF, g.delta); maxF = Math.max(maxF, g.delta); } } }   // (an end by its PLANTED hooves only: a swinging one dragged the front down and the planted foreleg folded its knee)
     });
     // 2. sink the body so the lowest hoof can reach
     const target = Math.max(minD, -HP.maxDrop) * this.ikW * (1 - this.rearA);
     this.bodyOff += (target - this.bodyOff) * lerpK(target < this.bodyOff ? 22 : 10, dt);   // sinks fast (a planted hoof stepping down would hover), rises gently
+    // ...the FRONT and the HIND end each by their own hooves (LEG_IK_PLAN stage 2): the hips sink for the
+    // hind, the withers for the front, the difference is a little more pitch round the hips. (One sink
+    // for both: up a slope the body sank for the hind legs, the forelegs came out 6 cm too long and the
+    // IK folded the knees 50° — a horse's knee is straight whenever its hoof is down)
+    const endsW = HP.endsApart * (upW > 0.001 ? 1 : 0);
+    const endT = (m, held) => Number.isFinite(m) ? clamp(m, -HP.maxDrop, HP.endsRise * endsW) * this.ikW * (1 - this.rearA) : held;   // (both of an end's hooves in the air: it holds)
+    // (by its HIGHER planted hoof: walking uphill both front hooves are down at once, the one just landed
+    // ~8 cm higher than the one leaving — by the lower, the new leg came out too long and folded its knee
+    // 60°; by the higher, the leaving one lifts its heel a little: its breakover)
+    const tH = endT(HP.endsByHigher ? maxH : minH, this.bodyOffH ?? 0), tF = endT(HP.endsByHigher ? maxF : minF, this.bodyOffF ?? 0);
+    // (rising as fast as sinking: a hoof landing 8 cm higher waited ~10 frames for its end, the knee folded meanwhile)
+    this.bodyOffH = (this.bodyOffH ?? 0) + (tH - (this.bodyOffH ?? 0)) * lerpK(22, dt);
+    this.bodyOffF = (this.bodyOffF ?? 0) + (tF - (this.bodyOffF ?? 0)) * lerpK(22, dt);
+    this.endsPitch = 0; this.endsShift = null;
+    if (endsW > 0.001) {
+      const ft = this.h.foot, span = Math.max(0.5, ft.shZ - ft.hipZ);
+      this.endsPitch = clamp(Math.atan2(this.bodyOffF - this.bodyOffH, span), -HP.endsPitchMax, HP.endsPitchMax) * endsW;
+      this.bodyOff += (this.bodyOffH - this.bodyOff) * endsW;   // (the body's own sink: the hips')
+      if (Math.abs(this.endsPitch) > 1e-5) {
+        const piv = new V3(0, ft.hipY, ft.hipZ), q0 = r.quaternion.clone(), p0 = piv.clone().applyQuaternion(q0);
+        r.rotation.x -= this.endsPitch;                                  // (nose up = −x)
+        const p1 = piv.clone().applyQuaternion(r.quaternion);
+        this.endsShift = p0.sub(p1);                                     // (round the hips: they stay — y re-added below, where the height is set)
+        r.position.x += this.endsShift.x; r.position.z += this.endsShift.z;
+      }
+    }
     // TAKE-OFF: the clip squats the hindquarters ~25–30 % (hips at 0.77 of the leg
     // length); a real horse gathers with them barely lower than galloping (Muybridge
     // 638 F5–F10: 0.92 → 0.83). Keep the hips at ≥ HP.jumpGather of the leg; the
@@ -674,7 +816,7 @@ export class HorseController {
         this.jumpRaise = this.jumpRaiseS;
       } else this.jumpRaiseS = 0;
     } else this.jumpRaiseS = 0;
-    r.position.y = this.y + this.lift + this.rearDy + this.bodyOff + this.jumpRaise;
+    r.position.y = this.y + this.lift + this.rearDy + this.bodyOff + this.jumpRaise + (this.endsShift?.y ?? 0);
     r.updateMatrixWorld(true);
     // 3. move each IK target and bend the leg to meet it
     this.startLockT = Math.max(0, (this.startLockT ?? 0) - dt);
@@ -695,7 +837,8 @@ export class HorseController {
     this.ikCorr = this.calmOn ? Math.max(0.011, this.calmMove ?? 0) : 0;   // (the calmed body: the legs re-solved on purpose)
     const jh = this.jumpHind();
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
-    const untilt = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw).multiply(r.quaternion.clone().invert());
+    let untilt = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw).multiply(r.quaternion.clone().invert());
+    if (this.slopeUndo) untilt = untilt.multiply(this.slopeUndo.clone().invert());   // (the legs already turned upright: only the rest of the tilt)
     this.legs.forEach((g, li) => {
       // (a jumping hind leg is taken over once its hoof has left the ground — see below)
       if (g.cannon) {
@@ -711,12 +854,13 @@ export class HorseController {
       // A hoof goes up only as far as it must to clear the ground: planted
       // (hA ≈ 0) it takes the whole offset; mid-stride, already lifted by the
       // clip, it takes only what is left — else bumps get stepped over twice.
-      let d = ((g.delta > 0 ? Math.max(0, g.delta - g.hA) : g.delta) - this.bodyOff) * g.w;
+      const endOff = this.endsPitch ? (g.cannon ? this.bodyOffH : this.bodyOffF) : this.bodyOff;   // (the ends apart: each leg with its own end)
+      let d = ((g.delta > 0 ? Math.max(0, g.delta - g.hA) : g.delta) - endOff) * g.w;
       if (this.jumpRaise > 0) d -= this.jumpRaise * (1 - smooth01(g.hA / 0.12));   // the gathered body raised: hooves on the ground stay on it
       // no hoof is ever left under the ground — front or hind, whatever the IK
       // weight (blends into a new gait, landing while IK fades back in)
       // (under was measured before the body sank by bodyOff: add that back)
-      const needUp = g.under - this.bodyOff - (this.jumpRaise ?? 0);   // (and the take-off's raise lifted it too)
+      const needUp = g.under - endOff - (this.jumpRaise ?? 0);   // (and the take-off's raise lifted it too)
       if ((needUp > 0.01 || this.jumpRaise > 0) && !(g.cannon && this.rearT >= 0)) d = Math.max(d, needUp);   // ≤ 1 cm into the ground is invisible (raised for the take-off: always — the clip's own planted hoof is a few cm in)
       const C = g.ik.getWorldPosition(new V3());
       let evenOff = null;
@@ -832,6 +976,20 @@ export class HorseController {
       // "IK on flat ground" check), worst while leaning into gallop turns.
       // (a hoof 1 cm into the ground is invisible; a near-straight leg turns a
       // few mm of correction into several degrees of knee — leave it alone)
+      // SWINGING: the whole SOLE (toe, middle, heel — from the skin, in the hoof's own frame) clears the
+      // ground under where it goes by HP.soleClear. The clip lifts the hoof bone; up a slope the toe, out
+      // in front and below it, caught the rising ground: walking up 15° a hind toe went 4–7 cm in
+      if (HP.soleClear > 0 && g.hA > 0.02 && this.rearT < 0 && !g.jumpAir && !this.airborne) {
+        const S = this.solePoints(g);
+        if (S) {
+          let need = 0;
+          for (const sp of S) {
+            const q = g.ff.localToWorld(sp.clone()).sub(C).add(T), gy = this.sampleGround(q.x, q.z, q.y, 1.5);
+            if (gy !== null) need = Math.max(need, gy + HP.soleClear - q.y);
+          }
+          if (need > 0) T.y += need;
+        }
+      }
       this.ikCorr = Math.max(this.ikCorr, T.distanceTo(C));   // biggest correction asked this frame (audit)
       if (g.evenW > 0.001) this.ikCorr = Math.max(this.ikCorr, 0.011);
       if (T.distanceToSquared(C) < 0.01 * 0.01 && !(needUp > 0.01) && !(g.cannon && g.jumpAir && jh && jh.w > 0) && !this.calmOn && !(g.evenW > 0.001)) return;
@@ -840,7 +998,11 @@ export class HorseController {
       // world angle, a hoof reaching up onto a step folded back under itself)
       const qL0 = !g.cannon ? g.l.getWorldQuaternion(new THREE.Quaternion()) : null;
       const legLat = new V3(1, 0, 0).applyQuaternion(r.quaternion);
-      if (!g.cannon) reached = solveTwoBone(g.u, g.l, C, T, fwd, new V3(), false, legLat, 1);
+      // a PLANTED foreleg: the knee kept as the clip has it (straight in stance), the leg turned at the elbow,
+      // the FETLOCK taking up the difference (it sinks under load) — the 2-bone solve shortened it by folding
+      // the knee: walking up 15°, 60–70° of knee on a hoof bearing weight (LEG_IK_PLAN: "front knee locked in stance")
+      const kneeLockW = HP.kneeLock * (this.rearT < 0 && !this.jumpUndo && !this.airborne ? 1 : 0) * clamp(1 - (g.hA ?? 1) / 0.025, 0, 1);
+      if (!g.cannon) reached = (kneeLockW > 0.5 && this.frontStance(g, C, T, fwd)) || solveTwoBone(g.u, g.l, C, T, fwd, new V3(), false, legLat, 1);
       else {
         // hind: the cannon keeps the clip's angle to the VERTICAL (not to the
         // tilted body); hip + stifle put the hock where the cannon must start.
@@ -928,7 +1090,15 @@ export class HorseController {
         const k = HP.hoofSlope * clamp(1 - g.hA / 0.06, 0, 1) * Math.max(g.w, g.cannon ? 1 : 0);
         // (the hoof bone tilts with the BODY, which already pitches with the slope:
         // take that out, then turn by the ground's own slope)
-        if (k > 0.001) rotateWorld(g.ik, new THREE.Quaternion().slerp(new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), g.nrm).multiply(untilt), k));
+        // (the HOOF alone (FF, its own bone since the hoof was re-skinned): the pastern keeps its angle —
+        // turned together, up a 15° slope the fetlock buckled forward over the hoof. The hoof against the
+        // pastern stays within the coffin joint's range, ±HP.coffinMax)
+        if (k > 0.001) {
+          const q0 = g.ff.quaternion.clone();
+          rotateWorld(g.ff, new THREE.Quaternion().slerp(new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), g.nrm).multiply(untilt), k));
+          const d = q0.clone().invert().multiply(g.ff.quaternion), ang = 2 * Math.acos(clamp(Math.abs(d.w), 0, 1));
+          if (ang > HP.coffinMax) { g.ff.quaternion.copy(q0.multiply(new THREE.Quaternion().slerp(d, HP.coffinMax / ang))); g.ff.updateMatrixWorld(true); }
+        }
       }
       // rearing: the hoof bone tilts with the body and would tip the hoof onto
       // its heel, 10 cm up — turn it back level with the ground
@@ -1543,10 +1713,14 @@ export class HorseController {
   // Down ray from `up` metres above yRef. Starting INSIDE a solid misses it,
   // so the step test (below) casts from high up.
   // the ground's normal under (x, z) (world), or null
+  // (a level on a TERRAIN — world.heightAt / normalAt, e.g. the engine's — is ground too: where it
+  // is above the meshes' hit, it is the ground; meshes on it (ramps, logs) still win above it)
   groundNormal(x, z, yRef, up = 0.9) {
     this.ray.set(new V3(x, yRef + up, z), new V3(0, -1, 0));
     this.ray.far = up + 7;
     const hit = this.ray.intersectObjects(this.nearList("ground"), false)[0];
+    const t = this.terrainY(x, z, yRef);
+    if (t != null && (!hit || t >= hit.point.y)) { const n = this.world.normalAt?.(x, z); return n && n.y > 0.5 ? new V3(n.x, n.y, n.z) : null; }
     if (!hit?.face) return null;
     const n = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
     return n.y > 0.5 ? n : null;                             // (a wall face: not a slope)
@@ -1555,7 +1729,16 @@ export class HorseController {
     this.ray.set(new V3(x, yRef + up, z), new V3(0, -1, 0));
     this.ray.far = up + 7;
     const hit = this.ray.intersectObjects(this.nearList("ground"), false)[0];
+    const t = this.terrainY(x, z, yRef);
+    if (t != null && (!hit || t >= hit.point.y)) return t;
     return hit ? hit.point.y : null;
+  }
+  // the terrain's height at (x, z), down to 7 m below yRef (as far as a down ray sees), or null. No
+  // upper bound: a terrain has no inside a ray could start in — on a 25° slope the ground ahead stood
+  // over the meshes' window, read as nothing, and a hoof sank 33 cm into the hill
+  terrainY(x, z, yRef) {
+    const t = this.world.heightAt?.(x, z);
+    return t != null && Number.isFinite(t) && t >= yRef - 7 ? t : null;
   }
 
   // Hoof clearance (m above the take-off ground) at a given time of the jump
@@ -1682,6 +1865,20 @@ export class HorseController {
     if (input.gearDown) this.gear = Math.max(0, (this.gear ?? 0) - 1);
     if (input.fwd <= 0 && Math.abs(this.v) < 0.05) this.gear = 0;
     this.effGear = input.run ? GEARS.length - 1 : (this.gear ?? 0);
+    // SLOPES THE LEGS CAN'T TAKE (you, 2026-10-22: "when something will make the horse legs look bad then the
+    // horse can't pass it"): the ground along the heading — under the body and ~3 m ahead, as RDR2 probes its
+    // path — caps the gait (gallop / canter / walk each to their own steepness, uphill, downhill, sideways), and
+    // past the walk's it REFUSES to go on (stops, a head toss); backing up or turning stay free (a traverse).
+    // Measured on the steppe ramps: from ~25° the legs can no longer look right (soles 10+ cm in, knees folded).
+    this.slopeBlock = false;
+    if (HP.slopeGate && this.world.heightAt && input.fwd > 0 && !busy) {
+      const sl = this.slopeAhead(), lim = (t) => { for (let gi = GEARS.length - 1; gi >= 0; gi--) { const [u, d, sd] = t[GEARS[gi]] ?? t.Walk; if (sl.up <= u && sl.down <= d && sl.side <= sd) return gi; } return -1; };
+      const allowed = lim(HP.slopeLimits);
+      this.slopeNow = sl;
+      if (allowed < 0) this.slopeBlock = true;
+      else this.effGear = Math.min(this.effGear, allowed);
+    }
+    if (!this.slopeBlock) this.slopeTossed = false;
     let target = 0;
     if (!busy) {
       if (input.fwd > 0) target = S[this.effGear] * (1 - HP.hillSlowUp * Math.max(0, this.hillK ?? 0) - HP.hillSlowDown * Math.max(0, -(this.hillK ?? 0)));   // slower up and down hills
@@ -1696,6 +1893,10 @@ export class HorseController {
       // forward under a slowing body) — it slows to that, the walk takes over, then
       // the walk slows on
       if (HP.departFirst && this.gaitName === "Canter" && target < galV * 0.6 && Math.abs(this.v) > 0.05) target = Math.max(target, galV * 0.5);
+    }
+    if (this.slopeBlock && target > 0) {                     // too steep ahead: it stops (and stays) — a head toss once stopped
+      target = 0;
+      if (Math.abs(this.v) < 0.05 && !this.slopeTossed && !this.oneShot) { this.slopeTossed = true; this.playOneShot("Idle_2", { fade: 0.25 }); }
     }
     // REFUSAL — a SLIDING STOP: something ahead it will not jump (too tall, a
     // wall, any fence when not galloping) → brake just hard enough to stop short

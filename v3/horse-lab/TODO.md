@@ -262,8 +262,27 @@ Ours measured with scratchpad gaitfilm.js + gaitstats.js (footfalls, duty, angle
 A Mongol / Scythian-style horse archer in open country (hunting, raids, herds, camps) — start
 SMALL, keep building in the lab first, prove the feel before a big world.
 - [x] 1 Camera-relative riding (6583ada8) · [x] 2 lance follows the look + ring sight + lock-on
-- [ ] 3 A SMALL steppe test map in the lab (~1 km valley): rolling grass hills, a river ford,
-  a few yurts / a camp, targets scattered in open country, maybe a small herd (sheep / donkey lab)
+- [~] 3 THE HORSE ON REAL TERRAIN (2026-10-21; you: "add the far mountain … use the terrain just as
+  parkour … river, texturing, grass later … keep the default grid"). Built like your other games:
+  games/steppe-rider/ boots the engine (startV3App) and loads an EDITOR LEVEL —
+  public/levels/steppe.v3proj, made by tools/steppeLevel.mjs (open it: /v3/editor.html?project=
+  /levels/steppe.v3proj). A 1 km test course on the grid ground: ramps 5–30°, a 12° cross slope,
+  rolling hills, moguls, two ditches, a ridge, a bowl, a 35 m hill; far mountains (the engine's
+  far terrain, ±4 km). The riding is horse-lab/kit.js (createRidingKit — a public engine module
+  now); the horse reads the terrain through world.heightAt / normalAt (horse.js sampleGround /
+  groundNormal; meshes on it still win); arrows and the aim stop on it (bow.js terrainCross /
+  terrainRay); ctrl.teleport() clears the ground memory (a teleport off a 25° slope left the
+  hooves 56 cm in the ground). Teleports: keys 1-9 / the HUD buttons.
+  Measured (canter / gallop through each piece): ramps 5–20° climbed, pitch = the slope, hooves
+  ≤ 5 cm; cross slope 2.9 cm; hills, moguls, ditches, bowl, the big hill ≤ 10 cm; 60 fps.
+  - [ ] ★ YOU (2026-10-21, after riding it): "everywhere the horse legs on any shape was doing some
+    bad things" — my numbers (hooves ≤ 5-10 cm) missed it: FILM the legs close up on each piece
+    (side view, slowed), find what looks wrong (knees, hoof angles, stride on slopes), fix, then
+    ask you to look again. NOT committed yet (waiting for this).
+  - [ ] 25° and 30° ramps: the horse's wall test reads them as walls (blocked after 2 m) and a
+    front hoof sinks up to 19 cm while it struggles — real horses walk up 25–30°
+  - [ ] the lab page (horse-lab.html) onto the kit too (its own copy of the glue for now)
+  - [ ] then: grass that bends (app.stampGrassPush), paint, a river ford, yurts, targets, a herd
 - [ ] 4 Then choose the game loop (hunting, races, raids, tournaments)
 - Ideas kept: a tournament (joust vs an AI knight, ring tilt, archery course) as a stepping
   stone; the jousting opponent = animated reactions + ragdoll only for the unhorsing; the

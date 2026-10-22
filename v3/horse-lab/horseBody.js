@@ -228,6 +228,12 @@ export function fitBodyToRig({ model, clips, bodyScene, rigid = () => false }) {
       else if (L - s < J && j < 2) { const u = 0.5 + 0.5 * ((L - s) / J); w.set(ch[j], u); w.set(ch[j + 1], 1 - u); }   // near the joint below
       else w.set(ch[j], 1);
       if (j === 0 && s < J) w.set(ch[0], 1);                   // the top of the chain: as it was blended into the thigh (left below)
+      // below the fetlock: the hoof capsule onto the HOOF bone (ch[3], FF), the pastern stays on the fetlock bone
+      const wIK = w.get(ch[2]) ?? 0;
+      if (wIK > 0) {
+        const h = p.y - P[3].y, t = Math.max(0, Math.min(1, (HOOF_SKIN.hi - h) / (HOOF_SKIN.hi - HOOF_SKIN.lo))), k = t * t * (3 - 2 * t);
+        if (k > 0) { w.set(ch[2], wIK * (1 - k)); w.set(ch[3], (w.get(ch[3]) ?? 0) + wIK * k); }
+      }
       for (const b of ch) W.delete(b);
       for (const [b, x] of w) W.set(b, (W.get(b) ?? 0) + x * mass);
       return;
@@ -544,6 +550,11 @@ export function calmTail(clips, bones) {
 // are WELDED first, so both sides of a seam get one weight (no cracks at the
 // fetlocks). Then `iters` rounds of: each vertex = half its own, half its
 // neighbours' mean.
+// THE HOOF is its own bone (FF — under the fetlock bone, at the coffin joint; never keyed by the clips):
+// the hoof capsule's skin goes to it, blended over the coronet. With pastern + hoof one piece, laying the
+// hoof on a slope turned the pastern too and the fetlock buckled forward over it (LEG_IK_PLAN.md:
+// "the rig was missing bones"). m above the FF bone: all hoof below `lo`, all pastern above `hi`.
+export const HOOF_SKIN = { lo: 0.005, hi: 0.03 };
 export const HP_SKIN = { joint: +(globalThis.location ? new URLSearchParams(location.search).get("legjoint") ?? 0.035 : 0.035), legPasses: +(globalThis.location ? new URLSearchParams(location.search).get("legpasses") ?? 20 : 20) };   // smoothing passes on the leg skin; ?legpasses= to compare (2 vs 20 measured: no visible difference — the curve look is the pose, not the skin)
 
 function smoothWeights(W, pts, index, iters, capOf = null) {
