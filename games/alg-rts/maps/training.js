@@ -57,6 +57,14 @@ export const MAP = {
   tutorial: true,
   // the practice hamlet's houses (the old merged mechta not placed on this map: showroom.js replacesHamlet)
   town: { houses: HAMLET_HOUSES, replacesHamlet: true },
+  // THE PRACTICE RANGE by the post (TRAINING_CAMP_PLAN step 2): what the sappers build, stood finished — your sandbag
+  // walls, the wire, a crewed MG nest; the mortar pit as a set piece ("mortarPit2": not a gun that would shell the lessons)
+  // (on clear ground EAST of the post, off the gate where the squads start: the wire and walls in a line facing north,
+  // the nest and the pit behind them — world x, z; yaw 0 faces north, -Z)
+  range: {
+    sandbags1: { at: [44, 112], yaw: 0 }, sandbags2: { at: [52, 113], yaw: -0.08 }, wire1: { at: [44, 104], yaw: 0 }, wire2: { at: [53, 104.5], yaw: 0.05 },
+    mgNest: { at: [48, 124], yaw: 0 }, mortarPit: { as: "mortarPit2", at: [62, 128], yaw: 0 },
+  },
   // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off): the birds, the
   // villagers (the mechta's people, the shepherd's lesson), the ground's splats, stones and macro
   // photo. Not the Aurès' farmsteads, fields, herds, hens, village life or telegraph; no FLN AI

@@ -190,7 +190,9 @@ const START_DEFENCES = typeof location !== "undefined" && new URLSearchParams(lo
 export const SHOWROOM = [
   // Detail 2 (the buildings lab, 2026-10-07): the bordj — no merlons, the yard in use, AA-52s.
   { key: "frenchPost", build: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })), x: BASE.x, z: BASE.z, yaw: BASE.yaw },
-  ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key)).map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
+  // (MAP.range — the training's PRACTICE RANGE, 2026-10-22: what the sappers will build, stood finished by the post as
+  // the demonstration; a piece's key renamed there — the mortar pit a set piece, not a gun that shells the lessons)
+  ...BASE_BUILDABLES.filter((v) => START_DEFENCES || !SAPPER_BUILT.has(v.key) || MAP.range?.[v.key]).map((v) => { const r = MAP.range?.[v.key]; const [x, z] = r?.at ? r.at : fromBase(v.lx, v.lz); return { key: r?.as ?? v.key, build: v.build, x, z, yaw: r?.yaw ?? BASE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
   ...BASE_PARK.map((v) => { const [x, z] = fromBase(v.lx, v.lz); return { key: v.key, build: v.build, x, z, yaw: BASE.yaw + v.yaw, vehicle: true, on: v.on }; }),
   // The two hamlets (layout.js), each its own houses.
   // (The new standard, 2026-10-11: algMasonry buildMechtaV2 — ?village=old = the kit's, A/B.)

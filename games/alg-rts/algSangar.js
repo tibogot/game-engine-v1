@@ -507,6 +507,7 @@ export function swapPlaced(showroom, re, geo, app = null) {
   let n = 0;
   for (const [name, mesh] of Object.entries(showroom ?? {})) {
     if (!re.test(name) || !mesh?.isMesh) continue;
+    const oldGeo = mesh.geometry;
     const g = geo.clone();
     g.userData = { ...geo.userData, ...mesh.geometry.userData, labMaterial: geo.userData.labMaterial };
     mesh.geometry = g;
@@ -525,6 +526,13 @@ export function swapPlaced(showroom, re, geo, app = null) {
       // (its far level carries this copy's data too)
       const f = geo.userData.farGeometry.clone(); f.userData = g.userData; g.userData.farGeometry = f;
       trackLod(app, mesh);
+    }
+    // (the OLD geometry's attributes the new lacks kept, zero-filled — the kit's matId / tone / ao: a mesh already DRAWN
+    // keeps its shadow-pass render state with the old attribute list, and its next draw read an attribute the new has
+    // not — "reading 'id'", the render loop stopped (the post, the training's range, 2026-10-22). Both levels.)
+    for (const q of [g, g.userData.farGeometry].filter(Boolean)) {
+      const cnt = q.attributes.position.count;
+      for (const [k, a] of Object.entries(oldGeo.attributes)) if (!q.attributes[k]) q.setAttribute(k, new THREE.BufferAttribute(new Float32Array(cnt * a.itemSize), a.itemSize));
     }
     n++;
   }
