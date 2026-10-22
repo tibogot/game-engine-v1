@@ -81,6 +81,8 @@ export function installCursorStyle() {
        cursor still wins, and the edge scroll (it stands down under an inline one) keeps working. */
     canvas.alg-nogo { cursor: url("/games/alg-rts/cursors/nogo.svg") 9 7, not-allowed; }
     canvas.alg-nogo-part { cursor: url("/games/alg-rts/cursors/nogo-part.svg") 9 7, default; }
+    /* A dropped weapon your men can take (algDroppedWeapons.js): the hand — a right-click picks it up. */
+    canvas.alg-pickup { cursor: ${HAND}; }
     /* THE HAND on everything that takes a click (and what it holds: an icon inside a button). */
     ${CLICKABLE.map((c) => `${c}, ${c} *`).join(", ")} { cursor: ${HAND} !important; }
     /* A locked or cooling-down button takes no click: the arrow. */

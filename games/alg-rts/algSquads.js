@@ -68,6 +68,20 @@ export const SQUADS = {
   mitrailleuse: { size: 2, name: t("Mitrailleuse"), reinforce: 45, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
   sansRecul: { size: 2, name: t("Sans-recul"), reinforce: 45, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
 };
+/**
+ * WEAPONS PICKED UP OFF THE GROUND (2026-10-22, CoH — algDroppedWeapons.js): a man who takes one CARRIES it
+ * (u.carried = the key) — his weapon and the piece in his hands, over his slot's kit (applyKit, every step: set
+ * on the man alone it was put back to his rifle the next tick). It drops again where he falls. kit: a piece on
+ * his back too (the lance's tanks). PICKERS: the squads whose men can take one; at most CARRY_PER_SQUAD a squad.
+ */
+export const CARRIED = {
+  fm: { label: t("FM 24/29"), prop: "fm2429", weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 } },
+  bazooka: { label: t("Bazooka"), prop: "m20", weapon: { weapon: "cannon", range: 40, damage: 70, fireRate: 0.16, footMul: 0.35 } },
+  flamer: { label: t("Lance-flammes"), prop: "lf50", kit: "flameTanks", weapon: { weapon: "flamer", range: 15, damage: 0, fireRate: 4 } },
+};
+export const PICKERS = new Set(["appele", "para", "legion", "sapeur", "moudjahid", "equipage"]);
+export const CARRY_PER_SQUAD = 2;
+
 /** Men per purchase at a producer: a squad for the French, and for the FLN only when a human plays it. */
 export const squadSize = (key, team) => (SQUADS[key] && (team === "player" || isHuman(team)) && (SQUADS[key].side ?? "player") === team ? SQUADS[key].size : 1);
 
@@ -234,14 +248,17 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
     s.slots.forEach((u, i) => {
       if (!u?.alive) return;
       const up = Object.keys(s.upgrades).map((k) => UPGRADES[k]).find((g) => g.slot === i && g.squads.includes(s.typeKey));
-      const w = up?.weapon ?? SQUADS[s.typeKey]?.kit?.[i] ?? u.type;
+      const C = u.carried ? CARRIED[u.carried] : null;   // (a weapon he picked up: over his slot's)
+      const w = C?.weapon ?? up?.weapon ?? SQUADS[s.typeKey]?.kit?.[i] ?? u.type;
       u.weapon = w.weapon ?? null;
       u.range = w.range ?? 0;
       u.damage = w.damage ?? 0;
       u.fireRate = (w.fireRate ?? 1) * v.fireRate;
       u.footMul = w.footMul;   // (an anti-tank weapon's, against men — undefined: his type's)
       // The upgrade's PROP in his hands (the bazooka's tube), once (a replacement gets it too).
-      if (up?.prop && u._prop !== up.prop && app.algUnitRenderer?.setWeapon?.(u, up.prop)) u._prop = up.prop;
+      const prop = C?.prop ?? up?.prop;
+      if (prop && u._prop !== prop && app.algUnitRenderer?.setWeapon?.(u, prop)) u._prop = prop;
+      if (C?.kit && u._kit !== C.kit && app.algUnitRenderer?.setKit?.(u, C.kit, true)) u._kit = C.kit;
       u.vetAcc = v.acc;
       u.vetArmor = v.armor;
       u.suppressMul = v.suppress;

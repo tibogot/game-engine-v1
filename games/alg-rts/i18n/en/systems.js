@@ -177,8 +177,6 @@ export default {
   "Terrasses d'amandiers": "Almond terraces",
   "Gourbi en ruine": "Ruined gourbi",
   // algDroppedWeapons.js
-  "Un <b>FM</b> est resté au sol : un groupe sans FM qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a squad without one that passes within 6 m picks it up.",
-  "Un <b>FM</b> est resté au sol : un combattant qui passe à moins de 6 m le ramasse.": "An <b>FM</b> lies on the ground: a fighter who passes within 6 m picks it up.",
   // algFlnTricks.js — the command mine (2026-10-18)
   "Mine commandée": "Command mine",
   "Un homme enterre une charge sous la piste, reliée à un fil : restez à moins de 45 m, à couvert, et faites-la sauter au passage du camion ou du half-track. Elle ne part pas seule.": "A man buries a charge under the piste, on a wire: stay within 45 m, in cover, and set it off as the truck or the half-track passes. It never goes off by itself.",
@@ -194,4 +192,8 @@ export default {
   "<b>Véhicule repris</b>.": "<b>Vehicle recovered</b>.",
   "<b>Le camion est vidé</b> : +{n} ravitaillement. Il est incendié.": "<b>The truck is unloaded</b>: +{n} supplies. It is set alight.",
   "<b>Plus de carburant</b> : le véhicule pris est incendié.": "<b>Out of fuel</b>: the seized vehicle is set alight.",
+  // 2026-10-22: dropped weapons, the CoH way (algDroppedWeapons.js)
+  "{w} ramassé.": "{w} picked up.",
+  "Une <b>arme</b> est restée au sol (cerclée) : sélectionnez des hommes et faites un <b>clic droit</b> dessus pour la ramasser.": "A <b>weapon</b> lies on the ground (ringed): select men and <b>right-click</b> it to pick it up.",
+  "FM 24/29": "FM 24/29",
 };
