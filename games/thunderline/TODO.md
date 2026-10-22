@@ -151,6 +151,13 @@ this is just the list. Newest decisions at the top of each section. Last updated
       PICTURES FOLLOW THE RAILS switch (Both / Left / Right / None): keyed per setting, the others drawn
       when first shown (wantThumb queue); not for obstacles, rings, tubes. Tutorial re-pointed (Game,
       Straight, Ramps); replayed: 10/10 steps.
+      THE RAMP ⚙ (the adjustable kicker grown, 2026-10-22): Angle 5–95°, Length 12–96 m (the curl
+      eased over the whole length: short = sharp, long = gentle), Width Road / Narrow (planks) / Wide
+      (platforms) — `adj_kicker_<A>_<L>_<r|n|w>`; old `adj_kicker_<A>` ids load as they were (and
+      convert when adjusted). Settings with names shown as names (adjShow). Tested from the hand's
+      buttons: road 20°/28 m 170 km/h, 13 m up, back to lip height at 142 m; wide 20°/40 m off a
+      platform 172 km/h, 14 m, 147 m; narrow 30°/24 m off a plank 164 km/h, 25 m, 174 m; 95°/44 m a
+      quarter pipe 127 km/h, 61 m up, falls back on its run-up (flagged, rightly).
       FROM THE SAME SCREENSHOTS, NOT YET: a rounded dead-end cap; wedges (straight / curved triangle
       platform pieces); planks / platforms with a hole to drop through; a cone ("volcano") ramp; side
       wall-ramps; more turn shapes (wide platform corners, rounded corners, varied radii); turn kerb

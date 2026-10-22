@@ -144,6 +144,8 @@ const ringGateOf = (pc) => {
 };
 const isRing = (p) => !!p?.ring;
 // ADJUSTABLE pieces (kit.js ADJUSTABLE): the card's settings in hand, one set per kind
+/** An adjustable setting as shown: its name (a Width's "Wide") or its number and unit. */
+const adjShow = (q, v) => (q.names ? q.names[v] : `${v}${q.unit}`);
 const adjDefaults = (base) => Object.fromEntries(Object.entries(ADJUSTABLE[base].params).map(([k, q]) => [k, q.def]));
 const adjParams = Object.fromEntries(Object.keys(ADJUSTABLE).map((b) => [b, adjDefaults(b)]));
 const tileId = (base, h = hand) => {
@@ -2298,7 +2300,7 @@ function renderStatus() {
     // a placed ADJUSTABLE piece: its settings, right here (the road after it follows)
     (selPc && !selPc.kind && !isRing(selPc) && parseAdjustable(selPc.id)
       ? (() => { const a = parseAdjustable(selPc.id), d = ADJUSTABLE[a.base];
-          return `<div class="acts">${Object.entries(d.params).map(([pk, q]) => `<button data-act="adj:${pk}:-1" title="Shift: ×4">◀</button><span class="adjv">${q.label} ${a.p[pk]}${q.unit}</span><button data-act="adj:${pk}:1" title="Shift: ×4">▶</button>`).join("")}</div>`; })()
+          return `<div class="acts">${Object.entries(d.params).map(([pk, q]) => `<button data-act="adj:${pk}:-1" title="Shift: ×4">◀</button><span class="adjv">${q.label} ${adjShow(q, a.p[pk])}</span><button data-act="adj:${pk}:1" title="Shift: ×4">▶</button>`).join("")}</div>`; })()
       : "") +
     // the gizmo's two modes, or why this piece can't move on its own
     (selPc?.kind && selPc.on != null
@@ -2535,7 +2537,7 @@ function renderHand() {
     `<span class="nm">${TILES[id]?.label ?? id}</span>` +
     // an ADJUSTABLE piece's own settings first (the ghost follows them)
     (tileBase === FITTED ? `<div class="gp"><span>Land tilt</span><button data-a="tl" title="Left side low (←)">↶</button><b>${landTilt ? `${Math.abs(landTilt)}° ${landTilt > 0 ? "R" : "L"}` : "flat"}</b><button data-a="tr" title="Right side low (→)">↷</button></div>` : "") +
-    (adj ? Object.entries(adj.params).map(([pk, q]) => `<div class="gp"><span>${q.label}</span><button data-a="p-${pk}" title="Less (Shift: ×4)">◀</button><b>${adjParams[tileBase][pk]}${q.unit}</b><button data-a="p+${pk}" title="More (Shift: ×4)">▶</button></div>`).join("") : "") +
+    (adj ? Object.entries(adj.params).map(([pk, q]) => `<div class="gp"><span>${q.label}</span><button data-a="p-${pk}" title="Less (Shift: ×4)">◀</button><b>${adjShow(q, adjParams[tileBase][pk])}</b><button data-a="p+${pk}" title="More (Shift: ×4)">▶</button></div>`).join("") : "") +
     `<div class="gp${off}" title="${free ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
     `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
     `<div class="gp${off}"><span>Tilt</span><button data-a="pd" title="Nose down (↓)">⤓</button><b>${rot.pitch}°</b><button data-a="pu" title="Nose up (↑)">⤒</button></div>` +

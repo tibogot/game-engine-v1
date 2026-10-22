@@ -491,20 +491,28 @@ export const TILE_RESOLVERS = [];
  *   adj_straight_<L>           a straight, L m
  *   adj_turn_<R>_<A>[_L]       a flat turn of A° at core radius R m (eased in and out, like the turn set)
  *   adj_slope_<u|d><H>         an S in the vertical: level in, level out, H m up / down
- *   adj_kicker_<A>             a kicker at A° (its last 8 m a lip)
+ *   adj_kicker_<A>             a kicker at A° (its last 8 m a lip) — the first form, kept for saved tracks
+ *   adj_kicker_<A>_<L>_<w>     THE RAMP (user, 2026-10-22: "ramps in more sizes", Apex Rush has ~18): A° up
+ *                              over L m (the curl eased over its whole length — short = sharp, long =
+ *                              gentle), w the width: r road 16 m · n narrow 8 m (planks) · w wide 48 m
+ *                              (platforms). 5–95°: a bump, a kicker, a launch, a quarter pipe.
  */
 export const ADJUSTABLE = {
   adj_straight: { label: "Straight", params: { L: { label: "Length", min: 8, max: 256, step: 8, unit: " m", def: 64 } } },
   adj_turn: { label: "Turn", hand: true, params: { A: { label: "Angle", min: 15, max: 180, step: 15, unit: "°", def: 90 }, R: { label: "Radius", min: 24, max: 256, step: 8, unit: " m", def: 96 } } },
   adj_slope: { label: "Slope", params: { H: { label: "Height", min: -40, max: 40, step: 2, unit: " m", def: 12, signed: true } } },
-  adj_kicker: { label: "Kicker", params: { A: { label: "Angle", min: 5, max: 35, step: 5, unit: "°", def: 20 } } },
+  adj_kicker: { label: "Ramp", params: {
+    A: { label: "Angle", min: 5, max: 95, step: 5, unit: "°", def: 20 },
+    L: { label: "Length", min: 12, max: 96, step: 4, unit: " m", def: 28 },
+    W: { label: "Width", min: 0, max: 2, step: 1, unit: "", def: 0, names: ["Road", "Narrow", "Wide"] },
+  } },
 };
 /** The id of an adjustable piece with these settings (`hand` −1 = left). */
 export function adjustableId(base, p, hand = 1) {
   if (base === "adj_straight") return `adj_straight_${p.L}`;
   if (base === "adj_turn") return `adj_turn_${p.R}_${p.A}${hand < 0 ? "_L" : ""}`;
   if (base === "adj_slope") return `adj_slope_${p.H < 0 ? "d" : "u"}${Math.abs(p.H)}`;
-  if (base === "adj_kicker") return `adj_kicker_${p.A}`;
+  if (base === "adj_kicker") return `adj_kicker_${p.A}_${p.L}_${"rnw"[p.W ?? 0]}`;
   return null;
 }
 /** An adjustable piece's base and settings from its id, or null. */
@@ -513,7 +521,8 @@ export function parseAdjustable(id) {
   if ((m = /^adj_straight_(\d+)$/.exec(id))) return { base: "adj_straight", p: { L: +m[1] }, hand: 1 };
   if ((m = /^adj_turn_(\d+)_(\d+)(_L)?$/.exec(id))) return { base: "adj_turn", p: { R: +m[1], A: +m[2] }, hand: m[3] ? -1 : 1 };
   if ((m = /^adj_slope_([ud])(\d+)$/.exec(id))) return { base: "adj_slope", p: { H: (m[1] === "d" ? -1 : 1) * +m[2] }, hand: 1 };
-  if ((m = /^adj_kicker_(\d+)$/.exec(id))) return { base: "adj_kicker", p: { A: +m[1] }, hand: 1 };
+  if ((m = /^adj_kicker_(\d+)$/.exec(id))) return { base: "adj_kicker", p: { A: +m[1], L: Math.max(16, Math.round((28 * +m[1]) / 20)), W: 0, old: true }, hand: 1 };
+  if ((m = /^adj_kicker_(\d+)_(\d+)_([rnw])$/.exec(id))) return { base: "adj_kicker", p: { A: +m[1], L: +m[2], W: "rnw".indexOf(m[3]) }, hand: 1 };
   return null;
 }
 TILE_RESOLVERS.push((id) => {
@@ -535,8 +544,19 @@ TILE_RESOLVERS.push((id) => {
     if (L < 32) { pitch = (15 * L) / 32; L = 32; }
     return { label: `Slope ${p.H >= 0 ? "up" : "down"} ${H} m`, segs: [{ L, pitch: s * pitch * DEG, ramp: L / 2 }, { L, pitch: -s * pitch * DEG, ramp: L / 2 }] };
   }
-  const L = Math.max(16, Math.round((28 * p.A) / 20)); // kicker_20 is 28 m
-  return { label: `Kicker ${p.A}°`, segs: [{ L, pitch: p.A * DEG, ramp: L / 2 }], marks: [{ kind: "lip", from: -8, to: -0 }] };
+  if (p.old) {
+    const L = Math.max(16, Math.round((28 * p.A) / 20)); // kicker_20 is 28 m
+    return { label: `Kicker ${p.A}°`, segs: [{ L, pitch: p.A * DEG, ramp: L / 2 }], marks: [{ kind: "lip", from: -8, to: -0 }] };
+  }
+  // THE RAMP: the old kicker's shape (curvature eased over half the length) at any angle, length, width
+  const section = ["road", "narrow", "wide"][p.W ?? 0];
+  const lip = Math.min(8, Math.round(p.L / 4));
+  return {
+    label: `Ramp ${p.A}° · ${p.L} m${section === "road" ? "" : ` · ${section}`}`,
+    ...(section === "road" ? {} : { section }),
+    segs: [{ L: p.L, pitch: p.A * DEG, ramp: p.L / 2 }],
+    marks: [{ kind: "lip", from: -lip, to: -0 }],
+  };
 });
 
 export function ensureTile(id) {
