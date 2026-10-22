@@ -395,6 +395,20 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
       after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
       bank / in a tube.
+- [x] **BUILDER PERFORMANCE** (2026-10-23, the editor audit; measured on White 3, my Chrome):
+      1. LEAK FIXED: a rebuild disposed nothing — 10 edits +90 geometries, +28.5 MB GPU buffers; now +2 /
+         +0.1 MB (releaseRebuilt: road chunks + post instances, gates / rings, obstacles, the stand-in box;
+         the helper boxes; the preview's own geometry — tagged ownGeo, never the shared piece cache).
+      2. The test lap SLICED BY TIME (12 ms a frame, then a frame), not 240 ticks (120-570 ms frozen).
+      3. The SNAP only when its inputs change (mouse, piece in hand, its settings, track version, camera):
+         a landing held over an arc re-flew ~49k flight steps a frame. Next-piece chips the same.
+      Same measure before → after: 3 s after an edit 26 → 145 frames (worst 592 → 121 ms); holding a
+      landing on an arc 16 → 130 frames in 3 s (median 127 → 22 ms, worst 1.2 s → 55 ms). The test lap's
+      result arrives later (5.0 → 6.1 s): it no longer freezes the page to get there.
+      OPEN from the audit: the rebuild is still WHOLE (all chunks, gates, arcs, checks; save re-writes the
+      whole library; reflow can rebuild 9×); the test lap in a Web Worker; road DoubleSide → FrontSide;
+      road noise on the deck only; underside / tube density, far LOD for deck + tubes; the live shadow
+      redraws whole 256 m chunks; far rail without normals (check); drive page builds all 100 tile looks.
 - [x] **PHYSICS REVIEW FIXES** (2026-10-23, from the review of the car; user: "check any physics and
       anything about the car"):
       1. NOSE DOWN on C, not Ctrl (Ctrl+W with the throttle closed the tab); the FREE CAMERA back on F.

@@ -504,7 +504,32 @@ function showPieceMeshes(on) {
   if (chunkMeshes) chunkMeshes.group.visible = !on;
   for (const [uid, b] of built) if (!b.prop && track.pieces.some((p) => p.uid === uid && !isRing(p))) b.group.traverse((o) => { if (o.isMesh) o.visible = on; });
 }
+/**
+ * RELEASE what a rebuild made new (performance pass, 2026-10-23: nothing was disposed — 10 edits on White 3
+ * left +90 geometries and +28.5 MB of GPU buffers). The merged road chunks and their post instances, the
+ * gates' and rings' own geometry and materials, the obstacles' geometry (their materials are shared), the
+ * test car's stand-in box. NOT the pieces' own meshes: their geometry is the shared piece cache.
+ */
+function disposeTree(root, materials) {
+  root.traverse((o) => {
+    if (!o.isMesh && !o.isLine) return;
+    o.geometry?.dispose();
+    if (o.isInstancedMesh) o.dispose();
+    if (materials) for (const m of [].concat(o.material)) m?.dispose();
+  });
+}
+function releaseRebuilt() {
+  if (chunkMeshes) { disposeTree(chunkMeshes.group, false); chunkMeshes = null; }
+  for (const c of trackGroup.children) {
+    if (c.userData.gate) disposeTree(c, true); // a checkpoint / start / finish gate or an air ring: all its own
+    else if (c.userData.spawn && !carHolo) c.geometry?.dispose(); // (the stand-in box)
+  }
+  if (obstacleSet) disposeTree(obstacleSet.group, false);
+}
+let trackVer = 0; // bumped by every rebuild and arc refresh: the snap's cache key (updateGhost)
 function rebuild() {
+  trackVer++;
+  releaseRebuilt();
   for (const c of trackGroup.children.slice()) trackGroup.remove(c);
   built = new Map();
   for (const pc of track.pieces) {
@@ -598,6 +623,7 @@ function toggleCheckpoint(uid) {
 let prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 };
 let predTimer = null, predToken = 0, failBox = null;
 const predScene = new THREE.Scene(); // the car's meshes live here; never rendered
+const PRED_SLICE_MS = 12; // the background test lap's share of a frame (8 ms: the result came in ~7.6 s on White 3)
 function schedulePrediction() { clearTimeout(predTimer); predTimer = setTimeout(runPrediction, 250); }
 /** Every piece the road reaches: the driving order, plus pieces laid BESIDE them (`sideOf`) and the road
  * that goes on from those — they are deck to land on and drive across, not part of the test lap's line. */
@@ -769,7 +795,7 @@ async function runPrediction() {
   let onPad = null, onPadTick = -1e9;
   const endsOnLip = lips.has(lastUid) || padZones.some((z) => z.host === lastUid);
   prediction.openJump = false;
-  let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0;
+  let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0, sliceT0 = performance.now();
   const nose = new THREE.Vector3();
   const pilot = createAutopilot(avoidObstacles(ride, track.props)); // the drive page's autopilot (wall cut, air spin), its line round the obstacles
   const magnets = magnetZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), TILES, integrate);
@@ -841,9 +867,12 @@ async function runPrediction() {
     slow = v < 2 ? slow + FIXED_DT : 0;
     if (slow > 3) { prediction.fail = { uid: ride[idx].uid, why: "stops" }; break; }
     if ((finishIdx >= 0 ? idx >= finishIdx : idx >= ride.length - 5) && !endsOnLip) { prediction.lapS = tick * FIXED_DT; endSpeed = v; break; }
-    if (tick % 240 === 239) {
-      await new Promise((r) => setTimeout(r, 0)); // let the page breathe between slices
+    // SLICES BY TIME, not by ticks (performance pass, 2026-10-23: 240 ticks were 120-570 ms with no frame
+    // drawn — the builder stuttered for seconds after every edit): ~8 ms of physics, then a frame
+    if ((tick & 7) === 7 && performance.now() - sliceT0 > PRED_SLICE_MS) {
+      await new Promise((r) => requestAnimationFrame(() => r()));
       if (token !== predToken) return; // a newer edit started another prediction
+      sliceT0 = performance.now();
     }
   }
   if (token !== predToken) return;
@@ -863,7 +892,7 @@ async function runPrediction() {
   const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size && !problems.misses.length && ringsOk;
   const author = clean ? Math.round(prediction.lapS * 100) / 100 : null;
   if (track.authorTime !== author) { if (author) track.authorTime = author; else delete track.authorTime; save(); }
-  if (failBox) { scene.remove(failBox); failBox = null; }
+  if (failBox) { scene.remove(failBox); disposeTree(failBox, true); failBox = null; }
   if (prediction.fail && built.get(prediction.fail.uid)) {
     failBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(built.get(prediction.fail.uid).group), 0xff9a3d);
     scene.add(failBox);
@@ -931,6 +960,7 @@ function rollNote(a, m, lean) {
   return Math.abs(r) <= 6 ? "" : `roll ${Math.round(Math.abs(r) / 5) * 5}° ${r > 0 ? "right" : "left"} in the air to land`;
 }
 function refreshArcs() {
+  trackVer++;
   for (const c of arcGroup.children.slice()) { arcGroup.remove(c); c.geometry.dispose(); }
   arcs = [];
   roadCache = null; // (cutAtRoad's road points: this track as it is now)
@@ -1124,7 +1154,7 @@ function runChecks() {
     problems.messages.push(`"${name}": the full-speed car misses it — ${fitted ? "Re-fit it to the jump" : "move it on the red arc or use a Fitted landing"}`);
   }
   // tint overlapping pieces: a red box around each
-  for (const c of overlapBoxes.splice(0)) scene.remove(c);
+  for (const c of overlapBoxes.splice(0)) { scene.remove(c); disposeTree(c, true); }
   for (const [uid, color] of [...[...problems.overlap].map((u) => [u, 0xff4d5e]), ...problems.loose.map((u) => [u, 0xff9a3d]), ...problems.misses.map((m) => [m.uid, 0xff9a3d])]) {
     const b = built.get(uid);
     if (!b) continue;
@@ -1686,8 +1716,22 @@ function updateDrop() {
   snap.where = `${Math.round(P.y - G.y)} m above ${hit ? "the road under it" : "the floor"}` +
     (near ? ` · ${Math.round(Math.hypot(P.x - near.x, P.z - near.z))} m from the nearest end${dh ? `, ${Math.abs(dh)} m ${dh > 0 ? "higher" : "lower"}` : ", same height"}` : "");
 }
+const ownGeo = (m) => { m.userData.ownGeo = true; return m; };
+// THE SNAP ONLY WHEN SOMETHING IT READS CHANGED (performance pass, 2026-10-23: every frame with a piece in
+// hand re-ran it — a landing over an arc flew up to 41 test flights × 1200 steps a frame, the mouse still)
+let snapKey = "";
+const _cm = new THREE.Matrix4();
+function snapInputs() {
+  _cm.copy(camera.matrixWorld);
+  return [mouse.x, mouse.y, tileBase, hand, edges, rot.yaw, rot.pitch, rot.roll, buildY, gridMode, gridStep, arcSpeed, landTilt, freeHold, bowlR,
+    ADJUSTABLE[tileBase] ? JSON.stringify(adjParams[tileBase]) : "", tileBase === STAMP ? clipboard?.n : "", trackVer, track.spawn?.kmh,
+    _cm.elements.map((x) => x.toFixed(3)).join(",")].join("|");
+}
 function updateGhost() {
-  if (!tileBase || !mouse.inside) { if (ghost) ghost.visible = false; snap = null; updateDrop(); renderStatus(); return; }
+  if (!tileBase || !mouse.inside) { snapKey = ""; if (ghost) ghost.visible = false; snap = null; updateDrop(); renderStatus(); return; }
+  const k = snapInputs();
+  if (k === snapKey && !ghostDirty) { renderStatus(); return; } // nothing moved: the snap, the drop line and the ghost stand (the panel still follows the test lap)
+  snapKey = k;
   snap = computeSnap();
   updateDrop();
   if (!snap) { if (ghost) ghost.visible = false; renderStatus(); return; }
@@ -1695,8 +1739,14 @@ function updateGhost() {
   const key = `${id}|${hand}|${edges}|${snap.type}|${!!snap.bad}|${snap.dx}|${snap.hw}|${snap.strip ? JSON.stringify(snap.strip[0]) + JSON.stringify(snap.strip.at(-1)) : ""}|${snap.m.elements.map((x) => x.toFixed(3)).join(",")}`;
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
-    if (ghost) scene.remove(ghost);
-    ghost = id === SPAWN ? new THREE.Mesh(carHolo?.geometry ?? new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), ghostMat) : id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(shapeOf(id, snap).ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
+    // the old preview's OWN geometry released (tagged ownGeo: a ring, a pad strip, the stand-in box — not
+    // the shared piece / car / obstacle shapes it otherwise shows)
+    if (ghost) { scene.remove(ghost); ghost.traverse((o) => { if (o.userData.ownGeo) o.geometry.dispose(); }); }
+    ghost = id === SPAWN ? (carHolo ? new THREE.Mesh(carHolo.geometry, ghostMat) : ownGeo(new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), ghostMat)))
+      : id === STAMP ? stampGhost()
+      : isObstacle(id) ? (OBSTACLES[id].decal ? ownGeo : (m) => m)(new THREE.Mesh(shapeOf(id, snap).ghost, ghostMat)) // (a pad's strip is new each time; a door's is cached)
+      : id === RING ? ownGeo(makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0])
+      : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -1731,8 +1781,14 @@ function suggestionsFor(end) {
   return recent.length ? { label: "Again", items: recent.slice(0, 4) } : null;
 }
 let nextKey = "";
+let nextInputs = "";
 function updateNext() {
   const el = $("next");
+  // only when the track, the camera, the selection or the piece in hand changed (it scanned every open end a frame)
+  _cm.copy(camera.matrixWorld);
+  const ki = `${trackVer}|${sel}|${tileBase}|${hand}|${innerWidth}x${innerHeight}|${_cm.elements.map((x) => x.toFixed(3)).join(",")}`;
+  if (ki === nextInputs) return;
+  nextInputs = ki;
   const ends = openEnds();
   const lastUid = track.pieces[track.pieces.length - 1]?.uid;
   const head = ends.find((e) => e.uid === lastUid) ?? ends[ends.length - 1];
@@ -2099,7 +2155,7 @@ function stampGhost() {
   const items = stampItems(), Ms = stampMatrices(new THREE.Matrix4(), items);
   items.forEach((it, i) => {
     const m = it.link === "ring"
-      ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0]
+      ? ownGeo(makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0])
       : new THREE.Mesh(piece(it.id, pcOE(it)).look.deck, ghostMat);
     m.matrixAutoUpdate = false;
     m.matrix.copy(Ms[i]);
@@ -2152,7 +2208,7 @@ function removeMany(uids) {
 let selBox = null;
 function refreshSelection() {
   if (sel == null || !selSet.has(sel)) selSet = new Set(sel != null ? [sel] : []);
-  if (selBox) { scene.remove(selBox); selBox = null; }
+  if (selBox) { scene.remove(selBox); disposeTree(selBox, true); selBox = null; }
   const many = selection();
   if (many.length) {
     selBox = new THREE.Group();
