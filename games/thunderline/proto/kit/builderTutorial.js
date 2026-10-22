@@ -60,14 +60,14 @@ const STEPS = [
   },
   {
     k: "Jumps", title: "A kicker",
-    text: "Open <b>Ramps</b> and add a <b>Kicker 20°</b>. Two lines appear: where the car <b>flies</b> — orange a bit slower, yellow at full speed.",
+    text: "Open <b>Ramps</b> and add a <b>Kicker 20°</b>. A <b>red arc</b> appears: where the car <b>flies</b> at full speed.",
     tip: "The test car drives your track by itself in the background: its speed sets these arcs.",
     hi: ['[data-cat="ramps"]', '[data-base="kicker_20"]'],
     done: (api) => roadPieces(api).some((p) => /kicker/.test(p.id)) && api.arcs.length > 0,
   },
   {
     k: "Jumps", title: "Land it",
-    text: "Still in <b>Ramps</b>, pick <b>Fitted landing</b> and point at the <b>yellow arc</b>, where the car comes down. The panel says from what speed the car makes it.",
+    text: "Still in <b>Ramps</b>, pick <b>Fitted landing</b> and point at the <b>red arc</b>, where the car comes down. The panel says from what speed the car makes it.",
     tip: "Any road piece can go on the arc too — a platform, a straight. ← / → tilt a fitted landing for the air roll.",
     hi: ['[data-cat="ramps"]', '[data-base="fitted_landing"]'],
     done: (api) => roadPieces(api).some((p) => p.flightFrom != null),

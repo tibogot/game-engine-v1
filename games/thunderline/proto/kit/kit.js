@@ -500,6 +500,9 @@ export const TILE_RESOLVERS = [];
  * are in the id, so any page rebuilds the same piece from the saved track:
  *   adj_straight_<L>           a straight, L m
  *   adj_turn_<R>_<A>[_L]       a flat turn of A° at core radius R m (eased in and out, like the turn set)
+ *   adj_turn_<R>_<A>_<w>[_L]   …and its WIDTH (user, 2026-10-22, Apex Rush's many turn shapes): r road ·
+ *                              n narrow (plank turns) · w wide (platform corners: R down to the inside edge
+ *                              nearly sharp, 4 m — a rounded corner)
  *   adj_slope_<u|d><H>         an S in the vertical: level in, level out, H m up / down
  *   adj_kicker_<A>             a kicker at A° (its last 8 m a lip) — the first form, kept for saved tracks
  *   adj_kicker_<A>_<L>_<w>     THE RAMP (user, 2026-10-22: "ramps in more sizes", Apex Rush has ~18): A° up
@@ -509,7 +512,11 @@ export const TILE_RESOLVERS = [];
  */
 export const ADJUSTABLE = {
   adj_straight: { label: "Straight", params: { L: { label: "Length", min: 8, max: 256, step: 8, unit: " m", def: 64 } } },
-  adj_turn: { label: "Turn", hand: true, params: { A: { label: "Angle", min: 15, max: 180, step: 15, unit: "°", def: 90 }, R: { label: "Radius", min: 24, max: 256, step: 8, unit: " m", def: 96 } } },
+  adj_turn: { label: "Turn", hand: true, params: {
+    A: { label: "Angle", min: 15, max: 180, step: 15, unit: "°", def: 90 },
+    R: { label: "Radius", min: 24, max: 256, step: 4, unit: " m", def: 96 },
+    W: { label: "Width", min: 0, max: 2, step: 1, unit: "", def: 0, names: ["Road", "Narrow", "Wide"] },
+  } },
   adj_slope: { label: "Slope", params: { H: { label: "Height", min: -40, max: 40, step: 2, unit: " m", def: 12, signed: true } } },
   adj_kicker: { label: "Ramp", params: {
     A: { label: "Angle", min: 5, max: 95, step: 5, unit: "°", def: 20 },
@@ -520,7 +527,7 @@ export const ADJUSTABLE = {
 /** The id of an adjustable piece with these settings (`hand` −1 = left). */
 export function adjustableId(base, p, hand = 1) {
   if (base === "adj_straight") return `adj_straight_${p.L}`;
-  if (base === "adj_turn") return `adj_turn_${p.R}_${p.A}${hand < 0 ? "_L" : ""}`;
+  if (base === "adj_turn") return `adj_turn_${p.R}_${p.A}${p.W ? `_${"rnw"[p.W]}` : ""}${hand < 0 ? "_L" : ""}`;
   if (base === "adj_slope") return `adj_slope_${p.H < 0 ? "d" : "u"}${Math.abs(p.H)}`;
   if (base === "adj_kicker") return `adj_kicker_${p.A}_${p.L}_${"rnw"[p.W ?? 0]}`;
   return null;
@@ -529,7 +536,7 @@ export function adjustableId(base, p, hand = 1) {
 export function parseAdjustable(id) {
   let m;
   if ((m = /^adj_straight_(\d+)$/.exec(id))) return { base: "adj_straight", p: { L: +m[1] }, hand: 1 };
-  if ((m = /^adj_turn_(\d+)_(\d+)(_L)?$/.exec(id))) return { base: "adj_turn", p: { R: +m[1], A: +m[2] }, hand: m[3] ? -1 : 1 };
+  if ((m = /^adj_turn_(\d+)_(\d+)(?:_([rnw]))?(_L)?$/.exec(id))) return { base: "adj_turn", p: { R: +m[1], A: +m[2], W: m[3] ? "rnw".indexOf(m[3]) : 0 }, hand: m[4] ? -1 : 1 };
   if ((m = /^adj_slope_([ud])(\d+)$/.exec(id))) return { base: "adj_slope", p: { H: (m[1] === "d" ? -1 : 1) * +m[2] }, hand: 1 };
   if ((m = /^adj_kicker_(\d+)$/.exec(id))) return { base: "adj_kicker", p: { A: +m[1], L: Math.max(16, Math.round((28 * +m[1]) / 20)), W: 0, old: true }, hand: 1 };
   if ((m = /^adj_kicker_(\d+)_(\d+)_([rnw])$/.exec(id))) return { base: "adj_kicker", p: { A: +m[1], L: +m[2], W: "rnw".indexOf(m[3]) }, hand: 1 };
@@ -542,9 +549,17 @@ TILE_RESOLVERS.push((id) => {
   if (base === "adj_straight") return { label: `Straight ${p.L}`, segs: [{ L: p.L }] };
   if (base === "adj_turn") {
     // the turn set's easing: ~0.3 R of curvature ramp at each end (R24 → 12 m … R128+ → 40 m)
-    const ramp = Math.min(40, Math.max(12, Math.round(p.R * 0.31)));
+    const section = ["road", "narrow", "wide"][p.W ?? 0];
+    // a wide corner: never tighter than its own half width + 4 m (the inside edge a near-sharp corner)
+    const R = Math.max(p.R, SECTIONS[section].hw + 4);
+    const ramp = Math.min(40, Math.max(12, Math.round(R * 0.31)));
     const turn = hand * p.A * DEG;
-    return { label: `Turn ${p.A}° · R${p.R}${hand < 0 ? " (L)" : ""}`, segs: [{ L: turnLen(p.R, p.A * DEG, ramp), turn, ramp }], ...(p.R <= 48 ? { marks: [{ kind: "chevron", from: 0, to: -0 }] } : {}) };
+    return {
+      label: `Turn ${p.A}° · R${R}${section === "road" ? "" : ` · ${section}`}${hand < 0 ? " (L)" : ""}`,
+      ...(section === "road" ? {} : { section }),
+      segs: [{ L: turnLen(R, p.A * DEG, ramp), turn, ramp }],
+      ...(R <= 48 && section === "road" ? { marks: [{ kind: "chevron", from: 0, to: -0 }] } : {}),
+    };
   }
   if (base === "adj_slope") {
     // slope_up_12's S (two 48 m halves at 15°) rises 12.47 m: longer for more height, flatter (never

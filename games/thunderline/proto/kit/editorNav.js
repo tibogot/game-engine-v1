@@ -11,7 +11,8 @@
 // Every jump of the view is animated, so you always see where you went.
 import * as THREE from "three";
 
-const MIN_DIST = 12, MAX_DIST = 2600;
+// (12 → 2 m, user 2026-10-22: "I cannot zoom in as much as I would like" — close to place a pole or a pad)
+const MIN_DIST = 2, MAX_DIST = 2600;
 const MIN_POLAR = 0.12; // ~7° from straight down (top view)
 const MAX_POLAR = 1.40; // ~10° above the horizon: never level with the floor, never under it
 const PANEL_CSS = `

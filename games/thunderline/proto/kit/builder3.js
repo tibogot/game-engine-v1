@@ -937,11 +937,18 @@ function refreshArcs() {
     const up = L?.U ? L.U.clone().applyMatrix4(rm) : padUp.clone(), fwd = L?.F ? L.F.clone().applyMatrix4(rm) : new THREE.Vector3(0, 0, -1).transformDirection(m);
     arcs.push({ ...slow, fast, near, from: pad.uid, host: pad.on, landing, lip: { m, launch: { P, V }, v }, up, fwd, fly });
   }
-  for (const a of arcs) for (const [f, color] of [[a, 0xff9a3d], [a.fast, 0xffd27a]]) {
-    if (f.pts.length < 2) continue;
-    arcGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(f.pts), new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })));
+  // ONE ARC, RED, GLOWING (user, 2026-10-22: "two arcs is very confusing … make it red with a bit of bloom
+  // so it reads well"): the full-speed flight — the one landings snap to — as a thin emissive tube (the
+  // page's selective bloom picks emissive up; a 1 px line could not glow). The slower edges stay computed
+  // for the notes, not drawn.
+  for (const a of arcs) {
+    const pts = a.fast.pts;
+    if (pts.length < 2) continue;
+    const curve = new THREE.CatmullRomCurve3(pts);
+    arcGroup.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(400, pts.length * 2), 0.35, 6, false), ARC_MAT));
   }
 }
+const ARC_MAT = new THREE.MeshStandardMaterial({ color: 0xff2a3d, emissive: 0xff2a3d, emissiveIntensity: 2.2, roughness: 0.5 });
 /** A jump pad's flight, ended where it comes back DOWN onto a road (the one it left, or any). The road's
  * points are kept per refresh: the notes fly the arc again at up to 40 speeds per mouse move. */
 
@@ -1069,7 +1076,7 @@ function runChecks() {
     const name = TILES[track.pieces.find((q) => q.uid === m.uid).id]?.label ?? "a landing";
     const fitted = track.pieces.find((q) => q.uid === m.uid).id.startsWith("fitted_landing_");
     if (track.pieces.find((q) => q.uid === m.uid).id.startsWith("catch_tube_")) { problems.messages.push(`"${name}": the full-speed car misses its mouth — Re-fit it to the jump`); continue; }
-    problems.messages.push(`"${name}": the full-speed car misses it — ${fitted ? "Re-fit it to the jump" : "move it on the yellow arc or use a Fitted landing"}`);
+    problems.messages.push(`"${name}": the full-speed car misses it — ${fitted ? "Re-fit it to the jump" : "move it on the red arc or use a Fitted landing"}`);
   }
   // tint overlapping pieces: a red box around each
   for (const c of overlapBoxes.splice(0)) scene.remove(c);
@@ -1196,7 +1203,7 @@ const canTurn = (kind) => { const d = OBSTACLES[kind]; return !!d && !d.decal &&
 /** How an obstacle in hand is placed, in one line (the panel). */
 function obstacleHow(kind) {
   const d = OBSTACLES[kind];
-  if (d.air) return "on a jump's yellow arc";
+  if (d.air) return "on a jump's red arc";
   if (d.decal) return "on any road piece · slides across in 1 m steps";
   if (kind === "ob_wall_door") return "across a road · the door slides across in 1 m steps";
   if (d.aimAt) return "on a road · slides across in 2 m steps";
@@ -1494,7 +1501,7 @@ function computeSnap() {
     }
     if (sb) return sb;
   }
-  // (on the FULL-SPEED arc, the yellow one: a landing starts where the fast car comes down)
+  // (on the FULL-SPEED arc, the red one: a landing starts where the fast car comes down)
   for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
     if (a.fast.tan[k].y > -0.02) continue; // only the falling part
     const s = toScreen(a.fast.pts[k]);
@@ -2255,7 +2262,7 @@ function predictionLine() {
   const name = (uid) => { const pc = track.pieces.find((q) => q.uid === uid); return pc ? (isRing(pc) ? "Air ring" : TILES[pc.id].label) : "?"; };
   const lips = [...P.lipSpeed.values()].map((v) => Math.round(v * 3.6)).join(", ");
   if (P.fail) return `<div class="warn">⚠ the car ${P.fail.why} at "${name(P.fail.uid)}" (orange box)</div>`;
-  if (P.openJump) return `<div class="row"><span>real car takes off at</span><b>${lips} km/h — land it on the band</b></div>`;
+  if (P.openJump) return `<div class="row"><span>real car takes off at</span><b>${lips} km/h — land it on the red arc</b></div>`;
   return `<div class="row"><span>${problems.loose?.length ? "real car: to the road's end" : "real car: lap"}</span><b>${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
     (lips ? `<div class="row"><span>take-offs</span><b>${lips} km/h</b></div>` : "") +
     (P.rings ? (P.rings.taken === P.rings.of
@@ -2323,9 +2330,8 @@ function renderStatus() {
         `<div class="row"><span>height</span><b>${buildY} m</b></div>` +
         `<div class="row"><span>turn / pitch / bank</span><b>${rot.yaw}° / ${rot.pitch}° / ${rot.roll}°</b></div>`
       : "") +
-    (prediction.lipSpeed.size
-      ? `<div class="row"><span>band (real car)</span><b>${[...prediction.lipSpeed.values()].map((v) => `${Math.round(v * BAND_SLOW * 3.6)}–${Math.round(v * 3.6)}`).join(" · ")} km/h</b></div>`
-      : `<div class="row"><span>arc band (guess)</span><b>${Math.round(arcSpeed * BAND_SLOW * 3.6)}–${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
+    // (once the test car has taken off, the prediction line above says it: only the guess here)
+    (prediction.lipSpeed.size ? "" : `<div class="row"><span>take-off (guess)</span><b>${Math.round(arcSpeed * 3.6)} km/h</b></div>`) +
     `<div class="row"><span>checkpoints (select + C)</span><b>${track.pieces.filter((p) => p.cp).length}</b></div>` +
     `<div class="row"><span>author time</span><b>${track.authorTime ? `${track.authorTime.toFixed(2)} s` : "—"}</b></div>` +
     `<div class="row"><span>pieces</span><b>${track.pieces.length}</b></div>`;

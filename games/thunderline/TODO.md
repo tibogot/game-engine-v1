@@ -163,6 +163,15 @@ this is just the list. Newest decisions at the top of each section. Last updated
       grew `shape` (oldLook buildTaperLook: each edge its own way, the deck centred between them, rails
       along both). `closed`: no open end after them (openEnds skips them; side by side still works).
       Tested on a platform's end: snapped, nothing snaps after, test lap runs; looked at in the builder.
+      TURN WIDTHS (2026-10-22): the Turn ⚙ has Width Road / Narrow / Wide (adj_turn_<R>_<A>_<n|w>[_L];
+      road ids unchanged), radius in 4 m steps; a wide corner never tighter than its half width + 4 m
+      (the inside edge nearly sharp: Apex Rush's rounded corners). Tested: platform → 90° R28 wide →
+      platform, test lap 9.0 s; seen from above. (Faint shading streaks on the deck near a tight
+      inside edge — the texture bunching; minor.)
+      ONE RED ARC (user, 2026-10-22: "two arcs is very confusing, make it red with a bit of bloom"): only
+      the full-speed flight is drawn (the one landings snap to), a thin emissive red tube (0.35 m) the
+      selective bloom catches; the panel says the take-off once ("land it on the red arc"); tutorial and
+      hints say "red arc". ZOOM: the builder camera now comes to 2 m of its target (was 12 m).
       FROM THE SAME SCREENSHOTS, NOT YET: planks / platforms with a hole to drop through; a cone ("volcano") ramp; side
       wall-ramps; more turn shapes (wide platform corners, rounded corners, varied radii); turn kerb
       posts; camera zones ("Follow" / "Bumper"); a ring tube with boost arrows; ramps in more sizes.

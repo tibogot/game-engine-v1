@@ -108,8 +108,11 @@ function build() {
     actions: `<button data-act="open">Edit</button><button data-act="drive"${r.track?.pieces?.length ? "" : " disabled"}>Drive</button><button data-act="rename">Rename</button><button data-act="dup">Copy</button><button data-act="del" class="danger">Delete</button>`,
   })).join("");
   $("screen").innerHTML = `<p class="note">Your tracks. Edit one, or start a new one. A track is validated when the builder's test lap reaches the finish: that time is its author time and sets the medals.</p>
-    <div class="grid"><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${cards}</div>`;
+    <div class="grid"><div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${cards}</div>`;
   $("new").onclick = () => { location.href = builderUrl(library.create().id); };
+  // THE BUILDER TUTORIAL (user, 2026-10-22: "shouldn't it be in the track builder menu?"): a new track,
+  // the builder opens with the tutorial running (builderTutorial.js; also the builder's Tutorial button)
+  $("tut").onclick = () => { location.href = `${builderUrl(library.create("Tutorial track").id)}&tutorial=1`; };
   // SHARE CODES (trackCode.js): a pasted code becomes one of your tracks
   $("paste").onclick = async () => {
     const code = prompt("Paste a Thunderline track code (it starts with TL1.)");
