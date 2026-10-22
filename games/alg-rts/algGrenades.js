@@ -121,7 +121,8 @@ export function createAlgGrenades({ app, units, projectiles, selection, onChange
   };
   const onKey = (e) => {
     if (e.key === "Escape" && targeting) { cancel(); return; }
-    if (e.ctrlKey || e.metaKey || targeting || isTyping(e)) return;
+    // (Shift: ⇧G is the attack ground's — algAttackGround.js; ⇧B nothing)
+    if (e.ctrlKey || e.metaKey || e.shiftKey || targeting || isTyping(e)) return;
     for (const K of Object.values(THROWS)) {
       if (e.key.toLowerCase() === K.hotkey && begin(selection.selected, K.key)) { e.preventDefault(); return; }
     }

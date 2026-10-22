@@ -351,6 +351,19 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
           // (a salvo ordered is fired above); its crew's holdFire can't say it — setCrew holds every
           // crewman's small arms anyway.
           if (s.mortarHold) { m.cd = 0.5; break; }
+          // ATTACK GROUND (algAttackGround.js, 2026-10-22, CoH): its rounds on the spot, free, a few metres apart, until
+          // another order (units.js clears groundAt) — a suspected position, a wood's edge, a house
+          const G = s.members.find((u) => u.groundAt)?.groundAt;
+          if (G) {
+            const dg = Math.hypot(G.x - g.position.x, G.z - g.position.z);
+            if (dg >= K.min && dg <= K.max) {
+              m.facing = Math.atan2(G.x - g.position.x, G.z - g.position.z);
+              const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 4;
+              load(s, m, G.x + Math.cos(a) * r, G.z + Math.sin(a) * r);
+              m.cd = K.every;
+              break;
+            }
+          }
           const tg = pick(s, g);
           if (!tg) { m.cd = 1; break; }
           m.facing = Math.atan2(tg.position.x - g.position.x, tg.position.z - g.position.z);

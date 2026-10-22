@@ -245,7 +245,10 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
     },
 
     /** Explicit attack order (right-click an enemy). */
-    attack(enemy) { unit.attackTarget = enemy; unit.chaseCd = 0; },
+    // (any order but the queue's own clears the QUEUE and an ATTACK-GROUND — shared selection.js orderQueue, 2026-10-22)
+    attack(enemy) { unit.dropQueue(); unit.groundAt = null; unit.attackTarget = enemy; unit.chaseCd = 0; },
+    /** A new order of the player's (not the queue running itself): the queued orders are dropped. */
+    dropQueue() { if (!unit._qRunning) { unit.orderQueue = null; unit._qCur = null; } },
     // While `ghost` is on, the unit ignores (and is ignored by) friendly
     // collision — the last rung of the unstick ladder.
     ghost: false,
@@ -273,6 +276,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
     stop() {
       unit.haltMovement();
       unit.attackTarget = null;
+      unit.dropQueue(); unit.groundAt = null;
     },
 
     /**
@@ -280,6 +284,7 @@ function makeUnit(app, type, navGrid, x, z, near, team = "player", opts = {}) {
      * which must NOT clear the attack target, hence the separate entry point.)
      */
     moveOrder(tx, tz, shared = null) {
+      unit.dropQueue(); unit.groundAt = null;
       unit.attackTarget = null;
       unit.target = null;
       unit.faceAngle = null;   // (a new move: no old facing — selection.js sets this order's after)

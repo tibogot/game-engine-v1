@@ -206,4 +206,8 @@ export default {
   "ÉQUIPAGE SONNÉ": "CREW STUNNED",
   "<b>{v}</b> : {part}.": "<b>{v}</b>: {part}.",
   "Coup critique sur un véhicule ennemi : {part}.": "Critical hit on an enemy vehicle: {part}.",
+  // 2026-10-22: attack ground (algAttackGround.js)
+  "Tir sur zone": "Attack ground",
+  "Tir sur zone : vos mitrailleuses, canons et mortiers tirent sur un point — une position soupçonnée, une lisière, une maison. Les mitrailleuses clouent au sol ceux qui s'y cachent ; le mortier y lance ses obus. Jusqu'au prochain ordre.": "Attack ground: your machine guns, cannons and mortars fire on a spot — a suspected position, a wood's edge, a house. The machine guns pin whoever hides there; the mortar drops its rounds on it. Until the next order.",
+  "Mortier <b>hors de portée</b> de ce point : rapprochez-le d'abord.": "Mortar <b>out of range</b> of that spot: move it closer first.",
 };

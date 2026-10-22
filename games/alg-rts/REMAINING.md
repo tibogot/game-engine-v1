@@ -160,10 +160,10 @@ ones throughout.
 6. **From the CoH 3 comparison (2026-10-20), biggest first:**
    - ~~**Vehicle critical hits**~~ — **done 2026-10-22** (algCriticals.js): engine, immobilised, gun, crew stunned, by what hits and
      where (side and rear more); sappers mend them. Left: the AIs reacting (repairs, the FLN aiming for flanks).
-   - **Shift-queued orders** — chain several orders for a unit (here, then there, then the house).
+   - ~~**Shift-queued orders**~~ — **done 2026-10-22** (shared orderQueue.js): moves and attacks, the waypoints shown.
    - **Tactical pause** (single player, vs AI) — pause, queue orders for several units, resume.
    - **Breach** — rush a garrisoned house to take it (at a risk), CoH 3's.
-   - **Attack ground** — mortars and MGs on a spot (a suspected position, a wood's edge, a house).
+   - ~~**Attack ground**~~ — **done 2026-10-22** (algAttackGround.js, ⇧G): guns pin the men hidden there, mortars fire on it.
    - **Height** — a bonus firing from above (CoH 3's vertical play): the town's hill, the djebel.
    - **Towing** guns with a vehicle (the mortar, the 12.7, the 57).
    - Done 2026-10-20: **hold fire** (⇧H, both sides) and **reverse** (vehicles back up to a spot close

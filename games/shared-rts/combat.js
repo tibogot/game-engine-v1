@@ -287,6 +287,9 @@ export function createCombat({
     // (noSmallArms: a weapon team's crew — alg-rts mortar teams fight with their piece only, CoH's)
     if (e.holdFire || e.throwing || e.noSmallArms) { e.target = null; return; }
     if (e.playerMove && (!e.isMoving || e.attackTarget)) e.playerMove = false;
+    // ATTACK GROUND (a game's order: e.groundAt { x, z } — alg-rts algAttackGround.js, CoH's): fire on the spot, not at
+    // what it picks; an explicit attack order still beats it.
+    if (e.groundAt && !e.attackTarget?.alive) { groundFire(e, dt); return; }
 
     // Forget dead targets.
     if (e.target && !e.target.alive) e.target = null;
@@ -385,6 +388,35 @@ export function createCombat({
       // an AMBUSH, and spends itself the moment you take it.
       cover?.reveal(e);
     }
+  }
+
+  /**
+   * Fire on a SPOT: within reach (closing in to it, a unit; a structure waits), rounds into the ground there — tracers
+   * and dirt, a miss each (no man is hit by name) — and SUPPRESSION on each of the other side's men hidden within
+   * GROUND_R m of it. What kills there is the mortar's.
+   */
+  const GROUND_R = 5, _gNear = [];
+  function groundFire(e, dt) {
+    const g = e.groundAt, d = Math.hypot(g.x - e.position.x, g.z - e.position.z);
+    if (!e.isStructure && d > e.range * 0.95) {
+      e.chaseCd = (e.chaseCd ?? 0) - dt;
+      if (e.chaseCd <= 0) { e.orderTo(g.x, g.z); e.chaseCd = 0.5; }
+      return;
+    }
+    if (d > e.range) return;
+    if (e.isMoving && !e.isStructure) e.haltMovement();
+    if (!e.isStructure && e.type?.foot) e.faceAngle = Math.atan2(g.x - e.position.x, g.z - e.position.z);
+    e.target = null;
+    if (e.cooldown > 0) return;
+    e.cooldown = 1 / ((e.fireRate || 1) * (e.fireMul ?? 1));
+    const y = g.y ?? 0;
+    const spot = { alive: true, isGround: true, team: null, position: new THREE.Vector3(g.x + (Math.random() - 0.5) * 3, y + 0.6, g.z + (Math.random() - 0.5) * 3) };
+    projectiles.spawn(muzzleOf(e), spot, 0, e, null, { miss: true });
+    // the men hidden there: EACH takes the round's suppression (one picked a round: the first man pinned, the two
+    // beside him at 0.03 — measured; CoH's MG on a spot keeps everyone there down)
+    const hid = units.near(g.x, g.z, GROUND_R, _gNear).filter((u) => u.alive && u.team !== e.team && !u.isStructure && Math.hypot(u.position.x - g.x, u.position.z - g.z) < GROUND_R);
+    for (const u of hid) onShot?.(e, u);
+    cover?.reveal(e);
   }
 
   // Two plain loops rather than one over [...units, ...structures]: that

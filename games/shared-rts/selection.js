@@ -16,6 +16,7 @@
 // camera's left-drag. Picks units by raycasting the meshes tagged in units.js
 // (mesh.userData.unit); box-select projects each unit to screen space.
 import * as THREE from "three";
+import { queueOrder } from "./orderQueue.js";
 import { isHuman, isHostile } from "./teams.js";
 import { RENDER_ORDER } from "./renderOrder.js";
 
@@ -393,10 +394,12 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     const press = rPress;
     rPress = null;
     preview.hide();
+    // SHIFT: the order goes to the END of each unit's queue (orderQueue.js — CoH's waypoints)
+    const queue = e.shiftKey;
     if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 18 && [...selected].some((u) => isHuman(u.team))) {
       const a = app.pickWorldAtClient?.(press.x, press.y), b = app.pickWorldAtClient?.(e.clientX, e.clientY);
       if (a?.point && b?.point && Math.hypot(b.point.x - a.point.x, b.point.z - a.point.z) > 1) {
-        orderMove(a.point.x, a.point.z, a.point.y, { facing: Math.atan2(b.point.x - a.point.x, b.point.z - a.point.z) });
+        (queue ? queueMove : orderMove)(a.point.x, a.point.z, a.point.y, { facing: Math.atan2(b.point.x - a.point.x, b.point.z - a.point.z) });
         return;
       }
     }
@@ -409,7 +412,8 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
     if (enemy) {
       // (an explicit attack order lifts a HOLD FIRE on those men — the battle lab's hold, 2026-10-16: they
       // took the target and stood still; a weapon team's crew keeps its noSmallArms all the same)
-      for (const u of mine) { u.holdFire = false; u.attack?.(enemy); }
+      if (queue) for (const u of mine) queueOrder(u, { kind: "attack", target: enemy });
+      else for (const u of mine) { u.holdFire = false; u.attack?.(enemy); }
       pingMarker(enemy.position.x, enemy.position.y, enemy.position.z, "attack");
       onOrder("attack", mine);
       return;
@@ -430,8 +434,17 @@ export function createSelection({ app, units, unitRenderer, structuresRenderer =
 
     const hit = app.pickWorldAtClient?.(e.clientX, e.clientY);
     if (!hit?.point) return;
-    orderMove(hit.point.x, hit.point.z, hit.point.y);
+    (queue ? queueMove : orderMove)(hit.point.x, hit.point.z, hit.point.y);
   };
+  /** SHIFT + right-click on the ground: each unit's spot in the formation there, at the END of its queue. */
+  function queueMove(x, z, y, { facing = null } = {}) {
+    if (clampOrder) { const c = clampOrder(x, z); x = c.x; z = c.z; }
+    const { arr, slots, facing: face } = formationAt(x, z, { facing });
+    if (!arr.length) return;
+    pingMarker(x, y ?? app.getWorldHeight?.(x, z) ?? 0, z);
+    onOrder("move", arr);
+    arr.forEach((u, i) => { if (!u.isAir) queueOrder(u, { kind: "move", x: slots[i].x, z: slots[i].z, face }); });
+  }
 
   /**
    * WHERE A MOVE TO (px, pz) PUTS EACH SELECTED UNIT — no side effects. orderMove uses it, and so

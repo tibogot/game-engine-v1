@@ -23,7 +23,7 @@ export const KEYS = ["patrol", "grenade", "stop", "focus", "cutWire", "cancelSit
  */
 export const CATEGORY = {
   stop: "order", focus: "order", patrol: "order", holdFire: "order", reverse: "order", garrison: "order", unload: "order", disembark: "order", transport: "order", cancelSite: "order",
-  attackMove: "attack", aimArc: "attack", barrage: "attack", airStrike: "attack", radioBarrage: "attack", radioAir: "attack", mortarBarrage: "attack", flnDetonate: "attack",
+  attackMove: "attack", attackGround: "attack", aimArc: "attack", barrage: "attack", airStrike: "attack", radioBarrage: "attack", radioAir: "attack", mortarBarrage: "attack", flnDetonate: "attack",
   retreat: "retreat",
   paraDrop: "attack", airSupply: "attack", legionCall: "attack", mortar120: "attack", douar: "attack", informers: "attack", jeep: "attack", mortar81: "attack",
   outsideSection: "attack", recon: "attack", t6Pair: "attack", medevac: "attack", gunship: "attack", commando: "attack",
