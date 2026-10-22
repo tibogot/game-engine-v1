@@ -11,6 +11,7 @@ import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS } from "../../../mo
 import { FlipbookDriftSmoke, DEFAULT_FLIPBOOK_SETTINGS, loadSmokeAtlases, copyDriftSmokeState } from "../../../modular-road-v3/modularRoadDriftSmokeFlipbook.js";
 import { createSparks } from "./sparks.js";
 import { createTyreMarks } from "./tyreMarks.js";
+import { createTyreSmoke } from "./tyreSmoke.js";
 
 /**
  * @param app  the v3 app (scene, camera, light)
@@ -27,6 +28,9 @@ export function createCarFx(app, rig, o = {}) {
   const looks = { flipbook: new FlipbookDriftSmoke(scene, smokeSettings, atlases, flipSettings), procedural: null };
   let smoke = looks.flipbook, look = "flipbook";
   smoke.setSprayEnabled?.(false); // the stunt roads are dry
+  // the TYRE smoke is Thunderline's own (tyreSmoke.js, as the game); the old module keeps only the exhaust
+  smoke.setSmokeEnabled(false);
+  const tyreSmoke = createTyreSmoke(app);
   // the rail sparks: Thunderline's own (sparks.js); the drive rig has them too, so the lab asks it for
   // none (createDriveRig fx: false) and shows these
   const sparks = createSparks(scene);
@@ -44,7 +48,7 @@ export function createCarFx(app, rig, o = {}) {
   }
 
   return {
-    get smoke() { return smoke; }, sparks, marks, smokeSettings, flipSettings,
+    get smoke() { return smoke; }, sparks, marks, tyreSmoke, smokeSettings, flipSettings,
     get look() { return look; },
     get on() { return { ...on }; },
     /** "flipbook" | "procedural" — the live plume carries over (an A/B of the same smoke) */
@@ -57,18 +61,19 @@ export function createCarFx(app, rig, o = {}) {
       prev.reset();
       next.setVisible(true);
       next.setSprayEnabled?.(false);
+      next.setSmokeEnabled(false); // (the tyre smoke is tyreSmoke.js: only the exhaust from here)
       smoke = next;
       look = kind;
       syncLight();
     },
     set(name, value) {
       on[name] = !!value;
-      if (name === "smoke") smoke.setSmokeEnabled(on.smoke);
+      if (name === "smoke") tyreSmoke.enabled = on.smoke;
       if (name === "exhaust") smoke.setExhaustEnabled(on.exhaust);
       if (name === "sparks") sparks.enabled = on.sparks;
       if (name === "marks") { marks.mesh.visible = on.marks; if (!on.marks) marks.reset(); }
     },
-    reset() { smoke.reset(); sparks.reset(); marks.reset(); },
+    reset() { smoke.reset(); sparks.reset(); marks.reset(); tyreSmoke.reset(); },
     /** After the drive rig's frame (the car and the chase camera are where this frame draws them). */
     update(dt) {
       syncLight();
@@ -79,11 +84,12 @@ export function createCarFx(app, rig, o = {}) {
       smoke.updateFromVehicle(vehicle, camera, dt, { Space: !!rig.lastInput?.handbrake });
       sparks.updateFromVehicle(vehicle, camera, dt);
       if (on.marks) marks.update(vehicle, dt);
+      tyreSmoke.update(vehicle, dt);
     },
     /** Live counts, for the lab's readout. */
     stats() {
       const alive = (pool) => (pool ?? []).reduce((n, p) => n + (p.life > 0 ? 1 : 0), 0);
-      return { puffs: alive(smoke.particles), sparks: sparks.alive() };
+      return { puffs: tyreSmoke.active(), sparks: sparks.alive() };
     },
   };
 }

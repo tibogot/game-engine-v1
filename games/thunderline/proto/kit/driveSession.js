@@ -35,6 +35,7 @@ import { buildObstacleSet, avoidObstacles, boostZones } from "./obstacles.js";
 import { createSparks } from "./sparks.js";
 import { createTyreMarks } from "./tyreMarks.js";
 import { createLandingFx } from "./landingFx.js";
+import { createTyreSmoke } from "./tyreSmoke.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -345,6 +346,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   // THE CAR'S EFFECTS in the game (the FX lab tunes them, fx: false there): the rail sparks, tyre marks
   const sparks = fx ? createSparks(scene) : null;
   const tyreMarks = fx ? createTyreMarks(scene) : null;
+  const tyreSmoke = fx ? createTyreSmoke(app) : null; // tyreSmoke.js: drifts, handbrake, wheelspin, locked brakes
   // touchdown dust + the perfect ring (landingFx.js): PARKED, OFF (user, 2026-10-22: "forget the landing dust
   // for now, we will do it later") — the dust still read as flat sheets, the ring hazed the lens as it passed
   const landingFx = fx && false ? createLandingFx(scene) : null;
@@ -641,6 +643,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     engineSound.suspend();
     sparks?.reset();
     tyreMarks?.reset();
+    tyreSmoke?.reset();
     landingFx?.reset();
     clearKeys();
     autopilot = false;
@@ -658,6 +661,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     engine.reset();
     sparks?.reset();
     tyreMarks?.reset();
+    tyreSmoke?.reset();
     landingFx?.reset();
     S.race.reset();
     $("finish").classList.remove("show");
@@ -893,6 +897,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (S.physMs.length > 480) S.physMs.splice(0, 240); // trimmed in batches, not shifted every frame (the debug readout's last 240+)
     vehicle.syncVisuals(dt, S.simAccum / FIXED_DT);
     if (dt > 0) tyreMarks?.update(vehicle, dt);
+    tyreSmoke?.update(vehicle, dt);
     engineTick(dt, input);
     if (S.ghostPlayer) {
       if (S.ghostPlayer.done) ghostCar.group.visible = false;
@@ -935,7 +940,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   return {
     start, stop, restart, respawnCheckpoint, recoverToSafe, modelsReady,
     get active() { return !!S; }, get session() { return S; },
-    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, landingFx,
+    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, tyreSmoke, landingFx,
     get sunShadows() { return sunShadows; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
     /** fn(vehicle, session) → input, or null for the player / autopilot again */

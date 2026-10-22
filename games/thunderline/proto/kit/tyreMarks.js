@@ -55,7 +55,9 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
   const setMask = (tex) => {
     const a = attribute("aAlpha", "float");
     material.colorNode = tint;
-    material.opacityNode = Fn(() => (tex ? a.mul(texture(tex).a) : a.mul(float(0.8))))();
+    // the mask READ SOFT (a blurrier mip, half its contrast): at full strength the skid PNG's tread blocks
+    // read as a printed tyre track, a zip — rubber laid by a slide is a smear (2026-10-22)
+    material.opacityNode = Fn(() => (tex ? a.mul(texture(tex).bias(1.5).a.mul(0.5).add(0.45)) : a.mul(float(0.8))))();
     material.needsUpdate = true;
   };
   setMask(null); // a plain ribbon for the frame or two before the PNG arrives

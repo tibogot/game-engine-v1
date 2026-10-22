@@ -395,6 +395,15 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
       after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
       bank / in a tube.
+- [x] **TYRE SMOKE, in the game** (user, 2026-10-22: "the best looking AAA tyre smoke"): kit/tyreSmoke.js, on
+      litSmoke's six-way book + motion-vector frames, one instanced draw (pool 1024). Emitted by each wheel's
+      real slip (slide, handbrake, wheelspin / locked brakes; front wheels 0.6×); laid along the wheel's path
+      (by time AND every 0.55 m: continuous at 127 km/h, no blobs); thrown with a third of the wheel's
+      speed, stopped by drag, then rising + wind (the cloud stays where the drift happened); soft into its
+      own road plane per pixel; thinned within 1.2-6 m of the camera; back-lit glow of the thin smoke. The
+      FX lab uses it (the old module keeps only the exhaust). Tyre marks softened (the skid mask read at a
+      blurrier mip, half contrast: they read as a printed tread). NOT YET: seen at sunset (the back-light),
+      GPU cost (overdraw of a dense cloud) at a quiet moment.
 - [ ] LANDING DUST + PERFECT RING — PARKED (user: "forget the landing dust for now, we will do it later").
       kit/landingFx.js exists, switched OFF in driveSession. Where it stood: dust puffs still read as flat
       sheets (cut by the road — the card is now pulled toward the camera by its radius; proper fix = a soft
