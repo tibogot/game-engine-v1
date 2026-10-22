@@ -21,9 +21,9 @@ const { loadMirador, miradorGeometry, loadMgNest, mgNestGeometry } = P;
 import { kitView } from "./showroom.js";
 import { houseMesh, loadHouses } from "./algHouse.js";
 import { ICON } from "./ui/icons.js";
-import { buildH21, buildT6 } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { buildAlouette, buildH21, buildT6, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { vehicleOf } from "./vehicleLab.js";
-import { CATEGORY, PALETTE } from "./ui/iconAtlas.js";
+import { CATEGORY, KEYS, PALETTE } from "./ui/iconAtlas.js";
 import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -101,6 +101,8 @@ const ICONS = [
       make: async () => { await loadHouses("smallprops"); return houseMesh(p, "intact", 1).children[0].levels[0].object.clone(); } })),
   // the aircraft, the game's own models (rtsVehiclesFr): the T-6 (the air strikes), the H-21 (the paradrop)
   { name: "t6", title: "Air strike (T-6)", view: [-40, 26], zoom: 0.5, make: async () => vehicleOf(buildT6(), "t6").group ?? vehicleOf(buildT6(), "t6") },
+  { name: "jeep", title: "Jeep (the FLN's captured one)", view: [-40, 22], zoom: 0.62, make: async () => { const v = vehicleOf(buildWillys(), "willys"); return v.group ?? v; } },
+  { name: "alouette", title: "Alouette (medevac, gunship)", view: [-35, 14], zoom: 0.4, light: 1.7, make: async () => { const v = vehicleOf(buildAlouette(), "alouette"); return v.group ?? v; } },
   { name: "h21", title: "Paradrop (H-21)", view: [-55, 18], zoom: 0.5, make: async () => { const v = vehicleOf(buildH21(), "h21"); return v.group ?? v; } },
   // ── THE REST OF THE BUILDINGS (2026-10-22): the Blender pieces, each framed on what says what it is ──
   ...[
@@ -190,9 +192,12 @@ export async function startIconStudio() {
     const x = c.getContext("2d");
     // the backdrop: dark warm, a soft glow behind the object, a vignette at the corners
     const g = x.createRadialGradient(R * 0.5, R * 0.42, R * 0.05, R * 0.5, R * 0.5, R * 0.75);
+    // ("bare": no backdrop — the resource bar's icons, the object and its outline on the bar itself)
     const pal = PALETTE[ic.cat ?? "ability"];
-    g.addColorStop(0, ic.glow && !ic.cat ? "#6a5a40" : pal[0]); g.addColorStop(0.6, mixHex(pal[0], pal[1], 0.55)); g.addColorStop(1, pal[1]);
-    x.fillStyle = g; x.fillRect(0, 0, R, R);
+    if (pal) {
+      g.addColorStop(0, ic.glow && !ic.cat ? "#6a5a40" : pal[0]); g.addColorStop(0.6, mixHex(pal[0], pal[1], 0.55)); g.addColorStop(1, pal[1]);
+      x.fillStyle = g; x.fillRect(0, 0, R, R);
+    }
     if (shot) {
       // the OUTLINE: the object's alpha dilated (a ring of offset copies), filled near-black
       const o = document.createElement("canvas"); o.width = o.height = R;
@@ -265,9 +270,14 @@ export async function startIconStudio() {
    * else its silhouette as a brass SYMBOL on the same tile (the orders; the abilities still without a model).
    */
   const RENDER_FOR = { cutWire: "cutters", flnMine: "mine", flnWire: "mine", flnDetonate: "detonator", reinforce: "helmet", tier: "kepi", sweepMines: "detector", radio: "radio", lmg: "lmg", bazooka: "bazooka", repair: "tools",
-    barrage: "shell", radioBarrage: "shell", mortarBarrage: "shell", airStrike: "t6", radioAir: "t6" };
+    barrage: "shell", radioBarrage: "shell", mortarBarrage: "shell", airStrike: "t6", radioAir: "t6",
+    // the doctrines' abilities (algDoctrines.js) and the resources (ui/resourceHud.js: no tile, the object alone)
+    paraDrop: "h21", commando: "sniper", airSupply: "ammobox", eliteParas: "helmet", legionCall: "kepi", legionEngineers: "tools", mortar120: "shell",
+    espritCorps: "kepi", douar: "helmet", informers: "radio", saboteurs: "detonator", jeep: "jeep", mortar81: "shell", borderArms: "bazooka",
+    outsideSection: "lmg", advisers: "kepi", recon: "t6", t6Pair: "t6", medevac: "alouette", gunship: "alouette",
+    resMp: "helmet", resMun: "ammobox", resFuel: "jerrycan" };
   async function atlas(size = 96, cols = 8) {
-    const keys = Object.keys(ICON).filter((k) => !/^(vet\d|alert)/.test(k));
+    const keys = [...KEYS];
     const tiles = [];
     for (const k of keys) {
       const r = out[RENDER_FOR[k] ?? k];

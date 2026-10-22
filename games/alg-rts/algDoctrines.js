@@ -41,6 +41,7 @@ import { createAlgParadrop } from "./algParadrop.js";
 import { SIDES } from "../shared-rts/teams.js";
 import { FLN_TRICKS } from "./algFlnTricks.js";
 import { iconStyle } from "./ui/icons.js";
+import { hasRendered, renderedStyle } from "./ui/iconAtlas.js";
 import { t } from "./i18n/i18n.js";
 
 export const DOCTRINE_PARAMS = {
@@ -451,6 +452,11 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
 #alg-doc .ab:hover { border-color: #f1dfa6; }
 #alg-doc .ab .ic { flex: 0 0 20px; height: 20px; background: currentColor; -webkit-mask-size: contain; mask-size: contain;
   -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; color: #c9a54a; }
+/* the RENDERED icons (ui/iconAtlas.js — the command card's tiles, here square at 30 px; 18 px on the pick cards) */
+#alg-doc .ab .ic.r, #alg-doc .pick .ics i.r { background-color: transparent; -webkit-mask-image: none; mask-image: none; border: 1px solid #070503; border-radius: 2px; }
+#alg-doc .ab .ic.r { flex: 0 0 30px; height: 30px; }
+#alg-doc .pick .ics i.r { width: 18px; height: 18px; }
+#alg-doc .ab.cool .ic.r, #alg-doc .ab.short .ic.r { filter: grayscale(0.85) brightness(0.6); }
 #alg-doc .ab .nm { flex: 1; line-height: 1.2; }
 #alg-doc .ab .pr { font: 11px var(--hud-mono, monospace); color: var(--hud-dim, #a8987a); white-space: nowrap; }
 #alg-doc .ab.locked { opacity: 0.6; }
@@ -498,7 +504,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
       el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${t("à choisir")}</span><span class="cp" title="${cpTitle()}">★ ${cp}</span></div>
         <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
         ${mine.map(([key, d]) => `<button type="button" class="pick" data-pick="${key}" title="${d.blurb} — ${t("Choisir cette doctrine pour toute la bataille.")}"><b>${d.name}</b>
-          <span class="ics">${d.abilities.map((a) => `<i style="${iconStyle(a.icon)}" title="${a.name}"></i>`).join("")}</span></button>`).join("")}`;
+          <span class="ics">${d.abilities.map((a) => `<i class="${hasRendered(a.key) ? "r" : ""}" style="${hasRendered(a.key) ? renderedStyle(a.key) : iconStyle(a.icon)}" title="${a.name}"></i>`).join("")}</span></button>`).join("")}`;
       return;
     }
     const d = DOCTRINES[doctrine];
@@ -506,7 +512,7 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     if (!d) return;
     el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${d.short}</span><span class="cp" title="${cpTitle()}">★ ${cp}</span></div>
       <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
-      ${d.abilities.map((a) => `<button type="button" class="ab" data-ab="${a.key}" title="${a.hint}"><span class="ic" style="${iconStyle(a.icon)}"></span>
+      ${d.abilities.map((a) => `<button type="button" class="ab" data-ab="${a.key}" title="${a.hint}"><span class="ic${hasRendered(a.key) ? " r" : ""}" style="${hasRendered(a.key) ? renderedStyle(a.key) : iconStyle(a.icon)}"></span>
         <span class="nm">${a.name}</span><span class="pr"></span><span class="sw"></span></button>`).join("")}`;
     refresh();
   }

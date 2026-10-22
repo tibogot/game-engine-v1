@@ -2,11 +2,14 @@
 // cool"): the command card's pictures, RENDERED from the game's own models (iconStudio.js, icon-studio.html → its
 // saveAtlas()), one 96 px tile per key in public/textures/ui/icons/rendered.webp, 8 a row. The orders and the abilities
 // still without a model: their silhouette as a brass symbol on the same tile. Regenerate both from the studio.
-const KEYS = ["patrol", "grenade", "stop", "focus", "cutWire", "cancelSite", "tier", "sandbags", "wire", "mgNest", "mortarPit",
+export const KEYS = ["patrol", "grenade", "stop", "focus", "cutWire", "cancelSite", "tier", "sandbags", "wire", "mgNest", "mortarPit",
   "mirador", "searchlight", "sangar", "ambushScreen", "smoke", "barrage", "airStrike", "flare", "lmg", "bazooka", "radio",
   "radioBarrage", "radioAir", "aimArc", "retreat", "reinforce", "repair", "garrison", "unload", "transport", "disembark",
   "attackMove", "holdFire", "reverse", "forwardPost", "aidStation", "fortPoint", "flnMine", "flnWire", "flnDetonate", "flnCut",
-  "armsCache", "refuge", "infirmary", "mortarBarrage"];
+  "armsCache", "refuge", "infirmary", "mortarBarrage",
+  // the doctrines' abilities (algDoctrines.js) and the resources (ui/resourceHud.js) — 2026-10-22
+  "paraDrop", "commando", "airSupply", "eliteParas", "legionCall", "legionEngineers", "mortar120", "espritCorps", "douar", "informers", "saboteurs",
+  "jeep", "mortar81", "borderArms", "outsideSection", "advisers", "recon", "t6Pair", "medevac", "gunship", "resMp", "resMun", "resFuel"];
 /**
  * THE COLOUR CODE (2026-10-22, you: "do the full colour coding for the orders" — Company of Heroes' card): each key's
  * CATEGORY, its tile's backdrop baked into the atlas (iconStudio): orders blue-grey, attack orders and call-ins orange,
@@ -16,7 +19,11 @@ export const CATEGORY = {
   stop: "order", focus: "order", patrol: "order", holdFire: "order", reverse: "order", garrison: "order", unload: "order", disembark: "order", transport: "order", cancelSite: "order",
   attackMove: "attack", aimArc: "attack", barrage: "attack", airStrike: "attack", radioBarrage: "attack", radioAir: "attack", mortarBarrage: "attack", flnDetonate: "attack",
   retreat: "retreat",
+  paraDrop: "attack", airSupply: "attack", legionCall: "attack", mortar120: "attack", douar: "attack", informers: "attack", jeep: "attack", mortar81: "attack",
+  outsideSection: "attack", recon: "attack", t6Pair: "attack", medevac: "attack", gunship: "attack", commando: "attack",
+  eliteParas: "upgrade", legionEngineers: "upgrade", espritCorps: "upgrade", saboteurs: "upgrade", borderArms: "upgrade", advisers: "upgrade",
   reinforce: "upgrade", tier: "upgrade",
+  resMp: "bare", resMun: "bare", resFuel: "bare",
   sandbags: "build", wire: "build", mgNest: "build", mortarPit: "build", mirador: "build", searchlight: "build", forwardPost: "build", aidStation: "build", fortPoint: "build",
   sangar: "build", ambushScreen: "build", armsCache: "build", refuge: "build", infirmary: "build",
 };

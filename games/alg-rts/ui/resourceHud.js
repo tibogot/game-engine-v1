@@ -3,6 +3,11 @@
 // its income a minute, and the villages — how many are yours, how many the
 // ALN's. This game's own (nam's shows its requisition points).
 import { iconSvg } from "./resourceIcons.js";
+import { hasRendered, renderedStyle } from "./iconAtlas.js";
+// THE RESOURCES' ICONS (2026-10-22): the RENDERED objects (ui/iconAtlas.js, no tile — helmet, jerrycan, ammunition
+// box) at 22 px; the old silhouette where the atlas has none.
+const RES_KEY = { mp: "resMp", fuel: "resFuel", mun: "resMun" };
+const resIcon = (r) => (hasRendered(RES_KEY[r]) ? `<i class="rr" style="${renderedStyle(RES_KEY[r])}"></i>` : iconSvg(r, { size: 15 }));
 import { t } from "../i18n/i18n.js";
 import { isHuman } from "../../shared-rts/teams.js";
 const CSS = `
@@ -15,7 +20,8 @@ const CSS = `
 }
 #alg-res .row { display: flex; align-items: center; gap: 10px; }
 #alg-res .row2 { font-size: 10px; }
-#alg-res .ric { display: inline-flex; color: var(--hud-dim); }
+#alg-res .ric { display: inline-flex; align-items: center; color: var(--hud-dim); }
+#alg-res .ric .rr { display: block; width: 22px; height: 22px; margin: -3px 0; }
 #alg-res .res.mp .ric { color: var(--hud-brass); } #alg-res .res.fuel .ric { color: #e2b25a; } #alg-res .res.mun .ric { color: #d48a6a; }
 #alg-res .res { display: flex; align-items: baseline; gap: 5px; }
 #alg-res .amount { font-weight: 700; font-size: 14px; color: var(--hud-brass); min-width: 30px; text-align: right; }
@@ -43,7 +49,7 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
   const fln = isHuman("enemy");
   root.innerHTML = fln ? `
     <div class="row">
-    <span class="res sup" title="${t("Ravitaillement : la katiba vit des villages qui la soutiennent, des caches et des points qu'elle tient. Recrute les combattants.")}"><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="sup">0</span><span class="inc" data-i="sup"></span></span>
+    <span class="res sup" title="${t("Ravitaillement : la katiba vit des villages qui la soutiennent, des caches et des points qu'elle tient. Recrute les combattants.")}"><span class="ric">${resIcon("mun")}</span><span class="amount hud-num" data-r="sup">0</span><span class="inc" data-i="sup"></span></span>
     </div>
     <div class="row row2">
     <span class="dim" id="alg-res-villages"></span>
@@ -55,9 +61,9 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
     </div>
   ` : `
     <div class="row">
-    <span class="res mp" title="${t("Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes.")}"><span class="ric">${iconSvg("mp", { size: 15 })}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
-    <span class="res fuel" title="${t("Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons.")}"><span class="ric">${iconSvg("fuel", { size: 15 })}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
-    <span class="res mun" title="${t("Munitions : des villages et des points de munitions que vous tenez, reliés au poste. Grenades, capacités, la Légion.")}"><span class="ric">${iconSvg("mun", { size: 15 })}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
+    <span class="res mp" title="${t("Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes.")}"><span class="ric">${resIcon("mp")}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
+    <span class="res fuel" title="${t("Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons.")}"><span class="ric">${resIcon("fuel")}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
+    <span class="res mun" title="${t("Munitions : des villages et des points de munitions que vous tenez, reliés au poste. Grenades, capacités, la Légion.")}"><span class="ric">${resIcon("mun")}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
     </div>
     <div class="row row2">
     <span class="dim" id="alg-res-villages"></span>
