@@ -9,7 +9,11 @@ export const KEYS = ["patrol", "grenade", "stop", "focus", "cutWire", "cancelSit
   "armsCache", "refuge", "infirmary", "mortarBarrage",
   // the doctrines' abilities (algDoctrines.js) and the resources (ui/resourceHud.js) — 2026-10-22
   "paraDrop", "commando", "airSupply", "eliteParas", "legionCall", "legionEngineers", "mortar120", "espritCorps", "douar", "informers", "saboteurs",
-  "jeep", "mortar81", "borderArms", "outsideSection", "advisers", "recon", "t6Pair", "medevac", "gunship", "resMp", "resMun", "resFuel"];
+  "jeep", "mortar81", "borderArms", "outsideSection", "advisers", "recon", "t6Pair", "medevac", "gunship", "resMp", "resMun", "resFuel",
+  // the squads' weapon badges (ui/armyTabs.js — CoH's upgrade marks on the unit card), no tile
+  "badgeLmg", "badgeBazooka", "badgeRadio", "badgeFlamer", "badgeSniper",
+  // the veterancy chevrons (brass symbols, no tile) and the alert feed's pictures (ui/battleHud.js)
+  "vet1", "vet2", "vet3", "alertMine", "alertCut", "alertAttack", "alertSeen", "alertFlag"];
 /**
  * THE COLOUR CODE (2026-10-22, you: "do the full colour coding for the orders" — Company of Heroes' card): each key's
  * CATEGORY, its tile's backdrop baked into the atlas (iconStudio): orders blue-grey, attack orders and call-ins orange,
@@ -24,6 +28,8 @@ export const CATEGORY = {
   eliteParas: "upgrade", legionEngineers: "upgrade", espritCorps: "upgrade", saboteurs: "upgrade", borderArms: "upgrade", advisers: "upgrade",
   reinforce: "upgrade", tier: "upgrade",
   resMp: "bare", resMun: "bare", resFuel: "bare",
+  badgeLmg: "bare", badgeBazooka: "bare", badgeRadio: "bare", badgeFlamer: "bare", badgeSniper: "bare",
+  vet1: "bare", vet2: "bare", vet3: "bare", alertAttack: "attack", alertFlag: "order",
   sandbags: "build", wire: "build", mgNest: "build", mortarPit: "build", mirador: "build", searchlight: "build", forwardPost: "build", aidStation: "build", fortPoint: "build",
   sangar: "build", ambushScreen: "build", armsCache: "build", refuge: "build", infirmary: "build",
 };
@@ -36,6 +42,9 @@ export const PALETTE = {
 const COLS = 8, ROWS = Math.ceil(KEYS.length / COLS);
 const URL_ = "/textures/ui/icons/rendered.webp";
 const AT = new Map(KEYS.map((k, i) => [k, i]));
+
+/** The rendered tile on an element that was styled as a MASK (ui/icons.js iconStyle): the mask and its colour cleared. */
+export const renderedOnly = (key) => `${renderedStyle(key)};background-color:transparent;-webkit-mask-image:none;mask-image:none`;
 
 /** Has `key` a rendered tile? */
 export const hasRendered = (key) => AT.has(key);

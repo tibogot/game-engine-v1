@@ -222,10 +222,10 @@ export async function startIconStudio() {
     await img.decode();
     const glyph = document.createElement("canvas"); glyph.width = glyph.height = R;
     const gx = glyph.getContext("2d");
-    const m = R * 0.18;
+    const m = R * (cat === "bare" ? 0.04 : 0.18);   // (bare: the chevrons, the glyph to the edges)
     gx.drawImage(img, m, m, R - 2 * m, R - 2 * m);
     gx.globalCompositeOperation = "source-in";
-    const gg = gx.createLinearGradient(0, m, 0, R - m); gg.addColorStop(0, PALETTE[cat][2]); gg.addColorStop(1, PALETTE[cat][3]);
+    const gg = gx.createLinearGradient(0, m, 0, R - m); const pal = PALETTE[cat] ?? PALETTE.ability; gg.addColorStop(0, pal[2]); gg.addColorStop(1, pal[3]);
     gx.fillStyle = gg; gx.fillRect(0, 0, R, R);
     return tile(glyph, { cat });
   }
@@ -276,7 +276,8 @@ export async function startIconStudio() {
     paraDrop: "h21", commando: "sniper", airSupply: "ammobox", eliteParas: "helmet", legionCall: "kepi", legionEngineers: "tools", mortar120: "shell",
     espritCorps: "kepi", douar: "shotgun", informers: "radio", saboteurs: "detonator", jeep: "jeep", mortar81: "shell", borderArms: "bazooka",
     outsideSection: "lmg", advisers: "mapcase", recon: "t6", t6Pair: "t6", medevac: "alouette", gunship: "alouette",
-    resMp: "helmet", resMun: "ammobox", resFuel: "jerrycan" };
+    resMp: "helmet", resMun: "ammobox", resFuel: "jerrycan",
+    badgeLmg: "lmg", badgeBazooka: "bazooka", badgeRadio: "radio", badgeFlamer: "flamer", badgeSniper: "sniper", alertMine: "mine", alertCut: "cutters" };
   async function atlas(size = 96, cols = 8) {
     const keys = [...KEYS];
     const tiles = [];

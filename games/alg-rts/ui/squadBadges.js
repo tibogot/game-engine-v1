@@ -15,6 +15,7 @@
 import { rectOf } from "../../shared-rts/canvasRect.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { iconStyle } from "./icons.js";
+import { hasRendered, renderedOnly } from "./iconAtlas.js";
 import { t } from "../i18n/i18n.js";
 
 const ICONS = {
@@ -57,7 +58,7 @@ const CSS = `
   justify-self: center; position: relative; }
 .alg-sqb .bar i { position: absolute; left: 0; top: 0; bottom: 0; background: #3ddc60; }
 /* Veterancy: CoH's gold CHEVRONS (ui/icons.js vet1-3, a mask), over the shield. */
-.alg-sqb .st { position: absolute; left: 30px; width: 20px; height: 17px; top: -18px; background: #f2c94c;
+.alg-sqb .st { position: absolute; left: 30px; width: 20px; height: 20px; top: -21px; background: #f2c94c;
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center; filter: drop-shadow(0 1px 1px #000); }
 .alg-sqb .up { position: absolute; left: 47px; top: 25px; padding: 0 3px; border-radius: 2px; background: #c9a54a; color: #15120a;
@@ -140,7 +141,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
       b.el.classList.toggle("hold", !!s.holdFire);
       const vet = Math.min(3, s.stars ?? 0);
       b.st.hidden = !vet;
-      if (vet) b.st.style.cssText = iconStyle(`vet${vet}`);
+      if (vet) b.st.style.cssText = hasRendered(`vet${vet}`) ? renderedOnly(`vet${vet}`) : iconStyle(`vet${vet}`);   // (the brass chevrons, ui/iconAtlas.js)
       b.up.hidden = !(s.upgrades?.lmg || s.upgrades?.bazooka);
       b.up.textContent = s.upgrades?.bazooka ? t("Bazooka") : t("FM");   // (the faoudj's M20, algSquads)
     }

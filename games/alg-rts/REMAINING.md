@@ -37,7 +37,7 @@ ones throughout.
    - **The infirmary's cloth roof reads FLAT** (you, 2026-10-21): it wants the detail the sandbags have —
      real cloth relief (seams, sewn patch edges, sagging folds, weave in the normal map, wear and dirt
      where it rests on the beams). Next session.
-3. **Icons:** ~~the doctrine panel, the resource bar~~ — **done 2026-10-22 (6be95bf9)**, rendered like the command card. Left: the flamethrower and sniper renders have no button yet; some doctrine abilities share a prop (kepi ×3, helmet ×3) — dedicated models possible (parachute crate, Legion beret, informer's notebook); the veterancy chevrons and alert marks are still the old silhouettes.
+3. **Icons:** ~~the doctrine panel, the resource bar, the FLN abilities on French kit, the squads' weapon badges, the chevrons and alerts~~ — **done 2026-10-22**: every HUD picture now comes from the rendered atlas (82 tiles). Possible later: Legion / para props for the French abilities still sharing the kepi and helmet (képi blanc, green and red berets, a crate under a parachute).
 4. **Housekeeping:** the unused scanned stones in assets-src/scans (delete or keep — your call).
 
 ## Done since the last list (2026-10-17 → 10-20)

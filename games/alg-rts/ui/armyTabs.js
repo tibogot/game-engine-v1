@@ -15,6 +15,7 @@
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { HUD_H, HUD_STRIP_H } from "./hudBar.js";
 import { iconStyle } from "./icons.js";
+import { hasRendered, renderedOnly, renderedStyle } from "./iconAtlas.js";
 import { t } from "../i18n/i18n.js";
 
 const LINK = 15;           // m: men closer than this to one of the group are in it
@@ -53,9 +54,14 @@ const CSS = `
 #alg-tabs .st.retreat { color: #fff; background: #7a5a18; }
 #alg-tabs .n.short { color: #ffcf8a; }
 /* The squad's veterancy, CoH's gold chevrons (ui/icons.js vet1-3) in the portrait's corner. */
-#alg-tabs .vet { position: absolute; right: 3px; bottom: 10px; width: 15px; height: 13px; background: #f2c94c;
+#alg-tabs .vet { position: absolute; right: 2px; bottom: 9px; width: 18px; height: 18px; background: #f2c94c;
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat;
   -webkit-mask-position: center; mask-position: center; filter: drop-shadow(0 1px 1px #000); }
+/* THE SQUAD'S SPECIAL WEAPONS (2026-10-22, CoH's upgrade marks on the unit card): the rendered objects (ui/iconAtlas.js
+   badge*, no tile) on small dark chips (a dark gun on a dark portrait vanished) in a column down the portrait's left edge, above the health bar. */
+#alg-tabs .kit { position: absolute; left: 2px; bottom: 10px; display: flex; flex-direction: column-reverse; gap: 2px; pointer-events: none; }
+#alg-tabs .kit i { display: block; width: 19px; height: 19px; box-sizing: border-box; background-color: rgba(14, 13, 9, 0.88);
+  border: 1px solid rgba(201, 165, 74, 0.7); border-radius: 2px; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.7); }
 #alg-tabs .hp { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 4px; background: #23261d; border: 1px solid #3a4031; }
 #alg-tabs .hp i { display: block; height: 100%; background: var(--hud-olive); }
 #alg-tabs .hp i.low { background: var(--hud-red); }
@@ -72,6 +78,16 @@ function stateOf(g) {
   if (g.some((u) => u.isMoving)) return ["move", "»", t("en mouvement")];
   if (g.some((u) => u.inCover)) return ["cover", t("ABRI"), t("à couvert")];
   return ["idle", "", t("en position")];
+}
+
+/** What special weapons a group carries, as badge keys: its squad's upgrades (algSquads UPGRADES: the FM, the radio,
+ *  the bazooka), a flamethrower or a scoped rifle in a man's hands. */
+const UPGRADE_BADGE = { lmg: "badgeLmg", bazooka: "badgeBazooka", radio: "badgeRadio" };
+const WEAPON_BADGE = { flamer: "badgeFlamer", sniper: "badgeSniper" };
+function kitOf(g) {
+  const out = Object.keys(g.squad?.upgrades ?? {}).map((k) => UPGRADE_BADGE[k]).filter(Boolean);
+  for (const u of g) { const b = WEAPON_BADGE[u.weapon]; if (b && !out.includes(b)) out.push(b); }
+  return out;
 }
 
 export function createArmyTabs({ units, selection, thumbnails, focus = () => {}, team = "player", mount = document.body, squads = null }) {
@@ -142,7 +158,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       if (url) el.style.backgroundImage = `url(${url})`;
       // A squad: men alive / its full strength (CoH's pips as a number).
       const n = g.squad ? `${g.length}/${g.squad.size}` : g.length > 1 ? `${g.length}` : "";
-      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<span class="vet" hidden></span><div class="hp"><i></i></div>`;
+      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<span class="vet" hidden></span><span class="kit"></span><div class="hp"><i></i></div>`;
       el.addEventListener("click", (e) => {
         const live = g.filter((m) => m.alive);
         if (!live.length) return;
@@ -153,7 +169,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         if (live.length) focus(live.reduce((s, m) => s + m.position.x, 0) / live.length, live.reduce((s, m) => s + m.position.z, 0) / live.length);
       });
       root.appendChild(el);
-      views.push({ el, g, bar: el.querySelector(".hp i"), st: el.querySelector(".st"), vet: el.querySelector(".vet"), vetLast: 0, hpLast: -1, stLast: null, fireLast: null, selLast: null });
+      views.push({ el, g, bar: el.querySelector(".hp i"), st: el.querySelector(".st"), vet: el.querySelector(".vet"), vetLast: 0, kit: el.querySelector(".kit"), kitLast: "", hpLast: -1, stLast: null, fireLast: null, selLast: null });
     });
     if (groups.length > MAX_TABS) {
       const more = document.createElement("div");
@@ -184,7 +200,9 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         v.st.style.display = label ? "" : "none";
       }
       const vet = Math.min(3, v.g.squad?.stars ?? v.g[0]?.stars ?? 0);   // a vehicle: its own (algVeterancy.js)
-      if (vet !== v.vetLast) { v.vetLast = vet; v.vet.hidden = !vet; if (vet) v.vet.style.cssText = iconStyle(`vet${vet}`); }
+      if (vet !== v.vetLast) { v.vetLast = vet; v.vet.hidden = !vet; if (vet) v.vet.style.cssText = hasRendered(`vet${vet}`) ? renderedOnly(`vet${vet}`) : iconStyle(`vet${vet}`); }
+      const kit = kitOf(live).filter(hasRendered).join(" ");
+      if (kit !== v.kitLast) { v.kitLast = kit; v.kit.innerHTML = kit ? kit.split(" ").map((k) => `<i style="${renderedStyle(k)}"></i>`).join("") : ""; }
       if (fire !== v.fireLast) { v.fireLast = fire; v.el.classList.toggle("fire", fire); }
       const isSel = v.g.some((u) => sel.has(u));
       if (isSel !== v.selLast) { v.selLast = isSel; v.el.classList.toggle("sel", isSel); }

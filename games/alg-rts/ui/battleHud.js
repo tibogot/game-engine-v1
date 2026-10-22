@@ -17,6 +17,7 @@ import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.j
 import { rectOf } from "../../shared-rts/canvasRect.js";
 import { iconSvg, pointIcon } from "./resourceIcons.js";
 import { hasIcon, iconStyle } from "./icons.js";
+import { hasRendered, renderedOnly } from "./iconAtlas.js";
 import { t } from "../i18n/i18n.js";
 
 const CSS = `
@@ -62,6 +63,10 @@ const CSS = `
 #alg-alerts .al .aic { position: absolute; left: 7px; top: 50%; width: 17px; height: 17px; transform: translateY(-50%); background: var(--hud-brass);
   -webkit-mask-size: contain; mask-size: contain; -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
 #alg-alerts .al.bad .aic { background: #ff6a55; } #alg-alerts .al.good .aic { background: #5aaeff; }
+/* (the RENDERED pictures, ui/iconAtlas.js — the command card's tiles: square, the kind's colour as their edge) */
+#alg-alerts .al.has-ic.r { padding-left: 34px; }
+#alg-alerts .al .aic.r { left: 5px; width: 24px; height: 24px; box-sizing: border-box; border: 1px solid #070503; border-radius: 2px; }
+#alg-alerts .al.bad .aic.r { border-color: #ff6a55; } #alg-alerts .al.good .aic.r { border-color: #5aaeff; }
 #alg-alerts .al.tip { border-left-color: var(--hud-brass); background: #2a2614; border-color: #5c5126; color: #f1e6c4; }
 #alg-alerts .al.tip::before { content: var(--alg-tip-label, "CONSEIL") "  "; font: 700 9px var(--hud-sans); letter-spacing: 0.18em; color: var(--hud-brass); }
 
@@ -230,9 +235,10 @@ export function createBattleHud({ camera, canvas, onJump }) {
   // `onClick`: more than the camera jump (a tier's alert selects the post).
   function alert(text, { x, z, kind = "", time = 0, life = 10, icon = null, onClick = null } = {}) {
     const node = document.createElement("div");
-    node.className = `al ${kind}${icon ? " has-ic" : ""}`;
+    const rendered = !!icon && hasRendered(icon);
+    node.className = `al ${kind}${icon ? " has-ic" : ""}${rendered ? " r" : ""}`;
     // CoH's alert pictures (ui/icons.js alert*), the kind's colour.
-    const ic = icon && hasIcon(icon) ? `<span class="aic" style="${iconStyle(icon)}"></span>` : "";
+    const ic = rendered ? `<span class="aic r" style="${renderedOnly(icon)}"></span>` : icon && hasIcon(icon) ? `<span class="aic" style="${iconStyle(icon)}"></span>` : "";
     node.innerHTML = kind === "tip" ? text : `${ic}<span class="t">${fmtTime(time)}</span>${text}`;
     const a = { node, x, z, t0: performance.now(), life: life * 1000 };
     if (x != null) node.addEventListener("click", () => { onJump(x, z); onClick?.(); });
