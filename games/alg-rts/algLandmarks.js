@@ -233,12 +233,13 @@ const Q_COUNTS = ["outcrops", "trees", "deadTrees", "betoums", "tamariskGroups",
  * The rock outcrops (instanced, hard cover, impassable) and the lone trees
  * (the showroom's PlacedFoliage). Call after the showroom and the fields.
  */
-export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid = null, plants = null, quantities = null, keepClear = [], fixedSandstone = [] }) {
+export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid = null, plants = null, quantities = null, over = null, keepClear = [], fixedSandstone = [] }) {
   // A map's own counts over the Aurès' (maps/training.js scenery: a few of each), and its circles
   // kept clear (the lessons' ground).
   // A map that brings its own scenery starts from NOTHING (2026-10-13): every count it does not give
   // is 0 — only the Aurès (no `quantities`) gets the Aurès' counts. The rules (spacings, slopes) stay.
-  const Q = { ...Q_AURES, ...(quantities ? Object.fromEntries(Q_COUNTS.map((k) => [k, 0])) : {}), ...quantities };
+  // (`over`: a few counts changed over the Aurès' own, the rest kept — the new Aurès: no old terraces)
+  const Q = { ...Q_AURES, ...(quantities ? Object.fromEntries(Q_COUNTS.map((k) => [k, 0])) : {}), ...quantities, ...over };
   const R = rng(2000);
   const H = (x, z) => app.getWorldHeight(x, z);
   const trackPts = TRACK_LINES.flatMap((t) => t.line);

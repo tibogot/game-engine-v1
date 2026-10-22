@@ -15,6 +15,9 @@
   - **The ksar:** the mosque on the summit with two rings of M'zab houses round it.
 - **Layout rules.** Every arc lies on the north side of its square, so every front faces the camera. There are at least 2 m between footprints (checked with a rectangle-overlap test).
 
+- **Fields (2026-10-22).** The old field system (algFields), gardens, terraces and threshing floors are gone. In their place are the Oued Abdi's fields, laid by `tools/algAuresNewFields.mjs`: 25 plots (ploughed, stubble, barley), 351 Blender dry-stone wall pieces and 113 prickly-pear hedges, clear of the oasis groves. The soil and barley are in the map's own level copy, `alg-aures-new.v3proj`, so the old map is untouched. On that copy only, the reed-mace plant slot (878 texels on the whole map) holds the barley.
+- **Rule.** A map with its own `MAP.fields` doesn't run algFields, and the scenery keeps off its plots.
+
 ## Next, area by area (one at a time; you look after each)
 1. Your look at the four villages, then fixes.
 2. A stone dechra kit in Blender: the dechra is in the ochre M'zab kit for now.
@@ -22,4 +25,4 @@
 4. Village marks: wall paint and flags.
 5. The French post: the Blender redesign.
 6. The FLN camp: the redesign proposal.
-7. The field walls, gardens and terraces round the rebuilt villages.
+7. New Blender pieces: the well, the koubba, the cemetery, the farmsteads and huts, and the zeriba from the lab into the game.

@@ -602,8 +602,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // FIELDS (algFields.js): ploughed, stubble and barley plots round the
   // villages, low walls (cover), prickly-pear hedges (concealment) round
   // them and along the pistes near the villages. Then the cover map again,
-  // with the walls in it. ?fields=0 = without.
-  if (params.get("fields") !== "0" && app.algEconomy) {
+  // with the walls in it. ?fields=0 = without. (Not on a map that brings its OWN fields — MAP.fields: the
+  // Oued Abdi's and the new Aurès' soil decals, Blender walls and hedges, laid by their tools.)
+  if (params.get("fields") !== "0" && app.algEconomy && !MAP.fields) {
     onStatus(t("Labour des champs…"));
     try {
       const t0 = performance.now();
@@ -611,13 +612,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       console.log(`[fields] ${JSON.stringify(app.algFields.stats)} in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg fields] failed:", e); }
   }
+  // (a map's own plots, as the boxes the scenery keeps off: local x across the contour, d; z along it, w)
+  const ownFields = MAP.fields?.plots?.length ? { plots: MAP.fields.plots.map((q) => ({ x: q.x, z: q.z, yaw: q.yaw, hx: q.d / 2 + 1.5, hz: q.w / 2 + 1.5 })) } : null;
   // ROCK OUTCROPS + LONE TREES (algLandmarks.js), after the fields so they
   // keep off them. Then the cover map once, with the walls and rocks in it.
   if (SCENERY) {
     try {
       const t0 = performance.now();
-      app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? null, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null,
-        quantities: MAP.scenery?.quantities ?? null, keepClear: MAP.scenery?.keepClear ?? [], fixedSandstone: MAP.sandstone?.rocks ?? [] });
+      app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? ownFields, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null,
+        quantities: MAP.scenery?.quantities ?? null, over: MAP.scenery?.over ?? null, keepClear: MAP.scenery?.keepClear ?? [], fixedSandstone: MAP.sandstone?.rocks ?? [] });
       console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
       // The SANDSTONE rocks: their shapes come from the workers started at the top of the boot.
       const t1 = performance.now();
@@ -764,7 +767,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("life") !== "0") {
     try {
       const t0 = performance.now();
-      app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? null, plants: app.showroom?.plants ?? null });
+      app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? ownFields, plants: app.showroom?.plants ?? null });
       console.log(`[village life] ${JSON.stringify(app.algVillageLife.stats)} in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg village life] failed:", e); }
   }

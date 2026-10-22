@@ -5,10 +5,14 @@
 //   · the merged procedural villages (the two mechtas, the dechra, the ksar) are left out (MAP.skip) and each is
 //     rebuilt as SEPARATE houses of the Blender kits (algHouse.js) in the map's TOWN field — garrisons, damage and
 //     collapse (algTownDamage) from day one, each on its own levelled pad (algGame: a row without a baked height);
+//   · the old gardens, terraces and threshing floors left out too: the Oued Abdi's FIELDS in their place (tools/
+//     algAuresNewFields.mjs: soil decals and barley in the map's OWN copy of the level, alg-aures-new.v3proj; the
+//     Blender dry-stone walls and the prickly-pear hedges in MAP.fields);
 //   · the rest arrives as it is rebuilt (the post, the stone dechra kit, the field walls, the stones…).
 // ?map=auresNew (the menu's "Les Aurès — 1956"; the old map is "Les Aurès (ancien)"). Plan: games/alg-rts/AURES_NEW_PLAN.md.
 import { LAYOUT as OLD_LAYOUT, MAP as OLD_MAP, PLAY as OLD_PLAY } from "./aures.js";
 import { t } from "../i18n/i18n.js";
+import { FIELD_HEDGES, FIELD_PLOTS, FIELD_WALLS } from "./auresNewFields.js";
 
 export const PLAY = OLD_PLAY;
 export const LAYOUT = OLD_LAYOUT;
@@ -67,7 +71,13 @@ export const MAP = {
   id: "auresNew",
   base: "aures",   // (the Aurès' briefing, post name and map title — algBattle, algUnits, tacticalMap)
   name: t("Aurès · vallée de Tighanimine"),
-  // the old merged villages, left out: rebuilt below as separate houses
-  skip: ["mechta", "mechta2", "dechra", "ksar"],
+  level: "/levels/alg-aures-new.v3proj",
+  // the old merged villages, left out: rebuilt below as separate houses; the old gardens, terraces and threshing
+  // floors: the fields below
+  skip: ["mechta", "mechta2", "dechra", "ksar", "gardenOA1", "gardenOA2", "threshOA", "gardenEO1", "gardenEO2", "threshEO", "terracesEO",
+    "terracesD1", "terracesD2", "terracesD3", "gardenD", "threshD", "terracesOpen1", "terracesOpen2", "terracesOpen3", "terracesOpen4"],
+  // (the old almond terraces of the open slopes, algLandmarks: none)
+  scenery: { over: { terraces: 0 } },
+  fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
   town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], replacesHamlet: true },
 };
