@@ -111,12 +111,29 @@ export function wallAt(tile, s, L) {
 }
 
 /** Deck (channel + shell) and TRIM (a white rim along each lip) for a half-pipe piece. */
+/**
+ * `aRound` on a bore / half-pipe deck: where a point is ROUND the inside, 0 → 1 from the profile's start
+ * (a tube: its top centre; a half-pipe: its left rim) — so the floor is 0.5 in both. The tube material
+ * (tubeMaterial.js) lays its floor band, side strips and darker roof by it. Per ring (one `along` value),
+ * the inner profile's length is the largest `across` of its zone-3 points.
+ */
+function addRound(deck, THREE) {
+  const uv = deck.getAttribute("uv"), zone = deck.getAttribute("aZone"), n = uv.count;
+  const span = new Map();
+  const key = (i) => Math.round(uv.getX(i) * 1000);
+  for (let i = 0; i < n; i++) if (Math.abs(zone.getX(i) - 3) < 0.5) span.set(key(i), Math.max(span.get(key(i)) ?? 0, uv.getY(i)));
+  const r = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const P = span.get(key(i)); r[i] = P ? Math.min(1, Math.max(0, uv.getY(i) / P)) : 0.5; }
+  deck.setAttribute("aRound", new THREE.Float32BufferAttribute(r, 1));
+}
+
 export function buildHalfpipeLook(tile, frames, sAt, L, { buildSweepGeometry, NO_CHECKER, THREE }) {
   const deck = buildSweepGeometry(frames, halfpipeSection(1), { profileAt: (_t, i) => halfpipeSection(wallAt(tile, sAt[i], L)) });
   const n = deck.getAttribute("position").count;
   const a = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
   deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
+  addRound(deck, THREE);
   const place = (f, x, y) => f.pos.clone().addScaledVector(f.right, x).addScaledVector(f.up, y);
   // the lips: centred on the wall's cut edge, so the rim caps it
   const lip = (side) => frames.map((f, i) => {
@@ -180,6 +197,7 @@ export function buildTubeLook(tile, frames, sAt, L, { buildSweepGeometry, NO_CHE
   const a = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
   deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
+  addRound(deck, THREE);
 
   // section point (x, y) at frame f → world (the deck frame: right, up)
   const place = (f, x, y) => f.pos.clone().addScaledVector(f.right, x).addScaledVector(f.up, y);

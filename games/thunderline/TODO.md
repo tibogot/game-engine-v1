@@ -169,8 +169,9 @@ this is just the list. Newest decisions at the top of each section. Last updated
       platform, test lap 9.0 s; seen from above. (Faint shading streaks on the deck near a tight
       inside edge — the texture bunching; minor.)
       ONE RED ARC (user, 2026-10-22: "two arcs is very confusing, make it red with a bit of bloom"): only
-      the full-speed flight is drawn (the one landings snap to), a thin emissive red tube (0.35 m) the
-      selective bloom catches; the panel says the take-off once ("land it on the red arc"); tutorial and
+      the full-speed flight is drawn (the one landings snap to), a flat red line of constant screen
+      width (fat line, 5 px; the 0.35 m tube "looks weird being a tube"), opted into the selective bloom
+      (applyBloomMRT — unlit lines don't glow otherwise); the panel says the take-off once ("land it on the red arc"); tutorial and
       hints say "red arc". ZOOM: the builder camera now comes to 2 m of its target (was 12 m).
       FROM THE SAME SCREENSHOTS, NOT YET: planks / platforms with a hole to drop through; a cone ("volcano") ramp; side
       wall-ramps; more turn shapes (wide platform corners, rounded corners, varied radii); turn kerb
@@ -277,6 +278,13 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.
 - [x] Tube wall thicker: 0.6 → 1.5 m (user: "looks too thin").
 - [x] Tubes are ROUND inside, no flat road (user, 2026-10-19).
+- [x] **Tube INSIDE, our own look** (user, 2026-10-22: "the interior tube texture is not nice, the same
+      as my old game with those lines"): kit/tubeMaterial.js — graphite panels (4 m × 1/16 round, each
+      its own tone), thin bloomed bolt rings every 16 m, a floor band with thin edge lines and V chevrons
+      pointing the way, the roof darker; the shell outside Thunderline blue. Tubes and half-pipes
+      (tubeLook.js `aRound`: 0 → 1 round the bore, floor 0.5). Trap found: an antialiased line thinner
+      than a pixel (far, or grazing) must FADE (w / fwidth), not smear to 0.5 — glowing floor edges at
+      the camera's height collapsed onto the horizon as one bright band across the screen.
 - [x] **Loops inside the pipe** (user: "that's the funny thing of tubes") work with today's grip —
       measured (trackRun --spiral): a held gentle steer rides the car up the wall, over the roof and
       round, 2½ loops in one long pipe, ~30–40 km/h lost per loop; too slow and it drops off the roof.

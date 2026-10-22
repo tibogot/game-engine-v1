@@ -11,6 +11,7 @@ import { buildRailGeometry, buildRailCollision, railParams } from "../../../modu
 // HALF THE POSTS (user, 2026-10-21: "they are too close from each other"): 7.2 m apart, not the old game's 3.6
 const RAIL = { ...railParams, postSpacing: 7.2 };
 import { createRoadMaterial, createGuardrailMaterial } from "../../../modular-road-v3/modularRoadMaterial.js";
+import { createTubeMaterial } from "./tubeMaterial.js";
 
 export function createOldLookMaterials() {
   const road = createRoadMaterial();
@@ -19,19 +20,10 @@ export function createOldLookMaterials() {
   // band across the near cascade even at normal bias 0.12 (user's screenshot, 2026-10-18; A/B:
   // decks not casting → band gone; back-face casting → band gone AND lower decks still shadowed).
   road.shadowSide = THREE.BackSide;
-  // TUBES: the same road material in its tube mode (aZone 3 = bore, 4 = shell, lit rings in the bore),
-  // in Thunderline's colours — graphite bore, light steel shell, bolt-blue rings — never the old red
-  // (zones 3/4 fell through to the kerb colour on the plain road material)
-  const tube = createRoadMaterial({
-    tubeZones: true,
-    tubeInner: 0x161c28, // dark bore: the lit rings carry it
-    tubeOuter: 0x1f56c9, // a deep Thunderline blue shell (a strong colour reads as an object — the
-    //                      Apex Rush reference; ours, not their orange)
-    neonColor: 0x3fd2ff,
-    neonIntensity: 2.4,
-    neonSpacing: 8,
-    neonWidth: 0.4,
-  });
+  // TUBES: Thunderline's own pipe (tubeMaterial.js, 2026-10-22) — graphite panels, thin light rings every
+  // 16 m, a floor band with chevrons, the deep blue shell. (Was the road material's tube mode: rings every
+  // 8 m whose bloom flooded the bore pale cyan — "the same as my old game with those lines".)
+  const tube = createTubeMaterial();
   tube.shadowSide = THREE.BackSide;
   // the tubes' white trim: rims at the ends and joints, seams along the shell
   const trim = new THREE.MeshStandardNodeMaterial({ color: 0xf1f4f9, roughness: 0.32, metalness: 0.05 });

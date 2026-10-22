@@ -5,7 +5,10 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { uniform, positionLocal, abs, fract, fwidth, float, min, max, smoothstep, length, vec3 } from "three/tsl";
+import { Line2 } from "three/addons/lines/webgpu/Line2.js";
+import { LineGeometry } from "three/addons/lines/LineGeometry.js";
+import { uniform, positionLocal, abs, fract, fwidth, float, min, max, smoothstep, length, vec3, color } from "three/tsl";
+import { applyBloomMRT } from "../../../../v3/render/bloomMRT.js";
 import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile, ADJUSTABLE, adjustableId, parseAdjustable } from "./kit.js";
 import { buildOldLook, createOldLookMaterials, edgesOf } from "./oldLook.js";
@@ -938,17 +941,22 @@ function refreshArcs() {
     arcs.push({ ...slow, fast, near, from: pad.uid, host: pad.on, landing, lip: { m, launch: { P, V }, v }, up, fwd, fly });
   }
   // ONE ARC, RED, GLOWING (user, 2026-10-22: "two arcs is very confusing … make it red with a bit of bloom
-  // so it reads well"): the full-speed flight — the one landings snap to — as a thin emissive tube (the
-  // page's selective bloom picks emissive up; a 1 px line could not glow). The slower edges stay computed
-  // for the notes, not drawn.
+  // so it reads well"): the full-speed flight — the one landings snap to. A flat line of constant screen
+  // width (fat line), not a tube: the lit 0.35 m tube read as an object ("it looks weird being a tube"),
+  // pink and fat up close, a hair far off. Unlit, so it opts into the selective bloom itself. The slower
+  // edges stay computed for the notes, not drawn.
   for (const a of arcs) {
     const pts = a.fast.pts;
     if (pts.length < 2) continue;
-    const curve = new THREE.CatmullRomCurve3(pts);
-    arcGroup.add(new THREE.Mesh(new THREE.TubeGeometry(curve, Math.min(400, pts.length * 2), 0.35, 6, false), ARC_MAT));
+    const g = new LineGeometry();
+    g.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
+    const line = new Line2(g, ARC_MAT);
+    line.computeLineDistances();
+    arcGroup.add(line);
   }
 }
-const ARC_MAT = new THREE.MeshStandardMaterial({ color: 0xff2a3d, emissive: 0xff2a3d, emissiveIntensity: 2.2, roughness: 0.5 });
+const ARC_MAT = new THREE.Line2NodeMaterial({ color: 0xff2a3d, linewidth: 5 });
+applyBloomMRT(ARC_MAT, color(0xff2a3d).mul(2));
 /** A jump pad's flight, ended where it comes back DOWN onto a road (the one it left, or any). The road's
  * points are kept per refresh: the notes fly the arc again at up to 40 speeds per mouse move. */
 
