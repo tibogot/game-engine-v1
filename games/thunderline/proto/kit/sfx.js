@@ -2,13 +2,14 @@
 // Shares the engine's AudioContext (engineSound.js — it is created on the first key press). Noise-based
 // sounds synthesise convincingly, unlike an engine: a tyre's roar is filtered noise, its squeal a
 // resonant band of noise, wind a swept band of noise.
-//   update(dt, car)  each frame: {kmh, slip (m/s sideways), grounded, braking, boosting}
+//   update(dt, car)  each frame: {kmh, slip (m/s sideways), grounded, braking, boosting, scrape (0..1)}
 //   landing(ev), boost(), beep(kind) one-shots
 export function createSfx(getCtx, { volume = 0.7 } = {}) {
   let ctx = null, master = null, noise = null, built = false, muted = false, vol = volume;
   // which synthesised parts play (setPart): a recorded sound replaces one at a time (sound lab, 2026-10-20)
-  const on = { roll: true, squeal: true, wind: true, landing: true };
-  let roll, rollF, squeal, squealF, wind, windF, whine;
+  const on = { roll: true, squeal: true, wind: true, landing: true, scrape: true };
+  let roll, rollF, squeal, squealF, wind, windF, whine, grind, grindF, rumble;
+  let lastScrape = 0, flutter = 0;
   function noiseBuffer(c) {
     // 2 s of white noise, looped (shared by every noise voice)
     const b = c.createBuffer(1, c.sampleRate * 2, c.sampleRate), d = b.getChannelData(0);
@@ -43,6 +44,10 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
     const wf = ctx.createBiquadFilter(); wf.type = "bandpass"; wf.frequency.value = 2400; wf.Q.value = 6;
     whine.g = ctx.createGain(); whine.g.gain.value = 0;
     whine.connect(wf).connect(whine.g).connect(master); whine.start();
+    // RAIL SCRAPE (2026-10-22, with the sparks): metal grinding = a mid band of noise, fluttering, over a
+    // low body rumble. Kept out of the bright highs (the user's ears: no harsh crackle)
+    ({ g: grind, filt: grindF } = loopVoice("bandpass", 1400, 1.6));
+    ({ g: rumble } = loopVoice("lowpass", 220, 0.9));
     built = true;
     return true;
   }
@@ -91,6 +96,18 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
       ramp(windF.frequency, 350 + 1800 * sp, 0.2);
       ramp(whine.g.gain, car.boosting ? 0.05 : 0, 0.08);
       ramp(whine.frequency, 700 + 900 * sp, 0.1);
+      // the scrape: car.scrape 0..1 (how fast along the rail); a clang as it starts, the grind while it lasts
+      const k = on.scrape ? car.scrape ?? 0 : 0;
+      if (k > 0.05 && lastScrape <= 0.05) {
+        burst({ dur: 0.22, gain: 0.25 + 0.35 * k, type: "bandpass", f0: 900, f1: 380, q: 3 });
+        tone([180, 271], { dur: 0.2, gain: 0.12 + 0.15 * k, type: "triangle" });
+      }
+      lastScrape = k;
+      flutter += dt * 31;
+      const shake = 0.75 + 0.25 * Math.sin(flutter) * Math.sin(flutter * 0.37 + 1.3); // grinding is never steady
+      ramp(grind.gain, k * 0.2 * shake, 0.02);
+      ramp(grindF.frequency, 1100 + 700 * k, 0.05);
+      ramp(rumble.gain, k * 0.3, 0.04);
     },
     /** a landing: a thump by how hard; a PERFECT landing rings */
     landing(ev, impact = 6) {

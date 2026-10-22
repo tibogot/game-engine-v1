@@ -32,6 +32,9 @@ import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testT
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
 import { buildObstacleSet, avoidObstacles, boostZones } from "./obstacles.js";
+import { createSparks } from "./sparks.js";
+import { createTyreMarks } from "./tyreMarks.js";
+import { createLandingFx } from "./landingFx.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -114,7 +117,7 @@ const SND_ICON = (on) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentCo
  * @param opts.sunShadows  the static-atlas sun shadows (drive page: one track, baked once). Off in the
  *   builder: the track changes between drives, the engine's cascades follow it for free.
  */
-export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunShadows: useSunShadows = false, ghost = true, car = "thunder" } = {}) {
+export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunShadows: useSunShadows = false, ghost = true, car = "thunder", fx = true } = {}) {
   const { scene, camera, renderer } = app;
   const $ = (id) => document.getElementById(id);
   applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top); // carTune.js: the builder's prediction drives this same car
@@ -286,6 +289,12 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   let engineMuted = true;
   engineSound.setMuted(engineMuted);
   const sfx = createSfx(() => (engineSound.ready ? engineSound.context : null), { volume: prefs.volume ?? 0.7 });
+  // THE CAR'S EFFECTS in the game (the FX lab tunes them, fx: false there): the rail sparks, tyre marks
+  const sparks = fx ? createSparks(scene) : null;
+  const tyreMarks = fx ? createTyreMarks(scene) : null;
+  // touchdown dust + the perfect ring (landingFx.js): PARKED, OFF (user, 2026-10-22: "forget the landing dust
+  // for now, we will do it later") — the dust still read as flat sheets, the ring hazed the lens as it passed
+  const landingFx = fx && false ? createLandingFx(scene) : null;
   sfx.setMuted(engineMuted);
   // RECORDED sounds over the synthesised ones, one part at a time (the user's picks in the sound lab,
   // 2026-10-20: the drift squeal is a recording, the long screech)
@@ -329,13 +338,17 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const boosting = rules.boostLeft > 0;
     if (boosting && !wasBoosting) sfx.boost();
     wasBoosting = boosting;
-    const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting };
+    // scrape: how fast the car slides along a rail, 3 → 30 m/s as 0 → 1 (the sparks' own scale, sparks.js)
+    const scrape = vehicle.enabled && vehicle.scraping ? Math.max(0, Math.min(1, (vehicle.scrapeSpeed - 3) / 27)) : 0;
+    const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting, scrape };
     sfx.update(dt, car);
     sfxRec.update(dt, car);
     // the countdown: a beep on 3, 2, 1
     const n = race.s.state === "countdown" ? Math.ceil(race.s.hold * 2) : 0;
     if (n && n !== lastCount && n <= 3) sfx.beep("count");
     lastCount = n;
+    // the start gantry's lights (gateMesh.js): red one by one on 3-2-1, green at GO
+    S.startGate?.userData.setLights?.(n ? 4 - Math.min(3, n) : "go");
   }
 
   // ---------- HUD helpers ----------
@@ -399,7 +412,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const runout = [];
     const lastP = lay.placements.filter((p) => !p.side).at(-1); // the road's end, not a piece beside it
     // (not after a FINISH piece: its own 72 m stub is the run-out, and its nose ends it)
-    if (track && lastP && !o.from && !TILES[lastP.id]?.finish) {
+    // (nor without an automatic finish — the builder: the road ends where you ended it)
+    if (track && lastP && !o.from && o.autoFinish !== false && !TILES[lastP.id]?.finish) {
       const t = TILES[lastP.id], b = built[lastP.id].b;
       const exit = lastP.M.clone().multiply(socketMatrix(b.exit));
       const dir = new V(0, 0, -1).transformDirection(exit);
@@ -426,9 +440,14 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const finK = lay.placements.length - 1, finT = TILES[lay.placements[finK]?.id]?.finish ?? null;
     const finR = finT ? lay.ride.find((r) => r.piece === finK && !r.air) : null;
     const finishAt = finR ? { P: finR.P.clone().addScaledVector(finR.T, finT.line), T: finR.T.clone(), U: finR.U ?? new V(0, 1, 0), piece: finK } : null;
-    const gates = gatesFor(lay.ride, flagged, hwOf, o.from ? [] : ringGates, finishAt);
+    const gates = gatesFor(lay.ride, flagged, hwOf, o.from ? [] : ringGates, finishAt, o.autoFinish !== false);
     const r0 = lay.ride[0];
-    for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, startT ? startT.line : 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0) }, ...gates]) group.add(makeGateMesh(g));
+    let startGate = null;
+    for (const g of [{ kind: "start", P: r0.P.clone().addScaledVector(r0.T, startT ? startT.line : 6), T: r0.T.clone(), U: r0.U ?? new V(0, 1, 0), hw: hwOf(0), slot: startT ? startT.line - startT.spawn : 0 }, ...gates]) {
+      const m = makeGateMesh(g);
+      if (g.kind === "start") startGate = m;
+      group.add(m);
+    }
     scene.add(group);
     // o.noTimer (the builder's Timer switch, off by default — user, 2026-10-22: "we shouldn't need the timer
     // and the countdown all the time when creating and debugging"): no countdown, no clock on screen, a
@@ -499,6 +518,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
       obstacles, moverT: 0, meshes, // the movers' RACE clock: 0 at the green light, held through the countdown
+      startGate,
     };
     // BACK, on screen (user, 2026-10-21: "why don't we have a back button to go back to the menu?") — the
     // same as Esc
@@ -566,6 +586,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     ghostCar.setEnabled(false);
     ghostCar.group.visible = false;
     engineSound.suspend();
+    sparks?.reset();
+    tyreMarks?.reset();
+    landingFx?.reset();
     clearKeys();
     autopilot = false;
     S = null;
@@ -580,6 +603,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   }
   function restart() {
     engine.reset();
+    sparks?.reset();
+    tyreMarks?.reset();
+    landingFx?.reset();
     S.race.reset();
     $("finish").classList.remove("show");
     vehicle.setEnabled(true); // parked after a finish
@@ -632,7 +658,13 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const p = vehicle.body.pos;
     if (!Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) return restart();
     // a fall goes back to the last checkpoint (keeping its speed: DESIGN.md §8), or restarts
-    if (p.y < S.KILL_Y) {
+    // o.fallReset false (the builder — user, 2026-10-22: "I should be able to fall on the ground, it shouldn't
+    // restart the race"): the car lands on the terrain and drives on; only through the world (or off its
+    // edge, nothing under it) does it come back
+    if (S.o.fallReset === false) {
+      const ground = app.getWorldHeight?.(p.x, p.z);
+      if (p.y < (Number.isFinite(ground) ? ground - 30 : S.KILL_Y - 500) || p.y < -5000) return S.race.s.state === "running" ? respawnCheckpoint() : restart();
+    } else if (p.y < S.KILL_Y) {
       // after the finish the road ends: park the car under the finish screen instead of restarting
       if (S.race.s.state === "finished") { vehicle.setEnabled(false); return; }
       return S.race.s.state === "running" ? respawnCheckpoint() : restart();
@@ -790,10 +822,12 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (!race.holding) S.moverT += FIXED_DT;
       S.obstacles.setTime(S.moverT);
       const used = race.holding ? HOLD : race.s.state === "finished" ? COAST : input;
-      if (race.s.state === "finished" && vehicle.groundedCount > 0) vehicle.body.vel.multiplyScalar(Math.exp(-1.1 * FIXED_DT));
+      // a FIRM stop (v / 3.5 m: 16 m from 200 km/h, 24 m from 300) — the Finish's run-out is 28 m (was a
+      // 1.1 coast over 72 m: user, 2026-10-22, "why is the finish piece so long?")
+      if (race.s.state === "finished" && vehicle.groundedCount > 0) vehicle.body.vel.multiplyScalar(Math.exp(-3.5 * FIXED_DT));
       const landed = rules.step(used, FIXED_DT);
       if (race.s.state !== "finished") recorder.tick(used, vehicle);
-      if (landed) { showLanding(landed); sfx.landing(landed, fallSpeed); }
+      if (landed) { showLanding(landed); sfx.landing(landed, fallSpeed); landingFx?.grade(landed, vehicle); }
       if (vehicle.groundedCount === 0) fallSpeed = Math.max(0, -vehicle.body.vel.y); // how hard the next landing hits
       for (const e of race.tick(vehicle, FIXED_DT)) { onRace(e); if (!S) return; }
       if (S.ghostPlayer) S.ghostPlayer.tick(FIXED_DT);
@@ -803,6 +837,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (ticks) S.physMs.push((performance.now() - tPhys) / ticks);
     if (S.physMs.length > 240) S.physMs.shift();
     vehicle.syncVisuals(dt, S.simAccum / FIXED_DT);
+    if (dt > 0) tyreMarks?.update(vehicle, dt);
     engineTick(dt, input);
     if (S.ghostPlayer) {
       if (S.ghostPlayer.done) ghostCar.group.visible = false;
@@ -815,6 +850,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     }
     checkFall();
     chase.update(dt);
+    sparks?.updateFromVehicle(vehicle, camera, dt); // after the camera: the streaks face it
+    landingFx?.update(vehicle, camera, dt);
     // the camera runs on REAL time (the mouse must still work in slow motion and when paused)
     if (freeCam) { const rdt = timeScale > 0 ? dt / timeScale : 1 / 60; debugCam.update(rdt); if (S.frame % 6 === 0) showFreeCam(rdt * 6); }
     S.meshes.updateLod(camera); // the posts' detail, from the game camera (testTrack.js)
@@ -838,7 +875,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   return {
     start, stop, restart, respawnCheckpoint, recoverToSafe, modelsReady,
     get active() { return !!S; }, get session() { return S; },
-    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera,
+    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, landingFx,
     get sunShadows() { return sunShadows; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
     /** fn(vehicle, session) → input, or null for the player / autopilot again */

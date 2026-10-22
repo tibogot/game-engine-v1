@@ -222,7 +222,8 @@ this is just the list. Newest decisions at the top of each section. Last updated
          carry `fly(scale)` (reach / hole / catch notes). Test: pad mid-road — arc 4.1 m up, 63 m long,
          no warnings; pad at the end of 2 straights — take-off 147 km/h measured, Fitted landing
          "lands from 137 km/h", test lap 8.75 s perfect, author time; drive page: perfect, 2.1 s air.
-      4. [ ] PISTON PILLAR, SLIDING BLOCK (race-clock movers, like the Sweeper)
+      4. [ ] PISTON PILLAR, SLIDING BLOCK (race-clock movers, like the Sweeper) — LAST (user, 2026-10-22:
+             "one of the last things I will work on, everything else should be solid before")
       later: slow pad, air boost ring, low bar, ramp-block, rotating gate, pendulum, moving ring,
       breakable panel, arrow boards
 - [x] **Land on ANY piece** (user, 2026-10-21: "this game is about jumps … large platforms to land"): a
@@ -278,6 +279,24 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.
 - [x] Tube wall thicker: 0.6 → 1.5 m (user: "looks too thin").
 - [x] Tubes are ROUND inside, no flat road (user, 2026-10-19).
+- [x] **BUILDER DRIVE: no automatic finish, falls land on the ground** (user, 2026-10-22: "a finish only
+      if I place the finish piece"; "I should be able to fall on the ground, it shouldn't restart"):
+      rig.start({autoFinish: false, fallReset: false}) from the builder — no finish gate and no run-out
+      straights without a Finish piece; a fall lands on the terrain and drives on (back only through the
+      world or off its edge). Checked: off the end of a 3-piece track at 120 m → on the grass, 4 wheels,
+      166 km/h, no restart. The Drive button shows its key (Tab). The CAMPAIGN keeps the automatic finish:
+      White 1-5 have no Finish piece (give them one, then drop autoFinish everywhere?).
+- [x] **START / FINISH GANTRIES** (user, 2026-10-22: "something we can recognize immediately … a real
+      start and real finish look"; no Apex Rush start/finish shot among the refs — its checkpoint pylons
+      only): gateMesh.js makeLineGantry, in the builder too (lineGate) and on the drive page. START: two
+      leaning graphite pylons with bolt-blue edges, a header "START" both faces, three lamps that do the
+      countdown (red one by one on 3-2-1, green at GO), the white line and the car's grid box painted.
+      FINISH: taller, "FINISH" between checkered bands, a checkered banner on top, a checkered band on the
+      road. Fixed on the way: gate frames were a MIRROR (X = T × U), unseen on the symmetric arches.
+      The palette thumbnails show the gantries. FINISH SHORTER ("why is the finish piece so long?"): its
+      run-out 72 → 28 m, the car stops FIRMLY after the line (v / 3.5 m: measured 189 km/h → 14.3 m).
+      Boost 32 (a straight whose boost paint was never drawn) LEFT THE PALETTE (user's choice): the Boost
+      pad does it. Kept in kit.js so old tracks load; White 1 "First Light" still has one (an unseen boost).
 - [x] **Tube INSIDE, our own look** (user, 2026-10-22: "the interior tube texture is not nice, the same
       as my old game with those lines"): kit/tubeMaterial.js — graphite panels (4 m × 1/16 round, each
       its own tone), thin bloomed bolt rings every 16 m, a floor band with thin edge lines and V chevrons
@@ -337,8 +356,23 @@ this is just the list. Newest decisions at the top of each section. Last updated
       landing (suspension thud + body) and a rail scrape (car on metal), not generic impacts.
 - [ ] Landing sounds (thump by impact speed; a distinct sound for a PERFECT landing), boost, checkpoint,
       finish, UI clicks, countdown.
-- [ ] Impacts: sparks on wall scrapes and hard landings, debris on crashes (no camera tricks: the
-      camera stays behind the car).
+- [x] **RAIL SPARKS, in the game** (user, 2026-10-22): kit/sparks.js, drawn by the drive rig (game,
+      builder drive) and the FX lab. The old ones flew away from the rail at their own small speed — under
+      the car's body, unseen from the chase camera (25 alive, none on screen). Now: part of the car's speed
+      + a fan across the rail's plane (up, over the rail, into the road), streaks stretched by their speed
+      AGAINST THE CAMERA, white-hot then orange, a flare at the contact, faded within 5 m of the lens (at
+      140 km/h they streamed past it as white bars). One draw (+ the flare), bloomed. SCRAPE SOUND (sfx.js):
+      a clang as it starts, a fluttering mid grind + a low rumble while it lasts, no bright highs.
+- [x] **TYRE MARKS, in the game**: kit/tyreMarks.js — the old ring buffer + skid mask, but laid across
+      the CONTACT NORMAL (the old ones were horizontal: on a bank, wall, loop or tube they stood on edge),
+      the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
+      after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
+      bank / in a tube.
+- [ ] LANDING DUST + PERFECT RING — PARKED (user: "forget the landing dust for now, we will do it later").
+      kit/landingFx.js exists, switched OFF in driveSession. Where it stood: dust puffs still read as flat
+      sheets (cut by the road — the card is now pulled toward the camera by its radius; proper fix = a soft
+      depth fade), the ring's glow hazed the lens as it swept under the camera (fade it near the camera).
+- [ ] Debris on crashes (no camera tricks: the camera stays behind the car).
 - [ ] **Smoke**: drift / tyre smoke, exhaust, landing dust. THE FX LAB (proto/fx-lab.html, 3ea8c280)
       shows every effect on our car in the game's light via kit/carFx.js (Apex Rush's smoke, exhaust,
       sparks, tyre marks). WAITING for the user's verdict per effect. Seen: at 190 km/h the trail breaks

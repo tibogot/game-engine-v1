@@ -54,7 +54,7 @@ const GRID_STEPS = [1, 2, 4, 8];
 // ramps, loop, obstacles"): one home per piece, by what kind of road it is — our own dock and look
 const CATS = [
   // the race's own things: where it starts and ends, what it hands the car
-  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "air_ring", "ob_boost", "ob_jump", "boost_32"] },
+  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "air_ring", "ob_boost", "ob_jump"] }, // (boost_32 left the palette, user 2026-10-22: the Boost pad does it; old tracks keep it)
   { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
@@ -278,6 +278,7 @@ async function renderThumb(id, open) {
     ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
     : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, open);
   const t = id === RING || isObstacle(id) ? {} : ensureTile(pid);
+  if (t.start || t.finish) g.add(lineGate({ id: pid }, new THREE.Matrix4(), open)); // its gantry, as on the track
   if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
   ts.add(g);
   g.updateMatrixWorld(true);
@@ -515,6 +516,7 @@ function rebuild() {
     g.userData.uid = pc.uid;
     trackGroup.add(g);
     if (pc.cp) trackGroup.add(checkpointGate(pc, M));
+    if (TILES[pc.id]?.start || TILES[pc.id]?.finish) trackGroup.add(lineGate(pc, M));
     built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pcOE(pc)).exitLocal), group: g, M });
   }
   // THE ROAD IS DRAWN IN CHUNKS (testTrack.buildTrackMeshes, as the drive page: performance pass,
@@ -545,6 +547,17 @@ function checkpointGate(pc, M) {
   const r = b.rings[Math.floor(b.rings.length / 2)];
   const f = deckFrame(r, hw);
   return makeGateMesh({ kind: "cp", P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), hw }, { lift: 0 });
+}
+// START / FINISH gantries (gateMesh.js) stand in the builder too, at the piece's line: you see at once
+// where a track begins and ends (user, 2026-10-22)
+function lineGate(pc, M, oe = pcOE(pc)) {
+  const { b, t } = piece(pc.id, oe);
+  const hw = SECTIONS[t.section ?? "road"].hw;
+  const line = t.start ? t.start.line : t.finish.line;
+  const r = b.rings.reduce((a, q) => (Math.abs(q.s - line) < Math.abs(a.s - line) ? q : a));
+  const f = deckFrame(r, hw);
+  const kind = t.start ? "start" : "finish";
+  return makeGateMesh({ kind, P: f.P.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), hw, slot: t.start ? t.start.line - t.start.spawn : 0 }, { lift: 0 });
 }
 function toggleCheckpoint(uid) {
   const pc = track.pieces.find((p) => p.uid === uid);
@@ -2613,7 +2626,7 @@ async function startDrive() {
   // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
   const selRoad = track.pieces.find((p) => p.uid === sel && !isRing(p)); // (not an obstacle or a ring)
   const from = selRoad ? built.get(sel)?.M ?? null : null;
-  await rig.start({ track, trackId, from, noTimer: !timerOn, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  await rig.start({ track, trackId, from, noTimer: !timerOn, autoFinish: false, fallReset: false, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
 }
 function stopDrive() {
   if (!driving) return;

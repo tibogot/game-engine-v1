@@ -23,9 +23,9 @@ const PRESETS = {
   // START: the nose BEHIND you (the piece's entry is the nose's tip), a 24 m stub to wait on. `start` =
   // how far in the car waits (past the 8 m nose) and the line is drawn.
   start_line: { label: "Start", base: "rounded_start", params: { roundEndLength: 24 }, start: { spawn: 14, line: 22 } },
-  // FINISH: the line at its entry, then a 72 m stub where the car brakes by itself (≈ 50 m from
-  // 200 km/h: driveSession's coast after the finish), then the nose. Nothing builds on past it.
-  finish_line: { label: "Finish", base: "rounded_end", params: { roundEndLength: 72 }, finish: { line: 2 } },
+  // FINISH: the line at its entry, then a 28 m stub where the car brakes by itself (≈ 16 m from
+  // 200 km/h: driveSession's firm stop after the finish; was 72 m), then the nose. Nothing builds on past it.
+  finish_line: { label: "Finish", base: "rounded_end", params: { roundEndLength: 28 }, finish: { line: 2 } },
 };
 
 /** Centre-to-centre spacing of the bowl's entry and return lanes (two 16 m roads, 4 m apart). */

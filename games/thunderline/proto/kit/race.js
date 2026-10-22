@@ -24,7 +24,7 @@ export function medalFor(time, medals) {
  * @param ride  [{P, T, U, piece}] in driving order
  * @param flagged  piece indices that carry a checkpoint flag
  */
-export function gatesFor(ride, flagged, hwOf = () => 8, rings = [], finishAt = null) {
+export function gatesFor(ride, flagged, hwOf = () => 8, rings = [], finishAt = null, autoFinish = true) {
   const gates = [];
   // AIR RINGS: checkpoints in the air (a piece placed on a flight arc), gone through within radius r
   for (const r of rings) gates.push({ kind: "cp", ring: true, piece: -1, P: r.P.clone(), T: r.T.clone().normalize(), U: r.U.clone(), hw: r.r });
@@ -36,6 +36,9 @@ export function gatesFor(ride, flagged, hwOf = () => 8, rings = [], finishAt = n
   }
   // a FINISH piece says where its line is (at its entry: its stub is the braking zone)
   if (finishAt) { gates.push({ kind: "finish", piece: finishAt.piece, P: finishAt.P.clone(), T: finishAt.T.clone().normalize(), U: finishAt.U.clone(), hw: hwOf(finishAt.piece) }); return gates; }
+  // the BUILDER: a finish only where you put the Finish piece (user, 2026-10-22: "it should have a finish
+  // only if I place the finish piece")
+  if (!autoFinish) return gates;
   const last = ride.filter((r) => !r.air).at(-1);
   // the finish sits 2 m before the very end, so the car crosses it while still on the road
   const T = last.T.clone().normalize();

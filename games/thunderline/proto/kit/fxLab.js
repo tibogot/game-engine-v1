@@ -37,7 +37,7 @@ camera.far = Math.max(camera.far, 9000);
 camera.updateProjectionMatrix();
 applyWorld(app, "flat");
 
-const rig = createDriveRig(app, { ghost: false, sunShadows: true });
+const rig = createDriveRig(app, { ghost: false, sunShadows: true, fx: false }); // the lab draws carFx's (all of them, switchable)
 const vehicle = rig.vehicle;
 const fx = createCarFx(app, rig);
 

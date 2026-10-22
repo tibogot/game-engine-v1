@@ -1,6 +1,6 @@
-// Thunderline's CAR EFFECTS — one module for the drive page and the FX lab (fx-lab.html), so what is tuned
-// in the lab is what the game shows. Today they are Apex Rush's (games/modular-road-v3, the parts bin),
-// driven by the same Vehicle the old game drove:
+// Thunderline's CAR EFFECTS in the FX lab (fx-lab.html). The SPARKS and TYRE MARKS are Thunderline's own
+// (sparks.js, tyreMarks.js — the drive rig draws the same ones in the game); the smoke and exhaust are
+// still the user's old game's (games/modular-road-v3, the parts bin), driven by the same Vehicle:
 //   - tyre smoke: the flipbook look (wispy atlases, sphere puffs, the lingering bank) or the procedural
 //     one, + the EXHAUST from the same pool (its pipes placed on our car's tail)
 //   - sparks where the chassis scrapes a rail or wall
@@ -9,8 +9,8 @@
 import * as THREE from "three";
 import { ModularRoadDriftSmoke, DEFAULT_DRIFT_SMOKE_SETTINGS } from "../../../modular-road-v3/modularRoadDriftSmoke.js";
 import { FlipbookDriftSmoke, DEFAULT_FLIPBOOK_SETTINGS, loadSmokeAtlases, copyDriftSmokeState } from "../../../modular-road-v3/modularRoadDriftSmokeFlipbook.js";
-import { ModularRoadSparks, DEFAULT_SPARK_SETTINGS } from "../../../modular-road-v3/modularRoadSparks.js";
-import { ModularRoadTireMarks } from "../../../modular-road-v3/modularRoadTireMarks.js";
+import { createSparks } from "./sparks.js";
+import { createTyreMarks } from "./tyreMarks.js";
 
 /**
  * @param app  the v3 app (scene, camera, light)
@@ -27,8 +27,10 @@ export function createCarFx(app, rig, o = {}) {
   const looks = { flipbook: new FlipbookDriftSmoke(scene, smokeSettings, atlases, flipSettings), procedural: null };
   let smoke = looks.flipbook, look = "flipbook";
   smoke.setSprayEnabled?.(false); // the stunt roads are dry
-  const sparks = new ModularRoadSparks(scene, { ...DEFAULT_SPARK_SETTINGS });
-  const marks = new ModularRoadTireMarks(scene);
+  // the rail sparks: Thunderline's own (sparks.js); the drive rig has them too, so the lab asks it for
+  // none (createDriveRig fx: false) and shows these
+  const sparks = createSparks(scene);
+  const marks = createTyreMarks(scene); // Thunderline's own (tyreMarks.js): on banks, walls, loops; touchdown scuffs
   const on = { smoke: true, exhaust: true, sparks: true, marks: true };
 
   const _dir = new THREE.Vector3();
@@ -63,7 +65,7 @@ export function createCarFx(app, rig, o = {}) {
       on[name] = !!value;
       if (name === "smoke") smoke.setSmokeEnabled(on.smoke);
       if (name === "exhaust") smoke.setExhaustEnabled(on.exhaust);
-      if (name === "sparks") { sparks.settings.enabled = on.sparks; if (!on.sparks) sparks.reset(); }
+      if (name === "sparks") sparks.enabled = on.sparks;
       if (name === "marks") { marks.mesh.visible = on.marks; if (!on.marks) marks.reset(); }
     },
     reset() { smoke.reset(); sparks.reset(); marks.reset(); },
@@ -76,12 +78,12 @@ export function createCarFx(app, rig, o = {}) {
       smoke.setEngine(Math.max(0, rig.lastInput?.throttle ?? 0), s?.rpm ?? 0, shifted);
       smoke.updateFromVehicle(vehicle, camera, dt, { Space: !!rig.lastInput?.handbrake });
       sparks.updateFromVehicle(vehicle, camera, dt);
-      if (on.marks) marks.update(vehicle);
+      if (on.marks) marks.update(vehicle, dt);
     },
     /** Live counts, for the lab's readout. */
     stats() {
       const alive = (pool) => (pool ?? []).reduce((n, p) => n + (p.life > 0 ? 1 : 0), 0);
-      return { puffs: alive(smoke.particles), sparks: alive(sparks.particles) };
+      return { puffs: alive(smoke.particles), sparks: sparks.alive() };
     },
   };
 }

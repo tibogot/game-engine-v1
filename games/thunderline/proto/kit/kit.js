@@ -376,6 +376,8 @@ export const TILES = {
     segs: [{ L: 64, pitch: 8 * DEG, ramp: 32 }],
     marks: [{ kind: "landing", from: 0, to: 40 }],
   },
+  // NOT in the builder's palette (2026-10-22: the Boost pad obstacle does the same, and shows it); kept so
+  // tracks that have it still load and boost
   boost_32: { label: "Boost 32", segs: [{ L: 32 }], marks: [{ kind: "boost", from: 4, to: 28 }] },
   // ---- THE TUBE FAMILY (tubeLook.js: one section, closure 0 = road … 1 = pipe r 8 m) ----
   // Sized for ~60 m/s: in a turn the car rides the wall at atan(v²/gR) — R64 ≈ 80° at full speed.
