@@ -108,3 +108,37 @@ export function motorPoolStats(root) {
   const L = lod.levels;
   return { near: L.length > 1 ? count([L[0].object]) : null, far: count([L[L.length - 1].object]) };
 }
+
+/**
+ * THE BLENDER MOTOR POOL IN THE GAME (2026-10-22 — it was the lab's only: "the motor pool you loved isn't in the
+ * game"). The placed one (the showroom's: the old builder's mesh — its footprint, nav, gate data, pick box and the
+ * producer stay ITS) draws nothing of its own any more: the Blender building (far level, one draw, the doors, the
+ * simulated bags) a child of it; its gate's leaves stay the producer's (they swing) but invisible, the Blender doors
+ * copying their swing (outward: the sign turned). True when done.
+ */
+export function attachMotorPool(mesh) {
+  const g = motorPoolMesh();
+  if (!g || !mesh?.isMesh || mesh.userData.blenderPool) return false;
+  mesh.userData.blenderPool = true;
+  const hidden = new THREE.MeshBasicMaterial({ visible: false });
+  mesh.material = hidden;
+  const leaves = [];
+  for (const c of mesh.children) {
+    if (c.name === "Stencils") c.visible = false;
+    else if (c.userData.gateLeaf) { c.material = hidden; leaves.push(c); }
+  }
+  mesh.add(g);
+  const doors = [];
+  g.traverse((o) => { if (o.name === "DoorL" || o.name === "DoorR") doors.push(o); });
+  // the doors follow the leaves (left with left): each frame, cheap
+  const sync = () => {
+    for (const d of doors) {
+      const leaf = leaves[d.name === "DoorL" ? 0 : 1];
+      if (!leaf) continue;
+      d.userData.y0 ??= d.rotation.y;
+      d.rotation.y = d.userData.y0 - leaf.rotation.y;
+    }
+  };
+  mesh.userData.syncDoors = sync;
+  return true;
+}

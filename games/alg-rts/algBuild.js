@@ -22,6 +22,7 @@ import { createHealthBarField } from "../shared-rts/healthBar.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
+import { attachMotorPool, loadMotorPool } from "./algMotorPool.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, loadFrenchPost, swapPost, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
@@ -129,6 +130,12 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   loadFortPoint().then((ok) => { if (ok) geoCache.delete("fortPoint"); });
   // THE POST in Blender (tools/blender/postKit.py): the placed one swapped, its gate, flag and bags kept
   loadFrenchPost().then((ok) => { if (ok) swapPost(showroom?.frenchPost, app); });
+  // THE MOTOR POOL in Blender (algMotorPool.js — far level only in the game): the placed one draws it, its doors
+  // following the producer's gate
+  loadMotorPool().then((ok) => {
+    const m = showroom?.motorPool;
+    if (ok && attachMotorPool(m)) app.addPreRenderHook?.(() => m.userData.syncDoors?.());
+  });
   loadForwardPost().then((ok) => { if (ok) geoCache.delete("forwardPost"); });
   // (the FLN's: the map's own refuges — algLandmarks refuge1 … — swapped, their scrub grown on the mound)
   loadRefuge().then((ok) => {
