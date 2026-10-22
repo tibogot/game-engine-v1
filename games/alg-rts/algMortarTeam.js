@@ -33,7 +33,10 @@ export const MORTAR_TEAM = {
   settle: 0.5,        // s stopped before it starts to set up
   setup: 3.5,         // s to set up
   pack: 2.2,          // s to pack up
-  min: 25, max: 110,  // m: its reach
+  // REACH (2026-10-22, you: "the mortars can touch a target very far in the map — is it how it is in CoH?"): it was
+  // 25-110 (the pit 160-170), 3.7 rifle ranges. CoH 3 (coh3stats, 2026-10-22): rifles 35, HMG 45, the 81 mm team 25-90, the mortar pit 100 — ours: rifles 30, the MG nest 44 → the mortar ~2.6 rifle ranges,
+  // the pit a little more. The light 60 mm: 20-70.
+  min: 20, max: 70,   // m: its reach
   every: 6.5,         // s between two rounds (by itself; a load takes LOAD of it)
   // BALANCE (2026-10-16, battle lab: a team on a squad standing in the open at 80 m): at 40 dmg and
   // 0.06 scatter both teams wiped it in < 50 s (a man every 8-10 s) — CoH's mortar pins and harasses,
@@ -51,8 +54,8 @@ const KINDS = {
   mortier: MORTAR_TEAM,
   mortierFr: {
     ...MORTAR_TEAM, key: "mortierFr", kind: "mortar81", tube: 0.39,
-    // (the ATTACK piece: 110 m — the pit reaches 160; the team must go forward, escorted)
-    min: 25, max: 110, every: 7.5, damage: 42, splash: 7,
+    // (the ATTACK piece: 80 m — the pit reaches 90; the team must go forward, escorted, as CoH's 90 against rifles 35)
+    min: 25, max: 80, every: 7.5, damage: 42, splash: 7,
     barrage: { cost: { mun: 40 }, shells: 6, every: 2.6, spread: 11, cooldown: 70 },
   },
 };

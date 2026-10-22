@@ -56,8 +56,9 @@ const STATS = {
   // built facing (the gun's rest: its barrel, local −Z), swings slowly, never packs up.
   mgNest: { team: "player", name: t("Nid de mitrailleuse"), hp: 700, weapon: "mg", range: 44, damage: 10, fireRate: 3.0, canHitAir: true, vision: 55, arcGun: true },
   // THE PIT = DEFENCE, the mobile team = attack (2026-10-16, you: "both" — CoH's British have both): the pit
-  // reaches FARTHER (160 m against the team's 110) and fires a little faster, but never moves.
-  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 160, every: 6, damage: 42, splash: 7, scatter: 0.11 }, vision: 45 },
+  // reaches FARTHER (90 m against the team's 80 — CoH 3's pit 100 against its team's 90; 160 until 2026-10-22) and
+  // fires a little faster, but never moves.
+  mortarPit: { team: "player", name: t("Mortier de 81"), hp: 600, mortar: { min: 25, max: 90, every: 6, damage: 42, splash: 7, scatter: 0.11 }, vision: 45 },
   searchlight: { team: "player", name: t("Projecteur"), hp: 400, vision: 100 },
   // FIELD WORKS (algFieldWorks.js)
   forwardPost: { team: "player", name: t("Poste avancé"), hp: 600, vision: 60 },

@@ -21,7 +21,7 @@ import { pitCrewShot } from "./algMortarPit.js";
 export const BARRAGE = {
   cost: { mun: 45 },
   cooldown: 75,     // s per pit
-  range: 170,       // m from the pit (its own fire reaches 160 — a defensive piece, it outranges the teams)
+  range: 100,       // m from the pit (its own fire reaches 90; CoH 3's pit barrage 110 against its fire 100 — 170 until 2026-10-22)
   minRange: 30,
   bombs: 6,
   every: 1.4,       // s between two bombs

@@ -84,15 +84,17 @@ const P = {
   },
   teamTiers: { 2: { cost: 120, villages: 1 }, 3: { cost: 180, villages: 2 } },
   teamEvery: 5,          // s between two looks at what to buy
-  // THE MORTAR HARASS (step 4): from 80-100 m of French the FLN KNOWS, a barrage, ~45 s of rounds,
+  // THE MORTAR HARASS (step 4): from 52-66 m of French the FLN KNOWS, a barrage, ~45 s of rounds,
   // gone before they close in; then it rests at home.
-  harass: { ring: [80, 100], fireFor: [38, 52], rest: [60, 90], danger: 45, minKnown: 2, lostAt: 0.34, setupWait: 25,
+  harass: { ring: [52, 66],   // (m from the target: inside the 60 mm's 70 — 80-100 against its old 110)
+    fireFor: [38, 52], rest: [60, 90], danger: 45, minKnown: 2, lostAt: 0.34, setupWait: 25,
     // HARCÈLEMENT DES POSTES (2026-10-18, the FLN's constant war on the French outposts): no troops known
     // to hit — it shells an OUTPOST (a mirador, a nest, a forward post…), one every `outpostEvery` s; at
     // NIGHT (app.sky.night ≥ `night`) the outposts come round and its rests end `nightK` sooner. Any
     // harass fires from out of every French mortar pit's reach (`pitClear` m: no counter-battery).
     outposts: ["mirador", "mgNest", "forwardPost", "fortPoint", "searchlight", "aidStation"],
-    pitClear: 175, outpostEvery: 240, night: 0.3, nightK: 0.5 },
+    pitClear: 105,   // (the pit's 90 + a margin — 175 against its old 160)
+    outpostEvery: 240, night: 0.3, nightK: 0.5 },
   // THE 12.7 GUARD (step 5): set up in cover by the FLN-held village nearest where French aircraft were
   // last seen (helicopters land men and supplies by the points), else at home. Re-looked every
   // `every` s; it moves only for a spot `moveOver` m away. Hurt with French close: home, a rest.
