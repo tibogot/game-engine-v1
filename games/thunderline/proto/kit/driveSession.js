@@ -344,7 +344,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   // ---------- input (roadGame.js readControls, same keys and merge) ----------
   const keys = {};
   const gamepad = createGamepadInput();
-  let padRespawn = false;
+  let padRespawn = false, padRestart = false;
   function readControls() {
     const kbSteer = (keys.keya || keys.arrowleft ? 1 : 0) - (keys.keyd || keys.arrowright ? 1 : 0);
     const kbThrottle = (keys.keyw || keys.arrowup ? 1 : 0) - (keys.keys || keys.arrowdown ? 1 : 0);
@@ -355,6 +355,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const kbPitch = (keys.shiftleft || keys.shiftright ? 1 : 0) - (keys.keyc ? 1 : 0);
     const gp = gamepad.read();
     padRespawn = !!gp?.respawnPressed;
+    if (gp?.restartPressed) padRestart = true; // Back: restart (the drive frame runs it)
     if (!gp) return { steerTarget: kbSteer, rollTarget: kbRoll, throttle: kbThrottle, handbrake: !!keys.space, yaw: kbYaw, pitch: kbPitch, analog: false };
     return {
       steerTarget: kbSteer !== 0 ? kbSteer : gp.steerTarget,
@@ -923,6 +924,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const { race, rules, recorder } = S;
     const input = (lastInput = inputSource ? inputSource(vehicle, S) : autopilot ? S.pilot.input(vehicle) : readControls());
     if (padRespawn) respawnCheckpoint();
+    if (padRestart) { padRestart = false; restart(); }
     S.simAccum += dt;
     let ticks = Math.floor(S.simAccum / FIXED_DT);
     if (ticks > MAX_SIM_TICKS) { ticks = MAX_SIM_TICKS; S.simAccum = ticks * FIXED_DT; }

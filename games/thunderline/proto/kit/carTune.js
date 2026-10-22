@@ -19,6 +19,7 @@ export const CAR_TUNE = {
 
 export function applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top = CAR_TUNE.top) {
   TIRE.topSpeed = top;
+  TIRE.analogPedals = true; // the pad's triggers are pedals, not buttons (the physics review, 2026-10-23)
   TIRE.steerSpeedRef = top * 0.9; // "full reduction should land AT top speed" (old: 45 for 50)
   WHEEL.radius = CAR_TUNE.wheel.radius;
   WHEEL.thickness = CAR_TUNE.wheel.thickness;

@@ -408,9 +408,13 @@ this is just the list. Newest decisions at the top of each section. Last updated
       4. A RESPAWN IS A FULL RESET (Vehicle.respawnAt, shared engine): heading hold, tube/loop press, roof /
          lid holds, assist mixes, land impact, steer. Ghost still deterministic; full suite green.
       Also: the bloom helper loads in Node again (ghostTest / landingTest crashed since the tube material).
-      OPEN from the review: analog throttle/brake (pad triggers act as buttons), the pad's Back = restart,
-      pitch levelling on landing, slower pitch response than roll, a drift reward, a player boost, untested
-      above 90 m/s (boost pads, long falls).
+      5. ANALOG PEDALS (TIRE.analogPedals, Thunderline on): drive / brake / reverse follow the trigger (same
+         run: full 86, half 60, quarter 31 km/h; keyboard unchanged). The pad's BACK restarts
+         (gamepadInput restartPressed).
+      KEPT ON PURPOSE (the review flagged them; the car's own notes say why): no pitch levelling on landing
+      (the user's old game: "the car gets flat and stabilised, that doesn't make sense"; and landing flat is
+      Thunderline's skill), pitch slower to respond than roll (a tap nudges, not a quarter flip).
+      OPEN: a drift reward, a player boost (the user's call), untested above 90 m/s (boost pads, long falls).
 - [ ] **FIRST-PERSON VIEW** (user, 2026-10-23: "some users prefer this view") — a camera switch (V is taken
       by the free camera's frame; pick a key), the cockpit or a bonnet view.
 - [x] **TEST CAR + RESTART KEYS** (user, 2026-10-23: "a key that restarts the drive to the start line and a way

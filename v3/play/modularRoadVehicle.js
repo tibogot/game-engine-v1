@@ -3554,19 +3554,22 @@ class Tire {
       const c1 = Math.cos(TIRE.wallDriveFadeEnd / 57.2958);
       wallDrive = Math.min(1, Math.max(0, (this.hitNormal.y - c1) / Math.max(1e-6, c0 - c1)));
     }
+    // ANALOG PEDALS (TIRE.analogPedals, off by default — Thunderline turns it on): the force follows how far
+    // the trigger is pressed; off, any press is a full press (the keyboard's ±1 is the same either way)
+    const pedal = TIRE.analogPedals ? Math.min(1, Math.abs(throttle)) : 1;
     if (throttle > 0) {
       if (carSpeed < -thr) {
-        Fx = TIRE.brakeForce;
+        Fx = TIRE.brakeForce * pedal;
       } else {
         const normSpeed = Math.min(1, Math.abs(carSpeed) / TIRE.topSpeed);
-        Fx = wallDrive * driveScale * TIRE.accelForce * Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
+        Fx = pedal * wallDrive * driveScale * TIRE.accelForce * Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
       }
     } else if (throttle < 0) {
       if (carSpeed > thr) {
-        Fx = -TIRE.brakeForce;
+        Fx = -TIRE.brakeForce * pedal;
       } else {
         const normSpeed = Math.min(1, Math.abs(carSpeed) / TIRE.topSpeed);
-        Fx = -driveScale * TIRE.reverseAccel * Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
+        Fx = -pedal * driveScale * TIRE.reverseAccel * Math.max(0, 1 - Math.pow(normSpeed, TIRE.powerCurveExp));
       }
     } else if (driveScale > 0) {
       const fwdVel = this._tireVel.dot(this._wheelFwd);

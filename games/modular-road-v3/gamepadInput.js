@@ -45,6 +45,7 @@ function shape(v, deadzone, gamma) {
  */
 export function createGamepadInput() {
   let lastRespawn = false;
+  let lastBack = false;
   let lastStart = false;
   let connected = false;
   let name = "";
@@ -113,6 +114,10 @@ export function createGamepadInput() {
     const start = down(9) === 1;
     const pausePressed = start && !lastStart;
     lastStart = start;
+    // BACK / VIEW (button 8) restarts — edge-detected (Thunderline, 2026-10-23: the pad had no restart)
+    const back = down(8) === 1;
+    const restartPressed = back && !lastBack;
+    lastBack = back;
 
     return {
       steerTarget,
@@ -123,6 +128,7 @@ export function createGamepadInput() {
       analog,
       respawnPressed,
       pausePressed,
+      restartPressed,
       // X HELD slows the world — held, not edge-detected: slow motion lasts as
       // long as the thumb stays down, like the keyboard's T.
       slowMo: down(2) === 1,
