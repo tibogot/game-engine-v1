@@ -37,7 +37,7 @@ ones throughout.
    - **The infirmary's cloth roof reads FLAT** (you, 2026-10-21): it wants the detail the sandbags have —
      real cloth relief (seams, sewn patch edges, sagging folds, weave in the normal map, wear and dirt
      where it rests on the beams). Next session.
-3. **Icons (rendered, 2026-10-22, paused by you to do house damage):** the doctrine panel and its abilities still on the old silhouettes (paradrop = the H-21 render, ready); the top resource bar (helmet / ammo crate / jerrycan renders ready); flamethrower and sniper renders ready, no button yet.
+3. **Icons:** ~~the doctrine panel, the resource bar~~ — **done 2026-10-22 (6be95bf9)**, rendered like the command card. Left: the flamethrower and sniper renders have no button yet; some doctrine abilities share a prop (kepi ×3, helmet ×3) — dedicated models possible (parachute crate, Legion beret, informer's notebook); the veterancy chevrons and alert marks are still the old silhouettes.
 4. **Housekeeping:** the unused scanned stones in assets-src/scans (delete or keep — your call).
 
 ## Done since the last list (2026-10-17 → 10-20)

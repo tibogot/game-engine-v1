@@ -96,7 +96,8 @@ const ICONS = [
     ["helmet", "Reinforce (helmet)", [-25, 20]], ["kepi", "Tier (kepi)", [-170, 14]], ["jerrycan", "Fuel", [-35, 16]], ["ammobox", "Munitions", [-25, 40]],
     ["detonator", "Detonate (FLN)", [-30, 20]], ["detector", "Sweep mines", [-60, 14]],
     ["radio", "Radio", [-30, 14], { crop: [0, 0.48], zoom: 0.8 }], ["lmg", "FM 24/29", [-35, 38], { zoom: 0.62 }], ["bazooka", "Bazooka", [-35, 38], { zoom: 0.62 }], ["flamer", "Flamethrower", [-50, 18], { zoom: 0.68 }],
-    ["sniper", "Sniper", [-35, 38], { zoom: 0.62 }], ["tools", "Repair", [-10, 70]], ["shell", "Barrage (shell)", [-25, 12]]]
+    ["sniper", "Sniper", [-35, 38], { zoom: 0.62 }], ["tools", "Repair", [-10, 70]], ["shell", "Barrage (shell)", [-25, 12]],
+    ["shotgun", "Douar reinforcements (FLN)", [-35, 34], { zoom: 0.62, svg: "reinforce" }], ["mapcase", "Advisers (FLN)", [-20, 50], { zoom: 0.78, svg: "vet1" }]]
     .map(([p, title, view, o = {}]) => ({ name: p, title, svg: p, view, zoom: 0.85, ...o,
       make: async () => { await loadHouses("smallprops"); return houseMesh(p, "intact", 1).children[0].levels[0].object.clone(); } })),
   // the aircraft, the game's own models (rtsVehiclesFr): the T-6 (the air strikes), the H-21 (the paradrop)
@@ -273,8 +274,8 @@ export async function startIconStudio() {
     barrage: "shell", radioBarrage: "shell", mortarBarrage: "shell", airStrike: "t6", radioAir: "t6",
     // the doctrines' abilities (algDoctrines.js) and the resources (ui/resourceHud.js: no tile, the object alone)
     paraDrop: "h21", commando: "sniper", airSupply: "ammobox", eliteParas: "helmet", legionCall: "kepi", legionEngineers: "tools", mortar120: "shell",
-    espritCorps: "kepi", douar: "helmet", informers: "radio", saboteurs: "detonator", jeep: "jeep", mortar81: "shell", borderArms: "bazooka",
-    outsideSection: "lmg", advisers: "kepi", recon: "t6", t6Pair: "t6", medevac: "alouette", gunship: "alouette",
+    espritCorps: "kepi", douar: "shotgun", informers: "radio", saboteurs: "detonator", jeep: "jeep", mortar81: "shell", borderArms: "bazooka",
+    outsideSection: "lmg", advisers: "mapcase", recon: "t6", t6Pair: "t6", medevac: "alouette", gunship: "alouette",
     resMp: "helmet", resMun: "ammobox", resFuel: "jerrycan" };
   async function atlas(size = 96, cols = 8) {
     const keys = [...KEYS];

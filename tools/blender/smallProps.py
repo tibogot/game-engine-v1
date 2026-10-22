@@ -374,18 +374,103 @@ def buildShell(K, *a, far=False):
     lathe(K, "Fuze", [(0.0, 0.47), (0.018, 0.47), (0.004, 0.54), (0.0, 0.54)], "spBrass", 20)
     drystone.writeBuildOrder(K); drystone.setLow(K, False)
 
+def strip(K, nm, pts, w, mat, th=0.003, up=(1, 0, 0)):
+    """A cloth band along pts [(x, y, z)…]: w wide across `up`, th thick (solidified)."""
+    bm = bmesh.new(); prev = None
+    for k, p in enumerate(pts):
+        ww = w[k] if isinstance(w, (list, tuple)) else w
+        u = up[k] if isinstance(up[0], (list, tuple)) else up
+        a = bm.verts.new(B(p[0] - u[0] * ww / 2, p[1] - u[1] * ww / 2, p[2] - u[2] * ww / 2))
+        b = bm.verts.new(B(p[0] + u[0] * ww / 2, p[1] + u[1] * ww / 2, p[2] + u[2] * ww / 2))
+        if prev: bm.faces.new((prev[0], prev[1], b, a))
+        prev = (a, b)
+    o = K.obj(nm, bm, mat, "h", smooth=True); so = o.modifiers.new("S", "SOLIDIFY"); so.thickness = th; so.offset = 0
+    return T(o)
+
+# ── THE FLN'S OWN (2026-10-22 — two FLN abilities showed a French helmet and kepi) ──────────────────────────────────────
+def buildShotgun(K, *a, far=False):
+    """Douar reinforcements — the villagers take up arms: an old side-by-side hunting gun with its outside hammers, the
+    fore-end and stock in dark walnut, and a CHÈCHE (the pale head cloth) wound round the wrist, its tail hanging."""
+    drystone.setLow(K, far)
+    for s in (-1, 1): rod(K, f"Barrel{s}", (s * 0.0105, 0.105, -0.82), (s * 0.0105, 0.1, -0.12), 0.0105, "spDark", 12)
+    box(K, "Rib", -0.004, 0.004, 0.112, 0.118, -0.8, -0.13, "spDark", 0.001)
+    box(K, "Fore", -0.018, 0.018, 0.07, 0.098, -0.42, -0.14, "spWood", 0.007)
+    box(K, "Action", -0.024, 0.024, 0.06, 0.122, -0.14, 0.0, "spSteel", 0.006)
+    for s in (-1, 1):   # the hammers: a neck up off the lock plate, the spur back
+        rod(K, f"Hammer{s}", (s * 0.018, 0.11, -0.005), (s * 0.018, 0.145, 0.012), 0.0045, "spSteel", 6)
+        rod(K, f"Spur{s}", (s * 0.018, 0.145, 0.012), (s * 0.018, 0.15, 0.03), 0.004, "spSteel", 6)
+    n = 8 if not LOW() else 4   # the trigger guard: a bow under the action
+    gp = [(0.0, 0.06 - 0.03 * math.sin(math.pi * k / n), -0.1 + 0.11 * k / n) for k in range(n + 1)]
+    for k in range(n): rod(K, f"Guard{k}", gp[k], gp[k + 1], 0.003, "spSteel", 5)
+    rod(K, "Trigger", (0.0, 0.06, -0.06), (0.0, 0.04, -0.055), 0.0025, "spSteel", 5)
+    bm = bmesh.new(); vs = []   # the stock: narrow at the wrist, a deep butt dropping away
+    for (z, y, hw) in [(0.0, 0.125, 0.02), (0.0, 0.06, 0.02), (0.16, 0.1, 0.018), (0.16, 0.045, 0.018), (0.46, 0.1, 0.024), (0.46, -0.03, 0.024)]:
+        for x in (-hw, hw): vs.append(bm.verts.new(B(x, y, z)))
+    bmesh.ops.convex_hull(bm, input=vs); T(K.bevel(K.obj("Stock", bm, "spWood", "h"), 0.008 if not LOW() else 0, 2, 40))
+    box(K, "Butt", -0.025, 0.025, -0.032, 0.102, 0.458, 0.47, "spBlack", 0.003)
+    # THE CHÈCHE: three loose turns round the wrist (each a little askew, the cloth bunched), the tail down and out
+    m = 16 if not LOW() else 6
+    for k, (z, tilt, r) in enumerate([(0.11, 0.18, 1.0), (0.14, -0.12, 1.08), (0.172, 0.1, 1.0)]):
+        ring = [(0.034 * r * math.cos(2 * math.pi * i / m), 0.082 + 0.042 * r * math.sin(2 * math.pi * i / m), z + tilt * 0.034 * math.cos(2 * math.pi * i / m) * 0.5
+                 + 0.004 * math.sin(5 * i + k)) for i in range(m + 1)]
+        strip(K, f"Wrap{k}", ring, 0.034, "spCheche", 0.004, up=(0, 0, 1))
+    # (the tail: soft — a sway out and back as it falls, wider toward its loose end, a twist)
+    nt = 14 if not LOW() else 5
+    tail = [(0.036 + 0.03 * math.sin(math.pi * k / nt) + 0.012 * math.sin(math.pi * 1.5 * k / nt), 0.07 - 0.25 * k / nt, 0.15 + 0.06 * (k / nt) ** 1.5) for k in range(nt + 1)]
+    strip(K, "Tail", tail, [0.04 + 0.03 * k / nt for k in range(nt + 1)], "spCheche", 0.004,
+          up=[(math.sin(0.5 * k / nt) * 0.6, 0, math.cos(0.5 * k / nt)) for k in range(nt + 1)])
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
+def buildMapCase(K, *a, far=False):
+    """The advisers (the officers from outside): a staff map, folded in panels on its leather case, a red route and the
+    grid drawn on it, an open brass compass on the map, a pencil."""
+    drystone.setLow(K, far)
+    box(K, "Case", -0.2, 0.2, 0.0, 0.022, -0.15, 0.15, "spLeather", 0.008)
+    box(K, "Flap", -0.2, 0.2, 0.0, 0.012, 0.15, 0.27, "spLeather", 0.005)
+    # the map: four panels across x, the folds a little up and down (the paper's spring), over the case
+    xs = [-0.24 + 0.12 * k for k in range(5)]; ys = [0.03, 0.04, 0.028, 0.041, 0.03]
+    bm = bmesh.new(); prev = None
+    for x, y in zip(xs, ys):
+        a = bm.verts.new(B(x, y, -0.17)); b = bm.verts.new(B(x, y, 0.17))
+        if prev: bm.faces.new((prev[0], prev[1], b, a))
+        prev = (a, b)
+    mp = K.obj("Map", bm, "spPaper", "h"); so = mp.modifiers.new("S", "SOLIDIFY"); so.thickness = 0.0016; so.offset = -1; T(mp)
+    yAt = lambda x: next(ys[k] + (ys[k + 1] - ys[k]) * (x - xs[k]) / 0.12 for k in range(4) if xs[k] <= x <= xs[k + 1] + 1e-9) + 0.0016
+    # the grid (thin, blue-black) and the route (red, thicker), lying ON the paper (1.6 mm over it: no z-fight)
+    for k in range(1, 4):
+        z = -0.17 + 0.085 * k
+        for i in range(4): rod(K, f"GridZ{k}{i}", (xs[i] + 0.004, yAt(xs[i] + 0.004), z), (xs[i + 1] - 0.004, yAt(xs[i + 1] - 0.004), z), 0.0012, "spBlueBlack", 4)
+    for x in (-0.18, -0.06, 0.06, 0.18): rod(K, f"GridX{x}", (x, yAt(x), -0.165), (x, yAt(x), 0.165), 0.0012, "spBlueBlack", 4)
+    route = [(-0.22, -0.12), (-0.13, -0.05), (-0.07, -0.08), (0.02, 0.02), (0.1, 0.0), (0.2, 0.11)]
+    for k in range(len(route) - 1):
+        (x0, z0), (x1, z1) = route[k], route[k + 1]
+        rod(K, f"Route{k}", (x0, yAt(x0) + 0.0008, z0), (x1, yAt(x1) + 0.0008, z1), 0.0028, "spRed", 5)
+    lathe(K, "Target", [(0.0, 0.0), (0.016, 0.0), (0.016, 0.002), (0.0, 0.002)], "spRed", 16, at=(0.2, yAt(0.2), 0.11))
+    # the compass: the brass case, the pale dial, the needle (red north), the lid open behind it
+    cx, cz = 0.09, 0.075; cy = yAt(cx)
+    lathe(K, "Compass", [(0.0, 0.0), (0.045, 0.0), (0.047, 0.008), (0.045, 0.018), (0.0, 0.018)], "spBrass", 32, at=(cx, cy, cz))
+    lathe(K, "Dial", [(0.0, 0.018), (0.039, 0.018), (0.039, 0.0195), (0.0, 0.0195)], "spPale", 32, at=(cx, cy, cz))
+    box(K, "NeedleN", cx - 0.004, cx + 0.004, cy + 0.0195, cy + 0.0225, cz - 0.034, cz, "spRed", 0.001)
+    box(K, "NeedleS", cx - 0.004, cx + 0.004, cy + 0.0195, cy + 0.0225, cz, cz + 0.034, "spBlack", 0.001)
+    lid = lathe(K, "Lid", [(0.0, 0.0), (0.046, 0.0), (0.046, 0.006), (0.0, 0.006)], "spBrass", 32)
+    lid.rotation_euler = (math.radians(-70), 0, 0); lid.location = B(cx, cy + 0.02, cz + 0.06)
+    rod(K, "Pencil", (-0.16, yAt(-0.16) + 0.006, 0.09), (-0.02, yAt(-0.02) + 0.006, 0.13), 0.005, "spWood", 6)
+    rod(K, "Lead", (-0.02, yAt(-0.02) + 0.006, 0.13), (-0.005, yAt(-0.005) + 0.006, 0.134), 0.003, "spBlack", 6)
+    drystone.writeBuildOrder(K); drystone.setLow(K, False)
+
 PROPS.update({"radio": buildRadio, "lmg": buildLmg, "bazooka": buildBazooka, "flamer": buildFlamer, "sniper": buildSniper,
-              "tools": buildTools, "shell": buildShell})
+              "tools": buildTools, "shell": buildShell, "shotgun": buildShotgun, "mapcase": buildMapCase})
 
 MATDEF.update({
     "spOlive": (0.55, paintWorn(0x4d5536, 0x6e6c66)), "spPale": (0.7, flatC(0xc9c2a4)), "spBlack": (0.5, flatC(0x161614)),
     "spRed": (0.6, flatC(0x7a2a1e)), "spWood": (0.7, flatC(0x6a4628, 0.75)), "spCrate": (0.8, milprops.timberMat(0x6a6a4c)),
     "spLeather": (0.7, flatC(0x4a3424)), "spKepi": (0.75, flatC(0x6b6a50)), "spBlueBlack": (0.6, flatC(0x1c2230)),
     "spGold": (0.3, flatC(0xc9a24a, 0.75)), "spCopper": (0.3, flatC(0xa8643a, 0.8)),
+    "spCheche": (0.85, flatC(0xd6ccb2, 0.8)), "spPaper": (0.8, flatC(0xd9cfae, 0.9)),
 })
 def _near(f): return lambda K, n, s, st, sd: f(K, far=False)
 def _far(f): return lambda K, n, s, st, sd: f(K, far=True)
-TYPES = {k: dict(builder=_near(f), farBuilder=_far(f), atlas=1024 if k == "grenade" else 512, aoDist=0.01, smoothAngle=60,
+TYPES = {k: dict(builder=_near(f), farBuilder=_far(f), atlas=1024 if k in ("grenade", "shotgun") else 512, aoDist=0.01, smoothAngle=60,
                  weighted=False, normals=True, normalAtlas=1024 if k == "grenade" else 512, states=["intact"]) for k, f in PROPS.items()}
 exported = buildKit(TYPES, MATDEF, "smallprops.glb", prefix="Prop", seed0=1940, colors=True)
 
