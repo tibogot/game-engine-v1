@@ -267,8 +267,9 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     s.range = 0; s.target = null;
     s.selected = false;
     // It burns a while, bigger for a big building.
+    // (none here when the baked death drew it — algCombat fx.destroyed: the blast, then the wreck book burning on it)
     const big = rec.fp.hx * rec.fp.hz > 60;
-    app.algCombat?.fire?.addFire(s.position.x, s.position.y + (big ? 3 : 1), s.position.z, big ? 8 : 3.5, big ? 60 : 30);
+    if (!app.algCombat?.fx?.destroyed) app.algCombat?.fire?.addFire(s.position.x, s.position.y + (big ? 3 : 1), s.position.z, big ? 8 : 3.5, big ? 60 : 30);
   }
 
   return {

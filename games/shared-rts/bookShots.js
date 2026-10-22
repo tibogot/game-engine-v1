@@ -15,6 +15,8 @@
 //     opacity 0..1: the whole card thinner (a pale column the book bakes too dense)
 //     fadeIn  0..1 of its life: faded in (a LOOP book played once starts on a full cloud — the
 //             construction dust, algBuild.js — and would pop in)
+//     life    s: a LOOP book cycled for this long (a wreck burning — algCombat.js), faded in over its
+//             first 0.8 s and out over its last 2.5 s
 //
 // Lit as flameStreamFx (the scene's sun and sky); fades into the real ground (heightmap tap).
 import * as THREE from "three";
@@ -53,12 +55,12 @@ export async function createBookShots({ app, books }) {
   const _cam = new THREE.Vector3(), _right = new THREE.Vector3(), _ctr = new THREE.Vector3();
   const _sun = new THREE.Vector3(0.3, 0.8, 0.4), _col = new THREE.Color(), _sky = new THREE.Color();
 
-  function play(key, x, z, { size = null, tint = null, fireK = null, wind = null, lift = 0, opacity = 1, fadeIn = 0 } = {}) {
+  function play(key, x, z, { size = null, tint = null, fireK = null, wind = null, lift = 0, opacity = 1, fadeIn = 0, life = null } = {}) {
     const s = sets.get(key);
     if (!s) return false;
     const card = s.cards.reduce((a, b) => (a.t0 + a.life < b.t0 + b.life ? a : b));   // free, else the oldest
     const speed = s.opts.speed ?? 1;
-    Object.assign(card, { t0: clock, life: s.meta.duration / speed, x, z, size: size ?? s.meta.size, tint, fireK: fireK ?? s.opts.fireK ?? 0.5, wind, lift, opacity, fadeIn });
+    Object.assign(card, { t0: clock, life: life ?? s.meta.duration / speed, loopDur: life ? s.meta.duration / speed : 0, x, z, size: size ?? s.meta.size, tint, fireK: fireK ?? s.opts.fireK ?? 0.5, wind, lift, opacity, fadeIn });
     card.c.mesh.visible = true;
     return true;
   }
@@ -76,20 +78,22 @@ export async function createBookShots({ app, books }) {
     for (const [, s] of sets) {
       const m = s.meta, bc = m.bake?.center ?? [0, m.size / 2, 0];
       for (const k of s.cards) {
-        const age = (clock - k.t0) / k.life;
+        const t = clock - k.t0, age = t / k.life;
         k.c.mesh.visible = age >= 0 && age < 1;
         if (!k.c.mesh.visible) continue;
         const sc = k.size / m.size;
         // The wind on the screen: blowing left, the book (drifting to its +X) is mirrored.
         const mirror = k.wind && (k.wind[0] * _right.x + k.wind[1] * _right.z) < 0 ? -1 : 1;
         k.c.u.uFireK.value = k.fireK;
-        k.c.u.uFade.value = (k.opacity ?? 1) * (1 - THREE.MathUtils.smoothstep(age, 0.85, 1)) * (k.fadeIn > 0 ? THREE.MathUtils.smoothstep(age, 0, k.fadeIn) : 1);
+        k.c.u.uFade.value = (k.opacity ?? 1) * (k.loopDur
+          ? THREE.MathUtils.smoothstep(t, 0, 0.8) * (1 - THREE.MathUtils.smoothstep(t, k.life - 2.5, k.life))
+          : (1 - THREE.MathUtils.smoothstep(age, 0.85, 1)) * (k.fadeIn > 0 ? THREE.MathUtils.smoothstep(age, 0, k.fadeIn) : 1));
         k.c.u.uTint.value.fromArray(k.tint ?? m.tint ?? [0.2, 0.2, 0.2]);
         // The book's point of origin (its emitter at x 0) on the ground at (x, z): the card's
         // centre sits the box's offset away along the screen's right (mirrored with the card).
         const cx = k.x + _right.x * bc[0] * sc * mirror, cz = k.z + _right.z * bc[0] * sc * mirror;
         const gy = (app.getWorldHeight?.(k.x, k.z) ?? 0) + (k.lift ?? 0);
-        k.c.update({ age, camera, size: k.size, sunDir: _sun, sunColor: _col, ambient: _sky, center: _ctr.set(cx, gy + bc[1] * sc, cz) });
+        k.c.update({ age: k.loopDur ? (t / k.loopDur) % 1 : age, camera, size: k.size, sunDir: _sun, sunColor: _col, ambient: _sky, center: _ctr.set(cx, gy + bc[1] * sc, cz) });
         if (mirror < 0) {
           k.c.mesh.scale.x = -k.size;
           k.c.u.uSunL.value.x *= -1;   // the light mirrored with it

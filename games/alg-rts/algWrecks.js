@@ -129,7 +129,8 @@ export function createAlgWrecks(app, { types, builders, paint = null, navGrid = 
     const c = Math.cos(w.yaw), s = Math.sin(w.yaw);
     w.nav = navGrid?.addFootprint?.(x + K.cz * s, z + K.cz * c, K.hx, K.hz, w.yaw) ?? null;
     // It burns, then smokes.
-    app.algCombat?.fire?.addFire?.(x, y + 1.2, z, 3.2, P.burn);
+    // (the fire: the baked wreck book when the death drew it — algCombat fx.destroyed, P.burn s; else the flame field)
+    if (!app.algCombat?.fx?.destroyed) app.algCombat?.fire?.addFire?.(x, y + 1.2, z, 3.2, P.burn);
     app.algAmbience?.smoulder?.(x, y + 1.8, z, P.burn + P.smoke, { strength: 0.8, r: 1.6 });
     // Its cover stamped at once, only its own (a whole re-bake is ~60 ms mid-fight).
     const t0 = performance.now();

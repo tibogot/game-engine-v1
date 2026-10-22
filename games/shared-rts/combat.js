@@ -180,6 +180,13 @@ export function createCombat({
       // A man goes down in a puff of dust; a machine goes up, and the bigger
       // it is the bigger the cloud (explosionField.js).
       const hq = target.typeKey === "base" || target.typeKey === "enemyBase";
+      // A GAME'S OWN death of a machine or a building (fx.destroyed — alg-rts: the baked Fire Pro blast, then the
+      // wreck burning, algCombat.js): its blast and its fire are drawn there; true when it did. The crater stays here.
+      if (!onFoot(target) && fx.destroyed?.(target, { hq })) {
+        craters?.addCrater(target.position.x, target.position.z, hq ? 7.5 : target.isStructure ? 4.8 : 2.4);
+        onDeath(target);
+        return;
+      }
       fx.explosion(target.position.x, target.position.y, target.position.z,
         onFoot(target) ? { size: 2.6, dust: true }
           : target.isStructure ? { size: hq ? 26 : 15 }

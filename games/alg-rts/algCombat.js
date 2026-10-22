@@ -97,7 +97,9 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // dome slumping). Pooled cards (bookShots.js); the flash, the clods and a dust that lingers after
   // the book are the old pieces. Without the books: the old blast, no launch smoke.
   // (+ the CONSTRUCTION DUST, 2026-10-22: a loop book played once per card, slowed — algBuild.js lays them round a site)
-  const shots = await createBookShots({ app, books: { mortarImpact: { pool: 10, fireK: 4 }, mortarLaunch: { pool: 8, fireK: 8 }, constructionDust: { pool: 24, fireK: 0, speed: 0.6 } } });
+  const shots = await createBookShots({ app, books: { mortarImpact: { pool: 10, fireK: 4 }, mortarLaunch: { pool: 8, fireK: 8 }, constructionDust: { pool: 24, fireK: 0, speed: 0.6 },
+    // (+ a machine or a building DESTROYED, 2026-10-22 — the Fire Pro pass: the fuel fireball, then the wreck burning)
+    blast: { pool: 4, fireK: 4 }, wreck: { pool: 10, fireK: 2 } } });
   app.algBookShots = shots;
   app.algWind = wind;
   const MORTAR_SIZE = { mortar60: 0.78, mortar81: 1, mortar120: 1.3 };
@@ -123,6 +125,40 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     const lift = Math.max(0, from.y - gy - 0.9 * k);
     // Light grey (the CoH ref's column, not the book's near-white: a cotton ball in the game's sun).
     shots.play("mortarLaunch", from.x, from.z, { size: shots.meta("mortarLaunch").size * k, wind: wind(), lift, tint: [0.24, 0.24, 0.235], opacity: 0.9 });
+  };
+
+  // A MACHINE OR A BUILDING DESTROYED (2026-10-22, the Fire Pro pass — it was the old procedural blast and the flame
+  // field): the baked FUEL FIREBALL (fire-bake lab "Shell blast") rolling into soot, the clods and the flash; then the
+  // WRECK BURNING (the "Burning wreck" loop book cycled for its life — bookShots `life`), its blaze lit at night
+  // (algLights burn). Bigger things: a bigger ball, a bigger fire, longer. shared combat.js asks (fx.destroyed).
+  if (shots.has("blast") && shots.has("wreck")) fx.destroyed = (u, { hq = false } = {}) => {
+    const p = u.position, big = !!u.isStructure;
+    const k = big ? (hq ? 2 : 1.4) : Math.min(1.3, Math.max(0.7, (u.radius ?? u.type?.radius ?? 3) / 3));
+    const size = big ? (hq ? 26 : 15) : Math.max(8, (u.radius ?? u.type?.radius ?? 4) * 2.4);   // (the old blast's: what the sounds and damage were tuned to)
+    fx.flash(p.x, p.y + 1.5, p.z, 0.14);
+    fx.throwDirt(p.x, p.y, p.z, Math.round(16 * k), 9 * k);
+    // A BUILDING: drawn at its centre the ball and the fire burnt INSIDE it — a column out of the roof with no flame
+    // (seen on the motor pool): the blast at mid-height, one fire on the roof, two at its edges toward the camera.
+    const h = big ? (u.visionEye ?? 4.5) / 0.9 : 0, R = u.radius ?? 6;
+    shots.play("blast", p.x, p.z, { size: shots.meta("blast").size * k * 0.8, wind: wind(), lift: h * 0.45 });
+    const life = big ? (hq ? 60 : 40) : 35, wk = big ? k * 1.1 : k;   // (a vehicle: algWrecks P.burn, then its smoulder)
+    const W = shots.meta("wreck").size;
+    later.push([0.7, () => {
+      if (!big) {
+        shots.play("wreck", p.x, p.z, { size: W * wk, life, wind: wind(), lift: 0.2 });
+        app.algLights?.burn?.(p.x, p.y + 0.6, p.z, 2.4, life);
+        return;
+      }
+      shots.play("wreck", p.x, p.z, { size: W * wk, life, wind: wind(), lift: h * 0.8 });
+      app.algLights?.burn?.(p.x, p.y + h, p.z, 4, life);
+      const c = app.camera.position, a = Math.atan2(c.x - p.x, c.z - p.z);
+      for (const da of [-0.9, 0.9]) {
+        const ex = p.x + Math.sin(a + da) * R * 0.55, ez = p.z + Math.cos(a + da) * R * 0.55;
+        shots.play("wreck", ex, ez, { size: W * wk * 0.7, life: life * 0.7, wind: wind(), lift: 0.2 });
+      }
+    }]);
+    app.algBirds?.flush(p.x, p.z, { size }); app.algSounds?.blast(p.x, p.y, p.z, size); app.algDamage?.blast(p.x, p.z, size); app.algAnimals?.hurt(p.x, p.z, size * 0.5, 70);
+    return true;
   };
 
   const grenade = fx.grenade;

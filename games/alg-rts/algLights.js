@@ -65,13 +65,20 @@ export function createAlgLights({ app, fx, fire = null }) {
   wrap("grenade", (x, y, z) => flash("grenade", x, y, z));
   wrap("shellHit", (x, y, z) => flash("shellHit", x, y, z));
   wrap("explosion", (x, y, z, o) => { if (!o?.dust) flash("blast", x, y, z, { scale: (o?.size ?? 10) / 10 }); });
+  // (a machine or a building destroyed, the Fire Pro way — algCombat.js fx.destroyed: its blast)
+  wrap("destroyed", (u, o) => flash("blast", u.position.x, u.position.y, u.position.z, { scale: u.isStructure ? (o?.hq ? 2.6 : 1.5) : 0.9 }));
+
+  // GLOWS: a fire drawn by something else (the baked wreck book — algCombat.js) lit like a blaze: { x, y, z, radius, end }
+  const glows = [];
+  function burn(x, y, z, radius, life) { if (fire) glows.push({ x, y, z, radius, end: fire.now + life }); }
 
   // ---- fires: one flickering light per blaze, as long as it burns
   const fireLights = new Map(); // fire -> handle
   let stamp = 0;
   function syncFires(n) {
-    const list = fire?.fires;
-    if (!list) return;
+    if (!fire?.fires) return;
+    for (let i = glows.length - 1; i >= 0; i--) if (glows[i].end <= fire.now) glows.splice(i, 1);
+    const list = glows.length ? fire.fires.concat(glows) : fire.fires;
     // by day with no fire light up: nothing to do
     if (n < 0.02 && fireLights.size === 0) return;
     const now = fire.now;
@@ -108,7 +115,7 @@ export function createAlgLights({ app, fx, fire = null }) {
   app.addPreRenderHook(function algCombatLights(dt) { update(dt * (app.timeScale ?? 1)); });
 
   return {
-    params, LOOKS,
+    params, LOOKS, burn,
     get count() { return flashes.length + fireLights.size; },
   };
 }
