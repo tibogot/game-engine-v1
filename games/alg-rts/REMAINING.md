@@ -128,13 +128,14 @@ ones throughout.
      on two or three walls and a small flag on a roof; French-held, a tricolour on the house by the square. Needs
      wall-decal textures, and separate houses (the new kit: Oued Abdi, the training hamlet; the Aurès' merged mechtas
      once redone). Done already: the capture burst at the flagpole, the sectors coloured on the minimap.
-   - **Bodies thrown by blasts** (an arc away from it, the Falling loop turned face up, landing on the blast death)
-     with a RED MIST in the blast's dust; near misses KNOCKED DOWN then GET UP (your Knocked Down / Getting Up clips).
+   - ~~**Bodies thrown by blasts**~~ — **done 2026-10-22** (e5fc0a28): thrown on an arc away from it, the RED MIST in
+     its dust, near misses KNOCKED DOWN then GET UP. Owed: your look at a knockdown up close (it was in the dust).
    - ~~**Dropped weapons the CoH way**~~ — **done 2026-10-22**: FM, bazooka, flamethrower drop; a right-click picks one up (the AI's men by passing); mortars and the recoilless RE-CREWED by any squad. Left: the FLN's 12.7 (algMgTeam reads its gunner's unit type).
-   - **The training:** a doctrine lesson; the mortar and the radio barrage; mines and sweeping; smoke and hold fire;
-     the MG nest and wire; veterancy. The camp's exercise figures (Push Up, Jumping Jacks, Salute).
+   - ~~**The training:** doctrine, mortar, mines, smoke and hold fire, the camp's drill~~ — **done 2026-10-22**. Left: the
+     radio barrage, the MG nest and wire, veterancy (one line each).
 
-1. **Building damage and collapse** — CoH's signature, our biggest gap.
+1. ~~**Building damage and collapse**~~ — **done 2026-10-22 for the new house kit** (algTownDamage: damage, collapse, the
+   garrison out). Left: the OLD merged villages (the Aurès' mechtas) — each house needs its own id first.
    - Walls go, the garrison is forced out, rubble is left behind.
    - The new kits are ready for it: every house (whitewashed, M'zab) has its intact / damaged /
      ruin states and the town is one instanced field with a per-house state — the swap is the next
@@ -151,15 +152,14 @@ ones throughout.
    - Low walls and brush slow infantry.
    - ~~Spotted mines show on the minimap~~ — **done 2026-10-20** (the FLN sees its own).
    - Wire snags men.
-   - A "can't go there" cursor.
+   - ~~A "can't go there" cursor~~ — **done 2026-10-22**.
    - A smoke barrage from the mortar.
    - The H-21 door gun.
    - The French AI: smoke, the Alouette, repairs, wire-cutting.
    - The FLN: train units at a refuge; retreat to the nearest refuge.
 6. **From the CoH 3 comparison (2026-10-20), biggest first:**
-   - **Vehicle critical hits** — a hit can damage the ENGINE (slow), IMMOBILISE, knock out the GUN,
-     stun the CREW; SIDE armour (the tracks, the wheels) as CoH 3: the bazooka's ambush (immobilise,
-     then finish it).
+   - ~~**Vehicle critical hits**~~ — **done 2026-10-22** (algCriticals.js): engine, immobilised, gun, crew stunned, by what hits and
+     where (side and rear more); sappers mend them. Left: the AIs reacting (repairs, the FLN aiming for flanks).
    - **Shift-queued orders** — chain several orders for a unit (here, then there, then the house).
    - **Tactical pause** (single player, vs AI) — pause, queue orders for several units, resume.
    - **Breach** — rush a garrisoned house to take it (at a risk), CoH 3's.

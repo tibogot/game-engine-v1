@@ -17,6 +17,7 @@ import { createProjectiles } from "../shared-rts/projectiles.js";
 import { createCombat } from "../shared-rts/combat.js";
 import { BLOOD, createBloodField } from "../shared-rts/bloodField.js";
 import { createAlgLights } from "./algLights.js";
+import { createAlgCriticals } from "./algCriticals.js";
 import { createAlgSmoke } from "./algSmoke.js";
 
 /**
@@ -252,13 +253,16 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     const mx = h.x + ((c.x - h.x) / cl) * 2, mz = h.z + ((c.z - h.z) / cl) * 2;
     later.push([0.12, () => shots.play("grenade", mx, mz, { size: shots.meta("grenade").size * k, tint: [0.2, 0.055, 0.045], opacity: 0.55, wind: wind() })]);   // (pure red, opaque: a cartoon ball — seen)
   }
+  // VEHICLE CRITICAL HITS (algCriticals.js, 2026-10-22, CoH): engine, tracks, gun, crew
+  const criticals = createAlgCriticals(app);
+  app.algCriticals = criticals;
   combat = createCombat({
     units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, splashMul, hitChance, gibChance, smoke,
     // Vehicles fire from their guns (the weapons pass): the renderer knows the muzzles.
     unitMuzzle: (e) => app.algUnits?.unitRenderer?.muzzleOf(e) ?? null,
     // ARMOUR BY FACING (algArmour.js): a bullet off a tank's front glances; its rear does not.
     armourMul,
-    onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
+    onHit: (e, amount, at, owner, how) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); else criticals.onHit(e, amount, at, owner, how); },
     // KNOCKED DOWN (2026-10-22, CoH; your Knocked Down / Getting Up clips): a man who lives through a big blast close
     // to him is thrown flat and gets up ~3.8 s later — no shot, no step meanwhile (shared combat.js knockedT).
     knock: (o, d, radius, kind, at) => {

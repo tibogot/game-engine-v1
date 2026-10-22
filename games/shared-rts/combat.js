@@ -177,7 +177,8 @@ export function createCombat({
       target.hp -= amount;
       if (target.hp <= 0) { target.hp = 0; target.alive = false; }
     }
-    onHit?.(target, amount, at, owner);
+    // (what hit: a round — { shell, bullet } — or a blast: target.lastHit { kind: "blast", src } — alg-rts criticals)
+    onHit?.(target, amount, at, owner, { shell, bullet });
 
     if (!target.alive) {
       // A man goes down in a puff of dust; a machine goes up, and the bigger
@@ -257,7 +258,7 @@ export function createCombat({
       if (owner) o.lastHitBy = owner;      // the kill's credit (onImpact gets no owner)
       // What hit him and from where (unitRenderer: a man killed by a blast is thrown back, away from it).
       // (d, radius: how hard — the renderer throws a man killed close to a big one farther)
-      o.lastHit = { kind: "blast", x: at.x, z: at.z, d, radius };
+      o.lastHit = { kind: "blast", x: at.x, z: at.z, d, radius, src: kind };
       onImpact(o, amount, at, null);       // null owner: no directional cover
       if (o.alive) o.lastHit = null;
       if (o.alive && knock && onFoot(o)) knock(o, d, radius, kind, at);
@@ -269,9 +270,11 @@ export function createCombat({
 
   /** One combatant's turn: forget, acquire, close in, shoot. */
   function engage(e, dt) {
-    if (!e.alive || !e.range) return;
-    // flat on the ground after a blast (a game's knock): no aim, no shot, no step — the clock runs down here
+    if (!e.alive) return;
+    // flat on the ground after a blast (a game's knock; a vehicle's crew stunned): no aim, no shot, no step — the
+    // clock runs down here, for a unit with no weapon too (a GMC, a gun knocked out)
     if (e.knockedT > 0) { e.knockedT -= dt; e.haltMovement?.(); return; }
+    if (!e.range) return;
     // A building still rising out of the ground, or a turret still running its
     // calibration sweep, is a target but not yet a shooter. (It stays in
     // `acquire`'s candidate list — enemies can and should shoot it meanwhile.)

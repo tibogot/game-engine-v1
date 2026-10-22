@@ -38,7 +38,8 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
   const jobs = new Map();   // sapper → { tgt, at: {x, z} }
   const v = new THREE.Vector3(), e = new THREE.Vector3();
 
-  const damaged = (t) => t?.alive && t.team === "player" && (t.hp ?? 0) < (t.maxHp ?? 0) - 0.5;
+  // (or a part broken — algCriticals: a vehicle whole in hit points but immobilised still wants the sappers)
+  const damaged = (t) => t?.alive && t.team === "player" && ((t.hp ?? 0) < (t.maxHp ?? 0) - 0.5 || !!t.crits);
   const repairable = (t) => damaged(t) && (t.isStructure ? !t.site : !t.type?.foot);
 
   /** A damaged vehicle or building of yours under the cursor (screen outline), or null. */
@@ -192,7 +193,14 @@ export function createAlgRepair(app, { units, structures, isSapper }) {
       working.add(t);
       if (!t.isStructure) weld(u, t, dt, j.close?.contact);
       t.hp = Math.min(t.maxHp, t.hp + P.rate * dt);
-      if (t.hp >= t.maxHp - 0.5) { t.hp = t.maxHp; end(u); }
+      if (t.hp >= t.maxHp - 0.5) {
+        t.hp = t.maxHp;
+        // the broken parts mended with it (a crit on a whole hull: a few seconds' work)
+        if (t.crits && (t._mendT = (t._mendT ?? 0) + dt) < 4) continue;
+        t._mendT = 0;
+        app.algCriticals?.repair(t);
+        end(u);
+      }
     }
     stepLights();
     hookSound();

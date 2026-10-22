@@ -199,4 +199,11 @@ export default {
   "{w} : vos hommes le servent.": "{w}: your men are crewing it.",
   "Mortier de 60": "60 mm mortar",
   "Canon sans recul de 57": "57 mm recoilless rifle",
+  // 2026-10-22: vehicle critical hits (algCriticals.js)
+  "MOTEUR ENDOMMAGÉ": "ENGINE DAMAGED",
+  "IMMOBILISÉ": "IMMOBILISED",
+  "ARME DÉTRUITE": "GUN DESTROYED",
+  "ÉQUIPAGE SONNÉ": "CREW STUNNED",
+  "<b>{v}</b> : {part}.": "<b>{v}</b>: {part}.",
+  "Coup critique sur un véhicule ennemi : {part}.": "Critical hit on an enemy vehicle: {part}.",
 };

@@ -14,6 +14,7 @@
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { t } from "../i18n/i18n.js";
+import { CRIT_LABEL } from "../algCriticals.js";
 
 const WEAPON = { rifle: t("Fusils"), mg: t("Mitrailleuse"), cannon: t("Canon"), gunship: t("Roquettes + mitrailleuse") };
 
@@ -143,6 +144,8 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
     else if (live.some((u) => u.suppressed)) chips += `<span class="chip supp">${t("SOUS LE FEU")}</span>`;
     if (live.some((u) => u.target?.alive || u.attackTarget?.alive)) chips += `<span class="chip act">${t("FEU")}</span>`;
     else if (live.some((u) => u.isMoving)) chips += `<span class="chip act">${t("EN MOUVEMENT")}</span>`;
+    // A vehicle's broken parts (algCriticals.js)
+    for (const u of live) for (const k of Object.keys(u.crits ?? {})) chips += `<span class="chip pinned">${CRIT_LABEL[k]()}</span>`;
     if (!one.units[0].isStructure) {
       const st = stanceFor(live);
       if (st) {

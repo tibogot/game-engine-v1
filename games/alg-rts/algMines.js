@@ -89,7 +89,7 @@ export function createAlgMines(app, { units, combat }) {
     detonate(m) {
       const w = m?.command, C = P.command;
       if (!w?.alive || !mines.includes(m) || m.arm > 0 || Math.hypot(w.position.x - m.x, w.position.z - m.z) > C.wire) return false;
-      combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul });
+      combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul, kind: "mine" });
       m.onDone?.("boom");
       remove(m);
       return true;
@@ -140,9 +140,9 @@ export function createAlgMines(app, { units, combat }) {
         if (boom && m.dud) boom = false;   // (a DUD — the training's: spotted and lifted, never set off)
         if (boom) {
           if (w) {
-            combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul });
+            combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul, kind: "mine" });
             m.onDone?.("boom");
-          } else combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, P.damage, P.radius, ALN, { vehicleMul: P.vehicleMul });
+          } else combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, P.damage, P.radius, ALN, { vehicleMul: P.vehicleMul, kind: "mine" });
           remove(m);
           continue;
         }
