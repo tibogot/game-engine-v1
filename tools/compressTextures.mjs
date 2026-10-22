@@ -42,7 +42,7 @@ const DEFAULT_ROOTS = ["textures", "city-ads", "games", "models", "assets"];
 const SKIP = [/^textures\/ui\//, /^brush-stamps\//, /^ktx2\//];
 const IMAGE = /\.(png|jpe?g|webp)$/i;
 // Data, not colour: stored linear. Matched on the file name only.
-const LINEAR = /(normal|_nor(_gl|_dx)?(?=[_.\-]|$)|_n\.|nrm|rough|_ao(?=[_.\-]|$)|ambientocclusion|occlusion|\borm\b|_arm(?=[_.\-]|$)|height|disp|metal|mask|noise|_spec|gloss|flow|depth|opacity|alpha\b)/i;
+const LINEAR = /(normal|_nor(_gl|_dx)?(?=[_.\-]|$)|_n\.|nrm|rough|_ao(?=[_.\-]|$)|ambientocclusion|occlusion|\borm\b|_arm(?=[_.\-]|$)|_mv(?=[_.\-]|$)|height|disp|metal|mask|noise|_spec|gloss|flow|depth|opacity|alpha\b)/i;
 
 export const KTX_TOOL = KTX;
 export function loadSharp() {

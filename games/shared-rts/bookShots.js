@@ -21,6 +21,7 @@
 // Lit as flameStreamFx (the scene's sun and sky); fades into the real ground (heightmap tap).
 import * as THREE from "three";
 import { createBookCards, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
+import { initTextureLoader } from "../../v3/render/textureLoad.js";
 import { drapeY } from "./terrainDrape.js";
 import { RENDER_ORDER } from "./renderOrder.js";
 
@@ -33,10 +34,11 @@ const BASE = "/textures/fx/firepro/fp_";
  * @returns {Promise<{ play: Function, update: Function, has: (key:string)=>boolean, clear: Function }>}
  */
 export async function createBookShots({ app, books }) {
+  initTextureLoader(app.renderer);   // (the KTX2 books: the GPU's formats known before the first load)
   const groundAt = app.heightTexNode ? (x, z) => drapeY(app.heightTexNode, x, z) : null;
   const sets = new Map();   // key → { meta, cards: [{ c, t0, life, ... }], opts }
   await Promise.all(Object.entries(books).map(async ([key, opts]) => {
-    const b = await loadBookTextures(`${BASE}${key}`).catch((e) => { console.warn(`bookShots: no ${key}`, e); return null; });
+    const b = await loadBookTextures(`${BASE}${key}`, { compressed: true }).catch((e) => { console.warn(`bookShots: no ${key}`, e); return null; });
     if (!b) return;
     // ONE material for the pool (createBookCards: one shader build, not one a card)
     const cards = createBookCards(opts.pool ?? 6, { groundAt }).map((c) => {

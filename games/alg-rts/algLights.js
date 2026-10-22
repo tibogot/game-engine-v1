@@ -66,7 +66,8 @@ export function createAlgLights({ app, fx, fire = null }) {
   wrap("shellHit", (x, y, z) => flash("shellHit", x, y, z));
   wrap("explosion", (x, y, z, o) => { if (!o?.dust) flash("blast", x, y, z, { scale: (o?.size ?? 10) / 10 }); });
   // (a machine or a building destroyed, the Fire Pro way — algCombat.js fx.destroyed: its blast)
-  wrap("destroyed", (u, o) => flash("blast", u.position.x, u.position.y, u.position.z, { scale: u.isStructure ? (o?.hq ? 2.6 : 1.5) : 0.9 }));
+  wrap("blastAt", (x, y, z, o) => flash("blast", x, y, z, { scale: Math.max(6, (o?.radius ?? 6) * 1.1) / 10 }));   // (a bomb, a mine)
+  wrap("destroyed",(u, o) => flash("blast", u.position.x, u.position.y, u.position.z, { scale: u.isStructure ? (o?.hq ? 2.6 : 1.5) : 0.9 }));
 
   // GLOWS: a fire drawn by something else (the baked wreck book — algCombat.js) lit like a blaze: { x, y, z, radius, end }
   const glows = [];

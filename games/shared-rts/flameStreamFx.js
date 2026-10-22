@@ -17,6 +17,7 @@
 // tells the game (its sounds) when a stream lights or is let go.
 import * as THREE from "three";
 import { createBookCards, loadBookTextures } from "../../v3/fire-bake-lab/bookCard.js";
+import { initTextureLoader } from "../../v3/render/textureLoad.js";
 import { RENDER_ORDER } from "./renderOrder.js";
 import { drapeY } from "./terrainDrape.js";
 
@@ -41,11 +42,14 @@ const ease = THREE.MathUtils.smoothstep;
 
 export async function createFlameStreamFx({ app, params = FLAME_STREAM, onState = null } = {}) {
   const P = params;
-  const [loop, start, stop] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`${P.base}${k}`)));
+  // (the KTX2 copies — v3/fire-bake-lab/bookCard.js loadBookTextures `compressed`)
+  initTextureLoader(app.renderer);
+  const Z = { compressed: true };
+  const [loop, start, stop] = await Promise.all(["flamethrower", "flamethrowerStart", "flamethrowerStop"].map((k) => loadBookTextures(`${P.base}${k}`, Z)));
   const books = [start, loop, stop];
   const anchor = loop.meta.anchor ?? [0.05, 0.42];
-  const groundBook = await loadBookTextures(`${P.base}fuelFire`)
-    .catch(() => loadBookTextures(`${P.base}napalmFire`)).catch(() => null);
+  const groundBook = await loadBookTextures(`${P.base}fuelFire`, Z)
+    .catch(() => loadBookTextures(`${P.base}napalmFire`, Z)).catch(() => null);
   const groundAt = app.heightTexNode ? (x, z) => drapeY(app.heightTexNode, x, z) : null;
 
   // The pool: `max` slots of three cards, handed to streams as they light. Each BOOK's cards share

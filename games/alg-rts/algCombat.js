@@ -99,7 +99,11 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // (+ the CONSTRUCTION DUST, 2026-10-22: a loop book played once per card, slowed — algBuild.js lays them round a site)
   const shots = await createBookShots({ app, books: { mortarImpact: { pool: 10, fireK: 4 }, mortarLaunch: { pool: 8, fireK: 8 }, constructionDust: { pool: 24, fireK: 0, speed: 0.6 },
     // (+ a machine or a building DESTROYED, 2026-10-22 — the Fire Pro pass: the fuel fireball, then the wreck burning)
-    blast: { pool: 4, fireK: 4 }, wreck: { pool: 10, fireK: 2 } } });
+    blast: { pool: 8, fireK: 4 }, wreck: { pool: 10, fireK: 2 },
+    // (+ a BOMB or a MINE, 2026-10-22: the "Shell in sand" book — a flash, a dust jet, the dome slumping)
+    shell: { pool: 6, fireK: 3 },
+    // (+ a GRENADE, 2026-10-22: its own bake — a dark dirt dome with a blink of fire, a low ring of dust, a few spikes)
+    grenade: { pool: 8, fireK: 3 } } });
   app.algBookShots = shots;
   app.algWind = wind;
   const MORTAR_SIZE = { mortar60: 0.78, mortar81: 1, mortar120: 1.3 };
@@ -125,6 +129,30 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     const lift = Math.max(0, from.y - gy - 0.9 * k);
     // Light grey (the CoH ref's column, not the book's near-white: a cotton ball in the game's sun).
     shots.play("mortarLaunch", from.x, from.z, { size: shots.meta("mortarLaunch").size * k, wind: wind(), lift, tint: [0.24, 0.24, 0.235], opacity: 0.9 });
+  };
+
+  // A BOMB OR A MINE (2026-10-22, the Fire Pro pass — it was the old procedural blast): the baked "Shell in sand" book
+  // sized to the blast (its 9 m card for a ~6 m radius: a mine ~1, the T-6's 9 m bombs ~1.5), the flash, the clods, a
+  // dust that hangs after (as the mortar's); the crater a moment late, once the dust hides where it lands.
+  if (shots.has("shell")) fx.blastAt = (x, y, z, { radius = 6, kind = null, crater = null } = {}) => {
+    const k = Math.min(1.8, Math.max(0.7, radius / 6)), [wx, wz] = wind();
+    if (crater) later.push([0.25, crater]);
+    fx.flash(x, y + 1, z, 0.12);
+    fx.throwDirt(x, y, z, Math.round(14 * k), 9 * k);
+    shots.play("shell", x, z, { size: shots.meta("shell").size * k, wind: wind() });
+    fx.lit?.puff(x, y + 2.6 * k, z, { size: 9 * k, duration: 7, delay: 2, tint: SMOKE_TINTS.dust, opacity: 0.4, grow: 1.25, vel: [wx * 0.4, 0.3, wz * 0.4] });
+    const size = Math.max(6, radius * 1.1);   // (the old blast's: what the sounds and damage were tuned to)
+    app.algBirds?.flush(x, z, { size }); app.algSounds?.blast(x, y, z, size); app.algDamage?.blast(x, z, size); app.algAnimals?.hurt(x, z, size * 0.5, 70);
+    return true;
+  };
+
+  // A SHELL HITTING SOMETHING (2026-10-22, the Fire Pro pass — a bazooka, the recoilless, a tank gun on a vehicle or a
+  // wall; it was a small procedural blast): the fuel-fireball book small (~5 m) at the hit's height — a warhead going
+  // off on armour, not earth thrown up (the "rocket impact" book is the ground's) — and its flash.
+  if (shots.has("blast")) fx.shellHit = (x, y, z) => {
+    const gy = app.getWorldHeight?.(x, z) ?? y, k = 0.5;
+    fx.flash(x, y, z, 0.08);
+    shots.play("blast", x, z, { size: shots.meta("blast").size * k, wind: wind(), lift: Math.max(0, y - gy - 1.2 * k) });
   };
 
   // A MACHINE OR A BUILDING DESTROYED (2026-10-22, the Fire Pro pass — it was the old procedural blast and the flame
@@ -161,7 +189,13 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     return true;
   };
 
-  const grenade = fx.grenade;
+  // THE GRENADE (2026-10-22, the Fire Pro pass — it was a small procedural burst): its own baked book, the flash, a few
+  // clods; without the book, the old burst.
+  const grenade = shots.has("grenade") ? (x, y, z) => {
+    fx.flash(x, y + 0.5, z, 0.08);
+    fx.throwDirt(x, y, z, 6, 4);
+    shots.play("grenade", x, z, { wind: wind() });
+  } : fx.grenade;
   fx.grenade = (x, y, z) => { grenade(x, y, z); app.algBirds?.flush(x, z, { size: 4 }); app.algSounds?.blast(x, y, z, 6); app.algDamage?.blast(x, z, 6); app.algAnimals?.hurt(x, z, 4, 70); };
   // A STRAY ROUND landing (projectiles' misses): an animal standing there is hit (ANIMALS DIE).
   const dirt = fx.dirt;

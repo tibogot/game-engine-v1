@@ -91,5 +91,5 @@ export async function loadTexture(url, o = {}) {
 // (2026-10-21: `_nor_gl_1k`, `_arm_2k`, `_ao_1k` — a Poly Haven name with its resolution after — slipped past ``
 // (`_` is a word character): a scan's normal map loaded as sRGB and bent every normal toward the sky. Now: the
 // suffix must end at `_`, `.`, `-` or the end.)
-export const LINEAR_NAME = /(normal|_nor(_gl|_dx)?(?=[_.\-]|$)|_n\.|nrm|rough|_ao(?=[_.\-]|$)|ambientocclusion|occlusion|\borm\b|_arm(?=[_.\-]|$)|height|disp|metal|mask|noise|_spec|gloss|flow|depth|opacity|alpha\b)/i;
+export const LINEAR_NAME = /(normal|_nor(_gl|_dx)?(?=[_.\-]|$)|_n\.|nrm|rough|_ao(?=[_.\-]|$)|ambientocclusion|occlusion|\borm\b|_arm(?=[_.\-]|$)|_mv(?=[_.\-]|$)|height|disp|metal|mask|noise|_spec|gloss|flow|depth|opacity|alpha\b)/i;
 export const isLinearName = (key) => LINEAR_NAME.test(key.split("/").pop());

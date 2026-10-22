@@ -234,6 +234,9 @@ export function createCombat({
     // A mortar bomb: a game's own (alg-rts: the baked "Mortar in earth" book). The crater is handed
     // over: stamped at once it showed as a black hole before the blast had risen over it.
     else if (kind?.startsWith?.("mortar") && fx.mortar) fx.mortar(at.x, at.y, at.z, kind, { crater: () => craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7)) });
+    // Any other blast — a bomb, a mine: a game's own (fx.blastAt — alg-rts: the baked "Shell in sand" book); true when
+    // it drew it. The crater handed over, as the mortar's.
+    else if (fx.blastAt?.(at.x, at.y, at.z, { radius, kind, crater: () => craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7)) })) { /* drawn */ }
     else {
       fx.explosion(at.x, at.y, at.z, { size: Math.max(6, radius * 1.1) });
       craters?.addCrater(at.x, at.z, Math.max(2.5, radius * 0.7));

@@ -9,6 +9,7 @@
 //   motion    both frames slid along M.rg before they are mixed (litSmoke's blend)
 import * as THREE from "three";
 import { BloomMRTNode } from "../render/bloomMRT.js";
+import { loadTexture } from "../render/textureLoad.js";
 import { float, floor, fract, mix, positionWorld, saturate, select, smoothstep, texture, uniform, uv, vec2, vec3, vec4, max } from "three/tsl";
 
 /** Atlas bytes (frame 0 top-left) → textures (row 0 = v 0, so the rows go bottom-up). */
@@ -32,9 +33,18 @@ export function bookTextures({ W, H, A, B, M }) {
  * uploaded it — 24 of them were ~1.1 s of the coast's boot. `no-cache`: always the latest bake (the
  * lab re-bakes them), revalidated with the server — a 304, not the whole file (`?v=Date.now()` was).
  */
-export async function loadBookTextures(base) {
+export async function loadBookTextures(base, { compressed = false } = {}) {
   const meta = await (await fetch(`${base}.json`, { cache: "no-store" })).json();
   const load = async (url, srgb) => {
+    // A GAME's books (2026-10-22, "be sure everything is optimized"): the KTX2 copies (npm run textures — UASTC, BC7 on
+    // the GPU: ~3 MB a 1536² atlas instead of 9.4) through loadTexture; the image when none is listed. Mip 0 only, as
+    // the image: a frame's edge must not pick up its neighbour's in the atlas. (The LAB keeps the webp: a fresh bake
+    // shows at once — re-run `npm run textures` after a bake, or the game draws the old one.)
+    if (compressed) {
+      const t = await loadTexture(url, { colorSpace: srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace });
+      t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+      return t;
+    }
     const res = await fetch(url, { cache: "no-cache" });
     if (!res.ok) throw new Error(`${url}: ${res.status}`);
     const bmp = await createImageBitmap(await res.blob(), { premultiplyAlpha: "none" });

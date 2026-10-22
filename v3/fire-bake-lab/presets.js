@@ -304,6 +304,34 @@ export const PRESETS = {
     forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.12 }, { type: "turbulence", strength: 1.6, scale: 1.8 }],
     bake: { center: [0, 1.3, 0], size: 3.0, pitch: 40, start: 3, duration: 64 / 24, loop: true, blend: 16 },
   },
+  // A GRENADE (2026-10-22, the Fire Pro pass — it was a small procedural burst): the mortar's recipe at a hand grenade's
+  // size — a blink of fire, a short burst of earth spikes (low, fast, thin), a ground skirt of dust, a small grey-brown
+  // cloud that slumps and drifts. ~3.5 m across; the game tints it to the ground.
+  grenade: {
+    label: "Grenade",
+    note: "one-shot: a hand grenade in earth — a blink of fire, a short burst of dirt spikes, a small dust cloud",
+    sim: {
+      voxelSize: 0.03, brickSize: 16, velocityDivisor: 2, smokeDivisor: 2, seed: 61,
+      grid: { maxVoxels: 8_000_000, cutoff: 0.03, ground: true },
+      flame: { lifespan: 0.18, heatRate: 2.4, smokeRate: 3, expansionRate: 3, cooling: 1.1, brightness: 14, opacity: 1, temperature: 2800, sootGlow: 2 },
+      smoke: { dissipation: 0.6, color: "#6e6658", density: 5, scattering: 0.36, shadowDensity: 3.5 },
+      motion: { buoyancy: 1.7, smokeWeight: 1.3, damping: 0.25, vorticity: 4 },
+      fuel: { enabled: false },
+    },
+    // [elevation °, azimuth °, speed m/s, radius m]: lower and shorter than the mortar's (a grenade lies ON the ground)
+    fires: [[58, 15, 9, 0.12], [46, 75, 7, 0.14], [66, 130, 10, 0.1], [44, 190, 7, 0.14], [55, 250, 8, 0.12], [62, 310, 9, 0.1]].map(([el, az, sp, rad]) => {
+      const e = (el * Math.PI) / 180, a = (az * Math.PI) / 180;
+      return { kind: "emitter", at: [0, 0.15, 0], radius: rad, emission: { flame: 0, heatRate: 0.4, smokeRate: 50 }, velocity: null,
+        path: { v: [Math.cos(e) * Math.cos(a) * sp, Math.sin(e) * sp, Math.cos(e) * Math.sin(a) * sp] }, until: 0.3 };
+    // NO ground skirt: as jets it drew petals — a flat scalloped "dust flower" on the ground in the game (18 thin or 26 fat,
+    // seen 2026-10-22). The volume goes UP: a fat jet of earth thrown up, and the blast's own spread.
+    }).concat([{ kind: "emitter", at: [0, 0.2, 0], radius: 0.5, emission: { flame: 0, heatRate: 1.8, smokeRate: 100 }, velocity: { direction: [0, 1, 0], speed: 10 }, until: 0.28 }]),
+    // (flame 1 drew a smooth WHITE BALL, as the flamethrower's head once: less flame, more smoke, and a strong fine
+    // turbulence over its first half-second to tear it)
+    blasts: [{ at: [0, 0.2, 0], radius: 0.4, charge: { flame: 0.55, heat: 2.6, smoke: 14, fuel: 0 }, outwardSpeed: 6, variation: { period: 0.3, strength: 0.8 } }],
+    forces: [{ type: "turbulence", strength: 3, scale: 1.2 }, { type: "turbulence", strength: 10, scale: 0.6, fadeUntil: 0.6 }, { type: "wind", direction: [1, 0, 0], strength: 0.3 }],
+    bake: { center: [0, 1.6, 0], size: 6, pitch: 40, start: 0, duration: 2.5, loop: false, blend: 0 },
+  },
   // A BUILDING GOING UP (2026-10-22, you, CoH 3's Nissen hut: "any building animation has a ground smoke"): the
   // dust the work kicks up — low, heavy, brown, ROLLING out along the ground from a few spots (spades, bags, boots),
   // lifting a little as it billows, dying inside the card (no square edge). The game lays a few of these round a
