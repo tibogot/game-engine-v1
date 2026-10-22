@@ -65,6 +65,7 @@ body > #alg-sys { position: fixed; right: calc(var(--alg-dev-w, 340px) + 8px); t
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); transition: color 0.12s, border-color 0.12s; }
 #alg-sys button:hover { color: #f1dfa6; border-color: var(--hud-brass); }
 #alg-sys button.off { color: var(--hud-dim); }
+#alg-sys button.on { color: #f1dfa6; border-color: var(--hud-brass); background: rgba(201,165,74,0.22); }
 #alg-paused { position: fixed; top: 64px; left: calc((100vw - var(--alg-dev-w, 340px)) / 2); transform: translateX(-50%); z-index: 89;
   font: 700 13px var(--hud-sans); letter-spacing: 0.4em; color: #f1dfa6; text-shadow: 0 1px 3px #000; pointer-events: none; }
 `;
@@ -107,6 +108,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
 
   // The two buttons: the menu (as Esc) and the sound on / off (as Options → Son; off by default,
   // so this is where a player learns the game has sound).
+  const ICON_PAUSE = `<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="4" y="3" width="3" height="10" rx="0.6"/><rect x="9" y="3" width="3" height="10" rx="0.6"/></svg>`;
   const ICON_MENU = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h10M3 8h10M3 12h10"/></svg>`;
   const ICON_SOUND = (on) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 6h2.5l3.5-3v10l-3.5-3H2.5z" fill="currentColor" fill-opacity="0.25"/>${on ? `<path d="M11 5.5a3.5 3.5 0 0 1 0 5M12.8 3.8a6 6 0 0 1 0 8.4"/>` : `<path d="M11 6l4 4M15 6l-4 4"/>`}</svg>`;
   const sys = document.createElement("div");
@@ -117,7 +119,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   const ICON_FS = (on) => `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${on
     ? `<path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4"/>`
     : `<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>`}</svg>`;
-  sys.innerHTML = `<button data-a="fullscreen"></button><button data-a="menu" title="${t("Menu (Échap)")}">${ICON_MENU}</button><button data-a="sound"></button>`;
+  // (⏸: the TACTICAL PAUSE — below)
+  sys.innerHTML = `<button data-a="tactical" title="${t("Pause tactique (Ctrl+Espace) : la bataille s'arrête, vous donnez vos ordres")}">${ICON_PAUSE}</button><button data-a="fullscreen"></button><button data-a="menu" title="${t("Menu (Échap)")}">${ICON_MENU}</button><button data-a="sound"></button>`;
   (document.getElementById("alg-res") ?? document.body).appendChild(sys);
   const soundBtn = sys.querySelector('[data-a="sound"]');
   const fsBtn = sys.querySelector('[data-a="fullscreen"]');
@@ -153,6 +156,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   syncSound();
   sys.addEventListener("pointerdown", (e) => e.stopPropagation());
   sys.querySelector('[data-a="menu"]').onclick = () => { if (paused) resume(); else open(); };
+  sys.querySelector('[data-a="tactical"]').onclick = () => tactical();
   soundBtn.onclick = () => {
     audio?.set("muted", !audio.settings.muted);
     // (paused: the mixer's set() resumes the context — hold it again)
@@ -163,6 +167,16 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
     if (box) box.checked = !audio.settings.muted;
   };
 
+  // THE TACTICAL PAUSE (2026-10-22, CoH 3's, single player): the battle stops — the sim, the clock, the smoke, the sound —
+  // with NO menu over it: the camera moves, you select, you give orders (queue them with Shift), then resume.
+  // Ctrl+Space or the ⏸ button; the same again (or Esc) resumes.
+  let tact = false;
+  function tactical(on = !tact) {
+    if (on === tact || (on && paused && !tact)) return;
+    if (on) { pause(); tact = true; badge.textContent = t("PAUSE TACTIQUE — Ctrl+Espace pour reprendre"); }
+    else { tact = false; resume(); badge.textContent = t("PAUSE"); }
+    sys.querySelector('[data-a="tactical"]').classList.toggle("on", tact);
+  }
   function pause() {
     if (paused) return;
     paused = true;
@@ -177,6 +191,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
     if (!paused) return;
     close();
     paused = false;
+    // (resumed from the menu opened during a tactical pause: that ends it too)
+    if (tact) { tact = false; badge.textContent = t("PAUSE"); sys.querySelector('[data-a="tactical"]').classList.remove("on"); }
     app.paused = false;
     app.timeScale = savedScale || 1;
     if (heldAudio && audio && !audio.settings.muted) audio.ctx.resume();
@@ -399,7 +415,9 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   function onKey(e) {
     if (/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName ?? "") && e.key !== "Escape") return;
     if (e.key === "F10") { e.preventDefault(); if (paused) resume(); else open(); return; }
+    if ((e.code === "Space" && (e.ctrlKey || e.metaKey)) || e.key === "Pause") { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) tactical(); return; }
     if (e.key !== "Escape" || e.repeat) return;
+    if (tact) { e.preventDefault(); tactical(false); return; }
     if (paused) { e.preventDefault(); resume(); return; }
     if (busy()) return;
     e.preventDefault();
@@ -409,7 +427,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
   window.addEventListener("keydown", onKey, true);
 
   return {
-    open, pause, resume, options: opts,
+    open, pause, resume, tactical, options: opts,
+    get tacticalPaused() { return tact; },
     get paused() { return paused; },
     dispose() { resume(); window.removeEventListener("keydown", onKey, true); document.removeEventListener("fullscreenchange", syncFs); badge.remove(); sys.remove(); style.remove(); },
   };

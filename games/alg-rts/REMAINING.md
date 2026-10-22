@@ -161,7 +161,8 @@ ones throughout.
    - ~~**Vehicle critical hits**~~ — **done 2026-10-22** (algCriticals.js): engine, immobilised, gun, crew stunned, by what hits and
      where (side and rear more); sappers mend them. Left: the AIs reacting (repairs, the FLN aiming for flanks).
    - ~~**Shift-queued orders**~~ — **done 2026-10-22** (shared orderQueue.js): moves and attacks, the waypoints shown.
-   - **Tactical pause** (single player, vs AI) — pause, queue orders for several units, resume.
+   - ~~**Tactical pause**~~ — **done 2026-10-22** (ui/gameMenu.js): Ctrl+Space, Pause or the ⏸ button; orders given during it.
+   - **The big loose stones** (you, 2026-10-22: "eggs, not AAA"): the 0.6-1 m lumps and boulders → the Poly Haven scans; the small ones kept.
    - **Breach** — rush a garrisoned house to take it (at a risk), CoH 3's.
    - ~~**Attack ground**~~ — **done 2026-10-22** (algAttackGround.js, ⇧G): guns pin the men hidden there, mortars fire on it.
    - **Height** — a bonus firing from above (CoH 3's vertical play): the town's hill, the djebel.

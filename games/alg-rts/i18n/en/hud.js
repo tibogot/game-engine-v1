@@ -100,4 +100,7 @@ export default {
 
   // ui/squadBadges.js (the FM 24/29 upgrade tag)
   "FM": "LMG",
+  // 2026-10-22: the tactical pause (ui/gameMenu.js)
+  "Pause tactique (Ctrl+Espace) : la bataille s'arrête, vous donnez vos ordres": "Tactical pause (Ctrl+Space): the battle stops, you give your orders",
+  "PAUSE TACTIQUE — Ctrl+Espace pour reprendre": "TACTICAL PAUSE — Ctrl+Space to resume",
 };
