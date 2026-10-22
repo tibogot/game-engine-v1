@@ -103,10 +103,13 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     // (+ a BOMB or a MINE, 2026-10-22: the "Shell in sand" book — a flash, a dust jet, the dome slumping)
     shell: { pool: 6, fireK: 3 },
     // (+ a GRENADE, 2026-10-22: its own bake — a dark dirt dome with a blink of fire, a low ring of dust, a few spikes)
-    grenade: { pool: 8, fireK: 3 } } });
+    grenade: { pool: 12, fireK: 3 } } });   // (+ the red mist: the same book, tinted)
   app.algBookShots = shots;
   app.algWind = wind;
   const MORTAR_SIZE = { mortar60: 0.78, mortar81: 1, mortar120: 1.3 };
+  // (the knockdown's rule: a blast this big at least, this close in its radius, this likely — a grenade far less; KNOCK.time
+  // = the renderer's knockdown + get-up, unitRenderer KNOCK)
+  const KNOCK = { time: 3.85, minRadius: 4.5, reach: 0.85, chance: 0.7, grenade: 0.25 };
   const later = [];   // [time left, fn]: the crater, once the blast hides where it lands
   if (shots.has("mortarImpact")) fx.mortar = (x, y, z, kind, { crater = null } = {}) => {
     const k = MORTAR_SIZE[kind] ?? 1, [wx, wz] = wind();
@@ -233,6 +236,22 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // The buildings (algStructures.js): targets, and the armed ones fighters.
   const structures = { list: built?.list ?? [] };
   const structuresRenderer = { muzzleOf: (s) => built?.muzzleOf(s) ?? s.position.clone() };
+  // THE RED MIST (2026-10-22, your CoH 3 screenshot): men killed by a blast — a dark red cloud in its dust, the grenade
+  // book tinted, ONE a blast (several men killed by it: one cloud), sized to it.
+  const mists = [];
+  function redMist(h) {
+    if (!shots.has("grenade")) return;
+    const now = performance.now();
+    for (let i = mists.length - 1; i >= 0; i--) if (now - mists[i].t > 1500) mists.splice(i, 1);
+    if (mists.some((m) => Math.hypot(m.x - h.x, m.z - h.z) < 4)) return;
+    mists.push({ x: h.x, z: h.z, t: now });
+    // (at the blast's own size and a moment after it: played with it, the mortar's 19 m dust dome buried it — seen)
+    const k = Math.min(2.4, Math.max(1, (h.radius ?? 6) / 3.5));
+    // (2 m toward the camera: at the blast's own point its card sorted behind the dust's — the same spot, the same band)
+    const c = app.camera.position, cl = Math.hypot(c.x - h.x, c.z - h.z) || 1;
+    const mx = h.x + ((c.x - h.x) / cl) * 2, mz = h.z + ((c.z - h.z) / cl) * 2;
+    later.push([0.12, () => shots.play("grenade", mx, mz, { size: shots.meta("grenade").size * k, tint: [0.2, 0.055, 0.045], opacity: 0.55, wind: wind() })]);   // (pure red, opaque: a cartoon ball — seen)
+  }
   combat = createCombat({
     units, structures, fx, structuresRenderer, projectiles, fire, craters, cover, blocksSight, onShot, onSplash, splashMul, hitChance, gibChance, smoke,
     // Vehicles fire from their guns (the weapons pass): the renderer knows the muzzles.
@@ -240,7 +259,18 @@ export async function createAlgCombat(app, { units, structures: built = null, co
     // ARMOUR BY FACING (algArmour.js): a bullet off a tank's front glances; its rear does not.
     armourMul,
     onHit: (e, amount, at, owner) => { if (onFootUnit(e) && at) blood.hit(at, owner?.position ?? null); },
+    // KNOCKED DOWN (2026-10-22, CoH; your Knocked Down / Getting Up clips): a man who lives through a big blast close
+    // to him is thrown flat and gets up ~3.8 s later — no shot, no step meanwhile (shared combat.js knockedT).
+    knock: (o, d, radius, kind, at) => {
+      const K = KNOCK;
+      if (o.knockedT > 0 || o.inside || radius < K.minRadius || d > radius * K.reach || /prone|crawl/.test(o.posture ?? "")) return;
+      if (Math.random() > (kind === "grenade" ? K.grenade : K.chance) * (1 - 0.5 * d / radius)) return;
+      o.knockedT = K.time;
+      o.haltMovement?.();
+      if (at) o.faceToward?.(at.x, at.z);   // (the clip falls backward: away from it)
+    },
     onDeath: (e) => {
+      if (onFootUnit(e) && e.lastHit?.kind === "blast") redMist(e.lastHit);
       if (e.isStructure) built?.wreck(e);
       else if (onFootUnit(e)) app.algSounds?.death(e);
       onDeath(e);

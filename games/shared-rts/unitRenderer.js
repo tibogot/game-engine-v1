@@ -496,6 +496,12 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
     plant: exact("plant")?.name ?? null,
     pickFruit: exact("pick_fruit")?.name ?? null,
     point: exact("point")?.name ?? null,
+    // (2026-10-22) a blast KNOCKS a man down (unit.knockedT, a game's sim): down, then up; the camp's exercises
+    knockedDown: exact("knocked_down")?.name ?? null,
+    gettingUp: exact("getting_up")?.name ?? null,
+    pushUp: exact("push_up")?.name ?? null,
+    jumpingJacks: exact("jumping_jacks")?.name ?? null,
+    salute: exact("salute")?.name ?? null,
     crawl: exact("rifle_crawl")?.name ?? null,
     proneFire: exact("rifle_prone_firing")?.name ?? null,
     // the unarmed set (an `unarmed` renderer only)
@@ -755,7 +761,7 @@ function withSkinnedKit(source, root, names) {
 }
 
 // Clips whose hands are busy: the rifle is slung on the back (tools/packMixamo.mjs).
-const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_|carry_walk|plant|pick_fruit|point|cower|para_land)/;   // (mortar_spot too: rifle slung, binoculars up)
+const STOWED = /^(dig|hammer|repair|grenade_throw|unarmed|mortar_|carry_walk|plant|pick_fruit|point|cower|para_land|push_up|jumping_jacks|salute)/;   // (mortar_spot too: rifle slung, binoculars up)
 const USES_TOOL = /^dig/;
 // The loader's bomb (on the Tool bone; its scale keys hide it once it is in the tube).
 const USES_BOMB = /^mortar_(wait|load)/;
@@ -1025,6 +1031,12 @@ function measureGroundSpeed(root, clip) {
  */
 /** The flinch's limit (s between two on one man). */
 const FLINCH = { every: 2.5 };
+// KNOCKED DOWN (2026-10-22, CoH): the knockdown played until he is flat (downS of it, at downRate), then the
+// get-up (at upRate) — ~3.8 s in all, the sim's knockedT (alg-rts algCombat KNOCK.time).
+export const KNOCK = { downS: 1.7, downRate: 1.3, upRate: 1.5 };
+// THROWN BY A BLAST (2026-10-22, you: "in CoH the soldiers fly when they receive an explosion"): a man killed by a blast
+// flies off along an arc AWAY from it, farther the closer and bigger it was — the blast death clip playing as he goes.
+export const THROWN = { far: 0.55, min: 0.8, max: 6, lift: 0.3, liftMin: 0.35, time: 0.32, timePerM: 0.07 };
 /** Under this share of his health a walking man limps (the injured walk). */
 const WOUNDED = 0.35;
 
@@ -1610,6 +1622,13 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         // (and his body: a corpse is drawn from his last living transform, which never sees this turn)
         v.xform.quaternion.setFromAxisAngle(_UP, unit.heading + (unit.type.facingOffset ?? 0));
         v.xform.updateMatrix();
+        // THROWN (THROWN above): an arc away from the blast — the closer and the bigger it was, the farther and higher
+        const R = lh.radius ?? 6, near = 1 - Math.min(1, (lh.d ?? R) / R);
+        const dist = Math.min(THROWN.max, Math.max(THROWN.min, near * R * THROWN.far));
+        let ax = unit.position.x - lh.x, az = unit.position.z - lh.z;
+        const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+        if (app.getWorldHeight) v.fly = { x0: v.xform.position.x, z0: v.xform.position.z, y0: v.xform.position.y, ax, az, dist,
+          h: THROWN.liftMin + dist * THROWN.lift, T: THROWN.time + dist * THROWN.timePerM };
       }
       const d = blast ? { clip: r.deathBlown, t: 0, fade: 0.1 } : running ? { clip: r.deathRunning, t: 0, fade: 0.15 }
         : behind ? { clip: r.deathBack, t: 0, fade: 0.12 }
@@ -1630,10 +1649,20 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
       if (onCorpse) {
         const h = unit.heading + (unit.type.facingOffset ?? 0);
         const off = DEATH_CHEST[v.cur.clip] ?? 0.75;
-        onCorpse(unit, unit.position.x + Math.sin(h) * off, unit.position.z + Math.cos(h) * off, h);
+        const fx = v.fly ? v.fly.ax * v.fly.dist : 0, fz = v.fly ? v.fly.az * v.fly.dist : 0;   // (where the throw lands him)
+        onCorpse(unit, unit.position.x + Math.sin(h) * off + fx, unit.position.z + Math.cos(h) * off + fz, h);
       }
     }
     v.deadT += dt;
+    // In the air (THROWN): along the arc, then down where it lands (on the ground there — a slope, a bank)
+    if (v.fly) {
+      const F = v.fly, s = Math.min(1, v.deadT / F.T);
+      const x = F.x0 + F.ax * F.dist * s, z = F.z0 + F.az * F.dist * s;
+      const g0 = F.y0, g1 = app.getWorldHeight(x, z) ?? F.y0;
+      v.xform.position.set(x, g0 + (g1 - g0) * s + F.h * 4 * s * (1 - s), z);
+      v.xform.updateMatrix();
+      if (s >= 1) v.fly = null;
+    }
     if (v.gone || v.deadT > v.crowd.field.duration(v.cur.clip) + CORPSES.seconds) return;
     v.cur.t += dt;
     v.prev.t += dt;
@@ -1874,6 +1903,12 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         if (v.once && unit.isMoving) v.once = null;   // (one-shots are in place: off he goes, no sliding)
         if (v.once && (v.once.left -= dt) <= 0) v.once = null;
         let want = v.once ? v.once.clip : soldierClip(unit, v, r);
+        // KNOCKED DOWN (a game's sim: unit.knockedT > 0): the knockdown, then the get-up — over any other clip
+        if (unit.knockedT > 0 && r.knockedDown && r.gettingUp) {
+          if (!v.knock) { v.knock = { t: 0 }; v.once = null; v.move = null; }
+          v.knock.t += dt;
+          want = v.knock.t < KNOCK.downS / KNOCK.downRate ? r.knockedDown : r.gettingUp;
+        } else v.knock = null;
         // A MOVE between postures (soldierTransitions MOVES): the real drop to
         // the ground or the rise, clip by clip, instead of one fade between two
         // poses (which squats and slides — the transition lab). Only standing
@@ -1894,6 +1929,7 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           v.prev = v.cur;
           // a shot / a throw / a move's clip from its start (a throw from its own offset: algGrenades.js)
           const t0 = v.once && want === v.once.clip ? 0
+            : v.knock ? 0
             : want === r.grenade || want === r.grenadeKneel ? unit.throwing?.start ?? 0
             // kneeling into aim with no shot yet: straight to the held aim, no recoil
             : want === r.crouchFire && v.firing <= 0 ? f.duration(want) * CROUCH_AIM_AT
@@ -1902,7 +1938,8 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
           v.fade = 0;
           v.fadeS = joining ? MOVE_JOIN : fadeFor(v.prev.clip, want);
         }
-        const rate = v.move ? v.move.steps[v.move.i].rate ?? 1
+        const rate = v.knock ? (v.cur.clip === r.knockedDown ? KNOCK.downRate : KNOCK.upRate)
+          : v.move ? v.move.steps[v.move.i].rate ?? 1
           : v.cur.clip === r.run && v.crowd.runSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.runSpeed, 0.6, 1.6)
           : v.cur.clip === r.walk && v.crowd.walkSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.walkSpeed, 0.6, 1.6)
           : v.cur.clip === r.flee && v.crowd.fleeSpeed > 0 ? THREE.MathUtils.clamp(v.speed / v.crowd.fleeSpeed, 0.6, 1.6)

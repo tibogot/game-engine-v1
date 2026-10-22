@@ -208,6 +208,14 @@ const ROLES = {
   "grenade throw": "grenade_throw_alt",
   "running scared": "flee",
   "surrender": "surrender",
+  // The 2026-10-22 batch: a blast THROWS men (falling, knocked down, getting up) and the camp's exercise figures.
+  "knocked down": "knocked_down",
+  "getting up": "getting_up",
+  "falling": "falling",
+  "falling idle": "falling",
+  "push up": "push_up",
+  "jumping jacks": "jumping_jacks",
+  "salute": "salute",
 };
 
 // Shouldered rifle (firing / aiming clips): the butt sits this far from the
@@ -416,6 +424,25 @@ if (!clips.length) fail("no animation clips found");
 // START — "Terrified" begins standing and never comes back to that pose (no end gave a loop gap
 // under 2.1): the best (start, end) pair is searched.
 const CUT = { sit_talk: [8, 16], cower: { start: [0.5, 8], len: [3, 8] } };
+// TRIMS: a fixed [start, end] (s) kept, not a loop. "Getting Up" lies still 2 s, rises, then stands 3 s (8.6 s in
+// all, measured 2026-10-22): the rise alone — CoH's knocked-down man is out of it ~3-4 s in all.
+const TRIM = { getting_up: [1.9, 5.7] };
+for (const clip of clips) {
+  const w = TRIM[clip.name];
+  if (!w || clip.duration <= w[0]) continue;
+  const [a, b] = [w[0], Math.min(w[1], clip.duration)];
+  for (const tr of clip.tracks) {
+    const ip = tr.createInterpolant(), sz = tr.getValueSize();
+    const keep = [...tr.times].map((t, k) => [t, k]).filter(([t]) => t > a && t < b);
+    const n = keep.length + 2, times = new Float32Array(n), values = new Float32Array(n * sz);
+    times[0] = 0; values.set(ip.evaluate(a).slice(), 0);
+    keep.forEach(([t, k], j) => { times[j + 1] = t - a; values.set(tr.values.subarray(k * sz, (k + 1) * sz), (j + 1) * sz); });
+    times[n - 1] = b - a; values.set(ip.evaluate(b).slice(), (n - 1) * sz);
+    tr.times = times; tr.values = values;
+  }
+  console.log(`  ${clip.name}: trimmed ${clip.duration.toFixed(1)} s → ${a}…${b} s`);
+  clip.duration = b - a;
+}
 for (const clip of clips) {
   const win = CUT[clip.name];
   if (!win) continue;
@@ -472,7 +499,9 @@ const TRANSITIONS = {
   rifle_prone_to_kneel: ["rifle_prone_idle", "rifle_crouch_idle"],
 };
 // (2026-10-17: the cower, the injured and carry walks loop; the para landings drift 8-14 cm — all pinned)
-const LOOPS_IN_PLACE = /^(rifle_(walk|run|sprint|crouch_walk|crouch_strafe|crawl)|cower|injured_walk|carry_walk|para_land|para_land_hard)$/;
+// (2026-10-22: the knockdown slid ~1.9 m back and the get-up began where IT starts: a snap between them — the
+// sim moves the man; the falling loop and the exercises on the spot)
+const LOOPS_IN_PLACE = /^(rifle_(walk|run|sprint|crouch_walk|crouch_strafe|crawl)|cower|injured_walk|carry_walk|para_land|para_land_hard|knocked_down|getting_up|falling|push_up|jumping_jacks)$/;
 {
   const hipsOf = (c) => c?.tracks.find((t) => /Hips\.position$/.test(t.name));
   const firstXZ = (c) => { const h = hipsOf(c); return h ? [h.values[0], h.values[2]] : null; };
@@ -743,7 +772,7 @@ function addWeaponBone() {
   for (const sd of soldiers) sd.mesh.bind(skeleton, sd.mesh.bindMatrix);
 
   // (2026-10-17: carry_walk, plant, pick_fruit, point, cower, para_land too — both hands busy, or a jumper's strapped rifle)
-  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit|mortar_|carry_walk|plant|pick_fruit|point|cower|para_land)/.test(c.name);
+  const isStowed = (c) => /^(dig|hammer|grenade_throw|unarmed|drive|sit|mortar_|carry_walk|plant|pick_fruit|point|cower|para_land|push_up|jumping_jacks|salute)/.test(c.name);
   const usesShovel = (c) => /^dig/.test(c.name);
   // The mortar loader's BOMB (synthMortarClips): on the Tool bone, in his right palm, shown by its keys.
   const usesBomb = (c) => !!c.userData?.bomb;

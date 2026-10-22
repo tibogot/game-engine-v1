@@ -137,6 +137,7 @@ export function createAlgMines(app, { units, combat }) {
           seen = true;
           if (m.spotted && d < P.clearR) clearing = true;
         }
+        if (boom && m.dud) boom = false;   // (a DUD — the training's: spotted and lifted, never set off)
         if (boom) {
           if (w) {
             combat.splashAt({ x: m.x, y: m.y + 0.3, z: m.z }, C.damage, C.radius, ALN, { vehicleMul: P.vehicleMul });

@@ -61,6 +61,9 @@ export function createCombat({
   // (target, owner, { bullet, shell }) → × the damage of a hit landing on him (alg-rts: ARMOUR BY
   // FACING, algArmour.js — a bullet off a tank's front glances, its rear does not). None: 1.
   armourMul = null,
+  // (man, distance, radius, kind, at) → a man on foot who LIVED through a blast near him (alg-rts: KNOCKED DOWN, a few
+  // seconds flat — algKnockdown.js). None: nothing (nam).
+  knock = null,
 }) {
   const _muzzle = new THREE.Vector3();
   /** Scratch for acquire's grid query — acquisition runs one combatant at a time. */
@@ -253,9 +256,11 @@ export function createCombat({
       if (gibChance && onFoot(o) && gibChance(d, radius, o)) o.gibbed = true;
       if (owner) o.lastHitBy = owner;      // the kill's credit (onImpact gets no owner)
       // What hit him and from where (unitRenderer: a man killed by a blast is thrown back, away from it).
-      o.lastHit = { kind: "blast", x: at.x, z: at.z };
+      // (d, radius: how hard — the renderer throws a man killed close to a big one farther)
+      o.lastHit = { kind: "blast", x: at.x, z: at.z, d, radius };
       onImpact(o, amount, at, null);       // null owner: no directional cover
       if (o.alive) o.lastHit = null;
+      if (o.alive && knock && onFoot(o)) knock(o, d, radius, kind, at);
       if (o.alive) o.gibbed = false;      // he lived: the next death is his own
     };
     for (const o of units.near(at.x, at.z, radius, _splashNear)) hit(o);
@@ -265,6 +270,8 @@ export function createCombat({
   /** One combatant's turn: forget, acquire, close in, shoot. */
   function engage(e, dt) {
     if (!e.alive || !e.range) return;
+    // flat on the ground after a blast (a game's knock): no aim, no shot, no step — the clock runs down here
+    if (e.knockedT > 0) { e.knockedT -= dt; e.haltMovement?.(); return; }
     // A building still rising out of the ground, or a turret still running its
     // calibration sweep, is a target but not yet a shooter. (It stays in
     // `acquire`'s candidate list — enemies can and should shoot it meanwhile.)

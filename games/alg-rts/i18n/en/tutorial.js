@@ -11,13 +11,13 @@ export default {
   "Instruction": "Training",
   "Passer ›": "Skip ›",
   "Algérie, 1956 · Camp d'instruction": "Algeria, 1956 · Training camp",
-  "Avant le djebel, le camp. Quinze leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, les moussebels, la retraite, le poste et ses échelons, le half-track — puis une vraie bande du FLN.":
-    "Before the djebel, the camp. Fifteen short lessons: the camera, orders, cover, villages and supply, combat, the moussebels, retreat, the post and its tiers, the half-track — then a real FLN band.",
+  "Avant le djebel, le camp. Des leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, les moussebels, la retraite, le poste et ses échelons, le half-track, les mines, le mortier, la fumée, la doctrine — puis une vraie bande du FLN.":
+    "Before the djebel, the camp. Short lessons: the camera, orders, cover, villages and supply, combat, the moussebels, retreat, the post and its tiers, the half-track, mines, the mortar, smoke, the doctrine — then a real FLN band.",
   "Chaque leçon s'affiche en haut de l'écran et passe d'elle-même une fois faite. <b>Passer</b> saute celle que vous connaissez. <kbd>Échap</kbd> : pause, options, manuel.":
     "Each lesson shows at the top of the screen and moves on by itself once done. <b>Skip</b> passes one you already know. <kbd>Esc</kbd>: pause, options, manual.",
   "Instruction terminée": "Training complete",
-  "Vous savez déplacer et abriter vos hommes, bâtir avec les sapeurs, tenir une maison, prendre et relier des points, gagner au score, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon et transporter un groupe. La suite : les Aurès.":
-    "You can move and shelter your men, build with the sappers, hold a house, take and link points, win on the score, attack, launch an assault and throw grenades, retreat and reinforce, train troops, unlock a tier and carry a squad. Next: the Aurès.",
+  "Vous savez déplacer et abriter vos hommes, bâtir avec les sapeurs, tenir une maison, prendre et relier des points, gagner au score, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon, transporter un groupe, lever des mines, tirer au mortier, vous couvrir de fumée et choisir une doctrine. La suite : les Aurès.":
+    "You can move and shelter your men, build with the sappers, hold a house, take and link points, win on the score, attack, launch an assault and throw grenades, retreat and reinforce, train troops, unlock a tier, carry a squad, lift mines, fire the mortar, cover yourself with smoke and choose a doctrine. Next: the Aurès.",
   "En bataille, le <b>brouillard de guerre</b> couvre la carte : vous ne voyez que ce que vos hommes voient. Le <b>manuel</b> (<kbd>Échap</kbd>) reprend tout.":
     "In battle, the <b>fog of war</b> covers the map: you only see what your men see. The <b>manual</b> (<kbd>Esc</kbd>) covers everything again.",
   "Les Aurès — 1956 ›": "The Aurès — 1956 ›",
@@ -204,4 +204,19 @@ export default {
   "Le convoi est passé": "The convoy got through",
   "L'embuscade a échoué : le convoi a quitté la vallée. Des mines sur la route, tout le monde caché, halte au feu — puis tout ensemble. <b>Rejouer</b> pour réessayer.": "The ambush failed: the convoy left the valley. Mines on the road, everyone hidden, hold fire — then all at once. <b>Play again</b> to retry.",
   "Vous n'avez ni blindés, ni avions, ni artillerie. Vous avez le djebel, les broussailles, les douars — et la surprise. Huit leçons courtes : se cacher, tendre une embuscade, frapper et disparaître, tenir un village, former, bâtir, armer.": "You have no armour, no aircraft, no artillery. You have the djebel, the scrub, the douars — and surprise. Eight short lessons: hide, lay an ambush, hit and run, hold a village, train, build, arm.",
+
+  // 2026-10-22: the mines, the mortar, smoke and hold fire, the doctrine
+  "Les mines": "Mines",
+  "Le FLN mine les pistes. Un homme à pied à moins de 10 m d'une mine la <b>repère</b> : un piquet rouge la signale et vos hommes la contournent — mais un véhicule la fera sauter. Deux mines attendent sur la piste, sous la mechta : parcourez-la <b>à pied</b>, puis restez quelques secondes près de chaque piquet pour <b>lever</b> la mine.": "The FLN mines the tracks. A man on foot within 10 m of a mine <b>spots</b> it: a red stake marks it and your men walk round it — but a vehicle will set it off. Two mines lie on the track below the mechta: walk it <b>on foot</b>, then stay a few seconds by each stake to <b>lift</b> the mine.",
+  "repérées": "spotted",
+  "levées": "lifted",
+  "Le mortier": "The mortar",
+  "Contre des hommes retranchés, le <b>mortier</b> : il tire par-dessus les murs, sans voir sa cible — il suffit qu'un de vos hommes la voie. Une équipe de mortier de 81 vous rejoint au poste. Amenez-la à moins de <b>80 m</b> des rebelles derrière les sacs de sable, et <b>arrêtez-la</b> : elle se met en batterie et tire d'elle-même. Le <b>Tir de barrage</b> envoie une salve où vous voulez.": "Against men dug in, the <b>mortar</b>: it fires over walls without seeing its target — one of your men seeing it is enough. An 81 mm mortar team joins you at the post. Bring it within <b>80 m</b> of the rebels behind the sandbags and <b>stop it</b>: it sets up and fires by itself. <b>Barrage</b> sends a salvo wherever you choose.",
+  "Fumée et halte au feu": "Smoke and hold fire",
+  "Deux outils de plus. Le <b>fumigène</b> (<kbd>B</kbd>) : un nuage qui coupe la vue — pour traverser à découvert sous le feu. La <b>halte au feu</b> (<kbd>⇧H</kbd>) : le groupe ne tire plus et reste caché — pour une embuscade ; il riposte si on lui tire dessus. Lancez un fumigène, puis mettez un groupe en halte au feu.": "Two more tools. <b>Smoke</b> (<kbd>B</kbd>): a cloud that cuts sight — to cross open ground under fire. <b>Hold fire</b> (<kbd>⇧H</kbd>): the squad stops shooting and stays hidden — for an ambush; it fires back if fired upon. Throw a smoke grenade, then put a squad on hold fire.",
+  "fumigène": "smoke",
+  "La doctrine": "The doctrine",
+  "En bataille, vos victoires rapportent des <b>points de commandement</b> : chaque rebelle tué, chaque village tenu. Ils se dépensent dans votre <b>doctrine</b>, choisie une fois pour toute la bataille — paras, Légion ou appui aérien — sur le panneau à droite. L'instructeur vous donne trois points : choisissez une doctrine et <b>débloquez</b> une capacité.": "In battle your successes earn <b>command points</b>: every rebel killed, every village held. You spend them in your <b>doctrine</b>, chosen once for the whole battle — paras, Legion or air support — on the panel on the right. The instructor gives you three points: choose a doctrine and <b>unlock</b> an ability.",
+  "débloquez une capacité ({n} points)": "unlock an ability ({n} points)",
+  "choisissez une doctrine, à droite": "choose a doctrine, on the right",
 };

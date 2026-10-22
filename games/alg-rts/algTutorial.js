@@ -24,6 +24,10 @@
 //  11 the post            train a squad                        → a new squad
 //  12 the tier            ▲ Airmobile at the post              → tier 2
 //  13 the half-track      board, drive, disembark (K)          → a squad out of it by the mechta
+//  13b mines              walk the track, stand by the stakes  → both lifted (2026-10-22)
+//  13c the mortar         a 81 team within 80 m, stopped       → the dug-in three down
+//  13d smoke, hold fire   B, then Shift+H                      → both done
+//  13e the doctrine       3 points given: choose, unlock one   → a doctrine and an ability
 //  14 the final           a band attacks the mechta            → the band down, the mechta held
 import { t } from "./i18n/i18n.js";
 import { LAYOUT, MAP } from "./layout.js";
@@ -95,6 +99,29 @@ export function createAlgTutorial(app) {
     console.warn("[tutorial] no ground for the sandbags near", x, z);
     return null;
   }
+  // THE CAMP'S LIFE (2026-10-22, your Push Up / Jumping Jacks / Salute clips): recruits at drill by the post — a row
+  // of jumping jacks, a row of push-ups behind, IN STEP, an instructor facing them — and a sentry saluting at the post.
+  // Static figures (unitRenderer): no AI, nothing to pick, drawn in the soldiers' own pass.
+  function campLife() {
+    const R = app.algUnitRenderer, nav = app.navGrid;
+    if (!R?.addStaticFigures) return;
+    const open = (x, z) => !nav?.isBlockedAtWorld?.(x, z, true);
+    const block = (cx, cz) => [-1, 0, 1].every((i) => [-1, 0, 1, 2].every((j) => open(cx + i * 2.2, cz + j * 2.2)));
+    const c = [[-26, 106], [-30, 96], [-24, 128], [24, 136], [-36, 116]].find(([x, z]) => block(x, z));
+    if (!c) return;
+    const [cx, cz] = c, ix = cx, iz = cz - 4;   // the instructor in front (north), the rows facing him
+    const figs = [];
+    for (let row = 0; row < 2; row++) for (let i = -1; i <= 1; i++) {
+      const x = cx + i * 2.2, z = cz + row * 2.4;
+      figs.push({ x, y: H(x, z), z, yaw: Math.atan2(ix - x, iz - z), role: row ? "pushUp" : "jumpingJacks", slot: 4 + row * 3 + i, bare: true });
+    }
+    figs.push({ x: ix, y: H(ix, iz), z: iz, yaw: Math.atan2(cx - ix, cz - iz), role: "point", slot: 1 });
+    const added = R.addStaticFigures("appele", figs);
+    for (const f of added.slice(0, 6)) f.t = 0;   // (in step: one clock for the drill)
+    const sx = postSite.x - 8, sz = postSite.z - 18;
+    if (open(sx, sz)) R.addStaticFigures("appele", [{ x: sx, y: H(sx, sz), z: sz, yaw: Math.atan2(postSite.x - sx, postSite.z - sz), role: "salute", slot: 2 }]);
+  }
+  campLife();
   const allDead = (list) => list.length > 0 && list.every((u) => !u.alive);
   const alive = (list) => (list ?? []).filter((u) => u.alive).map((u) => u.position);
 
@@ -322,6 +349,85 @@ export function createAlgTutorial(app) {
     },
     sub: (s) => `${s.boarded ? "✓" : "·"} ${t("embarquer")} · ${t("débarquer près de la mechta")}`,
   });
+  // ── 2026-10-22: what a battle asks for that the training never showed (you: "the doctrines? anything else?") ──
+  /** A squad of `key` at (x, z), yours (a lesson's own: the mortar team). */
+  function squadAt(key, x, z, size) {
+    const men = [];
+    for (let i = 0; i < size; i++) {
+      const a = (i / size) * Math.PI * 2, r = i ? 2 : 0;
+      const u = units.spawn(key, x + Math.cos(a) * r, z + Math.sin(a) * r, { team: "player", lookRole: i });
+      if (u) men.push(u);
+    }
+    if (!men.length) return null;
+    S.adopt(men, key);
+    return S.of(men[0]);
+  }
+  // 13b. MINES on the track: spotted by men on foot, lifted by standing by them
+  L.push({
+    title: t("Les mines"),
+    text: t("Le FLN mine les pistes. Un homme à pied à moins de 10 m d'une mine la <b>repère</b> : un piquet rouge la signale et vos hommes la contournent — mais un véhicule la fera sauter. Deux mines attendent sur la piste, sous la mechta : parcourez-la <b>à pied</b>, puis restez quelques secondes près de chaque piquet pour <b>lever</b> la mine."),
+    start(s) {
+      const M = app.algMines;
+      s.ms = M ? [[2, 56], [-10, 28]].map(([x, z]) => M.lay(x, z)).filter(Boolean) : [];
+      // (DUDS: a squad trained at the post or the half-track driving out ran over them and they went off before
+      // anyone saw them — the lesson is the finding and the lifting)
+      for (const m of s.ms) { m.arm = 0; m.dud = true; }
+      s.m = { x: -4, z: 42, r: 18, color: 0xe0574a }; markers.push(s.m);
+      app.rtsCamera?.focusOn(-4, 52);
+    },
+    where: (s) => s.ms.filter((m) => app.algMines?.list.includes(m)).map((m) => ({ x: m.x, z: m.z })),
+    done: (s) => s.ms.every((m) => !app.algMines?.list.includes(m)),
+    sub: (s) => {
+      const left = s.ms.filter((m) => app.algMines?.list.includes(m));
+      return `${s.ms.length - left.filter((m) => !m.spotted).length}/${s.ms.length} ${t("repérées")} · ${s.ms.length - left.length}/${s.ms.length} ${t("levées")}`;
+    },
+    end(s) {
+      markers.splice(markers.indexOf(s.m), 1);
+      const M = app.algMines;   // (skipped: the mines go — the final's men would walk onto them)
+      for (const m of s.ms) { const i = M?.list.indexOf(m) ?? -1; if (i >= 0) { m.marker?.removeFromParent(); M.list.splice(i, 1); } }
+    },
+  });
+  // 13c. THE MORTAR: indirect fire on men dug in, from out of their reach
+  L.push({
+    title: t("Le mortier"),
+    buttons: ["mortarBarrage"],
+    text: t("Contre des hommes retranchés, le <b>mortier</b> : il tire par-dessus les murs, sans voir sa cible — il suffit qu'un de vos hommes la voie. Une équipe de mortier de 81 vous rejoint au poste. Amenez-la à moins de <b>80 m</b> des rebelles derrière les sacs de sable, et <b>arrêtez-la</b> : elle se met en batterie et tire d'elle-même. Le <b>Tir de barrage</b> envoie une salve où vous voulez."),
+    async start(s) {
+      s.q = squadAt("mortierFr", postSite.x + 14, postSite.z - 26, 3);
+      const w = await wall(46, -18, { x: postSite.x, z: postSite.z }) ?? { x: 46, z: -18 };
+      s.f = fighters(3, w.x, w.z - 1.6, { hold: true, spread: 2.4, row: true });
+      E.french.earn({ mun: 50 });
+      if (s.q) { app.selection?.select(s.q.members); app.rtsCamera?.focusOn(s.q.members[0].position.x, s.q.members[0].position.z - 20); }
+    },
+    where: (s) => alive(s.f),
+    done: (s) => allDead(s.f),
+    sub: (s) => t("{n} rebelles restants", { n: (s.f ?? []).filter((u) => u.alive).length }),
+  });
+  // 13d. SMOKE and HOLD FIRE
+  L.push({
+    title: t("Fumée et halte au feu"),
+    buttons: ["smoke", "holdFire"],
+    text: t("Deux outils de plus. Le <b>fumigène</b> (<kbd>B</kbd>) : un nuage qui coupe la vue — pour traverser à découvert sous le feu. La <b>halte au feu</b> (<kbd>⇧H</kbd>) : le groupe ne tire plus et reste caché — pour une embuscade ; il riposte si on lui tire dessus. Lancez un fumigène, puis mettez un groupe en halte au feu."),
+    start(s) { s.s0 = app.algGrenades?.thrown?.smoke ?? 0; E.french.earn({ mun: 30 }); },
+    done: (s) => (app.algGrenades?.thrown?.smoke ?? 0) > s.s0 && squads().some((q) => q.holdFire),
+    sub: (s) => `${(app.algGrenades?.thrown?.smoke ?? 0) > s.s0 ? "✓" : "·"} ${t("fumigène")} · ${squads().some((q) => q.holdFire) ? "✓" : "·"} ${t("halte au feu")}`,
+    // (the final needs them firing: the hold lifted)
+    end() { for (const q of squads()) if (q.holdFire) { q.holdFire = false; for (const u of q.members) u.holdFire = false; } },
+  });
+  // 13e. THE DOCTRINE: command points, the choice, a first call-in
+  L.push({
+    title: t("La doctrine"),
+    text: t("En bataille, vos victoires rapportent des <b>points de commandement</b> : chaque rebelle tué, chaque village tenu. Ils se dépensent dans votre <b>doctrine</b>, choisie une fois pour toute la bataille — paras, Légion ou appui aérien — sur le panneau à droite. L'instructeur vous donne trois points : choisissez une doctrine et <b>débloquez</b> une capacité."),
+    start(s) {
+      const D = app.algDoctrines;
+      s.d = D;
+      if (!D) return;
+      D.offer();
+      D.give(3);
+    },
+    done: (s) => !s.d || (!!s.d.doctrine && s.d.unlocked.size > 0),
+    sub: (s) => (!s.d ? "" : s.d.doctrine ? t("débloquez une capacité ({n} points)", { n: s.d.cp }) : t("choisissez une doctrine, à droite")),
+  });
   // 14. the final
   L.push({
     title: t("L'attaque"),
@@ -431,7 +537,7 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
     const back = hud.end(`
       <div class="kicker">${t("Camp d'instruction")}</div>
       <h2 class="win">${t("Instruction terminée")}</h2>
-      <p>${t("Vous savez déplacer et abriter vos hommes, bâtir avec les sapeurs, tenir une maison, prendre et relier des points, gagner au score, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon et transporter un groupe. La suite : les Aurès.")}</p>
+      <p>${t("Vous savez déplacer et abriter vos hommes, bâtir avec les sapeurs, tenir une maison, prendre et relier des points, gagner au score, attaquer, lancer un assaut et des grenades, battre en retraite et renforcer, former des troupes, débloquer un échelon, transporter un groupe, lever des mines, tirer au mortier, vous couvrir de fumée et choisir une doctrine. La suite : les Aurès.")}</p>
       <p>${t("En bataille, le <b>brouillard de guerre</b> couvre la carte : vous ne voyez que ce que vos hommes voient. Le <b>manuel</b> (<kbd>Échap</kbd>) reprend tout.")}</p>
       <p><button type="button" class="go" data-a="aures">${t("Les Aurès — 1956 ›")}</button></p>`, { onReplay: () => location.reload() });
     back?.querySelector?.('[data-a="aures"]')?.addEventListener("click", () => { location.href = "./alg.html"; });
@@ -458,6 +564,8 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
 
   return {
     lessons: L,
+    /** The lessons' ground rings now (tests). */
+    get markers() { return markers; },
     get step() { return i; },
     next, finish,
     /** Start the lessons (the briefing's button, or ?brief=0). */
@@ -465,6 +573,7 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
       if (running) return;
       running = true;
       app.algBattle?.start?.("easy");
+      app.algDoctrines?.choose(null);   // (no doctrine panel until its lesson — 13e)
       el.hidden = false;
       begin(0);
     },
@@ -473,7 +582,7 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
       return hud.briefing(`
         <div class="kicker">${t("Algérie, 1956 · Camp d'instruction")}</div>
         <h2>${t("Instruction")}</h2>
-        <p>${t("Avant le djebel, le camp. Quinze leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, les moussebels, la retraite, le poste et ses échelons, le half-track — puis une vraie bande du FLN.")}</p>
+        <p>${t("Avant le djebel, le camp. Des leçons courtes : la caméra, les ordres, la couverture, les villages et le ravitaillement, le combat, les moussebels, la retraite, le poste et ses échelons, le half-track, les mines, le mortier, la fumée, la doctrine — puis une vraie bande du FLN.")}</p>
         <p>${t("Chaque leçon s'affiche en haut de l'écran et passe d'elle-même une fois faite. <b>Passer</b> saute celle que vous connaissez. <kbd>Échap</kbd> : pause, options, manuel.")}</p>`,
         () => this.start(), { ready });
     },

@@ -437,7 +437,8 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     start(key = storedDifficulty()) {
       applyDifficulty(app, key);
       const d = startDoctrine();
-      if (d === "none") app.algDoctrines?.choose(null);
+      // (the training: no choice until its doctrine lesson — algTutorial offers it then)
+      if (d === "none" || MAP.tutorial) app.algDoctrines?.choose(null);
       else if (d) app.algDoctrines?.choose(d);
       else app.algDoctrines?.offer?.();
       started = true; startAt = clock;
