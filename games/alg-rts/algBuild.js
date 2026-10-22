@@ -414,7 +414,6 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const [x, z] = toWorld(s.x, s.z, s.yaw ?? 0, (Math.random() * 2 - 1) * s.hx, (Math.random() * 2 - 1) * s.hz);
     shots.play("constructionDust", x, z, { size: Math.min(10, Math.max(6, 5 + r * 0.7)), fadeIn: 0.2, wind: app.algWind?.() });
   }
-  const HAUL_PACE = 0.45;   // × his speed with a crate in his arms (~2.3 m/s: a walk)
   function step(dt) {
     atWork.clear();
     // A builder ordered AWAY from his site drops it (his goal far from it): CoH's — he does not come back.
@@ -468,14 +467,9 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
       s.hp = s.progress * 100;
       dust(s, dt);
     }
-    // HAULING (2026-10-17, Mixamo "Carrying"): a sapper walking to a site of his side still rising carries
-    // a crate to it, at a walk (loadMul) — the renderer's carry walk, the crate in his arms.
-    for (const u of units.list) {
-      if (!u.alive || !u.type?.foot) continue;
-      const g = u.isMoving ? u.goalPoint : null;
-      const haul = !!g && sites.some((s) => !s.done && s.team === u.team && canBuild(u, s.key) && Math.hypot(g.x - s.x, g.z - s.z) < s.reach + 4);
-      if (haul !== !!u.hauling) { u.hauling = haul; u.loadMul = haul ? HAUL_PACE : 1; }
-    }
+    // (NO HAULING since 2026-10-22 — you: "we do like Company of Heroes": the sappers went to a site carrying a crate
+    // at 0.45 of their speed (u.hauling, the renderer's carry walk); CoH's engineers run there at their own pace. The
+    // carry walk and its crate stay in unitRenderer.js for something else — villagers carrying things.)
     for (let i = sites.length - 1; i >= 0; i--) if (sites[i].progress >= 1) finish(sites[i]);
     for (const u of units.list) if (u.working && !atWork.has(u) && !u.cutting && !u.repairing) { u.working = null; u.workClip = null; }   // a wire-cutter is algWire.js's, a repairer algRepair.js's
   }
