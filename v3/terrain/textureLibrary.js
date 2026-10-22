@@ -46,8 +46,8 @@ const DEFAULT_ALBEDO = [
   [ 60, 100,  50], // deep moss
 ];
 
-function _makeArrayTex(data, colorSpace = THREE.NoColorSpace) {
-  const tex = new THREE.DataArrayTexture(data, SLOT_RES, SLOT_RES, NUM_LAYERS);
+function _makeArrayTex(data, colorSpace = THREE.NoColorSpace, layers = NUM_LAYERS) {
+  const tex = new THREE.DataArrayTexture(data, SLOT_RES, SLOT_RES, layers);
   tex.format           = THREE.RGBAFormat;
   tex.colorSpace       = colorSpace;
   tex.wrapS            = tex.wrapT = THREE.RepeatWrapping;
@@ -109,7 +109,14 @@ export function detectMapKind(filename) {
 }
 
 export class TextureLibrary {
-  constructor() {
+  /**
+   * @param o.gpuLayers  how many slots the GPU arrays hold (startV3App `terrainLayers`, default all 7). A game
+   *   that paints with slots 0..n-1 only (Thunderline: 3) saves 2 × (7 − n) × ~5.3 MB of video memory. The
+   *   CPU arrays stay 7 slots, so every slot method still works: a slot past n is simply never uploaded,
+   *   and the shader never reads it (its loop is the splat layerBudget).
+   */
+  constructor({ gpuLayers = NUM_LAYERS } = {}) {
+    this.gpuLayers = Math.max(1, Math.min(NUM_LAYERS, Math.round(gpuLayers) || NUM_LAYERS));
     // ── CPU-side data arrays (modified in-place, textures re-upload via needsUpdate) ──
     this._albedoData = new Uint8Array(SLOT_RES * SLOT_RES * 4 * NUM_LAYERS);
     this._ormData    = new Uint8Array(SLOT_RES * SLOT_RES * 4 * NUM_LAYERS);
@@ -117,8 +124,10 @@ export class TextureLibrary {
     this._fillDefaultAlbedo();
     this._fillDefaultOrm();
 
-    this.albedoArrayTex = _makeArrayTex(this._albedoData, THREE.SRGBColorSpace);
-    this.ormArrayTex    = _makeArrayTex(this._ormData, THREE.LinearSRGBColorSpace);
+    // the GPU textures see the first gpuLayers slots: a VIEW of the same buffers (same bytes, no copy)
+    const gpuView = (a) => (this.gpuLayers === NUM_LAYERS ? a : a.subarray(0, SLOT_RES * SLOT_RES * 4 * this.gpuLayers));
+    this.albedoArrayTex = _makeArrayTex(gpuView(this._albedoData), THREE.SRGBColorSpace, this.gpuLayers);
+    this.ormArrayTex    = _makeArrayTex(gpuView(this._ormData), THREE.LinearSRGBColorSpace, this.gpuLayers);
 
     // Textures with a WHOLE-array upload still pending. A single-layer upload
     // (procedural re-bake) must not replace one of those, or the other layer's
@@ -260,6 +269,7 @@ export class TextureLibrary {
    */
   _uploadLayer(tex, layer) {
     if (this._cpuReleased) { console.error("[textureLibrary] slot change after releaseCpuCopies: ignored"); return; }
+    if (layer >= this.gpuLayers) return; // a slot the GPU arrays do not hold (gpuLayers)
     if (!this._fullUploadPending.has(tex)) tex.addLayerUpdate(layer);
     tex.needsUpdate = true;
   }

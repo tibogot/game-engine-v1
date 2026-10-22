@@ -9,7 +9,7 @@
 import { startV3App } from "../../../../v3/engine.js";
 import { library, campaign, lessons, settings, builderUrl, campaignUrl, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
-import { applyWorld, DEFAULT_TOD } from "./worlds.js";
+import { applyWorld, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -26,7 +26,8 @@ const app = await startV3App({
   // across the deck the user saw (2026-10-18).
   light: { envIntensity: 0.45, hemiIntensity: 0.6, dirIntensity: 2.6, exposure: 1.0, shadowNormalBias: 0.12 },
   terrainFeatures: { cursor: false },
-  splatFeatures: { solo: false, layerBudget: 3 }, // the ground uses paint slots 0-2 only (worlds.js): the shader loops over 3 layers, not 7
+  splatFeatures: groundFeatures(), // worlds.js: paint slots 0-2 only (3 layers, not 7) + the anti-tiling features
+  terrainLayers: 3, // and the GPU paint arrays hold just those 3 (−42 MB of video memory)
   preloadPaintTextures: false,
   csm: { cascades: 2 },
 });

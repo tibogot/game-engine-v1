@@ -189,6 +189,58 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     o.receiveShadow = false;
     o.material = Array.isArray(o.material) ? o.material.map(() => ghostMat) : ghostMat;
   });
+  /**
+   * THE GHOST'S BODY IN ONE DRAW (performance pass, 2026-10-22: the Lotus ghost was the full model, interior
+   * and all — 18 draws, 77k triangles — under ONE shared hologram material). Every visible body mesh is
+   * baked into a single float mesh (positions + normals: all the hologram reads), the originals hidden:
+   * - the INTERIOR is left out (cab, seats, wheel, door cards: through an additive hologram, only clutter);
+   * - the ShadowProxy hull is left out (it only casts shadows; the ghost casts none);
+   * - built from three's accessors, not mergeGeometries: the Lotus GLB is QUANTISED (int16 positions) and a
+   *   merged int16 buffer has a 6-byte stride WebGPU refuses (memory: merge-geometries gotchas).
+   * The wheels stay separate (they spin).
+   */
+  const GHOST_SKIP = /(_int|interior|steering|cab_|glass|lens)/i;
+  function mergeGhostBody(v) {
+    const root = v._chassisGlb;
+    if (!root) return 0;
+    root.updateMatrixWorld(true);
+    const inv = root.matrixWorld.clone().invert();
+    const parts = [];
+    root.traverse((o) => {
+      if (!o.isMesh || o.isInstancedMesh || !o.visible) return;
+      const names = [o.name, o.parent?.name, ...[].concat(o.material).map((m) => m?.name)].join(" ");
+      if (/ShadowProxy/i.test(names) || GHOST_SKIP.test(names)) { o.visible = false; return; }
+      parts.push(o);
+    });
+    let nv = 0, ni = 0;
+    for (const o of parts) { nv += o.geometry.attributes.position.count; ni += o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; }
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), idx = new Uint32Array(ni);
+    const p = new THREE.Vector3(), n = new THREE.Vector3(), M = new THREE.Matrix4(), N = new THREE.Matrix3();
+    let vo = 0, io = 0;
+    for (const o of parts) {
+      const g = o.geometry, P = g.attributes.position, Nn = g.attributes.normal;
+      M.multiplyMatrices(inv, o.matrixWorld);
+      N.getNormalMatrix(M);
+      for (let i = 0; i < P.count; i++) {
+        p.fromBufferAttribute(P, i).applyMatrix4(M);
+        pos.set([p.x, p.y, p.z], (vo + i) * 3);
+        if (Nn) { n.fromBufferAttribute(Nn, i).applyMatrix3(N).normalize(); nor.set([n.x, n.y, n.z], (vo + i) * 3); }
+      }
+      if (g.index) for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.getX(i) + vo;
+      else for (let i = 0; i < P.count; i++) idx[io++] = i + vo;
+      vo += P.count;
+      o.visible = false;
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
+    geo.computeBoundingSphere();
+    const body = new THREE.Mesh(geo, ghostMat);
+    body.name = "GhostBody";
+    root.add(body);
+    return parts.length;
+  }
   let ghostStyled = false; // the ghost is only shown once it wears its hologram (models loaded)
   // the Lotus is a DEV model only (trademark); it loads in the background, the car drives meanwhile
   // THE CAR: "thunder" = our car (thunderCar.js), "lotus" = the dev Lotus. Same slots, same physics.
@@ -229,13 +281,14 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     try {
       // the ghost: its own copies of the same models, THEN the hologram look (styled before the models
       // arrive, the car's own setup choked on the hologram material)
-      if (await dress(ghostCar, false)) { ghostify(ghostCar.group); ghostStyled = true; if (S?.ghostPlayer && showGhost) ghostCar.group.visible = true; return; }
+      if (await dress(ghostCar, false)) { mergeGhostBody(ghostCar); ghostify(ghostCar.group); ghostStyled = true; if (S?.ghostPlayer && showGhost) ghostCar.group.visible = true; return; }
       const gm = await loadChassisModel(renderer, CHASSIS_GLB_URL);
       ghostCar.setChassisModel(gm.object, { brakeLights: gm.brakeLights, headlampLenses: gm.headlampLenses });
       ghostCar.setChassisStyle("glb");
       const gw = await loadWheelModel(renderer);
       ghostCar.setWheelModel(gw.object, CAR_TUNE.wheel);
       ghostCar.setWheelStyle("glb");
+      mergeGhostBody(ghostCar);
       ghostify(ghostCar.group);
       ghostStyled = true;
       if (S?.ghostPlayer && showGhost) ghostCar.group.visible = true;

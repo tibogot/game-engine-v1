@@ -36,6 +36,32 @@ const GROUND_SETS = [
   { slug: "rock_boulder_dry", tile: 90 },
 ];
 const PAINT = { flatSlot: 0, screeSlot: 1, cliffSlot: 2, highSlot: 2, screeLo: 10, screeHi: 20, cliffLo: 24, cliffHi: 34, highLo: 650, highHi: 900 };
+// ANTI-TILING (user, 2026-10-22: "fix the repeating tiling of the grass and the mountain, the best way"):
+// the engine's terrain features, compiled in by the pages (GROUND_FEATURES) and set here —
+//   hex tiling near the camera (no repeat grid where the eye looks), a 5x tile further out (farBlend),
+//   far TONE: each texture fades to its own average colour from 250 m to 1.1 km (a tile's pattern seen
+//   from a kilometre is the repetition; its average cannot repeat), and MACRO variation: soft lighter /
+//   darker, warmer / cooler patches at 80 m and over whole hillsides (~900 m) — the variation the eye
+//   reads at distance comes from that, the lighting and the slope rules, not from a photo.
+export const GROUND_FEATURES = { solo: false, layerBudget: 3, topK: 3, farBlend: true, hexNear: true, farTone: true };
+/** The pages' splatFeatures; ?tiling=0 compiles the plain ground (the before/after A/B). */
+export function groundFeatures() {
+  let off = typeof location !== "undefined" && new URLSearchParams(location.search).get("tiling") === "0";
+  try { off ||= localStorage.getItem("thunderline.tiling") === "0"; } catch {} // (the builder rewrites its URL)
+  return off ? { solo: false, layerBudget: 3 } : { ...GROUND_FEATURES };
+}
+const ANTI_TILING = {
+  uHexEnd: 45, uHexBand: 15, // hex out to 45 m (a racer looks along the ground, not down at it)
+  uFarRatio: 5, uFarStart: 30, uFarEnd: 110,
+  uToneStart: 250, uToneEnd: 1100, uToneAmt: 0.85,
+  uMacroStrength: 0.22, uMacroWarmth: 0.35, uMacroScale: 70, uMacroBig: 0.45, uMacroBigScale: 900,
+};
+function setAntiTiling(app, on) {
+  const ov = app.splatOverlay ?? globalThis.__V3_DEBUG?.splatOverlay;
+  if (!ov) return;
+  if (!groundFeatures().topK) on = false; // ?tiling=0: the plain ground, macro tint off too
+  for (const [k, v] of Object.entries(ANTI_TILING)) if (ov[k]) ov[k].value = on || !k.startsWith("uMacro") ? v : 0;
+}
 let groundLoad = null;
 /** The ground sets into paint slots 0-2, once (the engine keeps them for the session). */
 function loadGround(app) {
@@ -122,10 +148,12 @@ export function applyWorld(app, name = DEFAULT_WORLD) {
   app.setFarTerrain({ grid, n, extent: EXTENT, stand: 1, standStart: 0, standEnd: 1, blend: 250, rule: NO_PAINT, enabled: true });
   // the GROUND: the grid at once, the paint when its textures are in (a switch back to a grid world wins)
   app.setAutoPaint?.({ enabled: false });
+  setAntiTiling(app, false); // the grid ground: no macro tint over it
   if (!gridLook && app.setAutoPaint) {
     loadGround(app).then(() => {
       if (current !== world) return;
       app.setFarTerrain({ rule: PAINT });
+      setAntiTiling(app, true);
       app.setAutoPaint({ enabled: true, flat: 0, cliff: 2, high: -1, slopeStartDeg: 24, slopeEndDeg: 34, noise: 0.3 });
     }).catch((e) => console.warn("[worlds] ground textures not loaded: the grid stays", e));
   }

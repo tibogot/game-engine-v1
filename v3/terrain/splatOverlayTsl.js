@@ -164,6 +164,16 @@ export const SPLAT_FEATURES = {
    * untaken — so close-camera games opt in, RTS games do not.
    */
   nearDetail: false,
+  /**
+   * FAR TONE on the top-K layers (needs topK > 0): from uToneStart to uToneEnd metres each chosen layer's
+   * colour fades (by uToneAmt) to the SAME texture read at a tile uToneRatio× bigger — one explicit-gradient
+   * tap inside a distance branch. A tile's pattern seen from a kilometre is what reads as repetition
+   * (Thunderline's mountains, 2026-10-22: a 90 m rock tile over km-long slopes); at ~2 km a tile is too big
+   * to repeat in view and still reads as rock (its plain average went flat and plastic). The
+   * large-scale look then comes from the lighting, the slope/height rules and the macro variation (with
+   * uMacroBig). Off by default: every other game is unchanged.
+   */
+  farTone: false,
 };
 
 /**
@@ -356,6 +366,8 @@ export function createSplatOverlay(
   const uMacroStrength  = uniform(0.0);  // brightness swing, 0..0.5
   const uMacroWarmth    = uniform(0.0);  // warm/cool tint amount, 0..1
   const uMacroScale     = uniform(80.0); // metres per noise cell
+  const uMacroBig       = uniform(0.0);  // a third, LARGE octave's weight (0 = as before): mountains, km-scale fields
+  const uMacroBigScale  = uniform(900.0); // metres per cell of that octave
   // Weathering from the terrain's shape (see blend()). Both 0 = off.
   const uCavityDark     = uniform(0.0);  // 0..1 hollows darker
   const uRidgeWear      = uniform(0.0);  // 0..1 ridges paler
@@ -400,6 +412,11 @@ export function createSplatOverlay(
   const uFarRatio       = uniform(5.0);
   const uFarStart       = uniform(35.0);
   const uFarEnd         = uniform(90.0);
+  // Far tone (SPLAT_FEATURES.farTone): the layer's colour → its average, by distance
+  const uToneStart      = uniform(250.0);
+  const uToneEnd        = uniform(1100.0);
+  const uToneAmt        = uniform(0.85);
+  const uToneRatio      = uniform(20.0); // the far read's tile, × the layer's
   // Hex tiling near the camera (SPLAT_FEATURES.hexNear).
   const uHexNear        = uniform(1.0);   // 0..1 strength, 0 = plain taps
   const uHexEnd         = uniform(30.0);  // metres where it is fully gone
@@ -974,6 +991,9 @@ export function createSplatOverlay(
               ? float(1).sub(smoothstep(uDetailEnd.sub(uDetailBand), uDetailEnd, length(P.sub(cameraPosition))))
                 .mul(uDetailStrength).toVar()
               : null;
+            const toneW = F.farTone && !hex && farFade === null
+              ? smoothstep(uToneStart, uToneEnd, length(P.sub(cameraPosition))).mul(uToneAmt).toVar()
+              : null;
             const hexW = F.hexNear && !hex && farFade === null
               ? float(1).sub(smoothstep(uHexEnd.sub(uHexBand), uHexEnd, length(P.sub(cameraPosition))))
                 .mul(uHexNear).toVar()
@@ -1033,6 +1053,20 @@ export function createSplatOverlay(
               if (fade) {
                 const far = tap(albedoArrNode, uvK.div(max(uFarRatio, float(1))));
                 albedo = mix(albedo, far, fade);
+              }
+              if (toneW) {
+                const toned = vec4(albedo).toVar();
+                // gradients outside the branch (a real per-pixel branch: explicit-gradient taps only)
+                const uvT = uvK.div(max(uToneRatio, float(1))).toVar();
+                const tgx = dFdx(uvT).toVar(), tgy = dFdy(uvT).toVar();
+                If(toneW.greaterThan(0.0), () => {
+                  // the SAME texture at a tile uToneRatio× bigger (~2 km for a 90 m rock): real rock-like
+                  // light and dark over a mountainside, and too big to repeat in view. (Its plain average
+                  // — the last mip — was tried first: no repeat, but the ranges went flat and plastic.)
+                  const big = albedoArrNode.sample(uvT).grad(tgx, tgy).depth(layer);
+                  toned.assign(vec4(mix(toned.rgb, big.rgb, toneW), toned.a));
+                });
+                albedo = toned;
               }
               entries.push({
                 w: max(topW[k], float(0)).mul(renorm).toVar(),
@@ -1158,8 +1192,10 @@ export function createSplatOverlay(
           If(uMacroStrength.add(uMacroWarmth).greaterThan(0.0), () => {
             const mp = P.xz.div(max(uMacroScale, float(1)));
             // Second octave at a non-integer ratio so the two never line up.
-            const n = macroValueNoise(mp).mul(0.65)
-              .add(macroValueNoise(mp.mul(2.37).add(vec2(17.3, 41.9))).mul(0.35)).toVar();
+            let n = macroValueNoise(mp).mul(0.65)
+              .add(macroValueNoise(mp.mul(2.37).add(vec2(17.3, 41.9))).mul(0.35));
+            // the LARGE octave (uMacroBig, 0 = as before): whole hillsides lighter or darker
+            n = mix(n, macroValueNoise(P.xz.div(max(uMacroBigScale, float(1))).add(vec2(5.1, 9.7))), uMacroBig).toVar();
             const b = n.sub(0.5).mul(2.0); // -1..1
             // Brighter patches lean warm, darker ones cool — the painted look.
             const warmTint = mix(vec3(0.93, 1.0, 1.07), vec3(1.07, 1.02, 0.9), n);
@@ -1312,6 +1348,8 @@ export function createSplatOverlay(
     uMacroStrength,
     uMacroWarmth,
     uMacroScale,
+    uMacroBig,
+    uMacroBigScale,
     uMacroTexStrength,
     uMacroTexScale,
     // Weathering (see blend()); live, no recompile.
@@ -1328,6 +1366,10 @@ export function createSplatOverlay(
     uFarRatio,
     uFarStart,
     uFarEnd,
+    uToneStart,
+    uToneEnd,
+    uToneAmt,
+    uToneRatio,
     // Hex tiling near the camera (SPLAT_FEATURES.hexNear); live, no recompile.
     uHexNear,
     uHexEnd,
@@ -1342,7 +1384,7 @@ export function createSplatOverlay(
     uDetailBand,
     uDetailAlbedo,
     /** What this build compiled: top-K count (0 = classic) and near/far. */
-    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend), hexNear: Boolean(TOPK && F.hexNear), nearDetail: Boolean(TOPK && F.nearDetail) },
+    compiled: { topK: TOPK, farBlend: Boolean(TOPK && F.farBlend), hexNear: Boolean(TOPK && F.hexNear), nearDetail: Boolean(TOPK && F.nearDetail), farTone: Boolean(TOPK && F.farTone) },
     blend,
     registerMaterial,
     setTriplanarCompiled,

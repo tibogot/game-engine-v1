@@ -1,6 +1,7 @@
 // The gate arches (race.js gates): two posts and a beam across the road, standing on the deck.
 // Checkpoint = bolt blue, finish = checkered, start = white. Shared by the drive page and the builder.
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 
 let checker = null;
 function checkerTexture() {
@@ -43,7 +44,7 @@ export function makeRingMesh(g, { material = null } = {}) {
 /** @param g {kind, P, T, U, hw} — P is on (or 0.7 m above) the deck centre */
 export function makeGateMesh(g, { height = 7.5, lift = 0.7 } = {}) {
   if (g.ring) return makeRingMesh(g);
-  if (g.kind === "start" || g.kind === "finish") return orient(makeLineGantry(g), g, lift);
+  if (g.kind === "start" || g.kind === "finish") return orient(mergeParts(makeLineGantry(g)), g, lift);
   const group = new THREE.Group();
   const color = g.kind === "cp" ? 0x3fd2ff : 0xf2f4f8;
   const post = new THREE.MeshStandardMaterial({ color: 0x1a2236, roughness: 0.6, metalness: 0.3 });
@@ -63,7 +64,46 @@ export function makeGateMesh(g, { height = 7.5, lift = 0.7 } = {}) {
   const beam = new THREE.Mesh(new THREE.BoxGeometry(w * 2 + 0.6, 1.4, 0.5), banner);
   beam.position.set(0, height - 0.7, 0);
   group.add(beam);
-  return orient(group, g, lift);
+  return orient(mergeParts(group), g, lift);
+}
+
+/**
+ * ONE MESH PER MATERIAL (performance pass, 2026-10-22: the start, finish and checkpoint gates were 14 draws
+ * for three gates): a gate's parts sharing a material (and a shadow flag) are baked into one geometry. The
+ * header (two materials on one box) and the start lamps (each its own material, lit one by one) stay apart.
+ * Mirrored parts (the left pylon, scale.x −1) get their triangles turned back: baking a mirror flips them.
+ */
+function mergeParts(group) {
+  const buckets = new Map();
+  for (const m of group.children.slice()) {
+    if (!m.isMesh || Array.isArray(m.material)) continue;
+    const k = `${m.material.uuid}|${m.castShadow}|${m.receiveShadow}|${m.renderOrder}`;
+    (buckets.get(k) ?? buckets.set(k, []).get(k)).push(m);
+  }
+  for (const parts of buckets.values()) {
+    if (parts.length < 2) continue;
+    const geos = parts.map((m) => {
+      m.updateMatrix();
+      const geo = (m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone()).applyMatrix4(m.matrix);
+      for (const name of Object.keys(geo.attributes)) if (!["position", "normal", "uv"].includes(name)) geo.deleteAttribute(name);
+      if (m.matrix.determinant() < 0) {
+        for (const a of Object.values(geo.attributes)) {
+          const n = a.itemSize, arr = a.array;
+          for (let t = 0; t < a.count; t += 3) for (let c = 0; c < n; c++) { const i1 = (t + 1) * n + c, i2 = (t + 2) * n + c; [arr[i1], arr[i2]] = [arr[i2], arr[i1]]; }
+        }
+      }
+      return geo;
+    });
+    const merged = mergeGeometries(geos);
+    if (!merged) continue; // (attribute sets differ: keep the parts)
+    const mesh = new THREE.Mesh(merged, parts[0].material);
+    mesh.castShadow = parts[0].castShadow;
+    mesh.receiveShadow = parts[0].receiveShadow;
+    mesh.renderOrder = parts[0].renderOrder;
+    for (const m of parts) { group.remove(m); m.geometry.dispose(); }
+    group.add(mesh);
+  }
+  return group;
 }
 
 // orient: local X across the road, Y up the deck, Z along the travel (the arch faces the car). X = U × T:
@@ -170,10 +210,17 @@ function makeLineGantry(g) {
   // HEADER: the word on both faces (box faces ±Z), graphite ends
   const sign = new THREE.MeshStandardMaterial({ map: signTexture(finish ? "FINISH" : "START"), roughness: 0.6, emissive: 0xffffff, emissiveMap: signTexture(finish ? "FINISH" : "START"), emissiveIntensity: 0.18 });
   const hw = w + 1.0, hh = 2.6;
-  const header = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, hh, 1.1), [graphite, graphite, graphite, graphite, sign, sign]);
+  // (a graphite box + the two sign faces 1 cm proud of it: a box with six materials was six draws)
+  const header = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, hh, 1.1), graphite);
   header.position.set(0, H - hh / 2 + 0.3, 0);
   header.castShadow = true;
   group.add(header);
+  for (const sz of [-1, 1]) {
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2, hh), sign);
+    face.position.set(0, H - hh / 2 + 0.3, sz * 0.56);
+    if (sz < 0) face.rotation.y = Math.PI; // the back face reads the right way round from behind
+    group.add(face);
+  }
   // a lit edge under the header
   const under = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 - 0.2, 0.12, 1.16), edge);
   under.position.set(0, H - hh + 0.3 - 0.04, 0);

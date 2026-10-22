@@ -129,3 +129,12 @@ look work goes FIRST, on the current system, and the control map after it. Every
    GPU stamping can still come with the control map if the CPU loop ever becomes the limit.
 6. **More materials:** arrays sized to what the level uses; then KTX2.
 7. **Biomes / layered paint** on top.
+8. **DISTANCE anti-tiling — DONE 2026-10-22 (Thunderline):** SPLAT_FEATURES.farTone (top-K, off by
+   default): from uToneStart → uToneEnd (250 → 1100 m) each layer fades (uToneAmt 0.85) to the SAME
+   texture at a tile uToneRatio (20) × bigger — one explicit-gradient tap in a distance branch. Its
+   plain average (last mip) was tried first: no repeat, but the mountains went flat and plastic. Plus
+   uMacroBig / uMacroBigScale: a third, LARGE macro-noise octave (0 = unchanged) for whole hillsides.
+   The full anti-tiling stack a ground-level game uses (Thunderline worlds.js GROUND_FEATURES): hexNear
+   to 45 m → farBlend ×5 (30-110 m) → farTone ×20 (250 m-1.1 km) + macro tint at 70 m and 900 m.
+   Seen: the 60 m-high checkerboard of 6 m grass tiles gone; the far ranges' speckled rock repeat gone.
+   COST NOT YET MEASURED (needs a quiet GPU).

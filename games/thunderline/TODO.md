@@ -279,6 +279,27 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the entrance shape at all"). WAITING for the user's Apex Rush tube screenshots; redesign from them.
 - [x] Tube wall thicker: 0.6 → 1.5 m (user: "looks too thin").
 - [x] Tubes are ROUND inside, no flat road (user, 2026-10-19).
+- [x] **PERFORMANCE PASS 2 (2026-10-22, measured on White 3 in the drive page, counts not GPU time):**
+      1. GHOST in one draw: its body baked into one float mesh (driveSession mergeGhostBody: interior and the
+         ShadowProxy left out; built from accessors — the Lotus GLB is int16-quantised). 18 → 3 draws, 77k →
+         44k triangles; looks the same (the hologram). The default car is still the LOTUS (SETTINGS_DEFAULTS).
+      2. Paint arrays sized to what the game uses: startV3App terrainLayers (textureLibrary gpuLayers, a view
+         of the same buffers; CPU arrays stay 7). Thunderline 3 layers: textures 611 → 568 MB.
+      3. DROPPED: freeing the river / lake / water / grass-data textures saves only ~32 MB (most were never
+         uploaded) and BREAKS rendering (drawn materials bind them: bind errors) — an engine restructure for
+         32 MB, not worth it.
+      7. Gates merged per material (gateMesh mergeParts; the header's 6-material box → a box + 2 sign faces):
+         start + finish fully in view 30 → 16 draws, 24 → 14 meshes. (From the chase camera at the start the
+         count can read HIGHER: the merged pylons are one mesh spanning the road, never culled.)
+      OPEN from the audit: bloom 14 of 23 passes, terrain 626k triangles (both need GPU timing); per-frame CPU:
+      engine-sound 42 audio ramps/frame (18 loops, 4 audible), silent synth voices running, the live shadow's
+      separate clear pass, allocations in sparks / tyre marks, hidden HUD rewritten each frame.
+- [x] **NO REPEATING TILES on the grass and the mountains** (user, 2026-10-22: "fix both the repeating
+      tiling of the grass and the mountain, the best solution"): worlds.js GROUND_FEATURES + ANTI_TILING —
+      hex tiling to 45 m, a ×5 tile 30-110 m, the engine's new FAR TONE (a ×20 read of the same texture
+      from 250 m to 1.1 km: v3/TEXTURING_PLAN step 8) and macro tint (70 m + a new 900 m octave). A/B in
+      the builder: localStorage thunderline.tiling = "0" (or ?tiling=0 on the drive page) = the old ground.
+      [ ] GPU COST to measure at a quiet moment (hex near is the expensive one: +0.5-1.3 ms in the editor).
 - [x] **BUILDER DRIVE: no automatic finish, falls land on the ground** (user, 2026-10-22: "a finish only
       if I place the finish piece"; "I should be able to fall on the ground, it shouldn't restart"):
       rig.start({autoFinish: false, fallReset: false}) from the builder — no finish gate and no run-out

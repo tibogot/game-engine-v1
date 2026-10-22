@@ -594,7 +594,8 @@ export async function startV3App(opts = {}) {
   const splatMap   = new SplatMap();
   // Strokes and undo upload only the rect they touched (splatMap._uploadRect).
   splatMap.renderer = renderer;
-  const textureLib = new TextureLibrary();
+  // terrainLayers: the GPU paint arrays hold only that many slots (video memory; default all 7)
+  const textureLib = new TextureLibrary({ gpuLayers: opts.terrainLayers });
   // Procedural paint layers bake on the GPU. A factory, so the bake targets are
   // only allocated the first time a slot actually goes procedural.
   textureLib.setProceduralBakerFactory(() => new ProceduralLayerBaker(renderer));
