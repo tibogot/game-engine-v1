@@ -122,6 +122,19 @@ ones throughout.
 
 ## 3. Gameplay still missing (biggest first)
 
+0. **From 2026-10-22 (your questions, CoH compared):**
+   - **A held village shows who it backs** (left for later): FLN-held, hand-painted "FLN" and the green-and-white flag
+     on two or three walls and a small flag on a roof; French-held, a tricolour on the house by the square. Needs
+     wall-decal textures, and separate houses (the new kit: Oued Abdi, the training hamlet; the Aurès' merged mechtas
+     once redone). Done already: the capture burst at the flagpole, the sectors coloured on the minimap.
+   - **Bodies thrown by blasts** (an arc away from it, the Falling loop turned face up, landing on the blast death)
+     with a RED MIST in the blast's dust; near misses KNOCKED DOWN then GET UP (your Knocked Down / Getting Up clips).
+   - **Dropped weapons the CoH way:** every special weapon drops (bazooka, flamethrower, sniper rifle — today only the
+     FM), picked up by a RIGHT-CLICK order, not automatically; abandoned TEAM WEAPONS (mortar, MG, recoilless) re-crewed
+     by any squad, either side.
+   - **The training:** a doctrine lesson; the mortar and the radio barrage; mines and sweeping; smoke and hold fire;
+     the MG nest and wire; veterancy. The camp's exercise figures (Push Up, Jumping Jacks, Salute).
+
 1. **Building damage and collapse** — CoH's signature, our biggest gap.
    - Walls go, the garrison is forced out, rubble is left behind.
    - The new kits are ready for it: every house (whitewashed, M'zab) has its intact / damaged /

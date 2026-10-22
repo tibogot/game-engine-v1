@@ -563,8 +563,12 @@ export function createMinimap({
       }
       own[j * n + i] = best;
     }
-    const tint = (p) => (isHuman(p.owner) ? (p.linked === false ? "rgba(224,160,64,0.16)" : "rgba(90,174,255,0.17)")
-      : isHostile(p.owner) ? "rgba(255,95,78,0.17)" : null);
+    // (2026-10-22, you: "taking a town, the only thing that makes the difference is the flag" — at 0.17 a held sector
+    // did not read over the painted map: 0.3, and its edge in its holder's colour below)
+    const tint = (p) => (isHuman(p.owner) ? (p.linked === false ? "rgba(224,160,64,0.28)" : "rgba(90,174,255,0.3)")
+      : isHostile(p.owner) ? "rgba(255,95,78,0.3)" : null);
+    const edge = (p) => (isHuman(p.owner) ? (p.linked === false ? "rgba(240,180,80,0.85)" : "rgba(120,190,255,0.85)")
+      : isHostile(p.owner) ? "rgba(255,120,100,0.85)" : null);
     for (let k = 0; k < pts.length; k++) {
       const f = tint(pts[k]);
       if (!f) continue;
@@ -581,6 +585,18 @@ export function createMinimap({
       if (own[j * n + i + 1] !== o || own[(j + 1) * n + i] !== o) c.rect(i * TERR_CELL + TERR_CELL * 0.25, j * TERR_CELL + TERR_CELL * 0.25, TERR_CELL * 0.5 + 0.5, TERR_CELL * 0.5 + 0.5);
     }
     c.fill();
+    // A HELD sector's own edge, inside it, in its holder's colour (both sides of a border held: both lines).
+    for (let k = 0; k < pts.length; k++) {
+      const f = edge(pts[k]);
+      if (!f) continue;
+      c.fillStyle = f;
+      c.beginPath();
+      for (let j = 1; j < n - 1; j++) for (let i = 1; i < n - 1; i++) {
+        if (own[j * n + i] !== k) continue;
+        if (own[j * n + i + 1] !== k || own[j * n + i - 1] !== k || own[(j + 1) * n + i] !== k || own[(j - 1) * n + i] !== k) c.rect(i * TERR_CELL, j * TERR_CELL, TERR_CELL, TERR_CELL);
+      }
+      c.fill();
+    }
   }
 
   // ── Fog ──────────────────────────────────────────────────────────────────
