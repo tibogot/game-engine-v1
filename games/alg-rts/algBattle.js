@@ -36,7 +36,7 @@ import { t, LANGS, LANG, setLang } from "./i18n/i18n.js";
 function briefingHead(fln) {
   const own = MAP.briefing?.[fln ? "fln" : "fr"];
   if (own) return own;
-  if (MAP.id === "aures") {
+  if ((MAP.base ?? MAP.id) === "aures") {
     return fln ? { kicker: t("Aurès, 1956 · La katiba de la grotte"), title: t("Libérer la vallée") }
       : { kicker: t("Aurès, 1956 · Poste de Tighanimine"), title: t("Tenir la vallée") };
   }
@@ -465,7 +465,7 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
           <li>${t("Les <b>{n} villages</b> sont l'enjeu de cette guerre. Chacun rapporte à celui qu'il soutient, et chacun est un <b>point de victoire</b> (★ au-dessus d'eux et sur la mini-carte).", { n })}</li>
           <li>${t("Les <b>effectifs</b> arrivent d'Alger en continu. Le <b>carburant</b> et les <b>munitions</b> viennent du terrain : les villages et les <b>points de ravitaillement</b> sur les pistes (jerrican / cartouches) — les véhicules et les échelons demandent du carburant, les grenades et la Légion des munitions. Un point ne rapporte que s'il est <b>relié au poste</b> par une chaîne de points que vous tenez ; coupé, il passe à l'orange et ne rapporte rien.")}</li>
           <li>${t("<b>Gagnez un village</b> en y postant des hommes à pied. Son anneau se remplit vers celui qui a le plus d'hommes sur place.")}</li>
-          <li>${MAP.id === "aures" ? t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez la grotte du FLN</b> (nord-ouest) pour gagner sur-le-champ. <b>Perdez le poste</b> et tout est fini.")
+          <li>${(MAP.base ?? MAP.id) === "aures" ? t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez la grotte du FLN</b> (nord-ouest) pour gagner sur-le-champ. <b>Perdez le poste</b> et tout est fini.")
             : t("Chaque camp part de <b>500</b>. Celui qui tient <b>moins</b> de villages perd des points chaque seconde ; à 0, il a perdu. <b>Détruisez la grotte du FLN</b> pour gagner sur-le-champ. <b>Perdez le poste</b> et tout est fini.")}</li>
           <li>${t("Le <b>FLN</b> ne vous affrontera pas à découvert. Il travaille les villages en silence, tend des embuscades aux hommes isolés, mine les pistes, raide vos dépôts et regagne sa grotte. Tenez garnison, patrouillez, fortifiez.")}</li>
         </ul>`}

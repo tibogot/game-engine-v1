@@ -77,6 +77,8 @@ export default {
   "Les bases, une à une : la caméra, les ordres, la couverture, les points, le combat, la retraite, le poste. À faire en premier.": "The basics, one at a time: the camera, orders, cover, points, combat, retreat, the post. Play it first.",
   "Les Aurès — 1956": "The Aurès — 1956",
   "Bataille": "Battle",
+  "Les Aurès (ancien)": "The Aurès (old)",
+  "La première carte des Aurès, gardée telle quelle.": "The first Aurès map, kept as it was.",
   "Tenez plus de villages que le FLN dans le massif : un poste, quatre villages, une katiba qui frappe et disparaît.": "Hold more villages than the FLN in the massif: one post, four villages, a katiba that strikes and vanishes.",
   "Côte du Constantinois — août 1955": "The Constantinois coast — August 1955",
   "La plaine et la baie de Philippeville, la veille du soulèvement.": "The plain and the bay of Philippeville, on the eve of the uprising.",

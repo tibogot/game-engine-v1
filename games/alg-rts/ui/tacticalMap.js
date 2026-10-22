@@ -22,7 +22,7 @@ export function createTacticalMap({ app, create }) {
   back.id = "alg-tacmap-back";
   back.innerHTML = `
     <div class="sheet">
-      <div class="head"><span class="kicker">${MAP.id === "aures" ? t("Aurès · vallée de Tighanimine") : MAP.name}</span><span class="title">${t("Carte tactique")}</span></div>
+      <div class="head"><span class="kicker">${(MAP.base ?? MAP.id) === "aures" ? t("Aurès · vallée de Tighanimine") : MAP.name}</span><span class="title">${t("Carte tactique")}</span></div>
       <div class="map"></div>
       <div class="foot">${t("<kbd>Clic gauche</kbd> y aller · <kbd>Clic droit</kbd> y envoyer la sélection · <kbd>Tab</kbd> maintenu : un coup d'œil, tapé : reste ouverte · <kbd>Échap</kbd> fermer")}</div>
     </div>`;

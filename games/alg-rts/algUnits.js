@@ -321,7 +321,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   if (showroom?.frenchPost) {
     const g = showroom.frenchPost.geometry.userData.gate;
     producers.push(createAlgProducer({
-      mesh: showroom.frenchPost, units, typeKey: "post", name: MAP.id === "aures" ? t("Poste de Tighanimine") : (LAYOUT.sites.find((s) => s.kind === "french")?.name ?? t("Poste")), maxHp: 2000,
+      mesh: showroom.frenchPost, units, typeKey: "post", name: (MAP.base ?? MAP.id) === "aures" ? t("Poste de Tighanimine") : (LAYOUT.sites.find((s) => s.kind === "french")?.name ?? t("Poste")), maxHp: 2000,
       builds: PRODUCTION.post,
       // In the courtyard behind the gate; out through the arch; the muster.
       inside: [0, g.z + 4.5 * S], outside: [0, g.z - 3.2 * S], rally: muster,

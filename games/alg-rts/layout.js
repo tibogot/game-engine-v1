@@ -12,8 +12,9 @@ import * as training from "./maps/training.js";
 import * as kantara from "./maps/kantara.js";
 import * as abdi from "./maps/abdi.js";
 import * as maquis from "./maps/maquis.js";
+import * as auresNew from "./maps/auresNew.js";
 
-const MAPS = { aures, coast, training, kantara, abdi, maquis };
+const MAPS = { aures, coast, training, kantara, abdi, maquis, auresNew };
 const asked = typeof location !== "undefined" ? new URLSearchParams(location.search).get("map") : null;
 if (asked && !MAPS[asked]) console.warn(`[alg] no map "${asked}" — the Aurès (maps: ${Object.keys(MAPS).join(", ")})`);
 const M = MAPS[asked] ?? aures;

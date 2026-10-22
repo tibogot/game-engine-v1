@@ -168,8 +168,12 @@
       };
       // The battle maps (layout.js ?map=; the Aurès: none). `ready: false` shows it, greyed, with its tag.
       const MAPS = [
-        { map: null, ready: true, title: t("Les Aurès — 1956"), sub: t("Bataille"), art: "/games/alg-rts/loading/aures-descente.webp",
+        // THE NEW AURÈS (2026-10-22, maps/auresNew.js): the same ground, its villages rebuilt from the new house kits;
+        // the old one stays below, as it was (the legacy map)
+        { map: "auresNew", ready: true, title: t("Les Aurès — 1956"), sub: t("Bataille"), art: "/games/alg-rts/loading/aures-descente.webp",
           d: t("Tenez plus de villages que le FLN dans le massif : un poste, quatre villages, une katiba qui frappe et disparaît.") },
+        { map: null, ready: true, title: t("Les Aurès (ancien)"), sub: t("Bataille"), art: "/games/alg-rts/loading/aures-descente.webp",
+          d: t("La première carte des Aurès, gardée telle quelle.") },
         // (its card: your Midjourney art, assets-src/menu/coast-philippeville.png, cut to 640 px). Playable
         // from the menu while it is built (2026-10-13, you: "easier for me to access it") — its layout to come.
         { map: "coast", ready: true, title: t("Côte du Constantinois — août 1955"), sub: t("Bataille"), art: "/games/alg-rts/menu/maps/coast-philippeville.webp",
