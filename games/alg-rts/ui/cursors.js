@@ -76,6 +76,11 @@ export function installCursorStyle() {
     html, body, *:not(canvas) { cursor: ${ARROW} !important; }
     /* The canvas: not !important, so a mode's inline cursor (the red sight, the house) wins. */
     canvas { cursor: ${ARROW}; }
+    /* NO-GO (2026-10-22, CoH): your arrow with a red slashed circle — ground the selection can't reach
+       (algCoverCursor.js); the small mark: some of it can't. A CLASS, not an inline cursor: a mode's
+       cursor still wins, and the edge scroll (it stands down under an inline one) keeps working. */
+    canvas.alg-nogo { cursor: url("/games/alg-rts/cursors/nogo.svg") 9 7, not-allowed; }
+    canvas.alg-nogo-part { cursor: url("/games/alg-rts/cursors/nogo-part.svg") 9 7, default; }
     /* THE HAND on everything that takes a click (and what it holds: an icon inside a button). */
     ${CLICKABLE.map((c) => `${c}, ${c} *`).join(", ")} { cursor: ${HAND} !important; }
     /* A locked or cooling-down button takes no click: the arrow. */

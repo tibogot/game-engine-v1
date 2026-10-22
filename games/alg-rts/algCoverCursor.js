@@ -12,6 +12,8 @@
 // enemy, a house to garrison), while placing a building, over the HUD, or with only vehicles
 // selected (cover is the infantry's).
 
+import { isHuman } from "../shared-rts/teams.js";
+
 export const COVER_CURSOR = {
   snap: [1.6, 3.2],   // m: the rings searched round each spot
   dirs: 8,            // directions on each ring
@@ -83,6 +85,28 @@ export function createAlgCoverCursor({ app, selection }) {
 
   const hide = () => { if (shown) { app.algOrderMarks?.preview(null); shown = false; } };
 
+  // ── NO-GO (2026-10-22, you: "the user might not understand why … it gets blocked in the no-go area") ──────
+  // With your units selected, over ground they can't reach — blocked for their kind (a cliff, deep water, a
+  // building's footprint) or cut off from where they stand (a shelf with no way up: the nav grid's regions,
+  // two lookups, no search) — the cursor is your arrow with a red slashed circle; the small mark when only some
+  // of them can't (a jeep among men, a footbridge). The order itself already goes to the nearest reachable spot
+  // (selection.js formationAt), and the rings below show where.
+  let nogo = "";
+  const setNoGo = (k) => {
+    if (k === nogo) return;
+    dom.classList.remove("alg-nogo", "alg-nogo-part");
+    if (k) dom.classList.add(k === "all" ? "alg-nogo" : "alg-nogo-part");
+    nogo = k;
+  };
+  /** Can ground unit u reach (x, z)? (one per kind and place asked: men and vehicles, where they stand) */
+  function reaches(u, x, z) {
+    const nav = app.navGrid;
+    if (!nav?.isBlockedAtWorld) return true;
+    const foot = !!u.type?.foot;
+    if (nav.isBlockedAtWorld(x, z, foot)) return false;
+    return nav.sameRegion ? nav.sameRegion(u.position.x, u.position.z, x, z) : true;
+  }
+
   /** Each frame: refresh the marks every `everyMs` while it should show. */
   function frame() {
     const now = performance.now();
@@ -90,8 +114,16 @@ export function createAlgCoverCursor({ app, selection }) {
     t = now;
     const sel = selection.selected ?? [];
     const busy = !overCanvas || buttons !== 0 || dom.style.cursor || app.algBuild?.placing || app.algTacMap?.open;
+    const movers = busy ? [] : sel.filter((u) => u.alive && !u.isStructure && !u.isAir && isHuman(u.team));
+    const hit = movers.length ? app.pickWorldAtClient?.(px, py) : null;
+    if (hit?.point) {
+      // (a few representatives: the first man and the first vehicle of each group standing apart)
+      const reps = [];
+      for (const u of movers) if (reps.length < 6 && !reps.some((r) => !!r.type?.foot === !!u.type?.foot && Math.hypot(r.position.x - u.position.x, r.position.z - u.position.z) < 40)) reps.push(u);
+      const ok = reps.filter((u) => reaches(u, hit.point.x, hit.point.z)).length;
+      setNoGo(ok === reps.length ? "" : ok === 0 ? "all" : "part");
+    } else setNoGo("");
     if (busy || !sel.some((u) => u.alive && u.type?.foot && !u.isStructure)) { hide(); return; }
-    const hit = app.pickWorldAtClient?.(px, py);
     if (!hit?.point) { hide(); return; }
     const { arr, slots } = selection.previewMove(hit.point.x, hit.point.z);
     const spots = [];
@@ -102,6 +134,6 @@ export function createAlgCoverCursor({ app, selection }) {
 
   return {
     params: P, adjustSlots, frame, hide,
-    dispose() { window.removeEventListener("pointermove", onMove); dom.removeEventListener("pointerleave", onLeave); hide(); },
+    dispose() { window.removeEventListener("pointermove", onMove); dom.removeEventListener("pointerleave", onLeave); hide(); setNoGo(""); },
   };
 }
