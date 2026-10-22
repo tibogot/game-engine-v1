@@ -22,6 +22,11 @@ export function createLandingJudge(car) {
   let pending = null; // { err, air, t }: touched down, waiting for the other wheels
   const n = { x: 0, y: 0, z: 0 };
   const wheels = () => Math.min(4, car.tires.length);
+  // A WHEEL IS DOWN when it carries load (its spring compressed), not when its probe first sees the road:
+  // the probe reaches ~1.6 m and turns true 58-92 ms before the tyre touches, so the angle was graded
+  // in the air and the rough-landing cut applied there (the physics review, 2026-10-23). Same test as
+  // the car's own landing assist (Vehicle._isSupported).
+  const loaded = () => { let n = 0; for (const t of car.tires) if (t.grounded && t.compression > 0) n++; return n; };
   function finish(p, partial) {
     pending = null;
     let grade = p.err <= LANDING.perfect ? "perfect" : p.err > LANDING.rough ? "rough" : "ok";
@@ -33,25 +38,26 @@ export function createLandingJudge(car) {
     get air() { return air; },
     reset() { air = 0; pending = null; },
     tick(dt) {
+      const down = loaded();
       if (pending) {
-        if (car.groundedCount === 0) { const ev = finish(pending, true); air = dt; return ev; } // bounced off
+        if (down === 0) { const ev = finish(pending, true); air = dt; return ev; } // bounced off
         pending.t += dt;
-        if (car.groundedCount >= wheels()) return finish(pending, false);
+        if (down >= wheels()) return finish(pending, false);
         return pending.t >= LANDING.settle ? finish(pending, true) : null;
       }
-      if (car.groundedCount === 0) { air += dt; return null; }
+      if (down === 0) { air += dt; return null; }
       const flew = air;
       air = 0;
       if (flew < LANDING.minAir) return null;
       // the surface the first tyres found (raw contact normal) vs the car's up
       n.x = n.y = n.z = 0;
-      for (const t of car.tires) if (t.grounded) { n.x += t._rawNormal.x; n.y += t._rawNormal.y; n.z += t._rawNormal.z; }
+      for (const t of car.tires) if (t.grounded && t.compression > 0) { n.x += t._rawNormal.x; n.y += t._rawNormal.y; n.z += t._rawNormal.z; }
       const q = car.body.quat; // car up = (0,1,0) rotated by q
       const ux = 2 * (q.x * q.y - q.w * q.z), uy = 1 - 2 * (q.x * q.x + q.z * q.z), uz = 2 * (q.y * q.z + q.w * q.x);
       const len = Math.hypot(n.x, n.y, n.z) || 1;
       const err = (Math.acos(Math.max(-1, Math.min(1, (ux * n.x + uy * n.y + uz * n.z) / len))) * 180) / Math.PI;
       pending = { err, air: flew, t: 0 };
-      return car.groundedCount >= wheels() ? finish(pending, false) : null;
+      return down >= wheels() ? finish(pending, false) : null;
     },
   };
 }

@@ -154,14 +154,14 @@ function settingsScreen() {
     <div class="keys">
       <span><kbd>W</kbd><kbd>S</kbd> / <kbd>↑</kbd><kbd>↓</kbd></span><span>throttle / brake</span>
       <span><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd></span><span>steer</span>
-      <span><kbd>Shift</kbd> <kbd>Ctrl</kbd></span><span>pitch in the air (nose up / down)</span>
+      <span><kbd>Shift</kbd> <kbd>C</kbd></span><span>pitch in the air (nose up / down)</span>
       <span><kbd>Q</kbd> <kbd>E</kbd></span><span>spin in the air</span>
       <span><kbd>Z</kbd> <kbd>X</kbd></span><span>roll in the air</span>
       <span><kbd>Space</kbd></span><span>handbrake</span>
       <span><kbd>Backspace</kbd></span><span>last checkpoint, keeping your speed (twice: standing)</span>
       <span><kbd>R</kbd> <kbd>Delete</kbd></span><span>restart</span>
       <span><kbd>M</kbd></span><span>sound on / off</span>
-      <span><kbd>C</kbd></span><span>free camera: drag to orbit the car, wheel to zoom, <kbd>T</kbd> slow motion / pause</span>
+      <span><kbd>F</kbd></span><span>free camera: drag to orbit the car, wheel to zoom, <kbd>T</kbd> slow motion / pause</span>
       <span><kbd>Esc</kbd></span><span>back</span>
     </div></div>`;
   for (const t of document.querySelectorAll(".toggle")) t.onclick = () => { settings.set({ [t.dataset.key]: !settings.get()[t.dataset.key] }); settingsScreen(); };

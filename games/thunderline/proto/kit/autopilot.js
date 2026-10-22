@@ -200,7 +200,8 @@ export function createAutopilot(ride) {
         else { yaw = k(yawE); pitch = k(pitchE); roll = k(rollE); }
         airAim = { at: ride.indexOf(n), yawE, pitchE, rollE }; // what it is lining up with (tests read it)
       }
-      return wallCut(car, { steerTarget: steer, rollTarget: roll, throttle, handbrake: false, yaw, pitch, analog: true });
+      // (no wall cut of its own: carRules applies it, in bowls and quarter pipes only — 2026-10-23)
+      return { steerTarget: steer, rollTarget: roll, throttle, handbrake: false, yaw, pitch, analog: true };
     },
   };
 }

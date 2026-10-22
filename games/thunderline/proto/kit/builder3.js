@@ -13,7 +13,7 @@ import { startV3App } from "../../../../v3/engine.js";
 import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, DEG, ensureTile, ADJUSTABLE, adjustableId, parseAdjustable } from "./kit.js";
 import { buildOldLook, createOldLookMaterials, edgesOf } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
-import { createCarRules, magnetZones, JUMP } from "./carRules.js";
+import { createCarRules, magnetZones, wallCutZones, JUMP } from "./carRules.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
@@ -54,7 +54,7 @@ const GRID_STEPS = [1, 2, 4, 8];
 // ramps, loop, obstacles"): one home per piece, by what kind of road it is — our own dock and look
 const CATS = [
   // the race's own things: where it starts and ends, what it hands the car
-  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "air_ring", "ob_boost", "ob_jump"] }, // (boost_32 left the palette, user 2026-10-22: the Boost pad does it; old tracks keep it)
+  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "test_car", "air_ring", "ob_boost", "ob_jump"] }, // (boost_32 left the palette, user 2026-10-22: the Boost pad does it; old tracks keep it)
   { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
@@ -140,6 +140,13 @@ for (const id of ["flip_ramp_std", "flip_ramp_s", "start_line", "finish_line"]) 
 // FAST edge of the band — the line of a full-speed take-off — so it tests the take-off: hit the lip at
 // speed, on the right line (in the air the car only rotates; nothing there changes where it flies).
 const RING = "air_ring";
+// THE TEST CAR (user, 2026-10-22: "a way to spawn the car anywhere I want so I don't have to redo the whole
+// track to test a piece … use a ghost car for that"): a hologram of the car laid on a road like an obstacle
+// (track.spawn = { on, s, lat, yaw, kmh }: it goes where its piece goes), Q/E turn it, its START SPEED in the
+// panel. Drive starts there at that speed; R again from it, Delete from the start line.
+const SPAWN = "test_car";
+const SPAWN_SPEEDS = [0, 50, 100, 150, 200, 250];
+let carHolo = null; // { geometry, material } once the car model is in (rig.carHologram)
 const RING_R = 5.5;
 const ringGateOf = (pc) => {
   const M = new THREE.Matrix4().fromArray(pc.M);
@@ -153,13 +160,13 @@ const adjDefaults = (base) => Object.fromEntries(Object.entries(ADJUSTABLE[base]
 const adjParams = Object.fromEntries(Object.keys(ADJUSTABLE).map((b) => [b, adjDefaults(b)]));
 const tileId = (base, h = hand) => {
   if (ADJUSTABLE[base]) return ensureTile(adjustableId(base, adjParams[base], ADJUSTABLE[base].hand ? h : 1)).id;
-  if (base === RING || isObstacle(base) || base === STAMP) return base;
+  if (base === RING || isObstacle(base) || base === STAMP || base === SPAWN) return base;
   if (base === FITTED) return fittedId;
   if (base === CATCH) return catchId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === CATCH ? "Catch tube" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const tileLabel = (base) => (base === SPAWN ? "Test car" : ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === CATCH ? "Catch tube" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
 const thumbOf = (id) => (parseAdjustable(id) ? parseAdjustable(id).base : id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === CATCH || id.startsWith("catch_tube_") ? "tube_in" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
@@ -271,14 +278,16 @@ function thumbSetup() {
   return (thumbKit = { W, H, rt, ts, cam, cvs, ctx: cvs.getContext("2d") });
 }
 /** Whether a dock piece's picture depends on the rails (not obstacles, rings, tubes, half-pipes). */
-const railsMatter = (id) => id !== RING && !isObstacle(id) && id !== CATCH && !TILES[id]?.tube && !TILES[id]?.halfpipe;
+const railsMatter = (id) => id !== RING && id !== SPAWN && !isObstacle(id) && id !== CATCH && !TILES[id]?.tube && !TILES[id]?.halfpipe;
 async function renderThumb(id, open) {
   const { W, H, rt, ts, cam, ctx, cvs } = thumbSetup();
   const pid = id === FITTED_BOWL ? "bowl_110" : ADJUSTABLE[id] ? ensureTile(adjustableId(id, adjDefaults(id))).id : id; // a typical one
-  const g = id === RING
+  const g = id === SPAWN
+    ? new THREE.Group().add(new THREE.Mesh(carHolo?.geometry ?? new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), carHolo?.material ?? ghostMat))
+    : id === RING
     ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
     : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, open);
-  const t = id === RING || isObstacle(id) ? {} : ensureTile(pid);
+  const t = id === RING || isObstacle(id) || id === SPAWN ? {} : ensureTile(pid);
   if (t.start || t.finish) g.add(lineGate({ id: pid }, new THREE.Matrix4(), open)); // its gantry, as on the track
   if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
   ts.add(g);
@@ -528,6 +537,19 @@ function rebuild() {
   // Those on a piece are laid on it again first (it may have moved or changed: roadSnapAt)
   relayProps();
   obstacleSet = buildObstacleSet(track.props ?? []);
+  // THE TEST CAR: re-laid on its piece (gone with it)
+  if (track.spawn) {
+    const m = spawnFrame();
+    if (!m) delete track.spawn;
+    else {
+      const holo = new THREE.Mesh(carHolo?.geometry ?? new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), carHolo?.material ?? ghostMat);
+      holo.matrixAutoUpdate = false;
+      holo.matrix.copy(m);
+      holo.renderOrder = 12;
+      holo.userData.spawn = true;
+      trackGroup.add(holo);
+    }
+  }
   for (const vis of obstacleSet.group.children.slice()) {
     trackGroup.add(vis);
     const M = vis.matrix.clone();
@@ -751,7 +773,8 @@ async function runPrediction() {
   const nose = new THREE.Vector3();
   const pilot = createAutopilot(avoidObstacles(ride, track.props)); // the drive page's autopilot (wall cut, air spin), its line round the obstacles
   const magnets = magnetZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), TILES, integrate);
-  const rules = createCarRules(car, { boostPads: boosts, magnets }); // the drive page's rules: wall cut, landing boost, pads, magnets
+  const cutZones = wallCutZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), Object.fromEntries(order.map((pc) => [pc.id, { b: piece(pc.id, pcOE(pc)).b }])));
+  const rules = createCarRules(car, { boostPads: boosts, magnets, cutZones }); // the drive page's rules: wall cut (bowls, quarter pipes), landing boost, pads, magnets
   // the air rings, judged by the race's own rule (race.js): through the hoop or missed
   const ringGates = track.pieces.filter(isRing).map(ringGateOf);
   const ringRace = ringGates.length ? createRace({ gates: [...ringGates, { kind: "finish", P: new THREE.Vector3(1e9, 1e9, 1e9), T: UP.clone(), U: new THREE.Vector3(1, 0, 0), hw: 0 }], countdown: 0 }) : null;
@@ -1167,6 +1190,21 @@ function obstacleSnap() {
   const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
   return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
 }
+/** The test car in hand: on a road only (it drives from there), 2 m steps across, Q/E turn. */
+function spawnSnap() {
+  ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
+  const on = roadUnder(ray.intersectObjects(trackGroup.children, true));
+  if (!on) return null;
+  const sn = roadSnapAt(on.pc, SPAWN, on.s, on.raw, rot.yaw);
+  const kmh = track.spawn?.kmh ?? 0;
+  return { ...sn, note: `Test car · drives from here${kmh ? ` at ${kmh} km/h` : ", standing"}${rot.yaw ? ` · turned ${rot.yaw}°` : ""} · <kbd>Q</kbd>/<kbd>E</kbd> turn` };
+}
+/** The test car's frame on its road (null if its piece is gone). */
+function spawnFrame() {
+  const sp = track.spawn;
+  const pc = sp && track.pieces.find((q) => q.uid === sp.on && !isRing(q));
+  return pc && built.has(pc.uid) ? roadSnapAt(pc, SPAWN, sp.s, sp.lat, sp.yaw ?? 0).m : null;
+}
 /** The first road piece among ray hits, and where on it: distance along its path, offset across its deck. */
 function roadUnder(hits) {
   for (const h of hits) {
@@ -1438,6 +1476,7 @@ function downAt(arc, y) {
 const reachNote = (a, sMin) => `lands from ${Math.round(a.lip.v * sMin * 3.6)} km/h (full speed ${Math.round(a.lip.v * 3.6)}) — slower falls short`;
 const ROUGH_FALL = 22; // °: steeper than this onto flat needs the player to level the car (else rough)
 function computeSnap() {
+  if (tileBase === SPAWN) return spawnSnap();
   if (tileBase === RING) return ringSnap();
   if (OBSTACLES[tileBase]?.air) return wallHoleSnap();
   if (isObstacle(tileBase)) return obstacleSnap();
@@ -1657,7 +1696,7 @@ function updateGhost() {
   if (key !== lastKey || ghostDirty) {
     lastKey = key; ghostDirty = false;
     if (ghost) scene.remove(ghost);
-    ghost = id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(shapeOf(id, snap).ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
+    ghost = id === SPAWN ? new THREE.Mesh(carHolo?.geometry ?? new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), ghostMat) : id === STAMP ? stampGhost() : isObstacle(id) ? new THREE.Mesh(shapeOf(id, snap).ghost, ghostMat) : id === RING ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0] : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
     ghost.matrix.copy(snap.m);
@@ -1726,6 +1765,14 @@ function place() {
   snapshot();
   const uid = track.nextUid++;
   const id = tileId(tileBase);
+  if (id === SPAWN) {
+    track.nextUid--;
+    track.spawn = { on: snap.extra.on, s: snap.extra.s, lat: snap.extra.lat, yaw: snap.extra.yaw ?? 0, kmh: track.spawn?.kmh ?? 0 };
+    tileBase = null; // one test car: placed, the tool is put down
+    renderDock();
+    rebuild();
+    return;
+  }
   if (id === RING) {
     track.pieces.push({ uid, id, ring: true, cp: true, M: snap.m.toArray(), parent: null, flightFrom: snap.from });
     rebuild();
@@ -2297,12 +2344,12 @@ function renderStatus() {
   const many = !tileBase ? selection() : [];
   const multi = many.length > 1;
   const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [freeHold, snap?.type, snap?.bad, snap?.where, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length].join("|");
+  const k = [freeHold, snap?.type, snap?.bad, snap?.where, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length, JSON.stringify(track.spawn ?? null)].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
-    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
+    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP || tileBase === SPAWN ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
     (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` +
       (multiRoads() ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div><div class="row"><span>The roads they are part of move and turn together</span></div>` : "") : "") +
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
@@ -2311,6 +2358,10 @@ function renderStatus() {
       ? `<div class="acts"><button data-act="lapline" class="${lapLineOn ? "on" : ""}">Test lap line ${lapLineOn ? "on" : "off"} <kbd>L</kbd></button></div>` +
         (lapLineOn ? `<div class="legend">The test car: blue slow → white fast, dashed in the air · red: hits, falls · orange: hard braking, rough landing</div>` : "")
       : "") +
+    // THE TEST CAR: placed → its speed and a remove, whenever nothing else is in hand
+    ((track.spawn && !multi && (!tileBase || tileBase === SPAWN))
+      ? `<div class="acts"><button data-act="spawnkmh" title="The speed the drive starts at (click: next)">Test car · ${track.spawn.kmh ? `${track.spawn.kmh} km/h` : "standing"}</button><button data-act="spawndel">Remove test car</button></div><div class="legend">Drive (Tab) starts from it · <kbd>R</kbd> again · <kbd>Del</kbd> from the start line</div>`
+      : tileBase === SPAWN ? `<div class="legend">Click a road: the drive starts there · <kbd>Q</kbd>/<kbd>E</kbd> turn it</div>` : "") +
     (tileBase === STAMP ? `<div class="row"><span>Snaps like its first piece · R mirrors it · it stays in hand</span></div>` : "") +
     (isObstacle(tileBase) ? `<div class="row"><span>${OBSTACLES[tileBase].hint} · ${obstacleHow(tileBase)}</span></div>` : "") +
     (tileBase && !isObstacle(tileBase) && tileBase !== RING ? `<div class="row"><span>${freeHold ? "<b>FREE</b> · " : ""}<kbd>Alt</kbd> free · <kbd>Ctrl</kbd>+wheel turn · <kbd>Shift</kbd>+wheel height · <kbd>H</kbd> match height · arrows tilt · <kbd>0</kbd> level</span></div>` : "") +
@@ -2362,6 +2413,8 @@ function renderStatus() {
 $("status").addEventListener("click", (e) => {
   const act = e.target.closest?.("button")?.dataset.act;
   if (act === "lapline") { setLapLine(!lapLineOn); return; }
+  if (act === "spawnkmh" && track.spawn) { const i = SPAWN_SPEEDS.indexOf(track.spawn.kmh ?? 0); track.spawn.kmh = SPAWN_SPEEDS[(i + 1) % SPAWN_SPEEDS.length]; save(); statusKey = ""; renderStatus(); return; }
+  if (act === "spawndel" && track.spawn) { snapshot(); delete track.spawn; rebuild(); statusKey = ""; renderStatus(); return; }
   if (act === "refit") { refitLandings(); return; }
   if (!act || sel == null) return;
   const adjA = /^adj:(\w+):(-?1)$/.exec(act);
@@ -2563,14 +2616,14 @@ function renderHand() {
   handKey = k;
   const off = free ? "" : " off";
   el.innerHTML =
-    `<span class="nm">${TILES[id]?.label ?? id}</span>` +
+    `<span class="nm">${tileBase === SPAWN ? tileLabel(SPAWN) : TILES[id]?.label ?? id}</span>` +
     // an ADJUSTABLE piece's own settings first (the ghost follows them)
     (tileBase === FITTED ? `<div class="gp"><span>Land tilt</span><button data-a="tl" title="Left side low (←)">↶</button><b>${landTilt ? `${Math.abs(landTilt)}° ${landTilt > 0 ? "R" : "L"}` : "flat"}</b><button data-a="tr" title="Right side low (→)">↷</button></div>` : "") +
     (adj ? Object.entries(adj.params).map(([pk, q]) => `<div class="gp"><span>${q.label}</span><button data-a="p-${pk}" title="Less (Shift: ×4)">◀</button><b>${adjShow(q, adjParams[tileBase][pk])}</b><button data-a="p+${pk}" title="More (Shift: ×4)">▶</button></div>`).join("") : "") +
-    `<div class="gp${off}" title="${free ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
-    `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
+    `<div class="gp${tileBase === SPAWN ? "" : off}" title="${free || tileBase === SPAWN ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
+    (tileBase === SPAWN ? "" : `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
     `<div class="gp${off}"><span>Tilt</span><button data-a="pd" title="Nose down (↓)">⤓</button><b>${rot.pitch}°</b><button data-a="pu" title="Nose up (↑)">⤒</button></div>` +
-    `<div class="gp${off}"><span>Bank</span><button data-a="rl" title="Bank left (←)">↶</button><b>${rot.roll}°</b><button data-a="rr" title="Bank right (→)">↷</button></div>` +
+    `<div class="gp${off}"><span>Bank</span><button data-a="rl" title="Bank left (←)">↶</button><b>${rot.roll}°</b><button data-a="rr" title="Bank right (→)">↷</button></div>`) +
     (mirror ? `<div class="gp"><span>Side</span><button data-a="L" class="${hand < 0 ? "on" : ""}" title="Left-hand version (R)">L</button><button data-a="R" class="${hand > 0 ? "on" : ""}" title="Right-hand version (R)">R</button></div>` : "") +
     (free && (rot.yaw || rot.pitch || rot.roll) ? `<button data-a="z" title="Straighten">Reset</button>` : "") +
     `<button class="x" data-a="x" title="Put the piece down (Esc)">✕</button>`;
@@ -2607,10 +2660,18 @@ function renderHand() {
 // the start in a second; Esc / B brings you back to building, the camera where you left it. The page
 // reload each way cost ~30 s since the builder runs on the engine.
 const rig = createDriveRig(app, { prefs: settings.get(), car: settings.get().car });
+// the TEST CAR's hologram: the car itself, once its model is in (its card, the one in hand, the placed one)
+rig.modelsReady.then(() => {
+  carHolo = rig.carHologram();
+  if (!carHolo) return;
+  ghostDirty = true;
+  if (track.spawn) rebuild();
+  renderThumb(SPAWN, false).then(renderDock);
+});
 let driving = false;
 const builderUi = ["toolbar", "keys", "steps", "status", "next", "dock", "nav"];
 let saved = null;
-const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <b style="color:#3fd2ff"><kbd>Esc</kbd> back to building</b>`;
+const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Esc</kbd> back to building</b>`;
 async function startDrive() {
   if (driving || !orderedPieces().length) return;
   save();
@@ -2626,8 +2687,10 @@ async function startDrive() {
   camera.updateProjectionMatrix();
   // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
   const selRoad = track.pieces.find((p) => p.uid === sel && !isRing(p)); // (not an obstacle or a ring)
-  const from = selRoad ? built.get(sel)?.M ?? null : null;
-  await rig.start({ track, trackId, from, noTimer: !timerOn, autoFinish: false, fallReset: false, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  // the TEST CAR wins: exactly where it stands, at its speed
+  const spawnM = spawnFrame();
+  const from = spawnM ?? (selRoad ? built.get(sel)?.M ?? null : null);
+  await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, autoFinish: false, fallReset: false, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
 }
 function stopDrive() {
   if (!driving) return;

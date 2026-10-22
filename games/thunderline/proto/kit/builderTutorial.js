@@ -74,7 +74,7 @@ const STEPS = [
   },
   {
     k: "Test it", title: "Drive",
-    text: "Add a straight after the landing, then press <b>Drive ▶</b> (or <kbd>Tab</kbd>). <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive, <kbd>Space</kbd> handbrake; in the air <kbd>Shift</kbd> / <kbd>Ctrl</kbd> pitch and <kbd>Z</kbd> / <kbd>X</kbd> roll — land flat for a boost. <kbd>Esc</kbd> comes back here.",
+    text: "Add a straight after the landing, then press <b>Drive ▶</b> (or <kbd>Tab</kbd>). <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> drive, <kbd>Space</kbd> handbrake; in the air <kbd>Shift</kbd> / <kbd>C</kbd> pitch and <kbd>Z</kbd> / <kbd>X</kbd> roll — land flat for a boost. <kbd>Esc</kbd> comes back here.",
     tip: "Timer off (the toolbar) drives at once; on, it is the real race.",
     hi: ["#b-drive"],
     done: (api, c) => { if (api.driving) c.drove = true; return c.drove && !api.driving; },

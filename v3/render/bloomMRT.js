@@ -17,7 +17,11 @@ import { output, vec4 } from "three/tsl";
  * the emissive MRT buffer, so a material glows only if it writes to it — unlit
  * (MeshBasicNodeMaterial) materials must opt in through this node.
  */
-export class BloomMRTNode extends THREE.MRTNode {
+// (THREE.MRTNode is a WebGPU-build class: in Node — the kit's physics sims import game modules that use
+// this file — plain "three" has none, and extending undefined threw at load. There, a stand-in, and
+// applyBloomMRT does nothing: no renderer, no bloom.)
+const MRTBase = THREE.MRTNode ?? class {};
+export class BloomMRTNode extends MRTBase {
   static get type() { return "BloomMRTNode"; }
 
   setup(builder) {
@@ -32,6 +36,7 @@ export class BloomMRTNode extends THREE.MRTNode {
 
 /** Write `emissiveNode` into the emissive MRT buffer so this material blooms. */
 export function applyBloomMRT(material, emissiveNode) {
+  if (!THREE.MRTNode) return material;
   material.mrtNode = new BloomMRTNode({ emissive: emissiveNode });
   return material;
 }

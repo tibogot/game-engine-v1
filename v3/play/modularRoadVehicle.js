@@ -4780,6 +4780,19 @@ export class Vehicle {
     this._clearStuck();
     this._crashYield = 0;
     this._crashMover = false;
+    // A RESPAWN IS A FULL RESET (Thunderline's physics review, 2026-10-23): these leaked across it —
+    // an airborne respawn was turned toward the OLD heading (up to 2 rad/s), the tube / loop press faded
+    // out over the first grounded ticks, a roof or lid hold and the steer rack carried over. Each back to
+    // its constructor value.
+    this._holdHeading = null;
+    this._sgMag = 0;
+    this._roofGuard = 0;
+    this._terrainLidHold = 0;
+    this._gripLimitMix = 1;
+    this._turnAssistMix = 0;
+    this.landImpact = 0;
+    this.input.steer = 0;
+    if ("airSteer" in this.input) this.input.airSteer = 0;
     this._resetInterpolation();
     // Keep the render pose in step with the teleport (syncVisuals hasn't run yet).
     this._renderPos.copy(this.body.pos);

@@ -395,6 +395,31 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
       after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
       bank / in a tube.
+- [x] **PHYSICS REVIEW FIXES** (2026-10-23, from the review of the car; user: "check any physics and
+      anything about the car"):
+      1. NOSE DOWN on C, not Ctrl (Ctrl+W with the throttle closed the tab); the FREE CAMERA back on F.
+      2. NO ENGINE UP A WALL only in BOWLS and QUARTER PIPES (carRules wallCutZones; the autopilot no longer
+         cuts on its own): it cut ~a third of every loop and flip ramps. Loop A/B: exit 182 km/h (the old
+         rule never got the car back upright in the measure), lap top 170 → 197 km/h; White 3 (bowl_115)
+         still clean: 41.41 s, 2 perfect landings.
+      3. LANDINGS GRADED ON LOAD (landing.js: a wheel is down when its spring is compressed, as the car's
+         own assist): the probe turned true up to 1.6 m / 60-90 ms before the tyre. landingTest: lined up
+         1-4° perfect, hands off 6-10° ok, crooked 89° rough.
+      4. A RESPAWN IS A FULL RESET (Vehicle.respawnAt, shared engine): heading hold, tube/loop press, roof /
+         lid holds, assist mixes, land impact, steer. Ghost still deterministic; full suite green.
+      Also: the bloom helper loads in Node again (ghostTest / landingTest crashed since the tube material).
+      OPEN from the review: analog throttle/brake (pad triggers act as buttons), the pad's Back = restart,
+      pitch levelling on landing, slower pitch response than roll, a drift reward, a player boost, untested
+      above 90 m/s (boost pads, long falls).
+- [ ] **FIRST-PERSON VIEW** (user, 2026-10-23: "some users prefer this view") — a camera switch (V is taken
+      by the free camera's frame; pick a key), the cockpit or a bonnet view.
+- [x] **TEST CAR + RESTART KEYS** (user, 2026-10-23: "a key that restarts the drive to the start line and a way
+      to spawn the car anywhere … use a ghost car"): Game tab → Test car, laid on a road like an obstacle
+      (track.spawn {on, s, lat, yaw, kmh}: follows its piece, gone with it), Q/E turn; drawn as the car's own
+      hologram (rig.carHologram: the parked car baked into one mesh, piece frame). Panel: its start speed
+      (click: 0/50/100/150/200/250 km/h), Remove. Drive (Tab) starts there at that speed (rig.start fromExact
+      + fromKmh); in the drive R = again from it, Delete = the start line standing. Checked: spawns at the car
+      (z −72), nose along the road, 149 km/h; R back there at 150; Delete on the line at 0.
 - [x] **TYRE SMOKE, in the game** (user, 2026-10-22: "the best looking AAA tyre smoke"): kit/tyreSmoke.js, on
       litSmoke's six-way book + motion-vector frames, one instanced draw (pool 1024). Emitted by each wheel's
       real slip (slide, handbrake, wheelspin / locked brakes; front wheels 0.6×); laid along the wheel's path

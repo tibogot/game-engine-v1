@@ -20,7 +20,7 @@ import { makeGateMesh } from "./gateMesh.js";
 import { library, campaign, contentKey, settings } from "../../app/library.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune, CAR_TUNE } from "./carTune.js";
-import { createCarRules, magnetZones } from "./carRules.js";
+import { createCarRules, magnetZones, wallCutZones } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
 import { createEngineModel } from "./engineModel.js";
 import { createEngineSound } from "./engineSound.js";
@@ -201,16 +201,16 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
    * The wheels stay separate (they spin).
    */
   const GHOST_SKIP = /(_int|interior|steering|cab_|glass|lens)/i;
-  function mergeGhostBody(v) {
-    const root = v._chassisGlb;
-    if (!root) return 0;
-    root.updateMatrixWorld(true);
-    const inv = root.matrixWorld.clone().invert();
+  /** The visible body meshes under `root` baked into ONE float geometry in the frame `inv` maps world into
+   * (interior, glass and the ShadowProxy left out); `hide` hides the originals. */
+  function bakeCar(root, inv, hide, near = null) {
     const parts = [];
+    const _w = new THREE.Vector3();
     root.traverse((o) => {
-      if (!o.isMesh || o.isInstancedMesh || !o.visible) return;
+      if (!o.isMesh || o.isInstancedMesh || !o.visible || o.name === "GhostBody") return;
+      if (near && o.getWorldPosition(_w).distanceTo(near) > 6) return; // (helpers drawn in world space)
       const names = [o.name, o.parent?.name, ...[].concat(o.material).map((m) => m?.name)].join(" ");
-      if (/ShadowProxy/i.test(names) || GHOST_SKIP.test(names)) { o.visible = false; return; }
+      if (/ShadowProxy/i.test(names) || GHOST_SKIP.test(names)) { if (hide) o.visible = false; return; }
       parts.push(o);
     });
     let nv = 0, ni = 0;
@@ -230,17 +230,48 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (g.index) for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.getX(i) + vo;
       else for (let i = 0; i < P.count; i++) idx[io++] = i + vo;
       vo += P.count;
-      o.visible = false;
+      if (hide) o.visible = false;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
     geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.computeBoundingSphere();
-    const body = new THREE.Mesh(geo, ghostMat);
+    return geo;
+  }
+  function mergeGhostBody(v) {
+    const root = v._chassisGlb;
+    if (!root) return 0;
+    root.updateMatrixWorld(true);
+    const body = new THREE.Mesh(bakeCar(root, root.matrixWorld.clone().invert(), true), ghostMat);
     body.name = "GhostBody";
     root.add(body);
-    return parts.length;
+    return 1;
+  }
+  /**
+   * THE CAR AS A HOLOGRAM for the builder's TEST CAR (user, 2026-10-22: "spawn the car anywhere … use a ghost
+   * car for that"): the parked car (body + wheels) baked into one geometry in the PIECE frame — −Z forward
+   * (the car's nose), the tyres' bottom at y 0 — so it stands on a road frame as it is. Null while driving
+   * or before the model is in. One shared hologram material (the ghost's).
+   */
+  function carHologram() {
+    if (S || !vehicle._chassisGlb) return null;
+    vehicle.setEnabled(true);
+    vehicle.respawnAt(PARK.clone(), parkQuat.clone());
+    vehicle.body.vel.set(0, 0, 0);
+    vehicle.syncVisuals(0, 0);
+    vehicle.setEnabled(false);
+    vehicle.group.updateMatrixWorld(true);
+    const frame = new THREE.Matrix4().compose(vehicle.body.pos, vehicle.body.quat, new V(1, 1, 1)); // (renderPos is stale while parked)
+    const geo = bakeCar(vehicle.group, frame.invert(), false, vehicle.body.pos);
+    // only the car itself (the group also holds helpers drawn in world space far away)
+    geo.computeBoundingBox();
+    if (geo.boundingBox.max.length() > 8) return null;
+    geo.rotateY(Math.PI); // the car's +Z nose → the piece frame's −Z
+    geo.translate(0, -geo.boundingBox.min.y, 0);
+    geo.computeBoundingBox();
+    geo.computeBoundingSphere();
+    return { geometry: geo, material: ghostMat };
   }
   let ghostStyled = false; // the ghost is only shown once it wears its hologram (models loaded)
   // the Lotus is a DEV model only (trademark); it loads in the background, the car drives meanwhile
@@ -307,7 +338,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const kbThrottle = (keys.keyw || keys.arrowup ? 1 : 0) - (keys.keys || keys.arrowdown ? 1 : 0);
     const kbYaw = (keys.keye ? 1 : 0) - (keys.keyq ? 1 : 0);
     const kbRoll = (keys.keyz ? 1 : 0) - (keys.keyx ? 1 : 0);
-    const kbPitch = (keys.shiftleft || keys.shiftright ? 1 : 0) - (keys.controlleft || keys.controlright ? 1 : 0);
+    // nose DOWN on C, not Ctrl (2026-10-23: Ctrl+W with the throttle held closed the browser tab, Ctrl+S
+    // opened Save, Ctrl+D bookmarked — a page cannot block Ctrl+W)
+    const kbPitch = (keys.shiftleft || keys.shiftright ? 1 : 0) - (keys.keyc ? 1 : 0);
     const gp = gamepad.read();
     padRespawn = !!gp?.respawnPressed;
     if (!gp) return { steerTarget: kbSteer, rollTarget: kbRoll, throttle: kbThrottle, handbrake: !!keys.space, yaw: kbYaw, pitch: kbPitch, analog: false };
@@ -549,19 +582,24 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const startFwd = new V(0, 0, -1).transformDirection(lay.start);
     let startQuat = new THREE.Quaternion().setFromAxisAngle(new V(0, 1, 0), Math.atan2(startFwd.x, startFwd.z)); // car forward = +Z
     let spawnPos = startPos.clone().addScaledVector(startFwd, startT ? startT.spawn : 12).add(new V(0, SPAWN_LIFT, 0));
+    const lineSpawn = { pos: spawnPos.clone(), quat: startQuat.clone() }; // Delete: always back to the start line
+    let spawnVel = null;
     if (o.from) {
       // PRACTICE FROM A PIECE (Trackmania's "test from here"): standing on that piece's start, its slope
       // and bank included (piece frame: −Z along the road; the car's nose is +Z)
       const fwd = new V(0, 0, -1).transformDirection(o.from), up = new V(0, 1, 0).transformDirection(o.from);
       startQuat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().extractRotation(o.from)).multiply(new THREE.Quaternion().setFromAxisAngle(new V(0, 1, 0), Math.PI));
-      spawnPos = new V().setFromMatrixPosition(o.from).addScaledVector(fwd, 4).addScaledVector(up, SPAWN_LIFT);
+      // (the builder's TEST CAR: exactly where it stands — fromExact — at its speed, fromKmh)
+      spawnPos = new V().setFromMatrixPosition(o.from).addScaledVector(fwd, o.fromExact ? 0 : 4).addScaledVector(up, SPAWN_LIFT);
+      if (o.fromKmh > 0) spawnVel = fwd.clone().multiplyScalar(o.fromKmh / 3.6);
     }
 
     // ---------- THE CAR'S RULES (carRules.js): wall cut, landing judge + boost, boost pads, magnets ----------
     const boostPads = [...lay.placements.filter((p) => p.id.startsWith("boost")).map((p) => p.M.clone().invert()), ...boostZones(track?.props)];
     const magnets = magnetZones(lay.placements, TILES, integrate);
-    const rules = createCarRules(vehicle, { boostPads, magnets });
-    const ghostRules = createCarRules(ghostCar, { boostPads, magnets });
+    const cutZones = wallCutZones(lay.placements, built); // the wall cut: bowls and quarter pipes only
+    const rules = createCarRules(vehicle, { boostPads, magnets, cutZones });
+    const ghostRules = createCarRules(ghostCar, { boostPads, magnets, cutZones });
     const pilot = createAutopilot(avoidObstacles(lay.ride, track?.props)); // autopilot.js (shared with the builder's prediction and the tests), its line round the obstacles
     const GHOST_KEY = `thunderline.ghost.${trackKey}`;
     let ghostData = null;
@@ -569,7 +607,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
 
     S = {
       o, lay, group, race, gates, trackKey, medals, BEST_KEY, GHOST_KEY, best, bakeMs, rules, ghostRules, pilot, ghostData,
-      ghostPlayer: null, recorder: createGhostRecorder(), landings: [], startQuat, spawnPos,
+      ghostPlayer: null, recorder: createGhostRecorder(), landings: [], startQuat, spawnPos, lineSpawn, spawnVel,
       KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
       obstacles, moverT: 0, meshes, // the movers' RACE clock: 0 at the green light, held through the countdown
@@ -580,7 +618,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     $("back").innerHTML = `← ${o.backLabel ?? "Back"}<kbd>Esc</kbd>`;
     $("back").style.display = o.onEscape ? "" : "none";
     $("back").onclick = () => { $("back").blur(); o.onEscape?.(); };
-    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>Ctrl</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>C</kbd> free camera`;
+    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>F</kbd> free camera`;
     hud.classList.add("on");
     $("time").style.display = $("cps").style.display = o.noTimer ? "none" : "";
 
@@ -657,7 +695,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (S.ghostPlayer) S.ghostPlayer.start(S.spawnPos, S.startQuat);
     else ghostCar.setEnabled(false);
   }
-  function restart() {
+  /** Back to the spawn — the test car, at its speed (R) — or, fromLine, the start line standing (Delete). */
+  function restart(fromLine = false) {
     engine.reset();
     sparks?.reset();
     tyreMarks?.reset();
@@ -670,8 +709,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S.recorder.start();
     S.landings.length = 0;
     S.pilot.reset();
-    vehicle.setSpawn(S.spawnPos, S.startQuat);
+    const sp = fromLine === true ? S.lineSpawn : { pos: S.spawnPos, quat: S.startQuat };
+    vehicle.setSpawn(sp.pos, sp.quat);
     vehicle.respawn();
+    if (fromLine !== true && S.spawnVel) vehicle.body.vel.copy(S.spawnVel); // the test car's speed
     startGhost();
     chase.reset();
     S.simAccum = 0;
@@ -679,8 +720,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S.moverT = 0;
     S.obstacles.setTime(0);
     S.topKmh = 0;
-    S.safe.pos.copy(S.spawnPos);
-    S.safe.quat.copy(S.startQuat);
+    S.safe.pos.copy(sp.pos);
+    S.safe.quat.copy(sp.quat);
     if (!engineMuted) engineSound.resume();
   }
   // CHECKPOINT RESPAWN (DESIGN.md §8): Backspace = back to the last checkpoint at the speed you had
@@ -784,11 +825,13 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     keys[e.code.toLowerCase()] = true;
     unlockAudio();
     if (e.code === "Backspace") { respawnCheckpoint(); e.preventDefault(); }
-    if (e.code === "KeyR" || e.code === "Delete") restart();
+    // R: again from where this drive started (the builder's test car, at its speed); Delete: the START LINE
+    if (e.code === "KeyR") restart();
+    if (e.code === "Delete") restart(true);
     if (e.code === "KeyP") { autopilot = !autopilot; S.pilot.reset(); }
     if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!S.ghostPlayer && showGhost && ghostStyled; }
     if (e.code === "KeyM") setSound(engineMuted);
-    if (e.code === "KeyC") toggleFreeCam(); // C (user, 2026-10-20: was F)
+    if (e.code === "KeyF") toggleFreeCam(); // F (back from C, 2026-10-23: C is nose-down now)
     if (e.code === "KeyT" && freeCam) { freeCam.slow = (freeCam.slow + 1) % FREE_SLOW.length; timeScale = FREE_SLOW[freeCam.slow]; showFreeCam(); }
     if (freeCam) freeCamKey(e.code);
     if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code)) e.preventDefault();
@@ -821,7 +864,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     airT = g === 0 ? airT + dt : 0;
     $("freecam").innerHTML =
       `<b>FREE CAMERA</b>${debugCam.frame} frame · ${debugCam.distance.toFixed(1)} m · pitch ${(Math.asin(THREE.MathUtils.clamp(_dF.y, -1, 1)) * D).toFixed(1)}° · roll ${(Math.atan2(_dR.y, _dU.y) * D).toFixed(1)}° · wheels ${g}/4${g === 0 ? ` · air ${airT.toFixed(2)} s` : ""}<br>` +
-      `drag orbit · right-drag pan · wheel / <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> frame · <kbd>1</kbd>-<kbd>4</kbd> views · <kbd>0</kbd> recentre · <kbd>T</kbd> ${["1×", "¼×", "paused"][freeCam.slow]} · <kbd>C</kbd> back`;
+      `drag orbit · right-drag pan · wheel / <kbd>+</kbd><kbd>−</kbd> zoom · <kbd>V</kbd> frame · <kbd>1</kbd>-<kbd>4</kbd> views · <kbd>0</kbd> recentre · <kbd>T</kbd> ${["1×", "¼×", "paused"][freeCam.slow]} · <kbd>F</kbd> back`;
   }
   function toggleFreeCam() {
     if (freeCam) {
@@ -940,7 +983,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   return {
     start, stop, restart, respawnCheckpoint, recoverToSafe, modelsReady,
     get active() { return !!S; }, get session() { return S; },
-    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, tyreSmoke, landingFx,
+    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, tyreSmoke, landingFx, carHologram,
     get sunShadows() { return sunShadows; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
     /** fn(vehicle, session) → input, or null for the player / autopilot again */

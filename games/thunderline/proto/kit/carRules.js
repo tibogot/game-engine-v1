@@ -13,6 +13,20 @@ export const JUMP = { v: 8 };
 /** The twist pieces' magnet (m/s² into the road surface): one g, so the car holds at any roll. */
 export const MAGNET = 9.81;
 const GRAVITY_ACC = 9.81; // the old car's world gravity (modularRoadVehicle GRAVITY)
+/**
+ * WALL-CUT ZONES: the pieces the "no engine up a wall" rule is FOR — bowls and quarter pipes, where full
+ * throttle drove the car up the wall and launched it 50-100 m higher than its arrival speed (bowlTest).
+ * (Applied everywhere, it cut the engine for about a third of every LOOP and up flip ramps — the physics
+ * review, 2026-10-23.) A box round each such piece's own rings, 12 m of margin.
+ */
+export const WALLCUT_TILE = /^(bowl_|quarter_pipe)/;
+export function wallCutZones(placements, built) {
+  return placements.filter((p) => WALLCUT_TILE.test(p.id) && built[p.id]?.b).map((p) => {
+    const box = new THREE.Box3();
+    for (const r of built[p.id].b.rings) box.expandByPoint(r.p);
+    return { inv: p.M.clone().invert(), box: box.expandByScalar(12) };
+  });
+}
 /** Magnet zones for a list of placements ({id, M}) — the pieces whose tile carries `magnet`. */
 export function magnetZones(placements, TILES, integrate) {
   return placements.filter((p) => TILES[p.id]?.magnet).map((p) => ({ inv: p.M.clone().invert(), L: integrate(TILES[p.id]).L }));
@@ -23,7 +37,7 @@ export function magnetZones(placements, TILES, integrate) {
  * @param boostPads  inverse world matrices of the boost pieces (piece frame: x right, y up, −z along), or
  *   BOOST PADS (obstacles.js boostZones): { inv, hx, hz } — a box round the pad's own frame
  */
-export function createCarRules(car, { boostPads = [], magnets = [] } = {}) {
+export function createCarRules(car, { boostPads = [], magnets = [], cutZones = null } = {}) {
   const judge = createLandingJudge(car);
   const lp = new THREE.Vector3(), fwd = new THREE.Vector3(), nrm = new THREE.Vector3();
   let boostLeft = 0;
@@ -34,7 +48,12 @@ export function createCarRules(car, { boostPads = [], magnets = [] } = {}) {
     reset() { judge.reset(); boostLeft = 0; },
     /** One fixed tick. Returns the landing event of this tick, or null. */
     step(input, dt) {
-      car.tick(wallCut(car, input));
+      // the wall cut only inside a bowl / quarter pipe (cutZones; null = everywhere, the old rule — wallTest)
+      let cut = cutZones === null;
+      if (!cut && cutZones.length && input.throttle > 0 && car.groundedCount > 0) {
+        for (const z of cutZones) { lp.copy(car.body.pos).applyMatrix4(z.inv); if (z.box.containsPoint(lp)) { cut = true; break; } }
+      }
+      car.tick(cut ? wallCut(car, input) : input);
       const landed = judge.tick(dt);
       if (landed) boostLeft = Math.max(boostLeft, landed.boost);
       for (const pad of boostPads) {
