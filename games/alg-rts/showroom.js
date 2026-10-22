@@ -370,6 +370,8 @@ function placePlants(app, placed) {
 }
 
 export async function placeShowroom(app, list = SHOWROOM) {
+  // (MAP.skip: pieces a map leaves out — the training's camp, 2026-10-22: no SAS post, well or zeriba, no lesson uses them)
+  if (MAP.skip?.length) list = list.filter((v) => !v || !MAP.skip.includes(v.key));
   const placed = {};
   // Footprint-local → world, for an entry turned by its yaw.
   const toWorld = (e, lx, lz) => {

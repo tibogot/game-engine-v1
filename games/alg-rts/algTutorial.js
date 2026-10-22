@@ -135,7 +135,11 @@ export function createAlgTutorial(app) {
     title: t("La couverture"),
     text: t("Derrière un mur, on survit ; à découvert, non. Maintenez <kbd>V</kbd> : <b>vert</b> = couverture lourde, <b>jaune</b> = légère. Envoyez le groupe derrière les sacs de sable : sous le curseur, chaque homme montre la couverture qu'il aura."),
     async start(s) {
-      const w = await wall(30, 52, { x: 30, z: 0 }) ?? { x: 30, z: 52, behind: { x: 30, z: 55 } };   // the bags face north
+      // (the PRACTICE RANGE's walls when the map has it — maps/training.js MAP.range, 2026-10-22: the lesson behind the
+      // range's bags, its MG nest and wire in view; else a wall of the lesson's own)
+      const R = app.showroom?.sandbags1, R2 = app.showroom?.sandbags2;
+      const w = R && R2 ? { x: (R.position.x + R2.position.x) / 2, z: R.position.z, behind: { x: (R.position.x + R2.position.x) / 2, z: R.position.z + 3.2 } }
+        : await wall(30, 52, { x: 30, z: 0 }) ?? { x: 30, z: 52, behind: { x: 30, z: 55 } };   // the bags face north
       s.m = { ...w.behind, r: 5 }; markers.push(s.m);
       app.rtsCamera?.focusOn(w.x, w.z + 4);
     },

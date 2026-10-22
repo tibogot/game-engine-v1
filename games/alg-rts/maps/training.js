@@ -61,6 +61,8 @@ export const MAP = {
   // walls, the wire, a crewed MG nest; the mortar pit as a set piece ("mortarPit2": not a gun that would shell the lessons)
   // (on clear ground EAST of the post, off the gate where the squads start: the wire and walls in a line facing north,
   // the nest and the pit behind them — world x, z; yaw 0 faces north, -Z)
+  // the camp reads as a camp: the pieces no lesson uses left out (showroom placeShowroom)
+  skip: ["sasPost", "wellHamlet1", "zeriba1"],
   range: {
     sandbags1: { at: [44, 112], yaw: 0 }, sandbags2: { at: [52, 113], yaw: -0.08 }, wire1: { at: [44, 104], yaw: 0 }, wire2: { at: [53, 104.5], yaw: 0.05 },
     mgNest: { at: [48, 124], yaw: 0 }, mortarPit: { as: "mortarPit2", at: [62, 128], yaw: 0 },
