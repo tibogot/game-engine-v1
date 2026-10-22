@@ -203,24 +203,36 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   const GHOST_SKIP = /(_int|interior|steering|cab_|glass|lens)/i;
   /** The visible body meshes under `root` baked into ONE float geometry in the frame `inv` maps world into
    * (interior, glass and the ShadowProxy left out); `hide` hides the originals. */
-  function bakeCar(root, inv, hide, near = null) {
-    const parts = [];
-    const _w = new THREE.Vector3();
+  // (instanced: `instances` also takes an InstancedMesh's copies — the WHEELS are instanced, one mesh per
+  // wheel part with four copies: the test car's hologram had none, 2026-10-23)
+  function bakeCar(root, inv, hide, near = null, instances = false) {
+    const parts = []; // { o, world }
+    const _w = new THREE.Vector3(), _im = new THREE.Matrix4();
     root.traverse((o) => {
-      if (!o.isMesh || o.isInstancedMesh || !o.visible || o.name === "GhostBody") return;
+      if (!o.isMesh || !o.visible || o.name === "GhostBody") return;
+      if (o.isInstancedMesh) {
+        if (!instances) return;
+        for (let i = 0; i < o.count; i++) {
+          o.getMatrixAt(i, _im);
+          const world = o.matrixWorld.clone().multiply(_im);
+          if (near && _w.setFromMatrixPosition(world).distanceTo(near) > 6) continue;
+          parts.push({ o, world });
+        }
+        return;
+      }
       if (near && o.getWorldPosition(_w).distanceTo(near) > 6) return; // (helpers drawn in world space)
       const names = [o.name, o.parent?.name, ...[].concat(o.material).map((m) => m?.name)].join(" ");
       if (/ShadowProxy/i.test(names) || GHOST_SKIP.test(names)) { if (hide) o.visible = false; return; }
-      parts.push(o);
+      parts.push({ o, world: o.matrixWorld });
     });
     let nv = 0, ni = 0;
-    for (const o of parts) { nv += o.geometry.attributes.position.count; ni += o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; }
+    for (const { o } of parts) { nv += o.geometry.attributes.position.count; ni += o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count; }
     const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), idx = new Uint32Array(ni);
     const p = new THREE.Vector3(), n = new THREE.Vector3(), M = new THREE.Matrix4(), N = new THREE.Matrix3();
     let vo = 0, io = 0;
-    for (const o of parts) {
+    for (const { o, world } of parts) {
       const g = o.geometry, P = g.attributes.position, Nn = g.attributes.normal;
-      M.multiplyMatrices(inv, o.matrixWorld);
+      M.multiplyMatrices(inv, world);
       N.getNormalMatrix(M);
       for (let i = 0; i < P.count; i++) {
         p.fromBufferAttribute(P, i).applyMatrix4(M);
@@ -230,7 +242,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (g.index) for (let i = 0; i < g.index.count; i++) idx[io++] = g.index.getX(i) + vo;
       else for (let i = 0; i < P.count; i++) idx[io++] = i + vo;
       vo += P.count;
-      if (hide) o.visible = false;
+      if (hide && !o.isInstancedMesh) o.visible = false;
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -263,7 +275,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     vehicle.setEnabled(false);
     vehicle.group.updateMatrixWorld(true);
     const frame = new THREE.Matrix4().compose(vehicle.body.pos, vehicle.body.quat, new V(1, 1, 1)); // (renderPos is stale while parked)
-    const geo = bakeCar(vehicle.group, frame.invert(), false, vehicle.body.pos);
+    const geo = bakeCar(vehicle.group, frame.invert(), false, vehicle.body.pos, true);
     // only the car itself (the group also holds helpers drawn in world space far away)
     geo.computeBoundingBox();
     if (geo.boundingBox.max.length() > 8) return null;
