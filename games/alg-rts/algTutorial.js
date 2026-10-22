@@ -126,7 +126,7 @@ export function createAlgTutorial(app) {
   L.push({
     title: t("Se déplacer"),
     text: t("<b>Clic droit</b> sur le sol : le groupe sélectionné y va. Amenez-le dans le cercle jaune, sur la piste. Pour choisir où il fera face, <b>maintenez le clic droit et glissez</b> : une flèche montre la direction, des anneaux la place de chaque homme."),
-    start(s) { s.m = { x: 4, z: 70, r: 7 }; markers.push(s.m); },
+    start(s) { s.m = { x: 4, z: 70, r: 7 }; markers.push(s.m); app.rtsCamera?.focusOn(s.m.x, s.m.z + 6); },
     done: (s) => squads().some((q) => q.members.filter((u) => near(u, s.m, s.m.r + 1)).length >= 3),
     end(s) { markers.splice(markers.indexOf(s.m), 1); },
   });
@@ -150,6 +150,7 @@ export function createAlgTutorial(app) {
   // it is for"): build your own cover. Done when a sandbag wall YOU placed is finished.
   L.push({
     title: t("Les sapeurs"),
+    buttons: ["buildMenu", "sandbags"],
     text: t("Vos <b>sapeurs</b> (le petit groupe de 3) bâtissent : sélectionnez-les, cliquez <b>Construire</b> puis <b>Sacs de sable</b> sur leur fiche, et posez le mur d'un clic gauche (<kbd>R</kbd> le tourne, clic droit annule). Ils vont le monter — un abri à vous, où vous voulez. Ils posent aussi des barbelés, coupent ceux de l'ennemi (<kbd>X</kbd>) et réparent les véhicules (<kbd>J</kbd>)."),
     start(s) {
       let q = squads().find((x) => x.typeKey === "sapeur");
@@ -182,6 +183,7 @@ export function createAlgTutorial(app) {
   const inside = () => mine().filter((u) => u.garrison);
   L.push({
     title: t("Les maisons"),
+    buttons: ["garrison", "unload"],
     text: t("Un mur protège ; une <b>maison</b> protège mieux. Groupe sélectionné, <b>clic droit sur une maison</b> de la mechta (le curseur devient une maison) : les hommes entrent et tirent par les fenêtres. Une grenade ou un obus les en chasse. Pour ressortir : <b>Sortir</b> (<kbd>K</kbd>), ou un simple ordre de marche."),
     start() { const v = hamlet(); if (v) app.rtsCamera?.focusOn(v.position.x, v.position.z); },
     where: () => [hamlet()?.position],
@@ -246,6 +248,7 @@ export function createAlgTutorial(app) {
   // 8. assault
   L.push({
     title: t("L'assaut"),
+    buttons: ["attackMove"],
     text: t("Un simple clic droit, c'est un ordre de marche : vos hommes avancent sans s'arrêter. <kbd>Ctrl</kbd> + <b>clic droit</b> (ou <kbd>N</kbd> puis un clic), c'est l'<b>assaut</b> : ils s'arrêtent pour tirer sur ce qu'ils rencontrent, puis continuent. Lancez un assaut sur la <b>butte</b> à l'est : elle est tenue."),
     start(s) { s.m = { x: knoll.x, z: knoll.z, r: 9, color: 0xe0574a }; markers.push(s.m); s.f = fighters(3, knoll.x + 2, knoll.z - 3, { spread: 3 }); app.rtsCamera?.focusOn(knoll.x - 20, knoll.z + 20); },
     done: (s) => allDead(s.f) && mine().some((u) => near(u, s.m, s.m.r + 3)),
@@ -254,6 +257,7 @@ export function createAlgTutorial(app) {
   // 9. grenade
   L.push({
     title: t("La grenade"),
+    buttons: ["grenade"],
     text: t("Des hommes retranchés derrière des sacs de sable : à découvert, vous ne les délogerez pas. Sélectionnez un groupe, <kbd>G</kbd> (ou le bouton <b>Grenade</b>, 15 munitions), puis cliquez sur eux. La fumée (<kbd>B</kbd>) aveugle, elle aussi."),
     async start(s) {
       const w = await wall(-58, -75, { x: -58, z: 0 }) ?? { x: -58, z: -75 };   // the bags face the French (south)
@@ -270,6 +274,7 @@ export function createAlgTutorial(app) {
   // 10. retreat, reinforce
   L.push({
     title: t("Retraite et renfort"),
+    buttons: ["retreat", "reinforce"],
     text: t("Un groupe affaibli : l'instructeur vous retire deux hommes. <b>Retraite</b> (<kbd>T</kbd>) le ramène au poste en courant — il ne tire plus, il est moins touché, et s'y soigne. Au poste, <b>Renforcer</b> (<kbd>Y</kbd>) : chaque clic fait sortir un homme par la porte, jusqu'à remplir le groupe."),
     start(s) {
       const q = squads().find((x) => x.typeKey === "appele" && x.count >= 4) ?? squads()[0];
@@ -292,6 +297,7 @@ export function createAlgTutorial(app) {
   // 12. the tier
   L.push({
     title: t("Les échelons"),
+    buttons: ["tier"],
     text: t("Les unités plus fortes sont <b>verrouillées</b> : elles s'ouvrent par échelon, au poste. Sur sa fiche, cliquez <b>▲ Moyens héliportés</b> (il faut tenir un village) : paras, Alouette et half-track."),
     start() { E.french.earn({ mp: 200, fuel: 60 }); const p = post(); if (p) { app.rtsCamera?.focusOn(p.position.x, p.position.z); app.selection?.select([p]); } },
     where: () => [post()?.position],
@@ -300,6 +306,7 @@ export function createAlgTutorial(app) {
   // 13. the half-track
   L.push({
     title: t("Le half-track"),
+    buttons: ["transport", "unload", "disembark"],
     text: t("Un half-track vous attend devant le poste. Groupe sélectionné, <b>clic droit sur le half-track</b> : les hommes montent (à l'abri, ils ne tirent pas). Conduisez-le près de la mechta, puis <b>Débarquer</b> (<kbd>K</kbd>). À l'arrêt, il sert aussi de point de <b>renfort</b> pour les groupes proches."),
     start(s) {
       const p = postSite;
@@ -324,6 +331,7 @@ export function createAlgTutorial(app) {
       s.goal = new Map(s.f.map((u) => [u, { x: hamletSite.x + (Math.random() - 0.5) * 16, z: hamletSite.z + (Math.random() - 0.5) * 16 }]));
       for (const u of s.f) u.orderTo(s.goal.get(u).x, s.goal.get(u).z);
       say(t("<b>Contact !</b> Une bande du FLN marche sur la Mechta d'exercice."), hamletSite.x, hamletSite.z, "bad");
+      app.rtsCamera?.focusOn(hamletSite.x, hamletSite.z);
       app.algVoices?.radio?.("hq_contact");
     },
     // The FLN's AI is off here: a man who stopped to fight (combat halts him) and has nobody left
@@ -361,6 +369,9 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
 #alg-tut button { padding: 3px 10px; font: 600 11px var(--hud-sans, sans-serif); letter-spacing: 0.06em; color: var(--hud-text, #e8dcc4);
   background: transparent; border: 1px solid rgba(201,165,74,0.5); border-radius: 2px; cursor: pointer; }
 #alg-tut button:hover { border-color: #f1dfa6; color: #f1dfa6; }
+/* THE LESSON'S BUTTONS (2026-10-22: the command card is icons now — "click Construire" named a picture): they pulse */
+.cc-grid [data-key].alg-tut-hint { outline: 2px solid #f1dfa6; outline-offset: -2px; animation: alg-tut-hint 0.9s ease-in-out infinite alternate; }
+@keyframes alg-tut-hint { from { box-shadow: 0 0 0 0 rgba(241,223,166,0); } to { box-shadow: 0 0 10px 2px rgba(241,223,166,0.75); } }
 #alg-tut.done h3::after { content: "  ✓"; color: #58e070; }`;
   document.head.appendChild(style);
   const el = document.createElement("div");
@@ -406,10 +417,15 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
     app.algUnits?.minimap?.setObjectives?.(pts);
     app.algTacMap?.map?.setObjectives?.(pts);
   }
+  /** The lesson's command-card buttons pulse (the card is rebuilt as the selection changes: re-marked each tick). */
+  function hint(keys) {
+    for (const b of document.querySelectorAll(".cc-grid [data-key]")) b.classList.toggle("alg-tut-hint", !!keys?.includes(b.dataset.key));
+  }
   function finish() {
     if (finished) return;
     finished = true;
     showWhere([]);
+    hint(null);
     el.hidden = true;
     app.algVoices?.radio?.("hq_victory");
     const back = hud.end(`
@@ -428,6 +444,7 @@ body.alg-tut-score #alg-tut { top: calc(16px + 38px * var(--alg-ui, 1)); }
     if (l.sub) el.querySelector(".sb").textContent = l.sub(state);
     try { l.tick?.(state); } catch (e) { console.warn("[tutorial] tick", e); }
     showWhere(waitT > 0 ? [] : l.where ? l.where(state) : state.m ? [state.m] : []);
+    hint(waitT > 0 ? null : l.buttons);
     if (waitT > 0) { waitT -= P.tick; if (waitT <= 0) next(); return; }
     let ok = false;
     try { ok = l.done(state); } catch (e) { console.warn("[tutorial] check", e); }
