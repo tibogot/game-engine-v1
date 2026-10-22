@@ -130,9 +130,7 @@ ones throughout.
      once redone). Done already: the capture burst at the flagpole, the sectors coloured on the minimap.
    - **Bodies thrown by blasts** (an arc away from it, the Falling loop turned face up, landing on the blast death)
      with a RED MIST in the blast's dust; near misses KNOCKED DOWN then GET UP (your Knocked Down / Getting Up clips).
-   - **Dropped weapons the CoH way:** every special weapon drops (bazooka, flamethrower, sniper rifle — today only the
-     FM), picked up by a RIGHT-CLICK order, not automatically; abandoned TEAM WEAPONS (mortar, MG, recoilless) re-crewed
-     by any squad, either side.
+   - ~~**Dropped weapons the CoH way**~~ — **done 2026-10-22**: FM, bazooka, flamethrower drop; a right-click picks one up (the AI's men by passing); mortars and the recoilless RE-CREWED by any squad. Left: the FLN's 12.7 (algMgTeam reads its gunner's unit type).
    - **The training:** a doctrine lesson; the mortar and the radio barrage; mines and sweeping; smoke and hold fire;
      the MG nest and wire; veterancy. The camp's exercise figures (Push Up, Jumping Jacks, Salute).
 

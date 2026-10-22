@@ -11,12 +11,17 @@
 //   WHO         a man of an infantry squad (algSquads PICKERS), not one carrying already, at most CARRY_PER_SQUAD a
 //               squad. The French section's FM goes in as the squad's FM UPGRADE if it has none (it is kept and
 //               replaced as the bought one); anything else he CARRIES (u.carried — algSquads applyKit).
+//   TEAMS       a mortar or the recoilless whose whole team fell stays too (algSquads TEAM_WEAPONS); a squad's
+//               right-click (the AI's: passing by) sends it, and crew (that many) of its men become that weapon's TEAM — their
+//               own uniforms, the weapon as itself (the FLN's 60 mm in French hands fires the 60 mm); never
+//               reinforced (nobody of that kind at the post). Men carrying a picked weapon stay in their squad.
 // A weapon lies 4 minutes, then it is gone (taken by someone off the map). DRAWN: one InstancedMesh a weapon
 // (procWeapons.js), lying on its side, made empty at load (the warm-up builds its programs); only what the human
 // can see.
 import * as THREE from "three";
 import { WEAPONS, weaponMaterial } from "../shared-rts/procWeapons.js";
-import { CARRIED, CARRY_PER_SQUAD, PICKERS, UPGRADES } from "./algSquads.js";
+import { CARRIED, CARRY_PER_SQUAD, PICKERS, TEAM_WEAPONS, UPGRADES } from "./algSquads.js";
+import { KIT } from "../shared-rts/soldierLooks.js";
 import { RTS_SCALE } from "./algUnitTypes.js";
 import { t } from "./i18n/i18n.js";
 import { isHuman } from "../shared-rts/teams.js";
@@ -55,14 +60,25 @@ export function createAlgDroppedWeapons(app, { units, squads, fogOfWar = null })
     app.scene.add(m);
     meshes[key] = m;
   }
+  // the TEAM weapons: the mortar tube (the carried piece, laid flat), the recoilless
+  for (const [k, T] of Object.entries(TEAM_WEAPONS)) {
+    const g = T.model === "mortarTube" ? KIT.mortarTube.build() : WEAPONS[T.model].buildRaw();
+    g.computeBoundingBox(); const c = g.boundingBox.getCenter(new THREE.Vector3()); g.translate(-c.x, -c.y, -c.z);
+    const m = new THREE.InstancedMesh(g, weaponMaterial(), 4);
+    m.count = 0; m.frustumCulled = false; m.castShadow = true; m.name = `droppedWeapons:team:${k}`;
+    app.scene.add(m);
+    meshes[`team:${k}`] = m;
+  }
+  const teamOf = (it) => (it.key.startsWith("team:") ? it.key.slice(5) : null);
+  const labelOf = (it) => (teamOf(it) ? TEAM_WEAPONS[teamOf(it)].label : CARRIED[it.key].label);
   // (the brass ring under each one you can see: a dropped gun is small and brown on brown ground)
   const rings = createSelectionRingField({ app, max: P.max, inner: 0.82, segments: 32, opacity: 0.75 });
   const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _e = new THREE.Euler(0, 0, 0, "YXZ"), _p = new THREE.Vector3(), _s = new THREE.Vector3().setScalar(RTS_SCALE * P.look);
   let told = false;
 
   function drop(x, z, yaw = Math.random() * Math.PI * 2, key = "fm") {
-    if (!CARRIED[key]) return;
-    if (items.length >= P.max) items.shift();
+    if (!CARRIED[key] && !TEAM_WEAPONS[key.slice(5)]) return;
+    if (items.length >= P.max) items.splice(items.findIndex((it) => !it.claim), 1);
     items.push({ key, x, z, y: app.getWorldHeight?.(x, z) ?? 0, yaw, t: 0, claim: null, ordered: false });
   }
 
@@ -71,15 +87,20 @@ export function createAlgDroppedWeapons(app, { units, squads, fogOfWar = null })
     if (e.isStructure || !e.type?.foot) return;
     const key = droppedBy(e);
     if (key) drop(e.position.x + 0.6, e.position.z + 0.3, (e.heading ?? 0) + 1.2, key);
+    // the last of a TEAM: its weapon stays
+    const s = e.squad;
+    if (s && TEAM_WEAPONS[s.typeKey] && !s.members.length) drop(e.position.x - 0.5, e.position.z + 0.6, (e.heading ?? 0) + 0.4, `team:${s.typeKey}`);
   }
 
   const near = (u, it, r) => Math.abs(u.position.x - it.x) < r && Math.abs(u.position.z - it.z) < r && Math.hypot(u.position.x - it.x, u.position.z - it.z) < r;
   const carriedIn = (s) => s.members.filter((m) => m.carried).length;
   /** Can `u` take `it`? (a man of an infantry squad, free hands, room in his squad) */
+  const freeMen = (s) => s.members.filter((m) => !m.carried);
   function canTake(u, it) {
     if (!u.alive || !u.type?.foot || u.inside || u.garrison || u.carrier || u.carried) return false;
     const s = u.squad;
     if (!s || !PICKERS.has(s.typeKey) || s.retreating) return false;
+    if (teamOf(it)) return freeMen(s).length >= 2;   // (a team of two at least: the gun and a loader)
     // (the section's own FM slot taken: a second FM is carried like anything else)
     if (it.key === "fm" && UPGRADES.lmg.squads.includes(s.typeKey) && !s.upgrades.lmg) return true;
     if (s.upgrades?.bazooka && s.slots[UPGRADES.bazooka.slot] === u) return false;   // (his own tube already)
@@ -87,10 +108,25 @@ export function createAlgDroppedWeapons(app, { units, squads, fogOfWar = null })
   }
   function take(u, it) {
     const s = u.squad;
+    if (teamOf(it)) return recrew(s, it);
     if (it.key === "fm" && s && UPGRADES.lmg.squads.includes(s.typeKey) && !s.upgrades.lmg) s.upgrades.lmg = true;
     else u.carried = it.key;
     u.playOnce = "plant";   // (he stoops for it)
     if (isHuman(u.team)) app.algBattle?.say?.(t("{w} ramassé.", { w: CARRIED[it.key].label }), u.position.x, u.position.z, "good");
+  }
+  /** crew (that many) of squad s's free men (the nearest) become the weapon's team; the others stay where they are. */
+  function recrew(s, it) {
+    const key = teamOf(it), T = TEAM_WEAPONS[key];
+    const d = (m) => Math.hypot(m.position.x - it.x, m.position.z - it.z);
+    const men = freeMen(s).sort((a, b) => d(a) - d(b)).slice(0, T.crew);
+    for (const m of men) squads.leave(m);
+    const ns = squads.create(key, s.team);
+    ns.captured = true;
+    men.forEach((m, k) => { squads.join(ns, m, k); m.playOnce = "plant"; });
+    if (isHuman(s.team)) {
+      app.algBattle?.say?.(t("{w} : vos hommes le servent.", { w: T.label }), it.x, it.z, "good");
+      if ((app.selection?.selected ?? []).some((u) => men.includes(u))) app.selection.select(men);
+    }
   }
 
   /** Who takes `it` now — the man who has reached it — or (the AI's) sends the nearest passer-by to it. */
@@ -146,6 +182,8 @@ export function createAlgDroppedWeapons(app, { units, squads, fogOfWar = null })
     it.claim = u; it.ordered = true;
     u.moveOrder(it.x, it.z);
     u.playerMove = true;
+    // (a team weapon: his squad goes with him, round it)
+    if (teamOf(it)) freeMen(u.squad).filter((m) => m !== u).forEach((m, k) => { const a = (k / 3) * Math.PI * 2; m.moveOrder(it.x + Math.cos(a) * 2, it.z + Math.sin(a) * 2); m.playerMove = true; });
     app.algSounds?.order?.("move", [u]);
   };
   // The HAND over a weapon you can take (ui/cursors.js canvas.alg-pickup)
@@ -169,7 +207,7 @@ export function createAlgDroppedWeapons(app, { units, squads, fogOfWar = null })
       if (fogOfWar?.enabled && !fogOfWar.isVisible(it.x, it.z)) continue;
       // The first one the human sees: say what it is for.
       if (!told && it.t > 0.5) { told = true; app.algBattle?.say?.(t("Une <b>arme</b> est restée au sol (cerclée) : sélectionnez des hommes et faites un <b>clic droit</b> dessus pour la ramasser."), it.x, it.z, "", null); }
-      _e.set(0, it.yaw, Math.PI / 2);
+      _e.set(0, it.yaw, teamOf(it) === "mortier" || teamOf(it) === "mortierFr" ? 0 : Math.PI / 2);
       _q.setFromEuler(_e);
       _p.set(it.x, it.y + 0.06, it.z);
       meshes[it.key].setMatrixAt(n[it.key]++, _m.compose(_p, _q, _s));

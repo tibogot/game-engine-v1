@@ -61,6 +61,9 @@ const KINDS = {
 };
 const P = MORTAR_TEAM;
 const kindOf = (s) => KINDS[s.typeKey];
+// A barrage's PRICE in the side's own money (2026-10-22: a captured mortar — algDroppedWeapons — kept its old side's
+// price: the FLN's 35 supplies read by the French purse as 35 MANPOWER). Each side pays its own team's.
+const priceOf = (s) => (s.team === "enemy" ? KINDS.mortier : KINDS.mortierFr).barrage.cost;
 
 // THE CREW'S CLIP (tools/packMixamo synthMortarClips): mortar_load is LOAD long, the bomb leaves his
 // hands at DROP_AT and slides home in SLIDE — the round goes then. Distances in the clip are the pack's
@@ -387,8 +390,8 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     const s = ss[0], m = stateOf(s), K = kindOf(s), purse = purseOf(s);
     const set = m.state === "set";
     return {
-      key: "mortarBarrage", label: t("Tir de barrage"), cost: K.barrage.cost,
-      ready: set && !m.salvo && m.cool <= 0 && !!purse?.canAfford(K.barrage.cost),
+      key: "mortarBarrage", label: t("Tir de barrage"), cost: priceOf(s),
+      ready: set && !m.salvo && m.cool <= 0 && !!purse?.canAfford(priceOf(s)),
       hint: !set ? t("Le mortier doit être en batterie : arrêtez l'équipe quelques secondes.")
         : m.cool > 0 ? t("Le tube refroidit encore ({n} s).", { n: Math.ceil(m.cool) })
           : t("{n} obus sur un point que vous choisissez, entre {min} et {max} m du mortier.", { n: K.barrage.shells, min: K.min, max: K.max }),
@@ -420,7 +423,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     const { s, at, ok } = targeting;
     if (!at || !ok) return;
     const m = stateOf(s), K = kindOf(s), purse = purseOf(s);
-    if (m.state === "set" && purse?.spend(K.barrage.cost)) {
+    if (m.state === "set" && purse?.spend(priceOf(s))) {
       m.salvo = { x: at.x, z: at.z, left: K.barrage.shells, t: 0 };
       m.cool = K.barrage.cooldown;
     }
@@ -512,7 +515,7 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
       const m = st.get(s), g = gunnerOf(s), K = kindOf(s), purse = purseOf(s);
       if (!m || !g || !K || m.state !== "set" || m.salvo || m.cool > 0) return false;
       const d = Math.hypot(x - g.position.x, z - g.position.z);
-      if (d < K.min || d > K.max || !purse?.spend(K.barrage.cost)) return false;
+      if (d < K.min || d > K.max || !purse?.spend(priceOf(s))) return false;
       m.salvo = { x, z, left: K.barrage.shells, t: 0 };
       m.cool = K.barrage.cooldown;
       return true;

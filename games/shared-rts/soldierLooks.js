@@ -326,8 +326,9 @@ LOOKS.equipage = { ...LOOKS.appeleSection, label: "Équipage", note: "a crew out
 for (const k of ["appeleSection", "sapeur", "paraSection", "legionSection", "alnSection", "equipage"]) {
   const l = LOOKS[k];
   if (!l) continue;
-  l.spare = [...new Set([...(l.spare ?? []), "fm2429", "m20", "lf50"])];
-  l.spareKit = [...new Set([...(l.spareKit ?? []), "flameTanks"])];
+  l.spare = [...new Set([...(l.spare ?? []), "fm2429", "m20", "lf50", "sr57"])];
+  // (+ a team weapon re-crewed: the mortar carried, the recoilless on the back)
+  l.spareKit = [...new Set([...(l.spareKit ?? []), "flameTanks", "mortarTube", "mortarPlate", "sr57Back"])];
 }
 LOOKS.moussebel = { ...LOOKS.civShepherd, label: "Moussebel", note: "the shepherd's clothes, an old rifle", weapon: "enfield" };
 

@@ -66,7 +66,8 @@ export const SQUADS = {
   // The recoilless rifle (algRecoilless.js): slot 0 the gun (his type's), slot 1 the loader's rifle.
   // The tripod HMG (algMgTeam.js set-up): slot 0 the gun, slot 1 the loader's rifle.
   mitrailleuse: { size: 2, name: t("Mitrailleuse"), reinforce: 45, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
-  sansRecul: { size: 2, name: t("Sans-recul"), reinforce: 45, side: "enemy", kit: { 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
+  // (slot 0 the gun in the kit too, 2026-10-22: a re-crewed team's gunner is a rifleman by type — algDroppedWeapons)
+  sansRecul: { size: 2, name: t("Sans-recul"), reinforce: 45, side: "enemy", kit: { 0: { weapon: "cannon", range: 55, damage: 90, fireRate: 0.14, footMul: 0.3 }, 1: { weapon: "rifle", range: 30, damage: 6, fireRate: 2.4 } } },
 };
 /**
  * WEAPONS PICKED UP OFF THE GROUND (2026-10-22, CoH — algDroppedWeapons.js): a man who takes one CARRIES it
@@ -78,6 +79,15 @@ export const CARRIED = {
   fm: { label: t("FM 24/29"), prop: "fm2429", weapon: { weapon: "mg", range: 42, damage: 5, fireRate: 4.5 } },
   bazooka: { label: t("Bazooka"), prop: "m20", weapon: { weapon: "cannon", range: 40, damage: 70, fireRate: 0.16, footMul: 0.35 } },
   flamer: { label: t("Lance-flammes"), prop: "lf50", kit: "flameTanks", weapon: { weapon: "flamer", range: 15, damage: 0, fireRate: 4 } },
+};
+// TEAM WEAPONS LEFT BY THEIR CREW (2026-10-22, CoH's re-crew — algDroppedWeapons.js): a mortar or the recoilless
+// whose whole team fell stays; an infantry squad takes it over — crew (that many) of its men become that weapon's TEAM (their
+// own uniforms, the weapon firing as itself: French men on the FLN's 60 mm fire the 60 mm). The 12.7 is not in yet
+// (algMgTeam reads its gunner's unit type).
+export const TEAM_WEAPONS = {
+  mortier: { label: t("Mortier de 60"), crew: 3, model: "mortarTube" },
+  mortierFr: { label: t("Mortier de 81"), crew: 3, model: "mortarTube" },
+  sansRecul: { label: t("Canon sans recul de 57"), crew: 2, model: "sr57" },
 };
 export const PICKERS = new Set(["appele", "para", "legion", "sapeur", "moudjahid", "equipage"]);
 export const CARRY_PER_SQUAD = 2;
@@ -212,7 +222,7 @@ export function createAlgSquads({ app, units, base, muster, pay, post, popRoom =
   /** What one more man costs this squad (0 = can't). */
   function reinforceCost(s) {
     if (!s || !(s.team === "player" || (s.team === "enemy" && aln)) || s.count + pending.filter((p) => p.squad === s).length >= s.size) return 0;
-    if (!SQUADS[s.typeKey]?.reinforce) return 0;
+    if (!SQUADS[s.typeKey]?.reinforce || s.captured) return 0;   // (a re-crewed team: nobody of its kind at the post)
     if (!squadInBase(s) && !fieldPointOf(s)) return 0;
     if (s.team === "player" && popRoom() < 1) return 0;   // the pop cap (algEconomy.js POP; the French's)
     // (A doctrine may cut it: the Légion's esprit de corps — algDoctrines.js.)

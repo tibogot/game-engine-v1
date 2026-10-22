@@ -196,4 +196,7 @@ export default {
   "{w} ramassé.": "{w} picked up.",
   "Une <b>arme</b> est restée au sol (cerclée) : sélectionnez des hommes et faites un <b>clic droit</b> dessus pour la ramasser.": "A <b>weapon</b> lies on the ground (ringed): select men and <b>right-click</b> it to pick it up.",
   "FM 24/29": "FM 24/29",
+  "{w} : vos hommes le servent.": "{w}: your men are crewing it.",
+  "Mortier de 60": "60 mm mortar",
+  "Canon sans recul de 57": "57 mm recoilless rifle",
 };
