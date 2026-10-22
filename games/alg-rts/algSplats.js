@@ -240,12 +240,40 @@ export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
   // down the road, each piste its own 10 km apart) keeps the noise continuous
   // from strip to strip. Drawn LAST, over everything else. ──
   const strips = [];
+  // (SMOOTHED first, 2026-10-23 — you: "when the road turns it's doing some straight angular shape": straight 8 m
+  // strips met at up to 88 deg on a bend. The line relaxed into curves, then a strip every ~3 m: a bend turns a few
+  // degrees from one strip to the next.)
+  const STEP = 3;
+  const resample = (Q) => {
+    const out = [Q[0]];
+    let carry = 0;
+    for (let k = 0; k < Q.length - 1; k++) {
+      const [ax, az] = Q[k], [bx, bz] = Q[k + 1], d = Math.hypot(bx - ax, bz - az);
+      let u = STEP - carry;
+      while (u <= d) { out.push([ax + (bx - ax) * (u / d), az + (bz - az) * (u / d)]); u += STEP; }
+      carry = d - (u - STEP);
+    }
+    const e = Q[Q.length - 1], l = out[out.length - 1];
+    if (Math.hypot(e[0] - l[0], e[1] - l[1]) > STEP * 0.3) out.push(e);
+    return out;
+  };
+  const smooth = (P) => {
+    // resampled every STEP m, then relaxed (each point toward its neighbours', the ends held): a corner becomes
+    // a curve ~15 m long; resampled again so the strips stay evenly spaced
+    let Q = resample(P.map((p) => [p.x, p.z]));
+    for (let it = 0; it < 24; it++) {
+      const R = Q.map((q) => q.slice());
+      for (let k = 1; k < Q.length - 1; k++) for (let c = 0; c < 2; c++) R[k][c] = Q[k][c] * 0.5 + (Q[k - 1][c] + Q[k + 1][c]) * 0.25;
+      Q = R;
+    }
+    return resample(Q).map(([x, z]) => ({ x, z }));
+  };
   TRACK_LINES.forEach((t, ti) => {
     if (t.kind !== "piste") return;
-    const L = t.line;
+    const L = smooth(t.line);
     let arc = ti * 10000;
-    for (let i = 0; i + 2 < L.length; i += 2) {
-      const a = L[i], b = L[i + 2];
+    for (let i = 0; i + 1 < L.length; i++) {
+      const a = L[i], b = L[i + 1];
       const dx = b.x - a.x, dz = b.z - a.z, d = Math.hypot(dx, dz) || 1;
       strips.push({
         x: (a.x + b.x) / 2, z: (a.z + b.z) / 2, w: 6.4, l: d * 1.45, yaw: Math.atan2(-dx / d, dz / d),
