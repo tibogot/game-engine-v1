@@ -78,6 +78,8 @@ export const MAP = {
     "terracesD1", "terracesD2", "terracesD3", "gardenD", "threshD", "terracesOpen1", "terracesOpen2", "terracesOpen3", "terracesOpen4"],
   // (the old almond terraces of the open slopes, algLandmarks: none)
   scenery: { over: { terraces: 0 } },
+  // (no trampled-yard splat at the villages: its 2.4 m photo repeated across the square — seen)
+  splats: { yards: false },
   fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
   town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], replacesHamlet: true },
 };

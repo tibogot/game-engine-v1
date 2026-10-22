@@ -202,8 +202,9 @@ export async function createAlgSplats(app, { seed = 1957, margin = 90 } = {}) {
   for (const s of LAYOUT.sites) {
     if (!["hamlet", "dechra", "ksar", "french", "aln", "koubba"].includes(s.kind)) continue;
     const r = s.r ?? 20;
-    // Trampled ground — the yard.
-    out.push({ x: s.x, z: s.z, w: r * 1.5, l: r * 1.7, yaw: rnd() * 6.28, mat: M.path, opacity: 0.75, tint: MATS.path.tint,
+    // Trampled ground — the yard. (MAP.splats.yards false: none — the new Aurès, 2026-10-22, you: its 2.4 m
+    // photo repeated across the 60 m square, "typical repeating tiling texture")
+    if (MAP.splats?.yards !== false) out.push({ x: s.x, z: s.z, w: r * 1.5, l: r * 1.7, yaw: rnd() * 6.28, mat: M.path, opacity: 0.75, tint: MATS.path.tint,
       tile: 2.4, soft: 0.5, push: 0.5, warp: 0.45, normal: 0.8, _layer: -2 });
     // Rubble AT THE WALLS: fallen plaster and stone lies where it fell, along
     // the foot of a building (a nav-blocked cell within 2.5 m), never in the
