@@ -540,6 +540,13 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       SEAM: thin dark glossy sealant, wandering a few cm. No visible break at piece joints (3 m above).
       A/B: ?asphalt=old (the old road) or ?asphalt=asphalt_track. Tunables: window.__roadScan / __roadWear.
       OPEN: judge the sparkle AT SPEED; GPU ms at a quiet moment; 1k instead of 2k if it costs.
+- [x] **HOW FORGIVING IS EACH JUMP** (user, 2026-10-23: "your autopilot makes the car always centred … in real
+      life landing perfectly on a tiny road is really hard"). The builder replays every jump of the test lap
+      from its take-off with a player's mistake: turned ±1/2/3/4/6° and 3–15 % slower (+5/+10 % faster);
+      the car still lines itself up in the air. Panel rows per jump, green / amber / red, click = go to it.
+      ~10 s per jump, in slices after the lap. FOUND: every White kicker forgives ±1° (White 1's second:
+      ±0°, and +10 % fast falls); the drops ±1-2°; speed −15 % is fine on all of them. Next: air steering,
+      speed made predictable (boost before big kickers, catch pads), wider landings after long flights.
 - [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
       wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
       used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner

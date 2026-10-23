@@ -12,6 +12,7 @@ import { TILES, integrate, socketMatrix, leanIn, leanOut, deckFrame, SECTIONS, D
 import { buildOldLook, createOldLookMaterials, edgesOf } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules, magnetZones, wallCutZones, JUMP } from "./carRules.js";
+import { LANDING } from "./landing.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
@@ -720,7 +721,7 @@ async function runPrediction() {
   const token = ++predToken;
   const order = orderedPieces();
   if (order.length < 2) { prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 }; return; }
-  prediction = { state: "running", lipSpeed: prediction.lipSpeed, launch: prediction.launch, endSpeed: prediction.endSpeed, fail: null, lapS: null, topKmh: 0, ticks: 0 };
+  prediction = { state: "running", lipSpeed: prediction.lipSpeed, launch: prediction.launch, endSpeed: prediction.endSpeed, fail: null, lapS: null, topKmh: 0, ticks: 0, forgive: new Map() };
   renderStatus();
   // collision, as drive.js: decks (road hold on banked pieces) + rail collision proxies
   const col = (geometry, M, userData = {}) => ({ geometry, matrixWorld: M, userData, updateMatrixWorld() {} });
@@ -737,7 +738,7 @@ async function runPrediction() {
       // roll axis. (On the deck itself, the autopilot's touchdown on White 3's bowl came out wrong: the test
       // lap fell there while the drive page's autopilot landed it perfect, 2026-10-22.)
       const Pr = f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7);
-      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
+      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, hw, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
     }
   }
   // the pieces BESIDE the road (and their own road): solid deck and rails, not on the line
@@ -791,11 +792,19 @@ async function runPrediction() {
     return { uid: q.uid, kind: q.kind, host: q.on, inv: M.clone().invert(), ...OBSTACLES[q.kind].boost };
   });
   let onPad = null, onPadTick = -1e9;
+  // every take-off as the car left it (world pose + velocities), for the forgiveness check after the lap
+  const takeoffs = new Map();
+  let lastTakeoff = null;
+  const snapTakeoff = (uid, label, tick, idx, up) => {
+    lastTakeoff = { uid, label, tick, idx, up: up.clone(), pos: car.body.pos.clone(), vel: car.body.vel.clone(), quat: car.body.quat.clone(), angVel: car.body.angVel.clone(), air: null };
+    takeoffs.set(uid, lastTakeoff);
+  };
   const endsOnLip = lips.has(lastUid) || padZones.some((z) => z.host === lastUid);
   prediction.openJump = false;
   let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0, sliceT0 = performance.now();
   const nose = new THREE.Vector3();
-  const pilot = createAutopilot(avoidObstacles(ride, track.props)); // the drive page's autopilot (wall cut, air spin), its line round the obstacles
+  const pilotRide = avoidObstacles(ride, track.props);
+  const pilot = createAutopilot(pilotRide); // the drive page's autopilot (wall cut, air spin), its line round the obstacles
   const magnets = magnetZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), TILES, integrate);
   const cutZones = wallCutZones(order.map((pc) => ({ id: pc.id, M: built.get(pc.uid).M })), Object.fromEntries(order.map((pc) => [pc.id, { b: piece(pc.id, pcOE(pc)).b }])));
   const rules = createCarRules(car, { boostPads: boosts, magnets, cutZones }); // the drive page's rules: wall cut (bowls, quarter pipes), landing boost, pads, magnets
@@ -838,6 +847,7 @@ async function runPrediction() {
       const inv = exits.get(ride[idx].uid).clone().invert();
       const rInv = new THREE.Matrix4().extractRotation(inv);
       launch.set(ride[idx].uid, { id: track.pieces.find((q) => q.uid === ride[idx].uid)?.id, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(inv), V: car.body.vel.clone().applyMatrix4(rInv), U: carUp.clone().applyMatrix4(rInv), F: new THREE.Vector3(0, 0, 1).applyQuaternion(car.body.quat).applyMatrix4(rInv) });
+      snapTakeoff(ride[idx].uid, TILES[track.pieces.find((q) => q.uid === ride[idx].uid)?.id]?.label ?? "Jump", tick, idx, carUp);
       flying = ride[idx].uid;
       airT = 0;
     }
@@ -850,10 +860,12 @@ async function runPrediction() {
       const carUp = new THREE.Vector3(0, 1, 0).applyQuaternion(car.body.quat);
       const rInv = new THREE.Matrix4().extractRotation(onPad.inv);
       launch.set(onPad.uid, { id: onPad.kind, P: car.body.pos.clone().addScaledVector(carUp, -0.55).applyMatrix4(onPad.inv), V: car.body.vel.clone().applyMatrix4(rInv), U: carUp.clone().applyMatrix4(rInv), F: new THREE.Vector3(0, 0, 1).applyQuaternion(car.body.quat).applyMatrix4(rInv) });
+      snapTakeoff(onPad.uid, OBSTACLES[onPad.kind]?.label ?? "Jump pad", tick, idx, carUp);
       flying = onPad.host; // (a pad on the last piece: the open jump, as off a lip)
       airT = 0;
       onPad = null;
     }
+    if (grounded && lastTakeoff && lastTakeoff.air == null) lastTakeoff.air = airT; // its flight time
     if (grounded) flying = null; else airT += FIXED_DT;
     if (flying === lastUid && airT > 0.5) { prediction.openJump = true; break; }
     wasGrounded = grounded;
@@ -899,6 +911,92 @@ async function runPrediction() {
   runChecks();
   statusKey = "";
   renderStatus();
+  // a real flight (≥ 0.8 s, as the landing judge counts one), in driving order
+  const jumps = [...takeoffs.values()].filter((t) => t.air != null && t.air >= LANDING.minAir).sort((a, b) => a.tick - b.tick);
+  if (jumps.length) runForgiveness(token, { ground, obs, boosts, magnets, cutZones, ride: pilotRide, lowY, jumps });
+}
+
+// ---------- HOW FORGIVING IS EACH JUMP (user, 2026-10-23: "your autopilot makes the car always centred and
+// do the best move … in real life landing perfectly on a tiny road is really hard") ----------
+// The test lap proves a track is POSSIBLE; this says whether a person can land it. Each jump is flown again
+// from its take-off with a player's mistake added: the flight turned a few degrees (a late correction at the
+// lip) or a few % slower (a lift off the throttle) — measured: 2-3° or 8 % slow was enough to fall off the
+// test track's jumps. The car still lines itself up in the air (the best a player does); it must land and be
+// on a deck 1.5 s later. One car, reused; slices like the lap, after it.
+const FORGIVE = { deg: [1, 2, 3, 4, 6], slow: [0.97, 0.94, 0.9, 0.85], fast: [1.05, 1.1] };
+/** green / amber / red from the two tolerances: ≥ 4° and down to −10 % is forgiving; < 2° or < −6 % is tight */
+function forgiveTone(f) {
+  if (!f.done || !f.base) return "dim";
+  const slow = 1 - (f.slow ?? 1);
+  if (f.deg >= 4 && slow >= 0.1 && f.fast) return "good";
+  if (f.deg >= 2 && slow >= 0.06) return "fair";
+  return "tight";
+}
+let forgiveCar = null;
+async function runForgiveness(token, ctx) {
+  forgiveCar ??= new Vehicle({ scene: predScene, showArrows: false });
+  const car = forgiveCar;
+  car.SUBSTEPS = 3;
+  car.setBvh(ctx.ground.ground, ctx.ground.solids);
+  car.getFloorY = () => FLOOR_Y;
+  car.setSolidCapsules([]);
+  car.setDynamicMovers(ctx.obs.movers);
+  car.enabled = true;
+  const pilot = createAutopilot(ctx.ride);
+  const q = new THREE.Quaternion();
+  let sliceT0 = performance.now();
+  // one flight from take-off `to`, turned `deg` round the car's up and its speed × `sp`: lands and stays?
+  // null = a newer edit took over
+  const why = (to, deg, sp, r, p) => { if (globalThis.__fgDebug) globalThis.__fgDebug.push({ uid: to.uid, deg, sp, r, y: Math.round(p.y) }); return false; };
+  async function fly(to, deg, sp) {
+    q.setFromAxisAngle(to.up, (deg * Math.PI) / 180);
+    car.respawnAt(to.pos, to.quat.clone().premultiply(q));
+    car.body.vel.copy(to.vel).applyQuaternion(q).multiplyScalar(sp);
+    car.body.angVel.copy(to.angVel).applyQuaternion(q);
+    const rules = createCarRules(car, { boostPads: ctx.boosts, magnets: ctx.magnets, cutZones: ctx.cutZones });
+    pilot.seek(to.idx);
+    let down = -1;
+    for (let k = 1; k < 120 * 12; k++) {
+      ctx.obs.setTime((to.tick + k) * FIXED_DT);
+      rules.step(pilot.input(car), FIXED_DT);
+      const p = car.body.pos;
+      if (p.y < ctx.lowY - 60 || p.y < FLOOR_Y + 2) return why(to, deg, sp, "fell", p); // fell (to the floor, or past the lowest road)
+      const g = car.groundedCount > 0;
+      if (g && down < 0 && k > 30) down = k;
+      if (down < 0 && k > 120 * 9) return why(to, deg, sp, "never down", p); // never came down
+      if (down >= 0 && k - down > 180) {
+        // 1.5 s after touching down: on a deck, near the line (a wide landing counts its own width)
+        const r = ctx.ride[pilot.idx];
+        const ok = g && p.distanceTo(r.P) < r.hw + 6;
+        return ok || why(to, deg, sp, `off: grounded ${g}, ${p.distanceTo(r.P).toFixed(1)} m from the line (hw ${r.hw})`, p);
+      }
+      if ((k & 7) === 7 && performance.now() - sliceT0 > PRED_SLICE_MS) {
+        await new Promise((r) => requestAnimationFrame(() => r()));
+        if (token !== predToken) return null;
+        sliceT0 = performance.now();
+      }
+    }
+    return false;
+  }
+  for (const [n, to] of ctx.jumps.entries()) {
+    const f = { n: n + 1, uid: to.uid, label: to.label, base: true, deg: 0, slow: null, fast: true, done: false };
+    prediction.forgive.set(to.uid, f);
+    statusKey = ""; renderStatus();
+    const base = await fly(to, 0, 1);
+    if (base === null) return;
+    if (!base) { f.base = false; f.done = true; continue; }
+    for (const d of FORGIVE.deg) {
+      const a = await fly(to, d, 1); if (a === null) return;
+      const b = a && await fly(to, -d, 1); if (b === null) return;
+      if (!(a && b)) break;
+      f.deg = d;
+    }
+    f.slow = 1;
+    for (const s of FORGIVE.slow) { const ok = await fly(to, 0, s); if (ok === null) return; if (!ok) break; f.slow = s; }
+    for (const s of FORGIVE.fast) { const ok = await fly(to, 0, s); if (ok === null) return; if (!ok) { f.fast = false; break; } }
+    f.done = true;
+    statusKey = ""; renderStatus();
+  }
 }
 
 /** Ends with no road after them. A lip whose flight has a landing (`flightFrom`) is not open. */
@@ -2462,14 +2560,25 @@ function predictionLine() {
     (P.rings ? (P.rings.taken === P.rings.of
       ? `<div class="row"><span>air rings</span><b>${P.rings.taken}/${P.rings.of} flown through</b></div>`
       : `<div class="warn">⚠ the car misses ${P.rings.of - P.rings.taken} air ring${P.rings.of - P.rings.taken > 1 ? "s" : ""} — no author time</div>`) : "") +
-    (P.landings?.length ? `<div class="row"><span>landings (lined up)</span><b>${P.landings.filter((g) => g === "perfect").length}/${P.landings.length} perfect</b></div>` : "");
+    (P.landings?.length ? `<div class="row"><span>landings (lined up)</span><b>${P.landings.filter((g) => g === "perfect").length}/${P.landings.length} perfect</b></div>` : "") +
+    forgiveLines();
+}
+/** Each jump's tolerance: how crooked / how slow a PLAYER may take off and still land (runForgiveness). */
+function forgiveLines() {
+  const F = [...(prediction.forgive?.values() ?? [])];
+  if (!F.length) return "";
+  const txt = (f) => !f.done ? "testing…" : !f.base ? "can't replay" :
+    `±${f.deg}° · ${f.slow < 1 ? `−${Math.round((1 - f.slow) * 100)} %` : "no slower"}${f.fast ? "" : " · too fast falls"}`;
+  return `<div class="forgive"><div class="row"><span>how forgiving (crooked · slower)</span></div>` +
+    F.map((f) => `<button class="fg ${forgiveTone(f)}" data-act="jump" data-uid="${f.uid}" title="Take off this many degrees crooked, or this much slower, and still land (the car lines itself up in the air). Click: go to the jump"><span>${f.n} · ${f.label}</span><b>${txt(f)}</b></button>`).join("") +
+    `</div>`;
 }
 function renderStatus() {
   const names = { end: "open end", road: "on the road", side: "beside it", arc: "flight arc", local: "local grid", world: "world grid" };
   const many = !tileBase ? selection() : [];
   const multi = many.length > 1;
   const selPc = sel != null && !tileBase && !multi ? track.pieces.find((p) => p.uid === sel) ?? (track.props ?? []).find((p) => p.uid === sel) : null;
-  const k = [freeHold, snap?.type, snap?.bad, snap?.where, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length, JSON.stringify(track.spawn ?? null)].join("|");
+  const k = [freeHold, snap?.type, snap?.bad, snap?.where, tileBase, hand, edges, sel, selPc?.id, many.join(), copiedNote, !!clipboard, lapLineOn, editMode, editMsg, gizmoMode, gridMode, gridStep, buildY, rot.yaw, rot.pitch, rot.roll, arcSpeed, track.pieces.length, problems.messages.join(), prediction.state, prediction.fail?.uid, snap?.note, track.authorTime, track.pieces.filter((p) => p.cp).length, JSON.stringify(track.spawn ?? null), [...(prediction.forgive?.values() ?? [])].map((f) => `${f.uid}${f.done}${f.deg}${f.slow}${f.fast}${f.base}`).join()].join("|");
   if (k === statusKey) return;
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
@@ -2541,6 +2650,20 @@ $("status").addEventListener("click", (e) => {
   if (act === "spawnkmh" && track.spawn) { const i = SPAWN_SPEEDS.indexOf(track.spawn.kmh ?? 0); track.spawn.kmh = SPAWN_SPEEDS[(i + 1) % SPAWN_SPEEDS.length]; save(); statusKey = ""; renderStatus(); return; }
   if (act === "spawndel" && track.spawn) { snapshot(); delete track.spawn; rebuild(); statusKey = ""; renderStatus(); return; }
   if (act === "refit") { refitLandings(); return; }
+  if (act === "jump") {
+    // select the jump's lip (a pad: the piece it stands on) and bring the camera to it
+    const uid = Number(e.target.closest("button").dataset.uid);
+    const pad = (track.props ?? []).find((p) => p.uid === uid);
+    const pc = track.pieces.find((p) => p.uid === (pad?.on ?? uid));
+    if (!pc || !built.get(pc.uid)) return;
+    sel = pc.uid; refreshSelection();
+    const at = new THREE.Vector3().setFromMatrixPosition(built.get(pc.uid).exit);
+    camera.position.add(at.clone().sub(controls.target));
+    controls.target.copy(at);
+    controls.update();
+    statusKey = ""; renderStatus();
+    return;
+  }
   if (!act || sel == null) return;
   const adjA = /^adj:(\w+):(-?1)$/.exec(act);
   if (adjA) { adjustPlaced(sel, adjA[1], Number(adjA[2]) * (e.shiftKey ? 4 : 1)); return; }

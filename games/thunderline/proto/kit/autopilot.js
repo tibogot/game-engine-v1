@@ -132,6 +132,8 @@ export function createAutopilot(ride) {
     get idx() { return idx; },
     get airAim() { return airAim; },
     reset() { idx = 0; touchCache = null; },
+    /** Start from ride point i (a replay that begins mid-track: the builder's jump forgiveness check). */
+    seek(i) { idx = i; touchCache = null; },
     /** Where along the ride the car is (also while a player drives: the fall camera needs it). */
     locate(car) {
       const p = car.body.pos;
