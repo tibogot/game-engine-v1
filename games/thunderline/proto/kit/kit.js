@@ -244,6 +244,17 @@ export function buildGeometry(tile, built = integrate(tile), opts = {}) {
 // ---------------------------------------------------------------- the lab's tiles
 const turnLen = (R, ang, ramp) => R * ang + ramp; // core radius R, eased ends
 
+// THE WALL RIDES stand up to VERTICAL (user, 2026-10-23, Apex Rush shots 01/02/07: "do we have full 90°
+// banked shape?" — the Wallride leaned 80°). Measured (trackRun, entries 90–216 km/h, all through, no air):
+//   - banked the usual way (the low edge on the road, the middle RISING hw·sin(lean)) a vertical wall cost
+//     speed — Wallride 216 → 158 km/h — and the WIDE wall's middle rose 24 m and dropped 24 m on the way
+//     out, faster than the car could follow: 0.5–1.1 s of air.
+//   - ROLLED ROUND THE CAR'S LINE (twistPivot 0.7, as the twist), the road's middle stays on its path:
+//     Wallride 216 → 198, the Wide wall 216 → 212, never airborne. The exits are where they were.
+//   - Not road-held: on a road-held contact the car's wall rule cuts the engine past 45° of surface tilt.
+const WALL_LEAN = 90 * DEG;
+const WALL_PIVOT = 0.7;
+const WALL_EASE = 50 * DEG; // the Wallride's lean where its roll-out starts (see the tile)
 export const TILES = {
   straight_64: { label: "Straight 64", segs: [{ L: 64 }] },
   // GLASS (user, 2026-10-23: a road with a glass window in it, as the old game's and Apex Rush's): oldLook.buildGlassLook
@@ -338,12 +349,30 @@ export const TILES = {
     ],
     marks: [{ kind: "landing", from: 0, to: 24 }],
   },
+  // (80° until 2026-10-23: WALL_LEAN above, rolled round the car's line)
   wallride_90: {
     label: "Wallride 90°",
+    twistPivot: WALL_PIVOT,
     segs: [
-      { L: 44, turn: 15 * DEG, ramp: 22, leanIn: 0, leanOut: 80 * DEG },
-      { L: turnLen(48, 60 * DEG, 0), turn: 60 * DEG, leanIn: 80 * DEG, leanOut: 80 * DEG },
-      { L: 44, turn: 15 * DEG, ramp: 22, leanIn: 80 * DEG, leanOut: 0 },
+      // the ROLL-OUT starts half-way round the wall (a lean changes no position: the exit is where it was):
+      // flattening over the last 44 m alone flicked the car off the road at 216 km/h (1.1 s of air after it)
+      { L: 44, turn: 15 * DEG, ramp: 22, leanIn: 0, leanOut: WALL_LEAN },
+      { L: turnLen(48, 30 * DEG, 0), turn: 30 * DEG, leanIn: WALL_LEAN, leanOut: WALL_LEAN },
+      { L: turnLen(48, 30 * DEG, 0), turn: 30 * DEG, leanIn: WALL_LEAN, leanOut: WALL_EASE },
+      { L: 44, turn: 15 * DEG, ramp: 22, leanIn: WALL_EASE, leanOut: 0 },
+    ],
+  },
+  // A WIDE WALL (Apex Rush shot 07: a whole wall to ride, you pick your height): the Wallride's shape on the
+  // 48 m section, at R 96, 96 m roll-in and out — standing up, a 48 m high wall round the turn, the car's
+  // line along its middle
+  wall_wide_90: {
+    label: "Wide wall 90°",
+    section: "wide",
+    twistPivot: WALL_PIVOT,
+    segs: [
+      { L: 96, turn: 15 * DEG, ramp: 58, leanIn: 0, leanOut: WALL_LEAN },
+      { L: turnLen(96, 60 * DEG, 0), turn: 60 * DEG, leanIn: WALL_LEAN, leanOut: WALL_LEAN },
+      { L: 96, turn: 15 * DEG, ramp: 58, leanIn: WALL_LEAN, leanOut: 0 },
     ],
   },
   loop_28: {
@@ -491,6 +520,9 @@ for (const [id, a] of [["landing_20", 20], ["banked_landing_20", 20], ["landing_
  * TILTED (user, 2026-10-21, Apex Rush: land with the air roll), `fitted_landing_<angle>_<D>_t<tilt>`:
  * the catch zone leans <tilt>° (signed, + = the right side low) and the curve rolls it back to flat, so
  * the exit is level and flat — the player rolls the car in the air to match (landing.js grades it).
+ * WIDE (user, 2026-10-23: "make it usable to human beings, not only your autopilot"), `…_w`: the same slope
+ * on the 48 m section — a take-off a few degrees crooked still lands (a road-wide one forgave ±1° on the
+ * White jumps). A Funnel 48 → 16 takes the road back down to width after it.
  */
 /**
  * Other modules can add tiles (oldTiles.js brings the old kit's bowl and flip ramp). A resolver
@@ -612,14 +644,15 @@ export function ensureTile(id) {
     };
     return TILES[id];
   }
-  const m = /^fitted_landing_(\d+)_(\d+)(?:_t(-?\d+))?$/.exec(id);
+  const m = /^fitted_landing_(\d+)_(\d+)(?:_t(-?\d+))?(_w)?$/.exec(id);
   if (!m) return undefined;
-  const angle = Number(m[1]), D = Number(m[2]), tilt = Number(m[3] ?? 0) * DEG;
+  const angle = Number(m[1]), D = Number(m[2]), tilt = Number(m[3] ?? 0) * DEG, wide = !!m[4];
   const lean = tilt ? [{ leanIn: tilt, leanOut: tilt }, { leanIn: tilt, leanOut: 0 }] : [{}, {}];
   TILES[id] = {
     id,
-    label: `${tilt ? "Tilted" : "Fitted"} landing ${angle}° · ${D} m${tilt ? ` · ${Math.abs(m[3])}° ${tilt > 0 ? "right" : "left"} low` : ""}`,
+    label: `${tilt ? "Tilted" : "Fitted"} landing ${angle}° · ${D} m${wide ? " · wide" : ""}${tilt ? ` · ${Math.abs(m[3])}° ${tilt > 0 ? "right" : "left"} low` : ""}`,
     landAngle: angle,
+    ...(wide ? { section: "wide" } : {}),
     ...(tilt ? { tilt } : {}),
     segs: [{ L: D, ...lean[0] }, { L: Math.max(44, Math.round(angle * 2.2)), pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1)), ...lean[1] }],
     marks: [{ kind: "landing", from: 0, to: D }],

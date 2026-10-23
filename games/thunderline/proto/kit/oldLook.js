@@ -49,7 +49,7 @@ export function createOldLookMaterials() {
  * in Thunderline's colours (navy, bolt blue, white, signal orange — never their orange-black livery),
  * following the deck through every roll. Only these pieces (and their _L):
  */
-export const STRIPED = new Set(["twist_120", "half_loop_28", "loop_28", "wallride_90", "uturn_wall_32"]);
+export const STRIPED = new Set(["twist_120", "half_loop_28", "loop_28", "wallride_90", "wall_wide_90", "uturn_wall_32"]);
 const NAVY = [0.06, 0.09, 0.2], BOLT = [0.25, 0.82, 1.0], WHITE = [0.93, 0.95, 0.98], SIGNAL = [1.0, 0.48, 0.1];
 // across the underside (x from −1 to 1 of the slab's half width) and down each side (0 top … 1 bottom)
 const UNDER_BANDS = [[-1, -0.62, NAVY], [-0.62, -0.38, BOLT], [-0.38, -0.2, WHITE], [-0.2, 0.2, SIGNAL], [0.2, 0.38, WHITE], [0.38, 0.62, BOLT], [0.62, 1, NAVY]];

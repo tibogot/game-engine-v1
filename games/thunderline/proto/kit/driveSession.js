@@ -18,6 +18,7 @@ import { TILES, integrate, ensureTile, SECTIONS, socketMatrix, leanOut } from ".
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { library, campaign, contentKey, settings } from "../../app/library.js";
+import { ghosts } from "../../app/ghostStore.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune, CAR_TUNE } from "./carTune.js";
 import { createCarRules, magnetZones, wallCutZones } from "./carRules.js";
@@ -617,12 +618,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const rules = createCarRules(vehicle, { boostPads, magnets, cutZones });
     const ghostRules = createCarRules(ghostCar, { boostPads, magnets, cutZones });
     const pilot = createAutopilot(avoidObstacles(lay.ride, track?.props)); // autopilot.js (shared with the builder's prediction and the tests), its line round the obstacles
-    const GHOST_KEY = `thunderline.ghost.${trackKey}`;
-    let ghostData = null;
-    try { ghostData = JSON.parse(localStorage.getItem(GHOST_KEY)); } catch {}
+    // (the ghost lives in IndexedDB — app/ghostStore.js: in localStorage the ghosts filled the 5 MB and every save failed)
+    const ghostData = await ghosts.get(trackKey);
 
     S = {
-      o, lay, group, race, gates, trackKey, medals, BEST_KEY, GHOST_KEY, best, bakeMs, rules, ghostRules, pilot, ghostData,
+      o, lay, group, race, gates, trackKey, medals, BEST_KEY, best, bakeMs, rules, ghostRules, pilot, ghostData,
       ghostPlayer: null, recorder: createGhostRecorder(), landings: [], startQuat, spawnPos, lineSpawn, spawnVel,
       KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
@@ -810,7 +810,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
         try { localStorage.setItem(S.BEST_KEY, JSON.stringify(S.best)); } catch {}
         // the new best becomes the ghost (from the next restart)
         S.ghostData = S.recorder.finish(e.time);
-        try { localStorage.setItem(S.GHOST_KEY, JSON.stringify(S.ghostData)); } catch (err) { console.warn("[ghost] not saved", err); }
+        ghosts.set(S.trackKey, S.ghostData);
       }
       const medal = medalFor(e.time, S.medals);
       if (S.o.campaignRec) campaign.recordFinish(S.o.campaignRec, e.time, medal);

@@ -57,7 +57,7 @@ const CATS = [
   { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "glass_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
-  { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "uturn_wall_32"] },
+  { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "wall_wide_90", "uturn_wall_32"] },
   { id: "slope", label: "Slope", tiles: ["adj_slope", "slope_up_12", "slope_down_12", "platform_up_12", "platform_down_12", "helix_up_360", "helix_down_360", "rollers_64", "drop_16"] },
   // the take-offs, then what you land on
   { id: "ramps", label: "Ramps", tiles: ["adj_kicker", "kicker_20", "launch_45", "launch_60", "quarter_pipe", "roll_kicker", "gap_jump", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },
@@ -99,10 +99,23 @@ const recent = [];
 function load() { const t = library.get(trackId)?.track; return t ? JSON.parse(JSON.stringify(t)) : null; }
 // every edit saves the track; its thumbnail is re-rendered a moment after the edits stop
 let thumbTimer = null;
+// A SAVE THAT FAILS SAYS SO (2026-10-23: the browser's storage filled up and every edit was lost without a
+// word — the track was gone at the next visit). A red line at the top until a save works again.
+let saveWarnEl = null;
+function saved(ok) {
+  if (ok) { if (saveWarnEl) saveWarnEl.style.display = "none"; return; }
+  if (!saveWarnEl) {
+    saveWarnEl = document.createElement("div");
+    saveWarnEl.style.cssText = "position:fixed;top:58px;left:50%;transform:translateX(-50%);z-index:50;background:#2a0d12;border:1px solid #ff4d5e;color:#ffd6db;padding:6px 12px;font:600 13px Barlow, sans-serif;pointer-events:none";
+    saveWarnEl.textContent = "⚠ This track is NOT being saved: the browser's storage is full. Delete tracks you don't need (menu → My tracks).";
+    document.body.appendChild(saveWarnEl);
+  }
+  saveWarnEl.style.display = "";
+}
 function save() {
-  library.saveTrack(trackId, track);
+  saved(library.saveTrack(trackId, track));
   clearTimeout(thumbTimer);
-  thumbTimer = setTimeout(() => trackThumb().then((url) => url && library.saveTrack(trackId, track, url)), 1200);
+  thumbTimer = setTimeout(() => trackThumb().then((url) => url && saved(library.saveTrack(trackId, track, url))), 1200);
 }
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
 function restore(from, to) {
@@ -123,6 +136,7 @@ let fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_32`).id;
 // TILTED LANDINGS (user, 2026-10-21, Apex Rush: the air roll must matter): with the Fitted landing in
 // hand, ← / → lean its catch zone (5° steps, ±45; + = the right side low); it rolls back to flat by its exit
 let landTilt = 0;
+let landWide = false; // a WIDE fitted landing (48 m): kit.js `…_w`
 // "catch_tube": the same idea as a TUBE whose wide portal is laid on the jump's arc (kit.js ensureTile):
 // the car flies into it and comes out level in a pipe (user, 2026-10-21: "jump to enter inside a tube in air")
 const CATCH = "catch_tube";
@@ -869,6 +883,7 @@ async function runPrediction() {
       onPad = null;
     }
     if (grounded && lastTakeoff && lastTakeoff.air == null) lastTakeoff.air = airT; // its flight time
+    if (globalThis.__predTrace && tick % 30 === 0) globalThis.__predTrace.push([tick / 120, ride[idx].uid, Math.round(v * 3.6), grounded ? 1 : 0, Math.round(p.y)]); // (debug: the lap, 4 a second)
     if (grounded) flying = null; else airT += FIXED_DT;
     if (flying === lastUid && airT > 0.5) { prediction.openJump = true; break; }
     wasGrounded = grounded;
@@ -1823,7 +1838,7 @@ function computeSnap() {
       // FITTED LANDING (fittedOnArc): the slope at the arc's own fall angle where you point (5° steps,
       // 10–45°), from where the NEAR-speed car comes down at that height until the FAST one is down too.
       // Leaned by the land tilt (not the Bank: that would leave its exit banked too)
-      const f = fittedOnArc(best.a, best.k, landTilt);
+      const f = fittedOnArc(best.a, best.k, landTilt, landWide);
       fittedId = f.id;
       const ft = TILES[f.id];
       const roll = rollNote(best.a, f.m, ft.tilt ?? 0);
@@ -1893,7 +1908,7 @@ let snapKey = "";
 const _cm = new THREE.Matrix4();
 function snapInputs() {
   _cm.copy(camera.matrixWorld);
-  return [mouse.x, mouse.y, tileBase, hand, edges, rot.yaw, rot.pitch, rot.roll, buildY, gridMode, gridStep, arcSpeed, landTilt, freeHold, bowlR,
+  return [mouse.x, mouse.y, tileBase, hand, edges, rot.yaw, rot.pitch, rot.roll, buildY, gridMode, gridStep, arcSpeed, landTilt, landWide, freeHold, bowlR,
     ADJUSTABLE[tileBase] ? JSON.stringify(adjParams[tileBase]) : "", tileBase === STAMP ? clipboard?.n : "", trackVer, track.spawn?.kmh,
     _cm.elements.map((x) => x.toFixed(3)).join(",")].join("|");
 }
@@ -1941,7 +1956,7 @@ function suggestionsFor(end) {
     for (const c of CATS) for (const base of c.tiles) for (const h of [1, -1]) {
       if (base === RING || isObstacle(base)) continue; // not road
       const id = tileId(base, h);
-      if (h < 0 && id === base) continue;
+      if ((h < 0 && id === base) || !TILES[id]) continue; // (no such mirror)
       if (Math.abs(deg(leanIn(TILES[id])) - deg(end.lean)) < 3 && !out.some((o) => o.id === id)) out.push({ base, h, id });
     }
     const back = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) <= 3), keep = out.filter((o) => Math.abs(deg(leanOut(TILES[o.id]))) > 3);
@@ -2184,7 +2199,7 @@ function editWith(id) {
 // Fitted landing (computeSnap), redone on the jump's arcs as they fly NOW, at the height the landing
 // stands at: its start where the near arc comes down to that height, its angle that fall's, its length
 // until the fast arc lands on it too. The road after it follows (reflow).
-function fittedOnArc(a, k, tilt = 0) {
+function fittedOnArc(a, k, tilt = 0, wide = false) {
   const n = downAt(a.near, a.fast.pts[k].y) ?? { p: a.fast.pts[k].clone(), T: a.fast.tan[k].clone() };
   let T = n.T;
   const fall = Math.asin(THREE.MathUtils.clamp(-T.y, -1, 1)) / DEG;
@@ -2203,8 +2218,8 @@ function fittedOnArc(a, k, tilt = 0) {
   D = Math.max(24, Math.ceil(D / 4) * 4);
   // a TILTED one keeps its low edge on the path plane (kit.js deckFrame raises the centre hw·sin): laid
   // that much lower, the car meets the deck's middle where the flat one would be
-  const p = P0.clone().addScaledVector(U, -SECTIONS.road.hw * Math.abs(Math.sin(tilt * DEG)));
-  return { id: ensureTile(`fitted_landing_${angle}_${D}${tilt ? `_t${tilt}` : ""}`).id, m: socketMatrix({ p, T, U, R }), P0, T, U };
+  const p = P0.clone().addScaledVector(U, -SECTIONS[wide ? "wide" : "road"].hw * Math.abs(Math.sin(tilt * DEG)));
+  return { id: ensureTile(`fitted_landing_${angle}_${D}${tilt ? `_t${tilt}` : ""}${wide ? "_w" : ""}`).id, m: socketMatrix({ p, T, U, R }), P0, T, U };
 }
 const refittable = () => problems.misses.filter((m) => /^(fitted_landing|catch_tube)_/.test(track.pieces.find((q) => q.uid === m.uid)?.id ?? "")).map((m) => m.uid);
 function refitLandings(uids = refittable()) {
@@ -2222,7 +2237,8 @@ function refitLandings(uids = refittable()) {
     let k = -1;
     for (let i = 3; i < a.fast.pts.length; i++) if (a.fast.tan[i].y < -0.02 && a.fast.pts[i].y <= y) { k = i; break; }
     if (k < 0) continue; // the full-speed arc never comes down to it: move it on the arc by hand
-    fits.push({ uid, ...fittedOnArc(a, k, Math.round((TILES[track.pieces.find((q) => q.uid === uid).id].tilt ?? 0) / DEG)) });
+    const was = TILES[track.pieces.find((q) => q.uid === uid).id];
+    fits.push({ uid, ...fittedOnArc(a, k, Math.round((was.tilt ?? 0) / DEG), was.section === "wide") });
   }
   if (!fits.length) { editMsg = "Couldn't re-fit: the jump's full-speed arc doesn't come down to that landing's height — place it again on the arc."; renderStatus(); return; }
   reflow(() => { for (const f of fits) { const pc = track.pieces.find((q) => q.uid === f.uid); pc.id = f.id; pc.M = f.m.toArray(); } });
@@ -2875,14 +2891,15 @@ function renderHand() {
   const free = snap?.type === "world" || snap?.type === "local";
   const mirror = !!(TILES[`${tileBase}_L`] || TILES[tileBase]?.hand || ADJUSTABLE[tileBase]?.hand);
   const adj = ADJUSTABLE[tileBase];
-  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, landTilt, buildY, adj ? JSON.stringify(adjParams[tileBase]) : ""].join("|");
+  const k = [id, free, mirror, hand, rot.yaw, rot.pitch, rot.roll, landTilt, landWide, buildY, adj ? JSON.stringify(adjParams[tileBase]) : ""].join("|");
   if (k === handKey) return;
   handKey = k;
   const off = free ? "" : " off";
   el.innerHTML =
     `<span class="nm">${tileBase === SPAWN ? tileLabel(SPAWN) : TILES[id]?.label ?? id}</span>` +
     // an ADJUSTABLE piece's own settings first (the ghost follows them)
-    (tileBase === FITTED ? `<div class="gp"><span>Land tilt</span><button data-a="tl" title="Left side low (←)">↶</button><b>${landTilt ? `${Math.abs(landTilt)}° ${landTilt > 0 ? "R" : "L"}` : "flat"}</b><button data-a="tr" title="Right side low (→)">↷</button></div>` : "") +
+    (tileBase === FITTED ? `<div class="gp"><span>Land tilt</span><button data-a="tl" title="Left side low (←)">↶</button><b>${landTilt ? `${Math.abs(landTilt)}° ${landTilt > 0 ? "R" : "L"}` : "flat"}</b><button data-a="tr" title="Right side low (→)">↷</button></div>` +
+      `<div class="gp"><span>Width</span><button data-a="lw" class="${landWide ? "" : "on"}" title="As wide as the road (16 m)">Road</button><button data-a="lw" class="${landWide ? "on" : ""}" title="As wide as a platform (48 m): a crooked take-off still lands — a Funnel takes the road back to width">Wide</button></div>` : "") +
     (adj ? Object.entries(adj.params).map(([pk, q]) => `<div class="gp"><span>${q.label}</span><button data-a="p-${pk}" title="Less (Shift: ×4)">◀</button><b>${adjShow(q, adjParams[tileBase][pk])}</b><button data-a="p+${pk}" title="More (Shift: ×4)">▶</button></div>`).join("") : "") +
     `<div class="gp${tileBase === SPAWN ? "" : off}" title="${free || tileBase === SPAWN ? "" : "Snapped to a road end: the road sets the angle"}"><span>Turn</span><button data-a="yl" title="Turn left (Q)">⟲</button><b>${rot.yaw}°</b><button data-a="yr" title="Turn right (E)">⟳</button></div>` +
     (tileBase === SPAWN ? "" : `<div class="gp${off}"><span>Height</span><button data-a="hd" title="Lower (PgDn)">▼</button><b>${buildY} m</b><button data-a="hu" title="Higher (PgUp)">▲</button></div>` +
@@ -2909,6 +2926,7 @@ function renderHand() {
       case "rr": rot.roll = Math.min(45, rot.roll + 5); break;
       case "tl": landTilt = Math.max(-45, landTilt - 5); renderDock(); break;
       case "tr": landTilt = Math.min(45, landTilt + 5); renderDock(); break;
+      case "lw": landWide = !landWide; renderDock(); break;
       case "L": hand = -1; renderDock(); break;
       case "R": hand = 1; renderDock(); break;
       case "z": rot.yaw = rot.pitch = rot.roll = 0; break;
@@ -3077,6 +3095,7 @@ const hookAim = (f) => (...a) => { controls.update(); camera.updateMatrixWorld()
 window.__b3 = {
   app, get rig() { return rig; }, startDrive, stopDrive, get driving() { return driving; },
   get track() { return track; }, get snap() { return snap; }, get problems() { return problems; }, built: () => built, camera, controls, gizmo, gizmoProxy,
+  setLandWide(on) { landWide = !!on; }, setLandTilt(d) { landTilt = d; },
   pickTile: hookAim(pickTile), place, removePiece, frameAll, toggleCheckpoint, select(uid) { sel = uid; refreshSelection(); }, setMouse(x, y) { mouse.x = x; mouse.y = y; mouse.inside = true; },
   aimEnd() { const e = openEnds().at(-1); const s = e && toScreen(new THREE.Vector3().setFromMatrixPosition(e.m)); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return s; },
   aimFast(k) { const a = arcs.at(-1); if (!a) return null; const p = a.fast.pts[Math.min(k, a.fast.pts.length - 1)]; const s = toScreen(p); if (s) { mouse.x = s.x; mouse.y = s.y; mouse.inside = true; } return { s, n: a.fast.pts.length, p }; },

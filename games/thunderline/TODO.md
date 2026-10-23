@@ -403,9 +403,11 @@ this is just the list. Newest decisions at the top of each section. Last updated
       landing. landingTest: lined up all perfect; hands-off now all "ok" 7-11° (one was perfect by chance);
       crooked now finishes. Ghost deterministic; full suite green. NOTE: ghosts saved before this replay a
       different car in the air (they will drift).
-      FOUND: the track LIBRARY hits localStorage's quota (~5 MB: tracks + a thumbnail each) — saves then FAIL
-      (QuotaExceededError, only a console warning). Seen in my test profile; the user's will fill too.
-      → move the library to IndexedDB (and the thumbnails as blobs), warn on screen if a save fails.
+      FOUND: saves FAIL once localStorage's ~5 MB is full (QuotaExceededError, only a console warning).
+      FIXED 2026-10-23 — the cause was not the library (33 tracks + thumbnails = 218 KB) but the GHOSTS:
+      4.9 MB, one per track content (every edit a new one), up to 900 KB each, never deleted. They now live
+      in IndexedDB (app/ghostStore.js: no 5 MB cap, the newest 60 kept, the old ones moved over once and
+      removed from localStorage: 5120 → 222 KB in my profile). The builder shows a red line when a save fails.
 - [x] **KNOCKABLE PROPS** (user, 2026-10-23: "the orange cones … I'm sure there were other things"; from the old
       game's PROP_CATALOG): Obstacles → Cone, Cone row (6 across), Tyre stack (3), Oil barrel, Swing gates (two,
       meeting in the middle). kit/physProps.js: the OLD physics unchanged (modularRoadPropPhysics: rigid bodies on
@@ -570,6 +572,13 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       a 24 × 10 m WINDOW in its middle with a white frame and the old game's real-glass pane (transmission),
       recessed and oversize so nothing is coplanar. The wheels drive the unbroken deck (collision); the
       windowed deck, the pane and the frame are only drawn (oldLook.buildGlassLook).
+- [x] **90° WALLS** (user, 2026-10-23, Apex Rush shots 01/02/07: "do we have full 90° banked shape?"). kit.js:
+      both walls stand VERTICAL and roll round the car's line (twistPivot 0.7, as the twist: banked the usual
+      way the middle rose hw·sin(lean) — speed lost, and the wide one threw the car off on the way out).
+      Wallride 90° (was 80°, R 48 and its exit unchanged for saved tracks; its roll-out starts half-way round:
+      flattening over the last 44 m alone flicked the car off at 216 km/h): 216 → 203 on the wall, out 205.
+      NEW Wide wall 90° (48 m, R 96, 96 m rolls): 216 → 212. All entries 90–216 km/h through, no air.
+      landingTest aligned / hands-off / crooked all finish as before; ghost bit-exact; 216/216 suites.
 - [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
       wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
       used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner
