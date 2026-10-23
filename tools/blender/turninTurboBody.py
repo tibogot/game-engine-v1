@@ -118,7 +118,7 @@ for sx in (-1, 1):
     axis = Vector((0, math.sin(LAMP_UP), -math.cos(LAMP_UP)))
     p, nrm = hit((sx * FX, LAMP_Y, -0.1), axis)          # from inside the body, out through the fender's end
     ex = Vector((1, 0, 0)); ey = axis.cross(ex)
-    M = gmat(p + axis * 0.004, ex, ey)                  # local z = the lamp's axis (ex x (axis x ex) = axis)
+    M = gmat(p - axis * 0.011, ex, ey)                  # local z = the lamp's axis (ex x (axis x ex) = axis)
     lathe("PodB" + ("L" if sx < 0 else "R"), POD, GREY, M)
     lathe("LensB" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.026, 0.0093), (0.0265, 0.0088), (0.0265, 0.008)], LENS, M)
 
