@@ -8,6 +8,11 @@ Sources behind DESIGN.md §2. UNVERIFIED = searched for and not confirmed.
 - Editor discussion: https://steamcommunity.com/app/2638250/discussions/0/797842431111365223/ · Workshop: https://steamcommunity.com/workshop/browse/?appid=2638250
 - Early UE5 playtest by "Hazardous" (likely the same dev, UNVERIFIED): https://realhazardous.itch.io/
 - UNVERIFIED: YouTube content (not readable), speeds, loop/wallride pieces, how medals are set.
+- SCREENSHOTS (user, 2026-10-23, from a streamer's video): assets-src/refs/apex-rush/ — a wall ride rising to
+  vertical with chevron panels at its entry (01, 02), a wide curved wave ramp (04), a half-pipe running into a
+  red tube with white rings (05), a vertical spiral seen from inside with a yellow ring (06), a huge wall with
+  orange tubes (07), an overhead chevron sign above a landing (08), crest signs with an X marker (09), a road
+  with a water pool cut in it and yellow barrels (10), the START side panels with chevrons + a big air ring (11).
 
 ## Trackmania
 - Block grid 32×32×8 m: https://openplanet.dev/plugin/advancedfreeblockmode · half-scale 16×4×16: https://github.com/vjeux/trackmania-tas/releases/tag/tiny-blocks-v1

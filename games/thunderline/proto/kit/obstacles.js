@@ -272,6 +272,135 @@ const SWING_GATES = [body("gate", -GATE_WIDTH, 0), body("gate", GATE_WIDTH, 0, M
 const GATE_POSTS = [-GATE_WIDTH, GATE_WIDTH].map((x) => new THREE.BoxGeometry(0.34, GATE_POST_HEIGHT, 0.34).translate(x, GATE_POST_HEIGHT / 2, 0));
 const physKind = (label, bodies, extra) => ({ label, phys: bodies, parts: () => physLook(bodies), solids: [], decks: [], ghost: physGhost(bodies), ...extra });
 
+// ---------------------------------------------------------------- SIGNS
+// (user, 2026-10-23, Apex Rush shots in assets-src/refs/apex-rush: "all those chevron panels … pieces the user
+// can place like the obstacles", "those START panels with the START and the chevron look awesome"). Placed on
+// a road like an obstacle, but BESIDE or ABOVE it (sign: "pair" — centred, sized by the road's half width
+// `hw`; "side" — past the edge on the side you point at, `dx` ±1). Boards and posts are solid (as a rail);
+// what hangs over the road is not (a jump never snags on a sign).
+const SIGN_YELLOW = 0xffc21a;
+let SIGN_MATS = null;
+const signMats = () => (SIGN_MATS ??= {
+  green: new THREE.MeshStandardMaterial({ color: 0x1d6a26, roughness: 0.6, metalness: 0.05 }),
+  black: new THREE.MeshStandardMaterial({ color: 0x0d1016, roughness: 0.55, metalness: 0.15 }),
+  post: new THREE.MeshStandardMaterial({ color: 0x2a313d, roughness: 0.5, metalness: 0.4 }),
+  yellow: new THREE.MeshStandardMaterial({ color: SIGN_YELLOW, emissive: SIGN_YELLOW, emissiveIntensity: 0.8, roughness: 0.45 }),
+});
+/** A chevron pointing +x, as a shape: w across, h tall, t thick stroke. */
+function chevronShape(w = 1, h = 1.2, t = 0.42) {
+  const c = new THREE.Shape();
+  c.moveTo(-w / 2, h / 2); c.lineTo(-w / 2 + t, h / 2); c.lineTo(w / 2, 0); c.lineTo(-w / 2 + t, -h / 2); c.lineTo(-w / 2, -h / 2); c.lineTo(w / 2 - t, 0); c.closePath();
+  return c;
+}
+/** The START / FINISH board's face: green, the word in white, lime chevrons at the end `dir` points to (+u / −u). */
+function boardFace(word, dir) {
+  const W = 1024, H = 192;
+  const cv = document.createElement("canvas");
+  cv.width = W; cv.height = H;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  const font = "800 132px \"Barlow Condensed\", \"Arial Narrow\", Impact, sans-serif";
+  const draw = () => {
+    const g = cv.getContext("2d");
+    g.fillStyle = "#1f7a2b"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#16591f"; g.fillRect(0, H - 18, W, 18); g.fillRect(0, 0, W, 10);
+    // the chevrons at the FORWARD end, pointing forward
+    g.fillStyle = "#9dff00";
+    const chev = (x) => { const s = dir; g.beginPath(); g.moveTo(x - 34 * s, 40); g.lineTo(x - 6 * s, 40); g.lineTo(x + 38 * s, 96); g.lineTo(x - 6 * s, 152); g.lineTo(x - 34 * s, 152); g.lineTo(x + 10 * s, 96); g.closePath(); g.fill(); };
+    const x0 = dir > 0 ? W - 250 : 250;
+    for (let k = 0; k < 3; k++) chev(x0 + dir * k * 70);
+    g.fillStyle = "#ffffff";
+    g.font = font;
+    g.textAlign = "center"; g.textBaseline = "middle";
+    g.fillText(word, dir > 0 ? W * 0.38 : W * 0.62, H / 2 + 6);
+    tex.needsUpdate = true;
+  };
+  draw();
+  document.fonts?.load?.(font).then(draw, () => {}); // drawn again once the font is in
+  return tex;
+}
+const boardFaces = new Map();
+const boardMat = (word, dir) => {
+  const k = `${word}|${dir}`;
+  if (!boardFaces.has(k)) {
+    const map = boardFace(word, dir);
+    boardFaces.set(k, new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: 0xffffff, emissiveIntensity: 0.35, roughness: 0.55 }));
+  }
+  return boardFaces.get(k);
+};
+// START / FINISH: a board on each edge of the road, over the kerb (the rail passes inside it)
+const BOARD = { L: 10, h: 1.9, w: 1.3 };
+const boardShapes = new Map();
+function boardShape(word) {
+  return ({ hw = 8 } = {}) => {
+    const key = `${word}|${hw}`;
+    if (!boardShapes.has(key)) {
+      const xs = [-1, 1].map((s) => s * (hw - 0.25));
+      const solids = xs.map((x) => box(BOARD.w, BOARD.h, BOARD.L, x, BOARD.h / 2, 0));
+      const parts = () => {
+        const m = signMats(), g = new THREE.Group();
+        g.add(new THREE.Mesh(mergeGeometries(solids), m.green));
+        // the faces toward the road: the left board's text runs along −Z (forward, as you read it), the right's +Z
+        for (const s of [-1, 1]) {
+          const face = new THREE.PlaneGeometry(BOARD.L - 0.2, BOARD.h - 0.2).rotateY(-s * Math.PI / 2).translate(s * (hw - 0.25 - BOARD.w / 2 - 0.02), BOARD.h / 2, 0);
+          g.add(new THREE.Mesh(face, boardMat(word, s < 0 ? 1 : -1)));
+        }
+        return g;
+      };
+      boardShapes.set(key, { solids, ghost: mergeGeometries(solids), parts });
+    }
+    return boardShapes.get(key);
+  };
+}
+// CHEVRON PANEL: a tall black board past the road's edge, facing the car, two rows of yellow chevrons
+// pointing toward the road (the way it takes you)
+const PANEL = { w: 3.4, h: 4.6, t: 0.35, gap: 1.2 };
+const panelShapes = new Map();
+function panelShape({ hw = 8, dx = 1 } = {}) {
+  const side = dx < 0 ? -1 : 1, key = `${hw}|${side}`;
+  if (!panelShapes.has(key)) {
+    const x = side * (hw + PANEL.gap + PANEL.w / 2), y0 = -1.0; // its foot level with the slab's underside
+    const solids = [box(PANEL.w, PANEL.h, PANEL.t, x, y0 + PANEL.h / 2, 0)];
+    const parts = () => {
+      const m = signMats(), g = new THREE.Group();
+      g.add(new THREE.Mesh(solids[0], m.black));
+      // a bracket back to the road's edge, under the deck
+      g.add(new THREE.Mesh(box(PANEL.gap + 0.3, 0.5, 0.5, side * (hw + PANEL.gap / 2), -0.6, 0), m.post));
+      const chev = [];
+      for (const row of [0.3, 0.68]) for (let k = -1; k <= 1; k++) chev.push(new THREE.ShapeGeometry(chevronShape(0.8, 1.15, 0.36)).rotateZ(side > 0 ? Math.PI : 0).translate(x + k * 0.95, y0 + PANEL.h * row + 0.4, PANEL.t / 2 + 0.02));
+      g.add(new THREE.Mesh(mergeGeometries(chev), m.yellow));
+      return g;
+    };
+    panelShapes.set(key, { solids, ghost: solids[0], parts });
+  }
+  return panelShapes.get(key);
+}
+// LANDING SIGN: two posts at the road's edges, a down-chevron panel on each, a yellow X hanging between
+// them on a thin bar: "land here" (Apex Rush shot 09). The posts are solid; the bar and the X are not.
+const AIM = { h: 8, post: 0.35 };
+const aimShapes = new Map();
+function aimShape({ hw = 8 } = {}) {
+  if (!aimShapes.has(hw)) {
+    const xs = [-1, 1].map((s) => s * (hw + 0.8));
+    const solids = xs.map((x) => box(AIM.post, AIM.h + 1, AIM.post, x, (AIM.h - 1) / 2, 0));
+    const parts = () => {
+      const m = signMats(), g = new THREE.Group();
+      g.add(new THREE.Mesh(mergeGeometries([...solids, box(2 * (hw + 0.8), 0.22, 0.22, 0, AIM.h, 0)]), m.post));
+      g.add(new THREE.Mesh(mergeGeometries(xs.map((x) => box(2.2, 2.4, 0.25, x, AIM.h - 2.2, 0.25))), m.black));
+      const yellow = [];
+      for (const x of xs) for (const dy of [0.45, -0.35]) yellow.push(new THREE.ShapeGeometry(chevronShape(0.75, 1.3, 0.34)).rotateZ(-Math.PI / 2).translate(x, AIM.h - 2.2 + dy, 0.4));
+      // the X: two crossed bars, hanging from the middle of the bar
+      for (const a of [Math.PI / 4, -Math.PI / 4]) yellow.push(box(0.42, 2.6, 0.2).rotateZ(a).translate(0, AIM.h - 2.0, 0));
+      g.add(new THREE.Mesh(mergeGeometries(yellow), m.yellow));
+      return g;
+    };
+    aimShapes.set(hw, { solids, ghost: mergeGeometries(solids), parts });
+  }
+  return aimShapes.get(hw);
+}
+const signKind = (label, sign, shape, hint) => ({ label, sign, shape, parts: () => shape().parts(), solids: shape().solids, decks: [], ghost: shape().ghost, hint });
+
 export const OBSTACLES = {
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
@@ -288,6 +417,11 @@ export const OBSTACLES = {
   ob_tyres: physKind("Tyre stack", TYRE_STACK, { hint: "Three tyres stacked: they scatter" }),
   ob_barrel: physKind("Oil barrel", [body("barrel")], { hint: "A heavy drum: it rolls away" }),
   ob_swing_gate: physKind("Swing gates", SWING_GATES, { halfW: 4.6, solids: GATE_POSTS, hint: "Two gates across the middle: smash through, or go round" }),
+  // SIGNS (above): beside or over the road
+  sg_start: signKind("START panels", "pair", boardShape("START"), "A green board on each edge of the road"),
+  sg_finish: signKind("FINISH panels", "pair", boardShape("FINISH"), "A green board on each edge of the road"),
+  sg_chevron: signKind("Chevron panel", "side", panelShape, "A tall black board past the edge: the way the road goes"),
+  sg_aim: signKind("Landing sign", "pair", aimShape, "Two posts and a yellow X over the road: land here"),
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad

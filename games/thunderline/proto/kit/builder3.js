@@ -65,6 +65,8 @@ const CATS = [
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out", "catch_tube"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
   { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  // SIGNS (obstacles.js): beside or over the road — placed like obstacles, never in the way
+  { id: "signs", label: "Signs", tiles: ["sg_start", "sg_finish", "sg_chevron", "sg_aim"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
@@ -1378,6 +1380,14 @@ function roadSnapAt(pc, kind, s, raw, yaw = 0) {
     return { ...d, extra: { ...d.extra, ...at, s: d.s, lat: d.lat } };
   }
   const rc = ringAt(b.rings, s), f = deckFrame(rc, hw);
+  // a SIGN stands square to the road, centred on it ("pair": START boards, the landing sign — sized by the
+  // road's half width) or past the edge on the side you point at ("side": a chevron panel, dx ±1)
+  const sign = OBSTACLES[kind]?.sign;
+  if (sign) {
+    const dx = sign === "side" ? (raw < 0 ? -1 : 1) : 0;
+    const m = new THREE.Matrix4().makeBasis(f.R, f.U, rc.T.clone().negate()).setPosition(f.P);
+    return { type: "road", m: M.clone().multiply(m), dx, hw, extra: { ...at, lat: dx }, note: `${OBSTACLES[kind].label}${dx ? ` · ${dx > 0 ? "right" : "left"} side` : ""} · ${Math.round(s)} m along the piece` };
+  }
   // a WALL · DOOR stays square across the road, its middle on the road's: only the door slides (1 m
   // steps, inside the kerbs)
   if (kind === "ob_wall_door") {
@@ -1394,13 +1404,15 @@ function roadSnapAt(pc, kind, s, raw, yaw = 0) {
 }
 /** Whether an obstacle of this kind can be turned (Q/E): not a pad, a door or a gate — they lie square
  * to the road — nor a wall in the air (it faces its flight). */
-const canTurn = (kind) => { const d = OBSTACLES[kind]; return !!d && !d.decal && !d.aimAt && !d.air; };
+const canTurn = (kind) => { const d = OBSTACLES[kind]; return !!d && !d.decal && !d.aimAt && !d.air && !d.sign; };
 /** How an obstacle in hand is placed, in one line (the panel). */
 function obstacleHow(kind) {
   const d = OBSTACLES[kind];
   if (d.air) return "on a jump's red arc";
   if (d.decal) return "on any road piece · slides across in 1 m steps";
   if (kind === "ob_wall_door") return "across a road · the door slides across in 1 m steps";
+  if (d.sign === "pair") return "across a road, on both its edges";
+  if (d.sign === "side") return "beside a road · point left or right of its middle for the side";
   if (d.aimAt) return "on a road · slides across in 2 m steps";
   return "on a road (2 m steps across) or the floor · <kbd>Q</kbd>/<kbd>E</kbd> turn";
 }

@@ -558,6 +558,13 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       least as wide across it — off-centre too —, same rails; tubes / old-kit pieces cover any). Gap jumps'
       inner ends always lidded. Visual only (the wheels still leave a lip). Merged into the chunks: no new
       draws. Counted: a run of pieces = 2 lids; White tracks = start + finish + 2 per jump.
+- [x] **SIGNS** (user, 2026-10-23, Apex Rush shots in assets-src/refs/apex-rush): a Signs group in the dock,
+      placed like obstacles (obstacles.js sg_*): START / FINISH panels (green boards on both edges, the word
+      + lime chevrons pointing forward, readable from either side), a CHEVRON panel (tall black board past
+      the edge on the side you point at, yellow chevrons toward the road), a LANDING sign (two posts with
+      down-chevrons, a yellow X over the road). Boards and posts solid; the bar and X over the road not.
+      Next from the shots: a glass straight (port the old game's), the full 90° wall + a wide wall-ride,
+      a vertical spiral, a wave ramp, a water pool, maybe the red/white tube look (user's call).
 - [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
       wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
       used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner
