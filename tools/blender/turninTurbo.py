@@ -230,25 +230,26 @@ def fender_h(z):
     g = math.sqrt(max(1 - (1 - min(u, 1.0)) ** 2, 0.0))   # a quarter round: the fender's nose rolls over (photos)
     return B_BUMP + (F_TOP - B_BUMP) * g
 def bonnet_h(z):
-    # a 911 nose seen from behind (straight back photo): an UPRIGHT red face from the bumper up, holding the lamps
-    # ~15 cm up, rolling back into the hood near the top (a quarter ellipse, 75 mm deep), then level to the frames
+    # a 911 hood (side photos): highest at the frames (the windscreen), sloping DOWN to the nose, then rolling over
+    # (quarter ellipse, NOSE_D deep) into the upright face above the bumper
     d = z - B_ZB
-    if d >= NOSE_D: return NOSE_H
-    return B_BUMP + (NOSE_H - B_BUMP) * math.sqrt(max(1 - (1 - max(d, 0.0) / NOSE_D) ** 2, 0.0))
-NOSE_H, NOSE_D = 0.172, 0.05    # upright: the face keeps its height until 5 cm from the back
+    top = HOOD_REAR + (HOOD_FRONT - HOOD_REAR) * min(max((z - (B_ZB + NOSE_D)) / (-0.1 - (B_ZB + NOSE_D)), 0.0), 1.0)
+    if d >= NOSE_D: return top
+    return B_BUMP + (top - B_BUMP) * math.sqrt(max(1 - (1 - max(d, 0.0) / NOSE_D) ** 2, 0.0))
+HOOD_FRONT, HOOD_REAR, NOSE_D = 0.162, 0.142, 0.05
 def b_height(z, x):
     ax = abs(x)
     # ONE hood (rear 3/4 photos): the bonnet's profile all across, a slight bulge over each lamp — no fenders standing
     # up with a trough between them
     wf = math.exp(-((ax - 0.15) / 0.05) ** 2)
-    hc = bonnet_h(z) + 0.008 * wf
+    hc = bonnet_h(z) + 0.014 * wf   # the fenders stand a little proud of the hood, carrying the lamps
     # kept under the sight line of the camera fitted to the front photo (it shows only a narrow red band over the
     # frames, the lamp shoulders just above it at the corners): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
     corner = min(max((ax - 0.11) / 0.05, 0.0), 1.0); corner = corner * corner * (3 - 2 * corner)
     corner *= min(max((-0.105 - z) / 0.03, 0.0), 1.0)
     ray, k = 0.167 + 0.72 * (z + 0.12) + 0.012 * corner, 0.01
     capped = max(0.5 * (hc + ray - math.sqrt((hc - ray) ** 2 + k * k)), B_BUMP)
-    w = min(max((z + 0.17) / 0.04, 0.0), 1.0)   # only near the frames: further back the upright nose rules (rear photos)
+    w = min(max((z + 0.2) / 0.09, 0.0), 1.0)   # only near the frames: further back the upright nose rules (rear photos)
     hc = hc + (capped - hc) * w
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
@@ -263,14 +264,22 @@ def b_height(z, x):
 def b_ring(z):
     w = b_halfwidth(z)
     t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
-    B_SH = 0.012 + 0.048 * t * t       # the shoulder rounds out towards the back: big round top corners on the nose
+    g = min(max((-0.03 - z) / 0.05, 0.0), 1.0)   # behind the frames: the 911 body's round section (side photo)
+    B_SH = 0.012 + 0.028 * g + 0.02 * t * t   # big round shoulders: the top rolls into the sides
     pts = []
-    N_TOP, N_SIDE, N_ARC, N_BOT = 96, 10, 8, 10   # dense: the humps round the lamps shaded in streaks
+    N_TOP, N_SIDE, N_ARC, N_BOT = 96, 16, 10, 10   # dense: the humps round the lamps shaded in streaks
     hl, hr = b_height(z, -w + B_SH), b_height(z, w - B_SH)
+    wb = w - g * 0.022                            # the bottom is narrower (the side curves in)
     for k in range(N_BOT + 1):                    # bottom, right to left
-        pts.append((w - 2 * w * k / N_BOT, 0.0))
+        pts.append((wb - 2 * wb * k / N_BOT, 0.0))
+    # the side BULGES (side photo: one smooth convex red surface, curving in at the bottom): x(y) bows out to w at
+    # ~45 % height, in by BULGE at the shoulder and by BOTTOM at the table
+    def side_x(y, h):
+        u = y / max(h, 1e-6)
+        return w - g * (0.022 * (1 - min(u / 0.45, 1.0)) ** 2 + 0.006 * max((u - 0.45) / 0.55, 0.0) ** 2)
     for k in range(1, N_SIDE):                    # left side up
-        pts.append((-w, (hl - B_SH) * k / N_SIDE))
+        y = (hl - B_SH) * k / N_SIDE
+        pts.append((-side_x(y, hl - B_SH), y))
     for k in range(N_ARC + 1):                    # left shoulder
         a = math.pi - (math.pi / 2) * k / N_ARC
         pts.append((-w + B_SH + B_SH * math.cos(a), hl - B_SH + B_SH * math.sin(a)))
@@ -281,7 +290,8 @@ def b_ring(z):
         a = math.pi / 2 - (math.pi / 2) * k / N_ARC
         pts.append((w - B_SH + B_SH * math.cos(a), hr - B_SH + B_SH * math.sin(a)))
     for k in range(1, N_SIDE):                    # right side down
-        pts.append((w, (hr - B_SH) * (1 - k / N_SIDE)))
+        y = (hr - B_SH) * (1 - k / N_SIDE)
+        pts.append((side_x(y, hr - B_SH), y))
     out = []
     for x, y, in pts:
         if y < B_SKIRT:                           # the chin: inset in x, and tucked forward at the back
@@ -319,12 +329,12 @@ POD_PROF = [(r * 0.95, h)   # outer ring ~73 mm across (straight back photo)
 for sx in (-1, 1):
     x = sx * 0.156   # right out at the corners, the fender round them (straight back photo)
     # the lamp faces BACK, 18 deg up (photos), its centre where the fender's rounded corner is 127 mm high
-    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.142))   # ~14 cm up (straight back photo, camera fitted)   # on the real (capped) surface
-    up = math.radians(28)
+    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.112))   # ~14 cm up (straight back photo, camera fitted)   # on the real (capped) surface
+    up = math.radians(18)
     n = Vector((0, math.sin(up), -math.cos(up)))
     n = (n + b_normal(zc, x)).normalized()   # halfway to the steep nose's own normal: the lamp sits on it
     ex = Vector((1, 0, 0)); ey = n.cross(ex).normalized()
-    z_l, y_l = zc + n.z * 0.004, b_height(zc, x) + n.y * 0.004   # the ring stands just proud, its bucket behind
+    z_l, y_l = zc - n.z * 0.002, b_height(zc, x) - n.y * 0.002   # the ring stands just proud, its bucket behind
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
     # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
     # the lens: a FLAT glossy silver-grey disc filling the ring (back photos), lighter than the ring
@@ -333,7 +343,7 @@ for sx in (-1, 1):
 
 # the bumper: a slate band round the back and the rear half of the sides, a groove along it
 def bumper():
-    z_start = -0.085
+    z_start = B_ZB + B_RC + 0.012   # the bumper only wraps round the corners (side photo), ending in a ribbed cap
     path = rpoly([(-B_W, z_start), (-B_W, B_ZB), (B_W, B_ZB), (B_W, z_start)], [0, B_RC, B_RC, 0], 12)
     # 32 -> 108 mm (straight back photo): a thin top lip, a wide band, a groove, a lower band; 1 cm proud
     # 33 -> 79 mm (straight back photo, camera fitted): a lip, a wide band, a groove, a lower band; 1 cm proud;
@@ -391,10 +401,11 @@ for sx_, sz_ in ((-0.15, -0.03), (0.15, -0.03), (-0.11, -0.16), (0.11, -0.16), (
 
 # the black ribbed pads on each side, just ahead of the bumper's ends (the side photo)
 for sx in (-1, 1):
-    PAD = gmat((sx * (B_W + 0.002), 0.128, -0.118), (0, 0, -sx), (0, 1, 0))   # on the red, just behind the slate (side photo)
-    slab(f"SidePad{sx}", [rrect(0, 0, 0.036, 0.058, 0.004)], -0.002, 0.007, 0.0015, BLACK, PAD)
+    # the bumper's END CAP (side photo): a ribbed black block where the bumper stops on each side
+    PAD = gmat((sx * (B_W + 0.004), 0.055, B_ZB + B_RC + 0.012), (0, 0, -sx), (0, 1, 0))
+    slab(f"SidePad{sx}", [rrect(0, 0, 0.028, 0.06, 0.004)], -0.006, 0.012, 0.0015, BLACK, PAD)
     for k in range(5):
-        slab(f"SidePadRib{sx}{k}", [rrect(0, -0.02 + k * 0.01, 0.03, 0.0035, 0.0012, 2)], 0.007, 0.0095, 0.0008, BLACK, PAD)
+        slab(f"SidePadRib{sx}{k}", [rrect(0, -0.02 + k * 0.01, 0.022, 0.0035, 0.0012, 2)], 0.012, 0.0145, 0.0008, BLACK, PAD)
 
 
 
