@@ -27,6 +27,8 @@ previews in assets-src/refs/motorpool/. Then compress both (tools/optimizeGlb.mj
 """
 import bpy, bmesh, sys, os, math, random
 from mathutils import Vector
+sys.path.insert(0, os.path.dirname(__file__))
+from bkit import deconflict
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 out = os.path.abspath(sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(ROOT, "public", "models", "alg"))
@@ -525,7 +527,7 @@ for key, sx in (("doorL", 1), ("doorR", -1)):
 # ── THE SIGNS ────────────────────────────────────────────────────────────────
 box("SignBoard", -1.75, 1.75, YB - 0.62, YB - 0.04, Z0 - 0.17, Z0 - 0.135, "signGreen", "shed", 0.008)
 box("SignFrame", -1.82, 1.82, YB - 0.67, YB + 0.01, Z0 - 0.135, Z0 - 0.125, "frame", "shed", 0.004)
-text("SignText", "PARC AUTO", (0, YB - 0.33, Z0 - 0.174), 0.36, "signWhite", "shed")
+text("SignText", "PARC AUTO", (0, YB - 0.33, Z0 - 0.182), 0.36, "signWhite", "shed")   # (8 mm proud of the board: at 4 mm its letters z-fought it, glbCoplanarTest)
 box("NoSmoke", X0 - 0.32, X0 - 0.3, F + 1.55, F + 2.05, -1.6, -0.6, "signWhite", "shed", 0.004)
 text("NoSmokeA", "DÉFENSE", (X0 - 0.324, F + 1.88, -1.1), 0.15, "signRed", "shed", "-x", 0.003)
 text("NoSmokeB", "DE FUMER", (X0 - 0.324, F + 1.68, -1.1), 0.15, "signRed", "shed", "-x", 0.003)
@@ -589,7 +591,7 @@ rod("Spout", (10.4, F + 3.66, WZ1 - WT - 0.1), (10.4, F + 3.6, WZ1 + 0.35), 0.05
 rod("LampArm", ((DOOR[0] + DOOR[1]) / 2, F + 2.95, WZ0), ((DOOR[0] + DOOR[1]) / 2, F + 2.95, WZ0 - 0.42), 0.012, "darkSteel", "workshop", 8)
 cyl("LampShade", ((DOOR[0] + DOOR[1]) / 2, F + 2.74, WZ0 - 0.45), 0.2, 0.16, "doorPaint", "workshop", 18, r2=0.04)
 cyl("LampBulb", ((DOOR[0] + DOOR[1]) / 2, F + 2.7, WZ0 - 0.45), 0.045, 0.07, "bulb", "workshop", 10)
-text("Atelier", "ATELIER", ((DOOR[0] + DOOR[1]) / 2, F + 2.62 + 0.38, WZ0 - 0.003), 0.26, "black", "workshop", "-z", 0.003)
+text("Atelier", "ATELIER", ((DOOR[0] + DOOR[1]) / 2, F + 2.62 + 0.38, WZ0 - 0.008), 0.26, "black", "workshop", "-z", 0.003)
 
 # ── THE PROPS ────────────────────────────────────────────────────────────────
 def drum(nm, c, mat, lying=False, rot=0.0):
@@ -712,6 +714,7 @@ def join(name, objs):
         bpy.context.view_layer.objects.active = o
         for m in list(o.modifiers): bpy.ops.object.modifier_apply(modifier=m.name)
         o.select_set(True)
+    deconflict([o for o in objs if o.type == "MESH"], name)   # (bkit: parts sharing a plane moved 4 mm apart — no z-fighting)
     bpy.context.view_layer.objects.active = objs[0]
     bpy.ops.object.join()
     j = bpy.context.view_layer.objects.active; j.name = name
@@ -737,6 +740,8 @@ if "--stats" in sys.argv:                              # (where the triangles go
             me = o.evaluated_get(dg).to_mesh(); per[re.sub(r"[-\d.]+.*$", "", o.name) or o.name] += sum(len(p.vertices) - 2 for p in me.polygons); o.evaluated_get(dg).to_mesh_clear()
     for k, v in per.most_common(25): print("PART", k, v)
     sys.exit(0)
+if os.environ.get("BKIT_TIME"):   # (timing the z-fight check alone: join, report, stop)
+    import time; _t = time.time(); join("T", [o for k in ("shed", "workshop", "apron", "props") for o in GROUPS[k]]); print("JOIN", round(time.time() - _t, 1), "s"); sys.exit(0)
 OBJS = {"Static": join("StaticFar" if LOW else "Static", [o for k in ("shed", "workshop", "apron", "props") for o in GROUPS[k]])}
 if not LOW:
     OBJS["DoorL"] = join("DoorL", GROUPS["doorL"]); OBJS["DoorR"] = join("DoorR", GROUPS["doorR"])

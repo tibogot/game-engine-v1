@@ -214,6 +214,7 @@ class Kit:
             bpy.context.view_layer.objects.active = o
             for m in list(o.modifiers): bpy.ops.object.modifier_apply(modifier=m.name)
             o.select_set(True)
+        if getattr(s, "deconflict_on", True): deconflict(objs, name)
         bpy.context.view_layer.objects.active = objs[0]
         bpy.ops.object.join()
         j = bpy.context.view_layer.objects.active; j.name = name
@@ -232,6 +233,7 @@ class Kit:
         spread apart while they bake (at one origin each would occlude the others: black AO) and every other
         mesh is hidden from the bake."""
         objs = list(objs) if isinstance(objs, (list, tuple)) else [objs]
+        if os.environ.get("BKIT_NOBAKE"): print("BAKE skipped (BKIT_NOBAKE)", name); return   # (geometry checks only)
         o = objs[0]
         scn = bpy.context.scene
         scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.render.bake.margin = 8
@@ -339,3 +341,99 @@ def weighted(o):
     bpy.ops.object.modifier_apply(modifier=md.name)
 
 def tris(o): return sum(len(p.vertices) - 2 for p in o.data.polygons)
+
+def _coplanar_pairs(objs, tol=0.0025, cos_tol=math.cos(math.radians(1.5))):
+    """Faces of two DIFFERENT parts in one plane, facing the same way and overlapping (z-fighting): the same
+    test as tools/lib/coplanar.mjs (the game's check) — [(i, j, normal), …] by part index, one per pair of parts
+    and plane. Bottoms on the ground (facing down under 0.35 m) are never seen and are left alone.
+    (2026-10-23: the first version bucketed every triangle of the piece together — on the motor pool's hundreds of
+    lapped roof sheets it ran over an hour. Now only parts whose BOXES touch are compared, and only their triangles
+    inside the two boxes' overlap.)"""
+    tris, boxes = [], []
+    for o in objs:
+        me = o.data; me.calc_loop_triangles(); M = o.matrix_world
+        co = np.array([(M @ v.co)[:] for v in me.vertices]) if len(me.vertices) else np.zeros((0, 3))
+        idx = np.array([lt.vertices[:] for lt in me.loop_triangles], dtype=np.int64).reshape(-1, 3)
+        T = co[idx] if len(idx) else np.zeros((0, 3, 3))
+        tris.append(T)
+        boxes.append((co.min(0) - tol, co.max(0) + tol) if len(co) else (np.full(3, np.inf), np.full(3, -np.inf)))
+    lo = np.array([b[0] for b in boxes]); hi = np.array([b[1] for b in boxes])
+    def prep(T):
+        n = np.cross(T[:, 1] - T[:, 0], T[:, 2] - T[:, 0]); L = np.linalg.norm(n, axis=1)
+        ok = L > 1e-7; n[ok] /= L[ok, None]
+        c = T.mean(1)
+        ok &= ~((n[:, 2] < -0.9) & (c[:, 2] < 0.35))
+        return n, (n * T[:, 0]).sum(1), ok
+    P = [prep(T) if len(T) else None for T in tris]
+    def separated(A, Bq):
+        for Q in (A, Bq):
+            for i in range(3):
+                e = Q[(i + 1) % 3] - Q[i]; nx = np.array([e[1], -e[0]])
+                a, b = A @ nx, Bq @ nx
+                if a.max() <= b.min() or b.max() <= a.min(): return True
+        return False
+    def shrink(Q):
+        m = Q.mean(0); return m + (Q - m) * 0.97
+    found = {}
+    for i in range(len(objs)):
+        if P[i] is None: continue
+        cand = np.nonzero(np.all(lo[i + 1:] <= hi[i], 1) & np.all(hi[i + 1:] >= lo[i], 1))[0] + i + 1
+        for j in cand:
+            if P[j] is None: continue
+            blo, bhi = np.maximum(lo[i], lo[j]), np.minimum(hi[i], hi[j])
+            def inside(T, ok):
+                return ok & np.all(T.max(1) >= blo, 1) & np.all(T.min(1) <= bhi, 1)
+            na, da, oka = P[i]; nb, db, okb = P[j]
+            ia = np.nonzero(inside(tris[i], oka))[0]; ib = np.nonzero(inside(tris[j], okb))[0]
+            if not len(ia) or not len(ib): continue
+            for ta in ia:
+                cand_b = ib[(nb[ib] @ na[ta]) > cos_tol]
+                if not len(cand_b): continue
+                cand_b = cand_b[np.abs(db[cand_b] - da[ta]) < tol * 4 + 1e-9]
+                if not len(cand_b): continue
+                offB = np.abs(np.einsum("kij,j->ki", tris[j][cand_b], na[ta]) - da[ta]).max(1)
+                offA = np.abs(np.einsum("ij,kj->ki", tris[i][ta], nb[cand_b]) - db[cand_b][:, None]).max(1)
+                cand_b = cand_b[(offB < tol) & (offA < tol)]
+                if not len(cand_b): continue
+                key = (i, j, tuple(np.round(na[ta], 2)))
+                if key in found: continue
+                ax = int(np.abs(na[ta]).argmax())
+                PA = shrink(np.delete(tris[i][ta], ax, axis=1))
+                for tb in cand_b:
+                    if not separated(PA, shrink(np.delete(tris[j][tb], ax, axis=1))):
+                        found[key] = na[ta]; break
+    return [(i, j, nv) for (i, j, _), nv in found.items()]
+
+def deconflict(objs, name="", step=0.004, rounds=4):
+    """NO Z-FIGHTING BETWEEN PARTS (2026-10-22, you, on the post: "z index shader issues, on each corner here, on the
+    clothes hanging"): a kit piece is boxes and parts ending exactly on one another — two wall caps meeting at a
+    tower's corner at the same height, a shirt on the line over the next. Before the join, the smaller of each pair
+    of parts sharing a plane (and overlapping in it) moves `step` m off it, along that plane's normal — up for a
+    top, out for a side — 4 mm: unseen, and past the game's check (tools/glbCoplanarCheck.mjs, 2.5 mm)."""
+    size = []
+    for o in objs:
+        bb = [o.matrix_world @ Vector(c) for c in o.bound_box]
+        ext = [max(v[k] for v in bb) - min(v[k] for v in bb) for k in range(3)]
+        size.append(ext[0] * ext[1] + ext[1] * ext[2] + ext[0] * ext[2])
+    import time
+    moved, first = set(), None
+    for r in range(rounds):
+        t0 = time.time(); pairs = _coplanar_pairs(objs)
+        if os.environ.get("BKIT_TIME"): print(f"  deconflict {name} round {r}: {len(objs)} parts, {len(pairs)} pairs, {time.time() - t0:.1f} s", flush=True)
+        if first is None: first = len(pairs)
+        if not pairs: break
+        push = {}
+        for i, j, nv in pairs:
+            k = i if size[i] <= size[j] else j
+            v = push.setdefault(k, Vector((0, 0, 0)))
+            # (a slab sharing its top AND its bottom with another — two wall copes crossing at a corner — moves ONE
+            # way: pushed up for the tops and down for the bottoms it stayed put, the corner's flicker, seen)
+            along = v.dot(Vector(nv))
+            # (each further round a little further: parts 2 mm apart need more than one 4 mm push to clear 2.5 mm)
+            if -step * 0.5 < along < step * 0.5: v += Vector(nv) * step * (1 + r * 0.5)
+        for k, v in push.items():
+            objs[k].location += v; moved.add(k)
+        bpy.context.view_layer.update()
+    rest = _coplanar_pairs(objs) if first else []
+    if first: print(f"DECONFLICT {name}: {first} coplanar part pairs, {len(moved)} parts moved 4 mm, {len(rest)} left")
+    for i, j, nv in rest[:12]: print(f"  left: {objs[i].name} / {objs[j].name} n={tuple(round(x, 2) for x in nv)}")
