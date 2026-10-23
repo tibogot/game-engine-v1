@@ -46,32 +46,37 @@ const lineD = (pts, x, z) => {
   return best;
 };
 
-// ── the art: the Abdi's ploughed and stubble bakes, appended to the level's own decal slots ──
+// ── the art: the Abdi's baked marks (tools/algAbdiDecals.mjs), appended to the level's own decal slots ──
 const MEANS = JSON.parse(fs.readFileSync(path.join(DIR, "means.json"), "utf8"));
 const LOOKS = JSON.parse(fs.readFileSync(path.join(DIR, "kinds.json"), "utf8"));
+const KINDS = ["ploughed", "stubble", "trampled", "sweptYard", "apron", "crater", "charred", "debris", "tankTracks"];
 const slots = [...(man.decals?.slots ?? [])], decals = [...(man.decals?.decals ?? [])], V = {};
-for (const f of fs.readdirSync(DIR).filter((f) => /^(ploughed|stubble)_\d+\.webp$/.test(f)).sort()) {
+for (const f of fs.readdirSync(DIR).filter((f) => KINDS.includes(f.replace(/_\d+\.webp$/, "")) && /_\d+\.webp$/.test(f)).sort()) {
   const key = f.replace(/\.webp$/, ""), kind = key.replace(/_\d+$/, "");
   (V[kind] ??= []).push({ slot: slots.length, key });
   slots.push({ name: `abdi ${key}`, albedoUrl: `/textures/decals/abdi/${f}`, normalUrl: `/textures/decals/abdi/${key}_n.webp` });
 }
-// (the Abdi's: matched to the ground's tone; ploughed's own near-black mean — tools/algAbdiDecals.mjs)
+// (the Abdi's: matched to the ground's tone; ploughed's own near-black mean, the scorch and craters on the unburnt
+// soil's — tools/algAbdiDecals.mjs MATCH / MEAN_OVERRIDE / TINT / SIZE)
 const SOIL = [0.624, 0.397, 0.219];
-const MEAN = { ploughed: [0.102, 0.061, 0.028], stubble: SOIL };
-const MATCH = { ploughed: 0.65, stubble: 0.6 };
-const TINT = { ploughed: "#f2e6da", stubble: "#fff4dc" };
-function soil(kind, x, z, yaw, w, d, tint) {
+const MEAN = { ploughed: [0.102, 0.061, 0.028], stubble: SOIL, charred: SOIL, crater: SOIL, trampled: SOIL };
+const MATCH = { ploughed: 0.65, stubble: 0.6, trampled: 1, sweptYard: 1, apron: 1, crater: 1, charred: 1, debris: 0.6, tankTracks: 1 };
+const TINT = { ploughed: "#f2e6da", stubble: "#fff4dc", trampled: "#e6d8c8", sweptYard: "#fff2e2", apron: "#e8ddd0", crater: "#ffffff", charred: "#ffffff", debris: "#ffffff", tankTracks: "#bba796" };
+const SIZE = { trampled: [14, 14], sweptYard: [12, 12], apron: [12, 12], crater: [7, 7], charred: [10, 10], debris: [16, 16], tankTracks: [4.4, 10] };
+/** One mark: `sx` across, `sz` along its yaw (m; default its kind's size × k), the panel's look (kinds.json) over it. */
+function mark(kind, x, z, yaw, o = {}) {
   const v = V[kind][Math.floor(hash(x, z, 5) * V[kind].length) % V[kind].length], lk = LOOKS[kind] ?? {};
-  // the panel's look (Dev → Decals, kinds.json), as the Abdi tool applies it
-  const t = [1, 3, 5].map((i) => parseInt((tint ?? TINT[kind]).slice(i, i + 2), 16) / 255), wm = lk.warmth ?? 0, k = lk.darkness ?? 1;
+  const t = [1, 3, 5].map((i) => parseInt((o.tint ?? TINT[kind]).slice(i, i + 2), 16) / 255), wm = lk.warmth ?? 0, k = lk.darkness ?? 1;
   const c = [t[0] * k * (1 + 0.25 * wm), t[1] * k * (1 + 0.04 * wm), t[2] * k * (1 - 0.3 * wm)];
+  const [w0, l0] = SIZE[kind] ?? [10, 10];
   decals.push({
     px: x, py: H(x, z), pz: z, qx: 0, qy: Math.sin(yaw / 2), qz: 0, qw: Math.cos(yaw / 2),
-    slot: v.slot, sx: d * (lk.size ?? 1), sy: 5, sz: w * (lk.size ?? 1), mean: MEAN[kind] ?? MEANS[v.key], match: lk.match ?? MATCH[kind],
-    opacity: Math.min(1, 0.95 * (lk.strength ?? 1)), tint: "#" + c.map((q) => Math.round(Math.max(0, Math.min(1, q)) * 255).toString(16).padStart(2, "0")).join(""),
-    roughness: 0.92, normalStrength: lk.relief ?? 1, angleFade: 60, edgeFade: lk.edge ?? 0.2, priority: 0,
+    slot: v.slot, sx: (o.sx ?? w0 * (o.k ?? 1)) * (lk.size ?? 1), sy: 5, sz: (o.sz ?? l0 * (o.k ?? 1)) * (lk.size ?? 1), mean: MEAN[kind] ?? MEANS[v.key], match: lk.match ?? MATCH[kind],
+    opacity: Math.min(1, (o.opacity ?? 0.95) * (lk.strength ?? 1)), tint: "#" + c.map((q) => Math.round(Math.max(0, Math.min(1, q)) * 255).toString(16).padStart(2, "0")).join(""),
+    roughness: 0.92, normalStrength: lk.relief ?? 1, angleFade: 60, edgeFade: lk.edge ?? o.edge ?? 0.2, priority: o.priority ?? 0,
   });
 }
+const soil = (kind, x, z, yaw, w, d, tint) => mark(kind, x, z, yaw, { sx: d, sz: w, tint });
 
 // ── what the fields keep clear of ──
 const TRACKS = OLD_MAP.tracks.map((t) => t.points);
@@ -208,6 +213,76 @@ stats.walls = walls.length; stats.hedges = hedges.length;
   };
   stats.cropTexels = paint("foliagePaint", 1024, 8, true);
   paint("susukiDensity", 512, 4, false);
+}
+
+// ── THE GROUND MARKS (2026-10-23, the Oued Abdi's kinds — you: "anything to make the terrain even better") ──
+// Kept off the plots, the houses' footprints and the water; each mark its own size and turn.
+const HOUSE_BOX = NEW_MAP.town.houses.map((r) => ({ x: r[6], z: r[7], yaw: r[5], hx: r[8], hz: r[9] }));
+const inHouse = (x, z, pad) => HOUSE_BOX.some((b) => {
+  const c = Math.cos(b.yaw), sn = Math.sin(b.yaw), dx = x - b.x, dz = z - b.z;
+  return Math.abs(dx * c - dz * sn) < b.hx + pad && Math.abs(dx * sn + dz * c) < b.hz + pad;
+});
+const free = (x, z, pad = 2) => !inPlot(x, z, pad) && !inHouse(x, z, pad) && wadiClear(x, z, 1) && inBox(x, z, 0) && !inGrove(x, z, 0);
+stats.marks = {};
+const count = (k) => { stats.marks[k] = (stats.marks[k] ?? 0) + 1; };
+const villages = ["Mechta Ouled Ali", "Mechta el Oued", "Dechra Tighanimine", "Ksar el Hamra"].map(site);
+// the village SQUARES: packed earth where the yard splat was (it repeated) — a swept yard at the mechtas, an apron at
+// the dechra and the ksar, a few overlapping round the square, wide soft edges (a 12 m box reads as a square)
+for (const v of villages) {
+  const yard = v.kind === "hamlet", n = 3;
+  for (let k = 0; k < n; k++) {
+    const a = hash(v.x, v.z, 10 + k) * 6.283, r = k ? 9 : 0, x = v.x + Math.cos(a) * r, z = v.z + Math.sin(a) * r;
+    if (!free(x, z, -3)) continue;
+    mark(yard ? "sweptYard" : "apron", x, z, hash(x, z, 20) * 6.28, { opacity: 0.6, k: 1.1 + hash(x, z, 30) * 0.5, edge: 0.45 }); count("yards");
+  }
+}
+// TRAMPLED earth where the squads stand to take a place: the four villages and the supply points
+for (const [x0, z0, r] of [...villages.map((v) => [v.x, v.z, 14]), ...SUPPLY.map(([x, z]) => [x, z, 5])]) {
+  for (let k = 0; k < 2; k++) {
+    const a = hash(x0, z0, 80 + k) * 6.283, d = k ? r * 0.6 : r * 0.1, x = x0 + Math.cos(a) * d, z = z0 + Math.sin(a) * d;
+    if (!free(x, z, 0)) continue;
+    mark("trampled", x, z, hash(x, z, 11) * 6.28, { opacity: 0.85, k: 0.8 + hash(x, z, 12) * 0.4, priority: 1, edge: 0.45 }); count("trampled");
+  }
+}
+// SHELL CRATERS, scorch and debris where the fighting is: the two gully mouths, the ksar's edge toward the valley,
+// the fords, the road below Mechta Ouled Ali (CoH's ground reads as fought over by its craters above all)
+const KS = site("Ksar el Hamra"), KS_EDGE = { x: KS.x + 10, z: KS.z + 62 }, OA_ROAD = { x: 178, z: 102 };
+const ford = (w, f) => { const P = w.points, i = Math.min(P.length - 2, Math.floor(f * (P.length - 1))), u = f * (P.length - 1) - i; return [P[i][0] + (P[i + 1][0] - P[i][0]) * u, P[i][1] + (P[i + 1][1] - P[i][1]) * u]; };
+const FIGHTS = [
+  ...LAYOUT.sites.filter((s) => s.kind === "pass" && inBox(s.x, s.z, 10)).map((s) => [s.x, s.z, 5, 3]),
+  [KS_EDGE.x, KS_EDGE.z, 4, 2],
+  ...LAYOUT.wadis.flatMap((w) => (w.fords ?? []).slice(0, 2).map((f) => [...ford(w, f), 3, 1])),
+  [OA_ROAD.x, OA_ROAD.z, 3, 1],
+];
+for (const [x0, z0, nCrater, nScorch] of FIGHTS) {
+  for (let k = 0; k < nCrater; k++) {
+    const a = hash(x0, z0, 60 + k) * 6.283, d = 4 + hash(x0, z0, 70 + k) * 20, x = x0 + Math.cos(a) * d, z = z0 + Math.sin(a) * d;
+    if (slope(x, z) > 22 || !free(x, z, 3)) continue;
+    mark("crater", x, z, hash(x, z, 8) * 6.28, { opacity: 1, k: 0.7 + hash(x, z, 9) * 0.6, priority: 4 }); count("craters");
+  }
+  for (let k = 0; k < nScorch; k++) {
+    const a = hash(x0, z0, 40 + k) * 6.283, d = 6 + hash(x0, z0, 50 + k) * 16, x = x0 + Math.cos(a) * d, z = z0 + Math.sin(a) * d;
+    if (slope(x, z) > 20 || !free(x, z, 3)) continue;
+    mark("charred", x, z, hash(x, z, 3) * 6.28, { opacity: 1, k: 1.1 + hash(x, z, 4) * 0.6, priority: 3 }); count("scorch");
+    mark("debris", x + 1, z - 1, hash(x, z, 6) * 6.28, { opacity: 0.8, k: 0.5 + hash(x, z, 7) * 0.4, priority: 2 }); count("debris");
+  }
+}
+// TANK TRACKS: the armour's own way out of the post west and up the valley toward the ksar, off the piste (the way
+// to Ouled Ali crossed the Aïn Tighanimine oasis — seen) — a relaxed curve (the ruts' lesson: no straight strips
+// meeting at an angle), 10 m pieces overlapping, continuous
+{
+  const post = LAYOUT.sites.find((s) => s.kind === "french");
+  let P = [[post.x - 22, post.z - 20], [40, 150], [20, 95], [12, 40]];
+  const R = []; for (let k = 0; k < P.length - 1; k++) for (let i = 0; i < 10; i++) R.push([P[k][0] + (P[k + 1][0] - P[k][0]) * i / 10, P[k][1] + (P[k + 1][1] - P[k][1]) * i / 10]);
+  R.push(P[P.length - 1]); P = R;
+  for (let it = 0; it < 30; it++) P = P.map((q, k) => (k === 0 || k === P.length - 1 ? q : [q[0] * 0.5 + (P[k - 1][0] + P[k + 1][0]) * 0.25, q[1] * 0.5 + (P[k - 1][1] + P[k + 1][1]) * 0.25]));
+  const S = [0]; for (let i = 1; i < P.length; i++) S.push(S[i - 1] + Math.hypot(P[i][0] - P[i - 1][0], P[i][1] - P[i - 1][1]));
+  const at = (d) => { let i = 1; while (i < S.length - 1 && S[i] < d) i++; const u = (d - S[i - 1]) / Math.max(1e-6, S[i] - S[i - 1]); return [P[i - 1][0] + (P[i][0] - P[i - 1][0]) * u, P[i - 1][1] + (P[i][1] - P[i - 1][1]) * u]; };
+  for (let d = 5; d < S[S.length - 1] - 5; d += 6) {
+    const a = at(d - 5), b = at(d + 5), c = at(d);
+    if (!free(c[0], c[1], 0) || slope(c[0], c[1]) > 18) continue;
+    mark("tankTracks", c[0], c[1], Math.atan2(b[0] - a[0], b[1] - a[1]), { opacity: 0.75, priority: 2 }); count("tankTracks");
+  }
 }
 
 man.decals = { ...(man.decals ?? {}), slots, decals };
