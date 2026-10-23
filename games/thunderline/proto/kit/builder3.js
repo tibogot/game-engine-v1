@@ -54,7 +54,7 @@ const GRID_STEPS = [1, 2, 4, 8];
 const CATS = [
   // the race's own things: where it starts and ends, what it hands the car
   { id: "game", label: "Game", tiles: ["start_line", "finish_line", "test_car", "air_ring", "ob_boost", "ob_jump"] }, // (boost_32 left the palette, user 2026-10-22: the Boost pad does it; old tracks keep it)
-  { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
+  { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "glass_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
   { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "uturn_wall_32"] },
@@ -246,7 +246,8 @@ function piece(id, open = false) {
 function meshesFor(id, open) {
   const { look } = piece(id, open);
   const g = new THREE.Group();
-  g.add(new THREE.Mesh(look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road));
+  if (look.glass) { g.add(new THREE.Mesh(look.drawn, mats.road)); g.add(new THREE.Mesh(look.glass, mats.glass)); g.add(new THREE.Mesh(look.trimFrame, mats.trim)); } // the glass road
+  else g.add(new THREE.Mesh(look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road));
   if (look.rail) g.add(new THREE.Mesh(look.rail, look.trim ? mats.trim : mats.rail));
   if (look.under) g.add(new THREE.Mesh(look.under, mats.stripe)); // stunt stripes (oldLook.js STRIPED)
   if (look.posts?.template && look.posts.matrices.length) {

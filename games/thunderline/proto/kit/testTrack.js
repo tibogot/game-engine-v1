@@ -197,7 +197,9 @@ export function buildTrackMeshes(placements, built, mats) {
     for (const M of list) {
       const at = c.setFromMatrixPosition(M).clone();
       if (look.deckBox) at.copy(look.deckBox.getCenter(new THREE.Vector3()).applyMatrix4(M)); // the piece's middle, not its entry
-      const parts = [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road, "near"], [look.under, mats.stripe, "near"], [look.rail, look.trim ? mats.trim : mats.rail, look.trim ? "near" : "rail"]];
+      // (a GLASS road draws its windowed deck, the pane and its frame; its `deck` is only what the wheels drive)
+      const decks = look.glass ? [[look.drawn, mats.road, "near"], [look.glass, mats.glass, "near"], [look.trimFrame, mats.trim, "near"]] : [[look.deck, TILES[id]?.tube || TILES[id]?.halfpipe ? mats.tube : mats.road, "near"]];
+      const parts = [...decks, [look.under, mats.stripe, "near"], [look.rail, look.trim ? mats.trim : mats.rail, look.trim ? "near" : "rail"]];
       for (const [geo, m, band] of parts) {
         if (!geo) continue;
         chunkParts.push({ geo, m, band, M, at, far: band === "rail" ? look.railCollision : null });

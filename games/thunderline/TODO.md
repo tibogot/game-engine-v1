@@ -565,6 +565,11 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       down-chevrons, a yellow X over the road). Boards and posts solid; the bar and X over the road not.
       Next from the shots: a glass straight (port the old game's), the full 90° wall + a wide wall-ride,
       a vertical spiral, a wave ramp, a water pool, maybe the red/white tube look (user's call).
+- [x] **GLASS ROAD** (user, 2026-10-23: "a straight with the glass material, we can see under" — not a road all of
+      glass: the old game's / Apex Rush shot 10). Glass 64 (Straight tab): our asphalt road, kerbs and rails,
+      a 24 × 10 m WINDOW in its middle with a white frame and the old game's real-glass pane (transmission),
+      recessed and oversize so nothing is coplanar. The wheels drive the unbroken deck (collision); the
+      windowed deck, the pane and the frame are only drawn (oldLook.buildGlassLook).
 - [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
       wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
       used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner

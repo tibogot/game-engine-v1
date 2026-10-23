@@ -246,6 +246,8 @@ const turnLen = (R, ang, ramp) => R * ang + ramp; // core radius R, eased ends
 
 export const TILES = {
   straight_64: { label: "Straight 64", segs: [{ L: 64 }] },
+  // GLASS (user, 2026-10-23: a road with a glass window in it, as the old game's and Apex Rush's): oldLook.buildGlassLook
+  glass_64: { label: "Glass 64", glass: true, segs: [{ L: 64 }] },
   bank_in_22: { label: "Bank in 22°", segs: [{ L: 48, leanIn: 0, leanOut: 22 * DEG }] },
   bank_out_22: { label: "Bank out 22°", segs: [{ L: 48, leanIn: 22 * DEG, leanOut: 0 }] },
   fast_turn_128: {
