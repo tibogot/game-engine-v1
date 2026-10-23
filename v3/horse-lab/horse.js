@@ -58,6 +58,8 @@ export const HP = {               // tunables (the lab GUI edits these)
   soleClear: 0.01,                // m a SWINGING hoof's whole sole stays over the ground under where it goes (toe, middle, heel)
   endsApart: 1,                   // the FRONT and the HIND end sink separately (withers from the front hooves, hips from the hind), the difference as pitch round the hips (0 = the whole body by the lowest hoof: up 15° the body sank 7 cm for the hind legs and the front knees folded 50° to fit) — LEG_IK_PLAN stage 2
   endsPitchMax: 0.3,              // rad that extra pitch at most (out of the wide ditch the hind sank 33 cm: 0.2 left the forelegs 15 cm short)
+  toeLock: 1,                     // a held hoof is held at its TOE (it breaks over about it) — 0 = at its fetlock
+  fsClipSide: 1, fsHoofKeep: 1,   // the planted foreleg's solve: the fetlock on the clip's own side of the leg line / the hoof keeps its angle as the pastern turns
   kneeLock: 1,                    // a PLANTED foreleg keeps its knee (the clip's): turned at the elbow, the fetlock takes up the length
   fetlockGive: 0.5,               // rad the pastern may turn from the clip's for that (more: the plain 2-bone solve)
   slopeGate: 1,                   // the gait capped and the horse refusing by the slope ahead (terrain levels: world.heightAt)
@@ -67,7 +69,11 @@ export const HP = {               // tunables (the lab GUI edits these)
   endsRate: 0.5,                  // m/s an end may move at most
   endsPitchRate: 0.6,             // rad/s the ends' extra pitch may turn at most
   endsRise: 0.15,                 // m an end may RISE for its hooves (the lower of its two: a planted hoof is never lifted off) — only sinking, climbing out of a ditch the forelegs stayed 13–16 cm short                // rad the hoof may turn against the pastern laying itself on the ground (the coffin joint: ~30°)
-  hindUnderDown: 0.14,            // rad the hind legs swing forward under the body at a full hill DOWN (~15 cm at the hoof)
+  hindSitDown: 0.15,              // m the hips sit lower at a full downhill (the hind legs stay bent)
+  // (downhill the legs stood upright reached 30° ahead of the hip onto the LOWER ground and came out straight —
+  // stifle 174°, "a weird stretch": turned a little back, and with the sit, at 20° down the hind legs move as on
+  // the flat — hoof vs hip median −5°, stretch ≤ 0.89 — with the hocks a little MORE bent: 116° vs 123°)
+  hindUnderDown: -0.05,            // rad the hind legs swing forward under the body at a full hill DOWN (~15 cm at the hoof)
   hindUnderUp: 0.05,              // ...and up a full hill (reaching forward to push)
   clipSmooth: !(globalThis.location && new URLSearchParams(globalThis.location.search).get("clipsmooth") === "0"),   // the pack's 24 fps linear clips resampled at 60 fps on smooth curves through the same keys (read at load; ?clipsmooth=0 for the raw clips)
   clipCloseLoops: !(globalThis.location && new URLSearchParams(globalThis.location.search).get("closeloops") === "0"),   // the canter / gallop loops' missing closing key put back (their wrap jumped a key step in zero time; ?closeloops=0 to compare)
@@ -109,6 +115,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   gallopNeck: 0.32,
   spinPivot: 0.8,                 // turning on the spot pivots this far behind the middle (× half the body length: over the hind legs) — 0 = about the middle
   walkEven: 1,                    // the walk's four beats evenly spaced (Muybridge) — 0 = the clip's
+  evenAngles: 1,                  // the even walk shifts the pastern's and hoof's ANGLES with the hoof (0 = position only: a hind hoof rose flat, no breakover)
   walkEvenShift: [0, 0.073, 0.115, 0.125],   // per leg (LF, RF, LH, RH): how far ahead on its own path (stride share)
   canterDepart: true,             // walk → canter as a departure stride (legs join the canter one by one, in its footfall order)
   departWalkU: [0.7, 0.79],       // the walk's moment to depart: its right hind about to land (clip 0.78)
@@ -658,14 +665,25 @@ export class HorseController {
     const Jt = T.clone().add(pv), d = Jt.clone().sub(E), dl = d.length();
     if (dl > L + p - 1e-3 || dl < Math.abs(L - p) + 1e-3) return null;
     const a = (L * L - p * p + dl * dl) / (2 * dl), h = Math.sqrt(Math.max(0, L * L - a * a)), dn = d.clone().divideScalar(dl);
-    const back = fwd.clone().negate(); back.addScaledVector(dn, -back.dot(dn));
+    // (on the side the clip's own fetlock is: with the forward axis the meeting point left the clip's leg
+    // plane, and with NOTHING to correct the pastern still turned — the front toe stood 3–5 cm up all stance)
+    let back = HP.fsClipSide > 0 ? C.clone().sub(E) : new V3(); back.addScaledVector(dn, -back.dot(dn));
+    if (back.lengthSq() < 1e-6) { back = fwd.clone().negate(); back.addScaledVector(dn, -back.dot(dn)); }
     if (back.lengthSq() < 1e-8) return null;
     back.normalize();
     const F = E.clone().addScaledVector(dn, a).addScaledVector(back, h), pNew = Jt.clone().sub(F);
     if (pv.angleTo(pNew) > HP.fetlockGive) return null;
     rotateWorld(g.u, new THREE.Quaternion().setFromUnitVectors(C.clone().sub(E).normalize(), F.clone().sub(E).normalize()));
-    rotateWorld(g.ik, new THREE.Quaternion().setFromUnitVectors(pv.clone().normalize(), pNew.normalize()));
+    const qP = new THREE.Quaternion().setFromUnitVectors(pv.clone().normalize(), pNew.normalize());
+    rotateWorld(g.ik, qP);
+    if (HP.fsHoofKeep > 0) rotateWorld(g.ff, qP.invert());   // (the planted hoof keeps lying as it was: the fetlock sinks, the hoof doesn't tip)
     return F;
+  }
+
+  // the hoof's TOE from its fetlock (the IK bone at C), in the world, as the bones are now; null without a sole
+  toeOffset(g, C) {
+    const S = this.solePoints(g);
+    return S ? S[0].clone().applyMatrix4(g.ff.matrixWorld).sub(C) : null;
   }
 
   // the slope (degrees) along the heading: the steepest climb and the steepest drop under the body and up to
@@ -746,7 +764,7 @@ export class HorseController {
         g.ff.getWorldPosition(_c);
         g.hA0 = Math.max(0, _c.y - (py - (up.x * (_c.x - px) + up.z * (_c.z - pz)) / up.y) - this.h.foot.sole);
         const top = g.u.getWorldPosition(new V3());
-        const q = g.cannon && under > 1e-4 ? qUnder.clone().multiply(this.slopeUndo) : this.slopeUndo;
+        const q = g.cannon && Math.abs(under) > 1e-4 ? qUnder.clone().multiply(this.slopeUndo) : this.slopeUndo;
         rotateWorld(g.u, q);
         g.ik.position.copy(g.ik.parent.worldToLocal(g.ik.getWorldPosition(new V3()).sub(top).applyQuaternion(q).add(top)));
         rotateWorld(g.ik, q);
@@ -864,7 +882,11 @@ export class HorseController {
     // (by its HIGHER planted hoof: walking uphill both front hooves are down at once, the one just landed
     // ~8 cm higher than the one leaving — by the lower, the new leg came out too long and folded its knee
     // 60°; by the higher, the leaving one lifts its heel a little: its breakover)
-    const tH = endT(endH.d > 1e-4 ? endH.n / endH.d : NaN, this.bodyOffH ?? 0), tF = endT(endF.d > 1e-4 ? endF.n / endF.d : NaN, this.bodyOffF ?? 0);
+    // DOWNHILL the quarters SIT: the hips lower, the hind legs stay bent under the body (riders: "back legs
+    // well up underneath him"). Hips kept at their flat height, at 20° down the hind legs came out fully
+    // straight to reach the lower ground (hock 167°, the leg 100 % stretched — "a weird stretch")
+    const sitH = HP.hindSitDown * Math.max(0, -(this.hillK ?? 0)) * upW;
+    const tH = endT(endH.d > 1e-4 ? endH.n / endH.d - sitH : NaN, this.bodyOffH ?? 0), tF = endT(endF.d > 1e-4 ? endF.n / endF.d : NaN, this.bodyOffF ?? 0);
     // (rising as fast as sinking: a hoof landing 8 cm higher waited ~10 frames for its end, the knee folded meanwhile)
     const endStep = (b, t) => b + clamp((t - b) * lerpK(14, dt), -HP.endsRate * dt, HP.endsRate * dt);   // (eased AND rate-limited: never a jump)
     this.bodyOffH = endStep(this.bodyOffH ?? 0, tH);
@@ -962,7 +984,7 @@ export class HorseController {
       // together). Each hoof follows the walk's OWN ground path, sampled ahead by
       // its leg's shift, placed in the ground frame (re-timing the leg keys moved
       // the hooves with the body's bob, timed to the old footfalls: they hovered)
-      g.evenW = 0;
+      g.evenW = 0; g.evenQ = g.evenQi = null;
       const ew = this.walkEvenW ?? 0;
       if (ew > 0.001 && this.walkPaths()) {
         const sh = HP.walkEvenShift[li], A = this.actions.Walk, u = (A.time / A.getClip().duration) + sh;
@@ -976,6 +998,12 @@ export class HorseController {
         // (shifted level, walking down 15° the planted hooves were 4–8 cm in the ground, the knees folded)
         { const n = this.groundNormal(C.x, C.z, C.y); if (n) evenOff.y += -(n.x * evenOff.x + n.z * evenOff.z) / n.y; }
         if (g.cannon && P.c) g.evenC = new V3(P.c.x * cy + P.c.z * sy, P.c.y, -P.c.x * sy + P.c.z * cy);
+        // ...and the HOOF's angle with it (moved ahead on its path but kept at the clip's angle of now, a hind
+        // hoof rose flat 5–7 cm before it tipped: no breakover — the clip peels the heel up over the toe)
+        const qy = new THREE.Quaternion().setFromAxisAngle(_u.set(0, 1, 0), this.yaw);
+        // (the PASTERN's too: the hoof hangs from it — turned alone, its toe left the ground 1.5 cm early)
+        const qyI = qy.clone().invert(), dW = (a, b) => new THREE.Quaternion().slerp(qy.clone().multiply(a.clone().multiply(b.clone().invert())).multiply(qyI), ew);
+        g.evenQi = dW(P.qi, P0.qi); g.evenQ = dW(P.q, P0.q);
         g.evenW = ew;
         g.hA = Math.max(0, g.hA + (P.p.y - P0.p.y) * ew);       // (its lift: from its shifted path)
       }
@@ -1019,11 +1047,17 @@ export class HorseController {
       if (behind) { if (!g.catchUp) g.stepArc = (g.lockRel ?? 0) === 0 && g.hA < 0.02; g.catchUp = true; settle = true; }   // (its own lift only for a step from the ground: the walk may already be lifting it)
       if ((settle || letGo) && !g.catchUp && (g.lockRel ?? 0) === 0 && g.hA < 0.02) g.stepArc = true;   // (let go while planted: it steps, it does not skate)
       if (!g.lock) { g.catchUp = false; g.stepArc = false; }
-      if (g.hA < 0.02 && (locking || g.lock) && !letGo && !settle && !g.catchUp) { if (!g.lock) g.lock = T.clone(); g.lockRel = 0; }
+      // (the lock holds the TOE, not the fetlock: as the clip breaks over, the hoof turns about its toe and the
+      // fetlock rolls forward over it — the fetlock held, the hoof swung round it and rose flat 5 cm before tipping)
+      const toeOff = HP.toeLock > 0 ? this.toeOffset(g, C) : null;
+      if (g.hA < 0.02 && (locking || g.lock) && !letGo && !settle && !g.catchUp) { if (!g.lock) { g.lock = T.clone(); g.lockOff = toeOff; } g.lockRel = 0; }
       else if (g.lock && (g.hA > 0.04 || letGo || settle || g.catchUp)) { g.lockRel = Math.min(1, (g.lockRel ?? 0) + (this.lastDt ?? 1 / 60) / (settle ? 0.32 : 0.12)); if (g.lockRel >= 1) { g.lock = null; if (this.settling === li) this.settling = undefined; } }
       else if (g.lock && !locking && Math.abs(this.v) < 0.3 && g.hA < 0.02 && (g.lockRel ?? 0) === 0 && T.distanceTo(g.lock) < 0.025) { g.lock = null; }   // (already where it stands: nothing to step)
       if (g.lock && g.stepArc && (g.lockRel ?? 0) > 0) T.y += Math.sin(Math.PI * g.lockRel) * 0.07 * (this.h.height / 2.02);   // the step's lift
-      if (g.lock) { const k = 1 - smooth01(g.lockRel ?? 0); T.x += (g.lock.x - T.x) * k; T.z += (g.lock.z - T.z) * k; }
+      if (g.lock) {
+        const k = 1 - smooth01(g.lockRel ?? 0), o0 = g.lockOff, lx = g.lock.x + (o0 && toeOff ? o0.x - toeOff.x : 0), lz = g.lock.z + (o0 && toeOff ? o0.z - toeOff.z : 0);
+        T.x += (lx - T.x) * k; T.z += (lz - T.z) * k;
+      }
       if (g.jumpShift) {                                         // take-off: planted forward, beside the other —
         const k = g.jumpAir ? 1 - smooth01(g.jumpLegW ?? 0) : 1;  // only for the stance: it hands over to the flight pose as the hoof leaves
         T.addScaledVector(new V3(Math.sin(this.yaw), 0, Math.cos(this.yaw)), g.jumpShift * k);   // (kept through the flight, it snapped off 20 cm at the jump's end)
@@ -1179,6 +1213,7 @@ export class HorseController {
       // turned with a cannon the IK bent on a ramp, it stood on its heel)
       const carry = clamp(g.hA / 0.06, 0, 1) * (this.jumpUndo ? 1 : g.w);
       if (qL0 && carry > 0.01) rotateWorld(g.ik, new THREE.Quaternion().slerp(g.l.getWorldQuaternion(new THREE.Quaternion()).multiply(qL0.invert()), carry));
+      if (g.evenQ && HP.evenAngles > 0) { rotateWorld(g.ik, g.evenQi); rotateWorld(g.ff, g.evenQ.clone().multiply(g.evenQi.clone().invert())); }   // (the even walk: the pastern's and the hoof's angles from the shifted path too)
       // planted on a slope: the hoof lies ON it — turned by the slope under it
       // (eased in as it lands); kept at its flat-ground angle it stood on its toe
       // or heel, the other edge 7–10 cm off a 20° ramp
@@ -2649,7 +2684,7 @@ export class HorseController {
       this.legs.forEach((g, li) => {
         const p = g.ik.getWorldPosition(new V3());
         const c = g.cannon ? p.clone().sub(g.cannon.getWorldPosition(new V3())) : null;
-        paths[li].push({ p, c });
+        paths[li].push({ p, c, q: g.ff.getWorldQuaternion(new THREE.Quaternion()), qi: g.ik.getWorldQuaternion(new THREE.Quaternion()) });
       });
     }
     a.stop(); m.uncacheRoot(this.h.model);
@@ -2660,7 +2695,7 @@ export class HorseController {
   walkPathAt(li, u, name = "Walk") {
     const W = this.walkPaths(name), N = W.N, x = ((u % 1) + 1) % 1 * N, i = Math.floor(x), f = x - i;
     const A = W.paths[li][i % N], B = W.paths[li][(i + 1) % N];
-    return { p: A.p.clone().lerp(B.p, f), c: A.c ? A.c.clone().lerp(B.c, f) : null };
+    return { p: A.p.clone().lerp(B.p, f), c: A.c ? A.c.clone().lerp(B.c, f) : null, q: A.q.clone().slerp(B.q, f), qi: A.qi.clone().slerp(B.qi, f) };
   }
 
   glueHooves() {

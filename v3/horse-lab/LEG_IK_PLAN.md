@@ -188,6 +188,59 @@ frame looks like a snap: two runs of the same thing disagreed by 2×.
 
 Motion audit 15/15, npm test 212/212. Slopes as before (15° / 20° walk down: sole −0.2 cm).
 
+## Stage 4, breakover: the hoof rolls over its toe (2026-10-24, waiting for your look)
+
+Measured as each hoof's toe and heel height and sole pitch, frame by frame, IK against the clip (horse
+lab, flat, fixed step). The clip DOES break over (heel up, toe planted: 1° → −17° → −47°). Our IK
+lost it in three places:
+
+- **Walk, hind:** the even walk moved each hoof along its path (up to 0.125 of a stride ahead) but
+  kept the clip's hoof ANGLE of now, so the hoof rose flat 5–7 cm before tipping. Now the pastern's
+  and the hoof's angles come from the shifted path too (`evenAngles`): heel 10.1 / toe 2.9 cm, where the
+  clip has 9.6 / 2.6.
+- **Walk and canter, front:** the stance solve (`frontStance`) picked the fetlock's side from the
+  forward axis, not from the clip's own leg plane. With nothing to correct it still turned the pastern,
+  and the toe stood 2–5 cm up through the whole stance (+3 to +16°). Now the side comes from the clip
+  (`fsClipSide`), and a planted hoof keeps its angle when the pastern turns (`fsHoofKeep`): flat, 1°.
+- **Held hooves** (starts, stops, spins, the slowed gallop) are held at the TOE, not the fetlock
+  (`toeLock`). As the clip breaks over, the fetlock rolls forward over the toe. Toe slip on the ground: 0.
+
+**Not fixed: the front hooves in the slowed gallop.** The body goes on while the hoof is held, and by the
+end of stance the foreleg can't reach: it lifts ~4 cm before tipping (the clip: 0.2). Pushing the
+hoof forward along the ground matched the heights, but the toe SKATED 8 cm a frame: removed. Next try:
+the front end sinks a few cm at the end of a held stance.
+
+**Correction:** the slope soles above were measured in real time, so they depend on the frame rate
+(the same run gave 2.6 and 5.0 cm). At a fixed step, walking down 20° the deepest sole is **3.0 cm**
+with the committed code, not −0.2. With stage 4 it is 3.9 cm (+0.9, all from `evenAngles`). The downhill
+landing (the front hooves, at touchdown) is the next thing to fix.
+
+Motion audit 15/15, npm test 212/212, smoothness unchanged (canter jerk 10.5, walk 4.1).
+
+### Downhill: the hind legs "stretched a weird way" (your screenshot, 2026-10-24)
+
+Measured at 20° down (fixed step), hind legs: the hoof reached up to 30° AHEAD of the hip (flat
+walk: 22°) onto the lower ground ahead, and the leg came out straight to reach it: stifle 174°,
+hock 167°, stretch 1.00. "Legs upright" kept the clip's forward reach from the VERTICAL (20° more
+forward than from the tilted body), and stage 5's step-under added 8° on top. A horse going down
+reaches under its body with its legs BENT, and lowers its quarters (sources: "walking downhill
+encourages the horse to reach farther under the body"; riders: "back legs well up underneath him").
+
+- The quarters sit going down: `hindSitDown` 0.15 m at a full downhill (the hips' target).
+- The hind legs turn a little back instead of forward: `hindUnderDown` −0.05 rad.
+
+| hind legs | flat walk | down 20° before | down 20° now |
+|---|---|---|---|
+| hoof vs hip (min / median / max) | −21 / −5 / +22° | −17 / +2 / +29° | −26 / **−5** / +25° |
+| hock (median / most open) | 123 / 138° | 146 / 167° | **116 / 134°** |
+| stifle, most open | 125° | 174° | **116°** |
+| stretch, max | 0.90 | 1.00 | **0.89** |
+
+Soles walking down (fixed step): 20° 3.9 → **2.2 cm**, 15° 0.3, 10° 1.5. Motion audit 15/15.
+
+**Found, not fixed (it was there before):** cantering onto the 20° ramp, the slope gate brakes to a walk
+at the top, and for ~12 frames a front knee folds 61° → 83° in stance.
+
 **Bones?** The hind chain is complete: thigh, shin, cannon, pastern, hoof. No bone was missing behind.
 In front, the "shoulder" bone is only 9 cm (no real humerus). It's the next thing to add if the front
 ever looks wrong.
