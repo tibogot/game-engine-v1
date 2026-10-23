@@ -102,7 +102,7 @@ let thumbTimer = null;
 // A SAVE THAT FAILS SAYS SO (2026-10-23: the browser's storage filled up and every edit was lost without a
 // word — the track was gone at the next visit). A red line at the top until a save works again.
 let saveWarnEl = null;
-function saved(ok) {
+function saveShown(ok) {
   if (ok) { if (saveWarnEl) saveWarnEl.style.display = "none"; return; }
   if (!saveWarnEl) {
     saveWarnEl = document.createElement("div");
@@ -113,9 +113,9 @@ function saved(ok) {
   saveWarnEl.style.display = "";
 }
 function save() {
-  saved(library.saveTrack(trackId, track));
+  saveShown(library.saveTrack(trackId, track));
   clearTimeout(thumbTimer);
-  thumbTimer = setTimeout(() => trackThumb().then((url) => url && saved(library.saveTrack(trackId, track, url))), 1200);
+  thumbTimer = setTimeout(() => trackThumb().then((url) => url && saveShown(library.saveTrack(trackId, track, url))), 1200);
 }
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
 function restore(from, to) {
