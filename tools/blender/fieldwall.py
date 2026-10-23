@@ -94,7 +94,7 @@ def buildWall(K, name, spec, state, seed):
         s = R.uniform(0.08, 0.15)
         stone(K, G, f"F{i}", (px, s * 0.6, pz), (s * 1.3, s * 0.7, s), R)
 
-TYPES = {t: dict(builder=buildWall, atlas=1024, aoDist=0.22) for t in ("a", "b", "c")}   # (the stones packed: a short AO, or every one baked black)
+TYPES = {t: dict(builder=buildWall, atlas=1024, aoDist=0.22, farRatio=0.75) for t in ("a", "b", "c")}   # (the stones packed: a short AO, or every one baked black)
 
 exported = buildKit(TYPES, MATDEF, "fieldwalls.glb", prefix="Wall", seed0=1954)
 previews(TYPES, exported, prefix="Wall", tag="wall_", spacing=3.2, frame=0.16)

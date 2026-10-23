@@ -3,7 +3,7 @@
  * file's world space. Reads what our pipeline writes — EXT_meshopt_compression (tools/optimizeGlb.mjs),
  * KHR_mesh_quantization (normalized integer positions, undone by the node transforms), TRS or matrix nodes.
  *
- *   const { nodes } = await readGlb(file);   // [{ name, path: "Root/Child", mesh, positions: Float32Array (world), indices }]
+ *   const { nodes } = await readGlb(file);   // [{ name, path: "Root/Child", mesh, positions, normals (world, Float32Array), indices }]
  */
 import fs from "node:fs";
 import { MeshoptDecoder } from "meshoptimizer";
@@ -65,7 +65,7 @@ export async function readGlb(file) {
     const n = json.nodes[ni], M = mul(parent, mat(n)), p = path ? `${path}/${n.name ?? ni}` : (n.name ?? String(ni));
     if (n.mesh != null) {
       const mesh = json.meshes[n.mesh];
-      const pos = [], idx = [];
+      const pos = [], idx = [], nrm = [];
       for (const prim of mesh.primitives) {
         if ((prim.mode ?? 4) !== 4) continue;
         const P = accessor(prim.attributes.POSITION), base = pos.length / 3;
@@ -73,10 +73,18 @@ export async function readGlb(file) {
           const [x, y, z] = [P[k], P[k + 1], P[k + 2]];
           pos.push(M[0] * x + M[4] * y + M[8] * z + M[12], M[1] * x + M[5] * y + M[9] * z + M[13], M[2] * x + M[6] * y + M[10] * z + M[14]);
         }
+        // normals by the node's rotation (our nodes scale uniformly: the 3x3 then renormalised is exact)
+        const N = prim.attributes.NORMAL != null ? accessor(prim.attributes.NORMAL) : null;
+        for (let k = 0; k < P.length; k += 3) {
+          if (!N) { nrm.push(0, 0, 0); continue; }
+          const [x, y, z] = [N[k], N[k + 1], N[k + 2]];
+          const a = M[0] * x + M[4] * y + M[8] * z, b = M[1] * x + M[5] * y + M[9] * z, c = M[2] * x + M[6] * y + M[10] * z, l = Math.hypot(a, b, c) || 1;
+          nrm.push(a / l, b / l, c / l);
+        }
         const I = prim.indices != null ? accessor(prim.indices) : Array.from({ length: P.length / 3 }, (_, k) => k);
         for (const i of I) idx.push(base + i);
       }
-      nodes.push({ name: n.name ?? String(ni), path: p, mesh: mesh.name, positions: Float32Array.from(pos), indices: Uint32Array.from(idx) });
+      nodes.push({ name: n.name ?? String(ni), path: p, mesh: mesh.name, positions: Float32Array.from(pos), normals: Float32Array.from(nrm), indices: Uint32Array.from(idx) });
     }
     for (const c of n.children ?? []) walk(c, M, p);
   };

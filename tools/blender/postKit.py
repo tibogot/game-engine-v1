@@ -224,16 +224,14 @@ def tower(K, R, x, z, idx, state):
             for y in (2.4, TH - 1.4):
                 cx, cz = x + nx * (W2 + 0.0), z + nz * (W2 + 0.0)
                 box(K, f"TLoop{idx}{k}{y}", cx - (0.04 if nx else 0.09), cx + (0.04 if nx else 0.09), y - 0.27, y + 0.27, cz - (0.09 if nx else 0.04), cz + (0.09 if nx else 0.04), "poSlit", 0.36)
-    # THE AA-52 on its tripod, on a step of ammunition boxes (clear of the game's 3-course sandbag ring)
+    # THE AA-52 on its tall ANTI-AIRCRAFT tripod (2026-10-23, you: the tower gunners "not holding anything" — on its old
+    # ammunition-box step the gun sat at a man's knees, where no hold fits): its axis at a STANDING man's shoulder
+    # (1.42 m real, x1.3 in the game), the gunner behind it with the stock in his shoulder (algStructures CREWS.post)
     yaw = math.atan2(sx, sz)
     gx, gz = x + sx * 0.2, z + sz * 0.2
     if not (state == "damaged" and idx == 1):
-        for k in (-1, 0, 1):
-            ox, oz = math.cos(yaw) * k * 0.32, -math.sin(yaw) * k * 0.32
-            c, s_ = math.cos(yaw + math.pi / 2), math.sin(yaw + math.pi / 2)
-            hull(K, f"Step{idx}{k}", [(gx + ox + a * 0.3 * c + b * 0.16 * s_, TH + 0.12 + yy, gz + oz - a * 0.3 * s_ + b * 0.16 * c) for a in (-1, 1) for b in (-1, 1) for yy in (0, 0.36)], "poTank", 0.45, 0.01)
         # (milprops: yaw 0 = toward −Z; the old gun pointed along +sx +sz — its atan2(sx, sz) as three.js rotation.y)
-        milprops.aa52(K, f"Gun{idx}", (gx, TH + 0.48, gz), yaw + math.pi, 0.46, tripod=True, tripodDrop=0.0)
+        milprops.aa52(K, f"Gun{idx}", (gx, TH + 1.42, gz), yaw + math.pi, 0.46, tripod=True, tripodDrop=1.42)
 
 # ── the gatehouse ───────────────────────────────────────────────────────────────────────────────────────────────
 def gatehouse(K, R, state):

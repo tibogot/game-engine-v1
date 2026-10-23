@@ -309,14 +309,31 @@ class Kit:
         """A FAR level of a baked object: a copy decimated (its UVs kept: the SAME atlas, no new texture)."""
         f = o.copy(); f.data = o.data.copy(); f.name = name or f"{o.name}_Far"
         bpy.context.scene.collection.objects.link(f)
-        d = f.modifiers.new("D", "DECIMATE"); d.decimate_type = "COLLAPSE"; d.ratio = ratio; d.use_collapse_triangulate = True
         bpy.ops.object.select_all(action="DESELECT"); f.select_set(True); bpy.context.view_layer.objects.active = f
-        bpy.ops.object.modifier_apply(modifier="D")
+        # PLANAR FIRST (2026-10-23, you at the ksar: the long dark streak down the far minaret "looks like a normal issue,
+        # bad topology"): the collapse alone moved wall vertices off their plane, so a flat wall's normals disagreed and
+        # smooth shading smeared them along its long slivers — a fake shadow on every far house, gone when the near
+        # model took over at 60 m (the "shadows that disappear when the camera comes close"). A planar dissolve first
+        # merges each flat wall into one exact plane (the UV seams kept: the same atlas); the collapse only takes
+        # what is still over the budget.
+        n0 = tris(f)
+        d = f.modifiers.new("P", "DECIMATE"); d.decimate_type = "DISSOLVE"; d.angle_limit = math.radians(2); d.delimit = {"UV", "SHARP", "MATERIAL"}
+        bpy.ops.object.modifier_apply(modifier="P")
+        t = f.modifiers.new("T", "TRIANGULATE"); t.quad_method = "BEAUTY"; t.ngon_method = "BEAUTY"
+        bpy.ops.object.modifier_apply(modifier="T")
+        n1 = tris(f)
+        if n1 > n0 * ratio * 1.05:
+            d = f.modifiers.new("D", "DECIMATE"); d.decimate_type = "COLLAPSE"; d.ratio = (n0 * ratio) / n1; d.use_collapse_triangulate = True
+            bpy.ops.object.modifier_apply(modifier="D")
+        print(f"FAR {f.name}: {n0} -> planar {n1} -> {tris(f)}")
         # (the collapse loses the sharp edges: smooth shading then ran across the walls' corners and the
         # long collapsed triangles — dark diagonal streaks on flat whitewash that read as SHADOWS from the RTS
         # zoom and "vanished" up close when the near level took over; you, 2026-10-19. Split by angle again.)
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(35))
-        weighted(f)
+        # …and THE NEAR MODEL'S OWN NORMALS (2026-10-23, you: "the far one makes bad shading … see between A and B" —
+        # combed stripes, dark wedges, a streak down the minaret the near model never had): copied corner by corner
+        # (copy_normals below — Blender's Data Transfer was measured WORSE). Gate: tools/glbLodShadingCheck.mjs.
+        copy_normals(f, o)
         return f
     def export(s, path, objs, colors=False):
         """`colors`: the ACTIVE colour attribute exported too (COLOR_0) — data a piece carries for the game (the
@@ -437,3 +454,51 @@ def deconflict(objs, name="", step=0.004, rounds=4):
     rest = _coplanar_pairs(objs) if first else []
     if first: print(f"DECONFLICT {name}: {first} coplanar part pairs, {len(moved)} parts moved 4 mm, {len(rest)} left")
     for i, j, nv in rest[:12]: print(f"  left: {objs[i].name} / {objs[j].name} n={tuple(round(x, 2) for x in nv)}")
+
+def copy_normals(f, n, inset=0.03, max_dist=0.3, min_facing=0.5):
+    """THE NEAR LEVEL'S NORMALS ON THE FAR ONE, corner by corner (2026-10-23 — the far levels' fake streaks and
+    stripes, tools/glbLodShadingCheck.mjs). Blender's Data Transfer blends across a corner's two sides (a wall and its
+    window reveal): measured WORSE than doing nothing. Here every corner of every far face is stepped `inset` m into
+    its own face, the closest point of the near surface FACING THE SAME WAY is found (BVH), and the near's interpolated
+    corner normal there becomes the far's custom normal; a corner with no such point keeps its face's normal."""
+    from mathutils.bvhtree import BVHTree
+    from mathutils.geometry import barycentric_transform
+    # (matrix_world is stale after a location change until the scene updates — the bake spreads the pieces 60 m apart
+    # and puts them back: without this every farBuilder kit's far looked for its near 180 m away and kept flat normals)
+    bpy.context.view_layer.update()
+    nm = n.data; nm.calc_loop_triangles()
+    Mn, Mf = n.matrix_world, f.matrix_world
+    Mn_inv = Mn.inverted(); rot_n = Mn.to_3x3(); rot_f = Mf.to_3x3()
+    tris_n = [lt for lt in nm.loop_triangles]
+    verts_n = [Mn @ v.co for v in nm.vertices]
+    cn = nm.corner_normals
+    bvh = BVHTree.FromPolygons(verts_n, [lt.vertices[:] for lt in tris_n], all_triangles=True)
+    fm = f.data; fm.calc_loop_triangles()
+    out = [None] * len(fm.loops)
+    for poly in fm.polygons:
+        fn = (rot_f @ poly.normal).normalized()
+        centre = Mf @ poly.center
+        for li in poly.loop_indices:
+            p = Mf @ fm.vertices[fm.loops[li].vertex_index].co
+            q = p + (centre - p).normalized() * min(inset, (centre - p).length * 0.5)
+            best = None
+            # every near triangle within reach; of those about as close as the closest (+5 cm), the one FACING most
+            # like this far face (2026-10-23: the nearest-that-faces-roughly-the-same-way took a 45° bevel at a small
+            # terrace wall's corners — its far level shaded 12-21 % off)
+            cand = bvh.find_nearest_range(q, max_dist)
+            if cand:
+                dmin = min(c[3] for c in cand)
+                score_best = -2.0
+                for loc2, face2, ti2, d2 in cand:
+                    if d2 > dmin + 0.05: continue
+                    lt = tris_n[ti2]
+                    a, b, c = (verts_n[i] for i in lt.vertices)
+                    tn = (b - a).cross(c - a)
+                    if tn.length < 1e-12: continue
+                    sc = tn.normalized().dot(fn)
+                    if sc < min_facing or sc <= score_best: continue
+                    na, nb, nc = (rot_n @ cn[l].vector for l in lt.loops)
+                    best = barycentric_transform(loc2, a, b, c, na, nb, nc).normalized(); score_best = sc
+            v = best if best is not None else fn
+            out[li] = tuple((rot_f.inverted() @ v).normalized())
+    fm.normals_split_custom_set(out)

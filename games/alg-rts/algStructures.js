@@ -37,7 +37,11 @@ const CREWS = {
   sangar: { look: "moudjahid", gun: [{ back: 0.95, side: 0, rest: "crouchIdle", fire: "crouchFire", bare: true }, { back: 0.9, side: 1.05, rest: "crouchIdle" }] },
   // the post's tower guns (rtsFrenchPost userData.towerGuns: each AA-52's muzzle, the towers on the diagonal): a
   // gunner kneeling behind each, `back` m in from the muzzle toward the post's centre, facing out
-  post: { look: "appele", muzzles: { key: "towerGuns", back: 1.5 * S, rest: "crouchIdle", fire: "crouchFire", bare: true },
+  // (2026-10-23, you: "like they are not holding anything"): the gun's axis stands 1.6 m over the tower roof — a
+  // STANDING man's shoulder — so he stands behind it, the AA-52's stock in his shoulder: the rifleman's aim (rest) and
+  // fire, his rifle hidden (bare). `back` m from the muzzle along the barrel, `dy` the roof under the muzzle, `side`
+  // the gun to his right
+  post: { look: "appele", muzzles: { key: "towerGuns", back: 1.45, dy: -1.6, side: 0.05, rest: "aim", fire: "fire", bare: true },
     // and its MORTAR (rtsFrenchPost: the tube at (-2.6, 1.4) on its baseplate, firing toward +z): the mortar team's
     // rest — the gunner behind the plate, the loader beside the mouth (y: null — the floor under them)
     at: [{ x: -2.6 * S, y: null, z: (1.4 - 0.6) * S, yaw: 0, rest: "mortarRest", bare: true },
@@ -227,8 +231,8 @@ export function createAlgStructures({ app, showroom, producers, units }) {
         const M = C.muzzles, pts = rec.mesh.geometry.userData[M.key] ?? [];
         rec.crew = R.addStaticFigures(C.look, pts.map((q, i) => {
           const L = Math.hypot(q[0], q[2]) || 1, dx = q[0] / L, dz = q[2] / L;
-          rec.mesh.localToWorld(_p.set(q[0] - dx * M.back, q[1], q[2] - dz * M.back));
-          return { x: _p.x, y: floorAt(rec, _p.x, _p.z, _p.y + 1), z: _p.z, yaw: rec.mesh.rotation.y + Math.atan2(dx, dz), role: M.rest, slot: i, bare: M.bare };
+          rec.mesh.localToWorld(_p.set(q[0] - dx * M.back - dz * (M.side ?? 0), q[1], q[2] - dz * M.back + dx * (M.side ?? 0)));
+          return { x: _p.x, y: M.dy != null ? _p.y + M.dy : floorAt(rec, _p.x, _p.z, _p.y + 1), z: _p.z, yaw: rec.mesh.rotation.y + Math.atan2(dx, dz), role: M.rest, slot: i, bare: M.bare };
         }));
         rec.gunCrewN = rec.crew.length;
         if (C.at) rec.crew.push(...atFigures(rec, C));

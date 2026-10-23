@@ -24,7 +24,7 @@ assets-src/refs/house/. Game coordinates (x along the front, y up, FRONT at -Z),
 import bpy, bmesh, sys, os, math, random
 sys.path.insert(0, os.path.dirname(__file__))
 import bkit
-from bkit import B, srgb, dust, flat, wood, paintedWood, Kit, tris
+from bkit import copy_normals, B, srgb, dust, flat, wood, paintedWood, Kit, tris
 
 out = os.path.abspath(sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(bkit.ROOT, "public", "models", "alg"))
 os.makedirs(out, exist_ok=True)
@@ -489,7 +489,9 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
                 K.drop_cutters()
         K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.002))
         for i, o in enumerate(objs):
-            f = fars[i] if fars else K.far(o, 0.3)
+            f = fars[i] if fars else K.far(o, spec.get("farRatio", 0.3))   # (a kit of small round stones: gentler — 0.3 left shards)
+            # (a piece's own far build shades by the near's normals too — the gate, tools/glbLodShadingCheck.mjs)
+            if fars: copy_normals(f, o)
             print("TRIS", o.name, tris(o), "far", tris(f))
             exported += [o, f]
     K.export(os.path.join(out, glb), exported, colors=colors)

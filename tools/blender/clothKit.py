@@ -99,17 +99,25 @@ def _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass, compress=None, b
     bpy.data.collections.remove(col)
     return verts
 
+def _sheet(K, key, nu, nv):
+    """A settled sheet's vertices (and grid size): a far level THINS the near's sheet — 2026-10-23: it used to simulate
+    its own coarser grid, which fell differently (the ruined aid tent's canvas changed shape at the LOD switch,
+    tools/glbLodShadingCheck.mjs 11 %)."""
+    verts = _CACHE[(key, nu, nv)]
+    if not K.low: return verts, nu, nv
+    NU, NV = nu, nv; nu, nv = max(4, nu // 2), max(3, nv // 2)
+    return [verts[round(i * NU / nu) * (NV + 1) + round(j * NV / nv)] for i in range(nu + 1) for j in range(nv + 1)], nu, nv
+
 def drape(K, nm, fn, nu, nv, mats, t, pins=lambda u, v: False, colliders=(), frames=50, stiff=40.0, mass=0.3,
           key=None, thick=0.006, compress=None, bend=0.6, keep=0.5):
     # (`compress`: its compression stiffness — low, the cloth BUCKLES into wrinkles where it is pushed together, as
     # canvas does between its ties; the tension stays `stiff`. `bend`: soft folds low, stiff panels high)
     """The settled sheet as a kit object (its faces' materials from `mats(u, v)` at their centres)."""
-    if K.low: nu, nv = max(4, nu // 2), max(3, nv // 2)
     ck = (key or nm, nu, nv)
     if ck not in _CACHE:
         _CACHE[ck] = _simulate(fn, nu, nv, pins, colliders, frames, stiff, mass, compress, bend)
         print(f"[cloth] {nm} {nu}x{nv} settled", flush=True)
-    verts = _CACHE[ck]
+    verts, nu, nv = _sheet(K, key or nm, nu, nv)
     bm = bmesh.new()
     g = [[bm.verts.new(verts[i * (nv + 1) + j]) for j in range(nv + 1)] for i in range(nu + 1)]
     names = []
@@ -152,8 +160,7 @@ def decal(K, nm, key, nu, nv, region, mat, t, lift=0.012, uv=True):
     the sheet's faces whose centres fall in `region(u, v)` → panel (pu, pv) in 0..1 (or None), lifted `lift` along
     their normals, a "Panel" UV layer from the region — its own material reads THAT (its own small sharp atlas, not
     the canvas's): it follows every fold of the cloth, crisp at any distance; the game draws it with a depth offset."""
-    if K.low: nu, nv = max(4, nu // 2), max(3, nv // 2)
-    verts = _CACHE[(key, nu, nv)]
+    verts, nu, nv = _sheet(K, key, nu, nv)
     full = bmesh.new()
     g = [[full.verts.new(verts[i * (nv + 1) + j]) for j in range(nv + 1)] for i in range(nu + 1)]
     for i in range(nu):
@@ -205,9 +212,8 @@ def quad(K, nm, corners, mat, t):
 def hem(K, nm, key, nu, nv, j, drop, out, mat, t, thick=0.006):
     """A flap hanging from a settled sheet's edge row `j` (0 or nv): `drop` m down, flared `out` (a game vector) at its
     foot — a tent's valance, from the cloth's own edge (no gap, no poke where the eave sags between the guys)."""
-    if K.low: nu, nv = max(4, nu // 2), max(3, nv // 2)
+    verts, nu, nv = _sheet(K, key, nu, nv)
     j = 0 if j == 0 else nv
-    verts = _CACHE[(key, nu, nv)]
     o3 = Vector(B(*out)); down = Vector(B(0, -drop, 0))
     bm = bmesh.new()
     top = [bm.verts.new(verts[i * (nv + 1) + j] + Vector(B(0, -0.01, 0))) for i in range(nu + 1)]
