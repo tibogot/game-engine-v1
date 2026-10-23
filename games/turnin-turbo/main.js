@@ -81,6 +81,14 @@ scene.add(table);
 // --- the toy: the Blender shell (tools/blender/turninTurbo.py), materials given here by part name -----
 const toy = (await new GLTFLoader().loadAsync("/models/turnin-turbo/turbo.glb")).scene;
 toy.position.y = 0.002;   // on its four feet
+// ?body=cage: the red body rebuilt as a subdivision cage in Blender (tools/blender/turninTurboBody.py) instead of the
+// formula-lofted one — the old body's parts hidden, the cage body's added (same materials by name)
+if (new URLSearchParams(location.search).get("body") === "cage") {
+  const cage = (await new GLTFLoader().loadAsync("/models/turnin-turbo/body_cage.glb")).scene;
+  const OLD = new Set(["Shell", "Bumper", "PodL", "PodR", "LensL", "LensR", "BonnetLines", "SidePads", "TopSticker"]);
+  toy.traverse((o) => { if (OLD.has(o.name)) o.visible = false; });
+  for (const c of [...cage.children]) { if (c.name === "TopStickerB") c.name = "TopSticker"; toy.add(c); }
+}
 scene.add(toy);
 const MATS = {
   Red: plastic(0xd8261c, 0.26, { clearcoat: 0.3, breakup: 0.1 }),
