@@ -216,7 +216,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
       rec.gun.getWorldPosition(_p);
       const Y = rec.mesh.rotation.y + rec.gun.rotation.y, fx = -Math.sin(Y), fz = -Math.cos(Y), rx = -fz, rz = fx;
       if (!rec.crew) {
-        rec.crew = R.addStaticFigures(C.look, C.gun.map((m, i) => ({ x: _p.x, y: _p.y, z: _p.z, yaw: 0, role: m.rest, slot: i, bare: m.bare })));
+        rec.crew = R.addStaticFigures(C.look, C.gun.map((m, i) => ({ x: _p.x, y: _p.y, z: _p.z, yaw: 0, role: m.rest, slot: 3 + i, bare: m.bare })));   // (slots 0-2 are the section's leader / radioman / LMG — soldierLooks SECTION_ROLES: a gun crew is plain riflemen, no radio on the tower, 2026-10-23)
         rec.crewFloor = C.gun.map((m) => floorAt(rec, _p.x - fx * m.back + rx * m.side, _p.z - fz * m.back + rz * m.side, _p.y + 1));
       }
       C.gun.forEach((m, i) => {
@@ -232,7 +232,7 @@ export function createAlgStructures({ app, showroom, producers, units }) {
         rec.crew = R.addStaticFigures(C.look, pts.map((q, i) => {
           const L = Math.hypot(q[0], q[2]) || 1, dx = q[0] / L, dz = q[2] / L;
           rec.mesh.localToWorld(_p.set(q[0] - dx * M.back - dz * (M.side ?? 0), q[1], q[2] - dz * M.back + dx * (M.side ?? 0)));
-          return { x: _p.x, y: M.dy != null ? _p.y + M.dy : floorAt(rec, _p.x, _p.z, _p.y + 1), z: _p.z, yaw: rec.mesh.rotation.y + Math.atan2(dx, dz), role: M.rest, slot: i, bare: M.bare };
+          return { x: _p.x, y: M.dy != null ? _p.y + M.dy : floorAt(rec, _p.x, _p.z, _p.y + 1), z: _p.z, yaw: rec.mesh.rotation.y + Math.atan2(dx, dz), role: M.rest, slot: 3 + i, bare: M.bare };
         }));
         rec.gunCrewN = rec.crew.length;
         if (C.at) rec.crew.push(...atFigures(rec, C));

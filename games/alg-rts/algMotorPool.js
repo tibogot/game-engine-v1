@@ -15,7 +15,7 @@
 import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { simplifierReady, simplifyGeometry } from "../../v3/render/instancing/autoLod.js";
-import { loadSandbags, sandbagMesh, sandbagWallBags } from "./algSandbags.js";
+import { loadSandbags, loadSandbagWall, sandbagMesh, sandbagWallBags, simulatedWallMesh } from "./algSandbags.js";
 
 let _p = null, _parts = null;
 const S = 1.3;          // (built in real metres; the game draws its buildings at unit scale ×1.3, as rtsAlgeria's)
@@ -27,7 +27,7 @@ export const MOTOR_POOL_FAR = 45;
 export function loadMotorPool(file = "motorPool", { near: withNear = false } = {}) {
   return (_p ??= (async () => {
     const load = (f) => getSharedGltfLoader().loadAsync(`/models/alg/${f}.glb`).catch((e) => { console.warn("[motorPool]", e); return null; });
-    const [gltf, gNear] = await Promise.all([load(file), withNear ? load(`${file}Near`) : null, loadSandbags(), simplifierReady]);
+    const [gltf, gNear] = await Promise.all([load(file), withNear ? load(`${file}Near`) : null, loadSandbags(), loadSandbagWall(), simplifierReady]);
     if (!gltf) return null;
     const get = (n) => gltf.scene.getObjectByName(n);
     const near = gNear?.scene.getObjectByName("StaticNear") ?? null, far = get("StaticFar");
@@ -35,12 +35,23 @@ export function loadMotorPool(file = "motorPool", { near: withNear = false } = {
     // THE SANDBAGS (you: "we have already made some — I have several realistic ones"): the game's cloth-
     // simulated bags (algSandbags.js), a low wall shielding the drums at the shed's left gable, on the apron.
     // (built in the game's units, then ÷S: the bags the size of the game's walls, not ×1.3 again)
-    const bags = sandbagMesh(sandbagWallBags({ length: 3.4 * S, courses: 3, thick: 1, seed: 11, x0: -9.08 * S, z0: -2.55 * S, yaw: Math.PI / 2 }), "MotorPoolBags");
-    bags.scale.setScalar(1 / S);
-    bags.position.y = 0.15;
-    const bagsFar = new THREE.Mesh(simplifyGeometry(bags.geometry, { ratio: 0.2, error: 0.02 }), bags.material);
-    bagsFar.name = "MotorPoolBagsFar";
-    bagsFar.scale.copy(bags.scale); bagsFar.position.copy(bags.position);
+    // NOW THE BLENDER-SIMULATED WALL (2026-10-23, you: "we made some nice sandbags … why are the motor pool sandbags by
+    // the side looking bad"): the game draws the far level only, and its bags were the cloth bags cut to 20 % by the
+    // simplifier — lumps. The searchlight shed's piece (sandbagWall.py "slshed": 3.4 m, one bag thick, three courses,
+    // its own near/far) is this wall's size exactly. The procedural bags only if it did not load.
+    let bags = simulatedWallMesh("MotorPoolBags", "slshed"), bagsFar = bags;
+    if (bags) {
+      bags.scale.setScalar(1 / S);
+      bags.position.set(-8.97, 0.15, -2.55);   // (fully on the slab — its edge at x −9.2 — and clear of the drums at −8.62)
+      bags.rotation.y = Math.PI / 2;
+    } else {
+      bags = sandbagMesh(sandbagWallBags({ length: 3.4 * S, courses: 3, thick: 1, seed: 11, x0: -9.08 * S, z0: -2.55 * S, yaw: Math.PI / 2 }), "MotorPoolBags");
+      bags.scale.setScalar(1 / S);
+      bags.position.y = 0.15;
+      bagsFar = new THREE.Mesh(simplifyGeometry(bags.geometry, { ratio: 0.2, error: 0.02 }), bags.material);
+      bagsFar.name = "MotorPoolBagsFar";
+      bagsFar.scale.copy(bags.scale); bagsFar.position.copy(bags.position);
+    }
     for (const o of [near, far, get("DoorL"), get("DoorR"), bags, bagsFar]) {
       if (!o?.isMesh) continue;
       o.castShadow = o.receiveShadow = true;

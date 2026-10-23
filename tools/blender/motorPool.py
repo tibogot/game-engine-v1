@@ -592,6 +592,9 @@ rod("LampArm", ((DOOR[0] + DOOR[1]) / 2, F + 2.95, WZ0), ((DOOR[0] + DOOR[1]) / 
 cyl("LampShade", ((DOOR[0] + DOOR[1]) / 2, F + 2.74, WZ0 - 0.45), 0.2, 0.16, "doorPaint", "workshop", 18, r2=0.04)
 cyl("LampBulb", ((DOOR[0] + DOOR[1]) / 2, F + 2.7, WZ0 - 0.45), 0.045, 0.07, "bulb", "workshop", 10)
 text("Atelier", "ATELIER", ((DOOR[0] + DOOR[1]) / 2, F + 2.62 + 0.38, WZ0 - 0.008), 0.26, "black", "workshop", "-z", 0.003)
+if LOW:   # (the far's own enamel PLATE behind it: the near's letters are painted onto it by the bake, and a plate is its
+         # own small UV island that boost_signs() below gives 4x the texture — on the whitewash they baked unreadable)
+    box("AtelierPlate", (DOOR[0] + DOOR[1]) / 2 - 0.72, (DOOR[0] + DOOR[1]) / 2 + 0.72, F + 2.81, F + 3.19, WZ0 - 0.012, WZ0, "signWhite", "workshop", 0.003)
 
 # ── THE PROPS ────────────────────────────────────────────────────────────────
 def drum(nm, c, mat, lying=False, rot=0.0):
@@ -726,7 +729,9 @@ if LOW:
     SKIP = ("Purlin", "Girt", "Gusset", "Brace", "Knee", "Nut", "Base", "Chain", "Tool", "EngPlug", "StoveLeg", "Sling", "Hook", "BucketPeg", "OilCan", "Vice", "PitLip")
     for g in GROUPS.values():
         for o in list(g):
-            if o.name.startswith(SKIP) or any(t in o.name for t in ("Rim", "Hoop", "Bung")) or o.dimensions.length < 0.3:
+            # (and the LETTERING — 2026-10-23, you: "for motorpool why don't you use a decal for text": the far,
+            # the game's, has no letters of its own; the bake below paints the near's onto its boards' texture)
+            if o.name.startswith(SKIP) or o.name in ("SignText", "NoSmokeA", "NoSmokeB", "Atelier") or any(t in o.name for t in ("Rim", "Hoop", "Bung")) or o.dimensions.length < 0.3:
                 g.remove(o); bpy.data.objects.remove(o, do_unlink=True)
     for k in ("doorL", "doorR"):                           # (the doors: the near ones serve both levels)
         for o in GROUPS[k]: bpy.data.objects.remove(o, do_unlink=True)
@@ -812,6 +817,25 @@ if not LOW:
 # the flat sheets and the box sections
 far = OBJS["Static"]
 unwrap(far, 0.004)
+def boost_signs(o, mats=("signGreen", "signWhite"), k=4.0):
+    """THE SIGNS' LETTERS READABLE (2026-10-23): painted into the far's atlas (no letter geometry — your "use a decal for
+    text"), PARC AUTO came out clean but ATELIER and DÉFENSE DE FUMER, a few texels tall, unreadable. Every face of a
+    sign board or plate scaled k times about its own centre in UV, then the islands packed again: those boards get
+    k x k the texels, the building gives up a sliver of its share. (A box's faces are each their own island.)"""
+    idx = {i for i, m in enumerate(o.data.materials) if m and m.name in mats}
+    bm = bmesh.new(); bm.from_mesh(o.data); uv = bm.loops.layers.uv.active; n = 0
+    for f in bm.faces:
+        if f.material_index not in idx: continue
+        cu = sum((l[uv].uv for l in f.loops), Vector((0, 0))) / len(f.loops)
+        for l in f.loops: l[uv].uv = cu + (l[uv].uv - cu) * k
+        n += 1
+    bm.to_mesh(o.data); bm.free()
+    bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
+    bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.pack_islands(rotate=False, margin=0.004)
+    bpy.ops.object.mode_set(mode="OBJECT")
+    print("SIGNS", n, "faces x", k)
+boost_signs(far)
 S_ = 2048 // (4 if QUICK else 1)                      # (1024 blurred the rust and the sheets' laps at the closest zoom)
 img = target(far, S_, "far_col")
 with bpy.data.libraries.load(NEAR_BLEND, link=False) as (src, dst):

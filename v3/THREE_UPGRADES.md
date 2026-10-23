@@ -84,5 +84,17 @@ These aren't bugs, just how three works; keep them in mind:
   - better occlusion queries (the Hi-Z lab);
   - BatchedMesh fixes;
   - `textureSize()` / mip fixes.
+- **Rendering pass, in this order** (agreed 2026-10-23, from a list of WebGPU techniques three.js lacks by
+  default; measure each in GPU ms, the user judges the look):
+  1. **TAA + upscaling** (three's TRAA node as the base; FSR 2-style: render ~75 %, reproject, sharpen).
+     GPU headroom on the throttling laptop AND the fix for the dotted 1-px shimmer down house corners that
+     4x MSAA leaves (games/alg-rts/TODO.md, "THE GAP TO A AAA RTS" item 0). Cost: a slightly softer image.
+  2. **Soft sun shadows (PCSS):** penumbra growing with the distance from the caster, CoH's look; affordable
+     on our fitted sun shadow; soft edges also shimmer less.
+  3. **Contact shadows** (short screen-space ray on depth): only if units or props look like they float up
+     close; baked contact splats cover most of it today (SSAO measured +0.35-0.8 ms).
+  4. **Capsule shadows** for soldiers: skip unless unit shadows measure as a cost.
+  - Shadows drawn with the FAR LOD (the "LOD shadows" idea): only if the shadow pass measures expensive.
+    Safe since 2026-10-23: far levels shade like their near (tools/glbLodShadingCheck.mjs).
 - **Not for us now:** the new `SunLight` (2 cascades; our RTS fit is sharper), Sky clouds (we have
   Sky Pro), Gaussian splats, OIT, VXGI, WebXR.

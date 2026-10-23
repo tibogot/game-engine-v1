@@ -729,6 +729,13 @@ ORDER (each step: you look before the next):
 The systems are close to CoH (VPs, 3 resources, squads, cover, garrisons, suppression, veterancy,
 call-ins, a flanking AI). What separates it is the WORLD and the FEEL. In order of impact / effort:
 
+0. [ ] **EDGE SHIMMER — a dotted bright 1-px line down house corners** (2026-10-23, you: "edges do some bad
+   lines … close and far camera both show that same line"). TESTED, ruled out: NOT the texture (atlas-only
+   view: gone; plain white houses: still there), NOT a crack (near + far rendered black on white: solid, no
+   dots), NOT the far LOD alone. It is a lit sliver on the corner thinner than a pixel — classic geometric
+   aliasing, which the 4x MSAA does not settle. The fix is engine-wide, no asset rebuild: try SMAA on top of
+   MSAA, or TAA (CoH 3's), measured in GPU ms, judged by you (TAA softens the image). Not now.
+
 1. [~] **TERRAIN DETAIL + MAP DENSITY** (started 2026-10-07). Ground: one brown with fine noise, no
    mid-scale structure — needs layers (worn paths, tyre ruts, mud/puddle patches, dry-grass tufts,
    stones, debris), WEAR round the post and the tracks, colour variety (ochre, red earth, grey
