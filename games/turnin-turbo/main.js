@@ -86,7 +86,8 @@ const MATS = {
   Red: plastic(0xd8261c, 0.26, { clearcoat: 0.3, breakup: 0.1 }),
   Slate: plastic(0x26303b, 0.74, { breakup: 0.08, scale: 30 }),
   Black: plastic(0x0a0a0b, 0.38, { breakup: 0.14 }),
-  Grey: plastic(0xb4b6b8, 0.45, { breakup: 0.08 }),
+  Grey: plastic(0xa2a5a8, 0.45, { breakup: 0.08 }),
+  Lens: plastic(0xc4c8cc, 0.16, { clearcoat: 0.6, breakup: 0.04 }),   // the lamps' flat glossy discs (lighter than the ring)
   Chrome: new THREE.MeshPhysicalMaterial({ color: 0xb9bcbf, metalness: 1, roughness: 0.22 }),
 };
 const LEVER_GREY = plastic(0x8e9194, 0.42, { breakup: 0.08 });

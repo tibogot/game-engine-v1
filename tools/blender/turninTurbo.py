@@ -65,6 +65,7 @@ RED = mat("Red", (0.62, 0.03, 0.02), 0.3)
 SLATE = mat("Slate", (0.035, 0.042, 0.05), 0.55)
 BLACK = mat("Black", (0.012, 0.012, 0.013), 0.35)
 GREY = mat("Grey", (0.33, 0.34, 0.35), 0.45)
+LENS = mat("Lens", (0.5, 0.51, 0.52), 0.2)
 CHROME = mat("Chrome", (0.55, 0.56, 0.57), 0.25)
 CREASE = mat("Crease", (0.16, 0.012, 0.008), 0.5)   # the bonnet's pressed-in lines: dark red, not black
 FACE = mat("Face", (0.5, 0.5, 0.5), 0.6)       # the UV planes: the page puts its own textures / shaders on them
@@ -236,15 +237,15 @@ def bonnet_h(z):
     return h
 def b_height(z, x):
     ax = abs(x)
-    wf = min(max((ax - 0.06) / 0.07, 0.0), 1.0); wf = wf * wf * (3 - 2 * wf)   # a broad, rounded rise
-    bon = bonnet_h(z)
-    hc = bon * (1 - wf) + max(fender_h(z), bon) * wf
+    # ONE hood (rear 3/4 photos): the bonnet's profile all across, a slight bulge over each lamp — no fenders standing
+    # up with a trough between them
+    wf = math.exp(-((ax - 0.15) / 0.05) ** 2)
+    hc = bonnet_h(z) + 0.008 * wf
     # kept under the sight line of the camera fitted to the front photo (it shows only a narrow red band over the
-    # frames): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
-    corner = min(max((ax - 0.095) / 0.06, 0.0), 1.0); corner = corner * corner * (3 - 2 * corner)
-    corner *= min(max((-0.105 - z) / 0.03, 0.0), 1.0)   # only behind the frames (it lifted the red over the screen frame)
-    # ...except at the corners: the front photo shows the red rising there round the lamps (fender humps)
-    ray, k = 0.167 + 0.72 * (z + 0.12) + 0.05 * corner, 0.008
+    # frames, the lamp shoulders just above it at the corners): a soft minimum with y = 0.167 + 0.72 (z + 0.12)
+    corner = min(max((ax - 0.11) / 0.05, 0.0), 1.0); corner = corner * corner * (3 - 2 * corner)
+    corner *= min(max((-0.105 - z) / 0.03, 0.0), 1.0)
+    ray, k = 0.167 + 0.72 * (z + 0.12) + 0.012 * corner, 0.01
     hc = max(0.5 * (hc + ray - math.sqrt((hc - ray) ** 2 + k * k)), B_BUMP)
     # in front, the shell stays inside the leaning bezel: under its face plane, 34 mm back (behind the panels) (FACE_TILT about y 25 mm)
     y_face = 0.025 + (ZF - 0.034 - z) / math.tan(math.radians(FACE_TILT))
@@ -310,12 +311,12 @@ def b_normal(z, x, e=0.001):
     hz = (b_height(z + e, x) - b_height(z - e, x)) / (2 * e)
     return Vector((-hx, 1.0, -hz)).normalized()
 POD_PROF = [(r * 0.95, h)   # outer ring ~73 mm across (straight back photo)
-            for r, h in [(0.0, 0.0085), (0.0275, 0.0085), (0.0282, 0.0105), (0.0305, 0.0122), (0.035, 0.0118),
-                                        (0.0375, 0.0102), (0.0385, 0.007), (0.0385, -0.035)]]
+            for r, h in [(0.0, 0.0085), (0.0298, 0.0085), (0.0304, 0.0108), (0.0322, 0.0121), (0.0362, 0.0118),
+                                        (0.0378, 0.0102), (0.0385, 0.007), (0.0385, -0.035)]]   # a thin ring
 for sx in (-1, 1):
     x = sx * 0.148   # (straight back photo)
     # the lamp faces BACK, 18 deg up (photos), its centre where the fender's rounded corner is 127 mm high
-    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.145))   # on the real (capped) surface
+    zc = min((B_ZB + i * 0.0005 for i in range(200)), key=lambda zz: abs(b_height(zz, x) - 0.125))   # where the rear photo's camera fit is best   # on the real (capped) surface
     up = math.radians(22)
     n = Vector((0, math.sin(up), -math.cos(up)))
     n = (n + b_normal(zc, x)).normalized()   # halfway to the steep nose's own normal: the lamp sits on it
@@ -323,8 +324,9 @@ for sx in (-1, 1):
     z_l, y_l = zc + n.z * 0.004, b_height(zc, x) + n.y * 0.004   # the ring stands just proud, its bucket behind
     lathe("Pod" + ("L" if sx < 0 else "R"), POD_PROF, GREY, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
     # the lens: a silvery dome inside the grey ring (rear 3/4 photos)
-    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.019, 0.0092), (0.0258, 0.009), (0.0258, 0.008)],
-          CHROME, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
+    # the lens: a FLAT glossy silver-grey disc filling the ring (back photos), lighter than the ring
+    lathe("Lens" + ("L" if sx < 0 else "R"), [(0.0, 0.0093), (0.0278, 0.0093), (0.0283, 0.0088), (0.0283, 0.008)],
+          LENS, gmat((x, y_l, z_l), ex, ey) @ gmat((0, 0, 0), (1, 0, 0), (0, 1, 0)), n=48)
 
 # the bumper: a slate band round the back and the rear half of the sides, a groove along it
 def bumper():
