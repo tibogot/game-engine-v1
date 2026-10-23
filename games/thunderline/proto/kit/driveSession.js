@@ -856,6 +856,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // these may end the session (back to the builder, the menu, the next track): last
     const o = S.o;
     if (e.code === "Escape") return o.onEscape?.();
+    // o.tabBack (the builder — user, 2026-10-23: "why not Tab for both?"): Tab toggles, back to building too
+    if (e.code === "Tab" && S.o.tabBack && !e.repeat) return o.onEscape?.();
     if ($("finish").classList.contains("show")) for (const b of o.buttons ?? []) if (e.code === (b.code ?? `Key${b.key}`)) return b.run();
   });
   addEventListener("keyup", (e) => { keys[e.code.toLowerCase()] = false; });

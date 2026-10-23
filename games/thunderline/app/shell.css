@@ -1,22 +1,15 @@
-/* Thunderline's own UI look (feedback: never like Apex Rush): BLACK panels on a black gradient (user,
-   2026-10-20: "black instead of blue"), bolt blue only as the accent, cut corners. */
+/* Thunderline's own UI look (feedback: never like Apex Rush): BLACK, the white logo, and ONE accent —
+   #9DFF00 (user, 2026-10-23: "black, white logo and 9DFF00"; it was bolt blue). Cut corners. */
 :root {
   --ink: #060607; --panel: rgba(16, 16, 18, 0.92); --panel2: #18181b; --line: #2a2a2f; --line2: #3a3a41;
-  --text: #ededf0; --dim: #8b8b95; --bolt: #3fd2ff; --signal: #ff7a1a; --bad: #ff4d5e; --ok: #45e08a;
+  --text: #ededf0; --dim: #8b8b95; --bolt: #9dff00; --signal: #ff7a1a; --bad: #ff4d5e; --ok: #45e08a;
   --cut: 16px;
   --white: #e9edf5; --green: #45e08a; --blue: #3fa2ff; --red: #ff4d5e; --black: #6b7489;
   --gold: #f2c14e; --silver: #c9d1de; --bronze: #c98a5b;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-height: 100%; color: var(--text); font: 14px/1.4 Inter, system-ui, sans-serif; }
-body {
-  background:
-    linear-gradient(115deg, transparent 0 62%, rgba(255, 255, 255, 0.035) 62% 63%, transparent 63% 70%, rgba(255, 255, 255, 0.025) 70% 71%, transparent 71%),
-    radial-gradient(1200px 700px at 80% -10%, #26262b 0%, transparent 60%),
-    linear-gradient(180deg, #141416 0%, #050506 100%);
-  background-attachment: fixed;
-  min-height: 100vh;
-}
+body { background: #000; min-height: 100vh; }
 .cond { font-family: "Barlow Condensed", Inter, sans-serif; text-transform: uppercase; letter-spacing: 0.06em; }
 .cut { clip-path: polygon(var(--cut) 0, 100% 0, 100% calc(100% - var(--cut)), calc(100% - var(--cut)) 100%, 0 100%, 0 var(--cut)); }
 a { color: inherit; text-decoration: none; }

@@ -5,8 +5,6 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
-import { Line2 } from "three/addons/lines/webgpu/Line2.js";
-import { LineGeometry } from "three/addons/lines/LineGeometry.js";
 import { uniform, positionLocal, abs, fract, fwidth, float, min, max, smoothstep, length, vec3, color } from "three/tsl";
 import { applyBloomMRT } from "../../../../v3/render/bloomMRT.js";
 import { startV3App } from "../../../../v3/engine.js";
@@ -1008,22 +1006,23 @@ function refreshArcs() {
     arcs.push({ ...slow, fast, near, from: pad.uid, host: pad.on, landing, lip: { m, launch: { P, V }, v }, up, fwd, fly });
   }
   // ONE ARC, RED, GLOWING (user, 2026-10-22: "two arcs is very confusing … make it red with a bit of bloom
-  // so it reads well"): the full-speed flight — the one landings snap to. A flat line of constant screen
-  // width (fat line), not a tube: the lit 0.35 m tube read as an object ("it looks weird being a tube"),
-  // pink and fat up close, a hair far off. Unlit, so it opts into the selective bloom itself. The slower
-  // edges stay computed for the notes, not drawn.
+  // so it reads well"): the full-speed flight — the one landings snap to. AS THE USER'S OLD GAME DRAWS IT
+  // (gapPreview.js; user, 2026-10-23: "the arc still looks like a large tube … look at the way I did the arc
+  // in my old game"): a ONE-PIXEL line, over-driven into the bloom — a hot hairline that glows, a light
+  // trail, not an object. (The 5 px fat line and before it a 0.35 m tube both read as a thing in the air.)
+  // Unlit: it opts into the selective bloom itself. The slower edges stay computed for the notes, not drawn.
   for (const a of arcs) {
     const pts = a.fast.pts;
     if (pts.length < 2) continue;
-    const g = new LineGeometry();
-    g.setPositions(pts.flatMap((p) => [p.x, p.y, p.z]));
-    const line = new Line2(g, ARC_MAT);
-    line.computeLineDistances();
+    const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ARC_MAT);
+    line.frustumCulled = false;
+    line.renderOrder = 3;
     arcGroup.add(line);
   }
 }
-const ARC_MAT = new THREE.Line2NodeMaterial({ color: 0xff2a3d, linewidth: 5 });
-applyBloomMRT(ARC_MAT, color(0xff2a3d).mul(2));
+// (the old game's: 0xff3b30, glow ×9 — a 1 px line feeds the bloom a fraction of what a mesh does)
+const ARC_MAT = new THREE.LineBasicNodeMaterial({ color: 0xff3b30, transparent: true, opacity: 1, depthWrite: false, toneMapped: false });
+applyBloomMRT(ARC_MAT, color(0xff3b30).mul(9));
 /** A jump pad's flight, ended where it comes back DOWN onto a road (the one it left, or any). The road's
  * points are kept per refresh: the notes fly the arc again at up to 40 speeds per mouse move. */
 
@@ -2645,7 +2644,8 @@ function heightUnderCursor() {
 }
 addEventListener("keydown", (e) => {
   if (driving) return; // the drive session owns the keys
-  if (e.code === "Tab") { e.preventDefault(); startDrive(); return; }
+  // (the press that starts the drive must not also reach the drive's own Tab = back, which would end it at once)
+  if (e.code === "Tab") { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) startDrive(); return; }
   const k = e.key.toLowerCase();
   if ((e.ctrlKey || e.metaKey) && k === "z") { e.preventDefault(); restore(e.shiftKey ? redo : undo, e.shiftKey ? undo : redo); return; }
   if ((e.ctrlKey || e.metaKey) && k === "y") { e.preventDefault(); restore(redo, undo); return; }
@@ -2791,7 +2791,7 @@ rig.modelsReady.then(() => {
 let driving = false;
 const builderUi = ["toolbar", "keys", "steps", "status", "next", "dock", "nav"];
 let saved = null;
-const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Esc</kbd> back to building</b>`;
+const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Tab</kbd> / <kbd>Esc</kbd> back to building</b>`;
 async function startDrive() {
   if (driving || !orderedPieces().length) return;
   save();
@@ -2810,7 +2810,7 @@ async function startDrive() {
   // the TEST CAR wins: exactly where it stands, at its speed
   const spawnM = spawnFrame();
   const from = spawnM ?? (selRoad ? built.get(sel)?.M ?? null : null);
-  await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, autoFinish: false, fallReset: false, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, autoFinish: false, fallReset: false, tabBack: true, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
 }
 function stopDrive() {
   if (!driving) return;
