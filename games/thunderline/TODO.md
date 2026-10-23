@@ -579,6 +579,16 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       flattening over the last 44 m alone flicked the car off at 216 km/h): 216 → 203 on the wall, out 205.
       NEW Wide wall 90° (48 m, R 96, 96 m rolls): 216 → 212. All entries 90–216 km/h through, no air.
       landingTest aligned / hands-off / crooked all finish as before; ghost bit-exact; 216/216 suites.
+- [x] **INCREMENTAL TEST LAP** (user, 2026-10-24: "the point of this editor is to be very fast"). The builder's
+      lap saves the car as it enters each piece (simState.js — exact: simStateTest.mjs restores mid-lap into
+      a fresh car and ends bit for bit the same); after an edit it resumes 150 m of road before the first
+      changed piece (earlier if a changed piece comes within 6 m of road already driven; the whole lap if
+      obstacles / rings / pieces beside changed). Adding a piece: ~0.5 s for the answer instead of the whole
+      lap (2-3 s on a 16-piece track, ~7 s for a 60 s lap). NOT exact (the collision tree of the whole track
+      changes as pieces are added: 60.517 vs 60.500 s) → its time shows ≈, and 2.5 s after the last edit a
+      FULL lap runs and sets the author time. window.__predVerify logs resumed-vs-full comparisons.
+      NEXT for speed: a cheaper forgiveness check (re-check only jumps whose run-up changed); warnings for
+      a wide end into road width and for a corner too fast for the arriving speed; kicker + landing in one.
 - [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
       wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
       used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner

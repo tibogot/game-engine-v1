@@ -13,6 +13,7 @@ import { buildOldLook, createOldLookMaterials, edgesOf } from "./oldLook.js";
 import { createAutopilot } from "./autopilot.js";
 import { createCarRules, magnetZones, wallCutZones, JUMP } from "./carRules.js";
 import { LANDING } from "./landing.js";
+import { saveState, restoreState } from "./simState.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
@@ -641,6 +642,26 @@ let predTimer = null, predToken = 0, failBox = null;
 const predScene = new THREE.Scene(); // the car's meshes live here; never rendered
 const PRED_SLICE_MS = 12; // the background test lap's share of a frame (8 ms: the result came in ~7.6 s on White 3)
 function schedulePrediction() { clearTimeout(predTimer); predTimer = setTimeout(runPrediction, 250); }
+// ---------- THE INCREMENTAL TEST LAP (user, 2026-10-24: "the point of this editor is to be very fast") ----------
+// Every lap keeps the car (simState.js: exact, simStateTest.mjs) as it ENTERS each piece. After an edit the next
+// lap carries on from the last of those before the change instead of driving the whole track again — adding a
+// piece at the end re-drives a few seconds, not the lap. What it may NOT skip:
+//   - the autopilot looks ahead (aims 25 / 90 m on): it resumes LOOKAHEAD m of road before the first changed
+//     piece;
+//   - a changed piece that comes near road the car already drove (a crossing, an overlap) could have changed
+//     that drive: it resumes before the car first came within 6 m of it;
+//   - anything else changed (obstacles, air rings, pieces laid beside) or a track with air rings (their race
+//     state is not saved): the whole lap, as before.
+// NOT EXACT, and so never the author time: the car's ground probe is a collision tree of the WHOLE track, and
+// adding pieces reshapes it — where two triangles meet, which one a wheel touches can change, so a car saved
+// on a shorter track drifts in the last digits (measured: a lap 59.058 s resumed vs 59.075 s full). A resumed
+// lap is the instant answer (landings, arcs, falls, the line; its time shown ≈); 2.5 s after the last edit a
+// FULL lap runs and sets the author time (the medals, the drive page).
+// window.__predVerify: that full lap compared with the resumed one, logged in __predVerifyLog.
+let lapCache = null; // { sigs, others, cps, samples, events, boxes }
+const LOOKAHEAD = 150; // (the autopilot aims 90 m on; 450 m — its whole touchdown search — re-drove ~9 s for every piece added: the exact lap is the full one after the pause anyway)
+const pieceSig = (pc) => `${pc.uid}|${pc.id}|${pcOE(pc)}|${pc.off ?? 0}|${pc.M.map((x) => x.toFixed(3)).join(",")}`;
+const predVerify = () => !!globalThis.__predVerify || new URLSearchParams(location.search).has("predVerify");
 /** Every piece the road reaches: the driving order, plus pieces laid BESIDE them (`sideOf`) and the road
  * that goes on from those — they are deck to land on and drive across, not part of the test lap's line. */
 /** The jump pads standing on a piece (obstacles.js ob_jump): each one a take-off, like a lip. */
@@ -736,6 +757,7 @@ function setLapLine(on) { lapLineOn = on; lapGroup.visible = on && !driving; sta
 
 async function runPrediction() {
   const token = ++predToken;
+  const tSetup = performance.now();
   const order = orderedPieces();
   if (order.length < 2) { prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 }; return; }
   prediction = { state: "running", lipSpeed: prediction.lipSpeed, launch: prediction.launch, endSpeed: prediction.endSpeed, fail: null, lapS: null, topKmh: 0, ticks: 0, forgive: new Map() };
@@ -830,10 +852,72 @@ async function runPrediction() {
   const ringRace = ringGates.length ? createRace({ gates: [...ringGates, { kind: "finish", P: new THREE.Vector3(1e9, 1e9, 1e9), T: UP.clone(), U: new THREE.Vector3(1, 0, 0), hw: 0 }], countdown: 0 }) : null;
   prediction.landings = [];
   let endSpeed = null;
-  const lapSamples = [], lapEvents = [];
+  let lapSamples = [], lapEvents = [];
   let vPrev = 0, hitCool = 0, brakeCool = 0;
-  for (let tick = 0; tick < 120 * 180; tick++) {
+  // INCREMENTAL: what changed since the last lap, and the saved car to carry on from (see lapCache)
+  const sigs = order.map(pieceSig);
+  const others = JSON.stringify([track.props ?? [], track.pieces.filter((q) => !inOrder.has(q.uid)).map((q) => (isRing(q) ? `ring|${q.M}` : pieceSig(q)))]);
+  const rideS = [0];
+  for (let i = 1; i < ride.length; i++) rideS.push(rideS[i - 1] + ride[i].P.distanceTo(ride[i - 1].P));
+  const orderIdx = new Map(order.map((pc, i) => [pc.uid, i]));
+  const boxes = new Map(order.map((pc) => [pc.uid, new THREE.Box3().setFromBufferAttribute(piece(pc.id, pcOE(pc)).look.deck.getAttribute("position")).applyMatrix4(built.get(pc.uid).M)]));
+  let resume = null;
+  const forceFull = globalThis.__predFull;
+  if (lapCache && !forceFull && lapCache.others === others && !ringRace) {
+    let d = 0;
+    while (d < sigs.length && d < lapCache.sigs.length && sigs[d] === lapCache.sigs[d]) d++;
+    if (d === sigs.length && d === lapCache.sigs.length) d = sigs.length; // nothing changed on the line
+    const firstRide = d < order.length ? ride.findIndex((r) => r.uid === order[d].uid) : ride.length - 1;
+    const sChange = rideS[Math.max(0, firstRide)];
+    // the changed pieces (this lap's, and the ones gone since): where the car first came near them
+    const near = [];
+    for (let i = d; i < order.length; i++) near.push(boxes.get(order[i].uid));
+    for (const [uid, bx] of lapCache.boxes) if (!orderIdx.has(uid) || orderIdx.get(uid) >= d) near.push(bx);
+    let tNear = Infinity;
+    for (const bx of near) {
+      const e = bx.clone().expandByScalar(6);
+      const k = lapCache.samples.findIndex((q) => e.containsPoint(q.p));
+      if (k >= 0) tNear = Math.min(tNear, k * 3);
+    }
+    resume = [...lapCache.cps].reverse().find((c) => c.k < d && c.s <= sChange - LOOKAHEAD && c.tick < tNear - 120) ?? null;
+  }
+  let startTick = 0;
+  const cps = [];
+  if (resume) {
+    const c = resume;
+    restoreState(car, c.car); rules.setState(c.rules); pilot.setState(c.pilot);
+    ({ slow, wasGrounded, flying, airT, onPadTick, vPrev, hitCool, brakeCool } = c.vars);
+    onPad = c.vars.onPadUid != null ? padZones.find((z) => z.uid === c.vars.onPadUid) ?? null : null;
+    prediction.landings = c.landings.slice();
+    for (const [k, v] of c.lipSpeed) lipSpeed.set(k, v);
+    for (const [k, v] of c.launch) launch.set(k, v);
+    for (const [k, v] of c.takeoffs) takeoffs.set(k, { ...v });
+    lastTakeoff = c.lastTakeoffUid != null ? takeoffs.get(c.lastTakeoffUid) ?? null : null;
+    lapSamples = lapCache.samples.slice(0, c.nSamples);
+    lapEvents = lapCache.events.slice(0, c.nEvents);
+    prediction.topKmh = c.topKmh;
+    startTick = c.tick;
+    for (const q of lapCache.cps) if (q.tick <= c.tick) cps.push(q);
+  }
+  prediction.resumedAt = startTick; // (tests read it)
+  const tDrive = performance.now();
+  let lastK = resume ? resume.k : -1;
+  for (let tick = startTick; tick < 120 * 180; tick++) {
     const p = car.body.pos;
+    // a SAVE as the car enters a piece (the state at the START of this tick)
+    {
+      const k = orderIdx.get(ride[pilot.idx]?.uid) ?? -1;
+      if (k > lastK) {
+        lastK = k;
+        if (tick > startTick || !resume) cps.push({
+          k, tick, s: rideS[pilot.idx], car: saveState(car), rules: rules.getState(), pilot: pilot.getState(),
+          vars: { slow, wasGrounded, flying, airT, onPadTick, vPrev, hitCool, brakeCool, onPadUid: onPad?.uid ?? null },
+          landings: prediction.landings.slice(), lipSpeed: [...lipSpeed], launch: [...launch],
+          takeoffs: [...takeoffs].map(([k2, v]) => [k2, { ...v }]), lastTakeoffUid: lastTakeoff?.uid ?? null,
+          nSamples: lapSamples.length, nEvents: lapEvents.length, topKmh: prediction.topKmh,
+        });
+      }
+    }
     obs.setTime(tick * FIXED_DT); // the drive page's race clock: 0 at the green light
     const landed = rules.step(pilot.input(car), FIXED_DT);
     if (landed) prediction.landings.push(landed.grade);
@@ -883,7 +967,7 @@ async function runPrediction() {
       onPad = null;
     }
     if (grounded && lastTakeoff && lastTakeoff.air == null) lastTakeoff.air = airT; // its flight time
-    if (globalThis.__predTrace && tick % 30 === 0) globalThis.__predTrace.push([tick / 120, ride[idx].uid, Math.round(v * 3.6), grounded ? 1 : 0, Math.round(p.y)]); // (debug: the lap, 4 a second)
+    if (globalThis.__predTrace && tick % 30 === 0) globalThis.__predTrace.push([tick / 120, ride[idx].uid, Math.round(v * 3.6), grounded ? 1 : 0, Math.round(p.y), +p.distanceTo(ride[idx].P).toFixed(1)]); // (debug: the lap, 4 a second)
     if (grounded) flying = null; else airT += FIXED_DT;
     if (flying === lastUid && airT > 0.5) { prediction.openJump = true; break; }
     wasGrounded = grounded;
@@ -897,13 +981,15 @@ async function runPrediction() {
     if ((finishIdx >= 0 ? idx >= finishIdx : idx >= ride.length - 5) && !endsOnLip) { prediction.lapS = tick * FIXED_DT; endSpeed = v; break; }
     // SLICES BY TIME, not by ticks (performance pass, 2026-10-23: 240 ticks were 120-570 ms with no frame
     // drawn — the builder stuttered for seconds after every edit): ~8 ms of physics, then a frame
-    if ((tick & 7) === 7 && performance.now() - sliceT0 > PRED_SLICE_MS) {
+    if ((tick & 7) === 7 && performance.now() - sliceT0 > (globalThis.__predSlice ?? PRED_SLICE_MS)) {
       await new Promise((r) => requestAnimationFrame(() => r()));
       if (token !== predToken) return; // a newer edit started another prediction
       sliceT0 = performance.now();
     }
   }
   if (token !== predToken) return;
+  prediction.ms = { setup: Math.round(tDrive - tSetup), drive: Math.round(performance.now() - tDrive), ticks: prediction.ticks - startTick }; // (where a lap's time goes)
+  lapCache = { sigs, others, cps, samples: lapSamples.slice(), events: lapEvents.slice(), boxes };
   if (prediction.fail) lapEvents.push({ kind: "fall", p: car.body.pos.clone() });
   drawLapLine(lapSamples, lapEvents);
   prediction.state = "done";
@@ -919,7 +1005,8 @@ async function runPrediction() {
   const ringsOk = !prediction.rings || prediction.rings.taken === prediction.rings.of;
   const clean = prediction.lapS != null && !prediction.fail && !problems.loose.length && !problems.overlap.size && !problems.misses.length && ringsOk;
   const author = clean ? Math.round(prediction.lapS * 100) / 100 : null;
-  if (track.authorTime !== author) { if (author) track.authorTime = author; else delete track.authorTime; save(); }
+  prediction.exact = !resume;
+  if (!resume && track.authorTime !== author) { if (author) track.authorTime = author; else delete track.authorTime; save(); }
   if (failBox) { scene.remove(failBox); disposeTree(failBox, true); failBox = null; }
   if (prediction.fail && built.get(prediction.fail.uid)) {
     failBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(built.get(prediction.fail.uid).group), 0xff9a3d);
@@ -930,8 +1017,30 @@ async function runPrediction() {
   statusKey = "";
   renderStatus();
   // a real flight (≥ 0.8 s, as the landing judge counts one), in driving order
+  if (resume) confirmFullLap(token);
   const jumps = [...takeoffs.values()].filter((t) => t.air != null && t.air >= LANDING.minAir).sort((a, b) => a.tick - b.tick);
   if (jumps.length) runForgiveness(token, { ground, obs, boosts, magnets, cutZones, ride: pilotRide, lowY, jumps });
+}
+
+/** After a resumed lap: once the edits pause (2.5 s), the same lap IN FULL — the exact one, the author time. */
+let confirmTimer = null;
+function confirmFullLap(token) {
+  clearTimeout(confirmTimer);
+  confirmTimer = setTimeout(() => { if (token === predToken) fullLapNow(token); }, 2500);
+}
+async function fullLapNow(token) {
+  const inc = { lapS: prediction.lapS, fail: prediction.fail?.why ?? null, landings: [...(prediction.landings ?? [])].join(), lips: JSON.stringify([...prediction.lipSpeed]), from: prediction.resumedAt };
+  const keep = lapCache;
+  globalThis.__predFull = true;
+  const myRun = predToken + 1;
+  try { await runPrediction(); } finally { globalThis.__predFull = false; }
+  // cut off by a newer lap (an edit, a re-save): no verdict
+  if (predToken !== myRun || prediction.state !== "done") { if (predVerify()) (globalThis.__predVerifyLog ??= []).push({ cut: true }); if (!lapCache) lapCache = keep; return; }
+  if (!predVerify()) return;
+  const full = { lapS: prediction.lapS, fail: prediction.fail?.why ?? null, landings: [...(prediction.landings ?? [])].join(), lips: JSON.stringify([...prediction.lipSpeed]) };
+  const same = inc.lapS === full.lapS && inc.fail === full.fail && inc.landings === full.landings && inc.lips === full.lips;
+  (globalThis.__predVerifyLog ??= []).push({ same, inc, full });
+  if (!lapCache) lapCache = keep;
 }
 
 // ---------- HOW FORGIVING IS EACH JUMP (user, 2026-10-23: "your autopilot makes the car always centred and
@@ -2584,7 +2693,7 @@ function predictionLine() {
   const lips = [...P.lipSpeed.values()].map((v) => Math.round(v * 3.6)).join(", ");
   if (P.fail) return `<div class="warn">⚠ the car ${P.fail.why} at "${name(P.fail.uid)}" (orange box)</div>`;
   if (P.openJump) return `<div class="row"><span>real car takes off at</span><b>${lips} km/h — land it on the red arc</b></div>`;
-  return `<div class="row"><span>${problems.loose?.length ? "real car: to the road's end" : "real car: lap"}</span><b>${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
+  return `<div class="row"><span>${problems.loose?.length ? "real car: to the road's end" : "real car: lap"}</span><b>${P.exact === false ? "≈ " : ""}${P.lapS?.toFixed(1)} s · top ${Math.round(P.topKmh)} km/h</b></div>` +
     (lips ? `<div class="row"><span>take-offs</span><b>${lips} km/h</b></div>` : "") +
     (P.rings ? (P.rings.taken === P.rings.of
       ? `<div class="row"><span>air rings</span><b>${P.rings.taken}/${P.rings.of} flown through</b></div>`
@@ -3109,7 +3218,7 @@ window.__b3 = {
   get tutorial() { return tutorial; }, trackThumb,
   selectMany(uids) { sel = uids.at(-1); selSet = new Set(uids); refreshSelection(); renderStatus(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
   get arcs() { return arcs; }, get launch() { return prediction.launch; },
-  get prediction() { return { state: prediction.state, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
+  get prediction() { return { state: prediction.state, resumedAt: prediction.resumedAt, ms: prediction.ms, ticks: prediction.ticks, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
 for (const k of ["aimEnd", "aimArc", "aimFast", "setMouse", "frameAll"]) window.__b3[k] = hookAim(window.__b3[k]);
 

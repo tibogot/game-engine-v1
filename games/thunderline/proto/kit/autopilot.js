@@ -134,6 +134,9 @@ export function createAutopilot(ride) {
     reset() { idx = 0; touchCache = null; },
     /** Start from ride point i (a replay that begins mid-track: the builder's jump forgiveness check). */
     seek(i) { idx = i; touchCache = null; },
+    /** (the builder's incremental test lap: simState.js) */
+    getState() { return { idx, airAim: airAim && { ...airAim }, touchCache: touchCache && { ...touchCache, p: touchCache.p?.clone() }, touchAge, lastPhi }; },
+    setState(s) { idx = s.idx; airAim = s.airAim && { ...s.airAim }; touchCache = s.touchCache && { ...s.touchCache, p: s.touchCache.p?.clone() }; touchAge = s.touchAge; lastPhi = s.lastPhi; },
     /** Where along the ride the car is (also while a player drives: the fall camera needs it). */
     locate(car) {
       const p = car.body.pos;

@@ -46,6 +46,9 @@ export function createCarRules(car, { boostPads = [], magnets = [], cutZones = n
     get boostLeft() { return boostLeft; },
     set boostLeft(v) { boostLeft = v; },
     reset() { judge.reset(); boostLeft = 0; },
+    /** (the builder's incremental test lap: simState.js) */
+    getState() { return { judge: judge.getState(), boostLeft }; },
+    setState(s) { judge.setState(s.judge); boostLeft = s.boostLeft; },
     /** One fixed tick. Returns the landing event of this tick, or null. */
     step(input, dt) {
       // the wall cut only inside a bowl / quarter pipe (cutZones; null = everywhere, the old rule — wallTest)

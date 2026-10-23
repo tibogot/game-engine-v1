@@ -37,6 +37,9 @@ export function createLandingJudge(car) {
   return {
     get air() { return air; },
     reset() { air = 0; pending = null; },
+    /** (the builder's incremental test lap: simState.js) */
+    getState() { return { air, pending: pending && { ...pending } }; },
+    setState(s) { air = s.air; pending = s.pending && { ...s.pending }; },
     tick(dt) {
       const down = loaded();
       if (pending) {
