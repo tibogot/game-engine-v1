@@ -153,7 +153,14 @@ function buildTaperLook(tile, edges) {
   const a = new Float32Array(n * 2);
   for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
   deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
-  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under: null };
+  const sig = sides.join(), iN = frames.length - 1;
+  const tEnd = (i, s) => {
+    const hwE = hwAt(i);
+    if (hwE < 1) return null; // a wedge's point, a round end
+    return endOf(frames[i], s, hwE, sig, capGeometry(deck, frames[i], sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwE }, sides).pts, s));
+  };
+  const ends = [tEnd(0, -1), tEnd(iN, 1)].filter(Boolean);
+  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under: null, ends };
   // each side: the frames moved sideways by (half width here − the narrow half width), tangents along
   // the moved edge (a converging rail faces along ITS line, not the road's centre line)
   const rp = { ...ROAD_PARAM_DEFAULTS, width: 2 * narrow };
@@ -175,7 +182,50 @@ function buildTaperLook(tile, edges) {
     cols.push(buildRailCollision(fr, rp, RAIL, { sides: [side] }));
   }
   const merge = (gs) => mergeGeometries(gs.filter(Boolean));
-  return { deck, rail: merge(rails), railCollision: merge(cols), posts, under: null };
+  return { deck, rail: merge(rails), railCollision: merge(cols), posts, under: null, ends };
+}
+
+// ---------- END CAPS (user, 2026-10-23: "we need caps on the road side … check my old game: it recognises when
+// two pieces go together and removes the caps, if one piece is alone it places a cap") ----------
+// The slab is a hollow prism (deck, sides, underside) with no end faces: an open end showed its inside.
+// Every piece's look carries its two END LIDS (built once, in the piece's frame, with the deck's own
+// attributes so they merge into the same draws) and `ends` (where each end is, which way it faces, how wide,
+// which rails): testTrack.buildTrackMeshes lids the ends no other piece covers. Visual only — the wheels
+// still leave a lip off the open sweep. Painted as the slab's side (zone 0), as the old game's lids.
+// Ear-clipped, as the old kit's appendRoadEndCaps (a banked U is not star-shaped: a fan sprays holes).
+function capGeometry(deck, f, pts, outSign) {
+  let contour = pts.map((p) => new THREE.Vector2(p.x, p.y)), ring = pts;
+  if (THREE.ShapeUtils.isClockWise(contour)) { contour = contour.slice().reverse(); ring = pts.slice().reverse(); }
+  const tris = THREE.ShapeUtils.triangulateShape(contour, []);
+  if (!tris.length) return null;
+  const n = ring.length, out = f.tangent.clone().multiplyScalar(outSign).normalize();
+  const g = new THREE.BufferGeometry();
+  for (const [name, attr] of Object.entries(deck.attributes)) {
+    const a = new Float32Array(n * attr.itemSize);
+    if (name === "aPiece") for (let i = 0; i < n; i++) a[i * 2 + 1] = NO_CHECKER;
+    g.setAttribute(name, new THREE.Float32BufferAttribute(a, attr.itemSize));
+  }
+  const pos = g.getAttribute("position"), nrm = g.getAttribute("normal"), p = new THREE.Vector3();
+  ring.forEach((q, i) => {
+    p.copy(f.pos).addScaledVector(f.right, q.x).addScaledVector(f.up, q.y);
+    pos.setXYZ(i, p.x, p.y, p.z);
+    nrm?.setXYZ(i, out.x, out.y, out.z);
+  });
+  const idx = [];
+  // entry faces back, exit forward: the winding follows (as the old kit's emitCap)
+  for (const [a, b, c] of tris) outSign < 0 ? idx.push(a, b, c) : idx.push(a, c, b);
+  g.setIndex(idx);
+  g.computeBoundingSphere();
+  return g;
+}
+/** One end: where it is, the way it faces (outward), its up and right, half width, rails ("*": covers any). */
+const endOf = (f, outSign, hw, sig, geo) => ({ pos: f.pos.clone(), out: f.tangent.clone().multiplyScalar(outSign).normalize(), up: f.up.clone(), right: f.right.clone(), hw, sig, geo });
+/** A piece with its own look (tubes, half-pipes, the old kit's pieces): ends that COVER a road's, no lid. */
+function coverEnds(tile) {
+  const b = integrate(tile, { maxGap: 2 });
+  const hw = SECTIONS[tile.section ?? "road"].hw;
+  const ring = (r, s) => { const f = deckFrame(r, hw); return endOf({ pos: f.P, tangent: r.T, up: f.U, right: f.R }, s, hw, "*", null); };
+  return b.rings.length > 1 ? [ring(b.rings[0], -1), ring(b.rings.at(-1), 1)] : [];
 }
 
 /**
@@ -184,6 +234,11 @@ function buildTaperLook(tile, edges) {
  * @returns {{deck: THREE.BufferGeometry, rail: THREE.BufferGeometry|null, railCollision: THREE.BufferGeometry|null, posts: {template, matrices}|null}}
  */
 export function buildOldLook(tile, edges = true) {
+  const look = buildLook(tile, edges);
+  look.ends ??= coverEnds(tile);
+  return look;
+}
+function buildLook(tile, edges) {
   if (tile.customLook) return tile.customLook(tile, edges); // the old kit's own pieces (oldTiles.js)
   if (tile.tube || tile.halfpipe) {
     // a tube piece: the tube section, its closure eased along the piece (tubeLook.js); no rails.
@@ -217,9 +272,14 @@ export function buildOldLook(tile, edges = true) {
   for (let i = 0; i < n; i++) { a[i * 2] = 0; a[i * 2 + 1] = NO_CHECKER; }
   deck.setAttribute("aPiece", new THREE.Float32BufferAttribute(a, 2));
   const under = STRIPED.has(String(tile.id ?? "").replace(/_L$/, "")) ? merge(parts.map((r) => stripedUnder(r, rp.width / 2, rp.thickness ?? 0.9))) : null;
-  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under };
+  const prof = sideProfile(rp, sides), sig = sides.join(), first = parts[0][0], last = parts.at(-1).at(-1);
+  const ends = [endOf(first, -1, rp.width / 2, sig, capGeometry(deck, first, prof.pts, -1)), endOf(last, 1, rp.width / 2, sig, capGeometry(deck, last, prof.pts, 1))];
+  const inner = [];
+  for (let i = 0; i + 1 < parts.length; i++) inner.push(capGeometry(deck, parts[i].at(-1), prof.pts, 1), capGeometry(deck, parts[i + 1][0], prof.pts, -1));
+  const capsFixed = inner.filter(Boolean).length ? mergeGeometries(inner.filter(Boolean)) : null;
+  if (!edges) return { deck, rail: null, railCollision: null, posts: null, under, ends, capsFixed };
   const posts = { key: "", template: null, matrices: [] };
   const rail = merge(parts.map((r) => buildRailGeometry(r, rp, RAIL, { postSink: posts, sides })));
   const railCollision = merge(parts.map((r) => buildRailCollision(r, rp, undefined, { sides })));
-  return { deck, rail, railCollision, posts, under };
+  return { deck, rail, railCollision, posts, under, ends, capsFixed };
 }

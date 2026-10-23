@@ -547,6 +547,17 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       ~10 s per jump, in slices after the lap. FOUND: every White kicker forgives ±1° (White 1's second:
       ±0°, and +10 % fast falls); the drops ±1-2°; speed −15 % is fine on all of them. Next: air steering,
       speed made predictable (boost before big kickers, catch pads), wider landings after long flights.
+- [x] ~~AIR STEERING~~ REJECTED (user, 2026-10-23, after trying it: "completely unnatural and wrong, we
+      shouldn't have this at all"). A/D bending the flight sideways (4 m/s², 6 m/s cap) took the White
+      kickers from ±0-2° to ±6°, but it reads as a hand moving the car. REMOVED; don't propose it again.
+      Forgiveness has to come from the TRACK (wider landings, catch pads, predictable speed) or the take-off.
+- [x] **END CAPS** (user, 2026-10-23, screenshot of an open end: "caps on the road side … like my old game:
+      when two pieces go together it removes the caps, if one piece is alone it places a cap"). oldLook.js:
+      every look carries its two end lids (ear-clipped section, the deck's attributes, side paint) and
+      `ends`; testTrack.buildTrackMeshes lids each end no other end covers (same plane, facing, same tilt, at
+      least as wide across it — off-centre too —, same rails; tubes / old-kit pieces cover any). Gap jumps'
+      inner ends always lidded. Visual only (the wheels still leave a lip). Merged into the chunks: no new
+      draws. Counted: a run of pieces = 2 lids; White tracks = start + finish + 2 per jump.
 - [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
       wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
       used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner

@@ -85,11 +85,9 @@ export const ROAD_SCAN = {
   saturation: uniform(0.35), // the scans are brownish; our deck is a cool grey
   normalAmt: uniform(1.0),
   roughBase: uniform(0.9),
-  roughStones: uniform(0.35), // how much shinier a bright chip is than the binder
+  roughStones: uniform(0.25), // how much shinier a bright chip is than the binder (0.35: "a bit too bright")
   shineAA: uniform(1.0), //    0 = off: the far road's bumps don't turn into sparkle (below)
-  seamWidth: uniform(0.045), // THE CENTRE SEAM: half width, metres
-  seamDark: uniform(0.5), //   its colour, × the deck's
-  seamGloss: uniform(0.2), //  how much smoother the sealant is
+  brightness: uniform(0.85), // the deck's colour (user, 2026-10-23: "a bit too bright")
 };
 
 const flatTex = (r, g, b) => {
@@ -141,19 +139,6 @@ export function createScanDeck(name = "tarred_gravel") {
     const ramp = mix(u.asphaltDark, u.asphaltLight, shaped);
     const normal = normalMap(norN.sample(suv).rgb.sub(norN.sample(suv).level(LOCAL_MIP).rgb).add(vec3(0.5, 0.5, 1.0)), vec2(S.normalAmt, S.normalAmt));
 
-    // THE CENTRE SEAM (2026-10-23): where the two lanes of asphalt were laid, a thin band of darker, glossier
-    // sealant down the middle. It wanders a few cm and its width breathes, like a hand-poured joint. Metres
-    // across come from the lateral coordinate through the ratio of their pixel derivatives (no width uniform
-    // needed per section), and the edge is feathered to a pixel so it never crawls.
-    const lateral = attribute("aLateral", "float");
-    const along = uv().x.add(attribute("aPiece", "vec2").x);
-    const mPerLat = fwidth(uv().y).div(max(fwidth(lateral), 1e-6));
-    const off = mx_noise_float(vec3(along.mul(0.06), 0.0, 11.0)).mul(0.05);
-    const x = abs(lateral.mul(mPerLat).sub(off)); // metres from the seam's centre
-    const hw = S.seamWidth.mul(mx_noise_float(vec3(along.mul(1.3), 0.0, 23.0)).mul(0.5).add(0.85));
-    const px = max(fwidth(x), 1e-4);
-    const seam = oneMinus(smoothstep(hw.sub(px), hw.add(px), x)).mul(min(float(1), hw.div(px))); // thinner than a pixel: fainter
-
     // SHINE THAT HOLDS AT DISTANCE (specular anti-aliasing, Kaplanyan & Hoffman 2016): where the stones'
     // normals change faster than a pixel can show, the sun's highlight would sparkle on and off between
     // frames. The normal's own screen-space variation becomes extra roughness instead, capped so the
@@ -162,8 +147,8 @@ export function createScanDeck(name = "tarred_gravel") {
     const roughAA = min(dot(dn, dn).mul(0.5), 0.18).mul(S.shineAA);
 
     return {
-      color: ramp.mul(mix(vec3(1, 1, 1), relC, S.colorAmt)).mul(mix(float(1), S.seamDark, seam)),
-      rough: S.roughBase.sub(saturate(lum.sub(1.0)).mul(S.roughStones)).add(surface.x.sub(0.5).mul(u.roughVary)).sub(seam.mul(S.seamGloss)),
+      color: ramp.mul(mix(vec3(1, 1, 1), relC, S.colorAmt)).mul(S.brightness),
+      rough: S.roughBase.sub(saturate(lum.sub(1.0)).mul(S.roughStones)).add(surface.x.sub(0.5).mul(u.roughVary)),
       roughAA,
       normal,
     };

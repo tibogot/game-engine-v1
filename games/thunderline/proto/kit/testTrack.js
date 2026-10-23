@@ -208,6 +208,35 @@ export function buildTrackMeshes(placements, built, mats) {
     const P = look.posts;
     if (P?.template && P.matrices.length) for (const M of list) for (const pm of P.matrices) posts.push({ template: P.template, W: new THREE.Matrix4().multiplyMatrices(M, pm) });
   }
+  // END CAPS (oldLook.js): a lid on every end no other piece covers — another end in the same plane, facing
+  // it, tilted the same, at least as wide across it (off-centre too: a road leaving a platform from its side
+  // half) and with the same rails (a flat plate does not close a kerb; a tube or an old-kit piece closes any).
+  // The lids at a gap jump's inner ends are always there. Into the chunks with the decks: same material.
+  const ends = [];
+  for (const [key, list] of Object.entries(byKey)) {
+    const [id, kind] = key.split("|");
+    const look = built[id][kind];
+    for (const M of list) {
+      if (look.capsFixed) { chunkParts.push({ geo: look.capsFixed, m: mats.road, band: "near", M, at: c.setFromMatrixPosition(M).clone(), far: null }); tris += trisOf(look.capsFixed); }
+      for (const e of look.ends ?? []) ends.push({ M, e, pos: e.pos.clone().applyMatrix4(M), out: e.out.clone().transformDirection(M), up: e.up.clone().transformDirection(M), right: e.right.clone().transformDirection(M) });
+    }
+  }
+  const d = new THREE.Vector3();
+  const covers = (a, b) => {
+    if (a.out.dot(b.out) > -0.995 || a.up.dot(b.up) < 0.995) return false;
+    d.subVectors(b.pos, a.pos);
+    if (Math.abs(d.dot(a.out)) > 0.08 || Math.abs(d.dot(a.up)) > 0.08) return false;
+    if (Math.abs(d.dot(a.right)) + a.e.hw > b.e.hw + 0.02) return false;
+    return b.e.sig === "*" || b.e.sig === a.e.sig || a.e.sig === "";
+  };
+  let lids = 0;
+  for (const a of ends) {
+    if (!a.e.geo || ends.some((b) => b !== a && covers(a, b))) continue;
+    lids++;
+    chunkParts.push({ geo: a.e.geo, m: mats.road, band: "near", M: a.M, at: a.pos, far: null });
+    tris += trisOf(a.e.geo);
+  }
+  globalThis.__trackLids = { ends: ends.length, lids }; // (tests read it)
   // POSTS IN CHUNKS WITH DISTANCE DETAIL (user, 2026-10-20: "as optimized as possible"). Per CHUNK cell of
   // the ground, one LOD: the real post (54 tris) up close, a box (12) from POST_BOX m, nothing from POST_NONE
   // m. A whole track's posts used to be one instanced mesh: never culled, drawn complete into the live
