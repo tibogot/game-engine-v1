@@ -32,6 +32,7 @@ from bkit import B, gv, srgb, dust, flat
 import drystone
 from drystone import tag
 import milprops
+import props
 
 FB, FT, H = 1.7, 0.75, 9.0            # the legs' half spread at the foot, at the top; the deck's height
 P = FT + 0.55                         # the deck's half size
@@ -63,7 +64,7 @@ MATDEF.update(milprops.MILPROP_MATS)
 MATDEF.update({
     "stSteel": (0.55, milprops._steel(0x484d40, 0.35)), "stSteelDark": (0.5, milprops._steel(0x30332c, 0.3)),
     "stPlank": (0.9, milprops.timberMat(0x9a9080)), "stConcrete": (0.95, flat(srgb(0xa59c8c), 0.4)),
-    "stRoof": (0.6, galv(0.5)), "stDrum": (0.6, drum), "stGen": (0.55, milprops._steel(0x55603f, 0.3)),
+    "stRoof": (0.6, galv(0.5)), "stDrum": (0.6, props.drum_paint(0x4d5a3a)), "stGen": (0.55, milprops._steel(0x55603f, 0.3)),
     "stChar": (0.95, charred), "stCable": (0.8, flat(srgb(0x161614), 0.0)), "stGrille": (0.6, milprops._steel(0x1e201c, 0.1)),
 })
 LOW = lambda: drystone.LOW
@@ -102,16 +103,14 @@ def corrugated(K, nm, o, aw, al, width, length, mat, t, pitch=0.1, depth=0.025):
     return tag(ob, t)
 
 def drumAt(K, nm, x, z, t, lying=None, mat="stDrum"):
-    """A 200 l drum standing at (x, z) — or lying (`lying`: its axis' yaw), on its side on the ground."""
-    r, h = 0.29, 0.88
-    if lying is None:
-        rod(K, nm, (x, 0, z), (x, h, z), r, mat, t, 14)
-        if not LOW():
-            for k, y in enumerate((0.3, 0.58)):
-                rod(K, f"{nm}Hoop{k}", (x, y, z), (x, y + 0.025, z), r + 0.012, mat, t, 14)
+    """A 200 l drum standing at (x, z) — or lying (`lying`: its axis' yaw) — THE shared one (props.drum, 2026-10-23)."""
+    burnt = mat == "stChar"
+    parts = props.drum(lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t), nm, mat, "stSteelDark", LOW(), 0.35 if burnt else 0.0, sum(map(ord, nm)), burnt)
+    if lying is None: M = Matrix.Translation(B(x, 0, z))
     else:
-        dx, dz = math.sin(lying) * h / 2, math.cos(lying) * h / 2
-        rod(K, nm, (x - dx, r, z - dz), (x + dx, r, z + dz), r, mat, t, 14)
+        ax = gv(math.sin(lying), 0, math.cos(lying)); a = gv(x, 0.294, z) - ax * 0.44
+        M = Matrix.Translation(B(*a)) @ Vector((0, 0, 1)).rotation_difference(B(*ax)).to_matrix().to_4x4()
+    for o in parts: o.matrix_world = M
 
 def lattice(K, state, f0=0.0, skip=()):
     """The legs bay by bay, the girts, the X-braces of flat bar (the crossing one outside), from f0 up."""

@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import bpy, bmesh
 from mathutils import Vector, Matrix, Euler
 import house
+import props
 from house import buildKit, previews
 from bkit import B, gv, srgb, dust, flat, wood, paintedWood, ROOT
 
@@ -75,9 +76,9 @@ MATDEF.update({
     "mast": (0.6, steel(0x5d6052, 0.35, 0.6)), "darkSteel": (0.6, steel(0x2f312d, 0.3)), "cable": (0.6, flat(srgb(0x2a2a27), 0.0)),
     "rope": (0.9, flat(srgb(0x9a8a68), 0.0)),
     "concrete": (0.95, flat(srgb(0xa59c8c), 0.4)),
-    "drumOlive": (0.7, steel(0x535a3a, 0.5)), "drumBlue": (0.65, steel(0x34495c, 0.45)), "drumRed": (0.7, steel(0x8a3826, 0.6)),
-    "jerry": (0.7, steel(0x56603a, 0.25)), "redPaint": (0.6, steel(0xb02a1e, 0.25)), "brass": (0.4, steel(0xb39048, 0.1, 0.2)),
-    "ammoBox": (0.6, steel(0x4a5236, 0.3)),
+    "drumOlive": (0.7, props.drum_paint(0x535a3a)), "drumBlue": (0.65, props.drum_paint(0x34495c, 0.45)), "drumRed": (0.7, props.drum_paint(0x8a3826, 0.6)),
+    "jerry": (0.7, props.steel_paint(0x56603a, 0.25)), "redPaint": (0.6, steel(0xb02a1e, 0.25)), "brass": (0.4, steel(0xb39048, 0.1, 0.2)),
+    "ammoBox": (0.6, props.steel_paint(0x4a5236, 0.3)),
     "crate": (0.85, crateWood(0x56603e)), "crateBare": (0.9, wood(0xb3a184)), "pallet": (0.9, wood(0x9c8b70)),
     "canvas": (0.95, canvas), "burlap": (0.95, burlap), "charred": (0.95, charred),
     "board": (0.85, paintedWood(0x3c4a34)), "paintWhite": (0.8, flat(srgb(0xe6e0cc), 0.0)), "paintYellow": (0.8, flat(srgb(0xd8b04a), 0.0)),
@@ -231,32 +232,20 @@ def mast(K, R, state):
 
 # ── the fuel depot ─────────────────────────────────────────────────────────────
 def drum(K, nm, at, mat, rot=(0, 0, 0), dent=0.0, burnt=False):
-    """A 200-litre drum, its base at `at` (rot: tilt it; pi/2 roll = on its side)."""
+    """A 200-litre drum, its base at `at` (rot: tilt it; pi/2 roll = on its side) — THE shared one (props.drum,
+    2026-10-23: one drum for every kit); a burnt one ruptured, its lid torn."""
     m = "charred" if burnt else mat
-    parts = [cylA(K, nm, (0, 0.01, 0), (0, 1, 0), 0.29, 0.86 * (1 - dent), m, 24, w=0.01)]
-    if not burnt:
-        parts += [torusA(K, nm + f"Rim{h}", (0, h, 0), (0, 1, 0), 0.287, 0.012, m, 20, 4) for h in (0.012, 0.87 * (1 - dent))]
-        parts += [torusA(K, nm + f"Hoop{h}", (0, h, 0), (0, 1, 0), 0.292, 0.015, m, 20, 4) for h in (0.29, 0.58)]
-        if not LOW:
-            parts.append(cylA(K, nm + "Bung", (0.17, 0.865 * (1 - dent), 0.05), (0, 1, 0), 0.032, 0.016, "darkSteel", 8, w=0.002))
-            parts.append(cylA(K, nm + "Vent", (-0.15, 0.865 * (1 - dent), -0.1), (0, 1, 0), 0.018, 0.012, "darkSteel", 6, w=0))
-    else:   # ruptured: the lid torn, a jagged split
-        parts.append(cylA(K, nm + "Lip", (0, 0.86 * (1 - dent), 0), (0.3, 1, 0.1), 0.3, 0.06, "charred", 10, 0.34, w=0, caps=False))
+    seed = sum(map(ord, nm))
+    parts = props.drum(lambda n, bm, mt: K.obj(n, bm, mt, "h", smooth=True), nm, m, "darkSteel", LOW, min(1.0, dent * 6 + (0.35 if burnt else 0.0)), seed, burnt)
+    if burnt:   # ruptured: the lid torn, a jagged split
+        parts.append(cylA(K, nm + "Lip", (0, 0.86, 0), (0.3, 1, 0.1), 0.3, 0.06, "charred", 10, 0.34, w=0, caps=False))
     move(parts, at, rot)
+def mk(K):
+    return lambda n, bm, m: K.obj(n, bm, m, "h", smooth=True)
 def jerry(K, nm, at, yaw, burnt=False):
+    """The 20 l jerrycan — THE shared one (props.jerry, 2026-10-23)."""
     m = "charred" if burnt else "jerry"
-    parts = [boxC(K, nm, (0.165, 0.47, 0.345), (0, 0, 0), mat=m, w=0.022)]
-    if not LOW and not burnt:
-        for s in (-1, 1):   # the pressed X on each face
-            for a in (0.62, -0.62):
-                # (centred on the face: a box turns round its FOOT — pivoted there, the strips poked out over the can;
-                # the two strips apart: crossed in one plane they z-fought)
-                h = 0.5
-                parts.append(boxC(K, nm + f"X{s}{a}", (0.008, h, 0.03), (s * (0.084 + (0.006 if a > 0 else 0)), 0.235 - h / 2 * math.cos(a), -h / 2 * math.sin(a)), (a, 0, 0), m, 0))
-        for k in (-0.08, 0, 0.08):
-            parts.append(cylA(K, nm + f"H{k}", (0, 0.47, k - 0.0), (0, 1, 0), 0.012, 0.05, m, 6, w=0))
-        parts.append(cylA(K, nm + "Cap", (0, 0.47, 0.13), (0, 1, 0.4), 0.022, 0.05, m, 8, w=0))
-    move(parts, at, (0, yaw, 0))
+    move(props.jerry(mk(K), nm, m, "charred" if burnt else "darkSteel", LOW), at, (0, yaw, 0))
 def firePoint(K, at, state):
     x, z = at
     if state == "ruin":
@@ -395,14 +384,11 @@ def fuel(K, R, state):
 
 # ── the ammunition dump ────────────────────────────────────────────────────────
 def crate(K, nm, size, at, yaw=0.0, rot=(0, 0, 0), mat="crate", stencil=None):
+    """A planked crate (size: along, up, across) — THE shared one (props.crate, 2026-10-23); `stencil` on its +x end."""
     x, y, z = size
-    parts = [boxC(K, nm, size, (0, 0, 0), mat=mat, w=0.012)]
-    if not LOW and mat != "charred":
-        for s in (-1, 1):   # end battens
-            parts.append(boxC(K, nm + f"Bat{s}", (0.05, y - 0.04, z + 0.024), (s * (x / 2 - 0.06), 0.02, 0), mat=mat, w=0.004))
-            parts.append(torusA(K, nm + f"Rope{s}", (s * (x / 2 + 0.02), y * 0.6, 0), (1, 0, 0), 0.05, 0.008, "rope", 8, 4))
+    parts = props.crate(mk(K), nm, mat, "charred" if mat == "charred" else "rope", x, y, z, LOW)
     if stencil and not LOW and mat != "charred":   # on its +x end (the camera's), between the battens
-        parts.append(text(K, nm + "St", stencil, (x / 2 + 0.03, y * 0.5, 0), 0.07, "paintYellow"))
+        parts.append(text(K, nm + "St", stencil, (x / 2 - 0.016, y * 0.5, 0), 0.07, "paintYellow"))   # (4 mm off the end board, inside the battens)
     move(parts, at, (rot[0], yaw + rot[1], rot[2]))
 def tarp(K, R, cx, cz, w, d, top, state):
     """A canvas sheet thrown over a stack: a grid draped on the stack's box, the skirt hanging, wind-rucked."""
@@ -468,7 +454,7 @@ def mun(K, R, state):
         if state != "intact" and r[2] < 0.4: continue
         if S.hit(dot_(x, z, 0.16, 0, 0.2)): continue
         S.take(dot_(x, z, 0.16, 0, 0.2))
-        boxC(K, f"AmmoBox{k}", (0.29, 0.18, 0.15), (x, 0, z), (0, r[1], 0), "charred" if burnt else "ammoBox", 0.008)
+        move(props.ammo(mk(K), f"AmmoBox{k}", "charred" if burnt else "ammoBox", "charred" if burnt else "darkSteel", LOW), (x, 0, z), (0, r[1], 0))
         if not LOW and not burnt:
             boxC(K, f"AmmoH{k}", (0.12, 0.02, 0.02), (x, 0.185, z), (0, r[1], 0), "darkSteel", 0)
     for p, pz in enumerate(PZ):

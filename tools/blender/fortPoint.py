@@ -29,6 +29,7 @@ from bkit import B, gv, srgb, dust, flat
 import drystone
 from drystone import tag
 import milprops
+import props
 
 # the walls (kit metres = the Blender piece's real metres): centre x, z, three.js yaw, length
 WALLS = [(0.0, -2.0, 0.0, 5.0), (-3.05, -0.55, 1.05, 3.2), (3.05, -0.55, -1.05, 3.2)]
@@ -44,9 +45,10 @@ def crateMat(nb):
     return dust(nb, nb.scale(c, nb.mr(nb.island(), 0, 1, 0.85, 1.1)), 0.45)
 MATDEF = dict(house.MATDEF)
 MATDEF.update(milprops.MILPROP_MATS)
+MATDEF.update(props.PROP_MATS)
 MATDEF.update({
     "fpEarth": (1.0, milprops.earthMat(0x9c8a72)), "fpCrate": (0.8, crateMat), "fpBatten": (0.85, milprops.timberMat(0x8a7a5c)), "fpHandle": (0.85, milprops.timberMat(0x9a876a)),
-    "fpJerry": (0.6, milprops._steel(0x56603a, 0.3)), "fpSteel": (0.5, milprops._steel(0x3a3c38, 0.4)), "fpPhone": (0.6, milprops._steel(0x3b4130, 0.2)),
+    "fpJerry": (0.6, props.steel_paint(0x56603a, 0.3)), "fpSteel": (0.5, milprops._steel(0x3a3c38, 0.4)), "fpPhone": (0.6, milprops._steel(0x3b4130, 0.2)),
     "fpCanvas": (0.95, flat(srgb(0x5c5e3e), 0.3)), "fpRope": (0.9, flat(srgb(0x9a8a68), 0.0)), "fpWire": (0.8, flat(srgb(0x1b1b18), 0.0)),
     "fpChar": (0.95, charred),
 })
@@ -96,26 +98,16 @@ def box(K, nm, at, size, yaw, mat, t, tilt=0.0, w=0.008):
     o.rotation_mode = "XYZ"; o.rotation_euler = (tilt, 0, yaw); o.location = B(*at)
     return tag(o, t)
 
+def mkt(K, t):
+    """props' make: a kit object, tagged with its moment in the construction."""
+    return lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t)
 def crate(K, nm, at, yaw, t, mat="fpCrate", tilt=0.0):
-    box(K, nm, at, (0.62, 0.32, 0.4), yaw, mat, t, tilt)
-    if LOW() or mat == "fpChar": return
-    c, s = math.cos(yaw), math.sin(yaw)
-    for sx in (-1, 1):   # the end battens (raw wood, proud of the paint): the box's outline at range
-        lx = sx * 0.27
-        box(K, f"{nm}Bat{sx}", (at[0] + lx * c, at[1] - 0.005, at[2] - lx * s), (0.05, 0.33, 0.42), yaw, "fpBatten", t)
-    for sx in (-1, 1):
-        lx = sx * 0.33
-        a = (at[0] + lx * c - 0.06 * s, at[1] + 0.2, at[2] - lx * s - 0.06 * c)
-        b = (at[0] + lx * c + 0.06 * s, at[1] + 0.2, at[2] - lx * s + 0.06 * c)
-        tag(K.rod(f"{nm}Rope{sx}", a, b, 0.009, "fpRope", "h", n=4), t)
+    """A stores crate — THE shared one (props.crate, 2026-10-23)."""
+    props.place(props.crate(mkt(K, t), nm, mat, "fpChar" if mat == "fpChar" else "propRope", 0.62, 0.32, 0.4, LOW()), at, yaw, tilt)
 
 def jerry(K, nm, at, yaw, t, tilt=0.0, mat="fpJerry"):
-    box(K, nm, at, (0.17, 0.47, 0.34), yaw, mat, t, tilt, 0.02)
-    if LOW() or mat == "fpChar" or tilt: return   # (the handles upright only)
-    for k in (-0.07, 0.0, 0.07):
-        c, s = math.cos(yaw), math.sin(yaw)
-        p = (at[0] + k * s, at[1] + 0.47, at[2] + k * c)
-        tag(K.rod(f"{nm}H{k}", p, (p[0], p[1] + 0.05, p[2]), 0.011, mat, "h", n=4), t)
+    """The jerrycan — THE shared one (props.jerry; built long along x: turned a quarter to stand as this kit's did)."""
+    props.place(props.jerry(mkt(K, t), nm, mat, "fpChar" if mat == "fpChar" else "propFittings", LOW()), at, yaw + math.pi / 2, tilt)
 
 def phone(K, R, at, t):
     """The field telephone on its crate, the wire reel beside, the line out under the front wall."""

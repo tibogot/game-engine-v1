@@ -32,6 +32,7 @@ from bkit import B, gv, srgb, dust, flat, wood
 import drystone
 from drystone import tag
 import milprops
+import props
 
 # (in GAME metres / 1.3 — the game scales the piece x1.3: the user's simulated ring (sandbagPit) was laid on a flat crest
 # 0.44 up from r ~2.6 to 3.0 in GAME metres; built in real metres the crest landed further out and higher and the bags
@@ -71,6 +72,7 @@ def charred(nb):
     return nb.mix(nb.mr(nb.noise(9.0, 4), 0.62, 0.7), c, srgb(0x6b6258))
 MATDEF = dict(house.MATDEF)
 MATDEF.update(milprops.MILPROP_MATS)
+MATDEF.update(props.PROP_MATS)
 MATDEF.update({
     "mpEarth": (1.0, earth(0xb09070)), "mpCrate": (0.85, timber(0x7d7556)), "mpRack": (0.9, timber(0x8f7c62)),
     "mpFibre": (0.8, fibre), "mpCanvas": (0.95, flat(srgb(0x5c5e3e), 0.3)), "mpRope": (0.9, flat(srgb(0x9a8a68), 0.0)),
@@ -126,8 +128,16 @@ def berm(K, R, state):
     if state == "ruin":
         tag(K.lump("Crater", (0.1, -0.04, 0.2), (1.5, 0.05, 1.4), "mpChar", "h", seed=8, rough=0.3, sub=2), 0.0)
 
+def mkt(K, t):
+    """props' make: a kit object, tagged with its moment in the construction."""
+    return lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t)
+
 def crate(K, nm, at, yaw, size, t, mat="mpCrate", tilt=0.0, lid=True):
-    """An ammunition crate standing on its foot at `at`: planked, end battens and rope handles; lid off: its tubes."""
+    """An ammunition crate standing on its foot at `at`: planked, end battens and rope handles; lid off: its tubes.
+    Closed: THE shared one (props.crate, 2026-10-23)."""
+    if lid:
+        props.place(props.crate(mkt(K, t), nm, mat, "mpChar" if mat == "mpChar" else "mpRope", *size, LOW()), at, yaw, tilt)
+        return
     x, y, z = size
     c, s = math.cos(yaw), math.sin(yaw)
     L = lambda lx, ly, lz: (at[0] + lx * c + lz * s, at[1] + ly, at[2] - lx * s + lz * c)
@@ -160,12 +170,12 @@ def stores(K, R, state):
         return
     thrown = state == "damaged"
     # the crates at the back-left: two side by side, one on them, one open beside
-    spots = [(-0.95, 0.75, 0.1), (-0.95, 1.27, -0.05), (-0.15, 1.3, 0.35)]   # (inside the floor: r < 1.6)
+    spots = [(-0.95, 0.74, 0.1), (-0.95, 1.29, -0.05), (-0.15, 1.3, 0.35)]   # (2 cm apart: the shared crate's battens stand 1.2 cm out — side by side at 0.52 they overlapped)   # (inside the floor: r < 1.6)
     for k, (x, z, yw) in enumerate(spots):
         if thrown: x, z, yw = x + R.uniform(-0.5, 0.7), z + R.uniform(-0.9, 0.2), yw + R.uniform(-1.2, 1.2)
         crate(K, f"Crate{k}", (x, 0.0, z), yw, (0.9, 0.34, 0.5), 0.55 + 0.03 * k, tilt=R.uniform(-0.2, 0.2) if thrown else 0, lid=k != 2)
     if not thrown:
-        crate(K, "CrateTop", (-0.95, 0.34, 1.0), 0.2, (0.9, 0.34, 0.5), 0.62)
+        crate(K, "CrateTop", (-0.95, 0.347, 1.0), 0.2, (0.9, 0.34, 0.5), 0.62)   # (on the end battens: props.CRATE_TOP)
     # the rack of tubes at the back-right: two bearers, the tubes stacked three-two-one
     rx, rz = 0.75, 1.0
     if not thrown:

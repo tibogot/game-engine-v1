@@ -27,6 +27,7 @@ import house
 from house import buildKit
 from bkit import B, srgb, dust, flat, wood
 import drystone
+import props as sprops   # (the shared props — this kit has its own props())
 from drystone import stone, tag
 
 # the hut (gourbi): its centre, outer size, wall height and thickness, the door on its front (-z) side
@@ -53,6 +54,7 @@ MATDEF.update({
     "acCrate": (0.85, wood(0x76704e)), "acBurlap": (0.95, burlap), "acCharred": (0.95, charred),
     "acSteel": (0.5, flat(srgb(0x2a2b2a), 0.0)), "acStock": (0.8, wood(0x6e4a30)), "acJar": (0.9, flat(srgb(0xa8644a), 0.3)),
 })
+MATDEF.update(sprops.PROP_MATS)
 
 def segs(state):
     """The hut's wall lines (x0, z0, x1, z1), clockwise from the door's right post; the door a gap in the front."""
@@ -152,18 +154,13 @@ def pit(K, R, state):
     # the lid, slid off toward +x, -z (a big flat stone)
     stone(K, "Lid", (MX + 0.95, 0.08, MZ - 0.5), (0.5, 0.07, 0.44), R, 0.14, "sgCap", yaw=0.5)
 
+def mkt(K, t):
+    """props' make: a kit object, tagged with its moment in the construction."""
+    return lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t)
+
 def crate(K, nm, at, yaw, size, t, mat="acCrate", tilt=0.0):
-    x, y, z = size
-    o = K.box(nm, -x / 2, x / 2, 0, y, -z / 2, z / 2, mat, "h", 0.01)
-    o.rotation_mode = "XYZ"; o.rotation_euler = (tilt, 0, yaw); o.location = B(*at)
-    tag(o, t)
-    if drystone.LOW or mat == "acCharred": return
-    for s in (-1, 1):   # end battens
-        b = K.box(nm + f"B{s}", -0.03, 0.03, 0.02, y - 0.02, -z / 2 - 0.012, z / 2 + 0.012, mat, "h", 0.004)
-        b.rotation_mode = "XYZ"; b.rotation_euler = (tilt, 0, yaw)
-        ox = s * (x / 2 - 0.07)                                             # (Blender's Z turn = three.js rotation.y)
-        b.location = B(*at) + Vector((ox * math.cos(yaw), ox * math.sin(yaw), 0))
-        tag(b, t)
+    """A crate (size: along, up, across) — THE shared one (sprops.crate, 2026-10-23)."""
+    sprops.place(sprops.crate(mkt(K, t), nm, mat, "acCharred" if mat == "acCharred" else "propRope", *size, drystone.LOW), at, yaw, tilt)
 
 def rifle(K, nm, foot, top, t, mat="acSteel"):
     tag(K.rod(nm + "Barrel", top, tuple(Vector(foot) + (Vector(top) - Vector(foot)) * 0.45), 0.012, mat, "h", n=5), t)

@@ -35,7 +35,8 @@ Writes <out>/postkit.glb (BordjPost_<State> + _Far) — then tools/optimizeGlb.m
 import sys, os, math, random
 sys.path.insert(0, os.path.dirname(__file__))
 import bpy, bmesh
-from mathutils import Vector
+from mathutils import Vector, Matrix
+import props
 import house
 from house import buildKit, paintedWood
 from bkit import B, gv, srgb, dust, flat, wood
@@ -71,7 +72,7 @@ MATDEF.update(milprops.MILPROP_MATS)
 MATDEF.update({
     "poSlit": (1.0, flat(srgb(0x15120e), 0.0)), "poCoping": (0.9, flat(srgb(0x8a8376), 0.6)), "poConcrete": (0.95, flat(srgb(0x8e877a), 0.4)),   # (darker: the outline the old post drew)
     "poShutter": (0.8, paintedWood(0x4e5638)), "poDoor": (0.8, paintedWood(0x5a4a32)), "poRoof": (0.7, galv(1.0)), "poTank": (0.6, milprops._steel(0x55603f, 0.3)),
-    "poDrum": (0.6, milprops._steel(0x4d5a3a, 0.35)), "poSteel": (0.5, milprops._steel(0x3a3c38, 0.35)), "poCanvas": (0.95, flat(srgb(0x6e6e4c), 0.4)),
+    "poDrum": (0.6, props.drum_paint(0x4d5a3a, 0.35)), "poSteel": (0.5, milprops._steel(0x3a3c38, 0.35)), "poCanvas": (0.95, flat(srgb(0x6e6e4c), 0.4)),
     "poRope": (0.9, flat(srgb(0x9a8e70), 0.0)), "poChar": (0.95, charred), "poRubber": (0.8, flat(srgb(0x1c1c1a), 0.0)),
 })
 def LOW(): return drystone.LOW
@@ -383,14 +384,14 @@ def mast(K, R, state):
 
 # ── the yard ────────────────────────────────────────────────────────────────────────────────────────────────────
 def drum(K, nm, x, z, t, lying=None, mat="poDrum"):
-    r, h = 0.29, 0.88
-    if lying is None:
-        rod(K, nm, (x, 0, z), (x, h, z), r, mat, t, 14)
-        if not LOW():
-            for k, y in enumerate((0.3, 0.58)): rod(K, f"{nm}H{k}", (x, y, z), (x, y + 0.025, z), r + 0.012, mat, t, 14)
+    """A 200 l drum standing at (x, z) — or lying (`lying`: its axis' yaw) — THE shared one (props.drum, 2026-10-23)."""
+    burnt = mat == "poChar"
+    parts = props.drum(lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t), nm, mat, "poSteel", LOW(), 0.35 if burnt else 0.0, sum(map(ord, nm)), burnt)
+    if lying is None: M = Matrix.Translation(B(x, 0, z))
     else:
-        dx, dz = math.sin(lying) * h / 2, math.cos(lying) * h / 2
-        rod(K, nm, (x - dx, r, z - dz), (x + dx, r, z + dz), r, mat, t, 14)
+        ax = gv(math.sin(lying), 0, math.cos(lying)); a = gv(x, 0.294, z) - ax * 0.44
+        M = Matrix.Translation(B(*a)) @ Vector((0, 0, 1)).rotation_difference(B(*ax)).to_matrix().to_4x4()
+    for o in parts: o.matrix_world = M
 
 def yard(K, R, state):
     ruin = state == "ruin"

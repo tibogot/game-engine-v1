@@ -26,9 +26,10 @@ Writes <out>/motorPool.glb (the far level + the doors: the game's) and motorPool
 previews in assets-src/refs/motorpool/. Then compress both (tools/optimizeGlb.mjs: KTX2, meshopt).
 """
 import bpy, bmesh, sys, os, math, random
-from mathutils import Vector
+from mathutils import Vector, Matrix
 sys.path.insert(0, os.path.dirname(__file__))
 from bkit import deconflict
+import props
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 out = os.path.abspath(sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(ROOT, "public", "models", "alg"))
@@ -185,14 +186,15 @@ MATDEF = {
     "roofOld": (0.62, galv(0.45, True)), "roofRust": (0.8, galv(0.95, True)), "roofNew": (0.45, galv(0.12, True)),
     "wallOld": (0.62, galv(0.5, False)), "wallRust": (0.8, galv(0.9, False)), "wallNew": (0.5, galv(0.15, False)),
     "frame": (0.7, steel(0x4c5243, 0.4)), "darkSteel": (0.6, steel(0x2f312d, 0.3)), "engine": (0.55, steel(0x3d433c, 0.2)),
-    "drumOlive": (0.7, steel(0x50553a, 0.5)), "drumBlue": (0.65, steel(0x2f4253, 0.45)), "drumRed": (0.7, steel(0x7a3424, 0.6)),
-    "jerry": (0.7, steel(0x4f5536, 0.25)), "redPaint": (0.6, steel(0xa1281d, 0.3)), "doorPaint": (0.7, steel(0x56604f, 0.5)),
+    "drumOlive": (0.7, props.drum_paint(0x50553a)), "drumBlue": (0.65, props.drum_paint(0x2f4253, 0.45)), "drumRed": (0.7, props.drum_paint(0x7a3424, 0.6)),
+    "jerry": (0.7, props.steel_paint(0x4f5536, 0.25)), "redPaint": (0.6, steel(0xa1281d, 0.3)), "doorPaint": (0.7, steel(0x56604f, 0.5)),
     "concrete": (0.92, concrete), "render": (0.95, render), "wood": (0.9, wood()), "woodDark": (0.9, wood(0x857767)),
     "shutter": (0.85, paintedWood(0x4e6b64)), "doorWood": (0.85, paintedWood(0x55654e)),
     "rubber": (0.95, flat(srgb(0x1f1e1c), 0.7)), "glass": (0.2, flat(srgb(0x1a1f22), 0.0)), "black": (0.8, flat(srgb(0x222220))),
     "signGreen": (0.8, flat(srgb(0x2e3a2c))), "signWhite": (0.8, flat(srgb(0xe2ddd0), 0.0)), "signRed": (0.7, flat(srgb(0xa4271e), 0.0)),
     "sand": (1.0, flat(srgb(0xc9ab7c))), "bulb": (0.3, flat(srgb(0xf2ead2), 0.0)),
 }
+MATDEF.update(props.PROP_MATS)   # (the shared props' fittings and rope — props.py)
 MAT = {}
 def M_(name):
     if name not in MAT:
@@ -598,16 +600,15 @@ if LOW:   # (the far's own enamel PLATE behind it: the near's letters are painte
 
 # ── THE PROPS ────────────────────────────────────────────────────────────────
 def drum(nm, c, mat, lying=False, rot=0.0):
+    """A 200 l drum — THE shared one (props.drum, 2026-10-23: one drum, one paint, for every kit); `lying`: on its
+    side, its axis along (cos rot, 0, sin rot)."""
     x, y, z = c
-    if not lying:
-        cyl(f"{nm}", (x, y + 0.01, z), 0.29, 0.86, mat, "props", 24, w=0.01)
-        for h in (0.0, 0.875): torus(f"{nm}Rim{h}", (x, y + 0.01 + h, z), 0.287, 0.012, mat, "props", "y", 16, 4)
-        for h in (0.29, 0.58): torus(f"{nm}Hoop{h}", (x, y + h, z), 0.29, 0.016, mat, "props", "y", 16, 4)
-        cyl(f"{nm}Bung", (x + 0.17, y + 0.87, z + 0.05), 0.03, 0.015, "darkSteel", "props", 8, w=0.002)
+    parts = props.drum(lambda n, bm, m: obj(n, bm, m, "props", smooth=True), nm, mat, "darkSteel", LOW, 0.0, sum(map(ord, nm)))
+    if not lying: M = Matrix.Translation(B(x, y, z))
     else:
-        ax = (math.cos(rot), 0, math.sin(rot)); a = gv(x, y + 0.3, z) - gv(*ax) * 0.43
-        cyl(f"{nm}", tuple(a), 0.29, 0.86, mat, "props", 24, ax, 0.01)
-        for h in (0.29, 0.58): torus(f"{nm}Hoop{h}", tuple(a + gv(*ax) * h), 0.29, 0.016, mat, "props", "x" if abs(ax[0]) > 0.7 else "z", 24, 6)
+        ax = gv(math.cos(rot), 0, math.sin(rot)); a = gv(x, y + 0.294, z) - ax * 0.44
+        M = Matrix.Translation(B(*a)) @ Vector((0, 0, 1)).rotation_difference(B(*ax)).to_matrix().to_4x4()
+    for o in parts: o.matrix_world = M
 # (a row along the gable, behind the sandbags; one more stood off at the corner)
 DRUMS = [(-8.32, -3.7, "drumOlive"), (-8.32, -3.08, "drumOlive"), (-8.32, -2.46, "drumRed"), (-8.32, -1.84, "drumOlive"), (-7.9, -4.95, "drumBlue")]
 for k, (x, z, mt) in enumerate(DRUMS): drum(f"Drum{k}", (x, F, z), mt)
@@ -622,9 +623,8 @@ rod("PumpHandle", (13.15, F + 1.42, -5.05), (13.5, F + 1.62, -5.05), 0.014, "dar
 rod("PumpSpout", (13.15, F + 1.45, -5.05), (12.88, F + 1.4, -5.05), 0.02, "darkSteel", "props", 8)
 # jerrycans in a row under the window
 def jerry(nm, x, z, rot=0.0, y=F):
-    o = box(nm, x - 0.08, x + 0.08, y, y + 0.47, z - 0.17, z + 0.17, "jerry", "props", 0.022)
-    o.rotation_euler.z = rot
-    box(nm + "H", x - 0.02, x + 0.02, y + 0.46, y + 0.52, z - 0.12, z + 0.1, "jerry", "props", 0.01).rotation_euler.z = rot
+    """The jerrycan — THE shared one (props.jerry, 2026-10-23; built long along x: a quarter turn to stand as before)."""
+    props.place(props.jerry(lambda n, bm, m: obj(n, bm, m, "props", smooth=True), nm, "jerry", "propFittings", LOW), (x, y, z), rot + math.pi / 2)
 for k in range(7):
     jerry(f"Jerry{k}", 11.0 + k * 0.19 + random.uniform(-0.01, 0.01), WZ0 - 0.26, random.uniform(-0.03, 0.03))
 jerry("JerryOut", 12.6, WZ0 - 0.75, 0.6)
@@ -686,12 +686,10 @@ for k in range(3):
     cyl(f"OilCan{k}", (BX0 + 0.9 + k * 0.16, F + 0.92, BZ - 0.25 - (k % 2) * 0.08), 0.055, 0.17, "drumBlue", "props", 12, w=0.004)
 # crates in the corner and on the apron
 def crate(nm, x, y, z, w, h, d, rot=0.0):
-    o = box(nm, x - w / 2, x + w / 2, y, y + h, z - d / 2, z + d / 2, "wood", "props", 0.012); o.rotation_euler.z = rot
-    for s in (-1, 1):
-        b = box(nm + f"Bat{s}", x - w / 2 - 0.012, x + w / 2 + 0.012, y + 0.04, y + h - 0.04, z + s * (d / 2 - 0.05) - 0.03, z + s * (d / 2 - 0.05) + 0.03, "woodDark", "props", 0.006)
-        b.rotation_euler.z = rot
+    """A stores crate (w along x, d across) — THE shared one (props.crate, 2026-10-23)."""
+    props.place(props.crate(lambda n, bm, m: obj(n, bm, m, "props", smooth=True), nm, "wood", "propRope", w, h, d, LOW), (x, y, z), rot)
 crate("Crate0", -3.15, F, Z1 - 0.55, 0.9, 0.55, 0.6, 0.02)
-crate("Crate1", -3.2, F + 0.55, Z1 - 0.55, 0.9, 0.55, 0.6, -0.05)
+crate("Crate1", -3.2, F + 0.557, Z1 - 0.55, 0.9, 0.55, 0.6, -0.05)   # (on the lower one's end battens, 4 mm over its lid: props.CRATE_TOP)
 crate("Crate2", -3.25, F, Z1 - 1.3, 0.7, 0.45, 0.5, 0.3)
 crate("Crate3", 1.6, F, Z1 - 0.5, 0.8, 0.5, 0.6, 0.0)
 # the fire point at the apron's front-left corner

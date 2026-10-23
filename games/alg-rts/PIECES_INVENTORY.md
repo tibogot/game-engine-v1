@@ -98,6 +98,29 @@ Verdicts: **KEEP** (good as it is) · **IMPROVE** (its own code, better look) ·
 |---|---|---|---|
 | Haystacks, woodpiles, bread ovens (tabouna), beehives | procedural, instanced | **REDO** as one Blender PROPS kit (+ jars, carts, crates, drums, a market stall — today they only exist inside bigger pieces) | |
 
+### THE PROPS PASS — 2026-10-23 (you: "everything in the game should be coherent … if we make a better oil drum the
+### others shouldn't look cheap … and the best optimisation possible")
+
+Inventory (a code sweep + game crops, fog off, ~38-70 m). Most small props are ALREADY Blender, baked inside their
+building's atlas (houses, M'zab, points, motor pool, post, field / FLN posts, fort point, cache, mortar pit, MG nest,
+sangar, searchlight tower). What is still below the bar:
+
+| Prop | Today | Plan |
+|---|---|---|
+| **Oil drums** (motor pool, fuel points, searchlight tower, post shed, helipad) | Blender, but plain cylinders, each script its own | ONE shared Blender drum (rolled ribs, chimes, bung caps, dents, rust/paint) in a shared props module the building scripts call → those kits rebuilt; same for **jerrycan**, **wooden crate**, **steel ammo box** |
+| Haystacks, woodpiles, tabouna, beehives (algVillageLife, 4 kinds, ~45 placed) | procedural, instanced + static batch | Blender village-props GLB (near / far, one atlas), drawn the same instanced way — the haystacks read as woven baskets today |
+| Village well + stone troughs + jars (3 wells), zeriba trough, farmstead oven + jars | procedural, merged into their piece | the same village-props kit |
+| Helipad fuel corner and radio corner | procedural (rtsAlgeria) | the shared drum / jerrycan / crate |
+| FLN cave camp + cave entrance clutter (sacks, crates, pot, bedrolls, lean-to) | procedural | the props kit (FLN half) |
+| Mine marker (pole, rag, cairn); laid mines one Mesh each | procedural, not instanced | small; with the props kit, instanced |
+| Telegraph poles | procedural, instanced | KEEP (fine at RTS zoom) |
+| `smallprops.glb` (21 weapons / kit items, Blender) | only the HUD icons | KEEP — usable as ground clutter later (dropped weapons) |
+
+Order: (1) the shared drum, then jerrycan / crate / ammo box — you judge the drum first, in the game; rebuild the
+kits that use them; (2) the village-props kit (haystack, woodpile, tabouna, beehives, well, troughs, jars); (3) the
+helipad corners, the FLN camp. Every prop: a near and a far level passing tools/glbLodShadingCheck.mjs, a few
+hundred triangles, one shared atlas, instanced where repeated.
+
 ## Points
 
 | Piece | Today | Verdict | Prio |

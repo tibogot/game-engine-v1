@@ -35,6 +35,7 @@ from bkit import B, gv, srgb, dust, flat
 import drystone
 from drystone import tag
 import milprops
+import props
 import clothKit
 
 def canvas(tint):
@@ -71,6 +72,7 @@ def charred(nb):
     return nb.mix(nb.mr(nb.noise(9.0, 4), 0.62, 0.7), c, srgb(0x6b6258))
 MATDEF = dict(house.MATDEF)
 MATDEF.update(milprops.MILPROP_MATS)
+MATDEF.update(props.PROP_MATS)
 MATDEF.update({
     "fpCanvas": (0.95, canvasPhoto(0x7c8460)), "fpSeam": (0.95, canvasPhoto(0x5c6248, False)), "fpCross": (0.9, crossPanel), "fpTarp": (0.95, canvas(0x5e6040)), "fpCanvasLight": (0.95, canvas(0x8a8462)),
     "fpWhite": (0.9, flat(srgb(0xd8d4c8), 0.3)), "fpRed": (0.8, flat(srgb(0x9a1c18), 0.3)), "fpBlue": (0.8, flat(srgb(0x1c2c6a), 0.3)),
@@ -132,13 +134,13 @@ def trestleStretcher(K, nm, x, z, yaw, t, mat="fpCanvasLight", h=0.6, on=True):
         rod(K, f"{nm}Pole{s}", P(-1.15, y + 0.03, s * 0.28), P(1.15, y + 0.03, s * 0.28), 0.022, "fpWood", t, 6)
     sheet(K, f"{nm}Canvas", lambda u, v: P(-0.9 + 1.8 * u, y + 0.03 - 0.05 * math.sin(math.pi * v), -0.27 + 0.54 * v), 4, 3, mat, t, 0.01)
 
+def mkt(K, t):
+    """props' make: a kit object, tagged with its moment in the construction."""
+    return lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t)
+
 def jerry(K, nm, x, z, yaw, t, mat="fpOlive"):
-    box(K, nm, (x, 0, z), (0.17, 0.47, 0.34), yaw, mat, t, 0.02)
-    if not LOW():
-        co, si = math.cos(yaw), math.sin(yaw)
-        for k in (-0.07, 0.0, 0.07):
-            p = (x + k * si, 0.47, z + k * co)
-            rod(K, f"{nm}H{k}", p, (p[0], 0.52, p[2]), 0.011, mat, t, 4)
+    """The jerrycan — THE shared one (props.jerry, 2026-10-23; built long along x: a quarter turn to stand as before)."""
+    props.place(props.jerry(mkt(K, t), nm, mat, "propFittings", LOW()), (x, 0, z), yaw + math.pi / 2)
 
 def flagPole(K, nm, x, z, h, panels, t, lean=0.0, lie=None, wave=0.05):
     """A pole and its flag: `panels` (mat, …) side by side from the pole, a slight wave; `lie` (yaw): down on the ground."""

@@ -59,6 +59,7 @@ export function coplanarOverlaps(geo) {
     return B.V.every((q) => off(A, q) < 0.0025) && A.V.every((q) => off(B, q) < 0.0025);
   };
   let pairs = 0, first = null;
+  const all = [];   // (every pair's first triangle centre: where to look)
   const seen = new Set();
   for (const list of buckets.values()) {
     for (let i = 0; i < list.length; i++) {
@@ -67,9 +68,9 @@ export function coplanarOverlaps(geo) {
         const id = list[i].t < list[j].t ? list[i].t * 1e7 + list[j].t : list[j].t * 1e7 + list[i].t;
         if (seen.has(id)) continue;
         seen.add(id);
-        if (!separated(list[i].P, list[j].P)) { pairs++; first ??= [list[i].at, list[j].at]; }
+        if (!separated(list[i].P, list[j].P)) { pairs++; first ??= [list[i].at, list[j].at]; all.push(list[i].at); }
       }
     }
   }
-  return { pairs, first, tris: nt };
+  return { pairs, first, all, tris: nt };
 }

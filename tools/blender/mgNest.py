@@ -34,6 +34,7 @@ from bkit import B, gv, srgb, dust, flat, wood
 import drystone
 from drystone import tag
 import milprops
+import props
 
 TOP, R_TOP, R_OUT, FOOT = 0.45, 3.1, 3.9, -0.14
 GROUND = os.path.join(house.bkit.ROOT, "public", "textures", "ground")
@@ -78,11 +79,12 @@ def charred(nb):
 MATDEF = dict(house.MATDEF)
 MATDEF.update({
     "mnEarth": (1.0, earth(0xb09070)), "mnFloor": (1.0, earth(0xa08468, 0.6)), "mnTimber": (0.9, timber(0x9a876a)),
-    "mnBox": (0.6, steel(0x4c5236)), "mnCrate": (0.85, timber(0x7d7556)), "mnJerry": (0.6, steel(0x56603a)),
+    "mnBox": (0.6, props.steel_paint(0x4c5236, 0.3)), "mnCrate": (0.85, timber(0x7d7556)), "mnJerry": (0.6, props.steel_paint(0x56603a, 0.3)),
     "mnBrass": (0.35, steel(0xb39048, 0.2)), "mnGun": (0.45, steel(0x2b2d2a, 0.15, False)), "mnGunPaint": (0.6, steel(0x45503a, 0.2, False)), "mnRound": (0.35, steel(0xb39048, 0.1, False)),
     "mnCharred": (0.95, charred),
 })
 MATDEF.update(milprops.MILPROP_MATS)   # (the shared AA-52 — milprops.py)
+MATDEF.update(props.PROP_MATS)
 LOW = lambda: drystone.LOW
 
 def beam(K, nm, a, b, w, h, mat, t):
@@ -174,6 +176,10 @@ def box(K, nm, at, size, yaw, mat, t, tilt=0.0):
     o.rotation_mode = "XYZ"; o.rotation_euler = (tilt, 0, yaw); o.location = B(*at)
     return tag(o, t)
 
+def mkt(K, t):
+    """props' make: a kit object, tagged with its moment in the construction."""
+    return lambda n, bm, m: tag(K.obj(n, bm, m, "h", smooth=True), t)
+
 def stores(K, R, state):
     if state == "ruin":
         for k in range(4):
@@ -184,12 +190,12 @@ def stores(K, R, state):
     for k, (x, z) in enumerate(spots[:3]):   # the AA-52's steel ammunition boxes, a handle on each
         if thrown: x, z = x + R.uniform(-0.6, 0.8), z + R.uniform(-0.8, 0.3)
         y = TOP - 0.02 + (0.2 if k == 2 and not thrown else 0)
-        o = box(K, f"Ammo{k}", (x, y, z), (0.3, 0.2, 0.15), R.uniform(-0.3, 0.3) + (R.uniform(0, 3) if thrown else 0), "mnBox", 0.8 + 0.02 * k, R.uniform(-0.4, 0.4) if thrown else 0)
-        if not LOW():
-            h = box(K, f"AmmoH{k}", (x, y + 0.205, z), (0.12, 0.02, 0.025), o.rotation_euler.z, "mnGun", 0.8 + 0.02 * k)
-    box(K, "Crate", (0.95, TOP - 0.02, 1.15), (0.7, 0.32, 0.42), 0.2, "mnCrate", 0.84)
+        # (THE shared ammunition box, props.ammo — 2026-10-23)
+        props.place(props.ammo(mkt(K, 0.8 + 0.02 * k), f"Ammo{k}", "mnBox", "propFittings", LOW()), (x, y, z),
+                    R.uniform(-0.3, 0.3) + (R.uniform(0, 3) if thrown else 0), R.uniform(-0.4, 0.4) if thrown else 0)
+    props.place(props.crate(mkt(K, 0.84), "Crate", "mnCrate", "propRope", 0.7, 0.32, 0.42, LOW()), (0.95, TOP - 0.02, 1.15), 0.2)
     if not thrown:
-        box(K, "Jerry", (1.45, TOP - 0.02, 0.55), (0.17, 0.47, 0.34), 0.6, "mnJerry", 0.86)
+        props.place(props.jerry(mkt(K, 0.86), "Jerry", "mnJerry", "propFittings", LOW()), (1.45, TOP - 0.02, 0.55), 0.6 + math.pi / 2)
     if not LOW():   # spent brass under the gun, lying on the floor (each built where it lies: a K.cyl bakes its place
         # into the mesh, and turning the object afterwards swung the cases round the nest's centre into the air)
         for k in range(14 if not thrown else 6):
