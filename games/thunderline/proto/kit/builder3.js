@@ -65,7 +65,7 @@ const CATS = [
   { id: "loop", label: "Loop", tiles: ["loop_28", "sky_loop", "half_loop_28", "twist_120", "fitted_bowl", "flip_ramp_std", "flip_ramp_s"] },
   { id: "tubes", label: "Tubes", tiles: ["halfpipe_in", "halfpipe_64", "halfpipe_turn_64", "halfpipe_out", "tube_in", "tube_32", "tube_64", "tube_turn_64", "tube_turn_32", "tube_roof_drop", "tube_cannon", "tube_out", "catch_tube"] },
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
 ];
 const catOf = new Map();
 for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);

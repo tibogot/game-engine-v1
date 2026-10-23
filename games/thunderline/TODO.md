@@ -395,6 +395,17 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
       after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
       bank / in a tube.
+- [x] **KNOCKABLE PROPS** (user, 2026-10-23: "the orange cones … I'm sure there were other things"; from the old
+      game's PROP_CATALOG): Obstacles → Cone, Cone row (6 across), Tyre stack (3), Oil barrel, Swing gates (two,
+      meeting in the middle). kit/physProps.js: the OLD physics unchanged (modularRoadPropPhysics: rigid bodies on
+      its contact solver, the gate a sprung hinge; ONE-WAY — the car shoves them, they never slow it, so the test
+      lap and the ghost stay exact); Thunderline's own look, ONE InstancedMesh per kind for the whole track
+      (colours in the vertices; the old make() was ~4 meshes + 4 new materials per cone). Placed like any obstacle
+      (on a road, Q/E turn); in the builder they stand still; R / Delete stand them back up.
+      Checked: cones fly to both sides at 120 km/h, the stack scatters (one on the bonnet), the gates swing wide
+      at 164 km/h. Shadows: on the live map only (near the car) — a moved prop must not leave a baked shadow.
+      NEXT from the old game (user's list): hole road, glass road, hazard pad; portals; tunnels and channels;
+      later the movers, then junctions.
 - [x] **FREEDOM ON THE ARC AND BEHIND A ROAD** (user, 2026-10-23: "why can't I place a piece before the platform";
       "we should be able to place pieces all along the arc"; "the editor should make the user feel as free as
       possible to make any kind of track"):

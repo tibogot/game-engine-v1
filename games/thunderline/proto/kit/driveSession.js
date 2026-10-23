@@ -33,6 +33,7 @@ import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
 import { buildObstacleSet, avoidObstacles, boostZones } from "./obstacles.js";
 import { createSparks } from "./sparks.js";
+import { createPhysProps } from "./physProps.js";
 import { createTyreMarks } from "./tyreMarks.js";
 import { createLandingFx } from "./landingFx.js";
 import { createTyreSmoke } from "./tyreSmoke.js";
@@ -572,7 +573,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (look.railCollision) solids.push(asCollider(look.railCollision, p.M));
     }
     // OBSTACLES (obstacles.js): fixed ones join the trees; movers are posed from the race clock each tick
-    const obstacles = buildObstacleSet(track?.props ?? []);
+    const obstacles = buildObstacleSet(track?.props ?? [], { physics: true });
+    // the KNOCKABLE props (cones, tyres, barrels, swing gates): the old game's physics, one-way (physProps.js)
+    const physProps = createPhysProps(scene, obstacles.bodies, () => vehicle.groundBvh, DYNAMIC_LAYER);
     group.add(obstacles.group);
     obstacles.group.traverse((m) => { if (m.isMesh) m.layers.enable(DYNAMIC_LAYER); });
     for (const d of obstacles.decks) decks.push(asCollider(d.geometry, d.M));
@@ -624,7 +627,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       KILL_Y: o.killY ?? lowestY - 50, safe: { pos: spawnPos.clone(), quat: startQuat.clone(), ok: false }, // killY: the FX lab drives on the floor
       simAccum: 0, runTime: 0, topKmh: 0, recoveries: 0, lastBackspace: -1e9, frame: 0, adoptCount: 0, physMs: [],
       obstacles, moverT: 0, meshes, // the movers' RACE clock: 0 at the green light, held through the countdown
-      startGate,
+      startGate, physProps,
     };
     // BACK, on screen (user, 2026-10-21: "why don't we have a back button to go back to the menu?") — the
     // same as Esc
@@ -675,6 +678,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (!S) return;
     if (freeCam) toggleFreeCam(); // back to the chase (and full speed) for the next drive
     scene.remove(S.group); // its geometries are the shared tile cache: kept for the next drive
+    S.physProps.dispose();
     vehicle.setDynamicMovers([]);
     ghostCar.setDynamicMovers([]);
     clearTimeout(splitTimer);
@@ -716,6 +720,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     tyreSmoke?.reset();
     landingFx?.reset();
     S.race.reset();
+    S.physProps.reset(); // the knocked props stand back where they were placed
     $("finish").classList.remove("show");
     vehicle.setEnabled(true); // parked after a finish
     S.rules.reset();
@@ -942,6 +947,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       // 1.1 coast over 72 m: user, 2026-10-22, "why is the finish piece so long?")
       if (race.s.state === "finished" && vehicle.groundedCount > 0) vehicle.body.vel.multiplyScalar(Math.exp(-3.5 * FIXED_DT));
       const landed = rules.step(used, FIXED_DT);
+      S.physProps.tick(FIXED_DT, vehicle); // the knockable props, after the car (it shoves them; they never push back)
       if (race.s.state !== "finished") recorder.tick(used, vehicle);
       if (landed) { showLanding(landed); sfx.landing(landed, fallSpeed); landingFx?.grade(landed, vehicle); }
       if (vehicle.groundedCount === 0) fallSpeed = Math.max(0, -vehicle.body.vel.y); // how hard the next landing hits
@@ -953,6 +959,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (ticks) S.physMs.push((performance.now() - tPhys) / ticks);
     if (S.physMs.length > 480) S.physMs.splice(0, 240); // trimmed in batches, not shifted every frame (the debug readout's last 240+)
     vehicle.syncVisuals(dt, S.simAccum / FIXED_DT);
+    S.physProps.sync();
     if (dt > 0) tyreMarks?.update(vehicle, dt);
     tyreSmoke?.update(vehicle, dt);
     engineTick(dt, input);

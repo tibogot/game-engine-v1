@@ -14,6 +14,8 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../../../v3/play/modularRoadRigidBvh.js";
+import { body, physLook, physGhost } from "./physProps.js";
+import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
 
 const BOLT = 0x3fd2ff, SIGNAL = 0xff7a1a;
 let MATS = null;
@@ -260,6 +262,16 @@ const polesSolids = (at) => at.map(([x, z]) => POLE_SOLID.clone().translate(x, 0
 // (15: its tail swung back in 1.9 m from the pole)
 const poleFoot = ([x, z]) => ({ x, z, hx: POLE.r + 0.3, hz: POLE.r + 0.3, lead: 70, tail: 30, clear: 2.5 });
 
+// KNOCKABLE PROPS (physProps.js, user 2026-10-23: the old game's cones, tyres, barrels, swing gate): `phys` is
+// their bodies in the obstacle's frame. In the drive they are simulated (the car knocks them flying, they
+// never slow it); in the builder they stand as placed. Nothing solid but a gate's posts.
+const CONE_ROW = [-6, -3.6, -1.2, 1.2, 3.6, 6].map((x) => body("cone", x, 0));
+const TYRE_STACK = [0, 1, 2].map((i) => body("tyre", 0, 0, 0, i * 2 * TIRE_TUBE_R));
+// two gates meeting in the middle, hinged at ±GATE_WIDTH: the right one turned round (its panel points −X)
+const SWING_GATES = [body("gate", -GATE_WIDTH, 0), body("gate", GATE_WIDTH, 0, Math.PI)];
+const GATE_POSTS = [-GATE_WIDTH, GATE_WIDTH].map((x) => new THREE.BoxGeometry(0.34, GATE_POST_HEIGHT, 0.34).translate(x, GATE_POST_HEIGHT / 2, 0));
+const physKind = (label, bodies, extra) => ({ label, phys: bodies, parts: () => physLook(bodies), solids: [], decks: [], ghost: physGhost(bodies), ...extra });
+
 export const OBSTACLES = {
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
@@ -271,6 +283,11 @@ export const OBSTACLES = {
   ob_gate: { label: "Pole gate", halfW: 4.5, parts: () => polesParts(GATE), solids: polesSolids(GATE), decks: [], ghost: mergeGeometries(polesSolids(GATE)), aimAt: { hz: POLE.r }, hint: "Two poles 8 m apart: drive between them" },
   // `decal`: lies on the road, conformed to it (the builder fills `strip`); nothing solid
   ob_boost: { label: "Boost pad", parts: boostShape().parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: boostShape, decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2 }, hint: "Drive over it: a push for 2 s" },
+  ob_cone: physKind("Cone", [body("cone")], { hint: "A traffic cone: knock it flying" }),
+  ob_cones: physKind("Cone row", CONE_ROW, { halfW: 6.3, hint: "Six cones across the road" }),
+  ob_tyres: physKind("Tyre stack", TYRE_STACK, { hint: "Three tyres stacked: they scatter" }),
+  ob_barrel: physKind("Oil barrel", [body("barrel")], { hint: "A heavy drum: it rolls away" }),
+  ob_swing_gate: physKind("Swing gates", SWING_GATES, { halfW: 4.6, solids: GATE_POSTS, hint: "Two gates across the middle: smash through, or go round" }),
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
@@ -359,10 +376,10 @@ export function obstacleLook(kind, p) {
  * @param o.look  build the meshes (false in Node tests)
  * @returns {{ group, decks: {geometry, M}[], solids: {geometry, M}[], movers: object[], setTime(t: number): void }}
  */
-export function buildObstacleSet(props = [], { look = true } = {}) {
+export function buildObstacleSet(props = [], { look = true, physics = false } = {}) {
   const group = new THREE.Group();
   group.name = "obstacles";
-  const decks = [], solids = [], movers = [];
+  const decks = [], solids = [], movers = [], bodies = [];
   const up = new THREE.Vector3();
   for (const p of props) {
     if (!OBSTACLES[p.kind]) continue;
@@ -371,6 +388,8 @@ export function buildObstacleSet(props = [], { look = true } = {}) {
     for (const g of def.solids) solids.push({ geometry: g, M });
     for (const g of def.decks) decks.push({ geometry: g, M });
     let vis = null, armVis = null;
+    // physics: knockable bodies leave the static look — the drive simulates them (physProps.createPhysProps)
+    if (physics && def.phys) { for (const b of def.phys) bodies.push({ kind: b.kind, M: M.clone().multiply(b.local) }); continue; }
     if (look) {
       vis = obstacleLook(p.kind, p);
       vis.matrixAutoUpdate = false;
@@ -402,5 +421,5 @@ export function buildObstacleSet(props = [], { look = true } = {}) {
     }
   }
   setTime(0);
-  return { group, decks, solids, movers, setTime };
+  return { group, decks, solids, movers, bodies, setTime };
 }
