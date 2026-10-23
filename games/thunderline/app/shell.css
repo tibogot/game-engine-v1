@@ -26,6 +26,11 @@ button { font: inherit; color: inherit; }
 #top { display: flex; align-items: center; gap: 18px; padding: 18px 28px; }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 26px; letter-spacing: 0.12em; color: var(--text); }
 .brand svg { width: 22px; height: 22px; color: var(--bolt); }
+/* THE LOGO (the user's wordmark, 2026-10-23: public/games/thunderline/logo.svg): large on the home screen,
+   smaller beside the crumbs elsewhere */
+.brand img { display: block; height: 30px; width: auto; transition: height 0.2s; }
+body.at-home .brand img { height: 58px; }
+body.at-home #top { padding-top: 26px; }
 #crumbs { color: var(--dim); font-size: 17px; font-weight: 600; display: flex; gap: 10px; }
 #crumbs a:hover { color: var(--bolt); }
 #crumbs .sep { color: var(--line2); }

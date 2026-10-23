@@ -13,10 +13,10 @@ import { applyWorld, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-const boot = $("boot");
+const boot = $("bootMsg"); // the loading screen's message line (the logo and the bar stay)
 
 // ---------- engine: Sky Pro, no terrain ----------
-boot.textContent = "Thunderline · starting the engine…";
+boot.textContent = "Starting the engine…";
 const app = await startV3App({
   container: $("game"),
   skyMode: "skypro",
@@ -48,7 +48,7 @@ camera.far = Math.max(camera.far, 9000);
 camera.updateProjectionMatrix();
 
 // ---------- the track ----------
-boot.textContent = "Thunderline · building the track…";
+boot.textContent = "Building the track…";
 const trackParam = params.get("track");
 const trackId = trackParam === "local" ? library.current : trackParam;
 const campaignRec = params.get("campaign") ? await campaign.get(params.get("campaign")) : null;
@@ -146,8 +146,8 @@ if (lesson) {
     verdict.style.display = "";
   }, 200);
 }
-boot.classList.add("gone");
-setTimeout(() => boot.remove(), 600);
+$("boot").classList.add("gone");
+setTimeout(() => $("boot").remove(), 600);
 
 // test hooks (the Node and CDP checks read these)
 window.__drive = {

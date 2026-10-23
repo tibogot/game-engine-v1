@@ -18,6 +18,7 @@ const TIERS = [["White", "var(--white)"], ["Green", "var(--green)"], ["Blue", "v
 let playTab = (() => { try { return sessionStorage.getItem("thunderline.playTab") ?? "campaign"; } catch { return "campaign"; } })();
 
 function crumbs(list) {
+  document.body.classList.toggle("at-home", list.length === 0); // the logo big on the home screen
   $("crumbs").innerHTML = list.map(([label, href]) => (href ? `<a href="${href}">${label}</a>` : `<span>${label}</span>`)).join(`<span class="sep">/</span>`);
 }
 function foot(html) { $("foot").innerHTML = html; }
