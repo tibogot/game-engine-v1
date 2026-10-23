@@ -395,6 +395,18 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
       after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
       bank / in a tube.
+- [x] **FREEDOM ON THE ARC AND BEHIND A ROAD** (user, 2026-10-23: "why can't I place a piece before the platform";
+      "we should be able to place pieces all along the arc"; "the editor should make the user feel as free as
+      possible to make any kind of track"):
+      1. The BACK of any road takes a piece (not only a Start): its end on the road's first piece; a landing
+         hands its jump link to the new piece. Checked: a straight before a platform on an arc → it is the
+         landing, the platform hangs off it, the test lap drives it.
+      2. FIXED-SLOPE LANDINGS (Landing 20°, banked, landing turn) go where you point on the falling half, their
+         slope kept (exit level); within 3° of the perfect spot they click there; the panel says how many
+         degrees off and which way to pitch. Checked: 81 m apart at two aims, "falls 7° / 27° steeper".
+      3. RAMP TO RAMP: a ramp in hand (kicker, launch…) goes on the RISING half too, along the climbing car;
+         its own arc follows. Checked: the test lap takes off at 144 then 143 km/h from the second kicker.
+      4. A landing counts the ROAD after it (up to 4 pieces), not only its first piece: no false "misses it".
 - [x] **BUILDER PERFORMANCE** (2026-10-23, the editor audit; measured on White 3, my Chrome):
       1. LEAK FIXED: a rebuild disposed nothing — 10 edits +90 geometries, +28.5 MB GPU buffers; now +2 /
          +0.1 MB (releaseRebuilt: road chunks + post instances, gates / rings, obstacles, the stand-in box;

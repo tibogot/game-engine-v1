@@ -1106,21 +1106,29 @@ function runChecks() {
   for (const a of arcs) {
     if (a.landing == null) continue;
     const pc = track.pieces.find((q) => q.uid === a.landing);
-    const { b, t } = piece(pc.id, pcOE(pc));
-    const M = built.get(pc.uid).M, hw = SECTIONS[t.section ?? "road"].hw;
-    const deck = b.rings.map((r) => { const f = deckFrame(r, hw); return { P: f.P.applyMatrix4(M), U: f.U.transformDirection(M) }; });
+    // THE LANDING ROAD, not only its first piece (user, 2026-10-23: "free to make any kind of tracks" — a
+    // straight put before a platform became the landing, and the car coming down on the platform read as a
+    // miss): the landing piece and up to 3 that follow it on the road, each with its own width
+    const chain = [pc];
+    for (let q = pc; chain.length < 4;) { q = track.pieces.find((x) => x.parent === q.uid && !isRing(x)); if (!q || !built.has(q.uid)) break; chain.push(q); }
+    const segs = [], deck = [];
+    for (const cp of chain) {
+      const { b, t } = piece(cp.id, pcOE(cp));
+      const M = built.get(cp.uid).M, hw = t.taper ? Math.max(t.taper.from, t.taper.to) : SECTIONS[t.section ?? "road"].hw;
+      const d = b.rings.map((r) => { const f = deckFrame(r, hw); return { P: f.P.applyMatrix4(M), U: f.U.transformDirection(M) }; });
+      for (let i = 0; i + 1 < d.length; i++) {
+        const s0 = d[i], s1 = d[i + 1];
+        const D = s1.P.clone().sub(s0.P), len = D.length();
+        if (len < 1e-6) continue;
+        const T = D.divideScalar(len), U = s0.U.clone().add(s1.U).normalize();
+        segs.push({ P: s0.P, T, U, R: new THREE.Vector3().crossVectors(T, U).normalize(), len, hw });
+      }
+      deck.push(...d);
+    }
     // THE DECK AS SEGMENTS between its rings: an arc point counts only if it is OVER the deck's footprint
     // — along a segment (its length, ± 3 m) and across it within its width. (A radius of hw round each
     // ring reached 24 m in FRONT of a wide platform's start: the car still rising before it read as "hits
     // it from below" — a level platform on an arc, 2026-10-21.)
-    const segs = [];
-    for (let i = 0; i + 1 < deck.length; i++) {
-      const s0 = deck[i], s1 = deck[i + 1];
-      const D = s1.P.clone().sub(s0.P), len = D.length();
-      if (len < 1e-6) continue;
-      const T = D.divideScalar(len), U = s0.U.clone().add(s1.U).normalize();
-      segs.push({ P: s0.P, T, U, R: new THREE.Vector3().crossVectors(T, U).normalize(), len });
-    }
     const lowest = Math.min(...deck.map((s) => s.P.y));
     const lands = (pts) => {
       let apex = 0;
@@ -1133,7 +1141,7 @@ function runChecks() {
           const along = d.dot(s.T);
           // (3 m of margin at the ends: a fitted landing starts exactly ON the near arc — the point just
           // before its start is where the arc arrives over it; 0.5 m flagged White 3's fitted landing)
-          if (along < -3 || along > s.len + 3 || Math.abs(d.dot(s.R)) > Math.max(hw, 6)) continue;
+          if (along < -3 || along > s.len + 3 || Math.abs(d.dot(s.R)) > Math.max(s.hw, 6)) continue;
           const h = d.dot(s.U);
           if (h >= -0.5) above = true; // over it, or ON it (a fitted landing starts exactly on the near arc)
           else if (above) return true; // came down onto the deck
@@ -1552,6 +1560,31 @@ function computeSnap() {
       }
     }
   }
+  // THE BACK OF A ROAD (user, 2026-10-23: "why can't I place a piece of road before the platform I just
+  // placed?" — and: "the editor should make the user feel as free as possible"): a road's FIRST piece takes
+  // a piece in front of it, this piece's END on its start. A landing hands its link to the jump
+  // (flightFrom) to the new first piece. (Not before a Start: it is closed there.)
+  if (!onArc && !best && t && !t.start && !t.finish && !t.closed && tileBase !== STAMP && tileBase !== FITTED && tileBase !== CATCH && tileBase !== FITTED_BOWL) {
+    let hb = null;
+    for (const pc of track.pieces) {
+      if (isRing(pc) || pc.parent != null || pc.sideOf != null || !built.has(pc.uid)) continue;
+      const ht = TILES[pc.id];
+      if (!ht || ht.start) continue;
+      const hM = built.get(pc.uid).M;
+      const hhw = ht.taper ? ht.taper.from : SECTIONS[ht.section ?? "road"].hw;
+      const a = toScreen(new THREE.Vector3(-hhw, 0, 0).applyMatrix4(hM)), c = toScreen(new THREE.Vector3(hhw, 0, 0).applyMatrix4(hM));
+      if (!a || !c) continue;
+      const ab = { x: c.x - a.x, y: c.y - a.y }, tA = THREE.MathUtils.clamp(((mouse.x - a.x) * ab.x + (mouse.y - a.y) * ab.y) / Math.max(1e-6, ab.x * ab.x + ab.y * ab.y), 0, 1);
+      const d = Math.hypot(a.x + ab.x * tA - mouse.x, a.y + ab.y * tA - mouse.y);
+      if (d < 60 && (!hb || d < hb.d)) hb = { pc, d, hM };
+    }
+    if (hb) {
+      const m = hb.hM.clone().multiply(piece(id, oeOf(edges)).exitLocal.clone().invert());
+      const want = leanIn(TILES[hb.pc.id]), have = leanOut(t);
+      const bad = Math.abs(deg(want) - deg(have)) > 3 ? `That road starts ${want ? `leaning ${Math.abs(deg(want))}°` : "flat"}; this piece ends ${have ? `leaning ${Math.abs(deg(have))}°` : "flat"}` : null;
+      return { type: "end", m, prepend: hb.pc.uid, bad, note: `Before ${TILES[hb.pc.id].label}${hb.pc.flightFrom != null ? " · it becomes the landing (the jump's arc lands on it)" : ""}` };
+    }
+  }
   if (best) {
     if (tileBase === FITTED_BOWL) {
       // sized to the speed the real car arrives at THIS end (the end the prediction drove to), else the guess
@@ -1593,12 +1626,27 @@ function computeSnap() {
     if (sb) return sb;
   }
   // (on the FULL-SPEED arc, the red one: a landing starts where the fast car comes down)
+  // A RAMP in hand (its own end points up: a kicker, a launch) also goes on the RISING half (user,
+  // 2026-10-23: "place pieces all along the arc") — it meets the car still climbing: ramp to ramp
+  const rampInHand = !!t && new THREE.Vector3(0, 0, -1).transformDirection(piece(id).exitLocal).y > Math.sin(3 * DEG) && !t.landAngle;
   for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
-    if (a.fast.tan[k].y > -0.02) continue; // only the falling part
+    const rising = a.fast.tan[k].y > 0.03;
+    if (a.fast.tan[k].y > -0.02 && !(rising && rampInHand)) continue; // the falling part (a ramp: the rising one too)
     const s = toScreen(a.fast.pts[k]);
     if (!s) continue;
     const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
-    if (d < 30 && (!best || d < best.d)) best = { a, k, d };
+    if (d < 30 && (!best || d < best.d)) best = { a, k, d, rising };
+  }
+  if (best?.rising) {
+    // RAMP TO RAMP: the piece's start on the full-speed line, along it — the car meets it climbing
+    const P0 = best.a.fast.pts[best.k].clone(), T = best.a.fast.tan[best.k].clone();
+    const R = new THREE.Vector3().crossVectors(T, UP).normalize(), U = new THREE.Vector3().crossVectors(R, T);
+    const m = socketMatrix({ p: P0, T, U, R });
+    if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
+    const climb = Math.asin(THREE.MathUtils.clamp(T.y, -1, 1)) / DEG;
+    const own = Math.asin(THREE.MathUtils.clamp(new THREE.Vector3(0, 0, -1).transformDirection(piece(id).exitLocal).y, -1, 1)) / DEG;
+    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "It must start flat (lean 0)" : null,
+      note: `Ramp to ramp · meets the full-speed car climbing ${Math.round(climb)}° · launches at ~${Math.round(climb + own)}° · a slower car passes under it` };
   }
   // LAND ON ANY PIECE (user, 2026-10-21: "this game is about jumps … large platforms to land"): a road
   // piece that isn't a landing — a platform, a straight, a turn… — goes LEVEL at the height you point at
@@ -1640,6 +1688,11 @@ function computeSnap() {
   if (best) {
     // a landing slides along the arc to where the fall angle equals its own → its exit comes out level
     // (not the FITTED landing: it takes the angle of the arc where you point — land at any depth)
+    // A FIXED-SLOPE LANDING (user, 2026-10-23: "some even snap at one position in the arc"): it goes where
+    // you point on the falling half, its own slope kept (its exit stays level); within 3° of the spot where
+    // the car falls at exactly its angle it clicks there (the PERFECT spot), and the panel says how far off
+    // a landing elsewhere meets the car
+    let landOff = null;
     if (t.landAngle && tileBase !== FITTED && tileBase !== CATCH) {
       const want = t.landAngle * DEG;
       let kBest = best.k, err = Infinity;
@@ -1647,7 +1700,13 @@ function computeSnap() {
         const fall = Math.asin(THREE.MathUtils.clamp(-best.a.near.tan[k].y, -1, 1));
         if (fall > 0 && Math.abs(fall - want) < err) { err = Math.abs(fall - want); kBest = k; }
       }
-      best.k = kBest;
+      const here = downAt(best.a.near, best.a.fast.pts[best.k].y);
+      if (!here || Math.abs(here.fall - t.landAngle) <= 3) best.k = kBest;
+      else {
+        const h = new THREE.Vector3(here.T.x, 0, here.T.z).normalize();
+        const T = h.multiplyScalar(Math.cos(want)).add(new THREE.Vector3(0, -Math.sin(want), 0));
+        landOff = { p: here.p, T, diff: here.fall - t.landAngle };
+      }
     }
     if (tileBase === CATCH) return catchSnap(best.a, best.a.fast.pts[best.k].y);
     if (tileBase === FITTED) {
@@ -1661,7 +1720,7 @@ function computeSnap() {
       return { type: "arc", m: f.m, from: best.a.from, note: `${ft.label} · ${reachNote(best.a, reachScale(best.a, f.P0, f.T))}${roll ? ` · ${roll}` : landTilt ? " · the car already flies at that tilt" : ""}${landTilt ? "" : " · ← / → tilt it"}` };
     }
     // (a landing piece: best.k now on the NEAR arc, slid to its own angle; anything else at the pointed height)
-    const nn = t.landAngle ? { p: best.a.near.pts[best.k], T: best.a.near.tan[best.k] } : downAt(best.a.near, best.a.fast.pts[best.k].y) ?? { p: best.a.fast.pts[best.k], T: best.a.fast.tan[best.k] };
+    const nn = landOff ?? (t.landAngle ? { p: best.a.near.pts[best.k], T: best.a.near.tan[best.k] } : downAt(best.a.near, best.a.fast.pts[best.k].y) ?? { p: best.a.fast.pts[best.k], T: best.a.fast.tan[best.k] });
     const T = nn.T.clone();
     const R = new THREE.Vector3().crossVectors(T, UP).normalize();
     const U = new THREE.Vector3().crossVectors(R, T);
@@ -1669,7 +1728,8 @@ function computeSnap() {
     const m = socketMatrix({ p: P0, T, U, R });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
     const roll = rollNote(best.a, m, leanIn(t));
-    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: [reachNote(best.a, reachScale(best.a, P0, T)), roll].filter(Boolean).join(" · ") };
+    const off = landOff ? `the car falls ${Math.round(Math.abs(landOff.diff))}° ${landOff.diff > 0 ? "steeper" : "flatter"} than this ${t.landAngle}° slope — ${Math.abs(landOff.diff) <= 6 ? "still perfect if it lands flat" : `pitch the nose ${landOff.diff > 0 ? "up" : "down"} in the air to land it perfect`}` : t.landAngle ? `on the perfect spot: the car falls at ${t.landAngle}°` : null;
+    return { type: "arc", m, from: best.a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : null, note: [off, reachNote(best.a, reachScale(best.a, P0, T)), roll].filter(Boolean).join(" · ") };
   }
   return gridSnap(t);
 }
@@ -1849,10 +1909,14 @@ function place() {
     return;
   }
   if (snap.prepend != null) {
-    // a START on the head of the road: first in the list (rebuild lays each piece on its parent), the
-    // old first piece now hangs off it
-    track.pieces.unshift({ uid, id, ...railFields(edges), M: snap.m.toArray(), parent: null, flightFrom: null });
-    track.pieces.find((p) => p.uid === snap.prepend).parent = uid;
+    // BEFORE a road's first piece (a Start, or any piece at the back of a road): in the list just before it
+    // (rebuild lays each piece on its parent), the old first piece now hangs off it; a landing hands its
+    // jump link (flightFrom) to the new first piece
+    const hi = track.pieces.findIndex((p) => p.uid === snap.prepend);
+    const head = track.pieces[hi];
+    track.pieces.splice(hi, 0, { uid, id, ...railFields(edges), M: snap.m.toArray(), parent: null, flightFrom: head.flightFrom ?? null });
+    head.parent = uid;
+    head.flightFrom = null;
   } else if (snap.type === "side") {
     // laid beside: no rail BETWEEN the two decks — the new piece keeps its outer side, the neighbour loses
     // its rail on the joined side (Rails: None stays none)
