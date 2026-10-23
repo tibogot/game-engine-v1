@@ -49,10 +49,12 @@ export function contactSplats(app, matIndex, sandIndex = null) {
     out.push({ ...base, x: c.x, z: c.z, w: r, l: r, yaw: (c.x * 7.3 + c.z) % 6.28 });
   }
   // SANDSTONE: their APRON — pale blown sand and grit round the foot, wider than the rock (the
-  // buildings lab's preview, 2026-10-08), under the shade above. Its own colour, not the ground's.
+  // buildings lab's preview, 2026-10-08), under the shade above. (2026-10-23, you: the ground under the big rocks "a
+  // different colour than the terrain": its own sand colour read as a patch. Now the GROUND's colour (match 1), a
+  // little lighter — the drift, not a stain; the sand photo's grain kept.)
   if (sandIndex != null) {
     for (const o of app.algLandmarks?.sandstone ?? []) {
-      out.push({ mat: sandIndex, opacity: 0.5, tint: [1.0, 0.95, 0.86], tile: 3, soft: 0.7, push: 0, warp: 0.4, normal: 0, match: 0, _layer: 45,
+      out.push({ mat: sandIndex, opacity: 0.5, tint: [1.14, 1.11, 1.06], tile: 3, soft: 0.7, push: 0, warp: 0.4, normal: 0, match: 1, _layer: 45,
         x: o.x, z: o.z, w: 2 * (o.ax * 1.25 + 2.5), l: 2 * (o.az * 1.25 + 2.5), yaw: -o.yaw });
     }
   }
