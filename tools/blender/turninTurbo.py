@@ -465,8 +465,10 @@ RIM_BACK = -0.088
 # 2.5 mm outside the outline: the red shell's sides are at x +-0.2 too (coplanar = z-fighting teeth)
 _front = [_lean(x * 1.0125, y, ZF - 0.0015) for x, y in outer]   # 2.5 mm wider (scaled: an offset folded at the steps)
 # its back end dips into the red (a vertical back face stood up as a dark wedge where the red is lower)
-_mid = [(x, y, RIM_BACK + 0.012) for x, y, z in _front]
-_back = [(x, min(y, b_height(RIM_BACK, x) - 0.003), RIM_BACK) for x, y, z in _front]
+# a NARROW band leaning with the face (the in-hand side photo: ~3.6 cm of slate, the red body right up to it)
+RIM_DEPTH = 0.056   # overlaps the red (46 mm behind the face) a little
+_mid = [(x, y, z - RIM_DEPTH * 0.6) for x, y, z in _front]
+_back = [(x, y, z - RIM_DEPTH) for x, y, z in _front]
 loft("BezelRim", [_front, _mid, _back], SLATE, cap1=True, angle=50, recalc=False)
 for _p in bpy.data.objects["BezelRim"].data.polygons: _p.flip()   # the outline runs CCW from the front: flip outwards
 bpy.data.objects["BezelRim"].data.update()

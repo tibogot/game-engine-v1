@@ -35,22 +35,26 @@ def link(name, me, material):
 FX = 0.148
 CAGE_STATIONS = [
     # z       wb     w      hf     hh
-    (0.016,  0.200, 0.200, 0.026, 0.026),   # the apron, under the bezel strip
-    (-0.040, 0.197, 0.200, 0.045, 0.045),   # low behind the leaning face (the panels sit there)
-    (-0.100, 0.188, 0.201, 0.168, 0.162),   # under the frames' level top, behind the panels
+    (-0.020, 0.198, 0.200, 0.168, 0.162),   # full height: sheared back along the leaning face by under_face()
+    (-0.090, 0.190, 0.201, 0.168, 0.162),
     (-0.140, 0.180, 0.201, 0.164, 0.156),   # the hood only a little lower than the fenders (straight back photo)
     (-0.190, 0.176, 0.199, 0.160, 0.152),
     (-0.228, 0.172, 0.197, 0.156, 0.148),   # the top's rounded back edge starts
     (-0.248, 0.168, 0.193, 0.140, 0.134),   # the upright face carrying the lamps
     (-0.258, 0.160, 0.182, 0.112, 0.108),   # its rounded edge before the cap
 ]
+TAN_TILT = math.tan(math.radians(28.0))
+def under_face(y, z):
+    """The red body stays behind the leaning face (28 deg about y 25 mm at z 0.02), 33 mm back — behind the panels,
+    inside the slate band (in-hand side photo: the red comes right up to that band); 46 mm: the panels sit ~40 back."""
+    return min(z, 0.02 - max(y - 0.025, 0.0) * TAN_TILT - 0.046) if y > 0.03 else z
 def ring(z, wb, w, hf, hh):
     sh = min(hf, hh + 0.03)
     half = [(0.0, 0.0), (wb * 0.6, 0.0), (wb, 0.004), (w, 0.04), (w + 0.002, 0.075), (w - 0.004, sh * 0.72),
             (w - 0.022, hf - 0.006), (FX + 0.02, hf), (FX - 0.02, hf - 0.002), (0.078, hh + (hf - hh) * 0.35),
             (0.0, hh)]
     pts = half + [(-x, y) for x, y in reversed(half[1:-1])]
-    return [(x, y, z) for x, y in pts]
+    return [(x, y, under_face(y, z)) for x, y in pts]
 
 me = bpy.data.meshes.new("ShellCage")
 bm = bmesh.new()
@@ -83,6 +87,14 @@ for p in me2.polygons: p.use_smooth = True
 for v in me2.vertices:
     if v.co.z < 0: v.co.z = 0.0
 me2.update()
+
+# the apron under the bezel strip: a plain red block (in the cage, its low section pulled the smoothed surface forward
+# in front of the panels — red showed through the windows)
+me = bpy.data.meshes.new("ApronB"); bm = bmesh.new()
+bmesh.ops.create_cube(bm, size=1.0); bmesh.ops.scale(bm, vec=(0.398, 0.026, 0.07), verts=bm.verts)
+bmesh.ops.translate(bm, vec=(0, 0.013, -0.019), verts=bm.verts)
+for v in bm.verts: v.co = R4.to_3x3() @ v.co
+bm.to_mesh(me); bm.free(); link("ApronB", me, RED)
 
 # ---- raycasts on the smoothed body (game frame helpers) ---------------------------------------------------------
 bvh = BVHTree.FromPolygons([v.co.copy() for v in me2.vertices], [tuple(p.vertices) for p in me2.polygons])
