@@ -133,6 +133,65 @@ You: "when something will make the horse legs look bad then it means the horse c
     - canter up 10–25°: **6°** (flat: 20°);
     - walk up 15°: median 6°, worst 10 % 52° → 34° (the flat walk's own).
 
+## Stage 5, postures, and the walk downhill (2026-10-23, waiting for your look)
+
+- **Hind legs step UNDER on hills** (`HP.hindUnderDown` 0.14 rad, `hindUnderUp` 0.05 at a full hill), swung
+  forward round the hip in the slope pre-pass. Downhill the hocks flex and the quarters sink, so the body
+  tilts less than the slope ("back legs well up underneath him"). The hind hoof still lies flat
+  (its swing is taken out where the hoof is laid on the ground).
+- The head and neck on hills were already there (`hillHead`): down and forward uphill, up downhill.
+- **Found: the EVEN WALK** (the four-beat timing, which shifts each hoof up to a quarter stride along its
+  path) **moved hooves LEVEL on a slope.** Walking downhill, planted hooves sank 4–8 cm and the knees folded.
+  The shift now goes along the slope, and the floor is the ground where the hoof went.
+- **Measured** (deepest drawn sole into the ground, cm; front knee in stance, max°):
+
+  | | flat | 10° | 15° | 20° |
+  |---|---|---|---|---|
+  | walk up | 2.7 / 31° | 3.0 / 39° | 3.6 / 52° | 3.8 / 58° |
+  | walk down | 2.7 / 29° | 2.4 / 36° | **−0.8 (was 7.8) / 47°** | **−0.8 (was 10.2) / 53°** |
+  | canter up | 1.1 / 18° | 1.7 / 6° | 1.6 / 6° | 4.1 / 59° |
+
+  (Cantering down past 12° doesn't happen: the slope gate makes the horse walk there.)
+- Motion audit 15/15, npm test 212/212.
+
+## The back legs' "instant broken movement" (2026-10-23, waiting for your look)
+
+You saw it, and it took three causes to explain. Measured joint by joint (the angle each hind segment
+turns per frame, and its change from frame to frame), at a FIXED 1/60 s step. Per rendered frame, a slow
+frame looks like a snap: two runs of the same thing disagreed by 2×.
+
+1. **The canter / gallop loop didn't close** (the main cause). Its last key is a 15th pose, not the
+   first again: the hind pasterns are 16° / 12° off, their IK bones 12 / 23 cm, the body 1 cm (one
+   ordinary key step: the exporter dropped the closing key). So every stride wrapped that step in
+   ZERO time. The fetlock folded 10 → 15 → 20 → 29° per frame, then stopped dead (1.4°). `closeLoop`
+   puts the missing key back: key 0 again, one key later (stride 0.583 → 0.625 s; the gait speeds are
+   measured from the clip at load). Walk, Trot and Idles were already closed.
+2. **The pack's clips are 24 fps with LINEAR keys**: every 42 ms each joint changed speed at once.
+   `resampleSmooth` puts them on a Catmull-Rom curve through the same keys, at 60 fps, wrapping a loop
+   round its seam. (The low-pass I first put on the canter keys did nothing once the loop was closed: its
+   "zig-zag" was the seam. Removed; the keys are the pack's own.)
+3. **The ends of the body switched hooves** (a hard max over the planted hooves): the hind thighs
+   snapped 23–29° per frame. Now a soft max weighted by contact, and rate-limited (`endsSoftMax`,
+   `endsRate`, `endsPitchRate`).
+
+| hind legs, fixed 60 fps step | joint accel max (°/frame²) before → after | fastest joint (°/frame) |
+|---|---|---|
+| flat walk | — → 4.5 | 9.2 |
+| walk up / down 15° | — → 6.3 / 9.1 | 8.0 / 9.5 |
+| flat canter | 32.5 → **10.8** | 31.2 → **19.5** |
+| canter up 15° | 28.8 → **9.4** | 27.5 → **16.2** |
+
+4. Found by the motion audit after the longer canter: a hoof held at the start (standing → canter) was
+   let go the moment its clip target got 1.2 m away, a teleport guard. The canter's first stride now gets
+   there mid-release, and the front hoof dropped 7 cm in a frame. The guard now watches the BODY jumping
+   (> 1 m in a frame), with 3 m as a safety net.
+
+Motion audit 15/15, npm test 212/212. Slopes as before (15° / 20° walk down: sole −0.2 cm).
+
+**Bones?** The hind chain is complete: thigh, shin, cannon, pastern, hoof. No bone was missing behind.
+In front, the "shoulder" bone is only 9 cm (no real humerus). It's the next thing to add if the front
+ever looks wrong.
+
 ## The plan, one stage at a time
 
 Each stage is filmed before and after, and you look before the next one.
