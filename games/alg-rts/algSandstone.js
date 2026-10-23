@@ -13,7 +13,7 @@
 //   the EDGES      the generator's baked curvature: worn edges lighter, the joints darker
 // The sand skirt at the foot is the game's contact splats (algGroundContact.js) — not in the lab.
 import * as THREE from "three";
-import { abs, attribute, clamp, dot, float, mix, normalGeometry, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
+import { abs, attribute, clamp, dot, float, mix, mx_noise_float, normalGeometry, positionWorld, positionGeometry, pow, smoothstep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { createRockGeometry, getRockGeometry, prewarmRockGeometries } from "../../v3/props/proceduralRock.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -108,6 +108,20 @@ export const sandstoneLook = {
   creaseDark: uniform(0.45),   // joints and hollows darker
   footDark: uniform(0.22),     // the foot in its own dust and shade
   saturation: uniform(1),      // 1 = the photos' own colour
+  // THE WEATHERING (2026-10-23, the rock lab's compositions — sandstoneMaterial({ weather: true })):
+  dust: uniform(0.45),         // pale sand settled on every top and ledge
+  dustColour: uniform(new THREE.Color(1.0, 0.86, 0.66)),
+  streaks: uniform(0.35),      // dark varnish streaks running down the walls
+  under: uniform(0.4),         // the undersides of overhangs and shelves, darker
+  seams: uniform(0.6),         // where two pieces meet: the crease shaded, grit in it (rockContact)
+  // THE FOOT INTO THE GROUND: the lowest metres fade into the ground's own colour, the line broken by noise
+  groundBlend: uniform(0.7),
+  groundY: uniform(0),         // the ground's height under the rock (the lab: its flat ground; the game: the terrain's)
+  groundColour: uniform(new THREE.Color(0.3, 0.18, 0.08)),    // (the lab ground's albedo, linear; the game sets its own)
+  groundRise: uniform(1.1),    // how high the blend reaches (m)
+  heightBands: uniform(0.6),   // COLOUR BY HEIGHT: the cliff's beds in their own colours (a tall wall reads as layered)
+  bandWarm: uniform(new THREE.Color(1.1, 0.82, 0.68)),   // an iron-red bed
+  bandPale: uniform(new THREE.Color(1.12, 1.06, 0.94)),  // a pale, bleached bed
 };
 
 /**
@@ -143,7 +157,7 @@ export function setSandstoneColour(key) {
  * it turns (in world space they slid over it on the lab's turntable — you, 2026-10-08), and each
  * rock placed at its own yaw shows its own patch. The layers stay level: rocks only yaw.
  */
-export function sandstoneMaterial() {
+export function sandstoneMaterial({ weather = false } = {}) {
   const sideD = photo(TEX("cliff_side", "diff"), true), sideN = photo(TEX("cliff_side", "nor_gl"));
   const topD = photo(TEX("rock_boulder_cracked", "diff"), true), topN = photo(TEX("rock_boulder_cracked", "nor_gl"));
   const L = sandstoneLook;
@@ -152,7 +166,11 @@ export function sandstoneMaterial() {
   const ps = positionGeometry.div(L.sideTile), pt = positionGeometry.div(L.topTile);
   const uvX = vec2(ps.z, ps.y), uvZ = vec2(ps.x, ps.y), uvY = vec2(pt.x, pt.z);
   // Colour: the sides blended by facing, the top over them where the face looks up.
-  const side = texture(sideD, uvX).rgb.mul(a).add(texture(sideD, uvZ).rgb.mul(b)).div(a.add(b));
+  // (2026-10-23, you: "under the rock the texture looks weird" — a face looking DOWN had only the X and Z projections, both
+  // edge-on to it: the photo smeared into streaks. The sides' blend now has a third, Y projection, for the undersides.)
+  const cY = pow(abs(n.y), float(4)).mul(n.y.lessThan(0).select(1, 0)).add(1e-5);
+  const uvYs = uvY.mul(L.topTile.div(L.sideTile));
+  const side = texture(sideD, uvX).rgb.mul(a).add(texture(sideD, uvZ).rgb.mul(b)).add(texture(sideD, uvYs).rgb.mul(cY)).div(a.add(b).add(cY));
   const topSameCol = texture(sideD, uvY.mul(L.topTile.div(L.sideTile))).rgb;
   const top = mix(texture(topD, uvY).rgb.mul(L.topHue), topSameCol, L.topSame).mul(L.topDark);
   const up = smoothstep(0.4, 0.92, n.y);      // a wide blend: a narrow one drew a hard rim
@@ -162,19 +180,55 @@ export function sandstoneMaterial() {
   const edge = clamp(shade.x.mul(4), -1, 1);
   col = col.mul(float(1).add(edge.max(0).mul(L.edgeLight)).sub(edge.min(0).negate().mul(L.creaseDark)));
   col = col.mul(float(1).sub(L.footDark.mul(float(1).sub(smoothstep(0.0, 0.3, shade.y)))));
+  let footMix = null, footCol = null;
+  if (weather) {
+    // (in the composition's own space: the noise runs on across pieces as one rock's)
+    const P = positionGeometry;
+    // DUST on what faces up, patchy (two scales of noise), thicker in the hollows of the top
+    const patch = smoothstep(-0.25, 0.45, mx_noise_float(P.mul(0.45)).add(mx_noise_float(P.mul(2.1)).mul(0.35)));
+    const dustW = smoothstep(0.55, 0.9, n.y).mul(patch).mul(L.dust);
+    // STREAKS: vertical (the noise stretched 12x in height), on the walls only, stronger high up under the lips
+    const st = smoothstep(0.15, 0.6, mx_noise_float(vec3(P.x.mul(1.3), P.y.mul(0.11), P.z.mul(1.3))));
+    const wall = float(1).sub(abs(n.y)).clamp(0, 1);
+    col = col.mul(float(1).sub(st.mul(wall).mul(L.streaks)));
+    // COLOUR BY HEIGHT: beds a few metres thick, each its own colour (red, ochre, pale), their lines a little wavy
+    const by = P.y.add(mx_noise_float(vec3(P.x.mul(0.06), 0.0, P.z.mul(0.06))).mul(0.9));
+    const bed = mx_noise_float(vec3(by.mul(0.32), 3.7, 1.3)).add(mx_noise_float(vec3(by.mul(1.3), 7.1, 2.9)).mul(0.35));
+    const bedCol = mix(L.bandWarm, L.bandPale, smoothstep(-0.35, 0.35, bed));
+    col = mix(col, col.mul(bedCol), L.heightBands);
+    // THE FOOT: the ground's colour rising up the rock over groundRise m, ragged (dust thrown up, the earth's stain)
+    const above = positionWorld.y.sub(L.groundY).add(mx_noise_float(P.mul(0.9)).mul(0.35)).add(mx_noise_float(P.mul(3.1)).mul(0.12));
+    const foot = float(1).sub(smoothstep(0.0, L.groundRise, above)).mul(L.groundBlend);
+    // (applied AFTER the stone's tint and saturation, below: before them the ground's colour came out grey — seen)
+    footMix = foot.mul(foot.mul(0.5).add(0.5)); footCol = L.groundColour.mul(float(0.85).add(mx_noise_float(P.mul(2.3)).mul(0.25)));
+    // UNDERSIDES
+    col = col.mul(float(1).sub(smoothstep(-0.05, -0.65, n.y).mul(L.under)));
+    // SEAMS: the crease between two pieces darker, a little grit (the dust's colour) in its deepest
+    const seam = attribute("rockContact", "float").clamp(0, 1).mul(L.seams);
+    col = col.mul(float(1).sub(seam.mul(0.55)));
+    col = mix(col, L.dustColour.mul(0.55), seam.mul(seam).mul(0.6));
+    col = mix(col, L.dustColour.mul(col.dot(vec3(0.33)).mul(1.9).add(0.12)), dustW);
+  }
   // Relief: each projection's tangent normal, whiteout-blended into the world normal.
   const tn = (tex, uv) => texture(tex, uv).xyz.mul(2).sub(1);
   const nx = tn(sideN, uvX), nz = tn(sideN, uvZ), ny = mix(tn(topN, uvY), tn(sideN, uvY.mul(L.topTile.div(L.sideTile))), L.topSame);
   const wX = vec3(nx.xy.add(vec2(n.z, n.y)), abs(nx.z).mul(n.x)).zyx;
   const wZ = vec3(nz.xy.add(vec2(n.x, n.y)), abs(nz.z).mul(n.z));
   const wY = vec3(ny.xy.add(vec2(n.x, n.z)), abs(ny.z).mul(n.y)).xzy;
-  const sideNrm = wX.mul(a).add(wZ.mul(b)).normalize();
+  const sideNrm = wX.mul(a).add(wZ.mul(b)).add(vec3(tn(sideN, uvYs).xy.add(vec2(n.x, n.z)), abs(tn(sideN, uvYs).z).mul(n.y)).xzy.mul(cY)).normalize();
   const nObj = mix(sideNrm, wY, up).normalize();
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
+  // THE FRONT FACES CAST (2026-10-23, you: "under the big rocks a thin line where the shadow is at the bottom"): by
+  // default three casts a front-faced mesh's shadow from its BACK faces — here the hidden underside, sunk below the
+  // ground and set in from the walls — so the shadow started a few cm short of the foot and a lit sliver of ground
+  // ran along it. Cast from the walls themselves, each pushed 4 cm into the rock for the shadow pass only (cast at
+  // the surface, the lit tops self-shadowed in a fine cross-hatch — seen up close): the shadow still meets the foot.
+  mat.shadowSide = THREE.FrontSide;
+  mat.castShadowPositionNode = positionGeometry.sub(normalGeometry.mul(0.04));
   mat.name = "Sandstone";
   // Saturation about the colour's own luminance, then the tint.
   col = mix(vec3(dot(col, vec3(0.2126, 0.7152, 0.0722))), col, L.saturation);
-  mat.colorNode = col.mul(L.tint);
+  mat.colorNode = footMix ? mix(col.mul(L.tint), footCol, footMix) : col.mul(L.tint);
   // normalNode is VIEW space (three r184): the rock's-space normal through its instance and model.
   mat.normalNode = transformNormalToView(nObj).normalize();
   return mat;

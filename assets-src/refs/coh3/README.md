@@ -44,3 +44,10 @@ MEASURED (the game area, x 22-78 %, y 8-68 %, HUD out): frame 4 mean RGB (202,15
 
 MEASURED against the soldiers (~1.8 m) and the ring (~22 m): CoH's dunes are SMALL — crests ~2-3 m
 high, ~10-25 m apart, a short steep lee (~5 m), a long gentle back. El Kantara's: 2.8 m, 20 m.
+
+## Added 2026-10-23 — the sandstone ROCKS (the user: "make better rocks", for the rock lab)
+
+| file | what |
+|---|---|
+| `rocks-mesa-shelves.png` | a low mesa: one big flat-topped mass in STEPPED shelves, rounded overhanging lips, a deep crack splitting it, the foot in shadow |
+| `rocks-cluster-tanks.png` | rocks as CLUSTERS: a lone rounded slab with a tree, a long ridge of leaning slabs, a cliff of stacked blocks (right) |

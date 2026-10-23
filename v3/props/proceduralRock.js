@@ -114,6 +114,16 @@ export const DEFAULT_ROCK_PARAMS = {
   jointDepth: 0.08,
   jointWidth: 0.35,
   topRelief: 0,
+  /**
+   * WALL RELIEF (alg-rts rock lab, 2026-10-23, you: "how smooth they look, especially from the side"): the sides broken
+   * by a 3D noise flattened into LAYERS — wide along the rock, short in height — so the walls come out in ragged ledges
+   * and recesses, not a smooth photo-covered skin. Fraction of radius (0 = off, every older preset unchanged) …
+   *   wallReliefScale  … the ledges' length (m; their height a quarter of it)
+   *   strataSharp      the step between two bedding bands, fraction of a band (0.16 = the old soft step)
+   */
+  wallRelief: 0,
+  wallReliefScale: 1.6,
+  strataSharp: 0.16,
   /** Sphere tessellation (IcosahedronGeometry detail). */
   detail: 40,
   /** Triangle target after simplification. */
@@ -270,7 +280,17 @@ export function createRockGeometry(params = {}) {
     const a = rng() * Math.PI, k = (Math.PI * 2) / (3 + rng() * 6);
     return { kx: Math.cos(a) * k, kz: Math.sin(a) * k, ph: rng() * 6.283 };
   }) : null;
-  const sandstone = p.undercut > 0 || bands || joints || swells;
+  const sandstone = p.undercut > 0 || bands || joints || swells || p.wallRelief > 0;
+  // the wall relief's noise: value noise, two octaves, its own seeded lattice
+  const nseed = (rng() * 1e6) | 0;
+  const lat = (i, j, k) => { let h = Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(k, 2147483647) ^ nseed; h = Math.imul(h ^ (h >>> 13), 1274126177); return ((h ^ (h >>> 16)) >>> 0) / 4294967296; };
+  const vnoise = (x, y, z) => {
+    const i = Math.floor(x), j = Math.floor(y), k = Math.floor(z), fx = x - i, fy = y - j, fz = z - k;
+    const u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy), w = fz * fz * (3 - 2 * fz);
+    const L = (a, b, t) => a + (b - a) * t;
+    return L(L(L(lat(i, j, k), lat(i + 1, j, k), u), L(lat(i, j + 1, k), lat(i + 1, j + 1, k), u), v),
+             L(L(lat(i, j, k + 1), lat(i + 1, j, k + 1), u), L(lat(i, j + 1, k + 1), lat(i + 1, j + 1, k + 1), u), v), w);
+  };
 
   // dense indexed sphere
   let geo = new THREE.IcosahedronGeometry(1, Math.max(4, Math.floor(p.detail)));
@@ -301,12 +321,16 @@ export function createRockGeometry(params = {}) {
       // t: height 0 (foot) … 1 (top); sw: how much a side this direction is.
       const t = Math.min(1, Math.max(0, (y * r + p.sizeY) / (2 * p.sizeY))), sw = 1 - y * y;
       let f = 1;
+      // (2026-10-23, the rock lab: the ledges and the sharp bands reaching the TOP and BASE cuts drew a saw-tooth along
+      // the lip — a step sharper than the mesh, sampled vertex by vertex. Both fade out over the last 35 cm before a cut.)
+      const yy = y * r, capT = p.topCut > 0 ? p.sizeY * (1 - p.topCut) : Infinity, capB = p.baseCut > 0 ? -p.sizeY * (1 - p.baseCut) : -Infinity;
+      const lipFade = Math.min(1, Math.max(0, (capT - yy) / 0.35)) * Math.min(1, Math.max(0, (yy - capB) / 0.35));
       if (p.undercut > 0) { const u = Math.max(0, 1 - t / p.undercutHeight); f -= p.undercut * u * u * sw; }
       if (bands) {
         // Each band set back its own amount; the step between two bands eased over a sixth of a band.
         const b = t * p.strata, kb = Math.min(bands.length - 1, Math.floor(b) + 1), fr = b - Math.floor(b);
-        const e = Math.min(1, fr / 0.16), ease = e * e * (3 - 2 * e);
-        f -= p.strataDepth * (bands[kb - 1] + (bands[kb] - bands[kb - 1]) * ease) * sw;
+        const e = Math.min(1, fr / Math.max(0.01, p.strataSharp)), ease = e * e * (3 - 2 * e);
+        f -= p.strataDepth * (bands[kb - 1] + (bands[kb] - bands[kb - 1]) * ease) * sw * (p.wallRelief > 0 ? lipFade : 1);
       }
       const qx = x * r, qz = z * r;
       if (joints) {
@@ -316,6 +340,12 @@ export function createRockGeometry(params = {}) {
           // Up the sides and across the top; shallow at the foot.
           f -= p.jointDepth * j.d * g * (0.25 + 0.75 * t) * (sw + (1 - sw) * 0.22);   // across the top: a crack, not a trench
         }
+      }
+      if (p.wallRelief > 0) {
+        // ledges: the noise wide in x / z, squashed in height (y × 4), a finer octave over it; the sides only
+        const S = p.wallReliefScale, qy = y * r;
+        const nv = vnoise(qx / S, qy * 4 / S, qz / S) * 0.7 + vnoise(qx * 2.7 / S, qy * 10 / S, qz * 2.7 / S) * 0.3;
+        f -= p.wallRelief * nv * sw * sw * lipFade;
       }
       if (swells && y > 0.2) {
         let w = 0;
@@ -627,3 +657,6 @@ export async function prewarmRockGeometries(paramsList) {
   for (const job of todo) if (_inFlight.get(job.key) === job.done) finish(job);
   await Promise.all(waits);
 }
+
+/** The rockShade bake (edge curvature, height), for other generators of the same rocks (games/alg-rts/rockFormations.js). */
+export function bakeRockShade(geo, { shadeBlur = 2 } = {}) { _bakeShade(geo, { shadeBlur }); }

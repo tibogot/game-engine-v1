@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- ROCK LAB (rockLab.js): sandstone formations beside the game's rock, the game's sun and shadow — no map. -->
+    <base href="/v3/" />
+    <title>Rock Lab — Sand &amp; Blood</title>
+    <link rel="icon" href="data:," />
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: #16110c; }
+      #game { position: fixed; inset: 0; }
+      #err { position: fixed; left: 290px; top: 12px; z-index: 60; max-width: 680px; white-space: pre-wrap;
+        color: #ff9a8c; font: 12px ui-monospace, monospace; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <pre id="err"></pre>
+    <script type="module">
+      try {
+        const { startRockLab } = await import("/games/alg-rts/rockLab.js");
+        window.__RLAB = await startRockLab(document.getElementById("game"));
+      } catch (e) {
+        console.error("[rock lab] failed to start", e);
+        document.getElementById("err").textContent = e?.stack || e?.message || String(e);
+      }
+    </script>
+  </body>
+</html>
