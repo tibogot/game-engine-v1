@@ -12,9 +12,15 @@ import { buildRailGeometry, buildRailCollision, railParams } from "../../../modu
 const RAIL = { ...railParams, postSpacing: 7.2 };
 import { createRoadMaterial, createGuardrailMaterial } from "../../../modular-road-v3/modularRoadMaterial.js";
 import { createTubeMaterial } from "./tubeMaterial.js";
+import { buildWornSurface, createScanDeck, ROAD_WEAR, ROAD_SCAN } from "./roadSurface.js";
 
 export function createOldLookMaterials() {
-  const road = createRoadMaterial();
+  // our own asphalt (roadSurface.js): a scanned deck under thin worn lines, not the old game's 14× stretched bands
+  // ?asphalt=<scan> picks another (roadSurface.js ROAD_SCANS); ?asphalt=old = the old game's road, for an A/B
+  const pick = new URLSearchParams(globalThis.location?.search ?? "").get("asphalt") ?? "tarred_gravel";
+  const scan = pick === "old" ? null : createScanDeck(pick);
+  const road = scan ? createRoadMaterial({ buildSurface: buildWornSurface, deck: scan.hook }) : createRoadMaterial();
+  if (typeof window !== "undefined") Object.assign(window, { __roadWear: ROAD_WEAR, __roadScan: ROAD_SCAN, __roadScanUse: scan?.use });
   // The deck casts its shadow from its UNDERSIDE only (back faces into the shadow map), so its top
   // can't shadow itself. Without this, under Sky Pro's lower sun the road self-shadowed into a dark
   // band across the near cascade even at normal bias 0.12 (user's screenshot, 2026-10-18; A/B:

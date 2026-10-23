@@ -20,6 +20,18 @@ export const CAR_TUNE = {
 export function applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top = CAR_TUNE.top) {
   TIRE.topSpeed = top;
   TIRE.analogPedals = true; // the pad's triggers are pedals, not buttons (the physics review, 2026-10-23)
+  // THE NOSE FOLLOWS THE WHOLE ARC (user, 2026-10-23: "why doesn't the car go nose down when falling … that's
+  // how it can land smoothly on a curved road"): the engine's arc assist tracks HALF the flight angle (the old
+  // game landed on flat roads); Thunderline's landings are shaped TO the arc, so arriving along it is the
+  // smooth landing. The player's pitch still overrides it (the assist stands down on any pitch input).
+  TIRE.airAlignFraction = 1.0;
+  // …all the way down: the follow stood down past 26° of TILT (a guard for a rolled car), and pitching
+  // nose-down is tilt too — it froze at −29° while the car fell at −37°. 0.5 = 60°; the roll-rate guard stays.
+  TIRE.airAlignMinUp = 0.5;
+  // …and in the last 1.4 s the nose turns onto the SURFACE it lands on (the engine levels only the roll by
+  // default: the old game's flat roads made a levelling nose look like a slap). Thunderline's landings are
+  // slopes and curves: meeting them along their own angle is the smooth landing.
+  TIRE.airLandPitchLevel = 1.0;
   TIRE.steerSpeedRef = top * 0.9; // "full reduction should land AT top speed" (old: 45 for 50)
   WHEEL.radius = CAR_TUNE.wheel.radius;
   WHEEL.thickness = CAR_TUNE.wheel.thickness;

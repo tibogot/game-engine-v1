@@ -395,6 +395,17 @@ this is just the list. Newest decisions at the top of each section. Last updated
       the slide measured in the wheel's frame, all four wheels, a gap at a respawn, and TOUCHDOWN SCUFFS
       after a jump (harder = darker). Seen: a handbrake spin on asphalt. NOT YET SEEN: scuffs, marks on a
       bank / in a tube.
+- [x] **THE NOSE FOLLOWS THE JUMP** (user, 2026-10-23: "why doesn't the car go nose down when falling … land
+      smoothly on a curved road"): carTune — airAlignFraction 0.5 → 1 (the engine followed HALF the flight
+      angle, for the old game's flat roads), airAlignMinUp 0.9 → 0.5 (the follow stood down past 26° of tilt:
+      it froze at −29° falling at −37°), airLandPitchLevel 0 → 1 (the last 1.4 s turn the nose onto the
+      SURFACE it lands on). Measured on White 1 hands-off: nose = flight path down to −35°, then onto the
+      landing. landingTest: lined up all perfect; hands-off now all "ok" 7-11° (one was perfect by chance);
+      crooked now finishes. Ghost deterministic; full suite green. NOTE: ghosts saved before this replay a
+      different car in the air (they will drift).
+      FOUND: the track LIBRARY hits localStorage's quota (~5 MB: tracks + a thumbnail each) — saves then FAIL
+      (QuotaExceededError, only a console warning). Seen in my test profile; the user's will fill too.
+      → move the library to IndexedDB (and the thumbnails as blobs), warn on screen if a save fails.
 - [x] **KNOCKABLE PROPS** (user, 2026-10-23: "the orange cones … I'm sure there were other things"; from the old
       game's PROP_CATALOG): Obstacles → Cone, Cone row (6 across), Tyre stack (3), Oil barrel, Swing gates (two,
       meeting in the middle). kit/physProps.js: the OLD physics unchanged (modularRoadPropPhysics: rigid bodies on
@@ -517,6 +528,22 @@ the new code is 5.30 ms: the shadow / chunk / caster work ~3 ms, the 3-layer gro
 toggles at that view: rails + posts at full detail +0.11 ms, the whole car in the shadow map -0.05 (noise 0.3).
 
 ## Look & tech
+- [x] **THE ROAD'S ASPHALT** (user, 2026-10-23: the old texture's long streaks "look cheap, cartoonish";
+      then the noise "looks also cheap … roughness and normals map?"). proto/kit/roadSurface.js, through an
+      opt-in `deck` hook in the shared modularRoadMaterial.js (the old game passes nothing: unchanged).
+      Poly Haven TARRED GRAVEL (CC0, 2.2 m tile, KTX2), picked over Asphalt Track / Pit Lane / Clean
+      Asphalt (all showed lines). The scan is HIGH-PASSED (÷ its own mip 7): only the stones stay, so the
+      tile's own shading no longer makes a checkerboard (user's top view). Roughness from the stones (the
+      scans' maps are flat), the normal high-passed too, our macro tone / thin worn lines / wheel paths /
+      drift marks on top. The two bright WHEEL BANDS into a low sun kept (checked against the old road).
+      Specular AA (normal's fwidth → roughness², capped 0.18) so the far road doesn't sparkle. A CENTRE
+      SEAM: thin dark glossy sealant, wandering a few cm. No visible break at piece joints (3 m above).
+      A/B: ?asphalt=old (the old road) or ?asphalt=asphalt_track. Tunables: window.__roadScan / __roadWear.
+      OPEN: judge the sparkle AT SPEED; GPU ms at a quiet moment; 1k instead of 2k if it costs.
+- [ ] **BRAKE MARKS before corners** (suggested 2026-10-23, user: "go ahead"): dark straight lines in the
+      wheel paths over the last 20–50 m before a corner. The deck can't carry it (8 vertex buffers, all
+      used; pieces don't know their neighbours) → a track-level pass: walk the centre line, find corner
+      entries, lay a few ribbon pairs; one merged mesh, lifted + polygon offset (never z-fight).
 - [x] **Shadow SAW-TOOTH** (user, 2026-10-21, screenshot): rail shadows along the road showed stair
       steps past ~24 m from the car (the baked atlas, 6.5 cm texels; the live map near the car is 2.3 cm).
       Tried, NOT a fix: a wider 3×3 filter (a wave instead of steps; streaks at spread 2.2); 2× resolution

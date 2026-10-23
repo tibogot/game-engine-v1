@@ -896,6 +896,14 @@ export function createRoadMaterial(opts = {}) {
    * same aggregate and wheel-path fields instead of a second copy of them.
    */
   const paintHook = opts.paint ? opts.paint(u, { surface }) : null;
+  // THE DECK FROM A SCAN (Thunderline, 2026-10-23). `opts.deck(u, { surface })` may return any of
+  //   color  vec3, replacing the dark→light asphalt ramp (wheel paths, old rubber, sealant, water and
+  //          paint still go on top of it, as before)
+  //   rough  float, replacing the deck's base roughness and its noise variation
+  //   normal vec3 in VIEW space, the deck's bumps (kerbs, sides and paint keep the smooth normal)
+  //   roughAA float, specular anti-aliasing: added to roughness² once every other deck term is in
+  // Without it the deck is exactly what it was.
+  const deckHook = opts.deck ? opts.deck(u, { surface }) : null;
   const lineAmt = Fn(() => lineCoverageAt(
     u,
     attribute("aLateral", "float"),
@@ -970,7 +978,7 @@ export function createRoadMaterial(opts = {}) {
     // Symmetric contrast about the midpoint, so grainScale can push or pull
     // variation without dragging the average brightness down with it.
     const shaped = saturate(tone.sub(0.5).mul(u.grainScale).add(0.5));
-    let deckBase = mix(u.asphaltDark, u.asphaltLight, shaped);
+    let deckBase = deckHook?.color ?? mix(u.asphaltDark, u.asphaltLight, shaped);
     deckBase = deckBase.mul(oneMinus(wheelPath.mul(u.wheelDarken)));
     // Old rubber. BOUNDED at 0.55 on purpose: the player's live skid ribbon
     // draws on top of this, and two independent darkenings multiply — an
@@ -1067,9 +1075,9 @@ export function createRoadMaterial(opts = {}) {
     // uniform sheen. Then polish the wheel paths — that pair of smoother strips
     // catching the sun is what sells a road at grazing angles, and it costs
     // nothing here because the fields are already computed.
-    let deck = u.deckRough
+    let deck = (deckHook?.rough ?? u.deckRough
       .add(macro.sub(0.5).mul(u.roughVary))
-      .add(agg.sub(0.5).mul(u.roughVary).mul(0.5))
+      .add(agg.sub(0.5).mul(u.roughVary).mul(0.5)))
       .sub(wheelPath.mul(u.wheelPolish))
       // Same field as the albedo above, referenced not recomputed. Rubber is
       // glossier than the asphalt around it, and that sheen is most of what
@@ -1088,6 +1096,7 @@ export function createRoadMaterial(opts = {}) {
     // on its own terms too: it starts smoother, so the same film takes it
     // further. Mixed AFTER the substrate mix so both sides of the blend are
     // already weather-aware.
+    if (deckHook?.roughAA) deck = sqrt(clamp(deck, 0.0, 1.0).mul(deck).add(deckHook.roughAA));
     const paintRough = wet ? mix(u.lineRough, wet.substrateRough, wet.film) : u.lineRough;
     deck = mix(deck, paintRough, paintAmt);
     deck = clamp(deck, 0.05, 1.0);
@@ -1492,6 +1501,12 @@ export function createRoadMaterial(opts = {}) {
    * dies with the albedo speckle; the height itself is re-sampled in UV metres
    * (screen-space dFdx of `.x`/`.y` self-shadows into stripes).
    */
+  if (deckHook?.normal) {
+    // deck zone only (aZone 1), and the paint lies smoother than the stones under it
+    const zone = attr("aZone", "float");
+    const onDeck = step(0.5, zone).mul(oneMinus(step(1.5, zone))).mul(oneMinus(paintAmt.mul(0.7)));
+    mat.normalNode = mix(normalView, deckHook.normal, onDeck).normalize();
+  }
   mat._surfaceNode = surface;
   /**
    * Paint coverage at THIS fragment, 0..1 — the same node the albedo and the

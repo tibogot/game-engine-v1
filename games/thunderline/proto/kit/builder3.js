@@ -2293,6 +2293,11 @@ gizmo.setSpace("world");
 gizmo.setSize(0.9);
 scene.add(gizmo.getHelper());
 let gizmoMode = "translate";
+// THE GIZMO'S AXES (user, 2026-10-23: "a shortcut to make the gizmo use local or world"): X switches them.
+// null = the builder's choice (move on the world, turn one piece on its own axes); "local" / "world" = yours,
+// for moving and turning alike, kept until you switch again
+let gizmoSpace = null;
+const gizmoSpaceNow = (multi) => gizmoSpace ?? (gizmoMode === "rotate" && !multi ? "local" : "world");
 let gizmoDrag = null;
 /** What the selection is, for the gizmo: "root" | "prop" | "ring" | null (held by the road). */
 function movableKind(uid) {
@@ -2338,7 +2343,7 @@ function attachGizmo() {
   gizmo.setMode(gizmoMode);
   // TURN: round the vertical, and (user, 2026-10-22: "tilt a placed road with the gizmo") PITCH and BANK —
   // the piece's own axes, 5° steps; MOVE: on the world grid
-  gizmo.setSpace(gizmoMode === "rotate" && !multi ? "local" : "world");
+  gizmo.setSpace(gizmoSpaceNow(multi));
   gizmo.showX = gizmo.showZ = true;
   gizmo.translationSnap = gridStep;
   gizmo.rotationSnap = 5 * DEG;
@@ -2351,6 +2356,7 @@ function carriedMany(uids) {
   return { pieces: [...pieces], props: [...props] };
 }
 function setGizmoMode(m) { gizmoMode = m; attachGizmo(); statusKey = ""; renderStatus(); }
+function toggleGizmoSpace() { gizmoSpace = gizmoSpaceNow(multiRoads()) === "local" ? "world" : "local"; attachGizmo(); statusKey = ""; renderStatus(); }
 /** Everything that moves with `uid`: a root carries its road, what flies off it, and what stands on it. */
 function carried(uid) {
   if (movableKind(uid) === "road") uid = rootOf(uid); // the whole road it is part of
@@ -2470,7 +2476,7 @@ function renderStatus() {
   $("status").innerHTML =
     `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP || tileBase === SPAWN ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
     (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button></div>` +
-      (multiRoads() ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div><div class="row"><span>The roads they are part of move and turn together</span></div>` : "") : "") +
+      (multiRoads() ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button><button data-act="space" title="The gizmo's axes: the piece's own (local) or the world's">${gizmoSpaceNow(multiRoads()) === "local" ? "Local" : "World"} <kbd>X</kbd></button></div><div class="row"><span>The roads they are part of move and turn together</span></div>` : "") : "") +
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
     (!tileBase && !multi && !selPc ? `<div class="legend">Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</div>` : "") +
     (!tileBase && !multi && !selPc && track.pieces.length > 1
@@ -2506,7 +2512,7 @@ function renderStatus() {
     (selPc?.kind && selPc.on != null
       ? `<div class="row"><span><b>Drag it</b> along or across the road${canTurn(selPc.kind) ? ` · <kbd>Q</kbd>/<kbd>E</kbd> turn` : ""} · <kbd>Del</kbd> delete</span></div>`
       : selPc ? (movableKind(sel)
-      ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button></div>` +
+      ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button><button data-act="space" title="The gizmo's axes: the piece's own (local) or the world's">${gizmoSpaceNow(multiRoads()) === "local" ? "Local" : "World"} <kbd>X</kbd></button></div>` +
         (movableKind(sel) === "root" ? `<div class="row"><span>The whole road behind it moves too</span></div>`
           : movableKind(sel) === "road" ? `<div class="row"><span>Its pieces are joined: the whole road moves and turns with it</span></div>` : "")
       : `<div class="row"><span>Held by the road: Replace or Insert</span></div>`) : "") +
@@ -2542,6 +2548,7 @@ $("status").addEventListener("click", (e) => {
   else if (act === "mirror") mirrorSelection();
   else if (act === "delmany") removeMany(selection());
   else if (act === "move" || act === "turn") setGizmoMode(act === "move" ? "translate" : "rotate");
+  else if (act === "space") toggleGizmoSpace();
   else if (act === "insert" || act === "replace") startEdit(act);
   else if (act === "delete") { editMode = null; removePiece(sel); }
   else if (act === "cp") toggleCheckpoint(sel);
@@ -2685,6 +2692,7 @@ addEventListener("keydown", (e) => {
       else if (k === "k" && !tileBase && sel != null) splitAt(sel);
       else if (k === "i" && !tileBase && sel != null) startEdit("insert");
       else if (k === "m" && !tileBase && movableKind(sel)) setGizmoMode(gizmoMode === "translate" ? "rotate" : "translate");
+      else if (k === "x" && !tileBase && (movableKind(sel) || multiRoads())) toggleGizmoSpace(); // the gizmo's axes: local ↔ world
       else if (k === "l") setLapLine(!lapLineOn);
       else if (k === "p" && !tileBase && sel != null) startEdit("replace");
       else if (k === "h") { const y = heightUnderCursor(); if (y != null) buildY = Math.round(y * 2) / 2; }
