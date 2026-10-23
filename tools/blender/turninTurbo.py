@@ -261,7 +261,7 @@ def b_ring(z):
     t = min(max((B_NOSE_Z - z) / (B_NOSE_Z - B_ZB), 0.0), 1.0)
     B_SH = 0.012 + 0.03 * t * t        # the shoulder rounds out towards the back: the fenders roll into the sides
     pts = []
-    N_TOP, N_SIDE, N_ARC, N_BOT = 48, 8, 5, 10
+    N_TOP, N_SIDE, N_ARC, N_BOT = 96, 10, 8, 10   # dense: the humps round the lamps shaded in streaks
     hl, hr = b_height(z, -w + B_SH), b_height(z, w - B_SH)
     for k in range(N_BOT + 1):                    # bottom, right to left
         pts.append((w - 2 * w * k / N_BOT, 0.0))
@@ -292,7 +292,7 @@ def b_ring(z):
             out.append((x, y, z))
     return out
 
-ZS = [B_ZF + (B_ZB - B_ZF) * (1 - (1 - i / 90) ** 1.7) for i in range(91)]   # denser towards the back (the fender faces)
+ZS = [B_ZF + (B_ZB - B_ZF) * (1 - (1 - i / 180) ** 1.7) for i in range(181)]   # denser towards the back (the fender faces)
 # the back end: the last rings shrink in to a rounded rear edge (2 mm) before the cap
 rings = [b_ring(z) for z in ZS]
 last = rings[-1]
@@ -333,7 +333,7 @@ def bumper():
     # 32 -> 108 mm (straight back photo): a thin top lip, a wide band, a groove, a lower band; 1 cm proud
     prof = [(-0.006, 0.032), (0.006, 0.032), (0.0092, 0.0335), (0.0105, 0.037), (0.0105, 0.058), (0.009, 0.0595),
             (0.0105, 0.061), (0.0105, 0.088), (0.009, 0.0895), (0.0105, 0.091), (0.0105, 0.1), (0.009, 0.1045),
-            (0.006, 0.1085), (-0.006, 0.1085)]   # 1.5 mm over the shell's lowest top (it met it exactly: z-fight)
+            (0.006, 0.113), (-0.006, 0.113)]   # its top 6 mm over where the body meets it (red teeth)   # 1.5 mm over the shell's lowest top (it met it exactly: z-fight)
     rings = []
     for i, (x, z) in enumerate(path):
         p = Vector((x, z))
