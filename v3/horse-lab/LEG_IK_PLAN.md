@@ -241,6 +241,53 @@ Soles walking down (fixed step): 20° 3.9 → **2.2 cm**, 15° 0.3, 10° 1.5. Mo
 **Found, not fixed (it was there before):** cantering onto the 20° ramp, the slope gate brakes to a walk
 at the top, and for ~12 frames a front knee folds 61° → 83° in stance.
 
+### Looked into: the FRONT legs walking down 20° (2026-10-24) — the big one
+
+That knee fold was really a front leg in the AIR that the code took for planted. Measured with the drawn
+sole against the ground (fixed step): walking down 20°, the front hooves are > 3 cm off the ground in
+**91–95 % of frames**, hanging up to 27 cm (48 cm coming in from a canter). With the old hind values: 8–17 cm.
+The downhill sit made it worse (the hips lowering tips the body nose-up round them).
+
+Why: in stance a leg sweeps about ±20° round its upright. With legs UPRIGHT (stage 1, `legUpright`) on a
+20° slope, the ground under a leading leg is ~15 cm lower and under a trailing leg ~15 cm higher, so one
+front leg hangs while the other folds, wherever the body is. With legs square to the BODY (the clip's
+own geometry), both ends of the sweep land on the slope.
+
+Tried:
+- the front end sitting too (`frontSitDown` 0.15 / 0.25): no hanging when walking, but the planted
+  front knees fold to a median 85–97° (flat walk: 16°). Not kept.
+- `legUpright` 0 / 0.3 / 0.5: the front hooves still hang (19 / 14 / 17 cm), and the hind values
+  would need retuning. The runs depend on where the stride starts, so more cases are needed.
+
+**Found and fixed (2026-10-24):** three slope stages fought each other: legs UPRIGHT, the two ENDS
+apart, and the EVEN WALK's shift along the flat walk's path. A stiff stance leg keeps its length only
+if its sweep is centred on the slope's perpendicular (the shoulder moves down the slope), which is the
+clip's own geometry. Now on a slope: legs square to the body (`legUpright` 0), one sink for the body
+(`endsApart` 0), the even walk faded out by ~3° (`walkEvenHill`), and the hind legs step under going
+down (`hindUnderDown` 0.2, which needs the hill posture's own weight, no longer tied to `legUpright`).
+Measured over 4 start phases, fixed step (front hang = drawn sole while the clip has the hoof down, p95):
+
+| walk | front hang before → now | front planted knee (median) |
+|---|---|---|
+| flat | 1.6 → 1.7 cm | 15° |
+| down 10° | 10.3 → **2.7** | 16° (hind under: ~48°) |
+| down 20° | 22.5 → **3.8** | 33° (hind under: ~48°) |
+| up 15° | 7.7 → **2.7** | 46° |
+
+Motion audit 15/15. Still not right to the eye (you, 2026-10-24).
+
+## The way out of the tuning loop (decided 2026-10-24)
+
+The pack has only flat-ground clips; ~10 runtime correction layers bend them onto slopes and they
+interact. Plan:
+1. **A slope regression test** (the probe above as a test): front hang, knees, hind, sink at flat,
+   5–20° down, 10–15° up, several start phases. Run after every leg change.
+2. **Gentle maps meanwhile:** the walk's slope limit down to ~12–15°; the steppe built with gentle hills.
+3. **A slope pose editor in the horse lab** (from poseEditor.js): the horse on a ramp of any grade,
+   the stride scrubbed in slow motion, joints dragged at a few stride points. These become
+   uphill/downhill poses blended in by slope (RDR2: incline / decline clips). Then the correction
+   layers they replace are removed; the IK only plants hooves.
+
 **Bones?** The hind chain is complete: thigh, shin, cannon, pastern, hoof. No bone was missing behind.
 In front, the "shoulder" bone is only 9 cm (no real humerus). It's the next thing to add if the front
 ever looks wrong.

@@ -56,7 +56,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   hoofSlope: 1,                   // planted hooves lie on the slope under them (0 = kept at their flat-ground angle)
   coffinMax: 0.52,                // rad the hoof may turn against the pastern laying itself on the ground (the coffin joint: ~30°)
   soleClear: 0.01,                // m a SWINGING hoof's whole sole stays over the ground under where it goes (toe, middle, heel)
-  endsApart: 1,                   // the FRONT and the HIND end sink separately (withers from the front hooves, hips from the hind), the difference as pitch round the hips (0 = the whole body by the lowest hoof: up 15° the body sank 7 cm for the hind legs and the front knees folded 50° to fit) — LEG_IK_PLAN stage 2
+  endsApart: 0,                   // the FRONT and the HIND end sink separately (withers from the front hooves, hips from the hind), the difference as pitch round the hips (0 = the whole body by the lowest hoof: up 15° the body sank 7 cm for the hind legs and the front knees folded 50° to fit) — LEG_IK_PLAN stage 2
   endsPitchMax: 0.3,              // rad that extra pitch at most (out of the wide ditch the hind sank 33 cm: 0.2 left the forelegs 15 cm short)
   toeLock: 1,                     // a held hoof is held at its TOE (it breaks over about it) — 0 = at its fetlock
   fsClipSide: 1, fsHoofKeep: 1,   // the planted foreleg's solve: the fetlock on the clip's own side of the leg line / the hoof keeps its angle as the pastern turns
@@ -69,15 +69,16 @@ export const HP = {               // tunables (the lab GUI edits these)
   endsRate: 0.5,                  // m/s an end may move at most
   endsPitchRate: 0.6,             // rad/s the ends' extra pitch may turn at most
   endsRise: 0.15,                 // m an end may RISE for its hooves (the lower of its two: a planted hoof is never lifted off) — only sinking, climbing out of a ditch the forelegs stayed 13–16 cm short                // rad the hoof may turn against the pastern laying itself on the ground (the coffin joint: ~30°)
+  uprightFront: 1, uprightHind: 1,   // × legUpright for each end (0 = the legs square to the body, as the clip)
   hindSitDown: 0.15,              // m the hips sit lower at a full downhill (the hind legs stay bent)
   // (downhill the legs stood upright reached 30° ahead of the hip onto the LOWER ground and came out straight —
   // stifle 174°, "a weird stretch": turned a little back, and with the sit, at 20° down the hind legs move as on
   // the flat — hoof vs hip median −5°, stretch ≤ 0.89 — with the hocks a little MORE bent: 116° vs 123°)
-  hindUnderDown: -0.05,            // rad the hind legs swing forward under the body at a full hill DOWN (~15 cm at the hoof)
+  hindUnderDown: 0.2,             // rad the hind legs swing forward under the body at a full hill DOWN (legs square to the body on a slope: at 0 they trailed 25° behind the hips at 20° down)
   hindUnderUp: 0.05,              // ...and up a full hill (reaching forward to push)
   clipSmooth: !(globalThis.location && new URLSearchParams(globalThis.location.search).get("clipsmooth") === "0"),   // the pack's 24 fps linear clips resampled at 60 fps on smooth curves through the same keys (read at load; ?clipsmooth=0 for the raw clips)
   clipCloseLoops: !(globalThis.location && new URLSearchParams(globalThis.location.search).get("closeloops") === "0"),   // the canter / gallop loops' missing closing key put back (their wrap jumped a key step in zero time; ?closeloops=0 to compare)
-  legUpright: 1,                  // on a slope the legs swing as on the flat, UPRIGHT (relative to gravity), not tilted with the body (0 = with the body: on 15° the forelegs reached into the hill) — LEG_IK_PLAN stage 1
+  legUpright: 0,                  // on a slope the legs swing as on the flat, UPRIGHT (relative to gravity), not tilted with the body (0 = with the body: on 15° the forelegs reached into the hill) — LEG_IK_PLAN stage 1
   hillFull: 0.21,                 // rad (12°): the slope where the hill posture is full
   hillHead: 0.25,                 // rad the neck lowers uphill (raises downhill) at a full hill
   hillSlowUp: 0.15, hillSlowDown: 0.1,   // speed lost uphill / downhill at a full hill
@@ -114,6 +115,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   gallopCalm: 0.55,               // share of the gallop / canter body rock + bob taken out (Annie G. rides far flatter) — 0 = the clip's
   gallopNeck: 0.32,
   spinPivot: 0.8,                 // turning on the spot pivots this far behind the middle (× half the body length: over the hind legs) — 0 = about the middle
+  walkEvenHill: 4,                // the even walk fades out on hills (gone by ~3°): its shift along the flat walk's path left front hooves hanging on slopes
   walkEven: 1,                    // the walk's four beats evenly spaced (Muybridge) — 0 = the clip's
   evenAngles: 1,                  // the even walk shifts the pastern's and hoof's ANGLES with the hoof (0 = position only: a hind hoof rose flat, no breakover)
   walkEvenShift: [0, 0.073, 0.115, 0.125],   // per leg (LF, RF, LH, RH): how far ahead on its own path (stride share)
@@ -750,21 +752,24 @@ export class HorseController {
     // folded under the belly; downhill the forelegs tucked back and the hind flung out flat.
     // (the clip's lift of each hoof is read BEFORE the turn: its own ground is the tilted body's)
     this.slopeUndo = null; this.qUnder = null;
-    const upW = HP.legUpright * (this.rearT < 0 && !(this.oneShot && this.oneShotName === "Gallop_Jump") && !this.airborne ? 1 : 0) * (1 - (this.rearA ?? 0));
-    if (upW > 0.001 && (Math.abs(this.pitch) > 1e-4 || Math.abs(this.roll) > 1e-4)) {
+    const postW = (this.rearT < 0 && !(this.oneShot && this.oneShotName === "Gallop_Jump") && !this.airborne ? 1 : 0) * (1 - (this.rearA ?? 0));   // (the hill posture: on its own, legs upright or not)
+    const upW = HP.legUpright * postW;
+    const hk0 = this.hillK ?? 0, under0 = (HP.hindUnderDown * Math.max(0, -hk0) + HP.hindUnderUp * Math.max(0, hk0)) * postW;
+    if ((upW > 0.001 || Math.abs(under0) > 1e-4) && (Math.abs(this.pitch) > 1e-4 || Math.abs(this.roll) > 1e-4)) {
       const tilt = new THREE.Quaternion().setFromEuler(new THREE.Euler(this.pitch, this.yaw, this.roll, r.rotation.order));
       const undo = new THREE.Quaternion().setFromAxisAngle(_u.set(0, 1, 0), this.yaw).multiply(tilt.invert());
       this.slopeUndo = new THREE.Quaternion().slerp(undo, upW);
       // ...and the HIND legs step UNDER the body on a hill (stage 5, the posture): downhill well under — the
       // hocks flex, the weight goes back, the quarters sink and the body tilts less than the slope (riders:
       // "back legs well up underneath him"); uphill a little, reaching forward to push. Swung forward round the hip.
-      const hk = this.hillK ?? 0, under = (HP.hindUnderDown * Math.max(0, -hk) + HP.hindUnderUp * Math.max(0, hk)) * upW;
+      const under = under0;
       const qUnder = this.qUnder = new THREE.Quaternion().setFromAxisAngle(_u.set(Math.cos(this.yaw), 0, -Math.sin(this.yaw)), -under);   // (round the horse's left axis: − brings the hoof forward)
       for (const g of this.legs) {
         g.ff.getWorldPosition(_c);
         g.hA0 = Math.max(0, _c.y - (py - (up.x * (_c.x - px) + up.z * (_c.z - pz)) / up.y) - this.h.foot.sole);
         const top = g.u.getWorldPosition(new V3());
-        const q = g.cannon && Math.abs(under) > 1e-4 ? qUnder.clone().multiply(this.slopeUndo) : this.slopeUndo;
+        const kU = g.cannon ? HP.uprightHind : HP.uprightFront, sU = g.sU = kU === 1 ? this.slopeUndo : new THREE.Quaternion().slerp(undo, upW * kU);   // (each end: how upright)
+        const q = g.cannon && Math.abs(under) > 1e-4 ? qUnder.clone().multiply(sU) : sU;
         rotateWorld(g.u, q);
         g.ik.position.copy(g.ik.parent.worldToLocal(g.ik.getWorldPosition(new V3()).sub(top).applyQuaternion(q).add(top)));
         rotateWorld(g.ik, q);
@@ -885,7 +890,7 @@ export class HorseController {
     // DOWNHILL the quarters SIT: the hips lower, the hind legs stay bent under the body (riders: "back legs
     // well up underneath him"). Hips kept at their flat height, at 20° down the hind legs came out fully
     // straight to reach the lower ground (hock 167°, the leg 100 % stretched — "a weird stretch")
-    const sitH = HP.hindSitDown * Math.max(0, -(this.hillK ?? 0)) * upW;
+    const sitH = HP.hindSitDown * Math.max(0, -(this.hillK ?? 0)) * postW;
     const tH = endT(endH.d > 1e-4 ? endH.n / endH.d - sitH : NaN, this.bodyOffH ?? 0), tF = endT(endF.d > 1e-4 ? endF.n / endF.d : NaN, this.bodyOffF ?? 0);
     // (rising as fast as sinking: a hoof landing 8 cm higher waited ~10 frames for its end, the knee folded meanwhile)
     const endStep = (b, t) => b + clamp((t - b) * lerpK(14, dt), -HP.endsRate * dt, HP.endsRate * dt);   // (eased AND rate-limited: never a jump)
@@ -947,12 +952,13 @@ export class HorseController {
       this.walkSteadyT = this.gaitName === "Walk" && (this.effGear ?? 0) === 0 && Math.abs(this.v) > 0.25 ? (this.walkSteadyT ?? 0) + dt : 0;
       const want = HP.walkEven > 0 && this.gaitName === "Walk" && !departing && this.walkSteadyT > 0.6 && !this.oneShot && this.rearT < 0 && !this.spinning ? HP.walkEven : 0;
       this.walkEvenK = (this.walkEvenK ?? 0) + (want - (this.walkEvenK ?? 0)) * lerpK(want > (this.walkEvenK ?? 0) ? 4 : 12, dt);
-      this.walkEvenW = this.walkEvenK * wW;                    // (× the walk's share of the blend: none of it leaks into the canter)
+      this.walkEvenW = this.walkEvenK * wW * clamp(1 - Math.abs(this.hillK ?? 0) * HP.walkEvenHill, 0, 1);   // (× the walk's share of the blend: none of it leaks into the canter; faded out on hills — shifting the hooves along the flat walk's path, a front hoof on a slope hung 10 cm over the ground)
     }
     this.ikCorr = this.calmOn ? Math.max(0.011, this.calmMove ?? 0) : 0;   // (the calmed body: the legs re-solved on purpose)
     const jh = this.jumpHind();
     const fwd = new V3(0, 0, 1).applyQuaternion(r.quaternion);
     let untilt = new THREE.Quaternion().setFromAxisAngle(new V3(0, 1, 0), this.yaw).multiply(r.quaternion.clone().invert());
+    const untilt0 = untilt.clone(), untiltOf = (g) => (g.sU && this.slopeUndo ? untilt0.clone().multiply(g.sU.clone().invert()) : untilt.clone());   // (each leg turned as upright as ITS end)
     if (this.slopeUndo) untilt = untilt.multiply(this.slopeUndo.clone().invert());   // (the legs already turned upright: only the rest of the tilt)
     this.legs.forEach((g, li) => {
       // (a jumping hind leg is taken over once its hoof has left the ground — see below)
@@ -1137,7 +1143,7 @@ export class HorseController {
         // hind: the cannon keeps the clip's angle to the VERTICAL (not to the
         // tilted body); hip + stifle put the hock where the cannon must start.
         const hock = g.cannon.getWorldPosition(new V3());
-        let w = C.clone().sub(hock).applyQuaternion(untilt);
+        let w = C.clone().sub(hock).applyQuaternion(untiltOf(g));
         if (g.evenW > 0 && g.evenC) w.lerp(g.evenC.clone().setLength(w.length()), g.evenW).setLength(hock.distanceTo(C));
         // JUMPING: the hind legs follow the measured flight (JUMP_HIND) instead of
         // the clip's tucked-under pose — hoof placed from the hip, cannon angle set
@@ -1226,7 +1232,7 @@ export class HorseController {
         // pastern stays within the coffin joint's range, ±HP.coffinMax)
         if (k > 0.001) {
           const q0 = g.ff.quaternion.clone();
-          const unt = g.cannon && this.qUnder ? untilt.clone().multiply(this.qUnder.clone().invert()) : untilt;   // (a hind hoof: its step-under swing taken out too — it lies flat)
+          const unt = g.cannon && this.qUnder ? untiltOf(g).multiply(this.qUnder.clone().invert()) : untiltOf(g);   // (a hind hoof: its step-under swing taken out too — it lies flat)
           rotateWorld(g.ff, new THREE.Quaternion().slerp(new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), g.nrm).multiply(unt), k));
           const d = q0.clone().invert().multiply(g.ff.quaternion), ang = 2 * Math.acos(clamp(Math.abs(d.w), 0, 1));
           if (ang > HP.coffinMax) { g.ff.quaternion.copy(q0.multiply(new THREE.Quaternion().slerp(d, HP.coffinMax / ang))); g.ff.updateMatrixWorld(true); }
