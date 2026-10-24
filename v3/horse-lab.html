@@ -620,7 +620,7 @@
           editor.update(rawDt);
           poseEd.update(rawDt);                                 // its layer off; open: the rear stepped to its time
           const rdt = poseEd.isOpen ? 0 : editor.ride || editor.rearMode ? rawDt * editor.rideRate() : dt;   // riding mode: the gait plays (or holds) under the rider; rear / pose editor: the editor steps the horse itself
-          ctrl.update(rdt, poseEd.isOpen ? { fwd: 0, turn: 0, run: false } : editor.isOpen ? editor.horseInput() : onHorse ? steerInput(inp) : { fwd: 0, turn: 0, run: false });
+          ctrl.update(rdt, poseEd.isOpen ? poseEd.horseInput() : editor.isOpen ? editor.horseInput() : onHorse ? steerInput(inp) : { fwd: 0, turn: 0, run: false });
           editor.afterHorse();
           poseEd.applyHorse();                                  // the pose layer on the horse (before the rider follows it)
           if (bowEd.isOpen) bowEd.update(rawDt);                // (the bow editor replays the fetch to its playhead itself)
@@ -718,7 +718,7 @@
         PERF.on = false;
         return { cpuUpdateMs: +(PERF.upd / PERF.n).toFixed(2), cpuSubmitMs: +(PERF.sub / PERF.n).toFixed(2), gpuMs: PERF.gn ? +(PERF.gpu / PERF.gn).toFixed(2) : null, draws: Math.round(PERF.draws / PERF.n) };
       }
-      window.__HORSE = { setHeadgear, riderKind: riderData.kind, SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, lanceSight, LA, RIDE, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
+      window.__HORSE = { poseEd, setHeadgear, riderKind: riderData.kind, SH, get csm() { return csm; }, bowEd, perf, labSky, renderer, scene, camera, horse, ctrl, rider, tack, editor, checkClip: (c) => checkClip(window.__HORSE, c), checkRiding: (p, s) => checkRiding(window.__HORSE, p, s), frameSheet: (c, s, o) => frameSheet(window.__HORSE, c, s, o), compareRefs: (p, o) => compareRefs(window.__HORSE, p, o), compareRear: (n, o) => compareRear(window.__HORSE, n, o), poseEd, joust, contactLane, lanceDebug, lanceSight, LA, RIDE, archer, BP, range, get cavalry() { return cavalry; }, makeCavalry: () => (cavalry ??= createCavalry({ scene, renderer, horse, ctrl, rider, D })), showPose: (...a) => showPose(window.__HORSE, ...a), fitRefCamera: (n) => fitRefCamera(window.__HORSE, n), REFS, RP, arena, HP, D, audit: () => runAudit({ ctrl, rider, HP }), doAudit, setZoom: (d) => (camDist = d), setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; } };
     </script>
   </body>
 </html>

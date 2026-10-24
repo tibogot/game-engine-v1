@@ -9,6 +9,12 @@
 // Step 1: the rear (R). The timeline scrubs it: replayed from its start at a
 // fixed 1/60 s, so a time always shows the same pose.
 //
+// SLOPE mode (clip "walk ↑ uphill" / "walk ↓ downhill"): the horse walks on a virtual ramp of the
+// grade set (a tilted plane 40 m up, out of the lab's meshes); the timeline is ONE STRIDE (phase
+// 0–1, looping; the bars: when each hoof is down). A turn of a joint changes that bone's offset in
+// the set (slopePoses.js) — the horse code plays it before the leg IK, in the lab and the game alike,
+// so what is seen here is what the game shows. 💾 → anims/slope-poses.json.
+//
 // Frame order (horse-lab.html): restore() → ctrl.update → applyHorse() →
 // rider.update → applyRider(). restore() puts the layered bones back to what
 // the animation wrote, BEFORE the animation runs again (the mixer skips
@@ -16,6 +22,7 @@
 import * as THREE from "three";
 import { TransformControls } from "three/addons/controls/TransformControls.js";
 import { HP, solveTwoBone } from "./horse.js";
+import { offsetAtPhase, SLOPE_FILE } from "./slopePoses.js";
 
 // move mode: the end you drag → the two joints that bend to reach it
 const CHAINS = {};
@@ -95,6 +102,7 @@ export class PoseEditor {
     this.layered = new Set();                                // bones the layer changed this frame
     this.sel = null; this.selKey = null; this.undo = [];
     this.showJ = "both";
+    this.slope = null; this.grade = 12;                      // slope mode: { gait, dir } (and the ramp's grade, °)
     this.collectBones();
     this.buildUI();
     this.buildScene();
@@ -113,7 +121,9 @@ export class PoseEditor {
     add(this.rider.r.rig, "R");
     this.ids = [...this.bones.keys()];
   }
-  keysOf(id) { return this.data[this.clip]?.[id]; }
+  keysOf(id) { return this.slope ? (id.startsWith("H:") ? this.slopeSet()?.[id.slice(2)] : undefined) : this.data[this.clip]?.[id]; }
+  slopeSet(create = false) { const L = this.ctrl.slope.data, { gait, dir } = this.slope; return create ? ((L[gait] ??= {})[dir] ??= {}) : L[gait]?.[dir]; }
+  dur() { return this.slope ? 1 : rearLength(); }
 
   // the layer's offset for a bone at time t: eased between keys, fading to none
   // at the clip's ends (virtual zero keys there, unless keyed)
@@ -146,6 +156,7 @@ export class PoseEditor {
   applyHorse() { if (this.applyWho("H")) this.ctrl.glueHooves(); }
   applyRider() { this.applyWho("R"); }
   applyWho(who) {
+    if (this.slope) return false;                            // (slope mode: the horse code plays its own layer, before the IK)
     const t = this.layerTime(), set = this.data[this.clip];
     const ids = new Set(Object.keys(set ?? {}).filter((id) => id.startsWith(who + ":")));
     if (this.isOpen && this.sel?.startsWith(who + ":")) { ids.add(this.sel); for (const id of CHAINS[this.sel] ?? []) ids.add(id); }   // (move mode keys the two joints above)
@@ -163,9 +174,18 @@ export class PoseEditor {
   }
 
   // ── keys ─────────────────────────────────────────────────────────────────
-  pushUndo() { this.undo.push(JSON.stringify(this.data)); if (this.undo.length > 80) this.undo.shift(); }
-  doUndo() { const s = this.undo.pop(); if (s) { this.data = JSON.parse(s); this.selKey = null; this.msg("undone"); } }
+  pushUndo() { this.undo.push(JSON.stringify({ d: this.data, s: this.ctrl.slope.data })); if (this.undo.length > 80) this.undo.shift(); }
+  doUndo() { const u = this.undo.pop(); if (u) { const o = JSON.parse(u); this.data = o.d; this.ctrl.slope.data = o.s; this.selKey = null; this.msg("undone"); } }
   setKey(id, t, q) {
+    if (this.slope) {                                        // (slope: by bone name, at a stride phase)
+      if (!id.startsWith("H:")) return null;
+      const set = this.slopeSet(true), keys = (set[id.slice(2)] ??= []);
+      const r = (x) => +x.toFixed(5), v = [r(q.x), r(q.y), r(q.z), r(q.w)];
+      let k = keys.find((kk) => Math.abs(kk[0] - t) < 0.004);
+      if (k) k[1] = v; else { k = [+t.toFixed(4), v]; keys.push(k); keys.sort((a, b) => a[0] - b[0]); }
+      this.ctrl.slope.registerBones(); this.dirty = true;
+      return k;
+    }
     const set = (this.data[this.clip] ??= {}), keys = (set[id] ??= []);
     const r = (x) => +x.toFixed(5), v = [r(q.x), r(q.y), r(q.z), r(q.w)];
     let k = keys.find((kk) => Math.abs(kk[0] - t) < 0.5 / FPS);
@@ -176,6 +196,12 @@ export class PoseEditor {
   // the selected bone's offset NOW (what the gizmo shows) — keyed at the current time
   keyHere() {
     if (!this.sel) return this.msg("click a joint first");
+    if (this.slope) {                                        // (slope: the offset it has here, made a key)
+      if (!this.sel.startsWith("H:")) return this.msg("slope poses are the horse's joints");
+      this.pushUndo();
+      this.selKey = this.setKey(this.sel, this.t, offsetAtPhase(this.keysOf(this.sel), this.t) ?? new Q());
+      return;
+    }
     const e = this.bones.get(this.sel), base = this.base.get(this.sel);
     if (!base) return;
     this.pushUndo();
@@ -188,12 +214,12 @@ export class PoseEditor {
     if (!k) return this.msg("no key of this joint here");
     this.pushUndo();
     keys.splice(keys.indexOf(k), 1);
-    if (!keys.length) delete this.data[this.clip][this.sel];
+    if (!keys.length) delete (this.slope ? this.slopeSet() : this.data[this.clip])[this.slope ? this.sel.slice(2) : this.sel];
     this.selKey = null; this.dirty = true;
   }
   resetBone() {
     if (!this.sel || !this.keysOf(this.sel)) return;
-    this.pushUndo(); delete this.data[this.clip][this.sel]; this.selKey = null; this.dirty = true;
+    this.pushUndo(); delete (this.slope ? this.slopeSet() : this.data[this.clip])[this.slope ? this.sel.slice(2) : this.sel]; this.selKey = null; this.dirty = true;
     this.msg(`${this.sel.slice(2)}: all its keys removed`);
   }
 
@@ -204,11 +230,11 @@ export class PoseEditor {
     } catch { /* none saved yet */ }
   }
   async save() {
-    const body = JSON.stringify(this.data);
+    const body = JSON.stringify(this.slope ? this.ctrl.slope.data : this.data);
     try {
-      const r = await fetch("/__horse-lab/anims?name=poses", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      const r = await fetch(`/__horse-lab/anims?name=${this.slope ? SLOPE_FILE : "poses"}`, { method: "POST", headers: { "Content-Type": "application/json" }, body });
       if (!r.ok) throw new Error(await r.text());
-      this.dirty = false; this.msg("saved → v3/horse-lab/anims/poses.json (the game plays it)");
+      this.dirty = false; this.msg(`saved → v3/horse-lab/anims/${this.slope ? SLOPE_FILE : "poses"}.json (the game plays it)`);
     } catch (e) { this.msg("save failed: " + e.message); }
   }
 
@@ -218,7 +244,8 @@ export class PoseEditor {
     const el = this.el = document.createElement("div"); el.id = "pe"; el.style.display = "none";
     el.innerHTML = `<div class="hd">
       <b>Pose</b>
-      <select data-k="clip"><option value="rear">rear (R)</option></select>
+      <select data-k="clip"><option value="rear">rear (R)</option><option value="slope:Walk:up">walk ↑ uphill</option><option value="slope:Walk:down">walk ↓ downhill</option></select>
+      <span data-k="gradeBox" style="display:none">grade <input data-k="grade" type="number" min="2" max="25" step="1" value="12" style="width:40px">°</span>
       <button data-k="play" title="Space">▶</button>
       <select data-k="speed"><option value="0.25">×0.25</option><option value="0.5" selected>×0.5</option><option value="1">×1</option></select>
       <span data-k="time" style="min-width:150px"></span>
@@ -245,6 +272,9 @@ export class PoseEditor {
     const q = (k) => el.querySelector(`[data-k=${k}]`);
     this.ui = { time: q("time"), bone: q("bone"), play: q("play"), ref: q("ref"), msg: el.querySelector(".msg") };
     q("play").onclick = () => this.togglePlay();
+    q("clip").onchange = (e) => this.setClip(e.target.value);
+    q("grade").onchange = (e) => { this.grade = THREE.MathUtils.clamp(+e.target.value || 12, 2, 25); this.slopeReady = false; };
+    this.ui.gradeBox = q("gradeBox"); this.ui.clip = q("clip");
     q("speed").onchange = (e) => (this.speed = +e.target.value);
     this.ui.mode = q("mode");
     q("mode").onclick = () => this.setMode(this.mode === "move" ? "rotate" : "move");
@@ -271,8 +301,8 @@ export class PoseEditor {
     const cv = this.cv = el.querySelector("canvas");
     cv.style.height = PANEL - 30 + "px";
     this.scroll = 0;
-    const toT = (x) => THREE.MathUtils.clamp((x - LABEL) / (cv.clientWidth - LABEL - 8) * rearLength(), 0, rearLength());
-    this.toX = (t) => LABEL + t / rearLength() * (cv.clientWidth - LABEL - 8);
+    const toT = (x) => THREE.MathUtils.clamp((x - LABEL) / (cv.clientWidth - LABEL - 8) * this.dur(), 0, this.dur());
+    this.toX = (t) => LABEL + t / this.dur() * (cv.clientWidth - LABEL - 8);
     let drag = null;
     cv.addEventListener("pointerdown", (e) => {
       const r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
@@ -287,7 +317,7 @@ export class PoseEditor {
     });
     cv.addEventListener("pointermove", (e) => {
       if (!drag) return;
-      const t = Math.round(toT(e.clientX - cv.getBoundingClientRect().left) * FPS) / FPS;
+      const t = this.slope ? Math.round(toT(e.clientX - cv.getBoundingClientRect().left) * 200) / 200 : Math.round(toT(e.clientX - cv.getBoundingClientRect().left) * FPS) / FPS;
       if (drag.scrub) this.t = t; else { drag.k[0] = t; this.t = t; this.dirty = true; }
     });
     cv.addEventListener("pointerup", () => { if (drag?.k) this.keysOf(drag.id)?.sort((a, b) => a[0] - b[0]); drag = null; });
@@ -307,9 +337,10 @@ export class PoseEditor {
     tc.setMode("rotate"); tc.setSpace("local"); tc.setSize(0.8);
     this.scene.add(tc.getHelper());
     tc.getHelper().visible = false;
-    tc.addEventListener("dragging-changed", (e) => { this.D.gizmoDrag = e.value; if (e.value) { this.playing = false; this.pushUndo(); } });
+    tc.addEventListener("dragging-changed", (e) => { this.D.gizmoDrag = e.value; if (e.value) { this.playing = false; this.pushUndo(); if (this.slope) this.slopeDragStart(); } });
     tc.addEventListener("objectChange", () => {
       if (!this.sel || !this.tc.dragging) return;
+      if (this.slope) return this.slopeDrag();
       if (this.mode === "move" && CHAINS[this.sel]) return this.dragEnd();
       const e = this.bones.get(this.sel), base = this.base.get(this.sel);
       if (base) this.selKey = this.setKey(this.sel, this.t, base.clone().invert().multiply(e.b.quaternion));   // auto-key
@@ -398,6 +429,24 @@ export class PoseEditor {
     up.b.updateMatrixWorld(true);
   }
 
+  // ── slope mode: a drag turns the bone(s) from where the drag began; the key = that turn on the offset
+  slopeDragStart() {
+    const ids = this.mode === "move" && CHAINS[this.sel] ? CHAINS[this.sel] : [this.sel];
+    this.dragStart = ids.filter((id) => id.startsWith("H:")).map((id) => ({ id, b: this.bones.get(id).b, q: this.bones.get(id).b.quaternion.clone(), off: offsetAtPhase(this.keysOf(id), this.t) ?? new Q() }));
+    if (!this.dragStart.length) this.msg("slope poses are the horse's joints");
+  }
+  slopeDrag() {
+    const st = this.dragStart;
+    if (!st?.length) return;
+    if (this.mode === "move" && CHAINS[this.sel]) {
+      for (const d of st) d.b.quaternion.copy(d.q);
+      this.ctrl.h.rig.updateMatrixWorld(true);
+      const c = this.ctrl, fwd = new V3(Math.sin(c.yaw), 0, Math.cos(c.yaw)), end = this.bones.get(this.sel).b;
+      solveTwoBone(st[0].b, st[1].b, end.getWorldPosition(new V3()), this.target.position.clone(), fwd, new V3());
+    }
+    for (const d of st) this.selKey = this.setKey(d.id, this.t, d.off.clone().multiply(d.q.clone().invert().multiply(d.b.quaternion)));
+  }
+
   // ── reference overlay ────────────────────────────────────────────────────
   setRef(name) {
     this.refName = name || null;
@@ -444,6 +493,68 @@ export class PoseEditor {
     while (this.simT < t - 1e-6) { st(); this.simT += DT; }
   }
 
+  // ── slope mode: the horse walking on a virtual ramp ─────────────────────────
+  setClip(v) {
+    this.restore(); this.sel = null; this.selKey = null; this.tc.detach(); this.tc.getHelper().visible = false;
+    if (v.startsWith("slope:")) {
+      const [, gait, dir] = v.split(":");
+      if (this.slope) this.leavePlane();
+      this.slope = { gait, dir }; this.t = 0; this.slopeReady = false;
+      this.ui.gradeBox.style.display = "";
+      this.msg(`${dir === "up" ? "uphill" : "downhill"} ${gait.toLowerCase()}: turn a joint (or M, drag a hoof) at a moment of the stride — the game blends this set in from flat to full at ${(HP.hillFull * 57.3).toFixed(0)}°`);
+    } else { if (this.slope) this.leavePlane(); this.slope = null; this.simDirty = true; this.ui.gradeBox.style.display = "none"; }
+    this.clip = v; this.ui.clip.value = v;
+  }
+  // the ground: a plane of the grade, rising (up) or falling (down) along +z, 40 m up — out of the lab's meshes
+  enterPlane() {
+    const c = this.ctrl, w = c.world, s = Math.tan(this.grade * Math.PI / 180) * (this.slope.dir === "up" ? 1 : -1), Y0 = 40;
+    this.home ??= { x: c.pos.x, z: c.pos.z, yaw: c.yaw, y: c.y, h: w.heightAt, n: w.normalAt };
+    const nn = new V3(0, 1, -s).normalize();
+    w.heightAt = (x, z) => Y0 + s * z;
+    w.normalAt = () => ({ x: nn.x, y: nn.y, z: nn.z });
+    if (!this.ramp) {
+      this.ramp = new THREE.Group();
+      const grid = new THREE.GridHelper(60, 60, 0x88aacc, 0x557088); grid.position.z = 20; this.ramp.add(grid);
+      const fill = new THREE.Mesh(new THREE.PlaneGeometry(60, 60).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: 0x9aa58a, transparent: true, opacity: 0.55, depthWrite: false }));
+      fill.position.set(0, -0.01, 20); this.ramp.add(fill);
+      this.scene.add(this.ramp);
+    }
+    this.ramp.visible = true; this.ramp.position.set(0, Y0, 0); this.ramp.rotation.set(-Math.atan(s), 0, 0);
+    const z0 = -2;
+    c.teleport(0, z0, 0, Y0 + s * z0);
+    c.gear = 0; this.feet = Array.from({ length: 100 }, () => [0, 0, 0, 0]);
+    for (let i = 0; i < 180; i++) this.slopeStep();          // (3 s: into the walk, the IK settled)
+    this.slopeReady = true;
+  }
+  leavePlane() {
+    if (!this.home) return;
+    const c = this.ctrl, w = c.world, h = this.home;
+    if (h.h === undefined) delete w.heightAt; else w.heightAt = h.h;
+    if (h.n === undefined) delete w.normalAt; else w.normalAt = h.n;
+    if (this.ramp) this.ramp.visible = false;
+    c.teleport(h.x, h.z, h.yaw, h.y); c.gear = 0;
+    this.home = null; this.slopeReady = false; c.slope.forceW = null;
+  }
+  slopeStep() {
+    const c = this.ctrl, DT = 1 / 60;
+    c.update(DT, { fwd: 1, turn: 0, run: false }); this.rider.update(DT, { lookYaw: 0, input: {} });
+    const p = c.slope.phaseOf(this.slope.gait);
+    if (p !== null) this.feet[Math.min(99, Math.floor(p * 100))] = c.legs.map((g) => ((g.hA ?? 1) < 0.02 ? 1 : 0));
+  }
+  // walked on to the stride's phase t (a scrub back = on to its next time); back to the start every ~20 m
+  slopeSimTo(t) {
+    const c = this.ctrl;
+    c.slope.forceW = { up: this.slope.dir === "up" ? 1 : 0, down: this.slope.dir === "down" ? 1 : 0 };   // (the set edited, at full strength)
+    if (!this.slopeReady || c.pos.z > 20) { this.slopeReady = false; this.enterPlane(); }
+    const ph = () => c.slope.phaseOf(this.slope.gait) ?? 0, near = (a) => Math.min(Math.abs(a - t), 1 - Math.abs(a - t)) < 0.004;
+    if (near(ph())) return;
+    for (let i = 0; i < 160; i++) {
+      const a = ph(); this.slopeStep(); const b = ph();
+      if (b >= a ? a < t && t <= b : t > a || t <= b) break;
+    }
+  }
+  horseInput() { return { fwd: this.slope && this.isOpen ? 1 : 0, turn: 0, run: false }; }   // (the lab's own frame update: the walk held, not stopped)
+
   // ── open / close / per frame ─────────────────────────────────────────────
   open() {
     if (this.isOpen) return;
@@ -451,13 +562,14 @@ export class PoseEditor {
     const ms = this.rider.mountSys, rd = this.rider;
     if (ms.mode !== "riding") { ms.edit = null; ms.mode = "riding"; ms.blend = null; rd.seatY = null; rd.sitAction.reset().play(); ms.cur?.stop(); ms.cur = null; }
     this.el.style.display = "block"; this.dots.visible = true; this.legend.style.display = "block";
-    this.simDirty = true; this.playing = false;
+    this.simDirty = true; this.playing = false; this.slopeReady = false;
     if (document.pointerLockElement) document.exitPointerLock();
     this.msg("click a joint, turn it: a key is set here · drag on the timeline to scrub · Space plays");
   }
   close() {
     if (!this.isOpen) return;
     this.restore();
+    if (this.slope) this.leavePlane();
     this.isOpen = false; this.D.editing = false; this.D.gizmoDrag = false;
     this.el.style.display = "none"; this.dots.visible = false; this.refImg.style.display = "none"; this.legend.style.display = "none"; this.tip.style.display = "none";
     this.tc.detach(); this.tc.getHelper().visible = false;
@@ -465,15 +577,20 @@ export class PoseEditor {
     if (this.dirty) console.warn("[pose editor] unsaved keys (💾 save keeps them)");
   }
   toggle() { this.isOpen ? this.close() : this.open(); }
-  togglePlay() { this.playing = !this.playing; if (this.playing && this.t >= rearLength() - 1e-3) this.t = 0; }
+  togglePlay() { this.playing = !this.playing; if (this.playing && this.t >= this.dur() - 1e-3) this.t = 0; }
 
   onKey(e) {
     const k = e.key;
     if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return false;
     if (k === " ") { e.preventDefault(); this.togglePlay(); }
-    else if (k === "ArrowLeft" || k === "ArrowRight") { e.preventDefault(); this.playing = false; this.t = THREE.MathUtils.clamp(Math.round((this.t + (k === "ArrowLeft" ? -1 : 1) * (e.shiftKey ? 6 : 1) / FPS) * FPS) / FPS, 0, rearLength()); }
+    else if (k === "ArrowLeft" || k === "ArrowRight") {
+      e.preventDefault(); this.playing = false;
+      const dir = k === "ArrowLeft" ? -1 : 1;
+      this.t = this.slope ? ((Math.round((this.t + dir * (e.shiftKey ? 5 : 1) * 0.01) * 100) / 100) % 1 + 1) % 1   // (slope: 1 % of the stride; it loops)
+        : THREE.MathUtils.clamp(Math.round((this.t + dir * (e.shiftKey ? 6 : 1) / FPS) * FPS) / FPS, 0, rearLength());
+    }
     else if (k === "Home") this.t = 0;
-    else if (k === "End") this.t = rearLength();
+    else if (k === "End") this.t = this.slope ? 0.99 : rearLength();
     else if (k === "Delete" || k === "Backspace") this.deleteKey();
     else if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "z") { e.preventDefault(); this.doUndo(); }
     else if ((e.ctrlKey || e.metaKey) && k.toLowerCase() === "s") { e.preventDefault(); this.save(); }
@@ -487,11 +604,12 @@ export class PoseEditor {
   update(dt) {
     this.restore();
     if (!this.isOpen) return;
-    const dur = rearLength();
-    if (this.playing) { this.t += dt * this.speed; if (this.t > dur) { if (this.loop) this.t = 0; else { this.t = dur; this.playing = false; } } }
-    this.simTo(this.t);
+    const dur = this.dur();
+    if (this.playing) { this.t += dt * this.speed / (this.slope ? 1.17 : 1); if (this.t > dur) { if (this.slope) this.t -= 1; else if (this.loop) this.t = 0; else { this.t = dur; this.playing = false; } } }   // (slope: a walk stride is ~1.17 s)
+    if (this.slope) this.slopeSimTo(this.t); else this.simTo(this.t);
     this.ui.play.textContent = this.playing ? "❚❚" : "▶";
-    this.ui.time.textContent = `${this.t.toFixed(2)} / ${dur.toFixed(2)} s · f${Math.round(this.t * FPS)} · body ${(this.ctrl.rearPitch * 57.3).toFixed(0)}°`;
+    this.ui.time.textContent = this.slope ? `stride ${this.t.toFixed(2)} · ${this.grade}° ${this.slope.dir} · body ${(this.ctrl.pitch * -57.3).toFixed(0)}°`
+      : `${this.t.toFixed(2)} / ${dur.toFixed(2)} s · f${Math.round(this.t * FPS)} · body ${(this.ctrl.rearPitch * 57.3).toFixed(0)}°`;
     this.camera.setViewOffset(innerWidth, innerHeight, 0, this.panelH() / 2, innerWidth, innerHeight);
     this.placeRef();
   }
@@ -519,24 +637,29 @@ export class PoseEditor {
     if (this.el.classList.contains("min")) return;
     const dpr = devicePixelRatio, W = cv.clientWidth, H = cv.clientHeight;
     if (cv.width !== Math.round(W * dpr) || cv.height !== Math.round(H * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
-    const g = cv.getContext("2d"), X = this.toX, dur = rearLength();
+    const g = cv.getContext("2d"), X = this.toX, dur = this.dur(), sl = !!this.slope;
     g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
     g.font = "10px system-ui"; g.textBaseline = "middle";
     // ruler
     g.fillStyle = "#1b2229"; g.fillRect(0, 0, W, RULER);
-    for (let t = 0; t <= dur + 1e-6; t += 0.1) {
-      const x = X(t), major = Math.abs(t * 2 - Math.round(t * 2)) < 1e-6;
+    for (let t = 0; t <= dur + 1e-6; t += sl ? 0.05 : 0.1) {
+      const x = X(t), major = sl ? Math.abs(t * 10 - Math.round(t * 10)) < 1e-6 : Math.abs(t * 2 - Math.round(t * 2)) < 1e-6;
       g.strokeStyle = major ? "#3d4955" : "#252e37"; g.beginPath(); g.moveTo(x, major ? 6 : 12); g.lineTo(x, H); g.stroke();
       if (major) { g.fillStyle = "#8fa0ad"; g.fillText(t.toFixed(1), x + 3, 8); }
     }
-    // the rear's phases
+    // the rear's phases (slope: when each hoof is down — FL FR HL HR, top to bottom)
+    if (sl) {
+      const cols = ["#ff5252", "#ff9f1c", "#3ddc84", "#2f9bff"], bh = (ROW - 4) / 4;
+      (this.feet ?? []).forEach((f, i) => f.forEach((d, k) => { if (d) { g.fillStyle = cols[k]; g.fillRect(X(i / 100), RULER + 2 + k * bh, X((i + 1) / 100) - X(i / 100) + 0.5, bh - 0.5); } }));
+      g.fillStyle = "#8fa0ad"; g.fillText("hooves down", 6, RULER + ROW / 2);
+    }
     let t0 = 0;
-    for (const [nm, d, col] of [["gather", HP.rearPrep, "#33424f"], ["rise", HP.rearRise, "#3f5a33"], ["up", HP.rearHold, "#5a4c26"], ["down", HP.rearFall, "#4f3442"], ["settle", HP.rearSettle, "#2c343c"]]) {
+    if (!sl) for (const [nm, d, col] of [["gather", HP.rearPrep, "#33424f"], ["rise", HP.rearRise, "#3f5a33"], ["up", HP.rearHold, "#5a4c26"], ["down", HP.rearFall, "#4f3442"], ["settle", HP.rearSettle, "#2c343c"]]) {
       g.fillStyle = col; g.fillRect(X(t0), RULER + 2, X(t0 + d) - X(t0), ROW - 4); g.fillStyle = "#c9d4dc"; g.fillText(nm, X(t0) + 3, RULER + ROW / 2); t0 += d;
     }
-    g.fillStyle = "#8fa0ad"; g.fillText("rear (R)", 6, RULER + ROW / 2);
+    if (!sl) { g.fillStyle = "#8fa0ad"; g.fillText("rear (R)", 6, RULER + ROW / 2); }
     // one row per keyed joint (+ the selected one)
-    const set = this.data[this.clip] ?? {};
+    const set = sl ? Object.fromEntries(Object.entries(this.slopeSet() ?? {}).map(([n, k]) => ["H:" + n, k])) : this.data[this.clip] ?? {};
     const rows = this.rows = Object.keys(set).sort();
     if (this.sel && !rows.includes(this.sel)) rows.unshift(this.sel);
     const fit = Math.floor((H - RULER - ROW) / ROW);

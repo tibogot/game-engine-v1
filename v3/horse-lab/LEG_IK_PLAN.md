@@ -287,10 +287,16 @@ interact. Plan:
    **Run it after every leg change.**
 2. **Gentle maps meanwhile — DONE for the gate:** the walk takes 16° at most (was 22 up / 20 down), the
    trot 16 / 14, the canter 16 / 12. Steeper is "the horse refuses". Build the steppe with gentle hills.
-3. **A slope pose editor in the horse lab** (from poseEditor.js): the horse on a ramp of any grade,
-   the stride scrubbed in slow motion, joints dragged at a few stride points. These become
-   uphill/downhill poses blended in by slope (RDR2: incline / decline clips). Then the correction
-   layers they replace are removed; the IK only plants hooves.
+3. **A slope pose editor in the horse lab — BUILT (step 1: the walk).** Horse lab → J (pose editor) →
+   clip **walk ↑ uphill / walk ↓ downhill**, set the **grade**. The horse walks on a virtual ramp (a
+   tilted plane 40 m up, a grid); the timeline is ONE STRIDE (0–1, loops; coloured bars = when each
+   hoof is down). Click a joint and turn it, or M and drag a hoof: the turn becomes a key at that
+   moment of the stride (keys wrap round the stride). 💾 → `anims/slope-poses.json`.
+   The horse code plays the sets itself (slopePoses.js, before the leg IK, blended in by the hill: none
+   on the flat, full at 12°), in the lab AND the steppe game: what the editor shows is what the game
+   does. In the editor the set being edited plays at full strength.
+   Next: pose the walk up and down; then the correction layers the poses make unneeded come out
+   (checked with horseSlopeCheck after each); then the trot / canter if needed.
 
 **Bones?** The hind chain is complete: thigh, shin, cannon, pastern, hoof. No bone was missing behind.
 In front, the "shoulder" bone is only 9 cm (no real humerus). It's the next thing to add if the front

@@ -16,6 +16,7 @@
 // stride as the outgoing one, so the crossfade never makes a leg jump.
 import * as THREE from "three";
 import { fitBodyToRig } from "./horseBody.js";
+import { SlopeLayer } from "./slopePoses.js";
 import { getSharedGltfLoader } from "../render/foliage/glbLoader.js";
 
 const V3 = THREE.Vector3;
@@ -69,6 +70,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   endsRate: 0.5,                  // m/s an end may move at most
   endsPitchRate: 0.6,             // rad/s the ends' extra pitch may turn at most
   endsRise: 0.15,                 // m an end may RISE for its hooves (the lower of its two: a planted hoof is never lifted off) — only sinking, climbing out of a ditch the forelegs stayed 13–16 cm short                // rad the hoof may turn against the pastern laying itself on the ground (the coffin joint: ~30°)
+  slopePoses: 1,                  // the designed uphill / downhill poses (slopePoses.js; the pose editor's slope mode)
   uprightFront: 1, uprightHind: 1,   // × legUpright for each end (0 = the legs square to the body, as the clip)
   hindSitDown: 0.15,              // m the hips sit lower at a full downhill (the hind legs stay bent)
   // (downhill the legs stood upright reached 30° ahead of the hip onto the LOWER ground and came out straight —
@@ -654,6 +656,7 @@ export class HorseController {
     this.ears = ["L", "R"].flatMap((s) => [1, 2, 3, 4].map((i) => h.bone(`Ear${i}${s}`))).filter(Boolean).map((b) => ({ b, q0: b.quaternion.clone() }));   // q0: the rest pose, ears up
     this.touched = [...this.legs.flatMap((g) => [g.u, g.l, g.cannon, g.ik, g.ff].filter(Boolean)), ...this.necks, this.headB, ...this.tailB, ...this.ears.map((e) => e.b)].map((b) => ({ b, p: b.position.clone(), q: b.quaternion.clone() }));
     this.bodyOff = 0;
+    this.slope = new SlopeLayer(this);                      // the uphill / downhill poses (anims/slope-poses.json), on the gait before the IK
     this.switchTo("Idle", 0, true);
   }
 
@@ -2475,6 +2478,7 @@ export class HorseController {
         if (toeB) aim(g.ik, g.ik.getWorldPosition(new V3()), toeB.getWorldPosition(new V3()), P[2]);
       }
     }
+    if (HP.slopePoses > 0) this.slope.apply();
     if (HP.ik) this.applyIK(dt);
     else this.bodyOff = 0;
     r.updateMatrixWorld(true);
