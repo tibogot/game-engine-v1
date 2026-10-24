@@ -63,7 +63,7 @@ export const HP = {               // tunables (the lab GUI edits these)
   kneeLock: 1,                    // a PLANTED foreleg keeps its knee (the clip's): turned at the elbow, the fetlock takes up the length
   fetlockGive: 0.5,               // rad the pastern may turn from the clip's for that (more: the plain 2-bone solve)
   slopeGate: 1,                   // the gait capped and the horse refusing by the slope ahead (terrain levels: world.heightAt)
-  slopeLimits: { Walk: [22, 20, 20], Trot: [20, 16, 18], Canter: [18, 12, 15], Gallop: [12, 8, 8] },   // degrees each gait may take [uphill, downhill, sideways] (fast gaits give way early: research in LEG_IK_PLAN.md)
+  slopeLimits: { Walk: [16, 16, 16], Trot: [16, 14, 16], Canter: [16, 12, 15], Gallop: [12, 8, 8] },   // degrees each gait may take [uphill, downhill, sideways] (fast gaits give way early: research in LEG_IK_PLAN.md; the walk 22/20 → 16 on 2026-10-24 (the 15° ramps the steepest): steeper, the legs did not look right — until the slope pose editor)
   endsAhead: 0.06,                // m: a hoof coming down within this of the ground already counts for its end (the body rises AS it lands, not after)
   endsSoftMax: 25,                // 1/m: how strongly an end favours its HIGHER planted hoof (a soft max — 0 = their average)
   endsRate: 0.5,                  // m/s an end may move at most

@@ -280,9 +280,13 @@ Motion audit 15/15. Still not right to the eye (you, 2026-10-24).
 
 The pack has only flat-ground clips; ~10 runtime correction layers bend them onto slopes and they
 interact. Plan:
-1. **A slope regression test** (the probe above as a test): front hang, knees, hind, sink at flat,
-   5–20° down, 10–15° up, several start phases. Run after every leg change.
-2. **Gentle maps meanwhile:** the walk's slope limit down to ~12–15°; the steppe built with gentle hills.
+1. **A slope regression check — DONE:** `node tools/horseSlopeCheck.mjs --port <your debug Chrome>
+   --url <steppe-rider page>`. Probe: games/steppe-rider/slopeProbe.js. Flat, 5/10/15° down, 10/15° up,
+   4 stride phases, fixed step, ~6 min; PASS/FAIL against limits (front hang p95 ≤ 4.5 cm, planted
+   front knee p95 ≤ 60°, hind stretch ≤ 0.95, stifle ≤ 150°, sink ≤ 3.5 cm, refused ≤ 10 %).
+   **Run it after every leg change.**
+2. **Gentle maps meanwhile — DONE for the gate:** the walk takes 16° at most (was 22 up / 20 down), the
+   trot 16 / 14, the canter 16 / 12. Steeper is "the horse refuses". Build the steppe with gentle hills.
 3. **A slope pose editor in the horse lab** (from poseEditor.js): the horse on a ramp of any grade,
    the stride scrubbed in slow motion, joints dragged at a few stride points. These become
    uphill/downhill poses blended in by slope (RDR2: incline / decline clips). Then the correction

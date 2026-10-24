@@ -12,7 +12,7 @@
 //
 // The lab page (horse-lab.html) still has its own copy of this glue — it moves onto the kit next.
 import * as THREE from "three";
-import { loadHorse, HorseController, GEARS } from "./horse.js";
+import { loadHorse, HorseController, GEARS, HP } from "./horse.js";
 import { loadRider, RiderController, RP, applyRidingData, seatDepth } from "./rider.js";
 import { loadYBot } from "./ybot.js";
 import { Tack } from "./tack.js";
@@ -255,7 +255,7 @@ export async function createRidingKit({ scene, renderer, camera, controls = null
   });
 
   return {
-    horse, ctrl, rider, tack, archer, lanceSight, LA, RIDE, RP, BP, DBG, aims, update, placeAt, setHeadgear, status,
+    horse, ctrl, rider, tack, archer, lanceSight, LA, RIDE, HP, RP, BP, DBG, aims, update, placeAt, setHeadgear, status,
     setCam: (yaw, pitch) => { camYaw = yaw; camPitch = pitch; lastMouse = performance.now() + 1e9; },
     setZoom: (d) => (camDist = d),
     get camYaw() { return camYaw; },
