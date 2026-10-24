@@ -69,7 +69,6 @@ export const META = {
   miradorBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   miradorEtats: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   barbelesBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
-  sacsConstruction: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   nidBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   mortierBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   fortBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
@@ -84,7 +83,7 @@ export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps
 // ENGLISH (2026-10-19, you: "the main language of labs is English"): the pieces' names, and their version
 // labels translated word by word (the old lab's data is French and stays so).
 export const NAMES = {
-  enclosFerme: "Farm thorn pen (new)", zeriba: "Zeriba (new)", sacsDeSable: "Sandbag wall (new)", port: "Fishing port (new)",
+  enclosFerme: "Farm thorn pen (new)", zeriba: "Zeriba (new)", sacsDeSable: "Sandbag wall", port: "Fishing port (new)",
   sacsNidMg: "MG nest (sim bags)", sacsPointFort: "Strongpoint (sim bags)", sacsPoste: "Post (sim bags)",
   mechtaHouse: "Mechta house", poste: "French post", parcAuto: "Motor pool", parcAutoNeuf: "Motor pool (new, Blender)",
   blanche_maison: "Whitewashed house: two storeys", blanche_cour: "Whitewashed house: courtyard", blanche_haute: "Whitewashed house: tall",
@@ -101,7 +100,6 @@ export const NAMES = {
   cacheBlender: "Arms cache (Blender) + construction", cacheEtats: "Arms cache (Blender): states",
   ecranBlender: "Ambush screen (Blender) + construction", ecranEtats: "Ambush screen (Blender): states",
   miradorBlender: "Mirador (Blender) + construction", miradorEtats: "Mirador (Blender): states",
-  sacsConstruction: "Sandbag pieces: construction (wall, MG nest, mortar pit)",
   nidBlender: "MG nest (Blender) + construction",
   mortierBlender: "Mortar pit (Blender) + construction", fortBlender: "Fortified point (Blender) + construction", projBlender: "Searchlight tower (Blender) + construction", posteBlender: "French post (Blender)", posteAvanceBlender: "Forward post (Blender) + construction", refugeBlender: "FLN refuge (Blender) + construction", infirmBlender: "FLN infirmary (Blender) + construction", secoursBlender: "Aid station (Blender) + construction",
   barbelesBlender: "Barbed wire (Blender) + construction", barbelesEtats: "Barbed wire (Blender): states",

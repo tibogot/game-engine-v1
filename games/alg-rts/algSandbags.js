@@ -199,14 +199,6 @@ export function sandbagWallBags({ length = 5, courses = 5, seed = 3, batter = 0.
   return out;
 }
 
-/** A few loose bags lying about (the ends of a wall, a breach). */
-export function looseBags(n, x, z, spread, seed) {
-  const R = stream(seed);
-  const out = [];
-  for (let k = 0; k < n; k++) out.push(placedBag(R, x + (R() - 0.5) * spread, 0, z + (R() - 0.5) * spread * 0.6, R() * 6.28, { squash: 0.82 }));
-  return out;
-}
-
 // ── THE MATERIAL ─────────────────────────────────────────────────────────────────────────────────
 let _mat = null;
 // THE GROUND BLEND (2026-10-24, algGroundBlend): the game hands the app over before the first wall is built — the bags'
@@ -322,28 +314,6 @@ export function sandbagMesh(list, name = "Sandbags") {
   return m;
 }
 
-/**
- * THE GAME'S WALL PIECE (algBuild "sandbags", the showroom's, algDamage's): the old piece's shape for
- * the build system (its footprint, height, the placement ghost) and the new wall as its `extra`.
- * Same layout as rtsAlgeria buildFrSandbagWall: a 5 m wall, a firing step behind (+Z), bags at the ends.
- */
-export function buildSandbagWallV2({ seed = 3, length = 5 } = {}) {
-  const sim = simulatedWallMesh();
-  if (sim) return { mesh: sim, footprint: { hx: length / 2 + 0.6, hz: 1.0, cz: 0.3, height: 1.0 } };
-  const list = [
-    ...sandbagWallBags({ length, courses: 6, seed }),
-    ...sandbagWallBags({ length: length - 0.6, courses: 2, seed: seed + 1, thick: 1, z0: BAG.W * 2.1 }),
-    ...looseBags(2, -(length / 2 + 0.35), 0.1, 0.7, seed + 5),
-    ...looseBags(2, length / 2 + 0.35, 0.05, 0.7, seed + 6),
-  ];
-  const mesh = sandbagMesh(list, "SandbagWall");
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", mesh.geometry.getAttribute("position"));
-  geo.setIndex(mesh.geometry.index);
-  geo.userData.ghost = geo;
-  return { mesh, footprint: { hx: length / 2 + 0.6, hz: 1.0, cz: 0.3, height: 1.0 } };
-}
-
 // ── THE WALL SIMULATED WHOLE (2026-10-14, you: "see the gap between the bags — compare to the Fab
 // asset") ──────────────────────────────────────────────────────────────────────────────────────────
 // tools/blender/sandbagWall.py drops every bag of the wall, one by one, onto the bags already laid:
@@ -389,8 +359,10 @@ function prepWall(gltf) {
 }
 /**
  * EACH BAG'S MOMENT in the construction (2026-10-21 — the walls were stretched out of the ground): the merged wall's
- * bags are its separate islands (union-find over the triangles); laid course by course — by the bag's centre height,
- * then along the wall — each its 0..1 rank. One float a vertex (`bagT`); sandbagMaterial(build) reads it.
+ * bags are its separate islands (union-find over the triangles); laid course by course — by the bag's BOTTOM height,
+ * then along the wall — each its 0..1 rank. One float a vertex (`bagT`); sandbagMaterial(build) reads it. (By its
+ * CENTRE an upright end bag ranked with the top course, and a bag lying on it came before it: floating in the air
+ * mid-build — you, in the lab, 2026-10-25. A bag rests on bags whose bottoms are lower.)
  */
 function bagOrder(g) {
   const P = g.getAttribute("position"), n = P.count, idx = g.index?.array;
@@ -400,15 +372,24 @@ function bagOrder(g) {
   const sums = new Map();
   for (let i = 0; i < n; i++) {
     const r = find(i);
-    let s = sums.get(r); if (!s) sums.set(r, (s = [0, 0, 0, 0]));
-    s[0] += P.getX(i); s[1] += P.getY(i); s[2] += P.getZ(i); s[3]++;
+    let s = sums.get(r); if (!s) sums.set(r, (s = [0, 0, 0, 0, Infinity, -Infinity]));
+    s[0] += P.getX(i); s[1] += P.getY(i); s[2] += P.getZ(i); s[3]++; s[4] = Math.min(s[4], P.getY(i)); s[5] = Math.max(s[5], P.getY(i));
   }
-  const bags = [...sums.entries()].map(([r, s]) => ({ r, x: s[0] / s[3], y: s[1] / s[3], z: s[2] / s[3] }));
-  // (courses: the centre heights in 0.13 m bands; along the wall: its long axis)
+  const bags = [...sums.entries()].map(([r, s]) => ({ r, x: s[0] / s[3], y: s[4], top: s[5], z: s[2] / s[3], lv: 0 }));
+  // (a bag's COURSE: one over the highest bag it rests on — lower bottom, its top reaching this one's bottom, the
+  // two centres within a bag's length; bottom-up, so every support is ranked first)
   let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity;
   for (const b of bags) { x0 = Math.min(x0, b.x); x1 = Math.max(x1, b.x); z0 = Math.min(z0, b.z); z1 = Math.max(z1, b.z); }
   const alongX = x1 - x0 >= z1 - z0;
-  bags.sort((a, b) => Math.floor(a.y / 0.13) - Math.floor(b.y / 0.13) || (alongX ? a.x - b.x : a.z - b.z));
+  bags.sort((a, b) => a.y - b.y);
+  for (let i = 0; i < bags.length; i++) {
+    const B = bags[i];
+    for (let j = 0; j < i; j++) {
+      const A = bags[j];
+      if (A.y < B.y - 0.02 && A.top > B.y - 0.04 && Math.hypot(A.x - B.x, A.z - B.z) < 0.55) B.lv = Math.max(B.lv, A.lv + 1);
+    }
+  }
+  bags.sort((a, b) => a.lv - b.lv || (alongX ? a.x - b.x : a.z - b.z));
   const rank = new Map(bags.map((b, k) => [b.r, bags.length > 1 ? k / (bags.length - 1) : 0]));
   const out = new Float32Array(n);
   for (let i = 0; i < n; i++) out[i] = rank.get(find(i));

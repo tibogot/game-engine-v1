@@ -9,7 +9,6 @@ import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { buildHelipad, buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
-import { startVehicleLab } from "./vehicleLab.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
@@ -30,8 +29,8 @@ import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { createConstruction } from "./algConstruction.js";
-import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, buildSandbagWallV2, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+import { buildFrSandbagWall, buildFrSandbagWallBreached } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 import { buildFlnInfirmary, buildFortPoint, buildMgNest, buildRefuge, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
@@ -301,12 +300,14 @@ export const BUILDINGS = {
     after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [zeribaMesh()].filter(Boolean); return g; },
     tags: ["ZERIBA (LE JEU)", "ZERIBA · NOUVEAU (BLENDER)"], note: "l'enclos du jeu à gauche, le nouveau à droite : des buissons d'épineux coupés, empilés en cercle, la cime vers l'extérieur.",
   },
-  // THE SANDBAGS (2026-10-14, you: "the sandbags look so cheap — can you do better?"): the game's wall LEFT,
-  // the new one RIGHT (algSandbags.js).
+  // THE SANDBAG WALL (2026-10-25, you: "we don't need the old one anymore… if it's repeating other assets that would be
+  // confusing"): ONE entry — your cloth-simulated wall as the game builds it (« Construction »: its bags laid course by
+  // course) LEFT, the game's damaged wall RIGHT (still the old breached kit: its simulated damage comes with D).
   sacsDeSable: {
-    label: "Sacs de sable (nouveau)", gap: 7.5, before: () => buildFrSandbagWall(),
-    after: () => { const { mesh } = buildSandbagWallV2({ seed: 3 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [mesh]; return g; },
-    tags: ["SACS DE SABLE (LE JEU)", `SACS DE SABLE · NOUVEAU · variante ${SEED + 1}`], note: "le mur du jeu à gauche, le nouveau à droite : sacs en jute, chacun sa forme et sa teinte, posés en quinconce.",
+    label: "Sacs de sable", gap: 7.5, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSimBags(),
+    before: () => sandbagSite(() => buildSandbagWallPiece(() => buildFrSandbagWall())),
+    after: () => buildFrSandbagWallBreached(),
+    tags: ["SACS DE SABLE", "SACS DE SABLE · ENDOMMAGÉ (ANCIEN)"], note: "le mur de sacs simulés du jeu — « Construction » : posés rang par rang — et, à droite, le mur endommagé du jeu (encore l'ancien).",
   },
   // THE REST OF THE SANDBAGS (2026-10-14): the kit's LEFT, the cloth-simulated RIGHT (algSandbags.js).
   // THE PORT (2026-10-16, the coast): the colonial fishing port's kit — row houses, the magasin, the
@@ -627,13 +628,6 @@ export const BUILDINGS = {
     after: () => labPiece(houseMesh("mg", "damaged")),
     tags: ["NID DE MG (LE JEU)", "NID DE MG · NOUVEAU", "NID DE MG · ENDOMMAGÉ"], note: "le nid de MG du jeu à gauche, le nouveau (Blender, vos sacs simulés) au milieu — « Construction » — endommagé à droite (sans ses sacs : leurs états viendront avec les dégâts).",
   },
-  sacsConstruction: {
-    label: "Sacs de sable : construction", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSimBags(),
-    before: () => sandbagSite(() => buildSandbagWallPiece(() => buildFrSandbagWall())),
-    middle: () => sandbagSite(() => buildMgNestPiece((o) => buildMgNest(o))),
-    after: () => sandbagSite(() => buildMortarPitV2()),
-    tags: ["MUR DE SACS", "NID DE MG", "FOSSE DE MORTIER"], note: "la construction en jeu des pièces en sacs : la terre et les bois montent, vos sacs simulés posés rang par rang — le curseur « Construction » pilote les trois.",
-  },
   barbelesBlender: {
     label: "Barbelés (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadBarbedWire(),
     before: () => buildBarbedWire(),
@@ -741,12 +735,12 @@ export const BUILDINGS = {
  * INTO the shared atlas live, so both houses show the same stone — a fair A/B. The lab only.
  */
 const STONES = {
-  actuelle: { label: "Pierre actuelle", make: makeRubbleTexture },
-  aures: { label: "Pierre des Aurès", make: makeAuresStoneTexture },
+  actuelle: { label: "Old stone", make: makeRubbleTexture },
+  aures: { label: "Aurès stone", make: makeAuresStoneTexture },
 };
 
-/** For the NEW lab (lab.js, 2026-10-19): the stone drawn into the kit's atlas (the old lab's default: the
- *  Aurès stone), and the helipad's construction site once its entry was built. */
+/** The stone drawn into the kit's atlas (MAT.rubble — every wall of the old kit): the Aurès stone, or the old one to
+ *  compare (the lab's « Wall stone »). */
 export async function applyLabStone(key = "aures") {
   await rtsAtlasReady();
   const atlas = rtsAtlas(), cell = atlas.image.width / ATLAS_COLS;
@@ -756,147 +750,84 @@ export async function applyLabStone(key = "aures") {
   t.dispose();
   atlas.needsUpdate = true;
 }
+export const LAB_STONES = Object.fromEntries(Object.entries(STONES).map(([k, v]) => [k, v.label]));
 export const labSite = () => SITE;
 
-export async function startBuildingLab(container) {
-  const lab = await startVehicleLab(container, { catalog: BUILDINGS, title: "Buildings Lab", kind: "Bâtiment", def: "mechtaHouse", gap: (k) => BUILDINGS[k].gap });
-  globalThis.__buildingLab = lab;   // (the camera for scripted close-ups: Chrome MCP checks)
-  await rtsAtlasReady();
-  const atlas = rtsAtlas(), cell = atlas.image.width / ATLAS_COLS;
-  const setStone = (key) => {
-    const t = STONES[key].make({ size: cell });
-    const i = MAT.rubble, col = i % ATLAS_COLS, row = (i / ATLAS_COLS) | 0;
-    atlas.image.getContext("2d").drawImage(t.image, col * cell, row * cell);
-    t.dispose();
-    atlas.needsUpdate = true;
-  };
-  const panel = document.getElementById("vlab");
-  const box = document.createElement("div");
-  box.innerHTML = `<h2>Pierre (les deux)</h2><div class="g">${Object.entries(STONES).map(([k, v]) => `<button data-stone="${k}">${v.label}</button>`).join("")}</div>`;
-  panel.insertBefore(box, panel.querySelector("h2:nth-of-type(3)"));
-  box.addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) setStone(b.dataset.stone); });
-  setStone("aures");   // the candidate first
-  // Another seed of the new piece (the Roman sites, the rocks).
-  const key = new URLSearchParams(location.search).get("v");
-  if (BUILDINGS[key]?.after) {
-    const v = document.createElement("div");
-    v.innerHTML = `<h2>Variante</h2><div class="g"><button data-seed="-1">Précédente</button><button data-seed="1">Suivante</button></div>`;
-    panel.insertBefore(v, box);
-    // The rocks: the top in the sides' layered stone, or the cracked photo (you, 2026-10-08).
-    if (key.startsWith("roche")) {
-      const t = document.createElement("div");
-      // The colour (CoH stays the default) and the sand apron at the foot (the game's splats: a preview).
-      t.innerHTML = `<h2>Dessus du rocher</h2><div class="g"><button data-top="1">Même pierre</button><button data-top="0">Craquelé</button></div>
-        <h2>Couleur du rocher</h2><div class="g">${Object.entries(SANDSTONE_COLOURS).map(([k, c]) => `<button data-col="${k}">${c.label}</button>`).join("")}</div>
-        <h2>Sable au pied</h2><div class="g"><button data-apron="1">Avec</button><button data-apron="0">Sans</button></div>`;
-      panel.insertBefore(t, box);
-      const rockMesh = lab.after.group.children[0];
-      const apron = sandApron(rockMesh.geometry);
-      lab.after.group.add(apron);
-      t.addEventListener("click", (e) => {
-        const b = e.target.closest("button");
-        if (!b) return;
-        if (b.dataset.top) sandstoneLook.topSame.value = Number(b.dataset.top);
-        if (b.dataset.col) setSandstoneColour(b.dataset.col);
-        if (b.dataset.apron) apron.visible = b.dataset.apron === "1";
-      });
-    }
-    v.addEventListener("click", (e) => {
-      const b = e.target.closest("button");
-      if (b) location.search = `?v=${key}&seed=${Math.max(0, SEED + Number(b.dataset.seed))}`;
+/**
+ * A PIECE'S OWN TOOLS in the lab (2026-10-25, you: "move those few panels into the new lab, then delete
+ * building-lab.html" — the old page's special panels, now the lab's « Piece » box): the variants of a seeded piece
+ * (the Roman sites, the rocks…), a rock's look, the supply point's capture. `versions` the lab's shown versions (the
+ * last one the new piece). Null when the piece has none. { html, bind(el), tick(dt), dispose() }
+ */
+export function pieceTools(key, versions) {
+  const E = BUILDINGS[key];
+  if (!E) return null;
+  const parts = [], binds = [], ticks = [], ends = [];
+  const btns = (items) => `<div class="btns">${items.join("")}</div>`;
+  // VARIANTS: another seed of the new piece (the page reloads on it: ?seed=)
+  if ((E.tags ?? []).some((t) => /variante/i.test(t))) {
+    parts.push(`<h4>Variant ${SEED + 1}</h4>${btns([`<button class="btn" data-seed="-1">Previous</button>`, `<button class="btn" data-seed="1">Next</button>`])}`);
+    binds.push((el) => el.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-seed]");
+      if (b) location.search = `?p=${key}&seed=${Math.max(0, SEED + Number(b.dataset.seed))}`;
+    }));
+  }
+  // A ROCK: its top in the sides' layered stone or the cracked photo (you, 2026-10-08), its colour, the sand at its foot
+  if (key.startsWith("roche")) {
+    parts.push(`<h4>Rock top</h4>${btns([`<button class="btn" data-top="1">Same stone</button>`, `<button class="btn" data-top="0">Cracked</button>`])}
+      <h4>Rock colour</h4>${btns(Object.entries(SANDSTONE_COLOURS).map(([k, c]) => `<button class="btn" data-col="${k}">${c.label}</button>`))}
+      <h4>Sand at the foot</h4>${btns([`<button class="btn" data-apron="1">With</button>`, `<button class="btn" data-apron="0">Without</button>`])}`);
+    const g = versions.at(-1)?.group, rock = g?.children[0];
+    const apron = rock?.geometry ? sandApron(rock.geometry) : null;
+    if (apron) { g.add(apron); ends.push(() => apron.removeFromParent()); }
+    binds.push((el) => el.addEventListener("click", (e) => {
+      const b = e.target.closest(".btn");
+      if (!b) return;
+      if (b.dataset.top) sandstoneLook.topSame.value = Number(b.dataset.top);
+      if (b.dataset.col) setSandstoneColour(b.dataset.col);
+      if (b.dataset.apron && apron) apron.visible = b.dataset.apron === "1";
+    }));
+  }
+  // THE SUPPLY POINT: its state on both sides, a capture played out (3 s, then the flash), the ring's size (ours
+  // 22 m / 40 m, Company of Heroes 3's ~11 m — measured, assets-src/refs/coh3/README.md)
+  if (["pointRavit", "pointCarbu"].includes(key)) {
+    const both = (fn) => { for (const p of [POINT.game, POINT.neu]) if (p) fn(p); };
+    let anim = null, state = { owner: null, capturer: null, progress: 0, cut: false };
+    const set = (owner, capturer = owner, progress = owner ? 1 : 0, cut = false) => {
+      anim = null;
+      state = { owner, capturer, progress, cut };
+      both((p) => { p.marks.set(state); p.flag(owner ?? (progress > 0 ? capturer : null), owner ? 1 : progress); });
+    };
+    const K = POINT_KINDS[POINT.kind] ?? POINT_KINDS.mun;
+    const sizes = K.R > 22 ? [11, 16, 22, 30, 40] : [11, 16, 22];
+    parts.push(`<h4>Point</h4>${btns([["neutral", "Neutral"], ["half", "Capture 50 %"], ["player", "Held: France"], ["enemy", "Held: FLN"], ["cut", "France, cut off"], ["capP", "▶ Capture: France"], ["capE", "▶ Capture: FLN"]].map(([k, l]) => `<button class="btn" data-pt="${k}">${l}</button>`))}
+      <h4>Radius</h4>${btns(sizes.map((r) => `<button class="btn" data-r="${r}">${r} m${r === 11 ? " (CoH)" : r === K.R ? " (game)" : ""}</button>`))}`);
+    binds.push((el) => el.addEventListener("click", (e) => {
+      const b = e.target.closest(".btn");
+      if (b?.dataset.r) { const r = Number(b.dataset.r); both((p) => p.resize(r)); both((p) => p.marks.set(state)); return; }
+      const k = b?.dataset.pt;
+      if (k === "neutral") set(null);
+      else if (k === "half") set(null, "player", 0.5);
+      else if (k === "player" || k === "enemy") set(k);
+      else if (k === "cut") set("player", "player", 1, true);
+      else if (k === "capP" || k === "capE") { set(null); anim = { side: k === "capP" ? "player" : "enemy", t: 0 }; }
+    }));
+    set(null);
+    ticks.push((dt) => {
+      if (anim) {
+        anim.t += dt / 3;
+        const k = Math.min(1, anim.t);
+        both((p) => { p.marks.set({ owner: null, capturer: anim.side, progress: k }); p.flag(anim.side, k); });
+        if (k >= 1) { const side = anim.side; anim = null; both((p) => { p.marks.capture(side); p.flag(side, 1); }); }
+      }
+      both((p) => p.marks.update(dt));
     });
   }
-  if (["pointRavit", "pointCarbu"].includes(new URLSearchParams(location.search).get("v"))) startPointPanel(lab, panel);
-  if (SITE) startConstructionPanel(lab, panel, box);
-  // (`point`: the supply point's two sides, for stills of the capture from the console.)
-  return Object.assign(lab, { setStone, point: POINT });
-}
-
-/**
- * CONSTRUCTION (the helipad): the site at a given progress, or played through at real pace (P.secs —
- * a sapper team's build time), the paint and the windsock at their moments.
- */
-function startConstructionPanel(lab, panel, before) {
-  const secs = 22;
-  const div = document.createElement("div");
-  div.innerHTML = `<h2>Construction</h2><div class="g">${[0, 20, 40, 60, 80, 100].map((p) => `<button data-p="${p}">${p} %</button>`).join("")}<button data-play="1">▶ Lecture (${secs} s)</button></div><div id="build-pct" style="font:12px monospace;margin-top:4px"></div>`;
-  panel.insertBefore(div, before);
-  const stencil = () => { let st = null; lab.after.group.traverse((o) => { if (o.material?.name === "RtsStencil") st = o; }); return st; };
-  const pct = div.querySelector("#build-pct");
-  let play = null;
-  const show = (p) => {
-    SITE.set(p);
-    const st = stencil(); if (st) st.visible = SITE.stencilShown(p);
-    if (SITE.sock) SITE.sock.visible = p >= 0.9;
-    pct.textContent = `${Math.round(p * 100)} %`;
+  if (!parts.length) return null;
+  return {
+    html: parts.join(""),
+    bind: (el) => { for (const f of binds) f(el); },
+    tick: (dt) => { for (const f of ticks) f(dt); },
+    dispose: () => { for (const f of ends) f(); },
   };
-  div.addEventListener("click", (e) => {
-    const b = e.target.closest("button");
-    if (!b) return;
-    if (b.dataset.play) { play = { t0: performance.now() }; return; }
-    play = null;
-    show(Number(b.dataset.p) / 100);
-  });
-  const tick = () => {
-    if (play) { const p = Math.min(1, (performance.now() - play.t0) / 1000 / secs); show(p); if (p >= 1) play = null; }
-    requestAnimationFrame(tick);
-  };
-  tick();
-  show(1);
-  lab.construction = { show, site: SITE };
-}
-
-/** The supply point's panel: its state on both sides, and a capture played out (3 s, then the flash). */
-function startPointPanel(lab, panel) {
-  const both = (fn) => { for (const p of [POINT.game, POINT.neu]) if (p) fn(p); };
-  let anim = null;      // { side, t } while a capture is playing
-  let state = { owner: null, capturer: null, progress: 0, cut: false };
-  const show = (owner, capturer = owner, progress = owner ? 1 : 0, cut = false) => {
-    anim = null;
-    state = { owner, capturer, progress, cut };
-    both((p) => { p.marks.set(state); p.flag(owner ?? (progress > 0 ? capturer : null), owner ? 1 : progress); });
-  };
-  // THE RING'S SIZE (the open question: ours 22 m / 40 m, Company of Heroes 3's ~11 m — measured,
-  // assets-src/refs/coh3/README.md). A supply point stops at 22: past it, it would cross the other side.
-  const K = POINT_KINDS[POINT.kind] ?? POINT_KINDS.mun;
-  const sizes = K.R > 22 ? [11, 16, 22, 30, 40] : [11, 16, 22];
-  const box = document.createElement("div");
-  box.innerHTML = `<h2>Point</h2><div class="g">
-    <button data-pt="neutral">Neutre</button><button data-pt="half">Capture 50 %</button>
-    <button data-pt="player">Tenu : France</button><button data-pt="enemy">Tenu : FLN</button>
-    <button data-pt="cut">France, coupé</button><button data-pt="capP">▶ Capture France</button>
-    <button data-pt="capE">▶ Capture FLN</button></div>
-    <h2>Rayon</h2><div class="g">${sizes.map((r) => `<button data-r="${r}">${r} m${r === 11 ? " (CoH)" : r === K.R ? " (jeu)" : ""}</button>`).join("")}</div>`;
-  panel.insertBefore(box, panel.firstElementChild?.nextSibling ?? null);
-  box.addEventListener("click", (e) => {
-    const b = e.target.closest("button");
-    if (b?.dataset.r) { const r = Number(b.dataset.r); both((p) => p.resize(r)); both((p) => p.marks.set(state)); return; }
-    const k = b?.dataset.pt;
-    if (k === "neutral") show(null);
-    else if (k === "half") show(null, "player", 0.5);
-    else if (k === "player" || k === "enemy") show(k);
-    else if (k === "cut") show("player", "player", 1, true);
-    else if (k === "capP" || k === "capE") { show(null); anim = { side: k === "capP" ? "player" : "enemy", t: 0 }; }
-  });
-  show(null);
-  // Both points in view through the GAME's camera (CoH 3's, algGame.js: a 26° lens, 44° down), back as
-  // far as the pair needs (a village is 80 m across) — the lab's own 40° lens would judge them wrong.
-  lab.camera.fov = 26;
-  lab.camera.updateProjectionMatrix();
-  lab.play(K.R * 7.6, 44);
-  const CAP_S = 3;
-  let last = performance.now();
-  const tick = (now) => {
-    const dt = Math.min(0.1, (now - last) / 1000);
-    last = now;
-    if (anim) {
-      anim.t += dt / CAP_S;
-      const k = Math.min(1, anim.t);
-      both((p) => { p.marks.set({ owner: null, capturer: anim.side, progress: k }); p.flag(anim.side, k); });
-      if (k >= 1) { const side = anim.side; anim = null; both((p) => { p.marks.capture(side); p.flag(side, 1); }); }
-    }
-    both((p) => p.marks.update(dt));
-    requestAnimationFrame(tick);
-  };
-  requestAnimationFrame(tick);
 }

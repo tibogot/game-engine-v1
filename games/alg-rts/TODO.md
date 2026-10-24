@@ -1372,7 +1372,7 @@ Most important first; details in the sections below. (sugg.) = mine, not yet you
   whether the game's stencil atlas (public/textures/alg-atlas.png?) has the cockade cell.
 - [x] Every French vehicle now at detail 2 in the game.
 
-**K. BUILDINGS LAB (started 2026-10-07; building-lab.html — the vehicle lab's scene)**
+**K. BUILDINGS LAB (started 2026-10-07; building-lab.html, the vehicle lab's scene — since 2026-10-25 ONE lab: lab.html, its panels moved in)**
 - [ ] The mechta house at detail 2 (buildMechtaHouse / house({ detail: 2 }): battered irregular
   stone walls, the Ghoufi LOGGIA upstairs, lintels) — you: "so identical I'm not sure it's
   better". The shape alone is too subtle at RTS range.

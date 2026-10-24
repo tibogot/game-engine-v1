@@ -130,19 +130,19 @@ export const sandstoneLook = {
  * the same stone greyed towards the map's ochre and limestone (the ground photos, the kit's stone).
  */
 export const SANDSTONE_COLOURS = {
-  coh: { label: "CoH (rouge)", tint: [1, 1, 1], saturation: 1, topDark: 0.6 },
+  coh: { label: "CoH (red)", tint: [1, 1, 1], saturation: 1, topDark: 0.6 },
   // (the photo greyed alone reads PINK — red without its orange: the tint puts the yellow back)
-  aures: { label: "Aurès (ocre)", tint: [1.14, 1.0, 0.72], saturation: 0.5, topDark: 0.66 },
-  aures2: { label: "Aurès (gris)", tint: [1.06, 1.0, 0.84], saturation: 0.22, topDark: 0.7 },
+  aures: { label: "Aurès (ochre)", tint: [1.14, 1.0, 0.72], saturation: 0.5, topDark: 0.66 },
+  aures2: { label: "Aurès (grey)", tint: [1.06, 1.0, 0.84], saturation: 0.22, topDark: 0.7 },
   // EL KANTARA (2026-10-13): the CoH red lifted warm and light — on the pale dunes the photos as they
   // are read as dark chocolate lumps; CoH's outcrops are a light warm sandstone.
-  kantara: { label: "El Kantara (sable)", tint: [1.3, 1.12, 0.98], saturation: 0.95, topDark: 0.85 },
+  kantara: { label: "El Kantara (sand)", tint: [1.3, 1.12, 0.98], saturation: 0.95, topDark: 0.85 },
   // THE COAST (2026-10-16, the Stora capes: assets-src/refs/coast/): the cliff's own ochre, a little
   // greyed (0.35 read grey, stuck on the ochre face).
   // THE OUED ABDI (2026-10-19): on its pale ochre earth the Aurès' colour read as dark chocolate lumps — a
   // light, warm limestone-sandstone, less red than El Kantara's.
-  abdi: { label: "Oued Abdi (calcaire)", tint: [1.32, 1.16, 0.98], saturation: 0.6, topDark: 0.88 },
-  coast: { label: "Côte (ocre)", tint: [1.06, 0.98, 0.86], saturation: 0.72, topDark: 0.8 },
+  abdi: { label: "Oued Abdi (limestone)", tint: [1.32, 1.16, 0.98], saturation: 0.6, topDark: 0.88 },
+  coast: { label: "Coast (ochre)", tint: [1.06, 0.98, 0.86], saturation: 0.72, topDark: 0.8 },
 };
 export function setSandstoneColour(key) {
   const c = SANDSTONE_COLOURS[key];

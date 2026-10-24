@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- THE LAB (lab.js, 2026-10-19): every building of the game in one catalogue — search, filters, its
-         versions side by side, the game's views, the numbers. The old one stays: building-lab.html. -->
+         versions side by side, the game's views, the numbers. (The old building-lab.html: gone, 2026-10-25 — one lab.) -->
     <base href="/v3/" />
     <title>Lab — Sand &amp; Blood</title>
     <link rel="icon" href="data:," />
@@ -53,6 +53,7 @@
         overflow-y: auto; }
       .box { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
       .box h3 { margin: 0 0 8px; font-size: 12px; color: var(--gold2); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+      .box h4 { margin: 8px 0 5px; font-size: 11px; color: var(--gold2); font-weight: 600; }
       .btns { display: flex; flex-wrap: wrap; gap: 5px; }
       .btn { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; padding: 5px 9px; cursor: pointer;
         font: inherit; font-size: 13px; }
@@ -74,7 +75,7 @@
     <aside id="side">
       <header>
         <h1>Lab</h1>
-        <div class="sub">Every building in the game · the old lab: building-lab.html</div>
+        <div class="sub">Every building in the game</div>
         <input id="search" type="search" placeholder="Search… (/)" autocomplete="off" />
       </header>
       <div class="filters" id="filters"></div>
