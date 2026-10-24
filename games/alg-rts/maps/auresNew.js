@@ -12,9 +12,14 @@
 // ?map=auresNew (the menu's "Les Aurès — 1956"; the old map is "Les Aurès (ancien)"). Plan: games/alg-rts/AURES_NEW_PLAN.md.
 import { LAYOUT as OLD_LAYOUT, MAP as OLD_MAP, PLAY as OLD_PLAY } from "./aures.js";
 import { t } from "../i18n/i18n.js";
-import { FIELD_HEDGES, FIELD_PLOTS, FIELD_WALLS } from "./auresNewFields.js";
+import { COVER_CLEAR, COVER_ROCKS, FIELD_HEDGES, FIELD_PLOTS, FIELD_WALLS } from "./auresNewFields.js";
 
-export const PLAY = OLD_PLAY;
+// THE PLAY BOX, TIGHTER (2026-10-24, you: "the Aurès is quite a big map for an RTS compared to Company of Heroes … we
+// might adapt it"; "make the best, our inspiration is CoH 3"). The old 610 x 610 m kept its empty north-east and far
+// south — nothing to hold there, ground only crossed. The north edge in from -285 to -225 (the katiba camp at -162
+// keeps its back), the south from 325 to 280 (the post and the helipad keep theirs): 610 x 505 m. Its soldiers run
+// 5.5 m/s — post to the far villages ~60 s, CoH's rhythm. What is left gets its COVER (tools/algAuresNewFields.mjs).
+export const PLAY = { ...OLD_PLAY, z0: -225, z1: 280 };
 export const LAYOUT = OLD_LAYOUT;
 
 // ── The houses: the kits' footprints (local real metres x0 x1 z0 z1, the front at -Z; the game ×1.3 — tools/algAbdiLevel.mjs
@@ -77,9 +82,17 @@ export const MAP = {
   skip: ["mechta", "mechta2", "dechra", "ksar", "gardenOA1", "gardenOA2", "threshOA", "gardenEO1", "gardenEO2", "threshEO", "terracesEO",
     "terracesD1", "terracesD2", "terracesD3", "gardenD", "threshD", "terracesOpen1", "terracesOpen2", "terracesOpen3", "terracesOpen4"],
   // (the old almond terraces of the open slopes, algLandmarks: none)
-  scenery: { over: { terraces: 0 } },
+  // (the lone trees and outcrops keep off the cover runs and the supply points — tools/algAuresNewFields.mjs COVER_CLEAR)
+  scenery: { over: { terraces: 0 }, keepClear: COVER_CLEAR },
+  // (its farmsteads, ruins, rocks and lone trees: scattered in the OLD box, so they stay where they were — algLandmarks)
+  sceneryBox: OLD_PLAY,
+  // the boulder groups of the cover pass (the gully mouths, the ravine pass, the west slopes)
+  sandstone: { ...(OLD_MAP.sandstone ?? {}), rocks: COVER_ROCKS },
   // (no trampled-yard splat at the villages: its 2.4 m photo repeated across the square — seen)
   splats: { yards: false },
+  // the supply points: the old map's, the South pass moved in from (31, -241) — outside the tighter box — to the flatter
+  // ground beside its track
+  supply: OLD_MAP.supply.map((p) => (p.name === "South pass" ? { ...p, x: 55, z: -190 } : p)),
   fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
   town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], replacesHamlet: true },
 };

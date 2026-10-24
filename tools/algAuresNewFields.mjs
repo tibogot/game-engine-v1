@@ -18,8 +18,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { readProject, writeProject } from "./lib/v3proj.mjs";
 import { FOLIAGE_PRESETS } from "../v3/app/state/foliageScatterState.js";
-import { LAYOUT, MAP as OLD_MAP, PLAY } from "../games/alg-rts/maps/aures.js";
-import { MAP as NEW_MAP } from "../games/alg-rts/maps/auresNew.js";
+import { LAYOUT, MAP as OLD_MAP } from "../games/alg-rts/maps/aures.js";
+import { MAP as NEW_MAP, PLAY } from "../games/alg-rts/maps/auresNew.js";   // (the new map's own, tighter box — 2026-10-24)
 
 const SRC = "public/levels/alg-aures.v3proj", OUT = "public/levels/alg-aures-new.v3proj";
 const DIR = "public/textures/decals/abdi";
@@ -92,7 +92,7 @@ const PIECES = [[92, 214, 41], [75, 269, 25], [78, 163, 24], [160, 130, 23], [-2
   [216, 195, 8], [-132, 220, 7], [33, 103, 8], [-85, 172, 7], [-14, 290, 18], [-14, 39, 19], [-47, 94, 14], [-218, 295, 12], [257, 92, 17],
   [37, 40, 14], [-180, 245, 12]];
 const HOUSES = NEW_MAP.town.houses.map((r) => [r[6], r[7], Math.hypot(r[8], r[9])]);
-const SUPPLY = (OLD_MAP.supply ?? []).filter((s) => Number.isFinite(s?.x)).map((s) => [s.x, s.z, 10]);
+const SUPPLY = (NEW_MAP.supply ?? []).filter((s) => Number.isFinite(s?.x)).map((s) => [s.x, s.z, 10]);   // (the new map's: the South pass moved)
 const clear = (x, z, rad, pad) => !LAYOUT.sites.some((q) => Math.hypot(x - q.x, z - q.z) < q.r + rad + pad)
   && ![...PIECES, ...HOUSES, ...SUPPLY].some(([px, pz, r]) => Math.hypot(x - px, z - pz) < r + rad + pad);
 // …nor in an oasis's grove: the palms and the tamarisk ring round them (algVillageLife inGrove — a plot's walls ran
@@ -190,6 +190,115 @@ TRACKS.forEach((p, pi) => {
     }
   }
 });
+
+// ── THE COVER PASS (2026-10-24, you: "do A" — CoH 3's maps are packed with cover along the routes; 62 % of this box was
+// > 35 m from any wall, hedge or house). Wall runs (cover: algFieldWalls.coverCircles) and hedge lines (concealment) in
+// CLUSTERS on the routes between the places, an ARC of broken walls on each village's approach from the post, and a
+// wall here and there along the pistes in the open. Each run faces the French line of advance (from the post), ± a
+// little; some breached, a gap or two; never on a track, a house, a point, the water or a plot.
+const POST = LAYOUT.sites.find((s) => s.kind === "french");
+const nearWall = (x, z, d) => walls.some((w) => Math.hypot(x - w[2], z - w[4]) < d) || hedges.some((h) => Math.hypot(x - h[2], z - h[4]) < d);
+const coverOK = (x, z) => inBox(x, z, 6) && slope(x, z) < 16 && wadiClear(x, z, 4) && clear(x, z, 0, 4) && trackDist(x, z) > 4.5 && !inPlot(x, z, 1.5) && !inGrove(x, z, 2) && !nearWall(x, z, 1.6);
+const coverRuns = [];
+/** A run of n modules centred on (x, z) along yaw; `hedge`: prickly pear; `broken`: more breached and gapped. */
+function run(x, z, yaw, n, { hedge = false, broken = 0.15, seed = 0 } = {}) {
+  const mod = hedge ? HMOD : MOD, ux = Math.cos(yaw), uz = -Math.sin(yaw);
+  let made = 0;
+  for (let k = 0; k < n; k++) {
+    const t = (k - (n - 1) / 2) * mod, px = x + ux * t, pz = z + uz * t;
+    if (hash(px, pz, 90 + seed) < broken * 0.6) continue;                    // a gap
+    if (!coverOK(px, pz)) continue;
+    if (Math.abs(H(px + ux * mod / 2, pz + uz * mod / 2) - H(px - ux * mod / 2, pz - uz * mod / 2)) > 1.4) continue;   // (not down a steep fall line)
+    const r = hash(px, pz, 91 + seed), state = r < broken * 0.5 ? "ruin" : r < broken ? "damaged" : "intact";
+    (hedge ? hedges : walls).push([["a", "b", "c"][Math.floor(hash(px, pz, 92) * 3)], state, px, H(px, pz) - (hedge ? 0.08 : 0.05), pz, yaw + (hash(px, pz, 93) - 0.5) * 0.06]);
+    made++;
+  }
+  if (made) coverRuns.push({ x, z, r: (n * mod) / 2 + 2 });
+  return made;
+}
+// the yaw that lays a run ACROSS the line from the post (it faces the French advance)
+const facing = (x, z) => Math.atan2(-(z - POST.z), x - POST.x) + Math.PI / 2;
+// the clusters (the plan, 2026-10-24: 9 and 10 fell outside the tighter box)
+const CLUSTERS = [[2, 177, 30], [-110, 150, 30], [-60, 60, 45], [19, -14, 28], [-78, -82, 28], [-276, -2, 26], [-235, -70, 40], [245, 170, 45], [-40, 255, 32]];
+stats.cover = { clusterWalls: 0, clusterHedges: 0, arcWalls: 0, pisteWalls: 0 };
+CLUSTERS.forEach(([cx, cz, cr], ci) => {
+  const nRuns = 3 + Math.floor(hash(cx, cz, 100) * 3);
+  for (let k = 0, tries = 0; k < nRuns && tries < 40; tries++) {
+    const a = hash(cx + tries, cz, 101) * 6.283, d = Math.sqrt(hash(cx, cz + tries, 102)) * cr * 0.85;
+    const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+    if (!coverOK(x, z)) continue;
+    const yaw = facing(x, z) + (hash(x, z, 103) - 0.5) * 0.7, n = 3 + Math.floor(hash(x, z, 104) * 4);
+    const m = run(x, z, yaw, n, { seed: ci });
+    if (!m) continue;
+    stats.cover.clusterWalls += m; k++;
+    if (hash(x, z, 105) < 0.4) {   // an L: a short return at one end (a corner to fight round)
+      const e = ((n - 1) / 2) * MOD * (hash(x, z, 106) < 0.5 ? -1 : 1), ex = x + Math.cos(yaw) * e, ez = z - Math.sin(yaw) * e;
+      stats.cover.clusterWalls += run(ex - Math.sin(yaw) * MOD * 1.5, ez - Math.cos(yaw) * MOD * 1.5, yaw + Math.PI / 2, 2, { seed: ci + 7 });
+    }
+  }
+  for (let k = 0, tries = 0; k < 2 && tries < 20; tries++) {   // a hedge line or two
+    const a = hash(cx, cz + tries, 107) * 6.283, d = cr * (0.5 + hash(cx + tries, cz, 108) * 0.5), x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d;
+    if (!coverOK(x, z)) continue;
+    const m = run(x, z, facing(x, z) + (hash(x, z, 109) - 0.5), 4 + Math.floor(hash(x, z, 110) * 3), { hedge: true, broken: 0.1, seed: ci + 3 });
+    if (m) { stats.cover.clusterHedges += m; k++; }
+  }
+});
+// each village's APPROACH: broken walls on an arc just outside its ring, toward the post (± 65°), in short runs with gaps
+for (const v of ["Mechta Ouled Ali", "Mechta el Oued", "Dechra Tighanimine", "Ksar el Hamra"].map(site)) {
+  const toPost = Math.atan2(POST.z - v.z, POST.x - v.x);
+  for (let k = -3; k <= 3; k++) {
+    const a = toPost + k * 0.36 + (hash(v.x, k, 111) - 0.5) * 0.12, R = v.r + 10 + hash(v.z, k, 112) * 8;   // (just outside the village's own ring: 34-52 m)
+    const x = v.x + Math.cos(a) * R, z = v.z + Math.sin(a) * R;
+    if (hash(v.x + k, v.z, 113) < 0.2) continue;
+    // (along the arc's tangent: the direction (-sin a, cos a) in x/z, as a yaw)
+    stats.cover.arcWalls += run(x, z, Math.atan2(-Math.cos(a), -Math.sin(a)), 3, { broken: 0.35, seed: 20 + k });
+  }
+}
+// the PISTES in the open (outside the farmed rings): a short run beside the track every ~55 m, alternating sides
+TRACKS.forEach((p, pi) => {
+  let next = 25 + hash(pi, 1, 114) * 30, s0 = 0;
+  for (let k = 0; k < p.length - 1; k++) {
+    const [ax, az] = p[k], [bx, bz] = p[k + 1], L = Math.hypot(bx - ax, bz - az), ux = (bx - ax) / L, uz = (bz - az) / L;
+    while (next < s0 + L) {
+      const t = next - s0, cx = ax + ux * t, cz = az + uz * t, side = hash(cx, cz, 115) < 0.5 ? -1 : 1;
+      next += 45 + hash(cx, cz, 116) * 25;
+      if (farmed.some((q) => Math.hypot(cx - q.x, cz - q.z) < q.r + 70)) continue;
+      stats.cover.pisteWalls += run(cx - uz * 8 * side, cz + ux * 8 * side, Math.atan2(-uz, ux), 2 + Math.floor(hash(cx, cz, 117) * 2), { broken: 0.25, seed: 40 + pi });
+    }
+    s0 += L;
+  }
+});
+
+// BOULDER GROUPS where the ground is rock (2026-10-24: the gully mouths, the ravine pass, the west slopes — walls read
+// wrong on broken ground): the game's sandstone shapes (algSandstone SANDSTONE_GAME: 2-3 the "block", 4-5 the low slab),
+// small, in groups of 3-4 — hard cover, impassable, the plants cleared under them (algLandmarks fixedSandstone)
+const ROCK_SIZE = { 2: [5.5, 4.2], 3: [5.5, 4.2], 4: [6.5, 4.5], 5: [6.5, 4.5] };
+const rocks = [];
+// (rocks sit on rougher ground than walls: up to 24°, nearer the passes' own rings and the tracks)
+const rockOK = (x, z) => inBox(x, z, 6) && slope(x, z) < 24 && wadiClear(x, z, 3) && clear(x, z, 0, 1) && trackDist(x, z) > 3.5 && !inPlot(x, z, 1.5) && !inGrove(x, z, 2) && !nearWall(x, z, 3) && !rocks.some((o) => Math.hypot(o.x - x, o.z - z) < 3);
+stats.cover.rocks = 0;
+[[19, -14, 28], [-78, -82, 28], [-276, -2, 26], [-235, -70, 40]].forEach(([cx, cz, cr], ci) => {
+  for (let g = 0, tries = 0; g < (cr > 30 ? 3 : 2) && tries < 40; tries++) {
+    const a = hash(cx + tries, cz, 120) * 6.283, d = cr * (0.25 + hash(cx, cz + tries, 121) * 0.6), gx = cx + Math.cos(a) * d, gz = cz + Math.sin(a) * d;
+    if (!rockOK(gx, gz) || rocks.some((o) => Math.hypot(o.x - gx, o.z - gz) < 14)) continue;
+    const n = 3 + Math.floor(hash(gx, gz, 122) * 2), yaw0 = facing(gx, gz);
+    let made = 0;
+    for (let k = 0; k < n; k++) {
+      const v = 2 + Math.floor(hash(gx + k, gz, 123) * 4), kk = (v < 4 ? 0.42 : 0.5) + hash(gx, gz + k, 124) * 0.28;
+      const [sx, sz] = ROCK_SIZE[v], ax = sx * kk, az = sz * kk;
+      const t = (k - (n - 1) / 2) * 3.4, off = (hash(gx, k, 125) - 0.5) * 3;
+      const x = gx + Math.cos(yaw0) * t - Math.sin(yaw0) * off, z = gz - Math.sin(yaw0) * t - Math.cos(yaw0) * off;
+      if (!rockOK(x, z)) continue;
+      const yaw = yaw0 + (hash(x, z, 126) - 0.5) * 1.2, c = Math.cos(yaw), sn = Math.sin(yaw);
+      // its base: the lowest of its four corners, sunk a little more (no gap under a rock on a slope)
+      const y = Math.min(...[[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([u, w]) => H(x + u * ax / 2 * c + w * az / 2 * sn, z - u * ax / 2 * sn + w * az / 2 * c))) - 0.25;
+      rocks.push({ x, y, z, yaw, k: kk, v });
+      coverRuns.push({ x, z, r: Math.hypot(ax, az) / 2 + 1.5 });
+      made++;
+    }
+    if (made) { g++; stats.cover.rocks += made; }
+  }
+});
 stats.walls = walls.length; stats.hedges = hedges.length;
 
 // ── THE CROPS AND THE CLEARING (the plant paint): the reed-mace slot (2: 878 texels on the whole map) becomes ripe
@@ -204,7 +313,11 @@ stats.walls = walls.length; stats.hedges = hedges.length;
       const x = ((px + 0.5) / res) * W - W / 2, z = ((pz + 0.5) / res) * W - W / 2;
       if (chans === 8) b[(pz * res + px) * 4 + 2] = 0;   // (the old reed-mace, everywhere)
       const q = inPlot(x, z, 0.8);
-      if (!q) continue;
+      if (!q) {   // (round the cover runs and the supply points: the shrubs wiped — a point's ring was full of them, seen)
+        if (!SUPPLY.some(([sx, sz]) => Math.hypot(x - sx, z - sz) < 14) && !coverRuns.some((c) => Math.hypot(x - c.x, z - c.z) < c.r)) continue;
+        for (let ch = 0; ch < chans; ch++) b[((ch / 4) | 0) * res * res * 4 + (pz * res + px) * 4 + (ch % 4)] = 0;
+        n++; continue;
+      }
       for (let ch = 0; ch < chans; ch++) b[((ch / 4) | 0) * res * res * 4 + (pz * res + px) * 4 + (ch % 4)] = 0;
       if (crop && q.kind === "barley" && inPlot(x, z, -0.6)) b[(pz * res + px) * 4 + 2] = 235;
       n++;
@@ -300,6 +413,14 @@ ${walls.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4]
 // the PRICKLY-PEAR HEDGES (3.9 m modules): [type, state, x, y, z, yaw]
 export const FIELD_HEDGES = [
 ${hedges.map((w) => `  ["${w[0]}", "${w[1]}", ${r2(w[2])}, ${r2(w[3])}, ${r2(w[4])}, ${r2(w[5])}],`).join("\n")}
+];
+// the BOULDER GROUPS (algSandstone shapes): { x, y, z, yaw, k, v } — MAP.sandstone.rocks
+export const COVER_ROCKS = [
+${rocks.map((o) => `  { x: ${r2(o.x)}, y: ${r2(o.y)}, z: ${r2(o.z)}, yaw: ${r2(o.yaw)}, k: ${r2(o.k)}, v: ${o.v} },`).join("\n")}
+];
+// what the scenery (lone trees, outcrops — algLandmarks keepClear) keeps off: the cover runs and the supply points
+export const COVER_CLEAR = [
+${[...coverRuns, ...SUPPLY.map(([x, z]) => ({ x, z, r: 14 }))].map((c) => `  { x: ${r2(c.x)}, z: ${r2(c.z)}, r: ${r2(c.r)} },`).join("\n")}
 ];
 `);
 console.log(`${OUT}: ${(bytes / 1e6).toFixed(1)} MB — ${slots.length} slots, ${decals.length} decals ${JSON.stringify(stats)}`);

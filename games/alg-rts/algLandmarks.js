@@ -14,7 +14,11 @@
 //            carobs (holm oak) and figs on the showroom's PlacedFoliage.
 //
 // ?landmarks=0 = without.
-import { LAYOUT, PLAY, VIEW_YAW } from "./layout.js";
+import { LAYOUT, MAP, PLAY as PLAY_BOX, VIEW_YAW } from "./layout.js";
+// THE BOX THEY ARE SCATTERED IN: the map's play box, or its own (maps/auresNew.js sceneryBox, 2026-10-24: the play box
+// tightened, its farmsteads, ruins, rocks and trees stay where its seeded draws put them in the old one — a smaller box
+// reshuffled every piece, and the fields tool keeps its walls off them where they were)
+const PLAY = MAP.sceneryBox ?? PLAY_BOX;
 import { TRACK_LINES } from "./algTracks.js";
 import * as THREE from "three";
 import { buildBurntFarm, buildFarmstead, buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin, buildRuinedHut, buildTerraces } from "../../v3/render/objects/rtsAlgVillage.js";
