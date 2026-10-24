@@ -14,6 +14,7 @@
 //                 every bag its own shade — new pale jute, khaki, faded grey, a few olive — and its foot
 //                 darker (sand-soaked, dusty)
 //   the COST      a whole wall merged into ONE mesh, ONE material shared by every bag in the game
+import { groundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { abs, atan, attribute, clamp as tslClamp, cross, dot, exp, float, mix, mx_noise_float, normalGeometry, normalize, positionGeometry, positionLocal, positionView, pow, select, sin, smoothstep as tslSmoothstep, step as tslStep, texture, transformNormalToView, uniform, vec2, vec3 } from "three/tsl";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
@@ -208,6 +209,10 @@ export function looseBags(n, x, z, spread, seed) {
 
 // ── THE MATERIAL ─────────────────────────────────────────────────────────────────────────────────
 let _mat = null;
+// THE GROUND BLEND (2026-10-24, algGroundBlend): the game hands the app over before the first wall is built — the bags'
+// lowest 30 cm in the ground's colour (the shared material rebuilt if one was made before)
+let _gbApp = null;
+export function setSandbagGroundBlend(app) { _gbApp = app; _mat = null; }
 const _tex = new Map();
 function photo(url, srgb) {
   if (_tex.has(url)) return _tex.get(url);
@@ -274,6 +279,7 @@ export function sandbagMaterial(build = null) {
   const m = new THREE.MeshPhysicalNodeMaterial({ roughness: 1, metalness: 0 });
   m.name = "Sandbags";
   m.colorNode = c;
+  if (_gbApp && !build) { m.userData.gbBase = c; m.colorNode = groundBlend(_gbApp, c, { fade: 0.3, tint: 0.25 }); }
   m.normalNode = bumped;
   m.roughnessNode = float(1.0);
   m.specularIntensityNode = bu.w.mul(0.6);

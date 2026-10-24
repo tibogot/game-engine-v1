@@ -10,6 +10,7 @@
 // CHEAP: the ground's height and colour are read PER VERTEX (two taps in the vertex stage, a rock's ~800 vertices) and
 // interpolated; the fragment adds one noise. No new draw. Off (the material untouched) without a ground cache, or with
 // ?gblend=0 (an A/B).
+import * as THREE from "three";
 import { float, mix, mx_noise_float, positionGeometry, positionWorld, smoothstep, texture, varying, vec2, vec3, dot, clamp } from "three/tsl";
 
 export const GROUND_BLEND = { fade: 0.75, strength: 0.95, tint: 0.3, fadeFrac: 0.7 };   // (seen from the RTS camera a rock is mostly its TOP: the tint carries the blend there, the foot fade the sides — 0.14 tint, 0.38 of the height: "I can't see any difference")
@@ -44,4 +45,37 @@ export function groundBlend(app, base, { fade = GROUND_BLEND.fade, strength = GR
   const h = bounds ? varying(positionGeometry.y.sub(bounds.minY).div(Math.max(1e-4, bounds.maxY - bounds.minY)), "vGbFrac") : above;
   const k = float(1).sub(smoothstep(0, float(bounds ? fadeFrac : fade).mul(n), h)).mul(strength);
   return mix(col, tone, k);
+}
+
+/**
+ * A Blender kit's loaded pieces (algHouse loadHouses' parts: "type:state" → { near, far }) on ground-blended materials
+ * — their baked atlas × colour, the foot `fade` m into the ground. Call RIGHT AFTER the kit loads, before anything
+ * draws them (swapping a drawn instanced mesh's material left three's cached shadow build behind — a render error).
+ * Each source material converted once (near and far share it). Returns how many materials.
+ */
+const _blended = new WeakMap();
+export function blendKitParts(app, parts, types, { fade = 0.3, tint = GROUND_BLEND.tint, strength = GROUND_BLEND.strength } = {}) {
+  if (!groundBlendAvailable(app) || !parts) return 0;
+  let n = 0;
+  for (const [key, P] of Object.entries(parts)) {
+    if (!types.includes(key.split(":")[0])) continue;
+    for (const lvl of ["near", "far"]) {
+      const mesh = P[lvl], src = mesh?.material;
+      if (!src || src.isNodeMaterial && src.userData?.gbBase) continue;
+      let m = _blended.get(src);
+      if (!m) {
+        m = new THREE.MeshStandardNodeMaterial({ roughness: src.roughness ?? 0.9, metalness: src.metalness ?? 0, side: src.side });
+        m.name = `${src.name || "kit"}:gblend`;
+        const base = src.map ? texture(src.map).rgb.mul(vec3(src.color.r, src.color.g, src.color.b)) : vec3(src.color.r, src.color.g, src.color.b);
+        if (src.normalMap) m.normalMap = src.normalMap;
+        if (src.roughnessMap) m.roughnessMap = src.roughnessMap;
+        m.userData.gbBase = base;
+        m.colorNode = groundBlend(app, base, { fade, tint, strength });
+        _blended.set(src, m);
+        n++;
+      }
+      mesh.material = m;
+    }
+  }
+  return n;
 }
