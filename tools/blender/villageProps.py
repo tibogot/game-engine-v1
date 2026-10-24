@@ -157,7 +157,7 @@ TYPES = {
     "jars3": dict(builder=jars(2), atlas=512, aoDist=0.15),
     "bench": dict(builder=bench, atlas=256, aoDist=0.2),
     "oven": dict(builder=oven, atlas=512, aoDist=0.3),
-    "hay": dict(builder=hay, atlas=512, aoDist=0.4),
+    "hay": dict(builder=hay, atlas=512, aoDist=0.4, farRatio=0.65),   # (its lumpy straw and tufts: decimated to 0.4 it shaded 4.8 % off its near — the gate)
     "wood": dict(builder=wood, atlas=512, aoDist=0.2, farRatio=0.75),   # (thin 6-sided logs: decimated hard they lost their round)
     "hives": dict(builder=hives, atlas=512, aoDist=0.25),
 }
