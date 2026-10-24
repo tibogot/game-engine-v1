@@ -48,9 +48,11 @@ export const FIELD_POST_TYPES = ["fwdradio", "aidtent", "aidmark"];
 // THE FLN'S FIELD WORKS (tools/blender/flnPosts.py — algSangar.js loadRefuge / loadInfirmary)
 export const FLN_POST_TYPES = ["refuge", "infirm"];
 // THE SMALL PROPS (tools/blender/smallProps.py — the HUD icons' hand-held kit: iconStudio.js)
+// THE RUBBLE (tools/blender/rubble.py — algTownDamage.js, a house collapsing): three heaps and four loose chunks
+export const RUBBLE_TYPES = ["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"];
 export const BORDJ_TYPES = ["post"];   // (the French post — tools/blender/postKit.py, algSangar loadFrenchPost)
 export const SMALL_PROP_TYPES = ["grenade", "smoke", "flare", "cutters", "mine", "helmet", "kepi", "jerrycan", "ammobox", "detonator", "detector", "radio", "lmg", "bazooka", "flamer", "sniper", "tools", "shell", "shotgun", "mapcase", "spade"];   // (aidmark: the tent's red crosses, a decal piece)
-const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES }, fieldposts: { prefix: "Field", types: FIELD_POST_TYPES }, flnposts: { prefix: "Fln", types: FLN_POST_TYPES }, smallprops: { prefix: "Prop", types: SMALL_PROP_TYPES }, postkit: { prefix: "Bordj", types: BORDJ_TYPES } };
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES }, fieldposts: { prefix: "Field", types: FIELD_POST_TYPES }, flnposts: { prefix: "Fln", types: FLN_POST_TYPES }, smallprops: { prefix: "Prop", types: SMALL_PROP_TYPES }, postkit: { prefix: "Bordj", types: BORDJ_TYPES }, rubble: { prefix: "Rubble", types: RUBBLE_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
@@ -132,7 +134,7 @@ export function createHouseField() {
     root.add(m);
     return m;
   };
-  const _w = new THREE.Matrix4();
+  const _w = new THREE.Matrix4(), _sc = new THREE.Vector3();
   function rebuild() {
     for (const s of sets.values()) { root.remove(s.near, s.far); s.near.dispose(); s.far.dispose(); }
     sets.clear();
@@ -155,6 +157,9 @@ export function createHouseField() {
       return items.length - 1;
     },
     setState(id, state) { const it = items[id]; if (!it) return; it.key = `${it.key.split(":")[0]}:${state}`; built = false; },
+    /** Move a piece (a chunk of rubble flying out of a collapsing house — algTownDamage): its new place, turn
+     *  (a quaternion) and scale; drawn there from the next update. */
+    move(id, p, q, scale = S) { const it = items[id]; if (!it) return; it.m.compose(p, q, _sc.set(scale, scale, scale)); it.p.copy(p); },
     /** Per frame, with the MAIN camera: who draws near, who far. */
     update(camera) {
       if (!built) rebuild();

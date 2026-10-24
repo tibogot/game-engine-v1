@@ -147,12 +147,14 @@ export function createAlgMortarTeams(app, { units, squads, projectiles, selectio
     const K = kindOf(s), at = g.attackTarget;
     const inReach = (o) => { const d = Math.hypot(o.position.x - g.position.x, o.position.z - g.position.z); return d >= K.min && d <= K.max; };
     if (at?.alive && !at.isAir && inReach(at)) return at;
+    // (2026-10-24, building damage E — CoH's mortar is THE answer to a garrison: men INSIDE a house are targets now, and
+    // preferred — ranked as if 40 % nearer; the bombs wear the house down too, algTownDamage. Before: skipped.)
     let best = null, bd = Infinity;
     for (const o of units.near ? units.near(g.position.x, g.position.z, K.max, []) : units.list) {
-      if (!o.alive || o.team === g.team || o.isAir || o.passive || o.inside || (o.team !== "player" && o.team !== "enemy")) continue;
-      const d = Math.hypot(o.position.x - g.position.x, o.position.z - g.position.z);
-      if (d < K.min || d > K.max || d >= bd || !sees(g.team, o.position.x, o.position.z)) continue;
-      best = o; bd = d;
+      if (!o.alive || o.team === g.team || o.isAir || o.passive || (o.team !== "player" && o.team !== "enemy")) continue;
+      const d = Math.hypot(o.position.x - g.position.x, o.position.z - g.position.z), rank = o.inside ? d * 0.6 : d;
+      if (d < K.min || d > K.max || rank >= bd || !sees(g.team, o.position.x, o.position.z)) continue;
+      best = o; bd = rank;
     }
     return best;
   }

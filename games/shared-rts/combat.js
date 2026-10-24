@@ -150,7 +150,8 @@ export function createCombat({
     // rocket bursts; a bullet sparks off metal and stone but not off a man —
     // in Company of Heroes you read a rifle hit from the man, not a flare on
     // him. Anything else (napalm pulses, a splash) keeps the old flare.
-    if (shell) fx.shellHit?.(at.x, at.y, at.z);
+    // (the round's damage handed on: a game sizes what the shell breaks by it — alg-rts' buildings, algCombat)
+    if (shell) fx.shellHit?.(at.x, at.y, at.z, { amount });
     // A game with its own bullet hits (alg-rts: sparks off metal, chips off
     // stone) takes them here; nam keeps the flare.
     else if (bullet && !onFoot(target) && fx.bulletHit) fx.bulletHit(at.x, at.y, at.z, { metal: !target.isStructure });

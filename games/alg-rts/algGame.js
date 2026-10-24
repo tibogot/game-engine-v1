@@ -48,6 +48,7 @@ import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
 import { createHouseField, loadHouses } from "./algHouse.js";
 import { createTownDamage } from "./algTownDamage.js";
+import { createPieceDamage } from "./algPieceDamage.js";
 import { createAlgTelegraph } from "./algTelegraph.js";
 import { createAlgSounds } from "./algSounds.js";
 import { createGameMenu, loadOptions } from "./ui/gameMenu.js";
@@ -636,7 +637,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (MAP.town?.houses?.length) {
     try {
       const t0 = performance.now();
-      await Promise.all([loadHouses("mzab"), loadHouses()]);
+      // (+ the RUBBLE kit, a house collapsing — algTownDamage; not needed to stand: a ruin without it keeps its dust)
+      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble")]);
       const field = createHouseField();
       // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
       // footprint's mean ground (as a built piece's), its y that
@@ -663,6 +665,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           for (let lx = -hx + r; lx <= hx - r + 0.01; lx += 2.2) { yield put(lx, -hz + r * 0.6); yield put(lx, hz - r * 0.6); }
           for (let lz = -hz + r; lz <= hz - r + 0.01; lz += 2.2) { yield put(-hx + r * 0.6, lz); yield put(hx - r * 0.6, lz); }
         }
+        // the RUBBLE heaps of a collapsed house (algTownDamage): soft cover
+        for (const r of field.damage?.rubble ?? []) yield { x: r.x, z: r.z, radius: r.r, size: 1, hard: false };
         // a terrace wall's parapet: cover for the men on the terrace ABOVE it (behind its face, uphill)
         for (const [st, x, , z, yaw] of MAP.town.walls ?? []) {
           if (st === "ruin") continue;
@@ -702,6 +706,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const fw = createHouseField();
       for (const [ty, st, x, y, z, yaw] of MAP.fields.walls) fw.add(ty, st, x, y, z, yaw);
       fw.coverCircles = function* () { for (const [, st, x, , z] of MAP.fields.walls) if (st !== "ruin") yield { x, z, radius: 1.4, size: 1, hard: true }; };
+      // THEY BREAK (2026-10-24, building damage C — algPieceDamage): a tank shell takes half a module, a mortar bomb
+      // the 81's a third, grenades a quarter; damaged, then down to its footing — a ruin no longer covers (coverCircles
+      // reads the row's state)
+      fw.damage = createPieceDamage(app, {
+        rows: MAP.fields.walls.map(([, st, x, , z]) => ({ x, z, r: 1.7, state: st })), hp: 140, per: (s) => Math.max(0, s - 4) * 16,
+        onState: (i, st) => { MAP.fields.walls[i][1] = st; fw.setState(i, st); app.algDamage?.coverChanged?.(); },
+      });
       app.scene.add(fw.root);
       app.addPreRenderHook(() => fw.update(app.camera));
       app.algFieldWalls = fw;
@@ -722,11 +733,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const hf = { size: MAP.fields.hedges.length };
       const half = 1.5 * 1.3, hh = (a, b, s) => { let h = Math.imul(Math.round(a * 10) + s * 977, 73856093) ^ Math.imul(Math.round(b * 10), 19349663); h = Math.imul(h ^ (h >>> 13), 1274126177); return (h >>> 0) / 4294967296; };
       let n = 0;
-      for (const [, st, x, y, z, yaw] of MAP.fields.hedges) {
+      // (a module's plants tagged with its row: a crushed hedge is replanted in its new state — algPieceDamage below)
+      const plantHedge = (hi) => {
+        const [, st, x, y, z, yaw] = MAP.fields.hedges[hi];
         const c = Math.cos(yaw), s = Math.sin(yaw);
         const put = (lx, lz, kind, k) => {
           const wx = x + lx * c + lz * s, wz = z - lx * s + lz * c, f = hh(wx, wz, 91);
           plants.add(kind, wx, app.getWorldHeight(wx, wz) - 0.05, wz, { rotY: f * 7, scale: k * (0.75 + f * 0.5), seed: (f + 0.29) % 1 });
+          plants.plants[plants.plants.length - 1].hedge = hi;
           n++;
         };
         for (let i = 0; i < 4; i++) {
@@ -737,9 +751,24 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           put(lx, lz, "pricklyPear", 1);
           if (hh(x + i, z + i, 94) < 0.5) put(lx + 0.5, lz + 0.8, "pricklyPear", 0.9);    // the second row
         }
-        if (st === "intact") app.algSight?.addBox(x, z, half, 0.7, yaw, y + 2.1);
-      }
+        return st === "intact";
+      };
+      MAP.fields.hedges.forEach(([, st, x, y, z, yaw], hi) => { if (plantHedge(hi)) app.algSight?.addBox(x, z, half, 0.7, yaw, y + 2.1); });
       hf.plants = n;
+      // CRUSHED (2026-10-24, building damage C): two grenades, a shell, a tank driving the burst — the middle plants
+      // down to stumps (damaged), the module dry and low (ruin); no longer blocks a look (its sight box down to the
+      // ground) nor hides a man (concealAt reads the row's state)
+      hf.damage = createPieceDamage(app, {
+        rows: MAP.fields.hedges.map(([, st, x, , z]) => ({ x, z, r: 2, state: st })), hp: 60, per: (s) => Math.max(0, s - 4) * 16, dust: 3,
+        onState: (hi, st) => {
+          const row = MAP.fields.hedges[hi], [, , x, y, z, yaw] = row;
+          row[1] = st;
+          plants.removeWhere((p) => p.hedge === hi);
+          plantHedge(hi);
+          app.algSight?.setBox?.(x, z, half, 0.7, yaw, y + 0.4);
+          app.fogOfWar?.rebuildHeights?.();
+        },
+      });
       // concealment: within 2 m of a standing hedge (its length, either side); a crushed one half
       const cells = new Map(), key = (x, z) => `${Math.floor(x / 8)},${Math.floor(z / 8)}`;
       for (const h of MAP.fields.hedges) {
@@ -754,6 +783,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         let best = 0;
         for (const [, st, hx, , hz, yaw] of cells.get(key(x, z)) ?? []) {
           const c = Math.cos(yaw), s = Math.sin(yaw), dx = x - hx, dz = z - hz;
+          if (st === "ruin") continue;   // (crushed flat: hides nobody — algPieceDamage)
           if (Math.abs(dx * c - dz * s) < half + 0.4 && Math.abs(dx * s + dz * c) < 2) best = Math.max(best, st === "intact" ? 1 : 0.5);
         }
         return best;

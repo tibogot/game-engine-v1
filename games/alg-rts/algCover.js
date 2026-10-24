@@ -124,7 +124,8 @@ export function createAlgCover(app, { showroom = {}, isArmed = () => true } = {}
         }
         if (!mesh?.isObject3D || NONE.has(key) || !mesh.parent) continue;
         // A breached sandbag wall (algDamage.js): knee-high stubs, soft cover.
-        yield* circlesOf(mesh, HARD.has(key) && !mesh.userData.breached);
+        // (+ a piece in RUIN, algSangar setPieceState — 2026-10-24: its broken walls and slumped bags, soft cover)
+        yield* circlesOf(mesh, HARD.has(key) && !mesh.userData.breached && mesh.userData.pieceState !== "ruin");
       }
     },
   });

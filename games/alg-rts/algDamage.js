@@ -184,6 +184,10 @@ export function createAlgDamage(app, { showroom = {}, structures = null, ambienc
     blast(x, z, size = 10) {
       app.algWire?.blast(x, z, size);
       app.algTown?.damage?.blast(x, z, size);   // (the town's houses break and collapse: algTownDamage.js)
+      // (+ the small pieces, 2026-10-24 — algPieceDamage.js: the field walls, the prickly-pear hedges, the depots)
+      app.algFieldWalls?.damage?.blast(x, z, size);
+      app.algHedges?.damage?.blast(x, z, size);
+      app.algPointDepots?.blast(x, z, size);
       breachWalls(x, z, size);
       hitHouses(x, z, size);
     },

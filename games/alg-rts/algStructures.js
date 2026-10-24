@@ -77,6 +77,8 @@ const STATS = {
 
 const _v = new THREE.Vector3();
 
+// the pieces whose RUIN men walk over (bags, dry stone slumped): their nav footprint opened (wreck)
+const LOW_RUINS = new Set(["sangar", "mgNest", "mortarPit", "fortPoint", "armsCache"]);
 export function createAlgStructures({ app, showroom, producers, units }) {
   const list = [];
   const byMesh = new Map();
@@ -262,6 +264,10 @@ export function createAlgStructures({ app, showroom, producers, units }) {
     // goes; the old procedural pieces are charred in place as before.
     if (setPieceState(rec.mesh, "ruin")) {
       app.algCombat?.fx?.explosion?.(s.position.x, s.position.y + 0.5, s.position.z, { size: 9 + Math.min(10, rec.fp.hx), dust: true });
+      // (2026-10-24, building damage B: a LOW piece's ruin is bags and stones slumped — men cross it: its footprint
+      // opened; its cover only soft from now, algCover. A mirador, a tower, the post keep their broken bulk.)
+      const nf = rec.mesh.userData.navFp;
+      if (nf && LOW_RUINS.has(s.typeKey) && !nf.noFoot) { app.navGrid?.removeFootprint?.(nf); app.navGrid?.rebuild?.(); rec.mesh.userData.navFp = null; }
       app.algDamage?.coverChanged?.();
     } else rec.mesh.traverse((o) => { if (o.isMesh && o.material && !o.material.transparent) o.material = charMaterial(o.material); });
     // Its crew (a mortar pit's: algBuild.js) gone with it.

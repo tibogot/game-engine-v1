@@ -491,7 +491,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     for (const c of s.mesh.children) if (c.userData.late != null) c.visible = true;   // (the shared material: a finished piece costs what it always did)
     retire(s);
     const B = BUILDS[s.key];
-    if (B.structure) structures.addBuilt(B.structure, s.mesh);
+    // (its nav footprint with it: a LOW piece's ruin opens it — algStructures wreck)
+    if (B.structure) { s.mesh.userData.navFp = s.fp ?? null; structures.addBuilt(B.structure, s.mesh); }
     // A CREW (a mortar pit's two appelés: algMortarPit.js) — idle figures in the soldiers' crowd, no
     // draw of their own; taken away when the piece falls (algStructures wreck).
     const crew = s.mesh.geometry.userData.crew;

@@ -153,10 +153,15 @@ export async function createAlgCombat(app, { units, structures: built = null, co
   // A SHELL HITTING SOMETHING (2026-10-22, the Fire Pro pass — a bazooka, the recoilless, a tank gun on a vehicle or a
   // wall; it was a small procedural blast): the fuel-fireball book small (~5 m) at the hit's height — a warhead going
   // off on armour, not earth thrown up (the "rocket impact" book is the ground's) — and its flash.
-  if (shots.has("blast")) fx.shellHit = (x, y, z) => {
+  // (+ what it BREAKS, 2026-10-24 — building damage, A: a tank gun, the recoilless or a bazooka round never reached
+  // algDamage — a house held by the enemy stood any number of tank shells; now the round bursts on what it hit: the house
+  // the men are in, the sandbags, the wire — its size from its damage: the AMX-13 / EBR gun (26) ~8.5, a bazooka (80)
+  // ~10.7, the recoilless (90) ~11.1: a small house down in 4-5 tank shells, the mosque in ~15 — CoH's rhythm)
+  if (shots.has("blast")) fx.shellHit = (x, y, z, { amount = 26 } = {}) => {
     const gy = app.getWorldHeight?.(x, z) ?? y, k = 0.5;
     fx.flash(x, y, z, 0.08);
     shots.play("blast", x, z, { size: shots.meta("blast").size * k, wind: wind(), lift: Math.max(0, y - gy - 1.2 * k) });
+    app.algDamage?.blast(x, z, 7.5 + Math.min(120, amount) * 0.04);
   };
 
   // A MACHINE OR A BUILDING DESTROYED (2026-10-22, the Fire Pro pass — it was the old procedural blast and the flame

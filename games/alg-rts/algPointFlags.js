@@ -13,6 +13,7 @@
 // CHEAP: the cloth is simulated only for flags ON SCREEN within SIM_RANGE (the others freeze
 // where they are) — in play one to three move at a time; two shared textures assigned once (a
 // capture never reloads or recompiles anything); the depots are two InstancedMeshes.
+import { createPieceDamage } from "./algPieceDamage.js";
 import * as THREE from "three";
 import { createFlag } from "../../v3/props/liveProps.js";
 import { buildAmmoDump, buildFuelDepot } from "../../v3/render/objects/rtsAlgeria.js";
@@ -170,9 +171,10 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
       }
       app.fogOfWar?.rebuildHeights?.();
       const f = createHouseField();
+      const depots = [];
       for (const pt of supplyPts) {
         const kind = pt.res === "fuel" ? "fuel" : "mun", px = pt.position.x, pz = pt.position.z;
-        f.add(kind, "intact", px, H(px, pz) - 0.05, pz, yaw, 1);
+        depots.push({ id: f.add(kind, "intact", px, H(px, pz) - 0.05, pz, yaw, 1), x: px, z: pz });
         for (const [part, lx, lz, ly] of pointWalls(kind, "intact")) {
           const [wx, wz] = local(px, pz, lx, lz);
           f.add(part, "intact", wx, H(wx, wz) - 0.03, wz, yaw + ly, 1);
@@ -181,6 +183,13 @@ export function createAlgPointFlags(app, { economy, navGrid = null }) {
       app.scene.add(f.root);
       app.addPreRenderHook?.(() => f.update(app.camera));
       pointField.field = f;
+      // THE DEPOT BREAKS (2026-10-24, building damage C — algPieceDamage): shells and bombs on a point wear its drums,
+      // crates and mast down to the damaged, then the burnt ruin model; the POINT itself is untouched (CoH: a point's
+      // dressing breaks, the point stays — captured, held, paying as before)
+      app.algPointDepots = createPieceDamage(app, {
+        rows: depots.map((d) => ({ x: d.x, z: d.z, r: 4, state: "intact" })), hp: 400, per: (s) => Math.max(0, s - 4) * 16, dust: 7,
+        onState: (i, st) => f.setState(depots[i].id, st),
+      });
     }).catch((e) => { console.warn("[points] the Blender point did not load:", e); buildOld(); });
   }
 

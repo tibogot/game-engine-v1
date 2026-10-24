@@ -430,7 +430,8 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     for (const f of known) {
       const n = known.filter((o) => dist(o.position, f.position) < 15).length;
       if (n < P.harass.minKnown) continue;
-      const sc = n * 10 - dist(f.position, from) / 20;
+      // (a squad IN A HOUSE: worth more — the bombs bring the house down on it, 2026-10-24 building damage E)
+      const sc = n * 10 * (f.inside ? 1.6 : 1) - dist(f.position, from) / 20;
       if (sc > bestS) { bestS = sc; best = { at: { x: f.position.x, z: f.position.z }, n }; }
     }
     return best;
