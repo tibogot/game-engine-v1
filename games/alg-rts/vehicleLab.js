@@ -91,7 +91,7 @@ export function vehicleOf(geo, key) {
   for (const x of geo.userData.extra ?? []) g.add(x);
   // An emplacement's gun (the mortar, the MG nest's): its own mesh on its pivot.
   let gunMesh = null;
-  if (geo.userData.gun) { const gm = new THREE.Mesh(geo.userData.gun.geo, rtsObjectMaterialTinted(FR_PAINT_TINT)); gm.position.fromArray(geo.userData.gun.pivot); gm.castShadow = true; g.add(gm); gunMesh = gm; }
+  if (geo.userData.gun) { const gm = new THREE.Mesh(geo.userData.gun.geo, geo.userData.gun.material ?? rtsObjectMaterialTinted(FR_PAINT_TINT));   /* (a Blender gun: its own baked material — the mortar pit's 81 mm) */ gm.position.fromArray(geo.userData.gun.pivot); gm.castShadow = true; g.add(gm); gunMesh = gm; }
   let gear = null;
   if (geo.userData.gear) {
     gear = new THREE.Mesh(geo.userData.gear, rtsRunningGearMaterial(FR_PAINT_TINT, key));

@@ -19,12 +19,7 @@ export const META = {
   parcAuto: { side: "fr", kind: "base", maps: ["aures"], status: "jeu" },
   parcAutoNeuf: { side: "fr", kind: "base", maps: ["abdi", "cote", "kantara"], status: "verdict" },
   helisurface: { side: "fr", kind: "base", maps: ALL, status: "jeu" },
-  sacsNidMg: { side: "fr", kind: "defense", maps: ALL, status: "jeu" },
-  sacsPointFort: { side: "fr", kind: "defense", maps: ALL, status: "jeu" },
   sacsDeSable: { side: "fr", kind: "defense", maps: ALL, status: "jeu" },
-  mortier: { side: "fr", kind: "defense", maps: ALL, status: "jeu" },
-  pointRavit: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
-  pointCarbu: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
   mechtaHouse: { side: "civil", kind: "village", maps: ["aures"], status: "ancien" },
   mechtaPierre: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
   maisonPierre: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
@@ -54,20 +49,14 @@ export const META = {
   rocheDalle: { side: "nature", kind: "nature", maps: ["kantara"], status: "jeu" },
   // (2026-10-21: the Blender requisition points — in the game — and the Blender sangar)
   // (the old depots: only a fallback in the game since the Blender points — their entries keep the capture panel)
-  pointRavit: { side: "fr", kind: "point", maps: ALL, status: "ancien" },
-  pointCarbu: { side: "fr", kind: "point", maps: ALL, status: "ancien" },
   pointBlender_fuel: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
   pointBlender_mun: { side: "fr", kind: "point", maps: ALL, status: "jeu" },
   sangarBlender: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
-  sangarEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   cacheBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
   refugeBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
   infirmBlender: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
-  cacheEtats: { side: "fln", kind: "fln", maps: ALL, status: "verdict" },
   ecranBlender: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
-  ecranEtats: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   miradorBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
-  miradorEtats: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   barbelesBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   nidBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   mortierBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
@@ -76,7 +65,6 @@ export const META = {
   posteBlender: { side: "fr", kind: "base", maps: ALL, status: "verdict" },
   posteAvanceBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   secoursBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
-  barbelesEtats: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
 };
 export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps: [], status: "jeu" };
 
@@ -84,7 +72,7 @@ export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps
 // labels translated word by word (the old lab's data is French and stays so).
 export const NAMES = {
   enclosFerme: "Farm thorn pen (new)", zeriba: "Zeriba (new)", sacsDeSable: "Sandbag wall", port: "Fishing port (new)",
-  sacsNidMg: "MG nest (sim bags)", sacsPointFort: "Strongpoint (sim bags)", sacsPoste: "Post (sim bags)",
+  sacsPoste: "Post (sim bags)",
   mechtaHouse: "Mechta house", poste: "French post", parcAuto: "Motor pool", parcAutoNeuf: "Motor pool (new, Blender)",
   blanche_maison: "Whitewashed house: two storeys", blanche_cour: "Whitewashed house: courtyard", blanche_haute: "Whitewashed house: tall",
   blanche_boutique: "Whitewashed house: shop", villageBlanc: "Whitewashed village", helisurface: "Helipad",
@@ -93,17 +81,11 @@ export const NAMES = {
   ruineRomaine: "Roman ruin", colonne: "Roman column", colonnade: "Colonnade", voie: "Roman road", arc: "Trajan's arch",
   pressoir: "Oil press", rocheBanc: "Rock: big shelf", rocheBloc: "Rock: block", rocheDalle: "Rock: low slab", grotte: "FLN cave",
   maisonPierre: "Stone house (HQ)", mechtaPierre: "Mechta (new)", hameau: "Hamlet (new)", dechraNouveau: "Dechra (new)",
-  ksarNouveau: "Ksar (new)", postePhoto: "Post (photo detail)", mortier: "Mortar pit", campFln: "FLN camp",
-  pointRavit: "Point: munitions (old depot) + capture marks", pointCarbu: "Point: fuel (old depot) + capture marks",
-  pointBlender_fuel: "Requisition point: fuel (Blender)", pointBlender_mun: "Requisition point: munitions (Blender)",
-  sangarBlender: "Sangar (Blender) + construction", sangarEtats: "Sangar (Blender): states",
-  cacheBlender: "Arms cache (Blender) + construction", cacheEtats: "Arms cache (Blender): states",
-  ecranBlender: "Ambush screen (Blender) + construction", ecranEtats: "Ambush screen (Blender): states",
-  miradorBlender: "Mirador (Blender) + construction", miradorEtats: "Mirador (Blender): states",
-  nidBlender: "MG nest (Blender) + construction",
-  mortierBlender: "Mortar pit (Blender) + construction", fortBlender: "Fortified point (Blender) + construction", projBlender: "Searchlight tower (Blender) + construction", posteBlender: "French post (Blender)", posteAvanceBlender: "Forward post (Blender) + construction", refugeBlender: "FLN refuge (Blender) + construction", infirmBlender: "FLN infirmary (Blender) + construction", secoursBlender: "Aid station (Blender) + construction",
-  barbelesBlender: "Barbed wire (Blender) + construction", barbelesEtats: "Barbed wire (Blender): states",
-};
+  ksarNouveau: "Ksar (new)", postePhoto: "Post (photo detail)", campFln: "FLN camp",
+    pointBlender_fuel: "Requisition point: fuel", pointBlender_mun: "Requisition point: munitions",
+  sangarBlender: "Sangar",   cacheBlender: "Arms cache",   ecranBlender: "Ambush screen",   miradorBlender: "Mirador",   nidBlender: "MG nest",
+  mortierBlender: "Mortar pit", fortBlender: "Fortified point", projBlender: "Searchlight tower", posteBlender: "French post (Blender)", posteAvanceBlender: "Forward post", refugeBlender: "FLN refuge", infirmBlender: "FLN infirmary", secoursBlender: "Aid station",
+  barbelesBlender: "Barbed wire", };
 const WORDS = [
   ["(LE JEU)", "(THE GAME)"], ["(KIT DU JEU)", "(GAME KIT)"], ["NOUVEAU STANDARD", "NEW STANDARD"], ["NOUVELLE", "NEW"], ["NOUVEAU", "NEW"],
   ["SACS SIMULÉS", "SIM BAGS"], ["SACS DE SABLE", "SANDBAGS"], ["DÉTAIL PHOTO", "PHOTO DETAIL"], ["DÉTAIL", "DETAIL"], ["variante", "variant"],

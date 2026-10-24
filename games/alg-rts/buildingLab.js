@@ -11,10 +11,8 @@ import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanCo
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { buildSandstoneCave } from "./algCave.js";
 import { buildCampV2 } from "./algAlnCamp.js";
-import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildMirador, buildMortarPit, buildSangar } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
 import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
 import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
@@ -23,16 +21,10 @@ import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
 import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
-import { buildAmmoDump, buildFuelDepot } from "../../v3/render/objects/rtsAlgeria.js";
 import { createPointMark } from "./algPointMarks.js";
-import { buildPointMast, pointMastMaterial } from "./algPointMast.js";
-import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
-import { drawFlnDataUrl, drawTricoloreDataUrl } from "./algFlag.js";
 import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall, buildFrSandbagWallBreached } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildFortPointPiece, buildFrenchPostPiece, buildHelipadPiece, buildMgNestPiece, buildSandbagWallPiece, loadSandbags, loadSandbagWall } from "./algSandbags.js";
-import { buildFlnInfirmary, buildFortPoint, buildMgNest, buildRefuge, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
-import { buildRadioStation, buildTent } from "../../v3/render/objects/rtsFirebaseProps.js";
+import { buildFrenchPostPiece, buildHelipadPiece, buildSandbagWallPiece, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
 await loadSandbagWall();
@@ -171,78 +163,28 @@ function pointWithWalls(kind, state) {
   return g;
 }
 
-// THE SUPPLY POINT (2026-10-11, you: "add the requisition point in my building lab"): the GAME's
-// marks on the LEFT (its thin solid ring, algUnits villageRings), the NEW ones on the RIGHT
-// (algPointMarks.js: dashed → filled → solid, the disc, the capture wave and streaks); the same
-// depot and flag on both. The panel's "Point" buttons set the state and play a capture.
-// (2026-10-11, you: "I have different points in the game — shouldn't we place them in the lab?")
-// THE GAME'S POINT KINDS (algEconomy.js, algPointFlags.js): a SUPPLY point pays munitions (crates)
-// or fuel (drums), 22 m, a 5 m pole beside the depot; a VILLAGE counts for the score and pays all
-// three, 40 m, a 7 m pole on open ground near its centre (a house stands for the village here).
-const POINT_KINDS = {
-  mun: { R: 11, pole: 5, mast: 9, cloth: [1.6, 1.07], build: () => buildAmmoDump() },
-  fuel: { R: 11, pole: 5, mast: 9, cloth: [1.6, 1.07], build: () => buildFuelDepot() },
-};
+// THE SUPPLY POINT'S CAPTURE MARKS (2026-10-11, you: "add the requisition point in my building lab"; on the Blender
+// point since 2026-10-25 — the old depot's entries gone): algPointMarks round the mast (dashed → filled → solid, the
+// disc, the capture wave and streaks), the lab's « Piece » box sets the state, plays a capture, sizes the ring
+// (ours 11 m, CoH 3's ~11 m — measured, assets-src/refs/coh3/README.md).
+const POINT_KINDS = { mun: { R: 11 }, fuel: { R: 11 } };
 const POINT = { game: null, neu: null, kind: null };
-function supplyPoint(which, kindKey = "mun") {
-  const K = POINT_KINDS[kindKey];
+function pointMarks(kindKey) {
   POINT.kind = kindKey;
-  const geo = K.build();
-  const fp = geo.userData.footprint ?? { hx: 1.5, hz: 1.5 };
-  const extra = [];
-  // The flag: a pole and a flat cloth that climbs with the hold (the game's waves: algPointFlags).
-  // The GAME's thin pole on the left; the NEW MAST on the right (algPointMast.js: tapered, guyed, a
-  // concrete footing), where the point marks are new too.
-  // The GAME: its pole beside the depot (a village's on open ground off its centre). The NEW: the mast
-  // AT THE CENTRE, as CoH's (the disc and the column of light round it), the depot / house moved
-  // beside it (2026-10-11: at 11 m a village's pole at (-9, 7) stood on the ring).
-  if (which !== "game") geo.translate(fp.hx + 2.6, 0, 0);
-  const [px, pz] = which === "game" ? (K.poleAt ?? [-fp.hx - 0.4, fp.hz * 0.6]) : [0, 0];
-  const H = which === "game" ? K.pole : K.mast;
-  const pole = which === "game"
-    ? new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, H, 8).translate(0, H / 2, 0), new THREE.MeshStandardNodeMaterial({ color: 0x5a5650, roughness: 0.6, metalness: 0.4 }))
-    : new THREE.Mesh(buildPointMast({ height: H, guyR: H * 0.4, away: Math.PI }).geometry, pointMastMaterial());   // the wires away from the depot / house
-  pole.position.set(px, 0, pz);
-  pole.castShadow = true;
-  const tex = { player: labFlagTex(drawTricoloreDataUrl(256)), enemy: labFlagTex(drawFlnDataUrl(256)) };
-  const [cw, ch] = K.cloth;
-  const cloth = new THREE.Mesh(new THREE.PlaneGeometry(cw, ch).translate(cw / 2, ch / 2, 0), new THREE.MeshStandardNodeMaterial({ map: tex.player, side: THREE.DoubleSide, roughness: 0.9 }));
-  cloth.castShadow = true;
-  pole.add(cloth);
-  extra.push(pole);
-  const flag = (side, hold) => {
-    cloth.visible = !!side && hold > 0;
-    if (side) cloth.material.map = tex[side];
-    cloth.position.y = 0.5 + hold * (H - 0.15 - ch - 0.5);
+  const make = (r) => createPointMark({ radius: r });
+  const marks = make(POINT_KINDS[kindKey].R);
+  // A new radius: the marks rebuilt in place (their geometry is made at their radius).
+  const resize = (r) => {
+    const parent = marks.group.parent, next = make(r);
+    parent?.remove(marks.group);
+    marks.dispose();
+    parent?.add(next.group);
+    Object.assign(marks, next);
   };
-  let marks, resize;
-  if (which === "game") {
-    const ring = new THREE.Mesh(gameRingGeo(K.R), new THREE.MeshBasicNodeMaterial({ transparent: true, opacity: 0.55, depthWrite: false }));
-    ring.position.y = 0.06;
-    ring.renderOrder = RENDER_ORDER.ON_GROUND;
-    extra.push(ring);
-    const GAME_COL = { player: 0x58a8ff, enemy: 0xff6a5a, cut: 0xe0a040, null: 0xd8cfae };
-    marks = { set: ({ owner, cut }) => ring.material.color.set(GAME_COL[cut && owner === "player" ? "cut" : owner]), capture() {}, update() {} };
-    resize = (r) => { ring.geometry.dispose(); ring.geometry = gameRingGeo(r); };
-  } else {
-    const make = (r) => { const m = createPointMark({ radius: r }); m.group.rotation.y = 0.6; return m; };   // undo the turntable's −0.6: the fill starts at the top
-    marks = make(K.R);
-    extra.push(marks.group);
-    // A new radius: the marks rebuilt in place (their geometry is made at their radius).
-    resize = (r) => {
-      const parent = marks.group.parent, next = make(r);
-      parent?.remove(marks.group);
-      marks.dispose();
-      parent?.add(next.group);
-      Object.assign(marks, next);
-    };
-  }
-  geo.userData.extra = extra;
-  POINT[which === "game" ? "game" : "neu"] = { marks, flag, resize };
-  return geo;
+  POINT.game = null;
+  POINT.neu = { marks, flag: () => {}, resize };   // (the flag: the game's, algPointFlags — not in the lab)
+  return marks.group;
 }
-const gameRingGeo = (r) => new THREE.RingGeometry(r * 0.975, r, 96).rotateX(-Math.PI / 2);
-function labFlagTex(url) { const t = new THREE.TextureLoader().load(url); t.colorSpace = THREE.SRGBColorSpace; return t; }
 
 // ?seed=: the new pieces' variant (the panel's "Variante suivante").
 const SEED = Number(new URLSearchParams(location.search).get("seed")) || 0;
@@ -316,14 +258,6 @@ export const BUILDINGS = {
     label: "Port (nouveau)", gap: 60, before: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); return g; },
     after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [buildPortBlock({ seed: 1 + SEED })]; return g; },
     tags: ["—", `PORT · NOUVEAU · variante ${SEED + 1}`], note: "le port de pêche : maisons coloniales chaulées aux toits de tuiles canal, le magasin, le môle et son phare, les lamparos.",
-  },
-  sacsNidMg: {
-    label: "Nid de MG (sacs)", gap: 10, before: () => buildMgNest({}), after: () => buildMgNestPiece((o) => buildMgNest(o)),
-    tags: ["NID DE MG (LE JEU)", "NID DE MG · SACS SIMULÉS"], note: "le nid du jeu à gauche, ses sacs simulés à droite (la couronne et le toit).",
-  },
-  sacsPointFort: {
-    label: "Point fortifié (sacs)", gap: 13, before: () => buildFortPoint({}), after: () => buildFortPointPiece((o) => buildFortPoint(o)),
-    tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · SACS SIMULÉS"], note: "le point fortifié du jeu à gauche, ses trois murs simulés à droite.",
   },
   sacsPoste: {
     label: "Poste (sacs)", gap: 42, before: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), after: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
@@ -461,61 +395,48 @@ export const BUILDINGS = {
     after: () => { const g = buildFrenchPost({ detail: 2, footStone: MAT.limestone }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); return g; },
     tags: ["POSTE (LE JEU)", "POSTE · DÉTAIL PHOTO"], note: "le poste du jeu à gauche, le même avec le grain et le relief des photos à droite.",
   },
-  mortier: {
-    label: "Fosse de mortier", gap: 7, before: () => buildMortarPit(), after: () => buildMortarPitV2(),
-    tags: ["MORTIER (LE JEU)", "MORTIER · NOUVEAU"], note: "la fosse du jeu à gauche, la nouvelle à droite.",
-  },
   campFln: {
     label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildCampV2(),
     tags: ["CAMP (LE JEU)", "CAMP · NOUVEAU STANDARD"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
   },
-  pointRavit: {
-    label: "Point : munitions", gap: POINT_KINDS.mun.R + 3, before: () => supplyPoint("game", "mun"), after: () => supplyPoint("new", "mun"),
-    tags: ["MUNITIONS (LE JEU)", "MUNITIONS · NOUVEAU"], note: "les marques du jeu à gauche, les nouvelles à droite — « Point » : l'état, la capture, le rayon.",
-  },
   // THE REQUISITION POINT IN BLENDER (2026-10-20, tools/blender/supplyPoint.py — you: "it doesn't look AAA at all,
   // and still my old sandbags"): the mast and the depot as one piece, the cloth-simulated bags; intact LEFT,
-  // damaged MIDDLE, ruin RIGHT (the game's old point: « Point : carburant / munitions » below).
-  ...Object.fromEntries([["fuel", "carburant"], ["mun", "munitions"]].map(([ty, fr]) => [`pointBlender_${ty}`, {
-    label: `Point (Blender) : ${fr}`, gap: 16, yaw: 1.5 * Math.PI - 0.5,   /* (its front is +x: turned to the camera as the houses' -z) */ prepare: () => Promise.all([loadHouses("points"), loadPointWalls()]),
-    before: () => { console.log("[points]", houseStats()); return labPiece(pointWithWalls(ty, "intact")); }, middle: () => labPiece(pointWithWalls(ty, "damaged")), after: () => labPiece(pointWithWalls(ty, "ruin")),
-    tags: [`${fr.toUpperCase()} · INTACT`, `${fr.toUpperCase()} · ENDOMMAGÉ`, `${fr.toUpperCase()} · DÉTRUIT`], note: "le point de ravitaillement refait dans Blender (mât, dépôt, sacs simulés) dans ses trois états.",
+  // damaged MIDDLE, ruin RIGHT; the capture marks round the intact one's mast (« Piece »).
+  ...Object.fromEntries([["fuel", "carburant", "FUEL"], ["mun", "munitions", "MUNITIONS"]].map(([ty, fr, en]) => [`pointBlender_${ty}`, {
+    label: `Point : ${fr}`, gap: 16, yaw: 1.5 * Math.PI - 0.5,   /* (its front is +x: turned to the camera as the houses' -z) */ prepare: () => Promise.all([loadHouses("points"), loadPointWalls()]),
+    before: () => { const g = pointWithWalls(ty, "intact"); g.add(pointMarks(ty)); return labPiece(g); }, middle: () => labPiece(pointWithWalls(ty, "damaged")), after: () => labPiece(pointWithWalls(ty, "ruin")),
+    tags: [`${en} · INTACT`, `${en} · DAMAGED`, `${en} · DESTROYED`], note: "the requisition point (Blender: mast, depot, simulated bags) in its three states; the capture marks round the intact one (« Piece »).",
   }])),
   // THE SANGAR IN BLENDER (2026-10-21, tools/blender/sangar.py, algSangar.js): the game's old one LEFT, the new one
   // MIDDLE — its CONSTRUCTION in the panel (stone by stone, the game's own site material) — damaged RIGHT;
   // « Sangar (Blender) : états » shows intact / damaged / ruin.
   sangarBlender: {
-    label: "Sangar (Blender)", gap: 7, yaw: Math.PI - 0.5, construction: true, prepare: () => Promise.all([loadSangar(), loadHouses("sangar")]),
-    before: () => buildSangar(),
-    middle: () => {
+    label: "Sangar", gap: 7, yaw: Math.PI - 0.5, construction: true, prepare: () => Promise.all([loadSangar(), loadHouses("sangar")]),
+    before: () => {
       const g = sangarGeometry().clone(), site = g.userData.siteMaterial();
       g.userData = { ...g.userData, labMaterial: site.material };
       SITE = { set: site.set, stencilShown: () => false, sock: null };
       site.set(1);
       return g;
     },
-    after: () => labPiece(sangarDetailed(houseMesh("sangar", "damaged"))),
-    tags: ["SANGAR (LE JEU)", "SANGAR · NOUVEAU", "SANGAR · ENDOMMAGÉ"], note: "le sangar du jeu à gauche, le nouveau en pierres sèches (Blender) au milieu — « Construction » : pierre par pierre, comme en jeu — endommagé à droite.",
+    middle: () => labPiece(sangarDetailed(houseMesh("sangar", "damaged"))),
+    after: () => labPiece(sangarDetailed(houseMesh("sangar", "ruin"))),
+    tags: ["SANGAR · NEW", "SANGAR · DAMAGED", "SANGAR · DESTROYED"], note: "the dry-stone sangar (Blender) — « Construction »: stone by stone, as in the game — damaged, destroyed.",
   },
   // THE ARMS CACHE IN BLENDER (2026-10-21, tools/blender/armsCache.py): the game's old one LEFT, the new one MIDDLE
   // (its construction in the panel), damaged RIGHT; « Cache d'armes (Blender) : états » the three states.
   cacheBlender: {
-    label: "Cache d'armes (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadArmsCache(),
-    before: () => buildArmsCache(),
-    middle: () => {
+    label: "Cache d'armes", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadArmsCache(),
+    before: () => {
       const g = armsCacheGeometry().clone(), site = g.userData.siteMaterial();
       g.userData = { ...g.userData, labMaterial: site.material };
       SITE = { set: site.set, stencilShown: () => false, sock: null };
       site.set(1);
       return g;
     },
-    after: () => labPiece(sangarDetailed(houseMesh("arms", "damaged"))),
-    tags: ["CACHE (LE JEU)", "CACHE · NOUVELLE", "CACHE · ENDOMMAGÉE"], note: "la cache d'armes du jeu à gauche, la nouvelle (matmora et gourbi en pierres sèches, Blender) au milieu — « Construction » — endommagée à droite.",
-  },
-  cacheEtats: {
-    label: "Cache d'armes (Blender) : états", gap: 11, yaw: Math.PI - 0.5, prepare: () => loadArmsCache(),
-    before: () => labPiece(sangarDetailed(houseMesh("arms", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("arms", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("arms", "ruin"))),
-    tags: ["CACHE · INTACTE", "CACHE · ENDOMMAGÉE", "CACHE · DÉTRUITE"], note: "la cache d'armes en pierres sèches dans ses trois états.",
+    middle: () => labPiece(sangarDetailed(houseMesh("arms", "damaged"))),
+    after: () => labPiece(sangarDetailed(houseMesh("arms", "ruin"))),
+    tags: ["ARMS CACHE · NEW", "ARMS CACHE · DAMAGED", "ARMS CACHE · DESTROYED"], note: "the arms cache (matmora and dry-stone gourbi, Blender) — « Construction » — damaged, destroyed.",
   },
   // THE AMBUSH SCREEN IN BLENDER (2026-10-21, tools/blender/ambushScreen.py): the game's old one LEFT, the new one
   // MIDDLE — the dry-stone footing, the scrub the engine's plants (its construction in the panel: the footing, then the
@@ -532,26 +453,27 @@ export const BUILDINGS = {
   // THE MORTAR PIT IN BLENDER (2026-10-21, tools/blender/mortarPit.py): the game's LEFT, the new one MIDDLE (its
   // construction in the panel: the berm, YOUR ring course by course, the stores, the mortar last), damaged RIGHT.
   mortierBlender: {
-    label: "Fosse de mortier (Blender)", gap: 10, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMortarPit(),
-    before: () => buildMortarPitV2(),
-    middle: () => {
+    label: "Fosse de mortier", gap: 10, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMortarPit(),
+    before: () => {
       const geo = mortarPitGeometry(), site = geo.userData.siteMaterial();
       const mesh = kitView(geo);
       mesh.material = site.material;
       const bags = siteBags(mesh);
       SITE = { set: (p) => { site.set(p); bags?.set(p); }, stencilShown: () => false, sock: null };
       SITE.set(1);
-      return labPiece(mesh);
+      // (its 81 mm: drawn by the lab on its pivot — the lab's « Fire » lobs the game's bombs from it)
+      const g = labPiece(mesh); g.userData.gun = geo.userData.gun;
+      return g;
     },
-    after: () => labPiece(houseMesh("mortar", "damaged")),
-    tags: ["MORTIER (LE JEU)", "MORTIER · NOUVEAU", "MORTIER · ENDOMMAGÉ"], note: "la fosse de mortier du jeu à gauche, la nouvelle (Blender : berme, munitions, piquets, le mortier de 81 ; vos sacs simulés) au milieu — « Construction » — endommagée à droite.",
+    middle: () => labPiece(houseMesh("mortar", "damaged")),
+    after: () => labPiece(houseMesh("mortar", "ruin")),
+    tags: ["MORTAR PIT · NEW", "MORTAR PIT · DAMAGED", "MORTAR PIT · DESTROYED"], note: "the mortar pit (Blender: berm, stores, stakes, the 81 mm; your simulated bags) — « Construction » — damaged, destroyed.",
   },
   // THE FORTIFIED POINT IN BLENDER (2026-10-21, tools/blender/fortPoint.py): the game's LEFT, the new one MIDDLE (the
   // spoil banked outside YOUR simulated walls, the stores inside; its construction in the panel), damaged RIGHT.
   fortBlender: {
-    label: "Point fortifié (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadFortPoint(),
-    before: () => buildFortPointPiece((o) => buildFortPoint(o)),
-    middle: () => {
+    label: "Point fortifié", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadFortPoint(),
+    before: () => {
       const geo = fortPointGeometry(), site = geo.userData.siteMaterial();
       const mesh = kitView(geo);
       mesh.material = site.material;
@@ -560,8 +482,9 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(mesh);
     },
-    after: () => labPiece(houseMesh("point", "damaged")),
-    tags: ["POINT FORTIFIÉ (LE JEU)", "POINT FORTIFIÉ · NOUVEAU", "POINT FORTIFIÉ · ENDOMMAGÉ"], note: "le point fortifié du jeu à gauche, le nouveau (Blender : la terre rejetée contre vos murs simulés, caisses, jerricans, téléphone de campagne et son dérouleur, pelle et pioche, bâche) au milieu — « Construction » — endommagé à droite.",
+    middle: () => labPiece(houseMesh("point", "damaged")),
+    after: () => labPiece(houseMesh("point", "ruin")),
+    tags: ["FORTIFIED POINT · NEW", "FORTIFIED POINT · DAMAGED", "FORTIFIED POINT · DESTROYED"], note: "the fortified point (Blender: spoil against your simulated walls, crates, jerrycans, field telephone, tarp) — « Construction » — damaged, destroyed.",
   },
   // THE SEARCHLIGHT TOWER IN BLENDER (2026-10-21, tools/blender/searchlightTower.py): the game's LEFT, the new one
   // MIDDLE (the lattice, the deck, the caged ladder, the searchlight's head on its own; the generator shed and YOUR
@@ -570,9 +493,8 @@ export const BUILDINGS = {
   // construction in the panel), damaged RIGHT. The forward post: a French radio post in YOUR simulated horseshoe (the
   // old one was the US shelter of the Vietnam kit); the aid station: the army's ridge tent, the red cross.
   posteAvanceBlender: {
-    label: "Poste avancé (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadForwardPost(),
-    before: () => buildRadioStation({}),
-    middle: () => {
+    label: "Poste avancé", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadForwardPost(),
+    before: () => {
       const geo = forwardPostGeometry(), site = geo.userData.siteMaterial();
       const mesh = kitView(geo);
       mesh.material = site.material;
@@ -581,13 +503,13 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(mesh);
     },
-    after: () => labPiece(houseMesh("fwdradio", "damaged")),
-    tags: ["POSTE AVANCÉ (LE JEU)", "POSTE AVANCÉ · NOUVEAU", "POSTE AVANCÉ · ENDOMMAGÉ"], note: "le poste avancé du jeu à gauche (l'abri américain du kit Vietnam), le nouveau (Blender : poste radio français, bâche, groupe à manivelle, mât haubané, le drapeau ; vos sacs simulés) au milieu — « Construction » — endommagé à droite.",
+    middle: () => labPiece(houseMesh("fwdradio", "damaged")),
+    after: () => labPiece(houseMesh("fwdradio", "ruin")),
+    tags: ["FORWARD POST · NEW", "FORWARD POST · DAMAGED", "FORWARD POST · DESTROYED"], note: "the forward post (Blender: French radio post, tarp, hand generator, guyed mast, flag; your simulated bags) — « Construction » — damaged, destroyed.",
   },
   secoursBlender: {
-    label: "Poste de secours (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAidStation(),
-    before: () => buildTent({ medic: true, blastWall: false }),
-    middle: () => {
+    label: "Poste de secours", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAidStation(),
+    before: () => {
       const geo = aidStationGeometry(), site = geo.userData.siteMaterial();
       const mesh = kitView(geo);
       mesh.material = site.material;
@@ -595,13 +517,13 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(mesh);
     },
-    after: () => { const g = new THREE.Group(); g.add(houseMesh("aidtent", "damaged"), markDecal("damaged")); return labPiece(g); },
-    tags: ["AID STATION (THE GAME)", "AID STATION · NEW", "AID STATION · DAMAGED"], note: "le poste de secours du jeu à gauche, le nouveau (Blender : la tente de l'armée, la croix rouge, brancards, caisse médicale, lavabo) au milieu — « Construction » — endommagé à droite.",
+    middle: () => { const g = new THREE.Group(); g.add(houseMesh("aidtent", "damaged"), markDecal("damaged")); return labPiece(g); },
+    after: () => (() => { const g = new THREE.Group(); g.add(houseMesh("aidtent", "ruin"), markDecal("ruin")); return labPiece(g); })(),
+    tags: ["AID STATION · NEW", "AID STATION · DAMAGED", "AID STATION · DESTROYED"], note: "the aid station (Blender: the army's ridge tent, the red cross, stretchers, medical chest) — « Construction » — damaged, destroyed.",
   },
   projBlender: {
-    label: "Tour de projecteur (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSearchlight(),
-    before: () => buildSearchlightTower(),
-    middle: () => {
+    label: "Tour de projecteur", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSearchlight(),
+    before: () => {
       const geo = searchlightGeometry(), site = geo.userData.siteMaterial();
       const mesh = kitView(geo);
       mesh.material = site.material;
@@ -610,13 +532,13 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(mesh);
     },
-    after: () => labPiece(houseMesh("sltower", "damaged")),
-    tags: ["PROJECTEUR (LE JEU)", "PROJECTEUR · NOUVEAU", "PROJECTEUR · ENDOMMAGÉ"], note: "la tour de projecteur du jeu à gauche, la nouvelle (Blender : treillis d'acier, plateforme, échelle à crinoline, la tête du projecteur qui pivote ; le groupe électrogène sous son appentis, vos sacs simulés) au milieu — « Construction » — endommagée à droite.",
+    middle: () => labPiece(houseMesh("sltower", "damaged")),
+    after: () => labPiece(houseMesh("sltower", "ruin")),
+    tags: ["SEARCHLIGHT · NEW", "SEARCHLIGHT · DAMAGED", "SEARCHLIGHT · DESTROYED"], note: "the searchlight tower (Blender: steel lattice, deck, caged ladder, the turning head; the generator shed, your simulated bags) — « Construction » — damaged, destroyed.",
   },
   nidBlender: {
-    label: "Nid de MG (Blender)", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMgNest(),
-    before: () => buildMgNestPiece((o) => buildMgNest(o)),
-    middle: () => {
+    label: "Nid de MG", gap: 11, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMgNest(),
+    before: () => {
       const geo = mgNestGeometry(), site = geo.userData.siteMaterial();
       const mesh = kitView(geo);
       mesh.material = site.material;
@@ -625,31 +547,26 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(mesh);
     },
-    after: () => labPiece(houseMesh("mg", "damaged")),
-    tags: ["NID DE MG (LE JEU)", "NID DE MG · NOUVEAU", "NID DE MG · ENDOMMAGÉ"], note: "le nid de MG du jeu à gauche, le nouveau (Blender, vos sacs simulés) au milieu — « Construction » — endommagé à droite (sans ses sacs : leurs états viendront avec les dégâts).",
+    middle: () => labPiece(houseMesh("mg", "damaged")),
+    after: () => labPiece(houseMesh("mg", "ruin")),
+    tags: ["MG NEST · NEW", "MG NEST · DAMAGED", "MG NEST · DESTROYED"], note: "the MG nest (Blender, your simulated bags) — « Construction » — damaged, destroyed (without their bags: their states come with the damage pass).",
   },
   barbelesBlender: {
-    label: "Barbelés (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadBarbedWire(),
-    before: () => buildBarbedWire(),
-    middle: () => {
+    label: "Barbelés", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadBarbedWire(),
+    before: () => {
       const g = barbedWireGeometry().clone(), site = g.userData.siteMaterial();
       g.userData = { ...g.userData, labMaterial: site.material };
       SITE = { set: site.set, stencilShown: () => false, sock: null };
       site.set(1);
       return g;
     },
-    after: () => labPiece(houseMesh("barbed", "damaged")),
-    tags: ["BARBELÉS (LE JEU)", "BARBELÉS · NOUVEAUX", "BARBELÉS · COUPÉS"], note: "les barbelés du jeu à gauche, les nouveaux (Blender) au milieu — « Construction » — coupés à droite.",
-  },
-  barbelesEtats: {
-    label: "Barbelés (Blender) : états", gap: 9, yaw: Math.PI - 0.5, prepare: () => loadBarbedWire(),
-    before: () => labPiece(houseMesh("barbed", "intact")), middle: () => labPiece(houseMesh("barbed", "damaged")), after: () => labPiece(houseMesh("barbed", "ruin")),
-    tags: ["BARBELÉS · INTACTS", "BARBELÉS · COUPÉS", "BARBELÉS · ÉCRASÉS"], note: "les barbelés dans leurs trois états (coupés : un passage ; écrasés : un véhicule est passé).",
+    middle: () => labPiece(houseMesh("barbed", "damaged")),
+    after: () => labPiece(houseMesh("barbed", "ruin")),
+    tags: ["BARBED WIRE · NEW", "BARBED WIRE · CUT", "BARBED WIRE · CRUSHED"], note: "the barbed wire (Blender) — « Construction » — cut (a gap), crushed (a vehicle went through).",
   },
   miradorBlender: {
-    label: "Mirador (Blender)", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMirador(),
-    before: () => buildMirador(),
-    middle: () => {
+    label: "Mirador", gap: 9, yaw: Math.PI - 0.5, construction: true, prepare: () => loadMirador(),
+    before: () => {
       const geo = miradorGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const bags = (geo.userData.extra ?? []).map((x) => x.clone());
@@ -658,22 +575,15 @@ export const BUILDINGS = {
       site.set(1);
       return labPiece(m);
     },
-    after: () => { const g = houseMesh("mirador", "damaged"); g.add(houseMesh("gear", "damaged", 1)); return labPiece(g); },
-    tags: ["MIRADOR (LE JEU)", "MIRADOR · NOUVEAU", "MIRADOR · ENDOMMAGÉ"], note: "le mirador du jeu à gauche, le nouveau (bois, tôle ondulée, vos sacs simulés sur le plancher) au milieu — « Construction » — endommagé à droite.",
-  },
-  miradorEtats: {
-    label: "Mirador (Blender) : états", gap: 10, yaw: Math.PI - 0.5, prepare: () => loadMirador(),
-    before: () => { const g = houseMesh("mirador", "intact"); const b = (miradorGeometry()?.userData.extra ?? [])[0]?.clone(); if (b) { b.position.y /= 1.3; b.scale.setScalar(1 / 1.3); g.add(b); } g.add(houseMesh("gear", "intact", 1)); return labPiece(g); },
     middle: () => { const g = houseMesh("mirador", "damaged"); g.add(houseMesh("gear", "damaged", 1)); return labPiece(g); },
-    after: () => { const g = houseMesh("mirador", "ruin"); g.add(houseMesh("gear", "ruin", 1)); return labPiece(g); },
-    tags: ["MIRADOR · INTACT", "MIRADOR · ENDOMMAGÉ", "MIRADOR · DÉTRUIT"], note: "le mirador dans ses trois états (les sacs du plancher : l'intact).",
+    after: () => (() => { const g = houseMesh("mirador", "ruin"); g.add(houseMesh("gear", "ruin", 1)); return labPiece(g); })(),
+    tags: ["MIRADOR · NEW", "MIRADOR · DAMAGED", "MIRADOR · DESTROYED"], note: "the mirador (timber, corrugated iron, your simulated bags on the deck) — « Construction » — damaged, destroyed.",
   },
   // THE FLN'S FIELD WORKS IN BLENDER (2026-10-21, tools/blender/flnPosts.py): the game's LEFT, the new one MIDDLE (its
   // construction in the panel; the scrub the game's plants), damaged RIGHT.
   refugeBlender: {
-    label: "Refuge FLN (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadRefuge(),
-    before: () => buildRefuge(),
-    middle: () => {
+    label: "Refuge FLN", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadRefuge(),
+    before: () => {
       const geo = refugeGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const sp = withScreenPlants(m, () => true, geo);
@@ -681,13 +591,13 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(sp.group);
     },
-    after: () => labPiece(withScreenPlants(houseMesh("refuge", "damaged"), () => true, refugeGeometry()).group),
-    tags: ["FLN REFUGE (THE GAME)", "FLN REFUGE · NEW", "FLN REFUGE · DAMAGED"], note: "le refuge du jeu à gauche, le nouveau au milieu (Blender : la butte, la tranchée en pierres sèches, la porte de rondins, la couverture ; les broussailles du jeu sur la butte) — « Construction » — endommagé à droite.",
+    middle: () => labPiece(withScreenPlants(houseMesh("refuge", "damaged"), () => true, refugeGeometry()).group),
+    after: () => labPiece(houseMesh("refuge", "ruin")),
+    tags: ["FLN REFUGE · NEW", "FLN REFUGE · DAMAGED", "FLN REFUGE · DESTROYED"], note: "the FLN refuge (Blender: the mound, the dry-stone trench, the log door; the game's scrub on the mound) — « Construction » — damaged, destroyed.",
   },
   infirmBlender: {
-    label: "Infirmerie FLN (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadInfirmary(),
-    before: () => buildFlnInfirmary(),
-    middle: () => {
+    label: "Infirmerie FLN", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadInfirmary(),
+    before: () => {
       const geo = infirmaryGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const sp = withScreenPlants(m, () => true, geo);
@@ -695,13 +605,13 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(sp.group);
     },
-    after: () => labPiece(withScreenPlants(houseMesh("infirm", "damaged"), () => true, infirmaryGeometry()).group),
-    tags: ["FLN INFIRMARY (THE GAME)", "FLN INFIRMARY · NEW", "FLN INFIRMARY · DAMAGED"], note: "l'infirmerie du jeu à gauche, la nouvelle au milieu (Blender : perches fourchues, bâche rapiécée, paillasses et couvertures — tissu simulé) — « Construction » — endommagée à droite.",
+    middle: () => labPiece(withScreenPlants(houseMesh("infirm", "damaged"), () => true, infirmaryGeometry()).group),
+    after: () => labPiece(houseMesh("infirm", "ruin")),
+    tags: ["FLN INFIRMARY · NEW", "FLN INFIRMARY · DAMAGED", "FLN INFIRMARY · DESTROYED"], note: "the FLN infirmary (Blender: forked poles, patched tarp, pallets and blankets — simulated cloth) — « Construction » — damaged, destroyed.",
   },
   ecranBlender: {
-    label: "Écran d'embuscade (Blender)", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAmbushScreen(),
-    before: () => buildAmbushScreen(),
-    middle: () => {
+    label: "Écran d'embuscade", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadAmbushScreen(),
+    before: () => {
       const geo = ambushScreenGeometry(), site = geo.userData.siteMaterial();
       const m = new THREE.Mesh(geo, site.material); m.castShadow = m.receiveShadow = true;
       const sp = withScreenPlants(m);
@@ -709,24 +619,9 @@ export const BUILDINGS = {
       SITE.set(1);
       return labPiece(sp.group);
     },
-    after: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "damaged")), (s) => Math.abs(s.x) > 1.2 * 1.3).group),
-    tags: ["ÉCRAN (LE JEU)", "ÉCRAN · NOUVEAU", "ÉCRAN · ENDOMMAGÉ"], note: "l'écran d'embuscade du jeu à gauche, le nouveau au milieu (pied en pierres sèches, broussailles : les plantes du jeu) — « Construction » — endommagé à droite.",
-  },
-  ecranEtats: {
-    label: "Écran d'embuscade (Blender) : états", gap: 12, yaw: Math.PI - 0.5, prepare: () => loadAmbushScreen(),
-    before: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "intact"))).group),
     middle: () => labPiece(withScreenPlants(sangarDetailed(houseMesh("ambush", "damaged")), (s) => Math.abs(s.x) > 1.2 * 1.3).group),
     after: () => labPiece(sangarDetailed(houseMesh("ambush", "ruin"))),
-    tags: ["ÉCRAN · INTACT", "ÉCRAN · ENDOMMAGÉ", "ÉCRAN · DÉTRUIT"], note: "l'écran d'embuscade dans ses trois états (détruit : les broussailles brûlées, parties).",
-  },
-  sangarEtats: {
-    label: "Sangar (Blender) : états", gap: 7, yaw: Math.PI - 0.5, prepare: () => loadSangar(),
-    before: () => labPiece(sangarDetailed(houseMesh("sangar", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("sangar", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("sangar", "ruin"))),
-    tags: ["SANGAR · INTACT", "SANGAR · ENDOMMAGÉ", "SANGAR · RUINE"], note: "le sangar en pierres sèches dans ses trois états.",
-  },
-  pointCarbu: {
-    label: "Point : carburant", gap: POINT_KINDS.fuel.R + 3, before: () => supplyPoint("game", "fuel"), after: () => supplyPoint("new", "fuel"),
-    tags: ["CARBURANT (LE JEU)", "CARBURANT · NOUVEAU"], note: "le dépôt de fûts — les marques du jeu à gauche, les nouvelles à droite.",
+    tags: ["AMBUSH SCREEN · NEW", "AMBUSH SCREEN · DAMAGED", "AMBUSH SCREEN · DESTROYED"], note: "the ambush screen (dry-stone footing, the game's scrub) — « Construction » — damaged, destroyed (the scrub burnt, gone).",
   },
 };
 
@@ -790,7 +685,7 @@ export function pieceTools(key, versions) {
   }
   // THE SUPPLY POINT: its state on both sides, a capture played out (3 s, then the flash), the ring's size (ours
   // 22 m / 40 m, Company of Heroes 3's ~11 m — measured, assets-src/refs/coh3/README.md)
-  if (["pointRavit", "pointCarbu"].includes(key)) {
+  if (key.startsWith("pointBlender_")) {
     const both = (fn) => { for (const p of [POINT.game, POINT.neu]) if (p) fn(p); };
     let anim = null, state = { owner: null, capturer: null, progress: 0, cut: false };
     const set = (owner, capturer = owner, progress = owner ? 1 : 0, cut = false) => {
