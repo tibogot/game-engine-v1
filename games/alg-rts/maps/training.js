@@ -78,6 +78,14 @@ export const MAP = {
   // (no trampled-YARD splat at the hamlet and the FLN camp: its 2.4 m photo repeated across the square — you, 2026-10-24,
   // as on the new Aurès)
   splats: { yards: false },
+  // ITS OWN STONES (2026-10-24, you: the small stones "look bad … maybe they don't fit the grass"): the Aurès' — brown mud
+  // and scree photos, a stone every few metres — read as brown potatoes on the camp's green. Grey limestone; on the GRASS
+  // (slot 0) only a rare stone, the scanned lumps among them; the pebbles on the dusty earth (1) and the track's shoulders (6)
+  stones: {
+    grass: { slot: 0, id: "rock_boulder_dry", tint: "#d6d2c8", per100: 0.05, shapes: [["rock", 0.55], ["lump", 0.45]] },
+    earth: { slot: 1, id: "rock_boulder_dry", tint: "#d6d0c4", per100: 0.9, shapes: [["pebble", 0.6], ["rock", 0.4]] },
+    gravel: { slot: 6, id: "rock_boulder_dry", tint: "#ddd6ca", per100: 5.0, shapes: [["pebble", 0.85], ["rock", 0.15]], edge: [0.08, 0.55] },
+  },
   // The knoll (the high-ground / cover lesson), as the level tool raises it.
   knoll: { x: 70, z: -58, r: 30, h: 5 },
   // A FARMSTEAD west of the track (algGame.js places it; algCivilians puts its "shepherd" there —

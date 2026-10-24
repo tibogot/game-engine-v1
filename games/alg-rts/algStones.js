@@ -111,7 +111,7 @@ async function stonePhotos() {
  * ground is a per-instance attribute (`ground`): its layer of the photo array,
  * triplanar, a tile per ~0.9 m, and its ground's tint.
  */
-function stoneMaterial(photos) {
+function stoneMaterial(photos, app = null) {
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0 });
   mat.name = "Stone";
   const layer = int(attribute("ground", "float").add(0.5));
@@ -128,6 +128,9 @@ function stoneMaterial(photos) {
   // A shade lighter than the ground photo: a stone's top catches the sun the
   // flat ground photo already had baked in its shadows.
   mat.colorNode = c.mul(tints.element(layer)).mul(1.12);
+  // (+ the GROUND BLEND, 2026-10-24 — you, on the camp: a lone brown stone on the grass "looks bad": its foot in the
+  // ground's colour over its lowest 12 cm, its hue toward the ground's — algGroundBlend; the scans have theirs)
+  if (app) { mat.userData.gbBase = mat.colorNode; mat.colorNode = groundBlend(app, mat.colorNode, { fade: 0.12 }); }
   return mat;
 }
 
@@ -255,7 +258,7 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
   // (each stone's ground rides along as a per-instance attribute).
   lap.push(["shapes+placing", performance.now()]);
   const photos = await stonePhotos();
-  const mat = stoneMaterial(photos);
+  const mat = stoneMaterial(photos, app);
   const scanMats = {};   // (one per scan photo: the three Namaqualand rocks share theirs)
   lap.push(["photos", performance.now()]);
   const byShape = {};                     // `${shape}|${variant}` → [{ ...p, g }]

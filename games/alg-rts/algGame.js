@@ -633,9 +633,21 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         if (parts) app.algLandmarks.meshes = app.algLandmarks.meshes.map((m, i) => {
           if (!/^Outcrops\d/.test(m.name)) return m;
           const P = parts[i % parts.length], own = i >= parts.length;
-          const n = new m.constructor(own ? P.geometry.clone() : P.geometry, own ? P.material.clone() : P.material, Math.max(1, m.count));
+          // (a 4th variant on 3 scans: its own geometry copy, the SAME material — a cloned one warned "Unable to serialize Texture")
+          const n = new m.constructor(own ? P.geometry.clone() : P.geometry, P.material, Math.max(1, m.count));
           const M = m.matrix.clone(), p = m.position.clone(), q = m.quaternion.clone(), sc = m.scale.clone();
-          for (let k = 0; k < m.count; k++) { m.getMatrixAt(k, M); M.decompose(p, q, sc); p.y -= 0.35 * sc.x; n.setMatrixAt(k, M.compose(p, q, sc)); }
+          // each sunk to the LOWEST ground under its footprint (2026-10-24, you: stones "with holes" — on a slope a
+          // scan's flat base, set at the ground under its centre, left its downhill side in the air: the gap under it, its
+          // thin edges), and 10 cm more
+          const bb = (n.geometry.boundingBox ?? (n.geometry.computeBoundingBox(), n.geometry.boundingBox));
+          const R0 = Math.max(bb.max.x - bb.min.x, bb.max.z - bb.min.z) * 0.45;
+          for (let k = 0; k < m.count; k++) {
+            m.getMatrixAt(k, M); M.decompose(p, q, sc);
+            let lo = app.getWorldHeight(p.x, p.z);
+            for (let a = 0; a < 8; a++) for (const f of [0.5, 1]) lo = Math.min(lo, app.getWorldHeight(p.x + Math.cos(a * 0.785) * R0 * sc.x * f, p.z + Math.sin(a * 0.785) * R0 * sc.x * f));
+            p.y = lo - 0.1;
+            n.setMatrixAt(k, M.compose(p, q, sc));
+          }
           n.count = m.count; n.name = `OutcropScan${i}`;   // (out of the static batch: its own draws)
           n.castShadow = n.receiveShadow = true;
           n.computeBoundingSphere();

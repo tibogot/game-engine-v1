@@ -75,6 +75,9 @@ export function createAlgVillageLife(app, { navGrid = null, showroom = {}, field
   for (const b of fields?.plots ?? []) boxes.push(b);
   // the map's town houses (algGame: MAP.town — not showroom pieces): their footprints
   for (const [, , , , , yaw, fx, fz, hx, hz] of MAP.town?.houses ?? []) boxes.push({ x: fx, z: fz, hx, hz, yaw });
+  // …and the SUPPLY POINTS (their depot and mast: a house field of their own, not showroom pieces — a haystack stood in
+  // the drums of the fuel point by the east gully mouth, 2026-10-24): their ring kept clear
+  for (const p of MAP.supply ?? []) if (Number.isFinite(p?.x)) boxes.push({ x: p.x, z: p.z, hx: 13, hz: 13, yaw: 0 });
   const axes = (b) => [[Math.cos(b.yaw), -Math.sin(b.yaw)], [Math.sin(b.yaw), Math.cos(b.yaw)]];
   const overlaps = (a, b, gap) => {
     for (const [ax, az] of [...axes(a), ...axes(b)]) {
