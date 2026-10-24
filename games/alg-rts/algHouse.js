@@ -81,7 +81,17 @@ export function loadHouses(kit = "houses") {
         // loader multiplied it in: the damaged sangar drew red, 2026-10-21)
         if (m.material) m.material.vertexColors = false;
       }
-      _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near };
+      // THE STENCILS (2026-10-25, you: "is it not better to use decals for lettering?"): a piece's painted words, flat
+      // quads 8 mm off their boards on the kit's stencil sheet (tools/blender/bkit.py stencils) — alpha-tested,
+      // drawn with the near level only, no shadow of their own
+      const decal = gltf.scene.getObjectByName(`${nm}_Decal`);
+      if (decal?.isMesh) {
+        const m = decal.material;
+        m.transparent = false; m.depthWrite = true; m.alphaTest = 0.5; m.side = THREE.FrontSide;
+        if (m.map) m.map.anisotropy = 8;
+        decal.castShadow = false; decal.receiveShadow = true;
+      }
+      _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near, decal: decal?.isMesh ? decal : null };
     }
     // (THE GROUND BLEND as it loads — algGroundBlend KIT_BLEND: before anything can draw it)
     if (KIT_BLEND[kit]) whenGroundBlend((app) => blendKitParts(app, _parts, K.types, KIT_BLEND[kit]));
@@ -105,7 +115,9 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
   g.scale.setScalar(scale);
   const lod = new THREE.LOD();
   lod.name = "HouseLOD";
-  lod.addLevel(P.near.clone(), 0, 0.1);
+  const near = P.near.clone();
+  if (P.decal) { P.near.updateMatrix(); P.decal.updateMatrix(); const d = P.decal.clone(); d.applyMatrix4(P.near.matrix.clone().invert()); near.add(d); }   // (its stencils: the near level's child, the GLB's own placement kept)
+  lod.addLevel(near, 0, 0.1);
   lod.addLevel(P.far.clone(), HOUSE_FAR, 0.1);   // (THREE.LOD measures plain world distance)
   g.add(lod);
   return g;
@@ -125,7 +137,7 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
 export function createHouseField() {
   const root = new THREE.Group();
   root.name = "HouseField";
-  const sets = new Map();   // "type:state" → { near, far, items: [] }
+  const sets = new Map();   // "type:state" → { near, far, decal (its stencils, drawn with near) }
   const items = [];         // { key, m: Matrix4, p: Vector3 }
   let built = false;
   const mesh = (src, n) => {
@@ -141,14 +153,16 @@ export function createHouseField() {
   };
   const _w = new THREE.Matrix4(), _sc = new THREE.Vector3();
   function rebuild() {
-    for (const s of sets.values()) { root.remove(s.near, s.far); s.near.dispose(); s.far.dispose(); }
+    for (const s of sets.values()) for (const m of [s.near, s.far, s.decal]) if (m) { root.remove(m); m.dispose(); }
     sets.clear();
     const per = new Map();
     for (const it of items) per.set(it.key, (per.get(it.key) ?? 0) + 1);
     for (const [key, n] of per) {
       const P = _parts?.[key];
       if (!P) continue;
-      sets.set(key, { near: mesh(P.near, n), far: mesh(P.far, n) });
+      const decal = P.decal ? mesh(P.decal, n) : null;
+      if (decal) decal.castShadow = false;
+      sets.set(key, { near: mesh(P.near, n), far: mesh(P.far, n), decal });
     }
     built = true;
   }
@@ -177,14 +191,16 @@ export function createHouseField() {
         const c = cnt.get(im) ?? 0;
         im.setMatrixAt(c, _w.multiplyMatrices(it.m, im.userData.local));
         cnt.set(im, c + 1);
+        if (near && s.decal) { s.decal.setMatrixAt(c, _w.multiplyMatrices(it.m, s.decal.userData.local)); cnt.set(s.decal, c + 1); }
       }
-      for (const s of sets.values()) for (const im of [s.near, s.far]) {
+      for (const s of sets.values()) for (const im of [s.near, s.far, s.decal]) {
+        if (!im) continue;
         const n = cnt.get(im) ?? 0;
         if (im.count !== n || n) { im.count = n; im.instanceMatrix.needsUpdate = true; }
       }
     },
     /** Draws this frame (near + far sets with instances) — ×2 with the shadow pass. */
-    draws() { let d = 0; for (const s of sets.values()) d += (s.near.count > 0) + (s.far.count > 0); return d; },
+    draws() { let d = 0; for (const s of sets.values()) d += (s.near.count > 0) + (s.far.count > 0) + (s.decal?.count > 0); return d; },
     get size() { return items.length; },
   };
 }

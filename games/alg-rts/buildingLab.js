@@ -760,6 +760,7 @@ export const labSite = () => SITE;
 
 export async function startBuildingLab(container) {
   const lab = await startVehicleLab(container, { catalog: BUILDINGS, title: "Buildings Lab", kind: "Bâtiment", def: "mechtaHouse", gap: (k) => BUILDINGS[k].gap });
+  globalThis.__buildingLab = lab;   // (the camera for scripted close-ups: Chrome MCP checks)
   await rtsAtlasReady();
   const atlas = rtsAtlas(), cell = atlas.image.width / ATLAS_COLS;
   const setStone = (key) => {

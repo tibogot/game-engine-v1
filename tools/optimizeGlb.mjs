@@ -36,7 +36,9 @@ if (max) step("resize", "--width", max, "--height", max);
 // scanned stones' baked normals, 2026-10-21)
 if (args.includes("--etc1s")) { step("etc1s", "--quality", "200", "--slots", "baseColorTexture"); step("uastc", "--level", "2", "--rdo", "--rdo-lambda", "2", "--zstd", "18", "--slots", "normalTexture"); }
 else step("uastc", "--level", flag("--level", "2"), "--rdo", "--rdo-lambda", "2", "--zstd", "18");
-step("meshopt", "--level", "medium");
+// (positions at 16 bits: 14 put a 20 m piece on a ~1.2 mm grid and rounded the kits' 3-4 mm separations back into one plane —
+// the requisition point: 12 coplanar pairs raw, 614 optimized, 2026-10-24; 16-bit positions are int16 either way)
+step("meshopt", "--level", "medium", "--quantize-position", "16");
 copyFileSync(cur, path.resolve(dst));
 rmSync(tmp, { recursive: true, force: true });
 const mb = (f) => (statSync(f).size / 1e6).toFixed(2) + " MB";

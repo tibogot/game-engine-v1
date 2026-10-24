@@ -305,6 +305,85 @@ class Kit:
             q.location = at
         for q in hidden: q.hide_render = False
         print("BAKED", name, size, len(objs))
+    def stencils(s, decals, name, out_dir, ppm=640, width=1024):
+        """THE STENCIL SHEET (2026-10-25, you: "is it not better to use decals for lettering?" — then "do the stencil
+        sheet now"): painted lettering as DECALS, the CoH way. `decals` {piece: [letter meshes]} — each letter mesh
+        a flat text standing 8 mm off its board. Every distinct word is baked ONCE, at `ppm` texels a metre, into
+        the kit's own small RGBA sheet (`{name}_stencils.png`: the paint's colour, its letters in the alpha); each
+        piece gets a `<piece>_Decal` mesh of flat quads mapped onto it — 2 triangles a word, crisp at any zoom (in
+        the shared atlas a 7 cm stencil was 6 texels: a blob). The game alpha-tests it, near level only, no shadow.
+        The letter meshes are removed. Returns {piece: its decal object}."""
+        scn = bpy.context.scene
+        items = [(q, d) for q, ds in decals.items() for d in ds if d and d.name in scn.objects]
+        if not items: return {}
+        bpy.context.view_layer.update()
+        PAD = 0.012
+        def rect(d):
+            xs = [v.co.x for v in d.data.vertices]; ys = [v.co.y for v in d.data.vertices]
+            return min(xs) - PAD, max(xs) + PAD, min(ys) - PAD, max(ys) + PAD
+        key = lambda d: (d.get("stencil", d.name), round(d.dimensions.length, 3), d.data.materials[0].name if d.data.materials else "")
+        # the sheet: one slot per distinct word (shelf packing, 4 texels apart)
+        slots, first, x, y, row = {}, {}, 4, 4, 0
+        for q, d in items:
+            k = key(d)
+            if k in slots: continue
+            x0, x1, y0, y1 = rect(d); w, h = math.ceil((x1 - x0) * ppm), math.ceil((y1 - y0) * ppm)
+            if x + w + 4 > width: x, y, row = 4, y + row + 4, 0
+            slots[k] = (x, y, w, h); first[k] = d; x += w + 4; row = max(row, h)
+        H = 1 << math.ceil(math.log2(y + row + 4))
+        def quads(bm, ds, uvl):
+            for d in ds:
+                x0, x1, y0, y1 = rect(d); sx, sy, w, h = slots[key(d)]
+                vs = [bm.verts.new(d.matrix_world @ Vector((px, py, 0))) for px, py in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+                f = bm.faces.new(vs)
+                for l, (u, v) in zip(f.loops, ((0, 0), (1, 0), (1, 1), (0, 1))):
+                    l[uvl].uv = ((sx + u * w) / width, (sy + v * h) / H)
+        def mesh_of(nm, ds, mat):
+            bm = bmesh.new(); uvl = bm.loops.layers.uv.new("UVMap"); quads(bm, ds, uvl)
+            me = bpy.data.meshes.new(nm); bm.to_mesh(me); bm.free()
+            ob = bpy.data.objects.new(nm, me); scn.collection.objects.link(ob); me.materials.append(mat)
+            return ob
+        # bake the sheet: one quad per distinct word over its first letters (selected → active, a 5 mm ray)
+        bakemat = bpy.data.materials.new(f"_{name}_StencilBake")
+        img = lambda nm: bpy.data.images.new(nm, width, H, alpha=False)
+        tgt = bakemat.node_tree.nodes.new("ShaderNodeTexImage"); bakemat.node_tree.nodes.active = tgt
+        bo = mesh_of(f"_{name}_StencilBake", list(first.values()), bakemat)
+        white = bpy.data.materials.new("_StencilMask"); nt = white.node_tree; nt.nodes.clear()
+        em = nt.nodes.new("ShaderNodeEmission"); nt.links.new(em.outputs[0], nt.nodes.new("ShaderNodeOutputMaterial").inputs[0])
+        texts = list(first.values()); mats = [list(d.data.materials) for d in texts]
+        hid = [o for o in scn.objects if o.type == "MESH" and o not in texts and o is not bo and not o.hide_render]
+        for o in hid: o.hide_render = True
+        for o in texts + [bo]: o.hide_render = False
+        scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.cycles.samples = 16; scn.render.bake.margin = 2
+        bpy.ops.object.select_all(action="DESELECT")
+        for d in texts: d.select_set(True)
+        bo.select_set(True); bpy.context.view_layer.objects.active = bo
+        kw = dict(use_selected_to_active=True, cage_extrusion=0.005, max_ray_distance=0.01)
+        for d in texts: d.data.materials.clear(); d.data.materials.append(white)
+        tgt.image = mk = img(f"{name}_smask"); bpy.ops.object.bake(type="EMIT", **kw)
+        for d, ms in zip(texts, mats):
+            d.data.materials.clear()
+            for m_ in ms: d.data.materials.append(m_)
+        scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
+        tgt.image = co = img(f"{name}_scol"); bpy.ops.object.bake(type="DIFFUSE", **kw)
+        for o in hid: o.hide_render = False
+        a = np.clip(np.array(mk.pixels[:]).reshape(-1, 4)[:, 0], 0, 1); c = np.array(co.pixels[:]).reshape(-1, 4)
+        # (round the letters the paint's own mean colour, not black: the mips blend into it, no dark fringe)
+        if (a > 0.5).any(): c[a < 0.5, :3] = c[a > 0.5, :3].mean(0)
+        c[:, 3] = a
+        out = bpy.data.images.new(f"{name}_stencils", width, H, alpha=True); out.pixels = c.ravel().tolist()
+        out.filepath_raw = os.path.join(out_dir, f"{name}_stencils.png"); out.file_format = "PNG"; out.save()
+        m = bpy.data.materials.new(f"M_{name}_Stencils")
+        tn = m.node_tree.nodes.new("ShaderNodeTexImage"); tn.image = out
+        pb = m.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = 0.85
+        m.node_tree.links.new(tn.outputs["Color"], pb.inputs["Base Color"]); m.node_tree.links.new(tn.outputs["Alpha"], pb.inputs["Alpha"])
+        res = {}
+        for q, ds in decals.items():
+            ds = [d for d in ds if d and d.name in scn.objects]
+            if ds: res[q] = mesh_of(f"{q.name}_Decal", ds, m)
+        for o in {bo, *(d for _, d in items)}: bpy.data.objects.remove(o, do_unlink=True)
+        print("STENCILS", name, f"{width}x{H}", len(slots), "words", {q.name: len(ds) for q, ds in decals.items()})
+        return res
     def far(s, o, ratio=0.3, name=None):
         """A FAR level of a baked object: a copy decimated (its UVs kept: the SAME atlas, no new texture)."""
         f = o.copy(); f.data = o.data.copy(); f.name = name or f"{o.name}_Far"
@@ -335,12 +414,12 @@ class Kit:
         # (copy_normals below — Blender's Data Transfer was measured WORSE). Gate: tools/glbLodShadingCheck.mjs.
         copy_normals(f, o)
         return f
-    def export(s, path, objs, colors=False):
+    def export(s, path, objs, colors=False, images="JPEG"):
         """`colors`: the ACTIVE colour attribute exported too (COLOR_0) — data a piece carries for the game (the
         sangar's build order, tools/blender/sangar.py), not a colour the baked material uses."""
         bpy.ops.object.select_all(action="DESELECT")
         for o in objs: o.select_set(True)
-        kw = dict(filepath=path, use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format="JPEG")
+        kw = dict(filepath=path, use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format=images)   # (AUTO: a kit with a stencil sheet — PNG keeps its alpha)
         if colors: kw["export_vertex_color"] = "ACTIVE"
         try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
         except TypeError: bpy.ops.export_scene.gltf(**kw)

@@ -471,18 +471,18 @@ def groundLife(K, R, spec, Z0):
 STATES = ("intact", "damaged", "ruin")
 def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
     K = Kit(MATDEF, ("h",))
-    exported = []
+    exported, stencilled = [], False
     S_ = 512 if QUICK else 2048
     for ti, (tname, spec) in enumerate(TYPES.items()):
         if ONLY and tname != ONLY: continue
         K.smooth_angle, K.weighted_on = spec.get("smoothAngle", 35), spec.get("weighted", True)
-        objs, fars = [], []
+        objs, fars, decals = [], [], {}
         for si, state in enumerate(spec.get("states", STATES)):   # (a prop: "intact" only)
-            K.groups["h"] = []
+            K.groups["h"] = []; K.decals = []
             (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
-            objs.append(o)
+            objs.append(o); decals[o] = K.decals   # (its painted lettering: the stencil sheet's decal quads — bkit.stencils)
             # A piece's OWN far level (`farBuilder`: the same seed, built coarser — 2026-10-20, the hedges: a
             # decimated cactus pad collapsed to a sliver, the far hedge was another shape and POPPED); baked into
             # the same atlas. Without one, the near level decimated (K.far).
@@ -492,13 +492,15 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
                 K.drop_cutters()
         K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.002))
+        dec = K.stencils(decals, f"{prefix}{tname.capitalize()}", REFS)   # (near level only: at the far's 60 m+ a word is a pixel)
+        if dec: stencilled = True
         for i, o in enumerate(objs):
             f = fars[i] if fars else K.far(o, spec.get("farRatio", 0.3))   # (a kit of small round stones: gentler — 0.3 left shards)
             # (a piece's own far build shades by the near's normals too — the gate, tools/glbLodShadingCheck.mjs)
             if fars: copy_normals(f, o)
             print("TRIS", o.name, tris(o), "far", tris(f))
-            exported += [o, f]
-    K.export(os.path.join(out, glb), exported, colors=colors)
+            exported += [o, f] + ([dec[o]] if o in dec else [])
+    K.export(os.path.join(out, glb), exported, colors=colors, images="AUTO" if stencilled else "JPEG")
     return exported
 
 def previews(TYPES, exported, prefix="House", tag="", spacing=16, frame=1.0):

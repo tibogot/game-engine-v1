@@ -131,8 +131,11 @@ def boxC(K, nm, size, at, rot=(0, 0, 0), mat="crate", w=0.012):
     o = K.box(nm, -x / 2, x / 2, 0, y, -z / 2, z / 2, mat, "h", w)
     return place(o, at, rot)
 def text(K, nm, body, at, size, mat, yaw=math.pi / 2, depth=0.0):
-    """Painted letters standing at `at`, facing +z turned by yaw (pi/2: facing +x, the camera's side)."""
-    if LOW: return None
+    """Painted letters standing at `at`, facing +z turned by yaw (pi/2: facing +x, the camera's side) — a DECAL
+    (2026-10-25, you: "is it not better to use decals for lettering?"): baked into the kit's stencil sheet and drawn
+    as a flat quad 8 mm off its board (bkit.stencils). (As geometry the glyphs' slivers folded onto each other once
+    the GLB quantized them: ~140 coplanar pairs; baked into the shared atlas they were blobs.)"""
+    if LOW: return None   # (the far level has none: at 60 m+ a word is a pixel)
     cu = bpy.data.curves.new(nm, "FONT"); cu.body = body; cu.size = size; cu.extrude = depth / 2
     cu.align_x = "CENTER"; cu.align_y = "CENTER"
     if os.path.exists(STENCIL): cu.font = bpy.data.fonts.load(STENCIL, check_existing=True)
@@ -150,7 +153,7 @@ def text(K, nm, body, at, size, mat, yaw=math.pi / 2, depth=0.0):
     bmesh.ops.triangulate(bm, faces=bm.faces, quad_method="BEAUTY", ngon_method="EAR_CLIP")
     bm.to_mesh(o.data); bm.free()
     o.data.materials.clear(); o.data.materials.append(K.mat(mat))
-    K.groups["h"].append(o)
+    o["stencil"] = body; K.decals.append(o)
     return o
 
 # ── the simulated sandbags ─────────────────────────────────────────────────────
@@ -266,7 +269,7 @@ def board(K, R, words, at, state):
     for s in (-1, 1): parts.append(cylA(K, f"BoardPost{s}", (0, -0.2, s * 0.45), (0, 1, 0), 0.045, 1.6, "pallet", 6, w=0))
     parts.append(boxC(K, "Board", (0.04, 0.42, 1.15), (0.05, 1.0, 0), mat="board", w=0.008))
     for i, w in enumerate(words):
-        parts.append(text(K, f"Word{i}", w, (0.077, 1.3 - i * 0.19, 0), 0.15, "paintYellow" if i == 0 else "paintWhite"))
+        parts.append(text(K, f"Word{i}", w, (0.08, 1.3 - i * 0.19, 0), 0.15, "paintYellow" if i == 0 else "paintWhite"))
     move(parts, (x, 0, z), (0, 0, -lean))
 # ── what is where (2026-10-21, you: "there is a shader issue — check no z-fighting"): two lying drums laid END TO
 # END overlapped 16 cm, the same radius in the same place — they z-fought; jerrycans stood inside a duckboard plank,
@@ -372,9 +375,11 @@ def fuel(K, R, state):
         cand = [(R.uniform(-0.6, 1.4), R.uniform(-0.3, 0.6), R.uniform(-3, 3)) for _ in range(5)]
         row, i = divmod(k, 5)
         x, z = cx - 0.9 + i * 0.2 + r[0], JZ[row]
-        if state == "intact": jerry(K, f"Jerry{k}", (x, 0, z), r[1]); continue
+        # (side by side: a quarter turn, the can's 0.165 thickness along the row's 0.2 step — turned along it, its
+        # 0.345 length, each can stood 14 cm inside the next: one block, its faces z-fighting; 2026-10-25)
+        if state == "intact": jerry(K, f"Jerry{k}", (x, 0, z), math.pi / 2 + r[1]); continue
         if state == "damaged" and 0.3 <= r[2] < 0.85:
-            if not S.hit(dot_(x, z, 0.1, 0, 0.5)): S.take(dot_(x, z, 0.1, 0, 0.5)); jerry(K, f"Jerry{k}", (x, 0, z), r[1])
+            if not S.hit(dot_(x, z, 0.1, 0, 0.5)): S.take(dot_(x, z, 0.1, 0, 0.5)); jerry(K, f"Jerry{k}", (x, 0, z), math.pi / 2 + r[1])
             continue
         if (state == "damaged" and r[2] < 0.3) or (state == "ruin" and r[2] < 0.5):
             got = S.first([(dot_(x + dx, z + dz, 0.2, 0, 0.5), dx, dz, yw) for dx, dz, yw in cand])
@@ -388,7 +393,8 @@ def crate(K, nm, size, at, yaw=0.0, rot=(0, 0, 0), mat="crate", stencil=None):
     x, y, z = size
     parts = props.crate(mk(K), nm, mat, "charred" if mat == "charred" else "rope", x, y, z, LOW)
     if stencil and not LOW and mat != "charred":   # on its +x end (the camera's), between the battens
-        parts.append(text(K, nm + "St", stencil, (x / 2 - 0.016, y * 0.5, 0), 0.07, "paintYellow"))   # (4 mm off the end board, inside the battens)
+        # (in the band UNDER the rope becket — centred, the rope's ring hid the letters, seen in the lab 2026-10-25)
+        parts.append(text(K, nm + "St", stencil, (x / 2 - 0.012, (0.06 + y * 0.62 - 0.062) / 2, 0), 0.055, "paintYellow"))   # (a decal 8 mm off the end board, inside the battens: the bake's ray reaches the board, not the battens' front)
     move(parts, at, (rot[0], yaw + rot[1], rot[2]))
 def tarp(K, R, cx, cz, w, d, top, state):
     """A canvas sheet thrown over a stack: a grid draped on the stack's box, the skirt hanging, wind-rucked."""
