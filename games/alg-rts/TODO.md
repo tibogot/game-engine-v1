@@ -19,7 +19,8 @@ PHASE 1 — finish what is half-built
 1. [ ] **you**: the village look (new stone vs `?village=old` with photo detail vs `&kitphoto=0`);
    Normal difficulty both sides; doctrine prices; the training's wording/pace; the steppe;
    fire / smoke / explosions (your effects lab).
-2. [ ] BUILDING DAMAGE + COLLAPSE (after your building tuning): walls lost, garrisons forced out,
+2. [~] (2026-10-24, 90fe769c: shells break houses, the collapse with debris and rubble, walls / hedges / depots break,
+   mortars on garrisons — LEFT: D, the motor pool's and the helipad's damaged / ruin models in Blender) BUILDING DAMAGE + COLLAPSE (after your building tuning): walls lost, garrisons forced out,
    rubble — CoH's signature, the biggest gameplay gap left.
 3. [x] The FRENCH AI: sappers that build, mortars, flares, doctrines — DONE 2026-10-13 (B below: + grenades,
    lifts, its own doctrine; not yet smoke, the Alouette, repair).
