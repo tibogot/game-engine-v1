@@ -36,7 +36,7 @@ import { createAlgPointRings } from "./algPointRings.js";
 import { createAlgHens } from "./algHens.js";
 import { createAlgBirds } from "./algBirds.js";
 import { createAlgAmbience } from "./algAmbience.js";
-import { createAlgStones, prefetchStonePhotos } from "./algStones.js";
+import { createAlgStones, prefetchStonePhotos, scanOutcropParts } from "./algStones.js";
 import { createAlgSplats, prefetchAlgSplats } from "./algSplats.js";
 import { applyMacroGround } from "./algMacroGround.js";
 import { createAlgSea } from "./algSea.js";
@@ -623,6 +623,26 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.algLandmarks = createAlgLandmarks(app, { showroom: app.showroom ?? {}, fields: app.algFields ?? ownFields, navGrid: app.navGrid ?? null, plants: app.showroom?.plants ?? null,
         quantities: MAP.scenery?.quantities ?? null, over: MAP.scenery?.over ?? null, keepClear: MAP.scenery?.keepClear ?? [], fixedSandstone: MAP.sandstone?.rocks ?? [] });
       console.log(`[landmarks] ${JSON.stringify(app.algLandmarks.stats)} in ${Math.round(performance.now() - t0)} ms`);
+      // THE OUTCROPS IN SCANNED BOULDERS (algStones scanOutcropParts — the old procedural eggs had holes): the same
+      // places, cover and footprints; each variant's geometry and material swapped, the base sunk a little more (a scan's
+      // bottom is flat: on the outcrops' slopes the downhill side showed)
+      try {
+        const parts = await scanOutcropParts(3.4, app);
+        // NEW meshes in their place (2026-10-24: swapping the old meshes' geometry and material left three's cached
+        // SHADOW-pass build on the old kit's attributes — a render error now and then, "reading 'id'")
+        if (parts) app.algLandmarks.meshes = app.algLandmarks.meshes.map((m, i) => {
+          if (!/^Outcrops\d/.test(m.name)) return m;
+          const P = parts[i % parts.length], own = i >= parts.length;
+          const n = new m.constructor(own ? P.geometry.clone() : P.geometry, own ? P.material.clone() : P.material, Math.max(1, m.count));
+          const M = m.matrix.clone(), p = m.position.clone(), q = m.quaternion.clone(), sc = m.scale.clone();
+          for (let k = 0; k < m.count; k++) { m.getMatrixAt(k, M); M.decompose(p, q, sc); p.y -= 0.35 * sc.x; n.setMatrixAt(k, M.compose(p, q, sc)); }
+          n.count = m.count; n.name = `OutcropScan${i}`;   // (out of the static batch: its own draws)
+          n.castShadow = n.receiveShadow = true;
+          n.computeBoundingSphere();
+          m.parent?.add(n); m.removeFromParent(); m.dispose();
+          return n;
+        });
+      } catch (e) { console.warn("[alg outcrops] scans:", e); }
       // The SANDSTONE rocks: their shapes come from the workers started at the top of the boot.
       const t1 = performance.now();
       const field = await buildSandstoneField(app.algLandmarks.sandstone, { colour: MAP.sandstone?.colour ?? "aures" });
@@ -797,7 +817,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   if (params.get("life") !== "0") {
     try {
       const t0 = performance.now();
-      app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? ownFields, plants: app.showroom?.plants ?? null });
+      // (a map with the Blender village props — MAP.villageProps: the vprops kit, the squares filled too)
+      const models = !!MAP.villageProps && !!(await loadHouses("vprops"));
+      app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? ownFields, plants: app.showroom?.plants ?? null, models });
+      for (const p of app.algVillageLife.pads ?? []) await app.flattenRect?.(...p);   // (in turn: together they raced)
       console.log(`[village life] ${JSON.stringify(app.algVillageLife.stats)} in ${Math.round(performance.now() - t0)} ms`);
     } catch (e) { console.warn("[alg village life] failed:", e); }
   }

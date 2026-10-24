@@ -329,11 +329,15 @@ def build(K, name, spec, state, seed):
             K.box("StairWall", ax1 + 0.78, ax1 + 0.95, 0.0, 1.0, az0 + 0.1, az1 - 0.25, REND, G, 0.02)
     if "hut" in spec:
         hx0, hx1, hz0, hz1 = spec["hut"]
-        hut = K.box("Hut", hx0, hx1, ROOF + 0.2, ROOF + 2.4, hz0, hz1, REND, G, 0)
-        hm = (hx0 + hx1) / 2
-        K.boolean(hut, K.cutter(hm - 0.4, hm + 0.4, ROOF + 0.24, ROOF + 2.1, hz0 - 0.1, hz0 + 0.15, REND))
-        K.bevel(hut, 0.03, 2, 30); shells.append(hut)
-        K.box("HutDark", hm - 0.4, hm + 0.4, ROOF + 0.24, ROOF + 2.1, hz0 + 0.2, hz0 + 0.24, "dark", G, 0)
+        # (2026-10-24, you: a black wedge on the roof and a doorway that changed between near and far — the door was
+        # a BOOLEAN 25 cm into a solid box: it left a broken sliver that took the dark, and the dark panel sat behind
+        # the cut, inside the box. Now no boolean: a back block, two jambs and a lintel, a doorway 45 cm deep, its
+        # dark panel at its back — the far level decimates plain boxes cleanly)
+        hm, D = (hx0 + hx1) / 2, 0.45
+        hut = K.box("Hut", hx0, hx1, ROOF + 0.2, ROOF + 2.4, hz0 + D, hz1, REND, G, 0.03); shells.append(hut)
+        for nm, a0, a1, y0 in (("HutJambL", hx0, hm - 0.4, ROOF + 0.2), ("HutJambR", hm + 0.4, hx1, ROOF + 0.2), ("HutLintel", hm - 0.4, hm + 0.4, ROOF + 2.1)):
+            shells.append(K.box(nm, a0, a1, y0, ROOF + 2.4, hz0, hz0 + D, REND, G, 0.03))
+        K.box("HutDark", hm - 0.4, hm + 0.4, ROOF + 0.2, ROOF + 2.1, hz0 + D - 0.02, hz0 + D - 0.008, "dark", G, 0)
         K.box("HutRoof", hx0 - 0.08, hx1 + 0.08, ROOF + 2.4, ROOF + 2.52, hz0 - 0.08, hz1 + 0.08, REND, G, 0.02)
     if "balcony" in spec:
         b0, b1 = spec["balcony"]

@@ -19,12 +19,21 @@
 // are buried, not placed (nam-rts's rocks lesson). None inside a building's
 // footprint (the nav grid), in water, on the oasis grove or outside PLAY.
 // One InstancedMesh per (ground, shape): ~14 draws, no per-frame work.
+//
+// THE BIG ONES ARE SCANS (2026-10-22, you: "they look like eggs, not realistic AAA at all" — the small ones are
+// fine): the lumps and boulders take one of six Poly Haven scans (public/models/alg/boulders.glb, made by
+// tools/blender/scanBoulders.py — 380-520 triangles, the scan's photo and normal map). Their COLOUR stays the
+// ground's, as before (they belong to it); the scan gives the DETAIL: its photo's light and dark over its own mean
+// (the smallest mip) — its cracks, crevices, layers — and its normal map. No file: the chipped eggs as before.
+import { groundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { abs, attribute, float, int, normalWorld, positionWorld, pow, renderGroup, texture, uniformArray, vec2, vec3 } from "three/tsl";
 import { markGpuOnly } from "../../v3/render/gpuOnlyArrays.js";
 import { createRockGeometry } from "../../v3/props/proceduralRock.js";
 import { simplifierReady } from "../../v3/render/instancing/autoLod.js";
 import { MAP, PLAY } from "./layout.js";
+import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
+import { mix, normalMap } from "three/tsl";
 
 const TEX = (id, m) => `/textures/ground/${id}/${id}_${m}_1k.jpg`;
 
@@ -122,6 +131,71 @@ function stoneMaterial(photos) {
   return mat;
 }
 
+/**
+ * A scan's material: the boulder's OWN baked colour (the Namaqualand desert boulders: ochre-brown, the Aurès' own dry
+ * rock — not tinted: the pale limestone tint read white against the red earth, seen) and its baked normal map, each
+ * rock's brightness EVENED to one level (its photo over its own mean: the smallest mip, ~30 % of it the empty UV
+ * space; the bakes ranged 0.27-0.40). The per-instance ground attribute is not read here.
+ */
+const SCAN_TINT = new THREE.Color(0.55, 0.45, 0.34);
+function scanStoneMaterial(photos, src, app = null, geo = null) {
+  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
+  mat.name = `Stone:scan:${src.name}`;
+  const map = src.map;
+  if (map) {
+    const c = texture(map).rgb, lum = (v) => v.r.mul(0.3).add(v.g.mul(0.59)).add(v.b.mul(0.11));
+    mat.colorNode = c.mul(float(0.17).div(lum(texture(map).level(float(12)).rgb).max(0.08)));   // (0.24: pale, greyish — seen)
+  } else mat.colorNode = vec3(SCAN_TINT.r, SCAN_TINT.g, SCAN_TINT.b);
+  if (src.normalMap) mat.normalNode = normalMap(texture(src.normalMap));
+  // (its foot in the ground's colour, its hue leaning to the ground's — algGroundBlend, 2026-10-24)
+  if (app) {
+    // (the fade over a share of ITS height: the source geometry's bounds — a scaled copy keeps the same share)
+    if (geo && !geo.boundingBox) geo.computeBoundingBox();
+    const bounds = geo ? { minY: geo.boundingBox.min.y, maxY: geo.boundingBox.max.y } : null;
+    mat.userData.gbBase = mat.colorNode;   // (its colour without the blend: an A/B of its cost, the dev console)
+    mat.colorNode = groundBlend(app, mat.colorNode, { bounds });
+  }
+  return mat;
+}
+/** The six scans (null: no file — the procedural shapes stay). */
+async function loadBoulders() {
+  try {
+    const gltf = await getSharedGltfLoader().loadAsync("/models/alg/boulders.glb");
+    const out = [];
+    gltf.scene.traverse((o) => { if (o.isMesh) out.push(o); });
+    out.sort((a, b) => a.name.localeCompare(b.name));
+    return out.length ? out : null;
+  } catch (e) { console.warn("[stones] no boulder scans:", e?.message ?? e); return null; }
+}
+
+/**
+ * THE SCANNED BOULDERS FOR THE OUTCROPS (2026-10-24, you, on the training camp: a white faceted outcrop "has holes" — "I
+ * thought we solved this stone issue"): the loose stones took the scans on 10-22, the outcrops (algLandmarks) were
+ * still the old procedural eggs. Each outcrop variant `i` gets scan i % n, its longest side `size` m (the old outcrop's
+ * width), its own sunk base — and the same material as the stones. Null without the scans.
+ */
+export async function scanOutcropParts(size = 3.4, app = null) {
+  const scans = await loadBoulders();
+  if (!scans) return null;
+  return scans.map((m) => {
+    // (the GLB's attributes are meshopt-QUANTIZED — normalized 16-bit, the node's own scale and offset undo them: moved and
+    // scaled as they are they CLAMP — the first try drew hollow ribbons. Plain floats first, the node's transform in.)
+    const g = new THREE.BufferGeometry();
+    for (const [k, at] of Object.entries(m.geometry.attributes)) {
+      const out = new Float32Array(at.count * at.itemSize);
+      for (let i = 0; i < at.count; i++) for (let c = 0; c < at.itemSize; c++) out[i * at.itemSize + c] = at.getComponent(i, c);
+      g.setAttribute(k, new THREE.BufferAttribute(out, at.itemSize));
+    }
+    if (m.geometry.index) g.setIndex(new THREE.BufferAttribute(Uint32Array.from(m.geometry.index.array), 1));
+    m.updateMatrix(); g.applyMatrix4(m.matrix);
+    g.computeBoundingBox();
+    const b = g.boundingBox, k = size / Math.max(b.max.x - b.min.x, b.max.z - b.min.z);
+    g.translate(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2).scale(k, k, k);
+    g.computeBoundingSphere();
+    return { geometry: g, material: scanStoneMaterial(null, m.material, app, g) };
+  });
+}
+
 export async function createAlgStones(app, { seed = 1954 } = {}) {
   const t0 = performance.now(), lap = [];
   await simplifierReady;
@@ -135,6 +209,15 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
       return g;
     });
   }
+  // THE BIG ONES: the scans (each 1 m long, its foot at 0) — a lump 0.9 m, a boulder bigger and taller
+  const scans = await loadBoulders();
+  const scanSrc = {};   // geometry uuid → the scan mesh (its material)
+  if (scans) {
+    const sized = (k, sx, sy) => scans.map((m) => { const g = m.geometry.clone().scale(sx, sy, sx); g.computeBoundingBox(); scanSrc[g.uuid] = m; return g; });
+    geos.lump = sized("lump", 0.9, 0.9);
+    geos.boulder = sized("boulder", 1.3, 1.15);   // (1.15 × 1.4: a real rock stretched up read as a tree stump — seen)
+  }
+  lap.push(["scans", performance.now()]);
   let st = seed;
   const rnd = () => ((st = (st * 16807) % 2147483647) / 2147483647);
 
@@ -171,7 +254,9 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
   // ── The meshes: ONE material, one instanced mesh per shape variant ──────
   // (each stone's ground rides along as a per-instance attribute).
   lap.push(["shapes+placing", performance.now()]);
-  const mat = stoneMaterial(await stonePhotos());
+  const photos = await stonePhotos();
+  const mat = stoneMaterial(photos);
+  const scanMats = {};   // (one per scan photo: the three Namaqualand rocks share theirs)
   lap.push(["photos", performance.now()]);
   const byShape = {};                     // `${shape}|${variant}` → [{ ...p, g }]
   for (const [key, list] of Object.entries(lists)) {
@@ -190,7 +275,8 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
     const geo = geos[shape][+v];
     const ground = new THREE.InstancedBufferAttribute(new Float32Array(list.length), 1);
     geo.setAttribute("ground", ground);
-    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    const src = scanSrc[geo.uuid];
+    const mesh = new THREE.InstancedMesh(geo, src ? (scanMats[src.material.uuid] ??= scanStoneMaterial(photos, src.material, app, src.geometry)) : mat, list.length);
     mesh.name = `Stones:${key}`;
     const hgt = geo.boundingBox.max.y - geo.boundingBox.min.y;
     list.forEach((p, k) => {
@@ -199,10 +285,13 @@ export async function createAlgStones(app, { seed = 1954 } = {}) {
       // Tilted to the ground (halfway: a stone rests, it does not lie flat on a
       // steep face), turned, and SUNK 20-35% of its height.
       const gn = app.getWorldNormal?.(p.x, p.z);
-      nv.set(gn?.x ?? 0, gn?.y ?? 1, gn?.z ?? 0).lerp(up, 0.45).normalize();
+      nv.set(gn?.x ?? 0, gn?.y ?? 1, gn?.z ?? 0).lerp(up, scanSrc[geo.uuid] ? 0.8 : 0.45).normalize();
       q.setFromUnitVectors(up, nv).multiply(qy.setFromAxisAngle(up, p.yaw));
       const s = p.s * (shape === "boulder" ? 1.2 + (i % 3) * 0.3 : 1);
-      pos.set(p.x, p.y - geo.boundingBox.min.y * s - hgt * s * (0.2 + ((i * 7) % 16) / 100), p.z);
+      // (a scan: deeper — its mesh is open underneath, a raised foot showed the cut — seen)
+      // (a scan rebuilt is FLAT where the scan had no data — its base: deeper, and tilted less below)
+      const sink = src ? 0.42 + ((i * 7) % 12) / 100 : 0.2 + ((i * 7) % 16) / 100;
+      pos.set(p.x, p.y - geo.boundingBox.min.y * s - hgt * s * sink, p.z);
       m.compose(pos, q, sc.set(s * (0.85 + ((i * 13) % 30) / 100), s, s));
       mesh.setMatrixAt(k, m);
     });

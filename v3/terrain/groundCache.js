@@ -1297,8 +1297,20 @@ export function createGroundCache({
     return { col, rough: n.b, nrm, covered };
   }
 
+  /**
+   * THE GROUND'S COLOUR at world XZ `p` (TSL, any stage — no derivatives): ONE tap of a coarse ring (`ring`, default the
+   * one under the last: 0.64 m texels over ~1.3 km at the defaults — the whole battlefield, splats and decals in it).
+   * For what stands ON the ground and should take its colour at its foot (a game's props: alg-rts algGroundBlend.js,
+   * 2026-10-24). Linear albedo.
+   */
+  function tone(p, ring = Math.max(0, N - 2)) {
+    const c = colNode.sample(vec2(p).div(float(extentOf(ring)))).level(0).depth(int(ring));
+    return c.rgb.mul(c.rgb);
+  }
+
   return {
     sample,
+    tone,
     update,
     bakeAll,
     markAllStale,

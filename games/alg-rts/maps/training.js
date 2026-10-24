@@ -71,7 +71,13 @@ export const MAP = {
   // villagers (the mechta's people, the shepherd's lesson), the ground's splats, stones and macro
   // photo. Not the Aurès' farmsteads, fields, herds, hens, village life or telegraph; no FLN AI
   // (the lessons bring their enemies), no fog of war. Its own rocks and trees: `scenery` below.
-  systems: { birds: true, civ: true, splats: true, stones: true, macro: true },
+  // (+ the VILLAGE LIFE in Blender, 2026-10-24: the hamlet's square — well, trough, jars, a bench, a shade tree — and its
+  // haystacks, firewood, oven and hives round it; MAP.villageProps, algVillageLife)
+  systems: { birds: true, civ: true, splats: true, stones: true, macro: true, life: true },
+  villageProps: true,
+  // (no trampled-YARD splat at the hamlet and the FLN camp: its 2.4 m photo repeated across the square — you, 2026-10-24,
+  // as on the new Aurès)
+  splats: { yards: false },
   // The knoll (the high-ground / cover lesson), as the level tool raises it.
   knoll: { x: 70, z: -58, r: 30, h: 5 },
   // A FARMSTEAD west of the track (algGame.js places it; algCivilians puts its "shepherd" there —

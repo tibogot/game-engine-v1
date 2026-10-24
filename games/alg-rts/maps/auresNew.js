@@ -79,13 +79,17 @@ export const MAP = {
   level: "/levels/alg-aures-new.v3proj",
   // the old merged villages, left out: rebuilt below as separate houses; the old gardens, terraces and threshing
   // floors: the fields below
-  skip: ["mechta", "mechta2", "dechra", "ksar", "gardenOA1", "gardenOA2", "threshOA", "gardenEO1", "gardenEO2", "threshEO", "terracesEO",
+  // (+ the old procedural wells: the Blender village props put one in each square — MAP.villageProps)
+  skip: ["wellHamlet1", "wellHamlet2", "wellDechra", "mechta", "mechta2", "dechra", "ksar", "gardenOA1", "gardenOA2", "threshOA", "gardenEO1", "gardenEO2", "threshEO", "terracesEO",
     "terracesD1", "terracesD2", "terracesD3", "gardenD", "threshD", "terracesOpen1", "terracesOpen2", "terracesOpen3", "terracesOpen4"],
   // (the old almond terraces of the open slopes, algLandmarks: none)
   // (the lone trees and outcrops keep off the cover runs and the supply points — tools/algAuresNewFields.mjs COVER_CLEAR)
   scenery: { over: { terraces: 0 }, keepClear: COVER_CLEAR },
   // (its farmsteads, ruins, rocks and lone trees: scattered in the OLD box, so they stay where they were — algLandmarks)
   sceneryBox: OLD_PLAY,
+  // the village life in Blender (tools/blender/villageProps.py): haystacks, firewood, ovens, hives round each village;
+  // a well, a trough, jars and benches in its square (algVillageLife)
+  villageProps: true,
   // the boulder groups of the cover pass (the gully mouths, the ravine pass, the west slopes)
   sandstone: { ...(OLD_MAP.sandstone ?? {}), rocks: COVER_ROCKS },
   // (no trampled-yard splat at the villages: its 2.4 m photo repeated across the square — seen)
