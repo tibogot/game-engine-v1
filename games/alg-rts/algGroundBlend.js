@@ -54,19 +54,29 @@ export function groundBlend(app, base, { fade = GROUND_BLEND.fade, strength = GR
  * Each source material converted once (near and far share it). Returns how many materials.
  */
 const _blended = new WeakMap();
-export function blendKitParts(app, parts, types, { fade = 0.3, tint = GROUND_BLEND.tint, strength = GROUND_BLEND.strength } = {}) {
+export function blendKitParts(app, parts, types, opts = {}) {
   if (!groundBlendAvailable(app) || !parts) return 0;
   let n = 0;
   for (const [key, P] of Object.entries(parts)) {
     if (!types.includes(key.split(":")[0])) continue;
-    for (const lvl of ["near", "far"]) {
-      const mesh = P[lvl], src = mesh?.material;
-      if (!src || src.isNodeMaterial && src.userData?.gbBase) continue;
+    for (const lvl of ["near", "far"]) n += blendMesh(app, P[lvl], opts);
+  }
+  return n;
+}
+/** One mesh's (a loaded GLB's) material swapped for its ground-blended copy; 1 when a new one was made. */
+export function blendMesh(app, mesh, { fade = 0.3, tint = GROUND_BLEND.tint, strength = GROUND_BLEND.strength } = {}) {
+  let n = 0;
+  {
+    {
+      const src = mesh?.material;
+      if (!groundBlendAvailable(app) || !src || src.isNodeMaterial && src.userData?.gbBase) return 0;
       let m = _blended.get(src);
       if (!m) {
         m = new THREE.MeshStandardNodeMaterial({ roughness: src.roughness ?? 0.9, metalness: src.metalness ?? 0, side: src.side });
         m.name = `${src.name || "kit"}:gblend`;
         const base = src.map ? texture(src.map).rgb.mul(vec3(src.color.r, src.color.g, src.color.b)) : vec3(src.color.r, src.color.g, src.color.b);
+        // (the source's own map and colour kept on it: other builders read them — algSangar's piece materials)
+        m.map = src.map ?? null; m.color.copy(src.color);
         if (src.normalMap) m.normalMap = src.normalMap;
         if (src.roughnessMap) m.roughnessMap = src.roughnessMap;
         m.userData.gbBase = base;
@@ -79,3 +89,21 @@ export function blendKitParts(app, parts, types, { fade = 0.3, tint = GROUND_BLE
   }
   return n;
 }
+
+// THE GAME'S APP for the loaders (2026-10-24 — every Blender kit blended AS IT LOADS, before anything can draw it:
+// algHouse loadHouses, algMotorPool): a kit loaded before the app is known waits in the queue.
+let _app = null;
+const _queue = [];
+export const groundBlendApp = () => _app;
+export function setGroundBlendApp(app) { _app = app; for (const f of _queue.splice(0)) f(); }
+export function whenGroundBlend(f) { if (_app) f(_app); else _queue.push(() => f(_app)); }
+/** Each kit's blend (algHouse KITS keys): how high its foot takes the ground, how much it leans to its hue. None: as built
+ *  (the barbed wire: thin strands; the small props: in hands and the HUD). */
+export const KIT_BLEND = {
+  houses: { fade: 0.9, tint: 0.1, strength: 0.75 }, mzab: { fade: 0.9, tint: 0.1, strength: 0.75 }, postkit: { fade: 0.9, tint: 0.1, strength: 0.75 },
+  rubble: { fade: 0.6 }, fieldwalls: { fade: 0.55, tint: 0.35 }, vprops: { fade: 0.4, tint: 0.3 },
+  points: { fade: 0.35, tint: 0.25 }, sangar: { fade: 0.5, tint: 0.3 }, mgnest: { fade: 0.45, tint: 0.3 }, mortarpit: { fade: 0.45, tint: 0.3 },
+  fortpoint: { fade: 0.4, tint: 0.3 }, armscache: { fade: 0.4, tint: 0.3 }, ambushscreen: { fade: 0.5, tint: 0.3 },
+  mirador: { fade: 0.5, tint: 0.2 }, sltower: { fade: 0.5, tint: 0.2 }, fieldposts: { fade: 0.35, tint: 0.25 }, flnposts: { fade: 0.5, tint: 0.3 },
+  motorPool: { fade: 0.5, tint: 0.12, strength: 0.8 },
+};

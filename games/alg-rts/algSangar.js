@@ -16,6 +16,7 @@
 //                  stones in the shader (rock_boulder_dry's normal and height, triplanar in the piece's space,
 //                  ~0.45 m a tile): its normal added to the baked one, its height darkening the pits (cavity).
 //                  6 texture taps, no new mesh.
+import { KIT_BLEND, groundBlend, groundBlendApp } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, select, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
@@ -172,6 +173,13 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
     g.userData.labMaterial = stone ? stoneMaterial(near.material, T)
       : plaster ? plasterMaterial(near.material, PT) : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
+    // THE GROUND BLEND (2026-10-24, algGroundBlend KIT_BLEND — a piece's own material, built here from the kit's): its foot
+    // in the ground's colour, its hue toward the ground's
+    { const lm = g.userData.labMaterial, ga = groundBlendApp(), cfg = KIT_BLEND[kit];
+      if (ga && cfg && lm && !lm.userData.gbBase) {
+        const base = lm.colorNode ?? (lm.map ? texture(lm.map).rgb.mul(vec3(lm.color.r, lm.color.g, lm.color.b)) : vec3(lm.color.r, lm.color.g, lm.color.b));
+        lm.userData.gbBase = base; lm.colorNode = groundBlend(ga, base, cfg);
+      } }
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
     g.userData.kitType = [kit, type];   // (its damaged / ruin states: pieceState)

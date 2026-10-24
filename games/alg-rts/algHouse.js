@@ -10,6 +10,7 @@
 // camera, far beyond — and the far one in the SUN'S SHADOW pass too (the LOD picks its level per camera, and
 // the shadow camera stands far off; checked in the lab). Meshes and materials shared between copies.
 // (The brown village houses stay — the farmers' and shepherds' homes: algMasonry.)
+import { KIT_BLEND, blendKitParts, whenGroundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 
@@ -82,6 +83,8 @@ export function loadHouses(kit = "houses") {
       }
       _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near };
     }
+    // (THE GROUND BLEND as it loads — algGroundBlend KIT_BLEND: before anything can draw it)
+    if (KIT_BLEND[kit]) whenGroundBlend((app) => blendKitParts(app, _parts, K.types, KIT_BLEND[kit]));
     return _parts;
   }).catch((e) => { console.warn("[houses]", e); return null; }));
 }

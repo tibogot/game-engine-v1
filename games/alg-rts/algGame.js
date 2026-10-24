@@ -46,8 +46,8 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
-import { FIELD_WALL_TYPES, HOUSE_TYPES, MZAB_TYPES, RUBBLE_TYPES, VPROP_TYPES, createHouseField, loadHouses } from "./algHouse.js";
-import { blendKitParts } from "./algGroundBlend.js";
+import { createHouseField, loadHouses } from "./algHouse.js";
+import { setGroundBlendApp } from "./algGroundBlend.js";
 import { createTownDamage } from "./algTownDamage.js";
 import { createPieceDamage } from "./algPieceDamage.js";
 import { createAlgTelegraph } from "./algTelegraph.js";
@@ -250,6 +250,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     groundCache: { farGrass: params.get("fargrass") !== "0", hexBake: params.get("gchex") !== "0", detail: Number(params.get("detail") ?? 0), calm: params.get("calm") !== "0" },
   });
   setSandbagGroundBlend(app);   // (the bags' foot in the ground — algGroundBlend; before any wall is built)
+  setGroundBlendApp(app);       // (every Blender kit blended as it loads — algHouse, algMotorPool)
   // Boot loop, parallel pipelines, stats-gl off, the perf line
   // (shared-rts/rtsPerfBoot.js). ONE engine frame a second behind the loading
   // screen here: nam-rts boots faster with none, this game was measured the
@@ -673,9 +674,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const t0 = performance.now();
       // (+ the RUBBLE kit, a house collapsing — algTownDamage; not needed to stand: a ruin without it keeps its dust)
       await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble")]);
-      // THE GROUND BLEND (2026-10-24, algGroundBlend — you: "make everything blend with the terrain"): the houses' walls
-      // take the ground's dust over their lowest 90 cm (75 %), the rubble heaps over 60 cm; before anything draws them
-      { const parts = await loadHouses(); blendKitParts(app, parts, [...HOUSE_TYPES, ...MZAB_TYPES], { fade: 0.9, tint: 0.1, strength: 0.75 }); blendKitParts(app, parts, RUBBLE_TYPES, { fade: 0.6 }); }
       const field = createHouseField();
       // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
       // footprint's mean ground (as a built piece's), its y that
@@ -739,7 +737,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // — men step over them, they block no sight — HARD cover both sides (algCover: a circle on each segment)
   if (MAP.fields?.walls?.length) {
     try {
-      blendKitParts(app, await loadHouses("fieldwalls"), FIELD_WALL_TYPES, { fade: 0.55, tint: 0.35 });   // (their foot in the ground — algGroundBlend)
+      await loadHouses("fieldwalls");
       const fw = createHouseField();
       for (const [ty, st, x, y, z, yaw] of MAP.fields.walls) fw.add(ty, st, x, y, z, yaw);
       fw.coverCircles = function* () { for (const [, st, x, , z] of MAP.fields.walls) if (st !== "ruin") yield { x, z, radius: 1.4, size: 1, hard: true }; };
@@ -836,7 +834,6 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const t0 = performance.now();
       // (a map with the Blender village props — MAP.villageProps: the vprops kit, the squares filled too)
       const models = !!MAP.villageProps && !!(await loadHouses("vprops"));
-      if (models) blendKitParts(app, await loadHouses("vprops"), VPROP_TYPES, { fade: 0.4, tint: 0.3 });   // (their foot in the ground — algGroundBlend)
       app.algVillageLife = createAlgVillageLife(app, { navGrid: app.navGrid ?? null, showroom: app.showroom ?? {}, fields: app.algFields ?? ownFields, plants: app.showroom?.plants ?? null, models });
       for (const p of app.algVillageLife.pads ?? []) await app.flattenRect?.(...p);   // (in turn: together they raced)
       console.log(`[village life] ${JSON.stringify(app.algVillageLife.stats)} in ${Math.round(performance.now() - t0)} ms`);

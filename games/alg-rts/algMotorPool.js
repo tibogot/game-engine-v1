@@ -12,6 +12,7 @@
 //               simplified copy of each (the same names: whoever swings them, swings both)
 // The game's cloth-simulated sandbags ride along: the full mesh near, a meshopt-simplified one far.
 // The geometry is meshopt-compressed (the shared loader decodes it).
+import { KIT_BLEND, blendMesh, whenGroundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { simplifierReady, simplifyGeometry } from "../../v3/render/instancing/autoLod.js";
@@ -69,6 +70,8 @@ export function loadMotorPool(file = "motorPool", { near: withNear = false } = {
       q.castShadow = q.receiveShadow = true;
       return q;
     });
+    // (THE GROUND BLEND — algGroundBlend: the building and its doors, before anything draws them)
+    whenGroundBlend((app) => { for (const m of [near, far, ...doors, ...doorsFar]) blendMesh(app, m, KIT_BLEND.motorPool); });
     return (_parts = { near, far, doors, doorsFar, bags, bagsFar });
   })());
 }
