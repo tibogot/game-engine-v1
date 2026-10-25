@@ -42,6 +42,12 @@ export function hasEarth(geo) {
   if (a) { geo.setAttribute("earthMask", a); geo.deleteAttribute("_earth"); }
   return !!geo.getAttribute("earthMask");
 }
+/** A geometry drawn with an earth material but no earth of its own (a far level sharing its near's material, an old
+ *  piece's): a zero mask, so the shader's attribute exists — three warned "earthMask not found" per draw. */
+export function ensureEarthMask(geo) {
+  if (!geo?.getAttribute || hasEarth(geo)) return;
+  geo.setAttribute("earthMask", new THREE.BufferAttribute(new Float32Array(geo.getAttribute("position").count), 1));
+}
 /**
  * `base` with the soil photo over the earth faces: the PHOTO's colour and grain at the bake's BRIGHTNESS (its light and
  * AO kept, its blotchy low-res colour not — modulating it only kept the smear). Call only for a geometry hasEarth().
@@ -131,10 +137,11 @@ export function blendMesh(app, mesh, { fade = 0.3, tint = GROUND_BLEND.tint, str
         if (src.roughnessMap) m.roughnessMap = src.roughnessMap;
         m.userData.gbBase = base;
         m.colorNode = groundBlend(app, base, { fade, tint, strength });
-        if (hasEarth(mesh.geometry)) m.colorNode = earthDetail(m.colorNode);   // (its earth: the soil photo over it)
+        if (hasEarth(mesh.geometry)) { m.colorNode = earthDetail(m.colorNode); m.userData.earth = true; }   // (its earth: the soil photo over it)
         _blended.set(src, m);
         n++;
       }
+      if (m.userData.earth) ensureEarthMask(mesh.geometry);   // (every geometry drawn with it carries the mask)
       mesh.material = m;
     }
   }
@@ -156,5 +163,5 @@ export const KIT_BLEND = {
   points: { fade: 0.35, tint: 0.25 }, sangar: { fade: 0.5, tint: 0.3 }, mgnest: { fade: 0.45, tint: 0.3 }, mortarpit: { fade: 0.45, tint: 0.3 },
   fortpoint: { fade: 0.4, tint: 0.3 }, armscache: { fade: 0.4, tint: 0.3 }, ambushscreen: { fade: 0.5, tint: 0.3 },
   mirador: { fade: 0.5, tint: 0.2 }, sltower: { fade: 0.5, tint: 0.2 }, fieldposts: { fade: 0.35, tint: 0.25 }, flnposts: { fade: 0.5, tint: 0.3 },
-  motorPool: { fade: 0.5, tint: 0.12, strength: 0.8 },
+  motorPool: { fade: 0.5, tint: 0.12, strength: 0.8 }, flnmarks: { fade: 0.45, tint: 0.3 },
 };

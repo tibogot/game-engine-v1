@@ -19,16 +19,6 @@
   "note": "rework completely later; some sandbags float",
   "at": "2026-10-25"
  },
- "lookout": {
-  "v": "redo",
-  "note": "very cheap � make a way better one (Blender)",
-  "at": "2026-10-25"
- },
- "mineMarker": {
-  "v": "redo",
-  "note": "very cheap � make a way better one (Blender)",
-  "at": "2026-10-25"
- },
  "mortierBlender": {
   "v": "improve",
   "note": "the pit's earth: low-resolution texture",

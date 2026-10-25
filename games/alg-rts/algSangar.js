@@ -16,12 +16,12 @@
 //                  stones in the shader (rock_boulder_dry's normal and height, triplanar in the piece's space,
 //                  ~0.45 m a tile): its normal added to the baked one, its height darkening the pits (cavity).
 //                  6 texture taps, no new mesh.
-import { KIT_BLEND, earthDetail, groundBlend, groundBlendApp, hasEarth } from "./algGroundBlend.js";
+import { KIT_BLEND, earthDetail, ensureEarthMask, groundBlend, groundBlendApp, hasEarth } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, select, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
-import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, buildFortPoint, buildMgNest, buildMirador, buildRefuge, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, buildFortPoint, buildLookout, buildMgNest, buildMineMarker, buildMirador, buildRefuge, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -181,10 +181,12 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
         lm.userData.gbBase = base; lm.colorNode = groundBlend(ga, base, cfg);
       }
       // ITS EARTH (algGroundBlend earthDetail — the berm's smear): the soil photo over the faces the bake marked earth
-      if (lm && hasEarth(g) && !lm.userData.earth) {
+      if (lm && (hasEarth(g) | hasEarth(far)) && !lm.userData.earth) {   // (both levels renamed: `|`, not `||`)
         lm.userData.earth = true;
         lm.colorNode = earthDetail(lm.colorNode ?? (lm.map ? texture(lm.map).rgb.mul(vec3(lm.color.r, lm.color.g, lm.color.b)) : vec3(lm.color.r, lm.color.g, lm.color.b)));
-      } }
+      }
+      if (lm?.userData.earth) { ensureEarthMask(g); ensureEarthMask(far); }   // (each level carries the mask its material reads)
+    }
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
     g.userData.kitType = [kit, type];   // (its damaged / ruin states: pieceState)
@@ -455,6 +457,12 @@ export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");
 
 /** The sangar (tools/blender/sangar.py). */
 export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar(), seatSangarGun);
+/** THE FLN'S MARKS (tools/blender/flnMarks.py, 2026-10-25 — you: "very cheap … make way better"): the lookout on its spur,
+ *  the mine's cairn — the old pieces' footprints and cover kept, the Blender model drawn. */
+export const loadLookout = () => loadBlenderPiece("flnmarks", "lookout", () => buildLookout());
+export const lookoutGeometry = () => pieceGeometry("flnmarks", "lookout");
+export const loadMineMarker = () => loadBlenderPiece("flnmarks", "minemark", () => buildMineMarker());
+export const mineMarkerGeometry = () => pieceGeometry("flnmarks", "minemark");
 /**
  * THE FM ON THE LIP (2026-10-25, you: the sangar's "weapon seems to be floating"): its pivot was the OLD sangar's height
  * (rtsAlgeria buildSangar, 1.28 m), level on its bipod. Unmanned, the gun LIES on the parapet (bipod folded): rays down

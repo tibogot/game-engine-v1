@@ -33,7 +33,8 @@ import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
-import { buildLookout, buildMineMarker, buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
+import { loadLookout, loadMineMarker } from "./algSangar.js";
 import { buildBeehives, buildBurntFarm, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
 import { loadPenProps } from "./algPenProps.js";
@@ -684,8 +685,13 @@ function houseRow(types, state, step) {
 }
 Object.assign(BUILDINGS, {
   sasPost: { label: "SAS post", gap: 10, before: () => buildSasPost({}), tags: ["SAS POST"], note: "the SAS post the old maps place by the base (rtsAlgeria buildSasPost) — no Blender version yet." },
-  mineMarker: { label: "Mine marker", gap: 6, before: () => buildMineMarker({}), tags: ["MINE MARKER"], note: "the FLN camp's mine marker, a pole and a rag (rtsAlgeria buildMineMarker)." },
-  lookout: { label: "FLN lookout", gap: 10, before: () => buildLookout({}), tags: ["LOOKOUT"], note: "the FLN lookouts on the old Aurès' spurs (rtsAlgeria buildLookout) — no Blender version yet." },
+  // THE FLN'S MARKS IN BLENDER (2026-10-25, you: "very cheap … make way better" — tools/blender/flnMarks.py)
+  mineMarker: { label: "Mine marker", gap: 5, yaw: Math.PI - 0.5, prepare: () => loadMineMarker(),
+    before: () => labPiece(sangarDetailed(houseMesh("minemark", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("minemark", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("minemark", "ruin"))),
+    tags: ["MINE MARKER · NEW", "MINE MARKER · KNOCKED OVER", "MINE MARKER · GONE OFF"], note: "where the ALN laid a mine: the turned earth, the three-stone cairn its fighters marked their own mines with, a thorn branch stuck in the mound." },
+  lookout: { label: "FLN lookout", gap: 8, yaw: Math.PI - 0.5, prepare: () => loadLookout(),
+    before: () => labPiece(sangarDetailed(houseMesh("lookout", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("lookout", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("lookout", "ruin"))),
+    tags: ["LOOKOUT · NEW", "LOOKOUT · DAMAGED", "LOOKOUT · DESTROYED"], note: "the watcher's perch on a spur: a dry-stone parapet, a brush shade on forked poles, the goatskin water bag, the blanket, the jar." },
   koubba: { label: "Koubba", gap: 12, before: () => buildKoubba({}), tags: ["KOUBBA"], note: "the marabout's domed tomb by the villages (rtsAlgVillage buildKoubba)." },
   cemetery: { label: "Cemetery", gap: 16, before: () => buildCemetery({}), tags: ["CEMETERY"], note: "the village cemetery (rtsAlgVillage buildCemetery)." },
   villageWell: { label: "Village well (old)", gap: 6, before: () => buildVillageWell({}), tags: ["WELL (OLD)"], note: "the old procedural well by the hamlets and the dechra (the Blender well: « Village props (Blender) »)." },

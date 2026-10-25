@@ -23,6 +23,7 @@ import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
 import { attachMotorPool, loadMotorPool } from "./algMotorPool.js";
+import { loadLookout, loadMineMarker, lookoutGeometry, mineMarkerGeometry } from "./algSangar.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, loadFrenchPost, swapPost, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
@@ -145,6 +146,10 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     for (const [name, mesh] of Object.entries(showroom ?? {})) if (/^refuge\d*$/.test(name)) growScreenPlants(plants(), mesh, 1);
   });
   loadInfirmary().then((ok) => { if (ok) geoCache.delete("infirmary"); });
+  // THE FLN'S MARKS in Blender (tools/blender/flnMarks.py, 2026-10-25): the map's lookouts on their spurs, the camp's
+  // mine marker — swapped where they stand (their footprints and cover kept)
+  loadLookout().then((ok) => { if (ok && swapPlaced(showroom, /^lookout\d*$/, lookoutGeometry(), app)) onCover(); });
+  loadMineMarker().then((ok) => { if (ok) swapPlaced(showroom, /^mineMarker\d*$/, mineMarkerGeometry(), app); });
   loadAidStation().then((ok) => { if (ok) geoCache.delete("aidStation"); });
   loadSearchlight().then((ok) => {
     if (!ok) return;
