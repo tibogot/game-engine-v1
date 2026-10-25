@@ -710,7 +710,18 @@ Object.assign(BUILDINGS, {
   // THE SCANNED BOULDERS (Poly Haven scans, boulders.glb — algStones scanOutcropParts): the game's outcrops and big
   // stones, at the outcrops' 3.4 m. (The sandstone formations have their own tool: rock-lab.html.)
   scannedBoulders: { label: "Scanned boulders", gap: 26, prepare: async () => { SCANS = await scanOutcropParts(3.4); },
-    before: () => { const g = new THREE.Group(); (SCANS ?? []).forEach((p, i) => { const m = new THREE.Mesh(p.geometry, p.material); m.castShadow = m.receiveShadow = true; m.position.x = (i - ((SCANS.length - 1) / 2)) * 4.6; g.add(m); }); return labPiece(g); },
+    before: () => {
+      const g = new THREE.Group();
+      (SCANS ?? []).forEach((p, i) => {
+        const m = new THREE.Mesh(p.geometry, p.material); m.castShadow = m.receiveShadow = true;
+        if (!p.geometry.boundingBox) p.geometry.computeBoundingBox();
+        const b = p.geometry.boundingBox;
+        // (sunk as the game sinks them — algGame: 15 % of their height, at least 10 cm)
+        m.position.set((i - ((SCANS.length - 1) / 2)) * 4.6, -Math.max(0.1, (b.max.y - b.min.y) * 0.15), 0);
+        g.add(m);
+      });
+      return labPiece(g);
+    },
     tags: ["SCANNED BOULDERS"], note: "the boulder scans (three today) the outcrops and the big loose stones use (tools/blender/scanBoulders.py → boulders.glb), at an outcrop's size." },
   rubbleHeapOld: { label: "Rubble heap (old)", gap: 8, before: () => buildRubbleHeap({}), tags: ["RUBBLE HEAP (OLD)"], note: "the old heap a shelled kit house leaves (rtsAlgeria buildRubbleHeap — algDamage)." },
 });

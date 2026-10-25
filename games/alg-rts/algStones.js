@@ -144,6 +144,10 @@ const SCAN_TINT = new THREE.Color(0.55, 0.45, 0.34);
 function scanStoneMaterial(photos, src, app = null, geo = null) {
   const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.92, metalness: 0 });
   mat.name = `Stone:scan:${src.name}`;
+  // (its shadow from its FRONT faces — its top: three draws a FrontSide material's BACK faces into the shadow map, the
+  // underside, which nearly touches the ground — the ground under it read lit, a hollow in its shadow; you, in the lab,
+  // 2026-10-25. The normal bias keeps the top's own shadow clean.)
+  mat.shadowSide = THREE.FrontSide;
   const map = src.map;
   if (map) {
     const c = texture(map).rgb, lum = (v) => v.r.mul(0.3).add(v.g.mul(0.59)).add(v.b.mul(0.11));
