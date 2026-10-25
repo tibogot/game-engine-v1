@@ -11,7 +11,57 @@
 // interpolated; the fragment adds one noise. No new draw. Off (the material untouched) without a ground cache, or with
 // ?gblend=0 (an A/B).
 import * as THREE from "three";
-import { float, mix, mx_noise_float, positionGeometry, positionWorld, smoothstep, texture, varying, vec2, vec3, dot, clamp } from "three/tsl";
+import { attribute, float, mix, mx_noise_float, normalWorld, positionGeometry, positionWorld, smoothstep, texture, varying, vec2, vec3, dot, clamp } from "three/tsl";
+import { loadTexture } from "../../v3/render/textureLoad.js";
+import { hexSample } from "../../v3/render/hexTiling.js";
+
+// THE EARTH'S DETAIL (2026-10-25, you: the mortar pit's, the fortified point's and the MG nest's pit — "a low-res
+// texture"): a kit's earth (its berm, its spoil) is a few texels a centimetre of the shared atlas — a smear close up.
+// The faces the bake marked earth (tools/blender/bkit.py earth_mask: the `_earth` vertex attribute) get a fine tiling
+// soil photo laid over their baked colour: its LUMINANCE only (the bake's colour, light and AO kept), hex-tiled (no
+// repeat grid), projected in world space from above and the sides by the surface's slope. One texture for every kit.
+const EARTH_PHOTO = "/textures/ground/dry_ground_rocks/dry_ground_rocks_diff_1k.jpg";
+let _earthTex = null;
+function earthTexture() {
+  if (_earthTex) return _earthTex;
+  const grey = new THREE.DataTexture(new Uint8Array([128, 128, 128, 255]), 1, 1);   // (until the photo arrives: no effect)
+  // (FILTERED, as the photo will be: a DataTexture's default nearest filtering is bound without a sampler, and the hex
+  // tiling's sampling needs one — "unresolved value nodeUniform_sampler", the pits invisible, when the shader was built
+  // before the photo arrived)
+  grey.magFilter = grey.minFilter = THREE.LinearFilter;
+  grey.needsUpdate = true;
+  _earthTex = texture(grey);
+  loadTexture(EARTH_PHOTO).then((t) => { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; _earthTex.value = t; })
+    .catch((e) => console.warn("[earth detail]", e?.message ?? e));
+  return _earthTex;
+}
+// (glTF names a custom attribute with an underscore — `_earth`; kept as `earthMask` on its geometry)
+export function hasEarth(geo) {
+  if (!geo?.getAttribute) return false;
+  const a = geo.getAttribute("_earth");
+  if (a) { geo.setAttribute("earthMask", a); geo.deleteAttribute("_earth"); }
+  return !!geo.getAttribute("earthMask");
+}
+/**
+ * `base` with the soil photo over the earth faces: the PHOTO's colour and grain at the bake's BRIGHTNESS (its light and
+ * AO kept, its blotchy low-res colour not — modulating it only kept the smear). Call only for a geometry hasEarth().
+ */
+export function earthDetail(base, { strength = 0.9, metres = 1.6 } = {}) {
+  const tex = earthTexture(), wp = positionWorld, n = normalWorld.abs();
+  const LUM = vec3(0.3, 0.59, 0.11);
+  const at = (uv) => hexSample(tex, uv.div(metres), null, { rotate: false }).rgb;
+  // (three projections — from above, along x, along z — weighted by the normal: a ring berm faces every way; one
+  // diagonal side projection stretched the photo into streaks where the slope looked along it)
+  const w = vec3(n.x.pow(4), n.y.pow(4), n.z.pow(4)), ws = w.x.add(w.y).add(w.z).max(1e-4);
+  const photo = at(vec2(wp.z, wp.y)).mul(w.x).add(at(vec2(wp.x, wp.z)).mul(w.y)).add(at(vec2(wp.x, wp.y)).mul(w.z)).div(ws);
+  // its brightness set to the bake's (the photo's mean — its last mip, one texel — brought to the base's luminance)
+  const mean = dot(tex.sample(vec2(0.5, 0.5)).level(float(12)).rgb, LUM).max(0.05);
+  // (the bake's brightness at HALF its contrast — a geometric mean with a typical earth's 0.3: its shading kept, the
+  // patchwork of its low-res blotches flattened)
+  const lb = dot(base, LUM).max(1e-3).mul(0.3).sqrt();
+  const earth = photo.mul(lb.div(mean));
+  return mix(base, earth, attribute("earthMask", "float").mul(strength));
+}
 
 export const GROUND_BLEND = { fade: 0.75, strength: 0.95, tint: 0.3, fadeFrac: 0.7 };   // (seen from the RTS camera a rock is mostly its TOP: the tint carries the blend there, the foot fade the sides — 0.14 tint, 0.38 of the height: "I can't see any difference")
 const OFF = typeof location !== "undefined" && new URLSearchParams(location.search).get("gblend") === "0";
@@ -81,6 +131,7 @@ export function blendMesh(app, mesh, { fade = 0.3, tint = GROUND_BLEND.tint, str
         if (src.roughnessMap) m.roughnessMap = src.roughnessMap;
         m.userData.gbBase = base;
         m.colorNode = groundBlend(app, base, { fade, tint, strength });
+        if (hasEarth(mesh.geometry)) m.colorNode = earthDetail(m.colorNode);   // (its earth: the soil photo over it)
         _blended.set(src, m);
         n++;
       }

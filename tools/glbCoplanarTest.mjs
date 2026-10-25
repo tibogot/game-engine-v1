@@ -11,6 +11,9 @@
  *   node tools/glbCoplanarTest.mjs            (npm test runs it)
  *   node tools/glbCoplanarTest.mjs --all      re-check every model, whatever the cache says
  *   node tools/glbCoplanarTest.mjs --baseline every model's pairs today become its bar (once: 2026-10-25)
+ *   node tools/glbCoplanarTest.mjs --accept <model.glb> "<why>"   ONE model's pairs today become its bar, the reason
+ *                                  recorded beside it (glbCoplanarPassed.json `why`) — for pairs looked at and judged
+ *                                  invisible (a sliver folded onto its neighbour, same face, same colour), never to hide one
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -23,7 +26,9 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const DIR = path.join(HERE, "..", "public", "models", "alg");
 const CACHE = path.join(HERE, "glbCoplanarPassed.json");
 const BASE = process.argv.includes("--baseline");
-const ALL = BASE || process.argv.includes("--all");
+const ai = process.argv.indexOf("--accept"), ACCEPT = ai >= 0 ? process.argv[ai + 1] : null, WHY = ai >= 0 ? process.argv[ai + 2] : null;
+if (ACCEPT && !WHY) { console.log("--accept <model.glb> \"<why>\": the reason is required"); process.exit(1); }
+const ALL = BASE || !!ACCEPT || process.argv.includes("--all");
 
 const seen = fs.existsSync(CACHE) ? JSON.parse(fs.readFileSync(CACHE, "utf8")) : {};
 const geoOf = (n) => ({
@@ -44,13 +49,13 @@ for (const f of fs.readdirSync(DIR).filter((f) => f.endsWith(".glb")).sort()) {
     const r = coplanarOverlaps(geoOf(n));
     if (r.pairs) { pairs += r.pairs; where.push(`${n.name} ${r.pairs}`); }
   }
-  const bar = BASE ? pairs : was?.pairs ?? 0;
+  const bar = BASE || f === ACCEPT ? pairs : was?.pairs ?? 0;
   if (pairs > bar) {
     failed++;
     next[f] = was ?? { hash: "", pairs: 0 };   // (the bar stays: fix the model)
     console.log(`FAIL  ${f}: ${pairs} coplanar pairs (z-fighting), the bar is ${bar} — ${where.slice(0, 6).join(", ")}`);
   } else {
-    next[f] = { hash, pairs };
+    next[f] = { hash, pairs, ...(f === ACCEPT ? { why: WHY } : was?.why && pairs > 0 ? { why: was.why } : {}) };
     left += pairs;
     console.log(`PASS  ${f}: ${pairs} pairs${pairs < bar ? ` (was ${bar})` : ""}${pairs ? ` — ${where.slice(0, 4).join(", ")}` : ""}`);
   }

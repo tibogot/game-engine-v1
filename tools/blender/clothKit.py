@@ -129,6 +129,15 @@ def drape(K, nm, fn, nu, nv, mats, t, pins=lambda u, v: False, colliders=(), fra
             f.material_index = names.index(mn)
     o = K.obj(nm, bm, names[0], "h", smooth=True)
     for mn in names[1:]: o.data.materials.append(K.mat(mn))
+    # THE FOLDS SMOOTH (2026-10-25, you: the tents' folds "saw tooth" — the French post's yard tent, the damaged forward
+    # post and aid station): one Catmull-Clark level on the settled sheet (the near level), so a fold is a curve and not
+    # a crease between long triangles, BEFORE the decimation; and the canvas marked "cloth" so the kit's join never
+    # splits its normals at a fold (bkit.Kit.join: smooth by angle, then the cloth's own edges smooth again).
+    if not K.low:
+        sd = o.modifiers.new("SD", "SUBSURF"); sd.levels = sd.render_levels = 1
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.modifier_apply(modifier="SD")
+    o.data.attributes.new("cloth", "BOOLEAN", "FACE").data.foreach_set("value", [True] * len(o.data.polygons))
     writeFold(o)
     # OPTIMISED (2026-10-22, you: "optimise as much as possible"): the sim grid is fine to make the folds; the mesh
     # kept is decimated (`keep`: its share of the triangles) — the folds' shape stays, the flat runs lose theirs

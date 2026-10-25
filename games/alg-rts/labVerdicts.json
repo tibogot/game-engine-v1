@@ -9,9 +9,64 @@
   "note": "in Blender: intact / damaged / burnt, the pen and the village props",
   "at": "2026-10-25"
  },
+ "fortBlender": {
+  "v": "improve",
+  "note": "the pit's earth: low-resolution texture",
+  "at": "2026-10-25"
+ },
+ "helisurface": {
+  "v": "redo",
+  "note": "rework completely later; some sandbags float",
+  "at": "2026-10-25"
+ },
+ "lookout": {
+  "v": "redo",
+  "note": "very cheap � make a way better one (Blender)",
+  "at": "2026-10-25"
+ },
+ "mineMarker": {
+  "v": "redo",
+  "note": "very cheap � make a way better one (Blender)",
+  "at": "2026-10-25"
+ },
+ "mortierBlender": {
+  "v": "improve",
+  "note": "the pit's earth: low-resolution texture",
+  "at": "2026-10-25"
+ },
+ "nidBlender": {
+  "v": "improve",
+  "note": "the pit's earth: low-resolution texture",
+  "at": "2026-10-25"
+ },
+ "parcAutoNeuf": {
+  "v": "improve",
+  "note": "finish what remained; its damaged / destroyed states (D)",
+  "at": "2026-10-25"
+ },
+ "posteAvanceBlender": {
+  "v": "improve",
+  "note": "damaged: the tent's folds saw-toothed",
+  "at": "2026-10-25"
+ },
  "posteBlender": {
+  "v": "improve",
+  "note": "the tent in the yard: saw-tooth folds",
+  "at": "2026-10-25"
+ },
+ "sangarBlender": {
   "v": "keep",
-  "note": "one entry: the old post, photo and sim-bags entries removed",
+  "note": "nice; the weapon floats with nobody holding it",
+  "at": "2026-10-25"
+ },
+ "sasPost": {
+  "v": "redo",
+  "note": "old asset, cheap; its sandbags are the old removed ones — a better one in Blender",
+  "at": "2026-10-25"
+ },
+ "secoursBlender": {
+  "v": "improve",
+  "note": "damaged: saw-tooth on one part of the tent",
   "at": "2026-10-25"
  },
  "zeriba": {

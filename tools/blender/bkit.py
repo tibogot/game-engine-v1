@@ -222,6 +222,7 @@ class Kit:
         # (a piece may round its shading — a dry-stone sangar's stones: 80 deg, no weighted normals — flat walls
         # keep 35 and the weighted normals, the M'zab houses' banding fix)
         bpy.ops.object.shade_smooth_by_angle(angle=math.radians(getattr(s, "smooth_angle", 35)))
+        unsharp_cloth(j)
         if getattr(s, "weighted_on", True): weighted(j)
         return j
     def drop_cutters(s):
@@ -300,6 +301,7 @@ class Kit:
         for q, at in zip(objs, home):
             for l in [l for l in q.data.uv_layers if l.name != "Atlas"]: q.data.uv_layers.remove(l)
             if "Atlas" in q.data.uv_layers: q.data.uv_layers["Atlas"].active_render = True
+            earth_mask(q)   # (before the materials go: which faces were earth)
             q.data.materials.clear(); q.data.materials.append(m)
             for p in q.data.polygons: p.material_index = 0
             q.location = at
@@ -420,10 +422,46 @@ class Kit:
         bpy.ops.object.select_all(action="DESELECT")
         for o in objs: o.select_set(True)
         kw = dict(filepath=path, use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format=images)   # (AUTO: a kit with a stencil sheet — PNG keeps its alpha)
+        kw["export_attributes"] = True   # (the custom attributes — the underscore ones: `_earth`, earth_mask)
         if colors: kw["export_vertex_color"] = "ACTIVE"
         try: bpy.ops.export_scene.gltf(**kw, export_jpeg_quality=90)
         except TypeError: bpy.ops.export_scene.gltf(**kw)
         print("GLB", path)
+
+def earth_mask(o):
+    """THE EARTH, MARKED (2026-10-25, you: the mortar pit's, the fortified point's, the MG nest's pit "a low-res texture"):
+    a vertex attribute `_earth` (1 on the faces whose material is an earth — "earth", "mpEarth", "spoil"…), exported with
+    the model (glTF custom attribute, the underscore). The game lays a fine tiling soil photo over those faces only
+    (algGroundBlend earthDetail): the atlas's few texels a centimetre for a 7 m berm stop reading as a smear."""
+    me = o.data
+    if not me.materials: return
+    earthy = [bool(m and any(w in m.name.lower() for w in ("earth", "spoil", "soil", "berm"))) for m in me.materials]
+    if not any(earthy): return
+    val = [0.0] * len(me.vertices)
+    for p in me.polygons:
+        if earthy[p.material_index]:
+            for vi in p.vertices: val[vi] = 1.0
+    a = me.attributes.get("_earth") or me.attributes.new("_earth", "FLOAT", "POINT")
+    a.data.foreach_set("value", val)
+    print(f"[earth] {o.name}: {sum(1 for v in val if v)} earth vertices", flush=True)
+
+def unsharp_cloth(o):
+    """THE CANVAS SMOOTH ACROSS ITS FOLDS (2026-10-25, the tents' "saw tooth"): a fold sharper than the kit's smoothing
+    angle was split into hard edges, its long triangles lit facet by facet. Every edge whose faces are ALL cloth
+    (clothKit's "cloth" face attribute) is smooth again; where the canvas meets a pole or a frame it stays hard."""
+    me = o.data
+    if "cloth" not in me.attributes or "sharp_edge" not in me.attributes: return
+    cloth = [False] * len(me.polygons); me.attributes["cloth"].data.foreach_get("value", cloth)
+    other = [False] * len(me.edges)   # (an edge touching a face that is NOT cloth)
+    for p in me.polygons:
+        if not cloth[p.index]:
+            for li in p.loop_indices: other[me.loops[li].edge_index] = True
+    sharp = [False] * len(me.edges); me.attributes["sharp_edge"].data.foreach_get("value", sharp)
+    n = 0
+    for i in range(len(me.edges)):
+        if sharp[i] and not other[i]: sharp[i] = False; n += 1
+    me.attributes["sharp_edge"].data.foreach_set("value", sharp)
+    if n: print(f"[cloth] {o.name}: {n} fold edges smooth again", flush=True)
 
 def weighted(o):
     """FLAT WALLS SHADE FLAT (2026-10-19, you, on the M'zab houses' diagonal bands: "bad normals and bad

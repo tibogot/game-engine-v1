@@ -16,19 +16,20 @@
   "pairs": 0
  },
  "fieldposts.glb": {
-  "hash": "7685087e1db2f69fd50fd749cddb76de06d2518e",
-  "pairs": 0
+  "hash": "de8cde8bf3449668be4f1d814d2f1d18342ba43c",
+  "pairs": 3,
+  "why": "2026-10-25: 3 sliver pairs in the ruined aid tent's smoothed canvas (1-2 cm triangles folded onto their neighbour, one face, the optimizer's 16-bit rounding; raw build 0) — invisible"
  },
  "fieldwalls.glb": {
   "hash": "97052f4a71734e02d73a5487cf42c7cb46c1e784",
   "pairs": 0
  },
  "flnposts.glb": {
-  "hash": "8267a77d74fda28e8d619d595b1feca7c3f80f1e",
+  "hash": "db84442b0161d423869cdf7f1875f49013c1fe1e",
   "pairs": 0
  },
  "fortpoint.glb": {
-  "hash": "91e299c6735a369a76a134a0afc3b3b7e312bf5b",
+  "hash": "cbb1b47cc878b233309cb8f0983161d4f53e3452",
   "pairs": 1
  },
  "houses.glb": {
@@ -36,15 +37,16 @@
   "pairs": 102
  },
  "mgnest.glb": {
-  "hash": "0011bb58a4cd72008ee1209cf0dab9d0f54fcf78",
-  "pairs": 0
+  "hash": "7562cffb5419f2eb67afb8cb274a481623d36d6e",
+  "pairs": 2,
+  "why": "2026-10-25: 2 sliver pairs (1-2 cm triangles folded onto their neighbour at 0.7,0.7,1.4, the optimizer's rounding; raw build 0) — invisible"
  },
  "mirador.glb": {
   "hash": "f11ee84302fb634a781bebfe80e532186b567c00",
   "pairs": 0
  },
  "mortarpit.glb": {
-  "hash": "f8602d2308bbc3b9320ab626a40032aa65a8189f",
+  "hash": "b049c4a84e51c76f97c458af18840a351f4f2195",
   "pairs": 0
  },
  "motorPool.glb": {
@@ -64,8 +66,8 @@
   "pairs": 0
  },
  "postkit.glb": {
-  "hash": "4c9c9b0b33547909d9933f6ec8bc22e60317e649",
-  "pairs": 8
+  "hash": "d7e8087c660d0dea9630e20762862042cceba1ca",
+  "pairs": 6
  },
  "rubble.glb": {
   "hash": "7d6744c90b0141e50c542d0b9b1f3e1b05fd50e5",

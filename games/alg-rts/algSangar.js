@@ -16,7 +16,7 @@
 //                  stones in the shader (rock_boulder_dry's normal and height, triplanar in the piece's space,
 //                  ~0.45 m a tile): its normal added to the baked one, its height darkening the pits (cavity).
 //                  6 texture taps, no new mesh.
-import { KIT_BLEND, groundBlend, groundBlendApp } from "./algGroundBlend.js";
+import { KIT_BLEND, earthDetail, groundBlend, groundBlendApp, hasEarth } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, select, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
@@ -179,6 +179,11 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
       if (ga && cfg && lm && !lm.userData.gbBase) {
         const base = lm.colorNode ?? (lm.map ? texture(lm.map).rgb.mul(vec3(lm.color.r, lm.color.g, lm.color.b)) : vec3(lm.color.r, lm.color.g, lm.color.b));
         lm.userData.gbBase = base; lm.colorNode = groundBlend(ga, base, cfg);
+      }
+      // ITS EARTH (algGroundBlend earthDetail — the berm's smear): the soil photo over the faces the bake marked earth
+      if (lm && hasEarth(g) && !lm.userData.earth) {
+        lm.userData.earth = true;
+        lm.colorNode = earthDetail(lm.colorNode ?? (lm.map ? texture(lm.map).rgb.mul(vec3(lm.color.r, lm.color.g, lm.color.b)) : vec3(lm.color.r, lm.color.g, lm.color.b)));
       } }
     g.userData.siteMaterial = () => siteMaterial(near.material, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4", stone);
     g.userData.blender = true;
@@ -449,7 +454,21 @@ export const loadBarbedWire = () => loadBlenderPiece("barbedwire", "barbed", () 
 export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");
 
 /** The sangar (tools/blender/sangar.py). */
-export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar());
+export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar(), seatSangarGun);
+/**
+ * THE FM ON THE LIP (2026-10-25, you: the sangar's "weapon seems to be floating"): its pivot was the OLD sangar's height
+ * (rtsAlgeria buildSangar, 1.28 m), level on its bipod. Unmanned, the gun LIES on the parapet (bipod folded): rays down
+ * onto the Blender stones under its receiver and under its barrel, the gun set on the higher of the two (its receiver's
+ * half height over it, ×1.3). Measured first try, on its bipod's feet: the receiver hung 25 cm over the stones.
+ */
+function seatSangarGun(g) {
+  const gun = g.userData.gun;
+  if (!gun?.pivot) return;
+  const [px, , pz] = gun.pivot, K = 1.3, body = new THREE.Mesh(g, new THREE.MeshBasicMaterial());
+  const top = (z) => new THREE.Raycaster(new THREE.Vector3(px, 10, z), new THREE.Vector3(0, -1, 0), 0, 20).intersectObject(body, false)[0]?.point.y ?? -Infinity;
+  const y = Math.max(top(pz), top(pz - 0.4 * K));   // (under the receiver, under the barrel)
+  if (y > -Infinity) gun.pivot = [px, y + 0.065 * K, pz];
+}
 /** The arms cache (tools/blender/armsCache.py). */
 export const loadArmsCache = () => loadBlenderPiece("armscache", "arms", () => buildArmsCache());
 export const armsCacheGeometry = () => pieceGeometry("armscache", "arms");
