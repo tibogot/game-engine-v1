@@ -416,7 +416,9 @@ export function siteBags(mesh) {
   const last = mesh.children.filter((c) => !holds(c) && c.userData.late == null);
   return {
     set(p) {
-      u.value = Math.min(1, Math.max(0, (p - 0.1) / 0.8));
+      // (to 1.02, not 1: the last bags' settle — 12 cm over 2 % of the work — done by 90 %; at 1 the top course hung
+      // 12 cm over the wall in a finished lab piece, 2026-10-25)
+      u.value = Math.min(1.02, Math.max(0, ((p - 0.1) / 0.8) * 1.02));
       for (const c of last) c.visible = p >= 0.94;
     },
     finish() {

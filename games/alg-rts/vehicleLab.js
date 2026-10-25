@@ -1,6 +1,6 @@
 // VEHICLE LAB — one asset at a time, BEFORE and AFTER side by side (you, 2026-10-06: "start
 // with one of them, then only if I see we can do better, we add and compare step by step").
-// The plant lab's light scene (plantLab.js): the game's sun, shadow and exposure, a stand-in
+// A light scene (as the plant lab had, now folded into lab.html): the game's sun, shadow and exposure, a stand-in
 // sky, one ground photo — loads in seconds. Judge here; give what you keep one look in the game.
 //
 //   left   AVANT — the game's half-track (rtsVehiclesFr.js buildHalfTrack, detail 1)

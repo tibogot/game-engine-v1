@@ -7,12 +7,37 @@
 //           "verdict" new, waiting for your verdict
 //           "ancien"  an old version kept to compare
 export const SIDES = { fr: "French", fln: "FLN", civil: "Civilian", nature: "Nature" };
-export const KINDS = { base: "Base", defense: "Defence", village: "Village", fln: "FLN camp", ruine: "Ruins", nature: "Rocks", point: "Points" };
+export const KINDS = { base: "Base", defense: "Defence", village: "Village", fln: "FLN camp", ruine: "Ruins", nature: "Rocks", plant: "Plants", field: "Fields", prop: "Props", point: "Points" };
 export const MAPS = { aures: "Aurès", abdi: "Oued Abdi", cote: "Coast", kantara: "El Kantara" };
 export const STATUS = { jeu: "In the game", verdict: "To judge", ancien: "Old, kept" };
 
 const ALL = ["aures", "abdi", "cote", "kantara"];
+// (the plants: buildingLab PLANT_SPECIES — every one as the game grows it, plant-lab.html folded in 2026-10-25)
+const PLANT_KEYS = ["pricklyPear", "thistle", "asphodel", "alfa", "agave", "agaveMast", "broom", "oleander", "tamarisk", "betoum", "tamariskTree", "typha", "juniperScrub", "doumPalm"];
 export const META = {
+  // (2026-10-25: everything the maps place that the lab never showed — tools/labCoverageTest.mjs)
+  sasPost: { side: "fr", kind: "base", maps: ["aures", "abdi"], status: "jeu" },
+  mineMarker: { side: "fln", kind: "defense", maps: ALL, status: "jeu" },
+  lookout: { side: "fln", kind: "defense", maps: ["aures"], status: "jeu" },
+  koubba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
+  cemetery: { side: "civil", kind: "village", maps: ["aures"], status: "jeu" },
+  villageWell: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
+  farmstead: { side: "civil", kind: "village", maps: ["aures"], status: "jeu" },
+  burntFarm: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
+  ruinedHut: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
+  garden: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
+  threshingFloor: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
+  terraces: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
+  fieldWallOld: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
+  fieldWallsBlender: { side: "civil", kind: "field", maps: ["aures", "abdi"], status: "jeu" },
+  villagePropsOld: { side: "civil", kind: "prop", maps: ["aures"], status: "jeu" },
+  villagePropsBlender: { side: "civil", kind: "prop", maps: ["aures"], status: "jeu" },
+  telegraphPole: { side: "fr", kind: "prop", maps: ["aures"], status: "jeu" },
+  rubbleKit: { side: "civil", kind: "ruine", maps: ["aures", "abdi"], status: "jeu" },
+  rubbleHeapOld: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
+  mzab_mur: { side: "civil", kind: "village", maps: ["abdi"], status: "jeu" },
+  ...Object.fromEntries(PLANT_KEYS.map((k) => [`plant_${k}`, { side: "nature", kind: "plant", maps: ALL, status: "jeu" }])),
+  plantSteppe: { side: "nature", kind: "plant", maps: ["aures", "kantara"], status: "jeu" },
   poste: { side: "fr", kind: "base", maps: ALL, status: "jeu" },
   postePhoto: { side: "fr", kind: "base", maps: ["aures"], status: "verdict" },
   sacsPoste: { side: "fr", kind: "base", maps: ALL, status: "jeu" },
@@ -33,8 +58,8 @@ export const META = {
   villageBlanc: { side: "civil", kind: "village", maps: ["abdi"], status: "verdict" },
   ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee"].map((ty) => [`mzab_${ty}`, { side: "civil", kind: "village", maps: ["abdi", "kantara"], status: "verdict" }])),
   villeMzab: { side: "civil", kind: "village", maps: ["abdi"], status: "verdict" },
-  enclosFerme: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
-  zeriba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
+  enclosFerme: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "verdict" },
+  zeriba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "verdict" },
   port: { side: "civil", kind: "village", maps: ["cote"], status: "verdict" },
   grotte: { side: "fln", kind: "fln", maps: ["aures", "abdi"], status: "jeu" },
   campFln: { side: "fln", kind: "fln", maps: ["aures", "abdi"], status: "verdict" },
@@ -70,13 +95,61 @@ export const metaOf = (key) => META[key] ?? { side: "civil", kind: "autre", maps
 
 // ENGLISH (2026-10-19, you: "the main language of labs is English"): the pieces' names, and their version
 // labels translated word by word (the old lab's data is French and stays so).
+// WHAT THE GAME PLACES → ITS LAB ENTRY (2026-10-25, you: "be careful with some assets not being in the lab … we need
+// better organization"). Every placement key of the maps (showroom.js, algLandmarks.js, algGame.js — trailing digits
+// and the villages' suffixes dropped: gardenOA1 → garden), every buildable (algBuild BUILDS) and every Blender kit type
+// (algHouse *_TYPES, as "kit:<type>"): its lab entry, or { none: why it has none }. tools/labCoverageTest.mjs (npm
+// test) fails when the game places something this table does not know — a new piece gets its lab entry first.
+// SYSTEMS: placed by their own modules, no key to read — listed by hand (PIECES_INVENTORY.md).
+const UNIT = { none: "a unit (the vehicle lab)" };
+export const PLACED = {
+  // the base (showroom.js)
+  frenchPost: "posteBlender", helipad: "helisurface", motorPool: "parcAutoNeuf", sasPost: "sasPost",
+  mirador: "miradorBlender", mgNest: "nidBlender", searchlight: "projBlender", mortarPit: "mortierBlender", sandbags: "sacsDeSable", wire: "barbelesBlender",
+  ebr: UNIT, amx: UNIT,   /* (amx13: its digits dropped) */ halftrack: UNIT, gmc: UNIT, willys: UNIT, alouette: UNIT,
+  // the FLN
+  alnCamp: "campFln", caveEntrance: "grotte", armsCache: "cacheBlender", sangar: "sangarBlender", ambushScreen: "ecranBlender", mineMarker: "mineMarker",
+  lookout: "lookout", refuge: "refugeBlender",
+  // the villages
+  mechta: "hameau", dechra: "dechraNouveau", ksar: "ksarNouveau", koubba: "koubba", cemetery: "cemetery", wellDechra: "villageWell", wellHamlet: "villageWell",
+  zeriba: "zeriba", garden: "garden", thresh: "threshingFloor", terraces: "terraces", terracesOpen: "terraces",
+  // the landmarks (algLandmarks.js, algGame.js MAP.farmsteads)
+  mechtaFarm: "farmstead", mechtaFarmMap: "farmstead", burntFarm: "burntFarm", ruinedHut: "ruinedHut",
+  romanRuin: "ruineRomaine", romanArch: "arc", romanColonnade: "colonnade", romanColumn: "colonne", romanPress: "pressoir", romanRoad: "voie",
+  // the buildables (algBuild.js BUILDS — the ones not placed above)
+  forwardPost: "posteAvanceBlender", aidStation: "secoursBlender", fortPoint: "fortBlender", infirmary: "infirmBlender",
+  // the Blender kits (algHouse.js)
+  ...Object.fromEntries(["maison", "cour", "haute", "boutique"].map((t) => [`kit:${t}`, `blanche_${t}`])),
+  ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee", "mur"].map((t) => [`kit:${t}`, `mzab_${t}`])),
+  "kit:a": "fieldWallsBlender", "kit:b": "fieldWallsBlender", "kit:c": "fieldWallsBlender",
+  "kit:fuel": "pointBlender_fuel", "kit:mun": "pointBlender_mun", "kit:sangar": "sangarBlender", "kit:arms": "cacheBlender", "kit:ambush": "ecranBlender",
+  "kit:mirador": "miradorBlender", "kit:gear": "miradorBlender", "kit:barbed": "barbelesBlender", "kit:mg": "nidBlender", "kit:gun": "nidBlender",
+  "kit:mortar": "mortierBlender", "kit:m81": "mortierBlender", "kit:point": "fortBlender", "kit:sltower": "projBlender", "kit:lamp": "projBlender",
+  "kit:fwdradio": "posteAvanceBlender", "kit:aidtent": "secoursBlender", "kit:aidmark": "secoursBlender", "kit:refuge": "refugeBlender", "kit:infirm": "infirmBlender",
+  "kit:post": "posteBlender",
+  ...Object.fromEntries(["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "hay", "wood", "hives"].map((t) => [`kit:${t}`, "villagePropsBlender"])),
+  ...Object.fromEntries(["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"].map((t) => [`kit:${t}`, "rubbleKit"])),
+  ...Object.fromEntries(["grenade", "smoke", "flare", "cutters", "mine", "helmet", "kepi", "jerrycan", "ammobox", "detonator", "detector", "radio", "lmg", "bazooka", "flamer", "sniper", "tools", "shell", "shotgun", "mapcase", "spade"]
+    .map((t) => [`kit:${t}`, { none: "hand-held: the HUD icons (iconStudio.js)" }])),
+};
+export const SYSTEMS = {
+  "village props (old, aures)": "villagePropsOld", "telegraph poles": "telegraphPole", "old field walls": "fieldWallOld", "port (coast)": "port",
+  "sandstone rocks": "rocheBanc", "rubble heap (old house hit)": "rubbleHeapOld", "plants (foliage presets)": "plantSteppe",
+  "rock outcrops / scanned boulders": { none: "the rock lab (rock-lab.html) — to fold in next" },
+  "loose stones (algStones)": { none: "scattered by the terrain: judged in the game" },
+  "flags, windsock (live cloth)": { none: "animated props: judged in the game" },
+  "field surfaces (old aures)": { none: "shader-draped ground: judged in the game" },
+  "simulated sandbag walls of the pieces": { none: "inside their pieces' entries" },
+  "fallback depot / mast / old buildable kits": { none: "drawn only when a Blender model fails to load" },
+};
+
 export const NAMES = {
   enclosFerme: "Farm thorn pen (new)", zeriba: "Zeriba (new)", sacsDeSable: "Sandbag wall", port: "Fishing port (new)",
   sacsPoste: "Post (sim bags)",
   mechtaHouse: "Mechta house", poste: "French post", parcAuto: "Motor pool", parcAutoNeuf: "Motor pool (new, Blender)",
   blanche_maison: "Whitewashed house: two storeys", blanche_cour: "Whitewashed house: courtyard", blanche_haute: "Whitewashed house: tall",
   blanche_boutique: "Whitewashed house: shop", villageBlanc: "Whitewashed village", helisurface: "Helipad",
-  mzab_dar: "M'zab house: roof gallery", mzab_tour: "M'zab house: tall", mzab_bas: "M'zab house: low, yard", mzab_terrasse: "M'zab house: stepped, pale blue",
+  mzab_dar: "M'zab house: roof gallery", mzab_mur: "M'zab terrace wall", mzab_tour: "M'zab house: tall", mzab_bas: "M'zab house: low, yard", mzab_terrasse: "M'zab house: stepped, pale blue",
   mzab_souk: "M'zab souk: arcade row", mzab_mosquee: "M'zab mosque and minaret", villeMzab: "M'zab town (souk square)",
   ruineRomaine: "Roman ruin", colonne: "Roman column", colonnade: "Colonnade", voie: "Roman road", arc: "Trajan's arch",
   pressoir: "Oil press", rocheBanc: "Rock: big shelf", rocheBloc: "Rock: block", rocheDalle: "Rock: low slab", grotte: "FLN cave",

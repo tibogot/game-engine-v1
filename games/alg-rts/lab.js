@@ -9,15 +9,20 @@
 //   PLAYERS     a piece's construction (0-100 %, play — the helipad, the sangar: entries with `construction`)
 //   KEYS        ← → the previous / next piece of the list, / search, 1-4 the views, Esc clears the search
 //   FIRE        a piece with a mortar tube lobs the game's bombs at a target 80 m out (follow the shell, slow ×0.1)
+//   PLANTS      every species the game grows, a bed of three, and the steppe (plant-lab.html folded in, 2026-10-25)
 //   PIECE       a piece's own tools: a seeded piece's variants, a rock's look, the supply point's capture
 //               (buildingLab.js pieceTools — the old page's panels; building-lab.html deleted 2026-10-25: one lab)
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { color, mx_noise_float, normalMap, texture, uv, vec3 } from "three/tsl";
+import { hexSample } from "../../v3/render/hexTiling.js";
 import { initGlbLoaderRenderer } from "../../v3/render/foliage/glbLoader.js";
 import { BUILDINGS, LAB_STONES, applyLabStone, labSite, labTick, pieceTools } from "./buildingLab.js";
 import { NIGHT, SUN, gradientSky, vehicleOf } from "./vehicleLab.js";
 import { KINDS, MAPS, NAMES, SIDES, STATUS, enTag, metaOf } from "./labCatalog.js";
 import { createCombatFx } from "../shared-rts/combatFx.js";
+import { kitPhotoMaterial } from "./algKitPhoto.js";
+import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { createProjectiles } from "../shared-rts/projectiles.js";
 const nameOf = (k) => NAMES[k] ?? BUILDINGS[k]?.label ?? k;
 
@@ -27,7 +32,7 @@ const store = {
   get(k, d) { try { const v = localStorage.getItem(`lab.${k}`); return v == null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(`lab.${k}`, JSON.stringify(v)); } catch { /* private window: no memory, fine */ } },
 };
-const ICON = { base: "⛺", defense: "🛡", village: "🏠", fln: "⛰", ruine: "🏛", nature: "🪨", point: "📍", autre: "▫" };
+const ICON = { base: "⛺", defense: "🛡", village: "🏠", fln: "⛰", ruine: "🏛", nature: "🪨", plant: "🌿", field: "🌾", prop: "🪵", point: "📍", autre: "▫" };
 
 export async function startLab() {
   // ── The scene: the old lab's light and sky, a bigger ground (villages) ──────────────────────
@@ -59,12 +64,19 @@ export async function startLab() {
   const loader = new THREE.TextureLoader();
   const tex = (f, srgb) => {
     const t = loader.load(`/textures/ground/dry_mud_field_001/dry_mud_field_001_${f}_1k.jpg`);
-    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(160, 160); t.anisotropy = 8;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8;
     if (srgb) t.colorSpace = THREE.SRGBColorSpace;
     return t;
   };
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(640, 640).rotateX(-Math.PI / 2),
-    new THREE.MeshStandardNodeMaterial({ map: tex("diff", true), normalMap: tex("nor_gl"), roughness: 1, color: 0xd8c6a8 }));
+  // THE GROUND WITHOUT ITS TILE (2026-10-25, you: "the terrain texture is tiling … even if it's a lab it will look
+  // better"): the terrain's hex tiling (v3/render/hexTiling.js hexSample — every cell of a hex lattice a different window of
+  // the photo, offsets only: turned cells point a scanned photo's baked shadows every which way) for its colour and
+  // its relief, and a faint 30 m colour drift so a big ground does not read flat. 4 m a repeat, as before (640 / 160).
+  const gUv = uv().mul(160), drift = mx_noise_float(vec3(uv().mul(21), 0.0)).mul(0.09).add(1);
+  const gMat = new THREE.MeshStandardNodeMaterial({ roughness: 1 });
+  gMat.colorNode = hexSample(texture(tex("diff", true)), gUv, null, { rotate: false }).rgb.mul(color(0xd8c6a8)).mul(drift);
+  gMat.normalNode = normalMap(hexSample(texture(tex("nor_gl")), gUv, null, { rotate: false }).rgb);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(640, 640).rotateX(-Math.PI / 2), gMat);
   ground.receiveShadow = true;
   scene.add(ground);
   // a man at the game's scale, for size
@@ -239,6 +251,9 @@ export async function startLab() {
       const gap = E.gap ?? 8, yaw = E.yaw ?? -0.6;
       const xs = geos.length === 3 ? [-gap, 0, gap] : geos.length === 2 ? [-gap, gap] : [0];
       const versions = geos.map((g, i) => {
+        // (a kit piece in the GAME's material — showroom kitView: the kit's colours with the photos' grain and relief,
+        // on by default — not the vehicle lab's plain one: every old kit piece read unlike the game, 2026-10-25)
+        if (g.isBufferGeometry && !g.userData.labMaterial) g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT);
         const v = vehicleOf(g, key);
         v.group.position.x = xs[i];
         v.group.rotation.y = yaw;

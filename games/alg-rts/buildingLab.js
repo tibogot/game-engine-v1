@@ -23,7 +23,7 @@ import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtla
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { createPointMark } from "./algPointMarks.js";
 import { createConstruction } from "./algConstruction.js";
-import { buildFrSandbagWall, buildFrSandbagWallBreached } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildFrenchPostPiece, buildHelipadPiece, buildSandbagWallPiece, loadSandbags, loadSandbagWall } from "./algSandbags.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
@@ -37,8 +37,12 @@ import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js"
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
-import { PlacedFoliage } from "../../v3/render/foliage/placedFoliage.js";
-import { siteBags, loadSandbagWall as loadSimBags } from "./algSandbags.js";
+import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
+import { buildLookout, buildMineMarker, buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildBeehives, buildBurntFarm, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
+import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
+import { SUN } from "./vehicleLab.js";
+import { siteBags, simulatedWallMesh, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -227,6 +231,55 @@ function labWindsock(g) {
   return grp;
 }
 
+// THE PLANTS (2026-10-25, you: "fold the plant lab into the game lab" — plant-lab.html gone): every species the game
+// grows, a bed of three (sizes 1 / 0.8 / 0.65, three headings: a species judged by one plant is judged by its seed) with
+// the engine's own builders and material (PlacedFoliage, FOLIAGE_PRESETS) — the plant judged here is the game's. Worst
+// first (the order we worked through them). The steppe: alfa at steppe spacing, as the player sees it — a field.
+const PLANT_SPECIES = [
+  ["pricklyPear", "Prickly pear"], ["thistle", "Thistle"], ["asphodel", "Asphodel"], ["alfa", "Alfa grass"],
+  ["agave", "Agave"], ["agaveMast", "Agave in flower"], ["broom", "Broom (genêt)"], ["oleander", "Oleander"],
+  ["tamarisk", "Big tree (old)"], ["betoum", "Betoum (Atlas pistachio)"], ["tamariskTree", "Tamarisk"], ["typha", "Reed-mace"],
+  ["juniperScrub", "Juniper scrub"], ["doumPalm", "Doum palm"],
+];
+const PLANT_PF = new Map();   // species → its bed's PlacedFoliage (the tamarisk's canopy A/B: pieceTools)
+function plantField(fill, w, h, d) {
+  const g = new THREE.Group();
+  // (its size for the lab's framing: the instanced plants give the bounds nothing to measure — an invisible box)
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d).translate(0, h / 2, 0), new THREE.MeshBasicMaterial({ visible: false }));
+  g.add(box);
+  const pf = new PlacedFoliage({ scene: g, lodDistances: [60, 140], shadowLods: 3 });
+  pf.setSunDir(SUN.dir);
+  fill(pf);
+  LAB_TICK.add((cam) => { if (g.parent) pf.update(cam); });
+  return { g, pf };
+}
+function plantBed(key) {
+  const size = FOLIAGE_PRESETS[key].size ?? 1, k = Math.max(1, size * 1.6 / 6);   // (a big tree's three spread apart too)
+  const { g, pf } = plantField((pf) => {
+    pf.setType(key, structuredClone(FOLIAGE_PRESETS[key]));
+    if (key === "agaveMast") pf.setType("agave", structuredClone(FOLIAGE_PRESETS.agave));
+    for (const [dx, dz, s, seed] of [[0, 0, 1, 0.13], [-1.4, 1.6, 0.8, 0.47], [1.5, 1.3, 0.65, 0.81]]) {
+      pf.add(key, dx * k, -0.05, dz * k, { rotY: seed * 9, scale: s, seed });
+      // (as in the game, algLandmarks: a mast grows out of an agave)
+      if (key === "agaveMast") pf.add("agave", dx * k - 0.2, -0.08, dz * k, { rotY: seed * 5, scale: 0.9 * s + 0.2, seed: (seed + 0.3) % 1 });
+    }
+  }, 2.9 * k + size, size, 1.6 * k + size);
+  PLANT_PF.set(key, pf);
+  return labPiece(g);
+}
+function steppeField() {
+  let s = 7;
+  const r = () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; };
+  const { g } = plantField((pf) => {
+    pf.setType("alfa", structuredClone(FOLIAGE_PRESETS.alfa));
+    for (let x = -12; x < 12; x += 1.6) for (let z = -8; z < 8; z += 1.6) {
+      if (r() < 0.25) continue;   // gaps: a steppe, not a lawn
+      pf.add("alfa", x + (r() - 0.5) * 1.44, -0.05, z + (r() - 0.5) * 1.44, { rotY: r() * 7, scale: 0.7 + r() * 0.5, seed: r() });
+    }
+  }, 24, 0.8, 16);
+  return labPiece(g);
+}
+
 export const BUILDINGS = {
   // THE ZERIBA (2026-10-14, you: "what are these things near the villager house?"): the kit's pen LEFT, the
   // Blender one RIGHT (algZeriba.js, tools/blender/zeribaSim.py).
@@ -243,13 +296,13 @@ export const BUILDINGS = {
     tags: ["ZERIBA (LE JEU)", "ZERIBA · NOUVEAU (BLENDER)"], note: "l'enclos du jeu à gauche, le nouveau à droite : des buissons d'épineux coupés, empilés en cercle, la cime vers l'extérieur.",
   },
   // THE SANDBAG WALL (2026-10-25, you: "we don't need the old one anymore… if it's repeating other assets that would be
-  // confusing"): ONE entry — your cloth-simulated wall as the game builds it (« Construction »: its bags laid course by
-  // course) LEFT, the game's damaged wall RIGHT (still the old breached kit: its simulated damage comes with D).
+  // confusing"; then "remove completely the old sandbags"): ONE entry — your cloth-simulated wall as the game builds it
+  // (« Construction »: its bags laid course by course) LEFT, the simulated breached wall the game swaps in RIGHT.
   sacsDeSable: {
     label: "Sacs de sable", gap: 7.5, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSimBags(),
     before: () => sandbagSite(() => buildSandbagWallPiece(() => buildFrSandbagWall())),
-    after: () => buildFrSandbagWallBreached(),
-    tags: ["SACS DE SABLE", "SACS DE SABLE · ENDOMMAGÉ (ANCIEN)"], note: "le mur de sacs simulés du jeu — « Construction » : posés rang par rang — et, à droite, le mur endommagé du jeu (encore l'ancien).",
+    after: () => labPiece(simulatedWallMesh("SandbagBreach", "breach")),
+    tags: ["SANDBAGS", "SANDBAGS · DAMAGED"], note: "your simulated wall — « Construction »: laid course by course — and, right, the simulated breached wall the game swaps in when a blast hits it (algDamage).",
   },
   // THE REST OF THE SANDBAGS (2026-10-14): the kit's LEFT, the cloth-simulated RIGHT (algSandbags.js).
   // THE PORT (2026-10-16, the coast): the colonial fishing port's kit — row houses, the magasin, the
@@ -291,7 +344,7 @@ export const BUILDINGS = {
   }])),
   // THE M'ZAB TOWN HOUSES (2026-10-19, the Oued Abdi's town — tools/blender/mzab.py, algHouse.js MZAB_TYPES):
   // each type in its three states, intact LEFT, damaged MIDDLE, ruin RIGHT.
-  ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee"].map((ty) => [`mzab_${ty}`, {
+  ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee", "mur"].map((ty) => [`mzab_${ty}`, {
     label: `Maison du M'zab : ${ty}`, gap: ty === "souk" || ty === "mosquee" ? 20 : 15, yaw: Math.PI - 0.5, prepare: () => loadHouses("mzab"),
     before: () => { console.log("[mzab]", houseStats()); return labPiece(houseMesh(ty, "intact")); }, middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
     tags: [`${ty.toUpperCase()} · INTACTE`, `${ty.toUpperCase()} · ENDOMMAGÉE`, `${ty.toUpperCase()} · RUINE`], note: "une maison du kit du M'zab (Blender) dans ses trois états : intacte, endommagée, en ruine.",
@@ -624,6 +677,56 @@ export const BUILDINGS = {
     tags: ["AMBUSH SCREEN · NEW", "AMBUSH SCREEN · DAMAGED", "AMBUSH SCREEN · DESTROYED"], note: "the ambush screen (dry-stone footing, the game's scrub) — « Construction » — damaged, destroyed (the scrub burnt, gone).",
   },
 };
+// EVERYTHING ELSE THE GAME PLACES (2026-10-25, you: "be careful with some assets not being in the lab … we need better
+// organization"): the pieces the maps place that the lab never showed — the old Aurès' landmarks, its fields and
+// props, the SAS post, the kits' extras — each as the game builds it (several seeds or kinds side by side where the
+// game varies them). The inventory: PIECES_INVENTORY.md; tools/labCoverageTest.mjs keeps the two in step.
+/** Kit geometries in a row, `step` m apart (one lab version). */
+function kitRow(geos, step) {
+  const g = new THREE.Group();
+  geos.forEach((geo, i) => { const m = kitView(geo); m.position.x = (i - (geos.length - 1) / 2) * step; g.add(m); });
+  return labPiece(g);
+}
+/** A Blender kit's types in a row, in one state (the missing ones skipped). */
+function houseRow(types, state, step) {
+  const g = new THREE.Group();
+  types.forEach((ty, i) => { const h = houseMesh(ty, state); if (h) { h.position.x = (i - (types.length - 1) / 2) * step; g.add(h); } });
+  return labPiece(g);
+}
+Object.assign(BUILDINGS, {
+  sasPost: { label: "SAS post", gap: 10, before: () => buildSasPost({}), tags: ["SAS POST"], note: "the SAS post the old maps place by the base (rtsAlgeria buildSasPost) — no Blender version yet." },
+  mineMarker: { label: "Mine marker", gap: 6, before: () => buildMineMarker({}), tags: ["MINE MARKER"], note: "the FLN camp's mine marker, a pole and a rag (rtsAlgeria buildMineMarker)." },
+  lookout: { label: "FLN lookout", gap: 10, before: () => buildLookout({}), tags: ["LOOKOUT"], note: "the FLN lookouts on the old Aurès' spurs (rtsAlgeria buildLookout) — no Blender version yet." },
+  koubba: { label: "Koubba", gap: 12, before: () => buildKoubba({}), tags: ["KOUBBA"], note: "the marabout's domed tomb by the villages (rtsAlgVillage buildKoubba)." },
+  cemetery: { label: "Cemetery", gap: 16, before: () => buildCemetery({}), tags: ["CEMETERY"], note: "the village cemetery (rtsAlgVillage buildCemetery)." },
+  villageWell: { label: "Village well (old)", gap: 6, before: () => buildVillageWell({}), tags: ["WELL (OLD)"], note: "the old procedural well by the hamlets and the dechra (the Blender well: « Village props (Blender) »)." },
+  farmstead: { label: "Farmstead", gap: 26, before: () => buildFarmstead({ seed: 1970 }), middle: () => buildFarmstead({ seed: 1977 }), after: () => buildFarmstead({ seed: 1984 }),
+    tags: ["FARMSTEAD 1", "FARMSTEAD 2", "FARMSTEAD 3"], note: "the lone farms of the old Aurès and the training camp (rtsAlgVillage buildFarmstead) — three of the game's seeds: the house, the byre, the yard wall, the thorn pen. On flat ground here; in the game seated on the slope." },
+  burntFarm: { label: "Burnt farm", gap: 20, before: () => buildBurntFarm({}), tags: ["BURNT FARM"], note: "the burnt-out farm on the old Aurès (rtsAlgVillage buildBurntFarm)." },
+  ruinedHut: { label: "Ruined hut", gap: 10, before: () => buildRuinedHut({ seed: 2010 }), middle: () => buildRuinedHut({ seed: 2013 }), after: () => buildRuinedHut({ seed: 2016 }),
+    tags: ["RUINED HUT 1", "RUINED HUT 2", "RUINED HUT 3"], note: "the ruined gourbis scattered over the old Aurès (rtsAlgVillage buildRuinedHut), three of the game's seeds." },
+  garden: { label: "Walled garden", gap: 22, before: () => buildGarden({ kind: "olive" }), middle: () => buildGarden({ kind: "mixed" }), after: () => buildGarden({ kind: "fig" }),
+    tags: ["GARDEN · OLIVE", "GARDEN · MIXED", "GARDEN · FIG"], note: "the village gardens of the old Aurès (rtsAlgVillage buildGarden) — their trees are the game's plants, not shown here." },
+  threshingFloor: { label: "Threshing floor", gap: 12, before: () => buildThreshingFloor({}), tags: ["THRESHING FLOOR"], note: "the stone threshing floor by the old villages (rtsAlgVillage buildThreshingFloor)." },
+  terraces: { label: "Almond terraces", gap: 26, before: () => buildTerraces({}), tags: ["TERRACES"], note: "the almond terraces of the old Aurès (rtsAlgVillage buildTerraces) — on flat ground here, stepped up the slope in the game; the almonds are the game's plants." },
+  fieldWallOld: { label: "Field wall (old)", gap: 8, before: () => kitRow([1964, 1965, 1966].map((seed) => buildFieldWallSegment({ seed })), 6), tags: ["FIELD WALLS (OLD)"], note: "the old Aurès' field wall segments (rtsAlgVillage buildFieldWallSegment), three variants." },
+  fieldWallsBlender: { label: "Field walls (Blender)", gap: 16, yaw: Math.PI - 0.5, prepare: () => loadHouses("fieldwalls"),
+    before: () => houseRow(FIELD_WALL_TYPES, "intact", 5), middle: () => houseRow(FIELD_WALL_TYPES, "damaged", 5), after: () => houseRow(FIELD_WALL_TYPES, "ruin", 5),
+    tags: ["FIELD WALLS · INTACT", "FIELD WALLS · DAMAGED", "FIELD WALLS · DESTROYED"], note: "the dry-stone field walls of Oued Abdi and the new Aurès (tools/blender/fieldwall.py: a b c), in their three states." },
+  villagePropsOld: { label: "Village props (old)", gap: 14, before: () => kitRow([buildHaystack({}), buildWoodpile({}), buildTabouna({}), buildBeehives({})], 3.5), tags: ["HAY · WOOD · OVEN · HIVES (OLD)"], note: "the old Aurès' village life props (rtsAlgVillage): haystack, woodpile, tabouna, beehives." },
+  villagePropsBlender: { label: "Village props (Blender)", gap: 18, prepare: () => loadHouses("vprops"), before: () => houseRow(VPROP_TYPES, "intact", 3), tags: ["VILLAGE PROPS"], note: "the village props kit (tools/blender/villageProps.py): well, trough, jars, bench, oven, hay, wood, hives — the new Aurès and the training camp." },
+  telegraphPole: { label: "Telegraph pole", gap: 6, before: () => buildTelegraphPole({}), tags: ["TELEGRAPH POLE"], note: "the telegraph line's pole (rtsAlgeria buildTelegraphPole); the wires are drawn between them in the game." },
+  rubbleKit: { label: "Rubble (Blender)", gap: 26, prepare: () => loadHouses("rubble"), before: () => houseRow(RUBBLE_TYPES, "intact", 5), tags: ["RUBBLE"], note: "a collapsing house's heaps and flying chunks (tools/blender/rubble.py — algTownDamage)." },
+  rubbleHeapOld: { label: "Rubble heap (old)", gap: 8, before: () => buildRubbleHeap({}), tags: ["RUBBLE HEAP (OLD)"], note: "the old heap a shelled kit house leaves (rtsAlgeria buildRubbleHeap — algDamage)." },
+});
+
+// (the plants after the buildings: the lab's list keeps its order)
+Object.assign(BUILDINGS, {
+  ...Object.fromEntries(PLANT_SPECIES.filter(([k]) => FOLIAGE_PRESETS[k]).map(([k, name]) => [`plant_${k}`, {
+    label: name, gap: 8, yaw: 0, before: () => plantBed(k), tags: [name.toUpperCase()], note: "the game's plant (PlacedFoliage, FOLIAGE_PRESETS): a bed of three.",
+  }])),
+  plantSteppe: { label: "Steppe (alfa field)", gap: 8, yaw: 0, before: () => steppeField(), tags: ["STEPPE"], note: "alfa tussocks at steppe spacing, gaps and all — the field the player sees." },
+});
 
 /**
  * STONE candidates for the atlas's rubble cell (MAT.rubble, 19 — every wall in the game): drawn
@@ -717,6 +820,17 @@ export function pieceTools(key, versions) {
       }
       both((p) => p.marks.update(dt));
     });
+  }
+  // THE CANOPY FIX (B): the dome cards' no-flip switch and the baked inner shadow — the tamarisk here, nam-rts's
+  // dipterocarps (the shared builder)
+  if (key === "plant_tamarisk") {
+    parts.push(`<h4>Canopy fix (B)</h4>${btns([`<button class="btn" data-ab="before">Before</button>`, `<button class="btn" data-ab="after">After</button>`])}`);
+    const ab = (which) => {
+      FOLIAGE_DOME_CARDS.value = which === "after" ? 1 : 0;
+      PLANT_PF.get("tamarisk")?.setType("tamarisk", { ...structuredClone(FOLIAGE_PRESETS.tamarisk), selfOcclusion: which === "after" });
+    };
+    binds.push((el) => el.addEventListener("click", (e) => { const b = e.target.closest("[data-ab]"); if (b) ab(b.dataset.ab); }));
+    ends.push(() => ab("after"));
   }
   if (!parts.length) return null;
   return {

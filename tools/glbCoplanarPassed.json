@@ -4,12 +4,12 @@
   "pairs": 0
  },
  "armscache.glb": {
-  "hash": "37e83319947722c8bc5706a5c392b4341497ef8d",
-  "pairs": 21
+  "hash": "e4ec90b176ab4e709672ca35ab720bd9f2d70335",
+  "pairs": 17
  },
  "barbedwire.glb": {
-  "hash": "ab960d1620a2bf415766b68a9dc4767b7d628d5b",
-  "pairs": 3
+  "hash": "8475097392af1eeeaf608931ecbc2e29b6320f8d",
+  "pairs": 1
  },
  "boulders.glb": {
   "hash": "424891c81ca106ae838ce5864d6277b635bb3756",
@@ -28,8 +28,8 @@
   "pairs": 0
  },
  "fortpoint.glb": {
-  "hash": "582c274c9d601fc94d5b1289c93f7d690322de4e",
-  "pairs": 2
+  "hash": "91e299c6735a369a76a134a0afc3b3b7e312bf5b",
+  "pairs": 1
  },
  "houses.glb": {
   "hash": "b59141a49b9f7372de752d5e120c0302c42a3d11",
@@ -52,20 +52,20 @@
   "pairs": 20
  },
  "motorPoolNear.glb": {
-  "hash": "8a49b58fe2c29465db2dd77a107f83e3d4be04f9",
-  "pairs": 90
+  "hash": "fd396d52c6f03c3866bcb48711a04d5a268aa8b3",
+  "pairs": 50
  },
  "mzab.glb": {
-  "hash": "01249d7f033e8b0a25912c5899e36f3828951651",
-  "pairs": 72
+  "hash": "804ecc428abf8a3039635048b2e6fb3abaa4146a",
+  "pairs": 58
  },
  "points.glb": {
   "hash": "50d39303b91397fd11007d2f775397892a793612",
   "pairs": 0
  },
  "postkit.glb": {
-  "hash": "ec8fa0699cae346e49e22636b3b06cd73ae8d430",
-  "pairs": 16
+  "hash": "4c9c9b0b33547909d9933f6ec8bc22e60317e649",
+  "pairs": 8
  },
  "rubble.glb": {
   "hash": "7d6744c90b0141e50c542d0b9b1f3e1b05fd50e5",
@@ -180,8 +180,8 @@
   "pairs": 6
  },
  "smallprops.glb": {
-  "hash": "bdbf257673de097090eacbd8eefd30fffda61a5d",
-  "pairs": 4
+  "hash": "94050f097cfb6f27a9c433513685ab0974d67798",
+  "pairs": 2
  },
  "vprops.glb": {
   "hash": "0a1cdae883972f9456d062b7edc50ea047b0fd54",

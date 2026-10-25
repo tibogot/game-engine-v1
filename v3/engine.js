@@ -44,6 +44,8 @@ export const PUBLIC_ENGINE_MODULES = [
   "v3/render/textureLoad.js",
   // Rendering helpers
   "v3/render/layers.js",
+  // Hex tiling (the terrain's no-repeat sampling) for a game's own flat grounds
+  "v3/render/hexTiling.js",
   "v3/render/bloomMRT.js",
   "v3/render/instancePipeline.js",
   "v3/render/gpuStatsPanel.js",
