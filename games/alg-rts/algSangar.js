@@ -139,6 +139,69 @@ function plasterMaterial(src, T) {
   return m;
 }
 
+/**
+ * EACH SURFACE ITS OWN PHOTO (2026-10-25, you on the post: "that look so cheap and not AAA rts at all, company of heroes
+ * look way better"): the CoH way — a sharp tiling texture per SURFACE over the baked atlas, which keeps only what it
+ * is good at (the large-scale colour, the grime, the occlusion). The Blender kit writes each face's surface into the
+ * build colour's .b (drystone.surfaceClass / 8: 1 plaster, 2 stone, 3 wood, 4 metal, 5 concrete; 0 = the bake alone);
+ * here that surface's photo — its relief and its light and dark — tiled in the piece's space, ONE tap per map (the
+ * face's dominant axis). `mean`: the photo's own mean LINEAR luminance, measured (its light and dark taken about it). ?surface=0 =
+ * the old plaster-everywhere detail.
+ */
+export const SURFACE_DETAIL = {
+  plaster: { tex: "build/white_plaster_rough_01/white_plaster_rough_01_{k}_1k.jpg", tile: 1.6, normal: 1.2, contrast: 0.6, mean: 0.173 },
+  stone: { tex: "build/seaworn_stone_tiles/seaworn_stone_tiles_{k}_1k.jpg", tile: 2.2, normal: 1.4, contrast: 0.9, mean: 0.205 },   // (dressed limestone blocks: the bordj's footing — a mossy slate wall read as camouflage)
+  wood: { tex: "build/raw_plank_wall/raw_plank_wall_{k}_1k.jpg", tile: 1.4, normal: 1.1, contrast: 0.7, mean: 0.251 },
+  metal: { tex: "build/Rust009/Rust009_{k}_1k.jpg", tile: 1.2, normal: 0.7, contrast: 0.6, mean: 0.111 },
+  concrete: { tex: "pbr_materials/Concrete030_1K-JPG/Concrete030_1K-JPG_{k}.jpg", keys: { nor: "NormalGL", diff: "Color" }, tile: 2.0, normal: 1.0, contrast: 0.8, mean: 0.119 },
+};
+const SURFACE_ORDER = ["plaster", "stone", "wood", "metal", "concrete"];
+export const SURFACE_OFF = typeof location !== "undefined" && new URLSearchParams(location.search).get("surface") === "0";
+let _surfaceTex = null;
+const surfaceTextures = () => (_surfaceTex ??= Promise.all(SURFACE_ORDER.map((s) => {
+  const D = SURFACE_DETAIL[s], key = D.keys ?? { nor: "nor_gl", diff: "diff" };
+  return Promise.all(["nor", "diff"].map((k) => loadTexture(`/textures/${D.tex.replace("{k}", key[k])}`)));
+})).then((all) => {
+  const T = {};
+  all.forEach(([nor, diff], i) => {
+    for (const t of [nor, diff]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.needsUpdate = true; }
+    T[SURFACE_ORDER[i]] = { nor, diff };
+  });
+  return T;
+}));
+/** Does a geometry carry surfaces (any face's build colour .b set)? */
+function hasSurfaces(g) {
+  const c = g?.attributes.color;
+  if (!c || c.itemSize < 3) return false;
+  for (let i = 0; i < c.count; i += 7) if (c.getZ(i) > 0.06) return true;
+  return false;
+}
+function surfaceMaterial(src, T, colorType) {
+  const m = new THREE.MeshStandardNodeMaterial({ map: src.map, normalMap: src.normalMap ?? null, color: src.color, roughness: src.roughness, metalness: src.metalness, side: THREE.FrontSide });
+  const cls = attribute("color", colorType).z.mul(8).round();
+  const n = normalGeometry.normalize(), ax = abs(n);
+  const isX = ax.x.greaterThan(ax.y).and(ax.x.greaterThan(ax.z)), isY = ax.y.greaterThan(ax.z);
+  let nn = n, shade = float(1);
+  SURFACE_ORDER.forEach((s, i) => {
+    const D = SURFACE_DETAIL[s], W = T[s];
+    const p = positionGeometry.div(D.tile);
+    const uvv = select(isX, p.zy, select(isY, p.xz, p.xy));
+    const k = float(D.normal);
+    const t = texture(W.nor, uvv).xyz.mul(2).sub(1).mul(vec3(k, k, 1));
+    const sn = normalize(select(isX, vec3(t.xy.add(n.zy), abs(t.z).mul(n.x)).zyx, select(isY, vec3(t.xy.add(n.xz), abs(t.z).mul(n.y)).xzy, vec3(t.xy.add(n.xy), abs(t.z).mul(n.z)))));
+    const c = texture(W.diff, uvv).rgb, lum = c.x.mul(0.2126).add(c.y.mul(0.7152)).add(c.z.mul(0.0722)).div(D.mean);
+    const sh = clamp(float(1).add(lum.sub(1).mul(D.contrast)), 0.5, 1.4);
+    const on = cls.equal(i + 1);
+    nn = select(on, sn, nn); shade = select(on, sh, shade);
+  });
+  const baked = src.normalMap ? normalMap(texture(src.normalMap)) : transformNormalToView(n);
+  // (the detail's turn added AFTER the transform — transformNormalToView normalises; see stoneMaterial)
+  m.normalNode = normalize(baked.add(transformNormalToView(nn).sub(transformNormalToView(n))));
+  m.colorNode = texture(src.map).rgb.mul(shade);
+  m.normalMap = null;
+  return m;
+}
+
 const S = 1.3;   // the kit's scale (the Blender piece is in real metres)
 let _detail = null;
 const _pieces = new Map();   // "kit:type" → { p: Promise<boolean>, geo }
@@ -156,7 +219,8 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
   if (_pieces.has(key)) return _pieces.get(key).p;
   const rec = { geo: null, p: null };
   _pieces.set(key, rec);
-  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null), cloth ? clothTextures().catch(() => null) : null, plaster ? plasterTextures().catch(() => null) : null]).then(([parts, T, CT, PT]) => {
+  rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null), cloth ? clothTextures().catch(() => null) : null, plaster ? plasterTextures().catch(() => null) : null,
+    plaster && !SURFACE_OFF ? surfaceTextures().catch((e) => { console.warn("[surfaces]", e); return null; }) : null]).then(([parts, T, CT, PT, ST]) => {
     if (!parts?.[`${type}:intact`]) return false;
     const lod = houseMesh(type, "intact", 1)?.children[0];
     const near = lod?.levels?.[0]?.object, farM = lod?.levels?.[1]?.object;
@@ -174,6 +238,7 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     _detail = T;
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
     g.userData.labMaterial = stone ? stoneMaterial(near.material, T)
+      : plaster && ST && hasSurfaces(g) ? surfaceMaterial(near.material, ST, g.attributes.color.itemSize === 3 ? "vec3" : "vec4")
       : plaster ? plasterMaterial(near.material, PT) : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
     // THE GROUND BLEND (2026-10-24, algGroundBlend KIT_BLEND — a piece's own material, built here from the kit's): its foot
     // in the ground's colour, its hue toward the ground's
@@ -681,6 +746,21 @@ function stateGeometry(kitType, state) {
   _states.set(key, rec);
   return rec;
 }
+/** A Blender piece's geometry in `state` as the GAME draws it (setPieceState's swap, for the lab — 2026-10-25: the
+ *  lab showed the damaged / destroyed tabs in the kit's raw material, the game in the piece's own): the state's near,
+ *  its far as `farGeometry`, the piece's data and material. Null when not loaded. */
+export function pieceInState(base, state) {
+  const ud = base?.userData;
+  if (!ud?.kitType || state === "intact") return base;
+  const s = stateGeometry(ud.kitType, state);
+  if (!s) return null;
+  const near = s.near.clone(), far = s.far ? s.far.clone() : null;
+  near.userData = { ...ud, farGeometry: far };
+  if (far) far.userData = near.userData;
+  ensureEarthMask(near); if (far) ensureEarthMask(far);
+  padAttributes(near, base); padAttributes(far, base);
+  return near;
+}
 export function setPieceState(mesh, state) {
   if (mesh?.userData?.setState) return mesh.userData.setState(state);   // (a piece with its own: the motor pool, algMotorPool)
   const L = mesh?.userData?.lod;
@@ -711,36 +791,44 @@ export function setPieceState(mesh, state) {
       const gg = state === "intact" ? null : stateGeometry(["mirador", "gear"], state);
       c.userData.intact ??= c.levels.map((l) => l.object.geometry);
       c.levels.forEach((l, i) => { l.object.geometry = gg ? (i === 0 ? gg.near : gg.far ?? gg.near) : c.userData.intact[i]; });
-    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags)/.test(c.name)) {
-      // the bags slumped in the ruin (thrown down, burst); the mirador's fell with its cabin
-      c.userData.scale0 ??= c.scale.clone();
-      if (c.name === "MiradorBags") {
-        // fell with its cabin in the ruin; in the damaged state they LEAN with it (mirador.py leanAll: −6.5° about
-        // the game axis (1, 0, −1) through the opposite foot (LS, 0, LS) — Blender's frame is a proper rotation of
-        // the game's, the angle carries over as it is)
-        c.visible = !ruin;
-        c.userData.pos0 ??= c.position.clone();
-        if (state === "damaged") {
-          const piv = new THREE.Vector3(2.6 * S, 0, 2.6 * S), q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, -1).normalize(), -6.5 * Math.PI / 180);
-          c.position.copy(c.userData.pos0).sub(piv).applyQuaternion(q).add(piv);
-          c.quaternion.copy(q);
-        } else { c.position.copy(c.userData.pos0); c.quaternion.identity(); }
-      } else {
-        // squashed from the bags' OWN foot, not the ground's (a ring on a berm 0.6 m up sank into it)
-        c.userData.pos0 ??= c.position.clone();
-        if (c.userData.foot == null) {
-          let lo = Infinity;
-          c.traverse((o) => { if (o.geometry) { o.geometry.computeBoundingBox?.(); lo = Math.min(lo, o.geometry.boundingBox?.min.y ?? 0); } });
-          c.userData.foot = Number.isFinite(lo) ? lo : 0;
-        }
-        const k = ruin ? 0.45 : 1, s0 = c.userData.scale0;
-        c.scale.set(s0.x * (ruin ? 1.06 : 1), s0.y * k, s0.z * (ruin ? 1.06 : 1));
-        c.position.copy(c.userData.pos0);
-        c.position.y += c.userData.foot * s0.y * (1 - k);
-      }
-    }
+    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags|PostBags)/.test(c.name)) bagsInState(c, state);
   }
   return true;
+}
+
+/** A piece's simulated bags in `state` (setPieceState; the lab's state tabs): slumped in the ruin (thrown down,
+ *  burst); the mirador's fell with its cabin; the POST's up on its towers and roofs fell with them (2026-10-25: the
+ *  ruin's towers gone, their rings floated in the air). */
+export function bagsInState(c, state) {
+  const ruin = state === "ruin";
+  c.userData.scale0 ??= c.scale.clone();
+  if (/^PostBags/.test(c.name) && (c.userData.pos0 ?? c.position).y > 1.5) {
+    c.userData.pos0 ??= c.position.clone();
+    c.visible = !ruin;
+  } else if (c.name === "MiradorBags") {
+    // fell with its cabin in the ruin; in the damaged state they LEAN with it (mirador.py leanAll: −6.5° about
+    // the game axis (1, 0, −1) through the opposite foot (LS, 0, LS) — Blender's frame is a proper rotation of
+    // the game's, the angle carries over as it is)
+    c.visible = !ruin;
+    c.userData.pos0 ??= c.position.clone();
+    if (state === "damaged") {
+      const piv = new THREE.Vector3(2.6 * S, 0, 2.6 * S), q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, -1).normalize(), -6.5 * Math.PI / 180);
+      c.position.copy(c.userData.pos0).sub(piv).applyQuaternion(q).add(piv);
+      c.quaternion.copy(q);
+    } else { c.position.copy(c.userData.pos0); c.quaternion.identity(); }
+  } else {
+    // squashed from the bags' OWN foot, not the ground's (a ring on a berm 0.6 m up sank into it)
+    c.userData.pos0 ??= c.position.clone();
+    if (c.userData.foot == null) {
+      let lo = Infinity;
+      c.traverse((o) => { if (o.geometry) { o.geometry.computeBoundingBox?.(); lo = Math.min(lo, o.geometry.boundingBox?.min.y ?? 0); } });
+      c.userData.foot = Number.isFinite(lo) ? lo : 0;
+    }
+    const k = ruin ? 0.45 : 1, s0 = c.userData.scale0;
+    c.scale.set(s0.x * (ruin ? 1.06 : 1), s0.y * k, s0.z * (ruin ? 1.06 : 1));
+    c.position.copy(c.userData.pos0);
+    c.position.y += c.userData.foot * s0.y * (1 - k);
+  }
 }
 
 /** Stop tracking (a cancelled site): its own near geometry back, so disposing it never frees the shared far one. */

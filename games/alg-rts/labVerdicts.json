@@ -1,7 +1,7 @@
 {
  "fortBlender": {
-  "v": "improve",
-  "note": "the pit's earth: low-resolution texture",
+  "v": "keep",
+  "note": "the pit's earth fixed; may still tweak",
   "at": "2026-10-25"
  },
  "helisurface": {
@@ -10,13 +10,13 @@
   "at": "2026-10-25"
  },
  "mortierBlender": {
-  "v": "improve",
-  "note": "the pit's earth: low-resolution texture",
+  "v": "keep",
+  "note": "the pit's earth fixed; may still tweak",
   "at": "2026-10-25"
  },
  "nidBlender": {
-  "v": "improve",
-  "note": "the pit's earth: low-resolution texture",
+  "v": "keep",
+  "note": "the pit's earth fixed; may still tweak",
   "at": "2026-10-25"
  },
  "parcAutoNeuf": {
@@ -25,13 +25,13 @@
   "at": "2026-10-25"
  },
  "posteAvanceBlender": {
-  "v": "improve",
-  "note": "damaged: the tent's folds saw-toothed",
+  "v": "keep",
+  "note": "tent folds fixed",
   "at": "2026-10-25"
  },
  "posteBlender": {
   "v": "improve",
-  "note": "the tent in the yard: saw-tooth folds",
+  "note": "tent folds fixed; the texture is blurry and cheap (the bake uses 4% of its atlas: 5 px/m)",
   "at": "2026-10-25"
  },
  "sangarBlender": {
@@ -40,8 +40,8 @@
   "at": "2026-10-25"
  },
  "secoursBlender": {
-  "v": "improve",
-  "note": "damaged: saw-tooth on one part of the tent",
+  "v": "keep",
+  "note": "tent folds fixed",
   "at": "2026-10-25"
  },
  "zeriba": {

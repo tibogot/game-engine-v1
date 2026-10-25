@@ -57,6 +57,7 @@ export async function startLab() {
   const camera = new THREE.PerspectiveCamera(26, view.clientWidth / view.clientHeight, 0.1, 3000);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
+  window.__LAB = { camera, controls, scene, renderer };   // (the console's and the screenshot driver's: same views before / after)
   controls.maxPolarAngle = Math.PI * 0.49;
   const sun = new THREE.DirectionalLight(SUN.color, SUN.intensity);
   sun.castShadow = true;

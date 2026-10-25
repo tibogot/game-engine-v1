@@ -78,20 +78,35 @@ def stone(K, nm, c, size, R, t, mat="sgStone", yaw=None, box=0.45):
     bmesh.ops.convex_hull(bm, input=vs)
     return tag(K.obj(nm, bm, mat, "h"), t)
 
+SURFACES = ("", "plaster", "stone", "wood", "metal", "concrete")
+def surfaceClass(nm):
+    """A face's SURFACE from its material's name (.b of the build colour, class / 8): the game tiles that surface's
+    photo over it (algSangar surfaceMaterial — 2026-10-25, you: the post's texture "so cheap and not AAA rts at all")."""
+    n = nm.split(".")[0].lower()
+    if n.startswith("render") or "plaster" in n: return 1
+    if n in ("stone", "rubble") or "stone" in n or "masonry" in n: return 2
+    if any(k in n for k in ("wood", "door", "shutter", "plank", "beam", "timber", "crate")): return 3
+    if any(k in n for k in ("steel", "iron", "tank", "galv", "rust", "metal", "poroof")): return 4
+    if any(k in n for k in ("concrete", "coping", "sill")): return 5
+    return 0
+
 def writeBuildOrder(K):
     """Each part's moment into a 'build' colour attribute (.r), the ACTIVE one — exported as COLOR_0. (.g: 1 on CLOTH
-    — a part tagged o["cloth"] (clothKit): the game lays the burlap weave over it, nowhere else — 2026-10-22.)"""
+    — a part tagged o["cloth"] (clothKit): the game lays the burlap weave over it, nowhere else — 2026-10-22.) (.b: the
+    face's SURFACE, surfaceClass / 8 — per face corner, 2026-10-25.)"""
     for o in K.groups["h"]:
         if o.type != "MESH": continue
         m = o.data
-        a = m.color_attributes.get("build") or m.color_attributes.new("build", "FLOAT_COLOR", "POINT")
+        old = m.color_attributes.get("build")
+        if old is not None and old.domain != "CORNER": m.color_attributes.remove(old); old = None
+        a = old or m.color_attributes.new("build", "FLOAT_COLOR", "CORNER")
         t, c = float(o.get("t", 0.0)), float(o.get("cloth", 0.0))
-        for d in a.data: d.color = (t, c, 0.0, 1.0)
-        if c > 0:   # the WEAVE per face material: wool (a blanket) 0.5, canvas / linen 1 — the game picks the photo
-            for p in m.polygons:
-                nm = m.materials[p.material_index].name if m.materials else ""
-                g = 0.5 if "Blanket" in nm else 1.0
-                for vi in p.vertices: a.data[vi].color = (t, g, 0.0, 1.0)
+        for p in m.polygons:
+            nm = m.materials[p.material_index].name if m.materials else ""
+            # the WEAVE per face material: wool (a blanket) 0.5, canvas / linen 1 — the game picks the photo
+            g = (0.5 if "Blanket" in nm else 1.0) if c > 0 else 0.0
+            col = (t, g, surfaceClass(nm) / 8, 1.0)
+            for li in p.loop_indices: a.data[li].color = col
         m.color_attributes.active_color = a
 
 def setLow(K, far):

@@ -258,6 +258,12 @@ class Kit:
         # (`island_margin`: a piece of sharp colour edges — the red cross on white — wants its islands further apart, or
         # one colour bleeds into the next island at the mips)
         bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=island_margin)
+        # PACKED AGAIN (2026-10-25, you on the French post: "that look so cheap and not AAA rts at all"): smart project's
+        # own packing broke down on thousands of islands — the post's 4096 atlas 4 % used, 5 texels a metre. Every
+        # island at one texel density, then Blender's packer (bounding boxes, turned to fit).
+        bpy.ops.uv.select_all(action="SELECT")
+        bpy.ops.uv.average_islands_scale()
+        bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=island_margin, shape_method="AABB")
         bpy.ops.object.mode_set(mode="OBJECT")
         def target(nm, sz=None):
             img = bpy.data.images.new(nm, sz or size, sz or size, alpha=False)

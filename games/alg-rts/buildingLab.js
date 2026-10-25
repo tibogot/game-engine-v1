@@ -34,7 +34,7 @@ import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
 import { buildRenderedWell, buildRubbleHeap, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
-import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker, loadSasPost, sasGeometry } from "./algSangar.js";
+import { bagsInState, farmGeometry, loadFarmstead, loadLookout, loadMineMarker, loadSasPost, pieceInState, sasGeometry } from "./algSangar.js";
 import { buildBeehives, buildBurntFarm as buildBurntFarmOld, buildFarmsteadOld, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
 import { loadPenProps } from "./algPenProps.js";
@@ -279,6 +279,14 @@ function steppeField() {
   return labPiece(g);
 }
 
+/** The French post in a state as the game draws it: the state's model in the post's material, its bags as setPieceState
+ *  leaves them (algSangar bagsInState). */
+function postInState(state) {
+  const g = buildFrenchPostPiece(() => pieceInState(frenchPostGeometry(), state));
+  for (const m of g?.userData.extra ?? []) if (/^PostBags/.test(m.name)) bagsInState(m, state);
+  return g;
+}
+
 /** The Blender motor pool in a state, as a lab piece (an empty geometry carrying it). */
 function motorPoolView(state) {
   const m = motorPoolMesh(), g = new THREE.BufferGeometry();
@@ -439,8 +447,9 @@ export const BUILDINGS = {
   // the flag's mast, the gate) LEFT, damaged MIDDLE, destroyed RIGHT.
   posteBlender: {
     label: "Poste français", gap: 46, yaw: Math.PI - 0.55, prepare: () => Promise.all([loadFrenchPost(), loadSandbagWall(), loadHouses("postkit")]),
+    // (all three as the game draws them — the piece's own material, its LOD: algSangar pieceInState)
     before: () => buildFrenchPostPiece(() => { const g0 = frenchPostGeometry(), g = g0.clone(); g.userData = { ...g0.userData }; return g; }),
-    middle: () => labPiece(houseMesh("post", "damaged")), after: () => labPiece(houseMesh("post", "ruin")),
+    middle: () => postInState("damaged"), after: () => postInState("ruin"),
     tags: ["FRENCH POST · NEW", "FRENCH POST · DAMAGED", "FRENCH POST · DESTROYED"], note: "the French post (Blender: the bordj, its towers, the gate, the barracks; your simulated sandbags) in its three states.",
   },
   campFln: {
