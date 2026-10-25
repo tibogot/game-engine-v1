@@ -34,7 +34,7 @@ import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
 import { buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
-import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker } from "./algSangar.js";
+import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker, loadSasPost, sasGeometry } from "./algSangar.js";
 import { buildBeehives, buildBurntFarm as buildBurntFarmOld, buildFarmsteadOld, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
 import { loadPenProps } from "./algPenProps.js";
@@ -684,7 +684,14 @@ function houseRow(types, state, step) {
   return labPiece(g);
 }
 Object.assign(BUILDINGS, {
-  sasPost: { label: "SAS post", gap: 10, before: () => buildSasPost({}), tags: ["SAS POST"], note: "the SAS post the old maps place by the base (rtsAlgeria buildSasPost) — no Blender version yet." },
+  // THE SAS POST IN BLENDER (2026-10-25, you: "the best looking for my AAA RTS … it shouldn't look cheap" — tools/blender/
+  // sasPost.py): new (your simulated sandbagged corner, the game's), damaged, destroyed; the OLD one beside the new below
+  sasPost: { label: "SAS post", gap: 30, yaw: -0.4, prepare: () => Promise.all([loadSasPost(), loadPenProps()]),
+    before: () => labPiece(kitView(sasGeometry())), middle: () => labPiece(houseMesh("sas", "damaged")), after: () => labPiece(houseMesh("sas", "ruin")),
+    tags: ["SAS POST · NEW", "SAS POST · DAMAGED", "SAS POST · DESTROYED"], note: "the French army's post in a village: the school and the clinic under a canal-tile roof, the veranda, the yard wall and gate, the well, the water tank, the flag's plinth, the radio mast; your simulated sandbagged corner." },
+  sasPostCompare: { label: "SAS post: old vs new", gap: 30, yaw: -0.4, prepare: () => Promise.all([loadSasPost(), loadPenProps()]),
+    before: () => buildSasPost({}), after: () => labPiece(kitView(sasGeometry())),
+    tags: ["SAS POST (OLD)", "SAS POST · NEW"], note: "the old procedural SAS post (left) beside the new one (right) — remove this entry once judged." },
   // THE FLN'S MARKS IN BLENDER (2026-10-25, you: "very cheap … make way better" — tools/blender/flnMarks.py)
   mineMarker: { label: "Mine marker", gap: 5, yaw: Math.PI - 0.5, prepare: () => loadMineMarker(),
     before: () => labPiece(sangarDetailed(houseMesh("minemark", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("minemark", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("minemark", "ruin"))),

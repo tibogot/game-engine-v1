@@ -16,7 +16,8 @@ const ALL = ["aures", "abdi", "cote", "kantara"];
 const PLANT_KEYS = ["pricklyPear", "thistle", "asphodel", "alfa", "agave", "agaveMast", "broom", "oleander", "tamarisk", "betoum", "tamariskTree", "typha", "juniperScrub", "doumPalm"];
 export const META = {
   // (2026-10-25: everything the maps place that the lab never showed — tools/labCoverageTest.mjs)
-  sasPost: { side: "fr", kind: "base", maps: ["aures", "abdi"], status: "jeu" },
+  sasPost: { side: "fr", kind: "base", maps: ["aures", "abdi"], status: "verdict" },
+  sasPostCompare: { side: "fr", kind: "base", maps: [], status: "ancien" },
   mineMarker: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   lookout: { side: "fln", kind: "defense", maps: ["aures"], status: "verdict" },
   koubba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
@@ -122,7 +123,7 @@ export const PLACED = {
   "kit:mirador": "miradorBlender", "kit:gear": "miradorBlender", "kit:barbed": "barbelesBlender", "kit:mg": "nidBlender", "kit:gun": "nidBlender",
   "kit:mortar": "mortierBlender", "kit:m81": "mortierBlender", "kit:point": "fortBlender", "kit:sltower": "projBlender", "kit:lamp": "projBlender",
   "kit:fwdradio": "posteAvanceBlender", "kit:aidtent": "secoursBlender", "kit:aidmark": "secoursBlender", "kit:refuge": "refugeBlender", "kit:infirm": "infirmBlender",
-  "kit:post": "posteBlender", "kit:lookout": "lookout", "kit:minemark": "mineMarker", "kit:farm": "farmstead",
+  "kit:post": "posteBlender", "kit:lookout": "lookout", "kit:minemark": "mineMarker", "kit:farm": "farmstead", "kit:sas": "sasPost",
   ...Object.fromEntries(["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "hay", "wood", "hives"].map((t) => [`kit:${t}`, "villagePropsBlender"])),
   ...Object.fromEntries(["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"].map((t) => [`kit:${t}`, "rubbleKit"])),
   ...Object.fromEntries(["grenade", "smoke", "flare", "cutters", "mine", "helmet", "kepi", "jerrycan", "ammobox", "detonator", "detector", "radio", "lmg", "bazooka", "flamer", "sniper", "tools", "shell", "shotgun", "mapcase", "spade"]

@@ -293,6 +293,13 @@ elif LAYOUT == "slshed":
     # of it, 3.4 m (game), one bag thick, three courses — laid along x at the origin; the game sets it there.
     for c in range(3):
         wall_course(2.6 * KS - c * 0.1, 1, 0.0, 0.0, 0.0, c)
+elif LAYOUT == "sas":
+    # the SAS post's sandbagged corner (tools/blender/sasPost.py, 2026-10-25): an L in the yard's front-right corner —
+    # 3.2 m along x and 2.6 m along z (kit metres, the old piece's), five courses. (Exported turned 180°: Blender x = -game x,
+    # Blender y = game z.)
+    for c in range(5):
+        wall_course(3.2 * KS - c * 0.1, 1, -(11 - 2.3) * KS, (-8 + 1.3) * KS, 0.0, c)
+        wall_course(2.6 * KS - c * 0.1, 1, -(11 - 3.85) * KS, (-8 + 2.55) * KS, math.pi / 2, c)
 elif LAYOUT == "radio":
     # the forward post (tools/blender/fieldPosts.py "fwdradio", 2026-10-21): a horseshoe r 2.2 x KS round the table
     # and the tarp, open 70° at the back (+Z, the entrance by the flag), three courses

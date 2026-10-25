@@ -7,7 +7,7 @@
 import { houseMesh, loadHouses } from "./algHouse.js";
 
 const VP = 1.3;   // (the props kit in real metres, the game's ×1.3 — algVillageLife)
-const TYPE = { trough: "trough", hay: "hay", oven: "oven", wood: "wood", jars: "jars", bench: "bench", hives: "hives" };   // (the vprops kit's types — the farmstead's yard too)
+const TYPE = { trough: "trough", hay: "hay", oven: "oven", wood: "wood", jars: "jars", bench: "bench", hives: "hives", well: "well" };   // (the vprops kit's types — the farmstead's yard too)
 let ready = false;
 const waiting = [];
 

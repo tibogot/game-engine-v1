@@ -154,6 +154,15 @@
   "hash": "3f2de46fdabaf5342f161bc62cb72724efe6d822",
   "pairs": 0
  },
+ "sandbagSas.glb": {
+  "hash": "515f1cfbf6b274ff32162c656fda86919fdc6dce",
+  "pairs": 1,
+  "why": "2026-10-25: 1 pair of sack faces pressed together by the cloth sim (as sandbagRadio, sandbagLookout) — two bags touching, invisible"
+ },
+ "sandbagSas_far.glb": {
+  "hash": "687ea0fdad1a4841cdf293f422a93a7bcc4b042c",
+  "pairs": 0
+ },
  "sandbagSlShed.glb": {
   "hash": "f0aacde9fecd8b6b6eda63e205ebd8d218f4a5d6",
   "pairs": 0
@@ -185,6 +194,11 @@
  "sangar.glb": {
   "hash": "2da67d048ad703aca332fbaa777ea091a3d6008c",
   "pairs": 3
+ },
+ "saspost.glb": {
+  "hash": "0bb8b043d75745dd5338d83e05defa0124b3695d",
+  "pairs": 1,
+  "why": "2026-10-25: 1 sliver (1 cm) at the damaged clinic's breach edge (raw build too) — invisible"
  },
  "sltower.glb": {
   "hash": "ab8a2c667ef9562153e0f6eb1eb63b3dcf7a0f73",

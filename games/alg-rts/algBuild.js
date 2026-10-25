@@ -23,7 +23,8 @@ import { buildMortarPitV2 } from "./algMortarPit.js";
 import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
 import { attachMotorPool, loadMotorPool } from "./algMotorPool.js";
-import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker, lookoutGeometry, mineMarkerGeometry, setPieceState } from "./algSangar.js";
+import { dressPens } from "./algPenProps.js";
+import { farmGeometry, loadFarmstead, loadSasPost, sasGeometry, loadLookout, loadMineMarker, lookoutGeometry, mineMarkerGeometry, setPieceState } from "./algSangar.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, loadFrenchPost, swapPost, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { PLAY, VIEW_YAW } from "./layout.js";
@@ -152,6 +153,15 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   loadMineMarker().then((ok) => { if (ok) swapPlaced(showroom, /^mineMarker\d*$/, mineMarkerGeometry(), app); });
   // THE FARMSTEAD in Blender (tools/blender/farmstead.py, 2026-10-25): the map's farms (their yard props dressed on their
   // spots — algPenProps) and its burnt farm, the model's burnt state
+  // THE SAS POST in Blender (tools/blender/sasPost.py, 2026-10-25): swapped where it stands, the old piece's painted
+  // boards (its stencil child) removed — the model has its own; the flag stays on its mount (?sas=old: the old one)
+  if (!(typeof location !== "undefined" && new URLSearchParams(location.search).get("sas") === "old")) loadSasPost().then((ok) => {
+    if (!ok || !swapPlaced(showroom, /^sasPost$/, sasGeometry(), app)) return;
+    const m = showroom.sasPost;
+    for (const c of [...m.children]) if (c.material?.name === "RtsStencil" || c.material?.name === "RtsPaint") m.remove(c);
+    dressPens(m, sasGeometry().userData.pens);   // (its well: the props kit's — algPenProps)
+    onCover();
+  });
   const FARM_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("farm") === "old";   // (?farm=old: the old kit's, an A/B)
   if (!FARM_OLD) loadFarmstead().then((ok) => {
     if (!ok) return;

@@ -27,6 +27,7 @@ import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { buildFarmstead } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildSasPost } from "../../v3/render/objects/rtsAlgeria.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -193,6 +194,13 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     g.userData.kitType = [kit, type];   // (its damaged / ruin states: pieceState)
     g.userData.farGeometry = far;
     if (far) far.userData = g.userData;   // (the same data at either level: footprint, gun, materials)
+    // ITS PAINTED WORDS (bkit.stencils — the kit's decal quads, a child of the near level): drawn with the piece
+    const dec = parts[`${type}:intact`]?.decal;
+    if (dec) {
+      const dg = plainGeometry(dec); dg.scale(S, S, S);
+      const dm = new THREE.Mesh(dg, dec.material); dm.name = "Decal"; dm.castShadow = false; dm.receiveShadow = true;
+      g.userData.extra = [...(g.userData.extra ?? []), dm];
+    }
     extra?.(g);
     rec.geo = g;
     return true;
@@ -468,6 +476,23 @@ export const mineMarkerGeometry = () => pieceGeometry("flnmarks", "minemark");
  *  yard's spots), the Blender model drawn; its burnt state the map's burnt farm. */
 export const loadFarmstead = () => loadBlenderPiece("farmstead", "farm", () => buildFarmstead({ seed: 1970 }), null, { stone: false });
 export const farmGeometry = () => pieceGeometry("farmstead", "farm");
+/** THE SAS POST (tools/blender/sasPost.py, 2026-10-25 — you: "the best looking for my AAA RTS"): the old piece's data (its
+ *  footprint, cover, the flag's mount, the night lamp), the Blender model drawn, YOUR simulated sandbagged corner added. */
+export const loadSasPost = () => loadBlenderPiece("saspost", "sas", () => buildSasPost({}), null, { stone: false }).then(async (ok) => {
+  if (!ok) return ok;
+  const g = pieceGeometry("saspost", "sas");
+  if (g.userData.sasReady) return ok;
+  await loadSandbagWall();
+  const bags = simulatedWallMesh("SasBags", "sas");
+  g.userData.extra = [...(g.userData.extra ?? []), ...(bags ? [bags] : [])];   // (after its painted words)
+  g.userData.stencil = null;   // (the old piece's painted boards: the model has its own)
+  // ITS WELL: the village props kit's (you: "we have wells already … is it not better looking?") on its spot — tools/
+  // blender/sasPost.py WELL, kit metres x1.3 (algPenProps dresses it: kitView, and algBuild after the swap)
+  g.userData.pens = [{ kind: "well", x: -6.5 * S, y: 0, z: -4.5 * S, yaw: 0.3 }];
+  g.userData.sasReady = true;
+  return ok;
+});
+export const sasGeometry = () => (pieceGeometry("saspost", "sas")?.userData.sasReady ? pieceGeometry("saspost", "sas") : null);
 /**
  * THE FM ON THE LIP (2026-10-25, you: the sangar's "weapon seems to be floating"): its pivot was the OLD sangar's height
  * (rtsAlgeria buildSangar, 1.28 m), level on its bipod. Unmanned, the gun LIES on the parapet (bipod folded): rays down
