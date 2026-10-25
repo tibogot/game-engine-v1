@@ -11,6 +11,7 @@
 // light, to A/B) · ?fog=0 · ?warmup=0 (no pipeline warm-up, to A/B it) ·
 // ?sky=atmosphere (the old Atmosphere sky and its tuned Aurès light, to A/B;
 // the default is SKY PRO since 2026-09-29, see SKY_PRO below)
+import { loadPenProps } from "./algPenProps.js";
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
 import { SIDES, setHumanSide } from "../shared-rts/teams.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
@@ -251,6 +252,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   });
   setSandbagGroundBlend(app);   // (the bags' foot in the ground — algGroundBlend; before any wall is built)
   setGroundBlendApp(app);       // (every Blender kit blended as it loads — algHouse, algMotorPool)
+  loadPenProps();               // (the pens' trough and hay — algPenProps: the zeribas, the farmsteads; they wait for it)
   // Boot loop, parallel pipelines, stats-gl off, the perf line
   // (shared-rts/rtsPerfBoot.js). ONE engine frame a second behind the loading
   // screen here: nam-rts boots faster with none, this game was measured the

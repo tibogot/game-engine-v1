@@ -25,7 +25,7 @@ the lab (`games/alg-rts/lab.html?p=<entry>`). The **Verdict** column is yours: k
 
 | Piece | Maps | Game draws | Lab entry | Verdict |
 |---|---|---|---|---|
-| The post (bordj, towers, gate, barracks) | all | Blender (postkit), swapped in over the old kit | posteBlender · old ones: poste, postePhoto, sacsPoste | |
+| The post (bordj, towers, gate, barracks) | all | Blender (postkit), swapped in over the old kit | posteBlender (new · damaged · destroyed) | **one entry** — the old post, photo and sim-bags entries removed (2026-10-25) |
 | Post flag | all | live cloth | — (animated: judged in the game) | |
 | Helipad + windsock | all | new procedural, cloth bags; construction | helisurface | |
 | Motor pool | all | old kit + the Blender far level attached | parcAutoNeuf (old: parcAuto) | |
@@ -66,7 +66,8 @@ the lab (`games/alg-rts/lab.html?p=<entry>`). The **Verdict** column is yours: k
 | Koubba | OA NA AB | old kit | koubba | |
 | Cemetery | OA NA | old kit | cemetery | |
 | Village well | OA AB MQ | old kit (the Blender well: NA TR) | villageWell, villagePropsBlender | |
-| Thorn pen (zeriba) | OA NA AB MQ | old kit (lumps); the Blender pens are in the lab only | zeriba, enclosFerme | |
+| Thorn pen (zeriba) | OA NA AB MQ | old kit fence + the Blender trough and haystack inside (algPenProps) | zeriba | **keep the old fence, better inside** — done 2026-10-25 |
+| Thorn ring (Blender) | — | parked | zeribaParked | **parked** — for another asset later (a thorn barricade?) |
 | Fishing port | CO | new procedural | port | |
 | Stone house (HQ) | — | lab only | maisonPierre | |
 
@@ -74,8 +75,8 @@ the lab (`games/alg-rts/lab.html?p=<entry>`). The **Verdict** column is yours: k
 
 | Piece | Maps | Game draws | Lab entry | Verdict |
 |---|---|---|---|---|
-| Farmstead (7, seeded) | OA NA TR | old kit | farmstead (3 seeds) | |
-| Burnt farm | OA NA | old kit | burntFarm | |
+| Farmstead (7, seeded) | OA NA TR | old kit; its pen now the zeriba fence + Blender trough and hay | farmstead (3 seeds) | **redo in Blender** (intact · damaged · burnt — the burnt farm becomes its burnt state) |
+| Burnt farm | OA NA | old kit | burntFarm | **cheap** — replaced by the new farmstead's burnt state |
 | Ruined hut (6) | OA NA | old kit | ruinedHut (3 seeds) | |
 | Roman temple, arch, colonnade, column, road, oil press | OA NA | new procedural | ruineRomaine, arc, colonnade, colonne, voie, pressoir | |
 | Rubble (collapsing house) | NA AB TR | Blender | rubbleKit | |

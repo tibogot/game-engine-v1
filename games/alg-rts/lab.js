@@ -1,5 +1,7 @@
 // THE LAB, REBUILT (2026-10-19, you: "a better-looking building lab, readable, UI/UX friendly … one for the
 // whole game"). One page, every building of the game, no reload between them:
+//   SECTIONS    Buildings · Plants & foliage · Rocks (2026-10-25, you: "the plants and the buildings should not be in the
+//               same menu … everything in the same page but separated") — the list, filters, search and ← → per section
 //   CATALOGUE   the old lab's pieces (buildingLab.js BUILDINGS — their builders, versions, tags, notes) with
 //               labCatalog.js's side / kind / maps / status: search, filter chips, thumbnail cards
 //   THE PIECE   its versions side by side (old / new / damaged / ruin…), tabs to isolate one
@@ -87,6 +89,11 @@ export async function startLab() {
   // ── State ───────────────────────────────────────────────────────────────────────────────────
   const keys = Object.keys(BUILDINGS);
   const filters = store.get("filters", { side: [], kind: [], map: [], status: [] });
+  // THE SECTIONS: by the piece's kind (labCatalog KINDS)
+  const SECTIONS = [["build", "Buildings", (k) => k !== "plant" && k !== "nature"], ["plant", "Plants & foliage", (k) => k === "plant"], ["rock", "Rocks", (k) => k === "nature"]];
+  const sectionOf = (key) => SECTIONS.find(([, , inS]) => inS(metaOf(key).kind))?.[0] ?? "build";
+  let section = store.get("section", "build");
+  const inSection = (key) => sectionOf(key) === section;
   let query = "";
   let cur = null;          // { key, versions: [{ label, group, stats }], focus: -1 }
   let viewMode = store.get("view", "rts");
@@ -97,7 +104,26 @@ export async function startLab() {
 
   // ── The catalogue panel ─────────────────────────────────────────────────────────────────────
   const GROUPS = [["side", "Side", SIDES], ["kind", "Kind", KINDS], ["map", "Map", MAPS], ["status", "Status", STATUS]];
-  $("filters").innerHTML = GROUPS.map(([g, label, opts]) => `<div class="frow"><span>${label}</span>${Object.entries(opts).map(([k, v]) => `<button class="chip" data-g="${g}" data-k="${k}">${v}</button>`).join("")}</div>`).join("");
+  function renderFilters() {
+    // (Kind: only the section's kinds — a row of one chip says nothing, so it goes)
+    const kinds = Object.fromEntries(Object.entries(KINDS).filter(([k]) => SECTIONS.find(([s]) => s === section)[2](k)));
+    // (the Side — French, FLN, civilian — is a building's: not a plant's or a rock's)
+    $("filters").innerHTML = GROUPS.map(([g, label, opts]) => [g, label, g === "kind" ? kinds : opts]).filter(([g, , opts]) => Object.keys(opts).length > 1 && (g !== "side" || section === "build"))
+      .map(([g, label, opts]) => `<div class="frow"><span>${label}</span>${Object.entries(opts).map(([k, v]) => `<button class="chip" data-g="${g}" data-k="${k}">${v}</button>`).join("")}</div>`).join("");
+    syncChips();
+  }
+  function renderSections() {
+    $("sections").innerHTML = SECTIONS.map(([s, label]) => `<button class="sec${s === section ? " on" : ""}" data-s="${s}">${label}<small>${keys.filter((k) => sectionOf(k) === s).length} pieces</small></button>`).join("");
+  }
+  function setSection(s, { open = true } = {}) {
+    if (s === section && $("sections").innerHTML) return;
+    section = s; store.set("section", s);
+    filters.kind = filters.kind.filter((k) => SECTIONS.find(([x]) => x === s)[2](k)); store.set("filters", filters);
+    renderSections(); renderFilters(); renderList();
+    $("stoneBox").style.display = s === "build" ? "" : "none";   // (the kit's wall stone: buildings only)
+    if (open && !inSection(cur?.key)) { const first = visible()[0]; if (first) show(first); }
+  }
+  $("sections").addEventListener("click", (e) => { const b = e.target.closest(".sec"); if (b) setSection(b.dataset.s); });
   const syncChips = () => { for (const b of $("filters").querySelectorAll(".chip")) b.classList.toggle("on", filters[b.dataset.g].includes(b.dataset.k)); };
   $("filters").addEventListener("click", (e) => {
     const b = e.target.closest(".chip"); if (!b) return;
@@ -108,6 +134,7 @@ export async function startLab() {
   $("search").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); renderList(); });
   const visible = () => keys.filter((k) => {
     const m = metaOf(k), e = BUILDINGS[k];
+    if (!inSection(k)) return false;
     if (filters.side.length && !filters.side.includes(m.side)) return false;
     if (filters.kind.length && !filters.kind.includes(m.kind)) return false;
     if (filters.map.length && !m.maps.some((x) => filters.map.includes(x))) return false;
@@ -117,7 +144,7 @@ export async function startLab() {
   });
   function renderList() {
     const list = visible();
-    $("count").innerHTML = `<span>${list.length} / ${keys.length} pieces</span><button id="mkthumbs" title="Takes a thumbnail of every piece in the list">Make thumbnails</button>`;
+    $("count").innerHTML = `<span>${list.length} / ${keys.filter(inSection).length} pieces</span><button id="mkthumbs" title="Takes a thumbnail of every piece in the list">Make thumbnails</button>`;
     $("list").innerHTML = list.map((k) => {
       const m = metaOf(k), t = thumbs.get(k);
       return `<button class="card${cur?.key === k ? " on" : ""}" data-k="${k}"><div class="thumb" style="${t ? `background-image:url(${t})` : ""}">${t ? "" : ICON[m.kind] ?? "▫"}</div>
@@ -135,7 +162,7 @@ export async function startLab() {
     <div class="box" id="fireBox" style="display:none"><h3>Fire</h3><div class="btns" id="fireBtns"><button class="btn" data-f="fire">Fire</button><button class="btn" data-f="follow">Follow the shell</button><button class="btn" data-f="slow">Slow ×0.1</button></div></div>
     <div class="box" id="pieceBox" style="display:none"><h3>Piece</h3><div id="pieceTools"></div></div>
     <div class="box" id="buildBox" style="display:none"><h3>Construction</h3><input type="range" id="buildP" min="0" max="100" value="100" /><div class="btns" style="margin-top:6px"><button class="btn" id="buildPlay">▶ Play (22 s)</button><span id="buildPct" class="keys" style="align-self:center"></span></div></div>
-    <div class="box"><h3>Wall stone (the old kit's walls)</h3><div class="btns" id="stones">${Object.entries(LAB_STONES).map(([k, v]) => `<button class="btn" data-s="${k}">${v}</button>`).join("")}</div></div>
+    <div class="box" id="stoneBox"><h3>Wall stone (the old kit's walls)</h3><div class="btns" id="stones">${Object.entries(LAB_STONES).map(([k, v]) => `<button class="btn" data-s="${k}">${v}</button>`).join("")}</div></div>
     <div class="box"><h3>Numbers</h3><table class="stats" id="stats"></table></div>
     <div class="box"><h3>Frame</h3><table class="stats" id="live"></table></div>
     <div class="box keys">← → previous / next piece · / search · 1-5 views · Esc clears</div>`;
@@ -405,8 +432,11 @@ export async function startLab() {
   });
 
   // ── Go ──────────────────────────────────────────────────────────────────────────────────────
-  syncChips();
+  const first = new URLSearchParams(location.search).get("p");
+  section = BUILDINGS[first] ? sectionOf(first) : section;   // (a piece's link opens its section)
+  renderSections(); renderFilters();
   renderList();
+  $("stoneBox").style.display = section === "build" ? "" : "none";
   setLight("day");
   markOn("stones", "s", "aures");
   const timer = new THREE.Timer();
@@ -421,7 +451,6 @@ export async function startLab() {
     renderer.render(scene, camera);
     renderLive(dt);
   });
-  const first = new URLSearchParams(location.search).get("p");
   await show(BUILDINGS[first] ? first : visible()[0] ?? keys[0]);
   return { renderer, scene, camera, controls, show, setView, setLight, get current() { return cur; } };
 }

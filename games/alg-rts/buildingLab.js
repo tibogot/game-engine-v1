@@ -41,6 +41,7 @@ import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/place
 import { buildLookout, buildMineMarker, buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildBeehives, buildBurntFarm, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
+import { loadPenProps } from "./algPenProps.js";
 import { SUN } from "./vehicleLab.js";
 import { siteBags, simulatedWallMesh, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -285,15 +286,17 @@ export const BUILDINGS = {
   // Blender one RIGHT (algZeriba.js, tools/blender/zeribaSim.py).
   // THE FARMSTEAD'S THORN PEN (2026-10-14, your screenshot: the ring of round lumps by the farm): the farm as
   // the game builds it LEFT (its pen of brush balls to the right of its yard), the Blender pen RIGHT.
-  enclosFerme: {
-    label: "Enclos de la ferme (nouveau)", gap: 24, before: () => buildFarmstead({ seed: 1970 }),
-    after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [zeribaMesh("ZeribaFarm", "zeribaFarm")].filter(Boolean); return g; },
-    tags: ["FERME (LE JEU) — SON ENCLOS À DROITE DE LA COUR", "ENCLOS · NOUVEAU (BLENDER)"], note: "la ferme du jeu à gauche (son enclos : les boules de broussailles), le nouvel enclos d'épineux à droite.",
-  },
+  // THE ZERIBA (2026-10-25, you: "I prefer the old one … keep the old zeriba fences but make some better assets inside"):
+  // the game's thorn fence, its trough and hay the Blender village props (algPenProps). The Blender branch ring
+  // (zeribaSim.py, algZeriba.js) is parked — "it might be useful for another asset".
   zeriba: {
-    label: "Zeriba (nouveau)", gap: 20, before: () => buildZeriba({ seed: 81 }),
-    after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [zeribaMesh()].filter(Boolean); return g; },
-    tags: ["ZERIBA (LE JEU)", "ZERIBA · NOUVEAU (BLENDER)"], note: "l'enclos du jeu à gauche, le nouveau à droite : des buissons d'épineux coupés, empilés en cercle, la cime vers l'extérieur.",
+    label: "Zeriba", gap: 20, prepare: () => loadPenProps(), before: () => labPiece(kitView(buildZeriba({ seed: 81 }))),
+    tags: ["ZERIBA"], note: "the flock's pen by the hamlets: the thorn fence, the Blender trough and haystack inside.",
+  },
+  zeribaParked: {
+    label: "Thorn ring (Blender, parked)", gap: 20, prepare: () => Promise.all([loadZeriba(), loadZeriba("zeribaFarm")]),
+    before: () => labPiece(zeribaMesh()), after: () => labPiece(zeribaMesh("ZeribaFarm", "zeribaFarm")),
+    tags: ["THORN RING · BIG", "THORN RING · SMALL"], note: "the Blender ring of cut thorn bushes (tools/blender/zeribaSim.py) — not in the game: kept for another asset (a thorn barricade, an FLN obstacle).",
   },
   // THE SANDBAG WALL (2026-10-25, you: "we don't need the old one anymore… if it's repeating other assets that would be
   // confusing"; then "remove completely the old sandbags"): ONE entry — your cloth-simulated wall as the game builds it
@@ -312,12 +315,7 @@ export const BUILDINGS = {
     after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [buildPortBlock({ seed: 1 + SEED })]; return g; },
     tags: ["—", `PORT · NOUVEAU · variante ${SEED + 1}`], note: "le port de pêche : maisons coloniales chaulées aux toits de tuiles canal, le magasin, le môle et son phare, les lamparos.",
   },
-  sacsPoste: {
-    label: "Poste (sacs)", gap: 42, before: () => buildFrenchPost({ detail: 2, footStone: MAT.limestone }), after: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
-    tags: ["POSTE (LE JEU)", "POSTE · SACS SIMULÉS"], note: "le poste du jeu à gauche, ses sacs simulés à droite : la chicane, les tours, le guetteur, le mortier.",
-  },
   mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
-  poste: { build: (o) => buildFrenchPost({ ...o }), label: "Poste français", gap: 42 },
   parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },
   // THE MOTOR POOL, NEW (2026-10-18, you: "how far could we make a better looking AAA motor pool?"): the
   // game's LEFT (detail 1), the lab's kit pass MIDDLE (detail 2, the sheets), the Blender one RIGHT
@@ -437,16 +435,14 @@ export const BUILDINGS = {
   // grain and relief on top (algKitPhoto.js) — the game's post on the LEFT.
   // THE POST IN BLENDER (2026-10-22, tools/blender/postKit.py): the game's LEFT, the Blender one RIGHT — the same
   // layout, its gate, flag and YOUR simulated bags on both
+  // THE FRENCH POST, ONE ENTRY (2026-10-25, you: "is a post asset not enough to check what is in the post?" — the
+  // separate sim-bags, photo and old-kit entries gone): the Blender post as the game builds it (your simulated bags,
+  // the flag's mast, the gate) LEFT, damaged MIDDLE, destroyed RIGHT.
   posteBlender: {
-    label: "Poste français (Blender)", gap: 46, yaw: Math.PI - 0.55, prepare: () => Promise.all([loadFrenchPost(), loadSandbagWall()]),
-    before: () => buildFrenchPostPiece((o) => buildFrenchPost({ detail: 2, footStone: MAT.limestone, ...o })),
-    after: () => buildFrenchPostPiece(() => { const g0 = frenchPostGeometry(), g = g0.clone(); g.userData = { ...g0.userData }; return g; }),
-    tags: ["POST (THE GAME)", "POST · BLENDER"], note: "the game's post on the left, the Blender one on the right (the same layout: the gate, the flag, the simulated sandbags).",
-  },
-  postePhoto: {
-    label: "Poste (photo)", gap: 42, before: () => buildFrenchPost({ detail: 2 }),
-    after: () => { const g = buildFrenchPost({ detail: 2, footStone: MAT.limestone }); g.userData.labMaterial = kitPhotoMaterial(FR_PAINT_TINT); return g; },
-    tags: ["POSTE (LE JEU)", "POSTE · DÉTAIL PHOTO"], note: "le poste du jeu à gauche, le même avec le grain et le relief des photos à droite.",
+    label: "Poste français", gap: 46, yaw: Math.PI - 0.55, prepare: () => Promise.all([loadFrenchPost(), loadSandbagWall(), loadHouses("postkit")]),
+    before: () => buildFrenchPostPiece(() => { const g0 = frenchPostGeometry(), g = g0.clone(); g.userData = { ...g0.userData }; return g; }),
+    middle: () => labPiece(houseMesh("post", "damaged")), after: () => labPiece(houseMesh("post", "ruin")),
+    tags: ["FRENCH POST · NEW", "FRENCH POST · DAMAGED", "FRENCH POST · DESTROYED"], note: "the French post (Blender: the bordj, its towers, the gate, the barracks; your simulated sandbags) in its three states.",
   },
   campFln: {
     label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildCampV2(),
@@ -700,7 +696,8 @@ Object.assign(BUILDINGS, {
   koubba: { label: "Koubba", gap: 12, before: () => buildKoubba({}), tags: ["KOUBBA"], note: "the marabout's domed tomb by the villages (rtsAlgVillage buildKoubba)." },
   cemetery: { label: "Cemetery", gap: 16, before: () => buildCemetery({}), tags: ["CEMETERY"], note: "the village cemetery (rtsAlgVillage buildCemetery)." },
   villageWell: { label: "Village well (old)", gap: 6, before: () => buildVillageWell({}), tags: ["WELL (OLD)"], note: "the old procedural well by the hamlets and the dechra (the Blender well: « Village props (Blender) »)." },
-  farmstead: { label: "Farmstead", gap: 26, before: () => buildFarmstead({ seed: 1970 }), middle: () => buildFarmstead({ seed: 1977 }), after: () => buildFarmstead({ seed: 1984 }),
+  farmstead: { label: "Farmstead", gap: 26, prepare: () => loadPenProps(),
+    before: () => labPiece(kitView(buildFarmstead({ seed: 1970 }))), middle: () => labPiece(kitView(buildFarmstead({ seed: 1977 }))), after: () => labPiece(kitView(buildFarmstead({ seed: 1984 }))),
     tags: ["FARMSTEAD 1", "FARMSTEAD 2", "FARMSTEAD 3"], note: "the lone farms of the old Aurès and the training camp (rtsAlgVillage buildFarmstead) — three of the game's seeds: the house, the byre, the yard wall, the thorn pen. On flat ground here; in the game seated on the slope." },
   burntFarm: { label: "Burnt farm", gap: 20, before: () => buildBurntFarm({}), tags: ["BURNT FARM"], note: "the burnt-out farm on the old Aurès (rtsAlgVillage buildBurntFarm)." },
   ruinedHut: { label: "Ruined hut", gap: 10, before: () => buildRuinedHut({ seed: 2010 }), middle: () => buildRuinedHut({ seed: 2013 }), after: () => buildRuinedHut({ seed: 2016 }),

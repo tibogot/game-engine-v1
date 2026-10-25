@@ -414,9 +414,12 @@ export function buildVillageWell({ seed = 1959 } = {}) {
  * closed at night with more brush, a stone trough and a heap of fodder
  * inside. Stands on whatever ground there is.
  */
-export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT } = {}) {
-  const R = rng(seed);
-  const parts = [];
+/**
+ * A THORN FENCE — the zeriba's ring of cut thorn round (cx, cz), radius r, its gap toward -Z (2026-10-25: shared by
+ * the zeriba and the farmstead's pen — you prefer it to the Blender branch ring, and the farm's pen of brush
+ * lumps, the first pass, read as baskets).
+ */
+function zeribaFence(parts, R, cx, cz, r, groundAt) {
   // Thorn brush is a TANGLE of dead grey branches, not a row of lumps (the
   // first pass, bushy clumps, read as baskets): per metre of fence a few
   // branches leaning every way, a low dark core of dry brush under them.
@@ -425,7 +428,7 @@ export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT } = {}) {
     const a = (k / n) * Math.PI * 2;
     // The gap, toward the front (-Z).
     if (Math.abs(Math.atan2(Math.sin(a + Math.PI / 2), Math.cos(a + Math.PI / 2))) < 0.2) continue;
-    const rr = r + (R() - 0.5) * 0.35, x = Math.cos(a) * rr, z = Math.sin(a) * rr, g = groundAt(x, z);
+    const rr = r + (R() - 0.5) * 0.35, x = cx + Math.cos(a) * rr, z = cz + Math.sin(a) * rr, g = groundAt(x, z);
     const tx = -Math.sin(a), tz = Math.cos(a);           // along the fence
     for (let q = 0; q < 4; q++) {
       const along = (R() - 0.5) * 1.6, out = (R() - 0.5) * 0.9, up = 0.5 + R() * 1.0;
@@ -443,13 +446,27 @@ export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT } = {}) {
       parts.push(wirePart([x - tx * l / 2, y1, z - tz * l / 2], [x + tx * l / 2 + Math.cos(a) * (R() - 0.5) * 0.3, y2, z + tz * l / 2 + Math.sin(a) * (R() - 0.5) * 0.3], 0.03, { mat: MAT.timber, tone: 0.5 + R() * 0.3 }));
     }
   }
+}
+/**
+ * The pen's INSIDE as spots — { kind: "trough" | "hay", x, y, z, yaw }, kit metres (scaled) — for the game's own props
+ * (alg-rts: the Blender village props kit — algPenProps.js). (2026-10-25, you: the inside "looks really cheap"; the
+ * old stone trough and fodder berm stay only with `inside: true`.)
+ */
+const penSpots = (spots, groundAt) => scaled(spots.map((p) => ({ ...p, y: groundAt(p.x, p.z) * KIT })));
+
+export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT, inside = false } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  zeribaFence(parts, R, 0, 0, r, groundAt);
   parts.push(...brushClump(R, 1.4, groundAt(1.4, -r - 0.9), -r - 0.9, { h: 0.8, r: 0.7, dry: true }));
-  // Inside: a trough, a heap of fodder, a few stones.
-  const tg = groundAt(-1.5, 1.5);
-  parts.push(...stoneTrough(rng(seed + 3), -1.5, tg, 1.5, 0.4, { len: 2.0 }));
-  const fg = groundAt(2, 2.2);
-  parts.push({ geo: earthBerm([[1.2, -0.15], [0.9, 0.35], [0.4, 0.6], [0.001, 0.65]], { seed, segs: 12, rJit: 0.15, yJit: 0.08 }), pos: [2, fg, 2.2], mat: MAT.thatch, tone: 0.45 });
+  if (inside) {   // the old inside: a trough, a heap of fodder
+    const tg = groundAt(-1.5, 1.5);
+    parts.push(...stoneTrough(rng(seed + 3), -1.5, tg, 1.5, 0.4, { len: 2.0 }));
+    const fg = groundAt(2, 2.2);
+    parts.push({ geo: earthBerm([[1.2, -0.15], [0.9, 0.35], [0.4, 0.6], [0.001, 0.65]], { seed, segs: 12, rJit: 0.15, yJit: 0.08 }), pos: [2, fg, 2.2], mat: MAT.thatch, tone: 0.45 });
+  }
   const geo = finish(parts, { hx: r + 1.2, hz: r + 1.6, height: 1.8 });
+  geo.userData.pens = inside ? [] : penSpots([{ kind: "trough", x: -1.5, z: 1.5, yaw: 0.1 }, { kind: "hay", x: 2.2, z: 2.0, yaw: R() * 6.28 }], groundAt);
   // Men push through the thorn; a vehicle does not (navGrid vehicleOnly, 2026-10-06).
   geo.userData.navRects = [{ ...geo.userData.footprint, vehicleOnly: true }];
   return geo;
@@ -594,13 +611,11 @@ export function buildFarmstead({ seed = 1970, groundAt = FLAT } = {}) {
   parts.push({ geo: earthBerm([[1.3, -0.1], [1.1, 0.5], [0.6, 1.0], [0.001, 1.15]], { seed: seed + 3, segs: 14, rJit: 0.12, yJit: 0.08 }), pos: [-2.2, groundAt(-2.2, -3.4), -3.4], mat: MAT.thatch, tone: 0.5 });
   parts.push(clayJar(1.8, groundAt(1.8, 0.2) - 0.02, 0.2, 1));
   parts.push(clayJar(2.4, groundAt(2.4, 0.4) - 0.02, 0.4, 0.85));
-  // The thorn pen, out to the right of the yard: a ring of cut thorn.
+  // The thorn pen, out to the right of the yard: the zeriba's fence (its lumps of brush, the first pass, read as
+  // baskets — you, 2026-10-25), a trough and hay inside (spots: the game's props).
   const px = yx1 + 6.5, pz = -1.5, pr = 3.6;
-  for (let k = 0; k < 16; k++) {
-    if (k === 12) continue;                                  // its gap
-    const a = (k / 16) * Math.PI * 2, x = px + Math.cos(a) * pr, z = pz + Math.sin(a) * pr;
-    parts.push(...brushClump(R, x, groundAt(x, z), z, { h: 0.9, r: 0.45, dry: true }));
-  }
+  zeribaFence(parts, R, px, pz, pr, groundAt);
+  const pens = penSpots([{ kind: "trough", x: px - 1.1, z: pz + 1.0, yaw: 0.2 }, { kind: "hay", x: px + 1.2, z: pz + 0.9, yaw: R() * 6.28 }], groundAt);
   const trees = [
     { kind: "fig", x: yx1 - 1.5, z: yz + 4.8, scale: 0.9 + R() * 0.25, seed: Math.floor(R() * 1000) },
     { kind: "olive", x: -w / 2 - 6, z: 5.5, scale: 0.85 + R() * 0.3, seed: Math.floor(R() * 1000) },
@@ -610,6 +625,7 @@ export function buildFarmstead({ seed = 1970, groundAt = FLAT } = {}) {
   const hedge = [];
   for (let x = -w / 2 - 2; x <= w / 2 + 3; x += 1.2) if (R() > 0.15) hedge.push([x + (R() - 0.5) * 0.4, 3.2 + d / 2 + 2.2 + (R() - 0.5) * 0.4]);
   const geo = finish(parts, { hx: (yx1 + 10.5 - (-w / 2 - bd - 0.5)) / 2, hz: 7.5, cx: (yx1 + 10.5 + (-w / 2 - bd - 0.5)) / 2, cz: 0.6, height: 3.4 });
+  geo.userData.pens = pens;
   geo.userData.houses = scaled(houses);
   geo.userData.trees = scaled(trees);
   geo.userData.hedge = hedge.map(([x, z]) => [x * KIT, z * KIT]);

@@ -9,7 +9,7 @@
 export const SIDES = { fr: "French", fln: "FLN", civil: "Civilian", nature: "Nature" };
 export const KINDS = { base: "Base", defense: "Defence", village: "Village", fln: "FLN camp", ruine: "Ruins", nature: "Rocks", plant: "Plants", field: "Fields", prop: "Props", point: "Points" };
 export const MAPS = { aures: "Aurès", abdi: "Oued Abdi", cote: "Coast", kantara: "El Kantara" };
-export const STATUS = { jeu: "In the game", verdict: "To judge", ancien: "Old, kept" };
+export const STATUS = { jeu: "In the game", verdict: "To judge", ancien: "Old, kept", parked: "Parked (for later)" };
 
 const ALL = ["aures", "abdi", "cote", "kantara"];
 // (the plants: buildingLab PLANT_SPECIES — every one as the game grows it, plant-lab.html folded in 2026-10-25)
@@ -38,9 +38,6 @@ export const META = {
   mzab_mur: { side: "civil", kind: "village", maps: ["abdi"], status: "jeu" },
   ...Object.fromEntries(PLANT_KEYS.map((k) => [`plant_${k}`, { side: "nature", kind: "plant", maps: ALL, status: "jeu" }])),
   plantSteppe: { side: "nature", kind: "plant", maps: ["aures", "kantara"], status: "jeu" },
-  poste: { side: "fr", kind: "base", maps: ALL, status: "jeu" },
-  postePhoto: { side: "fr", kind: "base", maps: ["aures"], status: "verdict" },
-  sacsPoste: { side: "fr", kind: "base", maps: ALL, status: "jeu" },
   parcAuto: { side: "fr", kind: "base", maps: ["aures"], status: "jeu" },
   parcAutoNeuf: { side: "fr", kind: "base", maps: ["abdi", "cote", "kantara"], status: "verdict" },
   helisurface: { side: "fr", kind: "base", maps: ALL, status: "jeu" },
@@ -58,8 +55,8 @@ export const META = {
   villageBlanc: { side: "civil", kind: "village", maps: ["abdi"], status: "verdict" },
   ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee"].map((ty) => [`mzab_${ty}`, { side: "civil", kind: "village", maps: ["abdi", "kantara"], status: "verdict" }])),
   villeMzab: { side: "civil", kind: "village", maps: ["abdi"], status: "verdict" },
-  enclosFerme: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "verdict" },
-  zeriba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "verdict" },
+  zeriba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
+  zeribaParked: { side: "civil", kind: "village", maps: [], status: "parked" },
   port: { side: "civil", kind: "village", maps: ["cote"], status: "verdict" },
   grotte: { side: "fln", kind: "fln", maps: ["aures", "abdi"], status: "jeu" },
   campFln: { side: "fln", kind: "fln", maps: ["aures", "abdi"], status: "verdict" },
@@ -144,9 +141,8 @@ export const SYSTEMS = {
 };
 
 export const NAMES = {
-  enclosFerme: "Farm thorn pen (new)", zeriba: "Zeriba (new)", sacsDeSable: "Sandbag wall", port: "Fishing port (new)",
-  sacsPoste: "Post (sim bags)",
-  mechtaHouse: "Mechta house", poste: "French post", parcAuto: "Motor pool", parcAutoNeuf: "Motor pool (new, Blender)",
+  zeriba: "Zeriba", zeribaParked: "Thorn ring (Blender, parked)", sacsDeSable: "Sandbag wall", port: "Fishing port (new)",
+    mechtaHouse: "Mechta house", parcAuto: "Motor pool", parcAutoNeuf: "Motor pool (new, Blender)",
   blanche_maison: "Whitewashed house: two storeys", blanche_cour: "Whitewashed house: courtyard", blanche_haute: "Whitewashed house: tall",
   blanche_boutique: "Whitewashed house: shop", villageBlanc: "Whitewashed village", helisurface: "Helipad",
   mzab_dar: "M'zab house: roof gallery", mzab_mur: "M'zab terrace wall", mzab_tour: "M'zab house: tall", mzab_bas: "M'zab house: low, yard", mzab_terrasse: "M'zab house: stepped, pale blue",
@@ -154,10 +150,10 @@ export const NAMES = {
   ruineRomaine: "Roman ruin", colonne: "Roman column", colonnade: "Colonnade", voie: "Roman road", arc: "Trajan's arch",
   pressoir: "Oil press", rocheBanc: "Rock: big shelf", rocheBloc: "Rock: block", rocheDalle: "Rock: low slab", grotte: "FLN cave",
   maisonPierre: "Stone house (HQ)", mechtaPierre: "Mechta (new)", hameau: "Hamlet (new)", dechraNouveau: "Dechra (new)",
-  ksarNouveau: "Ksar (new)", postePhoto: "Post (photo detail)", campFln: "FLN camp",
+  ksarNouveau: "Ksar (new)", campFln: "FLN camp",
     pointBlender_fuel: "Requisition point: fuel", pointBlender_mun: "Requisition point: munitions",
   sangarBlender: "Sangar",   cacheBlender: "Arms cache",   ecranBlender: "Ambush screen",   miradorBlender: "Mirador",   nidBlender: "MG nest",
-  mortierBlender: "Mortar pit", fortBlender: "Fortified point", projBlender: "Searchlight tower", posteBlender: "French post (Blender)", posteAvanceBlender: "Forward post", refugeBlender: "FLN refuge", infirmBlender: "FLN infirmary", secoursBlender: "Aid station",
+  mortierBlender: "Mortar pit", fortBlender: "Fortified point", projBlender: "Searchlight tower", posteBlender: "French post", posteAvanceBlender: "Forward post", refugeBlender: "FLN refuge", infirmBlender: "FLN infirmary", secoursBlender: "Aid station",
   barbelesBlender: "Barbed wire", };
 const WORDS = [
   ["(LE JEU)", "(THE GAME)"], ["(KIT DU JEU)", "(GAME KIT)"], ["NOUVEAU STANDARD", "NEW STANDARD"], ["NOUVELLE", "NEW"], ["NOUVEAU", "NEW"],

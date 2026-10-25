@@ -5,6 +5,7 @@
 // Each entry is levelled onto its own pad (app.flattenRect) and drawn with the
 // kit's one atlas material, markings as a child — exactly how nam-rts draws
 // its buildings (buildingRenderer.kitView).
+import { dressPens } from "./algPenProps.js";
 import * as THREE from "three";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
@@ -239,6 +240,8 @@ export function kitView(geo) {
   // Meshes of their own beside the kit's (the sandstone cave's rock and its dark: algCave.js).
   // (A piece built many times — a mortar pit — shares its cached geometry: each copy its own clone.)
   for (const x of geo.userData.extra ?? []) m.add(x.parent ? x.clone() : x);
+  // A pen's inside: the Blender trough and hay on its spots (algPenProps — the zeriba, the farmstead's pen)
+  dressPens(m, geo.userData.pens);
   // A vehicle's wheels and tracks: their own geometry on the rolling-gear
   // material, which reads a per-INSTANCE odometer — so an InstancedMesh of one.
   const gearGeo = geo.userData.gear;
