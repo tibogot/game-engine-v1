@@ -214,13 +214,13 @@ export function sangarStoneMaterial(src) { return _detail ? stoneMaterial(src, _
  * game geometry — plain floats, the kit's scale, the OLD piece's data (`old()`: its footprint, gun… the game's
  * systems read them), the stone material, the construction material. Resolves true when pieceGeometry() has it.
  */
-function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = false, plaster = false } = {}) {
+function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = false, plaster = false, surfaces = plaster } = {}) {
   const key = `${kit}:${type}`;
   if (_pieces.has(key)) return _pieces.get(key).p;
   const rec = { geo: null, p: null };
   _pieces.set(key, rec);
   rec.p = Promise.all([loadHouses(kit), detailTextures().catch(() => null), cloth ? clothTextures().catch(() => null) : null, plaster ? plasterTextures().catch(() => null) : null,
-    plaster && !SURFACE_OFF ? surfaceTextures().catch((e) => { console.warn("[surfaces]", e); return null; }) : null]).then(([parts, T, CT, PT, ST]) => {
+    surfaces && !SURFACE_OFF ? surfaceTextures().catch((e) => { console.warn("[surfaces]", e); return null; }) : null]).then(([parts, T, CT, PT, ST]) => {
     if (!parts?.[`${type}:intact`]) return false;
     const lod = houseMesh(type, "intact", 1)?.children[0];
     const near = lod?.levels?.[0]?.object, farM = lod?.levels?.[1]?.object;
@@ -238,7 +238,7 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     _detail = T;
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
     g.userData.labMaterial = stone ? stoneMaterial(near.material, T)
-      : plaster && ST && hasSurfaces(g) ? surfaceMaterial(near.material, ST, g.attributes.color.itemSize === 3 ? "vec3" : "vec4")
+      : surfaces && ST && hasSurfaces(g) ? surfaceMaterial(near.material, ST, g.attributes.color.itemSize === 3 ? "vec3" : "vec4")
       : plaster ? plasterMaterial(near.material, PT) : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
     // THE GROUND BLEND (2026-10-24, algGroundBlend KIT_BLEND — a piece's own material, built here from the kit's): its foot
     // in the ground's colour, its hue toward the ground's
@@ -543,7 +543,7 @@ export const loadFarmstead = () => loadBlenderPiece("farmstead", "farm", () => b
 export const farmGeometry = () => pieceGeometry("farmstead", "farm");
 /** THE SAS POST (tools/blender/sasPost.py, 2026-10-25 — you: "the best looking for my AAA RTS"): the old piece's data (its
  *  footprint, cover, the flag's mount, the night lamp), the Blender model drawn, YOUR simulated sandbagged corner added. */
-export const loadSasPost = () => loadBlenderPiece("saspost", "sas", () => buildSasPost({}), null, { stone: false }).then(async (ok) => {
+export const loadSasPost = () => loadBlenderPiece("saspost", "sas", () => buildSasPost({}), null, { stone: false, surfaces: true }).then(async (ok) => {
   if (!ok) return ok;
   const g = pieceGeometry("saspost", "sas");
   if (g.userData.sasReady) return ok;
@@ -791,7 +791,7 @@ export function setPieceState(mesh, state) {
       const gg = state === "intact" ? null : stateGeometry(["mirador", "gear"], state);
       c.userData.intact ??= c.levels.map((l) => l.object.geometry);
       c.levels.forEach((l, i) => { l.object.geometry = gg ? (i === 0 ? gg.near : gg.far ?? gg.near) : c.userData.intact[i]; });
-    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags|PostBags)/.test(c.name)) bagsInState(c, state);
+    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags|PostBags|SasBags)/.test(c.name)) bagsInState(c, state);
   }
   return true;
 }

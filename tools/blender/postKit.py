@@ -67,18 +67,10 @@ def galv(rust):
 def charred(nb):
     c = nb.mix(nb.noise(3.0, 5), srgb(0x1c1814), srgb(0x3a2a1e))
     return nb.mix(nb.mr(nb.noise(9.0, 4), 0.62, 0.7), c, srgb(0x6b6258))
-def limestoneRubble(nb):
-    """The bordj's rubble footing, its render fallen off in patches — of LIMESTONE (2026-10-25: the houses' rubble, a
-    mossy slate photo, baked sharp at last read as green camouflage; the game tiles these same blocks over it,
-    algSangar SURFACE_DETAIL.stone)."""
-    s = nb.mix(0.3, nb.img("build/seaworn_stone_tiles/seaworn_stone_tiles_diff_1k.jpg", 0.45), srgb(0xc9b797))
-    r = nb.mix(0.6, nb.img("build/white_plaster_rough_01/white_plaster_rough_01_diff_1k.jpg", 0.9), srgb(0xe0d8c8))
-    c = nb.mix(nb.mr(nb.noise(3.0, 5, 0.6), 0.45, 0.55), s, r)
-    return dust(nb, nb.scale(c, nb.mr(nb.island(), 0, 1, 0.8, 1.05)), 2.0, 1.2)
 MATDEF = dict(house.MATDEF)
 MATDEF.update(milprops.MILPROP_MATS)
 MATDEF.update({
-    "rubble": (0.95, limestoneRubble),
+    "rubble": (0.95, house.limestoneRubble),
     "poSlit": (1.0, flat(srgb(0x15120e), 0.0)), "poCoping": (0.9, flat(srgb(0x8a8376), 0.6)), "poConcrete": (0.95, flat(srgb(0x8e877a), 0.4)),   # (darker: the outline the old post drew)
     "poShutter": (0.8, paintedWood(0x4e5638)), "poDoor": (0.8, paintedWood(0x5a4a32)), "poRoof": (0.7, galv(1.0)), "poTank": (0.6, milprops._steel(0x55603f, 0.3)),
     "poDrum": (0.6, props.drum_paint(0x4d5a3a, 0.35)), "poSteel": (0.5, milprops._steel(0x3a3c38, 0.35)), "poCanvas": (0.95, flat(srgb(0x6e6e4c), 0.4)),

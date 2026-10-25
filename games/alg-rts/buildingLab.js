@@ -286,6 +286,14 @@ function postInState(state) {
   for (const m of g?.userData.extra ?? []) if (/^PostBags/.test(m.name)) bagsInState(m, state);
   return g;
 }
+/** The SAS post in a state, the same way (its bags slumped in the ruin, its well on its spot). */
+function sasInState(state) {
+  const g = pieceInState(sasGeometry(), state);
+  if (!g) return null;
+  const m = kitView(g);
+  for (const c of m.children) if (/^SasBags/.test(c.name)) bagsInState(c, state);
+  return m;
+}
 
 /** The Blender motor pool in a state, as a lab piece (an empty geometry carrying it). */
 function motorPoolView(state) {
@@ -702,7 +710,7 @@ Object.assign(BUILDINGS, {
   // THE SAS POST IN BLENDER (2026-10-25, you: "the best looking for my AAA RTS … it shouldn't look cheap" — tools/blender/
   // sasPost.py): new (your simulated sandbagged corner, the game's), damaged, destroyed (the old one gone 2026-10-25; its well kept: renderedWell)
   sasPost: { label: "SAS post", gap: 30, yaw: -0.4, prepare: () => Promise.all([loadSasPost(), loadPenProps()]),
-    before: () => labPiece(kitView(sasGeometry())), middle: () => labPiece(houseMesh("sas", "damaged")), after: () => labPiece(houseMesh("sas", "ruin")),
+    before: () => labPiece(kitView(sasGeometry())), middle: () => labPiece(sasInState("damaged")), after: () => labPiece(sasInState("ruin")),
     tags: ["SAS POST · NEW", "SAS POST · DAMAGED", "SAS POST · DESTROYED"], note: "the French army's post in a village: the school and the clinic under a canal-tile roof, the veranda, the yard wall and gate, the well, the water tank, the flag's plinth, the radio mast; your simulated sandbagged corner." },
   // THE FLN'S MARKS IN BLENDER (2026-10-25, you: "very cheap … make way better" — tools/blender/flnMarks.py)
   mineMarker: { label: "Mine marker", gap: 5, yaw: Math.PI - 0.5, prepare: () => loadMineMarker(),

@@ -63,6 +63,18 @@ def rubble(nb):
     r = nb.mix(0.6, nb.img("build/white_plaster_rough_01/white_plaster_rough_01_diff_1k.jpg", 0.9), srgb(0xe0d8c8))
     c = nb.mix(nb.mr(nb.noise(3.0, 5, 0.6), 0.45, 0.55), s, r)
     return dust(nb, nb.scale(c, nb.mr(nb.island(), 0, 1, 0.7, 1.05)), 2.0, 1.2)
+def limestoneRubble(nb):
+    """The bordj's rubble footing, its render fallen off in patches — of LIMESTONE (2026-10-25: the houses' rubble, a
+    mossy slate photo, baked sharp at last read as green camouflage; the game tiles these same blocks over it,
+    algSangar SURFACE_DETAIL.stone)."""
+    s = nb.mix(0.3, nb.img("build/seaworn_stone_tiles/seaworn_stone_tiles_diff_1k.jpg", 0.45), srgb(0xc9b797))
+    r = nb.mix(0.6, nb.img("build/white_plaster_rough_01/white_plaster_rough_01_diff_1k.jpg", 0.9), srgb(0xe0d8c8))
+    c = nb.mix(nb.mr(nb.noise(3.0, 5, 0.6), 0.45, 0.55), s, r)
+    return dust(nb, nb.scale(c, nb.mr(nb.island(), 0, 1, 0.8, 1.05)), 2.0, 1.2)
+def limestone(nb):
+    """Dressed limestone blocks (the SAS post's and the bordj's stone) — the game tiles the same blocks over them."""
+    c = nb.mix(0.3, nb.img("build/seaworn_stone_tiles/seaworn_stone_tiles_diff_1k.jpg", 0.45), srgb(0xc9b797))
+    return dust(nb, nb.scale(c, nb.mr(nb.noise(1.2, 4), 0.3, 0.7, 0.85, 1.05)), 1.2)
 def stripes(a, b, cc, freq=2.6):
     def f(nb):
         st = nb.math("FRACT", nb.math("MULTIPLY", nb.gx, freq))

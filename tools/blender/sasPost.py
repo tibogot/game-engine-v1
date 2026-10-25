@@ -36,6 +36,7 @@ import house
 from house import buildKit
 from bkit import B, srgb, dust, flat, wood, paintedWood
 import props
+import drystone
 
 # ── THE LAYOUT (the old piece's) ──────────────────────────────────────────────────
 WX, WZ, WT, WH = 11.0, 8.0, 0.4, 1.7          # the yard's half-sizes, its wall's thickness and height
@@ -67,6 +68,7 @@ def sooted(nb):
 MATDEF = dict(house.MATDEF)
 MATDEF.update(props.PROP_MATS)
 MATDEF.update({
+    "stone": (0.95, house.limestone), "rubble": (0.95, house.limestoneRubble),   # (limestone, as the bordj: the houses' mossy slate read as camouflage, baked sharp)
     "sasTile": (0.85, tile), "sasConcrete": (0.95, concrete), "sasSteel": (0.55, steel), "sasCharred": (0.95, charred),
     "sasSooted": (0.95, sooted), "sasBoard": (0.85, paintedWood(0xe8e2d2)), "sasBlack": (0.9, flat(srgb(0x22262a), 0.2)),
     "sasPaintBlue": (0.8, flat(srgb(0x1f3f78), 0.0)), "sasPaintRed": (0.8, flat(srgb(0xb02020), 0.0)),
@@ -464,11 +466,12 @@ def buildSas(K, name, spec, state, seed):
         for k in range(16):
             a = R.uniform(0, 6.28)
             K.lump(f"Rub{k}", (math.cos(a) * (BW / 2 + 1.2) * R.uniform(0.8, 1.1), 0.05, BZ + math.sin(a) * (BD / 2 + 1.2) * R.uniform(0.8, 1.1)), (R.uniform(0.12, 0.32), R.uniform(0.08, 0.2), R.uniform(0.12, 0.3)), "rubble", "h", seed=seed + k, sub=1)
+    drystone.writeBuildOrder(K)   # (each face's SURFACE for the game's photo detail — algSangar surfaceMaterial; no build order: t 0)
 
 WELL = (-6.5, -4.5)   # (the well's spot — algSangar loadSasPost dresses it with the props kit's well)
-TYPES = {"sas": dict(builder=buildSas, states=("intact", "damaged", "ruin"), farRatio=0.3, atlas=2048, aoDist=1.4)}
+TYPES = {"sas": dict(builder=buildSas, states=("intact", "damaged", "ruin"), farRatio=0.3, atlas=2048, islandMargin=0.0005, aoDist=1.4)}
 
-exported = buildKit(TYPES, MATDEF, "saspost.glb", prefix="Sas", seed0=1957)
+exported = buildKit(TYPES, MATDEF, "saspost.glb", prefix="Sas", seed0=1957, colors=True)
 
 scn = bpy.context.scene
 scn.render.engine = "BLENDER_WORKBENCH"
