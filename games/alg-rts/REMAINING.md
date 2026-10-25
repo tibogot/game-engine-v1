@@ -8,14 +8,14 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 ## NEXT SESSION (written 2026-10-25, when you left)
 
 **Your look first (lab: `/games/alg-rts/lab.html` — Tab browses, N = next to judge):**
-1. The new pieces, « To judge »: **SAS post** (+ « SAS post: old vs new »), **farmstead** (+ « Farmstead: old vs new »;
+1. The new pieces, « To judge »: **SAS post** (its old one removed 2026-10-25; the old well kept: « Rendered well (parked) »), **farmstead** (+ « Farmstead: old vs new »;
    its BURNT tab = the map's burnt farm), **FLN lookout**, **mine marker**.
 2. The fixes to confirm (their old « Improve » verdicts can then go): the tents' folds (French post, forward post,
    aid station), the pits' earth (mortar pit, fortified point, MG nest), the sangar's FM on its lip.
-3. Once judged: remove the two « old vs new » entries.
+3. Once judged: remove « Farmstead: old vs new ».
 
 **Work, in the order I'd suggest:**
-4. **The motor pool**: finish it, then its **damaged / destroyed** states (D).
+4. ~~**The motor pool**: its **damaged / destroyed** states (D)~~ DONE 2026-10-25 (motorPool.py --state; the lab « Motor pool » tabs) — to judge.
 5. **The rest of the lab pass**: ~57 buildings, 15 plants, 4 rocks not judged — your verdicts feed the next redo list.
 6. **Optimisation**: trim the near triangles of the smoothed tents (×2) and the SAS post's tile roof (25k → 35k).
 7. **The helipad**: rework completely (its floating sandbags) — you said later.

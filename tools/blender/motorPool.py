@@ -45,6 +45,18 @@ QUICK = "--quick" in sys.argv          # (low bake sizes and samples: for checki
 #            sides — its 2048 atlas baked FROM the near one (selected → active), then the two GLBs: StaticFar
 #            + DoorL + DoorR (the game's), StaticNear (the lab's)
 LOW = "--far" in sys.argv
+# THE STATES (2026-10-25, your verdict: "finish what remained; its damaged / destroyed states"): `--state damaged`
+# (a shell through the roof over the middle bay, the workshop's corner knocked off) or `--state ruin` (the middle
+# truss down, the roof over two bays gone, the workshop's roof fallen in, everything burnt), each run --near then
+# --far as the intact one → motorPool_damaged.glb / motorPool_ruin.glb (StaticFar only: the game keeps the intact
+# doors when damaged; in the ruin they lie on the apron, part of the building). THE DAMAGE PASS below works on the
+# built parts by name and place, its choices hashed from the names: the near and the far get the same damage.
+STATE = sys.argv[sys.argv.index("--state") + 1] if "--state" in sys.argv else "intact"
+assert STATE in ("intact", "damaged", "ruin"), STATE
+SUF = "" if STATE == "intact" else f"_{STATE}"
+MERGE = LOW and STATE == "intact"     # (the far's sheets merged one per row — not when sheets go missing)
+SOOT = []                             # (x, y, z, radius, strength): burnt round each hit — every material (M_)
+CHAR = {"intact": 0.0, "damaged": 0.0, "ruin": 0.42}[STATE]   # (and the ruin's fire over everything)
 random.seed(1958)
 bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete()
 
@@ -195,12 +207,22 @@ MATDEF = {
     "sand": (1.0, flat(srgb(0xc9ab7c))), "bulb": (0.3, flat(srgb(0xf2ead2), 0.0)),
 }
 MATDEF.update(props.PROP_MATS)   # (the shared props' fittings and rope — props.py)
+def soot(nb, col):
+    """Burnt: black soot round each SOOT point (fading out to its radius), the ruin's CHAR over all, patchy."""
+    f = CHAR
+    for x, y, z, r, k in SOOT:
+        vm = nb.N.new("ShaderNodeVectorMath"); vm.operation = "DISTANCE"
+        nb.L.new(nb.geo.outputs["Position"], vm.inputs[0]); vm.inputs[1].default_value = B(x, y, z)
+        f = nb.math("MAXIMUM", f, nb.mr(vm.outputs["Value"], r, r * 0.3, 0, k))
+    f = nb.math("MULTIPLY", f, nb.mr(nb.noise(1.6, 5, 0.6, (1, 1, 1), (5.1, 3.3, 1.7)), 0.3, 0.62, 0.45, 1.0))
+    return nb.mix(f, col, srgb(0x1b1916))
 MAT = {}
 def M_(name):
     if name not in MAT:
         m = bpy.data.materials.new(name); m.use_nodes = True
         pb = m.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = MATDEF[name][0]
-        m.node_tree.links.new(MATDEF[name][1](NB(m)), pb.inputs["Base Color"])
+        nb = NB(m); col = MATDEF[name][1](nb)
+        m.node_tree.links.new(soot(nb, col) if SOOT or CHAR else col, pb.inputs["Base Color"])
         MAT[name] = m
     return MAT[name]
 
@@ -359,6 +381,13 @@ H_SHEET = 0.04 + 0.14 + 0.0155    # the sheets' mid-plane over the chord line
 
 # ── THE APRON ────────────────────────────────────────────────────────────────
 PIT = (-0.45, 0.45, -3.0, 2.6)    # x0, x1, z0, z1
+# (the states' hits — the damage pass below cuts and throws round the same points)
+HIT_ROOF = on_slope(-1, -1.0, 2.4, H_SHEET)          # the shell through the front slope, over the middle bay's left
+HIT_WS = gv(13.25, F + 3.7, -4.05)                   # the one that took the workshop's front-right corner off
+if STATE == "damaged":
+    SOOT += [(*HIT_ROOF, 2.3, 0.9), (-1.5, F, -2.2, 2.6, 0.65), (*HIT_WS, 1.9, 0.9), (13.6, F, -4.9, 1.6, 0.5)]
+elif STATE == "ruin":
+    SOOT += [(-4.5, YB, -0.5, 6.5, 0.85), (-3.5, F, -1.5, 6.5, 0.75), (11.8, F + 2.4, -4.2, 2.6, 0.95), (8.4, F + 3.9, 2.8, 2.4, 0.9), (11.0, F + 0.5, -0.5, 3.8, 0.85)]
 slab = box("Slab", -9.2, 14.8, F - 0.25, F, -8.2, 5.6, "concrete", "apron", 0.035)
 if slab.modifiers.get("B"): slab.modifiers.remove(slab.modifiers["B"])
 boolean(slab, cutter(PIT[0], PIT[1], F - 1.5, F + 0.2, PIT[2], PIT[3]))
@@ -431,7 +460,7 @@ while x + SW < X1 + 0.42 + 0.05:
     xs.append(x); x += COVER
 xs.append(X1 + 0.42 - SW)
 SWR = SW
-if LOW: xs, SWR = [X0 - 0.42], X1 - X0 + 0.84
+if MERGE: xs, SWR = [X0 - 0.42], X1 - X0 + 0.84
 T0 = -0.42 * LL                                       # the overhang at the eave
 ROWS = [(T0, 2.75), (T0 + 2.6, T_RIDGE - 0.06 - (T0 + 2.6))]
 for sz in (-1, 1):
@@ -473,9 +502,9 @@ for y in (F + 1.1, F + 2.6, YB - 0.2):
     member(f"GirtB{y:.2f}", (X0 - 0.1, y, Z1 + 0.12), (X1 + 0.1, y, Z1 + 0.12), P_C(0.15, 0.06, 0.005), "frame", "shed", (0, 1, 0), 0.002, off=(0, 0))
 x = X0 - 0.27; k = 0
 while x < X1 + 0.27 - 0.05:
-    w_ = min(99 if LOW else SW, X1 + 0.27 - x)
+    w_ = min(99 if MERGE else SW, X1 + 0.27 - x)
     sheet(f"WallB{k}", (x, F + 0.36, ZB + (k % 2) * 0.005), (1, 0, 0), (0, 1, 0), (0, 0, 1), w_, YB + TD + 0.12 - (F + 0.36), wall_mat(), "shed")
-    x += w_ if LOW else COVER; k += 1
+    x += w_ if MERGE else COVER; k += 1
 # the gables (and the garage bay's partition): sheets cut along the roof line
 def gable(name, xp, sgn, z0, z1, top, upstand=True, girts=True):
     xs_ = xp + sgn * (0.1 + 0.15 + 0.016)
@@ -486,10 +515,10 @@ def gable(name, xp, sgn, z0, z1, top, upstand=True, girts=True):
     z = z0; k = 0
     y0 = F + (0.36 if upstand else 0.06)
     while z < z1 - 0.05:
-        w_ = min(99 if LOW else SW, z1 - z); xk = xs_ + sgn * (k % 2) * 0.005
+        w_ = min(99 if MERGE else SW, z1 - z); xk = xs_ + sgn * (k % 2) * 0.005
         if sgn > 0: sheet(f"Wall{name}{k}", (xk, y0, z + w_), (0, 0, -1), (0, 1, 0), (sgn, 0, 0), w_, lambda w, z=z + w_: top(z - w) - y0, wall_mat(), "shed")
         else: sheet(f"Wall{name}{k}", (xk, y0, z), (0, 0, 1), (0, 1, 0), (sgn, 0, 0), w_, lambda w, z=z: top(z + w) - y0, wall_mat(), "shed")
-        z += w_ if LOW else COVER; k += 1
+        z += w_ if MERGE else COVER; k += 1
 gable_top = lambda z: min(ytc(z) + 0.02, YB + TD + 4.5 * T15) if abs(z) < 4.62 else ytc(4.62) + 0.02
 gable("L", X0, -1, -4.62, ZB, gable_top)
 gable("R", X1, 1, -4.62, ZB, gable_top)
@@ -500,9 +529,9 @@ DH = 3.9                                              # door height
 member("Header", (COLS[2] - 0.12, F + DH + 0.12, Z0 - 0.2), (COLS[3] + 0.12, F + DH + 0.12, Z0 - 0.2), P_C(0.2, 0.07, 0.007), "frame", "shed", (0, 1, 0), 0.002)
 x = COLS[2] - 0.1; k = 0
 while x < COLS[3] + 0.1 - 0.05:
-    w_ = min(99 if LOW else SW, COLS[3] + 0.1 - x)
+    w_ = min(99 if MERGE else SW, COLS[3] + 0.1 - x)
     sheet(f"Fascia{k}", (x, F + DH + 0.02, Z0 - 0.3 - (k % 2) * 0.005), (1, 0, 0), (0, 1, 0), (0, 0, -1), w_, YB + TD - 0.02 - (F + DH + 0.02), wall_mat(), "shed")
-    x += w_ if LOW else COVER; k += 1
+    x += w_ if MERGE else COVER; k += 1
 LW = (COLS[3] - COLS[2] - 0.24 - 0.04) / 2
 HINGE = {"doorL": (COLS[2] + 0.12, Z0 - 0.36), "doorR": (COLS[3] - 0.12, Z0 - 0.36)}
 for key, sx in (("doorL", 1), ("doorR", -1)):
@@ -517,9 +546,9 @@ for key, sx in (("doorL", 1), ("doorR", -1)):
         member(f"{key}{nm}", a, b, P_R(T, T), "doorPaint", key, (0, 0, 1), 0.004)
     x = lo; k = 0
     while x < hi - 0.05:
-        w_ = min(99 if LOW else 0.84, hi - x)
+        w_ = min(99 if MERGE else 0.84, hi - x)
         sheet(f"{key}Sheet{k}", (x, F + 0.08, hz - 0.045 - (k % 2) * 0.005), (1, 0, 0), (0, 1, 0), (0, 0, -1), w_, DH - 0.12, "doorPaint", key)
-        x += w_ if LOW else 0.76; k += 1
+        x += w_ if MERGE else 0.76; k += 1
     for y in (F + 0.5, F + DH - 0.5):                   # the hinges and the handle
         box(f"{key}Hinge{y:.1f}", hx - 0.05, hx + 0.05, y - 0.06, y + 0.06, hz - 0.1, hz - 0.02, "darkSteel", key, 0.008)
         box(f"{key}Strap{y:.1f}", min(hx, hx + sx * 0.55), max(hx, hx + sx * 0.55), y - 0.025, y + 0.025, hz - 0.085, hz - 0.07, "darkSteel", key, 0.003)
@@ -705,6 +734,212 @@ box("SandIn", FP[0] - 0.46, FP[0] + 0.46, F + 0.3, F + 0.4, FP[1] - 0.66, FP[1] 
 box("Shovel", FP[0] + 0.15, FP[0] + 0.19, F + 0.38, F + 1.25, FP[1] - 0.45, FP[1] - 0.42, "woodDark", "props", 0.004).rotation_euler.x = 0.25
 # (the sandbags round the drums' corner: the game's cloth-simulated bags, added by algMotorPool.js)
 
+# ── THE DAMAGE PASS (--state damaged | ruin) ─────────────────────────────────
+# On the built parts, by name and place (game coordinates); every choice hashed from a part's name, so the near and
+# the far (built apart) break alike. A far sheet's flat underside ("…Under") follows its sheet.
+BM = Matrix(((1, 0, 0, 0), (0, 0, -1, 0), (0, 1, 0, 0), (0, 0, 0, 1)))   # game → Blender, as B()
+def hrand(name, salt=""):
+    return random.Random(f"{name}|{salt}|{STATE}").random()
+def parts(*prefixes):
+    return [o for g in GROUPS.values() for o in g if o.name.startswith(prefixes) and not o.name.endswith("Under")]
+def kin(o):
+    """A part and its far underside."""
+    u = bpy.data.objects.get(o.name + "Under")
+    return [o, u] if u else [o]
+def corners(o):
+    bpy.context.view_layer.update()
+    return [o.matrix_world @ Vector(c) for c in o.bound_box]
+def gbox(objs):
+    """The game-space box of some parts: (min, max) Vectors."""
+    ps = [gv(p.x, p.z, -p.y) for o in objs for p in corners(o)]
+    return gv(*(min(p[i] for p in ps) for i in range(3))), gv(*(max(p[i] for p in ps) for i in range(3)))
+def gcentre(objs):
+    a, b = gbox(objs); return (a + b) / 2
+def drop(objs):
+    for o in objs:
+        for g in GROUPS.values():
+            if o in g: g.remove(o)
+        bpy.data.objects.remove(o, do_unlink=True)
+def turn(objs, p, axis, ang, move=(0, 0, 0)):
+    """Rotate parts `ang` about the game-space line through p along axis, then move them."""
+    p = gv(*p)
+    M = Matrix.Translation(p + gv(*move)) @ Matrix.Rotation(ang, 4, gv(*axis).normalized()) @ Matrix.Translation(-p)
+    W = BM @ M @ BM.inverted()
+    for o in objs: o.matrix_world = W @ o.matrix_world
+def droop(objs, p, axis, ang, prefer=(0, -1, 0)):
+    """Swing parts about a hinge line, whichever way takes their centre further along `prefer` (down, by default)."""
+    c0 = gcentre(objs); turn(objs, p, axis, ang); d1 = (gcentre(objs) - c0).dot(gv(*prefer))
+    turn(objs, p, axis, -2 * ang); d2 = (gcentre(objs) - c0).dot(gv(*prefer))
+    if d1 > d2: turn(objs, p, axis, 2 * ang)
+def rest(objs, floor=F):
+    """Parts dropped onto the floor: their lowest point on it."""
+    a, _ = gbox(objs); turn(objs, (0, 0, 0), (0, 1, 0), 0, (0, floor + 0.004 - a.y, 0))
+def regroup(objs, group):
+    for o in objs:
+        for g in GROUPS.values():
+            if o in g: g.remove(o)
+        GROUPS[group].append(o)
+def lump(name, c, size, mat, group, flat=0.6):
+    """A chunk of broken masonry / concrete: a convex hull of points on a squashed, jittered ellipsoid, on its base."""
+    R = random.Random(name); bm = bmesh.new(); sx, sz = size * R.uniform(0.7, 1.3), size * R.uniform(0.7, 1.3)
+    vs = [bm.verts.new(B(c[0] + sx * math.cos(t) * math.sin(u) * R.uniform(0.75, 1.0), c[1] + size * flat * (1 + math.cos(u)) * 0.5 * R.uniform(0.8, 1.0),
+                         c[2] + sz * math.sin(t) * math.sin(u) * R.uniform(0.75, 1.0)))
+          for t, u in ((R.uniform(0, 2 * math.pi), R.uniform(0.3, math.pi)) for _ in range(9 if LOW else 14))]
+    bmesh.ops.convex_hull(bm, input=vs)
+    return obj(name, bm, mat, group)
+def blob(c, r, seed):
+    """A breach cutter: a jagged convex blob round c."""
+    R = random.Random(seed); bm = bmesh.new()
+    for _ in range(18):
+        t, u = R.uniform(0, 2 * math.pi), math.acos(R.uniform(-1, 1)); k = r * R.uniform(0.7, 1.15)
+        bm.verts.new(B(c[0] + k * math.cos(t) * math.sin(u), c[1] + k * math.cos(u), c[2] + k * math.sin(t) * math.sin(u)))
+    bmesh.ops.convex_hull(bm, input=list(bm.verts))
+    m = bpy.data.meshes.new("cut"); bm.to_mesh(m); bm.free()
+    o = bpy.data.objects.new("cut", m); bpy.context.scene.collection.objects.link(o); CUTTERS.append(o)
+    return o
+def rubble(nm, c, spread, n, mats=("render", "concrete"), size=(0.12, 0.32), group="apron"):
+    R = random.Random(nm)
+    for k in range(n):
+        a, d = R.uniform(0, 2 * math.pi), spread * math.sqrt(R.random())
+        lump(f"{nm}{k}", (c[0] + d * math.cos(a), c[1], c[2] + d * math.sin(a)), R.uniform(*size), mats[k % len(mats)], group)
+def debris_sheet(name, c, yaw, tilt, w, l, mat):
+    """A corrugated sheet thrown down: its low end on the floor at c, `yaw` its run, lifted `tilt` along it."""
+    aw = gv(math.cos(yaw), 0, math.sin(yaw)); al = gv(-math.sin(yaw) * math.cos(tilt), math.sin(tilt), math.cos(yaw) * math.cos(tilt))
+    an = aw.cross(al).normalized()
+    if an.y < 0: an = -an
+    o = gv(*c) - aw * (w / 2) + an * 0.02
+    sheet(name, tuple(o), tuple(aw), tuple(al), tuple(an), w, l, mat, "props")
+def roof_hinges(o, sz):
+    """A roof sheet's hinge lines: its eave end, its ridge end (axis x), its two side edges (axis up the slope)."""
+    a, b = gbox([o]); c = (a + b) / 2; l = slope(sz)[1]
+    return {"eave": ((c.x, a.y, a.z if sz < 0 else b.z), (1, 0, 0)), "ridge": ((c.x, b.y, b.z if sz < 0 else a.z), (1, 0, 0)),
+            "xmin": ((a.x, c.y, c.z), tuple(l)), "xmax": ((b.x, c.y, c.z), tuple(l))}
+def roof_sheets(sz):
+    return [o for o in parts(f"Roof{sz}") if o.type == "MESH"]
+def purlin(name, sz, t, xa, xb):
+    n = slope(sz)[2]
+    a = on_slope(sz, xa, t, H_PURLIN + 0.07); b = on_slope(sz, xb, t, H_PURLIN + 0.07)
+    member(name, a, b, P_C(0.14, 0.06, 0.006), "frame", "shed", tuple(n), 0.002, off=(-0.03 * sz, 0))
+
+if STATE == "damaged":
+    # THE ROOF: the shell's hole, the sheets round it torn and hanging into the bay, the purlins under it snapped
+    for o in roof_sheets(-1):
+        c = gcentre([o]); d = (c - HIT_ROOF).length
+        if d < 1.35: drop(kin(o)); continue
+        if d < 2.3:
+            h = roof_hinges(o, -1); dx = c.x - HIT_ROOF.x
+            side = "xmin" if dx > 0 else "xmax"
+            key = side if abs(dx) > 0.7 else ("eave" if HIT_ROOF.y > c.y else "ridge")
+            droop(kin(o), *h[key], (0.95 - (d - 1.35)) * 0.75 + 0.15 * hrand(o.name))
+    for o in parts("Purlin-1"):
+        k = int(o.name[len("Purlin-1"):]); t = PURL_T[k]
+        if abs(on_slope(-1, 0, t, 0).z - HIT_ROOF.z) > 1.4: continue
+        drop([o])
+        purlin(f"PurlinA{k}", -1, t, X0 - 0.42, HIT_ROOF.x - 1.0); purlin(f"PurlinB{k}", -1, t, HIT_ROOF.x + 1.0, X1 + 0.42)
+        for s, nm in ((-1, "A"), (1, "B")):          # the torn ends bent down into the hole
+            e = on_slope(-1, HIT_ROOF.x + s * 1.0, t, H_PURLIN + 0.07)
+            member(f"PurlinBent{nm}{k}", tuple(e), tuple(e + gv(-s * 0.45, -0.38, 0.05)), P_C(0.14, 0.06, 0.006), "frame", "shed", (0, 0, 1), 0.002)
+    # what came down: sheets on the slab (clear of the pit), a length of purlin, the hit's mark
+    debris_sheet("FallenA", (-1.9, F, -2.6), 0.4, 0.06, 0.9, 2.2, "roofOld")
+    debris_sheet("FallenB", (-1.3, F, -1.1), -0.9, 0.32, 0.9, 1.7, "roofRust")
+    debris_sheet("FallenC", (-2.6, F, -1.6), 1.9, 0.12, 0.9, 1.3, "roofOld")
+    member("FallenPurlin", (-2.3, F + 0.07, -0.4), (-0.8, F + 0.45, -1.1), P_C(0.14, 0.06, 0.006), "frame", "props", (0, 1, 0), 0.002)
+    # THE WORKSHOP: its front-right corner knocked off (the wall, the roof slab's corner, the coping), the rubble below
+    cbs = [blob(HIT_WS, 0.95, 31), blob(HIT_WS + gv(-0.55, -0.55, 0), 0.6, 32), blob(HIT_WS + gv(0, -0.25, 0.75), 0.7, 33)]
+    for o in [shell, *parts("WsRoof", "Coping")]:
+        for cb in cbs: boolean(o, cb)
+    rubble("WsRubble", (13.55, F, -4.75), 1.0, 12, size=(0.1, 0.3))
+    rubble("WsRubbleIn", (12.8, F + 0.06, -3.4), 0.6, 5, size=(0.1, 0.22), group="workshop")
+    drop(parts("WinGlass"))                          # (the window blown in)
+    # the drums knocked about: one over on its side
+    d3 = parts("Drum3"); turn(d3, (-8.32 + 0.3, F, -1.84), (0, 0, 1), -math.pi / 2); rest(d3); turn(d3, gcentre(d3), (0, 1, 0), 0.5)
+
+if STATE == "ruin":
+    XKEEP = 2.2                                      # (the garage bay's roof, past its truss, still stands)
+    # THE MIDDLE TRUSS DOWN: its front column snapped, the truss swung down off its back column onto the stump and the slab
+    xm = COLS[1]; tag = f"{xm}"
+    truss = parts(*(p + tag for p in ("Bot", "Top", "Vert", "Diag", "King", "Gusset")))
+    drop(parts(f"Knee{tag}"))
+    droop(truss, (xm, YB + 0.1, Z1), (1, 0, 0), 0.4)
+    turn(truss, (xm, YB, Z1), (0, 1, 0), 0.06)
+    drop(parts(f"Col{tag}{Z0}"))
+    member("ColStump", (xm, F + 0.025, Z0), (xm + 0.08, F + 1.25, Z0 - 0.05), P_I(0.24, 0.2, 0.014, 0.009), "frame", "shed", (0, 0, 1), 0.004)
+    member("ColDown", (xm + 0.3, F + 0.13, Z0 - 0.35), (xm + 1.4, 0.12, Z0 - 4.0), P_I(0.24, 0.2, 0.014, 0.009), "frame", "props", (0, 1, 0), 0.004)
+    # THE ROOF: gone over the two left bays — three sheets left hanging off the back eave, the rest down; the garage
+    # bay's still on, holed, a few peeled
+    for sz in (-1, 1):
+        for o in roof_sheets(sz):
+            c = gcentre([o]); r = hrand(o.name); h = roof_hinges(o, sz)
+            if c.x < (XKEEP if sz > 0 else 5.0):     # (the front: only the garage bay's outer half left)
+                if sz > 0 and c.x < -3.0 and c.y < YB + 1.0 and r < 0.4: droop(kin(o), *h["eave"], 1.15 + 0.3 * r)
+                else: drop(kin(o))
+            elif r < 0.12: drop(kin(o))
+            elif r < 0.3: droop(kin(o), *h["ridge" if r < 0.2 else "xmin"], 0.3 + r)
+    drop(parts("Ridge", "Purlin", "Eave-4.5", "Gutter-1", "Down-1", "Shoe-1", f"Verge-1{X0 - 0.43}", f"VergeTop-1{X0 - 0.43}",
+               f"Verge1{X0 - 0.43}", f"VergeTop1{X0 - 0.43}"))
+    for sz in (-1, 1):
+        E, l, n = slope(sz); apex = on_slope(sz, 0, T_RIDGE, H_SHEET + 0.04)
+        sheet(f"Ridge{sz}", (XKEEP, apex.y, apex.z), (1, 0, 0), tuple(-l), tuple(n), X1 + 0.44 - XKEEP, 0.34, "roofOld", "shed", depth=0, thick=0.003)
+        for k, t in enumerate(PURL_T): purlin(f"Purlin{sz}{k}", sz, t, COLS[2] - 0.3, X1 + 0.42)
+    member("EaveF", (COLS[2] - 0.2, YB - 0.16, Z0), (X1 + 0.1, YB - 0.16, Z0), P_I(0.22, 0.12, 0.012, 0.008), "frame", "shed", (0, 1, 0), 0.003)
+    member("EaveDown", (X0 + 0.3, F + 0.13, Z0 - 0.6), (xm - 0.4, F + 0.9, Z0 + 0.15), P_I(0.22, 0.12, 0.012, 0.008), "frame", "props", (0, 1, 0), 0.003)
+    for k, (x, z, yaw, tilt, mat) in enumerate(((-5.6, -2.9, 0.3, 0.05, "roofOld"), (-4.0, -1.0, 1.4, 0.2, "roofRust"), (-6.4, 1.6, -0.6, 0.04, "roofOld"),
+                                               (-1.6, -2.2, 0.9, 0.1, "roofNew"), (-1.4, 1.2, -1.2, 0.28, "roofOld"), (-3.3, 2.5, 0.1, 0.06, "roofRust"),
+                                               (1.4, -1.6, 2.2, 0.08, "roofOld"), (-7.0, -5.6, 0.7, 0.03, "roofOld"), (-2.6, -6.4, -0.3, 0.05, "roofRust"))):
+        debris_sheet(f"Fallen{k}", (x, F, z), yaw, tilt, 0.9, 2.0 + 0.5 * hrand(f"Fallen{k}"), mat)
+    for k, (a, b) in enumerate((((-6.8, F + 0.07, 0.2), (-2.9, F + 0.5, -0.9)), ((-1.9, F + 0.07, 2.9), (1.6, F + 0.07, 2.3)), ((-5.2, F + 0.07, -4.0), (-4.4, F + 0.35, -1.6)))):
+        member(f"FallenPurlin{k}", a, b, P_C(0.14, 0.06, 0.006), "frame", "props", (0, 1, 0), 0.002)
+    # THE WALLS: the back wall and the left gable stripped — sheets torn off, others hanging out off their girts
+    for o in parts("WallB", "WallL"):
+        c = gcentre([o]); r = hrand(o.name); left = o.name.startswith("WallL")
+        if not left and c.x > XKEEP: continue
+        if r < 0.5: drop(kin(o)); continue
+        a, b = gbox([o])
+        if r < 0.78: continue                         # (most still on their girts)
+        lean = 0.07 + 0.6 * (r - 0.78)
+        if left: droop(kin(o), (b.x, a.y, c.z), (0, 0, 1), lean, (-1, 0, 0))
+        else: droop(kin(o), (c.x, a.y, a.z), (1, 0, 0), lean, (0, 0, 1))
+    drop(parts("NoSmoke"))
+    # the sign fell from the eave onto the apron, face up
+    sign = parts("SignBoard", "SignFrame", "SignText")
+    turn(sign, (0, YB - 0.67, Z0 - 0.13), (1, 0, 0), -(math.pi / 2 - 0.22), (0.4, 0, -0.9)); rest(sign); turn(sign, gcentre(sign), (0, 1, 0), 0.35)
+    # THE GARAGE DOORS: the right one torn off flat on the apron, the left hanging off its top hinge — both now the building's
+    dl, dr = GROUPS["doorL"][:], GROUPS["doorR"][:]
+    hx, hz = HINGE["doorR"]
+    turn(dr, (hx, F, hz), (1, 0, 0), -(math.pi / 2 - 0.06)); turn(dr, (hx, F, hz), (0, 1, 0), 0.32, (-0.5, 0, -0.6)); rest(dr)
+    hx, hz = HINGE["doorL"]
+    turn(dl, (hx, F, hz), (0, 1, 0), 1.0)
+    droop(dl, (hx, F + DH - 0.5, hz), (math.sin(1.0), 0, math.cos(1.0)), 0.16)
+    a, _ = gbox(dl)
+    if a.y < F: turn(dl, (0, 0, 0), (0, 1, 0), 0, (0, F + 0.004 - a.y, 0))
+    regroup(dl + dr, "props")
+    # THE WORKSHOP: its front blown in round the window, the back-left corner down, the roof slab broken in two and
+    # fallen inside; a door leaf flat on the step, the shutters, the stove pipe and the lamp gone
+    cuts = [blob((12.2, F + 2.0, -4.3), 1.35, 41), blob((12.9, F + 3.3, -4.3), 1.15, 43), blob((11.4, F + 3.75, -4.3), 0.8, 44),   # (the front, open to the parapet)
+            blob((8.3, F + 3.9, 3.0), 1.25, 42), blob((8.2, F + 2.9, 2.2), 0.75, 45)]                                            # (the back-left corner)
+    for o in [shell, *parts("Coping")]:
+        for cb in cuts: boolean(o, cb)
+    drop(parts("WsRoof", "Win", "Sill", "Shutter", "ShutBat", "Stove", "LampArm", "LampShade", "LampBulb"))
+    ra = box("WsRoofA", WX0 + WT - 0.04, 11.3, F + 3.4, F + 3.62, WZ0 + WT - 0.04, WZ1 - WT + 0.04, "render", "workshop", 0)
+    turn([ra], (WX0 + WT, F + 3.62, 0), (0, 0, 1), -0.52)
+    rb = box("WsRoofB", 11.0, WX1 - WT + 0.04, F + 3.4, F + 3.62, WZ0 + WT - 0.04, WZ1 - WT + 0.04, "render", "workshop", 0)
+    turn([rb], (WX1 - WT, F + 3.62, 0), (0, 0, 1), 0.78)
+    for o in (ra, rb):
+        for cb in cuts: boolean(o, cb)
+    rubble("WsRubbleF", (12.3, F, -4.95), 1.3, 16, size=(0.12, 0.34))
+    rubble("WsRubbleB", (8.0, F, 3.4), 1.1, 12, size=(0.12, 0.32))
+    rubble("WsRubbleIn", (11.0, F + 0.06, -0.3), 1.7, 14, size=(0.14, 0.34), group="workshop")
+    leaf = parts("DoorPlank0", "DoorLedge0", "DoorRing0")
+    turn(leaf, (DOOR[0], F, WZ0 + 0.16), (1, 0, 0), -(math.pi / 2 + 0.06)); rest(leaf)   # (its hinge end up on the step)
+    rod("StoveDown", (12.9, F + 0.09, -5.6), (14.0, F + 0.09, -6.7), 0.09, "darkSteel", "props", 14)
+    # THE PROPS: the gantry over on its face across the bay, the engine off its stand, drums thrown down
+    gantry = parts("GLeg", "GTie", "GCaster", "GBeam", "Trolley", "HoistBlock", "Chain", "Hook", "Sling")
+    turn(gantry, (0, F, GZ - 0.85), (1, 0, 0), -(math.pi / 2 - 0.1)); rest(gantry); turn(gantry, gcentre(gantry), (0, 1, 0), 0.18)
+    eng = parts("Eng")
+    turn(eng, (-4.55, F + 0.62, GZ), (0, 0, 1), -1.45, (0.35, 0, 0.1)); rest(eng)
+    for k, ang in ((1, 0.4), (3, -1.1), (4, 2.0)):
+        d = parts(f"Drum{k}"); turn(d, (DRUMS[k][0] + 0.3, F, DRUMS[k][1]), (0, 0, 1), -math.pi / 2); rest(d); turn(d, gcentre(d), (0, 1, 0), ang)
+
 # ── Join: the building into ONE object (one draw), the doors their own (they swing) ─
 def join(name, objs):
     bpy.ops.object.select_all(action="DESELECT")
@@ -747,7 +982,8 @@ if os.environ.get("BKIT_TIME"):   # (timing the z-fight check alone: join, repor
     import time; _t = time.time(); join("T", [o for k in ("shed", "workshop", "apron", "props") for o in GROUPS[k]]); print("JOIN", round(time.time() - _t, 1), "s"); sys.exit(0)
 OBJS = {"Static": join("StaticFar" if LOW else "Static", [o for k in ("shed", "workshop", "apron", "props") for o in GROUPS[k]])}
 if not LOW:
-    OBJS["DoorL"] = join("DoorL", GROUPS["doorL"]); OBJS["DoorR"] = join("DoorR", GROUPS["doorR"])
+    for k, gk in (("DoorL", "doorL"), ("DoorR", "doorR")):
+        if GROUPS[gk]: OBJS[k] = join(k, GROUPS[gk])   # (the ruin's doors lie on the apron: the building's)
 for c in CUTTERS: bpy.data.objects.remove(c, do_unlink=True)
 def tris(o): return sum(len(p.vertices) - 2 for p in o.data.polygons)
 print("TRIS", {o.name: tris(o) for o in OBJS.values()}, "TOTAL", sum(tris(o) for o in OBJS.values()))
@@ -761,7 +997,7 @@ scn = bpy.context.scene
 scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"
 scn.render.bake.margin = 8
 scn.world.light_settings.distance = 2.2
-NEAR_BLEND = os.path.join(REFS, "motorPool_near.blend")
+NEAR_BLEND = os.path.join(REFS, f"motorPool_near{SUF}.blend")
 def unwrap(o, margin):
     bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
     bpy.ops.object.mode_set(mode="EDIT"); bpy.ops.mesh.select_all(action="SELECT")
@@ -777,9 +1013,9 @@ def colour_pass():
     scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
 def finish(o, px, size, name, rough):
     """The baked pixels → a PNG beside the refs and ONE plain material on the object."""
-    out_img = bpy.data.images.new(f"motorPool_{name}", size, size, alpha=False)
+    out_img = bpy.data.images.new(f"motorPool_{name}{SUF}", size, size, alpha=False)
     out_img.pixels = px.ravel().tolist()
-    out_img.filepath_raw = os.path.join(REFS, f"motorPool_{name}.png"); out_img.file_format = "PNG"; out_img.save()
+    out_img.filepath_raw = os.path.join(REFS, f"motorPool_{name}{SUF}.png"); out_img.file_format = "PNG"; out_img.save()
     m = bpy.data.materials.new(f"MotorPool_{name}"); m.use_nodes = True
     tn = m.node_tree.nodes.new("ShaderNodeTexImage"); tn.image = out_img
     pb = m.node_tree.nodes["Principled BSDF"]; pb.inputs["Roughness"].default_value = rough
@@ -801,6 +1037,7 @@ if not LOW:
         finish(o, c, S_, "Near" if key == "Static" else key, 0.85 if key == "Static" else 0.7)
     # the doors' origin on their hinges (a game swings them open, outward)
     for key, gk in (("DoorL", "doorL"), ("DoorR", "doorR")):
+        if key not in OBJS: continue
         o = OBJS[key]; hx, hz = HINGE[gk]
         scn.cursor.location = B(hx, F, hz)
         bpy.ops.object.select_all(action="DESELECT"); o.select_set(True); bpy.context.view_layer.objects.active = o
@@ -848,7 +1085,8 @@ finish(far, np.array(img.pixels[:]).reshape(-1, 4), S_, "Far", 0.85)
 # TWO FILES (2026-10-19): the game draws the far level only (the near cost 2 ms at the closest zoom), so it
 # never downloads the near's 4096 atlas — motorPool.glb = StaticFar + the doors, motorPoolNear.glb = StaticNear
 # (the buildings lab's close look)
-for fn, names in (("motorPool", ("StaticFar", "DoorL", "DoorR")), ("motorPoolNear", ("StaticNear",))):
+OUT = (("motorPool", ("StaticFar", "DoorL", "DoorR")), ("motorPoolNear", ("StaticNear",))) if STATE == "intact" else ((f"motorPool{SUF}", ("StaticFar",)),)
+for fn, names in OUT:   # (a state: its far building only — the game keeps the intact doors, or the ruin has none)
     bpy.ops.object.select_all(action="DESELECT")
     for n in names: bpy.data.objects[n].select_set(True)
     kw = dict(filepath=os.path.join(out, f"{fn}.glb"), use_selection=True, export_yup=True, export_materials="EXPORT", export_image_format="JPEG")
@@ -863,12 +1101,12 @@ scn.render.resolution_x, scn.render.resolution_y = 1400, 850
 cd = bpy.data.cameras.new("C"); cam = bpy.data.objects.new("C", cd); scn.collection.objects.link(cam); scn.camera = cam
 def shot(name, frm, tgt, lens=35):
     cd.lens = lens; cam.location = B(*frm); cam.rotation_euler = (B(*tgt) - cam.location).to_track_quat("-Z", "Y").to_euler()
-    scn.render.filepath = os.path.join(REFS, f"blender_{name}.png"); bpy.ops.render.render(write_still=True)
+    scn.render.filepath = os.path.join(REFS, f"blender_{name}{SUF}.png"); bpy.ops.render.render(write_still=True)
 far.hide_render = True
 shot("front34", (-14, 9, -20), (2, 2, 0))
 shot("inside", (-3, 2.2, -9), (-4.5, 1.6, 2))
 far.hide_render = False; near.hide_render = True
 shot("far_front34", (-14, 9, -20), (2, 2, 0))
 shot("far_rts", (-20, 30, -30), (2.5, 0, 0), 45)
-bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "motorPool.blend"))
+bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, f"motorPool{SUF}.blend"))
 print("DONE")

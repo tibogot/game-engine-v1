@@ -1722,6 +1722,25 @@ export function buildSearchlightTower({ seed = 37 } = {}) {
   return geo;
 }
 
+/** The SAS post's whitewashed well: the round rendered curb, its lid, two posts, the beam, the rope and bucket. */
+function wellParts(wx, wz) {
+  const well = new THREE.LatheGeometry([[0.72, -0.05], [0.72, 0.8], [0.56, 0.8], [0.56, 0.45]].map(([r, y]) => new THREE.Vector2(r, y)), 14);
+  return [
+    { geo: well, pos: [wx, 0, wz], mat: MAT.white, tone: 0.6 },
+    { geo: new THREE.CylinderGeometry(0.57, 0.57, 0.06, 14), pos: [wx, 0.47, wz], mat: MAT.steel, tone: 0 },
+    ...[-1, 1].map((sx) => wirePart([wx + sx * 0.66, 0.78, wz], [wx + sx * 0.6, 2.0, wz], 0.05, { mat: MAT.timber, tone: 0.3 })),
+    wirePart([wx - 0.7, 1.95, wz], [wx + 0.7, 1.95, wz], 0.045, { mat: MAT.timber, tone: 0.28 }),
+    wirePart([wx, 1.93, wz], [wx, 1.3, wz], 0.006, { tone: 0.3 }),
+    { geo: new THREE.CylinderGeometry(0.13, 0.1, 0.22, 8), pos: [wx, 1.2, wz], mat: MAT.metal, tone: 0.3 },
+  ];
+}
+
+/** THE RENDERED WELL on its own (2026-10-25, you: "the well on the old sas post seems nice too … keep the old one also in
+ *  our small assets maybe we will use it later") — the old SAS post's, kept when that post went. */
+export function buildRenderedWell() {
+  return finish(wellParts(0, 0), { hx: 0.9, hz: 0.9, height: 2.1 });
+}
+
 /**
  * SAS POST — a Section Administrative Spécialisée: the French army's
  * civil-military post IN a village — a school, a free clinic, the officer
@@ -1778,14 +1797,7 @@ export function buildSasPost({ seed = 41 } = {}) {
   }
   // The yard: the well, the water tank on its stand, the flag's plinth,
   // a sandbagged corner, benches.
-  const wx = -6.5, wz = -4.5;
-  const well = new THREE.LatheGeometry([[0.72, -0.05], [0.72, 0.8], [0.56, 0.8], [0.56, 0.45]].map(([r, y]) => new THREE.Vector2(r, y)), 14);
-  parts.push({ geo: well, pos: [wx, 0, wz], mat: MAT.white, tone: 0.6 });
-  parts.push({ geo: new THREE.CylinderGeometry(0.57, 0.57, 0.06, 14), pos: [wx, 0.47, wz], mat: MAT.steel, tone: 0 });
-  for (const sx of [-1, 1]) parts.push(wirePart([wx + sx * 0.66, 0.78, wz], [wx + sx * 0.6, 2.0, wz], 0.05, { mat: MAT.timber, tone: 0.3 }));
-  parts.push(wirePart([wx - 0.7, 1.95, wz], [wx + 0.7, 1.95, wz], 0.045, { mat: MAT.timber, tone: 0.28 }));
-  parts.push(wirePart([wx, 1.93, wz], [wx, 1.3, wz], 0.006, { tone: 0.3 }));
-  parts.push({ geo: new THREE.CylinderGeometry(0.13, 0.1, 0.22, 8), pos: [wx, 1.2, wz], mat: MAT.metal, tone: 0.3 });
+  parts.push(...wellParts(-6.5, -4.5));
   const tx = 8.3, tz = 5.3, tH = 4.1;
   for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) parts.push(wirePart([tx + sx * 0.85, 0, tz + sz * 0.85], [tx + sx * 0.7, tH, tz + sz * 0.7], 0.05, { tone: 0.3 }));
   parts.push({ geo: buildBox(1.9, 0.1, 1.9), pos: [tx, tH + 0.03, tz], mat: MAT.steel, tone: 0.3 });

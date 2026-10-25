@@ -72,8 +72,45 @@ export function loadMotorPool(file = "motorPool", { near: withNear = false } = {
     });
     // (THE GROUND BLEND — algGroundBlend: the building and its doors, before anything draws them)
     whenGroundBlend((app) => { for (const m of [near, far, ...doors, ...doorsFar]) blendMesh(app, m, KIT_BLEND.motorPool); });
-    return (_parts = { near, far, doors, doorsFar, bags, bagsFar });
+    _parts = { near, far, doors, doorsFar, bags, bagsFar };
+    loadStates(load);   // (the damaged and ruin models after it, not holding the boot)
+    return _parts;
   })());
+}
+
+// THE STATES (2026-10-25, your verdict: "finish what remained; its damaged / destroyed states"): motorPool_damaged.glb
+// (the shell through the roof, the workshop's corner off) and motorPool_ruin.glb (the middle truss down, two bays'
+// roof gone, the workshop fallen in, burnt — its doors on the apron, its own) — the far level, built and baked as the
+// intact one (tools/blender/motorPool.py --state). Fetched after the intact one; a state not there yet: no swap.
+const _states = {};
+let _statesP = null;
+/** Resolves once the states have loaded (or failed): the lab waits for them. */
+export const motorPoolStatesReady = () => (_p ? _p.then(() => _statesP) : Promise.resolve());
+function loadStates(load) {
+  _statesP = Promise.all(["damaged", "ruin"].map((st) =>
+    load(`motorPool_${st}`).then((g) => {
+      const m = g?.scene.getObjectByName("StaticFar");
+      if (!m?.isMesh) return;
+      m.castShadow = m.receiveShadow = true;
+      if (m.material) { m.material.side = THREE.FrontSide; if (m.material.map) m.material.map.anisotropy = 8; }
+      whenGroundBlend((app) => blendMesh(app, m, KIT_BLEND.motorPool));
+      _states[st] = m;
+    })));
+}
+
+/** A motor pool (motorPoolMesh's group) shown in a state: "intact" | "damaged" | "ruin" — its building (both levels)
+ *  the state's model, its doors gone in the ruin. False when that state's model is not loaded. */
+export function setMotorPoolState(g, state) {
+  const s = state === "intact" ? null : _states[state];
+  if (state !== "intact" && !s) return false;
+  g.traverse((o) => {
+    if (o.name === "StaticFar" || o.name === "StaticNear") {
+      o.userData.intact ??= { geometry: o.geometry, material: o.material };
+      o.geometry = s ? s.geometry : o.userData.intact.geometry;
+      o.material = s ? s.material : o.userData.intact.material;
+    } else if (o.name === "DoorL" || o.name === "DoorR") o.visible = state !== "ruin";
+  });
+  return true;
 }
 
 /** A geometry with every attribute as plain float32 (a quantized one decoded). */
@@ -154,5 +191,11 @@ export function attachMotorPool(mesh) {
     }
   };
   mesh.userData.syncDoors = sync;
+  // (its damage: algSangar setPieceState hands the swap here — algDamage below half health, algStructures' wreck)
+  mesh.userData.setState = (state) => {
+    if (!setMotorPoolState(g, state)) return false;
+    mesh.userData.pieceState = state;
+    return true;
+  };
   return true;
 }

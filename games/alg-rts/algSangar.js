@@ -682,6 +682,7 @@ function stateGeometry(kitType, state) {
   return rec;
 }
 export function setPieceState(mesh, state) {
+  if (mesh?.userData?.setState) return mesh.userData.setState(state);   // (a piece with its own: the motor pool, algMotorPool)
   const L = mesh?.userData?.lod;
   const base = mesh.userData.intactGeo ?? L?.near ?? mesh.geometry;
   const ud = base?.userData;

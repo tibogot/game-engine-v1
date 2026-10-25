@@ -66,6 +66,16 @@
   "hash": "fd396d52c6f03c3866bcb48711a04d5a268aa8b3",
   "pairs": 50
  },
+ "motorPool_damaged.glb": {
+  "hash": "d256d5f9d24bdc8b201d139c01e91ad22b7265d3",
+  "pairs": 20,
+  "why": "the intact far's own 20 leftovers (motorPool.glb's bar): the same build, its damage adds none"
+ },
+ "motorPool_ruin.glb": {
+  "hash": "d766c01d7d627e87e214b6bccf5d8133badfe8c7",
+  "pairs": 20,
+  "why": "the intact far's own 20 leftovers (motorPool.glb's bar): the same build, its damage adds none"
+ },
  "mzab.glb": {
   "hash": "804ecc428abf8a3039635048b2e6fb3abaa4146a",
   "pairs": 58

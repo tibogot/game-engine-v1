@@ -154,8 +154,8 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
   // THE FARMSTEAD in Blender (tools/blender/farmstead.py, 2026-10-25): the map's farms (their yard props dressed on their
   // spots — algPenProps) and its burnt farm, the model's burnt state
   // THE SAS POST in Blender (tools/blender/sasPost.py, 2026-10-25): swapped where it stands, the old piece's painted
-  // boards (its stencil child) removed — the model has its own; the flag stays on its mount (?sas=old: the old one)
-  if (!(typeof location !== "undefined" && new URLSearchParams(location.search).get("sas") === "old")) loadSasPost().then((ok) => {
+  // boards (its stencil child) removed — the model has its own; the flag stays on its mount
+  loadSasPost().then((ok) => {
     if (!ok || !swapPlaced(showroom, /^sasPost$/, sasGeometry(), app)) return;
     const m = showroom.sasPost;
     for (const c of [...m.children]) if (c.material?.name === "RtsStencil" || c.material?.name === "RtsPaint") m.remove(c);

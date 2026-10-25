@@ -15,6 +15,8 @@
  "mortarpit.glb": "b049c4a84e51c76f97c458af18840a351f4f2195",
  "motorPool.glb": "0d46260a0ae8e0327480d791e919d8f72900f89f",
  "motorPoolNear.glb": "fd396d52c6f03c3866bcb48711a04d5a268aa8b3",
+ "motorPool_damaged.glb": "d256d5f9d24bdc8b201d139c01e91ad22b7265d3",
+ "motorPool_ruin.glb": "d766c01d7d627e87e214b6bccf5d8133badfe8c7",
  "mzab.glb": "804ecc428abf8a3039635048b2e6fb3abaa4146a",
  "points.glb": "50d39303b91397fd11007d2f775397892a793612",
  "postkit.glb": "d7e8087c660d0dea9630e20762862042cceba1ca",
@@ -47,12 +49,12 @@
  "sandbagWall_far.glb": "3504fff481a0539baaa32246190b4de18ce5d3b7",
  "sandbags.glb": "4f49eecf5e9d62c3b202a701a5e8e13a7a78221a",
  "sangar.glb": "2da67d048ad703aca332fbaa777ea091a3d6008c",
+ "saspost.glb": "0bb8b043d75745dd5338d83e05defa0124b3695d",
  "sltower.glb": "ab8a2c667ef9562153e0f6eb1eb63b3dcf7a0f73",
  "smallprops.glb": "94050f097cfb6f27a9c433513685ab0974d67798",
  "vprops.glb": "0a1cdae883972f9456d062b7edc50ea047b0fd54",
  "zeriba.glb": "d1d1daccf4fd1e6b180d59e39dc3fd444c48a9e0",
  "zeribaFarm.glb": "56d60bf2857c6a805d35bb6a562025f03e3e6820",
  "zeribaFarm_far.glb": "98524b21cead2d34c8745b4648348a47c1e39f5f",
- "zeriba_far.glb": "0ac30c9121038db9ad43509443d587369a798ff1",
- "saspost.glb": "0bb8b043d75745dd5338d83e05defa0124b3695d"
+ "zeriba_far.glb": "0ac30c9121038db9ad43509443d587369a798ff1"
 }

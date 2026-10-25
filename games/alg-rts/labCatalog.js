@@ -17,7 +17,6 @@ const PLANT_KEYS = ["pricklyPear", "thistle", "asphodel", "alfa", "agave", "agav
 export const META = {
   // (2026-10-25: everything the maps place that the lab never showed — tools/labCoverageTest.mjs)
   sasPost: { side: "fr", kind: "base", maps: ["aures", "abdi"], status: "verdict" },
-  sasPostCompare: { side: "fr", kind: "base", maps: [], status: "ancien" },
   mineMarker: { side: "fln", kind: "defense", maps: ALL, status: "verdict" },
   lookout: { side: "fln", kind: "defense", maps: ["aures"], status: "verdict" },
   koubba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
@@ -34,6 +33,7 @@ export const META = {
   villagePropsOld: { side: "civil", kind: "prop", maps: ["aures"], status: "jeu" },
   villagePropsBlender: { side: "civil", kind: "prop", maps: ["aures"], status: "jeu" },
   telegraphPole: { side: "fr", kind: "prop", maps: ["aures"], status: "jeu" },
+  renderedWell: { side: "civil", kind: "prop", maps: [], status: "parked" },
   rubbleKit: { side: "civil", kind: "ruine", maps: ["aures", "abdi"], status: "jeu" },
   rubbleHeapOld: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
   mzab_mur: { side: "civil", kind: "village", maps: ["abdi"], status: "jeu" },
@@ -141,7 +141,7 @@ export const SYSTEMS = {
 };
 
 export const NAMES = {
-  zeriba: "Zeriba", zeribaParked: "Thorn ring (Blender, parked)", sacsDeSable: "Sandbag wall", port: "Fishing port",
+  zeriba: "Zeriba", zeribaParked: "Thorn ring (Blender, parked)", renderedWell: "Rendered well (parked)", sacsDeSable: "Sandbag wall", port: "Fishing port",
     parcAutoNeuf: "Motor pool",
   blanche_maison: "Whitewashed house: two storeys", blanche_cour: "Whitewashed house: courtyard", blanche_haute: "Whitewashed house: tall",
   blanche_boutique: "Whitewashed house: shop", villageBlanc: "Whitewashed village", helisurface: "Helipad",

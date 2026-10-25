@@ -28,12 +28,12 @@ import { buildPortBlock } from "./algPort.js";
 import { buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 await loadZeriba();
 await loadZeriba("zeribaFarm");
-import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
+import { loadMotorPool, motorPoolMesh, motorPoolStats, motorPoolStatesReady, setMotorPoolState } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
-import { buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildRenderedWell, buildRubbleHeap, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
 import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker, loadSasPost, sasGeometry } from "./algSangar.js";
 import { buildBeehives, buildBurntFarm as buildBurntFarmOld, buildFarmsteadOld, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
@@ -279,6 +279,17 @@ function steppeField() {
   return labPiece(g);
 }
 
+/** The Blender motor pool in a state, as a lab piece (an empty geometry carrying it). */
+function motorPoolView(state) {
+  const m = motorPoolMesh(), g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
+  g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
+  if (m && state !== "intact" && !setMotorPoolState(m, state)) console.warn("[motorPool] no", state, "model");
+  g.userData.extra = m ? [m] : [];
+  if (m && state === "intact") console.log("[motorPool]", motorPoolStats(m));
+  return g;
+}
+
 export const BUILDINGS = {
   // THE ZERIBA (2026-10-14, you: "what are these things near the villager house?"): the kit's pen LEFT, the
   // Blender one RIGHT (algZeriba.js, tools/blender/zeribaSim.py).
@@ -314,18 +325,13 @@ export const BUILDINGS = {
   },
   // THE MOTOR POOL, NEW (2026-10-18, you: "how far could we make a better looking AAA motor pool?"): the
   // game's LEFT (detail 1), the lab's kit pass MIDDLE (detail 2, the sheets), the Blender one RIGHT
-  // (algMotorPool.js, tools/blender/motorPool.py) — the evolution, three side by side.
+  // (algMotorPool.js, tools/blender/motorPool.py). ITS STATES (2026-10-25): damaged — the shell through the roof, the
+  // workshop's corner off — and destroyed: the middle truss down, two bays' roof gone, the workshop fallen in, burnt.
   parcAutoNeuf: {
-    label: "Parc auto", gap: 34, yaw: Math.PI - 0.6, prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined, { near: true }), 
-    before: () => {
-      const m = motorPoolMesh(), g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
-      g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
-      g.userData.extra = m ? [m] : [];
-      if (m) console.log("[motorPool]", motorPoolStats(m));
-      return g;
-    },
-    tags: ["MOTOR POOL"], note: "the motor pool as the game draws it (Blender: the steel frame, the corrugated sheets, the whitewashed workshop) — its damaged states come with D.",
+    label: "Parc auto", gap: 34, yaw: Math.PI - 0.6,
+    prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined, { near: true }).then(motorPoolStatesReady),
+    before: () => motorPoolView("intact"), middle: () => motorPoolView("damaged"), after: () => motorPoolView("ruin"),
+    tags: ["MOTOR POOL · NEW", "MOTOR POOL · DAMAGED", "MOTOR POOL · DESTROYED"], note: "the motor pool as the game draws it (Blender: the steel frame, the corrugated sheets, the whitewashed workshop); damaged below half its health, destroyed when it falls.",
   },
   // THE WHITEWASHED HOUSE, PILOT (2026-10-19, you, after CoH 3's North Africa — algHouse.js,
   // tools/blender/house.py): the village house the game builds today LEFT, the new one intact in the
@@ -685,13 +691,10 @@ function houseRow(types, state, step) {
 }
 Object.assign(BUILDINGS, {
   // THE SAS POST IN BLENDER (2026-10-25, you: "the best looking for my AAA RTS … it shouldn't look cheap" — tools/blender/
-  // sasPost.py): new (your simulated sandbagged corner, the game's), damaged, destroyed; the OLD one beside the new below
+  // sasPost.py): new (your simulated sandbagged corner, the game's), damaged, destroyed (the old one gone 2026-10-25; its well kept: renderedWell)
   sasPost: { label: "SAS post", gap: 30, yaw: -0.4, prepare: () => Promise.all([loadSasPost(), loadPenProps()]),
     before: () => labPiece(kitView(sasGeometry())), middle: () => labPiece(houseMesh("sas", "damaged")), after: () => labPiece(houseMesh("sas", "ruin")),
     tags: ["SAS POST · NEW", "SAS POST · DAMAGED", "SAS POST · DESTROYED"], note: "the French army's post in a village: the school and the clinic under a canal-tile roof, the veranda, the yard wall and gate, the well, the water tank, the flag's plinth, the radio mast; your simulated sandbagged corner." },
-  sasPostCompare: { label: "SAS post: old vs new", gap: 30, yaw: -0.4, prepare: () => Promise.all([loadSasPost(), loadPenProps()]),
-    before: () => buildSasPost({}), after: () => labPiece(kitView(sasGeometry())),
-    tags: ["SAS POST (OLD)", "SAS POST · NEW"], note: "the old procedural SAS post (left) beside the new one (right) — remove this entry once judged." },
   // THE FLN'S MARKS IN BLENDER (2026-10-25, you: "very cheap … make way better" — tools/blender/flnMarks.py)
   mineMarker: { label: "Mine marker", gap: 5, yaw: Math.PI - 0.5, prepare: () => loadMineMarker(),
     before: () => labPiece(sangarDetailed(houseMesh("minemark", "intact"))), middle: () => labPiece(sangarDetailed(houseMesh("minemark", "damaged"))), after: () => labPiece(sangarDetailed(houseMesh("minemark", "ruin"))),
@@ -724,6 +727,7 @@ Object.assign(BUILDINGS, {
     tags: ["FIELD WALLS · INTACT", "FIELD WALLS · DAMAGED", "FIELD WALLS · DESTROYED"], note: "the dry-stone field walls of Oued Abdi and the new Aurès (tools/blender/fieldwall.py: a b c), in their three states." },
   villagePropsOld: { label: "Village props (old)", gap: 14, before: () => kitRow([buildHaystack({}), buildWoodpile({}), buildTabouna({}), buildBeehives({})], 3.5), tags: ["HAY · WOOD · OVEN · HIVES (OLD)"], note: "the old Aurès' village life props (rtsAlgVillage): haystack, woodpile, tabouna, beehives." },
   villagePropsBlender: { label: "Village props (Blender)", gap: 18, prepare: () => loadHouses("vprops"), before: () => houseRow(VPROP_TYPES, "intact", 3), tags: ["VILLAGE PROPS"], note: "the village props kit (tools/blender/villageProps.py): well, trough, jars, bench, oven, hay, wood, hives — the new Aurès and the training camp." },
+  renderedWell: { label: "Rendered well (old SAS post's)", gap: 4, before: () => buildRenderedWell(), tags: ["RENDERED WELL"], note: "the whitewashed well of the old SAS post (gone 2026-10-25), kept as a small asset for later: the round rendered curb, its lid, two posts and the beam, the rope and bucket." },
   telegraphPole: { label: "Telegraph pole", gap: 6, before: () => buildTelegraphPole({}), tags: ["TELEGRAPH POLE"], note: "the telegraph line's pole (rtsAlgeria buildTelegraphPole); the wires are drawn between them in the game." },
   rubbleKit: { label: "Rubble (Blender)", gap: 26, prepare: () => loadHouses("rubble"), before: () => houseRow(RUBBLE_TYPES, "intact", 5), tags: ["RUBBLE"], note: "a collapsing house's heaps and flying chunks (tools/blender/rubble.py — algTownDamage)." },
   // THE SCANNED BOULDERS (Poly Haven scans, boulders.glb — algStones scanOutcropParts): the game's outcrops and big
