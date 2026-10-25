@@ -4,9 +4,8 @@
 //
 //   left   AVANT — the game's building (detail 1)
 //   right  APRÈS — the same builder at detail 2
-import { buildMechtaHouse } from "../../v3/render/objects/rtsMechta.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
-import { buildHelipad, buildMotorPool, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildHelipad } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin } from "../../v3/render/objects/rtsAlgVillage.js";
 import { SANDSTONE_COLOURS, buildSandstoneRock, sandApron, sandstoneLook, sandstoneMaterial, setSandstoneColour } from "./algSandstone.js";
 import { buildSandstoneCave } from "./algCave.js";
@@ -14,11 +13,7 @@ import { buildCampV2 } from "./algAlnCamp.js";
 import { kitPhotoMaterial } from "./algKitPhoto.js";
 import { FR_PAINT_TINT } from "../../v3/render/objects/rtsVehiclesFr.js";
 import { buildDechraV2, buildKsarV2, buildMechtaHouseV2, buildMechtaV2, buildStoneHouse } from "./algMasonry.js";
-import { buildDechra, buildKsar } from "../../v3/render/objects/rtsAlgVillage.js";
-import { buildMechta } from "../../v3/render/objects/rtsMechta.js";
 import * as THREE from "three";
-import { buildAlnCamp } from "../../v3/render/objects/rtsAlnCamp.js";
-import { buildCaveEntrance } from "../../v3/render/objects/rtsAlgeria.js";
 import { ATLAS_COLS, makeAuresStoneTexture, makeRubbleTexture, rtsAtlas, rtsAtlasReady } from "../../v3/render/objects/rtsTextures.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { createPointMark } from "./algPointMarks.js";
@@ -197,18 +192,17 @@ function pointMarks(kindKey) {
 const SEED = Number(new URLSearchParams(location.search).get("seed")) || 0;
 
 // THE ROMAN SITES (2026-10-08, you: "variants of that Roman ruin, it looks so nice — but don't
-// change it"): the temple as it is in the game on the LEFT, the new site on the RIGHT.
-const temple = () => buildRomanRuin({ seed: 1980, detail: 2 });
-const roman = (label, build, gap) => ({ label, gap, before: temple, after: () => build({ seed: build.seed0 + SEED }), tags: ["TEMPLE (LE JEU)", `NOUVEAU · variante ${SEED + 1}`], note: "le temple du jeu à gauche (référence, inchangé), le nouveau site à droite." });
+// change it"): each site alone (the temple, its own entry, no longer beside each one — 2026-10-25).
+const roman = (label, build, gap) => ({ label, gap, before: () => build({ seed: build.seed0 + SEED }), tags: [`ROMAN SITE · variante ${SEED + 1}`], note: "a Roman site of the old Aurès, alone (its variants: « Piece »)." });
 Object.assign(buildRomanColumn, { seed0: 2101 }); Object.assign(buildRomanColonnade, { seed0: 2201 }); Object.assign(buildRomanBlockField, { seed0: 2301 });
 Object.assign(buildRomanArch, { seed0: 2401 }); Object.assign(buildRomanOilPress, { seed0: 2501 });
 
-// THE SANDSTONE ROCKS (you, a CoH 3 screenshot): the game's outcrop on the LEFT, the new rock RIGHT.
+// THE SANDSTONE ROCKS (you, a CoH 3 screenshot): each shape alone — the old procedural outcrop beside them is gone
+// from the game (the scanned boulders replaced it, 2026-10-24), so from here too (2026-10-25).
 let _sand = null;
 const rock = (label, shape, gap) => ({
-  label, gap, before: () => buildRockOutcrop({ seed: 2000 }),
-  after: () => { const g = buildSandstoneRock(shape, 1 + SEED); g.userData.labMaterial = _sand ??= sandstoneMaterial(); return g; },
-  tags: ["ROCHER (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "l'affleurement du jeu à gauche, le nouveau rocher de grès à droite.",
+  label, gap, before: () => { const g = buildSandstoneRock(shape, 1 + SEED); g.userData.labMaterial = _sand ??= sandstoneMaterial(); return g; },
+  tags: [`SANDSTONE · variante ${SEED + 1}`], note: "a sandstone rock of the game (algSandstone); its look and variants: « Piece » — the formations' editor: rock-lab.html.",
 });
 
 /** The helipad's construction site (the lab's « Construction » panel). */
@@ -314,18 +308,15 @@ export const BUILDINGS = {
   // THE PORT (2026-10-16, the coast): the colonial fishing port's kit — row houses, the magasin, the
   // mole and its lighthouse, lamparo boats (algPort.js). New: nothing on the left.
   port: {
-    label: "Port (nouveau)", gap: 60, before: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); return g; },
-    after: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [buildPortBlock({ seed: 1 + SEED })]; return g; },
-    tags: ["—", `PORT · NOUVEAU · variante ${SEED + 1}`], note: "le port de pêche : maisons coloniales chaulées aux toits de tuiles canal, le magasin, le môle et son phare, les lamparos.",
+    label: "Port", gap: 60, before: () => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [buildPortBlock({ seed: 1 + SEED })]; return g; },
+    tags: [`FISHING PORT · variante ${SEED + 1}`], note: "le port de pêche : maisons coloniales chaulées aux toits de tuiles canal, le magasin, le môle et son phare, les lamparos.",
   },
-  mechtaHouse: { build: (o) => buildMechtaHouse({ ...o }), label: "Maison (mechta)", gap: 7.5 },
-  parcAuto: { build: (o) => buildMotorPool({ ...o }), label: "Parc auto", gap: 21 },
   // THE MOTOR POOL, NEW (2026-10-18, you: "how far could we make a better looking AAA motor pool?"): the
   // game's LEFT (detail 1), the lab's kit pass MIDDLE (detail 2, the sheets), the Blender one RIGHT
   // (algMotorPool.js, tools/blender/motorPool.py) — the evolution, three side by side.
   parcAutoNeuf: {
-    label: "Parc auto (nouveau)", gap: 34, yaw: Math.PI - 0.6, prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined, { near: true }), before: () => buildMotorPool({ detail: 1 }), middle: () => buildMotorPool({ detail: 2 }),
-    after: () => {
+    label: "Parc auto", gap: 34, yaw: Math.PI - 0.6, prepare: () => loadMotorPool(new URLSearchParams(location.search).get("glb") ?? undefined, { near: true }), 
+    before: () => {
       const m = motorPoolMesh(), g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3));
       g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false });
@@ -333,7 +324,7 @@ export const BUILDINGS = {
       if (m) console.log("[motorPool]", motorPoolStats(m));
       return g;
     },
-    tags: ["PARC AUTO (LE JEU)", "PARC AUTO · KIT, DÉTAIL 2", "PARC AUTO · NOUVEAU (BLENDER)"], note: "le parc auto du jeu à gauche, la passe du kit (détail 2) au milieu, le nouveau à droite : charpente acier, tôle ondulée, atelier enduit à la chaux.",
+    tags: ["MOTOR POOL"], note: "the motor pool as the game draws it (Blender: the steel frame, the corrugated sheets, the whitewashed workshop) — its damaged states come with D.",
   },
   // THE WHITEWASHED HOUSE, PILOT (2026-10-19, you, after CoH 3's North Africa — algHouse.js,
   // tools/blender/house.py): the village house the game builds today LEFT, the new one intact in the
@@ -352,25 +343,23 @@ export const BUILDINGS = {
   }])),
   villeMzab: {
     label: "Ville du M'zab", gap: 90, yaw: 0, prepare: () => Promise.all([loadHouses("mzab"), loadHouses()]),
-    before: () => { const g = whiteVillage(); return labPiece(g); },
-    after: () => { const g = mzabTown(); console.log("[mzab town]", houseStats()); return labPiece(g); },
-    tags: ["VILLAGE BLANCHI", "VILLE DU M'ZAB"], note: "le village blanchi à gauche, la ville du M'zab à droite : la place du souk et ses arcades, la ville serrée derrière (en jeu, la butte l'étage).",
+    before: () => { const g = mzabTown(); console.log("[mzab town]", houseStats()); return labPiece(g); },
+    tags: ["M'ZAB TOWN"], note: "le village blanchi à gauche, la ville du M'zab à droite : la place du souk et ses arcades, la ville serrée derrière (en jeu, la butte l'étage).",
   },
   // THE VILLAGE (2026-10-19, you: "then I guess we should see how it looks for a village"): a lane of the
   // whitewashed kit, one house damaged and one in ruins, the brown houses (the game's) on the outskirts as the
   // farmers' and shepherds' homes — the game's village beside it, LEFT.
   villageBlanc: {
     label: "Village blanchi", gap: 70, yaw: 0, prepare: () => loadHouses(),
-    before: () => buildMechtaV2(),
-    after: () => { const g = whiteVillage(); console.log("[village]", houseStats()); return labPiece(g); },
-    tags: ["HAMEAU (LE JEU)", "VILLAGE BLANCHI"], note: "le hameau du jeu à gauche, un village du kit blanchi à droite : une rue, une maison endommagée, une en ruine, les maisons brunes à l'écart (fermiers, bergers).",
+    before: () => { const g = whiteVillage(); console.log("[village]", houseStats()); return labPiece(g); },
+    tags: ["WHITEWASHED VILLAGE"], note: "le hameau du jeu à gauche, un village du kit blanchi à droite : une rue, une maison endommagée, une en ruine, les maisons brunes à l'écart (fermiers, bergers).",
   },
   // THE HELIPAD (2026-10-13, you: "add the helipad to the lab to fine-tune it" — the first base building
   // the sappers will place themselves, CoH's way): the game's on both sides until the new one exists.
   helisurface: {
-    label: "Hélisurface", gap: 24, construction: true, before: () => buildHelipad(),
+    label: "Hélisurface", gap: 24, construction: true,
     // (2026-10-13: the CONSTRUCTION too — algConstruction.js: the panel's « Construction » plays it.)
-    after: () => {
+    before: () => {
       const g = buildHelipadPiece((o) => buildHelipad({ detail: 2, ...o }));
       SITE = createConstruction(g, { paintTint: FR_PAINT_TINT });
       SITE.sock = labWindsock(g);
@@ -379,7 +368,7 @@ export const BUILDINGS = {
       SITE.set(1);
       return g;
     },
-    tags: ["HÉLISURFACE (LE JEU)", "HÉLISURFACE · NOUVELLE"], note: "l'hélisurface du jeu à gauche, la nouvelle à droite : terre battue, H et cercle peints à la chaux, panneaux de signalisation, point carburant, coin radio.",
+    tags: ["HELIPAD"], note: "l'hélisurface du jeu à gauche, la nouvelle à droite : terre battue, H et cercle peints à la chaux, panneaux de signalisation, point carburant, coin radio.",
   },
   ruineRomaine: { build: (o) => buildRomanRuin({ ...o }), label: "Ruine romaine", gap: 15 },
   colonne: roman("Colonne seule", buildRomanColumn, 17),
@@ -393,8 +382,8 @@ export const BUILDINGS = {
   // THE FLN CAVE (2026-10-11, you: "use the realistic rocks to make a cave"): the game's on the
   // LEFT (low-poly limestone), the sandstone cave on the RIGHT — the same shoring and gear.
   grotte: {
-    label: "Grotte du FLN", gap: 11, before: () => buildCaveEntrance(), after: () => buildSandstoneCave({ variant: SEED }),
-    tags: ["GROTTE (LE JEU)", `GRÈS · variante ${SEED + 1}`], note: "la grotte du jeu à gauche, la grotte en grès à droite (même étais, même matériel).",
+    label: "Grotte du FLN", gap: 11, before: () => buildSandstoneCave({ variant: SEED }),
+    tags: [`FLN CAVE · variante ${SEED + 1}`], note: "la grotte du jeu à gauche, la grotte en grès à droite (même étais, même matériel).",
   },
   // THE FLN CAMP (same day, you: "it looks wrong and too cheap beside the cave"): the game's on the
   // LEFT, the sandstone and dry-stone camp on the RIGHT (algAlnCamp.js).
@@ -402,8 +391,8 @@ export const BUILDINGS = {
   // house built as the rocks are (algMasonry.js) — real thickness, rounded corners, photo materials —
   // beside the game's mechta house (the kit atlas).
   maisonPierre: {
-    label: "Maison en pierre (PC)", gap: 10, before: () => buildMechtaHouse({}),
-    after: () => {
+    label: "Maison en pierre (PC)", gap: 10,
+    before: () => {
       const { group } = buildStoneHouse();
       // (the lab draws a body mesh per piece: an empty one, the house its `extra`)
       const g = new THREE.BufferGeometry();
@@ -412,27 +401,27 @@ export const BUILDINGS = {
       g.userData.extra = [group];
       return g;
     },
-    tags: ["MAISON (KIT DU JEU)", "PIERRE · NOUVEAU"], note: "la maison du jeu à gauche, la maison en pierre du nouveau standard à droite.",
+    tags: ["STONE HOUSE"], note: "la maison du jeu à gauche, la maison en pierre du nouveau standard à droite.",
   },
   // THE MORTAR PIT (same day): the game's on the LEFT, the new standard's on the RIGHT.
   // THE MECHTA (2026-10-11): the lab's best kit house (detail 2) on the LEFT, the new standard RIGHT.
   mechtaPierre: {
-    label: "Mechta (nouveau)", gap: 8, before: () => buildMechtaHouse({ detail: 2 }),
-    after: () => { const { group } = buildMechtaHouseV2({ seed: 7 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [group]; return g; },
-    tags: ["MECHTA (KIT, DÉTAIL 2)", `MECHTA · NOUVEAU · variante ${SEED + 1}`], note: "la maison du kit à gauche, la nouvelle à droite.",
+    label: "Mechta", gap: 8,
+    before: () => { const { group } = buildMechtaHouseV2({ seed: 7 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [group]; return g; },
+    tags: [`MECHTA HOUSE · variante ${SEED + 1}`], note: "la maison du kit à gauche, la nouvelle à droite.",
   },
   // THE HAMLET (same day): the game's on the LEFT, the new standard's on the RIGHT.
   hameau: {
-    label: "Hameau (nouveau)", gap: 26, before: () => buildMechta(), after: () => buildMechtaV2(),
-    tags: ["HAMEAU (LE JEU)", "HAMEAU · NOUVEAU"], note: "le hameau du jeu à gauche, le nouveau à droite.",
+    label: "Hameau", gap: 26, before: () => buildMechtaV2(),
+    tags: ["HAMLET"], note: "le hameau du jeu à gauche, le nouveau à droite.",
   },
   dechraNouveau: {
-    label: "Dechra (nouveau)", gap: 34, before: () => buildDechra(), after: () => buildDechraV2(),
-    tags: ["DECHRA (LE JEU)", "DECHRA · NOUVEAU"], note: "la dechra du jeu à gauche, la nouvelle à droite (sur terrain plat ici).",
+    label: "Dechra", gap: 34, before: () => buildDechraV2(),
+    tags: ["DECHRA"], note: "la dechra du jeu à gauche, la nouvelle à droite (sur terrain plat ici).",
   },
   ksarNouveau: {
-    label: "Ksar (nouveau)", gap: 46, before: () => buildKsar(), after: () => buildKsarV2(),
-    tags: ["KSAR (LE JEU)", "KSAR · NOUVEAU"], note: "le ksar du jeu à gauche, le nouveau à droite (terrain plat ici).",
+    label: "Ksar", gap: 46, before: () => buildKsarV2(),
+    tags: ["KSAR"], note: "le ksar du jeu à gauche, le nouveau à droite (terrain plat ici).",
   },
   // OPTION B (2026-10-11, your go): the post as the kit builds it, its colours kept, the photos'
   // grain and relief on top (algKitPhoto.js) — the game's post on the LEFT.
@@ -448,8 +437,8 @@ export const BUILDINGS = {
     tags: ["FRENCH POST · NEW", "FRENCH POST · DAMAGED", "FRENCH POST · DESTROYED"], note: "the French post (Blender: the bordj, its towers, the gate, the barracks; your simulated sandbags) in its three states.",
   },
   campFln: {
-    label: "Camp du FLN", gap: 31, before: () => buildAlnCamp(), after: () => buildCampV2(),
-    tags: ["CAMP (LE JEU)", "CAMP · NOUVEAU STANDARD"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
+    label: "Camp du FLN", gap: 31, before: () => buildCampV2(),
+    tags: ["FLN CAMP"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",
   },
   // THE REQUISITION POINT IN BLENDER (2026-10-20, tools/blender/supplyPoint.py — you: "it doesn't look AAA at all,
   // and still my old sandbags"): the mast and the depot as one piece, the cloth-simulated bags; intact LEFT,

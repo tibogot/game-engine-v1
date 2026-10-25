@@ -32,7 +32,7 @@ The lab's « Verdict: Not judged yet » filter and **N** (next to judge) walk th
 | The post (bordj, towers, gate, barracks) | all | Blender (postkit), swapped in over the old kit | posteBlender (new · damaged · destroyed) | **one entry** — the old post, photo and sim-bags entries removed (2026-10-25) |
 | Post flag | all | live cloth | — (animated: judged in the game) | |
 | Helipad + windsock | all | new procedural, cloth bags; construction | helisurface | |
-| Motor pool | all | old kit + the Blender far level attached | parcAutoNeuf (old: parcAuto) | |
+| Motor pool | all | Blender (the old kit hidden under it) | parcAutoNeuf | **one entry** — the old kit and kit-detail-2 versions removed (2026-10-25) |
 | SAS post | OA NA AB MQ | old kit | sasPost | |
 | Sandbag wall | build, TR | your simulated wall (+ simulated breach) | sacsDeSable | |
 | Barbed wire | build, TR | Blender | barbelesBlender | |
@@ -62,7 +62,7 @@ The lab's « Verdict: Not judged yet » filter and **N** (next to judge) walk th
 
 | Piece | Maps | Game draws | Lab entry | Verdict |
 |---|---|---|---|---|
-| Hamlet (mechta) | OA AB MQ | new (algMasonry) | hameau (old: mechtaHouse, mechtaPierre) | |
+| Hamlet (mechta) | OA AB MQ | new (algMasonry) | hameau, mechtaPierre (its house) | old hamlet and old kit house removed from the lab (2026-10-25) |
 | Dechra | OA AB | new | dechraNouveau | |
 | Ksar | OA | new | ksarNouveau | |
 | Whitewashed houses (4 types) | NA TR AB | Blender | blanche_maison / cour / haute / boutique, villageBlanc | |
