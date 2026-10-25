@@ -100,18 +100,43 @@ export async function startLab() {
   let light = "day";
   let busy = false;
   const thumbs = new Map();
-  for (const k of keys) { const t = store.get(`thumb.${k}`, null); if (t) thumbs.set(k, t); }
+  // (thumb2: the framed hero — the first ones, the whole entry from 102 m, dropped 2026-10-25)
+  for (const k of keys) { const t = store.get(`thumb2.${k}`, null); if (t) thumbs.set(k, t); }
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("lab.thumb.")) localStorage.removeItem(k); } catch { /* private window */ }
 
-  // ── The catalogue panel ─────────────────────────────────────────────────────────────────────
-  const GROUPS = [["side", "Side", SIDES], ["kind", "Kind", KINDS], ["map", "Map", MAPS], ["status", "Status", STATUS]];
-  function renderFilters() {
-    // (Kind: only the section's kinds — a row of one chip says nothing, so it goes)
-    const kinds = Object.fromEntries(Object.entries(KINDS).filter(([k]) => SECTIONS.find(([s]) => s === section)[2](k)));
-    // (the Side — French, FLN, civilian — is a building's: not a plant's or a rock's)
-    $("filters").innerHTML = GROUPS.map(([g, label, opts]) => [g, label, g === "kind" ? kinds : opts]).filter(([g, , opts]) => Object.keys(opts).length > 1 && (g !== "side" || section === "build"))
-      .map(([g, label, opts]) => `<div class="frow"><span>${label}</span>${Object.entries(opts).map(([k, v]) => `<button class="chip" data-g="${g}" data-k="${k}">${v}</button>`).join("")}</div>`).join("");
-    syncChips();
+  // ── YOUR VERDICTS (2026-10-25, you: "it doesn't make it easy to scroll and look for assets … not really UX friendly"):
+  // each piece's keep / improve / redo / remove / parked and a note, set here and saved to games/alg-rts/labVerdicts.json
+  // (the dev server, vite.config.js) — the record of the pass; a filter shows what is not judged yet ──────────────
+  const VERDICTS = { keep: "Keep", improve: "Improve", redo: "Redo", remove: "Remove", parked: "Parked" };
+  let verdicts = {};
+  try { verdicts = await (await fetch("/__alg-lab/verdicts")).json(); } catch { /* no dev server: read-only */ }
+  const verdictOf = (k) => verdicts[k]?.v ?? null;
+  async function setVerdict(key, v, note = verdicts[key]?.note ?? "") {
+    try {
+      const r = await fetch("/__alg-lab/verdicts", { method: "POST", body: JSON.stringify({ key, v, note }) });
+      if (r.ok) verdicts = await r.json();
+    } catch (e) { $("err").textContent = `verdict not saved: ${e?.message ?? e}`; }
+    renderList(); renderVerdict();
+    if (browserOpen) renderBrowserGrid();
   }
+
+  // ── The catalogue panel: compact filters (one dropdown a group), the list grouped by kind ───────────────
+  filters.verdict ??= [];
+  const GROUPS = [["side", "Side", SIDES], ["kind", "Kind", KINDS], ["map", "Map", MAPS], ["status", "Status", STATUS], ["verdict", "Verdict", { todo: "Not judged yet", ...VERDICTS }]];
+  const filterGroups = () => {
+    // (Kind: only the section's kinds — one option says nothing, so it goes; the Side is a building's, not a plant's)
+    const kinds = Object.fromEntries(Object.entries(KINDS).filter(([k]) => SECTIONS.find(([s]) => s === section)[2](k)));
+    return GROUPS.map(([g, label, opts]) => [g, label, g === "kind" ? kinds : opts]).filter(([g, , opts]) => Object.keys(opts).length > 1 && (g !== "side" || section === "build"));
+  };
+  const filtersHtml = () => filterGroups().map(([g, label, opts]) => `<select class="fsel${filters[g].length ? " on" : ""}" data-g="${g}"><option value="">${label}: all</option>${Object.entries(opts).map(([k, v]) => `<option value="${k}"${filters[g][0] === k ? " selected" : ""}>${v}</option>`).join("")}</select>`).join("");
+  function renderFilters() { $("filters").innerHTML = filtersHtml(); }
+  const onFilter = (e) => {
+    const sel = e.target.closest(".fsel"); if (!sel) return;
+    filters[sel.dataset.g] = sel.value ? [sel.value] : [];
+    store.set("filters", filters); renderFilters(); renderList();
+    if (browserOpen) renderBrowser();
+  };
+  $("filters").addEventListener("change", onFilter);
   function renderSections() {
     $("sections").innerHTML = SECTIONS.map(([s, label]) => `<button class="sec${s === section ? " on" : ""}" data-s="${s}">${label}<small>${keys.filter((k) => sectionOf(k) === s).length} pieces</small></button>`).join("");
   }
@@ -124,14 +149,8 @@ export async function startLab() {
     if (open && !inSection(cur?.key)) { const first = visible()[0]; if (first) show(first); }
   }
   $("sections").addEventListener("click", (e) => { const b = e.target.closest(".sec"); if (b) setSection(b.dataset.s); });
-  const syncChips = () => { for (const b of $("filters").querySelectorAll(".chip")) b.classList.toggle("on", filters[b.dataset.g].includes(b.dataset.k)); };
-  $("filters").addEventListener("click", (e) => {
-    const b = e.target.closest(".chip"); if (!b) return;
-    const arr = filters[b.dataset.g], i = arr.indexOf(b.dataset.k);
-    if (i >= 0) arr.splice(i, 1); else arr.push(b.dataset.k);
-    store.set("filters", filters); syncChips(); renderList();
-  });
-  $("search").addEventListener("input", (e) => { query = e.target.value.trim().toLowerCase(); renderList(); });
+  const setQuery = (q) => { query = q.trim().toLowerCase(); for (const id of ["search", "bSearch"]) if ($(id) && $(id).value !== q) $(id).value = q; renderList(); if (browserOpen) renderBrowserGrid(); };
+  $("search").addEventListener("input", (e) => setQuery(e.target.value));
   const visible = () => keys.filter((k) => {
     const m = metaOf(k), e = BUILDINGS[k];
     if (!inSection(k)) return false;
@@ -139,24 +158,78 @@ export async function startLab() {
     if (filters.kind.length && !filters.kind.includes(m.kind)) return false;
     if (filters.map.length && !m.maps.some((x) => filters.map.includes(x))) return false;
     if (filters.status.length && !filters.status.includes(m.status)) return false;
+    if (filters.verdict.length && (filters.verdict[0] === "todo" ? verdictOf(k) : verdictOf(k) !== filters.verdict[0])) return false;
     if (query && !`${nameOf(k)} ${e.label ?? ""} ${k} ${(e.tags ?? []).map(enTag).join(" ")}`.toLowerCase().includes(query)) return false;
     return true;
   });
+  // THE GROUPS: the list by kind, each a header with its count — click to fold (remembered)
+  const folded = new Set(store.get("folded", []));
+  const card = (k) => {
+    const m = metaOf(k), t = thumbs.get(k), v = verdictOf(k);
+    return `<button class="card${cur?.key === k ? " on" : ""}" data-k="${k}"><div class="thumb" style="${t ? `background-image:url(${t})` : ""}">${t ? "" : ICON[m.kind] ?? "▫"}${v ? `<span class="vb v-${v}">${VERDICTS[v]}</span>` : ""}</div>
+      <div class="t">${nameOf(k)}<br><span class="badge b-${m.status}">${STATUS[m.status] ?? m.status}</span></div></button>`;
+  };
+  const groupsHtml = (list) => Object.keys({ ...KINDS, autre: 1 }).map((kind) => {
+    const ks = list.filter((k) => (KINDS[metaOf(k).kind] ? metaOf(k).kind : "autre") === kind);
+    if (!ks.length) return "";
+    const judged = ks.filter(verdictOf).length;
+    return `<div class="ghead${folded.has(kind) ? " folded" : ""}" data-kind="${kind}"><span>${folded.has(kind) ? "▸" : "▾"} ${KINDS[kind] ?? "Other"}</span><small>${ks.length} · ${judged} judged</small></div>${folded.has(kind) ? "" : ks.map(card).join("")}`;
+  }).join("");
+  const onGroup = (e) => {
+    const h = e.target.closest(".ghead"); if (!h) return false;
+    const k = h.dataset.kind;
+    if (folded.has(k)) folded.delete(k); else folded.add(k);
+    store.set("folded", [...folded]); renderList(); if (browserOpen) renderBrowserGrid();
+    return true;
+  };
   function renderList() {
     const list = visible();
-    $("count").innerHTML = `<span>${list.length} / ${keys.filter(inSection).length} pieces</span><button id="mkthumbs" title="Takes a thumbnail of every piece in the list">Make thumbnails</button>`;
-    $("list").innerHTML = list.map((k) => {
-      const m = metaOf(k), t = thumbs.get(k);
-      return `<button class="card${cur?.key === k ? " on" : ""}" data-k="${k}"><div class="thumb" style="${t ? `background-image:url(${t})` : ""}">${t ? "" : ICON[m.kind] ?? "▫"}</div>
-        <div class="t">${nameOf(k)}<br><span class="badge b-${m.status}">${STATUS[m.status] ?? m.status}</span></div></button>`;
-    }).join("");
+    $("count").innerHTML = `<span>${list.length} / ${keys.filter(inSection).length} pieces · ${keys.filter((k) => inSection(k) && verdictOf(k)).length} judged</span><button id="mkthumbs" title="Takes a thumbnail of every piece in the list">Make thumbnails</button>`;
+    $("list").innerHTML = groupsHtml(list);
     $("mkthumbs").onclick = () => makeThumbs(list);
   }
-  $("list").addEventListener("click", (e) => { const c = e.target.closest(".card"); if (c) show(c.dataset.k); });
+  $("list").addEventListener("click", (e) => { if (onGroup(e)) return; const c = e.target.closest(".card"); if (c) show(c.dataset.k); });
+
+  // ── THE CATALOGUE, FULL SCREEN (Tab, or « Browse all »): every piece of the section in many columns, the same
+  // groups, filters and search — click one to open it ────────────────────────────────────────────────────────
+  let browserOpen = false;
+  const bEl = document.createElement("div");
+  bEl.id = "browser";
+  document.body.appendChild(bEl);
+  function renderBrowser() {
+    bEl.innerHTML = `<div class="bbar"><h2>Lab · browse</h2><div id="bSections">${$("sections").innerHTML}</div>
+      <input id="bSearch" type="search" placeholder="Search…" autocomplete="off" />
+      <div id="bFilters">${filtersHtml()}</div><span class="bcount"></span><button class="bclose" title="Esc / Tab">✕</button></div>
+      <div class="bgrid"></div>`;
+    $("bSearch").value = $("search").value;
+    $("bSearch").addEventListener("input", (e) => setQuery(e.target.value));
+    renderBrowserGrid();
+  }
+  // (typing in its search: the grid alone — the bar re-drawn would lose the caret)
+  function renderBrowserGrid() {
+    const list = visible();
+    bEl.querySelector(".bcount").textContent = `${list.length} pieces · ${list.filter(verdictOf).length} judged`;
+    bEl.querySelector(".bgrid").innerHTML = groupsHtml(list);
+  }
+  bEl.addEventListener("change", onFilter);
+  bEl.addEventListener("click", (e) => {
+    if (e.target.closest(".bclose")) return toggleBrowser(false);
+    const sec = e.target.closest(".sec"); if (sec) { setSection(sec.dataset.s, { open: false }); renderBrowser(); return; }
+    if (onGroup(e)) return;
+    const c = e.target.closest(".card"); if (c) { toggleBrowser(false); show(c.dataset.k); }
+  });
+  function toggleBrowser(on = !browserOpen) {
+    browserOpen = on;
+    bEl.classList.toggle("open", on);
+    if (on) { renderBrowser(); $("bSearch").focus(); }
+  }
 
   // ── The tools panel ─────────────────────────────────────────────────────────────────────────
   const VIEWS = { rts: "RTS (102 m)", near: "RTS near (38 m)", far: "RTS far (134 m)", close: "Close-up", orbit: "Orbit" };
   $("tools").innerHTML = `
+    <div class="box" id="verdictBox"><h3>Your verdict</h3><div class="btns" id="verdicts">${Object.entries(VERDICTS).map(([k, v]) => `<button class="btn vbtn v-${k}" data-vd="${k}">${v}</button>`).join("")}</div>
+      <input id="vNote" type="text" placeholder="A note (what to change…)" autocomplete="off" />
+      <div class="btns" style="margin-top:6px"><button class="btn" id="vNext" title="N">Next to judge →</button><span id="vLeft" class="keys" style="align-self:center"></span></div></div>
     <div class="box"><h3>View</h3><div class="btns" id="views">${Object.entries(VIEWS).map(([k, v], i) => `<button class="btn" data-v="${k}" title="${i + 1}">${v}</button>`).join("")}</div></div>
     <div class="box"><h3>Light (simple — not the game's look)</h3><div class="btns" id="lights"><button class="btn" data-l="day">Day</button><button class="btn" data-l="dusk">Dusk</button><button class="btn" data-l="night">Night</button></div></div>
     <div class="box" id="fireBox" style="display:none"><h3>Fire</h3><div class="btns" id="fireBtns"><button class="btn" data-f="fire">Fire</button><button class="btn" data-f="follow">Follow the shell</button><button class="btn" data-f="slow">Slow ×0.1</button></div></div>
@@ -165,7 +238,28 @@ export async function startLab() {
     <div class="box" id="stoneBox"><h3>Wall stone (the old kit's walls)</h3><div class="btns" id="stones">${Object.entries(LAB_STONES).map(([k, v]) => `<button class="btn" data-s="${k}">${v}</button>`).join("")}</div></div>
     <div class="box"><h3>Numbers</h3><table class="stats" id="stats"></table></div>
     <div class="box"><h3>Frame</h3><table class="stats" id="live"></table></div>
-    <div class="box keys">← → previous / next piece · / search · 1-5 views · Esc clears</div>`;
+    <div class="box keys">Tab: browse all · ← → previous / next · N: next to judge · / search · 1-5 views · Esc clears</div>`;
+  // the verdict: a click sets it (again: clears it), the note saves when it changes; « Next to judge » the next piece
+  // of the list without one
+  function renderVerdict() {
+    const v = cur ? verdictOf(cur.key) : null;
+    for (const b of $("verdicts").querySelectorAll(".btn")) b.classList.toggle("on", b.dataset.vd === v);
+    if (document.activeElement !== $("vNote")) $("vNote").value = cur ? verdicts[cur.key]?.note ?? "" : "";
+    const left = keys.filter((k) => inSection(k) && !verdictOf(k)).length;
+    $("vLeft").textContent = `${left} left in ${SECTIONS.find(([s]) => s === section)[1]}`;
+  }
+  $("verdicts").addEventListener("click", (e) => {
+    const b = e.target.closest(".btn"); if (!b || !cur) return;
+    setVerdict(cur.key, verdictOf(cur.key) === b.dataset.vd ? null : b.dataset.vd, $("vNote").value);
+  });
+  $("vNote").addEventListener("change", () => { if (cur && verdictOf(cur.key)) setVerdict(cur.key, verdictOf(cur.key), $("vNote").value); });
+  const nextToJudge = () => {
+    const list = visible(), i = list.indexOf(cur?.key);
+    const next = [...list.slice(i + 1), ...list.slice(0, i + 1)].find((k) => !verdictOf(k));
+    if (next) show(next);
+  };
+  $("vNext").addEventListener("click", nextToJudge);
+  $("browseAll").addEventListener("click", () => toggleBrowser(true));
   $("views").addEventListener("click", (e) => { const b = e.target.closest(".btn"); if (b) setView(b.dataset.v); });
   $("lights").addEventListener("click", (e) => { const b = e.target.closest(".btn"); if (b) setLight(b.dataset.l); });
   $("stones").addEventListener("click", (e) => { const b = e.target.closest(".btn"); if (b) { applyLabStone(b.dataset.s); markOn("stones", "s", b.dataset.s); } });
@@ -309,6 +403,7 @@ export async function startLab() {
       if (tools) { el.innerHTML = tools.html; tools.bind(el); }
       history.replaceState(null, "", `${location.pathname}?p=${key}`);   // (not "?p=": the page's <base href="/v3/"> would take it)
       for (const c of $("list").querySelectorAll(".card")) c.classList.toggle("on", c.dataset.k === key);
+      renderVerdict();
       $("list").querySelector(`.card[data-k="${key}"]`)?.scrollIntoView({ block: "nearest" });
       // its thumbnail, once it has settled
       if (!thumbs.has(key)) setTimeout(() => { if (cur?.key === key) snap(key); }, 1500);
@@ -396,16 +491,55 @@ export async function startLab() {
   $("buildPlay").addEventListener("click", () => { playT = 0; });
 
   // ── Thumbnails: the canvas as it is, framed at the RTS view ─────────────────────────────────
+  // THE THUMBNAIL'S HERO (2026-10-25, you: "the camera is too far … some plants we cannot even see; old and new: show
+  // the new; with damage: the one not damaged"): the version that is neither the game's old one nor a damaged state,
+  // alone, framed to fill the card from the RTS's side (40° down) — then the view as it was.
+  const OLDISH = /THE GAME|\(OLD\)|GAME KIT|\bKIT\b/i, HURT = /DAMAGED|DESTROYED|RUIN|\bCUT\b|CRUSHED|BURNT/i;
+  // (what frames a piece: its visible meshes and its flagged sizing boxes — the plants' — not an overlay that says it
+  // doesn't (the capture ring: userData.noFrame) nor a placeholder's invisible triangle)
+  function frameBox(group) {
+    const b = new THREE.Box3(), mb = new THREE.Box3();
+    group.updateMatrixWorld(true);
+    group.traverse((o) => {
+      for (let p = o; p && p !== group.parent; p = p.parent) if (p.userData?.noFrame || p.visible === false && p !== group) return;
+      if (!o.isMesh || !(o.material?.visible !== false || o.userData.frame)) return;
+      if (!o.geometry.boundingBox) o.geometry.computeBoundingBox();
+      b.union(mb.copy(o.geometry.boundingBox).applyMatrix4(o.matrixWorld));
+    });
+    return b;
+  }
+  function heroOf(versions) {
+    const ok = (v) => !frameBox(v.group).isEmpty();
+    let i = versions.findIndex((v) => ok(v) && !OLDISH.test(v.label) && !HURT.test(v.label));
+    if (i < 0) i = versions.findIndex((v) => ok(v) && !HURT.test(v.label));
+    return Math.max(0, i);
+  }
   async function snap(key) {
+    if (cur?.key !== key) return;
+    const hero = heroOf(cur.versions), was = { pos: camera.position.clone(), tgt: controls.target.clone(), fov: camera.fov, vis: cur.versions.map((v) => v.group.visible) };
+    cur.versions.forEach((v, i) => { v.group.visible = i === hero; });
+    cur.versions[hero].group.visible = true;
+    const b = frameBox(cur.versions[hero].group);
+    const ctr = b.getCenter(new THREE.Vector3()), r = Math.max(0.6, b.getSize(new THREE.Vector3()).length() / 2);
+    camera.fov = 30; camera.updateProjectionMatrix();
+    const pitch = (40 * Math.PI) / 180, yaw = 0.35, dist = (r / Math.sin((15 * Math.PI) / 180)) * 0.82;
+    controls.target.copy(ctr);
+    camera.position.set(ctr.x + Math.sin(yaw) * Math.cos(pitch) * dist, ctr.y + Math.sin(pitch) * dist, ctr.z + Math.cos(yaw) * Math.cos(pitch) * dist);
+    camera.lookAt(ctr);
+    labTick(camera);   // (the plants' LOD for this camera)
     renderer.render(scene, camera);   // (read back in the same task: the canvas still holds this frame)
     const src = renderer.domElement, c = document.createElement("canvas");
     c.width = 220; c.height = 140;
     const s = Math.min(src.width / 220, src.height / 140), w = 220 * s, h = 140 * s;
     c.getContext("2d").drawImage(src, (src.width - w) / 2, (src.height - h) / 2, w, h, 0, 0, 220, 140);
     const url = c.toDataURL("image/jpeg", 0.72);
+    // (the view back as it was)
+    cur.versions.forEach((v, i) => { v.group.visible = was.vis[i]; });
+    camera.fov = was.fov; camera.updateProjectionMatrix();
+    camera.position.copy(was.pos); controls.target.copy(was.tgt); controls.update();
     if (url.length < 3000) return;   // (a blank capture: keep the icon)
     thumbs.set(key, url);
-    store.set(`thumb.${key}`, url);
+    store.set(`thumb2.${key}`, url);
     const el = $("list").querySelector(`.card[data-k="${key}"] .thumb`);
     if (el) { el.style.backgroundImage = `url(${url})`; el.textContent = ""; }
   }
@@ -419,7 +553,12 @@ export async function startLab() {
 
   // ── Keys ────────────────────────────────────────────────────────────────────────────────────
   addEventListener("keydown", (e) => {
-    if (e.target === $("search")) { if (e.key === "Escape") { $("search").value = ""; query = ""; renderList(); $("search").blur(); } return; }
+    // the catalogue: Tab opens / closes it (from anywhere but a text field), Esc closes it
+    if (e.key === "Tab" && e.target !== $("vNote") && e.target !== $("search")) { e.preventDefault(); toggleBrowser(); return; }
+    if (browserOpen) { if (e.key === "Escape") toggleBrowser(false); return; }
+    if (e.target === $("vNote")) { if (e.key === "Enter") $("vNote").blur(); return; }
+    if (e.target === $("search")) { if (e.key === "Escape") { setQuery(""); $("search").blur(); } return; }
+    if (e.key === "n" || e.key === "N") { nextToJudge(); return; }
     const list = visible(), i = list.indexOf(cur?.key);
     if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); show(list[(i + 1) % list.length]); }
     else if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); show(list[(i - 1 + list.length) % list.length]); }

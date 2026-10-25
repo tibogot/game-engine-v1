@@ -86,6 +86,38 @@ function horseLabAnimsPlugin() {
   };
 }
 
+// The alg-rts lab's VERDICTS (dev only, 2026-10-25 — you judge every piece in the lab): GET /__alg-lab/verdicts reads
+// games/alg-rts/labVerdicts.json; POST { key, v, note } sets one piece's (v null: cleared). The repo's record of the pass.
+const ALG_VERDICTS = path.join(__dirname, "games/alg-rts/labVerdicts.json");
+function algLabVerdictsPlugin() {
+  return {
+    name: "alg-lab-verdicts",
+    configureServer(server) {
+      server.middlewares.use("/__alg-lab/verdicts", (req, res, next) => {
+        const read = () => (fs.existsSync(ALG_VERDICTS) ? JSON.parse(fs.readFileSync(ALG_VERDICTS, "utf8")) : {});
+        res.setHeader("Content-Type", "application/json");
+        res.setHeader("Cache-Control", "no-store");
+        if (req.method === "GET") return res.end(JSON.stringify(read()));
+        if (req.method !== "POST") return next();
+        let body = "";
+        req.on("data", (c) => { body += c; if (body.length > 1e5) req.destroy(); });
+        req.on("end", () => {
+          try {
+            const { key, v, note } = JSON.parse(body);
+            if (!/^[A-Za-z0-9_]{1,60}$/.test(key ?? "")) throw new Error("bad key");
+            const all = read();
+            if (v) all[key] = { v: String(v).slice(0, 20), note: String(note ?? "").slice(0, 500), at: new Date().toISOString().slice(0, 10) };
+            else delete all[key];
+            const sorted = Object.fromEntries(Object.keys(all).sort().map((k) => [k, all[k]]));
+            fs.writeFileSync(ALG_VERDICTS, `${JSON.stringify(sorted, null, 1)}\n`);
+            res.end(JSON.stringify(sorted));
+          } catch (e) { res.statusCode = 400; res.end(JSON.stringify({ error: String(e) })); }
+        });
+      });
+    },
+  };
+}
+
 // Fire-bake lab (dev only): POST /__fire-bake/save?name=fp_blast_a&w=1536&h=1536&q=92
 // with raw RGBA bytes writes public/textures/fx/firepro/<name>.webp (PIL, as
 // tools/bakeSixWaySmoke.mjs: q=-1 lossless); a JSON body (?name=…&json=1) writes <name>.json.
@@ -149,12 +181,13 @@ function fireBakePlugin() {
 }
 
 export default defineConfig({
-  plugins: [trunkManifestPlugin(), horseLabAnimsPlugin(), fireBakePlugin()],
+  plugins: [trunkManifestPlugin(), horseLabAnimsPlugin(), fireBakePlugin(), algLabVerdictsPlugin()],
   // The fire-bake lab writes its books there: a watched write reloaded the lab between
   // the atlases and their .json (the json went stale against the new images).
   // games/thunderline: worked on in parallel from its OWN dev server (hot reload off, port 5187, its
   // scratch config re-enables the watch there), so its edits never reload this server's pages.
-  server: { watch: { ignored: ["**/public/textures/fx/firepro/**", "**/games/thunderline/**"] } },
+  // (the lab's verdicts file: written while the lab is open — a watched write would reload it)
+  server: { watch: { ignored: ["**/public/textures/fx/firepro/**", "**/games/thunderline/**", "**/games/alg-rts/labVerdicts.json"] } },
   resolve: {
     alias: [
       {

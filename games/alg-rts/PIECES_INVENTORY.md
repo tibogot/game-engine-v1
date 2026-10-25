@@ -5,6 +5,10 @@ You: "be careful with some assets not being in the lab … I'm very confused, we
 **One row per piece.** It says where the piece appears, what the game actually draws today, and the piece's entry in
 the lab (`games/alg-rts/lab.html?p=<entry>`). The **Verdict** column is yours: keep · improve · redo · remove.
 
+**Your verdicts are set in the lab:** the « Your verdict » box (keep · improve · redo · remove · parked, with a note)
+saves to `games/alg-rts/labVerdicts.json`, the record of the pass. The Verdict column below is a summary of it.
+The lab's « Verdict: Not judged yet » filter and **N** (next to judge) walk through what is left.
+
 **Kept in step by `npm test`:**
 - `labCatalog.js PLACED` maps every placement key and every Blender kit type to its lab entry.
 - `tools/labCoverageTest.mjs` reads the placement code itself: `showroom.js`, `algLandmarks.js`, `algGame.js`,
@@ -98,7 +102,7 @@ the lab (`games/alg-rts/lab.html?p=<entry>`). The **Verdict** column is yours: k
 | Piece | Maps | Game draws | Lab entry | Verdict |
 |---|---|---|---|---|
 | Sandstone rocks (mesa, block, low) | all but CO | generator | rocheBanc, rocheBloc, rocheDalle | |
-| Rock outcrops / boulders | OA NA TR MQ | scanned (boulders.glb) | — **rock-lab.html: to fold in next** | |
+| Rock outcrops / boulders | OA NA TR MQ | scanned (boulders.glb, 3 scans) | scannedBoulders | |
 | Loose stones | all but CO | scans + procedural | — (scattered by the terrain) | |
 | Plants: 14 species + the steppe | all | the engine's foliage | plant_* , plantSteppe | |
 
@@ -122,6 +126,7 @@ the lab (`games/alg-rts/lab.html?p=<entry>`). The **Verdict** column is yours: k
 
 ## Next for the organisation
 
-1. **Fold `rock-lab.html` into the lab**, as was done with the plants, so the outcrops and boulders get their entries.
+1. ~~Fold the rock lab in~~ — it is a formation EDITOR (sliders, compose with a gizmo, saved formations): it stays its own
+   tool page; the scanned boulders got their entry in the lab's Rocks section instead (2026-10-25).
 2. **Fold the vehicle and weapon labs in** as panels: Fire is already there.
 3. Later, a **shared lab shell** in the engine, with one catalogue per game.

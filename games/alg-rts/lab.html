@@ -23,15 +23,45 @@
       #side h1 { margin: 0 0 2px; font-size: 15px; letter-spacing: 0.12em; color: var(--gold2); text-transform: uppercase; }
       #side .sub { color: var(--dim); font-size: 12.5px; }
       #sections { display: flex; gap: 4px; margin-top: 10px; }
-      #sections .sec { flex: 1; border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; padding: 6px 4px;
+      #sections .sec, #bSections .sec { flex: 1; border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; padding: 6px 4px;
         cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; line-height: 1.2; }
-      #sections .sec:hover { border-color: var(--gold); }
-      #sections .sec.on { background: var(--gold); color: #000; border-color: var(--gold); }
-      #sections .sec small { display: block; font-weight: 400; font-size: 11px; opacity: 0.8; }
+      #sections .sec:hover, #bSections .sec:hover { border-color: var(--gold); }
+      #sections .sec.on, #bSections .sec.on { background: var(--gold); color: #000; border-color: var(--gold); }
+      #sections .sec small, #bSections .sec small { display: block; font-weight: 400; font-size: 11px; opacity: 0.8; }
       #search { width: 100%; margin-top: 10px; padding: 8px 10px; border-radius: var(--r); border: 1px solid var(--line); background: #000;
         color: var(--text); font: inherit; outline: none; }
       #search:focus { border-color: var(--gold); }
-      .filters { padding: 4px 14px 8px; border-bottom: 1px solid var(--line); }
+      .filters { padding: 6px 14px 10px; border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 5px; }
+      .srow { display: flex; gap: 6px; margin-top: 10px; } .srow #search { margin-top: 0; flex: 1; }
+      #browseAll { border: 1px solid var(--gold); background: var(--panel2); color: var(--gold2); border-radius: var(--r); padding: 0 10px; cursor: pointer; font: inherit; font-size: 13px; white-space: nowrap; }
+      #browseAll:hover { background: var(--gold); color: #000; }
+      /* the compact filters: one dropdown a group */
+      .fsel { flex: 1 1 45%; min-width: 0; background: var(--panel2); color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; font: inherit; font-size: 12.5px; }
+      .fsel.on { border-color: var(--gold); color: var(--gold2); font-weight: 600; }
+      /* the groups */
+      .ghead { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: baseline; padding: 8px 2px 2px; cursor: pointer;
+        color: var(--gold2); font-weight: 700; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--line); user-select: none; }
+      .ghead small { color: var(--dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+      .ghead:hover span { color: var(--gold); }
+      /* your verdicts */
+      .thumb { position: relative; }
+      .vb { position: absolute; right: 4px; top: 4px; font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px; color: #000; }
+      .v-keep { background: #7fc97a; } .v-improve { background: #e8c25a; } .v-redo { background: #e8904a; } .v-remove { background: #e06a5a; } .v-parked { background: #8fb4d8; }
+      .vbtn.on { color: #000; font-weight: 700; border-color: transparent; }
+      .vbtn:not(.on) { background: var(--panel2); }
+      #vNote { width: 100%; margin-top: 6px; padding: 5px 8px; border-radius: 6px; border: 1px solid var(--line); background: #000; color: var(--text); font: inherit; font-size: 12.5px; box-sizing: border-box; }
+      /* the catalogue, full screen */
+      #browser { position: fixed; inset: 0; z-index: 40; background: #0c0905; display: none; flex-direction: column; }
+      #browser.open { display: flex; }
+      .bbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+      .bbar h2 { margin: 0; font-size: 15px; letter-spacing: 0.12em; color: var(--gold2); text-transform: uppercase; }
+      #bSections { display: flex; gap: 4px; } #bSections .sec { padding: 5px 10px; }
+      #bSearch { width: 220px; padding: 7px 10px; border-radius: var(--r); border: 1px solid var(--line); background: #000; color: var(--text); font: inherit; outline: none; }
+      #bFilters { display: flex; gap: 5px; } #bFilters .fsel { flex: none; }
+      .bcount { color: var(--dim); font-size: 13px; margin-left: auto; }
+      .bclose { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 15px; }
+      .bgrid { flex: 1; overflow-y: auto; padding: 8px 18px 24px; display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr)); grid-auto-rows: max-content; gap: 10px; align-content: start; }
+      .bgrid .thumb { height: 104px; }
       .frow { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0; align-items: center; }
       .frow > span { width: 54px; color: var(--gold2); font-size: 11.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
       .chip { border: 1px solid var(--line); background: var(--panel2); color: var(--text); border-radius: 999px; padding: 3px 9px; cursor: pointer;
@@ -83,7 +113,7 @@
         <h1>Lab</h1>
         <div class="sub">Every asset in the game</div>
         <nav id="sections"></nav>
-        <input id="search" type="search" placeholder="Search… (/)" autocomplete="off" />
+        <div class="srow"><input id="search" type="search" placeholder="Search… (/)" autocomplete="off" /><button id="browseAll" title="Tab">⊞ Browse all</button></div>
       </header>
       <div class="filters" id="filters"></div>
       <div id="count"></div>

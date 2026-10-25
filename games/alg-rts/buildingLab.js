@@ -42,6 +42,7 @@ import { buildLookout, buildMineMarker, buildRubbleHeap, buildSasPost, buildTele
 import { buildBeehives, buildBurntFarm, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
 import { loadPenProps } from "./algPenProps.js";
+import { scanOutcropParts } from "./algStones.js";
 import { SUN } from "./vehicleLab.js";
 import { siteBags, simulatedWallMesh, loadSandbagWall as loadSimBags } from "./algSandbags.js";
 import { kitView } from "./showroom.js";
@@ -178,6 +179,7 @@ function pointMarks(kindKey) {
   POINT.kind = kindKey;
   const make = (r) => createPointMark({ radius: r });
   const marks = make(POINT_KINDS[kindKey].R);
+  marks.group.userData.noFrame = true;   // (a ground overlay: the lab's thumbnail frames the point, not its 22 m ring)
   // A new radius: the marks rebuilt in place (their geometry is made at their radius).
   const resize = (r) => {
     const parent = marks.group.parent, next = make(r);
@@ -247,6 +249,7 @@ function plantField(fill, w, h, d) {
   const g = new THREE.Group();
   // (its size for the lab's framing: the instanced plants give the bounds nothing to measure — an invisible box)
   const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d).translate(0, h / 2, 0), new THREE.MeshBasicMaterial({ visible: false }));
+  box.userData.frame = true;   // (the lab's thumbnail frames it — lab.js frameBox)
   g.add(box);
   const pf = new PlacedFoliage({ scene: g, lodDistances: [60, 140], shadowLods: 3 });
   pf.setSunDir(SUN.dir);
@@ -678,6 +681,7 @@ export const BUILDINGS = {
 // props, the SAS post, the kits' extras — each as the game builds it (several seeds or kinds side by side where the
 // game varies them). The inventory: PIECES_INVENTORY.md; tools/labCoverageTest.mjs keeps the two in step.
 /** Kit geometries in a row, `step` m apart (one lab version). */
+let SCANS = null;   // (the scanned boulders, loaded by their entry)
 function kitRow(geos, step) {
   const g = new THREE.Group();
   geos.forEach((geo, i) => { const m = kitView(geo); m.position.x = (i - (geos.length - 1) / 2) * step; g.add(m); });
@@ -714,6 +718,11 @@ Object.assign(BUILDINGS, {
   villagePropsBlender: { label: "Village props (Blender)", gap: 18, prepare: () => loadHouses("vprops"), before: () => houseRow(VPROP_TYPES, "intact", 3), tags: ["VILLAGE PROPS"], note: "the village props kit (tools/blender/villageProps.py): well, trough, jars, bench, oven, hay, wood, hives — the new Aurès and the training camp." },
   telegraphPole: { label: "Telegraph pole", gap: 6, before: () => buildTelegraphPole({}), tags: ["TELEGRAPH POLE"], note: "the telegraph line's pole (rtsAlgeria buildTelegraphPole); the wires are drawn between them in the game." },
   rubbleKit: { label: "Rubble (Blender)", gap: 26, prepare: () => loadHouses("rubble"), before: () => houseRow(RUBBLE_TYPES, "intact", 5), tags: ["RUBBLE"], note: "a collapsing house's heaps and flying chunks (tools/blender/rubble.py — algTownDamage)." },
+  // THE SCANNED BOULDERS (Poly Haven scans, boulders.glb — algStones scanOutcropParts): the game's outcrops and big
+  // stones, at the outcrops' 3.4 m. (The sandstone formations have their own tool: rock-lab.html.)
+  scannedBoulders: { label: "Scanned boulders", gap: 26, prepare: async () => { SCANS = await scanOutcropParts(3.4); },
+    before: () => { const g = new THREE.Group(); (SCANS ?? []).forEach((p, i) => { const m = new THREE.Mesh(p.geometry, p.material); m.castShadow = m.receiveShadow = true; m.position.x = (i - ((SCANS.length - 1) / 2)) * 4.6; g.add(m); }); return labPiece(g); },
+    tags: ["SCANNED BOULDERS"], note: "the boulder scans (three today) the outcrops and the big loose stones use (tools/blender/scanBoulders.py → boulders.glb), at an outcrop's size." },
   rubbleHeapOld: { label: "Rubble heap (old)", gap: 8, before: () => buildRubbleHeap({}), tags: ["RUBBLE HEAP (OLD)"], note: "the old heap a shelled kit house leaves (rtsAlgeria buildRubbleHeap — algDamage)." },
 });
 

@@ -36,6 +36,7 @@ export const META = {
   rubbleKit: { side: "civil", kind: "ruine", maps: ["aures", "abdi"], status: "jeu" },
   rubbleHeapOld: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
   mzab_mur: { side: "civil", kind: "village", maps: ["abdi"], status: "jeu" },
+  scannedBoulders: { side: "nature", kind: "nature", maps: ["aures"], status: "jeu" },
   ...Object.fromEntries(PLANT_KEYS.map((k) => [`plant_${k}`, { side: "nature", kind: "plant", maps: ALL, status: "jeu" }])),
   plantSteppe: { side: "nature", kind: "plant", maps: ["aures", "kantara"], status: "jeu" },
   parcAuto: { side: "fr", kind: "base", maps: ["aures"], status: "jeu" },
@@ -132,7 +133,7 @@ export const PLACED = {
 export const SYSTEMS = {
   "village props (old, aures)": "villagePropsOld", "telegraph poles": "telegraphPole", "old field walls": "fieldWallOld", "port (coast)": "port",
   "sandstone rocks": "rocheBanc", "rubble heap (old house hit)": "rubbleHeapOld", "plants (foliage presets)": "plantSteppe",
-  "rock outcrops / scanned boulders": { none: "the rock lab (rock-lab.html) — to fold in next" },
+  "rock outcrops / scanned boulders": "scannedBoulders",   // (the sandstone formations' editor stays its own tool page: rock-lab.html)
   "loose stones (algStones)": { none: "scattered by the terrain: judged in the game" },
   "flags, windsock (live cloth)": { none: "animated props: judged in the game" },
   "field surfaces (old aures)": { none: "shader-draped ground: judged in the game" },

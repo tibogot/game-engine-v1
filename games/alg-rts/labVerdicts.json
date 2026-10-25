@@ -1,0 +1,27 @@
+{
+ "burntFarm": {
+  "v": "redo",
+  "note": "very cheap; becomes the new farmstead's burnt state",
+  "at": "2026-10-25"
+ },
+ "farmstead": {
+  "v": "redo",
+  "note": "in Blender: intact / damaged / burnt, the pen and the village props",
+  "at": "2026-10-25"
+ },
+ "posteBlender": {
+  "v": "keep",
+  "note": "one entry: the old post, photo and sim-bags entries removed",
+  "at": "2026-10-25"
+ },
+ "zeriba": {
+  "v": "keep",
+  "note": "the old fence kept; the inside now the Blender trough and haystack",
+  "at": "2026-10-25"
+ },
+ "zeribaParked": {
+  "v": "parked",
+  "note": "the Blender thorn ring, for another asset later (a thorn barricade?)",
+  "at": "2026-10-25"
+ }
+}
