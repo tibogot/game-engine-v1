@@ -1,14 +1,4 @@
 {
- "burntFarm": {
-  "v": "redo",
-  "note": "very cheap; becomes the new farmstead's burnt state",
-  "at": "2026-10-25"
- },
- "farmstead": {
-  "v": "redo",
-  "note": "in Blender: intact / damaged / burnt, the pen and the village props",
-  "at": "2026-10-25"
- },
  "fortBlender": {
   "v": "improve",
   "note": "the pit's earth: low-resolution texture",

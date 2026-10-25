@@ -466,7 +466,7 @@ export function buildZeriba({ seed = 1960, r = 6.5, groundAt = FLAT, inside = fa
     parts.push({ geo: earthBerm([[1.2, -0.15], [0.9, 0.35], [0.4, 0.6], [0.001, 0.65]], { seed, segs: 12, rJit: 0.15, yJit: 0.08 }), pos: [2, fg, 2.2], mat: MAT.thatch, tone: 0.45 });
   }
   const geo = finish(parts, { hx: r + 1.2, hz: r + 1.6, height: 1.8 });
-  geo.userData.pens = inside ? [] : penSpots([{ kind: "trough", x: -1.5, z: 1.5, yaw: 0.1 }, { kind: "hay", x: 2.2, z: 2.0, yaw: R() * 6.28 }], groundAt);
+  geo.userData.pens = inside ? [] : penSpots([{ kind: "trough", x: -1.5, z: 1.5, yaw: 0.1 }, { kind: "hay", x: 2.2, z: 2.0, yaw: R() * 6.28, scale: 0.6 }], groundAt);
   // Men push through the thorn; a vehicle does not (navGrid vehicleOnly, 2026-10-06).
   geo.userData.navRects = [{ ...geo.userData.footprint, vehicleOnly: true }];
   return geo;
@@ -581,20 +581,25 @@ function seatedHouse(parts, R, groundAt, o) {
  * straw heap, a fig and an olive or two, prickly pear along the back.
  * Front (the yard's gate) at -Z.
  */
-export function buildFarmstead({ seed = 1970, groundAt = FLAT } = {}) {
+/**
+ * THE FARMSTEAD'S LAYOUT — ONE, fixed (2026-10-25: the farm redone in Blender, tools/blender/farmstead.py, the same
+ * numbers there; seeded sizes would not match its one model): the house, the byre, the yard, the gate, the pen.
+ */
+export const FARM = { w: 8.2, d: 5.0, h: 2.9, bw: 5.5, bd: 3.8, gate: 1.3 };
+export function buildFarmstead({ seed = 1970, groundAt = FLAT, burnt = false } = {}) {
   const R = rng(seed);
   const parts = [];
   const houses = [];
   // The house along the back, the byre down the left side.
-  const w = 7.5 + R() * 2, d = 4.8 + R() * 0.6;
-  const h1 = seatedHouse(parts, R, groundAt, { x: 0.6, z: 3.2, yaw: 0, w, d, h: 2.7 + R() * 0.4, storey2: R() < 0.25, doorFace: -1, leanTo: false });
+  const w = FARM.w, d = FARM.d;
+  const h1 = seatedHouse(parts, R, groundAt, { x: 0.6, z: 3.2, yaw: 0, w, d, h: FARM.h, storey2: false, doorFace: -1, leanTo: false });
   houses.push({ x: 0.6, z: 3.2 });
-  const bw = 5 + R(), bd = 3.8;
+  const bw = FARM.bw, bd = FARM.bd;
   const h2 = seatedHouse(parts, R, groundAt, { x: -w / 2 - bd / 2 - 0.2, z: -1.4, yaw: Math.PI / 2, w: bw, d: bd, h: 2.3, doorFace: -1, leanTo: false });
   houses.push({ x: -w / 2 - bd / 2 - 0.2, z: -1.4 });
   void h1; void h2;
   // The yard wall: from the byre's front corner round to the house's right end, a gate at the front.
-  const yx0 = -w / 2 + 0.2, yx1 = w / 2 + 1.2, yz = -5.6, gate = 0.6 + R() * 1.5;
+  const yx0 = -w / 2 + 0.2, yx1 = w / 2 + 1.2, yz = -5.6, gate = FARM.gate;
   const wallPts = [[yx0, yz], [gate - 1.3, yz], null, [gate + 1.3, yz], [yx1, yz], [yx1, 3.2 - d / 2 - 0.3]];
   const yardLines = [];
   for (let k = 0; k < wallPts.length - 1; k++) {
@@ -603,19 +608,16 @@ export function buildFarmstead({ seed = 1970, groundAt = FLAT } = {}) {
     groundWall(parts, R, groundAt, a, b, { h: 1.3, t: 0.5 });
     yardLines.push({ hard: true, pts: [a, b] });
   }
-  // The oven in the yard, a straw heap, two jars.
-  const ox = yx1 - 2.2, oz = yz + 2.2, og = groundAt(ox, oz);
-  const n0 = parts.length;
-  oven(parts, R, ox, oz, Math.PI * 1.2);
-  lift(parts, n0, og);
-  parts.push({ geo: earthBerm([[1.3, -0.1], [1.1, 0.5], [0.6, 1.0], [0.001, 1.15]], { seed: seed + 3, segs: 14, rJit: 0.12, yJit: 0.08 }), pos: [-2.2, groundAt(-2.2, -3.4), -3.4], mat: MAT.thatch, tone: 0.5 });
-  parts.push(clayJar(1.8, groundAt(1.8, 0.2) - 0.02, 0.2, 1));
-  parts.push(clayJar(2.4, groundAt(2.4, 0.4) - 0.02, 0.4, 0.85));
+  // The yard's things — the oven, the hay, the woodpile, the jars — are the game's village props on spots (alg-rts
+  // algPenProps: the Blender kit, every farm the same); a burnt farm has none.
+  const ox = yx1 - 2.2, oz = yz + 2.2;
+  const yardSpots = burnt ? [] : [{ kind: "oven", x: ox, z: oz, yaw: Math.PI * 1.2 }, { kind: "hay", x: -2.2, z: -3.4, yaw: R() * 6.28, scale: 0.7 },
+    { kind: "jars", x: 2.1, z: 0.3, yaw: 0.4 }, { kind: "wood", x: w / 2 - 1.2, z: 3.2 - d / 2 - 0.8, yaw: 0.05 }];
   // The thorn pen, out to the right of the yard: the zeriba's fence (its lumps of brush, the first pass, read as
   // baskets — you, 2026-10-25), a trough and hay inside (spots: the game's props).
   const px = yx1 + 6.5, pz = -1.5, pr = 3.6;
   zeribaFence(parts, R, px, pz, pr, groundAt);
-  const pens = penSpots([{ kind: "trough", x: px - 1.1, z: pz + 1.0, yaw: 0.2 }, { kind: "hay", x: px + 1.2, z: pz + 0.9, yaw: R() * 6.28 }], groundAt);
+  const pens = penSpots([...yardSpots, ...(burnt ? [] : [{ kind: "trough", x: px - 1.1, z: pz + 1.0, yaw: 0.2 }, { kind: "hay", x: px + 1.2, z: pz + 0.9, yaw: R() * 6.28, scale: 0.45 }])], groundAt);   // (the pen's fodder heap: a stack filled the pen)
   const trees = [
     { kind: "fig", x: yx1 - 1.5, z: yz + 4.8, scale: 0.9 + R() * 0.25, seed: Math.floor(R() * 1000) },
     { kind: "olive", x: -w / 2 - 6, z: 5.5, scale: 0.85 + R() * 0.3, seed: Math.floor(R() * 1000) },

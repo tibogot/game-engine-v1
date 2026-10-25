@@ -21,7 +21,7 @@ import { LAYOUT, MAP, PLAY as PLAY_BOX, VIEW_YAW } from "./layout.js";
 const PLAY = MAP.sceneryBox ?? PLAY_BOX;
 import { TRACK_LINES } from "./algTracks.js";
 import * as THREE from "three";
-import { buildBurntFarm, buildFarmstead, buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin, buildRuinedHut, buildTerraces } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildFarmstead, buildRomanArch, buildRomanBlockField, buildRomanColonnade, buildRomanColumn, buildRomanOilPress, buildRomanRuin, buildRuinedHut, buildTerraces } from "../../v3/render/objects/rtsAlgVillage.js";
 import { SANDSTONE_GAME, SANDSTONE_SHAPES } from "./algSandstone.js";
 import { buildArmsCache, buildLookout, buildRefuge, buildRockOutcrop } from "../../v3/render/objects/rtsAlgeria.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
@@ -75,7 +75,7 @@ export function landmarkEntries(app, list) {
   // The ruins FIRST: placed after the farmsteads they found no room (one of 3).
   const want = [
     ...Array.from({ length: P.roman }, (_, i) => ({ key: `romanRuin${i + 1}`, build: (o) => buildRomanRuin({ ...o, seed: 1980 + i * 5, detail: 2 }), track: false })),   // detail 2: the buildings lab, 2026-10-07
-    ...Array.from({ length: P.burnt }, (_, i) => ({ key: `burntFarm${i + 1}`, build: (o) => buildBurntFarm({ ...o, seed: 1990 + i }), track: true })),
+    ...Array.from({ length: P.burnt }, (_, i) => ({ key: `burntFarm${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1990 + i, burnt: true }), track: true }   /* (the farmstead's layout: its Blender burnt state swapped in — algBuild) */)),
     ...Array.from({ length: P.farmsteads }, (_, i) => ({ key: `mechtaFarm${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1970 + i * 7 }), track: true })),
     // Last, and closer together: small, they fill the gaps the big pieces left.
     ...Array.from({ length: P.huts }, (_, i) => ({ key: `ruinedHut${i + 1}`, build: (o) => buildRuinedHut({ ...o, seed: 2010 + i * 3 }), track: false, spacing: P.hutSpacing })),

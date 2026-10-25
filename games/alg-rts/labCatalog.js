@@ -22,8 +22,7 @@ export const META = {
   koubba: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
   cemetery: { side: "civil", kind: "village", maps: ["aures"], status: "jeu" },
   villageWell: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
-  farmstead: { side: "civil", kind: "village", maps: ["aures"], status: "jeu" },
-  burntFarm: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
+  farmstead: { side: "civil", kind: "village", maps: ["aures"], status: "verdict" },
   ruinedHut: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
   garden: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
   threshingFloor: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
@@ -110,7 +109,7 @@ export const PLACED = {
   mechta: "hameau", dechra: "dechraNouveau", ksar: "ksarNouveau", koubba: "koubba", cemetery: "cemetery", wellDechra: "villageWell", wellHamlet: "villageWell",
   zeriba: "zeriba", garden: "garden", thresh: "threshingFloor", terraces: "terraces", terracesOpen: "terraces",
   // the landmarks (algLandmarks.js, algGame.js MAP.farmsteads)
-  mechtaFarm: "farmstead", mechtaFarmMap: "farmstead", burntFarm: "burntFarm", ruinedHut: "ruinedHut",
+  mechtaFarm: "farmstead", mechtaFarmMap: "farmstead", burntFarm: "farmstead", ruinedHut: "ruinedHut",
   romanRuin: "ruineRomaine", romanArch: "arc", romanColonnade: "colonnade", romanColumn: "colonne", romanPress: "pressoir", romanRoad: "voie",
   // the buildables (algBuild.js BUILDS — the ones not placed above)
   forwardPost: "posteAvanceBlender", aidStation: "secoursBlender", fortPoint: "fortBlender", infirmary: "infirmBlender",
@@ -122,7 +121,7 @@ export const PLACED = {
   "kit:mirador": "miradorBlender", "kit:gear": "miradorBlender", "kit:barbed": "barbelesBlender", "kit:mg": "nidBlender", "kit:gun": "nidBlender",
   "kit:mortar": "mortierBlender", "kit:m81": "mortierBlender", "kit:point": "fortBlender", "kit:sltower": "projBlender", "kit:lamp": "projBlender",
   "kit:fwdradio": "posteAvanceBlender", "kit:aidtent": "secoursBlender", "kit:aidmark": "secoursBlender", "kit:refuge": "refugeBlender", "kit:infirm": "infirmBlender",
-  "kit:post": "posteBlender", "kit:lookout": "lookout", "kit:minemark": "mineMarker",
+  "kit:post": "posteBlender", "kit:lookout": "lookout", "kit:minemark": "mineMarker", "kit:farm": "farmstead",
   ...Object.fromEntries(["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "hay", "wood", "hives"].map((t) => [`kit:${t}`, "villagePropsBlender"])),
   ...Object.fromEntries(["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"].map((t) => [`kit:${t}`, "rubbleKit"])),
   ...Object.fromEntries(["grenade", "smoke", "flare", "cutters", "mine", "helmet", "kepi", "jerrycan", "ammobox", "detonator", "detector", "radio", "lmg", "bazooka", "flamer", "sniper", "tools", "shell", "shotgun", "mapcase", "spade"]

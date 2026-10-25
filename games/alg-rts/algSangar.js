@@ -26,6 +26,7 @@ import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
+import { buildFarmstead } from "../../v3/render/objects/rtsAlgVillage.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -463,6 +464,10 @@ export const loadLookout = () => loadBlenderPiece("flnmarks", "lookout", () => b
 export const lookoutGeometry = () => pieceGeometry("flnmarks", "lookout");
 export const loadMineMarker = () => loadBlenderPiece("flnmarks", "minemark", () => buildMineMarker());
 export const mineMarkerGeometry = () => pieceGeometry("flnmarks", "minemark");
+/** THE FARMSTEAD (tools/blender/farmstead.py, 2026-10-25): the old kit's layout data (FARM — its cover, navigation, the
+ *  yard's spots), the Blender model drawn; its burnt state the map's burnt farm. */
+export const loadFarmstead = () => loadBlenderPiece("farmstead", "farm", () => buildFarmstead({ seed: 1970 }), null, { stone: false });
+export const farmGeometry = () => pieceGeometry("farmstead", "farm");
 /**
  * THE FM ON THE LIP (2026-10-25, you: the sangar's "weapon seems to be floating"): its pivot was the OLD sangar's height
  * (rtsAlgeria buildSangar, 1.28 m), level on its bipod. Unmanned, the gun LIES on the parapet (bipod folded): rays down
@@ -537,6 +542,13 @@ export function dropScreenPlants(plants, mesh) {
  * The pre-placed copies of a piece (the showroom's, the landmarks' — built with the old geometry before the Blender
  * one loaded): their geometry and material swapped, each keeping its own data (footprint, name).
  */
+/** `q` given every attribute `from` has and it lacks, zero-filled (a drawn mesh's shadow-pass state keeps its old
+ *  attribute list — the trap below; setPieceState too: the burnt farm, swapped then set burnt, 2026-10-25). */
+function padAttributes(q, from) {
+  if (!q || !from) return;
+  const cnt = q.attributes.position.count;
+  for (const [k, a] of Object.entries(from.attributes)) if (!q.attributes[k]) q.setAttribute(k, new THREE.BufferAttribute(new Float32Array(cnt * a.itemSize), a.itemSize));
+}
 export function swapPlaced(showroom, re, geo, app = null) {
   if (!geo) return 0;
   let n = 0;
@@ -565,10 +577,7 @@ export function swapPlaced(showroom, re, geo, app = null) {
     // (the OLD geometry's attributes the new lacks kept, zero-filled — the kit's matId / tone / ao: a mesh already DRAWN
     // keeps its shadow-pass render state with the old attribute list, and its next draw read an attribute the new has
     // not — "reading 'id'", the render loop stopped (the post, the training's range, 2026-10-22). Both levels.)
-    for (const q of [g, g.userData.farGeometry].filter(Boolean)) {
-      const cnt = q.attributes.position.count;
-      for (const [k, a] of Object.entries(oldGeo.attributes)) if (!q.attributes[k]) q.setAttribute(k, new THREE.BufferAttribute(new Float32Array(cnt * a.itemSize), a.itemSize));
-    }
+    for (const q of [g, g.userData.farGeometry].filter(Boolean)) padAttributes(q, oldGeo);
     n++;
   }
   return n;
@@ -661,6 +670,10 @@ export function setPieceState(mesh, state) {
     if (!g) return false;
     near = g.near.clone(); near.userData = ud;          // (the copy's own data on its own clone — the cover reads it)
     far = g.far ?? null;
+    // (its material reads the earth mask — algGroundBlend earthDetail: the state's geometry carries one too, or the
+    // draw finds no attribute — a render error "reading 'id'", the burnt farm, 2026-10-25)
+    ensureEarthMask(near); if (far) ensureEarthMask(far);
+    padAttributes(near, mesh.geometry); padAttributes(far, mesh.geometry);   // (the drawn mesh's attributes kept)
   }
   if (L) { L.near = near; L.far = far ?? near; mesh.geometry = near; } else mesh.geometry = near;
   mesh.userData.pieceState = state;

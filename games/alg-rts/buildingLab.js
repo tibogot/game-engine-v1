@@ -25,7 +25,7 @@ await loadSandbags();
 await loadSandbagWall();
 import { loadZeriba, zeribaMesh } from "./algZeriba.js";
 import { buildPortBlock } from "./algPort.js";
-import { buildFarmstead, buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildZeriba } from "../../v3/render/objects/rtsAlgVillage.js";
 await loadZeriba();
 await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats } from "./algMotorPool.js";
@@ -34,8 +34,8 @@ import { loadPointWalls, pointWalls } from "./algPointFlags.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
 import { buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
-import { loadLookout, loadMineMarker } from "./algSangar.js";
-import { buildBeehives, buildBurntFarm, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
+import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker } from "./algSangar.js";
+import { buildBeehives, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
 import { loadPenProps } from "./algPenProps.js";
 import { scanOutcropParts } from "./algStones.js";
@@ -695,10 +695,11 @@ Object.assign(BUILDINGS, {
   koubba: { label: "Koubba", gap: 12, before: () => buildKoubba({}), tags: ["KOUBBA"], note: "the marabout's domed tomb by the villages (rtsAlgVillage buildKoubba)." },
   cemetery: { label: "Cemetery", gap: 16, before: () => buildCemetery({}), tags: ["CEMETERY"], note: "the village cemetery (rtsAlgVillage buildCemetery)." },
   villageWell: { label: "Village well (old)", gap: 6, before: () => buildVillageWell({}), tags: ["WELL (OLD)"], note: "the old procedural well by the hamlets and the dechra (the Blender well: « Village props (Blender) »)." },
-  farmstead: { label: "Farmstead", gap: 26, prepare: () => loadPenProps(),
-    before: () => labPiece(kitView(buildFarmstead({ seed: 1970 }))), middle: () => labPiece(kitView(buildFarmstead({ seed: 1977 }))), after: () => labPiece(kitView(buildFarmstead({ seed: 1984 }))),
-    tags: ["FARMSTEAD 1", "FARMSTEAD 2", "FARMSTEAD 3"], note: "the lone farms of the old Aurès and the training camp (rtsAlgVillage buildFarmstead) — three of the game's seeds: the house, the byre, the yard wall, the thorn pen. On flat ground here; in the game seated on the slope." },
-  burntFarm: { label: "Burnt farm", gap: 20, before: () => buildBurntFarm({}), tags: ["BURNT FARM"], note: "the burnt-out farm on the old Aurès (rtsAlgVillage buildBurntFarm)." },
+  // THE FARMSTEAD IN BLENDER (2026-10-25, you: "do the farmstead" — tools/blender/farmstead.py): intact with its yard's
+  // props (the village props kit on its spots, as the game), damaged, burnt (the map's burnt farm)
+  farmstead: { label: "Farmstead", gap: 30, prepare: () => Promise.all([loadFarmstead(), loadPenProps()]),
+    before: () => labPiece(kitView(farmGeometry())), middle: () => labPiece(houseMesh("farm", "damaged")), after: () => labPiece(houseMesh("farm", "ruin")),
+    tags: ["FARMSTEAD · NEW", "FARMSTEAD · DAMAGED", "FARMSTEAD · BURNT"], note: "the Aurès' lone farm: the stone house and byre, the yard wall and gate, the thorn pen; its oven, hay, woodpile, jars and trough the village props kit. Burnt: the map's burnt farm." },
   ruinedHut: { label: "Ruined hut", gap: 10, before: () => buildRuinedHut({ seed: 2010 }), middle: () => buildRuinedHut({ seed: 2013 }), after: () => buildRuinedHut({ seed: 2016 }),
     tags: ["RUINED HUT 1", "RUINED HUT 2", "RUINED HUT 3"], note: "the ruined gourbis scattered over the old Aurès (rtsAlgVillage buildRuinedHut), three of the game's seeds." },
   garden: { label: "Walled garden", gap: 22, before: () => buildGarden({ kind: "olive" }), middle: () => buildGarden({ kind: "mixed" }), after: () => buildGarden({ kind: "fig" }),

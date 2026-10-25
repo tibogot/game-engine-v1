@@ -163,5 +163,5 @@ export const KIT_BLEND = {
   points: { fade: 0.35, tint: 0.25 }, sangar: { fade: 0.5, tint: 0.3 }, mgnest: { fade: 0.45, tint: 0.3 }, mortarpit: { fade: 0.45, tint: 0.3 },
   fortpoint: { fade: 0.4, tint: 0.3 }, armscache: { fade: 0.4, tint: 0.3 }, ambushscreen: { fade: 0.5, tint: 0.3 },
   mirador: { fade: 0.5, tint: 0.2 }, sltower: { fade: 0.5, tint: 0.2 }, fieldposts: { fade: 0.35, tint: 0.25 }, flnposts: { fade: 0.5, tint: 0.3 },
-  motorPool: { fade: 0.5, tint: 0.12, strength: 0.8 }, flnmarks: { fade: 0.45, tint: 0.3 },
+  motorPool: { fade: 0.5, tint: 0.12, strength: 0.8 }, flnmarks: { fade: 0.45, tint: 0.3 }, farmstead: { fade: 0.9, tint: 0.1, strength: 0.75 },
 };

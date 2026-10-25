@@ -262,7 +262,8 @@ def build(K, name, spec, state, seed):
             if s < 0 and "arcade" in spec: zf = Z0 - spec["arcade"][0]
             K.rod(f"Spout{k}", (x, ROOF + 0.3, zf - s * 0.1), (x, ROOF + 0.22, zf + s * 0.6), 0.075, "woodDark", G, 6)
     # COPING + CRENELS on every parapet (not on an annex's side against the main block)
-    for ri, (x0, x1, z0, z1, top, isAnnex) in enumerate([] if MZAB else rects):
+    # (spec plain: a farmhouse's low earth parapet, no crenels — tools/blender/farmstead.py)
+    for ri, (x0, x1, z0, z1, top, isAnnex) in enumerate([] if MZAB or spec.get("plain") else rects):
         for fa, (a0, a1, fixed, along) in (("f", (x0, x1, z0, "x")), ("b", (x0, x1, z1, "x")), ("l", (z0, z1, x0, "z")), ("r", (z0, z1, x1, "z"))):
             if isAnnex and fa == "l": continue
             n = max(2, int((a1 - a0) / 0.95))
@@ -279,7 +280,7 @@ def build(K, name, spec, state, seed):
     # the DOOR(s)
     def door(a0, a1, mat):
         K.box(f"Step{a0}", a0 - 0.25, a1 + 0.25, 0.0, 0.18, Z0 - 0.5, Z0 + 0.02, "sill", G, 0.02)
-        K.box(f"Lintel{a0}", a0 - 0.12, a1 + 0.12, 2.3, 2.46, Z0 - 0.02, Z0 + 0.08, "woodDark", G, 0.01)
+        K.box(f"Lintel{a0}", a0 - 0.12, a1 + 0.12, 2.27, 2.46, Z0 - 0.02, Z0 + 0.08, "woodDark", G, 0.01)   # (its underside 3 cm into the opening: at 2.30, the opening's top, one plane — 2026-10-25)
         zd = Z0 + T * 0.6; mid = (a0 + a1) / 2
         for s, (xa, xb) in enumerate(((a0 + 0.03, mid - 0.006), (mid + 0.006, a1 - 0.03))):
             K.box(f"Door{a0}{s}", xa, xb, 0.02, 2.27, zd, zd + 0.06, mat, G, 0.008)
