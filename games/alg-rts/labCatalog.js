@@ -23,6 +23,7 @@ export const META = {
   cemetery: { side: "civil", kind: "village", maps: ["aures"], status: "jeu" },
   villageWell: { side: "civil", kind: "village", maps: ["aures", "abdi"], status: "jeu" },
   farmstead: { side: "civil", kind: "village", maps: ["aures"], status: "verdict" },
+  farmsteadCompare: { side: "civil", kind: "village", maps: [], status: "ancien" },
   ruinedHut: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
   garden: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },
   threshingFloor: { side: "civil", kind: "field", maps: ["aures"], status: "jeu" },

@@ -35,7 +35,7 @@ import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointG
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
 import { buildRubbleHeap, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
 import { farmGeometry, loadFarmstead, loadLookout, loadMineMarker } from "./algSangar.js";
-import { buildBeehives, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
+import { buildBeehives, buildBurntFarm as buildBurntFarmOld, buildFarmsteadOld, buildCemetery, buildFieldWallSegment, buildGarden, buildHaystack, buildKoubba, buildRuinedHut, buildTabouna, buildTerraces, buildThreshingFloor, buildVillageWell, buildWoodpile } from "../../v3/render/objects/rtsAlgVillage.js";
 import { FIELD_WALL_TYPES, RUBBLE_TYPES, VPROP_TYPES } from "./algHouse.js";
 import { loadPenProps } from "./algPenProps.js";
 import { scanOutcropParts } from "./algStones.js";
@@ -700,6 +700,11 @@ Object.assign(BUILDINGS, {
   farmstead: { label: "Farmstead", gap: 30, prepare: () => Promise.all([loadFarmstead(), loadPenProps()]),
     before: () => labPiece(kitView(farmGeometry())), middle: () => labPiece(houseMesh("farm", "damaged")), after: () => labPiece(houseMesh("farm", "ruin")),
     tags: ["FARMSTEAD · NEW", "FARMSTEAD · DAMAGED", "FARMSTEAD · BURNT"], note: "the Aurès' lone farm: the stone house and byre, the yard wall and gate, the thorn pen; its oven, hay, woodpile, jars and trough the village props kit. Burnt: the map's burnt farm." },
+  // OLD vs NEW (2026-10-25, you: "do we still have the old farm so I can compare?"): the old kit's farm and burnt farm
+  // beside the new ones — remove this entry once judged
+  farmsteadCompare: { label: "Farmstead: old vs new", gap: 44, prepare: () => Promise.all([loadFarmstead(), loadPenProps()]),
+    before: () => buildFarmsteadOld({ seed: 1970 }), middle: () => labPiece(kitView(farmGeometry())), after: () => buildBurntFarmOld({}),
+    tags: ["FARMSTEAD (OLD)", "FARMSTEAD · NEW", "BURNT FARM (OLD)"], note: "the old procedural farm (left) and the old burnt farm (right) beside the new farmstead (middle) — its burnt state: « Farmstead »." },
   ruinedHut: { label: "Ruined hut", gap: 10, before: () => buildRuinedHut({ seed: 2010 }), middle: () => buildRuinedHut({ seed: 2013 }), after: () => buildRuinedHut({ seed: 2016 }),
     tags: ["RUINED HUT 1", "RUINED HUT 2", "RUINED HUT 3"], note: "the ruined gourbis scattered over the old Aurès (rtsAlgVillage buildRuinedHut), three of the game's seeds." },
   garden: { label: "Walled garden", gap: 22, before: () => buildGarden({ kind: "olive" }), middle: () => buildGarden({ kind: "mixed" }), after: () => buildGarden({ kind: "fig" }),

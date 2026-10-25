@@ -581,6 +581,72 @@ function seatedHouse(parts, R, groundAt, o) {
  * straw heap, a fig and an olive or two, prickly pear along the back.
  * Front (the yard's gate) at -Z.
  */
+/** THE OLD FARMSTEAD, as it was before the Blender one (2026-10-25) — kept for the lab's old-vs-new comparison only. */
+export function buildFarmsteadOld({ seed = 1970, groundAt = FLAT } = {}) {
+  const R = rng(seed);
+  const parts = [];
+  const houses = [];
+  // The house along the back, the byre down the left side.
+  const w = 7.5 + R() * 2, d = 4.8 + R() * 0.6;
+  const h1 = seatedHouse(parts, R, groundAt, { x: 0.6, z: 3.2, yaw: 0, w, d, h: 2.7 + R() * 0.4, storey2: R() < 0.25, doorFace: -1, leanTo: false });
+  houses.push({ x: 0.6, z: 3.2 });
+  const bw = 5 + R(), bd = 3.8;
+  const h2 = seatedHouse(parts, R, groundAt, { x: -w / 2 - bd / 2 - 0.2, z: -1.4, yaw: Math.PI / 2, w: bw, d: bd, h: 2.3, doorFace: -1, leanTo: false });
+  houses.push({ x: -w / 2 - bd / 2 - 0.2, z: -1.4 });
+  void h1; void h2;
+  // The yard wall: from the byre's front corner round to the house's right end, a gate at the front.
+  const yx0 = -w / 2 + 0.2, yx1 = w / 2 + 1.2, yz = -5.6, gate = 0.6 + R() * 1.5;
+  const wallPts = [[yx0, yz], [gate - 1.3, yz], null, [gate + 1.3, yz], [yx1, yz], [yx1, 3.2 - d / 2 - 0.3]];
+  const yardLines = [];
+  for (let k = 0; k < wallPts.length - 1; k++) {
+    const a = wallPts[k], b = wallPts[k + 1];
+    if (!a || !b) continue;
+    groundWall(parts, R, groundAt, a, b, { h: 1.3, t: 0.5 });
+    yardLines.push({ hard: true, pts: [a, b] });
+  }
+  // The oven in the yard, a straw heap, two jars.
+  const ox = yx1 - 2.2, oz = yz + 2.2, og = groundAt(ox, oz);
+  const n0 = parts.length;
+  oven(parts, R, ox, oz, Math.PI * 1.2);
+  lift(parts, n0, og);
+  parts.push({ geo: earthBerm([[1.3, -0.1], [1.1, 0.5], [0.6, 1.0], [0.001, 1.15]], { seed: seed + 3, segs: 14, rJit: 0.12, yJit: 0.08 }), pos: [-2.2, groundAt(-2.2, -3.4), -3.4], mat: MAT.thatch, tone: 0.5 });
+  parts.push(clayJar(1.8, groundAt(1.8, 0.2) - 0.02, 0.2, 1));
+  parts.push(clayJar(2.4, groundAt(2.4, 0.4) - 0.02, 0.4, 0.85));
+  // The thorn pen, out to the right of the yard: the zeriba's fence (its lumps of brush, the first pass, read as
+  // baskets — you, 2026-10-25), a trough and hay inside (spots: the game's props).
+  const px = yx1 + 6.5, pz = -1.5, pr = 3.6;
+  zeribaFence(parts, R, px, pz, pr, groundAt);
+  const pens = penSpots([{ kind: "trough", x: px - 1.1, z: pz + 1.0, yaw: 0.2 }, { kind: "hay", x: px + 1.2, z: pz + 0.9, yaw: R() * 6.28 }], groundAt);
+  const trees = [
+    { kind: "fig", x: yx1 - 1.5, z: yz + 4.8, scale: 0.9 + R() * 0.25, seed: Math.floor(R() * 1000) },
+    { kind: "olive", x: -w / 2 - 6, z: 5.5, scale: 0.85 + R() * 0.3, seed: Math.floor(R() * 1000) },
+  ];
+  if (R() < 0.6) trees.push({ kind: "olive", x: w / 2 + 4.5, z: 7.5, scale: 0.8 + R() * 0.3, seed: Math.floor(R() * 1000) });
+  // Prickly pear along the back, behind the house.
+  const hedge = [];
+  for (let x = -w / 2 - 2; x <= w / 2 + 3; x += 1.2) if (R() > 0.15) hedge.push([x + (R() - 0.5) * 0.4, 3.2 + d / 2 + 2.2 + (R() - 0.5) * 0.4]);
+  const geo = finish(parts, { hx: (yx1 + 10.5 - (-w / 2 - bd - 0.5)) / 2, hz: 7.5, cx: (yx1 + 10.5 + (-w / 2 - bd - 0.5)) / 2, cz: 0.6, height: 3.4 });
+  geo.userData.pens = pens;
+  geo.userData.houses = scaled(houses);
+  geo.userData.trees = scaled(trees);
+  geo.userData.hedge = hedge.map(([x, z]) => [x * KIT, z * KIT]);
+  // Cover: the yard walls and the houses' walls; the open ground round them none.
+  const outline = (cx, cz, hw, hd, yaw) => {
+    const c = Math.cos(yaw), s = Math.sin(yaw), p = (lx, lz) => [cx + lx * c + lz * s, cz - lx * s + lz * c];
+    return { hard: true, pts: [p(-hw, -hd), p(hw, -hd), p(hw, hd), p(-hw, hd), p(-hw, -hd)] };
+  };
+  geo.userData.coverLines = scaledLines([...yardLines, outline(0.6, 3.2, w / 2 + 0.2, d / 2 + 0.2, 0), outline(-w / 2 - bd / 2 - 0.2, -1.4, bw / 2 + 0.2, bd / 2 + 0.2, Math.PI / 2)]);
+  geo.userData.coverPerimeter = false;
+  // The houses block; the yard, its gate and the pen stay open (men walk in).
+  const t = 1.2 / KIT;   // ≥ half a 2 m nav cell (alg-rts's grid since 2026-10-06; 4 m before)
+  geo.userData.navRects = [
+    { cx: 0.6, cz: 3.2, hx: w / 2 + 0.2, hz: d / 2 + 0.2 },
+    { cx: -w / 2 - bd / 2 - 0.2, cz: -1.4, hx: bd / 2 + 0.2, hz: bw / 2 + 0.2 },
+    { cx: yx1, cz: (yz + 3.2 - d / 2) / 2, hx: t, hz: (3.2 - d / 2 - yz) / 2 },
+  ].map((r) => ({ cx: r.cx * KIT, cz: r.cz * KIT, hx: r.hx * KIT, hz: r.hz * KIT }));
+  return geo;
+}
+
 /**
  * THE FARMSTEAD'S LAYOUT — ONE, fixed (2026-10-25: the farm redone in Blender, tools/blender/farmstead.py, the same
  * numbers there; seeded sizes would not match its one model): the house, the byre, the yard, the gate, the pen.
