@@ -5,6 +5,31 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ---
 
+## NEXT SESSION (written 2026-10-25, when you left)
+
+**Your look first (lab: `/games/alg-rts/lab.html` — Tab browses, N = next to judge):**
+1. The new pieces, « To judge »: **SAS post** (+ « SAS post: old vs new »), **farmstead** (+ « Farmstead: old vs new »;
+   its BURNT tab = the map's burnt farm), **FLN lookout**, **mine marker**.
+2. The fixes to confirm (their old « Improve » verdicts can then go): the tents' folds (French post, forward post,
+   aid station), the pits' earth (mortar pit, fortified point, MG nest), the sangar's FM on its lip.
+3. Once judged: remove the two « old vs new » entries.
+
+**Work, in the order I'd suggest:**
+4. **The motor pool**: finish it, then its **damaged / destroyed** states (D).
+5. **The rest of the lab pass**: ~57 buildings, 15 plants, 4 rocks not judged — your verdicts feed the next redo list.
+6. **Optimisation**: trim the near triangles of the smoothed tents (×2) and the SAS post's tile roof (25k → 35k).
+7. **The helipad**: rework completely (its floating sandbags) — you said later.
+8. **The training camp** (the player's first map): the FLN ground (lessons 7-9), cover on the knoll, camera framing
+   per lesson, a less lawn-like grass.
+9. **Old-kit z-fighting** left in houses (112 pairs), M'zab (58), motor pool (50) — fixes inside their build scripts.
+
+**Notes:**
+- Method from now on (img2threejs' good idea): for each new piece, a reference image, a detail checklist, and a
+  side-by-side sheet before showing it to you.
+- Uncommitted on purpose: the ambientCG textures and tools/fetchAmbientCG.mjs (to try on paths and wadis later).
+
+---
+
 ## Done 2026-10-21 — the buildables redone in Blender (CoH standard)
 
 Every buildable on both sides now has a Blender model: intact / damaged / ruin, a build order the site
