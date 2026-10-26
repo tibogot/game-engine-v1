@@ -16,7 +16,7 @@
   "pairs": 0
  },
  "farmstead.glb": {
-  "hash": "fb7a940e3bc0f80297e7ed6945eacde42ca396a2",
+  "hash": "ac8dbe44f3399fa7b84423122bc738390c34c983",
   "pairs": 2,
   "why": "2026-10-25: 2 sub-millimetre slivers at a breach's boolean edge (the damaged byre, -4.4,0.8,-3.3), the optimizer's rounding; raw build 0 — invisible"
  },
@@ -41,6 +41,11 @@
   "hash": "cbb1b47cc878b233309cb8f0983161d4f53e3452",
   "pairs": 1
  },
+ "haystack.glb": {
+  "hash": "46cf583bc236726e934dc7a57c4bb1cd24171f9d",
+  "pairs": 202,
+  "why": "straw CARDS overlap by design: alpha-tested strands layered like shingles, not solid faces — no z-fight between opaque surfaces"
+ },
  "houses.glb": {
   "hash": "b59141a49b9f7372de752d5e120c0302c42a3d11",
   "pairs": 102
@@ -59,20 +64,20 @@
   "pairs": 0
  },
  "motorPool.glb": {
-  "hash": "0d46260a0ae8e0327480d791e919d8f72900f89f",
-  "pairs": 20
+  "hash": "fb85dd6be8e2a53c79db6d625a632832549f1090",
+  "pairs": 0
  },
  "motorPoolNear.glb": {
-  "hash": "fd396d52c6f03c3866bcb48711a04d5a268aa8b3",
-  "pairs": 50
+  "hash": "71f04da3fa41b1d3c049356967e3f96974add5ca",
+  "pairs": 26
  },
  "motorPool_damaged.glb": {
-  "hash": "d256d5f9d24bdc8b201d139c01e91ad22b7265d3",
+  "hash": "94f8cd8f1a0fa82b5f6154b9d2e62c39d6f3f915",
   "pairs": 20,
   "why": "the intact far's own 20 leftovers (motorPool.glb's bar): the same build, its damage adds none"
  },
  "motorPool_ruin.glb": {
-  "hash": "d766c01d7d627e87e214b6bccf5d8133badfe8c7",
+  "hash": "e4ed76fb5678850b49be2ea5fe2efa039e85bb8b",
   "pairs": 20,
   "why": "the intact far's own 20 leftovers (motorPool.glb's bar): the same build, its damage adds none"
  },
@@ -219,8 +224,9 @@
   "pairs": 2
  },
  "vprops.glb": {
-  "hash": "0a1cdae883972f9456d062b7edc50ea047b0fd54",
-  "pairs": 1
+  "hash": "5999f9cd2b27ca4730f273236f5b4b661ae0b8bc",
+  "pairs": 2,
+  "why": "the oven's pair is one quad's two halves, nudged by the meshopt quantisation (as the well's accepted one) — hay removed 2026-10-26"
  },
  "zeriba.glb": {
   "hash": "d1d1daccf4fd1e6b180d59e39dc3fd444c48a9e0",

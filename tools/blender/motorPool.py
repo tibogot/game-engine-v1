@@ -598,7 +598,7 @@ def window(nm, x0, x1, y0, y1, zf, axis):
     def bx(n, a0, a1, b0, b1, c0, c1, mat, w=0.006):
         return box(n, a0, a1, b0, b1, c0, c1, mat, "workshop", w) if axis == "z" else box(n, zf + c0 - zf, zf + c1 - zf, b0, b1, a0, a1, mat, "workshop", w)
     d = 0.06
-    bx(f"{nm}Glass", x0, x1, y0, y1, zf + 0.04, zf + 0.05, "glass", 0)
+    bx(f"{nm}Glass", x0, x1, y0, y1, zf + 0.025, zf + 0.035, "glass", 0)   # (mid-frame: at +0.04..0.05 its back face 1 cm off the frame's, a coplanar pair at the far level)
     for a0, a1, b0, b1 in ((x0, x1, y0, y0 + d), (x0, x1, y1 - d, y1), (x0, x0 + d, y0, y1), (x1 - d, x1, y0, y1), ((x0 + x1) / 2 - 0.025, (x0 + x1) / 2 + 0.025, y0, y1), (x0, x1, y0 + (y1 - y0) * 0.6, y0 + (y1 - y0) * 0.6 + 0.04)):
         bx(f"{nm}Frame{a0:.2f}{b0:.2f}", a0, a1, b0, b1, zf, zf + 0.06, "shutter")
     nb_ = 6
@@ -674,11 +674,11 @@ for gx in (GX0, GX1):
 member("GBeam", (GX0 - 0.15, F + 3.33, GZ), (GX1 + 0.15, F + 3.33, GZ), P_I(0.16, 0.09, 0.01, 0.007), "frame", "props", (0, 1, 0), 0.003)
 box("Trolley", -5.15, -4.85, F + 3.16, F + 3.27, GZ - 0.08, GZ + 0.08, "darkSteel", "props", 0.01)
 cyl("HoistBlock", (-5.0, F + 2.82, GZ), 0.14, 0.3, "redPaint", "props", 16, "z", 0.012)
-for k in range(9):
-    torus(f"Chain{k}", (-5.0, F + 2.78 - k * 0.08, GZ), 0.022, 0.006, "darkSteel", "props", "x" if k % 2 else "z", 8, 4, 1.0)
-rod("Hook", (-5.0, F + 2.07, GZ), (-5.0, F + 1.86, GZ), 0.014, "darkSteel", "props", 6)
+for k in range(1):   # (one link: the engine hangs high, out of the GMC's bonnet under it — algMotorPool PARKED)
+    torus(f"Chain{k}", (-5.0, F + 2.79 - k * 0.08, GZ), 0.022, 0.006, "darkSteel", "props", "x" if k % 2 else "z", 8, 4, 1.0)
+rod("Hook", (-5.0, F + 2.77, GZ), (-5.0, F + 2.62, GZ), 0.014, "darkSteel", "props", 6)
 for s in (-1, 1):
-    rod(f"Sling{s}", (-5.0, F + 1.86, GZ), (-5.0 + s * 0.28, F + 1.33, GZ), 0.008, "darkSteel", "props", 5)
+    rod(f"Sling{s}", (-5.0, F + 2.62, GZ), (-5.0, F + 2.3, GZ + s * 0.28), 0.008, "darkSteel", "props", 5)
 # the engine (a Hotchkiss four: block, head, sump, manifold, fan, pulleys) on a stand
 box("StandTop", -5.45, -4.55, F + 0.62, F + 0.67, GZ - 0.32, GZ + 0.32, "frame", "props", 0.006)
 for sx in (-1, 1):
@@ -821,6 +821,12 @@ def purlin(name, sz, t, xa, xb):
     a = on_slope(sz, xa, t, H_PURLIN + 0.07); b = on_slope(sz, xb, t, H_PURLIN + 0.07)
     member(name, a, b, P_C(0.14, 0.06, 0.006), "frame", "shed", tuple(n), 0.002, off=(-0.03 * sz, 0))
 
+# THE GMC UNDER THE HOIST (2026-10-26, you: the motor pool "doesn't look enough like a motor pool … add a broken vehicle"):
+# the game parks its GMC nose-in under the gantry (algMotorPool PARKED) — its engine lifted out, turned along the truck,
+# hung over its bonnet; the empty stand pushed aside to the bay's wall
+turn(parts("Eng"), (-5.0, 0, GZ), (0, 1, 0), math.pi / 2, (0, 0.9, 0))
+turn(parts("Stand"), (0, 0, 0), (0, 1, 0), 0, (-1.95, 0, 2.4))
+
 if STATE == "damaged":
     # THE ROOF: the shell's hole, the sheets round it torn and hanging into the bay, the purlins under it snapped
     for o in roof_sheets(-1):
@@ -841,8 +847,8 @@ if STATE == "damaged":
             member(f"PurlinBent{nm}{k}", tuple(e), tuple(e + gv(-s * 0.45, -0.38, 0.05)), P_C(0.14, 0.06, 0.006), "frame", "shed", (0, 0, 1), 0.002)
     # what came down: sheets on the slab (clear of the pit), a length of purlin, the hit's mark
     debris_sheet("FallenA", (-1.9, F, -2.6), 0.4, 0.06, 0.9, 2.2, "roofOld")
-    debris_sheet("FallenB", (-1.3, F, -1.1), -0.9, 0.32, 0.9, 1.7, "roofRust")
-    debris_sheet("FallenC", (-2.6, F, -1.6), 1.9, 0.12, 0.9, 1.3, "roofOld")
+    debris_sheet("FallenB", (-1.4, F, -4.3), 0.1, 0.32, 0.9, 1.7, "roofRust")
+    debris_sheet("FallenC", (-2.2, F, -1.4), 1.6, 0.12, 0.9, 1.3, "roofOld")
     member("FallenPurlin", (-2.3, F + 0.07, -0.4), (-0.8, F + 0.45, -1.1), P_C(0.14, 0.06, 0.006), "frame", "props", (0, 1, 0), 0.002)
     # THE WORKSHOP: its front-right corner knocked off (the wall, the roof slab's corner, the coping), the rubble below
     cbs = [blob(HIT_WS, 0.95, 31), blob(HIT_WS + gv(-0.55, -0.55, 0), 0.6, 32), blob(HIT_WS + gv(0, -0.25, 0.75), 0.7, 33)]
@@ -882,12 +888,11 @@ if STATE == "ruin":
         sheet(f"Ridge{sz}", (XKEEP, apex.y, apex.z), (1, 0, 0), tuple(-l), tuple(n), X1 + 0.44 - XKEEP, 0.34, "roofOld", "shed", depth=0, thick=0.003)
         for k, t in enumerate(PURL_T): purlin(f"Purlin{sz}{k}", sz, t, COLS[2] - 0.3, X1 + 0.42)
     member("EaveF", (COLS[2] - 0.2, YB - 0.16, Z0), (X1 + 0.1, YB - 0.16, Z0), P_I(0.22, 0.12, 0.012, 0.008), "frame", "shed", (0, 1, 0), 0.003)
-    member("EaveDown", (X0 + 0.3, F + 0.13, Z0 - 0.6), (xm - 0.4, F + 0.9, Z0 + 0.15), P_I(0.22, 0.12, 0.012, 0.008), "frame", "props", (0, 1, 0), 0.003)
-    for k, (x, z, yaw, tilt, mat) in enumerate(((-5.6, -2.9, 0.3, 0.05, "roofOld"), (-4.0, -1.0, 1.4, 0.2, "roofRust"), (-6.4, 1.6, -0.6, 0.04, "roofOld"),
-                                               (-1.6, -2.2, 0.9, 0.1, "roofNew"), (-1.4, 1.2, -1.2, 0.28, "roofOld"), (-3.3, 2.5, 0.1, 0.06, "roofRust"),
-                                               (1.4, -1.6, 2.2, 0.08, "roofOld"), (-7.0, -5.6, 0.7, 0.03, "roofOld"), (-2.6, -6.4, -0.3, 0.05, "roofRust"))):
+    member("EaveDown", (X0 + 0.3, F + 0.13, -6.9), (xm - 0.4, F + 0.6, -6.7), P_I(0.22, 0.12, 0.012, 0.008), "frame", "props", (0, 1, 0), 0.003)
+    for k, (x, z, yaw, tilt, mat) in enumerate(((-1.7, 0.4, 0.0, 0.05, "roofOld"), (-1.6, -2.2, 0.9, 0.1, "roofNew"), (1.6, -0.6, 0.0, 0.28, "roofOld"), (-3.3, 2.5, 0.1, 0.06, "roofRust"),
+                                               (1.6, -1.6, math.pi, 0.08, "roofOld"), (-7.3, -5.9, 0.7, 0.03, "roofOld"), (-2.6, -6.4, -0.3, 0.05, "roofRust"))):   # (none on the parked GMC and Willys)
         debris_sheet(f"Fallen{k}", (x, F, z), yaw, tilt, 0.9, 2.0 + 0.5 * hrand(f"Fallen{k}"), mat)
-    for k, (a, b) in enumerate((((-6.8, F + 0.07, 0.2), (-2.9, F + 0.5, -0.9)), ((-1.9, F + 0.07, 2.9), (1.6, F + 0.07, 2.3)), ((-5.2, F + 0.07, -4.0), (-4.4, F + 0.35, -1.6)))):
+    for k, (a, b) in enumerate((((-6.2, F + 0.07, 3.45), (-3.9, F + 0.4, 3.3)), ((-1.9, F + 0.07, 2.9), (1.6, F + 0.07, 2.3)), ((-2.0, F + 0.07, -6.2), (0.6, F + 0.3, -7.2)))):
         member(f"FallenPurlin{k}", a, b, P_C(0.14, 0.06, 0.006), "frame", "props", (0, 1, 0), 0.002)
     # THE WALLS: the back wall and the left gable stripped — sheets torn off, others hanging out off their girts
     for o in parts("WallB", "WallL"):
@@ -934,9 +939,9 @@ if STATE == "ruin":
     rod("StoveDown", (12.9, F + 0.09, -5.6), (14.0, F + 0.09, -6.7), 0.09, "darkSteel", "props", 14)
     # THE PROPS: the gantry over on its face across the bay, the engine off its stand, drums thrown down
     gantry = parts("GLeg", "GTie", "GCaster", "GBeam", "Trolley", "HoistBlock", "Chain", "Hook", "Sling")
-    turn(gantry, (0, F, GZ - 0.85), (1, 0, 0), -(math.pi / 2 - 0.1)); rest(gantry); turn(gantry, gcentre(gantry), (0, 1, 0), 0.18)
+    turn(gantry, (0, F, GZ + 0.85), (1, 0, 0), math.pi / 2 - 0.35); turn(gantry, gcentre(gantry), (0, 1, 0), 0.12)   # (back, onto the bench: the GMC stands under it)
     eng = parts("Eng")
-    turn(eng, (-4.55, F + 0.62, GZ), (0, 0, 1), -1.45, (0.35, 0, 0.1)); rest(eng)
+    turn(eng, gcentre(eng), (1, 0, 0), 1.4, (1.9, 0, 1.6)); rest(eng)   # (fallen off the hoist, beside the truck)
     for k, ang in ((1, 0.4), (3, -1.1), (4, 2.0)):
         d = parts(f"Drum{k}"); turn(d, (DRUMS[k][0] + 0.3, F, DRUMS[k][1]), (0, 0, 1), -math.pi / 2); rest(d); turn(d, gcentre(d), (0, 1, 0), ang)
 

@@ -34,6 +34,7 @@ export const META = {
   villagePropsBlender: { side: "civil", kind: "prop", maps: ["aures"], status: "jeu" },
   telegraphPole: { side: "fr", kind: "prop", maps: ["aures"], status: "jeu" },
   renderedWell: { side: "civil", kind: "prop", maps: [], status: "parked" },
+  haystack: { side: "civil", kind: "prop", maps: ["aures", "abdi"], status: "verdict" },
   rubbleKit: { side: "civil", kind: "ruine", maps: ["aures", "abdi"], status: "jeu" },
   rubbleHeapOld: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
   mzab_mur: { side: "civil", kind: "village", maps: ["abdi"], status: "jeu" },
@@ -124,7 +125,8 @@ export const PLACED = {
   "kit:mortar": "mortierBlender", "kit:m81": "mortierBlender", "kit:point": "fortBlender", "kit:sltower": "projBlender", "kit:lamp": "projBlender",
   "kit:fwdradio": "posteAvanceBlender", "kit:aidtent": "secoursBlender", "kit:aidmark": "secoursBlender", "kit:refuge": "refugeBlender", "kit:infirm": "infirmBlender",
   "kit:post": "posteBlender", "kit:lookout": "lookout", "kit:minemark": "mineMarker", "kit:farm": "farmstead", "kit:sas": "sasPost",
-  ...Object.fromEntries(["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "hay", "wood", "hives"].map((t) => [`kit:${t}`, "villagePropsBlender"])),
+  ...Object.fromEntries(["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "wood", "hives"].map((t) => [`kit:${t}`, "villagePropsBlender"])),
+  "haystack": "haystack",   // (the straw-card stack — algHaystack: the villages' stackyards, the pens')
   ...Object.fromEntries(["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"].map((t) => [`kit:${t}`, "rubbleKit"])),
   ...Object.fromEntries(["grenade", "smoke", "flare", "cutters", "mine", "helmet", "kepi", "jerrycan", "ammobox", "detonator", "detector", "radio", "lmg", "bazooka", "flamer", "sniper", "tools", "shell", "shotgun", "mapcase", "spade"]
     .map((t) => [`kit:${t}`, { none: "hand-held: the HUD icons (iconStudio.js)" }])),
@@ -141,7 +143,7 @@ export const SYSTEMS = {
 };
 
 export const NAMES = {
-  zeriba: "Zeriba", zeribaParked: "Thorn ring (Blender, parked)", renderedWell: "Rendered well (parked)", sacsDeSable: "Sandbag wall", port: "Fishing port",
+  zeriba: "Zeriba", zeribaParked: "Thorn ring (Blender, parked)", renderedWell: "Rendered well (parked)", haystack: "Haystack", sacsDeSable: "Sandbag wall", port: "Fishing port",
     parcAutoNeuf: "Motor pool",
   blanche_maison: "Whitewashed house: two storeys", blanche_cour: "Whitewashed house: courtyard", blanche_haute: "Whitewashed house: tall",
   blanche_boutique: "Whitewashed house: shop", villageBlanc: "Whitewashed village", helisurface: "Helipad",

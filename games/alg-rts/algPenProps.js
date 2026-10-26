@@ -5,9 +5,10 @@
 // LOD, the ground blend), children of the piece so they move and turn with it. A pen drawn before the kit has loaded
 // waits for it.
 import { houseMesh, loadHouses } from "./algHouse.js";
+import { haystackField } from "./algHaystack.js";
 
 const VP = 1.3;   // (the props kit in real metres, the game's ×1.3 — algVillageLife)
-const TYPE = { trough: "trough", hay: "hay", oven: "oven", wood: "wood", jars: "jars", bench: "bench", hives: "hives", well: "well" };   // (the vprops kit's types — the farmstead's yard too)
+const TYPE = { trough: "trough", oven: "oven", wood: "wood", jars: "jars", bench: "bench", hives: "hives", well: "well" };   // (the vprops kit's types — the farmstead's yard too)
 let ready = false;
 const waiting = [];
 
@@ -23,8 +24,12 @@ export function loadPenProps() {
 /** A kit piece's pens dressed: its trough and hay on their spots (now, or once the kit has loaded). */
 export function dressPens(mesh, pens) {
   if (!pens?.length) return;
+  // THE HAY: the straw-card haystack (algHaystack — 2026-10-26, the props kit's lumpy one "very cheap"), attached to
+  // the piece in the one instanced field
+  for (const p of pens) if (p.kind === "hay") haystackField().add(mesh, p.x, p.y, p.z, p.yaw ?? 0, p.scale ?? 1);
   const go = () => {
     for (const p of pens) {
+      if (p.kind === "hay") continue;
       const h = houseMesh(TYPE[p.kind], "intact", VP);
       if (!h) continue;
       h.position.set(p.x, p.y, p.z);

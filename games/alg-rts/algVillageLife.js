@@ -20,6 +20,7 @@ import { buildBeehives, buildHaystack, buildTabouna, buildWoodpile } from "../..
 import { TRACK_LINES } from "./algTracks.js";
 import { LAYOUT, MAP, PLAY } from "./layout.js";
 import { createHouseField } from "./algHouse.js";
+import { haystackField } from "./algHaystack.js";
 import { kitView } from "./showroom.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 
@@ -43,7 +44,7 @@ function rng(seed) { let s = seed >>> 0 || 1; return () => ((s = (s * 16807) % 2
 // gets its well and trough, its jars and a bench. Their footprints: the pieces' real metres x1.3.
 const VP = 1.3;
 const VPROP = {
-  haystack: { type: "hay", fp: { hx: 1.75 * VP, hz: 1.75 * VP } }, woodpile: { type: "wood", fp: { hx: 1.75 * VP, hz: 0.7 * VP } },
+  haystack: { type: null, fp: { hx: 1.75 * VP, hz: 1.75 * VP } }, woodpile: { type: "wood", fp: { hx: 1.75 * VP, hz: 0.7 * VP } },
   tabouna: { type: "oven", fp: { hx: 1.25 * VP, hz: 0.9 * VP } }, beehives: { type: "hives", fp: { hx: 1.35 * VP, hz: 0.45 * VP } },
   well: { type: "well", fp: { hx: 1.25 * VP, hz: 1.15 * VP } }, trough: { type: "trough", fp: { hx: 1.0 * VP, hz: 0.45 * VP } },
   jars: { type: "jars", fp: { hx: 0.6 * VP, hz: 0.6 * VP } }, bench: { type: "bench", fp: { hx: 1.2 * VP, hz: 0.32 * VP } },
@@ -239,7 +240,10 @@ export function createAlgVillageLife(app, { navGrid = null, showroom = {}, field
     // (the Blender pieces: one instanced field, near / far by the camera — algHouse)
     const field = createHouseField();
     let jk = 0;
+    const hay = haystackField();
     for (const [kind, vars] of Object.entries(placed)) for (const list of vars) for (const p of list) {
+      // (the HAYSTACKS: the straw-card stack, its own instanced field — algHaystack; a little size each, never two alike)
+      if (kind === "haystack") { hay.add(null, p.x, p.y + 0.02, p.z, p.yaw, 0.88 + ((p.x * 7.13 + p.z * 3.7) % 1 + 1) % 1 * 0.24); continue; }
       const type = kind === "jars" ? JARS[jk++ % 3] : VPROP[kind].type;
       field.add(type, "intact", p.x, p.y + 0.04, p.z, p.yaw, VP);
     }

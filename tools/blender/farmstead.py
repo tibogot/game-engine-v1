@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import bpy
 from mathutils import Matrix
 import house
+import drystone
 from house import buildKit
 from bkit import B, srgb, wood
 
@@ -169,10 +170,11 @@ def buildFarm(K, name, spec, state, seed):
         burnt_inside(K, R, -BW / 2 + 0.45, BW / 2 - 0.45, -BD / 2 + 0.45, BD / 2 - 0.45, BH, BX, BZ, -math.pi / 2)
     yard(K, random.Random(seed + 2), state)
     pen(K, random.Random(seed + 3), state, False)
+    drystone.writeBuildOrder(K)   # (each face's SURFACE: the game's photo detail — its stone the dry-stone photo, algSangar loadFarmstead)
 
-TYPES = {"farm": dict(builder=buildFarm, states=("intact", "damaged", "ruin"), farRatio=0.35, atlas=2048, aoDist=1.2)}
+TYPES = {"farm": dict(builder=buildFarm, states=("intact", "damaged", "ruin"), farRatio=0.35, atlas=2048, islandMargin=0.0005, aoDist=1.2)}
 
-exported = buildKit(TYPES, MATDEF, "farmstead.glb", prefix="Farm", seed0=1970)
+exported = buildKit(TYPES, MATDEF, "farmstead.glb", prefix="Farm", seed0=1970, colors=True)
 
 scn = bpy.context.scene
 scn.render.engine = "BLENDER_WORKBENCH"

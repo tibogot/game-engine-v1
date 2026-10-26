@@ -20,6 +20,7 @@ import { createPointMark } from "./algPointMarks.js";
 import { createConstruction } from "./algConstruction.js";
 import { buildFrSandbagWall } from "../../v3/render/objects/rtsAlgeria.js";
 import { buildFrenchPostPiece, buildHelipadPiece, buildSandbagWallPiece, loadSandbags, loadSandbagWall } from "./algSandbags.js";
+import { haystackField, loadHaystack } from "./algHaystack.js";
 // (the cloth-simulated bags, loaded before any piece is built: algSandbags.js)
 await loadSandbags();
 await loadSandbagWall();
@@ -279,6 +280,16 @@ function steppeField() {
   return labPiece(g);
 }
 
+/** A haystack as the game draws it (algHaystack's field — its near or far level forced, or by the camera): a lab piece
+ *  carrying an empty group the field attaches it to. */
+const hayLab = haystackField();
+LAB_TICK.add((camera) => hayLab.update(camera));
+function haystackView(force) {
+  const g = new THREE.Group();
+  hayLab.add(g, 0, 0, 0, 0, 1, force);
+  return labPiece(g);
+}
+
 /** The French post in a state as the game draws it: the state's model in the post's material, its bags as setPieceState
  *  leaves them (algSangar bagsInState). */
 function postInState(state) {
@@ -286,14 +297,15 @@ function postInState(state) {
   for (const m of g?.userData.extra ?? []) if (/^PostBags/.test(m.name)) bagsInState(m, state);
   return g;
 }
-/** The SAS post in a state, the same way (its bags slumped in the ruin, its well on its spot). */
-function sasInState(state) {
-  const g = pieceInState(sasGeometry(), state);
+/** A Blender piece in a state as the game draws it (kitView: its extras, its pen props), its bags as setPieceState leaves them. */
+function pieceView(base, state) {
+  const g = pieceInState(base, state);
   if (!g) return null;
   const m = kitView(g);
-  for (const c of m.children) if (/^SasBags/.test(c.name)) bagsInState(c, state);
+  for (const c of m.children) if (/Bags/.test(c.name)) bagsInState(c, state);
   return m;
 }
+const sasInState = (state) => pieceView(sasGeometry(), state);
 
 /** The Blender motor pool in a state, as a lab piece (an empty geometry carrying it). */
 function motorPoolView(state) {
@@ -725,7 +737,7 @@ Object.assign(BUILDINGS, {
   // THE FARMSTEAD IN BLENDER (2026-10-25, you: "do the farmstead" — tools/blender/farmstead.py): intact with its yard's
   // props (the village props kit on its spots, as the game), damaged, burnt (the map's burnt farm)
   farmstead: { label: "Farmstead", gap: 30, prepare: () => Promise.all([loadFarmstead(), loadPenProps()]),
-    before: () => labPiece(kitView(farmGeometry())), middle: () => labPiece(houseMesh("farm", "damaged")), after: () => labPiece(houseMesh("farm", "ruin")),
+    before: () => labPiece(kitView(farmGeometry())), middle: () => labPiece(pieceView(farmGeometry(), "damaged")), after: () => labPiece(pieceView(farmGeometry(), "ruin")),
     tags: ["FARMSTEAD · NEW", "FARMSTEAD · DAMAGED", "FARMSTEAD · BURNT"], note: "the Aurès' lone farm: the stone house and byre, the yard wall and gate, the thorn pen; its oven, hay, woodpile, jars and trough the village props kit. Burnt: the map's burnt farm." },
   // OLD vs NEW (2026-10-25, you: "do we still have the old farm so I can compare?"): the old kit's farm and burnt farm
   // beside the new ones — remove this entry once judged
@@ -744,6 +756,12 @@ Object.assign(BUILDINGS, {
     tags: ["FIELD WALLS · INTACT", "FIELD WALLS · DAMAGED", "FIELD WALLS · DESTROYED"], note: "the dry-stone field walls of Oued Abdi and the new Aurès (tools/blender/fieldwall.py: a b c), in their three states." },
   villagePropsOld: { label: "Village props (old)", gap: 14, before: () => kitRow([buildHaystack({}), buildWoodpile({}), buildTabouna({}), buildBeehives({})], 3.5), tags: ["HAY · WOOD · OVEN · HIVES (OLD)"], note: "the old Aurès' village life props (rtsAlgVillage): haystack, woodpile, tabouna, beehives." },
   villagePropsBlender: { label: "Village props (Blender)", gap: 18, prepare: () => loadHouses("vprops"), before: () => houseRow(VPROP_TYPES, "intact", 3), tags: ["VILLAGE PROPS"], note: "the village props kit (tools/blender/villageProps.py): well, trough, jars, bench, oven, hay, wood, hives — the new Aurès and the training camp." },
+  // THE HAYSTACK (2026-10-26, you: the props' hay "look really like some low poly assets, very cheap"; the straw-card one
+  // "the minimum level we want for assets" — tools/blender/haystack.py, algHaystack): its near and far levels, and one by
+  // the camera (orbit out past 52-66 m: the cross-fade)
+  haystack: { label: "Haystack", gap: 5, yaw: Math.PI - 0.5, prepare: () => loadHaystack(),
+    before: () => haystackView("near"), middle: () => haystackView("far"), after: () => haystackView(null),
+    tags: ["HAYSTACK · NEAR", "HAYSTACK · FAR", "HAYSTACK · BY THE CAMERA"], note: "the straw stack round its pole: ~550 straw cards (a strand texture, alpha-tested, coverage-kept mipmaps) layered like shingles over a lumpy core, the trodden straw round its foot, branches on its top, a pitchfork; its far level ~110 bigger cards; the two dither-faded over 52-66 m; the tips in the wind." },
   renderedWell: { label: "Rendered well (old SAS post's)", gap: 4, before: () => buildRenderedWell(), tags: ["RENDERED WELL"], note: "the whitewashed well of the old SAS post (gone 2026-10-25), kept as a small asset for later: the round rendered curb, its lid, two posts and the beam, the rope and bucket." },
   telegraphPole: { label: "Telegraph pole", gap: 6, before: () => buildTelegraphPole({}), tags: ["TELEGRAPH POLE"], note: "the telegraph line's pole (rtsAlgeria buildTelegraphPole); the wires are drawn between them in the game." },
   rubbleKit: { label: "Rubble (Blender)", gap: 26, prepare: () => loadHouses("rubble"), before: () => houseRow(RUBBLE_TYPES, "intact", 5), tags: ["RUBBLE"], note: "a collapsing house's heaps and flying chunks (tools/blender/rubble.py — algTownDamage)." },

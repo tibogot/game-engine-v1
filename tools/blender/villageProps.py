@@ -9,7 +9,7 @@ square is the jar on a roof.
   JARS      a huddle of turned clay jars (big amphora, a pot, a glazed jug) — three variants (jars, jars2, jars3)
   BENCH     a mud-plaster bench (a dukkana) with a stone seat
   OVEN      the tabouna: a clay dome on a low base, its mouth, a heap of brushwood beside it
-  HAY       a stack of straw round its pole, a skirt of loose straw
+  (HAY     tools/blender/haystack.py — the straw-card stack)
   WOOD      firewood: split logs in a stack, a brush bundle, the chopping block with its axe
   HIVES     cork cylinders on a stone shelf, a flat stone on each
 
@@ -113,21 +113,7 @@ def oven(K, tname, spec, state, seed):
             a = R.uniform(-0.4, 0.4)
             tag(K.rod(f"Brush{k}", (0.95, 0.05 + k * 0.04, 0.2 + k * 0.05), (1.6 + R.uniform(0, 0.2), 0.08 + k * 0.03, 0.2 + a), 0.035, "woodDark", "h", 5), 0)
 
-def hay(K, tname, spec, state, seed):
-    """A straw stack: a domed body, lumpy (every vertex pushed — straw settles unevenly), a little lean, a cap of straw
-    tied round the pole's top, tufts pulled out round it and a ragged skirt of loose straw at its foot."""
-    R = random.Random(seed)
-    prof = [(0, 0), (1.25, 0), (1.32, 0.25), (1.3, 0.6), (1.18, 1.0), (0.98, 1.4), (0.7, 1.75), (0.38, 2.0), (0.14, 2.12), (0.0, 2.16)]
-    lathe(K, "Stack", (0, 0, 0), prof, "hay", 22, jitter=0.07, seed=seed)
-    lathe(K, "Cap", (0.0, 1.9, 0.0), [(0, 0), (0.42, 0), (0.36, 0.18), (0.12, 0.34), (0, 0.36)], "hay", 10, jitter=0.15, seed=seed + 3)
-    tag(K.rod("Pole", (0, 1.8, 0), (0.05, 2.75, 0.02), 0.045, "woodDark", "h", 6), 0)
-    if not LOW():
-        for k in range(14):   # tufts pulled out of the body
-            a = R.uniform(0, 6.283); y = R.uniform(0.2, 1.6); rr = 1.28 - (y / 2.0) ** 2 * 0.75
-            K.lump(f"Tuft{k}", (math.cos(a) * rr, y, math.sin(a) * rr), (0.24, 0.12, 0.2), "hay", "h", seed=k + 10, rough=0.5, sub=1)
-        for k in range(9):    # the skirt: loose straw trodden round the foot
-            a = 2 * math.pi * k / 9 + R.uniform(-0.25, 0.25)
-            K.lump(f"Loose{k}", (math.cos(a) * 1.45, -0.02, math.sin(a) * 1.45), (0.45, 0.08, 0.32), "hay", "h", seed=k, rough=0.45, sub=1)
+# (THE HAY: tools/blender/haystack.py since 2026-10-26 — the straw-card stack; this lumpy lathe one, "very cheap", is gone)
 
 def wood(K, tname, spec, state, seed):
     R = random.Random(seed)
@@ -157,7 +143,6 @@ TYPES = {
     "jars3": dict(builder=jars(2), atlas=512, aoDist=0.15),
     "bench": dict(builder=bench, atlas=256, aoDist=0.2),
     "oven": dict(builder=oven, atlas=512, aoDist=0.3),
-    "hay": dict(builder=hay, atlas=512, aoDist=0.4, farRatio=0.65),   # (its lumpy straw and tufts: decimated to 0.4 it shaded 4.8 % off its near — the gate)
     "wood": dict(builder=wood, atlas=512, aoDist=0.2, farRatio=0.75),   # (thin 6-sided logs: decimated hard they lost their round)
     "hives": dict(builder=hives, atlas=512, aoDist=0.25),
 }

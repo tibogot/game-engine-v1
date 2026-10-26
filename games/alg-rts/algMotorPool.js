@@ -14,6 +14,11 @@
 // The geometry is meshopt-compressed (the shared loader decodes it).
 import { KIT_BLEND, blendMesh, whenGroundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
+import { vec3 } from "three/tsl";
+import { FR_PAINT_TINT, buildGMC, buildWillys } from "../../v3/render/objects/rtsVehiclesFr.js";
+import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
+import { rtsRunningGearMaterial } from "../../v3/render/objects/rtsVehicles.js";
+import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { simplifierReady, simplifyGeometry } from "../../v3/render/instancing/autoLod.js";
 import { loadSandbags, loadSandbagWall, sandbagMesh, sandbagWallBags, simulatedWallMesh } from "./algSandbags.js";
@@ -110,6 +115,7 @@ export function setMotorPoolState(g, state) {
       o.material = s ? s.material : o.userData.intact.material;
     } else if (o.name === "DoorL" || o.name === "DoorR") o.visible = state !== "ruin";
   });
+  for (const v of g.children) if (/^Parked/.test(v.name)) burnVehicle(v, state === "ruin");
   return true;
 }
 
@@ -125,6 +131,58 @@ function toFloat(src) {
   return g;
 }
 
+// ITS VEHICLES (2026-10-26, you: "it looks too neutral, it doesn't look enough like a motor pool … add a broken vehicle
+// inside?"): the game's own GMC — open, nose in under the gantry, its engine hung from the hoist over its bonnet
+// (tools/blender/motorPool.py: the engine out, turned along it), its tail out on the apron — and a Willys over the
+// inspection pit. Built as the units are (rtsVehiclesFr detail 2, the units' paint and running gear), at the pool's
+// real metres (÷S). Burnt in the ruin. Front +Z (the back wall).
+const PARKED = [
+  { name: "ParkedGMC", build: () => buildGMC({ detail: 2, crew: false, tilt: false }), at: [-5.0, 0.15, -2.75], yaw: 0 },
+  { name: "ParkedWillys", build: () => buildWillys({ detail: 2, crew: false }), at: [0, 0.15, -0.25], yaw: 0 },
+];
+let _vehicles = null;
+function parkedVehicles() {
+  return (_vehicles ??= PARKED.map((v) => {
+    const geo = v.build();
+    const body = new THREE.Mesh(geo, rtsObjectMaterialTinted(FR_PAINT_TINT));
+    body.name = v.name;
+    const st = stencilMesh(geo.userData.stencil);
+    if (st) body.add(st);
+    const tur = geo.userData.turret;
+    if (tur) { const t = new THREE.Mesh(tur.geo, body.material); t.position.set(...tur.pivot); body.add(t); }
+    // (the wheels on the units' rolling-gear material: it reads a per-INSTANCE odometer — an InstancedMesh of one)
+    if (geo.userData.gear) {
+      const gear = new THREE.InstancedMesh(geo.userData.gear, rtsRunningGearMaterial(FR_PAINT_TINT), 1);
+      gear.setMatrixAt(0, new THREE.Matrix4());
+      gear.frustumCulled = false;
+      body.add(gear);
+    }
+    body.traverse((o) => { if (o.isMesh) o.castShadow = o.receiveShadow = true; });
+    body.scale.setScalar(1 / S);
+    body.position.set(...v.at);
+    body.rotation.y = v.yaw;
+    return body;
+  }));
+}
+/** Burnt (the ruin) or not: every part's material darkened, the tyres gone flat (the body down 6 cm). */
+function burnVehicle(v, burnt) {
+  v.traverse((o) => {
+    if (!o.isMesh || !o.material) return;
+    o.userData.mat0 ??= o.material;
+    if (!burnt) { o.material = o.userData.mat0; return; }
+    // (the paint burnt off: its light and dark kept, the colour gone — black-brown, a rust tint; ×0.2 read as dark olive)
+    o.userData.charred ??= (() => {
+      const m = o.userData.mat0.clone(), c = o.userData.mat0.colorNode;
+      if (c) { const l = c.dot(vec3(0.2126, 0.7152, 0.0722)); m.colorNode = vec3(l.mul(0.12).add(0.012), l.mul(0.085).add(0.009), l.mul(0.06).add(0.007)); }
+      else m.color?.setRGB(0.06, 0.045, 0.035);
+      return m;
+    })();
+    o.material = o.userData.charred;
+  });
+  v.userData.y0 ??= v.position.y;
+  v.position.y = v.userData.y0 - (burnt ? 0.06 : 0);
+}
+
 /** A motor pool (meshes and materials shared): the far level and the two doors, an LOD with the near one
  *  when it was loaded. Null if not loaded. */
 export function motorPoolMesh() {
@@ -138,6 +196,7 @@ export function motorPoolMesh() {
   if (P.near) lod.addLevel(level(P.near, P.bags, ...P.doors), 0, 0.1);
   lod.addLevel(level(P.far, P.bagsFar, ...P.doorsFar), P.near ? MOTOR_POOL_FAR : 0, 0.1);
   g.add(lod);
+  for (const v of parkedVehicles()) g.add(v.clone());   // (each copy its own: the ruin burns its own)
   return g;
 }
 

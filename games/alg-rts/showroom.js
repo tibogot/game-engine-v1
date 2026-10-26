@@ -6,6 +6,7 @@
 // kit's one atlas material, markings as a child — exactly how nam-rts draws
 // its buildings (buildingRenderer.kitView).
 import { dressPens } from "./algPenProps.js";
+import { setHayWind } from "./algHaystack.js";
 import * as THREE from "three";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { rtsObjectMaterialTinted } from "../../v3/render/objects/rtsObjectProps.js";
@@ -536,6 +537,7 @@ export async function placeShowroom(app, list = SHOWROOM) {
     // default sway (0.16 rad) whatever the map asked: you saw them still moving at 0.
     const r = (w.dirDeg * Math.PI) / 180;
     app.algPlacedFoliage?.setWind(Math.cos(r), Math.sin(r), 0.16 * k);   // (its leaves' flutter follows the strength)
+    setHayWind(r, (0.3 + 0.7 * w.strength) * Math.min(1, k * 1.5));   // (the haystacks' lean and straw — algHaystack)
   });
   const socks = [];
   for (const e of list) {

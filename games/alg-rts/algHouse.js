@@ -51,7 +51,7 @@ export const FLN_POST_TYPES = ["refuge", "infirm"];
 // THE SMALL PROPS (tools/blender/smallProps.py — the HUD icons' hand-held kit: iconStudio.js)
 // THE RUBBLE (tools/blender/rubble.py — algTownDamage.js, a house collapsing): three heaps and four loose chunks
 // THE VILLAGE PROPS (tools/blender/villageProps.py — algVillageLife.js with MAP.villageProps)
-export const VPROP_TYPES = ["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "hay", "wood", "hives"];
+export const VPROP_TYPES = ["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "wood", "hives"];   // (the hay: algHaystack, 2026-10-26)
 export const RUBBLE_TYPES = ["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"];
 export const BORDJ_TYPES = ["post"];
 // THE FLN'S MARKS (tools/blender/flnMarks.py — algSangar.js loadLookout / loadMineMarker): the watcher's perch, the mine's cairn

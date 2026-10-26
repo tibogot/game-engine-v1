@@ -154,18 +154,20 @@ export const SURFACE_DETAIL = {
   wood: { tex: "build/raw_plank_wall/raw_plank_wall_{k}_1k.jpg", tile: 1.4, normal: 1.1, contrast: 0.7, mean: 0.251 },
   metal: { tex: "build/Rust009/Rust009_{k}_1k.jpg", tile: 1.2, normal: 0.7, contrast: 0.6, mean: 0.111 },
   concrete: { tex: "pbr_materials/Concrete030_1K-JPG/Concrete030_1K-JPG_{k}.jpg", keys: { nor: "NormalGL", diff: "Color" }, tile: 2.0, normal: 1.0, contrast: 0.8, mean: 0.119 },
+  // (the Aurès farms' and hamlets' stone: flat stones stacked dry — a kit swaps it in for "stone", loadBlenderPiece `surfaces: { stone: "drystone" }`)
+  drystone: { tex: "build/rabdentse_ruins_wall/rabdentse_ruins_wall_{k}_1k.jpg", tile: 2.4, normal: 1.5, contrast: 0.7, mean: 0.05 },
 };
 const SURFACE_ORDER = ["plaster", "stone", "wood", "metal", "concrete"];
 export const SURFACE_OFF = typeof location !== "undefined" && new URLSearchParams(location.search).get("surface") === "0";
 let _surfaceTex = null;
-const surfaceTextures = () => (_surfaceTex ??= Promise.all(SURFACE_ORDER.map((s) => {
+const surfaceTextures = () => (_surfaceTex ??= Promise.all(Object.keys(SURFACE_DETAIL).map((s) => {
   const D = SURFACE_DETAIL[s], key = D.keys ?? { nor: "nor_gl", diff: "diff" };
   return Promise.all(["nor", "diff"].map((k) => loadTexture(`/textures/${D.tex.replace("{k}", key[k])}`)));
 })).then((all) => {
   const T = {};
   all.forEach(([nor, diff], i) => {
     for (const t of [nor, diff]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; t.needsUpdate = true; }
-    T[SURFACE_ORDER[i]] = { nor, diff };
+    T[Object.keys(SURFACE_DETAIL)[i]] = { nor, diff };
   });
   return T;
 }));
@@ -176,14 +178,14 @@ function hasSurfaces(g) {
   for (let i = 0; i < c.count; i += 7) if (c.getZ(i) > 0.06) return true;
   return false;
 }
-function surfaceMaterial(src, T, colorType) {
+function surfaceMaterial(src, T, colorType, swap = {}) {   // (`swap`: a class drawn with another photo — { stone: "drystone" })
   const m = new THREE.MeshStandardNodeMaterial({ map: src.map, normalMap: src.normalMap ?? null, color: src.color, roughness: src.roughness, metalness: src.metalness, side: THREE.FrontSide });
   const cls = attribute("color", colorType).z.mul(8).round();
   const n = normalGeometry.normalize(), ax = abs(n);
   const isX = ax.x.greaterThan(ax.y).and(ax.x.greaterThan(ax.z)), isY = ax.y.greaterThan(ax.z);
   let nn = n, shade = float(1);
   SURFACE_ORDER.forEach((s, i) => {
-    const D = SURFACE_DETAIL[s], W = T[s];
+    const D = SURFACE_DETAIL[swap[s] ?? s], W = T[swap[s] ?? s];
     const p = positionGeometry.div(D.tile);
     const uvv = select(isX, p.zy, select(isY, p.xz, p.xy));
     const k = float(D.normal);
@@ -238,7 +240,7 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     _detail = T;
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
     g.userData.labMaterial = stone ? stoneMaterial(near.material, T)
-      : surfaces && ST && hasSurfaces(g) ? surfaceMaterial(near.material, ST, g.attributes.color.itemSize === 3 ? "vec3" : "vec4")
+      : surfaces && ST && hasSurfaces(g) ? surfaceMaterial(near.material, ST, g.attributes.color.itemSize === 3 ? "vec3" : "vec4", typeof surfaces === "object" ? surfaces : {})
       : plaster ? plasterMaterial(near.material, PT) : cloth ? clothMaterial(near.material, CT, g.attributes.color?.itemSize === 3 ? "vec3" : "vec4") : plainMaterial(near.material);
     // THE GROUND BLEND (2026-10-24, algGroundBlend KIT_BLEND — a piece's own material, built here from the kit's): its foot
     // in the ground's colour, its hue toward the ground's
@@ -539,7 +541,7 @@ export const loadMineMarker = () => loadBlenderPiece("flnmarks", "minemark", () 
 export const mineMarkerGeometry = () => pieceGeometry("flnmarks", "minemark");
 /** THE FARMSTEAD (tools/blender/farmstead.py, 2026-10-25): the old kit's layout data (FARM — its cover, navigation, the
  *  yard's spots), the Blender model drawn; its burnt state the map's burnt farm. */
-export const loadFarmstead = () => loadBlenderPiece("farmstead", "farm", () => buildFarmstead({ seed: 1970 }), null, { stone: false });
+export const loadFarmstead = () => loadBlenderPiece("farmstead", "farm", () => buildFarmstead({ seed: 1970 }), null, { stone: false, surfaces: { stone: "drystone" } });
 export const farmGeometry = () => pieceGeometry("farmstead", "farm");
 /** THE SAS POST (tools/blender/sasPost.py, 2026-10-25 — you: "the best looking for my AAA RTS"): the old piece's data (its
  *  footprint, cover, the flag's mount, the night lamp), the Blender model drawn, YOUR simulated sandbagged corner added. */
