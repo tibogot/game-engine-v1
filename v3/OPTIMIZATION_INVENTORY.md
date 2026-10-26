@@ -202,8 +202,10 @@ Order:
    { threshold, coverage: renderer.samples > 1 })` — also sets
    `maskShadowNode` (without it a card casts its whole square). On: the
    fog-lab trees. Rollout, one system at a time, before/after crops each:
-   [ ] tree leaf cards (foliageMaterial: leafField + chunked; its own
-   discard at 0.3), [ ] placed foliage / GLB leaf cards (palms; glbLoader
+   [x] tree leaf cards (foliageMaterial: leafField + chunked, cut at 0.3,
+   its own castShadowNode kept — `shadow: false`; engine default set at boot
+   from MSAA, `?a2c=0` = alpha test. Editor fog-lab level: near edges
+   smooth, mid crowns as full, 0.2–1.2 % of the frame changes), [ ] placed foliage / GLB leaf cards (palms; glbLoader
    alphaTest), [ ] ground plants (foliageSystem: the DEPTH PRE-PASS
    material needs it too — colour pass is EQUAL-depth), [ ] haystack straw,
    stencils. Not impostors (their own note: stippling). The Hi-Z "read fewer depth pixels" idea

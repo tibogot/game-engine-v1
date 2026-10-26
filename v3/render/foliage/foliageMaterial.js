@@ -15,6 +15,7 @@ import {
   cameraPosition, modelWorldMatrix,
 } from "three/tsl";
 import { MeshStandardNodeMaterial } from "three";
+import { applyAlphaCutout } from "../materials/alphaCutout.js";
 
 export function createFoliageMaterial(opts = {}) {
   const u = {
@@ -362,7 +363,6 @@ function _buildFoliageMaterial(u, P, opts) {
   const mat = new MeshStandardNodeMaterial({
     side:        THREE.DoubleSide,
     transparent: false,
-    alphaTest:   0.3,
     roughness:   0.88,
     metalness:   0.0,
     depthWrite:  true,
@@ -370,7 +370,10 @@ function _buildFoliageMaterial(u, P, opts) {
   mat.positionNode = positionNode;
   mat.normalNode   = finalNormal;
   mat.colorNode    = colorNode;
-  mat.opacityNode  = opacityNode;
+  // The leaf is cut where opacityNode crosses 0.3, as before — with MSAA, by coverage (smooth
+  // edges, a calmer canopy). The shadow keeps its own cut below (castShadowNode: a fixed
+  // cut-off — the adaptive one follows "the camera", which in the shadow pass is the light's).
+  applyAlphaCutout(mat, opacityNode, { threshold: 0.3, shadow: false });
   mat.envMapIntensity = 0;
 
   mat.castShadowNode = Fn(() => {

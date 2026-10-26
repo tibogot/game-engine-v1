@@ -11,6 +11,7 @@ import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } f
 import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
+import { setAlphaCoverageDefault } from "../render/materials/alphaCutout.js";
 import { ScatterField } from "../render/scatter/scatterField.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
@@ -298,6 +299,9 @@ export async function startV3App(opts = {}) {
     antialias: opts.antialias !== false && new URLSearchParams(location.search).get("msaa") !== "0",
     ...(gpuDevice ? { device: gpuDevice } : {}),
   });
+  // Cut-out cards (leaves…) get smooth alpha-to-coverage edges when there are MSAA samples to
+  // cover; ?a2c=0 = the plain alpha test (render/materials/alphaCutout.js).
+  setAlphaCoverageDefault(renderer.samples > 1 && new URLSearchParams(location.search).get("a2c") !== "0");
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   // ACES filmic, matching v2 + the daynight-sky lab. Without it the renderer

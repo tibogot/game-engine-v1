@@ -16,20 +16,29 @@
  * speckle (the user: "alpha to coverage look better").
  *
  * With MSAA off (the Low setting, ?msaa=0) the samples are not there, so it is
- * the plain alpha test. Shadows are always the hard cut (no MSAA in a shadow
+ * the plain alpha test; ?a2c=0 forces that too (A/B, or a game that wants it). Shadows are always the hard cut (no MSAA in a shadow
  * map): `maskShadowNode`, without which a card casts its whole square.
  */
 import { Fn, Discard, clamp, float, fwidth, max } from "three/tsl";
+
+// Whether cut-outs use coverage, for materials that do not say: the app sets it once at boot
+// from its renderer (MSAA on, and no ?a2c=0) — materials are built after that.
+let coverageDefault = true;
+/** @param {boolean} on  `renderer.samples > 1` (main.js, right after the renderer exists) */
+export function setAlphaCoverageDefault(on) { coverageDefault = !!on; }
 
 /**
  * @param {THREE.NodeMaterial} material  opaque (transparent false)
  * @param {Node} alpha     the card's shape, 0..1 (e.g. a mask texture's channel)
  * @param {object} [o]
  * @param {number} [o.threshold=0.5]  the cut-off
- * @param {boolean} [o.coverage=true] alpha-to-coverage — pass `renderer.samples > 1`
+ * @param {boolean} [o.coverage]  alpha-to-coverage; default: the app's (setAlphaCoverageDefault)
+ * @param {boolean} [o.shadow=true]  also set the shadow cut (maskShadowNode). false for a
+ *   material that cuts its own shadow (e.g. with a cut-off that must not follow the camera:
+ *   in the shadow pass "the camera" is the light's)
  * @returns {THREE.NodeMaterial} the same material
  */
-export function applyAlphaCutout(material, alpha, { threshold = 0.5, coverage = true } = {}) {
+export function applyAlphaCutout(material, alpha, { threshold = 0.5, coverage = coverageDefault, shadow = true } = {}) {
   const t = float(threshold);
   if (coverage) {
     const cov = clamp(alpha.sub(t).div(max(fwidth(alpha), float(1e-4))).add(0.5), 0, 1);
@@ -44,6 +53,6 @@ export function applyAlphaCutout(material, alpha, { threshold = 0.5, coverage = 
     material.alphaTest = threshold;
     material.alphaToCoverage = false;
   }
-  material.maskShadowNode = alpha.greaterThanEqual(t);
+  if (shadow) material.maskShadowNode = alpha.greaterThanEqual(t);
   return material;
 }
