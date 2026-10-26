@@ -5,6 +5,26 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ---
 
+## YOUR NOTES FROM PLAYING (2026-10-26, when you left — to fix next)
+
+1. **Construction animations, ALL buildings, to re-check.** The mirador: its searchlight lamp appears, disappears, then
+   the tower builds and it appears again. The searchlight tower does the same (things appearing, disappearing,
+   appearing again). Check every building's construction for parts shown before their moment.
+2. **Searchlight tower construction:** the small house's roof looks wrong while it builds.
+3. **Mirador roof:** a bad texture change at far distance (the LOD switch). The motor pool seems to use the same
+   roof texture without the problem: compare the two.
+4. **Aid station:** a small pop at the LOD switch, on the tent.
+5. **Jeep, "attack ground" behind it:** the jeep keeps facing the opposite way while it fires. It should turn (or
+   its gun should) toward the target.
+
+**Measure later (a quiet machine):** the GPU cost of the haystacks (overdraw of the straw cards), the two motor pool
+vehicles, and the new surface material (the French post, SAS post, farmstead).
+
+**Proposed next work (2026-10-26):** sharpen the remaining Blender buildings (whitewashed houses, M'zab houses); the
+Aurès stone hamlet (mechta) as a Blender kit; the haystack's card technique for the thorn fence, brush, thatch; the
+motor pool's mechanics (your "Working On Device" clip). Open questions: a warmer farmstead stone? the tents' cloth fix
+(brighter)? « Legacy » marks in the lab, and do shared pieces keep upgrading on the old Aurès?
+
 ## NEXT SESSION (written 2026-10-25, when you left)
 
 **Your look first (lab: `/games/alg-rts/lab.html` — Tab browses, N = next to judge):**
