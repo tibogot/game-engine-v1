@@ -174,9 +174,28 @@ Order:
    margin): tried the same sweep on their boxes — no view lost a shadow even
    at a 10° sun, so NOT changed. If the extra leaves cost real ms: a separate
    shadow-only list (scatterField's pattern) keeps them out of the main pass.
-2. **4× MSAA A/B** — does the scene pass need it? Costs every game; likely
-   becomes a quality setting. Cheap test (quiet machine, same clock, per game).
-   Also the open question from the Tidewater notes / AUDIT.md Hi-Z step 2.
+2. **4× MSAA A/B** — DONE 2026-10-26. Engine flag `?msaa=0` (main.js, any
+   game). Method: MSAA is fixed at renderer creation, so page reloads
+   alternating on/off/on/off; whole-frame ms via alg's gpuBench.timeFrames
+   (the GPU timestamp read 1.2 ms for a whole alg frame with MSAA on —
+   multi-pass frames break it). "Off" = FXAA where the post chain runs.
+   - alg-rts (auresNew, 1584×749): scale 1 — 9.0 vs 9.0 ms (CPU-bound, no
+     difference); scale 2 — MSAA 16.2–16.7 vs FXAA 14.3–14.7 (~2 ms); FXAA
+     itself 0.7–1.5 ms.
+   - editor (fog-lab walk view, post FX off = off means NO AA): scale 1
+     6.7 vs 6.3; scale 2 13.0 vs 11.9 (~1 ms).
+   - old nam (being remade, not chased): scale 2 ~24 vs ~14 ms; it also runs
+     FXAA ON TOP of MSAA (the double-AA blur alg already fixed).
+   - LOOK (alg, 3× crops): without MSAA, wires / barbed wire / the radio
+     mast break into dots or vanish — FXAA cannot rebuild sub-pixel lines.
+     Walls barely change. Alpha-tested foliage (palm fronds) is jagged WITH
+     MSAA too: MSAA does not touch alpha-test edges.
+   - VERDICT: keep 4× MSAA as the default (it costs nothing at 1× on this
+     laptop, and RTS maps are full of wires); "MSAA off + FXAA" becomes the
+     Low quality option for weak GPUs / high resolutions (~2 ms at 2×).
+     Next AA lever: alpha-to-coverage on alpha-tested foliage (uses the MSAA
+     samples already paid for). The Hi-Z "read fewer depth pixels" idea
+     cannot drop MSAA — use a low-res occluder pass if it is ever needed.
 3. **Culling + LOD + impostor spec** (a doc, agreed before code): one way to
    ask ("N copies of asset X, LODs, optional impostor"), backends picked by
    count (mesh + LOD / instanced CPU chunks / GPU compute + indirect), shared

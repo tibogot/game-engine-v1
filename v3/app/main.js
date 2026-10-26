@@ -293,8 +293,9 @@ export async function startV3App(opts = {}) {
   // ── Renderer ───────────────────────────────────────────────────────────────
   const renderer = new THREE.WebGPURenderer({
     // 4x MSAA (WebGPU offers 1 or 4). opts.antialias false = none, for a game
-    // that measures it or brings its own AA.
-    antialias: opts.antialias !== false,
+    // that measures it or brings its own AA. ?msaa=0 = none, in any game (to
+    // measure it; the post chain's FXAA is the edge AA then).
+    antialias: opts.antialias !== false && new URLSearchParams(location.search).get("msaa") !== "0",
     ...(gpuDevice ? { device: gpuDevice } : {}),
   });
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
