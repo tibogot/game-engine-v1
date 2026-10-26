@@ -46,7 +46,7 @@ import {
 } from "../foliage/foliageMaterial.js";
 import { terrainShade } from "../lighting/terrainSunShadow.js";
 
-import { scatterFrustumVisible } from "../scatter/gpuCull.js";
+import { shadowSweepVisible, SHADOW_SWEEP_MAX } from "../culling/shadowCasters.js";
 
 const REPACK_DEBOUNCE = 250;   // ms — coalesce per-stamp gen bumps while painting
 const VIS_CAP = 300000;        // max on-screen leaves per entry (payload budget)
@@ -98,6 +98,10 @@ export class LeafFieldRenderer {
       uFade1: uniform(620),
       uCullPadNdcX: uniform(0.45),
       uCullPadNdcY: uniform(0.5),
+      // Toward the sun (setSunDir): the cull keeps a tree whose SHADOW is on
+      // screen, not only the tree itself.
+      uLightDir: uniform(new THREE.Vector3(0.5, 0.8, 0.3).normalize()),
+      uShadowSweepMax: uniform(SHADOW_SWEEP_MAX),
     };
 
     this._viewInv = new THREE.Matrix4();
@@ -321,10 +325,14 @@ export class LeafFieldRenderer {
           const treePos = vec3(A.x, A.y, A.z);
           const treeCenterW = treePos.add(rot(bounds.xyz).mul(scale));
           const radius = bounds.w.mul(scale).mul(1.3).add(float(1));
-          // The shared test pads by the radius on EVERY side — a tall tree's
-          // canopy is not culled at the screen top while still on screen.
-          const vis = scatterFrustumVisible(
-            treeCenterW, u.uCamMatrix, u.uFx, u.uFy, radius,
+          // The canopy OR its shadow on screen (the one list draws both the
+          // view and the shadow map): a tree just behind the camera still
+          // casts onto the ground in front of it. The shared frustum test pads
+          // by the radius on every side, so a tall canopy is not cut at the
+          // screen top either.
+          const vis = shadowSweepVisible(
+            treeCenterW, A.y, radius, u.uLightDir, u.uShadowSweepMax,
+            u.uCamMatrix, u.uFx, u.uFy,
             u.uCullPadNdcX, u.uCullPadNdcY, u.uCullPadNdcY,
           );
           // NEAR OVERRIDE: with the camera beside/inside a canopy, the NDC
@@ -581,6 +589,7 @@ export class LeafFieldRenderer {
   }
 
   setSunDir(x, y, z) {
+    this.u.uLightDir.value.set(x, y, z).normalize();
     for (const [, entry] of this.entries) {
       if (entry.uniforms) entry.uniforms.sunDir.value.set(x, y, z).normalize();
     }

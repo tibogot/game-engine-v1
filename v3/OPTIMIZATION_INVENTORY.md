@@ -159,6 +159,21 @@ Order:
    SHADOW casters with the camera frustum — under a tree, canopies behind the
    camera lose their ground shadow (fog-lab view 4: 3.6 % of the frame). Fix
    belongs to the spec's "shadow casters culled per LIGHT" rule.
+1b. **Leaf shadow fix** (2026-10-26, not committed): `render/culling/
+   shadowCasters.js` `shadowSweepVisible` — keep a caster when it OR the
+   sweep down the light to where its shadow meets the ground touches the view
+   (two spheres; maxLen 0 = the old test exactly). leafField uses it
+   (`u.uLightDir` from setSunDir, `u.uShadowSweepMax` 80 m). Pixel test: view
+   4 3.6 % → 0, all views at noise. Cost in LEAVES DRAWN (GPU readback of the
+   indirect count): +2…37 % at the map's sun, +25…83 % at a 10° sun (one
+   look-up view +400 % from a small base). GPU ms (gpuAB, pixel ratio 2,
+   quiet machine, frame ~8–11 ms): map's sun — +0.22 / +0.46 / +0.10, all
+   inside noise (0.25 / 0.61 / 0.10); 10° sun — under a tree +0.69 (noise
+   0.38), over the forest +0.36 (noise 0.06), walking view +0.02. So free at
+   a normal sun, ~0.4–0.7 ms in long evening shadows. Trunks + chunked leaves (CPU, 100 m chunks, 12 m
+   margin): tried the same sweep on their boxes — no view lost a shadow even
+   at a 10° sun, so NOT changed. If the extra leaves cost real ms: a separate
+   shadow-only list (scatterField's pattern) keeps them out of the main pass.
 2. **4× MSAA A/B** — does the scene pass need it? Costs every game; likely
    becomes a quality setting. Cheap test (quiet machine, same clock, per game).
    Also the open question from the Tidewater notes / AUDIT.md Hi-Z step 2.
