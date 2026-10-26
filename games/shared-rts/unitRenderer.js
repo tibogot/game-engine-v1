@@ -1785,8 +1785,11 @@ export async function createUnitRenderer({ app, units, healthBars, selectionRing
         // The cupola turns to its target, in the hull's frame, eased; with no
         // target it comes back to the front.
         let want = 0;
-        const tg = unit.target;
+        const tg = unit.target, gr = unit.groundAt;
         if (tg?.alive) want = Math.atan2(tg.position.x - p.x, tg.position.z - p.z) - yaw;
+        // (ATTACK GROUND — a game's spot, not a man: the gun swings to it too; it kept facing the front and fired
+        // backwards over the jeep's tail, 2026-10-26)
+        else if (gr) want = Math.atan2(gr.x - p.x, gr.z - p.z) - yaw;
         let d = want - v.turretAngle;
         d = Math.atan2(Math.sin(d), Math.cos(d));
         v.turretAngle += d * Math.min(1, dt * 5);

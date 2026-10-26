@@ -133,10 +133,12 @@ def drape(K, nm, fn, nu, nv, mats, t, pins=lambda u, v: False, colliders=(), fra
     # post and aid station): one Catmull-Clark level on the settled sheet (the near level), so a fold is a curve and not
     # a crease between long triangles, BEFORE the decimation; and the canvas marked "cloth" so the kit's join never
     # splits its normals at a fold (bkit.Kit.join: smooth by angle, then the cloth's own edges smooth again).
-    if not K.low:
-        sd = o.modifiers.new("SD", "SUBSURF"); sd.levels = sd.render_levels = 1
-        bpy.context.view_layer.objects.active = o
-        bpy.ops.object.modifier_apply(modifier="SD")
+    # (the FAR level too, then decimated 4x harder — its triangles as before: Catmull-Clark pulls the sheet in, and a far
+    # level left unsmoothed sat apart from the near — the aid station's tent POPPED at the switch, 2026-10-26)
+    sd = o.modifiers.new("SD", "SUBSURF"); sd.levels = sd.render_levels = 1
+    bpy.context.view_layer.objects.active = o
+    bpy.ops.object.modifier_apply(modifier="SD")
+    if K.low: keep = keep / 4
     o.data.attributes.new("cloth", "BOOLEAN", "FACE").data.foreach_set("value", [True] * len(o.data.polygons))
     writeFold(o)
     # OPTIMISED (2026-10-22, you: "optimise as much as possible"): the sim grid is fine to make the folds; the mesh

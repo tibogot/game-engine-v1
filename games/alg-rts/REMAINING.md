@@ -7,15 +7,16 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ## YOUR NOTES FROM PLAYING (2026-10-26, when you left — to fix next)
 
-1. **Construction animations, ALL buildings, to re-check.** The mirador: its searchlight lamp appears, disappears, then
-   the tower builds and it appears again. The searchlight tower does the same (things appearing, disappearing,
-   appearing again). Check every building's construction for parts shown before their moment.
-2. **Searchlight tower construction:** the small house's roof looks wrong while it builds.
-3. **Mirador roof:** a bad texture change at far distance (the LOD switch). The motor pool seems to use the same
-   roof texture without the problem: compare the two.
-4. **Aid station:** a small pop at the LOD switch, on the tent.
-5. **Jeep, "attack ground" behind it:** the jeep keeps facing the opposite way while it fires. It should turn (or
-   its gun should) toward the target.
+DONE 2026-10-26 (to confirm in your game):
+1. ~~Construction: parts shown early~~ — the late parts (the mirador's gear and bags, the searchlight's head, the aid
+   station's cross) hidden from the site's placing, not from the first sapper's work (algBuild).
+2. ~~The searchlight shed's roof while building~~ — the generator goes in first, the shed over it, the exhaust last
+   (searchlightTower.py build order; it was dropped into the finished shed, its pipe pushed up through the roof).
+3. ~~The mirador roof's far texture~~ — its far sheets keep a zig-zag of the ribs (as the motor pool's): flat, their
+   bake lost the ribs' shading.
+4. ~~The aid station tent's LOD pop~~ — the far cloth smoothed too (then simplified harder): the near alone was, and
+   the smoothing pulls the sheet in. Every cloth piece rebuilt (forward post, FLN posts, French post's tent).
+5. ~~The jeep facing away on attack ground~~ — the gun mount swings to the spot (unitRenderer: it only tracked a man).
 
 **Measure later (a quiet machine):** the GPU cost of the haystacks (overdraw of the straw cards), the two motor pool
 vehicles, and the new surface material (the French post, SAS post, farmstead).

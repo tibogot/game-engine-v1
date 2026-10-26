@@ -219,17 +219,19 @@ def shed(K, R, state):
         for k in range(5):
             y = 0.1 + k * 0.27
             tag(K.box(f"Board{k}", gx - hx, gx + hx, y, y + 0.24, gz + hz - 0.03, gz + hz, "stPlank", "h", 0.005), 0.84)
+    # (BUILD ORDER, 2026-10-26 — you: the shed's roof "building" looked wrong: the set was dropped into the finished shed,
+    # its exhaust pushed up through the roof. Now the set goes in first (0.78-0.8), the shed over it, the exhaust last)
     gen = "stChar" if state != "intact" else "stGen"
     # the set on its skids: the engine block, the tank over it, the alternator, the radiator's grille at the front
     for sx in (-0.3, 0.3):
-        beam(K, f"Skid{sx}", (gx - 0.7, 0.04, gz + sx), (gx + 0.7, 0.04, gz + sx), 0.08, 0.08, "stSteelDark", 0.88)
-    tag(K.box("Engine", gx - 0.65, gx + 0.2, 0.08, 0.72, gz - 0.33, gz + 0.33, gen, "h", 0.02), 0.89)
-    rod(K, "Alternator", (gx + 0.2, 0.42, gz), (gx + 0.62, 0.42, gz), 0.24, gen, 0.89, 14)
-    rod(K, "Tank", (gx - 0.6, 0.92, gz), (gx + 0.15, 0.92, gz), 0.17, gen, 0.9, 12)
-    tag(K.box("Grille", gx - 0.68, gx - 0.64, 0.14, 0.68, gz - 0.3, gz + 0.3, "stGrille", "h", 0.0), 0.89)
+        beam(K, f"Skid{sx}", (gx - 0.7, 0.04, gz + sx), (gx + 0.7, 0.04, gz + sx), 0.08, 0.08, "stSteelDark", 0.78)
+    tag(K.box("Engine", gx - 0.65, gx + 0.2, 0.08, 0.72, gz - 0.33, gz + 0.33, gen, "h", 0.02), 0.79)
+    rod(K, "Alternator", (gx + 0.2, 0.42, gz), (gx + 0.62, 0.42, gz), 0.24, gen, 0.79, 14)
+    rod(K, "Tank", (gx - 0.6, 0.92, gz), (gx + 0.15, 0.92, gz), 0.17, gen, 0.8, 12)
+    tag(K.box("Grille", gx - 0.68, gx - 0.64, 0.14, 0.68, gz - 0.3, gz + 0.3, "stGrille", "h", 0.0), 0.79)
     if state != "ruin":
-        rod(K, "Exhaust", (gx - 0.2, 0.72, gz + 0.1), (gx - 0.2, hf + 0.6, gz + 0.1), 0.045, "stSteelDark", 0.9, 8)
-        rod(K, "ExhaustCap", (gx - 0.2, hf + 0.6, gz + 0.1), (gx - 0.2, hf + 0.68, gz + 0.1), 0.07, "stSteelDark", 0.9, 8)
+        rod(K, "Exhaust", (gx - 0.2, 0.72, gz + 0.1), (gx - 0.2, hf + 0.6, gz + 0.1), 0.045, "stSteelDark", 0.875, 8)
+        rod(K, "ExhaustCap", (gx - 0.2, hf + 0.6, gz + 0.1), (gx - 0.2, hf + 0.68, gz + 0.1), 0.07, "stSteelDark", 0.875, 8)
     else:   # flattened: the roof down on the set and the ground, the posts thrown
         corrugated(K, "Roof0", (gx - hx, 0.05, gz - hz - 0.4), (1, 0.0, 0.05), (0.15, 0.62, 1), hx * 2, 2 * hz + 0.2, "stRoof", 0.86)
         for i in range(3):

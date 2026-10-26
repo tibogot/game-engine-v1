@@ -379,6 +379,10 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     const bagSite = siteBags(mesh);
     if (bagSite) { mesh.scale.y = 1; bagSite.set(0); }   // (not stretched: its earth stands, its bags go on — siteBags)
     trackLod(app, mesh);                              // (a Blender piece: its far level past HOUSE_FAR — algSangar.js)
+    // ITS LATE PARTS hidden from the start (the mirador's gear and bags, the searchlight's head, the aid station's cross):
+    // they were hidden only at the first sapper's work — the mirador's searchlight showed on the bare site, went, and
+    // came back at the end (you, 2026-10-26: "appears then disappears then the mirador builds and it appears again")
+    for (const c of mesh.children) if (c.userData.late != null) c.visible = false;
     app.scene.add(mesh);
     const site = {
       key, mesh, x: cx, z: cz, reach: Math.hypot(f.hx, f.hz) + 5, progress: 0, done: false, fp, build, bagSite, hx: f.hx, hz: f.hz, yaw,

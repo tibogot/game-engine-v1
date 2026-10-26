@@ -536,7 +536,7 @@ export const BUILDINGS = {
       const mesh = kitView(geo);
       mesh.material = site.material;
       const bags = siteBags(mesh);
-      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ }, stencilShown: () => false, sock: null };
+      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ for (const c of mesh.children) if (c.userData.late != null) c.visible = p >= c.userData.late; /* (its late parts: the searchlight's head — as algBuild) */ }, stencilShown: () => false, sock: null };
       SITE.set(1);
       // (its 81 mm: drawn by the lab on its pivot — the lab's « Fire » lobs the game's bombs from it)
       const g = labPiece(mesh); g.userData.gun = geo.userData.gun;
@@ -555,7 +555,7 @@ export const BUILDINGS = {
       const mesh = kitView(geo);
       mesh.material = site.material;
       const bags = siteBags(mesh);
-      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ }, stencilShown: () => false, sock: null };
+      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ for (const c of mesh.children) if (c.userData.late != null) c.visible = p >= c.userData.late; /* (its late parts: the searchlight's head — as algBuild) */ }, stencilShown: () => false, sock: null };
       SITE.set(1);
       return labPiece(mesh);
     },
@@ -576,7 +576,7 @@ export const BUILDINGS = {
       const mesh = kitView(geo);
       mesh.material = site.material;
       const bags = siteBags(mesh);
-      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ }, stencilShown: () => false, sock: null };
+      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ for (const c of mesh.children) if (c.userData.late != null) c.visible = p >= c.userData.late; /* (its late parts: the searchlight's head — as algBuild) */ }, stencilShown: () => false, sock: null };
       SITE.set(1);
       return labPiece(mesh);
     },
@@ -605,7 +605,7 @@ export const BUILDINGS = {
       const mesh = kitView(geo);
       mesh.material = site.material;
       const bags = siteBags(mesh);
-      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ }, stencilShown: () => false, sock: null };
+      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ for (const c of mesh.children) if (c.userData.late != null) c.visible = p >= c.userData.late; /* (its late parts: the searchlight's head — as algBuild) */ }, stencilShown: () => false, sock: null };
       SITE.set(1);
       return labPiece(mesh);
     },
@@ -620,7 +620,7 @@ export const BUILDINGS = {
       const mesh = kitView(geo);
       mesh.material = site.material;
       const bags = siteBags(mesh);
-      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ }, stencilShown: () => false, sock: null };
+      SITE = { set: (p) => { site.set(p); bags?.set(p); mesh.material = p >= 1 ? geo.userData.labMaterial : site.material; /* (finished: the game's own material — algBuild) */ for (const c of mesh.children) if (c.userData.late != null) c.visible = p >= c.userData.late; /* (its late parts: the searchlight's head — as algBuild) */ }, stencilShown: () => false, sock: null };
       SITE.set(1);
       return labPiece(mesh);
     },

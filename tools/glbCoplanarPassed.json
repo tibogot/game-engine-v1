@@ -21,7 +21,7 @@
   "why": "2026-10-25: 2 sub-millimetre slivers at a breach's boolean edge (the damaged byre, -4.4,0.8,-3.3), the optimizer's rounding; raw build 0 — invisible"
  },
  "fieldposts.glb": {
-  "hash": "de8cde8bf3449668be4f1d814d2f1d18342ba43c",
+  "hash": "7f4d594df71eeccc492cae7fd2952e081f608743",
   "pairs": 3,
   "why": "2026-10-25: 3 sliver pairs in the ruined aid tent's smoothed canvas (1-2 cm triangles folded onto their neighbour, one face, the optimizer's 16-bit rounding; raw build 0) — invisible"
  },
@@ -34,7 +34,7 @@
   "pairs": 0
  },
  "flnposts.glb": {
-  "hash": "db84442b0161d423869cdf7f1875f49013c1fe1e",
+  "hash": "1f9ca38b00c2ed52bd73fe0fce814515f68702b6",
   "pairs": 0
  },
  "fortpoint.glb": {
@@ -56,7 +56,7 @@
   "why": "2026-10-25: 2 sliver pairs (1-2 cm triangles folded onto their neighbour at 0.7,0.7,1.4, the optimizer's rounding; raw build 0) — invisible"
  },
  "mirador.glb": {
-  "hash": "f11ee84302fb634a781bebfe80e532186b567c00",
+  "hash": "3205a4bbac5fa73c5771af7a07ece2f7a2b9d3d9",
   "pairs": 0
  },
  "mortarpit.glb": {
@@ -90,7 +90,7 @@
   "pairs": 0
  },
  "postkit.glb": {
-  "hash": "ee2301b7e20f8388a0845f1c8b53f73898efc023",
+  "hash": "c0f81558d5f7b4b25b9113a33a106db0f3e48574",
   "pairs": 6
  },
  "rubble.glb": {
@@ -216,8 +216,9 @@
   "why": "2026-10-25: 1 sliver (1 cm) at the damaged clinic's breach edge (raw build too) — invisible"
  },
  "sltower.glb": {
-  "hash": "ab8a2c667ef9562153e0f6eb1eb63b3dcf7a0f73",
-  "pairs": 6
+  "hash": "95d457c8793667f08d4e3644895afbabb2ece066",
+  "pairs": 14,
+  "why": "each pair one quad's two halves (the legs' long thin faces, the lamp's barrel), nudged by the meshopt quantisation — as the old 6; rebuilt 2026-10-26 for the shed's build order"
  },
  "smallprops.glb": {
   "hash": "94050f097cfb6f27a9c433513685ab0974d67798",

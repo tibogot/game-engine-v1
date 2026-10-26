@@ -290,6 +290,8 @@ export function kitView(geo) {
     lm.name = "Lamp";
     lm.position.set(...geo.userData.lamp.pivot);
     lm.castShadow = true;
+    // (on a construction site it goes on LAST, the tower built under it — it floated over the bare site, 2026-10-26)
+    lm.userData.late = 0.96;
     m.add(lm);
   }
   const tur = geo.userData.turret;

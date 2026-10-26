@@ -88,12 +88,15 @@ def corrugated(K, nm, o, aw, al, width, length, mat, t, pitch=0.1, depth=0.025):
     o, aw, al = gv(*o), gv(*aw).normalized(), gv(*al).normalized()
     an = aw.cross(al).normalized()
     if an.y < 0: an = -an
+    # (the FAR keeps the ribs as a zig-zag, two segments a wave — as the motor pool's: flat, its bake lost the ribs'
+    # shading and the roof changed texture at the LOD switch, 2026-10-26)
     segs = 4 if not LOW() else 2
-    N_ = max(2, round(width / pitch * segs)) if not LOW() else max(2, round(width / pitch * 2))
+    phase = 0.0 if not LOW() else math.pi / 2
+    N_ = max(2, round(width / pitch * segs))
     bm = bmesh.new(); rows = []
     for i in range(N_ + 1):
         w = width * i / N_
-        off = depth / 2 * math.sin(2 * math.pi * w / pitch) if not LOW() else 0
+        off = depth / 2 * math.sin(2 * math.pi * w / pitch + phase)
         p = o + aw * w + an * off
         rows.append((bm.verts.new(B(*p)), bm.verts.new(B(*(p + al * length)))))
     for i in range(N_):
