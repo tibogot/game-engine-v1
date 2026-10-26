@@ -1,5 +1,7 @@
 /**
- * TSL helpers ported from Revo Realms VegetationSsboUtils (stochastic + frustum cull).
+ * TSL helpers ported from Revo Realms VegetationSsboUtils (stochastic keep).
+ * Its frustum test is gone: the grass uses gpuCull.js like every other field
+ * (the Revo one pulled the screen top IN by the blade radius).
  */
 import {
   Fn,
@@ -10,7 +12,6 @@ import {
   mix,
   smoothstep,
   step,
-  vec4,
 } from "three/tsl";
 
 const EPSILON = float(1e-6);
@@ -27,29 +28,6 @@ export const computeStochasticKeep = Fn(
     const p = mix(float(1), pMin, t);
     const rnd = hash(float(instanceIndex).mul(0.73));
     return step(rnd, p);
-  },
-);
-
-/** NDC frustum test with blade-radius padding (Revo visibility). */
-export const computeFrustumVisibility = Fn(
-  ([worldPos, cameraMatrix, fx, fy, radius, padNdcX, padNdcYNear, padNdcYFar]) => {
-    const one = float(1);
-    const clip = cameraMatrix.mul(vec4(worldPos, 1));
-    const invW = one.div(clip.w);
-    const ndc = clip.xyz.mul(invW);
-    const eyeDepthAbs = clip.w.abs().max(EPSILON);
-    const rNdcX = fx.mul(radius).div(eyeDepthAbs).add(padNdcX);
-    const rNdcY = fy.mul(radius).div(eyeDepthAbs);
-    const rNdcYNear = rNdcY.add(padNdcYNear);
-    const rNdcYFar = rNdcY.sub(padNdcYFar);
-    const visLeft = step(one.negate().sub(rNdcX), ndc.x);
-    const visRight = step(ndc.x, one.add(rNdcX));
-    const visX = visLeft.mul(visRight);
-    const visNear = step(one.negate().sub(rNdcYNear), ndc.y);
-    const visFar = step(ndc.y.add(rNdcYFar), one);
-    const visY = visNear.mul(visFar);
-    const visZ = step(float(-1), ndc.z).mul(step(ndc.z, one));
-    return visX.mul(visY).mul(visZ);
   },
 );
 

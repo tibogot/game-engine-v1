@@ -69,12 +69,9 @@ import {
 import { hash42 } from "../foliage/foliageTslUtils.js";
 import { createRevoBladeGeometry } from "./revoGrassGeometry.js";
 import { wrapTileOffsetXZ } from "./revoGrassTile.js";
-import {
-  computeStochasticKeep,
-  computeFrustumVisibility,
-} from "./revoGrassSsboUtils.js";
+import { computeStochasticKeep } from "./revoGrassSsboUtils.js";
 import { createClipmapGroundY } from "../../terrain/clipmapGroundY.js";
-import { worldSizeForPixels } from "../scatter/gpuCull.js";
+import { scatterFrustumVisible, worldSizeForPixels } from "../scatter/gpuCull.js";
 import { revoGrassConfig } from "../../app/state/revoGrassState.js";
 import { markGpuOnly } from "../gpuOnlyArrays.js";
 
@@ -377,7 +374,7 @@ export class RevoGrassSystem {
       const stochastic = computeStochasticKeep(
         worldPos, u.uAnchorPos, u.uFadeStart, u.uFadeEnd, u.uFadeKeep,
       );
-      const frustum = computeFrustumVisibility(
+      const frustum = scatterFrustumVisible(
         worldPos, u.uCameraMatrix, u.uFx, u.uFy, u.uBladeRadius,
         u.uCullPadX, u.uCullPadYNear, u.uCullPadYFar,
       );

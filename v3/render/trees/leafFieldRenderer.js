@@ -46,29 +46,7 @@ import {
 } from "../foliage/foliageMaterial.js";
 import { terrainShade } from "../lighting/terrainSunShadow.js";
 
-/**
- * Sphere-vs-frustum in NDC with SYMMETRIC radius padding. Deliberately NOT
- * revoGrass's computeFrustumVisibility: that one SUBTRACTS the radius from
- * the screen-top margin (for ground grass, anything projecting near the top
- * is far away), which for a TALL tree culled the whole canopy while it was
- * still on screen — the "leaves disappear when I get close and look down"
- * play-mode bug. Here the radius always widens acceptance on every side.
- */
-const treeFrustumVisibility = Fn(
-  ([worldPos, cameraMatrix, fx, fy, radius, padX, padY]) => {
-    const one = float(1);
-    const clip = cameraMatrix.mul(vec4(worldPos, 1));
-    const invW = one.div(clip.w);
-    const ndc = clip.xyz.mul(invW);
-    const eyeDepthAbs = clip.w.abs().max(float(1e-6));
-    const rx = fx.mul(radius).div(eyeDepthAbs).add(padX);
-    const ry = fy.mul(radius).div(eyeDepthAbs).add(padY);
-    const visX = step(ndc.x.abs(), one.add(rx));
-    const visY = step(ndc.y.abs(), one.add(ry));
-    const visZ = step(float(-1), ndc.z).mul(step(ndc.z, one));
-    return visX.mul(visY).mul(visZ);
-  },
-);
+import { scatterFrustumVisible } from "../scatter/gpuCull.js";
 
 const REPACK_DEBOUNCE = 250;   // ms — coalesce per-stamp gen bumps while painting
 const VIS_CAP = 300000;        // max on-screen leaves per entry (payload budget)
@@ -343,9 +321,11 @@ export class LeafFieldRenderer {
           const treePos = vec3(A.x, A.y, A.z);
           const treeCenterW = treePos.add(rot(bounds.xyz).mul(scale));
           const radius = bounds.w.mul(scale).mul(1.3).add(float(1));
-          const vis = treeFrustumVisibility(
+          // The shared test pads by the radius on EVERY side — a tall tree's
+          // canopy is not culled at the screen top while still on screen.
+          const vis = scatterFrustumVisible(
             treeCenterW, u.uCamMatrix, u.uFx, u.uFy, radius,
-            u.uCullPadNdcX, u.uCullPadNdcY,
+            u.uCullPadNdcX, u.uCullPadNdcY, u.uCullPadNdcY,
           );
           // NEAR OVERRIDE: with the camera beside/inside a canopy, the NDC
           // test of its CENTER goes degenerate (behind the near plane /

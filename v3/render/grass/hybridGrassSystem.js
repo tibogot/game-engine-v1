@@ -60,7 +60,7 @@ import { hash42 } from "../foliage/foliageTslUtils.js";
 import { createClipmapGroundY } from "../../terrain/clipmapGroundY.js";
 import { createBladeGeometry } from "../foliage/grassGemini.js";
 import { wrapTileOffsetXZ } from "./revoGrassTile.js";
-import { computeFrustumVisibility } from "./revoGrassSsboUtils.js";
+import { scatterFrustumVisible } from "../scatter/gpuCull.js";
 import { grassTintBlend, grassFieldAlbedo } from "./grassFieldColor.js";
 import { markGpuOnly } from "../gpuOnlyArrays.js";
 
@@ -644,7 +644,7 @@ export class HybridGrassSystem {
 
       const pKeep = pIn.mul(mix(float(1), u.uPMin, tOut)).mul(slopeProb);
       const stochasticKeep = step(hash(instanceIndex.add(31337)), pKeep);
-      const frustumVis = computeFrustumVisibility(
+      const frustumVis = scatterFrustumVisible(
         worldPos,
         u.uCameraMatrix,
         u.uFx,
