@@ -194,7 +194,19 @@ Order:
      laptop, and RTS maps are full of wires); "MSAA off + FXAA" becomes the
      Low quality option for weak GPUs / high resolutions (~2 ms at 2×).
      Next AA lever: alpha-to-coverage on alpha-tested foliage (uses the MSAA
-     samples already paid for). The Hi-Z "read fewer depth pixels" idea
+     samples already paid for).
+2b. **Alpha-to-coverage** — APPROVED 2026-10-26 ("alpha to coverage look
+   better"). three's built-in A2C (ramp above the cut-off) thinned far crowns
+   to see-through; the CENTRED ramp (Golus) keeps them full. Shared helper:
+   `v3/render/materials/alphaCutout.js` `applyAlphaCutout(mat, alpha,
+   { threshold, coverage: renderer.samples > 1 })` — also sets
+   `maskShadowNode` (without it a card casts its whole square). On: the
+   fog-lab trees. Rollout, one system at a time, before/after crops each:
+   [ ] tree leaf cards (foliageMaterial: leafField + chunked; its own
+   discard at 0.3), [ ] placed foliage / GLB leaf cards (palms; glbLoader
+   alphaTest), [ ] ground plants (foliageSystem: the DEPTH PRE-PASS
+   material needs it too — colour pass is EQUAL-depth), [ ] haystack straw,
+   stencils. Not impostors (their own note: stippling). The Hi-Z "read fewer depth pixels" idea
      cannot drop MSAA — use a low-res occluder pass if it is ever needed.
 3. **Culling + LOD + impostor spec** (a doc, agreed before code): one way to
    ask ("N copies of asset X, LODs, optional impostor"), backends picked by
