@@ -76,15 +76,17 @@ ones throughout.
 - **Cloth simulation** for canvas (tools/blender/clothKit.py): tarps, blankets, collapsed tents — baked
   once in Blender, no cost in the game but triangles.
 
-## Assets still to do (the Blender pass) — 2026-10-21
+## Assets still to do (the Blender pass) — updated 2026-10-26
 
-1. **Still the old look in the game:**
-   - French: the **French post** itself (the base) and the **SAS post**.
-   - FLN: the **lookout** (guetteur's post), the **maquis camp**, the **cave mouth**, the mine
-     marker cairn.
-   - Villages: the **stone dechra kit**, the **koubba**, **wells**, the farms and sheepfold, the oasis
-     props; the field walls want their LOD and lab entries; the old mechta houses (kept, "ancien").
-   - The old Aurès' Roman ruins (procedural, in the game as they are).
+1. **Still the old look in the game** (new maps only — the old Aurès frozen):
+   - ~~French post, SAS post, FLN lookout, mine marker, farmstead, motor pool's states~~ — done 10-25/26.
+   - FLN: the **maquis camp**, the **cave mouth** (runtime sandstone builder).
+   - Villages: the **stone mechta / dechra kit** (the biggest gap — Oued Abdi, the maquis), the **koubba**, the
+     **cemetery**, the **village well** (swap to the props kit's), the **ruined hut**, the sheepfold, the oasis props,
+     **telegraph poles**.
+   - Fuzzy things with the straw-card technique: the **zeriba thorn fence**, brush piles, thatch.
+   - The **helipad** (rework completely).
+   - The old Aurès' Roman ruins (procedural, in the game as they are — fine).
 2. **For the new pieces:**
    - ~~The damaged / ruin states unused~~ — **done 2026-10-22**: below half health a piece breaks to its damaged
      model (dust), destroyed it stays as its ruin, repaired past 80 % it stands whole (algSangar setPieceState).
@@ -307,14 +309,16 @@ ones throughout.
 
 ---
 
-## Suggested order
+## Suggested order (updated 2026-10-26)
 
-1. Oued Abdi playable: its places, points and AI (section 2) — then you play it.
-2. You play a full match on each side.
-3. Building damage and collapse (the new kits first: their states exist).
-4. The HUD icons, as you make them.
-5. FLN-side training.
-6. The explosions onto lab books.
-7. The campaign.
-8. Options, cleanup, boot time.
-9. Steam.
+1. **The stone mechta kit** (+ its ruin = the ruined hut), then the **FLN camp and cave** in Blender — the last big
+   old-look pieces on the new maps.
+2. **Oued Abdi playable:** its places, capture points and AI (section 2) — then you play it.
+3. **You play a full match on each side** (balance, fun at 25-30 min).
+4. Building damage for the OLD merged villages (each house its own id) — the new kits have it.
+5. The small pieces to Blender (koubba, cemetery, well, poles) and the fuzzy ones (thorn fence, brush).
+6. FLN-side training.
+7. The explosions onto lab books (tank shell, vehicle death, grenade).
+8. The campaign (3-5 missions, saves).
+9. Options, release cleanup (dev panel), boot time re-measured, a weaker GPU.
+10. Steam: Electron build, Steamworks, licence audit, store page.
