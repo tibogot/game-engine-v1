@@ -16,7 +16,7 @@
  */
 import * as THREE from "three";
 import {
-  Discard, Fn, abs, attribute, cameraPosition, cameraViewMatrix, cos, cross, dot, exp, faceDirection, float,
+  Fn, abs, attribute, cameraPosition, cameraViewMatrix, cos, cross, dot, exp, faceDirection, float,
   floor, fract, fwidth, hash, instanceIndex, length, max, min, mix, normalLocal, normalize, pow, positionLocal, saturate,
   select, sin, smoothstep, step, texture, time, uniform, uv, varying, vec2, vec3, vec4, PI2, mx_noise_float,
 } from "three/tsl";
@@ -36,6 +36,7 @@ import { ScatterField } from "../scatter/scatterField.js";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { foliageLeafLift, foliageTopdownLift } from "./foliageLighting.js";
 import { coverageMippedTexture } from "./alphaCoverageMips.js";
+import { applyAlphaCutout } from "../materials/alphaCutout.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
@@ -801,14 +802,10 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     // or a bamboo spray (part 4); everything else on the plant is solid
     // geometry and stays fully opaque.
     const isCard = vPart.greaterThan(1.5).and(vPart.lessThan(2.5)).or(vPart.greaterThan(3.5));
-    mat.opacityNode = Fn(() => {
-      const a = select(isCard, texture(headTex, uv()).a, float(1));
-      Discard(a.lessThan(0.4));
-      return float(1);
-    })();
-    // The shadow pass ignores opacityNode: without this the card casts
-    // its whole rectangle.
-    mat.maskShadowNode = isCard.not().or(texture(headTex, uv()).a.greaterThanEqual(0.4));
+    // Cut at 0.4 — with MSAA by coverage (smooth frond and plume edges). The
+    // helper also sets the shadow cut (maskShadowNode): the shadow pass
+    // ignores opacityNode, and without it the card casts its whole rectangle.
+    applyAlphaCutout(mat, select(isCard, texture(headTex, uv()).a, float(1)), { threshold: 0.4 });
   }
   return mat;
 }
@@ -926,10 +923,16 @@ export class FoliageScatterSystem {
         const depth = new THREE.MeshBasicNodeMaterial({ side: base.side });
         depth.positionNode = base.positionNode;
         depth.opacityNode = base.opacityNode;
+        // the cut-out's edge lives HERE: with alpha-to-coverage this pass
+        // writes depth into the covered samples only, and the EQUAL-depth
+        // colour pass then fills exactly those — smooth edges, still one shade
+        depth.alphaTest = base.alphaTest;
+        depth.alphaToCoverage = base.alphaToCoverage;
         depth.colorWrite = false;
         depth.name = `${base.name || "Foliage"}:depth`;
         const colour = base.clone();
         colour.opacityNode = null;
+        colour.alphaToCoverage = false;
         colour.depthFunc = THREE.EqualDepth;
         colour.depthWrite = false;
         this._prepassMats[key] = { depth, colour };

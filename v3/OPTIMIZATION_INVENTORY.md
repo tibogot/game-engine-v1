@@ -205,10 +205,21 @@ Order:
    [x] tree leaf cards (foliageMaterial: leafField + chunked, cut at 0.3,
    its own castShadowNode kept — `shadow: false`; engine default set at boot
    from MSAA, `?a2c=0` = alpha test. Editor fog-lab level: near edges
-   smooth, mid crowns as full, 0.2–1.2 % of the frame changes), [ ] placed foliage / GLB leaf cards (palms; glbLoader
-   alphaTest), [ ] ground plants (foliageSystem: the DEPTH PRE-PASS
-   material needs it too — colour pass is EQUAL-depth), [ ] haystack straw,
-   stencils. Not impostors (their own note: stippling). The Hi-Z "read fewer depth pixels" idea
+   smooth, mid crowns as full, 0.2–1.2 % of the frame changes),
+   [x] palms / placed foliage AND ground plants — one builder
+   (foliageSystem createFoliageMaterial, cut at 0.4; the depth pre-pass
+   material now carries alphaTest + alphaToCoverage, the EQUAL-depth colour
+   pass fills exactly the covered samples). alg auresNew: palm fronds
+   smooth, stray edge pixels gone; ground plants nearly unchanged at RTS
+   distance, nothing thins. Frame at the foliage view, scale 2: 14.8–15.4
+   vs 14.7–16.3 ms — no cost; the pre-pass keeps its win.
+   [ ] haystack (alg game code): its near/far CROSS-FADE is a screen dither
+   (near draws exactly the pixels far gives up) — coverage would make both
+   half-cover the dither edges: needs its own treatment. ALSO CHECK: it has
+   alphaTest but no maskShadowNode — its straw cards may cast whole
+   rectangles (the fog-lab trees' bug). Not verified.
+   [ ] glbLoader leaf cards (alphaTest 0.5 on GLB materials) — if a game
+   draws GLB foliage outside placedFoliage. Not impostors (stippling note). The Hi-Z "read fewer depth pixels" idea
      cannot drop MSAA — use a low-res occluder pass if it is ever needed.
 3. **Culling + LOD + impostor spec** (a doc, agreed before code): one way to
    ask ("N copies of asset X, LODs, optional impostor"), backends picked by
