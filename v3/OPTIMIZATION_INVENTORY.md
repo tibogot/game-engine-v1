@@ -215,9 +215,10 @@ Order:
    vs 14.7–16.3 ms — no cost; the pre-pass keeps its win.
    [ ] haystack (alg game code): its near/far CROSS-FADE is a screen dither
    (near draws exactly the pixels far gives up) — coverage would make both
-   half-cover the dither edges: needs its own treatment. ALSO CHECK: it has
-   alphaTest but no maskShadowNode — its straw cards may cast whole
-   rectangles (the fog-lab trees' bug). Not verified.
+   half-cover the dither edges: needs its own treatment. Its SHADOWS were
+   checked (2026-10-26, auresNew pen haystack): adding a maskShadowNode live
+   left the ground shadow the same (a few edge pixels) — the shadow pass
+   already honours its alphaTest. No bug, unchanged.
    [ ] glbLoader leaf cards (alphaTest 0.5 on GLB materials) — if a game
    draws GLB foliage outside placedFoliage. Not impostors (stippling note). The Hi-Z "read fewer depth pixels" idea
      cannot drop MSAA — use a low-res occluder pass if it is ever needed.
