@@ -13,6 +13,7 @@
 import { KIT_BLEND, blendKitParts, whenGroundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
+import { SURFACE_OFF, hasSurfaces, surfaceMaterial, surfaceTextures } from "./algSurfaces.js";
 
 const S = 1.3;   // (built in real metres; the game draws its buildings x1.3)
 export const HOUSE_TYPES = ["maison", "cour", "haute", "boutique"];
@@ -64,6 +65,10 @@ export const SMALL_PROP_TYPES = ["grenade", "smoke", "flare", "cutters", "mine",
 const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES }, fieldposts: { prefix: "Field", types: FIELD_POST_TYPES }, flnposts: { prefix: "Fln", types: FLN_POST_TYPES }, smallprops: { prefix: "Prop", types: SMALL_PROP_TYPES }, postkit: { prefix: "Bordj", types: BORDJ_TYPES }, rubble: { prefix: "Rubble", types: RUBBLE_TYPES }, vprops: { prefix: "Village", types: VPROP_TYPES }, flnmarks: { prefix: "Mark", types: MARK_TYPES }, farmstead: { prefix: "Farm", types: FARM_TYPES }, saspost: { prefix: "Sas", types: SAS_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
+// THE KITS WITH SURFACES (2026-10-26 — the houses sharp, as the post): each its photo swaps ({ stone: "drystone" }: the
+// Aurès' flat stones). A kit missing here, or built before its surfaces were written, draws its bake alone.
+const SURFACE_KITS = { houses: { stone: "drystone" }, mzab: { stone: "drystone", plaster: "mudRender" } };   // (their bakes' own stone photo; the M'zab's render smoother)
+const _surf = new Map();
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 const _p = {};
 let _parts = null;
@@ -71,7 +76,9 @@ let _parts = null;
 /** Load a kit once ("houses": whitewashed, "mzab": the ochre town). Null if missing. */
 export function loadHouses(kit = "houses") {
   const K = KITS[kit];
-  return (_p[kit] ??= getSharedGltfLoader().loadAsync(`/models/alg/${kit}.glb`).then((gltf) => {
+  // (THE SURFACES — a kit that writes them, its photo detail over the bake: algSurfaces; loaded beside it)
+  return (_p[kit] ??= Promise.all([getSharedGltfLoader().loadAsync(`/models/alg/${kit}.glb`),
+    SURFACE_KITS[kit] && !SURFACE_OFF ? surfaceTextures().catch(() => null) : null]).then(([gltf, ST]) => {
     _parts ??= {};
     for (const ty of K.types) for (const st of HOUSE_STATES) {
       const nm = `${K.prefix}${cap(ty)}_${cap(st)}`;
@@ -86,6 +93,19 @@ export function loadHouses(kit = "houses") {
         // (a kit's colour is its baked atlas: a COLOR_0 it carries is DATA — the sangar's build order — and the
         // loader multiplied it in: the damaged sangar drew red, 2026-10-21)
         if (m.material) m.material.vertexColors = false;
+        // (NO EARTH DETAIL on a surfaced kit — the bake marks "earth…" faces, and the M'zab's renders are named so: its
+        // walls took the soil photo; and the earth detail over this instanced material drew NOTHING, every house gone
+        // from the game, 2026-10-26 — the surfaces carry the close-up detail)
+        if (SURFACE_KITS[kit]) for (const k of ["_earth", "earthMask"]) if (m.geometry.attributes[k]) m.geometry.deleteAttribute(k);   // (the GLB's `_earth`: algGroundBlend hasEarth renames it)
+        // (…and its geometry in REAL METRES: the surfaces tile in the geometry's space, and a meshopt-quantised GLB's is
+        // its 16-bit units — the photos tiled at the wrong scale, a dotted grid over the M'zab's towers. The node's
+        // transform baked in, the node reset: what the house field reads as `local` is identity.)
+        if (SURFACE_KITS[kit] && !m.userData.metres) dequantise(m);
+        // (one surface material a source material: the near and far share it, as they shared their atlas)
+        if (ST && m.material && hasSurfaces(m.geometry)) {
+          const src = m.material;
+          m.material = _surf.get(src) ?? _surf.set(src, surfaceMaterial(src, ST, m.geometry.attributes.color.itemSize === 3 ? "vec3" : "vec4", SURFACE_KITS[kit])).get(src);
+        }
       }
       // THE STENCILS (2026-10-25, you: "is it not better to use decals for lettering?"): a piece's painted words, flat
       // quads 8 mm off their boards on the kit's stencil sheet (tools/blender/bkit.py stencils) — alpha-tested,
@@ -103,6 +123,24 @@ export function loadHouses(kit = "houses") {
     if (KIT_BLEND[kit]) whenGroundBlend((app) => blendKitParts(app, _parts, K.types, KIT_BLEND[kit]));
     return _parts;
   }).catch((e) => { console.warn("[houses]", e); return null; }));
+}
+
+/** A GLB mesh's geometry as plain floats in its PARENT's space (its node transform baked in), the node reset. */
+function dequantise(m) {
+  const src = m.geometry, g = new THREE.BufferGeometry();
+  for (const [k, a] of Object.entries(src.attributes)) {
+    const out = new Float32Array(a.count * a.itemSize);
+    for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) out[i * a.itemSize + c] = a.getComponent(i, c);   // (getComponent denormalises a normalized attribute)
+    g.setAttribute(k, new THREE.BufferAttribute(out, a.itemSize));
+  }
+  if (src.index) g.setIndex(new THREE.BufferAttribute(Uint32Array.from(src.index.array), 1));
+  m.updateMatrix();
+  g.applyMatrix4(m.matrix);
+  g.computeBoundingBox(); g.computeBoundingSphere();
+  g.name = src.name;
+  m.geometry = g;
+  m.position.set(0, 0, 0); m.quaternion.identity(); m.scale.set(1, 1, 1); m.updateMatrix();
+  m.userData.metres = true;
 }
 
 /** A piece from outside the kits (its own near / far meshes — e.g. the simulated sandbag walls, algSandbags.js)

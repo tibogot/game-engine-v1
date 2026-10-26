@@ -130,7 +130,10 @@ export function blendMesh(app, mesh, { fade = 0.3, tint = GROUND_BLEND.tint, str
       if (!m) {
         m = new THREE.MeshStandardNodeMaterial({ roughness: src.roughness ?? 0.9, metalness: src.metalness ?? 0, side: src.side });
         m.name = `${src.name || "kit"}:gblend`;
-        const base = src.map ? texture(src.map).rgb.mul(vec3(src.color.r, src.color.g, src.color.b)) : vec3(src.color.r, src.color.g, src.color.b);
+        // (a node material's own colour and relief kept — the surfaces' photo detail, algSurfaces, the house kits)
+        const base = src.isNodeMaterial && src.colorNode ? src.colorNode
+          : src.map ? texture(src.map).rgb.mul(vec3(src.color.r, src.color.g, src.color.b)) : vec3(src.color.r, src.color.g, src.color.b);
+        if (src.isNodeMaterial && src.normalNode) m.normalNode = src.normalNode;
         // (the source's own map and colour kept on it: other builders read them — algSangar's piece materials)
         m.map = src.map ?? null; m.color.copy(src.color);
         if (src.normalMap) m.normalMap = src.normalMap;

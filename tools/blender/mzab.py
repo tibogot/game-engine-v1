@@ -152,7 +152,7 @@ def terraceWall(nb):
 MATDEF["terraceWall"] = (0.95, terraceWall)
 TYPES["mur"] = dict(builder=buildWall, drop=2.0, parapet=0.7, coping="earthOchre", atlas=1024)
 
-exported = buildKit(TYPES, MATDEF, "mzab.glb", prefix="Mzab", seed0=1830)
+exported = buildKit(TYPES, MATDEF, "mzab.glb", prefix="Mzab", seed0=1830, surfaces=True)
 previews(TYPES, exported, prefix="Mzab", tag="mzab_")
 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "mzab.blend"))
 print("DONE")

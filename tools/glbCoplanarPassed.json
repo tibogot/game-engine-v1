@@ -47,8 +47,8 @@
   "why": "straw CARDS overlap by design: alpha-tested strands layered like shingles, not solid faces — no z-fight between opaque surfaces"
  },
  "houses.glb": {
-  "hash": "b59141a49b9f7372de752d5e120c0302c42a3d11",
-  "pairs": 102
+  "hash": "17682a1eee58b6873ff21c6d28d4361d4fc0e7bb",
+  "pairs": 88
  },
  "mgnest.glb": {
   "hash": "7562cffb5419f2eb67afb8cb274a481623d36d6e",
@@ -82,8 +82,8 @@
   "why": "the intact far's own 20 leftovers (motorPool.glb's bar): the same build, its damage adds none"
  },
  "mzab.glb": {
-  "hash": "804ecc428abf8a3039635048b2e6fb3abaa4146a",
-  "pairs": 58
+  "hash": "1f8a56bd489286be7ac940c7255324c5b7fb2d9c",
+  "pairs": 37
  },
  "points.glb": {
   "hash": "50d39303b91397fd11007d2f775397892a793612",

@@ -441,7 +441,9 @@ def earth_mask(o):
     (algGroundBlend earthDetail): the atlas's few texels a centimetre for a 7 m berm stop reading as a smear."""
     me = o.data
     if not me.materials: return
-    earthy = [bool(m and any(w in m.name.lower() for w in ("earth", "spoil", "soil", "berm"))) for m in me.materials]
+    # (not the M'zab's earth RENDERS — earthOchre, earthPink…: plastered walls, not soil; 2026-10-26)
+    render = lambda n: n.startswith("earth") and len(n) > 5 and n[5].isupper()
+    earthy = [bool(m and not render(m.name.split(".")[0]) and any(w in m.name.lower() for w in ("earth", "spoil", "soil", "berm"))) for m in me.materials]
     if not any(earthy): return
     val = [0.0] * len(me.vertices)
     for p in me.polygons:

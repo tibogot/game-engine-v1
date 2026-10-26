@@ -25,6 +25,7 @@ import bpy, bmesh, sys, os, math, random
 sys.path.insert(0, os.path.dirname(__file__))
 import bkit
 from bkit import copy_normals, B, srgb, dust, flat, wood, paintedWood, Kit, tris
+import drystone   # (writeBuildOrder: the faces' surfaces — buildKit surfaces=True)
 
 out = os.path.abspath(sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv else os.path.join(bkit.ROOT, "public", "models", "alg"))
 os.makedirs(out, exist_ok=True)
@@ -482,7 +483,10 @@ def groundLife(K, R, spec, Z0):
 # ── Build, bake (three states, one atlas a type), far levels, export ──────────
 # (a function: tools/blender/mzab.py imports this builder with its own types and materials)
 STATES = ("intact", "damaged", "ruin")
-def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
+def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfaces=False):
+    # (SURFACES: each face's SURFACE written (drystone.writeBuildOrder: .b) and exported, the atlas packed tight — the
+    # game tiles that surface's photo over the bake, algSurfaces; 2026-10-26, the houses sharp as the post)
+    if surfaces: colors = True
     K = Kit(MATDEF, ("h",))
     exported, stencilled = [], False
     S_ = 512 if QUICK else 2048
@@ -493,6 +497,7 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
         for si, state in enumerate(spec.get("states", STATES)):   # (a prop: "intact" only)
             K.groups["h"] = []; K.decals = []
             (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
+            if surfaces: drystone.writeBuildOrder(K)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
             objs.append(o); decals[o] = K.decals   # (its painted lettering: the stencil sheet's decal quads — bkit.stencils)
@@ -504,7 +509,7 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False):
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
                 K.drop_cutters()
-        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.002))
+        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.0005 if surfaces else 0.002))
         dec = K.stencils(decals, f"{prefix}{tname.capitalize()}", REFS)   # (near level only: at the far's 60 m+ a word is a pixel)
         if dec: stencilled = True
         for i, o in enumerate(objs):
@@ -538,7 +543,7 @@ def previews(TYPES, exported, prefix="House", tag="", spacing=16, frame=1.0):
             o = bpy.data.objects[n]; o.hide_render = True; o.location.x = 0
 
 if __name__ == "__main__":
-    exported = buildKit(TYPES, MATDEF, "houses.glb")
+    exported = buildKit(TYPES, MATDEF, "houses.glb", surfaces=True)
     previews(TYPES, exported)
     bpy.ops.wm.save_as_mainfile(filepath=os.path.join(REFS, "houses.blend"))
     print("DONE")

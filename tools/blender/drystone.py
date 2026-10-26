@@ -83,7 +83,10 @@ def surfaceClass(nm):
     """A face's SURFACE from its material's name (.b of the build colour, class / 8): the game tiles that surface's
     photo over it (algSangar surfaceMaterial — 2026-10-25, you: the post's texture "so cheap and not AAA rts at all")."""
     n = nm.split(".")[0].lower()
-    if n.startswith("render") or "plaster" in n: return 1
+    raw = nm.split(".")[0]
+    if n.startswith("render") or "plaster" in n or n.startswith("lime"): return 1
+    if raw.startswith("earth") and len(raw) > 5 and raw[5].isupper(): return 1   # (the M'zab's earth renders: earthOchre…; "earth" alone is ground)
+    if n == "terracewall": return 2
     if n in ("stone", "rubble") or "stone" in n or "masonry" in n: return 2
     if any(k in n for k in ("wood", "door", "shutter", "plank", "beam", "timber", "crate")): return 3
     if any(k in n for k in ("steel", "iron", "tank", "galv", "rust", "metal", "poroof")): return 4

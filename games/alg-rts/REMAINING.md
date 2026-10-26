@@ -1,13 +1,50 @@
 # Sand & Blood — what remains
 
-*Updated 2026-10-20. Maps 2 (the coast) and 3 (El Kantara) are not here; they come after. The
+*Updated 2026-10-26. Maps 2 (the coast) and 3 (El Kantara) are not here; they come after. The
 details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ---
 
-## YOUR NOTES FROM PLAYING (2026-10-26, when you left — to fix next)
+## NEXT SESSION (written 2026-10-26, when you left)
 
-DONE 2026-10-26 (to confirm in your game):
+**Done this session (to confirm in your game, « Les Aurès — 1956 »):**
+- Your five playing notes (below): construction parts shown early, the searchlight shed's build order, the mirador
+  roof's far texture, the aid station tent's LOD pop, the jeep firing backwards on attack ground.
+- The motor pool: damaged / destroyed states, its GMC under the hoist and a jeep over the pit.
+- The straw-card HAYSTACK in the game (the quality floor: "nothing cheaper"), the old hay removed.
+- Sharp textures + each surface its own photo: French post, SAS post, farmstead, whitewashed houses, M'zab houses.
+
+**Your look (lab: `/games/alg-rts/lab.html`, N = next to judge):**
+1. To judge: the motor pool (3 tabs), SAS post, farmstead, FLN lookout, mine marker, the haystack, the whitewashed and
+   M'zab houses (sharper), the French post's damaged / destroyed tabs.
+2. Once judged: remove « Farmstead: old vs new ».
+3. Your answers: a warmer farmstead stone? the tents' cloth fix (it brightens them)? « Legacy » marks for the
+   old-Aurès-only entries? do shared pieces keep upgrading on the old Aurès (my advice: yes)?
+
+**Work, in the order I'd suggest:**
+4. **The rooftop hay** on the whitewashed houses (and any other lumpy "life" prop): the straw-card haystack's way.
+5. **The Aurès stone hamlet (mechta) as a Blender kit**: the villages where most of the fighting happens (Oued Abdi,
+   the maquis), still the runtime masonry builder. Then the **FLN camp**.
+6. **The card technique for the fuzzy things:** the zeriba's thorn fence, brush piles, a thorn barricade, thatch.
+7. **The motor pool's mechanics** (your "Working On Device" clip): 1-2 men at the truck.
+8. **Small old-kit pieces to Blender:** koubba, cemetery, ruined hut (the new mechta's ruin?), the village well's swap
+   (Oued Abdi, the maquis), telegraph poles (an instanced Blender pole, the wires runtime).
+9. **The sharp-surface treatment for the other Blender kits** at their next rebuild (mirador, sangar, field posts, FLN
+   posts, arms cache, points…): buildKit(..., surfaces=True) + algHouse SURFACE_KITS or loadBlenderPiece `surfaces`.
+10. **The helipad**: rework completely (its floating sandbags) — you said later.
+11. **The training camp** (the player's first map): the FLN ground (lessons 7-9), cover on the knoll, camera framing,
+    a less lawn-like grass.
+12. **Optimisation**: trim the near triangles of the smoothed tents and the SAS post's tile roof.
+13. **The lab pass**: ~57 buildings, 15 plants, 4 rocks not judged yet.
+
+**Measure (a quiet machine — tell me when):** the GPU cost of the haystacks (straw-card overdraw), the motor pool's
+two vehicles, the surface material (more texture taps on the posts and houses).
+
+**Tidy (later):** the post and the motor pool still keep their OLD runtime piece hidden underneath for the footprint,
+nav and gate data — that data into the Blender export. Old-kit z-fighting left: houses 88 pairs, M'zab 37, motor pool
+near 26.
+
+### Your notes from playing (2026-10-26) — DONE, to confirm in your game:
 1. ~~Construction: parts shown early~~ — the late parts (the mirador's gear and bags, the searchlight's head, the aid
    station's cross) hidden from the site's placing, not from the first sapper's work (algBuild).
 2. ~~The searchlight shed's roof while building~~ — the generator goes in first, the shed over it, the exhaust last
@@ -17,32 +54,6 @@ DONE 2026-10-26 (to confirm in your game):
 4. ~~The aid station tent's LOD pop~~ — the far cloth smoothed too (then simplified harder): the near alone was, and
    the smoothing pulls the sheet in. Every cloth piece rebuilt (forward post, FLN posts, French post's tent).
 5. ~~The jeep facing away on attack ground~~ — the gun mount swings to the spot (unitRenderer: it only tracked a man).
-
-**Measure later (a quiet machine):** the GPU cost of the haystacks (overdraw of the straw cards), the two motor pool
-vehicles, and the new surface material (the French post, SAS post, farmstead).
-
-**Proposed next work (2026-10-26):** sharpen the remaining Blender buildings (whitewashed houses, M'zab houses); the
-Aurès stone hamlet (mechta) as a Blender kit; the haystack's card technique for the thorn fence, brush, thatch; the
-motor pool's mechanics (your "Working On Device" clip). Open questions: a warmer farmstead stone? the tents' cloth fix
-(brighter)? « Legacy » marks in the lab, and do shared pieces keep upgrading on the old Aurès?
-
-## NEXT SESSION (written 2026-10-25, when you left)
-
-**Your look first (lab: `/games/alg-rts/lab.html` — Tab browses, N = next to judge):**
-1. The new pieces, « To judge »: **SAS post** (its old one removed 2026-10-25; the old well kept: « Rendered well (parked) »), **farmstead** (+ « Farmstead: old vs new »;
-   its BURNT tab = the map's burnt farm), **FLN lookout**, **mine marker**.
-2. The fixes to confirm (their old « Improve » verdicts can then go): the tents' folds (French post, forward post,
-   aid station), the pits' earth (mortar pit, fortified point, MG nest), the sangar's FM on its lip.
-3. Once judged: remove « Farmstead: old vs new ».
-
-**Work, in the order I'd suggest:**
-4. ~~**The motor pool**: its **damaged / destroyed** states (D)~~ DONE 2026-10-25 (motorPool.py --state; the lab « Motor pool » tabs) — to judge.
-5. **The rest of the lab pass**: ~57 buildings, 15 plants, 4 rocks not judged — your verdicts feed the next redo list.
-6. **Optimisation**: trim the near triangles of the smoothed tents (×2) and the SAS post's tile roof (25k → 35k).
-7. **The helipad**: rework completely (its floating sandbags) — you said later.
-8. **The training camp** (the player's first map): the FLN ground (lessons 7-9), cover on the knoll, camera framing
-   per lesson, a less lawn-like grass.
-9. **Old-kit z-fighting** left in houses (112 pairs), M'zab (58), motor pool (50) — fixes inside their build scripts.
 
 **Notes:**
 - Method from now on (img2threejs' good idea): for each new piece, a reference image, a detail checklist, and a
