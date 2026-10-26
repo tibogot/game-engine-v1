@@ -51,6 +51,7 @@ import { wrapTileOffsetXZ } from "../grass/revoGrassTile.js";
 import { createClipmapGroundY } from "../../terrain/clipmapGroundY.js";
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
 import { scatterFrustumVisible } from "./gpuCull.js";
+import { paddedClipPlanes } from "../culling/cpuCull.js";
 import { LAYERS } from "../layers.js";
 import { markGpuOnly } from "../gpuOnlyArrays.js";
 
@@ -872,17 +873,9 @@ export class ScatterField {
     const R = this._reach;
     let planes = null;
     if (hMin) {
-      const e = this._cameraMatrix.elements;
-      const row = (i) => [e[i], e[4 + i], e[8 + i], e[12 + i]];
-      const [r0, r1, r2, r3] = [row(0), row(1), row(2), row(3)];
-      const kX = 1 + u.uCullPadNdcX.value, kYn = 1 + u.uCullPadNdcYNear.value, kYf = 1 + u.uCullPadNdcYFar.value;
-      const fxr = u.uFx.value * R, fyr = u.uFy.value * R;
-      const comb = (a, sa, b, sb, add) => [0, 1, 2, 3].map((k) => sa * a[k] + sb * b[k] + (k === 3 ? add : 0));
-      planes = [
-        comb(r0, 1, r3, kX, fxr), comb(r0, -1, r3, kX, fxr),     // left, right
-        comb(r1, 1, r3, kYn, fyr), comb(r1, -1, r3, kYf, fyr),   // bottom (near), top (far)
-        comb(r3, 1, r3, 0, 0), comb(r3, 1, r2, -1, 0),           // in front, before the far plane
-      ];
+      // left, right, bottom (near), top (far), in front, before the far plane
+      planes = paddedClipPlanes(this._cameraMatrix.elements, u.uFx.value, u.uFy.value, R,
+        u.uCullPadNdcX.value, u.uCullPadNdcYNear.value, u.uCullPadNdcYFar.value);
     }
     let drawDone = 0;   // per type: every detail level already proven possible
     const ax = anchorPos.x, az = anchorPos.z, cx = u.uCamPos.value.x, cz = u.uCamPos.value.z;

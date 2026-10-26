@@ -6,6 +6,7 @@ import { WORLD_SIZE } from "../terrain/heightmapTexture.js";
 import { shareInstancePipeline } from "../render/instancePipeline.js";
 import { simplifyEntries, simplifierReady } from "../render/instancing/autoLod.js";
 import { MAX_SHADOW_CASCADE_LAYERS, shadowCascadeLayer } from "../render/layers.js";
+import { CULL_MARGIN, TIER_UNSET, lodTier } from "../render/culling/cpuCull.js";
 
 const _tmp       = new THREE.Matrix4();
 const _tmpDelta  = new THREE.Matrix4();
@@ -20,9 +21,8 @@ const MAX_GROUP_BOXES = 128; // selection outline pool cap (selection can exceed
 /** Starting capacity of each LOD mesh. Meshes GROW past it (they used to drop). */
 const INITIAL_INSTANCES = 4096;
 export { INITIAL_INSTANCES as MAX_PROP_INSTANCES_PER_MESH };
-const CULL_MARGIN   = 12;
-const LOD_HYST      = 0.1;
-const TIER_UNSET    = 255;
+// CULL_MARGIN / TIER_UNSET / the hysteresis: the engine's one copy (render/culling/cpuCull.js)
+const _tierEdges = [0, 0, 0];   // reused per call: _pickTier runs per instance per frame
 
 const CELL_SIZE  = 256;
 const HALF_WORLD = WORLD_SIZE * 0.5;
@@ -724,19 +724,10 @@ export class PropInstancer {
     }
   }
 
+  /** Tiers 0-2 drawn, 3 hidden; squared distances (tools/cpuCullTest.mjs pins it to the old code). */
   _pickTier(dist2, tier, d0, d1, dF) {
-    const out2 = (1 + LOD_HYST) ** 2, in2 = (1 - LOD_HYST) ** 2;
-    if (tier > 3 || tier === TIER_UNSET) {
-      if (dist2 > dF) return 3;
-      if (dist2 > d1) return 2;
-      if (dist2 > d0) return 1;
-      return 0;
-    }
-    const [d0o,d0i,d1o,d1i,dFo,dFi] = [d0*out2,d0*in2,d1*out2,d1*in2,dF*out2,dF*in2];
-    if (tier===3) return dist2<dFi?(dist2<d1i?(dist2<d0i?0:1):2):3;
-    if (tier===2) return dist2>dFo?3:(dist2<d1i?(dist2<d0i?0:1):2);
-    if (tier===1) return dist2>dFo?3:(dist2>d1o?2:(dist2<d0i?0:1));
-    return dist2>dFo?3:(dist2>d1o?2:(dist2>d0o?1:0));
+    _tierEdges[0] = d0; _tierEdges[1] = d1; _tierEdges[2] = dF;
+    return lodTier(dist2, tier, _tierEdges);
   }
 
   _lodForTier(tr, tier) {

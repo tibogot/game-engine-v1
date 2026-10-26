@@ -141,7 +141,18 @@ GPU timestamp misreads multi-pass frames) on a quiet machine.
 
 1. `cpuCull.js` (R1 CPU twin + R3 tier/hysteresis helper) + its Node tests.
    No behaviour change: scatterField's `_cpuCull` and the CPU renderers call
-   it, pixel A/B identical.
+   it, pixel A/B identical. — DONE 2026-10-26: `render/culling/cpuCull.js`
+   (`CULL_MARGIN`, `LOD_HYSTERESIS`, `TIER_UNSET`, `lodTier`,
+   `paddedClipPlanes`, `sphereVisibleCpu`); `tools/cpuCullTest.mjs` pins
+   lodTier to verbatim copies of the old prop + trunk tier code (200k cases
+   each, a 0.02 hysteresis error fails it) and sphereVisibleCpu to the GPU
+   formula (200k spheres). Adopted: propInstancer (`_pickTier`),
+   treeLodRenderer, scatterField's planes. Pixel check, same frozen views
+   before / after: editor fog-lab + rock-lab (427 props) and alg auresNew
+   identical to the noise floor (one rock-lab run caught the grass's own
+   state; re-run: 0 px). Left for later: foliageLodRenderer (its boundaries
+   use different distances per edge — needs `lodTier` with a distance per
+   boundary) and placedFoliage.
 2. The LOD settings shape + aliases (R3). Editor and level files read it.
 3. One octahedral core (R5): the arborist on `render/foliage/octahedralCore.js`.
 4. The API (§1) as a thin facade over today's systems — instanced →

@@ -9,6 +9,7 @@
  * distance check and the cheap worldMat × submeshLocalMat multiply remain.
  */
 import * as THREE from "three";
+import { CULL_MARGIN, lodTier } from "../culling/cpuCull.js";
 
 const _viewInvShared = new THREE.Matrix4();
 
@@ -17,12 +18,8 @@ const _viewInvShared = new THREE.Matrix4();
 // more visible instances than this, the meshes are recreated with doubled
 // capacity and refilled the same frame (see _growSlotCapacity).
 const INITIAL_CAPACITY = 4096;
-// Expand the chunk cull AABB so trees whose canopy overhangs the chunk edge
-// don't pop when the chunk footprint leaves the frustum.
-const CULL_MARGIN = 12;
-// LOD hysteresis band (±10%): a tree must cross threshold*(1+H) to demote and
-// threshold*(1-H) to promote, so boundary trees can't flip tiers every frame.
-const LOD_HYST = 0.1;
+// The chunk cull margin (a canopy overhanging its chunk edge must not pop) and the
+// LOD hysteresis: the engine's one copy, render/culling/cpuCull.js.
 
 export class TreeLodRenderer {
   constructor(scene, config) {
@@ -51,6 +48,7 @@ export class TreeLodRenderer {
     this._quat = new THREE.Quaternion();
     this._scl = new THREE.Vector3();
     this._box = new THREE.Box3();
+    this._tierEdges = [0, 0];   // lodTier's squared boundaries, reused per fill
     this._yAxis = new THREE.Vector3(0, 1, 0);
 
     // Idle early-out state: skip the full matrix rewrite + GPU upload when the
@@ -215,15 +213,10 @@ export class TreeLodRenderer {
 
     const camX = camera.position.x;
     const camZ = camera.position.z;
-    const lod0D2 = lodCfg.lod0Distance * lodCfg.lod0Distance;
-    const fadeD2 = lodCfg.fadeOutDistance * lodCfg.fadeOutDistance;
-    // Hysteresis bands (squared): demote past *(1+H), promote back under *(1-H).
-    const out2 = (1 + LOD_HYST) * (1 + LOD_HYST);
-    const in2 = (1 - LOD_HYST) * (1 - LOD_HYST);
-    const lod0OutD2 = lod0D2 * out2;
-    const lod0InD2 = lod0D2 * in2;
-    const fadeOutD2 = fadeD2 * out2;
-    const fadeInD2 = fadeD2 * in2;
+    // Tier boundaries (squared): lod0 → lod1 → hidden.
+    const edges2 = this._tierEdges;
+    edges2[0] = lodCfg.lod0Distance * lodCfg.lod0Distance;
+    edges2[1] = lodCfg.fadeOutDistance * lodCfg.fadeOutDistance;
     const chunkSize = this.config.world.chunkSize;
     const half = this.config.world.size * 0.5;
 
@@ -275,18 +268,7 @@ export class TreeLodRenderer {
         const dist2 = dx * dx + dz * dz;
 
         // Tier with hysteresis: 0=lod0, 1=lod1, 2=hidden, 255=unset.
-        let tier = tiers[i];
-        if (tier > 2) {
-          tier = dist2 > fadeD2 ? 2 : dist2 > lod0D2 ? 1 : 0;
-        } else if (tier === 2) {
-          if (dist2 < fadeInD2) tier = dist2 < lod0InD2 ? 0 : 1;
-        } else if (tier === 1) {
-          if (dist2 > fadeOutD2) tier = 2;
-          else if (dist2 < lod0InD2) tier = 0;
-        } else {
-          if (dist2 > fadeOutD2) tier = 2;
-          else if (dist2 > lod0OutD2) tier = 1;
-        }
+        const tier = lodTier(dist2, tiers[i], edges2);
         tiers[i] = tier;
         if (tier === 2) continue;
 
