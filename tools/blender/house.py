@@ -426,7 +426,9 @@ def roofLife(K, R, x0, x1, z0, z1, y, kinds, hut, par, zFront):
             if p: K.box(f"Prayer{p[0]:.1f}", p[0] - 0.36, p[0] + 0.36, y, y + 0.015, p[1] - 0.6, p[1] + 0.6, "prayerRug", G, 0)
         elif kind == "hay":
             p = spot(0.75, 0.55)
-            if p: K.lump(f"Hay{p[0]:.1f}", (p[0], y, p[1]), (0.7, 0.42, 0.5), "hay", G, seed=R.randint(0, 99), rough=0.18)
+            # (the STRAW-CARD hay pile, the game's — algHaystack, 2026-10-26: the baked lump read "very cheap"; a SPOT here,
+            # exported as an empty <piece>_Hay<i>: its place, its turn)
+            if p: K.spots.append((p[0], y, p[1], R.uniform(0, 6.28)))
         elif kind == "pottery":                           # amphorae, pots and a glazed jug in a huddle
             p = spot(0.6, 0.5)
             if not p: continue
@@ -493,19 +495,20 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
     for ti, (tname, spec) in enumerate(TYPES.items()):
         if ONLY and tname != ONLY: continue
         K.smooth_angle, K.weighted_on = spec.get("smoothAngle", 35), spec.get("weighted", True)
-        objs, fars, decals = [], [], {}
+        objs, fars, decals, hay = [], [], {}, {}
         for si, state in enumerate(spec.get("states", STATES)):   # (a prop: "intact" only)
-            K.groups["h"] = []; K.decals = []
+            K.groups["h"] = []; K.decals = []; K.spots = []
             (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
             if surfaces: drystone.writeBuildOrder(K)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
             objs.append(o); decals[o] = K.decals   # (its painted lettering: the stencil sheet's decal quads — bkit.stencils)
+            hay[o] = K.spots
             # A piece's OWN far level (`farBuilder`: the same seed, built coarser — 2026-10-20, the hedges: a
             # decimated cactus pad collapsed to a sliver, the far hedge was another shape and POPPED); baked into
             # the same atlas. Without one, the near level decimated (K.far).
             if spec.get("farBuilder"):
-                K.groups["h"] = []
+                K.groups["h"] = []; K.spots = []   # (the far build's own spots: thrown away)
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
                 K.drop_cutters()
@@ -518,6 +521,9 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
             if fars: copy_normals(f, o)
             print("TRIS", o.name, tris(o), "far", tris(f))
             exported += [o, f] + ([dec[o]] if o in dec else [])
+            for i, (x, y, z, yaw) in enumerate(hay.get(o, [])):   # (its hay piles' spots: empties, the game's straw-card piles)
+                e = bpy.data.objects.new(f"{o.name}_Hay{i}", None); bpy.context.scene.collection.objects.link(e)
+                e.location = B(x, y, z); e.rotation_euler = (0, 0, yaw); exported.append(e)
     K.export(os.path.join(out, glb), exported, colors=colors, images="AUTO" if stencilled else "JPEG")
     return exported
 

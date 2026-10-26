@@ -14,6 +14,7 @@ import { KIT_BLEND, blendKitParts, whenGroundBlend } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { getSharedGltfLoader } from "../../v3/render/foliage/glbLoader.js";
 import { SURFACE_OFF, hasSurfaces, surfaceMaterial, surfaceTextures } from "./algSurfaces.js";
+import { haystackField } from "./algHaystack.js";
 
 const S = 1.3;   // (built in real metres; the game draws its buildings x1.3)
 export const HOUSE_TYPES = ["maison", "cour", "haute", "boutique"];
@@ -117,7 +118,11 @@ export function loadHouses(kit = "houses") {
         if (m.map) m.map.anisotropy = 8;
         decal.castShadow = false; decal.receiveShadow = true;
       }
-      _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near, decal: decal?.isMesh ? decal : null };
+      // ITS HAY PILES (house.py: the rooftop hay's spots, empties <piece>_Hay<i> — 2026-10-26): the straw-card piles of
+      // algHaystack, placed with the house (its frame: the kit's real metres)
+      const hay = [];
+      for (let i = 0, e; (e = gltf.scene.getObjectByName(`${nm}_Hay${i}`)); i++) { e.updateMatrix(); hay.push(e.matrix.clone()); }
+      _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near, decal: decal?.isMesh ? decal : null, hay };
     }
     // (THE GROUND BLEND as it loads — algGroundBlend KIT_BLEND: before anything can draw it)
     if (KIT_BLEND[kit]) whenGroundBlend((app) => blendKitParts(app, _parts, K.types, KIT_BLEND[kit]));
@@ -163,6 +168,7 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
   if (P.decal) { P.near.updateMatrix(); P.decal.updateMatrix(); const d = P.decal.clone(); d.applyMatrix4(P.near.matrix.clone().invert()); near.add(d); }   // (its stencils: the near level's child, the GLB's own placement kept)
   lod.addLevel(near, 0, 0.1);
   lod.addLevel(P.far.clone(), HOUSE_FAR, 0.1);   // (THREE.LOD measures plain world distance)
+  for (const h of P.hay ?? []) haystackField().addMatrix(g, h.clone(), null, "pile");   // (its hay piles: algHaystack's field)
   g.add(lod);
   return g;
 }
@@ -178,6 +184,12 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
  *   const id = field.add("maison", "intact", x, y, z, yaw); field.update(camera) every frame;
  *   field.setState(id, "damaged")   // the damage system's hook
  */
+/** A house's hay piles into the haystack field (world: the house's matrix × each spot); their ids. */
+function hayFor(m, key) {
+  const P = _parts?.[key];
+  return (P?.hay ?? []).map((h) => haystackField().addMatrix(null, new THREE.Matrix4().multiplyMatrices(m, h), null, "pile"));
+}
+
 export function createHouseField() {
   const root = new THREE.Group();
   root.name = "HouseField";
@@ -215,11 +227,16 @@ export function createHouseField() {
     /** A house; its id (for setState). */
     add(type, state, x, y, z, yaw = 0, scale = S) {
       const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(scale, scale, scale));
-      items.push({ key: `${type}:${state}`, m, p: new THREE.Vector3(x, y, z) });
+      items.push({ key: `${type}:${state}`, m, p: new THREE.Vector3(x, y, z), hay: hayFor(m, `${type}:${state}`) });
       built = false;
       return items.length - 1;
     },
-    setState(id, state) { const it = items[id]; if (!it) return; it.key = `${it.key.split(":")[0]}:${state}`; built = false; },
+    setState(id, state) {
+      const it = items[id]; if (!it) return;
+      it.key = `${it.key.split(":")[0]}:${state}`; built = false;
+      for (const h of it.hay) haystackField().remove(h);   // (its roof's hay: the state's own — a ruin's none)
+      it.hay = hayFor(it.m, it.key);
+    },
     /** Move a piece (a chunk of rubble flying out of a collapsing house — algTownDamage): its new place, turn
      *  (a quaternion) and scale; drawn there from the next update. */
     move(id, p, q, scale = S) { const it = items[id]; if (!it) return; it.m.compose(p, q, _sc.set(scale, scale, scale)); it.p.copy(p); },

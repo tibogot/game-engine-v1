@@ -244,9 +244,68 @@ far.location.x = 0
 tris = lambda o: sum(len(p.vertices) - 2 for p in o.data.polygons)
 print("TRIS", {"HayNear": tris(near), "HayFar": tris(far)})
 
+# ── THE HAY PILE (2026-10-26): the loose hay drying on a roof or heaped in a yard — the houses' rooftop "life" (house.py
+# hay spots), the farmyards'. A low lumpy mound, no pole: its own core and cards, the same sheet. ~1.4 × 1.0 m, 0.55 m.
+PX, PZ, PH = 0.72, 0.52, 0.55
+def pile_r(a, y):
+    """The mound's radius scale (0..1 of its ellipse) at a height, round its centre — a dome, lumpy."""
+    t = min(1.0, max(0.0, y / PH))
+    return math.sqrt(max(0.0, 1 - t ** 2.2)) * (1 + 0.09 * math.sin(3 * a + 1.1) + 0.06 * math.cos(5 * a - y * 6) + 0.05 * math.cos(a - 0.4))
+def pile_surf(y, a, push=0.0):
+    k = pile_r(a, y)
+    return Vector((math.cos(a) * (PX * k + push), y, math.sin(a) * (PZ * k + push)))
+def pile_normal(p):
+    """Out of the mound's ellipsoid; the trodden skirt straight up."""
+    if p.y < 0.05 and (p.x / PX) ** 2 + (p.z / PZ) ** 2 > 1.1: return Vector((0, 1, 0))
+    return Vector((p.x / PX ** 2, (p.y + 0.12) / PH ** 2 * 0.8, p.z / PZ ** 2)).normalized()
+def pile_core(m, NA, NY, push, g0, g1):
+    rows = [[m.v(pile_surf(PH * j / NY * 0.98, 2 * math.pi * i / NA, push)) for i in range(NA)] for j in range(NY + 1)]
+    top = m.v(Vector((0, PH + push * 0.5, 0)))
+    UW = 6
+    for j in range(NY):
+        for i in range(NA):
+            u0, u1 = 0.5 + 0.5 * (i % UW) / UW, 0.5 + 0.5 * (i % UW + 1) / UW
+            ga, gb = g0 + (g1 - g0) * j / NY, g0 + (g1 - g0) * (j + 1) / NY
+            m.face((rows[j][i], rows[j][(i + 1) % NA], rows[j + 1][(i + 1) % NA], rows[j + 1][i]),
+                   ((u0, j / NY), (u1, j / NY), (u1, (j + 1) / NY), (u0, (j + 1) / NY)), (grey(ga), grey(ga), grey(gb), grey(gb)))
+    for i in range(NA):
+        m.face((rows[NY][i], rows[NY][(i + 1) % NA], top), ((0.75, 0.5),) * 3, (grey(g1),) * 3)
+def pile_cards(m, R_, rings, per, Lr, Wr, seg):
+    for r in range(rings):
+        y = PH * (0.05 + 0.85 * r / max(1, rings - 1))
+        n = max(5, int(per * pile_r(0, y) + 2))
+        off = R_.uniform(0, 6.28)
+        for i in range(n):
+            a = off + 2 * math.pi * (i + R_.uniform(-0.3, 0.3)) / n
+            L = R_.uniform(*Lr); yr = min(PH, y + L * 0.6)
+            root = pile_surf(yr, a, -0.03)
+            tip = pile_surf(max(0.0, y - L * 0.25), a + R_.uniform(-0.15, 0.15), R_.uniform(0.0, 0.06))
+            down = (tip - root).normalized()
+            out_ = pile_surf(yr, a, 0.1) - pile_surf(yr, a); out_.y = 0.2; out_.normalize()
+            tw = Matrix.Rotation(R_.uniform(-0.7, 0.7), 3, out_)   # (twisted more: no rows)
+            card(m, root, (tw @ down).normalized(), out_, R_.uniform(*Wr), L, R_.randrange(4), R_.uniform(0.02, 0.1), 0.3, seg)
+    for i in range(int(per * 0.6)):                         # the cap: cards from the crown down every way
+        a = 2 * math.pi * i / int(per * 0.6) + R_.uniform(-0.2, 0.2)
+        root = Vector((R_.uniform(-0.08, 0.08), PH + 0.02, R_.uniform(-0.06, 0.06))); tip = pile_surf(PH * 0.55, a, 0.02)
+        card(m, root, (tip - root).normalized(), Vector((math.cos(a), 0.6, math.sin(a))).normalized(), R_.uniform(*Wr), (tip - root).length + 0.06, R_.randrange(4), 0.02, 0.5, seg)
+    for i in range(int(per * 1.2)):                         # the loose hay round its foot, flat
+        a = R_.uniform(0, 6.28); root = pile_surf(0.0, a, -0.05) + Vector((0, 0.02, 0))
+        d = Vector((math.cos(a + R_.uniform(-0.6, 0.6)), -0.01, math.sin(a + R_.uniform(-0.6, 0.6)))).normalized()
+        card(m, root, d, Vector((0, 1, 0)), R_.uniform(*Wr) * 1.2, R_.uniform(0.2, 0.45), R_.randrange(4), 0.0, 0.45, 2)
+
+vol_normal_stack = vol_normal
+vol_normal = pile_normal                                   # (Mesh.finish reads the module's vol_normal)
+mPN = Mesh(); pile_core(mPN, 24, 6, -0.04, 0.45, 0.8); pile_cards(mPN, random.Random(31), 7, 24, (0.16, 0.32), (0.07, 0.14), 3)   # (narrow and many: big cards read as thatch tiles at 1.4 m)
+pileN = mPN.finish("HayPileNear")
+mPF = Mesh(); pile_core(mPF, 12, 3, 0.0, 0.5, 0.8); pile_cards(mPF, random.Random(32), 3, 10, (0.3, 0.45), (0.16, 0.26), 2)
+pileF = mPF.finish("HayPileFar")
+vol_normal = vol_normal_stack
+print("TRIS", {"HayPileNear": tris(pileN), "HayPileFar": tris(pileF)})
+
 # ── EXPORT: geometry only (the game's material, its sheet), the vertex colour as COLOR_0 ─────────────────────────────
-bpy.ops.object.select_all(action="DESELECT"); near.select_set(True); far.select_set(True)
-for o in (near, far): o.data.color_attributes.active_color = o.data.color_attributes["Col"]
+bpy.ops.object.select_all(action="DESELECT")
+for o in (near, far, pileN, pileF): o.select_set(True)
+for o in (near, far, pileN, pileF): o.data.color_attributes.active_color = o.data.color_attributes["Col"]
 kw = dict(filepath=OUT_GLB, use_selection=True, export_yup=True, export_materials="NONE")
 try: bpy.ops.export_scene.gltf(**kw, export_vertex_color="ACTIVE")
 except TypeError: bpy.ops.export_scene.gltf(**kw, export_colors=True)
@@ -268,8 +327,11 @@ cd = bpy.data.cameras.new("C"); cam = bpy.data.objects.new("C", cd); scn.collect
 def shot(name, frm, tgt, lens):
     cd.lens = lens; cam.location = B(*frm); cam.rotation_euler = (B(*tgt) - cam.location).to_track_quat("-Z", "Y").to_euler()
     scn.render.filepath = os.path.join(REFS, f"preview_{name}.png"); bpy.ops.render.render(write_still=True)
-far.hide_render = True
+for o in (far, pileN, pileF): o.hide_render = True
 shot("close", (4.2, 2.4, -5.2), (0, 1.1, 0), 40)
 far.hide_render = False; far.location = B(4.0, 0, 0)
 shot("rts_near_far", (16, 24, -20), (2, 1.0, 0), 70)
+for o in (near, far): o.hide_render = True
+pileN.hide_render = pileF.hide_render = False; pileF.location = B(1.8, 0, 0)
+shot("pile", (2.4, 1.8, -3.0), (0.9, 0.2, 0), 40)
 print("DONE")

@@ -22,6 +22,7 @@ import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize
 import { HOUSE_FAR, houseMesh, loadHouses } from "./algHouse.js";
 import { loadTexture } from "../../v3/render/textureLoad.js";
 import { SURFACE_OFF, hasSurfaces, surfaceMaterial, surfaceTextures } from "./algSurfaces.js";
+import { haystackField } from "./algHaystack.js";
 import { buildAmbushScreen, buildArmsCache, buildBarbedWire, buildFlnInfirmary, buildFortPoint, buildLookout, buildMgNest, buildMineMarker, buildMirador, buildRefuge, buildSangar, buildSearchlightTower } from "../../v3/render/objects/rtsAlgeria.js";
 import { loadSandbagWall, simulatedWallMesh } from "./algSandbags.js";
 import { buildMortarPitV2 } from "./algMortarPit.js";
@@ -174,6 +175,13 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     if (far) { far.scale(S, S, S); far.computeBoundingBox(); far.computeBoundingSphere(); }
     const o = old();
     g.userData = { ...o.userData };
+    // ITS HAY PILES (house.py's rooftop hay spots — the farmstead's): pen spots of kind "haypile", the straw-card piles
+    // dressed on them (algPenProps), the piece's game units (×1.3)
+    { const hay = parts[`${type}:intact`]?.hay ?? [];
+      if (hay.length) {
+        const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
+        g.userData.pens = [...(g.userData.pens ?? []), ...hay.map((h) => { h.decompose(_p, _q, _s); _e.setFromQuaternion(_q, "YXZ"); return { kind: "haypile", x: _p.x * S, y: _p.y * S, z: _p.z * S, yaw: _e.y }; })];
+      } }
     o.dispose();
     _detail = T;
     // (stone pieces: the scan's close-up detail; a timber one — the mirador — its baked material as it is)
@@ -723,6 +731,7 @@ export function setPieceState(mesh, state) {
   }
   if (L) { L.near = near; L.far = far ?? near; mesh.geometry = near; } else mesh.geometry = near;
   mesh.userData.pieceState = state;
+  if (state === "ruin") haystackField().dropUnder(mesh);   // (its hay burnt with it — the farm's roof and yard)
   const ruin = state === "ruin";
   for (const c of mesh.children) {
     if (c.name === "Gun" || c.name === "Lamp") c.visible = !ruin;

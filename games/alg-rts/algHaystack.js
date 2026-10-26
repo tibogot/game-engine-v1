@@ -29,11 +29,16 @@ export function loadHaystack() {
     getSharedGltfLoader().loadAsync("/models/alg/haystack.glb"),
     new THREE.ImageLoader().loadAsync("/textures/props/haystack.png"),
   ]).then(([gltf, img]) => {
-    const near = gltf.scene.getObjectByName("HayNear"), far = gltf.scene.getObjectByName("HayFar");
-    if (!near?.isMesh || !far?.isMesh) return null;
     const tex = coverageTexture(img);
     const local = (o) => { o.updateMatrix(); return o.matrix.clone(); };   // (the meshopt node transform: undoes the quantisation)
-    _parts = { near: { geo: near.geometry, local: local(near), mat: hayMaterial(tex) }, far: { geo: far.geometry, local: local(far), mat: hayMaterial(tex, true) } };
+    const mats = { near: hayMaterial(tex), far: hayMaterial(tex, true) };   // (one material a level: the stack and the pile share it)
+    // TWO KINDS (2026-10-26): the STACK round its pole, and the low hay PILE — the houses' rooftop hay, the yards'
+    _parts = {};
+    for (const [kind, nm] of [["stack", "Hay"], ["pile", "HayPile"]]) {
+      const near = gltf.scene.getObjectByName(`${nm}Near`), far = gltf.scene.getObjectByName(`${nm}Far`);
+      if (near?.isMesh && far?.isMesh) _parts[kind] = { near: { geo: near.geometry, local: local(near), mat: mats.near }, far: { geo: far.geometry, local: local(far), mat: mats.far } };
+    }
+    if (!_parts.stack) return (_parts = null);
     _field?.rebuild();
     return _parts;
   }).catch((e) => { console.warn("[haystack]", e); return null; }));
@@ -123,45 +128,57 @@ export function haystackField() {
   const items = [];   // { parent, local: Matrix4, phase, force }
   const sets = {};
   const _w = new THREE.Matrix4(), _p = new THREE.Vector3();
-  function make(level, n) {
-    const P = _parts[level];
+  function make(kind, level, n) {
+    const P = _parts[kind][level];
     const geo = P.geo.clone();
     geo.setAttribute("iHay", new THREE.InstancedBufferAttribute(new Float32Array(n * 2), 2));
     const im = new THREE.InstancedMesh(geo, P.mat, n);
     im.count = 0; im.castShadow = im.receiveShadow = true; im.frustumCulled = false;
-    im.name = level === "near" ? "HaystackNear" : "HaystackFar";
+    im.name = `Hay${kind}${level === "near" ? "Near" : "Far"}`;
     root.add(im);
     return im;
   }
+  let dirty = false;
   const visibleChain = (o) => { for (let q = o; q; q = q.parent) if (!q.visible) return false; return true; };
   const sceneOf = (o) => { let q = o; while (q.parent) q = q.parent; return q.isScene ? q : null; };
   const f = (_field = {
     root,
     /** A haystack: world (`parent` null) or attached to a piece (pen spots: the piece's local frame). `force`: "near" |
-     *  "far" (the lab's side-by-side). */
-    add(parent, x, y, z, yaw = 0, scale = 1, force = null) {
+     *  "far" (the lab's side-by-side). `kind`: "stack" (round its pole) or "pile" (a low heap: the roofs', the yards'). */
+    add(parent, x, y, z, yaw = 0, scale = 1, force = null, kind = "stack") {
       const local = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(1, 1, 1).multiplyScalar(S * scale));
-      items.push({ parent, local, phase: ((x * 12.9898 + z * 78.233) % 6.283 + 6.283) % 6.283, force });
-      f.rebuild();
+      return f.addMatrix(parent, local, force, kind);
+    },
+    /** The same, its placement a matrix (world, or in `parent`'s frame) — the scale ×1.3 of the props already in it. */
+    addMatrix(parent, local, force = null, kind = "stack") {
+      const e = local.elements;
+      items.push({ parent, local, phase: ((e[12] * 12.9898 + e[14] * 78.233) % 6.283 + 6.283) % 6.283, force, kind, dead: false });
+      dirty = true;   // (rebuilt at the next update: a map adds them by the dozen at load)
       return items.length - 1;
     },
+    /** Take one away (its id from add): a house fallen in takes its roof's hay with it. */
+    remove(id) { if (items[id]) items[id].dead = true; },
     /** Remove every haystack attached under `obj` (a piece taken out of the lab). */
     dropUnder(obj) {
-      for (let i = items.length - 1; i >= 0; i--) { for (let q = items[i].parent; q; q = q.parent) if (q === obj) { items.splice(i, 1); break; } }
-      f.rebuild();
+      for (const it of items) for (let q = it.parent; q; q = q.parent) if (q === obj) { it.dead = true; break; }
     },
     rebuild() {
       if (!_parts) return;
-      for (const im of Object.values(sets)) { root.remove(im); im.geometry.dispose(); }
-      const n = Math.max(1, items.length);
-      sets.near = make("near", n); sets.far = make("far", n);
+      for (const st of Object.values(sets)) for (const im of [st.near, st.far]) { root.remove(im); im.geometry.dispose(); }
+      for (const k of Object.keys(sets)) delete sets[k];
+      for (const kind of Object.keys(_parts)) {
+        const n = Math.max(1, items.filter((it) => it.kind === kind).length);
+        sets[kind] = { near: make(kind, "near", n), far: make(kind, "far", n), nn: 0, nf: 0 };
+      }
     },
-    /** Per frame, with the MAIN camera: each haystack's near weight, its matrices into the near and far sets. */
+    /** Per frame, with the MAIN camera: each haystack's near weight, its matrices into its kind's near and far sets. */
     update(camera) {
-      if (OFF || !_parts || !sets.near) return;
-      let nn = 0, nf = 0;
-      const dn = sets.near.geometry.attributes.iHay, df = sets.far.geometry.attributes.iHay;
+      if (OFF || !_parts) return;
+      if (dirty || !sets.stack) { f.rebuild(); dirty = false; }
+      for (const st of Object.values(sets)) st.nn = st.nf = 0;
       for (const it of items) {
+        const st = sets[it.kind];
+        if (it.dead || !st) continue;
         if (it.parent) {
           if (!visibleChain(it.parent)) continue;
           const sc = sceneOf(it.parent);
@@ -171,16 +188,17 @@ export function haystackField() {
         } else _w.copy(it.local);
         _p.setFromMatrixPosition(_w);
         const d = _p.distanceTo(camera.position);
-        let k = it.force === "near" ? 1 : it.force === "far" ? 0 : THREE.MathUtils.clamp((HAY_FADE[1] - d) / (HAY_FADE[1] - HAY_FADE[0]), 0, 1);
-        if (k > 0) { sets.near.setMatrixAt(nn, _m.multiplyMatrices(_w, _parts.near.local)); dn.setXY(nn, k, it.phase); nn++; }
-        if (k < 1) { sets.far.setMatrixAt(nf, _m.multiplyMatrices(_w, _parts.far.local)); df.setXY(nf, k, it.phase); nf++; }
+        const k = it.force === "near" ? 1 : it.force === "far" ? 0 : THREE.MathUtils.clamp((HAY_FADE[1] - d) / (HAY_FADE[1] - HAY_FADE[0]), 0, 1);
+        const P = _parts[it.kind];
+        if (k > 0) { st.near.setMatrixAt(st.nn, _m.multiplyMatrices(_w, P.near.local)); st.near.geometry.attributes.iHay.setXY(st.nn, k, it.phase); st.nn++; }
+        if (k < 1) { st.far.setMatrixAt(st.nf, _m.multiplyMatrices(_w, P.far.local)); st.far.geometry.attributes.iHay.setXY(st.nf, k, it.phase); st.nf++; }
       }
-      for (const [im, n, a] of [[sets.near, nn, dn], [sets.far, nf, df]]) {
-        im.count = n; im.instanceMatrix.needsUpdate = true; a.needsUpdate = true;
+      for (const st of Object.values(sets)) for (const [im, n] of [[st.near, st.nn], [st.far, st.nf]]) {
+        im.count = n; im.instanceMatrix.needsUpdate = true; im.geometry.attributes.iHay.needsUpdate = true;
       }
     },
-    /** Haystacks, and the draws this frame (near + far; ×2 with the shadow pass). */
-    stats() { return { haystacks: items.length, near: sets.near?.count ?? 0, far: sets.far?.count ?? 0 }; },
+    /** Haystacks, and the instances drawn this frame (near + far a kind; ×2 with the shadow pass). */
+    stats() { return { haystacks: items.filter((it) => !it.dead).length, ...Object.fromEntries(Object.entries(sets).map(([k, st]) => [k, { near: st.near.count, far: st.far.count }])) }; },
   });
   loadHaystack();
   return f;

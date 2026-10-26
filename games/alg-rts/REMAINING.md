@@ -22,7 +22,7 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
    old-Aurès-only entries? do shared pieces keep upgrading on the old Aurès (my advice: yes)?
 
 **Work, in the order I'd suggest:**
-4. **The rooftop hay** on the whitewashed houses (and any other lumpy "life" prop): the straw-card haystack's way.
+4. ~~**The rooftop hay**~~ DONE 2026-10-26: straw-card hay piles (haystack.py HayPile, algHaystack kind "pile"), the houses', M'zab's and farmstead's roofs.
 5. **The Aurès stone hamlet (mechta) as a Blender kit**: the villages where most of the fighting happens (Oued Abdi,
    the maquis), still the runtime masonry builder. Then the **FLN camp**.
 6. **The card technique for the fuzzy things:** the zeriba's thorn fence, brush piles, a thorn barricade, thatch.
