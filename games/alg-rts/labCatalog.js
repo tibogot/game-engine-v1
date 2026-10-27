@@ -38,6 +38,9 @@ export const META = {
   rubbleKit: { side: "civil", kind: "ruine", maps: ["aures", "abdi"], status: "jeu" },
   rubbleHeapOld: { side: "civil", kind: "ruine", maps: ["aures"], status: "jeu" },
   mzab_mur: { side: "civil", kind: "village", maps: ["abdi"], status: "jeu" },
+  // (the mechta in Blender, 2026-10-27 — MECHTA_PLAN.md: the new Aurès' hamlets, not placed yet)
+  mechta_petite: { side: "civil", kind: "village", maps: ["aures"], status: "verdict" },
+  mechta_etage: { side: "civil", kind: "village", maps: ["aures"], status: "verdict" },
   scannedBoulders: { side: "nature", kind: "nature", maps: ["aures"], status: "jeu" },
   ...Object.fromEntries(PLANT_KEYS.map((k) => [`plant_${k}`, { side: "nature", kind: "plant", maps: ALL, status: "jeu" }])),
   plantSteppe: { side: "nature", kind: "plant", maps: ["aures", "kantara"], status: "jeu" },
@@ -119,6 +122,7 @@ export const PLACED = {
   // the Blender kits (algHouse.js)
   ...Object.fromEntries(["maison", "cour", "haute", "boutique"].map((t) => [`kit:${t}`, `blanche_${t}`])),
   ...Object.fromEntries(["dar", "tour", "bas", "terrasse", "souk", "mosquee", "mur"].map((t) => [`kit:${t}`, `mzab_${t}`])),
+  ...Object.fromEntries(["petite", "etage"].map((t) => [`kit:${t}`, `mechta_${t}`])),
   "kit:a": "fieldWallsBlender", "kit:b": "fieldWallsBlender", "kit:c": "fieldWallsBlender",
   "kit:fuel": "pointBlender_fuel", "kit:mun": "pointBlender_mun", "kit:sangar": "sangarBlender", "kit:arms": "cacheBlender", "kit:ambush": "ecranBlender",
   "kit:mirador": "miradorBlender", "kit:gear": "miradorBlender", "kit:barbed": "barbelesBlender", "kit:mg": "nidBlender", "kit:gun": "nidBlender",
@@ -151,7 +155,7 @@ export const NAMES = {
   mzab_souk: "M'zab souk: arcade row", mzab_mosquee: "M'zab mosque and minaret", villeMzab: "M'zab town (souk square)",
   ruineRomaine: "Roman ruin", colonne: "Roman column", colonnade: "Colonnade", voie: "Roman road", arc: "Trajan's arch",
   pressoir: "Oil press", rocheBanc: "Rock: big shelf", rocheBloc: "Rock: block", rocheDalle: "Rock: low slab", grotte: "FLN cave",
-  maisonPierre: "Stone house (HQ)", mechtaPierre: "Mechta house", hameau: "Hamlet", dechraNouveau: "Dechra",
+  maisonPierre: "Stone house (HQ)", mechtaPierre: "Mechta house", mechta_petite: "Mechta (Blender): one room", mechta_etage: "Mechta (Blender): loggia room", hameau: "Hamlet", dechraNouveau: "Dechra",
   ksarNouveau: "Ksar", campFln: "FLN camp",
     pointBlender_fuel: "Requisition point: fuel", pointBlender_mun: "Requisition point: munitions",
   sangarBlender: "Sangar",   cacheBlender: "Arms cache",   ecranBlender: "Ambush screen",   miradorBlender: "Mirador",   nidBlender: "MG nest",

@@ -445,6 +445,13 @@ export const BUILDINGS = {
     before: () => { const { group } = buildMechtaHouseV2({ seed: 7 + SEED }); const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 0, 0, 0, 0, 0, 0], 3)); g.userData.labMaterial = new THREE.MeshBasicMaterial({ visible: false }); g.userData.extra = [group]; return g; },
     tags: [`MECHTA HOUSE · variante ${SEED + 1}`], note: "la maison du kit à gauche, la nouvelle à droite.",
   },
+  // THE MECHTA IN BLENDER (2026-10-27, MECHTA_PLAN.md — tools/blender/mechta.py, algHouse MECHTA_TYPES): for the NEW
+  // maps (the « Mechta » above stays the old Aurès'); each type intact LEFT, damaged MIDDLE, ruin RIGHT.
+  ...Object.fromEntries([["petite", "une pièce, son échelle"], ["etage", "deux pièces, la chambre haute sur sa loggia"]].map(([ty, what]) => [`mechta_${ty}`, {
+    label: `Mechta (Blender) : ${ty}`, gap: 13, yaw: Math.PI - 0.5, prepare: () => loadHouses("mechta"),
+    before: () => { console.log("[mechta]", houseStats()); return labPiece(houseMesh(ty, "intact")); }, middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
+    tags: [`${ty.toUpperCase()} · INTACTE`, `${ty.toUpperCase()} · ENDOMMAGÉE`, `${ty.toUpperCase()} · RUINE`], note: `la maison de pierre des Aurès (Blender) — ${what} — dans ses trois états. À comparer avec « Mechta » (celle du jeu).`,
+  }])),
   // THE HAMLET (same day): the game's on the LEFT, the new standard's on the RIGHT.
   hameau: {
     label: "Hameau", gap: 26, before: () => buildMechtaV2(),

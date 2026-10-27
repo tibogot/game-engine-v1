@@ -48,7 +48,7 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
-import { createHouseField, loadHouses } from "./algHouse.js";
+import { MECHTA_TYPES, createHouseField, loadHouses } from "./algHouse.js";
 import { setGroundBlendApp } from "./algGroundBlend.js";
 import { createTownDamage } from "./algTownDamage.js";
 import { createPieceDamage } from "./algPieceDamage.js";
@@ -681,7 +681,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     try {
       const t0 = performance.now();
       // (+ the RUBBLE kit, a house collapsing — algTownDamage; not needed to stand: a ruin without it keeps its dust)
-      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble")]);
+      // (+ the MECHTA kit when the map places its stone houses — the new Aurès' hamlets, ?mechta=1 for now)
+      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble"), MAP.town.houses.some(([ty]) => MECHTA_TYPES.includes(ty)) ? loadHouses("mechta") : null]);
       const field = createHouseField();
       // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
       // footprint's mean ground (as a built piece's), its y that
@@ -719,9 +720,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       };
       // SIGHT: each house a tall box to its parapet (the kits' heights, real metres x1.3; the minaret its own column)
       // — combat's line of sight and the fog of war (algSight.addBox / topAt): no shot, no view THROUGH the town
-      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0 };
-      for (const [ty, , , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
-        app.algSight?.addBox(fx, fz, hx, hz, yaw, y + (PAR[ty] ?? 5) * 1.3);
+      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0 };   // (the mechta's two-room: its upper room on half the roof)
+      for (const [ty, st, , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
+        app.algSight?.addBox(fx, fz, hx, hz, yaw, y + (st === "ruin" ? 1.6 : (PAR[ty] ?? 5) * 1.3));   // (a ruin from the start: its rubble's height — algTownDamage ruinTop)
         if (ty === "mosquee") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = -4.25 * 1.3, mz = 4.75 * 1.3; app.algSight?.addBox(fx + mx * c + mz * s, fz - mx * s + mz * c, 2.4, 2.4, yaw, y + 18 * 1.3); }
       }
       app.fogOfWar?.rebuildHeights();

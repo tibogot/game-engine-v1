@@ -22,6 +22,9 @@ export const HOUSE_TYPES = ["maison", "cour", "haute", "boutique"];
 // house with its roof gallery, a tall one, a low one behind its yard, a stepped pale-blue one, the souk's arcade
 export const MZAB_TYPES = ["dar", "tour", "bas", "terrasse", "souk", "mosquee", "mur"];   // (+ the hilltop mosque and its minaret)
 export const HOUSE_STATES = ["intact", "damaged", "ruin"];
+// THE MECHTA (tools/blender/mechta.py, the same builder — 2026-10-27, MECHTA_PLAN.md): the Aurès stone hamlet's houses for
+// the NEW maps (the old Aurès keeps its runtime hamlet, algMasonry) — one room with its ladder, two rooms with the loggia room
+export const MECHTA_TYPES = ["petite", "etage"];
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
 // THE FIELD WALLS (tools/blender/fieldwall.py): a dry-stone module, three variants (a b c), the same states
 export const FIELD_WALL_TYPES = ["a", "b", "c"];
@@ -63,12 +66,12 @@ export const FARM_TYPES = ["farm"];
 // THE SAS POST (tools/blender/sasPost.py — algSangar.js loadSasPost): the French army's post in a village
 export const SAS_TYPES = ["sas"];   // (the French post — tools/blender/postKit.py, algSangar loadFrenchPost)
 export const SMALL_PROP_TYPES = ["grenade", "smoke", "flare", "cutters", "mine", "helmet", "kepi", "jerrycan", "ammobox", "detonator", "detector", "radio", "lmg", "bazooka", "flamer", "sniper", "tools", "shell", "shotgun", "mapcase", "spade"];   // (aidmark: the tent's red crosses, a decal piece)
-const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES }, fieldposts: { prefix: "Field", types: FIELD_POST_TYPES }, flnposts: { prefix: "Fln", types: FLN_POST_TYPES }, smallprops: { prefix: "Prop", types: SMALL_PROP_TYPES }, postkit: { prefix: "Bordj", types: BORDJ_TYPES }, rubble: { prefix: "Rubble", types: RUBBLE_TYPES }, vprops: { prefix: "Village", types: VPROP_TYPES }, flnmarks: { prefix: "Mark", types: MARK_TYPES }, farmstead: { prefix: "Farm", types: FARM_TYPES }, saspost: { prefix: "Sas", types: SAS_TYPES } };
+const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: "Mzab", types: MZAB_TYPES }, mechta: { prefix: "Mechta", types: MECHTA_TYPES }, fieldwalls: { prefix: "Wall", types: FIELD_WALL_TYPES }, points: { prefix: "Point", types: POINT_TYPES }, sangar: { prefix: "Sangar", types: SANGAR_TYPES }, armscache: { prefix: "Cache", types: CACHE_TYPES }, ambushscreen: { prefix: "Screen", types: SCREEN_TYPES }, mirador: { prefix: "Tower", types: MIRADOR_TYPES }, barbedwire: { prefix: "Wire", types: WIRE_TYPES }, mgnest: { prefix: "Nest", types: NEST_TYPES }, mortarpit: { prefix: "Pit", types: PIT_TYPES }, fortpoint: { prefix: "Fort", types: FORT_TYPES }, sltower: { prefix: "Light", types: SLTOWER_TYPES }, fieldposts: { prefix: "Field", types: FIELD_POST_TYPES }, flnposts: { prefix: "Fln", types: FLN_POST_TYPES }, smallprops: { prefix: "Prop", types: SMALL_PROP_TYPES }, postkit: { prefix: "Bordj", types: BORDJ_TYPES }, rubble: { prefix: "Rubble", types: RUBBLE_TYPES }, vprops: { prefix: "Village", types: VPROP_TYPES }, flnmarks: { prefix: "Mark", types: MARK_TYPES }, farmstead: { prefix: "Farm", types: FARM_TYPES }, saspost: { prefix: "Sas", types: SAS_TYPES } };
 /** World metres from the camera where a house's far level takes over (the RTS camera sits 50-130 m out). */
 export const HOUSE_FAR = 60;
 // THE KITS WITH SURFACES (2026-10-26 — the houses sharp, as the post): each its photo swaps ({ stone: "drystone" }: the
 // Aurès' flat stones). A kit missing here, or built before its surfaces were written, draws its bake alone.
-const SURFACE_KITS = { houses: { stone: "drystone" }, mzab: { stone: "drystone", plaster: "mudRender" } };   // (their bakes' own stone photo; the M'zab's render smoother)
+const SURFACE_KITS = { houses: { stone: "drystone" }, mzab: { stone: "drystone", plaster: "mudRender" }, mechta: { stone: "drystone", plaster: "mudRender" } };   // (their bakes' own stone photo; the M'zab's render smoother; the mechta's clay terrace the mud render)
 const _surf = new Map();
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 const _p = {};

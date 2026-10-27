@@ -23,7 +23,7 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 **Work, in the order I'd suggest:**
 4. ~~**The rooftop hay**~~ DONE 2026-10-26: straw-card hay piles (haystack.py HayPile, algHaystack kind "pile"), the houses', M'zab's and farmstead's roofs.
-5. **The Aurès stone hamlet (mechta) as a Blender kit**: the villages where most of the fighting happens (Oued Abdi,
+5. **The Aurès stone hamlet (mechta) as a Blender kit** (the checklist and the kit: MECHTA_PLAN.md, 2026-10-27): the villages where most of the fighting happens (Oued Abdi,
    the maquis), still the runtime masonry builder. Then the **FLN camp**.
 6. **The card technique for the fuzzy things:** the zeriba's thorn fence, brush piles, a thorn barricade, thatch.
 7. **The motor pool's mechanics** (your "Working On Device" clip): 1-2 men at the truck.

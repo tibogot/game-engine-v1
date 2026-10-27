@@ -31,12 +31,13 @@ export function loadHaystack() {
   ]).then(([gltf, img]) => {
     const tex = coverageTexture(img);
     const local = (o) => { o.updateMatrix(); return o.matrix.clone(); };   // (the meshopt node transform: undoes the quantisation)
-    const mats = { near: hayMaterial(tex), far: hayMaterial(tex, true) };   // (one material a level: the stack and the pile share it)
+    // (a material a kind and a level: the pile its own wind — WIND_PILE; its instanced sets are apart anyway, no draw more)
+    const mats = { stack: { near: hayMaterial(tex), far: hayMaterial(tex, true) }, pile: { near: hayMaterial(tex, false, WIND_PILE), far: hayMaterial(tex, true, WIND_PILE) } };
     // TWO KINDS (2026-10-26): the STACK round its pole, and the low hay PILE — the houses' rooftop hay, the yards'
     _parts = {};
     for (const [kind, nm] of [["stack", "Hay"], ["pile", "HayPile"]]) {
       const near = gltf.scene.getObjectByName(`${nm}Near`), far = gltf.scene.getObjectByName(`${nm}Far`);
-      if (near?.isMesh && far?.isMesh) _parts[kind] = { near: { geo: near.geometry, local: local(near), mat: mats.near }, far: { geo: far.geometry, local: local(far), mat: mats.far } };
+      if (near?.isMesh && far?.isMesh) _parts[kind] = { near: { geo: near.geometry, local: local(near), mat: mats[kind].near }, far: { geo: far.geometry, local: local(far), mat: mats[kind].far } };
     }
     if (!_parts.stack) return (_parts = null);
     _field?.rebuild();
@@ -106,7 +107,12 @@ const uGust = uniform(0.55);
 /** Follow the game's wind (dir in radians, strength 0..1). */
 export function setHayWind(dirRad, strength) { uWind.value.set(Math.cos(dirRad), 0, Math.sin(dirRad)); uGust.value = strength; }
 
-function hayMaterial(tex, far = false) {
+// THE PILE'S WIND (2026-10-27, you: the roof's hay pile in the wind "looks like a furry animal that moves weirdly"): the
+// stack's flutter — every straw tip 3.5 cm at 5 rad/s — on a low dense heap read as fur breathing. A heap lies still:
+// only its top strands stir, slower and smaller, and it never leans.
+const WIND_STACK = { flutter: 0.035, rate: 5.1, lean: 0.06, from: 0 };
+const WIND_PILE = { flutter: 0.008, rate: 1.7, lean: 0, from: 0.75 };   // (`from`: the straw's tip fraction it starts at)
+function hayMaterial(tex, far = false, W = WIND_STACK) {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
   m.name = far ? "HaystackFar" : "Haystack";
   const t = texture(tex, uv());
@@ -122,9 +128,9 @@ function hayMaterial(tex, far = false) {
   const y = positionLocal.y, hgt = clamp(y.div(2.6), 0, 1);
   const ph = data.y, tt = time;
   const gust = sin(tt.mul(0.9).add(ph)).mul(0.6).add(sin(tt.mul(2.3).add(ph.mul(1.7))).mul(0.4)).mul(uGust);
-  const tip = select(uv().x.lessThan(0.5), uv().y, float(0));   // (the straw half — glTF flips v: 0 at a card's root, 1 at its tip)
-  const flutter = sin(tt.mul(5.1).add(ph).add(y.mul(3.1)).add(positionLocal.x.mul(2.3))).mul(tip).mul(uGust).mul(far ? 0 : 0.035);
-  m.positionNode = positionLocal.add(uWind.mul(hgt.mul(hgt).mul(gust).mul(0.06).add(flutter))).add(vec3(0, flutter.mul(0.3), 0));
+  const tip = select(uv().x.lessThan(0.5), clamp(uv().y.sub(W.from).div(1 - W.from), 0, 1), float(0));   // (the straw half — glTF flips v: 0 at a card's root, 1 at its tip)
+  const flutter = sin(tt.mul(W.rate).add(ph).add(y.mul(3.1)).add(positionLocal.x.mul(2.3))).mul(tip).mul(uGust).mul(far ? 0 : W.flutter);
+  m.positionNode = positionLocal.add(uWind.mul(hgt.mul(hgt).mul(gust).mul(W.lean).add(flutter))).add(vec3(0, flutter.mul(0.3), 0));
   // the VOLUME's normals (haystack.py: from the stack's axis), not flipped on a card's back face — a card seen from
   // behind is the same straw, lit the same
   m.normalNode = transformNormalToView(normalLocal);

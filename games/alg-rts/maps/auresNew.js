@@ -26,7 +26,9 @@ export const LAYOUT = OLD_LAYOUT;
 // and maps/training.js) ────────────────────────────────────────────────────────────────────────────────────────
 const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8], bas: [-3.2, 3.2, -4.0, 4.6], terrasse: [-3.0, 7.45, -3.5, 3.0],
   souk: [-6.0, 6.0, -5.0, 2.4], mosquee: [-6.0, 6.0, -6.5, 6.5], maison: [-3.8, 8.45, -3.5, 3.0], haute: [-2.6, 2.6, -3.7, 2.8], cour: [-3.4, 3.4, -4.2, 5.0],
-  boutique: [-4.6, 4.6, -3.6, 2.6] };
+  boutique: [-4.6, 4.6, -3.6, 2.6],
+  // the MECHTA (tools/blender/mechta.py): its walls, the doorstep, the ladder and the jars out front
+  petite: [-2.7, 2.7, -2.9, 2.2], etage: [-3.7, 3.7, -3.5, 2.9] };
 const HS = 1.3;
 const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
 /** A house whose FOOTPRINT's centre is (cx, cz), its front toward (tx, tz): the town field's row (y null: a pad). */
@@ -53,12 +55,45 @@ function village(sx, sz, types, { ring = [22, -168, -12], gap = 3.5, damaged = -
   });
   return out;
 }
+/**
+ * A STONE HAMLET, a CLUSTER (2026-10-27, you: "for the layout we should make it better — do what you think will look the
+ * best"; the arc read as a ring of lone houses round a 48 m square): the houses SHOULDER TO SHOULDER in short rows, their
+ * fronts toward the camera (south, +Z); a second row behind across a 3 m lane (its doors on the lane); a house at each
+ * side of a small square in front, facing in — the village's point in that square. Local metres from the site:
+ * a row `{ types, x, z }` starts at x (its left end) with its FRONT line at z; `states` per index; a side house
+ * `{ type, x, z }` its footprint's centre, facing the square. Each house its own levelled pad (algGame).
+ */
+function hamlet(sx, sz, { rows, sides = [] }) {
+  const out = [];
+  for (const { types, x, z, gap = 0.2, states = {} } of rows) {
+    let lx = x;
+    types.forEach((ty, k) => {
+      const [x0, x1, z0, z1] = FOOT[ty].map((v) => v * HS), w = x1 - x0, d = z1 - z0;
+      const cx = sx + lx + w / 2, cz = sz + z - d / 2 + (k % 2 ? -0.5 : 0.3);   // (the fronts a little in and out: no ruled line)
+      out.push(house(ty, states[k] ?? "intact", cx, cz, cx, cz + 50));
+      lx += w + gap;
+    });
+  }
+  for (const { type, x, z, state = "intact" } of sides) out.push(house(type, state, sx + x, sz + z, sx, sz + z));
+  return out;
+}
 const site = (name) => OLD_LAYOUT.sites.find((s) => s.name === name);
 const OA = site("Mechta Ouled Ali"), EO = site("Mechta el Oued"), DE = site("Dechra Tighanimine"), KS = site("Ksar el Hamra");
 
 // THE TWO MECHTAS: the whitewashed kit, five or six houses round each square (one shelled)
-const MECHTA_OA = village(OA.x, OA.z, ["cour", "maison", "haute", "boutique", "cour", "haute"], { ring: [30, -178, -2], damaged: 2 });
-const MECHTA_EO = village(EO.x, EO.z, ["haute", "cour", "maison", "boutique", "haute"], { ring: [27, -178, -2], damaged: 3 });
+// — or, with ?mechta=1 (2026-10-27, MECHTA_PLAN.md: the Aurès' own STONE houses, waiting for your verdict), the mechta
+// kit as a CLUSTER (hamlet() above): two rows behind a small square, a house on each side of it; one shelled, one a ruin
+const STONE_MECHTA = typeof location !== "undefined" && new URLSearchParams(location.search).get("mechta") === "1";
+const MECHTA_OA = STONE_MECHTA
+  ? hamlet(OA.x, OA.z, {
+    rows: [{ types: ["petite", "etage", "petite"], x: -12, z: -6 }, { types: ["etage", "petite", "etage"], x: -14, z: -18, states: { 0: "damaged" } }],
+    sides: [{ type: "petite", x: -15.5, z: 1 }, { type: "petite", x: 15.5, z: 0, state: "ruin" }] })
+  : village(OA.x, OA.z, ["cour", "maison", "haute", "boutique", "cour", "haute"], { ring: [30, -178, -2], damaged: 2 });
+const MECHTA_EO = STONE_MECHTA
+  ? hamlet(EO.x, EO.z, {
+    rows: [{ types: ["etage", "petite"], x: -8.5, z: -6, states: { 1: "ruin" } }, { types: ["petite", "etage", "petite"], x: -12, z: -17.5 }],
+    sides: [{ type: "petite", x: -13.5, z: 0.5, state: "damaged" }] })
+  : village(EO.x, EO.z, ["haute", "cour", "maison", "boutique", "haute"], { ring: [27, -178, -2], damaged: 3 });
 // THE DECHRA up its slope: the M'zab kit's plain houses (ochre plaster — the stone dechra kit to come), two rows
 const DECHRA = [
   ...village(DE.x, DE.z, ["bas", "dar", "bas", "terrasse", "bas"], { ring: [21, -170, -10] }),

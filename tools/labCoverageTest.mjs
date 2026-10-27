@@ -35,7 +35,7 @@ for (const m of src("algHouse.js").matchAll(/^export const \w+_TYPES = \[([^\]]*
 }
 // the lab's entries: catalogued (META), and built (a key or a key family in buildingLab.js)
 const lab = src("buildingLab.js");
-const built = (k) => new RegExp(`^ {2}${k}: \\{`, "m").test(lab) || [["plant_", "`plant_${"], ["mzab_", "`mzab_${"], ["blanche_", "`blanche_${"], ["pointBlender_", "`pointBlender_${"]]
+const built = (k) => new RegExp(`^ {2}${k}: \\{`, "m").test(lab) || [["plant_", "`plant_${"], ["mzab_", "`mzab_${"], ["mechta_", "`mechta_${"], ["blanche_", "`blanche_${"], ["pointBlender_", "`pointBlender_${"]]
   .some(([p, t]) => k.startsWith(p) && lab.includes(t)) || /^(colonne|colonnade|voie|arc|pressoir|rocheBanc|rocheBloc|rocheDalle)$/.test(k) && lab.includes(`${k}:`);
 
 let failed = 0;
