@@ -33,8 +33,10 @@ import { createSpatialGrid } from "./spatialGrid.js";
  * the cell it was filed under; this keeps it inside the searched square.
  */
 const GRID_PAD = 1;
-/** A driven vehicle backs up to a spot behind it within this many metres (CoH's auto-reverse; orderTo). */
-const REVERSE_MAX = 40;
+/** A driven vehicle backs up to a spot behind it within this many metres (CoH's auto-reverse; orderTo). Was 40 —
+ *  2026-10-27, you: "the jeep ... was driving backward all along"; CoH backs up a short hop, a farther spot behind
+ *  turns round and drives there (the REVERSE button still backs up any distance). */
+const REVERSE_MAX = 12;
 /** Scratch for avoidance's neighbour query — units update one at a time. */
 const _avoidNear = [];
 const _avoidKept = [];
