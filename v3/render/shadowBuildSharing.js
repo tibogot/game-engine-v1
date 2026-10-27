@@ -13,8 +13,9 @@
  * the index's presence) and `receiveShadow` as false. Plain = the source material gives the shadow
  * pass nothing of its own (what Renderer._getShadowNodes and the override setup read): no
  * castShadowNode / maskShadowNode / maskNode, no positionNode, no alphaMap, no alphaTest, no
- * displacementMap, not transparent — and the object is neither instanced, batched nor morphed (those
- * keep three's key; instanced meshes have their own sharing, sharedInstanceBuilds.js). A map or a
+ * displacementMap, not transparent — and the object is neither batched nor morphed (those keep three's
+ * key). Instanced meshes join: their matrices / colours come from the object, not the geometry, and
+ * their uuid in the key is sharedInstanceBuilds.js's business (kept wherever it cannot share). A map or a
  * colorNode is allowed: for such an opaque caster the shadow pass's map-alpha colorNode is dropped,
  * since a depth shadow map never uses it (opaqueSource below).
  * Everything else in the key is three's: the material's own properties (side…), skinning, the pass.
@@ -78,7 +79,7 @@ export function installShadowBuildSharing(renderer) {
         // the constructor keys the render object BEFORE it stores _sourceMaterial (r186): ask the renderer
         const source = this._sourceMaterial ?? this.renderer?._currentSourceMaterial;
         const shareable = this.material?.isShadowPassMaterial === true && plainSource(source)
-          && o && !o.isInstancedMesh && !o.isBatchedMesh && g?.attributes?.position
+          && o && !o.isBatchedMesh && g?.attributes?.position
           && Object.keys(g.morphAttributes || {}).length === 0;
         if (!shareable) return getMaterialCacheKey.call(this);
         this.geometry = positionOnly(g);

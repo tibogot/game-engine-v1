@@ -147,6 +147,15 @@ pooled UBOs (r185), the instance-sync, shared-build refresh and CSM frame-late f
      on vs off differs LESS than two loads of the same mode (wires, windsock, men move between loads).
      Note: r186 keys a render object BEFORE it stores `_sourceMaterial` — read
      `renderer._currentSourceMaterial` at key time.
+     Then instanced casters too (their matrices are not geometry): 489 → 484.
+   - **DONE — crowd shadows**: a node's cache key is its ID for leaves (Node.customCacheKey), so a
+     per-view `uniform` made every crowd view's shadow build its own. The view's range start is now an
+     object-scoped uniform (mesh.userData.crowdViewStart) and a crowd's views share one set of nodes
+     (crowdSkinning view(); unitRenderer's `extra` read and headwear mix per crowd): **484 → 443,
+     shadow builds 98 → 57**. Checked: appelés at 0+19 and sapeurs at 19+3 drawn in their own places.
+   - Left (201 duplicate builds): book cards 22 (one material per book: its own textures), RtsStencil
+     11, village gblend 8, 16 MeshBasic singles, PMREM 6 — each needs its family's nodes shared, the
+     same way (one node set, per-object values).
    - The warm-up (9 s) and the level load (8 s) are both main-thread CPU — overlapping them gains little.
    - Tried and reverted: every 2D canvas a CPU canvas (boot ~9 s SLOWER). Kept: the haystack's mips.
    Then:

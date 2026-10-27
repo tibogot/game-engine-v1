@@ -360,6 +360,18 @@ export function createCrowdField({
     };
   };
 
+  // ONE SET OF NODES FOR EVERY VIEW of this crowd (2026-10-27, the boot's duplicate builds): a view's
+  // range start was a uniform of its own, so its skinning nodes — and its shadow pass's whole build —
+  // were its own: alg built the same crowd shadow shader 7–8 times per crowd. The start is now read
+  // from the drawn mesh (userData.crowdViewStart, setRange), so the views of one crowd share these
+  // nodes and their shadow build. Another crowd's nodes read its own buffers, so it never shares.
+  let viewNodes = null;
+  const viewSkinning = () => {
+    const start = uniform(0, "uint").onObjectUpdate(({ object }) => object.userData.crowdViewStart ?? 0);
+    const index = instanceIndex.add(start);
+    return { index, nodes: skinnedAt(index) };
+  };
+
   // The one mesh that draws every soldier.
   const material = source.material.clone();
   const own = skinnedAt(instanceIndex);
@@ -427,9 +439,7 @@ export function createCrowdField({
      * index in the crowd (for extraNode / animNode reads in the material).
      */
     view(viewMaterial, name = "CrowdView") {
-      const base = uniform(0, "uint");
-      const index = instanceIndex.add(base);
-      const nodes = skinnedAt(index);
+      const { index, nodes } = viewNodes ??= viewSkinning();
       viewMaterial.positionNode = nodes.positionNode;
       viewMaterial.normalNode = nodes.normalNode;
       // Its own program: it reads THIS crowd's buffers (see ONE PROGRAM PER CROWD).
@@ -445,7 +455,7 @@ export function createCrowdField({
       scene.add(m);
       return {
         mesh: m, index,
-        setRange(start, count) { base.value = start; m.count = count; m.visible = count > 0; },
+        setRange(start, count) { m.userData.crowdViewStart = start; m.count = count; m.visible = count > 0; },
       };
     },
     /** The baked clips' names (plus the aliases). */
