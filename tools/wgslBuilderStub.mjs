@@ -26,7 +26,9 @@ export { THREE, TSL };
 const stubRenderer = {
   isWebGPURenderer: true,
   coordinateSystem: THREE.WebGPUCoordinateSystem,
-  debug: { checkShaderErrors: true },
+  // r186: WGSLNodeBuilder reads debug.diagnostics.keywords (rename declarations that hit WGSL
+  // keywords); the renderer's own default is false
+  debug: { checkShaderErrors: true, diagnostics: { keywords: false } },
   // `BasicNodeLibrary` is the real thing the renderer uses, with the light
   // node classes already registered. Only `fromMaterial` is overridden: it maps
   // a PLAIN material to its node equivalent, and ours already IS one, so it
@@ -39,7 +41,8 @@ const stubRenderer = {
   }),
   getMRT: () => null,
   getRenderTarget: () => null,
-  shadowMap: { enabled: true, type: THREE.PCFSoftShadowMap },
+  // PCFShadowMap: r186 removed PCFSoftShadowMap (the engine sets its own softness radius)
+  shadowMap: { enabled: true, type: THREE.PCFShadowMap },
   backend: {
     isWebGPUBackend: true,
     capabilities: { getUniformBufferLimit: () => 65536, isCompatibilityMode: false },
@@ -51,7 +54,9 @@ const stubRenderer = {
   // Renderer.js:246 — the builder asserts this is a real `context()` node.
   contextNode: TSL.context(),
   // Renderer.js:264 — `setupLights` rebuilds the lights node through this.
-  lighting: { createNode: (lights = []) => new THREE.LightsNode().setLights(lights) },
+  // r186: NodeMaterial.setupLighting only lights a material when `lighting.enabled`
+  // (without it every material built here came out UNLIT and the "is it lit" checks failed)
+  lighting: { enabled: true, createNode: (lights = []) => new THREE.LightsNode().setLights(lights) },
   // Queried for float32-filterable / depth-texture support when a shadow map
   // is in play. This build target has the lot.
   hasFeature: () => true,
@@ -81,7 +86,9 @@ stubRenderer.backend.createNodeBuilder = (o, r) => backendForBuilder.createNodeB
  * @returns {object} the built node builder — read `.computeShader`
  */
 export function buildComputeWGSL(computeNode) {
-  const builder = stubRenderer.backend.createNodeBuilder(computeNode, stubRenderer);
+  // r186 builds a compute the way Nodes.getForCompute does: no object, the node on `.compute`
+  const builder = stubRenderer.backend.createNodeBuilder(null, stubRenderer);
+  builder.compute = computeNode;
   builder.build();
   return builder;
 }

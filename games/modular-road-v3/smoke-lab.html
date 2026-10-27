@@ -510,7 +510,7 @@
         renderer.setSize(innerWidth, innerHeight);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.type = THREE.PCFShadowMap;
         document.body.prepend(renderer.domElement);
         await renderer.init();
 

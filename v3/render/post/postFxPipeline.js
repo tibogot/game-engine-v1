@@ -59,6 +59,39 @@ import { despeckle } from "./despeckleNode.js";
 const _emissiveBlend = /*@__PURE__*/ new THREE.BlendMode(THREE.MaterialBlending);
 
 /**
+ * r186: an MRT member's shader output is typed by its TARGET's format (NodeBuilder.getOutputType
+ * → getTextureType: RedFormat = one float). The selective bloom's MASK attachment is a one-byte
+ * RedFormat target that BLENDS like the material (above) — and blending reads the source ALPHA,
+ * which a one-float output no longer has: "Color blending srcFactor is reading alpha but it is
+ * missing from fragment output" on every transparent material (alg-rts, 2026-10-27). r184 wrote
+ * vec4 to every attachment. A texture tagged `userData.v3Vec4Output` keeps a vec4 output: WebGPU
+ * lets a shader write more components than the target stores, so the target stays one byte and
+ * the blend has its alpha. Patched once per page, on the builder class the renderer uses.
+ */
+/**
+ * renderOutput on the FINISHED frame, as an opaque image. r186's renderOutput un-premultiplies by
+ * alpha, tone-maps, then premultiplies again — right for a transparent layer, wrong here: the
+ * scene texture's alpha is below 1 wherever a cut-out card edge covered only part of a pixel's
+ * samples (alpha-to-coverage writes its coverage as alpha), and the round trip through the tone
+ * curve darkened exactly those pixels — a dark rim round every leaf (editor, fog-lab level,
+ * 2026-10-27; r184 ignored alpha here). The frame on screen is opaque, so alpha is 1.
+ */
+const opaqueOutput = (node) => renderOutput(vec4(node.rgb, 1));
+
+function keepVec4OutputForTaggedTargets(renderer) {
+  const probe = renderer.backend?.createNodeBuilder?.(null, renderer);
+  let proto = probe && Object.getPrototypeOf(probe);
+  while (proto && !Object.prototype.hasOwnProperty.call(proto, "getOutputType")) proto = Object.getPrototypeOf(proto);
+  if (!proto || proto._v3Vec4Output) return;
+  const getOutputType = proto.getOutputType;
+  proto.getOutputType = function (index = 0) {
+    const tex = this.renderer.getRenderTarget()?.textures?.[index];
+    return tex?.userData?.v3Vec4Output ? "vec4" : getOutputType.call(this, index);
+  };
+  proto._v3Vec4Output = true;
+}
+
+/**
  * v2 Post FX pipeline (WebGPU/TSL).
  *
  * Built on `THREE.RenderPipeline` (the r183 successor to the old
@@ -111,6 +144,7 @@ export class PostFxPipeline {
     this.renderer = renderer;
     this.scene = scene;
     this.camera = camera;
+    keepVec4OutputForTaggedTargets(renderer);
 
     this.enabled = false;
 
@@ -343,7 +377,7 @@ export class PostFxPipeline {
 
     const pipeline = new THREE.RenderPipeline(renderer);
     pipeline.outputColorTransform = false;
-    pipeline.outputNode = edgeAA(renderOutput(grade(color)));
+    pipeline.outputNode = edgeAA(opaqueOutput(grade(color)));
 
     // Cloud path: solids → linear RT, clouds composite onto it, then display.
     const linearRT = new THREE.RenderTarget(1, 1, {
@@ -358,7 +392,7 @@ export class PostFxPipeline {
     linearPipeline.outputNode = color;
     const displayPipeline = new THREE.RenderPipeline(renderer);
     displayPipeline.outputColorTransform = false;
-    displayPipeline.outputNode = edgeAA(renderOutput(grade(texture(linearRT.texture))));
+    displayPipeline.outputNode = edgeAA(opaqueOutput(grade(texture(linearRT.texture))));
 
     this._minimal = { scenePass, pipeline, linearRT, linearPipeline, displayPipeline };
     this._resizeLinearRT();
@@ -904,6 +938,7 @@ export class PostFxPipeline {
       const t = sp.getTexture("emissive");
       t.type = THREE.UnsignedByteType;
       t.format = THREE.RedFormat;
+      t.userData.v3Vec4Output = true;   // blended: the shader keeps its alpha (keepVec4OutputForTaggedTargets)
     }
   }
 
@@ -1097,7 +1132,7 @@ export class PostFxPipeline {
     const graded = this._purkinjeEnabled && this._purkinjeUniforms
       ? purkinje(inputNode, this._purkinjeUniforms)
       : inputNode;
-    let node = renderOutput(graded);
+    let node = opaqueOutput(graded);
     let sharpenNode = null;
 
     if (this._fxaaEnabled) node = fxaa(node);

@@ -543,7 +543,7 @@
         // See buildCompose: the present pass tone maps, nothing else does.
         renderer.toneMapping = THREE.NoToneMapping;
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.type = THREE.PCFShadowMap;
         // Two render() calls per frame and info.reset() runs on each, so the
         // default would report only the present quad's single draw.
         renderer.info.autoReset = false;

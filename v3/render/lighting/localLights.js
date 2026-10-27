@@ -2,9 +2,11 @@
 //
 // Measured in v3/lights-lab.html (2026-10-04, 2160x1098, MSAA 4): three's default lighting puts
 // every light into every lit material's shader key, so a light that APPEARS rebuilds the world's
-// shaders (a 1209 ms frame), and every pixel pays for every light (12.3 ms at 128). TiledLighting
-// keeps point lights out of the shader key (they live in a texture) and a compute pass bins them
-// per 32-px screen tile: 0.89 ms at 32 lights, 1.19 at 128, 1.57 at 256, 3.5 ms for a new light.
+// shaders (a 1209 ms frame), and every pixel pays for every light (12.3 ms at 128). r184's
+// TiledLighting kept point lights out of the shader key (they live in a texture) and a compute
+// pass binned them per 32-px screen tile: 0.89 ms at 32 lights, 1.19 at 128, 1.57 at 256.
+// r186 replaced it with ClusteredLighting (screen tiles x exponential depth slices, up to 64
+// lights a cluster): the same idea, ported here 2026-10-26.
 //
 //   installTiledLighting(renderer)   BEFORE anything compiles (right after renderer.init())
 //   const L = createLocalLights({ scene, max })
@@ -13,40 +15,37 @@
 //
 // Every light lives in a pool made at boot (nothing is allocated mid-game). Each frame the live
 // lights are ranked — brightness x range^2 / distance^2 to the camera, x importance — and written
-// into the pool in that order: TiledLighting keeps at most 8 lights per tile, in list order, so a
-// crowded spot drops the faintest, not whichever was added last. Pool lights are NEVER hidden or
-// shown (a light first turning visible rebuilt every shader: see the pool below) — a spare one
-// sits at intensity 0, parked far below the world.
+// into the pool in that order, so when the pool is full the faintest drop out, not whichever was
+// added last. Pool lights are NEVER hidden or shown (a light first turning visible rebuilt every
+// shader: see the pool below) — a spare one sits at intensity 0, parked far below the world.
 //
 // Water (Ocean Pro, lakes, rivers) builds its own lighting and is not lit by these.
 
 import * as THREE from "three/webgpu";
-import TiledLightsNode from "three/addons/tsl/lighting/TiledLightsNode.js";
+import ClusteredLightsNode from "three/addons/tsl/lighting/ClusteredLightsNode.js";
 
 /*
- * three r184's TiledLighting, made fit for the engine. Measured in the editor on the bay
- * (2026-10-04), the add-on as shipped ran its tile pass 79 TIMES A FRAME and 128 lights cost
- * +3.5 ms where the lab measured +0.5. Four problems, four fixes:
+ * three's clustered lighting, made fit for the engine. Measured in the editor on the bay
+ * (2026-10-04, then on r184's tiled version), the add-on as shipped ran its pass 79 TIMES A FRAME
+ * and 128 lights cost +3.5 ms where the lab measured +0.5. Two fixes still matter on r186:
  *
- * 1. EVERY MATERIAL WITH ITS OWN LIGHTING INPUT GOT ITS OWN TILE GRID. NodeMaterial.setupLights
- *    (r184 NodeMaterial.js:1050) asks the lighting for a NEW lights node whenever a material adds
- *    an AO / environment / light-map term — under TiledLighting a whole TiledLightsNode each, with
- *    its own 1024-light texture and its own compute pass every render. FIX: one MASTER node for the
- *    main scene does the binning; every other node is a FOLLOWER that reads the master's buffers
- *    (same shader loop, no compute, no texture of its own).
- * 2. THE TILE PASS RAN ON EVERY RENDER OF THE SCENE (shadow cascades, probes). FIX: the master
- *    bins once per frame, for the main camera only (shadow passes evaluate no lighting).
- * 3. THE DISPATCH WAS 32x TOO BIG: count = w*h / tileSize instead of / tileSize^2. FIX: the real
- *    tile count.
- * 4. A CRASH: customCacheKey() reads the compute program before updateProgram() has built it
- *    ("reading 'getCacheKey' of null" every frame). FIX: built as the node is made.
+ * 1. EVERY MATERIAL WITH ITS OWN LIGHTING INPUT GETS ITS OWN GRID. NodeMaterial.setupLights asks
+ *    the lighting for a NEW lights node whenever a material adds an AO / environment / light-map
+ *    term — a whole ClusteredLightsNode each, with its own light texture and its own compute pass
+ *    every render. FIX: one MASTER node for the main scene does the binning; every other node is a
+ *    FOLLOWER that reads the master's buffers (same shader loop, no compute, no texture of its own).
+ * 2. THE PASS RUNS ON EVERY RENDER OF THE SCENE (shadow cascades, probes). FIX: the master bins
+ *    once per frame, for the main camera only (shadow passes evaluate no lighting).
+ * (r184's other two — a dispatch 32x too big, a cache key read before the compute existed — are
+ *  fixed in three's clustered node; the master still builds its program as it is made, so the
+ *  followers have buffers from the first shader build.)
  *
  * Other scenes (bakes, thumbnails, tint scenes) get three's plain lights: no local lights there.
  */
 const _plainLights = new WeakMap();
 
-class MasterTiledLightsNode extends TiledLightsNode {
-  /** @param {number} maxLights  the pool's size: the light texture (uploaded every frame) and the tile loop's bound */
+class MasterClusteredLightsNode extends ClusteredLightsNode {
+  /** @param {number} maxLights  the pool's size: the light texture (uploaded every frame) and the loop's bound */
   constructor(maxLights) {
     super(maxLights);
     // (2) never per render: createLocalLights' update() drives it once a frame (drive()). Most lit
@@ -54,22 +53,17 @@ class MasterTiledLightsNode extends TiledLightsNode {
     this.updateBeforeType = THREE.NodeUpdateType.NONE;
     this._keep = [];
   }
-  create(width, height) {
-    super.create(width, height);
-    // (3) one invocation per tile
-    this._compute.count = Math.floor(width / this.tileSize) * Math.floor(height / this.tileSize);
-  }
   updateBefore() {}
-  /** Bin `lights` (in priority order) into the tiles for `camera`. */
+  /** Bin `lights` (in priority order) into the clusters for `camera`. */
   drive(renderer, camera, lights) {
-    this.tiledLights.length = 0;
-    for (const l of lights) this.tiledLights.push(l);
-    TiledLightsNode.prototype.updateBefore.call(this, { renderer, camera });
+    this.clusteredLights.length = 0;
+    for (const l of lights) this.clusteredLights.push(l);
+    ClusteredLightsNode.prototype.updateBefore.call(this, { renderer, camera });
   }
-  // the renderer hands the scene's lights over every render; the tiles keep the pool's order
+  // the renderer hands the scene's lights over every render; the clusters keep the pool's order
   // (no allocation: this runs on every render pass)
   setLights(lights) {
-    const keep = this._keep, t = this.tiledLights;
+    const keep = this._keep, t = this.clusteredLights;
     keep.length = 0;
     for (let i = 0; i < t.length; i++) keep.push(t[i]);
     super.setLights(lights);
@@ -79,10 +73,11 @@ class MasterTiledLightsNode extends TiledLightsNode {
   }
 }
 
-/** A material's own lights node: the master's tiles and light texture, no compute of its own. */
-class FollowerTiledLightsNode extends TiledLightsNode {
+/** A material's own lights node: the master's clusters and light texture, no compute of its own. */
+class FollowerClusteredLightsNode extends ClusteredLightsNode {
   constructor(master) {
-    super();
+    // the same grid as the master: the shader's tile / slice / per-cluster maths read these
+    super(master.maxLights, master.tileSize, master.zSlices, master.maxLightsPerCluster);
     this._master = master;
     this.updateBeforeType = THREE.NodeUpdateType.NONE;
   }
@@ -94,15 +89,17 @@ class FollowerTiledLightsNode extends TiledLightsNode {
 }
 // the master's buffers, read at shader-build time (after a resize the master's cache key changes,
 // so every follower rebuilds against the new ones); the base constructor's assignments are dropped
-for (const k of ["_bufferSize", "_lightIndexes", "_screenTileIndex", "_compute", "_lightsTexture", "_lightsCount", "_cameraViewMatrix", "_cameraProjectionMatrix", "_screenSize"]) {
-  Object.defineProperty(FollowerTiledLightsNode.prototype, k, {
+for (const k of ["_bufferSize", "_lightIndexes", "_screenClusterIndex", "_compute", "_lightsTexture", "_lightsCount",
+  "_zSliceRangesTexture", "_zSliceRangesData", "_cameraNear", "_cameraFar", "_cameraViewMatrix", "_cameraProjectionMatrix",
+  "_gridDimensions"]) {
+  Object.defineProperty(FollowerClusteredLightsNode.prototype, k, {
     get() { return this._master?.[k] ?? null; },
     set() {},
     configurable: true,
   });
 }
 
-class LocalTiledLighting extends THREE.Lighting {
+class LocalClusteredLighting extends THREE.Lighting {
   constructor(renderer) {
     super();
     this._renderer = renderer;
@@ -112,12 +109,12 @@ class LocalTiledLighting extends THREE.Lighting {
   /** The scene whose local lights are drawn, and the pool's size. */
   setMain(scene, maxLights) {
     this._mainScene = scene;
-    this._master = new MasterTiledLightsNode(maxLights);
-    this._master.updateProgram(this._renderer); // (4)
+    this._master = new MasterClusteredLightsNode(maxLights);
+    this._master.updateProgram(this._renderer);
   }
   createNode(lights = []) {
     if (!this._master) return new THREE.LightsNode().setLights(lights);
-    return new FollowerTiledLightsNode(this._master).setLights(lights);
+    return new FollowerClusteredLightsNode(this._master).setLights(lights);
   }
   getNode(scene) {
     if (scene.isQuadMesh || scene !== this._mainScene || !this._master) {
@@ -130,11 +127,12 @@ class LocalTiledLighting extends THREE.Lighting {
 }
 
 /**
- * Swap the renderer's lighting for tiled point lights. Call before the first render; then
+ * Swap the renderer's lighting for clustered point lights (the name is kept from r184's tiled
+ * version: callers need no change). Call before the first render; then
  * createLocalLights({ scene, camera }) names the main scene and camera.
  */
 export function installTiledLighting(renderer) {
-  renderer.lighting = new LocalTiledLighting(renderer);
+  renderer.lighting = new LocalClusteredLighting(renderer);
   return renderer.lighting;
 }
 
@@ -148,7 +146,7 @@ export function installTiledLighting(renderer) {
  *   ~50 at most); a game with more passes its own.
  */
 export function createLocalLights({ scene, camera, renderer, max = 128 }) {
-  const tiled = renderer?.lighting instanceof LocalTiledLighting ? renderer.lighting : null;
+  const tiled = renderer?.lighting instanceof LocalClusteredLighting ? renderer.lighting : null;
   tiled?.setMain(scene, max);
   void camera;
   const group = new THREE.Group();

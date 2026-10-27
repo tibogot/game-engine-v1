@@ -21,6 +21,10 @@
  */
 import { Fn, Discard, clamp, float, fwidth, max } from "three/tsl";
 
+// (r186: coverage is written as the colour target's ALPHA, so a frame drawn with these cards has
+// alpha below 1 at their edges; the post pipeline's final renderOutput treats the frame as opaque —
+// postFxPipeline.js opaqueOutput — or r186's premultiply round trip rims every leaf in dark.)
+
 // Whether cut-outs use coverage, for materials that do not say: the app sets it once at boot
 // from its renderer (MSAA on, and no ?a2c=0) — materials are built after that.
 let coverageDefault = true;

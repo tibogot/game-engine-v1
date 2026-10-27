@@ -177,6 +177,13 @@ function patchPrototype(P) {
  * class (not exported: reached through the first one made) — once per page.
  */
 export function installSharedInstanceBuilds(renderer) {
+  // r186: InstanceNode is gone — the instance() TSL function captures the BUILDER's matrices in
+  // its closure, so a shared build would draw every mesh with the first one's. Off there until
+  // this is rebuilt on r186's instancing (each mesh builds its own, as three does).
+  if (!THREE.InstanceNode) {
+    console.info("[V3] shared instanced builds: off on three r186+ (see render/sharedInstanceBuilds.js)");
+    return false;
+  }
   const objects = renderer._objects, nodes = renderer._nodes;
   if (!objects || !nodes || objects._v3Shared) return false;
   objects._v3Shared = true;

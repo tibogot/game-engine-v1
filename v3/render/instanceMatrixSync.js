@@ -26,11 +26,17 @@ import * as THREE from "three";
  * The fix: run the InstanceNode's own update in updateBefore, i.e. before the
  * geometry upload. It is idempotent (it copies the version and ranges), so
  * three running it again afterwards changes nothing.
+ *
+ * r186: InstanceNode is gone — instancing is the `instance()` TSL function,
+ * which syncs the buffer's version and update ranges in an OnBeforeFrameUpdate,
+ * before any draw of the frame: the bug this fixes is fixed in three. So this
+ * installs nothing there (THREE.InstanceNode is undefined).
  */
 const INODE = Symbol("v3InstanceNode");
 
 export function installInstanceMatrixSync(renderer) {
   const nodes = renderer?._nodes;
+  if (!THREE.InstanceNode) return false;   // r186+: three syncs before the frame
   if (!nodes || nodes._v3InstanceSync) return false;
   nodes._v3InstanceSync = true;
   const updateBefore = nodes.updateBefore;

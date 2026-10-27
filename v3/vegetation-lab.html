@@ -190,7 +190,7 @@
       scene.add(sun);
       scene.add(sun.target);
       renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      renderer.shadowMap.type = THREE.PCFShadowMap;
 
       function placeSun() {
         const az = (P.sunAzimuth * Math.PI) / 180;

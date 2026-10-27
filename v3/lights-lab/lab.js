@@ -7,7 +7,8 @@
 //   - DynamicLighting: point/spot lights batched into uniform arrays and ONE loop; the cache key is the
 //     set of light TYPES, so only the first light of a type rebuilds;
 //   - TiledLighting: point lights in a texture, a compute pass bins them per 32-px screen tile, each
-//     fragment loops over its tile's (<= ~8) lights.
+//     fragment loops over its tile's (<= ~8) lights. r186 removed it: mode "tiled" now runs its
+//     successor, ClusteredLighting (screen tiles x depth slices, up to 64 lights a cluster).
 //
 // URL: ?mode=classic|dynamic|tiled  &n=32 (lights)  &pr=1.5 (pixel ratio)  &view=rts|ground
 // Console: __lightsLab.bench(frames) -> ms/frame (the loop paused, frames through the GPU),
@@ -19,7 +20,7 @@ import * as THREE from "three/webgpu";
 import { Fn, vec3, float, positionWorld, mix, sin, fract, dot, floor } from "three/tsl";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { DynamicLighting } from "three/addons/lighting/DynamicLighting.js";
-import { TiledLighting } from "three/addons/lighting/TiledLighting.js";
+import { ClusteredLighting } from "three/addons/lighting/ClusteredLighting.js";
 
 const q = new URLSearchParams(location.search);
 const MODE = ["classic", "dynamic", "tiled"].includes(q.get("mode")) ? q.get("mode") : "dynamic";
@@ -37,13 +38,9 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 2.2;
 renderer.shadowMap.enabled = true;
 if (MODE === "dynamic") renderer.lighting = new DynamicLighting({ maxPointLights: Math.max(1, N + 4) });
-// r184 TRAP: TiledLightsNode.customCacheKey() reads its compute program before updateProgram() has
-// built it (a render whose key is taken before setup, e.g. the shadow pass) -> "reading 'getCacheKey'
-// of null" every frame. Build the program as the node is made.
-class EagerTiledLighting extends TiledLighting {
-  createNode(lights = []) { const n = super.createNode(lights); n.updateProgram(renderer); return n; }
-}
-if (MODE === "tiled") renderer.lighting = new EagerTiledLighting();
+// (r184's tiled node needed its program built as it was made — a cache key read it first; the
+// clustered node's key tolerates a missing program)
+if (MODE === "tiled") renderer.lighting = new ClusteredLighting(Math.max(1, N + 4));
 document.getElementById("app").appendChild(renderer.domElement);
 await renderer.init();
 

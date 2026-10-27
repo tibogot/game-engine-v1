@@ -21,7 +21,7 @@ const stub = {
   debug: { checkShaderErrors: true },
   library: Object.assign(new THREE.BasicNodeLibrary(), { fromMaterial: (m) => (m && m.isNodeMaterial ? m : null) }),
   getMRT: () => null, getRenderTarget: () => null,
-  shadowMap: { enabled: true, type: THREE.PCFSoftShadowMap },
+  shadowMap: { enabled: true, type: THREE.PCFShadowMap },
   backend: { isWebGPUBackend: true,
     capabilities: { getUniformBufferLimit: () => 65536, isCompatibilityMode: false },
     utils: { getTextureSampleData: () => ({ samples: 1, primarySamples: 1, isMSAA: false }) } },

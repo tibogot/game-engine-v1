@@ -1,6 +1,33 @@
 # three.js upgrades — workarounds, checks, what to try
 
-We ship three **r184** (`package.json` `"three": "^0.184.0"`, one version for the whole repo).
+We ship three **r186.1** since 2026-10-27 (`package.json` `"three": "^0.186.1"`, one version for the whole
+repo; restore point: git tag `pre-r186`). The r184 notes below stay as history.
+
+## The r186 upgrade (2026-10-27) — what broke, what fixed it, what is open
+
+- **Instancing rewritten** (InstanceNode gone → the `instance()` TSL function):
+  - a material's `positionNode` now ran AFTER the instance matrix — birds' wings, wind, sway,
+    billboards all wrong (you saw the birds). `render/instancedPositionOrder.js` restores r184's order
+    for instanced meshes with a positionNode. RETEST next upgrade.
+  - `instanceMatrixSync.js`: not needed (three syncs before the frame) — installs nothing on r186.
+  - `sharedInstanceBuilds.js`: OFF on r186 (instance() captures the builder's matrices) → **boot
+    40 s → 51–57 s** in alg. OPEN: rebuild shared builds the r186 way.
+- **TiledLighting removed** → `localLights.js` on `ClusteredLightsNode` (master / follower kept);
+  lights lab mode "tiled" = ClusteredLighting.
+- **MRT output typed by the target format**: the one-byte bloom mask lost its alpha → every
+  transparent material's pipeline failed. Tagged targets keep a vec4 output (postFxPipeline).
+- **renderOutput premultiplies**: alpha-to-coverage edges got a dark rim → `opaqueOutput` on the
+  finished frame (postFxPipeline).
+- **No single-component 16-bit vertex format**: alg's `earthMask` → float (algGroundBlend).
+- **PCFSoftShadowMap removed**: 23 labs → PCFShadowMap. WGSL test stub: `debug.diagnostics`,
+  `lighting.enabled`, compute built as `Nodes.getForCompute`.
+- Decoders (basis, draco): byte-identical, nothing to copy.
+- MEASURED: alg default view scale 2 16.0–17.5 ms (r184 16.2–16.8), scale 1 ~9 ms both; the first
+  frames after a render-scale change spike (pipelines for the resized MSAA targets), then settle.
+  Reference views identical to r184 except softer tree-shadow edges (r186 filtering).
+- OPEN: `handbrakeStabilityTest` 23° (limit 15°; r184 3°) — the car's straight-line drift is a
+  physics weakness r186's float rounding pushes over; the Thunderline car's call. Old MSAA targets
+  not freed after a resize (72 MB) and a second full-size 4-sample depth buffer (72 MB).
 Started 2026-10-17 from the r185 + r186 release notes.
 What WebGPU offers that three does not expose (render bundles, device limits, f16, subgroups…):
 [WEBGPU_BEYOND_THREE.md](WEBGPU_BEYOND_THREE.md).

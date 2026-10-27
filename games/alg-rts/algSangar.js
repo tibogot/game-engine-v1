@@ -447,7 +447,10 @@ function infirmaryPlantSpots() {
  * cover lines; its markings the boards and the tricolour only (the walls carry their own weathering).
  */
 export const loadFrenchPost = () => loadBlenderPiece("postkit", "post", () => buildFrenchPost({ detail: 2, noBags: true, signsOnly: true, footStone: MAT.limestone }), null, { stone: false, plaster: true });
-export const frenchPostGeometry = () => { const g = pieceGeometry("postkit", "post"); if (g) g.userData.farFrom = 150; return g; };   // (its far level only past the widest RTS zoom)
+// (its far level only past the widest RTS zoom. 150 m was not: at full zoom-out the screen's top corners are ~200 m from
+// the camera, so panning put the post on screen in its far level — the radio mast gone, its shadow changed (you,
+// 2026-10-27). 240 = those 200 m + the post's half-width and mast + its shadow's reach at the map's sun.)
+export const frenchPostGeometry = () => { const g = pieceGeometry("postkit", "post"); if (g) g.userData.farFrom = 240; return g; };
 /**
  * The placed post (the showroom's, the producer's mesh) to the Blender one: its geometry and material swapped, its
  * children kept (the gate's leaves, the flag, the simulated bags), its markings re-made (signs only), its far level.

@@ -12,6 +12,8 @@ import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
 import { setAlphaCoverageDefault } from "../render/materials/alphaCutout.js";
+// r186: instanced vertex effects (birds, wind, sway, billboards) in the instance's own frame, as r184
+import "../render/instancedPositionOrder.js";
 import { ScatterField } from "../render/scatter/scatterField.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";

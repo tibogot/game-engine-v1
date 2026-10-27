@@ -296,7 +296,7 @@
         renderer.setSize(innerWidth, innerHeight);
         renderer.toneMapping = THREE.ACESFilmicToneMapping;
         renderer.shadowMap.enabled = true;
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.type = THREE.PCFShadowMap;
         // Three render() calls per frame (bake, scene, overlay) and info.reset()
         // runs on each one, so the default would report only the overlay's
         // single draw. Reset once per frame instead and the count is the frame.

@@ -36,10 +36,22 @@ function earthTexture() {
   return _earthTex;
 }
 // (glTF names a custom attribute with an underscore — `_earth`; kept as `earthMask` on its geometry)
+// The GLB stores it as ONE normalized uint16 a vertex. three r186 has no vertex format for a single
+// 16-bit component (r184 quietly mapped it to uint32) — "Vertex format not supported yet" and every
+// earth piece's pipeline failed, shadows too. So it becomes one float (getX gives the 0..1 value).
 export function hasEarth(geo) {
   if (!geo?.getAttribute) return false;
   const a = geo.getAttribute("_earth");
-  if (a) { geo.setAttribute("earthMask", a); geo.deleteAttribute("_earth"); }
+  if (a) {
+    let m = a;
+    if (a.itemSize === 1 && !(a.array instanceof Float32Array)) {
+      const f = new Float32Array(a.count);
+      for (let i = 0; i < a.count; i++) f[i] = a.getX(i);
+      m = new THREE.BufferAttribute(f, 1);
+    }
+    geo.setAttribute("earthMask", m);
+    geo.deleteAttribute("_earth");
+  }
   return !!geo.getAttribute("earthMask");
 }
 /** A geometry drawn with an earth material but no earth of its own (a far level sharing its near's material, an old
