@@ -161,7 +161,17 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   const parkQuat = new THREE.Quaternion();
   vehicle.setSpawn(PARK, parkQuat);
   vehicle.respawn();
-  vehicle.setEnabled(false);
+  // PARKED, NOT HIDDEN (2026-10-27): Vehicle.setEnabled(false) hid the whole car, its two headlight spots with
+  // it — the scene's light set changed and every lit material (terrain, sky, track) compiled again: 1-4 s on
+  // every builder test drive. The parked car stays in the scene (under the floor, PARK). After a finish only
+  // its BODY hides (it would hang frozen under the road), until it drives again.
+  let hiddenBody = null;
+  const showBody = () => { for (const o of hiddenBody ?? []) o.visible = true; hiddenBody = null; };
+  const hideBody = () => { if (hiddenBody) return; hiddenBody = []; vehicle.group.traverse((o) => { if (o.isMesh && o.visible) { o.visible = false; hiddenBody.push(o); } }); };
+  const park = () => { vehicle.setEnabled(false); vehicle.group.visible = true; };
+  /** the car drives again (its body shows, if a finish hid it) */
+  const unpark = () => { vehicle.setEnabled(true); showBody(); };
+  park();
   const chase = createChaseCamera({ camera, vehicle });
   const ghostCar = new Vehicle({ scene, showArrows: false });
   ghostCar.SUBSTEPS = substeps;
@@ -272,11 +282,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
    */
   function carHologram() {
     if (S || !vehicle._chassisGlb) return null;
-    vehicle.setEnabled(true);
+    unpark();
     vehicle.respawnAt(PARK.clone(), parkQuat.clone());
     vehicle.body.vel.set(0, 0, 0);
     vehicle.syncVisuals(0, 0);
-    vehicle.setEnabled(false);
+    park();
     vehicle.group.updateMatrixWorld(true);
     const frame = new THREE.Matrix4().compose(vehicle.body.pos, vehicle.body.quat, new V(1, 1, 1)); // (renderPos is stale while parked)
     const geo = bakeCar(vehicle.group, frame.invert(), false, vehicle.body.pos, true);
@@ -676,6 +686,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S?.meshes?.fullDetail(false);
     // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
     app.shadows.setSunShadowNode(sunShadows.visibility);
+    // the old maps are freed once the engine has swapped the node in (it takes two frames: worldEnvironment.js
+    // setSunShadowNode) — freed at once, whatever is drawn meanwhile with the old node reads a destroyed
+    // texture (a re-bake: the FX lab's time-of-day buttons)
+    if (old) for (let i = 0; i < 4; i++) await new Promise((r) => requestAnimationFrame(r));
     old?.atlasRT?.dispose?.();
     old?.liveRT?.dispose?.();
     console.info("[drive] sun shadows", sunShadows.stats);
@@ -696,11 +710,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     $("land").classList.remove("show");
     $("finish").classList.remove("show");
     hud.classList.remove("on");
-    vehicle.setEnabled(true);
+    unpark();
     vehicle.respawnAt(PARK.clone(), parkQuat.clone());
     vehicle.body.vel.set(0, 0, 0);
     vehicle.syncVisuals(0, 0);
-    vehicle.setEnabled(false);
+    park();
     ghostCar.setEnabled(false);
     ghostCar.group.visible = false;
     engineSound.suspend();
@@ -730,7 +744,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S.race.reset();
     S.physProps.reset(); // the knocked props stand back where they were placed
     $("finish").classList.remove("show");
-    vehicle.setEnabled(true); // parked after a finish
+    unpark(); // (parked after a finish, or between drives)
     S.rules.reset();
     S.recorder.start();
     S.landings.length = 0;
@@ -790,7 +804,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (p.y < (Number.isFinite(ground) ? ground - 30 : S.KILL_Y - 500) || p.y < -5000) return S.race.s.state === "running" ? respawnCheckpoint() : restart();
     } else if (p.y < S.KILL_Y) {
       // after the finish the road ends: park the car under the finish screen instead of restarting
-      if (S.race.s.state === "finished") { vehicle.setEnabled(false); return; }
+      if (S.race.s.state === "finished") { park(); hideBody(); return; }
       return S.race.s.state === "running" ? respawnCheckpoint() : restart();
     }
     if (STUCK?.enabled && vehicle.isBeached && vehicle.stuckTime >= STUCK.respawnAfter) return recoverToSafe();

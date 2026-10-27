@@ -23,6 +23,8 @@ import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
 import { thumbStore } from "../../app/thumbStore.js";
+// (game-agnostic, from the RTS games: what the game adds is drawn once under the loading screen)
+import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
 import { buildTrackMeshes } from "./testTrack.js";
 import { createBuilderTutorial } from "./builderTutorial.js";
 import { OBSTACLES, HOLE, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
@@ -207,6 +209,7 @@ const app = await startV3App({
 });
 // HIDDEN WHILE THE PAGE BOOTS (as drive.js, 2026-10-27): frames drawn before the post chain, the car's lights
 // and the track are in compiled shader variants thrown away the next step. The loop still runs.
+const engineObjects = snapshotEngineScene(app.scene); // (before hiding: what the engine shows is warmed too)
 app.scene.visible = false;
 app.sky?.setMode?.("skypro");
 app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD); // the track's own time of day (worlds.js TIMES)
@@ -3143,6 +3146,26 @@ async function startDrive() {
   const spawnM = spawnFrame();
   const from = spawnM ?? (selRoad ? built.get(sel)?.M ?? null : null);
   await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, autoFinish: false, fallReset: false, tabBack: true, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  if (!driveWarmed) await warmFirstDrive();
+}
+// THE FIRST DRIVE'S SHADERS, under the loading screen (2026-10-27): what the drive builds when it starts — its
+// own copy of the track, the gates, the car's light and shadow state — compiled on its first frame, one of
+// 3.6 s (8.8 s before the page's boot warmed the car). The clock holds, the screen covers the warm-up, then
+// the countdown starts again. Later drives reuse every pipeline.
+let driveWarmed = false;
+async function warmFirstDrive() {
+  driveWarmed = true;
+  const el = $("boot");
+  el.style.transition = "none"; // covered at once: the warm-up shows everything for two frames
+  el.classList.remove("gone");
+  el.querySelector(".msg").textContent = "Warming up…";
+  rig.setTimeScale(0);
+  await warmGamePipelines(app, engineObjects);
+  await awaitPipelinesQuiet(app);
+  rig.setTimeScale(1);
+  rig.restart();
+  el.style.transition = "";
+  el.classList.add("gone");
 }
 function stopDrive() {
   if (!driving) return;
@@ -3246,8 +3269,10 @@ if (track.pieces.length) { frameAll(); controls.update(); } // an opened track s
 await rig.modelsReady;
 for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
 scene.visible = true;
-await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-await renderer.backend?.device?.queue.onSubmittedWorkDone();
+// EVERYTHING THE PAGE CAN SHOW, drawn once here (as drive.js): the test car (parked, hidden while building:
+// the first Drive compiled 41 pipelines in one 8.8 s frame), its effects, every LOD level, the gizmos
+await warmGamePipelines(app, engineObjects);
+await awaitPipelinesQuiet(app);
 $("boot").classList.add("gone");
 let last = performance.now();
 app.addPreUpdateHook(function builderFrame() {

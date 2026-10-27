@@ -10,6 +10,8 @@ import { startV3App } from "../../../../v3/engine.js";
 import { library, campaign, lessons, settings, builderUrl, campaignUrl, PAGES } from "../../app/library.js";
 import { createDriveRig } from "./driveSession.js";
 import { applyWorld, DEFAULT_TOD, groundFeatures } from "./worlds.js";
+// (game-agnostic, from the RTS games: what the game adds is drawn once under the loading screen)
+import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -39,6 +41,7 @@ const app = await startV3App({
 // car's headlights joined the lights, before the sun-shadow node replaced the cascades — every frame drawn
 // on the way compiled a variant thrown away the next step. Hidden, the frames still run (the sun settles
 // for the time of day) but draw no material; it shows once, final, behind the loading screen (below).
+const engineObjects = snapshotEngineScene(app.scene); // (before hiding: what the engine shows is warmed too)
 app.scene.visible = false;
 app.sky?.setMode?.("skypro");
 const tod = Number(params.get("tod"));
@@ -160,8 +163,11 @@ await rig.modelsReady;
 // shadow off — worldEnvironment.js setSunShadowNode — and that frame would compile a variant of its own)
 for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r));
 app.scene.visible = true;
-await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
-await app.renderer?.backend?.device?.queue.onSubmittedWorkDone();
+// EVERYTHING THE DRIVE CAN SHOW, drawn once here (2026-10-27, an autopilot lap compiled 16 pipelines after
+// this screen: the rails' far LOD levels as the camera reached them, the tyre smoke and marks, the ghost):
+// hidden effects, empty pools, every LOD level, off-screen pieces — then wait until nothing new compiles
+await warmGamePipelines(app, engineObjects);
+await awaitPipelinesQuiet(app);
 $("boot").classList.add("gone");
 setTimeout(() => $("boot").remove(), 600);
 

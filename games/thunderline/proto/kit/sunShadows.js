@@ -153,15 +153,23 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   tableTex.needsUpdate = true;
 
   // ---- render targets: "distance from the sun" (0 = at zMax, 1 = at zMin) in R32F, plus a depth buffer ----
-  const makeRT = (size, depthBuffer = true) => {
-    const rt = new THREE.RenderTarget(size, size, { type: THREE.FloatType, format: THREE.RedFormat, depthBuffer });
+  const makeRT = (size, depthBuffer = true, type = THREE.FloatType) => {
+    const rt = new THREE.RenderTarget(size, size, { type, format: THREE.RedFormat, depthBuffer });
     rt.texture.minFilter = rt.texture.magFilter = THREE.NearestFilter;
     rt.texture.generateMipmaps = false;
+    rt.texture.normalized = type === THREE.UnsignedShortType; // R16Unorm, not R16Uint (three asks for the flag)
     return rt;
   };
   // NO DEPTH BUFFER on the atlas: each cell is drawn into a small target that has one and copied in (bake) —
   // a depth buffer the atlas's size, used only while baking, doubled its memory
-  const atlasRT = makeRT(atlasPx, globalThis.__BAKE_DIRECT === true);
+  // THE ATLAS IN 16 BITS (2026-10-27, video memory: 110 MB on White 2 in R32F, and above ~1.75x pixel ratio the
+  // frame fell off a cliff on a 6 GB laptop GPU). R16Unorm (texture-formats-tier1) reads back as a float, so
+  // nothing else changes. A step is range / 65535 (White 2: 1.5 km of light depth -> 2.3 cm, rounding <= 1.4 cm)
+  // against the atlas's 5 cm bias; a longer range, or a GPU without the feature (three would make R16Uint, an
+  // integer target the depth material cannot write), keeps R32F. The live map stays R32F: its bias is 2 cm.
+  const atlas16 = range <= 2500 && renderer.backend?.device?.features?.has?.("texture-formats-tier1") === true;
+  const atlasType = atlas16 ? THREE.UnsignedShortType : THREE.FloatType;
+  const atlasRT = makeRT(atlasPx, globalThis.__BAKE_DIRECT === true, atlasType);
   const liveRT = makeRT(LIVE_TEX);
 
   const uZ = [uniform(zL), uniform(zMax), uniform(range)];
@@ -234,10 +242,14 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   function bake() {
     const t0 = performance.now();
     clearRT(atlasRT);
+    // the LIVE map set up as a render target now, before any material samples it: made first by a material's
+    // binding, its first draw (follow) re-created the texture, and whatever had bound the old one read a
+    // destroyed texture every frame (2026-10-27, the FX lab once the parked car kept its lights in the scene)
+    clearRT(liveRT);
     const prevCC = renderer.getClearColor(new THREE.Color());
     const vp = new THREE.Vector4();
     const direct = globalThis.__BAKE_DIRECT === true;
-    const cellRT = direct ? null : makeRT(CELL_TEX);
+    const cellRT = direct ? null : makeRT(CELL_TEX, true, atlasType); // (copied into the atlas: same format)
     const at = new THREE.Vector2();
     cells.forEach((k, slot) => {
       const cx = k % nx, cy = Math.floor(k / nx);
@@ -441,10 +453,18 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     const lv = ly.sub(live.cy).div(live.size).add(0.5);
     // texel rows run DOWN the image while the camera's up (+y) is at row 0: read v flipped
     // live texels: +x along xL, +y DOWN the image = −yL
+    // ONLY THE LOOKUPS THAT CAN CHANGE THE RESULT RUN (2026-10-27, GPU measurements: the full set — the
+    // live map's taps, the atlas's 6 × 6 in this cell AND the neighbour's — ran on every sunlit pixel,
+    // ~1.5 ms of a 5 ms frame at 1584 × 855, 4.3 ms at 1.5×). The live map only inside its box, the atlas
+    // only where the live map does not fully cover it, the neighbour cell only within SEAM_BLEND of a seam.
+    // Same maths where they run; the skipped ones were multiplied by 0 or thrown away by a select.
     const lt = live.size.div(LIVE_TEX);
-    const liveVis = (Q.get("liveFilter") === "tent3" ? pcfTent : Q.get("liveFilter") === "tent6" ? pcfWideTent : LIVE_TENT ? pcfAdaptive : pcfWideTent)(liveTex, lu.mul(LIVE_TEX), float(1).sub(lv).mul(LIVE_TEX), d, float(0.02 / range), vec2(0, 0), vec2(LIVE_TEX - 1, LIVE_TEX - 1), ddx.mul(lt), ddy.mul(lt).negate(), mpp.div(lt));
-    const edge = min(min(lu, float(1).sub(lu)), min(lv, float(1).sub(lv))); // 0 at the box edge, 0.5 at the centre
-    const liveW = smoothstep(0.0, 0.06, edge); // last ~2 m blend into the atlas
+    const edge = min(min(lu, float(1).sub(lu)), min(lv, float(1).sub(lv))).toVar(); // 0 at the box edge, 0.5 at the centre
+    const liveW = smoothstep(0.0, 0.06, edge).toVar(); // last ~2 m blend into the atlas
+    const liveVis = float(1).toVar();
+    If(edge.greaterThan(0), () => {
+      liveVis.assign((Q.get("liveFilter") === "tent3" ? pcfTent : Q.get("liveFilter") === "tent6" ? pcfWideTent : LIVE_TENT ? pcfAdaptive : pcfWideTent)(liveTex, lu.mul(LIVE_TEX), float(1).sub(lv).mul(LIVE_TEX), d, float(0.02 / range), vec2(0, 0), vec2(LIVE_TEX - 1, LIVE_TEX - 1), ddx.mul(lt), ddy.mul(lt).negate(), mpp.div(lt)));
+    });
 
     // static atlas: the point looked up in one cell's bake ({ vis, here: the cell exists and was baked })
     const fx = lx.sub(gx0).div(CELL), fy = ly.sub(gy0).div(CELL);
@@ -475,21 +495,28 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       const vis = Q.get("atlasFilter") === "along" ? pcf(atlasTex, px, py, d, float(0.05 / range), lo, hi, align ? TAPS_ALONG : TAPS) : pcfWideTent(atlasTex, px, py, d, float(0.05 / range), lo, hi, gpx, gpy, mpp.div(t));
       return { vis, here };
     };
-    const cx = floor(fx), cy = floor(fy);
-    const own = cellVis(cx, cy);
+    const cx = floor(fx).toVar(), cy = floor(fy).toVar();
     // ACROSS A SEAM two cells turned by different angles (a curve) put the edge a fraction of a texel
     // apart: a jog every 16 m. Within SEAM_BLEND of the nearer seam the neighbour's bake (it covers its
     // border texels, ~0.26 m, into this cell) is faded in, half and half on the seam.
     const SEAM_BLEND = 0.15; // m
     const ax = fx.sub(cx), ay = fy.sub(cy);
     const dX = min(ax, float(1).sub(ax)).mul(CELL), dY = min(ay, float(1).sub(ay)).mul(CELL);
-    const alongX = dX.lessThan(dY);
-    const ncx = select(alongX, cx.add(select(ax.lessThan(0.5), float(-1), float(1))), cx);
-    const ncy = select(alongX, cy, cy.add(select(ay.lessThan(0.5), float(-1), float(1))));
-    const nb = cellVis(ncx, ncy);
-    const seamW = float(0.5).mul(float(1).sub(smoothstep(0.0, SEAM_BLEND, min(dX, dY))));
-    const ownVis = select(own.here, own.vis, float(1));
-    const staticOrLit = select(own.here.and(nb.here), mix(own.vis, nb.vis, seamW), ownVis);
+    const seamW = float(0.5).mul(float(1).sub(smoothstep(0.0, SEAM_BLEND, min(dX, dY)))).toVar();
+    const staticOrLit = float(1).toVar();
+    If(liveW.lessThan(1).or(dbg.equal(3)), () => {
+      const own = cellVis(cx, cy);
+      If(own.here, () => {
+        staticOrLit.assign(own.vis);
+        If(seamW.greaterThan(0), () => {
+          const alongX = dX.lessThan(dY);
+          const ncx = select(alongX, cx.add(select(ax.lessThan(0.5), float(-1), float(1))), cx);
+          const ncy = select(alongX, cy, cy.add(select(ay.lessThan(0.5), float(-1), float(1))));
+          const nb = cellVis(ncx, ncy);
+          If(nb.here, () => { staticOrLit.assign(mix(staticOrLit, nb.vis, seamW)); });
+        });
+      });
+    });
 
     const normal = mix(staticOrLit, liveVis, select(edge.greaterThan(0), liveW, float(0)));
     // dbg 4: the live map's texels as a checkerboard (are the teeth the map's texels?)
@@ -507,18 +534,19 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     async probe(which = "live", x = 0, y = 0, w = 64, h = 64) {
       const rt = which === "live" ? liveRT : atlasRT;
       const px = await renderer.readRenderTargetPixelsAsync(rt, x, y, w, h);
-      // rows are padded to 256 bytes on read-back: stride = len / h floats
+      // rows are padded to 256 bytes on read-back: stride = len / h values (16-bit atlas: 0-65535)
       const stride = px.length / h;
+      const k = px instanceof Uint16Array ? 1 / 65535 : 1;
       let lo = Infinity, hi = -Infinity, sum = 0, n = 0, below1 = 0;
       for (let yy = 0; yy < h; yy++) for (let xx = 0; xx < w; xx++) {
-        const v = px[yy * stride + xx];
+        const v = px[yy * stride + xx] * k;
         lo = Math.min(lo, v); hi = Math.max(hi, v); sum += v; n++;
         if (v < 0.999) below1++;
       }
       return { lo, hi, mean: sum / n, n, below1 };
     },
     lightSpace: (p) => toL(p), zMax, range,
-    stats: { cells: cells.length, capacity, grid: `${nx}×${ny}`, texelsPerMetre: INNER / CELL, liveTexelsPerMetre: LIVE_TEX / LIVE_SIZE, atlasSize: atlasPx, atlasMB: Math.round((atlasPx * atlasPx * 4) / 1048576) },
+    stats: { cells: cells.length, capacity, grid: `${nx}×${ny}`, texelsPerMetre: INNER / CELL, liveTexelsPerMetre: LIVE_TEX / LIVE_SIZE, atlasSize: atlasPx, atlasMB: Math.round((atlasPx * atlasPx * (atlas16 ? 2 : 4)) / 1048576), atlasBits: atlas16 ? 16 : 32 },
     dispose() { atlasRT.dispose(); liveRT.dispose(); tableTex.dispose(); depthMat.dispose(); },
   };
 }
