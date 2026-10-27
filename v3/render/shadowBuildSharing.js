@@ -47,7 +47,38 @@ function positionOnly(geometry) {
 }
 const NO_RECEIVE = { get(t, p) { return p === "receiveShadow" ? false : Reflect.get(t, p, t); } };
 
-export function installShadowBuildSharing(renderer) {
+/**
+ * SHADOW KEYS RECOMPUTED ONLY WHEN THEY CAN CHANGE (2026-10-27, alg play profile: ~0.8 ms of every
+ * frame's CPU). three re-keys a render object (RenderObjects.get → getCacheKey: the material's every
+ * property, its node graphs, the geometry layout…) whenever `material.version` moved since its last
+ * draw. The shadow pass draws every caster with ONE override material and copies each caster's
+ * alphaTest onto it — and Material's alphaTest setter bumps the version whenever it crosses 0. So
+ * every switch between an alpha-tested caster (leaves) and an opaque one invalidated every shadow
+ * draw after it: each shadow draw re-keyed every frame, to the same key.
+ * The memo: a shadow draw's key is reused while everything it reads is the same object / value as
+ * when it was made — the source material (and its version), the override's per-draw fields (alphaTest
+ * on/off, alphaMap, side, transparent, colour / position / depth nodes, displacement map), the geometry,
+ * receiveShadow, `count > 1` (three's instanced test), the clipping key and the dynamic key.
+ */
+function memoShadowKeys(P) {
+  const getCacheKey = P.getCacheKey;
+  const sig = (ro) => {
+    const m = ro.material, o = ro.object;
+    const src = ro._sourceMaterial ?? ro.renderer?._currentSourceMaterial;
+    return [src, src?.version, m.alphaTest > 0, m.alphaMap, m.side, m.transparent, m.colorNode, m.positionNode, m.depthNode,
+      m.displacementMap, ro.geometry, o.receiveShadow, o.count > 1, ro.clippingContextCacheKey, ro.getDynamicCacheKey()];
+  };
+  P.getCacheKey = function () {
+    if (this.material?.isShadowPassMaterial !== true) return getCacheKey.call(this);
+    const s = sig(this), memo = this._v3KeyMemo;
+    if (memo && memo.sig.length === s.length && memo.sig.every((v, i) => v === s[i])) return memo.key;
+    const key = getCacheKey.call(this);
+    this._v3KeyMemo = { sig: s, key };
+    return key;
+  };
+}
+
+export function installShadowBuildSharing(renderer, { keyMemo = true } = {}) {
   const objects = renderer._objects;
   if (!objects || objects._v3ShadowShare) return false;
   objects._v3ShadowShare = true;
@@ -86,6 +117,7 @@ export function installShadowBuildSharing(renderer) {
         this.object = new Proxy(o, NO_RECEIVE);
         try { return getMaterialCacheKey.call(this); } finally { this.geometry = g; this.object = o; }
       };
+      if (keyMemo) memoShadowKeys(P);
       ro.initialCacheKey = ro.getCacheKey();   // made before the patch
     }
     return ro;

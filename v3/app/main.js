@@ -420,7 +420,10 @@ export async function startV3App(opts = {}) {
   }
   // One shadow-pass node build for every opaque caster, not one per material map / geometry layout
   // (render/shadowBuildSharing.js: alg built the same shadow shader 21, 16, 8… times). ?shadowshare=0 to A/B.
-  if (new URLSearchParams(location.search).get("shadowshare") !== "0") installShadowBuildSharing(renderer);
+  // ?shadowkeymemo=0 to A/B the shadow-key memo (the per-frame re-keying of every shadow draw).
+  if (new URLSearchParams(location.search).get("shadowshare") !== "0") {
+    installShadowBuildSharing(renderer, { keyMemo: new URLSearchParams(location.search).get("shadowkeymemo") !== "0" });
+  }
   // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
   // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer
   // and re-sends the whole buffer on every draw of every pass, changed or not

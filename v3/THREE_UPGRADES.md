@@ -162,8 +162,16 @@ pooled UBOs (r185), the instance-sync, shared-build refresh and CSM frame-late f
    shared instanced builds rebuilt the r186 way;
    `compileComputeAsync()` (#32551) for the compute warm-up; check the shadow warm-up (r186 draws no
    shadow maps in precompile, #33924).
-4. [ ] **Render bundles for static instanced meshes** (r185 #33839, #33811): alg is CPU-bound at scale 1
-   (~9 ms CPU) — measure the CPU on walls / rocks / props.
+4. [x] **Render bundles for static instanced meshes** (r185 #33839, #33811) — MEASURED, NOT WORTH IT
+   (2026-10-27, alg play profile at the post, ~9 ms busy per frame): three's render 5.8 ms, of which the
+   WebGPU encoding a bundle skips (setPipeline / setBindGroup / setVertexBuffer / draw) is ~0.65 ms and the
+   scene walk 0.3 ms; a bundle still refreshes every object's uniforms each frame, freezes culling and
+   `mesh.count` at record time, and once broke the foliage depth pre-pass (memory: perf audit 2).
+   **Found instead, DONE — the shadow-key memo** (render/shadowBuildSharing.js, `?shadowkeymemo=0`):
+   Material's alphaTest SETTER bumps `version` when it crosses 0; the shadow pass copies each caster's
+   alphaTest onto its ONE override material, so every opaque ↔ alpha-tested switch made every later shadow
+   draw re-key in full (RenderObjects.get → getCacheKey): 83 full keys per frame → 0, three's render
+   5.65 → 4.92 ms CPU per frame (one run each; the key count is the firm number).
 5. [ ] **Look, you judge**: `softParticles()` (TSL, #33887) for smoke / dust / fire / napalm meeting the
    ground; the new `SSAONode` (#33921, depth-aware blur) or the improved GTAO vs our old SSAO
    (+0.35–0.8 ms); faster bloom blur (#33923); OIT pass (#34253) for overlapping smoke / water / glass.
