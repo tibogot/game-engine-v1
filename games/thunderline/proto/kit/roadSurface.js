@@ -90,8 +90,16 @@ export const ROAD_SCAN = {
   brightness: uniform(0.85), // the deck's colour (user, 2026-10-23: "a bit too bright")
 };
 
+// The placeholder until the scan has loaded: FLAT, and with every mip level (2026-10-27: the dock's START picture
+// came out white — it is drawn at boot, before the scan arrives. A 1×1 texture has no LOCAL_MIP level, so the
+// high-pass below divided by ~0). 256² so LOCAL_MIP exists and equals the texture: the deck is plain grey.
 const flatTex = (r, g, b) => {
-  const t = new THREE.DataTexture(new Uint8Array([r, g, b, 255]), 1, 1);
+  const N = 256, px = new Uint8Array(N * N * 4);
+  for (let i = 0; i < N * N; i++) { px[i * 4] = r; px[i * 4 + 1] = g; px[i * 4 + 2] = b; px[i * 4 + 3] = 255; }
+  const t = new THREE.DataTexture(px, N, N);
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
   t.needsUpdate = true;
   return t;
 };

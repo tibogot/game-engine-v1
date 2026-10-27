@@ -280,6 +280,16 @@ function meshesFor(id, open) {
 // All pieces with both rails at start; another setting's pictures are drawn when first shown, one by one.
 const thumbs = new Map();
 let thumbKit = null;
+// THUMBNAILS DRAW NO REAL GLASS (three r186, 2026-10-27: with a Glass 64 on the track, the builder logged
+// "Destroyed texture … used in a submit" every frame). Real glass reads a copy of the screen
+// (ViewportTextureNode → copyFramebufferToTexture); drawn into a small target that copy is remade at the
+// target's size and the main view kept a binding to the destroyed one. A picture doesn't need see-through
+// glass: transmissive meshes are hidden for the offscreen render and put back.
+function withoutGlass(root, draw) {
+  const hidden = [];
+  root.traverse((o) => { if (o.isMesh && o.visible && [].concat(o.material).some((m) => m?.transmission > 0)) { o.visible = false; hidden.push(o); } });
+  try { return draw(); } finally { for (const o of hidden) o.visible = true; }
+}
 function thumbSetup() {
   if (thumbKit) return thumbKit;
   const W = 192, H = 128;
@@ -314,9 +324,7 @@ async function renderThumb(id, open) {
   const dir = new THREE.Vector3(0.75, 0.6, 0.9).normalize();
   cam.position.copy(sph.center).addScaledVector(dir, sph.radius / Math.sin((cam.fov * DEG) / 2) * 0.62);
   cam.lookAt(sph.center);
-  renderer.setRenderTarget(rt);
-  renderer.render(ts, cam);
-  renderer.setRenderTarget(null);
+  withoutGlass(ts, () => { renderer.setRenderTarget(rt); renderer.render(ts, cam); renderer.setRenderTarget(null); });
   const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
   const img = ctx.createImageData(W, H);
   const stride = px.length / H;
@@ -405,9 +413,7 @@ async function trackThumb() {
   }
   // the track borrowed into the thumbnail scene for one render, then given back
   thumbScene.add(trackGroup);
-  renderer.setRenderTarget(rt);
-  renderer.render(thumbScene, cam);
-  renderer.setRenderTarget(null);
+  withoutGlass(trackGroup, () => { renderer.setRenderTarget(rt); renderer.render(thumbScene, cam); renderer.setRenderTarget(null); });
   scene.add(trackGroup);
   const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
   rt.dispose();

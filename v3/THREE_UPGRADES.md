@@ -25,6 +25,10 @@ repo; restore point: git tag `pre-r186`). The r184 notes below stay as history.
   (every Thunderline shadow gone, 834 errors before driving). Fix: the override has `blending: NoBlending`
   (+ `forceSinglePass`), glass panes cast nothing (sunShadows.js, driveSession.js). Check any other
   `scene.overrideMaterial` pass that draws into a 1–2 channel target.
+- **A transmissive material drawn OFFSCREEN** (another target size: Thunderline's builder thumbnails) remakes
+  three's screen copy (ViewportTextureNode → copyFramebufferToTexture) at that size, and the main view kept a
+  binding to the destroyed texture: "Destroyed texture … used in a submit" every frame. Thunderline hides
+  transmissive meshes for offscreen renders (builder3 withoutGlass). Retest on the next upgrade.
 - **PCFSoftShadowMap removed**: 23 labs → PCFShadowMap. WGSL test stub: `debug.diagnostics`,
   `lighting.enabled`, compute built as `Nodes.getForCompute`.
 - Decoders (basis, draco): byte-identical, nothing to copy.
