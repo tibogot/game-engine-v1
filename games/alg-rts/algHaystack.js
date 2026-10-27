@@ -48,7 +48,9 @@ export function loadHaystack() {
  *  fraction of texels passing the 0.5 test that the full-size sheet has. */
 function coverageTexture(img) {
   const c = document.createElement("canvas"); c.width = img.width; c.height = img.height;
-  const g = c.getContext("2d"); g.drawImage(img, 0, 0);
+  // willReadFrequently: a CPU canvas. On a GPU canvas getImageData waits behind the GPU process's queue —
+  // at boot, full of pipeline compiles: 2.9 s of alg's boot for 47 ms of work (2026-10-27)
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0);
   let w = c.width, h = c.height, px = g.getImageData(0, 0, w, h).data;
   // (the canvas premultiplies: a transparent texel's colour comes back BLACK, and the filtering dragged it into every
   // strand's edge — the stack drew grey. Those texels take the straw's mean colour.)
@@ -56,24 +58,34 @@ function coverageTexture(img) {
     for (let i = 0; i < px.length; i += 4) if (px[i + 3] > 200) { r += px[i]; gg += px[i + 1]; b += px[i + 2]; n++; }
     r /= n; gg /= n; b /= n;
     for (let i = 0; i < px.length; i += 4) if (px[i + 3] < 8) { px[i] = r; px[i + 1] = gg; px[i + 2] = b; } }
-  const cover = (a, s) => { let n = 0; for (let i = 3; i < a.length; i += 4) if (a[i] * s >= 127.5) n++; return n / (a.length / 4); };
-  const target = cover(px, 1);
+  // The coverage at alpha scale s, from a 256-bin alpha histogram: a texel passes when a·s ≥ 127.5, so
+  // it is the share of texels with alpha ≥ 127.5 / s — one scan per level instead of one per bisection
+  // step (14 full scans of every level: 2.9 s of alg's boot, 2026-10-27). Same counts, same mips.
+  const histogram = (a) => { const hst = new Uint32Array(256); for (let i = 3; i < a.length; i += 4) hst[a[i]]++; return hst; };
+  const cover = (hst, n, s) => { let c = 0; for (let v = 255; v >= 0 && v * s >= 127.5; v--) c += hst[v]; return c / n; };
+  const target = cover(histogram(px), px.length / 4, 1);
   const mips = [{ data: new Uint8Array(px), width: w, height: h }];
   while (w > 1 || h > 1) {
     const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1), out = new Uint8Array(nw * nh * 4);
-    for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
-      let r = 0, gg = 0, b = 0, a = 0;
-      for (const [dx, dy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
-        const i = ((Math.min(h - 1, y * 2 + dy)) * w + Math.min(w - 1, x * 2 + dx)) * 4, al = px[i + 3];
-        r += px[i] * al; gg += px[i + 1] * al; b += px[i + 2] * al; a += al;
+    for (let y = 0; y < nh; y++) {
+      const y0 = Math.min(h - 1, y * 2) * w, y1 = Math.min(h - 1, y * 2 + 1) * w;
+      for (let x = 0; x < nw; x++) {
+        const x0 = Math.min(w - 1, x * 2), x1 = Math.min(w - 1, x * 2 + 1);
+        const i0 = (y0 + x0) * 4, i1 = (y0 + x1) * 4, i2 = (y1 + x0) * 4, i3 = (y1 + x1) * 4;
+        const a0 = px[i0 + 3], a1 = px[i1 + 3], a2 = px[i2 + 3], a3 = px[i3 + 3], a = a0 + a1 + a2 + a3;
+        const o = (y * nw + x) * 4;
+        if (a > 0) {
+          out[o] = (px[i0] * a0 + px[i1] * a1 + px[i2] * a2 + px[i3] * a3) / a;
+          out[o + 1] = (px[i0 + 1] * a0 + px[i1 + 1] * a1 + px[i2 + 1] * a2 + px[i3 + 1] * a3) / a;
+          out[o + 2] = (px[i0 + 2] * a0 + px[i1 + 2] * a1 + px[i2 + 2] * a2 + px[i3 + 2] * a3) / a;
+        } else { out[o] = px[i0]; out[o + 1] = px[i0 + 1]; out[o + 2] = px[i0 + 2]; }
+        out[o + 3] = a / 4;
       }
-      const o = (y * nw + x) * 4;
-      if (a > 0) { out[o] = r / a; out[o + 1] = gg / a; out[o + 2] = b / a; } else { const i = ((y * 2) * w + x * 2) * 4; out[o] = px[i]; out[o + 1] = px[i + 1]; out[o + 2] = px[i + 2]; }
-      out[o + 3] = a / 4;
     }
-    // the alpha scale that keeps the coverage (a bisection)
+    // the alpha scale that keeps the coverage (a bisection, on the level's histogram)
+    const hst = histogram(out), n = out.length / 4;
     let lo = 1, hi = 8;
-    for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (cover(out, m) < target) lo = m; else hi = m; }
+    for (let k = 0; k < 14; k++) { const m = (lo + hi) / 2; if (cover(hst, n, m) < target) lo = m; else hi = m; }
     for (let i = 3; i < out.length; i += 4) out[i] = Math.min(255, out[i] * hi);
     mips.push({ data: out, width: nw, height: nh });
     px = out; w = nw; h = nh;
