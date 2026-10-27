@@ -80,6 +80,7 @@ import { createAlgCoverCursor } from "./algCoverCursor.js";
 import { createAlgMgTeams } from "./algMgTeam.js";
 import { createAlgFlamethrowers } from "./algFlamethrower.js";
 import { createArmyTabs } from "./ui/armyTabs.js";
+import { createQuickSelect } from "./ui/quickSelect.js";
 import { createQueueBadges } from "./ui/queueBadges.js";
 import { installPortraits, hasPortrait } from "./ui/portraits.js";
 import { t } from "./i18n/i18n.js";
@@ -510,6 +511,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       if (!u || !c) return null;
       return { concealment: c.concealmentAt(u.position.x, u.position.z), cover: c.coverAt(u.position.x, u.position.z) };
     },
+    squadOf: (u) => squads.of(u),   // (the card's veterancy and kit: the squad's)
     mount: hud.centre,
   });
   const commandCard = createCommandCard({
@@ -814,15 +816,18 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.selection = selection;
   attackMove = createAlgAttackMove(app, { selection });
   app.algAttackMove = attackMove;
-  controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
+  // (no chip row: each squad's group number on its badge and its tab — HUD_COH3_COMPARE.md 4; the row sat on the doctrine button)
+  controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right"), chips: false });
   hud.setCollapsed(true);   // nothing selected at the start
   // THE ARMY TABS (ui/armyTabs.js): every group you have, in a row along the bottom beside the minimap.
   // What each building is training, over its roof (ui/queueBadges.js).
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
-  const armyTabs = createArmyTabs({ units, selection, squads, team: SIDES.human, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
+  const armyTabs = createArmyTabs({ units, selection, squads, team: SIDES.human, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z), groupOf: (u) => controlGroups?.groupOf(u) ?? 0 });
   // The tactical map from the start: the post has its own radio mast.
   const mapOpts = { app, units, selection, structures, fogOfWar, requisition: { params: economy.params, get points() { return economy.allPoints; } }, intel: () => true, upYaw: VIEW_YAW, area: PLAY, squadOf: (u) => squads.of(u) };
   const minimap = createMinimap({ ...mapOpts, mount: hud.left, dial: true });
+  // THE QUICK-SELECT BUTTONS in the minimap block's corner (ui/quickSelect.js): all infantry, all vehicles, the idle sappers
+  const quickSelect = createQuickSelect({ mount: hud.left, units, selection, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
   // THE TACTICAL MAP (ui/tacticalMap.js): the same map full screen, Tab.
   // COVER AT THE CURSOR: each man's spot, coloured by its cover, before the order.
   coverCursor = createAlgCoverCursor({ app, selection });
@@ -984,7 +989,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algPathDots = pathDots;
   // THE SQUAD BADGES (ui/squadBadges.js): icon, men left, one thin bar (CoH).
   // (+ the FLN's bands as squads once seen: a red shield, their men and the katiba's stars)
-  const squadBadges = createSquadBadges({ app, squads, groups: () => (app.algAI?.bands ?? []).filter((b) => b.state !== "gather" && b.state !== "done").map((b) => ({ id: b, team: "enemy", typeKey: "moudjahid", members: b.members.filter((u) => u.alive && !u.inside), stars: veterancy.katiba.stars })) });
+  const squadBadges = createSquadBadges({ app, squads, groupOf: (u) => controlGroups?.groupOf(u) ?? 0, groups: () => (app.algAI?.bands ?? []).filter((b) => b.state !== "gather" && b.state !== "done").map((b) => ({ id: b, team: "enemy", typeKey: "moudjahid", members: b.members.filter((u) => u.alive && !u.inside), stars: veterancy.katiba.stars })) });
   const orderMarks = createOrderMarks({ app });
   app.algOrderMarks = orderMarks;
   app.algLastSeen = lastSeen;
@@ -1080,6 +1085,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     commandCard.tick();
     unitBar.tick();
     armyTabs.tick(frameDt);
+    quickSelect.tick(frameDt);
     queueBadges.frame();
     minimap.draw();
     tacMap.draw();

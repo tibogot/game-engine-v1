@@ -28,7 +28,8 @@ const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8], bas: [
   souk: [-6.0, 6.0, -5.0, 2.4], mosquee: [-6.0, 6.0, -6.5, 6.5], maison: [-3.8, 8.45, -3.5, 3.0], haute: [-2.6, 2.6, -3.7, 2.8], cour: [-3.4, 3.4, -4.2, 5.0],
   boutique: [-4.6, 4.6, -3.6, 2.6],
   // the MECHTA (tools/blender/mechta.py): its walls, the doorstep, the ladder and the jars out front
-  petite: [-2.7, 2.7, -2.9, 2.2], etage: [-3.7, 3.7, -3.5, 2.9] };
+  petite: [-2.7, 2.7, -2.9, 2.2], etage: [-3.7, 3.7, -3.5, 2.9], pente: [-3.5, 4.45, -4.1, 2.9],   // (pente: its outside stair on the right)
+  appentis: [-1.85, 1.85, -1.7, 1.65], enclos: [-4.0, 4.0, -3.0, 3.0], tabouna: [-0.9, 0.9, -1.15, 0.8] };
 const HS = 1.3;
 const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
 /** A house whose FOOTPRINT's centre is (cx, cz), its front toward (tx, tz): the town field's row (y null: a pad). */
@@ -62,20 +63,28 @@ function village(sx, sz, types, { ring = [22, -168, -12], gap = 3.5, damaged = -
  * side of a small square in front, facing in — the village's point in that square. Local metres from the site:
  * a row `{ types, x, z }` starts at x (its left end) with its FRONT line at z; `states` per index; a side house
  * `{ type, x, z }` its footprint's centre, facing the square. Each house its own levelled pad (algGame).
+ * The hamlet's smaller pieces (the mechta kit's — the town's PROPS: no garrison, no sight box): a row's `yards` (its
+ * houses' indices) get a WALLED YARD behind them, its open side 15 cm into the house's back wall; `props`
+ * `{ type, x, z }` (a lean-to, an oven) their footprint's centre, facing the camera. Returns { houses, props }.
  */
-function hamlet(sx, sz, { rows, sides = [] }) {
-  const out = [];
-  for (const { types, x, z, gap = 0.2, states = {} } of rows) {
+function hamlet(sx, sz, { rows, sides = [], props = [] }) {
+  const houses = [], extra = [];
+  for (const { types, x, z, gap = 0.2, states = {}, yards = [] } of rows) {
     let lx = x;
     types.forEach((ty, k) => {
       const [x0, x1, z0, z1] = FOOT[ty].map((v) => v * HS), w = x1 - x0, d = z1 - z0;
       const cx = sx + lx + w / 2, cz = sz + z - d / 2 + (k % 2 ? -0.5 : 0.3);   // (the fronts a little in and out: no ruled line)
-      out.push(house(ty, states[k] ?? "intact", cx, cz, cx, cz + 50));
+      houses.push(house(ty, states[k] ?? "intact", cx, cz, cx, cz + 50));
+      if (yards.includes(k)) {   // (the house's back wall 0.1 m in from its footprint's back; the yard 3 m deep)
+        const front = cz - d / 2 + 0.1 * HS + 0.15, yz = front - FOOT.enclos[3] * HS;
+        extra.push(house("enclos", "intact", cx, yz, cx, yz + 50));
+      }
       lx += w + gap;
     });
   }
-  for (const { type, x, z, state = "intact" } of sides) out.push(house(type, state, sx + x, sz + z, sx, sz + z));
-  return out;
+  for (const { type, x, z, state = "intact" } of sides) houses.push(house(type, state, sx + x, sz + z, sx, sz + z));
+  for (const { type, x, z, state = "intact" } of props) extra.push(house(type, state, sx + x, sz + z, sx + x, sz + z + 50));
+  return { houses, props: extra };
 }
 const site = (name) => OLD_LAYOUT.sites.find((s) => s.name === name);
 const OA = site("Mechta Ouled Ali"), EO = site("Mechta el Oued"), DE = site("Dechra Tighanimine"), KS = site("Ksar el Hamra");
@@ -84,16 +93,19 @@ const OA = site("Mechta Ouled Ali"), EO = site("Mechta el Oued"), DE = site("Dec
 // — or, with ?mechta=1 (2026-10-27, MECHTA_PLAN.md: the Aurès' own STONE houses, waiting for your verdict), the mechta
 // kit as a CLUSTER (hamlet() above): two rows behind a small square, a house on each side of it; one shelled, one a ruin
 const STONE_MECHTA = typeof location !== "undefined" && new URLSearchParams(location.search).get("mechta") === "1";
-const MECHTA_OA = STONE_MECHTA
-  ? hamlet(OA.x, OA.z, {
-    rows: [{ types: ["petite", "etage", "petite"], x: -12, z: -6 }, { types: ["etage", "petite", "etage"], x: -14, z: -18, states: { 0: "damaged" } }],
-    sides: [{ type: "petite", x: -15.5, z: 1 }, { type: "petite", x: 15.5, z: 0, state: "ruin" }] })
-  : village(OA.x, OA.z, ["cour", "maison", "haute", "boutique", "cour", "haute"], { ring: [30, -178, -2], damaged: 2 });
-const MECHTA_EO = STONE_MECHTA
-  ? hamlet(EO.x, EO.z, {
-    rows: [{ types: ["etage", "petite"], x: -8.5, z: -6, states: { 1: "ruin" } }, { types: ["petite", "etage", "petite"], x: -12, z: -17.5 }],
-    sides: [{ type: "petite", x: -13.5, z: 0.5, state: "damaged" }] })
-  : village(EO.x, EO.z, ["haute", "cour", "maison", "boutique", "haute"], { ring: [27, -178, -2], damaged: 3 });
+// (the back row closed by the HILLSIDE house, yards behind two of its houses, a lean-to at each row's end, an oven in the square)
+const STONE_OA = STONE_MECHTA && hamlet(OA.x, OA.z, {
+  rows: [{ types: ["petite", "etage", "petite"], x: -12, z: -6 },
+    { types: ["etage", "petite", "pente"], x: -14, z: -18, states: { 0: "damaged" }, yards: [0, 2] }],
+  sides: [{ type: "petite", x: -15.5, z: 1 }, { type: "petite", x: 15.5, z: 0, state: "ruin" }],
+  props: [{ type: "appentis", x: 14.8, z: -8.2 }, { type: "appentis", x: -16.7, z: -20.2 }, { type: "tabouna", x: 8, z: 2 }] });
+const STONE_EO = STONE_MECHTA && hamlet(EO.x, EO.z, {
+  rows: [{ types: ["etage", "petite"], x: -8.5, z: -6, states: { 1: "ruin" } },
+    { types: ["petite", "pente", "petite"], x: -12, z: -17.5, yards: [1] }],
+  sides: [{ type: "petite", x: -13.5, z: 0.5, state: "damaged" }],
+  props: [{ type: "appentis", x: 11.0, z: -8.2 }, { type: "tabouna", x: 6, z: 2 }] });
+const MECHTA_OA = STONE_OA ? STONE_OA.houses : village(OA.x, OA.z, ["cour", "maison", "haute", "boutique", "cour", "haute"], { ring: [30, -178, -2], damaged: 2 });
+const MECHTA_EO = STONE_EO ? STONE_EO.houses : village(EO.x, EO.z, ["haute", "cour", "maison", "boutique", "haute"], { ring: [27, -178, -2], damaged: 3 });
 // THE DECHRA up its slope: the M'zab kit's plain houses (ochre plaster — the stone dechra kit to come), two rows
 const DECHRA = [
   ...village(DE.x, DE.z, ["bas", "dar", "bas", "terrasse", "bas"], { ring: [21, -170, -10] }),
@@ -133,5 +145,5 @@ export const MAP = {
   // ground beside its track
   supply: OLD_MAP.supply.map((p) => (p.name === "South pass" ? { ...p, x: 55, z: -190 } : p)),
   fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
-  town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], replacesHamlet: true },
+  town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], props: [...(STONE_OA?.props ?? []), ...(STONE_EO?.props ?? [])], replacesHamlet: true },
 };

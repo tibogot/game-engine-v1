@@ -42,10 +42,14 @@ const CSS = `
 #alg-score .held .f { color: #8fc8ff; } #alg-score .held .a { color: #ff8f80; }
 #alg-score .drain { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-dim); }
 #alg-score .drain.bad { color: var(--hud-red); } #alg-score .drain.good { color: var(--hud-olive); }
+/* THE MATCH CLOCK under the bar (2026-10-27, CoH 3: "08:09" centred under its score bar — it was in the objectives' header) */
+#alg-score .clock { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 3px; padding: 1px 8px;
+  background: var(--hud-bg); border: 1px solid var(--hud-edge); border-radius: var(--hud-radius); font: 600 11px var(--hud-mono); color: var(--hud-text); }
+#alg-score .clock:empty { display: none; }
 
 #alg-alerts {
   position: fixed; left: 8px; bottom: ${MINI + 12}px; z-index: 56;
-  display: flex; flex-direction: column-reverse; gap: 4px; width: 290px;
+  display: flex; flex-direction: column-reverse; align-items: flex-start; gap: 4px; max-width: 520px;   /* (ONE line an alert, CoH 3 — HUD_COH3_COMPARE.md 7; a tip still wraps) */
   font: 12px var(--hud-sans);
 }
 #alg-alerts .al {
@@ -53,7 +57,9 @@ const CSS = `
   background: var(--hud-bg); border: 1px solid var(--hud-edge); border-left: 3px solid var(--hud-brass);
   border-radius: var(--hud-radius); color: var(--hud-text); line-height: 1.3;
   transition: opacity 0.6s; box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  max-width: 520px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+#alg-alerts .al.tip { width: 290px; white-space: normal; }
 #alg-alerts .al:hover { border-color: var(--hud-brass); }
 #alg-alerts .al.bad { border-left-color: var(--hud-red); }
 #alg-alerts .al.good { border-left-color: #5aaeff; }
@@ -178,7 +184,6 @@ const CSS = `
 .alg-modal .langs button.on { border-color: var(--hud-brass); color: #f1dfa6; background: #3a3417; cursor: default; }
 `;
 
-const fmtTime = (s) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
  * @param {object} o
@@ -202,7 +207,7 @@ export function createBattleHud({ camera, canvas, onJump }) {
   score.innerHTML = `
     <div class="side fr"><span class="hud-label">${fln ? "FLN" : "France"}</span><span class="num">500</span><span class="bar"><i></i></span></div>
     <div class="mid"><span class="held"><span class="f">0</span> · <span class="a">0</span></span><span class="drain">${t("villages")}</span></div>
-    <div class="side aln"><span class="bar"><i></i></span><span class="num">500</span><span class="hud-label">${fln ? "France" : "FLN"}</span></div>`;
+    <div class="side aln"><span class="bar"><i></i></span><span class="num">500</span><span class="hud-label">${fln ? "France" : "FLN"}</span></div><div class="clock"></div>`;
   document.body.appendChild(score);
   const el = {
     frNum: score.querySelector(".fr .num"), frBar: score.querySelector(".fr .bar i"),
@@ -239,7 +244,9 @@ export function createBattleHud({ camera, canvas, onJump }) {
     node.className = `al ${kind}${icon ? " has-ic" : ""}${rendered ? " r" : ""}`;
     // CoH's alert pictures (ui/icons.js alert*), the kind's colour.
     const ic = rendered ? `<span class="aic r" style="${renderedOnly(icon)}"></span>` : icon && hasIcon(icon) ? `<span class="aic" style="${iconStyle(icon)}"></span>` : "";
-    node.innerHTML = kind === "tip" ? text : `${ic}<span class="t">${fmtTime(time)}</span>${text}`;
+    // (no timestamp: CoH 3's alert is an icon and one line — its full text on hover when it is cut)
+    node.innerHTML = kind === "tip" ? text : `${ic}${text}`;
+    if (kind !== "tip") node.title = node.textContent;
     const a = { node, x, z, t0: performance.now(), life: life * 1000 };
     if (x != null) node.addEventListener("click", () => { onJump(x, z); onClick?.(); });
     // Click a tip away.
@@ -383,6 +390,8 @@ export function createBattleHud({ camera, canvas, onJump }) {
 
   return {
     setScore, alert, markers, setObjectives,
+    /** The match clock under the score bar ("m:ss"). */
+    setClock(txt) { const c = score.querySelector(".clock"); if (c.textContent !== txt) c.textContent = txt; },
     /** The village tooltip's content: fn(point) → html. */
     setTooltip(fn) { tipFor = fn; },
     /** Every frame. */

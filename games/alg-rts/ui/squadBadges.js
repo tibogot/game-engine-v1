@@ -18,7 +18,7 @@ import { iconStyle } from "./icons.js";
 import { hasRendered, renderedOnly } from "./iconAtlas.js";
 import { t } from "../i18n/i18n.js";
 
-const ICONS = {
+export const ICONS = {   // (ui/quickSelect.js: its buttons' too)
   // A rifle, slung diagonally.
   appele: `<path d="M4.5 19.5 L18.5 5.5" stroke-width="2.4"/><path d="M3 18 L6 21" stroke-width="3.2"/><path d="M18.5 5.5 L21 3" stroke-width="1.2"/><path d="M11 13 L9.5 11.5" stroke-width="1.6"/>`,
   // A machine gun on its bipod: the pièce FM (algMgTeam.js).
@@ -35,6 +35,8 @@ const ICONS = {
   // The Légion's grenade with its seven flames.
   legion: `<circle cx="12" cy="16.5" r="4.6" fill="currentColor" stroke="none"/><path d="M12 11.5 C11 8 13 6 12 2.5 M10 11.8 C8 9.5 9 7.5 7.5 5 M14 11.8 C16 9.5 15 7.5 16.5 5" stroke-width="1.5"/>`,
 };
+
+const STATE_TIP = { pinned: () => t("Cloués au sol"), supp: () => t("Sous le feu"), hard: () => t("Couverture solide"), light: () => t("Couverture légère") };
 
 // (2026-10-12, you: "the badges with the health bar and icon are too small": every part ×1.45 —
 // the shield 22×26 → 32×38, the count 14 → 20 px, the bar 26×3 → 38×5.)
@@ -63,6 +65,14 @@ const CSS = `
   -webkit-mask-position: center; mask-position: center; filter: drop-shadow(0 1px 1px #000); }
 .alg-sqb .up { position: absolute; left: 47px; top: 25px; padding: 0 3px; border-radius: 2px; background: #c9a54a; color: #15120a;
   font: 800 10px/13px var(--hud-sans, sans-serif); box-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+/* THE CONTROL GROUP and THE STATE (2026-10-27, HUD_COH3_COMPARE.md 2 — CoH 3's badge): the group's number (Ctrl+1…9) over
+   the head count; beside the shield a small sign — pinned (red), suppressed (amber), in hard / light cover (green / khaki) */
+.alg-sqb .g { position: absolute; left: 5px; top: -16px; font: 800 12px/14px var(--hud-sans, sans-serif); color: #f1dfa6; text-shadow: 0 1px 2px #000, 0 0 4px #000; }
+.alg-sqb .sg { position: absolute; left: 50px; top: 1px; width: 15px; height: 15px; border-radius: 50%; box-sizing: border-box;
+  font: 900 10px/15px var(--hud-sans, sans-serif); text-align: center; color: #15120a; box-shadow: 0 1px 2px rgba(0,0,0,0.8); }
+.alg-sqb .sg[hidden] { display: none; }
+.alg-sqb .sg.pinned { background: #e4483a; color: #fff; } .alg-sqb .sg.supp { background: #f5a742; }
+.alg-sqb .sg.hard { background: #7fbf5a; border-radius: 3px 3px 7px 7px; } .alg-sqb .sg.light { background: #c9b98a; border-radius: 3px 3px 7px 7px; }
 `;
 
 /**
@@ -70,7 +80,7 @@ const CSS = `
  * @param {object} o.app      (camera, renderer, selection, rtsCamera)
  * @param {object} o.squads   algSquads
  */
-export function createSquadBadges({ app, squads, groups = null }) {
+export function createSquadBadges({ app, squads, groups = null, groupOf = () => 0 }) {
   // `groups()`: more squads to badge — the FLN's bands ({ id, team, typeKey, members, stars }),
   // shown while any of their men is seen (fog of war), not clickable.
   const style = document.createElement("style");
@@ -86,7 +96,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
     el.innerHTML = `<div class="n"></div>`
       + `<svg class="shield" viewBox="-2 -2 28 32"><path class="rim" d="M12 0 L24 3.5 V13 C24 21 18.5 25.5 12 28 C5.5 25.5 0 21 0 13 V3.5 Z"/>`
       + `<g class="ic" transform="translate(4.2 4.6) scale(0.65)">${ICONS[s.typeKey] ?? ICONS.appele}</g></svg>`
-      + `<div class="bar"><i></i></div><div class="st"></div><div class="up" hidden>${t("FM")}</div>`;
+      + `<div class="bar"><i></i></div><div class="st"></div><div class="up" hidden>${t("FM")}</div><div class="g"></div><div class="sg" hidden></div>`;
     document.body.appendChild(el);
     const shield = el.querySelector("svg.shield");
     shield.addEventListener("click", (e) => { e.stopPropagation(); if (isHuman(s.team)) app.selection?.select(s.members); });
@@ -96,7 +106,7 @@ export function createSquadBadges({ app, squads, groups = null }) {
       if (l) app.rtsCamera?.focusOn(l.position.x, l.position.z);
     });
     shield.addEventListener("pointerdown", (e) => e.stopPropagation());
-    const b = { el, n: el.querySelector(".n"), fill: el.querySelector(".bar i"), st: el.querySelector(".st"), up: el.querySelector(".up"), last: "", pos: "", shown: true };
+    const b = { el, g: el.querySelector(".g"), sg: el.querySelector(".sg"), n: el.querySelector(".n"), fill: el.querySelector(".bar i"), st: el.querySelector(".st"), up: el.querySelector(".up"), last: "", pos: "", shown: true };
     badges.set(key, b);
     return b;
   }
@@ -130,10 +140,19 @@ export function createSquadBadges({ app, squads, groups = null }) {
       const pos = `${sx},${sy}`;
       if (pos !== b.pos) { b.pos = pos; b.el.style.transform = `translate(${sx}px, ${sy}px) translate(-60%, -100%)`; }
       const f = max > 0 ? hp / max : 0;
-      const key = `${men.length}|${Math.round(f * 50)}|${sel}|${s.retreating}|${s.stars ?? 0}|${!!(s.upgrades?.lmg || s.upgrades?.bazooka)}|${!!s.holdFire}`;
+      // its control group, and its state (the enemy's cover is not yours to know)
+      const grp = enemy ? 0 : groupOf(lead);
+      let state = "";
+      if (men.some((u) => u.pinned)) state = "pinned";
+      else if (men.some((u) => u.suppressed)) state = "supp";
+      else if (!enemy && app.algCover) { const c = app.algCover.coverAt(lead.position.x, lead.position.z); state = c >= 0.35 ? "hard" : c >= 0.12 ? "light" : ""; }
+      const key = `${grp}|${state}|${men.length}|${Math.round(f * 50)}|${sel}|${s.retreating}|${s.stars ?? 0}|${!!(s.upgrades?.lmg || s.upgrades?.bazooka)}|${!!s.holdFire}`;
       if (key === b.last) continue;
       b.last = key;
       b.n.textContent = men.length;
+      b.g.textContent = grp ? String(grp) : "";
+      b.sg.hidden = !state;
+      if (state) { b.sg.className = `sg ${state}`; b.sg.textContent = state === "pinned" || state === "supp" ? "!" : ""; b.sg.title = STATE_TIP[state](); }
       b.fill.style.width = `${(f * 100).toFixed(0)}%`;
       b.fill.style.background = f > 0.6 ? "#3ddc60" : f > 0.3 ? "#f5c542" : "#e4483a";
       b.el.classList.toggle("sel", sel);

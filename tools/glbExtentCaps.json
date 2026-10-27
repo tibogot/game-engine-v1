@@ -1,0 +1,242 @@
+{
+ "ambushscreen.glb": [
+  12.6,
+  1.9
+ ],
+ "armscache.glb": [
+  8.2,
+  2.3
+ ],
+ "barbedwire.glb": [
+  8.2,
+  1.7
+ ],
+ "boulders.glb": [
+  1.2,
+  0.7
+ ],
+ "farmstead.glb": [
+  28,
+  5.2
+ ],
+ "fieldposts.glb": [
+  14.1,
+  11.8
+ ],
+ "fieldwalls.glb": [
+  3.2,
+  1.3
+ ],
+ "flnmarks.glb": [
+  5.3,
+  2.8
+ ],
+ "flnposts.glb": [
+  8.7,
+  2.7
+ ],
+ "fortpoint.glb": [
+  12.2,
+  1.5
+ ],
+ "haystack.glb": [
+  5,
+  4.2
+ ],
+ "houses.glb": [
+  16.6,
+  10.1
+ ],
+ "mechta.glb": [
+  13,
+  9
+ ],
+ "mgnest.glb": [
+  9.1,
+  2.1
+ ],
+ "mirador.glb": [
+  12.6,
+  10.5
+ ],
+ "mortarpit.glb": [
+  9.8,
+  2.5
+ ],
+ "motorPool.glb": [
+  27.6,
+  9
+ ],
+ "motorPoolNear.glb": [
+  27.6,
+  9
+ ],
+ "motorPool_damaged.glb": [
+  27.6,
+  9
+ ],
+ "motorPool_ruin.glb": [
+  27.6,
+  9
+ ],
+ "mzab.glb": [
+  18.4,
+  22.6
+ ],
+ "points.glb": [
+  13.8,
+  10.9
+ ],
+ "postkit.glb": [
+  38.7,
+  20.9
+ ],
+ "rubble.glb": [
+  4.8,
+  2.5
+ ],
+ "sandbagBreach.glb": [
+  6.3,
+  0.7
+ ],
+ "sandbagBreach_far.glb": [
+  6.3,
+  0.7
+ ],
+ "sandbagChicane.glb": [
+  5.6,
+  1
+ ],
+ "sandbagChicane_far.glb": [
+  5.6,
+  1
+ ],
+ "sandbagFort.glb": [
+  12,
+  0.9
+ ],
+ "sandbagFort_far.glb": [
+  12,
+  0.9
+ ],
+ "sandbagLookout.glb": [
+  4.2,
+  0.7
+ ],
+ "sandbagLookout_far.glb": [
+  4.2,
+  0.7
+ ],
+ "sandbagMirador.glb": [
+  4.1,
+  0.7
+ ],
+ "sandbagMirador_far.glb": [
+  4.1,
+  0.7
+ ],
+ "sandbagPit.glb": [
+  7.1,
+  0.5
+ ],
+ "sandbagPit_far.glb": [
+  7.1,
+  0.5
+ ],
+ "sandbagPostPit.glb": [
+  5,
+  0.7
+ ],
+ "sandbagPostPit_far.glb": [
+  5,
+  0.7
+ ],
+ "sandbagRadio.glb": [
+  7.2,
+  0.6
+ ],
+ "sandbagRadio_far.glb": [
+  7.2,
+  0.6
+ ],
+ "sandbagRing.glb": [
+  7.4,
+  1.8
+ ],
+ "sandbagRing_far.glb": [
+  7.4,
+  1.8
+ ],
+ "sandbagSas.glb": [
+  5.1,
+  0.5
+ ],
+ "sandbagSas_far.glb": [
+  5.1,
+  0.5
+ ],
+ "sandbagSlShed.glb": [
+  4.1,
+  0.5
+ ],
+ "sandbagSlShed_far.glb": [
+  4.1,
+  0.5
+ ],
+ "sandbagTower.glb": [
+  4.8,
+  0.7
+ ],
+ "sandbagTower_far.glb": [
+  4.8,
+  0.7
+ ],
+ "sandbagWall.glb": [
+  7.4,
+  1.1
+ ],
+ "sandbagWall_far.glb": [
+  7.4,
+  1.1
+ ],
+ "sandbags.glb": [
+  1,
+  0.5
+ ],
+ "sangar.glb": [
+  7.3,
+  1.8
+ ],
+ "saspost.glb": [
+  26,
+  14.1
+ ],
+ "sltower.glb": [
+  17,
+  12
+ ],
+ "smallprops.glb": [
+  2,
+  1.4
+ ],
+ "vprops.glb": [
+  3.8,
+  2.8
+ ],
+ "zeriba.glb": [
+  23.3,
+  3.5
+ ],
+ "zeribaFarm.glb": [
+  14.1,
+  2.7
+ ],
+ "zeribaFarm_far.glb": [
+  14.1,
+  2.7
+ ],
+ "zeriba_far.glb": [
+  23.2,
+  3.5
+ ]
+}

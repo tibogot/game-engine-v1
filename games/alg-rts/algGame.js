@@ -48,7 +48,7 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
-import { MECHTA_TYPES, createHouseField, loadHouses } from "./algHouse.js";
+import { MECHTA_PROPS, MECHTA_TYPES, createHouseField, loadHouses } from "./algHouse.js";
 import { setGroundBlendApp } from "./algGroundBlend.js";
 import { createTownDamage } from "./algTownDamage.js";
 import { createPieceDamage } from "./algPieceDamage.js";
@@ -685,18 +685,33 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble"), MAP.town.houses.some(([ty]) => MECHTA_TYPES.includes(ty)) ? loadHouses("mechta") : null]);
       const field = createHouseField();
       // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
-      // footprint's mean ground (as a built piece's), its y that
-      for (const row of MAP.town.houses) {
+      // footprint's mean ground (as a built piece's), its y that. (The mechta's HILLSIDE house, pente: cut into the slope
+      // at its LOWEST ground — the hill rises behind it, its two storeys stand clear in front — 2026-10-27.) The town's
+      // PROPS too (MAP.town.props: the mechta's lean-tos, yards and ovens — MECHTA_PROPS)
+      const townProps = MAP.town.props ?? [];
+      for (const row of [...MAP.town.houses, ...townProps]) {
         if (row[3] != null) continue;
-        const [, , , , , yaw, fx, fz, hx, hz] = row, c = Math.cos(yaw), s = Math.sin(yaw);
-        let sum = 0, n = 0;
-        for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) { const lx = a * hx, lz = b * hz; sum += app.getWorldHeight(fx + lx * c + lz * s, fz - lx * s + lz * c); n++; }
-        row[3] = sum / n;
+        const [ty, , , , , yaw, fx, fz, hx, hz] = row, c = Math.cos(yaw), s = Math.sin(yaw);
+        let sum = 0, n = 0, lo = Infinity;
+        for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) { const lx = a * hx, lz = b * hz, h = app.getWorldHeight(fx + lx * c + lz * s, fz - lx * s + lz * c); sum += h; n++; lo = Math.min(lo, h); }
+        row[3] = ty === "pente" ? lo : sum / n;
         await app.flattenRect?.(fx, fz, hx + 1.2, hz + 1.2, row[3], { rim: 4, rotY: yaw });
       }
       for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
       // the TERRACE WALLS (the kit's "mur" round the risers): in the same field
       for (const [st, x, y, z, yaw] of MAP.town.walls ?? []) field.add("mur", st, x, y, z, yaw);
+      // the PROPS after them (the houses' indices stay the damage's): each wall of theirs a nav block and HARD cover
+      for (const [ty, st, x, y, z, yaw] of townProps) field.add(ty, st, x, y, z, yaw);
+      const propWalls = [];   // { x, z, hx, hz, yaw, st } world, game metres
+      for (const [ty, st, x, , z, yaw] of townProps) {
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        for (const [x0, x1, z0, z1] of MECHTA_PROPS[ty] ?? []) {
+          const lx = ((x0 + x1) / 2) * 1.3, lz = ((z0 + z1) / 2) * 1.3;
+          const w = { x: x + lx * c + lz * s, z: z - lx * s + lz * c, hx: ((x1 - x0) / 2) * 1.3, hz: ((z1 - z0) / 2) * 1.3, yaw, st };
+          propWalls.push(w);
+          app.navGrid?.addFootprint?.(w.x, w.z, w.hx, w.hz, yaw);
+        }
+      }
       // SOLID: each house's footprint blocks the nav grid (a little in: its steps, its yard walls' ends), and its
       // walls are HARD cover, as the dechra's and the post's (algCover: circles along the walls, not inside)
       const townFoot = MAP.town.houses.map(([, , , , , yaw, fx, fz, hx, hz]) => app.navGrid?.addFootprint?.(fx, fz, hx * 0.92, hz * 0.92, yaw) ?? null);
@@ -709,6 +724,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           for (let lx = -hx + r; lx <= hx - r + 0.01; lx += 2.2) { yield put(lx, -hz + r * 0.6); yield put(lx, hz - r * 0.6); }
           for (let lz = -hz + r; lz <= hz - r + 0.01; lz += 2.2) { yield put(-hx + r * 0.6, lz); yield put(hx - r * 0.6, lz); }
         }
+        // the props' walls (a yard's, a lean-to's, an oven): hard cover along them, soft once a ruin
+        for (const w of propWalls) {
+          const c = Math.cos(w.yaw), s = Math.sin(w.yaw), long = w.hx >= w.hz, L = long ? w.hx : w.hz;
+          for (let u = -L + 0.8; u <= L - 0.8 + 0.01; u += 1.8) {
+            const lx = long ? u : 0, lz = long ? 0 : u;
+            yield { x: w.x + lx * c + lz * s, z: w.z - lx * s + lz * c, radius: 1.1, size: 1, hard: w.st !== "ruin" };
+          }
+        }
         // the RUBBLE heaps of a collapsed house (algTownDamage): soft cover
         for (const r of field.damage?.rubble ?? []) yield { x: r.x, z: r.z, radius: r.r, size: 1, hard: false };
         // a terrace wall's parapet: cover for the men on the terrace ABOVE it (behind its face, uphill)
@@ -720,7 +743,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       };
       // SIGHT: each house a tall box to its parapet (the kits' heights, real metres x1.3; the minaret its own column)
       // — combat's line of sight and the fog of war (algSight.addBox / topAt): no shot, no view THROUGH the town
-      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0 };   // (the mechta's two-room: its upper room on half the roof)
+      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0, pente: 6.0 };   // (the mechta's two-room: its upper room on half the roof)
       for (const [ty, st, , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
         app.algSight?.addBox(fx, fz, hx, hz, yaw, y + (st === "ruin" ? 1.6 : (PAR[ty] ?? 5) * 1.3));   // (a ruin from the start: its rubble's height — algTownDamage ruinTop)
         if (ty === "mosquee") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = -4.25 * 1.3, mz = 4.75 * 1.3; app.algSight?.addBox(fx + mx * c + mz * s, fz - mx * s + mz * c, 2.4, 2.4, yaw, y + 18 * 1.3); }

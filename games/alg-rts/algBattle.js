@@ -346,7 +346,9 @@ export function createAlgBattle(app, { units, economy, structures, mines = null,
     if (cave && !FLN) list.push({ text: t("Détruire la grotte du FLN (nord-ouest)"), sub: cave.alive ? (cave.hp < cave.maxHp ? t("{pct} % restants", { pct: Math.round((100 * cave.hp) / cave.maxHp) }) : t("victoire immédiate · amenez blindés et mortiers")) : t("détruite"), state: cave.alive ? "" : "done", x: cave.position.x, z: cave.position.z });
     if (post && !FLN) list.push({ text: t("Tenir le poste"), sub: post.hp < post.maxHp ? t("{pct} % restants", { pct: Math.round((100 * post.hp) / post.maxHp) }) : t("s'il tombe, la guerre est perdue"), state: post.hp < post.maxHp * 0.5 ? "bad" : "", x: post.position.x, z: post.position.z });
     const lv = { easy: t("Facile"), normal: t("Normal"), hard: t("Difficile") }[app.algDifficulty] ?? "";
-    hud.setObjectives(list, `${fmt(clock)}${lv ? ` · ${lv}` : ""}`);
+    // (the match clock under the score bar now, CoH 3's place — HUD_COH3_COMPARE.md 6; the header keeps the difficulty)
+    hud.setClock?.(fmt(clock));
+    hud.setObjectives(list, lv);
   }
 
   // ── ADVICE: one tip per first time something happens ────────────────────

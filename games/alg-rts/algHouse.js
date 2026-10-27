@@ -23,8 +23,17 @@ export const HOUSE_TYPES = ["maison", "cour", "haute", "boutique"];
 export const MZAB_TYPES = ["dar", "tour", "bas", "terrasse", "souk", "mosquee", "mur"];   // (+ the hilltop mosque and its minaret)
 export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // THE MECHTA (tools/blender/mechta.py, the same builder — 2026-10-27, MECHTA_PLAN.md): the Aurès stone hamlet's houses for
-// the NEW maps (the old Aurès keeps its runtime hamlet, algMasonry) — one room with its ladder, two rooms with the loggia room
-export const MECHTA_TYPES = ["petite", "etage"];
+// the NEW maps (the old Aurès keeps its runtime hamlet, algMasonry) — one room with its ladder, two rooms with the loggia room,
+// the hillside house (its outside stair); the hamlet's smaller pieces: the lean-to, the walled yard, the oven
+export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna"];
+/** The mechta's SMALLER PIECES (a town's `props`: no garrison, no sight box): their walls, local real metres x0 x1 z0 z1
+ *  (tools/blender/mechta.py — change both together) — the nav grid's blocks and HARD cover (algGame). The yard's gap
+ *  in its right wall (z -0.7 … 0.7) left open: its thorn branches are a door for men. */
+export const MECHTA_PROPS = {
+  appentis: [[-1.8, 1.8, -1.5, 1.6]],
+  enclos: [[-4.0, 4.0, 2.5, 3.0], [-4.0, -3.47, -3.0, 2.55], [3.47, 4.0, -3.0, -0.7], [3.47, 4.0, 0.7, 2.55]],
+  tabouna: [[-0.75, 0.75, -1.1, 0.75]],
+};
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
 // THE FIELD WALLS (tools/blender/fieldwall.py): a dry-stone module, three variants (a b c), the same states
 export const FIELD_WALL_TYPES = ["a", "b", "c"];

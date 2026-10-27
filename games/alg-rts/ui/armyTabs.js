@@ -30,7 +30,7 @@ const CSS = `
   position: fixed; z-index: 55; bottom: 8px;
   left: calc(${MINI}px * var(--alg-ui, 1) + 8px);
   right: calc(var(--alg-dev-w, 340px) + ${HUD_W}px * var(--alg-ui, 1) + 8px);
-  display: flex; flex-wrap: wrap-reverse; align-content: flex-start; gap: 5px; pointer-events: none;
+  display: flex; flex-wrap: wrap-reverse; align-content: flex-start; gap: 17px 5px; pointer-events: none;   /* (the rows 17 apart: room for the group number) */
 }
 #alg-tabs .tab {
   pointer-events: auto; cursor: pointer; position: relative; flex: none;
@@ -68,6 +68,8 @@ const CSS = `
 #alg-tabs .hp { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 4px; background: #23261d; border: 1px solid #3a4031; }
 #alg-tabs .hp i { display: block; height: 100%; background: var(--hud-olive); }
 #alg-tabs .hp i.low { background: var(--hud-red); }
+/* the CONTROL GROUP (Ctrl+1…9) over the tab, as over its badge on the field (HUD_COH3_COMPARE.md 3) */
+#alg-tabs .grp { position: absolute; left: 0; right: 0; top: -16px; text-align: center; font: 800 12px/14px var(--hud-sans); color: #f1dfa6; text-shadow: 0 1px 2px #000, 0 0 4px #000; pointer-events: none; }
 #alg-tabs .more { pointer-events: none; font: 10px var(--hud-sans); color: var(--hud-dim); text-align: center; width: 62px; align-self: center; }
 `;
 
@@ -93,7 +95,7 @@ function kitOf(g) {
   return out;
 }
 
-export function createArmyTabs({ units, selection, thumbnails, focus = () => {}, team = "player", mount = document.body, squads = null }) {
+export function createArmyTabs({ units, selection, thumbnails, focus = () => {}, team = "player", mount = document.body, squads = null, groupOf = () => 0 }) {
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
@@ -161,7 +163,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       if (url) el.style.backgroundImage = `url(${url})`;
       // A squad: men alive / its full strength (CoH's pips as a number).
       const n = g.squad ? `${g.length}/${g.squad.size}` : g.length > 1 ? `${g.length}` : "";
-      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<span class="vet" hidden></span><span class="kit"></span><div class="hp"><i></i></div>`;
+      el.innerHTML = `<span class="st"></span>${n ? `<span class="n${g.squad && g.length < g.squad.size ? " short" : ""}">${n}</span>` : ""}<span class="vet" hidden></span><span class="kit"></span><div class="hp"><i></i></div><span class="grp"></span>`;
       el.addEventListener("click", (e) => {
         const live = g.filter((m) => m.alive);
         if (!live.length) return;
@@ -172,7 +174,7 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
         if (live.length) focus(live.reduce((s, m) => s + m.position.x, 0) / live.length, live.reduce((s, m) => s + m.position.z, 0) / live.length);
       });
       root.appendChild(el);
-      views.push({ el, g, bar: el.querySelector(".hp i"), st: el.querySelector(".st"), vet: el.querySelector(".vet"), vetLast: 0, kit: el.querySelector(".kit"), kitLast: "", hpLast: -1, stLast: null, fireLast: null, selLast: null });
+      views.push({ el, g, grp: el.querySelector(".grp"), grpLast: -1, bar: el.querySelector(".hp i"), st: el.querySelector(".st"), vet: el.querySelector(".vet"), vetLast: 0, kit: el.querySelector(".kit"), kitLast: "", hpLast: -1, stLast: null, fireLast: null, selLast: null });
     });
     if (groups.length > MAX_TABS) {
       const more = document.createElement("div");
@@ -206,6 +208,9 @@ export function createArmyTabs({ units, selection, thumbnails, focus = () => {},
       if (vet !== v.vetLast) { v.vetLast = vet; v.vet.hidden = !vet; if (vet) v.vet.style.cssText = hasRendered(`vet${vet}`) ? renderedOnly(`vet${vet}`) : iconStyle(`vet${vet}`); }
       const kit = kitOf(live).filter(hasRendered).join(" ");
       if (kit !== v.kitLast) { v.kitLast = kit; v.kit.innerHTML = kit ? kit.split(" ").map((k) => `<i style="${renderedStyle(k)}"></i>`).join("") : ""; }
+      let grp = 0;
+      for (const u of live) { const n = groupOf(u); if (n && (!grp || n < grp)) grp = n; }
+      if (grp !== v.grpLast) { v.grpLast = grp; v.grp.textContent = grp ? String(grp) : ""; }
       if (fire !== v.fireLast) { v.fireLast = fire; v.el.classList.toggle("fire", fire); }
       const isSel = v.g.some((u) => sel.has(u));
       if (isSel !== v.selLast) { v.selLast = isSel; v.el.classList.toggle("sel", isSel); }

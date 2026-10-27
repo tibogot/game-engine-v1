@@ -15,8 +15,25 @@ import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
 import { isHuman, isHostile, SIDES, hostileSide } from "../../shared-rts/teams.js";
 import { t } from "../i18n/i18n.js";
 import { CRIT_LABEL } from "../algCriticals.js";
+import { VET } from "../algVeterancy.js";
+import { hasRendered, renderedStyle } from "./iconAtlas.js";
 
 const WEAPON = { rifle: t("Fusils"), mg: t("Mitrailleuse"), cannon: t("Canon"), gunship: t("Roquettes + mitrailleuse") };
+// THE ROLE LINE (2026-10-27, HUD_COH3_COMPARE.md 1 — CoH 3's yellow line under the name, "Light Vehicle / Anti-infantry"):
+// what the unit IS, at a glance
+const ROLE = {
+  appele: t("Infanterie / Anti-infanterie"), piece: t("Infanterie / Appui-feu"), lanceFlammes: t("Infanterie / Nettoyage des bâtiments"),
+  sapeur: t("Infanterie / Génie · construction, mines, réparation"), para: t("Infanterie d'élite / Assaut"), legion: t("Infanterie d'élite / Anti-infanterie"),
+  equipage: t("Équipage / Servants"), moudjahid: t("Infanterie / Embuscade"), moussebel: t("Milice / Renseignement · sabotage"),
+  tireur: t("Infanterie / Tireur d'élite · reconnaissance"), fmTeam: t("Arme d'appui / Anti-infanterie"), mitrailleuse: t("Arme d'appui / Anti-infanterie"),
+  mortier: t("Arme d'appui / Tir indirect"), mortierFr: t("Arme d'appui / Tir indirect"), sansRecul: t("Arme d'appui / Anti-blindé"),
+  mulet: t("Bât / Ravitaillement"), willys: t("Véhicule léger / Reconnaissance · anti-infanterie"), gmc: t("Véhicule léger / Transport"),
+  halftrack: t("Blindé léger / Transport · anti-infanterie"), amx13: t("Char léger / Anti-blindé"), ebr: t("Automitrailleuse / Reconnaissance · anti-blindé"),
+  alouette: t("Hélicoptère / Appui-feu"), h21: t("Hélicoptère / Transport"),
+};
+// the squad's special weapons on the card (armyTabs' badges: the same rendered objects)
+const UPGRADE_BADGE = { lmg: "badgeLmg", bazooka: "badgeBazooka", radio: "badgeRadio" };
+const WEAPON_BADGE = { flamer: "badgeFlamer", sniper: "badgeSniper" };
 
 const CSS = `
 #rts-unit-bar { height: 100%; }
@@ -60,9 +77,20 @@ const CSS = `
 #rts-unit-bar .chip.conceal { color: #9fcf7a; border-color: rgba(159,207,122,0.4); background: rgba(52,74,38,0.4); }
 #rts-unit-bar .chip.seen { color: #e0905a; border-color: rgba(224,144,90,0.45); background: rgba(94,52,25,0.4); }
 #rts-unit-bar .sub { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hud-dim); }
+#rts-unit-bar .role { font-size: 11px; color: #e2b25a; margin-top: -3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#rts-unit-bar .vet { display: flex; align-items: center; gap: 6px; min-height: 16px; }
+#rts-unit-bar .vet[hidden] { display: none; }
+#rts-unit-bar .vet .stars { font-size: 12px; letter-spacing: 1px; color: #f2c94c; white-space: nowrap; }
+#rts-unit-bar .vet .stars .off { color: #4a4d3c; }
+#rts-unit-bar .vet .xpbar { flex: 1; max-width: 90px; height: 5px; background: #23261d; border: 1px solid #3a4031; }
+#rts-unit-bar .vet .xpbar i { display: block; height: 100%; background: #c9a54a; }
+#rts-unit-bar .vet .xp { font-size: 10px; color: var(--hud-dim); white-space: nowrap; }
+#rts-unit-bar .vet .kit { display: flex; gap: 3px; margin-left: auto; }
+#rts-unit-bar .vet .kit i { display: block; width: 20px; height: 20px; box-sizing: border-box; background-color: rgba(14, 13, 9, 0.88);
+  border: 1px solid rgba(201, 165, 74, 0.7); border-radius: 2px; }
 `;
 
-export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllType = () => {}, stanceFor = () => null, mount = document.body }) {
+export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllType = () => {}, stanceFor = () => null, squadOf = () => null, mount = document.body }) {
   const root = document.createElement("div");
   root.id = "rts-unit-bar";
   mount.appendChild(root);
@@ -72,7 +100,7 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
 
   let current = [];
   let one = null;      // { units, pips: [el], chips, hp } while one type is shown
-  let lastPips = "", lastChips = "", lastHp = -1;
+  let lastPips = "", lastChips = "", lastHp = -1, lastVet = "";
 
   const portrait = (u) => thumbnails?.get(thumbKeyOf(u));
 
@@ -85,13 +113,15 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
         <div class="portrait" style="${url ? `background-image:url(${url})` : ""}">${url ? "" : `<span class="mono">${mono}</span>`}${units.length > 1 ? `<span class="n">×${units.length}</span>` : ""}</div>
         <div class="info">
           <div class="who">${u.type?.name ?? u.name ?? u.typeKey}</div>
+          ${!isStruct && ROLE[u.typeKey] ? `<div class="role">${ROLE[u.typeKey]}</div>` : ""}
           ${isStruct || !u.type?.foot ? `<div class="hpbar"><i></i></div>` : `<div class="pips"></div>`}
+          <div class="vet" hidden><span class="stars"></span><span class="xpbar"><i></i></span><span class="xp hud-num"></span><span class="kit"></span></div>
           <div class="chips"></div>
           <div class="sub">${isStruct ? (isHuman(u.team) ? t("Bâtiment") : t("Bâtiment ennemi")) : `${u.type?.weaponLabel ?? WEAPON[u.weapon ?? u.type?.weapon] ?? ""}${u.type?.speed ? ` · ${u.type.speed} m/s` : ""}`}</div>
         </div>
       </div>`;
-    one = { units, pips: root.querySelector(".pips"), hpbar: root.querySelector(".hpbar i"), chips: root.querySelector(".chips") };
-    lastPips = ""; lastChips = ""; lastHp = -1;
+    one = { units, pips: root.querySelector(".pips"), hpbar: root.querySelector(".hpbar i"), chips: root.querySelector(".chips"), vet: root.querySelector(".vet") };
+    lastPips = ""; lastChips = ""; lastHp = -1; lastVet = "";
     tick();
   }
 
@@ -156,6 +186,25 @@ export function createUnitBar({ thumbnails, onPickGroup = () => {}, onSelectAllT
       }
     }
     if (chips !== lastChips) { lastChips = chips; one.chips.innerHTML = chips; }
+    // VETERANCY (CoH 3's stars and XP bar on the card): your squad's, or a vehicle's own (algVeterancy — the same thresholds);
+    // and the squad's special weapons beside them
+    const u0 = one.units[0], s = squadOf(u0), src = s ?? (!u0.type?.foot ? u0 : null);
+    if (one.vet && src && isHuman(u0.team) && !u0.isStructure) {
+      const stars = Math.min(3, src.stars ?? 0), xp = Math.floor(src.xp ?? 0), th = VET.thresholds, next = th[stars];
+      const kit = Object.keys(s?.upgrades ?? {}).map((k) => UPGRADE_BADGE[k]);
+      for (const m of live) { const b = WEAPON_BADGE[m.weapon]; if (b && !kit.includes(b)) kit.push(b); }
+      const kitKeys = kit.filter((k) => k && hasRendered(k));
+      const sig = `${stars}|${xp}|${kitKeys.join(" ")}`;
+      if (sig !== lastVet) {
+        lastVet = sig;
+        one.vet.hidden = false;
+        one.vet.querySelector(".stars").innerHTML = [1, 2, 3].map((k) => `<span class="${k <= stars ? "" : "off"}">★</span>`).join("");
+        const prev = th[stars - 1] ?? 0;
+        one.vet.querySelector(".xpbar i").style.width = next == null ? "100%" : `${Math.round((100 * (xp - prev)) / (next - prev))}%`;
+        one.vet.querySelector(".xp").textContent = next == null ? t("vétéran") : `XP ${xp}/${next}`;
+        one.vet.querySelector(".kit").innerHTML = kitKeys.map((k) => `<i style="${renderedStyle(k)}"></i>`).join("");
+      }
+    } else if (one.vet && !one.vet.hidden) one.vet.hidden = true;
   }
 
   render([]);

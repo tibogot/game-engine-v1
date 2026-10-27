@@ -16,7 +16,8 @@
 const GROUPS = 9;
 const DOUBLE_TAP_MS = 350;
 
-export function createControlGroups({ app, selection, mount }) {
+// (`chips: false`: no chip row — alg-rts shows each squad's number on its badge and its tab instead, 2026-10-27)
+export function createControlGroups({ app, selection, mount, chips = true }) {
   const groups = Array.from({ length: GROUPS + 1 }, () => []);   // [1..9]
   let lastTap = { n: 0, t: 0 };
 
@@ -33,7 +34,7 @@ export function createControlGroups({ app, selection, mount }) {
   document.head.appendChild(style);
   const bar = document.createElement("div");
   bar.id = "nam-groups";
-  mount?.appendChild(bar);
+  if (chips) mount?.appendChild(bar);
 
   const alive = (n) => (groups[n] = groups[n].filter((u) => u.alive));
 
@@ -98,6 +99,8 @@ export function createControlGroups({ app, selection, mount }) {
     groups,
     /** Call when the selection changes, so the chip of the group shown lights up. */
     render,
+    /** The lowest group `u` is in (0: none) — a game showing the number on its squads (alg-rts squad badges and tabs). */
+    groupOf(u) { for (let n = 1; n <= GROUPS; n++) if (groups[n].includes(u)) return n; return 0; },
     dispose() { window.removeEventListener("keydown", onKey); bar.remove(); style.remove(); },
   };
 }
