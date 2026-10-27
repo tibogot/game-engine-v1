@@ -11,6 +11,7 @@ import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } f
 import { installSharedInstanceBuilds, installDrawnRangeUploads } from "../render/sharedInstanceBuilds.js";
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
+import { installShadowBuildSharing } from "../render/shadowBuildSharing.js";
 import { setAlphaCoverageDefault } from "../render/materials/alphaCutout.js";
 // r186: instanced vertex effects (birds, wind, sway, billboards) in the instance's own frame, as r184
 import "../render/instancedPositionOrder.js";
@@ -417,6 +418,9 @@ export async function startV3App(opts = {}) {
   if (opts.emptyDrawSkip !== false && new URLSearchParams(location.search).get("emptyskip") !== "0") {
     installEmptyDrawSkip(renderer);
   }
+  // One shadow-pass node build for every opaque caster, not one per material map / geometry layout
+  // (render/shadowBuildSharing.js: alg built the same shadow shader 21, 16, 8… times). ?shadowshare=0 to A/B.
+  if (new URLSearchParams(location.search).get("shadowshare") !== "0") installShadowBuildSharing(renderer);
   // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
   // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer
   // and re-sends the whole buffer on every draw of every pass, changed or not

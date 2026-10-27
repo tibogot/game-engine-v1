@@ -124,7 +124,32 @@ pooled UBOs (r185), the instance-sync, shared-build refresh and CSM frame-late f
    RenderObjectRefreshType.FULL, not `true` — the `true` was THE crash, "layoutGPU", r186 #34162). alg
    node builds 920 → 562, boot 52.5 → 46.4 s (r184: 40 s); walking soldiers keep their kit. The
    drawn-range uploads (only mesh.count instances, main.js on r184) ported too: installDrawnRangeUploads.
-   Still ~6 s over r184 — next: where the rest goes. Then:
+   Still ~6 s over r184 — next: where the rest goes.
+   **BOOT PROFILE 2026-10-27** (alg auresNew, CPU profile of a whole boot, ~46 s; boot noise 40–56 s on
+   this laptop, so a 1–3 s gain cannot be proven in one run):
+   - Chrome DOES cache compiled WebGPU pipelines across loads (12 fixed pipelines: 1050 ms → 15 ms), and
+     alg's WGSL is now identical load to load (0 of 513 changed) — GPU compiles are no longer the floor.
+   - three on the main thread ~23 s: **node builds (WGSL generation) 13.7–14.5 s** for 562 builds;
+     our code ~11 s; idle ~9 s.
+   - **268 of the 562 builds (48 %) produce WGSL identical to another build** (294 distinct shaders) —
+     ~6–7 s of pure waste. Families: `ShadowMaterial` (the shadow pass's shared override material; the
+     source material's positionNode / shadow nodes make each object's key different — 21, 16, 8, 6×…
+     copies), `Baked book card` (hidden bake cards woken by the warm-up: 22 builds for 220 objects),
+     `RtsStencil` (11), vehicle running gear (6), the crowd's shadow and gib materials (6 each),
+     PMREM (6). Cause to confirm: three's node cache key follows node IDENTITY, so structurally identical
+     graphs from different material instances never share. Fix candidates: share node graphs between
+     material instances in our code, keep the bake cards out of the warm-up, one stencil material.
+   - **DONE — shadow family** (render/shadowBuildSharing.js, `?shadowshare=0` to A/B): the real cause was
+     the opaque casters' MAP — three's shadow pass puts `map.a` in the override's colorNode, a node unique
+     to each material. For an opaque caster (no alphaTest / alphaMap / transparency / cast or mask shadow
+     node) that colorNode is now dropped, and plain casters key on their position attribute only.
+     alg: **builds 562 → 489, shadow builds 174 → 103** (distinct shaders 294 → 242), 0 errors. Pixels:
+     on vs off differs LESS than two loads of the same mode (wires, windsock, men move between loads).
+     Note: r186 keys a render object BEFORE it stores `_sourceMaterial` — read
+     `renderer._currentSourceMaterial` at key time.
+   - The warm-up (9 s) and the level load (8 s) are both main-thread CPU — overlapping them gains little.
+   - Tried and reverted: every 2D canvas a CPU canvas (boot ~9 s SLOWER). Kept: the haystack's mips.
+   Then:
    shared instanced builds rebuilt the r186 way;
    `compileComputeAsync()` (#32551) for the compute warm-up; check the shadow warm-up (r186 draws no
    shadow maps in precompile, #33924).
