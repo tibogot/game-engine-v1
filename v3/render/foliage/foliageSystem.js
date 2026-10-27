@@ -37,6 +37,7 @@ import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliag
 import { foliageLeafLift, foliageTopdownLift } from "./foliageLighting.js";
 import { coverageMippedTexture } from "./alphaCoverageMips.js";
 import { applyAlphaCutout } from "../materials/alphaCutout.js";
+import { applyCameraOnlyVelocity } from "../post/taauVelocity.js";
 import { FOLIAGE_TYPE_COUNT } from "../../app/state/foliageScatterState.js";
 import { terrainShade, terrainSunVisibilityHere } from "../lighting/terrainSunShadow.js";
 
@@ -807,6 +808,9 @@ export function createFoliageMaterial({ src, u, headTex = null }) {
     // ignores opacityNode, and without it the card casts its whole rectangle.
     applyAlphaCutout(mat, select(isCard, texture(headTex, uv()).a, float(1)), { threshold: 0.4 });
   }
+  // With TAAU: the camera's motion, computed per pixel — three's velocity adds two varyings and
+  // this material is at WebGPU's limit of 16 (every plant vanished)
+  applyCameraOnlyVelocity(mat);
   return mat;
 }
 

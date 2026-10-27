@@ -15,7 +15,10 @@ import {
   uniform,
   vec3,
   vec4,
+  velocity,
 } from "three/tsl";
+import { taau } from "three/addons/tsl/display/TAAUNode.js";
+import { TAAU_ON, TAAU_SCALE } from "./taauVelocity.js";
 import { bloom } from "three/addons/tsl/display/BloomNode.js";
 import { fxaa } from "three/addons/tsl/display/FXAANode.js";
 import { sharpen } from "three/addons/tsl/display/SharpenNode.js";
@@ -57,6 +60,14 @@ import { despeckle } from "./despeckleNode.js";
  * `blendings` property that nothing reads.)
  */
 const _emissiveBlend = /*@__PURE__*/ new THREE.BlendMode(THREE.MaterialBlending);
+
+/*
+ * TAAU — temporal anti-aliasing + upscaling (three r186 TAAUNode), EXPERIMENT (2026-10-27): ?taau=1,
+ * ?taauScale=0.7 (taauVelocity.js). The scene pass renders at that scale and also writes motion
+ * vectors; TAAU jitters the camera a sub-pixel each frame and rebuilds a full-size image from the
+ * history. Needs MSAA off (main.js turns it off with ?taau=1) and no FXAA after it. Full chain only
+ * (the post FX on); the minimal chain is unchanged.
+ */
 
 /**
  * r186: an MRT member's shader output is typed by its TARGET's format (NodeBuilder.getOutputType
@@ -769,6 +780,7 @@ export class PostFxPipeline {
     // something asks the scene pass for it by name (SSAO, SSR, a game's post
     // hook — `_wrapSceneTextureRequests`), or selective bloom is ON.
     this._scenePass = pass(scene, camera);
+    if (TAAU_ON) this._scenePass.setResolutionScale(TAAU_SCALE);
     this._sceneExtra = new Set();
     this._wrapSceneTextureRequests(this._scenePass);
     this._applySceneMRT();
@@ -908,6 +920,7 @@ export class PostFxPipeline {
     if (!sp) return;
     if (this._emissiveWanted()) this._sceneExtra.add("emissive");
     const targets = { output };
+    if (TAAU_ON) targets.velocity = velocity;
     if (this._sceneExtra.has("diffuseColor")) targets.diffuseColor = diffuseColor;
     if (this._sceneExtra.has("normal")) targets.normal = directionToColor(normalView);
     // The emissive member carries the fragment's OWN coverage in .a, and the
@@ -957,7 +970,11 @@ export class PostFxPipeline {
   _rebuildSceneColor() {
     const raw = this._scenePass.getTextureNode("output");
     const mask = this._bloomParams.mask && this._emissiveWanted() ? this._scenePass.getTextureNode("emissive") : null;
-    this._scenePassColor = this._despeckle ? despeckle(raw, mask) : raw;
+    const color = this._despeckle ? despeckle(raw, mask) : raw;
+    // TAAU: the low-resolution scene, its depth and motion → the full-size image
+    this._scenePassColor = TAAU_ON
+      ? taau(color, this._scenePass.getTextureNode("depth"), this._scenePass.getTextureNode("velocity"), this.camera)
+      : color;
   }
 
   /** Kill lone blown-up pixels in the scene colour (despeckleNode.js). Off by default. */
@@ -1135,7 +1152,7 @@ export class PostFxPipeline {
     let node = opaqueOutput(graded);
     let sharpenNode = null;
 
-    if (this._fxaaEnabled) node = fxaa(node);
+    if (this._fxaaEnabled && !TAAU_ON) node = fxaa(node);   // (TAAU is the edge AA: FXAA would only blur it)
 
     if (this._sharpenEnabled) {
       const userSharpness = this._sharpenParams.sharpness;

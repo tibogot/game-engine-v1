@@ -94,7 +94,56 @@ These aren't bugs, just how three works; keep them in mind:
 - Not used by us (checked with grep): `directionToFaceDirection`, `modInt`, `THREE.Source`,
   `renderer.dispose()`, the Sky's `up` uniform, `LightProbeGrid`, `determinant3x3`, `setDecoderConfig`.
 
-## To try after the upgrade
+## r185 + r186: what we gain — the order agreed 2026-10-27 (you: "ok yes go ahead")
+
+Read from both release notes and the installed addons. Already free: faster submit / descriptor caching /
+pooled UBOs (r185), the instance-sync, shared-build refresh and CSM frame-late fixes, clustered lights
+(alg's flares and lamps run on them), GPU errors + WGSL diagnostics in the console.
+
+1. [~] **PARKED 2026-10-27** (you: option 2 — MSAA looks good, take the safe gains first). Built behind
+   `?taau=1&taauScale=0.7` (postFxPipeline + `render/post/taauVelocity.js`; off by default, no effect
+   without the flag). Found: three's `velocity` adds 2 varyings + a previous-instance vertex buffer →
+   plants (16-varying limit) and the army kit (8-buffer limit) vanished; fixed with a fragment-stage
+   CAMERA-ONLY velocity and exempting those materials from previous data. Look in alg: corners and fronds
+   cleaner than MSAA, the whole image softer even at 100 % (sharpen 0.8 restores most), BUT the
+   camera-only objects FLICKER (palms, rusty roof, flag pole, fences — "very bad for the eyes"): that
+   velocity is probably wrong, so TAAU rejects their history. Resume in a light AA lab (not alg: 45–55 s
+   a load), velocity shown on screen; alg once at the end. Then the TAAU notes below apply.
+   **TAAU** (`tsl/display/TAAUNode.js`: TAA + upscaling in one pass, three's FSR2/3 alternative):
+   render ~70 %, sharp full-size image; fixes the 1-px shimmer on house corners MSAA leaves; frees GPU.
+   **FSR1Node** = the cheap fallback for the Low preset. Behind a URL flag; you judge the look in alg
+   (corners, wires, foliage in motion — TAA can soften or trail); GPU ms before / after.
+2. [x] **MSAA memory — checked 2026-10-27, nothing safe to take.** The discard / transient flags break any
+   frame that is SPLIT (a framebuffer copy for water refraction, decals reading depth: three resumes the
+   pass with loadOp Load, and a discarded or transient attachment has nothing to load — WebGPU rejects
+   transient + load). Only for a game whose frame is never split (~217 MB at scale 2). The old size's MSAA
+   targets (~90 MB) are a FIXED extra, not a leak: 5 scale switches, memory back to 2381 / 2876 MB each
+   time. alg: 2.4 GB of GPU textures at scale 1, 2.9 GB at scale 2 (hook counting MSAA too).
+3. [~] **Boot time** — 2026-10-27: shared instanced builds BACK on r186 (sharedInstanceBuilds.js: the
+   builder's buffers found by array identity — r186 has no InstanceNode; needsRefresh must answer
+   RenderObjectRefreshType.FULL, not `true` — the `true` was THE crash, "layoutGPU", r186 #34162). alg
+   node builds 920 → 562, boot 52.5 → 46.4 s (r184: 40 s); walking soldiers keep their kit. The
+   drawn-range uploads (only mesh.count instances, main.js on r184) ported too: installDrawnRangeUploads.
+   Still ~6 s over r184 — next: where the rest goes. Then:
+   shared instanced builds rebuilt the r186 way;
+   `compileComputeAsync()` (#32551) for the compute warm-up; check the shadow warm-up (r186 draws no
+   shadow maps in precompile, #33924).
+4. [ ] **Render bundles for static instanced meshes** (r185 #33839, #33811): alg is CPU-bound at scale 1
+   (~9 ms CPU) — measure the CPU on walls / rocks / props.
+5. [ ] **Look, you judge**: `softParticles()` (TSL, #33887) for smoke / dust / fire / napalm meeting the
+   ground; the new `SSAONode` (#33921, depth-aware blur) or the improved GTAO vs our old SSAO
+   (+0.35–0.8 ms); faster bloom blur (#33923); OIT pass (#34253) for overlapping smoke / water / glass.
+6. [ ] Later / per need: LightProbeGrid on WebGPU with incremental bake (#33913, #34486) — baked bounce
+   light, an editor feature; read-write storage + atomics in vertex / fragment (#33626) for crowd
+   skinning; `Object3D.intersectsFrustum()` and the robust occlusion queries (culling spec); runtime
+   lighting swap (#34050) — local lights as a setting; three's Inspector (overdraw view, split-screen
+   A/B, CPU/GPU graphs).
+- Study: the volumetric-fog and custom-fog-with-terrain/forest examples (vs the fog lab), the procedural
+  city / skyscraper generators (city builder), webgpu_deferred, the compute rasterizer.
+- Not for us: Gaussian splats, VXGI, the new SunLight (2 cascades; our fitted RTS shadow is sharper),
+  Sky's clouds (Sky Pro), WebXR, WebGL-only fixes.
+
+## To try after the upgrade (the r184-era list)
 
 - **CPU per frame:** pooled UBO updates, faster `submit()`, descriptor and pipeline caching,
   bind groups compared by handle. The RTS games are CPU-bound; measure first.

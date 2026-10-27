@@ -40,6 +40,7 @@ import {
   step, texture, uniform, uv, vec2, vec3,
 } from "three/tsl";
 import { rtsAtlas, ATLAS_COLS, ATLAS_ROWS, ATLAS_PAD } from "./rtsTextures.js";
+import { applyCameraOnlyVelocity } from "../post/taauVelocity.js";
 import { RTS_OBJECTS } from "./rtsEmplacement.js";
 import { HUT_OBJECT } from "./rtsHut.js";
 import { VILLAGE_HUT_OBJECT } from "./rtsVillageHut.js";
@@ -126,6 +127,9 @@ export function rtsObjectMaterialTinted(paintTint) {
   const id = attribute("matId", "float");
   const isPaint = step(float(6.5), id).mul(step(id, float(7.5)));
   m.colorNode = rtsAtlasColor(uv()).mul(mix(vec3(1, 1, 1), vec3(...paintTint), isPaint));
+  // With TAAU: three's velocity on an instanced kit mesh adds last frame's matrices as a 9th vertex
+  // buffer (WebGPU allows 8) — the camera's motion instead (render/post/taauVelocity.js)
+  applyCameraOnlyVelocity(m);
   _tinted.set(key, m);
   return m;
 }

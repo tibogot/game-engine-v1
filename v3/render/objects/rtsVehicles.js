@@ -16,6 +16,7 @@ import * as THREE from "three";
 import { MAT, assemble, bakeContactAO, buildBox, buildSandbagWall, rng } from "./rtsParts.js";
 import { STENCILS, flatSurface, mergeStencils, stencilPatch } from "./rtsStencils.js";
 import { rtsAtlasColor } from "./rtsObjectProps.js";
+import { applyCameraOnlyVelocity } from "../post/taauVelocity.js";
 import {
   attribute, cos, float, fract, instancedBufferAttribute, max, mix, positionLocal, sin, step, uv, vec2, vec3,
 } from "three/tsl";
@@ -74,6 +75,7 @@ export function rtsRunningGearMaterial(paintTint = null, channel = "") {
   if (key) m.name = `RtsRunningGear:${key}`;
   m.colorNode = col;
   m.userData.odometer = odoAttr;
+  applyCameraOnlyVelocity(m);   // (TAAU: a 9th vertex buffer otherwise — rtsObjectProps.js)
   _gearMats.set(key, m);
   return m;
 }

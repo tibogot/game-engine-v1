@@ -156,13 +156,21 @@ function patchPrototype(P) {
     this._v3OwnFor = attrs;
     const o = this.object;
     if (!shareable(o)) return attrs;
-    const inode = this.getNodeBuilderState().updateNodes.find((n) => n instanceof THREE.InstanceNode);
-    if (!inode || inode.buffer == null || inode.instanceMatrix === o.instanceMatrix) return attrs;   // its own build
+    // The build's instance buffers are found by ARRAY identity (r184 and r186 alike: three wraps the
+    // builder mesh's own instanceMatrix.array / instanceColor.array — r184 in InstanceNode, r186 in
+    // the instance() function, which has no node to ask). One wrapping ANOTHER mesh's array is the
+    // builder's: this draw gets its own in its place. Same array: its own build, untouched.
+    const imArr = o.instanceMatrix.array, icArr = o.instanceColor?.array ?? null;
+    const geo = o.geometry.attributes;
     let swapped = false;
     for (let i = 0; i < attrs.length; i++) {
       const a = attrs[i];
-      if (a.isInterleavedBufferAttribute && a.data === inode.buffer) { attrs[i] = ownAttribute(o, a); swapped = true; }
-      else if (inode.bufferColor && a === inode.bufferColor && o.instanceColor) { attrs[i] = ownColour(o, a); swapped = true; }
+      if (a.isInterleavedBufferAttribute && a.data?.isInstancedInterleavedBuffer && a.data.stride === 16) {
+        if (a.data.array !== imArr) { attrs[i] = ownAttribute(o, a); swapped = true; }
+      } else if (icArr && a.isInstancedBufferAttribute && !a.isInterleavedBufferAttribute && a.itemSize === 3
+        && a.array !== icArr && !Object.values(geo).includes(a)) {
+        attrs[i] = ownColour(o, a); swapped = true;
+      }
     }
     if (swapped) {
       this.vertexBuffers = [...new Set(attrs.map((a) => (a.isInterleavedBufferAttribute ? a.data : a)))];
@@ -177,13 +185,6 @@ function patchPrototype(P) {
  * class (not exported: reached through the first one made) — once per page.
  */
 export function installSharedInstanceBuilds(renderer) {
-  // r186: InstanceNode is gone — the instance() TSL function captures the BUILDER's matrices in
-  // its closure, so a shared build would draw every mesh with the first one's. Off there until
-  // this is rebuilt on r186's instancing (each mesh builds its own, as three does).
-  if (!THREE.InstanceNode) {
-    console.info("[V3] shared instanced builds: off on three r186+ (see render/sharedInstanceBuilds.js)");
-    return false;
-  }
   const objects = renderer._objects, nodes = renderer._nodes;
   if (!objects || !nodes || objects._v3Shared) return false;
   objects._v3Shared = true;
@@ -212,7 +213,9 @@ export function installSharedInstanceBuilds(renderer) {
       if (seen.get(renderObject) !== v) {
         seen.set(renderObject, v);
         needsRefresh.call(this, renderObject, ...rest);   // keep three's observer bookkeeping
-        return true;
+        // r186 answers a refresh TYPE (NONE 0 / SHARED 1 / FULL 2), not a boolean: `true` matched no
+        // branch, the draw's bindings were never set up and its pipeline creation crashed ("layoutGPU")
+        return THREE.RenderObjectRefreshType?.FULL ?? true;
       }
     }
     return needsRefresh.call(this, renderObject, ...rest);
@@ -223,6 +226,40 @@ export function installSharedInstanceBuilds(renderer) {
   const updateBefore = nodes.updateBefore;
   nodes.updateBefore = function (renderObject) {
     syncOwn(renderObject.object);
+    return updateBefore.call(this, renderObject);
+  };
+  return true;
+}
+
+/**
+ * A changed instance buffer uploads only the instances DRAWN (mesh.count), not its whole capacity —
+ * the soldiers' kit pieces have room for 640 and sent all 40 KB each frame for a dozen men. A
+ * caller's own update ranges win. r184 did this in InstanceNode.update (main.js); r186 has no
+ * InstanceNode: the instance() function copies the version and ranges onto its interleaved buffer at
+ * frame start, so the range is added here, before the draw's upload (nodes.updateBefore runs before
+ * the geometry update). Meshes with their own buffer under a shared build: syncOwn above.
+ */
+const _uploaded = new WeakMap();   // interleaved buffer → the version last given a drawn range
+export function installDrawnRangeUploads(renderer) {
+  const nodes = renderer._nodes;
+  if (!nodes || nodes._v3DrawnRange) return false;
+  nodes._v3DrawnRange = true;
+  const updateBefore = nodes.updateBefore;
+  nodes.updateBefore = function (renderObject) {
+    const o = renderObject.object;
+    if (o?.isInstancedMesh === true && o.instanceMatrix?.isStorageInstancedBufferAttribute !== true) {
+      for (const a of renderObject.getAttributes()) {
+        const buf = a.isInterleavedBufferAttribute ? a.data : null;
+        if (!buf?.isInstancedInterleavedBuffer || buf.stride !== 16 || buf.array !== o.instanceMatrix.array) continue;
+        if (_uploaded.get(buf) !== buf.version && buf.updateRanges.length === 0) {
+          const total = buf.array.length / 16;
+          const n = Math.min(total, Math.max(1, o.count));
+          if (n < total) buf.addUpdateRange(0, n * 16);
+        }
+        _uploaded.set(buf, buf.version);
+        break;
+      }
+    }
     return updateBefore.call(this, renderObject);
   };
   return true;

@@ -8,7 +8,7 @@ import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.j
 import { putAutosave, getAutosave, clearAutosave } from "../io/autosave.js";
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
-import { installSharedInstanceBuilds } from "../render/sharedInstanceBuilds.js";
+import { installSharedInstanceBuilds, installDrawnRangeUploads } from "../render/sharedInstanceBuilds.js";
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
 import { setAlphaCoverageDefault } from "../render/materials/alphaCutout.js";
@@ -298,7 +298,9 @@ export async function startV3App(opts = {}) {
     // 4x MSAA (WebGPU offers 1 or 4). opts.antialias false = none, for a game
     // that measures it or brings its own AA. ?msaa=0 = none, in any game (to
     // measure it; the post chain's FXAA is the edge AA then).
-    antialias: opts.antialias !== false && new URLSearchParams(location.search).get("msaa") !== "0",
+    // (?taau=1: no MSAA either — TAAU needs single-sample input, render/post/postFxPipeline.js)
+    antialias: opts.antialias !== false && new URLSearchParams(location.search).get("msaa") !== "0"
+      && new URLSearchParams(location.search).get("taau") !== "1",
     ...(gpuDevice ? { device: gpuDevice } : {}),
   });
   // Cut-out cards (leaves…) get smooth alpha-to-coverage edges when there are MSAA samples to
@@ -443,6 +445,8 @@ export async function startV3App(opts = {}) {
       };
       IN._v3DrawnRange = true;
     }
+    // r186: no InstanceNode — the same rule on the buffer three syncs at frame start
+    if (!IN) installDrawnRangeUploads(renderer);
     // With the matrices out of the shader source, instanced meshes on one
     // material can share ONE node build (three builds each — its uuid is in the
     // key): render/sharedInstanceBuilds.js. opts.shareInstanceBuilds.
