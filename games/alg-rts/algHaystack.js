@@ -32,10 +32,13 @@ export function loadHaystack() {
     const tex = coverageTexture(img);
     const local = (o) => { o.updateMatrix(); return o.matrix.clone(); };   // (the meshopt node transform: undoes the quantisation)
     // (a material a kind and a level: the pile its own wind — WIND_PILE; its instanced sets are apart anyway, no draw more)
-    const mats = { stack: { near: hayMaterial(tex), far: hayMaterial(tex, true) }, pile: { near: hayMaterial(tex, false, WIND_PILE), far: hayMaterial(tex, true, WIND_PILE) } };
+    // (+ BRUSH, 2026-10-27 — the FLN camp's cut juniper over its refuges, its PC's roof, the cave's lintel: the pile's
+    // cards tinted from straw to dry juniper, olive-brown; the pile's still wind)
+    const mats = { stack: { near: hayMaterial(tex), far: hayMaterial(tex, true) }, pile: { near: hayMaterial(tex, false, WIND_PILE), far: hayMaterial(tex, true, WIND_PILE) },
+      brush: { near: hayMaterial(tex, false, WIND_PILE, BRUSH_TINT), far: hayMaterial(tex, true, WIND_PILE, BRUSH_TINT) } };
     // TWO KINDS (2026-10-26): the STACK round its pole, and the low hay PILE — the houses' rooftop hay, the yards'
     _parts = {};
-    for (const [kind, nm] of [["stack", "Hay"], ["pile", "HayPile"]]) {
+    for (const [kind, nm] of [["stack", "Hay"], ["pile", "HayPile"], ["brush", "HayPile"]]) {
       const near = gltf.scene.getObjectByName(`${nm}Near`), far = gltf.scene.getObjectByName(`${nm}Far`);
       if (near?.isMesh && far?.isMesh) _parts[kind] = { near: { geo: near.geometry, local: local(near), mat: mats[kind].near }, far: { geo: far.geometry, local: local(far), mat: mats[kind].far } };
     }
@@ -112,7 +115,8 @@ export function setHayWind(dirRad, strength) { uWind.value.set(Math.cos(dirRad),
 // only its top strands stir, slower and smaller, and it never leans.
 const WIND_STACK = { flutter: 0.035, rate: 5.1, lean: 0.06, from: 0 };
 const WIND_PILE = { flutter: 0.008, rate: 1.7, lean: 0, from: 0.75 };   // (`from`: the straw's tip fraction it starts at)
-function hayMaterial(tex, far = false, W = WIND_STACK) {
+const BRUSH_TINT = [0.5, 0.6, 0.34];   // (× the straw: dry juniper, olive — 0.62 0.66 0.42 still read golden in the lab)
+function hayMaterial(tex, far = false, W = WIND_STACK, tint = null) {
   const m = new THREE.MeshStandardNodeMaterial({ roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
   m.name = far ? "HaystackFar" : "Haystack";
   const t = texture(tex, uv());
@@ -121,7 +125,7 @@ function hayMaterial(tex, far = false, W = WIND_STACK) {
   // the dither: interleaved gradient noise on the screen — the near keeps the pixels under its weight, the far the rest
   const ign = fract(float(52.9829189).mul(fract(screenCoordinate.xy.dot(vec2(0.06711056, 0.00583715)))));
   const keep = far ? step(data.x, ign) : step(ign, data.x).mul(step(0.001, data.x));
-  m.colorNode = t.rgb.mul(attribute("color", "vec3"));
+  m.colorNode = tint ? t.rgb.mul(attribute("color", "vec3")).mul(vec3(...tint)) : t.rgb.mul(attribute("color", "vec3"));
   m.opacityNode = t.a.mul(keep);
   m.alphaTest = 0.5;
   // the WIND: the whole stack leans a few cm at its top with the gusts; the straw's tips flutter faster

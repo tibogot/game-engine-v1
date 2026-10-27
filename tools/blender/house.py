@@ -523,9 +523,14 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
             if fars: copy_normals(f, o)
             print("TRIS", o.name, tris(o), "far", tris(f))
             exported += [o, f] + ([dec[o]] if o in dec else [])
-            for i, (x, y, z, yaw) in enumerate(hay.get(o, [])):   # (its hay piles' spots: empties, the game's straw-card piles)
-                e = bpy.data.objects.new(f"{o.name}_Hay{i}", None); bpy.context.scene.collection.objects.link(e)
+            # (its straw-card spots: empties <piece>_Hay<i> — the game's hay piles; a spot may say its KIND and SIZE,
+            # (x, y, z, yaw, "Brush", 1.6): <piece>_Brush<i>, the FLN camp's cut juniper — 2026-10-27, algHaystack "brush")
+            count = {}
+            for x, y, z, yaw, *rest in hay.get(o, []):
+                kind = rest[0] if rest else "Hay"; i = count.get(kind, 0); count[kind] = i + 1
+                e = bpy.data.objects.new(f"{o.name}_{kind}{i}", None); bpy.context.scene.collection.objects.link(e)
                 e.location = B(x, y, z); e.rotation_euler = (0, 0, yaw); exported.append(e)
+                if len(rest) > 1: e.scale = (rest[1],) * 3
         # THE TYPE'S OWN FILE (2026-10-27, you: "is there a way we can go faster … do we always have to wait long?"):
         # <out>/parts/<type>.glb, and a "<type>.quick" marker beside it when it is a quick build — tools/blenderKit.mjs
         # merges every part into the kit, so a fix to one type rebuilds that type alone

@@ -26,7 +26,8 @@ export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // the NEW maps (the old Aurès keeps its runtime hamlet, algMasonry) — one room with its ladder, two rooms with the loggia room,
 // the hillside house (its outside stair); the hamlet's smaller pieces: the lean-to, the walled yard, the oven
 // (+ the DECHRA's pieces, 2026-10-27 — DECHRA_PLAN.md: its mosque, a terrace's retaining wall, the lanes' steps, the djemaa)
-export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna", "masjid", "soutien", "escalier", "djemaa"];
+export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna", "masjid", "soutien", "escalier", "djemaa",
+  "pc", "casemate", "grotte", "foyer"];   // (+ the FLN CAMP's, 2026-10-27 — FLN_CAMP_PLAN.md: the command post, the refuge, the cave's mouth, the hidden fire)
 /** The mechta's SMALLER PIECES (a town's `props`: no garrison, no sight box): their walls, local real metres x0 x1 z0 z1
  *  (tools/blender/mechta.py — change both together) — the nav grid's blocks and HARD cover (algGame). The yard's gap
  *  in its right wall (z -0.7 … 0.7) left open: its thorn branches are a door for men. */
@@ -136,8 +137,11 @@ export function loadHouses(kit = "houses") {
       }
       // ITS HAY PILES (house.py: the rooftop hay's spots, empties <piece>_Hay<i> — 2026-10-26): the straw-card piles of
       // algHaystack, placed with the house (its frame: the kit's real metres)
+      // (+ the FLN camp's cut BRUSH, <piece>_Brush<i> — 2026-10-27: algHaystack's "brush" kind; each spot its kind)
       const hay = [];
-      for (let i = 0, e; (e = gltf.scene.getObjectByName(`${nm}_Hay${i}`)); i++) { e.updateMatrix(); hay.push(e.matrix.clone()); }
+      for (const [suffix, kind] of [["Hay", "pile"], ["Brush", "brush"]]) {
+        for (let i = 0, e; (e = gltf.scene.getObjectByName(`${nm}_${suffix}${i}`)); i++) { e.updateMatrix(); const m = e.matrix.clone(); m.kind = kind; hay.push(m); }
+      }
       _parts[`${ty}:${st}`] = { near, far: far?.isMesh ? far : near, decal: decal?.isMesh ? decal : null, hay };
     }
     // (THE GROUND BLEND as it loads — algGroundBlend KIT_BLEND: before anything can draw it)
@@ -184,7 +188,7 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
   if (P.decal) { P.near.updateMatrix(); P.decal.updateMatrix(); const d = P.decal.clone(); d.applyMatrix4(P.near.matrix.clone().invert()); near.add(d); }   // (its stencils: the near level's child, the GLB's own placement kept)
   lod.addLevel(near, 0, 0.1);
   lod.addLevel(P.far.clone(), HOUSE_FAR, 0.1);   // (THREE.LOD measures plain world distance)
-  for (const h of P.hay ?? []) haystackField().addMatrix(g, h.clone(), null, "pile");   // (its hay piles: algHaystack's field)
+  for (const h of P.hay ?? []) haystackField().addMatrix(g, h.clone(), null, h.kind);   // (its hay piles and brush: algHaystack's field)
   g.add(lod);
   return g;
 }
@@ -209,7 +213,7 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
 /** A house's hay piles into the haystack field (world: the house's matrix × each spot); their ids. */
 function hayFor(m, key) {
   const P = _parts?.[key];
-  return (P?.hay ?? []).map((h) => haystackField().addMatrix(null, new THREE.Matrix4().multiplyMatrices(m, h), null, "pile"));
+  return (P?.hay ?? []).map((h) => haystackField().addMatrix(null, new THREE.Matrix4().multiplyMatrices(m, h), null, h.kind));
 }
 
 export function createHouseField() {

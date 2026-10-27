@@ -219,6 +219,13 @@ def buildMechta(K, name, spec, state, seed):
         fr = K.box("DoorLime", d0 - 0.35, d1 + 0.35, 0.2, 2.75, Z0 - 0.035, Z0 + 0.02, "renderPlain", G, 0.01)
         K.boolean(fr, K.cutter(d0, d1, 0.0, 2.3, Z0 - 0.2, Z0 + 0.2))
         extras.append(fr)
+    # THE FLN's COMMAND POST: brush laid over the roof (from the air, scrub), a long-wire antenna between two poles
+    if spec.get("brushRoof") and not ruin:
+        extras += brushHeap(K, "RoofBrush", (0.0, ROOF + 0.24, 0.0), (X1 - T - 0.6, 0.35, Z1 - T - 0.6), seed + 31, n=9)
+    if spec.get("antenna") and not ruin:
+        a, b = (X0 + T + 0.3, ROOF + 0.24, Z1 - T - 0.3), (X1 - T - 0.3, ROOF + 0.24, Z0 + T + 0.3)
+        for k, p in enumerate((a, b)): extras.append(K.rod(f"Mast{k}", p, (p[0], p[1] + 3.2, p[2]), 0.04, "woodDark", G, 6))
+        extras.append(K.rod("Wire", (a[0], a[1] + 3.15, a[2]), (b[0], b[1] + 3.0, b[2]), 0.008, "iron", G, 4))
     # THE UPPER ROOM on its loggia (not in a ruin: fallen in)
     upperRect = None
     if "upper" in spec and not ruin:
@@ -456,6 +463,114 @@ def buildDjemaa(K, name, spec, state, seed):
         top = K.skyline(-4, 4, -3, 3, 0.4, 0.2, seed=seed, mat="stone")
         for w in walls: K.boolean(w, top)
 
+# ── THE FLN CAMP'S PIECES (2026-10-27, FLN_CAMP_PLAN.md: the hidden katiba camp) ────────────────────────────────────
+def brushHeap(K, nm, c, size, seed, n=7, surface=None):
+    """CAMOUFLAGE: cut juniper laid over something — STRAW-CARD piles the game draws (spots "Brush": algHaystack's brush
+    kind, the haystack's quality floor — 2026-10-27: the baked lumps read as faceted green blobs, "nothing cheaper"),
+    spread over the area, and a few dead branches sticking out (solid). `surface(x, z)`: the height under a spot (a
+    mound's); flat at c[1] without."""
+    R = random.Random(seed); G = "h"; made = []
+    nx, nz = max(1, round(size[0] / 0.6)), max(1, round(size[2] / 0.6))   # (a spot every ~1.2 m: 0.9 left the mound bare between clumps)
+    for i in range(nx):
+        for j in range(nz):
+            x = c[0] + (-size[0] + (2 * i + 1) * size[0] / nx) + R.uniform(-0.25, 0.25)
+            z = c[2] + (-size[2] + (2 * j + 1) * size[2] / nz) + R.uniform(-0.25, 0.25)
+            K.spots.append((x, surface(x, z) if surface else c[1], z, R.uniform(0, 6.28), "Brush", R.uniform(1.1, 1.5)))
+    for k in range(n):
+        a = R.uniform(0, 6.28); r = R.uniform(0.3, 1.0)
+        x, z = c[0] + math.cos(a) * size[0] * r, c[2] + math.sin(a) * size[2] * r
+        made.append(K.rod(f"{nm}Br{k}", (x, c[1] + size[1] * 0.6, z), (x + math.cos(a) * 0.6, c[1] + size[1] * R.uniform(0.2, 1.2), z + math.sin(a) * 0.6), 0.025, "woodDark", G, 4))
+    return made
+
+def buildCasemate(K, name, spec, state, seed):
+    """THE REFUGE (casemate): a room half in the ground — a dry-stone FRONT with a low door, the beams' ends over it, the
+    roof an EARTH MOUND under cut brush (invisible from the spotter planes). Front -Z. Damaged: the front breached, the
+    mound holed; ruin: the front down to its stumps, the mound slumped in, charred beams out of it."""
+    R = random.Random(seed); G = "h"
+    dmg, ruin = state != "intact", state == "ruin"
+    W = 2.3
+    front = K.box("Front", -W, W, -0.6, 1.45, -1.9, -1.4, "stoneMechta", G, 0)
+    K.boolean(front, K.skyline(-W - 1, W + 1, -3, -1, 1.38, 0.08, seed=seed, mat="stoneMechta"))
+    K.boolean(front, K.cutter(-0.42, 0.42, -0.1, 1.2, -2.1, -1.2, "dark"))   # (the low door)
+    K.bevel(front, 0.06, 2, 30)
+    K.box("Inside", -0.42, 0.42, -0.05, 1.2, -1.42, -1.3, "dark", G, 0)        # (its dark room behind the door)
+    mound = K.lump("Mound", (0.0, -0.3, 0.6), (W + 0.4, 1.95 if not ruin else 0.9, 1.95), "earthMound", G, seed=seed + 1, rough=0.32, sub=3)   # (behind the front: never filling the doorway)
+    parts = [front]
+    if not ruin:
+        for k in range(6):   # the roof beams' ends over the door's wall
+            x = -W + 0.5 + k * (2 * W - 1.0) / 5
+            parts.append(K.rod(f"Beam{k}", (x, 1.52, -2.15), (x + R.uniform(-0.05, 0.05), 1.55, -1.1), 0.08, "woodDark", G, 6))
+        mound_y = lambda x, z: -0.3 + 1.95 * math.sqrt(max(0.0, 1 - (x / (W + 0.4)) ** 2 - ((z - 0.6) / 1.95) ** 2)) - 0.08   # (the mound's surface)
+        brushHeap(K, "Roof", (0.0, 1.2, 0.5), (W - 0.2, 0.55, 1.5), seed + 3, n=6, surface=mound_y)
+        for k in range(2): K.cyl(f"Jerry{k}", (W - 0.5 - k * 0.45, 0.0, -2.3), 0.16, 0.45, "iron", G, 8)
+    if dmg:
+        K.boolean(front, K.breach((R.uniform(0.8, 1.6), 0.9, -1.65), (0.6, 0.55, 0.5), seed=seed, mat="stone"))
+        K.boolean(mound, K.breach((-0.8, 1.4, 0.2), (0.9, 0.6, 0.9), seed=seed + 5, mat="earthMound"))
+        K.lump("Fall", (1.2, 0.0, -2.5), (0.7, 0.3, 0.45), "rubble", G, seed=seed + 2)
+    if ruin:
+        K.boolean(front, K.skyline(-W - 1, W + 1, -3, -1, 0.5, 0.3, seed=seed + 7, mat="stone"))
+        for k in range(4):
+            parts.append(K.rod(f"Burnt{k}", (R.uniform(-1.6, 1.6), 0.3, -1.6), (R.uniform(-1.8, 1.8), 1.1, R.uniform(-0.5, 0.8)), 0.08, "fsCharred", G, 6))
+
+def buildCaveMouth(K, name, spec, state, seed):
+    """THE CAVE'S MOUTH (the game sets it into its sandstone rocks — algCave): the timber SHORING (two posts and a
+    lintel), the dark of the tunnel behind, a curved dry-stone BREASTWORK across the front with a gap, brush over the
+    lintel, the gear (jerrycans, crates). The mouth 3 wide × 2.4 high (algCave's), front -Z. Damaged: the breastwork
+    breached, a post knocked askew; ruin = BLOWN IN: the mouth filled with fallen rock, charred timbers out of it."""
+    R = random.Random(seed); G = "h"
+    dmg, ruin = state != "intact", state == "ruin"
+    # (no tunnel of its own: the game sets this into its cave — algCave's rocks frame it, its tunnel is the dark;
+    # a big dark box here baked pale)
+    walls = [wallRun(K, "BreastL", -2.6, -0.55, -1.55, -1.05, 1.05, seed), wallRun(K, "BreastR", 0.55, 2.6, -1.5, -1.0, 1.0, seed + 1)]
+    if not ruin:
+        tilt = 0.35 if dmg else 0.0
+        K.rod("PostL", (-1.45, -0.2, 0.0), (-1.45, 2.42, 0.0), 0.11, "woodDark", G, 7)
+        K.rod("PostR", (1.45, -0.2, 0.0), (1.45 + tilt, 2.4 - tilt * 0.3, -tilt * 0.4), 0.11, "woodDark", G, 7)
+        K.rod("Lintel", (-1.75, 2.48, 0.0), (1.75, 2.46 - tilt * 0.4, 0.0), 0.13, "woodDark", G, 7)
+        brushHeap(K, "Hang", (0.0, 2.55, -0.15), (1.9, 0.4, 0.5), seed + 3, n=6)
+        for k in range(3): K.cyl(f"Jerry{k}", (-2.2 + k * 0.42, 0.0, -0.4), 0.16, 0.45, "iron", G, 8)
+        for k in range(2): K.box(f"Crate{k}", 1.7, 2.3, 0.0 + k * 0.42, 0.4 + k * 0.42, -0.5, 0.0, "woodDark", G, 0.02)
+    if dmg:
+        K.boolean(walls[1], K.breach((1.5, 0.7, -1.25), (0.6, 0.5, 0.5), seed=seed, mat="stone"))
+        K.lump("Fall", (1.8, 0.0, -2.1), (0.6, 0.28, 0.4), "rubble", G, seed=seed + 2)
+    if ruin:   # BLOWN IN
+        K.lump("Rockfall", (0.0, -0.06, -0.2), (2.2, 1.9, 1.4), "rubble", G, seed=seed + 4, rough=0.45, sub=3, flatten=200)   # (its lower half left round, under the ground: so rough, a bottom clamped flat folded over itself — the coplanar gate)
+        for k in range(3): K.rod(f"Burnt{k}", (R.uniform(-1.4, 1.4), 0.4, -0.9), (R.uniform(-1.6, 1.6), 1.5, R.uniform(-0.2, 0.4)), 0.1, "fsCharred", G, 6)
+        top = K.skyline(-4, 4, -4, 2, 0.45, 0.25, seed=seed, mat="stone")
+        for w in walls: K.boolean(w, top)
+
+def buildFoyer(K, name, spec, state, seed):
+    """THE HIDDEN FIRE: a ring of stones, its ash, a pot on three stones and a kettle, under a brush SHADE on four poles
+    (no smoke seen from the air). Damaged: the shade half down; ruin: scattered, cold."""
+    R = random.Random(seed); G = "h"
+    for k in range(10):
+        a = k / 10 * 6.283
+        K.lump(f"Ring{k}", (math.cos(a) * 0.6, 0.0, math.sin(a) * 0.6), (0.15, 0.12, 0.13), "stoneMechta", G, seed=seed + k, rough=0.3, sub=1)
+    K.lump("Ash", (0.0, 0.0, 0.0), (0.45, 0.08, 0.45), "fsAshM", G, seed=seed + 20, rough=0.3)
+    if state != "ruin":
+        K.lump("Pot", (0.05, 0.12, 0.0), (0.22, 0.28, 0.22), "iron", G, seed=seed + 30, rough=0.04)   # (a cylinder overlapped itself once bevelled)
+        K.cyl("Kettle", (0.9, 0.0, 0.5), 0.12, 0.25, "iron", G, 10, r2=0.07)
+        for k, (x, z) in enumerate(((-1.6, -1.3), (1.6, -1.3), (-1.6, 1.3), (1.6, 1.3))):
+            if state == "damaged" and k == 3: continue
+            K.rod(f"Pole{k}", (x, 0.0, z), (x, 1.9, z), 0.05, "woodDark", G, 6)
+        if state == "damaged": brushHeap(K, "Shade", (0.6, 0.1, 0.9), (1.4, 0.35, 0.9), seed + 3, n=5)   # (fallen)
+        else:
+            for k in range(7): K.rod(f"Lath{k}", (-1.75, 1.88, -1.3 + k * 0.43), (1.75, 1.88, -1.3 + k * 0.43 + 0.05), 0.03, "woodDark", G, 5)   # (the shade's laths: the brush lies on them)
+            brushHeap(K, "Shade", (0.0, 1.9, 0.0), (1.6, 0.3, 1.3), seed + 3, n=5)
+
+def earthMound(nb):
+    """The casemate's roof: dug earth, stony, its colour the slope's (the ground blend takes it to the foot)."""
+    # (darker than the ground: 0x8c6c4c read as a pale blob in the lab)
+    c = nb.mix(nb.noise(2.5, 5), srgb(0x6a5038), srgb(0x4f3c2b))
+    c = nb.mix(nb.mr(nb.noise(9.0, 4), 0.6, 0.68), c, srgb(0x86705a))
+    return dust(nb, c, 0.6, 0.5)
+MATDEF.update({"brushMaquis": (0.95, house.drystone.brushMat),   # (the sangars' juniper)
+               "earthMound": (1.0, earthMound), "fsAshM": (1.0, lambda nb: nb.mix(nb.noise(4.0, 4), srgb(0x5e5a54), srgb(0x2e2a26)))})
+# THE COMMAND POST: the one-room house requisitioned — brush over its roof, a long-wire radio antenna between two poles
+TYPES["pc"] = dict(TYPES["petite"], brushRoof=True, antenna=True, life=[], ground=["firewood"])
+TYPES["casemate"] = dict(builder=buildCasemate, atlas=1024, farRatio=0.45)
+TYPES["grotte"] = dict(builder=buildCaveMouth, atlas=1024, farRatio=0.5)
+TYPES["foyer"] = dict(builder=buildFoyer, atlas=512, farRatio=0.6)
 TYPES["soutien"] = dict(builder=buildRetaining, atlas=512, farRatio=0.5)
 TYPES["escalier"] = dict(builder=buildSteps, atlas=512, farRatio=1.0)   # (1.2k triangles: the far keeps them all — decimated, its ruin and its damaged state shaded off their near, the gate)
 TYPES["djemaa"] = dict(builder=buildDjemaa, atlas=512, farRatio=0.5)
