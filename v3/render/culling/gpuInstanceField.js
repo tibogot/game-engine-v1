@@ -29,6 +29,7 @@ import {
   length, normalLocal, normalize, positionLocal, step, storage, uint, uniform, varying, vec3, vec4,
 } from "three/tsl";
 import { frustumVisibleAtClip } from "../scatter/gpuCull.js";
+import { readLod } from "./lodSettings.js";
 
 export class GpuInstanceField {
   /**
@@ -39,12 +40,15 @@ export class GpuInstanceField {
    *   instances  { count, sphere: Float32Array(count·4) world centre + radius,
    *                rows: Float32Array(count·12) affine rows (3×vec4, row-major),
    *                type: Uint32Array(count) }
-   *   lodDistances  [d1, d2, …] metres; one fewer than the LOD count
-   *   fadeDistance  beyond this, not drawn at all
+   *   lod        { distances: [d1, d2, …] (one fewer than the LOD count), cullFrom } metres
+   *              (render/culling/lodSettings.js; the old `lodDistances` / `fadeDistance` still read)
    *   hiz        HiZPyramid or null
    */
-  constructor({ renderer, scene, name = "GpuProps", types, instances, lodDistances = [40, 110],
-    fadeDistance = 600, hiz = null }) {
+  constructor({ renderer, scene, name = "GpuProps", types, instances, lod = null, lodDistances = null,
+    fadeDistance = null, hiz = null }) {
+    const L = readLod(lod ?? { lodDistances, fadeDistance });
+    lodDistances = L.distances.length ? L.distances : [40, 110];
+    fadeDistance = L.cullFrom ?? 600;
     this.renderer = renderer;
     this.name = name;
     this.types = types;

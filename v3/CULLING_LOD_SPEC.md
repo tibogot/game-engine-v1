@@ -153,7 +153,15 @@ GPU timestamp misreads multi-pass frames) on a quiet machine.
    state; re-run: 0 px). Left for later: foliageLodRenderer (its boundaries
    use different distances per edge — needs `lodTier` with a distance per
    boundary) and placedFoliage.
-2. The LOD settings shape + aliases (R3). Editor and level files read it.
+2. The LOD settings shape + aliases (R3). Editor and level files read it. — DONE 2026-10-27:
+   `render/culling/lodSettings.js` `readLod()` (every old spelling: `lodDistances` array or
+   `{lod1, lod2}`, `lod0Distance/lod1Distance`, `lodDistance/lodDistance2`, `lod0Dist/lod1Dist`,
+   `fadeOutDistance/fadeDistance/cullDistance` → cullFrom, `lodFloors` → floors; the new name wins;
+   `tools/lodSettingsTest.mjs`). Entry points take `lod: {…}` and still read their old names:
+   placedFoliage (now on `lodTier` — hysteresis, it switched hard before), gpuInstanceField,
+   scatterField.syncCommon. Saved files keep their names (read through readLod when a system moves).
+   Not done here: D1's 3D distance for the plant fields (they still use their floors) — changes
+   where boundaries fall on existing maps; with step 4.
 3. One octahedral core (R5): the arborist on `render/foliage/octahedralCore.js`.
 4. The API (§1) as a thin facade over today's systems — instanced →
    propInstancer, gpu → scatterField — so games can start using it before

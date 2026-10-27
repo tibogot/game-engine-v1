@@ -90,6 +90,9 @@ export const PUBLIC_ENGINE_MODULES = [
   // alg-rts algSplats.js)
   "v3/terrain/splatMaterials.js",
   "v3/render/instancing/autoLod.js",
+  // The one LOD settings shape (CULLING_LOD_SPEC R3): readLod() turns any old spelling a level,
+  // preset or system uses into { distances, hysteresis, fade, impostorFrom, cullFrom, floors }
+  "v3/render/culling/lodSettings.js",
   // The Revo grass field: a game runs its own instance on a surface the terrain
   // does not have (games/stylized-lab: grass on cliff tops), with the level's
   // revo settings (app.revoGrassState / app.grassState)

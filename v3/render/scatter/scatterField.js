@@ -52,6 +52,7 @@ import { createClipmapGroundY } from "../../terrain/clipmapGroundY.js";
 import { scatterClump, scatterRuleKeep } from "./scatterNoise.js";
 import { scatterFrustumVisible } from "./gpuCull.js";
 import { paddedClipPlanes } from "../culling/cpuCull.js";
+import { readLod } from "../culling/lodSettings.js";
 import { LAYERS } from "../layers.js";
 import { markGpuOnly } from "../gpuOnlyArrays.js";
 
@@ -990,11 +991,17 @@ export class ScatterField {
 
   /**
    * The settings every scattered plant has. A plant module passes its own state
-   * plus grassState for the shared wind.
+   * plus grassState for the shared wind. Its LOD: `lod` (render/culling/lodSettings.js, the
+   * engine's one shape) or the state's own `lodDistance` / `lodDistance2`.
    */
   syncCommon({ wind = null, density, sizeVar, colorVar, clumping, clumpSize, grassLift, flex,
-    interactRadius, interactStrength, lodDistance, lodDistance2, fadeStart, fadeEnd, slopeMinY }) {
+    interactRadius, interactStrength, lod = null, lodDistance, lodDistance2, fadeStart, fadeEnd, slopeMinY }) {
     const u = this.u;
+    if (lod) {
+      const [d0, d1] = readLod(lod).distances;
+      lodDistance = d0 ?? lodDistance;
+      lodDistance2 = d1 ?? lodDistance2;
+    }
     if (wind) {
       u.uWindSpeed.value = wind.windSpeed ?? 0.2;
       u.uWindStrength.value = (wind.windStrength ?? 1.4) * (wind.windMul ?? 1);

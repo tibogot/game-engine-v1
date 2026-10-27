@@ -27,6 +27,8 @@ import * as THREE from "three";
 import { attribute, cos, float, int, floor, sin, time, renderGroup, uniform, uniformArray, vec4 } from "three/tsl";
 import { createFoliageTypeGeometry, FOLIAGE_LODS, cardTextureOf } from "./foliageGeometry.js";
 import { createFoliageMaterial, makeCardTexture } from "./foliageSystem.js";
+import { lodTier, TIER_UNSET } from "../culling/cpuCull.js";
+import { readLod } from "../culling/lodSettings.js";
 // The canopy-tree no-flip switch (a lab's before / after), public through here.
 export { FOLIAGE_DOME_CARDS } from "./foliageSystem.js";
 
@@ -44,15 +46,19 @@ export class PlacedFoliage {
   /**
    * @param {object} o
    *   scene
-   *   lodDistances  [near→mid, mid→far] in metres from the camera
+   *   lod           { distances: [near→mid, mid→far], hysteresis } — metres from the camera
+   *                 (render/culling/lodSettings.js; the old `lodDistances: [a, b]` still reads)
    *   shadowLods    how many detail levels cast (the far one never does)
    */
-  constructor({ scene, lodDistances = [45, 110], shadowLods = 2 } = {}) {
+  constructor({ scene, lod = null, lodDistances = null, shadowLods = 2 } = {}) {
     this.scene = scene;
     this.group = new THREE.Group();
     this.group.name = "PlacedFoliage";
     scene.add(this.group);
-    this.lodDistances = lodDistances;
+    const L = readLod(lod ?? { lodDistances });
+    this.lodDistances = [L.distances[0] ?? 45, L.distances[1] ?? 110];
+    this.lodHysteresis = L.hysteresis;
+    this._edges2 = [0, 0];
     this.shadowLods = shadowLods;
 
     /** key → { index, type, localH, meshes: [lod] | null } */
@@ -258,6 +264,7 @@ export class PlacedFoliage {
     this._projView.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     this._frustum.setFromProjectionMatrix(this._projView);
     const [d1, d2] = this.lodDistances;
+    const edges2 = this._edges2;
     const byIndex = [];
     for (const t of this.types.values()) byIndex[t.index] = t;
     let changed = this._dirty;
@@ -269,9 +276,12 @@ export class PlacedFoliage {
       sph.radius = r + CULL_MARGIN;
       let lod = -1;
       if (this._frustum.intersectsSphere(sph)) {
-        const dist = Math.hypot(p.x - cp.x, p.y - cp.y, p.z - cp.z);
+        const dx = p.x - cp.x, dy = p.y - cp.y, dz = p.z - cp.z;
         const m = t.lodMul;
-        lod = dist < d1 * m ? 0 : dist < d2 * m ? 1 : 2;
+        edges2[0] = (d1 * m) ** 2; edges2[1] = (d2 * m) ** 2;
+        // The shared tiers with hysteresis (CULLING_LOD_SPEC R3): a plant on a boundary no longer
+        // flips detail every time the camera damps. Out of view (-1) comes back on plain thresholds.
+        lod = lodTier(dx * dx + dy * dy + dz * dz, p.lod < 0 ? TIER_UNSET : p.lod, edges2, this.lodHysteresis);
       }
       if (lod !== p.lod) { p.lod = lod; changed = true; }
     }
