@@ -12,6 +12,7 @@ import { installSharedInstanceBuilds, installDrawnRangeUploads } from "../render
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
 import { installShadowBuildSharing } from "../render/shadowBuildSharing.js";
+import { installCountStableKeys } from "../render/countStableKeys.js";
 import { setAlphaCoverageDefault } from "../render/materials/alphaCutout.js";
 // r186: instanced vertex effects (birds, wind, sway, billboards) in the instance's own frame, as r184
 import "../render/instancedPositionOrder.js";
@@ -420,6 +421,9 @@ export async function startV3App(opts = {}) {
   }
   // One shadow-pass node build for every opaque caster, not one per material map / geometry layout
   // (render/shadowBuildSharing.js: alg built the same shadow shader 21, 16, 8… times). ?shadowshare=0 to A/B.
+  // A Mesh drawn `count` times keeps one node build as its count crosses 1 (render/countStableKeys.js:
+  // a herd coming into view rebuilt its shaders each time). ?countkey=0 to A/B.
+  if (new URLSearchParams(location.search).get("countkey") !== "0") installCountStableKeys(renderer);
   // ?shadowkeymemo=0 to A/B the shadow-key memo (the per-frame re-keying of every shadow draw).
   if (new URLSearchParams(location.search).get("shadowshare") !== "0") {
     installShadowBuildSharing(renderer, { keyMemo: new URLSearchParams(location.search).get("shadowkeymemo") !== "0" });

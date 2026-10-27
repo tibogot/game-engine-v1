@@ -156,6 +156,17 @@ pooled UBOs (r185), the instance-sync, shared-build refresh and CSM frame-late f
    - Left (201 duplicate builds): book cards 22 (one material per book: its own textures), RtsStencil
      11, village gblend 8, 16 MeshBasic singles, PMREM 6 — each needs its family's nodes shared, the
      same way (one node set, per-object values).
+   - **DONE — builds MID-PLAY** (2026-10-27; tour = 10 camera jumps over alg auresNew after boot,
+     counting nodeBuilderCache sets + device pipeline creations): 13+ builds → **1**. The r186 "no shadow
+     maps in precompile" change was NOT the cause (alg warms with real frames). Two real causes:
+     (1) three adds the uuid to the key when `count > 1`, so a plain Mesh drawn `count` times (herds,
+     small crowds) re-keyed and REBUILT every time its count crossed 1 — forced 1 ↔ 3 eight times =
+     8 builds, in play, over and over. render/countStableKeys.js: a plain Mesh's key sees count 1
+     (`?countkey=0` to A/B) → 0 builds. (2) The warm-up skips engine objects hidden at load; the plant
+     fields' draw batches are hidden while the start view has none of their plants → `userData.warmUp`
+     (scatterField sets it on its batches; pipelineWarmup honours it). Left: the munitions-point model
+     (points.glb, M_PointMun_Stencils) is created mid-game — alg should pre-add it hidden at boot.
+     (Lesson: "not in nodeBuilderCache" ≠ new — three drops unused builds; count cache SETS.)
    - The warm-up (9 s) and the level load (8 s) are both main-thread CPU — overlapping them gains little.
    - Tried and reverted: every 2D canvas a CPU canvas (boot ~9 s SLOWER). Kept: the haystack's mips.
    Then:

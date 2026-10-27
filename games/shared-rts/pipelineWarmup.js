@@ -64,7 +64,9 @@ export async function warmGamePipelines(app, engineObjects, { frames = 2 } = {})
   const targets = [];
   app.scene.traverse((o) => {
     if (!drawable(o)) return;
-    if (engineObjects.has(o) && !shownAtLoad.has(o)) return;
+    // (An engine object that is hidden at load but SHOWN IN PLAY says so: `userData.warmUp` — the plant
+    // fields' draw batches, hidden while the start view has none of their plants: 6 builds on a map tour.)
+    if (engineObjects.has(o) && !shownAtLoad.has(o) && o.userData?.warmUp !== true) return;
     const emptyInstanced = o.isInstancedMesh && o.count === 0;
     const emptyGeo = o.geometry?.isInstancedBufferGeometry && o.geometry.instanceCount === 0;
     targets.push({ o, emptyInstanced, emptyGeo });

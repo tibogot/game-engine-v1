@@ -627,6 +627,7 @@ export class ScatterField {
       const mesh = new THREE.Mesh(geometry, first.material);
       mesh.name = `${this.name}:batch${this._batches.length}`;
       mesh.count = 1;
+      mesh.userData.warmUp = true;   // hidden while none of its plants show, drawn in play (pipelineWarmup)
       mesh.frustumCulled = false;
       mesh.castShadow = first.castShadow;
       mesh.receiveShadow = first.receiveShadow;
@@ -637,6 +638,7 @@ export class ScatterField {
         const d = new THREE.Mesh(geometry, grp.depth.material);
         d.name = mesh.name + ":depth";
         d.userData.depthPrepass = true;
+        d.userData.warmUp = true;
         d.count = 1;
         d.frustumCulled = false;
         d.castShadow = d.receiveShadow = false;
