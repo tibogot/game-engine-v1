@@ -35,8 +35,10 @@ repo; restore point: git tag `pre-r186`). The r184 notes below stay as history.
 - MEASURED: alg default view scale 2 16.0–17.5 ms (r184 16.2–16.8), scale 1 ~9 ms both; the first
   frames after a render-scale change spike (pipelines for the resized MSAA targets), then settle.
   Reference views identical to r184 except softer tree-shadow edges (r186 filtering).
-- OPEN: `handbrakeStabilityTest` 23° (limit 15°; r184 3°) — the car's straight-line drift is a
-  physics weakness r186's float rounding pushes over; the Thunderline car's call. Old MSAA targets
+- FIXED 2026-10-27: `handbrakeStabilityTest` 23° (limit 15°; r184 3°). The car is yaw-unstable with the
+  handbrake held straight — a round-off rate grew ~25×/s (also at full or 1.5× damping); r184 passed by luck.
+  modularRoadVehicle TIRE.handbrakeHold*: handbrake + centred steering + rate < 0.05 rad/s → extra yaw
+  damping. Now 0° over 15 s; the steered drift unchanged (180°, 5.0 s scoring). 221/221. Old MSAA targets
   not freed after a resize (72 MB) and a second full-size 4-sample depth buffer (72 MB).
 Started 2026-10-17 from the r185 + r186 release notes.
 What WebGPU offers that three does not expose (render bundles, device limits, f16, subgroups…):

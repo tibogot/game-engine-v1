@@ -905,6 +905,20 @@ export const TIRE = {
    *  Do not "split the difference" at 0.40: it measured WORSE than 0.25 (108°),
    *  the curve is not monotonic. */
   driftYawAssistMul: 0.7,
+  /**
+   * HANDBRAKE HELD STRAIGHT stays straight (2026-10-27, three r186: handbrakeStabilityTest 23°, r184 3°).
+   * With the rear on `gripHandbrake` the car is yaw-UNSTABLE going straight: a round-off rate grows ~25×
+   * a second (1e-16 rad/s at t0 → 0.55 by 15 s) — at driftYawAssistMul 0.7, at 1.0 (~10×/s) and even
+   * 1.5. No amount of the ordinary damping stabilises it, so r184 passed only because its round-off
+   * started smaller; r186 rounds differently and it showed. Real cars do this too on locked rears —
+   * but holding Space with the wheel centred is never a request to spin.
+   * So: handbrake down, steering centred (|steer| < handbrakeHoldSteer) and the car barely turning
+   * (|yaw rate| < handbrakeHoldRate rad/s) → extra yaw damping, handbrakeHoldGain × yawRateDamp.
+   * A real drift is never in that box: it starts with steering, and turns far faster than 0.05 rad/s.
+   */
+  handbrakeHoldRate: 0.05,
+  handbrakeHoldSteer: 0.02,
+  handbrakeHoldGain: 4,
   // Anti-roll / orientation. When grounded the chassis aligns its up-axis to the
   // averaged ground normal (so it leans into banks and follows loops instead of
   // fighting toward world-up); `stabilizerDamp` damps the roll/pitch rate.
@@ -5644,6 +5658,10 @@ export class Vehicle {
       refRate += (capped - refRate) * this._turnAssistMix;
     }
     torque -= (yawRate - refRate) * TIRE.yawRateDamp * driftMul;
+    // (see TIRE.handbrakeHoldRate: the handbrake held straight stays straight)
+    if (drifting && Math.abs(this.input.steer) < TIRE.handbrakeHoldSteer && Math.abs(yawRate) < TIRE.handbrakeHoldRate) {
+      torque -= yawRate * TIRE.yawRateDamp * TIRE.handbrakeHoldGain;
+    }
 
     body.torqueAccum.addScaledVector(this._yawN, torque * TIRE.yawAssist * contact);
   }
