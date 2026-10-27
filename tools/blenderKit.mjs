@@ -48,7 +48,11 @@ if (!flag("--merge")) {
   console.log(`blender: ${script}.py${only ? ` --only ${only}` : ""}${flag("--quick") ? " --quick" : ""}${flag("--gpu") ? " --gpu" : ""}`);
   const r = spawnSync(BLENDER, bargs, { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 28 });
   const out = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-  for (const line of out.split(/\r?\n/)) if (/^(TRIS|BAKE|Error|Traceback)|Error:|DONE/.test(line)) console.log(`  ${line}`);
+  let tb = false;   // (a traceback printed whole: its File lines say where)
+  for (const line of out.split(/\r?\n/)) {
+    if (/^Traceback/.test(line)) tb = true;
+    if (tb || /^(TRIS|BAKE|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
+  }
   if (r.status !== 0 || /Traceback/.test(out)) { console.log(`blender FAILED (${secs()})`); process.exit(1); }
   console.log(`  blender done (${secs()})`);
 }

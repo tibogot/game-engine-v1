@@ -689,12 +689,33 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       // at its LOWEST ground — the hill rises behind it, its two storeys stand clear in front — 2026-10-27.) The town's
       // PROPS too (MAP.town.props: the mechta's lean-tos, yards and ovens — MECHTA_PROPS)
       const townProps = MAP.town.props ?? [];
-      for (const row of [...MAP.town.houses, ...townProps]) {
-        if (row[3] != null) continue;
-        const [ty, , , , , yaw, fx, fz, hx, hz] = row, c = Math.cos(yaw), s = Math.sin(yaw);
+      const groundOf = ([, , , , , yaw, fx, fz, hx, hz]) => {   // its footprint's mean and lowest ground
+        const c = Math.cos(yaw), s = Math.sin(yaw);
         let sum = 0, n = 0, lo = Infinity;
         for (const a of [-1, 0, 1]) for (const b of [-1, 0, 1]) { const lx = a * hx, lz = b * hz, h = app.getWorldHeight(fx + lx * c + lz * s, fz - lx * s + lz * c); sum += h; n++; lo = Math.min(lo, h); }
-        row[3] = ty === "pente" ? lo : sum / n;
+        return { mean: sum / n, lo };
+      };
+      // A TERRACED village's rows (maps/auresNew.js terraced — the stone dechra, 2026-10-27: a row's 11th field
+      // { site, level, pad }): its BASE the mean ground of its level-0 houses; each row at base + level × 2.6 m (a
+      // retaining wall's height), so a wall standing on terrace k - 1 tops out at terrace k; the walls and steps
+      // (pad false) stand there unlevelled — sunk deep, never floating
+      const TERRACE_G = 2.6, base = {};
+      for (const row of MAP.town.houses) {
+        const m = row[10];
+        if (!m || m.level !== 0 || row[3] != null) continue;
+        const b = (base[m.site] ??= { sum: 0, n: 0 });
+        b.sum += groundOf(row).mean; b.n++;
+      }
+      for (const row of [...MAP.town.houses, ...townProps]) {
+        if (row[3] != null) continue;
+        const [ty, , , , , yaw, fx, fz, hx, hz] = row, m = row[10];
+        if (m && base[m.site]) {
+          row[3] = base[m.site].sum / base[m.site].n + m.level * TERRACE_G;
+          if (m.pad === false) continue;
+        } else {
+          const g = groundOf(row);
+          row[3] = ty === "pente" ? g.lo : g.mean;
+        }
         await app.flattenRect?.(fx, fz, hx + 1.2, hz + 1.2, row[3], { rim: 4, rotY: yaw });
       }
       for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
@@ -743,10 +764,12 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       };
       // SIGHT: each house a tall box to its parapet (the kits' heights, real metres x1.3; the minaret its own column)
       // — combat's line of sight and the fog of war (algSight.addBox / topAt): no shot, no view THROUGH the town
-      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0, pente: 6.0 };   // (the mechta's two-room: its upper room on half the roof)
-      for (const [ty, st, , y, , yaw, fx, fz, hx, hz] of MAP.town.houses) {
+      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0, pente: 6.0, masjid: 4.1 };   // (the mechta's two-room: its upper room on half the roof)
+      for (const [ty, st, x, y, z, yaw, fx, fz, hx, hz] of MAP.town.houses) {
         app.algSight?.addBox(fx, fz, hx, hz, yaw, y + (st === "ruin" ? 1.6 : (PAR[ty] ?? 5) * 1.3));   // (a ruin from the start: its rubble's height — algTownDamage ruinTop)
         if (ty === "mosquee") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = -4.25 * 1.3, mz = 4.75 * 1.3; app.algSight?.addBox(fx + mx * c + mz * s, fz - mx * s + mz * c, 2.4, 2.4, yaw, y + 18 * 1.3); }
+        // the dechra's mosque: its MINARET a column of its own (mechta.py tower: 5.35, 2.35 from the model's origin, 7.6 m)
+        if (ty === "masjid" && st !== "ruin") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = 5.35 * 1.3, mz = 2.35 * 1.3; app.algSight?.addBox(x + mx * c + mz * s, z - mx * s + mz * c, 1.5, 1.5, yaw, y + 7.6 * 1.3); }
       }
       app.fogOfWar?.rebuildHeights();
       // GARRISONS (algGarrison.js, CoH's): every house that still stands takes a squad (the mosque 8); the door a
@@ -755,7 +778,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         if (st === "ruin") return null;
         const c = Math.cos(yaw), s = Math.sin(yaw), out = hz + 1.2;
         return app.algGarrison?.addHouse({ x: fx, z: fz, yaw, hw: hx * 0.9, hd: hz * 0.9, y0: y, y1: y + (PAR[ty] ?? 5) * 1.3,
-          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" }) ?? null;
+          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" || ty === "masjid" }) ?? null;
       });
       // THEY BREAK AND COLLAPSE (algTownDamage.js): health, the damaged and ruin models, the garrison thrown out
       field.damage = createTownDamage(app, { field, houses: MAP.town.houses, footprints: townFoot, garrisons: townGarrisons, par: PAR });

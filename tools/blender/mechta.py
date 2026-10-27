@@ -81,6 +81,15 @@ TYPES = {
               ("r", -0.85, -0.1, 3.0, 4.72, "shut"), ("l", -0.4, 0.05, 3.9, 4.3, "void"), ("b", 0.3, 0.75, 4.0, 4.4, "void")],
         dmg=[((1.4, 0.8, -2.8), (0.55, 0.6, 0.6)), ((-3.4, 4.0, 1.3), (0.6, 0.8, 0.7)), ((-0.65, 4.6, -2.8), (0.6, 0.55, 0.6))],
         ruin=(2.6, 1.1), life=["hay", "pottery", "laundry"], ground=["firewood"]),
+    # THE DECHRA'S MOSQUE (2026-10-27, DECHRA_PLAN.md): a plain stone prayer hall, small high windows, a squat square
+    # MINARET at its back corner (the village's landmark), lime on the door's frame and the minaret's cap
+    "masjid": dict(render="stoneMechta", shutter="woodDark", door=(-0.7, 0.7, "woodDark"), plain=True,
+        main=(-4.5, 4.5, -3.5, 3.5), floors=[], roof=3.6, par=4.08, courses=[1.4], spouts=[-2.6, 2.6],
+        tower=(5.35, 2.35, 1.1, 7.6), limeDoor=True,   # (not "minaret": house.build reads that key, the M'zab's)
+        wins=[("f", -3.2, -2.7, 2.3, 2.8, "void"), ("f", 2.7, 3.2, 2.3, 2.8, "void"), ("l", -1.5, -1.0, 2.3, 2.8, "void"),
+              ("l", 1.0, 1.5, 2.3, 2.8, "void"), ("b", -2.0, -1.5, 2.3, 2.8, "void")],
+        dmg=[((-2.0, 1.0, -3.5), (0.7, 0.7, 0.6)), ((-4.5, 1.2, -1.6), (0.6, 0.8, 0.8)), ((5.35, 4.8, 1.25), (0.6, 0.7, 0.5))],
+        ruin=(2.2, 1.0), life=["mats"], ground=["bench"]),
 }
 
 def stairMass(K, nm, x0, x1, zFoot, zLand0, zLand1, yTop, n, mat):
@@ -98,6 +107,19 @@ def stairMass(K, nm, x0, x1, zFoot, zLand0, zLand1, yTop, n, mat):
     m = len(prof)
     for i in range(m):
         j = (i + 1) % m
+        bm.faces.new((a[i], a[j], b[j], b[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return K.obj(nm, bm, mat, "h")
+
+def prismX(K, nm, prof, x0, x1, mat):
+    """A solid from a (z, y) PROFILE (a closed polygon, real metres) extruded across x0..x1 — one mesh (a retaining wall
+    and its parapet as two boxes overlapped in one plane: the coplanar gate)."""
+    bm = bmesh.new()
+    a = [bm.verts.new(B(x0, y, z)) for z, y in prof]
+    b = [bm.verts.new(B(x1, y, z)) for z, y in prof]
+    bm.faces.new(a); bm.faces.new(list(reversed(b)))
+    for i in range(len(prof)):
+        j = (i + 1) % len(prof)
         bm.faces.new((a[i], a[j], b[j], b[i]))
     bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
     return K.obj(nm, bm, mat, "h")
@@ -179,6 +201,24 @@ def buildMechta(K, name, spec, state, seed):
     if "outStair" in spec:
         zf, zl0, zl1, yl = spec["outStair"]
         extras.append(stairMass(K, "OutStair", X1 + 0.03, X1 + 0.95, zf, zl0, zl1, yl, 12, spec["render"]))
+    # THE MINARET (the dechra's mosque): a squat square tower at the hall's back corner, small openings near its top,
+    # a lime cap and a finial; and LIME round the mosque's door — the village's one whitewashed building
+    if "tower" in spec:
+        mx, mz, mh, mH = spec["tower"]
+        mn = K.box("Minaret", mx - mh, mx + mh, -0.3, mH, mz - mh, mz + mh, spec["render"], G, 0)
+        for k, (fx, fz) in enumerate(((0, -1), (1, 0), (0, 1), (-1, 0))):
+            y0 = mH - 1.35
+            if fx == 0: K.boolean(mn, K.cutter(mx - 0.18, mx + 0.18, y0, y0 + 0.55, mz + fz * mh - 0.4, mz + fz * mh + 0.4, "dark"))
+            else: K.boolean(mn, K.cutter(mx + fx * mh - 0.4, mx + fx * mh + 0.4, y0, y0 + 0.55, mz - 0.18, mz + 0.18, "dark"))
+        K.bevel(mn, 0.06, 2, 30)
+        extras.append(mn)
+        extras.append(K.box("MinaretCap", mx - mh - 0.05, mx + mh + 0.05, mH - 0.05, mH + 0.32, mz - mh - 0.05, mz + mh + 0.05, "renderPlain", G, 0.03))
+        extras.append(K.cyl("Finial", (mx, mH + 0.3, mz), 0.26, 0.7, "renderPlain", G, 10, r2=0.04))
+    if spec.get("limeDoor"):
+        d0, d1 = spec["door"][0], spec["door"][1]
+        fr = K.box("DoorLime", d0 - 0.35, d1 + 0.35, 0.2, 2.75, Z0 - 0.035, Z0 + 0.02, "renderPlain", G, 0.01)
+        K.boolean(fr, K.cutter(d0, d1, 0.0, 2.3, Z0 - 0.2, Z0 + 0.2))
+        extras.append(fr)
     # THE UPPER ROOM on its loggia (not in a ruin: fallen in)
     upperRect = None
     if "upper" in spec and not ruin:
@@ -228,7 +268,9 @@ def buildMechta(K, name, spec, state, seed):
             for o in extras: K.boolean(o, cut)
     if ruin:
         h, amp = spec["ruin"]
-        top = K.skyline(X0 - 1.5, X1 + 1.5, Z0 - 5.0, Z1 + 1.5, h - 0.03, amp, seed=seed, mat="stone")
+        # (over the TOWER too: the mosque's minaret stands past the hall — a 45 cm slab of it was left standing full height)
+        tx1 = max(X1, spec["tower"][0] + spec["tower"][2]) if "tower" in spec else X1
+        top = K.skyline(X0 - 1.5, tx1 + 1.5, Z0 - 5.0, Z1 + 1.5, h - 0.03, amp, seed=seed, mat="stone")
         for o in extras: K.boolean(o, top)
     # (the shell triangulated HERE, the beauty way: the exporter's own cut a cut wall's concave faces into slivers that
     # overlapped — the hillside house's side door, the coplanar gate)
@@ -359,6 +401,64 @@ def buildYard(K, name, spec, state, seed):
         top = K.skyline(-W - 2, W + 2, -D - 2, D + 2, 0.6, 0.3, seed=seed, mat="stone")
         for w in walls: K.boolean(w, top)
 
+# ── THE DECHRA'S PIECES (2026-10-27, DECHRA_PLAN.md): its terraces' walls, the lanes' steps, the djemaa ─────────────────
+TERRACE = 2.0   # m: a terrace's drop — the retaining wall's height, the steps' climb (the map's rows: 2.6 game m apart)
+def buildRetaining(K, name, spec, state, seed):
+    """A TERRACE'S RETAINING WALL, a 4 m module laid end to end: dry stone from below the lower ground up to the terrace
+    (TERRACE), its back into the hill, a knee-high PARAPET along its top (cover for the row above), its top broken a
+    little; drain holes at its foot. Front -Z (downhill). Damaged: its parapet breached; ruin: slumped, its stones heaped."""
+    R = random.Random(seed); G = "h"; L, H, P = 2.0, TERRACE, 0.6
+    # (its foot 1.5 m down: the game stands it on the terrace below without levelling the ground — never floating)
+    w = prismX(K, "Retain", [(-0.3, -1.5), (-0.3, H + P), (0.1, H + P), (0.1, H), (0.65, H), (0.65, -1.5)], -L, L, "stoneMechta")
+    K.boolean(w, K.skyline(-L - 1, L + 1, -1.5, 0.12, H + P - 0.07, 0.09, seed=seed, mat="stoneMechta"))   # (the parapet's top: not a ruled line)
+    for k in range(2):
+        x = R.uniform(-L + 0.5, L - 0.5)
+        K.boolean(w, K.cutter(x - 0.1, x + 0.1, 0.25, 0.45, -0.5, -0.05, "dark"))
+    if state != "intact":
+        K.boolean(w, K.breach((R.uniform(-0.9, 0.9), H + P * 0.6, -0.1), (0.75, 0.45, 0.5), seed=seed, mat="stone"))
+        K.lump("Fall", (R.uniform(-0.8, 0.8), 0.0, -0.9), (0.8, 0.3, 0.5), "rubble", G, seed=seed + 1)
+    if state == "ruin":
+        K.boolean(w, K.skyline(-L - 1, L + 1, -2, 2, H * 0.55, 0.35, seed=seed + 2, mat="stone"))
+        K.lump("Heap", (0.0, 0.0, -1.0), (1.6, 0.55, 0.7), "rubble", G, seed=seed + 3, rough=0.45)
+    K.bevel(w, 0.05, 2, 30)
+
+def buildSteps(K, name, spec, state, seed):
+    """THE LANE'S STEPS up a terrace (TERRACE): ten stone steps between two stepped side walls, a landing at the top on
+    the upper terrace. Front -Z (the foot, downhill). Damaged: a side wall breached; ruin: the steps broken off."""
+    R = random.Random(seed); G = "h"
+    zf, zl0, zl1, H = -2.4, 0.5, 1.0, TERRACE
+    st = stairMass(K, "Steps", -0.8, 0.8, zf, zl0, zl1, H, 10, "stoneMechta")
+    # the side walls a stepped parapet over the steps (their ends 3 cm past the steps': never one plane)
+    walls = [stairMass(K, f"Side{s}", x0, x1, zf - 0.03, zl0, zl1 + 0.03, H + 0.45, 5, "stoneMechta") for s, (x0, x1) in ((0, (-1.2, -0.78)), (1, (0.78, 1.2)))]
+    for o in [st] + walls: K.bevel(o, 0.03, 2, 30)
+    # a stone BASE under it all, 1.5 m down (the game stands the steps on the terrace below as they are: never floating)
+    K.box("StepBase", -1.2, 1.2, -1.5, 0.02, -2.43, 1.03, "stoneMechta", G, 0)
+    if state != "intact":
+        K.boolean(walls[1], K.breach((1.0, 1.4, -0.6), (0.4, 0.5, 0.6), seed=seed, mat="stone"))
+        K.lump("Fall", (1.7, 0.0, -0.8), (0.5, 0.25, 0.6), "rubble", G, seed=seed + 1)
+    if state == "ruin":
+        top = K.skyline(-3, 3, -4, 3, 0.9, 0.35, seed=seed, mat="stone")
+        for o in [st] + walls: K.boolean(o, top)
+
+def buildDjemaa(K, name, spec, state, seed):
+    """THE DJEMAA: the elders' place on the village square — a low wall behind and to one side, stone benches along it,
+    a mat and jars. Front -Z (the square). Damaged: the wall breached; ruin: its stumps."""
+    R = random.Random(seed); G = "h"
+    walls = [wallRun(K, "DjBack", -3.0, 3.0, 0.9, 1.4, 1.1, seed), wallRun(K, "DjSide", -2.97, -2.47, -1.5, 0.95, 1.0, seed + 1)]
+    K.box("BenchBack", -2.4, 2.9, 0.0, 0.45, 0.4, 0.92, "stoneMechta", G, 0.03)
+    K.box("BenchSide", -2.45, -1.97, 0.0, 0.43, -1.4, 0.42, "stoneMechta", G, 0.03)   # (2 cm lower than the back bench: their tops never one plane)
+    if state != "ruin":
+        K.box("Mat", -0.8, 0.8, 0.45, 0.47, 0.45, 0.85, "rug2", G, 0)
+        for k in range(2): K.cyl(f"DjJar{k}", (2.4 + k * 0.4, 0.0, -0.2), 0.2 - k * 0.03, 0.52 - k * 0.08, "jar", G, 12, r2=0.09)
+    if state != "intact":
+        K.boolean(walls[0], K.breach((1.2, 0.8, 1.15), (0.6, 0.45, 0.5), seed=seed, mat="stone"))
+    if state == "ruin":
+        top = K.skyline(-4, 4, -3, 3, 0.4, 0.2, seed=seed, mat="stone")
+        for w in walls: K.boolean(w, top)
+
+TYPES["soutien"] = dict(builder=buildRetaining, atlas=512, farRatio=0.5)
+TYPES["escalier"] = dict(builder=buildSteps, atlas=512, farRatio=1.0)   # (1.2k triangles: the far keeps them all — decimated, its ruin and its damaged state shaded off their near, the gate)
+TYPES["djemaa"] = dict(builder=buildDjemaa, atlas=512, farRatio=0.5)
 TYPES["appentis"] = dict(builder=buildLeanTo, atlas=1024, farRatio=0.45)
 TYPES["enclos"] = dict(builder=buildYard, atlas=1024, farRatio=0.7)   # (0.45: the ruin's broken tops shaded off its near — the gate)
 TYPES["tabouna"] = dict(builder=buildTabouna, atlas=512, farRatio=0.5)

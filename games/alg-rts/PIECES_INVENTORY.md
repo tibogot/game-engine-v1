@@ -64,6 +64,7 @@ The lab's « Verdict: Not judged yet » filter and **N** (next to judge) walk th
 |---|---|---|---|---|
 | Hamlet (mechta) | OA AB MQ | new (algMasonry) | hameau, mechtaPierre (its house) | old hamlet and old kit house removed from the lab (2026-10-25) |
 | Mechta in Blender (4 houses: petite, etage, pente; + appentis, enclos, tabouna) | NA (?mechta=1) | Blender | mechta_* | waiting (2026-10-27, MECHTA_PLAN.md) |
+| Dechra in Blender (masjid, soutien, escalier, djemaa + the mechta houses, terraced) | NA (?dechra=1) | Blender | mechta_masjid … | waiting (2026-10-27, DECHRA_PLAN.md) |
 | Dechra | OA AB | new | dechraNouveau | |
 | Ksar | OA | new | ksarNouveau | |
 | Whitewashed houses (4 types) | NA TR AB | Blender | blanche_maison / cour / haute / boutique, villageBlanc | |

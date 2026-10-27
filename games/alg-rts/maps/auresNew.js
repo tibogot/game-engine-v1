@@ -29,7 +29,9 @@ const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8], bas: [
   boutique: [-4.6, 4.6, -3.6, 2.6],
   // the MECHTA (tools/blender/mechta.py): its walls, the doorstep, the ladder and the jars out front
   petite: [-2.7, 2.7, -2.9, 2.2], etage: [-3.7, 3.7, -3.5, 2.9], pente: [-3.5, 4.45, -4.1, 2.9],   // (pente: its outside stair on the right)
-  appentis: [-1.85, 1.85, -1.7, 1.65], enclos: [-4.0, 4.0, -3.0, 3.0], tabouna: [-0.9, 0.9, -1.15, 0.8] };
+  appentis: [-1.85, 1.85, -1.7, 1.65], enclos: [-4.0, 4.0, -3.0, 3.0], tabouna: [-0.9, 0.9, -1.15, 0.8],
+  // the DECHRA's (DECHRA_PLAN.md): the mosque and its minaret, a terrace wall's module (its face at z -0.3), the lane steps
+  masjid: [-4.6, 6.6, -4.1, 3.6], soutien: [-2.0, 2.0, -0.3, 0.65], escalier: [-1.25, 1.25, -2.45, 1.05], djemaa: [-3.0, 3.0, -1.5, 1.45] };
 const HS = 1.3;
 const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
 /** A house whose FOOTPRINT's centre is (cx, cz), its front toward (tx, tz): the town field's row (y null: a pad). */
@@ -86,6 +88,44 @@ function hamlet(sx, sz, { rows, sides = [], props = [] }) {
   for (const { type, x, z, state = "intact" } of props) extra.push(house(type, state, sx + x, sz + z, sx + x, sz + z + 50));
   return { houses, props: extra };
 }
+/**
+ * A TERRACED VILLAGE (2026-10-27, DECHRA_PLAN.md — the stone dechra): rows of houses up the slope, each row on its
+ * TERRACE, a dry-stone retaining wall along each terrace's downhill edge, steps up through the walls. In the slope's
+ * frame: `f` the way DOWNHILL (the houses' fronts face it), u along the contour, v downhill from the site.
+ *   rows   { types, u, v, level }   v the row's FRONT line; its houses shoulder to shoulder from u
+ *   walls  { u0, v, level, n }      n wall modules from u0, their face at v, standing on terrace `level` - 1
+ *   props  { type, u, v, level, pad } (steps, the djemaa…) their footprint's centre
+ * Each row carries { site, level, pad } (its 11th field): algGame stands it at the village's base (its level-0 houses'
+ * mean ground) + level × 2.6 m (a wall's height), levelling a pad there — the walls and steps (pad false) unlevelled.
+ */
+const TERRACE_G = 2.0 * HS;
+function terraced(key, sx, sz, [fx, fz], { rows, walls = [], props = [] }) {
+  const n = Math.hypot(fx, fz), f = [fx / n, fz / n], r = [-f[1], f[0]];
+  const at = (u, v) => [sx + u * r[0] + v * f[0], sz + u * r[1] + v * f[1]];
+  const facing = (cx, cz) => [cx + f[0] * 50, cz + f[1] * 50];
+  const houses = [], extra = [];
+  for (const { types, u, v, level, gap = 0.2, states = {} } of rows) {
+    let lu = u;
+    types.forEach((ty, k) => {
+      const [x0, x1, z0, z1] = FOOT[ty].map((q) => q * HS), w = x1 - x0, d = z1 - z0;
+      const [cx, cz] = at(lu + w / 2, v - d / 2 + (k % 2 ? -0.4 : 0.2));
+      houses.push([...house(ty, states[k] ?? "intact", cx, cz, ...facing(cx, cz)), { site: key, level }]);
+      lu += w + gap;
+    });
+  }
+  for (const { u0, v, level, n: count } of walls) {
+    const [x0, x1, z0, z1] = FOOT.soutien.map((q) => q * HS), L = x1 - x0, d = z1 - z0;
+    for (let i = 0; i < count; i++) {
+      const [cx, cz] = at(u0 + L * (i + 0.5), v - d / 2);   // (end to end: one module's end face against the next's)
+      extra.push([...house("soutien", "intact", cx, cz, ...facing(cx, cz)), { site: key, level: level - 1, pad: false }]);
+    }
+  }
+  for (const { type, u, v, level, pad = true, state = "intact" } of props) {
+    const [cx, cz] = at(u, v);
+    extra.push([...house(type, state, cx, cz, ...facing(cx, cz)), { site: key, level, pad }]);
+  }
+  return { houses, props: extra };
+}
 const site = (name) => OLD_LAYOUT.sites.find((s) => s.name === name);
 const OA = site("Mechta Ouled Ali"), EO = site("Mechta el Oued"), DE = site("Dechra Tighanimine"), KS = site("Ksar el Hamra");
 
@@ -106,8 +146,31 @@ const STONE_EO = STONE_MECHTA && hamlet(EO.x, EO.z, {
   props: [{ type: "appentis", x: 11.0, z: -8.2 }, { type: "tabouna", x: 6, z: 2 }] });
 const MECHTA_OA = STONE_OA ? STONE_OA.houses : village(OA.x, OA.z, ["cour", "maison", "haute", "boutique", "cour", "haute"], { ring: [30, -178, -2], damaged: 2 });
 const MECHTA_EO = STONE_EO ? STONE_EO.houses : village(EO.x, EO.z, ["haute", "cour", "maison", "boutique", "haute"], { ring: [27, -178, -2], damaged: 3 });
-// THE DECHRA up its slope: the M'zab kit's plain houses (ochre plaster — the stone dechra kit to come), two rows
-const DECHRA = [
+// THE STONE DECHRA (?dechra=1 while you judge it — DECHRA_PLAN.md): four terraces up the slope (it falls toward
+// +0.6 x +0.8 z, ~17°: measured), the mechta's houses shoulder to shoulder on each, a retaining wall along every
+// terrace with steps through it; the DJEMAA square (the village's point) in the second row's gap; the MOSQUE at the top,
+// its minaret the landmark. One house shelled, one a ruin.
+const STONE_DECHRA = typeof location !== "undefined" && new URLSearchParams(location.search).get("dechra") === "1";
+const STONE_DE = STONE_DECHRA && terraced("DE", DE.x, DE.z, [0.6, 0.8], {
+  rows: [
+    { types: ["petite", "etage", "petite", "etage"], u: -17, v: 17, level: 0 },
+    { types: ["etage", "petite"], u: -23, v: 4, level: 1, states: { 1: "damaged" } },   // (the square between)
+    { types: ["petite", "pente"], u: 6, v: 4, level: 1 },
+    { types: ["petite", "etage", "petite", "etage", "petite"], u: -20, v: -9, level: 2, states: { 3: "ruin" } },
+    { types: ["petite", "masjid", "petite"], u: -14.5, v: -22, level: 3 },
+  ],
+  walls: [
+    { u0: -21.77, v: 5.6, level: 1, n: 4 }, { u0: 2.27, v: 5.6, level: 1, n: 4 },
+    { u0: -24.6, v: -7.4, level: 2, n: 5 }, { u0: 4.6, v: -7.4, level: 2, n: 4 },
+    { u0: -16.7, v: -20.4, level: 3, n: 3 }, { u0: 2.1, v: -20.4, level: 3, n: 3 },
+  ],
+  props: [
+    { type: "escalier", u: 0.65, v: 6.64, level: 0, pad: false }, { type: "escalier", u: 3.0, v: -6.37, level: 1, pad: false },
+    { type: "escalier", u: 0.5, v: -19.36, level: 2, pad: false },
+    { type: "djemaa", u: -3, v: -2, level: 1 }, { type: "tabouna", u: 4, v: 1.5, level: 1 },
+  ] });
+// (without ?dechra=1: the M'zab kit's plain houses as before, two rows)
+const DECHRA = STONE_DE ? STONE_DE.houses : [
   ...village(DE.x, DE.z, ["bas", "dar", "bas", "terrasse", "bas"], { ring: [21, -170, -10] }),
   ...village(DE.x, DE.z, ["dar", "bas", "dar", "tour", "dar", "bas"], { ring: [37, -165, -15], damaged: 4 }),
 ];
@@ -145,5 +208,5 @@ export const MAP = {
   // ground beside its track
   supply: OLD_MAP.supply.map((p) => (p.name === "South pass" ? { ...p, x: 55, z: -190 } : p)),
   fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
-  town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], props: [...(STONE_OA?.props ?? []), ...(STONE_EO?.props ?? [])], replacesHamlet: true },
+  town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], props: [...(STONE_OA?.props ?? []), ...(STONE_EO?.props ?? []), ...(STONE_DE?.props ?? [])], replacesHamlet: true },
 };
