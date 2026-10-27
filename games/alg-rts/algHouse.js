@@ -183,6 +183,12 @@ export function houseMesh(type = "maison", state = "intact", scale = S) {
  *   const field = createHouseField(); scene.add(field.root);
  *   const id = field.add("maison", "intact", x, y, z, yaw); field.update(camera) every frame;
  *   field.setState(id, "damaged")   // the damage system's hook
+ * NO REBUILD ON A STATE CHANGE (2026-10-27): a shell on a depot (setState → "damaged") disposed EVERY mesh of
+ * the field and made them again — three drops a disposed mesh's shader builds, so the new ones compiled
+ * mid-fight: measured on the supply points, 4 builds, 3 pipelines, an 83–97 ms frame. Now every state of every
+ * type the field holds has its meshes from the start (empty: an empty InstancedMesh is skipped before drawing,
+ * render/emptyDrawSkip.js — and the boot's warm-up builds them), each sized for ALL that type's items, and a
+ * rebuild keeps every set it can: a state change only moves instances between meshes.
  */
 /** A house's hay piles into the haystack field (world: the house's matrix × each spot); their ids. */
 function hayFor(m, key) {
@@ -209,16 +215,24 @@ export function createHouseField() {
   };
   const _w = new THREE.Matrix4(), _sc = new THREE.Vector3();
   function rebuild() {
-    for (const s of sets.values()) for (const m of [s.near, s.far, s.decal]) if (m) { root.remove(m); m.dispose(); }
-    sets.clear();
-    const per = new Map();
-    for (const it of items) per.set(it.key, (per.get(it.key) ?? 0) + 1);
-    for (const [key, n] of per) {
+    // capacity per "type:state" = every item of that TYPE (any state may hold them all) — see NO REBUILD
+    const perType = new Map();
+    for (const it of items) { const t = it.key.split(":")[0]; perType.set(t, (perType.get(t) ?? 0) + 1); }
+    const need = new Map();
+    for (const it of items) need.set(it.key, perType.get(it.key.split(":")[0]));
+    for (const k of Object.keys(_parts ?? {})) { const n = perType.get(k.split(":")[0]); if (n) need.set(k, n); }
+    for (const [key, s] of sets) {
+      if (need.has(key) && s.cap >= need.get(key)) continue;
+      for (const m of [s.near, s.far, s.decal]) if (m) { root.remove(m); m.dispose(); }
+      sets.delete(key);
+    }
+    for (const [key, n] of need) {
+      if (sets.has(key)) continue;
       const P = _parts?.[key];
       if (!P) continue;
       const decal = P.decal ? mesh(P.decal, n) : null;
       if (decal) decal.castShadow = false;
-      sets.set(key, { near: mesh(P.near, n), far: mesh(P.far, n), decal });
+      sets.set(key, { near: mesh(P.near, n), far: mesh(P.far, n), decal, cap: n });
     }
     built = true;
   }

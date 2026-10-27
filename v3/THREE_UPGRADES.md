@@ -164,8 +164,12 @@ pooled UBOs (r185), the instance-sync, shared-build refresh and CSM frame-late f
      8 builds, in play, over and over. render/countStableKeys.js: a plain Mesh's key sees count 1
      (`?countkey=0` to A/B) → 0 builds. (2) The warm-up skips engine objects hidden at load; the plant
      fields' draw batches are hidden while the start view has none of their plants → `userData.warmUp`
-     (scatterField sets it on its batches; pipelineWarmup honours it). Left: the munitions-point model
-     (points.glb, M_PointMun_Stencils) is created mid-game — alg should pre-add it hidden at boot.
+     (scatterField sets it on its batches; pipelineWarmup honours it). Then the last one, the supply points
+     (points.glb): NOT a model made late — alg's house field (algHouse createHouseField) DISPOSED AND REMADE
+     every mesh on any state change (a shell on a depot), and three drops a disposed mesh's builds: 4 builds,
+     3 pipelines, an 83–97 ms frame. Now every state of every type has its (empty) meshes from the start,
+     sized for all that type's items, and a rebuild keeps them: damage → worst frame 19 ms, a second state
+     change 0 builds; boot +4 builds. Same field for the villages' houses.
      (Lesson: "not in nodeBuilderCache" ≠ new — three drops unused builds; count cache SETS.)
    - The warm-up (9 s) and the level load (8 s) are both main-thread CPU — overlapping them gains little.
    - Tried and reverted: every 2D canvas a CPU canvas (boot ~9 s SLOWER). Kept: the haystack's mips.
