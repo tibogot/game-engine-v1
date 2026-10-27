@@ -19,6 +19,12 @@ repo; restore point: git tag `pre-r186`). The r184 notes below stay as history.
 - **renderOutput premultiplies**: alpha-to-coverage edges got a dark rim → `opaqueOutput` on the
   finished frame (postFxPipeline).
 - **No single-component 16-bit vertex format**: alg's `earthMask` → float (algGroundBlend).
+- **An override material inherits each object's `transparent`** (three copies it, transmission included) —
+  with r186's format-typed output, an override drawn into a ONE-channel target (Thunderline's sun-shadow
+  distance map, R32F) became a blended pipeline with no alpha: WebGPU rejected it and the whole pass
+  (every Thunderline shadow gone, 834 errors before driving). Fix: the override has `blending: NoBlending`
+  (+ `forceSinglePass`), glass panes cast nothing (sunShadows.js, driveSession.js). Check any other
+  `scene.overrideMaterial` pass that draws into a 1–2 channel target.
 - **PCFSoftShadowMap removed**: 23 labs → PCFShadowMap. WGSL test stub: `debug.diagnostics`,
   `lighting.enabled`, compute built as `Nodes.getForCompute`.
 - Decoders (basis, draco): byte-identical, nothing to copy.

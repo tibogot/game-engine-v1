@@ -528,7 +528,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     }
     const solidPlacements = [...lay.placements, ...runout];
     const meshes = buildTrackMeshes(solidPlacements, built, mats);
-    meshes.group.traverse((m) => { if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; m.layers.enable(STATIC_LAYER); } });
+    // (a GLASS pane casts no sun shadow: light goes through it — oldLook.buildGlassLook)
+    meshes.group.traverse((m) => { if (m.isMesh) { const glass = m.material?.transmission > 0; m.castShadow = !glass; m.receiveShadow = true; if (!glass) m.layers.enable(STATIC_LAYER); } });
     group.add(meshes.group);
 
     // ---------- THE RACE (race.js, DESIGN.md §8): gates, checkpoints in any order, finish, medals ----------

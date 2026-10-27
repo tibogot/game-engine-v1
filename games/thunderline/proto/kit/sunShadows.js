@@ -165,7 +165,13 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   const liveRT = makeRT(LIVE_TEX);
 
   const uZ = [uniform(zL), uniform(zMax), uniform(range)];
-  const depthMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide });
+  // NO BLENDING, ever (three r186, 2026-10-27: every shadow vanished on the drive page). With an override
+  // material three copies each object's `transparent` onto it (the car's windows, a glass pane: transmission
+  // counts too); r186 shapes the fragment output to the target's format — ONE channel here — so a blended
+  // pipeline had no alpha to read, WebGPU rejected it and the whole pass with it (atlas bake and live map).
+  // A caster writes its distance whatever it is drawn with; single pass (no back-then-front for those).
+  const depthMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, blending: THREE.NoBlending });
+  depthMat.forceSinglePass = true;
   depthMat.colorNode = vec4(uZ[1].sub(dot(positionWorld, uZ[0])).div(uZ[2]), 0, 0, 1);
 
   // an ortho camera looking down the sun, at light-space centre (cx, cy), covering `half` m each side,
