@@ -56,10 +56,10 @@ const CSS = `
 .alg-menu .man .tabs button { padding: 4px 10px; font-size: 11px; }
 .alg-menu .man .tabs button.on { border-color: var(--hud-brass); color: #f1dfa6; }
 /* THE MENU AND SOUND BUTTONS (2026-10-08, you: "how does the player know he can open a menu?"):
-   top right, hung on the resources' left side (CoH's corner; it follows their width and their
-   scale, and the dev panel's tab keeps the corner itself); Esc / F10 still work. */
-#alg-sys { position: absolute; right: calc(100% + 6px); top: -1px; bottom: -1px; display: flex; gap: 4px; }
-body > #alg-sys { position: fixed; right: calc(var(--alg-dev-w, 340px) + 8px); top: 8px; bottom: auto; height: 50px; z-index: 56; }
+   top right, alone there since the resources went down on the command card's strip (2026-10-27, CoH 3);
+   Esc / F10 still work. */
+#alg-sys { position: fixed; right: calc(var(--alg-dev-w, 340px) + 8px); top: 8px; height: 34px; z-index: 56; display: flex; gap: 4px; }
+html:has(.dp-fold) #alg-sys { right: calc(var(--alg-dev-w, 340px) + 62px); }   /* (dev only: the folded dev panel's « Dev » tab keeps the corner) */
 #alg-sys button { width: 34px; height: 100%; padding: 0; display: grid; place-items: center; cursor: pointer;
   background: var(--hud-bg); border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius); color: var(--hud-text);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); transition: color 0.12s, border-color 0.12s; }
@@ -121,7 +121,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
     : `<path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4"/>`}</svg>`;
   // (⏸: the TACTICAL PAUSE — below)
   sys.innerHTML = `<button data-a="tactical" title="${t("Pause tactique (Ctrl+Espace) : la bataille s'arrête, vous donnez vos ordres")}">${ICON_PAUSE}</button><button data-a="fullscreen"></button><button data-a="menu" title="${t("Menu (Échap)")}">${ICON_MENU}</button><button data-a="sound"></button>`;
-  (document.getElementById("alg-res") ?? document.body).appendChild(sys);
+  document.body.appendChild(sys);
   const soundBtn = sys.querySelector('[data-a="sound"]');
   const fsBtn = sys.querySelector('[data-a="fullscreen"]');
   const fsOn = () => !!document.fullscreenElement;

@@ -816,7 +816,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algAttackMove = attackMove;
   controlGroups = createControlGroups({ app, selection, mount: hud.root.querySelector(".block-right") });
   hud.setCollapsed(true);   // nothing selected at the start
-  // THE ARMY TABS (ui/armyTabs.js): every group you have, down the right edge.
+  // THE ARMY TABS (ui/armyTabs.js): every group you have, in a row along the bottom beside the minimap.
   // What each building is training, over its roof (ui/queueBadges.js).
   const queueBadges = createQueueBadges({ app, producers, thumbnails: unitRenderer.thumbnails });
   const armyTabs = createArmyTabs({ units, selection, squads, team: SIDES.human, thumbnails: unitRenderer.thumbnails, focus: (x, z) => app.rtsCamera?.focusOn(x, z) });
@@ -829,9 +829,8 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
   app.algCoverCursor = coverCursor;
   const tacMap = createTacticalMap({ app, create: (mount) => createMinimap({ ...mapOpts, mount, id: "alg-tacmap", markScale: 2.3, labelPx: 15 }) });
   app.algTacMap = tacMap;
-  // Top right now (resourceHud.js); the bottom strip is gone with it.
-  const resourceHud = createResourceHud({ mount: document.body, troops: () => `${popNow()}/${economy.popCap()}`, tier: () => (flnTiers ?? tiers).readout() });
-  hud.strip.style.display = "none";
+  // On the strip over the command card again (resourceHud.js — 2026-10-27, CoH 3's place; it was top right).
+  const resourceHud = createResourceHud({ mount: hud.strip, troops: () => `${popNow()}/${economy.popCap()}`, tier: () => (flnTiers ?? tiers).readout() });
 
   // COMBAT (algCombat.js, the shared machinery): men and vehicles pick up
   // enemies in range, close, fire visible rounds; the dead drop out of the

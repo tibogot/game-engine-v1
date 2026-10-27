@@ -27,6 +27,8 @@ export const HUD_H = 172;          // the blocks' height, px (strip excluded)
 // 2026-10-03: "bigger and better like Company of Heroes").
 export const MINI = 320;
 export const HUD_STRIP_H = 24;
+// The right block's width: the selection card + the command card (its grid below); the army tabs' row ends there.
+export const HUD_W = 330 + 316;
 
 const CSS = `
 :root {
@@ -55,7 +57,7 @@ const CSS = `
 }
 #alg-hud .block-right {
   right: var(--alg-dev-w, 340px); height: ${HUD_H}px;
-  display: grid; grid-template-columns: 330px 316px;
+  display: grid; grid-template-columns: 330px 316px;   /* (HUD_W) */
   border-right: 0; border-radius: var(--hud-radius) 0 0 0;
   transition: height 0.18s ease;
 }

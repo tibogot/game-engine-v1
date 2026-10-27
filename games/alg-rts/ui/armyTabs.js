@@ -1,4 +1,4 @@
-// THE ARMY TABS — every group you have, down the right edge, the Company of
+// THE ARMY TABS — every group you have, along the bottom beside the minimap, the Company of
 // Heroes way (you, 2026-10-02: "the bottom UI could be better" → squad tabs
 // + the card collapsing when nothing is selected).
 //
@@ -13,7 +13,7 @@
 // Cheap: grouped 4 times a second; the DOM is rebuilt only when the groups
 // change, otherwise only a bar's width and a class are written.
 import { thumbKeyOf } from "../../shared-rts/thumbnails.js";
-import { HUD_H, HUD_STRIP_H } from "./hudBar.js";
+import { MINI, HUD_W } from "./hudBar.js";
 import { iconStyle } from "./icons.js";
 import { hasRendered, renderedOnly, renderedStyle } from "./iconAtlas.js";
 import { t } from "../i18n/i18n.js";
@@ -23,11 +23,14 @@ const EVERY = 0.25;        // s between regroupings
 const MAX_TABS = 14;
 
 const CSS = `
+/* ALONG THE BOTTOM, between the minimap and the command card (2026-10-27, you, a CoH 3 screenshot — they were a
+   column down the right edge, under the resources): a row, a second one above when it fills. Both neighbours grow
+   with the interface size (--alg-ui, ui/uiScale.js), the row's ends with them. */
 #alg-tabs {
-  position: fixed; z-index: 55; right: calc(var(--alg-dev-w, 340px) + 8px); top: 56px;
-  bottom: calc(var(--alg-hud-right-h, ${HUD_H}px) + ${HUD_STRIP_H + 52}px);
-  display: flex; flex-direction: column; gap: 5px; overflow: hidden; pointer-events: none;
-  transition: bottom 0.18s ease;
+  position: fixed; z-index: 55; bottom: 8px;
+  left: calc(${MINI}px * var(--alg-ui, 1) + 8px);
+  right: calc(var(--alg-dev-w, 340px) + ${HUD_W}px * var(--alg-ui, 1) + 8px);
+  display: flex; flex-wrap: wrap-reverse; align-content: flex-start; gap: 5px; pointer-events: none;
 }
 #alg-tabs .tab {
   pointer-events: auto; cursor: pointer; position: relative; flex: none;
@@ -65,7 +68,7 @@ const CSS = `
 #alg-tabs .hp { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 4px; background: #23261d; border: 1px solid #3a4031; }
 #alg-tabs .hp i { display: block; height: 100%; background: var(--hud-olive); }
 #alg-tabs .hp i.low { background: var(--hud-red); }
-#alg-tabs .more { pointer-events: none; font: 10px var(--hud-sans); color: var(--hud-dim); text-align: center; width: 62px; }
+#alg-tabs .more { pointer-events: none; font: 10px var(--hud-sans); color: var(--hud-dim); text-align: center; width: 62px; align-self: center; }
 `;
 
 /** What a group is doing, most urgent first: [class, label, words]. */

@@ -437,7 +437,40 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   // ── The strip ─────────────────────────────────────────────────────────────
   const style = document.createElement("style");
   style.textContent = `
-#alg-doc { position: fixed; right: calc(var(--alg-dev-w, 0px) + 8px); bottom: calc(var(--alg-hud-h, 182px) + 8px); z-index: 55; width: 214px;   /* (over the bottom HUD, its height measured: commandCard --alg-hud-h) */
+/* FOLDED AWAY (2026-10-27, you: "are you sure in Company of Heroes the doctrine panel is always showing like us?" —
+   it was open on the right all match): CoH 3's battlegroup button, a round one over the command card's strip with the
+   points; it PULSES while there is something to do (a doctrine to choose, an ability the points unlock). Click: the
+   panel opens above it; a choice, a use or the button again closes it. The abilities you have unlocked sit beside the
+   button as icons, used without opening anything. */
+#alg-doc-dock { position: fixed; right: calc(var(--alg-dev-w, 0px) + 8px); z-index: 55;
+  bottom: calc(var(--alg-hud-h, 0px) + 24px * var(--alg-ui, 1) + 8px);   /* (over the command card and its strip: commandCard --alg-hud-h) */
+  display: flex; flex-direction: row-reverse; align-items: flex-end; gap: 6px; }
+#alg-doc-dock[hidden] { display: none; }
+#alg-doc-btn { position: relative; width: 46px; height: 46px; padding: 0; border-radius: 50%; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0;
+  background: var(--hud-bg, rgba(16,14,10,0.9)); border: 2px solid rgba(201,165,74,0.7); color: #f1dfa6;
+  font: 700 15px var(--hud-mono, monospace); box-shadow: 0 4px 14px rgba(0,0,0,0.4); }
+#alg-doc-btn small { font: 600 7px var(--hud-sans, sans-serif); letter-spacing: 0.14em; color: var(--hud-dim, #a8987a); margin-top: -1px; }
+#alg-doc-btn:hover, #alg-doc-btn.open { border-color: #f1dfa6; background: #3a3417; }
+#alg-doc-btn.call { animation: alg-doc-call 1.1s ease-in-out infinite alternate; }
+@keyframes alg-doc-call { from { box-shadow: 0 0 0 0 rgba(241,223,166,0.0), 0 4px 14px rgba(0,0,0,0.4); }
+  to { box-shadow: 0 0 0 5px rgba(241,223,166,0.28), 0 0 16px rgba(241,223,166,0.55); } }
+#alg-doc-btn .ring { position: absolute; inset: -4px; width: calc(100% + 8px); height: calc(100% + 8px); transform: rotate(-90deg); pointer-events: none; }
+#alg-doc-btn .ring circle { fill: none; stroke: #c9a54a; stroke-width: 2.4; stroke-dasharray: 0 100; }
+#alg-doc-quick { display: flex; gap: 4px; }
+#alg-doc-quick .q { position: relative; width: 40px; height: 40px; padding: 0; cursor: pointer; overflow: hidden;
+  background: var(--hud-bg, rgba(16,14,10,0.9)) center/cover no-repeat; border: 1px solid rgba(201,165,74,0.55); border-radius: 2px;
+  box-shadow: 0 3px 10px rgba(0,0,0,0.4); }
+#alg-doc-quick .q:hover { border-color: #f1dfa6; }
+#alg-doc-quick .q .ic { position: absolute; inset: 3px; background: currentColor; color: #c9a54a; -webkit-mask-size: contain; mask-size: contain;
+  -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; -webkit-mask-position: center; mask-position: center; }
+#alg-doc-quick .q .ic.r { inset: 0; background-color: transparent; -webkit-mask-image: none; mask-image: none; }
+#alg-doc-quick .q.cool .ic, #alg-doc-quick .q.short .ic { filter: grayscale(0.85) brightness(0.55); }
+#alg-doc-quick .q .sw { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(10,9,6,0.6); pointer-events: none; }
+#alg-doc-quick .q .s { position: absolute; left: 0; right: 0; bottom: 1px; text-align: center; font: 700 11px var(--hud-mono, monospace); color: #f1dfa6; text-shadow: 0 1px 2px #000; pointer-events: none; }
+#alg-doc-quick .q.aiming { border-color: #58e070; box-shadow: 0 0 0 1px #58e070; }
+#alg-doc { position: fixed; right: calc(var(--alg-dev-w, 0px) + 8px); z-index: 56; width: 214px;
+  bottom: calc(var(--alg-hud-h, 0px) + 24px * var(--alg-ui, 1) + 62px);   /* (above the button) */
   padding: 8px 8px 9px; background: var(--hud-bg, rgba(16,14,10,0.9)); border: 1px solid rgba(201,165,74,0.55);
   border-radius: var(--hud-radius, 3px); font-family: var(--hud-sans, sans-serif); color: var(--hud-text, #e8dcc4); }
 #alg-doc[hidden] { display: none; }
@@ -477,12 +510,33 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   el.id = "alg-doc";
   el.hidden = true;
   if (ui) document.body.appendChild(el);   // (an AI's strip stays off the page: drawn into nothing)
-  el.addEventListener("pointerdown", (e) => e.stopPropagation());
+  // The button and the unlocked abilities beside it (the dock — CSS above).
+  const dock = document.createElement("div");
+  dock.id = "alg-doc-dock";
+  dock.hidden = true;
+  dock.innerHTML = `<button type="button" id="alg-doc-btn"><svg class="ring" viewBox="0 0 36 36"><circle cx="18" cy="18" r="16.5" pathLength="100"/></svg><span class="n">★ 0</span><small>${t("DOCTRINE")}</small></button><div id="alg-doc-quick"></div>`;
+  if (ui) document.body.appendChild(dock);
+  const btn = dock.querySelector("#alg-doc-btn"), quick = dock.querySelector("#alg-doc-quick");
+  let open = false;
+  function setOpen(on) {
+    open = on;
+    btn.classList.toggle("open", on);
+    el.hidden = !on || (!offering && !DOCTRINES[doctrine]);
+    refreshButton();
+  }
+  btn.addEventListener("click", () => setOpen(!open));
+  for (const n of [el, dock]) n.addEventListener("pointerdown", (e) => e.stopPropagation());
   el.addEventListener("click", (e) => {
     const p = e.target.closest("[data-pick]");
-    if (p) { pick(p.dataset.pick); return; }
-    const b = e.target.closest("[data-ab]"); if (b) press(b.dataset.ab);
+    if (p) { if (pick(p.dataset.pick)) setOpen(false); return; }
+    const b = e.target.closest("[data-ab]");
+    if (!b) return;
+    // (an unlock keeps the panel open — another may follow; a use closes it, the map is what you look at then)
+    const wasOpen = unlocked.has(b.dataset.ab);
+    press(b.dataset.ab);
+    if (wasOpen) setOpen(false);
   });
+  quick.addEventListener("click", (e) => { const b = e.target.closest("[data-ab]"); if (b) press(b.dataset.ab); });
   /** The doctrine for this battle, chosen in the match (CoH 3): the points earned so far are kept. */
   function pick(key) {
     if (!offering || !DOCTRINES[key] || (DOCTRINES[key].side ?? "player") !== SIDE) return false;
@@ -498,18 +552,22 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
   const cpTitle = () => (FLN ? t("Points de commandement : gagnés en tuant des soldats français et en tenant des villages.") : t("Points de commandement : gagnés en tuant des combattants du FLN et en tenant des villages."));
   function render() {
     // OFFERING: the side's doctrines as cards — name, what it is, its four abilities' icons.
+    dock.hidden = !offering && !DOCTRINES[doctrine];
+    el.hidden = !open || dock.hidden;
     if (offering) {
-      el.hidden = false;
+      quick.replaceChildren();
       const mine = Object.entries(DOCTRINES).filter(([, d]) => (d.side ?? "player") === SIDE);
       el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${t("à choisir")}</span><span class="cp" title="${cpTitle()}">★ ${cp}</span></div>
         <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
         ${mine.map(([key, d]) => `<button type="button" class="pick" data-pick="${key}" title="${d.blurb} — ${t("Choisir cette doctrine pour toute la bataille.")}"><b>${d.name}</b>
           <span class="ics">${d.abilities.map((a) => `<i class="${hasRendered(a.key) ? "r" : ""}" style="${hasRendered(a.key) ? renderedStyle(a.key) : iconStyle(a.icon)}" title="${a.name}"></i>`).join("")}</span></button>`).join("")}`;
+      refreshButton();
       return;
     }
     const d = DOCTRINES[doctrine];
-    el.hidden = !d;
     if (!d) return;
+    // The unlocked abilities you USE (not the passive ones), beside the button.
+    quick.innerHTML = d.abilities.filter((a) => unlocked.has(a.key) && !a.passive).map((a) => `<button type="button" class="q" data-ab="${a.key}" title="${a.name} — ${a.hint}"><span class="ic${hasRendered(a.key) ? " r" : ""}" style="${hasRendered(a.key) ? renderedStyle(a.key) : iconStyle(a.icon)}"></span><span class="sw"></span><span class="s"></span></button>`).join("");
     el.innerHTML = `<div class="hd"><span>${t("Doctrine")} · ${d.short}</span><span class="cp" title="${cpTitle()}">★ ${cp}</span></div>
       <div class="bar"><i style="width:${Math.round((100 * xp) / P.xpPerCp)}%"></i></div>
       ${d.abilities.map((a) => `<button type="button" class="ab" data-ab="${a.key}" title="${a.hint}"><span class="ic${hasRendered(a.key) ? " r" : ""}" style="${hasRendered(a.key) ? renderedStyle(a.key) : iconStyle(a.icon)}"></span>
@@ -517,7 +575,17 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     refresh();
   }
   let lastSig = "";
+  /** The button: the points, the bar to the next one as its ring, the pulse while there is something to do. */
+  function refreshButton() {
+    btn.querySelector(".n").textContent = `★ ${cp}`;
+    btn.querySelector(".ring circle").style.strokeDasharray = `${Math.round((100 * xp) / P.xpPerCp)} 100`;
+    const d = DOCTRINES[doctrine];
+    const todo = offering || !!d?.abilities.some((a) => !unlocked.has(a.key) && cp >= a.cp);
+    btn.classList.toggle("call", todo && !open);
+    btn.title = offering ? t("Doctrine : à choisir — cliquez ici") : todo ? t("Doctrine : des points à dépenser — cliquez pour débloquer") : t("Doctrine : {name}", { name: d?.name ?? "" });
+  }
   function refresh() {
+    refreshButton();
     if (offering) {
       const c = el.querySelector(".cp"), bar = el.querySelector(".bar i");
       if (c) c.textContent = `★ ${cp}`;
@@ -526,6 +594,14 @@ export function createAlgDoctrines(app, { units, squads, economy, projectiles, c
     }
     const d = DOCTRINES[doctrine];
     if (!d) return;
+    for (const q of quick.children) {
+      const a = abilityOf(q.dataset.ab), left = cd.get(a.key) ?? 0;
+      q.classList.toggle("cool", left > 0);
+      q.classList.toggle("short", !purse.canAfford(a.cost ?? {}));
+      q.classList.toggle("aiming", targeting?.ab === a);
+      q.querySelector(".sw").style.height = left > 0 ? `${Math.round((100 * left) / (a.cooldown || 1))}%` : "0";
+      q.querySelector(".s").textContent = left > 0 ? `${Math.ceil(left)}` : "";
+    }
     el.querySelector(".cp").textContent = `★ ${cp}`;
     el.querySelector(".bar i").style.width = `${Math.round((100 * xp) / P.xpPerCp)}%`;
     for (const a of d.abilities) {

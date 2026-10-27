@@ -3,9 +3,9 @@
 // anchor (a panel at the top-left grows right and down, one at the bottom-right grows left and up,
 // one centred grows both ways), so nothing slides off its edge. The labels pinned to the map
 // (squad badges, village marks) are left alone: they are placed in pixels over the world.
-// (Not #alg-tabs: the unit portraits down the right edge — pictures, a count; scaled they ran
-// under the resources.)
-const PANELS = "#alg-res, #alg-score, #alg-alerts, #alg-obj, #alg-hud > .block, .alg-modal-back > .alg-modal";
+// (Not #alg-tabs: the unit portraits along the bottom — they place themselves by --alg-ui between
+// the scaled minimap and the scaled command card. The resources ride the command card's block.)
+const PANELS = "#alg-sys, #alg-score, #alg-alerts, #alg-obj, #alg-hud > .block, .alg-modal-back > .alg-modal";
 
 /**
  * Where a box grows from, along one axis: its NEAREST edge (0 / 1), or its middle when it sits
@@ -31,15 +31,7 @@ export function createUiScale(initial = 1) {
     const base = getComputedStyle(el).transform;
     el.style.transform = `${base && base !== "none" ? base + " " : ""}scale(${scale})`;
   }
-  // The unit tabs (not scaled) hang under the resources: keep them clear of the grown panel.
-  let tabsTop = null;
-  function clearTabs() {
-    const tabs = document.getElementById("alg-tabs"), res = document.getElementById("alg-res");
-    if (!tabs || !res) return;
-    if (tabsTop == null) tabsTop = parseFloat(getComputedStyle(tabs).top) || 0;
-    tabs.style.top = `${Math.max(tabsTop, res.getBoundingClientRect().bottom + 6)}px`;
-  }
-  const applyAll = () => { document.querySelectorAll(PANELS).forEach(applyTo); clearTabs(); };
+  const applyAll = () => { document.querySelectorAll(PANELS).forEach(applyTo); };
   // Panels and modals made later (the pause menu, the briefing, the end screen).
   const mo = new MutationObserver((list) => {
     for (const m of list) for (const n of m.addedNodes) {

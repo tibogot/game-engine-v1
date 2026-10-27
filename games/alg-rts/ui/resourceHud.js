@@ -1,4 +1,4 @@
-// THE SUPPLY STRIP — the HUD bar's status strip (hudBar.js): the French
+// THE SUPPLY STRIP — the HUD bar's status strip (hudBar.js, over the command card): the French
 // three resources (effectifs, carburant, munitions, algEconomy.js), each with
 // its income a minute, and the villages — how many are yours, how many the
 // ALN's. This game's own (nam's shows its requisition points).
@@ -11,17 +11,15 @@ const resIcon = (r) => (hasRendered(RES_KEY[r]) ? `<i class="rr" style="${render
 import { t } from "../i18n/i18n.js";
 import { isHuman } from "../../shared-rts/teams.js";
 const CSS = `
-/* TOP RIGHT (2026-10-02, CoH): the numbers off the command card's back. */
+/* ON THE STRIP OVER THE COMMAND CARD (2026-10-27, you, a CoH 3 screenshot: "the resources are not at the top right";
+   top right from 2026-10-02): one row — the money, the villages, the men, the tier. The strip stays when the card
+   folds away (nothing selected), so they are always there, bottom right, over what they buy. */
 #alg-res {
-  position: fixed; top: 8px; right: calc(var(--alg-dev-w, 340px) + 8px); z-index: 56;
-  display: flex; flex-direction: column; align-items: flex-end; gap: 2px; font-size: 11px; white-space: nowrap;
-  padding: 5px 12px; background: var(--hud-bg); border: 1px solid var(--hud-edge-hi); border-radius: var(--hud-radius);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35); font-family: var(--hud-sans); color: var(--hud-text);
+  display: flex; align-items: center; gap: 12px; height: 100%; font-size: 11px; white-space: nowrap;
+  font-family: var(--hud-sans); color: var(--hud-text);
 }
-#alg-res .row { display: flex; align-items: center; gap: 10px; }
-#alg-res .row2 { font-size: 10px; }
 #alg-res .ric { display: inline-flex; align-items: center; color: var(--hud-dim); }
-#alg-res .ric .rr { display: block; width: 22px; height: 22px; margin: -3px 0; }
+#alg-res .ric .rr { display: block; width: 22px; height: 22px; margin: -4px 0; }
 #alg-res .res.mp .ric { color: var(--hud-brass); } #alg-res .res.fuel .ric { color: #e2b25a; } #alg-res .res.mun .ric { color: #d48a6a; }
 #alg-res .res { display: flex; align-items: baseline; gap: 5px; }
 #alg-res .amount { font-weight: 700; font-size: 14px; color: var(--hud-brass); min-width: 30px; text-align: right; }
@@ -48,31 +46,25 @@ export function createResourceHud({ mount = document.body, troops = null, tier =
   // PLAYING THE FLN (?side=fln): its one purse — supplies — and its villages; no tiers, no pop cap.
   const fln = isHuman("enemy");
   root.innerHTML = fln ? `
-    <div class="row">
     <span class="res sup" title="${t("Ravitaillement : la katiba vit des villages qui la soutiennent, des caches et des points qu'elle tient. Recrute les combattants.")}"><span class="ric">${resIcon("mun")}</span><span class="amount hud-num" data-r="sup">0</span><span class="inc" data-i="sup"></span></span>
-    </div>
-    <div class="row row2">
+    <span class="sep"></span>
     <span class="dim" id="alg-res-villages"></span>
     <span class="sep" hidden></span>
     <span class="dim" id="alg-res-troops" hidden></span>
     <span class="sep"></span>
     <span class="dim" id="alg-res-tier"></span>
     <span class="flash" id="alg-res-flash"></span>
-    </div>
   ` : `
-    <div class="row">
     <span class="res mp" title="${t("Effectifs : arrivent d'Alger en continu, moins l'entretien de votre armée sur le terrain. Achètent et renforcent les groupes.")}"><span class="ric">${resIcon("mp")}</span><span class="amount hud-num" data-r="mp">0</span><span class="inc" data-i="mp"></span></span>
     <span class="res fuel" title="${t("Carburant : des villages et des points de carburant que vous tenez, reliés au poste. Véhicules, l'Alouette, les échelons.")}"><span class="ric">${resIcon("fuel")}</span><span class="amount hud-num" data-r="fuel">0</span><span class="inc" data-i="fuel"></span></span>
     <span class="res mun" title="${t("Munitions : des villages et des points de munitions que vous tenez, reliés au poste. Grenades, capacités, la Légion.")}"><span class="ric">${resIcon("mun")}</span><span class="amount hud-num" data-r="mun">0</span><span class="inc" data-i="mun"></span></span>
-    </div>
-    <div class="row row2">
+    <span class="sep"></span>
     <span class="dim" id="alg-res-villages"></span>
     <span class="sep"></span>
     <span class="dim" id="alg-res-troops"></span>
     <span class="sep"></span>
     <span class="dim" id="alg-res-tier"></span>
     <span class="flash" id="alg-res-flash"></span>
-    </div>
   `;
   mount.appendChild(root);
   const KEYS = fln ? ["sup"] : ["mp", "fuel", "mun"];

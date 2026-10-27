@@ -1,6 +1,11 @@
 // English for the doctrines (algDoctrines.js, chosen in the match) — French key -> English. See ../i18n.js.
 export default {
   "Doctrine": "Doctrine",
+  // The folded button (2026-10-27)
+  "DOCTRINE": "DOCTRINE",
+  "Doctrine : à choisir — cliquez ici": "Doctrine: to choose — click here",
+  "Doctrine : des points à dépenser — cliquez pour débloquer": "Doctrine: points to spend — click to unlock",
+  "Doctrine : {name}": "Doctrine: {name}",
   // Paras
   "Parachutistes": "Paratroopers",
   "Paras": "Paras",
