@@ -4823,7 +4823,11 @@ export async function startV3App(opts = {}) {
 
   // v2 precompiles terrain TSL pipelines before the loop — without this WebGPU
   // can show a black viewport until async compile finishes (or fail silently).
-  try {
+  // `precompile: false` (opt-in): a game that sets up its post chain, lights and
+  // shadows behind its own loading screen and draws the scene once, final —
+  // compiled here, every lit material was a variant thrown away (Thunderline,
+  // 2026-10-27: the terrain alone ~2 s of the GPU driver's shader compiler).
+  if (opts.precompile !== false) try {
     // Same scene-depth rule as the frame loop (see there): the precompile frame
     // must not draw water or decals straight onto the multisampled canvas.
     worldEnv?.postFxPipeline?.setSceneDepthRequired(

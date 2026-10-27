@@ -135,15 +135,17 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   hud.innerHTML = HUD_HTML;
   document.body.appendChild(hud);
 
-  // ---------- geometry cache (every tile's look, built once) ----------
+  // ---------- geometry cache: a tile's path once; its LOOK only when a placement draws it ----------
+  // (2026-10-27, load profile: every tile of the kit, guarded and open, was built at page start — ~1.9 s of
+  // CPU on every load, for the few a track uses. lookFor / buildTrackMeshes / the shadow bake build a look
+  // on first use: `built[id][lookKey]`.)
   const mats = createOldLookMaterials();
   const built = {};
   const ensureBuilt = (id) => {
     if (built[id]) return built[id];
     const t = TILES[id] ?? ensureTile(id);
-    return (built[id] = t ? { b: integrate(t), guarded: buildOldLook(t, true), open: buildOldLook(t, false) } : null);
+    return (built[id] = t ? { b: integrate(t) } : null);
   };
-  for (const id of Object.keys(TILES)) ensureBuilt(id);
   // a placement's look by its edges (both rails, none, one side — the one-sided ones built on first use)
   const lookFor = (p) => {
     const e = edgesOf(p), k = lookKey(e), B = ensureBuilt(p.id);
@@ -505,6 +507,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     });
     // generated pieces (fitted landings) are rebuilt from their id, exactly as the builder made them
     for (const p of track?.pieces ?? []) ensureBuilt(p.id);
+    ensureBuilt("straight_64"); // (the run-out after the road's end)
+    if (!track) for (const id of Object.keys(TILES)) ensureBuilt(id); // the built-in test track lays out from any tile
     const jumpSpeed = o.jumpSpeed ?? top * 0.91;
     const lay = track
       ? layoutFromPlacements({ built, pieces: roadPieces })
@@ -665,7 +669,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S?.meshes?.fullDetail(true); // the bake sees every post, whatever the camera picked
     // trackLine: the road's centre, so each atlas cell is turned to the road's direction (no saw-tooth)
     sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts, trackLine: lay.ride.map((r) => r.P) });
+    const shown = scene.visible;
+    scene.visible = true; // (the drive page hides the scene while it boots: drive.js)
     sunShadows.stats.bakeMs = Math.round(sunShadows.bake());
+    scene.visible = shown;
     S?.meshes?.fullDetail(false);
     // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
     app.shadows.setSunShadowNode(sunShadows.visibility);

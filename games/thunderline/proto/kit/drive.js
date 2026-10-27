@@ -30,9 +30,16 @@ const app = await startV3App({
   terrainLayers: 3, // and the GPU paint arrays hold just those 3 (−42 MB of video memory)
   preloadPaintTextures: false,
   csm: { cascades: 2 },
+  precompile: false, // the scene compiles once, final, behind the loading screen (below)
 });
 // No level: the engine's DEFAULT floor stays as the backdrop (user, 2026-10-18 — terrain comes later,
 // as decoration). THE FLOOR IS SOLID (user, 2026-10-18): the car reads the engine's own height.
+// THE SCENE IS HIDDEN WHILE THE PAGE BOOTS (2026-10-27, load trace: ~23 s of the GPU driver compiling
+// shaders, DXC). Each lit material was compiled three times: before the post chain had its MRT, before the
+// car's headlights joined the lights, before the sun-shadow node replaced the cascades — every frame drawn
+// on the way compiled a variant thrown away the next step. Hidden, the frames still run (the sun settles
+// for the time of day) but draw no material; it shows once, final, behind the loading screen (below).
+app.scene.visible = false;
 app.sky?.setMode?.("skypro");
 const tod = Number(params.get("tod"));
 app.sky?.setTimeOfDay?.(params.has("tod") && Number.isFinite(tod) ? tod : 15.5);
@@ -146,6 +153,15 @@ if (lesson) {
     verdict.style.display = "";
   }, 200);
 }
+// the scene shows, final (car model in, sun shadows on), and its shaders compile behind the loading screen
+boot.textContent = "Warming up…";
+await rig.modelsReady;
+// (hidden still for 3 frames: the engine swaps in the sun-shadow node over two, the first with the sun's
+// shadow off — worldEnvironment.js setSunShadowNode — and that frame would compile a variant of its own)
+for (let i = 0; i < 3; i++) await new Promise((r) => requestAnimationFrame(r));
+app.scene.visible = true;
+await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+await app.renderer?.backend?.device?.queue.onSubmittedWorkDone();
 $("boot").classList.add("gone");
 setTimeout(() => $("boot").remove(), 600);
 

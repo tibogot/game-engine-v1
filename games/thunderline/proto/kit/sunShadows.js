@@ -11,7 +11,7 @@
 // radius 4 smeared it); why not TileShadowNode: every fragment samples every tile. See the study.
 import * as THREE from "three";
 import {
-  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, dot, floor, clamp, min, max, abs, mix, select, smoothstep, cos, sin, fwidth, dFdx, dFdy, length, If,
+  Fn, uniform, float, int, ivec2, vec2, vec3, vec4, dot, floor, clamp, min, max, abs, mix, select, smoothstep, cos, sin, fwidth, dFdx, dFdy, length, If, Loop,
   positionWorld, normalWorld, textureLoad, texture,
 } from "three/tsl";
 
@@ -341,21 +341,27 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // pixel), measured by the derivatives of the lookup itself — the edge is ≥ ~2.5 px wide at any zoom.
   // fp: texels per screen pixel, measured on the smooth light-space position by the caller (the atlas's
   // own texel coordinates jump at its cell seams)
+  // THE TAP GRIDS ARE SHADER LOOPS (2026-10-27, load profile): unrolled in JS they put ~180 texture reads
+  // into every material that receives the sun — each one a 400-570 KB shader, and the first drive froze
+  // ~20 s while the GPU driver compiled them. Same taps, same maths; the inputs are vars so the loop body
+  // does not recompute them.
   const pcfWideTent = (tex, px, py, d, bias, lo, hi, gpx = null, gpy = null, fp = float(1)) => {
-    const sp = clamp(fp.mul(SPREAD_K), float(1), float(SPREAD_CAP));
-    let sum = float(0), wsum = float(0);
-    for (let j = 0; j < 6; j++) for (let i = 0; i < 6; i++) {
+    const sp = clamp(fp.mul(SPREAD_K), float(1), float(SPREAD_CAP)).toVar();
+    const pxv = px.toVar(), pyv = py.toVar(), dv = d.toVar();
+    const gx = gpx?.toVar(), gy = gpy?.toVar();
+    const sum = float(0).toVar(), wsum = float(0).toVar();
+    Loop(6, 6, ({ i, j }) => {
       // 6 × 6 taps `sp` texels apart around the point, each the texel under it
-      const tx = floor(px.add(sp.mul(i - 2.5))), ty = floor(py.add(sp.mul(j - 2.5)));
+      const tx = floor(pxv.add(sp.mul(float(i).sub(2.5)))), ty = floor(pyv.add(sp.mul(float(j).sub(2.5))));
       // the texel's centre to the point, in texels
-      const ox = tx.add(0.5).sub(px), oy = ty.add(0.5).sub(py);
+      const ox = tx.add(0.5).sub(pxv), oy = ty.add(0.5).sub(pyv);
       const wx = max(float(0), float(1).sub(abs(ox).div(sp.mul(TENT_R))));
       const wy = max(float(0), float(1).sub(abs(oy).div(sp.mul(TENT_R))));
-      const w = wx.mul(wy);
-      const dt = gpx ? d.add(gpx.mul(ox)).add(gpy.mul(oy)) : d;
-      sum = sum.add(lit(tex, clamp(tx, lo.x, hi.x), clamp(ty, lo.y, hi.y), dt, bias).mul(w));
-      wsum = wsum.add(w);
-    }
+      const w = wx.mul(wy).toVar();
+      const dt = gx ? dv.add(gx.mul(ox)).add(gy.mul(oy)) : dv;
+      sum.addAssign(lit(tex, clamp(tx, lo.x, hi.x), clamp(ty, lo.y, hi.y), dt, bias).mul(w));
+      wsum.addAssign(w);
+    });
     return sum.div(wsum);
   };
   const TS = Number(Q.get("tentScale")) || 1; // ?tentScale= (study)
@@ -367,25 +373,27 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // edge pay the 10 × 10 tent (radius ADAPT_R texels, spread with the screen footprint like the 6 × 6).
   const ADAPT_N = 10, ADAPT_R = Number(Q.get("adaptR")) || 5;
   const pcfAdaptive = (tex, px, py, d, bias, lo, hi, gpx, gpy, fp) => {
-    const sp = clamp(fp.mul(SPREAD_K), float(1), float(SPREAD_CAP));
+    const sp = clamp(fp.mul(SPREAD_K), float(1), float(SPREAD_CAP)).toVar();
+    const pxv = px.toVar(), pyv = py.toVar(), dv = d.toVar(), gx = gpx.toVar(), gy = gpy.toVar();
     const at = (ox, oy) => {
-      const tx = floor(px.add(ox)), ty = floor(py.add(oy));
-      const dt = d.add(gpx.mul(tx.add(0.5).sub(px))).add(gpy.mul(ty.add(0.5).sub(py)));
+      const tx = floor(pxv.add(ox)), ty = floor(pyv.add(oy));
+      const dt = dv.add(gx.mul(tx.add(0.5).sub(pxv))).add(gy.mul(ty.add(0.5).sub(pyv)));
       return { tx, ty, v: lit(tex, clamp(tx, lo.x, hi.x), clamp(ty, lo.y, hi.y), dt, bias) };
     };
     let coarse = float(0);
     const c = (ADAPT_R - 0.5);
     for (const oy of [-c, 0, c]) for (const ox of [-c, 0, c]) coarse = coarse.add(at(sp.mul(ox), sp.mul(oy)).v);
+    coarse = coarse.toVar();
     const res = coarse.div(9).toVar();
     If(coarse.greaterThan(0.5).and(coarse.lessThan(8.5)), () => {
-      let sum = float(0), wsum = float(0);
-      for (let j = 0; j < ADAPT_N; j++) for (let i = 0; i < ADAPT_N; i++) {
-        const o = at(sp.mul(i - (ADAPT_N - 1) / 2), sp.mul(j - (ADAPT_N - 1) / 2));
-        const ox = o.tx.add(0.5).sub(px), oy = o.ty.add(0.5).sub(py);
-        const w = max(float(0), float(1).sub(abs(ox).div(sp.mul(ADAPT_R)))).mul(max(float(0), float(1).sub(abs(oy).div(sp.mul(ADAPT_R)))));
-        sum = sum.add(o.v.mul(w));
-        wsum = wsum.add(w);
-      }
+      const sum = float(0).toVar(), wsum = float(0).toVar();
+      Loop(ADAPT_N, ADAPT_N, ({ i, j }) => {
+        const o = at(sp.mul(float(i).sub((ADAPT_N - 1) / 2)), sp.mul(float(j).sub((ADAPT_N - 1) / 2)));
+        const ox = o.tx.add(0.5).sub(pxv), oy = o.ty.add(0.5).sub(pyv);
+        const w = max(float(0), float(1).sub(abs(ox).div(sp.mul(ADAPT_R)))).mul(max(float(0), float(1).sub(abs(oy).div(sp.mul(ADAPT_R))))).toVar();
+        sum.addAssign(o.v.mul(w));
+        wsum.addAssign(w);
+      });
       res.assign(sum.div(wsum));
     });
     return res;
