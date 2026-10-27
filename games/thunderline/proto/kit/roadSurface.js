@@ -135,7 +135,8 @@ export function createScanDeck(name = "tarred_gravel") {
     S.tile.value = info.tile;
     ROAD_WEAR.chipAmt.value = 0;
   }
-  use(name);
+  // (resolves once the scan is in: a picture cached before it would keep the flat grey placeholder)
+  const ready = use(name).catch(() => {});
 
   const hook = (u, { surface }) => {
     const suv = vec2(uv().x.add(attribute("aPiece", "vec2").x), uv().y).div(S.tile);
@@ -161,5 +162,5 @@ export function createScanDeck(name = "tarred_gravel") {
       normal,
     };
   };
-  return { hook, use };
+  return { hook, use, ready };
 }

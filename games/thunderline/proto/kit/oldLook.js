@@ -40,7 +40,7 @@ export function createOldLookMaterials() {
   // away from the sun showed only reflections, dark blue under the car and bright at a grazing angle
   // further on. Satin (0.5 / 0.25) is one even sky-lit tone along its length. The old game keeps its own.
   // the GLASS road's pane (buildGlassLook): the old game's real glass, double-sided — you see it from under the track too
-  return { road, tube, trim, rail: createGuardrailMaterial({ roughness: 0.5, metalness: 0.25 }), stripe, glass: createRoadGlassMaterial() };
+  return { road, tube, trim, rail: createGuardrailMaterial({ roughness: 0.5, metalness: 0.25 }), stripe, glass: createRoadGlassMaterial(), ready: scan?.ready ?? Promise.resolve() };
 }
 
 /**

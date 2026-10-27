@@ -22,6 +22,7 @@ import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
+import { thumbStore } from "../../app/thumbStore.js";
 import { buildTrackMeshes } from "./testTrack.js";
 import { createBuilderTutorial } from "./builderTutorial.js";
 import { OBSTACLES, HOLE, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
@@ -202,7 +203,11 @@ const app = await startV3App({
   terrainLayers: 3, // and the GPU paint arrays hold just those 3 (−42 MB of video memory)
   preloadPaintTextures: false,
   csm: { cascades: 2 },
+  precompile: false, // the scene compiles once, final, behind the loading screen (end of this file)
 });
+// HIDDEN WHILE THE PAGE BOOTS (as drive.js, 2026-10-27): frames drawn before the post chain, the car's lights
+// and the track are in compiled shader variants thrown away the next step. The loop still runs.
+app.scene.visible = false;
 app.sky?.setMode?.("skypro");
 app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD); // the track's own time of day (worlds.js TIMES)
 app.fog?.setHeight?.({ enabled: false });
@@ -306,7 +311,15 @@ function thumbSetup() {
 }
 /** Whether a dock piece's picture depends on the rails (not obstacles, rings, tubes, half-pipes). */
 const railsMatter = (id) => id !== RING && id !== SPAWN && !isObstacle(id) && id !== CATCH && !TILES[id]?.tube && !TILES[id]?.halfpipe;
-async function renderThumb(id, open) {
+// ONE PICTURE AT A TIME: they share one little scene, and a render waits (the cache, the road scan, the
+// pixel read) — two at once drew both pieces into one picture (the car's hologram in START's)
+let thumbChain = Promise.resolve();
+function renderThumb(id, open) {
+  const run = thumbChain.then(() => drawThumb(id, open));
+  thumbChain = run.catch(() => {});
+  return run;
+}
+async function drawThumb(id, open) {
   const { W, H, rt, ts, cam, ctx, cvs } = thumbSetup();
   const pid = id === FITTED_BOWL ? "bowl_110" : ADJUSTABLE[id] ? ensureTile(adjustableId(id, adjDefaults(id))).id : id; // a typical one
   const g = id === SPAWN
@@ -317,22 +330,64 @@ async function renderThumb(id, open) {
   const t = id === RING || isObstacle(id) || id === SPAWN ? {} : ensureTile(pid);
   if (t.start || t.finish) g.add(lineGate({ id: pid }, new THREE.Matrix4(), open)); // its gantry, as on the track
   if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
-  ts.add(g);
   g.updateMatrixWorld(true);
+  // KEPT PICTURES (app/thumbStore.js): drawn before for this very geometry and look code → no draw at all
+  const key = `${id}|${open}`, sig = await thumbSig(g);
+  const kept = (await keptThumbs).get(key);
+  if (kept?.sig === sig) { thumbs.set(key, kept.url); return; }
+  ts.add(g);
   const box = new THREE.Box3().setFromObject(g);
   const sph = box.getBoundingSphere(new THREE.Sphere());
   const dir = new THREE.Vector3(0.75, 0.6, 0.9).normalize();
   cam.position.copy(sph.center).addScaledVector(dir, sph.radius / Math.sin((cam.fov * DEG) / 2) * 0.62);
   cam.lookAt(sph.center);
+  await mats.ready; // (the road scan in: never draw — and keep — the flat placeholder)
   withoutGlass(ts, () => { renderer.setRenderTarget(rt); renderer.render(ts, cam); renderer.setRenderTarget(null); });
   const px = await renderer.readRenderTargetPixelsAsync(rt, 0, 0, W, H);
   const img = ctx.createImageData(W, H);
   const stride = px.length / H;
   for (let y = 0; y < H; y++) for (let x = 0; x < W * 4; x++) img.data[y * W * 4 + x] = px[y * stride + x];
   ctx.putImageData(img, 0, 0);
-  thumbs.set(`${id}|${open}`, cvs.toDataURL());
+  const url = cvs.toDataURL();
+  thumbs.set(key, url);
+  thumbStore.set(key, sig, url);
   ts.remove(g);
 }
+// A PICTURE'S SIGNATURE: the piece's geometry (every vertex, the post matrices, the materials' kind and
+// colour) + the LOOK's code. In development the look's source files are read and hashed, so an edit to the
+// road, rail, tube or obstacle look draws the pictures again; a release build (bundled: the files are not
+// there) hashes the build's own code instead (the whole page's scripts change with any release).
+const LOOK_FILES = ["./oldLook.js", "./roadSurface.js", "./tubeMaterial.js", "./tubeLook.js", "./obstacles.js", "./gateMesh.js", "./physProps.js",
+  "../../../modular-road-v3/modularRoadMaterial.js", "../../../modular-road-v3/modularRoadKit.js", "../../../modular-road-v3/modularRoadRail.js"];
+const hashStr = (h, s) => { for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h; };
+const hashU32 = (h, a) => { for (let i = 0; i < a.length; i++) h = Math.imul(h ^ a[i], 16777619); return h; };
+// a typed array's bytes as 32-bit words (as bytes when it does not sit on a 4-byte boundary)
+const words = (a) => (a.byteOffset % 4 || a.byteLength % 4 ? new Uint8Array(a.buffer, a.byteOffset, a.byteLength) : new Uint32Array(a.buffer, a.byteOffset, a.byteLength >> 2));
+const lookRev = (async () => {
+  let h = hashStr(2166136261, [drawThumb, thumbSetup, meshesFor, withoutGlass].map(String).join("|"));
+  try {
+    const texts = await Promise.all(LOOK_FILES.map(async (f) => { const r = await fetch(new URL(f, import.meta.url)); if (!r.ok) throw new Error(f); return r.text(); }));
+    for (const s of texts) h = hashStr(h, s);
+  } catch {
+    h = hashStr(h, [...document.scripts].map((s) => s.src).join("|") + import.meta.url);
+  }
+  return h;
+})();
+async function thumbSig(g) {
+  let h = await lookRev;
+  g.traverse((o) => {
+    if (!o.isMesh) return;
+    const p = o.geometry.getAttribute("position");
+    h = hashU32(h, words(p.array));
+    const ix = o.geometry.index;
+    if (ix) h = hashU32(h, ix.array);
+    if (o.isInstancedMesh) h = hashU32(h, words(o.instanceMatrix.array));
+    h = hashU32(h, new Uint32Array(new Float32Array(o.matrixWorld.elements).buffer));
+    for (const m of [].concat(o.material)) h = hashStr(h, `${m.type}|${m.name}|${m.color?.getHexString?.() ?? ""}|${m.vertexColors}`);
+  });
+  return (h >>> 0).toString(36);
+}
+const keptThumbs = thumbStore.all();
 async function bakeThumbs() {
   for (const c of CATS) for (const id of c.tiles) {
     if (id === FITTED || id === CATCH) continue; // drawn with the landing's / tube's picture (see pic)
@@ -3184,10 +3239,16 @@ $("info-copy").onclick = async () => {
 
 // ---------- go ----------
 await bakeThumbs();
-$("boot").classList.add("gone");
 renderDock();
 rebuild();
 if (track.pieces.length) { frameAll(); controls.update(); } // an opened track starts in view
+// the scene shows, final (the track, the car's model and lights), and compiles behind the loading screen
+await rig.modelsReady;
+for (let i = 0; i < 2; i++) await new Promise((r) => requestAnimationFrame(r));
+scene.visible = true;
+await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+await renderer.backend?.device?.queue.onSubmittedWorkDone();
+$("boot").classList.add("gone");
 let last = performance.now();
 app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();
