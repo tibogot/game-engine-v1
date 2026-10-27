@@ -412,6 +412,9 @@
 
     <script type="module">
       import * as THREE from "three";
+      // r186: instanced leaves' positionNode in the instance's own frame (as r184) — without it the
+      // leaf cards fly out of the crown (render/instancedPositionOrder.js; main.js pages get it there)
+      import "../render/instancedPositionOrder.js";
       import {
         Fn,
         float,
@@ -464,7 +467,7 @@
         bakeColorAtlasFromObject,
         makeFlatAuxTextures,
         createImpostorMaterials,
-      } from "./octahedral-core.js";
+      } from "../render/foliage/octahedralCore.js";   // the engine's one copy (the bake-state fix with it)
       import { bakeObjectThumbnails } from "../tools/objectThumbnails.js";
 
       // ─── CUSTOM INSPECTOR (v2/editor-style) ─────────────────────────────────────
@@ -4112,7 +4115,7 @@
       // --- OCTAHEDRAL IMPOSTOR (far-LOD): bake the whole tree into a color atlas ---
       // Phase 1a: bake + preview only. Renders trunk + stylized billboard foliage
       // with their REAL materials from grid² octahedral views. The lab does the
-      // heavy lifting (octahedral-v3/octahedral-core.js = single source of truth).
+      // heavy lifting (render/foliage/octahedralCore.js = single source of truth).
       const IMP = {
         grid: 8,
         atlasSize: 4096,
