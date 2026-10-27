@@ -1,6 +1,6 @@
 # Sand & Blood — what remains
 
-*Updated 2026-10-26. Maps 2 (the coast) and 3 (El Kantara) are not here; they come after. The
+*Updated 2026-10-27 (the stone villages, the HUD the CoH 3 way, the one-piece Blender builds). Maps 2 (the coast) and 3 (El Kantara) are not here; they come after. The
 details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
 
 ---
@@ -80,8 +80,10 @@ ones throughout.
 
 1. **Still the old look in the game** (new maps only — the old Aurès frozen):
    - ~~French post, SAS post, FLN lookout, mine marker, farmstead, motor pool's states~~ — done 10-25/26.
-   - FLN: the **maquis camp**, the **cave mouth** (runtime sandstone builder).
-   - Villages: the **stone mechta / dechra kit** (the biggest gap — Oued Abdi, the maquis), the **koubba**, the
+   - FLN: the **maquis camp**, the **cave mouth** (runtime sandstone builder) — **plan written 2026-10-27** (FLN_CAMP_PLAN.md).
+   - ~~Villages: the stone mechta / dechra kit~~ — **done 2026-10-27** (MECHTA_PLAN.md, DECHRA_PLAN.md: 10 pieces, the new
+     Aurès' two hamlets and its dechra on terraces, the default there). Left: Oued Abdi's and the maquis' villages
+     dressed with it. Still old: the **koubba**, the
      **cemetery**, the **village well** (swap to the props kit's), the **ruined hut**, the sheepfold, the oasis props,
      **telegraph poles**.
    - Fuzzy things with the straw-card technique: the **zeriba thorn fence**, brush piles, thatch.
@@ -309,10 +311,14 @@ ones throughout.
 
 ---
 
-## Suggested order (updated 2026-10-26)
+## Suggested order (updated 2026-10-27)
 
-1. **The stone mechta kit** (+ its ruin = the ruined hut), then the **FLN camp and cave** in Blender — the last big
-   old-look pieces on the new maps.
+**Done 2026-10-27:** the stone mechta and dechra kits (the new Aurès' villages); the HUD as a CoH 3 player expects
+(HUD_COH3_COMPARE.md — resources on the command card, the doctrine button, squad cards in a row, the unit card's role
+and veterancy, group numbers and states on the badges, quick-select buttons, grid hotkeys as an option); the jeep's
+auto-reverse to a short hop; Blender kits built one piece at a time (tools/blenderKit.mjs, ~2.7 min a piece).
+
+1. **The FLN camp and cave** in Blender (FLN_CAMP_PLAN.md) — the last big old-look pieces on the new maps.
 2. **Oued Abdi playable:** its places, capture points and AI (section 2) — then you play it.
 3. **You play a full match on each side** (balance, fun at 25-30 min).
 4. Building damage for the OLD merged villages (each house its own id) — the new kits have it.

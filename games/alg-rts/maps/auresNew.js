@@ -132,7 +132,8 @@ const OA = site("Mechta Ouled Ali"), EO = site("Mechta el Oued"), DE = site("Dec
 // THE TWO MECHTAS: the whitewashed kit, five or six houses round each square (one shelled)
 // — or, with ?mechta=1 (2026-10-27, MECHTA_PLAN.md: the Aurès' own STONE houses, waiting for your verdict), the mechta
 // kit as a CLUSTER (hamlet() above): two rows behind a small square, a house on each side of it; one shelled, one a ruin
-const STONE_MECHTA = typeof location !== "undefined" && new URLSearchParams(location.search).get("mechta") === "1";
+// (THE DEFAULT since 2026-10-27 — you: "ok lets go ahead as long as old aures didnt change"; ?mechta=0: the old stand-ins, to compare)
+const STONE_MECHTA = typeof location === "undefined" || new URLSearchParams(location.search).get("mechta") !== "0";
 // (the back row closed by the HILLSIDE house, yards behind two of its houses, a lean-to at each row's end, an oven in the square)
 const STONE_OA = STONE_MECHTA && hamlet(OA.x, OA.z, {
   rows: [{ types: ["petite", "etage", "petite"], x: -12, z: -6 },
@@ -150,7 +151,8 @@ const MECHTA_EO = STONE_EO ? STONE_EO.houses : village(EO.x, EO.z, ["haute", "co
 // +0.6 x +0.8 z, ~17°: measured), the mechta's houses shoulder to shoulder on each, a retaining wall along every
 // terrace with steps through it; the DJEMAA square (the village's point) in the second row's gap; the MOSQUE at the top,
 // its minaret the landmark. One house shelled, one a ruin.
-const STONE_DECHRA = typeof location !== "undefined" && new URLSearchParams(location.search).get("dechra") === "1";
+// (THE DEFAULT since 2026-10-27; ?dechra=0: the M'zab stand-ins, to compare)
+const STONE_DECHRA = typeof location === "undefined" || new URLSearchParams(location.search).get("dechra") !== "0";
 const STONE_DE = STONE_DECHRA && terraced("DE", DE.x, DE.z, [0.6, 0.8], {
   rows: [
     { types: ["petite", "etage", "petite", "etage"], u: -17, v: 17, level: 0 },
