@@ -119,6 +119,16 @@ const CSS = `
 #alg-tip .k kbd { font: 700 10px var(--hud-mono); color: var(--hud-text); border: 1px solid #4a503c; border-radius: 2px; padding: 0 4px; }
 `;
 
+// GRID KEYS (2026-10-27, HUD_COH3_COMPARE.md 8 — CoH's grid hotkeys, an OPTION: Options → Jeu → Ordres au clavier): each
+// button answers to the key in ITS PLACE on the card — three rows of five physical keys (QWERTY QWERT / ASDFG / ZXCVB, your
+// AZERTY's AZERT / QSDFG / WXCVB — e.code, the label the character your keyboard prints there). With something selected the
+// card owns those 15 keys (the camera pans with the arrows then; nothing selected, WASD as ever).
+const GRID = [["KeyQ", "KeyW", "KeyE", "KeyR", "KeyT"], ["KeyA", "KeyS", "KeyD", "KeyF", "KeyG"], ["KeyZ", "KeyX", "KeyC", "KeyV", "KeyB"]];
+const SLOT_OF = Object.fromEntries(GRID.flatMap((row, r) => row.map((code, c) => [code, r * 5 + c])));
+let printed = null;   // (navigator.keyboard's layout map: code → the printed character; Chrome / Edge)
+navigator.keyboard?.getLayoutMap?.().then((m) => { printed = m; }).catch(() => {});
+const gridLabel = (slot) => { const code = GRID[Math.floor(slot / 5)]?.[slot % 5]; return code ? (printed?.get(code) ?? code.slice(3)).toUpperCase() : ""; };
+
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
 
 export function createCommandCard({
@@ -136,6 +146,7 @@ export function createCommandCard({
   abilitiesFor = () => [],     // (selected) → [{ key, label, hint, cost, ready, cooldown }]
   onAbility = () => {},        // (key, selected)
   stanceFor = () => null,      // kept for the API (the selection card shows the stance now)
+  keyMode = () => "letters",   // "letters" (each order its letter, ui/icons.js HOTKEY) | "grid" (its place on the card)
   mount = document.body,
 }) {
   const root = document.createElement("div");
@@ -164,11 +175,11 @@ export function createCommandCard({
   function button({ kind, key, label, cost = 0, icon = null, pic = null, verb = false, tier = false, locked = null, info = "", ready = false, run }) {
     const el = document.createElement("button");
     el.className = `cc-b${verb ? " verb" : ""}${tier ? " tier" : ""}${locked ? " locked" : ""}${ready ? " ready" : ""}`;
-    const hk = HOTKEY[key];
+    const hk = keyMode() === "grid" ? "" : HOTKEY[key];   // (grid: the label once placed — slots())
     el.innerHTML = `${pic ? `<span class="pic" style="background-image:url(${pic})"></span>` : icon && hasRendered(icon) ? `<span class="ri" style="${renderedStyle(icon)}"></span>` : icon && hasIcon(icon) ? `<span class="ic" style="${iconStyle(icon)}"></span>` : ""}`
       + `${hk ? `<span class="hk">${hk}</span>` : ""}${costTag(cost)}<span class="lb">${esc(label)}</span>`;
     el.dataset.key = key;
-    const b = { el, kind, key, cost, label, info, locked, run };
+    const b = { el, kind, key, cost, label, info, locked, run, hk, slot: -1 };
     if (key === "retreat") el.classList.add("c-red");
     if (!pic && icon && hasRendered(icon)) el.classList.add("sq");
     el.addEventListener("click", () => {
@@ -184,7 +195,7 @@ export function createCommandCard({
     return el;
   }
   function showTip(b) {
-    const hk = HOTKEY[b.key];
+    const hk = b.hk;
     tip.innerHTML = `<div class="t"><b>${esc(b.label)}</b>${hasCost(b.cost) ? `<span>${costText(b.cost)}</span>` : ""}</div>`
       + (b.info ? `<div class="d">${esc(b.info)}</div>` : "")
       + (b.locked ? `<div class="l">${t("Verrouillé — {why}", { why: esc(b.locked) })}</div>` : hasCost(b.cost) && !canAfford(b.cost) ? `<div class="l">${t("Manque : {what}", { what: esc(shortOf(b.cost) || t("ressources")) })}</div>` : "")
@@ -202,6 +213,25 @@ export function createCommandCard({
     for (const el of grid.children) { const p = FIXED[el.dataset.key]; if (p) { el.style.gridColumn = p[0]; el.style.gridRow = p[1]; } }
     const n = grid.children.length, total = Math.max(15, Math.ceil(n / 5) * 5);
     for (let i = n; i < total; i++) { const e = document.createElement("div"); e.className = "cc-empty"; grid.appendChild(e); }
+  }
+  /** GRID KEYS: each button's place on the card (measured once laid out), its key label that place's. */
+  let mode = keyMode();
+  function slots() {
+    mode = keyMode();
+    if (mode !== "grid") return;
+    const grid = root.querySelector(".cc-grid");
+    if (!grid) return;
+    const g = grid.getBoundingClientRect(), gap = 4;
+    for (const b of buttons) {
+      if (!grid.contains(b.el)) continue;
+      const r = b.el.getBoundingClientRect();
+      const col = Math.round((r.left - g.left) / (r.width + gap)), row = Math.round((r.top - g.top) / (r.height + gap));
+      b.slot = row < 3 && col < 5 ? row * 5 + col : -1;
+      b.hk = b.slot >= 0 ? gridLabel(b.slot) : "";
+      let k = b.el.querySelector(".hk");
+      if (b.hk && !k) { k = document.createElement("span"); k.className = "hk"; b.el.insertBefore(k, b.el.querySelector(".lb")); }
+      if (k) k.textContent = b.hk;
+    }
   }
 
   // ── Faces ──────────────────────────────────────────────────────────────────
@@ -305,6 +335,7 @@ export function createCommandCard({
     else if (mobile.length) renderUnits(mobile);
     else renderStructure(selected[0]);
     fit();
+    slots();
   }
   // THE SAFETY NET (2026-10-12: the card ran 90 px off the screen): a card taller than its panel grows
   // the panel UPWARD to fit (it stands on the screen's bottom edge) — never past the window again.
@@ -375,8 +406,17 @@ export function createCommandCard({
     refresh();
   });
 
+  // GRID KEYS: first of everyone (capture) — a key of the card's 15, something selected: the card's, nobody else's
+  window.addEventListener("keydown", (e) => {
+    if (mode !== "grid" || !selRef.length || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target?.matches?.("input, textarea, select")) return;
+    const slot = SLOT_OF[e.code];
+    if (slot == null) return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    buttons.find((x) => x.slot === slot)?.el.click();
+  }, true);
   // Hotkeys (printed key, AZERTY-safe): only orders on the card now.
   window.addEventListener("keydown", (e) => {
+    if (mode === "grid") return;
     if (e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.target?.matches?.("input, textarea, select")) return;
     const k = e.key === "Delete" ? "Del" : e.key?.length === 1 ? e.key.toUpperCase() : null;
     if (!k || k === "G" || k === "B") return;   // G, B: algGrenades.js has its own (it targets)
@@ -393,10 +433,11 @@ export function createCommandCard({
     /** Called each frame — cooldowns, affordability, the queue and its bar. */
     tick() {
       if (!selRef.length) return;
+      if (keyMode() !== mode) { render(selRef); return; }   // (the option changed: the labels and the keys)
       // A tier unlocking, abilities appearing (a site, wire in reach): re-render, twice a second.
       if (performance.now() - prodT > 500) {
         prodT = performance.now();
-        if (baseRef && JSON.stringify(productionFor(baseRef)) !== prodSig) { renderProducer(baseRef); return; }
+        if (baseRef && JSON.stringify(productionFor(baseRef)) !== prodSig) { renderProducer(baseRef); fit(); slots(); return; }
         if (!baseRef && abilitiesFor(selRef.filter((e) => !e.isStructure).length ? selRef.filter((e) => !e.isStructure) : selRef).map((a) => a.key).join(",") !== abilSig) { render(selRef); return; }
       }
       refresh();

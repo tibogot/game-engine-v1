@@ -21,6 +21,8 @@ export default {
   "Explosions proches": "Close explosions",
   "Non": "Off",
   "Conseils": "Tips",
+  "Ordres au clavier": "Order hotkeys", "Lettres": "Letters", "Grille": "Grid",
+  "Grille : chaque ordre répond à la touche à sa place sur le panneau (trois rangées de cinq, à gauche du clavier) — une unité sélectionnée, la caméra se déplace alors aux flèches.": "Grid: each order answers to the key in its place on the panel (three rows of five, on the left of the keyboard) — with a unit selected, the camera then moves with the arrow keys.",
   "Langue": "Language",
   "La partie recommence dans la langue choisie.": "The game restarts in the chosen language.",
   "Affichage": "Display",

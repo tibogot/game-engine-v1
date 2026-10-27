@@ -16,6 +16,30 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 TEX = os.path.join(ROOT, "public", "textures")
 
 def B(x, y, z): return Vector((x, -z, y))           # game (x, y up, z) → Blender (z up; game -Z = Blender +Y)
+
+# THE BAKE ON THE GPU (2026-10-27, you: "is there a way we can go faster"): `--gpu` on a script's command line (or
+# BKIT_GPU=1) bakes with Cycles on the graphics card — OptiX, else CUDA, else HIP; the CPU when none answers. Opt-in: it
+# shares the GPU with whatever is on the screen.
+_device = None
+def bakeDevice(scn):
+    global _device
+    if _device is None:
+        _device = "CPU"
+        if "--gpu" in __import__("sys").argv or os.environ.get("BKIT_GPU"):
+            prefs = bpy.context.preferences.addons["cycles"].preferences
+            for kind in ("OPTIX", "CUDA", "HIP"):
+                try:
+                    prefs.compute_device_type = kind
+                    prefs.get_devices()
+                    gpus = [d for d in prefs.devices if d.type == kind]
+                    if gpus:
+                        for d in prefs.devices: d.use = d.type == kind
+                        _device = "GPU"
+                        print(f"BAKE on the GPU ({kind}: {', '.join(d.name for d in gpus)})", flush=True)
+                        break
+                except Exception: continue
+            if _device == "CPU": print("BAKE: no GPU answered — the CPU", flush=True)
+    scn.cycles.device = _device
 def gv(*p): return Vector(p)
 def srgb(h): return tuple(((h >> s & 255) / 255) ** 2.2 for s in (16, 8, 0))
 def sock(node, ident):
@@ -237,7 +261,7 @@ class Kit:
         if os.environ.get("BKIT_NOBAKE"): print("BAKE skipped (BKIT_NOBAKE)", name); return   # (geometry checks only)
         o = objs[0]
         scn = bpy.context.scene
-        scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.render.bake.margin = 8
+        scn.render.engine = "CYCLES"; bakeDevice(scn); scn.render.bake.margin = 8
         scn.world.light_settings.distance = ao_dist   # (a house's 2.2 m; small packed pieces less — 2.2 blackened a dry-stone wall)
         hidden = [q for q in scn.objects if q.type == "MESH" and q not in objs and not q.hide_render]
         for q in hidden: q.hide_render = True
@@ -362,7 +386,7 @@ class Kit:
         hid = [o for o in scn.objects if o.type == "MESH" and o not in texts and o is not bo and not o.hide_render]
         for o in hid: o.hide_render = True
         for o in texts + [bo]: o.hide_render = False
-        scn.render.engine = "CYCLES"; scn.cycles.device = "CPU"; scn.cycles.samples = 16; scn.render.bake.margin = 2
+        scn.render.engine = "CYCLES"; bakeDevice(scn); scn.cycles.samples = 16; scn.render.bake.margin = 2
         bpy.ops.object.select_all(action="DESELECT")
         for d in texts: d.select_set(True)
         bo.select_set(True); bpy.context.view_layer.objects.active = bo

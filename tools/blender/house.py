@@ -31,7 +31,8 @@ out = os.path.abspath(sys.argv[sys.argv.index("--") + 1] if "--" in sys.argv els
 os.makedirs(out, exist_ok=True)
 REFS = os.path.join(bkit.ROOT, "assets-src", "refs", "house"); os.makedirs(REFS, exist_ok=True)
 QUICK = "--quick" in sys.argv
-ONLY = sys.argv[sys.argv.index("--only") + 1] if "--only" in sys.argv else None
+# (--only a,b: just those types — written to <out>/parts/<type>.glb only; tools/blenderKit.mjs merges the parts into the kit)
+ONLY = set(sys.argv[sys.argv.index("--only") + 1].split(",")) if "--only" in sys.argv else None
 bpy.ops.object.select_all(action="SELECT"); bpy.ops.object.delete()
 
 # ── Materials ────────────────────────────────────────────────────────────────
@@ -493,7 +494,8 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
     exported, stencilled = [], False
     S_ = 512 if QUICK else 2048
     for ti, (tname, spec) in enumerate(TYPES.items()):
-        if ONLY and tname != ONLY: continue
+        if ONLY and tname not in ONLY: continue
+        typeStart = len(exported)
         K.smooth_angle, K.weighted_on = spec.get("smoothAngle", 35), spec.get("weighted", True)
         objs, fars, decals, hay = [], [], {}, {}
         for si, state in enumerate(spec.get("states", STATES)):   # (a prop: "intact" only)
@@ -524,7 +526,16 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
             for i, (x, y, z, yaw) in enumerate(hay.get(o, [])):   # (its hay piles' spots: empties, the game's straw-card piles)
                 e = bpy.data.objects.new(f"{o.name}_Hay{i}", None); bpy.context.scene.collection.objects.link(e)
                 e.location = B(x, y, z); e.rotation_euler = (0, 0, yaw); exported.append(e)
-    K.export(os.path.join(out, glb), exported, colors=colors, images="AUTO" if stencilled else "JPEG")
+        # THE TYPE'S OWN FILE (2026-10-27, you: "is there a way we can go faster … do we always have to wait long?"):
+        # <out>/parts/<type>.glb, and a "<type>.quick" marker beside it when it is a quick build — tools/blenderKit.mjs
+        # merges every part into the kit, so a fix to one type rebuilds that type alone
+        parts = os.path.join(out, "parts"); os.makedirs(parts, exist_ok=True)
+        K.export(os.path.join(parts, f"{tname}.glb"), exported[typeStart:], colors=colors, images="AUTO" if dec else "JPEG")
+        mark = os.path.join(parts, f"{tname}.quick")
+        if QUICK: open(mark, "w").close()
+        elif os.path.exists(mark): os.remove(mark)
+    # the whole kit in one file as before — not with --only (it would hold only those types: blenderKit.mjs merges the parts)
+    if not ONLY: K.export(os.path.join(out, glb), exported, colors=colors, images="AUTO" if stencilled else "JPEG")
     return exported
 
 def previews(TYPES, exported, prefix="House", tag="", spacing=16, frame=1.0):

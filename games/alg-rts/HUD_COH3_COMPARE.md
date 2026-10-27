@@ -7,7 +7,7 @@
 **Decided 2026-10-27** (you: "make what you think is the best for UX/UI and that a Company of Heroes player won't
 miss"): 1, 2, 4, 5, 6, 7 DONE as written; 3 DONE as the group number over each tab (the shield icon left out: a 62 px
 portrait had no room for it beside its state, count and chevrons — the number is what ties a tab to its badge);
-9: our portraits kept; 8: grid keys as an OPTION (the letters stay the default, as CoH 2's classic keys) — to do.
+9: our portraits kept; 8: DONE — grid keys as an OPTION (Options → Jeu → Ordres au clavier; the letters stay the default, as CoH 2's classic keys).
 
 Already like CoH 3, nothing to do: the minimap's corner, the score bar at the top, the alerts above the minimap,
 the resources on the command card's strip, the folded doctrine button, the capture point's ring and its "+N".

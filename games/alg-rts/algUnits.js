@@ -515,6 +515,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     mount: hud.centre,
   });
   const commandCard = createCommandCard({
+    keyMode: () => app.algOptions?.cardKeys ?? "letters",   // (Options → Ordres au clavier: the letters, or CoH's grid)
     thumbnails: unitRenderer.thumbnails,
     onStop: () => { attackMove?.cancel(app.selection?.selected); for (const u of app.selection?.selected ?? []) u.stop?.(); },
     onFocus: () => {

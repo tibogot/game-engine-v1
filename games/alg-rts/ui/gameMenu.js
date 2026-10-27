@@ -21,7 +21,7 @@ import { isHuman } from "../../shared-rts/teams.js";
 const STORE = "algrts.options.v1";
 // uiScale: the HUD's size (ui/uiScale.js). 100 % by default (you, 2026-10-11; it was 1.15 from 2026-10-07,
 // "the text is a bit small") — the slider in Options still goes to 150 %.
-const DEFAULTS = { gore: "coh", tips: true, panSpeed: 55, edgeScroll: true, uiScale: 1 };
+const DEFAULTS = { gore: "coh", tips: true, panSpeed: 55, edgeScroll: true, uiScale: 1, cardKeys: "letters" };   // (cardKeys "grid": CoH's grid hotkeys — ui/commandCard.js)
 
 /** The saved options (defaults where none). */
 export function loadOptions() {
@@ -248,6 +248,8 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
         <fieldset><legend>${t("Jeu")}</legend>
           <label class="r">${t("Corps déchiquetés")}<select data-k="gore"><option value="coh"${opts.gore === "coh" ? " selected" : ""}>${t("Explosions proches")}</option><option value="off"${opts.gore === "off" ? " selected" : ""}>${t("Non")}</option></select><output></output></label>
           <label class="r">${t("Conseils")}<input type="checkbox" data-k="tips" ${opts.tips ? "checked" : ""}><output></output></label>
+          <label class="r">${t("Ordres au clavier")}<select data-k="cardKeys"><option value="letters"${opts.cardKeys !== "grid" ? " selected" : ""}>${t("Lettres")}</option><option value="grid"${opts.cardKeys === "grid" ? " selected" : ""}>${t("Grille")}</option></select><output></output></label>
+          <div class="note">${t("Grille : chaque ordre répond à la touche à sa place sur le panneau (trois rangées de cinq, à gauche du clavier) — une unité sélectionnée, la caméra se déplace alors aux flèches.")}</div>
         </fieldset>
         <fieldset><legend>${t("Langue")}</legend>
           <label class="r">${t("Langue")}<select data-k="lang">${LANGS.map((l) => `<option value="${l.key}"${l.key === LANG ? " selected" : ""}>${l.label}</option>`).join("")}</select><output></output></label>
@@ -286,6 +288,7 @@ export function createGameMenu({ app, audio = null, voices = null, rtsCamera = n
           syncSound();
         } else if (k === "fullscreen") { setFullscreen(el2.checked); }
         else if (k === "gore") { opts.gore = el2.value; save(); apply(); }
+        else if (k === "cardKeys") { opts.cardKeys = el2.value; save(); apply(); }
         else if (k === "tips" || k === "edgeScroll") { opts[k] = el2.checked; save(); apply(); }
       });
     });
