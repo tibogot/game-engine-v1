@@ -546,10 +546,10 @@ function buildCrowdGroup(tpl, members, app, scene, { gibs = false, unarmed = fal
 
   // A VIEW per type: its range of the crowd, drawn in its look.
   const views = new Map();
-  const dress = (fld, key, type, look, name) => {
   // Per crowd, ONE `extra` read and ONE headwear-hidden position for all its views: the views'
   // shadow pass then shares one build (crowdSkinning's view(); nodes key by identity).
   const perField = new Map();   // field → { ex, hiddenPos }
+  const dress = (fld, key, type, look, name) => {
     const material = source.material.clone();
     // `crowdTint` [r, g, b]: a whole TYPE's clothing colour (it multiplies the
     // model's) — how a second side on the same stand-in model reads as
