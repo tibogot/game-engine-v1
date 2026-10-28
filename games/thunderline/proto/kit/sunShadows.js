@@ -42,8 +42,10 @@ const LIVE_TENT = Q.get("liveTent") !== "0";
  * @param {THREE.Vector3} o.sunDir unit vector TOWARDS the sun
  * @param {THREE.Vector3[]} o.casterPoints world points sampling every static caster (deck + rail vertices)
  * @param {number} [o.atlasSize] 8192 (1024 cells) or 4096 (256 cells)
+ * @param {object} [o.reuse] the previous bake's shadows: its maps, uniforms and RECEIVER NODE are kept (see
+ *   "kept across bakes" below) — the shell bakes track after track, and a new node recompiled every material
  */
-export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoints, trackLine = null, atlasSize = 8192 }) {
+export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoints, trackLine = null, atlasSize = 8192, reuse = null }) {
   // ---- light frame: x/y across the sun's view, z towards the sun ----
   const zL = sunDir.clone().normalize();
   const xL = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), zL);
@@ -148,7 +150,22 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     table[k * 4 + 2] = 1;
     table[k * 4 + 3] = cellAngle(k);
   });
-  const tableTex = new THREE.DataTexture(table, nx, ny, THREE.RGBAFormat, THREE.FloatType);
+  // KEPT ACROSS BAKES (2026-10-28, ONE ALWAYS-LOADED PAGE: the shell plays track after track). The receiver
+  // node is part of every material that takes the sun; a NEW node each bake rebuilt them all — ~170 shader
+  // modules, ~11 s of the GPU driver compiling, on every play, even the same track again. So a bake with
+  // `reuse` keeps the previous one's: the same render targets (the atlas resized), the cell table at a fixed
+  // size, the uniforms (the track's numbers live in them, not in the shader's code), the casters' material and
+  // the receiver node itself — the generated shaders are the same, nothing compiles. Not kept when the atlas
+  // format changes (a light range past 2.5 km keeps 32 bits) or the grid outgrows the fixed table.
+  const atlas16 = range <= 2500 && renderer.backend?.device?.features?.has?.("texture-formats-tier1") === true;
+  const atlasType = atlas16 ? THREE.UnsignedShortType : THREE.FloatType;
+  const TABLE_N = 256; // cells each way (4 km): the table texture's size, fixed so it can be kept
+  const fits = nx <= TABLE_N && ny <= TABLE_N;
+  const sh = reuse?._shared && reuse._shared.atlasType === atlasType && fits && reuse._shared.tableN === TABLE_N ? reuse._shared : null;
+  const tableW = fits ? TABLE_N : nx, tableH = fits ? TABLE_N : ny;
+  const tableTex = sh ? sh.tableTex : new THREE.DataTexture(new Float32Array(tableW * tableH * 4), tableW, tableH, THREE.RGBAFormat, THREE.FloatType);
+  tableTex.image.data.fill(0);
+  for (let cy = 0; cy < ny; cy++) tableTex.image.data.set(table.subarray(cy * nx * 4, (cy + 1) * nx * 4), cy * tableW * 4);
   tableTex.minFilter = tableTex.magFilter = THREE.NearestFilter;
   tableTex.needsUpdate = true;
 
@@ -167,20 +184,26 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // nothing else changes. A step is range / 65535 (White 2: 1.5 km of light depth -> 2.3 cm, rounding <= 1.4 cm)
   // against the atlas's 5 cm bias; a longer range, or a GPU without the feature (three would make R16Uint, an
   // integer target the depth material cannot write), keeps R32F. The live map stays R32F: its bias is 2 cm.
-  const atlas16 = range <= 2500 && renderer.backend?.device?.features?.has?.("texture-formats-tier1") === true;
-  const atlasType = atlas16 ? THREE.UnsignedShortType : THREE.FloatType;
-  const atlasRT = makeRT(atlasPx, globalThis.__BAKE_DIRECT === true, atlasType);
-  const liveRT = makeRT(LIVE_TEX);
+  const atlasRT = sh ? sh.atlasRT : makeRT(atlasPx, globalThis.__BAKE_DIRECT === true, atlasType);
+  if (sh && atlasRT.width !== atlasPx) atlasRT.setSize(atlasPx, atlasPx);
+  const liveRT = sh ? sh.liveRT : makeRT(LIVE_TEX);
+  if (sh && liveRT.width !== LIVE_TEX) liveRT.setSize(LIVE_TEX, LIVE_TEX); // (parked: shrunk to 1 texel)
 
-  const uZ = [uniform(zL), uniform(zMax), uniform(range)];
+  const uZ = sh ? sh.uZ : [uniform(zL), uniform(zMax), uniform(range)];
+  if (sh) { uZ[0].value.copy(zL); uZ[1].value = zMax; uZ[2].value = range; }
+  // the track's numbers the receiver reads: the cell grid (x0, y0, nx, ny) and the two depth biases
+  const uGrid = sh ? sh.uGrid : uniform(new THREE.Vector4());
+  uGrid.value.set(gx0, gy0, nx, ny);
+  const uBias = sh ? sh.uBias : uniform(new THREE.Vector2());
+  uBias.value.set(0.05 / range, 0.02 / range); // atlas, live map
   // NO BLENDING, ever (three r186, 2026-10-27: every shadow vanished on the drive page). With an override
   // material three copies each object's `transparent` onto it (the car's windows, a glass pane: transmission
   // counts too); r186 shapes the fragment output to the target's format — ONE channel here — so a blended
   // pipeline had no alpha to read, WebGPU rejected it and the whole pass with it (atlas bake and live map).
   // A caster writes its distance whatever it is drawn with; single pass (no back-then-front for those).
-  const depthMat = new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, blending: THREE.NoBlending });
+  const depthMat = sh ? sh.depthMat : new THREE.MeshBasicNodeMaterial({ side: THREE.DoubleSide, blending: THREE.NoBlending });
   depthMat.forceSinglePass = true;
-  depthMat.colorNode = vec4(uZ[1].sub(dot(positionWorld, uZ[0])).div(uZ[2]), 0, 0, 1);
+  if (!sh) depthMat.colorNode = vec4(uZ[1].sub(dot(positionWorld, uZ[0])).div(uZ[2]), 0, 0, 1);
 
   // an ortho camera looking down the sun, at light-space centre (cx, cy), covering `half` m each side,
   // turned by `angle` about the sun (its right = cos·xL + sin·yL, its up = −sin·xL + cos·yL)
@@ -249,7 +272,9 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     const prevCC = renderer.getClearColor(new THREE.Color());
     const vp = new THREE.Vector4();
     const direct = globalThis.__BAKE_DIRECT === true;
-    const cellRT = direct ? null : makeRT(CELL_TEX, true, atlasType); // (copied into the atlas: same format)
+    // (copied into the atlas: same format). KEPT with the rest (shared): a new target is a new render context,
+    // and three keys its built shaders by it — every caster's material was built again at each bake
+    const cellRT = direct ? null : (shared.cellRT ??= makeRT(CELL_TEX, true, atlasType));
     const at = new THREE.Vector2();
     cells.forEach((k, slot) => {
       const cx = k % nx, cy = Math.floor(k / nx);
@@ -274,7 +299,6 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       renderInto(cellRT, vp, [STATIC_LAYER]);
       renderer.copyTextureToTexture(cellRT.texture, atlasRT.texture, null, at.set(sc * CELL_TEX, sr * CELL_TEX));
     });
-    cellRT?.dispose();
     renderer.setClearColor(prevCC);
     return performance.now() - t0;
   }
@@ -291,7 +315,7 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   const CHASE_DIST = 8; // m, the chase camera's distance to the car (measured 7.9)
   const LIVE_VP = new THREE.Vector4(0, 0, LIVE_TEX, LIVE_TEX), LIVE_LAYERS = [STATIC_LAYER, DYNAMIC_LAYER];
   const LIVE_STEPS = [LIVE_MIN, 10, 12, 14, 16, 20, 24, 28, LIVE_SIZE].filter((v) => v <= LIVE_SIZE);
-  const live = { cx: uniform(0), cy: uniform(0), size: uniform(LIVE_SIZE) };
+  const live = sh ? sh.live : { cx: uniform(0), cy: uniform(0), size: uniform(LIVE_SIZE) };
   function follow(carPos, camDist = Infinity) {
     const want = Math.min(LIVE_SIZE, LIVE_SIZE * (camDist / CHASE_DIST) ** 2);
     let size = LIVE_SIZE;
@@ -308,7 +332,8 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   }
 
   // ---- C. the receiver ----
-  const uX = uniform(xL), uY = uniform(yL);
+  const uX = sh ? sh.uX : uniform(xL.clone()), uY = sh ? sh.uY : uniform(yL.clone());
+  if (sh) { uX.value.copy(xL); uY.value.copy(yL); }
   const atlasTex = atlasRT.texture, liveTex = liveRT.texture;
   // 4 taps around the point, each a BILINEAR compare of its 2×2 texels (what hardware PCF does):
   // 16 loads, smooth edges instead of the stair steps single-texel compares gave.
@@ -430,8 +455,8 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
   // resolution does not fit one texture (White 1: 9728² > 8192). See TODO.md for the fix proposed.
 
   // debug: 0 normal, 1 force lit (tests the engine hook), 2 live map only, 3 atlas only
-  const dbg = uniform(0);
-  const visibility = Fn(() => {
+  const dbg = sh ? sh.dbg : uniform(0);
+  const visibility = sh ? sh.visibility : Fn(() => {
     const p = positionWorld.add(normalWorld.mul(0.06));
     const lx = dot(p, uX), ly = dot(p, uY);
     const d = uZ[1].sub(dot(p, uZ[0])).div(uZ[2]);
@@ -463,15 +488,15 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     const liveW = smoothstep(0.0, 0.06, edge).toVar(); // last ~2 m blend into the atlas
     const liveVis = float(1).toVar();
     If(edge.greaterThan(0), () => {
-      liveVis.assign((Q.get("liveFilter") === "tent3" ? pcfTent : Q.get("liveFilter") === "tent6" ? pcfWideTent : LIVE_TENT ? pcfAdaptive : pcfWideTent)(liveTex, lu.mul(LIVE_TEX), float(1).sub(lv).mul(LIVE_TEX), d, float(0.02 / range), vec2(0, 0), vec2(LIVE_TEX - 1, LIVE_TEX - 1), ddx.mul(lt), ddy.mul(lt).negate(), mpp.div(lt)));
+      liveVis.assign((Q.get("liveFilter") === "tent3" ? pcfTent : Q.get("liveFilter") === "tent6" ? pcfWideTent : LIVE_TENT ? pcfAdaptive : pcfWideTent)(liveTex, lu.mul(LIVE_TEX), float(1).sub(lv).mul(LIVE_TEX), d, uBias.y, vec2(0, 0), vec2(LIVE_TEX - 1, LIVE_TEX - 1), ddx.mul(lt), ddy.mul(lt).negate(), mpp.div(lt)));
     });
 
     // static atlas: the point looked up in one cell's bake ({ vis, here: the cell exists and was baked })
-    const fx = lx.sub(gx0).div(CELL), fy = ly.sub(gy0).div(CELL);
+    const fx = lx.sub(uGrid.x).div(CELL), fy = ly.sub(uGrid.y).div(CELL);
     const cellVis = (cxi, cyi) => {
-      const cx = clamp(cxi, 0, nx - 1), cy = clamp(cyi, 0, ny - 1);
+      const cx = clamp(cxi, float(0), uGrid.z.sub(1)), cy = clamp(cyi, float(0), uGrid.w.sub(1));
       const entry = textureLoad(tableTex, ivec2(int(cx), int(cy)));
-      const here = cxi.greaterThanEqual(0).and(cyi.greaterThanEqual(0)).and(cxi.lessThan(nx)).and(cyi.lessThan(ny)).and(entry.z.greaterThan(0.5));
+      const here = cxi.greaterThanEqual(0).and(cyi.greaterThanEqual(0)).and(cxi.lessThan(uGrid.z)).and(cyi.lessThan(uGrid.w)).and(entry.z.greaterThan(0.5));
       const ox = entry.x.mul(CELL_TEX).add(BORDER), oy = entry.y.mul(CELL_TEX).add(BORDER);
       // the cell's bake was turned by entry.w (cellAngle): turn the point back into the camera's frame;
       // the turned square spans ±R (R = CELL/2 · (|cos| + |sin|)) over INNER texels
@@ -479,7 +504,7 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       const R = abs(ca).add(abs(sa)).mul(CELL / 2);
       // the bake's centre, snapped to whole texels in the turned frame (see bake: one lattice per angle)
       const t = R.mul(2 / INNER);
-      const ccx = cx.add(0.5).mul(CELL).add(gx0), ccy = cy.add(0.5).mul(CELL).add(gy0);
+      const ccx = cx.add(0.5).mul(CELL).add(uGrid.x), ccy = cy.add(0.5).mul(CELL).add(uGrid.y);
       const us = floor(ca.mul(ccx).add(sa.mul(ccy)).div(t).add(0.5)).mul(t);
       const vs = floor(ca.mul(ccy).sub(sa.mul(ccx)).div(t).add(0.5)).mul(t);
       const u = ca.mul(lx).add(sa.mul(ly)).sub(us).div(R.mul(2)).add(0.5);
@@ -492,7 +517,7 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       // ~±16 cm of soft edge at 6.5 cm texels, in the turned frame (+x along its right, +y = −its up)
       const lo = vec2(ox.sub(BORDER), oy.sub(BORDER)), hi = vec2(ox.add(INNER + BORDER - 1), oy.add(INNER + BORDER - 1));
       const gpx = ca.mul(ddx).add(sa.mul(ddy)).mul(t), gpy = ca.mul(ddy).sub(sa.mul(ddx)).mul(t).negate();
-      const vis = Q.get("atlasFilter") === "along" ? pcf(atlasTex, px, py, d, float(0.05 / range), lo, hi, align ? TAPS_ALONG : TAPS) : pcfWideTent(atlasTex, px, py, d, float(0.05 / range), lo, hi, gpx, gpy, mpp.div(t));
+      const vis = Q.get("atlasFilter") === "along" ? pcf(atlasTex, px, py, d, uBias.x, lo, hi, align ? TAPS_ALONG : TAPS) : pcfWideTent(atlasTex, px, py, d, uBias.x, lo, hi, gpx, gpy, mpp.div(t));
       return { vis, here };
     };
     const cx = floor(fx).toVar(), cy = floor(fy).toVar();
@@ -524,7 +549,9 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     return select(dbg.equal(4), checker.mul(0.7).add(0.3), select(dbg.equal(1), float(1), select(dbg.equal(2), liveVis, select(dbg.equal(3), staticOrLit, normal))));
   })();
 
-  return {
+  // what a later bake may keep (reuse): see "kept across bakes"
+  const shared = sh ?? { atlasType, tableN: fits ? TABLE_N : 0, tableTex, atlasRT, liveRT, uZ, uGrid, uBias, uX, uY, live, dbg, depthMat, visibility };
+  const self = {
     bake, follow, visibility, atlasRT, liveRT, setDebug(m) { dbg.value = m; },
     /** the live box's size this frame (m) — it follows the camera's distance */
     get liveSize() { return live.size.value; },
@@ -547,6 +574,22 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
     },
     lightSpace: (p) => toL(p), zMax, range,
     stats: { cells: cells.length, capacity, grid: `${nx}×${ny}`, texelsPerMetre: INNER / CELL, liveTexelsPerMetre: LIVE_TEX / LIVE_SIZE, atlasSize: atlasPx, atlasMB: Math.round((atlasPx * atlasPx * (atlas16 ? 2 : 4)) / 1048576), atlasBits: atlas16 ? 16 : 32 },
-    dispose() { atlasRT.dispose(); liveRT.dispose(); tableTex.dispose(); depthMat.dispose(); },
+    /** Frees the maps — unless a newer bake took them over (`reuse`): then they are its own. */
+    dispose() {
+      if (shared.owner !== self) return;
+      atlasRT.dispose(); liveRT.dispose(); tableTex.dispose(); depthMat.dispose(); shared.cellRT?.dispose();
+    },
+    /**
+     * Out of use for now (the shell's builder after a play): the two maps shrunk to one texel, ~130 MB of
+     * video memory back; the next bake with `reuse` sizes them again, nothing compiles.
+     */
+    park() {
+      if (shared.owner !== self) return;
+      atlasRT.setSize(1, 1);
+      liveRT.setSize(1, 1);
+    },
+    _shared: shared,
   };
+  shared.owner = self;
+  return self;
 }

@@ -1,7 +1,8 @@
 // THE MENU (DESIGN.md: the four modes). One page, screens by hash so the other pages can send the
 // player back to the right one: #home, #play (Stunt tracks: campaign + my tracks), #build (the
 // library: new, open, drive, rename, duplicate, delete), #settings.
-import { library, campaign, lessons, settings, currentBest, builderUrl, driveUrl, campaignUrl } from "./library.js";
+import { library, campaign, lessons, settings, currentBest } from "./library.js";
+import { go } from "./nav.js";
 import { decodeTrack } from "./trackCode.js";
 
 const $ = (id) => document.getElementById(id);
@@ -97,7 +98,7 @@ function play() {
       : `<p class="note">No validated track yet. Build one, and let the builder's test lap finish: its time becomes the author time.</p><div class="grid"><a class="card new cut" href="#build">Build a track ▶</a></div>`);
   $("screen").innerHTML = `<div class="tabs"><button data-tab="lessons" class="${playTab === "lessons" ? "on" : ""}">Lessons</button><button data-tab="campaign" class="${playTab === "campaign" ? "on" : ""}">Campaign</button><button data-tab="mine" class="${playTab === "mine" ? "on" : ""}">My tracks <span style="color:var(--dim);font-size:14px">${mine.length}</span></button></div>${body}`;
   for (const b of document.querySelectorAll(".tabs button")) b.onclick = () => { playTab = b.dataset.tab; try { sessionStorage.setItem("thunderline.playTab", playTab); } catch {} play(); };
-  for (const c of document.querySelectorAll(".card[data-id]")) c.onclick = () => { location.href = playTab === "mine" ? driveUrl(c.dataset.id) : campaignUrl(c.dataset.id); };
+  for (const c of document.querySelectorAll(".card[data-id]")) c.onclick = () => go(playTab === "mine" ? { to: "drive", id: c.dataset.id } : { to: "campaign", id: c.dataset.id });
   foot(`<span><kbd>Esc</kbd> back</span>`);
 }
 
@@ -110,10 +111,10 @@ function build() {
   })).join("");
   $("screen").innerHTML = `<p class="note">Your tracks. Edit one, or start a new one. A track is validated when the builder's test lap reaches the finish: that time is its author time and sets the medals.</p>
     <div class="grid"><div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${cards}</div>`;
-  $("new").onclick = () => { location.href = builderUrl(library.create().id); };
+  $("new").onclick = () => go({ to: "build", id: library.create().id });
   // THE BUILDER TUTORIAL (user, 2026-10-22: "shouldn't it be in the track builder menu?"): a new track,
   // the builder opens with the tutorial running (builderTutorial.js; also the builder's Tutorial button)
-  $("tut").onclick = () => { location.href = `${builderUrl(library.create("Tutorial track").id)}&tutorial=1`; };
+  $("tut").onclick = () => go({ to: "build", id: library.create("Tutorial track").id, tutorial: true });
   // SHARE CODES (trackCode.js): a pasted code becomes one of your tracks
   $("paste").onclick = async () => {
     const code = prompt("Paste a Thunderline track code (it starts with TL1.)");
@@ -130,8 +131,8 @@ function build() {
     c.onclick = (e) => {
       const act = e.target.closest("button")?.dataset.act ?? "open";
       e.stopPropagation();
-      if (act === "open") location.href = builderUrl(id);
-      else if (act === "drive") location.href = driveUrl(id, "builder");
+      if (act === "open") go({ to: "build", id });
+      else if (act === "drive") go({ to: "drive", id, from: "builder" });
       else if (act === "rename") { const n = prompt("Track name", library.get(id).name); if (n) { library.rename(id, n); build(); } }
       else if (act === "dup") { library.duplicate(id); build(); }
       else if (act === "del") { if (confirm(`Delete "${library.get(id).name}"? This cannot be undone.`)) { library.remove(id); build(); } }
@@ -148,9 +149,9 @@ function settingsScreen() {
   $("screen").innerHTML = `<div class="settings">
     ${row("ghost", "Ghost", "Race your best run on every track (G toggles it while driving).")}
     <div class="set cut"><div><div class="t">Volume</div><div class="d">The engine's loudness. Every drive starts silent: <b>M</b> or the speaker button turns the sound on.</div></div><input type="range" id="s-vol" min="0" max="100" value="${Math.round(s.volume * 100)}" style="width:220px;accent-color:var(--bolt)" /></div>
-    <div class="set cut"><div><div class="t">Car</div><div class="d">The new Thunderline car, or the Lotus (the dev car). <a href="./proto/carview.html" style="color:var(--bolt)">See them side by side ▶</a></div></div>
+    <div class="set cut"><div><div class="t">Car</div><div class="d">The new Thunderline car, or the Lotus (the dev car). <a href="/games/thunderline/proto/carview.html" target="_top" style="color:var(--bolt)">See them side by side ▶</a></div></div>
       <div style="display:flex;gap:4px">${[["thunder", "New car"], ["lotus", "Lotus"]].map(([k, n]) => `<button class="carb" data-c="${k}" style="background:var(--panel2);border:1px solid ${s.car === k ? "var(--bolt)" : "var(--line)"};color:${s.car === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
-    <div class="set cut"><div><div class="t">Engine</div><div class="d">Which engine you hear. <a href="./proto/engine-lab.html" style="color:var(--bolt)">Listen in the engine lab ▶</a></div></div>
+    <div class="set cut"><div><div class="t">Engine</div><div class="d">Which engine you hear. <a href="/games/thunderline/proto/engine-lab.html" target="_top" style="color:var(--bolt)">Listen in the engine lab ▶</a></div></div>
       <div style="display:flex;gap:4px">${[["gen6", "Four (loops)"], ["v8", "Synth V8"], ["i6", "Synth I6"], ["v10", "Synth V10"]].map(([k, n]) => `<button class="eng" data-e="${k}" style="background:var(--panel2);border:1px solid ${s.engine === k ? "var(--bolt)" : "var(--line)"};color:${s.engine === k ? "var(--bolt)" : "var(--dim)"};padding:6px 12px;cursor:pointer;font:700 14px 'Barlow Condensed';text-transform:uppercase">${n}</button>`).join("")}</div></div>
     <div class="keys">
       <span><kbd>W</kbd><kbd>S</kbd> / <kbd>↑</kbd><kbd>↓</kbd></span><span>throttle / brake</span>

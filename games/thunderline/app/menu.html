@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Thunderline</title>
+    <!-- THE MENU (DESIGN.md: the four modes): shown in a frame over the game by the shell (index.html → the
+         builder page with ?shell=1, app/nav.js), or opened on its own. Its own look: navy + bolt blue, cut corners,
+         Barlow Condensed — never Apex Rush's (no left rail, no yellow, no italics). -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/games/thunderline/app/shell.css" />
+  </head>
+  <body>
+    <header id="top">
+      <a class="brand" href="#home" title="Thunderline"><img src="/games/thunderline/logo.svg" alt="Thunderline" /></a>
+      <nav id="crumbs" class="cond"></nav>
+    </header>
+    <main id="screen"></main>
+    <footer id="foot" class="cond"></footer>
+    <script type="module" src="/games/thunderline/app/menu.js"></script>
+  </body>
+</html>

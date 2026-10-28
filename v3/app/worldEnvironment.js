@@ -492,11 +492,15 @@ export async function createWorldEnvironment({
   let _lastCsmSplitMode = toolState.csm.splitMode ?? "custom";
   let _lastCsmNearSplit = toolState.csm.nearSplit ?? 10;
   let _lastCsmEnabled = toolState.csm.enabled;
-  let _csmPipelineVersion = 0;
-
+  // THE KEY NAMES THE SUN'S SHADOW SETUP, NOT A COUNTER (2026-10-28, Thunderline's one-page shell). It was
+  // `|csm<n>` with n counting every switch: a setup seen before got a NEW key, so every material was built and
+  // compiled again each time — the shell switches building (cascades) ↔ a played track (its baked shadow node)
+  // and rebuilt ~160 byte-identical shaders per switch. Keyed by the setup — "off", or the installed shadow
+  // node's id (a recreated CSM is a new node: a new key) — a different setup still rebuilds, the same one can
+  // reuse what was built for it.
   function invalidateSunShadowPipeline() {
-    _csmPipelineVersion++;
-    const ver = _csmPipelineVersion;
+    const node = sun.castShadow ? sun.shadow.shadowNode : null;
+    const tag = `|sun:${!sun.castShadow ? "off" : node ? node.id : "none"}`;
     scene.traverse((obj) => {
       if (!obj.isMesh) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
@@ -504,7 +508,7 @@ export async function createWorldEnvironment({
         if (!m?.isNodeMaterial) continue;
         if (!m._csmOrigCPCK) m._csmOrigCPCK = m.customProgramCacheKey.bind(m);
         const orig = m._csmOrigCPCK;
-        m.customProgramCacheKey = () => orig() + `|csm${ver}`;
+        m.customProgramCacheKey = () => orig() + tag;
         m.needsUpdate = true;
       }
     });

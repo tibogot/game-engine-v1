@@ -348,7 +348,20 @@ this is just the list. Newest decisions at the top of each section. Last updated
       20° slope (the band is wide at speed) — every jump loses 40 m of height; the track's end is a
       cliff (the car drives off after the finish).
 - [ ] Campaign tiers Green → Black.
-- [ ] One always-loaded page (no reload between menu / builder / drive).
+- [x] **ONE ALWAYS-LOADED PAGE** (user, 2026-10-28: "my old car game, opening the track builder was super quick";
+      the old game is one page where building is a MODE). index.html → the builder page in SHELL mode (?shell=1):
+      the menu (app/menu.html) in a frame over the game, up at once while the engine boots behind it; Build
+      opens a track in place, Play / a lesson / Drive run the track as the drive page does (baked sun shadows,
+      finish buttons, the lesson card — lessonCard.js); every "go to" through app/nav.js (in place in the shell,
+      a navigation elsewhere: drive.html, builder3.html alone and the menu alone still work). The engine's loop
+      is paused under the menu. Measured: menu usable < 0.5 s; menu → builder 0.24 s; first play 5 s (its
+      shading setup prepared behind the menu at boot, stopped by any choice), next plays ~3 s to the race (1.5 s
+      of it the countdown). Why plays were slow and what fixed it: (1) the engine keyed every material's shader
+      by a COUNTER bumped at each sun-shadow switch (worldEnvironment invalidateSunShadowPipeline) — now by the
+      setup; (2) three frees unused shaders: keepPipelines.js keeps them (node states capped); (3) each shadow
+      bake made a new receiver node and render targets — sunShadows.js keeps them across bakes (`reuse`) while
+      its node is out. OPEN: every page load still compiles ~10 s of shaders in Chrome (its shader cache is
+      capped) → the Steam shell with its own cache.
 - [ ] Garage + more cars (a generic car body before any release: the Lotus is dev-only, trademark).
 - [ ] City mode, Drift mode (DESIGN.md: the four modes) — later.
 

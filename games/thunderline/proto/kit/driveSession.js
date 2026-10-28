@@ -497,6 +497,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   // ---------- the session (one per drive) ----------
   let S = null; // the running session, or null (building / menu)
   let sunShadows = null;
+  let parkedSun = null; // the last baked shadows while the cascades are back (dropSunShadows): reused next bake
+  let installedSun = null; // the node the engine has as the sun's shadow (ours), or null
 
   /**
    * Start driving a track.
@@ -504,6 +506,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
    * @param o.campaignRec / o.trackId  where a finish is recorded
    * @param o.buttons  finish-screen buttons after "Again": [{ label, key (shown), code? (KeyboardEvent.code, default Key<key>), run }]
    * @param o.onEscape  Esc while driving (also the BACK button top right)
+   * @param o.sunShadows  true: bake the sun shadows for THIS track and sun, and drop them at stop (the shell's
+   *   play mode: another track each time, and the builder's cascades back after); default: the rig's own
+   *   (the drive page bakes once)
    * @param o.backLabel  that button's word ("Menu", "Builder"…; default "Back")
    * @param o.help  the help line (HTML)
    */
@@ -654,7 +659,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     $("time").style.display = $("cps").style.display = o.noTimer ? "none" : "";
 
     // ---------- sun shadows (drive page only): static atlas of this track + live map around the car ----------
-    if (useSunShadows && !sunShadows) await bakeSunShadows(lay);
+    if (o.sunShadows === true) await bakeSunShadows(lay); // (a play: this track, this sun)
+    else if (useSunShadows && !sunShadows) await bakeSunShadows(lay);
+    else if (!useSunShadows && sunShadows) dropSunShadows(); // (a test drive after a play: the cascades)
     restart();
     return S;
   }
@@ -675,29 +682,54 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       }
     }
     scene.updateMatrixWorld(true);
-    const old = sunShadows;
+    const old = sunShadows ?? parkedSun;
+    parkedSun = null;
     S?.meshes?.fullDetail(true); // the bake sees every post, whatever the camera picked
-    // trackLine: the road's centre, so each atlas cell is turned to the road's direction (no saw-tooth)
-    sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts, trackLine: lay.ride.map((r) => r.P) });
+    // trackLine: the road's centre, so each atlas cell is turned to the road's direction (no saw-tooth).
+    // reuse: the last bake's maps and receiver node kept (sunShadows.js "kept across bakes"): nothing compiles.
+    // Only while our node is OUT (the shell: a play's stop put the cascades back): a re-bake with it installed
+    // (the FX lab's sun buttons) would resize the atlas under materials still bound to the old texture —
+    // "Destroyed texture used in a submit" every frame after. Those make new shadows, as before.
+    sunShadows = createSunShadows({ renderer, scene, sunDir: app.light.getDirection().clone(), casterPoints: pts, trackLine: lay.ride.map((r) => r.P), reuse: installedSun ? null : old });
     const shown = scene.visible;
     scene.visible = true; // (the drive page hides the scene while it boots: drive.js)
     sunShadows.stats.bakeMs = Math.round(sunShadows.bake());
     scene.visible = shown;
     S?.meshes?.fullDetail(false);
-    // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene
-    app.shadows.setSunShadowNode(sunShadows.visibility);
+    // the engine's opt-in hook: our node IS the sun's shadow term; the cascades leave the scene (set only when it
+    // changes: each set swaps over two frames, the first drawn without the sun's shadow)
+    const kept = old && sunShadows._shared === old._shared;
+    if (installedSun !== sunShadows.visibility) { app.shadows.setSunShadowNode(sunShadows.visibility); installedSun = sunShadows.visibility; }
     // the old maps are freed once the engine has swapped the node in (it takes two frames: worldEnvironment.js
     // setSunShadowNode) — freed at once, whatever is drawn meanwhile with the old node reads a destroyed
     // texture (a re-bake: the FX lab's time-of-day buttons)
-    if (old) for (let i = 0; i < 4; i++) await new Promise((r) => requestAnimationFrame(r));
-    old?.atlasRT?.dispose?.();
-    old?.liveRT?.dispose?.();
+    if (old && !kept) {
+      for (let i = 0; i < 4; i++) await new Promise((r) => requestAnimationFrame(r));
+      old.dispose?.();
+    }
     console.info("[drive] sun shadows", sunShadows.stats);
+  }
+
+  /**
+   * The engine's cascades back (the shell's builder after a play). The baked shadows are PARKED, not freed: their
+   * maps shrink to a texel, and the next play's bake takes them back with its receiver node — so going back and
+   * forth compiles nothing after the first time.
+   */
+  async function dropSunShadows() {
+    const old = sunShadows;
+    if (!old) return;
+    sunShadows = null;
+    app.shadows.setSunShadowNode(null);
+    installedSun = null;
+    parkedSun = old;
+    for (let i = 0; i < 4; i++) await new Promise((r) => requestAnimationFrame(r)); // (the swap takes two frames)
+    if (parkedSun === old) old.park?.();
   }
 
   /** Stop driving: the track's meshes leave, the car parks, the HUD hides. */
   function stop() {
     if (!S) return;
+    if (S.o.sunShadows === true) dropSunShadows();
     if (freeCam) toggleFreeCam(); // back to the chase (and full speed) for the next drive
     scene.remove(S.group); // its geometries are the shared tile cache: kept for the next drive
     S.physProps.dispose();

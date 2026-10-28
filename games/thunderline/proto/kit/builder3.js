@@ -17,7 +17,10 @@ import { saveState, restoreState } from "./simState.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
-import { library, settings, PAGES } from "../../app/library.js";
+import { library, settings, campaign } from "../../app/library.js";
+import { go } from "../../app/nav.js";
+import { attachLesson } from "./lessonCard.js";
+import { keepPipelines } from "./keepPipelines.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD, groundFeatures } from "./worlds.js";
@@ -41,10 +44,15 @@ const $ = (id) => document.getElementById(id);
 // THE TRACK: one record of the library (app/library.js), ?track=<id>; without one, the track last
 // worked on, else a new one
 const params = new URLSearchParams(location.search);
+// THE SHELL (?shell=1, app/nav.js — 2026-10-28, user: "my old car game, opening the track builder was super
+// quick"): this page is the WHOLE GAME — the menu over it in a frame (builder3.html puts it up at once), the
+// builder and the tracks' drives as modes. The engine boots once, behind the menu; nothing reloads after.
+const SHELL = params.get("shell") === "1";
+const pageUrl = () => `${location.pathname}?${SHELL ? "shell=1&" : ""}track=${trackId}`;
 let trackId = params.get("track");
 if (!trackId || !library.get(trackId)) trackId = (library.current && library.get(library.current) ? library.current : null) ?? library.list()[0]?.id ?? library.create().id;
 library.current = trackId;
-history.replaceState(null, "", `${location.pathname}?track=${trackId}`);
+history.replaceState(null, "", pageUrl());
 const UP = new THREE.Vector3(0, 1, 0);
 // THE FLOOR (the drive page's default floor, solid): pieces must stay above it, flights end on it
 const FLOOR_Y = 0;
@@ -116,10 +124,18 @@ function saveShown(ok) {
   }
   saveWarnEl.style.display = "";
 }
+let thumbDirty = false; // edits since the last picture (opening another track takes it first)
 function save() {
   saveShown(library.saveTrack(trackId, track));
+  thumbDirty = true;
   clearTimeout(thumbTimer);
-  thumbTimer = setTimeout(() => trackThumb().then((url) => url && saveShown(library.saveTrack(trackId, track, url))), 1200);
+  thumbTimer = setTimeout(saveThumb, 1200);
+}
+async function saveThumb() {
+  clearTimeout(thumbTimer);
+  thumbDirty = false;
+  const url = await trackThumb();
+  if (url) saveShown(library.saveTrack(trackId, track, url));
 }
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
 function restore(from, to) {
@@ -219,6 +235,7 @@ app.postFx?.setEnabled?.(true);
 app.postFx?.setBloomSelective?.(true);
 app.postFx?.setBloom?.({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
 const { scene, camera, renderer } = app;
+keepPipelines(renderer); // (building ↔ driving ↔ a played track switch shading setups: none rebuilt twice)
 app.controls.update = () => {}; // the builder's orbit below owns the camera
 app.controls.enabled = false;
 camera.far = Math.max(camera.far, 9000);
@@ -1047,6 +1064,7 @@ async function runPrediction() {
     // drawn — the builder stuttered for seconds after every edit): ~8 ms of physics, then a frame
     if ((tick & 7) === 7 && performance.now() - sliceT0 > (globalThis.__predSlice ?? PRED_SLICE_MS)) {
       await new Promise((r) => requestAnimationFrame(() => r()));
+      while (playing) await new Promise((r) => setTimeout(r, 250)); // (the shell plays another track: it waits)
       if (token !== predToken) return; // a newer edit started another prediction
       sliceT0 = performance.now();
     }
@@ -3044,8 +3062,8 @@ $("b-keys").onclick = toggleKeys;
 $("steps-keys").onclick = toggleKeys;
 $("steps-x").onclick = () => { try { localStorage.setItem(STEPS_OFF, "1"); } catch {} $("steps").classList.add("hidden"); };
 // New = a new track in the library (the current one stays, saved)
-$("b-new").onclick = () => { save(); location.href = `${PAGES.builder}?track=${library.create().id}`; };
-$("b-menu").onclick = () => { save(); location.href = `${PAGES.menu}#build`; };
+$("b-new").onclick = () => { save(); go({ to: "build", id: library.create().id }); };
+$("b-menu").onclick = () => { save(); go({ to: "menu", screen: "build" }); };
 $("b-name").value = trackName;
 $("b-name").onchange = () => { library.rename(trackId, $("b-name").value); trackName = library.get(trackId).name; $("b-name").value = trackName; };
 $("b-name").onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") e.target.blur(); };
@@ -3127,12 +3145,10 @@ let driving = false;
 const builderUi = ["toolbar", "keys", "steps", "status", "next", "dock", "nav"];
 let saved = null;
 const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Tab</kbd> / <kbd>Esc</kbd> back to building</b>`;
-async function startDrive() {
-  if (driving || !orderedPieces().length) return;
-  save();
+/** The builder's own scene objects and panels leave for a drive; the camera is kept to come back to. */
+function enterDriveView() {
   driving = true;
   gizmo.detach();
-  // the builder's own scene objects and panels leave; the camera is kept to come back to
   const objs = [grid, trackGroup, arcGroup, lapGroup, ghost, selBox, failBox, ...overlapBoxes].filter(Boolean);
   saved = { vis: objs.map((o) => [o, o.visible]), ui: builderUi.map((id) => [id, $(id).style.display]), pos: camera.position.clone(), quat: camera.quaternion.clone(), fov: camera.fov, target: controls.target.clone() };
   for (const o of objs) o.visible = false;
@@ -3140,36 +3156,49 @@ async function startDrive() {
   controls.enabled = false;
   camera.clearViewOffset();
   camera.updateProjectionMatrix();
+}
+async function startDrive() {
+  if (driving || !orderedPieces().length) return;
+  save();
+  enterDriveView();
   // a selected road piece = practice from it (Trackmania's "test from here"); nothing selected = the full run
   const selRoad = track.pieces.find((p) => p.uid === sel && !isRing(p)); // (not an obstacle or a ring)
   // the TEST CAR wins: exactly where it stands, at its speed
   const spawnM = spawnFrame();
   const from = spawnM ?? (selRoad ? built.get(sel)?.M ?? null : null);
   await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, autoFinish: false, fallReset: false, tabBack: true, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
-  if (!driveWarmed) await warmFirstDrive();
+  if (!driveWarmed) { driveWarmed = true; await warmUp(); }
 }
 // THE FIRST DRIVE'S SHADERS, under the loading screen (2026-10-27): what the drive builds when it starts — its
 // own copy of the track, the gates, the car's light and shadow state — compiled on its first frame, one of
 // 3.6 s (8.8 s before the page's boot warmed the car). The clock holds, the screen covers the warm-up, then
 // the countdown starts again. Later drives reuse every pipeline.
 let driveWarmed = false;
-async function warmFirstDrive() {
-  driveWarmed = true;
+async function warmUp() {
   const el = $("boot");
   el.style.transition = "none"; // covered at once: the warm-up shows everything for two frames
   el.classList.remove("gone");
   el.querySelector(".msg").textContent = "Warming up…";
   rig.setTimeScale(0);
-  await warmGamePipelines(app, engineObjects);
-  await awaitPipelinesQuiet(app);
-  rig.setTimeScale(1);
-  rig.restart();
-  el.style.transition = "";
-  el.classList.add("gone");
+  try {
+    await warmGamePipelines(app, engineObjects);
+    await awaitPipelinesQuiet(app);
+  } finally {
+    // (left meanwhile — Esc, the menu, another track: the screen and the clock come back all the same, and
+    // only a run still going starts again; a run left during the warm-up hid "Warming up…" never, clock at 0)
+    rig.setTimeScale(1);
+    if (driving && rig.session) rig.restart();
+    el.style.transition = "";
+    el.classList.add("gone");
+  }
 }
 function stopDrive() {
   if (!driving) return;
+  if (playing) return stopPlay();
   rig.stop();
+  leaveDriveView();
+}
+function leaveDriveView() {
   for (const [o, v] of saved.vis) o.visible = v;
   for (const [id, d] of saved.ui) $(id).style.display = d;
   camera.position.copy(saved.pos);
@@ -3187,6 +3216,134 @@ function stopDrive() {
   last = performance.now();
 }
 $("b-drive").onclick = startDrive;
+
+// ---------- THE SHELL'S MODES (?shell=1, app/nav.js) ----------
+// PLAY: a library or campaign track driven as the drive page drives it (drive.js) — its world and time of day,
+// the finish screen's buttons, a lesson's card; the builder's own track and scene wait, hidden
+let playing = null; // { world, tod, fromBuilder, dispose } while a track is played
+async function playTrack(w) {
+  const campaignRec = w.to === "campaign" ? await campaign.get(w.id) : null;
+  const rec = campaignRec ?? library.get(w.id);
+  if (!rec?.track?.pieces?.length) return showMenu(w.to === "campaign" ? "play" : "build");
+  const nextCampaign = campaignRec ? await campaign.get(campaignRec.id.replace(/\d+$/, (n) => +n + 1)) : null;
+  if (driving) stopDrive();
+  enterDriveView();
+  const run = playing = { world: track.world, tod: track.tod ?? DEFAULT_TOD, fromBuilder: w.from === "builder" ? w.id : null, dispose: null };
+  applyWorld(app, rec.track.world);
+  app.sky?.setTimeOfDay?.(rec.track.tod ?? DEFAULT_TOD); // before the start: its sun-shadow bake uses this sun
+  const toMenu = () => go({ to: "menu", screen: w.from === "builder" ? "build" : "play" });
+  const toBuilder = () => go({ to: "build", id: w.id });
+  const buttons = [
+    ...(playing.fromBuilder ? [{ label: "Back to builder", key: "B", run: toBuilder }] : []),
+    ...(nextCampaign ? [{ label: `Next: ${nextCampaign.name}`, key: "N", run: () => go({ to: "campaign", id: nextCampaign.id }) }] : []),
+    { label: "Menu", key: "Esc", code: "Escape", run: toMenu },
+  ];
+  await rig.start({
+    track: rec.track, campaignRec, trackId: campaignRec ? null : w.id, buttons,
+    sunShadows: params.get("playShadows") !== "csm", // (as the drive page; ?playShadows=csm: the builder's cascades, an A/B)
+    onEscape: playing.fromBuilder ? toBuilder : toMenu, backLabel: playing.fromBuilder ? "Builder" : "Menu",
+  });
+  // EVERY play warms (2026-10-28): another track brings pieces never drawn here, and the BAKED sun shadows are
+  // other shader variants than a test drive's — compiled on the race's first frames they froze its countdown
+  // (White 2 after White 1: 7 s in, still counting down). Nothing new to compile: a few frames.
+  await warmUp();
+  if (playing !== run) return; // (left during the warm-up)
+  run.dispose = attachLesson(rig, campaignRec, nextCampaign);
+}
+function stopPlay() {
+  if (!playing) return;
+  playing.dispose?.();
+  rig.stop();
+  applyWorld(app, playing.world); // the builder's track's world and time again
+  app.sky?.setTimeOfDay?.(playing.tod);
+  playing = null;
+  leaveDriveView();
+}
+addEventListener("keydown", (e) => { if (playing?.fromBuilder && e.code === "KeyB" && !e.repeat) go({ to: "build", id: playing.fromBuilder }); });
+
+// BUILD: another track of the library opened IN PLACE (what a reload with ?track= did)
+async function openTrack(id, { tutorial: asked = false } = {}) {
+  if (driving) stopDrive();
+  if (id !== trackId && library.get(id)) {
+    if (thumbDirty) await saveThumb(); // the last edits' picture, for the track they belong to
+    else save();
+    trackId = id;
+    library.current = id;
+    track = load() ?? { pieces: [], nextUid: 1 };
+    trackName = library.get(id)?.name ?? "Track";
+    $("b-name").value = trackName;
+    undo = [];
+    redo = [];
+    sel = null;
+    rebuild();
+    applyWorld(app, track.world);
+    $("b-world").value = WORLDS[track.world] ? track.world : DEFAULT_WORLD;
+    app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD);
+    $("b-tod").value = String(track.tod ?? DEFAULT_TOD);
+    $("info").classList.add("hidden");
+    if (track.pieces.length) { frameAll(); controls.update(); }
+  }
+  history.replaceState(null, "", pageUrl());
+  offerTutorial(asked);
+}
+
+// THE MENU over the game (builder3.html's frame): while it shows, the engine's loop is PAUSED — nothing is
+// drawn behind an opaque menu (the GPU idles, the laptop stays cool); it picks up where it was
+const menuFrame = $("menuFrame");
+let pausedLoop = null;
+function pauseGame(on) {
+  if (on && !pausedLoop) { pausedLoop = renderer._animation._animationLoop; renderer.setAnimationLoop(null); }
+  else if (!on && pausedLoop) { renderer.setAnimationLoop(pausedLoop); pausedLoop = null; last = performance.now(); }
+}
+function showMenu(screen) {
+  if (driving) stopDrive();
+  const w = menuFrame.contentWindow;
+  // (a hash change re-renders the menu; the same hash would not: re-render it, the library may have changed)
+  if (screen && w.location.hash !== `#${screen}`) w.location.hash = screen;
+  else w.__menu?.route();
+  menuFrame.style.display = "";
+  w.focus();
+  pauseGame(true);
+}
+function hideMenu() {
+  menuFrame.style.display = "none";
+  $("boot").classList.add("gone"); // (a choice made while the shell booted showed the loading screen)
+  pauseGame(false);
+  window.focus();
+}
+// THE FIRST PLAY, PREPARED BEHIND THE MENU (2026-10-28): a played track draws with the baked sun shadows — every
+// material's other shading setup, ~11 s of building and compiling the first time (measured: the first play 12.5 s
+// to the race, the next ones ~3 s). The shell's boot runs one hidden play of White 1 while the menu is up, then
+// goes back; a choice made meanwhile waits on the loading screen (builder3.html's stand-in).
+// A CHOICE MADE MEANWHILE STOPS IT at its next step (the step running finishes: a compile can't be cut short).
+let prewarm = null; // the promise while it runs
+let prewarmStop = false;
+async function prewarmPlay() {
+  const rec = await campaign.get("white-1").catch(() => null);
+  if (!rec?.track?.pieces?.length || prewarmStop) return;
+  enterDriveView();
+  const run = playing = { world: track.world, tod: track.tod ?? DEFAULT_TOD, fromBuilder: null, dispose: null };
+  try {
+    await rig.start({ track: rec.track, campaignRec: null, trackId: null, buttons: [], noTimer: true, sunShadows: params.get("playShadows") !== "csm" });
+    if (!prewarmStop) await warmUp();
+  } catch (e) { console.warn("[shell] prewarm", e); }
+  if (playing === run) stopPlay();
+}
+async function shellGo(w) {
+  if (prewarm) {
+    prewarmStop = true;
+    if (w.to !== "menu") { // the loading screen until the step running is done
+      menuFrame.style.display = "none";
+      $("boot").classList.remove("gone");
+      $("boot").querySelector(".msg").textContent = "Loading…";
+    }
+    await prewarm;
+  }
+  if (w.to === "menu") return showMenu(w.screen);
+  hideMenu();
+  if (w.to === "build") return openTrack(w.id, { tutorial: !!w.tutorial });
+  return playTrack(w);
+}
 // THE TIMER SWITCH (user, 2026-10-22): building and debugging, Drive starts at once — no countdown, no clock,
 // no medals; on, it is the real race. Off by default, remembered.
 let timerOn = false;
@@ -3203,16 +3360,18 @@ const tutorial = createBuilderTutorial({
 $("b-tut").onclick = () => {
   if (!track.pieces.length && !(track.props ?? []).length) { tutorial.start(); return; }
   save();
-  location.href = `${PAGES.builder}?track=${library.create().id}&tutorial=1`;
+  go({ to: "build", id: library.create().id, tutorial: true });
 };
-{
+/** The tutorial on opening a track: asked for, or offered by itself the first time the builder opens on an empty track. */
+function offerTutorial(asked) {
   let seen = false;
   try { seen = localStorage.getItem("thunderline.builder.tutorialSeen") === "1"; } catch {}
-  if (params.get("tutorial") === "1" || (!seen && !track.pieces.length)) {
+  if (asked || (!seen && !track.pieces.length)) {
     try { localStorage.setItem("thunderline.builder.tutorialSeen", "1"); } catch {}
     setTimeout(() => tutorial.start(), 600);
   }
 }
+if (!SHELL) offerTutorial(params.get("tutorial") === "1"); // (the shell: when the builder is opened, not at its hidden boot)
 // THE CAMERA for people who don't use 3D software (editorNav.js)
 const nav = createEditorNav({
   camera, controls, dom: renderer.domElement, frameAll, floorY: FLOOR_Y, enabled: () => !driving,
@@ -3275,6 +3434,17 @@ await warmGamePipelines(app, engineObjects);
 await awaitPipelinesQuiet(app);
 $("boot").classList.add("gone");
 let last = performance.now();
+// THE SHELL takes over from builder3.html's stand-in: a choice made in the menu while the engine booted runs
+// now; else the menu stays up and the game pauses behind it
+if (SHELL) {
+  const pending = window.__thunderShell?.pending;
+  window.__thunderShell = { go: shellGo };
+  if (pending) await shellGo(pending);
+  else {
+    // behind the menu: the first play prepared; a choice made meanwhile stops it (shellGo)
+    prewarm = prewarmPlay().finally(() => { prewarm = null; if (menuFrame.style.display !== "none") pauseGame(true); });
+  }
+}
 app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
