@@ -632,6 +632,22 @@ toggles at that view: rails + posts at full detail +0.11 ms, the whole car in th
       right-drag pan, wheel / + − zoom, V world/car frame, 1-4 views, 0 recentre, T slow-mo; readout.
 - [x] Guardrail posts 7.2 m apart, not 3.6 (user: "too close from each other") — oldLook.js RAIL.
 - [ ] Performance check: the tube run showed 37–49 fps in my window — measure GPU ms before adding more.
+- [ ] **ISLANDS WORLD — PARKED** (user, 2026-10-28: "islands so the ocean is visible a lot" … "forget the
+      ocean now, we will go back to terrain and ocean later, probably in the v3 editor"). Tried and reverted:
+      flat-topped islands at the track floor, beaches 5 % to the sea at −3 m, sand seabed (coast_sand_01 as
+      ground layer 4), hilly islands from 2.5 km, the level loaded per world (`thunder-islands.v3proj` + a flat
+      twin to leave it), falling into the sea = a fall. What it taught:
+      - THE MAP CAN'T GO UNDER 0 and tracks sit on y = 0: store the ground LIFT m higher (30) and draw the
+        terrain group LIFT m down — tracks, builder, ghosts, author times never move; app.getWorldHeight
+        offset by the same; Ocean Pro takes it as `heightBase` (a one-line opt-in in worldEnvironment
+        ensureOceanPro, not in yet). The engine's getWaterLevelAt does NOT know the offset.
+      - A level load resets the far terrain and the sea: set both again after it.
+      - OPEN BUG: Ocean Pro and Ocean V2 draw SEE-THROUGH in Thunderline (drawn every frame, correct depths
+        and heightBase in the shader, no validation error — yet no colour, no sky reflection; the sand shows
+        through, even with the depth test off). Both read the scene's depth; Thunderline renders 4× MSAA
+        (alg's coast logged an Ocean Pro MSAA depth error). The classic ocean draws but washed-out white.
+      - Tracks are not centred on the map (White 2 runs x 0 → 1.4 km, past the map's ±1 km edge).
+      The work is in the session scratchpad (islands.patch, islandShape.js, thunderIslandsLevel.mjs).
 - [ ] Horizon fix (engine, opt-in): ground to the horizon + haze coloured by Sky Pro. Warn the user
       first (engine edits reload the alg pages).
 - [ ] Shadow bake time (~4.7 s), shader warm-up.

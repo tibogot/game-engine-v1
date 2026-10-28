@@ -179,17 +179,17 @@ export const campaign = {
 const SETTINGS_KEY = "thunderline.settings.v1";
 // sound OFF by default (user, 2026-10-19: it disturbs work on the game) — Settings or M turns it on
 // engine "gen6": the recorded-style loops the user picked (2026-10-20, engineLoops.js) over the synth
-// car "lotus": the default again (user, 2026-10-21: "bring back the lotus as the default car"); the new
-// car stays in Settings
-export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "gen6", car: "lotus" };
+// car "thunder": the NEW CAR is the default (user, 2026-10-28: "lets use the not lotus car as default"; it was
+// the Lotus from 2026-10-21) — the Lotus (dev only, trademark) stays in Settings
+export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "gen6", car: "thunder" };
 export const settings = {
   get() {
     try {
       const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {};
       // once: settings saved before the loops kept the synth's "v8" default — move them to gen6
       if (!saved.engineV) { saved.engine = SETTINGS_DEFAULTS.engine; saved.engineV = 2; }
-      // once: settings saved while the new car was the default carry "thunder" — back to the Lotus
-      if (!saved.carV) { saved.car = SETTINGS_DEFAULTS.car; saved.carV = 2; }
+      // once: settings saved while the Lotus was the default carry "lotus" — over to the new car (carV 3)
+      if (!(saved.carV >= 3)) { saved.car = SETTINGS_DEFAULTS.car; saved.carV = 3; }
       return { ...SETTINGS_DEFAULTS, ...saved };
     } catch { return { ...SETTINGS_DEFAULTS }; }
   },
