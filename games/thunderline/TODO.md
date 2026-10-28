@@ -353,7 +353,11 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
 - [x] LODs on the instanced props (physProps.js PROP_LOD_FAR 26 / 70 m): one instanced mesh per level, refilled each
       frame by distance; an empty level keeps a zero-size instance (compiled behind the loading screen, never mid-race).
       30 tyres + 6 drums: 183k → 14.6k tris from 242 m, 156k beside them; 0 pipelines while racing.
-- [ ] Traffic cone (+ cone row) · swing gates · bollard (pole, slalom, pole gate) · block (stunt box,
+- [x] The old procedural tyre and drum REMOVED (user, 2026-10-28: "get rid of the old tyres and barrel"): their kinds
+      keep only the body's plain cylinder (the builder's placement ghost, and the look if a model file is missing).
+- [x] TRAFFIC CONE (0.93 m motorway cone: red-orange PVC, open top, recycled-rubber base, microprism sleeves, scuffs,
+      the standard moulded on the flange) — 1.3k / 0.34k / 94 tris; the cone row uses it. Its old look removed too
+      ("the new cone is nice"); the rim orange, not a black cap. · swing gates · bollard (pole, slalom, pole gate) · block (stunt box,
       diamond plate) · the two walls (truss + panel, the door / hole trimmed).
 - [ ] SIGNS: start, finish, chevron, aim — real trackside boards and banners.
 - [ ] One shared atlas for all obstacles once the set is done (one material: fewer draws, fewer textures).

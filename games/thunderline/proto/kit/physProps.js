@@ -26,41 +26,14 @@ function paint(geo, hex) {
   g.setAttribute("color", new THREE.BufferAttribute(a, 3));
   return g;
 }
-const ORANGE = 0xf4581a, WHITE = 0xeef0f2, RUBBER = 0x1a1a1c, STEEL = 0x8f969e, RED = 0xe0242b, BOLT = 0x3fd2ff;
+const ORANGE = 0xf4581a, WHITE = 0xeef0f2, RUBBER = 0x1a1a1c, STEEL = 0x8f969e, RED = 0xe0242b;
 
 /** Each kind: its geometry (root at the BODY's pivot, as the old physics simulates it) and `lift`, the
  * pivot's height over the road when it stands as placed. */
-function coneGeometry() {
-  const S = CONE_SCALE, R = PHYSICS_PROP_TYPES.cone.radius;
-  // the old cone's lathe: a truncated, slightly concave taper with a flat top, on a square flanged base
-  const prof = [[0.278, 0], [0.263, 0.033], [0.198, 0.045], [0.177, 0.083], [0.15, 0.21], [0.119, 0.42], [0.083, 0.66], [0.057, 0.84], [0.051, 0.93], [0, 0.93]]
-    .map(([x, y]) => new THREE.Vector2(x * S, y * S));
-  const collar = (y0, h, rB, rT) => paint(new THREE.CylinderGeometry(rT * 1.012, rB * 1.012, h, 20, 1, true).translate(0, y0 + h / 2, 0), WHITE);
-  return mergeGeometries([
-    paint(new THREE.BoxGeometry(0.55 * S, 0.042 * S, 0.55 * S).translate(0, 0.021 * S, 0), RUBBER),
-    paint(new THREE.LatheGeometry(prof, 20), ORANGE),
-    collar(0.45 * S, 0.17 * S, 0.113 * S, 0.097 * S),
-    collar(0.7 * S, 0.105 * S, 0.076 * S, 0.067 * S),
-  ]).translate(0, -R, 0);
-}
-function tyreGeometry() {
-  const outer = TIRE_OUTER_R, hw = TIRE_TUBE_R, inner = outer - hw * 1.55, s = TIRE_OUTER_R / 0.35;
-  const prof = [[inner, -hw * 0.88], [inner + 0.02 * s, -hw], [outer - 0.07 * s, -hw], [outer - 0.012 * s, -hw * 0.5], [outer, -hw * 0.22], [outer - 0.01 * s, 0],
-    [outer, hw * 0.22], [outer - 0.012 * s, hw * 0.5], [outer - 0.07 * s, hw], [inner + 0.02 * s, hw], [inner, hw * 0.88], [inner, -hw * 0.88]].map(([x, y]) => new THREE.Vector2(x, y));
-  return mergeGeometries([
-    paint(new THREE.LatheGeometry(prof, 28), RUBBER),
-    // a bolt-blue band round the tread: Thunderline's mark, and it reads in the dark
-    paint(new THREE.CylinderGeometry(outer * 1.004, outer * 1.004, hw * 0.34, 28, 1, true), BOLT),
-  ]);
-}
-function barrelGeometry() {
-  const H = BARREL_HEIGHT, r = H * 0.33;
-  const parts = [paint(new THREE.CylinderGeometry(r, r, H, 24), RED)];
-  // two rolling hoops and the lid ring
-  for (const y of [-H * 0.22, H * 0.22]) parts.push(paint(new THREE.TorusGeometry(r * 1.01, 0.03, 6, 24).rotateX(Math.PI / 2).translate(0, y, 0), STEEL));
-  parts.push(paint(new THREE.TorusGeometry(r * 0.98, 0.025, 6, 24).rotateX(Math.PI / 2).translate(0, H / 2, 0), STEEL));
-  return mergeGeometries(parts);
-}
+// THE TYRE, THE DRUM AND THE CONE are Blender models now (MODELS below; user, 2026-10-28: "get rid of the old tyres and
+// barrel", "the new cone is nice"); their procedural looks are gone. What stays is the BODY's plain cylinder: the builder's placement ghost (made when the
+// page loads, before any model) and the look if a model file is missing.
+const bodyCylinder = (r, halfH) => paint(new THREE.CylinderGeometry(r, r, 2 * halfH, 24), RUBBER);
 function gateGeometry() {
   const W = GATE_WIDTH, H = GATE_HEIGHT;
   // the post on the hinge axis (its collision is a static solid: obstacles.js), the panel along +X;
@@ -76,9 +49,10 @@ function gateGeometry() {
   return mergeGeometries(parts);
 }
 export const PHYS_KINDS = {
-  cone: { geometry: coneGeometry, lift: PHYSICS_PROP_TYPES.cone.radius },
-  tyre: { geometry: tyreGeometry, lift: TIRE_TUBE_R },
-  barrel: { geometry: barrelGeometry, lift: BARREL_HEIGHT / 2 },
+  // (the cone's body: its cone, 0.93 m, the pivot 0.42 m over the base)
+  cone: { geometry: () => paint(new THREE.CylinderGeometry(0.051 * CONE_SCALE, 0.275 * CONE_SCALE, 0.93 * CONE_SCALE, 16).translate(0, 0.465 * CONE_SCALE - PHYSICS_PROP_TYPES.cone.radius, 0), ORANGE), lift: PHYSICS_PROP_TYPES.cone.radius, model: true },
+  tyre: { geometry: () => bodyCylinder(TIRE_OUTER_R, TIRE_TUBE_R), lift: TIRE_TUBE_R, model: true },
+  barrel: { geometry: () => bodyCylinder(BARREL_HEIGHT * 0.33, BARREL_HEIGHT / 2), lift: BARREL_HEIGHT / 2, model: true },
   gate: { geometry: gateGeometry, lift: 0 },
 };
 const geoCache = new Map();
@@ -96,12 +70,14 @@ export const physMaterial = (kind) => kindMats.get(kind) ?? (sharedMat ??= new T
 const MODELS = {
   tyre: { glb: "/models/thunderline/obstacles/tyre.glb", lods: ["TyreLOD0", "TyreLOD1", "TyreLOD2"], tex: "/textures/thunderline/obstacles/tyre" },
   barrel: { glb: "/models/thunderline/obstacles/barrel.glb", lods: ["BarrelLOD0", "BarrelLOD1", "BarrelLOD2"], tex: "/textures/thunderline/obstacles/barrel", metal: true },
+  cone: { glb: "/models/thunderline/obstacles/cone.glb", lods: ["ConeLOD0", "ConeLOD1", "ConeLOD2"], tex: "/textures/thunderline/obstacles/cone" },
 };
 const kindLods = new Map(); // kind → its model's levels [near … far] (the game draws [0]; the asset lab all of them)
 let assetsLoad = null;
 /** The asset lab's view of a kind: its model (levels + material) once loaded, or null; and the procedural old look. */
 export const physModel = (kind) => (kindLods.has(kind) ? { lods: kindLods.get(kind), material: kindMats.get(kind), files: MODELS[kind] } : null);
-export const physOldLook = (kind) => ({ geometry: PHYS_KINDS[kind].geometry(), material: physMaterial(null) });
+/** A kind's old procedural look, or null when there is none any more (a model replaced it for good). */
+export const physOldLook = (kind) => (PHYS_KINDS[kind].model ? null : { geometry: PHYS_KINDS[kind].geometry(), material: physMaterial(null) });
 export function loadPhysAssets() {
   return (assetsLoad ??= Promise.all(Object.entries(MODELS).map(async ([kind, m]) => {
     try {

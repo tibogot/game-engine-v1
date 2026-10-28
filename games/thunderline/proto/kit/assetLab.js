@@ -126,15 +126,23 @@ function build() {
     const g = obstacleLook(e.obstacle, {});
     groups = [{ g, at: 0 }];
   } else {
-    const want = state.version === "both" ? ["old", "new"] : [state.version];
+    const hasOld = !!physOldLook(e.kind);
+    const want = !hasOld ? ["new"] : state.version === "both" ? ["old", "new"] : [state.version];
     for (const which of want) groups.push({ g: modelGroup(e, which), which });
     if (groups.length === 2) {
-      const r = new THREE.Box3().setFromObject(groups[1].g).getSize(new V()).x / 2 + 0.6;
-      // the old on the LEFT, the new on the RIGHT as the camera sees them (it looks back at the stage from in front)
-      groups[0].at = -r; groups[1].at = r;
+      const size = new THREE.Box3().setFromObject(groups[1].g).getSize(new V());
+      if (size.x < 4) {
+        // the old on the LEFT, the new on the RIGHT as the camera sees them (it looks back at the stage from in front)
+        const r = size.x / 2 + 0.6;
+        groups[0].at = [-r, 0]; groups[1].at = [r, 0];
+      } else {
+        // a wide one (a cone row across the road): one behind the other — the old nearer the car, the new in front
+        const r = size.z / 2 + 6;
+        groups[0].at = [0, -r]; groups[1].at = [0, r];
+      }
     }
   }
-  for (const { g, at = 0 } of groups) { g.position.x = at ?? 0; stage.add(g); }
+  for (const { g, at } of groups) { g.position.set(at?.[0] ?? 0, 0, at?.[1] ?? 0); stage.add(g); }
   stage.updateMatrixWorld(true);
   render();
 }
@@ -159,7 +167,8 @@ function costText(e) {
     lines.push(`     placed     ${n} × ${L[0]} = ${n * L[0]}`);
     lines.push(`     draws      1 per kind (instanced) + shadow`);
     lines.push(`     textures   ${texs.length} · ${mb.toFixed(1)} MB GPU · ${fmt}`);
-    if (e.kind) lines.push(`OLD  triangles  ${tris(physOldLook(e.kind).geometry)} · no texture`);
+    const old = e.kind && physOldLook(e.kind);
+    if (old) lines.push(`OLD  triangles  ${tris(old.geometry)} · no texture`);
   } else {
     const g = obstacleLook(e.obstacle, {});
     let t = 0, d = 0; g.traverse((o) => { if (o.isMesh) { t += tris(o.geometry) * (o.count ?? 1); d++; } });
@@ -193,7 +202,8 @@ function render() {
   $("status").innerHTML = chip(e.status);
   $("about").textContent = e.about ?? "";
   $("script").textContent = e.script ? `Made by ${e.script} · node tools/thunderObstacles.mjs ${e.id}` : "";
-  btns($("version"), [["both", "Old | New"], ["new", "New"], ["old", "Old"]], (k) => k === state.version, (k) => { state.version = k; build(); }, !hasNew);
+  const hasOld = !!(e.kind && physOldLook(e.kind));   // (none left once the model replaced it for good)
+  btns($("version"), [["both", "Old | New"], ["new", "New"], ["old", "Old"]], (k) => (hasOld ? k === state.version : k === "new"), (k) => { state.version = k; build(); }, !hasNew || !hasOld);
   btns($("arrange"), [["game", "As in the game"], ["single", "One"]], (k) => k === state.arrange, (k) => { state.arrange = k; build(); frameOn(stage); }, !hasNew);
   btns($("lod"), [["auto", "By distance"], [0, "LOD 0"], [1, "LOD 1"], [2, "LOD 2"]], (k) => k === state.lod, (k) => { state.lod = k; }, !hasNew);
   btns($("toggles"), [["wire", "Wireframe"], ["spin", "Turn round"]], (k) => state[k], (k) => { state[k] = !state[k]; for (const s of shown) s.wire.visible = state.wire; orbit.autoRotate = state.spin; });
