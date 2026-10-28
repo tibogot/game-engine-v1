@@ -11,7 +11,8 @@
     "dev:roads": "vite --open /v3/road-lab.html",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node tools/runAll.mjs --fast",
+    "test": "node tools/runAll.mjs --fast --changed",
+    "test:fast": "node tools/runAll.mjs --fast",
     "test:all": "node tools/runAll.mjs",
     "textures": "node tools/compressTextures.mjs",
     "levels": "node tools/levelCheck.mjs"

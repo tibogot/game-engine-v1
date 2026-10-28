@@ -36,7 +36,9 @@ for (const [id, t] of Object.entries(TILES)) {
   const wantTurn = t.segs.reduce((a, s) => a + (s.turn ?? 0), 0);
   const wantPitch = t.segs.reduce((a, s) => a + (s.pitch ?? 0), 0);
   const heading = Math.atan2(e.T.x, -e.T.z); // + = turned right
-  const pitch = Math.asin(e.T.y);
+  // (atan2 with the forward part, not asin: asin stops at 90° — the 94° Quarter pipe read as 86° and failed
+  // from the day it was added, unseen: this suite wasn't in npm test until 2026-10-28)
+  const pitch = Math.atan2(e.T.y, -e.T.z);
   const turnErr = Math.atan2(Math.sin(heading - wantTurn), Math.cos(heading - wantTurn)); // a helix turns a full 360°
   if (!t.segs.some((s) => s.pitch) && Math.abs(turnErr) > 1e-4) fail(`${id}: turned ${heading / DEG}° want ${wantTurn / DEG}°`);
   if (!t.segs.some((s) => s.turn) && Math.abs(wantPitch) < Math.PI && Math.abs(pitch - wantPitch) > 1e-4) fail(`${id}: pitched ${pitch / DEG}° want ${wantPitch / DEG}°`);

@@ -92,26 +92,27 @@ console.log("\n=== 2. WHAT collisionMeshes() HANDS EACH CHANNEL ===");
   const PROPS_DIR = join(ROOT, "games/modular-road-v3");
   const STUB = join(PROPS_DIR, `.propstub.${process.pid}.mjs`);
   const PTMP = join(PROPS_DIR, `.propsproxy.${process.pid}.mjs`);
-  // modularRoadPropPhysics and modularRoadScenery both reach code that needs a
+  // modularRoadPropPhysics and modularRoadScenery (and the LED display / ad modules: the WebGPU build of
+  // three, absent here) all reach code that needs a
   // DOM at import time. Nothing here calls a prop's make(), so the catalog only
   // needs these names to EXIST — an empty scenery catalog just means fewer
   // entries in PROP_CATALOG.
-  writeFileSync(STUB, [
-    "import * as THREE from 'three';",
-    "export const PHYSICS_PROP_TYPES = {};",
-    "export const CONE_SCALE = 1;",
-    "export const GATE_WIDTH = 4.4, GATE_HEIGHT = 1.5, GATE_BASE_Y = 0.15;",
-    "export const GATE_POST_RADIUS = 0.11, GATE_POST_HEIGHT = 1.9;",
-    "export const SCENERY_CATALOG = [];",
-    "export const makeSceneryProp = () => new THREE.Group();",
-  ].join("\n"));
-  writeFileSync(PTMP, readFileSync(join(PROPS_DIR, "modularRoadProps.js"), "utf8")
+  // The stub exports EVERY name modularRoadProps imports from those two modules, read from its own import
+  // lines: a hand-written list missed TIRE_SCALE / TIRE_OUTER_R / TIRE_TUBE_R / TIRE_SIZE when the tyres
+  // were added (2026-09-14) and this half of the suite printed SKIP and stayed green for six weeks.
+  const STUBBED = "PropPhysics|Scenery|AdBillboard|AdPrism|LedDisplay";
+  const propsSrc = readFileSync(join(PROPS_DIR, "modularRoadProps.js"), "utf8");
+  const stubbed = new Set();
+  for (const m of propsSrc.matchAll(new RegExp(`import\\s*\\{([^}]*)\\}\\s*from\\s*"\\./modularRoad(?:${STUBBED})\\.js"`, "g")))
+    for (const n of m[1].split(",").map((s) => s.trim()).filter(Boolean)) stubbed.add(n);
+  const stubValue = (n) => (n === "SCENERY_CATALOG" ? "[]" : /^make/.test(n) ? "() => new THREE.Group()" : /^[A-Z_]+_TYPES$/.test(n) ? "{}" : /^[a-z]/.test(n) ? "() => null" : "1");
+  writeFileSync(STUB, ["import * as THREE from 'three';", ...[...stubbed].map((n) => `export const ${n} = ${stubValue(n)};`)].join("\n"));
+  writeFileSync(PTMP, propsSrc
     .replace(/^import \{ TransformControls \}.*$/m, "const TransformControls = class {};")
     .replace(/^import \{ materialEmissive, materialColor \}.*$/m,
       "const materialEmissive = null, materialColor = null;")
     .replace(/^import \{ applyBloomMRT \}.*$/m, "const applyBloomMRT = () => {};")
-    .replace(/"\.\/modularRoadPropPhysics\.js"/g, `"./${basename(STUB)}"`)
-    .replace(/"\.\/modularRoadScenery\.js"/g, `"./${basename(STUB)}"`));
+    .replace(new RegExp(`"\\./modularRoad(?:${STUBBED})\\.js"`, "g"), `"./${basename(STUB)}"`));
   let PropManager = null;
   try {
     ({ PropManager } = await import(pathToFileURL(PTMP).href));
