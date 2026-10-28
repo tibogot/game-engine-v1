@@ -157,6 +157,10 @@ let fittedId = ensureTile(`fitted_landing_${FITTED_ANGLE}_32`).id;
 // TILTED LANDINGS (user, 2026-10-21, Apex Rush: the air roll must matter): with the Fitted landing in
 // hand, ← / → lean its catch zone (5° steps, ±45; + = the right side low); it rolls back to flat by its exit
 let landTilt = 0;
+// UP TO 75° (2026-10-28, measured on the Tilted landing test, a LEVEL track: 60-75° all PERFECT, 80° falls off — gravity presses the car
+// onto the slope by cos(tilt): ~0.26 g at 75°, nothing at 90°, where the surface runs ALONG the flight and nothing
+// lands on it). Shift + ← / → in 15° steps.
+const LAND_TILT_MAX = 75;
 let landWide = false; // a WIDE fitted landing (48 m): kit.js `…_w`
 // "catch_tube": the same idea as a TUBE whose wide portal is laid on the jump's arc (kit.js ensureTile):
 // the car flies into it and comes out level in a pipe (user, 2026-10-21: "jump to enter inside a tube in air")
@@ -2410,7 +2414,8 @@ function fittedOnArc(a, k, tilt = 0, wide = false) {
   D = Math.max(24, Math.ceil(D / 4) * 4);
   // a TILTED one keeps its low edge on the path plane (kit.js deckFrame raises the centre hw·sin): laid
   // that much lower, the car meets the deck's middle where the flat one would be
-  const p = P0.clone().addScaledVector(U, -SECTIONS[wide ? "wide" : "road"].hw * Math.abs(Math.sin(tilt * DEG)));
+  // (past 45° the piece rolls round the car's line instead — kit.js — its middle stays on the path: no drop)
+  const p = Math.abs(tilt) > 45 ? P0.clone() : P0.clone().addScaledVector(U, -SECTIONS[wide ? "wide" : "road"].hw * Math.abs(Math.sin(tilt * DEG)));
   return { id: ensureTile(`fitted_landing_${angle}_${D}${tilt ? `_t${tilt}` : ""}${wide ? "_w" : ""}`).id, m: socketMatrix({ p, T, U, R }), P0, T, U };
 }
 const refittable = () => problems.misses.filter((m) => /^(fitted_landing|catch_tube)_/.test(track.pieces.find((q) => q.uid === m.uid)?.id ?? "")).map((m) => m.uid);
@@ -3012,8 +3017,8 @@ addEventListener("keydown", (e) => {
     // tilt: 5° steps (Shift: 15°), up to ±90° (was ±45: Apex Rush floats pieces at any angle)
     case "ArrowUp": rot.pitch = Math.min(90, rot.pitch + (e.shiftKey ? 15 : 5)); break;
     case "ArrowDown": rot.pitch = Math.max(-90, rot.pitch - (e.shiftKey ? 15 : 5)); break;
-    case "ArrowLeft": if (tileBase === FITTED) landTilt = Math.max(-45, landTilt - 5); else rot.roll = Math.max(-90, rot.roll - (e.shiftKey ? 15 : 5)); break;
-    case "ArrowRight": if (tileBase === FITTED) landTilt = Math.min(45, landTilt + 5); else rot.roll = Math.min(90, rot.roll + (e.shiftKey ? 15 : 5)); break;
+    case "ArrowLeft": if (tileBase === FITTED) landTilt = Math.max(-LAND_TILT_MAX, landTilt - (e.shiftKey ? 15 : 5)); else rot.roll = Math.max(-90, rot.roll - (e.shiftKey ? 15 : 5)); break;
+    case "ArrowRight": if (tileBase === FITTED) landTilt = Math.min(LAND_TILT_MAX, landTilt + (e.shiftKey ? 15 : 5)); else rot.roll = Math.min(90, rot.roll + (e.shiftKey ? 15 : 5)); break;
     case "PageUp": buildY += 2; break;
     case "PageDown": buildY -= 2; break;
     case "Enter": place(); break;
@@ -3116,8 +3121,8 @@ function renderHand() {
       case "pd": rot.pitch = Math.max(-45, rot.pitch - 5); break;
       case "rl": rot.roll = Math.max(-45, rot.roll - 5); break;
       case "rr": rot.roll = Math.min(45, rot.roll + 5); break;
-      case "tl": landTilt = Math.max(-45, landTilt - 5); renderDock(); break;
-      case "tr": landTilt = Math.min(45, landTilt + 5); renderDock(); break;
+      case "tl": landTilt = Math.max(-LAND_TILT_MAX, landTilt - 5); renderDock(); break;
+      case "tr": landTilt = Math.min(LAND_TILT_MAX, landTilt + 5); renderDock(); break;
       case "lw": landWide = !landWide; renderDock(); break;
       case "L": hand = -1; renderDock(); break;
       case "R": hand = 1; renderDock(); break;

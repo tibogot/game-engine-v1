@@ -346,7 +346,12 @@ this is just the list. Newest decisions at the top of each section. Last updated
       piece ROLL OUT 90° (kit.js roll_out_90 / _L, Banked tab: a roll segment, the road's frame turns back upright) →
       straight → finish. The autopilot air-rolls, rides the wall round, finishes in 29.4 s; the lap prediction 26.5 s.
       The builder still says "the full-speed car misses it" (the wall is off the arc on purpose) — a wrong warning
-      for a wall landing; to look at.
+      for a wall landing; to look at. (Re-done 10-28 after LEVELLING the track: it had been tilted ~7° by hand.)
+- [x] TILTED LANDINGS UP TO 75° — Apex Rush's floating tilted boards (shot 03; user: "many tilted pieces in the air
+      like this to land on, that's the cool thing of the game"): the Fitted landing tilts to ±75° (was ±45°; Shift +
+      ← / → in 15° steps); past 45° it rolls round the car's line (the walls' twistPivot, no drop in the fitter) and
+      its roll back to flat lengthens with the tilt. Measured on "Tilted landing test" (level): 60-75° PERFECT,
+      80° falls off — gravity presses the car on by cos(tilt), nothing at 90°. ≤45° pieces unchanged.
 
 ## AAA obstacles & signs (user, 2026-10-28: "the oil barrel, swing gates, tyre stacks look kind of cheap … the assets
 ## in the SIGNS category look very cheap too"; real motorsport, not branded)

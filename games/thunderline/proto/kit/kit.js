@@ -653,13 +653,20 @@ export function ensureTile(id) {
   if (!m) return undefined;
   const angle = Number(m[1]), D = Number(m[2]), tilt = Number(m[3] ?? 0) * DEG, wide = !!m[4];
   const lean = tilt ? [{ leanIn: tilt, leanOut: tilt }, { leanIn: tilt, leanOut: 0 }] : [{}, {}];
+  // PAST 45° — UP TO A WALL (user, 2026-10-28, Apex Rush: "many tilted pieces in the air like this to land on,
+  // that's the cool thing of the game"): the catch zone ROLLED ROUND THE CAR'S LINE (the walls' twistPivot) — banked
+  // the usual way, a vertical one's middle would stand hw m above the line the car flies (the Wallride's lesson);
+  // and the roll back to flat gets longer with the tilt (90°: ~110 m), as the Wallride's roll-out
+  const steep = Math.abs(tilt) > 45 * DEG;
+  const outL = Math.max(44, Math.round(angle * 2.2), steep ? Math.round(Math.abs(tilt) / DEG * 1.2) : 0);
   TILES[id] = {
     id,
     label: `${tilt ? "Tilted" : "Fitted"} landing ${angle}° · ${D} m${wide ? " · wide" : ""}${tilt ? ` · ${Math.abs(m[3])}° ${tilt > 0 ? "right" : "left"} low` : ""}`,
     landAngle: angle,
     ...(wide ? { section: "wide" } : {}),
     ...(tilt ? { tilt } : {}),
-    segs: [{ L: D, ...lean[0] }, { L: Math.max(44, Math.round(angle * 2.2)), pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1)), ...lean[1] }],
+    ...(steep ? { twistPivot: WALL_PIVOT } : {}),
+    segs: [{ L: D, ...lean[0] }, { L: outL, pitch: angle * DEG, ramp: Math.max(22, Math.round(angle * 1.1), steep ? Math.round(outL / 2) : 0), ...lean[1] }],
     marks: [{ kind: "landing", from: 0, to: D }],
   };
   return TILES[id];
