@@ -4,8 +4,10 @@
 //   - it always looks at a point on the ground and orbits it; it never turns upside down, never goes
 //     under the floor, never zooms absurdly far in or out
 //   - W A S D (by key POSITION: Z Q S D on AZERTY) slide over the ground, faster when zoomed out,
-//     Shift faster still; LEFT-DRAG on the ground drags the map (a click still places / selects)
-//   - right-drag turns, the wheel zooms where the mouse points (as before)
+//     Shift faster still; LEFT-DRAG grabs the ground: what you grab stays under the mouse (a click still
+//     places / selects)
+//   - right-drag turns round what you look at; the wheel zooms TO WHAT THE MOUSE POINTS AT (the piece or the ground under it: see
+//     "the wheel" below)
 //   - an on-screen panel for the mouse only: a compass (click = face north), turn 90° left / right,
 //     zoom in / out, top view (V), go to the track's end (Home), frame everything (F)
 // Every jump of the view is animated, so you always see where you went.
@@ -37,17 +39,19 @@ const PANEL_CSS = `
  * @param o.frameAll  () => void
  * @param o.floorY  the floor height the camera stays above
  * @param o.enabled  () => boolean — false while a test drive runs
+ * @param o.pick  (ndc: THREE.Vector2) => THREE.Vector3 | null — the point under the mouse (a piece, else the floor, else that way)
  */
-export function createEditorNav({ camera, controls, dom, home, frameAll, floorY = 0, enabled = () => true }) {
+export function createEditorNav({ camera, controls, dom, home, frameAll, floorY = 0, enabled = () => true, pick = null }) {
   // ---------- the orbit's rules ----------
-  controls.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
+  // (left-drag is ours when the builder can pick: "the drag" below; else three's pan)
+  controls.mouseButtons = { LEFT: pick ? -1 : THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.ROTATE };
   controls.screenSpacePanning = false; // drags slide over the ground, never up into the sky
   controls.minPolarAngle = MIN_POLAR;
   controls.maxPolarAngle = MAX_POLAR;
-  controls.minDistance = MIN_DIST;
+  controls.minDistance = 0.5; // (the wheel keeps its own limits: ZOOM_MIN from what you point at)
   controls.maxDistance = MAX_DIST;
   controls.dampingFactor = 0.12;
-  controls.zoomToCursor = true;
+  controls.enableZoom = !pick; // the wheel is ours (below) when the builder can say what is under the mouse
 
   // ---------- smooth moves: the view eases to a goal (target, azimuth, polar, distance) ----------
   const sph = new THREE.Spherical(), off = new THREE.Vector3();
@@ -92,6 +96,95 @@ export function createEditorNav({ camera, controls, dom, home, frameAll, floorY 
   dom.addEventListener("pointerdown", () => { goal = null; });
   dom.addEventListener("wheel", () => { goal = null; }, { passive: true });
 
+  // ---------- THE WHEEL: zoom to what the mouse points at (user, 2026-10-28: "sometimes it feels like I can't
+  // zoom more, or I can't zoom exactly where I want") ----------
+  // three's zoom-to-cursor scaled the distance to the ORBIT CENTRE — a point in mid-air at the build height —
+  // and stopped 2 m from it, wherever that left you (looking down at a piece below it: stuck far away); and it
+  // aimed at the cursor on a plane through that centre, so what was really under the mouse slid away. Now each
+  // step finds the REAL point under the mouse (a piece, else the floor) and scales the whole view about it —
+  // camera and orbit centre together: that point stays exactly under the mouse, the zoom goes on until you are
+  // ZOOM_MIN from it, and the orbit centre settles on it (right-drag then turns round what you zoomed to).
+  // Eased over a few frames; wheel or trackpad, the same.
+  const ZOOM_MIN = 1.2; // m from the point under the mouse
+  const ndc = new THREE.Vector2(), toP = new THREE.Vector3(), toT = new THREE.Vector3();
+  let zoomP = null, zoomLog = 0; // the point zoomed about, and the zoom still to do (log of the scale)
+  if (pick) dom.addEventListener("wheel", (e) => {
+    if (!enabled()) return;
+    e.preventDefault();
+    const r = dom.getBoundingClientRect();
+    ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    const P = pick(ndc);
+    if (!P) return;
+    zoomP = P;
+    const px = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaMode === 2 ? e.deltaY * 400 : e.deltaY; // lines / pages → px
+    zoomLog += THREE.MathUtils.clamp(px, -300, 300) * 0.0016; // a wheel notch (100 px): ×0.85 or ×1.17
+  }, { passive: false });
+  // ---------- THE DRAG: the ground you grab stays under the mouse (2026-10-28) ----------
+  // three's pan moved the view at the ORBIT CENTRE's depth: with the centre high above the ground you grabbed
+  // (it sat at the build height, 120-190 m), the ground slid 44-93 px off the mouse over a 224 px drag —
+  // slippery. Now: the point under the mouse at the press, and its height as the drag plane; every move puts
+  // that point back under the mouse (camera and orbit centre slide together, never up or down). A press the
+  // builder takes first (the gizmo, an obstacle dragged: they switch the orbit off) is not a drag of the view.
+  let grab = null; // { y, P } while dragging the view
+  const planeHit = (cx, cy, y, out) => {
+    const r = dom.getBoundingClientRect();
+    ndc.set(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
+    gRay.setFromCamera(ndc, camera);
+    const d = gRay.ray.direction, o = gRay.ray.origin;
+    if (Math.abs(d.y) < 1e-4) return null;
+    const t = (y - o.y) / d.y;
+    return t > 0 ? out.copy(o).addScaledVector(d, t) : null;
+  };
+  const gRay = new THREE.Raycaster(), gHit = new THREE.Vector3(), gStep = new THREE.Vector3();
+  if (pick) {
+    dom.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0 || !enabled() || !controls.enabled) return;
+      const r = dom.getBoundingClientRect();
+      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+      let P = pick(ndc);
+      if (!P) return;
+      // grabbing the far horizon: a pixel there is kilometres — drag at the orbit centre's distance instead
+      const radius = camera.position.distanceTo(controls.target);
+      if (camera.position.distanceTo(P) > 3 * radius + 200) {
+        gRay.setFromCamera(ndc, camera);
+        P = gRay.ray.origin.clone().addScaledVector(gRay.ray.direction, radius);
+      }
+      grab = { y: P.y, P };
+    });
+    dom.addEventListener("pointermove", (e) => {
+      if (!grab || !(e.buttons & 1) || !controls.enabled) { if (grab && !(e.buttons & 1)) grab = null; return; }
+      if (!planeHit(e.clientX, e.clientY, grab.y, gHit)) return;
+      gStep.copy(grab.P).sub(gHit);
+      gStep.y = 0;
+      camera.position.add(gStep);
+      controls.target.add(gStep);
+    });
+    addEventListener("pointerup", () => { grab = null; });
+    // THE TURN (right-drag) turns round WHAT YOU LOOK AT: at the press, the orbit centre drops along the line of
+    // sight onto the first piece or the ground there (it can float far above it, at the build height or where a
+    // drag left it: the view then swung round a point in mid-air). On that same line, so the view does not jump.
+    dom.addEventListener("pointerdown", (e) => {
+      if (e.button !== 2 || !enabled() || !controls.enabled) return;
+      const q = gHit.copy(controls.target).project(camera);
+      const P = pick(ndc.set(q.x, q.y));
+      if (P && camera.position.distanceTo(P) > ZOOM_MIN) controls.target.copy(P);
+    }, { capture: true }); // (before three's own handler starts the turn from the old centre)
+  }
+  function stepZoom(dt) {
+    if (!zoomP || Math.abs(zoomLog) < 1e-4) { zoomLog = 0; return; }
+    const part = zoomLog * (1 - Math.exp(-dt * 16));
+    let k = Math.exp(part);
+    // the limits: no closer than ZOOM_MIN to the point, no further than MAX_DIST from the orbit centre
+    const dP = toP.copy(camera.position).sub(zoomP).length();
+    if (k < 1 && dP * k < ZOOM_MIN) k = Math.min(1, ZOOM_MIN / Math.max(dP, 1e-6));
+    const dT = toT.copy(camera.position).sub(controls.target).length();
+    if (k > 1 && dT * k > MAX_DIST) k = Math.max(1, MAX_DIST / Math.max(dT, 1e-6));
+    if (k === 1) { zoomLog = 0; return; } // at a limit: the rest of the scroll is dropped, not stored
+    zoomLog -= part;
+    camera.position.sub(zoomP).multiplyScalar(k).add(zoomP);
+    controls.target.sub(zoomP).multiplyScalar(k).add(zoomP);
+  }
+
   // ---------- the panel ----------
   const style = document.createElement("style");
   style.textContent = PANEL_CSS;
@@ -135,6 +228,7 @@ export function createEditorNav({ camera, controls, dom, home, frameAll, floorY 
         camera.position.add(step);
       }
     }
+    stepZoom(dt);
     // the eased moves (buttons, compass, top view, go to end)
     if (goal) {
       const s = read(), k = 1 - Math.exp(-dt * 7);
@@ -145,8 +239,9 @@ export function createEditorNav({ camera, controls, dom, home, frameAll, floorY 
       write();
       if (Math.abs(goal.az - s.theta) < 1e-3 && Math.abs(goal.polar - s.phi) < 1e-3 && Math.abs(goal.dist - s.radius) < 0.05 && controls.target.distanceTo(goal.target) < 0.05) goal = null;
     }
-    // never under the floor (zooming to the cursor near the ground can dip it)
-    if (camera.position.y < floorY + 3) { const d = floorY + 3 - camera.position.y; camera.position.y += d; }
+    // never under the floor (zooming to the cursor near the ground can dip it); 0.8 m, was 3 (close to the
+    // ground to place a cone, the 3 m stop read as "I can't zoom more")
+    if (camera.position.y < floorY + 0.8) camera.position.y = floorY + 0.8;
     // the compass: north stays north on screen
     rose.style.transform = `rotate(${(read().theta * 180) / Math.PI}deg)`;
   };
@@ -154,5 +249,6 @@ export function createEditorNav({ camera, controls, dom, home, frameAll, floorY 
   addEventListener("keydown", (e) => { if (e.key === "Shift") shift = true; });
   addEventListener("keyup", (e) => { if (e.key === "Shift") shift = false; });
   api.panel = panel;
+  api.pickAt = pick; // (test hook: what the wheel would zoom to)
   return api;
 }

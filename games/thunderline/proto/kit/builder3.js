@@ -3376,6 +3376,15 @@ if (!SHELL) offerTutorial(params.get("tutorial") === "1"); // (the shell: when t
 const nav = createEditorNav({
   camera, controls, dom: renderer.domElement, frameAll, floorY: FLOOR_Y, enabled: () => !driving,
   home: () => { const e = openEnds().at(-1); return e ? new THREE.Vector3().setFromMatrixPosition(e.m) : null; },
+  // what the wheel zooms to: the piece under the mouse, else the floor; the sky: that way, as far as the orbit centre
+  pick: (ndc) => {
+    ray.setFromCamera(ndc, camera);
+    const h = ray.intersectObjects(trackGroup.children, true)[0];
+    if (h) return h.point.clone();
+    const o = ray.ray.origin, d = ray.ray.direction;
+    const t = d.y < -1e-4 ? (FLOOR_Y - o.y) / d.y : -1;
+    return o.clone().addScaledVector(d, t > 0 ? t : camera.position.distanceTo(controls.target));
+  },
 });
 // THE WORLD (worlds.js), saved with the track: flat to the horizon, or the mountain valley
 $("b-world").innerHTML = Object.entries(WORLDS).map(([k, w]) => `<option value="${k}">World: ${w.label}</option>`).join("");
@@ -3483,4 +3492,5 @@ window.__b3 = {
   get prediction() { return { state: prediction.state, resumedAt: prediction.resumedAt, ms: prediction.ms, ticks: prediction.ticks, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },
 };
 for (const k of ["aimEnd", "aimArc", "aimFast", "setMouse", "frameAll"]) window.__b3[k] = hookAim(window.__b3[k]);
+window.__b3.navPick = (x, y) => nav.pickAt?.(new THREE.Vector2((x / innerWidth) * 2 - 1, -(y / innerHeight) * 2 + 1)) ?? null;
 
