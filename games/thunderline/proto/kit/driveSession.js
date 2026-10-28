@@ -18,6 +18,7 @@ import { TILES, integrate, ensureTile, SECTIONS, socketMatrix, leanOut } from ".
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { library, campaign, contentKey, settings } from "../../app/library.js";
+import { StuntCar, roadDirFromRide } from "./stuntCar.js";
 import { ghosts } from "../../app/ghostStore.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune, CAR_TUNE } from "./carTune.js";
@@ -154,7 +155,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
 
   // ---------- the car (+ the ghost), loaded once ----------
   const floorH = (x, z) => app.getWorldHeight(x, z);
-  const vehicle = new Vehicle({ scene, showArrows: false });
+  // the old car or the STUNT car (settings.physics, read once per session: the switch reloads the page)
+  const CarClass = settings.get().physics === "stunt" ? StuntCar : Vehicle;
+  const vehicle = new CarClass({ scene, showArrows: false });
   vehicle.SUBSTEPS = substeps; // per-car: 3 → 1/360 s, keeps travel per substep ≤ the verified 0.25 m up to 90 m/s
   vehicle.getFloorY = floorH; // the floor is solid for the body too
   vehicle.setSolidCapsules([]);
@@ -173,7 +176,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   const unpark = () => { vehicle.setEnabled(true); showBody(); };
   park();
   const chase = createChaseCamera({ camera, vehicle });
-  const ghostCar = new Vehicle({ scene, showArrows: false });
+  const ghostCar = new CarClass({ scene, showArrows: false }); // (a ghost replays inputs: the same physics)
   ghostCar.SUBSTEPS = substeps;
   ghostCar.getFloorY = floorH;
   ghostCar.setSolidCapsules([]);
@@ -528,6 +531,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const lay = track
       ? layoutFromPlacements({ built, pieces: roadPieces })
       : layoutTestTrack({ built, speed: jumpSpeed, jumpSpeeds: o.jumpSpeeds ?? [55.8, 48.6, 50.6], airDrag: AERO.drag / CHASSIS.mass });
+    if (vehicle.isStuntCar) vehicle.roadDirAt = ghostCar.roadDirAt = roadDirFromRide(lay.ride); // its take-off guide
     const group = new THREE.Group();
     // THE RUN-OUT: past the finish the road goes on for 3 straights (drawn and solid, not part of the
     // race), and the car brakes by itself (driveFrame): it used to fly off the track's end after the line

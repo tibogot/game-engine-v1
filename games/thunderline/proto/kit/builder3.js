@@ -17,7 +17,10 @@ import { saveState, restoreState } from "./simState.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
-import { library, settings, campaign } from "../../app/library.js";
+import { library, settings, campaign, draft, DRAFT } from "../../app/library.js";
+import { StuntCar, roadDirFromRide } from "./stuntCar.js";
+// the test lap drives the car the drive page drives (settings.physics: the switch reloads the page)
+const PredCar = settings.get().physics === "stunt" ? StuntCar : Vehicle;
 import { go } from "../../app/nav.js";
 import { attachLesson } from "./lessonCard.js";
 import { keepPipelines } from "./keepPipelines.js";
@@ -51,7 +54,8 @@ const params = new URLSearchParams(location.search);
 const SHELL = params.get("shell") === "1";
 const pageUrl = () => `${location.pathname}?${SHELL ? "shell=1&" : ""}track=${trackId}`;
 let trackId = params.get("track");
-if (!trackId || !library.get(trackId)) trackId = (library.current && library.get(library.current) ? library.current : null) ?? library.list()[0]?.id ?? library.create().id;
+// (a NEW track is the DRAFT — library.js: nothing goes in your list until you Save)
+if (!trackId || !library.get(trackId)) trackId = (library.current && library.get(library.current) ? library.current : null) ?? library.list()[0]?.id ?? (draft.get() ?? draft.start()).id;
 library.current = trackId;
 history.replaceState(null, "", pageUrl());
 const UP = new THREE.Vector3(0, 1, 0);
@@ -87,6 +91,15 @@ for (const c of CATS) for (const t of c.tiles) catOf.set(t, c.id);
 // ---------- state ----------
 let track = load() ?? { pieces: [], nextUid: 1 };
 let trackName = library.get(trackId)?.name ?? "Track";
+// SAVE (library.js DRAFT): `savedJson` is the track as last saved (null: never saved — the draft); `dirty` = what you
+// see differs from it. A draft kept for THIS saved track (a crash, a closed tab, edits not saved) comes back.
+let savedJson = trackId === DRAFT ? null : JSON.stringify(track);
+let dirty = trackId === DRAFT;
+let restoredNote = null;
+{
+  const d = draft.get();
+  if (trackId !== DRAFT && d && d.base === trackId) { track = d.track; trackName = d.name; dirty = true; restoredNote = "Your unsaved changes to this track were brought back. Save keeps them (to drop them: open another track and choose Discard)."; }
+}
 let hand = 1; // +1 right, −1 left (picks the "_L" mirror)
 let freeHold = false; // Alt held: free placement, no snapping
 let edges = true; // rails: true both, "L" left only, "R" right only, false none (oldLook.js edgesOf)
@@ -125,18 +138,71 @@ function saveShown(ok) {
   }
   saveWarnEl.style.display = "";
 }
-let thumbDirty = false; // edits since the last picture (opening another track takes it first)
+let thumbDirty = false; // (unused since tracks save on Save: the picture is taken then)
+/** EVERY EDIT: kept in the draft slot (the safety copy), not in your list — unless it matches the saved track */
 function save() {
-  saveShown(library.saveTrack(trackId, track));
-  thumbDirty = true;
-  clearTimeout(thumbTimer);
-  thumbTimer = setTimeout(saveThumb, 1200);
+  const j = JSON.stringify(track);
+  dirty = savedJson === null || j !== savedJson;
+  if (dirty) saveShown(draft.keep(trackId === DRAFT ? null : trackId, trackName, track));
+  else if (draft.get()?.base === trackId) draft.clear(); // (back to exactly what is saved: nothing to keep)
+  showSaved();
 }
-async function saveThumb() {
-  clearTimeout(thumbTimer);
-  thumbDirty = false;
+/** SAVE (the button, Ctrl+S): into your list — a new track gets its record now — with its picture */
+async function commit() {
+  if (trackId === DRAFT) {
+    const rec = library.create(trackName);
+    trackId = rec.id;
+    library.current = trackId;
+    history.replaceState(null, "", pageUrl());
+  } else library.rename(trackId, trackName);
+  const ok = library.saveTrack(trackId, track);
+  saveShown(ok);
+  if (!ok) return false;
+  savedJson = JSON.stringify(track);
+  dirty = false;
+  draft.clear();
+  showSaved();
   const url = await trackThumb();
-  if (url) saveShown(library.saveTrack(trackId, track, url));
+  if (url) library.saveTrack(trackId, track, url);
+  return true;
+}
+async function saveThumb() { /* (kept for openTrack: nothing to do — the picture is taken at Save) */ }
+function showSaved() {
+  const b = $("b-save");
+  if (!b) return;
+  b.textContent = dirty ? "Save •" : "Saved";
+  b.classList.toggle("dirty", dirty);
+  b.title = dirty ? (trackId === DRAFT ? "Not in your tracks yet: Save puts it there (Ctrl+S)" : "Unsaved changes: Save keeps them (Ctrl+S)") : "Saved in your tracks";
+}
+/**
+ * LEAVING WITH UNSAVED CHANGES (New, Tutorial, Menu, another track): Save / Discard / Cancel. Resolves true to go on.
+ * Discard drops the draft (a saved track stays as it was saved).
+ */
+let leaveDialog = null;
+function confirmLeave() {
+  if (!dirty || (trackId === DRAFT && !track.pieces.length && !(track.props ?? []).length)) { if (trackId === DRAFT) draft.clear(); return Promise.resolve(true); }
+  return new Promise((resolve) => {
+    const el = document.createElement("div");
+    el.style.cssText = "position:fixed;inset:0;z-index:80;display:grid;place-items:center;background:rgba(5,8,14,.55)";
+    el.innerHTML = `<div style="background:#0d1424;border:1px solid #3fd2ff;padding:18px 20px;min-width:340px;font:500 14px Barlow, sans-serif;color:#e6edf6">
+      <div style="font:700 18px 'Barlow Condensed', sans-serif;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px">Unsaved track</div>
+      <div style="opacity:.8;margin-bottom:14px">${trackId === DRAFT ? `“${trackName}” isn't in your tracks yet.` : `“${trackName}” has unsaved changes.`}</div>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button data-a="cancel">Cancel</button><button data-a="discard">Discard</button><button data-a="save" style="border-color:#3fd2ff;color:#3fd2ff">Save</button></div></div>`;
+    document.body.appendChild(el);
+    leaveDialog = el;
+    const done = (v) => { el.remove(); leaveDialog = null; resolve(v); };
+    el.onclick = async (e) => {
+      const a = e.target.closest("button")?.dataset.a;
+      if (a === "cancel") done(false);
+      else if (a === "discard") {
+        draft.clear(); dirty = false;
+        // back to the saved track, on screen too (going to the menu and back reopens the same track as it stands)
+        if (savedJson !== null) { track = JSON.parse(savedJson); undo = []; redo = []; sel = null; rebuild(); }
+        done(true);
+      }
+      else if (a === "save") done(await commit());
+    };
+  });
 }
 function snapshot() { undo.push(JSON.stringify(track)); if (undo.length > 200) undo.shift(); redo = []; }
 function restore(from, to) {
@@ -885,7 +951,8 @@ async function runPrediction() {
   const ground = createVehicleGround({ getTerrainHeight: () => FLOOR_Y });
   ground.setRoadBvh(deckBvh.baked ? deckBvh : null);
   ground.setRoadSolidsBvh(solidsBvh.baked ? solidsBvh : null);
-  const car = new Vehicle({ scene: predScene, showArrows: false });
+  const car = new PredCar({ scene: predScene, showArrows: false });
+  if (car.isStuntCar) car.roadDirAt = roadDirFromRide(ride);
   car.SUBSTEPS = 3;
   car.setBvh(ground.ground, ground.solids);
   car.getFloorY = () => FLOOR_Y;
@@ -1148,8 +1215,9 @@ function forgiveTone(f) {
 }
 let forgiveCar = null;
 async function runForgiveness(token, ctx) {
-  forgiveCar ??= new Vehicle({ scene: predScene, showArrows: false });
+  forgiveCar ??= new PredCar({ scene: predScene, showArrows: false });
   const car = forgiveCar;
+  if (car.isStuntCar) car.roadDirAt = roadDirFromRide(ctx.ride);
   car.SUBSTEPS = 3;
   car.setBvh(ctx.ground.ground, ctx.ground.solids);
   car.getFloorY = () => FLOOR_Y;
@@ -3000,6 +3068,8 @@ function heightUnderCursor() {
 }
 addEventListener("keydown", (e) => {
   if (driving) return; // the drive session owns the keys
+  if (leaveDialog) return; // (Save / Discard / Cancel is up: its buttons only)
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") { e.preventDefault(); commit(); return; }
   // (the press that starts the drive must not also reach the drive's own Tab = back, which would end it at once)
   if (e.code === "Tab") { e.preventDefault(); e.stopImmediatePropagation(); if (!e.repeat) startDrive(); return; }
   const k = e.key.toLowerCase();
@@ -3068,10 +3138,14 @@ $("b-keys").onclick = toggleKeys;
 $("steps-keys").onclick = toggleKeys;
 $("steps-x").onclick = () => { try { localStorage.setItem(STEPS_OFF, "1"); } catch {} $("steps").classList.add("hidden"); };
 // New = a new track in the library (the current one stays, saved)
-$("b-new").onclick = () => { save(); go({ to: "build", id: library.create().id }); };
-$("b-menu").onclick = () => { save(); go({ to: "menu", screen: "build" }); };
+$("b-new").onclick = async () => { if (!(await confirmLeave())) return; draft.start(); go({ to: "build", id: DRAFT, fresh: true }); };
+$("b-menu").onclick = async () => { if (!(await confirmLeave())) return; go({ to: "menu", screen: "build" }); };
+$("b-save").onclick = () => { $("b-save").blur(); commit(); };
+showSaved();
+if (restoredNote) editMsg = restoredNote;
 $("b-name").value = trackName;
-$("b-name").onchange = () => { library.rename(trackId, $("b-name").value); trackName = library.get(trackId).name; $("b-name").value = trackName; };
+// (the name is part of what Save saves: a draft's, or a saved track's new name)
+$("b-name").onchange = () => { trackName = $("b-name").value.trim() || trackName; $("b-name").value = trackName; if (trackId === DRAFT || dirty) save(); else library.rename(trackId, trackName); };
 $("b-name").onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") e.target.blur(); };
 // test drive in the same tab; the drive page's finish screen (and Esc) comes back here
 // THE PIECE IN HAND, with the mouse (user, 2026-10-19: players are not used to 3D software): a fixed
@@ -3268,15 +3342,19 @@ function stopPlay() {
 addEventListener("keydown", (e) => { if (playing?.fromBuilder && e.code === "KeyB" && !e.repeat) go({ to: "build", id: playing.fromBuilder }); });
 
 // BUILD: another track of the library opened IN PLACE (what a reload with ?track= did)
-async function openTrack(id, { tutorial: asked = false } = {}) {
+async function openTrack(id, { tutorial: asked = false, fresh = false } = {}) {
   if (driving) stopDrive();
-  if (id !== trackId && library.get(id)) {
-    if (thumbDirty) await saveThumb(); // the last edits' picture, for the track they belong to
-    else save();
+  if ((id !== trackId || fresh) && library.get(id)) {
+    if (!fresh && !(await confirmLeave())) { history.replaceState(null, "", pageUrl()); return; }
     trackId = id;
     library.current = id;
     track = load() ?? { pieces: [], nextUid: 1 };
     trackName = library.get(id)?.name ?? "Track";
+    savedJson = trackId === DRAFT ? null : JSON.stringify(track);
+    dirty = trackId === DRAFT;
+    const d = draft.get();
+    if (trackId !== DRAFT && d && d.base === trackId) { track = d.track; trackName = d.name; dirty = true; }
+    showSaved();
     $("b-name").value = trackName;
     undo = [];
     redo = [];
@@ -3347,7 +3425,7 @@ async function shellGo(w) {
   }
   if (w.to === "menu") return showMenu(w.screen);
   hideMenu();
-  if (w.to === "build") return openTrack(w.id, { tutorial: !!w.tutorial });
+  if (w.to === "build") return openTrack(w.id, { tutorial: !!w.tutorial, fresh: !!w.fresh });
   return playTrack(w);
 }
 // THE TIMER SWITCH (user, 2026-10-22): building and debugging, Drive starts at once — no countdown, no clock,
@@ -3357,16 +3435,22 @@ try { timerOn = localStorage.getItem("thunderline.builder.timer") === "1"; } cat
 function showTimer() { $("b-timer").textContent = `Timer: ${timerOn ? "on" : "off"}`; $("b-timer").classList.toggle("on", timerOn); }
 $("b-timer").onclick = () => { timerOn = !timerOn; try { localStorage.setItem("thunderline.builder.timer", timerOn ? "1" : "0"); } catch {} showTimer(); };
 showTimer();
+// OLD | NEW CAR (PHYSICS_PLAN.md, user 2026-10-28: "build a new one so we can compare side by side"): the drive and
+// the test lap both use it (settings.physics); the cars are made at load, so switching reloads the page
+$("b-physics").textContent = `Car: ${PredCar === StuntCar ? "new" : "old"}`;
+$("b-physics").classList.toggle("on", PredCar === StuntCar);
+$("b-physics").onclick = () => { settings.set({ physics: PredCar === StuntCar ? "old" : "stunt" }); location.reload(); };
 // THE TUTORIAL (builderTutorial.js): on a NEW track (yours stays as it is); offered by itself the first time
 // the builder opens on an empty track
 const tutorial = createBuilderTutorial({
   get track() { return track; }, get arcs() { return arcs; }, get driving() { return driving; }, get sel() { return sel; },
   camera, tiles: TILES,
 }, { onEnd: () => { try { localStorage.setItem("thunderline.builder.tutorialSeen", "1"); } catch {} } });
-$("b-tut").onclick = () => {
+$("b-tut").onclick = async () => {
   if (!track.pieces.length && !(track.props ?? []).length) { tutorial.start(); return; }
-  save();
-  go({ to: "build", id: library.create().id, tutorial: true });
+  if (!(await confirmLeave())) return;
+  draft.start("Tutorial track");
+  go({ to: "build", id: DRAFT, tutorial: true, fresh: true });
 };
 /** The tutorial on opening a track: asked for, or offered by itself the first time the builder opens on an empty track. */
 function offerTutorial(asked) {

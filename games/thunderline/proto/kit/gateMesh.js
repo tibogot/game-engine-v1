@@ -3,6 +3,7 @@
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { physKit, ViewLOD } from "./physProps.js";
+import { ledSignMaterial, ledLamp } from "./ledSigns.js";
 
 let checker = null;
 function checkerTexture() {
@@ -166,25 +167,16 @@ function archMissing(g) {
   return group;
 }
 
-/** The start lamps (meshes placed, left to right as the driver sees them): each its own material, and
- * group.userData.setLights(n): n red lamps (0–3), or "go" (all green), or 0 / null (all off). */
-function startLamps(group, meshes) {
-  const lamps = meshes.map((m) => {
-    m.material = new THREE.MeshStandardMaterial({ color: 0x2a0d12, emissive: 0x000000, roughness: 0.3 });
-    group.add(m);
-    return m.material;
-  });
-  const RED = new THREE.Color(0xff2a3d), GREEN = new THREE.Color(0x3dff7a), OFF = new THREE.Color(0x000000);
+/** THE START LIGHTS (user, 2026-10-28: "better traffic lights in the dotted style"): each lamp a round cluster of LEDs
+ * (ledSigns.js ledLamp) on its own material; `lamps` = [{ mesh, set }] left to right as the driver sees them.
+ * group.userData.setLights(n): n red lamps (0–3), or "go" (all green), or 0 / null (all off — dark red dots). */
+function startLamps(group, lamps) {
+  for (const l of lamps) group.add(l.mesh);
   let last = null;
   group.userData.setLights = (n) => {
     if (n === last) return;
     last = n;
-    lamps.forEach((mat, i) => {
-      const on = n === "go" || (typeof n === "number" && i < n);
-      mat.emissive.copy(!on ? OFF : n === "go" ? GREEN : RED);
-      mat.emissiveIntensity = on ? 0.5 : 0; // (3, even 1.2, bloomed the whole gantry and the road ahead green)
-      mat.color.set(on ? 0x111111 : 0x2a0d12);
-    });
+    lamps.forEach((l, i) => l.set(n === "go" ? "green" : typeof n === "number" && i < n ? "red" : "off"));
   };
 }
 /** PAINT on the deck: the start's line and the car's grid box behind it; the finish's checkered band on the line
@@ -213,58 +205,6 @@ export const ARCH_LOD_FAR = [60, 160];
 const SLAB = { 4: 0.7, 8: 0.9, 24: 1.1 }; // the deck's thickness per road width (kit.js SECTIONS)
 const LED = { y0: 7.25, y1: 9.15, z: 0.55, pitch: 0.09 }; // the header's LED faces (thunderArch.py HY0 + LIP …, LZ)
 const POD = { y: 6.3, z: -0.225, lamps: [1.2, 0, -1.2], r: 0.34 };
-const DOT_FONT = {
-  S: [".####", "#....", "#....", ".###.", "....#", "....#", "####."],
-  T: ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
-  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
-  R: ["####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"],
-  F: ["#####", "#....", "#....", "####.", "#....", "#....", "#...."],
-  I: [".###.", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."],
-  N: ["#...#", "##..#", "#.#.#", "#.#.#", "#..##", "#...#", "#...#"],
-  H: ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
-};
-const archLeds = new Map();
-function archLed(kit, word, w) {
-  const key = `${word}|${w.toFixed(2)}`;
-  if (archLeds.has(key)) return archLeds.get(key);
-  const h = LED.y1 - LED.y0, cols = Math.round(w / LED.pitch), rows = Math.round(h / LED.pitch);
-  // the word on the dot grid (one texel a dot): white = lit
-  const c = document.createElement("canvas");
-  c.width = cols; c.height = rows;
-  const tex = new THREE.CanvasTexture(c);
-  tex.magFilter = tex.minFilter = THREE.NearestFilter;
-  tex.generateMipmaps = false;
-  const finish = word === "FINISH";
-  const draw = () => {
-    const g = c.getContext("2d");
-    g.fillStyle = "#000"; g.fillRect(0, 0, cols, rows);
-    g.fillStyle = "#fff";
-    if (finish) { // two checkered rows of 2 × 2 dots, top and bottom
-      for (let x = 0; x < cols; x += 2) for (const y of [0, rows - 2]) if (((x >> 1) + (y ? 1 : 0)) % 2 === 0) g.fillRect(x, y, 2, 2);
-    }
-    // the word in a 5 × 7 DOT FONT, each font dot 2 × 2 LEDs (a browser font on a 21-dot grid was mush)
-    const k = rows >= 18 ? 2 : 1, gap = 2 * k, cw = 5 * k;
-    const tw = word.length * cw + (word.length - 1) * gap;
-    let x0 = Math.round((cols - tw) / 2);
-    const y0 = Math.round((rows - 7 * k) / 2);
-    for (const ch of word) {
-      (DOT_FONT[ch] ?? []).forEach((row, j) => { for (let i = 0; i < 5; i++) if (row[i] === "#") g.fillRect(x0 + i * k, y0 + j * k, k, k); });
-      x0 += cw + gap;
-    }
-    tex.needsUpdate = true;
-  };
-  draw();
-  const mat = kit.makeLedMatrixMaterial({
-    boardW: w, boardH: h, contentTexture: tex, sourceAspect: cols / rows,
-    params: {
-      mode: "image", shape: "round", cols, rows, dotRadius: 0.38, useRamp: true, threshold: 0.5, panSpeed: 0, emissive: 2.2, offLevel: 0.05,
-      ...(finish ? { coreColor: "#ffffff", edgeColor: "#aab8cc" } : { coreColor: "#e6fbff", edgeColor: "#3fd2ff" }),
-    },
-  });
-  mat.userData.keep = true; // (one per word and width, shared by every copy)
-  archLeds.set(key, mat);
-  return mat;
-}
 const _M = new THREE.Matrix4(), _S = new THREE.Matrix4();
 function archGantry(g, kit) {
   const finish = g.kind === "finish";
@@ -297,7 +237,7 @@ function archGantry(g, kit) {
   }
   group.add(lod);
   // the header's LED faces: toward the car (−z) and the other way, each reading the right way round
-  const led = archLed(kit, finish ? "FINISH" : "START", wh);
+  const led = ledSignMaterial(kit, { word: finish ? "FINISH" : "START", w: wh, h: LED.y1 - LED.y0, checker: finish, palette: finish ? "finish" : "start" });
   for (const sz of [-1, 1]) {
     const face = new THREE.Mesh(new THREE.PlaneGeometry(wh, LED.y1 - LED.y0), led);
     face.position.set(0, (LED.y0 + LED.y1) / 2, sz * LED.z);
@@ -306,9 +246,10 @@ function archGantry(g, kit) {
   }
   if (!finish) {
     startLamps(group, POD.lamps.map((x) => {
-      const m = new THREE.Mesh(new THREE.SphereGeometry(POD.r, 24, 12).scale(1, 1, 0.35));
-      m.position.set(x, POD.y, POD.z); // a domed lens, half out of the pod's face: no shared plane
-      return m;
+      const lamp = ledLamp(kit, POD.r);
+      const mesh = new THREE.Mesh(new THREE.CircleGeometry(POD.r, 40).rotateY(Math.PI), lamp.material);
+      mesh.position.set(x, POD.y, POD.z - 0.03); // inside its hood, 3 cm in front of the pod's face
+      return { mesh, set: lamp.set };
     }));
   }
   linePaint(group, g, finish);

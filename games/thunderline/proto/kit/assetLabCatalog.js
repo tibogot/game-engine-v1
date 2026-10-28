@@ -55,8 +55,10 @@ export const ENTRIES = [
     about: "A stunt wall: panels on a truss frame, the door trimmed and lit." },
   { id: "wall_hole", section: "obstacles", label: "Wall · hole", obstacle: "ob_wall_hole", status: "planned",
     about: "The same wall in the air, its hole trimmed and lit." },
-  { id: "sg_start", section: "signs", label: "Start", obstacle: "sg_start", status: "planned", about: "The start board." },
-  { id: "sg_finish", section: "signs", label: "Finish", obstacle: "sg_finish", status: "planned", about: "The finish board." },
+  { id: "sg_start", section: "signs", label: "Start", obstacle: "sg_start", gantryCam: true, status: "judge",
+    about: "A board on each edge of the road: the arch header's black cabinet laid along the kerb, its faces LED dots — START in bolt blue and three chevrons at the end you drive to." },
+  { id: "sg_finish", section: "signs", label: "Finish", obstacle: "sg_finish", gantryCam: true, status: "judge",
+    about: "The same boards: FINISH in white dots between checkered rows, the chevrons forward." },
   { id: "sg_chevron", section: "signs", label: "Chevron", obstacle: "sg_chevron", model: "chevron", status: "game",
     about: "A trackside LED cabinet: a bevelled black powder-coated housing, a bezel framing two LED modules — amber dots " +
       "(the old game's dot shader) running chevrons toward the road — a sun hood over each, hazard tape at the foot, bolts; " +

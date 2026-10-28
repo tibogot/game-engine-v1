@@ -1,7 +1,7 @@
 // THE MENU (DESIGN.md: the four modes). One page, screens by hash so the other pages can send the
 // player back to the right one: #home, #play (Stunt tracks: campaign + my tracks), #build (the
 // library: new, open, drive, rename, duplicate, delete), #settings.
-import { library, campaign, lessons, settings, currentBest } from "./library.js";
+import { library, campaign, lessons, settings, currentBest, draft, DRAFT } from "./library.js";
 import { go } from "./nav.js";
 import { decodeTrack } from "./trackCode.js";
 
@@ -106,15 +106,23 @@ function play() {
 function build() {
   crumbs([["Build", null]]);
   const all = library.list();
+  const d = draft.get();
+  const draftLeft = d && (d.track?.pieces?.length || d.base) ? d : null;
   const cards = all.map((r) => trackCard(r, {
     actions: `<button data-act="open">Edit</button><button data-act="drive"${r.track?.pieces?.length ? "" : " disabled"}>Drive</button><button data-act="rename">Rename</button><button data-act="dup">Copy</button><button data-act="del" class="danger">Delete</button>`,
   })).join("");
   $("screen").innerHTML = `<p class="note">Your tracks. Edit one, or start a new one. A track is validated when the builder's test lap reaches the finish: that time is its author time and sets the medals.</p>
-    <div class="grid"><div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${cards}</div>`;
-  $("new").onclick = () => go({ to: "build", id: library.create().id });
+    <div class="grid"><div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${draftLeft ? `<div class="card new cut" id="draft-go">Unsaved: ${draftLeft.name.replace(/[<&]/g, "")}<small>${draftLeft.base ? "changes to one of your tracks" : "a new track, not saved"} · <button id="draft-drop" class="danger">Discard</button></small></div>` : ""}${cards}</div>`;
+  // (a new track is a DRAFT until the builder's Save: nothing joins this list by itself — library.js)
+  $("new").onclick = () => { if (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and start a new one?`)) return; draft.start(); go({ to: "build", id: DRAFT, fresh: true }); };
   // THE BUILDER TUTORIAL (user, 2026-10-22: "shouldn't it be in the track builder menu?"): a new track,
   // the builder opens with the tutorial running (builderTutorial.js; also the builder's Tutorial button)
-  $("tut").onclick = () => go({ to: "build", id: library.create("Tutorial track").id, tutorial: true });
+  $("tut").onclick = () => { if (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and start the tutorial?`)) return; draft.start("Tutorial track"); go({ to: "build", id: DRAFT, tutorial: true, fresh: true }); };
+  // AN UNSAVED TRACK (the builder's draft: a new one never saved, or changes to one of yours): carry on or drop it
+  if (draftLeft) {
+    $("draft-go").onclick = () => go({ to: "build", id: draftLeft.base ?? DRAFT });
+    $("draft-drop").onclick = (e) => { e.stopPropagation(); if (confirm(`Discard “${draftLeft.name}”?`)) { draft.clear(); build(); } };
+  }
   // SHARE CODES (trackCode.js): a pasted code becomes one of your tracks
   $("paste").onclick = async () => {
     const code = prompt("Paste a Thunderline track code (it starts with TL1.)");

@@ -14,7 +14,9 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../../../v3/play/modularRoadRigidBvh.js";
-import { body, physLook, physGhost, physModel, ViewLOD } from "./physProps.js";
+import { body, physLook, physGhost, physModel, physKit, ViewLOD } from "./physProps.js";
+import { ledSignMaterial } from "./ledSigns.js";
+import { ARCH_LOD_FAR } from "./gateMesh.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
 
 const BOLT = 0x3fd2ff, SIGNAL = 0xff7a1a;
@@ -331,6 +333,49 @@ const boardMat = (word, dir) => {
 };
 // START / FINISH: a board on each edge of the road, over the kerb (the rail passes inside it)
 const BOARD = { L: 10, h: 1.9, w: 1.3 };
+// THE LED BOARDS (user, 2026-10-28: "make the start and finish panels look better, with digital dots for the chevrons
+// and text"): the arch header's cabinet (thunderArch.py's 1 m slices and end plates, powder coat) laid along the road
+// edge, its two faces LED dots — the word and three chevrons at the end the car drives to (ledSigns.js), bolt blue
+// for START, white with checkered rows for FINISH. Collision unchanged (the board's box). Levels by distance
+// (ViewLOD, the arch's). Without the kit file: the old green board.
+const HEAD_Y0 = 7.05, LED_Y0 = 7.25, LED_Y1 = 9.15, LED_Z = 0.55; // thunderArch.py HY0, HY0 + LIP, HY1 − LIP, LZ
+function ledBoards(kit, word, xs) {
+  const g = new THREE.Group(), lod = new ViewLOD();
+  const rot = new THREE.Matrix4().makeRotationY(Math.PI / 2), M = new THREE.Matrix4(), S = new THREE.Matrix4();
+  for (let i = 0; i < 3; i++) {
+    const geos = [];
+    const put = (part, x, xk, sx = 1) => {
+      // the kit's frame (x along the header) → the board's (z along the road), stood on the deck
+      M.makeTranslation(x, 0.01 - HEAD_Y0, 0).multiply(rot).multiply(S.makeTranslation(xk, 0, 0)).multiply(new THREE.Matrix4().makeScale(sx, 1, 1));
+      const geo = kit.parts[part][i].clone().applyMatrix4(M);
+      if (sx < 0) { const ix = geo.index.array; for (let t = 0; t < ix.length; t += 3) { const k = ix[t + 1]; ix[t + 1] = ix[t + 2]; ix[t + 2] = k; } }
+      geos.push(geo);
+    };
+    for (const x of xs) {
+      for (let k = 0; k < BOARD.L; k++) put("head", x, -BOARD.L / 2 + k + 0.5);
+      put("cap", x, BOARD.L / 2); put("cap", x, -BOARD.L / 2, -1);
+    }
+    const m = new THREE.Mesh(mergeGeometries(geos), kit.material.head);
+    for (const q of geos) q.dispose();
+    m.castShadow = m.receiveShadow = true;
+    lod.addLevel(m, i ? ARCH_LOD_FAR[i - 1] : 0);
+  }
+  g.add(lod);
+  const finish = word === "FINISH", h = LED_Y1 - LED_Y0, y = (LED_Y0 + LED_Y1) / 2 - HEAD_Y0 + 0.01;
+  for (const x of xs) {
+    const s = Math.sign(x);
+    // toward the road (the chevrons at the end the car drives to, as the old board's) and the other way
+    // (the road face turned −s·90° as the old board's, so its +u runs forward; the outer one the other way)
+    for (const [side, dir, turn] of [[-s, s < 0 ? 1 : -1, -s * Math.PI / 2], [s, s < 0 ? -1 : 1, s * Math.PI / 2]]) {
+      const mat = ledSignMaterial(kit, { word, w: BOARD.L, h, chevrons: dir, checker: finish, palette: finish ? "finish" : "start" });
+      const face = new THREE.Mesh(new THREE.PlaneGeometry(BOARD.L, h).rotateY(turn), mat);
+      face.position.set(x + side * LED_Z, y, 0);
+      face.userData.noShadow = true;
+      g.add(face);
+    }
+  }
+  return g;
+}
 const boardShapes = new Map();
 function boardShape(word) {
   return ({ hw = 8 } = {}) => {
@@ -339,6 +384,8 @@ function boardShape(word) {
       const xs = [-1, 1].map((s) => s * (hw - 0.25));
       const solids = xs.map((x) => box(BOARD.w, BOARD.h, BOARD.L, x, BOARD.h / 2, 0));
       const parts = () => {
+        const kit = physKit("arch");
+        if (kit) return ledBoards(kit, word, xs);
         const m = signMats(), g = new THREE.Group();
         g.add(new THREE.Mesh(mergeGeometries(solids), m.green));
         // the faces toward the road: the left board's text runs along −Z (forward, as you read it), the right's +Z

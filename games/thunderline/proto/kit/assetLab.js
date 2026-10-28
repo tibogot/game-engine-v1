@@ -85,7 +85,7 @@ function frameOn(obj, from = "front") {
   orbit.target.copy(sph.center);
   // from in front of the asset, looking back at it with the car behind it (its scale at a glance); a sign or an arch
   // from the car's side, as the driver meets it
-  const carSide = !!(state.entry?.model || state.entry?.gantry);
+  const carSide = !!(state.entry?.model || state.entry?.gantry || state.entry?.gantryCam);
   const dir = from === "front" ? fwd.clone().multiplyScalar(carSide ? -0.85 : 0.85).addScaledVector(right, 0.45).addScaledVector(up, 0.32) : up.clone().addScaledVector(fwd, 0.2);
   camera.position.copy(sph.center).addScaledVector(dir.normalize(), d);
   camera.lookAt(sph.center);

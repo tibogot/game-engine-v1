@@ -57,6 +57,30 @@ function cleanupOnce(all) {
   return removed;
 }
 
+/*
+ * SAVED ONLY WHEN YOU SAVE (user, 2026-10-29: "shouldn't it save a track only if I press a save button? that would
+ * make me keep only the ones I choose"). The list holds the tracks you SAVED. What you are editing and haven't saved
+ * — a new track, or changes to a saved one — lives in ONE draft slot, overwritten as you edit (never piling up), so a
+ * crash or a closed tab loses nothing: the builder brings it back. The draft reads like a record under the id
+ * DRAFT (get / saveTrack / recordFinish), with `base` = the saved track it changes, or null for a new one.
+ */
+export const DRAFT = "draft";
+const DRAFT_KEY = "thunderline.library.draft";
+const readDraft = () => { try { return JSON.parse(localStorage.getItem(DRAFT_KEY)); } catch { return null; } };
+const writeDraft = (d) => { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(d)); return true; } catch (e) { console.warn("[library] draft not kept", e); return false; } };
+const draftRecord = (d) => (d ? { id: DRAFT, name: d.name, created: d.updated, updated: d.updated, track: d.track, thumb: null, best: null, base: d.base ?? null } : null);
+export const draft = {
+  /** the draft as a record, or null */
+  get() { return draftRecord(readDraft()); },
+  /** a NEW track to build (nothing in the list until it is saved) */
+  start(name = "New track") {
+    return writeDraft({ base: null, name, updated: Date.now(), track: { pieces: [], nextUid: 1, world: NEW_TRACK_WORLD } }) && draft.get();
+  },
+  /** the builder's safety copy of what you are editing: `base` the saved track it changes (null: a new one) */
+  keep(base, name, track) { return writeDraft({ base, name, updated: Date.now(), track }); },
+  clear() { try { localStorage.removeItem(DRAFT_KEY); } catch {} },
+};
+
 export const library = {
   /** all tracks, most recently edited first */
   list() {
@@ -69,7 +93,7 @@ export const library = {
     if (pruned) writeAll(all);
     return Object.values(all).sort((a, b) => b.updated - a.updated);
   },
-  get(id) { return migrate(readAll())[id] ?? null; },
+  get(id) { return id === DRAFT ? draft.get() : migrate(readAll())[id] ?? null; },
   create(name) {
     const all = migrate(readAll());
     const n = Object.keys(all).length + 1;
@@ -80,6 +104,7 @@ export const library = {
   },
   /** the builder saves its track (and, now and then, a thumbnail) */
   saveTrack(id, track, thumb) {
+    if (id === DRAFT) { const d = readDraft(); return !!d && writeDraft({ ...d, updated: Date.now(), track }); }
     const all = readAll();
     const rec = all[id];
     if (!rec) return false;
@@ -181,7 +206,9 @@ const SETTINGS_KEY = "thunderline.settings.v1";
 // engine "gen6": the recorded-style loops the user picked (2026-10-20, engineLoops.js) over the synth
 // car "thunder": the NEW CAR is the default (user, 2026-10-28: "lets use the not lotus car as default"; it was
 // the Lotus from 2026-10-21) — the Lotus (dev only, trademark) stays in Settings
-export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "gen6", car: "thunder" };
+// physics "old" | "stunt": the old game's car, or the STUNT car built on it (proto/kit/stuntCar.js, PHYSICS_PLAN.md)
+// — side by side to compare (user, 2026-10-28); the old one stays the default until it is judged
+export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "gen6", car: "thunder", physics: "old" };
 export const settings = {
   get() {
     try {

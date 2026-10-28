@@ -338,6 +338,13 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] Rest of the tube family: corkscrew, loop tube, skylight (pop out the top), trapdoor (drop
       through the floor), half-pipe channel, helix (PIECES.md §7c).
 
+- [x] TRACKS SAVE ONLY WHEN YOU SAVE (user, 2026-10-29: "shouldn't it save a track only if I press a save button?
+      that would make me keep only the ones I choose"). library.js: one DRAFT slot (a new track, or edits to a saved
+      one: `base`), overwritten as you edit — never piling up — and brought back after a crash / a closed tab (a note
+      says so). The builder: a Save button (Ctrl+S; "Save •" yellow while unsaved, "Saved" otherwise); New, Tutorial,
+      Menu and opening another track ask Save / Discard / Cancel; a new track joins your list on its first Save (with
+      its picture). The menu: New / Tutorial start a draft, an unsaved draft shows as a card (continue / Discard).
+      The toolbar wraps instead of sliding under the status panel. The test browser's 28 test tracks deleted.
 - [x] FINISH THE BUILDER'S TEST TRACK "Tyre test" (user, 2026-10-28: "you never land on the rotated piece and you
       fall on the ground — could you finish this track"; the rolled pieces are the point: "roll the car to land on that
       90 degree ramp in the air"). The two rolled Launch 60° sat 50 m off the kicker's flight, unattached. Now: on the
@@ -396,7 +403,13 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       builder disposed shared gate materials → userData.keep. The lab's stage turned to the game's frame (+z toward
       the car: the signs were shown from behind). IN THE GAME; the old pylon arches deleted ("delete the old one also
       and use the new ones") — still to refine from the reference screenshots.
-- [ ] SIGNS: start, finish boards, aim — real trackside boards and banners.
+- [~] START / FINISH BOARDS + START LIGHTS in LED dots (user, 2026-10-28: "digital dots for the chevrons and text …
+      better traffic lights in the dotted style"): the boards are the arch header's cabinet laid along each kerb
+      (obstacles.js ledBoards: the kit's 1 m slices + end plates, ViewLOD), both faces LED (the word in the dot font
+      + three chevrons at the end you drive to; START bolt blue, FINISH white with checkered rows); collision
+      unchanged. The arch's lamps are round LED clusters in their hoods (dark red dots off, red, green at GO).
+      Shared: proto/kit/ledSigns.js (dot font, chevrons, palettes, ledLamp). TO JUDGE.
+- [ ] SIGNS: aim — a real landing marker.
 - [ ] One shared atlas for all obstacles once the set is done (one material: fewer draws, fewer textures).
 
 ## Game
