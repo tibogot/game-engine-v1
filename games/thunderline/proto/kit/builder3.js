@@ -70,7 +70,7 @@ const CATS = [
   { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "glass_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
-  { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "wall_wide_90", "uturn_wall_32"] },
+  { id: "banked", label: "Banked", tiles: ["bank_in_22", "banked_straight_64", "banked_turn_45", "fast_turn_128", "banked_turn_180", "bank_out_22", "wallride_90", "wall_wide_90", "uturn_wall_32", "roll_out_90"] },
   { id: "slope", label: "Slope", tiles: ["adj_slope", "slope_up_12", "slope_down_12", "platform_up_12", "platform_down_12", "helix_up_360", "helix_down_360", "rollers_64", "drop_16"] },
   // the take-offs, then what you land on
   { id: "ramps", label: "Ramps", tiles: ["adj_kicker", "kicker_20", "launch_45", "launch_60", "quarter_pipe", "roll_kicker", "gap_jump", "fitted_landing", "landing_20", "banked_landing_20", "landing_turn_20", "catch_pad"] },

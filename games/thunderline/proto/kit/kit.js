@@ -375,6 +375,11 @@ export const TILES = {
       { L: 96, turn: 15 * DEG, ramp: 58, leanIn: WALL_LEAN, leanOut: 0 },
     ],
   },
+  // ROLL OUT 90° (user, 2026-10-28, the test track: land on a ramp ROLLED onto its side in the air, ride it, then
+  // back to a normal road — "New 'Roll out 90°' piece"): the road twists a quarter turn round the car's line, from on
+  // its side back to flat; its mirror (_L) twists the other way. A ROLL (the half loop's), not a lean: a lean is the
+  // deck's alone, the end's frame stays where it was — the road after it would still stand on its side
+  roll_out_90: { label: "Roll out 90°", twistPivot: WALL_PIVOT, segs: [{ L: 64, roll: WALL_LEAN, ramp: 32 }] },
   loop_28: {
     label: "Loop R28",
     // eased (clothoid-like) loop: tighter at the top, gentler at the bottom, like a real coaster

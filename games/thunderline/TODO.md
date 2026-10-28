@@ -338,9 +338,15 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] Rest of the tube family: corkscrew, loop tube, skylight (pop out the top), trapdoor (drop
       through the floor), half-pipe channel, helix (PIECES.md §7c).
 
-- [ ] FINISH THE BUILDER'S TEST TRACK (user, 2026-10-28: "this track you are testing, you never land on the rotated
-      piece and you fall on the ground — could you finish this track"): the 13-piece track the builder opens with (the
-      one every builder drive check uses) — the jump never reaches the rotated piece; make it land and finish. Later.
+- [x] FINISH THE BUILDER'S TEST TRACK "Tyre test" (user, 2026-10-28: "you never land on the rotated piece and you
+      fall on the ground — could you finish this track"; the rolled pieces are the point: "roll the car to land on that
+      90 degree ramp in the air"). The two rolled Launch 60° sat 50 m off the kicker's flight, unattached. Now: on the
+      flight (flightFrom the kicker), raised 8 m and 2 m off the flight line (the car flew above the snapped arc and hit
+      the slab's front edge), as Ramp 60° · 96 m (a Launch 60° bends in ~28 m: ~12 g on the side = a crash) → a NEW
+      piece ROLL OUT 90° (kit.js roll_out_90 / _L, Banked tab: a roll segment, the road's frame turns back upright) →
+      straight → finish. The autopilot air-rolls, rides the wall round, finishes in 29.4 s; the lap prediction 26.5 s.
+      The builder still says "the full-speed car misses it" (the wall is off the arc on purpose) — a wrong warning
+      for a wall landing; to look at.
 
 ## AAA obstacles & signs (user, 2026-10-28: "the oil barrel, swing gates, tyre stacks look kind of cheap … the assets
 ## in the SIGNS category look very cheap too"; real motorsport, not branded)
