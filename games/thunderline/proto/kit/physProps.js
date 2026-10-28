@@ -71,13 +71,35 @@ const MODELS = {
   tyre: { glb: "/models/thunderline/obstacles/tyre.glb", lods: ["TyreLOD0", "TyreLOD1", "TyreLOD2"], tex: "/textures/thunderline/obstacles/tyre" },
   barrel: { glb: "/models/thunderline/obstacles/barrel.glb", lods: ["BarrelLOD0", "BarrelLOD1", "BarrelLOD2"], tex: "/textures/thunderline/obstacles/barrel", metal: true },
   cone: { glb: "/models/thunderline/obstacles/cone.glb", lods: ["ConeLOD0", "ConeLOD1", "ConeLOD2"], tex: "/textures/thunderline/obstacles/cone" },
+  gate: { glb: "/models/thunderline/obstacles/gate.glb", lods: ["GateLOD0", "GateLOD1", "GateLOD2"], tex: "/textures/thunderline/obstacles/gate", metal: true }, // (its banner: two faces back to back)
+  // not a knockable kind: the CHEVRON SIGN's cabinet (obstacles.js panelShape) and its LED faces, lit by the old game's
+  // dot shader (user: "the chevron itself should be with digital dots … same concept but better assets")
+  chevron: { glb: "/models/thunderline/obstacles/chevron.glb", lods: ["ChevronLOD0", "ChevronLOD1", "ChevronLOD2"], tex: "/textures/thunderline/obstacles/chevron", metal: true,
+    led: { mesh: "ChevronLED", boardW: 3.06, boardH: 2.0, params: { mode: "chevron", shape: "round", cols: 36, rows: 24, dotRadius: 0.36, useRamp: true,
+      coreColor: "#ffb22e", edgeColor: "#ff5a00", chevronCount: 2, skew: 1.4, duty: 0.45, panSpeed: 0.8, emissive: 1.8, offLevel: 0.06 } } },
 };
 const kindLods = new Map(); // kind → its model's levels [near … far] (the game draws [0]; the asset lab all of them)
 let assetsLoad = null;
 /** The asset lab's view of a kind: its model (levels + material) once loaded, or null; and the procedural old look. */
-export const physModel = (kind) => (kindLods.has(kind) ? { lods: kindLods.get(kind), material: kindMats.get(kind), files: MODELS[kind] } : null);
-/** A kind's old procedural look, or null when there is none any more (a model replaced it for good). */
-export const physOldLook = (kind) => (PHYS_KINDS[kind].model ? null : { geometry: PHYS_KINDS[kind].geometry(), material: physMaterial(null) });
+export const physModel = (kind) => (kindLods.has(kind) ? { lods: kindLods.get(kind), material: kindMats.get(kind), files: MODELS[kind], led: kindLed.get(kind) ?? null } : null);
+const kindLed = new Map(); // kind → { geometry, material } its LED faces (the chevron sign)
+/** A kind's old procedural look, or null when there is none any more (a model replaced it for good), or it is no knockable kind. */
+export const physOldLook = (kind) => (!PHYS_KINDS[kind] || PHYS_KINDS[kind].model ? null : { geometry: PHYS_KINDS[kind].geometry(), material: physMaterial(null) });
+/** A glTF mesh's geometry in the file's frame, as floats. To float FIRST: the file's positions are quantized (int16 in
+ * [-1, 1], the node's scale undoes it) — baking the node's matrix into them clamped anything past ±1 m (the gate's
+ * 4.4 m panel shrank to its post). */
+function floatGeometry(mesh) {
+  const g = mesh.geometry.clone();
+  for (const k of ["position", "normal", "uv"]) {
+    const a = g.getAttribute(k);
+    if (a && !(a.array instanceof Float32Array)) {
+      const f = new Float32Array(a.count * a.itemSize);
+      for (let i = 0; i < a.count; i++) for (let c = 0; c < a.itemSize; c++) f[i * a.itemSize + c] = a.getComponent(i, c);
+      g.setAttribute(k, new THREE.BufferAttribute(f, a.itemSize));
+    }
+  }
+  return g.applyMatrix4(mesh.matrixWorld);
+}
 export function loadPhysAssets() {
   return (assetsLoad ??= Promise.all(Object.entries(MODELS).map(async ([kind, m]) => {
     try {
@@ -93,9 +115,16 @@ export function loadPhysAssets() {
       const lods = m.lods.map((n) => {
         const mesh = byName.get(n);
         if (!mesh) throw new Error(`no mesh ${n} in ${m.glb}`);
-        return mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+        return floatGeometry(mesh);
       });
       const geo = lods[0];
+      if (m.led) {
+        // (imported here: the dot shader's module needs the WebGPU build of three, never loaded by the Node tests)
+        const { makeLedMatrixMaterial } = await import("../../../../v3/props/objects/shared/ledMatrix.js");
+        const mesh = byName.get(m.led.mesh);
+        if (!mesh) throw new Error(`no mesh ${m.led.mesh} in ${m.glb}`);
+        kindLed.set(kind, { geometry: floatGeometry(mesh), material: makeLedMatrixMaterial(m.led) });
+      }
       kindLods.set(kind, lods);
       // (u is a quarter turn, repeated: a lug straddling a quarter's edge reads past 1)
       for (const t of [map, normalMap, orm]) { t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; }

@@ -14,7 +14,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../../../v3/play/modularRoadRigidBvh.js";
-import { body, physLook, physGhost } from "./physProps.js";
+import { body, physLook, physGhost, physModel } from "./physProps.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
 
 const BOLT = 0x3fd2ff, SIGNAL = 0xff7a1a;
@@ -353,8 +353,9 @@ function boardShape(word) {
     return boardShapes.get(key);
   };
 }
-// CHEVRON PANEL: a tall black board past the road's edge, facing the car, two rows of yellow chevrons
-// pointing toward the road (the way it takes you)
+// CHEVRON PANEL: a tall sign past the road's edge, facing the car, chevrons pointing toward the road (the way it
+// takes you) — the LED cabinet below (its old procedural look removed, user 2026-10-28: "remove the old chevron and
+// use the new one"); its plain box stays the look only if the model file is missing
 const PANEL = { w: 3.4, h: 4.6, t: 0.35, gap: 1.2 };
 const panelShapes = new Map();
 function panelShape({ hw = 8, dx = 1 } = {}) {
@@ -363,18 +364,43 @@ function panelShape({ hw = 8, dx = 1 } = {}) {
     const x = side * (hw + PANEL.gap + PANEL.w / 2), y0 = -1.0; // its foot level with the slab's underside
     const solids = [box(PANEL.w, PANEL.h, PANEL.t, x, y0 + PANEL.h / 2, 0)];
     const parts = () => {
-      const m = signMats(), g = new THREE.Group();
-      g.add(new THREE.Mesh(solids[0], m.black));
-      // a bracket back to the road's edge, under the deck
-      g.add(new THREE.Mesh(box(PANEL.gap + 0.3, 0.5, 0.5, side * (hw + PANEL.gap / 2), -0.6, 0), m.post));
-      const chev = [];
-      for (const row of [0.3, 0.68]) for (let k = -1; k <= 1; k++) chev.push(new THREE.ShapeGeometry(chevronShape(0.8, 1.15, 0.36)).rotateZ(side > 0 ? Math.PI : 0).translate(x + k * 0.95, y0 + PANEL.h * row + 0.4, PANEL.t / 2 + 0.02));
-      g.add(new THREE.Mesh(mergeGeometries(chev), m.yellow));
+      const model = physModel("chevron");
+      if (model) return chevronCabinet(model, x, side);
+      const g = new THREE.Group();
+      g.add(new THREE.Mesh(solids[0], signMats().black));
       return g;
     };
     panelShapes.set(key, { solids, ghost: solids[0], parts });
   }
   return panelShapes.get(key);
+}
+// THE CHEVRON SIGN from Blender (tools/blender/thunderChevron.py; user, 2026-10-28: "it should have bevel; the chevron
+// itself with digital dots"): an LED cabinet on the panel's own box (its solid unchanged), the dots the old game's shader
+// (v3 ledMatrix.js, chevron mode: one material, every sign). Authored for the RIGHT side (its arm and chevrons toward −x,
+// the road); the left side's is its mirror. Its levels by distance (three's LOD: the renderer picks one per camera).
+export const CHEVRON_LOD_FAR = [40, 110];
+const mirrored = new Map();
+function mirrorX(geo) {
+  if (!mirrored.has(geo)) {
+    const g = geo.clone().applyMatrix4(new THREE.Matrix4().makeScale(-1, 1, 1));
+    const ix = g.index.array; // (mirrored, each triangle turned round: its front still outward)
+    for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; }
+    mirrored.set(geo, g);
+  }
+  return mirrored.get(geo);
+}
+function chevronCabinet(model, x, side) {
+  const geo = (g) => (side < 0 ? mirrorX(g) : g);
+  const g = new THREE.Group();
+  const lod = new THREE.LOD();
+  model.lods.forEach((l, i) => lod.addLevel(new THREE.Mesh(geo(l), model.material), i ? CHEVRON_LOD_FAR[i - 1] : 0));
+  lod.position.x = x;
+  g.add(lod);
+  const led = new THREE.Mesh(geo(model.led.geometry), model.led.material);
+  led.position.x = x;
+  led.userData.noShadow = true; // (inside the cabinet: nothing to cast)
+  g.add(led);
+  return g;
 }
 // LANDING SIGN: two posts at the road's edges, a down-chevron panel on each, a yellow X hanging between
 // them on a thin bar: "land here" (Apex Rush shot 09). The posts are solid; the bar and the X are not.
@@ -399,7 +425,7 @@ function aimShape({ hw = 8 } = {}) {
   }
   return aimShapes.get(hw);
 }
-const signKind = (label, sign, shape, hint) => ({ label, sign, shape, parts: () => shape().parts(), solids: shape().solids, decks: [], ghost: shape().ghost, hint });
+const signKind = (label, sign, shape, hint) => ({ label, sign, shape, parts: (o) => shape().parts(o), solids: shape().solids, decks: [], ghost: shape().ghost, hint });
 
 export const OBSTACLES = {
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
@@ -498,9 +524,9 @@ export function avoidObstacles(ride, props = [], hw = 8) {
 const UP = new THREE.Vector3(0, 1, 0);
 
 /** One obstacle's look (a fresh group; geometry and materials shared). */
-export function obstacleLook(kind, p) {
-  const g = shapeOf(kind, p).parts();
-  g.traverse((o) => { if (o.isMesh) { o.castShadow = !OBSTACLES[kind].decal; o.receiveShadow = true; } });
+export function obstacleLook(kind, p, o = {}) {
+  const g = shapeOf(kind, p).parts(o);
+  g.traverse((o) => { if (o.isMesh) { o.castShadow = !OBSTACLES[kind].decal && !o.userData.noShadow; o.receiveShadow = true; } });
   return g;
 }
 

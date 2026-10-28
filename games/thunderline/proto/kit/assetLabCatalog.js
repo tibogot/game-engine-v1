@@ -4,12 +4,16 @@
 // is games/thunderline/TODO.md "AAA obstacles & signs"; this is what the lab shows of it.
 //
 //   kind      a knockable prop kind (physProps.js): its Blender model (the new look) and the procedural one (old)
+//   model     a sign's Blender model (physProps.js MODELS), drawn through the game's own look (obstacleLook);
+//   oldLook   true while its old look is kept to compare (obstacleLook(…, { old: true }))
 //   obstacle  its entry in obstacles.js OBSTACLES: the arrangement as placed in the game, or the old look of a fixed one
+//   gantry    "start" | "finish": the track's arch over the line (gateMesh.js makeGateMesh)
 //   status    "game" in the game · "judge" made, for you to judge · "making" being made · "planned"
 
 export const SECTIONS = [
   { id: "obstacles", label: "Obstacles", note: "On the road: knocked flying, or driven round. Real motorsport props." },
   { id: "signs", label: "Signs", note: "Beside and over the road: trackside boards and banners." },
+  { id: "track", label: "Track", note: "Over the road on every track: the start and finish gantries." },
 ];
 
 export const STATUS = {
@@ -38,8 +42,11 @@ export const ENTRIES = [
     script: "tools/blender/thunderCone.py" },
   { id: "cones", section: "obstacles", label: "Cone row", kind: "cone", obstacle: "ob_cones", status: "game",
     about: "Six cones across the road (the same cone)." },
-  { id: "gates", section: "obstacles", label: "Swing gates", kind: "gate", obstacle: "ob_swing_gate", status: "planned",
-    about: "A steel tube frame on hinged posts with a chevron banner: smash through." },
+  { id: "gates", section: "obstacles", label: "Swing gates", kind: "gate", obstacle: "ob_swing_gate", status: "judge",
+    about: "A crash gate pair: galvanised tube frames on heavy round posts (red / white reflective bands), a red mesh " +
+      "banner with white chevrons pointing the way they open, zip-tied through eyelets, creased, grimy at the foot, " +
+      "scuffed by cars at the free end; a latch and a castor wheel. Smash through; they swing back.",
+    script: "tools/blender/thunderGate.py" },
   { id: "pole", section: "obstacles", label: "Bollard", obstacle: "ob_pole", status: "planned",
     about: "A steel bollard with reflective bands on a bolted base plate — the pole, the slalom and the pole gate." },
   { id: "block", section: "obstacles", label: "Stunt box", obstacle: "ob_block", status: "planned",
@@ -50,6 +57,15 @@ export const ENTRIES = [
     about: "The same wall in the air, its hole trimmed and lit." },
   { id: "sg_start", section: "signs", label: "Start", obstacle: "sg_start", status: "planned", about: "The start board." },
   { id: "sg_finish", section: "signs", label: "Finish", obstacle: "sg_finish", status: "planned", about: "The finish board." },
-  { id: "sg_chevron", section: "signs", label: "Chevron", obstacle: "sg_chevron", status: "planned", about: "A turn's chevron boards." },
+  { id: "sg_chevron", section: "signs", label: "Chevron", obstacle: "sg_chevron", model: "chevron", status: "game",
+    about: "A trackside LED cabinet: a bevelled black powder-coated housing, a bezel framing two LED modules — amber dots " +
+      "(the old game's dot shader) running chevrons toward the road — a sun hood over each, hazard tape at the foot, bolts; " +
+      "a service door with vents at the back; a galvanised arm under the road's edge. The left side's is its mirror.",
+    script: "tools/blender/thunderChevron.py" },
   { id: "sg_aim", section: "signs", label: "Aim", obstacle: "sg_aim", status: "planned", about: "The aim marker." },
+  { id: "arch_start", section: "track", label: "Start arch", gantry: "start", status: "making",
+    about: "The start gantry over the line: today two leaning pylons past the road's edges (standing on nothing on " +
+      "a track in the air), a header with the word, three countdown lamps, the line and the grid box painted." },
+  { id: "arch_finish", section: "track", label: "Finish arch", gantry: "finish", status: "making",
+    about: "The finish gantry: the same pylons, taller, a checkered header and banner, a checkered band on the road." },
 ];

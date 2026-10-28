@@ -357,9 +357,20 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       keep only the body's plain cylinder (the builder's placement ghost, and the look if a model file is missing).
 - [x] TRAFFIC CONE (0.93 m motorway cone: red-orange PVC, open top, recycled-rubber base, microprism sleeves, scuffs,
       the standard moulded on the flange) — 1.3k / 0.34k / 94 tris; the cone row uses it. Its old look removed too
-      ("the new cone is nice"); the rim orange, not a black cap. · swing gates · bollard (pole, slalom, pole gate) · block (stunt box,
+      ("the new cone is nice"); the rim orange, not a black cap. · bollard (pole, slalom, pole gate) · block (stunt box,
       diamond plate) · the two walls (truss + panel, the door / hole trimmed).
-- [ ] SIGNS: start, finish, chevron, aim — real trackside boards and banners.
+- [~] SWING GATES (galvanised frames on round posts with red / white bands, a red mesh banner with white chevrons,
+      eyelets, latch, castor) — 948 / 436 / 100 tris; TO JUDGE. Found on the way: physProps baked the node matrix into
+      the file's QUANTIZED positions (int16) and clamped everything past ±1 m — the 4.4 m gate shrank to its post; now
+      made float first (floatGeometry).
+- [x] CHEVRON SIGN (user: "it should have bevel; the chevron itself with digital dots … my old car game"): an LED
+      cabinet (tools/blender/thunderChevron.py) — bevelled powder-coated housing, bezel, two LED modules, sun hoods,
+      hazard tape, bolts, a service door with vents, a galvanised arm — 2040 / 1304 / 108 tris (THREE.LOD at 40 / 110 m);
+      the dots are the old game's shader (v3 ledMatrix.js, chevron mode, amber, scrolling toward the road), one
+      material for every sign; the left side's is the mirror. IN THE GAME; the old board removed ("remove the old
+      chevron and use the new one").
+- [ ] START / FINISH ARCH GANTRY (user: "they are floating and look very cheap"): next.
+- [ ] SIGNS: start, finish boards, aim — real trackside boards and banners.
 - [ ] One shared atlas for all obstacles once the set is done (one material: fewer draws, fewer textures).
 
 ## Game

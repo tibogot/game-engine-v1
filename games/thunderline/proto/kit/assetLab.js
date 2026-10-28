@@ -11,7 +11,8 @@ import { startV3App } from "../../../../v3/engine.js";
 import { createDriveRig } from "./driveSession.js";
 import { applyWorld, TIMES, groundFeatures } from "./worlds.js";
 import { loadPhysAssets, physModel, physOldLook, PROP_LOD_FAR } from "./physProps.js";
-import { OBSTACLES, obstacleLook } from "./obstacles.js";
+import { OBSTACLES, obstacleLook, CHEVRON_LOD_FAR } from "./obstacles.js";
+import { makeGateMesh } from "./gateMesh.js";
 import { SECTIONS, ENTRIES, STATUS } from "./assetLabCatalog.js";
 
 const $ = (id) => document.getElementById(id);
@@ -90,9 +91,18 @@ function frameOn(obj, from = "front") {
 // ---------- what is shown ----------
 const state = { entry: null, version: "both", arrange: "game", lod: "auto", wire: false, spin: false };
 let shown = []; // [{ mesh, lods, wire }] — the meshes of the model (their level swapped by distance)
+let shownLods = []; // a sign's THREE.LOD (the renderer picks its level by distance; the lab can force one)
+const modelKey = (e) => e.model ?? e.kind; // a knockable kind's model, or a sign's (physProps MODELS)
 const wireMat = new THREE.MeshBasicNodeMaterial({ color: 0x9dff00, wireframe: true, transparent: true, opacity: 0.55, depthWrite: false });
 const LOD_FAR = PROP_LOD_FAR; // m: level 1 from here, level 2 from there — the game's own (physProps.js)
 
+// what the game draws today for an entry with no new model: its obstacle, or the track's start / finish arch (on an
+// 8 m half-width road, its P 0.7 m over the deck as the drive's ride gives it)
+const ROAD_HW = 8;
+function lookOf(e) {
+  if (e.gantry) return makeGateMesh({ kind: e.gantry, P: new V(0, 0.7, 0), T: new V(0, 0, 1), U: new V(0, 1, 0), hw: ROAD_HW, slot: 6 });
+  return obstacleLook(e.obstacle, {});
+}
 function bodiesOf(entry) {
   const all = OBSTACLES[entry.obstacle]?.phys ?? [];
   return state.arrange === "game" ? all : all.slice(0, 1);
@@ -117,13 +127,23 @@ function modelGroup(entry, which) {
 }
 function build() {
   for (const c of [...stage.children]) stage.remove(c);
-  shown = [];
+  shown = []; shownLods = [];
   const e = state.entry;
-  const hasNew = !!(e.kind && physModel(e.kind));
+  const hasNew = !!(modelKey(e) && physModel(modelKey(e)));
   let groups = [];
-  if (!hasNew) {
+  if (hasNew && e.model) {
+    // a sign: the game's own look, new or old
+    // (e.oldLook: its old look still kept, for comparing — none once the model replaced it for good)
+    const want = !e.oldLook ? ["new"] : state.version === "both" ? ["old", "new"] : [state.version];
+    for (const which of want) {
+      const g = obstacleLook(e.obstacle, {}, { old: which === "old" });
+      g.traverse((o) => { if (o.isLOD) shownLods.push(o); });
+      groups.push({ g, which });
+    }
+    if (groups.length === 2) { const r = 6; groups[0].at = [0, -r]; groups[1].at = [0, r]; }
+  } else if (!hasNew) {
     // not made yet: the look the game draws today
-    const g = obstacleLook(e.obstacle, {});
+    const g = lookOf(e);
     groups = [{ g, at: 0 }];
   } else {
     const hasOld = !!physOldLook(e.kind);
@@ -155,7 +175,7 @@ function texBytes(t) {
   const im = t.image; return im?.width ? Math.round(im.width * im.height * 4 * 4 / 3) : 0;
 }
 function costText(e) {
-  const model = e.kind && physModel(e.kind);
+  const model = modelKey(e) && physModel(modelKey(e));
   const n = bodiesOf(e).length || 1;
   const lines = [];
   if (model) {
@@ -165,12 +185,18 @@ function costText(e) {
     const fmt = texs.every((t) => t.userData?.ktx2) ? "KTX2" : "PNG: npm run textures";
     lines.push(`NEW  triangles  ${L.map((t, i) => `LOD${i} ${t}`).join(" · ")}`);
     lines.push(`     placed     ${n} × ${L[0]} = ${n * L[0]}`);
-    lines.push(`     draws      1 per kind (instanced) + shadow`);
+    lines.push(e.model ? `     draws      2 a sign (cabinet + LED dots) + shadow` : `     draws      1 per kind (instanced) + shadow`);
     lines.push(`     textures   ${texs.length} · ${mb.toFixed(1)} MB GPU · ${fmt}`);
+    if (model.led) lines.push(`     LED        ${tris(model.led.geometry)} triangles · the dot shader (ledMatrix.js): no texture`);
+    if (e.model) lines.push(`     levels at  ${CHEVRON_LOD_FAR.join(" / ")} m`);
     const old = e.kind && physOldLook(e.kind);
     if (old) lines.push(`OLD  triangles  ${tris(old.geometry)} · no texture`);
+    if (e.model && e.oldLook) {
+      let t = 0; obstacleLook(e.obstacle, {}, { old: true }).traverse((o) => { if (o.isMesh) t += tris(o.geometry); });
+      lines.push(`OLD  triangles  ${t} · no texture`);
+    }
   } else {
-    const g = obstacleLook(e.obstacle, {});
+    const g = lookOf(e);
     let t = 0, d = 0; g.traverse((o) => { if (o.isMesh) { t += tris(o.geometry) * (o.count ?? 1); d++; } });
     lines.push(`NOW  triangles   ${t} · draws ${d} · the old look (no new model yet)`);
   }
@@ -197,12 +223,12 @@ function btns(el, items, isOn, onPick, disabled = false) {
 }
 function render() {
   const e = state.entry;
-  const hasNew = !!(e.kind && physModel(e.kind));
+  const hasNew = !!(modelKey(e) && physModel(modelKey(e)));
   $("title").textContent = e.label;
   $("status").innerHTML = chip(e.status);
   $("about").textContent = e.about ?? "";
   $("script").textContent = e.script ? `Made by ${e.script} · node tools/thunderObstacles.mjs ${e.id}` : "";
-  const hasOld = !!(e.kind && physOldLook(e.kind));   // (none left once the model replaced it for good)
+  const hasOld = e.model ? !!e.oldLook : !!(e.kind && physOldLook(e.kind));   // (none left once the model replaced it for good)
   btns($("version"), [["both", "Old | New"], ["new", "New"], ["old", "Old"]], (k) => (hasOld ? k === state.version : k === "new"), (k) => { state.version = k; build(); }, !hasNew || !hasOld);
   btns($("arrange"), [["game", "As in the game"], ["single", "One"]], (k) => k === state.arrange, (k) => { state.arrange = k; build(); frameOn(stage); }, !hasNew);
   btns($("lod"), [["auto", "By distance"], [0, "LOD 0"], [1, "LOD 1"], [2, "LOD 2"]], (k) => k === state.lod, (k) => { state.lod = k; }, !hasNew);
@@ -237,11 +263,18 @@ app.addPreUpdateHook(function assetLabFrame() {
     const g = s.lods[Math.min(i, s.lods.length - 1)];
     if (s.mesh.geometry !== g) { s.mesh.geometry = g; s.wire.geometry = g; }
   }
-  if (++n % 15 === 0 && shown.length) {
+  for (const l of shownLods) {
+    l.autoUpdate = state.lod === "auto";
+    if (!l.autoUpdate) l.levels.forEach((v, i) => { v.object.visible = i === Math.min(state.lod, l.levels.length - 1); });
+  }
+  if (++n % 15 === 0 && shownLods.length) {
+    const d = camera.position.distanceTo(orbit.target);
+    $("live").textContent = `camera ${d.toFixed(1)} m · showing LOD ${[...new Set(shownLods.map((l) => l.getCurrentLevel()))].join(", ")}`;
+  } else if (n % 15 === 0 && shown.length) {
     const d = camera.position.distanceTo(orbit.target);
     const lv = shown.map((s) => s.lods.indexOf(s.mesh.geometry));
     $("live").textContent = `camera ${d.toFixed(1)} m · showing LOD ${[...new Set(lv)].join(", ")}`;
-  } else if (!shown.length) $("live").textContent = "";
+  } else if (!shown.length && !shownLods.length) $("live").textContent = "";
 });
 
 const first = params.get("asset") ?? (() => { try { return localStorage.getItem("thunderline.assetLab.entry"); } catch { return null; } })();
