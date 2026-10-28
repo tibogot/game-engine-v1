@@ -13,6 +13,8 @@ import {
   PropPhysics, PHYSICS_PROP_TYPES, CONE_SCALE, TIRE_OUTER_R, TIRE_TUBE_R, BARREL_HEIGHT,
   GATE_WIDTH, GATE_HEIGHT, GATE_BASE_Y, GATE_POST_RADIUS, GATE_POST_HEIGHT,
 } from "../../../modular-road-v3/modularRoadPropPhysics.js";
+import { getSharedGltfLoader } from "../../../../v3/render/foliage/glbLoader.js";
+import { loadTexture } from "../../../../v3/render/textureLoad.js";
 
 /** One colour into a geometry's vertices (and nothing but position / normal / color: mergeable). */
 function paint(geo, hex) {
@@ -82,13 +84,60 @@ export const PHYS_KINDS = {
 const geoCache = new Map();
 export const physGeometry = (kind) => geoCache.get(kind) ?? geoCache.set(kind, PHYS_KINDS[kind].geometry()).get(kind);
 let sharedMat = null;
-export const physMaterial = () => (sharedMat ??= new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.08 }));
+const kindMats = new Map(); // a kind with its own (textured) material: its Blender model
+/** A kind's material: its model's own once loaded (loadPhysAssets), else the shared vertex-colour one. */
+export const physMaterial = (kind) => kindMats.get(kind) ?? (sharedMat ??= new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.6, metalness: 0.08 }));
+
+// THE BLENDER MODELS (2026-10-28, user: "the oil barrel, swing gates, tyre stacks look kind of cheap … better AAA assets";
+// real motorsport, the tyre first — tools/blender/thunderTyre.py): a kind listed here takes its model's geometry and
+// textured material once loadPhysAssets() is done (each page awaits it before it builds a track); until then, or if a
+// file is missing, the procedural look above. The model is built round the physics' own body (same radius, thickness,
+// pivot), so nothing about the simulation changes. Textures through loadTexture (KTX2 when compressed: npm run textures).
+const MODELS = {
+  tyre: { glb: "/models/thunderline/obstacles/tyre.glb", lods: ["TyreLOD0", "TyreLOD1", "TyreLOD2"], tex: "/textures/thunderline/obstacles/tyre" },
+  barrel: { glb: "/models/thunderline/obstacles/barrel.glb", lods: ["BarrelLOD0", "BarrelLOD1", "BarrelLOD2"], tex: "/textures/thunderline/obstacles/barrel", metal: true },
+};
+const kindLods = new Map(); // kind → its model's levels [near … far] (the game draws [0]; the asset lab all of them)
+let assetsLoad = null;
+/** The asset lab's view of a kind: its model (levels + material) once loaded, or null; and the procedural old look. */
+export const physModel = (kind) => (kindLods.has(kind) ? { lods: kindLods.get(kind), material: kindMats.get(kind), files: MODELS[kind] } : null);
+export const physOldLook = (kind) => ({ geometry: PHYS_KINDS[kind].geometry(), material: physMaterial(null) });
+export function loadPhysAssets() {
+  return (assetsLoad ??= Promise.all(Object.entries(MODELS).map(async ([kind, m]) => {
+    try {
+      const [gltf, map, normalMap, orm] = await Promise.all([
+        getSharedGltfLoader().loadAsync(m.glb),
+        loadTexture(`${m.tex}_color.png`, { colorSpace: THREE.SRGBColorSpace }),
+        loadTexture(`${m.tex}_normal.png`, { colorSpace: THREE.NoColorSpace }),
+        loadTexture(`${m.tex}_arm.png`, { colorSpace: THREE.NoColorSpace }), // (AO, roughness, metal: "_arm" keeps it linear in KTX2)
+      ]);
+      gltf.scene.updateMatrixWorld(true);
+      const byName = new Map();
+      gltf.scene.traverse((o) => { if (o.isMesh) byName.set(o.name, o); });
+      const lods = m.lods.map((n) => {
+        const mesh = byName.get(n);
+        if (!mesh) throw new Error(`no mesh ${n} in ${m.glb}`);
+        return mesh.geometry.clone().applyMatrix4(mesh.matrixWorld);
+      });
+      const geo = lods[0];
+      kindLods.set(kind, lods);
+      // (u is a quarter turn, repeated: a lug straddling a quarter's edge reads past 1)
+      for (const t of [map, normalMap, orm]) { t.wrapS = THREE.RepeatWrapping; t.anisotropy = 8; }
+      geoCache.set(kind, geo);
+      // ARM: R occlusion, G roughness, B metalness
+      // (a model with bare metal — the drum's chips — reads its metalness from B too)
+      kindMats.set(kind, new THREE.MeshStandardNodeMaterial({ map, normalMap, roughnessMap: orm, aoMap: orm, roughness: 1, ...(m.metal ? { metalnessMap: orm, metalness: 1 } : { metalness: 0 }) }));
+    } catch (e) {
+      console.warn(`[physProps] the ${kind} model is not loaded: the procedural look stays`, e?.message ?? e);
+    }
+  })));
+}
 
 /** The builder's look of a body set: [{kind, local Matrix4}] in the obstacle's frame (static, plain meshes). */
 export function physLook(bodies) {
   const g = new THREE.Group();
   for (const b of bodies) {
-    const m = new THREE.Mesh(physGeometry(b.kind), physMaterial());
+    const m = new THREE.Mesh(physGeometry(b.kind), physMaterial(b.kind));
     m.matrixAutoUpdate = false;
     m.matrix.copy(b.local);
     g.add(m);
@@ -115,7 +164,7 @@ export function createPhysProps(scene, bodies, getGroundBvh, layer = null) {
   const byKind = new Map();
   for (const b of bodies) (byKind.get(b.kind) ?? byKind.set(b.kind, []).get(b.kind)).push(b);
   for (const [kind, list] of byKind) {
-    const im = new THREE.InstancedMesh(physGeometry(kind), physMaterial(), list.length);
+    const im = new THREE.InstancedMesh(physGeometry(kind), physMaterial(kind), list.length);
     im.name = `props:${kind}`;
     im.castShadow = true;
     im.receiveShadow = true;

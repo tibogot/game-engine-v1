@@ -338,6 +338,22 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] Rest of the tube family: corkscrew, loop tube, skylight (pop out the top), trapdoor (drop
       through the floor), half-pipe channel, helix (PIECES.md §7c).
 
+## AAA obstacles & signs (user, 2026-10-28: "the oil barrel, swing gates, tyre stacks look kind of cheap … the assets
+## in the SIGNS category look very cheap too"; real motorsport, not branded)
+Blender, one asset at a time: `node tools/thunderObstacles.mjs <name> [--quick]` runs tools/blender/thunder<Name>.py →
+mesh (3 LODs, geometry + UVs only, meshopt) in public/models/thunderline/obstacles/, textures (color / normal / arm,
+1024²) in public/textures/thunderline/obstacles/ + their KTX2 copies (loadTexture), previews in
+assets-src/refs/thunderline-obstacles/. physProps.js MODELS swaps a kind's look in once loadPhysAssets() is done (each
+page awaits it); every model is built round the physics' own body (same sizes, pivot): the simulation never changes.
+Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh leaves Blender with v pre-flipped.
+- [x] TYRE (truck tyre 385/65 R22.5 at the stack's 1.4 m: chevron lugs as geometry, lettering, ribs, dust) — LOD0 5.2k
+      tris, LOD1 1.6k, LOD2 0.45k; one draw per kind (instanced); ~4 MB of GPU textures (BC7).
+- [ ] LODs on the instanced props: the GLB holds LOD1/2, the props draw LOD0 only (engine: CULLING_LOD_SPEC step 4).
+- [ ] Oil drum · traffic cone (+ cone row) · swing gates · bollard (pole, slalom, pole gate) · block (stunt box,
+      diamond plate) · the two walls (truss + panel, the door / hole trimmed).
+- [ ] SIGNS: start, finish, chevron, aim — real trackside boards and banners.
+- [ ] One shared atlas for all obstacles once the set is done (one material: fewer draws, fewer textures).
+
 ## Game
 - [x] **First campaign tier (White, 5 tracks)** — campaign/white.json, built in the REAL builder (each
       track's recipe placed piece by piece, landings on the real car's arcs) and validated by its test

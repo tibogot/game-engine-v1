@@ -21,6 +21,7 @@ import { library, settings, campaign } from "../../app/library.js";
 import { go } from "../../app/nav.js";
 import { attachLesson } from "./lessonCard.js";
 import { keepPipelines } from "./keepPipelines.js";
+import { loadPhysAssets } from "./physProps.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD, groundFeatures } from "./worlds.js";
@@ -3429,6 +3430,7 @@ $("info-copy").onclick = async () => {
 };
 
 // ---------- go ----------
+await loadPhysAssets(); // (the obstacles' Blender models: the dock's pictures and the track are drawn with them)
 await bakeThumbs();
 renderDock();
 rebuild();

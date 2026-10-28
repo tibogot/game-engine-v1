@@ -34,7 +34,7 @@ import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
 import { buildObstacleSet, avoidObstacles, boostZones } from "./obstacles.js";
 import { createSparks } from "./sparks.js";
-import { createPhysProps } from "./physProps.js";
+import { createPhysProps, loadPhysAssets } from "./physProps.js";
 import { createTyreMarks } from "./tyreMarks.js";
 import { createLandingFx } from "./landingFx.js";
 import { createTyreSmoke } from "./tyreSmoke.js";
@@ -596,6 +596,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // OBSTACLES (obstacles.js): fixed ones join the trees; movers are posed from the race clock each tick
     const obstacles = buildObstacleSet(track?.props ?? [], { physics: true });
     // the KNOCKABLE props (cones, tyres, barrels, swing gates): the old game's physics, one-way (physProps.js)
+    await loadPhysAssets(); // (their Blender models: once per page, then at once)
     const physProps = createPhysProps(scene, obstacles.bodies, () => vehicle.groundBvh, DYNAMIC_LAYER);
     group.add(obstacles.group);
     obstacles.group.traverse((m) => { if (m.isMesh) m.layers.enable(DYNAMIC_LAYER); });

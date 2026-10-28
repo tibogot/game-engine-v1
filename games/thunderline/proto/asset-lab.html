@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- the engine resolves its assets relative to /v3/ -->
+    <base href="/v3/" />
+    <title>Thunderline asset lab</title>
+    <!-- Every asset the game draws, new or still old, on the test track's road in the drive page's world and light, the
+         car behind it for scale (kit/assetLab.js, the catalogue kit/assetLabCatalog.js). The game's own look: black,
+         #9DFF00, square corners. -->
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      :root { --ink: #060607; --panel: rgba(16, 16, 18, 0.92); --panel2: #18181b; --line: #2a2a2f; --line2: #3a3a41; --text: #ededf0; --dim: #8b8b95; --bolt: #9dff00; }
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ink); color: var(--text); font: 13px/1.45 Inter, system-ui, sans-serif; }
+      #game { position: fixed; inset: 0; }
+      #drive-hud { display: none !important; } /* (the parked car's race overlays) */
+      .pane { position: fixed; top: 14px; bottom: 14px; z-index: 40; overflow-y: auto; background: var(--panel); border: 1px solid var(--line); }
+      #left { left: 14px; width: 230px; padding: 12px 0 12px; }
+      #right { right: 14px; width: 360px; padding: 14px 16px 16px; }
+      .brand { font: 800 22px "Barlow Condensed"; letter-spacing: 0.04em; text-transform: uppercase; padding: 0 14px; }
+      .brand b { color: var(--bolt); }
+      .sub { color: var(--dim); font-size: 12px; padding: 0 14px 6px; }
+      h2 { font: 700 12px "Barlow Condensed"; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin: 14px 14px 4px; }
+      .entry { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 8px; background: none; border: 0; border-left: 3px solid transparent; color: var(--text); padding: 6px 12px 6px 11px; cursor: pointer; font: 600 15px "Barlow Condensed"; letter-spacing: 0.03em; text-transform: uppercase; text-align: left; }
+      .entry:hover { background: var(--panel2); }
+      .entry.on { border-left-color: var(--bolt); background: var(--panel2); }
+      .chip { font: 700 11px "Barlow Condensed"; letter-spacing: 0.08em; text-transform: uppercase; color: var(--c); border: 1px solid var(--c); padding: 0 5px; white-space: nowrap; }
+      #title { font: 800 28px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.02em; margin: 0; line-height: 1.05; }
+      #status { margin: 4px 0 8px; }
+      #about { color: var(--text); margin: 0 0 4px; }
+      #script { color: var(--dim); font-size: 11px; font-family: Consolas, monospace; margin: 0 0 6px; }
+      #right h2 { margin: 14px 0 5px; }
+      .btns { display: flex; flex-wrap: wrap; gap: 4px; }
+      .btns button { background: var(--panel2); color: var(--text); border: 1px solid var(--line2); padding: 5px 10px; cursor: pointer; font: 600 13px "Barlow Condensed"; text-transform: uppercase; letter-spacing: 0.05em; }
+      .btns button:hover:not(:disabled) { border-color: var(--bolt); }
+      .btns button.on { border-color: var(--bolt); color: var(--bolt); }
+      .btns button:disabled { opacity: 0.35; cursor: default; }
+      #cost { font: 12px/1.55 Consolas, monospace; color: var(--text); white-space: pre-wrap; background: var(--ink); border: 1px solid var(--line); padding: 8px 10px; }
+      #live { color: var(--dim); font: 12px Consolas, monospace; margin-top: 6px; }
+      .hint { color: var(--dim); font-size: 12px; margin-top: 12px; }
+      #boot { position: fixed; inset: 0; z-index: 99; display: flex; align-items: center; justify-content: center; background: var(--ink); color: var(--bolt); font: 700 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; transition: opacity 0.4s; }
+      #boot.gone { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <div id="left" class="pane">
+      <div class="brand">Thunderline <b>assets</b></div>
+      <div class="sub">Every asset the game draws, on the road, in the game's light.</div>
+      <div id="list"></div>
+    </div>
+    <div id="right" class="pane">
+      <h1 id="title">—</h1>
+      <div id="status"></div>
+      <p id="about"></p>
+      <div id="script"></div>
+      <h2>Version</h2>
+      <div class="btns" id="version"></div>
+      <h2>Arrangement</h2>
+      <div class="btns" id="arrange"></div>
+      <h2>Level of detail</h2>
+      <div class="btns" id="lod"></div>
+      <h2>Show</h2>
+      <div class="btns" id="toggles"></div>
+      <h2>View</h2>
+      <div class="btns" id="views"></div>
+      <h2>Light</h2>
+      <div class="btns" id="tods"></div>
+      <h2>Cost</h2>
+      <div id="cost"></div>
+      <div id="live"></div>
+      <div class="hint">Left-drag turns · right-drag moves · wheel zooms. Old on the left, new on the right. The car behind is the game's, for scale.</div>
+    </div>
+    <div id="boot">Thunderline · asset lab…</div>
+    <script type="module" src="/games/thunderline/proto/kit/assetLab.js"></script>
+  </body>
+</html>
