@@ -338,6 +338,10 @@ this is just the list. Newest decisions at the top of each section. Last updated
 - [ ] Rest of the tube family: corkscrew, loop tube, skylight (pop out the top), trapdoor (drop
       through the floor), half-pipe channel, helix (PIECES.md §7c).
 
+- [ ] FINISH THE BUILDER'S TEST TRACK (user, 2026-10-28: "this track you are testing, you never land on the rotated
+      piece and you fall on the ground — could you finish this track"): the 13-piece track the builder opens with (the
+      one every builder drive check uses) — the jump never reaches the rotated piece; make it land and finish. Later.
+
 ## AAA obstacles & signs (user, 2026-10-28: "the oil barrel, swing gates, tyre stacks look kind of cheap … the assets
 ## in the SIGNS category look very cheap too"; real motorsport, not branded)
 Blender, one asset at a time: `node tools/thunderObstacles.mjs <name> [--quick]` runs tools/blender/thunder<Name>.py →
@@ -359,8 +363,9 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       the standard moulded on the flange) — 1.3k / 0.34k / 94 tris; the cone row uses it. Its old look removed too
       ("the new cone is nice"); the rim orange, not a black cap. · bollard (pole, slalom, pole gate) · block (stunt box,
       diamond plate) · the two walls (truss + panel, the door / hole trimmed).
-- [~] SWING GATES (galvanised frames on round posts with red / white bands, a red mesh banner with white chevrons,
-      eyelets, latch, castor) — 948 / 436 / 100 tris; TO JUDGE. Found on the way: physProps baked the node matrix into
+- [x] SWING GATES (galvanised frames on round posts with red / white bands, a red mesh banner with white chevrons,
+      eyelets, latch, castor) — 948 / 436 / 100 tris; IN THE GAME, the old procedural gate removed. The banner's back no longer mirrored: both gates'
+      chevrons point to the middle ("they should be symmetric"). Found on the way: physProps baked the node matrix into
       the file's QUANTIZED positions (int16) and clamped everything past ±1 m — the 4.4 m gate shrank to its post; now
       made float first (floatGeometry).
 - [x] CHEVRON SIGN (user: "it should have bevel; the chevron itself with digital dots … my old car game"): an LED
@@ -369,7 +374,17 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       the dots are the old game's shader (v3 ledMatrix.js, chevron mode, amber, scrolling toward the road), one
       material for every sign; the left side's is the mirror. IN THE GAME; the old board removed ("remove the old
       chevron and use the new one").
-- [ ] START / FINISH ARCH GANTRY (user: "they are floating and look very cheap"): next.
+- [~] START / FINISH ARCH — first kit made, MORE WORK TO DO from the user's reference screenshots (user: "they are floating and look very cheap"): a KIT (tools/blender/thunderArch.py) that
+      gateMesh.js builds to the road (half-width 4 / 8 / 24 m, slab 0.7-1.1): box-truss legs beside the deck, the top
+      truss tiled across, an I-beam UNDER the slab leg to leg (it closes round the road), a bevelled header in 1 m
+      slices with LED faces (ledMatrix.js image mode, a 5 × 7 dot font: START bolt blue, FINISH white + checkered rows),
+      the lamp pod (setLights unchanged). Two tiling materials (aluminium, powder coat, 512²); 6.4k / 3.5k / 1.1k tris
+      at 8 m (ViewLOD 60 / 160 m), 2 draws + LED + lamps + paint. TO JUDGE. Found on the way: three's LOD picked its
+      level for the SHADOW camera too (the sign at 11 m drew as boxes) → ViewLOD (perspective cameras only); the drive
+      built gates and obstacles BEFORE awaiting the models (stand-in looks on a first run) → awaited first; the
+      builder disposed shared gate materials → userData.keep. The lab's stage turned to the game's frame (+z toward
+      the car: the signs were shown from behind). IN THE GAME; the old pylon arches deleted ("delete the old one also
+      and use the new ones") — still to refine from the reference screenshots.
 - [ ] SIGNS: start, finish boards, aim — real trackside boards and banners.
 - [ ] One shared atlas for all obstacles once the set is done (one material: fewer draws, fewer textures).
 

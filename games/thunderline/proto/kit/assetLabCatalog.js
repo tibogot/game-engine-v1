@@ -42,7 +42,7 @@ export const ENTRIES = [
     script: "tools/blender/thunderCone.py" },
   { id: "cones", section: "obstacles", label: "Cone row", kind: "cone", obstacle: "ob_cones", status: "game",
     about: "Six cones across the road (the same cone)." },
-  { id: "gates", section: "obstacles", label: "Swing gates", kind: "gate", obstacle: "ob_swing_gate", status: "judge",
+  { id: "gates", section: "obstacles", label: "Swing gates", kind: "gate", obstacle: "ob_swing_gate", status: "game",
     about: "A crash gate pair: galvanised tube frames on heavy round posts (red / white reflective bands), a red mesh " +
       "banner with white chevrons pointing the way they open, zip-tied through eyelets, creased, grimy at the foot, " +
       "scuffed by cars at the free end; a latch and a castor wheel. Smash through; they swing back.",
@@ -63,9 +63,12 @@ export const ENTRIES = [
       "a service door with vents at the back; a galvanised arm under the road's edge. The left side's is its mirror.",
     script: "tools/blender/thunderChevron.py" },
   { id: "sg_aim", section: "signs", label: "Aim", obstacle: "sg_aim", status: "planned", about: "The aim marker." },
-  { id: "arch_start", section: "track", label: "Start arch", gantry: "start", status: "making",
-    about: "The start gantry over the line: today two leaning pylons past the road's edges (standing on nothing on " +
-      "a track in the air), a header with the word, three countdown lamps, the line and the grid box painted." },
-  { id: "arch_finish", section: "track", label: "Finish arch", gantry: "finish", status: "making",
-    about: "The finish gantry: the same pylons, taller, a checkered header and banner, a checkered band on the road." },
+  { id: "arch_start", section: "track", label: "Start arch", gantry: "start", status: "game",
+    about: "A truss gantry built to the road it stands on: an aluminium box-truss leg beside each edge of the deck, the " +
+      "top truss across, an I-beam under the slab from leg to leg (it closes round the road — nothing floats), a bevelled " +
+      "powder-coated header whose faces are LED dots (START in bolt blue, a dot font), the three countdown lamps in a pod.",
+    script: "tools/blender/thunderArch.py" },
+  { id: "arch_finish", section: "track", label: "Finish arch", gantry: "finish", status: "game",
+    about: "The same gantry kit: FINISH in white dots between two checkered rows, no lamps; the checkered band on the road.",
+    script: "tools/blender/thunderArch.py" },
 ];

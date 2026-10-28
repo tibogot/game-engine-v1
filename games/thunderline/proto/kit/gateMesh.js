@@ -2,6 +2,7 @@
 // Checkpoint = bolt blue, finish = checkered, start = white. Shared by the drive page and the builder.
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
+import { physKit, ViewLOD } from "./physProps.js";
 
 let checker = null;
 function checkerTexture() {
@@ -44,7 +45,12 @@ export function makeRingMesh(g, { material = null } = {}) {
 /** @param g {kind, P, T, U, hw} — P is on (or 0.7 m above) the deck centre */
 export function makeGateMesh(g, { height = 7.5, lift = 0.7 } = {}) {
   if (g.ring) return makeRingMesh(g);
-  if (g.kind === "start" || g.kind === "finish") return orient(mergeParts(makeLineGantry(g)), g, lift);
+  if (g.kind === "start" || g.kind === "finish") {
+    // the ARCH from its Blender kit (below); its old procedural pylons removed (user, 2026-10-28: "delete the old one
+    // also and use the new ones") — if the kit's file is missing, the paint alone (and lamps that light nothing)
+    const kit = physKit("arch");
+    return orient(kit ? archGantry(g, kit) : archMissing(g), g, lift);
+  }
   const group = new THREE.Group();
   const color = g.kind === "cp" ? 0x3fd2ff : 0xf2f4f8;
   const post = new THREE.MeshStandardMaterial({ color: 0x1a2236, roughness: 0.6, metalness: 0.3 });
@@ -118,41 +124,9 @@ function orient(group, g, lift) {
   return group;
 }
 
-// ---------- START / FINISH GANTRIES (user, 2026-10-22: "the start and finish should have something we
-// recognize immediately … a real start and a real finish look") ----------
-// Our own look (bolt blue, graphite, white): two leaning pylons, a header with the word on both faces,
-// paint on the road. START: three countdown lights under the header (red one by one on 3-2-1, green at
-// GO: userData.setLights), the line and the car's grid box. FINISH: taller, checkered, a checkered band.
-const NAVY = "#0d1424", BOLT = "#3fd2ff";
+// ---------- START / FINISH: the paint on the deck (the gantry is the arch kit, further down) ----------
+const BOLT = "#3fd2ff";
 const signs = new Map();
-function signTexture(word) {
-  if (signs.has(word)) return signs.get(word);
-  const c = document.createElement("canvas");
-  c.width = 1024; c.height = 192;
-  const tex = new THREE.CanvasTexture(c);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 8;
-  const draw = () => {
-    const g = c.getContext("2d");
-    g.fillStyle = NAVY; g.fillRect(0, 0, c.width, c.height);
-    if (word === "FINISH") { // checkered bands top and bottom
-      for (let x = 0; x < 64; x++) for (let y = 0; y < 2; y++) {
-        g.fillStyle = (x + y) % 2 ? "#0b0f1a" : "#f2f4f8";
-        g.fillRect(x * 16, y * 16, 16, 16); g.fillRect(x * 16, c.height - 32 + y * 16, 16, 16);
-      }
-    } else { g.fillStyle = BOLT; g.fillRect(0, 0, c.width, 14); g.fillRect(0, c.height - 14, c.width, 14); }
-    g.fillStyle = "#f2f4f8";
-    g.font = '800 128px "Barlow Condensed", "Arial Narrow", sans-serif';
-    g.textAlign = "center"; g.textBaseline = "middle";
-    if (g.letterSpacing !== undefined) g.letterSpacing = "18px";
-    g.fillText(word, c.width / 2, c.height / 2 + 6);
-    tex.needsUpdate = true;
-  };
-  draw();
-  document.fonts?.load('800 128px "Barlow Condensed"').then(draw, () => {}); // the web font may come late
-  signs.set(word, tex);
-  return tex;
-}
 function decalTexture(kind) {
   const key = `decal:${kind}`;
   if (signs.has(key)) return signs.get(key);
@@ -185,91 +159,159 @@ function flat(w, d, mat, z) {
   return m;
 }
 
-function makeLineGantry(g) {
-  const finish = g.kind === "finish";
+function archMissing(g) {
   const group = new THREE.Group();
-  const H = finish ? 9.5 : 8.5, w = g.hw + 1.7;
-  const graphite = new THREE.MeshStandardMaterial({ color: 0x1a2236, roughness: 0.55, metalness: 0.35 });
-  const edge = new THREE.MeshStandardMaterial({ color: finish ? 0xf2f4f8 : 0x3fd2ff, emissive: finish ? 0xf2f4f8 : 0x3fd2ff, emissiveIntensity: finish ? 0.6 : 1.2, roughness: 0.4 });
-  // PYLONS: a trapezoid (1.9 m at the foot, 0.9 m at the top), the inner side upright, the outer leaning in
-  for (const sx of [-1, 1]) {
-    const s = new THREE.Shape();
-    s.moveTo(0, 0); s.lineTo(1.9, 0); s.lineTo(0.9, H); s.lineTo(0, H); s.closePath();
-    const geo = new THREE.ExtrudeGeometry(s, { depth: 1.3, bevelEnabled: false });
-    geo.translate(0, 0, -0.65);
-    const p = new THREE.Mesh(geo, graphite);
-    p.scale.x = sx; // mirrored on the left (three flips the winding of a mirrored mesh itself)
-    p.position.x = sx * w; // x from the inner face (w) outward
-    p.castShadow = true;
-    group.add(p);
-    // the glowing strip on the inner face, standing 4 cm proud of it (never in its plane)
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.14, H * 0.82, 0.3), edge);
-    strip.position.set(sx * (w - 0.03), H * 0.43, 0);
-    group.add(strip);
-  }
-  // HEADER: the word on both faces (box faces ±Z), graphite ends
-  const sign = new THREE.MeshStandardMaterial({ map: signTexture(finish ? "FINISH" : "START"), roughness: 0.6, emissive: 0xffffff, emissiveMap: signTexture(finish ? "FINISH" : "START"), emissiveIntensity: 0.18 });
-  const hw = w + 1.0, hh = 2.6;
-  // (a graphite box + the two sign faces 1 cm proud of it: a box with six materials was six draws)
-  const header = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, hh, 1.1), graphite);
-  header.position.set(0, H - hh / 2 + 0.3, 0);
-  header.castShadow = true;
-  group.add(header);
-  for (const sz of [-1, 1]) {
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2, hh), sign);
-    face.position.set(0, H - hh / 2 + 0.3, sz * 0.56);
-    if (sz < 0) face.rotation.y = Math.PI; // the back face reads the right way round from behind
-    group.add(face);
-  }
-  // a lit edge under the header
-  const under = new THREE.Mesh(new THREE.BoxGeometry(hw * 2 - 0.2, 0.12, 1.16), edge);
-  under.position.set(0, H - hh + 0.3 - 0.04, 0);
-  group.add(under);
-
-  if (!finish) {
-    // START LIGHTS: three lamps on a bar under the header, facing the car (−Z)
-    const bar = new THREE.Mesh(new THREE.BoxGeometry(5.6, 1.4, 0.6), graphite);
-    const barY = H - hh + 0.3 - 0.85; // its top 5 cm under the lit edge's underside
-    bar.position.set(0, barY, 0);
-    group.add(bar);
-    const lamps = [1.8, 0, -1.8].map((x) => { // left to right as the driver sees them (local +X is his left)
-      const mat = new THREE.MeshStandardMaterial({ color: 0x2a0d12, emissive: 0x000000, roughness: 0.3 });
-      const m = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.12, 24), mat);
-      m.rotation.x = Math.PI / 2;
-      m.position.set(x, barY, -0.32); // half inside the bar (its face at −0.3): no shared plane
-      group.add(m);
-      return mat;
-    });
-    const RED = new THREE.Color(0xff2a3d), GREEN = new THREE.Color(0x3dff7a), OFF = new THREE.Color(0x000000);
-    let last = null;
-    /** n red lamps (0–3), or "go" (all green), or 0 / null (all off) */
-    group.userData.setLights = (n) => {
-      if (n === last) return;
-      last = n;
-      lamps.forEach((mat, i) => {
-        const on = n === "go" || (typeof n === "number" && i < n);
-        mat.emissive.copy(!on ? OFF : n === "go" ? GREEN : RED);
-        mat.emissiveIntensity = on ? 0.5 : 0; // (3, even 1.2, bloomed the whole gantry and the road ahead green)
-        mat.color.set(on ? 0x111111 : 0x2a0d12);
-      });
-    };
-    // PAINT: the line across the road at the gate, the car's grid box behind it
-    group.add(flat(g.hw * 2 - 0.4, 0.8, paint(null, false), 0));
-    if (g.slot > 0) group.add(flat(3.4, 6, paint(decalTexture("slot"), true), -g.slot));
-  } else {
-    // the header's top: a checkered banner standing on it
-    const flag = new THREE.MeshStandardMaterial({ map: decalTexture("band"), roughness: 0.7, side: THREE.DoubleSide });
-    flag.map.wrapS = THREE.RepeatWrapping;
-    const banner = new THREE.Mesh(new THREE.PlaneGeometry(hw * 2, 0.8), flag);
-    banner.position.set(0, H + 0.3 + 0.4, 0);
-    group.add(banner);
-    // PAINT: a checkered band across the road, on the line (inside the Finish piece: it starts 2 m before)
-    const band = paint(decalTexture("band"), false);
-    band.map = band.map.clone();
-    band.map.wrapS = band.map.wrapT = THREE.RepeatWrapping;
-    band.map.repeat.set(g.hw / 2, 1.5);
-    band.map.needsUpdate = true;
-    group.add(flat(g.hw * 2 - 0.4, 3, band, 0));
-  }
+  group.userData.setLights = () => {};
+  linePaint(group, g, g.kind === "finish");
   return group;
 }
+
+/** The start lamps (meshes placed, left to right as the driver sees them): each its own material, and
+ * group.userData.setLights(n): n red lamps (0–3), or "go" (all green), or 0 / null (all off). */
+function startLamps(group, meshes) {
+  const lamps = meshes.map((m) => {
+    m.material = new THREE.MeshStandardMaterial({ color: 0x2a0d12, emissive: 0x000000, roughness: 0.3 });
+    group.add(m);
+    return m.material;
+  });
+  const RED = new THREE.Color(0xff2a3d), GREEN = new THREE.Color(0x3dff7a), OFF = new THREE.Color(0x000000);
+  let last = null;
+  group.userData.setLights = (n) => {
+    if (n === last) return;
+    last = n;
+    lamps.forEach((mat, i) => {
+      const on = n === "go" || (typeof n === "number" && i < n);
+      mat.emissive.copy(!on ? OFF : n === "go" ? GREEN : RED);
+      mat.emissiveIntensity = on ? 0.5 : 0; // (3, even 1.2, bloomed the whole gantry and the road ahead green)
+      mat.color.set(on ? 0x111111 : 0x2a0d12);
+    });
+  };
+}
+/** PAINT on the deck: the start's line and the car's grid box behind it; the finish's checkered band on the line
+ * (inside the Finish piece: it starts 2 m before). */
+function linePaint(group, g, finish) {
+  if (!finish) {
+    group.add(flat(g.hw * 2 - 0.4, 0.8, paint(null, false), 0));
+    if (g.slot > 0) group.add(flat(3.4, 6, paint(decalTexture("slot"), true), -g.slot));
+    return;
+  }
+  const band = paint(decalTexture("band"), false);
+  band.map = band.map.clone();
+  band.map.wrapS = band.map.wrapT = THREE.RepeatWrapping;
+  band.map.repeat.set(g.hw / 2, 1.5);
+  band.map.needsUpdate = true;
+  group.add(flat(g.hw * 2 - 0.4, 3, band, 0));
+}
+
+// ---------- THE ARCH from Blender (2026-10-28, user: "the start and finish arch gantry … they are floating and look
+// very cheap"): tools/blender/thunderArch.py's KIT assembled to this road — a box-truss leg beside each edge of the
+// deck, the top truss tiled across, an I-beam UNDER the slab from leg to leg (the frame closes round the road: it
+// stands on the track, not on the air), a powder-coated header whose two faces are LED dots (v3 ledMatrix.js, image
+// mode: the word, bolt blue for START, white with checkered rows for FINISH), the start lights' pod. One mesh per
+// material per level (ViewLOD: 60 / 160 m). ----------
+export const ARCH_LOD_FAR = [60, 160];
+const SLAB = { 4: 0.7, 8: 0.9, 24: 1.1 }; // the deck's thickness per road width (kit.js SECTIONS)
+const LED = { y0: 7.25, y1: 9.15, z: 0.55, pitch: 0.09 }; // the header's LED faces (thunderArch.py HY0 + LIP …, LZ)
+const POD = { y: 6.3, z: -0.225, lamps: [1.2, 0, -1.2], r: 0.34 };
+const DOT_FONT = {
+  S: [".####", "#....", "#....", ".###.", "....#", "....#", "####."],
+  T: ["#####", "..#..", "..#..", "..#..", "..#..", "..#..", "..#.."],
+  A: [".###.", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+  R: ["####.", "#...#", "#...#", "####.", "#.#..", "#..#.", "#...#"],
+  F: ["#####", "#....", "#....", "####.", "#....", "#....", "#...."],
+  I: [".###.", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."],
+  N: ["#...#", "##..#", "#.#.#", "#.#.#", "#..##", "#...#", "#...#"],
+  H: ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+};
+const archLeds = new Map();
+function archLed(kit, word, w) {
+  const key = `${word}|${w.toFixed(2)}`;
+  if (archLeds.has(key)) return archLeds.get(key);
+  const h = LED.y1 - LED.y0, cols = Math.round(w / LED.pitch), rows = Math.round(h / LED.pitch);
+  // the word on the dot grid (one texel a dot): white = lit
+  const c = document.createElement("canvas");
+  c.width = cols; c.height = rows;
+  const tex = new THREE.CanvasTexture(c);
+  tex.magFilter = tex.minFilter = THREE.NearestFilter;
+  tex.generateMipmaps = false;
+  const finish = word === "FINISH";
+  const draw = () => {
+    const g = c.getContext("2d");
+    g.fillStyle = "#000"; g.fillRect(0, 0, cols, rows);
+    g.fillStyle = "#fff";
+    if (finish) { // two checkered rows of 2 × 2 dots, top and bottom
+      for (let x = 0; x < cols; x += 2) for (const y of [0, rows - 2]) if (((x >> 1) + (y ? 1 : 0)) % 2 === 0) g.fillRect(x, y, 2, 2);
+    }
+    // the word in a 5 × 7 DOT FONT, each font dot 2 × 2 LEDs (a browser font on a 21-dot grid was mush)
+    const k = rows >= 18 ? 2 : 1, gap = 2 * k, cw = 5 * k;
+    const tw = word.length * cw + (word.length - 1) * gap;
+    let x0 = Math.round((cols - tw) / 2);
+    const y0 = Math.round((rows - 7 * k) / 2);
+    for (const ch of word) {
+      (DOT_FONT[ch] ?? []).forEach((row, j) => { for (let i = 0; i < 5; i++) if (row[i] === "#") g.fillRect(x0 + i * k, y0 + j * k, k, k); });
+      x0 += cw + gap;
+    }
+    tex.needsUpdate = true;
+  };
+  draw();
+  const mat = kit.makeLedMatrixMaterial({
+    boardW: w, boardH: h, contentTexture: tex, sourceAspect: cols / rows,
+    params: {
+      mode: "image", shape: "round", cols, rows, dotRadius: 0.38, useRamp: true, threshold: 0.5, panSpeed: 0, emissive: 2.2, offLevel: 0.05,
+      ...(finish ? { coreColor: "#ffffff", edgeColor: "#aab8cc" } : { coreColor: "#e6fbff", edgeColor: "#3fd2ff" }),
+    },
+  });
+  mat.userData.keep = true; // (one per word and width, shared by every copy)
+  archLeds.set(key, mat);
+  return mat;
+}
+const _M = new THREE.Matrix4(), _S = new THREE.Matrix4();
+function archGantry(g, kit) {
+  const finish = g.kind === "finish";
+  const group = new THREE.Group();
+  const lx = g.hw + 1.6, slab = SLAB[g.hw] ?? 0.9;
+  const span = 2 * lx, nb = Math.ceil(span / 2), bw = span / nb;
+  const wh = Math.min(2 * g.hw + 2, 18), nh = Math.max(1, Math.round(wh)), sw = wh / nh;
+  const lod = new ViewLOD();
+  for (let i = 0; i < 3; i++) {
+    const byMat = new Map();
+    const put = (part, x, y = 0, sx = 1) => {
+      const geo = kit.parts[part][i].clone().applyMatrix4(_M.makeTranslation(x, y, 0).multiply(_S.makeScale(sx, 1, 1)));
+      if (sx < 0) { const ix = geo.index.array; for (let t = 0; t < ix.length; t += 3) { const k = ix[t + 1]; ix[t + 1] = ix[t + 2]; ix[t + 2] = k; } }
+      const mat = kit.material[part];
+      (byMat.get(mat) ?? byMat.set(mat, []).get(mat)).push(geo);
+    };
+    for (const s of [-1, 1]) put("leg", s * lx);
+    for (let k = 0; k < nb; k++) { const x = -lx + bw * (k + 0.5); put("bay", x, 0, bw / 2); put("beam", x, -slab, bw / 2); }
+    for (let k = 0; k < nh; k++) put("head", -wh / 2 + sw * (k + 0.5), 0, sw);
+    put("cap", wh / 2); put("cap", -wh / 2, 0, -1);
+    if (!finish) put("pod", 0);
+    const level = new THREE.Group();
+    for (const [mat, geos] of byMat) {
+      const m = new THREE.Mesh(mergeGeometries(geos), mat);
+      for (const q of geos) q.dispose();
+      m.castShadow = m.receiveShadow = true;
+      level.add(m);
+    }
+    lod.addLevel(level, i ? ARCH_LOD_FAR[i - 1] : 0);
+  }
+  group.add(lod);
+  // the header's LED faces: toward the car (−z) and the other way, each reading the right way round
+  const led = archLed(kit, finish ? "FINISH" : "START", wh);
+  for (const sz of [-1, 1]) {
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(wh, LED.y1 - LED.y0), led);
+    face.position.set(0, (LED.y0 + LED.y1) / 2, sz * LED.z);
+    if (sz < 0) face.rotation.y = Math.PI;
+    group.add(face);
+  }
+  if (!finish) {
+    startLamps(group, POD.lamps.map((x) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(POD.r, 24, 12).scale(1, 1, 0.35));
+      m.position.set(x, POD.y, POD.z); // a domed lens, half out of the pod's face: no shared plane
+      return m;
+    }));
+  }
+  linePaint(group, g, finish);
+  return group;
+}
+

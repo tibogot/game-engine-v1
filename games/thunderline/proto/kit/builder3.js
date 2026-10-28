@@ -614,7 +614,7 @@ function disposeTree(root, materials) {
     if (!o.isMesh && !o.isLine) return;
     o.geometry?.dispose();
     if (o.isInstancedMesh) o.dispose();
-    if (materials) for (const m of [].concat(o.material)) m?.dispose();
+    if (materials) for (const m of [].concat(o.material)) if (!m?.userData?.keep) m?.dispose(); // (keep: shared by every copy — the arch kit's, its LED faces)
   });
 }
 function releaseRebuilt() {

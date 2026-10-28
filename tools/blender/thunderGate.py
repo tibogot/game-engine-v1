@@ -95,13 +95,14 @@ def build(name, lod):
         T_ = (0.0, 0.5, 0.0, 0.24)
         for a, b in (((X0, BASE, 0), (X0, BASE + PH, 0)), ((X1, BASE, 0), (X1, BASE + PH, 0)), ((X0, Y0, 0), (X1, Y0, 0)), ((X0, Y1, 0), (X1, Y1, 0))):
             tube(a, b, TR, 4, T_)
-    # THE BANNER: front and back faces (the back's print mirrored: seen through)
+    # THE BANNER: front and back faces, the print NOT mirrored on the back: its chevrons point to the free end from either
+    # side (the right gate stands turned round, its back to the car — a mirrored back made both gates point the same way)
     for z, flip in ((BZ, False), (-BZ + 0.002 if lod == 2 else BZ - 0.003, True)):
         vs = [bm.verts.new((x, -z, y)) for (x, y) in ((BX0, BY0), (BX1, BY0), (BX1, BY1), (BX0, BY1))]
         f = bm.faces.new(vs if not flip else list(reversed(vs)))
         for loop in f.loops:
             x, y = loop.vert.co.x, loop.vert.co.z
-            u = (x - BX0) / (BX1 - BX0); u = 1 - u if flip else u
+            u = (x - BX0) / (BX1 - BX0)
             loop[uv].uv = (u, 0.30 + 0.70 * (y - BY0) / (BY1 - BY0))
     if lod == 0:
         # THE LATCH on the free stile, THE CASTOR under it

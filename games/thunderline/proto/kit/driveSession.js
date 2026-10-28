@@ -551,6 +551,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     meshes.group.traverse((m) => { if (m.isMesh) { const glass = m.material?.transmission > 0; m.castShadow = !glass; m.receiveShadow = true; if (!glass) m.layers.enable(STATIC_LAYER); } });
     group.add(meshes.group);
 
+    // the Blender models (knockable props, signs, the start / finish arch kit): once per page, then at once — before the
+    // gates and the obstacles are built, or the first run drew their stand-in looks
+    await loadPhysAssets();
+
     // ---------- THE RACE (race.js, DESIGN.md §8): gates, checkpoints in any order, finish, medals ----------
     // a practice run from a piece has only the finish: the checkpoints behind it can't be taken
     const flagged = o.from ? []
@@ -596,7 +600,6 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // OBSTACLES (obstacles.js): fixed ones join the trees; movers are posed from the race clock each tick
     const obstacles = buildObstacleSet(track?.props ?? [], { physics: true });
     // the KNOCKABLE props (cones, tyres, barrels, swing gates): the old game's physics, one-way (physProps.js)
-    await loadPhysAssets(); // (their Blender models: once per page, then at once)
     const physProps = createPhysProps(scene, obstacles.bodies, () => vehicle.groundBvh, DYNAMIC_LAYER);
     group.add(obstacles.group);
     obstacles.group.traverse((m) => { if (m.isMesh) m.layers.enable(DYNAMIC_LAYER); });

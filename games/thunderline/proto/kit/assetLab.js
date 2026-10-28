@@ -10,9 +10,9 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { startV3App } from "../../../../v3/engine.js";
 import { createDriveRig } from "./driveSession.js";
 import { applyWorld, TIMES, groundFeatures } from "./worlds.js";
-import { loadPhysAssets, physModel, physOldLook, PROP_LOD_FAR } from "./physProps.js";
+import { loadPhysAssets, physModel, physOldLook, physKit, PROP_LOD_FAR } from "./physProps.js";
 import { OBSTACLES, obstacleLook, CHEVRON_LOD_FAR } from "./obstacles.js";
-import { makeGateMesh } from "./gateMesh.js";
+import { makeGateMesh, ARCH_LOD_FAR } from "./gateMesh.js";
 import { SECTIONS, ENTRIES, STATUS } from "./assetLabCatalog.js";
 
 const $ = (id) => document.getElementById(id);
@@ -64,7 +64,10 @@ const stagePos = carPos.clone().addScaledVector(fwd, 25);
 }
 const stage = new THREE.Group();
 stage.matrixAutoUpdate = false;
-stage.matrix.makeBasis(right, up, fwd).setPosition(stagePos);
+// (the GAME's obstacle frame: +z back toward the oncoming car — a sign's face, the gates' swing; the stage was the other
+// way round and showed the signs from behind, "you placed the chevron in the opposite of the road direction")
+const back = fwd.clone().negate(), left = new V().crossVectors(up, back).normalize();
+stage.matrix.makeBasis(left, up, back).setPosition(stagePos);
 scene.add(stage);
 
 // ---------- the orbit (the drive session's chase camera is overruled each frame) ----------
@@ -80,8 +83,10 @@ function frameOn(obj, from = "front") {
   const box = new THREE.Box3().setFromObject(obj), sph = box.getBoundingSphere(new THREE.Sphere());
   const d = Math.max(2.2, sph.radius * 3.2);
   orbit.target.copy(sph.center);
-  // from in front of the asset, looking back at it with the car behind it (its scale at a glance)
-  const dir = from === "front" ? fwd.clone().multiplyScalar(0.85).addScaledVector(right, 0.45).addScaledVector(up, 0.32) : up.clone().addScaledVector(fwd, 0.2);
+  // from in front of the asset, looking back at it with the car behind it (its scale at a glance); a sign or an arch
+  // from the car's side, as the driver meets it
+  const carSide = !!(state.entry?.model || state.entry?.gantry);
+  const dir = from === "front" ? fwd.clone().multiplyScalar(carSide ? -0.85 : 0.85).addScaledVector(right, 0.45).addScaledVector(up, 0.32) : up.clone().addScaledVector(fwd, 0.2);
   camera.position.copy(sph.center).addScaledVector(dir.normalize(), d);
   camera.lookAt(sph.center);
   orbit.update();
@@ -100,7 +105,7 @@ const LOD_FAR = PROP_LOD_FAR; // m: level 1 from here, level 2 from there — th
 // 8 m half-width road, its P 0.7 m over the deck as the drive's ride gives it)
 const ROAD_HW = 8;
 function lookOf(e) {
-  if (e.gantry) return makeGateMesh({ kind: e.gantry, P: new V(0, 0.7, 0), T: new V(0, 0, 1), U: new V(0, 1, 0), hw: ROAD_HW, slot: 6 });
+  if (e.gantry) return makeGateMesh({ kind: e.gantry, P: new V(0, 0.7, 0), T: new V(0, 0, -1), U: new V(0, 1, 0), hw: ROAD_HW, slot: 6 });
   return obstacleLook(e.obstacle, {});
 }
 function bodiesOf(entry) {
@@ -140,10 +145,11 @@ function build() {
       g.traverse((o) => { if (o.isLOD) shownLods.push(o); });
       groups.push({ g, which });
     }
-    if (groups.length === 2) { const r = 6; groups[0].at = [0, -r]; groups[1].at = [0, r]; }
+    if (groups.length === 2) { const r = 6; groups[0].at = [0, -r]; groups[1].at = [0, r]; } // (the old further on, the new nearer the car)
   } else if (!hasNew) {
     // not made yet: the look the game draws today
     const g = lookOf(e);
+    g.traverse((o) => { if (o.isLOD) shownLods.push(o); }); // (the arch: its levels by distance)
     groups = [{ g, at: 0 }];
   } else {
     const hasOld = !!physOldLook(e.kind);
@@ -154,11 +160,11 @@ function build() {
       if (size.x < 4) {
         // the old on the LEFT, the new on the RIGHT as the camera sees them (it looks back at the stage from in front)
         const r = size.x / 2 + 0.6;
-        groups[0].at = [-r, 0]; groups[1].at = [r, 0];
+        groups[0].at = [r, 0]; groups[1].at = [-r, 0]; // (the stage's +x is the camera's left)
       } else {
         // a wide one (a cone row across the road): one behind the other — the old nearer the car, the new in front
         const r = size.z / 2 + 6;
-        groups[0].at = [0, -r]; groups[1].at = [0, r];
+        groups[0].at = [0, r]; groups[1].at = [0, -r]; // (the stage's +z is toward the car)
       }
     }
   }
@@ -197,8 +203,20 @@ function costText(e) {
     }
   } else {
     const g = lookOf(e);
-    let t = 0, d = 0; g.traverse((o) => { if (o.isMesh) { t += tris(o.geometry) * (o.count ?? 1); d++; } });
-    lines.push(`NOW  triangles   ${t} · draws ${d} · the old look (no new model yet)`);
+    if (e.gantry && physKit("arch")) {
+      // the arch from its kit: each level's triangles, the draws near (one level + the LED faces, lamps, paint)
+      const lod = []; g.traverse((o) => { if (o.isLOD) lod.push(o); });
+      const levelTris = lod[0].levels.map((l) => { let t = 0; l.object.traverse((o) => { if (o.isMesh) t += tris(o.geometry); }); return t; });
+      let rest = 0, d = 0;
+      g.traverse((o) => { if (o.isMesh && !lod[0].levels.some((l) => l.object === o.parent)) { rest += tris(o.geometry); d++; } });
+      lines.push(`NEW  triangles  ${levelTris.map((t, i) => `LOD${i} ${t}`).join(" · ")}  (+${rest} LED, lamps, paint)`);
+      lines.push(`     draws      ${lod[0].levels[0].object.children.length} (truss · coat) + ${d} + shadow`);
+      lines.push(`     levels at  ${ARCH_LOD_FAR.join(" / ")} m · built to the road (8 m half-wide here)`);
+      lines.push(`     textures   2 tiling sets 512² (aluminium, powder coat) · the LED word: the dot shader`);
+    } else {
+      let t = 0, d = 0; g.traverse((o) => { if (o.isMesh) { t += tris(o.geometry) * (o.count ?? 1); d++; } });
+      lines.push(`NOW  triangles   ${t} · draws ${d} · the old look (no new model yet)`);
+    }
   }
   return lines.join("\n");
 }
@@ -281,4 +299,4 @@ const first = params.get("asset") ?? (() => { try { return localStorage.getItem(
 pick(ENTRIES.some((e) => e.id === first) ? first : ENTRIES[0].id);
 $("boot").classList.add("gone");
 setTimeout(() => $("boot").remove(), 600);
-window.__assetLab = { app, rig, stage, state, pick, frameOn, build };
+window.__assetLab = { app, rig, stage, state, pick, frameOn, build, orbit, view };

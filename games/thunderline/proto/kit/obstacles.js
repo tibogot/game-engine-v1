@@ -14,7 +14,7 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../../../v3/play/modularRoadRigidBvh.js";
-import { body, physLook, physGhost, physModel } from "./physProps.js";
+import { body, physLook, physGhost, physModel, ViewLOD } from "./physProps.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
 
 const BOLT = 0x3fd2ff, SIGNAL = 0xff7a1a;
@@ -379,6 +379,7 @@ function panelShape({ hw = 8, dx = 1 } = {}) {
 // (v3 ledMatrix.js, chevron mode: one material, every sign). Authored for the RIGHT side (its arm and chevrons toward −x,
 // the road); the left side's is its mirror. Its levels by distance (three's LOD: the renderer picks one per camera).
 export const CHEVRON_LOD_FAR = [40, 110];
+export { ViewLOD } from "./physProps.js";
 const mirrored = new Map();
 function mirrorX(geo) {
   if (!mirrored.has(geo)) {
@@ -392,7 +393,7 @@ function mirrorX(geo) {
 function chevronCabinet(model, x, side) {
   const geo = (g) => (side < 0 ? mirrorX(g) : g);
   const g = new THREE.Group();
-  const lod = new THREE.LOD();
+  const lod = new ViewLOD();
   model.lods.forEach((l, i) => lod.addLevel(new THREE.Mesh(geo(l), model.material), i ? CHEVRON_LOD_FAR[i - 1] : 0));
   lod.position.x = x;
   g.add(lod);

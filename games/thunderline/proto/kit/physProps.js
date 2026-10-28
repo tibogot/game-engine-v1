@@ -26,7 +26,7 @@ function paint(geo, hex) {
   g.setAttribute("color", new THREE.BufferAttribute(a, 3));
   return g;
 }
-const ORANGE = 0xf4581a, WHITE = 0xeef0f2, RUBBER = 0x1a1a1c, STEEL = 0x8f969e, RED = 0xe0242b;
+const ORANGE = 0xf4581a, RUBBER = 0x1a1a1c, STEEL = 0x8f969e, RED = 0xe0242b;
 
 /** Each kind: its geometry (root at the BODY's pivot, as the old physics simulates it) and `lift`, the
  * pivot's height over the road when it stands as placed. */
@@ -34,26 +34,22 @@ const ORANGE = 0xf4581a, WHITE = 0xeef0f2, RUBBER = 0x1a1a1c, STEEL = 0x8f969e, 
 // barrel", "the new cone is nice"); their procedural looks are gone. What stays is the BODY's plain cylinder: the builder's placement ghost (made when the
 // page loads, before any model) and the look if a model file is missing.
 const bodyCylinder = (r, halfH) => paint(new THREE.CylinderGeometry(r, r, 2 * halfH, 24), RUBBER);
+// THE SWING GATE is a Blender model too (user, 2026-10-28: "for swing gates you can remove the old one and use the new
+// in the game"): what stays is its body's plain shape — the post on the hinge axis (its collision a static solid:
+// obstacles.js) and the panel along +X — the placement ghost, and the look if the model file is missing.
 function gateGeometry() {
   const W = GATE_WIDTH, H = GATE_HEIGHT;
-  // the post on the hinge axis (its collision is a static solid: obstacles.js), the panel along +X;
-  // a red panel with two white chevrons pointing the way it opens
-  const parts = [
+  return mergeGeometries([
     paint(new THREE.CylinderGeometry(GATE_POST_RADIUS, GATE_POST_RADIUS, GATE_POST_HEIGHT, 10).translate(0, GATE_POST_HEIGHT / 2, 0), STEEL),
     paint(new THREE.BoxGeometry(W, H, 0.09).translate(W / 2, GATE_BASE_Y + H / 2, 0), RED),
-  ];
-  for (const x of [W * 0.33, W * 0.66]) {
-    const chev = new THREE.Shape([new THREE.Vector2(-0.3, -0.45), new THREE.Vector2(0.05, 0), new THREE.Vector2(-0.3, 0.45), new THREE.Vector2(-0.1, 0.45), new THREE.Vector2(0.25, 0), new THREE.Vector2(-0.1, -0.45)]);
-    for (const z of [0.05, -0.05]) parts.push(paint(new THREE.ShapeGeometry(chev).rotateY(z > 0 ? 0 : Math.PI).translate(x, GATE_BASE_Y + H / 2, z), WHITE));
-  }
-  return mergeGeometries(parts);
+  ]);
 }
 export const PHYS_KINDS = {
   // (the cone's body: its cone, 0.93 m, the pivot 0.42 m over the base)
   cone: { geometry: () => paint(new THREE.CylinderGeometry(0.051 * CONE_SCALE, 0.275 * CONE_SCALE, 0.93 * CONE_SCALE, 16).translate(0, 0.465 * CONE_SCALE - PHYSICS_PROP_TYPES.cone.radius, 0), ORANGE), lift: PHYSICS_PROP_TYPES.cone.radius, model: true },
   tyre: { geometry: () => bodyCylinder(TIRE_OUTER_R, TIRE_TUBE_R), lift: TIRE_TUBE_R, model: true },
   barrel: { geometry: () => bodyCylinder(BARREL_HEIGHT * 0.33, BARREL_HEIGHT / 2), lift: BARREL_HEIGHT / 2, model: true },
-  gate: { geometry: gateGeometry, lift: 0 },
+  gate: { geometry: gateGeometry, lift: 0, model: true },
 };
 const geoCache = new Map();
 export const physGeometry = (kind) => geoCache.get(kind) ?? geoCache.set(kind, PHYS_KINDS[kind].geometry()).get(kind);
@@ -100,8 +96,61 @@ function floatGeometry(mesh) {
   }
   return g.applyMatrix4(mesh.matrixWorld);
 }
+/** three's LOD picks its level for EVERY camera that renders the scene — the sun shadow's (orthographic, far off) came
+ * last and left the far level on, a sign at 11 m drawn as boxes: this one follows the perspective (view) cameras only,
+ * and its shadow casts the level the view chose. (The chevron sign, the arch.) */
+export class ViewLOD extends THREE.LOD {
+  update(camera) { if (camera.isPerspectiveCamera) super.update(camera); }
+}
+
+// KITS: models in PARTS that a page assembles to fit (2026-10-28 — the start / finish ARCH, user: "they are floating and
+// look very cheap": tools/blender/thunderArch.py; gateMesh.js builds it to the road's width). Each part [LOD0, LOD1, LOD2];
+// each material a TILING set (UVs in metres, 1 m a repeat).
+const KITS = {
+  arch: {
+    glb: "/models/thunderline/obstacles/arch.glb",
+    parts: { leg: "ArchLeg", bay: "ArchBay", beam: "ArchBeam", head: "ArchHead", cap: "ArchCap", pod: "ArchPod" },
+    mats: { alu: { tex: "/textures/thunderline/obstacles/arch_alu", metal: true, parts: ["leg", "bay", "beam"] }, coat: { tex: "/textures/thunderline/obstacles/arch_coat", parts: ["head", "cap", "pod"] } },
+  },
+};
+const kits = new Map();
+/** A kit once loaded: { parts: { name: [LOD0, LOD1, LOD2] geometries }, material: { name: its material } }, or null. */
+export const physKit = (name) => kits.get(name) ?? null;
+const pbr = (map, normalMap, orm, metal) => new THREE.MeshStandardNodeMaterial({ map, normalMap, roughnessMap: orm, aoMap: orm, roughness: 1, ...(metal ? { metalnessMap: orm, metalness: 1 } : { metalness: 0 }) });
+async function loadKit(name, k) {
+  try {
+    const gltf = await getSharedGltfLoader().loadAsync(k.glb);
+    gltf.scene.updateMatrixWorld(true);
+    const byName = new Map();
+    gltf.scene.traverse((o) => { if (o.isMesh) byName.set(o.name, o); });
+    const parts = {}, material = {};
+    for (const [part, base] of Object.entries(k.parts)) {
+      parts[part] = [0, 1, 2].map((i) => {
+        const mesh = byName.get(`${base}LOD${i}`);
+        if (!mesh) throw new Error(`no mesh ${base}LOD${i} in ${k.glb}`);
+        return floatGeometry(mesh);
+      });
+    }
+    await Promise.all(Object.values(k.mats).map(async (mt) => {
+      const [map, normalMap, orm] = await Promise.all([
+        loadTexture(`${mt.tex}_color.png`, { colorSpace: THREE.SRGBColorSpace }),
+        loadTexture(`${mt.tex}_normal.png`, { colorSpace: THREE.NoColorSpace }),
+        loadTexture(`${mt.tex}_arm.png`, { colorSpace: THREE.NoColorSpace }),
+      ]);
+      for (const t of [map, normalMap, orm]) { t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 8; }
+      const mat = pbr(map, normalMap, orm, mt.metal);
+      for (const part of mt.parts) material[part] = mat;
+    }));
+    for (const mt of Object.values(material)) mt.userData.keep = true; // (shared by every copy: a page never disposes it)
+    // (the dot shader for the arch's LED header: imported here, the Node tests never load it)
+    const { makeLedMatrixMaterial, applyLedMatrixParams } = await import("../../../../v3/props/objects/shared/ledMatrix.js");
+    kits.set(name, { parts, material, makeLedMatrixMaterial, applyLedMatrixParams });
+  } catch (e) {
+    console.warn(`[physProps] the ${name} kit is not loaded: the procedural look stays`, e?.message ?? e);
+  }
+}
 export function loadPhysAssets() {
-  return (assetsLoad ??= Promise.all(Object.entries(MODELS).map(async ([kind, m]) => {
+  return (assetsLoad ??= Promise.all([...Object.entries(KITS).map(([n, k]) => loadKit(n, k)), ...Object.entries(MODELS).map(async ([kind, m]) => {
     try {
       const [gltf, map, normalMap, orm] = await Promise.all([
         getSharedGltfLoader().loadAsync(m.glb),
@@ -135,7 +184,7 @@ export function loadPhysAssets() {
     } catch (e) {
       console.warn(`[physProps] the ${kind} model is not loaded: the procedural look stays`, e?.message ?? e);
     }
-  })));
+  })]));
 }
 
 /** The builder's look of a body set: [{kind, local Matrix4}] in the obstacle's frame (static, plain meshes). */
