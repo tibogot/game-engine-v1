@@ -208,7 +208,7 @@ export const SHOWROOM = [
   // The ALN command post in the massif.
   // (The new standard, 2026-10-11: algAlnCamp.js buildCampV2 — stone houses, dry stone, sandstone.
   // ?camp=old = the kit one, A/B.)
-  { key: "alnCamp", build: CAMP_OLD ? buildAlnCamp : () => buildCampV2(), x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
+  { key: "alnCamp", build: CAMP_OLD ? buildAlnCamp : () => buildCampV2({ kit: !!MAP.flnKit }), x: ALN.x, z: ALN.z, yaw: siteYaw(ALN), flag: "fln" },
   ...ALN_BUILDABLES.map((v) => { const [x, z] = fromBase(v.lx, v.lz, ALN_SITE); return { key: v.key, build: v.build, x, z, yaw: ALN_SITE.yaw + v.yaw, follow: v.follow, rim: 4 }; }),
 ].filter(Boolean);
 

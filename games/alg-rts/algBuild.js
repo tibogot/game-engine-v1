@@ -24,10 +24,10 @@ import { kitView } from "./showroom.js";
 import { siteBags } from "./algSandbags.js";
 import { attachMotorPool, loadMotorPool } from "./algMotorPool.js";
 import { dressPens } from "./algPenProps.js";
-import { farmGeometry, loadFarmstead, loadSasPost, sasGeometry, loadLookout, loadMineMarker, lookoutGeometry, mineMarkerGeometry, setPieceState } from "./algSangar.js";
+import { farmGeometry, grotteGeometry, loadFarmstead, loadGrotte, loadSasPost, sasGeometry, loadLookout, loadMineMarker, lookoutGeometry, mineMarkerGeometry, setPieceState } from "./algSangar.js";
 import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, loadFrenchPost, swapPost, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
-import { PLAY, VIEW_YAW } from "./layout.js";
+import { MAP, PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { t } from "./i18n/i18n.js";
 
@@ -197,6 +197,15 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     // the caches already standing (the showroom's, the landmarks' in the hills): the new piece too
     const n = swapPlaced(showroom, /^armsCache\d*$/, armsCacheGeometry(), app);
     if (n) onCover();
+  });
+  // THE CAVE'S MOUTH in Blender (mechta.py grotte, 2026-10-28 — the new maps only: MAP.flnKit; ?cave=old keeps the old
+  // cave whole): the placed cave's kit shoring swapped, its sandstone rocks and dark kept; its damaged and blown-in
+  // models follow its health (algDamage, algStructures — setPieceState). (NOT its hung brush: the straw cards over the
+  // lintel read as two trees in front of the mouth from the game's camera, the objective's opening hidden — seen.)
+  const CAVE_OLD = typeof location !== "undefined" && new URLSearchParams(location.search).get("cave") === "old";
+  if (MAP.flnKit && !CAVE_OLD) loadGrotte().then((ok) => {
+    const m = showroom?.caveEntrance;
+    if (ok && m && swapPlaced({ caveEntrance: m }, /^caveEntrance$/, grotteGeometry(), app)) onCover();
   });
   const geoOf = (key) => { if (!geoCache.has(key)) geoCache.set(key, BUILDS[key].build()); return geoCache.get(key); };
 

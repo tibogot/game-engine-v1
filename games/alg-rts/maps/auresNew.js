@@ -211,4 +211,8 @@ export const MAP = {
   supply: OLD_MAP.supply.map((p) => (p.name === "South pass" ? { ...p, x: 55, z: -190 } : p)),
   fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },
   town: { houses: [...MECHTA_OA, ...MECHTA_EO, ...DECHRA, ...KSAR], props: [...(STONE_OA?.props ?? []), ...(STONE_EO?.props ?? []), ...(STONE_DE?.props ?? [])], replacesHamlet: true },
+  // THE FLN CAMP AND ITS CAVE in Blender (FLN_CAMP_PLAN.md, 2026-10-28): the command post, the casemates and the hidden
+  // fire in the camp (algAlnCamp kit), the cave's mouth set into its rocks with its damaged and blown-in states
+  // (algBuild loadGrotte). ?flnkit=0 = the code-built camp and the old shoring, to compare.
+  flnKit: typeof location === "undefined" || new URLSearchParams(location.search).get("flnkit") !== "0",
 };

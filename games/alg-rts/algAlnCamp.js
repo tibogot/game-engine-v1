@@ -15,6 +15,7 @@ import { sandstoneMaterial, sandstoneParams, setSandstoneColour } from "./algSan
 import { pebble } from "./algCave.js";
 import { addStoneHouse, newSite, siteGroup, stoneBlock } from "./algMasonry.js";
 import { grainSack } from "../../v3/render/objects/rtsAlgeria.js";
+import { houseMesh } from "./algHouse.js";
 
 const S = 1.3;   // the kit's scale (rtsAlnCamp: real metres × 1.3); the layout below is in kit metres
 
@@ -45,9 +46,42 @@ function rngFrom(seed) {
 // rock behind in the sandstone (above). One mesh per surface for the whole camp + the rock's: ~9
 // draws. The game reads its data as the kit camp's (geometry.userData: nav, cover, the house for a
 // garrison, the flag's mount) — the geometry itself an empty carrier, the camp its `extra`.
-export function buildCampV2({ seed = 1954, colour = "aures" } = {}) {
+//
+// `kit` (2026-10-28 — the new maps, MAP.flnKit; FLN_CAMP_PLAN.md): the code-built house, dugout, store and fire left out,
+// the BLENDER pieces in their place (tools/blender/mechta.py — the mechta kit, loaded before: algGame) — the command post
+// (a mechta under brush, its long-wire aerial), two casemates (half-buried refuges under earth and brush), the hidden
+// fire under its brush shade. The rock, the dry stone, the sangars and the flag's cairn as before.
+export function buildCampV2({ seed = 1954, colour = "aures", kit = false } = {}) {
   const W = S;   // kit metres → world
   const site = newSite();
+  const pieces = kit ? campPieces() : null;
+  if (kit && !pieces) console.warn("[fln camp] the mechta kit is not loaded: the code-built camp");
+  return pieces ? campRest({ seed, colour, site, pieces }) : campRest({ seed, colour, site, pieces: null, house: codeBuilt(site, seed) });
+}
+
+/** The camp's Blender pieces (world metres, the camp's frame; the kit's real metres ×1.3 in houseMesh) — null until loaded. */
+const KIT_PIECES = [
+  { type: "pc", x: -6.5, z: 3.4, yaw: 0 },            // (where the stone house stood: its door toward the forecourt's gap)
+  { type: "casemate", x: 10.4, z: -0.8, yaw: -0.12 }, // (the dugout's place)
+  { type: "casemate", x: -19.5, z: -3.2, yaw: 0.22 }, // (the store's)
+  { type: "foyer", x: -3 * S, z: -4 * S, yaw: 0.4 },  // (the cooking fire's: algGame lights it here)
+];
+function campPieces() {
+  const out = [];
+  for (const p of KIT_PIECES) {
+    const h = houseMesh(p.type, "intact");
+    if (!h) return null;
+    h.position.set(p.x, 0, p.z);
+    h.rotation.y = p.yaw;
+    h.name = `FlnCamp:${p.type}`;
+    out.push(h);
+  }
+  return out;
+}
+
+/** The code-built PC, dugout, store and fire (the camp before the Blender kit — the old Aurès'); the PC's plan. */
+function codeBuilt(site, seed) {
+  const W = S;
   // THE PC: the door inside the forecourt's gap (kit −7..−3 → world −9.1..−3.9).
   const house = addStoneHouse(site, { ox: -8.5, oz: 2.6, seed, doorX: 1.6, windows: [-3.4, 4.4] });
   // The wilaya's radio: a whip aerial off its roof.
@@ -77,6 +111,12 @@ export function buildCampV2({ seed = 1954, colour = "aures" } = {}) {
     }
     site.metal.push(new THREE.CylinderGeometry(0.3, 0.24, 0.36, 12).translate(fx + 0.95, 0.45, fz + 0.2));
   }
+  return house;
+}
+
+/** The rest of the camp, either way: the sangars' guns, the rock and the dry stone, its data. */
+function campRest({ seed, colour, site, pieces, house = null }) {
+  const W = S;
   // THE SANGARS' GUNS: a light machine gun on its bipod over each ring's front lip.
   for (const sg of SANGARS) {
     const gx = (sg.x + Math.cos(sg.face) * 1.45) * W, gz = (sg.z + Math.sin(sg.face) * 1.45) * W, yaw = -sg.face + Math.PI / 2;
@@ -121,8 +161,10 @@ export function buildCampV2({ seed = 1954, colour = "aures" } = {}) {
     rect(sg.x * W, sg.z * W, 2.6 * W, 2.6 * W, true);
     cover.push({ hard: true, pts: Array.from({ length: 8 }, (_, k) => { const a = sg.face - Math.PI * 0.65 + (k / 7) * Math.PI * 1.3; return [(sg.x + Math.cos(a) * 1.9) * W, (sg.z + Math.sin(a) * 1.9) * W]; }) });
   }
-  for (let k = 0; k < 9; k++) { const a = (k / 9) * Math.PI * 2 + rnd() * 0.25; put(-3 + Math.cos(a) * 0.58, -0.02, -4 + Math.sin(a) * 0.58, 0.55); }
-  for (let k = 0; k < 3; k++) put(-3 + 0.73 + Math.cos(k * 2.1) * 0.15, -0.02, -4 + 0.15 + Math.sin(k * 2.1) * 0.15, 0.45);
+  if (!pieces) {   // (the fire's ring and the pot's stones: the Blender fire has its own)
+    for (let k = 0; k < 9; k++) { const a = (k / 9) * Math.PI * 2 + rnd() * 0.25; put(-3 + Math.cos(a) * 0.58, -0.02, -4 + Math.sin(a) * 0.58, 0.55); }
+    for (let k = 0; k < 3; k++) put(-3 + 0.73 + Math.cos(k * 2.1) * 0.15, -0.02, -4 + 0.15 + Math.sin(k * 2.1) * 0.15, 0.45);
+  }
   for (let k = 0; k < 9; k++) { const c = k < 6 ? 0 : 1, a = (k / (c ? 3 : 6)) * Math.PI * 2 + rnd(); put(-9 + Math.cos(a) * (c ? 0.22 : 0.45), c * 0.28 - 0.02, -3.5 + Math.sin(a) * (c ? 0.22 : 0.45), 0.85); }
   const rockGeo = mergeGeometries(geos);
   for (const g of geos) g.dispose();
@@ -131,7 +173,13 @@ export function buildCampV2({ seed = 1954, colour = "aures" } = {}) {
   rock.name = "FlnCamp:sandstone";
   rock.castShadow = rock.receiveShadow = true;
   // THE BUILDINGS' blocks and cover.
-  const blocks = [[house.main.x, house.main.z, house.main.w / 2 + 0.5, house.main.d / 2 + 0.5], [house.annex.x, house.annex.z, house.annex.w / 2 + 0.4, house.annex.d / 2 + 0.4], [10.4, -1.3, 4.3, 3.0], [-19.5, -3.9, 3.2, 2.4]];
+  // (the Blender pieces': the PC's walls — mechta.py petite's main ±2.6 × ±2.1 — and the casemates' front and mound; the
+  // fire walked through)
+  const pc = pieces ? KIT_PIECES[0] : null;
+  if (pc) house = { main: { x: pc.x, z: pc.z, w: 5.2 * S, d: 4.2 * S }, door: [pc.x - 1.06 * S, pc.z - 2.1 * S - 0.6] };
+  const blocks = pieces
+    ? [[pc.x, pc.z, 2.6 * S + 0.5, 2.1 * S + 0.5], ...KIT_PIECES.filter((p) => p.type === "casemate").map((p) => [p.x, p.z + 0.4 * S, 2.7 * S, 2.25 * S])]
+    : [[house.main.x, house.main.z, house.main.w / 2 + 0.5, house.main.d / 2 + 0.5], [house.annex.x, house.annex.z, house.annex.w / 2 + 0.4, house.annex.d / 2 + 0.4], [10.4, -1.3, 4.3, 3.0], [-19.5, -3.9, 3.2, 2.4]];
   for (const [cx, cz, hx, hz] of blocks) { rect(cx, cz, hx, hz); box(cx, cz, hx - 0.4, hz - 0.4); }
   // THE CARRIER: an empty geometry with the camp's data; the camp its `extra`.
   const carrier = new THREE.BufferGeometry();
@@ -143,7 +191,7 @@ export function buildCampV2({ seed = 1954, colour = "aures" } = {}) {
     navRects: nav, coverLines: cover, coverPerimeter: false,
     houses: [{ x: house.main.x, z: house.main.z, w: house.main.w, d: house.main.d, yaw: 0, door: house.door }],
     campfire: [-3 * W, 0, -4 * W],   // its cooking fire (algGame lights it; algNightLamps' campfire)
-    extra: [group, rock], labMaterial: new THREE.MeshBasicMaterial({ visible: false }),
+    extra: [group, rock, ...(pieces ?? [])], labMaterial: new THREE.MeshBasicMaterial({ visible: false }),
   });
   return carrier;
 }

@@ -26,10 +26,12 @@ export function dressPens(mesh, pens) {
   if (!pens?.length) return;
   // THE HAY: the straw-card haystack (algHaystack — 2026-10-26, the props kit's lumpy one "very cheap"), attached to
   // the piece in the one instanced field
-  for (const p of pens) if (p.kind === "hay" || p.kind === "haypile") haystackField().add(mesh, p.x, p.y, p.z, p.yaw ?? 0, p.scale ?? 1, null, p.kind === "hay" ? "stack" : "pile");
+  // (+ the FLN pieces' cut BRUSH: "brush" spots, algHaystack's brush kind)
+  const HAY = { hay: "stack", haypile: "pile", brush: "brush" };
+  for (const p of pens) if (HAY[p.kind]) haystackField().add(mesh, p.x, p.y, p.z, p.yaw ?? 0, p.scale ?? 1, null, HAY[p.kind]);
   const go = () => {
     for (const p of pens) {
-      if (p.kind === "hay" || p.kind === "haypile") continue;
+      if (HAY[p.kind]) continue;
       const h = houseMesh(TYPE[p.kind], "intact", VP);
       if (!h) continue;
       h.position.set(p.x, p.y, p.z);

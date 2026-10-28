@@ -180,7 +180,8 @@ function loadBlenderPiece(kit, type, old, extra = null, { stone = true, cloth = 
     { const hay = parts[`${type}:intact`]?.hay ?? [];
       if (hay.length) {
         const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3(), _e = new THREE.Euler();
-        g.userData.pens = [...(g.userData.pens ?? []), ...hay.map((h) => { h.decompose(_p, _q, _s); _e.setFromQuaternion(_q, "YXZ"); return { kind: "haypile", x: _p.x * S, y: _p.y * S, z: _p.z * S, yaw: _e.y }; })];
+        // (a spot's kind and scale its own: the FLN pieces' brush — algHouse)
+        g.userData.pens = [...(g.userData.pens ?? []), ...hay.map((h) => { h.decompose(_p, _q, _s); _e.setFromQuaternion(_q, "YXZ"); return { kind: h.kind === "brush" ? "brush" : "haypile", x: _p.x * S, y: _p.y * S, z: _p.z * S, yaw: _e.y, scale: _s.x }; })];
       } }
     o.dispose();
     _detail = T;
@@ -526,6 +527,11 @@ function seatSangarGun(g) {
 /** The arms cache (tools/blender/armsCache.py). */
 export const loadArmsCache = () => loadBlenderPiece("armscache", "arms", () => buildArmsCache());
 export const armsCacheGeometry = () => pieceGeometry("armscache", "arms");
+/** THE CAVE'S MOUTH (tools/blender/mechta.py grotte, 2026-10-28 — the new maps, MAP.flnKit): its shoring, breastwork,
+ *  brush and gear, set into the placed cave's sandstone rocks (its children, kept); the cave's data (its nav, cover,
+ *  fire, tether) the placed one's — nothing to take from an old piece. Its damaged / ruin (blown in) follow its health. */
+export const loadGrotte = () => loadBlenderPiece("mechta", "grotte", () => new THREE.BufferGeometry(), null, { stone: false, surfaces: { stone: "drystone", plaster: "mudRender" } });
+export const grotteGeometry = () => pieceGeometry("mechta", "grotte");
 /** The ambush screen (tools/blender/ambushScreen.py): its stone; its SCRUB the engine's plants (screenPlantSpots). */
 export const loadAmbushScreen = () => loadBlenderPiece("ambushscreen", "ambush", () => buildAmbushScreen(), (g) => { g.userData.screenPlants = screenPlantSpots(); });
 export const ambushScreenGeometry = () => pieceGeometry("ambushscreen", "ambush");

@@ -400,6 +400,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
     (MAP.farmsteads ?? []).forEach((f, i) => extra.push({ key: `mechtaFarmMap${i + 1}`, build: (o) => buildFarmstead({ ...o, seed: 1975 + i * 7 }), x: f.x, z: f.z, yaw: VIEW_YAW + (f.turn ?? 0), ground: true }));
     // The sandstone cave's rocks (algCave.js), made in workers: waited for here, not built on the main thread.
     await prefetchCave();
+    if (MAP.flnKit) await loadHouses("mechta");   // (the FLN camp's Blender pieces: algAlnCamp kit)
     await sandbagsReady;   // (the post's walls are built from it)
     app.showroom = await placeShowroom(app, [...SHOWROOM, ...extra]);
   }

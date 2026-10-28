@@ -55,6 +55,12 @@ damaged, the mouth blown in when destroyed. Its rocks: the sandstone generator's
 
 The new Aurès and the new maps (a map flag, as the villages); **the old Aurès keeps its camp and cave as they are**.
 
+**Done 2026-10-28 (MAP.flnKit, the new Aurès; `?flnkit=0` = the code-built camp to compare):** the camp's house, dugout,
+store and fire → the `pc`, two `casemate`s and the `foyer` (algAlnCamp `kit`); the rock, dry stone, sangars and the flag
+kept. The cave's kit shoring → the `grotte` (algBuild loadGrotte), its damaged and blown-in models following its health
+(checked: 40 % → damaged, destroyed → ruin). Its hung brush is NOT drawn in the game: from the RTS camera the cards over
+the lintel read as two trees hiding the mouth. The old Aurès: its camp and cave as before.
+
 ## 6. Questions — with what I suggest
 
 1. **Hidden or showy?** Hidden: the camp under brush, half in the ground — the French have to find it. (Gameplay:
