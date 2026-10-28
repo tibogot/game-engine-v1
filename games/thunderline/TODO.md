@@ -348,8 +348,12 @@ page awaits it); every model is built round the physics' own body (same sizes, p
 Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh leaves Blender with v pre-flipped.
 - [x] TYRE (truck tyre 385/65 R22.5 at the stack's 1.4 m: chevron lugs as geometry, lettering, ribs, dust) — LOD0 5.2k
       tris, LOD1 1.6k, LOD2 0.45k; one draw per kind (instanced); ~4 MB of GPU textures (BC7).
-- [ ] LODs on the instanced props: the GLB holds LOD1/2, the props draw LOD0 only (engine: CULLING_LOD_SPEC step 4).
-- [ ] Oil drum · traffic cone (+ cone row) · swing gates · bollard (pole, slalom, pole gate) · block (stunt box,
+- [x] OIL DRUM (the game's 1.5 m drum: rims, hoops, lid and bungs, dents, chipped red paint, rust, stencil, label) —
+      4.3k / 1.5k / 0.2k tris. The ASSET LAB (proto/asset-lab.html) shows every obstacle and sign.
+- [x] LODs on the instanced props (physProps.js PROP_LOD_FAR 26 / 70 m): one instanced mesh per level, refilled each
+      frame by distance; an empty level keeps a zero-size instance (compiled behind the loading screen, never mid-race).
+      30 tyres + 6 drums: 183k → 14.6k tris from 242 m, 156k beside them; 0 pipelines while racing.
+- [ ] Traffic cone (+ cone row) · swing gates · bollard (pole, slalom, pole gate) · block (stunt box,
       diamond plate) · the two walls (truss + panel, the door / hole trimmed).
 - [ ] SIGNS: start, finish, chevron, aim — real trackside boards and banners.
 - [ ] One shared atlas for all obstacles once the set is done (one material: fewer draws, fewer textures).

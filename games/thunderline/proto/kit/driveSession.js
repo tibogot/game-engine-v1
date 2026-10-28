@@ -1016,7 +1016,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (ticks) S.physMs.push((performance.now() - tPhys) / ticks);
     if (S.physMs.length > 480) S.physMs.splice(0, 240); // trimmed in batches, not shifted every frame (the debug readout's last 240+)
     vehicle.syncVisuals(dt, S.simAccum / FIXED_DT);
-    S.physProps.sync();
+    S.physProps.sync(camera); // (each prop at its level of detail for this camera)
     if (dt > 0) tyreMarks?.update(vehicle, dt);
     tyreSmoke?.update(vehicle, dt);
     engineTick(dt, input);

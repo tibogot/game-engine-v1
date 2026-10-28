@@ -158,59 +158,99 @@ export const body = (kind, x = 0, z = 0, yaw = 0, up = 0) => ({ kind, local: new
  * @param getGroundBvh () => the car's deck BVH (props rest on and slide over the road)
  * @param layer the shadow layer for moving things (sunShadows DYNAMIC_LAYER)
  */
+// THE LEVELS OF DETAIL by distance (2026-10-28, user: "hope they are optimized enough"): a model's levels drawn from
+// here (m) — the asset lab's "By distance" shows the same. A tyre stack 200 m off was 3 × 5.2k triangles; now 3 × 0.45k.
+export const PROP_LOD_FAR = [26, 70];
+const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
+
 export function createPhysProps(scene, bodies, getGroundBvh, layer = null) {
-  const instances = [], meshes = new Map();
+  const instances = [], groups = [];
   const _p = new THREE.Vector3(), _q = new THREE.Quaternion(), _s = new THREE.Vector3();
   const byKind = new Map();
   for (const b of bodies) (byKind.get(b.kind) ?? byKind.set(b.kind, []).get(b.kind)).push(b);
   for (const [kind, list] of byKind) {
-    const im = new THREE.InstancedMesh(physGeometry(kind), physMaterial(kind), list.length);
-    im.name = `props:${kind}`;
-    im.castShadow = true;
-    im.receiveShadow = true;
-    im.frustumCulled = false; // (bodies fly: the instanced bounds would go stale)
-    if (layer != null) im.layers.enable(layer);
-    scene.add(im);
-    meshes.set(kind, im);
-    list.forEach((b, i) => {
+    // ONE instanced mesh per level (a kind without a model: its one procedural look), refilled each frame by distance
+    const lods = physModel(kind)?.lods ?? [physGeometry(kind)];
+    const levels = lods.map((geo, li) => {
+      const im = new THREE.InstancedMesh(geo, physMaterial(kind), list.length);
+      im.name = `props:${kind}:lod${li}`;
+      im.castShadow = true;
+      im.receiveShadow = true;
+      im.frustumCulled = false; // (bodies fly: the instanced bounds would go stale)
+      if (layer != null) im.layers.enable(layer);
+      scene.add(im);
+      return im;
+    });
+    const group = { levels, list: [] };
+    for (const b of list) {
       b.M.decompose(_p, _q, _s);
       const root = new THREE.Object3D();
       root.position.copy(_p);
       root.quaternion.copy(_q);
-      instances.push({ id: kind, root, authoredPos: _p.clone(), authoredQuat: _q.clone(), im, i });
-      im.setMatrixAt(i, b.M);
-    });
-    im.instanceMatrix.needsUpdate = true;
+      const inst = { id: kind, root, authoredPos: _p.clone(), authoredQuat: _q.clone(), M: b.M.clone(), group };
+      instances.push(inst);
+      group.list.push(inst);
+    }
+    groups.push(group);
   }
   const physics = new PropPhysics({ props: { instances }, getGroundBvh });
   physics.sync();
-  const _m = new THREE.Matrix4(), _one = new THREE.Vector3(1, 1, 1);
+  const _one = new THREE.Vector3(1, 1, 1);
   let moved = false;
+  /** Every body into the level its distance asks for. A level left empty keeps ONE zero-size instance: still drawn,
+   *  so its shader is compiled behind the loading screen with the rest, not when a prop first comes near mid-race. */
+  function place(camera) {
+    const cam = camera?.position;
+    for (const g of groups) {
+      const L = g.levels.length;
+      for (const im of g.levels) im.count = 0;
+      for (const inst of g.list) {
+        let li = 0;
+        if (L > 1 && cam) {
+          const d = _p.setFromMatrixPosition(inst.M).distanceTo(cam);
+          li = d > PROP_LOD_FAR[1] ? Math.min(2, L - 1) : d > PROP_LOD_FAR[0] ? 1 : 0;
+        }
+        const im = g.levels[li];
+        im.setMatrixAt(im.count++, inst.M);
+      }
+      for (const im of g.levels) {
+        im.userData.empty = im.count === 0;
+        if (im.userData.empty) { im.setMatrixAt(0, ZERO); im.count = 1; }
+        im.instanceMatrix.needsUpdate = true;
+      }
+    }
+  }
+  place(null);
   return {
     count: instances.length,
     /** One physics tick (the drive's fixed step), after the car's. */
     tick(dt, vehicle) { if (!instances.length) return; physics.tick(dt, vehicle); moved = true; },
-    /** Each frame: the bodies' poses into their instances (only after ticks). */
-    sync() {
-      if (!moved) return;
-      moved = false;
-      const dirty = new Set();
-      for (const s of physics.sims) {
-        if (s.asleep && !s.wasAwake && s.profile.kind !== "hinge") continue;
-        s.wasAwake = !s.asleep;
-        const inst = s.inst;
-        inst.im.setMatrixAt(inst.i, _m.compose(inst.root.position, inst.root.quaternion, _one));
-        dirty.add(inst.im);
+    /** Each frame: the bodies' poses (after ticks), then each into its level by the camera's distance. */
+    sync(camera = null) {
+      if (!instances.length) return;
+      if (moved) {
+        moved = false;
+        for (const s of physics.sims) {
+          if (s.asleep && !s.wasAwake && s.profile.kind !== "hinge") continue;
+          s.wasAwake = !s.asleep;
+          s.inst.M.compose(s.inst.root.position, s.inst.root.quaternion, _one);
+        }
       }
-      for (const im of dirty) im.instanceMatrix.needsUpdate = true;
+      place(camera);
     },
     /** Everything back where it was placed (a restart). */
     reset() {
       physics.reset();
-      for (const inst of instances) inst.im.setMatrixAt(inst.i, _m.compose(inst.authoredPos, inst.authoredQuat, _one));
-      for (const im of meshes.values()) im.instanceMatrix.needsUpdate = true;
+      for (const inst of instances) inst.M.compose(inst.authoredPos, inst.authoredQuat, _one);
+      place(null);
     },
     get awake() { return physics.awakeCount; },
-    dispose() { for (const im of meshes.values()) { scene.remove(im); im.dispose(); } meshes.clear(); },
+    /** (tests, the lab) how many bodies each level draws now: { kind: [n0, n1, n2] } (a lone zero-size one counts 0) */
+    levelCounts() {
+      const out = {};
+      for (const g of groups) out[g.list[0].id] = g.levels.map((im) => (im.userData.empty ? 0 : im.count));
+      return out;
+    },
+    dispose() { for (const g of groups) for (const im of g.levels) { scene.remove(im); im.dispose(); } groups.length = 0; },
   };
 }

@@ -10,7 +10,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { startV3App } from "../../../../v3/engine.js";
 import { createDriveRig } from "./driveSession.js";
 import { applyWorld, TIMES, groundFeatures } from "./worlds.js";
-import { loadPhysAssets, physModel, physOldLook } from "./physProps.js";
+import { loadPhysAssets, physModel, physOldLook, PROP_LOD_FAR } from "./physProps.js";
 import { OBSTACLES, obstacleLook } from "./obstacles.js";
 import { SECTIONS, ENTRIES, STATUS } from "./assetLabCatalog.js";
 
@@ -91,7 +91,7 @@ function frameOn(obj, from = "front") {
 const state = { entry: null, version: "both", arrange: "game", lod: "auto", wire: false, spin: false };
 let shown = []; // [{ mesh, lods, wire }] — the meshes of the model (their level swapped by distance)
 const wireMat = new THREE.MeshBasicNodeMaterial({ color: 0x9dff00, wireframe: true, transparent: true, opacity: 0.55, depthWrite: false });
-const LOD_FAR = [26, 70]; // m: level 1 from here, level 2 from there (what the game will do once it has LODs on props)
+const LOD_FAR = PROP_LOD_FAR; // m: level 1 from here, level 2 from there — the game's own (physProps.js)
 
 function bodiesOf(entry) {
   const all = OBSTACLES[entry.obstacle]?.phys ?? [];
