@@ -28,7 +28,7 @@ export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // (+ the DECHRA's pieces, 2026-10-27 — DECHRA_PLAN.md: its mosque, a terrace's retaining wall, the lanes' steps, the djemaa)
 export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna", "masjid", "soutien", "escalier", "djemaa",
   "pc", "casemate", "grotte", "foyer",   // (+ the FLN CAMP's, 2026-10-27 — FLN_CAMP_PLAN.md: the command post, the refuge, the cave's mouth, the hidden fire)
-  "koubba", "hawsh", "tombe", "tombeb", "murette"];   // (+ 2026-10-29: the marabout's tomb, a grave (earth / whitewashed), a low broken wall)
+  "koubba", "hawsh", "tombe", "tombeb", "tombec", "murette"];   // (+ 2026-10-29: the marabout's tomb, a grave (earth / whitewashed), a low broken wall)
 /** THE KOUBBA'S ENCLOSURE (tools/blender/mechta.py KB_HAWSH — change both together): its outline, the gateway between
  *  the first and last points. */
 const KB_HAWSH = [[1.45, -5.58], [4.9, -5.1], [5.9, -1.2], [5.5, 3.6], [2.2, 5.8], [-2.6, 5.5], [-5.6, 2.9], [-5.9, -1.9], [-4.6, -5.3], [-1.45, -5.58]];

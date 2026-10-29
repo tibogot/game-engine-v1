@@ -40,7 +40,10 @@ P. Raffa, *The marabout* ([Disegnarecon](https://disegnarecon.univaq.it/ojs/inde
 A town PROP (no garrison): its walls the nav's blocks and hard cover (algHouse MECHTA_PROPS koubba), on a levelled pad
 on its crest, facing the camera. Footprint ≤ 12.5 m across (×1.3 in the game).
 
-## Next, the same way
+## The cemetery — redone the same way (2026-10-29)
 
-The graves (a rural Algerian cemetery: a low rectangle of stones, an uncut upright headstone, some plastered low
-boxes — not round beads), then every remaining asset.
+Three graves (mechta.py buildGrave), laid on the slope toward Mecca: `tombe` a kerb of split slabs on edge round a bed
+of dark earth and small stones, an uncut upright headstone (the chahed) and a footstone — the commonest; `tombeb` a low
+whitewashed plastered box, a ridge along it, a plastered stele with a pointed head, the plaster fallen in patches;
+`tombec` an old grave slumped to a heap of stones, its headstone half sunk. The low wall at their feet (`murette`)
+stone by stone. Then every remaining asset, the same way.

@@ -803,45 +803,79 @@ def whiteRubble(nb):
     return dust(nb, nb.mix(nb.mr(nb.noise(2.5, 4), 0.45, 0.6), s, srgb(0xe2dccd)), 1.6, 1.0)
 MATDEF.update({"mechtaWhiteRubble": (0.95, whiteRubble)})
 
+def graveSlab(nb):
+    """The slabs of the graves: split schist and limestone from the hill, grey-ochre, each its own shade, lichen-grey
+    patches, dust at the foot."""
+    # (darker, more varied than the first bake — pale even slabs read as soap bars in the lab, 2026-10-29)
+    c = nb.mix(0.5, nb.img("build/rabdentse_ruins_wall/rabdentse_ruins_wall_diff_1k.jpg", 1.2), srgb(0x857a68))
+    c = nb.scale(c, nb.mr(nb.island(), 0.0, 1.0, 0.68, 1.12))
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(5.0, 4, 0.6), 0.55, 0.72), 0.7), c, srgb(0x5f5f55))   # (dark lichen)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(9.0, 3, 0.6), 0.62, 0.74), 0.5), c, srgb(0xb8b29c))   # (pale crust)
+    return dust(nb, c, 0.25, 0.8)
+MATDEF.update({"graveSlab": (0.95, graveSlab)})
+
 def buildGrave(K, name, spec, state, seed):
-    """A GRAVE (the cemetery below the koubba — the game lays each toward Mecca, on the slope as it is): a low earth
-    mound in a border of small stones, an upright HEADSTONE (+Z) and a smaller footstone, rough flat slabs; `white`: the
-    mound and the headstone whitewashed. Its foot sunk: the slope under it never shows a gap."""
-    R = random.Random(seed); G = "h"; white = spec.get("white")
-    # (LOW and STONY: a 20 cm round mound of pale earth read as a loaf of bread in the game, 2026-10-29 — as the old one's
-    # note said; the Aurès' graves are a low bed of earth and stones)
-    # (the earth DARK, fresh-turned: the casemate's pale earth read as a loaf against the hill's shade; the stones ROUNDED,
-    # sub 2 — at sub 1 a ring of icosahedra read as spikes)
-    K.lump("Mound", (0.0, -0.05, 0.0), (0.42, 0.1, 1.02), "renderPlain" if white else "graveEarth", G, seed=seed, rough=0.2, sub=3)
-    for k in range(12):
-        a = k / 12 * 6.283 + R.uniform(-0.1, 0.1)
-        K.lump(f"Edge{k}", (math.cos(a) * 0.56, -0.05 + k * 0.004, math.sin(a) * 1.18), (0.15, 0.1, 0.12), "stoneMechta", G, seed=seed + k, rough=0.2, sub=2)
-    if not white:   # stones laid over the bed (a whitewashed grave is plastered smooth)
-        for k in range(7):
-            x, z = R.uniform(-0.24, 0.24), R.uniform(-0.75, 0.75)
-            h = 0.06 * math.sqrt(max(0.0, 1 - (x / 0.42) ** 2 - (z / 1.02) ** 2))
-            K.lump(f"Bed{k}", (x, -0.04 + h + k * 0.003, z), (0.1, 0.06, 0.09), "stoneMechta", G, seed=seed + 40 + k, rough=0.2, sub=2)
-    K.lump("Head", (R.uniform(-0.04, 0.04), -0.3, 1.36), (0.34, 1.0 + R.uniform(-0.12, 0.1), 0.09), "renderPlain" if white else "stoneMechta", G, seed=seed + 20, rough=0.22, sub=2)
-    K.lump("Foot", (R.uniform(-0.04, 0.04), -0.25, -1.31), (0.22, 0.55, 0.075), "stoneMechta", G, seed=seed + 21, rough=0.22, sub=2)
+    """A GRAVE of the Aurès (2026-10-29, redone from references — the first, a bead ring round a pale mound, read cheap):
+    laid toward Mecca, on the slope as it is (the game tilts it to the ground); its head at +Z. `grave` (spec):
+      slab   a kerb of rough slabs set on edge round a bed of dark earth and small stones; an uncut upright HEADSTONE (the
+             chahed), a smaller one at the foot — the commonest;
+      white  a low plastered box, whitewashed and weathered (the plaster fallen in patches), a ridge along its top, a
+             plastered stele with a pointed head;
+      heap   an old grave: its kerb slumped low, a heap of stones over it, a short headstone half sunk.
+    Every stone's foot sunk: never a gap under it on the slope."""
+    R = random.Random(seed); G = "h"; kind = spec.get("grave", "slab"); stone = house.drystone.stone
+    L, Wd = 1.05, 0.4   # the bed's half length and half width
+    if kind == "white":
+        box = K.box("Plaster", -Wd - 0.04, Wd + 0.04, -0.3, 0.3, -L, L, "limeWash", G, 0)
+        K.bevel(box, 0.05, 3, 30)
+        for k in range(2):   # the plaster fallen in patches (after the bevel: small cuts, no slivers)
+            K.boolean(box, K.breach((R.choice((-1, 1)) * (Wd + 0.04), R.uniform(0.02, 0.16), R.uniform(-0.7, 0.4)), (0.22, 0.12, 0.25), seed=seed + k, mat="graveSlab", rough=0.3))
+        ridge = K.box("Ridge", -0.15, 0.15, 0.24, 0.41, -L + 0.2, L - 0.26, "limeWash", G, 0)
+        K.bevel(ridge, 0.05, 3, 30)
+        K.member("Stele", (0.0, 0.0, L - 0.08), (0.0, 0.0, L + 0.06), [(-0.21, -0.3), (0.21, -0.3), (0.21, 0.62), (0.12, 0.77), (0.0, 0.84), (-0.12, 0.77), (-0.21, 0.62)], "limeWash", G, w=0.02)
+        stone(K, "Foot", (0.0, 0.05, -L - 0.08), (0.14, 0.28, 0.05), R, 0.0, "graveSlab", yaw=R.uniform(-0.08, 0.08), box=0.55)
+        return
+    heap = kind == "heap"
+    # THE KERB: slabs on edge along both sides, two across each end (a heap's slumped low)
+    k = 0
+    for side in (-1, 1):
+        z = -L
+        while z < L - 0.12:
+            w = min(R.uniform(0.3, 0.5), L - z); h = R.uniform(0.15, 0.25) * (0.55 if heap else 1.0)
+            stone(K, f"Kerb{k}", (side * (Wd + R.uniform(-0.02, 0.03)), h * 0.45 - 0.1, z + w / 2), (w / 2, h, 0.045), R, 0.0, "graveSlab", yaw=math.pi / 2 + R.uniform(-0.07, 0.07), box=0.6)
+            k += 1; z += w + R.uniform(0.0, 0.03)
+    for end in (-1, 1):
+        for s in (-1, 1):
+            h = R.uniform(0.14, 0.22) * (0.55 if heap else 1.0)
+            stone(K, f"End{k}", (s * Wd * 0.5, h * 0.45 - 0.1, end * (L + 0.04)), (Wd * 0.5, h, 0.045), R, 0.0, "graveSlab", yaw=R.uniform(-0.07, 0.07), box=0.6)
+            k += 1
+    # THE BED: dark earth, small stones laid over it (a heap: piled high in the middle)
+    K.lump("Bed", (0.0, -0.06, 0.0), (Wd - 0.03, 0.2 if heap else 0.1, L - 0.05), "graveEarth", G, seed=seed, rough=0.2, sub=3)
+    for i in range(26 if heap else 20):
+        x, z = R.uniform(-Wd + 0.1, Wd - 0.1), R.uniform(-L + 0.12, L - 0.12)
+        top = (0.16 if heap else 0.05) * math.sqrt(max(0.0, 1 - (x / Wd) ** 2 - (z / L) ** 2))
+        sz = R.uniform(0.06, 0.11) * (1.3 if heap else 1.0)
+        wallStone(K, f"Bed{i}", (x, top - 0.02 + i * 0.002, z), (sz * 1.2, sz * 0.6, sz), R, R.uniform(0, 6.28))
+    # THE HEADSTONE (the chahed): an uncut slab upright at the head, leaning a little; a smaller one at the foot
+    hh = R.uniform(0.38, 0.5) * (0.6 if heap else 1.0)
+    stone(K, "Head", (R.uniform(-0.04, 0.04), hh - 0.3, L + 0.13), (R.uniform(0.19, 0.25), hh + 0.3, 0.06), R, 0.0, "graveSlab", yaw=R.uniform(-0.12, 0.12), box=0.5)
+    fh = hh * 0.55
+    stone(K, "Foot", (R.uniform(-0.04, 0.04), fh - 0.22, -L - 0.12), (0.14, fh + 0.22, 0.05), R, 0.0, "graveSlab", yaw=R.uniform(-0.12, 0.12), box=0.5)
 
 def buildLowWall(K, name, spec, state, seed):
-    """A LOW BROKEN DRY-STONE WALL, a 4 m length (the cemetery's edge, a field's): its top uneven, a gap fallen in
-    when damaged, its stumps when a ruin. Its foot 1 m down (stood on a slope as it is)."""
-    G = "h"
-    w = prismX(K, "Low", [(-0.25, -1.0), (-0.22, 0.72), (0.22, 0.68), (0.25, -1.0)], -2.0, 2.0, "stoneMechta")
-    K.boolean(w, K.skyline(-3, 3, -1, 1, 0.55, 0.16, seed=seed, mat="stoneMechta"))
-    if state != "intact":
-        K.boolean(w, K.breach((0.5, 0.6, 0.0), (0.7, 0.4, 0.5), seed=seed + 1, mat="stone"))
-        K.lump("Fall", (0.6, 0.0, -0.6), (0.6, 0.2, 0.35), "rubble", G, seed=seed + 2)
-    if state == "ruin": K.boolean(w, K.skyline(-3, 3, -1, 1, 0.25, 0.12, seed=seed + 3, mat="stone"))
-    K.bevel(w, 0.04, 2, 30)
+    """A LOW DRY-STONE WALL, a 4 m length (the cemetery's foot, a field's edge), stone by stone (stoneWallPath — the
+    first, a prism with a stone photo, read as a plank): breached when damaged, its top half fallen as a ruin."""
+    stoneWallPath(K, random.Random(seed), [(-2.0, 0.0), (2.0, 0.0)], 0.78, 0.5, state, gap=(0.5, 0.0, 0.6) if state != "intact" else None)
 
-MATDEF.update({"graveEarth": (1.0, lambda nb: dust(nb, nb.mix(nb.noise(6.0, 5), srgb(0x4a3a2b), srgb(0x5e4a37)), 0.5, 0.4))})
+MATDEF.update({"graveEarth": (1.0, lambda nb: dust(nb, nb.mix(nb.noise(6.0, 5), srgb(0x4a3a2b), srgb(0x5e4a37)), 0.5, 0.12))})   # (dust light: the bed is all "foot" — at 0.4 it baked pale)
 TYPES["koubba"] = dict(builder=buildKoubba, atlas=2048, farRatio=0.65, islandMargin=0.004)   # (islands 8 px apart: at 1 px the dome's seams bled — dark notches)
-TYPES["hawsh"] = dict(builder=buildHawsh, atlas=1024, farRatio=0.75, islandMargin=0.002, aoDist=0.2, smoothAngle=80, weighted=False)   # (round-shaded stones, the sangar's: at 35° they read faceted, crystals)   # (its stones packed: a short AO — fieldwall.py; 0.4 baked them near black)   # (0.4: its damaged and ruin far levels shaded off their near — the gate)
-TYPES["tombe"] = dict(builder=buildGrave, atlas=256, farRatio=0.5, states=["intact"])
-TYPES["tombeb"] = dict(builder=buildGrave, atlas=256, farRatio=0.5, states=["intact"], white=True)
-TYPES["murette"] = dict(builder=buildLowWall, atlas=256, farRatio=0.6)
+TYPES["hawsh"] = dict(builder=buildHawsh, atlas=1024, farRatio=0.75, islandMargin=0.002, aoDist=0.2, smoothAngle=80, weighted=False)   # (stones packed: a short AO — 0.4 baked them near black; round-shaded, the sangar's — at 35° they read as crystals)
+# the graves: their stones round-shaded, a short AO (packed small stones)
+GRAVE = dict(builder=buildGrave, atlas=512, farRatio=0.6, states=["intact"], aoDist=0.25, smoothAngle=38, weighted=False, islandMargin=0.003)   # (split stone: crisp arrises — at 70° the slabs read as soap)
+TYPES["tombe"] = dict(GRAVE, grave="slab")
+TYPES["tombeb"] = dict(GRAVE, grave="white")
+TYPES["tombec"] = dict(GRAVE, grave="heap")
+TYPES["murette"] = dict(builder=buildLowWall, atlas=512, farRatio=0.75, aoDist=0.2, smoothAngle=80, weighted=False)
 
 for spec in TYPES.values():
     spec.setdefault("builder", buildMechta); spec.setdefault("farRatio", 0.38)   # (0.3: the loggia house's far ruin shaded off its near — the gate)

@@ -126,7 +126,8 @@ export function koubbaAndCemetery(kx, kz, cx, cz, { seed = 1958, cols = 7, rows 
   for (let i = 0; i < cols; i++) for (let j = 0; j < rows; j++) {
     if (rnd() < 0.3) continue;   // (0.18: 29 graves in a ruled grid — a field of loaves)
     const [x, z] = at((i - (cols - 1) / 2) * 2.7 + (rnd() - 0.5) * 1.0, (j - (rows - 1) / 2) * 4.1 + (rnd() - 0.5) * 1.4);
-    props.push([rnd() < 0.14 ? "tombeb" : "tombe", "intact", x, null, z, th + (rnd() - 0.5) * 0.1, x, z, hx, hz, { ground: true }]);
+    const r = rnd();   // (a few whitewashed, some old heaps, most slab-kerbed)
+    props.push([r < 0.14 ? "tombeb" : r < 0.36 ? "tombec" : "tombe", "intact", x, null, z, th + (rnd() - 0.5) * 0.1, x, z, hx, hz, { ground: true }]);
   }
   // the low wall along the graves' feet, a gap between its two lengths (each 4 m real, ×1.3)
   const foot = -((rows - 1) / 2) * 4.1 - 3.0;
