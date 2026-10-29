@@ -10,7 +10,7 @@ export const LAB_Y = 0.05; // the roads' surface: just over the floor (their sla
 /** the zones (x: where they stand across the ground) — `key` jumps there while driving */
 export const LAB_ZONES = [
   { key: "1", label: "Start · acceleration / braking strip", x: 0, chain: ["start_line", "straight_64", "straight_64", "straight_64", "straight_64", "straight_64", "straight_64"] },
-  { key: "2", label: "Ramps 10° · 15° · 20° · 30° · 45°", x: 64, ramps: [10, 15, 20, 30, 45], lane: 26 },
+  { key: "2", label: "Ramps 10° · 15° · 20° · 30° · 45°", x: 40, ramps: [10, 15, 20, 30, 45], lane: 34 }, // (34: 10 m of floor between 24 m roads — at 26 the gap was a car wide)
   { key: "3", label: "Loop", x: 220, chain: ["straight_64", "straight_64", "loop_28", "straight_64", "straight_64"] },
   { key: "4", label: "Rollers, slopes, crests", x: 300, chain: ["straight_64", "rollers_64", "rollers_64", "straight_64", "slope_up_12", "slope_down_12", "straight_64"] },
   { key: "5", label: "Drift circle (open ground, cones R 30 m)", x: 360, circle: 30, z: -90 },

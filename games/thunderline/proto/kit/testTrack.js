@@ -167,7 +167,7 @@ export function layoutFromPlacements({ built, pieces }) {
     for (const r of built[pl.id].b.rings) {
       const f = deckFrame(r, hw);
       // the line 0.7 m above the deck — on a twist, its roll axis (r.pivot)
-      ride.push({ P: f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id, tube: TILES[pl.id]?.tube ? closureAt(TILES[pl.id], r.s, built[pl.id].b.L) : TILES[pl.id]?.halfpipe ? 0.5 * wallAt(TILES[pl.id], r.s, built[pl.id].b.L) : 0, air: !!r.air });
+      ride.push({ P: f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7).applyMatrix4(pl.M), T: r.T.clone().transformDirection(pl.M), U: f.U.clone().transformDirection(pl.M), piece: k, id: pl.id, hw: SECTIONS[TILES[pl.id]?.section ?? "road"]?.hw ?? SECTIONS.road.hw, tube: TILES[pl.id]?.tube ? closureAt(TILES[pl.id], r.s, built[pl.id].b.L) : TILES[pl.id]?.halfpipe ? 0.5 * wallAt(TILES[pl.id], r.s, built[pl.id].b.L) : 0, air: !!r.air });
     }
     length += built[pl.id].b.L;
   });

@@ -44,6 +44,9 @@ const SLIDERS = [
     [ARCADE, "air.yaw", "yaw rate (rad/s)", 1, 8, 0.1],
     [ARCADE, "air.hold", "holds its attitude (/s)", 0, 12, 0.25],
     [ARCADE, "air.follow", "nose follows the flight, pitch only (/s, 0 off)", 0, 6, 0.1],
+    [ARCADE, "magnet.rate", "landing magnet: eases roll / spin (/s, 0 off)", 0, 6, 0.1],
+    [ARCADE, "magnet.rollDeg", "landing magnet: roll window (°)", 0, 60, 1],
+    [ARCADE, "magnet.yawDeg", "landing magnet: spin window (°)", 0, 60, 1],
   ]],
   ["Helpers (stunt + arcade)", [
     [STUNT, "takeoff.maxDeg", "take-off guide (° max)", 0, 20, 0.5],

@@ -51,6 +51,20 @@ function build(root) {
   const wheels = [];
   root.traverse((o) => { if (/^Wheel_/.test(o.name) && !/^Wheel_/.test(o.parent?.name ?? "")) wheels.push(o); });
   const src = wheels.find((w) => w.name === "Wheel_FL") ?? wheels[0];
+  // THE BRAKES RIDE WITH THEIR WHEEL (user, 2026-10-29: "when the wheel moves with the suspension, does the rest of
+  // the wheel move too?"): disc + caliper sit on the upright — up and down with the wheel, turned with the steering,
+  // never spun. Kept: each brake's offset from its wheel's centre in the file (root frame); the car places them
+  // (arcadeCar.js syncVisuals: object.userData.brakes)
+  object.updateMatrixWorld(true);
+  const wheelAt = new Map(wheels.map((w) => [w.name.replace(/^Wheel_/, ""), root.worldToLocal(w.getWorldPosition(new THREE.Vector3()))]));
+  const brakes = [];
+  root.traverse((o) => {
+    const m = /^Brake_(FL|FR|RL|RR)$/.exec(o.name);
+    if (!m || !wheelAt.has(m[1]) || o.parent !== root) return;
+    brakes.push({ obj: o, corner: m[1], offset: o.position.clone().sub(wheelAt.get(m[1])), quat: o.quaternion.clone() });
+  });
+  object.userData.brakes = brakes;
+  object.userData.root = root;
   for (const w of wheels) w.removeFromParent();
   const wheelRoot = src.clone(true);
   wheelRoot.position.set(0, 0, 0);
