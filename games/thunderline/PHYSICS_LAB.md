@@ -54,3 +54,13 @@ needs:
    wheels down all the way round, no slide, ≤ 2.5 m off the middle, 204 → 245 km/h; a steer pulse upside down
    crosses the road and the car still exits. Also: the nose follows the arc in the air again (`air.follow` 2, as the
    old car since 10-23), the arcade car's own top speed (318 km/h on the flat, 300 in ~13 s), the car painted yellow.
+11. [x] ON THE GROUND (user, 10-29: "ramps I place on the ground, like my old game … collision … debug suspension"):
+   the builder's new GROUND tab (obstacles.js GROUND), placeable anywhere —
+   - the old game's ramps (modularRoadParkour.js shapes, drive surface and solids split as there): jump ramp
+     (6 m, ~23° lip), convex kicker, 20° slope, a 2.6 m side ramp (one side of the car);
+   - a rumble kerb (12 cm humps), a 25 cm step;
+   - MOVERS on the race clock, any motion now (`mover.pose(t)`, the contact velocity from the pose): pendulum
+     across the lane, sliding wall, a low spinning bar (35 cm, the wheels' height).
+   Lab zones on Shift + 1 (ground ramps, a jump onto a block), Shift + 2 (suspension: kerbs one side, side ramp,
+   step, kerbs left / right), Shift + 3 (movers). Telemetry: each wheel's spring travel, its peak, STOP on the bump
+   stop. Checked: all launch / collide (a parked car is shoved by the wall and the pendulum).

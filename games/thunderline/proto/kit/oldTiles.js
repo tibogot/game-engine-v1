@@ -28,8 +28,8 @@ const PRESETS = {
   finish_line: { label: "Finish", base: "rounded_end", params: { roundEndLength: 28 }, finish: { line: 2 } },
 };
 
-/** Centre-to-centre spacing of the bowl's entry and return lanes (two 16 m roads, 4 m apart). */
-export const BOWL_LANE = 20;
+/** Centre-to-centre spacing of the bowl's entry and return lanes (two 24 m roads, 4 m apart). */
+export const BOWL_LANE = 28;
 const laneSide = (t) => (t.id.endsWith("_L") ? -1 : 1);
 
 const cache = new Map();

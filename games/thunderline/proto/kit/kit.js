@@ -14,10 +14,13 @@ export const q5 = (t) => t * t * t * (10 + t * (-15 + 6 * t));
 
 /** Cross-sections. hw = half width of the drivable deck, kerb = slim edge strip. */
 export const SECTIONS = {
-  road: { hw: 8, kerbW: 0.7, kerbH: 0.16, slab: 0.9 },
+  // 24 m (user, 2026-10-29: "the tracks need a bigger width, landing and controlling is too hard — exactly what the
+  // Apex Rush guy said"; was 16 m)
+  road: { hw: 12, kerbW: 0.7, kerbH: 0.16, slab: 0.9 },
   wide: { hw: 24, kerbW: 0.9, kerbH: 0.16, slab: 1.1 },
-  // NARROW (user, 2026-10-21, Apex Rush: narrow planks floating for precision landings): 8 m wide
-  narrow: { hw: 4, kerbW: 0.5, kerbH: 0.14, slab: 0.7 },
+  // NARROW (user, 2026-10-21, Apex Rush: narrow planks floating for precision landings): 12 m wide (8 before the
+  // road went to 24 m: the same half of it)
+  narrow: { hw: 6, kerbW: 0.5, kerbH: 0.14, slab: 0.7 },
 };
 
 /**
@@ -388,7 +391,7 @@ export const TILES = {
   loop_28: {
     label: "Loop R28",
     // eased (clothoid-like) loop: tighter at the top, gentler at the bottom, like a real coaster
-    segs: [{ L: 2 * Math.PI * 28 + 70, pitch: 2 * Math.PI, ramp: 35, offset: 18 }],
+    segs: [{ L: 2 * Math.PI * 28 + 70, pitch: 2 * Math.PI, ramp: 35, offset: 28 }], // (offset: the exit clears the entry — a 24 m road + 4)
   },
   // THE SKY LOOP (Apex Rush plan step 6, shot 3: "the car upside down under a huge curved roof, a short
   // open pipe pointing straight up below it"): a loop with its two vertical sides OPEN — the road curls
@@ -403,7 +406,7 @@ export const TILES = {
     segs: [
       { L: Math.round(16 * Math.PI / 2 + 16), pitch: 90 * DEG, ramp: 16 },
       { L: 12, gap: true },
-      { L: Math.round(16 * Math.PI + 20), pitch: Math.PI, ramp: 18, offset: 18 },
+      { L: Math.round(16 * Math.PI + 20), pitch: Math.PI, ramp: 18, offset: 28 },
       { L: 12, gap: true },
       { L: Math.round(16 * Math.PI / 2 + 16), pitch: 90 * DEG, ramp: 16 },
     ],
@@ -460,7 +463,7 @@ export const TILES = {
     segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }],
   },
   // PLATFORMS (user, 2026-10-20: "we need some platform shapes, at least a straight one"): the WIDE section
-  // (48 m) as plain road — freestyle and landing areas; a 16 m road runs onto their open ends and off again
+  // (48 m) as plain road — freestyle and landing areas; a 24 m road runs onto their open ends and off again
   platform_32: { label: "Platform 32", section: "wide", segs: [{ L: 32 }] },
   platform_64: { label: "Platform 64", section: "wide", segs: [{ L: 64 }] },
   platform_128: { label: "Platform 128", section: "wide", segs: [{ L: 128 }] },
@@ -468,7 +471,7 @@ export const TILES = {
   platform_up_12: { label: "Platform up ~12 m", section: "wide", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
   platform_down_12: { label: "Platform down ~12 m", section: "wide", segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }] },
   // FUNNEL / FLARE (user, 2026-10-21: big landing platforms need a way back to the road): the deck eases
-  // from the wide platform (48 m) to the road (16 m), or back; the rails converge (oldLook.js taper)
+  // from the wide platform (48 m) to the road (24 m), or back; the rails converge (oldLook.js taper)
   funnel_64: { label: "Funnel 48 → 16", section: "wide", taper: { from: 24, to: 8 }, segs: [{ L: 64 }] },
   flare_64: { label: "Flare 16 → 48", section: "wide", taper: { from: 8, to: 24 }, segs: [{ L: 64 }] },
   // PLATFORM SHAPES (user, 2026-10-22, Apex Rush's straight palette: wedges and a rounded end): the taper's
@@ -553,7 +556,7 @@ export const TILE_RESOLVERS = [];
  *   adj_kicker_<A>             a kicker at A° (its last 8 m a lip) — the first form, kept for saved tracks
  *   adj_kicker_<A>_<L>_<w>     THE RAMP (user, 2026-10-22: "ramps in more sizes", Apex Rush has ~18): A° up
  *                              over L m (the curl eased over its whole length — short = sharp, long =
- *                              gentle), w the width: r road 16 m · n narrow 8 m (planks) · w wide 48 m
+ *                              gentle), w the width: r road 24 m · n narrow 12 m (planks) · w wide 48 m
  *                              (platforms). 5–95°: a bump, a kicker, a launch, a quarter pipe.
  */
 export const ADJUSTABLE = {

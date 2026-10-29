@@ -12,7 +12,7 @@ import { q5 } from "./kit.js";
 
 export const TUBE = {
   R: 8, // pipe radius (m)
-  hw: 8, // the road's half width = the mouth's flat floor
+  hw: 12, // the road's half width = the mouth's flat floor (kit.js SECTIONS.road.hw: 24 m since 2026-10-29)
   wall: 1.5, // shell thickness (user: 0.6 "looks too thin")
   N: 72, // points round the bore
   rim: 0.88, // a MOUTH's rim: caps the cut end of the wall (centred in it, a little proud of both faces)

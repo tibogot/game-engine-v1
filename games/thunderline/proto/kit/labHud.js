@@ -3,6 +3,7 @@
 // the ZONE keys (1–7: the car put at a test area, standing, facing it).
 import * as THREE from "three";
 import { ARCADE } from "./arcadeCar.js";
+import { TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { STUNT } from "./stuntCar.js";
 import { LAB_ZONES, zoneSpawn } from "./physicsLab.js";
 
@@ -91,7 +92,7 @@ export function createLabHud({ getVehicle, isDriving }) {
   panel.innerHTML = `<div style="font:700 16px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase">Tuning <small style="opacity:.6;font:500 11px Barlow">— live, the arcade car</small></div>
     <div data-note style="opacity:.75;margin:4px 0"></div>${rowsHtml}
     <div style="display:flex;gap:6px;margin-top:10px"><button data-a="copy">Copy values</button><button data-a="reset">Reset</button></div>
-    <div style="opacity:.6;margin-top:6px">Keys while driving: ${LAB_ZONES.map((z) => `<b>${z.key}</b> ${z.label.split(" (")[0]}`).join(" · ")}</div>`;
+    <div style="opacity:.6;margin-top:6px">Keys while driving: ${LAB_ZONES.map((z) => `<b>${z.key.replace(/^S/, "⇧")}</b> ${z.label.split(" (")[0].split(":")[0]}`).join(" · ")}</div>`;
   const all = SLIDERS.flatMap(([, rows]) => rows);
   const sync = () => {
     for (const [o, p, , , , step] of all) {
@@ -121,7 +122,8 @@ export function createLabHud({ getVehicle, isDriving }) {
   addEventListener("keydown", (e) => {
     if (!isDriving() || e.repeat || e.ctrlKey || e.altKey) return;
     // (by the key's PLACE — the top row or the keypad: on an AZERTY keyboard the unshifted top row types & é " …)
-    const sp = zoneSpawn(/^(?:Digit|Numpad)(\d)$/.exec(e.code)?.[1] ?? e.key);
+    const digit = /^(?:Digit|Numpad)(\d)$/.exec(e.code)?.[1] ?? e.key;
+    const sp = zoneSpawn(e.shiftKey ? `S${digit}` : digit); // (Shift + 1, 2: the ground zones)
     const v = getVehicle();
     if (!sp || !v) return;
     e.preventDefault(); e.stopImmediatePropagation();
@@ -132,6 +134,12 @@ export function createLabHud({ getVehicle, isDriving }) {
 
   // ---- the telemetry, every frame
   const last = { air: 0, airMax: 0, landing: null, vBefore: 0, pending: null };
+  // THE SPRINGS (user, 2026-10-29: "things to debug suspension"): each wheel's travel — 0 = hanging free (the hub at
+  // the spring's rest length), full = on the bump stop — with its peak over the last 1.5 s
+  const peak = [0, 0, 0, 0], peakT = [0, 0, 0, 0], bar = (k, pk) => {
+    const n = 10, f = Math.round(k * n), p = Math.min(n - 1, Math.round(pk * n));
+    let s = ""; for (let i = 0; i < n; i++) s += i < f ? "█" : i === p && pk > k ? "▏" : "░"; return s;
+  };
   const up = new THREE.Vector3(), fwd = new THREE.Vector3(), left = new THREE.Vector3(), n = new THREE.Vector3();
   let t0 = performance.now();
   function frame() {
@@ -161,6 +169,12 @@ export function createLabHud({ getVehicle, isDriving }) {
     }
     if (last.pending && now - last.pending.t > 1000) { last.pending.kept = speed / Math.max(1, last.pending.vIn); last.pending = null; }
     const car = v.isArcadeCar ? "ARCADE" : v.isStuntCar ? "STUNT" : "OLD";
+    const rest = TIRE.restLength, stop = WHEEL.radius + 0.04; // (the arcade car's bump stop: ARCADE.ride.clear)
+    const springs = v.tires.slice(0, 4).map((t, i) => {
+      const k = t.grounded ? THREE.MathUtils.clamp((rest - t.hitDistance) / (rest - stop), 0, 1) : 0;
+      if (k >= peak[i] || now - peakT[i] > 1500) { peak[i] = k; peakT[i] = now; }
+      return { k, s: `${bar(k, peak[i])}${k >= 0.99 ? " STOP" : t.grounded ? "     " : " air "}` };
+    });
     const L = last.landing;
     tele.textContent =
       `car         ${car}\n` +
@@ -172,6 +186,11 @@ export function createLabHud({ getVehicle, isDriving }) {
       `steer / gas ${(+v.input.steer).toFixed(2)} / ${(+v.input.throttle).toFixed(2)}${v.input.handbrake ? "  HANDBRAKE" : ""}\n` +
       (v.stuntEvents ? `take-off    guided ${v.stuntEvents.takeoffDeg.toFixed(1)}°\n` : "") +
       (v.arcade ? `road        ${v.arcade.onRoad ? "on it" : "flying"}${v.arcade.stunt > 0.01 ? ` · stunt gravity ${(v.arcade.stunt * 100).toFixed(0)}%` : ""}\n` : "") +
+      // (the car's +X is its LEFT: tyres 0, 2 = the right side — WHEEL_LOCAL x −0.92)
+      `springs     FL ${springs[1].s} FR ${springs[0].s}
+` +
+      `            RL ${springs[3].s} RR ${springs[2].s}
+` +
       (L ? `landing     ${L.grade} ${L.err.toFixed(0)}° after ${L.air.toFixed(1)} s air${L.kept ? ` · kept ${(L.kept * 100).toFixed(0)}%` : ""}` : "landing     —");
     panel.querySelector("[data-note]").textContent = v.isArcadeCar ? "" : `(the ${car.toLowerCase()} car: only the helpers apply — switch to arcade with the Car button)`;
   }

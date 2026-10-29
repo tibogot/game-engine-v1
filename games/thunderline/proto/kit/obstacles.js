@@ -18,8 +18,10 @@ import { body, physLook, physGhost, physModel, physKit, ViewLOD } from "./physPr
 import { ledSignMaterial } from "./ledSigns.js";
 import { ARCH_LOD_FAR } from "./gateMesh.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
+import { rampGeometry, kickerRampGeometry, jumpRampGeometry } from "../../../modular-road-v3/modularRoadParkour.js";
 
 const BOLT = 0x3fd2ff, SIGNAL = 0xff7a1a;
+const ROAD_HW = 12; // the road's half width (kit.js SECTIONS.road.hw — 24 m since 2026-10-29): obstacles sized to it
 let MATS = null;
 const mats = () => (MATS ??= {
   body: new THREE.MeshStandardMaterial({ color: 0x1c2436, roughness: 0.55, metalness: 0.25 }),
@@ -28,7 +30,7 @@ const mats = () => (MATS ??= {
   signal: new THREE.MeshStandardMaterial({ color: SIGNAL, emissive: SIGNAL, emissiveIntensity: 0.9, roughness: 0.45 }),
   white: new THREE.MeshStandardMaterial({ color: 0xe8edf5, roughness: 0.5, metalness: 0.1 }),
 });
-const _r = new THREE.Vector3();
+const _r = new THREE.Vector3(), _vm = new THREE.Matrix4(), _vm2 = new THREE.Matrix4();
 const box = (w, h, d, x = 0, y = 0, z = 0) => new THREE.BoxGeometry(w, h, d).translate(x, y, z);
 
 // ---------------------------------------------------------------- BLOCK
@@ -59,8 +61,8 @@ const BLOCK_SOLID = box(BW, BH, BD, 0, BH / 2, 0);
 const BLOCK_DECK = new THREE.PlaneGeometry(BW - 0.2, BD - 0.2).rotateX(-Math.PI / 2).translate(0, BH, 0);
 
 // ---------------------------------------------------------------- SWEEPER
-const ARM = 14.6, ARM_Y = 0.95, ARM_T = 0.7, POST_R = 0.6, POST_H = 3.4;
-const SWEEP_PERIOD = 5; // s per turn: the tips move at ~9 m/s. The arm stays inside the kerbs (16 m road: no gap a car fits through, and it never cuts the rails)
+const ARM = 2 * ROAD_HW - 1.4, ARM_Y = 0.95, ARM_T = 0.7, POST_R = 0.6, POST_H = 3.4;
+const SWEEP_PERIOD = 5; // s per turn: the tips move at ~9 m/s. The arm stays inside the kerbs (the road's width less 1.4 m: no gap a car fits through, and it never cuts the rails)
 function sweeperParts() {
   const m = mats();
   const g = new THREE.Group();
@@ -124,7 +126,7 @@ export const HOLE = { w: 30, h: 26, hole: [-5, 5, -4, 4] };
 const DOOR_BOXES = wallBoxes([-DOOR.w / 2, DOOR.w / 2, 0, DOOR.h], DOOR.hole);
 const doorShapes = new Map();
 /** One door wall's shape (cached per road width and door offset). */
-function doorShape({ hw = 8, dx = 0 } = {}) {
+function doorShape({ hw = ROAD_HW, dx = 0 } = {}) {
   const key = `${hw}|${dx}`;
   if (!doorShapes.has(key)) {
     const w = 2 * hw + 10, hole = [dx + DOOR.hole[0], dx + DOOR.hole[1], DOOR.hole[2], DOOR.hole[3]];
@@ -378,7 +380,7 @@ function ledBoards(kit, word, xs) {
 }
 const boardShapes = new Map();
 function boardShape(word) {
-  return ({ hw = 8 } = {}) => {
+  return ({ hw = ROAD_HW } = {}) => {
     const key = `${word}|${hw}`;
     if (!boardShapes.has(key)) {
       const xs = [-1, 1].map((s) => s * (hw - 0.25));
@@ -405,7 +407,7 @@ function boardShape(word) {
 // use the new one"); its plain box stays the look only if the model file is missing
 const PANEL = { w: 3.4, h: 4.6, t: 0.35, gap: 1.2 };
 const panelShapes = new Map();
-function panelShape({ hw = 8, dx = 1 } = {}) {
+function panelShape({ hw = ROAD_HW, dx = 1 } = {}) {
   const side = dx < 0 ? -1 : 1, key = `${hw}|${side}`;
   if (!panelShapes.has(key)) {
     const x = side * (hw + PANEL.gap + PANEL.w / 2), y0 = -1.0; // its foot level with the slab's underside
@@ -454,7 +456,7 @@ function chevronCabinet(model, x, side) {
 // them on a thin bar: "land here" (Apex Rush shot 09). The posts are solid; the bar and the X are not.
 const AIM = { h: 8, post: 0.35 };
 const aimShapes = new Map();
-function aimShape({ hw = 8 } = {}) {
+function aimShape({ hw = ROAD_HW } = {}) {
   if (!aimShapes.has(hw)) {
     const xs = [-1, 1].map((s) => s * (hw + 0.8));
     const solids = xs.map((x) => box(AIM.post, AIM.h + 1, AIM.post, x, (AIM.h - 1) / 2, 0));
@@ -475,7 +477,119 @@ function aimShape({ hw = 8 } = {}) {
 }
 const signKind = (label, sign, shape, hint) => ({ label, sign, shape, parts: (o) => shape().parts(o), solids: shape().solids, decks: [], ghost: shape().ghost, hint });
 
+// ---------------------------------------------------------------- ON THE GROUND (the physics lab; user, 2026-10-29:
+// "add some jumps and ramps — not road jumps, see my old game, ramps I place on the ground; they show behaviour too,
+// like collision … things to debug suspension"). The ramps are the OLD GAME'S shapes (modularRoadParkour.js): each
+// solid carries its drive surface alone (userData.deckGeometry: the wheels' ground) and its cheeks + a low inset
+// backstop (userData.solidGeometry: what the body hits) — never the lip cap (the old "straight up at the tip" pop).
+// Frame: the low edge at z = 0, rising toward −Z (the way the car drives), feet on y = 0.
+function groundRamp(geo, lipZ, lipY, w) {
+  return () => {
+    const m = mats(), g = new THREE.Group();
+    g.add(new THREE.Mesh(geo, m.body));
+    // the lip: a glowing edge (reads from far, and how high it stands)
+    g.add(new THREE.Mesh(box(w + 0.04, 0.12, 0.12, 0, lipY + 0.02, lipZ), m.bolt));
+    return g;
+  };
+}
+const rampDef = (label, geo, lipZ, lipY, w, hint) => ({
+  label, parts: groundRamp(geo, lipZ, lipY, w), solids: [geo.userData.solidGeometry], decks: [geo.userData.deckGeometry], ghost: geo,
+  footprint: { hx: w / 2, hz: -lipZ / 2 }, ground: true, hint,
+});
+const JUMP_RAMP = jumpRampGeometry(12, 22, 6), KICKER_RAMP = kickerRampGeometry(12, 18, 4), SLOPE_RAMP = rampGeometry(12, 20, 20 * Math.PI / 180);
+const SIDE_RAMP = rampGeometry(2.6, 12, 7 * Math.PI / 180);
+// RUMBLE KERB: 0.9 m wide, 12 m long, round humps 12 cm high every 0.9 m, red / white — the wheels of ONE side
+// on it (the roll, the springs one side at a time)
+const KERB = { w: 0.9, L: 12, h: 0.12, pitch: 0.9 };
+function kerbGeometry() {
+  const n = Math.round(KERB.L / 0.1), hw = KERB.w / 2, pos = [], col = [], deck = [];
+  const y = (z) => KERB.h * Math.max(0, Math.sin((Math.PI * -z) / KERB.pitch)) ** 0.7 + 0.01;
+  const red = new THREE.Color(0xd8262b), white = new THREE.Color(0xeef1f5);
+  for (let i = 0; i < n; i++) {
+    const z0 = -i * 0.1, z1 = -(i + 1) * 0.1, c = Math.floor(-z0 / KERB.pitch) % 2 ? white : red;
+    const q = [[-hw, y(z0), z0], [hw, y(z0), z0], [hw, y(z1), z1], [-hw, y(z1), z1]];
+    for (const v of [q[0], q[1], q[2], q[0], q[2], q[3]]) { pos.push(...v); deck.push(...v); col.push(c.r, c.g, c.b); }
+    for (const sx of [-hw, hw]) for (const v of [[sx, 0, z0], [sx, y(z0), z0], [sx, y(z1), z1], [sx, 0, z0], [sx, y(z1), z1], [sx, 0, z1]]) { pos.push(...v); col.push(c.r * 0.6, c.g * 0.6, c.b * 0.6); }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute("color", new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  const d = new THREE.BufferGeometry();
+  d.setAttribute("position", new THREE.Float32BufferAttribute(deck, 3));
+  d.computeVertexNormals();
+  g.userData.deckGeometry = d;
+  return g;
+}
+const KERB_GEO = kerbGeometry();
+// A STEP: a 25 cm high plate, 8 m across, 10 m long — up onto it, along, off it (a drop the springs take)
+const STEP = { w: 8, L: 10, h: 0.25 };
+const STEP_DECK = new THREE.PlaneGeometry(STEP.w, STEP.L).rotateX(-Math.PI / 2).translate(0, STEP.h, -STEP.L / 2);
+// MOVERS FOR THE LAB (collision with a moving thing): the moving part's pose is a function of the race clock,
+// `pose(t, out)` (a Matrix4 in the obstacle's frame), its velocity at a contact taken from that pose — any motion,
+// not only the sweeper's turn
+const PEND = { pivotY: 9, arm: 6.5, amp: 55 * Math.PI / 180, period: 3.6 };
+const PEND_BOB = box(3, 2, 1.6, 0, PEND.pivotY - PEND.arm, 0);
+const PEND_FRAME = [box(0.5, PEND.pivotY + 0.5, 0.5, -7, (PEND.pivotY + 0.5) / 2, 0), box(0.5, PEND.pivotY + 0.5, 0.5, 7, (PEND.pivotY + 0.5) / 2, 0)];
+const SLIDE = { amp: 5, period: 4 };
+const SLIDE_WALL = box(4, 2.4, 1, 0, 1.2, 0);
+const LOWBAR = { len: 14, y: 0.35, t: 0.4, period: 4 };
+const LOWBAR_ARM = box(LOWBAR.len, LOWBAR.t, LOWBAR.t, 0, LOWBAR.y, 0);
+const _pm = new THREE.Matrix4(), _pm2 = new THREE.Matrix4();
+// (`lookOnly`: drawn, never collided — the pendulum's beam over the lane and its rod)
+function moverParts(staticGeos, armGeo, armMat = "signal", { lookStatic = [], lookArm = [] } = {}) {
+  return () => {
+    const m = mats(), g = new THREE.Group();
+    for (const s of [...staticGeos, ...lookStatic]) g.add(new THREE.Mesh(s, m.body));
+    const arm = new THREE.Group();
+    arm.name = "arm";
+    arm.add(new THREE.Mesh(armGeo, m[armMat]));
+    for (const a of lookArm) arm.add(new THREE.Mesh(a, m.white));
+    g.add(arm);
+    return g;
+  };
+}
+const MOVERS = {
+  ob_pendulum: {
+    label: "Pendulum", parts: moverParts(PEND_FRAME, PEND_BOB, "signal", {
+      lookStatic: [box(14.5, 0.5, 0.5, 0, PEND.pivotY + 0.25, 0)],
+      lookArm: [box(0.18, PEND.arm - 1, 0.18, 0, PEND.pivotY - (PEND.arm - 1) / 2, 0)],
+    }), solids: PEND_FRAME, decks: [], ghost: mergeGeometries([...PEND_FRAME, PEND_BOB]),
+    mover: { arm: PEND_BOB, pose: (t, out) => out.makeTranslation(0, PEND.pivotY, 0).multiply(_pm.makeRotationZ(PEND.amp * Math.sin((2 * Math.PI * t) / PEND.period))).multiply(_pm2.makeTranslation(0, -PEND.pivotY, 0)) },
+    footprint: { hx: 7.5, hz: 1 }, ground: true, hint: "A block swinging across the lane (14 m frame): time it, or take the hit",
+  },
+  ob_slider: {
+    label: "Sliding wall", parts: moverParts([], SLIDE_WALL), solids: [], decks: [], ghost: SLIDE_WALL,
+    mover: { arm: SLIDE_WALL, pose: (t, out) => out.makeTranslation(SLIDE.amp * Math.sin((2 * Math.PI * t) / SLIDE.period), 0, 0) },
+    footprint: { hx: 7, hz: 0.5 }, ground: true, hint: "A wall sliding left and right across 14 m",
+  },
+  ob_lowbar: {
+    label: "Low spinning bar", parts: moverParts([box(0.6, 0.8, 0.6, 0, 0.4, 0)], LOWBAR_ARM), solids: [], decks: [], ghost: LOWBAR_ARM,
+    mover: { arm: LOWBAR_ARM, pose: (t, out) => out.makeRotationY((2 * Math.PI * t) / LOWBAR.period) },
+    footprint: { hx: 7, hz: 7 }, ground: true, hint: "A bar 35 cm off the ground, turning: it hits the wheels' height",
+  },
+};
+
+const GROUND = {
+  ...MOVERS,
+  ob_ramp_jump: rampDef("Jump ramp", JUMP_RAMP, -22, 6, 12, "On the ground: a scooped ramp, 6 m high, ~23° at the lip"),
+  ob_ramp_kicker: rampDef("Convex kicker", KICKER_RAMP, -18, 4, 12, "On the ground: steep first, flat at the top — a launch that rolls over"),
+  ob_ramp_slope: rampDef("Slope ramp 20°", SLOPE_RAMP, -20, 20 * Math.sin(20 * Math.PI / 180), 12, "On the ground: a straight 20° wedge, a 6.8 m drop off its back"),
+  ob_ramp_side: rampDef("Side ramp", SIDE_RAMP, -12, 12 * Math.sin(7 * Math.PI / 180), 2.6, "2.6 m wide: under the wheels of ONE side — the car tips, lands on one side"),
+  ob_kerb: {
+    label: "Rumble kerb", ground: true, solids: [], decks: [KERB_GEO.userData.deckGeometry], ghost: KERB_GEO,
+    parts: () => { const g = new THREE.Group(); g.add(new THREE.Mesh(KERB_GEO, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7 }))); return g; },
+    hint: "Humps 12 cm high: drive one side over it (the springs, the roll)",
+  },
+  ob_step: {
+    label: "Step 25 cm", ground: true, solids: [], decks: [STEP_DECK], ghost: box(STEP.w, STEP.h, STEP.L, 0, STEP.h / 2, -STEP.L / 2),
+    parts: () => { const m = mats(), g = new THREE.Group(); g.add(new THREE.Mesh(box(STEP.w, STEP.h, STEP.L, 0, STEP.h / 2, -STEP.L / 2), m.top)); g.add(new THREE.Mesh(box(STEP.w + 0.02, 0.05, 0.08, 0, STEP.h, 0), m.signal)); return g; },
+    hint: "Up 25 cm, along, down: how the springs take a step",
+  },
+};
+
 export const OBSTACLES = {
+  ...GROUND,
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
   ob_wall_door: { label: "Wall · door", parts: doorParts, solids: DOOR_BOXES, decks: [], ghost: mergeGeometries(DOOR_BOXES), shape: doorShape, hint: "A wall across the road: drive through its door" },
@@ -525,7 +639,7 @@ OBSTACLES.ob_wall_door.aimAt = { hz: WALL_T / 2 };
  * (2 m clear of it, inside the kerbs), hold past it and ease back. The race's own ride (gates) is untouched.
  * @param ride  [{P, T, U, …}]  @param props track.props  @param hw the road's half width
  */
-export function avoidObstacles(ride, props = [], hw = 8) {
+export function avoidObstacles(ride, props = [], hw = ROAD_HW) {
   const shift = new Float32Array(ride.length);
   const C = new THREE.Vector3(), ax = new THREE.Vector3(), az = new THREE.Vector3(), R = new THREE.Vector3(), d = new THREE.Vector3();
   const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
@@ -613,17 +727,29 @@ export function buildObstacleSet(props = [], { look = true, physics = false } = 
       up.set(0, 1, 0).transformDirection(M);
       const angVel = up.clone().multiplyScalar(def.mover.omega);
       const rot = new THREE.Matrix4();
-      movers.push({
-        uid: p.uid, proxy, armVis, M, omega: def.mover.omega, angVel, pivot, rot,
+      const pose = def.mover.pose ?? null;
+      const mv = {
+        uid: p.uid, proxy, armVis, M, omega: def.mover.omega, angVel, pivot, rot, pose, t: 0,
         bvh: new RigidBvh(proxy),
-        /** the bar's surface velocity at a contact: ω × r about the post */
-        velocityAt(pt, out) { _r.subVectors(pt, pivot); return out.crossVectors(angVel, _r); },
-      });
+        /** the bar's surface velocity at a contact: ω × r about the post — or, for a posed mover, the point carried
+         *  from the pose now to the pose 10 ms on */
+        velocityAt(pt, out) {
+          if (!pose) { _r.subVectors(pt, pivot); return out.crossVectors(angVel, _r); }
+          const h = 0.01;
+          _vm.copy(mv.proxy.matrixWorld).invert();
+          _r.copy(pt).applyMatrix4(_vm); // (the point in the moving part's frame)
+          pose(mv.t + h, _vm2);
+          _vm.multiplyMatrices(M, _vm2);
+          return out.copy(_r).applyMatrix4(_vm).sub(pt).multiplyScalar(1 / h);
+        },
+      };
+      movers.push(mv);
     }
   }
   function setTime(t) {
     for (const m of movers) {
-      m.rot.makeRotationY(m.omega * t);
+      m.t = t;
+      if (m.pose) m.pose(t, m.rot); else m.rot.makeRotationY(m.omega * t);
       m.proxy.matrixWorld.multiplyMatrices(m.M, m.rot);
       if (m.armVis) { m.armVis.matrixAutoUpdate = false; m.armVis.matrix.copy(m.rot); m.armVis.matrixWorldNeedsUpdate = true; }
     }

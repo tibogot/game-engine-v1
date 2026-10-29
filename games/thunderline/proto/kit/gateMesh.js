@@ -202,7 +202,7 @@ function linePaint(group, g, finish) {
 // mode: the word, bolt blue for START, white with checkered rows for FINISH), the start lights' pod. One mesh per
 // material per level (ViewLOD: 60 / 160 m). ----------
 export const ARCH_LOD_FAR = [60, 160];
-const SLAB = { 4: 0.7, 8: 0.9, 24: 1.1 }; // the deck's thickness per road width (kit.js SECTIONS)
+const SLAB = { 4: 0.7, 6: 0.7, 8: 0.9, 12: 0.9, 24: 1.1 }; // the deck's thickness per road half width (kit.js SECTIONS; 12 / 6: the 24 m road and its planks)
 const LED = { y0: 7.25, y1: 9.15, z: 0.55, pitch: 0.09 }; // the header's LED faces (thunderArch.py HY0 + LIP …, LZ)
 const POD = { y: 6.3, z: -0.225, lamps: [1.2, 0, -1.2], r: 0.34 };
 const _M = new THREE.Matrix4(), _S = new THREE.Matrix4();

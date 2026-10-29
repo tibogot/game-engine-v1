@@ -156,14 +156,24 @@ export function trackFromRide(ride) {
       if (!q) continue;
       const a = j > best ? r : q, c = j > best ? q : r;
       const seg = _v.subVectors(c.P, a.P), L2 = seg.lengthSq();
-      if (L2 < 1e-9) continue;
+      if (L2 < 1e-9 || !isRoad(a, c, seg, L2)) continue;
       const u = _f.subVectors(pos, a.P).dot(seg) / L2;
       if (u < 0 || u > 1) continue;
       const P = a.P.clone().lerp(c.P, u), T = a.T.clone().lerp(c.T, u).normalize(), U = a.U.clone().lerp(c.U, u).normalize();
       return { P, T, U, d: P.distanceTo(pos) };
     }
-    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd) };
+    // past the END of a stretch of road (a lip: no road segment on from here, the car beyond it along the road)
+    const next = pts[best + 1];
+    const end = (!next || !isRoad(r, next, _v.subVectors(next.P, r.P), _v.lengthSq())) && _f.subVectors(pos, r.P).dot(r.T) > 0.5;
+    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd), end };
   };
+}
+// Two ride points are joined by ROAD when the chord between them runs along both their directions (within ~15°) —
+// not a jump's flight (a lip to its landing: the ride's next point, but no road between)
+const COS15 = Math.cos(15 * Math.PI / 180);
+function isRoad(a, c, seg, L2) {
+  const L = Math.sqrt(L2);
+  return seg.dot(a.T) / L > COS15 && seg.dot(c.T) / L > COS15;
 }
 /** The road's direction at a point: the nearest ride point's tangent (a take-off happens rarely: a plain scan). */
 export function roadDirFromRide(ride) {

@@ -163,14 +163,22 @@ export class ArcadeCar extends StuntCar {
 
       // ---- gravity: the world's, or on a stunt surface — tilted past wall.from, or a road-hold piece — the road's up
       const speed = body.vel.length();
+      // PULLED ONTO THE ROAD only while the wheels are on it, or the car is coming back TO it (a wheel lifting for an
+      // instant in a loop) — never while it LEAVES it: in the coyote time after a lip the downforce (≤ 1.4 g) and
+      // the stunt gravity went on pulling the car down, ~6 m/s of its climb gone, every jump flew lower than its
+      // take-off (and than the builder's arc: user, 2026-10-29, "there is no way I reach that landing")
+      // (wheels off for an instant — a bank's exit, a crest, a loop — the road still pulls; but not past a LIP: there
+      // the road does not go on under where the car is headed. Without the pull at all, the arcade car flew off the
+      // Tilted landing test's 45° bank exit at 266 km/h)
+      const pressed = down > 0 || (onRoad && this._roadAhead(body));
       let stunt = 0;
-      if (onRoad) {
+      if (pressed) {
         stunt = THREE.MathUtils.clamp((ARCADE.wall.from - surf.y) / (ARCADE.wall.from - ARCADE.wall.full), 0, 1);
         if (roadHold) stunt = Math.max(stunt, 0.6);
         stunt *= THREE.MathUtils.clamp((speed - ARCADE.wall.minSpeed) / 8, 0, 1);
       }
       _F.set(0, -G * body.mass * (1 - stunt), 0).addScaledVector(surf, -G * body.mass * stunt);
-      this._stickAcc = onRoad && speed > ARCADE.stick.minSpeed ? Math.min(ARCADE.stick.max, ARCADE.stick.k * speed * speed) : 0;
+      this._stickAcc = pressed && speed > ARCADE.stick.minSpeed ? Math.min(ARCADE.stick.max, ARCADE.stick.k * speed * speed) : 0;
       if (this._stickAcc) _F.addScaledVector(surf, -this._stickAcc * body.mass);
       _F.addScaledVector(body.vel, -AERO.drag * speed); // air drag (the old car's AERO.drag)
       body.addForce(_F);
@@ -181,7 +189,7 @@ export class ArcadeCar extends StuntCar {
       // ---- just landed: nothing carries it off the surface again
       if (this._landHold > 0) {
         this._landHold -= subDt;
-        if (onRoad) { const vn = body.vel.dot(surf); if (vn > 0) body.vel.addScaledVector(surf, -vn); }
+        if (down > 0) { const vn = body.vel.dot(surf); if (vn > 0) body.vel.addScaledVector(surf, -vn); } // (wheels on: a kicker right after a landing still launches)
       }
       // ---- the bump stop: out of the road along its normal; the speed into it stopped AT THAT WHEEL — an impulse at
       // the tyre, not at the middle of the car, so a car landing on its rear wheels has its nose slam down onto the
@@ -206,6 +214,16 @@ export class ArcadeCar extends StuntCar {
       if (body.angVel.lengthSq() > wMax * wMax) body.angVel.setLength(wMax);
       this.arcade.onRoad = onRoad; this.arcade.stunt = stunt;
     }
+  }
+
+  /** Is there road under where the car will be in 0.15 s? (no: it is leaving a lip — a take-off, not a crest) */
+  _roadAhead(body) {
+    const ahead = _rel.copy(body.pos).addScaledVector(body.vel, 0.15);
+    const tr = this.trackAt?.(ahead);
+    if (!tr || tr.end) { this.trackAt(body.pos); return false; }
+    const rel = ahead.sub(tr.P), along = rel.dot(tr.U), across = Math.sqrt(Math.max(0, rel.lengthSq() - along * along));
+    this.trackAt(body.pos); // (back to where the car is: trackAt searches round its last match)
+    return along > -1.5 && along < ARCADE.road.reach + 1 && across < 26;
   }
 
   /** ON THE ROAD: engine, brakes, the grip curve, the turn rate, the car kept on the surface */
