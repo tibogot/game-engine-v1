@@ -107,7 +107,7 @@ function build() {
   crumbs([["Build", null]]);
   const all = library.list();
   const d = draft.get();
-  const draftLeft = d && (d.track?.pieces?.length || d.base) ? d : null;
+  const draftLeft = d && (d.track?.pieces?.length || d.base) && d.base !== "physics-lab" ? d : null; // (the lab's own: not one of yours)
   const cards = all.map((r) => trackCard(r, {
     actions: `<button data-act="open">Edit</button><button data-act="drive"${r.track?.pieces?.length ? "" : " disabled"}>Drive</button><button data-act="rename">Rename</button><button data-act="dup">Copy</button><button data-act="del" class="danger">Delete</button>`,
   })).join("");

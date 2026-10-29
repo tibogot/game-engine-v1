@@ -126,6 +126,45 @@ export class StuntCar extends Vehicle {
   }
 }
 
+/**
+ * THE TRACK FRAME at a point (the arcade car, PHYSICS_PLAN.md: "use what we KNOW, not what a ray guesses"): the
+ * nearest point of the road's centre line — { P, T (forward), U (the road's up), d (m from it) } or null. Searched
+ * around the last match first (called every physics step), the whole ride only when that is far.
+ */
+export function trackFromRide(ride) {
+  const pts = ride.filter((r) => !r.air && r.U);
+  let last = 0;
+  const near = (pos, from, to) => {
+    let best = -1, bd = Infinity;
+    for (let i = Math.max(0, from); i < Math.min(pts.length, to); i++) {
+      const d = pts[i].P.distanceToSquared(pos);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return { best, bd };
+  };
+  return (pos) => {
+    if (!pts.length) return null;
+    let { best, bd } = near(pos, last - 40, last + 40);
+    if (bd > 15 * 15) ({ best, bd } = near(pos, 0, pts.length));
+    if (best < 0) return null;
+    last = best;
+    // INTERPOLATED between the two ride points around the car (the nearest point alone stepped every ~1 m: the arcade
+    // car turns with the road's rotation, measured from this — steps were spikes)
+    const r = pts[best];
+    for (const j of [best + 1, best - 1]) {
+      const q = pts[j];
+      if (!q) continue;
+      const a = j > best ? r : q, c = j > best ? q : r;
+      const seg = _v.subVectors(c.P, a.P), L2 = seg.lengthSq();
+      if (L2 < 1e-9) continue;
+      const u = _f.subVectors(pos, a.P).dot(seg) / L2;
+      if (u < 0 || u > 1) continue;
+      const P = a.P.clone().lerp(c.P, u), T = a.T.clone().lerp(c.T, u).normalize(), U = a.U.clone().lerp(c.U, u).normalize();
+      return { P, T, U, d: P.distanceTo(pos) };
+    }
+    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd) };
+  };
+}
 /** The road's direction at a point: the nearest ride point's tangent (a take-off happens rarely: a plain scan). */
 export function roadDirFromRide(ride) {
   return (pos) => {

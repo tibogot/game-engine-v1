@@ -498,10 +498,12 @@ export async function createWorldEnvironment({
   // and rebuilt ~160 byte-identical shaders per switch. Keyed by the setup — "off", or the installed shadow
   // node's id (a recreated CSM is a new node: a new key) — a different setup still rebuilds, the same one can
   // reuse what was built for it.
-  function invalidateSunShadowPipeline() {
+  // `root`: the scene, or a tree that was OUT of it when the sun's shadow switched (a game's meshes it put back:
+  // their materials kept the old shadow — Thunderline's track after a baked play, 2026-10-29)
+  function invalidateSunShadowPipeline(root = scene) {
     const node = sun.castShadow ? sun.shadow.shadowNode : null;
     const tag = `|sun:${!sun.castShadow ? "off" : node ? node.id : "none"}`;
-    scene.traverse((obj) => {
+    root.traverse((obj) => {
       if (!obj.isMesh) return;
       const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
       for (const m of mats) {
@@ -2903,6 +2905,7 @@ export async function createWorldEnvironment({
     /** The shadow node, or null — it is REBUILT when cascades change, so read it live. */
     getCsm: () => csm,
     setSunShadowNode,
+    refreshSunShadowMaterials: (root) => invalidateSunShadowPipeline(root),
     /**
      * MEASUREMENT ONLY: bit i set = cascade i is never redrawn (it keeps its
      * last map), so an A/B against 0 is exactly that cascade's cost. With

@@ -44,7 +44,7 @@ for (const [id, t] of Object.entries(TILES)) {
   if (!t.segs.some((s) => s.turn) && Math.abs(wantPitch) < Math.PI && Math.abs(pitch - wantPitch) > 1e-4) fail(`${id}: pitched ${pitch / DEG}° want ${wantPitch / DEG}°`);
   if (Math.abs(wantPitch - 2 * Math.PI) < 1e-9 && (Math.abs(e.T.z + 1) > 1e-4 || Math.abs(e.p.y) > 1e-3)) fail(`${id}: loop doesn't come out level and forward (T ${e.T.toArray()}, y ${e.p.y})`);
   const tpm = tris / b.L;
-  if (tpm > BUDGET) fail(`${id}: ${tpm.toFixed(1)} tris/m over the ${BUDGET} budget`);
+  if (tpm > (t.trisPerM ?? BUDGET)) fail(`${id}: ${tpm.toFixed(1)} tris/m over the ${t.trisPerM ?? BUDGET} budget`);
   totalTris += tris; totalLen += b.L; totalOpen += trisOpen;
   console.log(id.padEnd(20), b.L.toFixed(0).padStart(7), String(b.rings.length).padStart(6), `${tris}/${trisOpen}`.padStart(11), tpm.toFixed(1).padStart(7),
     ` (${e.p.x.toFixed(2)}, ${e.p.y.toFixed(2)}, ${e.p.z.toFixed(2)}) ${(heading / DEG).toFixed(1)} ${(pitch / DEG).toFixed(1)} ${(e.lean / DEG).toFixed(1)}`);

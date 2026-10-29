@@ -81,6 +81,20 @@ export const draft = {
   clear() { try { localStorage.removeItem(DRAFT_KEY); } catch {} },
 };
 
+/** THE PHYSICS LAB's own track (PHYSICS_LAB.md): a record under a fixed id, marked `lab`, never in the list. */
+export const LAB_ID = "physics-lab";
+// (a NEW LAYOUT of the lab — zones added in physicsLab.js — replaces the stored one by itself, unless you Saved
+// changes to it: then only "Reset lab" does)
+export function ensureLabTrack(make, { reset = false } = {}) {
+  const all = migrate(readAll());
+  const track = make(), gen = JSON.stringify(track), rec = all[LAB_ID];
+  if (!rec || reset || (rec.gen !== gen && !rec.edited)) {
+    all[LAB_ID] = { id: LAB_ID, name: "Physics lab", lab: true, gen, created: Date.now(), updated: Date.now(), track, thumb: null, best: null };
+    writeAll(all);
+  }
+  return all[LAB_ID];
+}
+
 export const library = {
   /** all tracks, most recently edited first */
   list() {
@@ -89,9 +103,10 @@ export const library = {
     const all = migrate(readAll());
     const cur = localStorage.getItem(CURRENT);
     let pruned = cleanupOnce(all);
-    for (const [id, r] of Object.entries(all)) if (!r.track?.pieces?.length && id !== cur) { delete all[id]; pruned = true; }
+    for (const [id, r] of Object.entries(all)) if (!r.track?.pieces?.length && id !== cur && !r.lab) { delete all[id]; pruned = true; }
     if (pruned) writeAll(all);
-    return Object.values(all).sort((a, b) => b.updated - a.updated);
+    // (the PHYSICS LAB's track is a record too, but not one of "your tracks": never listed)
+    return Object.values(all).filter((r) => !r.lab).sort((a, b) => b.updated - a.updated);
   },
   get(id) { return id === DRAFT ? draft.get() : migrate(readAll())[id] ?? null; },
   create(name) {
@@ -111,6 +126,7 @@ export const library = {
     rec.track = track;
     rec.updated = Date.now();
     if (thumb !== undefined) rec.thumb = thumb;
+    else if (rec.lab) rec.edited = true; // (your Save: the lab's layout is now yours — see ensureLabTrack)
     return writeAll(all);
   },
   rename(id, name) {
@@ -206,7 +222,8 @@ const SETTINGS_KEY = "thunderline.settings.v1";
 // engine "gen6": the recorded-style loops the user picked (2026-10-20, engineLoops.js) over the synth
 // car "thunder": the NEW CAR is the default (user, 2026-10-28: "lets use the not lotus car as default"; it was
 // the Lotus from 2026-10-21) — the Lotus (dev only, trademark) stays in Settings
-// physics "old" | "stunt": the old game's car, or the STUNT car built on it (proto/kit/stuntCar.js, PHYSICS_PLAN.md)
+// physics "old" | "stunt" | "arcade": the old game's car, the STUNT car built on it (proto/kit/stuntCar.js), or the
+// ARCADE car, a new driving model (arcadeCar.js) — PHYSICS_PLAN.md
 // — side by side to compare (user, 2026-10-28); the old one stays the default until it is judged
 export const SETTINGS_DEFAULTS = { ghost: true, hud: true, sound: false, volume: 0.7, engine: "gen6", car: "thunder", physics: "old" };
 export const settings = {

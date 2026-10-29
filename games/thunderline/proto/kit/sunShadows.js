@@ -587,6 +587,13 @@ export function createSunShadows({ renderer, scene: mainScene, sunDir, casterPoi
       if (shared.owner !== self) return;
       atlasRT.setSize(1, 1);
       liveRT.setSize(1, 1);
+      // …and NO CELLS, the live box far away: the ground can still be holding this node (the terrain kept it after
+      // the switch back to the cascades) — its cells, read from a 1-texel atlas, drew the last played track's road
+      // as dark stair-stepped shapes on the builder's empty ground (user, 2026-10-29: White 1 from the shell's
+      // warm-up play). With no cell and no live box, it reads "lit". The next bake writes the table again.
+      tableTex.image.data.fill(0);
+      tableTex.needsUpdate = true;
+      live.cx.value = live.cy.value = 1e9;
     },
     _shared: shared,
   };

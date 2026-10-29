@@ -17,10 +17,15 @@ import { saveState, restoreState } from "./simState.js";
 import { makeGateMesh, makeRingMesh } from "./gateMesh.js";
 import { closureAt, wallAt } from "./tubeLook.js";
 import { createRace } from "./race.js";
-import { library, settings, campaign, draft, DRAFT } from "../../app/library.js";
-import { StuntCar, roadDirFromRide } from "./stuntCar.js";
+import { library, settings, campaign, draft, DRAFT, LAB_ID, ensureLabTrack } from "../../app/library.js";
+import { makeLabTrack, LAB_Y } from "./physicsLab.js";
+import { createDriveTrails } from "./driveTrails.js";
+import { createLabHud } from "./labHud.js";
+import { StuntCar, roadDirFromRide, trackFromRide } from "./stuntCar.js";
+import { ArcadeCar } from "./arcadeCar.js";
 // the test lap drives the car the drive page drives (settings.physics: the switch reloads the page)
-const PredCar = settings.get().physics === "stunt" ? StuntCar : Vehicle;
+const PHYSICS = settings.get().physics in { stunt: 1, arcade: 1 } ? settings.get().physics : "old";
+const PredCar = { stunt: StuntCar, arcade: ArcadeCar }[PHYSICS] ?? Vehicle;
 import { go } from "../../app/nav.js";
 import { attachLesson } from "./lessonCard.js";
 import { keepPipelines } from "./keepPipelines.js";
@@ -52,11 +57,14 @@ const params = new URLSearchParams(location.search);
 // quick"): this page is the WHOLE GAME — the menu over it in a frame (builder3.html puts it up at once), the
 // builder and the tracks' drives as modes. The engine boots once, behind the menu; nothing reloads after.
 const SHELL = params.get("shell") === "1";
-const pageUrl = () => `${location.pathname}?${SHELL ? "shell=1&" : ""}track=${trackId}`;
-let trackId = params.get("track");
+// THE PHYSICS LAB (?lab=physics — PHYSICS_LAB.md): this builder on the ground — its own track (never in your list),
+// the floor drivable, no "under the floor" / "falls to the floor" rules
+const LAB = params.get("lab") === "physics";
+const pageUrl = () => `${location.pathname}?${SHELL ? "shell=1&" : ""}${LAB ? "lab=physics&" : ""}track=${trackId}`;
+let trackId = LAB ? (ensureLabTrack(makeLabTrack), LAB_ID) : params.get("track");
 // (a NEW track is the DRAFT — library.js: nothing goes in your list until you Save)
 if (!trackId || !library.get(trackId)) trackId = (library.current && library.get(library.current) ? library.current : null) ?? library.list()[0]?.id ?? (draft.get() ?? draft.start()).id;
-library.current = trackId;
+if (!LAB) library.current = trackId;
 history.replaceState(null, "", pageUrl());
 const UP = new THREE.Vector3(0, 1, 0);
 // THE FLOOR (the drive page's default floor, solid): pieces must stay above it, flights end on it
@@ -93,7 +101,9 @@ let track = load() ?? { pieces: [], nextUid: 1 };
 let trackName = library.get(trackId)?.name ?? "Track";
 // SAVE (library.js DRAFT): `savedJson` is the track as last saved (null: never saved — the draft); `dirty` = what you
 // see differs from it. A draft kept for THIS saved track (a crash, a closed tab, edits not saved) comes back.
-let savedJson = trackId === DRAFT ? null : JSON.stringify(track);
+// (compared WITHOUT the author time: the test lap writes it, it is not an edit)
+const trackKey = (t) => JSON.stringify({ ...t, authorTime: undefined });
+let savedJson = trackId === DRAFT ? null : trackKey(track);
 let dirty = trackId === DRAFT;
 let restoredNote = null;
 {
@@ -109,7 +119,7 @@ let tileBase = null; // base id in hand
 let sel = null;
 let gridMode = "world";
 let gridStep = 8;
-let buildY = 120;
+let buildY = LAB ? LAB_Y : 120;
 const rot = { yaw: 0, pitch: 0, roll: 0 };
 let arcSpeed = 57; // m/s at a lip (≈ 0.91 × top 63, P3); [ ] change it
 // THE SLOW EDGE of a jump's speed band, as a share of the real car's take-off speed: landings catch every
@@ -141,10 +151,19 @@ function saveShown(ok) {
 let thumbDirty = false; // (unused since tracks save on Save: the picture is taken then)
 /** EVERY EDIT: kept in the draft slot (the safety copy), not in your list — unless it matches the saved track */
 function save() {
-  const j = JSON.stringify(track);
+  const j = trackKey(track);
   dirty = savedJson === null || j !== savedJson;
   if (dirty) saveShown(draft.keep(trackId === DRAFT ? null : trackId, trackName, track));
   else if (draft.get()?.base === trackId) draft.clear(); // (back to exactly what is saved: nothing to keep)
+  showSaved();
+}
+/** THE FIRST BUILD IS NOT AN EDIT: laying a track out fills in what it derives (pieces on their parents' ends…) —
+ * that is the saved track as it stands, not a change to save (a draft brought back stays unsaved) */
+function settleSaved() {
+  if (trackId === DRAFT || restoredNote) return;
+  savedJson = trackKey(track);
+  dirty = false;
+  if (draft.get()?.base === trackId) draft.clear();
   showSaved();
 }
 /** SAVE (the button, Ctrl+S): into your list — a new track gets its record now — with its picture */
@@ -158,7 +177,7 @@ async function commit() {
   const ok = library.saveTrack(trackId, track);
   saveShown(ok);
   if (!ok) return false;
-  savedJson = JSON.stringify(track);
+  savedJson = trackKey(track);
   dirty = false;
   draft.clear();
   showSaved();
@@ -197,7 +216,7 @@ function confirmLeave() {
       else if (a === "discard") {
         draft.clear(); dirty = false;
         // back to the saved track, on screen too (going to the menu and back reopens the same track as it stands)
-        if (savedJson !== null) { track = JSON.parse(savedJson); undo = []; redo = []; sel = null; rebuild(); }
+        if (savedJson !== null) { track = JSON.parse(library.get(trackId)?.track ? JSON.stringify(library.get(trackId).track) : savedJson); undo = []; redo = []; sel = null; rebuild(); }
         done(true);
       }
       else if (a === "save") done(await commit());
@@ -655,17 +674,20 @@ let problems = { overlap: new Set(), messages: [], loose: [], misses: [] };
 
 let chunkMeshes = null;
 const pieceLooks = {}; // buildTrackMeshes' `built`: id -> { guarded, open } (the builder's piece cache)
+// SHADOWS WHILE BUILDING (user, 2026-10-29: "add shadow in the builder edit also"): the road casts and takes the
+// sun's shadow as in a drive (driveSession: glass casts none) — how high a piece stands reads at a glance
+const shadowed = (m) => { m.castShadow = !(m.material?.transmission > 0); m.receiveShadow = true; };
 function drawChunks() {
   const placements = [];
   for (const pc of track.pieces) {
     if (isRing(pc) || !built.has(pc.uid)) continue;
     pieceLooks[pc.id] ??= { guarded: piece(pc.id, false).look, open: piece(pc.id, true).look };
     placements.push({ id: pc.id, open: !!pc.open, rail: pc.rail, M: built.get(pc.uid).M });
-    built.get(pc.uid).group.traverse((o) => { if (o.isMesh) o.visible = false; });
+    built.get(pc.uid).group.traverse((o) => { if (o.isMesh) { o.visible = false; shadowed(o); } });
   }
   chunkMeshes = buildTrackMeshes(placements, pieceLooks, mats);
   chunkMeshes.group.name = "trackChunks";
-  chunkMeshes.group.traverse((o) => { o.raycast = () => {}; }); // the mouse picks the pieces, never the chunks
+  chunkMeshes.group.traverse((o) => { o.raycast = () => {}; if (o.isMesh) shadowed(o); }); // the mouse picks the pieces, never the chunks
   trackGroup.add(chunkMeshes.group);
 }
 /** While the gizmo drags: the pieces themselves are drawn (they move), the chunks hidden; rebuilt after. */
@@ -860,6 +882,8 @@ function orderedPieces() {
 let lapLineOn = true;
 const lapGroup = new THREE.Group();
 scene.add(lapGroup);
+// THE DRIVE TRAILS (driveTrails.js; user, 2026-10-29, Apex Rush's editor): where your last drives went, red lines
+const trails = createDriveTrails(scene);
 const lapRibbonMat = new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
 const lapMarkMats = { hit: new THREE.MeshBasicMaterial({ color: 0xff4d5e }), fall: new THREE.MeshBasicMaterial({ color: 0xff4d5e }), brake: new THREE.MeshBasicMaterial({ color: 0xff9a3d }), rough: new THREE.MeshBasicMaterial({ color: 0xff9a3d }) };
 const lapMarkGeo = new THREE.OctahedronGeometry(1.6);
@@ -953,6 +977,7 @@ async function runPrediction() {
   ground.setRoadSolidsBvh(solidsBvh.baked ? solidsBvh : null);
   const car = new PredCar({ scene: predScene, showArrows: false });
   if (car.isStuntCar) car.roadDirAt = roadDirFromRide(ride);
+  if (car.isArcadeCar) car.trackAt = trackFromRide(ride);
   car.SUBSTEPS = 3;
   car.setBvh(ground.ground, ground.solids);
   car.getFloorY = () => FLOOR_Y;
@@ -1128,7 +1153,7 @@ async function runPrediction() {
     prediction.ticks = tick;
     if (p.y < lowY - 60) { prediction.fail = { uid: ride[idx].uid, why: "falls off" }; break; }
     // down on the floor, away from the road: it fell
-    if (p.y < FLOOR_Y + 2 && ride[idx].P.distanceTo(p) > 12) { prediction.fail = { uid: ride[idx].uid, why: "falls to the floor" }; break; }
+    if (!LAB && p.y < FLOOR_Y + 2 && ride[idx].P.distanceTo(p) > 12) { prediction.fail = { uid: ride[idx].uid, why: "falls to the floor" }; break; }
     slow = v < 2 ? slow + FIXED_DT : 0;
     if (slow > 3) { prediction.fail = { uid: ride[idx].uid, why: "stops" }; break; }
     if ((finishIdx >= 0 ? idx >= finishIdx : idx >= ride.length - 5) && !endsOnLip) { prediction.lapS = tick * FIXED_DT; endSpeed = v; break; }
@@ -1218,6 +1243,7 @@ async function runForgiveness(token, ctx) {
   forgiveCar ??= new PredCar({ scene: predScene, showArrows: false });
   const car = forgiveCar;
   if (car.isStuntCar) car.roadDirAt = roadDirFromRide(ctx.ride);
+  if (car.isArcadeCar) car.trackAt = trackFromRide(ctx.ride);
   car.SUBSTEPS = 3;
   car.setBvh(ctx.ground.ground, ctx.ground.solids);
   car.getFloorY = () => FLOOR_Y;
@@ -1449,15 +1475,15 @@ function runChecks() {
   }
   if (problems.overlap.size) problems.messages.push(`${problems.overlap.size} pieces overlap another road (red)`);
   // UNDER THE FLOOR: the floor is solid, so road under it can't be driven
-  const under = new Set(roads.filter((r) => r.P.y < FLOOR_Y + 1).map((r) => r.uid));
+  const under = new Set(LAB ? [] : roads.filter((r) => r.P.y < FLOOR_Y + 1).map((r) => r.uid)); // (the lab: roads ON the floor)
   for (const u of under) problems.overlap.add(u);
   if (under.size) problems.messages.push(`${under.size} piece${under.size > 1 ? "s go" : " goes"} under the floor (red) — build higher`);
   // LOOSE PIECES: not reachable from the first piece by road or flight (placed on a grid, not snapped
   // to an end). The car falls off where the connected road stops; the prediction used to stop there
   // too and call it a lap (user, 2026-10-18: "the last pieces … are not aligned and make the car fall")
   const chain = connectedUids();
-  problems.loose = track.pieces.filter((p) => !(isRing(p) ? chain.has(p.flightFrom) : chain.has(p.uid))).map((p) => p.uid);
-  if (problems.loose.length) problems.messages.push(`${problems.loose.length} piece${problems.loose.length > 1 ? "s are" : " is"} not connected to the road (orange) — the car falls where the road stops`);
+  problems.loose = LAB ? [] : track.pieces.filter((p) => !(isRing(p) ? chain.has(p.flightFrom) : chain.has(p.uid))).map((p) => p.uid);
+  if (problems.loose.length && !LAB) problems.messages.push(`${problems.loose.length} piece${problems.loose.length > 1 ? "s are" : " is"} not connected to the road (orange) — the car falls where the road stops`);
   let blocked = 0;
   for (const a of arcs) {
     // a flight that has its landing ends there: the arc beyond it never happens (it ran on under the
@@ -2883,7 +2909,7 @@ function renderStatus() {
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
     (!tileBase && !multi && !selPc ? `<div class="legend">Shift-click: the road up to a piece · Ctrl-click: one more${clipboard ? " · Ctrl+V: paste" : ""}</div>` : "") +
     (!tileBase && !multi && !selPc && track.pieces.length > 1
-      ? `<div class="acts"><button data-act="lapline" class="${lapLineOn ? "on" : ""}">Test lap line ${lapLineOn ? "on" : "off"} <kbd>L</kbd></button></div>` +
+      ? `<div class="acts"><button data-act="lapline" class="${lapLineOn ? "on" : ""}">Test lap line ${lapLineOn ? "on" : "off"} <kbd>L</kbd></button> <button data-act="trails" class="${trails.on ? "on" : ""}">Your drives ${trails.on ? "on" : "off"}</button>${trails.count ? ` <button data-act="trailsclear">Clear</button>` : ""}</div>` +
         (lapLineOn ? `<div class="legend">The test car: blue slow → white fast, dashed in the air · red: hits, falls · orange: hard braking, rough landing</div>` : "")
       : "") +
     // THE TEST CAR: placed → its speed and a remove, whenever nothing else is in hand
@@ -2941,6 +2967,8 @@ function renderStatus() {
 $("status").addEventListener("click", (e) => {
   const act = e.target.closest?.("button")?.dataset.act;
   if (act === "lapline") { setLapLine(!lapLineOn); return; }
+  if (act === "trails") { trails.on = !trails.on; statusKey = ""; renderStatus(); return; }
+  if (act === "trailsclear") { trails.clear(); statusKey = ""; renderStatus(); return; }
   if (act === "spawnkmh" && track.spawn) { const i = SPAWN_SPEEDS.indexOf(track.spawn.kmh ?? 0); track.spawn.kmh = SPAWN_SPEEDS[(i + 1) % SPAWN_SPEEDS.length]; save(); statusKey = ""; renderStatus(); return; }
   if (act === "spawndel" && track.spawn) { snapshot(); delete track.spawn; rebuild(); statusKey = ""; renderStatus(); return; }
   if (act === "refit") { refitLandings(); return; }
@@ -3143,6 +3171,21 @@ $("b-menu").onclick = async () => { if (!(await confirmLeave())) return; go({ to
 $("b-save").onclick = () => { $("b-save").blur(); commit(); };
 showSaved();
 if (restoredNote) editMsg = restoredNote;
+// THE LAB's "Reset lab": the test ground as generated (physicsLab.js), your lab changes dropped
+if (LAB) {
+  const rb = document.createElement("button");
+  rb.id = "b-lab-reset";
+  rb.textContent = "Reset lab";
+  rb.title = "Rebuild the physics lab's test ground as it ships (your changes to it are dropped)";
+  rb.onclick = () => {
+    if (!confirm("Rebuild the lab's test ground? Your changes to the lab are dropped.")) return;
+    if (draft.get()?.base === LAB_ID) draft.clear();
+    ensureLabTrack(makeLabTrack, { reset: true });
+    location.reload();
+  };
+  $("b-new").after(rb);
+  $("b-tut").style.display = "none";
+}
 $("b-name").value = trackName;
 // (the name is part of what Save saves: a draft's, or a saved track's new name)
 $("b-name").onchange = () => { trackName = $("b-name").value.trim() || trackName; $("b-name").value = trackName; if (trackId === DRAFT || dirty) save(); else library.rename(trackId, trackName); };
@@ -3213,6 +3256,8 @@ function renderHand() {
 // the start in a second; Esc / B brings you back to building, the camera where you left it. The page
 // reload each way cost ~30 s since the builder runs on the engine.
 const rig = createDriveRig(app, { prefs: settings.get(), car: settings.get().car });
+// THE LAB's overlay (labHud.js): telemetry, live tuning, zone keys — while driving in the lab
+if (LAB) createLabHud({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing });
 // the TEST CAR's hologram: the car itself, once its model is in (its card, the one in hand, the placed one)
 rig.modelsReady.then(() => {
   carHolo = rig.carHologram();
@@ -3246,7 +3291,8 @@ async function startDrive() {
   // the TEST CAR wins: exactly where it stands, at its speed
   const spawnM = spawnFrame();
   const from = spawnM ?? (selRoad ? built.get(sel)?.M ?? null : null);
-  await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, autoFinish: false, fallReset: false, tabBack: true, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  await rig.start({ track, trackId, from, fromExact: !!spawnM, fromKmh: spawnM ? track.spawn.kmh ?? 0 : 0, noTimer: !timerOn, landingBanner: !LAB, autoFinish: false, fallReset: false, tabBack: true, buttons: [{ label: "Back to building", key: "B", run: stopDrive }], onEscape: stopDrive, backLabel: "Building", help: DRIVE_HELP });
+  trails.begin(rig.vehicle);
   if (!driveWarmed) { driveWarmed = true; await warmUp(); }
 }
 // THE FIRST DRIVE'S SHADERS, under the loading screen (2026-10-27): what the drive builds when it starts — its
@@ -3275,6 +3321,8 @@ async function warmUp() {
 function stopDrive() {
   if (!driving) return;
   if (playing) return stopPlay();
+  trails.end();
+  statusKey = "";
   rig.stop();
   leaveDriveView();
 }
@@ -3350,16 +3398,18 @@ async function openTrack(id, { tutorial: asked = false, fresh = false } = {}) {
     library.current = id;
     track = load() ?? { pieces: [], nextUid: 1 };
     trackName = library.get(id)?.name ?? "Track";
-    savedJson = trackId === DRAFT ? null : JSON.stringify(track);
+    savedJson = trackId === DRAFT ? null : trackKey(track);
     dirty = trackId === DRAFT;
     const d = draft.get();
     if (trackId !== DRAFT && d && d.base === trackId) { track = d.track; trackName = d.name; dirty = true; }
     showSaved();
     $("b-name").value = trackName;
+    restoredNote = d && d.base === trackId ? "restored" : null;
     undo = [];
     redo = [];
     sel = null;
     rebuild();
+    settleSaved();
     applyWorld(app, track.world);
     $("b-world").value = WORLDS[track.world] ? track.world : DEFAULT_WORLD;
     app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD);
@@ -3437,9 +3487,10 @@ $("b-timer").onclick = () => { timerOn = !timerOn; try { localStorage.setItem("t
 showTimer();
 // OLD | NEW CAR (PHYSICS_PLAN.md, user 2026-10-28: "build a new one so we can compare side by side"): the drive and
 // the test lap both use it (settings.physics); the cars are made at load, so switching reloads the page
-$("b-physics").textContent = `Car: ${PredCar === StuntCar ? "new" : "old"}`;
-$("b-physics").classList.toggle("on", PredCar === StuntCar);
-$("b-physics").onclick = () => { settings.set({ physics: PredCar === StuntCar ? "old" : "stunt" }); location.reload(); };
+// (three now: old → stunt, the old car + take-off guide + landing catch → arcade, the new driving model: arcadeCar.js)
+$("b-physics").textContent = `Car: ${PHYSICS}`;
+$("b-physics").classList.toggle("on", PHYSICS !== "old");
+$("b-physics").onclick = () => { settings.set({ physics: { old: "stunt", stunt: "arcade", arcade: "old" }[PHYSICS] }); location.reload(); };
 // THE TUTORIAL (builderTutorial.js): on a NEW track (yours stays as it is); offered by itself the first time
 // the builder opens on an empty track
 const tutorial = createBuilderTutorial({
@@ -3523,6 +3574,7 @@ await loadPhysAssets(); // (the obstacles' Blender models: the dock's pictures a
 await bakeThumbs();
 renderDock();
 rebuild();
+settleSaved();
 if (track.pieces.length) { frameAll(); controls.update(); } // an opened track starts in view
 // the scene shows, final (the track, the car's model and lights), and compiles behind the loading screen
 await rig.modelsReady;

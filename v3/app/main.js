@@ -13498,6 +13498,9 @@ export async function startV3App(opts = {}) {
        * never calls this is unaffected. Used by Thunderline (static track atlas + live car map).
        */
       setSunShadowNode(node) { worldEnv?.setSunShadowNode?.(node); },
+      /** Meshes put back in the scene after the sun's shadow switched while they were out (their shared materials
+       *  kept the old shadow): rebuilt for the current one. */
+      refreshSunShadow(root) { worldEnv?.refreshSunShadowMaterials?.(root); },
       /** Cascades off: the fitted frustum's half extents (m), m/texel and ground slab this frame. */
       fitInfo() { return worldEnv?.getFittedShadowInfo?.() ?? null; },
       /** MEASUREMENT ONLY: bit i = cascade i is never redrawn (bit 0 = the fitted map with cascades off). */

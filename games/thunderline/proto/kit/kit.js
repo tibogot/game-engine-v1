@@ -321,6 +321,11 @@ export const TILES = {
     ],
     marks: [{ kind: "lip", from: 12, to: 20 }, { kind: "landing", from: 44, to: 114 }],
   },
+  // SMALL BUMPS (the physics lab; user, 2026-10-29: "small obstacles on the ground to check the wheels react well"):
+  // SPEED BUMPS — four ~14 cm humps 2.4 m long, 8 m apart; WASHBOARD — ten ~5 cm ripples every 3.2 m. Their shape
+  // IS rings: over the 30 tris/m budget by design (`trisPerM`; ~1.5k / 3.1k tris a piece — test pieces, few of them)
+  bumps_32: { label: "Speed bumps", trisPerM: 50, segs: Array.from({ length: 4 }, () => [{ L: 2.8 }, { L: 0.6, pitch: 11 * DEG, ramp: 0.3 }, { L: 1.2, pitch: -22 * DEG, ramp: 0.6 }, { L: 0.6, pitch: 11 * DEG, ramp: 0.3 }, { L: 2.8 }]).flat() },
+  washboard_32: { label: "Washboard", trisPerM: 100, segs: Array.from({ length: 10 }, () => [{ L: 0.8 }, { L: 0.4, pitch: 6 * DEG, ramp: 0.2 }, { L: 0.8, pitch: -12 * DEG, ramp: 0.4 }, { L: 0.4, pitch: 6 * DEG, ramp: 0.2 }, { L: 0.8 }]).flat() },
   // ROLLERS: two smooth bumps (~1 m) in 64 m — the car hops; level in, level out
   rollers_64: {
     label: "Rollers",

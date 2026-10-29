@@ -18,7 +18,8 @@ import { TILES, integrate, ensureTile, SECTIONS, socketMatrix, leanOut } from ".
 import { gatesFor, createRace, medalTimes, medalFor } from "./race.js";
 import { makeGateMesh } from "./gateMesh.js";
 import { library, campaign, contentKey, settings } from "../../app/library.js";
-import { StuntCar, roadDirFromRide } from "./stuntCar.js";
+import { StuntCar, roadDirFromRide, trackFromRide } from "./stuntCar.js";
+import { ArcadeCar } from "./arcadeCar.js";
 import { ghosts } from "../../app/ghostStore.js";
 import { createAutopilot } from "./autopilot.js";
 import { applyCarTune, CAR_TUNE } from "./carTune.js";
@@ -156,7 +157,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   // ---------- the car (+ the ghost), loaded once ----------
   const floorH = (x, z) => app.getWorldHeight(x, z);
   // the old car or the STUNT car (settings.physics, read once per session: the switch reloads the page)
-  const CarClass = settings.get().physics === "stunt" ? StuntCar : Vehicle;
+  const CarClass = { stunt: StuntCar, arcade: ArcadeCar }[settings.get().physics] ?? Vehicle;
   const vehicle = new CarClass({ scene, showArrows: false });
   vehicle.SUBSTEPS = substeps; // per-car: 3 → 1/360 s, keeps travel per substep ≤ the verified 0.25 m up to 90 m/s
   vehicle.getFloorY = floorH; // the floor is solid for the body too
@@ -487,6 +488,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   }
   function showLanding(ev) {
     S.landings.push({ grade: ev.grade, err: Math.round(ev.err), air: +ev.air.toFixed(1), t: +S.runTime.toFixed(2), ...(ev.partial ? { partial: true } : {}) });
+    if (S.o.landingBanner === false) return; // (the physics lab: its telemetry says it — user 2026-10-29: "not necessary for me")
     const el = $("land");
     const label = { perfect: "Perfect landing", ok: "Landed", rough: "Rough landing" }[ev.grade];
     const tail = ev.grade === "perfect" ? "boost" : ev.grade === "rough" ? "−15% speed" : ev.partial ? "not on all four wheels: no boost" : "land flat for a boost";
@@ -502,6 +504,11 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   let sunShadows = null;
   let parkedSun = null; // the last baked shadows while the cascades are back (dropSunShadows): reused next bake
   let installedSun = null; // the node the engine has as the sun's shadow (ours), or null
+  // THE TRACK'S MATERIALS MISSED THE SWITCH BACK (2026-10-29, user: "no shadows" in the builder's drive after the
+  // menu's warm-up play): stop() takes the track out of the scene at once, the engine's switch to the cascades
+  // rebuilds only what is IN the scene a few frames later — the shared road / car materials came back still built
+  // for the baked node (parked: lit everywhere). The next drive on the cascades refreshes them once they are back.
+  let cascadesStale = false;
 
   /**
    * Start driving a track.
@@ -532,6 +539,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       ? layoutFromPlacements({ built, pieces: roadPieces })
       : layoutTestTrack({ built, speed: jumpSpeed, jumpSpeeds: o.jumpSpeeds ?? [55.8, 48.6, 50.6], airDrag: AERO.drag / CHASSIS.mass });
     if (vehicle.isStuntCar) vehicle.roadDirAt = ghostCar.roadDirAt = roadDirFromRide(lay.ride); // its take-off guide
+    if (vehicle.isArcadeCar) { vehicle.trackAt = trackFromRide(lay.ride); ghostCar.trackAt = trackFromRide(lay.ride); } // the track frame
     const group = new THREE.Group();
     // THE RUN-OUT: past the finish the road goes on for 3 straights (drawn and solid, not part of the
     // race), and the car brakes by itself (driveFrame): it used to fly off the track's end after the line
@@ -670,6 +678,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (o.sunShadows === true) await bakeSunShadows(lay); // (a play: this track, this sun)
     else if (useSunShadows && !sunShadows) await bakeSunShadows(lay);
     else if (!useSunShadows && sunShadows) dropSunShadows(); // (a test drive after a play: the cascades)
+    if (!sunShadows && cascadesStale) { cascadesStale = false; app.shadows.refreshSunShadow?.(scene); }
     restart();
     return S;
   }
@@ -730,7 +739,9 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     app.shadows.setSunShadowNode(null);
     installedSun = null;
     parkedSun = old;
+    cascadesStale = true;
     for (let i = 0; i < 4; i++) await new Promise((r) => requestAnimationFrame(r)); // (the swap takes two frames)
+    if (!sunShadows) app.shadows.refreshSunShadow?.(scene); // (what is in the scene now: the switch is done)
     if (parkedSun === old) old.park?.();
   }
 

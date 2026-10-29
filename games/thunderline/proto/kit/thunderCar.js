@@ -13,6 +13,12 @@ import * as THREE from "three";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../../v3/render/foliage/glbLoader.js";
 import { WHEEL_LOCAL } from "../../../../v3/play/modularRoadVehicle.js";
 import { CAR_TUNE } from "./carTune.js";
+import { texture, color, max, smoothstep, mix, clamp } from "three/tsl";
+
+// THE PAINT (user, 2026-10-29: "the car texture is kind of dark, make it yellow"): the livery texture's dark blue body
+// recoloured to `body` (its shading kept: the texture's brightness, relative to the blue's), its bright cyan stripes to
+// `stripe`. A colour here, not a new texture: no source of the livery is kept.
+export const PAINT = { body: 0xffc21a, stripe: 0x15161a, navy: 0.045, metal: 0.35 };
 
 export const THUNDER_CAR_URL = "/models/thunderline/thunder_car.glb";
 export const THUNDER_CAR_LOD1_URL = "/models/thunderline/thunder_car_lod1.glb";
@@ -63,7 +69,9 @@ function build(root) {
   wheel.updateMatrixWorld(true);
   ws = new THREE.Box3().setFromObject(wheel).getSize(new THREE.Vector3());
   wheel.userData.fit = fit;
-  wheel.traverse((o) => { if (o.isMesh) { o.castShadow = /tyre|tire|rim/i.test(`${o.material?.name} ${o.name}`); o.receiveShadow = false; } });
+  // (the tyre AND the rim cast: a tyre is a ring — alone its shadow had a hole, "the shadow of the wheel being hollow",
+  // user 2026-10-29. This file's rim is the "WheelAtlas" material, not named rim)
+  wheel.traverse((o) => { if (o.isMesh) { o.castShadow = /tyre|tire|rim|wheel/i.test(`${o.material?.name}`); o.receiveShadow = false; } });
   // THE TYRE IS INSIDE-OUT in the file (864 of its 1008 triangles and their normals face inward). On a
   // DoubleSide node material that still draws, but faceDirection turns the shading normal INTO the rubber,
   // so it caught only the light from behind and read tan. Turned right side out once per loaded geometry
@@ -88,6 +96,7 @@ function build(root) {
     if (/^ShadowProxy/.test(o.name) || /^ShadowProxy/.test(o.parent?.name ?? "")) { o.material = hidden; o.castShadow = true; o.receiveShadow = false; return; }
     o.castShadow = false;
     o.receiveShadow = true;
+    if (o.material?.name === "ThunderPaint") o.material = paintMaterial(o.material);
     if (/^(Brakelights|TailBar)/.test(o.name)) brakeLights.push(o);
     if (/^(Headlights|DRL_)/.test(o.name)) headlampLenses.push(o);
   });
@@ -104,6 +113,23 @@ function build(root) {
     chassis: { object, brakeLights, headlampLenses, headlampMounts },
     wheel: { object: wheel, radius: ws.y / 2, width: ws.x },
   };
+}
+
+const painted = new WeakMap(); // the file's material → ours (clones share it)
+function paintMaterial(m) {
+  if (painted.has(m)) return painted.get(m);
+  const n = new THREE.MeshPhysicalNodeMaterial();
+  for (const k of ["name", "side", "metalnessMap", "roughnessMap", "metalness", "roughness", "normalMap", "clearcoat", "clearcoatRoughness", "envMapIntensity"]) if (m[k] !== undefined) n[k] = m[k];
+  if (m.normalScale) n.normalScale.copy(m.normalScale);
+  n.metalness = PAINT.metal; // (× the file's metalness map: fully metallic, yellow read as mustard gold)
+  const c = texture(m.map).rgb; // (linear: the map is sRGB-tagged)
+  const lum = max(c.r, max(c.g, c.b));
+  const stripe = smoothstep(0.1, 0.25, c.g); // the navy body has almost no green; the cyan stripes a lot
+  const body = color(PAINT.body).mul(clamp(lum.div(PAINT.navy), 0.35, 1.25));
+  n.colorNode = mix(body, color(PAINT.stripe), stripe);
+  n.userData.source = m;
+  painted.set(m, n);
+  return n;
 }
 
 /** Reverse a geometry's winding and negate its normals, once (the flag survives the clones sharing it). */
