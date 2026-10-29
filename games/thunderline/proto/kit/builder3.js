@@ -935,7 +935,8 @@ async function runPrediction() {
   const token = ++predToken;
   const tSetup = performance.now();
   const order = orderedPieces();
-  if (order.length < 2) { prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 }; return; }
+  // (no lap: no lap line either — a New track showed the last track's, user 2026-10-29)
+  if (order.length < 2) { prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 }; lapCache = null; drawLapLine([], []); return; }
   prediction = { state: "running", lipSpeed: prediction.lipSpeed, launch: prediction.launch, endSpeed: prediction.endSpeed, fail: null, lapS: null, topKmh: 0, ticks: 0, forgive: new Map() };
   renderStatus();
   // collision, as drive.js: decks (road hold on banked pieces) + rail collision proxies
@@ -3503,11 +3504,15 @@ $("b-tut").onclick = async () => {
   draft.start("Tutorial track");
   go({ to: "build", id: DRAFT, tutorial: true, fresh: true });
 };
+// FOCUS (app/menu.js, user 2026-10-29: "a tutorial for an unfinished product makes no sense"): no Tutorial button,
+// never offered by itself (?tutorial=1 still runs it)
+const FOCUS = true;
+if (FOCUS) $("b-tut").style.display = "none";
 /** The tutorial on opening a track: asked for, or offered by itself the first time the builder opens on an empty track. */
 function offerTutorial(asked) {
   let seen = false;
   try { seen = localStorage.getItem("thunderline.builder.tutorialSeen") === "1"; } catch {}
-  if (asked || (!seen && !track.pieces.length)) {
+  if (asked || (!FOCUS && !seen && !track.pieces.length)) {
     try { localStorage.setItem("thunderline.builder.tutorialSeen", "1"); } catch {}
     setTimeout(() => tutorial.start(), 600);
   }
@@ -3592,10 +3597,12 @@ if (SHELL) {
   const pending = window.__thunderShell?.pending;
   window.__thunderShell = { go: shellGo };
   if (pending) await shellGo(pending);
-  else {
-    // behind the menu: the first play prepared; a choice made meanwhile stops it (shellGo)
+  // behind the menu: the first play prepared; a choice made meanwhile stops it (shellGo). OFF while the game is
+  // the builder and the car (FOCUS, user 2026-10-29: "the menu takes long to be stable for the hover" — its ~11 s
+  // of compiling held the page; and its baked shadows leaked into the builder). ?prewarm=1 runs it.
+  else if (params.get("prewarm") === "1") {
     prewarm = prewarmPlay().finally(() => { prewarm = null; if (menuFrame.style.display !== "none") pauseGame(true); });
-  }
+  } else if (menuFrame.style.display !== "none") pauseGame(true);
 }
 app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();

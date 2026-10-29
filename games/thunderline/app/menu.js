@@ -15,6 +15,12 @@ const fmt = (t) => {
 const MEDAL = { author: "Author", gold: "Gold", silver: "Silver", bronze: "Bronze" };
 const TIERS = [["White", "var(--white)"], ["Green", "var(--green)"], ["Blue", "var(--blue)"], ["Red", "var(--red)"], ["Black", "var(--black)"]];
 
+// FOCUS (user, 2026-10-29: "a campaign and lessons when the physics and the editor are not finished is not a good
+// idea … a tutorial for an unfinished product makes no sense … then we focus on the car"): the menu is the builder
+// and the physics lab. Stunt tracks (campaign, lessons), the builder tutorial and the "later" modes are HIDDEN,
+// not gone — FOCUS = false brings them back.
+const FOCUS = true;
+
 // (the tab you were on: a lesson sends you back to the lessons)
 let playTab = (() => { try { return sessionStorage.getItem("thunderline.playTab") ?? "campaign"; } catch { return "campaign"; } })();
 
@@ -27,6 +33,23 @@ function foot(html) { $("foot").innerHTML = html; }
 // ---------- home ----------
 function home() {
   crumbs([]);
+  if (FOCUS) {
+    $("screen").innerHTML = `
+    <div class="modes">
+      <a class="mode main cut" href="#build"><div class="art"></div>
+        <span class="tag">Track builder</span>
+        <h2>Build</h2>
+        <p>Make stunt tracks piece by piece and drive them.</p>
+        <span class="go">Open ▶</span></a>
+      <a class="mode cut" href="/games/thunderline/proto/physics-lab.html" target="_top"><span class="tag">Physics lab</span>
+        <h2>Lab</h2><p>The car on open ground: jumps, loop, drift, bumps — telemetry and live tuning.</p><span class="go">Open ▶</span></a>
+    </div>
+    <div class="home-row">
+      <a class="mode cut" href="#settings"><h2>Settings</h2></a>
+    </div>`;
+    foot(`<span>${library.list().length} track${library.list().length === 1 ? "" : "s"} in your library</span>`);
+    return;
+  }
   $("screen").innerHTML = `
     <div class="modes">
       <a class="mode main cut" href="#play"><div class="art"></div>
@@ -112,12 +135,12 @@ function build() {
     actions: `<button data-act="open">Edit</button><button data-act="drive"${r.track?.pieces?.length ? "" : " disabled"}>Drive</button><button data-act="rename">Rename</button><button data-act="dup">Copy</button><button data-act="del" class="danger">Delete</button>`,
   })).join("");
   $("screen").innerHTML = `<p class="note">Your tracks. Edit one, or start a new one. A track is validated when the builder's test lap reaches the finish: that time is its author time and sets the medals.</p>
-    <div class="grid"><div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div><div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${draftLeft ? `<div class="card new cut" id="draft-go">Unsaved: ${draftLeft.name.replace(/[<&]/g, "")}<small>${draftLeft.base ? "changes to one of your tracks" : "a new track, not saved"} · <button id="draft-drop" class="danger">Discard</button></small></div>` : ""}${cards}</div>`;
+    <div class="grid">${FOCUS ? "" : `<div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div>`}<div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${draftLeft ? `<div class="card new cut" id="draft-go">Unsaved: ${draftLeft.name.replace(/[<&]/g, "")}<small>${draftLeft.base ? "changes to one of your tracks" : "a new track, not saved"} · <button id="draft-drop" class="danger">Discard</button></small></div>` : ""}${cards}</div>`;
   // (a new track is a DRAFT until the builder's Save: nothing joins this list by itself — library.js)
   $("new").onclick = () => { if (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and start a new one?`)) return; draft.start(); go({ to: "build", id: DRAFT, fresh: true }); };
   // THE BUILDER TUTORIAL (user, 2026-10-22: "shouldn't it be in the track builder menu?"): a new track,
   // the builder opens with the tutorial running (builderTutorial.js; also the builder's Tutorial button)
-  $("tut").onclick = () => { if (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and start the tutorial?`)) return; draft.start("Tutorial track"); go({ to: "build", id: DRAFT, tutorial: true, fresh: true }); };
+  if ($("tut")) $("tut").onclick = () => { if (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and start the tutorial?`)) return; draft.start("Tutorial track"); go({ to: "build", id: DRAFT, tutorial: true, fresh: true }); };
   // AN UNSAVED TRACK (the builder's draft: a new one never saved, or changes to one of yours): carry on or drop it
   if (draftLeft) {
     $("draft-go").onclick = () => go({ to: "build", id: draftLeft.base ?? DRAFT });
@@ -184,7 +207,7 @@ function settingsScreen() {
 // ---------- routing ----------
 function route() {
   const h = location.hash.replace("#", "") || "home";
-  ({ home, play, build, settings: settingsScreen }[h] ?? home)();
+  ({ home, play: FOCUS ? home : play, build, settings: settingsScreen }[h] ?? home)();
   window.scrollTo(0, 0);
 }
 addEventListener("hashchange", route);

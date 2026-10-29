@@ -33,6 +33,7 @@ const newId = () => `t${Date.now().toString(36)}${Math.floor(Math.random() * 129
 /** The one-slot track from before the library becomes the first library track (once). */
 function migrate(all) {
   if (Object.keys(all).length) return all;
+  try { if (localStorage.getItem(ARCHIVE_KEY)) return all; } catch {} // (set aside on purpose: not brought back)
   let old = null;
   try { old = JSON.parse(localStorage.getItem(OLD_SINGLE)); } catch {}
   if (old?.pieces?.length) {
@@ -49,6 +50,32 @@ function migrate(all) {
  * Exactly these names, once (a flag says it ran), never anything else.
  */
 const CLEANUP_FLAG = "thunderline.library.cleanup.2026-10-20";
+
+/*
+ * A FRESH START, ONCE (user, 2026-10-29: "the ones we see in the menu, my first track, track 5 … remove all for now
+ * and make them step by step"): every saved track is SET ASIDE, not deleted — moved under ARCHIVE_KEY (the physics
+ * lab stays). restoreArchived() puts them back in the list.
+ */
+const ARCHIVE_KEY = "thunderline.library.archive.2026-10-29";
+function archiveOnce(all) {
+  try { if (localStorage.getItem(ARCHIVE_KEY)) return false; } catch { return false; }
+  const aside = {};
+  for (const [id, r] of Object.entries(all)) if (!r.lab) { aside[id] = r; delete all[id]; }
+  try { localStorage.setItem(ARCHIVE_KEY, JSON.stringify(aside)); } catch (e) { console.warn("[library] archive not kept: nothing moved", e); Object.assign(all, aside); return false; }
+  // (unsaved changes to a track set aside: kept, as a new track)
+  const d = readDraft();
+  if (d?.base && aside[d.base]) writeDraft({ ...d, base: null });
+  return Object.keys(aside).length > 0;
+}
+/** The tracks set aside on 2026-10-29, back in the list (kept in the archive too). */
+export function restoreArchived() {
+  let aside = {};
+  try { aside = JSON.parse(localStorage.getItem(ARCHIVE_KEY)) ?? {}; } catch {}
+  const all = readAll();
+  for (const [id, r] of Object.entries(aside)) all[id] ??= r;
+  writeAll(all);
+  return Object.keys(aside).length;
+}
 const CLEANUP_NAMES = [/^White [1-5] · /, /^W[1-5]b? · /, /^Gap test$/, /^Small pieces test( 2)?$/, /^Track 2$/, /^Track 24$/];
 function cleanupOnce(all) {
   try { if (localStorage.getItem(CLEANUP_FLAG)) return false; localStorage.setItem(CLEANUP_FLAG, "1"); } catch { return false; }
@@ -103,6 +130,7 @@ export const library = {
     const all = migrate(readAll());
     const cur = localStorage.getItem(CURRENT);
     let pruned = cleanupOnce(all);
+    pruned = archiveOnce(all) || pruned;
     for (const [id, r] of Object.entries(all)) if (!r.track?.pieces?.length && id !== cur && !r.lab) { delete all[id]; pruned = true; }
     if (pruned) writeAll(all);
     // (the PHYSICS LAB's track is a record too, but not one of "your tracks": never listed)
