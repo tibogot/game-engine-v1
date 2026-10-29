@@ -6,7 +6,7 @@ import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { integrate, deckFrame, SECTIONS } from "./kit.js";
 import "./oldTiles.js"; // registers the old kit's bowl and flip ramp as tiles
 import { buildTubeLook, buildHalfpipeLook } from "./tubeLook.js";
-import { buildSweepGeometry, buildProfile, ROAD_PARAM_DEFAULTS, NO_CHECKER } from "../../../modular-road-v3/modularRoadKit.js";
+import { buildSweepGeometry, ROAD_PARAM_DEFAULTS as OLD_ROAD_PARAMS, NO_CHECKER } from "../../../modular-road-v3/modularRoadKit.js";
 import { buildRailGeometry, buildRailCollision, railParams } from "../../../modular-road-v3/modularRoadRail.js";
 // HALF THE POSTS (user, 2026-10-21: "they are too close from each other"): 7.2 m apart, not the old game's 3.6
 const RAIL = { ...railParams, postSpacing: 7.2 };
@@ -98,19 +98,30 @@ export const railSides = (edges) => (edges === "L" ? [-1] : edges === "R" ? [1] 
 export const edgesOf = (p) => (p.open ? false : p.rail === "L" || p.rail === "R" ? p.rail : true);
 /** The look-cache key for those edges. */
 export const lookKey = (edges) => (edges === true ? "guarded" : edges === false ? "open" : `rail${edges}`);
+/**
+ * THE KERB (user, 2026-10-29: "see what the kerb does to the car — a bit too dramatic; maybe kerbs should not be
+ * square, hard and vertical"): the old game's was a 0.75 m block, 22 cm high with vertical sides — a wheel going onto
+ * it at speed met a step. Thunderline's rises KERB.h over its inner KERB.slope m along a rounded curve (a wheel rolls up
+ * it), flat under the guardrail beyond. The rails stand on it (TL_ROAD.railHeight = KERB.h).
+ */
+export const KERB = { h: 0.07, slope: 0.35, steps: 5 };
+// (and the WIDTH: the kit's road — kit.js SECTIONS.road, 24 m since 2026-10-29; the old params said 16, and the
+// road drawn and driven stayed 16 m while everything sized to it read 24)
+const TL_ROAD = { ...OLD_ROAD_PARAMS, railHeight: KERB.h, width: 2 * SECTIONS.road.hw };
 /** The road cross-section with a kerb on each side in `sides` (−1 left, +1 right) and a flush edge elsewhere. */
 function sideProfile(rp, sides) {
-  const both = buildProfile(rp, true), none = buildProfile(rp, false);
-  if (sides.length === 2) return both;
-  if (!sides.length) return none;
   const hw = rp.width / 2;
   const rw = Math.min(Math.max(0, rp.railWidth), hw * 0.45), rh = Math.max(0, rp.railHeight);
   const t = Math.max(0.05, rp.thickness), N = 24;
-  const left = sides.includes(-1), xl = left ? -hw + rw : -hw, xr = left ? hw : hw - rw;
+  const left = sides.includes(-1), right = sides.includes(1);
+  const xl = left ? -hw + rw : -hw, xr = right ? hw - rw : hw;
+  const sl = Math.min(KERB.slope, rw * 0.8), M = KERB.steps;
+  // the slope: from the deck (y 0) up to the kerb's top, a smooth S (cosine) — its inner points shaded smooth
+  const ramp = (x0, dir) => Array.from({ length: M + 1 }, (_, k) => ({ x: x0 + dir * (sl * k) / M, y: (rh * (1 - Math.cos((Math.PI * k) / M))) / 2, zone: k === 0 ? 1 : 2, smooth: k > 0 && k < M }));
   const pts = [];
-  if (left) pts.push({ x: -hw, y: rh, zone: 2 }, { x: -hw + rw, y: rh, zone: 2 });
-  for (let k = 0; k <= N; k++) pts.push({ x: xl + ((xr - xl) * k) / N, y: 0, zone: 1, smooth: k > 0 && k < N });
-  if (!left) pts.push({ x: hw - rw, y: rh, zone: 2 }, { x: hw, y: rh, zone: 2 });
+  if (left) { pts.push({ x: -hw, y: rh, zone: 2 }); pts.push(...ramp(xl, -1).reverse()); } // (outer edge → the top → down the slope to the deck)
+  for (let k = left ? 1 : 0; k <= (right ? N - 1 : N); k++) pts.push({ x: xl + ((xr - xl) * k) / N, y: 0, zone: 1, smooth: k > 0 && k < N });
+  if (right) { pts.push(...ramp(xr, 1)); pts.push({ x: hw, y: rh, zone: 2 }); }
   for (let k = N; k >= 0; k--) pts.push({ x: -hw + (2 * hw * k) / N, y: -t, zone: 0, smooth: k > 0 && k < N });
   return { pts, hw };
 }
@@ -147,8 +158,8 @@ function buildTaperLook(tile, edges) {
   let narrow = Infinity;
   for (let i = 0; i < frames.length; i++) narrow = Math.min(narrow, hwAt(i));
   const sides = railSides(edges);
-  const deck = buildSweepGeometry(frames, sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(0) }, sides), {
-    profileAt: (_t, i) => sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwAt(i) }, sides),
+  const deck = buildSweepGeometry(frames, sideProfile({ ...TL_ROAD, width: 2 * hwAt(0) }, sides), {
+    profileAt: (_t, i) => sideProfile({ ...TL_ROAD, width: 2 * hwAt(i) }, sides),
   });
   const n = deck.getAttribute("position").count;
   const a = new Float32Array(n * 2);
@@ -158,13 +169,13 @@ function buildTaperLook(tile, edges) {
   const tEnd = (i, s) => {
     const hwE = hwAt(i);
     if (hwE < 1) return null; // a wedge's point, a round end
-    return endOf(frames[i], s, hwE, sig, capGeometry(deck, frames[i], sideProfile({ ...ROAD_PARAM_DEFAULTS, width: 2 * hwE }, sides).pts, s));
+    return endOf(frames[i], s, hwE, sig, capGeometry(deck, frames[i], sideProfile({ ...TL_ROAD, width: 2 * hwE }, sides).pts, s));
   };
   const ends = [tEnd(0, -1), tEnd(iN, 1)].filter(Boolean);
   if (!edges) return { deck, rail: null, railCollision: null, posts: null, under: null, ends };
   // each side: the frames moved sideways by (half width here − the narrow half width), tangents along
   // the moved edge (a converging rail faces along ITS line, not the road's centre line)
-  const rp = { ...ROAD_PARAM_DEFAULTS, width: 2 * narrow };
+  const rp = { ...TL_ROAD, width: 2 * narrow };
   const sideFrames = (side) => {
     const moved = frames.map((f, i) => ({ ...f, pos: f.pos.clone().addScaledVector(f.right, side * (hwAt(i) - narrow)) }));
     moved.forEach((f, i) => {
@@ -243,7 +254,7 @@ function coverEnds(tile) {
 const WINDOW = { L: 24, hw: 5, recess: 0.025, thick: 0.18, flange: 0.15, rim: 0.35, rimH: 0.04 };
 function buildGlassLook(tile, edges) {
   const { frames } = oldFrames(tile);
-  const rp = ROAD_PARAM_DEFAULTS, hw = rp.width / 2, sides = railSides(edges), t = Math.max(0.05, rp.thickness);
+  const rp = TL_ROAD, hw = rp.width / 2, sides = railSides(edges), t = Math.max(0.05, rp.thickness);
   const prof = sideProfile(rp, sides);
   const stamp = (g) => {
     const n = g.getAttribute("position").count, a = new Float32Array(n * 2);
@@ -320,7 +331,7 @@ function buildLook(tile, edges) {
   if (tile.glass) return buildGlassLook(tile, edges);
   const { frames: all } = oldFrames(tile);
   // the road look at this section's width (road 16 m, wide 48, narrow 8)
-  const rp = tile.section && tile.section !== "road" ? { ...ROAD_PARAM_DEFAULTS, width: SECTIONS[tile.section].hw * 2 } : ROAD_PARAM_DEFAULTS;
+  const rp = tile.section && tile.section !== "road" ? { ...TL_ROAD, width: SECTIONS[tile.section].hw * 2 } : TL_ROAD;
   // RUNS of road: a gap's air frames cut the piece in two (gap jumps); one run for the others
   const runs = [[]];
   for (const f of all) { if (f.air) { if (runs.at(-1).length) runs.push([]); } else runs.at(-1).push(f); }

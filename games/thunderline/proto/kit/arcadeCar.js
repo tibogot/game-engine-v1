@@ -30,7 +30,7 @@ export const ARCADE = {
   // `stop` N/m: the bump stop is a very stiff spring AT EACH WHEEL (a push of the whole car out of the road, by the
   // deepest wheel, lifted the other axle off: in a loop's 9 g the front met the curve first and the rear wheels rode
   // 0.65 m off it — half the grip; the car drifted sideways); the whole car is moved out only past `deep` m
-  ride: { k: 60000, c: 5200, rebound: 16000, prog: 900000, clear: 0.04, stop: 400000, deep: 0.08, visualDrop: 0.1 }, // visualDrop: see syncVisuals
+  ride: { k: 60000, c: 5200, rebound: 16000, prog: 900000, clear: 0.04, stop: 400000, deep: 0.08, visualDrop: 0.1, archRoom: 0.06 }, // visualDrop, archRoom: see syncVisuals
   // `top` m/s: its own (user, 2026-10-29: "it should go faster, in Apex Rush it goes more than 300 km/h") — the engine stops pulling at 100 (360 km/h); with the air drag it tops ~315
   drive: { top: 100, accel: 11.5, brake: 20, reverseTop: 14, coast: 0.8, overspeed: 0.6 }, // m/s², m/s, /s
   // GRIP: up to `g` g of sideways grip, all of it at `peakDeg` of slide, `slide` of it once sliding past `slideDeg`;
@@ -139,7 +139,9 @@ export class ArcadeCar extends StuntCar {
     super.syncVisuals(dt, alpha);
     let ext = Infinity;
     for (const t of this.tires) if (t.grounded && t.visualExt !== undefined) ext = Math.min(ext, t.visualExt);
-    const want = THREE.MathUtils.clamp(ext === Infinity ? ARCADE.ride.visualDrop : ext - 0.01, 0, ARCADE.ride.visualDrop);
+    // (the resting gap — a wheel pushed up by a kerb rises INTO its arch, by up to archRoom, as on a real car: lowering
+    // the body only by the most compressed wheel left the other wheels dangling under it: user, 2026-10-29, the kerb shot)
+    const want = THREE.MathUtils.clamp(ext === Infinity ? ARCADE.ride.visualDrop : ext + ARCADE.ride.archRoom, 0, ARCADE.ride.visualDrop);
     this._visDrop += (want - this._visDrop) * (1 - Math.exp(-12 * Math.max(dt, 0)));
     if (this._visDrop > 0) this.chassisMesh.position.addScaledVector(_aU.set(0, -1, 0).applyQuaternion(this._renderQuat ?? this.body.quat), this._visDrop);
     this._placeBrakes();

@@ -393,6 +393,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   // THE FX LAB's hooks: its own driver (drift circles, a wall scrape), slow motion, and the input used
   let inputSource = null, timeScale = 1, lastInput = null;
   let headlightsOn = null; // set from the sun's height (driveFrame)
+  let headlightsHand = null; // the L key's choice (null: the sun's)
   let showGhost = ghost && prefs.ghost !== false;
 
   // ---------- ENGINE SOUND (engineModel.js + engineLoops.js — the loops the user picked, 2026-10-20 — or
@@ -535,6 +536,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
    */
   async function start(o = {}) {
     if (S) stop();
+    headlightsHand = null; // (each drive: the sun's choice again)
     const track = o.track?.pieces?.length ? o.track : null;
     const roadPieces = (track?.pieces ?? []).filter((p) => !p.ring);
     const ringGates = (track?.pieces ?? []).filter((p) => p.ring).map((p) => {
@@ -933,6 +935,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (e.code === "KeyR") restart();
     if (e.code === "Delete") restart(true);
     if (e.code === "KeyP") { autopilot = !autopilot; S.pilot.reset(); }
+    // L: the headlights by hand (user, 2026-10-29) — on / off, overriding the sun's choice for this drive
+    if (e.code === "KeyL") { headlightsHand = !(headlightsHand ?? headlightsOn); headlightsOn = headlightsHand; vehicle.setHeadlights(headlightsOn); }
     if (e.code === "KeyG") { showGhost = !showGhost; ghostCar.group.visible = !!S.ghostPlayer && showGhost && ghostStyled; }
     if (e.code === "KeyM") setSound(engineMuted);
     if (e.code === "KeyF") toggleFreeCam(); // F (back from C, 2026-10-23: C is nose-down now)
@@ -1085,7 +1089,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     // HEADLIGHTS ON when the sun is low (user, 2026-10-20: "we don't have the car lights" at dusk) — a
     // uniform write in the car (setHeadlights), so checking twice a second costs nothing
     if (S.frame % 30 === 1) {
-      const on = app.light.getDirection().y < Math.sin(12 * Math.PI / 180);
+      const on = headlightsHand ?? app.light.getDirection().y < Math.sin(12 * Math.PI / 180);
       if (on !== headlightsOn) { headlightsOn = on; vehicle.setHeadlights(on); }
     }
   });
