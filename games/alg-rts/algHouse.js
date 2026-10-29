@@ -27,7 +27,25 @@ export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // the hillside house (its outside stair); the hamlet's smaller pieces: the lean-to, the walled yard, the oven
 // (+ the DECHRA's pieces, 2026-10-27 — DECHRA_PLAN.md: its mosque, a terrace's retaining wall, the lanes' steps, the djemaa)
 export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna", "masjid", "soutien", "escalier", "djemaa",
-  "pc", "casemate", "grotte", "foyer"];   // (+ the FLN CAMP's, 2026-10-27 — FLN_CAMP_PLAN.md: the command post, the refuge, the cave's mouth, the hidden fire)
+  "pc", "casemate", "grotte", "foyer",   // (+ the FLN CAMP's, 2026-10-27 — FLN_CAMP_PLAN.md: the command post, the refuge, the cave's mouth, the hidden fire)
+  "koubba", "hawsh", "tombe", "tombeb", "murette"];   // (+ 2026-10-29: the marabout's tomb, a grave (earth / whitewashed), a low broken wall)
+/** THE KOUBBA'S ENCLOSURE (tools/blender/mechta.py KB_HAWSH — change both together): its outline, the gateway between
+ *  the first and last points. */
+const KB_HAWSH = [[1.45, -5.58], [4.9, -5.1], [5.9, -1.2], [5.5, 3.6], [2.2, 5.8], [-2.6, 5.5], [-5.6, 2.9], [-5.9, -1.9], [-4.6, -5.3], [-1.45, -5.58]];
+/** A wall along a polyline as the props' axis-aligned blocks: each length cut in pieces ≤ 1.8 m, each piece's box along
+ *  its main direction, 0.7 m thick (long enough for a cover point each — algGame's props' cover). */
+function wallRects(pts, t = 0.35) {
+  const out = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, az] = pts[i], [bx, bz] = pts[i + 1], n = Math.ceil(Math.hypot(bx - ax, bz - az) / 1.8);
+    for (let k = 0; k < n; k++) {
+      const x0 = ax + ((bx - ax) * k) / n, z0 = az + ((bz - az) * k) / n, x1 = ax + ((bx - ax) * (k + 1)) / n, z1 = az + ((bz - az) * (k + 1)) / n;
+      const mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+      out.push(Math.abs(x1 - x0) >= Math.abs(z1 - z0) ? [Math.min(x0, x1), Math.max(x0, x1), mz - t, mz + t] : [mx - t, mx + t, Math.min(z0, z1), Math.max(z0, z1)]);
+    }
+  }
+  return out;
+}
 /** The mechta's SMALLER PIECES (a town's `props`: no garrison, no sight box): their walls, local real metres x0 x1 z0 z1
  *  (tools/blender/mechta.py — change both together) — the nav grid's blocks and HARD cover (algGame). The yard's gap
  *  in its right wall (z -0.7 … 0.7) left open: its thorn branches are a door for men. */
@@ -38,6 +56,12 @@ export const MECHTA_PROPS = {
   soutien: [[-2.0, 2.0, -0.3, 0.65]],
   escalier: [[-1.2, -0.78, -2.4, 1.0], [0.78, 1.2, -2.4, 1.0]],   // (the steps between: the way up)
   djemaa: [[-3.0, 3.0, 0.9, 1.4], [-3.0, -2.47, -1.5, 0.95]],
+  // the koubba: the tomb on its footing, its enclosure's wall along its irregular outline (the gateway at the front open)
+  // (its enclosure, hawsh, is its own piece and atlas: its wall along the irregular outline, the gateway open)
+  koubba: [[-2.65, 2.65, -2.65, 2.65], [-1.32, -0.68, -5.95, -5.3], [0.68, 1.32, -5.95, -5.3]],
+  hawsh: wallRects(KB_HAWSH),
+  murette: [[-2.0, 2.0, -0.25, 0.25]],
+  // (the graves, tombe / tombeb: walked over, no cover — none here)
 };
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
 // THE FIELD WALLS (tools/blender/fieldwall.py): a dry-stone module, three variants (a b c), the same states
@@ -259,8 +283,11 @@ export function createHouseField() {
   return {
     root,
     /** A house; its id (for setState). */
-    add(type, state, x, y, z, yaw = 0, scale = S) {
-      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw), new THREE.Vector3(scale, scale, scale));
+    // (`tilt` [about its own x, about its own z], radians: a piece LAID ON the slope — a grave, 2026-10-29)
+    add(type, state, x, y, z, yaw = 0, scale = S, tilt = null) {
+      const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
+      if (tilt) q.multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(tilt[0], 0, tilt[1])));
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(scale, scale, scale));
       items.push({ key: `${type}:${state}`, m, p: new THREE.Vector3(x, y, z), hay: hayFor(m, `${type}:${state}`) });
       built = false;
       return items.length - 1;

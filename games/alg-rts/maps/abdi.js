@@ -13,6 +13,7 @@ import { t } from "../i18n/i18n.js";
 import { ROCKS } from "./abdiRocks.js";
 import { TOWN_HOUSES, TOWN_SQUARE, TOWN_WALLS } from "./abdiTown.js";
 import { FIELD_PLOTS, FIELD_WALLS, FIELD_HEDGES } from "./abdiFields.js";
+import { hamlet, house, koubbaAndCemetery } from "./villageKit.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -72,6 +73,36 @@ export const LAYOUT = {
   ],
 };
 
+// ── THE PORT TO THE NEW KITS (2026-10-29 — you: "start working on the port … AAA Company of Heroes type of assets") ──
+// The places the old procedural pieces stood, rebuilt from the Blender kits (maps/villageKit.js, as the new Aurès):
+// their houses in the TOWN field (garrisons, damage, collapse), their smaller pieces its props. The ground measured
+// (2026-10-29): the hamlet's and the dechra's sites are flat pads (0.5 m over 60 m), the koubba on a small crest.
+// ?stone=0: the old pieces, to compare.
+const STONE = typeof location === "undefined" || new URLSearchParams(location.search).get("stone") !== "0";
+const site = (name) => LAYOUT.sites.find((s) => s.name === name);
+const DJ = site("Mechta el Djorf"), TG = site("Dechra Taghit"), SA = site("Sidi Ali");
+// MECHTA EL DJORF (the east lane's hamlet): two rows behind a small square, a house at each side of it, a yard behind,
+// a lean-to and an oven; one house shelled
+const DJORF = STONE && hamlet(DJ.x, DJ.z, {
+  rows: [{ types: ["petite", "etage", "petite"], x: -11, z: -6, states: { 2: "damaged" } },
+    { types: ["pente", "petite", "etage"], x: -13, z: -18, yards: [1] }],
+  sides: [{ type: "etage", x: -15.5, z: 2 }, { type: "petite", x: 15, z: 0.5 }],
+  props: [{ type: "appentis", x: 16, z: -9 }, { type: "tabouna", x: -7, z: 3 }] });
+// DECHRA TAGHIT (at the djebel's foot, the west lane's end): the bigger village — two long rows round its square, a
+// house on each side, its MOSQUE at the back against the hill (the minaret the landmark from the valley), the djemaa
+// and an oven in the square; one house a ruin, one shelled (the war has been here)
+const TAGHIT = STONE && (() => {
+  const v = hamlet(TG.x, TG.z, {
+    rows: [{ types: ["petite", "etage", "petite", "etage"], x: -17, z: -7 },
+      { types: ["etage", "petite", "pente", "petite"], x: -19, z: -20, states: { 1: "ruin" } }],
+    sides: [{ type: "etage", x: -21, z: 3 }, { type: "petite", x: 20, z: 2, state: "damaged" }],
+    props: [{ type: "djemaa", x: 6, z: 4 }, { type: "tabouna", x: -8, z: 5 }, { type: "appentis", x: 21.5, z: -10 }] });
+  v.houses.push(house("masjid", "intact", TG.x, TG.z - 36, TG.x, TG.z));
+  return v;
+})();
+// SIDI ALI: the koubba on its crest; the village's dead on the slope below it (south)
+const SAINT = STONE ? koubbaAndCemetery(SA.x, SA.z, SA.x - 6, SA.z + 21, { seed: 1961, cols: 5, rows: 4 }) : [];   // (east of it the graves ran under the mosque, north into a walled field — seen; south: clear, measured)
+
 /** THE MAP: its level, its pistes as tracks, its supply — the ground only for now (no town, no AI). */
 export const MAP = {
   id: "abdi",
@@ -81,7 +112,7 @@ export const MAP = {
   supply: LAYOUT.supply,
   handPlaced: false,
   // WHAT THIS MAP SHOWS (mapSystems.js): the ground under review — no AI yet.
-  systems: { fow: true, birds: true, splats: true, stones: true },
+  systems: { fow: true, birds: true, splats: true, stones: true, life: true },   // (life: the villages' hay, wood, ovens, hives and the squares' wells — 2026-10-29)
   // THE PLANTS BARELY MOVE (you, 2026-10-19: "in CoH there is no wind on foliage"): a slight breath, 1/4 of
   // the Aurès' sway; the flags and the windsock keep the full wind. ?plantwind=0..1 to compare.
   foliageWind: 0,   // (you, 2026-10-19: "make wind 0 for foliage" on this map — 0.25 was the first try)
@@ -103,7 +134,14 @@ export const MAP = {
   sandstone: { colour: "abdi", rocks: ROCKS },
   // ITS TOWN (algGame: an instanced house field): placed by tools/algAbdiLevel.mjs on the knoll's ring terraces,
   // the souk square at the town's point
-  town: { houses: TOWN_HOUSES, square: TOWN_SQUARE, walls: TOWN_WALLS },
+  town: { houses: [...TOWN_HOUSES, ...(DJORF?.houses ?? []), ...(TAGHIT?.houses ?? [])], props: [...(DJORF?.props ?? []), ...(TAGHIT?.props ?? []), ...SAINT],
+    square: TOWN_SQUARE, walls: TOWN_WALLS, replacesHamlet: STONE },
+  // the old procedural pieces the kits replace (the hamlet: replacesHamlet), the old wells (the props kit puts one in each
+  // square: villageProps)
+  skip: STONE ? ["dechra", "koubba", "wellDechra", "wellHamlet1"] : [],
+  villageProps: STONE,
+  // THE FLN CAMP AND ITS CAVE in Blender (algAlnCamp kit, algBuild loadGrotte — FLN_CAMP_PLAN.md); ?flnkit=0 the old
+  flnKit: typeof location === "undefined" || new URLSearchParams(location.search).get("flnkit") !== "0",
   // ITS FIELDS (tools/algAbdiDecals.mjs: the plots round the farms, their soil laid as decals; algGame clears
   // their plants — worked land). Their walls and crops next.
   fields: { plots: FIELD_PLOTS, walls: FIELD_WALLS, hedges: FIELD_HEDGES },

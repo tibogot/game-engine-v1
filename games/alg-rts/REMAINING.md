@@ -27,8 +27,10 @@ details are in TODO.md; the new map's plan in AURES2_PLAN.md.*
    the maquis), still the runtime masonry builder. Then the **FLN camp**.
 6. **The card technique for the fuzzy things:** the zeriba's thorn fence, brush piles, a thorn barricade, thatch.
 7. **The motor pool's mechanics** (your "Working On Device" clip): 1-2 men at the truck.
-8. **Small old-kit pieces to Blender:** koubba, cemetery, ruined hut (the new mechta's ruin?), the village well's swap
-   (Oued Abdi, the maquis), telegraph poles (an instanced Blender pole, the wires runtime).
+8. **Small old-kit pieces to Blender:** ~~koubba, cemetery~~ (**done 2026-10-29** in the mechta kit: `koubba`, the graves
+   `tombe` / `tombeb` laid on the slope toward Mecca, the low wall `murette` — the new Aurès, ?koubba=0 the old pair; to
+   judge), ruined hut (the new mechta's ruin?), the village well's swap (Oued Abdi, the maquis — the new Aurès has the
+   props kit's well already), telegraph poles (an instanced Blender pole, the wires runtime).
 9. **The sharp-surface treatment for the other Blender kits** at their next rebuild (mirador, sangar, field posts, FLN
    posts, arms cache, points…): buildKit(..., surfaces=True) + algHouse SURFACE_KITS or loadBlenderPiece `surfaces`.
 10. **The helipad**: rework completely (its floating sandbags) — you said later.
@@ -166,15 +168,16 @@ ones throughout.
 
 ## 2. Oued Abdi — to make it playable (the map in progress)
 
-1. **The other places' buildings:** the oasis (whitewashed kit), the hamlet, the farms and the
-   sheepfold (the brown houses), the DECHRA in stone (a stone kit, still to make in Blender), the
-   koubba.
+1. **The other places' buildings:** ~~the hamlet, the DECHRA in stone, the koubba~~ — **done 2026-10-29** (the mechta
+   kit: Mechta el Djorf, Dechra Taghit with its mosque, Sidi Ali and its cemetery, the squares' wells — maps/abdi.js,
+   maps/villageKit.js shared with the new Aurès; ?stone=0 the old pieces). Left: the oasis (whitewashed kit), the farms
+   and the sheepfold (the Blender farmstead).
 2. **Capture points and supply** live: the game told the new site kinds (town, oasis, farm, pass,
    lookout); the souk the big point.
 3. **The AI on:** the FLN down its two gullies, its cells in the villages and the town's houses; the
    French AI's routes over the fords.
 4. **Your first full match on it**, then the fixes from it.
-5. **The FLN side in Blender:** the maquis camp and the cave mouth.
+5. ~~**The FLN side in Blender:** the maquis camp and the cave mouth.~~ — **done 2026-10-29** (MAP.flnKit, as the new Aurès).
 6. **The new French post** in Blender (replaces the old one on this map only).
 7. **The town's finish** (after the playtest, where the fighting really is): its edge toward the
    valley (gardens, palms, low walls), the sand ridges at the lanes' edges, patchier render on the

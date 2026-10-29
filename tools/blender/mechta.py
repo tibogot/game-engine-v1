@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import bpy, bmesh
 import house
 from house import buildKit, previews, REFS, T
-from bkit import B, srgb, dust, wood
+from bkit import B, srgb, dust, wood, flat
 
 # ── Materials ────────────────────────────────────────────────────────────────
 def mechtaStone(nb):
@@ -578,6 +578,270 @@ TYPES["appentis"] = dict(builder=buildLeanTo, atlas=1024, farRatio=0.45)
 TYPES["enclos"] = dict(builder=buildYard, atlas=1024, farRatio=0.7)   # (0.45: the ruin's broken tops shaded off its near — the gate)
 TYPES["tabouna"] = dict(builder=buildTabouna, atlas=512, farRatio=0.5)
 MATDEF.update({"fsCharred": (0.95, lambda nb: nb.mix(nb.noise(3.0, 5), srgb(0x1c1814), srgb(0x3a2a1e)))})
+
+# ── THE KOUBBA AND THE CEMETERY (2026-10-29, REMAINING.md 8 — the old procedural ones, rtsAlgVillage buildKoubba /
+# buildCemetery, for the new maps) ─────────────────────────────────────────────────────────────────────────────────────
+def lathe(K, nm, prof, c, mat, n=40, smooth=True, rot=0.0, G="h"):
+    """A TURNED solid round (c x, c z): `prof` [(r, y)] bottom to top, r 0 at an end closes it to a point."""
+    bm = bmesh.new(); rings = []
+    for r, y in prof:
+        if r < 1e-4: rings.append([bm.verts.new(B(c[0], y, c[1]))]); continue
+        rings.append([bm.verts.new(B(c[0] + r * math.cos(rot + 2 * math.pi * i / n), y, c[1] + r * math.sin(rot + 2 * math.pi * i / n))) for i in range(n)])
+    for a, b in zip(rings, rings[1:]):
+        if len(a) == 1: [bm.faces.new((a[0], b[(i + 1) % n], b[i])) for i in range(n)]
+        elif len(b) == 1: [bm.faces.new((a[i], a[(i + 1) % n], b[0])) for i in range(n)]
+        else: [bm.faces.new((a[i], a[(i + 1) % n], b[(i + 1) % n], b[i])) for i in range(n)]
+    if len(rings[0]) > 1: bm.faces.new(list(reversed(rings[0])))
+    if len(rings[-1]) > 1: bm.faces.new(rings[-1])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return K.obj(nm, bm, mat, G, smooth)
+
+def limeWash(nb):
+    """THE KOUBBA'S WHITEWASH, generations of it: off-white to cream, grey rain streaks down from the parapet, a dirty
+    ochre band at the foot (splash, dust)."""
+    # (the first bake read as clean white plaster in the lab, 2026-10-29: the weathering pushed — older, greyer coats in
+    # patches, the streaks stronger and longer, the foot dirtier and higher)
+    c = nb.mix(nb.noise(1.4, 5, 0.6), srgb(0xcfc7b5), srgb(0xeee9de))
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(0.6, 3, 0.5), 0.5, 0.62), 0.55), c, srgb(0xc2b8a3))                          # (an older coat showing)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(4.0, 4, 0.6, stretch=(1, 1, 0.07)), 0.5, 0.74), 0.75), c, srgb(0x9a907c))   # (the streaks: the noise stretched down)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.gy, 1.3, 0.0), 0.8), c, srgb(0x8f785a))                                           # (the foot)
+    return dust(nb, c, 1.1, 0.9)
+MATDEF.update({"limeWash": (0.92, limeWash),
+               "soot": (1.0, lambda nb: nb.mix(nb.noise(6.0, 4), srgb(0x2a221c), srgb(0x4a3c30))),
+               "copper": (0.45, flat(srgb(0x8a5a32)))})
+
+KB_W, KB_C = 2.4, 6.0   # the tomb's half width; the enclosure's reach (algHouse MECHTA_PROPS koubba: change both together)
+# the enclosure's outline (real metres, front -Z): irregular, the GATE between the first two points (x -1.0 … 1.0)
+# (its ends at the gateway pillars' outer faces, x ±1.45: the stones ran through the pillars — seen)
+KB_HAWSH = [(1.45, -5.58), (4.9, -5.1), (5.9, -1.2), (5.5, 3.6), (2.2, 5.8), (-2.6, 5.5), (-5.6, 2.9), (-5.9, -1.9), (-4.6, -5.3), (-1.45, -5.58)]
+def buildKoubba(K, name, spec, state, seed):
+    """THE KOUBBA (KOUBBA_PLAN.md — new, from the real thing): one square room of rubble under thick lime, its edges soft,
+    its walls leaning in; a footing of stone; a parapet with four pointed corner HORNS; an octagonal drum and a smooth,
+    slightly POINTED dome, its finial three copper balls and a crescent; a round-headed door deep in a lime frame, two
+    soot-blackened candle niches, small grilled windows, the visitors' bench, offerings and votive rags; the render fallen
+    in patches low down. Round it a low dry-stone enclosure on an irregular outline, a gateway between whitewashed pillars,
+    a family grave inside. Front -Z. Damaged: the dome holed, a horn gone, render blown off, the enclosure breached;
+    ruin: the dome fallen in, the walls' stumps, white rubble."""
+    R = random.Random(seed); G = "h"; W = KB_W
+    dmg, ruin = state != "intact", state == "ruin"
+    H = 3.9   # the walls' height to the roof
+    K.batter = -0.012   # (the joined mesh leans in with height — batteredJoin)
+    foot = K.box("Footing", -W - 0.22, W + 0.22, -1.5, 0.32, -W - 0.22, W + 0.22, "stoneMechta", G, 0)
+    K.boolean(foot, K.skyline(-W - 1, W + 1, -W - 1, W + 1, 0.3, 0.05, seed=seed, mat="stoneMechta"))
+    K.bevel(foot, 0.05, 2, 30)
+    tomb = K.box("Tomb", -W, W, 0.2, H, -W, W, "limeWash", G, 0)
+    if ruin: K.boolean(tomb, K.skyline(-W - 1, W + 1, -W - 1, W + 1, 1.9, 0.7, seed=seed, mat="stoneMechta"))
+    # the render's SOFT ARRISES on the block itself, the openings cut after: bevelled round the openings (and the fallen
+    # render's ragged edges) it left zero-area slivers — the coplanar gate (16, then 13 pairs)
+    K.bevel(tomb, 0.14, 4, 30)
+    # the door: round-headed, deep in the wall; its lime frame proud of it; two candle niches; two small windows
+    K.boolean(tomb, K.arch(-0.5, 0.5, 0.3, 1.85, -W - 0.5, -W + 0.38, "dark"))
+    for s in (-1, 1):
+        K.boolean(tomb, K.arch(s * 1.3 - 0.17, s * 1.3 + 0.17, 0.95, 1.3, -W - 0.3, -W + 0.16, "soot", n=8))
+        K.boolean(tomb, K.cutter(s * W - 0.3, s * W + 0.3, 2.45, 2.85, -0.2, 0.2, "dark"))
+    # THE RENDER FALLEN in patches low on the walls (the rubble under it)
+    for k in range(3 if not dmg else 5):
+        a = R.choice(((1, 0), (-1, 0), (0, 1)))
+        x, z = (a[0] * W, R.uniform(-1.2, 1.2)) if a[0] else (R.uniform(-1.6, 1.6), W)
+        K.boolean(tomb, K.breach((x, R.uniform(0.4, 1.1), z), (0.45 if a[0] else 0.5, 0.3, 0.45 if not a[0] else 0.5), seed=seed + 20 + k, mat="stoneMechta", rough=0.3))
+    frame = K.box("DoorFrame", -0.82, 0.82, 0.32, 2.55, -W - 0.12, -W + 0.1, "limeWash", G, 0)
+    K.boolean(frame, K.arch(-0.54, 0.54, 0.3, 1.85, -W - 0.5, -W + 0.38, "dark"))   # (a touch wider than the door's: never one face)
+    K.bevel(frame, 0.05, 3, 30)
+    leaf = K.box("Door", -0.49, 0.49, 0.33, 2.33, -W + 0.27, -W + 0.32, "doorGreen", G, 0)
+    K.boolean(leaf, K.arch(-0.49, 0.49, 0.2, 1.85, -W + 0.1, -W + 0.5), op="INTERSECT")
+    K.box("Threshold", -0.62, 0.62, 0.2, 0.35, -W - 0.45, -W + 0.3, "stoneMechta", G, 0.03)
+    for s in (-1, 1):   # the windows' grilles, the niches' clay lamps
+        for k in range(3): K.rod(f"Grille{s}{k}", (s * (W - 0.08), 2.45, -0.15 + k * 0.15), (s * (W - 0.08), 2.85, -0.15 + k * 0.15), 0.018, "woodDark", G, 5)
+        if not ruin: lathe(K, f"Lamp{s}", [(0.0, 0.94), (0.05, 0.94), (0.08, 0.98), (0.07, 1.02), (0.04, 1.03), (0.03, 1.0), (0.0, 0.99)], (s * 1.3, -W + 0.06), "terracotta", n=14)   # (a clay oil lamp in the niche, sat in its floor)
+    # the visitors' bench along the front, the right of the door
+    bench = K.box("Bench", 0.95, W - 0.1, 0.25, 0.72, -W - 0.62, -W + 0.1, "limeWash", G, 0)
+    K.bevel(bench, 0.08, 3, 30)
+    parts = []
+    if not ruin:
+        # THE PARAPET round the roof (its inside cut away: the roof sits low behind it), the four corner HORNS
+        par = K.box("Parapet", -W - 0.04, W + 0.04, H - 0.1, H + 0.42, -W - 0.04, W + 0.04, "limeWash", G, 0)
+        K.boolean(par, K.cutter(-W + 0.32, W - 0.32, H + 0.12, H + 1.0, -W + 0.32, W - 0.32))
+        K.bevel(par, 0.1, 3, 30)
+        for i, (sx, sz) in enumerate(((-1, -1), (1, -1), (1, 1), (-1, 1))):
+            if dmg and i == 1: continue   # (knocked off: its stump below)
+            x, z = sx * (W - 0.12), sz * (W - 0.12)
+            parts.append(lathe(K, f"Horn{i}", [(0.3, H + 0.3), (0.3, H + 0.62), (0.22, H + 0.7), (0.21, H + 0.92), (0.12, H + 1.05), (0.0, H + 1.32 + i * 0.01)], (x, z), "limeWash", n=4, smooth=False, rot=math.pi / 4))
+        # THE DRUM (octagonal, a lip at its top) and THE DOME: turned, slightly pointed
+        Rd, y0 = 1.72, H + 0.08   # (its foot 4 cm under the roof: never on it)
+        parts.append(lathe(K, "Drum", [(Rd, y0), (Rd, y0 + 0.62), (Rd + 0.09, y0 + 0.68), (Rd + 0.09, y0 + 0.8), (Rd - 0.05, y0 + 0.83)], (0, 0), "limeWash", n=8, smooth=False, rot=math.pi / 8))
+        Rm, yb = 1.6, y0 + 0.8
+        prof = [(Rm, yb)] + [(Rm * math.cos(a) ** 1.15, yb + 1.9 * math.sin(a)) for a in (math.pi / 2 * i / 14 for i in range(1, 14))] + [(0.0, yb + 1.93)]
+        dome = lathe(K, "Dome", prof, (0, 0), "limeWash", n=40)
+        parts.append(dome)
+        top = yb + 1.93
+        if not dmg:
+            K.rod("Finial", (0.0, top - 0.1, 0.0), (0.0, top + 0.95, 0.0), 0.022, "iron", G, 6)
+            for k, r in enumerate((0.1, 0.08, 0.06)): lathe(K, f"Ball{k}", [(0.0, top + 0.12 + k * 0.24 - r)] + [(r * math.sin(math.pi * j / 6), top + 0.12 + k * 0.24 - r * math.cos(math.pi * j / 6)) for j in range(1, 6)] + [(0.0, top + 0.12 + k * 0.24 + r)], (0, 0), "copper", n=10)
+            K.member("Crescent", (-0.09, top + 0.86, 0.0), (0.09, top + 0.86, 0.0), [(-0.012, 0.0), (0.012, 0.0), (0.012, 0.13), (-0.012, 0.13)], "copper", G)
+        else:
+            K.boolean(dome, K.breach((0.7, yb + 1.1, -0.9), (0.75, 0.7, 0.7), seed=seed, mat="dark"))
+            K.rod("FinialBent", (0.0, top - 0.1, 0.0), (0.4, top + 0.6, -0.25), 0.022, "iron", G, 6)
+            K.lump("HornFallen", (W + 0.9, 0.0, -W - 0.6), (0.3, 0.22, 0.25), "limeWash", G, seed=seed + 4, rough=0.3, sub=2)
+        # offerings and votive rags by the door
+        # (TURNED JARS on the ground before the footing, sunk 3 cm — cones floating 30 cm over the ground read as cheap)
+        for k, (x, sc) in enumerate(((-1.95, 1.0), (-1.5, 0.82), (-1.2, 0.66))): clayJar(K, f"Offering{k}", x, -W - 0.5 - k * 0.04, sc)
+        K.rod("RagCord", (-0.75, 2.5, -W - 0.16), (0.75, 2.5, -W - 0.16), 0.008, "woodDark", G, 4)
+        for k in range(6):
+            x, dx, dy = -0.62 + k * 0.25, R.uniform(-0.04, 0.04), R.uniform(0.18, 0.34)
+            K.member(f"Rag{k}", (x, 2.5, -W - 0.17), (x + dx, 2.5 - dy, -W - 0.19), [(-0.035, 0.0), (0.035, 0.0), (0.035, 0.006), (-0.035, 0.006)], f"cloth{1 + k % 3}", G)
+    # THE ENCLOSURE'S GATEWAY: two whitewashed pillars and their caps (its dry-stone wall: the piece "hawsh" — its own
+    # atlas: ~1800 stones took 60 % of the koubba's, its walls and dome left blurred, 2026-10-29)
+    for s in (-1, 1):
+        p = K.box(f"Pillar{s}", s * 1.0 - 0.32, s * 1.0 + 0.32, -0.3, 1.45, -5.95, -5.3, "limeWash", G, 0)
+        K.bevel(p, 0.08, 3, 30)
+        # (a small pointed cap, the horns' shape — a round one read as a crumpled blob in the lab)
+        if not ruin: lathe(K, f"Cap{s}", [(0.5, 1.38), (0.5, 1.5), (0.37, 1.57), (0.34, 1.67), (0.0, 1.93 + s * 0.01)], (s * 1.0, -5.62), "limeWash", n=4, smooth=False, rot=math.pi / 4)
+    # a family grave inside the enclosure (the saint's kin): a low plastered box, its headstone
+    gb = K.box("KinGrave", -4.5, -3.9, 0.0, 0.32, 0.4, 2.3, "limeWash", G, 0)
+    K.bevel(gb, 0.07, 3, 30)
+    K.lump("KinHead", (-4.2, -0.2, 2.42), (0.24, 0.95, 0.07), "stoneMechta", G, seed=seed + 30, rough=0.22, sub=2)
+    if ruin:
+        K.lump("Heap", (0.3, 0.25, 0.2), (2.2, 1.15, 2.0), "mechtaWhiteRubble", G, seed=seed + 9, rough=0.45, flatten=200)
+        for k in range(5): K.lump(f"Chunk{k}", (R.uniform(-3.4, 3.4), 0.0, R.uniform(-3.6, -2.7)), (0.32, 0.2, 0.28), "limeWash", G, seed=seed + 40 + k, rough=0.35, sub=2)
+    K.spots.append((4.2, 0.0, 3.6, R.uniform(0, 6.28), "Brush", 1.6))   # (a juniper grown in the enclosure's corner)
+
+def buildHawsh(K, name, spec, state, seed):
+    """THE KOUBBA'S ENCLOSURE (hawsh): a low dry-stone wall stone by stone round its irregular outline (KB_HAWSH), between
+    the koubba's gateway pillars; damaged: breached on its west side; ruin: its top half fallen. Placed with the koubba."""
+    stoneWallPath(K, random.Random(seed), KB_HAWSH, 0.95, 0.56, state, gap=(-5.75, 0.5, 1.1) if state != "intact" else None)
+
+def clayJar(K, nm, x, z, sc=1.0, y0=-0.03):
+    """A TURNED JAR (the offerings, a village's water): a foot, a full belly, its shoulder, a narrow neck, a rolled rim and
+    its open mouth — sat on the ground (y0: 3 cm into it)."""
+    prof = [(0.0, 0), (0.09, 0), (0.12, 0.03), (0.19, 0.14), (0.215, 0.25), (0.2, 0.34), (0.15, 0.42), (0.085, 0.47), (0.075, 0.52),
+            (0.09, 0.55), (0.1, 0.57), (0.085, 0.585), (0.065, 0.56), (0.055, 0.5), (0.0, 0.48)]
+    return lathe(K, nm, [(r * sc, y0 + y * sc) for r, y in prof], (x, z), "terracotta", n=20)
+
+def terracotta(nb):
+    """Fired clay: red-brown, paler where it dried, darker where water ran, dusty at the foot."""
+    c = nb.mix(nb.noise(3.0, 5, 0.6), srgb(0x8a4a2e), srgb(0xb06a44))
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(6.0, 4, 0.6, stretch=(1, 1, 0.15)), 0.55, 0.75), 0.5), c, srgb(0xc9a27e))
+    return dust(nb, c, 0.3, 1.0)
+def fieldRock(nb):
+    """A dry-stone wall's stones: the ruined-wall photo pulled to the Aurès' warm ochre, EACH STONE its own shade (light
+    to brown), lichen-grey here and there. (Not the house stone's: its darker foot — splash under 0.7 m — took the whole of
+    a 1 m wall, near black in the game's shade.)"""
+    c = nb.mix(0.55, nb.img("build/rabdentse_ruins_wall/rabdentse_ruins_wall_diff_1k.jpg", 0.9), srgb(0xb89a72))
+    c = nb.scale(c, nb.mr(nb.island(), 0.0, 1.0, 0.8, 1.15))
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.island(), 0.82, 1.0), 0.6), c, srgb(0x9a9688))
+    return dust(nb, c, 0.4, 0.5)
+MATDEF.update({"terracotta": (0.8, terracotta),
+               # (a wall built STONE BY STONE: its bake alone — named outside the "stone" surface class, whose dry-stone photo
+               # laid over 30 cm stones showed each one a scrap of the photo's dark joints: the koubba's enclosure near black)
+               "fieldRock": (0.95, fieldRock)})
+
+def wallStone(K, nm, c, size, R, yaw, mat="fieldRock"):
+    """A rough field stone (fieldwall.py's: the hull of 14 points on a flattened ellipsoid, each pushed — ~24 triangles),
+    its long axis turned to `yaw` (the wall's way)."""
+    bm = bmesh.new(); vs = []
+    tx, tz = R.uniform(-0.15, 0.15), R.uniform(-0.15, 0.15)
+    ca, sa = math.cos(yaw), math.sin(yaw)
+    for i in range(14):
+        u = 1 - 2 * (i + 0.5) / 14; v = i * 2.399963 + R.uniform(-0.3, 0.3)
+        r = math.sqrt(max(0.0, 1 - u * u)) * R.uniform(0.84, 1.0)
+        px, py, pz = r * math.cos(v) * size[0], u * size[1] * R.uniform(0.88, 1.0), r * math.sin(v) * size[2]
+        py += px * tx + pz * tz
+        vs.append((c[0] + px * ca + pz * sa, c[1] + py, c[2] - px * sa + pz * ca))
+    vs = [bm.verts.new(B(*q)) for q in vs]
+    bmesh.ops.convex_hull(bm, input=vs)
+    return K.obj(nm, bm, mat, "h")
+
+def stoneWallPath(K, R, pts, h, th, state, gap=None):
+    """A DRY-STONE WALL along a polyline, stone by stone (fieldwall.py's way): a rubble core, courses of rough stones on
+    both faces (joints staggered, a big one now and then, thinner up — the batter), flat capstones; `gap` (x, z, r) a
+    breach with its stones fallen out in front; the ruin's top half mostly gone, its stones scattered."""
+    G = "h"; ruin = state == "ruin"; top = h * (0.5 if ruin else 1.0); k = 0
+    for i in range(len(pts) - 1):
+        (ax, az), (bx, bz) = pts[i], pts[i + 1]
+        L = math.hypot(bx - ax, bz - az); dx, dz = (bx - ax) / L, (bz - az) / L; nx, nz = -dz, dx
+        yaw = math.atan2(-dz, dx)
+        at = lambda s, o: (ax + dx * s + nx * o, az + dz * s + nz * o)
+        # the core: rubble between the faces, below the capstones (never seen through a joint)
+        e = i * 0.012   # (each length's top and foot their own height: where two meet at a corner, never one face)
+        K.member(f"Core{i}", (ax, 0.0, az), (bx, 0.0, bz), [(-th * 0.32, -0.5 - e), (th * 0.32, -0.5 - e), (th * 0.26, top - 0.12 - e), (-th * 0.26, top - 0.12 - e)], "rubble", G)
+        y, course = -0.05, 0
+        while y < top - 0.1:
+            ch = R.uniform(0.17, 0.3); t = th * (1 - 0.2 * y / h)
+            s = 0.02 + (0.2 if course % 2 else 0.0)
+            while s < L - 0.14:   # (inside its length: never through what it ends against)
+                w = min(R.uniform(0.28, 0.5) if R.random() < 0.8 else R.uniform(0.5, 0.72), L - 0.02 - s)
+                cs = s + w / 2
+                x, z = at(cs, 0)
+                hole = gap and math.hypot(x - gap[0], z - gap[1]) < gap[2] and y > 0.05
+                gone = ruin and R.random() < 0.15 + 0.5 * (y / top)
+                if not hole and not gone:
+                    for side in (-1, 1):
+                        px, pz = at(cs + R.uniform(-0.03, 0.03), side * t * R.uniform(0.38, 0.48))
+                        wallStone(K, f"W{k}{side}", (px, y + ch / 2, pz), (w * 0.6, ch * 0.66, t * 0.34), R, yaw)
+                    k += 1
+                s += w + R.uniform(0.0, 0.03)
+            y += ch * 0.9; course += 1
+        if not ruin:   # the capstones, across the top
+            s = 0.0
+            while s < L:
+                w = R.uniform(0.3, 0.46); x, z = at(s + w / 2, 0)
+                if not (gap and math.hypot(x - gap[0], z - gap[1]) < gap[2]):
+                    wallStone(K, f"Cap{k}", (x, top + 0.03, z), (w / 2, R.uniform(0.06, 0.09), th * 0.42), R, yaw)
+                k += 1; s += w + 0.02
+    # the fallen: a heap out of the breach; a ruin's stones scattered both sides
+    for i in range(10 if gap else 18 if ruin else 0):
+        if gap: px, pz = gap[0] + R.uniform(-1.1, -0.3), gap[1] + R.uniform(-0.9, 0.9)
+        else:
+            j = R.randrange(len(pts) - 1); f = R.random(); (ax, az), (bx, bz) = pts[j], pts[j + 1]
+            px, pz = ax + (bx - ax) * f + R.uniform(-0.9, 0.9), az + (bz - az) * f + R.uniform(-0.9, 0.9)
+        sz = R.uniform(0.1, 0.18)
+        wallStone(K, f"F{i}", (px, sz * 0.5, pz), (sz * 1.3, sz * 0.7, sz), R, R.uniform(0, 6.28))
+
+def whiteRubble(nb):
+    """The koubba's fallen walls: lime render broken over rubble stone."""
+    s = nb.mix(0.5, nb.img("build/rabdentse_ruins_wall/rabdentse_ruins_wall_diff_1k.jpg", 0.9), srgb(0xa8855c))
+    return dust(nb, nb.mix(nb.mr(nb.noise(2.5, 4), 0.45, 0.6), s, srgb(0xe2dccd)), 1.6, 1.0)
+MATDEF.update({"mechtaWhiteRubble": (0.95, whiteRubble)})
+
+def buildGrave(K, name, spec, state, seed):
+    """A GRAVE (the cemetery below the koubba — the game lays each toward Mecca, on the slope as it is): a low earth
+    mound in a border of small stones, an upright HEADSTONE (+Z) and a smaller footstone, rough flat slabs; `white`: the
+    mound and the headstone whitewashed. Its foot sunk: the slope under it never shows a gap."""
+    R = random.Random(seed); G = "h"; white = spec.get("white")
+    # (LOW and STONY: a 20 cm round mound of pale earth read as a loaf of bread in the game, 2026-10-29 — as the old one's
+    # note said; the Aurès' graves are a low bed of earth and stones)
+    # (the earth DARK, fresh-turned: the casemate's pale earth read as a loaf against the hill's shade; the stones ROUNDED,
+    # sub 2 — at sub 1 a ring of icosahedra read as spikes)
+    K.lump("Mound", (0.0, -0.05, 0.0), (0.42, 0.1, 1.02), "renderPlain" if white else "graveEarth", G, seed=seed, rough=0.2, sub=3)
+    for k in range(12):
+        a = k / 12 * 6.283 + R.uniform(-0.1, 0.1)
+        K.lump(f"Edge{k}", (math.cos(a) * 0.56, -0.05 + k * 0.004, math.sin(a) * 1.18), (0.15, 0.1, 0.12), "stoneMechta", G, seed=seed + k, rough=0.2, sub=2)
+    if not white:   # stones laid over the bed (a whitewashed grave is plastered smooth)
+        for k in range(7):
+            x, z = R.uniform(-0.24, 0.24), R.uniform(-0.75, 0.75)
+            h = 0.06 * math.sqrt(max(0.0, 1 - (x / 0.42) ** 2 - (z / 1.02) ** 2))
+            K.lump(f"Bed{k}", (x, -0.04 + h + k * 0.003, z), (0.1, 0.06, 0.09), "stoneMechta", G, seed=seed + 40 + k, rough=0.2, sub=2)
+    K.lump("Head", (R.uniform(-0.04, 0.04), -0.3, 1.36), (0.34, 1.0 + R.uniform(-0.12, 0.1), 0.09), "renderPlain" if white else "stoneMechta", G, seed=seed + 20, rough=0.22, sub=2)
+    K.lump("Foot", (R.uniform(-0.04, 0.04), -0.25, -1.31), (0.22, 0.55, 0.075), "stoneMechta", G, seed=seed + 21, rough=0.22, sub=2)
+
+def buildLowWall(K, name, spec, state, seed):
+    """A LOW BROKEN DRY-STONE WALL, a 4 m length (the cemetery's edge, a field's): its top uneven, a gap fallen in
+    when damaged, its stumps when a ruin. Its foot 1 m down (stood on a slope as it is)."""
+    G = "h"
+    w = prismX(K, "Low", [(-0.25, -1.0), (-0.22, 0.72), (0.22, 0.68), (0.25, -1.0)], -2.0, 2.0, "stoneMechta")
+    K.boolean(w, K.skyline(-3, 3, -1, 1, 0.55, 0.16, seed=seed, mat="stoneMechta"))
+    if state != "intact":
+        K.boolean(w, K.breach((0.5, 0.6, 0.0), (0.7, 0.4, 0.5), seed=seed + 1, mat="stone"))
+        K.lump("Fall", (0.6, 0.0, -0.6), (0.6, 0.2, 0.35), "rubble", G, seed=seed + 2)
+    if state == "ruin": K.boolean(w, K.skyline(-3, 3, -1, 1, 0.25, 0.12, seed=seed + 3, mat="stone"))
+    K.bevel(w, 0.04, 2, 30)
+
+MATDEF.update({"graveEarth": (1.0, lambda nb: dust(nb, nb.mix(nb.noise(6.0, 5), srgb(0x4a3a2b), srgb(0x5e4a37)), 0.5, 0.4))})
+TYPES["koubba"] = dict(builder=buildKoubba, atlas=2048, farRatio=0.65, islandMargin=0.004)   # (islands 8 px apart: at 1 px the dome's seams bled — dark notches)
+TYPES["hawsh"] = dict(builder=buildHawsh, atlas=1024, farRatio=0.75, islandMargin=0.002, aoDist=0.2, smoothAngle=80, weighted=False)   # (round-shaded stones, the sangar's: at 35° they read faceted, crystals)   # (its stones packed: a short AO — fieldwall.py; 0.4 baked them near black)   # (0.4: its damaged and ruin far levels shaded off their near — the gate)
+TYPES["tombe"] = dict(builder=buildGrave, atlas=256, farRatio=0.5, states=["intact"])
+TYPES["tombeb"] = dict(builder=buildGrave, atlas=256, farRatio=0.5, states=["intact"], white=True)
+TYPES["murette"] = dict(builder=buildLowWall, atlas=256, farRatio=0.6)
 
 for spec in TYPES.values():
     spec.setdefault("builder", buildMechta); spec.setdefault("farRatio", 0.38)   # (0.3: the loggia house's far ruin shaded off its near — the gate)

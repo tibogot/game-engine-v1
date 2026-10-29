@@ -710,6 +710,16 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       for (const row of [...MAP.town.houses, ...townProps]) {
         if (row[3] != null) continue;
         const [ty, , , , , yaw, fx, fz, hx, hz] = row, m = row[10];
+        // ON THE GROUND AS IT IS (a grave on the cemetery's slope — 2026-10-29): no pad, LAID ON the slope — its centre's
+        // ground, tilted along and across to the ground at its ends (stood level, a 25 % slope left its foot half a metre
+        // up: a field of loaves)
+        if (m?.ground) {
+          const c = Math.cos(yaw), s = Math.sin(yaw), h = (lx, lz) => app.getWorldHeight(fx + lx * c + lz * s, fz - lx * s + lz * c);
+          row[3] = h(0, 0);
+          // (`upright`: a wall follows the slope along its length only — leant across, it read as a fallen slab)
+          m.tilt = [m.upright ? 0 : -Math.atan2(h(0, hz) - h(0, -hz), 2 * hz), Math.atan2(h(hx, 0) - h(-hx, 0), 2 * hx)];
+          continue;
+        }
         if (m && base[m.site]) {
           row[3] = base[m.site].sum / base[m.site].n + m.level * TERRACE_G;
           if (m.pad === false) continue;
@@ -723,7 +733,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       // the TERRACE WALLS (the kit's "mur" round the risers): in the same field
       for (const [st, x, y, z, yaw] of MAP.town.walls ?? []) field.add("mur", st, x, y, z, yaw);
       // the PROPS after them (the houses' indices stay the damage's): each wall of theirs a nav block and HARD cover
-      for (const [ty, st, x, y, z, yaw] of townProps) field.add(ty, st, x, y, z, yaw);
+      for (const [ty, st, x, y, z, yaw, , , , , m] of townProps) field.add(ty, st, x, y, z, yaw, undefined, m?.tilt);
       const propWalls = [];   // { x, z, hx, hz, yaw, st } world, game metres
       for (const [ty, st, x, , z, yaw] of townProps) {
         const c = Math.cos(yaw), s = Math.sin(yaw);
