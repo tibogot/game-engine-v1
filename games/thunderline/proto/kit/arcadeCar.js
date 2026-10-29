@@ -61,6 +61,11 @@ export const ARCADE = {
   // turned onto the road at `rollRate` /s and the wheels' kicks spin it only `spin` of what they would (no rocking
   // onto one wheel). PITCH stays the car's (rear first, the nose slams down), and so do its speed and springs. Not past
   // `maxDeg` of tilt: that is a crash.
+  // THE ROAD GLUE (see _physicsStep): `g` g toward a road that goes on, for up to `time` s off it; `damp` /s of the
+  // speed away from it; a car leaving at more than `launch` m/s (a jump pad: 8) is flying on purpose
+  // `anticipate` m: on the wheels, the pull grows as the road 0.15 s ahead falls this far under the car's path;
+  // `minSpeed` m/s: below it, nothing (a crawl over a crest is not a flight)
+  glue: { g: 3.5, time: 0.8, damp: 10, launch: 7.5, anticipate: 0.6, minSpeed: 15 },
   land: { hold: 0.5, minAir: 0.35, roll: 0.35, rollRate: 12, spin: 0.25, maxDeg: 45 },
   // A CRASH (_crashSolve): from `speed` m/s into a solid (a scrape along a rail stays under it: the corkscrew's press
   // peaked at 14.2), the hit bounces back `restitution` of it and may spin the car up to `maxSpin` rad/s
@@ -88,6 +93,8 @@ const _com = new THREE.Vector3(), _n = new THREE.Vector3(), _f = new THREE.Vecto
 const _up = new THREE.Vector3(), _tmp = new THREE.Vector3(), _axis = new THREE.Vector3(), _F = new THREE.Vector3();
 const _qi = new THREE.Quaternion(), _w = new THREE.Vector3(), _roadUp = new THREE.Vector3(), _rel = new THREE.Vector3();
 const _aP = new THREE.Vector3(), _aU = new THREE.Vector3(), _aF = new THREE.Vector3(), _aN = new THREE.Vector3();
+// a loop, a wall: their own hold (stunt gravity) — the glue is for roads you drive ON
+const stuntish = (surf) => surf.y < ARCADE.wall.from;
 const _bInv = new THREE.Matrix4(), _bRootQ = new THREE.Quaternion(), _bQ = new THREE.Quaternion(), _bP = new THREE.Vector3(), _bA = new THREE.Vector3(), _bY = new THREE.Vector3(0, 1, 0);
 const bump = { pen: 0, n: new THREE.Vector3() };
 // THE BODY'S CONTACTS (_bodyContact): m of skin, the bounce (and from what speed), friction, passes, the push out
@@ -258,8 +265,22 @@ export class ArcadeCar extends StuntCar {
       // (wheels off for an instant — a bank's exit, a crest, a loop — the road still pulls; but not past a LIP: there
       // the road does not go on under where the car is headed. Without the pull at all, the arcade car flew off the
       // Tilted landing test's 45° bank exit at 266 km/h)
-      const pressed = down > 0 || (onRoad && this._roadAhead(body));
-      this.arcade.pressed = pressed; this.arcade.ahead = this._dbgAhead;
+      // (wheels down too: the road falling away ahead is the crest coming — the glue starts before the car leaves)
+      const roadAhead = tr && speed > ARCADE.glue.minSpeed ? this._roadAhead(body) : false;
+      const pressed = down > 0 || (onRoad && roadAhead);
+      // THE ROAD GLUE (user, 2026-10-29: "should the car jump even on slopes? … a bigger force to the ground?"): off a
+      // road that GOES ON (a crest, rollers, a bank's exit — not a lip: _roadAhead), a car that left it slowly (not
+      // thrown up by a jump pad: glue.launch) is pulled back onto it at up to glue.g, its speed away from it damped.
+      // Jumps come from the pieces made for them; real physics flies a 250 km/h car off any crest.
+      if (down && !this._subDown) this._glueOK = true;
+      if (!down && this._subDown) this._glueOK = body.vel.dot(surf) < ARCADE.glue.launch;
+      this._subDown = down > 0;
+      // off the road: the full pull; on it, as much as the road falls away ahead (0 → full over glue.anticipate m)
+      const glueK = !roadAhead || !this._glueOK || stuntish(surf) ? 0
+        : !down ? (this._sinceWheels < ARCADE.glue.time ? 1 : 0)
+        : THREE.MathUtils.clamp((this._aheadAbove - 0.1) / ARCADE.glue.anticipate, 0, 1);
+      const glue = glueK > 0;
+      this.arcade.glue = glueK;
       let stunt = 0;
       if (pressed) {
         stunt = THREE.MathUtils.clamp((ARCADE.wall.from - surf.y) / (ARCADE.wall.from - ARCADE.wall.full), 0, 1);
@@ -269,6 +290,11 @@ export class ArcadeCar extends StuntCar {
       _F.set(0, -G * body.mass * (1 - stunt), 0).addScaledVector(surf, -G * body.mass * stunt);
       this._stickAcc = pressed && speed > ARCADE.stick.minSpeed ? Math.min(ARCADE.stick.max, ARCADE.stick.k * speed * speed) : 0;
       if (this._stickAcc) _F.addScaledVector(surf, -this._stickAcc * body.mass);
+      if (glue) {
+        _F.addScaledVector(surf, -ARCADE.glue.g * G * body.mass * glueK);
+        const away = body.vel.dot(surf);
+        if (!down && away > 0) body.vel.addScaledVector(surf, -away * (1 - Math.exp(-ARCADE.glue.damp * subDt)));
+      }
       _F.addScaledVector(body.vel, -AERO.drag * speed); // air drag (the old car's AERO.drag)
       body.addForce(_F);
 
@@ -329,13 +355,13 @@ export class ArcadeCar extends StuntCar {
   _roadAhead(body) {
     const ahead = _rel.copy(body.pos).addScaledVector(body.vel, 0.15);
     const tr = this.trackAt?.(ahead);
-    if (!tr || tr.end) { this._dbgAhead = tr ? "end" : "none"; this.trackAt(body.pos); return false; }
+    if (!tr || tr.end) { this._aheadAbove = 0; this.trackAt(body.pos); return false; }
     // (the road GOES ON there: a crest's road falls away under the car — "too far above it" called that a lip, and
     // at 200 km/h the slope-down piece threw the car 120 m: user's Tilted landing test, 2026-10-29. Only how far
     // ABOVE the road counts as a flight: past a few metres the car really has left it)
     const rel = ahead.sub(tr.P), along = rel.dot(tr.U), across = Math.sqrt(Math.max(0, rel.lengthSq() - along * along));
     this.trackAt(body.pos); // (back to where the car is: trackAt searches round its last match)
-    this._dbgAhead = `${along.toFixed(1)}/${across.toFixed(1)}`;
+    this._aheadAbove = along; // (m the car's path is above the road 0.15 s ahead: a crest falling away)
     return along > -1.5 && along < ARCADE.road.crestReach && across < (tr.hw ?? 12) + ARCADE.road.edge;
   }
 

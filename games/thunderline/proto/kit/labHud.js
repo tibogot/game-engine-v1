@@ -33,6 +33,7 @@ const SLIDERS = [
     [ARCADE, "road.coyote", "on the road after a wheel lifts (s)", 0, 0.6, 0.01],
     [ARCADE, "wall.from", "walls & loops: holds from tilt (up.y)", 0.3, 0.95, 0.01],
     [ARCADE, "guide.rate", "walls & loops: follows the road (/s, 0 off)", 0, 12, 0.25],
+    [ARCADE, "glue.g", "road glue over crests (g, 0 off)", 0, 8, 0.25],
     [ARCADE, "stick.k", "downforce (×v²)", 0, 0.008, 0.0002],
     [ARCADE, "ride.k", "spring (N/m)", 10000, 80000, 1000],
     [ARCADE, "ride.c", "damper, compressing (N·s/m)", 500, 12000, 100],
