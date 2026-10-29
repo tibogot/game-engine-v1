@@ -134,6 +134,23 @@ export function createSfx(getCtx, { volume = 0.7 } = {}) {
     },
     /** the boost kicks in: a rising whoosh */
     boost() { burst({ dur: 0.7, gain: 0.35, type: "bandpass", f0: 400, f1: 3200, q: 1.4 }); },
+    /** A CRASH (user, 2026-10-29: a 170 km/h hit was silent): k 0..1 how hard — a low body thud, a metal crunch, a
+     *  rattle of bits after it */
+    crash(k = 1) {
+      if (!on.landing) return;
+      k = Math.max(0.15, Math.min(1, k));
+      burst({ dur: 0.35 + 0.3 * k, gain: 0.45 + 0.5 * k, f0: 320, f1: 50 });
+      tone([48, 71], { dur: 0.35, gain: 0.25 + 0.35 * k, type: "sine" });
+      burst({ dur: 0.22 + 0.2 * k, gain: 0.3 + 0.35 * k, type: "bandpass", f0: 2600, f1: 700, q: 2.2 });
+      if (k > 0.4) tone([311, 467, 623], { dur: 0.18, gain: 0.06 * k, type: "square", delay: 0.06 });
+    },
+    /** the BODY hitting the ground (roof, side, nose first): a dull knock, k 0..1 */
+    knock(k = 0.5) {
+      if (!on.landing) return;
+      k = Math.max(0.1, Math.min(1, k));
+      burst({ dur: 0.16 + 0.15 * k, gain: 0.3 + 0.45 * k, f0: 420, f1: 70 });
+      burst({ dur: 0.12, gain: 0.12 + 0.25 * k, type: "bandpass", f0: 1800, f1: 600, q: 1.6 });
+    },
     /** the race: countdown beeps, GO, checkpoint, finish, a missed checkpoint */
     beep(kind) {
       if (kind === "count") tone([660], { dur: 0.16, gain: 0.25, type: "square" });

@@ -371,6 +371,7 @@ export class ArcadeCar extends StuntCar {
     if (!C.length) return 0;
     for (const c of C) {
       const vn = _pv.crossVectors(body.angVel, c.r).add(body.vel).dot(c.n);
+      if (-vn > 3) this.arcade.bodyHit = Math.max(this.arcade.bodyHit ?? 0, -vn); // (the sound: the body striking the ground)
       c.target = vn < -BODY.bounceMin ? -BODY.restitution * vn : 0; // (a bounce only off a real hit)
       c.mn = body.effectiveInvMass(c.r, c.n);
     }
@@ -413,7 +414,10 @@ export class ArcadeCar extends StuntCar {
     try { solve(); } finally { [CRASH.wallSpeed, CRASH.restitution, CRASH.maxSpin] = keep; }
     // (the old contact arms ITS crash timer on a real hit — the old car's step counts it down, not this one: the car's
     // own timer instead, and the old one cleared so nothing of the old car's reads it)
-    if (this._crashYield > 0) { this._crashT = C.loose; this._crashYield = 0; }
+    if (this._crashYield > 0) {
+      if (this._crashT <= 0) this.arcade.crashHit = Math.max(this.arcade.crashHit ?? 0, this._solidImpactSpeed ?? C.speed); // (the sound: one per crash)
+      this._crashT = C.loose; this._crashYield = 0;
+    }
   }
 
   /** ON THE ROAD: engine, brakes, the grip curve, the turn rate, the car kept on the surface */

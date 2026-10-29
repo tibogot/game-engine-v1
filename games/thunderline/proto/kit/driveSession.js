@@ -25,7 +25,7 @@ import { createAutopilot } from "./autopilot.js";
 import { applyCarTune, CAR_TUNE } from "./carTune.js";
 import { createCarRules, magnetZones, wallCutZones } from "./carRules.js";
 import { createGhostRecorder, createGhostPlayer } from "./ghost.js";
-import { createEngineModel } from "./engineModel.js";
+import { createEngineModel, ENGINE } from "./engineModel.js";
 import { createEngineSound } from "./engineSound.js";
 import { createEngineLoops, isLoopEngine } from "./engineLoops.js";
 import { createSfx } from "./sfx.js";
@@ -399,7 +399,12 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   // the synth, engineSound.js) + sfx ----------
   // Starts on the first key press / click (browsers allow audio only after a gesture). M mutes; the
   // tab hidden = paused. Sound is OFF unless the settings turned it on (user, 2026-10-19).
-  const engine = createEngineModel();
+  // THE GEARS FIT THE CAR (user, 2026-10-29: "when the car reaches its max speed the engine sound stutters"): 6th
+  // topped out at 268 km/h, the arcade car runs to ~318 — it sat on the rev limiter (its bursts: the stutter). Its
+  // gears spread so that its top speed is reached in 6th under the redline.
+  const carTopKmh = settings.get().physics === "arcade" ? 318 : 0;
+  const gearScale = Math.max(1, (carTopKmh * 1.12) / ENGINE.gearTopKmh.at(-1)); // (+12 %: a boost pad over top speed stays under the limiter)
+  const engine = createEngineModel({ ...ENGINE, gearTopKmh: ENGINE.gearTopKmh.map((k) => k * gearScale) });
   const engineType = prefs.engine ?? "gen6";
   const engineSound = (isLoopEngine(engineType) ? createEngineLoops : createEngineSound)({ type: engineType, volume: prefs.volume ?? 0.7 });
   // EVERY PAGE OPENS SILENT (user, 2026-10-22: "disable the sound by default"; 2026-10-21: "when we open a
@@ -464,6 +469,10 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting, scrape };
     sfx.update(dt, car);
     sfxRec.update(dt, car);
+    // the arcade car's CRASHES and body knocks (arcadeCar.js marks them; heard once, then cleared)
+    const A = vehicle.arcade;
+    if (A?.crashHit) { sfx.crash((A.crashHit - 12) / 30); A.crashHit = 0; }
+    if (A?.bodyHit) { if (!A.crashHit) sfx.knock((A.bodyHit - 3) / 12); A.bodyHit = 0; }
     // the countdown: a beep on 3, 2, 1
     const n = race.s.state === "countdown" ? Math.ceil(race.s.hold * 2) : 0;
     if (n && n !== lastCount && n <= 3) sfx.beep("count");
