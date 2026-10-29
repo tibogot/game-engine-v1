@@ -683,7 +683,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     $("back").innerHTML = `← ${o.backLabel ?? "Back"}<kbd>Esc</kbd>`;
     $("back").style.display = o.onEscape ? "" : "none";
     $("back").onclick = () => { $("back").blur(); o.onEscape?.(); };
-    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> last checkpoint · <kbd>R</kbd> restart · <kbd>F</kbd> free camera`;
+    $("help").innerHTML = o.help ?? `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>Backspace</kbd> back on the road · <kbd>R</kbd> restart · <kbd>F</kbd> free camera`;
     hud.classList.add("on");
     $("time").style.display = $("cps").style.display = o.noTimer ? "none" : "";
 
@@ -828,19 +828,73 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     S.topKmh = 0;
     S.safe.pos.copy(sp.pos);
     S.safe.quat.copy(sp.quat);
+    clearTrail();
     if (!engineMuted) engineSound.resume();
   }
+  // BACK ON THE ROAD (user, 2026-10-29: "instant respawn"): with no checkpoint passed yet — the physics lab, a test
+  // drive — Backspace sent the car all the way back to the start. Now it goes back onto the road where the car was
+  // ROAD_BACK.back s ago (before the mistake), lined up with the road, at the speed it had there; the arcade car only
+  // (its track frame, trackAt). The trail: a fixed ring of spots, one every ROAD_BACK.every s on the road, nothing
+  // allocated while driving.
+  const ROAD_BACK = { every: 0.2, back: 1.0, edge: 3, n: 32 };
+  const trail = Array.from({ length: ROAD_BACK.n }, () => ({ t: -1, P: new V(), T: new V(), U: new V(), speed: 0 }));
+  let trailHead = 0, trailWait = 0, roadSpot = null;
+  const _ra = new V(), _rr = new V(), _lastPos = new V(Infinity, 0, 0);
+  function noteRoad() {
+    // (a teleport — the lab's zone keys — is not a road travelled: its spots are elsewhere)
+    if (_lastPos.distanceToSquared(vehicle.body.pos) > 400) clearTrail();
+    _lastPos.copy(vehicle.body.pos);
+    if ((trailWait -= FIXED_DT) > 0) return;
+    if (!vehicle.trackAt || vehicle.groundedCount < 3 || !vehicle.arcade?.onRoad || vehicle._crashT > 0) return;
+    const tr = vehicle.trackAt(vehicle.body.pos);
+    if (!tr || tr.end || !tr.U) return;
+    trailWait = ROAD_BACK.every;
+    const s = trail[trailHead];
+    trailHead = (trailHead + 1) % ROAD_BACK.n;
+    const dir = Math.sign(vehicle.body.vel.dot(tr.T)) || 1; // (the way the car was going along it)
+    _rr.crossVectors(tr.T, tr.U).normalize();
+    const lim = Math.max(0, (tr.hw ?? 12) - ROAD_BACK.edge), across = THREE.MathUtils.clamp(_ra.subVectors(vehicle.body.pos, tr.P).dot(_rr), -lim, lim);
+    s.t = S.runTime; s.P.copy(tr.P).addScaledVector(_rr, across); s.T.copy(tr.T).multiplyScalar(dir); s.U.copy(tr.U); s.speed = vehicle.body.vel.length();
+  }
+  function clearTrail() { for (const s of trail) s.t = -1; roadSpot = null; trailWait = 0; }
+  /** the newest spot from ROAD_BACK.back s ago or before (the oldest if none is that old); null with none */
+  function pickRoadSpot() {
+    let pick = null, oldest = null;
+    for (const s of trail) {
+      if (s.t < 0 || s.t > S.runTime) continue;
+      if (!oldest || s.t < oldest.t) oldest = s;
+      if (s.t <= S.runTime - ROAD_BACK.back && (!pick || s.t > pick.t)) pick = s;
+    }
+    return pick ?? oldest;
+  }
+  function respawnRoad(standing) {
+    const spot = standing && roadSpot ? roadSpot : pickRoadSpot();
+    if (!spot) return false;
+    roadSpot = spot;
+    for (const s of trail) if (s.t > spot.t) s.t = -1; // (the spots after it are where it went wrong)
+    const L = _rr.crossVectors(spot.U, spot.T).normalize(), F = _ra.crossVectors(L, spot.U).normalize(); // (the car's +X is its left)
+    const quat = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(L, spot.U, F));
+    vehicle.respawnAt(spot.P.clone().addScaledVector(spot.U, SPAWN_LIFT), quat);
+    if (!standing) vehicle.body.vel.copy(F).multiplyScalar(spot.speed);
+    _lastPos.copy(vehicle.body.pos); // (this jump is ours: the trail before the spot stays)
+    return true;
+  }
   // CHECKPOINT RESPAWN (DESIGN.md §8): Backspace = back to the last checkpoint at the speed you had
-  // there; again within 1.5 s = the same spot standing; no checkpoint yet = the start, standing.
+  // there; again within 1.5 s = the same spot standing; no checkpoint yet = back on the road (respawnRoad), or the
+  // start, standing.
   function respawnCheckpoint() {
     const now = performance.now();
     const standing = now - S.lastBackspace < 1500;
     S.lastBackspace = now;
     const cp = S.race.s.last;
+    if (!cp && respawnRoad(standing)) return afterRespawn();
     const pos = cp ? cp.pos.clone() : S.spawnPos.clone();
     const quat = cp ? cp.quat.clone() : S.startQuat.clone();
     vehicle.respawnAt(pos, quat);
     if (cp && !standing) vehicle.body.vel.copy(cp.vel);
+    afterRespawn();
+  }
+  function afterRespawn() {
     S.race.teleported(vehicle.body.pos);
     S.rules.reset();
     S.recorder.respawn(vehicle);
@@ -1047,6 +1101,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       if (S.ghostPlayer) S.ghostPlayer.tick(FIXED_DT);
       S.runTime += FIXED_DT;
       if (vehicle.groundedCount >= 3) { S.safe.pos.copy(vehicle.body.pos); S.safe.quat.copy(vehicle.body.quat); S.safe.ok = true; }
+      noteRoad();
     }
     if (ticks) S.physMs.push((performance.now() - tPhys) / ticks);
     if (S.physMs.length > 480) S.physMs.splice(0, 240); // trimmed in batches, not shifted every frame (the debug readout's last 240+)

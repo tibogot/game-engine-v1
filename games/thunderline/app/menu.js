@@ -191,7 +191,7 @@ function settingsScreen() {
       <span><kbd>Q</kbd> <kbd>E</kbd></span><span>spin in the air</span>
       <span><kbd>Z</kbd> <kbd>X</kbd></span><span>roll in the air</span>
       <span><kbd>Space</kbd></span><span>handbrake</span>
-      <span><kbd>Backspace</kbd></span><span>last checkpoint, keeping your speed (twice: standing)</span>
+      <span><kbd>Backspace</kbd></span><span>back on the road where you went off (or the last checkpoint), keeping your speed (twice: standing)</span>
       <span><kbd>R</kbd> <kbd>Delete</kbd></span><span>restart</span>
       <span><kbd>M</kbd></span><span>sound on / off</span>
       <span><kbd>F</kbd></span><span>free camera: drag to orbit the car, wheel to zoom, <kbd>T</kbd> slow motion / pause</span>
