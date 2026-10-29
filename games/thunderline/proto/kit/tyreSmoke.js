@@ -206,23 +206,27 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
   const _c = new THREE.Color(), _v = new THREE.Vector3(), _fwd = new THREE.Vector3(), _right = new THREE.Vector3(), _p = new THREE.Vector3(), _q = new THREE.Vector3();
   const wheels = [0, 1, 2, 3].map(() => ({ prev: new THREE.Vector3(), has: false, carry: 0 }));
 
-  function puff(pos, n, vel, k, startOffset) {
+  // (ex: a puff from elsewhere — the EXHAUST, exhaustFx.js: its own size, life, opacity and velocity as given)
+  function puff(pos, n, vel, k, startOffset, ex = null) {
     const i = cursor;
     cursor = (cursor + 1) % MAX;
     used = Math.max(used, cursor === 0 ? MAX : cursor);
     seedN = (seedN + 0.6180339887) % 1;
     const r = Math.random();
-    const size = THREE.MathUtils.lerp(s.size[0], s.size[1], k) * (0.8 + 0.4 * r);
-    const life = THREE.MathUtils.lerp(s.life[0], s.life[1], k) * (0.75 + 0.5 * Math.random());
+    const size = ex ? ex.size * (0.8 + 0.4 * r) : THREE.MathUtils.lerp(s.size[0], s.size[1], k) * (0.8 + 0.4 * r);
+    const life = ex ? ex.life * (0.8 + 0.4 * Math.random()) : THREE.MathUtils.lerp(s.life[0], s.life[1], k) * (0.75 + 0.5 * Math.random());
     const start = clock - startOffset; // puffs laid back along this frame's path are already a little older
     const card = size / F.fill;
     const P = attrs.iPos.array, Lf = attrs.iLife.array, V = attrs.iVel.array, N = attrs.iPlane.array, o = i * 4;
     P[o] = pos.x + n.x * 0.15; P[o + 1] = pos.y + n.y * 0.15; P[o + 2] = pos.z + n.z * 0.15; // (at the tyre: the anchor places the card)
     P[o + 3] = card;
-    Lf[o] = start; Lf[o + 1] = life; Lf[o + 2] = seedN; Lf[o + 3] = THREE.MathUtils.lerp(s.opacity[0], s.opacity[1], k);
-    V[o] = vel.x * s.throwK + (Math.random() - 0.5) * 1.2; V[o + 1] = vel.y * s.throwK + 0.4 + Math.random() * 0.6; V[o + 2] = vel.z * s.throwK + (Math.random() - 0.5) * 1.2;
-    V[o + 3] = THREE.MathUtils.lerp(s.grow[0], s.grow[1], Math.random());
-    N[o] = n.x; N[o + 1] = n.y; N[o + 2] = n.z; N[o + 3] = n.x * pos.x + n.y * pos.y + n.z * pos.z;
+    Lf[o] = start; Lf[o + 1] = life; Lf[o + 2] = seedN; Lf[o + 3] = ex ? ex.opacity : THREE.MathUtils.lerp(s.opacity[0], s.opacity[1], k);
+    const tk = ex ? 1 : s.throwK;
+    V[o] = vel.x * tk + (Math.random() - 0.5) * 1.2; V[o + 1] = vel.y * tk + 0.4 + Math.random() * 0.6; V[o + 2] = vel.z * tk + (Math.random() - 0.5) * 1.2;
+    V[o + 3] = ex ? ex.grow ?? 0.6 : THREE.MathUtils.lerp(s.grow[0], s.grow[1], Math.random());
+    // (the road's plane under it: an exhaust puff fades into the road, not into the pipe's height)
+    const gp = ex?.ground ?? pos;
+    N[o] = n.x; N[o + 1] = n.y; N[o + 2] = n.z; N[o + 3] = n.x * gp.x + n.y * gp.y + n.z * gp.z;
     if (fresh) { for (const a in attrs) attrs[a].clearUpdateRanges(); fresh = false; }
     for (const a in attrs) { attrs[a].addUpdateRange(o, 4); attrs[a].needsUpdate = true; }
     geo.instanceCount = used;
@@ -235,6 +239,9 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
     get enabled() { return enabled; },
     set enabled(v) { enabled = !!v; if (!enabled) this.reset(); },
     reset() { liveUntil = -1; mesh.visible = false; for (const w of wheels) { w.has = false; w.carry = 0; } },
+    /** One puff from elsewhere (the exhaust): { size m, life s, opacity, grow, ground: a point on the road below }.
+     *  `vel` is the puff's own (m/s), not a share of a wheel's slide. */
+    emit(pos, n, vel, opts) { puff(pos, n, vel, 0, 0, opts); },
     /** Each frame after the car moved (the tyres' contacts are this frame's). dt 0 = paused. */
     update(vehicle, dt) {
       if (dt > 0) clock += dt;

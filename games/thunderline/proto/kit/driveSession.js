@@ -40,6 +40,7 @@ import { createPhysProps, loadPhysAssets } from "./physProps.js";
 import { createTyreMarks } from "./tyreMarks.js";
 import { createLandingFx } from "./landingFx.js";
 import { createTyreSmoke } from "./tyreSmoke.js";
+import { createExhaust } from "./exhaustFx.js";
 
 const V = THREE.Vector3;
 // Road hold (the old car's crest/bank follower) goes on pieces the car should FOLLOW, never on
@@ -411,6 +412,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   const sparks = fx ? createSparks(scene) : null;
   const tyreMarks = fx ? createTyreMarks(scene) : null;
   const tyreSmoke = fx ? createTyreSmoke(app) : null; // tyreSmoke.js: drifts, handbrake, wheelspin, locked brakes
+  const exhaust = tyreSmoke ? createExhaust(app, tyreSmoke) : null; // exhaustFx.js: haze, shift puffs, lift-off pops and flames
   // touchdown dust + the perfect ring (landingFx.js): PARKED, OFF (user, 2026-10-22: "forget the landing dust
   // for now, we will do it later") — the dust still read as flat sheets, the ring hazed the lens as it passed
   const landingFx = fx && false ? createLandingFx(scene) : null;
@@ -772,6 +774,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     sparks?.reset();
     tyreMarks?.reset();
     tyreSmoke?.reset();
+    exhaust?.reset();
     landingFx?.reset();
     clearKeys();
     autopilot = false;
@@ -791,6 +794,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     sparks?.reset();
     tyreMarks?.reset();
     tyreSmoke?.reset();
+    exhaust?.reset();
     landingFx?.reset();
     S.race.reset();
     S.physProps.reset(); // the knocked props stand back where they were placed
@@ -1038,6 +1042,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (dt > 0) tyreMarks?.update(vehicle, dt);
     tyreSmoke?.update(vehicle, dt);
     engineTick(dt, input);
+    exhaust?.update(vehicle, engine, Math.max(0, input?.throttle ?? 0), dt); // (after the engine: its shifts and pops of this frame)
     if (S.ghostPlayer) {
       if (S.ghostPlayer.done) ghostCar.group.visible = false;
       else if (showGhost) ghostCar.syncVisuals(dt, S.simAccum / FIXED_DT);
@@ -1079,7 +1084,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   return {
     start, stop, restart, respawnCheckpoint, recoverToSafe, modelsReady,
     get active() { return !!S; }, get session() { return S; },
-    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, tyreSmoke, landingFx, carHologram,
+    vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, tyreSmoke, exhaust, landingFx, carHologram,
     get sunShadows() { return sunShadows; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
     /** fn(vehicle, session) → input, or null for the player / autopilot again */
