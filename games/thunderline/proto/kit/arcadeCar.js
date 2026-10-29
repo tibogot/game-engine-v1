@@ -33,13 +33,20 @@ export const ARCADE = {
   ride: { k: 60000, c: 5200, rebound: 16000, prog: 900000, clear: 0.04, stop: 400000, deep: 0.08, visualDrop: 0.1, archRoom: 0.06 }, // visualDrop, archRoom: see syncVisuals
   // `top` m/s: its own (user, 2026-10-29: "it should go faster, in Apex Rush it goes more than 300 km/h") — the engine stops pulling at 100 (360 km/h); with the air drag it tops ~315
   drive: { top: 100, accel: 11.5, brake: 20, reverseTop: 14, coast: 0.8, overspeed: 0.6 }, // m/s², m/s, /s
+  // WHEELSPIN AND LOCKED BRAKES, for the tyre marks and smoke (each tyre's `overDemand`: tyreMarks.js, tyreSmoke.js). The
+  // drive has no traction limit, so they come from the controls (user, 2026-10-29: "do we need it for a nice game"):
+  //   - a LAUNCH spins the rears (two stripes off the line), fading out by `launchTo` m/s;
+  //   - HARD BRAKING from over `lockFrom` m/s (full at `lockFull`) locks all four for a moment: a short dab of rubber
+  //     that fades over `lockFade` s of braking — not a black line into every turn
+  spin: { launch: 1, launchTo: 14, lock: 0.6, lockFrom: 20, lockFull: 45, lockFade: 0.45 },
   // GRIP: up to `g` g of sideways grip, all of it at `peakDeg` of slide, `slide` of it once sliding past `slideDeg`;
   // `handbrake` scales it (a drift)
   // `aero`: the DOWNFORCE GRIPS — the grip × (1 + aero × downforce / g) (user, 2026-10-29, a real track: at 330 km/h
   // Sky Switchback's banked fast turn asked 6.7 g, the flat 2.2 g slid the car off it; a fast car turns harder fast)
   grip: { g: 2.2, peakDeg: 8, slideDeg: 30, slide: 0.7, handbrake: 0.35, aero: 1, bank: 2 }, // bank: see _groundDrive
   steer: { low: 2.2, high: 1.0, lowAt: 8, response: 9, handbrakeBoost: 1.5 }, // rad/s at lowAt m/s → at top speed
-  align: { rate: 10, max: 4, rollOnly: 4 }, // /s, rad/s: up onto the wheels' surface; /s: the body-on-road roll righting
+  // mixFrom → mixFull °: wheel surfaces disagreeing this much hand the tilt over to the springs (mixedRate /s of pull left)
+  align: { rate: 10, max: 4, rollOnly: 4, mixFrom: 4, mixFull: 12, mixedRate: 1.5 }, // /s, rad/s: up onto the wheels' surface; /s: the body-on-road roll righting
   // ON THE ROAD: `coyote` s after the last wheel contact the car still counts as on it, while the road (the track
   // frame) is within `reach` m of where its wheels would be
   road: { coyote: 0.25, reach: 1.5, agree: 0.94, crestReach: 6, edge: 1.5 }, // edge: m past a road's side still on it (the kerb, a wheel over it) // crestReach: m over a road that still goes on and still pulls the car back // agree: cos of the wheels' normal ↔ the road's up (~20°)
@@ -79,7 +86,8 @@ export const ARCADE = {
   // since 10-23. Landing on FLAT ground off a big ramp it comes down nose-first: Thunderline's landings are shaped to
   // the arc. Your pitch keys override it)
   // `hold` /s: how fast a rotation stops once its key is released (3 let a spin run on ~40° — 9: it stops in ~0.15 s)
-  air: { roll: 3.6, pitch: 2.8, yaw: 2.4, response: 8, hold: 9, follow: 2 },
+  // spinDrag /s: the carried spin's fade (the air); tumble rad/s: above it the car is tumbling by itself (no helpers)
+  air: { roll: 3.6, pitch: 2.8, yaw: 2.4, response: 8, hold: 9, follow: 2, spinDrag: 0.35, tumble: 0.8 },
   // THE LANDING MAGNET (user, 2026-10-29: "a small assist so the player doesn't have to do his barrel or spin perfectly
   // to land perfectly — not so big he feels it controls the car"): with NO air key held, a car already within
   // `rollDeg` of the landing surface's tilt (the road under the flight ahead; open ground: level) rolls onto it, and
@@ -93,6 +101,7 @@ const _com = new THREE.Vector3(), _n = new THREE.Vector3(), _f = new THREE.Vecto
 const _up = new THREE.Vector3(), _tmp = new THREE.Vector3(), _axis = new THREE.Vector3(), _F = new THREE.Vector3();
 const _qi = new THREE.Quaternion(), _w = new THREE.Vector3(), _roadUp = new THREE.Vector3(), _rel = new THREE.Vector3();
 const _aP = new THREE.Vector3(), _aU = new THREE.Vector3(), _aF = new THREE.Vector3(), _aN = new THREE.Vector3();
+const _plane = new THREE.Vector3(), _pa = new THREE.Vector3(), _pb = new THREE.Vector3();
 // a loop, a wall: their own hold (stunt gravity) — the glue is for roads you drive ON
 const stuntish = (surf) => surf.y < ARCADE.wall.from;
 const _bInv = new THREE.Matrix4(), _bRootQ = new THREE.Quaternion(), _bQ = new THREE.Quaternion(), _bP = new THREE.Vector3(), _bA = new THREE.Vector3(), _bY = new THREE.Vector3(0, 1, 0);
@@ -111,6 +120,8 @@ export class ArcadeCar extends StuntCar {
     this._landRollT = 0; // s left of a landing's roll settle (ARCADE.land)
     this._rollKey = 0; // the roll key as pressed (tick)
     this._visDrop = 0; // m the body is drawn lowered onto its wheels (syncVisuals)
+    this._carry = new THREE.Vector3(); // rad/s, car frame: the spin it took off with (_airControl)
+    this._spread = 0; // rad: how much the wheels' surfaces disagree
     this._sinceWheels = 9; // s since a wheel last touched
     this._ff = new THREE.Vector3(); // rad/s: the road's own rotation under the car (turned with it, not after it)
     this._prevRoadUp = null;
@@ -176,8 +187,8 @@ export class ArcadeCar extends StuntCar {
       m.br.obj.quaternion.copy(_bQ).multiply(m.br.quat);
     }
   }
-  respawn() { this._landHold = 0; this._landRollT = 0; this._crashT = 0; this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawn(); }
-  respawnAt(pos, quat) { this._landHold = 0; this._landRollT = 0; this._crashT = 0; this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawnAt(pos, quat); }
+  respawn() { this._landHold = 0; this._landRollT = 0; this._crashT = 0; this._carry?.set(0, 0, 0); this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawn(); }
+  respawnAt(pos, quat) { this._landHold = 0; this._landRollT = 0; this._crashT = 0; this._carry?.set(0, 0, 0); this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawnAt(pos, quat); }
 
   /** the whole driving step (the old car's _physicsStep, replaced) — collisions are the old car's */
   _physicsStep(dt) {
@@ -208,6 +219,7 @@ export class ArcadeCar extends StuntCar {
         // (by WHERE the hit is — the road's triangles are wound either way, their normals can't tell)
         if (_tmp.subVectors(t.worldPos, probe.point).dot(_up) < -0.1) { t._clearContact(); continue; }
         t.grounded = true;
+        t.overDemand = 0; // (_groundDrive sets it: wheelspin, locked brakes)
         t.hitDistance = fromHub;
         t.hitPoint.copy(probe.point);
         t._rawNormal.copy(t._bestN);
@@ -232,6 +244,22 @@ export class ArcadeCar extends StuntCar {
       // a TOUCHDOWN after a flight: the roll settles for land.roll s (see ARCADE.land)
       if (down && this._sinceWheels >= ARCADE.land.minAir) this._landRollT = ARCADE.land.roll;
       if (down) { _n.normalize(); this._sinceWheels = 0; } else this._sinceWheels += subDt;
+      // THE GROUND THE WHEELS STAND ON, from WHERE they touch (not only how their surfaces tilt): a ramp under one side
+      // tilts the surface forward, but puts that side metres higher — that height is the roll. 4 wheels: the diagonals'
+      // cross; 3: the triangle's. `spread`: how far that plane is from the surfaces' own average (one side up a ramp,
+      // a kerb, a bump).
+      let spread = 0;
+      _plane.copy(_n);
+      if (down >= 3) {
+        const T = this.tires, g = T.map((t) => t.grounded);
+        if (down === 4) _plane.crossVectors(_pa.subVectors(T[0].hitPoint, T[3].hitPoint), _pb.subVectors(T[1].hitPoint, T[2].hitPoint));
+        else { const k = [0, 1, 2, 3].filter((i) => g[i]); _plane.crossVectors(_pa.subVectors(T[k[1]].hitPoint, T[k[0]].hitPoint), _pb.subVectors(T[k[2]].hitPoint, T[k[0]].hitPoint)); }
+        if (_plane.lengthSq() > 1e-8) { _plane.normalize(); if (_plane.dot(_n) < 0) _plane.negate(); } else _plane.copy(_n);
+        if (_plane.dot(_n) < Math.cos(40 * DEG)) _plane.copy(_n); // (a wheel on a wall face: not a ground)
+        spread = Math.acos(THREE.MathUtils.clamp(_plane.dot(_n), -1, 1));
+        for (const t of T) if (t.grounded) spread = Math.max(spread, Math.acos(THREE.MathUtils.clamp(t._rawNormal.dot(_n), -1, 1)));
+      }
+      this._spread = spread;
       const landing = this._landRollT > 0;
 
       // ---- THE TRACK FRAME: the road's own up under the car (known, not guessed), and whether the car is on it
@@ -249,7 +277,10 @@ export class ArcadeCar extends StuntCar {
       // THE SURFACE IT IS ON: on a road, the road's own up at the car's middle (when the wheels roughly agree — not on
       // a kerb or an obstacle); else the wheels'. (The wheels' alone, in a loop, was the FRONT wheels' road: the car
       // sat 2.7° nose-down on the curve, its rear wheels 0.65 m off the road — half its grip, it drifted sideways.)
-      const surf = !down ? _roadUp : roadNear && _n.dot(_roadUp) > ARCADE.road.agree ? _roadUp : _n;
+      // (on a track piece: the road's frame — exact, and curved pieces (loops, tubes) would fool a plane through the
+      // wheels; off them — the floor, ground ramps, obstacles — the plane through the contacts)
+      if (!Number.isFinite(_plane.x + _plane.y + _plane.z)) _plane.copy(_n);
+      const surf = !down ? _roadUp : roadNear && _n.dot(_roadUp) > ARCADE.road.agree ? _roadUp : _plane;
       // THE ROAD'S ROTATION (feed-forward): the car turns WITH the road, the alignment only corrects what's left — a
       // catch-up alone trailed a loop's 1.6 rad/s by ~9°, nose down, the rear wheels off the road
       if (tr && roadNear && this._prevRoadUp) {
@@ -276,6 +307,9 @@ export class ArcadeCar extends StuntCar {
       // Jumps come from the pieces made for them; real physics flies a 250 km/h car off any crest.
       if (down && !this._subDown) this._glueOK = true;
       if (!down && this._subDown) this._glueOK = body.vel.dot(surf) < ARCADE.glue.launch;
+      // THE SPIN IT TAKES OFF WITH is the car's own (a ramp under one side rolls it): kept in the air, fading as the air
+      // slows it — only a rotation made with the keys stops when they are released
+      if (!down && this._subDown) this._carry.copy(body.angVel).applyQuaternion(_qi.copy(body.quat).invert());
       this._subDown = down > 0;
       // off the road: the full pull; on it, as much as the road falls away ahead (0 → full over glue.anticipate m)
       const glueK = !roadAhead || !this._glueOK || stuntish(surf) ? 0
@@ -463,6 +497,12 @@ export class ArcadeCar extends StuntCar {
     if (hb) a += -Math.sign(vF) * Math.min(Math.abs(vF) / dt, 3);
     if (Math.abs(vF) > top) a -= Math.sign(vF) * (Math.abs(vF) - top) * D.overspeed;
     body.vel.addScaledVector(_f, a * dt * w);
+    // wheelspin and locked brakes (ARCADE.spin)
+    const Sp = ARCADE.spin, braking = th < 0 && vF > 0.5;
+    this._brakeT = braking ? (this._brakeT ?? 0) + dt : 0;
+    const spin = th > 0 && vF > -0.5 ? Sp.launch * th * THREE.MathUtils.clamp(1 - vF / Sp.launchTo, 0, 1) : 0;
+    const lock = braking ? Sp.lock * -th * THREE.MathUtils.clamp((vF - Sp.lockFrom) / (Sp.lockFull - Sp.lockFrom), 0, 1) * Math.exp(-this._brakeT / Sp.lockFade) : 0;
+    for (const t of this.tires) if (t.grounded) t.overDemand = Math.max(t.canSteer ? 0 : spin, lock);
     // THE GRIP CURVE: the sideways speed taken away at up to grip.g g — all of it at a small slide, less once sliding
     const Gp = ARCADE.grip, slide = Math.atan2(Math.abs(vR), Math.max(1, Math.abs(vF))) / DEG;
     const curve = slide <= Gp.peakDeg ? 0.55 + 0.45 * (slide / Gp.peakDeg) : slide >= Gp.slideDeg ? Gp.slide : 1 - (1 - Gp.slide) * ((slide - Gp.peakDeg) / (Gp.slideDeg - Gp.peakDeg));
@@ -499,7 +539,20 @@ export class ArcadeCar extends StuntCar {
       const s = _axis.length(), ang = Math.atan2(s, _up.dot(surf));
       if (s > 1e-6) _w.copy(_axis.multiplyScalar(1 / s)).multiplyScalar(Math.min(ARCADE.align.max, ang * ARCADE.align.rate * (loose ? Cr.looseAlign : 1)));
       _w.add(this._ff).addScaledVector(surf, -this._ff.dot(surf)); // (+ the road's own pitch / roll rate)
-      body.angVel.copy(_w).addScaledVector(surf, yaw);
+      // WHEELS ON SURFACES THAT DISAGREE (a ramp under one side — user, 2026-10-29: "taking the ramp with two wheels at
+      // full speed should throw the car into a roll; now it always stays flat"): the flattening fades out, the springs'
+      // own forces tilt the car. On one clean surface it holds the car as before.
+      // (TWO WHEELS ON ONE SIDE — or one axle — are a LINE, not a plane: the car pivots about it. Held flat on the two
+      // wheels left on a ramp's edge, it stayed level with its other side over a 6 m drop: now it tips, and rolls)
+      const g = this.tires.map((t) => t.grounded), onALine = down === 2 && ((g[0] && g[2]) || (g[1] && g[3]) || (g[0] && g[1]) || (g[2] && g[3]));
+      const AL = ARCADE.align, mixed = onALine ? 1 : THREE.MathUtils.clamp((this._spread / DEG - AL.mixFrom) / (AL.mixFull - AL.mixFrom), 0, 1);
+      if (mixed > 0) {
+        const keep = _aP.copy(body.angVel).addScaledVector(surf, -body.angVel.dot(surf)); // (its own tilting, not the yaw)
+        const blend = THREE.MathUtils.lerp(1, 1 - Math.exp(-AL.mixedRate * dt), mixed);
+        _w.addScaledVector(surf, -_w.dot(surf));
+        keep.lerp(_w, blend);
+        body.angVel.copy(keep).addScaledVector(surf, yaw);
+      } else body.angVel.copy(_w).addScaledVector(surf, yaw);
     } else {
       // roll only: about the car's own forward
       _tmp.set(0, 0, 1).applyQuaternion(body.quat);
@@ -527,7 +580,9 @@ export class ArcadeCar extends StuntCar {
     const side = _tmp.set(1, 0, 0).applyQuaternion(body.quat), upY = _w.set(0, 1, 0).applyQuaternion(body.quat).y;
     const level = !keys && Math.abs(side.y) < Math.sin(35 * DEG) && upY > 0;
     _tmp.set(-inP * A.pitch, (this.input.yaw ?? 0) * A.yaw, -this._rollKey * A.roll); // (the asked rates again: _tmp was borrowed)
-    if (level && A.follow > 0 && body.vel.lengthSq() > 25) {
+    // (a car tumbling by itself is not helped: the follow and the magnet wait until its own spin has faded)
+    const tumbling = this._carry.length() > A.tumble;
+    if (level && !tumbling && A.follow > 0 && body.vel.lengthSq() > 25) {
       // the nose's slope against the flight's, in the WORLD (user, 2026-10-29: "Q/E was supposed to be only on one axis,
       // it does weird rotation": measured in the car's own frame, a car spun 90° to its flight read a 90° pitch error
       // and was flipped over at 160°/s) — and only while the nose points along the flight: off by 60° sideways, none
@@ -543,7 +598,7 @@ export class ArcadeCar extends StuntCar {
     // the LANDING MAGNET (ARCADE.magnet): keys released, close to clean → eased the rest of the way
     let magnet = false;
     const M = ARCADE.magnet;
-    if (!keys && M.rate > 0) {
+    if (!keys && !tumbling && M.rate > 0) {
       const v = body.vel;
       // the surface it will land on: the road under the flight, a moment ahead (else level ground)
       const tr = this.trackAt?.(_aP.copy(body.pos).addScaledVector(v, M.ahead));
@@ -566,9 +621,16 @@ export class ArcadeCar extends StuntCar {
     }
     this.arcade.magnet = magnet;
     const local = _w.copy(body.angVel).applyQuaternion(_qi);
+    // the carried spin fades with the air; an axis the player turns with a key is his from then on
+    this._carry.multiplyScalar(Math.exp(-A.spinDrag * dt));
+    if (inP !== 0) this._carry.x = 0;
+    if ((this.input.yaw ?? 0) !== 0) this._carry.y = 0;
+    if (this._rollKey !== 0) this._carry.z = 0;
     for (const c of ["x", "y", "z"]) {
-      const k = want[c] !== 0 || (follow && c === "x") ? A.response : A.hold;
-      local[c] += (want[c] - local[c]) * (1 - Math.exp(-k * dt));
+      const driven = want[c] !== 0 || (follow && c === "x");
+      const target = driven ? want[c] : this._carry[c];
+      const k = driven ? A.response : A.hold;
+      local[c] += (target - local[c]) * (1 - Math.exp(-k * dt));
     }
     body.angVel.copy(local.applyQuaternion(body.quat));
   }

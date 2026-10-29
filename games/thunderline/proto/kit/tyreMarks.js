@@ -10,7 +10,7 @@
 // One mesh, one draw call; nothing allocated while driving.
 import * as THREE from "three";
 import { Fn, attribute, texture, uniform, float } from "three/tsl";
-import { WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
+import { WHEEL, DRIFT } from "../../../../v3/play/modularRoadVehicle.js";
 
 export const TYRE_MARKS = {
   color: 0x050506,
@@ -24,6 +24,7 @@ export const TYRE_MARKS = {
   touchSpeed: 3.5, // m/s into the road at touchdown before it scuffs
   touchFull: 11, // m/s for the darkest scuff
   touchTime: 0.14, // s a touchdown scuff lasts
+  frontLock: DRIFT.maxVisualSteer, // rad a front wheel can countersteer: a slide wider than this, the fronts mark too (a spin)
 };
 export const SKID_TEXTURE_URL = "/textures/skid_mark01.png";
 
@@ -155,14 +156,20 @@ export function createTyreMarks(scene, settings = TYRE_MARKS) {
           if (into > s.touchSpeed) { st.touch = s.touchTime; st.touchK = THREE.MathUtils.clamp((into - s.touchSpeed) / (s.touchFull - s.touchSpeed), 0.35, 1); }
         }
         st.wasGrounded = true;
-        // the slide, in the wheel's frame on the road's plane
+        // the slide, in the car's frame on the road's plane
         _v.addScaledVector(tire.hitNormal, -_v.dot(tire.hitNormal));
         const speed = _v.length();
         const vLat = Math.abs(_v.dot(_right)), vLong = Math.abs(_v.dot(_fwd));
-        const slip = vLat / Math.max(vLong, 3.5);
+        let slip = vLat / Math.max(vLong, 3.5);
+        // THE FRONTS STEER INTO THE SLIDE: a driver countersteers them down the road, they roll — they mark only by
+        // what the slide's angle passes the lock. Taken as the body's slip, all four slid alike in a drift: four equal
+        // lines, "a sticker under the car" (user, 2026-10-29). (Not the drawn steer angle: the arcade car turns by
+        // its yaw rate, and the drawn angle has an arcade minimum — measured against it the fronts slid MORE.)
+        if (tire.canSteer) slip = Math.tan(Math.max(0, Math.atan(slip) - s.frontLock));
         const gate = THREE.MathUtils.smoothstep(speed, s.entrySpeed, s.entrySpeed * 2);
         let k = THREE.MathUtils.clamp((slip - s.slipMin) / (s.slipFull - s.slipMin), 0, 1) * gate;
-        k = Math.max(k, THREE.MathUtils.clamp((tire.overDemand ?? 0) * s.brakeMark, 0, 1) * gate);
+        // (a spinning tyre marks from a crawl: off the line it is the tyre that moves over the road, not the car)
+        k = Math.max(k, THREE.MathUtils.clamp((tire.overDemand ?? 0) * s.brakeMark, 0, 1) * THREE.MathUtils.smoothstep(speed, 0.3, 2));
         if (handbrake && !tire.canSteer) k = Math.max(k, 0.6 * gate);
         if (st.touch > 0) { k = Math.max(k, st.touchK); st.touch -= dt; }
         _p.copy(tire.hitPoint).addScaledVector(tire.hitNormal, s.lift);

@@ -261,9 +261,11 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
           const gate = THREE.MathUtils.smoothstep(speed, s.minSpeed, s.minSpeed * 3);
           const slip = Math.abs(_v.dot(_right)) / Math.max(Math.abs(_v.dot(_fwd)), 3.5);
           let k = THREE.MathUtils.clamp((slip - s.slipMin) / (s.slipFull - s.slipMin), 0, 1);
-          k = Math.max(k, THREE.MathUtils.clamp((tire.overDemand ?? 0) * s.brakeK, 0, 1));
           if (handbrake && !tire.canSteer) k = Math.max(k, s.handbrake);
-          k *= gate * (tire.canSteer ? s.front : 1);
+          k *= gate;
+          // (a spinning tyre smokes from a crawl: off the line it is the tyre that moves over the road, not the car)
+          k = Math.max(k, THREE.MathUtils.clamp((tire.overDemand ?? 0) * s.brakeK, 0, 1) * THREE.MathUtils.smoothstep(speed, 0.3, 2));
+          k *= tire.canSteer ? s.front : 1;
           _p.copy(tire.hitPoint);
           if (k > 0.04) {
             // along this frame's path: by time (rate) and by distance (density), whichever asks more
