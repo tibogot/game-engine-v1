@@ -16,6 +16,17 @@ const DOT_FONT = {
   I: [".###.", "..#..", "..#..", "..#..", "..#..", "..#..", ".###."],
   N: ["#...#", "##..#", "#.#.#", "#.#.#", "#..##", "#...#", "#...#"],
   H: ["#...#", "#...#", "#...#", "#####", "#...#", "#...#", "#...#"],
+  // (the physics lab's signs: ROLLERS, BUMPS, WASHBOARD, KERBS, STEP)
+  B: ["####.", "#...#", "#...#", "####.", "#...#", "#...#", "####."],
+  U: ["#...#", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."],
+  M: ["#...#", "##.##", "#.#.#", "#.#.#", "#...#", "#...#", "#...#"],
+  P: ["####.", "#...#", "#...#", "####.", "#....", "#....", "#...."],
+  W: ["#...#", "#...#", "#...#", "#.#.#", "#.#.#", "##.##", "#...#"],
+  O: [".###.", "#...#", "#...#", "#...#", "#...#", "#...#", ".###."],
+  L: ["#....", "#....", "#....", "#....", "#....", "#....", "#####"],
+  E: ["#####", "#....", "#....", "####.", "#....", "#....", "#####"],
+  K: ["#...#", "#..#.", "#.#..", "##...", "#.#..", "#..#.", "#...#"],
+  D: ["####.", "#...#", "#...#", "#...#", "#...#", "#...#", "####."],
 };
 export const LED_PALETTES = {
   // (the cores saturated: with the bloom, near-white cores read WHITE — red lamps pink, green and START white)
@@ -23,6 +34,7 @@ export const LED_PALETTES = {
   finish: { coreColor: "#ffffff", edgeColor: "#aab8cc" }, // white
   red: { coreColor: "#ff4a32", edgeColor: "#e00800" },
   green: { coreColor: "#5dff70", edgeColor: "#00d02a" },
+  amber: { coreColor: "#ffc84a", edgeColor: "#ff8a00" }, // a warning: the lab's signs
 };
 const ledParams = (cols, rows, palette, emissive = 2.2) => ({
   mode: "image", shape: "round", cols, rows, dotRadius: 0.38, useRamp: true, threshold: 0.5, panSpeed: 0, emissive, offLevel: 0.05,

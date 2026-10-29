@@ -12,7 +12,9 @@ export const LAB_ZONES = [
   { key: "1", label: "Start · acceleration / braking strip", x: 0, chain: ["start_line", "straight_64", "straight_64", "straight_64", "straight_64", "straight_64", "straight_64"] },
   { key: "2", label: "Ramps 10° · 15° · 20° · 30° · 45°", x: 40, ramps: [10, 15, 20, 30, 45], lane: 34 }, // (34: 10 m of floor between 24 m roads — at 26 the gap was a car wide)
   { key: "3", label: "Loop", x: 220, chain: ["straight_64", "straight_64", "loop_28", "straight_64", "straight_64"] },
-  { key: "4", label: "Rollers, slopes, crests", x: 300, chain: ["straight_64", "rollers_64", "rollers_64", "straight_64", "slope_up_12", "slope_down_12", "straight_64"] },
+  // (`signs`: an amber LED word beside the road, `z` before the section — user, 2026-10-29: "the bumps are almost
+  // invisible … add a sign that there are bumps so I know what this road is for")
+  { key: "4", label: "Rollers, slopes, crests", x: 300, chain: ["straight_64", "rollers_64", "rollers_64", "straight_64", "slope_up_12", "slope_down_12", "straight_64"], signs: [{ word: "ROLLERS", z: -50 }] },
   { key: "5", label: "Drift circle (open ground, cones R 30 m)", x: 360, circle: 30, z: -90 },
   { key: "6", label: "Slalom (poles every 18 m) · obstacles to hit (right of it)", x: 430, slalom: 8, hits: 466 },
   // (the LEFT wall ride: the right one turned back across the acceleration strip; it ends heading −X at z ≈ −211, x
@@ -21,7 +23,7 @@ export const LAB_ZONES = [
   // (user, 2026-10-29: "not only roads … obstacles to debug drift angles … small obstacles on the ground to check
   // the wheels react well")
   { key: "8", label: "Circuit (four 90° turns, closed — lap it)", x: 520, chain: ["straight_64", "turn_48_90", "straight_64", "turn_48_90", "straight_64", "turn_48_90", "straight_64", "turn_48_90"] },
-  { key: "9", label: "Speed bumps · washboard · hairpin · narrow planks", x: 760, chain: ["straight_64", "bumps_32", "straight_64", "washboard_32", "straight_64", "hairpin_24", "straight_64", "plank_64", "plank_32"] },
+  { key: "9", label: "Speed bumps · washboard · hairpin · narrow planks", x: 760, chain: ["straight_64", "bumps_32", "straight_64", "washboard_32", "straight_64", "hairpin_24", "straight_64", "plank_64", "plank_32"], signs: [{ word: "BUMPS", z: -50 }, { word: "WASHBOARD", z: -146 }] },
   { key: "0", label: "Drift arena (48 m wide, cone figure-eight)", x: 880, chain: ["platform_128", "platform_128"], eight: [{ z: -70, r: 13 }, { z: -130, r: 13 }] },
   // ON THE GROUND (user, 2026-10-29: "ramps I place on the ground, like my old game … collision … things to debug
   // suspension"): obstacles.js GROUND, on the floor. Shift + the key.
@@ -35,6 +37,7 @@ export const LAB_ZONES = [
     { kind: "ob_ramp_side", x: 29.1, z: -30 },
     { kind: "ob_step", x: 60, z: -30 },
     { kind: "ob_kerb", x: 89.1, z: -20 }, { kind: "ob_kerb", x: 90.9, z: -40 }, { kind: "ob_kerb", x: 89.1, z: -60 }, { kind: "ob_kerb", x: 90.9, z: -80 },
+    { kind: "sg_label", word: "KERBS", x: -9, z: -6 }, { kind: "sg_label", word: "STEP", x: 52, z: -14 }, { kind: "sg_label", word: "KERBS", x: 81, z: -6 },
   ] },
   // BANKED (user, 2026-10-29: "with a banked-in shape the car was behaving very weirdly"): in, two banked 45°, out
   { key: "S4", label: "Banked: bank in 22° · banked 45° × 2 · bank out", x: 1500, chain: ["straight_64", "straight_64", "straight_64", "bank_in_22", "banked_turn_45", "banked_turn_45", "bank_out_22", "straight_64"] },
@@ -68,7 +71,9 @@ export function makeLabTrack() {
         props.push({ uid: uid++, kind: "ob_cone", M: M(zone.x + Math.cos(a) * zone.circle, 0, zone.z + Math.sin(a) * zone.circle) });
       }
     }
-    if (zone.items) for (const it of zone.items) props.push({ uid: uid++, kind: it.kind, M: M(zone.x + it.x, 0, it.z) });
+    if (zone.items) for (const it of zone.items) props.push({ uid: uid++, kind: it.kind, ...(it.word ? { word: it.word } : {}), M: M(zone.x + it.x, 0, it.z) });
+    // the signs: on the floor past the road's left edge (12 m), facing the car
+    if (zone.signs) for (const s of zone.signs) props.push({ uid: uid++, kind: "sg_label", word: s.word, M: M(zone.x - 17, 0, s.z) });
     if (zone.slalom) for (let k = 0; k < zone.slalom; k++) props.push({ uid: uid++, kind: "ob_pole", M: M(zone.x + (k % 2 ? 3 : -3), 0, -40 - k * 18) });
     // things to drive into: how the car takes a knock (tyre stacks, barrels, cones, a concrete block), two of each
     if (zone.hits) ["ob_tyres", "ob_barrel", "ob_cones", "ob_block", "ob_tyres", "ob_barrel", "ob_cones", "ob_block"].forEach((kind, k) => props.push({ uid: uid++, kind, M: M(zone.hits + (k % 2 ? 6 : -6), 0, -40 - k * 22) }));

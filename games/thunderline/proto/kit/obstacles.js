@@ -15,7 +15,7 @@ import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.j
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh } from "../../../../v3/play/modularRoadRigidBvh.js";
 import { body, physLook, physGhost, physModel, physKit, ViewLOD } from "./physProps.js";
-import { ledSignMaterial } from "./ledSigns.js";
+import { ledSignMaterial, LED_PITCH } from "./ledSigns.js";
 import { ARCH_LOD_FAR } from "./gateMesh.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
 import { rampGeometry, kickerRampGeometry, jumpRampGeometry } from "../../../modular-road-v3/modularRoadParkour.js";
@@ -423,6 +423,34 @@ function panelShape({ hw = ROAD_HW, dx = 1 } = {}) {
   }
   return panelShapes.get(key);
 }
+// A LAB SIGN (user, 2026-10-29: "the bumps are almost invisible … add a sign that there are bumps so I know what this
+// road is for"): an amber LED board on two posts, facing +Z (the physics lab's roads run −Z: the car comes at it), the
+// word in the dot font, the board as wide as the word. Placed by the lab beside a road (props with `word`), never from
+// the palette. Its posts and board are solid.
+const LABEL = { h: 1.0, t: 0.3, y0: 2.4, post: 0.18, margin: 4 };
+const labelShapes = new Map();
+function labelShape({ word = "LAB" } = {}) {
+  if (!labelShapes.has(word)) {
+    const cols = word.length * 7 - 2 + 2 * LABEL.margin, w = cols * LED_PITCH, px = w / 2 - 0.5;
+    const board = box(w + 0.2, LABEL.h + 0.2, LABEL.t, 0, LABEL.y0 + LABEL.h / 2, 0);
+    const posts = [-px, px].map((x) => box(LABEL.post, LABEL.y0, LABEL.post, x, LABEL.y0 / 2, -LABEL.t / 2 - LABEL.post / 2));
+    const solids = [board, ...posts];
+    const parts = () => {
+      const g = new THREE.Group(), m = signMats();
+      g.add(new THREE.Mesh(board, m.black), new THREE.Mesh(mergeGeometries(posts), m.post));
+      const kit = physKit("arch");
+      if (kit) {
+        const face = new THREE.Mesh(new THREE.PlaneGeometry(w, LABEL.h), ledSignMaterial(kit, { word, w, h: LABEL.h, palette: "amber" }));
+        face.position.set(0, LABEL.y0 + LABEL.h / 2, LABEL.t / 2 + 0.01);
+        face.userData.noShadow = true;
+        g.add(face);
+      }
+      return g;
+    };
+    labelShapes.set(word, { solids, ghost: mergeGeometries(solids), parts });
+  }
+  return labelShapes.get(word);
+}
 // THE CHEVRON SIGN from Blender (tools/blender/thunderChevron.py; user, 2026-10-28: "it should have bevel; the chevron
 // itself with digital dots"): an LED cabinet on the panel's own box (its solid unchanged), the dots the old game's shader
 // (v3 ledMatrix.js, chevron mode: one material, every sign). Authored for the RIGHT side (its arm and chevrons toward −x,
@@ -610,6 +638,7 @@ export const OBSTACLES = {
   sg_finish: signKind("FINISH panels", "pair", boardShape("FINISH"), "A green board on each edge of the road"),
   sg_chevron: signKind("Chevron panel", "side", panelShape, "A tall black board past the edge: the way the road goes"),
   sg_aim: signKind("Landing sign", "pair", aimShape, "Two posts and a yellow X over the road: land here"),
+  sg_label: { label: "Lab sign", shape: labelShape, ...labelShape(), decks: [], hint: "The physics lab's word on a post: what this road tests" },
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
