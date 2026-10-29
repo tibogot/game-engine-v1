@@ -132,7 +132,22 @@ export class StuntCar extends Vehicle {
  * around the last match first (called every physics step), the whole ride only when that is far.
  */
 export function trackFromRide(ride) {
-  const pts = ride.filter((r) => !r.air && r.U);
+  // THE FRAME FOLLOWS THE ROAD'S MIDDLE AS IT CLIMBS (user, 2026-10-29: "a banked-in shape — the car behaved very
+  // weirdly"): a bank rolls the deck about its edge, so the middle climbs ~5° and levels again, but a ride point's T and
+  // U are its ring's, without that climb — the car held to U ran nose into the rising deck, the rear wheels in the air.
+  // T: the middle's own direction (from its neighbours, along the road); U: square to it, the roll kept.
+  // (a JOIN between two pieces is the same point twice — a zero step read as "no road on from here": every join was
+  // taken for a lip, and the road glue let go at it. One of each kept.)
+  const src = ride.filter((r) => !r.air && r.U).filter((r, i, all) => i === 0 || all[i - 1].P.distanceToSquared(r.P) > 1e-4);
+  const pts = src.map((r, i) => {
+    const a = src[i - 1], c = src[i + 1];
+    const A = a && isRoad(a, r, _v.subVectors(r.P, a.P), _v.lengthSq()) ? a : r, C = c && isRoad(r, c, _v.subVectors(c.P, r.P), _v.lengthSq()) ? c : r;
+    if (A === C) return r;
+    const T = new THREE.Vector3().subVectors(C.P, A.P).normalize();
+    const side = new THREE.Vector3().crossVectors(r.U, T).normalize(); // (the road's sideways, from its roll)
+    const U = new THREE.Vector3().crossVectors(T, side).normalize();
+    return { ...r, T, U };
+  });
   let last = 0;
   const near = (pos, from, to) => {
     let best = -1, bd = Infinity;

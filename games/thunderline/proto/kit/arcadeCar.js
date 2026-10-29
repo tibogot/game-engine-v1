@@ -37,7 +37,7 @@ export const ARCADE = {
   // `handbrake` scales it (a drift)
   // `aero`: the DOWNFORCE GRIPS — the grip × (1 + aero × downforce / g) (user, 2026-10-29, a real track: at 330 km/h
   // Sky Switchback's banked fast turn asked 6.7 g, the flat 2.2 g slid the car off it; a fast car turns harder fast)
-  grip: { g: 2.2, peakDeg: 8, slideDeg: 30, slide: 0.7, handbrake: 0.35, aero: 1 },
+  grip: { g: 2.2, peakDeg: 8, slideDeg: 30, slide: 0.7, handbrake: 0.35, aero: 1, bank: 2 }, // bank: see _groundDrive
   steer: { low: 2.2, high: 1.0, lowAt: 8, response: 9, handbrakeBoost: 1.5 }, // rad/s at lowAt m/s → at top speed
   align: { rate: 10, max: 4, rollOnly: 4 }, // /s, rad/s: up onto the wheels' surface; /s: the body-on-road roll righting
   // ON THE ROAD: `coyote` s after the last wheel contact the car still counts as on it, while the road (the track
@@ -466,7 +466,10 @@ export class ArcadeCar extends StuntCar {
     // THE GRIP CURVE: the sideways speed taken away at up to grip.g g — all of it at a small slide, less once sliding
     const Gp = ARCADE.grip, slide = Math.atan2(Math.abs(vR), Math.max(1, Math.abs(vF))) / DEG;
     const curve = slide <= Gp.peakDeg ? 0.55 + 0.45 * (slide / Gp.peakDeg) : slide >= Gp.slideDeg ? Gp.slide : 1 - (1 - Gp.slide) * ((slide - Gp.peakDeg) / (Gp.slideDeg - Gp.peakDeg));
-    const grip = Gp.g * G * curve * (hb ? Gp.handbrake : 1) * w * (1 + Gp.aero * (this._stickAcc ?? 0) / G);
+    // A BANK GRIPS: tilted into the turn, the road presses the car into it (a 22° bank at 300 km/h asked ~5 g of a
+    // 4.7 g car: it slid 10 m wide — user, 2026-10-29, the banked shapes). Up to 45° of bank: × (1 + bank·sin).
+    const bankAng = Math.min(Math.acos(THREE.MathUtils.clamp(surf.y, -1, 1)), 45 * DEG);
+    const grip = Gp.g * G * curve * (hb ? Gp.handbrake : 1) * w * (1 + Gp.aero * (this._stickAcc ?? 0) / G) * (1 + Gp.bank * Math.sin(bankAng));
     body.vel.addScaledVector(_r, -Math.sign(vR) * Math.min(Math.abs(vR), grip * dt));
     this.arcade.slideDeg = slide;
     // steering: the turn rate about the surface (positive steer = left, the old car's convention)

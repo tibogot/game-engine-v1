@@ -36,6 +36,9 @@ export const LAB_ZONES = [
     { kind: "ob_step", x: 60, z: -30 },
     { kind: "ob_kerb", x: 89.1, z: -20 }, { kind: "ob_kerb", x: 90.9, z: -40 }, { kind: "ob_kerb", x: 89.1, z: -60 }, { kind: "ob_kerb", x: 90.9, z: -80 },
   ] },
+  // BANKED (user, 2026-10-29: "with a banked-in shape the car was behaving very weirdly"): in, two banked 45°, out
+  { key: "S4", label: "Banked: bank in 22° · banked 45° × 2 · bank out", x: 1500, chain: ["straight_64", "straight_64", "straight_64", "bank_in_22", "banked_turn_45", "banked_turn_45", "bank_out_22", "straight_64"] },
+  { key: "S5", label: "Banked 180°", x: 1750, chain: ["straight_64", "straight_64", "straight_64", "bank_in_22", "banked_turn_180", "bank_out_22", "straight_64"] },
   { key: "S3", label: "Movers: pendulum · sliding wall · low spinning bar · sweeper", x: 1300, items: [
     { kind: "ob_pendulum", x: 0, z: -50 }, { kind: "ob_slider", x: 30, z: -50 }, { kind: "ob_lowbar", x: 60, z: -50 }, { kind: "ob_sweeper", x: 90, z: -50 },
   ] },

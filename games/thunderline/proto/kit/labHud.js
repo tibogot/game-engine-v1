@@ -22,6 +22,7 @@ const SLIDERS = [
     [ARCADE, "grip.slide", "grip once sliding (×)", 0.2, 1, 0.05],
     [ARCADE, "grip.handbrake", "handbrake grip (×)", 0.05, 1, 0.05],
     [ARCADE, "grip.aero", "downforce adds grip (×, 0 off)", 0, 2, 0.05],
+    [ARCADE, "grip.bank", "a bank adds grip (× sin bank, 0 off)", 0, 4, 0.1],
   ]],
   ["Engine", [
     [ARCADE, "drive.accel", "acceleration (m/s²)", 3, 25, 0.5],
