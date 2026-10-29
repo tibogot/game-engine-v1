@@ -87,7 +87,7 @@ export const ROAD_SCAN = {
   roughBase: uniform(0.9),
   roughStones: uniform(0.25), // how much shinier a bright chip is than the binder (0.35: "a bit too bright")
   shineAA: uniform(1.0), //    0 = off: the far road's bumps don't turn into sparkle (below)
-  brightness: uniform(0.85), // the deck's colour (user, 2026-10-23: "a bit too bright")
+  brightness: uniform(0.72), // the deck's colour (user: "a bit too bright", 10-23 → 0.85; "a bit darker", 10-29 → 0.72)
 };
 
 // The placeholder until the scan has loaded: FLAT, and with every mip level (2026-10-27: the dock's START picture

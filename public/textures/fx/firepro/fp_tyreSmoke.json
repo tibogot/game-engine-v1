@@ -1,0 +1,35 @@
+{
+ "format": "firepro-sixway-1",
+ "cols": 8,
+ "rows": 8,
+ "cell": 192,
+ "frames": 64,
+ "mvScale": 15.415,
+ "emissionMax": 0.000001,
+ "fill": 0.995,
+ "size": 7,
+ "pitch": 15,
+ "duration": 2.9,
+ "loop": false,
+ "anchor": null,
+ "tint": [
+  0.9047,
+  0.9047,
+  0.9216
+ ],
+ "seconds": 8.1,
+ "preset": "tyreSmoke",
+ "bake": {
+  "center": [
+   -1.6,
+   2.2,
+   0
+  ],
+  "size": 7,
+  "pitch": 15,
+  "start": 0.45,
+  "duration": 2.9,
+  "loop": false,
+  "blend": 0
+ }
+}

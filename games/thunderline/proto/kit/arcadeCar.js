@@ -21,7 +21,7 @@
 //   - the TAKE-OFF GUIDE and the LANDING CATCH of the stunt car (inherited), and a landing that stays landed.
 // The collision code is the old car's, unchanged: rails, walls, props, the deck under the body, the floor.
 import * as THREE from "three";
-import { TIRE, WHEEL, CHASSIS, DECK, SOLID, AERO } from "../../../../v3/play/modularRoadVehicle.js";
+import { TIRE, WHEEL, CHASSIS, DECK, SOLID, AERO, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { StuntCar } from "./stuntCar.js";
 
 export const ARCADE = {
@@ -56,6 +56,11 @@ export const ARCADE = {
   wall: { from: 0.75, full: 0.45, minSpeed: 10 },
   stick: { k: 0.0028, max: 14, minSpeed: 15 }, // downforce ∝ v² while on the road
   land: { hold: 0.5 }, // s after a touchdown the car does not leave the surface
+  // A CRASH (_crashSolve): from `speed` m/s into a solid (a scrape along a rail stays under it: the corkscrew's press
+  // peaked at 14.2), the hit bounces back `restitution` of it and may spin the car up to `maxSpin` rad/s
+  // `loose` s after a crash the steering doesn't set the turn rate and the car sits flat on the road gently: the
+  // hit's spin and tilt play out (the turn-rate control stopped a 5 rad/s corner-hit spin in one step)
+  crash: { speed: 18, restitution: 0.25, maxSpin: 8, loose: 0.8, looseYawDecay: 1.5, looseAlign: 0.25 },
   // rad/s; /s to the asked rate; /s idle: stop; `follow` /s: with no pitch key the NOSE FOLLOWS THE FLIGHT (pitch only,
   // from the car's own velocity — never roll or yaw, never a ray: user 2026-10-23 "why doesn't the car go nose down when
   // falling … that's how it can land smoothly"; off a 45° ramp it flew nose-up and landed tail-first)
@@ -70,12 +75,17 @@ const _com = new THREE.Vector3(), _n = new THREE.Vector3(), _f = new THREE.Vecto
 const _up = new THREE.Vector3(), _tmp = new THREE.Vector3(), _axis = new THREE.Vector3(), _F = new THREE.Vector3();
 const _qi = new THREE.Quaternion(), _w = new THREE.Vector3(), _roadUp = new THREE.Vector3(), _rel = new THREE.Vector3();
 const bump = { pen: 0, n: new THREE.Vector3() };
+// THE BODY'S CONTACTS (_bodyContact): m of skin, the bounce (and from what speed), friction, passes, the push out
+const BODY = { skin: 0.02, restitution: 0.2, bounceMin: 3, friction: 0.45, iterations: 8, slop: 0.01, correct: 0.6, settle: 3 };
+const _contacts = Object.assign([], { pool: [] });
+const _cw = new THREE.Vector3(), _cn = new THREE.Vector3(), _bn = new THREE.Vector3(), _pv = new THREE.Vector3(), _pj = new THREE.Vector3();
 
 export class ArcadeCar extends StuntCar {
   constructor(opts) {
     super(opts);
     this.isArcadeCar = true;
     this._landHold = 0;
+    this._crashT = 0; // s left of a crash's loose time (_crashSolve)
     this._sinceWheels = 9; // s since a wheel last touched
     this._ff = new THREE.Vector3(); // rad/s: the road's own rotation under the car (turned with it, not after it)
     this._prevRoadUp = null;
@@ -89,8 +99,8 @@ export class ArcadeCar extends StuntCar {
   // the fall back as forward speed. Here the springs take it (progressive, the bump stop, a stiff rebound) and the
   // car only doesn't bounce back off (`land.hold`).
   _catchLanding() { this._landHold = ARCADE.land.hold; this.stuntEvents.caught = false; }
-  respawn() { this._landHold = 0; this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawn(); }
-  respawnAt(pos, quat) { this._landHold = 0; this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawnAt(pos, quat); }
+  respawn() { this._landHold = 0; this._crashT = 0; this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawn(); }
+  respawnAt(pos, quat) { this._landHold = 0; this._crashT = 0; this._sinceWheels = 9; this._ff?.set(0, 0, 0); this._prevRoadUp = null; return super.respawnAt(pos, quat); }
 
   /** the whole driving step (the old car's _physicsStep, replaced) — collisions are the old car's */
   _physicsStep(dt) {
@@ -115,6 +125,11 @@ export class ArcadeCar extends StuntCar {
         const fromHub = probe ? probe.dist - TIRE.rayPadAbove : Infinity;
         const comp = TIRE.restLength - Math.max(0, fromHub);
         if (!probe || comp <= 0) { t._clearContact(); continue; }
+        // A WHEEL TOUCHES ONLY WHAT IS UNDER THE CAR: a hit below the hub, along the car's own up. On its roof, the probes found the floor too, and the springs — pushing along the car's
+        // up, straight DOWN on a car on its lid — drove it into the floor and pinned it there (user, 2026-10-29: "if the
+        // car falls on its roof it's jittering")
+        // (by WHERE the hit is — the road's triangles are wound either way, their normals can't tell)
+        if (_tmp.subVectors(t.worldPos, probe.point).dot(_up) < -0.1) { t._clearContact(); continue; }
         t.grounded = true;
         t.hitDistance = fromHub;
         t.hitPoint.copy(probe.point);
@@ -205,10 +220,15 @@ export class ArcadeCar extends StuntCar {
           body.applyImpulseAtPoint(_F.copy(t._rawNormal).multiplyScalar(j), t.hitPoint);
         }
       }
-      // ---- the old car's collisions: rails / walls / props, the body against the deck, the floor
-      if (SOLID.enabled) this._resolveSolids(subDt);
-      if (DECK.enabled && this.groundBvh && this.groundBvh.baked) this._applyDeckContact(subDt);
-      this._applyChassisGroundContact(subDt);
+      // ---- the old car's collisions with rails / walls / props; the BODY against the road and the floor its own
+      if (SOLID.enabled) this._crashSolve(() => this._resolveSolids(subDt));
+      const touching = this._bodyContact(subDt);
+      if (this._crashT > 0) this._crashT -= subDt;
+      // a car on its lid or side (body down, no wheel): it settles — its spin and slide die out, it doesn't buzz
+      if (touching && !down) {
+        const k = Math.exp(-BODY.settle * subDt);
+        body.angVel.multiplyScalar(k);
+      }
       body.integrate(subDt);
       const wMax = TIRE.maxAngVel;
       if (body.angVel.lengthSq() > wMax * wMax) body.angVel.setLength(wMax);
@@ -224,6 +244,83 @@ export class ArcadeCar extends StuntCar {
     const rel = ahead.sub(tr.P), along = rel.dot(tr.U), across = Math.sqrt(Math.max(0, rel.lengthSq() - along * along));
     this.trackAt(body.pos); // (back to where the car is: trackAt searches round its last match)
     return along > -1.5 && along < ARCADE.road.reach + 1 && across < 26;
+  }
+
+  /**
+   * THE BODY AGAINST THE ROAD AND THE FLOOR (user, 2026-10-29: "if the car falls on its roof it's jittering … make
+   * better realistic collisions"). The old car's body contact is PENALTY SPRINGS (220 kN/m on the deck, 180 on the
+   * floor) wrapped in roof guards and crash states run by the old car's own step: on its lid the arcade car sank
+   * through the floor and was thrown about at 100 m/s, or froze under a road. Here, the games' way (sequential
+   * impulses, Box2D / Bullet): every body sample inside the surface is a CONTACT; a few passes stop each one's
+   * speed into the surface (a little bounce on a hard hit only), with scraping friction bounded by its push, and the
+   * body is moved out of the deepest one. Returns the number of contacts.
+   */
+  _bodyContact(dt) {
+    const body = this.body, C = _contacts;
+    C.length = 0;
+    for (const lp of this.DECK_CONTACT_POINTS) {
+      this._geomToWorld(lp, _cw);
+      let sd = Infinity;
+      if (DECK.enabled && this.groundBvh?.baked) {
+        const res = this.groundBvh.closestPointWithNormal(_cw.x, _cw.y, _cw.z, 0.8, _cn);
+        if (res) {
+          const d = (_cw.x - res.x) * _cn.x + (_cw.y - res.y) * _cn.y + (_cw.z - res.z) * _cn.z;
+          if (d < BODY.skin && d > -0.6) { sd = d; _bn.copy(_cn); }
+        }
+      }
+      const fy = this.getFloorY?.(_cw.x, _cw.z);
+      if (Number.isFinite(fy) && _cw.y - fy < BODY.skin && _cw.y - fy < sd) { sd = _cw.y - fy; _bn.set(0, 1, 0); }
+      if (sd === Infinity) continue;
+      const c = (C.pool[C.length] ??= { p: new THREE.Vector3(), n: new THREE.Vector3(), r: new THREE.Vector3(), t: new THREE.Vector3() });
+      c.p.copy(_cw); c.n.copy(_bn); c.r.subVectors(_cw, body.pos); c.pen = BODY.skin - sd; c.jn = 0; c.jt = 0;
+      C.push(c);
+    }
+    if (!C.length) return 0;
+    for (const c of C) {
+      const vn = _pv.crossVectors(body.angVel, c.r).add(body.vel).dot(c.n);
+      c.target = vn < -BODY.bounceMin ? -BODY.restitution * vn : 0; // (a bounce only off a real hit)
+      c.mn = body.effectiveInvMass(c.r, c.n);
+    }
+    for (let it = 0; it < BODY.iterations; it++) for (const c of C) {
+      c.r.subVectors(c.p, body.pos);
+      _pv.crossVectors(body.angVel, c.r).add(body.vel);
+      const vn = _pv.dot(c.n);
+      const jn = Math.max(0, c.jn + (c.target - vn) / c.mn), dj = jn - c.jn;
+      c.jn = jn;
+      if (dj) body.applyImpulseAtPoint(_pj.copy(c.n).multiplyScalar(dj), c.p);
+      // friction: the sliding part of the point's speed, stopped up to μ × its push
+      _pv.crossVectors(body.angVel, c.r).add(body.vel);
+      c.t.copy(_pv).addScaledVector(c.n, -_pv.dot(c.n));
+      const vt = c.t.length();
+      if (vt < 1e-4) continue;
+      c.t.multiplyScalar(1 / vt);
+      const want = vt / body.effectiveInvMass(c.r, c.t), room = BODY.friction * c.jn - c.jt;
+      const jt = Math.min(want, Math.max(0, room));
+      if (jt > 0) { c.jt += jt; body.applyImpulseAtPoint(_pj.copy(c.t).multiplyScalar(-jt), c.p); }
+    }
+    // out of the deepest contact (positions only: no speed added — the old projection's "pop")
+    let deep = null;
+    for (const c of C) if (!deep || c.pen > deep.pen) deep = c;
+    if (deep.pen > BODY.slop) body.pos.addScaledVector(deep.n, (deep.pen - BODY.slop) * BODY.correct);
+    this.arcade.contacts = C.length; this.arcade.deepest = deep.pen; // (the lab's telemetry, the tests)
+    return C.length;
+  }
+
+  /**
+   * A REAL HIT IS A CRASH (user, 2026-10-29: "more realistic crashes"; measured: 150 km/h head-on into a concrete
+   * block stopped the car dead — no rebound, no pitch, no spin). The old car's solid contact is impulses with spin,
+   * but Thunderline turned its crash threshold OFF (a rail never tumbles the car: carTune railCrashSpeed) — every hit
+   * was a scrape, bounce 0.05, spin capped at 2.5 rad/s. For this car, during its solve only: a scrape stays a scrape
+   * (a rail glanced off keeps its speed), and from `crash.speed` m/s into a solid the hit bounces and spins.
+   */
+  _crashSolve(solve) {
+    const C = ARCADE.crash, keep = [CRASH.wallSpeed, CRASH.restitution, CRASH.maxSpin];
+    CRASH.wallSpeed = C.speed; CRASH.restitution = C.restitution; CRASH.maxSpin = C.maxSpin;
+    this._crashYield = 0;
+    try { solve(); } finally { [CRASH.wallSpeed, CRASH.restitution, CRASH.maxSpin] = keep; }
+    // (the old contact arms ITS crash timer on a real hit — the old car's step counts it down, not this one: the car's
+    // own timer instead, and the old one cleared so nothing of the old car's reads it)
+    if (this._crashYield > 0) { this._crashT = C.loose; this._crashYield = 0; }
   }
 
   /** ON THE ROAD: engine, brakes, the grip curve, the turn rate, the car kept on the surface */
@@ -263,14 +360,16 @@ export class ArcadeCar extends StuntCar {
       }
     }
     const cur = body.angVel.dot(surf);
-    const yaw = cur + (want - cur) * (1 - Math.exp(-S.response * dt));
+    // (after a crash: the spin it was given winds down; the steering takes over again after crash.loose s)
+    const loose = this._crashT > 0, Cr = ARCADE.crash;
+    const yaw = loose ? cur * Math.exp(-Cr.looseYawDecay * dt) : cur + (want - cur) * (1 - Math.exp(-S.response * dt));
     // the up onto the surface: both axes on ≥ 2 wheels; on the roll axis only with the body on the road (no wheels)
     _up.set(0, 1, 0).applyQuaternion(body.quat);
     _w.set(0, 0, 0);
     if (down >= 2) {
       _axis.crossVectors(_up, surf);
       const s = _axis.length(), ang = Math.atan2(s, _up.dot(surf));
-      if (s > 1e-6) _w.copy(_axis.multiplyScalar(1 / s)).multiplyScalar(Math.min(ARCADE.align.max, ang * ARCADE.align.rate));
+      if (s > 1e-6) _w.copy(_axis.multiplyScalar(1 / s)).multiplyScalar(Math.min(ARCADE.align.max, ang * ARCADE.align.rate * (loose ? Cr.looseAlign : 1)));
       _w.add(this._ff).addScaledVector(surf, -this._ff.dot(surf)); // (+ the road's own pitch / roll rate)
       body.angVel.copy(_w).addScaledVector(surf, yaw);
     } else {

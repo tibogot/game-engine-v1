@@ -20,9 +20,14 @@ import {
   varying, vec2, vec3, vec4, length,
 } from "three/tsl";
 
+// THE BOOK: ONE PUFF OF RUBBER SMOKE, baked in the Fire Pro lab (v3/fire-bake-lab, preset tyreSmoke; user, 2026-10-29:
+// "the best looking AAA smoke" — on the generic smoke6 book the drift read as two tidy white ropes). Its whole life is
+// in the frames: a dense ball at the tyre that rolls over, swells to ~5 m and thins low and wide — so the card is the
+// bake box, constant, and the code adds almost no growth. `anchor`: where the source (the tyre) is on the card, from
+// its centre in card widths (+x right, +y up): the card is placed so that point sits on the tyre.
 export const SMOKE_BOOK = {
-  a: "/textures/fx/smoke6_a.webp", b: "/textures/fx/smoke6_b.webp", mv: "/textures/fx/smoke6_mv.webp",
-  cols: 8, rows: 8, cell: 192, mvScale: 24, fill: 0.8,
+  a: "/textures/fx/firepro/fp_tyreSmoke_a.webp", b: "/textures/fx/firepro/fp_tyreSmoke_b.webp", mv: "/textures/fx/firepro/fp_tyreSmoke_mv.webp",
+  cols: 8, rows: 8, cell: 192, mvScale: 15.415, fill: 0.995, anchor: [0.229, -0.27], // (fp_tyreSmoke.json; the bake box centre −1.6, 2.2 of 7 m from the source; from 0.45 s of the puff: torn already)
 };
 
 export const TYRE_SMOKE = {
@@ -31,14 +36,15 @@ export const TYRE_SMOKE = {
   brakeK: 0.8, // a tyre past its grip lengthwise (wheelspin, locked brakes)
   handbrake: 0.75, // the rear wheels on the handbrake (moving)
   minSpeed: 3, // m/s of the wheel over the road before any smoke
-  rate: 55, // puffs a second per wheel at full smoke
-  density: 0.55, // and at least one puff per this many metres of the wheel's path (continuity at speed)
-  size: [0.7, 1.3], // the card at birth (m), light → full
-  grow: [2.6, 3.6], // swells to size × (1 + grow)
-  growTime: 0.7, // s for most of the swell
-  life: [1.4, 2.8], // s
-  opacity: [0.24, 0.55],
-  front: 0.6, // the front wheels smoke this much (a drift smokes mostly at the rear)
+  rate: 24, // puffs a second per wheel at full smoke (each a whole rolling puff now: big cards, fewer of them)
+  density: 0.8, // and at least one puff per this many metres of the wheel's path (continuity at speed)
+  size: [4, 6.5], // the card (m): the bake box — light → full slip
+  grow: [0.05, 0.15], // swells to size × (1 + grow): the book swells by itself
+  growTime: 1.0, // s for most of the swell
+  life: [1.6, 3.4], // s (the book's 3 s, played faster or slower)
+  opacity: [0.5, 0.9],
+  spin: 0.15, // rad either way: the card's turn (the book has a ground under it: a big turn tipped it)
+  front: 0.3, // the front wheels smoke this much (a drift smokes at the REAR: user, 2026-10-29)
   throwK: 0.32, // of the wheel's velocity over the road the puff leaves with…
   drag: 2.4, // …lost to the air (1/s)
   rise: 0.45, // m/s up
@@ -126,15 +132,17 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
     const centre = vec3(p.x, p.y, p.z).add(thrown).add(vec3(uRise).mul(t));
     // swells fast, then slowly: size × (1 + grow (1 − e^(−t/T)))
     const size = p.w.mul(float(1).add(v.w.mul(float(1).sub(exp(t.negate().div(uGrowT)))))).mul(alive);
-    // toward the camera by a third of its size (litSmoke): it meets the road less
-    const lifted = centre.add(normalize(cameraPosition.sub(centre)).mul(size.mul(0.33)));
-    const rot = l.z.sub(0.5).mul(2.4);
+    // toward the camera a little (litSmoke's third of a small puff; the baked card is the whole 5 m puff's box)
+    const lifted = centre.add(normalize(cameraPosition.sub(centre)).mul(size.mul(0.08)));
+    const rot = l.z.sub(0.5).mul(2 * s.spin);
     const cr = cos(rot), sr = sin(rot);
     const right = cameraWorldMatrix[0].xyz, up = cameraWorldMatrix[1].xyz;
     const ax = right.mul(cr).add(up.mul(sr));
     const ay = right.mul(sr.negate()).add(up.mul(cr));
     const toCam = normalize(cameraPosition.sub(lifted));
     const mirror = step(float(0.5), fract(l.z.mul(7.31)));
+    // the book's source on the tyre: the card moved by its anchor (mirrored with the picture)
+    const anchored = lifted.sub(ax.mul(size.mul(F.anchor?.[0] ?? 0).mul(float(1).sub(mirror.mul(2))))).sub(ay.mul(size.mul(F.anchor?.[1] ?? 0)));
     const L = uSunDir;
     vL.assign(normalize(vec3(dot(L, ax).mul(float(1).sub(mirror.mul(2))), dot(L, ay), dot(L, toCam))));
     vAge.assign(saturate(age));
@@ -145,7 +153,7 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
     vPlane.assign(attribute("iPlane", "vec4"));
     // the sun BEHIND the smoke as seen from the camera: forward scattering
     vBack.assign(pow(saturate(dot(toCam.negate(), L)), float(6)));
-    return lifted.add(ax.mul(positionLocal.x.mul(size))).add(ay.mul(positionLocal.y.mul(size)));
+    return anchored.add(ax.mul(positionLocal.x.mul(size))).add(ay.mul(positionLocal.y.mul(size)));
   })();
 
   const frames = F.cols * F.rows, inset = 0.5 / F.cell;
@@ -172,7 +180,9 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
     let rgb = tint.mul(vec3(uSun).mul(lit).mul(uSunK).add(vec3(uSky).mul(sky).mul(uSkyK)));
     // back-lit: the THIN smoke glows (the dense core stays shaded)
     rgb = rgb.add(vec3(uSun).mul(tint).mul(vBack.mul(uBack).mul(float(1).sub(A.w).mul(A.w).mul(2.2))));
-    const fade = smoothstep(float(0), float(0.05), vAge).mul(float(1).sub(smoothstep(float(0.55), float(1), vAge)));
+    // in GENTLY (a puff appearing whole at the tyre read as a round lump: the ones the chase camera sees most — user,
+    // 2026-10-29), out over its second half
+    const fade = smoothstep(float(0.02), float(0.14), vAge).mul(float(1).sub(smoothstep(float(0.55), float(1), vAge)));
     const e = uv().min(float(1).sub(uv()));
     const border = smoothstep(float(0), float(0.12), e.x).mul(smoothstep(float(0), float(0.12), e.y));
     // soft into the road it came off (its plane, per pixel)
@@ -207,7 +217,7 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
     const start = clock - startOffset; // puffs laid back along this frame's path are already a little older
     const card = size / F.fill;
     const P = attrs.iPos.array, Lf = attrs.iLife.array, V = attrs.iVel.array, N = attrs.iPlane.array, o = i * 4;
-    P[o] = pos.x + n.x * size * 0.35; P[o + 1] = pos.y + n.y * size * 0.35; P[o + 2] = pos.z + n.z * size * 0.35;
+    P[o] = pos.x + n.x * 0.15; P[o + 1] = pos.y + n.y * 0.15; P[o + 2] = pos.z + n.z * 0.15; // (at the tyre: the anchor places the card)
     P[o + 3] = card;
     Lf[o] = start; Lf[o + 1] = life; Lf[o + 2] = seedN; Lf[o + 3] = THREE.MathUtils.lerp(s.opacity[0], s.opacity[1], k);
     V[o] = vel.x * s.throwK + (Math.random() - 0.5) * 1.2; V[o + 1] = vel.y * s.throwK + 0.4 + Math.random() * 0.6; V[o + 2] = vel.z * s.throwK + (Math.random() - 0.5) * 1.2;

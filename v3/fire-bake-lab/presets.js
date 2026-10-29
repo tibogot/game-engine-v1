@@ -357,6 +357,28 @@ export const PRESETS = {
     forces: [{ type: "wind", direction: [1, 0, 0], strength: 0.15 }, { type: "turbulence", strength: 2.5, scale: 1.6 }],
     bake: { center: [0.2, 1.6, 0], size: 7, pitch: 40, start: 4, duration: 64 / 24, loop: true, blend: 16 },
   },
+  // THUNDERLINE'S TYRE SMOKE (user, 2026-10-29: "the best looking AAA smoke"; the game's puffs read as two tidy white
+  // ropes behind the wheels). ONE PUFF'S LIFE, as the game plays it (tyreSmoke.js: age 0 → 1 over the frames):
+  // rubber smoke burst off a spinning tyre for a third of a second, thrown sideways (the slide) and a little up; it
+  // rolls over itself, swells several times, hangs low (rubber smoke is heavy, barely buoyant) and thins.
+  tyreSmoke: {
+    label: "Tyre smoke (one puff)",
+    note: "one-shot: a puff of rubber smoke thrown off a sliding tyre — it rolls, swells and hangs, then thins (Thunderline)",
+    sim: {
+      voxelSize: 0.04, brickSize: 16, velocityDivisor: 2, smokeDivisor: 1, seed: 61,
+      grid: { maxVoxels: 8_000_000, cutoff: 0.03, ground: true },
+      flame: { cooling: 0.6, opacity: 1, brightness: 1 },
+      smoke: { dissipation: 0.45, color: "#f4f4f6", density: 4.5, scattering: 0.45, shadowDensity: 2.6 },
+      motion: { buoyancy: 0.55, smokeWeight: 0.35, damping: 0.25, vorticity: 4.5 },
+    },
+    // (a slower, longer burst with mild turbulence left a smooth white BALL for the first second — a drift's puffs
+    // live mostly there, and the trail read as a row of balls: torn at once now, and the book starts 0.15 s in)
+    fires: [{ kind: "smoke", at: [0, 0.3, 0], radius: 0.22, emission: { flame: 0, heatRate: 0.6, smokeRate: 80 }, velocity: { direction: [1, 0.25, 0.2], speed: 8 }, until: 0.22 }],
+    blasts: [],
+    forces: [{ type: "turbulence", strength: 3.5, scale: 1.4 }, { type: "turbulence", strength: 5, scale: 0.45 }, { type: "wind", direction: [1, 0, 0], strength: 0.25 }],
+    // the chase camera sees smoke from low: 15° down
+    bake: { center: [-1.6, 2.2, 0], size: 7, pitch: 15, start: 0.45, duration: 2.9, loop: false, blend: 0 },
+  },
   campfire: {
     label: "Campfire",
     note: "loop: clean small flames (Fire Pro's Campfire preset)",
