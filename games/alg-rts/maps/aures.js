@@ -104,6 +104,9 @@ export const LAYOUT = {
 export const MAP = {
   id: "aures",
   name: "Aurès — Tighanimine",
+  // its trampled YARDS at the villages, the post and the camp (algSplats — off by default since 2026-10-30: a 2.4 m
+  // photo stretched over a 60 m square repeats; this frozen map keeps its look)
+  splats: { yards: true },
   level: "/levels/alg-aures.v3proj",
   tracks: TRACKS,
   // The supply points (fuel / munitions), on the pistes between the post and the villages.
