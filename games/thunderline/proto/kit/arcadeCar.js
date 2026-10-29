@@ -39,6 +39,9 @@ export const ARCADE = {
   //   - HARD BRAKING from over `lockFrom` m/s (full at `lockFull`) locks all four for a moment: a short dab of rubber
   //     that fades over `lockFade` s of braking — not a black line into every turn
   spin: { launch: 1, launchTo: 14, lock: 0.6, lockFrom: 20, lockFull: 45, lockFade: 0.45 },
+  // A RAIL GLANCE (see _groundDrive): touching a rail, the nose is turned off it to `deg`°, at `rate` rad/s per unit of
+  // sin short of it (at most `max` rad/s); `hold` s after the last touch
+  rail: { deg: 3, rate: 12, max: 0.6, hold: 0.1 },
   // GRIP: up to `g` g of sideways grip, all of it at `peakDeg` of slide, `slide` of it once sliding past `slideDeg`;
   // `handbrake` scales it (a drift)
   // `aero`: the DOWNFORCE GRIPS — the grip × (1 + aero × downforce / g) (user, 2026-10-29, a real track: at 330 km/h
@@ -122,6 +125,7 @@ export class ArcadeCar extends StuntCar {
     this._visDrop = 0; // m the body is drawn lowered onto its wheels (syncVisuals)
     this._carry = new THREE.Vector3(); // rad/s, car frame: the spin it took off with (_airControl)
     this._spread = 0; // rad: how much the wheels' surfaces disagree
+    this._wallN = new THREE.Vector3(); this._wallT = 0; // the last rail touched, and for how long more (ARCADE.rail)
     this._sinceWheels = 9; // s since a wheel last touched
     this._ff = new THREE.Vector3(); // rad/s: the road's own rotation under the car (turned with it, not after it)
     this._prevRoadUp = null;
@@ -359,7 +363,14 @@ export class ArcadeCar extends StuntCar {
         }
       }
       // ---- the old car's collisions with rails / walls / props; the BODY against the road and the floor its own
-      if (SOLID.enabled) this._crashSolve(() => this._resolveSolids(subDt));
+      if (SOLID.enabled) {
+        // (this substep's rail contact, for the glance in _groundDrive: _solidTouch itself stays the whole tick's)
+        const before = this._solidTouch;
+        this._solidTouch = false;
+        this._crashSolve(() => this._resolveSolids(subDt));
+        if (this._solidTouch) { this._wallN.copy(this._scrapeNormal); this._wallT = ARCADE.rail.hold; } else this._wallT -= subDt;
+        this._solidTouch ||= before;
+      }
       const touching = this._bodyContact(subDt);
       if (this._crashT > 0) this._crashT -= subDt;
       // a car on its lid or side (body down, no wheel): it settles — its spin and slide die out, it doesn't buzz
@@ -525,6 +536,19 @@ export class ArcadeCar extends StuntCar {
         const side = _axis.subVectors(body.pos, tr.P).dot(_r); // (+ = left of the middle)
         const aim = head - THREE.MathUtils.clamp(side * Gd.centre, -Gd.centreMaxDeg * DEG, Gd.centreMaxDeg * DEG);
         if (Math.abs(head) < Gd.maxDeg * DEG) want += aim * Gd.rate * stunt;
+      }
+    }
+    // A RAIL GLANCES THE CAR OFF (user, 2026-10-29: "the car gets magnet and a bit stuck on the guardrail"): a graze
+    // laid the car flush along the rail and the grip, which takes every sideways speed away, held it there — the rail
+    // stopped it going in, the grip stopped it coming off (measured: 3° into the rail at 200 km/h, then the wheel
+    // straight → 0.00 m/s off it, scraping until the player steered away). Touching a rail, the nose is turned off it to
+    // at least `rail.deg`: the grip then carries the car away, as a real glance does. Steering into the rail still wins.
+    if (this._wallT > 0 && vF > 5) {
+      _tmp.copy(this._wallN).addScaledVector(surf, -this._wallN.dot(surf));
+      if (_tmp.lengthSq() > 0.25) { // (a rail's face, not a lid)
+        _tmp.normalize();
+        const R = ARCADE.rail, short = Math.sin(R.deg * DEG) - _f.dot(_tmp); // (how far the nose is from pointing off it)
+        if (short > 0) want += Math.sign(_tmp.dot(_r)) * Math.min(R.max, short * R.rate); // (toward the rail's normal: + = left)
       }
     }
     const cur = body.angVel.dot(surf);
