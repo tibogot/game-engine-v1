@@ -425,7 +425,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     // Held from the VILLAGE ITSELF: the centre of its placed footprint (the
     // houses are not built round the site's point — a ring there sat off to
     // one side, you, 2026-09-29), and a ksar from its souk (layout.js sitePoint).
-    sites: LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind)).map((s) => ({ ...s, ...villageCentre(s, showroom) })),
+    // (A map that FLAGS its objectives — `point: true`, Oued Abdi 2026-10-30: the town, the oasis, a farm, a pass, a lookout —
+    // holds those; the Aurès, unflagged, its villages as before.)
+    sites: (LAYOUT.sites.some((s) => s.point) ? LAYOUT.sites.filter((s) => s.point) : LAYOUT.sites.filter((s) => ["hamlet", "dechra", "ksar"].includes(s.kind))).map((s) => ({ ...s, ...villageCentre(s, showroom) })),
     // The supply lines run from the post (a held point pays only if linked to it).
     post: producers.find((p) => p.structure.typeKey === "post")?.centre ?? muster,
   });

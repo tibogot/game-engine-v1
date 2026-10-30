@@ -104,8 +104,12 @@ const P = {
   // A village to its holder (the ALN: one number, as before).
   village: {
     hamlet: { mp: 20, fuel: 6, mun: 8 }, dechra: { mp: 25, fuel: 8, mun: 10 }, ksar: { mp: 30, fuel: 10, mun: 12 },
+    // (Oued Abdi's kinds, 2026-10-30: the town the big point, as a ksar; the oasis a hamlet's worth; a farm a little less;
+    // a pass and a lookout few people, their worth the ground — munitions mostly)
+    town: { mp: 30, fuel: 10, mun: 12 }, oasis: { mp: 20, fuel: 6, mun: 8 }, farm: { mp: 15, fuel: 5, mun: 6 },
+    pass: { mp: 8, fuel: 4, mun: 10 }, point: { mp: 8, fuel: 3, mun: 10 },
   },
-  villageAln: { hamlet: 40, dechra: 60, ksar: 80 },
+  villageAln: { hamlet: 40, dechra: 60, ksar: 80, town: 80, oasis: 40, farm: 30, pass: 25, point: 25 },
   supplyPoint: 9,                         // its resource a minute (12 with 6 points; 9 with 13, 2026-10-08: more ground worth holding, each worth less)
   supplyAln: 6,                           // the ALN's supplies a minute per supply point it holds (algAI.js raids)
   // m between two held points of a supply line. 180: the ksar needs the col,
@@ -114,6 +118,7 @@ const P = {
   link: 180,
   cache: 15,                              // per minute per standing arms cache (ALN)
   radius: 40,
+  radiusOf: { pass: 18, point: 18, farm: 30 },   // (a pass's and a lookout's ground is narrow: a 40 m ring took in the slopes round them)
   supplyRadius: 11,                       // a supply point's capture ring — CoH 3's 11 m (you, 2026-10-12; was 22)
   // Influence per second per man (up to 3): ~20 s from neutral with 3+.
   push: 0.01,
@@ -169,7 +174,7 @@ export function createAlgEconomy({ app, units, sites, structures, post = null })
   const at = (x, z) => new THREE.Vector3(x, app.getWorldHeight?.(x, z) ?? 0, z);
   const points = sites.map((s) => ({
     name: s.name, kind: s.kind, position: at(s.x, s.z),
-    value: 0, owner: null, progress: 0, linked: false, linkFrom: null, radius: P.radius,
+    value: 0, owner: null, progress: 0, linked: false, linkFrom: null, radius: P.radiusOf[s.kind] ?? P.radius,
   }));
   const supply = SUPPLY.map((s) => ({
     name: s.res === "fuel" ? t("{name} · carburant", { name: s.name }) : t("{name} · munitions", { name: s.name }), kind: "supply", res: s.res,

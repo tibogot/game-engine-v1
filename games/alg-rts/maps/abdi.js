@@ -128,7 +128,7 @@ const OASIS = STONE && (() => {
 // SIDI ALI: the koubba on its crest; the village's dead on the slope below it (south)
 const SAINT = STONE ? koubbaAndCemetery(SA.x, SA.z, SA.x - 6, SA.z + 21, { seed: 1961, cols: 5, rows: 4 }) : [];   // (east of it the graves ran under the mosque, north into a walled field — seen; south: clear, measured)
 
-/** THE MAP: its level, its pistes as tracks, its supply — the ground only for now (no town, no AI). */
+/** THE MAP: its level, its pistes as tracks, its supply, its objectives (the sites flagged `point`) and the FLN's AI. */
 export const MAP = {
   id: "abdi",
   name: t("Aurès — Oued Abdi"),
@@ -137,7 +137,7 @@ export const MAP = {
   supply: LAYOUT.supply,
   handPlaced: false,
   // WHAT THIS MAP SHOWS (mapSystems.js): the ground under review — no AI yet.
-  systems: { fow: true, birds: true, splats: true, stones: true, life: true },   // (life: the villages' hay, wood, ovens, hives and the squares' wells — 2026-10-29)
+  systems: { fow: true, birds: true, splats: true, stones: true, life: true, ai: true },   // (life: the villages' hay, wood, ovens, hives and the squares' wells — 2026-10-29; ai: the FLN's, 2026-10-30)
   // THE PLANTS BARELY MOVE (you, 2026-10-19: "in CoH there is no wind on foliage"): a slight breath, 1/4 of
   // the Aurès' sway; the flags and the windsock keep the full wind. ?plantwind=0..1 to compare.
   foliageWind: 0,   // (you, 2026-10-19: "make wind 0 for foliage" on this map — 0.25 was the first try)

@@ -174,10 +174,12 @@ ones throughout.
    new pieces, the sheepfold and its zriba, the threshing floor; Ferme Ouled Saïd and the Bergerie laid out with the
    mechta houses). **The oasis done the same day** (OASIS_PLAN.md: the spring and its kesria, the palm-rib gardens, the
    whitewashed houses). Every place of the map now built.
-2. **Capture points and supply** live: the game told the new site kinds (town, oasis, farm, pass,
-   lookout); the souk the big point.
-3. **The AI on:** the FLN down its two gullies, its cells in the villages and the town's houses; the
-   French AI's routes over the fords.
+2. ~~**Capture points and supply** live~~ — **done 2026-10-30**: the sites flagged `point` are the objectives (7: the
+   souk, the oasis, Mechta el Djorf, the farm, Dechra Taghit, the pass, the Kef) with their kinds' incomes (algEconomy;
+   a pass and a lookout an 18 m ring), the 15 supply points; every point links to the post (3 hops at most).
+3. ~~**The AI on**~~ — **done the same day** (systems.ai): watched 6 minutes — a cell in the dechra, a band down the west
+   lane takes the farm and leaves its cell, the next down the east gully for the pass. Playing the FLN, the French AI
+   takes the valley.
 4. **Your first full match on it**, then the fixes from it.
 5. ~~**The FLN side in Blender:** the maquis camp and the cave mouth.~~ — **done 2026-10-29** (MAP.flnKit, as the new Aurès).
 6. **The new French post** in Blender (replaces the old one on this map only).
