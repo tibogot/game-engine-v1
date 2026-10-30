@@ -33,11 +33,16 @@ const glb = GLB[script] ?? `${script}.glb`;
 const cache = path.join(ROOT, ".cache", "blender", glb.replace(/\.glb$/, ""));
 const parts = path.join(cache, "parts");
 const flag = (f) => args.includes(f);
+const MIP_BAR = 25;   // a material's AVERAGE colour shift at the game's mip (summed RGB x 100, 0-300): the port houses read 1-14 after the fix (2026-10-30). Not yet proven on a known fault — the lab's lodView at the switch distance stays the eye check
 const only = flag("--only") ? args[args.indexOf("--only") + 1] : null;
 const t0 = Date.now();
 const secs = () => `${Math.round((Date.now() - t0) / 1000)} s`;
 
 // 1. BLENDER: the types asked for (all without --only), each into parts/<type>.glb
+// (its own checks read from its output — bkit.bake: MIPCHECK, a material's colour moving at the mip the game draws it with;
+// BAKEBLACK, an atlas that came out black. Both failed SILENTLY before 2026-10-30: the port houses' brown window bars, two
+// black atlases)
+const blenderBad = [];
 if (!flag("--merge")) {
   const py = path.join(ROOT, "tools", "blender", `${script}.py`);
   if (!fs.existsSync(py)) { console.log(`no ${py}`); process.exit(1); }
@@ -51,7 +56,10 @@ if (!flag("--merge")) {
   let tb = false;   // (a traceback printed whole: its File lines say where)
   for (const line of out.split(/\r?\n/)) {
     if (/^Traceback/.test(line)) tb = true;
-    if (tb || /^(TRIS|BAKE|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
+    if (tb || /^(TRIS|BAKE|MIPCHECK|FARFROM|THIN|UVFIT|SHARED|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
+    const mc = /^MIPCHECK (\S+) (\S+) (\S+) ([\d.]+)/.exec(line);
+    if (mc && !flag("--quick") && +mc[4] > MIP_BAR) blenderBad.push(`${mc[2]}: ${mc[3]} ${mc[4]}`);
+    if (/^BAKEBLACK/.test(line)) blenderBad.push(line);
   }
   if (r.status !== 0 || /Traceback/.test(out)) { console.log(`blender FAILED (${secs()})`); process.exit(1); }
   console.log(`  blender done (${secs()})`);
@@ -74,6 +82,8 @@ console.log(`  → public/models/alg/${glb} (${(fs.statSync(dst).size / 1e6).toF
 
 // 4. THE GATES on it
 let bad = 0;
+if (blenderBad.length) { bad++; console.log(`  FAIL mipCheck (a material's average colour shifts past ${MIP_BAR} at the game's mip, or a black atlas): ${blenderBad.join(" | ")}`); }
+else if (!flag("--merge")) console.log(`  ok   mipCheck${flag("--quick") ? " (quick: not judged)" : ""}`);
 for (const gate of ["glbExtentTest", "glbCoplanarTest", "glbLodShadingTest"]) {
   const g = spawnSync(process.execPath, [path.join(ROOT, "tools", `${gate}.mjs`)], { cwd: ROOT, encoding: "utf8" });
   const mine = `${g.stdout}`.split(/\r?\n/).filter((l) => l.includes(glb));

@@ -770,7 +770,15 @@ Object.assign(BUILDINGS, {
     before: () => haystackView("near"), middle: () => haystackView("far"), after: () => haystackView(null),
     tags: ["HAYSTACK · NEAR", "HAYSTACK · FAR", "HAYSTACK · BY THE CAMERA"], note: "the straw stack round its pole: ~550 straw cards (a strand texture, alpha-tested, coverage-kept mipmaps) layered like shingles over a lumpy core, the trodden straw round its foot, branches on its top, a pitchfork; its far level ~110 bigger cards; the two dither-faded over 52-66 m; the tips in the wind." },
   renderedWell: { label: "Rendered well (old SAS post's)", gap: 4, before: () => buildRenderedWell(), tags: ["RENDERED WELL"], note: "the whitewashed well of the old SAS post (gone 2026-10-25), kept as a small asset for later: the round rendered curb, its lid, two posts and the beam, the rope and bucket." },
-  telegraphPole: { label: "Telegraph pole", gap: 6, before: () => buildTelegraphPole({}), tags: ["TELEGRAPH POLE"], note: "the telegraph line's pole (rtsAlgeria buildTelegraphPole); the wires are drawn between them in the game." },
+  // THE PORT IN BLENDER (2026-10-30 — tools/blender/port.py, PORT_PLAN.md): the coast's row houses, their three states
+  ...Object.fromEntries([["quai", "two storeys, three bays, the balcony over the door"], ["cafe", "the café below — its glazed shopfronts, the striped awning"], ["etroite", "narrow, three storeys"]].map(([ty, what]) => [`port_${ty}`, {
+    label: `Port (Blender): ${ty}`, gap: 14, yaw: Math.PI - 0.5, prepare: () => loadHouses("port"),
+    before: () => labPiece(houseMesh(ty, "intact")), middle: () => labPiece(houseMesh(ty, "damaged")), after: () => labPiece(houseMesh(ty, "ruin")),
+    tags: [`${ty.toUpperCase()} · NEW`, `${ty.toUpperCase()} · DAMAGED`, `${ty.toUpperCase()} · RUIN`], note: `the coast port's row house (Blender): ${what} — lime-washed, louvred shutters, the génoise under the eaves, the canal tiles modelled.`,
+  }])),
+  // THE TELEGRAPH POLE IN BLENDER (2026-10-30 — tools/blender/poles.py): the old one on the left, the new on the right
+  telegraphPole: { label: "Telegraph pole", gap: 4, yaw: Math.PI - 0.5, prepare: () => loadHouses("poles"), before: () => buildTelegraphPole({}), after: () => labPiece(houseMesh("pole", "intact")),
+    tags: ["TELEGRAPH POLE · OLD", "TELEGRAPH POLE · NEW"], note: "the PTT line's pole: the tarred foot, the weathered pine, the crossarm and its steel braces, four porcelain insulators, the zinc cap, its number plate; the wires are drawn between them in the game (they hang from the same four points)." },
   rubbleKit: { label: "Rubble (Blender)", gap: 26, prepare: () => loadHouses("rubble"), before: () => houseRow(RUBBLE_TYPES, "intact", 5), tags: ["RUBBLE"], note: "a collapsing house's heaps and flying chunks (tools/blender/rubble.py — algTownDamage)." },
   // THE SCANNED BOULDERS (Poly Haven scans, boulders.glb — algStones scanOutcropParts): the game's outcrops and big
   // stones, at the outcrops' 3.4 m. (The sandstone formations have their own tool: rock-lab.html.)

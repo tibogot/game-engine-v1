@@ -20,8 +20,9 @@ import { PLAY } from "./layout.js";
 // the ribbon half-width, drawn fat (a real wire is under a pixel at play zoom).
 const P = { spacing: 42, offset: 5.5, start: 12, sagPerM: 0.026, segs: 16, wireHalf: 0.022, maxNormalTilt: 0.86 };
 
-export function createAlgPoles(app, { navGrid = null } = {}) {
-  const geo = buildTelegraphPole();
+export function createAlgPoles(app, { navGrid = null, geo: blender = null } = {}) {
+  // (the Blender pole when it loaded — algSangar loadPoles, its insulators where the old one's were; else the old kit's)
+  const geo = blender ?? buildTelegraphPole();
   const wiresLocal = geo.userData.wires;
 
   // ── Where: along each piste ──────────────────────────────────────────────
@@ -60,7 +61,7 @@ export function createAlgPoles(app, { navGrid = null } = {}) {
   }
 
   // ── The poles: one InstancedMesh ─────────────────────────────────────────
-  const material = kitView(geo).material;
+  const material = blender ? geo.userData.labMaterial : kitView(geo).material;
   const mesh = new THREE.InstancedMesh(geo, material, Math.max(1, poles.length));
   mesh.name = "TelegraphPoles";
   mesh.castShadow = mesh.receiveShadow = true;

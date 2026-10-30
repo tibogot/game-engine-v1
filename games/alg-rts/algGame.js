@@ -29,6 +29,7 @@ import { createAlgUnits } from "./algUnits.js";
 import { createAlgNightLamps } from "./algNightLamps.js";
 import { createAlgBattle } from "./algBattle.js";
 import { createAlgPoles } from "./algPoles.js";
+import { loadPoles, poleGeometry } from "./algSangar.js";
 import { createAlgDamage } from "./algDamage.js";
 import { createAlgWire } from "./algWire.js";
 import { createAlgFields } from "./algFields.js";
@@ -519,7 +520,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // THE TELEGRAPH LINE (algPoles.js): poles and wires along the pistes, one
   // draw each. ?poles=0 = without.
   if (params.get("poles") !== "0") {
-    try { app.algPoles = createAlgPoles(app, { navGrid: app.navGrid ?? null }); } catch (e) { console.warn("[alg poles] failed:", e); }
+    // (the Blender pole, 2026-10-30 — ?poles=old the old kit's)
+    const poleGeo = params.get("poles") === "old" ? null : await loadPoles().then((ok) => (ok ? poleGeometry() : null), () => null);
+    try { app.algPoles = createAlgPoles(app, { navGrid: app.navGrid ?? null, geo: poleGeo }); } catch (e) { console.warn("[alg poles] failed:", e); }
     // THE LINE AS A STAKE (algTelegraph.js): the FLN fells poles, the post loses Algiers.
     if (app.algPoles && app.algUnits) {
       app.algTelegraph = createAlgTelegraph(app, { poles: app.algPoles, units: app.algUnits.units });

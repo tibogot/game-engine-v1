@@ -1,0 +1,43 @@
+# The coast's port in Blender — new pieces at Company of Heroes 3 level
+
+2026-10-30 (you: "make the port assets for the other map; as always think AAA Company of Heroes assets, not cheap
+assets, of course as optimized as possible"). The coast map's port (`?map=coast`) is algPort.js today: boxes with a
+photo projected on them, flat window holes, a flat grey mole. Every piece will be NEW in Blender, from the references
+(assets-src/refs/coast/: Stora, Collo, Philippeville's harbour entrance; the FAO's 1961 report on Algerian fishing). It
+is not the procedural one re-textured (see memory: new assets, never remakes). One kit, tools/blender/port.py
+(port.glb), built with `node tools/blenderKit.mjs port`.
+
+## What the references show
+
+- **Shore-road houses:** two or three storeys of the French colonial kind, lime-washed white, cream, ochre or pale blue,
+  the wash worn grey at the foot and streaked under the sills. Low CANAL-TILE roofs (round clay tiles in channels, a
+  ridge of tiles), the tiles' round ends at the eaves. Tall windows with louvred SHUTTERS, some open and some closed,
+  painted green, blue or brown, faded. A dressed-stone plinth, a moulded cornice under the eaves, a balcony on iron
+  brackets over the door. Shops and a café on the ground floor with a canvas awning.
+- **The magasin (warehouse):** long and low, dressed stone, a tile roof, big plank doors (Philippeville's harbour entrance,
+  1887).
+- **The mole:** dressed blocks on a rock apron (tumbled boulders), a parapet on its sea side, iron bollards, steps
+  down to the water, and a small white LIGHTHOUSE on its head with a green lantern.
+- **The boats:** LAMPARO boats, open and double-ended, about 6–8 m, white with a coloured sheer band, a short mast, the
+  big lamp on a pole at the stern; nets heaped in them; some pulled up on the beach on their bilge.
+- **The quay's life:** fish boxes, barrels, coils of rope, nets drying on poles, the fish market's striped awning.
+
+## The pieces, in order (each judged in the lab, then placed)
+
+1. [x] **Row houses** (`quai` two storeys and its balcony, `cafe` with the café below, `etroite` a narrow three-storey house — done 2026-10-30, in the lab; placing them on the coast comes with the magasin and the mole): real wall
+   thickness, deep window reveals, shutters, sills, plinth, cornice, balconies, chimneys. The roof's canal tiles are
+   MODELLED as channels of round tiles, and the far level's roof is a flat skin baked from them. States: intact,
+   damaged (shell holes, shutters torn), ruin (the roof fallen in, the upper floor gone).
+2. [ ] **The magasin:** dressed stone, plank doors, the tile roof; its states.
+3. [ ] **The mole**, as modules laid end to end: a straight length, the head with its LIGHTHOUSE, the steps; the rock
+   apron, bollards, rings.
+4. [ ] **The lamparo boat** (two colour variants), afloat and beached.
+5. [ ] **The quay's props**: fish boxes, barrels, rope, nets on poles, the fish market's awning (the oil drums and crates
+   from props.py, as every kit).
+6. [ ] **The church** (Jemmapes': the nave, the tower and its spire, the clock).
+
+## Optimised (as every kit)
+
+One atlas per type, its near and far levels, three states. The far level is used in the sun's shadow too. Instanced
+where repeated: the houses are the town field's (garrisons, damage, collapse), the boats one instanced draw. The tiles'
+relief is near only.

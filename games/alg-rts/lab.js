@@ -58,6 +58,64 @@ export async function startLab() {
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   window.__LAB = { camera, controls, scene, renderer };   // (the console's and the screenshot driver's: same views before / after)
+  /**
+   * THE NEAR / FAR COLOUR CHECK (2026-10-30, you, on the port house's windows: "there is a LOD problem … it looks
+   * different between LOD … we made rules to not have that kind of thing every time"): the LOD gate (tools/
+   * glbLodShadingTest) compares the levels' SHADING only — the far level's white glazing bars baked orange (the tiles'
+   * mips) passed it. Each LOD on show rendered twice from where the game switches (its far level's distance, the lab
+   * camera's direction), its near level then its far; the share of the piece's pixels whose colour changes past `tol`
+   * (summed RGB 0-765), compared in 4 x 4 blocks. Returns [{ name, at, pixels (blocks), changed % }] — under ~5 % reads the same.
+   */
+  window.__LAB.lodDiff = async ({ tol = 60 } = {}) => {
+    const lods = [];
+    scene.traverse((o) => { if (o.isLOD && o.levels.length > 1 && o.visible !== false) lods.push(o); });
+    const size = renderer.getDrawingBufferSize(new THREE.Vector2());
+    const rt = new THREE.RenderTarget(size.x, size.y);
+    const out = [];
+    for (const lod of lods) {
+      const box = new THREE.Box3().setFromObject(lod.levels[0].object), c = box.getCenter(new THREE.Vector3());
+      const cam = camera.clone(); cam.aspect = size.x / size.y; cam.updateProjectionMatrix();
+      const dir = camera.position.clone().sub(controls.target).normalize();
+      cam.position.copy(c).addScaledVector(dir, lod.levels[1].distance + 0.5); cam.lookAt(c);
+      const was = lods.map((l) => [l.autoUpdate, l.levels.map((v) => v.object.visible)]);
+      const shot = async (which) => {   // 0 near, 1 far, -1 neither (the background)
+        for (const l of lods) { l.autoUpdate = false; l.levels.forEach((v, i) => { v.object.visible = l === lod && i === which; }); }
+        renderer.setRenderTarget(rt); renderer.render(scene, cam); renderer.setRenderTarget(null);
+        return renderer.readRenderTargetPixelsAsync(rt, 0, 0, size.x, size.y);
+      };
+      // (each read COPIED: the renderer hands back the same staging buffer — the three shots were one)
+      const bg = (await shot(-1)).slice(), a = (await shot(0)).slice(), b = (await shot(1)).slice();
+      lods.forEach((l, k) => { l.autoUpdate = was[k][0]; l.levels.forEach((v, i) => { v.object.visible = was[k][1][i]; }); });
+      // in 4 x 4 BLOCKS, their mean colours (pixel by pixel, the tiles' fine relief against the far roof's strips counted 12 %
+      // — the same read; a real change of colour, the orange bars, is a block's): `px` the blocks the piece covers
+      let px = 0, changed = 0;
+      const row = Math.ceil((size.x * 4) / 256) * 256, B = 4;   // (WebGPU pads each row to 256 bytes — all but the last: length / height is not the stride)
+      const mean = (p, bx, by) => { const m = [0, 0, 0]; for (let y = 0; y < B; y++) for (let x = 0; x < B; x++) { const i = (by * B + y) * row + (bx * B + x) * 4; m[0] += p[i]; m[1] += p[i + 1]; m[2] += p[i + 2]; } return m.map((v) => v / (B * B)); };
+      const d3 = (p, q) => Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]) + Math.abs(p[2] - q[2]);
+      for (let by = 0; by < Math.floor(size.y / B); by++) for (let bx = 0; bx < Math.floor(size.x / B); bx++) {
+        const ma = mean(a, bx, by), mb = mean(b, bx, by), mg = mean(bg, bx, by);
+        if (d3(ma, mg) < 12 && d3(mb, mg) < 12) continue;   // (the ground: neither level there)
+        px++;
+        if (d3(ma, mb) > tol) changed++;
+      }
+      const r = { name: lod.levels[0].object.name || lod.name, at: lod.levels[1].distance, pixels: px, changed: px ? +(changed / px * 100).toFixed(1) : 0 };
+      out.push(r);
+    }
+    rt.dispose();
+    return out;
+  };
+  /** The same view on screen, to SEE where they differ: the camera where lodDiff renders from (the first LOD on show), one
+   *  level forced (0 near, 1 far); null gives the levels back to the LOD. */
+  window.__LAB.lodView = (level) => {
+    const lods = [];
+    scene.traverse((o) => { if (o.isLOD && o.levels.length > 1 && o.visible !== false) lods.push(o); });
+    for (const l of lods) { l.autoUpdate = level == null; if (level != null) l.levels.forEach((v, i) => { v.object.visible = i === level; }); }
+    const lod = lods[0];
+    if (level == null || !lod) return;
+    const c = new THREE.Box3().setFromObject(lod.levels[0].object).getCenter(new THREE.Vector3());
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    camera.position.copy(c).addScaledVector(dir, lod.levels[1].distance + 0.5); controls.target.copy(c); controls.update();
+  };
   controls.maxPolarAngle = Math.PI * 0.49;
   const sun = new THREE.DirectionalLight(SUN.color, SUN.intensity);
   sun.castShadow = true;
@@ -592,5 +650,5 @@ export async function startLab() {
     renderLive(dt);
   });
   await show(BUILDINGS[first] ? first : visible()[0] ?? keys[0]);
-  return { renderer, scene, camera, controls, show, setView, setLight, get current() { return cur; } };
+  return { renderer, scene, camera, controls, show, setView, setLight, lodDiff: window.__LAB.lodDiff, lodView: window.__LAB.lodView, get current() { return cur; } };
 }

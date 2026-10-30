@@ -87,7 +87,8 @@ ones throughout.
      Aurès' two hamlets and its dechra on terraces, the default there). Left: Oued Abdi's and the maquis' villages
      dressed with it. Still old: the **koubba**, the
      **cemetery**, the **village well** (swap to the props kit's), the **ruined hut**, the sheepfold, the oasis props,
-     **telegraph poles**.
+     ~~**telegraph poles**~~ (**done 2026-10-30**: tools/blender/poles.py — the tarred PTT pole, its crossarm, braces and
+     porcelain insulators on the old wires' points; ?poles=old the old one).
    - Fuzzy things with the straw-card technique: the **zeriba thorn fence**, brush piles, thatch.
    - The **helipad** (rework completely).
    - The old Aurès' Roman ruins (procedural, in the game as they are — fine).
@@ -97,9 +98,7 @@ ones throughout.
    - The **construction animation the CoH way** — you were gathering CoH references.
    - Their **GPU cost**, measured in a quiet moment (the laptop cool, nothing else running).
    - Your verdict in the lab on each ("To judge"): the lab's status → "In the game" once you've seen it.
-   - **The infirmary's cloth roof reads FLAT** (you, 2026-10-21): it wants the detail the sandbags have —
-     real cloth relief (seams, sewn patch edges, sagging folds, weave in the normal map, wear and dirt
-     where it rests on the beams). Next session.
+   - ~~**The infirmary's cloth roof reads FLAT**~~ — **done 2026-10-21** (caad80fb: cloth that reads as cloth).
 3. **Icons:** ~~the doctrine panel, the resource bar, the FLN abilities on French kit, the squads' weapon badges, the chevrons and alerts~~ — **done 2026-10-22**: every HUD picture now comes from the rendered atlas (82 tiles). Possible later: Legion / para props for the French abilities still sharing the kepi and helmet (képi blanc, green and red berets, a crate under a parachute).
 4. **Housekeeping:** the unused scanned stones in assets-src/scans (delete or keep — your call).
 

@@ -514,7 +514,7 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
                 K.drop_cutters()
-        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.0005 if surfaces else 0.002))
+        K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.0005 if surfaces else 0.002), pairs=list(zip(objs, fars)) if fars else None, thin=set(spec.get("thin", ())), thin_px=spec.get("thinPx", 12), shared=set(spec.get("shared", ())), boost=spec.get("boost"))
         dec = K.stencils(decals, f"{prefix}{tname.capitalize()}", REFS)   # (near level only: at the far's 60 m+ a word is a pixel)
         if dec: stencilled = True
         for i, o in enumerate(objs):

@@ -29,7 +29,7 @@ import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { buildFarmstead } from "../../v3/render/objects/rtsAlgVillage.js";
-import { buildSasPost } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -485,6 +485,10 @@ export const barbedWireGeometry = () => pieceGeometry("barbedwire", "barbed");
 export const loadSangar = () => loadBlenderPiece("sangar", "sangar", () => buildSangar(), seatSangarGun);
 /** THE FLN'S MARKS (tools/blender/flnMarks.py, 2026-10-25 — you: "very cheap … make way better"): the lookout on its spur,
  *  the mine's cairn — the old pieces' footprints and cover kept, the Blender model drawn. */
+/** THE TELEGRAPH POLE (tools/blender/poles.py, 2026-10-30 — you: "if you think you could do them better in blender then go
+ *  ahead"): the old piece's wire anchors (its insulators' tops — the Blender one's on the same points), the model drawn. */
+export const loadPoles = () => loadBlenderPiece("poles", "pole", () => buildTelegraphPole(), null, { stone: false });
+export const poleGeometry = () => pieceGeometry("poles", "pole");
 export const loadLookout = () => loadBlenderPiece("flnmarks", "lookout", () => buildLookout());
 export const lookoutGeometry = () => pieceGeometry("flnmarks", "lookout");
 export const loadMineMarker = () => loadBlenderPiece("flnmarks", "minemark", () => buildMineMarker());
