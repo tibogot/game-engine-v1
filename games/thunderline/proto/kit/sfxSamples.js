@@ -12,13 +12,15 @@ const BASE = "/sounds/thunderline/sfx-candidates/";
 // GRAIN BANKS (user, 2026-10-30: "the drift sound is repeating badly"): a 1.5 s loop of one screech repeats every
 // 1.5 s, and the ear hears it. A bank is the loud cores of several squeals side by side (scratchpad grainBank.py);
 // the player lays overlapping 0.25–0.5 s grains of them, each from a random place, crossfaded — nothing repeats.
-//   ga: the long screech (B's source, BigSoundBank #2371), 3 cores. (A bank of #0500's 17 short squeals was rejected:
-//   "completely unusable", user 2026-10-30.)
+//   ga: the long screech (B's source, BigSoundBank #2371) — its STEADY core only, 4.75–6.15 s, ~1.1 kHz: with the two
+//   cores of its start (~1.3 kHz) in the bank too the grains jumped pitch every half second ("sounds weird … maybe
+//   it's the way you use it", user 2026-10-30). (#0500's short squeals were rejected: "completely unusable"; a real Chrysler squeal and a hot-water bottle
+//   (Freesound CC0) lost to it by ear.)
 export const GRAINS = {
-  squeal_grains_a: { segs: [[0, 0.65], [0.65, 1.15], [1.15, 2.95]], rate: 1 },
+  squeal_core_a: { segs: [[0, 1.4]], rate: 1 },
 };
 export const SAMPLE_SETS = {
-  squeal: { b: "squeal_b", ga: "squeal_grains_a" },
+  squeal: { b: "squeal_b", ga: "squeal_core_a" },
   roll: { a: "roll_a", b: "roll_b" },
   wind: { a: "wind_a", b: "wind_b", c: "wind_c" },
   scrape: {},
@@ -89,7 +91,10 @@ export function createSfxSamples(getCtx, { volume = 0.7, pick = {} } = {}) {
       let k = Math.floor(Math.random() * G.segs.length);
       if (k === L.last && G.segs.length > 1) k = (k + 1) % G.segs.length;
       L.last = k;
-      const [a, b] = G.segs[k], r = rate * G.rate;
+      // (a slow wander of the pitch, ±2.5 %, a step of ≤ 0.3 % a grain: the ear hears a living screech, not a loop —
+      // too small a step between two grains to beat in their crossfade)
+      L.wander = Math.max(-0.025, Math.min(0.025, (L.wander ?? 0) + (Math.random() - 0.5) * 0.006));
+      const [a, b] = G.segs[k], r = rate * G.rate * (1 + L.wander);
       const d = Math.min(0.35 + 0.35 * Math.random(), (b - a) / r * 0.95), x = Math.min(0.04, d * 0.2); // seconds of output
       const off = a + Math.random() * Math.max(0, (b - a) - d * r);
       const src = ctx.createBufferSource(), env = ctx.createGain();
@@ -126,8 +131,11 @@ export function createSfxSamples(getCtx, { volume = 0.7, pick = {} } = {}) {
       }
       if (L.squeal) {
         // sliding sideways, or the brakes held hard at speed (as sfx.js's squeal, which this replaces)
-        const sq = Math.max(slide, car.braking && car.kmh > 40 ? 0.55 : 0);
-        ramp(L.squeal.gain.gain, g ? sq * 0.6 : 0, 0.04);
+        // (BY THE SLIDE'S ANGLE when the car gives it — 6° → 25°, × the speed to 40 km/h: the sideways m/s screeched
+        // through every fast grip corner; a hard corner now whispers, a drift screams. Rising in ~0.06 s, dying in ~0.15.)
+        const ang = car.slideDeg != null ? Math.max(0, Math.min(1, (car.slideDeg - 6) / 19)) * Math.min(1, car.kmh / 40) : slide;
+        const sq = Math.max(ang * ang * (3 - 2 * ang), car.braking && car.kmh > 40 ? 0.45 : 0), cur = L.squeal.gain.gain.value;
+        ramp(L.squeal.gain.gain, g ? sq * 0.6 : 0, (g ? sq * 0.6 : 0) > cur ? 0.06 : 0.15);
         if (L.squeal.grain) { if (g && sq > 0) grains(L.squeal, 0.92 + 0.16 * sq); } // (a slide stopping for an instant: the grains go on from where they were — a fresh one over the last was heard twice)
         else ramp(L.squeal.src.playbackRate, 0.92 + 0.16 * sq, 0.05);
       }

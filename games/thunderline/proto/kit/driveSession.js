@@ -471,7 +471,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     wasBoosting = boosting;
     // scrape: how fast the car slides along a rail, 3 → 30 m/s as 0 → 1 (the sparks' own scale, sparks.js)
     const scrape = vehicle.enabled && vehicle.scraping ? Math.max(0, Math.min(1, (vehicle.scrapeSpeed - 3) / 27)) : 0;
-    const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: ((input.throttle ?? 0) < 0 && !reversing) || !!input.handbrake, boosting, scrape }; // (reversing is not braking: no brake squeal)
+    const car = { kmh, slip: vehicle.body.vel.dot(_side), slideDeg: vehicle.arcade?.slideDeg, grounded: vehicle.groundedCount > 0, braking: ((input.throttle ?? 0) < 0 && !reversing) || !!input.handbrake, boosting, scrape }; // (reversing is not braking: no brake squeal)
     sfx.update(dt, car);
     sfxRec.update(dt, car);
     // the arcade car's CRASHES and body knocks (arcadeCar.js marks them; heard once, then cleared)
