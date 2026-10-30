@@ -47,7 +47,8 @@ export function createAutopilot(ride) {
     const n = ride[i + 1];
     if (!n) return false;
     const d = n.P.distanceTo(r.P);
-    return d > 8 && n.P.clone().sub(r.P).divideScalar(d).dot(r.T) < 0.98;
+    // (…or two pieces apart: a road ended and the next begins 40 m on, straight ahead — no turn to see, still a gap)
+    return (d > 8 && n.P.clone().sub(r.P).divideScalar(d).dot(r.T) < 0.98) || (r.piece !== undefined && n.piece !== undefined && r.piece !== n.piece && d > 2);
   });
   // never aim across a gap: steering at the far side while still on the wall carves the car off the face
   const aim = (from, dist) => {

@@ -1044,7 +1044,9 @@ async function runPrediction() {
     lastTakeoff = { uid, label, tick, idx, up: up.clone(), pos: car.body.pos.clone(), vel: car.body.vel.clone(), quat: car.body.quat.clone(), angVel: car.body.angVel.clone(), air: null };
     takeoffs.set(uid, lastTakeoff);
   };
-  const endsOnLip = lips.has(lastUid) || padZones.some((z) => z.host === lastUid);
+  // (a LEVEL end with nothing landed off it is just where the road stops so far — the lap still ends there)
+  const openLevel = new Set(arcs.filter((a) => a.level && a.landing == null).map((a) => a.from));
+  const endsOnLip = (lips.has(lastUid) && !openLevel.has(lastUid)) || padZones.some((z) => z.host === lastUid);
   prediction.openJump = false;
   let idx = 0, slow = 0, wasGrounded = true, flying = null, airT = 0, sliceT0 = performance.now();
   const nose = new THREE.Vector3();
@@ -1349,6 +1351,7 @@ function openEnds() {
 // ---------- flight arcs: the car's air model (gravity + drag), a SPEED BAND per lip ----------
 const arcGroup = new THREE.Group();
 scene.add(arcGroup);
+const LEVEL_ARC_SKIP = 15; // m: a level end's arc doesn't snap this near its lip (the road goes on there)
 let arcs = []; // { pts, tan, from, landing } — the SLOW edge of the band (landings fit there, P3)
 let roadCache = null; // cutAtRoad: the road's points, kept per refreshArcs
 /** From the lip socket `m` at `speed` along it — or from a MEASURED take-off ({P, V}, the real car's)
@@ -1403,8 +1406,11 @@ function refreshArcs() {
     if (roadChild.has(p.uid) || isRing(p)) continue;
     const m = built.get(p.uid).exit;
     const dir = new THREE.Vector3(0, 0, -1).transformDirection(m);
-    // level ends are not lips — except a DROP piece, whose whole point is the fall
-    if (Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG && !TILES[p.id]?.drop) continue;
+    // A LEVEL END is a lip too (user, 2026-10-30: "make the builder show the flight arc from a flat road end" — Apex
+    // Rush's gaps: a road stops, the next one starts further on): its arc shows where the car comes down, and a road
+    // laid on it is the landing. (Its first LEVEL_ARC_SKIP m don't snap: there the next piece continues the road.)
+    const level = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG && !TILES[p.id]?.drop;
+    if (level && (TILES[p.id]?.finish || TILES[p.id]?.closed)) continue; // (a Finish, a wedge's point: nothing flies on)
     const landing = track.pieces.find((q) => q.flightFrom === p.uid && !isRing(q))?.uid ?? null;
     // the REAL car's take-off speed at this lip (background prediction), else the global guess
     // where and how the REAL car left this lip (background prediction): a flip ramp's curl lets the
@@ -1421,7 +1427,9 @@ function refreshArcs() {
     const human = vH != null && vH < v * 0.995 ? fly(vH / v) : null;
     // the car's UP as it leaves (the roll kicker throws it tilted): measured, else the lip's leaned deck
     const up = launch?.U ?? surfaceUp(m, leanOut(TILES[p.id])), fwd = launch?.F ?? new THREE.Vector3(0, 0, -1).transformDirection(m);
-    arcs.push({ ...slow, fast, near, human, vH, from: p.uid, landing, lip: { m, launch, v }, up, fwd, fly }); // fly: any speed in the band (catch tube, reach)
+    const k15 = fast.pts.findIndex((q) => q.distanceTo(fast.pts[0]) >= LEVEL_ARC_SKIP);
+    const kMin = level ? (k15 < 0 ? fast.pts.length : Math.max(3, k15)) : 3;
+    arcs.push({ ...slow, fast, near, human, vH, from: p.uid, landing, lip: { m, launch, v }, up, fwd, fly, level, kMin }); // fly: any speed in the band (catch tube, reach)
   }
   // JUMP PADS (2026-10-21): a take-off like a lip — the car's speed along the road carries on, its speed
   // along the pad's up is the pad's (carRules JUMP: raised to it, so it does NOT scale with the band).
@@ -1861,7 +1869,7 @@ function decalSnap(pc, b, t, M, s0, raw, kind) {
 }
 function ringSnap() {
   let best = null;
-  for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
+  for (const a of arcs) for (let k = a.kMin ?? 3; k < a.fast.pts.length; k++) {
     const s = toScreen(a.fast.pts[k]);
     if (!s) continue;
     const d = Math.hypot(s.x - mouse.x, s.y - mouse.y);
@@ -1880,7 +1888,7 @@ function ringSnap() {
  */
 function wallHoleSnap() {
   let best = null;
-  for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
+  for (const a of arcs) for (let k = a.kMin ?? 3; k < a.fast.pts.length; k++) {
     const sp = toScreen(a.fast.pts[k]);
     if (!sp) continue;
     const d = Math.hypot(sp.x - mouse.x, sp.y - mouse.y);
@@ -2021,7 +2029,7 @@ function computeSnap() {
   const landingInHand = !!t?.landAngle || tileBase === FITTED || tileBase === CATCH;
   if (freeHold && !landingInHand && tileBase !== STAMP) return gridSnap(t); // Alt: exactly where you point
   const onArc = landingInHand && arcs.some((a) => a.fast.pts.some((p, k) => {
-    if (k < 3 || a.fast.tan[k].y > -0.02) return false;
+    if (k < (a.kMin ?? 3) || a.fast.tan[k].y > -0.02) return false;
     const s = toScreen(p);
     return s && Math.hypot(s.x - mouse.x, s.y - mouse.y) < 30;
   }));
@@ -2123,7 +2131,7 @@ function computeSnap() {
   // A RAMP in hand (its own end points up: a kicker, a launch) also goes on the RISING half (user,
   // 2026-10-23: "place pieces all along the arc") — it meets the car still climbing: ramp to ramp
   const rampInHand = !!t && new THREE.Vector3(0, 0, -1).transformDirection(piece(id).exitLocal).y > Math.sin(3 * DEG) && !t.landAngle;
-  for (const a of arcs) for (let k = 3; k < a.fast.pts.length; k++) {
+  for (const a of arcs) for (let k = a.kMin ?? 3; k < a.fast.pts.length; k++) {
     const rising = a.fast.tan[k].y > 0.03;
     if (a.fast.tan[k].y > -0.02 && !(rising && rampInHand)) continue; // the falling part (a ramp: the rising one too)
     const s = toScreen(a.fast.pts[k]);

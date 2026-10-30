@@ -81,6 +81,7 @@ export const ARCADE = {
   // `anticipate` m: on the wheels, the pull grows as the road 0.15 s ahead falls this far under the car's path;
   // `minSpeed` m/s: below it, nothing (a crawl over a crest is not a flight)
   glue: { g: 3.5, time: 0.8, damp: 10, launch: 7.5, anticipate: 0.6, minSpeed: 15 },
+  ledge: { reach: 1.6, time: 0.35, rest: 0.0 }, // the ledge catch across a gap: m below, s ahead; rest: the car's middle over the road line when on it
   land: { hold: 0.5, minAir: 0.35, roll: 0.35, rollRate: 12, spin: 0.25, maxDeg: 45 },
   // A CRASH (_crashSolve): from `speed` m/s into a solid (a scrape along a rail stays under it: the corkscrew's press
   // peaked at 14.2), the hit bounces back `restitution` of it and may spin the car up to `maxSpin` rad/s
@@ -283,7 +284,7 @@ export class ArcadeCar extends StuntCar {
         const along = _rel.subVectors(body.pos, tr.P).dot(tr.U), across = Math.sqrt(Math.max(0, _rel.lengthSq() - along * along));
         // (across: within THAT road's width, + a margin — "26 m" for every road made a car on the floor BESIDE a kicker
         // take the ramp's slope as its ground and tip up 14°: user, 2026-10-29, "it climbs something invisible")
-        roadNear = along > -1.5 && along < ARCADE.road.reach + 1 && across < (tr.hw ?? 12) + ARCADE.road.edge;
+        roadNear = !tr.start && along > -1.5 && along < ARCADE.road.reach + 1 && across < (tr.hw ?? 12) + ARCADE.road.edge; // (not short of a landing across a gap)
       } else _roadUp.set(0, 1, 0);
       const onRoad = down > 0 || (this._sinceWheels < ARCADE.road.coyote && roadNear);
       // THE SURFACE IT IS ON: on a road, the road's own up at the car's middle (when the wheels roughly agree — not on
@@ -311,6 +312,20 @@ export class ArcadeCar extends StuntCar {
         const deckV = _tmp.copy(tr.T).multiplyScalar(twist).cross(_rel.subVectors(body.pos, tr.P)).dot(_roadUp);
         const away = body.vel.dot(_roadUp) - deckV;
         if (away > 0) body.vel.addScaledVector(_roadUp, -away);
+      }
+
+      // ---- THE LEDGE CATCH (user, 2026-10-30, a road, a GAP, the next road at the same height — Apex Rush does it a lot):
+      // a 20 m gap at 180 km/h drops the car 0.8 m, onto the front face of the next road's slab — pushed into it, the
+      // car drove on UNDER the deck. Short of the start of a road across a gap, within `time` s of it and up to `reach`
+      // m below its driving height, the car is lifted to arrive AT that height (gravity included) — a step up, as arcade
+      // racers forgive it. Further below, it meets the wall.
+      const Lc = ARCADE.ledge;
+      if (!down && tr?.start && Lc.reach > 0) {
+        const rel = _rel.subVectors(body.pos, tr.P), short = -rel.dot(tr.T), h = rel.dot(tr.U) - Lc.rest, vT = body.vel.dot(tr.T);
+        if (vT > 5 && short > 0 && h < 0 && h > -Lc.reach && short / vT < Lc.time) {
+          const t = Math.max(short / vT, 0.05), need = -h / t + 0.5 * G * t, vU = body.vel.dot(tr.U);
+          if (need > vU) body.vel.addScaledVector(tr.U, need - vU);
+        }
       }
 
       // ---- gravity: the world's, or on a stunt surface — tilted past wall.from, or a road-hold piece — the road's up
@@ -430,7 +445,7 @@ export class ArcadeCar extends StuntCar {
   _roadAhead(body) {
     const ahead = _rel.copy(body.pos).addScaledVector(body.vel, 0.15);
     const tr = this.trackAt?.(ahead);
-    if (!tr || tr.end) { this._aheadAbove = 0; this.trackAt(body.pos); return false; }
+    if (!tr || tr.end || tr.start) { this._aheadAbove = 0; this.trackAt(body.pos); return false; } // (start: short of a landing across a gap)
     // (the road GOES ON there: a crest's road falls away under the car — "too far above it" called that a lip, and
     // at 200 km/h the slope-down piece threw the car 120 m: user's Tilted landing test, 2026-10-29. Only how far
     // ABOVE the road counts as a flight: past a few metres the car really has left it)

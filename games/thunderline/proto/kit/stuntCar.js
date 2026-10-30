@@ -142,6 +142,8 @@ export function trackFromRide(ride) {
   // the T from its neighbours then read the middle of the turn behind, the frame tipped 1.2° within 0.4 m and the car was
   // jolted at every bank out — user, 2026-10-30, "it's shifting the car in one short instant". Under 1 m across a join,
   // the next piece's point goes.)
+  // (the gaps: a piece starting > 2 m from where the one before it ended — marked before the joins are thinned below)
+  ride.forEach((r, i) => { const q = ride[i - 1]; if (q && r.piece !== undefined && r.piece !== q.piece && !q.air && !r.air && q.P.distanceToSquared(r.P) > 4) r._gapBefore = true; });
   const src = ride.filter((r) => !r.air && r.U).filter((r, i, all) => {
     if (i === 0) return true;
     const d2 = all[i - 1].P.distanceToSquared(r.P);
@@ -188,13 +190,21 @@ export function trackFromRide(ride) {
     // past the END of a stretch of road (a lip: no road segment on from here, the car beyond it along the road)
     const next = pts[best + 1];
     const end = (!next || !isRoad(r, next, _v.subVectors(next.P, r.P), _v.lengthSq())) && _f.subVectors(pos, r.P).dot(r.T) > 0.5;
-    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd), end, hw: r.hw ?? 12, id: r.id }; // id: the piece; hw: the road's half width there
+    // …and BEFORE THE START of one (the landing across a gap, the car still short of it): not over its deck — read as
+    // "near the road", the glue pulled a car 13 m short of the landing down at 3.5 g and it hit the deck's front edge
+    const prev = pts[best - 1];
+    const start = (!prev || !isRoad(prev, r, _v.subVectors(r.P, prev.P), _v.lengthSq())) && _f.subVectors(pos, r.P).dot(r.T) < -0.5;
+    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd), end, start, hw: r.hw ?? 12, id: r.id }; // id: the piece; hw: the road's half width there
   };
 }
 // Two ride points are joined by ROAD when the chord between them runs along both their directions (within ~15°) —
 // not a jump's flight (a lip to its landing: the ride's next point, but no road between)
 const COS15 = Math.cos(15 * Math.PI / 180);
+// (A GAP between two pieces is never road, however straight: a road ended, a gap, the next road 40 m on and 4 m lower read
+// as one gentle slope — the glue pulled the car down onto it, the nose followed it, the car fell under the landing,
+// user 2026-10-30 "instead of landing on it, it's putting its nose very down". Pieces that join sit within centimetres.)
 function isRoad(a, c, seg, L2) {
+  if (c._gapBefore) return false; // (marked by trackFromRide on the ride as built, before its joins are thinned)
   const L = Math.sqrt(L2);
   return seg.dot(a.T) / L > COS15 && seg.dot(c.T) / L > COS15;
 }
