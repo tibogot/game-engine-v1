@@ -28,9 +28,12 @@ export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 // (+ the DECHRA's pieces, 2026-10-27 — DECHRA_PLAN.md: its mosque, a terrace's retaining wall, the lanes' steps, the djemaa)
 export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna", "masjid", "soutien", "escalier", "djemaa",
   "pc", "casemate", "grotte", "foyer",   // (+ the FLN CAMP's, 2026-10-27 — FLN_CAMP_PLAN.md: the command post, the refuge, the cave's mouth, the hidden fire)
-  "koubba", "hawsh", "tombe", "tombeb", "tombec", "murette"];   // (+ 2026-10-29: the marabout's tomb, a grave (earth / whitewashed), a low broken wall)
+  "koubba", "hawsh", "tombe", "tombeb", "tombec", "murette",   // (+ 2026-10-29: the marabout's tomb, a grave (earth / whitewashed), a low broken wall)
+  "bergerie", "aire"];   // (+ 2026-10-30, FARM_PLAN.md: the sheepfold and its zriba, the threshing floor)
 /** THE KOUBBA'S ENCLOSURE (tools/blender/mechta.py KB_HAWSH — change both together): its outline, the gateway between
  *  the first and last points. */
+/** THE SHEEPFOLD'S PEN, its two lengths either side of the gateway (mechta.py BG_PEN — change both together). */
+const BG_PEN = [[[-3.75, 0.9], [-5.0, -1.2], [-4.6, -3.6], [-2.6, -5.0], [-0.75, -5.3]], [[0.75, -5.3], [2.7, -5.0], [4.7, -3.4], [5.1, -1.0], [3.75, 0.9]]];
 const KB_HAWSH = [[1.45, -5.58], [4.9, -5.1], [5.9, -1.2], [5.5, 3.6], [2.2, 5.8], [-2.6, 5.5], [-5.6, 2.9], [-5.9, -1.9], [-4.6, -5.3], [-1.45, -5.58]];
 /** A wall along a polyline as the props' axis-aligned blocks: each length cut in pieces ≤ 1.8 m, each piece's box along
  *  its main direction, 0.7 m thick (long enough for a cover point each — algGame's props' cover). */
@@ -61,6 +64,9 @@ export const MECHTA_PROPS = {
   koubba: [[-2.65, 2.65, -2.65, 2.65], [-1.32, -0.68, -5.95, -5.3], [0.68, 1.32, -5.95, -5.3]],
   hawsh: wallRects(KB_HAWSH),
   murette: [[-2.0, 2.0, -0.25, 0.25]],
+  // the sheepfold: its shelter's back and sides (its front open: the flock's way in), the zriba's two lengths (the gateway
+  // between them: its hurdle a door for men); the threshing floor walked over, no cover
+  bergerie: [[-4.0, 4.0, 3.9, 4.4], [-4.0, -3.5, 0.95, 3.95], [3.5, 4.0, 0.95, 3.95], ...BG_PEN.flatMap((p) => wallRects(p))],
   // (the graves, tombe / tombeb: walked over, no cover — none here)
 };
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)

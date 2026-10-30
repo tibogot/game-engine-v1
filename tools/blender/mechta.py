@@ -763,7 +763,10 @@ def stoneWallPath(K, R, pts, h, th, state, gap=None):
         at = lambda s, o: (ax + dx * s + nx * o, az + dz * s + nz * o)
         # the core: rubble between the faces, below the capstones (never seen through a joint)
         e = i * 0.012   # (each length's top and foot their own height: where two meet at a corner, never one face)
-        K.member(f"Core{i}", (ax, 0.0, az), (bx, 0.0, bz), [(-th * 0.32, -0.5 - e), (th * 0.32, -0.5 - e), (th * 0.26, top - 0.12 - e), (-th * 0.26, top - 0.12 - e)], "rubble", G)
+        core = K.member(f"Core{i}", (ax, 0.0, az), (bx, 0.0, bz), [(-th * 0.32, -0.5 - e), (th * 0.32, -0.5 - e), (th * 0.26, top - 0.12 - e), (-th * 0.26, top - 0.12 - e)], "rubble", G)
+        if gap and min(math.hypot(ax + dx * s - gap[0], az + dz * s - gap[1]) for s in (0, L / 2, L)) < gap[2] + L / 2:
+            # (the breach through the core too: left whole, its flat face stood in the hole — the sheepfold in the lab)
+            K.boolean(core, K.cutter(gap[0] - gap[2] * 0.9, gap[0] + gap[2] * 0.9, 0.08, top + 1, gap[1] - gap[2] * 0.9, gap[1] + gap[2] * 0.9, "rubble"))
         y, course = -0.05, 0
         while y < top - 0.1:
             ch = R.uniform(0.17, 0.3); t = th * (1 - 0.2 * y / h)
@@ -788,6 +791,18 @@ def stoneWallPath(K, R, pts, h, th, state, gap=None):
                 if not (gap and math.hypot(x - gap[0], z - gap[1]) < gap[2]):
                     wallStone(K, f"Cap{k}", (x, top + 0.03, z), (w / 2, R.uniform(0.06, 0.09), th * 0.42), R, yaw)
                 k += 1; s += w + 0.02
+    # THE CORNERS: a stack of stones at each bend (each length's stones stop inside it: the core's end showed at the
+    # outer corner). Their own draws: the walls already judged keep their stones.
+    Rc = random.Random(len(pts) * 131 + int(h * 100))
+    for i in range(1, len(pts) - 1):
+        (px, pz), (ax, az), (bx, bz) = pts[i], pts[i - 1], pts[i + 1]
+        yaw = (math.atan2(-(pz - az), px - ax) + math.atan2(-(bz - pz), bx - px)) / 2
+        y = -0.05
+        while y < top - 0.12:
+            ch = Rc.uniform(0.17, 0.26)
+            if not (gap and math.hypot(px - gap[0], pz - gap[1]) < gap[2] and y > 0.05) and not (ruin and Rc.random() < 0.15 + 0.5 * (y / top)):
+                wallStone(K, f"Q{i}_{int(y * 100)}", (px + Rc.uniform(-0.03, 0.03), y + ch / 2, pz + Rc.uniform(-0.03, 0.03)), (th * 0.5, ch * 0.66, th * 0.5), Rc, yaw + Rc.uniform(-0.3, 0.3))
+            y += ch * 0.9
     # the fallen: a heap out of the breach; a ruin's stones scattered both sides
     for i in range(10 if gap else 18 if ruin else 0):
         if gap: px, pz = gap[0] + R.uniform(-1.1, -0.3), gap[1] + R.uniform(-0.9, 0.9)
@@ -867,7 +882,162 @@ def buildLowWall(K, name, spec, state, seed):
     first, a prism with a stone photo, read as a plank): breached when damaged, its top half fallen as a ruin."""
     stoneWallPath(K, random.Random(seed), [(-2.0, 0.0), (2.0, 0.0)], 0.78, 0.5, state, gap=(0.5, 0.0, 0.6) if state != "intact" else None)
 
-MATDEF.update({"graveEarth": (1.0, lambda nb: dust(nb, nb.mix(nb.noise(6.0, 5), srgb(0x4a3a2b), srgb(0x5e4a37)), 0.5, 0.12))})   # (dust light: the bed is all "foot" — at 0.4 it baked pale)
+# ── THE FARM'S PIECES (2026-10-30, FARM_PLAN.md — new, from the Aurès: the sheepfold and the threshing floor) ──────────
+# The Aurès house keeps its flock on its ground floor (the zerdab); out on the slopes the shepherds' fold is a ZRIBA — a
+# round of stacked stone topped with thorn branches — against a low stone shelter roofed with beams, brush and earth.
+def earthCap(K, nm, x0, x1, z0, z1, yfn, R, mat="roofEarth", th=0.14):
+    """A roof's skin of PACKED EARTH: a grid over x0..x1 / z0..z1 at yfn(z), its top lumpy, its edge ragged and slumped
+    (the first, a ruled slab, read as a tabletop in the lab), a skirt down `th` to its underside."""
+    from mathutils import noise as mn, Vector
+    gv = lambda *p: Vector(p)
+    bm = bmesh.new(); nx, nz = 26, 12; off = R.uniform(0, 100)
+    def at(i, j, dy):
+        u, v = i / nx, j / nz; edge = i in (0, nx) or j in (0, nz)
+        x, z = x0 + (x1 - x0) * u, z0 + (z1 - z0) * v
+        if edge:   # (the ragged outline: pushed in and out along its normal)
+            j2 = 0.07 * mn.noise(gv(x * 1.3 + off, z * 1.3, 0.5))
+            x += j2 if i == nx else -j2 if i == 0 else 0; z += j2 if j == nz else -j2 if j == 0 else 0
+        bump = 0.045 * mn.noise(gv(x * 0.9 + off, z * 0.9, 0.0)) + 0.02 * mn.noise(gv(x * 3.1, z * 3.1 + off, 1.0))
+        d = min(min(u, 1 - u) * (x1 - x0), min(v, 1 - v) * (z1 - z0))   # (to the nearest edge)
+        slump = -0.07 * max(0.0, 1 - d / 0.35)   # (its edge rolled down)
+        return bm.verts.new(B(x, yfn(z) + bump + slump + dy, z))
+    top = [[at(i, j, 0.0) for j in range(nz + 1)] for i in range(nx + 1)]
+    bot = [[at(i, j, -th) if i in (0, nx) or j in (0, nz) else None for j in range(nz + 1)] for i in range(nx + 1)]
+    for i in range(nx):
+        for j in range(nz): bm.faces.new((top[i][j], top[i + 1][j], top[i + 1][j + 1], top[i][j + 1]))
+    ring = [(i, 0) for i in range(nx)] + [(nx, j) for j in range(nz)] + [(i, nz) for i in range(nx, 0, -1)] + [(0, j) for j in range(nz, 0, -1)]
+    for k, (i, j) in enumerate(ring):
+        a, b = ring[k], ring[(k + 1) % len(ring)]
+        bm.faces.new((top[a[0]][a[1]], bot[a[0]][a[1]], bot[b[0]][b[1]], top[b[0]][b[1]]))
+    bm.faces.new([bot[i][j] for i, j in reversed(ring)])
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return K.obj(nm, bm, mat, "h")
+
+def roofEarth(nb):
+    """A shelter's roof of packed earth: dark brown, straw in it, paler where it dried, grass-grey crust in patches."""
+    c = nb.mix(nb.noise(1.6, 5), srgb(0x5f4a36), srgb(0x7a6148))
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(14.0, 3, 0.6, stretch=(1, 1, 0.2)), 0.6, 0.72), 0.6), c, srgb(0xa58b5c))   # (straw)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(3.5, 4), 0.58, 0.7), 0.5), c, srgb(0x8c8470))
+    return dust(nb, c, 0.3, 0.2)
+MATDEF.update({"roofEarth": (1.0, roofEarth)})
+
+BG_PEN = ([(-3.75, 0.9), (-5.0, -1.2), (-4.6, -3.6), (-2.6, -5.0), (-0.75, -5.3)],
+          [(0.75, -5.3), (2.7, -5.0), (4.7, -3.4), (5.1, -1.0), (3.75, 0.9)])   # (algHouse BG_PEN: change both together)
+def buildBergerie(K, name, spec, state, seed):
+    """THE SHEEPFOLD: a long low SHELTER of dry stone at the back (its front open on three rough posts and a beam, the roof
+    poles, brush and a skin of packed earth on top, stones to hold it, hay on it), and in front the ZRIBA — its pen, a
+    dry-stone wall stone by stone on a round outline, thorn branches along its top, a gateway closed by a woven HURDLE;
+    a stone trough, the dung heap, hay. Front -Z. Damaged: the roof's middle fallen in, the pen breached, the hurdle down;
+    ruin: the shelter's walls' stumps, its beams burnt on the floor, the pen's top fallen."""
+    R = random.Random(seed); G = "h"
+    dmg, ruin = state != "intact", state == "ruin"
+    hb, hf, zf, zb = 2.2, 1.78, 0.82, 4.45     # the roof's back and front heights, its front and back
+    walls = [wallRun(K, "BgBack", -4.0, 4.0, 3.9, 4.4, hb - 0.03, seed),
+             wallRun(K, "BgSideL", -4.0, -3.5, 0.95, 3.95, 1.9, seed + 1), wallRun(K, "BgSideR", 3.5, 4.0, 0.95, 3.95, 1.86, seed + 2)]
+    K.box("BgFloor", -3.48, 3.48, 0.0, 0.03, 0.95, 3.88, "dung", G, 0)
+    if not ruin:
+        for k, x in enumerate((-2.2, 0.05, 2.25)):
+            K.rod(f"BgPost{k}", (x, 0.0, zf), (x + R.uniform(-0.04, 0.04), hf - 0.02, zf), 0.085, "timberCourse", G, 7)
+        K.rod("BgBeam", (-4.05, hf - 0.06, zf), (4.05, hf - 0.04, zf), 0.09, "timberCourse", G, 7)
+        rise = lambda z: hf + 0.05 + (hb - hf) * (z - zf + 0.15) / (zb - zf + 0.15)
+        for k in range(18):
+            x = -3.9 + k * 7.8 / 17 + R.uniform(-0.04, 0.04)
+            if dmg and 7 <= k <= 11:   # (fallen in across the floor)
+                K.rod(f"BgFallen{k}", (x + R.uniform(-0.3, 0.3), 0.08, 1.2), (x + R.uniform(-0.5, 0.5), 0.4 + R.uniform(0, 0.8), 3.6), 0.06, "woodDark", G, 6)
+                continue
+            K.rod(f"BgPole{k}", (x, hf + 0.03, zf - 0.22), (x + R.uniform(-0.06, 0.06), hb + 0.04, zb + 0.08), 0.06, "woodDark", G, 6)
+        # the brush over the poles, its fringe hanging at the front; the packed earth over it, shorter (the fringe seen)
+        th = K.member("BgThatch", (0.0, hf + 0.07, zf - 0.3), (0.0, hb + 0.07, zb + 0.1), [(-4.12, -0.03), (4.12, -0.03), (4.12, 0.05), (-4.12, 0.05)], "hay", G)
+        mud = earthCap(K, "BgEarth", -4.06, 4.06, zf - 0.1, zb + 0.02, lambda z: rise(z) + 0.15, R)
+        if dmg:
+            # (each its own hole, the earth's wider — one breach through both made their cut walls one face, the gate)
+            K.boolean(th, K.breach((0.1, (hf + hb) / 2 + 0.1, 2.4), (1.2, 0.6, 1.1), seed=seed + 9, mat="hay"))
+            K.boolean(mud, K.breach((0.15, (hf + hb) / 2 + 0.15, 2.4), (1.65, 0.6, 1.5), seed=seed + 10, mat="roofEarth"))
+        for k in range(9):   # stones to hold the earth down in the wind
+            x, z = R.uniform(-3.6, 3.6), R.uniform(zf + 0.3, zb - 0.3)
+            if dmg and abs(x) < 1.9 and 1.0 < z < 3.8: continue
+            sz = R.uniform(0.12, 0.2)
+            wallStone(K, f"BgRoofSt{k}", (x, rise(z) + 0.17 + sz * 0.3, z), (sz * 1.2, sz * 0.55, sz), R, R.uniform(0, 6.28))
+        for k in range(2):   # hay stored on the roof
+            K.spots.append((-2.4 + k * 4.4 + R.uniform(-0.3, 0.3), rise(3.2) + 0.22, 3.2, R.uniform(0, 6.28)))
+        K.spots.append((-2.6, 0.03, 2.6, R.uniform(0, 6.28)))   # (and under it)
+    else:
+        for k in range(7):
+            x = R.uniform(-3.2, 3.2)
+            K.rod(f"BgBurnt{k}", (x, 0.07, R.uniform(1.0, 1.8)), (x + R.uniform(-0.9, 0.9), 0.08 + R.uniform(0, 0.4), R.uniform(2.8, 3.8)), 0.06, "fsCharred", G, 6)
+        K.rod("BgStump", (-2.2, 0.0, zf), (-2.17, 0.85, zf + 0.03), 0.085, "fsCharred", G, 7)
+    if dmg:
+        K.boolean(walls[2], K.breach((3.75, 1.2, 2.2), (0.45, 0.55, 0.65), seed=seed, mat="stone"))
+        K.lump("BgFall", (4.55, 0.0, 2.2), (0.55, 0.28, 0.7), "rubble", G, seed=seed + 3)
+    if ruin:
+        top = K.skyline(-5, 5, 0, 5, 0.8, 0.35, seed=seed, mat="stone")
+        for w in walls: K.boolean(w, top)
+    # THE ZRIBA: the pen's wall, the gateway between its two lengths
+    h = 1.12
+    Rp = random.Random(seed + 40)   # (the pen its own draws: the shelter's changes leave its stones as judged)
+    stoneWallPath(K, Rp, BG_PEN[0], h, 0.55, state, gap=(-4.65, -3.0, 0.9) if dmg else None)
+    stoneWallPath(K, Rp, BG_PEN[1], h - 0.04, 0.55, state)
+    if not ruin:   # thorn branches along its top: dead branches, a few cut-brush cards among them (one every 1.25 m, big, read as a hedge in the game)
+        for pts in BG_PEN:
+            for i in range(len(pts) - 1):
+                (ax, az), (bx, bz) = pts[i], pts[i + 1]; L = math.hypot(bx - ax, bz - az)
+                m = max(1, round(L / 0.8))
+                for s in range(m):
+                    f = (s + 0.5) / m; x, z = ax + (bx - ax) * f, az + (bz - az) * f
+                    if dmg and math.hypot(x + 4.65, z + 3.0) < 1.3: continue
+                    if s % 3 == 1: K.spots.append((x, h + 0.02, z, R.uniform(0, 6.28), "Brush", R.uniform(0.38, 0.5)))
+                    for q in range(2):
+                        a = R.uniform(0, 6.28)
+                        K.rod(f"BgThorn{i}_{s}_{q}_{len(K.spots)}", (x, h + 0.04, z), (x + math.cos(a) * 0.6, h + R.uniform(0.1, 0.4), z + math.sin(a) * 0.6), 0.026, "woodDark", G, 5)
+        # the gateway: two stakes and the woven HURDLE across it (damaged: knocked flat in front)
+        for s in (-1, 1): K.rod(f"BgGate{s}", (s * 0.82, -0.1, -5.32), (s * 0.84, 1.35, -5.32), 0.06, "woodDark", G, 6)
+        if dmg:
+            y0, tilt = 0.06, 1.0
+        else:
+            y0, tilt = 0.0, 0.0
+        for k in range(5):   # its rails...
+            y = 0.2 + k * 0.22
+            yy, zz = (y0 + 0.03 + k * 0.01, -5.6 - y) if dmg else (y, -5.38)
+            K.rod(f"BgRail{k}", (-0.78, yy, zz), (0.78, yy + R.uniform(-0.02, 0.02), zz), 0.025, "woodDark", G, 4)
+        for k in range(6):   # ...and its uprights
+            x = -0.65 + k * 0.26
+            a, b = ((x, 0.08, -5.45), (x, 0.08, -6.75)) if dmg else ((x, 0.0, -5.4), (x, 1.15, -5.4))
+            K.rod(f"BgStake{k}", a, b, 0.022, "woodDark", G, 4)
+        # the trough (a hollowed stone), hay in the pen (a dung heap read as a boulder in the lab, twice: none)
+        tr = K.box("BgTrough", 1.4, 2.7, 0.0, 0.38, -2.2, -1.75, "stoneMechta", G, 0.03)
+        K.boolean(tr, K.cutter(1.5, 2.6, 0.12, 0.6, -2.12, -1.83, "dark"))
+        K.spots.append((0.4, 0.0, -2.4, R.uniform(0, 6.28)))
+
+def buildAire(K, name, spec, state, seed):
+    """THE THRESHING FLOOR (the anrar): a round of beaten earth on open ground, ringed with slabs set on edge, the post
+    in its middle the mules were driven round, the straw heaped beside it, the grain in a heap, the threshing board and
+    a wooden fork. Walked over: no cover. One state (its burning would be its hay's)."""
+    R = random.Random(seed); G = "h"; stone = house.drystone.stone; Rr = 3.3
+    # THE FLOOR IS THE GROUND, beaten (no floor of its own: a cream disc read as a cake in the lab, a darker one as a dark
+    # disc on Oued Abdi's pale ground — any one colour is wrong on some map); the chaff over it, below
+    n = 30   # the ring: slabs of every size, sunk unevenly, a few gone (an even ring of pillows read cheap)
+    for k in range(n):
+        if R.random() < 0.08: continue
+        a = (k + R.uniform(-0.2, 0.2)) / n * 6.2832; hh = R.uniform(0.08, 0.24); w = R.uniform(0.2, 0.42); rr = Rr + R.uniform(-0.06, 0.06)
+        stone(K, f"AireRing{k}", (math.cos(a) * rr, hh * 0.35 - 0.1, math.sin(a) * rr), (w, hh, R.uniform(0.05, 0.08)), R, 0.0, "fieldRock", yaw=-a + math.pi / 2 + R.uniform(-0.12, 0.12), box=0.55)
+    K.rod("AirePost", (0.0, -0.1, 0.0), (0.03, 1.55, 0.02), 0.075, "timberCourse", G, 7)
+    # the winnowed grain in a cone (a lump read as a smooth blob)
+    lathe(K, "AireGrain", [(0.0, 0.0), (0.72, 0.0), (0.64, 0.05), (0.38, 0.25), (0.1, 0.38), (0.0, 0.4)], (1.25, -0.85), "grain", n=28)
+    for k in range(3):   # the threshed straw heaped to one side
+        K.spots.append((-1.3 + k * 0.5, 0.0, 1.0 - k * 0.55, R.uniform(0, 6.28), "Hay", 1.3 - k * 0.3))
+    for k in range(7):   # chaff spread round the floor where the mules went
+        a = k / 7 * 6.2832 + R.uniform(-0.3, 0.3); r = R.uniform(1.4, 2.5)
+        K.spots.append((math.cos(a) * r, -0.12, math.sin(a) * r, R.uniform(0, 6.28), "Hay", R.uniform(0.45, 0.6)))
+    # the threshing board (a plank studded underneath, its front turned up) and the wooden fork laid by the straw
+    K.member("AireBoard", (1.4, 0.06, 0.6), (1.4, 0.06, 2.0), [(-0.32, 0.0), (0.32, 0.0), (0.32, 0.06), (-0.32, 0.06)], "woodDark", G)
+    K.rod("AireBoardLip", (1.08, 0.1, 2.05), (1.72, 0.1, 2.05), 0.05, "woodDark", G, 5)
+    K.rod("AireFork", (-2.3, 0.06, -0.6), (-0.95, 0.06, -1.45), 0.025, "woodDark", G, 5)
+    for k in range(4): K.rod(f"AireTine{k}", (-0.95 + (k - 1.5) * 0.05, 0.06, -1.45 + (k - 1.5) * 0.08), (-0.6 + (k - 1.5) * 0.09, 0.07, -1.65 + (k - 1.5) * 0.14), 0.014, "woodDark", G, 4)
+
+MATDEF.update({"dung": (1.0, lambda nb: dust(nb, nb.mix(nb.noise(5.0, 5), srgb(0x3f3326), srgb(0x5a4936)), 0.4, 0.1)),
+               "grain": (0.9, lambda nb: nb.mix(nb.noise(40.0, 4, 0.7), srgb(0x7e5f34), srgb(0xa07c46)))})
+
+MATDEF.update({"graveEarth":(1.0, lambda nb: dust(nb, nb.mix(nb.noise(6.0, 5), srgb(0x4a3a2b), srgb(0x5e4a37)), 0.5, 0.12))})   # (dust light: the bed is all "foot" — at 0.4 it baked pale)
 TYPES["koubba"] = dict(builder=buildKoubba, atlas=2048, farRatio=0.65, islandMargin=0.004)   # (islands 8 px apart: at 1 px the dome's seams bled — dark notches)
 TYPES["hawsh"] = dict(builder=buildHawsh, atlas=1024, farRatio=0.75, islandMargin=0.002, aoDist=0.2, smoothAngle=80, weighted=False)   # (stones packed: a short AO — 0.4 baked them near black; round-shaded, the sangar's — at 35° they read as crystals)
 # the graves: their stones round-shaded, a short AO (packed small stones)
@@ -876,6 +1046,8 @@ TYPES["tombe"] = dict(GRAVE, grave="slab")
 TYPES["tombeb"] = dict(GRAVE, grave="white")
 TYPES["tombec"] = dict(GRAVE, grave="heap")
 TYPES["murette"] = dict(builder=buildLowWall, atlas=512, farRatio=0.75, aoDist=0.2, smoothAngle=80, weighted=False)
+TYPES["bergerie"] = dict(builder=buildBergerie, atlas=2048, farRatio=0.8, aoDist=0.25, islandMargin=0.002)
+TYPES["aire"] = dict(builder=buildAire, atlas=512, farRatio=0.7, states=["intact"], aoDist=0.25, smoothAngle=50, weighted=False)
 
 for spec in TYPES.values():
     spec.setdefault("builder", buildMechta); spec.setdefault("farRatio", 0.38)   # (0.3: the loggia house's far ruin shaded off its near — the gate)

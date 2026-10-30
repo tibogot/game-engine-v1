@@ -100,6 +100,19 @@ const TAGHIT = STONE && (() => {
   v.houses.push(house("masjid", "intact", TG.x, TG.z - 36, TG.x, TG.z));
   return v;
 })();
+// THE FARMS (2026-10-30, FARM_PLAN.md — the mechta kit's houses and its new farm pieces). FERME OULED SAÏD: the farmer's
+// loggia house and his son's beside it, their yard behind, the goats' lean-to at the west end; the THRESHING FLOOR out in front on the
+// open ground (the oued runs north-east of the site: everything south and west of it). The point in the front yard.
+const FS = site("Ferme Ouled Saïd"), BG = site("Bergerie");
+const FARM = STONE && hamlet(FS.x, FS.z, {
+  rows: [{ types: ["petite", "etage"], x: -14, z: 2, gap: 1.5, yards: [1] }],
+  props: [{ type: "appentis", x: -18.5, z: -1 }, { type: "aire", x: -4, z: 13 }],   // (the lean-to west: east of the houses the piste runs north)
+});
+// THE BERGERIE (the shepherd's, up the east piste): the sheepfold and its zriba, his one-room house beside it, its oven
+const FOLD = STONE && hamlet(BG.x, BG.z, {
+  rows: [{ types: ["petite"], x: 9, z: 4 }],
+  props: [{ type: "bergerie", x: -2, z: 0 }, { type: "tabouna", x: 14, z: 7 }],
+});
 // SIDI ALI: the koubba on its crest; the village's dead on the slope below it (south)
 const SAINT = STONE ? koubbaAndCemetery(SA.x, SA.z, SA.x - 6, SA.z + 21, { seed: 1961, cols: 5, rows: 4 }) : [];   // (east of it the graves ran under the mosque, north into a walled field — seen; south: clear, measured)
 
@@ -134,7 +147,8 @@ export const MAP = {
   sandstone: { colour: "abdi", rocks: ROCKS },
   // ITS TOWN (algGame: an instanced house field): placed by tools/algAbdiLevel.mjs on the knoll's ring terraces,
   // the souk square at the town's point
-  town: { houses: [...TOWN_HOUSES, ...(DJORF?.houses ?? []), ...(TAGHIT?.houses ?? [])], props: [...(DJORF?.props ?? []), ...(TAGHIT?.props ?? []), ...SAINT],
+  town: { houses: [...TOWN_HOUSES, ...(DJORF?.houses ?? []), ...(TAGHIT?.houses ?? []), ...(FARM?.houses ?? []), ...(FOLD?.houses ?? [])],
+    props: [...(DJORF?.props ?? []), ...(TAGHIT?.props ?? []), ...SAINT, ...(FARM?.props ?? []), ...(FOLD?.props ?? [])],
     square: TOWN_SQUARE, walls: TOWN_WALLS, replacesHamlet: STONE },
   // the old procedural pieces the kits replace (the hamlet: replacesHamlet), the old wells (the props kit puts one in each
   // square: villageProps)

@@ -13,7 +13,9 @@ export const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8],
   // the DECHRA's (DECHRA_PLAN.md): the mosque and its minaret, a terrace wall's module (its face at z -0.3), the lane steps
   masjid: [-4.6, 6.6, -4.1, 3.6], soutien: [-2.0, 2.0, -0.3, 0.65], escalier: [-1.25, 1.25, -2.45, 1.05], djemaa: [-3.0, 3.0, -1.5, 1.45],
   // the koubba and its enclosure (mechta.py KB_HAWSH)
-  koubba: [-6.0, 6.0, -5.95, 5.85], hawsh: [-6.0, 6.0, -5.95, 5.85] };
+  koubba: [-6.0, 6.0, -5.95, 5.85], hawsh: [-6.0, 6.0, -5.95, 5.85],
+  // the farm's (FARM_PLAN.md): the sheepfold and its pen (the hurdle knocked flat out to -6.8), the threshing floor
+  bergerie: [-5.3, 5.3, -6.8, 4.5], aire: [-3.55, 3.55, -3.55, 3.55] };
 export const HS = 1.3;
 export const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
 /** A house whose FOOTPRINT's centre is (cx, cz), its front toward (tx, tz): the town field's row (y null: a pad). */
