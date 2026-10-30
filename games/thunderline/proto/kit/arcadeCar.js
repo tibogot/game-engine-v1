@@ -57,7 +57,7 @@ export const ARCADE = {
   align: { rate: 10, max: 4, rollOnly: 4, mixFrom: 4, mixFull: 12, mixedRate: 1.5 }, // /s, rad/s: up onto the wheels' surface; /s: the body-on-road roll righting
   // ON THE ROAD: `coyote` s after the last wheel contact the car still counts as on it, while the road (the track
   // frame) is within `reach` m of where its wheels would be
-  road: { coyote: 0.25, reach: 1.5, agree: 0.94, crestReach: 6, edge: 1.5 }, // edge: m past a road's side still on it (the kerb, a wheel over it) // crestReach: m over a road that still goes on and still pulls the car back // agree: cos of the wheels' normal ↔ the road's up (~20°)
+  road: { coyote: 0.25, reach: 1.5, agree: 0.94, crestReach: 6, edge: 1.5, twistHold: 0.05 }, // twistHold: rad/s of the road's roll past which the car is held on its deck // edge: m past a road's side still on it (the kerb, a wheel over it) // crestReach: m over a road that still goes on and still pulls the car back // agree: cos of the wheels' normal ↔ the road's up (~20°)
   // THE STUNT GUIDE (user, 2026-10-29: "in the loop it's clearly uncontrollable" — measured: no input, the car turned
   // 85° off the road's direction inside the loop and wedged on the rail; the loop steps sideways as it goes round, so
   // a car holding its own heading on the surface drifts off it): on a stunt surface (× the stunt gravity), the turn
@@ -105,7 +105,9 @@ export const ARCADE = {
 };
 
 const G = 9.81, DEG = Math.PI / 180;
-const smooth01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const MILD_BANK_Y = Math.cos(30 * DEG);
+const BANK_PIECE = /^bank(ed)?_/; // the bank in / out, banked straight and turns (kit.js): the car is held on their twisting deck // a road tilted less than this is driven as a road, not a stunt surface
+const smooth01 =(x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const _com = new THREE.Vector3(), _n = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3();
 const _up = new THREE.Vector3(), _tmp = new THREE.Vector3(), _axis = new THREE.Vector3(), _F = new THREE.Vector3();
 const _qi = new THREE.Quaternion(), _w = new THREE.Vector3(), _roadUp = new THREE.Vector3(), _rel = new THREE.Vector3();
@@ -298,6 +300,18 @@ export class ArcadeCar extends StuntCar {
         this._ff.lerp(_w, 1 - Math.exp(-subDt / 0.04));
       } else this._ff.multiplyScalar(0.8);
       if (tr && roadNear) (this._prevRoadUp ??= new THREE.Vector3()).copy(_roadUp); else this._prevRoadUp = null;
+      // …AND THE DECK UNDER A CAR OFF THE MIDDLE MOVES WITH IT: a twisting road (a bank in / out) turns about its
+      // centreline, so 7 m off it the deck rises or falls at ω·7 m/s — and a 48 m bank out at 200 km/h sets it falling at
+      // ~28 m/s², more than gravity + downforce: the car left the deck, flew 0.2 s and landed 10° off, snapped flat in two
+      // frames (user, 2026-10-30: "it's shifting the car in one short instant"). On a TWISTING deck (rolling about its
+      // own direction) the car never moves away from it: its speed off the deck at its place is taken away. (Bumps on a
+      // straight road — no roll — still lift it.)
+      const twist = tr && roadNear ? this._ff.dot(tr.T) : 0;
+      if (Math.abs(twist) > ARCADE.road.twistHold && BANK_PIECE.test(tr.id ?? "") && down > 0) { // (the bank pieces only: a roll kicker throws the car, as it should)
+        const deckV = _tmp.copy(tr.T).multiplyScalar(twist).cross(_rel.subVectors(body.pos, tr.P)).dot(_roadUp);
+        const away = body.vel.dot(_roadUp) - deckV;
+        if (away > 0) body.vel.addScaledVector(_roadUp, -away);
+      }
 
       // ---- gravity: the world's, or on a stunt surface — tilted past wall.from, or a road-hold piece — the road's up
       const speed = body.vel.length();
@@ -330,7 +344,12 @@ export class ArcadeCar extends StuntCar {
       let stunt = 0;
       if (pressed) {
         stunt = THREE.MathUtils.clamp((ARCADE.wall.from - surf.y) / (ARCADE.wall.from - ARCADE.wall.full), 0, 1);
-        if (roadHold) stunt = Math.max(stunt, 0.6);
+        // (a road-held piece is a stunt surface — but NOT a mild bank: the banked straight / 45° / 180° (22°) carry the
+        // old car's roadHold, and the stunt guide and gravity switched on mid-bank and off at its exit — the steering
+        // pulled back along the road, one way 1–3 m, the other 8 (user, 2026-10-30: "the car physics behave weird on a
+        // bank in, bank out"). A 22° bank is a road: its grip comes from grip.bank. Loops, twists, walls keep it.)
+        const mildBank = surf.y > MILD_BANK_Y && (!tr || (Math.abs(tr.T.y) < 0.2 && tr.U.y > MILD_BANK_Y));
+        if (roadHold && !mildBank) stunt = Math.max(stunt, 0.6);
         stunt *= THREE.MathUtils.clamp((speed - ARCADE.wall.minSpeed) / 8, 0, 1);
       }
       _F.set(0, -G * body.mass * (1 - stunt), 0).addScaledVector(surf, -G * body.mass * stunt);

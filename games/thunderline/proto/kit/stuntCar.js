@@ -138,7 +138,15 @@ export function trackFromRide(ride) {
   // T: the middle's own direction (from its neighbours, along the road); U: square to it, the roll kept.
   // (a JOIN between two pieces is the same point twice — a zero step read as "no road on from here": every join was
   // taken for a lip, and the road glue let go at it. One of each kept.)
-  const src = ride.filter((r) => !r.air && r.U).filter((r, i, all) => i === 0 || all[i - 1].P.distanceToSquared(r.P) > 1e-4);
+  // (…and a piece's LAST ring a few dm from the next piece's first — 0.4 m after a 16 m step at a banked turn's end:
+  // the T from its neighbours then read the middle of the turn behind, the frame tipped 1.2° within 0.4 m and the car was
+  // jolted at every bank out — user, 2026-10-30, "it's shifting the car in one short instant". Under 1 m across a join,
+  // the next piece's point goes.)
+  const src = ride.filter((r) => !r.air && r.U).filter((r, i, all) => {
+    if (i === 0) return true;
+    const d2 = all[i - 1].P.distanceToSquared(r.P);
+    return d2 > 1e-4 && !(d2 < 1 && r.piece !== all[i - 1].piece && all[i + 1]);
+  });
   const pts = src.map((r, i) => {
     const a = src[i - 1], c = src[i + 1];
     const A = a && isRoad(a, r, _v.subVectors(r.P, a.P), _v.lengthSq()) ? a : r, C = c && isRoad(r, c, _v.subVectors(c.P, r.P), _v.lengthSq()) ? c : r;
@@ -175,12 +183,12 @@ export function trackFromRide(ride) {
       const u = _f.subVectors(pos, a.P).dot(seg) / L2;
       if (u < 0 || u > 1) continue;
       const P = a.P.clone().lerp(c.P, u), T = a.T.clone().lerp(c.T, u).normalize(), U = a.U.clone().lerp(c.U, u).normalize();
-      return { P, T, U, d: P.distanceTo(pos), hw: r.hw ?? 12 };
+      return { P, T, U, d: P.distanceTo(pos), hw: r.hw ?? 12, id: r.id };
     }
     // past the END of a stretch of road (a lip: no road segment on from here, the car beyond it along the road)
     const next = pts[best + 1];
     const end = (!next || !isRoad(r, next, _v.subVectors(next.P, r.P), _v.lengthSq())) && _f.subVectors(pos, r.P).dot(r.T) > 0.5;
-    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd), end, hw: r.hw ?? 12 }; // hw: the road's half width there
+    return { P: r.P, T: r.T, U: r.U, d: Math.sqrt(bd), end, hw: r.hw ?? 12, id: r.id }; // id: the piece; hw: the road's half width there
   };
 }
 // Two ride points are joined by ROAD when the chord between them runs along both their directions (within ~15°) —
