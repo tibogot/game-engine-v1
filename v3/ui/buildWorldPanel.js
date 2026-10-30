@@ -785,6 +785,98 @@ function _buildOceanProControls(parent, P) {
 }
 
 /**
+ * VOLUMETRIC FOG (`ts.volumetricFog`, render/fog/volumetricFog.js — from the fog lab): valley fog,
+ * mist banks and sun shafts, ON TOP of the height / distance fog and the sky's haze (it replaces
+ * none of them). The engine reads this very object every frame, so the controls are live. The
+ * first time it is switched on, the layer's height is fitted to the level's relief.
+ */
+const VOLUMETRIC_FOG_QUALITY = {
+  low: { resolution: 0.25, steps: 24 },
+  medium: { resolution: 0.5, steps: 40 },
+  high: { resolution: 0.5, steps: 72 },
+};
+function _buildVolumetricFogControls(container, ts, app) {
+  const S = ts.volumetricFog;
+  if (!S) return;
+  const body = _section(container, "Volumetric Fog", false);
+  _toggle(body, S, "enabled", {
+    label: "Enabled",
+    hint: "Valley fog, mist banks and sun shafts through trees. A layer on top of the other fogs and the sky's haze. Off = the level looks as before.",
+    onChange: () => _refreshWidgets(),
+  });
+  for (const [name, title] of [["low", "Low"], ["medium", "Medium"], ["high", "High"]]) {
+    _button(body, {
+      title: `Quality: ${title}`,
+      hint: "Low: quarter resolution, 24 steps (weak GPUs). Medium: half resolution, 40 steps. High: half resolution, 72 steps (smoother shafts).",
+      onClick: () => { Object.assign(S, VOLUMETRIC_FOG_QUALITY[name]); _refreshWidgets(); },
+    });
+  }
+  _button(body, {
+    title: "Fit to terrain",
+    hint: "Puts the layer's top a third of the way up the level's relief, so the fog pools in the low ground (done once, the first time it is switched on).",
+    onClick: () => { app.fitVolumetricFog?.(); _refreshWidgets(); },
+  });
+
+  const lay = _section(body, "Layer", true);
+  _slider(lay, S, "density", {
+    label: "Density", min: 0.0002, max: 0.03, step: 0.0001, curve: "log",
+    hint: "How thick the fog is inside the layer. 0.005: a 400 m view through it keeps ~13 %.",
+  });
+  _slider(lay, S, "top", {
+    label: "Height (m)", min: -100, max: 600, step: 0.5,
+    hint: "World height of the layer's top: below it the fog is full, above it thins out.",
+  });
+  _slider(lay, S, "falloff", {
+    label: "Thickness above (m)", min: 1, max: 200, step: 0.5,
+    hint: "How far above the top the fog fades out. Small = a sharp lid, large = a soft rise.",
+  });
+  _slider(lay, S, "topBreakup", {
+    label: "Top breakup (m)", min: 0, max: 100, step: 0.5,
+    hint: "How far the noise lifts and drops the top, so it is not a flat lid.",
+  });
+  _slider(lay, S, "haze", {
+    label: "Haze everywhere", min: 0, max: 0.004, step: 0.00005,
+    hint: "A thin fog in all the air, so sun shafts also show above the layer. Costs more (the whole ray is marched).",
+  });
+  _slider(lay, S, "startDist", {
+    label: "Start distance (m)", min: 0, max: 200, step: 1,
+    hint: "No fog nearer than this: keeps the foreground crisp when the camera stands in the layer.",
+  });
+  _slider(lay, S, "maxDist", {
+    label: "Max distance (m)", min: 200, max: 6000, step: 10,
+    hint: "How far the fog is marched. Past it, the distance fog and the sky's haze take over.",
+  });
+
+  const sh = _section(body, "Shape & wind", true);
+  _slider(sh, S, "noiseAmount", { label: "Patchiness", min: 0, max: 1, step: 0.01, hint: "0 = an even layer, 1 = fully carved into banks." });
+  _slider(sh, S, "coverage", { label: "Coverage", min: 0, max: 1, step: 0.01, hint: "How much of the noise is fog." });
+  _slider(sh, S, "detail", { label: "Detail", min: 0, max: 1, step: 0.01, hint: "The finer wisps on the banks' edges." });
+  _slider(sh, S, "noiseFreq", {
+    label: "Bank frequency", min: 1 / 600, max: 1 / 30, step: 0.0001, curve: "log",
+    hint: "Left = big banks (~600 m across), right = small ones (~30 m).",
+  });
+  _slider(sh, S, "windSpeed", { label: "Wind (m/s)", min: 0, max: 20, step: 0.1 });
+  _slider(sh, S, "windDeg", { label: "Wind direction", min: 0, max: 360, step: 1 });
+
+  const li = _section(body, "Light & shafts", true);
+  _color(li, S, "tint", { label: "Colour", hint: "White = the light's own colour (the sun's and the sky's). Tint it for a coloured mist." });
+  _toggle(li, S, "shadows", {
+    label: "Sun shafts",
+    hint: "The fog is shadowed by the sun's shadow maps: shafts through trees and past hills. Off = cheaper, no shafts.",
+  });
+  _slider(li, S, "anisotropy", { label: "Forward glow", min: 0, max: 0.9, step: 0.01, hint: "How much brighter the fog is looking toward the sun." });
+  _slider(li, S, "sunScale", { label: "Sun", min: 0, max: 4, step: 0.01, hint: "The sun's light in the fog (1 = the scene's own sun)." });
+  _slider(li, S, "ambientScale", { label: "Sky light", min: 0, max: 4, step: 0.01, hint: "The sky's light in the fog. Raise it to keep the fog visible at night." });
+  _slider(li, S, "multiScatter", { label: "Glow (thick fog)", min: 0, max: 1.5, step: 0.01, hint: "Light bouncing inside thick fog, so it glows instead of going grey." });
+  _slider(li, S, "selfShadow", { label: "Self shadow", min: 0, max: 2, step: 0.01, hint: "How much the fog above darkens the fog below." });
+
+  const q = _section(body, "Quality", false);
+  _slider(q, S, "steps", { label: "Steps", min: 8, max: 128, step: 1 });
+  _slider(q, S, "resolution", { label: "Resolution", min: 0.25, max: 1, step: 0.25, hint: "Of the screen. 0.5 = half (the default); the result is upsampled with the depth." });
+  _slider(q, S, "temporalBlend", { label: "Temporal blend", min: 0.03, max: 1, step: 0.01, hint: "Lower = smoother but slower to follow the camera (can trail on fast moves)." });
+}
+
+/**
  * SKY PRO (skyMode "skypro", v3/render/skypro/): its own settings slice, `ts.skyProSky`. The
  * engine holds that very object (not a copy), so every control here is live with no callback.
  */
@@ -2138,6 +2230,9 @@ export function buildWorldPanel(app) {
         step: 0.01,
         hint: "How high the sky-dome horizon haze climbs (Procedural sky only). Lower hugs the waterline.",
       });
+
+      // --- Volumetric fog (render/fog/volumetricFog.js): a layer of its own, every sky mode ---
+      _buildVolumetricFogControls(container, ts, app);
 
       // --- Interior lighting (tunnels, caves, future house boxes) ---
       const intBody = _section(container, "Interior lighting", false);

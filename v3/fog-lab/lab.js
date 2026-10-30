@@ -12,7 +12,7 @@
 
 import * as THREE from "three/webgpu";
 import { startV3App, createLevelLoader } from "../engine.js";
-import { createVolumetricFog, VOLUMETRIC_FOG_DEFAULTS } from "./volumetricFog.js";
+import { createVolumetricFog, VOLUMETRIC_FOG_DEFAULTS } from "../render/fog/volumetricFog.js";
 import { createStylizedTrees } from "./stylizedTrees.js";
 
 const DEFAULT_LEVEL = "/levels/fog-lab.v3proj";

@@ -1394,6 +1394,7 @@ export async function startV3App(opts = {}) {
       setTimeOfDay: (t) => worldEnv?.setTimeOfDay(t),
       rebuildProceduralSkyEnv: () => worldEnv?.rebuildProceduralSkyEnv(),
       rebuildSkyEnv: () => worldEnv?.rebuildSkyEnv(),
+      fitVolumetricFog: () => worldEnv?.volumetricFog?.fitToTerrain(),
       syncInteriorUniforms: () => worldEnv?.syncInteriorUniforms(),
       rebuildInteriorVolumes: () => worldEnv?.rebuildInteriorVolumes(),
       worldOceanChanged: () => worldEnv?.worldOceanChanged(),

@@ -4,6 +4,7 @@ import { SKY_DEFAULTS as ATMOSPHERE_SKY_DEFAULTS } from "../../render/sky/atmosp
 import { CLOUD_DEFAULTS } from "../../render/clouds/volumetricCloudDeck.js";
 import { PAINTED_CLOUD_DEFAULTS } from "../../render/clouds/paintedCloudDeck.js";
 import { SKYPRO_DEFAULTS } from "../../render/skypro/skyproSky.js";
+import { VOLUMETRIC_FOG_DEFAULTS } from "../../render/fog/volumetricFog.js";
 import { OCEANPRO_DEFAULTS } from "../../render/oceanpro/oceanproOcean.js";
 import { GRID_DEFAULTS } from "../../render/materials/gridMaterial.js";
 
@@ -168,6 +169,14 @@ export function createWorldToolState({ editor = false, skyMode } = {}) {
      * Time of day is not here: the one clock is proceduralSky.timeOfDay, as for the domes.
      */
     skyProSky: { ...SKYPRO_DEFAULTS },
+    /*
+     * VOLUMETRIC FOG (render/fog/volumetricFog.js, from the fog lab): valley fog, mist banks and
+     * sun shafts, a layer ON TOP of the distance fog and the sky's haze — it replaces neither. Off
+     * by default, so a level without it looks as it always did. `fitted`: the layer's height was
+     * fitted to this level's relief once (the first time it is switched on); after that the
+     * level's own values are kept. Rides in the project's look.
+     */
+    volumetricFog: { ...VOLUMETRIC_FOG_DEFAULTS, enabled: false, fitted: false },
     atmospherePaintedClouds: {
       ...PAINTED_CLOUD_DEFAULTS,
       /*

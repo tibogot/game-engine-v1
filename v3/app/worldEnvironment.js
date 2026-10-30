@@ -50,6 +50,7 @@ import { SKY_LENS_FLARE_LOOK } from "../render/sky/skyLensFlareLook.js";
 import { createModularRoadClouds } from "../render/clouds/volumetricCloudDeck.js";
 import { createSkyProSky, skyProKeyDir, skyProSunFromTime, SKYPRO_NOON_GROUND_E } from "../render/skypro/skyproSky.js";
 import { createOceanPro } from "../render/oceanpro/oceanproOcean.js";
+import { createVolumetricFog, VOLUMETRIC_FOG_DEFAULTS } from "../render/fog/volumetricFog.js";
 import { createPaintedClouds } from "../render/clouds/paintedCloudDeck.js";
 import { createDayNightCloudLayer } from "../render/clouds/dayNightCloudLayer.js";
 import { createWorldOcean } from "../render/water/worldOcean.js";
@@ -2050,7 +2051,7 @@ export async function createWorldEnvironment({
     "light", "skyExposureByMode", "physicalSky", "proceduralSky", "atmosphereSky",
     "atmosphereClouds", "atmospherePaintedClouds", "skyProSky",
     "volumetricCloudDayNight", "cloudShadows", "cloudGodRays", "cloudBloom",
-    "lensFlare", "postFx", "fog", "interior",
+    "lensFlare", "postFx", "fog", "volumetricFog", "interior",
   ];
   const SKY_MODES = ["physical", "hdr", "procedural", "atmosphere", "skypro"];
 
@@ -2076,6 +2077,12 @@ export async function createWorldEnvironment({
     for (const key of LOOK_SLICES) {
       const src = key === "light" ? lookLight : look[key];
       if (src && toolState[key]) mergeKnownKeys(toolState[key], src);
+    }
+    // A level saved before the volumetric fog existed has no slice: it gets the fog OFF, not the
+    // previous level's (every other slice is in every saved level).
+    if (!look.volumetricFog && toolState.volumetricFog) {
+      Object.assign(toolState.volumetricFog, VOLUMETRIC_FOG_DEFAULTS, { enabled: false, fitted: false });
+      volFog?.resetHistory();
     }
     let mode = SKY_MODES.includes(look.skyMode) ? look.skyMode : toolState.skyMode;
     if (mode === "hdr") {
@@ -2752,10 +2759,111 @@ export async function createWorldEnvironment({
         // the marine haze layer sits on the sea (and the far sea is measured to it)
         seaLevel: toolState.worldOcean.enabled ? toolState.worldOcean.seaLevel : 0,
       });
+      // the volumetric fog over the haze, before the meter: the exposure sees the fogged frame
+      applyVolumetricFog(rt);
       // Tidewater meters the frame after its haze, before exposure: this one
       skyPro.meter(rt);
     },
   };
+
+  /*
+   * ── VOLUMETRIC FOG (toolState.volumetricFog, render/fog/volumetricFog.js) ──────────────────
+   *
+   * A LAYER of its own: valley fog, mist banks, sun shafts, on top of the distance fog and the
+   * sky's haze — it replaces neither, and no cloud system. It runs on the linear HDR frame after
+   * whichever system the frame went through (Sky Pro's haze, a deck, a game's clouds, or none:
+   * the fog-only pass below), so it works in every sky mode. Its light is the sky's: Sky Pro's
+   * own key light and sky irradiance (the look the fog lab was tuned under), else the scene's sun
+   * and hemisphere lights. Its shafts read the sun's shadow maps — the cascades, or the fitted
+   * single map the RTS games use. Off (the default) it costs nothing.
+   */
+  let volFog = null;
+  let _vfDt = 1 / 60;
+  const _vfSize = new THREE.Vector2();
+  const _vfSunDir = new THREE.Vector3();
+  const _vfSunPos = new THREE.Vector3();
+  const _vfTargetPos = new THREE.Vector3();
+  const _vfCascades = [];
+  const _vfMatrices = [];
+  const volumetricFogOn = () => toolState.volumetricFog?.enabled === true;
+
+  /** The layer's height fitted to this level's relief (as the fog lab does): it pools in the low ground. */
+  function fitVolumetricFogToTerrain() {
+    const S = toolState.volumetricFog;
+    if (!S) return false;
+    S.fitted = true;
+    if (typeof getWorldHeight !== "function") return false;
+    const half = terrainSize * 0.45, n = 48;
+    let min = Infinity, max = -Infinity;
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const h = getWorldHeight(-half + (i / (n - 1)) * 2 * half, -half + (j / (n - 1)) * 2 * half);
+      if (!Number.isFinite(h)) continue;
+      if (h < min) min = h;
+      if (h > max) max = h;
+    }
+    if (!Number.isFinite(min)) return false;
+    const range = Math.max(10, max - min);
+    S.top = min + range * 0.32;
+    S.falloff = Math.max(6, range * 0.14);
+    S.topBreakup = Math.max(4, range * 0.1);
+    return true;
+  }
+
+  /** The sun's shadow maps, near to far: the cascades, or the fitted single map. */
+  function volumetricFogShadows() {
+    _vfCascades.length = 0;
+    if (!sun.castShadow) return _vfCascades;
+    const add = (shadowCam, depthTex, i) => {
+      if (!depthTex) return;
+      const m = (_vfMatrices[i] ??= new THREE.Matrix4());
+      m.multiplyMatrices(shadowCam.projectionMatrix, shadowCam.matrixWorldInverse);
+      _vfCascades.push({ matrix: m, depthTex });
+    };
+    if (csm && toolState.csm.enabled) {
+      csm.lights.forEach((l, i) => add(l.shadow.camera, csm._shadowNodes?.[i]?.shadowMap?.depthTexture ?? null, i));
+    } else {
+      add(sun.shadow.camera, sun.shadow.map?.depthTexture ?? null, 0);
+    }
+    return _vfCascades;
+  }
+
+  function applyVolumetricFog(rt) {
+    const S = toolState.volumetricFog;
+    if (!S?.enabled) return;
+    const depthTex = postFxPipeline.getSceneDepthTexture();
+    if (!depthTex) return;
+    volFog ??= createVolumetricFog({ renderer });
+    Object.assign(volFog.params, S);
+    renderer.getDrawingBufferSize(_vfSize);
+    let sunColor, ambient;
+    if (toolState.skyMode === "skypro" && skyPro && _skyProReady) {
+      const K = skyPro.light();
+      sunColor = K.keyIsMoon ? K.moonColor.toArray() : K.sunColor;
+      _vfSunDir.copy(K.keyDir);
+      const irr = K.skyIrradiance;
+      ambient = [irr[0] / Math.PI, irr[1] / Math.PI, irr[2] / Math.PI];
+    } else {
+      sun.getWorldPosition(_vfSunPos);
+      sun.target.getWorldPosition(_vfTargetPos);
+      _vfSunDir.subVectors(_vfSunPos, _vfTargetPos).normalize();
+      sunColor = [sun.color.r * sun.intensity, sun.color.g * sun.intensity, sun.color.b * sun.intensity];
+      const a = hemi.intensity / Math.PI;
+      ambient = [hemi.color.r * a, hemi.color.g * a, hemi.color.b * a];
+    }
+    volFog.composite(rt, {
+      depthTex, camera, size: _vfSize, dt: _vfDt, sunDir: _vfSunDir, sunColor, ambient, cascades: volumetricFogShadows(),
+    });
+  }
+
+  // Any other system the frame goes through gets the fog after its own composite (one object, reused).
+  const _vfWrap = {
+    inner: null,
+    prepareFrame(anchor, dt) { return this.inner.prepareFrame(anchor, dt); },
+    compositeOntoLinearHDR(r, rt) { this.inner.compositeOntoLinearHDR(r, rt); applyVolumetricFog(rt); },
+  };
+  const withVolumetricFog = (system) => (volumetricFogOn() ? ((_vfWrap.inner = system), _vfWrap) : system);
+  // No system at all this frame: the fog alone.
+  const _vfOnly = { prepareFrame: () => true, compositeOntoLinearHDR: (_r, rt) => applyVolumetricFog(rt) };
 
   function setCustomCloudSystem(system) {
     customCloudSystem = system ?? null;
@@ -2763,6 +2871,12 @@ export async function createWorldEnvironment({
 
   function renderFrame(dtSec) {
     const cloudFollowAnchor = playMode?.active ? playMode.playerPosition : controls.target;
+    // The volumetric fog marches the scene depth: every path below goes through the linear HDR chain.
+    _vfDt = dtSec || _vfDt;
+    if (volumetricFogOn()) {
+      if (!toolState.volumetricFog.fitted) fitVolumetricFogToTerrain();
+      postFxPipeline.setSceneDepthRequired(true);
+    }
     // Ocean Pro reads a copy of the scene's depth, which cannot come out of the multisampled
     // canvas: while it shows, the frame goes through a scene pass (main.js does the same for lakes).
     if (oceanPro?.visible) postFxPipeline.setSceneDepthRequired(true);
@@ -2796,7 +2910,7 @@ export async function createWorldEnvironment({
     if (!customCloudSystem?.enabled && toolState.skyMode === "atmosphere" && deck?.enabled) {
       if (postFxPipeline.isActive()) {
         deck.setDepthSource?.(postFxPipeline.getSceneDepthTexture?.() ?? null);
-        postFxPipeline.renderWithClouds(deck, cloudFollowAnchor, dtSec);
+        postFxPipeline.renderWithClouds(withVolumetricFog(deck), cloudFollowAnchor, dtSec);
         return;
       }
       deck.setDepthSource?.(null);
@@ -2810,7 +2924,7 @@ export async function createWorldEnvironment({
         // Hand it the depth the solids pass already wrote so it can march afterwards
         // instead of re-rendering the scene to make its own.
         customCloudSystem.setDepthSource?.(postFxPipeline.getSceneDepthTexture?.() ?? null);
-        postFxPipeline.renderWithClouds(customCloudSystem, cloudFollowAnchor, dtSec);
+        postFxPipeline.renderWithClouds(withVolumetricFog(customCloudSystem), cloudFollowAnchor, dtSec);
         return;
       }
       customCloudSystem.setDepthSource?.(null); // owns-the-frame path uses its own buffer
@@ -2833,7 +2947,7 @@ export async function createWorldEnvironment({
     if (dncOn && dayNightCloudLayer) {
       driveDayNightClouds(dtSec);
       if (postFxPipeline.isActive()) {
-        postFxPipeline.renderWithClouds(dayNightCloudLayer, cloudFollowAnchor, dtSec);
+        postFxPipeline.renderWithClouds(withVolumetricFog(dayNightCloudLayer), cloudFollowAnchor, dtSec);
         didCloudRt = true;
       } else {
         didCloudRt = dayNightCloudLayer.tryRenderFrame({
@@ -2846,7 +2960,9 @@ export async function createWorldEnvironment({
     }
 
     if (!didCloudRt) {
-      if (postFxPipeline.isActive()) {
+      if (volumetricFogOn()) {
+        postFxPipeline.renderWithClouds(_vfOnly, cloudFollowAnchor, dtSec);
+      } else if (postFxPipeline.isActive()) {
         postFxPipeline.render();
       } else {
         renderer.render(scene, camera);
@@ -2949,6 +3065,13 @@ export async function createWorldEnvironment({
     get skyVisible() { return _skyShown; },
     /** The Sky Pro sky (skyMode "skypro"), or null until the mode is first entered. */
     get skyPro() { return skyPro; },
+    /** The volumetric fog layer (settings: toolState.volumetricFog). `fitToTerrain()` re-fits its
+     *  height to the level's relief; `resetHistory()` after a camera cut. */
+    volumetricFog: {
+      fitToTerrain: fitVolumetricFogToTerrain,
+      resetHistory: () => volFog?.resetHistory(),
+      get module() { return volFog; },
+    },
     worldOcean,
     getOceanV2: () => oceanV2,
     /** Ocean Pro (worldOcean.mode "pro"), or null until the mode is first chosen. */
