@@ -88,6 +88,7 @@ body.at-home #top { padding-top: 26px; }
 
 /* ---- campaign tiers ---- */
 .tier { margin-bottom: 20px; }
+h3.sect { margin: 26px 0 4px; font: 800 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text); } /* (the Build screen's Test tracks) */
 .tier h3 { margin: 0 0 8px; font: 800 22px "Barlow Condensed"; letter-spacing: 0.1em; text-transform: uppercase; display: flex; align-items: center; gap: 10px; }
 .tier h3 i { width: 22px; height: 6px; transform: skewX(-30deg); }
 .tier .grid { grid-template-columns: repeat(5, 1fr); }

@@ -96,7 +96,7 @@ function save() {
  * @param o.getVehicle () => the car while driving, else null
  * @param o.isDriving () => boolean
  */
-export function createLabHud({ getVehicle, isDriving, getSfx, getSynth }) {
+export function createLabHud({ getVehicle, isDriving, getSfx, getSynth, setStats }) {
   applySaved(); // (the lab's own tune: remembered between visits — the game's defaults stay in code)
   const css = "font:500 12px Barlow, sans-serif;color:#e6edf6;background:rgba(13,20,36,.88);border:1px solid #233149;padding:8px 10px;";
   const tele = document.createElement("div");
@@ -199,6 +199,7 @@ export function createLabHud({ getVehicle, isDriving, getSfx, getSynth }) {
   };
   const up = new THREE.Vector3(), fwd = new THREE.Vector3(), left = new THREE.Vector3(), n = new THREE.Vector3();
   let t0 = performance.now();
+  let lastStats = null;
 
   function frame() {
     requestAnimationFrame(frame);
@@ -207,11 +208,13 @@ export function createLabHud({ getVehicle, isDriving, getSfx, getSynth }) {
     tele.style.display = v && view.info ? "" : "none";
     // the drive page's own panels: the track's stats and the perf graphs with the info, the keys with H (put back
     // as they were once the drive ends — the builder shows the graphs)
-    const stats = document.getElementById("stats"), help = document.getElementById("help"), perf = document.getElementById("perf-stats");
+    const stats = document.getElementById("stats"), help = document.getElementById("help");
     if (help && v && !help.querySelector("[data-zones]")) help.insertAdjacentHTML("beforeend", ZONES_HTML);
     if (stats) stats.style.display = v && !view.info ? "none" : "";
     if (help) help.style.display = v && !view.help ? "none" : "";
-    if (perf) { if (v && !view.info) { perf.dataset.labHid = "1"; perf.style.display = "none"; } else if (perf.dataset.labHid) { delete perf.dataset.labHid; perf.style.display = ""; } }
+    // (the perf graphs: the engine's stats overlay, on with the info — off, its timing wrappers come off too)
+    const wantStats = !!(v && view.info);
+    if (setStats && wantStats !== lastStats) { setStats(wantStats); lastStats = wantStats; }
     if (help && v) hint.style.bottom = view.help ? `${help.offsetHeight + 24}px` : "16px";
     if (!v) soundOn = false; else if (!soundOn) { soundOn = true; applySound(); } // (the recordings exist once a drive runs)
     if (!v) return;

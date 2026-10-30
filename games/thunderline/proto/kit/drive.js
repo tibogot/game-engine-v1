@@ -41,6 +41,11 @@ const app = await startV3App({
   csm: { cascades: 2 },
   precompile: false, // the scene compiles once, final, behind the loading screen (below)
 });
+// the stats panel hidden unless asked for — ² (Backquote) shows it, remembered (as the builder, 2026-10-30)
+let statsPref = false;
+try { statsPref = localStorage.getItem("thunderline.stats") === "1"; } catch {}
+app.setStatsOverlay?.(statsPref);
+addEventListener("keydown", (e) => { if (e.code !== "Backquote" || e.repeat) return; statsPref = !statsPref; try { localStorage.setItem("thunderline.stats", statsPref ? "1" : "0"); } catch {} app.setStatsOverlay?.(statsPref); });
 // No level: the engine's DEFAULT floor stays as the backdrop (user, 2026-10-18 — terrain comes later,
 // as decoration). THE FLOOR IS SOLID (user, 2026-10-18): the car reads the engine's own height.
 // THE SCENE IS HIDDEN WHILE THE PAGE BOOTS (2026-10-27, load trace: ~23 s of the GPU driver compiling

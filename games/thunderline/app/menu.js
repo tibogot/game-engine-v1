@@ -1,7 +1,7 @@
 // THE MENU (DESIGN.md: the four modes). One page, screens by hash so the other pages can send the
 // player back to the right one: #home, #play (Stunt tracks: campaign + my tracks), #build (the
 // library: new, open, drive, rename, duplicate, delete), #settings.
-import { library, campaign, lessons, settings, currentBest, draft, DRAFT } from "./library.js";
+import { library, campaign, lessons, settings, currentBest, draft, DRAFT, testTracks } from "./library.js";
 import { go } from "./nav.js";
 import { decodeTrack } from "./trackCode.js";
 
@@ -96,6 +96,7 @@ function trackCard(rec, { actions, best = currentBest(rec), badge: tag }) {
 // ---------- Stunt tracks: campaign + my tracks ----------
 let tiers = null; // campaign files, loaded once (campaign/<tier>.json)
 let lessonList = null; // the stunt lessons (campaign/lessons.json), loaded once
+let testList = null; // Claude's test tracks (campaign/tests.json), loaded once
 function play() {
   crumbs([["Stunt tracks", null]]);
   if (playTab === "campaign" && !tiers) { campaign.tiers().then((t) => { tiers = t; if ((location.hash || "#home") === "#play") play(); }); }
@@ -135,7 +136,11 @@ function build() {
     actions: `<button data-act="open">Edit</button><button data-act="drive"${r.track?.pieces?.length ? "" : " disabled"}>Drive</button><button data-act="rename">Rename</button><button data-act="dup">Copy</button><button data-act="del" class="danger">Delete</button>`,
   })).join("");
   $("screen").innerHTML = `<p class="note">Your tracks. Edit one, or start a new one. A track is validated when the builder's test lap reaches the finish: that time is its author time and sets the medals.</p>
-    <div class="grid">${FOCUS ? "" : `<div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div>`}<div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${draftLeft ? `<div class="card new cut" id="draft-go">Unsaved: ${draftLeft.name.replace(/[<&]/g, "")}<small>${draftLeft.base ? "changes to one of your tracks" : "a new track, not saved"} · <button id="draft-drop" class="danger">Discard</button></small></div>` : ""}${cards}</div>`;
+    <div class="grid">${FOCUS ? "" : `<div class="card new tut cut" id="tut">Builder tutorial ▶<small>10 short steps, on a new track</small></div>`}<div class="card new cut" id="new">+ New track</div><div class="card new paste cut" id="paste">Paste a code<small>a track someone shared</small></div>${draftLeft ? `<div class="card new cut" id="draft-go">Unsaved: ${draftLeft.name.replace(/[<&]/g, "")}<small>${draftLeft.base ? "changes to one of your tracks" : "a new track, not saved"} · <button id="draft-drop" class="danger">Discard</button></small></div>` : ""}${cards}</div>
+    <h3 class="sect">Test tracks</h3>
+    <p class="note">The tracks Claude drives to check the physics (turns, stunts, banks, gaps…). One opens in the builder as an unsaved copy: drive it, change it, or save it as yours — the original stays as it is.</p>
+    ${testList ? `<div class="grid">${testList.map((r) => trackCard(r, { actions: `<button data-act="open">Open</button>`, badge: "Test" }).replace('class="card cut"', 'class="card cut test"')).join("")}</div>` : `<p class="note">Loading…</p>`}`;
+  if (!testList) testTracks.list().then((l) => { testList = l; if ((location.hash || "#home") === "#build") build(); });
   // (a new track is a DRAFT until the builder's Save: nothing joins this list by itself — library.js)
   $("new").onclick = () => { if (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and start a new one?`)) return; draft.start(); go({ to: "build", id: DRAFT, fresh: true }); };
   // THE BUILDER TUTORIAL (user, 2026-10-22: "shouldn't it be in the track builder menu?"): a new track,
@@ -157,7 +162,17 @@ function build() {
       build();
     } catch (e) { alert(e.message); }
   };
-  for (const c of document.querySelectorAll(".card[data-id]")) {
+  // a TEST TRACK opens as the draft: an unsaved copy (Save makes it one of yours)
+  for (const c of document.querySelectorAll(".card.test[data-id]")) {
+    c.onclick = (e) => {
+      e.stopPropagation();
+      const rec = testList.find((t) => t.id === c.dataset.id);
+      if (!rec || (draftLeft && !confirm(`Discard your unsaved track “${draftLeft.name}” and open “${rec.name}”?`))) return;
+      draft.keep(null, rec.name, structuredClone(rec.track));
+      go({ to: "build", id: DRAFT, fresh: true });
+    };
+  }
+  for (const c of document.querySelectorAll(".card[data-id]:not(.test)")) {
     const id = c.dataset.id;
     c.onclick = (e) => {
       const act = e.target.closest("button")?.dataset.act ?? "open";

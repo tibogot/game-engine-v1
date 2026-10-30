@@ -335,6 +335,19 @@ app.postFx?.setBloomSelective?.(true);
 app.postFx?.setBloom?.({ enabled: true, strength: 0.9, threshold: 0.0, radius: 0.5 });
 const { scene, camera, renderer } = app;
 keepPipelines(renderer); // (building ↔ driving ↔ a played track switch shading setups: none rebuilt twice)
+// THE STATS PANEL, HIDDEN unless asked for (user, 2026-10-30: "should I really keep the stats panel visible even if it's
+// showing wrong numbers?" — its GPU ms at the 60 fps cap reads the card's power saving, ~2× the real cost; and its
+// timing wrappers cost every frame). ² (the key under Esc; Backquote) shows / hides it, remembered; the lab's I shows it too.
+const STATS_KEY = "thunderline.stats";
+let statsPref = false;
+try { statsPref = localStorage.getItem(STATS_KEY) === "1"; } catch {}
+app.setStatsOverlay?.(statsPref);
+addEventListener("keydown", (e) => {
+  if (e.code !== "Backquote" || e.repeat || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target?.tagName ?? "")) return;
+  statsPref = !statsPref;
+  try { localStorage.setItem(STATS_KEY, statsPref ? "1" : "0"); } catch {}
+  app.setStatsOverlay?.(statsPref);
+});
 app.controls.update = () => {}; // the builder's orbit below owns the camera
 app.controls.enabled = false;
 camera.far = Math.max(camera.far, 9000);
@@ -1416,7 +1429,7 @@ function refreshArcs() {
     // Rush's gaps: a road stops, the next one starts further on): its arc shows where the car comes down, and a road
     // laid on it is the landing. (Its first LEVEL_ARC_SKIP m don't snap: there the next piece continues the road.)
     const level = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1)) < 3 * DEG && !TILES[p.id]?.drop;
-    if (level && (TILES[p.id]?.finish || TILES[p.id]?.closed)) continue; // (a Finish, a wedge's point: nothing flies on)
+    if (TILES[p.id]?.finish || TILES[p.id]?.closed) continue; // (a Finish, a wedge's point: nothing flies on — level or tilted)
     const landing = track.pieces.find((q) => q.flightFrom === p.uid && !isRing(q))?.uid ?? null;
     // the REAL car's take-off speed at this lip (background prediction), else the global guess
     // where and how the REAL car left this lip (background prediction): a flip ramp's curl lets the
@@ -3355,7 +3368,7 @@ function renderHand() {
 // reload each way cost ~30 s since the builder runs on the engine.
 const rig = createDriveRig(app, { prefs: settings.get(), car: settings.get().car });
 // THE LAB's overlay (labHud.js): telemetry, live tuning, zone keys — while driving in the lab
-if (LAB) createLabHud({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getSfx: () => rig.sfxRec, getSynth: () => rig.sfx });
+if (LAB) createLabHud({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getSfx: () => rig.sfxRec, getSynth: () => rig.sfx, setStats: (on) => app.setStatsOverlay?.(on || statsPref) });
 // every drive from the builder: J reads what just jolted the car (joltRecorder.js)
 createJoltRecorder({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getCamera: () => rig.camera });
 // the TEST CAR's hologram: the car itself, once its model is in (its card, the one in hand, the placed one)
@@ -3369,7 +3382,7 @@ rig.modelsReady.then(() => {
 let driving = false;
 const builderUi = ["toolbar", "keys", "steps", "status", "next", "dock", "nav"];
 let saved = null;
-const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>L</kbd> lights · <kbd>Backspace</kbd> back on the road · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>J</kbd> what just jolted? · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Tab</kbd> / <kbd>Esc</kbd> back to building</b>`;
+const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>L</kbd> lights · <kbd>Backspace</kbd> back on the road · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>J</kbd> what just jolted? · <kbd>²</kbd> stats · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Tab</kbd> / <kbd>Esc</kbd> back to building</b>`;
 /** The builder's own scene objects and panels leave for a drive; the camera is kept to come back to. */
 function enterDriveView() {
   driving = true;

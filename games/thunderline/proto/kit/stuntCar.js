@@ -143,11 +143,11 @@ export function trackFromRide(ride) {
   // jolted at every bank out — user, 2026-10-30, "it's shifting the car in one short instant". Under 1 m across a join,
   // the next piece's point goes.)
   // (the gaps: a piece starting > 2 m from where the one before it ended — marked before the joins are thinned below)
-  ride.forEach((r, i) => { const q = ride[i - 1]; if (q && r.piece !== undefined && r.piece !== q.piece && !q.air && !r.air && q.P.distanceToSquared(r.P) > 4) r._gapBefore = true; });
+  ride.forEach((r, i) => { const q = ride[i - 1]; if (q && !r.air && (q.air || ((r.piece ?? r.uid) !== undefined && (r.piece ?? r.uid) !== (q.piece ?? q.uid) && q.P.distanceToSquared(r.P) > 4))) r._gapBefore = true; }); // (…and a hole INSIDE a piece — the Gap jump's: road after flight points; read as road, the glue pulled the car into it at the lip)
   const src = ride.filter((r) => !r.air && r.U).filter((r, i, all) => {
     if (i === 0) return true;
     const d2 = all[i - 1].P.distanceToSquared(r.P);
-    return d2 > 1e-4 && !(d2 < 1 && r.piece !== all[i - 1].piece && all[i + 1]);
+    return d2 > 1e-4 && !(d2 < 1 && (r.piece ?? r.uid) !== (all[i - 1].piece ?? all[i - 1].uid) && all[i + 1]);
   });
   const pts = src.map((r, i) => {
     const a = src[i - 1], c = src[i + 1];

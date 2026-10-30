@@ -220,6 +220,10 @@ export const lessons = {
   passed(id) { return !!readPassed()[id]; },
   markPassed(id) { const all = readPassed(); all[id] = true; try { localStorage.setItem(LESSONS_PASSED, JSON.stringify(all)); } catch {} },
 };
+// CLAUDE'S TEST TRACKS (user, 2026-10-30: "when you check the physics you try some premade tracks — where are they? why
+// can't I see them and test them myself?"): campaign/tests.json, written by tools/thunderTestTracks.mjs — the tracks
+// the physics checks drive. The Build screen opens one as an unsaved copy.
+export const testTracks = { async list() { return (await campaignTier("tests"))?.tracks ?? []; } };
 const readCampaignBests = () => { try { return JSON.parse(localStorage.getItem(CAMPAIGN_BEST)) ?? {}; } catch { return {}; } };
 export const campaign = {
   /** every tier: { tier, tracks } (tracks [] when the tier has no file yet) */
