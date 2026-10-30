@@ -3341,7 +3341,7 @@ function renderHand() {
 // reload each way cost ~30 s since the builder runs on the engine.
 const rig = createDriveRig(app, { prefs: settings.get(), car: settings.get().car });
 // THE LAB's overlay (labHud.js): telemetry, live tuning, zone keys — while driving in the lab
-if (LAB) createLabHud({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getSfx: () => rig.sfxRec });
+if (LAB) createLabHud({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getSfx: () => rig.sfxRec, getSynth: () => rig.sfx });
 // the TEST CAR's hologram: the car itself, once its model is in (its card, the one in hand, the placed one)
 rig.modelsReady.then(() => {
   carHolo = rig.carHologram();

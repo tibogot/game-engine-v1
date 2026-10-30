@@ -312,6 +312,7 @@ export const CHASE_CAM = {
   fovBase: 60,
   fovAtSpeed: 12,     // extra degrees at fovSpeedRef and above
   fovSpeedRef: 50,    // m/s for the full kick — keep matching TIRE.topSpeed
+  fovCurve: 1,        // the kick ∝ (speed / ref)^fovCurve: 1 = linear; > 1 keeps it for the high speeds (Thunderline: 2)
   fovLerp: 3.0,       // slow: a twitchy FOV reads as nausea
 
   // ── IMPACT ─────────────────────────────────────────────────────────────────
@@ -578,7 +579,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
 
     // Total speed, not horizontal, so a near-vertical drop reads as fast too.
     applyFov(
-      CAM.fovBase + CAM.fovAtSpeed * Math.min(1, speed / Math.max(1, CAM.fovSpeedRef)),
+      CAM.fovBase + CAM.fovAtSpeed * Math.min(1, speed / Math.max(1, CAM.fovSpeedRef)) ** CAM.fovCurve,
       dt, snap, CAM.launchFovKick * _fovKick,
     );
 

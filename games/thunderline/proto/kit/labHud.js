@@ -12,6 +12,7 @@ import "./carTune.js"; // (its camera tune: the slider's default)
 const TUNE_KEY = "thunderline.lab.tune";
 const VIEW_KEY = "thunderline.lab.view"; // (which lab panels are open)
 const DRIFT_SOUNDS = [["b", "Old loop"], ["ga", "Long screech"]];
+const WIND_SOUNDS = [["synth", "Synth"], ["a", "Strong"], ["b", "Whistling"], ["c", "Strong 2"], ["off", "Off"]]; // (sfxSamples.js wind a/b/c; "synth" = sfx.js)
 // [object, path, label, min, max, step]
 const SLIDERS = [
   ["Steering", [
@@ -61,6 +62,8 @@ const SLIDERS = [
     [CHASE_CAM, "turnLead", "stays behind in a turn (0 = the old lag, 1 = none)", 0, 1, 0.05],
     [CHASE_CAM, "turnLeadMaxDeg", "turn lead at most (°)", 0, 60, 1],
     [CHASE_CAM, "noseBlend", "looks toward the nose in a drift (0 = the travel)", 0, 0.8, 0.05],
+    [CHASE_CAM, "fovAtSpeed", "lens widens at top speed (°)", 0, 30, 1],
+    [CHASE_CAM, "fovCurve", "…kept for high speeds (1 = linear)", 1, 4, 0.1],
   ]],
   ["Helpers (stunt + arcade)", [
     [STUNT, "takeoff.maxDeg", "take-off guide (° max)", 0, 20, 0.5],
@@ -93,7 +96,7 @@ function save() {
  * @param o.getVehicle () => the car while driving, else null
  * @param o.isDriving () => boolean
  */
-export function createLabHud({ getVehicle, isDriving, getSfx }) {
+export function createLabHud({ getVehicle, isDriving, getSfx, getSynth }) {
   applySaved(); // (the lab's own tune: remembered between visits — the game's defaults stay in code)
   const css = "font:500 12px Barlow, sans-serif;color:#e6edf6;background:rgba(13,20,36,.88);border:1px solid #233149;padding:8px 10px;";
   const tele = document.createElement("div");
@@ -120,6 +123,8 @@ export function createLabHud({ getVehicle, isDriving, getSfx }) {
     <div data-body><div data-note style="opacity:.75;margin:4px 0"></div>${rowsHtml}
     <div style="font:700 13px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase;color:#3fd2ff;margin:8px 0 4px">Drift sound</div>
     <div style="display:flex;gap:6px">${DRIFT_SOUNDS.map(([k, l]) => `<button data-snd="${k}">${l}</button>`).join("")}</div>
+    <div style="font:700 13px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase;color:#3fd2ff;margin:8px 0 4px">Wind</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap">${WIND_SOUNDS.map(([k, l]) => `<button data-wind="${k}">${l}</button>`).join("")}</div>
     <div style="display:flex;gap:6px;margin-top:10px"><button data-a="copy">Copy values</button><button data-a="reset">Reset</button></div></div>`;
   const fold = () => { panel.querySelector("[data-body]").style.display = view.tune ? "" : "none"; panel.querySelector("[data-fold]").textContent = view.tune ? "▾" : "▸"; };
   fold();
@@ -131,6 +136,11 @@ export function createLabHud({ getVehicle, isDriving, getSfx }) {
     if (view.sound && !DRIFT_SOUNDS.some(([k]) => k === view.sound)) delete view.sound; // (a sound since removed)
     if (sfx && view.sound) sfx.pick("squeal", view.sound);
     panel.querySelectorAll("[data-snd]").forEach((el) => (el.style.outline = el.dataset.snd === (view.sound ?? sfx?.choice.squeal) ? "2px solid #3fd2ff" : ""));
+    // THE WIND (sense of speed, 2026-10-30): the synthesised one, a recording (it replaces the synth), or none
+    const syn = getSynth?.(), wind = view.wind ?? (sfx?.choice.wind ?? "synth");
+    if (sfx && view.wind) sfx.pick("wind", ["a", "b", "c"].includes(wind) ? wind : null);
+    if (syn && view.wind) syn.setPart("wind", wind === "synth");
+    panel.querySelectorAll("[data-wind]").forEach((el) => (el.style.outline = el.dataset.wind === wind ? "2px solid #3fd2ff" : ""));
   };
   // the zones, in the H keys panel (the drive page's #help, added to once it exists)
   const ZONES_HTML = `<div data-zones style="margin-top:6px">Zones: ${LAB_ZONES.map((z) => `<kbd>${z.key.replace(/^S/, "⇧")}</kbd> ${z.label.split(" (")[0].split(":")[0]}`).join(" · ")}</div>`;
@@ -156,6 +166,8 @@ export function createLabHud({ getVehicle, isDriving, getSfx }) {
     if (a === "fold") { view.tune = !view.tune; saveView(); fold(); }
     const snd = e.target.dataset.snd;
     if (snd) { view.sound = snd; saveView(); applySound(); }
+    const wd = e.target.dataset.wind;
+    if (wd) { view.wind = wd; saveView(); applySound(); }
     if (a === "copy") { const txt = JSON.stringify(save(), null, 1); try { await navigator.clipboard.writeText(txt); e.target.textContent = "Copied"; } catch { prompt("The values:", txt); } setTimeout(() => (e.target.textContent = "Copy values"), 1200); }
     if (a === "reset") { for (const [o, p, v] of DEFAULTS) set(o, p, v); try { localStorage.removeItem(TUNE_KEY); } catch {} sync(); }
   });

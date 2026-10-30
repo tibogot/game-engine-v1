@@ -2153,15 +2153,17 @@ function roundedEndRailFrames(pp = pieceParams, rp = roadParams, atStart = false
   return computeFrames(pts, _up);
 }
 
-function roundedEndPoints(pp) {
+// (the nose is half the ROAD BEING BUILT, `rp` — the global roadParams was 16 m while Thunderline builds these at 24:
+// the deck reached 36 m and the exit sat at 32, the next piece overlapping the stub, 2026-10-30)
+function roundedEndPoints(pp, rp = roadParams) {
   const L = Math.max(2, pp.roundEndLength ?? 8);
-  const hw = roadParams.width / 2;
+  const hw = rp.width / 2;
   return straightLinePoints(L + hw);
 }
 
-function roundedEndSockets(pp) {
+function roundedEndSockets(pp, rp = roadParams) {
   const L = Math.max(2, pp.roundEndLength ?? 8);
-  const hw = roadParams.width / 2;
+  const hw = rp.width / 2;
   return {
     entryPos: new V3(0, 0, 0),
     entryDir: new V3(0, 0, -1),
@@ -6460,7 +6462,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
    * exits to 1e-9.
    */
   const ppSteps = def.stepRelax ? { ...pp, stepRelax: def.stepRelax } : pp;
-  const points = def.points(ppSteps);
+  const points = def.points(ppSteps, rp);
   const frames = computeFrames(points, _up);
   // Snap end frames to exact analytic tangents (before roll, so banking rolls
   // about the corrected tangent) so connectors hit their labelled angle exactly.
@@ -6696,7 +6698,7 @@ export function buildPiece(pieceId, currentConnector, pp = pieceParams, rp = roa
     // LEVEL sockets: position + heading only, up = world-up. Bank pieces use
     // this so a rolled deck never rolls the connector — the piece always sits
     // upright as authored, and its exit hands the next piece a level frame.
-    const s = def.sockets(pp);
+    const s = def.sockets(pp, rp);
     entryLocal = socketMatrix(s.entryPos, s.entryDir, _up);
     exitLocal = socketMatrix(s.exitPos, s.exitDir, _up);
   } else {

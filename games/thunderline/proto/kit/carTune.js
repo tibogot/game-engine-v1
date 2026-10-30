@@ -27,6 +27,10 @@ CHASE_CAM.turnLead = 0.85;
 // (was 24°), 20° off the nose (was 38°)
 CHASE_CAM.turnLeadMaxDeg = 40;
 CHASE_CAM.noseBlend = 0.3;
+// SENSE OF SPEED (2026-10-30): the lens widens 18° at top speed (was 12°), as the SQUARE of the speed — kept for the
+// high speeds: +5° at 120 km/h, +14° at 200 (linear had spent half of it by 100 km/h)
+CHASE_CAM.fovAtSpeed = 18;
+CHASE_CAM.fovCurve = 2;
 
 export function applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top = CAR_TUNE.top) {
   TIRE.topSpeed = top;

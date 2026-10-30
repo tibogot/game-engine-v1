@@ -26,7 +26,8 @@ export const SAMPLE_SETS = {
   scrape: {},
   landing: {},
 };
-export const GAME_PICK = { squeal: "ga" }; // (2026-10-30: the grain bank A — the old loop "b" repeated)
+export const GAME_PICK = { squeal: "ga", wind: "c" }; // (wind: "Strong 2", picked 2026-10-30 — replaces the synth wind) // (2026-10-30: the grain bank A — the old loop "b" repeated)
+export const WIND_LEVEL = 0.45;
 const LOOPS = ["squeal", "roll", "wind", "scrape"];
 
 /**
@@ -140,7 +141,8 @@ export function createSfxSamples(getCtx, { volume = 0.7, pick = {} } = {}) {
         else ramp(L.squeal.src.playbackRate, 0.92 + 0.16 * sq, 0.05);
       }
       if (L.wind) {
-        ramp(L.wind.gain.gain, 0.02 + 0.55 * sp * sp + (g ? 0 : 0.25 * sp), 0.15);
+        // (× WIND_LEVEL: "it shouldn't disturb the user", 2026-10-30 — ~0.16 at 200 km/h, the synth wind's level)
+        ramp(L.wind.gain.gain, WIND_LEVEL * (0.02 + 0.55 * sp * sp + (g ? 0 : 0.25 * sp)), 0.15);
         ramp(L.wind.src.playbackRate, 0.8 + 0.5 * sp + (g ? 0 : 0.1), 0.2);
       }
       if (L.scrape) {
