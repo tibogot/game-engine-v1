@@ -66,6 +66,36 @@ export function createAutopilot(ride) {
     }
     return ride[from];
   };
+  // THE CURVES AHEAD, for a car that knows its corner speed (ArcadeCar.cornerSpeed): each ride step's curvature
+  // (its heading change over its length) — FLAT steps only (not a bank, a slope, a tube, a gap, a flight): those
+  // keep their own rules below
+  // (the TURN only — the heading's change seen from above, over ≥ 8 m: a kicker's or a crest's pitch is not a curve,
+  // and short steps at the pieces' joints read as sharp ones)
+  const curv = ride.map((r, i) => {
+    const n = ride[i + 1], ds = n ? n.P.distanceTo(r.P) : 0;
+    let j = i + 1, span = ds;
+    while (j + 1 < ride.length && span < 8 && !gapAfter[j]) { span += ride[j + 1].P.distanceTo(ride[j].P); j++; }
+    const m = ride[j];
+    if (!n || !m || gapAfter[i] || r.tube || m.tube || r.air || m.air) return { k: 0, ds };
+    const flat = Math.abs(r.T.y) < 0.15 && Math.abs(m.T.y) < 0.15 && bankTan(r) < 0.1 && bankTan(m) < 0.1;
+    const yaw = Math.abs(Math.atan2(r.T.x * m.T.z - r.T.z * m.T.x, r.T.x * m.T.x + r.T.z * m.T.z));
+    return { k: flat && span > 0 ? yaw / span : 0, ds };
+  });
+  const BRAKE = 16; // m/s² the planner counts on (ARCADE.drive.brake 20, a margin)
+  const MARGIN = 0.75; // of the car's corner speed limits (its line is not a racing line: at 0.85 it ran wide of the 96 m turn)
+  /** brake for the curves ahead: −1 when the car could not get down to a curve's speed in the road left */
+  function curveBrake(car, from, v) {
+    let d = 0;
+    for (let i = from; i < ride.length - 1 && d < (v * v) / (2 * BRAKE) + 40; i++) {
+      const c = curv[i];
+      if (c.k > 0.004) {
+        const vc = car.cornerSpeed(c.k, MARGIN);
+        if (v * v > vc * vc + 2 * BRAKE * d) return v > vc + 1 || d > 0 ? -1 : 0;
+      }
+      d += c.ds;
+    }
+    return 1;
+  }
   // in the air: WHERE WILL IT TOUCH DOWN — the car's flight (gravity + drag) projected forward against
   // the rings ahead; the first one whose surface it passes through within half a road. Lining up with
   // the landing's first ring was not enough: a car faster than the band's slow edge flies past it and
@@ -179,7 +209,9 @@ export function createAutopilot(ride) {
       // past ~40° the wall itself holds the car (the U-turn wall, measured flat out 161-223 km/h: through,
       // 146-169 out): no brake at all
       const vCap = tb < 0.85 ? 26 * Math.sqrt((tb + 1) / (1 - tb)) : Infinity;
-      const throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > vCap && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
+      let throttle = bend > 1.1 && Math.abs(far.y) < 0.4 && Math.abs(_nose.y) < 0.4 && v > vCap && grounded && !ride[best].tube && !farR.tube ? -1 : 1;
+      // a car that knows its corner speed (the arcade car) also brakes for the FLAT curves ahead in time
+      if (throttle > 0 && grounded && car.cornerSpeed) throttle = curveBrake(car, best, v);
       // IN THE AIR, line up with the road across the gap (the landing): yaw the nose onto its
       // direction, pitch onto its slope, roll onto its up — proportional, in the car's own frame
       // (measured: +yaw turns the nose to the car's +X, +pitch raises it, +roll drops the +X side).

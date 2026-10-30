@@ -502,6 +502,24 @@ export class ArcadeCar extends StuntCar {
     }
   }
 
+  /**
+   * THE FASTEST STEADY SPEED (m/s) ON A FLAT CURVE of curvature `k` (1/m), on the grip — for the test autopilot's brake
+   * (autopilot.js): what the side grip (+ downforce) holds AND what the steering can turn, × `margin`. (Its rule from
+   * the old car braked only past a 63° bend ahead: it took a 96 m turn at 237 km/h and ran off — 2026-10-30.)
+   */
+  cornerSpeed(k, margin = 0.85) {
+    if (!(k > 1e-4)) return Infinity;
+    const Gp = ARCADE.grip, S = ARCADE.steer, St = ARCADE.stick, top = ARCADE.drive.top;
+    const ok = (v) => {
+      const aLat = Gp.g * G * (1 + Gp.aero * (v > St.minSpeed ? Math.min(St.max, St.k * v * v) : 0) / G);
+      const w = THREE.MathUtils.lerp(S.low, S.high, THREE.MathUtils.clamp((v - S.lowAt) / (top - S.lowAt), 0, 1));
+      return v * v * k <= aLat * margin && v * k <= w * margin;
+    };
+    let lo = 3, hi = 120;
+    for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (ok(m)) lo = m; else hi = m; }
+    return lo;
+  }
+
   /** ON THE ROAD: engine, brakes, the grip curve, the turn rate, the car kept on the surface */
   _groundDrive(dt, down, surf, tr, stunt) {
     const body = this.body, w = Math.max(down, 2) / 4; // (fewer wheels, less authority — never none: the coyote time)
