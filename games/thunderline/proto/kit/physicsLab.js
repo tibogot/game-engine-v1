@@ -42,6 +42,10 @@ export const LAB_ZONES = [
   // BANKED (user, 2026-10-29: "with a banked-in shape the car was behaving very weirdly"): in, two banked 45°, out
   { key: "S4", label: "Banked: bank in 22° · banked 45° × 2 · bank out", x: 1500, chain: ["straight_64", "straight_64", "straight_64", "bank_in_22", "banked_turn_45", "banked_turn_45", "bank_out_22", "straight_64"] },
   { key: "S5", label: "Banked 180°", x: 1750, chain: ["straight_64", "straight_64", "straight_64", "bank_in_22", "banked_turn_180", "bank_out_22", "straight_64"] },
+  // TURNS ONLY (user, 2026-10-30: "that piece of road is not a good test for turning, handbrake and drift because of the
+  // bumps before"): flat, smooth, a 192 m run-up — hairpin right, hairpin left, a wide U-turn, straights between to
+  // get the speed back
+  { key: "S6", label: "Turns: hairpin R · hairpin L · U-turn 48 m (flat, no bumps)", x: 2150, chain: ["straight_64", "straight_64", "straight_64", "hairpin_24", "straight_64", "straight_64", "hairpin_24_L", "straight_64", "straight_64", "turn_48_180", "straight_64", "straight_64"], signs: [{ word: "HAIRPIN", z: -150 }] },
   { key: "S3", label: "Movers: pendulum · sliding wall · low spinning bar · sweeper", x: 1300, items: [
     { kind: "ob_pendulum", x: 0, z: -50 }, { kind: "ob_slider", x: 30, z: -50 }, { kind: "ob_lowbar", x: 60, z: -50 }, { kind: "ob_sweeper", x: 90, z: -50 },
   ] },

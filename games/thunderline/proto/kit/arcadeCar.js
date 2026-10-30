@@ -46,8 +46,13 @@ export const ARCADE = {
   // `handbrake` scales it (a drift)
   // `aero`: the DOWNFORCE GRIPS — the grip × (1 + aero × downforce / g) (user, 2026-10-29, a real track: at 330 km/h
   // Sky Switchback's banked fast turn asked 6.7 g, the flat 2.2 g slid the car off it; a fast car turns harder fast)
-  grip: { g: 2.2, peakDeg: 8, slideDeg: 30, slide: 0.7, handbrake: 0.35, aero: 1, bank: 2 }, // bank: see _groundDrive
-  steer: { low: 2.2, high: 1.0, lowAt: 8, response: 9, handbrakeBoost: 1.5 }, // rad/s at lowAt m/s → at top speed
+  grip: { g: 2.2, peakDeg: 8, slideDeg: 30, slide: 0.7, handbrake: 0.35, aero: 1, bank: 2, carve: 0.6 }, // bank: see _groundDrive
+  // (low/high HALVED 2026-10-30, 2.2/1.0 → 1.1/0.5: the air control's pull on the road — a bug, fixed — had halved the
+  // turn rate since 10-29, and that is the grip feel you know; a drift turns harder: drift.steer)
+  steer: { low: 1.1, high: 0.5, lowAt: 8, response: 9, handbrakeBoost: 2.5, slideTurn: true }, // rad/s at lowAt m/s → at top speed
+  // THE DRIFT (a state — see _groundDrive): starts on the handbrake with the wheel turned, or past fromDeg of slide;
+  // ends under endDeg. The path turned toward the nose at `rate` rad/s, the steering × `steer`, the angle held past holdDeg
+  drift: { rate: 0.9, minSpeed: 10, holdDeg: 35, exitDeg: 75, steer: 2, fromDeg: 22, endDeg: 5 },
   // mixFrom → mixFull °: wheel surfaces disagreeing this much hand the tilt over to the springs (mixedRate /s of pull left)
   align: { rate: 10, max: 4, rollOnly: 4, mixFrom: 4, mixFull: 12, mixedRate: 1.5 }, // /s, rad/s: up onto the wheels' surface; /s: the body-on-road roll righting
   // ON THE ROAD: `coyote` s after the last wheel contact the car still counts as on it, while the road (the track
@@ -100,6 +105,7 @@ export const ARCADE = {
 };
 
 const G = 9.81, DEG = Math.PI / 180;
+const smooth01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const _com = new THREE.Vector3(), _n = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3();
 const _up = new THREE.Vector3(), _tmp = new THREE.Vector3(), _axis = new THREE.Vector3(), _F = new THREE.Vector3();
 const _qi = new THREE.Quaternion(), _w = new THREE.Vector3(), _roadUp = new THREE.Vector3(), _rel = new THREE.Vector3();
@@ -339,8 +345,11 @@ export class ArcadeCar extends StuntCar {
       body.addForce(_F);
 
       if (onRoad) this._groundDrive(subDt, down, surf, stunt > 0 ? tr : null, stunt);
+      // (the air control ONLY off the road: from 2026-10-29 it ran on the road too — this `else` had become the landing's
+      // — and its hold and landing magnet pulled the yaw back toward the travel every substep: the steering got half its
+      // turn rate and every drift was straightened. Found 2026-10-30, the hairpin.)
       if (landing) { this._settleRoll(subDt, surf); this._landRollT -= subDt; }
-      else this._airControl(subDt);
+      else if (!onRoad) this._airControl(subDt);
 
       // ---- just landed: nothing carries it off the surface again
       if (this._landHold > 0) {
@@ -521,12 +530,57 @@ export class ArcadeCar extends StuntCar {
     // 4.7 g car: it slid 10 m wide — user, 2026-10-29, the banked shapes). Up to 45° of bank: × (1 + bank·sin).
     const bankAng = Math.min(Math.acos(THREE.MathUtils.clamp(surf.y, -1, 1)), 45 * DEG);
     const grip = Gp.g * G * curve * (hb ? Gp.handbrake : 1) * w * (1 + Gp.aero * (this._stickAcc ?? 0) / G) * (1 + Gp.bank * Math.sin(bankAng));
-    body.vel.addScaledVector(_r, -Math.sign(vR) * Math.min(Math.abs(vR), grip * dt));
+    const take = Math.min(Math.abs(vR), grip * dt);
+    body.vel.addScaledVector(_r, -Math.sign(vR) * take);
+    // A DRIFT CARVES (user, 2026-10-30, the hairpin): taking the sideways speed away scrubbed ALL of it — at 40° of slide
+    // that is 64% of the speed, so a drift was always slower than crawling round on the grip. An arcade drift turns the
+    // speed toward the nose instead: past `peakDeg`, `carve` of what the grip took comes back along the nose (the
+    // speed is only ever kept, never gained). It fades out from 60° to 90°: a car spun broadside scrubs, as before.
+    if (Gp.carve > 0 && vF > 1 && slide > Gp.peakDeg) {
+      const k = Gp.carve * Math.min(1, (slide - Gp.peakDeg) / Gp.peakDeg, (90 - slide) / 30), vR2 = Math.abs(vR) - take;
+      body.vel.addScaledVector(_f, k * (Math.sqrt(vF * vF + vR * vR - vR2 * vR2) - vF));
+    }
+    // THE DRIFT, A STATE (Burnout, Ridge Racer — user, 2026-10-30: "if the user has to slow down as much then it's very
+    // annoying": the 24 m hairpin wanted 85 km/h on the grip). The handbrake with the wheel turned, or a slide past
+    // `fromDeg`, STARTS it; it lasts until the slide is back under `endDeg` (the wheel let go, or countersteered), the
+    // speed under `minSpeed`, or a crash. While it lasts the car's travel is bent toward its nose at up to `rate` rad/s on
+    // top of the grip, the speed kept (half of it on the handbrake: the rears locked; gone by `exitDeg`: a spin is a spin).
+    const Dr = ARCADE.drift;
+    if (Dr.rate <= 0 || vF < Dr.minSpeed || this._crashT > 0) this._drifting = false;
+    else if (!this._drifting) this._drifting = (hb && Math.abs(this.input.steer) > 0.3) || slide > Dr.fromDeg;
+    else if (!hb && slide < Dr.endDeg) this._drifting = false;
+    this.arcade.drifting = this._drifting;
+    let driftRate = 0; // (rad/s the path is turned, + = left)
+    if (this._drifting) {
+      const k = (1 - smooth01((slide - Dr.exitDeg + 15) / 15)) * (hb ? 0.5 : 1);
+      if (k > 0) {
+        const f2 = body.vel.dot(_f), r2 = body.vel.dot(_r), phi = Math.atan2(r2, f2);
+        const th = -Math.sign(phi) * Math.min(Math.abs(phi), Dr.rate * k * dt), c = Math.cos(th), s = Math.sin(th);
+        body.vel.addScaledVector(_f, f2 * c - r2 * s - f2).addScaledVector(_r, f2 * s + r2 * c - r2);
+        driftRate = th / dt;
+      }
+    }
     this.arcade.slideDeg = slide;
     // steering: the turn rate about the surface (positive steer = left, the old car's convention)
-    const S = ARCADE.steer, sp = Math.abs(vF), tL = THREE.MathUtils.clamp((sp - S.lowAt) / Math.max(1, top - S.lowAt), 0, 1);
-    let want = this.input.steer * THREE.MathUtils.lerp(S.low, S.high, tL) * Math.min(1, sp / 4) * Math.sign(vF || 1);
+    // A SLIDE KEEPS TURNING (user, 2026-10-30: "how am I supposed to take that turn" — the 24 m hairpin): the turn rate
+    // followed the FORWARD speed, so a car swung sideways on the handbrake had none left and its rotation stopped dead at
+    // ~90°. On the handbrake or past `slideDeg` it follows the whole speed: the tail swings round, you steer it out.
+    const S = ARCADE.steer, spAll = Math.hypot(vF, vR), sliding = S.slideTurn && (hb || slide > Gp.slideDeg);
+    const sp = sliding ? spAll : Math.abs(vF), tL = THREE.MathUtils.clamp((sp - S.lowAt) / Math.max(1, top - S.lowAt), 0, 1);
+    const dir = sliding ? (vF < -0.5 * spAll ? -1 : 1) : Math.sign(vF || 1); // (sideways is still forwards)
+    let want = this.input.steer * THREE.MathUtils.lerp(S.low, S.high, tL) * Math.min(1, sp / 4) * dir;
     if (hb) want *= S.handbrakeBoost;
+    // IN A DRIFT, steering into it turns the nose `drift.steer` × harder: on the grip's turn rate alone a handbrake slide
+    // straightened at once (the grip driving, out of a drift, is untouched). Into it = the way the nose points off the
+    // travel (or, just started, the way the wheel is turned).
+    else if (this._drifting && (Math.abs(vR) < 0.5 || Math.sign(want) === -Math.sign(vR))) want *= Dr.steer;
+    // THE DRIFT HOLDS ITS ANGLE: past `holdDeg` (+10°) of slide, steering further into the drift turns the nose no faster
+    // than the path turns (the assist + the grip) — the angle holds instead of growing into a spin. Countersteer, or the
+    // handbrake, still change it.
+    if (this._drifting && !hb && driftRate !== 0 && Math.sign(want) === Math.sign(driftRate)) {
+      const pathRate = Math.abs(driftRate) + grip / Math.max(1, spAll), h = smooth01((slide - Dr.holdDeg) / 10);
+      if (Math.abs(want) > pathRate) want = Math.sign(want) * THREE.MathUtils.lerp(Math.abs(want), pathRate, h);
+    }
     // the stunt guide: toward the road's own direction (its forward laid on the surface the wheels are on)
     if (tr && vF > 5) {
       _tmp.copy(tr.T).addScaledVector(surf, -tr.T.dot(surf));

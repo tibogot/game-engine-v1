@@ -263,6 +263,21 @@ export const CHASE_CAM = {
    *  spring this is a true backstop and normally inactive — a loop sweeps about
    *  90°/s. Kept because a spring bounds acceleration, not speed. */
   boomMaxRate: 300,
+  /** TURN LEAD (Thunderline, 2026-10-29; 0 = off, the old game's camera). The two smoothings above — the heading's
+   *  1/headingLerp and the boom's spring — each trail a steady turn by (turn rate × their time): measured on the
+   *  arcade car, 31° behind its nose at 140 km/h round the drift circle, the road it was turning into off the side
+   *  of the screen. The boom's target is led by that same lag × `turnLead` (1 = none left), from the travel
+   *  direction's own turn rate (eased at `turnLeadLerp`/s), at most `turnLeadMaxDeg`; on the ground, moving, the travel
+   *  mostly level (`turnLeadLevel`: its horizontal part → +0.12 fades it in) and the car's up at least `turnLeadUpY`
+   *  (→ +0.1). A 45° bank (up 0.71) leads in full — gated at 0.75 the lead dropped out mid-turn and the camera swung;
+   *  a loop's climb and a wall ride lead not at all — let in there, the lead chased the steep travel direction's fast
+   *  swinging compass heading and doubled the view's jolts (A/B, 2026-10-29). A steady turn loses its lag; a sudden
+   *  change is smoothed as before. */
+  turnLead: 0,
+  turnLeadLerp: 6,
+  turnLeadMaxDeg: 25,
+  turnLeadUpY: 0.55,
+  turnLeadLevel: 0.85,
 
   // ── LEVELLING ──────────────────────────────────────────────────────────────
   // SAFETY NET ONLY. `poleGuard` keeps the boom's elevation at or under 68°, so
@@ -407,6 +422,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
   const _boom = new THREE.Vector3();           // raw road-frame boom
   const _boomDir = new THREE.Vector3(0, 0, 1); // actual boom direction (unit)
   let _az = 0, _el = 0, _azTgt = 0;            // the boom, as angles
+  let _turnRate = 0, _prevDirAz = null;        // the travel direction's turn rate (CAM.turnLead)
   const _vel = [0, 0];                         // their spring velocities
   let _initBoom = false;
   const _d = new THREE.Vector3();             // camera → car
@@ -497,6 +513,8 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     _fovKickTgt = 0;
     _wasGrounded = true;
     _groundFor = 0;
+    _turnRate = 0;
+    _prevDirAz = null;
     if (vehicle) vehicle.landImpact = 0;
   }
 
@@ -825,7 +843,27 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
       // mid-flight: position and velocity are carried in `_vel`/`_az` and stay
       // continuous, only the stiffness steps.
       const smoothT = flipFlat ? CAM.flipSmoothTime : CAM.boomSmoothTime;
-      _az = smoothDamp(_az, _az + dAz, _vel, 0, smoothT, dt, cap);
+      // the turn lead (CAM.turnLead): ahead of the turn by the lag the two smoothings will add
+      let lead = 0;
+      if (CAM.turnLead > 0) {
+        const hz = Math.hypot(_dirTgt.x, _dirTgt.z), dirAz = Math.atan2(_dirTgt.x, _dirTgt.z);
+        let raw = 0;
+        if (_prevDirAz !== null && hz > 0.5 && dt > 0) {
+          raw = dirAz - _prevDirAz;
+          while (raw > Math.PI) raw -= 2 * Math.PI;
+          while (raw < -Math.PI) raw += 2 * Math.PI;
+          raw = THREE.MathUtils.clamp(raw / dt, -3, 3); // (rad/s: a hard knock's one-frame swing is not a turn)
+        }
+        _prevDirAz = hz > 0.5 ? dirAz : null;
+        // (and moving: under walking pace the travel direction is noise — a car stopped by a cone threw the lead about)
+        const gate = grounded && !flipFlat
+          ? THREE.MathUtils.smoothstep(_carUp.y, CAM.turnLeadUpY, CAM.turnLeadUpY + 0.1) * THREE.MathUtils.smoothstep(hz, CAM.turnLeadLevel, CAM.turnLeadLevel + 0.12) * THREE.MathUtils.smoothstep(speed, 6, 14)
+          : 0;
+        _turnRate += (raw * gate - _turnRate) * (1 - Math.exp(-CAM.turnLeadLerp * dt));
+        const maxLead = CAM.turnLeadMaxDeg * D2R;
+        lead = THREE.MathUtils.clamp(_turnRate * (1 / headRate + smoothT) * CAM.turnLead, -maxLead, maxLead);
+      }
+      _az = smoothDamp(_az, _az + dAz + lead, _vel, 0, smoothT, dt, cap);
       _el = smoothDamp(_el, elTgt, _vel, 1, smoothT, dt, cap);
     }
 

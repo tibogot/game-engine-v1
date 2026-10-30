@@ -6,6 +6,8 @@ import { ARCADE } from "./arcadeCar.js";
 import { TIRE, WHEEL } from "../../../../v3/play/modularRoadVehicle.js";
 import { STUNT } from "./stuntCar.js";
 import { LAB_ZONES, zoneSpawn } from "./physicsLab.js";
+import { CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
+import "./carTune.js"; // (its camera tune: the slider's default)
 
 const TUNE_KEY = "thunderline.lab.tune";
 // [object, path, label, min, max, step]
@@ -21,6 +23,9 @@ const SLIDERS = [
     [ARCADE, "grip.peakDeg", "grip peaks at (° slide)", 2, 20, 0.5],
     [ARCADE, "grip.slide", "grip once sliding (×)", 0.2, 1, 0.05],
     [ARCADE, "grip.handbrake", "handbrake grip (×)", 0.05, 1, 0.05],
+    [ARCADE, "grip.carve", "a drift keeps its speed (0 = scrubs, 1 = all)", 0, 1, 0.05],
+    [ARCADE, "drift.rate", "a drift turns the path (rad/s, 0 off)", 0, 2.5, 0.05],
+    [ARCADE, "drift.holdDeg", "a drift holds its angle past (°)", 15, 70, 1],
     [ARCADE, "grip.aero", "downforce adds grip (×, 0 off)", 0, 2, 0.05],
     [ARCADE, "grip.bank", "a bank adds grip (× sin bank, 0 off)", 0, 4, 0.1],
   ]],
@@ -50,6 +55,9 @@ const SLIDERS = [
     [ARCADE, "magnet.rollDeg", "landing magnet: roll window (°)", 0, 60, 1],
     [ARCADE, "magnet.yawDeg", "landing magnet: spin window (°)", 0, 60, 1],
   ]],
+  ["Camera", [
+    [CHASE_CAM, "turnLead", "stays behind in a turn (0 = the old lag, 1 = none)", 0, 1, 0.05],
+  ]],
   ["Helpers (stunt + arcade)", [
     [STUNT, "takeoff.maxDeg", "take-off guide (° max)", 0, 20, 0.5],
     [STUNT, "catch.maxDeg", "landing catch (° max)", 0, 60, 1],
@@ -59,7 +67,7 @@ const SLIDERS = [
 const get = (o, path) => path.split(".").reduce((a, k) => a[k], o);
 const set = (o, path, v) => { const ks = path.split("."), last = ks.pop(); ks.reduce((a, k) => a[k], o)[last] = v; };
 const DEFAULTS = SLIDERS.flatMap(([, rows]) => rows.map(([o, p]) => [o, p, get(o, p)]));
-const keyOf = (o, p) => `${o === ARCADE ? "ARCADE" : "STUNT"}.${p}`;
+const keyOf = (o, p) => `${o === ARCADE ? "ARCADE" : o === CHASE_CAM ? "CAM" : "STUNT"}.${p}`;
 
 // ONLY WHAT YOU MOVED is kept (format v2): a whole snapshot pinned every slider, so a new default in code never
 // reached a lab that had been tuned once. The first format's air.follow is dropped (its default changed, 10-29).

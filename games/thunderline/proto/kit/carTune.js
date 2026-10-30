@@ -3,6 +3,8 @@
 // The wheel: the old car writes WHEEL.radius/thickness from the wheel MODEL (setWheelStyle("glb")), so
 // the drive page's car rolled on 0.374 m wheels and the builder's on the 0.36 m default — on a flip
 // ramp's curl that was 146 vs 119 km/h at the lip (2026-10-18). The real build splits look from physics.
+import { CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
+
 export const CAR_TUNE = {
   top: 63, // m/s (P3 speed step)
   substeps: 3, // 1/360 s: ≤ 0.25 m of travel per substep up to 90 m/s
@@ -16,6 +18,10 @@ export const CAR_TUNE = {
   railMu: 0.15,
   railCrashSpeed: Infinity,
 };
+
+// THE CAMERA STAYS BEHIND IN A TURN (chaseCamera.js turnLead: 0 = the old game's lag, 1 = none; 0.85 leaves a few
+// degrees of trail). Set when this module loads, so the lab's slider reads it as its default.
+CHASE_CAM.turnLead = 0.85;
 
 export function applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top = CAR_TUNE.top) {
   TIRE.topSpeed = top;
