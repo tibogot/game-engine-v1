@@ -454,12 +454,16 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   function engineTick(dt, input) {
     const { race, rules } = S;
     _nose.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
-    const kmh = Math.max(0, vehicle.body.vel.dot(_nose)) * 3.6;
+    // REVERSING pulls too (user, 2026-10-30: "why does driving backward make no engine sound"): backwards, the engine
+    // reads the speed backwards and the reverse pedal as its throttle (reverse gear ≈ first) — it read only forward
+    // speed and forward throttle, and reversed at idle. Braking while still rolling forwards is no throttle, as before.
+    const vF = vehicle.body.vel.dot(_nose), reversing = vF < 0.5 && (input.throttle ?? 0) < 0;
+    const kmh = Math.abs(vF) * 3.6;
     const parked = race.s.state === "finished" && !vehicle.enabled;
-    const throttle = parked ? 0 : Math.max(0, input.throttle ?? 0);
+    const throttle = parked ? 0 : reversing ? -(input.throttle ?? 0) : Math.max(0, input.throttle ?? 0);
     // held on the line, the wheels don't turn: the engine revs freely, as in the air
     const free = race.holding || vehicle.groundedCount === 0;
-    engineSound.update(engine.update(dt, kmh, throttle, !free, !race.holding && vehicle.groundedCount === 0));
+    engineSound.update(engine.update(dt, kmh, throttle, !free, !race.holding && vehicle.groundedCount === 0, reversing));
     // tyres slide when the car moves SIDEWAYS (car-local x); braking = the brake held at speed
     _side.set(1, 0, 0).applyQuaternion(vehicle.body.quat);
     const boosting = rules.boostLeft > 0;
@@ -467,7 +471,7 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     wasBoosting = boosting;
     // scrape: how fast the car slides along a rail, 3 → 30 m/s as 0 → 1 (the sparks' own scale, sparks.js)
     const scrape = vehicle.enabled && vehicle.scraping ? Math.max(0, Math.min(1, (vehicle.scrapeSpeed - 3) / 27)) : 0;
-    const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: (input.throttle ?? 0) < 0 || !!input.handbrake, boosting, scrape };
+    const car = { kmh, slip: vehicle.body.vel.dot(_side), grounded: vehicle.groundedCount > 0, braking: ((input.throttle ?? 0) < 0 && !reversing) || !!input.handbrake, boosting, scrape }; // (reversing is not braking: no brake squeal)
     sfx.update(dt, car);
     sfxRec.update(dt, car);
     // the arcade car's CRASHES and body knocks (arcadeCar.js marks them; heard once, then cleared)

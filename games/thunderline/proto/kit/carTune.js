@@ -22,6 +22,11 @@ export const CAR_TUNE = {
 // THE CAMERA STAYS BEHIND IN A TURN (chaseCamera.js turnLead: 0 = the old game's lag, 1 = none; 0.85 leaves a few
 // degrees of trail). Set when this module loads, so the lab's slider reads it as its default.
 CHASE_CAM.turnLead = 0.85;
+// IN A DRIFT (2026-10-30): the lead may reach 40° (a 25° cap left a tight drift's view 24° outside the travel), and the
+// boom is drawn 30 % from the travel toward the nose — measured round a held drift at 120–170 km/h: 6° behind the travel
+// (was 24°), 20° off the nose (was 38°)
+CHASE_CAM.turnLeadMaxDeg = 40;
+CHASE_CAM.noseBlend = 0.3;
 
 export function applyCarTune({ TIRE, WHEEL, SOLID, CRASH }, top = CAR_TUNE.top) {
   TIRE.topSpeed = top;

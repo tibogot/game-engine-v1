@@ -278,6 +278,11 @@ export const CHASE_CAM = {
   turnLeadMaxDeg: 25,
   turnLeadUpY: 0.55,
   turnLeadLevel: 0.85,
+  /** NOSE BLEND (Thunderline, 2026-10-30, the camera in drifts; 0 = off): the boom follows the travel direction, so a
+   *  drift shows the car sideways — but held there, a 40° slide round a tight turn pointed the view at the OUTSIDE of
+   *  the turn, the road ahead off screen. On the ground, the boom's direction is drawn this far from the travel
+   *  toward the car's nose (0.3: 12° of a 40° slide), as arcade chase cameras do. */
+  noseBlend: 0,
 
   // ── LEVELLING ──────────────────────────────────────────────────────────────
   // SAFETY NET ONLY. `poleGuard` keeps the boom's elevation at or under 68°, so
@@ -395,7 +400,9 @@ export const CHASE_CAM = {
  * @param {() => boolean} [o.isOrbit] free-look override (build mode / debug)
  */
 export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () => false, params = {} }) {
-  const CAM = { ...CHASE_CAM, ...params };
+  // (LIVE: CHASE_CAM is the prototype, not copied — a copy made at the drive's start left the lab's camera sliders
+  // changing nothing, 2026-10-30; `params` and what is set on CAM here still win)
+  const CAM = Object.assign(Object.create(CHASE_CAM), params);
   if (camera.isPerspectiveCamera && params.fovBase == null) CAM.fovBase = camera.fov;
 
   const _boomF = new THREE.Vector3(0, 0, 1);  // boom forward (unit)
@@ -583,6 +590,7 @@ export function createChaseCamera({ camera, vehicle, orbit = null, isOrbit = () 
     const reversing = grounded && v.dot(_carFwd) < -0.5;
     if (speed > CAM.minSpeed && !reversing) _dirTgt.copy(v).multiplyScalar(1 / speed);
     else _dirTgt.copy(_carFwd);
+    if (CAM.noseBlend > 0 && grounded && speed > CAM.minSpeed && !reversing) _dirTgt.lerp(_carFwd, CAM.noseBlend).normalize();
 
     // ── THE LOOP-BACK: RIDE THE CAR'S OWN FRAME UP THE WALL, THEN FREEZE ────
     // Three reference frames from the game this copies, in order: on the wall

@@ -11,6 +11,7 @@ import "./carTune.js"; // (its camera tune: the slider's default)
 
 const TUNE_KEY = "thunderline.lab.tune";
 const VIEW_KEY = "thunderline.lab.view"; // (which lab panels are open)
+const DRIFT_SOUNDS = [["b", "Old loop"], ["ga", "Long screech"]];
 // [object, path, label, min, max, step]
 const SLIDERS = [
   ["Steering", [
@@ -58,6 +59,8 @@ const SLIDERS = [
   ]],
   ["Camera", [
     [CHASE_CAM, "turnLead", "stays behind in a turn (0 = the old lag, 1 = none)", 0, 1, 0.05],
+    [CHASE_CAM, "turnLeadMaxDeg", "turn lead at most (°)", 0, 60, 1],
+    [CHASE_CAM, "noseBlend", "looks toward the nose in a drift (0 = the travel)", 0, 0.8, 0.05],
   ]],
   ["Helpers (stunt + arcade)", [
     [STUNT, "takeoff.maxDeg", "take-off guide (° max)", 0, 20, 0.5],
@@ -90,7 +93,7 @@ function save() {
  * @param o.getVehicle () => the car while driving, else null
  * @param o.isDriving () => boolean
  */
-export function createLabHud({ getVehicle, isDriving }) {
+export function createLabHud({ getVehicle, isDriving, getSfx }) {
   applySaved(); // (the lab's own tune: remembered between visits — the game's defaults stay in code)
   const css = "font:500 12px Barlow, sans-serif;color:#e6edf6;background:rgba(13,20,36,.88);border:1px solid #233149;padding:8px 10px;";
   const tele = document.createElement("div");
@@ -115,9 +118,20 @@ export function createLabHud({ getVehicle, isDriving }) {
       <input type="range" data-k="${keyOf(o, p)}" min="${min}" max="${max}" step="${step}" style="grid-column:1 / 3;width:100%"></label>`).join("")).join("");
   panel.innerHTML = `<div data-a="fold" style="font:700 16px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase;cursor:pointer">Tuning <span data-fold style="float:right;opacity:.6"></span></div>
     <div data-body><div data-note style="opacity:.75;margin:4px 0"></div>${rowsHtml}
+    <div style="font:700 13px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase;color:#3fd2ff;margin:8px 0 4px">Drift sound</div>
+    <div style="display:flex;gap:6px">${DRIFT_SOUNDS.map(([k, l]) => `<button data-snd="${k}">${l}</button>`).join("")}</div>
     <div style="display:flex;gap:6px;margin-top:10px"><button data-a="copy">Copy values</button><button data-a="reset">Reset</button></div></div>`;
   const fold = () => { panel.querySelector("[data-body]").style.display = view.tune ? "" : "none"; panel.querySelector("[data-fold]").textContent = view.tune ? "▾" : "▸"; };
   fold();
+  // THE DRIFT SOUND to compare by ear (user, 2026-10-30: "the drift sound is repeating badly"): the old 1.5 s loop, or
+  // the grain banks A / B (sfxSamples.js GRAINS) — remembered; the game's pick is sfxSamples GAME_PICK
+  let soundOn = false;
+  const applySound = () => {
+    const sfx = getSfx?.();
+    if (view.sound && !DRIFT_SOUNDS.some(([k]) => k === view.sound)) delete view.sound; // (a sound since removed)
+    if (sfx && view.sound) sfx.pick("squeal", view.sound);
+    panel.querySelectorAll("[data-snd]").forEach((el) => (el.style.outline = el.dataset.snd === (view.sound ?? sfx?.choice.squeal) ? "2px solid #3fd2ff" : ""));
+  };
   // the zones, in the H keys panel (the drive page's #help, added to once it exists)
   const ZONES_HTML = `<div data-zones style="margin-top:6px">Zones: ${LAB_ZONES.map((z) => `<kbd>${z.key.replace(/^S/, "⇧")}</kbd> ${z.label.split(" (")[0].split(":")[0]}`).join(" · ")}</div>`;
   const all = SLIDERS.flatMap(([, rows]) => rows);
@@ -140,6 +154,8 @@ export function createLabHud({ getVehicle, isDriving }) {
   panel.addEventListener("click", async (e) => {
     const a = e.target.closest("[data-a]")?.dataset.a;
     if (a === "fold") { view.tune = !view.tune; saveView(); fold(); }
+    const snd = e.target.dataset.snd;
+    if (snd) { view.sound = snd; saveView(); applySound(); }
     if (a === "copy") { const txt = JSON.stringify(save(), null, 1); try { await navigator.clipboard.writeText(txt); e.target.textContent = "Copied"; } catch { prompt("The values:", txt); } setTimeout(() => (e.target.textContent = "Copy values"), 1200); }
     if (a === "reset") { for (const [o, p, v] of DEFAULTS) set(o, p, v); try { localStorage.removeItem(TUNE_KEY); } catch {} sync(); }
   });
@@ -184,6 +200,7 @@ export function createLabHud({ getVehicle, isDriving }) {
     if (help) help.style.display = v && !view.help ? "none" : "";
     if (perf) { if (v && !view.info) { perf.dataset.labHid = "1"; perf.style.display = "none"; } else if (perf.dataset.labHid) { delete perf.dataset.labHid; perf.style.display = ""; } }
     if (help && v) hint.style.bottom = view.help ? `${help.offsetHeight + 24}px` : "16px";
+    if (!v) soundOn = false; else if (!soundOn) { soundOn = true; applySound(); } // (the recordings exist once a drive runs)
     if (!v) return;
     const now = performance.now(), dt = Math.min(0.1, (now - t0) / 1000);
     t0 = now;

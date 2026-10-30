@@ -14,6 +14,7 @@ export const ENGINE = {
   gearTopKmh: [72, 112, 150, 188, 228, 268], // 6 gears; 6th tops out past the boosted speed
   wheelRadius: 0.374,
   launchRpm: 4600, // wheelspin floor in 1st with the throttle down
+  reverseRpm: 6200, reverseKmh: 50, // REVERSE (2026-10-30): one gear, these revs at the car's reverse top speed
   freeRevUp: 9000, // rpm/s revving in the air / in neutral
   freeRevDown: 5200, // rpm/s falling off the throttle
   follow: 18, // 1/s: how fast RPM follows the wheels (drivetrain lash)
@@ -49,11 +50,13 @@ export function createEngineModel(cfg = ENGINE) {
      * @param throttle  0..1 (the player's accelerator; brakes are 0)
      * @param grounded  wheels on the ground (false in the air AND held on the start line)
      * @param air  in the air (the wheels still turn): near the take-off RPM, light, never on the limiter
+     * @param reverse  driving backwards: one gear, the revs from idle to `reverseRpm` over 0 → `reverseKmh`
      */
-    update(dt, kmh, throttle, grounded, air = false) {
+    update(dt, kmh, throttle, grounded, air = false, reverse = false) {
       const thr = Math.max(0, Math.min(1, throttle));
       // GEAR: shift on RPM, only with the wheels down (no shifts mid-air)
-      if (grounded && s.shifting <= 0) {
+      if (reverse && grounded) { s.gear = 1; s.shifting = 0; }
+      else if (grounded && s.shifting <= 0) {
         const wheel = wheelRpmAt(kmh);
         const inGear = wheel * ratio[s.gear - 1];
         if (inGear > cfg.shiftUp && thr > 0.3 && s.gear < ratio.length) { s.gear++; s.shifting = cfg.shiftTime; }
@@ -77,7 +80,8 @@ export function createEngineModel(cfg = ENGINE) {
       } else {
         if (s.wasAir) { s.rpm = Math.max(cfg.idle, s.rpm - cfg.landDip); s.wasAir = false; } // the tyres bite
         target = wheelRpmAt(kmh) * ratio[s.gear - 1];
-        if (s.gear === 1 && thr > 0.5) target = Math.max(target, cfg.launchRpm); // launch wheelspin
+        if (reverse) target = cfg.idle + (cfg.reverseRpm - cfg.idle) * Math.min(1, kmh / cfg.reverseKmh) * (0.6 + 0.4 * thr); // (the launch floor held a flat 4600 all the way back)
+        else if (s.gear === 1 && thr > 0.5) target = Math.max(target, cfg.launchRpm); // launch wheelspin
         target = Math.max(cfg.idle, target);
         if (s.shifting > 0) target = Math.min(target, s.rpm); // the clutch is out: no climbing
         s.rpm += (target - s.rpm) * (1 - Math.exp(-dt * cfg.follow));

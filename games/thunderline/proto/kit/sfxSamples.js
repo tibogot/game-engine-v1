@@ -9,14 +9,22 @@ const BASE = "/sounds/thunderline/sfx-candidates/";
 // The user's picks, 2026-10-20: the drift squeal is B, the long screech (in the game: GAME_PICK). Wind and
 // rolling are kept for later. The scrape and landing recordings were rejected and deleted (the landings
 // sounded "like Mario Bros"); the code for both stays for a later sound.
+// GRAIN BANKS (user, 2026-10-30: "the drift sound is repeating badly"): a 1.5 s loop of one screech repeats every
+// 1.5 s, and the ear hears it. A bank is the loud cores of several squeals side by side (scratchpad grainBank.py);
+// the player lays overlapping 0.25–0.5 s grains of them, each from a random place, crossfaded — nothing repeats.
+//   ga: the long screech (B's source, BigSoundBank #2371), 3 cores. (A bank of #0500's 17 short squeals was rejected:
+//   "completely unusable", user 2026-10-30.)
+export const GRAINS = {
+  squeal_grains_a: { segs: [[0, 0.65], [0.65, 1.15], [1.15, 2.95]], rate: 1 },
+};
 export const SAMPLE_SETS = {
-  squeal: { b: "squeal_b" },
+  squeal: { b: "squeal_b", ga: "squeal_grains_a" },
   roll: { a: "roll_a", b: "roll_b" },
   wind: { a: "wind_a", b: "wind_b", c: "wind_c" },
   scrape: {},
   landing: {},
 };
-export const GAME_PICK = { squeal: "b" };
+export const GAME_PICK = { squeal: "ga" }; // (2026-10-30: the grain bank A — the old loop "b" repeated)
 const LOOPS = ["squeal", "roll", "wind", "scrape"];
 
 /**
@@ -44,11 +52,18 @@ export function createSfxSamples(getCtx, { volume = 0.7, pick = {} } = {}) {
   }
   async function setLoop(part) {
     const old = loops[part];
-    if (old) { old.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.03); old.src.stop(ctx.currentTime + 0.2); delete loops[part]; }
+    if (old) { old.gain.gain.setTargetAtTime(0, ctx.currentTime, 0.03); old.src?.stop(ctx.currentTime + 0.2); delete loops[part]; }
     const key = choice[part], file = key && SAMPLE_SETS[part][key];
     if (!file) return;
     const buf = await load(file);
     if (choice[part] !== key || loops[part]) return; // changed while loading
+    if (GRAINS[file]) { // a grain bank: no looping source, grains scheduled by update()
+      const filt = ctx.createBiquadFilter(), gain = ctx.createGain();
+      filt.type = "lowpass"; filt.frequency.value = 18000; gain.gain.value = 0;
+      filt.connect(gain).connect(master);
+      loops[part] = { grain: GRAINS[file], buf, filt, gain, file, next: 0, last: -1 };
+      return;
+    }
     const src = ctx.createBufferSource();
     src.buffer = buf;
     src.loop = true;
@@ -62,6 +77,31 @@ export function createSfxSamples(getCtx, { volume = 0.7, pick = {} } = {}) {
     loops[part] = { src, gain, filt, file };
   }
   const ramp = (param, v, tc) => param.setTargetAtTime(v, ctx.currentTime, tc);
+  // the grains a little ahead of now: each 0.35–0.7 s from a random place in a random core (never the last one), at
+  // the drift's rate, joined to the next by a 40 ms equal-power crossfade. (A screech is ONE tone: 40 % overlaps at ±3 %
+  // pitch were two detuned copies — "it's echoing and playing twice", user 2026-10-30.)
+  const FADE = new Float32Array(32).map((_, i) => Math.sin((i / 31) * Math.PI / 2));
+  const FADE_OUT = FADE.slice().reverse();
+  function grains(L, rate) {
+    const now = ctx.currentTime, G = L.grain;
+    if (L.next < now) L.next = now + 0.01;
+    while (L.next < now + 0.12) {
+      let k = Math.floor(Math.random() * G.segs.length);
+      if (k === L.last && G.segs.length > 1) k = (k + 1) % G.segs.length;
+      L.last = k;
+      const [a, b] = G.segs[k], r = rate * G.rate;
+      const d = Math.min(0.35 + 0.35 * Math.random(), (b - a) / r * 0.95), x = Math.min(0.04, d * 0.2); // seconds of output
+      const off = a + Math.random() * Math.max(0, (b - a) - d * r);
+      const src = ctx.createBufferSource(), env = ctx.createGain();
+      src.buffer = L.buf; src.playbackRate.value = r;
+      env.gain.setValueAtTime(0, L.next);
+      env.gain.setValueCurveAtTime(FADE, L.next, x);
+      env.gain.setValueCurveAtTime(FADE_OUT, L.next + d - x, x);
+      src.connect(env).connect(L.filt);
+      src.start(L.next, off, d * r);
+      L.next += d - x;
+    }
+  }
   return {
     get choice() { return { ...choice }; },
     /** the loops playing now, with their level (checks) */
@@ -88,7 +128,8 @@ export function createSfxSamples(getCtx, { volume = 0.7, pick = {} } = {}) {
         // sliding sideways, or the brakes held hard at speed (as sfx.js's squeal, which this replaces)
         const sq = Math.max(slide, car.braking && car.kmh > 40 ? 0.55 : 0);
         ramp(L.squeal.gain.gain, g ? sq * 0.6 : 0, 0.04);
-        ramp(L.squeal.src.playbackRate, 0.92 + 0.16 * sq, 0.05);
+        if (L.squeal.grain) { if (g && sq > 0) grains(L.squeal, 0.92 + 0.16 * sq); } // (a slide stopping for an instant: the grains go on from where they were — a fresh one over the last was heard twice)
+        else ramp(L.squeal.src.playbackRate, 0.92 + 0.16 * sq, 0.05);
       }
       if (L.wind) {
         ramp(L.wind.gain.gain, 0.02 + 0.55 * sp * sp + (g ? 0 : 0.25 * sp), 0.15);
