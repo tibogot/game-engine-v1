@@ -22,11 +22,17 @@ const PRESETS = {
   // in the old game"): the old rounded terminus, its guardrail one U round the nose.
   // START: the nose BEHIND you (the piece's entry is the nose's tip), a 24 m stub to wait on. `start` =
   // how far in the car waits (past the 8 m nose) and the line is drawn.
-  start_line: { label: "Start", base: "rounded_start", params: { roundEndLength: 24 }, start: { spawn: 14, line: 22 } },
+  // (the nose is half the road's width: 12 m since the 24 m road — spawn and line moved with it, from 14 / 22)
+  start_line: { label: "Start", base: "rounded_start", params: { roundEndLength: 24 }, start: { spawn: 18, line: 26 } },
   // FINISH: the line at its entry, then a 28 m stub where the car brakes by itself (≈ 16 m from
   // 200 km/h: driveSession's firm stop after the finish; was 72 m), then the nose. Nothing builds on past it.
   finish_line: { label: "Finish", base: "rounded_end", params: { roundEndLength: 28 }, finish: { line: 2 } },
 };
+
+// THE ROAD'S WIDTH, not the old game's (user, 2026-10-30: "I'm placing the start piece and now the straight is larger …
+// this kind of problem should not happen"): the old params say 16 m, and the Start, the Finish and the flip ramps
+// stayed 16 m when the road went to 24 (2026-10-29)
+const OLD_ROAD = { ...ROAD_PARAM_DEFAULTS, width: 2 * SECTIONS.road.hw };
 
 /** Centre-to-centre spacing of the bowl's entry and return lanes (two 24 m roads, 4 m apart). */
 export const BOWL_LANE = 28;
@@ -38,7 +44,7 @@ function oldPiece(t, edges) {
   const key = `${t.id}|${edges}`;
   if (cache.has(key)) return cache.get(key);
   const pp = { ...PIECE_PARAM_DEFAULTS, ...t.old.params };
-  const r = buildPiece(t.old.base, new THREE.Matrix4(), pp, t.old.road ?? ROAD_PARAM_DEFAULTS, GUARDRAIL_PARAM_DEFAULTS, edges);
+  const r = buildPiece(t.old.base, new THREE.Matrix4(), pp, t.old.road ?? OLD_ROAD, GUARDRAIL_PARAM_DEFAULTS, edges);
   // piece-local → socket space (the connector is identity); a bowl's face is shifted half a lane
   // spacing so the entry socket sits on its entry lane
   const W = t.bowl ? new THREE.Matrix4().makeTranslation((laneSide(t) * BOWL_LANE) / 2, 0, 0).multiply(r.world) : r.world;

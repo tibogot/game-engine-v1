@@ -472,8 +472,9 @@ export const TILES = {
   platform_down_12: { label: "Platform down ~12 m", section: "wide", segs: [{ L: 48, pitch: -15 * DEG, ramp: 24 }, { L: 48, pitch: 15 * DEG, ramp: 24 }] },
   // FUNNEL / FLARE (user, 2026-10-21: big landing platforms need a way back to the road): the deck eases
   // from the wide platform (48 m) to the road (24 m), or back; the rails converge (oldLook.js taper)
-  funnel_64: { label: "Funnel 48 → 16", section: "wide", taper: { from: 24, to: 8 }, segs: [{ L: 64 }] },
-  flare_64: { label: "Flare 16 → 48", section: "wide", taper: { from: 8, to: 24 }, segs: [{ L: 64 }] },
+  // (to the ROAD's half width: they stayed at the old 16 m road when it went to 24 — a step at the join, 2026-10-30)
+  funnel_64: { label: "Funnel 48 → 24", section: "wide", taper: { from: 24, to: SECTIONS.road.hw }, segs: [{ L: 64 }] },
+  flare_64: { label: "Flare 24 → 48", section: "wide", taper: { from: SECTIONS.road.hw, to: 24 }, segs: [{ L: 64 }] },
   // PLATFORM SHAPES (user, 2026-10-22, Apex Rush's straight palette: wedges and a rounded end): the taper's
   // two edges each their own way (oldLook.js buildTaperLook `shape`). A WEDGE: one edge straight on, the
   // other cutting across to meet it — a right-angle triangle 48 × 48; CURVED, that edge a quarter circle;
