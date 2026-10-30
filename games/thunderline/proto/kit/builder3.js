@@ -306,6 +306,11 @@ const DOCK_H = 175;
 // bloom and default floor. The builder keeps its own orbit (its mouse buttons) and its frame work runs
 // in the engine's pre-update hook; the engine renders.
 const app = await startV3App({
+  // INSTANCED MESHES SHARE ONE SHADER (2026-10-30, the load profile: 157 instanced meshes — rail posts, props — at 35
+  // instance counts made 68 vertex shaders differing only in an array size, each its own pipeline compile): the
+  // matrices as vertex attributes, one node build per material (the RTS games' boot fix). ?instubo=1 / ?instshare=0: off
+  instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
+  shareInstanceBuilds: new URLSearchParams(location.search).get("instshare") !== "0",
   container: $("view"),
   skyMode: "skypro",
   cloudShadows: true,

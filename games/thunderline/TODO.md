@@ -616,6 +616,25 @@ BEFORE the pass 8.30 / 8.36 ms -> AFTER 3.97 / 3.80 ms (3.59 a third time). With
 the new code is 5.30 ms: the shadow / chunk / caster work ~3 ms, the 3-layer ground shader ~1.7 ms. In-page
 toggles at that view: rails + posts at full detail +0.11 ms, the whole car in the shadow map -0.05 (noise 0.3).
 
+LOAD + LAB FRAME, 2026-10-30 (user: "the best performance possible, the quickest load as possible"):
+- **Load profile, lab page:** about 5.7 s of the main thread is three.js building node materials, and 3.3 s is idle, waiting for Chrome's GPU process (DXC). The game's own code is small, and every file arrives within 0.2 s.
+- [x] **Instanced meshes share one shader** (`instanceAttributes` and `shareInstanceBuilds`, as in the RTS games):
+  - before, rail posts and props at 35 different instance counts made 68 vertex shaders that differed only in an array size;
+  - node builds went 799 → 136, render pipelines 178 → 111;
+  - lab load went from about 13.1 s to about 10.3 s, and the drive start from 2.7 s to 1.6 s (interleaved A/B).
+  - Builder and drive page; `?instubo=1` / `?instshare=0` turn it off.
+- **Lab, build view:**
+  - About 10.5–11.5 ms GPU at 1584×855 (the laptop warms up and drifts).
+  - The same cost at ¼ of the pixels, so it is GEOMETRY-bound, not shading-bound (1.45 M triangles).
+  - By toggle: track 2.3 ms (0.8 of it its shadows), ground 1.6, sky 1.2, post 1.0. Noise is about ±0.4.
+  - The lab is the worst case (85 pieces); White 1 in a race was 3.8 ms.
+- [ ] **Next for load:**
+  - 79 distinct fragment programs (the terrain is 208 KB; there are four at 58–74 KB);
+  - the builder pulls in the v3 editor's panels (lakes, rivers, tunnels: 242 JS files);
+  - a Steam shell (Electron) could keep the shader cache between runs.
+- [ ] **Next for the frame:** the terrain grid is a shared engine constant (`GRID_N` 256: 625k triangles; 128 saved ~1.2 ms in an earlier test). A per-game option would need engine work, which is paused.
+- My test Chrome renders at full speed even when hidden. It halved the user's FPS while both ran on the same GPU, so close it when it isn't in use.
+
 ## Look & tech
 - [x] **THE ROAD'S ASPHALT** (user, 2026-10-23: the old texture's long streaks "look cheap, cartoonish";
       then the noise "looks also cheap … roughness and normals map?"). proto/kit/roadSurface.js, through an
