@@ -21,6 +21,7 @@ import { library, settings, campaign, draft, DRAFT, LAB_ID, ensureLabTrack } fro
 import { makeLabTrack, LAB_Y } from "./physicsLab.js";
 import { createDriveTrails } from "./driveTrails.js";
 import { createLabHud } from "./labHud.js";
+import { createJoltRecorder } from "./joltRecorder.js";
 import { StuntCar, roadDirFromRide, trackFromRide } from "./stuntCar.js";
 import { ArcadeCar } from "./arcadeCar.js";
 // the test lap drives the car the drive page drives (settings.physics: the switch reloads the page)
@@ -3350,6 +3351,8 @@ function renderHand() {
 const rig = createDriveRig(app, { prefs: settings.get(), car: settings.get().car });
 // THE LAB's overlay (labHud.js): telemetry, live tuning, zone keys — while driving in the lab
 if (LAB) createLabHud({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getSfx: () => rig.sfxRec, getSynth: () => rig.sfx });
+// every drive from the builder: J reads what just jolted the car (joltRecorder.js)
+createJoltRecorder({ getVehicle: () => rig.vehicle, isDriving: () => driving && !playing, getCamera: () => rig.camera });
 // the TEST CAR's hologram: the car itself, once its model is in (its card, the one in hand, the placed one)
 rig.modelsReady.then(() => {
   carHolo = rig.carHologram();
@@ -3361,7 +3364,7 @@ rig.modelsReady.then(() => {
 let driving = false;
 const builderUi = ["toolbar", "keys", "steps", "status", "next", "dock", "nav"];
 let saved = null;
-const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>L</kbd> lights · <kbd>Backspace</kbd> back on the road · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Tab</kbd> / <kbd>Esc</kbd> back to building</b>`;
+const DRIVE_HELP = `<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> / arrows drive · <kbd>Space</kbd> handbrake · in the air: <kbd>Shift</kbd>/<kbd>C</kbd> pitch, <kbd>Q</kbd>/<kbd>E</kbd> spin, <kbd>Z</kbd>/<kbd>X</kbd> roll · <kbd>L</kbd> lights · <kbd>Backspace</kbd> back on the road · <kbd>R</kbd> restart${"" /* (the test car, if placed) */} · <kbd>J</kbd> what just jolted? · <kbd>Del</kbd> from the start line · <b style="color:#3fd2ff"><kbd>Tab</kbd> / <kbd>Esc</kbd> back to building</b>`;
 /** The builder's own scene objects and panels leave for a drive; the camera is kept to come back to. */
 function enterDriveView() {
   driving = true;

@@ -112,7 +112,7 @@ export function createLabHud({ getVehicle, isDriving, getSfx, getSynth }) {
   const hint = document.createElement("div");
   hint.style.cssText = `position:fixed;left:16px;bottom:16px;z-index:30;${css}color:#8796b5;display:none;pointer-events:none`;
   const kbd = (k) => `<kbd style="color:#e8f0ff;background:#121a2e;border:1px solid #23304d;padding:0 4px;font:11px Consolas, monospace">${k}</kbd>`;
-  hint.innerHTML = `${kbd("H")} keys &amp; zones · ${kbd("I")} info`;
+  hint.innerHTML = `${kbd("H")} keys &amp; zones · ${kbd("I")} info · ${kbd("J")} what just jolted?`;
   document.body.append(tele, panel, hint);
 
   // ---- the tuning panel
@@ -199,6 +199,7 @@ export function createLabHud({ getVehicle, isDriving, getSfx, getSynth }) {
   };
   const up = new THREE.Vector3(), fwd = new THREE.Vector3(), left = new THREE.Vector3(), n = new THREE.Vector3();
   let t0 = performance.now();
+
   function frame() {
     requestAnimationFrame(frame);
     const v = isDriving() ? getVehicle() : null;
