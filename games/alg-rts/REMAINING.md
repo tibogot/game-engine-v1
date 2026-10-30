@@ -172,7 +172,8 @@ ones throughout.
    kit: Mechta el Djorf, Dechra Taghit with its mosque, Sidi Ali and its cemetery, the squares' wells — maps/abdi.js,
    maps/villageKit.js shared with the new Aurès; ?stone=0 the old pieces). **The farms done 2026-10-30** (FARM_PLAN.md:
    new pieces, the sheepfold and its zriba, the threshing floor; Ferme Ouled Saïd and the Bergerie laid out with the
-   mechta houses). Left: the oasis (whitewashed kit).
+   mechta houses). **The oasis done the same day** (OASIS_PLAN.md: the spring and its kesria, the palm-rib gardens, the
+   whitewashed houses). Every place of the map now built.
 2. **Capture points and supply** live: the game told the new site kinds (town, oasis, farm, pass,
    lookout); the souk the big point.
 3. **The AI on:** the FLN down its two gullies, its cells in the villages and the town's houses; the

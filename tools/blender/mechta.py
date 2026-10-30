@@ -1034,6 +1034,116 @@ def buildAire(K, name, spec, state, seed):
     K.rod("AireFork", (-2.3, 0.06, -0.6), (-0.95, 0.06, -1.45), 0.025, "woodDark", G, 5)
     for k in range(4): K.rod(f"AireTine{k}", (-0.95 + (k - 1.5) * 0.05, 0.06, -1.45 + (k - 1.5) * 0.08), (-0.6 + (k - 1.5) * 0.09, 0.07, -1.65 + (k - 1.5) * 0.14), 0.014, "woodDark", G, 4)
 
+# ── THE OASIS'S PIECES (2026-10-30, OASIS_PLAN.md — new, from the Ziban and Aurès oases) ─────────────────────────────────
+AIN_RIM = [(0.45, -1.62), (1.25, -1.55), (2.3, -1.1), (2.55, 0.35), (2.1, 1.4), (0.0, 1.55), (-2.0, 1.4), (-2.65, 0.2), (-2.35, -1.25), (-0.9, -1.6), (-0.2, -1.62)]   # (algHouse AIN: change both together)
+def buildAin(K, name, spec, state, seed):
+    """THE SPRING (aïn) — redone the same day from the oasis springs (the first, plastered boxes round a flat rectangle of
+    water, read cheap in the lab): the water comes out of a dark wet NICHE in a rubble HEAD WALL, framed by a whitewashed
+    round-headed arch, into an irregular POOL walled stone by stone; steps down into it; its outflow through the KESRIA —
+    the oasis's comb, an upright slab notched three times — into three SEGUIAS kerbed with stones, fanning toward the
+    gardens; reeds in its corners; flagstones where the women draw. Front -Z. Damaged: the head breached, the
+    pool's wall breached at its east; ruin: the head's stump, the pool's wall half down, the water gone to mud."""
+    R = random.Random(seed); G = "h"; stone = house.drystone.stone
+    dmg, ruin = state != "intact", state == "ruin"
+    # THE HEAD: rubble, its arch frame limewashed, the niche dark and wet, a stone spout
+    head = wallRun(K, "AinHead", -1.7, 1.7, 1.62, 2.2, 1.75, seed)
+    if ruin: K.boolean(head, K.skyline(-3, 3, 1, 3, 0.7, 0.3, seed=seed, mat="stoneMechta"))
+    else:
+        K.boolean(head, K.arch(-0.4, 0.4, 0.3, 1.2, 1.3, 1.98, "soot", n=10))
+        frame = K.box("AinFrame", -0.66, 0.66, 0.2, 1.62, 1.5, 1.66, "limeWash", G, 0)
+        K.boolean(frame, K.arch(-0.44, 0.44, 0.25, 1.2, 1.3, 1.9, "soot", n=10))   # (a touch wider than the niche's: never one face)
+        K.bevel(frame, 0.04, 3, 30)
+        K.rod("AinSpout", (0.0, 0.5, 1.75), (0.02, 0.44, 1.2), 0.06, "stoneMechta", G, 6)
+    if dmg: K.boolean(head, K.breach((1.15, 0.95, 1.9), (0.45, 0.4, 0.45), seed=seed + 1, mat="stoneMechta"))   # (at 1.3 it met the broken top: a sliver, the gate)
+    # THE POOL: its wall stone by stone round the outline, open at the front for the kesria; the water inside it
+    stoneWallPath(K, R, AIN_RIM, 0.62, 0.5, state, gap=(2.45, -0.4, 0.55) if dmg else None)
+    bm = bmesh.new()
+    vs = [bm.verts.new(B(x * 0.86, 0.06 if ruin else 0.3, z * 0.84)) for x, z in AIN_RIM[:-1]] + [bm.verts.new(B(0.12, 0.06 if ruin else 0.3, -1.5))]
+    bm.faces.new(list(reversed(vs)))   # (its face up)
+    K.obj("AinWater", bm, "dung" if ruin else "water", G)
+    if not ruin:
+        for k in range(3):   # steps down into it, at the west
+            stone(K, f"AinStep{k}", (-2.05 + k * 0.32, 0.5 - k * 0.15, -0.5), (0.2, 0.08, 0.38), R, 0.0, "graveSlab", yaw=math.pi / 2 + R.uniform(-0.06, 0.06), box=0.6)
+        for x, z in ((1.8, 0.95), (-1.6, 1.0), (1.9, -0.8)):   # reeds in its corners
+            K.spots.append((x, 0.25, z, R.uniform(0, 6.28), "Brush", R.uniform(0.55, 0.75)))
+    # THE KESRIA in the front opening, its three notches; three seguias out of it, fanning
+    kes = K.box("Kesria", -0.32, 0.62, -0.25, 0.55, -1.7, -1.56, "graveSlab", G, 0.02)
+    for k in range(3): K.boolean(kes, K.cutter(-0.2 + k * 0.3, -0.07 + k * 0.3, 0.33, 0.8, -1.8, -1.45, "dark"))
+    for k, a in enumerate((-0.45, 0.0, 0.45)):
+        ox = -0.13 + k * 0.3; L = 2.1
+        ex, ez = ox + math.sin(a) * L, -1.75 - math.cos(a) * L
+        K.member(f"Seguia{k}", (ox, 0.0, -1.72), (ex, 0.0, ez), [(-0.09, -0.1), (0.09, -0.1), (0.09, 0.03), (-0.09, 0.03)], "dung" if ruin else "water", G)   # (low between its kerbs: proud, the strips read as planks)
+        n = int(L / 0.3)
+        for i in range(n):
+            f = (i + 0.5) / n; cx, cz = ox + (ex - ox) * f, -1.72 + (ez + 1.72) * f
+            for s in (-1, 1):
+                if ruin and R.random() < 0.4: continue
+                sz = R.uniform(0.1, 0.14)
+                wallStone(K, f"Kerb{k}_{i}{s}", (cx + s * 0.19 * math.cos(a), sz * 0.45, cz + s * 0.19 * math.sin(a)), (sz * 1.2, sz * 0.8, sz), R, -a + math.pi / 2)
+    # the women's side: flagstones by the steps, jars on them
+    for k in range(9):
+        x, z = R.uniform(-3.1, -1.4), R.uniform(-2.9, -1.4)
+        stone(K, f"AinFlag{k}", (x, -0.04, z), (R.uniform(0.22, 0.34), 0.07, R.uniform(0.2, 0.3)), R, 0.0, "graveSlab", yaw=R.uniform(0, 3.14), box=0.65)
+    # (no jars: at this size their bake came out blotched in the lab — you have called pottery cheap before)
+    if ruin:
+        for k in range(3): K.lump(f"AinFall{k}", (R.uniform(-1.4, 1.4), 0.0, R.uniform(-0.6, 1.0)), (0.35, 0.18, 0.3), "rubble", G, seed=seed + 10 + k, rough=0.4)
+
+def djerid(nb):
+    """Dried palm ribs (djerid): straw-grey, paler at the tips, some darker with age."""
+    c = nb.mix(nb.noise(18.0, 3, 0.6, stretch=(1, 1, 0.1)), srgb(0x8c7a5c), srgb(0xb3a07c))
+    c = nb.scale(c, nb.mr(nb.island(), 0.0, 1.0, 0.72, 1.1))
+    return dust(nb, c, 0.4, 0.5)
+MATDEF.update({"djerid": (0.9, djerid),
+               "water": (0.3, lambda nb: nb.mix(nb.mr(nb.noise(2.0, 4), 0.4, 0.65), srgb(0x26312b), srgb(0x3a4a40)))})
+
+def tabia(nb):
+    """Puddled mud (tabia): the oasis's earth, darker where the rain ran, pale crust on top, straw in it."""
+    c = nb.mix(nb.noise(2.5, 5), srgb(0x5c4936), srgb(0x725c45))   # (0x6f5840: baked pale as a plank in the lab)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(5.0, 4, 0.6, stretch=(1, 1, 0.2)), 0.55, 0.7), 0.6), c, srgb(0x5c4834))   # (rain streaks)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(16.0, 3, 0.6), 0.62, 0.72), 0.5), c, srgb(0xa58d62))   # (straw)
+    return dust(nb, c, 0.5, 0.6)
+MATDEF.update({"tabia": (1.0, tabia),
+               "djeridLeaf": (0.9, lambda nb: dust(nb, nb.mix(nb.noise(12.0, 3, 0.6, stretch=(1, 1, 0.1)), srgb(0x7a6d52), srgb(0x9c8c68)), 0.4, 0.3))})
+
+def buildDjerid(K, name, spec, state, seed):
+    """A GARDEN FENCE of the oasis, a 4 m module laid end to end: a low eroded wall of puddled mud (tabia) and on it the
+    DJERID — dried palm fronds stuck upright side by side, close as a screen (the first, bare ribs 7 cm apart, read as
+    rebar in the lab), each its own height and lean, its dry leaflets fanning at the tip; two rails lash them. Front -Z.
+    Damaged: a gap, fronds broken and leaning out; ruin: the wall slumped, the fronds on the ground."""
+    R = random.Random(seed); G = "h"
+    dmg, ruin = state != "intact", state == "ruin"
+    w = K.box("Tabia", -2.0, 2.0, -0.3, 0.5, -0.24, 0.24, "tabia", G, 0)
+    K.boolean(w, K.skyline(-3, 3, -1, 1, 0.45 if not ruin else 0.22, 0.07 if not ruin else 0.15, seed=seed, mat="tabia"))
+    K.bevel(w, 0.06, 2, 30)   # (0.08 x 3: its far level folded a face on the top edge — the coplanar gate)
+    for k in range(3):   # the rain's pits along its foot (after the bevel: small cuts, no slivers)
+        K.boolean(w, K.breach((R.uniform(-1.6, 1.6), R.uniform(0.0, 0.15), R.choice((-0.24, 0.24))), (0.22, 0.12, 0.1), seed=seed + 5 + k, mat="tabia", rough=0.3))
+    x, k = -1.96, 0
+    while x < 1.96:
+        z = (0.07, -0.02, -0.08)[k % 3]
+        gone = dmg and -0.6 < x < 0.5
+        if ruin or (gone and R.random() < 0.7):   # (fallen: on the ground in front)
+            if R.random() < (0.3 if ruin else 0.5):
+                a = R.uniform(-0.5, 0.5); L = R.uniform(1.0, 1.7)
+                K.rod(f"Rib{k}", (x, 0.03, -0.38), (x + math.sin(a) * L, 0.05, -0.38 - math.cos(a) * L), 0.02, "djerid", G, 4)
+        else:
+            top = R.uniform(1.45, 1.95) * (R.uniform(0.45, 0.7) if gone else 1.0)
+            lean = R.uniform(-0.05, 0.05) + (R.uniform(-0.35, -0.15) if gone else 0.0)
+            tx, tz = x + R.uniform(-0.06, 0.06), z + lean
+            K.rod(f"Rib{k}", (x, 0.38, z), (tx, top, tz), 0.022, "djerid", G, 4)
+            if not gone:   # its dry leaflets fanning at the tip
+                a = R.uniform(-0.6, 0.6); L = R.uniform(0.3, 0.5)
+                K.member(f"Leaf{k}", (tx, top - 0.25, tz), (tx + math.sin(a) * L, top + math.cos(a) * L * 0.6, tz + R.uniform(-0.12, 0.12)),
+                         [(-0.04, -0.004), (0.04, -0.004), (0.04, 0.004), (-0.04, 0.004)], "djeridLeaf", G, up=(0, 0, 1))
+        x += R.uniform(0.04, 0.055); k += 1
+    if not ruin:   # the rails, each side, lashing the fronds (cut where the gap is)
+        for y in (0.9, 1.35):
+            for s in (-1, 1):
+                if dmg:
+                    K.rod(f"Rail{y}{s}a", (-1.98, y, s * 0.13), (-0.65, y + R.uniform(-0.02, 0.02), s * 0.13), 0.022, "woodDark", G, 5)
+                    K.rod(f"Rail{y}{s}b", (0.55, y, s * 0.13), (1.98, y + R.uniform(-0.02, 0.02), s * 0.13), 0.022, "woodDark", G, 5)
+                else:
+                    K.rod(f"Rail{y}{s}", (-1.98, y + s * 0.01, s * 0.13), (1.98, y + R.uniform(-0.02, 0.02), s * 0.13), 0.022, "woodDark", G, 5)
+
 MATDEF.update({"dung": (1.0, lambda nb: dust(nb, nb.mix(nb.noise(5.0, 5), srgb(0x3f3326), srgb(0x5a4936)), 0.4, 0.1)),
                "grain": (0.9, lambda nb: nb.mix(nb.noise(40.0, 4, 0.7), srgb(0x7e5f34), srgb(0xa07c46)))})
 
@@ -1048,6 +1158,8 @@ TYPES["tombec"] = dict(GRAVE, grave="heap")
 TYPES["murette"] = dict(builder=buildLowWall, atlas=512, farRatio=0.75, aoDist=0.2, smoothAngle=80, weighted=False)
 TYPES["bergerie"] = dict(builder=buildBergerie, atlas=2048, farRatio=0.8, aoDist=0.25, islandMargin=0.002)
 TYPES["aire"] = dict(builder=buildAire, atlas=512, farRatio=0.7, states=["intact"], aoDist=0.25, smoothAngle=50, weighted=False)
+TYPES["ain"] = dict(builder=buildAin, atlas=1024, farRatio=0.85, aoDist=0.3)   # (0.7: its far shaded off its near — the gate)
+TYPES["djerid"] = dict(builder=buildDjerid, atlas=512, farRatio=1.0, aoDist=0.2, smoothAngle=50, weighted=False)   # (its fronds four-sided rods and flat blades already: decimated, they folded — far = near, as the steps)
 
 for spec in TYPES.values():
     spec.setdefault("builder", buildMechta); spec.setdefault("farRatio", 0.38)   # (0.3: the loggia house's far ruin shaded off its near — the gate)

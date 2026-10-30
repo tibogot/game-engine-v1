@@ -13,7 +13,7 @@ import { t } from "../i18n/i18n.js";
 import { ROCKS } from "./abdiRocks.js";
 import { TOWN_HOUSES, TOWN_SQUARE, TOWN_WALLS } from "./abdiTown.js";
 import { FIELD_PLOTS, FIELD_WALLS, FIELD_HEDGES } from "./abdiFields.js";
-import { hamlet, house, koubbaAndCemetery } from "./villageKit.js";
+import { garden, hamlet, house, koubbaAndCemetery } from "./villageKit.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -113,6 +113,18 @@ const FOLD = STONE && hamlet(BG.x, BG.z, {
   rows: [{ types: ["petite"], x: 9, z: 4 }],
   props: [{ type: "bergerie", x: -2, z: 0 }, { type: "tabouna", x: 14, z: 7 }],
 });
+// AÏN ABDI, THE OASIS (2026-10-30, OASIS_PLAN.md): the whitewashed kit's houses in two short rows between the piste and
+// the oued (their fronts to the piste, 9 m off it — the point on the piste between them, the oasis's square); the SPRING
+// south of the piste, its seguia running south down the lane between two GARDENS fenced in palm ribs (the grove beyond)
+const OA = site("Aïn Abdi");
+const OASIS = STONE && (() => {
+  const v = hamlet(OA.x, OA.z, {
+    rows: [{ types: ["haute", "maison"], x: -36, z: -21 }, { types: ["boutique", "haute"], x: 2, z: -15, states: { 1: "damaged" } }],
+    props: [{ type: "ain", x: 5, z: 13 }],
+  });
+  v.props.push(...garden(OA.x - 27, OA.z + 22, 5, 3, { gate: ["n", 4] }), ...garden(OA.x + 11, OA.z + 22, 5, 3, { gate: ["n", 0], damaged: [6] }));
+  return v;
+})();
 // SIDI ALI: the koubba on its crest; the village's dead on the slope below it (south)
 const SAINT = STONE ? koubbaAndCemetery(SA.x, SA.z, SA.x - 6, SA.z + 21, { seed: 1961, cols: 5, rows: 4 }) : [];   // (east of it the graves ran under the mosque, north into a walled field — seen; south: clear, measured)
 
@@ -147,8 +159,8 @@ export const MAP = {
   sandstone: { colour: "abdi", rocks: ROCKS },
   // ITS TOWN (algGame: an instanced house field): placed by tools/algAbdiLevel.mjs on the knoll's ring terraces,
   // the souk square at the town's point
-  town: { houses: [...TOWN_HOUSES, ...(DJORF?.houses ?? []), ...(TAGHIT?.houses ?? []), ...(FARM?.houses ?? []), ...(FOLD?.houses ?? [])],
-    props: [...(DJORF?.props ?? []), ...(TAGHIT?.props ?? []), ...SAINT, ...(FARM?.props ?? []), ...(FOLD?.props ?? [])],
+  town: { houses: [...TOWN_HOUSES, ...(DJORF?.houses ?? []), ...(TAGHIT?.houses ?? []), ...(FARM?.houses ?? []), ...(FOLD?.houses ?? []), ...(OASIS?.houses ?? [])],
+    props: [...(DJORF?.props ?? []), ...(TAGHIT?.props ?? []), ...SAINT, ...(FARM?.props ?? []), ...(FOLD?.props ?? []), ...(OASIS?.props ?? [])],
     square: TOWN_SQUARE, walls: TOWN_WALLS, replacesHamlet: STONE },
   // the old procedural pieces the kits replace (the hamlet: replacesHamlet), the old wells (the props kit puts one in each
   // square: villageProps)

@@ -48,7 +48,7 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
-import { MECHTA_PROPS, MECHTA_TYPES, createHouseField, loadHouses } from "./algHouse.js";
+import { MECHTA_PROPS, MECHTA_SOFT, MECHTA_TYPES, createHouseField, loadHouses } from "./algHouse.js";
 import { setGroundBlendApp } from "./algGroundBlend.js";
 import { createTownDamage } from "./algTownDamage.js";
 import { createPieceDamage } from "./algPieceDamage.js";
@@ -730,6 +730,13 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         await app.flattenRect?.(fx, fz, hx + 1.2, hz + 1.2, row[3], { rim: 4, rotY: yaw });
       }
       for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
+      // THE PLANTS OFF THEM (2026-10-30, the oasis: its houses stand at its grove's edge — a painted palm through a roof):
+      // every piece's footprint cleared, as a built piece's (algBuild) — not a grave's or a low wall's (on the ground as it is)
+      for (const [, , , , , yaw, fx, fz, hx, hz, m] of [...MAP.town.houses, ...townProps]) {
+        if (m?.ground) continue;
+        const c = Math.cos(yaw), s = Math.sin(yaw);
+        for (let lx = -hx; lx <= hx + 0.01; lx += 2.5) for (let lz = -hz; lz <= hz + 0.01; lz += 2.5) app.clearVegetation?.(fx + lx * c + lz * s, fz - lx * s + lz * c, 2.4, { grass: 2, edge: 0.5 });
+      }
       // the TERRACE WALLS (the kit's "mur" round the risers): in the same field
       for (const [st, x, y, z, yaw] of MAP.town.walls ?? []) field.add("mur", st, x, y, z, yaw);
       // the PROPS after them (the houses' indices stay the damage's): each wall of theirs a nav block and HARD cover
@@ -739,7 +746,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         const c = Math.cos(yaw), s = Math.sin(yaw);
         for (const [x0, x1, z0, z1] of MECHTA_PROPS[ty] ?? []) {
           const lx = ((x0 + x1) / 2) * 1.3, lz = ((z0 + z1) / 2) * 1.3;
-          const w = { x: x + lx * c + lz * s, z: z - lx * s + lz * c, hx: ((x1 - x0) / 2) * 1.3, hz: ((z1 - z0) / 2) * 1.3, yaw, st };
+          const w = { x: x + lx * c + lz * s, z: z - lx * s + lz * c, hx: ((x1 - x0) / 2) * 1.3, hz: ((z1 - z0) / 2) * 1.3, yaw, st, soft: MECHTA_SOFT.has(ty) };
           propWalls.push(w);
           app.navGrid?.addFootprint?.(w.x, w.z, w.hx, w.hz, yaw);
         }
@@ -761,7 +768,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           const c = Math.cos(w.yaw), s = Math.sin(w.yaw), long = w.hx >= w.hz, L = long ? w.hx : w.hz;
           for (let u = -L + 0.8; u <= L - 0.8 + 0.01; u += 1.8) {
             const lx = long ? u : 0, lz = long ? 0 : u;
-            yield { x: w.x + lx * c + lz * s, z: w.z - lx * s + lz * c, radius: 1.1, size: 1, hard: w.st !== "ruin" };
+            yield { x: w.x + lx * c + lz * s, z: w.z - lx * s + lz * c, radius: 1.1, size: 1, hard: w.st !== "ruin" && !w.soft };
           }
         }
         // the RUBBLE heaps of a collapsed house (algTownDamage): soft cover

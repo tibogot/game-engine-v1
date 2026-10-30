@@ -15,7 +15,9 @@ export const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8],
   // the koubba and its enclosure (mechta.py KB_HAWSH)
   koubba: [-6.0, 6.0, -5.95, 5.85], hawsh: [-6.0, 6.0, -5.95, 5.85],
   // the farm's (FARM_PLAN.md): the sheepfold and its pen (the hurdle knocked flat out to -6.8), the threshing floor
-  bergerie: [-5.3, 5.3, -6.8, 4.5], aire: [-3.55, 3.55, -3.55, 3.55] };
+  bergerie: [-5.3, 5.3, -6.8, 4.5], aire: [-3.55, 3.55, -3.55, 3.55],
+  // the oasis's (OASIS_PLAN.md): the spring (its seguia out to -3.45, its trough to the right), a garden fence's 4 m module
+  ain: [-2.5, 3.5, -3.5, 2.1], djerid: [-2.0, 2.0, -0.25, 0.25] };
 export const HS = 1.3;
 export const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
 /** A house whose FOOTPRINT's centre is (cx, cz), its front toward (tx, tz): the town field's row (y null: a pad). */
@@ -135,4 +137,28 @@ export function koubbaAndCemetery(kx, kz, cx, cz, { seed = 1958, cols = 7, rows 
   const foot = -((rows - 1) / 2) * 4.1 - 3.0;
   for (const lx of [-cols * 0.8, cols * 0.8 - 1.0]) { const [x, z] = at(lx, foot); props.push(["murette", "intact", x, null, z, th, x, z, 2.0 * HS, 0.25 * HS, { ground: true, upright: true }]); }
   return props;
+}
+
+/**
+ * AN OASIS GARDEN (2026-10-30, OASIS_PLAN.md): its palm-rib fence (djerid, 4 m modules end to end) round a plot whose
+ * north-west corner is (x0, z0), `nx` modules along x, `nz` along z; `gate` [edge "n" | "s" | "w" | "e", module index]
+ * left open (the way in); `damaged` the indices (in the order laid) knocked about. Each module on the ground as it is.
+ */
+export function garden(x0, z0, nx, nz, { gate = ["n", 0], damaged = [] } = {}) {
+  const L = 4.0 * HS, out = [];
+  const lay = (edge, i, cx, cz, tx, tz) => {
+    if (gate[0] === edge && gate[1] === i) return;
+    out.push([...house("djerid", damaged.includes(out.length) ? "damaged" : "intact", cx, cz, tx, tz), { ground: true, upright: true }]);
+  };
+  for (let i = 0; i < nx; i++) {   // the north and south lengths (their fronts out)
+    const cx = x0 + L * (i + 0.5);
+    lay("n", i, cx, z0, cx, z0 - 50);
+    lay("s", i, cx, z0 + nz * L, cx, z0 + nz * L + 50);
+  }
+  for (let j = 0; j < nz; j++) {   // the west and east (30 cm in from the corners: never two walls in one place)
+    const cz = z0 + L * (j + 0.5);
+    lay("w", j, x0 + 0.3, cz, x0 - 50, cz);
+    lay("e", j, x0 + nx * L - 0.3, cz, x0 + nx * L + 50, cz);
+  }
+  return out;
 }

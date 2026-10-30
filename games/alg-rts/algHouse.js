@@ -29,7 +29,8 @@ export const HOUSE_STATES = ["intact", "damaged", "ruin"];
 export const MECHTA_TYPES = ["petite", "etage", "pente", "appentis", "enclos", "tabouna", "masjid", "soutien", "escalier", "djemaa",
   "pc", "casemate", "grotte", "foyer",   // (+ the FLN CAMP's, 2026-10-27 — FLN_CAMP_PLAN.md: the command post, the refuge, the cave's mouth, the hidden fire)
   "koubba", "hawsh", "tombe", "tombeb", "tombec", "murette",   // (+ 2026-10-29: the marabout's tomb, a grave (earth / whitewashed), a low broken wall)
-  "bergerie", "aire"];   // (+ 2026-10-30, FARM_PLAN.md: the sheepfold and its zriba, the threshing floor)
+  "bergerie", "aire",   // (+ 2026-10-30, FARM_PLAN.md: the sheepfold and its zriba, the threshing floor)
+  "ain", "djerid"];   // (+ the same day, OASIS_PLAN.md: the spring and its basin, a palm-rib garden fence)
 /** THE KOUBBA'S ENCLOSURE (tools/blender/mechta.py KB_HAWSH — change both together): its outline, the gateway between
  *  the first and last points. */
 /** THE SHEEPFOLD'S PEN, its two lengths either side of the gateway (mechta.py BG_PEN — change both together). */
@@ -67,8 +68,13 @@ export const MECHTA_PROPS = {
   // the sheepfold: its shelter's back and sides (its front open: the flock's way in), the zriba's two lengths (the gateway
   // between them: its hurdle a door for men); the threshing floor walked over, no cover
   bergerie: [[-4.0, 4.0, 3.9, 4.4], [-4.0, -3.5, 0.95, 3.95], [3.5, 4.0, 0.95, 3.95], ...BG_PEN.flatMap((p) => wallRects(p))],
+  // the spring: its head wall, its basin (its rim knee-high), the animals' trough; a garden fence (soft cover: MECHTA_SOFT)
+  ain: [[-1.7, 1.7, 1.53, 2.05], [-2.4, 2.4, -1.5, 1.55], [2.65, 3.45, -0.9, 0.9]],
+  djerid: [[-2.0, 2.0, -0.22, 0.22]],
   // (the graves, tombe / tombeb: walked over, no cover — none here)
 };
+/** The props whose walls are SOFT cover (a palm-rib fence on a knee-high mud wall stops nothing): still nav blocks. */
+export const MECHTA_SOFT = new Set(["djerid"]);
 // the kits: their file and their objects' prefix (the type names never collide: one table of parts for all)
 // THE FIELD WALLS (tools/blender/fieldwall.py): a dry-stone module, three variants (a b c), the same states
 export const FIELD_WALL_TYPES = ["a", "b", "c"];
