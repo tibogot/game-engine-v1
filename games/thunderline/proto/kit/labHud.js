@@ -10,6 +10,7 @@ import { CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
 import "./carTune.js"; // (its camera tune: the slider's default)
 
 const TUNE_KEY = "thunderline.lab.tune";
+const VIEW_KEY = "thunderline.lab.view"; // (which lab panels are open)
 // [object, path, label, min, max, step]
 const SLIDERS = [
   ["Steering", [
@@ -96,16 +97,29 @@ export function createLabHud({ getVehicle, isDriving }) {
   tele.style.cssText = `position:fixed;left:16px;top:96px;z-index:30;min-width:230px;${css}display:none;pointer-events:none;white-space:pre;font-family:Consolas, monospace;font-size:12px;line-height:1.45`;
   const panel = document.createElement("div");
   panel.style.cssText = `position:fixed;right:16px;top:96px;z-index:30;width:300px;max-height:calc(100vh - 230px);overflow:auto;${css}display:none`;
-  document.body.append(tele, panel);
+  // A CLEANER LAB (user, 2026-10-30: "too many UI in the lab … we should clean this a bit"): on screen only the speed,
+  // the tuning (its title folds it) and one line of keys. I = the info (telemetry, the track's stats, the perf graphs),
+  // H = every key and the zones. Remembered between visits.
+  const view = { info: false, help: false, tune: true };
+  try { Object.assign(view, JSON.parse(localStorage.getItem(VIEW_KEY)) ?? {}); } catch {}
+  const saveView = () => { try { localStorage.setItem(VIEW_KEY, JSON.stringify(view)); } catch {} };
+  const hint = document.createElement("div");
+  hint.style.cssText = `position:fixed;left:16px;bottom:16px;z-index:30;${css}color:#8796b5;display:none;pointer-events:none`;
+  const kbd = (k) => `<kbd style="color:#e8f0ff;background:#121a2e;border:1px solid #23304d;padding:0 4px;font:11px Consolas, monospace">${k}</kbd>`;
+  hint.innerHTML = `${kbd("H")} keys &amp; zones · ${kbd("I")} info`;
+  document.body.append(tele, panel, hint);
 
   // ---- the tuning panel
   const rowsHtml = SLIDERS.map(([title, rows]) => `<div style="font:700 13px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase;color:#3fd2ff;margin:8px 0 4px">${title}</div>` +
     rows.map(([o, p, label, min, max, step]) => `<label style="display:grid;grid-template-columns:1fr 54px;gap:2px 6px;margin:3px 0"><span>${label}</span><b data-v="${keyOf(o, p)}" style="text-align:right;font-weight:600"></b>
       <input type="range" data-k="${keyOf(o, p)}" min="${min}" max="${max}" step="${step}" style="grid-column:1 / 3;width:100%"></label>`).join("")).join("");
-  panel.innerHTML = `<div style="font:700 16px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase">Tuning <small style="opacity:.6;font:500 11px Barlow">— live, the arcade car</small></div>
-    <div data-note style="opacity:.75;margin:4px 0"></div>${rowsHtml}
-    <div style="display:flex;gap:6px;margin-top:10px"><button data-a="copy">Copy values</button><button data-a="reset">Reset</button></div>
-    <div style="opacity:.6;margin-top:6px">Keys while driving: ${LAB_ZONES.map((z) => `<b>${z.key.replace(/^S/, "⇧")}</b> ${z.label.split(" (")[0].split(":")[0]}`).join(" · ")}</div>`;
+  panel.innerHTML = `<div data-a="fold" style="font:700 16px 'Barlow Condensed';letter-spacing:.06em;text-transform:uppercase;cursor:pointer">Tuning <span data-fold style="float:right;opacity:.6"></span></div>
+    <div data-body><div data-note style="opacity:.75;margin:4px 0"></div>${rowsHtml}
+    <div style="display:flex;gap:6px;margin-top:10px"><button data-a="copy">Copy values</button><button data-a="reset">Reset</button></div></div>`;
+  const fold = () => { panel.querySelector("[data-body]").style.display = view.tune ? "" : "none"; panel.querySelector("[data-fold]").textContent = view.tune ? "▾" : "▸"; };
+  fold();
+  // the zones, in the H keys panel (the drive page's #help, added to once it exists)
+  const ZONES_HTML = `<div data-zones style="margin-top:6px">Zones: ${LAB_ZONES.map((z) => `<kbd>${z.key.replace(/^S/, "⇧")}</kbd> ${z.label.split(" (")[0].split(":")[0]}`).join(" · ")}</div>`;
   const all = SLIDERS.flatMap(([, rows]) => rows);
   const sync = () => {
     for (const [o, p, , , , step] of all) {
@@ -124,7 +138,8 @@ export function createLabHud({ getVehicle, isDriving }) {
     sync();
   });
   panel.addEventListener("click", async (e) => {
-    const a = e.target.dataset.a;
+    const a = e.target.closest("[data-a]")?.dataset.a;
+    if (a === "fold") { view.tune = !view.tune; saveView(); fold(); }
     if (a === "copy") { const txt = JSON.stringify(save(), null, 1); try { await navigator.clipboard.writeText(txt); e.target.textContent = "Copied"; } catch { prompt("The values:", txt); } setTimeout(() => (e.target.textContent = "Copy values"), 1200); }
     if (a === "reset") { for (const [o, p, v] of DEFAULTS) set(o, p, v); try { localStorage.removeItem(TUNE_KEY); } catch {} sync(); }
   });
@@ -134,6 +149,7 @@ export function createLabHud({ getVehicle, isDriving }) {
   // ---- the zone keys
   addEventListener("keydown", (e) => {
     if (!isDriving() || e.repeat || e.ctrlKey || e.altKey) return;
+    if (e.code === "KeyH" || e.code === "KeyI") { view[e.code === "KeyH" ? "help" : "info"] ^= 1; saveView(); return; }
     // (by the key's PLACE — the top row or the keypad: on an AZERTY keyboard the unshifted top row types & é " …)
     const digit = /^(?:Digit|Numpad)(\d)$/.exec(e.code)?.[1] ?? e.key;
     const sp = zoneSpawn(e.shiftKey ? `S${digit}` : digit); // (Shift + 1, 2: the ground zones)
@@ -158,7 +174,16 @@ export function createLabHud({ getVehicle, isDriving }) {
   function frame() {
     requestAnimationFrame(frame);
     const v = isDriving() ? getVehicle() : null;
-    tele.style.display = panel.style.display = v ? "" : "none";
+    panel.style.display = hint.style.display = v ? "" : "none";
+    tele.style.display = v && view.info ? "" : "none";
+    // the drive page's own panels: the track's stats and the perf graphs with the info, the keys with H (put back
+    // as they were once the drive ends — the builder shows the graphs)
+    const stats = document.getElementById("stats"), help = document.getElementById("help"), perf = document.getElementById("perf-stats");
+    if (help && v && !help.querySelector("[data-zones]")) help.insertAdjacentHTML("beforeend", ZONES_HTML);
+    if (stats) stats.style.display = v && !view.info ? "none" : "";
+    if (help) help.style.display = v && !view.help ? "none" : "";
+    if (perf) { if (v && !view.info) { perf.dataset.labHid = "1"; perf.style.display = "none"; } else if (perf.dataset.labHid) { delete perf.dataset.labHid; perf.style.display = ""; } }
+    if (help && v) hint.style.bottom = view.help ? `${help.offsetHeight + 24}px` : "16px";
     if (!v) return;
     const now = performance.now(), dt = Math.min(0.1, (now - t0) / 1000);
     t0 = now;
@@ -190,15 +215,14 @@ export function createLabHud({ getVehicle, isDriving }) {
     });
     const L = last.landing;
     tele.textContent =
-      `car         ${car}\n` +
-      `speed       ${(speed * 3.6).toFixed(0).padStart(4)} km/h\n` +
+      (v.isArcadeCar ? "" : `car         ${car}\n`) +
       `lateral     ${((yaw * Math.abs(vF)) / 9.81).toFixed(2).padStart(5)} g\n` +
       `turn rate   ${((yaw * 180) / Math.PI).toFixed(0).padStart(4)} °/s\n` +
-      `slide       ${slip.toFixed(1).padStart(5)} °\n` +
+      `slide       ${slip.toFixed(1).padStart(5)} °${v.arcade?.drifting ? "  DRIFT" : ""}\n` +
       `wheels      ${down}/4${down ? "" : `   air ${last.air.toFixed(2)} s`}\n` +
       `steer / gas ${(+v.input.steer).toFixed(2)} / ${(+v.input.throttle).toFixed(2)}${v.input.handbrake ? "  HANDBRAKE" : ""}\n` +
       (v.stuntEvents ? `take-off    guided ${v.stuntEvents.takeoffDeg.toFixed(1)}°\n` : "") +
-      (v.arcade ? `road        ${v.arcade.onRoad ? "on it" : "flying"}${v.arcade.stunt > 0.01 ? ` · stunt gravity ${(v.arcade.stunt * 100).toFixed(0)}%` : ""}\n` : "") +
+      (v.arcade?.stunt > 0.01 ? `road        stunt gravity ${(v.arcade.stunt * 100).toFixed(0)}%\n` : "") +
       // (the car's +X is its LEFT: tyres 0, 2 = the right side — WHEEL_LOCAL x −0.92)
       `springs     FL ${springs[1].s} FR ${springs[0].s}
 ` +
