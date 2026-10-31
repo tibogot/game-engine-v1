@@ -47,7 +47,16 @@ async function trianglesOf(node, texCache) {
     if (t) {
       if (!texCache.has(t)) {
         const { data, info } = await sharp(Buffer.from(t.getImage())).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-        texCache.set(t, { data, w: info.width, h: info.height });
+        // ITS MIP CHAIN (box-filtered halvings, as the GPU's): sampled at the level a triangle's footprint asks for — at
+        // mip 0 alone, a net's 6 cm mesh shimmered pixel by pixel between two renders the game draws alike (2026-10-31)
+        const lv = [{ data: Float32Array.from(data), w: info.width, h: info.height }];
+        while (lv[lv.length - 1].w > 1 && lv[lv.length - 1].h > 1) {
+          const p = lv[lv.length - 1], w = p.w >> 1, h = p.h >> 1, d = new Float32Array(w * h * 4);
+          for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) for (let c = 0; c < 4; c++)
+            d[(y * w + x) * 4 + c] = (p.data[(2 * y * p.w + 2 * x) * 4 + c] + p.data[(2 * y * p.w + 2 * x + 1) * 4 + c] + p.data[((2 * y + 1) * p.w + 2 * x) * 4 + c] + p.data[((2 * y + 1) * p.w + 2 * x + 1) * 4 + c]) / 4;
+          lv.push({ data: d, w, h });
+        }
+        texCache.set(t, { levels: lv, w: info.width, h: info.height });
       }
       tex = texCache.get(t);
     }
@@ -80,6 +89,12 @@ function render(tris, cam, W, H, cx, cy) {
       const ax = S[ia * 3], ay = S[ia * 3 + 1], az = S[ia * 3 + 2], bx = S[ib * 3], by = S[ib * 3 + 1], bz = S[ib * 3 + 2], qx = S[ic * 3], qy = S[ic * 3 + 1], qz = S[ic * 3 + 2];
       if (az <= 0.1 || bz <= 0.1 || qz <= 0.1) continue;
       const area = (bx - ax) * (qy - ay) - (by - ay) * (qx - ax); if (Math.abs(area) < 1e-9) continue;
+      // the mip level: texels per pixel over this triangle (its UV area in texels over its screen area)
+      let lvl = null;
+      if (tex) {
+        const ua = Math.abs((U[ib * 2] - U[ia * 2]) * (U[ic * 2 + 1] - U[ia * 2 + 1]) - (U[ic * 2] - U[ia * 2]) * (U[ib * 2 + 1] - U[ia * 2 + 1])) * tex.w * tex.h;
+        lvl = tex.levels[Math.max(0, Math.min(tex.levels.length - 1, Math.round(0.5 * Math.log2(Math.max(1e-9, ua / Math.abs(area))))))];
+      }
       const x0 = Math.max(0, Math.floor(Math.min(ax, bx, qx))), x1 = Math.min(W - 1, Math.ceil(Math.max(ax, bx, qx)));
       const y0 = Math.max(0, Math.floor(Math.min(ay, by, qy))), y1 = Math.min(H - 1, Math.ceil(Math.max(ay, by, qy)));
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
@@ -93,7 +108,7 @@ function render(tris, cam, W, H, cx, cy) {
         const p0 = w0 / az / iz, p1 = w1 / bz / iz, p2 = w2 / qz / iz;
         const nx = N[ia * 3] * p0 + N[ib * 3] * p1 + N[ic * 3] * p2, ny = N[ia * 3 + 1] * p0 + N[ib * 3 + 1] * p1 + N[ic * 3 + 1] * p2, nz = N[ia * 3 + 2] * p0 + N[ib * 3 + 2] * p1 + N[ic * 3 + 2] * p2;
         const nl = Math.hypot(nx, ny, nz) || 1, lit = 0.35 + 0.65 * Math.max(0, (nx * L[0] + ny * L[1] + nz * L[2]) / nl);
-        if (tex) sample(tex, U[ia * 2] * p0 + U[ib * 2] * p1 + U[ic * 2] * p2, U[ia * 2 + 1] * p0 + U[ib * 2 + 1] * p1 + U[ic * 2 + 1] * p2, col);
+        if (tex) sample(lvl, U[ia * 2] * p0 + U[ib * 2] * p1 + U[ic * 2] * p2, U[ia * 2 + 1] * p0 + U[ib * 2 + 1] * p1 + U[ic * 2 + 1] * p2, col);
         else { col[0] = col[1] = col[2] = 200; }
         img[k * 3] = col[0] * f[0] * lit; img[k * 3 + 1] = col[1] * f[1] * lit; img[k * 3 + 2] = col[2] * f[2] * lit;
       }
@@ -120,7 +135,16 @@ function compare(A, B, W, H, tol) {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const k = y * W + x; if (!A.cov[k] && !B.cov[k]) continue;
     px++;
-    if (!matchIn(A, B, x, y) || !matchIn(B, A, x, y)) { bad++; mask[k] = 1; }
+    if (!matchIn(A, B, x, y) || !matchIn(B, A, x, y)) mask[k] = 1;
+  }
+  // ISOLATED pixels not counted (2026-10-31, the quay cargo: its crates' 4 mm plank joints, under a pixel at the switch, flicker
+  // pixel by pixel between ANY two renders — no change anyone sees). A real fault — a bar gone brown, a roof's courses gone —
+  // is lines and areas: pixels that differ next to others that differ.
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const k = y * W + x; if (!mask[k]) continue;
+    let n = 0;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; const xx = x + dx, yy = y + dy; if (xx >= 0 && yy >= 0 && xx < W && yy < H && mask[yy * W + xx]) n++; }
+    if (n) bad++; else mask[k] = 2;
   }
   return { px, bad, mask };
 }
@@ -130,7 +154,7 @@ async function diffImage(file, A, B, mask, W, H) {
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const k = y * W + x;
     for (const [s, I] of [[0, A], [1, B]]) { const o = (y * W * 3 + s * W + x) * 3; for (let c = 0; c < 3; c++) out[o + c] = I.cov[k] ? Math.min(255, I.img[k * 3 + c]) : 30; }
-    const o = (y * W * 3 + 2 * W + x) * 3; out[o] = mask[k] ? 255 : A.cov[k] ? 60 : 20; out[o + 1] = mask[k] ? 40 : A.cov[k] ? 60 : 20; out[o + 2] = mask[k] ? 40 : A.cov[k] ? 60 : 20;
+    const o = (y * W * 3 + 2 * W + x) * 3; out[o] = mask[k] === 1 ? 255 : mask[k] === 2 ? 120 : A.cov[k] ? 60 : 20; out[o + 1] = mask[k] === 1 ? 40 : mask[k] === 2 ? 90 : A.cov[k] ? 60 : 20; out[o + 2] = mask[k] === 1 ? 40 : mask[k] === 2 ? 40 : A.cov[k] ? 60 : 20;
   }
   await sharp(out, { raw: { width: W * 3, height: H, channels: 3 } }).png().toFile(file);
 }

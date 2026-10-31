@@ -25,6 +25,11 @@ approach the industry uses (Simplygon, InstaLOD, meshoptimizer's own guidance), 
 The kits that build their own far levels (every kit made before this) are left as they were. autoLod skips any node
 that already has a `_Far`, and only the auto-made pairs are gated.
 
+**Calibration (2026-10-31, the quay props):** the check samples each texture at the MIP LEVEL the GPU would use for that
+triangle (sampled at full size, a net's fine mesh and a crate's plank joints shimmered pixel by pixel between two renders
+the game draws alike), and it ignores ISOLATED differing pixels. A real fault (a bar gone brown, a roof's courses gone) is
+lines and areas. The old Blender-built warehouse fars still fail at 4.5–10.7 %, so the check still catches real faults.
+
 ## Measured on the port kit (2026-10-31)
 
 | Far levels | Pixels differing at the switch (worst of 8 views) |

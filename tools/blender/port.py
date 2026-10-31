@@ -28,6 +28,24 @@ import house
 from drystone import stone   # (split blocks: the mole's rock apron, its fallen coping)
 from house import buildKit, previews
 from bkit import B, srgb, dust, flat, paintedWood
+import bkit
+_join = bkit.Kit.join
+def cleanJoin(self, name, objs):
+    """The kit's join, every merged piece rid of its zero-area triangles (mechta.py's way: the quay cargo's left two — the
+    coplanar gate)."""
+    # (the world matrices refreshed first: a part placed by its location or matrix — the casks, props.place's drums — was
+    # joined where it was BUILT, at the origin, every cask on top of the others: the coplanar gate, 2026-10-31)
+    bpy.context.view_layer.update()
+    if os.environ.get("PORT_PROBE"):
+        for o in objs:
+            mw = o.matrix_world
+            if any(abs((mw @ v.co).x) < 0.02 and abs((mw @ v.co).z) < 0.005 and 0.05 < (mw @ v.co).y < 0.6 for v in o.data.vertices): print("PROBE", name, o.name, flush=True)
+    j = _join(self, name, objs)
+    bm = bmesh.new(); bm.from_mesh(j.data)
+    bmesh.ops.dissolve_degenerate(bm, dist=1e-4, edges=bm.edges)
+    bm.to_mesh(j.data); bm.free()
+    return j
+bkit.Kit.join = cleanJoin
 
 # ── Materials ────────────────────────────────────────────────────────────────
 def wash(tint, foot=0x8a8070):
@@ -577,8 +595,15 @@ def hullWhite(nb):
     return nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(9.0, 3, 0.6, stretch=(1, 1, 0.1)), 0.6, 0.7), 0.5), c, srgb(0x9a958a))   # (worn streaks)
 def varnish(nb):
     return nb.mix(nb.noise(12.0, 4, 0.6, stretch=(0.15, 1, 1)), srgb(0x7a5634), srgb(0x9a7046))
-def netMat(nb):   # (a cotton net tanned brown, heaped)
-    return nb.mix(nb.mr(nb.noise(25.0, 3, 0.7), 0.45, 0.6), srgb(0x4a3826), srgb(0x6e553a))
+def netMat(nb):
+    """A cotton net tanned brown: its DIAMOND MESH (6 cm) — the twine light, the gaps between dark as the shade behind a net
+    (opaque: the kit's atlas has no alpha; a blotched sheet read as a camouflage tarp in the lab, 2026-10-31)."""
+    f = 2 * math.pi / 0.085
+    d1 = nb.math("ABSOLUTE", nb.math("SINE", nb.math("MULTIPLY", nb.math("ADD", nb.gx, nb.gy), f)))
+    d2 = nb.math("ABSOLUTE", nb.math("SINE", nb.math("MULTIPLY", nb.math("SUBTRACT", nb.gx, nb.gy), f)))
+    twine = nb.math("MAXIMUM", nb.mr(d1, 0.82, 0.95), nb.mr(d2, 0.82, 0.95))   # (1 on the strands)
+    tw = nb.mix(nb.mr(nb.noise(3.0, 3), 0.4, 0.6), srgb(0x7a5e3c), srgb(0x94744c))
+    return nb.mix(twine, srgb(0x1f1913), tw)
 MATDEF.update({"antifoul": (0.8, antifoul), "hullWhite": (0.7, hullWhite), "varnish": (0.7, varnish), "net": (0.95, netMat),
                "bandBlue": (0.6, paintedWood(0x2f5d8a)), "bandGreen": (0.6, paintedWood(0x3f7a52)), "charred": (0.95, lambda nb: nb.mix(nb.noise(4.0, 5), srgb(0x161310), srgb(0x2e2620))),
                "lampGlass": (0.2, flat(srgb(0xf2efe2))), "reflector": (0.4, flat(srgb(0xa9aba8)))})
@@ -684,6 +709,121 @@ def buildBarque(K, name, spec, state, seed, far=False):
 
 TYPES["barque"] = dict(builder=buildBarque, band="bandBlue", autoLod=True, atlas=1024, smoothAngle=50)
 TYPES["barque2"] = dict(builder=buildBarque, band="bandGreen", autoLod=True, atlas=1024, smoothAngle=50)
+
+# ── THE QUAY'S LIFE (2026-10-31, PORT_PLAN.md 5): the props of a working fishing quay, built from the same shared props as every
+# kit (props.py: the crates and drums) plus the harbour's own. One state each (props); autoLod.
+#   etal      the FISH STALL: a dressed-stone counter, its striped awning on four poles, slatted fish boxes of silver sardines
+#             on it, the hanging balance scale, a basket, a cask
+#   caisses   CARGO on the quay: crates stacked, wooden casks in their iron hoops, oil drums, a coil of mooring rope
+#   filets    NETS DRYING: two posts and a line, the brown net draped over it sagging, its cork floats along the edge, a
+#             bench with a net heaped on it for mending
+import props
+def fishSilver(nb):   # (sardines: silver flanks, a blue-dark back)
+    return nb.mix(nb.mr(nb.noise(30.0, 3), 0.4, 0.6), srgb(0x9ea7ad), srgb(0x3c4c5c))
+MATDEF.update({"fishSilver": (0.35, fishSilver), "basketWeave": (0.9, lambda nb: nb.mix(nb.noise(40.0, 3, 0.7), srgb(0x8a6a40), srgb(0xb08a55))),
+               "rope": (0.95, lambda nb: nb.mix(nb.noise(30.0, 3, 0.6), srgb(0x8f7b55), srgb(0xb59e72))),
+               "drumBlue": (0.6, props.drum_paint(0x2c4a66, 0.5)), "drumOlive": (0.6, props.drum_paint(0x4d5536, 0.4)), "drumSteel": (0.5, props.steel_paint(0x6a6a66, 0.3))})
+
+def make(K):
+    return lambda n, bm, m: K.obj(n, bm, m, "h", smooth=True)
+
+def cask(K, nm, x, z, y0=0.0, h=0.82, lying=False, yaw=0.0):
+    """A wooden cask: staves bulging, four iron hoops. Lying: on its side along `yaw`."""
+    prof = [(0.0, 0.0), (0.27, 0.0), (0.31, h * 0.2), (0.335, h * 0.5), (0.31, h * 0.8), (0.27, h), (0.0, h)]
+    parts = [lathe(K, f"{nm}Body", prof, (0.0, 0.0), "woodDark", n=16)]
+    for k, f in enumerate((0.08, 0.3, 0.7, 0.92)):
+        r = 0.27 + 0.065 * math.sin(math.pi * f) + 0.012
+        parts.append(lathe(K, f"{nm}Hoop{k}", [(r - 0.012, h * f - 0.025), (r, h * f - 0.025), (r, h * f + 0.025), (r - 0.012, h * f + 0.025)], (0.0, 0.0), "castIron", n=16))
+    for o in parts:
+        if lying:
+            o.rotation_euler = (0.0, math.pi / 2, yaw)   # (Blender: about its Y — the game\x27s across; then turned)
+            o.location = B(x, y0 + 0.335, z)
+        else:
+            o.location = B(x, y0, z)
+    return parts
+
+def fishBox(K, R, nm, x, y, z, yaw=0.0, full=True):
+    """A slatted fish box (60 x 40 x 15 cm), sardines laid in it."""
+    G = "h"; L, W, H = 0.6, 0.4, 0.15; c, s = math.cos(yaw), math.sin(yaw)
+    at = lambda lx, lz: (x + lx * c + lz * s, z - lx * s + lz * c)
+    K.member(f"{nm}Floor", (*at(-L / 2, 0)[:1], y, at(-L / 2, 0)[1]), (*at(L / 2, 0)[:1], y, at(L / 2, 0)[1]), [(-W / 2, 0.0), (W / 2, 0.0), (W / 2, 0.02), (-W / 2, 0.02)], "wood", G)
+    for side in (-1, 1):
+        a, b = at(-L / 2, side * W / 2), at(L / 2, side * W / 2)
+        K.member(f"{nm}Side{side}", (a[0], y, a[1]), (b[0], y, b[1]), [(-0.012, 0.0), (0.012, 0.0), (0.012, H), (-0.012, H)], "wood", G)
+        a, b = at(side * L / 2, -W / 2), at(side * L / 2, W / 2)
+        K.member(f"{nm}End{side}", (a[0], y, a[1]), (b[0], y, b[1]), [(-0.018, 0.0), (0.018, 0.0), (0.018, H + 0.03), (-0.018, H + 0.03)], "woodDark", G)
+    if full:
+        for k in range(9):   # the sardines, laid head to tail
+            fx, fz = R.uniform(-0.22, 0.22), R.uniform(-0.14, 0.14); p = at(fx, fz); ya = yaw + R.uniform(-0.4, 0.4)
+            K.member(f"{nm}Fish{k}", (p[0] - 0.09 * math.cos(ya), y + 0.05 + k * 0.004, p[1] + 0.09 * math.sin(ya)), (p[0] + 0.09 * math.cos(ya), y + 0.05 + k * 0.004, p[1] - 0.09 * math.sin(ya)),
+                     [(-0.022, 0.0), (0.0, -0.012), (0.022, 0.0), (0.0, 0.016)], "fishSilver", G)
+
+def buildEtal(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"
+    K.box("Counter", -1.6, 1.6, 0.0, 0.82, -0.45, 0.45, "dressedStone", G, 0.03)
+    K.box("CounterTop", -1.7, 1.7, 0.82, 0.9, -0.55, 0.52, "sill", G, 0.015)
+    for k, x in enumerate((-1.0, 0.0, 1.0)): fishBox(K, R, f"Box{k}", x, 0.9, -0.05 + R.uniform(-0.05, 0.05), R.uniform(-0.1, 0.1))
+    fishBox(K, R, "BoxStack", 1.3, 0.0, -1.05, 0.3, full=False); fishBox(K, R, "BoxStack2", 1.32, 0.17, -1.02, 0.25)
+    # THE AWNING on four poles, sloping to the front, striped
+    for x in (-1.9, 1.9):
+        for z, h in ((-1.2, 2.25), (0.9, 2.7)): K.rod(f"Pole{x}{z}", (x, 0.0, z), (x, h, z), 0.035, "woodDark", G, 6)
+    K.member("Awning", (0.0, 2.7, 0.95), (0.0, 2.22, -1.3), [(-2.05, -0.008), (2.05, -0.008), (2.05, 0.008), (-2.05, 0.008)], "awningRed", G)
+    K.member("Valance", (0.0, 2.24, -1.3), (0.0, 1.98, -1.33), [(-2.05, -0.008), (2.05, -0.008), (2.05, 0.008), (-2.05, 0.008)], "awningRed", G, up=(0, 0, -1))
+    # the balance scale hanging from the awning\x27s front, its pans
+    K.rod("ScaleChain", (0.55, 2.3, -1.15), (0.55, 1.55, -1.15), 0.008, "castIron", G, 4)
+    K.rod("ScaleBeam", (0.3, 1.55, -1.15), (0.8, 1.55, -1.15), 0.012, "castIron", G, 4)
+    for x in (0.3, 0.8): lathe(K, f"Pan{x}", [(0.0, 1.27), (0.1, 1.27), (0.12, 1.31), (0.0, 1.3)], (x, -1.15), "castIron", n=12)
+    lathe(K, "Basket", [(0.0, 0.0), (0.2, 0.0), (0.26, 0.32), (0.27, 0.34), (0.0, 0.33)], (-1.3, -1.0), "basketWeave", n=14)
+    cask(K, "Cask", -2.2, 0.4)
+
+def buildCaisses(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); mk = make(K)
+    # crates stacked two high, a third leaning on the stack (props.crate: its top at H + CRATE_TOP — stacked 3 mm over it)
+    top = 0.42 + getattr(props, "CRATE_TOP", 0.02) + 0.003
+    for k, (x, z, y, yaw) in enumerate(((-1.2, -0.3, 0.0, 0.05), (-0.42, -0.32, 0.0, -0.04), (-0.8, -0.3, top, 0.12), (-1.0, 0.45, 0.0, 1.5))):
+        props.place(props.crate(mk, f"Crate{k}", "wood", "rope"), (x, y, z), yaw)
+    for k, (x, z) in enumerate(((0.55, -0.4), (1.2, -0.25), (0.85, 0.35))): cask(K, f"Cask{k}", x, z)
+    cask(K, "CaskLying", 0.2, 0.9, lying=True, yaw=0.3)
+    for k, (x, z, p) in enumerate(((1.9, 0.45, "drumBlue"), (2.25, -0.1, "drumOlive"))):
+        props.place(props.drum(mk, f"Drum{k}", p, "drumSteel", seed=seed + k), (x, 0.0, z), R.uniform(0, 6))
+    # a coil of mooring rope: a flat spiral, three turns
+    pts = [(-0.3 + (0.16 + 0.05 * (a / (2 * math.pi))) * math.cos(a), 0.035 + 0.04 * (a // (2 * math.pi)), 1.0 + (0.16 + 0.05 * (a / (2 * math.pi))) * math.sin(a)) for a in [k * 0.4 for k in range(48)]]
+    for k in range(len(pts) - 1): K.rod(f"Rope{k}", pts[k], pts[k + 1], 0.03, "rope", "h", 6)
+
+def buildFilets(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"
+    for x in (-2.0, 2.0): K.rod(f"Post{x}", (x, -0.1, 0.0), (x + R.uniform(-0.03, 0.03), 1.85, 0.0), 0.05, "woodDark", G, 7)
+    K.rod("Line", (-2.0, 1.78, 0.0), (2.0, 1.76, 0.0), 0.012, "rope", G, 4)
+    # THE NET draped over the line, sagging between the posts and hanging both sides in folds — one surface, its edge
+    # lifted where it lies on the ground
+    bm = bmesh.new(); NX, NZ = 64, 14; grid = []   # (64 along: the pleats need the vertices)
+    for i in range(NX + 1):
+        x = -1.9 + 3.8 * i / NX; sag = 0.18 * (1 - (x / 2.0) ** 2)
+        row = []
+        for j in range(NZ + 1):
+            v = -1 + 2 * j / NZ   # -1 front .. +1 back, 0 over the line
+            hang = abs(v) * 1.45
+            y = max(0.04, 1.76 - sag - hang * (0.95 + 0.06 * math.sin(x * 5.0 + j)))
+            # (GATHERED: vertical pleats where it hangs — spread flat it read as a tarp)
+            z = math.copysign(0.05 + 0.32 * abs(v) ** 1.5, v) + (0.06 * math.sin(x * 4.0 + v * 3.0) + 0.07 * math.sin(x * 11.0 + 1.3 * math.sin(x * 2.0))) * min(1.0, abs(v) * 2.5)
+            row.append(bm.verts.new(B(x, y, z)))
+        grid.append(row)
+    for i in range(NX):
+        for j in range(NZ): bm.faces.new((grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    net = K.obj("Net", bm, "net", G, smooth=True)
+    sol = net.modifiers.new("T", "SOLIDIFY"); sol.thickness = 0.015   # (both faces seen: a sheet, not a card)
+    for k in range(10):   # the cork floats along its lower edges
+        x = -1.7 + k * 0.38
+        for side in (-1, 1): K.lump(f"Cork{k}{side}", (x, 0.08, side * 0.42), (0.06, 0.04, 0.06), "woodDark", G, seed=seed + k, rough=0.1, sub=1)
+    # the mending bench, a heap of net on it
+    K.box("Bench", -1.0, 0.6, 0.38, 0.45, -1.45, -1.1, "woodDark", G, 0.01)
+    for x in (-0.85, 0.45): K.box(f"BenchLeg{x}", x - 0.04, x + 0.04, 0.0, 0.38, -1.4, -1.15, "woodDark", G, 0.005)
+    K.lump("NetHeap", (-0.2, 0.46, -1.27), (0.55, 0.16, 0.2), "net", G, seed=seed + 30, rough=0.3, sub=3, flatten=200)   # (round, sunk into the bench: its flattened foot folded — the gate)
+
+TYPES["etal"] = dict(builder=buildEtal, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
+TYPES["caisses"] = dict(builder=buildCaisses, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
+TYPES["filets"] = dict(builder=buildFilets, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
 
 for spec in TYPES.values():
     # (its far level its own build — the tiles as long strips, the genoise's beds alone — baked on the same atlas)
