@@ -76,6 +76,22 @@ const m = spawnSync("gltf-transform", ["merge", ...files.map((f) => `"${path.joi
 if (m.status !== 0) { console.log(`merge FAILED:\n${m.stderr}`); process.exit(1); }
 console.log(`merged ${files.length} parts (${files.map((f) => f.replace(/\.glb$/, "")).join(", ")})`);
 
+// 2b. THE FAR LEVELS a kit did not build (its spec `autoLod`) MADE FROM THEIR NEAR — tools/lod/autoLod.mjs: the same UVs and
+// texture, simplified within one pixel of shape at the switch; then PROVED — tools/lod/lodCheck.mjs renders each near and its
+// far where the game switches and fails the build if they differ (2026-10-31, you: "SOLID with no problems at all").
+// A kit with its own far levels is left as it was (reported, not failed: "i dont want to remake all my assets").
+const autoMade = [];
+{
+  const { NodeIO } = await import("@gltf-transform/core");
+  const { ALL_EXTENSIONS } = await import("@gltf-transform/extensions");
+  const { addFarLevels } = await import("./lod/autoLod.mjs");
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+  const doc = await io.read(raw);
+  const made = (await addFarLevels(doc)).filter((r) => !r.skipped);
+  for (const r of made) { autoMade.push(r.name); console.log(`  AUTOLOD ${r.name} ${r.near} -> ${r.far} tris (${(r.err * 1000).toFixed(1)} mm)`); }
+  if (made.length) await io.write(raw, doc);
+}
+
 // 3. OPTIMISE into the game (ETC1S for a kit — UASTC with --uastc)
 const dst = path.join(ROOT, "public", "models", "alg", glb);
 const o = spawnSync(process.execPath, [path.join(ROOT, "tools", "optimizeGlb.mjs"), raw, dst, ...(flag("--uastc") ? [] : ["--etc1s"])], { cwd: ROOT, encoding: "utf8" });
@@ -84,6 +100,13 @@ console.log(`  → public/models/alg/${glb} (${(fs.statSync(dst).size / 1e6).toF
 
 // 4. THE GATES on it
 let bad = 0;
+if (autoMade.length) {
+  const lc = spawnSync(process.execPath, [path.join(ROOT, "tools", "lod", "lodCheck.mjs"), raw, "--out", path.join(cache, "lodcheck")], { cwd: ROOT, encoding: "utf8", maxBuffer: 1 << 26 });
+  const lines = `${lc.stdout}`.split(/\r?\n/).filter((l) => /^LODCHECK/.test(l) && autoMade.some((n) => l.includes(` ${n} `)));
+  const fails = lines.filter((l) => /FAIL/.test(l));
+  if (fails.length) { bad++; console.log(`  FAIL lodCheck (near and far differ where the game switches — diff images in .cache/blender/${path.basename(cache)}/lodcheck):\n    ${fails.join("\n    ")}`); }
+  else console.log(`  ok   lodCheck: ${lines.length} near/far pairs look the same at the switch`);
+}
 if (blenderBad.length) { bad++; console.log(`  FAIL mipCheck (a material's average colour shifts past ${MIP_BAR} at the game's mip, or a black atlas): ${blenderBad.join(" | ")}`); }
 else if (!flag("--merge")) console.log(`  ok   mipCheck${flag("--quick") ? " (quick: not judged)" : ""}`);
 for (const gate of ["glbExtentTest", "glbCoplanarTest", "glbLodShadingTest"]) {

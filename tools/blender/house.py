@@ -512,7 +512,9 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
             # A piece's OWN far level (`farBuilder`: the same seed, built coarser — 2026-10-20, the hedges: a
             # decimated cactus pad collapsed to a sliver, the far hedge was another shape and POPPED); baked into
             # the same atlas. Without one, the near level decimated (K.far).
-            if spec.get("farBuilder"):
+            # (`autoLod`: NO far level here — tools/lod/autoLod.mjs makes it from this near after the merge, the same UVs and
+            # texture, within one pixel at the switch; tools/lod/lodCheck.mjs proves it. 2026-10-31.)
+            if spec.get("farBuilder") and not spec.get("autoLod"):
                 K.groups["h"] = []; K.spots = []   # (the far build's own spots: thrown away)
                 _f0 = _t.time()
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
@@ -523,11 +525,15 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
         dec = K.stencils(decals, f"{prefix}{tname.capitalize()}", REFS)   # (near level only: at the far's 60 m+ a word is a pixel)
         if dec: stencilled = True
         for i, o in enumerate(objs):
-            f = fars[i] if fars else K.far(o, spec.get("farRatio", 0.3))   # (a kit of small round stones: gentler — 0.3 left shards)
-            # (a piece's own far build shades by the near's normals too — the gate, tools/glbLodShadingCheck.mjs)
-            if fars: copy_normals(f, o)
-            print("TRIS", o.name, tris(o), "far", tris(f))
-            exported += [o, f] + ([dec[o]] if o in dec else [])
+            if spec.get("autoLod"):
+                print("TRIS", o.name, tris(o), "far (autoLod)")
+                exported += [o] + ([dec[o]] if o in dec else [])
+            else:
+                f = fars[i] if fars else K.far(o, spec.get("farRatio", 0.3))   # (a kit of small round stones: gentler — 0.3 left shards)
+                # (a piece's own far build shades by the near's normals too — the gate, tools/glbLodShadingCheck.mjs)
+                if fars: copy_normals(f, o)
+                print("TRIS", o.name, tris(o), "far", tris(f))
+                exported += [o, f] + ([dec[o]] if o in dec else [])
             # (its straw-card spots: empties <piece>_Hay<i> — the game's hay piles; a spot may say its KIND and SIZE,
             # (x, y, z, yaw, "Brush", 1.6): <piece>_Brush<i>, the FLN camp's cut juniper — 2026-10-27, algHaystack "brush")
             count = {}

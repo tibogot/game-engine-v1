@@ -376,7 +376,9 @@ TYPES["magasin"] = dict(builder=buildMagasin, W=16.0, D=8.0, H=4.6, pitch=0.3, w
 for spec in TYPES.values():
     # (its far level its own build — the tiles as long strips, the genoise's beds alone — baked on the same atlas)
     b = spec.get("builder", buildHouse)
-    spec.update(builder=b, farBuilder=(lambda b: lambda K, n, sp, st, sd: b(K, n, sp, st, sd, far=True))(b), atlas=2048,
+    # (autoLod: Blender builds the NEAR only; tools/lod/autoLod.mjs makes the far from it — 2026-10-31. The far builders and
+    # their far=True branches stay for a kit that wants its own)
+    spec.update(builder=b, autoLod=True, atlas=2048,
                 # (wider gaps between the islands — 0.004, 0.006 — baked the atlas BLACK, silently: the far level's bars are widened instead)
                 islandMargin=0.003,
                 # (its thin coloured parts kept wide enough in the atlas to hold their colour at the mips — bkit.bake `thin`)

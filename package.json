@@ -18,7 +18,11 @@
     "levels": "node tools/levelCheck.mjs"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.2.1",
+    "@gltf-transform/extensions": "^4.2.1",
+    "@gltf-transform/functions": "^4.2.1",
     "eslint": "^10.9.1",
+    "sharp": "^0.35.5",
     "vite": "^8.0.12"
   },
   "dependencies": {
