@@ -28,9 +28,6 @@ export function rtsEngineOptions(params = new URLSearchParams(location.search)) 
     // Instance matrices as vertex attributes: uploaded when they change, not
     // re-sent on every draw (main.js). ?instubo=1 = three's per-draw copy.
     instanceAttributes: params.get("instubo") !== "1",
-    // Instanced meshes on one material share ONE shader build
-    // (render/sharedInstanceBuilds.js). ?instshare=0 = one build each.
-    shareInstanceBuilds: params.get("instshare") !== "0",
     // Plant-field draws that cannot hold a plant are skipped on the CPU
     // (ScatterField.setCpuDensity). ?plantcull=0 = draw them all.
     plantCpuCull: params.get("plantcull") !== "0",

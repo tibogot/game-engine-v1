@@ -24,9 +24,8 @@ boot.textContent = "Starting the engine…";
 const app = await startV3App({
   // INSTANCED MESHES SHARE ONE SHADER (2026-10-30, the load profile: 157 instanced meshes — rail posts, props — at 35
   // instance counts made 68 vertex shaders differing only in an array size, each its own pipeline compile): the
-  // matrices as vertex attributes, one node build per material (the RTS games' boot fix). ?instubo=1 / ?instshare=0: off
+  // matrices as vertex attributes (the RTS games' boot fix; three r187 shares their node builds). ?instubo=1: off
   instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
-  shareInstanceBuilds: new URLSearchParams(location.search).get("instshare") !== "0",
   container: $("game"),
   skyMode: "skypro",
   cloudShadows: true,

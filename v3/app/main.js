@@ -8,14 +8,18 @@ import { stashPendingHeightmap, takePendingHeightmap } from "../io/pendingLoad.j
 import { putAutosave, getAutosave, clearAutosave } from "../io/autosave.js";
 import { createTerrainLOD, LOD_LEVELS, BASE_STEP, GRID_N, GRID_OFFSET } from "../terrain/terrainLOD.js";
 import { GRID_DEFAULTS, applyGridConfig, createGridMaterial, getGridUniforms } from "../render/materials/gridMaterial.js";
-import { installSharedInstanceBuilds, installDrawnRangeUploads } from "../render/sharedInstanceBuilds.js";
+import { installDrawnRangeUploads } from "../render/drawnRangeUploads.js";
 import { installInstanceMatrixSync } from "../render/instanceMatrixSync.js";
 import { installEmptyDrawSkip } from "../render/emptyDrawSkip.js";
 import { installShadowBuildSharing } from "../render/shadowBuildSharing.js";
 import { installCountStableKeys } from "../render/countStableKeys.js";
+import { installSerialCompile } from "../render/serialCompile.js";
 import { setAlphaCoverageDefault } from "../render/materials/alphaCutout.js";
 // r186: instanced vertex effects (birds, wind, sway, billboards) in the instance's own frame, as r184
 import "../render/instancedPositionOrder.js";
+// r187: a shared uniform group in ONE order in the shader and in its buffer (values at the wrong
+// offsets, "binding too small" otherwise). Side effect on import, for every renderer on the page.
+import "../render/sharedUniformOrder.js";
 import { ScatterField } from "../render/scatter/scatterField.js";
 import { createSculptBrush } from "../terrain/sculptBrush.js";
 import { createHeightLayers } from "../terrain/heightLayers.js";
@@ -401,6 +405,8 @@ export async function startV3App(opts = {}) {
   // THE SAME SHADER TEXT EVERY LOAD (render/stableShaderNames.js): before anything compiles, so
   // Chrome's shader disk cache can reuse every shader on the next load.
   installStableShaderNames(renderer);
+  // One compileAsync at a time (render/serialCompile.js: r187's parallel precompile keeps one state).
+  installSerialCompile(renderer);
   /*
    * LOCAL LIGHTS (opts.localLights, or ?locallights=1): fires, lanterns, muzzle flashes as tiled
    * point lights (render/lighting/localLights.js). The lighting system must be in place before
@@ -428,40 +434,18 @@ export async function startV3App(opts = {}) {
   if (new URLSearchParams(location.search).get("shadowshare") !== "0") {
     installShadowBuildSharing(renderer, { keyMemo: new URLSearchParams(location.search).get("shadowkeymemo") !== "0" });
   }
-  // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). three
-  // puts an instanced mesh of ≤1024 instances' matrices in a UNIFORM buffer
-  // and re-sends the whole buffer on every draw of every pass, changed or not
-  // (measured 2026-10-03, alg-rts: ~1.3 MB a frame — static stones and walls
-  // included). Above that size it uses an instanced vertex buffer, uploaded
-  // only when instanceMatrix.needsUpdate. A limit of 0 sends every instanced
-  // mesh that way. Only InstanceNode and RangeNode read this limit. Cost: one
-  // more vertex buffer per instanced draw (WebGPU allows 8).
+  // INSTANCE MATRICES AS VERTEX ATTRIBUTES (opts.instanceAttributes). r187 draws
+  // instanced meshes from vertex attributes read per object, and shares their
+  // node builds (what render/sharedInstanceBuilds.js did by hand until r186).
+  // Where it cannot — a geometry with too many vertex buffers left — it falls
+  // back to a UNIFORM buffer for ≤1024 instances, re-sent on every draw of every
+  // pass, changed or not (alg-rts, 2026-10-03: ~1.3 MB a frame). A limit of 0
+  // keeps that fallback on vertex attributes too.
   if (opts.instanceAttributes && renderer.backend?.capabilities?.getUniformBufferLimit) {
     renderer.backend.capabilities.getUniformBufferLimit = () => 0;
-    // And a changed buffer uploads only the instances DRAWN (mesh.count), not
-    // its whole capacity — the soldiers' kit pieces have room for 640 and sent
-    // all 40 KB each frame for a dozen men. A caller's own update ranges win.
-    // (Patched once per page; every app in it shares three's classes.)
-    const IN = THREE.InstanceNode?.prototype;
-    if (IN && !IN._v3DrawnRange) {
-      const update = IN.update;
-      IN.update = function (frame) {
-        const buf = this.buffer, im = this.instanceMatrix;
-        const changed = buf !== null && this.isStorageMatrix !== true && im.version !== buf.version;
-        update.call(this, frame);
-        if (changed && buf.updateRanges.length === 0) {
-          const n = Math.min(im.count, Math.max(1, this.instancedMesh?.count ?? im.count));
-          if (n < im.count) buf.addUpdateRange(0, n * 16);
-        }
-      };
-      IN._v3DrawnRange = true;
-    }
-    // r186: no InstanceNode — the same rule on the buffer three syncs at frame start
-    if (!IN) installDrawnRangeUploads(renderer);
-    // With the matrices out of the shader source, instanced meshes on one
-    // material can share ONE node build (three builds each — its uuid is in the
-    // key): render/sharedInstanceBuilds.js. opts.shareInstanceBuilds.
-    if (opts.shareInstanceBuilds) installSharedInstanceBuilds(renderer);
+    // And a changed buffer uploads only the instances DRAWN (mesh.count), not its
+    // whole capacity (render/drawnRangeUploads.js). ?drawnrange=0 to A/B.
+    if (new URLSearchParams(location.search).get("drawnrange") !== "0") installDrawnRangeUploads(renderer);
   }
 
   // ── Scene ──────────────────────────────────────────────────────────────────
@@ -8652,7 +8636,7 @@ export async function startV3App(opts = {}) {
   // ONE material per (kit, library material, triplanar), shared by every kit
   // shape: nothing in it is per shape (the shading reads the geometry's
   // rockShade attribute, the uniforms are global), and with instanced meshes
-  // sharing node builds (render/sharedInstanceBuilds.js) the 60 rock shapes
+  // sharing node builds (three r187's own instanced sharing) the 60 rock shapes
   // then build one shader per pass instead of 60 (nam-rts boot, 2026-10-03).
   // Marked `sharedKit`: the prop instancer never disposes it on a swap.
   const _kitMaterials = new Map();

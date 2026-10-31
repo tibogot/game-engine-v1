@@ -21,7 +21,12 @@
 import * as THREE from "three/webgpu";
 import { Fn, uniform, vec2, texture, uv } from "three/tsl";
 
-/** Tidewater PostFX aeUniforms. */
+/**
+ * Tidewater PostFX aeUniforms. refLum is the default target; a game can set its own (Sky Pro's
+ * `aeRefLum`). On three r186 the meter read too DARK, by a factor that changed with the scene (2026-10-31:
+ * alg 0.46×, the editor's fog-lab level 0.2×, Thunderline 0.62×; r187 reads the frame right), so the
+ * looks approved before r187 were exposed brighter than this target says — see algGame's aeRefLum.
+ */
 export const SKYPRO_AE = { refLum: 0.25, min: 0.6, max: 6.0, nightMax: 2.0, up: 1.6, down: 1.1 };
 
 export function createSkyProExposure({ renderer }) {
@@ -114,13 +119,14 @@ export function createSkyProExposure({ renderer }) {
   /**
    * @param {number} dt  seconds
    * @param {object} o   night (0..1, Tidewater's), enabled (Tidewater's auto exposure),
-   *                     nightEV (the night look: extra stops at full night; 0 = faithful)
+   *                     nightEV (the night look: extra stops at full night; 0 = faithful),
+   *                     refLum (the luminance the eye aims for; Tidewater's by default)
    * @returns {number}   the factor on the base exposure
    */
-  function update(dt, { night = 0, enabled = true, nightEV = 0 } = {}) {
+  function update(dt, { night = 0, enabled = true, nightEV = 0, refLum = SKYPRO_AE.refLum } = {}) {
     let tgt = 1;
     if (enabled && state.metered) {
-      const ratio = SKYPRO_AE.refLum / state.avg;
+      const ratio = refLum / state.avg;
       const partial = ratio > 1 ? Math.pow(ratio, 0.8) : ratio;
       const hi = SKYPRO_AE.max + (SKYPRO_AE.nightMax - SKYPRO_AE.max) * night;
       tgt = Math.min(Math.max(partial, SKYPRO_AE.min), hi);

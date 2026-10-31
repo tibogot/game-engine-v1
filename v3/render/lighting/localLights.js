@@ -58,6 +58,9 @@ class MasterClusteredLightsNode extends ClusteredLightsNode {
   drive(renderer, camera, lights) {
     this.clusteredLights.length = 0;
     for (const l of lights) this.clusteredLights.push(l);
+    // r187 sizes the grid once, at first use; r186 followed the drawing buffer every frame (a
+    // render-scale change, a window resize). Same size: returns at once.
+    this._fitToRenderer(renderer);
     ClusteredLightsNode.prototype.updateBefore.call(this, { renderer, camera });
   }
   // the renderer hands the scene's lights over every render; the clusters keep the pool's order
@@ -81,7 +84,7 @@ class FollowerClusteredLightsNode extends ClusteredLightsNode {
     this._master = master;
     this.updateBeforeType = THREE.NodeUpdateType.NONE;
   }
-  updateProgram() {}
+  _initGrid() {}   // the master's grid (r187's setupLights would make one of its own)
   updateBefore() {}
   customCacheKey() {
     return this._master._compute.getCacheKey() + THREE.LightsNode.prototype.customCacheKey.call(this);
@@ -110,7 +113,7 @@ class LocalClusteredLighting extends THREE.Lighting {
   setMain(scene, maxLights) {
     this._mainScene = scene;
     this._master = new MasterClusteredLightsNode(maxLights);
-    this._master.updateProgram(this._renderer);
+    this._master._initGrid(this._renderer);
   }
   createNode(lights = []) {
     if (!this._master) return new THREE.LightsNode().setLights(lights);

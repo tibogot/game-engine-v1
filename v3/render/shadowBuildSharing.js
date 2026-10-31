@@ -15,7 +15,7 @@
  * castShadowNode / maskShadowNode / maskNode, no positionNode, no alphaMap, no alphaTest, no
  * displacementMap, not transparent — and the object is neither batched nor morphed (those keep three's
  * key). Instanced meshes join: their matrices / colours come from the object, not the geometry, and
- * their uuid in the key is sharedInstanceBuilds.js's business (kept wherever it cannot share). A map or a
+ * three r187 keeps no uuid in their key (it shares instanced builds itself). A map or a
  * colorNode is allowed: for such an opaque caster the shadow pass's map-alpha colorNode is dropped,
  * since a depth shadow map never uses it (opaqueSource below).
  * Everything else in the key is three's: the material's own properties (side…), skinning, the pass.

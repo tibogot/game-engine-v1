@@ -715,7 +715,7 @@ fn scShadowAt( gate: f32, texel: vec2u, size: vec2u, nT: texture_3d<f32>, wT: te
     If(texel.x.lessThan(uint(PANO_W)).and(texel.y.lessThan(uint(PANO_H))), () => {
       textureStore(panorama, texel, panoFn(loadAll(), texel, uvec2(PANO_W, PANO_H), noiseNode, weatherNode, boundsNode, skyNode, smpRepeat, skySmp));
     });
-  })().compute([PANO_W / 8, PANO_H / 8, 1], [8, 8, 1]).setName("Clouds Panorama");
+  })().computeKernel([8, 8, 1]).setName("Clouds Panorama");
 
   const shadowPass = Fn(() => {
     const id = globalId.xy;
@@ -725,7 +725,7 @@ fn scShadowAt( gate: f32, texel: vec2u, size: vec2u, nT: texture_3d<f32>, wT: te
     If(texel.x.lessThan(uint(SHADOW_RES)).and(texel.y.lessThan(uint(SHADOW_RES))), () => {
       textureStore(shadowMap, texel, shadowFn(loadAll(), texel, uvec2(SHADOW_RES, SHADOW_RES), noiseNode, weatherNode, smpRepeat));
     });
-  })().compute([SHADOW_RES / 8, SHADOW_RES / 8, 1], [8, 8, 1]).setName("Clouds Shadow");
+  })().computeKernel([8, 8, 1]).setName("Clouds Shadow");
 
   let tracePass = null;
   const resolvePasses = [null, null];
@@ -738,7 +738,7 @@ fn scShadowAt( gate: f32, texel: vec2u, size: vec2u, nT: texture_3d<f32>, wT: te
         textureStore(source, id, c);
         textureStore(sourceMeta, id, metaFn(c));
       });
-    })().compute([1, 1, 1], [8, 8, 1]).setName("Clouds Trace");
+    })().computeKernel([8, 8, 1]).setName("Clouds Trace");
 
     // ping-pong: pass k writes colors[k] / metas[k] and reads the other pair
     for (let k = 0; k < 2; k++) {
@@ -751,7 +751,7 @@ fn scShadowAt( gate: f32, texel: vec2u, size: vec2u, nT: texture_3d<f32>, wT: te
           textureStore(outC, id, c);
           textureStore(outM, id, metaFn(c));
         });
-      })().compute([1, 1, 1], [8, 8, 1]).setName("Clouds Resolve");
+      })().computeKernel([8, 8, 1]).setName("Clouds Resolve");
     }
   }
 

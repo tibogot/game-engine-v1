@@ -566,11 +566,14 @@ export function createCrowdField({
       instMatrices.needsUpdate = true;
       anim.needsUpdate = true;
       extra.needsUpdate = true;
-      // Dispatch sized to the LIVE soldiers: renderer.compute takes the thread
-      // count per call (WebGPUBackend: workgroups = ceil(count / 64)). It used
-      // to be the capacity — 160 soldiers skinned with 5 alive. (One dimension
-      // caps at 65 535 workgroups: ~1 700 soldiers of ~2 400 vertices a crowd.)
-      renderer.compute(kernel, n * vertexCount);
+      // Dispatch sized to the LIVE soldiers: the kernel's thread count, set per
+      // call (WebGPUBackend: workgroups = ceil(count / 64); the kernel's own guard
+      // stops at it too). It used to be the capacity — 160 soldiers skinned with
+      // 5 alive. r187 refuses a size passed to renderer.compute() for a kernel
+      // made with compute(count). (One dimension caps at 65 535 workgroups:
+      // ~1 700 soldiers of ~2 400 vertices a crowd.)
+      kernel.count = n * vertexCount;
+      renderer.compute(kernel);
     },
 
     dispose() {

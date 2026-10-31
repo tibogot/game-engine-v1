@@ -22,8 +22,8 @@ level, auto-off at RTS height), next step = wire into leafField + scatterField.
 | Module | What | Used by |
 |---|---|---|
 | `render/instanceMatrixSync.js:32` `installInstanceMatrixSync` | matrices uploaded the SAME frame (fix for flashing rocks) | main.js (all games), splitflap-lab |
-| main.js:419-439 inline, `opts.instanceAttributes` | instance matrices as vertex attributes; upload only `mesh.count` | rtsPerfBoot (alg), namGame |
-| `render/sharedInstanceBuilds.js:179` | one node build per material for instanced meshes (needs the above) | main.js `opts.shareInstanceBuilds` |
+| main.js inline + `render/drawnRangeUploads.js`, `opts.instanceAttributes` | instance matrices as vertex attributes (r187: always, except its fallback); upload only `mesh.count` | rtsPerfBoot (alg), namGame, Thunderline |
+| three r187 itself (#35007) | one node build per material for instanced meshes (was `render/sharedInstanceBuilds.js`, deleted 2026-10-31) | — |
 | `render/emptyDrawSkip.js:19` | skip count-0 draws (wraps `renderer.renderObject`) | main.js |
 | `render/parallelPipelines.js:23` | async pipeline compile at boot | rtsPerfBoot, namGame |
 | `render/gpuOnlyArrays.js` | free CPU copies of GPU-only buffers | scatter, crowd, grass, splat, algStones, nam, rtsPerfBoot |
@@ -259,7 +259,7 @@ machine), `npm test` once before the commit, reload every touched page.
 - [ ] **3. One CPU cull + LOD helper** (`render/culling/cpuCull.js`: frustum test with margin, LOD tier with hysteresis, shared constants). TreeLod, FoliageLod, PropInstancer, PlacedFoliage call it; then the ad-hoc loops in decals / waterfall / rivers / games, one by one.
 - [ ] **4. One LOD settings shape** (`{ distances: [..], hysteresis, floors }`) read by every system; old names accepted as aliases so old levels still load.
 - [ ] **5. One mesh-merge helper** (`render/mergeByMaterial.js`) — roadDrawCallMerge, modularRoadBatching.mergeByMaterial, horse-lab mergeStatic call it.
-- [ ] **6. One instance-pipeline path.** Decide: global `instanceAttributes` + sharedInstanceBuilds for every game, or per-mesh `shareInstancePipeline`. Measure modular-road with the global path before choosing.
+- [ ] **6. One instance-pipeline path.** r187 shares instanced builds itself and always draws them from vertex attributes, so per-mesh `shareInstancePipeline` (its matrix padding) is now redundant: retire it, keep the drawn-range uploads. Measure modular-road before and after.
 - [ ] **7. One pooled-instance helper** (capacity / count / upload) for the shared-rts fields and the single-purpose game pools — new code uses it; old pools moved only when touched.
 - [ ] **8. One indirect-args helper** for scatter / grass / ambient / leaf / staticInstanceBatch / gpuInstanceField.
 - [ ] **9. Hi-Z + GpuInstanceField into real content** — follow AUDIT.md's plan (leafField + scatterField first, camera lists only).

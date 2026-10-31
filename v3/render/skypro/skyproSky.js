@@ -59,6 +59,8 @@ export const SKYPRO_DEFAULTS = {
   exposure: 0.55,
   /** Tidewater's eye adaptation on top of `exposure` (skyproExposure.js): x0.6..x6, at most x2 at night */
   autoExposure: true,
+  /** the eye adaptation's target luminance (Tidewater's 0.25); a game may aim brighter (alg: see algGame) */
+  aeRefLum: 0.25,
   /**
    * THE NIGHT LOOK — a layer on top of the faithful Tidewater night, never part of it. Off = the
    * night exactly as Tidewater draws it.
@@ -327,6 +329,7 @@ export function createSkyProSky({ renderer, camera, params = {} }) {
   function exposureFactor(dt) {
     return ae.update(dt, {
       night: out.night, enabled: !!P.autoExposure, nightEV: P.nightLook ? P.nightEV : 0,
+      refLum: P.aeRefLum ?? undefined,
     });
   }
 

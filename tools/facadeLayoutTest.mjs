@@ -48,7 +48,8 @@ const check = (name, ok, extra = "") => {
   for (const k of ["73856093", "19349663", "256.0", "1 << 22"]) {
     check(`...and the hash key constant ${k}`, shader.includes(k) && port.includes(k));
   }
-  const three = readFileSync(join(ROOT, "node_modules/three/build/three.webgpu.js"), "utf8");
+  // three's hash() source (r187 moved the node code out of build/three.webgpu.js into three.tsl.js)
+  const three = readFileSync(join(ROOT, "node_modules/three/src/nodes/math/Hash.js"), "utf8");
   for (const k of ["747796405", "2891336453", "277803737"]) {
     check(`...and three's PCG constant ${k}`, three.includes(k) && port.includes(k));
   }

@@ -12,7 +12,7 @@
  * For a plain Mesh the count changes nothing in the shader (three reads it only for a morph texture
  * and the RangeNode, neither used here — both keep three's key), so the key sees count as 1. Meshes
  * that do differ still differ: their materials' node graphs (each crowd's own buffers) key by identity.
- * InstancedMesh keeps three's rule (sharedInstanceBuilds.js shares those its own way).
+ * InstancedMesh keeps three's rule (r187 shares those builds itself: no uuid in their key).
  *
  * Installed once per page through the first render object (RenderObject is not exported).
  */

@@ -1079,6 +1079,10 @@ export function applyAuresLight(app, L = AURES_LIGHT) {
     // path on a sea; this map has none, and a low moon left the land half as bright (MEASURED at
     // the post, 23 h: open ground 0.0016 at 18° vs 0.0034 at Tidewater's).
     app.sky.skyPro.moonElev = 0;
+    // The look as approved: tuned on three r186, whose exposure meter read this map at 0.46× its
+    // real brightness (r187 reads it right). Aiming at 0.54 instead of Tidewater's 0.25 gives the
+    // same exposure on r187 (MEASURED at the post, 2026-10-31: x3.82 on r186, x3.81 here).
+    app.sky.skyPro.aeRefLum = 0.54;
     if (L.skyProSunScale) app.sky.skyPro.sunScale = L.skyProSunScale;
     // A map's own Sky Pro settings (MAP_LIGHT.skyPro: its cloud cover, its haze…).
     if (L.skyPro) Object.assign(app.sky.skyPro, L.skyPro);

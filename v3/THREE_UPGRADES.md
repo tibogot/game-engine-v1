@@ -1,7 +1,37 @@
 # three.js upgrades — workarounds, checks, what to try
 
-We ship three **r186.1** since 2026-10-27 (`package.json` `"three": "^0.186.1"`, one version for the whole
-repo; restore point: git tag `pre-r186`). The r184 notes below stay as history.
+We ship three **r187** since 2026-10-31 (`package.json` `"three": "^0.187.0"`, one version for the whole
+repo; restore point: git tag `pre-r187`; r186.1 before it, tag `pre-r186`). The older notes stay as history.
+
+## The r187 upgrade (2026-10-31) — what broke, what fixed it, what it gave
+
+Done in a separate checkout (a git worktree with its own three, on its own Vite port) so the working tree
+stayed on r186 until r187 was proven; A/B against a second checkout of the same commit on r186.
+- **Shared uniform groups laid out in two orders** (three bug): r187 sorts a shared group's uniforms by node
+  id to find its buffer AFTER the shader was written in build order — values at the wrong offsets, and
+  "binding … too small" (alg: thousands of errors, the haystacks and foliage depth pass). Our render-group
+  uniforms interleave with three's camera ones. `render/sharedUniformOrder.js` sorts before the code is
+  written, as r186 did (side effect on import: every renderer on the page). RETEST next upgrade.
+- **Two compileAsync calls at once crash** (three keeps ONE precompile state and r187 yields mid-call):
+  `render/serialCompile.js` queues them (foliage, grass, scatter, the game warm-up start side by side).
+- **`renderer.compute(node, size)` refused for a node made with `compute(count)`**: Sky Pro's four
+  explicitly dispatched cloud passes are `computeKernel([8, 8, 1])`; the crowd skinning sets
+  `kernel.count` per frame (and gets three's bounds guard at the live soldiers).
+- **ClusteredLightsNode rewritten** (spot lights, a grid sized once): localLights' master calls
+  `_initGrid` / `_fitToRenderer` (followed the drawing buffer every frame before), followers no-op `_initGrid`.
+- **Instanced builds shared by three itself** (#35007: matrices read per object, no uuid in the key):
+  `sharedInstanceBuilds.js` DELETED (measured: same builds with it on or off), `shareInstanceBuilds` option
+  gone. Its drawn-range uploads re-done on the instanceMatrix itself (`render/drawnRangeUploads.js`,
+  `?drawnrange=0`): without it r187 sends every buffer's capacity — alg 1 450 KB a frame → 280 KB.
+- Node code moved from `build/three.webgpu.js` into `three.tsl.js`: facadeLayoutTest reads three's
+  `src/nodes/math/Hash.js` instead.
+- Still needed, retested: `instancedPositionOrder.js` (setupPosition identical to r186), `countStableKeys.js`
+  (a plain Mesh with count > 1 still keys on its uuid), `shadowBuildSharing.js` (alg 617 → 445 builds) and
+  its key memo (the alphaTest setter still bumps `version`). Decoders (basis, draco): identical.
+- Redundant now but harmless, retire later: `render/instancePipeline.js` (pads matrices past 1024 to get
+  vertex attributes — r187 always uses them), `instanceMatrixSync.js` (installs nothing since r186).
+- MEASURED (alg auresNew, same commit, my Chrome, two boots each): **ready 41–50 s → 32 s**, node builds
+  469 → 445, async pipelines 237 → 212; uploads 580 KB / 273 writes → 280 KB / 200 writes a frame.
 
 ## The r186 upgrade (2026-10-27) — what broke, what fixed it, what is open
 
@@ -65,8 +95,8 @@ What WebGPU offers that three does not expose (render bundles, device limits, f1
 | Quirk | Where we work around it | Maybe fixed in |
 |---|---|---|
 | InstancedMesh matrices upload one frame late; re-packed lists flash | `render/instanceMatrixSync.js` | r185 (InstanceNode update range sync), r186 (update range clear, previous instance data) |
-| Every InstancedMesh gets its own shader build (uuid in the cache key) | `render/sharedInstanceBuilds.js`, `render/instancePipeline.js` | ? |
-| A shared build refreshes only its first mesh; the rest froze | needsRefresh per render object (`sharedInstanceBuilds.js`) | r186 ("refresh types for render objects") |
+| Every InstancedMesh gets its own shader build (uuid in the cache key) | `render/instancePipeline.js` (sharedInstanceBuilds.js deleted) | **r187** (#35007) |
+| A shared build refreshes only its first mesh; the rest froze | (was sharedInstanceBuilds.js) | r186 / r187 |
 | Unstable uniform names → shaders recompiled from scratch | `render/stableShaderNames.js` | r185 (function nodes cached per backend)? |
 | `uniform()` defaults to the per-object group → every draw re-uploads | globals in `frameGroup`, arrays in `renderGroup` | r185 (pooled, garbage-free UBO updates); keep our grouping anyway |
 | MRT blends only the `output` attachment; transparents wipe emissive/normal | opaque or alpha-test markers; `render/bloomMRT.js`, `post/postFxPipeline.js`, city signs, headlight beam | ? |
