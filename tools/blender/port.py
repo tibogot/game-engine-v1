@@ -165,23 +165,24 @@ def opening(K, R, spec, wall, kind, x, y0, state, nth, z0, joinery=True, far=Fal
         K.box(f"Sh{nth}", x0 + 0.01, x1 - 0.01, y0 + 0.01, y1 - 0.01, z0 + 0.06, z0 + 0.1, spec["shutter"], G, 0.005)
         K.box(f"ShGap{nth}", x - 0.008, x + 0.008, y0 + 0.02, y1 - 0.02, z0 + 0.055, z0 + 0.065, "dark", G, 0)
 
-def tileRoof(K, R, x0, x1, zE0, zE1, yE, pitch, hole=None, far=False):
+def tileRoof(K, R, x0, x1, zE0, zE1, yE, pitch, hole=None, far=False, only=None, nm=""):
     """THE CANAL-TILE ROOF over x0..x1, its eaves at zE0 (front) and zE1 (back) at height yE, its ridge on the middle:
     a deck under it (the tiles' colour, seen between the channels), the COVER TILES in channels down each slope course by
     course (each course's foot lifted over the one below — the overlaps the eye reads), the ridge's round tiles on a
     lime bed. `hole` (x, z, r): no tiles there, the deck holed (a shell through the roof). `far`: the far level's — each
-    channel one long strip, three-sided (decimated, the courses folded into each other: the coplanar gate)."""
+    channel one long strip, three-sided (decimated, the courses folded into each other: the coplanar gate). `only` -1 / +1:
+    that slope alone, no ridge (a LEAN-TO against a higher wall — the church's aisles). `nm`: its objects' name prefix."""
     G = "h"; zR = (zE0 + zE1) / 2; rise = (zR - zE0) * math.tan(pitch); yR = yE + rise
     deck = []
-    for s, zE in ((-1, zE0), (1, zE1)):
-        d = K.member(f"Deck{s}", (0.0, yE, zE), (0.0, yR, zR), [(x0 - 0.02, -0.06), (x1 + 0.02, -0.06), (x1 + 0.02, 0.0), (x0 - 0.02, 0.0)], "canalTile", G, up=(0, 1, 0))
+    for s, zE in [(s_, z_) for s_, z_ in ((-1, zE0), (1, zE1)) if only in (None, s_)]:
+        d = K.member(f"{nm}Deck{s}", (0.0, yE, zE), (0.0, yR, zR), [(x0 - 0.02, -0.06), (x1 + 0.02, -0.06), (x1 + 0.02, 0.0), (x0 - 0.02, 0.0)], "canalTile", G, up=(0, 1, 0))
         deck.append(d)
     if hole:
         for d in deck: K.boolean(d, K.breach((hole[0], yE + rise * 0.5, hole[1]), (hole[2], 1.2, hole[2]), seed=7, mat="woodDark"))
     r, pitchX, course = 0.075, 0.21, 0.42
     tiles = []   # (all of them ONE object — K.members: one each, the join cost 22 s a state)
     nx = int((x1 - x0) / pitchX)
-    for s, zE in ((-1, zE0), (1, zE1)):
+    for s, zE in [(s_, z_) for s_, z_ in ((-1, zE0), (1, zE1)) if only in (None, s_)]:
         # (the far keeps the COURSES — strips without them changed the roof at the switch, you: "the roof lod is changing too
         # much"; its tiles three-sided instead)
         L = math.hypot(zR - zE, rise); nC = max(1, round(L / course))
@@ -198,11 +199,12 @@ def tileRoof(K, R, x0, x1, zE0, zE1, yE, pitch, hole=None, far=False):
                 if hole and math.hypot(x - hole[0], (za + zb) / 2 - hole[1]) < hole[2] + 0.3: continue
                 ang = [math.pi * k / (3 if far else 5) for k in range(4 if far else 6)]
                 tiles.append(((x + R.uniform(-0.01, 0.01), ya, za), (x, yb, zb), [(r * math.cos(t), r * math.sin(t) * 0.8) for t in ang]))
-    K.members("Tiles", tiles, "canalTile", G)
+    K.members(f"{nm}Tiles", tiles, "canalTile", G)
+    if only is not None: return yR
     # the ridge: its lime bed, the round ridge tiles along it
-    K.box("RidgeBed", x0 - 0.05, x1 + 0.05, yR - 0.04, yR + 0.05, zR - 0.14, zR + 0.14, "mortarLime", G, 0.01)
+    K.box(f"{nm}RidgeBed", x0 - 0.05, x1 + 0.05, yR - 0.04, yR + 0.05, zR - 0.14, zR + 0.14, "mortarLime", G, 0.01)
     ang = [math.pi * k / 6 for k in range(7)]
-    K.member("Ridge", (x0 - 0.08, yR + 0.03, zR), (x1 + 0.08, yR + 0.03, zR), [(0.13 * math.cos(t), 0.11 * math.sin(t)) for t in ang], "canalTile", G, up=(0, 1, 0))
+    K.member(f"{nm}Ridge", (x0 - 0.08, yR + 0.03, zR), (x1 + 0.08, yR + 0.03, zR), [(0.13 * math.cos(t), 0.11 * math.sin(t)) for t in ang], "canalTile", G, up=(0, 1, 0))
     return yR
 
 def genoise(K, R, x0, x1, z, y, out, far=False):
@@ -315,17 +317,17 @@ def buildHouse(K, name, spec, state, seed, far=False):
 # one open on the dark inside, one ajar; small barred windows high on the back; a low canal-tile roof; a stone loading
 # step along the doors. States as the houses: damaged (shell holes, the roof holed, a door torn off), ruin (the roof gone,
 # the walls broken off ragged, rubble and charred trusses inside).
-def quoins(K, R, x, z, sx, sz, H, nm):
+def quoins(K, R, x, z, sx, sz, H, nm, bev=0.012):
     """Dressed long-and-short blocks up a corner at (x, z), proud of both faces it turns (sx, sz: which way out)."""
     G = "h"; y, k = -0.3, 0
     while y < H - 0.25:
         h = 0.32 + R.uniform(-0.02, 0.02); L = 0.55 if k % 2 else 0.32
         # (along X: L from the corner, 5 cm proud of the face at z; along Z: the short side)
         ax0, ax1 = (x - L, x + 0.04) if sx > 0 else (x - 0.04, x + L)
-        K.box(f"{nm}{k}x", ax0, ax1, y, y + h - 0.012, (z - 0.05) if sz < 0 else z, z if sz < 0 else (z + 0.05), "dressedStone", G, 0.012)
+        K.box(f"{nm}{k}x", ax0, ax1, y, y + h - 0.012, (z - 0.05) if sz < 0 else z, z if sz < 0 else (z + 0.05), "dressedStone", G, bev)
         L2 = 0.32 if k % 2 else 0.55
         az0, az1 = (z, z + L2) if sz < 0 else (z - L2, z)
-        K.box(f"{nm}{k}z", (x - 0.0) if sx > 0 else (x - 0.05), (x + 0.05) if sx > 0 else x, y + 0.006, y + h - 0.018, az0, az1, "dressedStone", G, 0.012)
+        K.box(f"{nm}{k}z", (x - 0.0) if sx > 0 else (x - 0.05), (x + 0.05) if sx > 0 else x, y + 0.006, y + h - 0.018, az0, az1, "dressedStone", G, bev)
         y += h; k += 1
 
 def buildMagasin(K, name, spec, state, seed, far=False):
@@ -824,6 +826,134 @@ def buildFilets(K, name, spec, state, seed, far=False):
 TYPES["etal"] = dict(builder=buildEtal, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
 TYPES["caisses"] = dict(builder=buildCaisses, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
 TYPES["filets"] = dict(builder=buildFilets, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
+
+# ── THE CHURCH (2026-10-31, PORT_PLAN.md 6 — assets-src/refs/coast/Algerie.Jemmapes.Eglise.jpg, the 1930s postcard): the
+# colonial village church of the Constantinois. autoLod from the start.
+#   the TOWER before the nave: rendered rubble, dressed-stone QUOINS and string courses; the round-arched DOOR at its foot,
+#   a tall round-arched WINDOW over it, the CLOCK, the BELFRY with its twin louvred lancets on every face, a cornice, the
+#   steep octagonal SLATE SPIRE flaring at its eaves, its iron cross
+#   the NAVE behind it, higher, its gable to the front; two lower AISLES either side under canal-tile LEAN-TOS, round-
+#   arched windows down their sides and on their fronts
+#   damaged  shell holes in the tower and an aisle, the spire's tip shot away, a hole in the nave's roof
+#   ruin     the roofs gone, the walls broken off ragged, the tower broken at its belfry, rubble and charred trusses inside
+# Built along X (its front at -X), then turned so its front faces -Z, the camera's (every kit's way).
+def slate(nb):
+    c = nb.mix(nb.noise(6.0, 4), srgb(0x3b4046), srgb(0x535a60))
+    return nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(18.0, 3, 0.6, stretch=(1, 1, 0.2)), 0.6, 0.7), 0.5), c, srgb(0x6b6f6a))
+MATDEF.update({"churchWash": (0.95, wash(0xc4b69c, foot=0x7c705e)), "slate": (0.6, slate), "clockFace": (0.6, flat(srgb(0xe8e2d2))),
+               "louvre": (0.8, paintedWood(0x4a3a2a))})
+
+def buildEglise(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"; dmg, ruin = state != "intact", state == "ruin"
+    before = set(bpy.data.objects)
+    NX0, NX1, NW, NH = -8.0, 9.0, 3.6, 9.0          # the nave: its x, half width, wall height
+    AW, AH = 3.4, 5.6                                # the aisles: their width, wall height
+    TX0, TX1, TW, TH = -12.2, -7.4, 2.4, 17.0        # the tower: its x, half width, height to its cornice
+    ZO = NW + AW                                     # the aisles' outer walls
+    wall = lambda nm, x0, x1, y1, z0, z1: K.box(nm, x0, x1, -0.4, y1, z0, z1, "churchWash", G, 0)
+    nave = wall("Nave", NX0, NX1, NH, -NW, NW); K.bevel(nave, 0.04, 2, 30)
+    aisles = [wall(f"Aisle{s}", NX0 - 0.6, NX1 - 0.3, AH, *( (NW - 0.02, ZO) if s > 0 else (-ZO, -NW + 0.02) )) for s in (-1, 1)]
+    for a in aisles: K.bevel(a, 0.04, 2, 30)
+    tower = wall("Tower", TX0, TX1, TH, -TW, TW); K.bevel(tower, 0.04, 2, 30)
+    # HOLLOW once hit, as the houses (solid, a ruin's broken aisles read as slabs of rubble — you on the houses: "not showing
+    # the inside"): the nave and aisles emptied to 0.5 m walls, an earth floor
+    if dmg:
+        K.boolean(nave, K.cutter(NX0 + 0.5, NX1 - 0.5, 0.02, NH + 3, -NW + 0.5, NW - 0.5, "interior"))
+        for s, a in zip((-1, 1), aisles):
+            z0, z1 = (NW - 0.6, ZO - 0.5) if s > 0 else (-ZO + 0.5, -NW + 0.6)
+            K.boolean(a, K.cutter(NX0 - 0.1, NX1 - 0.8, 0.02, AH + 3, z0, z1, "interior"))
+        K.box("Floor", NX0 - 0.1, NX1 - 0.5, -0.2, 0.03, -ZO + 0.48, ZO - 0.48, "earth", G, 0)
+        K.boolean(tower, K.cutter(TX0 + 0.6, TX1 - 0.6, 0.02, TH - 0.6, -TW + 0.6, TW - 0.6, "interior"))   # (the tower too: its belfry's floor left)
+    # the nave's front gable over the aisles' roofs (behind the tower), the back gable
+    for x, nm in ((NX0, "GableF"), (NX1, "GableB")):
+        K.member(nm, (x - 0.25, NH - 0.01, 0.0), (x + 0.25, NH - 0.01, 0.0), [(-NW, 0.0), (NW, 0.0), (0.0, NW * math.tan(0.5) - 0.05)], "churchWash", G, up=(0, 1, 0))
+    # THE OPENINGS — the door, the window over it, the clock\'s round, the belfry's twin lancets on each face; the aisles'
+    # windows down their sides and on their fronts
+    K.boolean(tower, K.arch(-0.95, 0.95, 0.0, 2.9, TX0 - 0.5, TX0 + 0.45, "dark", across="x"))
+    K.boolean(tower, K.arch(-0.6, 0.6, 5.2, 7.3, TX0 - 0.5, TX0 + 0.3, "dark", across="x"))
+    for (fx, across, d0, d1) in ((None, "x", TX0 - 0.5, TX0 + 0.35), (None, "x", TX1 - 0.35, TX1 + 0.5)):
+        for u in (-0.55, 0.55): K.boolean(tower, K.arch(u - 0.32, u + 0.32, 13.0, 15.3, d0, d1, "dark", across="x"))
+    for zs in (-1, 1):
+        zf = zs * TW
+        for u in (-0.55, 0.55): K.boolean(tower, K.arch((TX0 + TX1) / 2 + u - 0.32, (TX0 + TX1) / 2 + u + 0.32, 13.0, 15.3, min(zf - zs * 0.5, zf + zs * 0.35), max(zf - zs * 0.5, zf + zs * 0.35), "dark"))
+    for s, a in zip((-1, 1), aisles):
+        zf = s * ZO
+        for k in range(4):
+            x = NX0 + 2.6 + k * 3.6
+            dw = AW + 0.4 if ruin else 0.5   # (a ruin's right through: its recess's back met the broken top in a sliver — the gate)
+            K.boolean(a, K.arch(x - 0.55, x + 0.55, 1.6, 3.9, min(zf - s * dw, zf + s * 0.3), max(zf - s * dw, zf + s * 0.3), "dark"))
+        K.boolean(a, K.arch(s * (NW + AW / 2) - 0.6, s * (NW + AW / 2) + 0.6, 1.6, 3.9, NX0 - 1.1, NX0 - 0.3, "dark", across="x"))
+    # the glazing: leaded panes behind iron bars, set in the reveals (not in a ruin)
+    if not ruin:
+        K.box("DoorLeaf", TX0 + 0.3, TX0 + 0.36, 0.0, 3.85, -0.94, 0.94, "woodDark", G, 0.005)
+        K.box("DoorSplit", TX0 + 0.28, TX0 + 0.3, 0.0, 3.4, -0.02, 0.02, "dark", G, 0)
+        K.box("WinT", TX0 + 0.26, TX0 + 0.28, 5.2, 7.85, -0.6, 0.6, "glass", G, 0)
+        for k in range(3): K.rod(f"WinTBar{k}", (TX0 + 0.24, 5.2, -0.3 + k * 0.3), (TX0 + 0.24, 7.6, -0.3 + k * 0.3), 0.02, "castIron", G, 4)
+        for (wx, wz, nx_, s_) in [(NX0 + 2.6 + k * 3.6, s * ZO, 0, s) for s in (-1, 1) for k in range(4)]:
+            zz = wz - s_ * 0.26
+            K.box(f"Win{wx:.1f}{s_}", wx - 0.55, wx + 0.55, 1.6, 4.45, min(zz, zz + s_ * 0.02), max(zz, zz + s_ * 0.02), "glass", G, 0)
+        for s in (-1, 1):
+            K.box(f"WinFront{s}", NX0 - 0.86, NX0 - 0.84, 1.6, 4.5, s * (NW + AW / 2) - 0.6, s * (NW + AW / 2) + 0.6, "glass", G, 0)
+        # the belfry's LOUVRES: slats slanted down and out in each lancet
+        for face in range(4):
+            for u in (-0.55, 0.55):
+                for k in range(6):
+                    y = 13.15 + k * 0.33
+                    if face < 2:
+                        x = TX0 + 0.12 if face == 0 else TX1 - 0.12
+                        K.member(f"Lv{face}{u}{k}", (x, y + 0.12, u - 0.3), (x, y + 0.12, u + 0.3), [(-0.12, -0.02), (0.12, -0.14), (0.12, -0.11), (-0.12, 0.01)], "louvre", G)
+                    else:
+                        zz = TW - 0.12 if face == 2 else -TW + 0.12; xm = (TX0 + TX1) / 2 + u
+                        K.member(f"Lv{face}{u}{k}", (xm - 0.3, y + 0.12, zz), (xm + 0.3, y + 0.12, zz), [(-0.12, -0.02), (0.12, -0.14), (0.12, -0.11), (-0.12, 0.01)], "louvre", G)
+        # THE CLOCK on the front, under the belfry
+        lathe(K, "ClockRim", [(0.0, -0.06), (0.62, -0.06), (0.62, 0.05), (0.0, 0.05)], (0.0, 0.0), "dressedStone", n=24)
+        K.groups[G][-1].rotation_euler = (0.0, math.pi / 2, 0.0); K.groups[G][-1].location = B(TX0 - 0.02, 10.8, 0.0)
+        lathe(K, "ClockFace", [(0.0, -0.08), (0.5, -0.08), (0.5, 0.075), (0.0, 0.075)], (0.0, 0.0), "clockFace", n=24)
+        K.groups[G][-1].rotation_euler = (0.0, math.pi / 2, 0.0); K.groups[G][-1].location = B(TX0 - 0.03, 10.8, 0.0)
+        K.rod("HandH", (TX0 - 0.12, 10.8, 0.0), (TX0 - 0.12, 11.08, 0.12), 0.025, "castIron", G, 4)
+        K.rod("HandM", (TX0 - 0.13, 10.8, 0.0), (TX0 - 0.13, 11.22, -0.08), 0.018, "castIron", G, 4)
+    # STRING COURSES and the CORNICE (dressed stone, proud), the QUOINS up the tower's and the building's corners
+    for y in ((4.4, 9.4, 12.6) if not ruin else (4.4, 9.4)):   # (a ruin's tower broken at ~10.5: the higher one floated)
+        K.box(f"String{y}", TX0 - 0.08, TX1 + 0.08, y, y + 0.18, -TW - 0.08, TW + 0.08, "dressedStone", G, 0.015)
+    if not ruin: K.box("Cornice", TX0 - 0.22, TX1 + 0.22, TH - 0.02, TH + 0.3, -TW - 0.22, TW + 0.22, "dressedStone", G, 0.02)
+    for (x, sx) in ((TX0, -1), (TX1, 1)):
+        for (z, sz) in ((-TW, -1), (TW, 1)): quoins(K, R, x, z, sx, sz, TH if not ruin else 8.0, f"QT{sx}{sz}", bev=0)
+    for (x, sx) in ((NX0 - 0.6, -1), (NX1 - 0.3, 1)):
+        for (z, sz) in ((-ZO, -1), (ZO, 1)): quoins(K, R, x, z, sx, sz, AH if not ruin else 3.0, f"QA{sx}{sz}", bev=0)
+    # THE ROOFS: the nave's gable (along X), the aisles' lean-tos against it
+    if not ruin:
+        hole = (2.0, -1.4, 1.3) if dmg else None
+        # (its tiles three-sided — far=True: 3 500 six-sided tiles made the church 136 000 triangles; seen from the RTS camera
+        # a canal tile's roundness is under a pixel)
+        tileRoof(K, R, NX0 - 0.2, NX1 + 0.3, -NW - 0.35, NW + 0.35, NH + 0.02, 0.5, hole=hole, far=True, nm="Nv")
+        for s in (-1, 1):
+            zE = s * (ZO + 0.35); zW = s * (NW - 0.02)
+            tileRoof(K, R, NX0 - 0.6, NX1 - 0.1, zE if s < 0 else 2 * zW - zE, 2 * zW - zE if s < 0 else zE, AH + 0.02, math.atan2((NH - 1.6) - AH, abs(zE - zW)), far=True, only=-1 if s < 0 else 1, nm=f"Ai{s}")
+        # THE SPIRE: octagonal, flaring at its eaves, its tip shot away when damaged; the iron cross
+        top = TH + 0.3; tip = top + (8.6 if not dmg else 5.4)
+        lathe(K, "Spire", [(0.0, top), (2.35, top), (2.2, top + 0.45), (1.9, top + 0.75), (0.08 if not dmg else 0.7, tip), (0.0, tip + 0.02)], ((TX0 + TX1) / 2, 0.0), "slate", n=8)
+        if not dmg:
+            K.rod("Cross", ((TX0 + TX1) / 2, tip, 0.0), ((TX0 + TX1) / 2, tip + 1.3, 0.0), 0.045, "castIron", G, 5)
+            K.rod("CrossBar", ((TX0 + TX1) / 2, tip + 0.9, -0.38), ((TX0 + TX1) / 2, tip + 0.9, 0.38), 0.04, "castIron", G, 5)
+    if dmg:
+        K.boolean(tower, K.breach((TX0, 9.4 if not ruin else 6.0, 1.1), (0.7, 0.8, 0.7), seed=seed + 1, mat="rubble"))
+        K.boolean(aisles[1], K.breach((NX0 + 6.2, 2.6, ZO), (0.9, 1.0, 0.8), seed=seed + 2, mat="rubble"))
+        K.lump("Fall", (NX0 + 6.2, 0.0, ZO + 1.4), (1.4, 0.4, 0.8), "rubble", G, seed=seed + 3)
+    if ruin:
+        for o, h in [(nave, 5.5), (aisles[0], 3.4), (aisles[1], 3.0), (tower, 10.5)]:
+            K.boolean(o, K.skyline(TX0 - 3, NX1 + 3, -ZO - 3, ZO + 3, h, 1.4, seed=seed + int(h * 10), mat="rubble"))
+        for nm in ("GableF", "GableB"):
+            for o in K.groups[G]:
+                if o.name == nm: K.boolean(o, K.skyline(TX0 - 3, NX1 + 3, -ZO - 3, ZO + 3, 5.0, 1.0, seed=seed + 9, mat="rubble"))
+        for k in range(4): K.lump(f"Heap{k}", (NX0 + 2 + k * 4.0, 0.0, R.uniform(-2, 2)), (1.8, 0.9, 1.4), "rubble", G, seed=seed + 20 + k, rough=0.45, flatten=200)
+        for k in range(5): K.rod(f"Truss{k}", (NX0 + 1.5 + k * 3.2, 0.4, -NW + 0.7), (NX0 + 2.0 + k * 3.2, R.uniform(1.5, 3.5), NW - 0.7), 0.13, "fsCharred", G, 6)
+    # turned so the front faces -Z: every object made here (and its cutters) about the origin
+    import mathutils
+    M = mathutils.Matrix.Rotation(-math.pi / 2, 4, "Z")
+    bpy.context.view_layer.update()   # (the clock's parts placed by location: stale, the turn sent them to the origin)
+    for o in set(bpy.data.objects) - before: o.matrix_world = M @ o.matrix_world
+
+TYPES["eglise"] = dict(builder=buildEglise, autoLod=True, atlas=2048)
 
 for spec in TYPES.values():
     # (its far level its own build — the tiles as long strips, the genoise's beds alone — baked on the same atlas)

@@ -114,7 +114,7 @@ export const MARK_TYPES = ["lookout", "minemark"];
 // THE TELEGRAPH POLE (tools/blender/poles.py, 2026-10-30 — algSangar.js loadPoles, drawn by algPoles)
 export const POLE_TYPES = ["pole"];
 // THE PORT (tools/blender/port.py, 2026-10-30 — PORT_PLAN.md): the coast's row houses
-export const PORT_TYPES = ["quai", "cafe", "etroite", "magasin", "mole", "phare", "barque", "barque2", "etal", "caisses", "filets"];   // (+ 2026-10-31: the harbour's warehouse)
+export const PORT_TYPES = ["quai", "cafe", "etroite", "magasin", "mole", "phare", "barque", "barque2", "etal", "caisses", "filets", "eglise"];   // (+ 2026-10-31: the harbour's warehouse)
 // THE FARMSTEAD (tools/blender/farmstead.py — algSangar.js loadFarmstead): intact / damaged / ruin = burnt
 export const FARM_TYPES = ["farm"];
 // THE SAS POST (tools/blender/sasPost.py — algSangar.js loadSasPost): the French army's post in a village
