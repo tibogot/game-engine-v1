@@ -29,9 +29,8 @@ is not the procedural one re-textured (see memory: new assets, never remakes). O
    MODELLED as channels of round tiles, and the far level's roof is a flat skin baked from them. States: intact,
    damaged (shell holes, shutters torn), ruin (the roof fallen in, the upper floor gone).
 2. [x] **The magasin** (`magasin`, done 2026-10-31): long and low, its gable to the sea, ochre-washed rubble with dressed-stone quoins, four round-arched doorways on the quay (plank doors, one open on the dark inside), the loading step, barred windows high on the back, the canal-tile roof; its states.
-3. [ ] **The mole**, as modules laid end to end: a straight length, the head with its LIGHTHOUSE, the steps; the rock
-   apron, bollards, rings.
-4. [ ] **The lamparo boat** (two colour variants), afloat and beached.
+3. [x] **The mole** (done 2026-10-31, the first pieces through tools/lod from the start): `mole`, a 10 m length laid end to end — flagstone deck, dressed blocks modelled course by course over a mortar core (wet and weedy at the waterline), the parapet and its coping, cast-iron bollards and rings, the rock apron; `phare`, its head — the lighthouse on a block-built plinth, corbels under the gallery, the iron rail, the green lantern and copper dome, the steps to the water. ~4.9k and ~7.3k triangles near.
+4. [x] **The lamparo boat** (`barque` blue band, `barque2` green — done 2026-10-31): a double-ended hull LOFTED from stations (white topsides, the coloured sheer band, red antifouling below the waterline), varnished inside, floorboards and thwarts, the stem and stern posts, a short mast, the lamp on its arm in a galvanised reflector, oars, the net heaped; damaged holed and dismasted, ruin burnt to its bilge. ~5.5k triangles near, 2.6k far. Beached = the same model tilted on its bilge when placed.
 5. [ ] **The quay's props**: fish boxes, barrels, rope, nets on poles, the fish market's awning (the oil drums and crates
    from props.py, as every kit).
 6. [ ] **The church** (Jemmapes': the nave, the tower and its spire, the clock).

@@ -25,6 +25,7 @@ import sys, os, math, random
 sys.path.insert(0, os.path.dirname(__file__))
 import bpy, bmesh
 import house
+from drystone import stone   # (split blocks: the mole's rock apron, its fallen coping)
 from house import buildKit, previews
 from bkit import B, srgb, dust, flat, paintedWood
 
@@ -373,12 +374,323 @@ def buildMagasin(K, name, spec, state, seed, far=False):
 
 TYPES["magasin"] = dict(builder=buildMagasin, W=16.0, D=8.0, H=4.6, pitch=0.3, wash="washOchre", door="doorGreen", doors=4, open=2)
 
+# ── THE MOLE AND ITS LIGHTHOUSE (2026-10-31, PORT_PLAN.md 3 — refs: Philippeville's harbour entrance, the 1887 sketch; the
+# Stora and Collo photographs). Built with autoLod from the start (Blender: the near only; tools/lod makes and proves the far).
+#   mole      a 10 m length laid end to end along X: the paved deck, its walls of big dressed blocks down into the sea (a
+#             dark wet band, weed at the waterline), the sea side's PARAPET with its coping stones, cast-iron bollards and
+#             mooring rings on the harbour side (-Z, the camera's), the ROCK APRON of tumbled blocks against the sea side
+#   phare     the mole's rounded end: the same deck and walls, the LIGHTHOUSE on its plinth — a white masonry tower, its
+#             gallery and iron rail, the lantern (green: the harbour's starboard light) under a copper dome — and stone
+#             steps down to the water on the harbour side
+# States: damaged (the parapet breached, its blocks fallen; the lantern's glass out), ruin (the deck cratered, the parapet
+# down, the lighthouse broken off at half height). Real metres; the deck at +1.7 over the sea (y 0 = the water).
+def quayStone(nb):
+    """The mole's dressed blocks: the sandstone blocks photo, warm, WET and dark low down, weed green at the waterline (y 0)."""
+    c = nb.mix(0.35, nb.img("build/large_sandstone_blocks/large_sandstone_blocks_diff_1k.jpg", 0.33), srgb(0xb59a76))
+    c = nb.scale(c, nb.mr(nb.noise(1.2, 4), 0.3, 0.7, 0.85, 1.05))
+    c = nb.mix(nb.mr(nb.gy, 0.9, 0.1), c, nb.scale(c, 0.55))                                         # (wet below 0.9 m)
+    c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.gy, 0.25, -0.15), nb.mr(nb.noise(4.0, 4), 0.35, 0.6)), c, srgb(0x3d4a2c))   # (weed at the waterline)
+    return c
+def paving(nb):
+    c = nb.mix(0.4, nb.img("build/seaworn_stone_tiles/seaworn_stone_tiles_diff_1k.jpg", 0.5), srgb(0xb9a688))
+    return dust(nb, nb.scale(c, nb.mr(nb.noise(0.8, 3), 0.3, 0.7, 0.88, 1.05)), 0.3, 0.3)
+def quayMortar(nb):   # (the mortar in the blocks' joints: the core behind them, dark and damp)
+    return nb.mix(nb.mr(nb.gy, 0.9, 0.1), nb.mix(nb.noise(3.0, 4), srgb(0x6b6150), srgb(0x7d725e)), srgb(0x3b3a30))
+MATDEF.update({"quayMortar": (0.95, quayMortar), "quayStone": (0.95, quayStone), "paving": (0.95, paving), "lightWhite": (0.9, wash(0xf0ece2, foot=0xb8b0a0)),
+               "lantern": (0.15, flat(srgb(0x3f8a5a))), "copperGreen": (0.6, lambda nb: nb.mix(nb.noise(5.0, 4), srgb(0x4f8a74), srgb(0x6fa08c))),
+               "castIron": (0.6, flat(srgb(0x23211f), 0.4))})
+
+DECK = 1.7   # m over the sea
+def lathe(K, nm, prof, c, mat, n=20):
+    """A turned shape: the profile [(r, y)] spun round the vertical at c (x, z)."""
+    bm = bmesh.new(); rings = []
+    for r, y in prof:
+        rings.append([bm.verts.new(B(c[0] + r * math.cos(2 * math.pi * i / n), y, c[1] + r * math.sin(2 * math.pi * i / n))) for i in range(n)] if r > 1e-4 else [bm.verts.new(B(c[0], y, c[1]))])
+    for a, b in zip(rings, rings[1:]):
+        for i in range(n):
+            j = (i + 1) % n
+            if len(a) == 1: bm.faces.new((a[0], b[j], b[i]))
+            elif len(b) == 1: bm.faces.new((a[i], a[j], b[0]))
+            else: bm.faces.new((a[i], a[j], b[j], b[i]))
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return K.obj(nm, bm, mat, "h", smooth=True)
+
+def blockCourses(K, R, path, nrm, y0, y1, nm, skip=None, depth=0.25, mat="quayStone"):
+    """A FACE OF DRESSED BLOCKS along `path` (a polyline of (x, z), its outward normal `nrm(i)` (x, z) for each length),
+    course by course from y0 to y1: each block its own length (0.8-1.5 m) and a hair proud or sunk (the wall\x27s face
+    hand-laid), the courses staggered; the core behind shows as mortar in the joints. `skip(x, y, z)` True: no block there
+    (a breach). The blocks stand 2-5 cm proud of the path."""
+    G = "h"; y, c, k = y0, 0, 0
+    while y < y1 - 0.08:
+        h = min(R.uniform(0.42, 0.6), y1 - y)
+        off = 0.0 if c % 2 == 0 else R.uniform(0.35, 0.6)
+        for i in range(len(path) - 1):
+            (ax, az), (bx, bz) = path[i], path[i + 1]
+            L = math.hypot(bx - ax, bz - az); dx, dz = (bx - ax) / L, (bz - az) / L; nx, nz = nrm(i)
+            s = -off if i == 0 else 0.0
+            while s < L - 0.05:
+                w = R.uniform(0.8, 1.5); s0, s1 = max(0.0, s), min(L, s + w)
+                if s1 - s0 > 0.15:
+                    mx, mz = ax + dx * (s0 + s1) / 2, az + dz * (s0 + s1) / 2
+                    if not (skip and skip(mx, y + h / 2, mz)):
+                        pr = R.uniform(0.02, 0.05)
+                        # (the block a prism along the path; its profile across: from `depth` behind the face to `pr` proud)
+                        e = 0.004 * (i % 2)   # (round a bend, neighbours' inner corners overlap: every other length 4 mm up — never one plane)
+                        a = (ax + dx * (s0 + 0.012), y + 0.012 + e, az + dz * (s0 + 0.012))
+                        b = (ax + dx * (s1 - 0.012), y + 0.012 + e, az + dz * (s1 - 0.012))
+                        ux, uz = -dz, dx   # (up x d, in the game\x27s frame: the profile\x27s u across the face)
+                        sg = 1.0 if ux * nx + uz * nz > 0 else -1.0
+                        K.member(f"{nm}{k}", a, b, [(-depth * sg, 0.0), (pr * sg, 0.0), (pr * sg, h - 0.024), (-depth * sg, h - 0.024)], mat, G)
+                        k += 1
+                s += w
+        y += h; c += 1
+    return k
+
+def moleBody(K, R, x0, x1, state, seed, head=False):
+    """The deck and its walls from x0 to x1 (a head: rounded at x1), the sea side +Z: the parapet, the rock apron."""
+    G = "h"; dmg, ruin = state != "intact", state == "ruin"; zH, zS = -3.0, 3.0   # the harbour face, the sea face
+    body = K.box("Body", x0, x1, -3.0, DECK, zH, zS, "quayMortar", G, 0)
+    if head: K.cyl("HeadRound", (x1, -3.0, 0.0), 2.98, DECK + 3.0, "quayMortar", G, 24)
+    # THE DECK'S FLAGSTONES: rows of big slabs, each its own size and a hair higher or lower, over the mortar bed (one paved
+    # slab read as a plain pale board in the lab)
+    deck = K.box("Deck", x0 + 0.02, x1 - (0.02 if not head else 0.0), DECK - 0.05, DECK - 0.01, zH + 0.15, zS - 1.05, "quayMortar", G, 0)
+    if head: K.cyl("DeckRound", (x1, DECK - 0.05, 0.0), 2.85, 0.04, "quayMortar", G, 24)
+    zz, row = zH + 0.17, 0
+    while zz < zS - 1.1:
+        d = min(R.uniform(0.55, 0.75), zS - 1.07 - zz); xx = x0 + (0.0 if row % 2 == 0 else -R.uniform(0.2, 0.4)); k = 0
+        while xx < x1 + (2.8 if head else 0.0):
+            w = R.uniform(0.6, 1.0); a0, a1 = max(xx, x0 + 0.03), min(xx + w, x1 - 0.03 if not head else x1 + 2.8)
+            mid = ((a0 + a1) / 2, (zz + zz + d) / 2)
+            on = a1 - a0 > 0.2 and (not head or mid[0] <= x1 or math.hypot(mid[0] - x1, mid[1]) < 2.75 - max(a1 - a0, d) / 2)
+            crat = ruin and math.hypot(mid[0] - ((x0 + x1) / 2), mid[1] + 0.6) < 2.1
+            if on and not crat:
+                K.box(f"Flag{row}_{k}", a0 + 0.012, a1 - 0.012, DECK - 0.02, DECK + 0.03 + R.uniform(-0.008, 0.012), zz + 0.012, zz + d - 0.012, "paving", G, 0)   # (unbevelled: bevelled, a mole length was 13 500 triangles)
+            xx += w; k += 1
+        zz += d; row += 1
+    if ruin:   # the deck cratered
+        cx = (x0 + x1) / 2 + R.uniform(-1, 1)
+        K.boolean(body, K.breach((cx, DECK, -0.6), (1.8, 0.9, 1.6), seed=seed, mat="rubble"))
+        K.boolean(deck, K.breach((cx, DECK, -0.6), (1.85, 0.9, 1.65), seed=seed + 1, mat="rubble"))
+    # THE PARAPET on the sea side, its coping stones (a head: none round its end — the lighthouse stands there)
+    pz0, pz1 = zS - 1.0, zS - 0.2; ph = DECK + 1.15; xe0 = x1 - (2.6 if head else 0.0)
+    par = K.box("Parapet", x0, xe0, DECK, ph, pz0, pz1, "quayMortar", G, 0.02)
+    bx = (x0 + xe0) / 2 - 1.0
+    # THE DRESSED BLOCKS, course by course, over the mortar core (a photo on a box read as a beige box in the lab, 2026-10-31):
+    # the harbour face, the sea face, round the head, the parapet's two faces — down to below the waterline
+    crater = (x0 + x1) / 2
+    hole = lambda x, y, z: (dmg and abs(x - bx) < 1.15 and y > DECK and z > pz0 - 0.1) or (ruin and y > DECK - 0.1 and z > pz0 - 0.1)
+    xh = x1 - (0.3 if head else 0.0)
+    blockCourses(K, R, [(x0, zH), (xh, zH)], lambda i: (0.0, -1.0), -0.6, DECK - 0.01, "BH", skip=lambda x, y, z: ruin and abs(x - crater) < 2.0 and y > 0.6)
+    blockCourses(K, R, [(x0, zS), (xh, zS)], lambda i: (0.0, 1.0), -0.6, DECK - 0.01, "BS")
+    if head:
+        A = [math.radians(-84 + 168 * k / 12) for k in range(13)]
+        arc = [(x1 + 3.0 * math.cos(a), 3.0 * math.sin(a)) for a in A]
+        blockCourses(K, R, arc, lambda i: (math.cos((A[i] + A[i + 1]) / 2), math.sin((A[i] + A[i + 1]) / 2)), -0.6, DECK - 0.01, "BR")
+    if not ruin:
+        blockCourses(K, R, [(x0, pz1), (xe0, pz1)], lambda i: (0.0, 1.0), DECK + 0.01, ph - 0.01, "BPo", skip=hole, depth=0.2)
+        blockCourses(K, R, [(x0, pz0), (xe0, pz0)], lambda i: (0.0, -1.0), DECK + 0.01, ph - 0.01, "BPi", skip=hole, depth=0.2)
+    if dmg: K.boolean(par, K.breach((bx, ph - 0.2, (pz0 + pz1) / 2), (1.0, 0.6, 0.7), seed=seed + 2, mat="quayStone"))
+    if ruin: K.boolean(par, K.skyline(x0 - 1, x1 + 1, pz0 - 1, pz1 + 1, DECK + 0.25, 0.3, seed=seed + 3, mat="quayStone"))
+    if not ruin:
+        x = x0; k = 0
+        while x < xe0 - 0.2:
+            w = R.uniform(0.9, 1.3); xe = min(x + w, xe0)
+            if not (dmg and abs((x + xe) / 2 - bx) < 1.2):
+                K.box(f"Coping{k}", x + 0.01, xe - 0.01, ph, ph + 0.16 + k % 2 * 0.012, pz0 - 0.06, pz1 + 0.06, "dressedStone", G, 0.02)
+            x = xe; k += 1
+    if dmg:   # the parapet's blocks fallen onto the deck
+        for k in range(4): stone(K, f"Fallen{k}", (bx + R.uniform(-1.2, 1.2), DECK + 0.12, R.uniform(-0.2, 1.4)), (0.4, 0.18, 0.25), R, 0.0, "quayStone", box=0.7)
+    # BOLLARDS and RINGS on the harbour side
+    for k, x in enumerate([x0 + 2.0, x0 + 7.0] if not head else [x0 + 2.5]):
+        if ruin and k == 0: continue
+        lathe(K, f"Bollard{k}", [(0.0, DECK), (0.2, DECK), (0.16, DECK + 0.35), (0.22, DECK + 0.48), (0.24, DECK + 0.56), (0.0, DECK + 0.58)], (x, zH + 0.5), "castIron", n=12)
+    for k, x in enumerate([x0 + 4.5, x0 + 9.0] if not head else [x0 + 5.0]):
+        K.rod(f"Ring{k}a", (x - 0.15, DECK - 0.6, zH - 0.03), (x, DECK - 0.75, zH - 0.03), 0.025, "castIron", G, 5)
+        K.rod(f"Ring{k}b", (x, DECK - 0.75, zH - 0.03), (x + 0.15, DECK - 0.6, zH - 0.03), 0.025, "castIron", G, 5)
+    # THE ROCK APRON: tumbled blocks against the sea face, half under the water
+    n = int((x1 - x0) * 1.6)
+    for k in range(n):
+        x = x0 + (k + R.uniform(0, 1)) * (x1 - x0) / n
+        stone(K, f"Apron{k}", (x, R.uniform(-0.6, 0.3), zS + 0.6 + R.uniform(0, 1.6)), (R.uniform(0.6, 1.1), R.uniform(0.4, 0.7), R.uniform(0.5, 0.9)), R, 0.0, "quayStone", box=0.75)
+
+def buildMole(K, name, spec, state, seed, far=False):
+    moleBody(K, random.Random(seed), -5.0, 5.0, state, seed)
+
+def buildMoleHead(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"; dmg, ruin = state != "intact", state == "ruin"
+    moleBody(K, R, -5.0, 2.0, state, seed, head=True)
+    # the steps down to the water on the harbour side, against the face
+    for k in range(7):
+        y = DECK - 0.24 * (k + 1)
+        K.box(f"Step{k}", -3.4 + k * 0.32, -2.2 + k * 0.32, y - 0.5, y, -3.6, -3.02, "quayStone", G, 0.015)
+    # THE LIGHTHOUSE on the head's round
+    cx, cz = 2.0, 0.4
+    K.box("Plinth", cx - 1.5, cx + 1.5, DECK, DECK + 1.2, cz - 1.5, cz + 1.5, "quayMortar", G, 0)
+    sq = [(cx - 1.5, cz - 1.5), (cx + 1.5, cz - 1.5), (cx + 1.5, cz + 1.5), (cx - 1.5, cz + 1.5), (cx - 1.5, cz - 1.5)]
+    nrm4 = [(0.0, -1.0), (1.0, 0.0), (0.0, 1.0), (-1.0, 0.0)]
+    blockCourses(K, R, sq, lambda i: nrm4[i], DECK + 0.01, DECK + 1.08, "BPl", depth=0.2, mat="dressedStone")
+    K.box("PlinthCap", cx - 1.58, cx + 1.58, DECK + 1.08, DECK + 1.22, cz - 1.58, cz + 1.58, "dressedStone", G, 0.02)
+    top = DECK + 9.0
+    tower = lathe(K, "Tower", [(0.0, DECK + 1.2), (1.05, DECK + 1.2), (0.82, top - 0.4), (0.92, top - 0.3), (0.92, top), (0.0, top)], (cx, cz), "lightWhite", n=24)
+    K.boolean(tower, K.arch(cx - 0.4, cx + 0.4, DECK + 1.2, DECK + 2.9, cz - 1.4, cz - 0.6, "dark"))
+    if not ruin: K.box("Door", cx - 0.38, cx + 0.38, DECK + 1.2, DECK + 3.25, cz - 0.86, cz - 0.82, "doorGreen", G, 0.005)
+    for y in (DECK + 4.0, DECK + 6.4):   # small windows up the tower, facing the harbour
+        K.boolean(tower, K.cutter(cx - 0.18, cx + 0.18, y, y + 0.6, cz - 1.4, cz - 0.4, "dark"))
+    if ruin:
+        K.boolean(tower, K.skyline(cx - 3, cx + 3, cz - 3, cz + 3, DECK + 4.5, 0.9, seed=seed + 7, mat="rubble"))
+        K.lump("TowerFall", (cx + 1.2, DECK, cz + 1.8), (1.4, 0.7, 1.0), "rubble", G, seed=seed + 8)
+        return
+    # the CORBELS carrying the gallery: a ring of dressed stones stepping out under its slab
+    for k in range(16):
+        a = 2 * math.pi * (k + 0.5) / 16; ca, sa = math.cos(a), math.sin(a)
+        K.member(f"Corbel{k}", (cx + 0.86 * ca, top - 0.55, cz + 0.86 * sa), (cx + 1.22 * ca, top - 0.55, cz + 1.22 * sa), [(-0.09, 0.0), (0.09, 0.0), (0.09, 0.55), (-0.09, 0.55)], "dressedStone", G)
+    # the gallery: its slab, the iron rail; the lantern, its glass (out when damaged), the copper dome and its vane
+    lathe(K, "Gallery", [(0.0, top), (1.3, top), (1.3, top + 0.14), (0.0, top + 0.14)], (cx, cz), "dressedStone", n=24)
+    for k in range(16):
+        a = 2 * math.pi * k / 16
+        K.rod(f"Rail{k}", (cx + 1.22 * math.cos(a), top + 0.14, cz + 1.22 * math.sin(a)), (cx + 1.22 * math.cos(a), top + 1.05, cz + 1.22 * math.sin(a)), 0.018, "castIron", G, 4)
+    lathe(K, "RailTop", [(1.18, top + 1.02), (1.26, top + 1.02), (1.26, top + 1.07), (1.18, top + 1.07)], (cx, cz), "castIron", n=24)
+    lathe(K, "LanternBase", [(0.0, top + 0.14), (0.72, top + 0.14), (0.72, top + 0.55), (0.0, top + 0.55)], (cx, cz), "lightWhite", n=16)
+    lathe(K, "Lantern", [(0.0, top + 0.55), (0.62, top + 0.55), (0.62, top + 1.75), (0.0, top + 1.75)], (cx, cz), "dark" if dmg else "lantern", n=8)
+    for k in range(8):   # the glazing bars
+        a = 2 * math.pi * (k + 0.5) / 8
+        K.rod(f"Bar{k}", (cx + 0.64 * math.cos(a), top + 0.55, cz + 0.64 * math.sin(a)), (cx + 0.64 * math.cos(a), top + 1.75, cz + 0.64 * math.sin(a)), 0.03, "castIron", G, 4)
+    lathe(K, "Dome", [(0.0, top + 1.75), (0.72, top + 1.75), (0.6, top + 2.0), (0.35, top + 2.25), (0.08, top + 2.4), (0.0, top + 2.45)], (cx, cz), "copperGreen", n=16)
+    K.rod("Vane", (cx, top + 2.4, cz), (cx, top + 2.95, cz), 0.025, "castIron", G, 5)
+
+TYPES["mole"] = dict(builder=buildMole, autoLod=True, atlas=2048)
+TYPES["phare"] = dict(builder=buildMoleHead, autoLod=True, atlas=2048)
+
+# ── THE LAMPARO BOAT (2026-10-31, PORT_PLAN.md 4 — the FAO's 1961 report on Algerian fishing: open, undecked LAMPARO boats
+# for sardine and anchovy, fished at night under a big lamp; the Stora and Collo photographs). autoLod from the start.
+#   a double-ended wooden hull, ~7.4 m, LOFTED from stations (smooth: a hull is curves, not boxes): white above, a coloured
+#   SHEER BAND under the gunwale, red-brown antifouling below the waterline (y 0), a rubbing strake; the inside varnished
+#   wood — floorboards, three thwarts, the stem and stern posts rising (the bow\x27s higher, curved); a short mast; the LAMP
+#   on its arm over the water at the stern quarter (a white globe in a conical reflector); oars along the thwarts; the net
+#   heaped amidships. Placed afloat, or beached tilted on its bilge (the game\x27s tilt).
+#   damaged  a hole through the side at the waterline, the mast snapped, the lamp arm bent down
+#   ruin     burnt: the hull charred and broken down to its bilge, the thwarts and posts charred, no gear
+# Front -Z: the boat lies along X (its bow at +X).
+def antifoul(nb): return nb.mix(nb.noise(6.0, 4), srgb(0x6e2d22), srgb(0x8a3a2a))
+def hullWhite(nb):
+    c = nb.mix(nb.mr(nb.noise(2.0, 4), 0.4, 0.7), srgb(0xeeeae0), srgb(0xd4cdbd))
+    return nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(9.0, 3, 0.6, stretch=(1, 1, 0.1)), 0.6, 0.7), 0.5), c, srgb(0x9a958a))   # (worn streaks)
+def varnish(nb):
+    return nb.mix(nb.noise(12.0, 4, 0.6, stretch=(0.15, 1, 1)), srgb(0x7a5634), srgb(0x9a7046))
+def netMat(nb):   # (a cotton net tanned brown, heaped)
+    return nb.mix(nb.mr(nb.noise(25.0, 3, 0.7), 0.45, 0.6), srgb(0x4a3826), srgb(0x6e553a))
+MATDEF.update({"antifoul": (0.8, antifoul), "hullWhite": (0.7, hullWhite), "varnish": (0.7, varnish), "net": (0.95, netMat),
+               "bandBlue": (0.6, paintedWood(0x2f5d8a)), "bandGreen": (0.6, paintedWood(0x3f7a52)), "charred": (0.95, lambda nb: nb.mix(nb.noise(4.0, 5), srgb(0x161310), srgb(0x2e2620))),
+               "lampGlass": (0.2, flat(srgb(0xf2efe2))), "reflector": (0.4, flat(srgb(0xa9aba8)))})
+
+BL, BB, KEEL, SHEER = 7.4, 2.3, -0.42, 0.52   # length, beam, the keel's and the sheer's height (the waterline y 0)
+def hullSection(f, t):
+    """A point of the hull: f along it (-1 stern .. +1 bow), t round its section (-1 port sheer .. 0 keel .. +1 starboard
+    sheer) -> (x, y, z). Double-ended: the beam falls to nothing at both ends; the sheer rises toward them (the bow more)."""
+    x = f * BL / 2
+    hw = (BB / 2) * (1 - abs(f) ** 2.2) ** 0.75
+    sh = SHEER + 0.18 * abs(f) ** 2.5 + (0.12 * f ** 3 if f > 0 else 0.0)
+    kl = KEEL + 0.12 * abs(f) ** 3
+    a = abs(t) * math.pi / 2
+    z = math.copysign(hw * math.sin(a) ** 0.7, t)
+    y = kl + (sh - kl) * (1 - math.cos(a)) ** 0.9
+    return x, y, z
+
+def buildBarque(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"; dmg, ruin = state != "intact", state == "ruin"
+    NS, NT = 28, 16   # stations along, points round a section (each side)
+    def shell(nm, mat, t0, t1, inset=0.0, top=None):
+        """The hull's skin between section heights t0..t1 (|t|), both sides; `inset`: the inside skin, that far in."""
+        bm = bmesh.new(); grid = []
+        fe = 0.9 if inset else 0.985   # (the inside skin stops short of the ends — there it folded onto itself: the coplanar gate; the posts cover them)
+        for i in range(NS + 1):
+            f = -fe + 2 * fe * i / NS
+            row = []
+            for j in range(-NT, NT + 1):
+                t = j / NT
+                if not (t0 <= abs(t) <= t1): row.append(None); continue
+                x, y, z = hullSection(f, t)
+                if inset:
+                    x2, y2, z2 = hullSection(f * (1 - inset / (BL / 2)), t)
+                    z = z2 * max(0.0, 1 - inset / max(0.05, abs(z2) + 1e-3)) if abs(z2) > inset else 0.0
+                    y = min(max(y2 + inset, KEEL + inset), hullSection(f, 1.0)[1] - 0.03)   # (never above the outside's sheer: at the stern it stood up like a board)
+                    x = x2
+                if top is not None: y = min(y, top(f))
+                row.append(bm.verts.new(B(x, y, z)))
+            grid.append(row)
+        for i in range(NS):
+            for j in range(2 * NT):
+                q = (grid[i][j], grid[i + 1][j], grid[i + 1][j + 1], grid[i][j + 1])
+                if all(q):
+                    try: bm.faces.new(q if not inset else q[::-1])
+                    except ValueError: pass
+        bmesh.ops.remove_doubles(bm, verts=bm.verts, dist=1e-4)
+        # (split each quad on its better diagonal: on the export's fixed one a quad near the bow folded — two triangles on one
+        # plane, overlapping: the coplanar gate)
+        bmesh.ops.triangulate(bm, faces=bm.faces, quad_method="BEAUTY", ngon_method="BEAUTY")
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        if inset: bmesh.ops.reverse_faces(bm, faces=bm.faces)
+        return K.obj(nm, bm, mat, G, smooth=True)
+    tw = 0.0   # where the antifouling meets the white (the waterline, as a |t| of the section) — found per section below
+    if ruin:
+        burnt = lambda f: SHEER * 0.25 + 0.25 * math.sin(f * 7.0 + seed)   # (burnt down to here, ragged)
+        shell("HullOut", "charred", 0.0, 1.0, top=burnt)
+        shell("HullIn", "charred", 0.0, 1.0, inset=0.05, top=burnt)
+    else:
+        # the skin in three bands by height round the section: antifouling to ~t 0.45, white, the coloured band at the top
+        shell("Bottom", "antifoul", 0.0, 0.47)
+        shell("Topsides", "hullWhite", 0.47, 0.8)
+        shell("Band", spec["band"], 0.8, 1.0)   # (0.88: a line nobody saw in the lab)
+        shell("Inside", "varnish", 0.0, 1.0, inset=0.045)
+        # the GUNWALE capping the sheer and the rubbing strake below it, both ends to end
+        rail = [hullSection(-0.985 + 1.97 * i / NS, 1.0) for i in range(NS + 1)]
+        for s in (-1, 1):
+            pts = [(x, y, z * s) for x, y, z in rail]
+            for i in range(NS):
+                K.member(f"Gunwale{s}_{i}", pts[i], pts[i + 1], [(-0.035, -0.03), (0.035, -0.03), (0.035, 0.035), (-0.035, 0.035)], "varnish", G)
+            low = [hullSection(-0.97 + 1.94 * i / NS, 0.8) for i in range(NS + 1)]
+            pts2 = [(x, y, z * s * 1.02) for x, y, z in low]
+            for i in range(NS):
+                K.member(f"Strake{s}_{i}", pts2[i], pts2[i + 1], [(-0.02, -0.025), (0.02, -0.025), (0.02, 0.025), (-0.02, 0.025)], spec["band"], G)
+    if dmg:   # a hole through the side at the waterline (the hull\x27s skins cut together)
+        for o in list(K.groups[G]):
+            if o.name.startswith(("Bottom", "Topsides", "Inside", "HullOut", "HullIn")):
+                K.boolean(o, K.breach((-0.8, 0.05, 0.95), (0.55, 0.32, 0.4), seed=seed, mat="charred" if ruin else "varnish"))
+    # THE POSTS: the stem at the bow rising and curving forward, the sternpost
+    mat = "charred" if ruin else "varnish"
+    bx, by, _ = hullSection(0.985, 0.0); sx, sy, _ = hullSection(-0.985, 0.0)
+    stem = [(bx - 0.1, KEEL + 0.2, 0.0), (bx + 0.05, 0.3, 0.0), (bx + 0.12, 0.85, 0.0), (bx + 0.1, 1.25 if not ruin else 0.6, 0.0)]
+    for i in range(len(stem) - 1): K.member(f"Stem{i}", stem[i], stem[i + 1], [(-0.05, -0.06), (0.05, -0.06), (0.05, 0.06), (-0.05, 0.06)], mat, G, up=(0, 0, 1))
+    post = [(sx + 0.1, KEEL + 0.2, 0.0), (sx - 0.04, 0.4, 0.0), (sx - 0.08, 0.95 if not ruin else 0.4, 0.0)]
+    for i in range(len(post) - 1): K.member(f"Post{i}", post[i], post[i + 1], [(-0.05, -0.06), (0.05, -0.06), (0.05, 0.06), (-0.05, 0.06)], mat, G, up=(0, 0, 1))
+    # FLOORBOARDS and THWARTS
+    K.box("Floor", -2.2, 2.2, KEEL + 0.12, KEEL + 0.16, -0.42, 0.42, mat, G, 0)
+    for k, x in enumerate((-1.6, 0.1, 1.7)):
+        _, sy2, sz = hullSection(x / (BL / 2), 0.9)
+        K.box(f"Thwart{k}", x - 0.15, x + 0.15, sy2 - 0.2, sy2 - 0.15, -abs(sz) + 0.06, abs(sz) - 0.06, mat, G, 0)
+    if ruin: return
+    # the MAST (snapped when damaged), the LAMP on its arm over the stern quarter, the OARS, the NET
+    K.rod("Mast", (0.1, KEEL + 0.16, 0.0), (0.1, 2.4 if not dmg else 1.2, 0.0), 0.05, "varnish", G, 8)
+    ax, ay, az = -2.6, SHEER + 0.05, 0.75
+    K.rod("LampPost", (ax, KEEL + 0.2, az - 0.3), (ax, 1.6, az - 0.3), 0.035, "castIron", G, 6)
+    tip = (ax - 0.25, 1.15 if dmg else 1.55, az + 0.75)
+    K.rod("LampArm", (ax, 1.55, az - 0.3), tip, 0.03, "castIron", G, 6)
+    lathe(K, "Reflector", [(0.06, tip[1] - 0.05), (0.32, tip[1] - 0.3), (0.34, tip[1] - 0.32), (0.08, tip[1] - 0.02)], (tip[0], tip[2]), "reflector", n=14)   # (galvanised: black, it read as a hole)
+    lathe(K, "Globe", [(0.0, tip[1] - 0.48), (0.12, tip[1] - 0.42), (0.15, tip[1] - 0.32), (0.1, tip[1] - 0.2), (0.0, tip[1] - 0.18)], (tip[0], tip[2]), "lampGlass", n=12)
+    for s in (-1, 1): K.rod(f"Oar{s}", (-2.0, SHEER - 0.05, s * 0.55), (2.3, SHEER - 0.02, s * 0.5), 0.028, "varnish", G, 6)
+    K.lump("Net", (-0.8, KEEL + 0.16, 0.0), (0.85, 0.32, 0.55), "net", G, seed=seed + 4, rough=0.35, sub=3)
+    for k in range(5):   # the net\x27s cork floats along its edge
+        K.lump(f"Cork{k}", (-1.4 + k * 0.3, KEEL + 0.38 + R.uniform(-0.03, 0.04), 0.5 - k * 0.05), (0.06, 0.04, 0.06), "woodDark", G, seed=seed + 10 + k, rough=0.1, sub=1)
+
+TYPES["barque"] = dict(builder=buildBarque, band="bandBlue", autoLod=True, atlas=1024, smoothAngle=50)
+TYPES["barque2"] = dict(builder=buildBarque, band="bandGreen", autoLod=True, atlas=1024, smoothAngle=50)
+
 for spec in TYPES.values():
     # (its far level its own build — the tiles as long strips, the genoise's beds alone — baked on the same atlas)
     b = spec.get("builder", buildHouse)
     # (autoLod: Blender builds the NEAR only; tools/lod/autoLod.mjs makes the far from it — 2026-10-31. The far builders and
     # their far=True branches stay for a kit that wants its own)
-    spec.update(builder=b, autoLod=True, atlas=2048,
+    spec.update(builder=b, autoLod=True, atlas=spec.get("atlas", 2048),
                 # (wider gaps between the islands — 0.004, 0.006 — baked the atlas BLACK, silently: the far level's bars are widened instead)
                 islandMargin=0.003,
                 # (its thin coloured parts kept wide enough in the atlas to hold their colour at the mips — bkit.bake `thin`)
