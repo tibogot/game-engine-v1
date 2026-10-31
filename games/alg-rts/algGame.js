@@ -706,6 +706,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       // { site, level, pad }): its BASE the mean ground of its level-0 houses; each row at base + level × 2.6 m (a
       // retaining wall's height), so a wall standing on terrace k - 1 tops out at terrace k; the walls and steps
       // (pad false) stand there unlevelled — sunk deep, never floating
+      // (`carve`: a deck laid at its row's level — the coast's quay, a square — with the ground under its footprint LOWERED
+      // to 15 cm below it, never raised: ground poking through paving z-fights, and a beach falling away shows the quay's wall)
+      const carveUnder = async ([, , , y, , yaw, fx, fz, hx, hz]) => {
+        const c = Math.cos(yaw), s = Math.sin(yaw), r = Math.hypot(hx, hz), top = y - 0.15;
+        await app.remapHeights?.(fx - r, fz - r, fx + r, fz + r, (wx, wz, gy) => {
+          const dx = wx - fx, dz = wz - fz, lx = dx * c - dz * s, lz = dx * s + dz * c;
+          return Math.abs(lx) <= hx && Math.abs(lz) <= hz && gy > top ? top : null;
+        });
+      };
       const TERRACE_G = 2.6, base = {};
       for (const row of MAP.town.houses) {
         const m = row[10];
@@ -728,22 +737,16 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
           continue;
         }
         if (m && base[m.site]) {
-          row[3] = base[m.site].sum / base[m.site].n + m.level * TERRACE_G;
-          // (`carve`: a deck laid at that level — the coast's quay — with the ground under its footprint LOWERED to 15 cm
-          // below it, never raised: sand poking through a paved deck z-fights, and the beach falling away shows its wall)
-          if (m.carve) {
-            const c = Math.cos(yaw), s = Math.sin(yaw), r = Math.hypot(hx, hz), top = row[3] - 0.15;
-            await app.remapHeights?.(fx - r, fz - r, fx + r, fz + r, (wx, wz, y) => {
-              const dx = wx - fx, dz = wz - fz, lx = dx * c - dz * s, lz = dx * s + dz * c;
-              return Math.abs(lx) <= hx && Math.abs(lz) <= hz && y > top ? top : null;
-            });
-          }
-          if (m.pad === false) continue;
+          // (`dy`: a piece whose own deck is not its origin — the coast's mole, its deck 2.2 m over its waterline, laid
+          // level with the quay)
+          row[3] = base[m.site].sum / base[m.site].n + m.level * TERRACE_G + (m.dy ?? 0);
+          if (m.pad === false) { if (m.carve) await carveUnder(row); continue; }
         } else {
           const g = groundOf(row);
           row[3] = ty === "pente" ? g.lo : g.mean;
         }
         await app.flattenRect?.(fx, fz, hx + 1.2, hz + 1.2, row[3], { rim: 4, rotY: yaw });
+        if (m?.carve) await carveUnder(row);   // (a paved square ON its pad: the pad first, then the ground under the paving below it)
       }
       for (const [ty, st, x, y, z, yaw] of MAP.town.houses) field.add(ty, st, x, y, z, yaw);
       // THE PLANTS OFF THEM (2026-10-30, the oasis: its houses stand at its grove's edge — a painted palm through a roof):

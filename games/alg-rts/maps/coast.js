@@ -65,7 +65,7 @@ const TRACK = [[-40, -62], [5, -52], [22, -10], [24, 45], [14, 100], [22, 150], 
  *   the BOATS        moored along the mole's harbour side; pulled up on the sand west of its root, heeled
  *   the QUAY'S LIFE  the fish stall by the mole's root, cargo before the magasin, nets drying on the beach
  */
-const FRONT = [[26, -69], [76, -91]], MOLE_ROOT = [44, -108], MOLE_LEN = 5;   // (the root at the water's edge: the beach dry to z ≈ -110, measured; the bay only ~3 m deep at the tip)
+const FRONT = [[26, -69], [76, -91]], MOLE_U = 22.3, MOLE_LEN = 7;   // (the mole from the quay before the lane at u 20.8-23.8; the beach dry ~26 m out, the bay ~3 m deep at the tip)
 function portTown() {
   const [[ax, az], [bx, bz]] = FRONT, L = Math.hypot(bx - ax, bz - az), d = [(bx - ax) / L, (bz - az) / L];
   const sea = [d[1], -d[0]];   // the line's left: the fronts' way
@@ -90,8 +90,11 @@ function portTown() {
   // the second row: the church's square between its houses (the church 19 m wide, its front 9 m behind the street)
   const back = 10.4 + 7;
   row(["quai", "etroite"], -1, back, { 0: "damaged" });
-  const [cx, cz] = at(29, back + 9 + 21.6 * HS / 2);
-  houses.push(house("eglise", "intact", cx, cz, ...facing(cx, cz)));
+  const [cx, cz] = at(29, back + 9 + 21.6 * HS / 2), SQUARE = { site: "square", level: 0 };
+  houses.push([...house("eglise", "intact", cx, cz, ...facing(cx, cz)), SQUARE]);
+  // ITS SQUARE (port.py place, 7.5 m: 9.75 game): two before its steps, at its level — on a pad (the ground falls away
+  // before the church: carved alone, the paving stood up as a slab), the ground under the paving then carved below it
+  for (const du of [-1, 1]) { const [x, z] = at(29 + du * 3.75 * HS, back + 9 - 3.75 * HS); props.push([...house("place", "intact", x, z, ...facing(x, z)), { ...SQUARE, carve: true }]); }
   row(["etroite", "quai"], 40.5, back);
   // THE QUAY (port.py pave: 10 × 8 m lengths, 13 × 10.4 game) under the front row, end to end from just past the magasin's
   // end to past the last house: the deck at the row's level (no pad of its own: the sand under it CARVED below it —
@@ -104,19 +107,27 @@ function portTown() {
   prop("caisses", 5, -4.5, 0, onQuay); prop("caisses", 13, -5.5, 0.6, onQuay); prop("etal", 33, -5, 0, onQuay);
   for (const u of [8, 41, 58]) prop("lampadaire", u, -8.6, 0, onQuay);   // (along the sea edge, behind the coping)
   prop("filets", 46, -14, 0.3); prop("filets", 52, -16, -0.2);
-  // THE MOLE: north from its root (a length's +X the way out, so its yaw π/2 — its harbour face, -Z, then west), on the
-  // sea (y: the sea level — the model's waterline at its origin); the lighthouse's piece (its body -5..2 m, the round
-  // head past it) end to end with the last length
-  const [mx, mz] = MOLE_ROOT, Lm = 10 * HS, yaw = Math.PI / 2, out = (t, w = 0) => [mx - w, mz - t];
-  const onSea = (ty, t, w, hw, hz, dy = 0, m) => { const [x, z] = out(t, w); props.push([ty, "intact", x, SEA_LEVEL + dy, z, yaw, x, z, hw, hz, m]); };
-  for (let i = 0; i < MOLE_LEN; i++) onSea("mole", Lm * (i + 0.5), 0, 5 * HS, 3 * HS);
-  onSea("phare", Lm * MOLE_LEN + 5 * HS, 0, 5 * HS, 3 * HS);
-  // the boats moored along its harbour side (3 m out from the face), bows out; two of the second colour. `afloat`: the
-  // sea kept out of their hulls (algHouse afloatCaps — their floorboards are under the waterline, the swell over them)
-  [[24, "barque"], [35, "barque2"], [47, "barque"], [59, "barque2"]].forEach(([t, ty]) => onSea(ty, t, 3 * HS + 2.1, 3.8 * HS, 1.2 * HS, 0, { afloat: true }));
-  // pulled up on the sand west of its root (landward: dry), bows to the sea, heeled on their bilge
-  [[-14, 12, 0.18, 0.15], [-22, 16, -0.2, -0.3], [-30, 13, 0.16, 0.25]].forEach(([dx, dz, heel, turn], k) => {
-    const x = mx + dx, z = mz + dz, th = Math.PI / 2 + turn;
+  // THE MOLE, OUT FROM THE QUAY (2026-10-31, you: "do what you think would look the best" — it stood alone 15 m out on
+  // the sand): square to the quay's sea edge, from before the lane between the magasin and the café, its deck LEVEL with
+  // the quay's (`dy`: the model's deck is 2.25 m over its origin, the waterline — so that sits 0.46 m under the sea, in
+  // its weed). A length's +X the way out: its yaw turns +X onto `sea`; its harbour face (-Z) then looks west, to the
+  // magasin's end. The lighthouse's piece (its body -5..2 m, the round head past it) end to end with the last length.
+  const Lm = 10 * HS, yaw = Math.atan2(-sea[1], sea[0]), harbour = [-d[0], -d[1]];
+  const [mx, mz] = at(MOLE_U, -(pz1 - pz0));   // (the quay's sea face)
+  const out = (t, w = 0) => [mx + sea[0] * t + harbour[0] * w, mz + sea[1] * t + harbour[1] * w];
+  const onMole = { ...QUAY, pad: false, dy: 0.03 * HS - (1.7 + 0.03) * HS };   // (the flagstones' tops: the quay's 0.03, the mole's DECK + 0.03)
+  const mole = (ty, t) => { const [x, z] = out(t); props.push([ty, "intact", x, null, z, yaw, x, z, 5 * HS, 3 * HS, onMole]); };
+  for (let i = 0; i < MOLE_LEN; i++) mole("mole", Lm * (i + 0.5));
+  mole("phare", Lm * MOLE_LEN + 5 * HS);
+  // the boats moored along its harbour side (3 m out from the face), bows out, past where the sand ends; two of the second
+  // colour. `afloat`: the sea kept out of their hulls (algHouse afloatCaps — their floorboards are under the waterline)
+  [[36, "barque"], [47, "barque2"], [59, "barque"], [71, "barque2"]].forEach(([t, ty]) => {
+    const [x, z] = out(t, 3 * HS + 2.1);
+    props.push([ty, "intact", x, SEA_LEVEL, z, yaw, x, z, 3.8 * HS, 1.2 * HS, { afloat: true }]);
+  });
+  // pulled up on the sand west of the mole (landward: dry), bows to the sea, heeled on their bilge
+  [[30, -96, 0.18, 0.15], [22, -92, -0.2, -0.3], [14, -95, 0.16, 0.25]].forEach(([x, z, heel, turn], k) => {
+    const th = Math.PI / 2 + turn;
     props.push([k % 2 ? "barque2" : "barque", "intact", x, null, z, th, x, z, 3.8 * HS, 1.2 * HS, { ground: true, lift: 0.3 * HS, heel }]);
   });
   return { houses, props };

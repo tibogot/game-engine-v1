@@ -883,7 +883,36 @@ def buildLampadaire(K, name, spec, state, seed, far=False):
     lathe(K, "LampGlass", [(0.0, 2.62), (0.09, 2.62), (0.16, 2.92), (0.0, 2.92)], (0.0, -0.62), "glass", n=8)
     K.rod("LampHang", (0.0, 3.25, -0.55), (0.0, 3.08, -0.62), 0.02, "castIron", G, 5)
 
+def buildPlace(K, name, spec, state, seed, far=False):
+    """THE SQUARE's paving (the church's, 2026-10-31): a 7.5 m square of the quay's flagstones on a thin bed, a dressed
+    kerb round its four sides (two side by side: a band of kerb down the middle — the square's pattern)."""
+    R = random.Random(seed); G = "h"; H = 3.75
+    K.box("Bed", -H, H, -0.45, -0.02, -H, H, "quayMortar", G, 0)
+    zz, row = -H + 0.32, 0
+    while zz < H - 0.34:
+        d = min(R.uniform(0.55, 0.8), H - 0.32 - zz); xx = -H + 0.32 - (0.0 if row % 2 == 0 else R.uniform(0.2, 0.4)); k = 0
+        while xx < H - 0.34:
+            w = R.uniform(0.7, 1.1); a0, a1 = max(xx, -H + 0.32), min(xx + w, H - 0.32)
+            if a1 - a0 > 0.2 and d > 0.2:
+                K.box(f"Flag{row}_{k}", a0 + 0.012, a1 - 0.012, -0.05, 0.03 + R.uniform(-0.008, 0.012), zz + 0.012, zz + d - 0.012, "paving", G, 0)
+            xx += w; k += 1
+        zz += d; row += 1
+    # the KERB: long dressed stones round the edge (the corners' stones over the sides' ends: never one plane)
+    k = 0
+    for side in (-1, 1):
+        x = -H
+        while x < H - 0.1:
+            w = R.uniform(1.0, 1.4); xe = min(x + w, H)
+            K.box(f"KerbX{k}", x + 0.01, xe - 0.01, -0.2, 0.07 + (k % 2) * 0.01, side * H - (0.3 if side > 0 else 0.0), side * H + (0.0 if side > 0 else 0.3), "dressedStone", G, 0.02)
+            x = xe; k += 1
+        z = -H + 0.31
+        while z < H - 0.41:
+            w = R.uniform(1.0, 1.4); ze = min(z + w, H - 0.31)
+            K.box(f"KerbZ{k}", side * H - (0.3 if side > 0 else 0.0), side * H + (0.0 if side > 0 else 0.3), -0.2, 0.065 + (k % 2) * 0.01, z + 0.01, ze - 0.01, "dressedStone", G, 0.02)
+            z = ze; k += 1
+
 TYPES["pave"] = dict(builder=buildPave, states=["intact"], autoLod=True, atlas=2048)
+TYPES["place"] = dict(builder=buildPlace, states=["intact"], autoLod=True, atlas=2048)
 TYPES["lampadaire"] = dict(builder=buildLampadaire, states=["intact"], autoLod=True, atlas=512, smoothAngle=50)
 
 # ── THE CHURCH (2026-10-31, PORT_PLAN.md 6 — assets-src/refs/coast/Algerie.Jemmapes.Eglise.jpg, the 1930s postcard): the
