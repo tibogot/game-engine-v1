@@ -160,11 +160,14 @@ def tileRoof(K, R, x0, x1, zE0, zE1, yE, pitch, hole=None, far=False):
     if hole:
         for d in deck: K.boolean(d, K.breach((hole[0], yE + rise * 0.5, hole[1]), (hole[2], 1.2, hole[2]), seed=7, mat="woodDark"))
     r, pitchX, course = 0.075, 0.21, 0.42
+    tiles = []   # (all of them ONE object — K.members: one each, the join cost 22 s a state)
     nx = int((x1 - x0) / pitchX)
     for s, zE in ((-1, zE0), (1, zE1)):
         # (the far keeps the COURSES — strips without them changed the roof at the switch, you: "the roof lod is changing too
         # much"; its tiles three-sided instead)
         L = math.hypot(zR - zE, rise); nC = max(1, round(L / course))
+        # (the far's tiles three-sided, as near's: one flat band a course, its texture projected from the near, came out
+        # smeared and lighter — 2026-10-31, the warehouse; corrugated, the same)
         for i in range(nx):
             x = x0 + pitchX * (i + 0.5)
             for c in range(nC):
@@ -175,7 +178,8 @@ def tileRoof(K, R, x0, x1, zE0, zE1, yE, pitch, hole=None, far=False):
                 ya, yb = yE + rise * f0 + 0.04, yE + rise * min(1.0, f1) + 0.012   # (the far the same steps as the near: at 1.5 cm its courses did not read)
                 if hole and math.hypot(x - hole[0], (za + zb) / 2 - hole[1]) < hole[2] + 0.3: continue
                 ang = [math.pi * k / (3 if far else 5) for k in range(4 if far else 6)]
-                K.member(f"Tile{s}_{i}_{c}", (x + R.uniform(-0.01, 0.01), ya, za), (x, yb, zb), [(r * math.cos(t), r * math.sin(t) * 0.8) for t in ang], "canalTile", G, up=(0, 1, 0))
+                tiles.append(((x + R.uniform(-0.01, 0.01), ya, za), (x, yb, zb), [(r * math.cos(t), r * math.sin(t) * 0.8) for t in ang]))
+    K.members("Tiles", tiles, "canalTile", G)
     # the ridge: its lime bed, the round ridge tiles along it
     K.box("RidgeBed", x0 - 0.05, x1 + 0.05, yR - 0.04, yR + 0.05, zR - 0.14, zR + 0.14, "mortarLime", G, 0.01)
     ang = [math.pi * k / 6 for k in range(7)]
@@ -184,14 +188,12 @@ def tileRoof(K, R, x0, x1, zE0, zE1, yE, pitch, hole=None, far=False):
 
 def genoise(K, R, x0, x1, z, y, out, far=False):
     """THE GENOISE under the eaves: two rows of tile ends stepping out from the wall, bedded in lime."""
-    G = "h"; ang = [math.pi * k / 4 for k in range(5)]
+    G = "h"; ang = [math.pi * k / (2 if far else 4) for k in range(3 if far else 5)]   # (the far's tile ends three-sided)
     for row in range(2):
         yy = y - 0.17 + row * 0.12; d = 0.12 + row * 0.12
         K.box(f"GenBed{row}{out}", x0, x1, yy - 0.06, yy - 0.005, z - out * d, z + out * 0.02, "mortarLime", G, 0)
-        n = 0 if far else int((x1 - x0) / 0.2)   # (the far level: the beds alone)
-        for i in range(n):
-            x = x0 + (x1 - x0) * (i + 0.5) / n
-            K.member(f"Gen{row}{out}_{i}", (x, yy, z + out * 0.02), (x, yy, z - out * d), [(0.06 * math.cos(t), 0.05 * math.sin(t)) for t in ang], "canalTile", G, up=(0, 1, 0))
+        n = int((x1 - x0) / 0.2)   # (the far keeps its tile ends: beds alone, the warehouse's far shaded off its near — the gate)
+        K.members(f"Gen{row}{out}", [((x0 + (x1 - x0) * (i + 0.5) / n, yy, z + out * 0.02), (x0 + (x1 - x0) * (i + 0.5) / n, yy, z - out * d), [(0.06 * math.cos(t), 0.05 * math.sin(t)) for t in ang]) for i in range(n)], "canalTile", G)
 
 def buildHouse(K, name, spec, state, seed, far=False):
     R = random.Random(seed); G = "h"
@@ -288,9 +290,93 @@ def buildHouse(K, name, spec, state, seed, far=False):
         K.boolean(part, K.skyline(X0, X1, Z0, Z1, 1.1, 0.6, seed=seed + 13, mat="stone"))
         for k in range(3): K.rod(f"Beam{k}", (R.uniform(xi0 + 0.4, xi1 - 0.4), 0.2, zi0 + 0.5), (R.uniform(xi0 + 0.4, xi1 - 0.4), R.uniform(0.6, 1.2), zi1 - 0.8), 0.09, "fsCharred", G, 6)
 
+# ── THE MAGASIN (2026-10-31, PORT_PLAN.md 2 — refs: Philippeville's harbour entrance, the 1887 sketch; S.alles' photographs):
+# the harbour's warehouse — long and low, its gable end to the sea; rendered rubble under an ochre wash, DRESSED-STONE
+# QUOINS at its corners and round its doors; four big ROUND-ARCHED DOORWAYS on the quay (its front, -Z), plank doors —
+# one open on the dark inside, one ajar; small barred windows high on the back; a low canal-tile roof; a stone loading
+# step along the doors. States as the houses: damaged (shell holes, the roof holed, a door torn off), ruin (the roof gone,
+# the walls broken off ragged, rubble and charred trusses inside).
+def quoins(K, R, x, z, sx, sz, H, nm):
+    """Dressed long-and-short blocks up a corner at (x, z), proud of both faces it turns (sx, sz: which way out)."""
+    G = "h"; y, k = -0.3, 0
+    while y < H - 0.25:
+        h = 0.32 + R.uniform(-0.02, 0.02); L = 0.55 if k % 2 else 0.32
+        # (along X: L from the corner, 5 cm proud of the face at z; along Z: the short side)
+        ax0, ax1 = (x - L, x + 0.04) if sx > 0 else (x - 0.04, x + L)
+        K.box(f"{nm}{k}x", ax0, ax1, y, y + h - 0.012, (z - 0.05) if sz < 0 else z, z if sz < 0 else (z + 0.05), "dressedStone", G, 0.012)
+        L2 = 0.32 if k % 2 else 0.55
+        az0, az1 = (z, z + L2) if sz < 0 else (z - L2, z)
+        K.box(f"{nm}{k}z", (x - 0.0) if sx > 0 else (x - 0.05), (x + 0.05) if sx > 0 else x, y + 0.006, y + h - 0.018, az0, az1, "dressedStone", G, 0.012)
+        y += h; k += 1
+
+def buildMagasin(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"
+    dmg, ruin = state != "intact", state == "ruin"
+    W, D, H, pitch = spec["W"], spec["D"], spec["H"], spec["pitch"]
+    X0, X1, Z0, Z1 = -W / 2, W / 2, -D / 2, D / 2
+    rise = (D / 2 + 0.4) * math.tan(pitch)
+    wall = K.box("Walls", X0, X1, -0.4, H, Z0, Z1, spec["wash"], G, 0)
+    K.bevel(wall, 0.04, 2, 30)
+    gab = K.member("Gable", (X0, H - 0.01, 0.0), (X1, H - 0.01, 0.0), [(Z0, 0.0), (Z1, 0.0), (0.0, rise - 0.4 * math.tan(pitch) - 0.08)], spec["wash"], G, up=(0, 1, 0))
+    if dmg:   # hollow once hit, as the houses
+        K.boolean(wall, K.cutter(X0 + T, X1 - T, 0.02, H + 6, Z0 + T, Z1 - T, "interior"))
+        K.box("Floor", X0 + T - 0.02, X1 - T + 0.02, -0.2, 0.03, Z0 + T - 0.02, Z1 - T + 0.02, "earth", G, 0)
+    # THE DOORWAYS: four round arches on the quay, their dressed-stone surrounds, plank doors (one open, one ajar)
+    n = spec["doors"]; xs = [X0 + W * (i + 0.5) / n for i in range(n)]; dw, ds = 2.4, 2.5
+    for i, x in enumerate(xs):
+        deep = i == spec["open"] and not dmg   # (the open one cut deep into the solid block: its dark inside seen — at 30 cm it showed wall)
+        K.boolean(wall, K.arch(x - dw / 2, x + dw / 2, 0.12, ds, Z0 - 0.5, Z0 + (T + 0.3 if ruin else 1.8 if deep else 0.3), "dark", n=12))
+        if not ruin:
+            sur = K.box(f"Surround{i}", x - dw / 2 - 0.3, x + dw / 2 + 0.3, 0.1, ds + dw / 2 + 0.35, Z0 - 0.06, Z0 + 0.01, "dressedStone", G, 0)
+            K.boolean(sur, K.arch(x - dw / 2 - 0.02, x + dw / 2 + 0.02, -0.5, ds, Z0 - 0.5, Z0 + 0.3, "dark", n=12))
+            K.bevel(sur, 0.02, 2, 30)
+        back = Z0 + 0.26
+        if ruin or (dmg and i == 1): continue   # (torn off)
+        if i == spec["open"]:   # open: the leaves folded back against the reveal, the dark inside
+            for s in (-1, 1): K.box(f"Leaf{i}{s}", x + s * dw / 2 - (0.06 if s > 0 else 0.01), x + s * dw / 2 + (-0.01 if s > 0 else 0.06), 0.13, ds + 0.2, back - 0.02, back + 1.1, "woodDark", G, 0.005)
+            if not dmg: K.box(f"Inside{i}", x - dw / 2 - 0.05, x + dw / 2 + 0.05, 0.05, ds + dw / 2 + 0.05, Z0 + 1.7, Z0 + 1.75, "dark", G, 0)
+            continue
+        leaf = K.box(f"Door{i}", x - dw / 2, x + dw / 2, 0.12, ds + dw / 2, back, back + 0.06, spec["door"], G, 0.005)
+        K.boolean(leaf, K.arch(x - dw / 2, x + dw / 2, 0.0, ds, back - 0.2, back + 0.3), op="INTERSECT")
+        for k in range(1, 6):   # the planks' joints
+            K.box(f"Joint{i}{k}", x - dw / 2 + k * dw / 6 - 0.008, x - dw / 2 + k * dw / 6 + 0.008, 0.15, ds - 0.05, back - 0.006, back + 0.001, "dark", G, 0)
+        for y in (0.6, 2.0): K.box(f"Strap{i}{y}", x - dw / 2 + 0.05, x + dw / 2 - 0.05, y, y + 0.07, back - 0.02, back + 0.0, "iron", G, 0)
+    # the stone LOADING STEP along the doors
+    K.box("Step", X0 + 0.4, X1 - 0.4, -0.3, 0.12, Z0 - 0.9, Z0 + 0.02, "dressedStone", G, 0.02)
+    # small BARRED WINDOWS high on the back
+    for i in range(n):
+        x = X0 + W * (i + 0.5) / n
+        K.boolean(wall, K.cutter(x - 0.45, x + 0.45, H - 1.5, H - 0.7, Z1 - 0.22, Z1 + 0.5, "dark"))
+        if not ruin:
+            for k in range(4): K.rod(f"Bar{i}{k}", (x - 0.3 + k * 0.2, H - 1.5, Z1 - 0.12), (x - 0.3 + k * 0.2, H - 0.7, Z1 - 0.12), 0.015, "iron", G, 5)
+    # THE QUOINS at the four corners
+    for (x, sx) in ((X0, -1), (X1, 1)):
+        for (z, sz) in ((Z0, -1), (Z1, 1)):
+            quoins(K, R, x, z, sx, sz, H, f"Q{'L' if sx < 0 else 'R'}{'F' if sz < 0 else 'B'}")
+    # THE ROOF (none in a ruin; holed when damaged)
+    if not ruin:
+        genoise(K, R, X0, X1, Z0, H, 1, far); genoise(K, R, X0, X1, Z1, H, -1, far)
+        tileRoof(K, R, X0 - 0.3, X1 + 0.3, Z0 - 0.4, Z1 + 0.4, H + 0.02, pitch, hole=(W * 0.2, Z0 * 0.4, 1.4) if dmg else None, far=far)
+    if dmg:
+        Rb = random.Random(seed + 99)
+        for k in range(2 if not ruin else 1):
+            px = (xs[k % n] + xs[(k + 1) % n]) / 2 if n > 1 else X0 + 1
+            K.boolean(wall, K.breach((px, Rb.uniform(1.0, H - 1.0), Z0), (0.55, 0.6, 0.6), seed=seed + k, mat="stone"))
+        K.lump("Fall", (xs[0] + 1.2, 0.0, Z0 - 1.2), (1.1, 0.35, 0.6), "rubble", G, seed=seed + 3)
+    if ruin:
+        top = K.skyline(X0 - 1, X1 + 1, Z0 - 1, Z1 + 1, H * 0.55, 1.0, seed=seed, mat="stone")
+        K.boolean(wall, top); K.boolean(gab, top)
+        xi0, xi1, zi0, zi1 = X0 + T, X1 - T, Z0 + T, Z1 - T
+        for k in range(4):
+            K.lump(f"Heap{k}", (xi0 + (k + 0.5) * (xi1 - xi0) / 4, 0.0, zi1 - 1.0 if k % 2 else zi0 + 1.0), (1.4, 0.7, 1.0), "rubble", G, seed=seed + 5 + k, rough=0.45, flatten=200)
+        for k in range(4): K.rod(f"Truss{k}", (xi0 + 1 + k * (xi1 - xi0 - 2) / 3, 0.3, zi0 + 0.6), (xi0 + 1.5 + k * (xi1 - xi0 - 2) / 3, R.uniform(1.0, 2.2), zi1 - 0.4), 0.11, "fsCharred", G, 6)
+
+TYPES["magasin"] = dict(builder=buildMagasin, W=16.0, D=8.0, H=4.6, pitch=0.3, wash="washOchre", door="doorGreen", doors=4, open=2)
+
 for spec in TYPES.values():
     # (its far level its own build — the tiles as long strips, the genoise's beds alone — baked on the same atlas)
-    spec.update(builder=buildHouse, farBuilder=lambda K, n, sp, st, sd: buildHouse(K, n, sp, st, sd, far=True), atlas=2048,
+    b = spec.get("builder", buildHouse)
+    spec.update(builder=b, farBuilder=(lambda b: lambda K, n, sp, st, sd: b(K, n, sp, st, sd, far=True))(b), atlas=2048,
                 # (wider gaps between the islands — 0.004, 0.006 — baked the atlas BLACK, silently: the far level's bars are widened instead)
                 islandMargin=0.003,
                 # (its thin coloured parts kept wide enough in the atlas to hold their colour at the mips — bkit.bake `thin`)

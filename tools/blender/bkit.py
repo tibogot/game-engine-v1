@@ -42,6 +42,22 @@ def bakeDevice(scn):
     scn.cycles.device = _device
 def gv(*p): return Vector(p)
 
+def uvZero(objs, stage):
+    """The faces over 0.3 m² whose atlas UV area is ~0 — a face unwrapped to a line smears one texel row. Printed with
+    BKIT_UVDEBUG at every stage; at the "final" one always (blenderKit fails the build on a count above 0)."""
+    if not os.environ.get("BKIT_UVDEBUG") and stage != "final": return
+    for q in objs:
+        if "_Far" in q.name: continue
+        bm = bmesh.from_edit_mesh(q.data) if q.mode == "EDIT" else None
+        names = [mm.name if mm else "" for mm in q.data.materials]; n = 0; ex = []
+        if bm is not None:
+            uvl = bm.loops.layers.uv["Atlas"]
+            for fc in bm.faces:
+                if fc.calc_area() < 0.3: continue
+                pts = [l[uvl].uv for l in fc.loops]
+                ua = abs(sum(pts[i].x * pts[(i + 1) % len(pts)].y - pts[(i + 1) % len(pts)].x * pts[i].y for i in range(len(pts)))) / 2
+                if ua < 1e-9: n += 1; ex.append((names[fc.material_index], round(fc.calc_area(), 2), fc.select))
+        print("UVZERO", stage, q.name, n, ex[:4], flush=True)
 def mipCheck(objs, img, name, matOf=None, factor=None):
     """THE MIP CHECK: does a material's AVERAGE colour shift at the mip the game draws it with? Colour leaking in from the
     islands round it (white window bars gone brown) shifts it; a stripe's edges softening, a fine noise smoothing, do not —
@@ -185,6 +201,19 @@ class Kit:
         bm.faces.new(r0); bm.faces.new(list(reversed(r1)))
         bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
         return s.bevel(s.obj(name, bm, mat, group, smooth), w, 1, 50)
+    def members(s, name, items, mat, group, up=(0, 1, 0)):
+        """MANY prisms (`items`: [(a, b, prof)]) as ONE object — each its own piece of the mesh (2026-10-31, the build timed:
+        a warehouse roof's 2 000 tiles, one object each, cost 22 s a state in the JOIN alone)."""
+        bm = bmesh.new()
+        for a, b, prof in items:
+            a, b = gv(*a), gv(*b); d, u, v = s.frame_of(a, b, gv(*up))
+            r0 = [bm.verts.new(B(*(a + u * pu + v * pv))) for pu, pv in prof]; r1 = [bm.verts.new(B(*(b + u * pu + v * pv))) for pu, pv in prof]
+            n = len(prof)
+            for i in range(n):
+                j = (i + 1) % n; bm.faces.new((r0[i], r0[j], r1[j], r1[i]))
+            bm.faces.new(r0); bm.faces.new(list(reversed(r1)))
+        bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+        return s.obj(name, bm, mat, group) if items else None
     def rod(s, name, a, b, r, mat, group, n=8):
         return s.member(name, a, b, [(r * math.cos(2 * math.pi * i / n), r * math.sin(2 * math.pi * i / n)) for i in range(n)], mat, group, w=0, smooth=True)
     def cyl(s, name, c, r, h, mat, group, n=16, r2=None, w=0.006):
@@ -289,6 +318,10 @@ class Kit:
         spread apart while they bake (at one origin each would occlude the others: black AO) and every other
         mesh is hidden from the bake."""
         objs = list(objs) if isinstance(objs, (list, tuple)) else [objs]
+        # THE STAGES TIMED (2026-10-31, you: "is there a way you can make the assets in blender faster … why?"): printed as
+        # TIME <name> <stage> <seconds>
+        import time as _t; _t0 = [_t.time()]
+        def lap(stage): now = _t.time(); print("TIME", name, stage, f"{now - _t0[0]:.1f}", flush=True); _t0[0] = now
         if os.environ.get("BKIT_NOBAKE"): print("BAKE skipped (BKIT_NOBAKE)", name); return   # (geometry checks only)
         o = objs[0]
         scn = bpy.context.scene
@@ -313,8 +346,10 @@ class Kit:
         # room for the gaps a mip needs; wider gaps, the packer shrank every island to a point: the bake came out BLACK).
         # The small repeated parts of the `shared` materials (a roof's tiles): each part laid out straight (its long axis
         # along v), at the atlas's texel density, onto one of 8 SLOTS where they overlap — 8 islands, not thousands.
-        comps = {}
+        comps = {}; slotMask = None
         if shared:
+            # (near AND far on the same slots — the far's tiles read the near's texels, the same look by construction; the
+            # far-from-near pass below never writes inside the slots: it overwrote them once, the roof came out mottled)
             for q in objs:
                 names = [mm.name if mm else "" for mm in q.data.materials]
                 bm = bmesh.new(); bm.from_mesh(q.data); bm.faces.ensure_lookup_table(); seen = set(); cl = []
@@ -338,11 +373,13 @@ class Kit:
         # (`island_margin`: a piece of sharp colour edges — the red cross on white — wants its islands further apart, or
         # one colour bleeds into the next island at the mips)
         bpy.ops.uv.smart_project(angle_limit=math.radians(55), island_margin=island_margin)
+        uvZero(objs, "after-smart")
         # PACKED AGAIN (2026-10-25, you on the French post: "that look so cheap and not AAA rts at all"): smart project's
         # own packing broke down on thousands of islands — the post's 4096 atlas 4 % used, 5 texels a metre. Every
         # island at one texel density, then Blender's packer (bounding boxes, turned to fit).
         bpy.ops.uv.select_all(action="SELECT")
         bpy.ops.uv.average_islands_scale()
+        uvZero(objs, "after-average")
         # the density they got (UV per metre) and the one they will have once packed (~60 % of the atlas filled)
         ua = ma = 0.0
         for q in objs:
@@ -388,8 +425,13 @@ class Kit:
                     for l in fc.loops: p = l[uvl].uv; l[uvl].uv = (cu + (p.x - cu) * kk, cv + (p.y - cv) * kk)
                 bmesh.update_edit_mesh(q.data)
         # packed WITHOUT merging (the evened islands overlap each other until then)
+        uvZero(objs, "after-thin")
         bpy.ops.uv.select_all(action="SELECT")
-        bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=island_margin, shape_method="AABB")
+        # (margin_method SCALED: FRACTION, with thousands of islands, collapsed some to NOTHING — the warehouse's walls and doors
+        # unwrapped to a line, smeared one texel row across them: "those textures look wrong", 2026-10-31)
+        _pk = dict(rotate=True, margin_method="SCALED", margin=island_margin, shape_method="AABB")
+        bpy.ops.uv.pack_islands(**_pk)
+        uvZero(objs, "after-pack1")
         if any(comps.values()):
             # the shared parts written at the density the others have now, slot by slot, then everything packed again —
             # merging only what overlaps now: the slots
@@ -416,8 +458,18 @@ class Kit:
                 for fc in bm.faces: fc.select = True
                 bmesh.update_edit_mesh(q.data)
             bpy.ops.uv.select_all(action="SELECT")
-            bpy.ops.uv.pack_islands(rotate=True, margin_method="FRACTION", margin=island_margin, shape_method="AABB", merge_overlap=True)
+            bpy.ops.uv.pack_islands(rotate=True, margin_method="SCALED", margin=island_margin, shape_method="AABB", merge_overlap=True)
             print("SHARED", name, k, "parts on 8 slots", flush=True)
+            # the slots' texels, kept from the far-from-near pass (each shared face's UV box, rasterised)
+            slotMask = np.zeros((size, size), dtype=bool)
+            for q in objs:
+                bm = bmesh.from_edit_mesh(q.data); bm.faces.ensure_lookup_table(); uvl = bm.loops.layers.uv["Atlas"]
+                for part in comps.get(q, []):
+                    for i in part:
+                        us = [l[uvl].uv for l in bm.faces[i].loops]
+                        x0, x1 = int(min(p.x for p in us) * size) - 2, int(max(p.x for p in us) * size) + 3
+                        y0, y1 = int(min(p.y for p in us) * size) - 2, int(max(p.y for p in us) * size) + 3
+                        slotMask[max(0, y0):min(size, y1), max(0, x0):min(size, x1)] = True
         # (measured, not assumed: the thinnest of the thin materials' faces in texels of the final atlas)
         if thin:
             mn = 1e9
@@ -431,6 +483,7 @@ class Kit:
                     if Lm < 0.25 or fc.calc_area() / Lm < 0.01 or (max(p.x for p in us) - min(p.x for p in us)) * (max(p.y for p in us) - min(p.y for p in us)) < 1e-12: continue   # (slivers, specks, a face unwrapped to a point: not measured — the same rule as the widening)
                     mn = min(mn, min(max(p.x for p in us) - min(p.x for p in us), max(p.y for p in us) - min(p.y for p in us)) * size)
             print("THIN", name, n, f"faces widened, thinnest {mn:.1f} px", flush=True)
+        uvZero(objs, "final")
         bpy.ops.object.mode_set(mode="OBJECT")
         # THE PACK OVERFLOWED (2026-10-30): with wider gaps (island_margin 0.004, 0.006) Blender's packer could not fit a
         # house's thousands of islands — it left them out to 1.5 x the atlas, the bake saw black there. Everything scaled
@@ -441,6 +494,17 @@ class Kit:
                 for d in q.data.uv_layers["Atlas"].data: d.uv = (d.uv[0] / mx, d.uv[1] / mx)
             print("UVFIT", name, f"{mx:.2f}", flush=True)
         if os.environ.get("BKIT_UVDEBUG"):
+            for q in objs:
+                if "_Far" in q.name: continue
+                names = [mm.name if mm else "" for mm in q.data.materials]; uvd = q.data.uv_layers["Atlas"].data; rows = []
+                for p in q.data.polygons:
+                    if p.area < 0.5: continue
+                    pts = [uvd[i].uv for i in p.loop_indices]
+                    ua = abs(sum(pts[i][0] * pts[(i + 1) % len(pts)][1] - pts[(i + 1) % len(pts)][0] * pts[i][1] for i in range(len(pts)))) / 2
+                    rows.append((ua / p.area, names[p.material_index], round(p.area, 2), p.loop_total))
+                rows.sort(); med = rows[len(rows) // 2][0] if rows else 0
+                print("UVBIG", q.name, "median", f"{med:.2e}", "lowest", [(f"{r[0] / max(med, 1e-12):.2f}", r[1], r[2], r[3]) for r in rows[:6]], flush=True)
+
             for q in objs:
                 uvl = q.data.uv_layers["Atlas"].data; xs = [d.uv[0] for d in uvl]; ys = [d.uv[1] for d in uvl]
                 me = q.data; uva = 0.0
@@ -457,8 +521,16 @@ class Kit:
             return img
         col = target(f"{name}_col"); scn.cycles.samples = 4
         scn.render.bake.use_pass_direct = False; scn.render.bake.use_pass_indirect = False; scn.render.bake.use_pass_color = True
+        lap("unwrap+pack")
+        # (the far levels left out of the colour and AO passes when they are baked from their near below — their texels
+        # are overwritten there: baking them was half the AO's cost for nothing)
+        if pairs:
+            for _, fr in pairs: fr.select_set(False)
+            bpy.context.view_layer.objects.active = objs[0]
         bpy.ops.object.bake(type="DIFFUSE")
+        lap("colour")
         ao = target(f"{name}_ao"); scn.cycles.samples = samples_ao; bpy.ops.object.bake(type="AO")
+        lap("ao")
         # NORMALS (opt-in): the materials' own normal maps (a scan's) and the shapes, tangent space, into an atlas
         # the game's material reads — the relief a colour bake alone flattens
         nrm = None
@@ -502,6 +574,7 @@ class Kit:
         # own islands, its own colours: the tiles' strips, the windows' bars came out unlike the near's. Each far is now
         # re-baked FROM its near (selected → active, the motor pool's way): the near's colour, AO, tiles' shading and
         # thin bars land on the far's surfaces — at the switch the far shows what the near showed.
+        lap("combine")
         if pairs:
             # (each far baked into a BLANK image of its own — a bake clears its target first: into the atlas itself it wiped
             # the near's colours it was reading, the whole house came out black — then only the texels it baked copied in)
@@ -521,6 +594,7 @@ class Kit:
                 bpy.ops.object.bake(type="DIFFUSE", use_selected_to_active=True, cage_extrusion=0.15, max_ray_distance=0.4)
                 fr.data.materials[0] = m; fr.location = at
                 t = np.array(tmp.pixels[:]).reshape(-1, 4); got = t[:, 3] > 0.5
+                if slotMask is not None: got &= ~slotMask.ravel()
                 base[got, :3] = t[got, :3]
             out.pixels = base.ravel().tolist(); out.save()
             print("FARFROMNEAR", name, len(pairs))
@@ -528,7 +602,9 @@ class Kit:
         # full size and at the mip a piece is drawn with from the RTS camera (16 x smaller); a face whose colour changes
         # there (a 4 cm white bar between orange tile islands: brown) is a LOD fault nobody should have to spot. Printed
         # per object as the share of its AREA that changes; tools/blenderKit.mjs fails the build past its bar.
+        lap("far-from-near")
         mipCheck(objs, out, name, matOf)
+        lap("mipcheck")
         for q in hidden: q.hide_render = False
         print("BAKED", name, size, len(objs))
     def stencils(s, decals, name, out_dir, ppm=640, width=1024):

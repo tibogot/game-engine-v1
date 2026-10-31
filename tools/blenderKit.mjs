@@ -56,10 +56,12 @@ if (!flag("--merge")) {
   let tb = false;   // (a traceback printed whole: its File lines say where)
   for (const line of out.split(/\r?\n/)) {
     if (/^Traceback/.test(line)) tb = true;
-    if (tb || /^(TRIS|BAKE|MIPCHECK|FARFROM|THIN|UVFIT|SHARED|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
+    if (tb || /^(TRIS|BAKE|MIPCHECK|FARFROM|THIN|UVFIT|SHARED|TIME|UVZERO|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
     const mc = /^MIPCHECK (\S+) (\S+) (\S+) ([\d.]+)/.exec(line);
     if (mc && !flag("--quick") && +mc[4] > MIP_BAR) blenderBad.push(`${mc[2]}: ${mc[3]} ${mc[4]}`);
     if (/^BAKEBLACK/.test(line)) blenderBad.push(line);
+    const uz = /^UVZERO final (\S+) (\d+)/.exec(line);
+    if (uz && +uz[2] > 0) blenderBad.push(`${uz[1]}: ${uz[2]} faces unwrapped to a line`);
   }
   if (r.status !== 0 || /Traceback/.test(out)) { console.log(`blender FAILED (${secs()})`); process.exit(1); }
   console.log(`  blender done (${secs()})`);

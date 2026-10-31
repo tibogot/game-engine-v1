@@ -500,10 +500,13 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
         objs, fars, decals, hay = [], [], {}, {}
         for si, state in enumerate(spec.get("states", STATES)):   # (a prop: "intact" only)
             K.groups["h"] = []; K.decals = []; K.spots = []
+            import time as _t; _b0 = _t.time()
             (spec.get("builder") or build)(K, tname, spec, state, seed0 + ti * 10 + si)   # (a kit's own piece: its builder)
+            _b1 = _t.time()
             if surfaces: drystone.writeBuildOrder(K)
             o = K.join(f"{prefix}{tname.capitalize()}_{state.capitalize()}", K.groups["h"])
             K.drop_cutters()
+            print("TIME", tname, state, "build", f"{_b1 - _b0:.1f}", "join", f"{_t.time() - _b1:.1f}", flush=True)
             objs.append(o); decals[o] = K.decals   # (its painted lettering: the stencil sheet's decal quads — bkit.stencils)
             hay[o] = K.spots
             # A piece's OWN far level (`farBuilder`: the same seed, built coarser — 2026-10-20, the hedges: a
@@ -511,8 +514,10 @@ def buildKit(TYPES, MATDEF, glb, prefix="House", seed0=1958, colors=False, surfa
             # the same atlas. Without one, the near level decimated (K.far).
             if spec.get("farBuilder"):
                 K.groups["h"] = []; K.spots = []   # (the far build's own spots: thrown away)
+                _f0 = _t.time()
                 spec["farBuilder"](K, tname, spec, state, seed0 + ti * 10 + si)
                 fars.append(K.join(f"{o.name}_Far", K.groups["h"]))
+                print("TIME", tname, state, "far build+join", f"{_t.time() - _f0:.1f}", flush=True)
                 K.drop_cutters()
         K.bake(objs + fars, S_ if QUICK else spec.get("atlas", S_), f"{prefix}{tname.capitalize()}", REFS, samples_ao=16 if QUICK else 80, ao_dist=spec.get("aoDist", 2.2), normals=spec.get("normals", False), normal_size=None if QUICK else spec.get("normalAtlas"), island_margin=spec.get("islandMargin", 0.0005 if surfaces else 0.002), pairs=list(zip(objs, fars)) if fars else None, thin=set(spec.get("thin", ())), thin_px=spec.get("thinPx", 12), shared=set(spec.get("shared", ())), boost=spec.get("boost"))
         dec = K.stencils(decals, f"{prefix}{tname.capitalize()}", REFS)   # (near level only: at the far's 60 m+ a word is a pixel)

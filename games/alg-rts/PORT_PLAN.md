@@ -28,7 +28,7 @@ is not the procedural one re-textured (see memory: new assets, never remakes). O
    thickness, deep window reveals, shutters, sills, plinth, cornice, balconies, chimneys. The roof's canal tiles are
    MODELLED as channels of round tiles, and the far level's roof is a flat skin baked from them. States: intact,
    damaged (shell holes, shutters torn), ruin (the roof fallen in, the upper floor gone).
-2. [ ] **The magasin:** dressed stone, plank doors, the tile roof; its states.
+2. [x] **The magasin** (`magasin`, done 2026-10-31): long and low, its gable to the sea, ochre-washed rubble with dressed-stone quoins, four round-arched doorways on the quay (plank doors, one open on the dark inside), the loading step, barred windows high on the back, the canal-tile roof; its states.
 3. [ ] **The mole**, as modules laid end to end: a straight length, the head with its LIGHTHOUSE, the steps; the rock
    apron, bollards, rings.
 4. [ ] **The lamparo boat** (two colour variants), afloat and beached.
