@@ -73,26 +73,37 @@ function portTown() {
   const at = (u, v) => [ax + d[0] * u - sea[0] * v, az + d[1] * u - sea[1] * v];
   const facing = (x, z) => [x + sea[0] * 50, z + sea[1] * 50];
   const houses = [], props = [];
-  const row = (types, u0, v, states = {}, gap = 0.2) => {
+  // (`quay`: the front row ON the quay — its fronts in one line, the deck meeting each wall, and its pads one level, the
+  // quay's: the site "port" — algGame's terraced base, the mean ground of its houses)
+  const QUAY = { site: "port", level: 0 };
+  const row = (types, u0, v, states = {}, gap = 0.2, quay = false) => {
     let u = u0;
     types.forEach((ty, k) => {
       if (ty === null) { u += gap * 15; return; }   // (a lane)
       const [x0, x1, z0, z1] = FOOT[ty].map((q) => q * HS), w = x1 - x0, dd = z1 - z0;
-      const [cx, cz] = at(u + w / 2, v + dd / 2 + (k % 2 ? 0.4 : -0.2));   // (the fronts a little in and out)
-      houses.push(house(ty, states[k] ?? "intact", cx, cz, ...facing(cx, cz)));
+      const [cx, cz] = at(u + w / 2, v + dd / 2 + (quay ? 0 : k % 2 ? 0.4 : -0.2));   // (else the fronts a little in and out)
+      houses.push(quay ? [...house(ty, states[k] ?? "intact", cx, cz, ...facing(cx, cz)), QUAY] : house(ty, states[k] ?? "intact", cx, cz, ...facing(cx, cz)));
       u += w + gap;
     });
   };
-  row(["magasin", null, "cafe", "etroite", "quai"], 0, 0);
+  row(["magasin", null, "cafe", "etroite", "quai"], 0, 0, {}, 0.2, true);
   // the second row: the church's square between its houses (the church 19 m wide, its front 9 m behind the street)
   const back = 10.4 + 7;
   row(["quai", "etroite"], -1, back, { 0: "damaged" });
   const [cx, cz] = at(29, back + 9 + 21.6 * HS / 2);
   houses.push(house("eglise", "intact", cx, cz, ...facing(cx, cz)));
   row(["etroite", "quai"], 40.5, back);
-  // the quay's life, on the strip before the fronts (v < 0, toward the sea)
-  const prop = (ty, u, v, turn = 0) => { const [x, z] = at(u, v); const [tx, tz] = facing(x, z); props.push(house(ty, "intact", x, z, x + (tx - x) * Math.cos(turn) - (tz - z) * Math.sin(turn), z + (tx - x) * Math.sin(turn) + (tz - z) * Math.cos(turn))); };
-  prop("caisses", 5, -4.5); prop("caisses", 13, -5.5, 0.6); prop("etal", 33, -5); prop("filets", 46, -9, 0.3); prop("filets", 52, -11, -0.2);
+  // THE QUAY (port.py pave: 10 × 8 m lengths, 13 × 10.4 game) under the front row, end to end from just past the magasin's
+  // end to past the last house: the deck at the row's level (no pad of its own: the sand under it CARVED below it —
+  // algGame `carve` — its wall showing where the beach falls away to the sea)
+  const onQuay = { ...QUAY, pad: false };
+  const [px0, px1, pz0, pz1] = FOOT.pave.map((q) => q * HS);
+  for (let i = 0; i < 5; i++) { const [x, z] = at(-5 + (px1 - px0) * (i + 0.5), -(pz1 - pz0) / 2); props.push([...house("pave", "intact", x, z, ...facing(x, z)), { ...onQuay, carve: true }]); }
+  // the quay's life, on the deck before the fronts (v < 0, toward the sea) at its level; the nets on the sand below it
+  const prop = (ty, u, v, turn = 0, m) => { const [x, z] = at(u, v); const [tx, tz] = facing(x, z); const r = house(ty, "intact", x, z, x + (tx - x) * Math.cos(turn) - (tz - z) * Math.sin(turn), z + (tx - x) * Math.sin(turn) + (tz - z) * Math.cos(turn)); props.push(m ? [...r, m] : r); };
+  prop("caisses", 5, -4.5, 0, onQuay); prop("caisses", 13, -5.5, 0.6, onQuay); prop("etal", 33, -5, 0, onQuay);
+  for (const u of [8, 41, 58]) prop("lampadaire", u, -8.6, 0, onQuay);   // (along the sea edge, behind the coping)
+  prop("filets", 46, -14, 0.3); prop("filets", 52, -16, -0.2);
   // THE MOLE: north from its root (a length's +X the way out, so its yaw π/2 — its harbour face, -Z, then west), on the
   // sea (y: the sea level — the model's waterline at its origin); the lighthouse's piece (its body -5..2 m, the round
   // head past it) end to end with the last length

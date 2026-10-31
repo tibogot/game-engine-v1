@@ -420,9 +420,14 @@ def quayStone(nb):
 def paving(nb):
     c = nb.mix(0.4, nb.img("build/seaworn_stone_tiles/seaworn_stone_tiles_diff_1k.jpg", 0.5), srgb(0xb9a688))
     return dust(nb, nb.scale(c, nb.mr(nb.noise(0.8, 3), 0.3, 0.7, 0.88, 1.05)), 0.3, 0.3)
+def quayDry(nb):
+    """The QUAY's wall (2026-10-31): the mole's dressed sandstone blocks, DRY — on the beach, no wet band, no weed. Not on
+    the shared slots (as dressedStone is): a block's top face flattened to a line there, the UVZERO gate."""
+    c = nb.mix(0.35, nb.img("build/large_sandstone_blocks/large_sandstone_blocks_diff_1k.jpg", 0.33), srgb(0xb59a76))
+    return dust(nb, nb.scale(c, nb.mr(nb.noise(1.2, 4), 0.3, 0.7, 0.85, 1.05)), 0.3, 0.3)
 def quayMortar(nb):   # (the mortar in the blocks' joints: the core behind them, dark and damp)
     return nb.mix(nb.mr(nb.gy, 0.9, 0.1), nb.mix(nb.noise(3.0, 4), srgb(0x6b6150), srgb(0x7d725e)), srgb(0x3b3a30))
-MATDEF.update({"quayMortar": (0.95, quayMortar), "quayStone": (0.95, quayStone), "paving": (0.95, paving), "lightWhite": (0.9, wash(0xf0ece2, foot=0xb8b0a0)),
+MATDEF.update({"quayMortar": (0.95, quayMortar), "quayStone": (0.95, quayStone), "quayDry": (0.95, quayDry), "paving": (0.95, paving), "lightWhite": (0.9, wash(0xf0ece2, foot=0xb8b0a0)),
                "lantern": (0.15, flat(srgb(0x3f8a5a))), "copperGreen": (0.6, lambda nb: nb.mix(nb.noise(5.0, 4), srgb(0x4f8a74), srgb(0x6fa08c))),
                "castIron": (0.6, flat(srgb(0x23211f), 0.4))})
 
@@ -832,6 +837,54 @@ def buildFilets(K, name, spec, state, seed, far=False):
 TYPES["etal"] = dict(builder=buildEtal, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
 TYPES["caisses"] = dict(builder=buildCaisses, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
 TYPES["filets"] = dict(builder=buildFilets, states=["intact"], autoLod=True, atlas=1024, smoothAngle=50)
+
+# ── THE QUAY (2026-10-31, PORT_PLAN.md 8 — you: "yes commit and go ahead", after the port stood on the bare sand): the paved
+# quay under the front row, laid end to end along X; the deck at y 0 (the row's ground), its SEA EDGE at -Z (the camera's).
+#   pave        a 10 m length, 8 m deep: big worn flagstones in courses, a dressed-stone COPING along the sea edge, the quay
+#               WALL of dressed blocks under it down into the sand (the beach falls away: 0.5-1 m of it shows), two
+#               cast-iron bollards and a mooring ring on the wall
+#   lampadaire  the quay's cast-iron lamp: a fluted post on its plinth, the crook, the lantern
+# One state each (dry stone: no wet band, no weed — those are the mole's, in the sea).
+def buildPave(K, name, spec, state, seed, far=False):
+    R = random.Random(seed); G = "h"; X0, X1, ZS, ZL = -5.0, 5.0, -4.0, 4.0; FOOT_Y = -1.6
+    K.box("Core", X0, X1, FOOT_Y, -0.02, ZS + 0.15, ZL, "quayMortar", G, 0)
+    # the flagstones, course by course across the deck (as the mole's: each its own size and a hair high or low)
+    zz, row = ZS + 0.5, 0
+    while zz < ZL - 0.05:
+        d = min(R.uniform(0.55, 0.8), ZL - zz); xx = X0 - (0.0 if row % 2 == 0 else R.uniform(0.2, 0.4)); k = 0
+        while xx < X1 - 0.05:
+            w = R.uniform(0.7, 1.1); a0, a1 = max(xx, X0), min(xx + w, X1)
+            if a1 - a0 > 0.2:
+                K.box(f"Flag{row}_{k}", a0 + 0.012, a1 - 0.012, -0.05, 0.03 + R.uniform(-0.008, 0.012), zz + 0.012, zz + d - 0.012, "paving", G, 0)
+            xx += w; k += 1
+        zz += d; row += 1
+    # the COPING along the sea edge: long dressed kerb stones, rounded, a little over the wall's face
+    x, k = X0, 0
+    while x < X1 - 0.1:
+        w = R.uniform(1.0, 1.5); xe = min(x + w, X1)
+        K.box(f"Coping{k}", x + 0.01, xe - 0.01, -0.12, 0.09 + (k % 2) * 0.012, ZS - 0.06, ZS + 0.48, "dressedStone", G, 0.025)
+        x = xe; k += 1
+    # the WALL: dressed blocks from the coping down into the sand
+    blockCourses(K, R, [(X0, ZS), (X1, ZS)], lambda i: (0.0, -1.0), FOOT_Y, -0.14, "BW", mat="quayDry")
+    # the BOLLARDS behind the coping, a RING on the wall
+    for k, bx in enumerate((-2.6, 2.4)):
+        lathe(K, f"Bollard{k}", [(0.0, 0.0), (0.2, 0.0), (0.16, 0.35), (0.22, 0.48), (0.24, 0.56), (0.0, 0.58)], (bx, ZS + 0.85), "castIron", n=12)
+    K.rod("Ringa", (-0.15, -0.35, ZS - 0.06), (0.0, -0.5, ZS - 0.06), 0.025, "castIron", G, 5)
+    K.rod("Ringb", (0.0, -0.5, ZS - 0.06), (0.15, -0.35, ZS - 0.06), 0.025, "castIron", G, 5)
+
+def buildLampadaire(K, name, spec, state, seed, far=False):
+    G = "h"
+    lathe(K, "Plinth", [(0.0, -0.1), (0.24, -0.1), (0.24, 0.12), (0.2, 0.18), (0.16, 0.5), (0.11, 0.62), (0.0, 0.62)], (0.0, 0.0), "castIron", n=12)
+    lathe(K, "Post", [(0.0, 0.6), (0.075, 0.6), (0.06, 2.9), (0.08, 3.0), (0.0, 3.02)], (0.0, 0.0), "castIron", n=10)
+    # the crook: out to the lantern, a scroll under it
+    K.rod("Arm", (0.0, 2.95, 0.0), (0.0, 3.25, -0.55), 0.03, "castIron", G, 6)
+    K.rod("Scroll", (0.0, 2.6, 0.0), (0.0, 3.0, -0.45), 0.018, "castIron", G, 5)
+    lathe(K, "LampCap", [(0.0, 3.1), (0.04, 3.1), (0.2, 2.98), (0.22, 2.94), (0.0, 2.95)], (0.0, -0.62), "castIron", n=8)
+    lathe(K, "LampGlass", [(0.0, 2.62), (0.09, 2.62), (0.16, 2.92), (0.0, 2.92)], (0.0, -0.62), "glass", n=8)
+    K.rod("LampHang", (0.0, 3.25, -0.55), (0.0, 3.08, -0.62), 0.02, "castIron", G, 5)
+
+TYPES["pave"] = dict(builder=buildPave, states=["intact"], autoLod=True, atlas=2048)
+TYPES["lampadaire"] = dict(builder=buildLampadaire, states=["intact"], autoLod=True, atlas=512, smoothAngle=50)
 
 # ── THE CHURCH (2026-10-31, PORT_PLAN.md 6 — assets-src/refs/coast/Algerie.Jemmapes.Eglise.jpg, the 1930s postcard): the
 # colonial village church of the Constantinois. autoLod from the start.

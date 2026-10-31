@@ -729,6 +729,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         }
         if (m && base[m.site]) {
           row[3] = base[m.site].sum / base[m.site].n + m.level * TERRACE_G;
+          // (`carve`: a deck laid at that level — the coast's quay — with the ground under its footprint LOWERED to 15 cm
+          // below it, never raised: sand poking through a paved deck z-fights, and the beach falling away shows its wall)
+          if (m.carve) {
+            const c = Math.cos(yaw), s = Math.sin(yaw), r = Math.hypot(hx, hz), top = row[3] - 0.15;
+            await app.remapHeights?.(fx - r, fz - r, fx + r, fz + r, (wx, wz, y) => {
+              const dx = wx - fx, dz = wz - fz, lx = dx * c - dz * s, lz = dx * s + dz * c;
+              return Math.abs(lx) <= hx && Math.abs(lz) <= hz && y > top ? top : null;
+            });
+          }
           if (m.pad === false) continue;
         } else {
           const g = groundOf(row);
