@@ -17,7 +17,13 @@ export const FOOT = { dar: [-3.6, 3.6, -3.9, 3.4], tour: [-2.6, 2.6, -3.3, 2.8],
   // the farm's (FARM_PLAN.md): the sheepfold and its pen (the hurdle knocked flat out to -6.8), the threshing floor
   bergerie: [-5.3, 5.3, -6.8, 4.5], aire: [-3.55, 3.55, -3.55, 3.55],
   // the oasis's (OASIS_PLAN.md): the spring (its seguia out to -3.45, its trough to the right), a garden fence's 4 m module
-  ain: [-2.5, 3.5, -3.5, 2.1], djerid: [-2.0, 2.0, -0.25, 0.25] };
+  ain: [-2.5, 3.5, -3.5, 2.1], djerid: [-2.0, 2.0, -0.25, 0.25],
+  // the PORT's (tools/blender/port.py, PORT_PLAN.md): the row houses' and the magasin's walls (its loading step out front),
+  // the church (the tower and its steps at -Z, the buttresses at the sides), a mole length (its harbour face at -Z), the
+  // quay's props, a boat
+  quai: [-4.2, 4.2, -3.5, 3.5], cafe: [-4.8, 4.8, -3.75, 3.75], etroite: [-2.8, 2.8, -3.5, 3.5], magasin: [-8.0, 8.0, -4.4, 4.0],
+  eglise: [-7.4, 7.4, -12.4, 9.2], mole: [-5.0, 5.0, -3.0, 3.0], phare: [-5.0, 5.0, -3.0, 3.0],
+  etal: [-2.5, 2.05, -1.34, 0.95], caisses: [-1.63, 2.54, -0.73, 1.3], filets: [-2.07, 2.08, -1.48, 0.5], barque: [-3.8, 3.8, -1.2, 1.2] };
 export const HS = 1.3;
 export const rotY = (th, lx, lz) => [lx * Math.cos(th) + lz * Math.sin(th), -lx * Math.sin(th) + lz * Math.cos(th)];
 /** A house whose FOOTPRINT's centre is (cx, cz), its front toward (tx, tz): the town field's row (y null: a pad). */

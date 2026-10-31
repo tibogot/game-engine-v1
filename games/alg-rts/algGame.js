@@ -49,7 +49,8 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
-import { MECHTA_PROPS, MECHTA_SOFT, MECHTA_TYPES, createHouseField, loadHouses } from "./algHouse.js";
+import { MECHTA_PROPS, MECHTA_SOFT, MECHTA_TYPES, PORT_TYPES, afloatCaps, createHouseField, loadHouses } from "./algHouse.js";
+import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { setGroundBlendApp } from "./algGroundBlend.js";
 import { createTownDamage } from "./algTownDamage.js";
 import { createPieceDamage } from "./algPieceDamage.js";
@@ -686,7 +687,9 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       const t0 = performance.now();
       // (+ the RUBBLE kit, a house collapsing — algTownDamage; not needed to stand: a ruin without it keeps its dust)
       // (+ the MECHTA kit when the map places its stone houses — the new Aurès' hamlets, ?mechta=1 for now)
-      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble"), MAP.town.houses.some(([ty]) => MECHTA_TYPES.includes(ty)) ? loadHouses("mechta") : null]);
+      // (+ the PORT kit when the map places its pieces — the coast, 2026-10-31)
+      const usesKit = (types) => [...MAP.town.houses, ...(MAP.town.props ?? [])].some(([ty]) => types.includes(ty));
+      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble"), usesKit(MECHTA_TYPES) ? loadHouses("mechta") : null, usesKit(PORT_TYPES) ? loadHouses("port") : null]);
       const field = createHouseField();
       // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
       // footprint's mean ground (as a built piece's), its y that. (The mechta's HILLSIDE house, pente: cut into the slope
@@ -718,9 +721,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         // up: a field of loaves)
         if (m?.ground) {
           const c = Math.cos(yaw), s = Math.sin(yaw), h = (lx, lz) => app.getWorldHeight(fx + lx * c + lz * s, fz - lx * s + lz * c);
-          row[3] = h(0, 0);
-          // (`upright`: a wall follows the slope along its length only — leant across, it read as a fallen slab)
-          m.tilt = [m.upright ? 0 : -Math.atan2(h(0, hz) - h(0, -hz), 2 * hz), Math.atan2(h(hx, 0) - h(-hx, 0), 2 * hx)];
+          row[3] = h(0, 0) + (m.lift ?? 0);   // (`lift`: a boat pulled up on the sand — its origin the waterline, its keel below)
+          // (`upright`: a wall follows the slope along its length only — leant across, it read as a fallen slab; `heel`: the
+          // boat heeled on its bilge, about its length)
+          m.tilt = [(m.upright ? 0 : -Math.atan2(h(0, hz) - h(0, -hz), 2 * hz)) + (m.heel ?? 0), Math.atan2(h(hx, 0) - h(-hx, 0), 2 * hx)];
           continue;
         }
         if (m && base[m.site]) {
@@ -785,12 +789,15 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       };
       // SIGHT: each house a tall box to its parapet (the kits' heights, real metres x1.3; the minaret its own column)
       // — combat's line of sight and the fog of war (algSight.addBox / topAt): no shot, no view THROUGH the town
-      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0, pente: 6.0, masjid: 4.1 };   // (the mechta's two-room: its upper room on half the roof)
+      const PAR = { dar: 6.7, tour: 9.6, bas: 3.7, terrasse: 6.6, souk: 4.3, mosquee: 5.1, maison: 6.8, haute: 6.9, cour: 3.9, boutique: 4.0, petite: 3.0, etage: 5.0, pente: 6.0, masjid: 4.1,   // (the mechta's two-room: its upper room on half the roof)
+        quai: 6.6, cafe: 6.8, etroite: 9.4, magasin: 4.6, eglise: 9.0 };   // (the port's eaves; the church's nave — its tower a column below)
       for (const [ty, st, x, y, z, yaw, fx, fz, hx, hz] of MAP.town.houses) {
         app.algSight?.addBox(fx, fz, hx, hz, yaw, y + (st === "ruin" ? 1.6 : (PAR[ty] ?? 5) * 1.3));   // (a ruin from the start: its rubble's height — algTownDamage ruinTop)
         if (ty === "mosquee") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = -4.25 * 1.3, mz = 4.75 * 1.3; app.algSight?.addBox(fx + mx * c + mz * s, fz - mx * s + mz * c, 2.4, 2.4, yaw, y + 18 * 1.3); }
         // the dechra's mosque: its MINARET a column of its own (mechta.py tower: 5.35, 2.35 from the model's origin, 7.6 m)
         if (ty === "masjid" && st !== "ruin") { const c = Math.cos(yaw), s = Math.sin(yaw), mx = 5.35 * 1.3, mz = 2.35 * 1.3; app.algSight?.addBox(x + mx * c + mz * s, z - mx * s + mz * c, 1.5, 1.5, yaw, y + 7.6 * 1.3); }
+        // the port's church: its TOWER (port.py: 4.8 m square, 9.8 m before the model's origin, 17 m to its cornice)
+        if (ty === "eglise" && st !== "ruin") { const c = Math.cos(yaw), s = Math.sin(yaw), mz = -9.8 * 1.3; app.algSight?.addBox(x + mz * s, z + mz * c, 2.4 * 1.3, 2.4 * 1.3, yaw, y + 17 * 1.3); }
       }
       app.fogOfWar?.rebuildHeights();
       // GARRISONS (algGarrison.js, CoH's): every house that still stands takes a squad (the mosque 8); the door a
@@ -799,11 +806,14 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
         if (st === "ruin") return null;
         const c = Math.cos(yaw), s = Math.sin(yaw), out = hz + 1.2;
         return app.algGarrison?.addHouse({ x: fx, z: fz, yaw, hw: hx * 0.9, hd: hz * 0.9, y0: y, y1: y + (PAR[ty] ?? 5) * 1.3,
-          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" || ty === "masjid" }) ?? null;
+          door: { x: fx - out * s, z: fz - out * c }, mosque: ty === "mosquee" || ty === "masjid" || ty === "eglise" }) ?? null;
       });
       // THEY BREAK AND COLLAPSE (algTownDamage.js): health, the damaged and ruin models, the garrison thrown out
       field.damage = createTownDamage(app, { field, houses: MAP.town.houses, footprints: townFoot, garrisons: townGarrisons, par: PAR });
       app.scene.add(field.root);
+      // THE BOATS AFLOAT (the coast's moored boats, meta `afloat`): the sea kept out of their hulls
+      const afloat = afloatCaps(townProps.filter((r) => r[10]?.afloat), RENDER_ORDER.SEA_CAP);
+      if (afloat) app.scene.add(afloat);
       app.addPreRenderHook(() => field.update(app.camera));
       app.algTown = field;
       console.log(`[town] ${field.size} houses in ${Math.round(performance.now() - t0)} ms`);

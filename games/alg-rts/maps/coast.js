@@ -19,6 +19,7 @@
 
 /** THE PLAYABLE AREA: 500 m, the sea along its north and west. */
 import { ROCKS } from "./coastRocks.js";
+import { FOOT, HS, house } from "./villageKit.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -52,6 +53,65 @@ export const LAYOUT = {
  *  and south across the plain, up into the ridges to the katiba. */
 const TRACK = [[-40, -62], [5, -52], [22, -10], [24, 45], [14, 100], [22, 150], [36, 186]];
 
+/**
+ * THE PORT (2026-10-31 — the Blender pieces, PORT_PLAN.md, in place of algPort.js's procedural one; you: "ok commit
+ * and go ahead"): the TOWN field's rows (algGame: levelled pads, near / far, garrisons, damage, cover, sight).
+ *   the QUAY FRONT   along the line from `FRONT[0]` to `FRONT[1]` (the top of the bay's beach east of the post), its
+ *                    fronts toward the sea (the line's left, walking it) — and the camera: the magasin at its west end,
+ *                    a lane, the café, the narrow house, a balcony house
+ *   the SECOND ROW   across a street behind it; the CHURCH set back on its square in the middle, its tower over the
+ *                    quay's roofs
+ *   the MOLE         10 m (13 game) lengths out from the beach, the lighthouse at its head; its harbour side west
+ *   the BOATS        moored along the mole's harbour side; pulled up on the sand west of its root, heeled
+ *   the QUAY'S LIFE  the fish stall by the mole's root, cargo before the magasin, nets drying on the beach
+ */
+const FRONT = [[26, -69], [76, -91]], MOLE_ROOT = [44, -108], MOLE_LEN = 5;   // (the root at the water's edge: the beach dry to z ≈ -110, measured; the bay only ~3 m deep at the tip)
+function portTown() {
+  const [[ax, az], [bx, bz]] = FRONT, L = Math.hypot(bx - ax, bz - az), d = [(bx - ax) / L, (bz - az) / L];
+  const sea = [d[1], -d[0]];   // the line's left: the fronts' way
+  // (u along the line from its start, v inland from it) → world
+  const at = (u, v) => [ax + d[0] * u - sea[0] * v, az + d[1] * u - sea[1] * v];
+  const facing = (x, z) => [x + sea[0] * 50, z + sea[1] * 50];
+  const houses = [], props = [];
+  const row = (types, u0, v, states = {}, gap = 0.2) => {
+    let u = u0;
+    types.forEach((ty, k) => {
+      if (ty === null) { u += gap * 15; return; }   // (a lane)
+      const [x0, x1, z0, z1] = FOOT[ty].map((q) => q * HS), w = x1 - x0, dd = z1 - z0;
+      const [cx, cz] = at(u + w / 2, v + dd / 2 + (k % 2 ? 0.4 : -0.2));   // (the fronts a little in and out)
+      houses.push(house(ty, states[k] ?? "intact", cx, cz, ...facing(cx, cz)));
+      u += w + gap;
+    });
+  };
+  row(["magasin", null, "cafe", "etroite", "quai"], 0, 0);
+  // the second row: the church's square between its houses (the church 19 m wide, its front 9 m behind the street)
+  const back = 10.4 + 7;
+  row(["quai", "etroite"], -1, back, { 0: "damaged" });
+  const [cx, cz] = at(29, back + 9 + 21.6 * HS / 2);
+  houses.push(house("eglise", "intact", cx, cz, ...facing(cx, cz)));
+  row(["etroite", "quai"], 40.5, back);
+  // the quay's life, on the strip before the fronts (v < 0, toward the sea)
+  const prop = (ty, u, v, turn = 0) => { const [x, z] = at(u, v); const [tx, tz] = facing(x, z); props.push(house(ty, "intact", x, z, x + (tx - x) * Math.cos(turn) - (tz - z) * Math.sin(turn), z + (tx - x) * Math.sin(turn) + (tz - z) * Math.cos(turn))); };
+  prop("caisses", 5, -4.5); prop("caisses", 13, -5.5, 0.6); prop("etal", 33, -5); prop("filets", 46, -9, 0.3); prop("filets", 52, -11, -0.2);
+  // THE MOLE: north from its root (a length's +X the way out, so its yaw π/2 — its harbour face, -Z, then west), on the
+  // sea (y: the sea level — the model's waterline at its origin); the lighthouse's piece (its body -5..2 m, the round
+  // head past it) end to end with the last length
+  const [mx, mz] = MOLE_ROOT, Lm = 10 * HS, yaw = Math.PI / 2, out = (t, w = 0) => [mx - w, mz - t];
+  const onSea = (ty, t, w, hw, hz, dy = 0, m) => { const [x, z] = out(t, w); props.push([ty, "intact", x, SEA_LEVEL + dy, z, yaw, x, z, hw, hz, m]); };
+  for (let i = 0; i < MOLE_LEN; i++) onSea("mole", Lm * (i + 0.5), 0, 5 * HS, 3 * HS);
+  onSea("phare", Lm * MOLE_LEN + 5 * HS, 0, 5 * HS, 3 * HS);
+  // the boats moored along its harbour side (3 m out from the face), bows out; two of the second colour. `afloat`: the
+  // sea kept out of their hulls (algHouse afloatCaps — their floorboards are under the waterline, the swell over them)
+  [[24, "barque"], [35, "barque2"], [47, "barque"], [59, "barque2"]].forEach(([t, ty]) => onSea(ty, t, 3 * HS + 2.1, 3.8 * HS, 1.2 * HS, 0, { afloat: true }));
+  // pulled up on the sand west of its root (landward: dry), bows to the sea, heeled on their bilge
+  [[-14, 12, 0.18, 0.15], [-22, 16, -0.2, -0.3], [-30, 13, 0.16, 0.25]].forEach(([dx, dz, heel, turn], k) => {
+    const x = mx + dx, z = mz + dz, th = Math.PI / 2 + turn;
+    props.push([k % 2 ? "barque2" : "barque", "intact", x, null, z, th, x, z, 3.8 * HS, 1.2 * HS, { ground: true, lift: 0.3 * HS, heel }]);
+  });
+  return { houses, props };
+}
+const PORT = portTown();
+
 export const MAP = {
   id: "coast",
   viewYaw: 0,   // the camera looks south: the post at the bottom, the katiba at the top (layout.js)
@@ -71,9 +131,9 @@ export const MAP = {
   // THE GAME'S OWN SEA (algSea.js) instead of Ocean Pro (2026-10-12): drawn for the RTS camera, at
   // this level (the level file carries no ocean; algGame answers the sea level to every system).
   sea: { level: SEA_LEVEL },
-  // THE PORT (algPort.js, 2026-10-16): its quay front along the top of the bay's beach east of the post
-  // (the magasin west, the houses east, facing the sea), the mole out from the beach into the bay.
-  port: { front: { from: [26, -69], to: [76, -91] }, mole: { root: [44, -99], dir: 0, len: 75 } },   // (east of the road from the gate and of the post's helipad)
+  // THE PORT (2026-10-31, the Blender pieces — portTown above): the TOWN field's. (The procedural one of 2026-10-16,
+  // algPort.js's `port: { front, mole }`, retired from the map; the lab keeps it to compare.)
+  town: { houses: PORT.houses, props: PORT.props },
   // THE CAP'S ROCKS (2026-10-16): the slabs in its cliff face and the reef at its foot, placed by the
   // level tool (maps/coastRocks.js), drawn as El Kantara's (algLandmarks / algSandstone), in the
   // Stora capes' ochre-grey. Nothing else of algLandmarks' scenery (a map with `scenery` starts at 0).

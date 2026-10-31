@@ -208,6 +208,64 @@ function dequantise(m) {
   m.userData.metres = true;
 }
 
+/**
+ * THE SEA KEPT OUT OF A BOAT (2026-10-31, the coast's port): an open hull afloat has its floor under the waterline, and
+ * the sea — see-through, drawn after the opaque scene — drew inside it, its swell over the floorboards. A cap at the
+ * gunwale, DEPTH ONLY (no colour), drawn after everything opaque: what was drawn stays, the sea behind it inside the
+ * hull fails its depth test. Its outline the hull's own: the 2-D convex hull of the near model's vertices in the sheer's
+ * band (port.py SHEER 0.52 m; the lamp's arm and the mast's top above it left out), a hair inside. `rows`: the town
+ * field's [type, state, x, y, z, yaw]. Null when no boat's model is loaded.
+ */
+export function afloatCaps(rows, renderOrder) {
+  const caps = new Map();   // type → its cap geometry (real metres)
+  const capOf = (ty) => {
+    if (caps.has(ty)) return caps.get(ty);
+    const pos = _parts?.[`${ty}:intact`]?.near?.geometry?.attributes.position;
+    let g = null;
+    if (pos) {
+      const pts = [];
+      for (let i = 0; i < pos.count; i++) { const y = pos.getY(i); if (y > 0.3 && y < 0.75) pts.push([pos.getX(i), pos.getZ(i)]); }
+      const hull = convexHull2(pts);
+      if (hull.length >= 3) {
+        const cx = hull.reduce((s, p) => s + p[0], 0) / hull.length, cz = hull.reduce((s, p) => s + p[1], 0) / hull.length, Y = 0.5;
+        const v = [cx, Y, cz];
+        for (const [x, z] of hull) v.push(cx + (x - cx) * 0.97, Y, cz + (z - cz) * 0.97);
+        const idx = [];
+        for (let k = 1; k <= hull.length; k++) idx.push(0, (k % hull.length) + 1, k);
+        g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(v, 3));
+        g.setIndex(idx);
+      }
+    }
+    caps.set(ty, g);
+    return g;
+  };
+  const byType = new Map();
+  for (const r of rows) if (capOf(r[0])) (byType.get(r[0]) ?? byType.set(r[0], []).get(r[0])).push(r);
+  if (!byType.size) return null;
+  const root = new THREE.Group();
+  root.name = "AfloatCaps";
+  const mat = new THREE.MeshBasicNodeMaterial({ colorWrite: false, side: THREE.DoubleSide, name: "Port:seaCap" });
+  for (const [ty, list] of byType) {
+    const im = new THREE.InstancedMesh(capOf(ty), mat, list.length);
+    im.renderOrder = renderOrder; im.castShadow = im.receiveShadow = false; im.frustumCulled = false;
+    const q = new THREE.Quaternion(), up = new THREE.Vector3(0, 1, 0);
+    list.forEach(([, , x, y, z, yaw], k) => im.setMatrixAt(k, new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q.setFromAxisAngle(up, yaw), new THREE.Vector3(S, S, S))));
+    root.add(im);
+  }
+  return root;
+}
+/** The 2-D convex hull (monotone chain) of [x, z] points, counter-clockwise. */
+function convexHull2(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  if (p.length < 3) return p;
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], hi = [];
+  for (const q of p) { while (lo.length >= 2 && cross(lo.at(-2), lo.at(-1), q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (hi.length >= 2 && cross(hi.at(-2), hi.at(-1), q) <= 0) hi.pop(); hi.push(q); }
+  return lo.slice(0, -1).concat(hi.slice(0, -1));
+}
+
 /** A piece from outside the kits (its own near / far meshes — e.g. the simulated sandbag walls, algSandbags.js)
  *  made addable to a house field as `type` in `state`. */
 export function registerHouseParts(type, state, near, far = near) {
