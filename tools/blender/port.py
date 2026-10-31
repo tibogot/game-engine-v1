@@ -911,7 +911,45 @@ def buildPlace(K, name, spec, state, seed, far=False):
             K.box(f"KerbZ{k}", side * H - (0.3 if side > 0 else 0.0), side * H + (0.0 if side > 0 else 0.3), -0.2, 0.065 + (k % 2) * 0.01, z + 0.01, ze - 0.01, "dressedStone", G, 0.02)
             z = ze; k += 1
 
+def setts(nb):   # (the street's granite setts: grey with a blue cast, each its own shade — the bake's noise per face)
+    c = nb.mix(0.45, nb.img("build/seaworn_stone_tiles/seaworn_stone_tiles_diff_1k.jpg", 0.9), srgb(0x8a8781))
+    return dust(nb, nb.scale(c, nb.mr(nb.noise(6.0, 3), 0.3, 0.7, 0.8, 1.08)), 0.3, 0.25)
+MATDEF["setts"] = (0.9, setts)
+
+def buildRue(K, name, spec, state, seed, far=False):
+    """THE STREET between the port's rows (2026-11-01, you: "do the cobbled street between the two port rows"): a 10 m
+    length along X, 6 m wide — granite SETTS in courses across it (0.24 m along the street, 0.3-0.42 across, each a hair
+    high or low and a little turned, 2 cm joints over a dark bed), a GUTTER down its middle of long dished stones. The
+    setts are ONE object (bmesh: five faces each — no bottom), not 700 boxes."""
+    R = random.Random(seed); G = "h"; X0, X1, W = -5.0, 5.0, 3.0
+    K.box("Bed", X0, X1, -0.3, -0.02, -W, W, "quayMortar", G, 0)
+    bm = bmesh.new()
+    def sett(x0, x1, z0, z1, y1):
+        v = [bm.verts.new(B(x, y, z)) for (x, y, z) in ((x0, -0.01, z0), (x1, -0.01, z0), (x1, -0.01, z1), (x0, -0.01, z1),
+                                                        (x0, y1, z0), (x1, y1 + R.uniform(-0.004, 0.004), z0), (x1, y1, z1), (x0, y1 + R.uniform(-0.004, 0.004), z1))]
+        for f in ((4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)): bm.faces.new([v[i] for i in f])
+    GW = 0.32   # the gutter's half width
+    x, row = X0, 0
+    while x < X1 - 0.05:
+        dx = min(0.24, X1 - x)
+        for z0, z1 in ((-W, -GW), (GW, W)):
+            z = z0 + (0.0 if row % 2 == 0 else -R.uniform(0.12, 0.2))
+            while z < z1 - 0.05:
+                w = R.uniform(0.3, 0.42); a, b = max(z, z0), min(z + w, z1)
+                if b - a > 0.12 and dx > 0.12: sett(x + 0.011, x + dx - 0.011, a + 0.011, b - 0.011, 0.03 + R.uniform(-0.008, 0.008))
+                z += w
+        x += dx; row += 1
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    K.obj("Setts", bm, "setts", G)
+    # the GUTTER: long stones, their tops 1-2 cm below the setts
+    x, k = X0, 0
+    while x < X1 - 0.1:
+        w = R.uniform(0.7, 1.0); xe = min(x + w, X1)
+        K.box(f"Gutter{k}", x + 0.01, xe - 0.01, -0.12, 0.015 + (k % 2) * 0.004, -GW + 0.01, GW - 0.01, "dressedStone", G, 0.02)   # (its top 1.5 cm up: at y 0 the GROUNDZ gate)
+        x = xe; k += 1
+
 TYPES["pave"] = dict(builder=buildPave, states=["intact"], autoLod=True, atlas=2048)
+TYPES["rue"] = dict(builder=buildRue, states=["intact"], autoLod=True, atlas=2048)
 TYPES["place"] = dict(builder=buildPlace, states=["intact"], autoLod=True, atlas=2048)
 TYPES["lampadaire"] = dict(builder=buildLampadaire, states=["intact"], autoLod=True, atlas=512, smoothAngle=50)
 

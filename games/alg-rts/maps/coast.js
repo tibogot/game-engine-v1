@@ -18,7 +18,6 @@
 // coast down the right edge. Points and the AI: the mission's next step.
 
 /** THE PLAYABLE AREA: 500 m, the sea along its north and west. */
-import { ROCKS } from "./coastRocks.js";
 import { FOOT, HS, house } from "./villageKit.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
@@ -87,15 +86,24 @@ function portTown() {
     });
   };
   row(["magasin", null, "cafe", "etroite", "quai"], 0, 0, {}, 0.2, true);
-  // the second row: the church's square between its houses (the church 19 m wide, its front 9 m behind the street)
-  const back = 10.4 + 7;
-  row(["quai", "etroite"], -1, back, { 0: "damaged" });
-  const [cx, cz] = at(29, back + 9 + 21.6 * HS / 2), SQUARE = { site: "square", level: 0 };
-  houses.push([...house("eglise", "intact", cx, cz, ...facing(cx, cz)), SQUARE]);
-  // ITS SQUARE (port.py place, 7.5 m: 9.75 game): two before its steps, at its level — on a pad (the ground falls away
-  // before the church: carved alone, the paving stood up as a slab), the ground under the paving then carved below it
-  for (const du of [-1, 1]) { const [x, z] = at(29 + du * 3.75 * HS, back + 9 - 3.75 * HS); props.push([...house("place", "intact", x, z, ...facing(x, z)), { ...SQUARE, carve: true }]); }
-  row(["etroite", "quai"], 40.5, back);
+  // THE STREET behind it (2026-11-01, port.py rue: 10 × 6 m lengths, 13 × 7.8 game), and the SECOND ROW across it — the
+  // church's square between its houses. ONE LEVEL for the whole port (the site "port": the back row stood 0.4-0.8 m up
+  // the slope, and a street between the two would have had a bank along it): the street's lengths at it, their ground
+  // carved. Behind the magasin (10.9 m deep) the street runs 1.4 m further back than behind the houses (9.1-9.75), so the
+  // back row's west houses stand further back too; both stretches end where the square begins (u 19.2 — the setts
+  // and the square's flagstones at one height: overlapped, they z-fought).
+  const SW = 6 * HS, U_SQ = 19.2, V_W = 10.92 + 0.05, V_E = 17.4 - SW - 0.05;
+  const street = (u, v0) => { const [x, z] = at(u, v0 + SW / 2); props.push([...house("rue", "intact", x, z, ...facing(x, z)), { ...QUAY, pad: false, carve: true }]); };
+  for (let i = 0; i < 2; i++) street(U_SQ - 13 * (i + 0.5), V_W);
+  for (let i = 0; i < 3; i++) street(U_SQ + 13 * (i + 0.5), V_E);
+  row(["quai", "etroite"], -1, V_W + SW + 0.05, { 0: "damaged" }, 0.2, true);
+  // the church, its front 9.75 m behind the street (the square's depth): its steps on the square
+  const SQ0 = 17.4, [cx, cz] = at(29, SQ0 + 7.5 * HS + 21.6 * HS / 2);
+  houses.push([...house("eglise", "intact", cx, cz, ...facing(cx, cz)), QUAY]);
+  // ITS SQUARE (port.py place, 7.5 m: 9.75 game): two before its steps — on a pad at the port's level (the ground falls
+  // away before the church: carved alone, the paving stood up as a slab), the ground under the paving then carved below it
+  for (const du of [-1, 1]) { const [x, z] = at(29 + du * 3.75 * HS, SQ0 + 3.75 * HS); props.push([...house("place", "intact", x, z, ...facing(x, z)), { ...QUAY, carve: true }]); }
+  row(["etroite", "quai"], 40.5, SQ0, {}, 0.2, true);
   // THE QUAY (port.py pave: 10 × 8 m lengths, 13 × 10.4 game) under the front row, end to end from just past the magasin's
   // end to past the last house: the deck at the row's level (no pad of its own: the sand under it CARVED below it —
   // algGame `carve` — its wall showing where the beach falls away to the sea)
@@ -156,10 +164,9 @@ export const MAP = {
   // THE PORT (2026-10-31, the Blender pieces — portTown above): the TOWN field's. (The procedural one of 2026-10-16,
   // algPort.js's `port: { front, mole }`, retired from the map; the lab keeps it to compare.)
   town: { houses: PORT.houses, props: PORT.props },
-  // THE CAP'S ROCKS (2026-10-16): the slabs in its cliff face and the reef at its foot, placed by the
-  // level tool (maps/coastRocks.js), drawn as El Kantara's (algLandmarks / algSandstone), in the
-  // Stora capes' ochre-grey. Nothing else of algLandmarks' scenery (a map with `scenery` starts at 0).
-  sandstone: { colour: "coast", rocks: ROCKS },
+  // THE CAP'S ROCKS REMOVED (2026-11-01, you: "the rocks we added on it — it looks bad, so remove them"): the slabs of
+  // 2026-10-16 (tools/algCoastLevel.mjs still writes maps/coastRocks.js; the map no longer places them). Nothing of
+  // algLandmarks' scenery (a map with `scenery` starts at 0).
   scenery: { quantities: {}, keepClear: [] },
   // THE MINIMAP's ground (ui/minimap.js), by paint layer (tools/algCoastLevel.mjs): the plain's red
   // earth, the sand, the seabed (under the water's own colour), the maquis, (4 unused), rock, the track.

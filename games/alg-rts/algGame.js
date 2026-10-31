@@ -555,6 +555,8 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
   // map's sea level. ?sea=pro = Ocean Pro instead (switched on above), to compare.
   if (MAP.sea && params.get("sea") !== "pro") {
     try { app.algSea = createAlgSea(app, { level: MAP.sea.level }); } catch (e) { console.warn("[alg sea] failed:", e); }
+    // …and the fog of war leaves the open sea its colour (no unit is ever on it — fogOfWar setSeaLevel)
+    app.fogOfWar?.setSeaLevel?.(MAP.sea.level);
     // ITS PORT (algPort.js, maps/coast.js `port`)
     if (MAP.port) try { app.algPort = createAlgPort(app, { ...MAP.port, sea: MAP.sea.level, navGrid: app.navGrid ?? null }); } catch (e) { console.warn("[alg port] failed:", e); }
   }

@@ -85,6 +85,12 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   const explored = new Uint8Array(cols * rows);
   const visible = new Uint8Array(cols * rows);
   const strengths = new Float32Array(cols * rows);
+  // THE OPEN SEA LEFT CLEAR (setSeaLevel — alg-rts's coast, 2026-11-01, you: "the ocean … will stay in the fog of war and
+  // we will never see the ocean with nice color"): no unit is ever on it, so the fog has nothing there to hide — its
+  // darkening and grey only took the colour from a third of the map. Per cell for the minimap (1 = clear); the 3-D view
+  // tests its own ground under each pixel. Fades in over the first metre of depth: no hard line at the waterline.
+  const seaClear = new Float32Array(cols * rows);
+  let seaLevel = null;
 
   const texData = new Uint8Array(TEX_RES * TEX_RES * 4);
   const tex = new THREE.DataTexture(texData, TEX_RES, TEX_RES, THREE.RGBAFormat);
@@ -234,7 +240,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
       for (let r = 0; r < TEX_RES; r++) {
         for (let c = 0; c < TEX_RES; c++) {
           const i = idx(c, r);
-          const s = blurred[i];
+          const s = blurred[i] * (1 - seaClear[i]);
           const cx = TEX_RES - 1 - c;
           const cy = TEX_RES - 1 - r;
           const p = (cy * TEX_RES + cx) * 4;
@@ -313,6 +319,9 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     // haze that thickens with distance past the edge (a fog wall; reads from
     // the free camera too). Strength 0-1; the haze's colour.
     const uOutMode = uniform(0), uOutStrength = uniform(1);
+    // the open sea (setSeaLevel): its level, on/off
+    const uSea = uniform(0), uSeaOn = uniform(0);
+    seaUniforms = { uSea, uSeaOn };
     const uOutColor = uniform(new THREE.Color(0xcdb58e));
     if (bounds) uOut.value.set(bounds.x0, bounds.z0, bounds.x1, bounds.z1);
     const outsideD = (xz) => max(max(uOut.x.sub(xz.x), xz.x.sub(uOut.z)), max(uOut.y.sub(xz.y), xz.y.sub(uOut.w)));
@@ -360,7 +369,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
       const hitsGround = rayDir.y
         .lessThan(float(-0.0001))
         .select(float(1), float(0));
-      let groundXZ;
+      let groundXZ, groundY = null;
       if (heightTexNode) {
         const t0 = float(0).sub(camPos.y).div(rayDir.y);
         const hit0 = camPos.add(rayDir.mul(max(t0, float(0))));
@@ -369,12 +378,15 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
         const t2 = drapeY(heightTexNode, hit1.x, hit1.z).sub(camPos.y).div(rayDir.y);
         const hit2 = camPos.add(rayDir.mul(max(t2, float(0))));
         groundXZ = vec2(hit2.x, hit2.z);
+        groundY = drapeY(heightTexNode, hit2.x, hit2.z);
       } else {
         const t = float(0).sub(camPos.y).div(rayDir.y);
         const hit = camPos.add(rayDir.mul(max(t, float(0))));
         groundXZ = vec2(hit.x, hit.z);
       }
-      const shaded = shadeRgb(color.rgb, worldUv(groundXZ));
+      let shaded = shadeRgb(color.rgb, worldUv(groundXZ));
+      // the open sea: the fog's shading off where the ground under the pixel lies a metre or more under the water
+      if (groundY) shaded = mix(shaded, color.rgb, smoothstep(float(0), float(1), uSea.sub(groundY)).mul(uSeaOn));
       // Outside the playable box. DARKEN: 45% darker, a third of its colour
       // gone. HAZE: toward the haze colour, 55% at the edge's end, ~90% 120 m out.
       const dim = outsideDim(groundXZ).mul(hitsGround).mul(uOutStrength);
@@ -410,6 +422,8 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
   let lightLevel = 1;               // setLightLevel: the fogged colours x this (1 = as authored)
   let edgeUniforms = null;         // the play-box edge's (set when the post pass is built)
   let cohLook = null;              // the "coh" look's level uniforms (set with the pass)
+  let seaUniforms = null;          // the open sea's (set with the pass)
+  const pushSea = () => { if (seaUniforms) { seaUniforms.uSea.value = seaLevel ?? 0; seaUniforms.uSeaOn.value = seaLevel == null ? 0 : 1; } };
   const edge = { on: !!bounds, mode: "darken", strength: 1, color: "#cdb58e" };
   const pushEdge = () => {
     if (!edgeUniforms) return;
@@ -457,6 +471,7 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     // because setEnabled may well have run before there was a `post` to tell.
     post.setEnabled(enabled);
     pushEdge();
+    pushSea();
     post.setLightLevel(lightLevel);
   }
 
@@ -477,6 +492,16 @@ export function createFogOfWar({ app, units, structures, buildings, getRadioInte
     /** The "coh" look's live levels { dark, shroud, desat } (uniforms; null before the pass is built). */
     get cohLook() { return cohLook; },
     setEdge(o = {}) { Object.assign(edge, o); pushEdge(); },
+    /** THE OPEN SEA LEFT CLEAR: the water level (world y), null for none. Read the ground once: call it after the terrain
+     *  is final (pads, the quay's carving). */
+    setSeaLevel(y) {
+      seaLevel = Number.isFinite(y) ? y : null;
+      for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+        const g = seaLevel == null ? Infinity : app.getWorldHeight?.(-half + (c + 0.5) * cell, -half + (r + 0.5) * cell);
+        seaClear[idx(c, r)] = Number.isFinite(g) ? Math.min(1, Math.max(0, seaLevel - g)) : 0;
+      }
+      pushSea();
+    },
     /**
      * The fogged ground blends toward FIXED colours (the shroud's grey, the unexplored black): a
      * radiance, the same by night as by day — at night the shroud's grey glowed over the moonlit
