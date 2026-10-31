@@ -988,7 +988,7 @@ async function runPrediction() {
       // roll axis. (On the deck itself, the autopilot's touchdown on White 3's bowl came out wrong: the test
       // lap fell there while the drive page's autopilot landed it perfect, 2026-10-22.)
       const Pr = f.P.clone().addScaledVector(f.U, r.pivot ?? 0.7);
-      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, hw, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air });
+      ride.push({ P: Pr.clone().applyMatrix4(M), T: r.T.clone().transformDirection(M), U: f.U.clone().transformDirection(M), uid: pc.uid, hw, tube: t.tube ? closureAt(t, r.s, b.L) : t.halfpipe ? 0.5 * wallAt(t, r.s, b.L) : 0, air: !!r.air, gap: !!r.afterGap });
     }
   }
   // THE REALISTIC TAKE-OFF at every lip (speedProfile.js: the road's shape, a good player's grip and brakes) —

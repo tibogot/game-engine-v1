@@ -27,6 +27,8 @@ const T = [
   ["Stunt · sky loop", "", course([S, S, S, "sky_loop", S, S])],
   ["Stunt · wall ride 90°", "", course([S, S, S, "wallride_90", S, S])],
   ["Stunt · helix up 360°", "", course([S, S, S, "helix_up_360", S, S])],
+  ["Stunt · U-turn wall", "No jump on the way in (2026-10-31).", course([S, S, S, "uturn_wall_32", S, S])],
+  ["Slopes · slopes, platforms, rollers", "Flat out: no hops (rollers: a skim).", course([S, S, S, "slope_up_12", S, "slope_down_12", S, "platform_up_12", "platform_down_12", S, "rollers_64", S, S])],
   ["Banks · two banked 45°", "Bank in, 45° + 45°, bank out (the shift you felt).", course([S, S, S, "bank_in_22", "banked_turn_45", "banked_turn_45", "bank_out_22", S, S])],
   ["Banks · banked 180°", "", course([S, S, S, "bank_in_22", "banked_turn_180", "bank_out_22", S, S])],
   ["Banks · banked straight", "Bank in, two banked straights, bank out.", course([S, S, "bank_in_22", "banked_straight_64", "banked_straight_64", "bank_out_22", S, S])],

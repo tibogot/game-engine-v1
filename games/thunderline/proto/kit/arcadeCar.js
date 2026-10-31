@@ -57,7 +57,7 @@ export const ARCADE = {
   align: { rate: 10, max: 4, rollOnly: 4, mixFrom: 4, mixFull: 12, mixedRate: 1.5 }, // /s, rad/s: up onto the wheels' surface; /s: the body-on-road roll righting
   // ON THE ROAD: `coyote` s after the last wheel contact the car still counts as on it, while the road (the track
   // frame) is within `reach` m of where its wheels would be
-  road: { coyote: 0.25, reach: 1.5, agree: 0.94, crestReach: 6, edge: 1.5, twistHold: 0.05 }, // twistHold: rad/s of the road's roll past which the car is held on its deck // edge: m past a road's side still on it (the kerb, a wheel over it) // crestReach: m over a road that still goes on and still pulls the car back // agree: cos of the wheels' normal ↔ the road's up (~20°)
+  road: { coyote: 0.25, reach: 1.5, agree: 0.94, crestReach: 6, edge: 1.5, twistHold: 0.05, bankPull: 0 }, // bankPull: the share of a tilted road's sideways slope pull kept (0: none — see _physicsStep) // twistHold: rad/s of the road's roll past which the car is held on its deck // edge: m past a road's side still on it (the kerb, a wheel over it) // crestReach: m over a road that still goes on and still pulls the car back // agree: cos of the wheels' normal ↔ the road's up (~20°)
   // THE STUNT GUIDE (user, 2026-10-29: "in the loop it's clearly uncontrollable" — measured: no input, the car turned
   // 85° off the road's direction inside the loop and wedged on the rail; the loop steps sideways as it goes round, so
   // a car holding its own heading on the surface drifts off it): on a stunt surface (× the stunt gravity), the turn
@@ -65,7 +65,7 @@ export const ARCADE = {
   // Your steering adds on top.
   // …and aimed back toward the middle by `centre` rad per m off it (at most `centreMaxDeg`): the loop's road steps
   // sideways under the car, which ended 6 m off-centre, beside the rail
-  guide: { rate: 4, maxDeg: 50, centre: 0.06, centreMaxDeg: 10 },
+  guide: { rate: 4, maxDeg: 50, centre: 0.06, centreMaxDeg: 10, ffMax: 3 }, // ffMax: rad/s — a faster "turn" is the frame jumping, not the road
   // STUNT SURFACE GRAVITY: the road's up below `from` (its y) → gravity starts turning toward it, fully by `full`;
   // it needs `minSpeed` m/s (a stopped car falls off a wall)
   wall: { from: 0.75, full: 0.45, minSpeed: 10 },
@@ -80,7 +80,9 @@ export const ARCADE = {
   // speed away from it; a car leaving at more than `launch` m/s (a jump pad: 8) is flying on purpose
   // `anticipate` m: on the wheels, the pull grows as the road 0.15 s ahead falls this far under the car's path;
   // `minSpeed` m/s: below it, nothing (a crawl over a crest is not a flight)
-  glue: { g: 3.5, time: 0.8, damp: 10, launch: 7.5, anticipate: 0.6, minSpeed: 15 },
+  // (g 3.5 → 6, damp 10 → 40, 2026-10-31: the slope and platform pieces still hopped 0.07-0.18 s at 240-300 km/h, the
+  // Rollers 0.56 s — now none on the slopes, a 0.4 m skim over the Rollers at 300)
+  glue: { g: 6, time: 0.8, damp: 40, launch: 7.5, anticipate: 0.6, minSpeed: 15 },
   ledge: { reach: 1.6, time: 0.35, rest: 0.0 }, // the ledge catch across a gap: m below, s ahead; rest: the car's middle over the road line when on it
   land: { hold: 0.5, minAir: 0.35, roll: 0.35, rollRate: 12, spin: 0.25, maxDeg: 45 },
   // A CRASH (_crashSolve): from `speed` m/s into a solid (a scrape along a rail stays under it: the corkscrew's press
@@ -107,7 +109,7 @@ export const ARCADE = {
 
 const G = 9.81, DEG = Math.PI / 180;
 const MILD_BANK_Y = Math.cos(30 * DEG);
-const BANK_PIECE = /^bank(ed)?_/; // the bank in / out, banked straight and turns (kit.js): the car is held on their twisting deck // a road tilted less than this is driven as a road, not a stunt surface
+const THROW_PIECE = /kick|launch|flip_ramp|quarter_pipe|cannon|gap_jump|ob_ramp/; // pieces whose rolling deck throws the car on purpose
 const smooth01 =(x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const _com = new THREE.Vector3(), _n = new THREE.Vector3(), _f = new THREE.Vector3(), _r = new THREE.Vector3();
 const _up = new THREE.Vector3(), _tmp = new THREE.Vector3(), _axis = new THREE.Vector3(), _F = new THREE.Vector3();
@@ -308,10 +310,16 @@ export class ArcadeCar extends StuntCar {
       // own direction) the car never moves away from it: its speed off the deck at its place is taken away. (Bumps on a
       // straight road — no roll — still lift it.)
       const twist = tr && roadNear ? this._ff.dot(tr.T) : 0;
-      if (Math.abs(twist) > ARCADE.road.twistHold && BANK_PIECE.test(tr.id ?? "") && down > 0) { // (the bank pieces only: a roll kicker throws the car, as it should)
-        const deckV = _tmp.copy(tr.T).multiplyScalar(twist).cross(_rel.subVectors(body.pos, tr.P)).dot(_roadUp);
-        const away = body.vel.dot(_roadUp) - deckV;
-        if (away > 0) body.vel.addScaledVector(_roadUp, -away);
+      // (every rolling road but the pieces MADE to throw the car — from 2026-10-31: the U-turn wall rolls 0 → 65° in 30 m,
+      // its deck rose under a car at 210 km/h like a kicker and threw it 4.6 m up for 0.64 s, user: "the car was jumping
+      // at the banked where I thought it wasn't supposed to jump". A roll kicker, a flip ramp still throw it.)
+      if (Math.abs(twist) > ARCADE.road.twistHold && !THROW_PIECE.test(tr.id ?? "") && down > 0) {
+        // (against the surface the WHEELS are on: on the U-turn wall's entry the deck under the car climbs 30° where the
+        // frame's middle is level — measured against the frame's up, the car's own speed up the face was taken away, 207 →
+        // 30 km/h in 0.1 s)
+        const deckV = _tmp.copy(tr.T).multiplyScalar(twist).cross(_rel.subVectors(body.pos, tr.P)).dot(surf);
+        const away = body.vel.dot(surf) - deckV;
+        if (away > 0) body.vel.addScaledVector(surf, -away);
       }
 
       // ---- THE LEDGE CATCH (user, 2026-10-30, a road, a GAP, the next road at the same height — Apex Rush does it a lot):
@@ -345,7 +353,11 @@ export class ArcadeCar extends StuntCar {
       // thrown up by a jump pad: glue.launch) is pulled back onto it at up to glue.g, its speed away from it damped.
       // Jumps come from the pieces made for them; real physics flies a 250 km/h car off any crest.
       if (down && !this._subDown) this._glueOK = true;
-      if (!down && this._subDown) this._glueOK = body.vel.dot(surf) < ARCADE.glue.launch;
+      // (…a CREST at speed: the road turns away so fast that the car leaves it already moving off it — Rollers at 300
+      // km/h, 9.4 m/s — read as a launch, it was let go and flew 3 m high, 0.56 s (user, 2026-10-31: "slope pieces …
+      // making the car jump, I thought we added a down force"). The speed the road itself falls away at is added to the
+      // line: a jump pad on a flat road still launches)
+      if (!down && this._subDown) this._glueOK = body.vel.dot(surf) < ARCADE.glue.launch + (roadAhead ? (this._roadFall ?? 0) / 0.15 : 0);
       // THE SPIN IT TAKES OFF WITH is the car's own (a ramp under one side rolls it): kept in the air, fading as the air
       // slows it — only a rotation made with the keys stops when they are released
       if (!down && this._subDown) this._carry.copy(body.angVel).applyQuaternion(_qi.copy(body.quat).invert());
@@ -368,6 +380,17 @@ export class ArcadeCar extends StuntCar {
         stunt *= THREE.MathUtils.clamp((speed - ARCADE.wall.minSpeed) / 8, 0, 1);
       }
       _F.set(0, -G * body.mass * (1 - stunt), 0).addScaledVector(surf, -G * body.mass * stunt);
+      // A BANK DOESN'T PULL THE CAR DOWN IT (user, 2026-10-31: "where the piece banked the car was losing control, like
+      // a force going right by itself"): on a 22° bank the slope's own pull, g·sin 22° = 3.7 m/s² sideways, crept the
+      // car hands-off to the low side at 1.3 m/s — 4 m over a banked straight, a steady steer to hold a line. A tilted
+      // ROAD (a mild bank, a helix, wheels down) presses the car into it; its pull along the road (slopes) stays.
+      if (down > 0 && stunt === 0 && surf.y > MILD_BANK_Y && surf.y < 0.9995) {
+        _tmp.copy(body.vel).addScaledVector(surf, -body.vel.dot(surf));
+        if (_tmp.lengthSq() < 4) _tmp.set(0, 0, 1).applyQuaternion(body.quat).addScaledVector(surf, -_tmp.dot(surf));
+        _axis.crossVectors(surf, _tmp);
+        const k = _axis.lengthSq();
+        if (k > 1e-8) { const side = _F.dot(_axis) / k; _F.addScaledVector(_axis, -side * (1 - ARCADE.road.bankPull)); }
+      }
       this._stickAcc = pressed && speed > ARCADE.stick.minSpeed ? Math.min(ARCADE.stick.max, ARCADE.stick.k * speed * speed) : 0;
       if (this._stickAcc) _F.addScaledVector(surf, -this._stickAcc * body.mass);
       if (glue) {
@@ -445,12 +468,15 @@ export class ArcadeCar extends StuntCar {
   _roadAhead(body) {
     const ahead = _rel.copy(body.pos).addScaledVector(body.vel, 0.15);
     const tr = this.trackAt?.(ahead);
-    if (!tr || tr.end || tr.start) { this._aheadAbove = 0; this.trackAt(body.pos); return false; } // (start: short of a landing across a gap)
+    if (!tr || tr.end || tr.start) { this._aheadAbove = 0; this._roadFall = 0; this.trackAt(body.pos); return false; } // (start: short of a landing across a gap)
     // (the road GOES ON there: a crest's road falls away under the car — "too far above it" called that a lip, and
     // at 200 km/h the slope-down piece threw the car 120 m: user's Tilted landing test, 2026-10-29. Only how far
     // ABOVE the road counts as a flight: past a few metres the car really has left it)
     const rel = ahead.sub(tr.P), along = rel.dot(tr.U), across = Math.sqrt(Math.max(0, rel.lengthSq() - along * along));
-    this.trackAt(body.pos); // (back to where the car is: trackAt searches round its last match)
+    _pa.copy(tr.P);
+    const now = this.trackAt(body.pos); // (back to where the car is: trackAt searches round its last match)
+    // (how far the ROAD itself falls below its own plane here, 0.15 s on: a crest's, not the car's height over it)
+    this._roadFall = now ? Math.max(0, -_pa.sub(now.P).dot(now.U)) : 0;
     this._aheadAbove = along; // (m the car's path is above the road 0.15 s ahead: a crest falling away)
     return along > -1.5 && along < ARCADE.road.crestReach && across < (tr.hw ?? 12) + ARCADE.road.edge;
   }
@@ -634,16 +660,26 @@ export class ArcadeCar extends StuntCar {
       if (Math.abs(want) > pathRate) want = Math.sign(want) * THREE.MathUtils.lerp(Math.abs(want), pathRate, h);
     }
     // the stunt guide: toward the road's own direction (its forward laid on the surface the wheels are on)
+    // (…and it TURNS WITH the road (feed-forward): the error alone lagged a road turning fast under the car — the Sky
+    // loop's roof steps 28 m sideways in 70 m, the car trailed it by 31°, crabbed and lifted at the top: user 2026-10-31,
+    // "driving on it is not smooth". The road's own turn rate on the surface is added, the error only corrects the rest)
+    let guided = false, ffYaw = 0;
     if (tr && vF > 5) {
       _tmp.copy(tr.T).addScaledVector(surf, -tr.T.dot(surf));
       if (_tmp.lengthSq() > 1e-6) {
         _tmp.normalize();
+        if (this._guideT) {
+          const roadTurn = _axis.crossVectors(this._guideT, _tmp).dot(surf) / dt;
+          if (Math.abs(roadTurn) < ARCADE.guide.ffMax) ffYaw = roadTurn * stunt; // (added past the steering's lag, below)
+        } else this._guideT = new THREE.Vector3();
+        this._guideT.copy(_tmp); guided = true;
         const Gd = ARCADE.guide, head = Math.atan2(_axis.crossVectors(_f, _tmp).dot(surf), _f.dot(_tmp));
         const side = _axis.subVectors(body.pos, tr.P).dot(_r); // (+ = left of the middle)
         const aim = head - THREE.MathUtils.clamp(side * Gd.centre, -Gd.centreMaxDeg * DEG, Gd.centreMaxDeg * DEG);
         if (Math.abs(head) < Gd.maxDeg * DEG) want += aim * Gd.rate * stunt;
       }
     }
+    if (!guided) this._guideT = null;
     // A RAIL GLANCES THE CAR OFF (user, 2026-10-29: "the car gets magnet and a bit stuck on the guardrail"): a graze
     // laid the car flush along the rail and the grip, which takes every sideways speed away, held it there — the rail
     // stopped it going in, the grip stopped it coming off (measured: 3° into the rail at 200 km/h, then the wheel
@@ -660,7 +696,11 @@ export class ArcadeCar extends StuntCar {
     const cur = body.angVel.dot(surf);
     // (after a crash: the spin it was given winds down; the steering takes over again after crash.loose s)
     const loose = this._crashT > 0, Cr = ARCADE.crash;
-    const yaw = loose ? cur * Math.exp(-Cr.looseYawDecay * dt) : cur + (want - cur) * (1 - Math.exp(-S.response * dt));
+    // (the road's own turn goes straight onto the car, past the steering's lag: through that lag (response 9/s) a road
+    // turning 1.7 rad/s was trailed by 1 rad/s — 14° behind it within 0.25 s on the Sky loop's roof)
+    const base = cur - (this._ffYaw ?? 0);
+    const yaw = loose ? cur * Math.exp(-Cr.looseYawDecay * dt) : base + (want - base) * (1 - Math.exp(-S.response * dt)) + ffYaw;
+    this._ffYaw = loose ? 0 : ffYaw;
     // the up onto the surface: both axes on ≥ 2 wheels; on the roll axis only with the body on the road (no wheels)
     _up.set(0, 1, 0).applyQuaternion(body.quat);
     _w.set(0, 0, 0);

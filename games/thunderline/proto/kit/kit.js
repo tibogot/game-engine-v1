@@ -115,6 +115,10 @@ export function integrate(tile, opts = {}) {
   let segEnd = 0;
   const ends = tile.segs.map((g) => (segEnd += g.L));
   for (const r of rings) if (tile.segs[r.seg]?.gap && r.s < ends[r.seg] - 1e-6) r.air = true;
+  // (…and the ring where the road starts again is marked: a straight gap integrated coarsely has NO ring inside it —
+  // the Sky loop's 12 m holes at maxGap 16: the ride ran straight across them, the car was held onto a road that
+  // wasn't there and pulled into the hole, user 2026-10-31 "the gap makes the car want to fall inside")
+  for (const r of rings) if (tile.segs[r.seg]?.gap && r.s >= ends[r.seg] - 1e-6) r.afterGap = true;
   return { rings, exit, L: s };
 }
 
@@ -491,7 +495,10 @@ export const TILES = {
   half_loop_28: { label: "Half loop + roll", segs: [{ L: Math.PI * 28 + 50, pitch: Math.PI, ramp: 25 }, { L: 96, roll: Math.PI, ramp: 48 }], roadHold: true, twistPivot: 0.9 },
   // U-TURN WALL (the "C" at a road's end): a tight 180° banked up to 65° — the car rides up the wall
   // and comes round onto a road beside the way in
-  uturn_wall_32: { label: "U-turn wall", segs: [{ L: turnLen(32, Math.PI, 30), turn: Math.PI, ramp: 30, bank: 65 * DEG }] },
+  // (rolled round the car's line like the wall rides — banked about its low edge, its middle rose ~11 m over the 30 m
+  // ramp: a hump that threw a car at 210 km/h 4.6 m up and stalled one at 80 — user 2026-10-31, "the car was jumping
+  // at the banked". The exit is where it was.)
+  uturn_wall_32: { label: "U-turn wall", twistPivot: WALL_PIVOT, segs: [{ L: turnLen(32, Math.PI, 30), turn: Math.PI, ramp: 30, bank: 65 * DEG }] },
   slope_up_12: { label: "Slope up ~12 m", segs: [{ L: 48, pitch: 15 * DEG, ramp: 24 }, { L: 48, pitch: -15 * DEG, ramp: 24 }] },
   // HELIX (PIECES §7c, "use height" on small maps): a full circle (R 56) that climbs or drops 20 m over
   // itself — the exit runs on, in the entry's heading, 20 m above / below it. Banked with the curvature

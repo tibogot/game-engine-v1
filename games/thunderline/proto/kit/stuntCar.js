@@ -143,7 +143,7 @@ export function trackFromRide(ride) {
   // jolted at every bank out — user, 2026-10-30, "it's shifting the car in one short instant". Under 1 m across a join,
   // the next piece's point goes.)
   // (the gaps: a piece starting > 2 m from where the one before it ended — marked before the joins are thinned below)
-  ride.forEach((r, i) => { const q = ride[i - 1]; if (q && !r.air && (q.air || ((r.piece ?? r.uid) !== undefined && (r.piece ?? r.uid) !== (q.piece ?? q.uid) && q.P.distanceToSquared(r.P) > 4))) r._gapBefore = true; }); // (…and a hole INSIDE a piece — the Gap jump's: road after flight points; read as road, the glue pulled the car into it at the lip)
+  ride.forEach((r, i) => { const q = ride[i - 1]; if (q && !r.air && (q.air || r.gap || ((r.piece ?? r.uid) !== undefined && (r.piece ?? r.uid) !== (q.piece ?? q.uid) && q.P.distanceToSquared(r.P) > 4))) r._gapBefore = true; }); // (…and a hole INSIDE a piece — the Gap jump's: road after flight points; read as road, the glue pulled the car into it at the lip)
   const src = ride.filter((r) => !r.air && r.U).filter((r, i, all) => {
     if (i === 0) return true;
     const d2 = all[i - 1].P.distanceToSquared(r.P);
@@ -203,10 +203,20 @@ const COS15 = Math.cos(15 * Math.PI / 180);
 // (A GAP between two pieces is never road, however straight: a road ended, a gap, the next road 40 m on and 4 m lower read
 // as one gentle slope — the glue pulled the car down onto it, the nose followed it, the car fell under the landing,
 // user 2026-10-30 "instead of landing on it, it's putting its nose very down". Pieces that join sit within centimetres.)
+// (…measured with the SIDEWAYS part of the chord taken out: a loop steps 28 m sideways over its climb, but a ring's T
+// is the path's without that step — near the top of the Loop / Sky loop the chord ran 15-30° off it, every point was
+// "no road on", the frame stopped interpolating and turned 14° in one step: user 2026-10-31, the Sky loop "not smooth".
+// A jump's flight leaves the road in PITCH, which this still sees; a sideways gap is a different piece: _gapBefore.)
+const _side = new THREE.Vector3(), _seg = new THREE.Vector3();
 function isRoad(a, c, seg, L2) {
   if (c._gapBefore) return false; // (marked by trackFromRide on the ride as built, before its joins are thinned)
-  const L = Math.sqrt(L2);
-  return seg.dot(a.T) / L > COS15 && seg.dot(c.T) / L > COS15;
+  let s = seg, L = Math.sqrt(L2);
+  if (a.U) {
+    _side.crossVectors(a.T, a.U);
+    const k = _side.lengthSq();
+    if (k > 1e-8) { s = _seg.copy(seg).addScaledVector(_side, -seg.dot(_side) / k); L = s.length(); if (L < 1e-6) return false; }
+  }
+  return s.dot(a.T) / L > COS15 && s.dot(c.T) / L > COS15;
 }
 /** The road's direction at a point: the nearest ride point's tangent (a take-off happens rarely: a plain scan). */
 export function roadDirFromRide(ride) {
