@@ -85,6 +85,7 @@ def surfaceClass(nm):
     n = nm.split(".")[0].lower()
     raw = nm.split(".")[0]
     if n.startswith("render") or "plaster" in n or n.startswith("lime"): return 1
+    if n.startswith("wash") or n.endswith("wash"): return 1   # (the port's lime washes — washCream, churchWash: 2026-10-31)
     if raw.startswith("earth") and len(raw) > 5 and raw[5].isupper(): return 1   # (the M'zab's earth renders: earthOchre…; "earth" alone is ground)
     if n == "terracewall": return 2
     if n in ("stone", "rubble") or "stone" in n or "masonry" in n: return 2

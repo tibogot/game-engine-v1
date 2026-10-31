@@ -56,10 +56,12 @@ if (!flag("--merge")) {
   let tb = false;   // (a traceback printed whole: its File lines say where)
   for (const line of out.split(/\r?\n/)) {
     if (/^Traceback/.test(line)) tb = true;
-    if (tb || /^(TRIS|BAKE|MIPCHECK|FARFROM|THIN|UVFIT|SHARED|TIME|UVZERO|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
+    if (tb || /^(TRIS|BAKE|MIPCHECK|FARFROM|THIN|UVFIT|SHARED|TIME|UVZERO|GROUNDZ|Error)|Error:|DONE/.test(line)) console.log(`  ${line}`);
     const mc = /^MIPCHECK (\S+) (\S+) (\S+) ([\d.]+)/.exec(line);
     if (mc && !flag("--quick") && +mc[4] > MIP_BAR) blenderBad.push(`${mc[2]}: ${mc[3]} ${mc[4]}`);
     if (/^BAKEBLACK/.test(line)) blenderBad.push(line);
+    const gz = /^GROUNDZ \S+ (\S+) (\d+)/.exec(line);
+    if (gz && +gz[2] > 0) blenderBad.push(`${gz[1]}: ${gz[2]} faces at the ground${String.fromCharCode(39)}s height (z-fight the terrain)`);
     const uz = /^UVZERO final (\S+) (\d+)/.exec(line);
     if (uz && +uz[2] > 0) blenderBad.push(`${uz[1]}: ${uz[2]} faces unwrapped to a line`);
   }

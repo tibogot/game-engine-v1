@@ -48,7 +48,7 @@ def cleanJoin(self, name, objs):
 bkit.Kit.join = cleanJoin
 
 # ── Materials ────────────────────────────────────────────────────────────────
-def wash(tint, foot=0x8a8070):
+def wash(tint, foot=0x8a8070, peel=0.668):
     """A LIME WASH over rubble: the plaster photo pulled to its colour, uneven; fallen off in patches (the stone under
     it); grey rain streaks; the foot greyed by splash and salt."""
     def f(nb):
@@ -56,8 +56,8 @@ def wash(tint, foot=0x8a8070):
         c = nb.mix(0.6, c, srgb(tint))
         c = nb.scale(c, nb.mr(nb.noise(0.6, 4), 0.3, 0.7, 0.84, 1.04))
         stone = nb.img("build/rabdentse_ruins_wall/rabdentse_ruins_wall_diff_1k.jpg", 0.45)
-        peel = nb.mr(nb.noise(1.7, 8, 0.66, (1, 1, 1), (1.3, 0, 4.4)), 0.668, 0.69)
-        c = nb.mix(peel, c, stone)
+        peel_ = nb.mr(nb.noise(1.7, 8, 0.66, (1, 1, 1), (1.3, 0, 4.4)), peel, peel + 0.022)
+        c = nb.mix(peel_, c, stone)
         streak = nb.math("MULTIPLY", nb.mr(nb.noise(3.2, 5, 0.6, (9, 9, 0.45)), 0.5, 0.7), 0.45)
         c = nb.mix(streak, c, srgb(0x9a9286))
         c = nb.mix(nb.math("MULTIPLY", nb.mr(nb.gy, 1.2, 0.1), 0.55), c, srgb(foot))
@@ -129,13 +129,17 @@ def opening(K, R, spec, wall, kind, x, y0, state, nth, z0, joinery=True, far=Fal
         y0 += 0.85 if y0 < 1 else 0.55
     x0, x1, y1 = x - w / 2, x + w / 2, y0 + h
     # (a ruin's openings right through its hollow walls: the room seen through them)
-    K.boolean(wall, K.cutter(x0, x1, y0, y1, z0 - 0.5, z0 + (T + 0.3 if state == "ruin" else 0.22), "dark"))
+    # (a ground-floor opening cut from 15 cm up, its STONE THRESHOLD under it to the back of the reveal: cut from the ground,
+    # its floor lay at the terrain's height and z-fought it — the café, then the church; the GROUNDZ gate now)
+    yc = 0.15 if y0 < 0.05 else y0
+    K.boolean(wall, K.cutter(x0, x1, yc, y1, z0 - 0.5, z0 + (T + 0.3 if state == "ruin" else 0.22), "dark"))
+    if y0 < 0.05: K.box(f"Threshold{nth}", x0 - 0.04, x1 + 0.04, -0.3, 0.16, z0 - 0.06, z0 + 0.24, "dressedStone", G, 0.01)
     if not joinery: return
     back = z0 + 0.2
     if kind in ("door",):
-        K.box(f"Door{nth}", x0 + 0.02, x1 - 0.02, y0, y1 - 0.02, back - 0.06, back, spec["door"], G, 0.005)
+        K.box(f"Door{nth}", x0 + 0.02, x1 - 0.02, 0.17, y1 - 0.02, back - 0.06, back, spec["door"], G, 0.005)
         K.box(f"Fan{nth}", x0 + 0.05, x1 - 0.05, y1 - 0.55, y1 - 0.08, back - 0.08, back - 0.06, "glass", G, 0)
-        K.box(f"Step{nth}", x0 - 0.15, x1 + 0.15, -0.3, 0.12, z0 - 0.45, z0 + 0.05, "dressedStone", G, 0.02)
+        K.box(f"Step{nth}", x0 - 0.15, x1 + 0.15, -0.3, 0.12, z0 - 0.45, z0 - 0.04, "dressedStone", G, 0.02)
         K.box(f"Surround{nth}", x0 - 0.18, x1 + 0.18, y1 - 0.02, y1 + 0.22, z0 - 0.04, z0 + 0.04, "dressedStone", G, 0.01)   # (the lintel stone)
         return
     # the glazing: dark panes behind a white frame and glazing bars
@@ -151,7 +155,7 @@ def opening(K, R, spec, wall, kind, x, y0, state, nth, z0, joinery=True, far=Fal
     if kind == "shop":   # a shopfront: its stall riser, no shutters
         K.box(f"Riser{nth}", x0, x1, 0.0, 0.6, back - 0.08, back - 0.02, spec["door"], G, 0.005)
         # its stone THRESHOLD: the opening's floor was the ground's height — the two flickered (you, 2026-10-30, the café)
-        K.box(f"ShopSill{nth}", x0 - 0.06, x1 + 0.06, -0.3, 0.09, z0 - 0.14, back - 0.1, "dressedStone", G, 0.015)
+        K.box(f"ShopSill{nth}", x0 - 0.06, x1 + 0.06, -0.3, 0.09, z0 - 0.14, z0 - 0.08, "dressedStone", G, 0.015)
         return
     if kind != "balc":   # the stone sill, proud
         K.box(f"Sill{nth}", x0 - 0.08, x1 + 0.08, y0 - 0.1, y0 - 0.02, z0 - 0.09, z0 + 0.05, "sill", G, 0.01)
@@ -317,11 +321,13 @@ def buildHouse(K, name, spec, state, seed, far=False):
 # one open on the dark inside, one ajar; small barred windows high on the back; a low canal-tile roof; a stone loading
 # step along the doors. States as the houses: damaged (shell holes, the roof holed, a door torn off), ruin (the roof gone,
 # the walls broken off ragged, rubble and charred trusses inside).
-def quoins(K, R, x, z, sx, sz, H, nm, bev=0.012):
+def quoins(K, R, x, z, sx, sz, H, nm, bev=0.012, avoid=()):
     """Dressed long-and-short blocks up a corner at (x, z), proud of both faces it turns (sx, sz: which way out)."""
-    G = "h"; y, k = -0.3, 0
+    G = "h"; y, k = -0.42, 0   # (from -0.3, the first stone's top fell at the ground's height: z-fought the terrain — the GROUNDZ gate)
     while y < H - 0.25:
         h = 0.32 + R.uniform(-0.02, 0.02); L = 0.55 if k % 2 else 0.32
+        for a in avoid:   # (a stone's top or foot never level with a course it meets — the string's top and a quoin's fell at one height: the gate)
+            if abs(y + h - 0.012 - a) < 0.02 or abs(y + h - a) < 0.02: h += 0.045
         # (along X: L from the corner, 5 cm proud of the face at z; along Z: the short side)
         ax0, ax1 = (x - L, x + 0.04) if sx > 0 else (x - 0.04, x + L)
         K.box(f"{nm}{k}x", ax0, ax1, y, y + h - 0.012, (z - 0.05) if sz < 0 else z, z if sz < 0 else (z + 0.05), "dressedStone", G, bev)
@@ -705,7 +711,7 @@ def buildBarque(K, name, spec, state, seed, far=False):
     lathe(K, "Reflector", [(0.06, tip[1] - 0.05), (0.32, tip[1] - 0.3), (0.34, tip[1] - 0.32), (0.08, tip[1] - 0.02)], (tip[0], tip[2]), "reflector", n=14)   # (galvanised: black, it read as a hole)
     lathe(K, "Globe", [(0.0, tip[1] - 0.48), (0.12, tip[1] - 0.42), (0.15, tip[1] - 0.32), (0.1, tip[1] - 0.2), (0.0, tip[1] - 0.18)], (tip[0], tip[2]), "lampGlass", n=12)
     for s in (-1, 1): K.rod(f"Oar{s}", (-2.0, SHEER - 0.05, s * 0.55), (2.3, SHEER - 0.02, s * 0.5), 0.028, "varnish", G, 6)
-    K.lump("Net", (-0.8, KEEL + 0.16, 0.0), (0.85, 0.32, 0.55), "net", G, seed=seed + 4, rough=0.35, sub=3)
+    K.lump("Net", (-0.8, KEEL + 0.19, 0.0), (0.85, 0.32, 0.55), "net", G, seed=seed + 4, rough=0.35, sub=3)
     for k in range(5):   # the net\x27s cork floats along its edge
         K.lump(f"Cork{k}", (-1.4 + k * 0.3, KEEL + 0.38 + R.uniform(-0.03, 0.04), 0.5 - k * 0.05), (0.06, 0.04, 0.06), "woodDark", G, seed=seed + 10 + k, rough=0.1, sub=1)
 
@@ -840,8 +846,68 @@ TYPES["filets"] = dict(builder=buildFilets, states=["intact"], autoLod=True, atl
 def slate(nb):
     c = nb.mix(nb.noise(6.0, 4), srgb(0x3b4046), srgb(0x535a60))
     return nb.mix(nb.math("MULTIPLY", nb.mr(nb.noise(18.0, 3, 0.6, stretch=(1, 1, 0.2)), 0.6, 0.7), 0.5), c, srgb(0x6b6f6a))
-MATDEF.update({"churchWash": (0.95, wash(0xc4b69c, foot=0x7c705e)), "slate": (0.6, slate), "clockFace": (0.6, flat(srgb(0xe8e2d2))),
+# (churchWash: the render fallen in big patches, the rubble stone shows — a flat wash read cheap)
+MATDEF.update({"churchWash": (0.95, wash(0xc4b69c, foot=0x7c705e, peel=0.61)), "slate": (0.6, slate), "clockFace": (0.6, flat(srgb(0xe8e2d2))),
                "louvre": (0.8, paintedWood(0x4a3a2a))})
+
+
+# ── THE CHURCH'S DRESSING (2026-10-31, you: "church could be way better … looks too cheap"): what makes the postcard's church a
+# church — the dressed STONE round every arch (voussoirs, a keystone, the jambs long-and-short, a sill), BUTTRESSES between
+# the aisles' windows, a PLINTH course round its foot, CORNICES under the eaves, the door\x27s stepped ARCHIVOLT and its steps.
+def hullPrism(K, nm, pts, mat):
+    """A convex solid through the given game points (bmesh convex hull)."""
+    bm = bmesh.new(); vs = [bm.verts.new(B(*p)) for p in pts]
+    bmesh.ops.convex_hull(bm, input=vs)
+    for v in [v for v in bm.verts if not v.link_faces]: bm.verts.remove(v)
+    bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+    return K.obj(nm, bm, mat, "h")
+
+def onFace(face, u, y, d):
+    """A face's local point -> game point. face ("x", X, out) the plane x = X, its outside toward x * out, u along z;
+    ("z", Z, out) the plane z = Z, u along x. d: out from the face."""
+    ax, P, out = face
+    return (P + out * d, y, u) if ax == "x" else (u, y, P + out * d)
+
+def archSurround(K, R, face, u, y0, ys, w, nm, depth=0.09, ring=0.26, sill=True, mat="dressedStone"):
+    """The dressed stone round a round-headed opening (its sides from y0 to the springing ys, w wide, its centre u): nine
+    VOUSSOIRS on the arch, the KEYSTONE proud and taller, the JAMBS long-and-short, a SILL (windows). Each piece 1.2 cm out from
+    the opening\x27s edge (never in the plane of the cut reveal), into the wall 2 cm, `depth` proud of it."""
+    r = w / 2 + 0.012; n = 9
+    for k in range(n):
+        a0, a1 = math.pi * k / n + 0.006, math.pi * (k + 1) / n - 0.006
+        ro = r + ring + (0.08 if k == n // 2 else 0.0); dp = depth + (0.03 if k == n // 2 else 0.0)
+        pts = []
+        for a in (a0, a1):
+            for rr in (r, ro):
+                for d in (-0.02, dp): pts.append(onFace(face, u + rr * math.cos(a), ys + rr * math.sin(a), d))
+        hullPrism(K, f"{nm}V{k}", pts, mat)
+    for side in (-1, 1):
+        y, k = y0 + (0.02 if sill else 0.0), 0
+        while y < ys - 0.08:
+            h = min(0.36 + R.uniform(-0.03, 0.03), ys - y); wd = 0.36 if k % 2 == 0 else 0.22
+            a, b = u + side * r, u + side * (r + wd)
+            pts = [onFace(face, uu, yy, d) for uu in (a, b) for yy in (y + 0.006, y + h - 0.006) for d in (-0.02, depth)]
+            hullPrism(K, f"{nm}J{side}{k}", pts, mat)
+            y += h; k += 1
+    if sill:
+        pts = [onFace(face, uu, yy, d) for uu in (u - r - 0.16, u + r + 0.16) for yy in (y0 - 0.15, y0 + 0.012) for d in (-0.02, depth + 0.07)]
+        hullPrism(K, f"{nm}Sill", pts, mat)
+
+def leaded(K, face, u, y0, ys, w, nm, back):
+    """A church window\x27s iron tracery: a mullion, two transoms, the arch\x27s ring — on the glass, `back` in from the face."""
+    G = "h"; r = w / 2
+    K.rod(f"{nm}Mul", onFace(face, u, y0, -back + 0.015), onFace(face, u, ys + r * 0.95, -back + 0.015), 0.018, "castIron", G, 4)
+    for f in (0.35, 0.7): K.rod(f"{nm}Tr{f}", onFace(face, u - r, y0 + (ys - y0) * f, -back + 0.015), onFace(face, u + r, y0 + (ys - y0) * f, -back + 0.015), 0.014, "castIron", G, 4)
+    pts = [onFace(face, u + r * 0.98 * math.cos(math.pi * k / 8), ys + r * 0.98 * math.sin(math.pi * k / 8), -back + 0.015) for k in range(9)]
+    for k in range(8): K.rod(f"{nm}Ar{k}", pts[k], pts[k + 1], 0.016, "castIron", G, 4)
+
+def buttress(K, x, Z, s, h, nm, mat="churchWash"):
+    """A stepped BUTTRESS against the wall z = Z (its outside toward z * s): 0.7 wide, 0.7 deep at its foot, its top sloping
+    back into the wall; its stone weathering cap."""
+    pts = [(x + dx, y, Z + s * dz) for dx in (-0.35, 0.35) for (y, dz) in ((-0.4, -0.05), (-0.4, 0.72), (h - 1.2, 0.72), (h, -0.05))]
+    hullPrism(K, nm, pts, mat)
+    cap = [(x + dx, y, Z + s * dz) for dx in (-0.39, 0.39) for (y, dz) in ((h - 1.24, 0.78), (h - 1.14, 0.78), (h + 0.04, -0.04), (h - 0.08, -0.04))]
+    hullPrism(K, nm + "Cap", cap, "dressedStone")
 
 def buildEglise(K, name, spec, state, seed, far=False):
     R = random.Random(seed); G = "h"; dmg, ruin = state != "intact", state == "ruin"
@@ -869,7 +935,7 @@ def buildEglise(K, name, spec, state, seed, far=False):
         K.member(nm, (x - 0.25, NH - 0.01, 0.0), (x + 0.25, NH - 0.01, 0.0), [(-NW, 0.0), (NW, 0.0), (0.0, NW * math.tan(0.5) - 0.05)], "churchWash", G, up=(0, 1, 0))
     # THE OPENINGS — the door, the window over it, the clock\'s round, the belfry's twin lancets on each face; the aisles'
     # windows down their sides and on their fronts
-    K.boolean(tower, K.arch(-0.95, 0.95, 0.0, 2.9, TX0 - 0.5, TX0 + 0.45, "dark", across="x"))
+    K.boolean(tower, K.arch(-0.95, 0.95, 0.2, 2.9, TX0 - 0.5, TX0 + 0.45, "dark", across="x"))   # (from 20 cm: from the ground, its floor z-fought the terrain — the GROUNDZ gate)
     K.boolean(tower, K.arch(-0.6, 0.6, 5.2, 7.3, TX0 - 0.5, TX0 + 0.3, "dark", across="x"))
     for (fx, across, d0, d1) in ((None, "x", TX0 - 0.5, TX0 + 0.35), (None, "x", TX1 - 0.35, TX1 + 0.5)):
         for u in (-0.55, 0.55): K.boolean(tower, K.arch(u - 0.32, u + 0.32, 13.0, 15.3, d0, d1, "dark", across="x"))
@@ -883,17 +949,66 @@ def buildEglise(K, name, spec, state, seed, far=False):
             dw = AW + 0.4 if ruin else 0.5   # (a ruin's right through: its recess's back met the broken top in a sliver — the gate)
             K.boolean(a, K.arch(x - 0.55, x + 0.55, 1.6, 3.9, min(zf - s * dw, zf + s * 0.3), max(zf - s * dw, zf + s * 0.3), "dark"))
         K.boolean(a, K.arch(s * (NW + AW / 2) - 0.6, s * (NW + AW / 2) + 0.6, 1.6, 3.9, NX0 - 1.1, NX0 - 0.3, "dark", across="x"))
+        # THE BACK too (you: "at its back the texture looks cheap" — blank walls): the aisles' back windows
+        K.boolean(a, K.arch(s * (NW + AW / 2) - 0.55, s * (NW + AW / 2) + 0.55, 1.6, 3.9, NX1 - 0.6 if not ruin else NX1 - AW, NX1 + 0.3, "dark", across="x"))
+    # the nave's tall back window
+    K.boolean(nave, K.arch(-0.65, 0.65, 4.4, 6.9, NX1 - (0.3 if not ruin else 1.0), NX1 + 0.5, "dark", across="x"))
+    k_of = lambda wx: round((wx - NX0 - 2.6) / 3.6)
+    # THE DRESSING (the plinth, the arches' stone, the leading, the buttresses, the cornices, the door's steps)
+    for s in (-1, 1):
+        K.box(f"PlinthS{s}", NX0 - 0.6, NX1 - 0.3, -0.4, 0.55, *sorted((s * (ZO - 0.02), s * (ZO + 0.08))), "dressedStone", G, 0.01)
+        K.box(f"PlinthF{s}", NX0 - 0.68, NX0 - 0.58, -0.4, 0.61, *sorted((s * NW, s * (ZO + 0.08))), "dressedStone", G, 0.01)
+        K.box(f"PlinthT{s}", TX0, TX1 + 0.05, -0.4, 0.55, *sorted((s * (TW - 0.02), s * (TW + 0.08))), "dressedStone", G, 0.01)
+    # (plinths meeting: their tops 5 cm apart — 1 cm apart, autoLod's 1.5 cm budget merged them into one plane, the gate)
+    pt = K.box("PlinthTF", TX0 - 0.08, TX0 + 0.02, -0.4, 0.61, -TW - 0.08, TW + 0.08, "dressedStone", G, 0.01)
+    K.boolean(pt, K.arch(-0.95, 0.95, 0.2, 2.9, TX0 - 0.5, TX0 + 0.45, "dark", across="x"))
+    for k in range(3):   # the door's steps, the top one its threshold into the doorway
+        K.box(f"DoorStep{k}", TX0 - 0.95 + k * 0.32, TX0 + (0.3 if k == 2 else -0.0), -0.4, 0.07 + k * 0.065, -1.35 + k * 0.1, 1.35 - k * 0.1, "dressedStone", G, 0.015)
+    archSurround(K, R, ("x", TX0, -1), 0.0, 0.2, 2.9, 1.9, "SrDoor", depth=0.12, ring=0.34, sill=False)
+    archSurround(K, R, ("x", TX0, -1), 0.0, 5.2, 7.3, 1.2, "SrWinT")
+    if not ruin:
+        for s in (-1, 1):
+            for k in range(4):
+                wx = NX0 + 2.6 + k * 3.6
+                if not (dmg and s > 0 and k == 1): archSurround(K, R, ("z", s * ZO, s), wx, 1.6, 3.9, 1.1, f"SrW{s}{k}")
+            archSurround(K, R, ("x", NX0 - 0.6, -1), s * (NW + AW / 2), 1.6, 3.9, 1.2, f"SrWF{s}")
+            for k in range(1, 4): buttress(K, NX0 + 0.8 + k * 3.6, s * ZO, s, AH - 0.6, f"Butt{s}{k}")
+            K.box(f"CorniceA{s}", NX0 - 0.62, NX1 - 0.28, AH - 0.22, AH - 0.02, *sorted((s * (ZO - 0.03), s * (ZO + 0.15))), "dressedStone", G, 0.015)
+            K.box(f"CorniceN{s}", NX0 + 0.02, NX1 - 0.02, NH - 0.2, NH - 0.02, *sorted((s * (NW - 0.03), s * (NW + 0.13))), "dressedStone", G, 0.015)
+            # the back: the aisles' windows dressed, their plinth, the nave's corners quoined over the aisles' roofs
+            archSurround(K, R, ("x", NX1 - 0.3, 1), s * (NW + AW / 2), 1.6, 3.9, 1.1, f"SrWB{s}")
+            K.box(f"PlinthB{s}", NX1 - 0.32, NX1 - 0.22, -0.4, 0.61, *sorted((s * NW, s * (ZO + 0.08))), "dressedStone", G, 0.01)
+            quoins(K, R, NX1, s * NW, 1, s, NH, f"QN{s}", bev=0)
+        archSurround(K, R, ("x", NX1, 1), 0.0, 4.4, 6.9, 1.3, "SrWN")
+        K.box("PlinthBN", NX1 - 0.02, NX1 + 0.08, -0.4, 0.67, -NW + 0.01, NW - 0.01, "dressedStone", G, 0.01)
+        # the OCULUS in the back gable: a dark round in its ring of voussoirs
+        oc = (0.0, NH + 0.75); gx = NX1 + 0.25
+        lathe(K, "OculusGlass", [(0.0, -0.01), (0.42, -0.01), (0.42, 0.01), (0.0, 0.01)], (0.0, 0.0), "glass", n=20)
+        K.groups[G][-1].rotation_euler = (0.0, math.pi / 2, 0.0); K.groups[G][-1].location = B(gx + 0.005, oc[1], oc[0])
+        for k in range(14):
+            a0, a1 = 2 * math.pi * k / 14 + 0.01, 2 * math.pi * (k + 1) / 14 - 0.01
+            pts = [onFace(("x", gx, 1), oc[0] + rr * math.cos(a), oc[1] + rr * math.sin(a), d) for a in (a0, a1) for rr in (0.43, 0.68) for d in (-0.02, 0.08)]
+            hullPrism(K, f"OcV{k}", pts, "dressedStone")
     # the glazing: leaded panes behind iron bars, set in the reveals (not in a ruin)
     if not ruin:
-        K.box("DoorLeaf", TX0 + 0.3, TX0 + 0.36, 0.0, 3.85, -0.94, 0.94, "woodDark", G, 0.005)
-        K.box("DoorSplit", TX0 + 0.28, TX0 + 0.3, 0.0, 3.4, -0.02, 0.02, "dark", G, 0)
+        K.box("DoorLeaf", TX0 + 0.3, TX0 + 0.36, 0.21, 3.85, -0.94, 0.94, "woodDark", G, 0.005)
+        K.box("DoorSplit", TX0 + 0.28, TX0 + 0.3, 0.21, 3.4, -0.02, 0.02, "dark", G, 0)
         K.box("WinT", TX0 + 0.26, TX0 + 0.28, 5.2, 7.85, -0.6, 0.6, "glass", G, 0)
-        for k in range(3): K.rod(f"WinTBar{k}", (TX0 + 0.24, 5.2, -0.3 + k * 0.3), (TX0 + 0.24, 7.6, -0.3 + k * 0.3), 0.02, "castIron", G, 4)
+        leaded(K, ("x", TX0, -1), 0.0, 5.2, 7.3, 1.2, "LdT", 0.26)
+        K.box("WinN", NX1 - 0.28, NX1 - 0.26, 4.4, 7.55, -0.65, 0.65, "glass", G, 0)
+        leaded(K, ("x", NX1, 1), 0.0, 4.4, 6.9, 1.3, "LdN", 0.26)
+        for s in (-1, 1):
+            leaded(K, ("x", NX0 - 0.6, -1), s * (NW + AW / 2), 1.6, 3.9, 1.2, f"LdF{s}", 0.26)
+            for k in range(4):
+                if not (dmg and s > 0 and k == 1): leaded(K, ("z", s * ZO, s), NX0 + 2.6 + k * 3.6, 1.6, 3.9, 1.1, f"Ld{s}{k}", 0.26)
         for (wx, wz, nx_, s_) in [(NX0 + 2.6 + k * 3.6, s * ZO, 0, s) for s in (-1, 1) for k in range(4)]:
+            if dmg and s_ > 0 and k_of(wx) == 1: continue   # (the shell hole there)
             zz = wz - s_ * 0.26
             K.box(f"Win{wx:.1f}{s_}", wx - 0.55, wx + 0.55, 1.6, 4.45, min(zz, zz + s_ * 0.02), max(zz, zz + s_ * 0.02), "glass", G, 0)
         for s in (-1, 1):
-            K.box(f"WinFront{s}", NX0 - 0.86, NX0 - 0.84, 1.6, 4.5, s * (NW + AW / 2) - 0.6, s * (NW + AW / 2) + 0.6, "glass", G, 0)
+            K.box(f"WinBack{s}", NX1 - 0.57, NX1 - 0.55, 1.6, 4.45, s * (NW + AW / 2) - 0.55, s * (NW + AW / 2) + 0.55, "glass", G, 0)
+            leaded(K, ("x", NX1 - 0.3, 1), s * (NW + AW / 2), 1.6, 3.9, 1.1, f"LdB{s}", 0.26)
+            K.box(f"WinFront{s}", NX0 - 0.35, NX0 - 0.33, 1.6, 4.5, s * (NW + AW / 2) - 0.6, s * (NW + AW / 2) + 0.6, "glass", G, 0)
         # the belfry's LOUVRES: slats slanted down and out in each lancet
         for face in range(4):
             for u in (-0.55, 0.55):
@@ -914,10 +1029,11 @@ def buildEglise(K, name, spec, state, seed, far=False):
         K.rod("HandM", (TX0 - 0.13, 10.8, 0.0), (TX0 - 0.13, 11.22, -0.08), 0.018, "castIron", G, 4)
     # STRING COURSES and the CORNICE (dressed stone, proud), the QUOINS up the tower's and the building's corners
     for y in ((4.4, 9.4, 12.6) if not ruin else (4.4, 9.4)):   # (a ruin's tower broken at ~10.5: the higher one floated)
-        K.box(f"String{y}", TX0 - 0.08, TX1 + 0.08, y, y + 0.18, -TW - 0.08, TW + 0.08, "dressedStone", G, 0.015)
+        st = K.box(f"String{y}", TX0 - 0.08, TX1 + 0.08, y, y + 0.18, -TW - 0.08, TW + 0.08, "dressedStone", G, 0.015)
+        if dmg: K.boolean(st, K.cutter(TX0 + 0.6, TX1 - 0.6, y - 1, y + 1, -TW + 0.6, TW - 0.6, "interior"))   # (hollow with the tower: solid, it lay across its inside)
     if not ruin: K.box("Cornice", TX0 - 0.22, TX1 + 0.22, TH - 0.02, TH + 0.3, -TW - 0.22, TW + 0.22, "dressedStone", G, 0.02)
     for (x, sx) in ((TX0, -1), (TX1, 1)):
-        for (z, sz) in ((-TW, -1), (TW, 1)): quoins(K, R, x, z, sx, sz, TH if not ruin else 8.0, f"QT{sx}{sz}", bev=0)
+        for (z, sz) in ((-TW, -1), (TW, 1)): quoins(K, R, x, z, sx, sz, TH if not ruin else 8.0, f"QT{sx}{sz}", bev=0, avoid=[v for y in (4.4, 9.4, 12.6) for v in (y, y + 0.18)])
     for (x, sx) in ((NX0 - 0.6, -1), (NX1 - 0.3, 1)):
         for (z, sz) in ((-ZO, -1), (ZO, 1)): quoins(K, R, x, z, sx, sz, AH if not ruin else 3.0, f"QA{sx}{sz}", bev=0)
     # THE ROOFS: the nave's gable (along X), the aisles' lean-tos against it
@@ -925,10 +1041,10 @@ def buildEglise(K, name, spec, state, seed, far=False):
         hole = (2.0, -1.4, 1.3) if dmg else None
         # (its tiles three-sided — far=True: 3 500 six-sided tiles made the church 136 000 triangles; seen from the RTS camera
         # a canal tile's roundness is under a pixel)
-        tileRoof(K, R, NX0 - 0.2, NX1 + 0.3, -NW - 0.35, NW + 0.35, NH + 0.02, 0.5, hole=hole, far=True, nm="Nv")
+        tileRoof(K, R, NX0 - 0.2, NX1 + 0.3, -NW - 0.35, NW + 0.35, NH + 0.02, 0.5, hole=hole, far=far, nm="Nv")
         for s in (-1, 1):
             zE = s * (ZO + 0.35); zW = s * (NW - 0.02)
-            tileRoof(K, R, NX0 - 0.6, NX1 - 0.1, zE if s < 0 else 2 * zW - zE, 2 * zW - zE if s < 0 else zE, AH + 0.02, math.atan2((NH - 1.6) - AH, abs(zE - zW)), far=True, only=-1 if s < 0 else 1, nm=f"Ai{s}")
+            tileRoof(K, R, NX0 - 0.6, NX1 - 0.1, zE if s < 0 else 2 * zW - zE, 2 * zW - zE if s < 0 else zE, AH + 0.02, math.atan2((NH - 1.6) - AH, abs(zE - zW)), far=far, only=-1 if s < 0 else 1, nm=f"Ai{s}")
         # THE SPIRE: octagonal, flaring at its eaves, its tip shot away when damaged; the iron cross
         top = TH + 0.3; tip = top + (8.6 if not dmg else 5.4)
         lathe(K, "Spire", [(0.0, top), (2.35, top), (2.2, top + 0.45), (1.9, top + 0.75), (0.08 if not dmg else 0.7, tip), (0.0, tip + 0.02)], ((TX0 + TX1) / 2, 0.0), "slate", n=8)
@@ -953,7 +1069,7 @@ def buildEglise(K, name, spec, state, seed, far=False):
     bpy.context.view_layer.update()   # (the clock's parts placed by location: stale, the turn sent them to the origin)
     for o in set(bpy.data.objects) - before: o.matrix_world = M @ o.matrix_world
 
-TYPES["eglise"] = dict(builder=buildEglise, autoLod=True, atlas=2048)
+TYPES["eglise"] = dict(builder=buildEglise, autoLod=True, atlas=4096)   # (the town's one landmark, 30 m: at 2048 its walls had ~25 texels a metre — blurred blotches on its back, you)
 
 for spec in TYPES.values():
     # (its far level its own build — the tiles as long strips, the genoise's beds alone — baked on the same atlas)
@@ -966,9 +1082,12 @@ for spec in TYPES.values():
                 # (its thin coloured parts kept wide enough in the atlas to hold their colour at the mips — bkit.bake `thin`)
                 thin=("frameWhite", "sill", "iron", "mortarLime", "glass"), thinPx=20,
                 # (the roof's and the genoise's thousand tiles on 8 shared islands — bkit.bake `shared`: room for wide gaps)
-                shared=("canalTile",),
+                # (the small dressed stones, louvres and iron too — thousands of specks each its own island took ~90 % of the church's atlas, its walls a blurred corner: 2026-10-31)
+                shared=("canalTile", "dressedStone", "louvre", "castIron", "iron"),
                 boost={"awningRed": 2.0, "awningBlue": 2.0})   # (the café's stripes: 8 texels each smeared — the mip check, 90 %)
 
-exported = buildKit(TYPES, MATDEF, "port.glb", prefix="Port", seed0=1955)
+# (surfaces: the game tiles a full-resolution photo over each face's class — the washes the rough plaster, the stone the dry
+# stone — a baked atlas alone, over a 30 m church, was a blurred mosaic close up: you, "at its back the texture looks cheap")
+exported = buildKit(TYPES, MATDEF, "port.glb", prefix="Port", seed0=1955, surfaces=True)
 previews(TYPES, exported, prefix="Port", tag="port_", spacing=14, frame=0.8)
 print("DONE")

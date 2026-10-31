@@ -450,7 +450,7 @@ class Kit:
                     P = np.array([v.co[:] for i in part for v in bm.faces[i].verts]); c = P.mean(0)
                     w, vec = np.linalg.eigh(np.cov((P - c).T)); a1, a2 = vec[:, 2], vec[:, 1]
                     lo = np.array([((P - c) @ a2).min(), ((P - c) @ a1).min()])
-                    ox = 3.0 + (k % 8) * 2.0; k += 1   # (its slot: out of the way, the packer brings it in)
+                    ox = 3.0 + ((k * 2654435761 >> 7) % 8) * 2.0; k += 1   # (its slot, by a hash: in turn, neighbours repeated in a grid — the church roof read as a checkerboard; out of the way, the packer brings it in)
                     for i in part:
                         for l in bm.faces[i].loops:
                             d = np.array(l.vert.co[:]) - c
@@ -545,6 +545,9 @@ class Kit:
                 im.filepath_raw = os.path.join(out_dir, f"_{name}_{nm}.png"); im.file_format = "PNG"; im.save()
         c = np.array(col.pixels[:]).reshape(-1, 4); a = np.array(ao.pixels[:]).reshape(-1, 4)
         unbaked = c[:, :3].sum(1) == 0                         # (the atlas's empty background, round the islands)
+        # (the SHARED slots an even shadowing: their texels hold the AO of whichever part was baked into them last — one deep in
+        # shade made every dressed stone of the church near black, 2026-10-31)
+        if slotMask is not None and slotMask.any(): a[slotMask.ravel(), :1] = 0.85
         c[:, :3] *= 0.3 + 0.7 * a[:, :1]                      # (softened: the game lights it too)
         # THE BACKGROUND the islands' mean, not black (2026-10-20: a dry-stone wall's hundreds of tiny islands —
         # its mip levels averaged stone and black gaps, the wall drew near-black from the RTS camera)
@@ -604,6 +607,16 @@ class Kit:
         # per object as the share of its AREA that changes; tools/blenderKit.mjs fails the build past its bar.
         lap("far-from-near")
         mipCheck(objs, out, name, matOf)
+        # THE GROUND CHECK (2026-10-31, you on the church: "we have that z index shader issue at the bottom like we had before, i
+        # thought we will never have this issue again"): an UPWARD face lying at the ground's height (y 0) z-fights the terrain
+        # — an opening cut down to the ground (the café's shopfronts, the church's door). Every such face counted;
+        # tools/blenderKit.mjs fails the build on any.
+        for q in objs:
+            n = 0; where = {}
+            for p in q.data.polygons:
+                if p.normal.z > 0.9 and p.area > 0.004 and all(abs(q.data.vertices[v].co.z) < 0.012 for v in p.vertices):
+                    n += 1; mn = (matOf.get(q.name) or ["?"] * (p.index + 1))[p.index]; where[mn] = where.get(mn, 0) + 1
+            print("GROUNDZ", name, q.name, n, where if n else "", flush=True)
         lap("mipcheck")
         for q in hidden: q.hide_render = False
         print("BAKED", name, size, len(objs))

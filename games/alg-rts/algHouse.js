@@ -125,7 +125,7 @@ const KITS = { houses: { prefix: "House", types: HOUSE_TYPES }, mzab: { prefix: 
 export const HOUSE_FAR = 60;
 // THE KITS WITH SURFACES (2026-10-26 — the houses sharp, as the post): each its photo swaps ({ stone: "drystone" }: the
 // Aurès' flat stones). A kit missing here, or built before its surfaces were written, draws its bake alone.
-const SURFACE_KITS = { houses: { stone: "drystone" }, mzab: { stone: "drystone", plaster: "mudRender" }, mechta: { stone: "drystone", plaster: "mudRender" } };   // (their bakes' own stone photo; the M'zab's render smoother; the mechta's clay terrace the mud render)
+const SURFACE_KITS = { houses: { stone: "drystone" }, mzab: { stone: "drystone", plaster: "mudRender" }, mechta: { stone: "drystone", plaster: "mudRender" }, port: { stone: "drystone", plaster: "mudRender" } };   // (their bakes' own stone photo; the M'zab's render smoother; the mechta's clay terrace the mud render)
 const _surf = new Map();
 const cap = (s) => s[0].toUpperCase() + s.slice(1);
 const _p = {};
