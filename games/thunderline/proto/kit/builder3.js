@@ -40,7 +40,7 @@ import { thumbStore } from "../../app/thumbStore.js";
 import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
 import { buildTrackMeshes } from "./testTrack.js";
 import { createBuilderTutorial } from "./builderTutorial.js";
-import { OBSTACLES, HOLE, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
+import { OBSTACLES, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -80,7 +80,7 @@ const GRID_STEPS = [1, 2, 4, 8];
 // ramps, loop, obstacles"): one home per piece, by what kind of road it is — our own dock and look
 const CATS = [
   // the race's own things: where it starts and ends, what it hands the car
-  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "test_car", "air_ring", "ob_boost", "ob_jump"] }, // (boost_32 left the palette, user 2026-10-22: the Boost pad does it; old tracks keep it)
+  { id: "game", label: "Game", tiles: ["start_line", "finish_line", "checkpoint", "test_car", "air_ring", "ob_boost", "ob_jump"] }, // (boost_32 left the palette, user 2026-10-22: the Boost pad does it; old tracks keep it)
   { id: "straight", label: "Straight", tiles: ["adj_straight", "straight_64", "glass_64", "plank_32", "plank_64", "platform_32", "platform_64", "platform_128", "funnel_64", "flare_64", "wedge_48", "curved_wedge_48", "round_end_24"] },
   // flat-out first, then a lift, then the brake ones (PIECES.md §7d: the turn set)
   { id: "turns", label: "Turns", tiles: ["adj_turn", "sweep_160_15", "sweep_160_30", "sweep_160_45", "s_bend_96", "turn_96_45", "turn_96_90", "snake_60", "turn_48_90", "brake_turn_32", "turn_48_180", "hairpin_24", "platform_turn_90"] },
@@ -93,7 +93,7 @@ const CATS = [
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
   // ON THE GROUND (the physics lab's ramps, kerb, step: obstacles.js GROUND)
   { id: "ground", label: "Ground", tiles: ["ob_ramp_jump", "ob_ramp_kicker", "ob_ramp_slope", "ob_ramp_side", "ob_kerb", "ob_step", "ob_pendulum", "ob_slider", "ob_lowbar"] },
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch"] },
   // SIGNS (obstacles.js): beside or over the road — placed like obstacles, never in the way
   { id: "signs", label: "Signs", tiles: ["sg_start", "sg_finish", "sg_chevron", "sg_aim"] },
 ];
@@ -274,6 +274,10 @@ const RING = "air_ring";
 // (track.spawn = { on, s, lat, yaw, kmh }: it goes where its piece goes), Q/E turn it, its START SPEED in the
 // panel. Drive starts there at that speed; R again from it, Delete from the start line.
 const SPAWN = "test_car";
+// THE CHECKPOINT TOOL (user, 2026-11-01: "do we have checkpoints? if not we need a checkpoint piece"): a piece's
+// checkpoint flag (pc.cp, race.js) was only reachable by selecting a piece and pressing C. In the Game tab now: click
+// a road piece to put the gate on it, click it again to take it off. Nothing new in the track: the same flag.
+const CP_TOOL = "checkpoint";
 const SPAWN_SPEEDS = [0, 50, 100, 150, 200, 250];
 let carHolo = null; // { geometry, material } once the car model is in (rig.carHologram)
 const RING_R = 5.5;
@@ -289,14 +293,14 @@ const adjDefaults = (base) => Object.fromEntries(Object.entries(ADJUSTABLE[base]
 const adjParams = Object.fromEntries(Object.keys(ADJUSTABLE).map((b) => [b, adjDefaults(b)]));
 const tileId = (base, h = hand) => {
   if (ADJUSTABLE[base]) return ensureTile(adjustableId(base, adjParams[base], ADJUSTABLE[base].hand ? h : 1)).id;
-  if (base === RING || isObstacle(base) || base === STAMP || base === SPAWN) return base;
+  if (base === RING || isObstacle(base) || base === STAMP || base === SPAWN || base === CP_TOOL) return base;
   if (base === FITTED) return fittedId;
   if (base === CATCH) return catchId;
   if (base === FITTED_BOWL) return ensureTile(`bowl_${bowlR}${h < 0 ? "_L" : ""}`).id;
   return h < 0 && TILES[`${base}_L`] ? `${base}_L` : base;
 };
-const tileLabel = (base) => (base === SPAWN ? "Test car" : ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === CATCH ? "Catch tube" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
-const thumbOf = (id) => (parseAdjustable(id) ? parseAdjustable(id).base : id === RING || isObstacle(id) ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === CATCH || id.startsWith("catch_tube_") ? "tube_in" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
+const tileLabel = (base) => (base === SPAWN ? "Test car" : base === CP_TOOL ? "Checkpoint" : ADJUSTABLE[base] ? `${TILES[tileId(base)].label} ⚙` : base === STAMP ? `Section · ${clipboard?.n ?? 0} piece${clipboard?.n === 1 ? "" : "s"}${hand < 0 ? " (mirrored)" : ""}` : isObstacle(base) ? OBSTACLES[base].label : base === RING ? "Air ring" : base === FITTED ? "Fitted landing" : base === CATCH ? "Catch tube" : base === FITTED_BOWL ? `Fitted bowl · R${bowlR}` : TILES[base].label);
+const thumbOf = (id) => (parseAdjustable(id) ? parseAdjustable(id).base : id === RING || isObstacle(id) || id === CP_TOOL ? id : id === FITTED || id.startsWith("fitted_landing_") ? "landing_20" : id === CATCH || id.startsWith("catch_tube_") ? "tube_in" : id === FITTED_BOWL || id.startsWith("bowl_") ? "fitted_bowl" : id.replace(/_L$/, ""));
 const deg = (r) => Math.round((r / DEG) * 10) / 10;
 
 // ---------- renderer ----------
@@ -441,7 +445,7 @@ function thumbSetup() {
   return (thumbKit = { W, H, rt, ts, cam, cvs, ctx: cvs.getContext("2d") });
 }
 /** Whether a dock piece's picture depends on the rails (not obstacles, rings, tubes, half-pipes). */
-const railsMatter = (id) => id !== RING && id !== SPAWN && !isObstacle(id) && id !== CATCH && !TILES[id]?.tube && !TILES[id]?.halfpipe;
+const railsMatter = (id) => id !== RING && id !== SPAWN && id !== CP_TOOL && !isObstacle(id) && id !== CATCH && !TILES[id]?.tube && !TILES[id]?.halfpipe;
 // ONE PICTURE AT A TIME: they share one little scene, and a render waits (the cache, the road scan, the
 // pixel read) — two at once drew both pieces into one picture (the car's hologram in START's)
 let thumbChain = Promise.resolve();
@@ -457,8 +461,9 @@ async function drawThumb(id, open) {
     ? new THREE.Group().add(new THREE.Mesh(carHolo?.geometry ?? new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), carHolo?.material ?? ghostMat))
     : id === RING
     ? makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0.5, -0.15, -1).normalize(), U: new THREE.Vector3(0, 1, 0), hw: RING_R })
+    : id === CP_TOOL ? meshesFor("straight_64", open).add(checkpointGate({ id: "straight_64" }, new THREE.Matrix4())) // (the gate on a road: alone it drew as a bar)
     : isObstacle(id) ? obstacleLook(id) : meshesFor(pid, open);
-  const t = id === RING || isObstacle(id) || id === SPAWN ? {} : ensureTile(pid);
+  const t = id === RING || isObstacle(id) || id === SPAWN || id === CP_TOOL ? {} : ensureTile(pid);
   if (t.start || t.finish) g.add(lineGate({ id: pid }, new THREE.Matrix4(), open)); // its gantry, as on the track
   if (id !== RING) g.rotation.x = -(t.landAngle ?? 0) * DEG;
   g.updateMatrixWorld(true);
@@ -800,7 +805,14 @@ function rebuild() {
   schedulePrediction();
 }
 
-// ---------- CHECKPOINTS (race.js): a flag on any piece; select it and press C ----------
+// ---------- CHECKPOINTS (race.js): a flag on any piece; select it and press C, or the Checkpoint tool ----------
+/** The checkpoint tool's preview: the gate on the piece under the mouse, in the ghost's colour. */
+function cpGhost(sn) {
+  const pc = track.pieces.find((p) => p.uid === sn.extra.on);
+  const g = checkpointGate(pc, built.get(pc.uid).M);
+  g.traverse((o) => { if (o.isMesh) { o.material = ghostMat; o.userData.ownGeo = true; } });
+  return g;
+}
 function checkpointGate(pc, M) {
   const { b, t } = piece(pc.id, pcOE(pc));
   const hw = SECTIONS[t.section ?? "road"].hw;
@@ -1738,6 +1750,14 @@ function obstacleSnap() {
   const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
   return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
 }
+/** The checkpoint tool in hand: a road piece under the mouse (its gate shown where it will stand). */
+function checkpointSnap() {
+  ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
+  const on = roadUnder(ray.intersectObjects(trackGroup.children, true));
+  if (!on || !built.has(on.pc.uid)) return null;
+  const M = built.get(on.pc.uid).M;
+  return { type: "road", m: M.clone(), extra: { on: on.pc.uid }, note: on.pc.cp ? "Checkpoint here · click to take it off" : `Checkpoint on this ${TILES[on.pc.id]?.label ?? "piece"} · click` };
+}
 /** The test car in hand: on a road only (it drives from there), 2 m steps across, Q/E turn. */
 function spawnSnap() {
   ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
@@ -1918,15 +1938,14 @@ function wallHoleSnap() {
   const R = new THREE.Vector3().crossVectors(h, UP).normalize();
   const P = a.fast.pts[k];
   const m = socketMatrix({ p: P, T: h, U: UP.clone(), R });
-  const [hx0, hx1, hy0, hy1] = HOLE.hole;
+  const passes = OBSTACLES[tileBase].passes, label = OBSTACLES[tileBase].label; // (the hole's own shape: square, round)
   const through = (sc) => {
     const { pts } = a.fly(sc);
     for (let i = 1; i < pts.length; i++) {
       const d0 = pts[i - 1].clone().sub(P).dot(h), d1 = pts[i].clone().sub(P).dot(h);
       if (d0 < 0 && d1 >= 0) {
         const q = pts[i - 1].clone().lerp(pts[i], -d0 / (d1 - d0)).sub(P);
-        const x = q.dot(R), y = q.y;
-        return x > hx0 + 1.2 && x < hx1 - 1.2 && y > hy0 + 0.8 && y < hy1 - 0.8;
+        return passes(q.dot(R), q.y);
       }
     }
     return false;
@@ -1935,7 +1954,7 @@ function wallHoleSnap() {
   for (let sc = 0.99; sc >= 0.8 - 1e-9 && through(sc); sc -= 0.01) sMin = sc;
   const kmh = (sc) => Math.round(a.lip.v * sc * 3.6);
   const guess = !prediction.lipSpeed.has(a.from);
-  return { type: "arc", m, from: a.from, note: guess ? "Wall · hole: on the full-speed line (the take-off isn't measured yet)" : `Wall · hole: flies through from ${kmh(sMin)} to ${kmh(1)} km/h — slower hits the wall under the hole` };
+  return { type: "arc", m, from: a.from, note: guess ? `${label}: on the full-speed line (the take-off isn't measured yet)` : `${label}: flies through from ${kmh(sMin)} to ${kmh(1)} km/h — slower hits the wall under the hole` };
 }
 /**
  * THE CATCH TUBE ON A JUMP. A tube in the air is a PRECISION target: the band (85–100% of the take-off
@@ -2035,6 +2054,7 @@ const reachNote = (a, sMin) => `lands from ${Math.round(a.lip.v * sMin * 3.6)} k
 const ROUGH_FALL = 22; // °: steeper than this onto flat needs the player to level the car (else rough)
 function computeSnap() {
   if (tileBase === SPAWN) return spawnSnap();
+  if (tileBase === CP_TOOL) return checkpointSnap();
   if (tileBase === RING) return ringSnap();
   if (OBSTACLES[tileBase]?.air) return wallHoleSnap();
   if (isObstacle(tileBase)) return obstacleSnap();
@@ -2322,14 +2342,15 @@ function updateGhost() {
     // the old preview's OWN geometry released (tagged ownGeo: a ring, a pad strip, the stand-in box — not
     // the shared piece / car / obstacle shapes it otherwise shows)
     if (ghost) { scene.remove(ghost); ghost.traverse((o) => { if (o.userData.ownGeo) o.geometry.dispose(); }); }
-    ghost = id === SPAWN ? (carHolo ? new THREE.Mesh(carHolo.geometry, ghostMat) : ownGeo(new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), ghostMat)))
+    ghost = id === CP_TOOL ? cpGhost(snap)
+      : id === SPAWN ? (carHolo ? new THREE.Mesh(carHolo.geometry, ghostMat) : ownGeo(new THREE.Mesh(new THREE.BoxGeometry(2, 1.2, 4.4).translate(0, 0.6, 0), ghostMat)))
       : id === STAMP ? stampGhost()
       : isObstacle(id) ? (OBSTACLES[id].decal ? ownGeo : (m) => m)(new THREE.Mesh(shapeOf(id, snap).ghost, ghostMat)) // (a pad's strip is new each time; a door's is cached)
       : id === RING ? ownGeo(makeRingMesh({ P: new THREE.Vector3(), T: new THREE.Vector3(0, 0, -1), U: new THREE.Vector3(0, 1, 0), hw: RING_R }, { material: ghostMat }).children[0])
       : new THREE.Mesh(piece(id, oeOf(edges)).look.deck, ghostMat);
     ghostMat.color.setHex(snap.bad ? 0xff4d5e : SNAP_COLORS[snap.type]);
     ghost.matrixAutoUpdate = false;
-    ghost.matrix.copy(snap.m);
+    if (id === CP_TOOL) ghost.matrix.identity(); else ghost.matrix.copy(snap.m); // (the gate is built in world space)
     ghost.renderOrder = 10;
     scene.add(ghost);
   }
@@ -2401,6 +2422,16 @@ function place() {
   snapshot();
   const uid = track.nextUid++;
   const id = tileId(tileBase);
+  if (id === CP_TOOL) {
+    track.nextUid--;
+    const pc = track.pieces.find((p) => p.uid === snap.extra.on);
+    if (!pc || isRing(pc)) return;
+    pc.cp = !pc.cp;
+    if (!pc.cp) delete pc.cp;
+    ghostDirty = true;
+    rebuild();
+    return;
+  }
   if (id === SPAWN) {
     track.nextUid--;
     track.spawn = { on: snap.extra.on, s: snap.extra.s, lat: snap.extra.lat, yaw: snap.extra.yaw ?? 0, kmh: track.spawn?.kmh ?? 0 };
@@ -3008,7 +3039,7 @@ function renderStatus() {
   statusKey = k;
   const col = snap?.bad ? "#ff4d5e" : snap ? `#${SNAP_COLORS[snap.type].toString(16).padStart(6, "0")}` : "#8796b5";
   $("status").innerHTML =
-    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP || tileBase === SPAWN ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
+    `<div class="mode" style="color:${col}">${tileBase ? `${isObstacle(tileBase) || tileBase === STAMP || tileBase === SPAWN || tileBase === CP_TOOL ? tileLabel(tileBase) : tileBase === RING ? "Air ring" : TILES[tileId(tileBase)].label} → ${names[snap?.type] ?? "—"}` : multi ? `${many.length} pieces selected` : selPc ? (selPc.kind ? OBSTACLES[selPc.kind]?.label ?? "Obstacle" : isRing(selPc) ? "Air ring" : TILES[selPc.id]?.label ?? "Piece") : "Pick a piece"}</div>` +
     (multi ? `<div class="acts"><button data-act="copy">Copy <kbd>Ctrl+C</kbd></button><button data-act="mirror">Mirror</button><button data-act="delmany">Delete <kbd>Del</kbd></button><button data-act="railsmany" title="Their rails: Both → Left → Right → None">Rails <kbd>T</kbd></button></div>` +
       (multiRoads() ? `<div class="acts"><button data-act="move" class="${gizmoMode === "translate" ? "on" : ""}">Move <kbd>M</kbd></button><button data-act="turn" class="${gizmoMode === "rotate" ? "on" : ""}">Turn <kbd>M</kbd></button><button data-act="space" title="The gizmo's axes: the piece's own (local) or the world's">${gizmoSpaceNow(multiRoads()) === "local" ? "Local" : "World"} <kbd>X</kbd></button></div><div class="row"><span>The roads they are part of move and turn together</span></div>` : "") : "") +
     (copiedNote ? `<div class="edit-ask">${copiedNote}</div>` : "") +
@@ -3319,6 +3350,7 @@ function renderHand() {
   if (k === handKey) return;
   handKey = k;
   const off = free ? "" : " off";
+  if (tileBase === CP_TOOL) { el.innerHTML = `<span class="nm">Checkpoint</span><span class="nm" style="opacity:.7">click a road piece · again to remove</span>`; return; }
   el.innerHTML =
     `<span class="nm">${tileBase === SPAWN ? tileLabel(SPAWN) : TILES[id]?.label ?? id}</span>` +
     // an ADJUSTABLE piece's own settings first (the ghost follows them)

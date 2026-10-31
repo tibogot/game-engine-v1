@@ -616,13 +616,187 @@ const GROUND = {
   },
 };
 
+// ---------------------------------------------------------------- STATIC OBSTACLES, SET 2
+// (user, 2026-11-01: "compared to the old game some pieces are missing … a container, a road block, a concrete
+// barrier, the rounded hole gate and hole wall, the arch"): designed new in Thunderline's look — the old game's
+// ones were the brief for what each does, not the meshes.
+const extrude = (shape, depth, bevel = 0) => {
+  const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: bevel > 0, bevelThickness: bevel, bevelSize: bevel, bevelSegments: 2, curveSegments: 40 });
+  return g.translate(0, 0, -depth / 2);
+};
+let MATS2 = null;
+const mats2 = () => (MATS2 ??= {
+  steel: new THREE.MeshStandardMaterial({ color: 0x245a78, roughness: 0.62, metalness: 0.35 }),
+  steelDark: new THREE.MeshStandardMaterial({ color: 0x173a50, roughness: 0.7, metalness: 0.3 }),
+  concrete: new THREE.MeshStandardMaterial({ color: 0xb9b6ad, roughness: 0.92, metalness: 0 }),
+  red: new THREE.MeshStandardMaterial({ color: 0xd8262b, roughness: 0.45, metalness: 0 }),
+  whiteP: new THREE.MeshStandardMaterial({ color: 0xeef0f2, roughness: 0.45, metalness: 0 }),
+  orange: new THREE.MeshStandardMaterial({ color: 0xff7a1a, roughness: 0.5, metalness: 0.1 }),
+});
+/** Boxes filling a wall [x0,x1]×[y0,y1] round a circle (cx, cy, r) in 0.4 m strips — its solids (the hole stays open). */
+function roundHoleBoxes([x0, x1, y0, y1], cx, cy, r, t = WALL_T) {
+  const out = [], step = 0.4;
+  for (let ya = y0; ya < y1 - 1e-6; ya += step) {
+    const yb = Math.min(y1, ya + step);
+    const inBand = ya < cy + r && yb > cy - r;
+    // (the chord at the strip's edge nearest the middle: the widest — the boxes never stand in the visible hole)
+    const dy = ya <= cy && yb >= cy ? 0 : Math.min(Math.abs(ya - cy), Math.abs(yb - cy));
+    const c = inBand ? Math.sqrt(Math.max(0, r * r - dy * dy)) : 0;
+    const spans = c > 0 ? [[x0, cx - c], [cx + c, x1]] : [[x0, x1]];
+    for (const [a, b] of spans) if (b - a > 1e-3) out.push(box(b - a, yb - ya, t, (a + b) / 2, (ya + yb) / 2, 0));
+  }
+  return out;
+}
+
+// CONTAINER: a 40 ft box along the road — steer round it, or land on its roof
+const CT = { w: 2.44, h: 2.6, L: 12.2 };
+function containerParts() {
+  const m = mats2(), mm = mats(), g = new THREE.Group();
+  g.add(new THREE.Mesh(box(CT.w - 0.12, CT.h - 0.1, CT.L - 0.1, 0, CT.h / 2, 0), m.steel));
+  // the corrugation: ribs down both sides; the corner posts and rails darker
+  const ribs = [];
+  for (let z = -CT.L / 2 + 0.35; z < CT.L / 2 - 0.3; z += 0.3) for (const s of [1, -1]) ribs.push(box(0.06, CT.h - 0.36, 0.14, s * (CT.w / 2 - 0.05), CT.h / 2, z));
+  g.add(new THREE.Mesh(mergeGeometries(ribs), m.steel));
+  const frame = [];
+  for (const sx of [1, -1]) for (const sz of [1, -1]) frame.push(box(0.16, CT.h, 0.16, sx * (CT.w / 2 - 0.08), CT.h / 2, sz * (CT.L / 2 - 0.08)));
+  for (const y of [0.09, CT.h - 0.09]) for (const sx of [1, -1]) frame.push(box(0.14, 0.18, CT.L, sx * (CT.w / 2 - 0.07), y, 0));
+  for (const y of [0.09, CT.h - 0.09]) for (const sz of [1, -1]) frame.push(box(CT.w, 0.18, 0.14, 0, y, sz * (CT.L / 2 - 0.07)));
+  // the doors' lock bars on the end facing the car (+Z)
+  for (const x of [-0.85, -0.3, 0.3, 0.85]) frame.push(box(0.05, CT.h - 0.4, 0.05, x, CT.h / 2, CT.L / 2 + 0.03));
+  g.add(new THREE.Mesh(mergeGeometries(frame), m.steelDark));
+  // the roof you land on, and a glowing band down each side (reads from far)
+  g.add(new THREE.Mesh(box(CT.w - 0.3, 0.05, CT.L - 0.3, 0, CT.h + 0.01, 0), mm.top));
+  g.add(new THREE.Mesh(mergeGeometries([1, -1].map((s) => box(0.06, 0.12, CT.L - 0.4, s * (CT.w / 2 + 0.01), CT.h - 0.35, 0))), mm.bolt));
+  return g;
+}
+const CT_SOLID = box(CT.w, CT.h, CT.L, 0, CT.h / 2, 0);
+const CT_DECK = new THREE.PlaneGeometry(CT.w - 0.2, CT.L - 0.2).rotateX(-Math.PI / 2).translate(0, CT.h, 0);
+
+// ROAD BLOCK: water-filled plastic barriers, red and white, four in a row across the road
+const RB = { n: 4, L: 2, h: 1.0, base: 0.6 };
+function rbShape() {
+  const s = new THREE.Shape(), b = RB.base / 2;
+  s.moveTo(-b, 0); s.lineTo(b, 0); s.lineTo(b, 0.18); s.lineTo(0.16, 0.55); s.lineTo(0.13, RB.h); s.lineTo(-0.13, RB.h); s.lineTo(-0.16, 0.55); s.lineTo(-b, 0.18); s.closePath();
+  return s;
+}
+function roadBlockParts() {
+  const m = mats2(), g = new THREE.Group(), seg = extrude(rbShape(), RB.L - 0.1, 0.03).rotateY(Math.PI / 2);
+  for (let i = 0; i < RB.n; i++) {
+    const mesh = new THREE.Mesh(seg, i % 2 ? m.whiteP : m.red);
+    mesh.position.x = (i - (RB.n - 1) / 2) * RB.L;
+    g.add(mesh);
+  }
+  return g;
+}
+const RB_SOLID = box(RB.n * RB.L, RB.h, RB.base, 0, RB.h / 2, 0);
+
+// CONCRETE BARRIER: three jersey blocks end to end, an orange band near the top
+const JB = { n: 3, L: 3, h: 0.81, base: 0.6 };
+function jerseyShape() {
+  const s = new THREE.Shape(), b = JB.base / 2;
+  s.moveTo(-b, 0); s.lineTo(b, 0); s.lineTo(b, 0.075); s.lineTo(0.13, 0.33); s.lineTo(0.075, JB.h); s.lineTo(-0.075, JB.h); s.lineTo(-0.13, 0.33); s.lineTo(-b, 0.075); s.closePath();
+  return s;
+}
+function jerseyParts() {
+  const m = mats2(), mm = mats(), g = new THREE.Group(), seg = extrude(jerseyShape(), JB.L - 0.06, 0.015).rotateY(Math.PI / 2);
+  const stripes = [];
+  for (let i = 0; i < JB.n; i++) {
+    const x = (i - (JB.n - 1) / 2) * JB.L, mesh = new THREE.Mesh(seg, m.concrete);
+    mesh.position.x = x;
+    g.add(mesh);
+    for (let k = 0; k < 5; k++) for (const s of [1, -1]) stripes.push(box(0.28, 0.1, 0.02, x - JB.L / 2 + 0.4 + k * 0.55, JB.h - 0.14, s * 0.092));
+  }
+  g.add(new THREE.Mesh(mergeGeometries(stripes), mm.signal));
+  return g;
+}
+const JB_SOLID = box(JB.n * JB.L, JB.h, JB.base, 0, JB.h / 2, 0);
+
+// ROUND-HOLE WALL: across the road, a round port at road level — a tunnel mouth to aim through
+const RW = { w: 2 * ROAD_HW + 10, h: 12, r: 5, cy: 3.5 };
+function roundWallShape() {
+  const { w, h, r, cy } = RW, c = Math.sqrt(r * r - cy * cy);
+  const a0 = Math.atan2(-cy, -c), a1 = Math.atan2(-cy, c);
+  const s = new THREE.Shape();
+  s.moveTo(-w / 2, 0); s.lineTo(-c, 0);
+  s.absarc(0, cy, r, a0, a1, true); // from the left foot, over the top, to the right foot
+  s.lineTo(w / 2, 0); s.lineTo(w / 2, h); s.lineTo(-w / 2, h); s.closePath();
+  return s;
+}
+const RW_BOXES = roundHoleBoxes([-RW.w / 2, RW.w / 2, 0, RW.h], 0, RW.cy, RW.r);
+function roundWallParts() {
+  const mm = mats(), g = new THREE.Group();
+  g.add(new THREE.Mesh(extrude(roundWallShape(), WALL_T), mm.body));
+  // the glowing rim over the port (the part above the road), both faces
+  const { r, cy } = RW, a = Math.asin(cy / r), arc = [];
+  for (const s of [1, -1]) arc.push(new THREE.TorusGeometry(r + 0.12, 0.16, 8, 48, Math.PI + 2 * a).rotateZ(-a).translate(0, cy, s * (WALL_T / 2 + 0.05)));
+  g.add(new THREE.Mesh(mergeGeometries(arc), mm.bolt));
+  const chev = [];
+  for (let i = -2; i <= 2; i++) {
+    const c = new THREE.Shape();
+    c.moveTo(-0.6, 0.6); c.lineTo(0, -0.1); c.lineTo(0.6, 0.6); c.lineTo(0.6, 0.1); c.lineTo(0, -0.65); c.lineTo(-0.6, 0.1); c.closePath();
+    chev.push(new THREE.ShapeGeometry(c).translate(i * 1.6, cy + r + 1.6, WALL_T / 2 + 0.04));
+  }
+  g.add(new THREE.Mesh(mergeGeometries(chev), mm.signal));
+  return g;
+}
+
+// RING GATE (air): a floating plate with a round hole, placed on a jump's flight — thread it, or hit the plate
+export const RING_GATE = { w: 20, h: 20, r: 5 };
+function ringGateShape() {
+  const { w, h, r } = RING_GATE, s = new THREE.Shape();
+  s.moveTo(-w / 2, -h / 2); s.lineTo(w / 2, -h / 2); s.lineTo(w / 2, h / 2); s.lineTo(-w / 2, h / 2); s.closePath();
+  const hole = new THREE.Path();
+  hole.absarc(0, 0, r, 0, 2 * Math.PI, true);
+  s.holes.push(hole);
+  return s;
+}
+const RG_BOXES = roundHoleBoxes([-RING_GATE.w / 2, RING_GATE.w / 2, -RING_GATE.h / 2, RING_GATE.h / 2], 0, 0, RING_GATE.r);
+function ringGateParts() {
+  const mm = mats(), g = new THREE.Group();
+  g.add(new THREE.Mesh(extrude(ringGateShape(), WALL_T), mm.body));
+  const rim = mergeGeometries([1, -1].map((s) => new THREE.TorusGeometry(RING_GATE.r + 0.12, 0.16, 8, 64).translate(0, 0, s * (WALL_T / 2 + 0.05))));
+  g.add(new THREE.Mesh(rim, mm.bolt));
+  return g;
+}
+
+// ARCH: a short orange vault over part of the road — aim through its opening (10 m wide, 8 m high)
+const AR = { open: 5, side: 3, outer: 8, depth: 4 };
+function archShape() {
+  const { open, side, outer } = AR, s = new THREE.Shape();
+  s.moveTo(-outer, 0); s.lineTo(-open, 0); s.lineTo(-open, side);
+  s.absarc(0, side, open, Math.PI, 0, true); // the opening's top, left to right
+  s.lineTo(open, 0); s.lineTo(outer, 0); s.lineTo(outer, side);
+  s.absarc(0, side, outer, 0, Math.PI, false); // the outside, back over
+  s.closePath();
+  return s;
+}
+const AR_BOXES = (() => {
+  const out = [], { open, side, outer, depth } = AR, n = 14, rm = (open + outer) / 2;
+  for (const sx of [1, -1]) out.push(box(outer - open, side, depth, (sx * (open + outer)) / 2, side / 2, 0));
+  // the vault as wedges round its arc (each box: radial thickness × arc length, turned to its angle)
+  for (let i = 0; i < n; i++) {
+    const a = (Math.PI * (i + 0.5)) / n, len = (Math.PI * rm) / n + 0.15;
+    out.push(box(outer - open, len, depth).rotateZ(a).translate(Math.cos(a) * rm, side + Math.sin(a) * rm, 0));
+  }
+  return out;
+})();
+function archParts() {
+  const m = mats2(), mm = mats(), g = new THREE.Group();
+  g.add(new THREE.Mesh(extrude(archShape(), AR.depth, 0.12), m.orange));
+  // a glowing strip round the opening, on the face the car comes at (+Z)
+  const strip = new THREE.TorusGeometry(AR.open - 0.1, 0.12, 8, 48, Math.PI).translate(0, AR.side, AR.depth / 2 + 0.14);
+  const legs = [1, -1].map((s) => new THREE.CylinderGeometry(0.12, 0.12, AR.side, 8).translate(s * (AR.open - 0.1), AR.side / 2, AR.depth / 2 + 0.14));
+  g.add(new THREE.Mesh(strip, mm.bolt), new THREE.Mesh(mergeGeometries(legs), mm.bolt));
+  return g;
+}
+
 export const OBSTACLES = {
   ...GROUND,
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
   ob_wall_door: { label: "Wall · door", parts: doorParts, solids: DOOR_BOXES, decks: [], ghost: mergeGeometries(DOOR_BOXES), shape: doorShape, hint: "A wall across the road: drive through its door" },
   // `air`: placed on a jump's flight, not on the road (the builder's arc snap)
-  ob_wall_hole: { label: "Wall · hole", parts: holeParts, solids: HOLE_BOXES, decks: [], ghost: mergeGeometries(HOLE_BOXES), air: true, hint: "A wall in the air: fly through its hole" },
+  ob_wall_hole: { label: "Wall · hole", parts: holeParts, solids: HOLE_BOXES, decks: [], ghost: mergeGeometries(HOLE_BOXES), air: true, passes: (x, y) => x > HOLE.hole[0] + 1.2 && x < HOLE.hole[1] - 1.2 && y > HOLE.hole[2] + 0.8 && y < HOLE.hole[3] - 0.8, hint: "A wall in the air: fly through its hole" },
   ob_pole: { label: "Pole", parts: () => polesParts([[0, 0]]), solids: polesSolids([[0, 0]]), decks: [], ghost: mergeGeometries(polesSolids([[0, 0]])), footprints: [poleFoot([0, 0])], hint: "A pole on the road: go round it" },
   ob_slalom: { label: "Slalom", halfW: 3.5, parts: () => polesParts(SLALOM), solids: polesSolids(SLALOM), decks: [], ghost: mergeGeometries(polesSolids(SLALOM)), footprints: SLALOM.map(poleFoot), hint: "Four poles, left and right: weave through" },
   ob_gate: { label: "Pole gate", halfW: 4.5, parts: () => polesParts(GATE), solids: polesSolids(GATE), decks: [], ghost: mergeGeometries(polesSolids(GATE)), aimAt: { hz: POLE.r }, hint: "Two poles 8 m apart: drive between them" },
@@ -639,6 +813,13 @@ export const OBSTACLES = {
   sg_chevron: signKind("Chevron panel", "side", panelShape, "A tall black board past the edge: the way the road goes"),
   sg_aim: signKind("Landing sign", "pair", aimShape, "Two posts and a yellow X over the road: land here"),
   sg_label: { label: "Lab sign", shape: labelShape, ...labelShape(), decks: [], hint: "The physics lab's word on a post: what this road tests" },
+  ob_container: { label: "Container", parts: containerParts, solids: [CT_SOLID], decks: [CT_DECK], ghost: CT_SOLID, hint: "A shipping container: steer round it, or land on its roof" },
+  ob_roadblock: { label: "Road block", halfW: RB.n * RB.L / 2, parts: roadBlockParts, solids: [RB_SOLID], decks: [], ghost: RB_SOLID, hint: "Plastic water barriers, red and white: go round" },
+  ob_jersey: { label: "Concrete barrier", halfW: JB.n * JB.L / 2, parts: jerseyParts, solids: [JB_SOLID], decks: [], ghost: JB_SOLID, hint: "Three concrete blocks in a row: go round" },
+  // (halfW = the road's: it stays square across the middle of the road, its port in the middle)
+  ob_wall_round: { label: "Wall · round hole", halfW: ROAD_HW, parts: roundWallParts, solids: RW_BOXES, decks: [], ghost: mergeGeometries(RW_BOXES), aimAt: { hz: WALL_T / 2 }, hint: "A wall across the road: through its round port" },
+  ob_ring_gate: { label: "Ring gate", parts: ringGateParts, solids: RG_BOXES, decks: [], ghost: mergeGeometries(RG_BOXES), air: true, passes: (x, y) => x * x + y * y < (RING_GATE.r - 1.3) ** 2, hint: "A ring in the air: fly through it" },
+  ob_arch: { label: "Arch", halfW: AR.outer, parts: archParts, solids: AR_BOXES, decks: [], ghost: mergeGeometries(AR_BOXES), aimAt: { hz: AR.depth / 2 }, hint: "An orange vault: aim through it" },
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
@@ -657,6 +838,9 @@ export const shapeOf = (kind, p = {}) => (OBSTACLES[kind].shape ? { ...OBSTACLES
 // what stands IN THE WAY, in the obstacle's frame (half across x, half along z; m): the autopilot's line
 // goes round it (avoidObstacles)
 OBSTACLES.ob_block.footprint = { hx: BW / 2, hz: BD / 2 };
+OBSTACLES.ob_container.footprint = { hx: CT.w / 2, hz: CT.L / 2 };
+OBSTACLES.ob_roadblock.footprint = { hx: (RB.n * RB.L) / 2, hz: RB.base / 2 };
+OBSTACLES.ob_jersey.footprint = { hx: (JB.n * JB.L) / 2, hz: JB.base / 2 };
 // (the poles carry `footprints`, one per pole, in the table)
 OBSTACLES.ob_sweeper.footprint = { hx: POST_R + 0.3, hz: POST_R + 0.3 };
 // a DOOR is the other way round: the line goes THROUGH it (its centre), not round it
@@ -692,8 +876,10 @@ export function avoidObstacles(ride, props = [], hw = ROAD_HW) {
       const across = Math.abs((f.hx ?? 0) * ax.dot(R)) + Math.abs(f.hz * az.dot(R));
       const along = Math.abs((f.hx ?? 0) * ax.dot(r.T)) + Math.abs(f.hz * az.dot(r.T));
       if (Math.abs(lat) > hw + across) return; // beside the road
-      // weight: 0 → 1 over the 35 m before it, 1 alongside, back to 0 over 15 m after
-      const w = lon > along ? smooth(1 - (lon - along) / (f.lead ?? 35)) : lon < -along ? smooth(1 - (-along - lon) / (f.tail ?? 15)) : 1;
+      // weight: 0 → 1 over the 100 m before it, 1 alongside, back to 0 over 15 m after
+      // (100, was 35, 2026-11-01: the arcade car at 268 km/h covers 35 m in 0.47 s — the test lap steered too late round
+      // a Block in the middle and stopped on it)
+      const w = lon > along ? smooth(1 - (lon - along) / (f.lead ?? 100)) : lon < -along ? smooth(1 - (-along - lon) / (f.tail ?? 15)) : 1;
       if (w <= 0) return;
       if (aim) { if (Math.abs(lat * w) > Math.abs(shift[i])) shift[i] = lat * w; return; }
       const room = hw - 1.6;
