@@ -41,7 +41,7 @@ import { thumbStore } from "../../app/thumbStore.js";
 import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
 import { buildTrackMeshes } from "./testTrack.js";
 import { createBuilderTutorial } from "./builderTutorial.js";
-import { OBSTACLES, BOOST_PAD, isObstacle, attachMovers, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
+import { OBSTACLES, BOOST_PAD, isObstacle, attachMovers, edgeInset, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -96,7 +96,7 @@ const CATS = [
   { id: "ground", label: "Ground", tiles: ["ob_ramp_jump", "ob_ramp_kicker", "ob_ramp_slope", "ob_ramp_side", "ob_kerb", "ob_step", "ob_pendulum", "ob_slider", "ob_lowbar"] },
   { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch", "ob_boost_tube", "ob_open_cyl", "ob_turnstile", "ob_push_gate", "ob_spin_column", "ob_spin_barrel"] },
   // SCENERY (obstacles.js): what stands beside the road — the street lights light it at night
-  { id: "scenery", label: "Scenery", tiles: ["sc_street_light", "sc_street_lights"] },
+  { id: "scenery", label: "Scenery", tiles: ["sc_street_light", "sc_street_lights", "sc_flag", "sc_banners", "sc_palm", "sc_fence_run", "sc_wire_run", "sc_fence", "sc_barbwire"] },
   // SIGNS (obstacles.js): beside or over the road — placed like obstacles, never in the way
   { id: "signs", label: "Signs", tiles: ["sg_start", "sg_finish", "sg_chevron", "sg_aim"] },
 ];
@@ -1819,6 +1819,7 @@ function roadSnapAt(pc, kind, s, raw, yaw = 0) {
     const d = decalSnap(pc, b, t, M, s, raw, kind);
     return { ...d, extra: { ...d.extra, ...at, s: d.s, lat: d.lat } };
   }
+  if (OBSTACLES[kind]?.edge) return edgeSnap(pc, b, M, hw, raw, kind, at);
   const rc = ringAt(b.rings, s), f = deckFrame(rc, hw);
   // a SIGN stands square to the road, centred on it ("pair": START boards, the landing sign — sized by the
   // road's half width) or past the edge on the side you point at ("side": a chevron panel, dx ±1)
@@ -1867,8 +1868,25 @@ function relayProps() {
     p.M = sn.m.toArray();
     if (sn.dx != null) { p.dx = sn.dx; p.hw = sn.hw; }
     if (sn.extra?.strip) p.strip = sn.extra.strip;
+    if (sn.extra?.edge) p.edge = sn.extra.edge; // (a fence: its piece's edge as it is now)
     p.lat = sn.extra.lat;
   }
+}
+/**
+ * A FENCE ALONG A PIECE'S EDGE (obstacles.js sc_fence, sc_barbwire): the side you point at, the piece's whole length —
+ * its edge sampled every 2 m in the piece's frame (the prop's frame is the piece's own), inside the edge by the kind's
+ * inset. Not over a gap.
+ */
+function edgeSnap(pc, b, M, hw, raw, kind, at) {
+  const side = raw < 0 ? -1 : 1, total = b.rings.at(-1).s, inset = edgeInset(kind), edge = [];
+  let air = false;
+  for (let k = 0, n = Math.max(1, Math.round(total / 2)); k <= n; k++) {
+    const rk = ringAt(b.rings, (k / n) * total), fk = deckFrame(rk, hw);
+    air ||= rk.air;
+    const q = fk.P.clone().addScaledVector(fk.R, side * (hw - inset));
+    edge.push([+q.x.toFixed(3), +q.y.toFixed(3), +q.z.toFixed(3)]);
+  }
+  return { type: "road", m: M.clone(), dx: side, hw, edge, extra: { ...at, lat: side, edge }, bad: air ? "Not over a gap" : null, note: `${OBSTACLES[kind].label} · the ${side > 0 ? "right" : "left"} edge, all ${Math.round(total)} m of the piece` };
 }
 /** A piece's path frame at distance s (rings interpolated): what deckFrame needs. */
 function ringAt(rings, s) {

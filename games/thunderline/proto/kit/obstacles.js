@@ -14,7 +14,10 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh, BvhSet } from "../../../../v3/play/modularRoadRigidBvh.js";
-import { body, physLook, physGhost, physModel, physKit, ViewLOD } from "./physProps.js";
+import { body, physLook, physGhost, physModel, physKit, physPalm, ViewLOD } from "./physProps.js";
+import { createFlag as createFlagProp } from "../../../../v3/props/liveProps.js";
+import { buildChainLinkFenceMesh } from "../../../../v3/props/objects/chainLinkFence.js";
+import { buildBarbWireMesh } from "../../../../v3/props/objects/barbWire.js";
 import { ledSignMaterial, LED_PITCH } from "./ledSigns.js";
 import { ARCH_LOD_FAR } from "./gateMesh.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
@@ -1075,6 +1078,136 @@ function streetLightShape({ hw = ROAD_HW, dx = 1, pair = false } = {}) {
 }
 const lightKind = (label, sign, shape, hint) => ({ label, sign, shape, parts: (o) => shape().parts(o), solids: shape().solids, decks: [], ghost: shape().ghost, lights: shape().lights, hint });
 
+// ---------------------------------------------------------------- SCENERY: FLAGS, PALMS
+// (user, 2026-11-01: "you can add flags and palms"): beside the road like the street lights (point at the side). The
+// cloth is the engine's Verlet flag (v3/props/flagFactory.js, the RTS's) — each its own little sim, stepped by the
+// obstacle set's clock (`animate`); the designs are Thunderline's own colours, no real brand.
+const flagTextures = new Map();
+/** A flag's design on a canvas: "bolt" (navy, a cyan bolt, an orange hem) or "chevron" banners in `color`. */
+function flagTexture(kind, color = "#3fd2ff") {
+  const key = `${kind}|${color}`;
+  if (flagTextures.has(key) || typeof document === "undefined") return flagTextures.get(key) ?? null;
+  const c = document.createElement("canvas");
+  c.width = kind === "bolt" ? 384 : 128; c.height = kind === "bolt" ? 256 : 448;
+  const g = c.getContext("2d"), W = c.width, H = c.height;
+  if (kind === "bolt") {
+    g.fillStyle = "#101a2e"; g.fillRect(0, 0, W, H);
+    g.fillStyle = "#ff7a1a"; g.fillRect(0, H - 26, W, 26);
+    g.fillStyle = "#3fd2ff";
+    g.beginPath(); g.moveTo(W * 0.56, H * 0.1); g.lineTo(W * 0.3, H * 0.55); g.lineTo(W * 0.48, H * 0.55); g.lineTo(W * 0.38, H * 0.9); g.lineTo(W * 0.72, H * 0.4); g.lineTo(W * 0.53, H * 0.4); g.closePath(); g.fill();
+  } else {
+    g.fillStyle = "#101a2e"; g.fillRect(0, 0, W, H);
+    g.fillStyle = color;
+    for (let k = 0; k < 4; k++) { const y = 40 + k * 70; g.beginPath(); g.moveTo(14, y + 40); g.lineTo(W / 2, y); g.lineTo(W - 14, y + 40); g.lineTo(W - 14, y + 64); g.lineTo(W / 2, y + 24); g.lineTo(14, y + 64); g.closePath(); g.fill(); }
+    g.fillRect(0, H - 22, W, 22);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+  flagTextures.set(key, tex);
+  return tex;
+}
+/** One flag on its own pole at local x; returns its group (and pushes its sim's step into `anims`). */
+function flagOn(x, { w, h, pole, tex }, anims) {
+  const f = createFlagProp({ clothWidth: w, clothHeight: h, poleHeight: pole, poleRadius: 0.1, xSegs: 12, ySegs: 10, showPole: false, windIntensity: 260, windSpeed: 900 });
+  const cloth = f.group.children[1];
+  if (tex) { cloth.material.map = tex; cloth.material.color.set(0xffffff); cloth.material.needsUpdate = true; }
+  f.group.position.x = x;
+  anims.push(f.update);
+  return f.group;
+}
+const FLAGS = {
+  mast: { gap: 4, poles: [0], w: 6, h: 4, pole: 15, tex: () => flagTexture("bolt") },
+  banners: { gap: 3, poles: [-3, 0, 3], w: 1.3, h: 4.2, pole: 7.5, tex: (i) => flagTexture("chevron", ["#3fd2ff", "#ff7a1a", "#e8edf5"][i]) },
+};
+const flagShapes = new Map();
+function flagShape({ hw = ROAD_HW, dx = 1, style = "mast" } = {}) {
+  const side = dx < 0 ? -1 : 1, key = `${hw}|${side}|${style}`, F = FLAGS[style];
+  if (!flagShapes.has(key)) {
+    const y0 = -1.0, xp = side * (hw + F.gap);
+    // (along the road, the poles: the cloth hangs toward the way the car comes, +Z)
+    const poles = F.poles.map((z) => new THREE.CylinderGeometry(0.1, 0.14, F.pole - y0, 10).rotateY(0).translate(xp, (F.pole + y0) / 2, z));
+    const solids = F.poles.map((z) => box(0.35, F.pole - y0, 0.35, xp, (F.pole + y0) / 2, z));
+    const parts = () => {
+      const m = mats(), g = new THREE.Group(), anims = [];
+      g.add(new THREE.Mesh(mergeGeometries(poles), m.white));
+      F.poles.forEach((z, i) => {
+        const fg = flagOn(0, { w: F.w, h: F.h, pole: F.pole, tex: F.tex(i) }, anims);
+        fg.position.set(xp, y0, z);
+        fg.rotation.y = Math.PI / 2; // (the cloth's +X runs toward +Z: it flies back along the road)
+        g.add(fg);
+      });
+      let last = null;
+      g.userData.animate = (t) => { const dt = last == null ? 1 / 60 : Math.min(0.05, Math.max(0, t - last)); last = t; if (dt > 0) for (const a of anims) a(dt); };
+      return g;
+    };
+    flagShapes.set(key, { solids, ghost: mergeGeometries(solids), parts });
+  }
+  return flagShapes.get(key);
+}
+// PALM: the old game's palm model (public/models/palmtest_compressed.glb, 12 m), the trunk solid; a simple stand-in
+// until it is loaded
+const PALM = { gap: 5, trunk: 0.45 };
+const palmShapes = new Map();
+function palmShape({ hw = ROAD_HW, dx = 1 } = {}) {
+  const side = dx < 0 ? -1 : 1, key = `${hw}|${side}`;
+  if (!palmShapes.has(key)) {
+    const xp = side * (hw + PALM.gap), y0 = -1.0;
+    const solids = [box(0.7, 12 - y0, 0.7, xp, (12 + y0) / 2, 0)];
+    const parts = () => {
+      const g = new THREE.Group(), model = physPalm();
+      if (model) { model.position.set(xp, y0, 0); g.add(model); }
+      else g.add(new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.4, 12 - y0, 8).translate(xp, (12 + y0) / 2, 0), mats().top));
+      return g;
+    };
+    palmShapes.set(key, { solids, ghost: solids[0], parts });
+  }
+  return palmShapes.get(key);
+}
+
+// ---------------------------------------------------------------- SCENERY: FENCES ALONG A PIECE'S EDGE
+// (user, 2026-11-01: "the barbed wire and chain link fences"): the engine's fence and wire (v3/props/objects — the old
+// game's) laid along a piece's EDGE, its whole length (the roads float: beside them a fence would hang in the air — on
+// the deck's edge it is a motorsport catch fence). `edge`: the builder samples the piece's edge (edgeSnap) into the
+// prop — [x, y, z] every 2 m in the PIECE's frame (the prop's M is the piece's): it follows the turn and the slope, and
+// is re-laid with the piece. Solid: a thin wall per stretch.
+const edgeShapes = new Map();
+function edgeShape(kind, { edge = null, dx = 1 } = {}) {
+  const pts = edge?.length >= 2 ? edge : [[dx * (ROAD_HW - 0.4), 0, 0], [dx * (ROAD_HW - 0.4), 0, -24]];
+  const key = `${kind}|${JSON.stringify(pts)}`;
+  if (!edgeShapes.has(key)) {
+    const E = EDGE_KINDS[kind], solids = [];
+    for (let i = 1; i < pts.length; i++) {
+      const [x0, y0, z0] = pts[i - 1], [x1, y1, z1] = pts[i], L = Math.hypot(x1 - x0, z1 - z0);
+      if (L < 1e-3) continue;
+      solids.push(box(E.thick, E.h, L + 0.05).rotateY(Math.atan2(x1 - x0, z1 - z0)).translate((x0 + x1) / 2, (y0 + y1) / 2 + E.h / 2, (z0 + z1) / 2));
+    }
+    // (the fence builders walk a flat path; the posts stand on the edge's height there — the nearest sample's)
+    const heightAt = (x, z) => { let best = pts[0], bd = Infinity; for (const p of pts) { const d = (p[0] - x) ** 2 + (p[2] - z) ** 2; if (d < bd) { bd = d; best = p; } } return best[1]; };
+    const parts = () => {
+      const g = new THREE.Group();
+      const mesh = E.build({ points: pts.map(([x, , z]) => ({ x, y: 0, z })), params: { ...E.params, pathSegments: Math.max(12, Math.round(pts.length * 1.5)) }, getWorldHeight: heightAt });
+      if (mesh) g.add(mesh);
+      return g;
+    };
+    edgeShapes.set(key, { solids, ghost: solids.length ? mergeGeometries(solids) : box(0.2, 2, 2), parts });
+    if (edgeShapes.size > 64) edgeShapes.delete(edgeShapes.keys().next().value); // (the ghost's every position: keep a few)
+  }
+  return edgeShapes.get(key);
+}
+const EDGE_KINDS = {
+  sc_fence: { build: buildChainLinkFenceMesh, h: 3.2, thick: 0.2, inset: 0.15, params: { height: 3.2, postSpacing: 3, topRail: true, arms: true, armSide: "in", strands: 3, coil: false, meshPitch: 0.3, meshWire: 0.05, meshOpacityCut: 0.3 } }, // (coarser, thicker wire than the lab's 14 cm / 2 cm: at racing distance that weave vanished into its mips)
+  sc_barbwire: { build: buildBarbWireMesh, h: 1.4, thick: 0.6, inset: 0.6, params: { stacking: "pyramid", coilRadius: 0.5, coilPitch: 0.34, segsPerRev: 8, stakes: true, stakeSpacing: 4 } },
+};
+/** How far inside the road's edge a kind's run stands (the builder's edgeSnap). */
+export const edgeInset = (kind) => EDGE_KINDS[kind]?.inset ?? 0;
+/** A straight run centred on its own origin, along its Z (2 m samples): the free-placed fence's path. */
+const straightRun = (L) => Array.from({ length: Math.round(L / 2) + 1 }, (_, i) => [0, 0, -L / 2 + i * 2]);
+const freeRunKind = (label, kind, L, hint) => {
+  const sh = edgeShape(kind, { edge: straightRun(L) });
+  return { label, parts: sh.parts, solids: sh.solids, decks: [], ghost: sh.ghost, footprint: { hx: EDGE_KINDS[kind].thick / 2 + 0.3, hz: L / 2 }, hint };
+};
+const edgeKind = (label, kind, hint) => ({ label, edge: true, shape: (p) => edgeShape(kind, p), parts: (o) => edgeShape(kind).parts(o), solids: edgeShape(kind).solids, decks: [], ghost: edgeShape(kind).ghost, hint });
+
 export const OBSTACLES = {
   ...MOVERS2,
   ...MOVERS3,
@@ -1112,6 +1245,15 @@ export const OBSTACLES = {
   ob_open_cyl: { label: "Open cylinder", halfW: OPEN_CYL.r + OPEN_CYL.wall, parts: openCylParts, solids: [...CYL_SKIRTS, ...CYL_RIM_SOLIDS], decks: [CYL_INNER], ghost: mergeGeometries([CYL_OUTER, CYL_INNER].map((g) => g.toNonIndexed())), hint: "A big open pipe on the road: drive through it, ride up its walls" },
   sc_street_light: lightKind("Street light", "side", (p) => streetLightShape({ ...p, pair: false }), "A tall lamp past the road's edge, its arm over the road: it lights the road at night"),
   sc_street_lights: lightKind("Street lights · pair", "pair", (p) => streetLightShape({ ...p, pair: true }), "Two lamps facing each other across the road: they light it at night"),
+  sc_flag: lightKind("Flag", "side", (p) => flagShape({ ...p, style: "mast" }), "A big flag on a 14 m mast beside the road, flying in the wind"),
+  sc_banners: lightKind("Banner flags", "side", (p) => flagShape({ ...p, style: "banners" }), "Three tall banners beside the road, cyan, orange and white"),
+  sc_palm: lightKind("Palm", "side", palmShape, "A 12 m palm beside the road"),
+  // FREE RUNS, as the old game places them (user, 2026-11-01: "place them also like the old game"): a straight run
+  // anywhere — on the ground or on a road — turned with Q / E
+  sc_fence_run: freeRunKind("Chain-link fence", "sc_fence", 24, "A straight 24 m chain-link fence, anywhere: on the ground or a road (Q / E turn it)"),
+  sc_wire_run: freeRunKind("Barbed wire", "sc_barbwire", 20, "A straight 20 m run of barbed wire, anywhere: on the ground or a road (Q / E turn it)"),
+  sc_fence: edgeKind("Catch fence · edge", "sc_fence", "A 3 m chain-link fence along this piece's edge, its whole length (it follows the curve)"),
+  sc_barbwire: edgeKind("Barbed wire · edge", "sc_barbwire", "Coils of barbed wire along this piece's edge, its whole length (it follows the curve)"),
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
@@ -1221,7 +1363,7 @@ export function obstacleLook(kind, p, o = {}) {
 export function buildObstacleSet(props = [], { look = true, physics = false } = {}) {
   const group = new THREE.Group();
   group.name = "obstacles";
-  const decks = [], solids = [], movers = [], bodies = [];
+  const decks = [], solids = [], movers = [], bodies = [], anims = []; // anims: looks that move by themselves (the flags' cloth)
   const up = new THREE.Vector3();
   for (const p of props) {
     if (!OBSTACLES[p.kind]) continue;
@@ -1239,6 +1381,7 @@ export function buildObstacleSet(props = [], { look = true, physics = false } = 
       vis.userData.uid = p.uid;
       group.add(vis);
       armVis = vis.getObjectByName("arm") ?? null;
+      if (vis.userData.animate) anims.push(vis.userData.animate);
     }
     if (def.mover) {
       // the arm turns about the obstacle's own up, through its origin
@@ -1282,6 +1425,7 @@ export function buildObstacleSet(props = [], { look = true, physics = false } = 
     }
   }
   function setTime(t) {
+    for (const a of anims) a(t);
     for (const m of movers) {
       m.t = t;
       if (m.pose) m.pose(t, m.rot); else m.rot.makeRotationY(m.omega * t);

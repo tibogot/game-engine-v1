@@ -149,8 +149,13 @@ async function loadKit(name, k) {
     console.warn(`[physProps] the ${name} kit is not loaded: the procedural look stays`, e?.message ?? e);
   }
 }
+// THE PALM (scenery): the old game's model and its loader (modular-road-v3/modularRoadPalm.js), loaded with the rest —
+// imported when loaded, so the Node tests that build obstacles never touch the glTF loader
+let palmMod = null;
+/** A placed palm's model (a fresh group sharing the template's meshes), or null until loaded. */
+export const physPalm = () => (palmMod?.palmReady() ? palmMod.makePalm() : null);
 export function loadPhysAssets() {
-  return (assetsLoad ??= Promise.all([...Object.entries(KITS).map(([n, k]) => loadKit(n, k)), ...Object.entries(MODELS).map(async ([kind, m]) => {
+  return (assetsLoad ??= Promise.all([import("../../../modular-road-v3/modularRoadPalm.js").then(async (m) => { await m.preloadPalm(); palmMod = m; }).catch((e) => console.warn("[physProps] the palm is not loaded", e?.message ?? e)), ...Object.entries(KITS).map(([n, k]) => loadKit(n, k)), ...Object.entries(MODELS).map(async ([kind, m]) => {
     try {
       const [gltf, map, normalMap, orm] = await Promise.all([
         getSharedGltfLoader().loadAsync(m.glb),
