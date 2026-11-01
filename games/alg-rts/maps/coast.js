@@ -15,10 +15,11 @@
 // camera looks SOUTH, from the sea inland — the French hold the coast at the BOTTOM of the screen
 // (the post behind the bay, the port between it and the sea: their rear), the FLN come down from
 // the ridges at the TOP. The cap (north-east) bottom-left, its cliffs facing the camera; the west
-// coast down the right edge. Points and the AI: the mission's next step.
+// coast down the right edge. The objectives, supply and the AI: 2026-11-01 (LAYOUT below).
 
 /** THE PLAYABLE AREA: 500 m, the sea along its north and west. */
-import { FOOT, HS, house } from "./villageKit.js";
+import { t } from "../i18n/i18n.js";
+import { FOOT, HS, hamlet, house, koubbaAndCemetery } from "./villageKit.js";
 
 export const PLAY = { x0: -250, x1: 250, z0: -250, z1: 250 };
 
@@ -42,10 +43,38 @@ export const LAYOUT = {
     // ── Starts: the post at the bottom (behind the bay), the katiba at the top (the ridges) ──
     { kind: "french", name: "Poste de la plage", x: -40, z: -20, r: 34, turn: 35 },
     { kind: "aln", name: "Katiba des crêtes", x: 40, z: 205, r: 26, turn: -30 },
+    // ── THE OBJECTIVES (2026-11-01, you: "lets go with 1" — the coast playable: its HUD read "villages 0/0"). Seven
+    // flagged places, as Oued Abdi's (algUnits: a map with `point` sites fights over those): the French side's three
+    // near the post and the sea, two in the middle on the road and the plain, two up toward the katiba. Their kinds
+    // are the coast's own — the showroom builds its OLD pieces (wells, a zeriba, the SAS post) for "hamlet", "koubba"…;
+    // the kits build these (portTown, COAST_VILLAGES below) ──
+    { kind: "port", name: "Port de la Marsa", x: 56, z: -72, r: 40, point: true },
+    { kind: "point", name: "Vigie du cap", x: 190, z: -165, r: 16, point: true },        // (the cape's top, 55 m: up its south slope)
+    { kind: "village", name: "Mechta Ouled Ali", x: -130, z: 30, r: 30, point: true },   // (the west plain, by the shore)
+    { kind: "farm", name: "Ferme Ben Salah", x: 85, z: 40, r: 20, point: true },         // (a farm, east of the road)
+    { kind: "point", name: "Carrefour de la route", x: 20, z: 100, r: 16, point: true }, // (on the road, the plain's middle)
+    { kind: "village", name: "Mechta des crêtes", x: 175, z: 115, r: 30, point: true },  // (on the ridges' shelf, 39 m)
+    { kind: "marabout", name: "Sidi Mabrouk", x: -110, z: 160, r: 14, point: true },     // (the saint's tomb, the FLN's west)
   ],
   // NO WADI (2026-10-13, you: "the carved dry river — I don't think we need it"): it cut the map in two
   // with nothing to fight over. The coast's cover is its villages, walls, vines and tree lines.
   wadis: [],
+  // SUPPLY (munitions / fuel, CoH's): spread over the plain between the places, a pair by each start
+  supply: [
+    { name: "Dépôt de la plage", x: -90, z: -60, res: "mun" },
+    { name: "Pompe de la route", x: 10, z: -40, res: "fuel" },
+    { name: "Dunes de l'ouest", x: -170, z: -50, res: "fuel" },
+    { name: "Pied du cap", x: 130, z: -110, res: "mun" },
+    { name: "Gué de la plaine", x: 40, z: 30, res: "mun" },
+    { name: "Puits des oliviers", x: -60, z: 60, res: "fuel" },
+    { name: "Vignes Ben Salah", x: 130, z: 60, res: "fuel" },
+    { name: "Haies de l'ouest", x: -150, z: 110, res: "mun" },
+    { name: "Talus des crêtes", x: 100, z: 150, res: "mun" },
+    { name: "Col de l'est", x: 210, z: 40, res: "fuel" },
+    // the FLN's own pair by the katiba
+    { name: "Cache des crêtes", x: 90, z: 215, res: "mun" },
+    { name: "Bergerie du col", x: -20, z: 225, res: "fuel" },
+  ],
 };
 
 /** The road: from the post's gate (its north side, toward the bay and the port), round its east side
@@ -142,6 +171,34 @@ function portTown() {
 }
 const PORT = portTown();
 
+/**
+ * THE COAST'S VILLAGES (2026-11-01, the objectives): the mechta kit's houses as Oued Abdi's (villageKit hamlet), TURNED
+ * (`flip`: written fronts to +Z for the Aurès' camera; this one looks south, so a front faces -Z). Each house its own
+ * pad; garrisons, damage, cover, sight as every town house.
+ */
+const at = (name) => LAYOUT.sites.find((s) => s.name === name);
+const OA = at("Mechta Ouled Ali"), FR = at("Ferme Ben Salah"), CR = at("Mechta des crêtes"), SM = at("Sidi Mabrouk");
+const COAST_VILLAGES = [
+  // MECHTA OULED ALI (the west plain): two rows behind a small square, a house at each side of it, a yard, a lean-to and
+  // an oven; one house shelled
+  hamlet(OA.x, OA.z, { flip: true,
+    rows: [{ types: ["petite", "etage", "petite"], x: -11, z: -6, states: { 2: "damaged" } }, { types: ["etage", "petite", "petite"], x: -13, z: -18, yards: [1] }],
+    sides: [{ type: "etage", x: -15.5, z: 2 }, { type: "petite", x: 15, z: 0.5 }],
+    props: [{ type: "appentis", x: 16, z: -9 }, { type: "tabouna", x: -7, z: 3 }] }),
+  // FERME BEN SALAH (the plain's middle, east of the road): the farmhouse and its neighbour, their yard, the lean-to, the
+  // threshing floor out front, the sheepfold beside
+  hamlet(FR.x, FR.z, { flip: true,
+    rows: [{ types: ["etage", "petite"], x: -14, z: 2, gap: 1.5, yards: [0] }],
+    props: [{ type: "appentis", x: 5, z: -1 }, { type: "aire", x: -4, z: 13 }, { type: "bergerie", x: 18, z: 2 }] }),
+  // MECHTA DES CRÊTES (the ridges' shelf, the FLN's side): a short row, a house on the square's side — shelled —, an oven
+  hamlet(CR.x, CR.z, { flip: true,
+    rows: [{ types: ["etage", "petite", "etage"], x: -12, z: -5 }],
+    sides: [{ type: "petite", x: 14, z: 1, state: "damaged" }],
+    props: [{ type: "tabouna", x: -6, z: 3 }, { type: "appentis", x: -16, z: 2 }] }),
+  // SIDI MABROUK: the koubba, its door to the camera; the village's dead before it (north)
+  { houses: [], props: koubbaAndCemetery(SM.x, SM.z, SM.x + 4, SM.z - 22, { seed: 1955, cols: 5, rows: 3, face: -1 }) },
+];
+
 export const MAP = {
   id: "coast",
   viewYaw: 0,   // the camera looks south: the post at the bottom, the katiba at the top (layout.js)
@@ -152,7 +209,9 @@ export const MAP = {
   name: "Côte du Constantinois — août 1955",
   level: "/levels/alg-coast.v3proj",
   tracks: [{ name: "Route de la côte", kind: "piste", from: "gate", to: "Katiba des crêtes", length: 420, points: TRACK }],
-  supply: [],
+  supply: LAYOUT.supply,
+  // the briefing's list of the places (algBattle: a map with flagged objectives)
+  places: t("le port, des villages, une ferme, un carrefour, la vigie du cap, un marabout"),
   handPlaced: false,
   // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off). PROVISIONAL, as the map:
   // the battle's own (the FLN's AI, the fog of war); its scenery chosen when the coast is built —
@@ -163,7 +222,8 @@ export const MAP = {
   sea: { level: SEA_LEVEL },
   // THE PORT (2026-10-31, the Blender pieces — portTown above): the TOWN field's. (The procedural one of 2026-10-16,
   // algPort.js's `port: { front, mole }`, retired from the map; the lab keeps it to compare.)
-  town: { houses: PORT.houses, props: PORT.props },
+  // (+ its villages, the objectives: COAST_VILLAGES)
+  town: { houses: [...PORT.houses, ...COAST_VILLAGES.flatMap((v) => v.houses)], props: [...PORT.props, ...COAST_VILLAGES.flatMap((v) => v.props)] },
   // THE CAP'S ROCKS REMOVED (2026-11-01, you: "the rocks we added on it — it looks bad, so remove them"): the slabs of
   // 2026-10-16 (tools/algCoastLevel.mjs still writes maps/coastRocks.js; the map no longer places them). Nothing of
   // algLandmarks' scenery (a map with `scenery` starts at 0).

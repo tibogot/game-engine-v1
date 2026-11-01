@@ -62,7 +62,17 @@ export function village(sx, sz, types, { ring = [22, -168, -12], gap = 3.5, dama
  * houses' indices) get a WALLED YARD behind them, its open side 15 cm into the house's back wall; `props`
  * `{ type, x, z }` (a lean-to, an oven) their footprint's centre, facing the camera. Returns { houses, props }.
  */
-export function hamlet(sx, sz, { rows, sides = [], props = [] }) {
+export function hamlet(sx, sz, opts) {
+  const v = hamletNorth(sx, sz, opts);
+  return opts.flip ? { houses: v.houses.map((r) => turned(r, sx, sz)), props: v.props.map((r) => turned(r, sx, sz)) } : v;
+}
+/** A town row turned 180° about (sx, sz) — `flip` (2026-11-01, the coast: its camera looks SOUTH, +Z, so a front faces
+ *  -Z there; the hamlet's layout, written fronts to +Z for the Aurès' camera, turned whole). */
+export function turned(r, sx, sz) {
+  const [ty, st, x, y, z, yaw, fx, fz, hx, hz, ...rest] = r;
+  return [ty, st, 2 * sx - x, y, 2 * sz - z, yaw + Math.PI, 2 * sx - fx, 2 * sz - fz, hx, hz, ...rest];
+}
+function hamletNorth(sx, sz, { rows, sides = [], props = [] }) {
   const houses = [], extra = [];
   for (const { types, x, z, gap = 0.2, states = {}, yards = [] } of rows) {
     let lx = x;
@@ -126,8 +136,9 @@ export function terraced(key, sx, sz, [fx, fz], { rows, walls = [], props = [] }
  * the axis 18° (NNE–SSW), the head NNE (the body on its right side, facing the qibla, ~108°) — in loose rows, some
  * missing, a few whitewashed; a low broken wall along their feet. `cols` x `rows` the grid before the gaps. Town props.
  */
-export function koubbaAndCemetery(kx, kz, cx, cz, { seed = 1958, cols = 7, rows = 5 } = {}) {
-  const props = kx == null ? [] : [house("koubba", "intact", kx, kz, kx, kz + 50), house("hawsh", "intact", kx, kz, kx, kz + 50)];   // (its enclosure: its own piece)
+export function koubbaAndCemetery(kx, kz, cx, cz, { seed = 1958, cols = 7, rows = 5, face = 1 } = {}) {
+  // (`face` -1: its door to -Z — the coast's camera looks south)
+  const props = kx == null ? [] : [house("koubba", "intact", kx, kz, kx, kz + 50 * face), house("hawsh", "intact", kx, kz, kx, kz + 50 * face)];   // (its enclosure: its own piece)
   if (cx == null) return props;
   const th = Math.PI - (18 * Math.PI) / 180;   // (the grave's local +Z, its head, toward NNE)
   let st = seed;
