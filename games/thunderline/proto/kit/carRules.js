@@ -65,6 +65,15 @@ export function createCarRules(car, { boostPads = [], magnets = [], cutZones = n
           if (Math.abs(lp.x) < 8 && lp.y > -1 && lp.y < 3 && lp.z < -4 && lp.z > -28) boostLeft = BOOST.time;
         } else {
           lp.copy(car.body.pos).applyMatrix4(pad.inv);
+          // a BOOST TUBE: inside its hoop, the speed along it raised to pad.v (at most pad.accel m/s² — a punch, not a
+          // teleport), wheels down or flying; going through it backwards does nothing
+          if (pad.tube) {
+            if (Math.abs(lp.z) < pad.hz && lp.x * lp.x + (lp.y - pad.cy) ** 2 < pad.r * pad.r) {
+              const along = car.body.vel.dot(pad.fwd);
+              if (along > 0 && along < pad.v) car.body.vel.addScaledVector(pad.fwd, Math.min(pad.accel * dt, pad.v - along));
+            }
+            continue;
+          }
           if (!(Math.abs(lp.x) < pad.hx && Math.abs(lp.z) < pad.hz && lp.y > -1 && lp.y < 3)) continue;
           if (!pad.jump) { boostLeft = BOOST.time; continue; }
           // a JUMP PAD: wheels on it, up to JUMP.v along its up (raised, not added: no stacking)

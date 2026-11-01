@@ -790,6 +790,86 @@ function archParts() {
   return g;
 }
 
+// ---------------------------------------------------------------- BOOST TUBE · OPEN CYLINDER
+// (user, 2026-11-01: "the booster tube, the open cylinder" — from the old game: a hoop that punches the car to speed,
+// and a big open pipe lying on the road to ride inside)
+// BOOST TUBE: an arch of glowing chevrons over the road (the hoop's upper half: its zone the whole circle); anything going
+// through is raised to BOOST_TUBE.v along the tube — on the wheels or in the air (carRules)
+export const BOOST_TUBE = { r: 12.6, len: 6, v: 68, accel: 400 };
+function boostTubeParts() {
+  const mm = mats(), g = new THREE.Group(), { r, len } = BOOST_TUBE, cy = 0.6;
+  const K = 9, ROWS = 3, half = 1.8, stroke = 0.5, pitch = len * 0.3, pos = [];
+  const at = (ph, z, rr = r) => pos.push(Math.cos(ph) * rr, cy + Math.sin(ph) * rr, z);
+  const tri = (a, b, c) => { at(...a); at(...b); at(...c); };
+  for (let row = 0; row < ROWS; row++) {
+    const zTip = -pitch + row * pitch, zBack = zTip + len * 0.22, zIn = zTip + (zBack - zTip) * 0.48; // (tips point along −Z: the way through)
+    const dO = half / r, dI = Math.max(0.05, (half - stroke) / r);
+    for (let k = 0; k <= K; k++) {
+      const ph = -0.05 + ((Math.PI + 0.1) * k) / K; // (over the road only: an arch — the lower half hung below the deck over the drop)
+      tri([ph, zTip], [ph + dO, zBack], [ph + dI, zBack]); tri([ph, zTip], [ph + dI, zBack], [ph, zIn]);
+      tri([ph, zTip], [ph, zIn], [ph - dI, zBack]); tri([ph, zTip], [ph - dI, zBack], [ph - dO, zBack]);
+    }
+  }
+  const chev = new THREE.BufferGeometry();
+  chev.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  chev.computeVertexNormals();
+  const glow = new THREE.MeshStandardMaterial({ color: BOLT, emissive: BOLT, emissiveIntensity: 1.6, roughness: 0.4, side: THREE.DoubleSide });
+  const m = new THREE.Mesh(chev, glow);
+  m.userData.noShadow = true;
+  g.add(m);
+  // two thin hoops at the mouths (read the tube's edge from far)
+  for (const z of [-len / 2, len / 2]) g.add(new THREE.Mesh(new THREE.TorusGeometry(r, 0.14, 6, 64, Math.PI + 0.1).rotateZ(-0.05).translate(0, cy, z), mm.bolt));
+  return g;
+}
+const BOOST_TUBE_GHOST = new THREE.TorusGeometry(BOOST_TUBE.r, 0.6, 6, 32, Math.PI).translate(0, 0.6, 0);
+
+// OPEN CYLINDER: a pipe 30 m long lying along the road, its inner floor flush with the road (no step in): ride its
+// walls inside. The inside is a DECK (the wheels drive it); the outside and the two rims are solid.
+export const OPEN_CYL = { r: 9, wall: 0.6, L: 30 };
+const CYL_CY = OPEN_CYL.r + 0.02; // (the inner floor 2 cm over the road: never z-fighting)
+const cylAlong = (geo) => geo.rotateX(Math.PI / 2).translate(0, CYL_CY, 0); // (a cylinder's axis turned along Z)
+const CYL_INNER = cylAlong(new THREE.CylinderGeometry(OPEN_CYL.r, OPEN_CYL.r, OPEN_CYL.L, 64, 8, true));
+const CYL_OUTER = cylAlong(new THREE.CylinderGeometry(OPEN_CYL.r + OPEN_CYL.wall, OPEN_CYL.r + OPEN_CYL.wall, OPEN_CYL.L, 64, 1, true));
+const flipped = (geo) => {
+  const g = geo.clone(), ix = g.index.array;
+  for (let i = 0; i < ix.length; i += 3) { const t = ix[i + 1]; ix[i + 1] = ix[i + 2]; ix[i + 2] = t; }
+  const n = g.attributes.normal.array;
+  for (let i = 0; i < n.length; i++) n[i] = -n[i];
+  return g;
+};
+const CYL_INNER_LOOK = flipped(CYL_INNER);
+// (SOLID: the two rims, as 0.5 m-deep rings of boxes, and SKIRTS under the low flanks — the road up to the shell, where
+// a car beside the pipe would run into it. Not the shell itself: 0.6 m behind the inner floor, a car riding the wall
+// inside touched it and crashed at 3 m up, 2026-11-01)
+const CYL_SKIRTS = [];
+for (let x = 4.6; x < 6.6; x += 0.4) { // (from where the floor's edge at the mouth is a 1.2 m step: nearer the middle the wheels climb it)
+  const ro = OPEN_CYL.r + OPEN_CYL.wall, y = CYL_CY - Math.sqrt(ro * ro - x * x); // (the shell's underside at the box's inner edge: its lowest)
+  if (y > 0.05) for (const sx of [1, -1]) CYL_SKIRTS.push(box(0.4, y, OPEN_CYL.L, sx * (x + 0.2), y / 2, 0));
+}
+const CYL_RIM_SOLIDS = [1, -1].flatMap((s) => Array.from({ length: 32 }, (_, i) => {
+  // (from 15 cm outside the floor: flush with it, a tyre pressed 3 cm into the floor near the exit was INSIDE the rim's
+  // box — a 234 → 104 km/h crash into nothing you could see)
+  const r0 = OPEN_CYL.r + 0.15, r1 = OPEN_CYL.r + OPEN_CYL.wall, a = (2 * Math.PI * (i + 0.5)) / 32, rm = (r0 + r1) / 2;
+  if (Math.sin(a) * rm + CYL_CY < 0.3) return null; // (under the road: nothing to hit)
+  return box(r1 - r0, (2 * Math.PI * rm) / 32 + 0.1, 0.5).rotateZ(a).translate(Math.cos(a) * rm, CYL_CY + Math.sin(a) * rm, s * (OPEN_CYL.L / 2 - 0.25));
+}).filter(Boolean));
+const CYL_RIMS = [1, -1].map((s) => new THREE.RingGeometry(OPEN_CYL.r, OPEN_CYL.r + OPEN_CYL.wall, 64).translate(0, CYL_CY, (s * OPEN_CYL.L) / 2));
+function openCylParts() {
+  const mm = mats(), g = new THREE.Group();
+  const shell = new THREE.MeshStandardMaterial({ color: 0x1c2436, roughness: 0.55, metalness: 0.3, side: THREE.DoubleSide });
+  const inside = new THREE.MeshStandardMaterial({ color: 0x2a2f3a, roughness: 0.85, metalness: 0.05 });
+  g.add(new THREE.Mesh(CYL_OUTER, shell), new THREE.Mesh(CYL_INNER_LOOK, inside), ...CYL_RIMS.map((r) => new THREE.Mesh(r, shell)));
+  // glowing rings at both mouths and three lines along the inside (the way through, and how far up the wall you are)
+  const glow = [];
+  for (const s of [1, -1]) glow.push(new THREE.TorusGeometry(OPEN_CYL.r + OPEN_CYL.wall / 2, 0.14, 6, 96).translate(0, CYL_CY, (s * OPEN_CYL.L) / 2 + s * 0.05));
+  for (const a of [-Math.PI / 2 + 1.2, -Math.PI / 2 - 1.2, Math.PI / 2]) {
+    const rr = OPEN_CYL.r - 0.03;
+    glow.push(new THREE.BoxGeometry(0.25, 0.04, OPEN_CYL.L - 1).rotateZ(a + Math.PI / 2).translate(Math.cos(a) * rr, CYL_CY + Math.sin(a) * rr, 0));
+  }
+  g.add(new THREE.Mesh(mergeGeometries(glow.map((x) => x.toNonIndexed())), mm.bolt));
+  return g;
+}
+
 export const OBSTACLES = {
   ...GROUND,
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
@@ -820,6 +900,9 @@ export const OBSTACLES = {
   ob_wall_round: { label: "Wall · round hole", halfW: ROAD_HW, parts: roundWallParts, solids: RW_BOXES, decks: [], ghost: mergeGeometries(RW_BOXES), aimAt: { hz: WALL_T / 2 }, hint: "A wall across the road: through its round port" },
   ob_ring_gate: { label: "Ring gate", parts: ringGateParts, solids: RG_BOXES, decks: [], ghost: mergeGeometries(RG_BOXES), air: true, passes: (x, y) => x * x + y * y < (RING_GATE.r - 1.3) ** 2, hint: "A ring in the air: fly through it" },
   ob_arch: { label: "Arch", halfW: AR.outer, parts: archParts, solids: AR_BOXES, decks: [], ghost: mergeGeometries(AR_BOXES), aimAt: { hz: AR.depth / 2 }, hint: "An orange vault: aim through it" },
+  // (no solids: a ring of light. `boost.tube`: carRules raises the speed along it, on the wheels or in the air)
+  ob_boost_tube: { label: "Boost tube", halfW: ROAD_HW, parts: boostTubeParts, solids: [], decks: [], ghost: BOOST_TUBE_GHOST, boost: { tube: true, r: BOOST_TUBE.r - 0.4, cy: 0.6, hz: BOOST_TUBE.len / 2 + 0.5, v: BOOST_TUBE.v, accel: BOOST_TUBE.accel }, hint: `Drive or fly through it: ${Math.round(BOOST_TUBE.v * 3.6)} km/h at once` },
+  ob_open_cyl: { label: "Open cylinder", halfW: OPEN_CYL.r + OPEN_CYL.wall, parts: openCylParts, solids: [...CYL_SKIRTS, ...CYL_RIM_SOLIDS], decks: [CYL_INNER], ghost: mergeGeometries([CYL_OUTER, CYL_INNER].map((g) => g.toNonIndexed())), hint: "A big open pipe on the road: drive through it, ride up its walls" },
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
@@ -829,6 +912,7 @@ export function boostZones(props = []) {
     const M = new THREE.Matrix4().fromArray(p.M);
     const z = { inv: M.clone().invert(), ...OBSTACLES[p.kind].boost };
     if (z.jump) z.up = new THREE.Vector3(0, 1, 0).transformDirection(M);
+    if (z.tube) z.fwd = new THREE.Vector3(0, 0, -1).transformDirection(M); // (the way through: −Z, as along a road)
     return z;
   });
 }

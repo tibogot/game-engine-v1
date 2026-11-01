@@ -93,7 +93,7 @@ const CATS = [
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
   // ON THE GROUND (the physics lab's ramps, kerb, step: obstacles.js GROUND)
   { id: "ground", label: "Ground", tiles: ["ob_ramp_jump", "ob_ramp_kicker", "ob_ramp_slope", "ob_ramp_side", "ob_kerb", "ob_step", "ob_pendulum", "ob_slider", "ob_lowbar"] },
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch", "ob_boost_tube", "ob_open_cyl"] },
   // SIGNS (obstacles.js): beside or over the road — placed like obstacles, never in the way
   { id: "signs", label: "Signs", tiles: ["sg_start", "sg_finish", "sg_chevron", "sg_aim"] },
 ];
