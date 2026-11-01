@@ -14,10 +14,13 @@ import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { RigidBvh, BvhSet } from "../../../../v3/play/modularRoadRigidBvh.js";
-import { body, physLook, physGhost, physModel, physKit, physPalm, ViewLOD } from "./physProps.js";
+import { body, physLook, physGhost, physModel, physKit, physPalm, physLedBuilder, ViewLOD } from "./physProps.js";
 import { createFlag as createFlagProp } from "../../../../v3/props/liveProps.js";
 import { buildChainLinkFenceMesh } from "../../../../v3/props/objects/chainLinkFence.js";
 import { buildBarbWireMesh } from "../../../../v3/props/objects/barbWire.js";
+import { buildAdBillboardMesh, buildAdTotemMesh, setAdPosterImage, AD_BILLBOARD, AD_TOTEM } from "../../../modular-road-v3/modularRoadAdBillboard.js";
+import { buildAdPrismMesh, setAdPrismImages, AD_PRISM } from "../../../modular-road-v3/modularRoadAdPrism.js";
+import { adPoster } from "./adPosters.js";
 import { ledSignMaterial, LED_PITCH } from "./ledSigns.js";
 import { ARCH_LOD_FAR } from "./gateMesh.js";
 import { GATE_WIDTH, GATE_POST_HEIGHT, TIRE_TUBE_R } from "../../../modular-road-v3/modularRoadPropPhysics.js";
@@ -1208,6 +1211,57 @@ const freeRunKind = (label, kind, L, hint) => {
 };
 const edgeKind = (label, kind, hint) => ({ label, edge: true, shape: (p) => edgeShape(kind, p), parts: (o) => edgeShape(kind).parts(o), solids: edgeShape(kind).solids, decks: [], ghost: edgeShape(kind).ghost, hint });
 
+// ---------------------------------------------------------------- SCENERY: LED BOARD, BILLBOARDS
+// (user, 2026-11-01: "the different billboard would be cool … the prism one especially, also the LED board"): the old
+// game's boards (modular-road-v3: the ad billboard and totem, the tri-vision prism; the engine's LED matrix), placed
+// as the old game places them — anywhere, on the ground or a road, Q / E turn — facing the way the car comes (+Z).
+// A board shows Thunderline's own made-up ads (adPosters.js; `ad`: which) or YOUR picture (`img`: a data URL in the
+// track); the LED board chevrons or YOUR text (`text`), scrolling. The builder's panel sets them (Next ad, Your picture,
+// Text).
+const posterOf = (p, portrait) => p?.img ?? adPoster(p?.ad ?? (p?.uid ?? 0), portrait);
+const adShapes = new Map();
+function adShape(kind, p = {}) {
+  const key = `${kind}|${p.ad ?? p.uid ?? 0}|${p.img ? p.img.length + p.img.slice(-24) : ""}|${p.text ?? ""}`;
+  if (!adShapes.has(key)) {
+    const A = AD_SPECS[kind];
+    const parts = () => {
+      const g = new THREE.Group(), board = A.build(p);
+      if (board) g.add(board);
+      return g;
+    };
+    adShapes.set(key, { solids: A.solids, ghost: mergeGeometries(A.solids), parts });
+    if (adShapes.size > 48) adShapes.delete(adShapes.keys().next().value);
+  }
+  return adShapes.get(key);
+}
+const capsuleBoxes = (xs, z, r, h) => xs.map((x) => box(2 * r, h, 2 * r, x, h / 2, z));
+const AD_SPECS = {
+  sc_billboard: {
+    build: (p) => { const g = buildAdBillboardMesh(); setAdPosterImage(g, posterOf(p, false)); return g; },
+    solids: capsuleBoxes([-AD_BILLBOARD.panelW * 0.34, AD_BILLBOARD.panelW * 0.34], -0.38, 0.2, AD_BILLBOARD.panelBottom + AD_BILLBOARD.panelH + 0.55),
+  },
+  sc_prism: {
+    // three faces: the ad and the next two (or your picture on all three)
+    build: (p) => { const g = buildAdPrismMesh(); const a = p?.ad ?? (p?.uid ?? 0); setAdPrismImages(g, p?.img ? [p.img, p.img, p.img] : [0, 1, 2].map((k) => adPoster(a + k, false))); return g; },
+    solids: capsuleBoxes([-AD_PRISM.panelW * 0.34 * AD_PRISM.scale, AD_PRISM.panelW * 0.34 * AD_PRISM.scale], -0.38 * AD_PRISM.scale, 0.2 * AD_PRISM.scale, (AD_PRISM.panelBottom + AD_PRISM.panelH + 0.55) * AD_PRISM.scale),
+  },
+  sc_totem: {
+    build: (p) => { const g = buildAdTotemMesh(); setAdPosterImage(g, posterOf(p, true)); return g; },
+    solids: [box(AD_TOTEM.panelW + AD_TOTEM.frame * 2, AD_TOTEM.baseH + AD_TOTEM.panelH + AD_TOTEM.frame, AD_TOTEM.depth + 0.06, 0, (AD_TOTEM.baseH + AD_TOTEM.panelH + AD_TOTEM.frame) / 2, 0)],
+  },
+  sc_led_board: {
+    build: (p) => physLedBuilder()?.({
+      points: [{ x: 0, y: 0, z: 0 }],
+      params: {
+        ...(p?.text ? { source: "text", text: `${p.text}   •   `, coreColor: "#bff4ff", edgeColor: "#3fd2ff", panSpeed: 0.5 } : { source: "chevron", coreColor: "#ffd27a", edgeColor: "#ff6a00" }),
+        boardW: 8, boardH: 2.2, standHeight: 2.6, legs: true, cols: 96, rows: 26, shape: "round", emissive: 5,
+      },
+    }),
+    solids: capsuleBoxes([-8 * 0.35, 8 * 0.35], -0.05, 0.13, 2.6),
+  },
+};
+const adKind = (label, kind, hint, extra = {}) => ({ label, shape: (p) => adShape(kind, p), parts: (o) => adShape(kind).parts(o), solids: AD_SPECS[kind].solids, decks: [], ghost: adShape(kind).ghost, hint, ...extra });
+
 export const OBSTACLES = {
   ...MOVERS2,
   ...MOVERS3,
@@ -1254,6 +1308,10 @@ export const OBSTACLES = {
   sc_wire_run: freeRunKind("Barbed wire", "sc_barbwire", 20, "A straight 20 m run of barbed wire, anywhere: on the ground or a road (Q / E turn it)"),
   sc_fence: edgeKind("Catch fence · edge", "sc_fence", "A 3 m chain-link fence along this piece's edge, its whole length (it follows the curve)"),
   sc_barbwire: edgeKind("Barbed wire · edge", "sc_barbwire", "Coils of barbed wire along this piece's edge, its whole length (it follows the curve)"),
+  sc_led_board: adKind("LED board", "sc_led_board", "An LED board on two legs: chevrons, or your own scrolling text (Text in the panel)", { ledText: true }),
+  sc_billboard: adKind("Ad billboard", "sc_billboard", "A billboard on two masts: our ads, or your own picture", { advert: "landscape" }),
+  sc_prism: adKind("Ad prism", "sc_prism", "A tri-vision billboard: its slats turn every few seconds through three ads", { advert: "landscape" }),
+  sc_totem: adKind("Ad totem", "sc_totem", "A tall poster cabinet on the ground: our ads, or your own picture", { advert: "portrait" }),
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad

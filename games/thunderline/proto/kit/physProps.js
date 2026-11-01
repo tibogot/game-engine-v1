@@ -154,8 +154,12 @@ async function loadKit(name, k) {
 let palmMod = null;
 /** A placed palm's model (a fresh group sharing the template's meshes), or null until loaded. */
 export const physPalm = () => (palmMod?.palmReady() ? palmMod.makePalm() : null);
+// THE LED BOARD's builder (v3/props/objects/ledMatrix.js): its shader classes need the browser's three — loaded here too
+let ledBuild = null;
+/** The LED board's mesh builder once loaded, or null. */
+export const physLedBuilder = () => ledBuild;
 export function loadPhysAssets() {
-  return (assetsLoad ??= Promise.all([import("../../../modular-road-v3/modularRoadPalm.js").then(async (m) => { await m.preloadPalm(); palmMod = m; }).catch((e) => console.warn("[physProps] the palm is not loaded", e?.message ?? e)), ...Object.entries(KITS).map(([n, k]) => loadKit(n, k)), ...Object.entries(MODELS).map(async ([kind, m]) => {
+  return (assetsLoad ??= Promise.all([import("../../../../v3/props/objects/ledMatrix.js").then((m) => { ledBuild = m.buildLedMatrixMesh; }).catch((e) => console.warn("[physProps] the LED board is not loaded", e?.message ?? e)), import("../../../modular-road-v3/modularRoadPalm.js").then(async (m) => { await m.preloadPalm(); palmMod = m; }).catch((e) => console.warn("[physProps] the palm is not loaded", e?.message ?? e)), ...Object.entries(KITS).map(([n, k]) => loadKit(n, k)), ...Object.entries(MODELS).map(async ([kind, m]) => {
     try {
       const [gltf, map, normalMap, orm] = await Promise.all([
         getSharedGltfLoader().loadAsync(m.glb),

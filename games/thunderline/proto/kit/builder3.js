@@ -34,6 +34,7 @@ import { loadPhysAssets } from "./physProps.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
 import { createTrackLamps } from "./trackLamps.js";
+import { AD_COUNT, pictureToPoster } from "./adPosters.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
 import { thumbStore } from "../../app/thumbStore.js";
@@ -96,7 +97,7 @@ const CATS = [
   { id: "ground", label: "Ground", tiles: ["ob_ramp_jump", "ob_ramp_kicker", "ob_ramp_slope", "ob_ramp_side", "ob_kerb", "ob_step", "ob_pendulum", "ob_slider", "ob_lowbar"] },
   { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch", "ob_boost_tube", "ob_open_cyl", "ob_turnstile", "ob_push_gate", "ob_spin_column", "ob_spin_barrel"] },
   // SCENERY (obstacles.js): what stands beside the road — the street lights light it at night
-  { id: "scenery", label: "Scenery", tiles: ["sc_street_light", "sc_street_lights", "sc_flag", "sc_banners", "sc_palm", "sc_fence_run", "sc_wire_run", "sc_fence", "sc_barbwire"] },
+  { id: "scenery", label: "Scenery", tiles: ["sc_street_light", "sc_street_lights", "sc_flag", "sc_banners", "sc_palm", "sc_fence_run", "sc_wire_run", "sc_fence", "sc_barbwire", "sc_led_board", "sc_billboard", "sc_prism", "sc_totem"] },
   // SIGNS (obstacles.js): beside or over the road — placed like obstacles, never in the way
   { id: "signs", label: "Signs", tiles: ["sg_start", "sg_finish", "sg_chevron", "sg_aim"] },
 ];
@@ -1759,6 +1760,31 @@ function obstacleSnap() {
   const P = new THREE.Vector3(Math.round(hit.x / gridStep) * gridStep, FLOOR_Y, Math.round(hit.z / gridStep) * gridStep);
   return { type: "world", m: new THREE.Matrix4().makeRotationY(rot.yaw * DEG).setPosition(P) };
 }
+/** A selected board's content: the next of our ads, your picture (a file → a data URL kept in the track), the LED text. */
+async function boardContent(act) {
+  const p = (track.props ?? []).find((q) => q.uid === sel);
+  if (!p) return;
+  if (act === "adpic") {
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: "image/*" });
+    const file = await new Promise((r) => { input.onchange = () => r(input.files?.[0] ?? null); input.click(); });
+    if (!file) return;
+    const img = await pictureToPoster(file, OBSTACLES[p.kind].advert === "portrait");
+    snapshot(); p.img = img;
+  } else if (act === "ledtext") {
+    const text = prompt("The LED board's text (empty: chevrons)", p.text ?? "");
+    if (text == null) return;
+    snapshot();
+    if (text.trim()) p.text = text.trim().slice(0, 80); else delete p.text;
+  } else {
+    snapshot();
+    if (act === "adnext") { p.ad = ((p.ad ?? p.uid) + 1) % AD_COUNT; delete p.img; }
+    else if (act === "adclear") delete p.img;
+    else if (act === "ledchev") delete p.text;
+  }
+  rebuild();
+  statusKey = "";
+  renderStatus();
+}
 /** The checkpoint tool in hand: a road piece under the mouse (its gate shown where it will stand). */
 function checkpointSnap() {
   ray.setFromCamera(new THREE.Vector2((mouse.x / innerWidth) * 2 - 1, -(mouse.y / innerHeight) * 2 + 1), camera);
@@ -3101,6 +3127,12 @@ function renderStatus() {
       ? (() => { const a = parseAdjustable(selPc.id), d = ADJUSTABLE[a.base];
           return `<div class="acts">${Object.entries(d.params).map(([pk, q]) => `<button data-act="adj:${pk}:-1" title="Shift: ×4">◀</button><span class="adjv">${q.label} ${adjShow(q, a.p[pk])}</span><button data-act="adj:${pk}:1" title="Shift: ×4">▶</button>`).join("")}</div>`; })()
       : "") +
+    // A BOARD'S CONTENT (obstacles.js adKind): which of our ads, or your own picture; the LED board's text
+    (selPc?.kind && OBSTACLES[selPc.kind]?.advert
+      ? `<div class="acts"><button data-act="adnext" title="The next of our ads">Next ad</button><button data-act="adpic" title="A picture from your computer">Your picture…</button>${selPc.img ? `<button data-act="adclear">Our ads</button>` : ""}</div>`
+      : selPc?.kind && OBSTACLES[selPc.kind]?.ledText
+      ? `<div class="acts"><button data-act="ledtext" title="Your own scrolling text">Text…</button>${selPc.text ? `<button data-act="ledchev">Chevrons</button>` : ""}</div>${selPc.text ? `<div class="row"><span>“${selPc.text.replace(/[<&]/g, "")}”</span></div>` : ""}`
+      : "") +
     // the gizmo's two modes, or why this piece can't move on its own
     (selPc?.kind && selPc.on != null
       ? `<div class="row"><span><b>Drag it</b> along or across the road${canTurn(selPc.kind) ? ` · <kbd>Q</kbd>/<kbd>E</kbd> turn` : ""} · <kbd>Del</kbd> delete</span></div>`
@@ -3136,6 +3168,8 @@ $("status").addEventListener("click", (e) => {
   if (act === "spawnkmh" && track.spawn) { const i = SPAWN_SPEEDS.indexOf(track.spawn.kmh ?? 0); track.spawn.kmh = SPAWN_SPEEDS[(i + 1) % SPAWN_SPEEDS.length]; save(); statusKey = ""; renderStatus(); return; }
   if (act === "spawndel" && track.spawn) { snapshot(); delete track.spawn; rebuild(); statusKey = ""; renderStatus(); return; }
   if (act === "refit") { refitLandings(); return; }
+  // a board's content (the selected prop)
+  if (["adnext", "adpic", "adclear", "ledtext", "ledchev"].includes(act)) { boardContent(act); return; }
   if (act === "jump") {
     // select the jump's lip (a pad: the piece it stands on) and bring the camera to it
     const uid = Number(e.target.closest("button").dataset.uid);
