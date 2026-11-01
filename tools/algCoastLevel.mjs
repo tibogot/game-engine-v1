@@ -270,9 +270,12 @@ console.log(`${ROCKS_FILE}: ${capRocks.length} rocks`);
 const S = man.terrain.splatSize ?? man.splatRes;
 const splat = Buffer.alloc(S * S * 8);   // two planar RGBA planes: layer c in plane c >> 2, channel c & 3
 const put = (t, c, v) => { splat[(c >> 2) * S * S * 4 + t * 4 + (c & 3)] = v; };
-for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
-  const x = -W / 2 + ((j + 0.5) * W) / S, z = -W / 2 + ((i + 0.5) * W) / S, t = i * S + j;
-  const h = H(x, z), depth = SEA - h;
+// THE WATERLINE BLENDED (2026-11-02, you: the saw-tooth at the cape's foot — "check without the ocean … everything you
+// did was wrong"): the paint switched from the under-sea rules to the dry ones at depth 0 exactly, and at the cape's
+// foot — nearly flat ground at sea level — that contour wandered with every centimetre of the ground, drawn on the
+// 0.5 m paint grid with nothing between: the pale seabed against the rock in square teeth (the sea hidden, the mesh's
+// split changed: the same teeth). The two sets of rules are now blended over ±0.6 m of height around the waterline.
+const paintAt = (x, z, depth) => {
   const w = new Float32Array(7);
   if (depth > 0) {
     // under the sea: the beach's pale sand running out to ~6 m (the Mediterranean's turquoise band:
@@ -316,6 +319,16 @@ for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
     const rest = (1 - trk) * (1 - bed) * (1 - rock) * (1 - sand);
     w[3] = rest * Math.min(1, maquis) + strip;
     w[0] = rest * (1 - Math.min(1, maquis)) + ruts;
+  }
+  return w;
+};
+for (let i = 0; i < S; i++) for (let j = 0; j < S; j++) {
+  const x = -W / 2 + ((j + 0.5) * W) / S, z = -W / 2 + ((i + 0.5) * W) / S, t = i * S + j;
+  const depth = SEA - H(x, z), k = smoothstep(-0.6, 0.6, depth);   // (0 dry … 1 under the sea)
+  let w = paintAt(x, z, depth);
+  if (k > 0 && k < 1) {
+    const wet = paintAt(x, z, Math.max(depth, 0.001)), dry = paintAt(x, z, Math.min(depth, 0));
+    w = wet.map((v, c) => v * k + dry[c] * (1 - k));
   }
   const sum = w.reduce((a, b) => a + b, 0) || 1;
   for (let c = 0; c < 7; c++) if (w[c]) put(t, c, Math.round((255 * w[c]) / sum));
