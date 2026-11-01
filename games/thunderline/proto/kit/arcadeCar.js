@@ -402,6 +402,8 @@ export class ArcadeCar extends StuntCar {
       body.addForce(_F);
 
       if (onRoad) this._groundDrive(subDt, down, surf, stunt > 0 ? tr : null, stunt);
+      // ON A MOVING DECK (the Spin barrel): carried round with it (obstacles.js attachMovers)
+      if (down > 0 && this.deckMovers?.length) for (const m of this.deckMovers) m.carry(body, subDt);
       // (the air control ONLY off the road: from 2026-10-29 it ran on the road too — this `else` had become the landing's
       // — and its hold and landing magnet pulled the yaw back toward the travel every substep: the steering got half its
       // turn rate and every drift was straightened. Found 2026-10-30, the hairpin.)

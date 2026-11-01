@@ -11,6 +11,7 @@ import { library, campaign, settings } from "../../app/library.js";
 import { go } from "../../app/nav.js";
 import { attachLesson } from "./lessonCard.js";
 import { createDriveRig } from "./driveSession.js";
+import { createTrackLamps } from "./trackLamps.js";
 import { applyWorld, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 // (game-agnostic, from the RTS games: what the game adds is drawn once under the loading screen)
 import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
@@ -26,6 +27,9 @@ const app = await startV3App({
   // instance counts made 68 vertex shaders differing only in an array size, each its own pipeline compile): the
   // matrices as vertex attributes (the RTS games' boot fix; three r187 shares their node builds). ?instubo=1: off
   instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
+  // REAL LIGHTS AT NIGHT (the street lights: trackLamps.js): the engine's tiled point lights — measured in alg-rts: installed
+  // with no light lit = not installed; 128 lights +0.9 ms. ?locallights=0: off
+  localLights: new URLSearchParams(location.search).get("locallights") !== "0",
   container: $("game"),
   skyMode: "skypro",
   cloudShadows: true,
@@ -80,6 +84,8 @@ const cameFrom = params.get("from"); // "builder" → Back goes there
 applyWorld(app, params.get("world") ?? trackRec?.track?.world);
 // the track's TIME OF DAY (?tod= wins), set before the drive starts: its sun-shadow bake uses this sun
 if (!(params.has("tod") && Number.isFinite(tod))) app.sky?.setTimeOfDay?.(trackRec?.track?.tod ?? DEFAULT_TOD);
+app.sky?.setNightStyle?.("cinematic");
+createTrackLamps(app).sync(trackRec?.track?.props ?? []); // the street lights' real lights (trackLamps.js)
 
 const rig = createDriveRig(app, {
   prefs: settings.get(),

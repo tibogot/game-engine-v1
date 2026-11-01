@@ -13,7 +13,7 @@
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { RigidBvh } from "../../../../v3/play/modularRoadRigidBvh.js";
+import { RigidBvh, BvhSet } from "../../../../v3/play/modularRoadRigidBvh.js";
 import { body, physLook, physGhost, physModel, physKit, ViewLOD } from "./physProps.js";
 import { ledSignMaterial, LED_PITCH } from "./ledSigns.js";
 import { ARCH_LOD_FAR } from "./gateMesh.js";
@@ -870,7 +870,214 @@ function openCylParts() {
   return g;
 }
 
+// ---------------------------------------------------------------- MOVERS, SET 2
+// (user, 2026-11-01: "the spin barrel smooth and probably others" — the old game's movers, new in Thunderline's look).
+// Posed by the RACE CLOCK like the pendulum (ghosts and author times stay fair).
+// TURNSTILE: two bars crossed at car height turning round a post — slip between the arms
+const TS = { span: 20, thick: 0.9, tall: 1.4, y0: 0.4, period: 8 };
+const TS_ARM = mergeGeometries([
+  box(TS.span, TS.tall, TS.thick, 0, TS.y0 + TS.tall / 2, 0), box(TS.thick, TS.tall, TS.span, 0, TS.y0 + TS.tall / 2, 0),
+]);
+const TS_POST = new THREE.CylinderGeometry(0.75, 0.9, TS.y0 + TS.tall + 0.6, 16).translate(0, (TS.y0 + TS.tall + 0.6) / 2, 0);
+const TS_STRIPES = (() => {
+  const s = [];
+  for (const sgn of [1, -1]) for (let k = 1; k <= 4; k++) {
+    const d = sgn * (1.4 + k * 2), y = TS.y0 + TS.tall / 2;
+    s.push(box(0.9, TS.tall + 0.04, TS.thick + 0.04, d, y, 0), box(TS.thick + 0.04, TS.tall + 0.04, 0.9, 0, y, d));
+  }
+  return mergeGeometries(s);
+})();
+// PUSH GATE: a block sliding to and fro along the road, 16 m of travel — get past before it comes back
+const PG = { w: 8, h: 5, d: 3.5, amp: 8, period: 14 };
+const PG_BLOCK = box(PG.w, PG.h, PG.d, 0, PG.h / 2, 0);
+const PG_FACES = (() => {
+  const c = [];
+  for (const z of [PG.d / 2 + 0.03, -PG.d / 2 - 0.03]) for (let i = -2; i <= 2; i++) {
+    const sh = new THREE.Shape();
+    sh.moveTo(-0.6, -0.5); sh.lineTo(0, 0.1); sh.lineTo(0.6, -0.5); sh.lineTo(0.6, -0.05); sh.lineTo(0, 0.55); sh.lineTo(-0.6, -0.05); sh.closePath();
+    const g = new THREE.ShapeGeometry(sh);
+    if (z < 0) g.rotateY(Math.PI); // (the back face's chevrons face out of it too)
+    c.push(g.translate(i * 1.45, PG.h * 0.55, z));
+  }
+  return mergeGeometries(c);
+})();
+const PG_BAND = mergeGeometries([PG.d / 2 + 0.03, -PG.d / 2 - 0.03].map((z) => box(PG.w + 0.04, 0.18, 0.06, 0, PG.h - 0.5, z)));
+// SPIN COLUMN: a square pillar 7 m tall turning on its spot — its corners sweep 2.5 m round it
+const SC = { w: 3.5, h: 7, period: 11 };
+const SC_ARM = box(SC.w, SC.h, SC.w, 0, SC.h / 2, 0);
+const SC_BANDS = mergeGeometries([1.2, 3.5, 5.8].map((y) => box(SC.w + 0.06, 0.22, SC.w + 0.06, 0, y, 0)));
+const SC_BASE = new THREE.CylinderGeometry(2.7, 2.9, 0.12, 32).translate(0, 0.06, 0);
+
+const _mp = new THREE.Matrix4();
+const MOVERS2 = {
+  ob_turnstile: {
+    label: "Turnstile", parts: () => {
+      const m = mats(), g = new THREE.Group();
+      g.add(new THREE.Mesh(TS_POST, m.body));
+      const arm = new THREE.Group(); arm.name = "arm";
+      arm.add(new THREE.Mesh(TS_ARM, m.signal), new THREE.Mesh(TS_STRIPES, m.white));
+      g.add(arm);
+      return g;
+    },
+    solids: [TS_POST], decks: [], ghost: mergeGeometries([TS_ARM, TS_POST]),
+    mover: { arm: TS_ARM, pose: (t, out) => out.makeRotationY((2 * Math.PI * t) / TS.period) },
+    footprint: { hx: 1.2, hz: 1.2 }, hint: "Two bars crossed at car height, turning: slip between the arms",
+  },
+  ob_push_gate: {
+    label: "Push gate", parts: () => {
+      const m = mats(), g = new THREE.Group();
+      const arm = new THREE.Group(); arm.name = "arm";
+      arm.add(new THREE.Mesh(PG_BLOCK, m.body), new THREE.Mesh(PG_FACES, m.signal), new THREE.Mesh(PG_BAND, m.bolt));
+      g.add(arm);
+      return g;
+    },
+    solids: [], decks: [], ghost: mergeGeometries([PG_BLOCK, box(PG.w, 0.1, PG.amp * 2 + PG.d, 0, 0.05, 0)]),
+    mover: { arm: PG_BLOCK, pose: (t, out) => out.makeTranslation(0, 0, PG.amp * Math.sin((2 * Math.PI * t) / PG.period)) },
+    footprint: { hx: PG.w / 2, hz: PG.amp + PG.d / 2 }, hint: "A block sliding up and down the road: pass it on the side",
+  },
+  ob_spin_column: {
+    label: "Spin column", parts: () => {
+      const m = mats(), g = new THREE.Group();
+      g.add(new THREE.Mesh(SC_BASE, m.top));
+      const arm = new THREE.Group(); arm.name = "arm";
+      arm.add(new THREE.Mesh(SC_ARM, m.body), new THREE.Mesh(SC_BANDS, m.bolt));
+      g.add(arm);
+      return g;
+    },
+    solids: [], decks: [], ghost: SC_ARM,
+    mover: { arm: SC_ARM, pose: (t, out) => out.makeRotationY((2 * Math.PI * t) / SC.period) },
+    footprint: { hx: 2.6, hz: 2.6 }, hint: "A pillar turning on its spot: its corners knock you aside",
+  },
+};
+
+// SPIN BARREL (the old game's "Spin barrel (smooth)"): a barrel 40 m long lying along the road, its floor flush with the
+// road, turning slowly on its own axis — four staggered holes in its wall come round. Its inside is a MOVING DECK (the
+// wheels drive on it: the ground's mover tree) and a car on it is carried round with it (carry(), arcadeCar): drive
+// along it, or be lifted up the wall until you slide — or drop out of a hole.
+export const SPIN_BARREL = { r: 8, wall: 0.6, L: 40, period: 11.5 };
+const SB_CY = SPIN_BARREL.r + 0.02;
+const SB_HOLES = [ // (angle from the bottom, span, z from its start, length: m)
+  { a: 40, span: 70, z: 5, len: 7 }, { a: 150, span: 70, z: 14, len: 7 }, { a: 250, span: 80, z: 23, len: 7 }, { a: 330, span: 60, z: 31, len: 6 },
+];
+/** The barrel's wall as a grid (A round × NZ along), the holes' cells left out; inner and outer skins, the holes' sides. */
+function barrelGeometry({ A = 72, NZ = 40, inner = true, outer = true, sides = true } = {}) {
+  const { r, wall, L } = SPIN_BARREL, ro = r + wall, DEG1 = Math.PI / 180;
+  const hole = (i, j) => {
+    const a = ((i + 0.5) / A) * 360, z = ((j + 0.5) / NZ) * L;
+    return SB_HOLES.some((h) => z > h.z && z < h.z + h.len && ((a - h.a + 360) % 360) < h.span);
+  };
+  // angle measured from the BOTTOM (−Y), round toward +X
+  const P = (rr, i, j) => { const t = (i / A) * 2 * Math.PI; return [Math.sin(t) * rr, SB_CY - Math.cos(t) * rr, -L / 2 + (j / NZ) * L]; };
+  const pos = [], nrm = [], side = [];
+  const quad = (out, a, b, c, d) => out.push(...a, ...b, ...c, ...a, ...c, ...d);
+  for (let i = 0; i < A; i++) for (let j = 0; j < NZ; j++) {
+    if (hole(i, j)) continue;
+    if (inner) quad(pos, P(r, i, j), P(r, i, j + 1), P(r, i + 1, j + 1), P(r, i + 1, j)); // (faces the axis)
+    if (outer) quad(pos, P(ro, i, j), P(ro, i + 1, j), P(ro, i + 1, j + 1), P(ro, i, j + 1));
+    if (sides) { // the wall's edge where a hole (or the barrel's end) is next to this cell
+      if (hole((i + 1) % A, j)) quad(side, P(r, i + 1, j), P(r, i + 1, j + 1), P(ro, i + 1, j + 1), P(ro, i + 1, j));
+      if (hole((i - 1 + A) % A, j)) quad(side, P(r, i, j), P(ro, i, j), P(ro, i, j + 1), P(r, i, j + 1));
+      if (j + 1 < NZ && hole(i, j + 1)) quad(side, P(r, i, j + 1), P(ro, i, j + 1), P(ro, i + 1, j + 1), P(r, i + 1, j + 1));
+      if (j > 0 && hole(i, j - 1)) quad(side, P(r, i, j), P(r, i + 1, j), P(ro, i + 1, j), P(ro, i, j));
+    }
+  }
+  const geo = (arr) => { const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(arr, 3)); return g; };
+  const shell = geo(pos);
+  // SMOOTH: radial normals (inward on the inner skin, outward on the outer), not the faceted ones
+  const p = shell.attributes.position.array, n = new Float32Array(p.length);
+  for (let k = 0; k < p.length; k += 3) {
+    const x = p[k], y = p[k + 1] - SB_CY, len = Math.hypot(x, y) || 1, s = len < r + wall / 2 ? -1 : 1;
+    n[k] = (s * x) / len; n[k + 1] = (s * y) / len; n[k + 2] = 0;
+  }
+  shell.setAttribute("normal", new THREE.BufferAttribute(n, 3));
+  const sideGeo = geo(side); sideGeo.computeVertexNormals();
+  return { shell, sides: sideGeo };
+}
+const SB_LOOK = barrelGeometry();
+const SB_DECK = barrelGeometry({ A: 48, NZ: 20, outer: false, sides: false }).shell; // (what the wheels drive: the inner skin, lower poly)
+const SB_RIMS = [1, -1].map((s) => new THREE.TorusGeometry(SPIN_BARREL.r + SPIN_BARREL.wall / 2, 0.16, 6, 96).translate(0, SB_CY, (s * SPIN_BARREL.L) / 2));
+// (static solids: a ring's rims and the skirts under its flanks look the same at any angle — as the Open cylinder's)
+const SB_SOLIDS = (() => {
+  const out = [], { r, wall, L } = SPIN_BARREL, r0 = r + 0.15, r1 = r + wall;
+  for (const s of [1, -1]) for (let i = 0; i < 32; i++) {
+    const a = (2 * Math.PI * (i + 0.5)) / 32, rm = (r0 + r1) / 2;
+    if (Math.sin(a) * rm + SB_CY < 0.3) continue;
+    out.push(box(r1 - r0, (2 * Math.PI * rm) / 32 + 0.1, 0.5).rotateZ(a).translate(Math.cos(a) * rm, SB_CY + Math.sin(a) * rm, s * (L / 2 - 0.25)));
+  }
+  for (let x = 4.2; x < 6; x += 0.4) {
+    const y = SB_CY - Math.sqrt(r1 * r1 - x * x);
+    if (y > 0.05) for (const sx of [1, -1]) out.push(box(0.4, y, L, sx * (x + 0.2), y / 2, 0));
+  }
+  return out;
+})();
+const _sbm = new THREE.Matrix4(), _sbm2 = new THREE.Matrix4();
+function spinBarrelParts() {
+  const mm = mats(), g = new THREE.Group();
+  const shellMat = new THREE.MeshStandardMaterial({ color: 0x232a3a, roughness: 0.7, metalness: 0.2, side: THREE.DoubleSide });
+  const arm = new THREE.Group(); arm.name = "arm";
+  const sh = new THREE.Mesh(SB_LOOK.shell, shellMat);
+  const rimMat = new THREE.MeshStandardMaterial({ color: 0xff3ea5, emissive: 0xff3ea5, emissiveIntensity: 1.6, roughness: 0.45, side: THREE.DoubleSide });
+  arm.add(sh, new THREE.Mesh(SB_LOOK.sides, rimMat));
+  g.add(arm, ...SB_RIMS.map((t) => new THREE.Mesh(t, mm.bolt)));
+  return g;
+}
+const MOVERS3 = {
+  ob_spin_barrel: {
+    label: "Spin barrel", halfW: SPIN_BARREL.r + SPIN_BARREL.wall, parts: spinBarrelParts, solids: SB_SOLIDS, decks: [],
+    ghost: mergeGeometries([SB_DECK, ...SB_SOLIDS.map((g) => g.toNonIndexed())].map((g) => { const c = g.clone(); for (const k of Object.keys(c.attributes)) if (k !== "position") c.deleteAttribute(k); return c; })),
+    // turns about its own axis (the obstacle's Z, through the barrel's middle)
+    mover: {
+      arm: SB_DECK, deck: true, spin: { cy: SB_CY, omega: (2 * Math.PI) / SPIN_BARREL.period, r: SPIN_BARREL.r, L: SPIN_BARREL.L },
+      pose: (t, out) => out.makeTranslation(0, SB_CY, 0).multiply(_sbm.makeRotationZ((2 * Math.PI * t) / SPIN_BARREL.period)).multiply(_sbm2.makeTranslation(0, -SB_CY, 0)),
+    },
+    hint: "A barrel turning on its axis: drive through it — it carries you up its wall, and its holes come round",
+  },
+};
+
+// ---------------------------------------------------------------- SCENERY: STREET LIGHTS
+// (user, 2026-11-01: "the scenery could be important, especially the street lights for a night time track"): a tall
+// pole past the road's edge, an arm reaching over the road and an LED head. Its LIGHT is real (trackLamps.js: a pool
+// point light at the head, scaled by the night), its lens glows with the night too (streetLensMaterial). One beside the
+// road (point at the side), or a pair facing each other.
+export const STREET_LIGHT = { gap: 1.6, h: 10.4, reach: 4.6, color: 0xffe2bd, cd: 170, range: 34 };
+let lensMat = null;
+/** The lamp heads' glowing lens — shared: trackLamps turns it up with the night. */
+export const streetLensMaterial = () => (lensMat ??= new THREE.MeshStandardMaterial({ color: 0x2a2a2a, emissive: STREET_LIGHT.color, emissiveIntensity: 0.25, roughness: 0.3 }));
+const streetShapes = new Map();
+function streetLightShape({ hw = ROAD_HW, dx = 1, pair = false } = {}) {
+  const sides = pair ? [1, -1] : [dx < 0 ? -1 : 1], key = `${hw}|${sides.join(",")}`;
+  if (!streetShapes.has(key)) {
+    const S = STREET_LIGHT, y0 = -1.0; // (its foot level with the slab's underside, as the chevron panels')
+    const solids = [], look = [], heads = [], lights = [];
+    for (const side of sides) {
+      const xp = side * (hw + S.gap), xh = xp - side * S.reach;
+      solids.push(box(0.4, S.h - y0, 0.4, xp, (S.h + y0) / 2, 0));
+      look.push(new THREE.CylinderGeometry(0.11, 0.17, S.h - y0, 12).translate(xp, (S.h + y0) / 2, 0));
+      look.push(box(0.7, 0.5, 0.7, xp, y0 + 0.25, 0)); // (the foot's plinth)
+      // the arm: a gentle curve from the pole's top out over the road
+      const arm = new THREE.QuadraticBezierCurve3(new THREE.Vector3(xp, S.h - 0.9, 0), new THREE.Vector3(xp, S.h + 0.35, 0), new THREE.Vector3(xh + side * 0.5, S.h + 0.25, 0));
+      look.push(new THREE.TubeGeometry(arm, 16, 0.085, 8, false));
+      heads.push(box(1.5, 0.26, 0.6, xh, S.h + 0.18, 0)); // the head's housing
+      lights.push({ x: xh, y: S.h - 0.4, z: 0, color: S.color, cd: S.cd, range: S.range });
+    }
+    const lens = mergeGeometries(sides.map((side) => box(1.3, 0.05, 0.46, side * (hw + S.gap - S.reach), S.h + 0.03, 0)));
+    const parts = () => {
+      const m = mats(), g = new THREE.Group();
+      g.add(new THREE.Mesh(mergeGeometries(look.map((x) => x.toNonIndexed())), m.body));
+      g.add(new THREE.Mesh(mergeGeometries(heads), m.body));
+      const l = new THREE.Mesh(lens, streetLensMaterial()); l.userData.noShadow = true;
+      g.add(l);
+      return g;
+    };
+    streetShapes.set(key, { solids, ghost: mergeGeometries([...solids, ...heads]), parts, lights });
+  }
+  return streetShapes.get(key);
+}
+const lightKind = (label, sign, shape, hint) => ({ label, sign, shape, parts: (o) => shape().parts(o), solids: shape().solids, decks: [], ghost: shape().ghost, lights: shape().lights, hint });
+
 export const OBSTACLES = {
+  ...MOVERS2,
+  ...MOVERS3,
   ...GROUND,
   ob_block: { label: "Block", parts: blockParts, solids: [BLOCK_SOLID], decks: [BLOCK_DECK], ghost: BLOCK_SOLID, hint: "Dodge it, or jump onto it" },
   ob_sweeper: { label: "Sweeper", parts: sweeperParts, solids: [SWEEP_POST], decks: [], ghost: mergeGeometries([SWEEP_POST, SWEEP_ARM]), mover: { arm: SWEEP_ARM, omega: (2 * Math.PI) / SWEEP_PERIOD }, hint: "A bar turning over the road: time it" },
@@ -903,6 +1110,8 @@ export const OBSTACLES = {
   // (no solids: a ring of light. `boost.tube`: carRules raises the speed along it, on the wheels or in the air)
   ob_boost_tube: { label: "Boost tube", halfW: ROAD_HW, parts: boostTubeParts, solids: [], decks: [], ghost: BOOST_TUBE_GHOST, boost: { tube: true, r: BOOST_TUBE.r - 0.4, cy: 0.6, hz: BOOST_TUBE.len / 2 + 0.5, v: BOOST_TUBE.v, accel: BOOST_TUBE.accel }, hint: `Drive or fly through it: ${Math.round(BOOST_TUBE.v * 3.6)} km/h at once` },
   ob_open_cyl: { label: "Open cylinder", halfW: OPEN_CYL.r + OPEN_CYL.wall, parts: openCylParts, solids: [...CYL_SKIRTS, ...CYL_RIM_SOLIDS], decks: [CYL_INNER], ghost: mergeGeometries([CYL_OUTER, CYL_INNER].map((g) => g.toNonIndexed())), hint: "A big open pipe on the road: drive through it, ride up its walls" },
+  sc_street_light: lightKind("Street light", "side", (p) => streetLightShape({ ...p, pair: false }), "A tall lamp past the road's edge, its arm over the road: it lights the road at night"),
+  sc_street_lights: lightKind("Street lights · pair", "pair", (p) => streetLightShape({ ...p, pair: true }), "Two lamps facing each other across the road: they light it at night"),
   ob_jump: { label: "Jump pad", parts: boostShape({}, jumpMaterial).parts, solids: [], decks: [], ghost: BOOST_FLAT, shape: (p) => boostShape(p, jumpMaterial), decal: true, boost: { hx: BOOST_PAD.w / 2, hz: BOOST_PAD.L / 2, jump: true }, hint: "Drive over it: it throws the car up" },
 };
 /** The zones of a track's pads, for carRules: { inv (world → pad frame), hx, hz }, and for a JUMP pad
@@ -917,6 +1126,18 @@ export function boostZones(props = []) {
   });
 }
 export const isObstacle = (id) => !!OBSTACLES[id];
+/**
+ * A track's movers to a car: the moving SOLIDS push it (setDynamicMovers), the moving DECKS are driven on (the
+ * ground's mover tree) and carry it (car.deckMovers, arcadeCar). One call wherever a car meets a track's obstacles.
+ */
+export function attachMovers(car, ground, movers = []) {
+  car.setDynamicMovers(movers.filter((m) => !m.deck));
+  const decks = movers.filter((m) => m.deck);
+  car.deckMovers = decks;
+  if (ground?.setMoverBvh) {
+    if (decks.length) { const set = new BvhSet(); set.set(decks.map((m) => m.bvh)); ground.setMoverBvh(set); } else ground.setMoverBvh(null);
+  }
+}
 /** A placed obstacle's definition: its kind's, with the parts / solids / ghost of ITS shape (a door's offset). */
 export const shapeOf = (kind, p = {}) => (OBSTACLES[kind].shape ? { ...OBSTACLES[kind], ...OBSTACLES[kind].shape(p) } : OBSTACLES[kind]);
 // what stands IN THE WAY, in the obstacle's frame (half across x, half along z; m): the autopilot's line
@@ -1042,6 +1263,21 @@ export function buildObstacleSet(props = [], { look = true, physics = false } = 
           return out.copy(_r).applyMatrix4(_vm).sub(pt).multiplyScalar(1 / h);
         },
       };
+      // a MOVING DECK (the Spin barrel): its tree is a drive surface (attachMovers), and a car on it is carried round
+      if (def.mover.deck) {
+        mv.deck = true;
+        const sp = def.mover.spin, axis = new THREE.Vector3(0, 0, 1).transformDirection(M), centre = new THREE.Vector3(0, sp.cy, 0).applyMatrix4(M);
+        const inv = M.clone().invert(), q = new THREE.Quaternion(), lp = new THREE.Vector3();
+        /** The car riding the floor: turned with it about its axis, ω·dt (wheels down, inside it, near the floor). */
+        mv.carry = (body, dt) => {
+          lp.copy(body.pos).applyMatrix4(inv);
+          if (Math.abs(lp.z) > sp.L / 2 || Math.hypot(lp.x, lp.y - sp.cy) < sp.r - 2.5) return;
+          q.setFromAxisAngle(axis, sp.omega * dt);
+          body.pos.sub(centre).applyQuaternion(q).add(centre);
+          body.vel.applyQuaternion(q);
+          body.quat.premultiply(q);
+        };
+      }
       movers.push(mv);
     }
   }

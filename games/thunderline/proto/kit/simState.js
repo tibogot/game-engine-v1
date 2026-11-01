@@ -14,7 +14,7 @@
 
 const SKIP = new Set([
   "scene", "group", "raycaster", "groundBvh", "solidsBvh", "collidables", "walls", "wallBoxes", "dynamicMovers",
-  "deckCarryMovers", "getFloorY", "_bvhRay", "_castGround", "_castSphereSweep", "chassisMesh", "tireGroups",
+  "deckCarryMovers", "deckMovers", "getFloorY", "_bvhRay", "_castGround", "_castSphereSweep", "chassisMesh", "tireGroups",
   "arrowGroup", "arrows", "headlights", "headlightTargets", "headlamps", "taillights", "_wheelInstances",
   "_wheelParts", "_ground", "_solids", "ground", "solids", "bvh", "mesh", "parent", "vehicle", "car",
 ]);

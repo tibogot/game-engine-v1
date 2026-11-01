@@ -24,7 +24,7 @@ export const DEFAULT_WORLD = "flat";
 // BEFORE its sun-shadow bake, so the baked shadows always match the track's sun.
 // Picked by the SUN'S HEIGHT on the engine's calendar (it sets ~18:10): morning ~23°, sunset ~8°, dusk ~1°.
 // No night yet: without its own exposure / lights the night is near black (seen 2026-10-20).
-export const TIMES = [[7.5, "Morning"], [12.5, "Midday"], [15.5, "Afternoon"], [17.6, "Sunset"], [18.1, "Dusk"]];
+export const TIMES = [[7.5, "Morning"], [12.5, "Midday"], [15.5, "Afternoon"], [17.6, "Sunset"], [18.1, "Dusk"], [22, "Night"]]; // (Night: the cinematic night look, street lights lit — trackLamps.js)
 export const DEFAULT_TOD = 15.5;
 
 // the paint layers (slots 0-2; Grass005 + two public/textures/ground sets, ~13 MB in all) and their tile sizes

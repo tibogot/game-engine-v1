@@ -34,7 +34,7 @@ import { buildOldLook, createOldLookMaterials, edgesOf, lookKey } from "./oldLoo
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
 import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
-import { buildObstacleSet, avoidObstacles, boostZones } from "./obstacles.js";
+import { buildObstacleSet, avoidObstacles, boostZones, attachMovers } from "./obstacles.js";
 import { createSparks } from "./sparks.js";
 import { createPhysProps, loadPhysAssets } from "./physProps.js";
 import { createTyreMarks } from "./tyreMarks.js";
@@ -634,8 +634,6 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     obstacles.group.traverse((m) => { if (m.isMesh) m.layers.enable(DYNAMIC_LAYER); });
     for (const d of obstacles.decks) decks.push(asCollider(d.geometry, d.M));
     for (const s of obstacles.solids) solids.push(asCollider(s.geometry, s.M));
-    vehicle.setDynamicMovers(obstacles.movers);
-    ghostCar.setDynamicMovers(obstacles.movers);
     const t0 = performance.now();
     const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
     const ground = createVehicleGround({ getTerrainHeight: floorH });
@@ -646,6 +644,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     const bakeMs = performance.now() - t0;
     vehicle.setBvh(ground.ground, ground.solids);
     ghostCar.setBvh(ground.ground, ground.solids);
+    attachMovers(vehicle, ground, obstacles.movers); // (moving solids push; moving decks are driven on and carry the car)
+    attachMovers(ghostCar, null, obstacles.movers);
     let lowestY = Infinity;
     for (const r of lay.ride) lowestY = Math.min(lowestY, r.P.y);
     const startPos = new V().setFromMatrixPosition(lay.start);
@@ -769,8 +769,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (freeCam) toggleFreeCam(); // back to the chase (and full speed) for the next drive
     scene.remove(S.group); // its geometries are the shared tile cache: kept for the next drive
     S.physProps.dispose();
-    vehicle.setDynamicMovers([]);
-    ghostCar.setDynamicMovers([]);
+    attachMovers(vehicle, null, []);
+    attachMovers(ghostCar, null, []);
     clearTimeout(splitTimer);
     clearTimeout(landTimer);
     // (their timers are gone: hide them now, or a banner from the last second came back on the next drive)

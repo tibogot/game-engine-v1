@@ -33,6 +33,7 @@ import { keepPipelines } from "./keepPipelines.js";
 import { loadPhysAssets } from "./physProps.js";
 import { createDriveRig } from "./driveSession.js";
 import { createEditorNav } from "./editorNav.js";
+import { createTrackLamps } from "./trackLamps.js";
 import { applyWorld, WORLDS, DEFAULT_WORLD, TIMES, DEFAULT_TOD, groundFeatures } from "./worlds.js";
 import { encodeTrack } from "../../app/trackCode.js";
 import { thumbStore } from "../../app/thumbStore.js";
@@ -40,7 +41,7 @@ import { thumbStore } from "../../app/thumbStore.js";
 import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
 import { buildTrackMeshes } from "./testTrack.js";
 import { createBuilderTutorial } from "./builderTutorial.js";
-import { OBSTACLES, BOOST_PAD, isObstacle, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
+import { OBSTACLES, BOOST_PAD, isObstacle, attachMovers, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -93,7 +94,9 @@ const CATS = [
   // things on the road that are not road (obstacles.js): placed on a road or on the floor, kept in track.props
   // ON THE GROUND (the physics lab's ramps, kerb, step: obstacles.js GROUND)
   { id: "ground", label: "Ground", tiles: ["ob_ramp_jump", "ob_ramp_kicker", "ob_ramp_slope", "ob_ramp_side", "ob_kerb", "ob_step", "ob_pendulum", "ob_slider", "ob_lowbar"] },
-  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch", "ob_boost_tube", "ob_open_cyl"] },
+  { id: "obstacles", label: "Obstacles", tiles: ["ob_cone", "ob_cones", "ob_tyres", "ob_barrel", "ob_swing_gate", "ob_pole", "ob_slalom", "ob_gate", "ob_block", "ob_sweeper", "ob_wall_door", "ob_wall_hole", "ob_container", "ob_roadblock", "ob_jersey", "ob_wall_round", "ob_ring_gate", "ob_arch", "ob_boost_tube", "ob_open_cyl", "ob_turnstile", "ob_push_gate", "ob_spin_column", "ob_spin_barrel"] },
+  // SCENERY (obstacles.js): what stands beside the road — the street lights light it at night
+  { id: "scenery", label: "Scenery", tiles: ["sc_street_light", "sc_street_lights"] },
   // SIGNS (obstacles.js): beside or over the road — placed like obstacles, never in the way
   { id: "signs", label: "Signs", tiles: ["sg_start", "sg_finish", "sg_chevron", "sg_aim"] },
 ];
@@ -314,6 +317,9 @@ const app = await startV3App({
   // instance counts made 68 vertex shaders differing only in an array size, each its own pipeline compile): the
   // matrices as vertex attributes (the RTS games' boot fix; three r187 shares their node builds). ?instubo=1: off
   instanceAttributes: new URLSearchParams(location.search).get("instubo") !== "1",
+  // REAL LIGHTS AT NIGHT (the street lights: trackLamps.js): the engine's tiled point lights — measured in alg-rts: installed
+  // with no light lit = not installed; 128 lights +0.9 ms. ?locallights=0: off
+  localLights: new URLSearchParams(location.search).get("locallights") !== "0",
   container: $("view"),
   skyMode: "skypro",
   cloudShadows: true,
@@ -331,6 +337,8 @@ const engineObjects = snapshotEngineScene(app.scene); // (before hiding: what th
 app.scene.visible = false;
 app.sky?.setMode?.("skypro");
 app.sky?.setTimeOfDay?.(track.tod ?? DEFAULT_TOD); // the track's own time of day (worlds.js TIMES)
+app.sky?.setNightStyle?.("cinematic"); // (night readable as a game: the realistic look was near black on a dark road)
+const trackLamps = createTrackLamps(app); // the street lights' real lights (trackLamps.js)
 app.fog?.setHeight?.({ enabled: false });
 applyWorld(app, track.world); // worlds.js: the track's world (the haze too), before any material is built
 app.postFx?.setEnabled?.(true);
@@ -779,6 +787,7 @@ function rebuild() {
   // Those on a piece are laid on it again first (it may have moved or changed: roadSnapAt)
   relayProps();
   obstacleSet = buildObstacleSet(track.props ?? []);
+  trackLamps?.sync(track.props ?? []);
   // THE TEST CAR: re-laid on its piece (gone with it)
   if (track.spawn) {
     const m = spawnFrame();
@@ -1040,7 +1049,7 @@ async function runPrediction() {
   car.setBvh(ground.ground, ground.solids);
   car.getFloorY = () => FLOOR_Y;
   car.setSolidCapsules([]);
-  car.setDynamicMovers(obs.movers);
+  attachMovers(car, ground, obs.movers);
   const M0 = built.get(order[0].uid).M;
   const fwd0 = new THREE.Vector3(0, 0, -1).transformDirection(M0);
   car.setSpawn(new THREE.Vector3().setFromMatrixPosition(M0).addScaledVector(fwd0, TILES[order[0].id]?.start?.spawn ?? 12).add(new THREE.Vector3(0, 0.6, 0)),
@@ -1308,7 +1317,7 @@ async function runForgiveness(token, ctx) {
   car.setBvh(ctx.ground.ground, ctx.ground.solids);
   car.getFloorY = () => FLOOR_Y;
   car.setSolidCapsules([]);
-  car.setDynamicMovers(ctx.obs.movers);
+  attachMovers(car, ctx.ground, ctx.obs.movers);
   car.enabled = true;
   const pilot = createAutopilot(ctx.ride);
   const q = new THREE.Quaternion();
