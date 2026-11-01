@@ -1451,6 +1451,26 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.villageTrigger + 10);
         const shot = underFire(b, m);
         holdFire(b, !close && !shot);
+        // THE CELL'S WORK FIRST (2026-11-01, the coast — you: "something is weird at Mechta des crêtes … like an unfinished
+        // thing"): its sangar, a cache, a refuge raised 14-60 m out — and the cell inside a house (placeCell garrisons it
+        // where there is one: the kits' villages), never "near" its site; the sites stood at 0 % for good, a bare
+        // progress bar and the cache's first pieces. While the village is quiet its builders go out and raise it, then
+        // back in.
+        const work = !close && !shot ? (app.algBuild?.sites ?? []).find((s) => !s.done && s.alive !== false && s.team === "enemy" && dist(s, b.village.position) < 75) : null;
+        if (work) {
+          for (const u of m) {
+            if (u.typeKey !== "moudjahid") continue;
+            if (u.garrison) { app.algGarrison?.exit(u); u._workT = 0; }   // (out first: inside, a man walking to his window is "moving")
+            if (u.isMoving) continue;
+            const d = dist(u.position, work);
+            if (d < work.reach - 1.5 || (u._workT ?? 0) > b.t) continue;
+            u._workT = b.t + 2;   // (a route at most every 2 s: none found, no A* each tick)
+            const k = (work.reach - 3.5) / Math.max(d, 1e-3);
+            const p = app.navGrid?.nearestOpenWorld?.(work.x + (u.position.x - work.x) * k, work.z + (u.position.z - work.z) * k, true);
+            if (p) u.orderTo(p.x, p.z);
+          }
+          b.building = true;
+        } else if (b.building) { b.building = false; placeCell(b.village, m); }
         if (close) {
           b.tact = (b.tact ?? 0) - dt;
           if (b.tact <= 0) { b.tact = P.tactEvery; tactics(b, m, dt); }
