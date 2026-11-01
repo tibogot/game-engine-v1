@@ -19,8 +19,9 @@ PHASE 1 — finish what is half-built
 1. [ ] **you**: the village look (new stone vs `?village=old` with photo detail vs `&kitphoto=0`);
    Normal difficulty both sides; doctrine prices; the training's wording/pace; the steppe;
    fire / smoke / explosions (your effects lab).
-2. [~] (2026-10-24, 90fe769c: shells break houses, the collapse with debris and rubble, walls / hedges / depots break,
-   mortars on garrisons — LEFT: D, the motor pool's and the helipad's damaged / ruin models in Blender) BUILDING DAMAGE + COLLAPSE (after your building tuning): walls lost, garrisons forced out,
+2. [x] (2026-10-24, 90fe769c: shells break houses, the collapse with debris and rubble, walls / hedges / depots break,
+   mortars on garrisons; the motor pool's damaged / ruin models 2026-10-25; THE HELIPAD in Blender with its damaged and
+   ruin states 2026-11-01 — tools/blender/helipad.py, the last building without them) BUILDING DAMAGE + COLLAPSE (after your building tuning): walls lost, garrisons forced out,
    rubble — CoH's signature, the biggest gameplay gap left.
 3. [x] The FRENCH AI: sappers that build, mortars, flares, doctrines — DONE 2026-10-13 (B below: + grenades,
    lifts, its own doctrine; not yet smoke, the Alouette, repair).
@@ -114,7 +115,8 @@ PHASE 1 — finish what is half-built
 6. [ ] VOICES + radio calls (FR + Arabic) — blocked on recordings / a TTS key (env var only).
 
 PHASE 2 — content for a launch
-7. [ ] MISSION 2, THE COAST (map planned; its ground and layout to do).
+7. [x] MISSION 2, THE COAST — playable 2026-11-01: its ground, the port (PORT_PLAN.md), seven objectives, twelve supply
+   points, the FLN's AI. Left: the cape's stretched cliffs, its menu card art, a full match by you.
 8. [~] A THIRD MAP: "LA PORTE DU DÉSERT", El Kantara 1958 — planned 2026-10-13, see MAP 3 below
    (waiting for your go).
 9. [~] SKIRMISH from the menu: map, side, difficulty, doctrine. MAP + SIDE done 2026-10-11 (menu.html

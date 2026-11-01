@@ -29,7 +29,7 @@ import { buildMortarPitV2 } from "./algMortarPit.js";
 import { FOLIAGE_PRESETS } from "../../v3/app/state/foliageScatterState.js";
 import { buildFrenchPost } from "../../v3/render/objects/rtsFrenchPost.js";
 import { buildFarmstead } from "../../v3/render/objects/rtsAlgVillage.js";
-import { buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
+import { buildHelipad, buildSasPost, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
 import { MAT } from "../../v3/render/objects/rtsParts.js";
 import { stencilMesh } from "../../v3/render/objects/rtsStencils.js";
 
@@ -357,6 +357,13 @@ export const loadSearchlight = () => loadBlenderPiece("sltower", "sltower", () =
   g.userData.slReady = true;
   return ok;
 });
+/**
+ * THE HELIPAD (tools/blender/helipad.py, 2026-11-01 — the last building without damaged / ruin states): the old piece's
+ * data kept (buildHelipadV2: its paint, windsock, sandbag slots, signal panels, deck height, construction) — the placed
+ * one's children (the painted H, the cloth-simulated bags, the panels) stay; only its geometry is the Blender one.
+ */
+export const loadHelipad = () => loadBlenderPiece("helipad", "helipad", () => buildHelipad({ detail: 2, noBags: true }), null, { stone: false });
+export const helipadGeometry = () => pieceGeometry("helipad", "helipad");
 export const searchlightGeometry = () => (pieceGeometry("sltower", "sltower")?.userData.slReady ? pieceGeometry("sltower", "sltower") : null);
 
 /**
@@ -744,16 +751,19 @@ export function setPieceState(mesh, state) {
   }
   if (L) { L.near = near; L.far = far ?? near; mesh.geometry = near; } else mesh.geometry = near;
   mesh.userData.pieceState = state;
-  if (state === "ruin") haystackField().dropUnder(mesh);   // (its hay burnt with it — the farm's roof and yard)
+  if (state === "ruin") haystackField().dropUnder(mesh);
+  // (the helipad's windsock — the game's cloth on the mast's top, algWind: down with the mast)
+  if (mesh.userData.sockGroup) mesh.userData.sockGroup.visible = state !== "ruin";   // (its hay burnt with it — the farm's roof and yard)
   const ruin = state === "ruin";
   for (const c of mesh.children) {
-    if (c.name === "Gun" || c.name === "Lamp") c.visible = !ruin;
+    // (the helipad's painted H and circle: burnt off with the deck in the ruin — its craters across them)
+    if (c.name === "Gun" || c.name === "Lamp" || c.name === "Paint") c.visible = !ruin;
     else if (c.name === "MiradorGear") {
       // the gear's own state (the searchlight knocked down on the deck, thrown beside the wreck)
       const gg = state === "intact" ? null : stateGeometry(["mirador", "gear"], state);
       c.userData.intact ??= c.levels.map((l) => l.object.geometry);
       c.levels.forEach((l, i) => { l.object.geometry = gg ? (i === 0 ? gg.near : gg.far ?? gg.near) : c.userData.intact[i]; });
-    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags|PostBags|SasBags)/.test(c.name)) bagsInState(c, state);
+    } else if (/^(Sandbag|MiradorBags|RadioBags|SearchlightBags|PostBags|SasBags|HelipadBags)/.test(c.name)) bagsInState(c, state);
   }
   return true;
 }

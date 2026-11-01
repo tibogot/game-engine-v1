@@ -45,6 +45,10 @@
   "pairs": 510,
   "why": "straw CARDS overlap by design (the stack and now the hay pile): alpha-tested strands layered like shingles, not solid faces"
  },
+ "helipad.glb": {
+  "hash": "540f3a8f5221a9065ef0f2c206168d81e0bbc58f",
+  "pairs": 0
+ },
  "houses.glb": {
   "hash": "d03616104c8ebd04ee0957b52f73991d0c0516c0",
   "pairs": 87

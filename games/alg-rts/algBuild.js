@@ -25,7 +25,7 @@ import { siteBags } from "./algSandbags.js";
 import { attachMotorPool, loadMotorPool } from "./algMotorPool.js";
 import { dressPens } from "./algPenProps.js";
 import { farmGeometry, grotteGeometry, loadFarmstead, loadGrotte, loadSasPost, sasGeometry, loadLookout, loadMineMarker, lookoutGeometry, mineMarkerGeometry, setPieceState } from "./algSangar.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, loadFrenchPost, swapPost, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
+import { helipadGeometry, loadHelipad, ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, dropScreenPlants, loadFrenchPost, swapPost, fortPointGeometry, loadFortPoint, loadSearchlight, forwardPostGeometry, aidStationGeometry, loadForwardPost, loadAidStation, refugeGeometry, infirmaryGeometry, loadRefuge, loadInfirmary, searchlightGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, sangarGeometry, swapPlaced, trackLod, untrackLod } from "./algSangar.js";
 import { buildFortPointPiece, buildMgNestPiece, buildSandbagWallPiece } from "./algSandbags.js";
 import { MAP, PLAY, VIEW_YAW } from "./layout.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
@@ -185,6 +185,14 @@ export function createAlgBuild({ app, units, structures, navGrid, purse, enemyPu
     if (!ok) return;
     geoCache.delete("wire");
     swapPlaced(showroom, /^wire\d*$/, barbedWireGeometry(), app);   // (?defences=1: the post's own)
+  });
+  // THE HELIPAD in Blender (2026-11-01): its geometry swapped in; its painted H lifted a hair — the far level's deck is
+  // the near one simplified within 15 mm, and the paint lay 16 mm over the old one's
+  loadHelipad().then((ok) => {
+    if (!ok) return;
+    geoCache.delete("helipad");
+    swapPlaced(showroom, /^helipadd*$/, helipadGeometry(), app);
+    for (const [name, mesh] of Object.entries(showroom ?? {})) if (/^helipadd*$/.test(name)) { const p = mesh.getObjectByName?.("Paint"); if (p && !p.userData.lifted) { p.position.y += 0.012; p.userData.lifted = true; } }
   });
   loadMirador().then((ok) => {
     if (!ok) return;

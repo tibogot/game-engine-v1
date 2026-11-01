@@ -32,7 +32,7 @@ await loadZeriba("zeribaFarm");
 import { loadMotorPool, motorPoolMesh, motorPoolStats, motorPoolStatesReady, setMotorPoolState } from "./algMotorPool.js";
 import { houseMesh, houseStats, loadHouses } from "./algHouse.js";
 import { loadPointWalls, pointWalls } from "./algPointFlags.js";
-import { ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
+import { helipadGeometry, loadHelipad, ambushScreenGeometry, armsCacheGeometry, barbedWireGeometry, fortPointGeometry, loadFortPoint, loadSearchlight, searchlightGeometry, forwardPostGeometry, loadForwardPost, aidStationGeometry, loadAidStation, markDecal, loadFrenchPost, frenchPostGeometry, loadRefuge, refugeGeometry, loadInfirmary, infirmaryGeometry, growScreenPlants, loadAmbushScreen, loadArmsCache, loadBarbedWire, loadMgNest, loadMirador, loadMortarPit, loadSangar, mgNestGeometry, mortarPitGeometry, miradorGeometry, plainGeometry, sangarGeometry, sangarStoneMaterial } from "./algSangar.js";
 import { PlacedFoliage, FOLIAGE_DOME_CARDS } from "../../v3/render/foliage/placedFoliage.js";
 import { buildRenderedWell, buildRubbleHeap, buildTelegraphPole } from "../../v3/render/objects/rtsAlgeria.js";
 import { bagsInState, farmGeometry, loadFarmstead, loadLookout, loadMineMarker, loadSasPost, pieceInState, sasGeometry } from "./algSangar.js";
@@ -604,6 +604,18 @@ export const BUILDINGS = {
     middle: () => { const g = new THREE.Group(); g.add(houseMesh("aidtent", "damaged"), markDecal("damaged")); return labPiece(g); },
     after: () => (() => { const g = new THREE.Group(); g.add(houseMesh("aidtent", "ruin"), markDecal("ruin")); return labPiece(g); })(),
     tags: ["AID STATION · NEW", "AID STATION · DAMAGED", "AID STATION · DESTROYED"], note: "the aid station (Blender: the army's ridge tent, the red cross, stretchers, medical chest) — « Construction » — damaged, destroyed.",
+  },
+  // THE HELIPAD IN BLENDER (2026-11-01, tools/blender/helipad.py — you: "ok lets build an helipad"): the old piece's
+  // paint, panels and simulated bags on it (its data kept), its damaged and ruin states
+  helipadBlender: {
+    label: "Hélisurface (Blender)", gap: 26, yaw: 0, prepare: () => loadHelipad(),
+    before: () => {
+      const src = helipadGeometry(), g = src.clone(); g.userData = { ...src.userData, extra: [] };
+      return labPiece(kitView(buildHelipadPiece(() => g)));
+    },
+    middle: () => labPiece(houseMesh("helipad", "damaged")),
+    after: () => labPiece(houseMesh("helipad", "ruin")),
+    tags: ["HELIPAD · NEW", "HELIPAD · DAMAGED", "HELIPAD · DESTROYED"], note: "the post's helipad (Blender): rammed earth graded into a platform, the lime H and circle painted, whitewashed edge stones, cairns, the windsock's mast, the fuel point and the radio corner, your simulated bags — damaged (two shells off the H, drums knocked over), destroyed (cratered, burnt, the mast down).",
   },
   projBlender: {
     label: "Tour de projecteur", gap: 12, yaw: Math.PI - 0.5, construction: true, prepare: () => loadSearchlight(),

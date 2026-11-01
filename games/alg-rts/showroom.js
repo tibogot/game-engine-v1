@@ -544,7 +544,7 @@ export async function placeShowroom(app, list = SHOWROOM) {
   const socks = [];
   for (const e of list) {
     const o = placed[e.key], spec = o?.geometry?.userData?.windsock;
-    if (spec) socks.push(Object.assign(createWindsock(app, o, spec, wind), { at: o.position }));
+    if (spec) { const sock = createWindsock(app, o, spec, wind); o.userData.sockGroup = sock.group; socks.push(Object.assign(sock, { at: o.position })); }   // (its mesh knows it: hidden in the ruin — algSangar setPieceState)
   }
   app.addPreRenderHook((dt) => stepSeen(socks, (s) => s.at, dt));
   placed.wind = wind;
