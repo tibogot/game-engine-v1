@@ -620,7 +620,12 @@ function wing(r, w, a0 = 0.15, a1 = 2.4, seg = 12) {
   return g;
 }
 
-export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = {}) {
+export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true, body = "cargo" } = {}) {
+  // `body` "tanker" (2026-11-02, alg-rts El Kantara — the oil road): the CCKW's TANKER — an elliptical tank on three
+  // cradles over the frame, two manhole domes and a hand rail on top, the pump and hose cabinet at the rear (its doors,
+  // the hose coiled on its side), a ladder up it; no bed, no tilt, no one in the back
+  const TANKER = body === "tanker";
+  if (TANKER) tilt = false;
   const R = rng(seed);
   // DETAIL 2 (the vehicle lab, 2026-10-07, from CCKW photos): the FLAT-TOPPED front wings (the
   // banjo arches were the silhouette's mistake), the TILT's flat roof on rounded shoulders, the
@@ -722,8 +727,32 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
     for (const sx of [-1, 1]) P(buildBox(0.5, 0.5, 0.45), [sx * 0.45, 1.3, CZ - 0.3], MAT.canvas, 0.3);   // the seat
   }
 
-  // ── The bed: floor, low sides, and the canvas tilt over its bows.
   const BZ0 = 0.0, BZ1 = -3.55, BL = BZ0 - BZ1, BZ = (BZ0 + BZ1) / 2;
+  const TW = 1.13, TTOP = 2.84, SH = 0.3, TBOT = 1.42;   // (the tilt's section — the FLN flag's roof patch reads it too)
+  if (TANKER) {
+    const TZ0 = BZ0 - 0.05, TZ1 = BZ1 + 0.72, TL = TZ0 - TZ1, TZ = (TZ0 + TZ1) / 2, TY = 1.98, TRX = 0.98, TRY = 0.62;
+    for (const z of [TZ0 - 0.3, TZ, TZ1 + 0.3]) P(buildBox(1.9, 0.2, 0.2), [0, 1.0, z], MAT.paint, VA * 0.8);                       // cradles on the frame
+    P(new THREE.CylinderGeometry(1, 1, TL, 28, 1).rotateX(Math.PI / 2).scale(TRX, TRY, 1), [0, TY, TZ], MAT.paint, VA * 1.02);    // the tank
+    for (const z of [TZ0 - 0.1, TZ1 + 0.1]) P(new THREE.CylinderGeometry(1, 1, 0.08, 28, 1).rotateX(Math.PI / 2).scale(TRX + 0.02, TRY + 0.02, 1), [0, TY, z], MAT.paint, VA * 0.85);   // its end bands (inside the ends: no shared face)
+    for (const z of [TZ + TL * 0.22, TZ - TL * 0.22]) {
+      P(new THREE.CylinderGeometry(0.24, 0.26, 0.14, 16), [0, TY + TRY + 0.04, z], MAT.paint, VA * 0.9);                            // a manhole's collar
+      P(new THREE.SphereGeometry(0.22, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.45, 1), [0, TY + TRY + 0.11, z], MAT.steel, 0.25);   // its lid
+    }
+    for (const sx of [-1, 1]) {                                                                                                     // the hand rail
+      P(alongZ(0.022, 0.022, TL - 0.6, 6), [sx * 0.5, TY + TRY + 0.42, TZ], MAT.steel, 0.2);
+      for (const z of [TZ0 - 0.4, TZ, TZ1 + 0.4]) P(buildBox(0.04, 0.42, 0.04), [sx * 0.5, TY + TRY - 0.14 + 0.35, z], MAT.steel, 0.2);
+    }
+    // THE PUMP AND HOSE CABINET at the rear: its back on the frame's end (the unit code and plate on it), two doors, the
+    // hose coiled on its side, a ladder up to the tank
+    const CZ0 = BZ1, CZ1 = TZ1 - 0.06;
+    P(buildBox(2.08, 1.35, CZ1 - CZ0), [0, 1.625, (CZ0 + CZ1) / 2], MAT.paint, VA * 0.92);
+    for (const sx of [-1, 1]) P(buildBox(0.94, 1.15, 0.02), [sx * 0.5, 1.62, CZ0 - 0.012], MAT.paint, VA * 0.8);                    // the doors
+    for (const sx of [-1, 1]) P(buildBox(0.05, 0.05, 0.04), [sx * 0.08, 1.62, CZ0 - 0.03], MAT.steel, 0.2);                          // their handles
+    P(new THREE.TorusGeometry(0.34, 0.05, 8, 20).rotateY(Math.PI / 2), [1.1, 1.6, (CZ0 + CZ1) / 2], MAT.rubber, 0.25);               // the hose
+    for (const sx of [-1, 1]) P(buildBox(0.04, 1.6, 0.04), [-0.45 + sx * 0.18, 1.9, CZ1 + 0.03], MAT.steel, 0.2);                    // the ladder
+    for (let k = 0; k < 5; k++) P(buildBox(0.36, 0.03, 0.03), [-0.45, 1.25 + k * 0.3, CZ1 + 0.03], MAT.steel, 0.2);
+  } else {
+  // ── The bed: floor, low sides, and the canvas tilt over its bows.
   P(buildBox(2.2, 0.1, BL), [0, 1.22, BZ], MAT.paint, VA * 0.9);
   for (const sx of [-1, 1]) {
     for (let k = 0; k < 3; k++) P(buildBox(0.05, 0.13, BL - 0.1), [sx * 1.09, 1.36 + k * 0.16, BZ], MAT.timber, 0.3 + R() * 0.25);
@@ -731,7 +760,6 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
   }
   P(buildBox(2.1, 0.5, 0.06), [0, 1.52, BZ1 + 0.03], MAT.paint, VA * 0.95);                 // tailgate
   // The TILT's section (the photos): straight sides, rounded SHOULDERS, a near-flat crowned roof.
-  const TW = 1.13, TTOP = 2.84, SH = 0.3, TBOT = 1.42;
   const tiltSection = (n = 5) => {
     const pts = [[-TW, TBOT], [-TW, TTOP - SH]];
     for (let i = 1; i < n; i++) { const a = Math.PI - (i / n) * (Math.PI / 2); pts.push([-TW + SH + Math.cos(a) * SH, TTOP - SH + Math.sin(a) * SH]); }
@@ -833,6 +861,7 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
   }
   // Seen through the open back: two men on the benches, a crate.
   if (!D2) for (const sx of [-1, 1]) P(new THREE.SphereGeometry(0.15, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.85, 1.1), [sx * 0.62, 2.1, BZ1 + 0.6], MAT.paint, VA * 1.1);
+  }   // (the bed — not the tanker's)
 
   // The truck's WHEEL at detail 2 (the jeep's, at R 0.46): tyre, chevron tread, combat rim,
   // six bolts; `inner` (the inside of a dual pair): the tyre and tread only.
@@ -878,8 +907,10 @@ export function buildGMC({ seed = 353, detail = 1, crew = true, tilt = true } = 
   // unit code on the tailgate.
   const st = [];
   st.push(stencilPatch("frPlate", flatSurface([0.55, 0.8, 3.315], [0, 0, 1], [1, 0, 0], 0.55, "frPlate"), { lift: 0.004 }));
-  st.push(stencilPatch("frUnitCode", flatSurface([0, 1.55, BZ1 - 0.005], [0, 0, -1], [-1, 0, 0], 1.3, "frUnitCode"), { lift: 0.004 }));
-  st.push(stencilPatch("frPlate", flatSurface([0.6, 1.1, BZ1 - 0.02], [0, 0, -1], [-1, 0, 0], 0.5, "frPlate"), { lift: 0.004 }));
+  // (the tanker's on its cabinet's doors, 2 cm out from its back)
+  const backZ = TANKER ? BZ1 - 0.024 : BZ1;
+  st.push(stencilPatch("frUnitCode", flatSurface([0, 1.55, backZ - 0.005], [0, 0, -1], [-1, 0, 0], 1.3, "frUnitCode"), { lift: 0.004 }));
+  st.push(stencilPatch("frPlate", flatSurface([0.6, 1.1, backZ - 0.02], [0, 0, -1], [-1, 0, 0], 0.5, "frPlate"), { lift: 0.004 }));
   for (const sx of [-1, 1]) st.push(stencilPatch("frTricolore", flatSurface([sx * 0.46, 1.36, 2.6], [sx, 0, 0], [0, 0, -sx], 0.3, "frTricolore"), { lift: 0.004 }));
   const stencil = mergeStencils(st);
   // DECALS a game paints on SOME units only (unitRenderer `unit.decal`): the FLN's flag on a truck it

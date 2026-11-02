@@ -58,8 +58,9 @@
 //           grenade per band every few seconds, not a hail.
 import { ARMOUR, faceHit } from "./algArmour.js";
 import { TRACK_LINES, nearestTrack } from "./algTracks.js";
-import { PLAY } from "./layout.js";
-import { t } from "./i18n/i18n.js";
+import { MAP, PLAY } from "./layout.js";
+import { isHuman } from "../shared-rts/teams.js";
+import { t, t as tr } from "./i18n/i18n.js";   // (tr: inside the AI, `t` is often its own clock)
 import { COSTS } from "./algEconomy.js";
 import { SQUADS, UPGRADES } from "./algSquads.js";
 
@@ -170,6 +171,10 @@ const P = {
   huntKeepOff: 120,           // m: no French this near the stretch it picks (their teams were caught on the way)
   cutShare: 0.2,              // of the bands: cut the telegraph line (algTelegraph.js), while it stands
   cutWork: 10,                // seconds at the pole to bring it down
+  // SABOTAGE (2026-11-02, El Kantara): a band takes a charge to a town piece the map marks (MAP.sabotage — the pump
+  // station), where no French stand within sabotageKeepOff, plants it in sabotageWork s and goes; the piece one state
+  // down (intact → damaged → ruin), a blast and a fire
+  sabotageShare: 0.3, sabotageWork: 14, sabotageKeepOff: 40,
   mineKeepOff: 90,            // no French within this of the spot
   mineApart: 45,              // from the other mines
   mgKeepOff: 8,               // metres past an MG's range an ambush spot must keep
@@ -1349,7 +1354,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
             else { b.members.splice(b.members.indexOf(u), 1); inBand.delete(u); u.holdFire = true; homebound.add(u); sendHome(u); }
           }
           if (b.mission === "assault") { goIn(b); break; }
-          setState(b, b.mission === "village" || b.mission === "defend" || b.mission === "raid" ? "occupy" : b.mission === "mine" || b.mission === "cut" ? "lay" : "ambush");
+          setState(b, b.mission === "village" || b.mission === "defend" || b.mission === "raid" ? "occupy" : b.mission === "mine" || b.mission === "cut" || b.mission === "sabotage" ? "lay" : "ambush");
           break;
         }
         // Everyone stopped short (no route for anyone): wire in the way? Cut
@@ -1492,6 +1497,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         const c = centre(m);
         if (underFire(b, m) || french().some((u) => !u.isAir && dist(u.position, c) < P.trigger)) { strike(b); break; }
         if (b.mission === "cut") { if (b.t > P.cutWork) { app.algTelegraph?.fell(b.cutPole.i); withdraw(b); } }
+        else if (b.mission === "sabotage") { if (b.t > P.sabotageWork) { detonate(b.sabTarget); withdraw(b); } }
         else if (b.t > P.mineWork) { layMine(b); withdraw(b); }
         break;
       }
@@ -1774,6 +1780,42 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
    * A stretch of piste (or mule path) to mine: no French within mineKeepOff, clear of the
    * post and of the other mines; nearer the band better. False if none.
    */
+  /** SABOTAGE: the map's marked pieces (MAP.sabotage: town types — El Kantara's pump station) still standing, with no
+   *  French near; the band goes to the nearest, its men a few metres before its front. False if none. */
+  const sabotageTargets = () => (MAP.sabotage?.length ? (MAP.town?.houses ?? []).map((r, k) => ({ r, k })).filter(({ r }) => MAP.sabotage.includes(r[0])) : []);
+  function planSabotage(b) {
+    const D = app.algTown?.damage, c = centre(alive(b));
+    let best = null, bd = Infinity;
+    for (const { r, k } of sabotageTargets()) {
+      if ((D?.state?.(k) ?? "intact") === "ruin") continue;
+      const p = { x: r[6], z: r[7] };
+      if (french().some((u) => !u.isAir && dist(u.position, p) < P.sabotageKeepOff)) continue;
+      const d = dist(p, c);
+      if (d < bd) { bd = d; best = { k, p, yaw: r[5], hz: r[9] }; }
+    }
+    if (!best) return false;
+    b.mission = "sabotage"; b.sabTarget = best; b.target = null;
+    const out = best.hz + 3;   // (before its front: the piece's local -Z)
+    const sx = best.p.x - Math.sin(best.yaw) * out, sz = best.p.z - Math.cos(best.yaw) * out;
+    b.spot = app.navGrid?.nearestOpenWorld?.(sx, sz, true) ?? { x: sx, z: sz };
+    holdFire(b, true);
+    sendBand(b, b.spot);
+    setState(b, "approach");
+    return true;
+  }
+  /** The charge goes off: the piece one state down, a blast, a fire; the French told. */
+  function detonate(T) {
+    const D = app.algTown?.damage, r = MAP.town?.houses?.[T.k];
+    if (!D || !r || T.fired) return;
+    T.fired = true;   // (one charge, once: the band stays in its laying state a tick after — it went off twice, a ruin at once)
+    const cur = D.state?.(T.k) ?? "intact";
+    if (cur === "ruin") return;
+    D.force(T.k, cur === "intact" ? "damaged" : "ruin");
+    const y = app.getWorldHeight?.(T.p.x, T.p.z) ?? 0;
+    app.algCombat?.fx?.explosion?.(T.p.x, y + 1, T.p.z, { size: 14, dust: true });
+    app.algCombat?.fire?.addFire(T.p.x, y + 2, T.p.z, 7, 70);
+    if (isHuman("player")) app.algBattle?.say?.(tr("<b>Sabotage !</b> Le FLN a fait sauter la station de pompage. Gardez-la, ou elle brûlera tout à fait."), T.p.x, T.p.z, "bad", "hq_contact", "alertAttack");
+  }
   /** CUT THE LINE: the band goes to a telegraph pole far from the French and fells it. */
   function planCut(b) {
     const pole = app.algTelegraph?.poleFor?.(centre(alive(b)));
@@ -2094,6 +2136,11 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     if (b.mission === "mine") {
       if (planMine(b)) return;
       b.mission = "ambush";
+    }
+    // SABOTAGE (MAP.sabotage — El Kantara's pump station): its share of the bands while a target stands unguarded.
+    if ((!b.mission && Math.random() < P.sabotageShare) || b.mission === "sabotage") {
+      if (planSabotage(b)) return;
+      if (b.mission === "sabotage") b.mission = "ambush";
     }
     // THE LINE (algTelegraph.js): a pole far from the French, now and then.
     if ((!b.mission && Math.random() < P.cutShare) || b.mission === "cut") {
@@ -2422,6 +2469,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     raidNow() { return newBand({ mission: "raid" }); },
     /** Dev: a band now, sent to cut the telegraph line. */
     cutNow() { return newBand({ mission: "cut" }); },
+    sabotageNow() { return newBand({ mission: "sabotage" }); },
     /** Dev: a mule train now. */
     convoyNow() { if (!convoy) startConvoy(); },
     /** Dev: the last ambush-screen attempt ("placed" or why not). */

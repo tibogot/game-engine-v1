@@ -227,11 +227,13 @@ export const MAP = {
   // placed (algLandmarks adds them as it does its own: impassable, hard cover).
   sandstone: { colour: "kantara", rocks: ROCKS },
   // algLandmarks' own scenery: only the slabs above (a map with `scenery` starts at 0 of everything).
-  scenery: { quantities: {}, keepClear: [] },
+  scenery: { quantities: { betoums: 14 }, over: { betoumSpacing: 45 }, bigTree: "acacia", keepClear: [] },   // (14 ACACIAS in the big trees' places, 2026-11-02)
   // ITS TOWN (algGame: the instanced house field — garrisons, damage, cover, sight): the places' buildings
   town: KANTARA_TOWN,
   // ITS EARTH BANKS (algGame: app.raiseBerm after the town's pads): the pump station's bund
   berms,
+  // WHAT THE FLN SABOTAGES (algAI: a band's charge — one state down, a blast, a fire): the pump station
+  sabotage: ["pompage"],
   // THE MINIMAP's ground, by paint layer (tools/algKantaraLevel.mjs).
   minimap: { layers: { 0: [196, 124, 80], 1: [176, 98, 60], 2: [218, 172, 122], 3: [120, 110, 70], 4: [160, 152, 140], 5: [176, 104, 66], 6: [214, 184, 150] } },
 };

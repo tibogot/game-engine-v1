@@ -413,12 +413,13 @@ export function createAlgLandmarks(app, { showroom = {}, fields = null, navGrid 
     }
   }
   if (plants) {
-    for (const [kind, list, sc] of [["betoum", betoums, [0.85, 0.35]], ["tamariskTree", tamarisks, [0.75, 0.45]]]) {
+    // (MAP.scenery.bigTree: the map's own shade tree in the betoums' places — El Kantara's acacia, 2026-11-02)
+    for (const [kind, list, sc] of [[MAP.scenery?.bigTree ?? "betoum", betoums, [0.85, 0.35]], ["tamariskTree", tamarisks, [0.75, 0.45]]]) {
       if (!list.length || !FOLIAGE_PRESETS[kind]) continue;
       if (!plants.types.has(kind)) plants.setType(kind, structuredClone(FOLIAGE_PRESETS[kind]));
       for (const b of list) {
         plants.add(kind, b.x, H(b.x, b.z) - 0.05, b.z, { rotY: R() * 6.28, scale: sc[0] + R() * sc[1], seed: R() });
-        app.clearVegetation?.(b.x, b.z, kind === "betoum" ? 4 : 2.5, { grass: 0, edge: 0.6 });
+        app.clearVegetation?.(b.x, b.z, kind === "tamariskTree" ? 2.5 : 4, { grass: 0, edge: 0.6 });
       }
     }
   }

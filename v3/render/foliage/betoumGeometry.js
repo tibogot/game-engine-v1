@@ -64,6 +64,9 @@ function mulberry(a) {
  */
 function growSkeleton(type, seed) {
   const R = mulberry(seed);
+  // THE ACACIA (Vachellia tortilis raddiana, 2026-11-02 — El Kantara, the Saharan edge): the same tree grown otherwise —
+  // a short bole splitting LOW into 3-4 stems that rise in a vase, their limbs going out level to a wide FLAT crown
+  const AC = type.kind === "acacia";
   const branches = [];
   const stemW = type.stemWidth ?? 1;
   const up = [0, 1, 0];
@@ -138,16 +141,16 @@ function growSkeleton(type, seed) {
   const boleR = 0.05 * stemW;
   // A clear trunk under the crown (a short one read as a bush once the crown
   // went wide).
-  const boleH = 0.3 + R() * 0.06;
-  const stems = Math.max(2, Math.min(3, Math.round(type.fronds ?? 2) + (R() < 0.4 ? 1 : 0)));
+  const boleH = AC ? 0.1 + R() * 0.05 : 0.3 + R() * 0.06;
+  const stems = AC ? 3 + (R() < 0.5 ? 1 : 0) : Math.max(2, Math.min(3, Math.round(type.fronds ?? 2) + (R() < 0.4 ? 1 : 0)));
   const stemDir = (s) => {
     const az = (s / stems) * Math.PI * 2 + R() * 0.9;
     const out = [Math.cos(az), 0, Math.sin(az)];
     // Leaning well out: the betoum is far wider than tall.
-    return { out, dir: norm(add([0, 1, 0], out, Math.tan(0.78 + R() * 0.28))) };
+    return { out, dir: norm(add([0, 1, 0], out, Math.tan(AC ? 0.42 + R() * 0.2 : 0.78 + R() * 0.28))) };   // (the acacia's vase: steeper)
   };
   const s0 = stemDir(0);
-  const stemLen = 0.27 + R() * 0.07;
+  const stemLen = AC ? 0.42 + R() * 0.08 : 0.27 + R() * 0.07;
   const total = boleH + stemLen;
   const fk = boleH / total;                         // the fork, as a fraction
   const r0Main = boleR * 0.78;
@@ -265,9 +268,12 @@ export function buildBetoum(type, ctx) {
   const twigs = skel.filter((b) => b.level >= 3);
   let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
   for (const b of twigs) for (const p of b.pts) for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], p[a]); hi[a] = Math.max(hi[a], p[a]); }
-  const cc = [(lo[0] + hi[0]) / 2, lo[1] + (hi[1] - lo[1]) * 0.42, (lo[2] + hi[2]) / 2];
+  const AC = type.kind === "acacia";
+  // (the acacia: its crown a thin flat UMBRELLA high on the stems — centred near their tops, its height a quarter
+  // of the betoum's dome's; the cards only on its upper face, sparse, with sky between)
+  const cc = [(lo[0] + hi[0]) / 2, lo[1] + (hi[1] - lo[1]) * (AC ? 0.78 : 0.42), (lo[2] + hi[2]) / 2];
   const ex = Math.max(0.1, (hi[0] - lo[0]) / 2 + 0.08), ez = Math.max(0.1, (hi[2] - lo[2]) / 2 + 0.08);
-  const ey = Math.max(0.08, (hi[1] - lo[1]) * 0.62 + 0.06);
+  const ey = AC ? Math.max(0.04, (hi[1] - lo[1]) * 0.22 + 0.03) : Math.max(0.08, (hi[1] - lo[1]) * 0.62 + 0.06);
   const shellOf = (p) => Math.hypot((p[0] - cc[0]) / ex, (p[1] - cc[1]) / ey, (p[2] - cc[2]) / ez);
   const crownN = (p) => norm([(p[0] - cc[0]) / (ex * ex), (p[1] - cc[1]) / (ey * ey), (p[2] - cc[2]) / (ez * ez)]);
 
@@ -276,8 +282,13 @@ export function buildBetoum(type, ctx) {
   const anchors = [];
   for (const b of twigs) {
     for (let i = 1; i < b.pts.length; i++) {
-      const p = b.pts[i];
-      if (shellOf(p) < 0.55) continue;
+      let p = b.pts[i];
+      if (AC) {
+        // (the acacia's UMBRELLA: every twig point in the upper half of the wood, pulled most of the way up to one level
+        // — a flat layer of foliage over the vase, sky through it; on its shell only, the dome read as a dead bush)
+        if (p[1] < lo[1] + (hi[1] - lo[1]) * 0.45) continue;
+        p = [p[0], p[1] + (hi[1] - 0.02 - p[1]) * 0.7, p[2]];
+      } else if (shellOf(p) < 0.55) continue;
       anchors.push({ p, d: norm(sub(p, b.pts[i - 1])) });
     }
   }

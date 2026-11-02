@@ -40,6 +40,7 @@ export default {
   "Le groupe abat le poteau télégraphique le plus proche (~10 s) : le poste perd son appui aérien et une part de ses effectifs d'Alger jusqu'à ce que ses sapeurs le réparent.": "The group fells the nearest telegraph pole (~10 s): the post loses its air support and part of its manpower from Algiers until its sappers mend it.",
   "Aucun poteau télégraphique debout à moins de 45 m.": "No standing telegraph pole within 45 m.",
   "<b>Mine posée.</b> Elle attend les Français.": "<b>Mine laid.</b> It is waiting for the French.",
+  "<b>Sabotage !</b> Le FLN a fait sauter la station de pompage. Gardez-la, ou elle brûlera tout à fait.": "<b>Sabotage!</b> The FLN has blown up the pump station. Guard it, or it will burn to the ground.",
   "<b>Ligne coupée !</b> Le poste n'a plus Alger au bout du fil.": "<b>Line cut!</b> The post has lost its line to Algiers.",
   "<b>Ligne réparée</b> par les sapeurs français : le poste a de nouveau Alger au bout du fil.": "<b>Line repaired</b> by the French sappers: the post has its line to Algiers again.",
   // algMortarTeam.js — the FLN's mortar team (2026-10-13)

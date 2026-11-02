@@ -120,6 +120,7 @@ const LEAF_ROUNDING = {
   // The betoum's cards carry their own CLUMP's normal (betoumGeometry.js):
   // round only a little more, from the crown's middle, so the whole dome reads.
   betoum:    [0.62, 0.08],
+  acacia:    [0.62, 0.08],
   agaveMast: [0.6, 0.15],
 };
 
@@ -168,6 +169,7 @@ const SELF_OCCLUSION = {
   broom: [0.8, 0.4],
   oleander: [0.9, 0.35],
   betoum: [0.85, 0.4],
+  acacia: [0.85, 0.4],
   typha: [0.6, 0.5],
   // The canopy tree (alg-rts tamarisk, nam-rts dipterocarps): the crown's
   // heart and underside darker (the Plant Lab's before / after, 2026-10-02).
@@ -297,7 +299,7 @@ export function cardTextureOf(kind) {
     // Sprays of real leaves with sky between them (leafSprayCard.js) — the
     // banyan card's solid blob made both crowns read as green sheets.
     case "banyan": case "dipterocarp": return "leafSpray";
-    case "betoum": return "betoumLeaf";
+    case "betoum": case "acacia": return "betoumLeaf";
     // Rosettes of short needles in flat mats (cedarNeedleTexture.js).
     case "atlasCedar": return "needle";
     case "taro": return "taro";
@@ -347,7 +349,7 @@ export function createFoliageTypeGeometry(type, { lod = 0, variant = 0 } = {}) {
   if (type.kind === "dipterocarp") return buildDipterocarp(type, { near, far, rand, push, vcount, I, finish });
   // The new tamarisk TREE (2026-10-02): its own grown skeleton + weeping
   // sprays (buildTamariskTree); the old "tamarisk" (dipterocarp) is untouched.
-  if (type.kind === "betoum") return buildBetoum(type, { near, far, rand, push, vcount, I, finish });
+  if (type.kind === "betoum" || type.kind === "acacia") return buildBetoum(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "tamariskTree") return buildTamariskTree(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "atlasCedar") return buildAtlasCedar(type, { near, far, rand, push, vcount, I, finish });
   if (type.kind === "pandanus") return buildPandanus(type, { near, far, rand, push, vcount, I, finish });

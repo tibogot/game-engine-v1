@@ -422,6 +422,14 @@ export const FOLIAGE_PRESETS = {
     spread: 0.62, arch: 0, droop: 0, stemWidth: 1, bareStalk: 0,
     colorBase: "#26341f", colorTip: "#5c7040", colorHead: "#544c44", size: 11, translucency: 0.3,
   },
+  // ACACIA (Vachellia tortilis raddiana, 2026-11-02 — alg-rts El Kantara): the Saharan edge's tree — a short bole, 3-4
+  // stems in a vase, a wide flat umbrella of fine grey-olive leaves with sky through it (betoumGeometry.js, kind acacia)
+  acacia: {
+    kind: "acacia",
+    fronds: 3, frondLength: 1.0, leaflets: 620, leafletWidth: 1.0, leafletAngle: 30,
+    spread: 0.7, arch: 0, droop: 0, stemWidth: 0.8, bareStalk: 0,
+    colorBase: "#3a3f26", colorTip: "#7a8350", colorHead: "#4e4238", size: 7, translucency: 0.3,
+  },
   // PRICKLY PEAR (Opuntia ficus-indica) — the hedge round every village and
   // garden in the Maghreb: tiers of flat grey-green pads (buildOpuntia).
   pricklyPear: {

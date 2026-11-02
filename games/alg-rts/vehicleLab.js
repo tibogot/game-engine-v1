@@ -61,6 +61,8 @@ const VEHICLES = {
   willys: { build: buildWillys, label: "Jeep Willys MB" },
   gmc: { build: buildGMC, label: "Camion GMC (bâché)" },
   gmcOpen: { build: (o) => buildGMC({ ...o, tilt: !o }), label: "Camion GMC (ouvert)" },
+  // THE TANKER (2026-11-02, El Kantara's oil road): the CCKW's tank body — the cargo truck on the left, the tanker on the right
+  gmcCiterne: { before: () => buildGMC({ detail: 2 }), after: () => buildGMC({ detail: 2, crew: false, body: "tanker" }), build: (o) => buildGMC({ ...o, body: "tanker" }), label: "Camion-citerne GMC" },
   alouette: { build: buildAlouette, label: "Alouette II" },
   h21: { build: () => buildH21(), label: "H-21 « Banane »" },
   noratlas: { build: () => { const g = buildNoratlas(); g.userData.labMaterial = aluminiumMaterial(); return g; }, label: "Nord Noratlas" },

@@ -472,10 +472,16 @@ ORDER (each step: you look before the next):
        battered towers — MAP.bordj); [x] the PUMP STATION + PIPELINE (2026-11-02, tools/blender/oilStation.py: two riveted
        tanks, the pump house, the manifold on saddles with its valves, spare pipes, drums; damaged / ruin; the pipeline in
        10 m lengths west to the road; the BUND an earth bank RAISED IN THE TERRAIN — MAP.berms, app.raiseBerm after the
-       town; an objective, "Station de pompage"); [ ] acacia; [ ] the tanker. Its SABOTAGE (an FLN charge → fire) with
+       town; an objective, "Station de pompage"); [x] the ACACIA (2026-11-02: the betoum's generator grown otherwise —
+       kind "acacia", a short bole splitting low into 3-4 stems in a vase, the foliage pulled into a flat umbrella; 14 on
+       the plain, MAP.scenery.bigTree); [x] the TANKER (2026-11-02: buildGMC body "tanker" — the CCKW's elliptical tank on
+       cradles, manholes, a rail, the rear pump and hose cabinet; in the vehicle lab, "Camion-citerne GMC"; not yet a unit
+       — the convoys, step 4). Its SABOTAGE (an FLN charge → fire) with
        the AI, step 4.
-4. [ ] THE AI: the FLN (sabotage, ambushes in the gullies, raids from the plateau); the French
-       (convoys, holding the bridge); then the méharistes.
+4. [~] THE AI: [x] the FLN's SABOTAGE (2026-11-02, algAI planSabotage / detonate — MAP.sabotage: a band takes a charge
+       to the pump station when no French stand within 40 m, plants it in 14 s and goes; the station one state down — the
+       second charge burns it out — a fire, an alert; tested: intact → damaged, the band withdrew). [ ] The French
+       guarding it (their AI); convoys on the road; then the méharistes.
 
 ## HELIBORNE — 2026-10-12 (you: "the helicopter should pick up and disembark units; paratroopers
 ## dropped by the plane, animated by us")
