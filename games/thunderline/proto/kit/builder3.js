@@ -705,9 +705,23 @@ const trackGroup = new THREE.Group();
 scene.add(trackGroup);
 let built = new Map(); // uid → { exit: Matrix4, group, M }
 let obstacleSet = null; // the track's obstacles as drawn (obstacles.js); the sweepers turn on the page's clock
+const obstacleLooks = new Map(); // uid → { sig, vis }: an unchanged obstacle keeps its look across rebuilds
+const gateCache = new Map(); // a gate's / ring's key → { sig, g }: the same, for the start / finish / checkpoint gates and air rings
+let gatesUsed = new Set();
+/** The gate made by `make`, or the one kept from the last rebuild if `sig` (what it is built from) is the same. */
+function keptGate(key, sig, make) {
+  gatesUsed.add(key);
+  const hit = gateCache.get(key);
+  if (hit?.sig === sig) return hit.g;
+  if (hit) disposeTree(hit.g, true);
+  const g = make();
+  gateCache.set(key, { sig, g });
+  return g;
+}
 let problems = { overlap: new Set(), messages: [], loose: [], misses: [] };
 
 let chunkMeshes = null;
+const chunkCache = new Map(); // buildTrackMeshes' kept cells: an edit re-merges only the 256 m cells it changed
 const pieceLooks = {}; // buildTrackMeshes' `built`: id -> { guarded, open } (the builder's piece cache)
 // SHADOWS WHILE BUILDING (user, 2026-10-29: "add shadow in the builder edit also"): the road casts and takes the
 // sun's shadow as in a drive (driveSession: glass casts none) — how high a piece stands reads at a glance
@@ -720,7 +734,8 @@ function drawChunks() {
     placements.push({ id: pc.id, open: !!pc.open, rail: pc.rail, M: built.get(pc.uid).M });
     built.get(pc.uid).group.traverse((o) => { if (o.isMesh) { o.visible = false; shadowed(o); } });
   }
-  chunkMeshes = buildTrackMeshes(placements, pieceLooks, mats);
+  chunkMeshes = buildTrackMeshes(placements, pieceLooks, mats, chunkCache);
+  for (const o of chunkMeshes.dropped) disposeTree(o, false); // (the cells it merged again, or no longer has)
   chunkMeshes.group.name = "trackChunks";
   chunkMeshes.group.traverse((o) => { o.raycast = () => {}; if (o.isMesh) shadowed(o); }); // the mouse picks the pieces, never the chunks
   trackGroup.add(chunkMeshes.group);
@@ -745,12 +760,12 @@ function disposeTree(root, materials) {
   });
 }
 function releaseRebuilt() {
-  if (chunkMeshes) { disposeTree(chunkMeshes.group, false); chunkMeshes = null; }
+  // (the chunk cells are KEPT: drawChunks reuses the unchanged ones and disposes what it drops)
+  if (chunkMeshes) { trackGroup.remove(chunkMeshes.group); chunkMeshes = null; }
   for (const c of trackGroup.children) {
-    if (c.userData.gate) disposeTree(c, true); // a checkpoint / start / finish gate or an air ring: all its own
-    else if (c.userData.spawn && !carHolo) c.geometry?.dispose(); // (the stand-in box)
+    // (the gates and air rings are KEPT: keptGate disposes those it makes again or no longer needs)
+    if (c.userData.spawn && !carHolo) c.geometry?.dispose(); // (the stand-in box)
   }
-  if (obstacleSet) disposeTree(obstacleSet.group, false);
 }
 let trackVer = 0; // bumped by every rebuild and arc refresh: the snap's cache key (updateGhost)
 function rebuild() {
@@ -758,9 +773,10 @@ function rebuild() {
   releaseRebuilt();
   for (const c of trackGroup.children.slice()) trackGroup.remove(c);
   built = new Map();
+  gatesUsed = new Set();
   for (const pc of track.pieces) {
     if (isRing(pc)) {
-      const g = makeRingMesh(ringGateOf(pc));
+      const g = keptGate(`ring:${pc.uid}`, JSON.stringify(pc), () => makeRingMesh(ringGateOf(pc)));
       g.userData.uid = pc.uid;
       trackGroup.add(g);
       const M = new THREE.Matrix4().fromArray(pc.M);
@@ -776,8 +792,9 @@ function rebuild() {
     g.matrix.copy(M);
     g.userData.uid = pc.uid;
     trackGroup.add(g);
-    if (pc.cp) trackGroup.add(checkpointGate(pc, M));
-    if (TILES[pc.id]?.start || TILES[pc.id]?.finish) trackGroup.add(lineGate(pc, M));
+    const gsig = `${pc.id}|${JSON.stringify(pcOE(pc))}|${M.elements.join(",")}`;
+    if (pc.cp) trackGroup.add(keptGate(`cp:${pc.uid}`, gsig, () => checkpointGate(pc, M)));
+    if (TILES[pc.id]?.start || TILES[pc.id]?.finish) trackGroup.add(keptGate(`line:${pc.uid}`, gsig, () => lineGate(pc, M)));
     built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pcOE(pc)).exitLocal), group: g, M });
   }
   // THE ROAD IS DRAWN IN CHUNKS (testTrack.buildTrackMeshes, as the drive page: performance pass,
@@ -787,7 +804,8 @@ function rebuild() {
   // OBSTACLES (track.props): drawn here, selectable like pieces; the sweepers turn on the page's clock.
   // Those on a piece are laid on it again first (it may have moved or changed: roadSnapAt)
   relayProps();
-  obstacleSet = buildObstacleSet(track.props ?? []);
+  obstacleSet = buildObstacleSet(track.props ?? [], { cache: obstacleLooks });
+  for (const [k, v] of [...gateCache]) if (!gatesUsed.has(k)) { disposeTree(v.g, true); gateCache.delete(k); } // (gates gone with their pieces)
   trackLamps?.sync(track.props ?? []);
   // THE TEST CAR: re-laid on its piece (gone with it)
   if (track.spawn) {
@@ -870,6 +888,8 @@ function toggleCheckpoint(uid) {
 let prediction = { state: "idle", lipSpeed: new Map(), fail: null, lapS: null, topKmh: 0, ticks: 0 };
 let predTimer = null, predToken = 0, failBox = null;
 const predScene = new THREE.Scene(); // the car's meshes live here; never rendered
+let predCar = null; // the test lap's car (one at a time in predScene)
+let predBvh = { deck: null, solids: null }; // the last run's collision trees (kept while their inputs are the same)
 const PRED_SLICE_MS = 12; // the background test lap's share of a frame (8 ms: the result came in ~7.6 s on White 3)
 function schedulePrediction() { clearTimeout(predTimer); predTimer = setTimeout(runPrediction, 250); }
 // ---------- THE INCREMENTAL TEST LAP (user, 2026-10-24: "the point of this editor is to be very fast") ----------
@@ -1037,13 +1057,23 @@ async function runPrediction() {
   const obs = buildObstacleSet(track.props ?? [], { look: false });
   for (const d of obs.decks) decks.push(col(d.geometry, d.M));
   for (const s of obs.solids) solids.push(col(s.geometry, s.M));
-  const deckBvh = new RoadBvh(), solidsBvh = new RoadBvh();
-  deckBvh.bakeFromMeshes(decks);
-  solidsBvh.bakeFromMeshes(solids);
+  // THE LAST RUN'S TREES when nothing they are built from changed (audit 2026-11-02: the whole track's deck tree is
+  // ~40 ms on the lab track, every edit). An older run may still be flying on its trees, so a changed input gets a NEW
+  // tree, never a re-bake of the old one.
+  const kept = (prev, list) => (!globalThis.__predFreshBvh && prev?.baked && prev._signature(list) === prev._sig ? prev : null); // (__predFreshBvh: dev A/B)
+  let freshBake = false;
+  const deckBvh = kept(predBvh.deck, decks) ?? ((freshBake = true), new RoadBvh());
+  const solidsBvh = kept(predBvh.solids, solids) ?? ((freshBake = true), new RoadBvh());
+  if (deckBvh !== predBvh.deck) deckBvh.bakeFromMeshes(decks);
+  if (solidsBvh !== predBvh.solids) solidsBvh.bakeFromMeshes(solids);
+  predBvh = { deck: deckBvh, solids: solidsBvh };
   const ground = createVehicleGround({ getTerrainHeight: () => FLOOR_Y });
   ground.setRoadBvh(deckBvh.baked ? deckBvh : null);
   ground.setRoadSolidsBvh(solidsBvh.baked ? solidsBvh : null);
-  const car = new PredCar({ scene: predScene, showArrows: false });
+  // (the last run's car out of the hidden scene: each run left one behind — audit 2026-11-02. Never rendered, so
+  // nothing on the GPU; its geometry is shared with the other cars, so not disposed)
+  if (predCar) predScene.remove(predCar.group);
+  const car = (predCar = new PredCar({ scene: predScene, showArrows: false }));
   if (car.isStuntCar) car.roadDirAt = roadDirFromRide(ride);
   if (car.isArcadeCar) car.trackAt = trackFromRide(ride);
   car.SUBSTEPS = 3;
@@ -1148,6 +1178,13 @@ async function runPrediction() {
     for (const q of lapCache.cps) if (q.tick <= c.tick) cps.push(q);
   }
   prediction.resumedAt = startTick; // (tests read it)
+  // (after a fresh bake, a frame before the first slice: the bake and a 12 ms slice in one frame was the worst frame
+  // after an edit, 80 ms on the lab track)
+  if (freshBake) {
+    await new Promise((r) => requestAnimationFrame(() => r()));
+    if (token !== predToken) return;
+    sliceT0 = performance.now();
+  }
   const tDrive = performance.now();
   let lastK = resume ? resume.k : -1;
   for (let tick = startTick; tick < 120 * 180; tick++) {
@@ -1261,8 +1298,7 @@ async function runPrediction() {
     failBox = new THREE.Box3Helper(new THREE.Box3().setFromObject(built.get(prediction.fail.uid).group), 0xff9a3d);
     scene.add(failBox);
   }
-  refreshArcs();
-  runChecks();
+  // (the arcs and checks above are this run's: a second pass here redid them for nothing — audit 2026-11-02)
   statusKey = "";
   renderStatus();
   // a real flight (≥ 0.8 s, as the landing judge counts one), in driving order
@@ -2609,12 +2645,28 @@ function cutOut(uid) {
 let editMode = null; // "insert" | "replace" while the dock picks the piece
 let editMsg = null; // why the last edit was refused
 const IDENT = new THREE.Matrix4().elements;
+/**
+ * THE MATRICES ONLY: each piece laid on its parent's end (as rebuild does), into `built` — no meshes, no checks, no
+ * lap. reflow's passes need only where the pieces' ends went (audit 2026-11-02: each pass was a whole rebuild — up to
+ * 9 a reflow); rebuild() draws once at the end.
+ */
+function layout() {
+  built = new Map();
+  for (const pc of track.pieces) {
+    if (isRing(pc)) { const M = new THREE.Matrix4().fromArray(pc.M); built.set(pc.uid, { exit: M.clone(), M }); continue; }
+    const M = pc.parent != null && built.has(pc.parent) ? built.get(pc.parent).exit.clone().multiply(new THREE.Matrix4().makeTranslation(pc.off ?? 0, 0, 0)) : new THREE.Matrix4().fromArray(pc.M);
+    pc.M = M.toArray();
+    ensureTile(pc.id);
+    built.set(pc.uid, { exit: M.clone().multiply(piece(pc.id, pcOE(pc)).exitLocal), M });
+  }
+}
 function reflow(mutate) {
   const old = new Map([...built].map(([u, b]) => [u, b.exit.clone()]));
   const oldM = new Map([...built].map(([u, b]) => [u, b.M.clone()])); // pieces laid BESIDE follow their neighbour's start
   snapshot();
   mutate(old);
-  rebuild();
+  const lay = globalThis.__reflowFull ? rebuild : layout; // (__reflowFull: the old whole rebuild per pass — dev A/B)
+  lay();
   for (let pass = 0; pass < 8; pass++) {
     const moved = [];
     for (const pc of track.pieces) {
@@ -2636,8 +2688,9 @@ function reflow(mutate) {
     }
     if (!moved.length) break;
     for (const src of moved) old.set(src, built.get(src).exit.clone());
-    rebuild(); // pieces after a carried landing follow it, and their own lips move in the next pass
+    lay(); // pieces after a carried landing follow it, and their own lips move in the next pass
   }
+  rebuild();
 }
 /** Why `id` can't sit between the lean it meets and the lean it hands on, or null. */
 function leanClash(id, inLean, nextPc) {

@@ -1418,8 +1418,11 @@ export function obstacleLook(kind, p, o = {}) {
  * @param o.look  build the meshes (false in Node tests)
  * @returns {{ group, decks: {geometry, M}[], solids: {geometry, M}[], movers: object[], setTime(t: number): void }}
  */
-export function buildObstacleSet(props = [], { look = true, physics = false } = {}) {
+export function buildObstacleSet(props = [], { look = true, physics = false, cache = null } = {}) {
   const group = new THREE.Group();
+  // `cache` (the builder's, a Map uid → { sig, vis }): an obstacle whose record did not change keeps its look — an edit
+  // rebuilt every prop's meshes and the next frame set every one up again for drawing (audit 2026-11-02)
+  const usedLooks = cache ? new Set() : null;
   group.name = "obstacles";
   const decks = [], solids = [], movers = [], bodies = [], anims = []; // anims: looks that move by themselves (the flags' cloth)
   const up = new THREE.Vector3();
@@ -1433,7 +1436,10 @@ export function buildObstacleSet(props = [], { look = true, physics = false } = 
     // physics: knockable bodies leave the static look — the drive simulates them (physProps.createPhysProps)
     if (physics && def.phys) { for (const b of def.phys) bodies.push({ kind: b.kind, M: M.clone().multiply(b.local) }); continue; }
     if (look) {
-      vis = obstacleLook(p.kind, p);
+      const sig = cache ? JSON.stringify(p) : null, hit = cache?.get(p.uid);
+      if (cache) usedLooks.add(p.uid);
+      vis = hit?.sig === sig ? hit.vis : obstacleLook(p.kind, p);
+      if (cache) cache.set(p.uid, { sig, vis });
       vis.matrixAutoUpdate = false;
       vis.matrix.copy(M);
       vis.userData.uid = p.uid;
@@ -1492,5 +1498,6 @@ export function buildObstacleSet(props = [], { look = true, physics = false } = 
     }
   }
   setTime(0);
+  if (cache) for (const k of [...cache.keys()]) if (!usedLooks.has(k)) cache.delete(k);
   return { group, decks, solids, movers, bodies, setTime };
 }

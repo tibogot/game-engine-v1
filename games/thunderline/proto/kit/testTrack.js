@@ -174,8 +174,17 @@ export function layoutFromPlacements({ built, pieces }) {
   return { placements, ride, arcPts: [], length, warnings: [], start: placements[0]?.M.clone() ?? new THREE.Matrix4() };
 }
 
-/** Instanced meshes for the placements: one draw per tile kind for deck, rail and posts. */
-export function buildTrackMeshes(placements, built, mats) {
+/**
+ * Instanced meshes for the placements: one draw per tile kind for deck, rail and posts.
+ * `cache` (the builder's, kept across rebuilds — a Map): each 256 m chunk cell's merged meshes are kept with a signature
+ * of what went into them (the parts' geometry, material, band and matrix); a cell whose parts did not change is REUSED
+ * as it was, not merged again (performance audit, 2026-11-02: re-merging every cell was 136 of the 194 ms an edit froze
+ * the builder on the lab track, plus re-uploading every chunk to the GPU on the next frame). Cells no longer used come
+ * back in `dropped` (theirs to dispose).
+ */
+export function buildTrackMeshes(placements, built, mats, cache = null) {
+  const used = cache ? new Set() : null, replaced = [];
+  const sigM = (M) => M.elements.join(",");
   const group = new THREE.Group();
   const byKey = {};
   // the look per placement's edges: both rails, none, or one side (oldLook.js edgesOf / lookKey), built
@@ -265,14 +274,23 @@ export function buildTrackMeshes(placements, built, mats) {
     g.computeBoundingSphere();
     return [g];
   };
-  for (const list of chunkCells.values()) {
+  for (const [cellKey, list] of chunkCells) {
+    let sig = null;
+    if (cache) {
+      sig = list.map((q) => `${q.geo.uuid}|${q.m.uuid}|${q.band}|${q.far?.uuid ?? ""}|${sigM(q.M)}`).join(";");
+      const k = `near:${cellKey}`, hit = cache.get(k);
+      used.add(k);
+      if (hit?.sig === sig) { for (const o of hit.objs) group.add(o); lods.push(...hit.lods); continue; }
+      if (hit) replaced.push(...hit.objs); // (merged again below: the old one is dropped)
+    }
+    const objs = [], cellLods = [];
     const byMat = new Map();
     for (const q of list) { const k = `${q.m.uuid}|${q.band}`; (byMat.get(k) ?? byMat.set(k, []).get(k)).push(q); }
     for (const qs of byMat.values()) {
       const { m, band } = qs[0];
       const near = mergeIn(qs, (q) => q.geo);
       if (!near) continue;
-      if (band !== "rail") { for (const g of near) group.add(new THREE.Mesh(g, m)); continue; }
+      if (band !== "rail") { for (const g of near) { const o = new THREE.Mesh(g, m); group.add(o); objs.push(o); } continue; }
       const far = mergeIn(qs, (q) => q.far);
       const lod = new THREE.LOD();
       lod.autoUpdate = false;
@@ -291,7 +309,10 @@ export function buildTrackMeshes(placements, built, mats) {
       lod.levels.forEach((v, i) => (v.object.visible = i === 0));
       group.add(lod);
       lods.push(lod);
+      objs.push(lod);
+      cellLods.push(lod);
     }
+    if (cache) cache.set(`near:${cellKey}`, { sig, objs, lods: cellLods });
   }
   const POST_BOX = 150, POST_NONE = 420;
   const cells = new Map();
@@ -309,7 +330,16 @@ export function buildTrackMeshes(placements, built, mats) {
     }
     return boxOf.get(tpl.uuid);
   };
-  for (const list of cells.values()) {
+  for (const [cellKey, list] of cells) {
+    let sig = null;
+    if (cache) {
+      sig = list.map((q) => sigM(q.W)).join(";");
+      const k = `post:${cellKey}`, hit = cache.get(k);
+      used.add(k);
+      tris += trisOf(list[0].template) * list.length;
+      if (hit?.sig === sig) { for (const o of hit.objs) group.add(o); lods.push(...hit.lods); continue; }
+      if (hit) replaced.push(...hit.objs);
+    }
     const mid = new THREE.Vector3();
     for (const q of list) mid.add(c.setFromMatrixPosition(q.W));
     mid.divideScalar(list.length);
@@ -329,11 +359,15 @@ export function buildTrackMeshes(placements, built, mats) {
     lod.levels.forEach((v, i) => (v.object.visible = i === 0)); // full detail until a camera picks (lab.js never does)
     group.add(lod);
     lods.push(lod);
-    tris += trisOf(list[0].template) * list.length;
+    if (cache) cache.set(`post:${cellKey}`, { sig, objs: [lod], lods: [lod] });
+    else tris += trisOf(list[0].template) * list.length;
   }
+  // what the cache no longer draws: cells gone, or replaced by a new merge (the caller disposes them)
+  const dropped = replaced;
+  if (cache) for (const [k, v] of [...cache]) if (!used.has(k)) { dropped.push(...v.objs); cache.delete(k); }
   let forced = false;
   return {
-    group, tris, chunks: chunkCells.size, lodCount: lods.length,
+    group, tris, chunks: chunkCells.size, lodCount: lods.length, dropped,
     /** the game camera picks each chunk's detail (every pass this frame then uses it) */
     updateLod(camera) { if (!forced) for (const l of lods) l.update(camera); },
     /** full detail on every chunk (the shadow bake), or back to the camera's pick */
