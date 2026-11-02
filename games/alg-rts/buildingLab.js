@@ -486,6 +486,12 @@ export const BUILDINGS = {
     before: () => labPiece(houseMesh("saharien", "intact")), middle: () => labPiece(houseMesh("saharien", "damaged")), after: () => labPiece(houseMesh("saharien", "ruin")),
     tags: ["SAHARAN BORDJ · NEW", "SAHARAN BORDJ · DAMAGED", "SAHARAN BORDJ · DESTROYED"], note: "El Kantara's French post (Blender): the same bordj in ochre banco on a dark earth footing, crenellated walls, towers and gate, the towers battered with their beam-ends, the gate's arch in whitewash.",
   },
+  // THE PUMP STATION (2026-11-02, tools/blender/oilStation.py — El Kantara): its three states, a pipeline length beside
+  stationPompage: {
+    label: "Station de pompage", gap: 34, yaw: Math.PI - 0.5, prepare: () => loadHouses("oilstation"),
+    before: () => labPiece(houseMesh("pompage", "intact")), middle: () => labPiece(houseMesh("pompage", "damaged")), after: () => labPiece(houseMesh("pompage", "ruin")),
+    tags: ["PUMP STATION · NEW", "PUMP STATION · DAMAGED", "PUMP STATION · DESTROYED"], note: "the oil road's pump station (Blender): two riveted tanks in their earth bund, ladders and roof rails, the pump house and its stack, the manifold on saddles with its valves, spare pipes, drums — damaged (a tank holed, the header broken), destroyed (a tank burst, burnt, the pump house roofless).",
+  },
   campFln: {
     label: "Camp du FLN", gap: 31, before: () => buildCampV2(),
     tags: ["FLN CAMP"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",

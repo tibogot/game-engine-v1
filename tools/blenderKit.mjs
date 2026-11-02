@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const BLENDER = process.env.BLENDER ?? "C:/Program Files/Blender Foundation/Blender 5.0/blender.exe";
 // the script → its kit file, where they differ (house.py writes houses.glb)
-const GLB = { house: "houses.glb" };
+const GLB = { house: "houses.glb", oilStation: "oilstation.glb" };
 
 const args = process.argv.slice(2);
 const script = args.find((a) => !a.startsWith("--") && !["--only"].includes(args[args.indexOf(a) - 1]));

@@ -179,4 +179,5 @@ export const KIT_BLEND = {
   fortpoint: { fade: 0.4, tint: 0.3 }, armscache: { fade: 0.4, tint: 0.3 }, ambushscreen: { fade: 0.5, tint: 0.3 },
   mirador: { fade: 0.5, tint: 0.2 }, sltower: { fade: 0.5, tint: 0.2 }, fieldposts: { fade: 0.35, tint: 0.25 }, flnposts: { fade: 0.5, tint: 0.3 },
   motorPool: { fade: 0.5, tint: 0.12, strength: 0.8 }, flnmarks: { fade: 0.45, tint: 0.3 }, farmstead: { fade: 0.9, tint: 0.1, strength: 0.75 }, saspost: { fade: 0.9, tint: 0.1, strength: 0.75 },
+  oilstation: { fade: 0.45, tint: 0.3 },   // (the pump station: the bund's earth into the ground — 2026-11-02)
 };

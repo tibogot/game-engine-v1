@@ -468,7 +468,12 @@ ORDER (each step: you look before the next):
        each start); the briefing's places (MAP.places, FR + EN); the FLN AI takes them (seen: the lookout, then the
        marabout). Left: the BORDJ (the French start is still the Aurès post) and the PUMP STATION (step 3); a
        full match by you; dead zones measured.
-3. [ ] THE NEW PIECES: bordj, acacia, pipeline + pump station, the tanker.
+3. [~] THE NEW PIECES: [x] the BORDJ (2026-11-02, postKit.py "saharien": the post's layout in ochre banco, crenellated,
+       battered towers — MAP.bordj); [x] the PUMP STATION + PIPELINE (2026-11-02, tools/blender/oilStation.py: two riveted
+       tanks, the pump house, the manifold on saddles with its valves, spare pipes, drums; damaged / ruin; the pipeline in
+       10 m lengths west to the road; the BUND an earth bank RAISED IN THE TERRAIN — MAP.berms, app.raiseBerm after the
+       town; an objective, "Station de pompage"); [ ] acacia; [ ] the tanker. Its SABOTAGE (an FLN charge → fire) with
+       the AI, step 4.
 4. [ ] THE AI: the FLN (sabotage, ambushes in the gullies, raids from the plateau); the French
        (convoys, holding the bridge); then the méharistes.
 

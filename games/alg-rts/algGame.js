@@ -52,7 +52,7 @@ import { installGameCursors } from "./ui/cursors.js";
 import { batchStaticInstances } from "../../v3/render/staticInstanceBatch.js";
 import { contactSplats } from "./algGroundContact.js";
 import { buildSandstoneField, prefetchSandstone, sandstoneLook } from "./algSandstone.js";
-import { MECHTA_PROPS, MECHTA_SOFT, MECHTA_TYPES, PORT_TYPES, afloatCaps, createHouseField, loadHouses } from "./algHouse.js";
+import { MECHTA_PROPS, MECHTA_SOFT, MECHTA_TYPES, OIL_TYPES, PORT_TYPES, afloatCaps, createHouseField, loadHouses } from "./algHouse.js";
 import { RENDER_ORDER } from "../shared-rts/renderOrder.js";
 import { setGroundBlendApp } from "./algGroundBlend.js";
 import { createTownDamage } from "./algTownDamage.js";
@@ -694,7 +694,7 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       // (+ the MECHTA kit when the map places its stone houses — the new Aurès' hamlets, ?mechta=1 for now)
       // (+ the PORT kit when the map places its pieces — the coast, 2026-10-31)
       const usesKit = (types) => [...MAP.town.houses, ...(MAP.town.props ?? [])].some(([ty]) => types.includes(ty));
-      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble"), usesKit(MECHTA_TYPES) ? loadHouses("mechta") : null, usesKit(PORT_TYPES) ? loadHouses("port") : null]);
+      await Promise.all([loadHouses("mzab"), loadHouses(), loadHouses("rubble"), usesKit(MECHTA_TYPES) ? loadHouses("mechta") : null, usesKit(PORT_TYPES) ? loadHouses("port") : null, usesKit(OIL_TYPES) ? loadHouses("oilstation") : null]);
       const field = createHouseField();
       // A house without a baked height (the training's hamlet — maps/training.js): a PAD levelled under it to its
       // footprint's mean ground (as a built piece's), its y that. (The mechta's HILLSIDE house, pente: cut into the slope
@@ -834,6 +834,10 @@ export async function startAlgGame({ container, onStatus = () => {}, onProgress 
       app.addPreRenderHook(() => field.update(app.camera));
       app.algTown = field;
       console.log(`[town] ${field.size} houses in ${Math.round(performance.now() - t0)} ms`);
+      // A map's EARTH BANKS (MAP.berms — El Kantara's pump station bund, 2026-11-02): raised in the terrain once the town
+      // stands (raised before its damage set-up, the ground under the houses was levelled again and the bank lost)
+      for (const bm of MAP.berms ?? []) await app.raiseBerm?.(bm.points, bm.opts);
+      if (MAP.berms?.length) app.fogOfWar?.rebuildHeights?.();
     } catch (e) { console.warn("[alg town] failed:", e); }
   }
   // THEIR DRY-STONE WALLS (tools/blender/fieldwall.py): one instanced field (a draw per variant and state); knee-high

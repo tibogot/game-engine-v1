@@ -20,7 +20,7 @@
 // and the pump station wait for their own pieces (TODO MAP 3, step 3).
 import { t } from "../i18n/i18n.js";
 import { ROCKS } from "./kantaraRocks.js";
-import { garden, hamlet, koubbaAndCemetery } from "./villageKit.js";
+import { HS, garden, hamlet, house, koubbaAndCemetery } from "./villageKit.js";
 
 /** THE PLAYABLE AREA: 448 m (CoH 2v2 size, 14 × 32 m), starts ~360 m apart. */
 export const PLAY = { x0: -224, x1: 224, z0: -224, z1: 224 };
@@ -71,6 +71,8 @@ export const LAYOUT = {
     { kind: "farm", name: "Bergerie de la route", x: 70, z: 110, r: 20, point: true },       // (near the bordj)
     { kind: "point", name: "Carrefour de la route", x: 18, z: 10, r: 16, point: true },       // (the road, the middle)
     { kind: "point", name: "Vigie du nord", x: 100, z: -190, r: 16, point: true },           // (the high ground by the katiba)
+    // THE PUMP STATION (2026-11-02, oilStation.py): the oil road's station on the east plain, its pipeline west to the road
+    { kind: "station", name: "Station de pompage", x: 150, z: 90, r: 28, point: true },
   ],
   // SUPPLY (munitions / fuel): over the ground between the places, a pair by each start
   supply: [
@@ -106,8 +108,10 @@ const ROAD = [
  * THE PLACES' BUILDINGS (2026-11-02): the kits as Oued Abdi's (villageKit hamlet — fronts to +Z: this map's camera
  * looks north-north-east, they face it at three-quarters). Each house its own pad.
  */
+const berms = [];   // (the terrain's earth banks the places want — MAP.berms)
 const KANTARA_TOWN = (() => {
   const at = (n) => LAYOUT.sites.find((s) => s.name === n);
+  const PS = at("Station de pompage");
   const KS = at("Ksar d'El Kantara"), OA = at("Aïn el Kantara"), VB = at("Le village blanc"), SB = at("Sidi Bel Abbès"), BG = at("Bergerie de la route");
   const parts = [
     // THE KSAR: the M'zab kit's ochre houses in two rows round its souk, a tower at each end, a house on each side of
@@ -128,6 +132,19 @@ const KANTARA_TOWN = (() => {
       sides: [{ type: "haute", x: 22, z: 2 }] }),
     // SIDI BEL ABBÈS: the koubba; its dead in front (south)
     { houses: [], props: koubbaAndCemetery(SB.x, SB.z, SB.x - 4, SB.z + 22, { seed: 1958, cols: 5, rows: 3 }) },
+    // THE PUMP STATION, its front to the camera (the model turned half round: its pipeline outlet, local +X, to the
+    // west); its PIPELINE from the header's end west toward the road, 10 m (13 game) lengths on the ground as it is
+    (() => {
+      const st = house("pompage", "intact", PS.x, PS.z, PS.x, PS.z + 50);
+      const x0 = st[2] - 11 * HS, z = st[4] + 1.4 * HS, L = 10 * HS, props = [];
+      for (let k = 0; k < 7; k++) { const x = x0 - L * (k + 0.5); props.push(["tuyau", "intact", x, null, z, Math.PI, x, z, 5 * HS, 0.7 * HS, { ground: true, upright: true }]); }
+      // THE BUND round the tanks (the station's local frame, real metres: tanks x -4.4..9.2, z 1.6..8.0): an earth bank
+      // RAISED IN THE TERRAIN (algGame MAP.berms — a mesh bank read as beams on the sand), gaps where the outlets cross
+      const W = (lx, lz) => ({ x: st[2] - lx * HS, z: st[4] - lz * HS });
+      berms.push({ points: [W(-6.0, 0.0), W(11.0, 0.0), W(11.0, 9.6), W(-6.0, 9.6)], opts: { closed: true, height: 0.9, base: 3.2, top: 0.7,
+        gaps: [W(-1.2, 0.0), W(6.0, 0.0)].map((p) => ({ ...p, r: 0.9 })), taper: 1.2 } });
+      return { houses: [st], props };
+    })(),
     // THE SHEEPFOLD by the road: the fold and its zriba, the shepherd's house, the threshing floor
     hamlet(BG.x, BG.z, { rows: [{ types: ["petite"], x: 9, z: 4 }], props: [{ type: "bergerie", x: -4, z: 0 }, { type: "aire", x: 6, z: 16 }] }),
   ];
@@ -144,7 +161,7 @@ export const MAP = {
   tracks: [{ name: t("Route de Biskra"), kind: "piste", from: "gate", to: t("Katiba du ravin"), length: 520, points: ROAD }],
   supply: LAYOUT.supply,
   // the briefing's list of the places (algBattle: a map with flagged objectives)
-  places: t("le ksar, la source de la palmeraie, un village, un marabout, une bergerie, un carrefour, une vigie"),
+  places: t("le ksar, la station de pompage, la source de la palmeraie, un village, un marabout, une bergerie, un carrefour, une vigie"),
   handPlaced: false,
   // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off). PROVISIONAL, as the map.
   systems: { ai: true, fow: true, birds: true, splats: true, stones: true },
@@ -213,6 +230,8 @@ export const MAP = {
   scenery: { quantities: {}, keepClear: [] },
   // ITS TOWN (algGame: the instanced house field — garrisons, damage, cover, sight): the places' buildings
   town: KANTARA_TOWN,
+  // ITS EARTH BANKS (algGame: app.raiseBerm after the town's pads): the pump station's bund
+  berms,
   // THE MINIMAP's ground, by paint layer (tools/algKantaraLevel.mjs).
   minimap: { layers: { 0: [196, 124, 80], 1: [176, 98, 60], 2: [218, 172, 122], 3: [120, 110, 70], 4: [160, 152, 140], 5: [176, 104, 66], 6: [214, 184, 150] } },
 };
