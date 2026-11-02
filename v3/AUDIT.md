@@ -2378,7 +2378,18 @@ instances, render −0.66 ms (three runs agree), but the pyramid costs +0.48 ms
 the test and the pyramid off (+0.02 ms). The pyramid's cost is READING the
 full-res 4× MSAA depth, not its dispatch count (a one-texel read = no read).
 The lab props are cheap to shade; the real test is heavy content.
+Parked by CULLING_LOD_SPEC.md R8 / step 6 until a big-world game is next.
 
+- [ ] **0. When this resumes: re-check the lab on three r187** (built on r184,
+      not loaded since the upgrade). Clean console (warnings too); ground
+      preset (`__CULL_LAB.setPreset('ground')`, camera (-300, 0, -100), yaw
+      0.79) gives props 328 drawn / 2,984 occluded and foliage 1,265 / 5,242;
+      the 8-heading occlusion off/on pixel diff (`capture()` + `diffPixels()`)
+      stays at 0–3 px. Then try the r187 additions: `compileComputeAsync()` to
+      warm the cull and pyramid pipelines before the first frame, and
+      `textureGather` for the pyramid's depth reads (may gain little — its cost
+      is bandwidth, not instructions). r187's occlusion queries are per OBJECT,
+      so they do not replace the per-instance test.
 - [ ] **1. Wire occlusion into the heavy fields, then measure on real content.**
       One engine-owned HiZPyramid built from the post-FX scene pass depth
       (`postFxPipeline` depthTexture) after the scene renders, invalidated on
