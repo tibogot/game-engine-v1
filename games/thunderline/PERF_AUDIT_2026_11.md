@@ -78,7 +78,14 @@ Measured and NOT changed:
 - **2e prediction garbage:** GC about 1% of the 6 s after an edit, in physics that must stay bit-exact. Not worth it.
 - **2f library writes:** under 1 ms with the current library. They grow with many tracks and thumbnails; on Steam, store one file per track.
 
-LEFT: the deck collision tree is re-baked when road pieces change (40–80 ms in one frame, about 0.4 s after the edit). The fix is three-mesh-bvh's worker builder (GenerateMeshBVHWorker, 0.9.10) in an async RoadBvh bake. That is an ENGINE file, v3/play/modularRoadBvh.js; check that the tree is identical.
+**DONE 2026-11-03 — the collision tree is built in a worker** (uncommitted until the user says):
+- ENGINE: `v3/play/modularRoadBvh.js` has `bakeFromMeshesAsync`, with `roadBvhWorker.js` building the tree. The sync `bakeFromMeshes` is unchanged; its merge moved into `_mergeInputs`.
+- The builder's test lap uses the worker bake (dev switch `__predSyncBake` for the old main-thread bake).
+- Checked:
+  - Byte-identical trees: roots, reordered index and bounds, on the lab track's 1.4 M triangles. Main thread 503 ms sync, 21 ms with the worker.
+  - Identical test laps (lap, lips, landings, end speed) on White 1–3, Two gap jumps and Mixed.
+  - Removing a road piece on the lab track: worst frame 28 ms, none over 50 ms (was a 132 ms frame).
+  - npm run test:all: 226/226.
 
 The original analysis follows:
 

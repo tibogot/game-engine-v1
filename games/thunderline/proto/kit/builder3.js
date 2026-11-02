@@ -1064,8 +1064,16 @@ async function runPrediction() {
   let freshBake = false;
   const deckBvh = kept(predBvh.deck, decks) ?? ((freshBake = true), new RoadBvh());
   const solidsBvh = kept(predBvh.solids, solids) ?? ((freshBake = true), new RoadBvh());
-  if (deckBvh !== predBvh.deck) deckBvh.bakeFromMeshes(decks);
-  if (solidsBvh !== predBvh.solids) solidsBvh.bakeFromMeshes(solids);
+  // (a fresh tree is built OFF THE MAIN THREAD — modularRoadBvh bakeFromMeshesAsync: the whole track's deck was 40-80
+  // ms in one frame, every road edit — and the page keeps drawing meanwhile; a newer edit while it bakes: this run stops)
+  const bakes = [];
+  if (deckBvh !== predBvh.deck) bakes.push(globalThis.__predSyncBake ? deckBvh.bakeFromMeshes(decks) : deckBvh.bakeFromMeshesAsync(decks));
+  if (solidsBvh !== predBvh.solids) bakes.push(globalThis.__predSyncBake ? solidsBvh.bakeFromMeshes(solids) : solidsBvh.bakeFromMeshesAsync(solids));
+  if (bakes.length) {
+    const builtAt = built; // (an edit meanwhile replaces `built` — and its rebuild schedules the next lap: this one stops)
+    await Promise.all(bakes);
+    if (token !== predToken || built !== builtAt) return;
+  }
   predBvh = { deck: deckBvh, solids: solidsBvh };
   const ground = createVehicleGround({ getTerrainHeight: () => FLOOR_Y });
   ground.setRoadBvh(deckBvh.baked ? deckBvh : null);

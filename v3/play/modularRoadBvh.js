@@ -152,7 +152,51 @@ export class RoadBvh {
     // matrices.
     const sig = this._signature(meshes);
     if (!force && this.baked && sig === this._sig) return true;
+    const m = this._mergeInputs(meshes);
+    if (!m) { this._clear(); return false; }
+    this._install(m, new MeshBVH(m.merged), sig);
+    return true;
+  }
 
+  /**
+   * The same bake with the TREE BUILT IN A WORKER (roadBvhWorker.js): the merge runs here, the MeshBVH build — the
+   * long part, ~40-80 ms for a whole Thunderline track — off the main thread, then the tree comes back serialized and
+   * is installed exactly as the sync bake installs its own (the same build, the same defaults: the same tree — the
+   * builder's test lap checked bit for bit). No Worker (Node): the sync build.
+   * @returns {Promise<boolean>}
+   */
+  async bakeFromMeshesAsync(meshes, { force = false } = {}) {
+    const sig = this._signature(meshes);
+    if (!force && this.baked && sig === this._sig) return true;
+    const m = this._mergeInputs(meshes);
+    if (!m) { this._clear(); return false; }
+    const bvh = (await buildBvhOffThread(m.merged)) ?? new MeshBVH(m.merged);
+    this._install(m, bvh, sig);
+    return true;
+  }
+
+  _clear() {
+    this._bvh?.geometry?.dispose?.();
+    this.baked = false;
+    this._bvh = null;
+    this.geometry = null;
+    this.triCount = 0;
+    this.vertHold = null;
+    this._sig = null;
+  }
+
+  _install(m, bvh, sig) {
+    this._bvh?.geometry?.dispose?.();
+    this._bvh = bvh;
+    this.geometry = m.merged;
+    this.vertHold = m.vertHold;
+    this.triCount = m.triCount;
+    this.baked = true;
+    this._sig = sig;
+  }
+
+  /** The inputs merged into one world-space, double-sided geometry (+ the hold tags), or null when there is nothing. */
+  _mergeInputs(meshes) {
     // ── SIZE FIRST, THEN FILL ───────────────────────────────────────────────
     // This used to build `positions` and `indices` as plain JS arrays, one
     // element per `push` — ~100k pushes for a 33k-vertex track — and then copy
@@ -171,16 +215,7 @@ export class RoadBvh {
       if (vertTags(mesh)) anyHold = true;
     }
 
-    if (vertCount === 0) {
-      this._bvh?.geometry?.dispose?.();
-      this.baked = false;
-      this._bvh = null;
-      this.geometry = null;
-      this.triCount = 0;
-      this.vertHold = null;
-      this._sig = null;
-      return false;
-    }
+    if (vertCount === 0) return null;
 
     const positions = new Float32Array(vertCount * 3);
     // Doubled, because every triangle is about to get a winding-flipped twin.
@@ -266,15 +301,7 @@ export class RoadBvh {
     const merged = new THREE.BufferGeometry();
     merged.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     merged.setIndex(new THREE.BufferAttribute(indices, 1));
-
-    this._bvh?.geometry?.dispose?.();
-    this._bvh = new MeshBVH(merged);
-    this.geometry = merged;
-    this.vertHold = vertHold;
-    this.triCount = iw / 3;
-    this.baked = true;
-    this._sig = sig;
-    return true;
+    return { merged, vertHold, triCount: iw / 3 };
   }
 
   /** Face normal at a hit (geometry is baked in world space). */
@@ -545,4 +572,35 @@ export class RoadBvh {
     if (s >= 0 && s <= 1) return t;
     return null;
   }
+}
+
+// ── THE TREE OFF THE MAIN THREAD (bakeFromMeshesAsync) ──────────────────────
+// One worker, made on first use, jobs in turn. The geometry's buffers are COPIED to it (the merged geometry stays usable
+// here); the worker's MeshBVH reorders its copy of the index, and deserialize writes that order back into ours, as the
+// sync build reorders it in place.
+let _bvhWorker = null, _bvhJob = 0;
+const _bvhWaiting = new Map();
+function bvhWorker() {
+  if (_bvhWorker !== null) return _bvhWorker;
+  try {
+    _bvhWorker = new Worker(new URL("./roadBvhWorker.js", import.meta.url), { type: "module" });
+    _bvhWorker.onmessage = ({ data }) => { const w = _bvhWaiting.get(data.id); _bvhWaiting.delete(data.id); w?.(data); };
+    _bvhWorker.onerror = (e) => { console.warn("[roadBvh] worker failed, baking on the main thread", e.message); for (const w of _bvhWaiting.values()) w({ error: e.message }); _bvhWaiting.clear(); _bvhWorker = false; };
+  } catch { _bvhWorker = false; }
+  return _bvhWorker;
+}
+/** A MeshBVH for `geometry` built in the worker, or null (no worker, or it failed: the caller builds it here). */
+async function buildBvhOffThread(geometry) {
+  const w = typeof Worker === "undefined" ? false : bvhWorker();
+  if (!w) return null;
+  const id = ++_bvhJob;
+  const position = geometry.attributes.position.array.slice(), index = geometry.index.array.slice();
+  const data = await new Promise((res) => {
+    _bvhWaiting.set(id, res);
+    w.postMessage({ id, position, index }, [position.buffer, index.buffer]);
+  });
+  if (data.error) { console.warn("[roadBvh] worker bake failed, baking on the main thread", data.error); return null; }
+  const bvh = MeshBVH.deserialize({ version: 1, roots: data.roots, index: data.index, indirectBuffer: null }, geometry, { setIndex: true });
+  geometry.boundingBox = bvh.getBoundingBox(new THREE.Box3()); // (as the sync build sets it)
+  return bvh;
 }
