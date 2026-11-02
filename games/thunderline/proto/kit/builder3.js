@@ -42,7 +42,7 @@ import { thumbStore } from "../../app/thumbStore.js";
 import { snapshotEngineScene, warmGamePipelines, awaitPipelinesQuiet } from "../../../shared-rts/pipelineWarmup.js";
 import { buildTrackMeshes } from "./testTrack.js";
 import { createBuilderTutorial } from "./builderTutorial.js";
-import { OBSTACLES, BOOST_PAD, isObstacle, attachMovers, edgeInset, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
+import { OBSTACLES, BOOST_PAD, isObstacle, attachMovers, edgeInset, batchStaticLooks, obstacleLook, buildObstacleSet, avoidObstacles, shapeOf, boostZones } from "./obstacles.js";
 import { Vehicle, FIXED_DT, TIRE, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyCarTune } from "./carTune.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
@@ -706,6 +706,8 @@ scene.add(trackGroup);
 let built = new Map(); // uid → { exit: Matrix4, group, M }
 let obstacleSet = null; // the track's obstacles as drawn (obstacles.js); the sweepers turn on the page's clock
 const obstacleLooks = new Map(); // uid → { sig, vis }: an unchanged obstacle keeps its look across rebuilds
+const propBatchCache = new Map(); // the obstacles' identical still meshes, instanced (obstacles.js batchStaticLooks)
+let propBatch = null;
 const gateCache = new Map(); // a gate's / ring's key → { sig, g }: the same, for the start / finish / checkpoint gates and air rings
 let gatesUsed = new Set();
 /** The gate made by `make`, or the one kept from the last rebuild if `sig` (what it is built from) is the same. */
@@ -743,6 +745,7 @@ function drawChunks() {
 /** While the gizmo drags: the pieces themselves are drawn (they move), the chunks hidden; rebuilt after. */
 function showPieceMeshes(on) {
   if (chunkMeshes) chunkMeshes.group.visible = !on;
+  propBatch?.setActive(!on); // (the obstacles too: the gizmo moves their own meshes)
   for (const [uid, b] of built) if (!b.prop && track.pieces.some((p) => p.uid === uid && !isRing(p))) b.group.traverse((o) => { if (o.isMesh) o.visible = on; });
 }
 /**
@@ -825,6 +828,11 @@ function rebuild() {
     const M = vis.matrix.clone();
     built.set(vis.userData.uid, { exit: M, group: vis, M, prop: true });
   }
+  // THE SAME OBSTACLE MANY TIMES IN ONE DRAW (audit 2026-11-03, step 3: 154 of an idle frame's 277 draws were the
+  // obstacles, mesh by mesh); the meshes stay, hidden, for the mouse
+  trackGroup.updateMatrixWorld(true);
+  propBatch = batchStaticLooks((globalThis.__noPropBatch || params.get("propbatch") === "0") ? [] : [...built.values()].filter((b) => b.prop).map((b) => b.group), trackGroup, propBatchCache); // (__noPropBatch: dev A/B)
+  for (const m of propBatch.dropped) { if (m.isInstancedMesh) m.dispose(); else if (m.userData.ownGeo) m.geometry.dispose(); }
   save();
   refreshArcs();
   runChecks();
@@ -3869,6 +3877,17 @@ if (SHELL) {
     prewarm = prewarmPlay().finally(() => { prewarm = null; if (menuFrame.style.display !== "none") pauseGame(true); });
   } else if (menuFrame.style.display !== "none") pauseGame(true);
 }
+// RESTING (audit 2026-11-03, step 3c): with no input for 2 s the builder draws 30 frames a second, not 60 — the
+// same picture, half the CPU, GPU and heat while you think; the first input brings it back at once. Never while
+// driving or playing a track. (`?rest=0` turns it off.)
+const REST = { afterMs: 2000, frameMs: 33 };
+let lastInputT = performance.now(), resting = false;
+const wake = () => { lastInputT = performance.now(); if (resting) { resting = false; app.setFrameThrottle(0); } };
+for (const ev of ["pointerdown", "pointermove", "pointerup", "wheel", "keydown", "keyup"]) addEventListener(ev, wake, { capture: true, passive: true });
+if (params.get("rest") !== "0") setInterval(() => {
+  const rest = !driving && !playing && !gizmoDrag && performance.now() - lastInputT > REST.afterMs;
+  if (rest !== resting) { resting = rest; app.setFrameThrottle(rest ? REST.frameMs : 0); }
+}, 250);
 app.addPreUpdateHook(function builderFrame() {
   const now = performance.now();
   const dt = Math.min(0.05, (now - last) / 1000);
@@ -3903,7 +3922,7 @@ window.__b3 = {
   selectRun(a, b) { sel = b; selSet = new Set(runBetween(a, b) ?? [b]); refreshSelection(); },
   get tutorial() { return tutorial; }, trackThumb,
   selectMany(uids) { sel = uids.at(-1); selSet = new Set(uids); refreshSelection(); renderStatus(); }, selection, copySelection, pasteSection, mirrorSelection, removeMany, get clipboard() { return clipboard; },
-  get arcs() { return arcs; }, get launch() { return prediction.launch; },
+  get arcs() { return arcs; }, get propBatch() { return propBatch; }, get launch() { return prediction.launch; },
   get profile() { return prediction.profile; },
   get lapSamples() { return lapCache?.samples; },
   get prediction() { return { state: prediction.state, resumedAt: prediction.resumedAt, ms: prediction.ms, ticks: prediction.ticks, fail: prediction.fail, lapS: prediction.lapS, openJump: prediction.openJump, endSpeed: prediction.endSpeed, landings: prediction.landings, topKmh: Math.round(prediction.topKmh), lips: [...prediction.lipSpeed.entries()].map(([u, v]) => [u, Math.round(v * 3.6)]) }; },

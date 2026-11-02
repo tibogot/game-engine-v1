@@ -1501,3 +1501,109 @@ export function buildObstacleSet(props = [], { look = true, physics = false, cac
   if (cache) for (const k of [...cache.keys()]) if (!usedLooks.has(k)) cache.delete(k);
   return { group, decks, solids, movers, bodies, setTime };
 }
+
+// ---------------------------------------------------------------- STATIC LOOKS, INSTANCED
+// (performance audit 2026-11-03, step 3: the builder drew its 77 obstacles mesh by mesh — 154 of an idle frame's 277
+// draws, ~18 µs of CPU each — though most are the same drum, tyre, cone or block many times.) Every mesh of the given
+// looks that has an identical twin (same geometry, same material, same shadow flags) and stays still is drawn in ONE
+// InstancedMesh per kind; the meshes themselves stay, HIDDEN — the mouse still picks them (three's raycast ignores
+// `visible`), and a page can show them again (setActive(false): the builder while the gizmo drags). Never batched:
+// what moves on its own — a look with `userData.animate` (the flags), anything under a mover's "arm", anything with its
+// own onBeforeRender (the prism's slats) — transparent parts (their sort order is per object) and multi-material meshes.
+const NO_HOOK = THREE.Object3D.prototype.onBeforeRender;
+/**
+ * @param looks   the obstacles' look groups (their matrices set)
+ * @param parent  where the instanced meshes go (world-placed like the looks' parent)
+ * @param cache   a Map kept across calls: a kind whose instances did not change keeps its InstancedMesh
+ * @returns {{ meshes: THREE.InstancedMesh[], setActive(on: boolean): void, dropped: THREE.InstancedMesh[] }}
+ */
+export function batchStaticLooks(looks, parent, cache = new Map()) {
+  const groups = new Map();
+  const _m = new THREE.Matrix4();
+  // (a look kept from the last call may hold meshes the last batch hid: shown again first, then sorted anew)
+  for (const vis of looks) vis.traverse((o) => { if (o.userData.batchHidden) { o.visible = true; o.userData.batchHidden = false; } });
+  for (const vis of looks) {
+    if (vis.userData.animate) continue;
+    vis.updateMatrixWorld(true);
+    const stack = [[vis, false]];
+    while (stack.length) {
+      const [o, skip] = stack.pop();
+      const no = skip || o.name === "arm" || (o.onBeforeRender !== NO_HOOK);
+      if (o.isMesh && !o.isInstancedMesh && !no && o.visible && !Array.isArray(o.material) && !o.material?.transparent) {
+        const k = `${o.geometry.uuid}|${o.material.uuid}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}`;
+        (groups.get(k) ?? groups.set(k, []).get(k)).push(o);
+      }
+      for (const c of o.children) stack.push([c, no]);
+    }
+  }
+  const meshes = [], hidden = [], used = new Set(), dropped = [];
+  const toParent = parent.matrixWorld.clone().invert();
+  for (const [k, list] of groups) {
+    if (list.length < 2) continue;
+    const mats = list.map((o) => _m.multiplyMatrices(toParent, o.matrixWorld).toArray());
+    const sig = mats.map((a) => a.join(",")).join(";");
+    used.add(k);
+    let hit = cache.get(k);
+    if (hit?.sig !== sig) {
+      if (hit) dropped.push(hit.mesh);
+      const src = list[0];
+      const im = new THREE.InstancedMesh(src.geometry, src.material, list.length);
+      mats.forEach((a, i) => im.setMatrixAt(i, _m.fromArray(a)));
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = src.castShadow;
+      im.receiveShadow = src.receiveShadow;
+      im.matrixAutoUpdate = false;
+      im.raycast = () => {}; // (the hidden meshes are picked, never these)
+      im.computeBoundingSphere();
+      im.name = "batchedLooks";
+      hit = { sig, mesh: im };
+      cache.set(k, hit);
+    }
+    parent.add(hit.mesh);
+    meshes.push(hit.mesh);
+    for (const o of list) { o.visible = false; o.userData.batchHidden = true; hidden.push(o); }
+  }
+  // …and what has NO twin (a kerb, a ramp, a label: geometry made to measure, materials shared): MERGED per material
+  // and vertex layout, like the road's chunks — one draw per material instead of one per piece
+  const layout = (g) => Object.entries(g.attributes).map(([n, a]) => `${n}:${a.itemSize}:${a.array.constructor.name}:${a.normalized ? 1 : 0}`).sort().join(",") + (g.index ? "|i" : "|n");
+  const merges = new Map();
+  for (const [k, list] of groups) {
+    if (list.length >= 2) continue;
+    const o = list[0];
+    const mk = `merge|${o.material.uuid}|${o.castShadow ? 1 : 0}${o.receiveShadow ? 1 : 0}|${layout(o.geometry)}`;
+    (merges.get(mk) ?? merges.set(mk, []).get(mk)).push(o);
+  }
+  for (const [k, list] of merges) {
+    if (list.length < 2) continue;
+    const mats = list.map((o) => _m.multiplyMatrices(toParent, o.matrixWorld).toArray());
+    const sig = list.map((o, i) => `${o.geometry.uuid}@${mats[i].join(",")}`).join(";");
+    let hit = cache.get(k);
+    if (hit?.sig !== sig) {
+      let g = null;
+      try { g = mergeGeometries(list.map((o, i) => o.geometry.clone().applyMatrix4(_m.fromArray(mats[i]))), false); } catch { g = null; }
+      if (!g) continue; // (not mergeable after all: they stay as they are)
+      if (hit) dropped.push(hit.mesh);
+      g.computeBoundingSphere();
+      const mesh = new THREE.Mesh(g, list[0].material);
+      mesh.castShadow = list[0].castShadow;
+      mesh.receiveShadow = list[0].receiveShadow;
+      mesh.matrixAutoUpdate = false;
+      mesh.raycast = () => {};
+      mesh.name = "batchedLooks";
+      mesh.userData.ownGeo = true;
+      hit = { sig, mesh };
+      cache.set(k, hit);
+    }
+    used.add(k);
+    parent.add(hit.mesh);
+    meshes.push(hit.mesh);
+    for (const o of list) { o.visible = false; o.userData.batchHidden = true; hidden.push(o); }
+  }
+  for (const [k, v] of [...cache]) if (!used.has(k)) { dropped.push(v.mesh); cache.delete(k); }
+  for (const im of dropped) im.removeFromParent();
+  return {
+    meshes, dropped,
+    /** true: the instances / merges draw, the meshes hidden (the default); false: the meshes themselves draw (while they move) */
+    setActive(on) { for (const im of meshes) im.visible = on; for (const o of hidden) o.visible = !on; },
+  };
+}

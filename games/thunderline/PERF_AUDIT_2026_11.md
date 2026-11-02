@@ -113,6 +113,20 @@ The original analysis follows:
 
 ## 3. The builder at rest: 8.3 ms CPU a frame, 424 draws
 
+**DONE 2026-11-03** (uncommitted until the user says). Lab track; the earlier "8.3 ms / 424 draws" reading included a running test lap; at rest it is about 5 ms and 277 draws.
+- **Resting:** after 2 s without input the builder draws 30 frames a second (33.6 ms); the first input brings 60 back at once. Never while driving, playing or dragging; `?rest=0` turns it off. Half the CPU, GPU and heat while you think.
+- **Obstacles batched** (obstacles.js `batchStaticLooks`):
+  - Identical still meshes are instanced; twin-less ones (kerbs, ramps, labels: geometry made to measure) are merged per material. The meshes stay hidden for picking, and the gizmo shows them while it drags.
+  - Prop draws went 154 → 34 (the frame 277 → 157), and live A/B in one page measured 4.88 → 4.46 ms of CPU a frame.
+  - Screenshots on/off differ by 5 pixels of 1.27 M (the moving obstacles). `?propbatch=0` turns it off.
+- **Measured and NOT changed:**
+  - 3a static matrices: the whole scene's updateMatrixWorld is 0.1 ms.
+  - 3b status keys: builderFrame under 0.1 ms a frame.
+  - 3d the lamps' own rAF loop: tiny.
+- **Found, ENGINE:** the world editor's river system draws its rock instances (count 0) every frame, main pass and shadows: about 7 empty draws a frame on every v3 game page.
+
+The original analysis follows:
+
 - **3a.** The hidden pick meshes stay in the rendered scene. Chunks, gates and obstacles keep `matrixAutoUpdate`, so `updateMatrixWorld` walks them every frame, and again for the live sun-shadow render (sunShadows.js:242).
   - Fix:
     - put the pick meshes in a separate root that is never rendered;
