@@ -41,6 +41,12 @@ export default {
   "Aucun poteau télégraphique debout à moins de 45 m.": "No standing telegraph pole within 45 m.",
   "<b>Mine posée.</b> Elle attend les Français.": "<b>Mine laid.</b> It is waiting for the French.",
   "<b>Sabotage !</b> Le FLN a fait sauter la station de pompage. Gardez-la, ou elle brûlera tout à fait.": "<b>Sabotage!</b> The FLN has blown up the pump station. Guard it, or it will burn to the ground.",
+  // algOilConvoy.js — the oil convoy (2026-11-02)
+  "<b>Convoi de carburant</b> descendant de Batna par les gorges : un camion-citerne et sa jeep vont à la station de pompage. Couvrez la route.": "<b>Fuel convoy</b> coming down from Batna through the gorge: a tanker and its jeep are heading for the pump station. Cover the road.",
+  "<b>Un convoi de carburant</b> quitte Batna : il sera dans les gorges dans une minute. Ouvrez-lui la route.": "<b>A fuel convoy</b> is leaving Batna: it will be in the gorge in a minute. Clear the road for it.",
+  "<b>Convoi passé :</b> le carburant de la station est parti pour Batna, le poste en garde sa part.": "<b>Convoy through:</b> the station's fuel is on its way to Batna, and the post keeps its share.",
+  "<b>Convoi perdu !</b> Le camion-citerne a été détruit sur la route.": "<b>Convoy lost!</b> The tanker was destroyed on the road.",
+  "<b>Les informateurs</b> signalent un convoi français qui descend des gorges : un camion-citerne vers la station de pompage. Tendez-lui une embuscade.": "<b>The informers</b> report a French convoy coming down the gorge: a tanker heading for the pump station. Ambush it.",
   "<b>Ligne coupée !</b> Le poste n'a plus Alger au bout du fil.": "<b>Line cut!</b> The post has lost its line to Algiers.",
   "<b>Ligne réparée</b> par les sapeurs français : le poste a de nouveau Alger au bout du fil.": "<b>Line repaired</b> by the French sappers: the post has its line to Algiers again.",
   // algMortarTeam.js — the FLN's mortar team (2026-10-13)

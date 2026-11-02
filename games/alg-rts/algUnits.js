@@ -59,6 +59,7 @@ import { createAlgFlnTricks } from "./algFlnTricks.js";
 import { createAlgMortarTeams } from "./algMortarTeam.js";
 import { createAlgRecoilless } from "./algRecoilless.js";
 import { createAlgMules } from "./algMules.js";
+import { createOilConvoy } from "./algOilConvoy.js";
 import { createAlgSalvage } from "./algSalvage.js";
 import { createAlgAttackMove } from "./algAttackMove.js";
 import { createAlgWrecks } from "./algWrecks.js";
@@ -110,7 +111,7 @@ function padEdge(m, px, pz) {
  * builders' seats (FR_CREW, below) instead of the box men.
  */
 const FR_VEHICLES = {
-  willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC({ detail: 2, crew: false }), gmcOpen: () => buildGMC({ detail: 2, crew: false, tilt: false }), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
+  willys: () => buildWillys({ detail: 2, crew: false }), gmc: () => buildGMC({ detail: 2, crew: false }), gmcOpen: () => buildGMC({ detail: 2, crew: false, tilt: false }), gmcCiterne: () => buildGMC({ detail: 2, crew: false, body: "tanker" }), halftrack: () => buildHalfTrack({ detail: 2, crew: false }),
   amx13: () => buildAMX13({ detail: 2 }), ebr: () => buildEBR({ detail: 2 }), alouette: () => buildAlouette({ detail: 2, crew: false }),
   h21: () => buildH21(),
 };
@@ -279,7 +280,7 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
     procedural: FR_VEHICLES, paint: FR_PAINT_TINT,
     // Their crews: appelés in the soldiers' crowd, on each vehicle's seats (unitRenderer crew).
     // (the closed GMC's cab too, 2026-10-18: its driver was baked in — a truck the FLN took kept him)
-    crew: { willys: "appele", halftrack: "appele", alouette: "appele", gmc: "appele", gmcOpen: "appele" },
+    crew: { willys: "appele", halftrack: "appele", alouette: "appele", gmc: "appele", gmcOpen: "appele", gmcCiterne: "appele" },
     // Seated men drawn out to the far corner of CoH 3's camera (~175 m at the top zoom; 135 cut them
     // off mid-screen from 102 m back — 2026-10-11).
     crewFar: 200,
@@ -1012,7 +1013,9 @@ export async function createAlgUnits(app, { showroom, muster, onSelect = () => {
       doctrine: MAP.tutorial ? null : (app.algFrenchDoctrines = createAlgDoctrines(app, { units, squads, economy, projectiles: combat.projectiles, combat: combat.combat ?? combat, airStrike, fogOfWar, side: "player", ui: false })) })
     : null;
   app.algFrenchAI = frenchAI;
-  const simStep = (d) => { stepOrderQueues(units, d); app.algCriticals?.step(d); ai?.step(d); frenchAI?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); app.algSalvage?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); app.algHeliDelivery?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); app.algFrenchDoctrines?.step(d); app.algFlnDoctrines?.step(d); fieldWorks.step(d); };
+  // THE OIL CONVOY (algOilConvoy.js, MAP.oilConvoy — El Kantara): the tanker and its jeep to the pump station and back
+  const oilConvoy = MAP.oilConvoy ? (app.algOilConvoy = createOilConvoy(app, { units, economy, cfg: MAP.oilConvoy })) : null;
+  const simStep = (d) => { stepOrderQueues(units, d); app.algCriticals?.step(d); ai?.step(d); frenchAI?.step(d); oilConvoy?.step(d); snipers?.step(d); dropped.step(d); for (const p of producers) p.update(d); patrols.step(d); units.update(d); combat.step(d, sim.simTime + ffTime); flamers.step(d); posture.step(d); squads.step(d); mortarTeams?.step(d); recoilless?.step(d); mules?.step(d); app.algSalvage?.step(d); march?.step(d); mgTeams.step(d); lastSeen.step(d); grenades.step(d); flares?.step(d); barrage.step(d); airStrike.step(d); mines.step(d); economy.step(d); build.step(d); repair?.step(d); garrison?.step(d); heliLift?.step(d); flnTricks?.step(d); transports?.step(d); app.algHeliDelivery?.step(d); attackMove?.step(d); searchlights.step(d); veterancy.step(); doctrines?.step(d); app.algFrenchDoctrines?.step(d); app.algFlnDoctrines?.step(d); fieldWorks.step(d); };
   // BALANCE RUNS (dev, as nam's): `seconds` of the war at once, nothing drawn —
   // __ALG.fastForward(120). The battle's score clock (algBattle.js) runs on frames, not this.
   let ffTime = 0;   // fast-forwarded seconds: the combat clock (fire timings) must see them

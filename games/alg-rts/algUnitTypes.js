@@ -367,6 +367,16 @@ export const ALG_UNIT_TYPES = {
     procedural: "gmc", excludeRotorsFromBox: false, facingOffset: 0,
     ringRadius: 5.4, barWidth: 5, barY: 4.4, castShadow: true,
   },
+  // The GMC TANKER (2026-11-02, El Kantara): the oil convoy's truck (algOilConvoy.js) — not built, not a transport;
+  // the cargo truck's chassis, heavier and slower loaded.
+  gmcCiterne: {
+    drive: { kind: "wheels", turn: 0.9, accel: 2.4 },
+    typeKey: "gmcCiterne", name: t("Camion-citerne"),
+    isAir: false, hover: 0, speed: 7.5, radius: 3.6, turnRate: 2.6, maxHp: 180,
+    range: 0, damage: 0, fireRate: 1, canHitAir: false, vision: 30,
+    procedural: "gmcCiterne", excludeRotorsFromBox: false, facingOffset: 0,
+    ringRadius: 5.4, barWidth: 5, barY: 4.4, castShadow: true,
+  },
   // M3 half-track, the APC. Plays like nam's M113 (its .50 reaches aircraft).
   halftrack: {
     // drives along its hull (shared-rts/units.js type.drive, 2026-10-06: "vehicles slide")

@@ -30,6 +30,7 @@
 // when he moves or fires (the scrub ambush works on him as it does on you). Re-plans each second.
 import { SQUADS } from "./algSquads.js";
 import { BUILD_COSTS } from "./algBuild.js";
+import { MAP } from "./layout.js";
 
 const P = {
   tick: 1,
@@ -70,7 +71,7 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
   const lastValue = new Map(); // point → its needle a second ago
   let clock = 0, acc = 0, built = 0, lastAir = -1e9, postHp = post?.structure.hp ?? 0, postHitAt = -1e9;
 
-  const mine = (u) => u.alive && u.team === "player" && !u.delivery;   // (not the base's delivery H-21)
+  const mine = (u) => u.alive && u.team === "player" && !u.delivery && !u.convoy;   // (not the base's delivery H-21, nor the oil convoy: algOilConvoy.js)
   const strength = (s) => s.members.length / ((SQUADS[s.typeKey]?.size ?? s.members.length) || 1);
   const centreOf = (s) => {
     let x = 0, z = 0;
@@ -210,6 +211,17 @@ export function createAlgFrenchAI(app, { units, squads, economy, producers, tier
       if (p.owner !== "player") continue;
       // FLN men seen in it, or its needle going their way (someone unseen is working it).
       if (flnNear(known, p.position, p.radius + 6) || p.value < was - 1e-4) take(2, "retake", p.position, p);
+    }
+    // 2b. WHAT THE FLN SABOTAGES (MAP.sabotage — El Kantara's pump station, 2026-11-02): one squad holds each one still
+    // standing, before any other expansion (a band blows it up wherever no French stand within 40 m — algAI)
+    if (MAP.sabotage?.length) {
+      const D = app.algTown?.damage;
+      (MAP.town?.houses ?? []).forEach((r, k) => {
+        if (!MAP.sabotage.includes(r[0]) || (D?.state?.(k) ?? "intact") === "ruin") return;
+        const at = { x: r[6], z: r[7] };
+        const p = pts.find((q) => q.kind !== "supply" && dist(q.position, at) < 30) ?? null;
+        take(1, "hold", p ? p.position : at, p);
+      });
     }
     // 3. The VILLAGES to take (the score), nearest first; 4. a squad sits in each held one (from the
     // third squad on: the first two keep moving); 5. then the depots, with what is left.

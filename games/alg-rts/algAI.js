@@ -175,6 +175,10 @@ const P = {
   // station), where no French stand within sabotageKeepOff, plants it in sabotageWork s and goes; the piece one state
   // down (intact → damaged → ruin), a blast and a fire
   sabotageShare: 0.3, sabotageWork: 14, sabotageKeepOff: 40,
+  // THE OIL CONVOY (algOilConvoy.js, 2026-11-02): the villages' informants hear of it this often; a band lies up on its
+  // route (no French but the convoy within convoyKeepOff of the stretch, none nearer the post than mineKeepOff) and
+  // waits the whole round trip, close (convoyRing: its wire man reaches the charge); the wire team goes out at once
+  convoyHeard: 0.75, convoyKeepOff: 70, convoyRing: [20, 35],
   mineKeepOff: 90,            // no French within this of the spot
   mineApart: 45,              // from the other mines
   mgKeepOff: 8,               // metres past an MG's range an ambush spot must keep
@@ -549,6 +553,10 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
 
   // ── THE RECOILLESS'S WORK (P.sr) ─────────────────────────────────────────
   let lastVehicle = null;   // where a French vehicle was last KNOWN
+  // THE OIL CONVOY the informants told of (convoyComing): its route, densified, until it is gone
+  let convoyRoute = null, convoyUntil = 0;
+  const convoyOn = () => !!convoyRoute && t < convoyUntil;
+  const toRoute = (p) => convoyRoute.reduce((m, q) => Math.min(m, dist(p, q)), Infinity);
   function piste(near) {
     const pts = TRACK_LINES.filter((tr) => tr.kind === "piste").flatMap((tr) => tr.line).filter((p) => { const d = dist(p, post); return d > 150 && d < 380; });
     if (!pts.length) return null;
@@ -940,7 +948,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
    * target, on the band's side (±70°), open for men on foot, scored for cover
    * and height. Never inside the post's reach.
    */
-  function ambushSpot(from, tgt) {
+  function ambushSpot(from, tgt, ring = P.ambushRing) {
     const base = Math.atan2(from.z - tgt.z, from.x - tgt.x);
     const gy = app.getWorldHeight(tgt.x, tgt.z);
     // French ON a track (the piste, a mule path): the band lines THAT track,
@@ -950,7 +958,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     const mgs = frenchMGs();
     let best = null, bestS = -Infinity;
     for (let i = 0; i < 28; i++) {
-      const a = base + rand(-1.2, 1.2), r = rand(...P.ambushRing);
+      const a = base + rand(-1.2, 1.2), r = rand(...ring);
       const x = tgt.x + Math.cos(a) * r, z = tgt.z + Math.sin(a) * r;
       if (app.navGrid?.isBlockedAtWorld?.(x, z, true)) continue;
       if (dist({ x, z }, post) < P.postKeepOff) continue;
@@ -1355,6 +1363,12 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
           }
           if (b.mission === "assault") { goIn(b); break; }
           setState(b, b.mission === "village" || b.mission === "defend" || b.mission === "raid" ? "occupy" : b.mission === "mine" || b.mission === "cut" || b.mission === "sabotage" ? "lay" : "ambush");
+          // THE CONVOY AMBUSH opens with a charge: a man runs the wire to the road at the band's stretch (layMine, a
+          // command mine), the rest lie up — the tanker stopped by the blast, then the fire
+          if (b.mission === "convoy" && !b.mined && app.algMines && app.algMines.count < app.algMines.params.max) {
+            b.mined = true; b.minePt = { ...b.target.at }; b.wire = true; layMine(b);
+            b.lastHp = null;   // (the wire man out of the band: his hp gone from its sum read as a hit — it sprang on nobody)
+          }
           break;
         }
         // Everyone stopped short (no route for anyone): wire in the way? Cut
@@ -1375,14 +1389,17 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         const near = m.filter((u) => dist(u.position, b.spot) < 15);
         const c = centre(near.length ? near : m);
         const close = french().some((u) => !u.isAir && dist(u.position, c) < P.trigger);
-        if (close || underFire(b, m)) { strike(b); break; }
+        // (a convoy ambush keeps still while its charge is wired: the blast under the tanker is the signal)
+        const held = b.mission === "convoy" && b.minePt && (app.algMines?.list ?? []).some((q) => q.command && dist(q, b.minePt) < 1);
+        if ((close && !held) || underFire(b, m)) { strike(b); break; }
         // A flare over the ambush: no hiding in the light — set up again just outside it.
         if (dodgeFlare(b, m)) break;
         // Waiting: cut scrub stood up in front of them — an AMBUSH SCREEN
         // (algBuild.js, paid from the ALN purse): they are hidden behind it
         // until they fire (algCover concealment).
         if (b.t > P.screenWait && !b.screened && b.target) { b.screened = true; buildScreen(b, near.length ? near : m, c); }
-        if (b.t > P.waitMax) {
+        if (b.t > (b.waitMax ?? P.waitMax)) {
+          b.waitMax = null;
           const tg = pickTarget(c);
           if (tg && dist(tg.at, c) < 80) { strike(b); for (const u of m) u.orderTo(tg.at.x, tg.at.z); }
           else {
@@ -1504,7 +1521,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
       case "strike": {
         const lost = 1 - m.length / Math.max(1, b.start);
         const c = centre(m);
-        const armour = !m.some((u) => bearers.has(u)) && french().some((u) => !u.type?.foot && !u.isAir && dist(u.position, c) < P.armourNear);   // (a band with a bazooka stands)
+        const armour = !m.some((u) => bearers.has(u)) && french().some((u) => !u.type?.foot && !u.isAir && !u.convoy && dist(u.position, c) < P.armourNear);   // (the convoy's soft trucks: no armour to run from)   // (a band with a bazooka stands)
         if (!m.length) return setState(b, "done");
         const pinned = m.filter((u) => u.pinned).length / m.length;
         // Still winning (few lost, French still there): fight on, up to strikeMax.
@@ -1803,6 +1820,27 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     setState(b, "approach");
     return true;
   }
+  /** THE CONVOY AMBUSH: a stretch of its route far from the post and from the French (the convoy aside), the band
+   *  lying up 15-45 m off it, waiting out the round trip. */
+  function planConvoyAmbush(b) {
+    if (!convoyOn()) return false;
+    const c = centre(alive(b));
+    const fr = french().filter((u) => !u.isAir && !u.convoy);
+    const A = convoyRoute[0], Z = convoyRoute[convoyRoute.length - 1];
+    // (not where it comes onto the map — it spawned on the charge — nor at the station: on the road between)
+    const pts = convoyRoute.filter((p) => dist(p, A) > 70 && dist(p, Z) > 50 && dist(p, post) > P.mineKeepOff && !fr.some((u) => dist(u.position, p) < P.convoyKeepOff))
+      .sort((p1, p2) => dist(p1, c) - dist(p2, c));
+    if (!pts.length) return false;
+    const p = pts[Math.floor(Math.random() * Math.min(6, pts.length))];
+    const spot = ambushSpot(c, p, P.convoyRing);   // (close: the wire man's 45 m must reach the charge from it)
+    if (!spot) return false;
+    b.mission = "convoy"; b.target = { lead: null, at: { x: p.x, z: p.z }, size: 0 }; b.spot = spot;
+    b.waitMax = Math.max(P.waitMax, convoyUntil - t);
+    holdFire(b, true);
+    sendBand(b, spot);
+    setState(b, "approach");
+    return true;
+  }
   /** The charge goes off: the piece one state down, a blast, a fire; the French told. */
   function detonate(T) {
     const D = app.algTown?.damage, r = MAP.town?.houses?.[T.k];
@@ -1863,7 +1901,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     if ((huntT -= dt) > 0) return;
     huntT = P.wireEvery;
     const M = app.algMines;
-    if (!seenVehicles || !M || M.count >= M.params.max) return;
+    if ((!seenVehicles && !convoyOn()) || !M || M.count >= M.params.max) return;
     const live = M.list.filter((m) => m.command).length + bands.filter((b) => b.hunt && b.state !== "done" && b.state !== "withdraw").length;
     if (live >= P.wireMax) return;
     if (newBand({ size: 3, mission: "mine" })) bands[bands.length - 1].hunt = true;
@@ -1886,7 +1924,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
         if (fr.some((u) => dist(u.position, p) < (b.hunt ? P.huntKeepOff : P.mineKeepOff))) continue;
         if (mines.list.some((q) => dist(q, p) < P.mineApart)) continue;
         const s = -dist(p, c) / 400 + Math.random() * 0.4 + (t.kind === "piste" ? 0.1 : 0)
-          - (b.hunt && lastVehicle ? dist(p, lastVehicle) / 600 : 0);   // where the French vehicles were last seen (a pull, not a march into them)
+          - (b.hunt && convoyOn() ? toRoute(p) / 150 : b.hunt && lastVehicle ? dist(p, lastVehicle) / 600 : 0);   // where the French vehicles were last seen (a pull, not a march into them) — the convoy's road, told of
         if (s > bestS) { bestS = s; best = p; }
       }
     }
@@ -1894,7 +1932,7 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
     b.mission = "mine"; b.minePt = { x: best.x, z: best.z }; b.target = null;
     // A COMMAND mine (algMines) on the PISTE once the French have shown their vehicles: a man stays on
     // the wire for the lorry or the half-track (a mule path's walkers get the pressure mine).
-    b.wire = seenVehicles && TRACK_LINES.some((t) => t.kind === "piste" && t.line.includes(best)) && (b.hunt || Math.random() < P.wireShare);
+    b.wire = (seenVehicles || convoyOn()) && TRACK_LINES.some((t) => t.kind === "piste" && t.line.includes(best)) && (b.hunt || Math.random() < P.wireShare);
     // The band stands beside the road, the mine goes in the wheel track.
     b.spot = { x: best.x, z: best.z };
     holdFire(b, true);
@@ -2104,6 +2142,11 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
       const v = b.mission === "defend" ? b.village : defendNeed();
       if (v && v.owner === "enemy" && planVillage(b, v)) { b.mission = "defend"; b.village = v; defending.add(v); return; }
       b.mission = null;
+    }
+    // THE CONVOY told of: lie up on its route (one band at a time)
+    if (b.mission === "convoy" || (!b.mission && convoyOn() && !bands.some((o) => o !== b && o.mission === "convoy" && o.state !== "done" && o.state !== "withdraw"))) {
+      if (planConvoyAmbush(b)) return;
+      if (b.mission === "convoy") b.mission = null;
     }
     // An ASSAULT: a big band against what the French hold.
     if (b.mission === "assault") {
@@ -2396,6 +2439,29 @@ export function createAlgAI(app, { units, squads = null, cave, post, caveMouth, 
 
   return {
     params: P,
+    /** THE OIL CONVOY (algOilConvoy.js) on its way: `route` [{x, z}, …], about `secs` s on the map. The informants
+     *  hear of it (P.convoyHeard): a band for its route, the wire team out at once. */
+    convoyComing(route, secs) {
+      if (!enabled || Math.random() > P.convoyHeard) return false;
+      convoyRoute = [];
+      for (let i = 0; i + 1 < route.length; i++) {
+        const a = route[i], b = route[i + 1], n = Math.max(1, Math.round(dist(a, b) / 10));
+        for (let k = 0; k < n; k++) convoyRoute.push({ x: a.x + (b.x - a.x) * k / n, z: a.z + (b.z - a.z) * k / n });
+      }
+      convoyRoute.push(route[route.length - 1]);
+      convoyUntil = t + secs;
+      huntT = Math.min(huntT, 3);
+      const live = (o) => o.state !== "done" && o.state !== "withdraw";
+      if (bands.some((o) => o.mission === "convoy" && live(o)) || newBand({ mission: "convoy" })) return true;
+      // (at the cap: a band forming with nothing in mind, else one lying in a chance ambush — the nearest the route)
+      const forming = bands.find((o) => o.state === "gather" && !o.mission);
+      if (forming) { forming.mission = "convoy"; return true; }
+      const lying = bands.filter((o) => o.mission === "ambush" && (o.state === "ambush" || o.state === "approach") && alive(o).length)
+        .sort((p, q) => toRoute(centre(alive(p))) - toRoute(centre(alive(q))))[0];
+      if (lying) { lying.mission = "convoy"; lying.screened = false; plan(lying); }
+      return true;
+    },
+    get convoyRoute() { return convoyOn() ? convoyRoute : null; },
     get bands() { return bands; },
     get enabled() { return enabled; },
     setEnabled(v) { enabled = !!v; },

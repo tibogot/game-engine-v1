@@ -17,6 +17,7 @@ export default {
   "Jeep Willys": "Willys Jeep",
   "H-21 « Banane »": "H-21 \"Flying Banana\"",
   "Camion GMC": "GMC Truck",
+  "Camion-citerne": "Tanker Truck",
   "Half-track M3": "Half-track",
 
   // algSquads.js — squad names, upgrades

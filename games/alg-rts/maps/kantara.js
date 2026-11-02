@@ -234,6 +234,10 @@ export const MAP = {
   berms,
   // WHAT THE FLN SABOTAGES (algAI: a band's charge — one state down, a blast, a fire): the pump station
   sabotage: ["pompage"],
+  // THE OIL CONVOY (algOilConvoy.js, 2026-11-02): down from Batna out of the gorge at the box's north edge, the road
+  // past the Roman bridge and the crossroads, along the pipeline to the station's front; loads, and back north the same
+  // way — through the FLN's country (from Biskra it ran under the post's walls: no target). The post's share if it lives.
+  oilConvoy: { route: [[-61, -220], [-58, -184], [-44, -150], [-26, -118], [-6, -62], [6, -18], [30, 40], [52, 92], [80, 106], [112, 110], [136, 112]], first: 120, every: [270, 360], load: 25, fuel: 60, trip: 320 },
   // THE MINIMAP's ground, by paint layer (tools/algKantaraLevel.mjs).
   minimap: { layers: { 0: [196, 124, 80], 1: [176, 98, 60], 2: [218, 172, 122], 3: [120, 110, 70], 4: [160, 152, 140], 5: [176, 104, 66], 6: [214, 184, 150] } },
 };
