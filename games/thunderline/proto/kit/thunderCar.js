@@ -11,14 +11,19 @@
 // Sources: assets-src/car/thunder_car.glb, thunder_car_lod1.glb (the uncompressed exports).
 import * as THREE from "three";
 import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../../v3/render/foliage/glbLoader.js";
-import { WHEEL_LOCAL } from "../../../../v3/play/modularRoadVehicle.js";
+import { WHEEL_LOCAL, HEADLIGHTS } from "../../../../v3/play/modularRoadVehicle.js";
+import { applyBloomMRT } from "../../../../v3/render/bloomMRT.js";
 import { CAR_TUNE } from "./carTune.js";
-import { texture, color, max, smoothstep, mix, clamp } from "three/tsl";
+import { texture, color, max, smoothstep, mix, clamp, uniform, float, dot, pow, normalView, positionViewDirection } from "three/tsl";
 
 // THE PAINT (user, 2026-10-29: "the car texture is kind of dark, make it yellow"): the livery texture's dark blue body
 // recoloured to `body` (its shading kept: the texture's brightness, relative to the blue's), its bright cyan stripes to
 // `stripe`. A colour here, not a new texture: no source of the livery is kept.
-export const PAINT = { body: 0xffc21a, stripe: 0x15161a, navy: 0.045, metal: 0.35 };
+export const PAINT = { body: 0xffc21a, stripe: 0x15161a, navy: 0.045, metal: 0.35, nightRim: 0.15, rimPower: 3 };
+// THE CAR AT NIGHT (2026-11-02): under the night sky the paint read as a black silhouette from the chase camera — the old
+// game's answer (modular-road-v3 CAR_NIGHT): a fresnel rim on the paint, faded in by the sky's night (updateThunderLamps).
+// The paint's own colour at grazing angles, as if the sky caught its edges: no light, no shader change between day and night.
+const NIGHT_RIM = uniform(0);
 
 export const THUNDER_CAR_URL = "/models/thunderline/thunder_car.glb";
 export const THUNDER_CAR_LOD1_URL = "/models/thunderline/thunder_car_lod1.glb";
@@ -32,10 +37,10 @@ const cache = new Map(); // url -> Promise<gltf>
 export function loadThunderCar(renderer, url = THUNDER_CAR_URL) {
   initGlbLoaderRenderer(renderer);
   if (!cache.has(url)) cache.set(url, getSharedGltfLoader().loadAsync(url));
-  return cache.get(url).then((gltf) => build(gltf.scene.clone(true)));
+  return cache.get(url).then((gltf) => build(gltf.scene.clone(true), url === THUNDER_CAR_URL));
 }
 
-function build(root) {
+function build(root, lit = true) {
   const hubY = WHEEL_LOCAL[0].pos.y;
   const object = new THREE.Group();
   object.name = "ThunderCarGLB";
@@ -111,6 +116,7 @@ function build(root) {
     o.castShadow = false;
     o.receiveShadow = true;
     if (o.material?.name === "ThunderPaint") o.material = paintMaterial(o.material);
+    if (lit && LAMP_OF[o.material?.name]) o.material = lampMaterial(o.material, LAMP_OF[o.material.name]);
     if (/^(Brakelights|TailBar)/.test(o.name)) brakeLights.push(o);
     if (/^(Headlights|DRL_)/.test(o.name)) headlampLenses.push(o);
   });
@@ -124,7 +130,8 @@ function build(root) {
     headlampMounts = [new THREE.Vector3(c.x - hx, c.y, b.max.z), new THREE.Vector3(c.x + hx, c.y, b.max.z)];
   }
   return {
-    chassis: { object, brakeLights, headlampLenses, headlampMounts },
+    // (lit: the lamps are ours — updateThunderLamps — and the vehicle's own lamp lists stay empty)
+    chassis: { object, brakeLights: lit ? [] : brakeLights, headlampLenses: lit ? [] : headlampLenses, headlampMounts, lamps: lit },
     wheel: { object: wheel, radius: ws.y / 2, width: ws.x },
   };
 }
@@ -141,6 +148,8 @@ function paintMaterial(m) {
   const stripe = smoothstep(0.1, 0.25, c.g); // the navy body has almost no green; the cyan stripes a lot
   const body = color(PAINT.body).mul(clamp(lum.div(PAINT.navy), 0.35, 1.25));
   n.colorNode = mix(body, color(PAINT.stripe), stripe);
+  const facing = clamp(dot(normalView, positionViewDirection), 0, 1);
+  n.emissiveNode = n.colorNode.mul(pow(float(1).sub(facing), PAINT.rimPower)).mul(NIGHT_RIM);
   n.userData.source = m;
   painted.set(m, n);
   return n;
@@ -156,4 +165,76 @@ function turnOutward(geo) {
   const n = geo.attributes.normal;
   for (let i = 0; i < n.array.length; i++) n.array[i] = -n.array[i]; // quantized int16: -32767..32767 negates exactly
   n.needsUpdate = true;
+}
+
+// ---------------------------------------------------------------- THE LAMPS
+// (user, 2026-11-02: "some nice lights … as best as possible … very optimized"). The file's lamp glass, one material
+// per lamp FUNCTION, each glowing by one shared colour uniform (colour × brightness) into the selective bloom's
+// emissive buffer: switching a lamp is a uniform write, never a shader change. Five functions:
+//   drl     the day-running light bars: the car's signature, always lit (brighter at night)
+//   head    the headlamp glass: lit with the beams (the vehicle's spot lights, HEADLIGHTS)
+//   tail    the tail lamp housings: with the headlights; up a step under braking
+//   stop    the stop strip: dark until you brake — braking lights a different AREA, not just a brighter one
+//   reverse white, while the car rolls backwards
+// The amber blinkers stay plain glass. Brightness = emissive before tone mapping (bloom threshold 0).
+export const LAMPS = {
+  drl: { color: 0xdaf6ff, day: 2.2, night: 3.2 },
+  head: { color: 0xeef4ff, on: 6 }, // (cool white LED, like the beams and the day-running bars)
+  tail: { color: 0xff1a0a, day: 0, night: 2.4, brake: 4 },
+  stop: { color: 0xff1206, brake: 12 },
+  reverse: { color: 0xf2f5ff, on: 12 }, // (two small lamps in the bar: bright, or they read as nothing)
+  attack: 0.04, release: 0.12, // s: LEDs, quick both ways (a hint of fade, never a flicker)
+};
+// THE BEAMS (the vehicle's two spot lights, HEADLIGHTS — set for this car by driveSession): nearly level, a slow falloff and
+// a soft edge, so the road lights 60-100 m ahead at racing speed (the old aim, 11° down with decay 2, lit a hot blob ~8 m
+// in front of the nose and nothing past it)
+export const THUNDER_BEAM = { color: "#eef4ff", intensity: 120, decay: 1, distance: 150, angle: 0.5, penumbra: 0.75, aimDrop: 0.8, aimForward: 16 };
+const LAMP_OF = { DRL: "drl", Headlights: "head", TailRed: "tail", BrakeRed: "stop", ReverseWhite: "reverse" };
+const LAMP_U = Object.fromEntries(Object.keys(LAMP_OF).map((k) => [LAMP_OF[k], uniform(new THREE.Color(0, 0, 0))]));
+const lampLevel = { drl: 0, head: 0, tail: 0, stop: 0, reverse: 0 };
+const lamped = new WeakMap(); // the file's material → ours (clones share it)
+function lampMaterial(m, fn) {
+  if (lamped.has(m)) return lamped.get(m);
+  const n = new THREE.MeshStandardNodeMaterial();
+  for (const k of ["name", "side", "map", "roughness", "metalness", "roughnessMap", "metalnessMap", "normalMap", "transparent", "opacity", "envMapIntensity"]) if (m[k] !== undefined && m[k] !== null) n[k] = m[k];
+  n.color.copy(m.color);
+  // the glass, dark when off (the file's lamp colours are bright: they read as lit at noon)
+  n.color.multiplyScalar(fn === "drl" || fn === "head" || fn === "reverse" ? 0.35 : 0.5);
+  let glow = LAMP_U[fn];
+  // (the headlamp glass: its projector pattern — by the map's BLUE: the white projectors glow, the amber marker shapes the
+  // same map paints on the bonnet and the bumper stay dark: they read as orange triangles lit on the bonnet, user 11-02)
+  if (m.emissiveMap) glow = glow.mul(smoothstep(0.55, 0.95, texture(m.emissiveMap).b));
+  n.emissiveNode = glow;
+  applyBloomMRT(n, glow);
+  lamped.set(m, n);
+  return n;
+}
+const _fwd = new THREE.Vector3();
+/**
+ * Once a frame, the car's lamps from what it does: the headlights' switch (HEADLIGHTS.enabled), the brake pedal, rolling
+ * backwards; `night` 0–1 (the sky's). Five uniform writes.
+ */
+export function updateThunderLamps(vehicle, night, dt) {
+  const L = LAMPS, inp = vehicle.input ?? {};
+  _fwd.set(0, 0, 1).applyQuaternion(vehicle.body.quat);
+  const vF = vehicle.body.vel.dot(_fwd), pedal = (inp.throttle ?? 0) < 0;
+  // the brake pedal: S while rolling forward (or still: held, before it backs up), or the handbrake
+  const braking = !!inp.handbrake || (pedal && vF > -0.5);
+  const reversing = vF <= -0.5 && (inp.throttle ?? 0) <= 0; // (in reverse: backing up, or rolling back off the pedal)
+  const head = HEADLIGHTS.enabled;
+  NIGHT_RIM.value = PAINT.nightRim * night;
+  const want = {
+    drl: L.drl.day + (L.drl.night - L.drl.day) * night,
+    head: head ? L.head.on : 0,
+    tail: braking ? L.tail.brake : head ? L.tail.night : L.tail.day,
+    stop: braking ? L.stop.brake : 0,
+    reverse: reversing ? L.reverse.on : 0,
+  };
+  for (const k in want) {
+    const a = lampLevel[k], b = want[k];
+    const t = Math.min(1, dt / (b > a ? L.attack : L.release));
+    const v = Math.abs(b - a) < 1e-3 ? b : a + (b - a) * t;
+    lampLevel[k] = v;
+    LAMP_U[k].value.set(L[k].color).multiplyScalar(v);
+  }
 }

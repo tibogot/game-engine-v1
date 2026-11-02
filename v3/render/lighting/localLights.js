@@ -52,12 +52,29 @@ class MasterClusteredLightsNode extends ClusteredLightsNode {
     // materials use a follower, so the master is often in no shader graph at all.
     this.updateBeforeType = THREE.NodeUpdateType.NONE;
     this._keep = [];
+    this._extra = []; // the scene's OWN clusterable lights (a car's headlight spots): see setLights
   }
   updateBefore() {}
-  /** Bin `lights` (in priority order) into the clusters for `camera`. */
+  /** True when a scene light outside the pool is lit (the pass must run even with no pool light). */
+  hasLitExtras() {
+    for (const l of this._extra) if (l.intensity > 0) return true;
+    return false;
+  }
+  /** Bin `lights` (in priority order) into the clusters for `camera` — after the scene's own lit lights. */
   drive(renderer, camera, lights) {
     this.clusteredLights.length = 0;
-    for (const l of lights) this.clusteredLights.push(l);
+    // THE SCENE'S OWN SPOT AND POINT LIGHTS (2026-11-02): three's clustered node takes every plain spot / point light
+    // out of the regular lighting and draws it only through the clusters — so a car's headlights (shadowless spots)
+    // VANISHED wherever local lights were installed (Thunderline's drive page and builder: no beam at night). They
+    // go first (never pushed out by a full pool), their matrices brought up to this frame (the car moved in the
+    // game's hooks; the render's own matrix update comes after this pass).
+    for (const l of this._extra) {
+      if (!(l.intensity > 0) || this.clusteredLights.length >= this.maxLights) continue;
+      l.updateWorldMatrix(true, false);
+      l.target?.updateWorldMatrix(true, false);
+      this.clusteredLights.push(l);
+    }
+    for (const l of lights) { if (this.clusteredLights.length >= this.maxLights) break; this.clusteredLights.push(l); }
     // r187 sizes the grid once, at first use; r186 followed the drawing buffer every frame (a
     // render-scale change, a window resize). Same size: returns at once.
     this._fitToRenderer(renderer);
@@ -70,6 +87,14 @@ class MasterClusteredLightsNode extends ClusteredLightsNode {
     keep.length = 0;
     for (let i = 0; i < t.length; i++) keep.push(t[i]);
     super.setLights(lights);
+    // the scene's clusterable lights that are not the pool's (drive() bins them too). From a REAL hand-over only: three
+    // restores the list it saved at the render's start when the render ends (Lighting.finishRender) — an empty one
+    // between frames — and drive() runs between frames
+    if (lights.length) {
+      const extra = this._extra;
+      extra.length = 0;
+      for (let i = 0; i < t.length; i++) if (!t[i].userData.localPool) extra.push(t[i]);
+    }
     t.length = 0;
     for (let i = 0; i < keep.length; i++) t.push(keep[i]);
     return this;
@@ -172,6 +197,7 @@ export function createLocalLights({ scene, camera, renderer, max = 128 }) {
     const l = new THREE.PointLight(0xffffff, 0, 0.01, 2);
     l.castShadow = false;
     l.matrixAutoUpdate = false;
+    l.userData.localPool = true; // (the master tells its pool from the scene's own lights by this)
     l.position.set(0, PARK, 0);
     group.add(l);
     l.updateMatrix(); l.updateMatrixWorld();
@@ -243,14 +269,17 @@ export function createLocalLights({ scene, camera, renderer, max = 128 }) {
     }
     // bin them into the screen tiles for this view, once a frame — and not at all while none is lit
     // (by day): one empty pass clears the tiles, then the pass and its upload stop
-    if (tiled && (n > 0 || lastDrawn !== 0)) {
+    const extras = !!tiled?._master.hasLitExtras();
+    if (tiled && (n > 0 || lastDrawn !== 0 || extras || extrasLast)) {
       camera.updateMatrixWorld();
       active.length = 0;
       for (let i = 0; i < n; i++) active.push(pool[i]);
       tiled._master.drive(renderer, camera, active);
     }
     lastDrawn = n;
+    extrasLast = extras; // (a scene light just switched off: one more pass clears it from the clusters)
   }
+  let extrasLast = false;
   const active = [];
 
   function clear() { live.clear(); }

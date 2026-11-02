@@ -8,6 +8,9 @@ import { startV3App } from "../../../../v3/engine.js";
 import { createDriveRig } from "./driveSession.js";
 import { applyWorld, TIMES, groundFeatures } from "./worlds.js";
 import { createCarFx } from "./carFx.js";
+import { LAMPS, PAINT } from "./thunderCar.js";
+import { BEAM_FX } from "./carBeams.js";
+import { HEADLIGHTS } from "../../../../v3/play/modularRoadVehicle.js";
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -27,6 +30,7 @@ const app = await startV3App({
 app.sky?.setMode?.("skypro");
 let tod = Number(params.get("tod")) || 15.5;
 app.sky?.setTimeOfDay?.(tod);
+app.sky?.setNightStyle?.("cinematic"); // the game's night (drive.js, builder3.js)
 app.fog?.setHeight?.({ enabled: false });
 app.postFx?.setEnabled?.(true);
 app.postFx?.setBloomSelective?.(true);
@@ -52,10 +56,13 @@ const SCENES = {
   drift: { label: "Drift circles", note: "Full throttle, half lock, the handbrake pulled every 2 s, on the floor." },
   launch: { label: "Launch + brake", note: "Standing start flat out for 3 s, then the brakes for 2 s: the exhaust's bark and the tyres." },
   scrape: { label: "Rail scrape", note: "The autopilot, steered into the right-hand rail: sparks." },
+  lights: { label: "Lights", note: "On the floor: off, a run, the brakes to a stop, backing up, the handbrake. Watch the stop strip, the tail lamps, the reverse light." },
   free: { label: "Drive yourself", note: "W A S D / arrows, Space handbrake (the panel keeps the keys while the mouse is over it)." },
 };
 const DRIVERS = {
   drift: () => ({ steerTarget: 0.55, rollTarget: 0, throttle: 1, handbrake: sceneT % 2 < 0.45, yaw: 0, pitch: 0, analog: false }),
+  // (a 9 s loop) go 2.5 s · brake: the stop strip, then S held backs the car up: the reverse light · coast · handbrake
+  lights: () => { const k = sceneT % 9; return { steerTarget: 0, rollTarget: 0, throttle: k < 2.5 ? 0.7 : k < 6 ? -1 : 0, handbrake: k >= 7.5, yaw: 0, pitch: 0, analog: false }; },
   launch: () => { const k = sceneT % 5; return { steerTarget: 0, rollTarget: 0, throttle: k < 3 ? 1 : -1, handbrake: false, yaw: 0, pitch: 0, analog: false }; },
   scrape: (v, S) => { const i = S.pilot.input(v); return { ...i, steerTarget: clamp((i.steerTarget ?? 0) - 0.9, -1, 1) }; },
 };
@@ -63,7 +70,7 @@ async function setScene(name) {
   scene = name;
   sceneT = 0;
   finishedAt = null;
-  const onFloor = name === "drift" || name === "launch";
+  const onFloor = name === "drift" || name === "launch" || name === "lights";
   await rig.start({ from: onFloor ? floorFrom : null, killY: onFloor ? -100 : undefined, help: "FX lab · the panel on the right" });
   rig.setAuto(name === "lap" || name === "scrape");
   rig.setInputSource(DRIVERS[name] ?? null); // lap / scrape: the autopilot; free: the keys
@@ -75,7 +82,7 @@ async function setScene(name) {
 // ---------- cameras (the chase camera, or views from outside the car) ----------
 let cam = params.get("cam") ?? "chase";
 let trackside = null;
-const CAMS = { chase: "Chase", side: "Side", low: "Low rear", trackside: "Trackside" };
+const CAMS = { chase: "Chase", side: "Side", low: "Low rear", trackside: "Trackside", front: "Front ¾", rear: "Rear ¾", nose: "Nose" };
 const _p = new V(), _f = new V(), _r = new V(), _u = new V(0, 1, 0);
 function placeCamera() {
   if (cam === "chase") return; // the rig's chase camera already placed it
@@ -84,6 +91,9 @@ function placeCamera() {
   _r.crossVectors(_f, _u).normalize(); // car's right
   if (cam === "side") _p.copy(pos).addScaledVector(_r, 9).addScaledVector(_f, 1.5).add(new V(0, 1.6, 0));
   else if (cam === "low") _p.copy(pos).addScaledVector(_f, -7.5).add(new V(0, 0.7, 0));
+  else if (cam === "front") _p.copy(pos).addScaledVector(_f, 6.5).addScaledVector(_r, 3.2).add(new V(0, 1.1, 0));
+  else if (cam === "nose") _p.copy(pos).addScaledVector(_f, 4.2).addScaledVector(_r, 0.6).add(new V(0, 0.9, 0));
+  else if (cam === "rear") _p.copy(pos).addScaledVector(_f, -6.5).addScaledVector(_r, 3.2).add(new V(0, 1.1, 0));
   else {
     // a fixed spot beside the road ahead; a new one when the car is far past it
     if (!trackside || trackside.distanceTo(pos) > 110) trackside = pos.clone().addScaledVector(_f, 30).addScaledVector(_r, 14).add(new V(0, 2.5, 0));
@@ -114,6 +124,8 @@ function renderButtons() {
   buttons($("speeds"), SPEEDS, (k) => Number(k) === rig.timeScale, (k) => rig.setTimeScale(Number(k)));
   buttons($("looks"), { flipbook: "Wispy flipbook", procedural: "Procedural" }, (k) => k === fx.look, (k) => fx.setLook(k));
   buttons($("tods"), TODS, (k) => Number(k) === tod, (k) => { tod = Number(k); app.sky?.setTimeOfDay?.(tod); rig.rebakeSunShadows(); }); // the baked shadows follow the sun
+  buttons($("heads"), { auto: "Auto", on: "On", off: "Off" }, (k) => k === heads, (k) => { heads = k; rig.setHeadlightsHand(k === "auto" ? null : k === "on"); });
+  renderLampSliders();
   const box = $("fxs");
   box.innerHTML = "";
   for (const [k, label] of Object.entries(EFFECTS)) {
@@ -121,6 +133,37 @@ function renderButtons() {
     row.className = "fx";
     row.innerHTML = `<label><input type="checkbox" ${fx.on[k] ? "checked" : ""}> ${label}</label>`;
     row.querySelector("input").onchange = (e) => { fx.set(k, e.target.checked); e.target.blur(); };
+    box.appendChild(row);
+  }
+}
+
+// ---------- the car's lights: live sliders (thunderCar.js LAMPS, the beams: HEADLIGHTS); the values printed to copy ----------
+let heads = "auto";
+const SLIDERS = [
+  ["DRL day", LAMPS.drl, "day", 0, 8], ["DRL night", LAMPS.drl, "night", 0, 8], ["Headlamp glass", LAMPS.head, "on", 0, 16],
+  ["Tail (night)", LAMPS.tail, "night", 0, 8], ["Tail (brake)", LAMPS.tail, "brake", 0, 12], ["Stop strip", LAMPS.stop, "brake", 0, 30],
+  ["Reverse", LAMPS.reverse, "on", 0, 24], ["Paint night rim", PAINT, "nightRim", 0, 1],
+  ["Beam", HEADLIGHTS, "intensity", 0, 6000], ["Beam reach", HEADLIGHTS, "distance", 20, 200], ["Beam cone", HEADLIGHTS, "angle", 0.2, 1.2],
+  ["Beam softness", HEADLIGHTS, "penumbra", 0, 1], ["Beam aim drop", HEADLIGHTS, "aimDrop", 0, 8],
+  ["Haze in the air", BEAM_FX, "media", 0, 1], ["Haze brightness", BEAM_FX, "intensity", 0, 1], ["Haze length", BEAM_FX, "range", 10, 100],
+  ["Lens flare", BEAM_FX, "glareSize", 0, 4],
+];
+function renderLampSliders() {
+  const box = $("lamps");
+  if (box.childElementCount) return;
+  for (const [label, obj, key, lo, hi] of SLIDERS) {
+    const row = document.createElement("div");
+    row.className = "fx";
+    const step = hi - lo > 50 ? 10 : 0.05;
+    row.innerHTML = `<label style="display:flex;gap:6px;align-items:center"><span style="width:110px">${label}</span><input type="range" min="${lo}" max="${hi}" step="${step}" value="${obj[key]}" style="flex:1;min-width:0"><b style="width:44px;text-align:right">${obj[key]}</b></label>`;
+    const input = row.querySelector("input"), out = row.querySelector("b");
+    input.oninput = () => {
+      obj[key] = Number(input.value);
+      out.textContent = input.value;
+      if (obj === HEADLIGHTS) vehicle.applyHeadlightParams();
+      if (obj === HEADLIGHTS || obj === BEAM_FX) rig.carBeams?.sync();
+      console.info("[fx lab] lamps", JSON.stringify({ LAMPS, nightRim: PAINT.nightRim, haze: BEAM_FX, beam: { intensity: HEADLIGHTS.intensity, distance: HEADLIGHTS.distance, angle: HEADLIGHTS.angle, penumbra: HEADLIGHTS.penumbra, aimDrop: HEADLIGHTS.aimDrop } }));
+    };
     box.appendChild(row);
   }
 }

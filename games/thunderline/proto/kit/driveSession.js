@@ -6,7 +6,7 @@
 // :9904-10040), minus everything a sky track doesn't need.
 import * as THREE from "three";
 import { float, abs, dot, vec3, normalView, positionViewDirection } from "three/tsl";
-import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL, SOLID, CRASH } from "../../../../v3/play/modularRoadVehicle.js";
+import { Vehicle, FIXED_DT, STUCK, TIRE, AERO, CHASSIS, WHEEL, SOLID, CRASH, HEADLIGHTS } from "../../../../v3/play/modularRoadVehicle.js";
 import { RoadBvh } from "../../../../v3/play/modularRoadBvh.js";
 import { createVehicleGround } from "../../../../v3/play/modularRoadGround.js";
 import { createChaseCamera, CHASE_CAM } from "../../../modular-road-v3/chaseCamera.js";
@@ -33,7 +33,8 @@ import { createSfxSamples, GAME_PICK } from "./sfxSamples.js";
 import { buildOldLook, createOldLookMaterials, edgesOf, lookKey } from "./oldLook.js";
 import { layoutTestTrack, layoutFromPlacements, buildTrackMeshes } from "./testTrack.js";
 import { createSunShadows, STATIC_LAYER, DYNAMIC_LAYER } from "./sunShadows.js";
-import { loadThunderCar, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
+import { createCarBeams } from "./carBeams.js";
+import { loadThunderCar, updateThunderLamps, THUNDER_BEAM, THUNDER_CAR_URL, THUNDER_CAR_LOD1_URL } from "./thunderCar.js";
 import { buildObstacleSet, avoidObstacles, boostZones, attachMovers } from "./obstacles.js";
 import { createSparks } from "./sparks.js";
 import { createPhysProps, loadPhysAssets } from "./physProps.js";
@@ -307,6 +308,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
   let ghostStyled = false; // the ghost is only shown once it wears its hologram (models loaded)
   // the Lotus is a DEV model only (trademark); it loads in the background, the car drives meanwhile
   // THE CAR: "thunder" = our car (thunderCar.js), "lotus" = the dev Lotus. Same slots, same physics.
+  let carBeams = null; // the visible beams in the air (carBeams.js), on our car
+  let carLamps = false; // our car's own lamps (thunderCar.js updateThunderLamps), once it is dressed
   async function dress(v, adopt) {
     if (car === "thunder") {
       // the car file is not in git until it is optimised: without it, the Lotus
@@ -314,6 +317,8 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
       // the ghost wears the light version (thunderCar.js LOD1)
       try { tc = await loadThunderCar(renderer, adopt ? THUNDER_CAR_URL : THUNDER_CAR_LOD1_URL); } catch (e) { console.warn("[drive] Thunderline car not found, using the Lotus", e); return false; }
       if (adopt) adoptCar(tc.chassis.object);
+      if (adopt && tc.chassis.lamps) { carLamps = true; Object.assign(HEADLIGHTS, THUNDER_BEAM); v.applyHeadlightParams(); }
+      if (adopt && tc.chassis.lamps && !carBeams) carBeams = createCarBeams(v); // (after the mounts: setHeadlampMounts below re-places them, the beams ride them)
       if (tc.chassis.headlampMounts && adopt) v.setHeadlampMounts(tc.chassis.headlampMounts);
       v.setChassisModel(tc.chassis.object, { brakeLights: tc.chassis.brakeLights, headlampLenses: tc.chassis.headlampLenses });
       v.setChassisStyle("glb");
@@ -1147,17 +1152,24 @@ export function createDriveRig(app, { prefs = {}, top = 63, substeps = 3, sunSha
     if (++S.frame % 15 === 0) renderStats();
     // HEADLIGHTS ON when the sun is low (user, 2026-10-20: "we don't have the car lights" at dusk) — a
     // uniform write in the car (setHeadlights), so checking twice a second costs nothing
+    // (at NIGHT the scene's light is the MOON, high in the sky: the sun's height alone never switched them on —
+    // 2026-11-02; the sky's night factor does)
     if (S.frame % 30 === 1) {
-      const on = headlightsHand ?? app.light.getDirection().y < Math.sin(12 * Math.PI / 180);
+      const on = headlightsHand ?? ((app.sky?.night ?? 0) > 0.05 || app.light.getDirection().y < Math.sin(12 * Math.PI / 180));
       if (on !== headlightsOn) { headlightsOn = on; vehicle.setHeadlights(on); }
     }
+    if (carLamps) updateThunderLamps(vehicle, app.sky?.night ?? 0, dt);
+    carBeams?.update(dt, camera);
   });
 
   return {
     start, stop, restart, respawnCheckpoint, recoverToSafe, modelsReady,
+    /** The headlights by hand (true / false), or null: the sky's choice again (the L key's switch). */
+    setHeadlightsHand(v) { headlightsHand = v; headlightsOn = null; if (v != null) { headlightsOn = v; vehicle.setHeadlights(v); } },
     get active() { return !!S; }, get session() { return S; },
     vehicle, ghostCar, chase, keys, engine, engineSound, sfx, sfxRec, camera, sparks, tyreMarks, tyreSmoke, exhaust, landingFx, carHologram,
     get sunShadows() { return sunShadows; },
+    get carBeams() { return carBeams; },
     setAuto(on) { autopilot = on; S?.pilot.reset(); if (S) S.recoveries = 0; },
     /** fn(vehicle, session) → input, or null for the player / autopilot again */
     setInputSource(fn) { inputSource = fn; },
