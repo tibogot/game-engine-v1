@@ -479,6 +479,13 @@ export const BUILDINGS = {
     middle: () => postInState("damaged"), after: () => postInState("ruin"),
     tags: ["FRENCH POST · NEW", "FRENCH POST · DAMAGED", "FRENCH POST · DESTROYED"], note: "the French post (Blender: the bordj, its towers, the gate, the barracks; your simulated sandbags) in its three states.",
   },
+  // THE SAHARAN BORDJ (2026-11-02, postKit.py "saharien" — El Kantara's French post): the kit's model in its three
+  // states, as the lab shows the town's pieces (the game puts the post's children on it: the gate, the flag, the bags)
+  bordjSaharien: {
+    label: "Bordj saharien", gap: 46, yaw: Math.PI - 0.55, prepare: () => loadHouses("postkit"),
+    before: () => labPiece(houseMesh("saharien", "intact")), middle: () => labPiece(houseMesh("saharien", "damaged")), after: () => labPiece(houseMesh("saharien", "ruin")),
+    tags: ["SAHARAN BORDJ · NEW", "SAHARAN BORDJ · DAMAGED", "SAHARAN BORDJ · DESTROYED"], note: "El Kantara's French post (Blender): the same bordj in ochre banco on a dark earth footing, crenellated walls, towers and gate, the towers battered with their beam-ends, the gate's arch in whitewash.",
+  },
   campFln: {
     label: "Camp du FLN", gap: 31, before: () => buildCampV2(),
     tags: ["FLN CAMP"], note: "le camp du jeu à gauche, le camp en grès et pierre sèche à droite.",

@@ -108,7 +108,7 @@ export const FLN_POST_TYPES = ["refuge", "infirm"];
 // THE VILLAGE PROPS (tools/blender/villageProps.py — algVillageLife.js with MAP.villageProps)
 export const VPROP_TYPES = ["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "wood", "hives"];   // (the hay: algHaystack, 2026-10-26)
 export const RUBBLE_TYPES = ["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"];
-export const BORDJ_TYPES = ["post"];
+export const BORDJ_TYPES = ["post", "saharien"];   // (saharien: El Kantara's Saharan bordj, 2026-11-02 — MAP.bordj)
 // THE FLN'S MARKS (tools/blender/flnMarks.py — algSangar.js loadLookout / loadMineMarker): the watcher's perch, the mine's cairn
 export const MARK_TYPES = ["lookout", "minemark"];
 // THE TELEGRAPH POLE (tools/blender/poles.py, 2026-10-30 — algSangar.js loadPoles, drawn by algPoles)

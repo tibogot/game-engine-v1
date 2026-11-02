@@ -14,6 +14,9 @@
 import { loadPenProps } from "./algPenProps.js";
 import { haystackField } from "./algHaystack.js";
 import { startV3App, createLevelLoader } from "../../v3/engine.js";
+import { STENCIL_TEXT } from "../../v3/render/objects/rtsStencils.js";
+// THE POST'S BOARD reads the map's own post (the stencil sheet drew "Poste de Tighanimine" on every map — 2026-11-02)
+{ const fr = LAYOUT.sites.find((s) => s.kind === "french"); const sign = MAP.postSign ?? fr?.name; if (sign) STENCIL_TEXT.postSign = sign.toUpperCase(); }   // (MAP.postSign: the board in French whatever the language — a map whose post name goes through t())
 import { SIDES, setHumanSide } from "../shared-rts/teams.js";
 import { createRtsCamera } from "../shared-rts/rtsCamera.js";
 import { placeShowroom, SHOWROOM } from "./showroom.js";

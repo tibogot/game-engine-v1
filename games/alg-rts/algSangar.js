@@ -16,6 +16,7 @@
 //                  stones in the shader (rock_boulder_dry's normal and height, triplanar in the piece's space,
 //                  ~0.45 m a tile): its normal added to the baked one, its height darkening the pits (cavity).
 //                  6 texture taps, no new mesh.
+import { MAP } from "./layout.js";
 import { KIT_BLEND, earthDetail, ensureEarthMask, groundBlend, groundBlendApp, hasEarth } from "./algGroundBlend.js";
 import * as THREE from "three";
 import { abs, attribute, clamp, float, mix, normalGeometry, normalMap, normalize, positionGeometry, positionLocal, pow, select, smoothstep, step, texture, transformNormalToView, uniform, vec3 } from "three/tsl";
@@ -454,11 +455,13 @@ function infirmaryPlantSpots() {
  * the sandbag slots (the user's simulated bags, children of the placed post), the flag's mount, the footprint, the
  * cover lines; its markings the boards and the tricolour only (the walls carry their own weathering).
  */
-export const loadFrenchPost = () => loadBlenderPiece("postkit", "post", () => buildFrenchPost({ detail: 2, noBags: true, signsOnly: true, footStone: MAT.limestone }), null, { stone: false, plaster: true });
+// (MAP.bordj: the map's own style of the same post — El Kantara's "saharien", 2026-11-02; the Aurès one by default)
+const POST_TYPE = MAP.bordj ?? "post";
+export const loadFrenchPost = () => loadBlenderPiece("postkit", POST_TYPE, () => buildFrenchPost({ detail: 2, noBags: true, signsOnly: true, footStone: MAT.limestone }), null, { stone: false, plaster: true });
 // (its far level only past the widest RTS zoom. 150 m was not: at full zoom-out the screen's top corners are ~200 m from
 // the camera, so panning put the post on screen in its far level — the radio mast gone, its shadow changed (you,
 // 2026-10-27). 240 = those 200 m + the post's half-width and mast + its shadow's reach at the map's sun.)
-export const frenchPostGeometry = () => { const g = pieceGeometry("postkit", "post"); if (g) g.userData.farFrom = 240; return g; };
+export const frenchPostGeometry = () => { const g = pieceGeometry("postkit", POST_TYPE); if (g) g.userData.farFrom = 240; return g; };
 /**
  * The placed post (the showroom's, the producer's mesh) to the Blender one: its geometry and material swapped, its
  * children kept (the gate's leaves, the flag, the simulated bags), its markings re-made (signs only), its far level.

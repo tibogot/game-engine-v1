@@ -460,8 +460,14 @@ ORDER (each step: you look before the next):
        - [ ] Where a rim's slabs stop at a ramp, the bare terrain step shows (a smeared corner): a block.
        - [ ] The briefing is still the Aurès' ("Hold the valley"): a per-map briefing (step 2).
        - [ ] The level tool takes ~4 min (plateauSd per cell, 3 gully fields): cache it on a grid.
-2. [ ] THE LAYOUT: sites, road carved, oued, palm grove, ksar, villages, bordj, FLN camp, pump
-       station; the plan image (algPlanView); dead zones measured.
+2. [~] THE LAYOUT — 2026-11-02 (you: "lets do 1"; the menu card active 59d74804): seven flagged places on the ground
+       as it is (the plateau, gullies and oued dropped with the redo), built from the kits (maps/kantara.js
+       KANTARA_TOWN): ★ the KSAR (the M'zab kit round its souk, the mosque behind, (-110,-80)), the SPRING in the grove
+       (ain + palm-rib gardens), the WHITE VILLAGE (the whitewashed kit, the east plain), SIDI BEL ABBÈS (koubba +
+       cemetery), the SHEEPFOLD by the road, the CROSSROADS, the northern LOOKOUT; fourteen supply points (a pair by
+       each start); the briefing's places (MAP.places, FR + EN); the FLN AI takes them (seen: the lookout, then the
+       marabout). Left: the BORDJ (the French start is still the Aurès post) and the PUMP STATION (step 3); a
+       full match by you; dead zones measured.
 3. [ ] THE NEW PIECES: bordj, acacia, pipeline + pump station, the tanker.
 4. [ ] THE AI: the FLN (sabotage, ambushes in the gullies, raids from the plateau); the French
        (convoys, holding the bridge); then the méharistes.

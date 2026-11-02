@@ -214,6 +214,10 @@ function drawSheet() {
 // dark ultramarine and a vermilion that sun and dust have both taken down.
 const FR_BLUE = "#1f3f8f", FR_WHITE = "#ece8dc", FR_RED = "#c1272d";
 
+/** THE POST'S BOARD over its gate (2026-11-02: every map's post read "Poste de Tighanimine" — the Aurès'): a game sets
+ *  its own before the sheet is first drawn. */
+export const STENCIL_TEXT = { postSign: "POSTE DE TIGHANIMINE" };
+
 /** The bottom half of the sheet: France, 1954-62. */
 function drawFrench(g, text, wear) {
   let c = STENCILS.frTricolore;
@@ -233,7 +237,7 @@ function drawFrench(g, text, wear) {
   c = STENCILS.frPosteSign;
   g.fillStyle = "#e6e0d0"; g.fillRect(c.x + 4, c.y + 4, c.w - 8, c.h - 8);
   g.strokeStyle = "#2a2622"; g.lineWidth = 6; g.strokeRect(c.x + 12, c.y + 12, c.w - 24, c.h - 24);
-  text("POSTE DE TIGHANIMINE", c.x + 16, c.y + 16, c.w - 32, c.h - 32, "#1d1b18", 58);
+  text(STENCIL_TEXT.postSign, c.x + 16, c.y + 16, c.w - 32, c.h - 32, "#1d1b18", 58);
   wear(c.x, c.y, c.w, c.h, 160);
   c = STENCILS.frPlate;
   g.fillStyle = "#26281f"; g.fillRect(c.x + 2, c.y + 8, c.w - 4, c.h - 16);

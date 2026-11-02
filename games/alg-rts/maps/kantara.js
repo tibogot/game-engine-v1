@@ -15,9 +15,12 @@
 // the rock as OUTCROPS and low SHELVES on the hills' shoulders, half buried. The OUED and its PALM
 // GROVE in the west, the road through the middle.
 //
-// PROVISIONAL (step 1, the ground and the look): only the two starts; the points come next.
+// THE LAYOUT (step 2, 2026-11-02, you: "lets do 1" — El Kantara playable): seven flagged places on the ground as it is
+// (the plan's plateau, gullies and oued were dropped with the ground's redo), built from the kits that exist; the bordj
+// and the pump station wait for their own pieces (TODO MAP 3, step 3).
 import { t } from "../i18n/i18n.js";
 import { ROCKS } from "./kantaraRocks.js";
+import { garden, hamlet, koubbaAndCemetery } from "./villageKit.js";
 
 /** THE PLAYABLE AREA: 448 m (CoH 2v2 size, 14 × 32 m), starts ~360 m apart. */
 export const PLAY = { x0: -224, x1: 224, z0: -224, z1: 224 };
@@ -58,6 +61,34 @@ export const LAYOUT = {
     // The bordj on the plain in the south, by the road; the katiba in a hollow in the north-east.
     { kind: "french", name: t("Bordj d'El Kantara"), x: 20, z: 165, r: 34, turn: 35 },
     { kind: "aln", name: t("Katiba du ravin"), x: 160, z: -160, r: 26, turn: -30 },
+    // ── THE OBJECTIVES (2026-11-02): flagged, as Oued Abdi's and the coast's (algUnits: a map with `point` sites fights
+    // over those). Measured on the level: each site flat (23-25 m, slopes under 12°), off the sand mass. Their kinds the
+    // map's own (the showroom builds its old pieces for "ksar", "hamlet", "koubba"…) — "oasis" gets its fog and herds ──
+    { kind: "town", name: "Ksar d'El Kantara", x: -110, z: -80, r: 40, point: true },       // (the M'zab kit: the big prize)
+    { kind: "oasis", name: "Aïn el Kantara", x: -85, z: -5, r: 24, point: true },            // (the spring in the palm grove)
+    { kind: "village", name: "Le village blanc", x: 110, z: 40, r: 30, point: true },        // (the whitewashed kit, the east plain)
+    { kind: "marabout", name: "Sidi Bel Abbès", x: -40, z: -130, r: 14, point: true },       // (the koubba and its dead)
+    { kind: "farm", name: "Bergerie de la route", x: 70, z: 110, r: 20, point: true },       // (near the bordj)
+    { kind: "point", name: "Carrefour de la route", x: 18, z: 10, r: 16, point: true },       // (the road, the middle)
+    { kind: "point", name: "Vigie du nord", x: 100, z: -190, r: 16, point: true },           // (the high ground by the katiba)
+  ],
+  // SUPPLY (munitions / fuel): over the ground between the places, a pair by each start
+  supply: [
+    { name: "Puits de la palmeraie", x: -150, z: 30, res: "mun" },
+    { name: "Seguia du ksar", x: -60, z: -60, res: "fuel" },
+    { name: "Piste du ksar", x: -150, z: -150, res: "mun" },
+    { name: "Gué de la route", x: -20, z: -60, res: "fuel" },
+    { name: "Borne kilométrique", x: 40, z: 60, res: "mun" },
+    { name: "Champ de l'est", x: 170, z: 0, res: "fuel" },
+    { name: "Talus de l'est", x: 180, z: 100, res: "mun" },
+    { name: "Ruines romaines", x: 40, z: -110, res: "mun" },
+    { name: "Col du nord-est", x: 200, z: -80, res: "fuel" },
+    { name: "Dunes du sud", x: -60, z: 170, res: "fuel" },
+    // the starts' own pairs
+    { name: "Dépôt du bordj", x: -20, z: 190, res: "mun" },
+    { name: "Citerne du bordj", x: 110, z: 170, res: "fuel" },
+    { name: "Cache du ravin", x: 200, z: -200, res: "mun" },
+    { name: "Bergerie du ravin", x: 110, z: -130, res: "fuel" },
   ],
   // No oued (2026-10-13): CoH's desert has none, and its grey bed spoiled the sand. The palm grove is
   // a spring oasis. (Oued El Haï ran from the gorge past the grove: in git, 2026-10-13.)
@@ -71,12 +102,49 @@ const ROAD = [
   [30, 40], [52, 92], [56, 140], [62, 190], [100, 248], [160, 330], [204, 500],
 ];
 
+/**
+ * THE PLACES' BUILDINGS (2026-11-02): the kits as Oued Abdi's (villageKit hamlet — fronts to +Z: this map's camera
+ * looks north-north-east, they face it at three-quarters). Each house its own pad.
+ */
+const KANTARA_TOWN = (() => {
+  const at = (n) => LAYOUT.sites.find((s) => s.name === n);
+  const KS = at("Ksar d'El Kantara"), OA = at("Aïn el Kantara"), VB = at("Le village blanc"), SB = at("Sidi Bel Abbès"), BG = at("Bergerie de la route");
+  const parts = [
+    // THE KSAR: the M'zab kit's ochre houses in two rows round its souk, a tower at each end, a house on each side of
+    // its square (the point); one house shelled
+    hamlet(KS.x, KS.z, {
+      rows: [{ types: ["tour", "dar", "souk", "dar", "tour"], x: -32, z: -8, states: { 3: "damaged" } },
+        { types: ["terrasse", "bas", "dar", "terrasse"], x: -30, z: -26 }],
+      sides: [{ type: "dar", x: -24, z: 8 }, { type: "bas", x: 24, z: 6 }] }),
+    // its mosque behind, against the grove's edge
+    hamlet(KS.x, KS.z, { rows: [{ types: ["mosquee"], x: -8, z: -40 }] }),
+    // THE SPRING in the grove: the basin and its seguia, two gardens fenced in palm ribs
+    (() => { const v = hamlet(OA.x, OA.z, { rows: [], props: [{ type: "ain", x: 2, z: 0 }] });
+      v.props.push(...garden(OA.x - 24, OA.z + 8, 4, 3, { gate: ["n", 2] }), ...garden(OA.x + 10, OA.z + 8, 4, 3, { gate: ["n", 0], damaged: [4] }));
+      return v; })(),
+    // THE WHITE VILLAGE: two short rows of the whitewashed kit, a house on the side; one shelled
+    hamlet(VB.x, VB.z, {
+      rows: [{ types: ["maison", "haute", "boutique"], x: -18, z: -6, states: { 2: "damaged" } }, { types: ["cour", "haute", "maison"], x: -20, z: -20 }],
+      sides: [{ type: "haute", x: 22, z: 2 }] }),
+    // SIDI BEL ABBÈS: the koubba; its dead in front (south)
+    { houses: [], props: koubbaAndCemetery(SB.x, SB.z, SB.x - 4, SB.z + 22, { seed: 1958, cols: 5, rows: 3 }) },
+    // THE SHEEPFOLD by the road: the fold and its zriba, the shepherd's house, the threshing floor
+    hamlet(BG.x, BG.z, { rows: [{ types: ["petite"], x: 9, z: 4 }], props: [{ type: "bergerie", x: -4, z: 0 }, { type: "aire", x: 6, z: 16 }] }),
+  ];
+  return { houses: parts.flatMap((v) => v.houses), props: parts.flatMap((v) => v.props) };
+})();
+
 export const MAP = {
   id: "kantara",
+  // THE SAHARAN BORDJ (tools/blender/postKit.py "saharien", 2026-11-02): the French start's post in banco, crenellated
+  bordj: "saharien",
+  postSign: "Bordj d'El Kantara",   // (the board over its gate, in French whatever the language)
   name: t("La porte du désert — El Kantara, 1958"),
   level: "/levels/alg-kantara.v3proj",
   tracks: [{ name: t("Route de Biskra"), kind: "piste", from: "gate", to: t("Katiba du ravin"), length: 520, points: ROAD }],
-  supply: [],
+  supply: LAYOUT.supply,
+  // the briefing's list of the places (algBattle: a map with flagged objectives)
+  places: t("le ksar, la source de la palmeraie, un village, un marabout, une bergerie, un carrefour, une vigie"),
   handPlaced: false,
   // WHAT THIS MAP SHOWS (mapSystems.js — one it does not list stays off). PROVISIONAL, as the map.
   systems: { ai: true, fow: true, birds: true, splats: true, stones: true },
@@ -143,6 +211,8 @@ export const MAP = {
   sandstone: { colour: "kantara", rocks: ROCKS },
   // algLandmarks' own scenery: only the slabs above (a map with `scenery` starts at 0 of everything).
   scenery: { quantities: {}, keepClear: [] },
+  // ITS TOWN (algGame: the instanced house field — garrisons, damage, cover, sight): the places' buildings
+  town: KANTARA_TOWN,
   // THE MINIMAP's ground, by paint layer (tools/algKantaraLevel.mjs).
   minimap: { layers: { 0: [196, 124, 80], 1: [176, 98, 60], 2: [218, 172, 122], 3: [120, 110, 70], 4: [160, 152, 140], 5: [176, 104, 66], 6: [214, 184, 150] } },
 };

@@ -31,6 +31,7 @@ const MULE = [[-12, 92], [8, 60], [30, 22], [44, -8], [40, -40], [28, -72], [20,
 const MULE_HAMLET = [[8, 60], [-20, 40], [-52, 22], [-72, 14]];
 
 export const MAP = {
+  postSign: "Poste de la vallée",   // (the board over its gate, in French whatever the language — 2026-11-02)
   id: "maquis",
   name: t("Le maquis — instruction FLN"),
   level: "/levels/alg-maquis.v3proj",

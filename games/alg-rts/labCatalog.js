@@ -96,6 +96,7 @@ export const META = {
   projBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   helipadBlender: { side: "fr", kind: "base", maps: ALL, status: "verdict" },
   posteBlender: { side: "fr", kind: "base", maps: ALL, status: "verdict" },
+  bordjSaharien: { side: "fr", kind: "base", maps: ["kantara"], status: "verdict" },
   posteAvanceBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
   secoursBlender: { side: "fr", kind: "defense", maps: ALL, status: "verdict" },
 };
@@ -136,7 +137,7 @@ export const PLACED = {
   "kit:mirador": "miradorBlender", "kit:gear": "miradorBlender", "kit:barbed": "barbelesBlender", "kit:mg": "nidBlender", "kit:gun": "nidBlender",
   "kit:mortar": "mortierBlender", "kit:m81": "mortierBlender", "kit:point": "fortBlender", "kit:sltower": "projBlender", "kit:helipad": "helipadBlender", "kit:lamp": "projBlender",
   "kit:fwdradio": "posteAvanceBlender", "kit:aidtent": "secoursBlender", "kit:aidmark": "secoursBlender", "kit:refuge": "refugeBlender", "kit:infirm": "infirmBlender",
-  "kit:post": "posteBlender", "kit:lookout": "lookout", "kit:minemark": "mineMarker", "kit:farm": "farmstead", "kit:sas": "sasPost",
+  "kit:post": "posteBlender", "kit:saharien": "bordjSaharien", "kit:lookout": "lookout", "kit:minemark": "mineMarker", "kit:farm": "farmstead", "kit:sas": "sasPost",
   ...Object.fromEntries(["well", "trough", "jars", "jars2", "jars3", "bench", "oven", "wood", "hives"].map((t) => [`kit:${t}`, "villagePropsBlender"])),
   "haystack": "haystack",   // (the straw-card stack — algHaystack: the villages' stackyards, the pens')
   ...Object.fromEntries(["wide", "tall", "spill", "chunkslab", "chunkstone", "chunkblock", "chunkbeam"].map((t) => [`kit:${t}`, "rubbleKit"])),
@@ -167,7 +168,7 @@ export const NAMES = {
   ksarNouveau: "Ksar", campFln: "FLN camp",
     pointBlender_fuel: "Requisition point: fuel", pointBlender_mun: "Requisition point: munitions",
   sangarBlender: "Sangar",   cacheBlender: "Arms cache",   ecranBlender: "Ambush screen",   miradorBlender: "Mirador",   nidBlender: "MG nest",
-  mortierBlender: "Mortar pit", fortBlender: "Fortified point", projBlender: "Searchlight tower", posteBlender: "French post", posteAvanceBlender: "Forward post", refugeBlender: "FLN refuge", infirmBlender: "FLN infirmary", secoursBlender: "Aid station",
+  mortierBlender: "Mortar pit", fortBlender: "Fortified point", projBlender: "Searchlight tower", posteBlender: "French post", bordjSaharien: "Saharan bordj (El Kantara)", posteAvanceBlender: "Forward post", refugeBlender: "FLN refuge", infirmBlender: "FLN infirmary", secoursBlender: "Aid station",
   barbelesBlender: "Barbed wire", };
 const WORDS = [
   ["(LE JEU)", "(THE GAME)"], ["(KIT DU JEU)", "(GAME KIT)"], ["NOUVEAU STANDARD", "NEW STANDARD"], ["NOUVELLE", "NEW"], ["NOUVEAU", "NEW"],

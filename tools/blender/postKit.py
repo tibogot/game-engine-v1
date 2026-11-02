@@ -78,6 +78,44 @@ MATDEF.update({
 })
 def LOW(): return drystone.LOW
 
+# THE STYLE (2026-11-02, El Kantara — you: "ok lets continue"): the post's own (the Aurès: lime render over limestone
+# rubble) or the SAHARAN bordj ("saharien": ochre banco on a dark earth footing, stepped merlons crowning the walls, the
+# towers and the gate, the towers battered with their timber beam-ends out, the gate's arch framed in whitewash). The
+# same layout: the game's data (gate, tower guns, sandbag slots, flag, cover) unchanged.
+STYLES = {
+    "post": dict(wall="renderPlain", foot="rubble", cope="poCoping", sahara=False),
+    "saharien": dict(wall="banco", foot="bancoFoot", cope="bancoCope", sahara=True),
+}
+S_ = dict(STYLES["post"])
+def banco(base, dark):
+    def f(nb):
+        c = nb.mix(nb.noise(1.3, 4), srgb(base), srgb(dark))
+        c = nb.mix(nb.mr(nb.noise(5.5, 5), 0.56, 0.7), c, nb.scale(c, 0.86))                       # the mud's patches
+        c = nb.mix(nb.mr(nb.gy, 1.4, 0.1), c, nb.scale(c, 0.78))                                     # the rain's run at the foot
+        return dust(nb, c, 0.6, 0.7)
+    return f
+MATDEF.update({"banco": (0.95, banco(0xc39466, 0xa97a50)), "bancoFoot": (0.95, banco(0x8a6646, 0x6e5038)),
+               "bancoCope": (0.95, banco(0xb58658, 0x9c6e48)), "bancoLime": (0.9, flat(srgb(0xe4ddd0), 0.3)),
+               "bancoBeam": (0.85, wood(0x5a4630))})
+
+def merlons(K, nm, pts, y, t, w=0.42, h=0.55, gap=0.42):
+    """THE SAHARAN CROWN: stepped merlons along a top edge — pts the edge's two ends (x, z) on the wall's centre line,
+    y its top; each a block and a pointed cap over it."""
+    (ax, az), (bx, bz) = pts
+    L = math.hypot(bx - ax, bz - az); dx, dz = (bx - ax) / L, (bz - az) / L
+    n = max(1, int((L + gap) // (w + gap)))
+    off = (L - (n * w + (n - 1) * gap)) / 2
+    for k in range(n):
+        u0 = off + k * (w + gap); u1 = u0 + w
+        p0 = (ax + dx * u0, az + dz * u0); p1 = (ax + dx * u1, az + dz * u1)
+        th = 0.22
+        nx, nz = -dz * th, dx * th
+        base = [(p[0] + sx * nx, yy, p[1] + sx * nz) for p in (p0, p1) for sx in (-1, 1) for yy in (y, y + h * 0.6)]
+        hull(K, f"{nm}M{k}", base, S_["wall"], t, 0.012)
+        cx, cz = (p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2
+        cap = [(p[0] + sx * nx * 0.9, y + h * 0.6 - 0.02, p[1] + sx * nz * 0.9) for p in (p0, p1) for sx in (-1, 1)] + [(cx, y + h, cz)]   # (2 cm into its block: never a shared face)
+        hull(K, f"{nm}C{k}", cap, S_["cope"], t)
+
 # ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────
 def hull(K, nm, pts, mat, t, bev=0.0):
     bm = bmesh.new()
@@ -140,21 +178,24 @@ def walls(K, R, state):
                 u = a
                 while u < b - 0.05:
                     w = min(b - u, R.uniform(1.5, 2.6)); h = R.uniform(0.7, 2.4) if R.random() < 0.75 else R.uniform(2.4, 3.1)
-                    W.box(K, f"Foot{side}{si}{u:.1f}", u, u + w, 0, min(1.0, h), -T / 2 - 0.04, T / 2 + 0.04, "rubble", t0)
-                    if h > 1.0: W.box(K, f"Wall{side}{si}{u:.1f}", u + 0.02, u + w - 0.02, 0.98, h, -T / 2, T / 2, "renderPlain", t0 + 0.05)
+                    W.box(K, f"Foot{side}{si}{u:.1f}", u, u + w, 0, min(1.0, h), -T / 2 - 0.04, T / 2 + 0.04, S_["foot"], t0)
+                    if h > 1.0: W.box(K, f"Wall{side}{si}{u:.1f}", u + 0.02, u + w - 0.02, 0.98, h, -T / 2, T / 2, S_["wall"], t0 + 0.05)
                     u += w
                 rubbleRun(K, R, W, a, b, f"{side}{si}")
                 continue
-            W.box(K, f"Foot{side}{si}", a, b, 0, 1.0, -T / 2 - 0.04, T / 2 + 0.04, "rubble", t0, 0.03)
-            W.box(K, f"Wall{side}{si}", a, b, 0.98, H, -T / 2, T / 2, "renderPlain", t0 + 0.05, 0.02)
-            W.box(K, f"Walk{side}{si}", a + 0.03, b - 0.03, 0, H - 1.25 - (0.03 if side in ("left", "right") else 0), T / 2, T / 2 + 1.0, "rubble", t0 + 0.04, 0.02)
+            W.box(K, f"Foot{side}{si}", a, b, 0, 1.0, -T / 2 - 0.04, T / 2 + 0.04, S_["foot"], t0, 0.03)
+            W.box(K, f"Wall{side}{si}", a, b, 0.98, H, -T / 2, T / 2, S_["wall"], t0 + 0.05, 0.02)
+            W.box(K, f"Walk{side}{si}", a + 0.03, b - 0.03, 0, H - 1.25 - (0.03 if side in ("left", "right") else 0), T / 2, T / 2 + 1.0, S_["foot"], t0 + 0.04, 0.02)
             # the parapet and its coping (damaged: chipped in places)
             u = a
             while u < b - 0.05:
                 w = min(b - u, 2.2)
                 if not (state == "damaged" and R.random() < 0.18):
-                    W.box(K, f"Par{side}{si}{u:.1f}", u, u + w, H - 0.01, H + 0.72, -T / 2, T / 2, "renderPlain", t0 + 0.08, 0.015)
-                    W.box(K, f"Cope{side}{si}{u:.1f}", u - 0.01, u + w + 0.01, H + 0.72, H + 0.82, -T / 2 - 0.06, T / 2 + 0.06, "poCoping", t0 + 0.09, 0.01)
+                    W.box(K, f"Par{side}{si}{u:.1f}", u, u + w, H - 0.01, H + 0.72, -T / 2, T / 2, S_["wall"], t0 + 0.08, 0.015)
+                    W.box(K, f"Cope{side}{si}{u:.1f}", u - 0.01, u + w + 0.01, H + 0.72, H + 0.82, -T / 2 - 0.06, T / 2 + 0.06, S_["cope"], t0 + 0.09, 0.01)
+                    if S_["sahara"] and not LOW():
+                        a0, a1 = W.P(u + 0.15, 0, 0), W.P(u + w - 0.15, 0, 0)
+                        merlons(K, f"Mer{side}{si}{u:.1f}", ((a0[0], a0[2]), (a1[0], a1[2])), H + 0.81, t0 + 0.1)
                 u += w
             if not LOW():
                 ns = max(1, round((b - a) / 1.6))
@@ -168,9 +209,9 @@ def walls(K, R, state):
             nb = math.floor((b - a) / 4.4)
             for k in range(1, nb + 1):
                 bu = a + (b - a) * k / (nb + 1)
-                W.box(K, f"ButA{side}{si}{k}", bu - 0.35, bu + 0.35, 0, 1.3, -T / 2 - 0.58, -T / 2 + 0.02, "rubble", t0 + 0.02, 0.03)
-                W.box(K, f"ButB{side}{si}{k}", bu - 0.28, bu + 0.28, 1.25, H + 0.15, -T / 2 - 0.3, -T / 2 + 0.02, "renderPlain", t0 + 0.06, 0.02)
-                W.box(K, f"ButC{side}{si}{k}", bu - 0.31, bu + 0.31, H + 0.15, H + 0.23, -T / 2 - 0.34, -T / 2 + 0.03, "poCoping", t0 + 0.07)
+                W.box(K, f"ButA{side}{si}{k}", bu - 0.35, bu + 0.35, 0, 1.3, -T / 2 - 0.58, -T / 2 + 0.02, S_["foot"], t0 + 0.02, 0.03)
+                W.box(K, f"ButB{side}{si}{k}", bu - 0.28, bu + 0.28, 1.25, H + 0.15, -T / 2 - 0.3, -T / 2 + 0.02, S_["wall"], t0 + 0.06, 0.02)
+                W.box(K, f"ButC{side}{si}{k}", bu - 0.31, bu + 0.31, H + 0.15, H + 0.23, -T / 2 - 0.34, -T / 2 + 0.03, S_["cope"], t0 + 0.07)
             if state == "damaged" and side == "right" and si == 1:
                 rubbleRun(K, R, W, 1.6, 4.8, "breach", heap=True)
     # the corner piers
@@ -178,8 +219,8 @@ def walls(K, R, state):
         for sz in (-1, 1):
             x, z = sx * (HL - T / 2), sz * (HL - T / 2)
             top = H if state != "ruin" else R.uniform(1.2, 2.6)
-            box(K, f"PierF{sx}{sz}", x - T / 2 - 0.02, x + T / 2 + 0.02, 0, 1.0, z - T / 2 - 0.02, z + T / 2 + 0.02, "rubble", 0.06, 0.03)
-            box(K, f"Pier{sx}{sz}", x - T / 2, x + T / 2, 0.98, top, z - T / 2, z + T / 2, "renderPlain", 0.12, 0.02)
+            box(K, f"PierF{sx}{sz}", x - T / 2 - 0.02, x + T / 2 + 0.02, 0, 1.0, z - T / 2 - 0.02, z + T / 2 + 0.02, S_["foot"], 0.06, 0.03)
+            box(K, f"Pier{sx}{sz}", x - T / 2, x + T / 2, 0.98, top, z - T / 2, z + T / 2, S_["wall"], 0.12, 0.02)
 
 def rubbleRun(K, R, W, a, b, nm, heap=False):
     """Fallen stone and render at a wall's foot, both sides (a heap at a breach)."""
@@ -188,7 +229,7 @@ def rubbleRun(K, R, W, a, b, nm, heap=False):
         u = R.uniform(a, b); v = R.choice((-1, 1)) * R.uniform(0.5, 1.6)
         s = R.uniform(0.25, 0.55) * (1.6 if heap else 1.0)
         p = W.P(u, 0, v)
-        tag(K.lump(f"Rub{nm}{k}", (p[0], s * 0.3, p[2]), (s, s * 0.55, s * 0.8), "rubble" if R.random() < 0.6 else "renderPlain", "h", seed=R.randint(0, 99), rough=0.35, sub=2 if not LOW() else 1), 0.3)
+        tag(K.lump(f"Rub{nm}{k}", (p[0], s * 0.3, p[2]), (s, s * 0.55, s * 0.8), S_["foot"] if R.random() < 0.6 else S_["wall"], "h", seed=R.randint(0, 99), rough=0.35, sub=2 if not LOW() else 1), 0.3)
 
 # ── the towers ──────────────────────────────────────────────────────────────────────────────────────────────────
 def tower(K, R, x, z, idx, state):
@@ -196,13 +237,23 @@ def tower(K, R, x, z, idx, state):
     sx, sz = (1 if x > 0 else -1), (1 if z > 0 else -1)
     top = TH if state != "ruin" else R.uniform(2.6, 3.6)
     # the talus (a stone skirt, sloped) and the body
-    hull(K, f"Talus{idx}", [(x + a * (W2 + 0.55), 0, z + b * (W2 + 0.55)) for a in (-1, 1) for b in (-1, 1)] + [(x + a * (W2 + 0.02), 1.8, z + b * (W2 + 0.02)) for a in (-1, 1) for b in (-1, 1)], "rubble", 0.3 + idx * 0.05, 0.03)
-    box(K, f"TBody{idx}", x - W2, x + W2, 1.78, top, z - W2, z + W2, "renderPlain", 0.33 + idx * 0.05, 0.02)
+    hull(K, f"Talus{idx}", [(x + a * (W2 + 0.55), 0, z + b * (W2 + 0.55)) for a in (-1, 1) for b in (-1, 1)] + [(x + a * (W2 + 0.02), 1.8, z + b * (W2 + 0.02)) for a in (-1, 1) for b in (-1, 1)], S_["foot"], 0.3 + idx * 0.05, 0.03)
+    if S_["sahara"]:   # battered: 0.35 m wider each side at its foot
+        hull(K, f"TBody{idx}", [(x + a * (W2 + 0.35), 1.78, z + b * (W2 + 0.35)) for a in (-1, 1) for b in (-1, 1)] + [(x + a * W2, top, z + b * W2) for a in (-1, 1) for b in (-1, 1)], S_["wall"], 0.33 + idx * 0.05, 0.02)
+        if state != "ruin" and not LOW():
+            for k, (nx, nz) in enumerate(((0, -1), (0, 1), (-1, 0), (1, 0))):
+                for yb in (3.3, TH - 0.6):
+                    inset = 0.35 * (1 - (yb - 1.78) / (top - 1.78))
+                    for o in (-1.4, 0.0, 1.4):
+                        cx, cz = x + nx * (W2 + inset) + (o if nz else 0), z + nz * (W2 + inset) + (o if nx else 0)
+                        rod(K, f"TBeam{idx}{k}{yb}{o}", (cx - nx * 0.3, yb, cz - nz * 0.3), (cx + nx * 0.42, yb, cz + nz * 0.42), 0.07, "bancoBeam", 0.36, 6)
+    else:
+        box(K, f"TBody{idx}", x - W2, x + W2, 1.78, top, z - W2, z + W2, S_["wall"], 0.33 + idx * 0.05, 0.02)
     if state == "ruin":
         for k in range(6 if not LOW() else 2):
-            tag(K.lump(f"TRub{idx}{k}", (x + sx * R.uniform(2.5, 4.5), 0.3, z + sz * R.uniform(-2, 3)), (0.6, 0.35, 0.5), "rubble", "h", seed=k + idx * 9, rough=0.35, sub=1), 0.4)
+            tag(K.lump(f"TRub{idx}{k}", (x + sx * R.uniform(2.5, 4.5), 0.3, z + sz * R.uniform(-2, 3)), (0.6, 0.35, 0.5), S_["foot"], "h", seed=k + idx * 9, rough=0.35, sub=1), 0.4)
         return
-    box(K, f"TString{idx}", x - W2 - 0.12, x + W2 + 0.12, TH - 0.14, TH + 0.04, z - W2 - 0.12, z + W2 + 0.12, "poCoping", 0.36 + idx * 0.05, 0.01)
+    box(K, f"TString{idx}", x - W2 - 0.12, x + W2 + 0.12, TH - 0.14, TH + 0.04, z - W2 - 0.12, z + W2 + 0.12, S_["cope"], 0.36 + idx * 0.05, 0.01)
     box(K, f"TCorbel{idx}", x - W2 - 0.25, x + W2 + 0.25, TH - 0.05, TH + 0.17, z - W2 - 0.25, z + W2 + 0.25, "poConcrete", 0.37 + idx * 0.05, 0.01)
     box(K, f"TRoof{idx}", x - W2 + 0.2, x + W2 - 0.2, TH - 0.01, TH + 0.12, z - W2 + 0.2, z + W2 - 0.2, "poConcrete", 0.37 + idx * 0.05)
     PW, ph = TW + 0.4, 0.72
@@ -211,15 +262,18 @@ def tower(K, R, x, z, idx, state):
         side = dx != 0; ln = PW - 0.66 if side else PW
         px, pz = x + dx * (PW / 2 - 0.16), z + dz * (PW / 2 - 0.16)
         hx, hz = (0.16, ln / 2) if side else (ln / 2, 0.16)
-        box(K, f"TPar{idx}{k}", px - hx, px + hx, TH + 0.17, TH + 0.17 + ph, pz - hz, pz + hz, "renderPlain", 0.4 + idx * 0.05, 0.015)
-        box(K, f"TCope{idx}{k}", px - hx - 0.05, px + hx + 0.05, TH + 0.17 + ph, TH + 0.27 + ph, pz - hz - 0.05, pz + hz + 0.05, "poCoping", 0.41 + idx * 0.05)
+        box(K, f"TPar{idx}{k}", px - hx, px + hx, TH + 0.17, TH + 0.17 + ph, pz - hz, pz + hz, S_["wall"], 0.4 + idx * 0.05, 0.015)
+        box(K, f"TCope{idx}{k}", px - hx - 0.05, px + hx + 0.05, TH + 0.17 + ph, TH + 0.27 + ph, pz - hz - 0.05, pz + hz + 0.05, S_["cope"], 0.41 + idx * 0.05)
+        if S_["sahara"] and not LOW():
+            ends = ((px, pz - hz + 0.1), (px, pz + hz - 0.1)) if side else ((px - hx + 0.1, pz), (px + hx - 0.1, pz))
+            merlons(K, f"TMer{idx}{k}", ends, TH + 0.26 + ph, 0.42 + idx * 0.05, w=0.38, h=0.62, gap=0.36)
         if not LOW():
             for o in (-1.2, 0.0, 1.2):
                 ox, oz = (0, o) if side else (o, 0)
                 box(K, f"TSlit{idx}{k}{o}", px + ox - (0.17 if side else 0.05), px + ox + (0.17 if side else 0.05), TH + 0.37, TH + 0.67, pz + oz - (0.05 if side else 0.17), pz + oz + (0.05 if side else 0.17), "poSlit", 0.41)
     if state == "damaged" and idx == 1:
         for k in range(4 if not LOW() else 1):
-            tag(K.lump(f"TRub{idx}{k}", (x + sx * R.uniform(2.8, 4.2), 0.25, z + sz * R.uniform(-1.5, 2.5)), (0.45, 0.3, 0.4), "renderPlain", "h", seed=k, rough=0.35, sub=1), 0.45)
+            tag(K.lump(f"TRub{idx}{k}", (x + sx * R.uniform(2.8, 4.2), 0.25, z + sz * R.uniform(-1.5, 2.5)), (0.45, 0.3, 0.4), S_["wall"], "h", seed=k, rough=0.35, sub=1), 0.45)
     # the loopholes, two storeys
     if not LOW():
         for k, (nx, nz) in enumerate(((0, -1), (0, 1), (-1, 0), (1, 0))):
@@ -241,31 +295,42 @@ def gatehouse(K, R, state):
     if state == "ruin":
         for sx in (-1, 1):   # the two piers, broken; the arch down
             x0, x1 = sorted((sx * (GATE_W / 2 + 0.03), sx * GW / 2))
-            box(K, f"GPier{sx}", x0, x1, 0, R.uniform(2.0, 3.4), z0, z1, "renderPlain", 0.45, 0.02)
+            box(K, f"GPier{sx}", x0, x1, 0, R.uniform(2.0, 3.4), z0, z1, S_["wall"], 0.45, 0.02)
         for k in range(5 if not LOW() else 2):
             sx = R.choice((-1, 1))
-            tag(K.lump(f"GRub{k}", (sx * R.uniform(2.2, 4.0), 0.3, z0 - R.uniform(0.3, 1.8)), (0.6, 0.4, 0.5), "renderPlain", "h", seed=k + 40, rough=0.35, sub=1), 0.46)
+            tag(K.lump(f"GRub{k}", (sx * R.uniform(2.2, 4.0), 0.3, z0 - R.uniform(0.3, 1.8)), (0.6, 0.4, 0.5), S_["wall"], "h", seed=k + 40, rough=0.35, sub=1), 0.46)
         return
-    gh = box(K, "Gate", -GW / 2, GW / 2, 0, GH, z0, z1, "renderPlain", 0.45, 0.02)
-    K.boolean(gh, K.arch(-GATE_W / 2, GATE_W / 2, -0.1, 2.7, z0 - 0.2, z1 + 0.2, "renderPlain"))
+    gh = box(K, "Gate", -GW / 2, GW / 2, 0, GH, z0, z1, S_["wall"], 0.45, 0.02)
+    K.boolean(gh, K.arch(-GATE_W / 2, GATE_W / 2, -0.1, 2.7, z0 - 0.2, z1 + 0.2, S_["wall"]))
     for sx in (-1, 1):
         sw = (GW + 0.1 - GATE_W) / 2 - 0.03
         x0 = sx * (GATE_W / 2 + 0.03); x1 = x0 + sx * sw
-        box(K, f"GFoot{sx}", min(x0, x1), max(x0, x1), 0, 1.04, z0 - 0.05, z1 + 0.05, "rubble", 0.44, 0.02)
+        box(K, f"GFoot{sx}", min(x0, x1), max(x0, x1), 0, 1.04, z0 - 0.05, z1 + 0.05, S_["foot"], 0.44, 0.02)
         px = sx * (GATE_W / 2 + 0.55)
-        box(K, f"Pilaster{sx}", px - 0.25, px + 0.25, 1.02, GH - 0.06, z0 - 0.18, z0 + 0.02, "renderPlain", 0.47, 0.015)
+        box(K, f"Pilaster{sx}", px - 0.25, px + 0.25, 1.02, GH - 0.06, z0 - 0.18, z0 + 0.02, S_["wall"], 0.47, 0.015)
         box(K, f"GSlit{sx}", sx * (GW / 2 - 0.6) - 0.05, sx * (GW / 2 - 0.6) + 0.05, GH + 0.24, GH + 0.66, z0 - 0.015, z0 + 0.03, "poSlit", 0.48)
     box(K, "Threshold", -GATE_W / 2 + 0.02, GATE_W / 2 - 0.02, 0.0, 0.1, z0 - 0.03, z1 + 0.03, "poConcrete", 0.46)
     box(K, "GCorbelBand", -GW / 2 - 0.15, GW / 2 + 0.15, GH - 0.08, GH + 0.08, z0 - 0.15, z1 + 0.15, "poConcrete", 0.47)
     if state == "damaged":
-        box(K, "GPar", -GW / 2, GW / 2 - 1.6, GH, GH + 0.9, z0 + 0.05, z1 - 0.05, "renderPlain", 0.48, 0.015)
+        box(K, "GPar", -GW / 2, GW / 2 - 1.6, GH, GH + 0.9, z0 + 0.05, z1 - 0.05, S_["wall"], 0.48, 0.015)
         for k in range(3):
-            tag(K.lump(f"GRub{k}", (R.uniform(1.5, 3.5), 0.25, z0 - R.uniform(0.4, 1.4)), (0.4, 0.25, 0.35), "renderPlain", "h", seed=k + 50, rough=0.35, sub=1), 0.48)
+            tag(K.lump(f"GRub{k}", (R.uniform(1.5, 3.5), 0.25, z0 - R.uniform(0.4, 1.4)), (0.4, 0.25, 0.35), S_["wall"], "h", seed=k + 50, rough=0.35, sub=1), 0.48)
         return
-    box(K, "GPar", -GW / 2, GW / 2, GH, GH + 0.9, z0 + 0.05, z1 - 0.05, "renderPlain", 0.48, 0.015)
-    box(K, "GCope", -GW / 2 - 0.02, GW / 2 + 0.02, GH + 0.9, GH + 1.0, z0 + 0.04, z1 - 0.04, "poCoping", 0.49)
+    box(K, "GPar", -GW / 2, GW / 2, GH, GH + 0.9, z0 + 0.05, z1 - 0.05, S_["wall"], 0.48, 0.015)
+    box(K, "GCope", -GW / 2 - 0.02, GW / 2 + 0.02, GH + 0.9, GH + 1.0, z0 + 0.04, z1 - 0.04, S_["cope"], 0.49)
+    if S_["sahara"]:
+        if not LOW(): merlons(K, "GMer", ((-GW / 2 + 0.2, z0 + 0.7), (GW / 2 - 0.2, z0 + 0.7)), GH + 0.99, 0.49, w=0.4, h=0.7, gap=0.34)
+        # the arch's whitewashed frame: a band round the opening, 3 cm proud of the face
+        for k in range(13):
+            a0, a1 = math.pi * k / 13, math.pi * (k + 1) / 13; r0, r1 = GATE_W / 2 + 0.02, GATE_W / 2 + 0.26   # (clear of the pilasters at 2.0: their back faces were its back face — z-fighting)
+            pts = [(r * math.cos(a), 2.7 + r * math.sin(a), zz) for a in (a0, a1) for r in (r0, r1) for zz in (z0 - 0.04, z0 + 0.012)]
+            hull(K, f"GLime{k}", pts, "bancoLime", 0.48)
+        for sx in (-1, 1):
+            x0, x1 = sorted((sx * (GATE_W / 2 + 0.02), sx * (GATE_W / 2 + 0.26)))
+            box(K, f"GLimeJ{sx}", x0, x1, 0.12, 2.7, z0 - 0.04, z0 + 0.012, "bancoLime", 0.48)
+        return
     bz = z0 - 0.32
-    box(K, "Bretech", -0.9, 0.9, GH - 0.65, GH + 0.35, bz - 0.3, bz + 0.3, "renderPlain", 0.49, 0.015)
+    box(K, "Bretech", -0.9, 0.9, GH - 0.65, GH + 0.35, bz - 0.3, bz + 0.3, S_["wall"], 0.49, 0.015)
     for k, sx in enumerate((-1, 0, 1)):
         box(K, f"BCorbel{k}", sx * 0.75 - 0.08, sx * 0.75 + 0.08, GH - 0.95, GH - 0.65, bz - 0.21, bz + 0.29, "poConcrete", 0.49)
     box(K, "BSlit", -0.06, 0.06, GH - 0.29, GH + 0.09, bz - 0.315, bz - 0.27, "poSlit", 0.49)
@@ -276,8 +341,8 @@ def block(K, R, b, state, nm):
     t0 = 0.55 if nm == "Bar" else 0.6
     ruin = state == "ruin"
     top = h if not ruin else None
-    box(K, f"{nm}Foot", x - w / 2 - 0.04, x + w / 2 + 0.04, 0, 0.6, z - d / 2 - 0.04, z + d / 2 + 0.04, "rubble", t0, 0.02)
-    body = box(K, f"{nm}Body", x - w / 2, x + w / 2, 0.58, h, z - d / 2, z + d / 2, "renderPlain", t0 + 0.02, 0.02)
+    box(K, f"{nm}Foot", x - w / 2 - 0.04, x + w / 2 + 0.04, 0, 0.6, z - d / 2 - 0.04, z + d / 2 + 0.04, S_["foot"], t0, 0.02)
+    body = box(K, f"{nm}Body", x - w / 2, x + w / 2, 0.58, h, z - d / 2, z + d / 2, S_["wall"], t0 + 0.02, 0.02)
     # the openings, cut through the door face; a dark interior behind each
     fz = z + side * d / 2
     slots = b["doors"] + b["windows"]
@@ -286,12 +351,12 @@ def block(K, R, b, state, nm):
         sxp = x - w / 2 + w * (k + 0.5) / slots
         isDoor = b["doors"] > 0 and k % per == per // 2
         if isDoor:
-            K.boolean(body, K.cutter(sxp - 0.55, sxp + 0.55, 0.5, 2.25, fz - 0.5, fz + 0.5, "renderPlain"))
+            K.boolean(body, K.cutter(sxp - 0.55, sxp + 0.55, 0.5, 2.25, fz - 0.5, fz + 0.5, S_["wall"]))
             box(K, f"{nm}DoorLeaf{k}", sxp - 0.55, sxp + 0.55, 0.6, 2.25, fz - side * 0.22, fz - side * 0.17, "poDoor", t0 + 0.05)
             box(K, f"{nm}Lintel{k}", sxp - 0.72, sxp + 0.72, 2.25, 2.42, fz - side * 0.02, fz + side * 0.07, "poConcrete", t0 + 0.05)
             box(K, f"{nm}Step{k}", sxp - 0.7, sxp + 0.7, 0.0, 0.3, fz, fz + side * 0.45, "poConcrete", t0 + 0.05)
         else:
-            K.boolean(body, K.cutter(sxp - 0.45, sxp + 0.45, 1.2, 2.3, fz - 0.5, fz + 0.5, "renderPlain"))
+            K.boolean(body, K.cutter(sxp - 0.45, sxp + 0.45, 1.2, 2.3, fz - 0.5, fz + 0.5, S_["wall"]))
             box(K, f"{nm}Dark{k}", sxp - 0.45, sxp + 0.45, 1.2, 2.3, fz - side * 0.3, fz - side * 0.26, "poSlit", t0 + 0.04)
             box(K, f"{nm}Sill{k}", sxp - 0.55, sxp + 0.55, 1.12, 1.22, fz - side * 0.02, fz + side * 0.1, "poConcrete", t0 + 0.04)
             if not ruin:
@@ -299,11 +364,11 @@ def block(K, R, b, state, nm):
                     if R.random() < 0.12 or (state == "damaged" and R.random() < 0.4): continue
                     box(K, f"{nm}Shut{k}{s}", sxp + s * 0.66 - 0.18, sxp + s * 0.66 + 0.18, 1.2, 2.3, fz + side * 0.01, fz + side * 0.05, "poShutter", t0 + 0.06)
     if ruin:
-        K.boolean(body, K.skyline(x - w / 2 - 1, x + w / 2 + 1, z - d / 2 - 1, z + d / 2 + 1, h * 0.55, h * 0.3, seed=len(nm) * 7, mat="rubble"))
+        K.boolean(body, K.skyline(x - w / 2 - 1, x + w / 2 + 1, z - d / 2 - 1, z + d / 2 + 1, h * 0.55, h * 0.3, seed=len(nm) * 7, mat=S_["foot"]))
         # hollowed: the roof gone, the floor inside heaped
-        K.boolean(body, K.cutter(x - w / 2 + 0.35, x + w / 2 - 0.35, 0.65, h + 2, z - d / 2 + 0.35, z + d / 2 - 0.35, "rubble"))
+        K.boolean(body, K.cutter(x - w / 2 + 0.35, x + w / 2 - 0.35, 0.65, h + 2, z - d / 2 + 0.35, z + d / 2 - 0.35, S_["foot"]))
         for k in range(5 if not LOW() else 2):
-            tag(K.lump(f"{nm}Rub{k}", (x + R.uniform(-w / 2 + 1, w / 2 - 1), 0.6, z + R.uniform(-d / 2 + 1, d / 2 - 1)), (0.9, 0.5, 0.8), "rubble", "h", seed=k + 70, rough=0.35, sub=1), t0 + 0.1)
+            tag(K.lump(f"{nm}Rub{k}", (x + R.uniform(-w / 2 + 1, w / 2 - 1), 0.6, z + R.uniform(-d / 2 + 1, d / 2 - 1)), (0.9, 0.5, 0.8), S_["foot"], "h", seed=k + 70, rough=0.35, sub=1), t0 + 0.1)
         tag(K.lump(f"{nm}Beam", (x, 0.9, z), (w * 0.3, 0.12, 0.15), "poChar", "h", seed=3, rough=0.1, sub=1), t0 + 0.1)
         return
     # the flat roof: its slab, the parapet (damaged barracks: fallen in at its right end)
@@ -313,11 +378,11 @@ def block(K, R, b, state, nm):
     if fallen:
         hull(K, f"{nm}SlabFall", [(x1r, h + 0.2, z - d / 2), (x1r, h, z - d / 2), (x + w / 2, 0.9, z - d / 2), (x + w / 2, 0.7, z - d / 2),
                                    (x1r, h + 0.2, z + d / 2), (x1r, h, z + d / 2), (x + w / 2, 0.9, z + d / 2), (x + w / 2, 0.7, z + d / 2)], "poConcrete", t0 + 0.08)
-        K.boolean(body, K.breach((x + w / 2 - 1.8, h - 0.4, z + side * d / 2), (1.6, 1.0, 1.2), seed=5, mat="rubble"))
+        K.boolean(body, K.breach((x + w / 2 - 1.8, h - 0.4, z + side * d / 2), (1.6, 1.0, 1.2), seed=5, mat=S_["foot"]))
     for s in (-1, 1):
-        box(K, f"{nm}ParZ{s}", x - w / 2 - 0.15, x1r if s == side or not fallen else x1r, h + 0.2, h + 0.6, z + s * (d / 2 + 0.05) - 0.1, z + s * (d / 2 + 0.05) + 0.1, "renderPlain", t0 + 0.09, 0.01)
+        box(K, f"{nm}ParZ{s}", x - w / 2 - 0.15, x1r if s == side or not fallen else x1r, h + 0.2, h + 0.6, z + s * (d / 2 + 0.05) - 0.1, z + s * (d / 2 + 0.05) + 0.1, S_["wall"], t0 + 0.09, 0.01)
     for s in ((-1,) if fallen else (-1, 1)):
-        box(K, f"{nm}ParX{s}", x + s * (w / 2 + 0.02) - 0.1, x + s * (w / 2 + 0.02) + 0.1, h + 0.2, h + 0.57, z - d / 2 - 0.05 + 0.1, z + d / 2 + 0.05 - 0.1, "renderPlain", t0 + 0.09, 0.01)
+        box(K, f"{nm}ParX{s}", x + s * (w / 2 + 0.02) - 0.1, x + s * (w / 2 + 0.02) + 0.1, h + 0.2, h + 0.57, z - d / 2 - 0.05 + 0.1, z + d / 2 + 0.05 - 0.1, S_["wall"], t0 + 0.09, 0.01)
     ry = h + 0.2
     # the roof in use
     ex = x + (w / 2 - 1.4) * (-1 if nm == "Bar" else 1)
@@ -460,6 +525,9 @@ def wire(K, R, state):
         for k in range(n + 1):
             tt = k / n
             if state == "ruin" and R.random() < 0.6: continue
+            # (a corner shared with the run before — or, the last run's end, the first's start — has its picket already:
+            # two in one place z-fought, the coplanar gate, 2026-11-02)
+            if (k == 0 and ri >= 2) or (k == n and ri == len(runs) - 1): continue
             px, pz = x0 + (x1 - x0) * tt, z0 + (z1 - z0) * tt
             lean = R.uniform(-0.25, 0.25) if state != "intact" else R.uniform(-0.04, 0.04)
             rod(K, f"Pick{ri}{k}", (px, -0.05, pz), (px + lean, 1.3, pz + lean * 0.5), 0.04, "poSteel", 0.97, 4)
@@ -474,6 +542,7 @@ def wire(K, R, state):
                 rod(K, f"X{ri}{k}b", (ax, 1.25, az), (bx, 0.12, bz), 0.011, "poSteel", 0.98, 3)
 
 def buildPost(K, name, spec, state, seed, far=False):
+    S_.clear(); S_.update(STYLES[spec.get("style", "post")])
     drystone.setLow(K, far)
     R = random.Random(seed)
     walls(K, random.Random(seed + 1), state)
@@ -489,6 +558,7 @@ def buildPost(K, name, spec, state, seed, far=False):
 
 farPost = lambda K, n, s, st, sd: buildPost(K, n, s, st, sd, far=True)
 TYPES = {"post": dict(builder=buildPost, farBuilder=farPost, atlas=4096, normalAtlas=2048, islandMargin=0.0005, aoDist=1.2, smoothAngle=35, weighted=True, normals=True)}
+TYPES["saharien"] = dict(TYPES["post"], style="saharien")
 exported = buildKit(TYPES, MATDEF, "postkit.glb", prefix="Bordj", seed0=1957, colors=True)
 
 scn = bpy.context.scene

@@ -46,6 +46,7 @@ const HAMLET_HOUSES = [["haute", "damaged", -165], ["cour", "intact", -128], ["m
   .map(([ty, st, a]) => houseRow(ty, st, SQ.x + R * Math.cos((a * Math.PI) / 180), SQ.z + R * Math.sin((a * Math.PI) / 180), SQ.x, SQ.z));
 
 export const MAP = {
+  postSign: "Camp d'instruction",   // (the board over its gate, in French whatever the language — 2026-11-02)
   id: "training",
   name: t("Camp d'instruction — 1956"),
   level: "/levels/alg-training.v3proj",
