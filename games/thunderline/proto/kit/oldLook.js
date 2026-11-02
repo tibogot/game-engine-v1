@@ -14,7 +14,13 @@ import { createRoadMaterial, createGuardrailMaterial, createRoadGlassMaterial } 
 import { createTubeMaterial } from "./tubeMaterial.js";
 import { buildWornSurface, createScanDeck, ROAD_WEAR, ROAD_SCAN } from "./roadSurface.js";
 
+// ONE SET PER PAGE (audit 2026-11-03, load time): the builder and its drive rig each made their own — the 2K asphalt
+// scan (diffuse + normal) fetched, transcoded and uploaded twice (~10 MB of video memory), every road material twice
+let _oldLookMats = null;
 export function createOldLookMaterials() {
+  return (_oldLookMats ??= makeOldLookMaterials());
+}
+function makeOldLookMaterials() {
   // our own asphalt (roadSurface.js): a scanned deck under thin worn lines, not the old game's 14× stretched bands
   // ?asphalt=<scan> picks another (roadSurface.js ROAD_SCANS); ?asphalt=old = the old game's road, for an A/B
   const pick = new URLSearchParams(globalThis.location?.search ?? "").get("asphalt") ?? "tarred_gravel";

@@ -332,6 +332,9 @@ const app = await startV3App({
   csm: { cascades: 2 },
   precompile: false, // the scene compiles once, final, behind the loading screen (end of this file)
 });
+// (the obstacles' models and textures load NOW, while the page sets itself up — they were fetched only after the whole
+// module had run, then waited on: audit 2026-11-03, load time)
+const physAssetsReady = loadPhysAssets();
 // HIDDEN WHILE THE PAGE BOOTS (as drive.js, 2026-10-27): frames drawn before the post chain, the car's lights
 // and the track are in compiled shader variants thrown away the next step. The loop still runs.
 const engineObjects = snapshotEngineScene(app.scene); // (before hiding: what the engine shows is warmed too)
@@ -533,11 +536,25 @@ async function thumbSig(g) {
   return (h >>> 0).toString(36);
 }
 const keptThumbs = thumbStore.all();
+// THE DOCK'S PICTURES AT BOOT: the kept ones at once; their exact check (each tile's geometry built and hashed, a
+// picture drawn again if it changed) AFTER the page is up, in idle time — it was ~0.85 s of the builder's boot on
+// the critical path, for pictures that are nearly always the same (audit 2026-11-03, load time)
+const dockTiles = () => CATS.flatMap((c) => c.tiles).filter((id) => id !== FITTED && id !== CATCH); // (FITTED / CATCH: drawn with the landing's / tube's picture, see pic)
 async function bakeThumbs() {
-  for (const c of CATS) for (const id of c.tiles) {
-    if (id === FITTED || id === CATCH) continue; // drawn with the landing's / tube's picture (see pic)
+  const kept = await keptThumbs;
+  for (const id of dockTiles()) { const k = `${id}|false`; if (kept.get(k)) thumbs.set(k, kept.get(k).url); }
+}
+async function checkThumbs() {
+  const idle = () => new Promise((r) => (window.requestIdleCallback ? requestIdleCallback(() => r(), { timeout: 400 }) : setTimeout(r, 30)));
+  let changed = 0;
+  for (const id of dockTiles()) {
+    await idle();
+    while (driving || playing) await new Promise((r) => setTimeout(r, 1000)); // (never while a car drives)
+    const k = `${id}|false`, before = thumbs.get(k);
     await renderThumb(id, false);
+    if (thumbs.get(k) !== before && ++changed % 8 === 1) renderDock();
   }
+  if (changed) renderDock();
 }
 const thumbQueue = [];
 let thumbBusy = false;
@@ -3848,7 +3865,7 @@ $("info-copy").onclick = async () => {
 };
 
 // ---------- go ----------
-await loadPhysAssets(); // (the obstacles' Blender models: the dock's pictures and the track are drawn with them)
+await physAssetsReady; // (the obstacles' Blender models: the dock's pictures and the track are drawn with them)
 await bakeThumbs();
 renderDock();
 rebuild();
@@ -3863,6 +3880,7 @@ scene.visible = true;
 await warmGamePipelines(app, engineObjects);
 await awaitPipelinesQuiet(app);
 $("boot").classList.add("gone");
+checkThumbs(); // (the dock's pictures checked in idle time, now that the page is up)
 let last = performance.now();
 // THE SHELL takes over from builder3.html's stand-in: a choice made in the menu while the engine booted runs
 // now; else the menu stays up and the game pauses behind it

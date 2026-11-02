@@ -153,7 +153,24 @@ The original analysis follows:
 - **4i.** Deck and tubes have no far LOD; only rails and posts do. It matters on big tracks: the lab is geometry-bound.
 - **4j.** The stats panel rewrites innerHTML 4×/s (debug). Hide it in a ship build.
 
-## 5. Load time
+## 5. Load time (+ 6. memory): game-only items
+
+**DONE 2026-11-03** (uncommitted until the user says; step 1, the ground, SKIPPED — terrain is coming, see the reply of 11-03):
+- **5a.** One road-material set per page (oldLook.js `createOldLookMaterials` memoised): the builder and its rig each fetched, transcoded and uploaded the 2K asphalt scan.
+- **5b.** The dock's pictures: the kept ones at once; the exact geometry check runs after boot in idle time (`checkThumbs`), never while driving. drawThumb went from 845 ms on the boot path to 0 before the builder is ready.
+- **5c.** `loadPhysAssets()` starts right after the engine does (it fetches while the page sets up).
+- **5d.** The 3 ground sets load in parallel, then `releasePaintCpuCopies()`: live heap after GC 171 → 127 MB (`?paintcpu=1` keeps the copies). Screenshots identical.
+- **5e.** Thunderline's palm is a meshopt copy (public/models/thunderline/palm.glb, 49 KB; `preloadPalm(url)`): no Draco decoder.
+- **6a.** Tyre smoke books in KTX2 via `loadTexture` (`npm run textures` made the copies; the shader's texture nodes get the loaded ones): about 28 → 7 MB of video memory. Drift screenshots look the same.
+- The boot time itself is too noisy to show these (9.9–13.3 s: the GPU process's shader compiles dominate).
+
+NOT done:
+- **6c.** The live shadow map's colour target: three's render targets always have one, so going depth-only means reworking the map; R16F is too coarse for its 2 cm bias.
+- **6d.** Obstacle textures per track: the shell boots the builder, which needs them all for the dock.
+- **6e.** Ghost car textures: small.
+- **7a / 7b** (production build, local fonts): for the Steam packaging step.
+
+The original analysis follows:
 
 - **5a.** Road scan textures and materials are loaded twice: builder3.js:395 and driveSession.js:146 each call `createOldLookMaterials()`, and loadTexture has no cache. That is 2× the 2K diffuse + normal (about 10 MB of VRAM wasted) and a second material set. Fix: pass the builder's materials to the rig, or memoise by URL.
 - **5b.** `await bakeThumbs()` (:3783) builds and hashes every dock tile's geometry at each boot even when the pictures are kept, and `lookRev` fetches about 700 KB of source just to hash it. Fix: key by tile id + build version; bake in idle time.

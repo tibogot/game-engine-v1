@@ -65,12 +65,18 @@ function setAntiTiling(app, on) {
 let groundLoad = null;
 /** The ground sets into paint slots 0-2, once (the engine keeps them for the session). */
 function loadGround(app) {
+  // (the three sets IN PARALLEL — one after another they were 12 fetches in a row; each writes its own layers. Then the
+  // paint's CPU copies are freed once the GPU has them — ~56 MB of JS heap: Thunderline never repaints a layer, the
+  // ground loads once a session — audit 2026-11-03)
   return (groundLoad ??= (async () => {
-    for (let i = 0; i < GROUND_SETS.length; i++) {
-      const { slug, files, tile } = GROUND_SETS[i];
+    await Promise.all(GROUND_SETS.map(async ({ slug, files, tile }, i) => {
       const f = files ?? ((m) => `/textures/ground/${slug}/${slug}_${m}_1k.jpg`);
       await app.setTerrainLayerTextures(i, { albedo: f("diff"), normal: f("nor_gl"), rough: f("rough"), ao: f("ao") });
       app.setTerrainLayerTile?.(i, tile);
+    }));
+    if (app.releasePaintCpuCopies && new URLSearchParams(location.search).get("paintcpu") !== "1") {
+      // (only once the uploads are done: it returns 0 until then)
+      for (let k = 0; k < 40 && !app.releasePaintCpuCopies(); k++) await new Promise((r) => setTimeout(r, 250));
     }
   })());
 }

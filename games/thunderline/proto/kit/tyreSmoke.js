@@ -14,6 +14,7 @@
 //   - NEVER ON THE LENS: thinned within a few metres of the camera (a drift filled the chase view);
 //   - BACK-LIT: thin smoke glows towards a low sun behind it (forward scattering).
 import * as THREE from "three";
+import { loadTexture } from "../../../../v3/render/textureLoad.js";
 import {
   Fn, attribute, cameraPosition, cameraWorldMatrix, cos, dot, exp, float, floor, fract, max, mix, normalize,
   output, positionLocal, positionWorld, pow, saturate, select, sin, smoothstep, step, texture, uniform, uv,
@@ -71,15 +72,21 @@ class SmokeMRTNode extends THREE.MRTNode {
 
 export function createTyreSmoke(app, settings = TYRE_SMOKE) {
   const s = settings, F = SMOKE_BOOK;
+  // THE BOOKS COMPRESSED (audit 2026-11-03, memory): through the engine's loader (v3/render/textureLoad.js) — the KTX2
+  // copy (`npm run textures`: BC7 on desktop, ~7 MB of video memory) instead of three 1536² images uncompressed (~28 MB),
+  // the image itself when there is no copy. The shader is built now on a stand-in each; every texture node that reads a
+  // book gets the loaded one (a binding change, no new shader).
+  const nodesOf = new Map(); // stand-in → its texture nodes
   const load = (url, srgb) => {
     const t = new THREE.Texture();
     t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
-    t.anisotropy = 4;
-    fetch(url).then((r) => r.blob()).then((b) => createImageBitmap(b, { premultiplyAlpha: "none" }))
-      .then((bmp) => { t.image = bmp; t.needsUpdate = true; })
+    nodesOf.set(t, []);
+    loadTexture(url, { colorSpace: t.colorSpace })
+      .then((k) => { k.anisotropy = 4; for (const n of nodesOf.get(t)) n.value = k; })
       .catch((e) => console.warn(`tyreSmoke: ${url}`, e));
     return t;
   };
+  const book = (t, uv) => { const n = texture(t, uv); nodesOf.get(t).push(n); return n; };
   const texA = load(F.a, true), texB = load(F.b, true), texM = load(F.mv, false);
 
   const uTime = uniform(0);
@@ -168,10 +175,10 @@ export function createTyreSmoke(app, settings = TYRE_SMOKE) {
     const f = vAge.mul(frames - 1);
     const f0 = floor(f), f1 = f0.add(1).min(frames - 1), w = fract(f);
     const local = vec2(mix(uv().x, float(1).sub(uv().x), vMirror), uv().y);
-    const mv = texture(texM, cellUV(f0, local)).xy.sub(0.5).div(F.mvScale);
+    const mv = book(texM, cellUV(f0, local)).xy.sub(0.5).div(F.mvScale);
     const l0 = local.sub(mv.mul(w)), l1 = local.add(mv.mul(float(1).sub(w)));
-    const A = mix(texture(texA, cellUV(f0, l0)), texture(texA, cellUV(f1, l1)), w);
-    const B = mix(texture(texB, cellUV(f0, l0)).xyz, texture(texB, cellUV(f1, l1)).xyz, w);
+    const A = mix(book(texA, cellUV(f0, l0)), book(texA, cellUV(f1, l1)), w);
+    const B = mix(book(texB, cellUV(f0, l0)).xyz, book(texB, cellUV(f1, l1)).xyz, w);
     const L = vL, L2 = L.mul(L);
     const lit = L2.x.mul(select(L.x.greaterThan(0), A.x, B.x))
       .add(L2.y.mul(select(L.y.greaterThan(0), A.y, B.y)))

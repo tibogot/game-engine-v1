@@ -41,11 +41,12 @@ let _loading = null;
  * Load and normalise the palm once.
  * Must be awaited before thumbnails or placement — makePalm() is sync.
  */
-export function preloadPalm() {
+export function preloadPalm(url = PALM_URL) {
+  // (`url`: another copy of the same palm — Thunderline loads a meshopt one, so its pages never fetch the Draco decoder)
   if (_loading) return _loading;
   _loading = new Promise((resolve) => {
     getSharedGltfLoader().load(
-      PALM_URL,
+      url,
       (gltf) => { _template = normalise(gltf.scene); resolve(_template); },
       undefined,
       (err) => {
