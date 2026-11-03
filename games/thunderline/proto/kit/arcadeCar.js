@@ -49,6 +49,15 @@ export const ARCADE = {
   grip: { g: 2.2, peakDeg: 8, slideDeg: 30, slide: 0.7, handbrake: 0.35, aero: 1, bank: 2, carve: 0.6 }, // bank: see _groundDrive
   // (low/high HALVED 2026-10-30, 2.2/1.0 → 1.1/0.5: the air control's pull on the road — a bug, fixed — had halved the
   // turn rate since 10-29, and that is the grip feel you know; a drift turns harder: drift.steer)
+  // THE CAR'S BALANCE (user, 2026-11-03: "it feels too stiff … in a turn it doesn't leave many different ways to make
+  // the turn"): the pedals shape the turn, as a car's weight moving does (arcade weight transfer — no tyre model). A
+  // load follows the pedals with a lag of `lag` s: braking puts it on the front (1), lifting off a little (`lift`),
+  // throttle on the rear (−throttle). On the road (not walls and loops, not the handbrake) the turn rate is ×
+  // (1 + brakeTurn·front − throttleWide·rear) and the side grip × (1 + brakeGrip·front): the front bites — the nose turns
+  // faster AND the path follows it, the line tightens (measured: cutting the grip instead only swung the nose, the path ran
+  // WIDER). A HARD brake (load past `slideFrom`), steering, lets the tail go: the grip × (1 − brakeSlide·…) — the car
+  // swings round into a drift (Trackmania's brake-drift). Lift off: it tucks in. On the throttle: it settles, a little wider.
+  balance: { lag: 0.18, lift: 0.35, brakeTurn: 0.4, brakeGrip: 0.2, throttleWide: 0.1, slideFrom: 0.6, brakeSlide: 0.35, minSpeed: 8 },
   steer: { low: 1.1, high: 0.5, lowAt: 8, response: 9, handbrakeBoost: 2.5, slideTurn: true }, // rad/s at lowAt m/s → at top speed
   // THE DRIFT (a state — see _groundDrive): starts on the handbrake with the wheel turned, or past fromDeg of slide;
   // ends under endDeg. The path turned toward the nose at `rate` rad/s, the steering × `steer`, the angle held past holdDeg
@@ -603,13 +612,18 @@ export class ArcadeCar extends StuntCar {
     const spin = th > 0 && vF > -0.5 ? Sp.launch * th * THREE.MathUtils.clamp(1 - vF / Sp.launchTo, 0, 1) : 0;
     const lock = braking ? Sp.lock * -th * THREE.MathUtils.clamp((vF - Sp.lockFrom) / (Sp.lockFull - Sp.lockFrom), 0, 1) * Math.exp(-this._brakeT / Sp.lockFade) : 0;
     for (const t of this.tires) if (t.grounded) t.overDemand = Math.max(t.canSteer ? 0 : spin, lock);
+    // THE BALANCE'S LOAD (ARCADE.balance): toward the front braking (1) or lifting off (`lift`), the rear on the throttle
+    const Bl = ARCADE.balance, loadTgt = braking ? -th : th > 0 ? -th : Bl.lift;
+    this._load = (this._load ?? 0) + (loadTgt - (this._load ?? 0)) * (1 - Math.exp(-dt / Math.max(0.01, Bl.lag)));
+    const balanceOn = !tr && !hb && vF > Bl.minSpeed;
     // THE GRIP CURVE: the sideways speed taken away at up to grip.g g — all of it at a small slide, less once sliding
     const Gp = ARCADE.grip, slide = Math.atan2(Math.abs(vR), Math.max(1, Math.abs(vF))) / DEG;
     const curve = slide <= Gp.peakDeg ? 0.55 + 0.45 * (slide / Gp.peakDeg) : slide >= Gp.slideDeg ? Gp.slide : 1 - (1 - Gp.slide) * ((slide - Gp.peakDeg) / (Gp.slideDeg - Gp.peakDeg));
     // A BANK GRIPS: tilted into the turn, the road presses the car into it (a 22° bank at 300 km/h asked ~5 g of a
     // 4.7 g car: it slid 10 m wide — user, 2026-10-29, the banked shapes). Up to 45° of bank: × (1 + bank·sin).
     const bankAng = Math.min(Math.acos(THREE.MathUtils.clamp(surf.y, -1, 1)), 45 * DEG);
-    const grip = Gp.g * G * curve * (hb ? Gp.handbrake : 1) * w * (1 + Gp.aero * (this._stickAcc ?? 0) / G) * (1 + Gp.bank * Math.sin(bankAng));
+    const grip = Gp.g * G * curve * (hb ? Gp.handbrake : 1) * w * (1 + Gp.aero * (this._stickAcc ?? 0) / G) * (1 + Gp.bank * Math.sin(bankAng))
+      * (balanceOn ? (1 + Bl.brakeGrip * Math.max(0, this._load)) * (1 - Bl.brakeSlide * smooth01((this._load - Bl.slideFrom) / Math.max(0.01, 1 - Bl.slideFrom)) * Math.abs(this.input.steer ?? 0)) : 1); // (the front bites; a hard brake, steering, lets the tail go)
     const take = Math.min(Math.abs(vR), grip * dt);
     body.vel.addScaledVector(_r, -Math.sign(vR) * take);
     // A DRIFT CARVES (user, 2026-10-30, the hairpin): taking the sideways speed away scrubbed ALL of it — at 40° of slide
@@ -649,6 +663,8 @@ export class ArcadeCar extends StuntCar {
     const sp = sliding ? spAll : Math.abs(vF), tL = THREE.MathUtils.clamp((sp - S.lowAt) / Math.max(1, top - S.lowAt), 0, 1);
     const dir = sliding ? (vF < -0.5 * spAll ? -1 : 1) : Math.sign(vF || 1); // (sideways is still forwards)
     let want = this.input.steer * THREE.MathUtils.lerp(S.low, S.high, tL) * Math.min(1, sp / 4) * dir;
+    // the balance (ARCADE.balance): the pedals' load, eased; on the road only, never on the handbrake
+    if (balanceOn && !hb) want *= 1 + Bl.brakeTurn * Math.max(0, this._load) - Bl.throttleWide * Math.max(0, -this._load);
     if (hb) want *= S.handbrakeBoost;
     // IN A DRIFT, steering into it turns the nose `drift.steer` × harder: on the grip's turn rate alone a handbrake slide
     // straightened at once (the grip driving, out of a drift, is untouched). Into it = the way the nose points off the

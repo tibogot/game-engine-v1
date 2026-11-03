@@ -594,6 +594,15 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       wheel MODEL sets the physics radius today — carTune.js pins it).
 - [ ] "No engine up a wall" into the car itself (today an input cut, autopilot.js wallCut).
 
+## CAMERA PASS, the check (2026-11-03: landings, crests, respawn — measured with a per-frame probe on White 1-4 + the test track)
+- Fine: the car never moves on screen (x 0.00, y −0.18…−0.13); landings move it ≤ 0.006 of the screen; crests turn the
+  view ≤ 21°/s; the horizon never rolls (0°).
+- [ ] ONE-FRAME VIEW JOLTS on the ground at speed: the test track at 27.7 s (150°/s, 268 km/h) and 28.5 s (a crest);
+      White 4 at 28.6 s (113°/s). Screenshot them, find the cause (a piece joint? the turn lead's rate?), fix.
+- [ ] White 3's bowl: the car nearly stops on the wall (1 km/h) and the view spins at ~270°/s in the air; a landing
+      there peaks at 123°/s. Look at it.
+- [ ] The respawn snap: not checked yet.
+
 ## PERFORMANCE AUDIT 2026-11-02 → games/thunderline/PERF_AUDIT_2026_11.md (steps 2, 3, 5-6 done; what remains: its REMAINING section)
 
 ## Performance pass (user, 2026-10-20: "be sure the pieces and the scene are as optimized as possible")

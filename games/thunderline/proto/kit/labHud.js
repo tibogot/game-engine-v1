@@ -21,6 +21,15 @@ const SLIDERS = [
     [ARCADE, "steer.response", "steering response (/s)", 2, 25, 0.5],
     [ARCADE, "steer.handbrakeBoost", "handbrake turn ×", 1, 3, 0.05],
   ]],
+  ["Balance (pedals shape the turn)", [
+    [ARCADE, "balance.brakeTurn", "braking turns it tighter (+share at full brake)", 0, 1.5, 0.05],
+    [ARCADE, "balance.lift", "lifting off: load on the front (0-1)", 0, 1, 0.05],
+    [ARCADE, "balance.throttleWide", "full throttle runs it wider (share)", 0, 0.5, 0.01],
+    [ARCADE, "balance.brakeGrip", "the front bites: grip added at full load (share)", 0, 0.8, 0.05],
+    [ARCADE, "balance.slideFrom", "a HARD brake from (0-1 of the load) lets the tail go", 0, 1, 0.05],
+    [ARCADE, "balance.brakeSlide", "…and how much grip the tail lets go (share)", 0, 0.8, 0.05],
+    [ARCADE, "balance.lag", "the weight moves in (s)", 0.02, 0.6, 0.01],
+  ]],
   ["Grip & drift", [
     [ARCADE, "grip.g", "side grip (g)", 0.5, 5, 0.05],
     [ARCADE, "grip.peakDeg", "grip peaks at (° slide)", 2, 20, 0.5],
