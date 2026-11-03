@@ -269,13 +269,24 @@ export class PlacedFoliage {
     for (const t of this.types.values()) byIndex[t.index] = t;
     let changed = this._dirty;
     const sph = this._sphere;
+    // ITS SHADOW ON THE GROUND (2026-11-03, alg-rts El Kantara — you: "the shadow of the palm trees around the base
+    // disappear related to the camera position"): under a low sun a tall plant's shadow runs far past CULL_MARGIN —
+    // the palm off the top of the screen, its shadow still across it, was culled with it. A second sphere over the
+    // shadow's ground, from the foot to the tip (height × the sun's slope, its height held to 0.2 at least: a 12 m palm reaches 60 m at most).
+    const sd = this.u.uSunDir.value, sy = Math.max(sd.y, 0.2), kx = -sd.x / sy, kz = -sd.z / sy, kL = Math.hypot(kx, kz);
     for (const p of this.plants) {
       const t = byIndex[p.typeIndex];
       const r = (t.type.size ?? 1) * p.scale;
       sph.center.set(p.x, p.y + r * 0.5, p.z);
       sph.radius = r + CULL_MARGIN;
+      let seen = this._frustum.intersectsSphere(sph);
+      if (!seen && sd.y > 0) {
+        sph.center.set(p.x + kx * r * 0.5, p.y, p.z + kz * r * 0.5);
+        sph.radius = kL * r * 0.5 + r * 0.5 + CULL_MARGIN * 0.5;
+        seen = this._frustum.intersectsSphere(sph);
+      }
       let lod = -1;
-      if (this._frustum.intersectsSphere(sph)) {
+      if (seen) {
         const dx = p.x - cp.x, dy = p.y - cp.y, dz = p.z - cp.z;
         const m = t.lodMul;
         edges2[0] = (d1 * m) ** 2; edges2[1] = (d2 * m) ** 2;
