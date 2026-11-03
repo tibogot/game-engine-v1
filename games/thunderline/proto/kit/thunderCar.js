@@ -14,6 +14,7 @@ import { getSharedGltfLoader, initGlbLoaderRenderer } from "../../../../v3/rende
 import { WHEEL_LOCAL, HEADLIGHTS } from "../../../../v3/play/modularRoadVehicle.js";
 import { applyBloomMRT } from "../../../../v3/render/bloomMRT.js";
 import { CAR_TUNE } from "./carTune.js";
+import { liverySheet, liveryNode } from "./carLivery.js";
 import { texture, color, max, smoothstep, mix, clamp, uniform, float, dot, pow, normalView, positionViewDirection } from "three/tsl";
 
 // THE PAINT (user, 2026-10-29: "the car texture is kind of dark, make it yellow"): the livery texture's dark blue body
@@ -115,7 +116,7 @@ function build(root, lit = true) {
     if (/^ShadowProxy/.test(o.name) || /^ShadowProxy/.test(o.parent?.name ?? "")) { o.material = hidden; o.castShadow = true; o.receiveShadow = false; return; }
     o.castShadow = false;
     o.receiveShadow = true;
-    if (o.material?.name === "ThunderPaint") o.material = paintMaterial(o.material);
+    if (o.material?.name === "ThunderPaint") { o.updateMatrix(); o.material = paintMaterial(o.material, o.parent === root ? o.matrix : null); }
     if (lit && LAMP_OF[o.material?.name]) o.material = lampMaterial(o.material, LAMP_OF[o.material.name]);
     if (/^(Brakelights|TailBar)/.test(o.name)) brakeLights.push(o);
     if (/^(Headlights|DRL_)/.test(o.name)) headlampLenses.push(o);
@@ -137,7 +138,9 @@ function build(root, lit = true) {
 }
 
 const painted = new WeakMap(); // the file's material → ours (clones share it)
-function paintMaterial(m) {
+const LIVERY_ON = !/[?&]livery=0/.test(globalThis.location?.search ?? "");
+/** `meshMatrix`: the paint mesh's matrix in the file (for the livery's projection); none → no livery. */
+function paintMaterial(m, meshMatrix) {
   if (painted.has(m)) return painted.get(m);
   const n = new THREE.MeshPhysicalNodeMaterial();
   for (const k of ["name", "side", "metalnessMap", "roughnessMap", "metalness", "roughness", "normalMap", "clearcoat", "clearcoatRoughness", "envMapIntensity"]) if (m[k] !== undefined) n[k] = m[k];
@@ -148,6 +151,8 @@ function paintMaterial(m) {
   const stripe = smoothstep(0.1, 0.25, c.g); // the navy body has almost no green; the cyan stripes a lot
   const body = color(PAINT.body).mul(clamp(lum.div(PAINT.navy), 0.35, 1.25));
   n.colorNode = mix(body, color(PAINT.stripe), stripe);
+  // THE LIVERY (carLivery.js): sponsors, number, logos projected onto the paint — one sample, no mesh
+  if (LIVERY_ON && meshMatrix) n.colorNode = liveryNode(n.colorNode, liverySheet(), meshMatrix);
   const facing = clamp(dot(normalView, positionViewDirection), 0, 1);
   n.emissiveNode = n.colorNode.mul(pow(float(1).sub(facing), PAINT.rimPower)).mul(NIGHT_RIM);
   n.userData.source = m;

@@ -47,8 +47,17 @@ applyWorld(app, "flat");
 // the car, parked on the test track's start straight (the drive session's own: its model, light and shadows)
 const rig = createDriveRig(app, { ghost: false, sunShadows: true, fx: false });
 await rig.start({ help: "" });
-rig.setTimeScale(0);
 await Promise.all([rig.modelsReady, loadPhysAssets()]);
+// PARKED ON ITS SPRINGS: the car runs until every wheel is on the road and it has settled, THEN stops — frozen at once,
+// it stood as it spawned, its tyres 9 cm into the road (user, 2026-11-03: "the tyres go inside the ground")
+{
+  const v = rig.vehicle, t0 = performance.now();
+  while (performance.now() - t0 < 4000) {
+    await new Promise((r) => setTimeout(r, 50));
+    if (performance.now() - t0 > 800 && v.tires.every((t) => t.grounded) && v.body.vel.length() < 0.05) break;
+  }
+}
+rig.setTimeScale(0);
 
 // ---------- THE STAGE: on the road, 25 m ahead of the car (out of the start gate's shadow) ----------
 const car = rig.vehicle;

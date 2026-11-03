@@ -594,6 +594,11 @@ Texture names: "_arm" (not "_orm") so the KTX2 tool keeps them linear. The mesh 
       wheel MODEL sets the physics radius today — carTune.js pins it).
 - [ ] "No engine up a wall" into the car itself (today an input cut, autopilot.js wallCut).
 
+## LANDINGS (2026-11-03, after "place anything as landing, tilt it easily")
+- [x] Road pieces lie along the flight on an arc, ↑↓ pitch / ←→ bank, graded live (b52229a9).
+- [ ] REVERSED PIECES (a kicker / quarter pipe placed backwards = a skateboard transition): the ride, the stunt guide
+      and the gaps all run entry → exit — its own project. Ask the user after they've tried the along-the-flight landings.
+
 ## CAMERA PASS, the check (2026-11-03: landings, crests, respawn — measured with a per-frame probe on White 1-4 + the test track)
 - Fine: the car never moves on screen (x 0.00, y −0.18…−0.13); landings move it ≤ 0.006 of the screen; crests turn the
   view ≤ 21°/s; the horizon never rolls (0°).
