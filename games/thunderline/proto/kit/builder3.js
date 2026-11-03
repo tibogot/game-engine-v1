@@ -1418,6 +1418,9 @@ async function runForgiveness(token, ctx) {
       if (p.y < ctx.lowY - 60 || p.y < FLOOR_Y + 2) return why(to, deg, sp, "fell", p); // fell (to the floor, or past the lowest road)
       const g = car.groundedCount > 0;
       if (g && down < 0 && k > 30) down = k;
+      // (THE ROAD ENDS right after the landing — a track being built: down on it and reaching its end counts; the 1.5 s
+      // after touchdown ran it off the end and every such jump read "can't replay")
+      if (down >= 0 && g && pilot.idx >= ctx.ride.length - 2) return true;
       if (down < 0 && k > 120 * 9) return why(to, deg, sp, "never down", p); // never came down
       if (down >= 0 && k - down > 180) {
         // 1.5 s after touching down: on a deck, near the line (a wide landing counts its own width)
@@ -2392,27 +2395,55 @@ function computeSnap() {
         if (pts[k - 1].y >= y0 && pts[k].y < y0) {
           const f = (pts[k - 1].y - y0) / (pts[k - 1].y - pts[k].y);
           const p = pts[k - 1].clone().lerp(pts[k], f), d = pts[k].clone().sub(pts[k - 1]).normalize();
-          return { p, fall: Math.asin(THREE.MathUtils.clamp(-d.y, -1, 1)) / DEG };
+          return { p, d, fall: Math.asin(THREE.MathUtils.clamp(-d.y, -1, 1)) / DEG };
         }
       }
       return null;
     };
-    const fast = cross(a.fast.pts) ?? { p: a.fast.pts[best.k].clone(), fall: Math.asin(THREE.MathUtils.clamp(-a.fast.tan[best.k].y, -1, 1)) / DEG };
+    const fast = cross(a.fast.pts) ?? { p: a.fast.pts[best.k].clone(), d: a.fast.tan[best.k].clone(), fall: Math.asin(THREE.MathUtils.clamp(-a.fast.tan[best.k].y, -1, 1)) / DEG };
     const near = cross(a.near.pts) ?? fast;
     const h = new THREE.Vector3(a.fast.tan[best.k].x, 0, a.fast.tan[best.k].z).normalize();
     // (NOT AT THE TOP of a flight: there a car barely comes down, a little faster flies over — catchZone)
     const topOfFlight = Math.min(near.fall, fast.fall) < ZONE.minFall ? `At the top of the flight (the car falls ${Math.round(Math.min(near.fall, fast.fall))}° here) — point lower on the arc, where it comes down` : null;
-    const start = near.p.clone().addScaledVector(h, -LAND_LEAD);
-    start.y = y0;
-    const m = socketMatrix({ p: start, T: h, U: UP.clone(), R: new THREE.Vector3().crossVectors(h, UP).normalize() });
+    // ALONG THE FLIGHT (user, 2026-11-03: "we place anything as landing, tilt it easily … a curve like a skateboard
+    // landing ramp … tilted pieces that make us barrel roll"): a ROAD piece is laid along the car's path where the 95 %
+    // car comes down — its start on that arc, pitched to it — and its own shape goes on from there; a PLATFORM (a wide
+    // piece) stays level, as before. The arrows tilt either from there: ↑↓ the pitch, ←→ the bank (0: back).
+    const along = (t.section ?? "road") !== "wide";
+    let start, T;
+    if (along) {
+      start = near.p.clone();
+      T = (near.d ?? fast.d ?? h).clone().normalize();
+    } else {
+      start = near.p.clone().addScaledVector(h, -LAND_LEAD);
+      start.y = y0;
+      T = h.clone();
+    }
+    let R = new THREE.Vector3().crossVectors(T, UP).normalize();
+    if (rot.pitch) T.applyAxisAngle(R, rot.pitch * DEG).normalize(); // (↑: the nose up — flatter)
+    R = new THREE.Vector3().crossVectors(T, UP).normalize();
+    const U = new THREE.Vector3().crossVectors(R, T).normalize();
+    const m = socketMatrix({ p: start, T, U, R });
     if (rot.roll) m.multiply(new THREE.Matrix4().makeRotationZ(rot.roll * DEG));
-    // (the full-speed car must come down on it too: a short piece under a long jump)
+    // WHERE THE FULL-SPEED CAR MEETS IT, AND AT WHAT ANGLE: through the piece's starting plane (its deck as it starts:
+    // a straight exactly, a curve near enough), the angle between the car's path and that surface — the game grades a
+    // landing by it (landing.js: ≤ LANDING.perfect° PERFECT; the player can pitch in the air to close it)
+    const Ud = new THREE.Vector3(0, 1, 0).transformDirection(m), Td = new THREE.Vector3(0, 0, -1).transformDirection(m);
+    let hitAt = null, hitDeg = null;
+    for (let k = 1; k < a.fast.pts.length; k++) {
+      if (a.fast.tan[k].y >= 0) continue;
+      const d1 = a.fast.pts[k].clone().sub(start).dot(Ud);
+      if (d1 < 0 && a.fast.pts[k - 1].clone().sub(start).dot(Ud) >= 0) {
+        hitAt = a.fast.pts[k].clone().sub(start).dot(Td);
+        hitDeg = Math.asin(THREE.MathUtils.clamp(-a.fast.tan[k].dot(Ud), -1, 1)) / DEG;
+        break;
+      }
+    }
     const ex = new THREE.Vector3().setFromMatrixPosition(piece(id).exitLocal);
-    const fastAt = fast.p.clone().sub(start).dot(h);
-    const notes = [`level landing · touchdown ${Math.round(fast.fall)}°`, reachNote(a, reachScale(a, start, h))];
-    if (fastAt > Math.hypot(ex.x, ex.z) - 4) notes.push(`the full-speed car lands ${Math.round(fastAt)} m on, past this piece — use a longer one`);
-    // (the game grades by the car's angle to the surface — landing.js — and the player can level it in the air)
-    if (fast.fall > ROUGH_FALL) notes.push(`steep onto flat (${Math.round(fast.fall)}°): level the car in the air, or use a landing slope`);
+    const notes = [along ? `along the flight (${Math.round(near.fall - rot.pitch)}° down) · ↑↓ pitch · ←→ bank` : `level landing · touchdown ${Math.round(fast.fall)}° · ↑↓ ←→ tilt it`, reachNote(a, reachScale(a, start, h))];
+    if (hitDeg == null) notes.push("the full-speed car never comes down on it — it falls faster than the car: tilt it flatter (↑)");
+    else notes.push(hitDeg <= LANDING.perfect ? `the full-speed car meets it at ${Math.round(hitDeg)}°: PERFECT` : `the full-speed car meets it at ${Math.round(hitDeg)}° — pitch the nose ${Math.round(hitDeg - LANDING.perfect)}° to land it perfect${hitDeg > ROUGH_FALL ? " (rough if not)" : ""}`);
+    if (hitAt != null && hitAt > Math.hypot(ex.x, ex.z) - 4) notes.push(`the full-speed car lands ${Math.round(hitAt)} m on, past this piece — use a longer one`);
     const roll = rollNote(a, m, leanIn(t));
     if (roll) notes.push(roll);
     return { type: "arc", m, from: a.from, bad: leanIn(t) ? "A landing must start flat (lean 0)" : topOfFlight, note: notes.join(" · ") };
